@@ -175,108 +175,238 @@ csp/fast:
 .PHONY : csp/fast
 
 #=============================================================================
-# Target rules for targets named sipplatform
+# Target rules for targets named opensrtp
 
 # Build rule for target.
-sipplatform: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sipplatform
-.PHONY : sipplatform
+opensrtp: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 opensrtp
+.PHONY : opensrtp
 
 # fast build rule for target.
-sipplatform/fast:
-	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/sipplatform.dir/build.make psip_build/CMakeFiles/sipplatform.dir/build
-.PHONY : sipplatform/fast
+opensrtp/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/opensrtp.dir/build.make psip_build/CMakeFiles/opensrtp.dir/build
+.PHONY : opensrtp/fast
 
 #=============================================================================
-# Target rules for targets named sipparser
+# Target rules for targets named SipPlatform
 
 # Build rule for target.
-sipparser: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sipparser
-.PHONY : sipparser
+SipPlatform: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SipPlatform
+.PHONY : SipPlatform
 
 # fast build rule for target.
-sipparser/fast:
-	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/sipparser.dir/build.make psip_build/CMakeFiles/sipparser.dir/build
-.PHONY : sipparser/fast
+SipPlatform/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SipPlatform.dir/build.make psip_build/CMakeFiles/SipPlatform.dir/build
+.PHONY : SipPlatform/fast
 
 #=============================================================================
-# Target rules for targets named sdpparser
+# Target rules for targets named SipParser
 
 # Build rule for target.
-sdpparser: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sdpparser
-.PHONY : sdpparser
+SipParser: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SipParser
+.PHONY : SipParser
 
 # fast build rule for target.
-sdpparser/fast:
-	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/sdpparser.dir/build.make psip_build/CMakeFiles/sdpparser.dir/build
-.PHONY : sdpparser/fast
+SipParser/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SipParser.dir/build.make psip_build/CMakeFiles/SipParser.dir/build
+.PHONY : SipParser/fast
 
 #=============================================================================
-# Target rules for targets named xmlparser
+# Target rules for targets named SdpParser
 
 # Build rule for target.
-xmlparser: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 xmlparser
-.PHONY : xmlparser
+SdpParser: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SdpParser
+.PHONY : SdpParser
 
 # fast build rule for target.
-xmlparser/fast:
-	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/xmlparser.dir/build.make psip_build/CMakeFiles/xmlparser.dir/build
-.PHONY : xmlparser/fast
+SdpParser/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SdpParser.dir/build.make psip_build/CMakeFiles/SdpParser.dir/build
+.PHONY : SdpParser/fast
 
 #=============================================================================
-# Target rules for targets named sipstack
+# Target rules for targets named StunParser
 
 # Build rule for target.
-sipstack: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sipstack
-.PHONY : sipstack
+StunParser: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 StunParser
+.PHONY : StunParser
 
 # fast build rule for target.
-sipstack/fast:
-	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/sipstack.dir/build.make psip_build/CMakeFiles/sipstack.dir/build
-.PHONY : sipstack/fast
+StunParser/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/StunParser.dir/build.make psip_build/CMakeFiles/StunParser.dir/build
+.PHONY : StunParser/fast
 
 #=============================================================================
-# Target rules for targets named sipuseragent
+# Target rules for targets named XmlParser
 
 # Build rule for target.
-sipuseragent: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sipuseragent
-.PHONY : sipuseragent
+XmlParser: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 XmlParser
+.PHONY : XmlParser
 
 # fast build rule for target.
-sipuseragent/fast:
-	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/sipuseragent.dir/build.make psip_build/CMakeFiles/sipuseragent.dir/build
-.PHONY : sipuseragent/fast
+XmlParser/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/XmlParser.dir/build.make psip_build/CMakeFiles/XmlParser.dir/build
+.PHONY : XmlParser/fast
 
 #=============================================================================
-# Target rules for targets named serverplatform
+# Target rules for targets named HttpParser
 
 # Build rule for target.
-serverplatform: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 serverplatform
-.PHONY : serverplatform
+HttpParser: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 HttpParser
+.PHONY : HttpParser
 
 # fast build rule for target.
-serverplatform/fast:
-	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/serverplatform.dir/build.make psip_build/CMakeFiles/serverplatform.dir/build
-.PHONY : serverplatform/fast
+HttpParser/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/HttpParser.dir/build.make psip_build/CMakeFiles/HttpParser.dir/build
+.PHONY : HttpParser/fast
 
 #=============================================================================
-# Target rules for targets named psip
+# Target rules for targets named TcpStack
 
 # Build rule for target.
-psip: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 psip
-.PHONY : psip
+TcpStack: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 TcpStack
+.PHONY : TcpStack
 
 # fast build rule for target.
-psip/fast:
-	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/psip.dir/build.make psip_build/CMakeFiles/psip.dir/build
-.PHONY : psip/fast
+TcpStack/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/TcpStack.dir/build.make psip_build/CMakeFiles/TcpStack.dir/build
+.PHONY : TcpStack/fast
+
+#=============================================================================
+# Target rules for targets named HttpStack
+
+# Build rule for target.
+HttpStack: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 HttpStack
+.PHONY : HttpStack
+
+# fast build rule for target.
+HttpStack/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/HttpStack.dir/build.make psip_build/CMakeFiles/HttpStack.dir/build
+.PHONY : HttpStack/fast
+
+#=============================================================================
+# Target rules for targets named SipStack
+
+# Build rule for target.
+SipStack: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SipStack
+.PHONY : SipStack
+
+# fast build rule for target.
+SipStack/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SipStack.dir/build.make psip_build/CMakeFiles/SipStack.dir/build
+.PHONY : SipStack/fast
+
+#=============================================================================
+# Target rules for targets named ServerPlatform
+
+# Build rule for target.
+ServerPlatform: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 ServerPlatform
+.PHONY : ServerPlatform
+
+# fast build rule for target.
+ServerPlatform/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/ServerPlatform.dir/build.make psip_build/CMakeFiles/ServerPlatform.dir/build
+.PHONY : ServerPlatform/fast
+
+#=============================================================================
+# Target rules for targets named SipUserAgent
+
+# Build rule for target.
+SipUserAgent: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SipUserAgent
+.PHONY : SipUserAgent
+
+# fast build rule for target.
+SipUserAgent/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SipUserAgent.dir/build.make psip_build/CMakeFiles/SipUserAgent.dir/build
+.PHONY : SipUserAgent/fast
+
+#=============================================================================
+# Target rules for targets named EchoSipServer
+
+# Build rule for target.
+EchoSipServer: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 EchoSipServer
+.PHONY : EchoSipServer
+
+# fast build rule for target.
+EchoSipServer/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/EchoSipServer.dir/build.make psip_build/CMakeFiles/EchoSipServer.dir/build
+.PHONY : EchoSipServer/fast
+
+#=============================================================================
+# Target rules for targets named SimpleSipServer
+
+# Build rule for target.
+SimpleSipServer: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SimpleSipServer
+.PHONY : SimpleSipServer
+
+# fast build rule for target.
+SimpleSipServer/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SimpleSipServer.dir/build.make psip_build/CMakeFiles/SimpleSipServer.dir/build
+.PHONY : SimpleSipServer/fast
+
+#=============================================================================
+# Target rules for targets named SipClient
+
+# Build rule for target.
+SipClient: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SipClient
+.PHONY : SipClient
+
+# fast build rule for target.
+SipClient/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SipClient.dir/build.make psip_build/CMakeFiles/SipClient.dir/build
+.PHONY : SipClient/fast
+
+#=============================================================================
+# Target rules for targets named SipLoadBalancer
+
+# Build rule for target.
+SipLoadBalancer: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SipLoadBalancer
+.PHONY : SipLoadBalancer
+
+# fast build rule for target.
+SipLoadBalancer/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SipLoadBalancer.dir/build.make psip_build/CMakeFiles/SipLoadBalancer.dir/build
+.PHONY : SipLoadBalancer/fast
+
+#=============================================================================
+# Target rules for targets named SipSpeedLinux
+
+# Build rule for target.
+SipSpeedLinux: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 SipSpeedLinux
+.PHONY : SipSpeedLinux
+
+# fast build rule for target.
+SipSpeedLinux/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/SipSpeedLinux.dir/build.make psip_build/CMakeFiles/SipSpeedLinux.dir/build
+.PHONY : SipSpeedLinux/fast
+
+#=============================================================================
+# Target rules for targets named TestWebRtcVideo
+
+# Build rule for target.
+TestWebRtcVideo: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 TestWebRtcVideo
+.PHONY : TestWebRtcVideo
+
+# fast build rule for target.
+TestWebRtcVideo/fast:
+	$(MAKE) $(MAKESILENT) -f psip_build/CMakeFiles/TestWebRtcVideo.dir/build.make psip_build/CMakeFiles/TestWebRtcVideo.dir/build
+.PHONY : TestWebRtcVideo/fast
 
 CallMap.o: CallMap.cpp.o
 .PHONY : CallMap.o
@@ -578,15 +708,25 @@ help:
 	@echo "... install/strip"
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
-	@echo "... psip"
+	@echo "... EchoSipServer"
+	@echo "... HttpParser"
+	@echo "... HttpStack"
+	@echo "... SdpParser"
+	@echo "... ServerPlatform"
+	@echo "... SimpleSipServer"
+	@echo "... SipClient"
+	@echo "... SipLoadBalancer"
+	@echo "... SipParser"
+	@echo "... SipPlatform"
+	@echo "... SipSpeedLinux"
+	@echo "... SipStack"
+	@echo "... SipUserAgent"
+	@echo "... StunParser"
+	@echo "... TcpStack"
+	@echo "... TestWebRtcVideo"
+	@echo "... XmlParser"
 	@echo "... csp"
-	@echo "... sdpparser"
-	@echo "... serverplatform"
-	@echo "... sipparser"
-	@echo "... sipplatform"
-	@echo "... sipstack"
-	@echo "... sipuseragent"
-	@echo "... xmlparser"
+	@echo "... opensrtp"
 	@echo "... CallMap.o"
 	@echo "... CallMap.i"
 	@echo "... CallMap.s"

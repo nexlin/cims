@@ -71,6 +71,9 @@ bool CSipServer::Start( CSipStackSetup &clsSetup ) {
  * @returns SIP 요청 메시지를 처리하면 true 를 리턴하고 그렇지 않으면 false 를 리턴한다.
  */
 bool CSipServer::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
+    std::string strCallId;
+    pclsMessage->GetCallId( strCallId );
+    printf( "[DEBUG] RecvRequest: Method=%s CallId=%s\n", pclsMessage->m_strSipMethod.c_str(), strCallId.c_str() );
     if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
         return RecvRequestRegister( iThreadId, pclsMessage );
     }
@@ -175,6 +178,7 @@ void CSipServer::SaveCdr( const char *pszCallId, int iSipStatus ) {
  * @param iSipStatus	응답 코드
  */
 void CSipServer::StopCall( const char *pszCallId, int iResponseCode ) {
+    printf( "[DEBUG] StopCall: CallId=%s Code=%d\n", pszCallId, iResponseCode );
     SaveCdr( pszCallId, iResponseCode );
     gclsUserAgent.StopCall( pszCallId, iResponseCode );
 }

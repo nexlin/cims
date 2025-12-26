@@ -1,0 +1,23 @@
+[ 11%] Built target SipPlatform
+[ 12%] Built target XmlParser
+[ 19%] Built target HttpParser
+[ 19%] Built target StunParser
+[ 30%] Built target SdpParser
+[ 40%] Built target opensrtp
+[ 51%] Built target TcpStack
+[ 59%] Built target SipParser
+[ 61%] Built target HttpStack
+[ 77%] Built target SipStack
+[ 81%] Built target ServerPlatform
+[ 85%] Built target TestWebRtcVideo
+[ 86%] Building CXX object CMakeFiles/SipUserAgent.dir/SipUserAgent/SipUserAgent.cpp.o
+[ 87%] Linking CXX static library libSipUserAgent.a
+[ 90%] Built target SipUserAgent
+[ 90%] Linking CXX executable SimpleSipServer
+[ 90%] Linking CXX executable SipSpeedLinux
+[ 90%] Linking CXX executable EchoSipServer
+[ 90%] Linking CXX executable SipLoadBalancer
+[ 92%] Built target SimpleSipServer
+[ 94%] Built target SipSpeedLinux
+[ 98%] Built target SipLoadBalancer
+[100%] Built target EchoSipServer

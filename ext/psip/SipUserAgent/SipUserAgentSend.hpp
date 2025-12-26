@@ -1,5 +1,6 @@
-/* 
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
+/*
+ * Copyright (C) 2012 Yee Young Han <websearch@naver.com>
+ * (http://blog.naver.com/websearch)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,165 +14,151 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 /**
  * @ingroup SipUserAgent
- * @brief ReINVITE ¸Þ½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
+ * @brief ReINVITE ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
  * @param pszCallId SIP Call-ID
- * @param pclsRtp		local RTP Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param pclsRtp		local RTP ì •ë³´ ì €ìž¥ ê°ì²´
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ì‹¤íŒ¨í•˜ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipUserAgent::SendReInvite( const char * pszCallId, CSipCallRtp * pclsRtp )
-{
-	SIP_DIALOG_MAP::iterator		itMap;
-	CSipMessage * pclsRequest = NULL;
-	bool	bRes = false;
+bool CSipUserAgent::SendReInvite(const char *pszCallId, CSipCallRtp *pclsRtp) {
+  SIP_DIALOG_MAP::iterator itMap;
+  CSipMessage *pclsRequest = NULL;
+  bool bRes = false;
 
-	m_clsDialogMutex.acquire();
-	itMap = m_clsDialogMap.find( pszCallId );
-	if( itMap != m_clsDialogMap.end() )
-	{
-		itMap->second.SetLocalRtp( pclsRtp );
-		pclsRequest = itMap->second.CreateInvite();
-		bRes = true;
-	}
-	m_clsDialogMutex.release();
+  m_clsDialogMutex.acquire();
+  itMap = m_clsDialogMap.find(pszCallId);
+  if (itMap != m_clsDialogMap.end()) {
+    itMap->second.SetLocalRtp(pclsRtp);
+    pclsRequest = itMap->second.CreateInvite();
+    bRes = true;
+  }
+  m_clsDialogMutex.release();
 
-	if( pclsRequest )
-	{
-		m_clsSipStack.SendSipMessage( pclsRequest );
-	}
+  if (pclsRequest) {
+    m_clsSipStack.SendSipMessage(pclsRequest);
+  }
 
-	return bRes;
+  return bRes;
 }
 
 /**
  * @ingroup SipUserAgent
- * @brief Blind Transfer ¿¡¼­ »ç¿ëµÇ´Â NOTIFY ¸Þ½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
+ * @brief Blind Transfer ì—ì„œ ì‚¬ìš©ë˜ëŠ” NOTIFY ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
  * @param pszCallId SIP Call-ID
- * @param iSipCode	INVITE ÀÀ´ä ¸Þ½ÃÁöÀÇ SIP status code
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param iSipCode	INVITE ì‘ë‹µ ë©”ì‹œì§€ì˜ SIP status code
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ì‹¤íŒ¨í•˜ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipUserAgent::SendNotify( const char * pszCallId, int iSipCode )
-{
-	SIP_DIALOG_MAP::iterator		itMap;
-	CSipMessage * pclsRequest = NULL;
-	bool	bRes = false;
+bool CSipUserAgent::SendNotify(const char *pszCallId, int iSipCode) {
+  SIP_DIALOG_MAP::iterator itMap;
+  CSipMessage *pclsRequest = NULL;
+  bool bRes = false;
 
-	m_clsDialogMutex.acquire();
-	itMap = m_clsDialogMap.find( pszCallId );
-	if( itMap != m_clsDialogMap.end() )
-	{
-		pclsRequest = itMap->second.CreateNotify();
-		bRes = true;
-	}
-	m_clsDialogMutex.release();
+  m_clsDialogMutex.acquire();
+  itMap = m_clsDialogMap.find(pszCallId);
+  if (itMap != m_clsDialogMap.end()) {
+    pclsRequest = itMap->second.CreateNotify();
+    bRes = true;
+  }
+  m_clsDialogMutex.release();
 
-	if( pclsRequest )
-	{
-		char	szBuf[255];
+  if (pclsRequest) {
+    char szBuf[255];
 
-		pclsRequest->m_clsContentType.Set( "message", "sipfrag" );
-		pclsRequest->m_clsContentType.InsertParam( "version", "2.0" );
-		pclsRequest->AddHeader( "Event", "refer" );
+    pclsRequest->m_clsContentType.Set("message", "sipfrag");
+    pclsRequest->m_clsContentType.InsertParam("version", "2.0");
+    pclsRequest->AddHeader("Event", "refer");
 
-		if( iSipCode >= 200 )
-		{
-			pclsRequest->AddHeader( "Subscription-State",  "terminated" );
-		}
-		else
-		{
-			pclsRequest->AddHeader( "Subscription-State",  "active" );
-		}
+    if (iSipCode >= 200) {
+      pclsRequest->AddHeader("Subscription-State", "terminated");
+    } else {
+      pclsRequest->AddHeader("Subscription-State", "active");
+    }
 
-		pclsRequest->m_iContentLength = snprintf( szBuf, sizeof(szBuf), "SIP/2.0 %d %s", iSipCode, GetReasonPhrase( iSipCode ) );
-		pclsRequest->m_strBody = szBuf;
+    pclsRequest->m_iContentLength =
+        snprintf(szBuf, sizeof(szBuf), "SIP/2.0 %d %s", iSipCode,
+                 SipGetReasonPhrase(iSipCode));
+    pclsRequest->m_strBody = szBuf;
 
-		m_clsSipStack.SendSipMessage( pclsRequest );
-	}
+    m_clsSipStack.SendSipMessage(pclsRequest);
+  }
 
-	return bRes;
+  return bRes;
 }
 
 /**
  * @ingroup SipUserAgent
- * @brief INFO ¸Þ½ÃÁö·Î DTMF ¸¦ Àü¼ÛÇÑ´Ù.
+ * @brief INFO ë©”ì‹œì§€ë¡œ DTMF ë¥¼ ì „ì†¡í•œë‹¤.
  * @param pszCallId SIP Call-ID
- * @param cDtmf			DTMF ¹®ÀÚ. '0' ~ '9' ¹× '*', '#'
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param cDtmf			DTMF ë¬¸ìž. '0' ~ '9' ë° '*', '#'
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ì‹¤íŒ¨í•˜ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipUserAgent::SendDtmf( const char * pszCallId, char cDtmf )
-{
-	SIP_DIALOG_MAP::iterator		itMap;
-	CSipMessage * pclsRequest = NULL;
-	bool	bRes = false;
+bool CSipUserAgent::SendDtmf(const char *pszCallId, char cDtmf) {
+  SIP_DIALOG_MAP::iterator itMap;
+  CSipMessage *pclsRequest = NULL;
+  bool bRes = false;
 
-	m_clsDialogMutex.acquire();
-	itMap = m_clsDialogMap.find( pszCallId );
-	if( itMap != m_clsDialogMap.end() )
-	{
-		pclsRequest = itMap->second.CreateInfo();
-		bRes = true;
-	}
-	m_clsDialogMutex.release();
+  m_clsDialogMutex.acquire();
+  itMap = m_clsDialogMap.find(pszCallId);
+  if (itMap != m_clsDialogMap.end()) {
+    pclsRequest = itMap->second.CreateInfo();
+    bRes = true;
+  }
+  m_clsDialogMutex.release();
 
-	if( pclsRequest )
-	{
-		char szBody[51];
+  if (pclsRequest) {
+    char szBody[51];
 
-		pclsRequest->m_iContentLength = snprintf( szBody, sizeof(szBody), "Signal=%c\r\nDuration=160", cDtmf );
-		pclsRequest->m_strBody = szBody;
+    pclsRequest->m_iContentLength =
+        snprintf(szBody, sizeof(szBody), "Signal=%c\r\nDuration=160", cDtmf);
+    pclsRequest->m_strBody = szBody;
 
-		pclsRequest->m_clsContentType.Set( "application", "dtmf-relay" );
+    pclsRequest->m_clsContentType.Set("application", "dtmf-relay");
 
-		m_clsSipStack.SendSipMessage( pclsRequest );
-	}
+    m_clsSipStack.SendSipMessage(pclsRequest);
+  }
 
-	return bRes;
+  return bRes;
 }
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP PRACK ¸Þ½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
+ * @brief SIP PRACK ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
  * @param pszCallId SIP Call-ID
- * @param pclsRtp		local RTP Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param pclsRtp		local RTP ì •ë³´ ì €ìž¥ ê°ì²´
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ì‹¤íŒ¨í•˜ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipUserAgent::SendPrack( const char * pszCallId, CSipCallRtp * pclsRtp )
-{
-	SIP_DIALOG_MAP::iterator		itMap;
-	bool	bRes = false;
-	CSipMessage * pclsMessage = NULL;
+bool CSipUserAgent::SendPrack(const char *pszCallId, CSipCallRtp *pclsRtp) {
+  SIP_DIALOG_MAP::iterator itMap;
+  bool bRes = false;
+  CSipMessage *pclsMessage = NULL;
 
-	m_clsDialogMutex.acquire();
-	itMap = m_clsDialogMap.find( pszCallId );
-	if( itMap != m_clsDialogMap.end() )
-	{
-		// ÅëÈ­ ¿¬°áµÇÁö ¾Ê°í ¹ß½ÅÇÑ °æ¿ì¿¡¸¸ PRACK ¸Þ½ÃÁö¸¦ »ý¼ºÇÑ´Ù.
-		if( itMap->second.m_sttStartTime.tv_sec == 0 && itMap->second.m_pclsInvite == NULL )
-		{
-			pclsMessage = itMap->second.CreatePrack();
-			if( pclsMessage )
-			{
-				itMap->second.SetLocalRtp( pclsRtp );
-				
-				if( pclsRtp )
-				{
-					itMap->second.AddSdp( pclsMessage );
-				}
+  m_clsDialogMutex.acquire();
+  itMap = m_clsDialogMap.find(pszCallId);
+  if (itMap != m_clsDialogMap.end()) {
+    // í†µí™” ì—°ê²°ë˜ì§€ ì•Šê³  ë°œì‹ í•œ ê²½ìš°ì—ë§Œ PRACK ë©”ì‹œì§€ë¥¼ ìƒì„±í•œë‹¤.
+    if (itMap->second.m_sttStartTime.tv_sec == 0 &&
+        itMap->second.m_pclsInvite == NULL) {
+      pclsMessage = itMap->second.CreatePrack();
+      if (pclsMessage) {
+        itMap->second.SetLocalRtp(pclsRtp);
 
-				bRes = true;
-			}
-		}
-	}
-	m_clsDialogMutex.release();
+        if (pclsRtp) {
+          itMap->second.AddSdp(pclsMessage);
+        }
 
-	if( pclsMessage )
-	{
-		m_clsSipStack.SendSipMessage( pclsMessage );
-	}
+        bRes = true;
+      }
+    }
+  }
+  m_clsDialogMutex.release();
 
-	return bRes;
+  if (pclsMessage) {
+    m_clsSipStack.SendSipMessage(pclsMessage);
+  }
+
+  return bRes;
 }

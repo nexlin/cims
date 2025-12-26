@@ -1,5 +1,6 @@
-/* 
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
+/*
+ * Copyright (C) 2012 Yee Young Han <websearch@naver.com>
+ * (http://blog.naver.com/websearch)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef _SIP_PLATFORM_DEFINE_H_
@@ -24,19 +25,20 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 // Window XP 에서 빌드할 때에는 아래의 주석을 해제하라.
-//#define WINXP
+// #define WINXP
 
 #ifdef _DEBUG
 #define _CRTDBG_MAP_ALLOC
 
-#include <stdlib.h>
 #include <crtdbg.h>
+#include <stdlib.h>
+
 #endif
 
-#define VC2008_VERSION	1500
+#define VC2008_VERSION 1500
 
-#define strcasecmp	_stricmp
-#define sleep(x)		Sleep(x*1000)
+#define strcasecmp _stricmp
+#define sleep(x) Sleep(x * 1000)
 
 typedef unsigned __int64 uint64_t;
 typedef unsigned short uint16_t;
@@ -50,20 +52,55 @@ typedef __int16 int16_t;
 #if _MSC_VER == VC2008_VERSION
 typedef char int8_t;
 
-#define snprintf		_snprintf
+#define snprintf _snprintf
 #define atoll(x) _atoi64(x)
 #endif
 
-#define THREAD_API	DWORD WINAPI
+#define THREAD_API DWORD WINAPI
 
 #else
 
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-#define THREAD_API	void *
-#define LPVOID			void *
+
+#define THREAD_API void *
+#define LPVOID void *
+
+// Windows Compatibility Types
+typedef int SOCKET;
+typedef int BOOL;
+typedef unsigned int DWORD;
+typedef unsigned short WORD;
+typedef unsigned char BYTE;
+typedef void *HANDLE;
+
+#ifndef TRUE
+#define TRUE 1
+#endif
+
+#ifndef FALSE
+#define FALSE 0
+#endif
+
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
+
+#define closesocket(s) close(s)
+#define ZeroMemory(p, s) memset((p), 0, (s))
+#define Sleep(ms) usleep((ms) * 1000)
+#define GetCurrentThreadId() pthread_self()
 
 #endif
 
@@ -82,11 +119,11 @@ typedef char int8_t;
 #endif
 
 #if defined LINUX_64
-#define UNSIGNED_LONG_LONG_FORMAT	"%lu"
-#define LONG_LONG_FORMAT	"%ld"
+#define UNSIGNED_LONG_LONG_FORMAT "%lu"
+#define LONG_LONG_FORMAT "%ld"
 #else
-#define UNSIGNED_LONG_LONG_FORMAT	"%llu"
-#define LONG_LONG_FORMAT	"%lld"
+#define UNSIGNED_LONG_LONG_FORMAT "%llu"
+#define LONG_LONG_FORMAT "%lld"
 #endif
 
 /**

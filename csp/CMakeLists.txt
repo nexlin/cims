@@ -18,24 +18,40 @@ file(GLOB SRCS "*.cpp")
 # Define the executable
 add_executable(csp ${SRCS})
 
-# Include directories (csp own headers)
-target_include_directories(csp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# Include directories (Propagated from targets but adding explicit just in case)
+target_include_directories(csp PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/SipPlatform
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/SipStack
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/SipParser
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/SdpParser
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/StunParser
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/XmlParser
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/SipUserAgent
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/ServerPlatform
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/TcpStack
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/HttpStack
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/HttpParser
+)
 
-# Link against the psip libraries
-# Note: The order here should match the dependency stack if not automatically handled,
-# but using target links usually handles it.
+# Link against the psip libraries (PascalCase matches ext/psip/CMakeLists.txt)
 target_link_libraries(csp PUBLIC
-    sipuseragent
-    sipstack
-    sipparser
-    sdpparser
-    xmlparser
-    serverplatform
-    sipplatform
+    SipUserAgent
+    SipStack
+    SipParser
+    SdpParser
+    XmlParser
+    ServerPlatform
+    SipPlatform
+    StunParser
+    TcpStack
+    HttpStack
+    HttpParser
+    opensrtp
     Threads::Threads
     OpenSSL::SSL
     OpenSSL::Crypto
-    OpenSSL::Crypto
+    dl
 )
 
 # --- Deployment / Install Configuration ---

@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
  *
  * This program is free software; you can redistribute it and/or modify
@@ -13,11 +13,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 /*
- SIP Pick UP ½Ã³ª¸®¿À
+ SIP Pick UP ï¿½Ã³ï¿½ï¿½ï¿½ï¿½ï¿½
 
         INVITE                       INVITE
  (#1) ----------------> CspServer --------------> (#2)
@@ -26,8 +26,8 @@
  (#3) ----------------> CspServer
 
                                      CANCEL
-												CspServer --------------> (#2)
-                        
+                                                CspServer --------------> (#2)
+
         200 OK
  (#3) <---------------- CspServer
         200 OK
@@ -37,93 +37,78 @@
 
 /**
  * @ingroup CspServer
- * @brief SIP Call Pick up ÅëÈ­ ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+ * @brief SIP Call Pick up ï¿½ï¿½È­ ï¿½ï¿½Ã» ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
  * @param	pszCallId	SIP Call-ID
- * @param pszFrom		SIP From »ç¿ëÀÚ ¾ÆÀÌµð
- * @param pszTo			SIP To »ç¿ëÀÚ ¾ÆÀÌµð
- * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
+ * @param pszFrom		SIP From ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+ * @param pszTo			SIP To ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+ * @param pclsRtp		RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
  */
-void CSipServer::PickUp( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp )
-{
-	CXmlUser	xmlFrom;
-	USER_ID_LIST	clsUserIdList;
-	bool bCallPickup = false;
+void CSipServer::PickUp( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp ) {
+    CXmlUser xmlFrom;
+    USER_ID_LIST clsUserIdList;
+    bool bCallPickup = false;
 
-	CLog::Print( LOG_DEBUG, "EventIncomingCall(%s,%s,%s)  CallPickup", pszCallId, pszFrom, pszTo );
+    CLog::Print( LOG_DEBUG, "EventIncomingCall(%s,%s,%s)  CallPickup", pszCallId, pszFrom, pszTo );
 
-	if( SelectUser( pszFrom, xmlFrom ) && gclsUserMap.SelectGroup( xmlFrom.m_strGroupId.c_str(), clsUserIdList ) )
-	{
-		USER_ID_LIST::iterator	itUIL;
-		std::string strOldCallId;
+    if ( SelectUser( pszFrom, xmlFrom ) && gclsUserMap.SelectGroup( xmlFrom.m_strGroupId.c_str(), clsUserIdList ) ) {
+        USER_ID_LIST::iterator itUIL;
+        std::string strOldCallId;
 
-		for( itUIL = clsUserIdList.begin(); itUIL != clsUserIdList.end(); ++itUIL )
-		{
-			if( gclsCallMap.SelectToRing( itUIL->c_str(), strOldCallId ) == false ) continue;
+        for ( itUIL = clsUserIdList.begin(); itUIL != clsUserIdList.end(); ++itUIL ) {
+            if ( gclsCallMap.SelectToRing( itUIL->c_str(), strOldCallId ) == false ) continue;
 
-			CCallInfo clsOldCallInfo;
+            CCallInfo clsOldCallInfo;
 
-			if( gclsCallMap.Select( strOldCallId.c_str(), clsOldCallInfo ) && gclsCallMap.Insert( pszCallId, clsOldCallInfo ) )
-			{
-				// #2 ÅëÈ­¸¦ Á¾·á½ÃÅ²´Ù.
-				gclsCallMap.DeleteOne( strOldCallId.c_str() );
-				gclsUserAgent.StopCall( strOldCallId.c_str() );
+            if ( gclsCallMap.Select( strOldCallId.c_str(), clsOldCallInfo ) &&
+                 gclsCallMap.Insert( pszCallId, clsOldCallInfo ) ) {
+                gclsCallMap.DeleteOne( strOldCallId.c_str() );
+                gclsUserAgent.StopCall( strOldCallId.c_str() );
 
-				CSipCallRtp clsRemoteRtp;
+                CSipCallRtp clsRemoteRtp;
 
-				if( gclsUserAgent.GetRemoteCallRtp( clsOldCallInfo.m_strPeerCallId.c_str(), &clsRemoteRtp ) )
-				{
-					if( pclsRtp )
-					{
-						if( clsOldCallInfo.m_iPeerRtpPort > 0 )
-						{
-							pclsRtp->m_iPort = clsOldCallInfo.m_iPeerRtpPort;
-							pclsRtp->m_strIp = gclsSetup.m_strLocalIp;
-						}
+                if ( gclsUserAgent.GetRemoteCallRtp( clsOldCallInfo.m_strPeerCallId.c_str(), &clsRemoteRtp ) ) {
+                    if ( pclsRtp ) {
+                        if ( clsOldCallInfo.m_iPeerRtpPort > 0 ) {
+                            pclsRtp->m_iPort = clsOldCallInfo.m_iPeerRtpPort;
+                            pclsRtp->m_strIp = gclsSetup.m_strLocalIp;
+                        }
 
-						pclsRtp->m_iCodec = clsRemoteRtp.m_iCodec;
-					}
+                        pclsRtp->m_iCodec = clsRemoteRtp.m_iCodec;
+                    }
 
-					// #1 ÅëÈ­ ¿¬°á
-					if( gclsUserAgent.AcceptCall( clsOldCallInfo.m_strPeerCallId.c_str(), pclsRtp ) )
-					{
-						CCallInfo clsPeerCallInfo;
+                    // #1 ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½
+                    if ( gclsUserAgent.AcceptCall( clsOldCallInfo.m_strPeerCallId.c_str(), pclsRtp ) ) {
+                        CCallInfo clsPeerCallInfo;
 
-						if( gclsCallMap.Select( clsOldCallInfo.m_strPeerCallId.c_str(), clsPeerCallInfo ) )
-						{
-							gclsCallMap.Update( clsOldCallInfo.m_strPeerCallId.c_str(), pszCallId );
+                        if ( gclsCallMap.Select( clsOldCallInfo.m_strPeerCallId.c_str(), clsPeerCallInfo ) ) {
+                            gclsCallMap.Update( clsOldCallInfo.m_strPeerCallId.c_str(), pszCallId );
 
-							if( pclsRtp )
-							{
-								if( clsOldCallInfo.m_iPeerRtpPort > 0 )
-								{
-									pclsRtp->m_iPort = clsPeerCallInfo.m_iPeerRtpPort;
-								}
-								else
-								{
-									pclsRtp = &clsRemoteRtp;
-								}
-							}
+                            if ( pclsRtp ) {
+                                if ( clsOldCallInfo.m_iPeerRtpPort > 0 ) {
+                                    pclsRtp->m_iPort = clsPeerCallInfo.m_iPeerRtpPort;
+                                } else {
+                                    pclsRtp = &clsRemoteRtp;
+                                }
+                            }
 
-							// #3 ÅëÈ­ ¿¬°á
-							gclsUserAgent.AcceptCall( pszCallId, pclsRtp );
-							bCallPickup = true;
-						}
-						
-						if( bCallPickup == false )
-						{
-							gclsUserAgent.StopCall( clsOldCallInfo.m_strPeerCallId.c_str() );	
-						}
-					}
-				}
-			}
+                            // #3 ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½
+                            gclsUserAgent.AcceptCall( pszCallId, pclsRtp );
+                            bCallPickup = true;
+                        }
 
-			break;
-		}
-	}
-	
-	if( bCallPickup == false )
-	{
-		CLog::Print( LOG_DEBUG, "EventIncomingCall CallPickup from(%s) is not found", pszFrom );
-		StopCall( pszCallId, SIP_NOT_FOUND );
-	}
+                        if ( bCallPickup == false ) {
+                            gclsUserAgent.StopCall( clsOldCallInfo.m_strPeerCallId.c_str() );
+                        }
+                    }
+                }
+            }
+
+            break;
+        }
+    }
+
+    if ( bCallPickup == false ) {
+        CLog::Print( LOG_DEBUG, "EventIncomingCall CallPickup from(%s) is not found", pszFrom );
+        StopCall( pszCallId, SIP_NOT_FOUND );
+    }
 }

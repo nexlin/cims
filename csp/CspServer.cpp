@@ -80,11 +80,15 @@ int ServiceMain() {
     Fork( gbFork );
     SetCoreDumpEnable();
     ServerSignal();
+    printf( "Loading SipServerMap...\n" );
     gclsSipServerMap.Load();
+    printf( "Starting SipServer...\n" );
     if ( gclsSipServer.Start( clsSetup ) == false ) {
         CLog::Print( LOG_ERROR, "SipServer start error" );
+        printf( "SipServer start error (check logs/permissions/ports)\n" );
         return -1;
     }
+    printf( "SipServer started successfully.\n" );
     if ( gclsSetup.m_iMonitorPort > 0 ) {
         gclsMonitor.m_iMonitorPort = gclsSetup.m_iMonitorPort;
         StartMonitorServerThread( &gclsMonitor );

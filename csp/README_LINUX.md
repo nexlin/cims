@@ -13,6 +13,8 @@ sudo apt-get install build-essential libssl-dev cmake net-tools dos2unix
 
 ## 2. 빌드 및 배포 방법 (CMake & Install)
 
+**참고**: `csp` 프로젝트는 `ext/psip` 하위의 라이브러리들(`SipStack`, `SipUserAgent` 등)을 의존성으로 가지며, 빌드 시 자동으로 함께 컴파일됩니다.
+
 프로젝트 루트(`csp` 디렉토리)에서 다음 명령어를 실행하여 빌드하고 배포 패키지를 생성합니다.
 
 ```bash

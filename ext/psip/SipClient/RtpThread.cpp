@@ -1,5 +1,6 @@
-/* 
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
+/*
+ * Copyright (C) 2012 Yee Young Han <websearch@naver.com>
+ * (http://blog.naver.com/websearch)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,119 +14,116 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "SipClientSetup.h"
 #include "RtpThread.h"
-#include "TimeUtility.h"
-#include "ServerUtility.h"
-#include "RtpHeader.h"
 #include "G711.h"
+#include "RtpHeader.h"
+#include "ServerUtility.h"
+#include "SipClientSetup.h"
+#include "TimeUtility.h"
 
 #ifndef WIN32
 #define ALSA_PCM_NEW_HW_PARAMS_API
 
+#if !defined(WIN32) && !defined(NO_ALSA)
 #include <alsa/asoundlib.h>
 #endif
+#endif
+
+// CheckError moved from RtpThreadSend.hpp to resolve scope issues
+bool CheckError(int n, const char *pszLog) {
+  if (n < 0) {
+#if !defined(WIN32) && !defined(NO_ALSA)
+    printf("%s error - %s\n", pszLog, snd_strerror(n));
+#endif
+    return true;
+  }
+
+  return false;
+}
 
 CRtpThread gclsRtpThread;
 
-#include "RtpThreadSend.hpp"
 #include "RtpThreadRecv.hpp"
+#include "RtpThreadSend.hpp"
 
-CRtpThread::CRtpThread() : m_hSocket(INVALID_SOCKET), m_iPort(0), m_bStopEvent(false), m_bSendThreadRun(false), m_bRecvThreadRun(false)
-{
+
+CRtpThread::CRtpThread()
+    : m_hSocket(INVALID_SOCKET), m_iPort(0), m_bStopEvent(false),
+      m_bSendThreadRun(false), m_bRecvThreadRun(false) {}
+
+CRtpThread::~CRtpThread() { Destroy(); }
+
+bool CRtpThread::Create() {
+  if (m_hSocket != INVALID_SOCKET) {
+    return true;
+  }
+
+  for (int i = 10000; i < 11000; i += 2) {
+    m_hSocket = UdpListen(i, NULL);
+    if (m_hSocket != INVALID_SOCKET) {
+      m_iPort = i;
+      break;
+    }
+  }
+
+  if (m_hSocket == INVALID_SOCKET) {
+    return false;
+  }
+
+  return true;
 }
 
-CRtpThread::~CRtpThread()
-{
-	Destroy( );
+bool CRtpThread::Destroy() {
+  if (m_hSocket != INVALID_SOCKET) {
+    closesocket(m_hSocket);
+    m_hSocket = INVALID_SOCKET;
+  }
+
+  return true;
 }
 
-bool CRtpThread::Create( )
-{
-	if( m_hSocket != INVALID_SOCKET )
-	{
-		return true;
-	}
+bool CRtpThread::Start(const char *pszDestIp, int iDestPort) {
+  if (m_hSocket == INVALID_SOCKET) {
+    return false;
+  }
 
-	for( int i = 10000; i < 11000; i += 2 )
-	{
-		m_hSocket = UdpListen( i, NULL );
-		if( m_hSocket != INVALID_SOCKET )
-		{
-			m_iPort = i;
-			break;
-		}
-	}
+  m_strDestIp = pszDestIp;
+  m_iDestPort = iDestPort;
 
-	if( m_hSocket == INVALID_SOCKET )
-	{
-		return false;
-	}
-
-	return true;
-}
-
-bool CRtpThread::Destroy( )
-{
-	if( m_hSocket != INVALID_SOCKET )
-	{
-		closesocket( m_hSocket );
-		m_hSocket = INVALID_SOCKET;
-	}
-
-	return true;
-}
-
-bool CRtpThread::Start( const char * pszDestIp, int iDestPort )
-{
-	if( m_hSocket == INVALID_SOCKET )
-	{
-		return false;
-	}
-
-	m_strDestIp = pszDestIp;
-	m_iDestPort = iDestPort;
-
-	if( m_bSendThreadRun || m_bRecvThreadRun )
-	{
-		return true;
-	}
+  if (m_bSendThreadRun || m_bRecvThreadRun) {
+    return true;
+  }
 
 #ifndef WIN32
-	if( StartThread( "RtpThreadSend", RtpThreadSend, NULL ) == false )
-	{
-		Stop();
-		return false;
-	}
+  if (StartThread("RtpThreadSend", RtpThreadSend, NULL) == false) {
+    Stop();
+    return false;
+  }
 
-	if( StartThread( "RtpThreadRecv", RtpThreadRecv, NULL ) == false )
-	{
-		Stop();
-		return false;
-	}
+  if (StartThread("RtpThreadRecv", RtpThreadRecv, NULL) == false) {
+    Stop();
+    return false;
+  }
 #endif
 
-	return true;
+  return true;
 }
 
-bool CRtpThread::Stop( )
-{
-	m_bStopEvent = true;
+bool CRtpThread::Stop() {
+  m_bStopEvent = true;
 
-	for( int i = 0; i < 100; ++i )
-	{
-		if( m_bSendThreadRun == false && m_bRecvThreadRun == false )
-		{
-			break;
-		}
+  for (int i = 0; i < 100; ++i) {
+    if (m_bSendThreadRun == false && m_bRecvThreadRun == false) {
+      break;
+    }
 
-		MiliSleep(20);
-	}
+    MiliSleep(20);
+  }
 
-	m_bStopEvent = false;
+  m_bStopEvent = false;
 
-	return true;
+  return true;
 }

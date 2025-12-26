@@ -1,0 +1,4 @@
+[  1%] Building CXX object CMakeFiles/TestWebRtcVideo.dir/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipStatusCode.cpp.o
+[  2%] Building C object CMakeFiles/TestWebRtcVideo.dir/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/opensrtp/crypto/cipher/aes_icm.c.o
+[  3%] Linking CXX executable TestWebRtcVideo
+[100%] Built target TestWebRtcVideo

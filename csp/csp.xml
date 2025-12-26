@@ -33,7 +33,7 @@
 		<Folder>../log/cdr</Folder>
 	</Cdr>
 	<Monitor>
-	  <Port>6000</Port>
+	  <Port>16000</Port>
 	  <ClientIpList>
 	    <ClientIp>127.0.0.1</ClientIp>
 	    <ClientIp>192.168.0.30</ClientIp>

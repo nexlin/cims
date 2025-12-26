@@ -1,5 +1,6 @@
-/* 
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
+/*
+ * Copyright (C) 2012 Yee Young Han <websearch@naver.com>
+ * (http://blog.naver.com/websearch)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,1317 +14,1248 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "SipParserDefine.h"
 #include "SipMessage.h"
+#include "MemoryDebug.h"
+#include "SipParserDefine.h"
 #include "SipStatusCode.h"
 #include "SipUtility.h"
 #include <stdlib.h>
-#include "MemoryDebug.h"
 
-CSipMessage::CSipMessage() : m_iStatusCode(-1), m_iContentLength(0), m_iExpires(-1), m_iMaxForwards(-1), m_eTransport(E_SIP_UDP)
-	, m_iClientPort(0)
-	, m_bUseCompact(false), m_iUseCount(0)
-{
-}
 
-CSipMessage::~CSipMessage()
-{
-}
+CSipMessage::CSipMessage()
+    : m_iStatusCode(-1), m_iContentLength(0), m_iExpires(-1),
+      m_iMaxForwards(-1), m_eTransport(E_SIP_UDP), m_iClientPort(0),
+      m_bUseCompact(false), m_iUseCount(0) {}
+
+CSipMessage::~CSipMessage() {}
 
 /**
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipMessage Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipMessage í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
+ * @param pszText		SIP í—¤ë”ì˜ ê°’ì„ ì €ì¥í•œ ë¬¸ìì—´
+ * @param iTextLen	pszText ë¬¸ìì—´ì˜ ê¸¸ì´
+ * @returns ì„±ê³µí•˜ë©´ íŒŒì‹±í•œ ê¸¸ì´ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ -1 ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-int CSipMessage::Parse( const char * pszText, int iTextLen )
-{
-	if( pszText == NULL || iTextLen <= 4 ) return -1;
+int CSipMessage::Parse(const char *pszText, int iTextLen) {
+  if (pszText == NULL || iTextLen <= 4)
+    return -1;
 
-	int iPos, iCurPos, iNameLen, iValueLen;
-	const char * pszName, * pszValue;
-	CSipHeader	clsHeader;
-
-#ifdef PARSE_FAST
-	bool bNotFound;
-#endif
-
-	if( !strncmp( pszText, "SIP/", 4 ) )
-	{
-		iCurPos = ParseStatusLine( pszText, iTextLen );
-	}
-	else
-	{
-		iCurPos = ParseRequestLine( pszText, iTextLen );
-	}
-
-	if( iCurPos == -1 ) return -1;
-
-	while( iCurPos < iTextLen )
-	{
-		iPos = clsHeader.Parse( pszText + iCurPos, iTextLen - iCurPos );
-		if( iPos == -1 ) return -1;
-		iCurPos += iPos;
-
-		iNameLen = (int)clsHeader.m_strName.length();
-		if( iNameLen == 0 ) break;
-
-		pszName = clsHeader.m_strName.c_str();
-		pszValue = clsHeader.m_strValue.c_str();
-		iValueLen = (int)clsHeader.m_strValue.length();
+  int iPos, iCurPos, iNameLen, iValueLen;
+  const char *pszName, *pszValue;
+  CSipHeader clsHeader;
 
 #ifdef PARSE_FAST
-		bNotFound = false;
-
-		if( iNameLen == 1 )
-		{
-			if( pszName[0] == 'v' )
-			{
-				if( ParseSipVia( m_clsViaList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( pszName[0] == 'f' )
-			{
-				if( m_clsFrom.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( pszName[0] == 't' )
-			{
-				if( m_clsTo.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( pszName[0] == 'i' )
-			{
-				if( m_clsCallId.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( pszName[0] == 'm' )
-			{
-				if( ParseSipFrom( m_clsContactList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( pszName[0] == 'c' )
-			{
-				if( m_clsContentType.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( pszName[0] == 'l' )
-			{
-				m_iContentLength = atoi( pszValue );
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 2 )
-		{
-			if( !strcasecmp( pszName, "To" ) )
-			{
-				if( m_clsTo.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 3 )
-		{
-			if( !strcasecmp( pszName, "Via" ) )
-			{
-				if( ParseSipVia( m_clsViaList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 4 )
-		{
-			if( !strcasecmp( pszName, "From" ) )
-			{
-				if( m_clsFrom.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( !strcasecmp( pszName, "CSeq" ) )
-			{
-				if( m_clsCSeq.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 5 )
-		{
-			if( !strcasecmp( pszName, "Route" ) )
-			{
-				if( ParseSipFrom( m_clsRouteList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-#ifdef USE_ACCEPT_HEADER
-		else if( iNameLen == 6 )
-		{
-			if( !strcasecmp( pszName, "Accept" ) )
-			{
-				if( ParseSipContentType( m_clsAcceptList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
+  bool bNotFound;
 #endif
-		else if( iNameLen == 7 )
-		{
-			if( !strcasecmp( pszName, "Call-ID" ) )
-			{
-				if( m_clsCallId.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( !strcasecmp( pszName, "Contact" ) )
-			{
-				if( ParseSipFrom( m_clsContactList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( !strcasecmp( pszName, "Expires" ) )
-			{
-				m_iExpires = atoi( pszValue );
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 10 )
-		{
-			if( !strcasecmp( pszName, "User-Agent" ) )
-			{
-				m_strUserAgent = clsHeader.m_strValue;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 12 )
-		{
-			if( !strcasecmp( pszName, "Max-Forwards" ) )
-			{
-				m_iMaxForwards = atoi( pszValue );
-			}
-			else if( !strcasecmp( pszName, "Record-Route" ) )
-			{
-				if( ParseSipFrom( m_clsRecordRouteList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( !strcasecmp( pszName, "Content-Type" ) )
-			{
-				if( m_clsContentType.Parse( pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 13 )
-		{
-			if( !strcasecmp( pszName, "Authorization" ) )
-			{
-				if( ParseSipCredential( m_clsAuthorizationList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 14 )
-		{
-			if( !strcasecmp( pszName, "Content-Length" ) )
-			{
-				m_iContentLength = atoi( pszValue );
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-#ifdef USE_ACCEPT_HEADER
-		else if( iNameLen == 15 )
-		{
-			if( !strcasecmp( pszName, "Accept-Encoding" ) )
-			{
-				if( ParseSipAcceptData( m_clsAcceptEncodingList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else if( !strcasecmp( pszName, "Accept-Language" ) )
-			{
-				if( ParseSipAcceptData( m_clsAcceptLanguageList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-#endif
-		else if( iNameLen == 16 )
-		{
-			if( !strcasecmp( pszName, "WWW-Authenticate" ) )
-			{
-				if( ParseSipChallenge( m_clsWwwAuthenticateList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 18 )
-		{
-			if( !strcasecmp( pszName, "Proxy-Authenticate" ) )
-			{
-				if( ParseSipChallenge( m_clsProxyAuthenticateList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else if( iNameLen == 19 )
-		{
-			if( !strcasecmp( pszName, "Proxy-Authorization" ) )
-			{
-				if( ParseSipCredential( m_clsProxyAuthorizationList, pszValue, iValueLen ) == -1 ) return -1;
-			}
-			else
-			{
-				bNotFound = true;
-			}
-		}
-		else
-		{
-			bNotFound = true;
-		}
 
-		if( bNotFound )
-		{
-			m_clsHeaderList.push_back( clsHeader );
-		}
+  if (!strncmp(pszText, "SIP/", 4)) {
+    iCurPos = ParseStatusLine(pszText, iTextLen);
+  } else {
+    iCurPos = ParseRequestLine(pszText, iTextLen);
+  }
+
+  if (iCurPos == -1)
+    return -1;
+
+  while (iCurPos < iTextLen) {
+    iPos = clsHeader.Parse(pszText + iCurPos, iTextLen - iCurPos);
+    if (iPos == -1)
+      return -1;
+    iCurPos += iPos;
+
+    iNameLen = (int)clsHeader.m_strName.length();
+    if (iNameLen == 0)
+      break;
+
+    pszName = clsHeader.m_strName.c_str();
+    pszValue = clsHeader.m_strValue.c_str();
+    iValueLen = (int)clsHeader.m_strValue.length();
+
+#ifdef PARSE_FAST
+    bNotFound = false;
+
+    if (iNameLen == 1) {
+      if (pszName[0] == 'v') {
+        if (ParseSipVia(m_clsViaList, pszValue, iValueLen) == -1)
+          return -1;
+      } else if (pszName[0] == 'f') {
+        if (m_clsFrom.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else if (pszName[0] == 't') {
+        if (m_clsTo.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else if (pszName[0] == 'i') {
+        if (m_clsCallId.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else if (pszName[0] == 'm') {
+        if (ParseSipFrom(m_clsContactList, pszValue, iValueLen) == -1)
+          return -1;
+      } else if (pszName[0] == 'c') {
+        if (m_clsContentType.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else if (pszName[0] == 'l') {
+        m_iContentLength = atoi(pszValue);
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 2) {
+      if (!strcasecmp(pszName, "To")) {
+        if (m_clsTo.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 3) {
+      if (!strcasecmp(pszName, "Via")) {
+        if (ParseSipVia(m_clsViaList, pszValue, iValueLen) == -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 4) {
+      if (!strcasecmp(pszName, "From")) {
+        if (m_clsFrom.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else if (!strcasecmp(pszName, "CSeq")) {
+        if (m_clsCSeq.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 5) {
+      if (!strcasecmp(pszName, "Route")) {
+        if (ParseSipFrom(m_clsRouteList, pszValue, iValueLen) == -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    }
+#ifdef USE_ACCEPT_HEADER
+    else if (iNameLen == 6) {
+      if (!strcasecmp(pszName, "Accept")) {
+        if (ParseSipContentType(m_clsAcceptList, pszValue, iValueLen) == -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    }
+#endif
+    else if (iNameLen == 7) {
+      if (!strcasecmp(pszName, "Call-ID")) {
+        if (m_clsCallId.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else if (!strcasecmp(pszName, "Contact")) {
+        if (ParseSipFrom(m_clsContactList, pszValue, iValueLen) == -1)
+          return -1;
+      } else if (!strcasecmp(pszName, "Expires")) {
+        m_iExpires = atoi(pszValue);
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 10) {
+      if (!strcasecmp(pszName, "User-Agent")) {
+        m_strUserAgent = clsHeader.m_strValue;
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 12) {
+      if (!strcasecmp(pszName, "Max-Forwards")) {
+        m_iMaxForwards = atoi(pszValue);
+      } else if (!strcasecmp(pszName, "Record-Route")) {
+        if (ParseSipFrom(m_clsRecordRouteList, pszValue, iValueLen) == -1)
+          return -1;
+      } else if (!strcasecmp(pszName, "Content-Type")) {
+        if (m_clsContentType.Parse(pszValue, iValueLen) == -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 13) {
+      if (!strcasecmp(pszName, "Authorization")) {
+        if (ParseSipCredential(m_clsAuthorizationList, pszValue, iValueLen) ==
+            -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 14) {
+      if (!strcasecmp(pszName, "Content-Length")) {
+        m_iContentLength = atoi(pszValue);
+      } else {
+        bNotFound = true;
+      }
+    }
+#ifdef USE_ACCEPT_HEADER
+    else if (iNameLen == 15) {
+      if (!strcasecmp(pszName, "Accept-Encoding")) {
+        if (ParseSipAcceptData(m_clsAcceptEncodingList, pszValue, iValueLen) ==
+            -1)
+          return -1;
+      } else if (!strcasecmp(pszName, "Accept-Language")) {
+        if (ParseSipAcceptData(m_clsAcceptLanguageList, pszValue, iValueLen) ==
+            -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    }
+#endif
+    else if (iNameLen == 16) {
+      if (!strcasecmp(pszName, "WWW-Authenticate")) {
+        if (ParseSipChallenge(m_clsWwwAuthenticateList, pszValue, iValueLen) ==
+            -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 18) {
+      if (!strcasecmp(pszName, "Proxy-Authenticate")) {
+        if (ParseSipChallenge(m_clsProxyAuthenticateList, pszValue,
+                              iValueLen) == -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    } else if (iNameLen == 19) {
+      if (!strcasecmp(pszName, "Proxy-Authorization")) {
+        if (ParseSipCredential(m_clsProxyAuthorizationList, pszValue,
+                               iValueLen) == -1)
+          return -1;
+      } else {
+        bNotFound = true;
+      }
+    } else {
+      bNotFound = true;
+    }
+
+    if (bNotFound) {
+      m_clsHeaderList.push_back(clsHeader);
+    }
 #else
-		if( !strcasecmp( pszName, "Via" ) || !strcasecmp( pszName, "v" ) )
-		{
-			if( ParseSipVia( m_clsViaList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Max-Forwards" ) )
-		{
-			m_iMaxForwards = atoi( pszValue );
-		}
-		else if( !strcasecmp( pszName, "From" ) || !strcasecmp( pszName, "f" ) )
-		{
-			if( m_clsFrom.Parse( pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "To" ) || !strcasecmp( pszName, "t" ) )
-		{
-			if( m_clsTo.Parse( pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "CSeq" ) )
-		{
-			if( m_clsCSeq.Parse( pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Call-ID" ) || !strcasecmp( pszName, "i" ) )
-		{
-			if( m_clsCallId.Parse( pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Contact" ) || !strcasecmp( pszName, "m" ) )
-		{
-			if( ParseSipFrom( m_clsContactList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Record-Route" ) )
-		{
-			if( ParseSipFrom( m_clsRecordRouteList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Route" ) )
-		{
-			if( ParseSipFrom( m_clsRouteList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Authorization" ) )
-		{
-			if( ParseSipCredential( m_clsAuthorizationList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "WWW-Authenticate" ) )
-		{
-			if( ParseSipChallenge( m_clsWwwAuthenticateList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Proxy-Authorization" ) )
-		{
-			if( ParseSipCredential( m_clsProxyAuthorizationList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Proxy-Authenticate" ) )
-		{
-			if( ParseSipChallenge( m_clsProxyAuthenticateList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Content-Type" ) || !strcasecmp( pszName, "c" ) )
-		{
-			if( m_clsContentType.Parse( pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Content-Length" ) || !strcasecmp( pszName, "l" ) )
-		{
-			m_iContentLength = atoi( pszValue );
-		}
+    if (!strcasecmp(pszName, "Via") || !strcasecmp(pszName, "v")) {
+      if (ParseSipVia(m_clsViaList, pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Max-Forwards")) {
+      m_iMaxForwards = atoi(pszValue);
+    } else if (!strcasecmp(pszName, "From") || !strcasecmp(pszName, "f")) {
+      if (m_clsFrom.Parse(pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "To") || !strcasecmp(pszName, "t")) {
+      if (m_clsTo.Parse(pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "CSeq")) {
+      if (m_clsCSeq.Parse(pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Call-ID") || !strcasecmp(pszName, "i")) {
+      if (m_clsCallId.Parse(pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Contact") || !strcasecmp(pszName, "m")) {
+      if (ParseSipFrom(m_clsContactList, pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Record-Route")) {
+      if (ParseSipFrom(m_clsRecordRouteList, pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Route")) {
+      if (ParseSipFrom(m_clsRouteList, pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Authorization")) {
+      if (ParseSipCredential(m_clsAuthorizationList, pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "WWW-Authenticate")) {
+      if (ParseSipChallenge(m_clsWwwAuthenticateList, pszValue, iValueLen) ==
+          -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Proxy-Authorization")) {
+      if (ParseSipCredential(m_clsProxyAuthorizationList, pszValue,
+                             iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Proxy-Authenticate")) {
+      if (ParseSipChallenge(m_clsProxyAuthenticateList, pszValue, iValueLen) ==
+          -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Content-Type") ||
+               !strcasecmp(pszName, "c")) {
+      if (m_clsContentType.Parse(pszValue, iValueLen) == -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Content-Length") ||
+               !strcasecmp(pszName, "l")) {
+      m_iContentLength = atoi(pszValue);
+    }
 #ifdef USE_ACCEPT_HEADER
-		else if( !strcasecmp( pszName, "Accept-Encoding" ) )
-		{
-			if( ParseSipAcceptData( m_clsAcceptEncodingList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Accept-Language" ) )
-		{
-			if( ParseSipAcceptData( m_clsAcceptLanguageList, pszValue, iValueLen ) == -1 ) return -1;
-		}
-		else if( !strcasecmp( pszName, "Accept" ) )
-		{
-			if( ParseSipContentType( m_clsAcceptList, pszValue, iValueLen ) == -1 ) return -1;
-		}
+    else if (!strcasecmp(pszName, "Accept-Encoding")) {
+      if (ParseSipAcceptData(m_clsAcceptEncodingList, pszValue, iValueLen) ==
+          -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Accept-Language")) {
+      if (ParseSipAcceptData(m_clsAcceptLanguageList, pszValue, iValueLen) ==
+          -1)
+        return -1;
+    } else if (!strcasecmp(pszName, "Accept")) {
+      if (ParseSipContentType(m_clsAcceptList, pszValue, iValueLen) == -1)
+        return -1;
+    }
 #endif
-		else if( !strcasecmp( pszName, "Expires" ) )
-		{
-			m_iExpires = atoi( pszValue );
-		}
-		else if( !strcasecmp( pszName, "User-Agent" ) )
-		{
-			m_strUserAgent = clsHeader.m_strValue;
-		}
-		else
-		{
-			m_clsHeaderList.push_back( clsHeader );
-		}
+    else if (!strcasecmp(pszName, "Expires")) {
+      m_iExpires = atoi(pszValue);
+    } else if (!strcasecmp(pszName, "User-Agent")) {
+      m_strUserAgent = clsHeader.m_strValue;
+    } else {
+      m_clsHeaderList.push_back(clsHeader);
+    }
 #endif
-	}
+  }
 
-	if( m_iContentLength > 0 )
-	{
-		if( m_iContentLength > ( iTextLen - iCurPos ) ) return -1;
+  if (m_iContentLength > 0) {
+    if (m_iContentLength > (iTextLen - iCurPos))
+      return -1;
 
-		m_strBody.append( pszText + iCurPos, m_iContentLength );
-		return iTextLen;
-	}
+    m_strBody.append(pszText + iCurPos, m_iContentLength);
+    return iTextLen;
+  }
 
-	return iCurPos;
+  return iCurPos;
 }
 
 /**
- * @brief SIP ¸Ş½ÃÁö ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP ¸Ş½ÃÁö ¹®ÀÚ¿­À» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP ë©”ì‹œì§€ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
+ * @param pszText		SIP ë©”ì‹œì§€ ë¬¸ìì—´ì„ ì €ì¥í•  ë¬¸ìì—´ ë³€ìˆ˜
+ * @param iTextSize	pszText ë³€ìˆ˜ì˜ í¬ê¸°
+ * @returns ì„±ê³µí•˜ë©´ ì‘ì„±í•œ ë¬¸ìì—´ ê¸¸ì´ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ -1 ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-int CSipMessage::ToString( char * pszText, int iTextSize )
-{
-	if( pszText == NULL || iTextSize <= 0 ) return -1;
+int CSipMessage::ToString(char *pszText, int iTextSize) {
+  if (pszText == NULL || iTextSize <= 0)
+    return -1;
 
-	int iLen, n;
+  int iLen, n;
 
-	if( m_strSipVersion.empty() ) m_strSipVersion = SIP_VERSION;
+  if (m_strSipVersion.empty())
+    m_strSipVersion = SIP_VERSION;
 
-	if( m_iStatusCode > 0 )
-	{
-		if( m_strReasonPhrase.empty() )
-		{
-			m_strReasonPhrase = GetReasonPhrase( m_iStatusCode );
-		}
+  if (m_iStatusCode > 0) {
+    if (m_strReasonPhrase.empty()) {
+      m_strReasonPhrase = SipGetReasonPhrase(m_iStatusCode);
+    }
 
-		iLen = snprintf( pszText, iTextSize, "%s %d %s\r\n", m_strSipVersion.c_str(), m_iStatusCode, m_strReasonPhrase.c_str() );
-	}
-	else
-	{
-		if( m_strSipMethod.empty() || m_clsReqUri.Empty() || m_strSipVersion.empty() ) return -1;
-		iLen = snprintf( pszText, iTextSize, "%s ", m_strSipMethod.c_str() );
-		n = m_clsReqUri.ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, " %s\r\n", m_strSipVersion.c_str() );
-	}
+    iLen = snprintf(pszText, iTextSize, "%s %d %s\r\n", m_strSipVersion.c_str(),
+                    m_iStatusCode, m_strReasonPhrase.c_str());
+  } else {
+    if (m_strSipMethod.empty() || m_clsReqUri.Empty() ||
+        m_strSipVersion.empty())
+      return -1;
+    iLen = snprintf(pszText, iTextSize, "%s ", m_strSipMethod.c_str());
+    n = m_clsReqUri.ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, " %s\r\n",
+                     m_strSipVersion.c_str());
+  }
 
-	for( SIP_VIA_LIST::iterator itList = m_clsViaList.begin(); itList != m_clsViaList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, ( m_bUseCompact ? "v: " : "Via: " ) );
-		n = itList->ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  for (SIP_VIA_LIST::iterator itList = m_clsViaList.begin();
+       itList != m_clsViaList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen,
+                     (m_bUseCompact ? "v: " : "Via: "));
+    n = itList->ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	for( SIP_FROM_LIST::iterator itList = m_clsRecordRouteList.begin(); itList != m_clsRecordRouteList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Record-Route: " );
-		n = itList->ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  for (SIP_FROM_LIST::iterator itList = m_clsRecordRouteList.begin();
+       itList != m_clsRecordRouteList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Record-Route: ");
+    n = itList->ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	for( SIP_FROM_LIST::iterator itList = m_clsRouteList.begin(); itList != m_clsRouteList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Route: " );
-		n = itList->ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  for (SIP_FROM_LIST::iterator itList = m_clsRouteList.begin();
+       itList != m_clsRouteList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Route: ");
+    n = itList->ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	if( m_iMaxForwards >= 0 )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Max-Forwards: %d\r\n", m_iMaxForwards );
-	}
+  if (m_iMaxForwards >= 0) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Max-Forwards: %d\r\n",
+                     m_iMaxForwards);
+  }
 
-	if( m_clsFrom.Empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, ( m_bUseCompact ? "f: " : "From: " ) );
-		n = m_clsFrom.ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  if (m_clsFrom.Empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen,
+                     (m_bUseCompact ? "f: " : "From: "));
+    n = m_clsFrom.ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	if( m_clsTo.Empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, ( m_bUseCompact ? "t: " : "To: " ) );
-		n = m_clsTo.ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  if (m_clsTo.Empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen,
+                     (m_bUseCompact ? "t: " : "To: "));
+    n = m_clsTo.ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	if( m_clsCallId.Empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, ( m_bUseCompact ? "i: " : "Call-ID: " ) );
-		n = m_clsCallId.ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  if (m_clsCallId.Empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen,
+                     (m_bUseCompact ? "i: " : "Call-ID: "));
+    n = m_clsCallId.ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	if( m_clsCSeq.Empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "CSeq: " );
-		n = m_clsCSeq.ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  if (m_clsCSeq.Empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "CSeq: ");
+    n = m_clsCSeq.ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	for( SIP_FROM_LIST::iterator itList = m_clsContactList.begin(); itList != m_clsContactList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, ( m_bUseCompact ? "m: " : "Contact: " ) );
-		n = itList->ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  for (SIP_FROM_LIST::iterator itList = m_clsContactList.begin();
+       itList != m_clsContactList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen,
+                     (m_bUseCompact ? "m: " : "Contact: "));
+    n = itList->ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	for( SIP_CREDENTIAL_LIST::iterator itList = m_clsAuthorizationList.begin(); itList != m_clsAuthorizationList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Authorization: " );
-		n = itList->ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  for (SIP_CREDENTIAL_LIST::iterator itList = m_clsAuthorizationList.begin();
+       itList != m_clsAuthorizationList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Authorization: ");
+    n = itList->ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	for( SIP_CHALLENGE_LIST::iterator itList = m_clsWwwAuthenticateList.begin(); itList != m_clsWwwAuthenticateList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "WWW-Authenticate: " );
-		n = itList->ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  for (SIP_CHALLENGE_LIST::iterator itList = m_clsWwwAuthenticateList.begin();
+       itList != m_clsWwwAuthenticateList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "WWW-Authenticate: ");
+    n = itList->ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	for( SIP_CREDENTIAL_LIST::iterator itList = m_clsProxyAuthorizationList.begin(); itList != m_clsProxyAuthorizationList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Proxy-Authorization: " );
-		n = itList->ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  for (SIP_CREDENTIAL_LIST::iterator itList =
+           m_clsProxyAuthorizationList.begin();
+       itList != m_clsProxyAuthorizationList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Proxy-Authorization: ");
+    n = itList->ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	for( SIP_CHALLENGE_LIST::iterator itList = m_clsProxyAuthenticateList.begin(); itList != m_clsProxyAuthenticateList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Proxy-Authenticate: " );
-		n = itList->ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  for (SIP_CHALLENGE_LIST::iterator itList = m_clsProxyAuthenticateList.begin();
+       itList != m_clsProxyAuthenticateList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Proxy-Authenticate: ");
+    n = itList->ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	if( m_clsContentType.Empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, ( m_bUseCompact ? "c: " : "Content-Type: " ) );
-		n = m_clsContentType.ToString( pszText + iLen, iTextSize - iLen );
-		if( n == -1 ) return -1;
-		iLen += n;
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
+  if (m_clsContentType.Empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen,
+                     (m_bUseCompact ? "c: " : "Content-Type: "));
+    n = m_clsContentType.ToString(pszText + iLen, iTextSize - iLen);
+    if (n == -1)
+      return -1;
+    iLen += n;
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 
-	iLen += snprintf( pszText + iLen, iTextSize - iLen, "%s: %d\r\n", ( m_bUseCompact ? "l" : "Content-Length" ), m_iContentLength );
-
-#ifdef USE_ACCEPT_HEADER
-	if( m_clsAcceptList.empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Accept: " );
-		for( SIP_CONTENT_TYPE_LIST::iterator itList = m_clsAcceptList.begin(); itList != m_clsAcceptList.end(); ++itList )
-		{
-			if( itList != m_clsAcceptList.begin() )
-			{
-				iLen += snprintf( pszText + iLen, iTextSize - iLen, ", " );
-			}
-			n = itList->ToString( pszText + iLen, iTextSize - iLen );
-			if( n == -1 ) return -1;
-			iLen += n;
-		}
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
-
-	if( m_clsAcceptEncodingList.empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Accept-Encoding: " );
-		for( SIP_ACCEPT_DATA_LIST::iterator itList = m_clsAcceptEncodingList.begin(); itList != m_clsAcceptEncodingList.end(); ++itList )
-		{
-			if( itList != m_clsAcceptEncodingList.begin() )
-			{
-				iLen += snprintf( pszText + iLen, iTextSize - iLen, ", " );
-			}
-			n = itList->ToString( pszText + iLen, iTextSize - iLen );
-			if( n == -1 ) return -1;
-			iLen += n;
-		}
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
-
-	if( m_clsAcceptLanguageList.empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Accept-Language: " );
-		for( SIP_ACCEPT_DATA_LIST::iterator itList = m_clsAcceptLanguageList.begin(); itList != m_clsAcceptLanguageList.end(); ++itList )
-		{
-			if( itList != m_clsAcceptLanguageList.begin() )
-			{
-				iLen += snprintf( pszText + iLen, iTextSize - iLen, ", " );
-			}
-			n = itList->ToString( pszText + iLen, iTextSize - iLen );
-			if( n == -1 ) return -1;
-			iLen += n;
-		}
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-	}
-#endif
-
-	if( m_iExpires >= 0 )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "Expires: %d\r\n", m_iExpires );
-	}
-
-	if( m_strUserAgent.empty() == false )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "User-Agent: %s\r\n", m_strUserAgent.c_str() );
-	}
-
-	for( SIP_HEADER_LIST::iterator itList = m_clsHeaderList.begin(); itList != m_clsHeaderList.end(); ++itList )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "%s: %s\r\n", itList->m_strName.c_str(), itList->m_strValue.c_str() );
-	}
-
-	iLen += snprintf( pszText + iLen, iTextSize - iLen, "\r\n" );
-
-	if( m_iContentLength > 0 )
-	{
-		iLen += snprintf( pszText + iLen, iTextSize - iLen, "%s", m_strBody.c_str() );
-	}
-
-	return iLen;
-}
-
-/**
- * @ingroup SipParser
- * @brief ³×Æ®¿öÅ©·Î Àü¼ÛÇÒ ¼ö ÀÖ´Â SIP ¸Ş½ÃÁö ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
-bool CSipMessage::MakePacket()
-{
-	char	szPacket[SIP_MESSAGE_MAX_LEN];
-
-	if( ToString( szPacket, sizeof(szPacket) ) == -1 ) return false;
-
-	m_strPacket = szPacket;
-
-	return true;
-}
-
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
-void CSipMessage::Clear()
-{
-	m_strSipMethod.clear();
-	m_clsReqUri.Clear();
-	m_strSipVersion.clear();
-
-	m_iStatusCode = -1;
-	m_strReasonPhrase.clear();
-
-	m_clsFrom.Clear();
-	m_clsTo.Clear();
-
-	m_clsViaList.clear();        
-	m_clsContactList.clear();    
-	m_clsRecordRouteList.clear();
-	m_clsRouteList.clear();      
+  iLen += snprintf(pszText + iLen, iTextSize - iLen, "%s: %d\r\n",
+                   (m_bUseCompact ? "l" : "Content-Length"), m_iContentLength);
 
 #ifdef USE_ACCEPT_HEADER
-	m_clsAcceptList.clear();            
-                            
-	m_clsAcceptEncodingList.clear();    
-	m_clsAcceptLanguageList.clear();    
+  if (m_clsAcceptList.empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Accept: ");
+    for (SIP_CONTENT_TYPE_LIST::iterator itList = m_clsAcceptList.begin();
+         itList != m_clsAcceptList.end(); ++itList) {
+      if (itList != m_clsAcceptList.begin()) {
+        iLen += snprintf(pszText + iLen, iTextSize - iLen, ", ");
+      }
+      n = itList->ToString(pszText + iLen, iTextSize - iLen);
+      if (n == -1)
+        return -1;
+      iLen += n;
+    }
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
+
+  if (m_clsAcceptEncodingList.empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Accept-Encoding: ");
+    for (SIP_ACCEPT_DATA_LIST::iterator itList =
+             m_clsAcceptEncodingList.begin();
+         itList != m_clsAcceptEncodingList.end(); ++itList) {
+      if (itList != m_clsAcceptEncodingList.begin()) {
+        iLen += snprintf(pszText + iLen, iTextSize - iLen, ", ");
+      }
+      n = itList->ToString(pszText + iLen, iTextSize - iLen);
+      if (n == -1)
+        return -1;
+      iLen += n;
+    }
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
+
+  if (m_clsAcceptLanguageList.empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Accept-Language: ");
+    for (SIP_ACCEPT_DATA_LIST::iterator itList =
+             m_clsAcceptLanguageList.begin();
+         itList != m_clsAcceptLanguageList.end(); ++itList) {
+      if (itList != m_clsAcceptLanguageList.begin()) {
+        iLen += snprintf(pszText + iLen, iTextSize - iLen, ", ");
+      }
+      n = itList->ToString(pszText + iLen, iTextSize - iLen);
+      if (n == -1)
+        return -1;
+      iLen += n;
+    }
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
+  }
 #endif
 
-	m_clsAuthorizationList.clear();     
-	m_clsWwwAuthenticateList.clear();   
+  if (m_iExpires >= 0) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Expires: %d\r\n",
+                     m_iExpires);
+  }
 
-	m_clsProxyAuthorizationList.clear();
-	m_clsProxyAuthenticateList.clear(); 
+  if (m_strUserAgent.empty() == false) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "User-Agent: %s\r\n",
+                     m_strUserAgent.c_str());
+  }
 
-	m_clsHeaderList.clear();            
+  for (SIP_HEADER_LIST::iterator itList = m_clsHeaderList.begin();
+       itList != m_clsHeaderList.end(); ++itList) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "%s: %s\r\n",
+                     itList->m_strName.c_str(), itList->m_strValue.c_str());
+  }
 
-	m_clsCSeq.Clear();       
-	m_clsCallId.Clear();     
-	m_clsContentType.Clear();
-	m_iContentLength = 0;
-	                 
-	m_iExpires = -1;      
-	m_iMaxForwards = -1;  
-	                 
-	m_strUserAgent.clear();  
-	m_strBody.clear();
-	m_strPacket.clear();
+  iLen += snprintf(pszText + iLen, iTextSize - iLen, "\r\n");
 
-	m_eTransport = E_SIP_UDP;
-	m_strClientIp.clear();
-	m_iClientPort = -1;
+  if (m_iContentLength > 0) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "%s", m_strBody.c_str());
+  }
 
-	m_bUseCompact = false;
-	m_iUseCount = 0;
+  return iLen;
 }
 
 /**
  * @ingroup SipParser
- * @brief SIP ¿äÃ» ¸Ş½ÃÁöÀÎÁö °Ë»çÇÑ´Ù.
- * @returns SIP ¿äÃ» ¸Ş½ÃÁöÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief ë„¤íŠ¸ì›Œí¬ë¡œ ì „ì†¡í•  ìˆ˜ ìˆëŠ” SIP ë©”ì‹œì§€ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ì‹¤íŒ¨í•˜ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::IsRequest()
-{
-	if( m_strSipMethod.empty() ) return false;
+bool CSipMessage::MakePacket() {
+  char szPacket[SIP_MESSAGE_MAX_LEN];
 
-	return true;
+  if (ToString(szPacket, sizeof(szPacket)) == -1)
+    return false;
+
+  m_strPacket = szPacket;
+
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief SIP ¸Ş¼Òµå°¡ ÀÔ·ÂÇÑ ¸Ş¼Òµå¿Í °°ÀºÁö °Ë»çÇÑ´Ù.
- * @param pszMethod SIP ¸Ş¼Òµå
- * @returns SIP ¸Ş¼Òµå°¡ ÀÔ·ÂÇÑ ¸Ş¼Òµå¿Í °°À¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
  */
-bool CSipMessage::IsMethod( const char * pszMethod )
-{
-	if( pszMethod == NULL ) return false;
+void CSipMessage::Clear() {
+  m_strSipMethod.clear();
+  m_clsReqUri.Clear();
+  m_strSipVersion.clear();
 
-	if( m_strSipMethod.empty() == false )
-	{
-		if( !strcmp( m_strSipMethod.c_str(), pszMethod ) ) return true;
-	}
-	else
-	{
-		if( !strcmp( m_clsCSeq.m_strMethod.c_str(), pszMethod ) ) return true;
-	}
+  m_iStatusCode = -1;
+  m_strReasonPhrase.clear();
 
-	return false;
+  m_clsFrom.Clear();
+  m_clsTo.Clear();
+
+  m_clsViaList.clear();
+  m_clsContactList.clear();
+  m_clsRecordRouteList.clear();
+  m_clsRouteList.clear();
+
+#ifdef USE_ACCEPT_HEADER
+  m_clsAcceptList.clear();
+
+  m_clsAcceptEncodingList.clear();
+  m_clsAcceptLanguageList.clear();
+#endif
+
+  m_clsAuthorizationList.clear();
+  m_clsWwwAuthenticateList.clear();
+
+  m_clsProxyAuthorizationList.clear();
+  m_clsProxyAuthenticateList.clear();
+
+  m_clsHeaderList.clear();
+
+  m_clsCSeq.Clear();
+  m_clsCallId.Clear();
+  m_clsContentType.Clear();
+  m_iContentLength = 0;
+
+  m_iExpires = -1;
+  m_iMaxForwards = -1;
+
+  m_strUserAgent.clear();
+  m_strBody.clear();
+  m_strPacket.clear();
+
+  m_eTransport = E_SIP_UDP;
+  m_strClientIp.clear();
+  m_iClientPort = -1;
+
+  m_bUseCompact = false;
+  m_iUseCount = 0;
 }
 
 /**
  * @ingroup SipParser
- * @brief Call-ID °¡ µ¿ÀÏÇÑÁö °Ë»çÇÑ´Ù.
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå °´Ã¼
- * @returns Call-ID °¡ µ¿ÀÏÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP ìš”ì²­ ë©”ì‹œì§€ì¸ì§€ ê²€ì‚¬í•œë‹¤.
+ * @returns SIP ìš”ì²­ ë©”ì‹œì§€ì´ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼
+ * ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::IsEqualCallId( CSipMessage * pclsMessage )
-{
-	if( pclsMessage == NULL ) return false;
+bool CSipMessage::IsRequest() {
+  if (m_strSipMethod.empty())
+    return false;
 
-	return m_clsCallId.IsEqual( &pclsMessage->m_clsCallId );
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief Call-ID ¿Í CSeq ÀÇ ¹øÈ£°¡ µ¿ÀÏÇÑÁö °Ë»çÇÑ´Ù.
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå °´Ã¼
- * @returns Call-ID ¿Í CSeq ÀÇ ¹øÈ£°¡ µ¿ÀÏÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP ë©”ì†Œë“œê°€ ì…ë ¥í•œ ë©”ì†Œë“œì™€ ê°™ì€ì§€ ê²€ì‚¬í•œë‹¤.
+ * @param pszMethod SIP ë©”ì†Œë“œ
+ * @returns SIP ë©”ì†Œë“œê°€ ì…ë ¥í•œ ë©”ì†Œë“œì™€ ê°™ìœ¼ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´
+ * false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::IsEqualCallIdSeq( CSipMessage * pclsMessage )
-{
-	if( pclsMessage == NULL ) return false;
+bool CSipMessage::IsMethod(const char *pszMethod) {
+  if (pszMethod == NULL)
+    return false;
 
-	if( m_clsCallId.IsEqual( &pclsMessage->m_clsCallId ) && m_clsCSeq.m_iDigit == pclsMessage->m_clsCSeq.m_iDigit ) return true;
+  if (m_strSipMethod.empty() == false) {
+    if (!strcmp(m_strSipMethod.c_str(), pszMethod))
+      return true;
+  } else {
+    if (!strcmp(m_clsCSeq.m_strMethod.c_str(), pszMethod))
+      return true;
+  }
 
-	return false;
+  return false;
 }
 
 /**
  * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ 100rel Çì´õ¸¦ Æ÷ÇÔÇÏ°í ÀÖ´Â°¡?
- * @returns 100rel Çì´õ¸¦ Æ÷ÇÔÇÏ°í ÀÖÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief Call-ID ê°€ ë™ì¼í•œì§€ ê²€ì‚¬í•œë‹¤.
+ * @param pclsMessage SIP ë©”ì‹œì§€ ì €ì¥ ê°ì²´
+ * @returns Call-ID ê°€ ë™ì¼í•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼
+ * ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::Is100rel( )
-{
-	CSipHeader * pclsHeader = GetHeader( "Supported" );
-	if( pclsHeader )
-	{
-		if( strstr( pclsHeader->m_strValue.c_str(), "100rel" ) ) return true;
-	}
+bool CSipMessage::IsEqualCallId(CSipMessage *pclsMessage) {
+  if (pclsMessage == NULL)
+    return false;
 
-	pclsHeader = GetHeader( "Requires" );
-	if( pclsHeader )
-	{
-		if( strstr( pclsHeader->m_strValue.c_str(), "100rel" ) ) return true;
-	}
-
-	return false;
+  return m_clsCallId.IsEqual(&pclsMessage->m_clsCallId);
 }
 
 /**
  * @ingroup SipParser
- * @brief Call-ID ¹®ÀÚ¿­À» °¡Á®¿Â´Ù.
- * @param strCallId Call-ID ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief Call-ID ì™€ CSeq ì˜ ë²ˆí˜¸ê°€ ë™ì¼í•œì§€ ê²€ì‚¬í•œë‹¤.
+ * @param pclsMessage SIP ë©”ì‹œì§€ ì €ì¥ ê°ì²´
+ * @returns Call-ID ì™€ CSeq ì˜ ë²ˆí˜¸ê°€ ë™ì¼í•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´
+ * false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::GetCallId( std::string & strCallId )
-{
-	strCallId.clear();
+bool CSipMessage::IsEqualCallIdSeq(CSipMessage *pclsMessage) {
+  if (pclsMessage == NULL)
+    return false;
 
-	if( m_clsCallId.Empty() ) return false;
-	m_clsCallId.ToString( strCallId );
+  if (m_clsCallId.IsEqual(&pclsMessage->m_clsCallId) &&
+      m_clsCSeq.m_iDigit == pclsMessage->m_clsCSeq.m_iDigit)
+    return true;
 
-	return true;
+  return false;
 }
 
 /**
  * @ingroup SipParser
- * @brief Call-ID + CSeq digit ¹®ÀÚ¿­À» °¡Á®¿Â´Ù.
- * @param strCallId Call-ID + CSeq digit ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP ë©”ì‹œì§€ì— 100rel í—¤ë”ë¥¼ í¬í•¨í•˜ê³  ìˆëŠ”ê°€?
+ * @returns 100rel í—¤ë”ë¥¼ í¬í•¨í•˜ê³  ìˆìœ¼ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false
+ * ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::GetCallIdSeq( std::string & strCallId )
-{
-	if( GetCallId( strCallId ) == false ) return false;
+bool CSipMessage::Is100rel() {
+  CSipHeader *pclsHeader = GetHeader("Supported");
+  if (pclsHeader) {
+    if (strstr(pclsHeader->m_strValue.c_str(), "100rel"))
+      return true;
+  }
 
-	char szDigit[12];
+  pclsHeader = GetHeader("Requires");
+  if (pclsHeader) {
+    if (strstr(pclsHeader->m_strValue.c_str(), "100rel"))
+      return true;
+  }
 
-	snprintf( szDigit, sizeof(szDigit), " %d", m_clsCSeq.m_iDigit );
-	strCallId.append( szDigit );
-
-	return true;
+  return false;
 }
 
 /**
  * @ingroup SipParser
- * @brief Top Via Çì´õ¿¡ ¹ß½Å IP ÁÖ¼Ò¿Í Æ÷Æ® ¹øÈ£¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszIp SIP ¸Ş½ÃÁö ¹ß½Å IP ÁÖ¼Ò
- * @param iPort SIP ¸Ş½ÃÁö ¹ß½Å Æ÷Æ® ¹øÈ£
- * @param eTransport SIP ¸Ş½ÃÁö¸¦ ¹ß½ÅÇÑ transport
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief Call-ID ë¬¸ìì—´ì„ ê°€ì ¸ì˜¨ë‹¤.
+ * @param strCallId Call-ID ë¬¸ìì—´ì„ ì €ì¥í•  ë³€ìˆ˜
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::AddIpPortToTopVia( const char * pszIp, int iPort, ESipTransport eTransport )
-{
-	SIP_VIA_LIST::iterator itViaList = m_clsViaList.begin();
-	if( itViaList == m_clsViaList.end() ) return false;
+bool CSipMessage::GetCallId(std::string &strCallId) {
+  strCallId.clear();
 
-	SIP_PARAMETER_LIST::iterator	itList;
-	bool bRport = false, bReceived = false;
+  if (m_clsCallId.Empty())
+    return false;
+  m_clsCallId.ToString(strCallId);
 
-	char	szNum[11];
-
-	snprintf( szNum, sizeof(szNum), "%d", iPort );
-
-	for( itList = itViaList->m_clsParamList.begin(); itList != itViaList->m_clsParamList.end(); ++itList )
-	{
-		if( !strcmp( itList->m_strName.c_str(), SIP_RPORT ) )
-		{
-			itList->m_strValue = szNum;
-			bRport = true;
-		}
-		else if( !strcmp( itList->m_strName.c_str(), SIP_RECEIVED ) )
-		{
-			itList->m_strValue = pszIp;
-			bReceived = true;
-		}
-
-		if( bRport && bReceived ) break;
-	}
-
-	if( bRport == false && itViaList->m_iPort != iPort )
-	{
-		itViaList->InsertParam( SIP_RPORT, szNum );
-	}
-
-	if( bReceived == false && strcmp( itViaList->m_strHost.c_str(), pszIp ) )
-	{
-		itViaList->InsertParam( SIP_RECEIVED, pszIp );
-	}
-
-	if( eTransport == E_SIP_TCP && strcasecmp( itViaList->m_strTransport.c_str(), SIP_TRANSPORT_TCP ) )
-	{
-		itViaList->InsertParam( SIP_TRANSPORT, SIP_TRANSPORT_TCP );
-	}
-
-	return true;
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief Via Çì´õ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszIp			Via Çì´õ¿¡ ÀúÀåÇÒ IP ÁÖ¼Ò
- * @param iPort			Via Çì´õ¿¡ ÀúÀåÇÒ Æ÷Æ® ¹øÈ£
- * @param pszBranch Via branch tag ¹®ÀÚ¿­
- * @param eTransport SIP ¸Ş½ÃÁö¸¦ ¹ß½ÅÇÒ transport
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief Call-ID + CSeq digit ë¬¸ìì—´ì„ ê°€ì ¸ì˜¨ë‹¤.
+ * @param strCallId Call-ID + CSeq digit ë¬¸ìì—´ì„ ì €ì¥í•  ë³€ìˆ˜
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::AddVia( const char * pszIp, int iPort, const char * pszBranch, ESipTransport eTransport )
-{
-	if( pszIp == NULL || strlen(pszIp) == 0 ) return false;
-	if( iPort <= 0 ) return false;
+bool CSipMessage::GetCallIdSeq(std::string &strCallId) {
+  if (GetCallId(strCallId) == false)
+    return false;
 
-	CSipVia clsVia;
+  char szDigit[12];
 
-	clsVia.m_strProtocolName = "SIP";
-	clsVia.m_strProtocolVersion = "2.0";
-	clsVia.m_strTransport = SipGetTransport( eTransport );
+  snprintf(szDigit, sizeof(szDigit), " %d", m_clsCSeq.m_iDigit);
+  strCallId.append(szDigit);
 
-	clsVia.m_strHost = pszIp;
-	clsVia.m_iPort = iPort;
-
-	clsVia.InsertParam( SIP_RPORT, NULL );
-
-	if( pszBranch == NULL || strlen(pszBranch) == 0 )
-	{
-		char	szBranch[SIP_BRANCH_MAX_SIZE];
-
-		SipMakeBranch( szBranch, sizeof(szBranch) );
-		clsVia.InsertParam( SIP_BRANCH, szBranch );
-	}
-	else
-	{
-		clsVia.InsertParam( SIP_BRANCH, pszBranch );
-	}
-
-	m_clsViaList.push_front( clsVia );
-
-	return true;
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief Route Çì´õ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszIp		Route Çì´õ¿¡ ÀúÀåÇÒ IP ÁÖ¼Ò
- * @param iPort		Route Çì´õ¿¡ ÀúÀåÇÒ Æ÷Æ® ¹øÈ£
- * @param eTransport SIP ¸Ş½ÃÁö¸¦ ¹ß½ÅÇÒ transport
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief Top Via í—¤ë”ì— ë°œì‹  IP ì£¼ì†Œì™€ í¬íŠ¸ ë²ˆí˜¸ë¥¼ ì¶”ê°€í•œë‹¤.
+ * @param pszIp SIP ë©”ì‹œì§€ ë°œì‹  IP ì£¼ì†Œ
+ * @param iPort SIP ë©”ì‹œì§€ ë°œì‹  í¬íŠ¸ ë²ˆí˜¸
+ * @param eTransport SIP ë©”ì‹œì§€ë¥¼ ë°œì‹ í•œ transport
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::AddRoute( const char * pszIp, int iPort, ESipTransport eTransport )
-{
-	if( pszIp == NULL || strlen(pszIp) == 0 ) return false;
-	if( iPort <= 0 ) return false;
+bool CSipMessage::AddIpPortToTopVia(const char *pszIp, int iPort,
+                                    ESipTransport eTransport) {
+  SIP_VIA_LIST::iterator itViaList = m_clsViaList.begin();
+  if (itViaList == m_clsViaList.end())
+    return false;
 
-	CSipFrom clsFrom;
+  SIP_PARAMETER_LIST::iterator itList;
+  bool bRport = false, bReceived = false;
 
-	clsFrom.m_clsUri.m_strProtocol = SipGetProtocol( eTransport );
-	clsFrom.m_clsUri.m_strHost = pszIp;
-	clsFrom.m_clsUri.m_iPort = iPort;
+  char szNum[11];
 
-	clsFrom.m_clsUri.InsertParam( "lr", NULL );
-	clsFrom.m_clsUri.InsertTransport( eTransport );
+  snprintf(szNum, sizeof(szNum), "%d", iPort);
 
-	m_clsRouteList.push_front( clsFrom );
+  for (itList = itViaList->m_clsParamList.begin();
+       itList != itViaList->m_clsParamList.end(); ++itList) {
+    if (!strcmp(itList->m_strName.c_str(), SIP_RPORT)) {
+      itList->m_strValue = szNum;
+      bRport = true;
+    } else if (!strcmp(itList->m_strName.c_str(), SIP_RECEIVED)) {
+      itList->m_strValue = pszIp;
+      bReceived = true;
+    }
 
-	return true;
+    if (bRport && bReceived)
+      break;
+  }
+
+  if (bRport == false && itViaList->m_iPort != iPort) {
+    itViaList->InsertParam(SIP_RPORT, szNum);
+  }
+
+  if (bReceived == false && strcmp(itViaList->m_strHost.c_str(), pszIp)) {
+    itViaList->InsertParam(SIP_RECEIVED, pszIp);
+  }
+
+  if (eTransport == E_SIP_TCP &&
+      strcasecmp(itViaList->m_strTransport.c_str(), SIP_TRANSPORT_TCP)) {
+    itViaList->InsertParam(SIP_TRANSPORT, SIP_TRANSPORT_TCP);
+  }
+
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief RecordRoute Çì´õ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszIp		Route Çì´õ¿¡ ÀúÀåÇÒ IP ÁÖ¼Ò
- * @param iPort		Route Çì´õ¿¡ ÀúÀåÇÒ Æ÷Æ® ¹øÈ£
- * @param eTransport SIP ¸Ş½ÃÁö¸¦ ¹ß½ÅÇÒ transport
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief Via í—¤ë”ë¥¼ ì¶”ê°€í•œë‹¤.
+ * @param pszIp			Via í—¤ë”ì— ì €ì¥í•  IP ì£¼ì†Œ
+ * @param iPort			Via í—¤ë”ì— ì €ì¥í•  í¬íŠ¸ ë²ˆí˜¸
+ * @param pszBranch Via branch tag ë¬¸ìì—´
+ * @param eTransport SIP ë©”ì‹œì§€ë¥¼ ë°œì‹ í•  transport
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::AddRecordRoute( const char * pszIp, int iPort, ESipTransport eTransport )
-{
-	if( pszIp == NULL || strlen(pszIp) == 0 ) return false;
-	if( iPort <= 0 ) return false;
+bool CSipMessage::AddVia(const char *pszIp, int iPort, const char *pszBranch,
+                         ESipTransport eTransport) {
+  if (pszIp == NULL || strlen(pszIp) == 0)
+    return false;
+  if (iPort <= 0)
+    return false;
 
-	CSipFrom clsFrom;
+  CSipVia clsVia;
 
-	clsFrom.m_clsUri.m_strProtocol = SipGetProtocol( eTransport );
-	clsFrom.m_clsUri.m_strHost = pszIp;
-	clsFrom.m_clsUri.m_iPort = iPort;
+  clsVia.m_strProtocolName = "SIP";
+  clsVia.m_strProtocolVersion = "2.0";
+  clsVia.m_strTransport = SipGetTransport(eTransport);
 
-	clsFrom.m_clsUri.InsertParam( "lr", NULL );
-	clsFrom.m_clsUri.InsertTransport( eTransport );
+  clsVia.m_strHost = pszIp;
+  clsVia.m_iPort = iPort;
 
-	m_clsRecordRouteList.push_front( clsFrom );
+  clsVia.InsertParam(SIP_RPORT, NULL);
 
-	return true;
+  if (pszBranch == NULL || strlen(pszBranch) == 0) {
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+
+    SipMakeBranch(szBranch, sizeof(szBranch));
+    clsVia.InsertParam(SIP_BRANCH, szBranch);
+  } else {
+    clsVia.InsertParam(SIP_BRANCH, pszBranch);
+  }
+
+  m_clsViaList.push_front(clsVia);
+
+  return true;
 }
-
 
 /**
  * @ingroup SipParser
- * @brief SIP Çì´õ ÀÚ·á±¸Á¶¿¡ ÀÌ¸§°ú °ªÀ» Ãß°¡ÇÑ´Ù.
- * @param pszName		SIP Çì´õ ÀÌ¸§
- * @param pszValue	SIP Çì´õ °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief Route í—¤ë”ë¥¼ ì¶”ê°€í•œë‹¤.
+ * @param pszIp		Route í—¤ë”ì— ì €ì¥í•  IP ì£¼ì†Œ
+ * @param iPort		Route í—¤ë”ì— ì €ì¥í•  í¬íŠ¸ ë²ˆí˜¸
+ * @param eTransport SIP ë©”ì‹œì§€ë¥¼ ë°œì‹ í•  transport
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::AddHeader( const char * pszName, const char * pszValue )
-{
-	if( pszName == NULL || pszValue == NULL ) return false;
+bool CSipMessage::AddRoute(const char *pszIp, int iPort,
+                           ESipTransport eTransport) {
+  if (pszIp == NULL || strlen(pszIp) == 0)
+    return false;
+  if (iPort <= 0)
+    return false;
 
-	CSipHeader clsHeader;
+  CSipFrom clsFrom;
 
-	clsHeader.m_strName = pszName;
-	clsHeader.m_strValue = pszValue;
+  clsFrom.m_clsUri.m_strProtocol = SipGetProtocol(eTransport);
+  clsFrom.m_clsUri.m_strHost = pszIp;
+  clsFrom.m_clsUri.m_iPort = iPort;
 
-	m_clsHeaderList.push_back( clsHeader );
+  clsFrom.m_clsUri.InsertParam("lr", NULL);
+  clsFrom.m_clsUri.InsertTransport(eTransport);
 
-	return true;
+  m_clsRouteList.push_front(clsFrom);
+
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief SIP Çì´õ ÀÚ·á±¸Á¶¿¡ ÀÌ¸§°ú °ªÀ» Ãß°¡ÇÑ´Ù.
- * @param pszName		SIP Çì´õ ÀÌ¸§
- * @param iValue		SIP Çì´õ °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief RecordRoute í—¤ë”ë¥¼ ì¶”ê°€í•œë‹¤.
+ * @param pszIp		Route í—¤ë”ì— ì €ì¥í•  IP ì£¼ì†Œ
+ * @param iPort		Route í—¤ë”ì— ì €ì¥í•  í¬íŠ¸ ë²ˆí˜¸
+ * @param eTransport SIP ë©”ì‹œì§€ë¥¼ ë°œì‹ í•  transport
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::AddHeader( const char * pszName, int iValue )
-{
-	char szValue[22];
+bool CSipMessage::AddRecordRoute(const char *pszIp, int iPort,
+                                 ESipTransport eTransport) {
+  if (pszIp == NULL || strlen(pszIp) == 0)
+    return false;
+  if (iPort <= 0)
+    return false;
 
-	snprintf( szValue, sizeof(szValue), "%d", iValue );
+  CSipFrom clsFrom;
 
-	return AddHeader( pszName, szValue );
+  clsFrom.m_clsUri.m_strProtocol = SipGetProtocol(eTransport);
+  clsFrom.m_clsUri.m_strHost = pszIp;
+  clsFrom.m_clsUri.m_iPort = iPort;
+
+  clsFrom.m_clsUri.InsertParam("lr", NULL);
+  clsFrom.m_clsUri.InsertTransport(eTransport);
+
+  m_clsRecordRouteList.push_front(clsFrom);
+
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief SIP ÀÀ´ä ¸Ş½ÃÁö °´Ã¼¸¦ »ı¼ºÇÑ´Ù.
- * @param iStatus		SIP ÀÀ´ä ÄÚµå
- * @param pszToTag	To Çì´õÀÇ tag
- * @returns ¼º°øÇÏ¸é SIP ÀÀ´ä ¸Ş½ÃÁö °´Ã¼ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é NULL À» ¸®ÅÏÇÑ´Ù.
+ * @brief SIP í—¤ë” ìë£Œêµ¬ì¡°ì— ì´ë¦„ê³¼ ê°’ì„ ì¶”ê°€í•œë‹¤.
+ * @param pszName		SIP í—¤ë” ì´ë¦„
+ * @param pszValue	SIP í—¤ë” ê°’
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-CSipMessage * CSipMessage::CreateResponse( int iStatus, const char * pszToTag )
-{
-	if( IsRequest() == false ) return NULL;
+bool CSipMessage::AddHeader(const char *pszName, const char *pszValue) {
+  if (pszName == NULL || pszValue == NULL)
+    return false;
 
-	CSipMessage * pclsResponse = new CSipMessage();
-	if( pclsResponse == NULL ) return NULL;
+  CSipHeader clsHeader;
 
-	pclsResponse->m_iStatusCode = iStatus;
-	pclsResponse->m_clsTo = m_clsTo;
-	pclsResponse->m_clsFrom = m_clsFrom;
-	pclsResponse->m_clsViaList = m_clsViaList;
-	pclsResponse->m_clsCallId = m_clsCallId;
-	pclsResponse->m_clsCSeq = m_clsCSeq;
-	pclsResponse->m_eTransport = m_eTransport;
+  clsHeader.m_strName = pszName;
+  clsHeader.m_strValue = pszValue;
 
-	if( iStatus != SIP_TRYING )
-	{
-		// 100 Trying Àº SIP Record-Route Çì´õ¸¦ Æ÷ÇÔÇÏÁö ¾Ê¾Æµµ µÈ´Ù.
-		pclsResponse->m_clsRecordRouteList = m_clsRecordRouteList;
-	}
+  m_clsHeaderList.push_back(clsHeader);
 
-	if( pszToTag )
-	{
-		pclsResponse->m_clsTo.InsertParam( SIP_TAG, pszToTag );
-	}
-
-	return pclsResponse;
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief To Çì´õÀÇ tag °¡ Á¸ÀçÇÏÁö ¾Ê´Â °æ¿ì tag ¸¦ »ı¼ºÇÏ¿©¼­ ÀúÀåÇÑ SIP ÀÀ´ä ¸Ş½ÃÁö °´Ã¼¸¦ »ı¼ºÇÑ´Ù.
- * @param iStatus SIP ÀÀ´ä ÄÚµå
- * @returns ¼º°øÇÏ¸é SIP ÀÀ´ä ¸Ş½ÃÁö °´Ã¼ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é NULL À» ¸®ÅÏÇÑ´Ù.
+ * @brief SIP í—¤ë” ìë£Œêµ¬ì¡°ì— ì´ë¦„ê³¼ ê°’ì„ ì¶”ê°€í•œë‹¤.
+ * @param pszName		SIP í—¤ë” ì´ë¦„
+ * @param iValue		SIP í—¤ë” ê°’
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-CSipMessage * CSipMessage::CreateResponseWithToTag( int iStatus )
-{
-	if( IsRequest() == false ) return NULL;
+bool CSipMessage::AddHeader(const char *pszName, int iValue) {
+  char szValue[22];
 
-	CSipMessage * pclsResponse = new CSipMessage();
-	if( pclsResponse == NULL ) return NULL;
+  snprintf(szValue, sizeof(szValue), "%d", iValue);
 
-	pclsResponse->m_iStatusCode = iStatus;
-	pclsResponse->m_clsTo = m_clsTo;
-	pclsResponse->m_clsFrom = m_clsFrom;
-	pclsResponse->m_clsViaList = m_clsViaList;
-	pclsResponse->m_clsCallId = m_clsCallId;
-	pclsResponse->m_clsCSeq = m_clsCSeq;
-	pclsResponse->m_eTransport = m_eTransport;
-
-	if( pclsResponse->m_clsTo.SelectParam( SIP_TAG ) == false )
-	{
-		pclsResponse->m_clsTo.InsertTag();
-	}
-
-	return pclsResponse;
+  return AddHeader(pszName, szValue);
 }
 
 /**
  * @ingroup SipParser
- * @brief Top Via Çì´õÀÇ IP ÁÖ¼Ò¿Í Æ÷Æ® ¹øÈ£¸¦ °¡Á®¿Â´Ù.
- * @param strIp		IP ÁÖ¼Ò¸¦ ÀúÀåÇÒ º¯¼ö
- * @param iPort		Æ÷Æ® ¹øÈ£¸¦ ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP ì‘ë‹µ ë©”ì‹œì§€ ê°ì²´ë¥¼ ìƒì„±í•œë‹¤.
+ * @param iStatus		SIP ì‘ë‹µ ì½”ë“œ
+ * @param pszToTag	To í—¤ë”ì˜ tag
+ * @returns ì„±ê³µí•˜ë©´ SIP ì‘ë‹µ ë©”ì‹œì§€ ê°ì²´ì˜ í¬ì¸í„°ë¥¼ ë¦¬í„´í•˜ê³  ì‹¤íŒ¨í•˜ë©´ NULL ì„
+ * ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::GetTopViaIpPort( std::string & strIp, int & iPort )
-{
-	strIp.clear();
-	iPort = 0;
+CSipMessage *CSipMessage::CreateResponse(int iStatus, const char *pszToTag) {
+  if (IsRequest() == false)
+    return NULL;
 
-	SIP_VIA_LIST::iterator itViaList = m_clsViaList.begin();
-	if( itViaList == m_clsViaList.end() ) return false;
+  CSipMessage *pclsResponse = new CSipMessage();
+  if (pclsResponse == NULL)
+    return NULL;
 
-	std::string strTemp;
+  pclsResponse->m_iStatusCode = iStatus;
+  pclsResponse->m_clsTo = m_clsTo;
+  pclsResponse->m_clsFrom = m_clsFrom;
+  pclsResponse->m_clsViaList = m_clsViaList;
+  pclsResponse->m_clsCallId = m_clsCallId;
+  pclsResponse->m_clsCSeq = m_clsCSeq;
+  pclsResponse->m_eTransport = m_eTransport;
 
-	if( itViaList->SelectParam( SIP_RPORT, strTemp ) )
-	{
-		iPort = atoi( strTemp.c_str() );
-	}
+  if (iStatus != SIP_TRYING) {
+    // 100 Trying ì€ SIP Record-Route í—¤ë”ë¥¼ í¬í•¨í•˜ì§€ ì•Šì•„ë„ ëœë‹¤.
+    pclsResponse->m_clsRecordRouteList = m_clsRecordRouteList;
+  }
 
-	if( itViaList->SelectParam( SIP_RECEIVED, strTemp ) )
-	{
-		strIp = strTemp;
-	}
+  if (pszToTag) {
+    pclsResponse->m_clsTo.InsertParam(SIP_TAG, pszToTag);
+  }
 
-	if( iPort == 0 ) iPort = itViaList->m_iPort;
-	if( strIp.empty() ) strIp = itViaList->m_strHost;
-
-	return true;
+  return pclsResponse;
 }
 
 /**
  * @ingroup SipParser
- * @brief Top Via Çì´õÀÇ IP ÁÖ¼Ò¿Í Æ÷Æ® ¹øÈ£¸¦ ¼öÁ¤ÇÑ´Ù.
- * @param pszIp		IP ÁÖ¼Ò
- * @param iPort		Æ÷Æ® ¹øÈ£
+ * @brief To í—¤ë”ì˜ tag ê°€ ì¡´ì¬í•˜ì§€ ì•ŠëŠ” ê²½ìš° tag ë¥¼ ìƒì„±í•˜ì—¬ì„œ ì €ì¥í•œ SIP ì‘ë‹µ
+ * ë©”ì‹œì§€ ê°ì²´ë¥¼ ìƒì„±í•œë‹¤.
+ * @param iStatus SIP ì‘ë‹µ ì½”ë“œ
+ * @returns ì„±ê³µí•˜ë©´ SIP ì‘ë‹µ ë©”ì‹œì§€ ê°ì²´ì˜ í¬ì¸í„°ë¥¼ ë¦¬í„´í•˜ê³  ì‹¤íŒ¨í•˜ë©´ NULL ì„
+ * ë¦¬í„´í•œë‹¤.
+ */
+CSipMessage *CSipMessage::CreateResponseWithToTag(int iStatus) {
+  if (IsRequest() == false)
+    return NULL;
+
+  CSipMessage *pclsResponse = new CSipMessage();
+  if (pclsResponse == NULL)
+    return NULL;
+
+  pclsResponse->m_iStatusCode = iStatus;
+  pclsResponse->m_clsTo = m_clsTo;
+  pclsResponse->m_clsFrom = m_clsFrom;
+  pclsResponse->m_clsViaList = m_clsViaList;
+  pclsResponse->m_clsCallId = m_clsCallId;
+  pclsResponse->m_clsCSeq = m_clsCSeq;
+  pclsResponse->m_eTransport = m_eTransport;
+
+  if (pclsResponse->m_clsTo.SelectParam(SIP_TAG) == false) {
+    pclsResponse->m_clsTo.InsertTag();
+  }
+
+  return pclsResponse;
+}
+
+/**
+ * @ingroup SipParser
+ * @brief Top Via í—¤ë”ì˜ IP ì£¼ì†Œì™€ í¬íŠ¸ ë²ˆí˜¸ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
+ * @param strIp		IP ì£¼ì†Œë¥¼ ì €ì¥í•  ë³€ìˆ˜
+ * @param iPort		í¬íŠ¸ ë²ˆí˜¸ë¥¼ ì €ì¥í•  ë³€ìˆ˜
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
+ */
+bool CSipMessage::GetTopViaIpPort(std::string &strIp, int &iPort) {
+  strIp.clear();
+  iPort = 0;
+
+  SIP_VIA_LIST::iterator itViaList = m_clsViaList.begin();
+  if (itViaList == m_clsViaList.end())
+    return false;
+
+  std::string strTemp;
+
+  if (itViaList->SelectParam(SIP_RPORT, strTemp)) {
+    iPort = atoi(strTemp.c_str());
+  }
+
+  if (itViaList->SelectParam(SIP_RECEIVED, strTemp)) {
+    strIp = strTemp;
+  }
+
+  if (iPort == 0)
+    iPort = itViaList->m_iPort;
+  if (strIp.empty())
+    strIp = itViaList->m_strHost;
+
+  return true;
+}
+
+/**
+ * @ingroup SipParser
+ * @brief Top Via í—¤ë”ì˜ IP ì£¼ì†Œì™€ í¬íŠ¸ ë²ˆí˜¸ë¥¼ ìˆ˜ì •í•œë‹¤.
+ * @param pszIp		IP ì£¼ì†Œ
+ * @param iPort		í¬íŠ¸ ë²ˆí˜¸
  * @param eTransport	transport
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- *					ÀÌ¹Ì ÀúÀåµÈ °ª°ú µ¿ÀÏÇÑ °ªÀÌ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
+ *					ì´ë¯¸ ì €ì¥ëœ ê°’ê³¼ ë™ì¼í•œ ê°’ì´ë©´ false ë¥¼
+ * ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::SetTopViaIpPort( const char * pszIp, int iPort, ESipTransport eTransport )
-{
-	SIP_VIA_LIST::iterator itViaList = m_clsViaList.begin();
-	if( itViaList == m_clsViaList.end() ) return false;
+bool CSipMessage::SetTopViaIpPort(const char *pszIp, int iPort,
+                                  ESipTransport eTransport) {
+  SIP_VIA_LIST::iterator itViaList = m_clsViaList.begin();
+  if (itViaList == m_clsViaList.end())
+    return false;
 
-	const char * pszTransport = SipGetTransport( eTransport );
-		
-	if( !strcmp( itViaList->m_strHost.c_str(), pszIp ) && itViaList->m_iPort == iPort && !strcmp( itViaList->m_strTransport.c_str(), pszTransport ) ) return false;
+  const char *pszTransport = SipGetTransport(eTransport);
 
-	itViaList->m_strHost = pszIp;
-	itViaList->m_iPort = iPort;
-	itViaList->m_strTransport = pszTransport;
+  if (!strcmp(itViaList->m_strHost.c_str(), pszIp) &&
+      itViaList->m_iPort == iPort &&
+      !strcmp(itViaList->m_strTransport.c_str(), pszTransport))
+    return false;
 
-	return true;
+  itViaList->m_strHost = pszIp;
+  itViaList->m_iPort = iPort;
+  itViaList->m_strTransport = pszTransport;
+
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief Top Via Çì´õÀÇ transport ¹®ÀÚ¿­À» ¼öÁ¤ÇÑ´Ù.
+ * @brief Top Via í—¤ë”ì˜ transport ë¬¸ìì—´ì„ ìˆ˜ì •í•œë‹¤.
  * @param eTransport	transport
- * @param iPort				Æ÷Æ® ¹øÈ£
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- *					ÀÌ¹Ì ÀúÀåµÈ °ª°ú µ¿ÀÏÇÑ °ªÀÌ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param iPort				í¬íŠ¸ ë²ˆí˜¸
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
+ *					ì´ë¯¸ ì €ì¥ëœ ê°’ê³¼ ë™ì¼í•œ ê°’ì´ë©´ false ë¥¼
+ * ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::SetTopViaTransPort( ESipTransport eTransport, int iPort )
-{
-	SIP_VIA_LIST::iterator itViaList = m_clsViaList.begin();
-	if( itViaList == m_clsViaList.end() ) return false;
+bool CSipMessage::SetTopViaTransPort(ESipTransport eTransport, int iPort) {
+  SIP_VIA_LIST::iterator itViaList = m_clsViaList.begin();
+  if (itViaList == m_clsViaList.end())
+    return false;
 
-	const char * pszTransport = SipGetTransport( eTransport );
+  const char *pszTransport = SipGetTransport(eTransport);
 
-	if( !strcmp( itViaList->m_strTransport.c_str(), pszTransport ) && itViaList->m_iPort == iPort ) return false;
+  if (!strcmp(itViaList->m_strTransport.c_str(), pszTransport) &&
+      itViaList->m_iPort == iPort)
+    return false;
 
-	itViaList->m_strTransport = pszTransport;
-	itViaList->m_iPort = iPort;
+  itViaList->m_strTransport = pszTransport;
+  itViaList->m_iPort = iPort;
 
-	return true;
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief Top Contact Çì´õÀÇ IP ÁÖ¼Ò¿Í Æ÷Æ® ¹øÈ£¸¦ ¼öÁ¤ÇÑ´Ù.
- * @param pszIp		IP ÁÖ¼Ò
- * @param iPort		Æ÷Æ® ¹øÈ£
+ * @brief Top Contact í—¤ë”ì˜ IP ì£¼ì†Œì™€ í¬íŠ¸ ë²ˆí˜¸ë¥¼ ìˆ˜ì •í•œë‹¤.
+ * @param pszIp		IP ì£¼ì†Œ
+ * @param iPort		í¬íŠ¸ ë²ˆí˜¸
  * @param eTransport	transport
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- *					ÀÌ¹Ì ÀúÀåµÈ °ª°ú µ¿ÀÏÇÑ °ªÀÌ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @returns ì„±ê³µí•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
+ *					ì´ë¯¸ ì €ì¥ëœ ê°’ê³¼ ë™ì¼í•œ ê°’ì´ë©´ false ë¥¼
+ * ë¦¬í„´í•œë‹¤.
  */
-bool CSipMessage::SetTopContactIpPort( const char * pszIp, int iPort, ESipTransport eTransport )
-{
-	SIP_FROM_LIST::iterator	itList = m_clsContactList.begin();
-	if( itList == m_clsContactList.end() ) return false;
+bool CSipMessage::SetTopContactIpPort(const char *pszIp, int iPort,
+                                      ESipTransport eTransport) {
+  SIP_FROM_LIST::iterator itList = m_clsContactList.begin();
+  if (itList == m_clsContactList.end())
+    return false;
 
-	if( !strcmp( itList->m_clsUri.m_strHost.c_str(), pszIp) && itList->m_clsUri.m_iPort == iPort ) return false;
+  if (!strcmp(itList->m_clsUri.m_strHost.c_str(), pszIp) &&
+      itList->m_clsUri.m_iPort == iPort)
+    return false;
 
-	itList->m_clsUri.m_strHost = pszIp;
-	itList->m_clsUri.m_iPort = iPort;
+  itList->m_clsUri.m_strHost = pszIp;
+  itList->m_clsUri.m_iPort = iPort;
 
-	return true;
+  return true;
 }
 
 /**
  * @ingroup SipParser
- * @brief Expires Çì´õ°¡ Á¸ÀçÇÏ¸é Expires Çì´õ °ªÀ» ¸®ÅÏÇÏ°í Contact Çì´õ¿¡ expires °¡ Á¸ÀçÇÏ¸é Contact Çì´õÀÇ expires ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns Expires Çì´õ°¡ Á¸ÀçÇÏ¸é Expires Çì´õ °ªÀ» ¸®ÅÏÇÏ°í Contact Çì´õ¿¡ expires °¡ Á¸ÀçÇÏ¸é Contact Çì´õÀÇ expires ¸¦ ¸®ÅÏÇÑ´Ù.
- *					µÑ ´Ù ¾øÀ¸¸é 0 À» ¸®ÅÏÇÑ´Ù.
+ * @brief Expires í—¤ë”ê°€ ì¡´ì¬í•˜ë©´ Expires í—¤ë” ê°’ì„ ë¦¬í„´í•˜ê³  Contact í—¤ë”ì—
+ * expires ê°€ ì¡´ì¬í•˜ë©´ Contact í—¤ë”ì˜ expires ë¥¼ ë¦¬í„´í•œë‹¤.
+ * @returns Expires í—¤ë”ê°€ ì¡´ì¬í•˜ë©´ Expires í—¤ë” ê°’ì„ ë¦¬í„´í•˜ê³  Contact í—¤ë”ì—
+ * expires ê°€ ì¡´ì¬í•˜ë©´ Contact í—¤ë”ì˜ expires ë¥¼ ë¦¬í„´í•œë‹¤. ë‘˜ ë‹¤ ì—†ìœ¼ë©´ 0 ì„
+ * ë¦¬í„´í•œë‹¤.
  */
-int CSipMessage::GetExpires()
-{
-	if( m_iExpires != -1 ) return m_iExpires;
+int CSipMessage::GetExpires() {
+  if (m_iExpires != -1)
+    return m_iExpires;
 
-	SIP_FROM_LIST::iterator itContact = m_clsContactList.begin();
-	if( itContact == m_clsContactList.end() ) return 0;
+  SIP_FROM_LIST::iterator itContact = m_clsContactList.begin();
+  if (itContact == m_clsContactList.end())
+    return 0;
 
-	std::string	strExpires;
+  std::string strExpires;
 
-	if( itContact->SelectParam( "EXPIRES", strExpires ) )
-	{
-		return atoi( strExpires.c_str() );
-	}
+  if (itContact->SelectParam("EXPIRES", strExpires)) {
+    return atoi(strExpires.c_str());
+  }
 
-	return 0;
+  return 0;
 }
 
 /**
  * @ingroup SipParser
- * @brief Çì´õ ¸®½ºÆ®¸¦ °Ë»öÇÏ¿©¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú ÀÏÄ¡ÇÏ´Â Çì´õ¸¦ ¸®ÅÏÇÑ´Ù.
- * @param pszName Çì´õ ÀÌ¸§
- * @returns Çì´õ ¸®½ºÆ®¿¡ Á¸ÀçÇÏ¸é Çì´õ °´Ã¼¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
+ * @brief í—¤ë” ë¦¬ìŠ¤íŠ¸ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ì¼ì¹˜í•˜ëŠ” í—¤ë”ë¥¼ ë¦¬í„´í•œë‹¤.
+ * @param pszName í—¤ë” ì´ë¦„
+ * @returns í—¤ë” ë¦¬ìŠ¤íŠ¸ì— ì¡´ì¬í•˜ë©´ í—¤ë” ê°ì²´ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ NULL ì„
+ * ë¦¬í„´í•œë‹¤.
  */
-CSipHeader * CSipMessage::GetHeader( const char * pszName )
-{
-	SIP_HEADER_LIST::iterator	itList;
+CSipHeader *CSipMessage::GetHeader(const char *pszName) {
+  SIP_HEADER_LIST::iterator itList;
 
-	for( itList = m_clsHeaderList.begin(); itList != m_clsHeaderList.end(); ++itList )
-	{
-		if( !strcasecmp( pszName, itList->m_strName.c_str() ) )
-		{
-			return &(*itList);
-		}
-	}
+  for (itList = m_clsHeaderList.begin(); itList != m_clsHeaderList.end();
+       ++itList) {
+    if (!strcasecmp(pszName, itList->m_strName.c_str())) {
+      return &(*itList);
+    }
+  }
 
-	return NULL;
+  return NULL;
 }
 
 /**
  * @ingroup SipParser
- * @brief SIP status line À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP status line ì„ íŒŒì‹±í•œë‹¤.
+ * @param pszText		SIP í—¤ë”ì˜ ê°’ì„ ì €ì¥í•œ ë¬¸ìì—´
+ * @param iTextLen	pszText ë¬¸ìì—´ì˜ ê¸¸ì´
+ * @returns ì„±ê³µí•˜ë©´ íŒŒì‹±í•œ ê¸¸ì´ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ -1 ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-int CSipMessage::ParseStatusLine( const char * pszText, int iTextLen )
-{
-	int		iPos, iStartPos = -1;
-	char	cType = 0;
+int CSipMessage::ParseStatusLine(const char *pszText, int iTextLen) {
+  int iPos, iStartPos = -1;
+  char cType = 0;
 
-	for( iPos = 0; iPos < iTextLen; ++iPos )
-	{
-		if( cType != 2 )
-		{
-			if( pszText[iPos] == ' ' )
-			{
-				switch( cType )
-				{
-				case 0:
-					m_strSipVersion.append( pszText, iPos );
-					break;
-				case 1:
-					{
-						std::string strStatusCode;
+  for (iPos = 0; iPos < iTextLen; ++iPos) {
+    if (cType != 2) {
+      if (pszText[iPos] == ' ') {
+        switch (cType) {
+        case 0:
+          m_strSipVersion.append(pszText, iPos);
+          break;
+        case 1: {
+          std::string strStatusCode;
 
-						strStatusCode.append( pszText + iStartPos, iPos - iStartPos );
-						m_iStatusCode = atoi( strStatusCode.c_str() );
-						break;
-					}
-				}
+          strStatusCode.append(pszText + iStartPos, iPos - iStartPos);
+          m_iStatusCode = atoi(strStatusCode.c_str());
+          break;
+        }
+        }
 
-				iStartPos = iPos + 1;
-				++cType;
-			}
-		}
-		else
-		{
-			if( pszText[iPos] == '\r' )
-			{
-				if( iPos + 1 >= iTextLen || pszText[iPos+1] != '\n' ) return -1;
+        iStartPos = iPos + 1;
+        ++cType;
+      }
+    } else {
+      if (pszText[iPos] == '\r') {
+        if (iPos + 1 >= iTextLen || pszText[iPos + 1] != '\n')
+          return -1;
 
-				m_strReasonPhrase.append( pszText + iStartPos, iPos - iStartPos );
-				return iPos + 2;
-			}
-		}
-	}
+        m_strReasonPhrase.append(pszText + iStartPos, iPos - iStartPos);
+        return iPos + 2;
+      }
+    }
+  }
 
-	return -1;
+  return -1;
 }
 
 /**
  * @ingroup SipParser
- * @brief SIP request line À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP request line ì„ íŒŒì‹±í•œë‹¤.
+ * @param pszText		SIP í—¤ë”ì˜ ê°’ì„ ì €ì¥í•œ ë¬¸ìì—´
+ * @param iTextLen	pszText ë¬¸ìì—´ì˜ ê¸¸ì´
+ * @returns ì„±ê³µí•˜ë©´ íŒŒì‹±í•œ ê¸¸ì´ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ -1 ë¥¼ ë¦¬í„´í•œë‹¤.
  */
-int CSipMessage::ParseRequestLine( const char * pszText, int iTextLen )
-{
-	int		iPos, iStartPos = -1;
-	char	cType = 0;
+int CSipMessage::ParseRequestLine(const char *pszText, int iTextLen) {
+  int iPos, iStartPos = -1;
+  char cType = 0;
 
-	for( iPos = 0; iPos < iTextLen; ++iPos )
-	{
-		if( cType != 2 )
-		{
-			if( pszText[iPos] == ' ' )
-			{
-				switch( cType )
-				{
-				case 0:
-					m_strSipMethod.append( pszText, iPos );
-					break;
-				case 1:
-					{
-						if( m_clsReqUri.Parse( pszText + iStartPos, iPos - iStartPos ) == -1 ) return -1;
-						break;
-					}
-				}
+  for (iPos = 0; iPos < iTextLen; ++iPos) {
+    if (cType != 2) {
+      if (pszText[iPos] == ' ') {
+        switch (cType) {
+        case 0:
+          m_strSipMethod.append(pszText, iPos);
+          break;
+        case 1: {
+          if (m_clsReqUri.Parse(pszText + iStartPos, iPos - iStartPos) == -1)
+            return -1;
+          break;
+        }
+        }
 
-				iStartPos = iPos + 1;
-				++cType;
-			}
-		}
-		else
-		{
-			if( pszText[iPos] == '\r' )
-			{
-				if( iPos + 1 >= iTextLen || pszText[iPos+1] != '\n' ) return -1;
+        iStartPos = iPos + 1;
+        ++cType;
+      }
+    } else {
+      if (pszText[iPos] == '\r') {
+        if (iPos + 1 >= iTextLen || pszText[iPos + 1] != '\n')
+          return -1;
 
-				m_strSipVersion.append( pszText + iStartPos, iPos - iStartPos );
-				return iPos + 2;
-			}
-		}
-	}
+        m_strSipVersion.append(pszText + iStartPos, iPos - iStartPos);
+        return iPos + 2;
+      }
+    }
+  }
 
-	return -1;
+  return -1;
 }

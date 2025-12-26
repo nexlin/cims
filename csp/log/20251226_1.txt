@@ -1,0 +1,48 @@
+[18:48:11.402461] [SYSTEM] [7DA745FEFB80] CspServer is started ( version-0.25 Dec 26 2025 15:50:31 )
+[18:48:11.405479] [DEBUG] [7DA745FEFB80] CspServer[/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist/bin]
+[18:48:11.411496] [DEBUG] [7DA745FEFB80] SipServerMap Load
+[18:48:11.412138] [ERROR] [7DA745FEFB80] opendir(../config/SipServerXml) error(2)
+[18:48:11.443958] [ERROR] [7DA745FEFB80] cert file is not found
+[18:48:11.444215] [ERROR] [7DA745FEFB80] SSLServerStart() error
+[18:49:03.463087] [SYSTEM] [72E924124B80] CspServer is started ( version-0.25 Dec 26 2025 15:50:31 )
+[18:49:03.466958] [DEBUG] [72E924124B80] CspServer[/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist/bin]
+[18:49:03.481253] [DEBUG] [72E924124B80] SipServerMap Load
+[18:49:03.481808] [ERROR] [72E924124B80] opendir(../config/SipServerXml) error(2)
+[18:49:03.494860] [ERROR] [72E924124B80] cert file is not found
+[18:49:03.495170] [ERROR] [72E924124B80] SSLServerStart() error
+[18:49:35.924127] [SYSTEM] [78F3F172BB80] CspServer is started ( version-0.25 Dec 26 2025 15:50:31 )
+[18:49:35.927243] [DEBUG] [78F3F172BB80] CspServer[/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist/bin]
+[18:49:35.931205] [DEBUG] [78F3F172BB80] SipServerMap Load
+[18:49:35.931814] [ERROR] [78F3F172BB80] opendir(../config/SipServerXml) error(2)
+[18:49:35.962996] [ERROR] [78F3F172BB80] cert file is not found
+[18:49:35.963220] [ERROR] [78F3F172BB80] SSLServerStart() error
+[20:19:30.065112] [SYSTEM] [743D443D6B80] CspServer is started ( version-0.25 Dec 26 2025 15:50:31 )
+[20:19:30.081913] [DEBUG] [743D443D6B80] CspServer[/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist/bin]
+[20:19:30.084766] [DEBUG] [743D443D6B80] SipServerMap Load
+[20:19:30.085204] [ERROR] [743D443D6B80] opendir(../config/SipServerXml) error(2)
+[20:19:30.100598] [ERROR] [743D443D6B80] cert file is not found
+[20:19:30.100851] [ERROR] [743D443D6B80] SSLServerStart() error
+[20:24:08.263710] [SYSTEM] [7341795BFB80] CspServer is started ( version-0.25 Dec 26 2025 15:50:31 )
+[20:24:08.266719] [DEBUG] [7341795BFB80] CspServer[/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist/bin]
+[20:24:08.268780] [DEBUG] [7341795BFB80] SipServerMap Load
+[20:24:08.269136] [ERROR] [7341795BFB80] opendir(../config/SipServerXml) error(2)
+[20:24:08.284338] [ERROR] [7341795BFB80] cert file is not found
+[20:24:08.284556] [ERROR] [7341795BFB80] SSLServerStart() error
+[20:24:27.320450] [SYSTEM] [71C247DD9B80] CspServer is started ( version-0.25 Dec 26 2025 15:50:31 )
+[20:24:27.323493] [DEBUG] [71C247DD9B80] CspServer[/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist/bin]
+[20:24:27.325691] [DEBUG] [71C247DD9B80] SipServerMap Load
+[20:24:27.326093] [ERROR] [71C247DD9B80] opendir(../config/SipServerXml) error(2)
+[20:24:27.338712] [ERROR] [71C247DD9B80] cert file is not found
+[20:24:27.338898] [ERROR] [71C247DD9B80] SSLServerStart() error
+[20:31:22.883904] [SYSTEM] [74BF7FDCDB80] CspServer is started ( version-0.25 Dec 26 2025 20:30:23 )
+[20:31:22.886749] [DEBUG] [74BF7FDCDB80] CspServer[/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist/bin]
+[20:31:22.888528] [DEBUG] [74BF7FDCDB80] SipServerMap Load
+[20:31:22.888884] [ERROR] [74BF7FDCDB80] opendir(../config/SipServerXml) error(2)
+[20:31:22.905535] [ERROR] [74BF7FDCDB80] cert file is not found
+[20:31:22.905738] [ERROR] [74BF7FDCDB80] SSLServerStart() error
+[20:31:52.387988] [SYSTEM] [73638F550B80] CspServer is started ( version-0.25 Dec 26 2025 20:30:23 )
+[20:31:52.391372] [DEBUG] [73638F550B80] CspServer[/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist/bin]
+[20:31:52.393566] [DEBUG] [73638F550B80] SipServerMap Load
+[20:31:52.394035] [ERROR] [73638F550B80] opendir(../config/SipServerXml) error(2)
+[20:31:52.407098] [ERROR] [73638F550B80] cert file is not found
+[20:31:52.407332] [ERROR] [73638F550B80] SSLServerStart() error

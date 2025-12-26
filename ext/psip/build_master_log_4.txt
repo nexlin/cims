@@ -1,0 +1,50 @@
+[ 23%] Built target opensrtp
+[ 26%] Built target SipPlatform
+[ 28%] Built target XmlParser
+[ 31%] Built target HttpParser
+[ 35%] Built target StunParser
+[ 40%] Built target SdpParser
+[ 59%] Built target SipParser
+[ 60%] Built target TcpStack
+[ 63%] Built target HttpStack
+[ 79%] Built target SipStack
+[ 84%] Built target ServerPlatform
+[ 84%] Building CXX object CMakeFiles/TestWebRtcVideo.dir/TestWebRtcVideo/main_linux.cpp.o
+[ 85%] Building CXX object CMakeFiles/TestWebRtcVideo.dir/TestWebRtcVideo/H264Decoder.cpp.o
+[ 85%] Building CXX object CMakeFiles/TestWebRtcVideo.dir/TestWebRtcVideo/HttpCallBack.cpp.o
+In file included from /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/TestWebRtcVideo/H264Decoder.cpp:20:
+/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/TestWebRtcVideo/H264Decoder.h:23:10: fatal error: codec_api.h: No such file or directory
+   23 | #include "codec_api.h"
+      |          ^~~~~~~~~~~~~
+In file included from /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/TestWebRtcVideo/main_linux.cpp:1:
+/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/TestWebRtcVideo/H264Decoder.h:23:10: fatal error: codec_api.h: No such file or directory
+   23 | #include "codec_api.h"
+      |          ^~~~~~~~~~~~~
+compilation terminated.
+compilation terminated.
+gmake[2]: *** [CMakeFiles/TestWebRtcVideo.dir/build.make:90: CMakeFiles/TestWebRtcVideo.dir/TestWebRtcVideo/H264Decoder.cpp.o] Error 1
+gmake[2]: *** Waiting for unfinished jobs....
+gmake[2]: *** [CMakeFiles/TestWebRtcVideo.dir/build.make:76: CMakeFiles/TestWebRtcVideo.dir/TestWebRtcVideo/main_linux.cpp.o] Error 1
+[ 86%] Linking CXX executable SimpleSipServer
+[ 87%] Linking CXX executable SipSpeedLinux
+[ 88%] Linking CXX executable EchoSipServer
+/usr/bin/ld: cannot find -lsipuseragent: No such file or directory
+/usr/bin/ld: cannot find -lsipuseragent: No such file or directory
+[ 88%] Linking CXX executable SipLoadBalancer
+collect2: error: ld returned 1 exit status
+gmake[2]: *** [CMakeFiles/SipSpeedLinux.dir/build.make:145: SipSpeedLinux] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:532: CMakeFiles/SipSpeedLinux.dir/all] Error 2
+gmake[1]: *** Waiting for unfinished jobs....
+/usr/bin/ld: cannot find -lsipuseragent: No such file or directory
+/usr/bin/ld: cannot find -lsipuseragent: No such file or directory
+collect2: error: ld returned 1 exit status
+gmake[2]: *** [CMakeFiles/SimpleSipServer.dir/build.make:145: SimpleSipServer] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:460: CMakeFiles/SimpleSipServer.dir/all] Error 2
+collect2: error: ld returned 1 exit status
+gmake[2]: *** [CMakeFiles/EchoSipServer.dir/build.make:161: EchoSipServer] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:424: CMakeFiles/EchoSipServer.dir/all] Error 2
+collect2: error: ld returned 1 exit status
+gmake[2]: *** [CMakeFiles/SipLoadBalancer.dir/build.make:193: SipLoadBalancer] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:496: CMakeFiles/SipLoadBalancer.dir/all] Error 2
+gmake[1]: *** [CMakeFiles/Makefile2:567: CMakeFiles/TestWebRtcVideo.dir/all] Error 2
+gmake: *** [Makefile:91: all] Error 2

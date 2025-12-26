@@ -1,0 +1,4 @@
+-- Configured ext/psip Linux Build
+-- Configuring done (1.0s)
+-- Generating done (10.5s)
+-- Build files have been written to: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master

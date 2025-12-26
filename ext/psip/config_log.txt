@@ -1,0 +1,9 @@
+-- Configured ext/psip Linux Build
+-- Configuring done (0.5s)
+CMake Error at CMakeLists.txt:113 (add_executable):
+  No SOURCES given to target: ServerMonitor
+Call Stack (most recent call first):
+  CMakeLists.txt:140 (create_psip_app)
+
+
+CMake Generate step failed.  Build files cannot be regenerated correctly.
