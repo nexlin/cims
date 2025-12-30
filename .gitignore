@@ -30,3 +30,19 @@
 *.exe
 *.out
 *.app
+
+# Build Directories and Artifacts
+build/
+dist/
+psip_build/
+CMakeFiles/
+.cache/
+.vscode/
+
+# Logs
+*.log
+*_log.txt
+strace_output.txt
+
+# Keys
+*.pem

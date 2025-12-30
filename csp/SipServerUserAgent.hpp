@@ -155,6 +155,8 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
     }
 
     if ( SelectUser( pszTo, clsXmlUser ) == false ) {
+        printf( "[DEBUG] ## 1 EventIncomingCall: CallId=%s From=%s To=%s\n", pszCallId, pszFrom, pszTo );
+
         CXmlSipServer clsXmlSipServer;
 
         // 로그인 대상 사용자가 아니면 연동할 IP-PBX 가 존재하는지 검사한다.
@@ -184,14 +186,17 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
             return StopCall( pszCallId, SIP_NOT_FOUND );
         }
     }
+    printf( "[DEBUG] ## 2 EventIncomingCall: CallId=%s From=%s To=%s\n", pszCallId, pszFrom, pszTo );
 
     if ( clsXmlUser.IsDnd() ) {
+        printf( "[DEBUG] ## 3 EventIncomingCall: CallId=%s From=%s To=%s\n", pszCallId, pszFrom, pszTo );
         // 사용자가 DND 로 설정되어 있으면 통화 요청을 거절한다.
         CLog::Print( LOG_DEBUG, "EventIncomingCall to(%s) is DND", pszTo );
         return StopCall( pszCallId, SIP_DECLINE );
     }
 
     if ( clsXmlUser.IsCallForward() ) {
+        printf( "[DEBUG] ## 4 EventIncomingCall: CallId=%s From=%s To=%s\n", pszCallId, pszFrom, pszTo );
         CLog::Print( LOG_DEBUG, "EventIncomingCall to(%s) is CallForward(%s)", pszTo,
                      clsXmlUser.m_strCallForward.c_str() );
 
@@ -220,6 +225,7 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
     }
 
     if ( bRoutePrefix == false ) {
+        printf( "[DEBUG] ## 5 EventIncomingCall: CallId=%s From=%s To=%s\n", pszCallId, pszFrom, pszTo );
         if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) {
             CLog::Print( LOG_DEBUG, "EventIncomingCall(%s) to(%s) is not found", pszCallId, pszTo );
             return StopCall( pszCallId, SIP_NOT_FOUND );
