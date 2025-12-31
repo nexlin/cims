@@ -8,10 +8,10 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/EchoSipServer/CallMap.cpp" "CMakeFiles/EchoSipServer.dir/EchoSipServer/CallMap.cpp.o" "gcc" "CMakeFiles/EchoSipServer.dir/EchoSipServer/CallMap.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/EchoSipServer/EchoSipServer.cpp" "CMakeFiles/EchoSipServer.dir/EchoSipServer/EchoSipServer.cpp.o" "gcc" "CMakeFiles/EchoSipServer.dir/EchoSipServer/EchoSipServer.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/EchoSipServer/EchoSipServerSetup.cpp" "CMakeFiles/EchoSipServer.dir/EchoSipServer/EchoSipServerSetup.cpp.o" "gcc" "CMakeFiles/EchoSipServer.dir/EchoSipServer/EchoSipServerSetup.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/EchoSipServer/SipServer.cpp" "CMakeFiles/EchoSipServer.dir/EchoSipServer/SipServer.cpp.o" "gcc" "CMakeFiles/EchoSipServer.dir/EchoSipServer/SipServer.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/EchoSipServer/CallMap.cpp" "CMakeFiles/EchoSipServer.dir/EchoSipServer/CallMap.cpp.o" "gcc" "CMakeFiles/EchoSipServer.dir/EchoSipServer/CallMap.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/EchoSipServer/EchoSipServer.cpp" "CMakeFiles/EchoSipServer.dir/EchoSipServer/EchoSipServer.cpp.o" "gcc" "CMakeFiles/EchoSipServer.dir/EchoSipServer/EchoSipServer.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/EchoSipServer/EchoSipServerSetup.cpp" "CMakeFiles/EchoSipServer.dir/EchoSipServer/EchoSipServerSetup.cpp.o" "gcc" "CMakeFiles/EchoSipServer.dir/EchoSipServer/EchoSipServerSetup.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/EchoSipServer/SipServer.cpp" "CMakeFiles/EchoSipServer.dir/EchoSipServer/SipServer.cpp.o" "gcc" "CMakeFiles/EchoSipServer.dir/EchoSipServer/SipServer.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

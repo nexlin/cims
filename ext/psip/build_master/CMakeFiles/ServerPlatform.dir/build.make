@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+CMAKE_SOURCE_DIR = /home/nex/work/cims/ext/psip
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master
+CMAKE_BINARY_DIR = /home/nex/work/cims/ext/psip/build_master
 
 # Include any dependencies generated for this target.
 include CMakeFiles/ServerPlatform.dir/depend.make
@@ -70,88 +70,88 @@ include CMakeFiles/ServerPlatform.dir/progress.make
 include CMakeFiles/ServerPlatform.dir/flags.make
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o: CMakeFiles/ServerPlatform.dir/flags.make
-CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/InstallService.cpp
+CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o: /home/nex/work/cims/ext/psip/ServerPlatform/InstallService.cpp
 CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o: CMakeFiles/ServerPlatform.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/InstallService.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.o -c /home/nex/work/cims/ext/psip/ServerPlatform/InstallService.cpp
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/InstallService.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/ServerPlatform/InstallService.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.i
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/InstallService.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/ServerPlatform/InstallService.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/InstallService.cpp.s
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o: CMakeFiles/ServerPlatform.dir/flags.make
-CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/MonitorThread.cpp
+CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o: /home/nex/work/cims/ext/psip/ServerPlatform/MonitorThread.cpp
 CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o: CMakeFiles/ServerPlatform.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/MonitorThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.o -c /home/nex/work/cims/ext/psip/ServerPlatform/MonitorThread.cpp
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/MonitorThread.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/ServerPlatform/MonitorThread.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.i
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/MonitorThread.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/ServerPlatform/MonitorThread.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/MonitorThread.cpp.s
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o: CMakeFiles/ServerPlatform.dir/flags.make
-CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerMain.cpp
+CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o: /home/nex/work/cims/ext/psip/ServerPlatform/ServerMain.cpp
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o: CMakeFiles/ServerPlatform.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerMain.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.o -c /home/nex/work/cims/ext/psip/ServerPlatform/ServerMain.cpp
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerMain.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/ServerPlatform/ServerMain.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.i
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerMain.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/ServerPlatform/ServerMain.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerMain.cpp.s
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o: CMakeFiles/ServerPlatform.dir/flags.make
-CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerService.cpp
+CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o: /home/nex/work/cims/ext/psip/ServerPlatform/ServerService.cpp
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o: CMakeFiles/ServerPlatform.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerService.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.o -c /home/nex/work/cims/ext/psip/ServerPlatform/ServerService.cpp
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerService.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/ServerPlatform/ServerService.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.i
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerService.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/ServerPlatform/ServerService.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerService.cpp.s
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o: CMakeFiles/ServerPlatform.dir/flags.make
-CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerSignal.cpp
+CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o: /home/nex/work/cims/ext/psip/ServerPlatform/ServerSignal.cpp
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o: CMakeFiles/ServerPlatform.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerSignal.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.o -c /home/nex/work/cims/ext/psip/ServerPlatform/ServerSignal.cpp
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerSignal.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/ServerPlatform/ServerSignal.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.i
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerSignal.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/ServerPlatform/ServerSignal.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.cpp.s
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o: CMakeFiles/ServerPlatform.dir/flags.make
-CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerThread.cpp
+CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o: /home/nex/work/cims/ext/psip/ServerPlatform/ServerThread.cpp
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o: CMakeFiles/ServerPlatform.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o -MF CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o.d -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o -c /home/nex/work/cims/ext/psip/ServerPlatform/ServerThread.cpp
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerThread.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/ServerPlatform/ServerThread.cpp > CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.i
 
 CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/ServerPlatform/ServerThread.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/ServerPlatform/ServerThread.cpp -o CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.s
 
 # Object files for target ServerPlatform
 ServerPlatform_OBJECTS = \
@@ -173,7 +173,7 @@ libServerPlatform.a: CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerSignal.c
 libServerPlatform.a: CMakeFiles/ServerPlatform.dir/ServerPlatform/ServerThread.cpp.o
 libServerPlatform.a: CMakeFiles/ServerPlatform.dir/build.make
 libServerPlatform.a: CMakeFiles/ServerPlatform.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX static library libServerPlatform.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX static library libServerPlatform.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/ServerPlatform.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/ServerPlatform.dir/link.txt --verbose=$(VERBOSE)
 
@@ -186,6 +186,6 @@ CMakeFiles/ServerPlatform.dir/clean:
 .PHONY : CMakeFiles/ServerPlatform.dir/clean
 
 CMakeFiles/ServerPlatform.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles/ServerPlatform.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master/CMakeFiles/ServerPlatform.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/ServerPlatform.dir/depend
 

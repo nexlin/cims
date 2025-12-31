@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/SipPlatform -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/SipStack -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/SipParser -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/SdpParser -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/StunParser -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/XmlParser -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/SipUserAgent -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/ServerPlatform -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/TcpStack -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/HttpStack -I/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/../ext/psip/HttpParser
+CXX_INCLUDES = -I/home/nex/work/cims/csp -I/home/nex/work/cims/csp/../ext/psip/SipPlatform -I/home/nex/work/cims/csp/../ext/psip/SipStack -I/home/nex/work/cims/csp/../ext/psip/SipParser -I/home/nex/work/cims/csp/../ext/psip/SdpParser -I/home/nex/work/cims/csp/../ext/psip/StunParser -I/home/nex/work/cims/csp/../ext/psip/XmlParser -I/home/nex/work/cims/csp/../ext/psip/SipUserAgent -I/home/nex/work/cims/csp/../ext/psip/ServerPlatform -I/home/nex/work/cims/csp/../ext/psip/TcpStack -I/home/nex/work/cims/csp/../ext/psip/HttpStack -I/home/nex/work/cims/csp/../ext/psip/HttpParser
 
 CXX_FLAGS = -std=gnu++11
 

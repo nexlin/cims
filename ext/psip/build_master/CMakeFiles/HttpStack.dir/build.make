@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+CMAKE_SOURCE_DIR = /home/nex/work/cims/ext/psip
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master
+CMAKE_BINARY_DIR = /home/nex/work/cims/ext/psip/build_master
 
 # Include any dependencies generated for this target.
 include CMakeFiles/HttpStack.dir/depend.make
@@ -70,46 +70,46 @@ include CMakeFiles/HttpStack.dir/progress.make
 include CMakeFiles/HttpStack.dir/flags.make
 
 CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o: CMakeFiles/HttpStack.dir/flags.make
-CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpClient.cpp
+CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o: /home/nex/work/cims/ext/psip/HttpStack/HttpClient.cpp
 CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o: CMakeFiles/HttpStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o -MF CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o.d -o CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpClient.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o -MF CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o.d -o CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o -c /home/nex/work/cims/ext/psip/HttpStack/HttpClient.cpp
 
 CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpClient.cpp > CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/HttpStack/HttpClient.cpp > CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.i
 
 CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpClient.cpp -o CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/HttpStack/HttpClient.cpp -o CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.s
 
 CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o: CMakeFiles/HttpStack.dir/flags.make
-CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpStack.cpp
+CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o: /home/nex/work/cims/ext/psip/HttpStack/HttpStack.cpp
 CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o: CMakeFiles/HttpStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o -MF CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o.d -o CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpStack.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o -MF CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o.d -o CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o -c /home/nex/work/cims/ext/psip/HttpStack/HttpStack.cpp
 
 CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpStack.cpp > CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/HttpStack/HttpStack.cpp > CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.i
 
 CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpStack.cpp -o CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/HttpStack/HttpStack.cpp -o CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.s
 
 CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o: CMakeFiles/HttpStack.dir/flags.make
-CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/WebSocketPacket.cpp
+CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o: /home/nex/work/cims/ext/psip/HttpStack/WebSocketPacket.cpp
 CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o: CMakeFiles/HttpStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o -MF CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o.d -o CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/WebSocketPacket.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o -MF CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o.d -o CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o -c /home/nex/work/cims/ext/psip/HttpStack/WebSocketPacket.cpp
 
 CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/WebSocketPacket.cpp > CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/HttpStack/WebSocketPacket.cpp > CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.i
 
 CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/WebSocketPacket.cpp -o CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/HttpStack/WebSocketPacket.cpp -o CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.s
 
 # Object files for target HttpStack
 HttpStack_OBJECTS = \
@@ -125,7 +125,7 @@ libHttpStack.a: CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o
 libHttpStack.a: CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o
 libHttpStack.a: CMakeFiles/HttpStack.dir/build.make
 libHttpStack.a: CMakeFiles/HttpStack.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX static library libHttpStack.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX static library libHttpStack.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/HttpStack.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/HttpStack.dir/link.txt --verbose=$(VERBOSE)
 
@@ -138,6 +138,6 @@ CMakeFiles/HttpStack.dir/clean:
 .PHONY : CMakeFiles/HttpStack.dir/clean
 
 CMakeFiles/HttpStack.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles/HttpStack.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master/CMakeFiles/HttpStack.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/HttpStack.dir/depend
 

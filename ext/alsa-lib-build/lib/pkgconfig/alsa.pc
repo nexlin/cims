@@ -1,5 +1,5 @@
-prefix=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/alsa-lib-build
-exec_prefix=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/alsa-lib-build
+prefix=/home/nex/work/cims/ext/alsa-lib-build
+exec_prefix=/home/nex/work/cims/ext/alsa-lib-build
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 

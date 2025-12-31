@@ -1,8 +1,8 @@
-# Install script for directory: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp
+# Install script for directory: /home/nex/work/cims/csp
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist")
+  set(CMAKE_INSTALL_PREFIX "/home/nex/work/cims/csp/dist")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
@@ -49,7 +49,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/csp"
          RPATH "")
   endif()
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE FILES "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/csp")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE FILES "/home/nex/work/cims/csp/build/csp")
   if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/csp" AND
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/csp")
     if(CMAKE_INSTALL_DO_STRIP)
@@ -59,27 +59,30 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  include("/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles/csp.dir/install-cxx-module-bmi-noconfig.cmake" OPTIONAL)
+  include("/home/nex/work/cims/csp/build/CMakeFiles/csp.dir/install-cxx-module-bmi-noconfig.cmake" OPTIONAL)
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE PROGRAM FILES "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/csp.sh")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE PROGRAM FILES "/home/nex/work/cims/csp/csp.sh")
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/config" TYPE FILE FILES "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/csp.xml")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/config" TYPE FILE FILES "/home/nex/work/cims/csp/csp.xml")
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/config" TYPE DIRECTORY FILES
-    "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerXml"
-    "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/UserXml"
-    "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/cdr"
+    "/home/nex/work/cims/csp/SipServerXml"
+    "/home/nex/work/cims/csp/UserXml"
     )
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/cert" TYPE FILE FILES "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/csp.pem")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/config/cdr" TYPE DIRECTORY FILES "")
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/cert" TYPE FILE FILES "/home/nex/work/cims/csp/csp.pem")
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
@@ -88,7 +91,7 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
-  include("/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build/cmake_install.cmake")
+  include("/home/nex/work/cims/csp/build/psip_build/cmake_install.cmake")
 
 endif()
 
@@ -100,5 +103,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/nex/work/cims/csp/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

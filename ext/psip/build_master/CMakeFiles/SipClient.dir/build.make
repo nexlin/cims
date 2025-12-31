@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+CMAKE_SOURCE_DIR = /home/nex/work/cims/ext/psip
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master
+CMAKE_BINARY_DIR = /home/nex/work/cims/ext/psip/build_master
 
 # Include any dependencies generated for this target.
 include CMakeFiles/SipClient.dir/depend.make
@@ -70,74 +70,74 @@ include CMakeFiles/SipClient.dir/progress.make
 include CMakeFiles/SipClient.dir/flags.make
 
 CMakeFiles/SipClient.dir/SipClient/G711.cpp.o: CMakeFiles/SipClient.dir/flags.make
-CMakeFiles/SipClient.dir/SipClient/G711.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/G711.cpp
+CMakeFiles/SipClient.dir/SipClient/G711.cpp.o: /home/nex/work/cims/ext/psip/SipClient/G711.cpp
 CMakeFiles/SipClient.dir/SipClient/G711.cpp.o: CMakeFiles/SipClient.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/SipClient.dir/SipClient/G711.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/G711.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/G711.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/G711.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/G711.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/SipClient.dir/SipClient/G711.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/G711.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/G711.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/G711.cpp.o -c /home/nex/work/cims/ext/psip/SipClient/G711.cpp
 
 CMakeFiles/SipClient.dir/SipClient/G711.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipClient.dir/SipClient/G711.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/G711.cpp > CMakeFiles/SipClient.dir/SipClient/G711.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipClient/G711.cpp > CMakeFiles/SipClient.dir/SipClient/G711.cpp.i
 
 CMakeFiles/SipClient.dir/SipClient/G711.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipClient.dir/SipClient/G711.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/G711.cpp -o CMakeFiles/SipClient.dir/SipClient/G711.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipClient/G711.cpp -o CMakeFiles/SipClient.dir/SipClient/G711.cpp.s
 
 CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o: CMakeFiles/SipClient.dir/flags.make
-CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/RtpThread.cpp
+CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o: /home/nex/work/cims/ext/psip/SipClient/RtpThread.cpp
 CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o: CMakeFiles/SipClient.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/RtpThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o -c /home/nex/work/cims/ext/psip/SipClient/RtpThread.cpp
 
 CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/RtpThread.cpp > CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipClient/RtpThread.cpp > CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.i
 
 CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/RtpThread.cpp -o CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipClient/RtpThread.cpp -o CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.s
 
 CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o: CMakeFiles/SipClient.dir/flags.make
-CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClient.cpp
+CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o: /home/nex/work/cims/ext/psip/SipClient/SipClient.cpp
 CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o: CMakeFiles/SipClient.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClient.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o -c /home/nex/work/cims/ext/psip/SipClient/SipClient.cpp
 
 CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClient.cpp > CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipClient/SipClient.cpp > CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.i
 
 CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClient.cpp -o CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipClient/SipClient.cpp -o CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.s
 
 CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o: CMakeFiles/SipClient.dir/flags.make
-CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientMain.cpp
+CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o: /home/nex/work/cims/ext/psip/SipClient/SipClientMain.cpp
 CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o: CMakeFiles/SipClient.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientMain.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o -c /home/nex/work/cims/ext/psip/SipClient/SipClientMain.cpp
 
 CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientMain.cpp > CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipClient/SipClientMain.cpp > CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.i
 
 CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientMain.cpp -o CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipClient/SipClientMain.cpp -o CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.s
 
 CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o: CMakeFiles/SipClient.dir/flags.make
-CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientSetup.cpp
+CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o: /home/nex/work/cims/ext/psip/SipClient/SipClientSetup.cpp
 CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o: CMakeFiles/SipClient.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientSetup.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o -MF CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o.d -o CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o -c /home/nex/work/cims/ext/psip/SipClient/SipClientSetup.cpp
 
 CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientSetup.cpp > CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipClient/SipClientSetup.cpp > CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.i
 
 CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientSetup.cpp -o CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipClient/SipClientSetup.cpp -o CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.s
 
 # Object files for target SipClient
 SipClient_OBJECTS = \
@@ -169,7 +169,7 @@ SipClient: libSipPlatform.a
 SipClient: libopensrtp.a
 SipClient: /usr/lib/x86_64-linux-gnu/libssl.so
 SipClient: /usr/lib/x86_64-linux-gnu/libcrypto.so
-SipClient: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/../alsa-lib-build/lib/libasound.a
+SipClient: /home/nex/work/cims/ext/psip/../alsa-lib-build/lib/libasound.a
 SipClient: libServerPlatform.a
 SipClient: libSipStack.a
 SipClient: libSipParser.a
@@ -183,7 +183,7 @@ SipClient: libSipPlatform.a
 SipClient: /usr/lib/x86_64-linux-gnu/libssl.so
 SipClient: /usr/lib/x86_64-linux-gnu/libcrypto.so
 SipClient: CMakeFiles/SipClient.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX executable SipClient"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX executable SipClient"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/SipClient.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
@@ -195,6 +195,6 @@ CMakeFiles/SipClient.dir/clean:
 .PHONY : CMakeFiles/SipClient.dir/clean
 
 CMakeFiles/SipClient.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles/SipClient.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master/CMakeFiles/SipClient.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/SipClient.dir/depend
 

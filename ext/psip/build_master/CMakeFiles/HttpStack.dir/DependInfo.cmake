@@ -8,9 +8,9 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpClient.cpp" "CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o" "gcc" "CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/HttpStack.cpp" "CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o" "gcc" "CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpStack/WebSocketPacket.cpp" "CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o" "gcc" "CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/HttpStack/HttpClient.cpp" "CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o" "gcc" "CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/HttpStack/HttpStack.cpp" "CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o" "gcc" "CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/HttpStack/WebSocketPacket.cpp" "CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o" "gcc" "CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

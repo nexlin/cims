@@ -5,10 +5,38 @@ A master `CMakeLists.txt` has been added to support building these components on
 
 ## Prerequisites
 
-- CMake 3.10+
-- GCC/G++ (supporting C++11)
-- OpenSSL Development Libraries (`libssl-dev`)
-- Pthreads (usually standard)
+Before building, ensure the following development tools and libraries are installed on your Linux system (e.g., Ubuntu/WSL).
+
+### 1. Install System Dependencies
+Run the following commands to install CMake, GCC/G++, OpenSSL, and build tools:
+
+```bash
+sudo apt update
+sudo apt install -y cmake g++ libssl-dev autoconf automake libtool
+```
+
+- **CMake**: Build system configuration (Version 3.10+).
+- **G++**: C++ Compiler (GCC 13 recommended).
+- **OpenSSL**: Required for cryptographic functions (`libssl-dev`).
+- **Autotools**: Required for building dependencies like ALSA (`autoconf`, `automake`, `libtool`).
+
+### 2. Build ALSA Dependency (Required for SipClient)
+The `SipClient` target depends on a static ALSA library (`libasound.a`). If it is not present in `ext/alsa-lib-build`, you must build it from source:
+
+```bash
+cd ../alsa-lib-1.2.10
+
+# 1. Configure
+autoreconf -fvi
+./configure --prefix=$(pwd)/../alsa-lib-build --enable-static --disable-shared
+
+# 2. Build and Install
+make -j $(nproc)
+make install
+
+# Return to psip directory
+cd ../psip
+```
 
 ## Building (Master Build)
 
@@ -16,10 +44,10 @@ To build all portable libraries and tools at once:
 
 ```bash
 # 1. Create a build directory (e.g., build_master)
-wsl cmake -S . -B build_master
+cmake -S . -B build_master
 
 # 2. Compile (parallel build)
-wsl cmake --build build_master -j 8
+cmake --build build_master -j $(nproc)
 ```
 
 ## Build Targets
@@ -43,7 +71,6 @@ wsl cmake --build build_master -j 8
 The following are currently excluded from the default Linux build:
 - **MFC Applications**: `SipSend`, `ServerMonitor` (Windows GUI dependent)
 - **System Dependencies**: 
-  - `SipClient` (requires `libasound2-dev` / ALSA) - *Can be enabled if dependencies installed*
   - `SipCallDump`, `SipClientPcapRtp` (requires `libpcap-dev`) - *Can be enabled if dependencies installed*
 
 ## Integration

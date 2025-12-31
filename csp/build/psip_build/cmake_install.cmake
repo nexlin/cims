@@ -1,8 +1,8 @@
-# Install script for directory: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+# Install script for directory: /home/nex/work/cims/ext/psip
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/dist")
+  set(CMAKE_INSTALL_PREFIX "/home/nex/work/cims/csp/dist")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 

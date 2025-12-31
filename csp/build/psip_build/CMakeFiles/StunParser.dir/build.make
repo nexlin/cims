@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp
+CMAKE_SOURCE_DIR = /home/nex/work/cims/csp
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build
+CMAKE_BINARY_DIR = /home/nex/work/cims/csp/build
 
 # Include any dependencies generated for this target.
 include psip_build/CMakeFiles/StunParser.dir/depend.make
@@ -70,74 +70,74 @@ include psip_build/CMakeFiles/StunParser.dir/progress.make
 include psip_build/CMakeFiles/StunParser.dir/flags.make
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o: psip_build/CMakeFiles/StunParser.dir/flags.make
-psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunAttribute.cpp
+psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o: /home/nex/work/cims/ext/psip/StunParser/StunAttribute.cpp
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o: psip_build/CMakeFiles/StunParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunAttribute.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o -c /home/nex/work/cims/ext/psip/StunParser/StunAttribute.cpp
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunAttribute.cpp > CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/StunParser/StunAttribute.cpp > CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.i
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunAttribute.cpp -o CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/StunParser/StunAttribute.cpp -o CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.s
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o: psip_build/CMakeFiles/StunParser.dir/flags.make
-psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunDecode.cpp
+psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o: /home/nex/work/cims/ext/psip/StunParser/StunDecode.cpp
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o: psip_build/CMakeFiles/StunParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunDecode.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o -c /home/nex/work/cims/ext/psip/StunParser/StunDecode.cpp
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunDecode.cpp > CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/StunParser/StunDecode.cpp > CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.i
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunDecode.cpp -o CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/StunParser/StunDecode.cpp -o CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.s
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o: psip_build/CMakeFiles/StunParser.dir/flags.make
-psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunEncode.cpp
+psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o: /home/nex/work/cims/ext/psip/StunParser/StunEncode.cpp
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o: psip_build/CMakeFiles/StunParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunEncode.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o -c /home/nex/work/cims/ext/psip/StunParser/StunEncode.cpp
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunEncode.cpp > CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/StunParser/StunEncode.cpp > CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.i
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunEncode.cpp -o CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/StunParser/StunEncode.cpp -o CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.s
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o: psip_build/CMakeFiles/StunParser.dir/flags.make
-psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunHeader.cpp
+psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o: /home/nex/work/cims/ext/psip/StunParser/StunHeader.cpp
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o: psip_build/CMakeFiles/StunParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunHeader.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o -c /home/nex/work/cims/ext/psip/StunParser/StunHeader.cpp
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunHeader.cpp > CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/StunParser/StunHeader.cpp > CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.i
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunHeader.cpp -o CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/StunParser/StunHeader.cpp -o CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.s
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o: psip_build/CMakeFiles/StunParser.dir/flags.make
-psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunMessage.cpp
+psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o: /home/nex/work/cims/ext/psip/StunParser/StunMessage.cpp
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o: psip_build/CMakeFiles/StunParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunMessage.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o -MF CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o.d -o CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o -c /home/nex/work/cims/ext/psip/StunParser/StunMessage.cpp
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunMessage.cpp > CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/StunParser/StunMessage.cpp > CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.i
 
 psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/StunParser/StunMessage.cpp -o CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/StunParser/StunMessage.cpp -o CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.s
 
 # Object files for target StunParser
 StunParser_OBJECTS = \
@@ -157,19 +157,19 @@ psip_build/libStunParser.a: psip_build/CMakeFiles/StunParser.dir/StunParser/Stun
 psip_build/libStunParser.a: psip_build/CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o
 psip_build/libStunParser.a: psip_build/CMakeFiles/StunParser.dir/build.make
 psip_build/libStunParser.a: psip_build/CMakeFiles/StunParser.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX static library libStunParser.a"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/StunParser.dir/cmake_clean_target.cmake
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/StunParser.dir/link.txt --verbose=$(VERBOSE)
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX static library libStunParser.a"
+	cd /home/nex/work/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/StunParser.dir/cmake_clean_target.cmake
+	cd /home/nex/work/cims/csp/build/psip_build && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/StunParser.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
 psip_build/CMakeFiles/StunParser.dir/build: psip_build/libStunParser.a
 .PHONY : psip_build/CMakeFiles/StunParser.dir/build
 
 psip_build/CMakeFiles/StunParser.dir/clean:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/StunParser.dir/cmake_clean.cmake
+	cd /home/nex/work/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/StunParser.dir/cmake_clean.cmake
 .PHONY : psip_build/CMakeFiles/StunParser.dir/clean
 
 psip_build/CMakeFiles/StunParser.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build/CMakeFiles/StunParser.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/csp/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/csp /home/nex/work/cims/ext/psip /home/nex/work/cims/csp/build /home/nex/work/cims/csp/build/psip_build /home/nex/work/cims/csp/build/psip_build/CMakeFiles/StunParser.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : psip_build/CMakeFiles/StunParser.dir/depend
 

@@ -8,11 +8,11 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/G711.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/G711.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/G711.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/RtpThread.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClient.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientMain.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o.d"
-  "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipClient/SipClientSetup.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/SipClient/G711.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/G711.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/G711.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/SipClient/RtpThread.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/RtpThread.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/SipClient/SipClient.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClient.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/SipClient/SipClientMain.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClientMain.cpp.o.d"
+  "/home/nex/work/cims/ext/psip/SipClient/SipClientSetup.cpp" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o" "gcc" "psip_build/CMakeFiles/SipClient.dir/SipClient/SipClientSetup.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

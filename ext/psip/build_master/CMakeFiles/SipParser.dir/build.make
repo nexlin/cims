@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+CMAKE_SOURCE_DIR = /home/nex/work/cims/ext/psip
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master
+CMAKE_BINARY_DIR = /home/nex/work/cims/ext/psip/build_master
 
 # Include any dependencies generated for this target.
 include CMakeFiles/SipParser.dir/depend.make
@@ -70,242 +70,242 @@ include CMakeFiles/SipParser.dir/progress.make
 include CMakeFiles/SipParser.dir/flags.make
 
 CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipAcceptData.cpp
+CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipAcceptData.cpp
 CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipAcceptData.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipAcceptData.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipAcceptData.cpp > CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipAcceptData.cpp > CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipAcceptData.cpp -o CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipAcceptData.cpp -o CMakeFiles/SipParser.dir/SipParser/SipAcceptData.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCSeq.cpp
+CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipCSeq.cpp
 CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCSeq.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipCSeq.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCSeq.cpp > CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipCSeq.cpp > CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCSeq.cpp -o CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipCSeq.cpp -o CMakeFiles/SipParser.dir/SipParser/SipCSeq.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCallId.cpp
+CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipCallId.cpp
 CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCallId.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipCallId.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCallId.cpp > CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipCallId.cpp > CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCallId.cpp -o CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipCallId.cpp -o CMakeFiles/SipParser.dir/SipParser/SipCallId.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipChallenge.cpp
+CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipChallenge.cpp
 CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipChallenge.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipChallenge.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipChallenge.cpp > CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipChallenge.cpp > CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipChallenge.cpp -o CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipChallenge.cpp -o CMakeFiles/SipParser.dir/SipParser/SipChallenge.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipContentType.cpp
+CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipContentType.cpp
 CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipContentType.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipContentType.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipContentType.cpp > CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipContentType.cpp > CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipContentType.cpp -o CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipContentType.cpp -o CMakeFiles/SipParser.dir/SipParser/SipContentType.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCredential.cpp
+CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipCredential.cpp
 CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCredential.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipCredential.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCredential.cpp > CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipCredential.cpp > CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipCredential.cpp -o CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipCredential.cpp -o CMakeFiles/SipParser.dir/SipParser/SipCredential.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipFrom.cpp
+CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipFrom.cpp
 CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipFrom.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipFrom.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipFrom.cpp > CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipFrom.cpp > CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipFrom.cpp -o CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipFrom.cpp -o CMakeFiles/SipParser.dir/SipParser/SipFrom.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipHeader.cpp
+CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipHeader.cpp
 CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipHeader.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipHeader.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipHeader.cpp > CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipHeader.cpp > CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipHeader.cpp -o CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipHeader.cpp -o CMakeFiles/SipParser.dir/SipParser/SipHeader.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipMessage.cpp
+CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipMessage.cpp
 CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipMessage.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipMessage.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipMessage.cpp > CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipMessage.cpp > CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipMessage.cpp -o CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipMessage.cpp -o CMakeFiles/SipParser.dir/SipParser/SipMessage.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipParameter.cpp
+CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipParameter.cpp
 CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipParameter.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipParameter.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipParameter.cpp > CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipParameter.cpp > CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipParameter.cpp -o CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipParameter.cpp -o CMakeFiles/SipParser.dir/SipParser/SipParameter.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipParameterList.cpp
+CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipParameterList.cpp
 CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipParameterList.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipParameterList.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipParameterList.cpp > CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipParameterList.cpp > CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipParameterList.cpp -o CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipParameterList.cpp -o CMakeFiles/SipParser.dir/SipParser/SipParameterList.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipReason.cpp
+CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipReason.cpp
 CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipReason.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipReason.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipReason.cpp > CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipReason.cpp > CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipReason.cpp -o CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipReason.cpp -o CMakeFiles/SipParser.dir/SipParser/SipReason.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipStatusCode.cpp
+CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipStatusCode.cpp
 CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipStatusCode.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipStatusCode.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipStatusCode.cpp > CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipStatusCode.cpp > CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipStatusCode.cpp -o CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipStatusCode.cpp -o CMakeFiles/SipParser.dir/SipParser/SipStatusCode.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipTransport.cpp
+CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipTransport.cpp
 CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipTransport.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipTransport.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipTransport.cpp > CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipTransport.cpp > CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipTransport.cpp -o CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipTransport.cpp -o CMakeFiles/SipParser.dir/SipParser/SipTransport.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipUri.cpp
+CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipUri.cpp
 CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipUri.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipUri.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipUri.cpp > CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipUri.cpp > CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipUri.cpp -o CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipUri.cpp -o CMakeFiles/SipParser.dir/SipParser/SipUri.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipUtility.cpp
+CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipUtility.cpp
 CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipUtility.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipUtility.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipUtility.cpp > CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipUtility.cpp > CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipUtility.cpp -o CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipUtility.cpp -o CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.s
 
 CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o: CMakeFiles/SipParser.dir/flags.make
-CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipVia.cpp
+CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o: /home/nex/work/cims/ext/psip/SipParser/SipVia.cpp
 CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o: CMakeFiles/SipParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipVia.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building CXX object CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o -MF CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o.d -o CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o -c /home/nex/work/cims/ext/psip/SipParser/SipVia.cpp
 
 CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipVia.cpp > CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipParser/SipVia.cpp > CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.i
 
 CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipParser/SipVia.cpp -o CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipParser/SipVia.cpp -o CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.s
 
 # Object files for target SipParser
 SipParser_OBJECTS = \
@@ -349,7 +349,7 @@ libSipParser.a: CMakeFiles/SipParser.dir/SipParser/SipUtility.cpp.o
 libSipParser.a: CMakeFiles/SipParser.dir/SipParser/SipVia.cpp.o
 libSipParser.a: CMakeFiles/SipParser.dir/build.make
 libSipParser.a: CMakeFiles/SipParser.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Linking CXX static library libSipParser.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Linking CXX static library libSipParser.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/SipParser.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/SipParser.dir/link.txt --verbose=$(VERBOSE)
 
@@ -362,6 +362,6 @@ CMakeFiles/SipParser.dir/clean:
 .PHONY : CMakeFiles/SipParser.dir/clean
 
 CMakeFiles/SipParser.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles/SipParser.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master/CMakeFiles/SipParser.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/SipParser.dir/depend
 

@@ -1,153 +1,147 @@
-#!/bin/sh
+#!/bin/bash
 #------------------------------------------------------------------------------
 # csp start/stop script
 #------------------------------------------------------------------------------
-# programmer : yee young han ( websearch@naver.com )
-#------------------------------------------------------------------------------
-# start date : 2012/09/14
-#------------------------------------------------------------------------------
 
-# program directory
 # Get the absolute path of the script's directory
-#root_dir=$(cd "$(dirname "$0")" && pwd)
-root_dir=".."
-echo "RootDir:" $root_dir
-bin_dir=$root_dir"/bin"
-log_dir=$root_dir"/log"
-cfg_dir=$root_dir"/config"
+bin_dir=$(cd "$(dirname "$0")" && pwd)
+root_dir=$(cd "$bin_dir/.." && pwd)
+this_script="$bin_dir/$(basename "$0")"
+
+echo "RootDir: $root_dir"
+
+log_dir="$root_dir/log"
+cfg_dir="$root_dir/config"
 
 program="csp"
 program_list="$program"
-# Use the config file in the build directory
-program_arg=$cfg_dir"/csp.xml"
+program_arg="$cfg_dir/csp.xml"
 program_name="csp"
-logfile=$log_dir"/cspdog.log"
-this_script="csp.sh"
+logfile="$log_dir/cspdog.log"
 
 # get process pid
 getpids(){
-        # Use pgrep for robust pid finding
-        if [ "$1" = "csp" ]; then
-            # Exact match for the binary name to avoid matching this script
-            pgrep -x "$1"
-        else
-            # Full command line match for watchdog script
-            pgrep -f "$1"
-        fi
-}
-
-# start function
-start() {
-        if [ -n "`getpids $program`" ]; then
-                echo "$program_name: already running"
-        else
-                echo "$program_name: Starting..."
-                ulimit -c unlimited
-                ulimit -n 65535
-
-                start_program
-                cd $root_dir
-        fi
-}
-
-# stop function
-stop() {
-        echo "$program_name : Stopping... "
-        # Try pkill if killall fails or just use kill on pids
-        pids=$(getpids $program)
-        if [ -n "$pids" ]; then
-            kill $pids
-            echo "Sent kill signal to $pids"
-        else
-            echo "No process found to stop"
-        fi
-}
-
-# status function
-status() {
-        pids=`getpids $program`
-        if [ "$pids" != "" ]; then
-                echo "$program_name: running ($pids)"
-        else
-                echo "$program_name: not running"
-        fi
-
-        pids=`getpids "$this_script watchdog"`
-        if [ "$pids" != "" ]; then
-                echo "watchdog: running ($pids)"
-        else
-                echo "watchdog: not running"
-        fi
+    if [ "$1" = "csp" ]; then
+        pgrep -x "$1"
+    else
+        pgrep -f "$1"
+    fi
 }
 
 start_program(){
-        d=`date +%Y/%m/%d_%H:%M:%S`
+    echo "Starting $program..."
+    ulimit -c unlimited
+    ulimit -n 65535
+    
+    cd "$bin_dir"
+    "$bin_dir/$program" "$program_arg"
+}
 
-        echo "[$d] $1: Starting..." >> $logfile
-        ulimit -c unlimited
-        ulimit -n 65535
-        cd $bin_dir
-        $bin_dir/$program $program_arg
-        cd $root_dir
+start_program_input(){
+    d=`date +%Y/%m/%d_%H:%M:%S`
+    echo "[$d] $1: Starting..." >> "$logfile"
+    ulimit -c unlimited
+    ulimit -n 65535
+    cd "$bin_dir"
+    "$bin_dir/$program" "$program_arg"
+}
+
+start() {
+    if [ -n "$(getpids $program)" ]; then
+        echo "$program_name: already running"
+    else
+        echo "$program_name: Starting..."
+        start_program_input "$program_name"
+    fi
+}
+
+stop() {
+    echo "$program_name : Stopping... "
+    pids=$(getpids $program)
+    if [ -n "$pids" ]; then
+        kill $pids
+        echo "Sent kill signal to $pids"
+    else
+        echo "No process found to stop"
+    fi
+}
+
+status() {
+    pids=$(getpids $program)
+    if [ -n "$pids" ]; then
+        echo "$program_name: running ($pids)"
+    else
+        echo "$program_name: not running"
+    fi
+
+    pids=$(getpids "$(basename "$this_script") watchdog")
+    if [ -n "$pids" ]; then
+        echo "watchdog: running ($pids)"
+    else
+        echo "watchdog: not running"
+    fi
 }
 
 watchdog(){
-        echo "watchdog: Starting..."
-        sleep 10
-        while [ 1 ]; do
-                for program in $program_list
-                do
-                        if [ -f "$bin_dir/$program" ]; then
-                                if [ "`getpids $program`" = "" ]; then
-                                        start_program
-                                fi
-                        else
-                                echo "[error] $bin_dir/$program does not exist."
-                        fi
-                done
-                sleep 10
-        done
-}
-
-# watchdog start
-watchdog_start(){
-        $root_dir/$this_script watchdog &
-        echo "watchdog started."
-}
-
-# watchdog stop
-watchdog_stop(){
-        pids=`getpids "$this_script watchdog"`
-        for p in $pids
+    echo "watchdog: Starting..."
+    sleep 10
+    while true; do
+        for program in $program_list
         do
-                kill $p
+            if [ -f "$bin_dir/$program" ]; then
+                if [ -z "$(getpids $program)" ]; then
+                    start_program_input "$program_name"
+                fi
+            else
+                echo "[error] $bin_dir/$program does not exist."
+            fi
         done
-        echo "watchdog : Stopped"
+        sleep 10
+    done
 }
 
-# main function.
+watchdog_start(){
+    nohup "$this_script" watchdog > /dev/null 2>&1 &
+    echo "watchdog started."
+}
+
+watchdog_stop(){
+    pids=$(getpids "$(basename "$this_script") watchdog")
+    if [ -n "$pids" ]; then
+        kill $pids
+        echo "watchdog : Stopped"
+    fi
+}
+
+# Main
 case "$1" in
-        start)
-                start
-                watchdog_start
-                ;;
-        stop)
-                watchdog_stop
-                stop
-                ;;
-        status)
-                status
-                ;;
-        restart)
-                stop
-                sleep 1
-                start
-                ;;
-        watchdog)
-                watchdog
-                ;;
-        *)
-                echo $"Usage: $0 {start|stop|status|restart}"
-                exit 1
-                ;;
+    start)
+        if [ "$2" = "-f" ]; then
+            # Foreground mode
+            start_program
+        else
+            start
+            watchdog_start
+        fi
+        ;;
+    stop)
+        watchdog_stop
+        stop
+        ;;
+    status)
+        status
+        ;;
+    restart)
+        stop
+        sleep 1
+        start
+        watchdog_start
+        ;;
+    watchdog)
+        watchdog
+        ;;
+    *)
+        echo "Usage: $0 {start [-f]|stop|status|restart}"
+        exit 1
+        ;;
 esac

@@ -67,7 +67,8 @@ install(PROGRAMS csp.sh DESTINATION bin)
 
 # 2. Configuration (config/)
 install(FILES csp.xml DESTINATION config)
-install(DIRECTORY SipServerXml UserXml cdr DESTINATION config)
+install(DIRECTORY SipServerXml UserXml DESTINATION config)
+install(DIRECTORY DESTINATION config/cdr)
 
 # 3. Certificates (cert/)
 # Install csp.pem from the source directory (as per user request)

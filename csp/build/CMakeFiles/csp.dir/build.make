@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp
+CMAKE_SOURCE_DIR = /home/nex/work/cims/csp
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build
+CMAKE_BINARY_DIR = /home/nex/work/cims/csp/build
 
 # Include any dependencies generated for this target.
 include CMakeFiles/csp.dir/depend.make
@@ -70,172 +70,172 @@ include CMakeFiles/csp.dir/progress.make
 include CMakeFiles/csp.dir/flags.make
 
 CMakeFiles/csp.dir/CallMap.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/CallMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/CallMap.cpp
+CMakeFiles/csp.dir/CallMap.cpp.o: /home/nex/work/cims/csp/CallMap.cpp
 CMakeFiles/csp.dir/CallMap.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/csp.dir/CallMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/CallMap.cpp.o -MF CMakeFiles/csp.dir/CallMap.cpp.o.d -o CMakeFiles/csp.dir/CallMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/CallMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/csp.dir/CallMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/CallMap.cpp.o -MF CMakeFiles/csp.dir/CallMap.cpp.o.d -o CMakeFiles/csp.dir/CallMap.cpp.o -c /home/nex/work/cims/csp/CallMap.cpp
 
 CMakeFiles/csp.dir/CallMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/CallMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/CallMap.cpp > CMakeFiles/csp.dir/CallMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/CallMap.cpp > CMakeFiles/csp.dir/CallMap.cpp.i
 
 CMakeFiles/csp.dir/CallMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/CallMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/CallMap.cpp -o CMakeFiles/csp.dir/CallMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/CallMap.cpp -o CMakeFiles/csp.dir/CallMap.cpp.s
 
 CMakeFiles/csp.dir/CspServer.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/CspServer.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/CspServer.cpp
+CMakeFiles/csp.dir/CspServer.cpp.o: /home/nex/work/cims/csp/CspServer.cpp
 CMakeFiles/csp.dir/CspServer.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/csp.dir/CspServer.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/CspServer.cpp.o -MF CMakeFiles/csp.dir/CspServer.cpp.o.d -o CMakeFiles/csp.dir/CspServer.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/CspServer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/csp.dir/CspServer.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/CspServer.cpp.o -MF CMakeFiles/csp.dir/CspServer.cpp.o.d -o CMakeFiles/csp.dir/CspServer.cpp.o -c /home/nex/work/cims/csp/CspServer.cpp
 
 CMakeFiles/csp.dir/CspServer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/CspServer.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/CspServer.cpp > CMakeFiles/csp.dir/CspServer.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/CspServer.cpp > CMakeFiles/csp.dir/CspServer.cpp.i
 
 CMakeFiles/csp.dir/CspServer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/CspServer.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/CspServer.cpp -o CMakeFiles/csp.dir/CspServer.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/CspServer.cpp -o CMakeFiles/csp.dir/CspServer.cpp.s
 
 CMakeFiles/csp.dir/Monitor.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/Monitor.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/Monitor.cpp
+CMakeFiles/csp.dir/Monitor.cpp.o: /home/nex/work/cims/csp/Monitor.cpp
 CMakeFiles/csp.dir/Monitor.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/csp.dir/Monitor.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/Monitor.cpp.o -MF CMakeFiles/csp.dir/Monitor.cpp.o.d -o CMakeFiles/csp.dir/Monitor.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/Monitor.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/csp.dir/Monitor.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/Monitor.cpp.o -MF CMakeFiles/csp.dir/Monitor.cpp.o.d -o CMakeFiles/csp.dir/Monitor.cpp.o -c /home/nex/work/cims/csp/Monitor.cpp
 
 CMakeFiles/csp.dir/Monitor.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/Monitor.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/Monitor.cpp > CMakeFiles/csp.dir/Monitor.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/Monitor.cpp > CMakeFiles/csp.dir/Monitor.cpp.i
 
 CMakeFiles/csp.dir/Monitor.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/Monitor.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/Monitor.cpp -o CMakeFiles/csp.dir/Monitor.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/Monitor.cpp -o CMakeFiles/csp.dir/Monitor.cpp.s
 
 CMakeFiles/csp.dir/NonceMap.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/NonceMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/NonceMap.cpp
+CMakeFiles/csp.dir/NonceMap.cpp.o: /home/nex/work/cims/csp/NonceMap.cpp
 CMakeFiles/csp.dir/NonceMap.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/csp.dir/NonceMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/NonceMap.cpp.o -MF CMakeFiles/csp.dir/NonceMap.cpp.o.d -o CMakeFiles/csp.dir/NonceMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/NonceMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/csp.dir/NonceMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/NonceMap.cpp.o -MF CMakeFiles/csp.dir/NonceMap.cpp.o.d -o CMakeFiles/csp.dir/NonceMap.cpp.o -c /home/nex/work/cims/csp/NonceMap.cpp
 
 CMakeFiles/csp.dir/NonceMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/NonceMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/NonceMap.cpp > CMakeFiles/csp.dir/NonceMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/NonceMap.cpp > CMakeFiles/csp.dir/NonceMap.cpp.i
 
 CMakeFiles/csp.dir/NonceMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/NonceMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/NonceMap.cpp -o CMakeFiles/csp.dir/NonceMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/NonceMap.cpp -o CMakeFiles/csp.dir/NonceMap.cpp.s
 
 CMakeFiles/csp.dir/RtpMap.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/RtpMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/RtpMap.cpp
+CMakeFiles/csp.dir/RtpMap.cpp.o: /home/nex/work/cims/csp/RtpMap.cpp
 CMakeFiles/csp.dir/RtpMap.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/csp.dir/RtpMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/RtpMap.cpp.o -MF CMakeFiles/csp.dir/RtpMap.cpp.o.d -o CMakeFiles/csp.dir/RtpMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/RtpMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/csp.dir/RtpMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/RtpMap.cpp.o -MF CMakeFiles/csp.dir/RtpMap.cpp.o.d -o CMakeFiles/csp.dir/RtpMap.cpp.o -c /home/nex/work/cims/csp/RtpMap.cpp
 
 CMakeFiles/csp.dir/RtpMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/RtpMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/RtpMap.cpp > CMakeFiles/csp.dir/RtpMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/RtpMap.cpp > CMakeFiles/csp.dir/RtpMap.cpp.i
 
 CMakeFiles/csp.dir/RtpMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/RtpMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/RtpMap.cpp -o CMakeFiles/csp.dir/RtpMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/RtpMap.cpp -o CMakeFiles/csp.dir/RtpMap.cpp.s
 
 CMakeFiles/csp.dir/RtpThread.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/RtpThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/RtpThread.cpp
+CMakeFiles/csp.dir/RtpThread.cpp.o: /home/nex/work/cims/csp/RtpThread.cpp
 CMakeFiles/csp.dir/RtpThread.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/csp.dir/RtpThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/RtpThread.cpp.o -MF CMakeFiles/csp.dir/RtpThread.cpp.o.d -o CMakeFiles/csp.dir/RtpThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/RtpThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/csp.dir/RtpThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/RtpThread.cpp.o -MF CMakeFiles/csp.dir/RtpThread.cpp.o.d -o CMakeFiles/csp.dir/RtpThread.cpp.o -c /home/nex/work/cims/csp/RtpThread.cpp
 
 CMakeFiles/csp.dir/RtpThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/RtpThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/RtpThread.cpp > CMakeFiles/csp.dir/RtpThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/RtpThread.cpp > CMakeFiles/csp.dir/RtpThread.cpp.i
 
 CMakeFiles/csp.dir/RtpThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/RtpThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/RtpThread.cpp -o CMakeFiles/csp.dir/RtpThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/RtpThread.cpp -o CMakeFiles/csp.dir/RtpThread.cpp.s
 
 CMakeFiles/csp.dir/SipServer.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/SipServer.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServer.cpp
+CMakeFiles/csp.dir/SipServer.cpp.o: /home/nex/work/cims/csp/SipServer.cpp
 CMakeFiles/csp.dir/SipServer.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/csp.dir/SipServer.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/SipServer.cpp.o -MF CMakeFiles/csp.dir/SipServer.cpp.o.d -o CMakeFiles/csp.dir/SipServer.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/csp.dir/SipServer.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/SipServer.cpp.o -MF CMakeFiles/csp.dir/SipServer.cpp.o.d -o CMakeFiles/csp.dir/SipServer.cpp.o -c /home/nex/work/cims/csp/SipServer.cpp
 
 CMakeFiles/csp.dir/SipServer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/SipServer.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServer.cpp > CMakeFiles/csp.dir/SipServer.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/SipServer.cpp > CMakeFiles/csp.dir/SipServer.cpp.i
 
 CMakeFiles/csp.dir/SipServer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/SipServer.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServer.cpp -o CMakeFiles/csp.dir/SipServer.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/SipServer.cpp -o CMakeFiles/csp.dir/SipServer.cpp.s
 
 CMakeFiles/csp.dir/SipServerMap.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/SipServerMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerMap.cpp
+CMakeFiles/csp.dir/SipServerMap.cpp.o: /home/nex/work/cims/csp/SipServerMap.cpp
 CMakeFiles/csp.dir/SipServerMap.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/csp.dir/SipServerMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/SipServerMap.cpp.o -MF CMakeFiles/csp.dir/SipServerMap.cpp.o.d -o CMakeFiles/csp.dir/SipServerMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/csp.dir/SipServerMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/SipServerMap.cpp.o -MF CMakeFiles/csp.dir/SipServerMap.cpp.o.d -o CMakeFiles/csp.dir/SipServerMap.cpp.o -c /home/nex/work/cims/csp/SipServerMap.cpp
 
 CMakeFiles/csp.dir/SipServerMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/SipServerMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerMap.cpp > CMakeFiles/csp.dir/SipServerMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/SipServerMap.cpp > CMakeFiles/csp.dir/SipServerMap.cpp.i
 
 CMakeFiles/csp.dir/SipServerMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/SipServerMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerMap.cpp -o CMakeFiles/csp.dir/SipServerMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/SipServerMap.cpp -o CMakeFiles/csp.dir/SipServerMap.cpp.s
 
 CMakeFiles/csp.dir/SipServerSetup.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/SipServerSetup.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerSetup.cpp
+CMakeFiles/csp.dir/SipServerSetup.cpp.o: /home/nex/work/cims/csp/SipServerSetup.cpp
 CMakeFiles/csp.dir/SipServerSetup.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/csp.dir/SipServerSetup.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/SipServerSetup.cpp.o -MF CMakeFiles/csp.dir/SipServerSetup.cpp.o.d -o CMakeFiles/csp.dir/SipServerSetup.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerSetup.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/csp.dir/SipServerSetup.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/SipServerSetup.cpp.o -MF CMakeFiles/csp.dir/SipServerSetup.cpp.o.d -o CMakeFiles/csp.dir/SipServerSetup.cpp.o -c /home/nex/work/cims/csp/SipServerSetup.cpp
 
 CMakeFiles/csp.dir/SipServerSetup.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/SipServerSetup.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerSetup.cpp > CMakeFiles/csp.dir/SipServerSetup.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/SipServerSetup.cpp > CMakeFiles/csp.dir/SipServerSetup.cpp.i
 
 CMakeFiles/csp.dir/SipServerSetup.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/SipServerSetup.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/SipServerSetup.cpp -o CMakeFiles/csp.dir/SipServerSetup.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/SipServerSetup.cpp -o CMakeFiles/csp.dir/SipServerSetup.cpp.s
 
 CMakeFiles/csp.dir/UserMap.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/UserMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/UserMap.cpp
+CMakeFiles/csp.dir/UserMap.cpp.o: /home/nex/work/cims/csp/UserMap.cpp
 CMakeFiles/csp.dir/UserMap.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/csp.dir/UserMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/UserMap.cpp.o -MF CMakeFiles/csp.dir/UserMap.cpp.o.d -o CMakeFiles/csp.dir/UserMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/UserMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/csp.dir/UserMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/UserMap.cpp.o -MF CMakeFiles/csp.dir/UserMap.cpp.o.d -o CMakeFiles/csp.dir/UserMap.cpp.o -c /home/nex/work/cims/csp/UserMap.cpp
 
 CMakeFiles/csp.dir/UserMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/UserMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/UserMap.cpp > CMakeFiles/csp.dir/UserMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/UserMap.cpp > CMakeFiles/csp.dir/UserMap.cpp.i
 
 CMakeFiles/csp.dir/UserMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/UserMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/UserMap.cpp -o CMakeFiles/csp.dir/UserMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/UserMap.cpp -o CMakeFiles/csp.dir/UserMap.cpp.s
 
 CMakeFiles/csp.dir/XmlSipServer.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/XmlSipServer.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/XmlSipServer.cpp
+CMakeFiles/csp.dir/XmlSipServer.cpp.o: /home/nex/work/cims/csp/XmlSipServer.cpp
 CMakeFiles/csp.dir/XmlSipServer.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/csp.dir/XmlSipServer.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/XmlSipServer.cpp.o -MF CMakeFiles/csp.dir/XmlSipServer.cpp.o.d -o CMakeFiles/csp.dir/XmlSipServer.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/XmlSipServer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/csp.dir/XmlSipServer.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/XmlSipServer.cpp.o -MF CMakeFiles/csp.dir/XmlSipServer.cpp.o.d -o CMakeFiles/csp.dir/XmlSipServer.cpp.o -c /home/nex/work/cims/csp/XmlSipServer.cpp
 
 CMakeFiles/csp.dir/XmlSipServer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/XmlSipServer.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/XmlSipServer.cpp > CMakeFiles/csp.dir/XmlSipServer.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/XmlSipServer.cpp > CMakeFiles/csp.dir/XmlSipServer.cpp.i
 
 CMakeFiles/csp.dir/XmlSipServer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/XmlSipServer.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/XmlSipServer.cpp -o CMakeFiles/csp.dir/XmlSipServer.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/XmlSipServer.cpp -o CMakeFiles/csp.dir/XmlSipServer.cpp.s
 
 CMakeFiles/csp.dir/XmlUser.cpp.o: CMakeFiles/csp.dir/flags.make
-CMakeFiles/csp.dir/XmlUser.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/XmlUser.cpp
+CMakeFiles/csp.dir/XmlUser.cpp.o: /home/nex/work/cims/csp/XmlUser.cpp
 CMakeFiles/csp.dir/XmlUser.cpp.o: CMakeFiles/csp.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/csp.dir/XmlUser.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/XmlUser.cpp.o -MF CMakeFiles/csp.dir/XmlUser.cpp.o.d -o CMakeFiles/csp.dir/XmlUser.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/XmlUser.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/csp.dir/XmlUser.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/csp.dir/XmlUser.cpp.o -MF CMakeFiles/csp.dir/XmlUser.cpp.o.d -o CMakeFiles/csp.dir/XmlUser.cpp.o -c /home/nex/work/cims/csp/XmlUser.cpp
 
 CMakeFiles/csp.dir/XmlUser.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/csp.dir/XmlUser.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/XmlUser.cpp > CMakeFiles/csp.dir/XmlUser.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/csp/XmlUser.cpp > CMakeFiles/csp.dir/XmlUser.cpp.i
 
 CMakeFiles/csp.dir/XmlUser.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/csp.dir/XmlUser.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/XmlUser.cpp -o CMakeFiles/csp.dir/XmlUser.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/csp/XmlUser.cpp -o CMakeFiles/csp.dir/XmlUser.cpp.s
 
 # Object files for target csp
 csp_OBJECTS = \
@@ -293,7 +293,7 @@ csp: psip_build/libSipPlatform.a
 csp: /usr/lib/x86_64-linux-gnu/libssl.so
 csp: /usr/lib/x86_64-linux-gnu/libcrypto.so
 csp: CMakeFiles/csp.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Linking CXX executable csp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Linking CXX executable csp"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/csp.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
@@ -305,6 +305,6 @@ CMakeFiles/csp.dir/clean:
 .PHONY : CMakeFiles/csp.dir/clean
 
 CMakeFiles/csp.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles/csp.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/csp/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/csp /home/nex/work/cims/csp /home/nex/work/cims/csp/build /home/nex/work/cims/csp/build /home/nex/work/cims/csp/build/CMakeFiles/csp.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/csp.dir/depend
 

@@ -55,7 +55,7 @@ typedef struct in6_addr IN6_ADDR;
 #define INVALID_SOCKET	-1
 #define SOCKET_ERROR		-1
 
-inline int closesocket( Socket fd ) { return close(fd); };
+// inline int closesocket( Socket fd ) { return close(fd); };
 inline int GetError() { return errno; }
 
 #endif

@@ -1,4 +1,4 @@
-# Install script for directory: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+# Install script for directory: /home/nex/work/cims/ext/psip
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -50,5 +50,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/nex/work/cims/ext/psip/build_master/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

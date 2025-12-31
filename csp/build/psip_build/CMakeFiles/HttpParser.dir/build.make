@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp
+CMAKE_SOURCE_DIR = /home/nex/work/cims/csp
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build
+CMAKE_BINARY_DIR = /home/nex/work/cims/csp/build
 
 # Include any dependencies generated for this target.
 include psip_build/CMakeFiles/HttpParser.dir/depend.make
@@ -70,74 +70,74 @@ include psip_build/CMakeFiles/HttpParser.dir/progress.make
 include psip_build/CMakeFiles/HttpParser.dir/flags.make
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o: psip_build/CMakeFiles/HttpParser.dir/flags.make
-psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpHeader.cpp
+psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o: /home/nex/work/cims/ext/psip/HttpParser/HttpHeader.cpp
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o: psip_build/CMakeFiles/HttpParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpHeader.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o -c /home/nex/work/cims/ext/psip/HttpParser/HttpHeader.cpp
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpHeader.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/HttpParser/HttpHeader.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.i
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpHeader.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/HttpParser/HttpHeader.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.s
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o: psip_build/CMakeFiles/HttpParser.dir/flags.make
-psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpMessage.cpp
+psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o: /home/nex/work/cims/ext/psip/HttpParser/HttpMessage.cpp
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o: psip_build/CMakeFiles/HttpParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpMessage.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o -c /home/nex/work/cims/ext/psip/HttpParser/HttpMessage.cpp
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpMessage.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/HttpParser/HttpMessage.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.i
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpMessage.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/HttpParser/HttpMessage.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.s
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o: psip_build/CMakeFiles/HttpParser.dir/flags.make
-psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpPacket.cpp
+psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o: /home/nex/work/cims/ext/psip/HttpParser/HttpPacket.cpp
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o: psip_build/CMakeFiles/HttpParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpPacket.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o -c /home/nex/work/cims/ext/psip/HttpParser/HttpPacket.cpp
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpPacket.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/HttpParser/HttpPacket.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.i
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpPacket.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/HttpParser/HttpPacket.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.s
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o: psip_build/CMakeFiles/HttpParser.dir/flags.make
-psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpStatusCode.cpp
+psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o: /home/nex/work/cims/ext/psip/HttpParser/HttpStatusCode.cpp
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o: psip_build/CMakeFiles/HttpParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpStatusCode.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o -c /home/nex/work/cims/ext/psip/HttpParser/HttpStatusCode.cpp
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpStatusCode.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/HttpParser/HttpStatusCode.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.i
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpStatusCode.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/HttpParser/HttpStatusCode.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.s
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o: psip_build/CMakeFiles/HttpParser.dir/flags.make
-psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpUri.cpp
+psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o: /home/nex/work/cims/ext/psip/HttpParser/HttpUri.cpp
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o: psip_build/CMakeFiles/HttpParser.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpUri.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o -MF CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o.d -o CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o -c /home/nex/work/cims/ext/psip/HttpParser/HttpUri.cpp
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpUri.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/HttpParser/HttpUri.cpp > CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.i
 
 psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/HttpParser/HttpUri.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/HttpParser/HttpUri.cpp -o CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.s
 
 # Object files for target HttpParser
 HttpParser_OBJECTS = \
@@ -157,19 +157,19 @@ psip_build/libHttpParser.a: psip_build/CMakeFiles/HttpParser.dir/HttpParser/Http
 psip_build/libHttpParser.a: psip_build/CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o
 psip_build/libHttpParser.a: psip_build/CMakeFiles/HttpParser.dir/build.make
 psip_build/libHttpParser.a: psip_build/CMakeFiles/HttpParser.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX static library libHttpParser.a"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/HttpParser.dir/cmake_clean_target.cmake
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/HttpParser.dir/link.txt --verbose=$(VERBOSE)
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX static library libHttpParser.a"
+	cd /home/nex/work/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/HttpParser.dir/cmake_clean_target.cmake
+	cd /home/nex/work/cims/csp/build/psip_build && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/HttpParser.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
 psip_build/CMakeFiles/HttpParser.dir/build: psip_build/libHttpParser.a
 .PHONY : psip_build/CMakeFiles/HttpParser.dir/build
 
 psip_build/CMakeFiles/HttpParser.dir/clean:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/HttpParser.dir/cmake_clean.cmake
+	cd /home/nex/work/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/HttpParser.dir/cmake_clean.cmake
 .PHONY : psip_build/CMakeFiles/HttpParser.dir/clean
 
 psip_build/CMakeFiles/HttpParser.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build/CMakeFiles/HttpParser.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/csp/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/csp /home/nex/work/cims/ext/psip /home/nex/work/cims/csp/build /home/nex/work/cims/csp/build/psip_build /home/nex/work/cims/csp/build/psip_build/CMakeFiles/HttpParser.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : psip_build/CMakeFiles/HttpParser.dir/depend
 

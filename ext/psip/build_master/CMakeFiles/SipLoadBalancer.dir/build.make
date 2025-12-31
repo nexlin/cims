@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+CMAKE_SOURCE_DIR = /home/nex/work/cims/ext/psip
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master
+CMAKE_BINARY_DIR = /home/nex/work/cims/ext/psip/build_master
 
 # Include any dependencies generated for this target.
 include CMakeFiles/SipLoadBalancer.dir/depend.make
@@ -70,88 +70,88 @@ include CMakeFiles/SipLoadBalancer.dir/progress.make
 include CMakeFiles/SipLoadBalancer.dir/flags.make
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o: CMakeFiles/SipLoadBalancer.dir/flags.make
-CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/Monitor.cpp
+CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o: /home/nex/work/cims/ext/psip/SipLoadBalancer/Monitor.cpp
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o: CMakeFiles/SipLoadBalancer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/Monitor.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.o -c /home/nex/work/cims/ext/psip/SipLoadBalancer/Monitor.cpp
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/Monitor.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipLoadBalancer/Monitor.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.i
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/Monitor.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipLoadBalancer/Monitor.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/Monitor.cpp.s
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o: CMakeFiles/SipLoadBalancer.dir/flags.make
-CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipLoadBalancer.cpp
+CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o: /home/nex/work/cims/ext/psip/SipLoadBalancer/SipLoadBalancer.cpp
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o: CMakeFiles/SipLoadBalancer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipLoadBalancer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.o -c /home/nex/work/cims/ext/psip/SipLoadBalancer/SipLoadBalancer.cpp
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipLoadBalancer.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipLoadBalancer/SipLoadBalancer.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.i
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipLoadBalancer.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipLoadBalancer/SipLoadBalancer.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipLoadBalancer.cpp.s
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o: CMakeFiles/SipLoadBalancer.dir/flags.make
-CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServer.cpp
+CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o: /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServer.cpp
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o: CMakeFiles/SipLoadBalancer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.o -c /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServer.cpp
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServer.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServer.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.i
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServer.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServer.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServer.cpp.s
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o: CMakeFiles/SipLoadBalancer.dir/flags.make
-CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServerMap.cpp
+CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o: /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServerMap.cpp
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o: CMakeFiles/SipLoadBalancer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServerMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.o -c /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServerMap.cpp
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServerMap.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServerMap.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.i
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServerMap.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServerMap.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerMap.cpp.s
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o: CMakeFiles/SipLoadBalancer.dir/flags.make
-CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServerSetup.cpp
+CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o: /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServerSetup.cpp
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o: CMakeFiles/SipLoadBalancer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServerSetup.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.o -c /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServerSetup.cpp
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServerSetup.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServerSetup.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.i
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/SipServerSetup.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipLoadBalancer/SipServerSetup.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/SipServerSetup.cpp.s
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o: CMakeFiles/SipLoadBalancer.dir/flags.make
-CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/UserMap.cpp
+CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o: /home/nex/work/cims/ext/psip/SipLoadBalancer/UserMap.cpp
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o: CMakeFiles/SipLoadBalancer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/UserMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o -MF CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o.d -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.o -c /home/nex/work/cims/ext/psip/SipLoadBalancer/UserMap.cpp
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/UserMap.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipLoadBalancer/UserMap.cpp > CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.i
 
 CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipLoadBalancer/UserMap.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipLoadBalancer/UserMap.cpp -o CMakeFiles/SipLoadBalancer.dir/SipLoadBalancer/UserMap.cpp.s
 
 # Object files for target SipLoadBalancer
 SipLoadBalancer_OBJECTS = \
@@ -198,7 +198,7 @@ SipLoadBalancer: libSipPlatform.a
 SipLoadBalancer: /usr/lib/x86_64-linux-gnu/libssl.so
 SipLoadBalancer: /usr/lib/x86_64-linux-gnu/libcrypto.so
 SipLoadBalancer: CMakeFiles/SipLoadBalancer.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX executable SipLoadBalancer"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX executable SipLoadBalancer"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/SipLoadBalancer.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
@@ -210,6 +210,6 @@ CMakeFiles/SipLoadBalancer.dir/clean:
 .PHONY : CMakeFiles/SipLoadBalancer.dir/clean
 
 CMakeFiles/SipLoadBalancer.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles/SipLoadBalancer.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master/CMakeFiles/SipLoadBalancer.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/SipLoadBalancer.dir/depend
 

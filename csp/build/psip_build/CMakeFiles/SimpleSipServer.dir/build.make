@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp
+CMAKE_SOURCE_DIR = /home/nex/work/cims/csp
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build
+CMAKE_BINARY_DIR = /home/nex/work/cims/csp/build
 
 # Include any dependencies generated for this target.
 include psip_build/CMakeFiles/SimpleSipServer.dir/depend.make
@@ -70,46 +70,46 @@ include psip_build/CMakeFiles/SimpleSipServer.dir/progress.make
 include psip_build/CMakeFiles/SimpleSipServer.dir/flags.make
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o: psip_build/CMakeFiles/SimpleSipServer.dir/flags.make
-psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/SimpleSipServer.cpp
+psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o: /home/nex/work/cims/ext/psip/SimpleSipServer/SimpleSipServer.cpp
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o: psip_build/CMakeFiles/SimpleSipServer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o -MF CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o.d -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/SimpleSipServer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o -MF CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o.d -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.o -c /home/nex/work/cims/ext/psip/SimpleSipServer/SimpleSipServer.cpp
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/SimpleSipServer.cpp > CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SimpleSipServer/SimpleSipServer.cpp > CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.i
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/SimpleSipServer.cpp -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SimpleSipServer/SimpleSipServer.cpp -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SimpleSipServer.cpp.s
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o: psip_build/CMakeFiles/SimpleSipServer.dir/flags.make
-psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/SipServer.cpp
+psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o: /home/nex/work/cims/ext/psip/SimpleSipServer/SipServer.cpp
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o: psip_build/CMakeFiles/SimpleSipServer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o -MF CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o.d -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/SipServer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o -MF CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o.d -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.o -c /home/nex/work/cims/ext/psip/SimpleSipServer/SipServer.cpp
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/SipServer.cpp > CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SimpleSipServer/SipServer.cpp > CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.i
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/SipServer.cpp -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SimpleSipServer/SipServer.cpp -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/SipServer.cpp.s
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o: psip_build/CMakeFiles/SimpleSipServer.dir/flags.make
-psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/UserMap.cpp
+psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o: /home/nex/work/cims/ext/psip/SimpleSipServer/UserMap.cpp
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o: psip_build/CMakeFiles/SimpleSipServer.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o -MF CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o.d -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/UserMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o"
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o -MF CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o.d -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.o -c /home/nex/work/cims/ext/psip/SimpleSipServer/UserMap.cpp
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.i"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/UserMap.cpp > CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.i
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SimpleSipServer/UserMap.cpp > CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.i
 
 psip_build/CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.s"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SimpleSipServer/UserMap.cpp -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.s
+	cd /home/nex/work/cims/csp/build/psip_build && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SimpleSipServer/UserMap.cpp -o CMakeFiles/SimpleSipServer.dir/SimpleSipServer/UserMap.cpp.s
 
 # Object files for target SimpleSipServer
 SimpleSipServer_OBJECTS = \
@@ -150,18 +150,18 @@ psip_build/SimpleSipServer: psip_build/libSipPlatform.a
 psip_build/SimpleSipServer: /usr/lib/x86_64-linux-gnu/libssl.so
 psip_build/SimpleSipServer: /usr/lib/x86_64-linux-gnu/libcrypto.so
 psip_build/SimpleSipServer: psip_build/CMakeFiles/SimpleSipServer.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX executable SimpleSipServer"
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/SimpleSipServer.dir/link.txt --verbose=$(VERBOSE)
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/csp/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX executable SimpleSipServer"
+	cd /home/nex/work/cims/csp/build/psip_build && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/SimpleSipServer.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
 psip_build/CMakeFiles/SimpleSipServer.dir/build: psip_build/SimpleSipServer
 .PHONY : psip_build/CMakeFiles/SimpleSipServer.dir/build
 
 psip_build/CMakeFiles/SimpleSipServer.dir/clean:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/SimpleSipServer.dir/cmake_clean.cmake
+	cd /home/nex/work/cims/csp/build/psip_build && $(CMAKE_COMMAND) -P CMakeFiles/SimpleSipServer.dir/cmake_clean.cmake
 .PHONY : psip_build/CMakeFiles/SimpleSipServer.dir/clean
 
 psip_build/CMakeFiles/SimpleSipServer.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/csp/build/psip_build/CMakeFiles/SimpleSipServer.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/csp/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/csp /home/nex/work/cims/ext/psip /home/nex/work/cims/csp/build /home/nex/work/cims/csp/build/psip_build /home/nex/work/cims/csp/build/psip_build/CMakeFiles/SimpleSipServer.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : psip_build/CMakeFiles/SimpleSipServer.dir/depend
 

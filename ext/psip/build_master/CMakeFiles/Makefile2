@@ -54,10 +54,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+CMAKE_SOURCE_DIR = /home/nex/work/cims/ext/psip
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master
+CMAKE_BINARY_DIR = /home/nex/work/cims/ext/psip/build_master
 
 #=============================================================================
 # Directory level rules for the build root directory
@@ -115,14 +115,14 @@ clean: CMakeFiles/TestWebRtcVideo.dir/clean
 CMakeFiles/opensrtp.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/opensrtp.dir/build.make CMakeFiles/opensrtp.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/opensrtp.dir/build.make CMakeFiles/opensrtp.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=87,88,89,90,91,92,93,94,95,96,97,98,99,100 "Built target opensrtp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=87,88,89,90,91,92,93,94,95,96,97,98,99,100 "Built target opensrtp"
 .PHONY : CMakeFiles/opensrtp.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/opensrtp.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 14
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/opensrtp.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/opensrtp.dir/rule
 
 # Convenience name for target.
@@ -141,14 +141,14 @@ CMakeFiles/opensrtp.dir/clean:
 CMakeFiles/SipPlatform.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipPlatform.dir/build.make CMakeFiles/SipPlatform.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipPlatform.dir/build.make CMakeFiles/SipPlatform.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=38,39,40,41,42,43,44,45,46,47,48 "Built target SipPlatform"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=38,39,40,41,42,43,44,45,46,47,48 "Built target SipPlatform"
 .PHONY : CMakeFiles/SipPlatform.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SipPlatform.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 11
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 11
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SipPlatform.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SipPlatform.dir/rule
 
 # Convenience name for target.
@@ -167,14 +167,14 @@ CMakeFiles/SipPlatform.dir/clean:
 CMakeFiles/SipParser.dir/all: CMakeFiles/SipPlatform.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipParser.dir/build.make CMakeFiles/SipParser.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipParser.dir/build.make CMakeFiles/SipParser.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=28,29,30,31,32,33,34,35,36,37 "Built target SipParser"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=28,29,30,31,32,33,34,35,36,37 "Built target SipParser"
 .PHONY : CMakeFiles/SipParser.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SipParser.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 21
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 21
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SipParser.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SipParser.dir/rule
 
 # Convenience name for target.
@@ -193,14 +193,14 @@ CMakeFiles/SipParser.dir/clean:
 CMakeFiles/SdpParser.dir/all: CMakeFiles/SipPlatform.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SdpParser.dir/build.make CMakeFiles/SdpParser.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SdpParser.dir/build.make CMakeFiles/SdpParser.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=9,10,11,12,13 "Built target SdpParser"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=9,10,11,12,13 "Built target SdpParser"
 .PHONY : CMakeFiles/SdpParser.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SdpParser.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 16
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 16
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SdpParser.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SdpParser.dir/rule
 
 # Convenience name for target.
@@ -219,14 +219,14 @@ CMakeFiles/SdpParser.dir/clean:
 CMakeFiles/StunParser.dir/all: CMakeFiles/SipPlatform.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/StunParser.dir/build.make CMakeFiles/StunParser.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/StunParser.dir/build.make CMakeFiles/StunParser.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=71,72,73 "Built target StunParser"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=71,72,73 "Built target StunParser"
 .PHONY : CMakeFiles/StunParser.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/StunParser.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 14
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/StunParser.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/StunParser.dir/rule
 
 # Convenience name for target.
@@ -245,14 +245,14 @@ CMakeFiles/StunParser.dir/clean:
 CMakeFiles/XmlParser.dir/all: CMakeFiles/SipPlatform.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/XmlParser.dir/build.make CMakeFiles/XmlParser.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/XmlParser.dir/build.make CMakeFiles/XmlParser.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=85,86 "Built target XmlParser"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=85,86 "Built target XmlParser"
 .PHONY : CMakeFiles/XmlParser.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/XmlParser.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 13
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 13
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/XmlParser.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/XmlParser.dir/rule
 
 # Convenience name for target.
@@ -271,14 +271,14 @@ CMakeFiles/XmlParser.dir/clean:
 CMakeFiles/HttpParser.dir/all: CMakeFiles/SipPlatform.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/HttpParser.dir/build.make CMakeFiles/HttpParser.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/HttpParser.dir/build.make CMakeFiles/HttpParser.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=3,4,5,6 "Built target HttpParser"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=3,4,5,6 "Built target HttpParser"
 .PHONY : CMakeFiles/HttpParser.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/HttpParser.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 15
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 15
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/HttpParser.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/HttpParser.dir/rule
 
 # Convenience name for target.
@@ -297,14 +297,14 @@ CMakeFiles/HttpParser.dir/clean:
 CMakeFiles/TcpStack.dir/all: CMakeFiles/SipPlatform.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/TcpStack.dir/build.make CMakeFiles/TcpStack.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/TcpStack.dir/build.make CMakeFiles/TcpStack.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=74,75,76,77,78,79,80 "Built target TcpStack"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=74,75,76,77,78,79,80 "Built target TcpStack"
 .PHONY : CMakeFiles/TcpStack.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/TcpStack.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 18
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 18
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/TcpStack.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/TcpStack.dir/rule
 
 # Convenience name for target.
@@ -325,14 +325,14 @@ CMakeFiles/HttpStack.dir/all: CMakeFiles/HttpParser.dir/all
 CMakeFiles/HttpStack.dir/all: CMakeFiles/TcpStack.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/HttpStack.dir/build.make CMakeFiles/HttpStack.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/HttpStack.dir/build.make CMakeFiles/HttpStack.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=7,8 "Built target HttpStack"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=7,8 "Built target HttpStack"
 .PHONY : CMakeFiles/HttpStack.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/HttpStack.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 24
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 24
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/HttpStack.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/HttpStack.dir/rule
 
 # Convenience name for target.
@@ -357,14 +357,14 @@ CMakeFiles/SipStack.dir/all: CMakeFiles/XmlParser.dir/all
 CMakeFiles/SipStack.dir/all: CMakeFiles/TcpStack.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipStack.dir/build.make CMakeFiles/SipStack.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipStack.dir/build.make CMakeFiles/SipStack.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=51,52,53,54,55,56,57,58,59,60,61,62,63,64,65 "Built target SipStack"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=51,52,53,54,55,56,57,58,59,60,61,62,63,64,65 "Built target SipStack"
 .PHONY : CMakeFiles/SipStack.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SipStack.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 67
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 67
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SipStack.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SipStack.dir/rule
 
 # Convenience name for target.
@@ -390,14 +390,14 @@ CMakeFiles/ServerPlatform.dir/all: CMakeFiles/TcpStack.dir/all
 CMakeFiles/ServerPlatform.dir/all: CMakeFiles/SipStack.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ServerPlatform.dir/build.make CMakeFiles/ServerPlatform.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ServerPlatform.dir/build.make CMakeFiles/ServerPlatform.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=14,15,16,17 "Built target ServerPlatform"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=14,15,16,17 "Built target ServerPlatform"
 .PHONY : CMakeFiles/ServerPlatform.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/ServerPlatform.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 71
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 71
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/ServerPlatform.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/ServerPlatform.dir/rule
 
 # Convenience name for target.
@@ -417,21 +417,21 @@ CMakeFiles/SipUserAgent.dir/all: CMakeFiles/opensrtp.dir/all
 CMakeFiles/SipUserAgent.dir/all: CMakeFiles/SipPlatform.dir/all
 CMakeFiles/SipUserAgent.dir/all: CMakeFiles/SipParser.dir/all
 CMakeFiles/SipUserAgent.dir/all: CMakeFiles/SdpParser.dir/all
+CMakeFiles/SipUserAgent.dir/all: CMakeFiles/ServerPlatform.dir/all
 CMakeFiles/SipUserAgent.dir/all: CMakeFiles/StunParser.dir/all
 CMakeFiles/SipUserAgent.dir/all: CMakeFiles/XmlParser.dir/all
 CMakeFiles/SipUserAgent.dir/all: CMakeFiles/TcpStack.dir/all
 CMakeFiles/SipUserAgent.dir/all: CMakeFiles/SipStack.dir/all
-CMakeFiles/SipUserAgent.dir/all: CMakeFiles/ServerPlatform.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipUserAgent.dir/build.make CMakeFiles/SipUserAgent.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipUserAgent.dir/build.make CMakeFiles/SipUserAgent.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=66,67,68,69,70 "Built target SipUserAgent"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=66,67,68,69,70 "Built target SipUserAgent"
 .PHONY : CMakeFiles/SipUserAgent.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SipUserAgent.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 76
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 76
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SipUserAgent.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SipUserAgent.dir/rule
 
 # Convenience name for target.
@@ -451,24 +451,24 @@ CMakeFiles/EchoSipServer.dir/all: CMakeFiles/opensrtp.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/SipPlatform.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/SipParser.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/SdpParser.dir/all
+CMakeFiles/EchoSipServer.dir/all: CMakeFiles/ServerPlatform.dir/all
+CMakeFiles/EchoSipServer.dir/all: CMakeFiles/SipUserAgent.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/StunParser.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/XmlParser.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/HttpParser.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/TcpStack.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/HttpStack.dir/all
 CMakeFiles/EchoSipServer.dir/all: CMakeFiles/SipStack.dir/all
-CMakeFiles/EchoSipServer.dir/all: CMakeFiles/ServerPlatform.dir/all
-CMakeFiles/EchoSipServer.dir/all: CMakeFiles/SipUserAgent.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/EchoSipServer.dir/build.make CMakeFiles/EchoSipServer.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/EchoSipServer.dir/build.make CMakeFiles/EchoSipServer.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=1,2 "Built target EchoSipServer"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=1,2 "Built target EchoSipServer"
 .PHONY : CMakeFiles/EchoSipServer.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/EchoSipServer.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 84
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 84
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/EchoSipServer.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/EchoSipServer.dir/rule
 
 # Convenience name for target.
@@ -488,24 +488,24 @@ CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/opensrtp.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/SipPlatform.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/SipParser.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/SdpParser.dir/all
+CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/ServerPlatform.dir/all
+CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/SipUserAgent.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/StunParser.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/XmlParser.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/HttpParser.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/TcpStack.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/HttpStack.dir/all
 CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/SipStack.dir/all
-CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/ServerPlatform.dir/all
-CMakeFiles/SimpleSipServer.dir/all: CMakeFiles/SipUserAgent.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SimpleSipServer.dir/build.make CMakeFiles/SimpleSipServer.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SimpleSipServer.dir/build.make CMakeFiles/SimpleSipServer.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=18,19 "Built target SimpleSipServer"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=18,19 "Built target SimpleSipServer"
 .PHONY : CMakeFiles/SimpleSipServer.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SimpleSipServer.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 84
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 84
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SimpleSipServer.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SimpleSipServer.dir/rule
 
 # Convenience name for target.
@@ -525,24 +525,24 @@ CMakeFiles/SipClient.dir/all: CMakeFiles/opensrtp.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/SipPlatform.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/SipParser.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/SdpParser.dir/all
+CMakeFiles/SipClient.dir/all: CMakeFiles/ServerPlatform.dir/all
+CMakeFiles/SipClient.dir/all: CMakeFiles/SipUserAgent.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/StunParser.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/XmlParser.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/HttpParser.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/TcpStack.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/HttpStack.dir/all
 CMakeFiles/SipClient.dir/all: CMakeFiles/SipStack.dir/all
-CMakeFiles/SipClient.dir/all: CMakeFiles/ServerPlatform.dir/all
-CMakeFiles/SipClient.dir/all: CMakeFiles/SipUserAgent.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipClient.dir/build.make CMakeFiles/SipClient.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipClient.dir/build.make CMakeFiles/SipClient.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=20,21,22,23 "Built target SipClient"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=20,21,22,23 "Built target SipClient"
 .PHONY : CMakeFiles/SipClient.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SipClient.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 86
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 86
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SipClient.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SipClient.dir/rule
 
 # Convenience name for target.
@@ -562,24 +562,24 @@ CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/opensrtp.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/SipPlatform.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/SipParser.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/SdpParser.dir/all
+CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/ServerPlatform.dir/all
+CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/SipUserAgent.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/StunParser.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/XmlParser.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/HttpParser.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/TcpStack.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/HttpStack.dir/all
 CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/SipStack.dir/all
-CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/ServerPlatform.dir/all
-CMakeFiles/SipLoadBalancer.dir/all: CMakeFiles/SipUserAgent.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipLoadBalancer.dir/build.make CMakeFiles/SipLoadBalancer.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipLoadBalancer.dir/build.make CMakeFiles/SipLoadBalancer.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=24,25,26,27 "Built target SipLoadBalancer"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=24,25,26,27 "Built target SipLoadBalancer"
 .PHONY : CMakeFiles/SipLoadBalancer.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SipLoadBalancer.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 86
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 86
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SipLoadBalancer.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SipLoadBalancer.dir/rule
 
 # Convenience name for target.
@@ -599,24 +599,24 @@ CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/opensrtp.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/SipPlatform.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/SipParser.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/SdpParser.dir/all
+CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/ServerPlatform.dir/all
+CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/SipUserAgent.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/StunParser.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/XmlParser.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/HttpParser.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/TcpStack.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/HttpStack.dir/all
 CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/SipStack.dir/all
-CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/ServerPlatform.dir/all
-CMakeFiles/SipSpeedLinux.dir/all: CMakeFiles/SipUserAgent.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipSpeedLinux.dir/build.make CMakeFiles/SipSpeedLinux.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/SipSpeedLinux.dir/build.make CMakeFiles/SipSpeedLinux.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=49,50 "Built target SipSpeedLinux"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=49,50 "Built target SipSpeedLinux"
 .PHONY : CMakeFiles/SipSpeedLinux.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/SipSpeedLinux.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 84
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 84
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/SipSpeedLinux.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/SipSpeedLinux.dir/rule
 
 # Convenience name for target.
@@ -644,14 +644,14 @@ CMakeFiles/TestWebRtcVideo.dir/all: CMakeFiles/HttpStack.dir/all
 CMakeFiles/TestWebRtcVideo.dir/all: CMakeFiles/SipStack.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/TestWebRtcVideo.dir/build.make CMakeFiles/TestWebRtcVideo.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/TestWebRtcVideo.dir/build.make CMakeFiles/TestWebRtcVideo.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=81,82,83,84 "Built target TestWebRtcVideo"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=81,82,83,84 "Built target TestWebRtcVideo"
 .PHONY : CMakeFiles/TestWebRtcVideo.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/TestWebRtcVideo.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 77
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 77
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/TestWebRtcVideo.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/nex/work/cims/ext/psip/build_master/CMakeFiles 0
 .PHONY : CMakeFiles/TestWebRtcVideo.dir/rule
 
 # Convenience name for target.

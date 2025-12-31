@@ -1,10 +1,10 @@
 <SipClient>
   <Sip>
-    <LocalIp>192.168.0.30</LocalIp>
+    <LocalIp>192.168.0.58</LocalIp>
     <UdpPort>5080</UdpPort>
   </Sip>
   <SipServer>
-    <Ip>192.168.0.30</Ip>
+    <Ip>192.168.0.58</Ip>
     <Port>5060</Port>
     <UserId>1010</UserId>
     <PassWord>1234</PassWord>

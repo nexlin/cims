@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip
+CMAKE_SOURCE_DIR = /home/nex/work/cims/ext/psip
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master
+CMAKE_BINARY_DIR = /home/nex/work/cims/ext/psip/build_master
 
 # Include any dependencies generated for this target.
 include CMakeFiles/SipStack.dir/depend.make
@@ -70,368 +70,368 @@ include CMakeFiles/SipStack.dir/progress.make
 include CMakeFiles/SipStack.dir/flags.make
 
 CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipBuffer.cpp
+CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipBuffer.cpp
 CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipBuffer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipBuffer.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipBuffer.cpp > CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipBuffer.cpp > CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipBuffer.cpp -o CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipBuffer.cpp -o CMakeFiles/SipStack.dir/SipStack/SipBuffer.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipDeleteQueue.cpp
+CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipDeleteQueue.cpp
 CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipDeleteQueue.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipDeleteQueue.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipDeleteQueue.cpp > CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipDeleteQueue.cpp > CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipDeleteQueue.cpp -o CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipDeleteQueue.cpp -o CMakeFiles/SipStack.dir/SipStack/SipDeleteQueue.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipICTList.cpp
+CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipICTList.cpp
 CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipICTList.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipICTList.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipICTList.cpp > CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipICTList.cpp > CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipICTList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipICTList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipICTList.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipISTList.cpp
+CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipISTList.cpp
 CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipISTList.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipISTList.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipISTList.cpp > CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipISTList.cpp > CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipISTList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipISTList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipISTList.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipInviteTransaction.cpp
+CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipInviteTransaction.cpp
 CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipInviteTransaction.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipInviteTransaction.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipInviteTransaction.cpp > CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipInviteTransaction.cpp > CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipInviteTransaction.cpp -o CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipInviteTransaction.cpp -o CMakeFiles/SipStack.dir/SipStack/SipInviteTransaction.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNICTList.cpp
+CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipNICTList.cpp
 CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNICTList.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipNICTList.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNICTList.cpp > CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipNICTList.cpp > CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNICTList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipNICTList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipNICTList.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNISTList.cpp
+CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipNISTList.cpp
 CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNISTList.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipNISTList.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNISTList.cpp > CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipNISTList.cpp > CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNISTList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipNISTList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipNISTList.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNonInviteTransaction.cpp
+CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipNonInviteTransaction.cpp
 CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNonInviteTransaction.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipNonInviteTransaction.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNonInviteTransaction.cpp > CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipNonInviteTransaction.cpp > CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipNonInviteTransaction.cpp -o CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipNonInviteTransaction.cpp -o CMakeFiles/SipStack.dir/SipStack/SipNonInviteTransaction.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipQueue.cpp
+CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipQueue.cpp
 CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipQueue.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipQueue.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipQueue.cpp > CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipQueue.cpp > CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipQueue.cpp -o CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipQueue.cpp -o CMakeFiles/SipStack.dir/SipStack/SipQueue.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipQueueThread.cpp
+CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipQueueThread.cpp
 CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipQueueThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipQueueThread.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipQueueThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipQueueThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipQueueThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipQueueThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipQueueThread.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStack.cpp
+CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipStack.cpp
 CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStack.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipStack.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStack.cpp > CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipStack.cpp > CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStack.cpp -o CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipStack.cpp -o CMakeFiles/SipStack.dir/SipStack/SipStack.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStackSetup.cpp
+CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipStackSetup.cpp
 CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStackSetup.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipStackSetup.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStackSetup.cpp > CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipStackSetup.cpp > CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStackSetup.cpp -o CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipStackSetup.cpp -o CMakeFiles/SipStack.dir/SipStack/SipStackSetup.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStackThread.cpp
+CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipStackThread.cpp
 CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStackThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipStackThread.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStackThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipStackThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipStackThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipStackThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipStackThread.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpClientThread.cpp
+CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipTcpClientThread.cpp
 CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpClientThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipTcpClientThread.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpClientThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipTcpClientThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpClientThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipTcpClientThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTcpClientThread.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpMessage.cpp
+CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipTcpMessage.cpp
 CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpMessage.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipTcpMessage.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpMessage.cpp > CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipTcpMessage.cpp > CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpMessage.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipTcpMessage.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTcpMessage.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpThread.cpp
+CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipTcpThread.cpp
 CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipTcpThread.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipTcpThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTcpThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipTcpThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTcpThread.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsClientThread.cpp
+CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipTlsClientThread.cpp
 CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsClientThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipTlsClientThread.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsClientThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipTlsClientThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsClientThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipTlsClientThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTlsClientThread.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsMessage.cpp
+CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipTlsMessage.cpp
 CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsMessage.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipTlsMessage.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsMessage.cpp > CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipTlsMessage.cpp > CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsMessage.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipTlsMessage.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTlsMessage.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsThread.cpp
+CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipTlsThread.cpp
 CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_19) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_19) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipTlsThread.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipTlsThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTlsThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipTlsThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTlsThread.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTransactionList.cpp
+CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipTransactionList.cpp
 CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_20) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTransactionList.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_20) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipTransactionList.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTransactionList.cpp > CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipTransactionList.cpp > CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipTransactionList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipTransactionList.cpp -o CMakeFiles/SipStack.dir/SipStack/SipTransactionList.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipUdpThread.cpp
+CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o: /home/nex/work/cims/ext/psip/SipStack/SipUdpThread.cpp
 CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_21) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipUdpThread.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_21) "Building CXX object CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/SipUdpThread.cpp
 
 CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipUdpThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/SipUdpThread.cpp > CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/SipUdpThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/SipUdpThread.cpp -o CMakeFiles/SipStack.dir/SipStack/SipUdpThread.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpConnectMap.cpp
+CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o: /home/nex/work/cims/ext/psip/SipStack/TcpConnectMap.cpp
 CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_22) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpConnectMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_22) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/TcpConnectMap.cpp
 
 CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpConnectMap.cpp > CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/TcpConnectMap.cpp > CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpConnectMap.cpp -o CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/TcpConnectMap.cpp -o CMakeFiles/SipStack.dir/SipStack/TcpConnectMap.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpSessionList.cpp
+CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o: /home/nex/work/cims/ext/psip/SipStack/TcpSessionList.cpp
 CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpSessionList.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/TcpSessionList.cpp
 
 CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpSessionList.cpp > CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/TcpSessionList.cpp > CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpSessionList.cpp -o CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/TcpSessionList.cpp -o CMakeFiles/SipStack.dir/SipStack/TcpSessionList.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpSocketMap.cpp
+CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o: /home/nex/work/cims/ext/psip/SipStack/TcpSocketMap.cpp
 CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpSocketMap.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/TcpSocketMap.cpp
 
 CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpSocketMap.cpp > CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/TcpSocketMap.cpp > CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpSocketMap.cpp -o CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/TcpSocketMap.cpp -o CMakeFiles/SipStack.dir/SipStack/TcpSocketMap.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpThreadList.cpp
+CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o: /home/nex/work/cims/ext/psip/SipStack/TcpThreadList.cpp
 CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpThreadList.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/TcpThreadList.cpp
 
 CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpThreadList.cpp > CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/TcpThreadList.cpp > CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TcpThreadList.cpp -o CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/TcpThreadList.cpp -o CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.s
 
 CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o: CMakeFiles/SipStack.dir/flags.make
-CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o: /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TlsFunction.cpp
+CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o: /home/nex/work/cims/ext/psip/SipStack/TlsFunction.cpp
 CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o: CMakeFiles/SipStack.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_26) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o -c /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TlsFunction.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_26) "Building CXX object CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o -MF CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o.d -o CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o -c /home/nex/work/cims/ext/psip/SipStack/TlsFunction.cpp
 
 CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TlsFunction.cpp > CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/nex/work/cims/ext/psip/SipStack/TlsFunction.cpp > CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.i
 
 CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/SipStack/TlsFunction.cpp -o CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/nex/work/cims/ext/psip/SipStack/TlsFunction.cpp -o CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.s
 
 # Object files for target SipStack
 SipStack_OBJECTS = \
@@ -493,7 +493,7 @@ libSipStack.a: CMakeFiles/SipStack.dir/SipStack/TcpThreadList.cpp.o
 libSipStack.a: CMakeFiles/SipStack.dir/SipStack/TlsFunction.cpp.o
 libSipStack.a: CMakeFiles/SipStack.dir/build.make
 libSipStack.a: CMakeFiles/SipStack.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_27) "Linking CXX static library libSipStack.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/nex/work/cims/ext/psip/build_master/CMakeFiles --progress-num=$(CMAKE_PROGRESS_27) "Linking CXX static library libSipStack.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/SipStack.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/SipStack.dir/link.txt --verbose=$(VERBOSE)
 
@@ -506,6 +506,6 @@ CMakeFiles/SipStack.dir/clean:
 .PHONY : CMakeFiles/SipStack.dir/clean
 
 CMakeFiles/SipStack.dir/depend:
-	cd /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master /mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/build_master/CMakeFiles/SipStack.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/nex/work/cims/ext/psip/build_master && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master /home/nex/work/cims/ext/psip/build_master/CMakeFiles/SipStack.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/SipStack.dir/depend
 
