@@ -1,58 +1,6 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# Build Directories and Artifacts
-build/
-dist/
-psip_build/
-CMakeFiles/
-.cache/
-.vscode/
-
-# Logs
+csc/venv/
+csc/venv_new/
+bin/csc_pihttp/logs/
 *.log
-*_log.txt
-strace_output.txt
-
-# Keys
-*.pem
-
-# External Projects and Artifacts
-pkg/l_ffmpeg/
-pkg/oneTBB/
-pkg/opencore-amr/
-pkg/vo-amrwbenc-0.1.3/
-pkg/x264/
-ext/oneTBB_down/
-ext/googletest/tmp/
-
+__pycache__/
+.DS_Store
