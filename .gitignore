@@ -6,3 +6,8 @@ __pycache__/
 .DS_Store
 ext/
 pkg/
+build/
+csp/build/
+csp/CMakeFiles/
+csp/psip_build/
+csp/dist/
