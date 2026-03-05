@@ -190,63 +190,16 @@ void SendSipNotify(const std::string& uri, const std::string& etag, const std::s
     std::list<SubscriptionInfo> subList;
     
     // [USER REQ] Skip subscription requirement, target registered group members
-    /*
+    
     gclsSubscriptionManager.GetSubscribers(uri, subList);
 
     if (subList.empty()) {
         CLog::Print(LOG_INFO, "SendSipNotify: No subscribers for %s", uri.c_str());
         return;
     }
-    */
+    
 
-    // Extract Group ID from URI (Handle tel: schema and + prefix)
-    std::string strGroupId;
-    size_t pos = uri.find( ":" );
-    if ( pos != std::string::npos ) {
-        strGroupId = uri.substr( pos + 1 );
-    } else {
-        strGroupId = uri;
-    }
-    if ( !strGroupId.empty() && strGroupId[0] == '+' ) {
-        strGroupId = strGroupId.substr( 1 );
-    }
 
-    CspPttGroup clsGroup;
-    if (gclsGroupMap.Select(strGroupId.c_str(), clsGroup)) {
-        CLog::Print(LOG_INFO, "SendSipNotify: Found Group %s, checking %d members", strGroupId.c_str(), (int)clsGroup._pusers.size());
-        for (const auto& pUser : clsGroup._pusers) {
-            CUserInfo clsUserInfo;
-            if (gclsUserMap.Select(pUser->_id.c_str(), clsUserInfo)) {
-                SubscriptionInfo info;
-                char szContact[256];
-                snprintf(szContact, sizeof(szContact), "sip:%s@%s:%d", pUser->_id.c_str(), clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort);
-                
-                info.strSubscriberUri = szContact;
-                info.strCallId = "forced-notify-" + std::to_string(time(NULL)) + "-" + pUser->_id;
-                info.iExpires = 3600;
-                
-                subList.push_back(info);
-                CLog::Print(LOG_INFO, "SendSipNotify: Target member %s added for NOTIFY", pUser->_id.c_str());
-            } else {
-                CLog::Print(LOG_DEBUG, "SendSipNotify: Member %s is not registered", pUser->_id.c_str());
-            }
-        }
-    } else {
-        CLog::Print(LOG_INFO, "SendSipNotify: Group %s NOT found in GroupMap", strGroupId.c_str());
-    }
-
-    if (subList.empty()) {
-        USER_ID_LIST clsRegList;
-        gclsUserMap.GetRegisteredUsers( clsRegList );
-        std::string strRegUsers;
-        for ( auto const &strId : clsRegList ) {
-            if ( !strRegUsers.empty() ) strRegUsers += ", ";
-            strRegUsers += strId;
-        }
-        CLog::Print(LOG_INFO, "SendSipNotify: No registered members found for group %s. Total RegUsers[%s]", 
-                    strGroupId.c_str(), strRegUsers.c_str());
-        return;
-    }
 
     for (const auto& sub : subList) {
         CLog::Print(LOG_INFO, "SendSipNotify: Sending to %s", sub.strSubscriberUri.c_str());
