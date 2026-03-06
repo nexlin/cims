@@ -21,8 +21,8 @@ import os
 from typing import Optional, Dict
 
 # === CONFIGURATION ===
-TEST_USER = "tel:+2001"
-TEST_GROUP = "tel:+2000"
+TEST_USER = "tel:+82571900034"
+TEST_GROUP = "tel:3000"
 
 # 토큰 캐시 파일
 CONFIG_FILE = "data/ptt_token_config.json"
@@ -86,7 +86,7 @@ async def full_authentication(session, base_url):
     async with session.get(f"{base_url}/idms/authreq", params={
         "client_id": "MCPTT_UE",
         "user_name": TEST_USER,
-        "user_password": "1234",
+        "user_password": "123456",
         "redirect_uri": "http://client/cb",
         "state": "mystate",
         "scope": "openid 3gpp:mcptt:ptt_server",

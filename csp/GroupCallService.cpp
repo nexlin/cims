@@ -13,6 +13,7 @@
 #include "UserMap.h"
 #include "SipServerSetup.h"
 
+
 // External global objects
 extern CSipUserAgent gclsUserAgent;
 
@@ -87,7 +88,26 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     int iSharedPort = -1;
     std::string strSharedIp;
 
-    // 1. Check User
+    // 0. Verify Group Membership (Requirement: Only invite if user is explicitly in group config)
+    CspPttGroup clsGroup;
+    if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
+        bool bIsMember = false;
+        for ( const auto& pUser : clsGroup._pusers ) {
+            if ( pUser && pUser->_id == pszUserId ) {
+                bIsMember = true;
+                break;
+            }
+        }
+        if ( !bIsMember ) {
+            CLog::Print( LOG_DEBUG, "InviteMember(%s) User NOT in Group(%s) member list. Skipping invitation.", pszUserId, pszGroupId );
+            return false;
+        }
+    } else {
+        CLog::Print( LOG_ERROR, "InviteMember(%s) Group config not found for %s", pszUserId, pszGroupId );
+        return false;
+    }
+
+    // 1. Check User 
     if ( !gclsUserMap.Select( pszUserId, clsUserInfo ) ) {
         // CspUser (JSON) does not store dynamic IP/Port. Only UserMap (Cache) does.
         // If not in UserMap, user is not registered/active.

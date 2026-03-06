@@ -41,8 +41,10 @@ public:
     };
     ~CspUser() {};
 
-    // SIP 사용자 아이디
     std::string m_strId;
+
+    // SIP 인증용 아이디 (IMS 등에서 전화번호와 분리된 단말기 고유 ID. 없으면 m_strId와 동일시함)
+    std::string m_strAuthId;
 
     // SIP 비밀번호
     std::string m_strPassWord;

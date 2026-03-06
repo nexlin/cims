@@ -40,6 +40,7 @@ CspUserMap gclsCspUserMap;
  */
 void CspUser::clear() {
     m_strId.clear();
+    m_strAuthId.clear();
     m_strPassWord.clear();
     m_bDnd = false;
     m_strOrganizationId.clear();
@@ -56,33 +57,11 @@ void CspUser::clear() {
 //std::string strFileName = gclsSetup.m_strUserDataFolder; 
 /**/    
 bool CspUserMap::_loadUserFromFile(std::string strUserId, CspUser &clsUser) {
-    long long userId = 0;
-    try {
-        userId = std::stoll(strUserId);
-    } catch (...) {
-        return false; 
-    }
-
-    std::stringstream ss;
-    ss << std::setw(10) << std::setfill('0') << userId;
-    std::string strFileName = ss.str() + ".json";
+    std::string strFileName = strUserId + ".json";
     
-    // Directory structure: 00/00/00/10/0000001000.json
-    std::string d1 = strFileName.substr(0, 2);
-    std::string d2 = strFileName.substr(2, 2);
-    std::string d3 = strFileName.substr(4, 2);
-    std::string d4 = strFileName.substr(6, 2);
-
     // Assuming m_strUserDataFolder is "cims/csp/User" as requested
-    std::string strFolderName = gclsSetup.m_strUserDataFolder; // "cims/csp/User"
-    // Remove trailing slash if present? Assuming clean path or handle it.
-    // User path: cims/csp/User/00/00/00/10/0000001000.json
-    
-    // If strFolderName doesn't end with User, we might need to adjust?
-    // User said: @[cims/csp/User/00/00/00/10/0000001000.json]
-    // Let's assume m_strUserDataFolder points to "cims/csp/User".
-    
-    std::string strFilePath = strFolderName + "/" + d1 + "/" + d2 + "/" + d3 + "/" + d4 + "/" + strFileName;
+    std::string strFolderName = gclsSetup.m_strUserDataFolder;
+    std::string strFilePath = strFolderName + "/" + strFileName;
 
     std::ifstream t(strFilePath);
     if (!t.is_open()) {
@@ -103,6 +82,12 @@ bool CspUserMap::_loadUserFromFile(std::string strUserId, CspUser &clsUser) {
     // User sample: ID in file? "0000001000.json"
     
     clsUser.m_strId = strUserId;
+    if (jsonUser.Has("username")) {
+        clsUser.m_strAuthId = jsonUser.GetString("username");
+    } else {
+        clsUser.m_strAuthId = strUserId;
+    }
+    
     if (jsonUser.Has("passwd")) clsUser.m_strPassWord = jsonUser.GetString("passwd");
     if (jsonUser.Has("org_id")) clsUser.m_strOrganizationId = jsonUser.GetString("org_id");
     
@@ -300,15 +285,12 @@ static bool ScanUserFiles( const char *pszDirName, std::list<std::string> &clsUs
         std::string strPath = pszDirName;
         CDirectory::AppendName( strPath, strName.c_str() );
 
-        if ( CDirectory::IsDirectory( strPath.c_str() ) ) {
-            ScanUserFiles( strPath.c_str(), clsUserList );
-        } else if ( strName.length() > 5 && strName.substr( strName.length() - 5 ) == ".json" ) {
-            std::string strId = strName.substr( 0, strName.length() - 5 );
-            size_t first = strId.find_first_not_of( '0' );
-            if ( std::string::npos == first ) {
-                clsUserList.push_back( "0" );
-            } else {
-                clsUserList.push_back( strId.substr( first ) );
+        // Removed recursive directory scanning and zero-trimming.
+        // Assuming a flat hierarchy where all .json files are directly under User directory.
+        if ( !CDirectory::IsDirectory( strPath.c_str() ) ) {
+            if ( strName.length() > 5 && strName.substr( strName.length() - 5 ) == ".json" ) {
+                std::string strId = strName.substr( 0, strName.length() - 5 );
+                clsUserList.push_back( strId );
             }
         }
     }

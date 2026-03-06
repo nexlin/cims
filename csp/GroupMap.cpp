@@ -65,7 +65,7 @@ bool CGroupMap::ReadDir( const char *pszDirName ) {
     }
     
     // Sync Logic: Remove groups not found in current directory scan
-    m_clsMutex.acquire();
+    m_clsMutex.lock();
     for (auto it = m_clsMap.begin(); it != m_clsMap.end(); ) {
         if (setFoundIds.find(it->first) == setFoundIds.end()) {
             CLog::Print(LOG_INFO, "GroupMap Removed Group(%s)", it->first.c_str());
@@ -74,7 +74,7 @@ bool CGroupMap::ReadDir( const char *pszDirName ) {
             ++it;
         }
     }
-    m_clsMutex.release();
+    m_clsMutex.unlock();
 
     CLog::Print( LOG_INFO, "GroupMap: ReadDir finished. Total %d groups in map.", (int)m_clsMap.size() );
     return true;
@@ -83,10 +83,18 @@ bool CGroupMap::ReadDir( const char *pszDirName ) {
 /**
  * @brief Insert group into map
  */
-void CGroupMap::Insert( CspPttGroup &clsGroup ) {
-    m_clsMutex.acquire();
-    m_clsMap[clsGroup._id] = clsGroup;
-    m_clsMutex.release();
+void CGroupMap::Insert(CspPttGroup& clsGroup) {
+    GROUP_MAP::iterator itMap;
+
+    m_clsMutex.lock();
+    itMap = m_clsMap.find(clsGroup._id);
+    if (itMap == m_clsMap.end()) {
+        m_clsMap.insert(GROUP_MAP::value_type(clsGroup._id, clsGroup));
+    }
+    else {
+        itMap->second = clsGroup;
+    }
+    m_clsMutex.unlock();
 }
 
 
@@ -94,13 +102,13 @@ bool CGroupMap::Select(const char *pszGroupId, CspPttGroup &clsGroup ) {
     bool bRes = false;
     GROUP_MAP::iterator it;
 
-    m_clsMutex.acquire();
+    m_clsMutex.lock();
     it = m_clsMap.find( pszGroupId );
     if ( it != m_clsMap.end() ) {
         clsGroup = it->second;
         bRes = true;
     }
-    m_clsMutex.release();
+    m_clsMutex.unlock();
 
     return bRes;
 }
@@ -109,36 +117,32 @@ bool CGroupMap::Select(const char *pszGroupId, CspPttGroup &clsGroup ) {
  * @brief Clear map
  */
 void CGroupMap::Clear() {
-    m_clsMutex.acquire();
+    m_clsMutex.lock();
     m_clsMap.clear();
-    m_clsMutex.release();
+    m_clsMutex.unlock();
 }
 
-void CGroupMap::IterateInternal( std::function<void(const CspPttGroup&)> fnCallback ) {
-    m_clsMutex.acquire();
-    for ( auto const& [key, val] : m_clsMap ) {
-        fnCallback(val);
+void CGroupMap::IterateInternal(std::function<void(const CspPttGroup&)> fn) {
+    m_clsMutex.lock();
+    for ( auto const& [key, group] : m_clsMap ) {
+        fn(group);
     }
-    m_clsMutex.release();
+    m_clsMutex.unlock();
 }
 
 bool CGroupMap::FindGroupsByUser(std::string strUserId) {
-    bool bRes = false;
-    
-    m_clsMutex.acquire();
+    bool bRet = false;
+    m_clsMutex.lock();
     for (auto const& [key, group] : m_clsMap) {
         for (auto const& user : group._pusers) {
             if (user->_id == strUserId) {
-                bRes = true; // Found at least one group
-                // If we need to return the groups, we should change signature.
-                // For now, matching the bool return type (just checks existence?).
-                // User code snippet didn't specify behavior, but signature returns bool.
+                bRet = true;
                 break;
             }
         }
-        if (bRes) break;
+        if (bRet) break;
     }
-    m_clsMutex.release();
+    m_clsMutex.unlock();
 
-    return bRes;
+    return bRet;
 }

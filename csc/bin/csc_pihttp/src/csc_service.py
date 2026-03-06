@@ -67,8 +67,9 @@ def load_shared_data(config):
                 with open(fpath, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     filename = os.path.basename(fpath).split('.')[0]
-                    user_id = str(int(filename)) 
-                    uri = f"tel:+{user_id}"
+                    # Fix: Handle numbers with '+' prefix correctly, e.g., '+82571900034'
+                    user_id = filename
+                    uri = f"tel:{user_id}" if user_id.startswith('+') else f"tel:+{user_id}"
                     
                     USERS[uri] = {
                         "password": data.get('passwd', 'password123'),
@@ -445,7 +446,13 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     logger.log_info(f"[IdMS] Auth Req: user={user_name}, client={client_id}, pkce=S256")
 
     # 사용자 인증
-    if user_name not in USERS or USERS[user_name]['password'] != user_password:
+    if user_name not in USERS:
+        logger.log_error(f"[IdMS] Auth Req Failed: user {user_name} not found in USERS keys: {list(USERS.keys())}")
+        location = f"{redirect_uri}?error=auth_fail&state={state}"
+        return HandlerResult(status=302, headers={"Location": location})
+    
+    if USERS[user_name]['password'] != user_password:
+        logger.log_error(f"[IdMS] Auth Req Failed: Password mismatch for {user_name}. Expected {USERS[user_name]['password']}, got {user_password}")
         location = f"{redirect_uri}?error=auth_fail&state={state}"
         return HandlerResult(status=302, headers={"Location": location})
 

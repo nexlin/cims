@@ -190,16 +190,41 @@ void SendSipNotify(const std::string& uri, const std::string& etag, const std::s
     std::list<SubscriptionInfo> subList;
     
     // [USER REQ] Skip subscription requirement, target registered group members
+    // gclsSubscriptionManager.GetSubscribers(uri, subList);
     
-    gclsSubscriptionManager.GetSubscribers(uri, subList);
+    // Instead of active subscribers, find the group and all its members
+    CspPttGroup clsGroup;
+    std::string strGroupId = uri;
+    if (strGroupId.find("tel:") == 0) strGroupId = strGroupId.substr(4);
+    if (strGroupId.find("sip:") == 0) strGroupId = strGroupId.substr(4);
 
-    if (subList.empty()) {
-        CLog::Print(LOG_INFO, "SendSipNotify: No subscribers for %s", uri.c_str());
+    if (!gclsGroupMap.Select(strGroupId.c_str(), clsGroup)) {
+        CLog::Print(LOG_INFO, "SendSipNotify: Group %s not found in GroupMap", strGroupId.c_str());
         return;
     }
-    
 
+    CLog::Print(LOG_INFO, "SendSipNotify: Broadcasting NOTIFY to %d members of group %s", 
+                (int)clsGroup._pusers.size(), strGroupId.c_str());
 
+    for (const auto& member : clsGroup._pusers) {
+        // Check if member is actually registered before sending
+        std::string memberId = member->_id;
+        CspUser clsUser;
+        if (!gclsUserMap.Select(memberId.c_str())) {
+            continue; // Not registered right now
+        }
+        
+        SubscriptionInfo dummySub;
+        dummySub.strSubscriberUri = "sip:" + memberId + "@mcptt.com"; // Format URI for the NOTIFY To header
+        dummySub.strCallId = "notify_" + std::to_string(time(NULL)) + "_" + memberId;
+        dummySub.iExpires = 3600;
+        subList.push_back(dummySub);
+    }
+
+    if (subList.empty()) {
+        CLog::Print(LOG_INFO, "SendSipNotify: No registered members to notify for %s", uri.c_str());
+        return;
+    }
 
     for (const auto& sub : subList) {
         CLog::Print(LOG_INFO, "SendSipNotify: Sending to %s", sub.strSubscriberUri.c_str());

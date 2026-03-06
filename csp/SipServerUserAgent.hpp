@@ -16,7 +16,7 @@ bool CSipServer::CheckAuthrization( CSipMessage *pclsMessage ) {
 
     CspUser clsUser;
 
-    ECheckAuthResult eRes = CheckAuthorization( &( *itCL ), pclsMessage->m_strSipMethod.c_str(), clsUser );
+    ECheckAuthResult eRes = CheckAuthorization( &( *itCL ), pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), pclsMessage->m_strSipMethod.c_str(), clsUser );
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
             SendUnAuthorizedResponse( pclsMessage );

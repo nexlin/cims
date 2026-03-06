@@ -120,17 +120,24 @@ enum ECheckAuthResult
  * @ingroup CspServer
  * @brief
  * @param pclsCredential	SIP 인증 정보 저장 객체
+ * @param pszFromId             SIP From 헤더의 사용자 식별자 (전화번호 등 파일 조회용)
  * @param pszMethod				SIP 메소드
  * @param clsXmlUser			사용자 정보 저장 객체
  * @returns 인증에 성공하면 E_AUTH_OK 를 리턴한다.
  *					존재하지 않는 nonce 인 경우 E_AUTH_NONCE_NOT_FOUND 를 리턴한다.
  *					그 외의 오류는 E_AUTH_ERROR 를 리턴한다.
  */
-ECheckAuthResult CheckAuthorization( CSipCredential * pclsCredential, const char * pszMethod, CspUser & clsXmlUser )
+ECheckAuthResult CheckAuthorization( CSipCredential * pclsCredential, const char * pszFromId, const char * pszMethod, CspUser & clsXmlUser )
 {
 	if( pclsCredential->m_strUserName.empty() ) return E_AUTH_ERROR;
 	if( gclsNonceMap.Select( pclsCredential->m_strNonce.c_str() ) == false ) return E_AUTH_NONCE_NOT_FOUND;
-	if( gclsCspUserMap.Select( pclsCredential->m_strUserName.c_str(), clsXmlUser ) == false ) return E_AUTH_ERROR;
+	// 1. Load user configuration using the From ID instead of the Auth Username
+	if( gclsCspUserMap.Select( pszFromId, clsXmlUser ) == false ) return E_AUTH_ERROR;
+
+	// 2. Cross-check: The Authorization username must match the AuthId configured for this From ID
+	if( clsXmlUser.m_strAuthId != pclsCredential->m_strUserName ) return E_AUTH_ERROR;
+
+	// 3. Digest Crypto verification
 	if( CheckAuthorizationResponse( pclsCredential->m_strUserName.c_str(), pclsCredential->m_strRealm.c_str(), pclsCredential->m_strNonce.c_str(), pclsCredential->m_strUri.c_str()
 				, pclsCredential->m_strResponse.c_str(), clsXmlUser.m_strPassWord.c_str(), pszMethod ) == false ) return E_AUTH_ERROR;
 
@@ -177,7 +184,7 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 
 	CspUser	clsUser;
 
-	ECheckAuthResult eRes = CheckAuthorization( &(*itCL), pclsMessage->m_strSipMethod.c_str(), clsUser );
+	ECheckAuthResult eRes = CheckAuthorization( &(*itCL), pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), pclsMessage->m_strSipMethod.c_str(), clsUser );
 	switch( eRes )
 	{
 	case E_AUTH_NONCE_NOT_FOUND:

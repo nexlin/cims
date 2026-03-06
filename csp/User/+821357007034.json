@@ -1,6 +1,7 @@
 {
-    "passwd": "1234",
-    "org_id": "1000",
+    "username": "4503312341235@ims.mnc033.mcc450.3gppnetwork.org",
+    "passwd": "123456",
+    "org_id": "1",
     "dnd": "false",
     "forward_id": "",
     "reject_id": [],

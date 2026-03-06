@@ -8,6 +8,7 @@
 #include "CspPttGroup.h"
 #include <map>
 #include <functional>
+#include <mutex>
 
 typedef std::map<std::string, CspPttGroup> GROUP_MAP;
 
@@ -39,7 +40,7 @@ public:
 
 private:
     std::map<std::string, CspPttGroup> m_clsMap;
-    CSipMutex m_clsMutex;
+    std::recursive_mutex m_clsMutex;
 
     bool ReadDir( const char *pszDirName );
 };
