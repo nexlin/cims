@@ -2,12 +2,39 @@ csc/venv/
 csc/venv_new/
 bin/csc_pihttp/logs/
 *.log
-__pycache__/
-.DS_Store
-ext/
-pkg/
+
+# Python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# CMake build artifacts
+CMakeCache.txt
+CMakeFiles/
+**/CMakeCache.txt
+**/CMakeFiles/
+**/cmake_install.cmake
+**/Makefile
+**/*.cbp
+
+# Build directories
 build/
+**/build/
+dist/
+**/dist/
+pkg/
 csp/build/
 csp/CMakeFiles/
 csp/psip_build/
 csp/dist/
+
+# External dependencies
+ext/
+
+# Lock files
+**/*.lock
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
