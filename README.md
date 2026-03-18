@@ -74,3 +74,18 @@ This will create a `dist/` directory in your build folder containing the binarie
 ``` bash
  ./cmp ../config/cmp.json
 ```
+
+
+6. 기타 설정
+6.1 git 설정
+``` bash
+ git config --global user.name "nexlin"
+ git config --global user.email "jcryu74@gmail.com"
+
+# github 에서 Token 생성 후 아래와 같이 입력
+``` bash
+ git config --global credential.helper store
+ git push 
+ # 비밀번호에 token 입력
+
+```
