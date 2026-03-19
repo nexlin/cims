@@ -28,8 +28,11 @@ csp/CMakeFiles/
 csp/psip_build/
 csp/dist/
 
-# External dependencies
+# External dependencies (build artifacts, source archives)
 ext/
+
+# Test run logs
+test_run/log/
 
 # Lock files
 **/*.lock

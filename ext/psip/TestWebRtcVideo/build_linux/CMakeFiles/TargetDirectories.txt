@@ -1,3 +1,0 @@
-/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/TestWebRtcVideo/build_linux/CMakeFiles/TestWebRtcVideo.dir
-/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/TestWebRtcVideo/build_linux/CMakeFiles/edit_cache.dir
-/mnt/c/Users/nex/Desktop/work/cIMS/media/cims/ext/psip/TestWebRtcVideo/build_linux/CMakeFiles/rebuild_cache.dir

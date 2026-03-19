@@ -1,2 +1,0 @@
-/usr/bin/ar qc libSdpParser.a CMakeFiles/SdpParser.dir/SdpParser/SdpAttribute.cpp.o CMakeFiles/SdpParser.dir/SdpParser/SdpAttributeCrypto.cpp.o CMakeFiles/SdpParser.dir/SdpParser/SdpBandWidth.cpp.o CMakeFiles/SdpParser.dir/SdpParser/SdpConnection.cpp.o CMakeFiles/SdpParser.dir/SdpParser/SdpMedia.cpp.o CMakeFiles/SdpParser.dir/SdpParser/SdpMessage.cpp.o CMakeFiles/SdpParser.dir/SdpParser/SdpOrigin.cpp.o CMakeFiles/SdpParser.dir/SdpParser/SdpTime.cpp.o
-/usr/bin/ranlib libSdpParser.a

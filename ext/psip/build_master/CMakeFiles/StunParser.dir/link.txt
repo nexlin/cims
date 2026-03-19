@@ -1,2 +1,0 @@
-/usr/bin/ar qc libStunParser.a CMakeFiles/StunParser.dir/StunParser/StunAttribute.cpp.o CMakeFiles/StunParser.dir/StunParser/StunDecode.cpp.o CMakeFiles/StunParser.dir/StunParser/StunEncode.cpp.o CMakeFiles/StunParser.dir/StunParser/StunHeader.cpp.o CMakeFiles/StunParser.dir/StunParser/StunMessage.cpp.o
-/usr/bin/ranlib libStunParser.a

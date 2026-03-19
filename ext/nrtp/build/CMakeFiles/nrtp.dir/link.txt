@@ -1,2 +1,0 @@
-/usr/bin/ar qc libnrtp.a CMakeFiles/nrtp.dir/nrtp_packet.cpp.o CMakeFiles/nrtp.dir/nrtp_session.cpp.o CMakeFiles/nrtp.dir/nrtp_socket.cpp.o CMakeFiles/nrtp.dir/nrtp_rtcp.cpp.o CMakeFiles/nrtp.dir/mc_video_session.cpp.o
-/usr/bin/ranlib libnrtp.a

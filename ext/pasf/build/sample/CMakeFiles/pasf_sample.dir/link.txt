@@ -1,1 +1,0 @@
-/usr/bin/c++ -rdynamic CMakeFiles/pasf_sample.dir/src/test.o -o pasf_sample   -L/mnt/c/Users/nex/Desktop/work/cIMS/media/extensions/pasf/build/src  ../src/libSTATIC.a -lpthread -lrt 

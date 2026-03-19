@@ -1,2 +1,0 @@
-/usr/bin/ar qc libHttpParser.a CMakeFiles/HttpParser.dir/HttpParser/HttpHeader.cpp.o CMakeFiles/HttpParser.dir/HttpParser/HttpMessage.cpp.o CMakeFiles/HttpParser.dir/HttpParser/HttpPacket.cpp.o CMakeFiles/HttpParser.dir/HttpParser/HttpStatusCode.cpp.o CMakeFiles/HttpParser.dir/HttpParser/HttpUri.cpp.o
-/usr/bin/ranlib libHttpParser.a

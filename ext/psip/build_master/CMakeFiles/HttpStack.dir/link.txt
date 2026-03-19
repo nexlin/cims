@@ -1,2 +1,0 @@
-/usr/bin/ar qc libHttpStack.a CMakeFiles/HttpStack.dir/HttpStack/HttpClient.cpp.o CMakeFiles/HttpStack.dir/HttpStack/HttpStack.cpp.o CMakeFiles/HttpStack.dir/HttpStack/WebSocketPacket.cpp.o
-/usr/bin/ranlib libHttpStack.a

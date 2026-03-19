@@ -1,4 +1,0 @@
-/mnt/c/Users/nex/Desktop/work/cIMS/media/extensions/nrtp/build/CMakeFiles/nrtp.dir
-/mnt/c/Users/nex/Desktop/work/cIMS/media/extensions/nrtp/build/CMakeFiles/nrtp_test.dir
-/mnt/c/Users/nex/Desktop/work/cIMS/media/extensions/nrtp/build/CMakeFiles/edit_cache.dir
-/mnt/c/Users/nex/Desktop/work/cIMS/media/extensions/nrtp/build/CMakeFiles/rebuild_cache.dir
