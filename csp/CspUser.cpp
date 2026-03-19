@@ -82,8 +82,8 @@ bool CspUserMap::_loadUserFromFile(std::string strUserId, CspUser &clsUser) {
     // User sample: ID in file? "0000001000.json"
     
     clsUser.m_strId = strUserId;
-    if (jsonUser.Has("username")) {
-        clsUser.m_strAuthId = jsonUser.GetString("username");
+    if (jsonUser.Has("auth_id")) {
+        clsUser.m_strAuthId = jsonUser.GetString("auth_id");
     } else {
         clsUser.m_strAuthId = strUserId;
     }

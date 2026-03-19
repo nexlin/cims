@@ -55,6 +55,23 @@ private:
     void CheckMemberState();
     void CheckGroupIntegrity();
 
+    /**
+     * @brief Build PTT group info XML body (application/vnd.oma.poc.groups+xml)
+     * @param clsGroup PTT group info
+     * @return XML string
+     */
+    static std::string BuildGroupInfoXml( const class CspPttGroup& clsGroup, const std::string& strUserId );
+
+    /**
+     * @brief Wrap SDP and group XML into multipart/mixed body, update INVITE message
+     * @param pclsInvite   INVITE message to modify
+     * @param strGroupXml  PTT group info XML string
+     * @param strFloorIp   Floor control IP (shared RTP IP)
+     * @param iFloorPort   Floor control UDP port
+     */
+    static void WrapMultipartBody( class CSipMessage * pclsInvite, const std::string& strGroupXml,
+                                   const std::string& strFloorIp, int iFloorPort );
+
     bool m_bMonitorRunning;
     std::thread m_threadMonitor;
 

@@ -273,9 +273,13 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
         }
     } else {
         group = _groups[groupId];
+        sharedSession = group->getSharedSession();
+        if (sharedSession) {
+            sharedPort = sharedSession->getLocalPort();
+        }
     }
-    
-    printf("[CmpServer] processAddGroup Group=%p SharedSession=%p\n", group, sharedSession);
+
+    printf("[CmpServer] processAddGroup Group=%p SharedSession=%p Port=%d\n", group, sharedSession, sharedPort);
 
     if (group) {
         if (!membersStr.empty()) {

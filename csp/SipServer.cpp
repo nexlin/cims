@@ -30,6 +30,7 @@
 #include "SipServerSetup.h"
 #include "GroupCallService.h"
 #include "SipUtility.h"
+#include "SipUserAgent.h"
 #include "TimeString.h"
 #include "UserMap.h"
 #include "CspUser.h"
@@ -81,57 +82,87 @@ bool CSipServer::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
         return RecvRequestRegister( iThreadId, pclsMessage );
     } else if ( pclsMessage->IsMethod( "SUBSCRIBE" ) ) {
-        // [FIX] Handle SUBSCRIBE
-        //std::string strFrom = pclsMessage->GetHeaderUrl("From");
-        char szFromBuf[1024];
+        char szFromBuf[256];
         pclsMessage->m_clsFrom.m_clsUri.ToString(szFromBuf, sizeof(szFromBuf));
-        std::string strFrom = szFromBuf;
-        CLog::Print( LOG_DEBUG, "RecvRequest: SUBSCRIBE From=%s", strFrom.c_str() );
+        CLog::Print( LOG_DEBUG, "RecvRequest: SUBSCRIBE From=%s", szFromBuf );
 
         // 1. Check Registration
         std::string strFromId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
         if ( !gclsUserMap.Select( strFromId.c_str() ) ) {
             CLog::Print( LOG_ERROR, "SUBSCRIBE Rejected: User %s not registered", strFromId.c_str() );
-            SendResponse( pclsMessage, 403 ); // Forbidden
+            SendResponse( pclsMessage, 403 );
             return true;
         }
 
-        // 2. Parse Info
-        CSipHeader * pHeader = pclsMessage->GetHeader("Event");
-        std::string strEvent;
-        if (pHeader) strEvent = pHeader->m_strValue;
-        
+        // 2. Parse dialog info
+        std::string strSubCallId;
+        pclsMessage->GetCallId(strSubCallId);
+
+        std::string strFromTag = pclsMessage->m_clsFrom.SelectParamValue(SIP_TAG);
+
+        // Determine event type from Request-URI (gms_psi -> gms, cms_psi -> cms)
+        char szReqUriBuf[256];
+        pclsMessage->m_clsReqUri.ToString(szReqUriBuf, sizeof(szReqUriBuf));
+        std::string strReqUri = szReqUriBuf;
+        std::string strEventType;
+        if (strReqUri.find("gms") != std::string::npos) {
+            strEventType = "gms";
+        } else if (strReqUri.find("cms") != std::string::npos) {
+            strEventType = "cms";
+        } else {
+            strEventType = "gms"; // Default
+        }
+
         int iExpires = pclsMessage->GetExpires();
-        if (iExpires <= 0) iExpires = 3600; // Default
 
-        std::string strCallId, strFromTag, strToTag;
-        pclsMessage->GetCallId(strCallId);
-        // Getting Tags might require parsing From/To headers manually if GetHeaderVal doesn't split params
-        // For Mock, we assume simple handling or minimal tag usage
-        // Note: New Dialog -> Server (Us) should generate ToTag.
-        
-        char szBuf[1024];
-        pclsMessage->m_clsReqUri.ToString(szBuf, sizeof(szBuf));
-        std::string strReqUri = szBuf; // Resource URI
+        // 3. Unsubscribe (Expires=0) or subscribe
+        if (iExpires == 0) {
+            gclsSubscriptionManager.RemoveSubscription(strSubCallId);
+            SendResponse( pclsMessage, 200 );
+            return true;
+        }
 
-        // 3. Save Subscription
+        // 4. Parse Contact URI (destination for NOTIFY)
+        std::string strContactUri;
+        if (!pclsMessage->m_clsContactList.empty()) {
+            char szContact[256];
+            pclsMessage->m_clsContactList.front().m_clsUri.ToString(szContact, sizeof(szContact));
+            strContactUri = szContact;
+        } else {
+            // Fallback: use From URI with registered IP
+            strContactUri = szFromBuf;
+        }
+
+        // 5. Generate server-side To-tag for this dialog
+        char szToTag[64];
+        SipMakeTag(szToTag, sizeof(szToTag));
+
+        // 6. Save subscription
         SubscriptionInfo info;
-        info.strSubscriberUri = strFrom;
-        info.strCallId = strCallId;
-        info.iExpires = iExpires;
-        info.tStartTime = time(NULL);
-        // info.strFromTag = ...
-        
+        info.strUserId       = strFromId;
+        info.strSubscriberUri = szFromBuf;
+        info.strFromTag      = strFromTag;
+        info.strToTag        = szToTag;
+        info.strContact      = strContactUri;
+        info.strCallId       = strSubCallId;
+        info.strEventType    = strEventType;
+        info.iExpires        = (iExpires > 0) ? iExpires : 3600;
+        info.tStartTime      = time(NULL);
+        info.iNotifySeq      = 1;
+
         gclsSubscriptionManager.AddSubscription(strReqUri, info);
 
-        // 4. Send 200 OK
-        SendResponse( pclsMessage, 200 );
+        // 7. Send 200 OK with To-tag
+        CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag(200);
+        if (pclsResponse) {
+            pclsResponse->m_clsTo.InsertParam(SIP_TAG, szToTag);
+            gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResponse);
+        }
 
-        // 5. Send Initial NOTIFY (Current State)
-        // For Mock, we just send a dummy "Active" notification or reuse SendSipNotify logic
-        // But SendSipNotify is in CspServer.cpp. We can just declare it extern or copy minimal logic.
-        // Let's rely on event-based updates for now, or send a quick "Sync" logic.
-        
+        // 8. Send initial NOTIFY (current state)
+        extern void SendInitialNotify(const SubscriptionInfo& sub);
+        SendInitialNotify(info);
+
         return true;
     }
 

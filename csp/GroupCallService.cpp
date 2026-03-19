@@ -12,6 +12,12 @@
 #include "RtpMap.h"
 #include "UserMap.h"
 #include "SipServerSetup.h"
+#include "CspPttGroup.h"
+#include "SipMessage.h"
+#include <sstream>
+
+// Notify subscribers about group changes
+extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
 
 
 // External global objects
@@ -37,35 +43,48 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         return false;
     }
 
-    CLog::Print( LOG_INFO, "Processing Group Call GroupId(%s) Name(%s) Caller(%s)", 
+    CLog::Print( LOG_INFO, "Processing Group Call GroupId(%s) Name(%s) Caller(%s)",
                  pszGroupId, clsGroup._name.c_str(), pszCallerInfo );
-    
-    // We do NOT support Incoming Group Call routing in this Refactor yet (Focus on Server-Initiated Invitation).
-    // But we should likely ensure the logic doesn't break.
-    // Legacy logic iterated members and created calls.
-    // For now, let's keep it similar but maybe skip the "Join caller to group" if not trivial.
-    // Actually, if we want A to talk to Group, A's RTP should be joined.
-    // But this function is complex. Let's just trigger Invitations for other members.
 
+    // 1. CMP 공유 RTP 포트 확보 (포트가 0이면 재시도)
+    int iSharedPort = -1;
+    std::string strSharedIp;
+    if ( m_mapGroupRtp.find(pszGroupId) != m_mapGroupRtp.end() &&
+         m_mapGroupRtp[pszGroupId].iPort > 0 ) {
+        iSharedPort = m_mapGroupRtp[pszGroupId].iPort;
+        strSharedIp = m_mapGroupRtp[pszGroupId].strIp;
+    }
+    if ( iSharedPort <= 0 ) {
+        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort ) ) {
+            m_mapGroupRtp[pszGroupId] = { iSharedPort, strSharedIp, 0 };
+        }
+    }
+
+    // 2. 발신자(Caller)에게 공유 RTP 포트로 200 OK 응답
+    if ( iSharedPort > 0 ) {
+        CSipCallRtp clsCallerRtp;
+        clsCallerRtp.SetIpPort( strSharedIp.c_str(), iSharedPort, SOCKET_COUNT_PER_MEDIA );
+        clsCallerRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;
+        clsCallerRtp.m_clsCodecList.push_back(0);
+        clsCallerRtp.m_clsCodecList.push_back(8);
+        if ( !gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp ) ) {
+            CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
+            return false;
+        }
+        // 발신자 호출 추적
+        m_mapUserCall[pszCallerInfo] = pszCallId;
+        m_mapCallSession[pszCallId] = { pszGroupId, pszCallerInfo, pszCallerInfo };
+        CLog::Print( LOG_INFO, "ProcessGroupCall: AcceptCall OK → Caller(%s) SharedPort(%d)", pszCallerInfo, iSharedPort );
+    } else {
+        CLog::Print( LOG_ERROR, "ProcessGroupCall: No shared RTP port for Group(%s)", pszGroupId );
+        return false;
+    }
+
+    // 3. 나머지 멤버들에게 INVITE
     for ( const auto& pUser : clsGroup._pusers ) {
         if (!pUser) continue;
         std::string strMember = pUser->_id;
-        if (strMember == pszCallerInfo) continue; // Don't call back caller
-
-        // Trigger InviteMember?
-        // InviteMember(strMember.c_str(), pszGroupId);
-        // But InviteMember creates a NEW call.
-        // We probably want to bridge.
-        // Legacy code bridged using CallMap.
-        // For Shared Session, we might just InviteMember (Use Shared Port).
-        // And Caller (A) connects to... Shared Port?
-        // If A sent INVITE, we responded 200 OK with... ?
-        // We need to Respond 200 OK with Shared Port!
-        // This response happens in SipServer::EventIncomingCall.
-        // We should ensure that returns Shared Port.
-        // But that's outside this function.
-        
-        // For now, let's just trigger InviteMember for others to join the conference.
+        if (strMember == pszCallerInfo) continue;
         InviteMember(strMember.c_str(), pszGroupId);
     }
 
@@ -154,16 +173,43 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     CSipMessage *pclsInvite = NULL;
 
     if ( gclsUserAgent.CreateCall( pszGroupId, pszUserId, &clsRtp, &clsRoute, strCallId, &pclsInvite ) ) {
-         
+
+         // 4-1. Add PTT group info XML to INVITE (multipart/mixed: mcptt-info+xml + SDP)
+         if ( pclsInvite != NULL ) {
+             // To 헤더: 개인 AOR → 그룹 PSI로 변경 (prearranged 그룹콜 식별)
+             pclsInvite->m_clsTo.m_clsUri.Set( SIP_PROTOCOL, pszGroupId, gclsSetup.m_strRealm.c_str() );
+
+             std::string strGroupXml = BuildGroupInfoXml( clsGroup, pszUserId );
+             WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iSharedPort + 1 );
+
+             // MCPTT capability required
+             pclsInvite->AddHeader( "Accept-Contact",
+                 "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";+g.3gpp.mcptt;require;explicit" );
+             // Callee identity
+             char szPCalledParty[256];
+             snprintf( szPCalledParty, sizeof(szPCalledParty), "<sip:%s@%s>",
+                       pszUserId, gclsSetup.m_strRealm.c_str() );
+             pclsInvite->AddHeader( "P-Called-Party-ID", szPCalledParty );
+             // Group call priority
+             pclsInvite->AddHeader( "Resource-Priority", "mcpttp.6" );
+             // isfocus: indicate server is conference focus for this group call
+             const std::string& strLocalIp = gclsUserAgent.m_clsSipStack.m_clsSetup.m_strLocalIp;
+             int iLocalPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
+             char szContact[256];
+             snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>;isfocus",
+                      pszGroupId, strLocalIp.c_str(), iLocalPort);
+             pclsInvite->AddHeader("Contact", szContact);
+         }
+
          // Insert into CallMap (But manage Port cleanup ourselves)
          CCallInfo clsCallInfo;
-         clsCallInfo.m_bRecv = false; 
-         clsCallInfo.m_iPeerRtpPort = iSharedPort; 
+         clsCallInfo.m_bRecv = false;
+         clsCallInfo.m_iPeerRtpPort = iSharedPort;
          // Note: CallMap::Delete would try to delete this port if we don't intercept it.
          // Intercept logic handled in EventCallEnd -> OnCallTerminated.
-         
+
          gclsCallMap.Insert( strCallId.c_str(), clsCallInfo );
-         
+
          // Track Session Info
          m_mapUserCall[pszUserId] = strCallId;
          m_mapCallSession[strCallId] = { pszGroupId, pszUserId, pszUserId }; // Use UserId as SessionId
@@ -258,6 +304,8 @@ void CGroupCallService::SyncGroupsState() {
                     std::unique_lock<std::recursive_mutex> lock2(m_mutex);
                     m_mapGroupRtp[group._id].nMemberHash = nHash;
                 }
+                // Notify GMS subscribers that group config changed
+                SendSipNotify("tel:" + group._id, "change_" + std::to_string(time(NULL)), "PUT");
             }
         }
     });
@@ -276,8 +324,10 @@ void CGroupCallService::SyncGroupsState() {
 
     for(const auto& strGroupId : vecToRemove) {
         CLog::Print( LOG_INFO, "SyncGroupsState: Group(%s) removed from config. Cleaning up.", strGroupId.c_str() );
+        // Notify GMS subscribers about group deletion before removing
+        SendSipNotify("tel:" + strGroupId, "deleted_" + std::to_string(time(NULL)), "DELETE");
         gclsCmpClient.RemoveGroup(strGroupId);
-        
+
         std::unique_lock<std::recursive_mutex> lock(m_mutex);
         m_mapGroupRtp.erase(strGroupId);
     }
@@ -425,8 +475,76 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
             }
         }
         CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
-        return true; 
+        return true;
     }
-    
+
     return false;
+}
+
+/**
+ * @brief Build PTT group info XML body per 3GPP TS 24.379 MCPTT spec
+ *        Content-Type: application/vnd.3gpp.mcptt-info+xml
+ */
+std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup& clsGroup, const std::string& strUserId )
+{
+    std::ostringstream oss;
+
+    oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+        << "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\""
+        << " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
+        << "  <mcptt-Params>\r\n"
+        << "    <session-type>prearranged</session-type>\r\n"
+        << "    <mcptt-request-uri>tel:" << strUserId << "</mcptt-request-uri>\r\n"
+        << "    <mcptt-calling-user-id>tel:" << clsGroup._id << "</mcptt-calling-user-id>\r\n"
+        << "    <mcptt-calling-group-id>tel:" << clsGroup._id << "</mcptt-calling-group-id>\r\n"
+        << "  </mcptt-Params>\r\n"
+        << "</mcpttinfo>\r\n";
+
+    return oss.str();
+}
+
+/**
+ * @brief Replace INVITE body with multipart/mixed per 3GPP TS 24.379:
+ *        Part 1: application/vnd.3gpp.mcptt-info+xml  (XML first)
+ *        Part 2: application/sdp  (SDP with MCPTT floor control m= line)
+ */
+void CGroupCallService::WrapMultipartBody( CSipMessage * pclsInvite, const std::string& strGroupXml,
+                                           const std::string& strFloorIp, int iFloorPort )
+{
+    if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
+
+    const std::string strBoundary = "mcptt";
+    std::string strSdp = pclsInvite->m_strBody;
+
+    // SDP 끝에 MCPTT floor control 미디어 라인 추가 (3GPP TS 24.379)
+    // m=application: PTT floor control (Grant/Deny/Release) 전용 UDP 포트
+    std::ostringstream sdpFloor;
+    sdpFloor << "m=application " << iFloorPort << " UDP MCPTT\r\n"
+             << "c=IN IP4 " << strFloorIp << "\r\n"
+             << "a=floorid:0 mstrm:audio\r\n"
+             << "a=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
+    strSdp += sdpFloor.str();
+
+    std::ostringstream oss;
+    // Part 1: mcptt-info XML (3GPP MCPTT format)
+    oss << "--" << strBoundary << "\r\n"
+        << "Content-Type: application/vnd.3gpp.mcptt-info+xml\r\n"
+        << "Content-Length: " << strGroupXml.size() << "\r\n"
+        << "\r\n"
+        << strGroupXml
+        << "\r\n";
+    // Part 2: SDP with floor control
+    oss << "--" << strBoundary << "\r\n"
+        << "Content-Type: application/sdp\r\n"
+        << "Content-Disposition: render\r\n"
+        << "Content-Length: " << strSdp.size() << "\r\n"
+        << "\r\n"
+        << strSdp
+        << "\r\n";
+    oss << "--" << strBoundary << "--\r\n";
+
+    pclsInvite->m_strBody = oss.str();
+    pclsInvite->m_iContentLength = (int)pclsInvite->m_strBody.size();
+    pclsInvite->m_clsContentType.Set( "multipart", "mixed" );
+    pclsInvite->m_clsContentType.InsertParam( "boundary", strBoundary.c_str() );
 }

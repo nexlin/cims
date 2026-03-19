@@ -316,7 +316,7 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cspsim ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClient.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClientCaller.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipServer.pem ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/csp/csp.pem ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
 )
 
 # Independent cspsim distribution target
@@ -327,7 +327,7 @@ add_custom_target(dist_cspsim
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cspsim ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClient.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClientCaller.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipServer.pem ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/csp/csp.pem ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
 )
 
 

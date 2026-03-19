@@ -1,0 +1,41 @@
+{
+    "Setup": {
+        "Sip": {
+            "LocalIp": "192.168.199.129",
+            "UdpPort": 5060,
+            "UdpThreadCount": 2,
+            "TcpPort": 25061,
+            "TcpThreadCount": 2,
+            "TcpRecvTimeout": 600,
+            "Realm": "csp",
+            "TlsPort": 0,
+            "MinRegisterTimeout": 10,
+            "StackExecutePeriod": 20
+        },
+        "RtpRelay": {
+            "UseRtpRelay": true,
+            "CmpIp": "127.0.0.1",
+            "CmpPort": 9000,
+            "LocalCmpIp": "127.0.0.1",
+            "LocalCmpPort": 9001
+        },
+        "Log": {
+            "Folder": "log",
+            "MaxSize": 10000000,
+            "Level": {
+                "Debug": true,
+                "Info": true,
+                "Network": true,
+                "Sql": false
+            }
+        },
+        "DataFolder": {
+            "User": "User",
+            "SipServer": "route",
+            "Group": "Group"
+        },
+        "Cdr": {
+            "Folder": "log/cdr"
+        }
+    }
+}

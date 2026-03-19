@@ -12,13 +12,16 @@
  * @brief Subscription Info Structure
  */
 struct SubscriptionInfo {
-    std::string strSubscriberUri; // From URI
+    std::string strUserId;        // User ID extracted from From URI (e.g., "1001")
+    std::string strSubscriberUri; // From URI (AoR) - used as NOTIFY To
+    std::string strFromTag;       // SUBSCRIBE From-tag  -> NOTIFY To-tag
+    std::string strToTag;         // Server-generated tag -> NOTIFY From-tag
+    std::string strContact;       // Contact URI from SUBSCRIBE -> NOTIFY Request-URI
     std::string strCallId;        // SIP Dialog Call-ID
-    std::string strFromTag;
-    std::string strToTag;
+    std::string strEventType;     // "gms" or "cms"
     int iExpires;                 // Expires in seconds
     time_t tStartTime;            // Subscription Start Time
-    std::string strContact;       // Contact Header value
+    int iNotifySeq;               // CSeq counter for NOTIFY messages
 };
 
 /**
@@ -34,28 +37,34 @@ public:
      * @brief Add or Update a subscription
      */
     void AddSubscription(const std::string& strResourceUri, const SubscriptionInfo& info);
-    
+
     /**
      * @brief Remove a subscription (e.g. Expires=0 or Terminated)
      */
-    void RemoveSubscription(const std::string& strResourceUri, const std::string& strSubscriberUri);
+    void RemoveSubscription(const std::string& strCallId);
 
     /**
-     * @brief Get all subscribers for a resource
+     * @brief Get subscriptions for a specific user and event type
+     * @param strUserId   User ID (e.g. "1001")
+     * @param strEventType "gms" or "cms"
+     * @param outList     Result list (copies of SubscriptionInfo)
      */
-    void GetSubscribers(const std::string& strResourceUri, std::list<SubscriptionInfo>& outList);
-    
+    void GetSubscriptionsByUser(const std::string& strUserId, const std::string& strEventType,
+                                std::list<SubscriptionInfo>& outList);
+
+    /**
+     * @brief Increment NOTIFY CSeq for a subscription and return the new value
+     */
+    int IncrementNotifySeq(const std::string& strCallId);
+
     /**
      * @brief Check and remove expired subscriptions
      */
     void CheckExpired();
 
 private:
-    // Map: Resource URI -> Subscription Info
-    // Multimap allowed if multiple devices for same user subscribe? 
-    // Usually one subscription per Dialog.
-    // We use multimap to allow multiple subscribers per resource.
-    std::multimap<std::string, SubscriptionInfo> m_mapSubs;
+    // Map: CallId -> SubscriptionInfo (one entry per SIP dialog)
+    std::map<std::string, SubscriptionInfo> m_mapSubs;
     std::recursive_mutex m_mutex;
 };
 

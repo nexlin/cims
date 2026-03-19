@@ -43,6 +43,7 @@ public:
     virtual ~McpttGroup();
 
     void setSharedSession(PRtpTrans* session);
+    PRtpTrans* getSharedSession() const { return _sharedSession; }
     void addMember(const std::string& sessionId, const std::string& ip, int port);
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);

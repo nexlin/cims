@@ -8,179 +8,409 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <thread>
+#include <atomic>
+#include <algorithm>
 
 #include "SimSession.h"
 #include "Log.h"
 
-// Basic Console Logger
-class CConsoleLog : public ILogCallBack
-{
+// ─────────────────────────────────────────────
+//  콘솔 로거
+// ─────────────────────────────────────────────
+class CConsoleLog : public ILogCallBack {
 public:
-    void Print( EnumLogLevel eLevel, const char * fmt, ... )
-    {
-        if( (eLevel & LOG_NETWORK) == 0 ) return;
-
+    void Print(EnumLogLevel eLevel, const char* fmt, ...) {
+        if (!(eLevel & (LOG_INFO | LOG_ERROR | LOG_SYSTEM))) return;
         va_list ap;
-        char    szBuf[LOG_MAX_SIZE];
-
-        va_start( ap, fmt );
-        vsnprintf( szBuf, sizeof(szBuf), fmt, ap );
-        va_end( ap );
-
-        printf( "%s\n", szBuf );
+        char szBuf[LOG_MAX_SIZE];
+        va_start(ap, fmt);
+        vsnprintf(szBuf, sizeof(szBuf), fmt, ap);
+        va_end(ap);
+        printf("%s\n", szBuf);
     }
 };
-
 CConsoleLog gclsConsoleLog;
 
-// Helper to get command line args
-std::string GetArg(int argc, char* argv[], const char* pszKey, const char* pszDefault = "") {
+// ─────────────────────────────────────────────
+//  유틸
+// ─────────────────────────────────────────────
+static std::string GetArg(int argc, char* argv[], const char* pszKey,
+                           const char* pszDefault = "") {
     for (int i = 1; i < argc - 1; i++) {
-        if (strcmp(argv[i], pszKey) == 0) {
-            return argv[i + 1];
-        }
+        if (strcmp(argv[i], pszKey) == 0) return argv[i + 1];
     }
     return pszDefault;
 }
 
-std::string GetLocalIp() {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) return "127.0.0.1";
-
-    struct sockaddr_in serv;
-    memset(&serv, 0, sizeof(serv));
-    serv.sin_family = AF_INET;
-    serv.sin_addr.s_addr = inet_addr("8.8.8.8"); 
-    serv.sin_port = htons(53);
-
-    if (connect(sock, (const struct sockaddr*)&serv, sizeof(serv)) < 0) {
-        close(sock);
-        return "127.0.0.1";
+static bool HasFlag(int argc, char* argv[], const char* pszKey) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], pszKey) == 0) return true;
     }
-
-    struct sockaddr_in name;
-    socklen_t namelen = sizeof(name);
-    if (getsockname(sock, (struct sockaddr*)&name, &namelen) < 0) {
-        close(sock);
-        return "127.0.0.1";
-    }
-
-    char buffer[INET_ADDRSTRLEN];
-    const char* p = inet_ntop(AF_INET, &name.sin_addr, buffer, sizeof(buffer));
-    close(sock);
-
-    if (p) return std::string(buffer);
-    return "127.0.0.1";
+    return false;
 }
 
+// 순번 i 만큼 증가한 사용자 ID 생성
+// E.164(+로 시작) 또는 순수 숫자 모두 지원
+static std::string MakeUserId(const std::string& strBase, int iOffset) {
+    if (!strBase.empty() && strBase[0] == '+') {
+        long long llNum = atoll(strBase.c_str() + 1);
+        llNum += iOffset;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "+%lld", llNum);
+        return buf;
+    }
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)atoll(strBase.c_str()) + iOffset);
+    return buf;
+}
+
+// PTT 모드 E.164 → Digest auth_id 자동 유도
+// +82571900001 → 4503382571900001@{domain}
+static std::string DerivePttAuthId(const std::string& strUser, const std::string& strDomain) {
+    if (strUser.empty() || strUser[0] != '+') return "";
+    return std::string("45033") + strUser.substr(1) + "@" + strDomain;
+}
+
+static std::string GetLocalIp() {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) return "127.0.0.1";
+    struct sockaddr_in serv{};
+    serv.sin_family = AF_INET;
+    serv.sin_addr.s_addr = inet_addr("8.8.8.8");
+    serv.sin_port = htons(53);
+    if (connect(sock, (const struct sockaddr*)&serv, sizeof(serv)) < 0) {
+        close(sock); return "127.0.0.1";
+    }
+    struct sockaddr_in name{};
+    socklen_t namelen = sizeof(name);
+    getsockname(sock, (struct sockaddr*)&name, &namelen);
+    char buf[INET_ADDRSTRLEN];
+    const char* p = inet_ntop(AF_INET, &name.sin_addr, buf, sizeof(buf));
+    close(sock);
+    return p ? std::string(buf) : "127.0.0.1";
+}
+
+// ─────────────────────────────────────────────
+//  집계 통계 출력
+// ─────────────────────────────────────────────
+static void PrintStats(const std::vector<SimSession*>& sessions) {
+    int totalReg = 0, failReg = 0, gmsOk = 0, cmsOk = 0;
+    int notifyRecv = 0, callOk = 0, callFail = 0, callEnd = 0;
+    long long totalRegMs = 0, totalCallMs = 0;
+    int registered = 0, inCall = 0;
+
+    for (auto* s : sessions) {
+        totalReg   += s->m_stats.iRegOk.load();
+        failReg    += s->m_stats.iRegFail.load();
+        gmsOk      += s->m_stats.iGmsOk.load();
+        cmsOk      += s->m_stats.iCmsOk.load();
+        notifyRecv += s->m_stats.iNotifyRecv.load();
+        callOk     += s->m_stats.iCallOk.load();
+        callFail   += s->m_stats.iCallFail.load();
+        callEnd    += s->m_stats.iCallEnd.load();
+        totalRegMs += s->m_stats.llTotalRegMs.load();
+        totalCallMs+= s->m_stats.llTotalCallMs.load();
+        if (s->m_bRegistered) registered++;
+        if (s->m_bInCall)     inCall++;
+    }
+
+    int n = (int)sessions.size();
+    printf("\n===== STATISTICS (%d sessions) =====\n", n);
+    printf("  Registered   : %d / %d  (fail=%d)\n", registered, n, failReg);
+    printf("  Avg Reg Time : %lldms\n", totalReg ? totalRegMs / totalReg : 0LL);
+    printf("  GMS Subscribed: %d\n", gmsOk);
+    printf("  CMS Subscribed: %d\n", cmsOk);
+    printf("  NOTIFY Recv   : %d\n", notifyRecv);
+    printf("  Active Calls  : %d\n", inCall);
+    printf("  Call OK/End   : %d / %d  (fail=%d)\n", callOk, callEnd, callFail);
+    printf("  Avg Call Setup: %lldms\n", callOk ? totalCallMs / callOk : 0LL);
+    printf("=====================================\n\n");
+}
+
+// ─────────────────────────────────────────────
+//  사용법 출력
+// ─────────────────────────────────────────────
+static void PrintUsage(const char* pszBin) {
+    printf("Usage: %s [options]\n\n", pszBin);
+    printf("Options:\n");
+    printf("  -server_ip   <ip>        CSP 서버 IP (default: 127.0.0.1)\n");
+    printf("  -server_port <port>      CSP 서버 SIP 포트 (default: 5060)\n");
+    printf("  -local_ip    <ip>        로컬 IP (default: auto-detect)\n");
+    printf("  -local_port  <port>      로컬 SIP 시작 포트 (default: 6000)\n");
+    printf("  -count       <N>         단말 수 (default: 1)\n");
+    printf("  -user        <start_id>  시작 사용자 ID (예: 1000 또는 +82571900001)\n");
+    printf("  -auth_id     <auth_id>   Digest 인증 ID (PTT E.164는 자동 유도)\n");
+    printf("  -domain      <domain>    SIP 도메인 (default: csp)\n");
+    printf("  -password    <pwd>       패스워드 (default: 1234)\n");
+    printf("  -mode        <voip|ptt>  단말 유형 (default: voip)\n");
+    printf("  -group       <group_id>  PTT 그룹 ID (default: 1000)\n");
+    printf("  -scenario    <name>      자동 시나리오:\n");
+    printf("                             register     - 등록만\n");
+    printf("                             subscribe    - 등록 + GMS/CMS 구독 (PTT)\n");
+    printf("                             call         - 등록 + 짝끼리 통화\n");
+    printf("                             group-call   - 등록 + 구독 + 그룹통화 (PTT)\n");
+    printf("                             full         - 전체 반복\n");
+    printf("  -call_duration <secs>    통화 유지 시간 (default: 10)\n");
+    printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
+    printf("  -verbose                 SIP 메시지 상세 로그\n\n");
+    printf("Commands (실행 중):\n");
+    printf("  s           - 통계 출력\n");
+    printf("  c [N] [dst] - 통화 시작 (N번 세션 → dst, 생략시 전체)\n");
+    printf("  e           - 통화 종료\n");
+    printf("  g [group]   - PTT 그룹통화 시작\n");
+    printf("  t           - PTT 발언권 요청\n");
+    printf("  r           - PTT 발언권 해제\n");
+    printf("  sub         - GMS/CMS SUBSCRIBE 전송\n");
+    printf("  q           - 종료\n\n");
+}
+
+// ─────────────────────────────────────────────
+//  자동 시나리오 실행 스레드
+// ─────────────────────────────────────────────
+static void RunScenario(std::vector<SimSession*>& sessions,
+                        ESimScenario eScenario,
+                        int iCallDuration,
+                        const std::string& strGroupId)
+{
+    // 1. 모든 단말이 등록될 때까지 대기 (최대 30초)
+    printf("[Scenario] Waiting for registration...\n");
+    for (int retry = 0; retry < 300; ++retry) {
+        int regCount = 0;
+        for (auto* s : sessions) if (s->m_bRegistered) regCount++;
+        if (regCount == (int)sessions.size()) break;
+        usleep(100000);
+    }
+    {
+        int regCount = 0;
+        for (auto* s : sessions) if (s->m_bRegistered) regCount++;
+        printf("[Scenario] %d/%d registered\n", regCount, (int)sessions.size());
+    }
+
+    if (eScenario == E_SCENARIO_REGISTER) return;
+
+    // 2. PTT: GMS/CMS SUBSCRIBE
+    if (eScenario == E_SCENARIO_SUBSCRIBE ||
+        eScenario == E_SCENARIO_GROUP_CALL ||
+        eScenario == E_SCENARIO_FULL) {
+        printf("[Scenario] Sending GMS/CMS SUBSCRIBE...\n");
+        for (auto* s : sessions) {
+            if (!s->m_bPttMode) continue;
+            s->SubscribeGms();
+            usleep(50000);
+            s->SubscribeCms();
+            usleep(50000);
+        }
+        // 구독 완료 대기 (최대 10초)
+        for (int retry = 0; retry < 100; ++retry) {
+            int subCount = 0;
+            for (auto* s : sessions) if (s->m_bGmsSubscribed) subCount++;
+            if (subCount == (int)sessions.size()) break;
+            usleep(100000);
+        }
+        printf("[Scenario] Subscriptions complete\n");
+    }
+
+    if (eScenario == E_SCENARIO_SUBSCRIBE) return;
+
+    // 3. 통화 시나리오
+    if (eScenario == E_SCENARIO_CALL) {
+        printf("[Scenario] Starting paired calls...\n");
+        for (int i = 0; i + 1 < (int)sessions.size(); i += 2) {
+            std::string strTarget = sessions[i + 1]->m_strUser;
+            sessions[i]->StartCall(strTarget);
+            usleep(200000);
+        }
+        for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
+        printf("[Scenario] Ending calls...\n");
+        for (auto* s : sessions) s->StopCall();
+        return;
+    }
+
+    // 4. PTT 그룹통화
+    if (eScenario == E_SCENARIO_GROUP_CALL || eScenario == E_SCENARIO_FULL) {
+        printf("[Scenario] Starting group call → %s\n", strGroupId.c_str());
+        if (!sessions.empty() && sessions[0]->m_bPttMode) {
+            sessions[0]->StartGroupCall(strGroupId);
+        }
+        for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
+        printf("[Scenario] Ending group call\n");
+        for (auto* s : sessions) s->StopCall();
+    }
+}
+
+// ─────────────────────────────────────────────
+//  main
+// ─────────────────────────────────────────────
 int main(int argc, char* argv[])
 {
-    if( argc < 2 || GetArg(argc, argv, "-help") != "")
-    {
-        printf( "[Usage] %s -server_ip <ip> -server_port <port> -user_count <N> -user <start_id> -mode <call|ptt>\n", argv[0] );
+    if (HasFlag(argc, argv, "-help") || HasFlag(argc, argv, "--help") || argc < 2) {
+        PrintUsage(argv[0]);
         return 0;
     }
 
-    // Parse Args
-    std::string strServerIp = GetArg(argc, argv, "-server_ip", "127.0.0.1");
-    int iServerPort = atoi(GetArg(argc, argv, "-server_port", "5060").c_str());
-    int iUserCount = atoi(GetArg(argc, argv, "-user_count", "1").c_str());
-    int iStartUser = atoi(GetArg(argc, argv, "-user", "1000").c_str());
-    std::string strMode = GetArg(argc, argv, "-mode", "call");
-    bool bPttMode = (strMode == "ptt");
-    
-    // Local IP/Port
-    std::string strLocalIp = GetArg(argc, argv, "-local_ip", "");
+    // 인자 파싱
+    std::string strServerIp   = GetArg(argc, argv, "-server_ip",   "127.0.0.1");
+    int iServerPort            = atoi(GetArg(argc, argv, "-server_port", "5060").c_str());
+    std::string strLocalIp    = GetArg(argc, argv, "-local_ip",    "");
+    int iLocalBasePort         = atoi(GetArg(argc, argv, "-local_port",  "6000").c_str());
+    int iCount                 = atoi(GetArg(argc, argv, "-count",       "1").c_str());
+    std::string strStartUser  = GetArg(argc, argv, "-user",        "1000");
+    std::string strExplicitAuthId = GetArg(argc, argv, "-auth_id", "");
+    std::string strDomain     = GetArg(argc, argv, "-domain",     "csp");
+    std::string strPassword   = GetArg(argc, argv, "-password",   "1234");
+    std::string strMode       = GetArg(argc, argv, "-mode",       "voip");
+    std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
+    std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
+    int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
+    int iIntervalMs            = atoi(GetArg(argc, argv, "-interval",    "100").c_str());
+    bool bVerbose              = HasFlag(argc, argv, "-verbose");
+    bool bPttMode              = (strMode == "ptt");
+
     if (strLocalIp.empty()) strLocalIp = GetLocalIp();
-    
-    // Setup Logging
+
+    // 시나리오 선택
+    ESimScenario eScenario = E_SCENARIO_NONE;
+    if      (strScenario == "register")   eScenario = E_SCENARIO_REGISTER;
+    else if (strScenario == "subscribe")  eScenario = E_SCENARIO_SUBSCRIBE;
+    else if (strScenario == "call")       eScenario = E_SCENARIO_CALL;
+    else if (strScenario == "group-call") eScenario = E_SCENARIO_GROUP_CALL;
+    else if (strScenario == "full")       eScenario = E_SCENARIO_FULL;
+
+    // 로깅 설정
     CLog::SetDirectory("log");
-    CLog::SetLevel( LOG_NETWORK | LOG_DEBUG | LOG_INFO );
-    CLog::SetCallBack( &gclsConsoleLog );
+    EnumLogLevel eLevel = (EnumLogLevel)(LOG_INFO | LOG_ERROR | LOG_SYSTEM);
+    if (bVerbose) eLevel = (EnumLogLevel)(eLevel | LOG_NETWORK | LOG_DEBUG);
+    CLog::SetLevel(eLevel);
+    CLog::SetCallBack(&gclsConsoleLog);
 
-    printf("Starting cspsim with %d sessions...\n", iUserCount);
-    printf("Server: %s:%d\n", strServerIp.c_str(), iServerPort);
-    printf("Local IP: %s\n", strLocalIp.c_str());
-    printf("Mode: %s\n", bPttMode ? "PTT" : "Call");
+    printf("╔══════════════════════════════════════════╗\n");
+    printf("║           CSP SIM - 단말 시뮬레이터       ║\n");
+    printf("╚══════════════════════════════════════════╝\n");
+    printf("  서버   : %s:%d\n", strServerIp.c_str(), iServerPort);
+    printf("  로컬   : %s (시작포트 %d)\n", strLocalIp.c_str(), iLocalBasePort);
+    printf("  단말수 : %d개  (시작ID: %s)\n", iCount, strStartUser.c_str());
+    printf("  모드   : %s\n", bPttMode ? "PTT" : "VoIP");
+    if (bPttMode) printf("  그룹ID : %s\n", strGroupId.c_str());
+    if (!strScenario.empty()) printf("  시나리오: %s\n", strScenario.c_str());
+    printf("\n");
 
+    // 세션 생성 및 시작
     std::vector<SimSession*> sessions;
+    sessions.reserve(iCount);
 
-    for (int i = 0; i < iUserCount; i++) {
-        int userId = iStartUser + i;
-        char szUser[32];
-        sprintf(szUser, "%d", userId);
-        
-        // Random local port for SIP (let stack/OS decide if 0, but usually we give 0 to let it bind)
-        // SipStack usually takes a specific port or fails if busy.
-        // We can let them try to bind to sequential ports or 0 (random).
-        // The original code tried explicit ports.
-        // SipUserAgent::Start receives Setup info.
-        // If we define port 0, does the stack handle unique binding?
-        // Let's assume passing 0 lets it pick an ephemeral port or we need to assign.
-        // To be safe, let's assign ports starting from 5060 + i * 2 (if available) or similar, 
-        // OR just pass 0 and hope the stack does the right thing.
-        // SipClientMain used random port if 0.
-        // Assign explicit unique port for each session
-        int iLocalPort = 6000 + (i * 2);
+    for (int i = 0; i < iCount; i++) {
+        int iLocalPort = iLocalBasePort + (i * 2); // SIP + 여유
 
-        SimSession* session = new SimSession(i, szUser, "csp", "1234", 
-                                             strServerIp, iServerPort, strLocalIp, iLocalPort, bPttMode);
-        
-        if (session->Start()) {
-            sessions.push_back(session);
+        std::string strUser   = MakeUserId(strStartUser, i);
+        std::string strAuthId = strExplicitAuthId;
+        if (strAuthId.empty()) {
+            if (bPttMode && !strUser.empty() && strUser[0] == '+') {
+                // PTT + E.164: 자동 유도 (45033 + MSISDN숫자 + @domain)
+                strAuthId = DerivePttAuthId(strUser, strDomain);
+            } else {
+                strAuthId = strUser;
+            }
+        }
+
+        SimSession* s = new SimSession(
+            i,
+            strUser,
+            strAuthId,
+            strDomain,
+            strPassword,
+            strServerIp, iServerPort,
+            strLocalIp,  iLocalPort,
+            bPttMode,
+            strGroupId
+        );
+
+        if (s->Start()) {
+            sessions.push_back(s);
         } else {
-            printf("Failed to start session %d (User %s)\n", i, szUser);
-            delete session;
+            printf("[%d] Failed to start session (User %s)\n", i, strUser.c_str());
+            delete s;
         }
-        
-        // Stagger starts slightly to avoid thundering herd on network/logs
-        usleep(100000); 
+
+        if (iIntervalMs > 0) usleep(iIntervalMs * 1000);
     }
 
-    printf("All sessions started. Press 'q' to quit.\n");
-    
-    // Main Command Loop (Global scope, affects all or specific?)
-    // For now, simple loop to keep alive.
-    
-    char szCommand[1024];
-    while( fgets( szCommand, sizeof(szCommand), stdin ) )
-    {
-        if( szCommand[0] == 'q' || szCommand[0] == 'Q' ) break;
-        
-        // Broadcast generic commands to all sessions for testing?
-        // e.g. 'c' calls all? 't' talks all?
-        // Usage: "c" -> All call
-        // "t" -> All sending talk burst
-        
-        if (szCommand[0] == 't') { // PTT Talk
-             for(auto* s : sessions) s->SendPttRequest();
-        } else if (szCommand[0] == 'r') { // PTT Release
-             for(auto* s : sessions) s->SendPttRelease();
-        } else if (szCommand[0] == 'c') { // Call
-             // Check if arguments provided: c <idx> <target>
-             int sessionIdx = -1;
-             char szTarget[64];
-             int nArgs = sscanf(szCommand + 1, "%d %63s", &sessionIdx, szTarget);
-             
-             if (nArgs == 2) {
-                 if (sessionIdx >= 0 && sessionIdx < (int)sessions.size()) {
-                     sessions[sessionIdx]->StartCall(szTarget);
-                 } else {
-                     printf("Invalid session index: %d\n", sessionIdx);
-                 }
-             } else {
-                 printf("Broadcasting call start to ALL sessions...\n");
-                 for(auto* s : sessions) s->StartCall();
-             }
-        } else if (szCommand[0] == 'e') { // End Call
-             for(auto* s : sessions) s->StopCall();
+    printf("\n%d개 세션 시작 완료. 명령어는 -help 참조\n\n", (int)sessions.size());
+
+    // 자동 시나리오 실행 (별도 스레드)
+    std::thread scenarioThread;
+    if (eScenario != E_SCENARIO_NONE && !sessions.empty()) {
+        scenarioThread = std::thread(RunScenario,
+                                     std::ref(sessions),
+                                     eScenario,
+                                     iCallDuration,
+                                     strGroupId);
+    }
+
+    // 대화형 명령 루프
+    char szCommand[256];
+    while (fgets(szCommand, sizeof(szCommand), stdin)) {
+        // 개행 제거
+        char* nl = strchr(szCommand, '\n');
+        if (nl) *nl = '\0';
+
+        if (szCommand[0] == 'q' || szCommand[0] == 'Q') {
+            break;
+        } else if (szCommand[0] == 's') {
+            PrintStats(sessions);
+        } else if (szCommand[0] == 't') {
+            for (auto* s : sessions) s->SendPttRequest();
+            printf("PTT 발언권 요청 전송\n");
+        } else if (szCommand[0] == 'r') {
+            for (auto* s : sessions) s->SendPttRelease();
+            printf("PTT 발언권 해제 전송\n");
+        } else if (szCommand[0] == 'e') {
+            for (auto* s : sessions) s->StopCall();
+            printf("통화 종료\n");
+        } else if (strncmp(szCommand, "sub", 3) == 0) {
+            for (auto* s : sessions) {
+                if (!s->m_bPttMode) continue;
+                s->SubscribeGms();
+                usleep(30000);
+                s->SubscribeCms();
+            }
+            printf("SUBSCRIBE 전송\n");
+        } else if (szCommand[0] == 'g') {
+            // g [group_id]
+            char szGroup[64] = "";
+            sscanf(szCommand + 1, " %63s", szGroup);
+            std::string grp = strlen(szGroup) > 0 ? szGroup : strGroupId;
+            for (auto* s : sessions) {
+                if (s->m_bPttMode) s->StartGroupCall(grp);
+            }
+            printf("그룹통화 시작 → %s\n", grp.c_str());
+        } else if (szCommand[0] == 'c') {
+            // c [session_idx] [target]
+            int idx = -1;
+            char szTarget[64] = "";
+            sscanf(szCommand + 1, " %d %63s", &idx, szTarget);
+            if (idx >= 0 && idx < (int)sessions.size()) {
+                sessions[idx]->StartCall(strlen(szTarget) > 0 ? szTarget : "");
+            } else {
+                // 짝끼리 통화
+                for (int i = 0; i + 1 < (int)sessions.size(); i += 2) {
+                    sessions[i]->StartCall(sessions[i + 1]->m_strUser);
+                    usleep(50000);
+                }
+                printf("페어 통화 시작\n");
+            }
+        } else if (szCommand[0] != '\0') {
+            printf("? 알 수 없는 명령 (h: 도움말)\n");
         }
     }
 
-    printf("Stopping all sessions...\n");
-    for(auto* s : sessions) {
-        delete s;
-    }
+    // 정리
+    if (scenarioThread.joinable()) scenarioThread.join();
+    printf("\n최종 통계:\n");
+    PrintStats(sessions);
+
+    printf("세션 종료 중...\n");
+    for (auto* s : sessions) delete s;
     sessions.clear();
 
     return 0;

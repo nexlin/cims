@@ -38,6 +38,7 @@ bool AddChallenge( CSipMessage * psttResponse )
 	clsChallenge.m_strType = "Digest";
 	clsChallenge.m_strNonce = szNonce;
 	clsChallenge.m_strRealm = gclsSetup.m_strRealm;
+	clsChallenge.m_strQop = "auth";
 
 	psttResponse->m_clsWwwAuthenticateList.push_back( clsChallenge );
 
@@ -80,7 +81,10 @@ bool CheckAuthorizationResponse( const char * pszUserName
 		, const char * pszUri
 		, const char * pszResponse
 		, const char * pszPassWord
-		, const char * pszMethod )
+		, const char * pszMethod
+		, const char * pszQop
+		, const char * pszNc
+		, const char * pszCnonce )
 {
 	char	szA1[301], szA2[201], szMd5[33], szResponse[1024];
 
@@ -92,7 +96,18 @@ bool CheckAuthorizationResponse( const char * pszUserName
 	SipMd5String( szA2, szMd5 );
 	snprintf( szA2, sizeof(szA2), "%s", szMd5 );
 
-	snprintf( szResponse, sizeof(szResponse), "%s:%s:%s", szA1, pszNonce, szA2 );
+	if( pszQop && strcasecmp( pszQop, "auth" ) == 0 )
+	{
+		// RFC 2617: qop=auth → HA1:nonce:nc:cnonce:qop:HA2
+		snprintf( szResponse, sizeof(szResponse), "%s:%s:%s:%s:%s:%s",
+			szA1, pszNonce, pszNc ? pszNc : "", pszCnonce ? pszCnonce : "", pszQop, szA2 );
+	}
+	else
+	{
+		// no qop → HA1:nonce:HA2
+		snprintf( szResponse, sizeof(szResponse), "%s:%s:%s", szA1, pszNonce, szA2 );
+	}
+
 	SipMd5String( szResponse, szMd5 );
 	snprintf( szResponse, sizeof(szResponse), "%s", szMd5 );
 
@@ -137,9 +152,15 @@ ECheckAuthResult CheckAuthorization( CSipCredential * pclsCredential, const char
 	// 2. Cross-check: The Authorization username must match the AuthId configured for this From ID
 	if( clsXmlUser.m_strAuthId != pclsCredential->m_strUserName ) return E_AUTH_ERROR;
 
-	// 3. Digest Crypto verification
-	if( CheckAuthorizationResponse( pclsCredential->m_strUserName.c_str(), pclsCredential->m_strRealm.c_str(), pclsCredential->m_strNonce.c_str(), pclsCredential->m_strUri.c_str()
-				, pclsCredential->m_strResponse.c_str(), clsXmlUser.m_strPassWord.c_str(), pszMethod ) == false ) return E_AUTH_ERROR;
+	// 3. Digest Crypto verification (supports both plain MD5 and qop=auth)
+	const char * pszQop    = pclsCredential->m_strQop.empty()        ? NULL : pclsCredential->m_strQop.c_str();
+	const char * pszNc     = pclsCredential->m_strNonceCount.empty() ? NULL : pclsCredential->m_strNonceCount.c_str();
+	const char * pszCnonce = pclsCredential->m_strCnonce.empty()     ? NULL : pclsCredential->m_strCnonce.c_str();
+
+	if( CheckAuthorizationResponse( pclsCredential->m_strUserName.c_str(), pclsCredential->m_strRealm.c_str(),
+				pclsCredential->m_strNonce.c_str(), pclsCredential->m_strUri.c_str(),
+				pclsCredential->m_strResponse.c_str(), clsXmlUser.m_strPassWord.c_str(),
+				pszMethod, pszQop, pszNc, pszCnonce ) == false ) return E_AUTH_ERROR;
 
 	return E_AUTH_OK;
 }
@@ -208,16 +229,20 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		pclsResponse->m_clsContactList.push_back( clsContact );
 		pclsResponse->AddHeader( "Expires", 3600 );
 
+		// P-Associated-URI: IMS 단말이 등록 완료 처리에 필요로 하는 헤더
+		{
+			char szPAUri[512];
+			const std::string & strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+			const std::string & strDomain = gclsSetup.m_strRealm;
+			snprintf( szPAUri, sizeof(szPAUri), "<sip:%s@%s>", strUser.c_str(), strDomain.c_str() );
+			pclsResponse->AddHeader( "P-Associated-URI", szPAUri );
+		}
+
 		gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
 		
 		// [FIX for P2P Call] Update CspUserMap (JSON Map) registration time.
 		// Otherwise isAlive returns false (timeout) because time is 0.
 		gclsCspUserMap.registerUser( clsUser.m_strId, "" ); // Password already verified during Auth
-		
-		// [GROUP CALL AUTO JOIN]
-		if ( !clsUser.m_strOrganizationId.empty() ) {
-			gclsGroupCallService.InviteMember( clsUser.m_strId.c_str(), clsUser.m_strOrganizationId.c_str() );
-		}
 	}
 	else
 	{

@@ -40,8 +40,9 @@
 #include "UserMap.h"
 #include "SipUri.h"
 
-// Forward Declaration for Notify Helper
+// Forward Declaration for Notify Helpers
 void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
+void SendInitialNotify(const SubscriptionInfo& sub);
 
 bool gbFork = true;
 /**
@@ -147,6 +148,7 @@ int ServiceMain() {
             gclsNonceMap.DeleteTimeout( 1000 );
             gclsUserMap.DeleteTimeout( 1000 );
             gclsUserMap.SendOptions();
+            gclsSubscriptionManager.CheckExpired();
             //gclsCspUserMap.DeleteTimeout( 1000 );
         }
         if ( iSecond % 60 == 0 ) {
@@ -182,94 +184,150 @@ int ServiceMain() {
 
 // Logic to send SIP NOTIFY
 #include "SipMessage.h"
+#include "SipUtility.h"
+#include "CspPttGroup.h"
 extern CSipUserAgent gclsUserAgent;
 
+/**
+ * @brief Build xcap-diff XML body for NOTIFY
+ *   - GMS (group_change): sel points to group document for this subscriber
+ *   - CMS (user_change):  sel points to user-profile and service-config documents
+ */
+static std::string BuildXcapDiffBody(const SubscriptionInfo& sub, const std::string& etag,
+                                     const std::string& strChangedId) {
+    const std::string strXcapRoot = "http://" + gclsSetup.m_strLocalIp + ":4420/";
+    std::string strBody;
+    strBody  = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    strBody += "<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"";
+    strBody += strXcapRoot + "\">\r\n";
+
+    if (sub.strEventType == "gms") {
+        // sel = org.openmobilealliance.groups/users/tel:{user}/tel:{group}
+        strBody += "  <document new-etag=\"" + etag + "\" sel=\"org.openmobilealliance.groups/users/"
+               +  "tel:" + sub.strUserId + "/tel:" + strChangedId + "\"/>\r\n";
+    } else {
+        // cms: user-profile
+        strBody += "  <document new-etag=\"" + etag + "\" sel=\"org.3gpp.mcptt.user-profile/users/"
+               +  "tel:" + sub.strUserId + "/user-profile\"/>\r\n";
+        // cms: service-config
+        strBody += "  <document new-etag=\"" + etag + "\" sel=\"org.3gpp.mcptt.service-config/users/"
+               +  "tel:" + sub.strUserId + "/service-config\"/>\r\n";
+    }
+
+    strBody += "</xcap-diff>\r\n";
+    return strBody;
+}
+
+/**
+ * @brief Send a proper in-dialog NOTIFY to a single subscriber
+ */
+static void SendNotifyToSubscriber(const SubscriptionInfo& sub, const std::string& etag,
+                                   const std::string& strChangedId) {
+    const std::string& strLocalIp = gclsUserAgent.m_clsSipStack.m_clsSetup.m_strLocalIp;
+    int iLocalPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
+
+    // Get NOTIFY CSeq (increment in manager)
+    int iSeq = gclsSubscriptionManager.IncrementNotifySeq(sub.strCallId);
+
+    // Request-URI = subscriber's Contact URI
+    std::string strTarget = sub.strContact.empty() ? sub.strSubscriberUri : sub.strContact;
+
+    CSipMessage *pMsg = new CSipMessage();
+    pMsg->m_strSipMethod = "NOTIFY";
+    pMsg->m_clsReqUri.Parse(strTarget.c_str(), (int)strTarget.size());
+
+    // Via
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+    SipMakeBranch(szBranch, sizeof(szBranch));
+    pMsg->AddVia(strLocalIp.c_str(), iLocalPort, szBranch);
+
+    // From: server (our PSI), tag = sub.strToTag (the tag we sent in 200 OK)
+    std::string strServerPsi = (sub.strEventType == "gms") ? "gms_psi" : "cms_psi";
+    pMsg->m_clsFrom.m_clsUri.Set("sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort);
+    if (!sub.strToTag.empty()) {
+        pMsg->m_clsFrom.InsertParam(SIP_TAG, sub.strToTag.c_str());
+    }
+
+    // To: subscriber AoR, tag = sub.strFromTag (the tag from SUBSCRIBE From)
+    pMsg->m_clsTo.m_clsUri.Parse(sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size());
+    if (!sub.strFromTag.empty()) {
+        pMsg->m_clsTo.InsertParam(SIP_TAG, sub.strFromTag.c_str());
+    }
+
+    pMsg->m_clsCallId.Parse(sub.strCallId.c_str(), (int)sub.strCallId.size());
+    pMsg->m_clsCSeq.Set(iSeq, "NOTIFY");
+
+    // Max-Forwards
+    pMsg->m_iMaxForwards = 70;
+
+    // Route to subscriber's registered address
+    CUserInfo clsUserInfo;
+    if (gclsUserMap.Select(sub.strUserId.c_str(), clsUserInfo)) {
+        CSipCallRoute clsRoute;
+        clsUserInfo.GetCallRoute(clsRoute);
+        pMsg->AddRoute(clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP);
+    }
+
+    pMsg->AddHeader("Event", "xcap-diff");
+    time_t tRemaining = (sub.tStartTime + sub.iExpires) - time(NULL);
+    if (tRemaining < 0) tRemaining = 0;
+    pMsg->AddHeader("Subscription-State", ("active;expires=" + std::to_string((int)tRemaining)).c_str());
+
+    std::string strBody = BuildXcapDiffBody(sub, etag, strChangedId);
+    pMsg->m_clsContentType.Set("application", "xcap-diff+xml");
+    pMsg->m_strBody = strBody;
+    pMsg->m_iContentLength = (int)strBody.size();
+
+    CLog::Print(LOG_INFO, "SendNotifyToSubscriber: User=%s Type=%s Target=%s CSeq=%d",
+        sub.strUserId.c_str(), sub.strEventType.c_str(), strTarget.c_str(), iSeq);
+
+    gclsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
+/**
+ * @brief Send initial NOTIFY immediately after 200 OK to SUBSCRIBE
+ *        (Active state, no specific document change)
+ */
+void SendInitialNotify(const SubscriptionInfo& sub) {
+    SendNotifyToSubscriber(sub, "init", "");
+}
+
+/**
+ * @brief Send NOTIFY on group_change or user_change event
+ *   - group_change: uri = group ID, notify all GMS subscribers that are group members
+ *   - user_change:  uri = user ID, notify that user's CMS subscribers
+ */
 void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action) {
-    CLog::Print(LOG_INFO, "SendSipNotify: Processing Event Uri=%s ETag=%s Action=%s", uri.c_str(), etag.c_str(), action.c_str());
+    CLog::Print(LOG_INFO, "SendSipNotify: Uri=%s ETag=%s Action=%s", uri.c_str(), etag.c_str(), action.c_str());
 
-    std::list<SubscriptionInfo> subList;
-    
-    // [USER REQ] Skip subscription requirement, target registered group members
-    // gclsSubscriptionManager.GetSubscribers(uri, subList);
-    
-    // Instead of active subscribers, find the group and all its members
+    // Strip uri prefix
+    std::string strId = uri;
+    if (strId.rfind("tel:", 0) == 0) strId = strId.substr(4);
+    else if (strId.rfind("sip:", 0) == 0) strId = strId.substr(4);
+
+    // Determine if group or user change
     CspPttGroup clsGroup;
-    std::string strGroupId = uri;
-    if (strGroupId.find("tel:") == 0) strGroupId = strGroupId.substr(4);
-    if (strGroupId.find("sip:") == 0) strGroupId = strGroupId.substr(4);
+    bool bIsGroup = gclsGroupMap.Select(strId.c_str(), clsGroup);
 
-    if (!gclsGroupMap.Select(strGroupId.c_str(), clsGroup)) {
-        CLog::Print(LOG_INFO, "SendSipNotify: Group %s not found in GroupMap", strGroupId.c_str());
-        return;
-    }
-
-    CLog::Print(LOG_INFO, "SendSipNotify: Broadcasting NOTIFY to %d members of group %s", 
-                (int)clsGroup._pusers.size(), strGroupId.c_str());
-
-    for (const auto& member : clsGroup._pusers) {
-        // Check if member is actually registered before sending
-        std::string memberId = member->_id;
-        CspUser clsUser;
-        if (!gclsUserMap.Select(memberId.c_str())) {
-            continue; // Not registered right now
+    if (bIsGroup) {
+        // GMS: find each group member's GMS subscription and notify
+        CLog::Print(LOG_INFO, "SendSipNotify: group_change Group=%s Members=%d", strId.c_str(), (int)clsGroup._pusers.size());
+        for (const auto& pUser : clsGroup._pusers) {
+            if (!pUser) continue;
+            std::list<SubscriptionInfo> subList;
+            gclsSubscriptionManager.GetSubscriptionsByUser(pUser->_id, "gms", subList);
+            for (auto& sub : subList) {
+                SendNotifyToSubscriber(sub, etag, strId);
+            }
         }
-        
-        SubscriptionInfo dummySub;
-        dummySub.strSubscriberUri = "sip:" + memberId + "@mcptt.com"; // Format URI for the NOTIFY To header
-        dummySub.strCallId = "notify_" + std::to_string(time(NULL)) + "_" + memberId;
-        dummySub.iExpires = 3600;
-        subList.push_back(dummySub);
-    }
-
-    if (subList.empty()) {
-        CLog::Print(LOG_INFO, "SendSipNotify: No registered members to notify for %s", uri.c_str());
-        return;
-    }
-
-    for (const auto& sub : subList) {
-        CLog::Print(LOG_INFO, "SendSipNotify: Sending to %s", sub.strSubscriberUri.c_str());
-        
-        CSipMessage *pMsg = new CSipMessage();
-        pMsg->m_strSipMethod = "NOTIFY";
-        pMsg->m_clsReqUri.Parse( sub.strSubscriberUri.c_str(), sub.strSubscriberUri.length() );
-        pMsg->m_strSipVersion = "SIP/2.0";
-
-        // Set Headers (Standardize using structures)
-        pMsg->m_clsFrom.m_clsUri.Set("sip", "csc", "mcptt.com");
-        pMsg->m_clsFrom.InsertParam("tag", "serverTag");
-
-        pMsg->m_clsTo.m_clsUri.Parse( sub.strSubscriberUri.c_str(), sub.strSubscriberUri.length() );
-        if (!sub.strFromTag.empty()) {
-             pMsg->m_clsTo.InsertParam("tag", sub.strFromTag.c_str());
+    } else {
+        // CMS: find this user's CMS subscriptions and notify
+        CLog::Print(LOG_INFO, "SendSipNotify: user_change User=%s", strId.c_str());
+        std::list<SubscriptionInfo> subList;
+        gclsSubscriptionManager.GetSubscriptionsByUser(strId, "cms", subList);
+        for (auto& sub : subList) {
+            SendNotifyToSubscriber(sub, etag, strId);
         }
-        
-        pMsg->m_clsCallId.Parse( sub.strCallId.c_str(), sub.strCallId.length() );
-        pMsg->m_clsCSeq.Set( 1, "NOTIFY" );
-
-        pMsg->AddHeader("Event", "xcap-diff");
-        pMsg->AddHeader("Subscription-State", ( "active;expires=" + std::to_string(sub.iExpires) ).c_str());
-        pMsg->AddHeader("Content-Type", "application/xcap-diff+xml");
-
-        // Body
-        std::string strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-        strBody += "<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"http://csc.mcptt.com/\">\n";
-        strBody += " <document-new-etag>" + etag + "</document-new-etag>\n";
-        strBody += "</xcap-diff>";
-
-        pMsg->m_strBody = strBody;
-        pMsg->m_iContentLength = strBody.length();
-
-        // Ensure raw packet is generated so stack can log it correctly
-        if (pMsg->MakePacket() == false) {
-            CLog::Print(LOG_ERROR, "SendSipNotify: MakePacket failed for %s", sub.strSubscriberUri.c_str());
-            delete pMsg;
-            continue;
-        }
-
-        CLog::Print(LOG_INFO, "SendSipNotify: Sending NOTIFY to %s", sub.strSubscriberUri.c_str());
-        
-        // Send (Stack will log UdpSend now because m_strPacket is filled)
-        gclsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
     }
 }
 
