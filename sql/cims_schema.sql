@@ -12,7 +12,7 @@ USE cims;
 -- ─────────────────────────────────────────────
 --  가입자 (Users)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS csp_users (
+CREATE TABLE IF NOT EXISTS cims_users (
     id            VARCHAR(64)  NOT NULL COMMENT 'MSISDN (E.164, 파일명과 동일)',
     auth_id       VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 인증 ID (IMPI)',
     passwd        VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 패스워드',
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS csp_users (
 -- ─────────────────────────────────────────────
 --  착신거부 목록 (User Reject List)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS csp_user_rejects (
+CREATE TABLE IF NOT EXISTS cims_user_rejects (
     user_id   VARCHAR(64) NOT NULL COMMENT '가입자 ID',
     reject_id VARCHAR(64) NOT NULL COMMENT '거부할 발신자 ID',
     PRIMARY KEY (user_id, reject_id)
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS csp_user_rejects (
 -- ─────────────────────────────────────────────
 --  PTT 그룹 (Groups)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS csp_groups (
+CREATE TABLE IF NOT EXISTS cims_groups (
     id   VARCHAR(64)  NOT NULL COMMENT '그룹 번호 (E.164)',
     name VARCHAR(128) NOT NULL DEFAULT '' COMMENT '그룹명',
     PRIMARY KEY (id)
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS csp_groups (
 -- ─────────────────────────────────────────────
 --  그룹 멤버 (Group Members)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS csp_group_members (
+CREATE TABLE IF NOT EXISTS cims_group_members (
     group_id VARCHAR(64) NOT NULL COMMENT '그룹 ID',
     user_id  VARCHAR(64) NOT NULL COMMENT '멤버 가입자 ID',
     priority INT         NOT NULL DEFAULT 0 COMMENT '발언권 우선순위 (낮을수록 높음)',

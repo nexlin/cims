@@ -140,7 +140,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
 
     std::string strSql =
         "SELECT id, auth_id, passwd, org_id, dnd, forward_id "
-        "FROM csp_users WHERE id='" + Escape(strUserId) + "'";
+        "FROM cims_users WHERE id='" + Escape(strUserId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
@@ -163,7 +163,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
 
     // 착신 거부 목록 로드
     clsUser.m_vecReject.clear();
-    strSql = "SELECT reject_id FROM csp_user_rejects WHERE user_id='" + Escape(strUserId) + "'";
+    strSql = "SELECT reject_id FROM cims_user_rejects WHERE user_id='" + Escape(strUserId) + "'";
     pRes = ExecuteSelect(strSql);
     if (pRes) {
         while ((row = mysql_fetch_row(pRes)) != nullptr) {
@@ -181,7 +181,7 @@ bool CDbManager::UpdateRegisterTime( const std::string& strUserId )
     if (!m_pMysql && !Reconnect()) return false;
 
     std::string strSql =
-        "UPDATE csp_users SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'";
+        "UPDATE cims_users SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'";
     return ExecuteQuery(strSql);
 }
 
@@ -191,7 +191,7 @@ bool CDbManager::UpdateLogoutTime( const std::string& strUserId )
     if (!m_pMysql && !Reconnect()) return false;
 
     std::string strSql =
-        "UPDATE csp_users SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'";
+        "UPDATE cims_users SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'";
     return ExecuteQuery(strSql);
 }
 
@@ -206,7 +206,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
 
     // 그룹 기본 정보
     std::string strSql =
-        "SELECT id, name FROM csp_groups WHERE id='" + Escape(strGroupId) + "'";
+        "SELECT id, name FROM cims_groups WHERE id='" + Escape(strGroupId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
@@ -224,7 +224,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
 
     // 멤버 목록
     strSql =
-        "SELECT user_id, priority FROM csp_group_members "
+        "SELECT user_id, priority FROM cims_group_members "
         "WHERE group_id='" + Escape(strGroupId) + "' ORDER BY priority";
 
     pRes = ExecuteSelect(strSql);
@@ -250,7 +250,7 @@ bool CDbManager::LoadAllGroups( CGroupMap& clsMap )
     if (!m_pMysql && !Reconnect()) return false;
 
     // 전체 그룹 ID 목록 조회
-    MYSQL_RES* pRes = ExecuteSelect("SELECT id FROM csp_groups");
+    MYSQL_RES* pRes = ExecuteSelect("SELECT id FROM cims_groups");
     if (!pRes) return false;
 
     std::vector<std::string> vecGroupIds;

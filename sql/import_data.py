@@ -95,7 +95,7 @@ def import_users(conn, user_dir):
         update_time = data.get("update_time") or None
 
         sql = """
-            INSERT INTO csp_users
+            INSERT INTO cims_users
                 (id, auth_id, passwd, org_id, dnd, forward_id, create_time, update_time)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
@@ -109,10 +109,10 @@ def import_users(conn, user_dir):
         # 착신거부 목록
         reject_ids = data.get("reject_id", [])
         if reject_ids:
-            cur.execute("DELETE FROM csp_user_rejects WHERE user_id=%s", (user_id,))
+            cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (user_id,))
             for rid in reject_ids:
                 cur.execute(
-                    "INSERT IGNORE INTO csp_user_rejects (user_id, reject_id) VALUES (%s, %s)",
+                    "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
                     (user_id, rid)
                 )
 
@@ -146,19 +146,19 @@ def import_groups(conn, group_dir):
         name = data.get("name", group_id)
 
         cur.execute(
-            "INSERT INTO csp_groups (id, name) VALUES (%s, %s) "
+            "INSERT INTO cims_groups (id, name) VALUES (%s, %s) "
             "ON DUPLICATE KEY UPDATE name=VALUES(name)",
             (group_id, name)
         )
 
         # 멤버 목록 교체
-        cur.execute("DELETE FROM csp_group_members WHERE group_id=%s", (group_id,))
+        cur.execute("DELETE FROM cims_group_members WHERE group_id=%s", (group_id,))
         for member in data.get("users", []):
             uid   = member.get("id", "")
             prio  = int(member.get("priority", 0))
             if uid:
                 cur.execute(
-                    "INSERT INTO csp_group_members (group_id, user_id, priority) VALUES (%s, %s, %s)",
+                    "INSERT INTO cims_group_members (group_id, user_id, priority) VALUES (%s, %s, %s)",
                     (group_id, uid, prio)
                 )
                 print(f"[Group] {group_id} ← member {uid} (priority={prio})")
