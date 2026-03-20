@@ -19,6 +19,7 @@
 #include "CspUser.h"
 
 #include "CspServer.h"
+#include "DbManager.h"
 #include "Directory.h"
 #include "MemoryDebug.h"
 #include "Log.h"
@@ -177,14 +178,12 @@ bool CspUserMap::Select( const char *pszUserId, CspUser &clsXmlUser ) {
     m_clsMutex.release();
 
     if (!bRes) {
-         bRes = _loadUserFromFile(pszUserId, clsXmlUser);
-         // Do NOT Insert here? 
-         // If we don't insert, Auth loads every time until registered.
-         // If we insert, we have un-registered user in map.
-         // Usually ok to have them in map but with old/zero register time?
-         // If RegisterTime is 0, isAlive returns false. 
-         // So it is SAFE to Insert here.
-         if (bRes) Insert(clsXmlUser);
+        if (!gclsSetup.m_strUserDataFolder.empty()) {
+            bRes = _loadUserFromFile(pszUserId, clsXmlUser);
+        } else {
+            bRes = gclsDbManager.SelectUser(pszUserId, clsXmlUser);
+        }
+        if (bRes) Insert(clsXmlUser);
     }
     return bRes;
 }
@@ -198,67 +197,56 @@ bool CspUserMap::registerUser(std::string strUserId, std::string strPassWord ) {
     itMap = m_clsMap.find( strUserId );
     if ( itMap != m_clsMap.end() ) {
         user = itMap->second;
-        bRes = true; // Found in map
+        bRes = true;
     }
     m_clsMutex.release();
 
-    if (bRes) {
-        // #2 Found in Map
-        if (user.m_strPassWord == strPassWord) { // Simple auth check if pass provided
-            user.m_iRegisterTime = time(NULL);
-            _update(user);
-            return true;
+    if (!bRes) {
+        // 캐시 미스 → 파일 또는 DB에서 로드
+        if (!gclsSetup.m_strUserDataFolder.empty()) {
+            bRes = _loadUserFromFile(strUserId, user);
+        } else {
+            bRes = gclsDbManager.SelectUser(strUserId, user);
         }
-        // If password mismatch, return false? Or ignore pass if empty?
-        // Method signature has password.
-        if (!strPassWord.empty() && user.m_strPassWord != strPassWord) return false;
-        
-        user.m_iRegisterTime = time(NULL);
-        _update(user);
-        return true;
-    } else {
-        // #3 Not in Map -> Load
-        if (_loadUserFromFile(strUserId, user)) {
-            // Check password?
-            if (!strPassWord.empty() && user.m_strPassWord != strPassWord) return false;
-            
-            user.m_iRegisterTime = time(NULL);
-            Insert(user);
-            return true;
-        }
+        if (bRes) Insert(user);
     }
-    return false;
+
+    if (!bRes) return false;
+
+    if (!strPassWord.empty() && user.m_strPassWord != strPassWord) return false;
+
+    user.m_iRegisterTime = time(NULL);
+    _update(user);
+
+    // DB 모드: register_time 동기화
+    if (gclsSetup.m_strUserDataFolder.empty()) {
+        gclsDbManager.UpdateRegisterTime(strUserId);
+    }
+    return true;
 }
 
 bool CspUserMap::unregisterUser(std::string strUserId ) {
-    CSP_USER_MAP::iterator itMap;
-    bool bRes = false;
     CspUser user;
+    bool bRes = false;
+
     m_clsMutex.acquire();
-    itMap = m_clsMap.find( strUserId );
+    auto itMap = m_clsMap.find( strUserId );
     if ( itMap != m_clsMap.end() ) {
         user = itMap->second;
+        bRes = true;
     }
     m_clsMutex.release();
 
-    
-    if(bRes) {
-        if(user.m_strId != strUserId) {
-            // invalid user id 
-            // 정상적인 상황에서 루틴이 실행 되면 안됨
-            CLog::Print(LOG_ERROR, "[CspUserMap] unregisterUser: Invalid user id(%s/%s)", 
-                user.m_strId.c_str(), strUserId.c_str());
+    if (!bRes) return false;
 
-            // 비정상적인 데이터 캐쉬 및 파일에서 제거
-            _remove(strUserId);
-            return false;
-        }
-        // 캐쉬 또는 파일로 있으면 LogoutTime을 업데이트하여 캐쉬 및 파일을 업데이트한다.
-        user.m_iLogoutTime = time(NULL);
-        _update(user);
-        return true;        
+    user.m_iLogoutTime = time(NULL);
+    _update(user);
+
+    // DB 모드: logout_time 동기화
+    if (gclsSetup.m_strUserDataFolder.empty()) {
+        gclsDbManager.UpdateLogoutTime(strUserId);
     }
-    return false; 
+    return true;
 }
 
 bool CspUserMap::_update(CspUser &clsUser) {

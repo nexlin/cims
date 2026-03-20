@@ -7,6 +7,22 @@ set(CMAKE_CXX_STANDARD 11)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
+# MariaDB / MySQL C connector
+# 설치: sudo apt-get install -y libmariadb-dev
+find_library(MARIADB_LIB NAMES mariadb mysqlclient
+    HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib)
+if(NOT MARIADB_LIB)
+    message(FATAL_ERROR "MariaDB/MySQL client library not found.\n"
+            "  sudo apt-get install -y libmariadb-dev")
+endif()
+find_path(MARIADB_INCLUDE_DIR NAMES mysql/mysql.h mariadb/mysql.h
+    HINTS /usr/include /usr/local/include)
+if(NOT MARIADB_INCLUDE_DIR)
+    message(FATAL_ERROR "MariaDB/MySQL header not found.\n"
+            "  sudo apt-get install -y libmariadb-dev")
+endif()
+message(STATUS "MariaDB lib: ${MARIADB_LIB}, include: ${MARIADB_INCLUDE_DIR}")
+
 # Add the dependency libraries from ext/psip
 # We assume this file is in .../csp/ and psip is in .../ext/psip/
 # Adjust path if necessary. Using relative path here.
@@ -19,8 +35,9 @@ file(GLOB SRCS "*.cpp")
 add_executable(csp ${SRCS})
 
 # Include directories (Propagated from targets but adding explicit just in case)
-target_include_directories(csp PUBLIC 
+target_include_directories(csp PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${MARIADB_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/SipPlatform
     ${CMAKE_CURRENT_SOURCE_DIR}/../ext/psip/SipStack
@@ -52,6 +69,7 @@ target_link_libraries(csp PUBLIC
     Threads::Threads
     OpenSSL::SSL
     OpenSSL::Crypto
+    ${MARIADB_LIB}
     dl
 )
 

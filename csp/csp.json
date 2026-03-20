@@ -37,6 +37,13 @@
             "SipServer": "../route",
             "Group": "../Group"
         },
+        "Database": {
+            "Host": "127.0.0.1",
+            "Port": 3306,
+            "User": "cims",
+            "Password": "cims1234",
+            "DbName": "cims"
+        },
         "Cdr": {
             "Folder": "../log/cdr"
         },

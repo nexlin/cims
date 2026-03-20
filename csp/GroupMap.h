@@ -21,8 +21,11 @@ public:
     CGroupMap();
     ~CGroupMap();
 
-    /** Load all groups from directory */
+    /** Load all groups from directory (file mode) */
     bool Load( const char *pszDirName );
+
+    /** Load all groups from DB */
+    bool LoadFromDb();
 
     /** Insert a group */
     void Insert( CspPttGroup &clsGroup );

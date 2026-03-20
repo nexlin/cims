@@ -85,6 +85,7 @@ CSipServerSetup::CSipServerSetup()
       m_iSendOptionsPeriod( 0 ),
       m_bUseRegisterSession( false ),
       m_iUserTimeout( 3600 ),
+      m_iDbPort( 3306 ),
       m_iLogLevel( 0 ),
       m_iLogMaxSize( 20000000 ),
       m_iMonitorPort( 6000 ),
@@ -166,6 +167,15 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (dataDir.Has("User")) m_strUserDataFolder = dataDir.GetString("User");
                 if (dataDir.Has("SipServer")) m_strSipServerDataFolder = dataDir.GetString("SipServer");
                 if (dataDir.Has("Group")) m_strGroupDataFolder = dataDir.GetString("Group");
+            }
+
+            if (setup.Has("Database")) {
+                SimpleJson::JsonNode db = setup.Get("Database");
+                if (db.Has("Host"))     m_strDbHost   = db.GetString("Host");
+                if (db.Has("Port"))     m_iDbPort     = (int)db.GetInt("Port");
+                if (db.Has("User"))     m_strDbUser   = db.GetString("User");
+                if (db.Has("Password")) m_strDbPasswd = db.GetString("Password");
+                if (db.Has("DbName"))   m_strDbName   = db.GetString("DbName");
             }
             
             if (setup.Has("Cdr")) {

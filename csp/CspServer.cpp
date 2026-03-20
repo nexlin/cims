@@ -19,6 +19,7 @@
 
 #include "CallMap.h"
 #include "CmpClient.h"
+#include "DbManager.h"
 #include "CspServerDefine.h"
 #include "CspServerVersion.h"
 #include "Directory.h"
@@ -106,13 +107,30 @@ int ServiceMain() {
     });
     gclsGroupCallService.StartMonitor();
 
+    // DB 연결 (UserDataFolder 또는 GroupDataFolder 가 비어 있으면 DB 모드)
+    bool bNeedDb = gclsSetup.m_strUserDataFolder.empty() || gclsSetup.m_strGroupDataFolder.empty();
+    if ( bNeedDb ) {
+        CLog::Print( LOG_SYSTEM, "Connecting to DB %s:%d/%s ...",
+                     gclsSetup.m_strDbHost.c_str(), gclsSetup.m_iDbPort, gclsSetup.m_strDbName.c_str() );
+        if ( !gclsDbManager.Connect( gclsSetup.m_strDbHost, gclsSetup.m_strDbUser,
+                                     gclsSetup.m_strDbPasswd, gclsSetup.m_strDbName, gclsSetup.m_iDbPort ) ) {
+            CLog::Print( LOG_ERROR, "DB Connect failed — check csp.json Database section" );
+        }
+    }
+
     if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
         CLog::Print( LOG_SYSTEM, "Loading GroupMap from %s...", gclsSetup.m_strGroupDataFolder.c_str() );
         gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
+    } else if ( gclsDbManager.IsConnected() ) {
+        CLog::Print( LOG_SYSTEM, "Loading GroupMap from DB..." );
+        gclsGroupMap.LoadFromDb();
     }
+
     if ( gclsSetup.m_strUserDataFolder.length() > 0 ) {
         CLog::Print( LOG_SYSTEM, "Loading CspUserMap from %s...", gclsSetup.m_strUserDataFolder.c_str() );
         gclsCspUserMap.Load( gclsSetup.m_strUserDataFolder.c_str() );
+    } else if ( gclsDbManager.IsConnected() ) {
+        CLog::Print( LOG_SYSTEM, "User data: DB mode (on-demand loading)" );
     }
 
     {
@@ -156,6 +174,8 @@ int ServiceMain() {
             gclsSipServerMap.SetSipUserAgentRegisterInfo();
             if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
                 gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
+            } else if ( gclsDbManager.IsConnected() ) {
+                gclsGroupMap.LoadFromDb();
             }
         }
         if ( iSecond == 3600 ) {

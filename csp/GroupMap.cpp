@@ -3,6 +3,7 @@
  */
 
 #include "GroupMap.h"
+#include "DbManager.h"
 #include "Directory.h"
 #include "Log.h"
 #include "CmpClient.h"
@@ -23,6 +24,13 @@ CGroupMap::~CGroupMap() {
  */
 bool CGroupMap::Load( const char *pszDirName ) {
     return ReadDir( pszDirName );
+}
+
+/**
+ * @brief DB에서 전체 그룹을 로드한다
+ */
+bool CGroupMap::LoadFromDb() {
+    return gclsDbManager.LoadAllGroups(*this);
 }
 
 /**

@@ -82,6 +82,7 @@ public:
     void clear();
 
     friend class CspUserMap;
+    friend class CDbManager;
 
 private:
     time_t _loadTime;

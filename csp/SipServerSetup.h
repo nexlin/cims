@@ -98,16 +98,16 @@ public:
     /** 로그인된 사용자에게 OPTIONS 메시지를 전송하는 주기 (초단위) */
     int m_iSendOptionsPeriod;
 
-    /** 사용자 계정 정보 저장 폴더 - 본 항목이 설정되어 있지 않으면 MySQL DB 를 사용한다. */
+    /** 사용자 계정 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strUserDataFolder;
 
-    /** IP-PBX 정보 저장 폴더 - m_strUserDataFolder 가 설정되어 있지 않으면 본 항목은 사용되지 않는다. */
+    /** IP-PBX 정보 저장 폴더 */
     std::string m_strSipServerDataFolder;
 
-    /** 그룹 정보 저장 폴더 */
+    /** 그룹 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strGroupDataFolder;
 
-    /** CDR 파일 저장 폴더 - m_strUserDataFolder 가 설정되어 있지 않으면 본 항목은 사용되지 않는다. */
+    /** CDR 파일 저장 폴더 */
     std::string m_strCdrFolder;
 
     /** SIP REGISTER 를 전송한 후, 수신한 401 응답의 Authenticate 를 저장하여서 다음 주기의 SIP REGISTER 메시지를 생성할
@@ -116,6 +116,24 @@ public:
 
     /** User Alive Check Timeout (Seconds) */
     int m_iUserTimeout;
+
+    // ================================================================
+    // DB 연동 설정 (UserDataFolder / GroupDataFolder 가 비어 있을 때 사용)
+
+    /** DB 서버 호스트 */
+    std::string m_strDbHost;
+
+    /** DB 서버 포트 */
+    int m_iDbPort;
+
+    /** DB 접속 계정 */
+    std::string m_strDbUser;
+
+    /** DB 접속 패스워드 */
+    std::string m_strDbPasswd;
+
+    /** DB 이름 */
+    std::string m_strDbName;
 
     // ================================================================
     // 로그 기능
