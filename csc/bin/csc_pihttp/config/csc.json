@@ -22,8 +22,8 @@
     "CimsDatabase": {
         "Host": "127.0.0.1",
         "Port": 3306,
-        "User": "root",
-        "Password": "",
+        "User": "cims",
+        "Password": "cims1234",
         "Db": "cims"
     }
 }

@@ -180,7 +180,29 @@ body { background: var(--bg); min-height: 100vh; }
 }
 .badge--red  { background: #fee2e2; color: #b91c1c; }
 .badge--gray { background: #f3f4f6; color: #6b7280; }
-.badge--blue { background: #dbeafe; color: #1d4ed8; }
+.badge--blue  { background: #dbeafe; color: #1d4ed8; }
+.badge--green { background: #dcfce7; color: #15803d; }
+
+/* ── Detail tab bar ────────────────────────────────────────── */
+.tab-bar {
+  display: flex;
+  gap: 2px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 16px;
+}
+.tab-bar .tab-btn { border-radius: var(--radius) var(--radius) 0 0; }
+
+/* ── Form section title ────────────────────────────────────── */
+.form-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
 
 /* ── Empty state ───────────────────────────────────────────── */
 .empty { padding: 48px; text-align: center; color: var(--text-muted); }
