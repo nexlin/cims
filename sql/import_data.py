@@ -86,27 +86,54 @@ def import_users(conn, user_dir):
             print(f"[User] Skip {fname}: {e}")
             continue
 
-        auth_id    = data.get("auth_id", user_id)
-        passwd     = data.get("passwd", "")
-        org_id     = data.get("org_id", "")
-        dnd        = 1 if str(data.get("dnd", "false")).lower() == "true" else 0
-        forward_id = data.get("forward_id", "")
+        auth_id     = data.get("auth_id", user_id)
+        passwd      = data.get("passwd", "")
+        org_id      = data.get("org_id", "")
+        name        = data.get("name", "")
+        details     = data.get("details") or None
+        dnd         = 1 if str(data.get("dnd", "false")).lower() == "true" else 0
+        forward_id  = data.get("forward_id", "")
         create_time = data.get("create_time") or None
         update_time = data.get("update_time") or None
 
-        sql = """
+        # 1. Insert into cims_users (base info)
+        sql_base = """
             INSERT INTO cims_users
-                (id, auth_id, passwd, org_id, dnd, forward_id, create_time, update_time)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (id, name, org_id, details, create_time, update_time)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
-                auth_id=VALUES(auth_id), passwd=VALUES(passwd),
-                org_id=VALUES(org_id),   dnd=VALUES(dnd),
-                forward_id=VALUES(forward_id),
+                name=VALUES(name),
+                org_id=VALUES(org_id),
+                details=VALUES(details),
                 update_time=VALUES(update_time)
         """
-        cur.execute(sql, (user_id, auth_id, passwd, org_id, dnd, forward_id, create_time, update_time))
+        cur.execute(sql_base, (user_id, name, org_id, details, create_time, update_time))
 
-        # 착신거부 목록
+        # 2. Insert auth into cims_call_users or cims_ptt_users based on auth_id domain
+        if "@ptt." in auth_id:
+            sql_auth = """
+                INSERT INTO cims_ptt_users
+                    (user_id, auth_id, passwd, dnd, forward_id)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    auth_id=VALUES(auth_id), passwd=VALUES(passwd),
+                    dnd=VALUES(dnd), forward_id=VALUES(forward_id)
+            """
+            auth_table = "cims_ptt_users"
+        else:
+            sql_auth = """
+                INSERT INTO cims_call_users
+                    (user_id, auth_id, passwd, dnd, forward_id)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    auth_id=VALUES(auth_id), passwd=VALUES(passwd),
+                    dnd=VALUES(dnd), forward_id=VALUES(forward_id)
+            """
+            auth_table = "cims_call_users"
+
+        cur.execute(sql_auth, (user_id, auth_id, passwd, dnd, forward_id))
+
+        # 3. 착신거부 목록
         reject_ids = data.get("reject_id", [])
         if reject_ids:
             cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (user_id,))
@@ -117,7 +144,7 @@ def import_users(conn, user_dir):
                 )
 
         count += 1
-        print(f"[User] Imported {user_id}  auth_id={auth_id}")
+        print(f"[User] Imported {user_id}  auth_id={auth_id}  table={auth_table}")
 
     conn.commit()
     cur.close()

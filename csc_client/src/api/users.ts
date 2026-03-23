@@ -1,26 +1,49 @@
 import { api } from './client'
 
-export interface User {
-  id: string
+export interface CallAuth {
   auth_id: string
   passwd?: string
-  org_id: string
   dnd: boolean
   forward_id: string
-  reject_id: string[]
-  create_time?: string
-  update_time?: string
-  register_time?: string
-  logout_time?: string
+  register_time?: string | null
+  logout_time?: string | null
 }
 
-export type UserInput = Omit<User, 'create_time' | 'update_time' | 'register_time' | 'logout_time'>
+export interface UserSummary {
+  id: string
+  name: string
+  org_id: string
+  details?: string | null
+  has_call: boolean
+  has_ptt: boolean
+  reject_id: string[]
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export interface UserDetail extends UserSummary {
+  call_auth: CallAuth | null
+  ptt_auth: CallAuth | null
+}
+
+export type UserInput = {
+  id: string
+  name: string
+  org_id: string
+  details?: string
+  call_auth?: Partial<CallAuth> | null
+  ptt_auth?: Partial<CallAuth> | null
+  reject_id?: string[]
+}
 
 export const usersApi = {
-  list:   ()                            => api.get<{ users: User[] }>('/users').then(r => r.users),
-  get:    (id: string)                  => api.get<User>(`/users/${encodeURIComponent(id)}`),
-  create: (data: UserInput)             => api.post<{ id: string }>('/users', data),
-  update: (id: string, data: Partial<UserInput>) =>
-    api.put<{ id: string }>(`/users/${encodeURIComponent(id)}`, data),
-  delete: (id: string)                  => api.delete<{ id: string }>(`/users/${encodeURIComponent(id)}`),
+  list:       ()                                     => api.get<{ users: UserSummary[] }>('/users').then(r => r.users),
+  get:        (id: string)                           => api.get<UserDetail>(`/users/${encodeURIComponent(id)}`),
+  create:     (data: UserInput)                      => api.post<{ id: string }>('/users', data),
+  update:     (id: string, data: Partial<UserInput>) => api.put<{ id: string }>(`/users/${encodeURIComponent(id)}`, data),
+  delete:     (id: string)                           => api.delete<{ id: string }>(`/users/${encodeURIComponent(id)}`),
+  upsertCall: (id: string, auth: Partial<CallAuth>)  => api.post<{ id: string }>(`/users/${encodeURIComponent(id)}/call`, auth),
+  deleteCall: (id: string)                           => api.delete<{ id: string }>(`/users/${encodeURIComponent(id)}/call`),
+  upsertPtt:  (id: string, auth: Partial<CallAuth>)  => api.post<{ id: string }>(`/users/${encodeURIComponent(id)}/ptt`, auth),
+  deletePtt:  (id: string)                           => api.delete<{ id: string }>(`/users/${encodeURIComponent(id)}/ptt`),
 }

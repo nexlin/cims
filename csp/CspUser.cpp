@@ -41,6 +41,7 @@ CspUserMap gclsCspUserMap;
  */
 void CspUser::clear() {
     m_strId.clear();
+    m_strName.clear();
     m_strAuthId.clear();
     m_strPassWord.clear();
     m_bDnd = false;

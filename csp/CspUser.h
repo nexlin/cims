@@ -43,6 +43,9 @@ public:
 
     std::string m_strId;
 
+    // 표시 이름
+    std::string m_strName;
+
     // SIP 인증용 아이디 (IMS 등에서 전화번호와 분리된 단말기 고유 ID. 없으면 m_strId와 동일시함)
     std::string m_strAuthId;
 

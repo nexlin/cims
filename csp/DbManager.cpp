@@ -138,9 +138,11 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
+    // Try call users first
     std::string strSql =
-        "SELECT id, auth_id, passwd, org_id, dnd, forward_id "
-        "FROM cims_users WHERE id='" + Escape(strUserId) + "'";
+        "SELECT u.id, u.name, u.org_id, c.auth_id, c.passwd, c.dnd, c.forward_id "
+        "FROM cims_users u JOIN cims_call_users c ON u.id = c.user_id "
+        "WHERE u.id='" + Escape(strUserId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
@@ -148,15 +150,30 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     MYSQL_ROW row = mysql_fetch_row(pRes);
     if (!row) {
         mysql_free_result(pRes);
-        return false;
+
+        // Try PTT users
+        strSql =
+            "SELECT u.id, u.name, u.org_id, p.auth_id, p.passwd, p.dnd, p.forward_id "
+            "FROM cims_users u JOIN cims_ptt_users p ON u.id = p.user_id "
+            "WHERE u.id='" + Escape(strUserId) + "'";
+
+        pRes = ExecuteSelect(strSql);
+        if (!pRes) return false;
+
+        row = mysql_fetch_row(pRes);
+        if (!row) {
+            mysql_free_result(pRes);
+            return false;
+        }
     }
 
     clsUser.m_strId             = row[0] ? row[0] : "";
-    clsUser.m_strAuthId         = row[1] ? row[1] : "";
-    clsUser.m_strPassWord       = row[2] ? row[2] : "";
-    clsUser.m_strOrganizationId = row[3] ? row[3] : "";
-    clsUser.m_bDnd              = row[4] ? (atoi(row[4]) != 0) : false;
-    clsUser.m_strForward        = row[5] ? row[5] : "";
+    clsUser.m_strName           = row[1] ? row[1] : "";
+    clsUser.m_strOrganizationId = row[2] ? row[2] : "";
+    clsUser.m_strAuthId         = row[3] ? row[3] : "";
+    clsUser.m_strPassWord       = row[4] ? row[4] : "";
+    clsUser.m_bDnd              = row[5] ? (atoi(row[5]) != 0) : false;
+    clsUser.m_strForward        = row[6] ? row[6] : "";
     clsUser._loadTime           = time(nullptr);
 
     mysql_free_result(pRes);
@@ -180,9 +197,9 @@ bool CDbManager::UpdateRegisterTime( const std::string& strUserId )
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
-    std::string strSql =
-        "UPDATE cims_users SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'";
-    return ExecuteQuery(strSql);
+    ExecuteQuery("UPDATE cims_call_users SET register_time=NOW() WHERE user_id='" + Escape(strUserId) + "'");
+    ExecuteQuery("UPDATE cims_ptt_users SET register_time=NOW() WHERE user_id='" + Escape(strUserId) + "'");
+    return true;
 }
 
 bool CDbManager::UpdateLogoutTime( const std::string& strUserId )
@@ -190,9 +207,9 @@ bool CDbManager::UpdateLogoutTime( const std::string& strUserId )
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
-    std::string strSql =
-        "UPDATE cims_users SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'";
-    return ExecuteQuery(strSql);
+    ExecuteQuery("UPDATE cims_call_users SET logout_time=NOW() WHERE user_id='" + Escape(strUserId) + "'");
+    ExecuteQuery("UPDATE cims_ptt_users SET logout_time=NOW() WHERE user_id='" + Escape(strUserId) + "'");
+    return true;
 }
 
 // ─────────────────────────────────────────────
