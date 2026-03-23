@@ -111,27 +111,25 @@ def import_users(conn, user_dir):
 
         # 2. Insert auth into cims_call_users or cims_ptt_users based on auth_id domain
         if "@ptt." in auth_id:
-            sql_auth = """
-                INSERT INTO cims_ptt_users
-                    (user_id, auth_id, passwd, dnd, forward_id)
-                VALUES (%s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    auth_id=VALUES(auth_id), passwd=VALUES(passwd),
-                    dnd=VALUES(dnd), forward_id=VALUES(forward_id)
-            """
+            sql_auth = (
+                "INSERT INTO cims_ptt_users (id, user_id, auth_id, passwd, dnd, forward_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE "
+                "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
+                "dnd=VALUES(dnd), forward_id=VALUES(forward_id)"
+            )
             auth_table = "cims_ptt_users"
         else:
-            sql_auth = """
-                INSERT INTO cims_call_users
-                    (user_id, auth_id, passwd, dnd, forward_id)
-                VALUES (%s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    auth_id=VALUES(auth_id), passwd=VALUES(passwd),
-                    dnd=VALUES(dnd), forward_id=VALUES(forward_id)
-            """
+            sql_auth = (
+                "INSERT INTO cims_call_users (id, user_id, auth_id, passwd, dnd, forward_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE "
+                "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
+                "dnd=VALUES(dnd), forward_id=VALUES(forward_id)"
+            )
             auth_table = "cims_call_users"
 
-        cur.execute(sql_auth, (user_id, auth_id, passwd, dnd, forward_id))
+        cur.execute(sql_auth, (user_id, user_id, auth_id, passwd, dnd, forward_id))
 
         # 3. 착신거부 목록
         reject_ids = data.get("reject_id", [])

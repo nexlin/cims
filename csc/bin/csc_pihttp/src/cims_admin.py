@@ -3,17 +3,19 @@ CIMS Admin REST API
 Subscriber and PTT group CRUD operations backed by MariaDB.
 
 Routes (prefix-matched):
-  /api/v1/users                           GET list / POST create
-  /api/v1/users/{id}                      GET / PUT / DELETE
-  /api/v1/users/{id}/call                 POST upsert / DELETE remove call auth
-  /api/v1/users/{id}/ptt                  POST upsert / DELETE remove PTT auth
-  /api/v1/ptt/groups                      GET list / POST create
-  /api/v1/ptt/groups/{id}                 GET / PUT / DELETE
-  /api/v1/ptt/groups/{id}/members         GET list / POST add
-  /api/v1/ptt/groups/{id}/members/{uid}   DELETE
+  /api/v1/users                               GET list / POST create
+  /api/v1/users/{pid}                         GET / PUT / DELETE
+  /api/v1/users/{pid}/call                    GET list / POST add call subscription
+  /api/v1/users/{pid}/call/{msisdn}           PUT update / DELETE remove call subscription
+  /api/v1/users/{pid}/ptt                     GET list / POST add PTT subscription
+  /api/v1/users/{pid}/ptt/{msisdn}            PUT update / DELETE remove PTT subscription
+  /api/v1/ptt/groups                          GET list / POST create
+  /api/v1/ptt/groups/{id}                     GET / PUT / DELETE
+  /api/v1/ptt/groups/{id}/members             GET list / POST add
+  /api/v1/ptt/groups/{id}/members/{uid}       DELETE
 """
 
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
 import pymysql
@@ -40,14 +42,14 @@ def _get_db(config: dict):
 
 
 def _path_parts(full_path: str, base: str):
-    """Return the path segments that come after *base*.
+    """Return the path segments that come after *base*, URL-decoded.
 
-    e.g. base='/api/v1/users', full_path='/api/v1/users/1001' → ('1001',)
+    e.g. base='/api/v1/users', full_path='/api/v1/users/%2B821001' → ('+821001',)
     """
     path = urlparse(full_path).path
     try:
         rel = PurePath(path).relative_to(PurePath(base))
-        return rel.parts
+        return tuple(unquote(p) for p in rel.parts)
     except ValueError:
         return ()
 
@@ -69,13 +71,14 @@ _USERS_BASE = '/api/v1/users'
 async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     config = kwargs.get('config', {})
     parts = _path_parts(handler_args.full_path, _USERS_BASE)
-    # parts: () | ('id',) | ('id', 'call') | ('id', 'ptt')
-    user_id = parts[0] if len(parts) > 0 else None
-    sub     = parts[1] if len(parts) > 1 else None
-    method  = handler_args.method.upper()
+    # parts: () | (pid,) | (pid, 'call'|'ptt') | (pid, 'call'|'ptt', msisdn)
+    person_id = parts[0] if len(parts) > 0 else None
+    sub       = parts[1] if len(parts) > 1 else None   # 'call' | 'ptt'
+    sub_id    = parts[2] if len(parts) > 2 else None   # MSISDN of the subscription
+    method    = handler_args.method.upper()
 
     try:
-        if user_id is None:
+        if person_id is None:
             if method == 'GET':
                 return await _list_users(config)
             elif method == 'POST':
@@ -84,19 +87,26 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
         if sub is None:
             if method == 'GET':
-                return await _get_user(user_id, config)
+                return await _get_user(person_id, config)
             elif method == 'PUT':
-                return await _update_user(user_id, handler_args.body, config)
+                return await _update_user(person_id, handler_args.body, config)
             elif method == 'DELETE':
-                return await _delete_user(user_id, config)
+                return await _delete_user(person_id, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         if sub in ('call', 'ptt'):
-            if method == 'POST':
-                return await _upsert_auth(user_id, sub, handler_args.body, config)
-            elif method == 'DELETE':
-                return await _delete_auth(user_id, sub, config)
-            return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+            if sub_id is None:
+                if method == 'GET':
+                    return await _list_subscriptions(person_id, sub, config)
+                elif method == 'POST':
+                    return await _add_subscription(person_id, sub, handler_args.body, config)
+                return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+            else:
+                if method == 'PUT':
+                    return await _update_subscription(person_id, sub, sub_id, handler_args.body, config)
+                elif method == 'DELETE':
+                    return await _delete_subscription(person_id, sub, sub_id, config)
+                return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         return HandlerResult(status=404, body={'error': 'Not Found'})
     except pymysql.Error as e:
@@ -109,17 +119,18 @@ async def _list_users(config):
             cur.execute(
                 "SELECT u.id, u.name, u.org_id, u.details, "
                 "u.create_time, u.update_time, "
-                "CASE WHEN c.user_id IS NOT NULL THEN 1 ELSE 0 END AS has_call, "
-                "CASE WHEN p.user_id IS NOT NULL THEN 1 ELSE 0 END AS has_ptt "
+                "COUNT(DISTINCT c.id) AS call_count, "
+                "COUNT(DISTINCT p.id) AS ptt_count "
                 "FROM cims_users u "
                 "LEFT JOIN cims_call_users c ON u.id = c.user_id "
                 "LEFT JOIN cims_ptt_users p ON u.id = p.user_id "
+                "GROUP BY u.id, u.name, u.org_id, u.details, u.create_time, u.update_time "
                 "ORDER BY u.id"
             )
             rows = cur.fetchall()
             for row in rows:
-                row['has_call'] = bool(row['has_call'])
-                row['has_ptt']  = bool(row['has_ptt'])
+                row['call_count'] = int(row['call_count'])
+                row['ptt_count']  = int(row['ptt_count'])
                 row['create_time'] = _dt(row['create_time'])
                 row['update_time'] = _dt(row['update_time'])
                 # attach reject list
@@ -131,13 +142,13 @@ async def _list_users(config):
     return HandlerResult(status=200, body={'users': rows})
 
 
-async def _get_user(user_id: str, config):
+async def _get_user(person_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, name, org_id, details, create_time, update_time "
                 "FROM cims_users WHERE id=%s",
-                (user_id,)
+                (person_id,)
             )
             row = cur.fetchone()
             if row is None:
@@ -148,35 +159,35 @@ async def _get_user(user_id: str, config):
             # reject list
             cur.execute(
                 "SELECT reject_id FROM cims_user_rejects WHERE user_id=%s",
-                (user_id,)
+                (person_id,)
             )
             row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
 
-            # call auth
+            # call subscriptions
             cur.execute(
-                "SELECT auth_id, passwd, dnd, forward_id, register_time, logout_time "
-                "FROM cims_call_users WHERE user_id=%s",
-                (user_id,)
+                "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                "FROM cims_call_users WHERE user_id=%s ORDER BY id",
+                (person_id,)
             )
-            call_row = cur.fetchone()
-            if call_row:
-                call_row['dnd'] = bool(call_row['dnd'])
-                call_row['register_time'] = _dt(call_row['register_time'])
-                call_row['logout_time']   = _dt(call_row['logout_time'])
-            row['call_auth'] = call_row
+            call_subs = cur.fetchall()
+            for s in call_subs:
+                s['dnd'] = bool(s['dnd'])
+                s['register_time'] = _dt(s['register_time'])
+                s['logout_time']   = _dt(s['logout_time'])
+            row['call_subscriptions'] = call_subs
 
-            # ptt auth
+            # ptt subscriptions
             cur.execute(
-                "SELECT auth_id, passwd, dnd, forward_id, register_time, logout_time "
-                "FROM cims_ptt_users WHERE user_id=%s",
-                (user_id,)
+                "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                "FROM cims_ptt_users WHERE user_id=%s ORDER BY id",
+                (person_id,)
             )
-            ptt_row = cur.fetchone()
-            if ptt_row:
-                ptt_row['dnd'] = bool(ptt_row['dnd'])
-                ptt_row['register_time'] = _dt(ptt_row['register_time'])
-                ptt_row['logout_time']   = _dt(ptt_row['logout_time'])
-            row['ptt_auth'] = ptt_row
+            ptt_subs = cur.fetchall()
+            for s in ptt_subs:
+                s['dnd'] = bool(s['dnd'])
+                s['register_time'] = _dt(s['register_time'])
+                s['logout_time']   = _dt(s['logout_time'])
+            row['ptt_subscriptions'] = ptt_subs
 
     return HandlerResult(status=200, body=row)
 
@@ -184,16 +195,14 @@ async def _get_user(user_id: str, config):
 async def _create_user(body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
-    user_id = body.get('id', '').strip()
-    if not user_id:
+    person_id = body.get('id', '').strip()
+    if not person_id:
         return HandlerResult(status=400, body={'error': 'id is required'})
 
     name       = body.get('name', '')
     org_id     = body.get('org_id', '')
     details    = body.get('details') or None
     reject_ids = body.get('reject_id', [])
-    call_auth  = body.get('call_auth')
-    ptt_auth   = body.get('ptt_auth')
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -201,50 +210,20 @@ async def _create_user(body, config):
                 "INSERT INTO cims_users "
                 "(id, name, org_id, details, create_time, update_time) "
                 "VALUES (%s, %s, %s, %s, NOW(), NOW())",
-                (user_id, name, org_id, details)
+                (person_id, name, org_id, details)
             )
 
-            if call_auth:
-                cur.execute(
-                    "INSERT INTO cims_call_users "
-                    "(user_id, auth_id, passwd, dnd, forward_id) "
-                    "VALUES (%s, %s, %s, %s, %s) "
-                    "ON DUPLICATE KEY UPDATE "
-                    "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
-                    "dnd=VALUES(dnd), forward_id=VALUES(forward_id)",
-                    (user_id,
-                     call_auth.get('auth_id', user_id),
-                     call_auth.get('passwd', ''),
-                     1 if call_auth.get('dnd', False) else 0,
-                     call_auth.get('forward_id', ''))
-                )
-
-            if ptt_auth:
-                cur.execute(
-                    "INSERT INTO cims_ptt_users "
-                    "(user_id, auth_id, passwd, dnd, forward_id) "
-                    "VALUES (%s, %s, %s, %s, %s) "
-                    "ON DUPLICATE KEY UPDATE "
-                    "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
-                    "dnd=VALUES(dnd), forward_id=VALUES(forward_id)",
-                    (user_id,
-                     ptt_auth.get('auth_id', user_id),
-                     ptt_auth.get('passwd', ''),
-                     1 if ptt_auth.get('dnd', False) else 0,
-                     ptt_auth.get('forward_id', ''))
-                )
-
             if reject_ids:
-                cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (user_id,))
+                cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
                 for rid in reject_ids:
                     cur.execute(
                         "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
-                        (user_id, rid)
+                        (person_id, rid)
                     )
-    return HandlerResult(status=201, body={'id': user_id})
+    return HandlerResult(status=201, body={'id': person_id})
 
 
-async def _update_user(user_id: str, body, config):
+async def _update_user(person_id: str, body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
@@ -257,7 +236,7 @@ async def _update_user(user_id: str, body, config):
 
     if fields:
         fields.append('update_time=NOW()')
-        values.append(user_id)
+        values.append(person_id)
         with _get_db(config) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -267,79 +246,127 @@ async def _update_user(user_id: str, body, config):
                 if cur.rowcount == 0:
                     return HandlerResult(status=404, body={'error': 'User not found'})
                 if 'reject_id' in body:
-                    cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (user_id,))
+                    cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
                     for rid in body['reject_id']:
                         cur.execute(
                             "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
-                            (user_id, rid)
+                            (person_id, rid)
                         )
     elif 'reject_id' in body:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
-                # verify user exists
-                cur.execute("SELECT id FROM cims_users WHERE id=%s", (user_id,))
+                cur.execute("SELECT id FROM cims_users WHERE id=%s", (person_id,))
                 if cur.fetchone() is None:
                     return HandlerResult(status=404, body={'error': 'User not found'})
-                cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (user_id,))
+                cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
                 for rid in body['reject_id']:
                     cur.execute(
                         "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
-                        (user_id, rid)
+                        (person_id, rid)
                     )
     else:
         return HandlerResult(status=400, body={'error': 'No updatable fields provided'})
 
-    return HandlerResult(status=200, body={'id': user_id})
+    return HandlerResult(status=200, body={'id': person_id})
 
 
-async def _delete_user(user_id: str, config):
+async def _delete_user(person_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            # cims_call_users and cims_ptt_users cascade delete via FK
-            cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (user_id,))
-            cur.execute("DELETE FROM cims_users WHERE id=%s", (user_id,))
+            cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
+            cur.execute("DELETE FROM cims_users WHERE id=%s", (person_id,))
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'User not found'})
-    return HandlerResult(status=200, body={'id': user_id})
+    return HandlerResult(status=200, body={'id': person_id})
 
 
-async def _upsert_auth(user_id: str, service: str, body, config):
-    if not isinstance(body, dict):
-        return HandlerResult(status=400, body={'error': 'JSON body required'})
+# ──────────────────────────────────────────────────────────────
+#  Subscription handlers (call / ptt)
+# ──────────────────────────────────────────────────────────────
 
-    auth_id    = body.get('auth_id', user_id)
-    passwd     = body.get('passwd', '')
-    dnd        = 1 if body.get('dnd', False) else 0
-    forward_id = body.get('forward_id', '')
+def _sub_table(svc: str) -> str:
+    return 'cims_call_users' if svc == 'call' else 'cims_ptt_users'
 
-    table = 'cims_call_users' if service == 'call' else 'cims_ptt_users'
 
+async def _list_subscriptions(person_id: str, svc: str, config):
+    table = _sub_table(svc)
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            # verify user exists
-            cur.execute("SELECT id FROM cims_users WHERE id=%s", (user_id,))
+            cur.execute("SELECT id FROM cims_users WHERE id=%s", (person_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
-                f"INSERT INTO {table} "
-                "(user_id, auth_id, passwd, dnd, forward_id) "
-                "VALUES (%s, %s, %s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE "
-                "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
-                "dnd=VALUES(dnd), forward_id=VALUES(forward_id)",
-                (user_id, auth_id, passwd, dnd, forward_id)
+                f"SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                f"FROM {table} WHERE user_id=%s ORDER BY id",
+                (person_id,)
             )
-    return HandlerResult(status=200, body={'id': user_id})
+            subs = cur.fetchall()
+            for s in subs:
+                s['dnd'] = bool(s['dnd'])
+                s['register_time'] = _dt(s['register_time'])
+                s['logout_time']   = _dt(s['logout_time'])
+    return HandlerResult(status=200, body={'subscriptions': subs})
 
 
-async def _delete_auth(user_id: str, service: str, config):
-    table = 'cims_call_users' if service == 'call' else 'cims_ptt_users'
+async def _add_subscription(person_id: str, svc: str, body, config):
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={'error': 'JSON body required'})
+    msisdn = body.get('id', '').strip()
+    if not msisdn:
+        return HandlerResult(status=400, body={'error': 'id (MSISDN) is required'})
+
+    auth_id    = body.get('auth_id', msisdn)
+    passwd     = body.get('passwd', '')
+    dnd        = 1 if body.get('dnd', False) else 0
+    forward_id = body.get('forward_id', '')
+    table      = _sub_table(svc)
+
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute(f"DELETE FROM {table} WHERE user_id=%s", (user_id,))
+            cur.execute("SELECT id FROM cims_users WHERE id=%s", (person_id,))
+            if cur.fetchone() is None:
+                return HandlerResult(status=404, body={'error': 'User not found'})
+            cur.execute(
+                f"INSERT INTO {table} (id, user_id, auth_id, passwd, dnd, forward_id) "
+                f"VALUES (%s, %s, %s, %s, %s, %s)",
+                (msisdn, person_id, auth_id, passwd, dnd, forward_id)
+            )
+    return HandlerResult(status=201, body={'id': msisdn})
+
+
+async def _update_subscription(person_id: str, svc: str, msisdn: str, body, config):
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={'error': 'JSON body required'})
+
+    auth_id    = body.get('auth_id', msisdn)
+    passwd     = body.get('passwd', '')
+    dnd        = 1 if body.get('dnd', False) else 0
+    forward_id = body.get('forward_id', '')
+    table      = _sub_table(svc)
+
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE {table} SET auth_id=%s, passwd=%s, dnd=%s, forward_id=%s "
+                f"WHERE id=%s AND user_id=%s",
+                (auth_id, passwd, dnd, forward_id, msisdn, person_id)
+            )
             if cur.rowcount == 0:
-                return HandlerResult(status=404, body={'error': 'Auth record not found'})
-    return HandlerResult(status=200, body={'id': user_id})
+                return HandlerResult(status=404, body={'error': 'Subscription not found'})
+    return HandlerResult(status=200, body={'id': msisdn})
+
+
+async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
+    table = _sub_table(svc)
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {table} WHERE id=%s AND user_id=%s",
+                (msisdn, person_id)
+            )
+            if cur.rowcount == 0:
+                return HandlerResult(status=404, body={'error': 'Subscription not found'})
+    return HandlerResult(status=200, body={'id': msisdn})
 
 
 # ──────────────────────────────────────────────────────────────
@@ -509,7 +536,6 @@ async def _delete_group(group_id: str, config):
 async def _list_members(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            # verify group exists
             cur.execute("SELECT id FROM cims_ptt_groups WHERE id=%s", (group_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})

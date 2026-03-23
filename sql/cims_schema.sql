@@ -26,30 +26,34 @@ CREATE TABLE IF NOT EXISTS cims_users (
 --  VoLTE 가입자 인증 정보 (Call Users)
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cims_call_users (
-    user_id       VARCHAR(64)  NOT NULL COMMENT 'cims_users.id 참조',
+    id            VARCHAR(64)  NOT NULL COMMENT 'VoLTE MSISDN (E.164)',
+    user_id       VARCHAR(64)  NOT NULL COMMENT 'cims_users.id 참조 (개인 ID)',
     auth_id       VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 인증 ID (IMPI)',
     passwd        VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 패스워드',
     dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
     forward_id    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '착신전환 대상',
     register_time DATETIME              DEFAULT NULL,
     logout_time   DATETIME              DEFAULT NULL,
-    PRIMARY KEY (user_id),
-    CONSTRAINT fk_call_user FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
+    PRIMARY KEY (id),
+    KEY idx_user_id (user_id),
+    CONSTRAINT fk_call_user2 FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='VoLTE 가입자 인증 정보';
 
 -- ─────────────────────────────────────────────
 --  PTT 가입자 인증 정보 (PTT Users)
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cims_ptt_users (
-    user_id       VARCHAR(64)  NOT NULL COMMENT 'cims_users.id 참조',
+    id            VARCHAR(64)  NOT NULL COMMENT 'PTT MSISDN (E.164)',
+    user_id       VARCHAR(64)  NOT NULL COMMENT 'cims_users.id 참조 (개인 ID)',
     auth_id       VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 인증 ID (IMPI)',
     passwd        VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 패스워드',
     dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
     forward_id    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '착신전환 대상',
     register_time DATETIME              DEFAULT NULL,
     logout_time   DATETIME              DEFAULT NULL,
-    PRIMARY KEY (user_id),
-    CONSTRAINT fk_ptt_user FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
+    PRIMARY KEY (id),
+    KEY idx_user_id (user_id),
+    CONSTRAINT fk_ptt_user2 FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PTT 가입자 인증 정보';
 
 -- ─────────────────────────────────────────────

@@ -1,14 +1,22 @@
 import { useState, useEffect, useCallback } from 'react'
-import { usersApi, type UserSummary, type UserDetail, type UserInput, type CallAuth } from '../api/users'
+import { usersApi, type UserSummary, type UserDetail, type UserInput, type Subscription } from '../api/users'
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 
-// ── Auth section initial state ──────────────────────────────
-const EMPTY_AUTH: Partial<CallAuth> = {
-  auth_id: '', passwd: '', dnd: false, forward_id: '',
+// ── Subscription form state ───────────────────────────────────
+interface SubForm {
+  id: string
+  auth_id: string
+  passwd: string
+  dnd: boolean
+  forward_id: string
 }
 
-// ── Form state ──────────────────────────────────────────────
+const EMPTY_SUB_FORM: SubForm = {
+  id: '', auth_id: '', passwd: '', dnd: false, forward_id: '',
+}
+
+// ── Person form state ─────────────────────────────────────────
 interface FormState {
   id: string
   name: string
@@ -21,7 +29,7 @@ const EMPTY_FORM: FormState = {
   id: '', name: '', org_id: '', details: '', reject_id: [],
 }
 
-// ── Detail modal tab type ────────────────────────────────────
+// ── Detail modal tab type ─────────────────────────────────────
 type DetailTab = 'base' | 'call' | 'ptt'
 
 export default function UsersPage() {
@@ -30,21 +38,27 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
-  // form modal
+  // person add/edit form modal
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [rejectStr, setRejectStr] = useState('')
-  const [callEnabled, setCallEnabled] = useState(false)
-  const [callAuth, setCallAuth] = useState<Partial<CallAuth>>(EMPTY_AUTH)
-  const [pttEnabled, setPttEnabled] = useState(false)
-  const [pttAuth, setPttAuth] = useState<Partial<CallAuth>>(EMPTY_AUTH)
   const [saving, setSaving] = useState(false)
 
   // detail modal
   const [detail, setDetail] = useState<UserDetail | null>(null)
   const [detailTab, setDetailTab] = useState<DetailTab>('base')
   const [detailLoading, setDetailLoading] = useState(false)
+
+  // subscription add modal
+  const [addSubOpen, setAddSubOpen] = useState<{svc: 'call'|'ptt'} | null>(null)
+  const [subForm, setSubForm] = useState<SubForm>(EMPTY_SUB_FORM)
+  const [subSaving, setSubSaving] = useState(false)
+
+  // subscription edit modal
+  const [editSub, setEditSub] = useState<{svc: 'call'|'ptt'; sub: Subscription} | null>(null)
+  const [editSubForm, setEditSubForm] = useState<SubForm>(EMPTY_SUB_FORM)
+  const [editSubSaving, setEditSubSaving] = useState(false)
 
   // delete confirm
   const [delTarget, setDelTarget] = useState<UserSummary | null>(null)
@@ -63,20 +77,26 @@ export default function UsersPage() {
 
   useEffect(() => { load() }, [load])
 
-  // ── open add form ─────────────────────────────────────────
+  // ── refresh detail ─────────────────────────────────────────
+  const refreshDetail = useCallback(async (pid: string) => {
+    try {
+      const d = await usersApi.get(pid)
+      setDetail(d)
+    } catch (e: unknown) {
+      show(String(e), 'err')
+    }
+  }, [show])
+
+  // ── open add person form ───────────────────────────────────
   function openAdd() {
     setEditingId(null)
     setForm(EMPTY_FORM)
     setRejectStr('')
-    setCallEnabled(false)
-    setCallAuth(EMPTY_AUTH)
-    setPttEnabled(false)
-    setPttAuth(EMPTY_AUTH)
     setFormOpen(true)
   }
 
-  // ── open edit form (from detail) ──────────────────────────
-  async function openEdit(u: UserSummary) {
+  // ── open edit person form ──────────────────────────────────
+  function openEdit(u: UserSummary) {
     setEditingId(u.id)
     setForm({
       id: u.id,
@@ -86,59 +106,21 @@ export default function UsersPage() {
       reject_id: u.reject_id,
     })
     setRejectStr(u.reject_id.join(', '))
-
-    // fetch detail to populate auth fields
-    try {
-      const d = await usersApi.get(u.id)
-      if (d.call_auth) {
-        setCallEnabled(true)
-        setCallAuth({ ...d.call_auth, passwd: '' })
-      } else {
-        setCallEnabled(false)
-        setCallAuth(EMPTY_AUTH)
-      }
-      if (d.ptt_auth) {
-        setPttEnabled(true)
-        setPttAuth({ ...d.ptt_auth, passwd: '' })
-      } else {
-        setPttEnabled(false)
-        setPttAuth(EMPTY_AUTH)
-      }
-    } catch {
-      setCallEnabled(false)
-      setCallAuth(EMPTY_AUTH)
-      setPttEnabled(false)
-      setPttAuth(EMPTY_AUTH)
-    }
-
     setFormOpen(true)
   }
 
-  // ── save ──────────────────────────────────────────────────
+  // ── save person ────────────────────────────────────────────
   async function handleSave() {
     const rejectIds = rejectStr.split(',').map(s => s.trim()).filter(Boolean)
     setSaving(true)
     try {
       if (editingId) {
-        // update base fields
         await usersApi.update(editingId, {
           name: form.name,
           org_id: form.org_id,
           details: form.details || undefined,
           reject_id: rejectIds,
         })
-        // handle call auth
-        if (callEnabled) {
-          await usersApi.upsertCall(editingId, callAuth)
-        } else {
-          try { await usersApi.deleteCall(editingId) } catch { /* ignore if not found */ }
-        }
-        // handle ptt auth
-        if (pttEnabled) {
-          await usersApi.upsertPtt(editingId, pttAuth)
-        } else {
-          try { await usersApi.deletePtt(editingId) } catch { /* ignore if not found */ }
-        }
         show('가입자 정보가 수정되었습니다.')
       } else {
         const payload: UserInput = {
@@ -147,8 +129,6 @@ export default function UsersPage() {
           org_id: form.org_id,
           details: form.details || undefined,
           reject_id: rejectIds,
-          call_auth: callEnabled ? callAuth : null,
-          ptt_auth: pttEnabled ? pttAuth : null,
         }
         await usersApi.create(payload)
         show('가입자가 등록되었습니다.')
@@ -162,7 +142,7 @@ export default function UsersPage() {
     }
   }
 
-  // ── open detail modal ─────────────────────────────────────
+  // ── open detail modal ──────────────────────────────────────
   async function openDetail(u: UserSummary) {
     setDetail(null)
     setDetailTab('base')
@@ -177,13 +157,89 @@ export default function UsersPage() {
     }
   }
 
-  // ── delete ────────────────────────────────────────────────
+  // ── delete person ──────────────────────────────────────────
   async function handleDelete() {
     if (!delTarget) return
     try {
       await usersApi.delete(delTarget.id)
       show('가입자가 삭제되었습니다.')
       setDelTarget(null)
+      await load()
+    } catch (e: unknown) {
+      show(String(e), 'err')
+    }
+  }
+
+  // ── open subscription add modal ────────────────────────────
+  function openAddSub(svc: 'call'|'ptt') {
+    setSubForm(EMPTY_SUB_FORM)
+    setAddSubOpen({ svc })
+  }
+
+  // ── save new subscription ──────────────────────────────────
+  async function handleAddSub() {
+    if (!detail || !addSubOpen) return
+    setSubSaving(true)
+    try {
+      await usersApi.addSub(detail.id, addSubOpen.svc, {
+        id: subForm.id,
+        auth_id: subForm.auth_id,
+        passwd: subForm.passwd,
+        dnd: subForm.dnd,
+        forward_id: subForm.forward_id,
+      })
+      show('번호가 추가되었습니다.')
+      setAddSubOpen(null)
+      await refreshDetail(detail.id)
+      await load()
+    } catch (e: unknown) {
+      show(String(e), 'err')
+    } finally {
+      setSubSaving(false)
+    }
+  }
+
+  // ── open subscription edit modal ───────────────────────────
+  function openEditSub(svc: 'call'|'ptt', sub: Subscription) {
+    setEditSub({ svc, sub })
+    setEditSubForm({
+      id: sub.id,
+      auth_id: sub.auth_id,
+      passwd: '',
+      dnd: sub.dnd,
+      forward_id: sub.forward_id,
+    })
+  }
+
+  // ── save subscription edit ─────────────────────────────────
+  async function handleEditSub() {
+    if (!detail || !editSub) return
+    setEditSubSaving(true)
+    try {
+      await usersApi.updateSub(detail.id, editSub.svc, editSub.sub.id, {
+        auth_id: editSubForm.auth_id,
+        passwd: editSubForm.passwd,
+        dnd: editSubForm.dnd,
+        forward_id: editSubForm.forward_id,
+      })
+      show('번호 정보가 수정되었습니다.')
+      setEditSub(null)
+      await refreshDetail(detail.id)
+      await load()
+    } catch (e: unknown) {
+      show(String(e), 'err')
+    } finally {
+      setEditSubSaving(false)
+    }
+  }
+
+  // ── delete subscription ────────────────────────────────────
+  async function handleDeleteSub(svc: 'call'|'ptt', msisdn: string) {
+    if (!detail) return
+    try {
+      await usersApi.deleteSub(detail.id, svc, msisdn)
+      show('번호가 삭제되었습니다.')
+      await refreshDetail(detail.id)
       await load()
     } catch (e: unknown) {
       show(String(e), 'err')
@@ -218,16 +274,17 @@ export default function UsersPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>ID (MSISDN)</th>
+                <th>ID (개인)</th>
                 <th>이름</th>
                 <th>조직</th>
-                <th>서비스</th>
+                <th>Call 번호</th>
+                <th>PTT 번호</th>
                 <th style={{ width: 130 }}>작업</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={5} className="empty-cell">가입자 없음</td></tr>
+                <tr><td colSpan={6} className="empty-cell">가입자 없음</td></tr>
               ) : filtered.map(u => (
                 <tr key={u.id}>
                   <td>
@@ -236,13 +293,16 @@ export default function UsersPage() {
                   <td>{u.name || '—'}</td>
                   <td>{u.org_id || '—'}</td>
                   <td>
-                    {u.has_call && (
-                      <span className="badge badge--blue" style={{ marginRight: 4 }}>Call</span>
-                    )}
-                    {u.has_ptt && (
-                      <span className="badge badge--green">PTT</span>
-                    )}
-                    {!u.has_call && !u.has_ptt && <span className="badge badge--gray">없음</span>}
+                    {u.call_count > 0
+                      ? <span className="badge badge--blue">{u.call_count}개</span>
+                      : <span className="badge badge--gray">없음</span>
+                    }
+                  </td>
+                  <td>
+                    {u.ptt_count > 0
+                      ? <span className="badge badge--green">{u.ptt_count}개</span>
+                      : <span className="badge badge--gray">없음</span>
+                    }
                   </td>
                   <td className="actions">
                     <button className="btn btn--sm btn--outline" onClick={() => openEdit(u)}>편집</button>
@@ -255,20 +315,18 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* ── add/edit modal ── */}
+      {/* ── person add/edit modal ── */}
       {formOpen && (
         <Modal title={editingId ? `가입자 편집 — ${editingId}` : '가입자 추가'} onClose={() => setFormOpen(false)}>
-
-          {/* 기본정보 section */}
           <div className="form-section-title">기본정보</div>
           <div className="form-grid">
-            <label>ID (MSISDN) *</label>
+            <label>ID (개인 식별자) *</label>
             <input
               className="form-input"
               value={form.id}
               disabled={!!editingId}
               onChange={e => setForm(f => ({ ...f, id: e.target.value }))}
-              placeholder="+821001234567"
+              placeholder="+821357007001"
             />
 
             <label>이름</label>
@@ -302,110 +360,6 @@ export default function UsersPage() {
             />
           </div>
 
-          {/* Call 인증 section */}
-          <div className="form-section-title" style={{ marginTop: 16 }}>
-            <label className="toggle" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={callEnabled}
-                onChange={e => setCallEnabled(e.target.checked)}
-              />
-              <span className="toggle-track" />
-              <span>Call 인증 (VoLTE)</span>
-            </label>
-          </div>
-          {callEnabled && (
-            <div className="form-grid">
-              <label>Auth ID</label>
-              <input
-                className="form-input"
-                value={callAuth.auth_id ?? ''}
-                onChange={e => setCallAuth(a => ({ ...a, auth_id: e.target.value }))}
-                placeholder="단말 인증 ID (IMPI)"
-              />
-
-              <label>비밀번호</label>
-              <input
-                type="password"
-                className="form-input"
-                value={callAuth.passwd ?? ''}
-                onChange={e => setCallAuth(a => ({ ...a, passwd: e.target.value }))}
-                placeholder={editingId ? '변경 시에만 입력' : ''}
-              />
-
-              <label>착신전환</label>
-              <input
-                className="form-input"
-                value={callAuth.forward_id ?? ''}
-                onChange={e => setCallAuth(a => ({ ...a, forward_id: e.target.value }))}
-                placeholder="+821009999999"
-              />
-
-              <label>DND</label>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={callAuth.dnd ?? false}
-                  onChange={e => setCallAuth(a => ({ ...a, dnd: e.target.checked }))}
-                />
-                <span className="toggle-track" />
-                <span className="toggle-label">{callAuth.dnd ? '켜짐' : '꺼짐'}</span>
-              </label>
-            </div>
-          )}
-
-          {/* PTT 인증 section */}
-          <div className="form-section-title" style={{ marginTop: 16 }}>
-            <label className="toggle" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={pttEnabled}
-                onChange={e => setPttEnabled(e.target.checked)}
-              />
-              <span className="toggle-track" />
-              <span>PTT 인증</span>
-            </label>
-          </div>
-          {pttEnabled && (
-            <div className="form-grid">
-              <label>Auth ID</label>
-              <input
-                className="form-input"
-                value={pttAuth.auth_id ?? ''}
-                onChange={e => setPttAuth(a => ({ ...a, auth_id: e.target.value }))}
-                placeholder="단말 인증 ID (IMPI)"
-              />
-
-              <label>비밀번호</label>
-              <input
-                type="password"
-                className="form-input"
-                value={pttAuth.passwd ?? ''}
-                onChange={e => setPttAuth(a => ({ ...a, passwd: e.target.value }))}
-                placeholder={editingId ? '변경 시에만 입력' : ''}
-              />
-
-              <label>착신전환</label>
-              <input
-                className="form-input"
-                value={pttAuth.forward_id ?? ''}
-                onChange={e => setPttAuth(a => ({ ...a, forward_id: e.target.value }))}
-                placeholder="+821009999999"
-              />
-
-              <label>DND</label>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={pttAuth.dnd ?? false}
-                  onChange={e => setPttAuth(a => ({ ...a, dnd: e.target.checked }))}
-                />
-                <span className="toggle-track" />
-                <span className="toggle-label">{pttAuth.dnd ? '켜짐' : '꺼짐'}</span>
-              </label>
-            </div>
-          )}
-
           <div className="modal-footer">
             <button className="btn btn--ghost" onClick={() => setFormOpen(false)}>취소</button>
             <button className="btn btn--primary" onClick={handleSave} disabled={saving}>
@@ -433,7 +387,7 @@ export default function UsersPage() {
                     className={`tab-btn${detailTab === tab ? ' tab-btn--active' : ''}`}
                     onClick={() => setDetailTab(tab)}
                   >
-                    {tab === 'base' ? '기본정보' : tab === 'call' ? 'Call 인증' : 'PTT 인증'}
+                    {tab === 'base' ? '기본정보' : tab === 'call' ? 'Call 번호' : 'PTT 번호'}
                   </button>
                 ))}
               </div>
@@ -451,31 +405,85 @@ export default function UsersPage() {
               )}
 
               {detailTab === 'call' && (
-                detail.call_auth ? (
-                  <dl className="detail-list">
-                    <dt>Auth ID</dt>   <dd>{detail.call_auth.auth_id}</dd>
-                    <dt>DND</dt>       <dd>{detail.call_auth.dnd ? '켜짐' : '꺼짐'}</dd>
-                    <dt>착신전환</dt>  <dd>{detail.call_auth.forward_id || '—'}</dd>
-                    <dt>등록시간</dt>  <dd>{detail.call_auth.register_time ?? '—'}</dd>
-                    <dt>로그아웃</dt>  <dd>{detail.call_auth.logout_time ?? '—'}</dd>
-                  </dl>
-                ) : (
-                  <div className="empty">Call 인증 정보 없음</div>
-                )
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                    <button className="btn btn--primary btn--sm" onClick={() => openAddSub('call')}>＋ 번호 추가</button>
+                  </div>
+                  {detail.call_subscriptions.length === 0 ? (
+                    <div className="empty">Call 번호 없음</div>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>MSISDN</th>
+                            <th>Auth ID</th>
+                            <th>DND</th>
+                            <th>착신전환</th>
+                            <th>등록시간</th>
+                            <th style={{ width: 100 }}>작업</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detail.call_subscriptions.map(s => (
+                            <tr key={s.id}>
+                              <td>{s.id}</td>
+                              <td>{s.auth_id}</td>
+                              <td>{s.dnd ? '켜짐' : '꺼짐'}</td>
+                              <td>{s.forward_id || '—'}</td>
+                              <td>{s.register_time ?? '—'}</td>
+                              <td className="actions">
+                                <button className="btn btn--sm btn--outline" onClick={() => openEditSub('call', s)}>편집</button>
+                                <button className="btn btn--sm btn--danger" onClick={() => handleDeleteSub('call', s.id)}>삭제</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
 
               {detailTab === 'ptt' && (
-                detail.ptt_auth ? (
-                  <dl className="detail-list">
-                    <dt>Auth ID</dt>   <dd>{detail.ptt_auth.auth_id}</dd>
-                    <dt>DND</dt>       <dd>{detail.ptt_auth.dnd ? '켜짐' : '꺼짐'}</dd>
-                    <dt>착신전환</dt>  <dd>{detail.ptt_auth.forward_id || '—'}</dd>
-                    <dt>등록시간</dt>  <dd>{detail.ptt_auth.register_time ?? '—'}</dd>
-                    <dt>로그아웃</dt>  <dd>{detail.ptt_auth.logout_time ?? '—'}</dd>
-                  </dl>
-                ) : (
-                  <div className="empty">PTT 인증 정보 없음</div>
-                )
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                    <button className="btn btn--primary btn--sm" onClick={() => openAddSub('ptt')}>＋ 번호 추가</button>
+                  </div>
+                  {detail.ptt_subscriptions.length === 0 ? (
+                    <div className="empty">PTT 번호 없음</div>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>MSISDN</th>
+                            <th>Auth ID</th>
+                            <th>DND</th>
+                            <th>착신전환</th>
+                            <th>등록시간</th>
+                            <th style={{ width: 100 }}>작업</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detail.ptt_subscriptions.map(s => (
+                            <tr key={s.id}>
+                              <td>{s.id}</td>
+                              <td>{s.auth_id}</td>
+                              <td>{s.dnd ? '켜짐' : '꺼짐'}</td>
+                              <td>{s.forward_id || '—'}</td>
+                              <td>{s.register_time ?? '—'}</td>
+                              <td className="actions">
+                                <button className="btn btn--sm btn--outline" onClick={() => openEditSub('ptt', s)}>편집</button>
+                                <button className="btn btn--sm btn--danger" onClick={() => handleDeleteSub('ptt', s.id)}>삭제</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
 
               <div className="modal-footer">
@@ -488,6 +496,126 @@ export default function UsersPage() {
               </div>
             </>
           ) : null}
+        </Modal>
+      )}
+
+      {/* ── subscription add modal ── */}
+      {addSubOpen && detail && (
+        <Modal
+          title={`${addSubOpen.svc === 'call' ? 'Call' : 'PTT'} 번호 추가 — ${detail.id}`}
+          onClose={() => setAddSubOpen(null)}
+        >
+          <div className="form-grid">
+            <label>MSISDN *</label>
+            <input
+              className="form-input"
+              value={subForm.id}
+              onChange={e => setSubForm(f => ({ ...f, id: e.target.value }))}
+              placeholder="+821001234567"
+            />
+
+            <label>Auth ID</label>
+            <input
+              className="form-input"
+              value={subForm.auth_id}
+              onChange={e => setSubForm(f => ({ ...f, auth_id: e.target.value }))}
+              placeholder="단말 인증 ID (IMPI)"
+            />
+
+            <label>비밀번호</label>
+            <input
+              type="password"
+              className="form-input"
+              value={subForm.passwd}
+              onChange={e => setSubForm(f => ({ ...f, passwd: e.target.value }))}
+            />
+
+            <label>착신전환</label>
+            <input
+              className="form-input"
+              value={subForm.forward_id}
+              onChange={e => setSubForm(f => ({ ...f, forward_id: e.target.value }))}
+              placeholder="+821009999999"
+            />
+
+            <label>DND</label>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={subForm.dnd}
+                onChange={e => setSubForm(f => ({ ...f, dnd: e.target.checked }))}
+              />
+              <span className="toggle-track" />
+              <span className="toggle-label">{subForm.dnd ? '켜짐' : '꺼짐'}</span>
+            </label>
+          </div>
+
+          <div className="modal-footer">
+            <button className="btn btn--ghost" onClick={() => setAddSubOpen(null)}>취소</button>
+            <button className="btn btn--primary" onClick={handleAddSub} disabled={subSaving}>
+              {subSaving ? '저장 중…' : '추가'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── subscription edit modal ── */}
+      {editSub && detail && (
+        <Modal
+          title={`${editSub.svc === 'call' ? 'Call' : 'PTT'} 번호 편집 — ${editSub.sub.id}`}
+          onClose={() => setEditSub(null)}
+        >
+          <div className="form-grid">
+            <label>MSISDN</label>
+            <input
+              className="form-input"
+              value={editSubForm.id}
+              disabled
+            />
+
+            <label>Auth ID</label>
+            <input
+              className="form-input"
+              value={editSubForm.auth_id}
+              onChange={e => setEditSubForm(f => ({ ...f, auth_id: e.target.value }))}
+              placeholder="단말 인증 ID (IMPI)"
+            />
+
+            <label>비밀번호</label>
+            <input
+              type="password"
+              className="form-input"
+              value={editSubForm.passwd}
+              onChange={e => setEditSubForm(f => ({ ...f, passwd: e.target.value }))}
+              placeholder="변경 시에만 입력"
+            />
+
+            <label>착신전환</label>
+            <input
+              className="form-input"
+              value={editSubForm.forward_id}
+              onChange={e => setEditSubForm(f => ({ ...f, forward_id: e.target.value }))}
+              placeholder="+821009999999"
+            />
+
+            <label>DND</label>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={editSubForm.dnd}
+                onChange={e => setEditSubForm(f => ({ ...f, dnd: e.target.checked }))}
+              />
+              <span className="toggle-track" />
+              <span className="toggle-label">{editSubForm.dnd ? '켜짐' : '꺼짐'}</span>
+            </label>
+          </div>
+
+          <div className="modal-footer">
+            <button className="btn btn--ghost" onClick={() => setEditSub(null)}>취소</button>
+            <button className="btn btn--primary" onClick={handleEditSub} disabled={editSubSaving}>
+              {editSubSaving ? '저장 중…' : '저장'}
+            </button>
+          </div>
         </Modal>
       )}
 
