@@ -146,19 +146,19 @@ def import_groups(conn, group_dir):
         name = data.get("name", group_id)
 
         cur.execute(
-            "INSERT INTO cims_groups (id, name) VALUES (%s, %s) "
+            "INSERT INTO cims_ptt_groups (id, name) VALUES (%s, %s) "
             "ON DUPLICATE KEY UPDATE name=VALUES(name)",
             (group_id, name)
         )
 
         # 멤버 목록 교체
-        cur.execute("DELETE FROM cims_group_members WHERE group_id=%s", (group_id,))
+        cur.execute("DELETE FROM cims_ptt_group_members WHERE group_id=%s", (group_id,))
         for member in data.get("users", []):
             uid   = member.get("id", "")
             prio  = int(member.get("priority", 0))
             if uid:
                 cur.execute(
-                    "INSERT INTO cims_group_members (group_id, user_id, priority) VALUES (%s, %s, %s)",
+                    "INSERT INTO cims_ptt_group_members (group_id, user_id, priority) VALUES (%s, %s, %s)",
                     (group_id, uid, prio)
                 )
                 print(f"[Group] {group_id} ← member {uid} (priority={prio})")

@@ -18,5 +18,12 @@
         "User": "agapeoom",
         "Password": "!core0908",
         "Db": "csc_idms"
+    },
+    "CimsDatabase": {
+        "Host": "127.0.0.1",
+        "Port": 3306,
+        "User": "root",
+        "Password": "",
+        "Db": "cims"
     }
 }

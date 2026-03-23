@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS cims_user_rejects (
 -- ─────────────────────────────────────────────
 --  PTT 그룹 (Groups)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS cims_groups (
+CREATE TABLE IF NOT EXISTS cims_ptt_groups (
     id   VARCHAR(64)  NOT NULL COMMENT '그룹 번호 (E.164)',
     name VARCHAR(128) NOT NULL DEFAULT '' COMMENT '그룹명',
     PRIMARY KEY (id)
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS cims_groups (
 -- ─────────────────────────────────────────────
 --  그룹 멤버 (Group Members)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS cims_group_members (
+CREATE TABLE IF NOT EXISTS cims_ptt_group_members (
     group_id VARCHAR(64) NOT NULL COMMENT '그룹 ID',
     user_id  VARCHAR(64) NOT NULL COMMENT '멤버 가입자 ID',
     priority INT         NOT NULL DEFAULT 0 COMMENT '발언권 우선순위 (낮을수록 높음)',

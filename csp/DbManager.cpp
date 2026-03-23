@@ -206,7 +206,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
 
     // 그룹 기본 정보
     std::string strSql =
-        "SELECT id, name FROM cims_groups WHERE id='" + Escape(strGroupId) + "'";
+        "SELECT id, name FROM cims_ptt_groups WHERE id='" + Escape(strGroupId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
@@ -224,7 +224,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
 
     // 멤버 목록
     strSql =
-        "SELECT user_id, priority FROM cims_group_members "
+        "SELECT user_id, priority FROM cims_ptt_group_members "
         "WHERE group_id='" + Escape(strGroupId) + "' ORDER BY priority";
 
     pRes = ExecuteSelect(strSql);
@@ -250,7 +250,7 @@ bool CDbManager::LoadAllGroups( CGroupMap& clsMap )
     if (!m_pMysql && !Reconnect()) return false;
 
     // 전체 그룹 ID 목록 조회
-    MYSQL_RES* pRes = ExecuteSelect("SELECT id FROM cims_groups");
+    MYSQL_RES* pRes = ExecuteSelect("SELECT id FROM cims_ptt_groups");
     if (!pRes) return false;
 
     std::vector<std::string> vecGroupIds;
