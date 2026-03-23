@@ -113,24 +113,30 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         return HandlerResult(status=500, body={'error': str(e)})
 
 
+def _has_email_column(cur) -> bool:
+    """Check whether cims_users.email column exists (migration may not have run yet)."""
+    cur.execute(
+        "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cims_users' AND COLUMN_NAME='email'"
+    )
+    return cur.fetchone()['cnt'] > 0
+
+
 async def _list_users(config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            has_email = _has_email_column(cur)
+            email_col = ", u.email" if has_email else ""
             cur.execute(
-                "SELECT u.id, u.name, u.org_id, u.details, "
-                "u.create_time, u.update_time, "
-                "COUNT(DISTINCT c.id) AS call_count, "
-                "COUNT(DISTINCT p.id) AS ptt_count "
+                f"SELECT u.id, u.name{email_col}, u.org_id, u.details, "
+                "u.create_time, u.update_time "
                 "FROM cims_users u "
-                "LEFT JOIN cims_call_users c ON u.id = c.user_id "
-                "LEFT JOIN cims_ptt_users p ON u.id = p.user_id "
-                "GROUP BY u.id, u.name, u.org_id, u.details, u.create_time, u.update_time "
                 "ORDER BY u.id"
             )
             rows = cur.fetchall()
             for row in rows:
-                row['call_count'] = int(row['call_count'])
-                row['ptt_count']  = int(row['ptt_count'])
+                if not has_email:
+                    row['email'] = ''
                 row['create_time'] = _dt(row['create_time'])
                 row['update_time'] = _dt(row['update_time'])
                 # attach reject list
@@ -139,20 +145,48 @@ async def _list_users(config):
                     (row['id'],)
                 )
                 row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
+                # attach subscriptions
+                cur.execute(
+                    "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                    "FROM cims_call_users WHERE user_id=%s ORDER BY id",
+                    (row['id'],)
+                )
+                call_subs = cur.fetchall()
+                for s in call_subs:
+                    s['dnd'] = bool(s['dnd'])
+                    s['register_time'] = _dt(s['register_time'])
+                    s['logout_time']   = _dt(s['logout_time'])
+                row['call_subscriptions'] = call_subs
+
+                cur.execute(
+                    "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                    "FROM cims_ptt_users WHERE user_id=%s ORDER BY id",
+                    (row['id'],)
+                )
+                ptt_subs = cur.fetchall()
+                for s in ptt_subs:
+                    s['dnd'] = bool(s['dnd'])
+                    s['register_time'] = _dt(s['register_time'])
+                    s['logout_time']   = _dt(s['logout_time'])
+                row['ptt_subscriptions'] = ptt_subs
     return HandlerResult(status=200, body={'users': rows})
 
 
 async def _get_user(person_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            has_email = _has_email_column(cur)
+            email_col = ", email" if has_email else ""
             cur.execute(
-                "SELECT id, name, org_id, details, create_time, update_time "
+                f"SELECT id, name{email_col}, org_id, details, create_time, update_time "
                 "FROM cims_users WHERE id=%s",
                 (person_id,)
             )
             row = cur.fetchone()
             if row is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
+            if not has_email:
+                row['email'] = ''
             row['create_time'] = _dt(row['create_time'])
             row['update_time'] = _dt(row['update_time'])
 
@@ -195,20 +229,32 @@ async def _get_user(person_id: str, config):
 async def _create_user(body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
+    name = body.get('name', '').strip()
+    if not name:
+        return HandlerResult(status=400, body={'error': 'name is required'})
 
-    name       = body.get('name', '')
+    email      = body.get('email', '')
     org_id     = body.get('org_id', '')
     details    = body.get('details') or None
     reject_ids = body.get('reject_id', [])
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO cims_users "
-                "(name, org_id, details, create_time, update_time) "
-                "VALUES (%s, %s, %s, NOW(), NOW())",
-                (name, org_id, details)
-            )
+            has_email = _has_email_column(cur)
+            if has_email:
+                cur.execute(
+                    "INSERT INTO cims_users "
+                    "(name, email, org_id, details, create_time, update_time) "
+                    "VALUES (%s, %s, %s, %s, NOW(), NOW())",
+                    (name, email, org_id, details)
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO cims_users "
+                    "(name, org_id, details, create_time, update_time) "
+                    "VALUES (%s, %s, %s, NOW(), NOW())",
+                    (name, org_id, details)
+                )
             person_id = cur.lastrowid
 
             if reject_ids:
@@ -226,7 +272,7 @@ async def _update_user(person_id: str, body, config):
 
     fields = []
     values = []
-    for col in ('name', 'org_id', 'details'):
+    for col in ('name', 'email', 'org_id', 'details'):
         if col in body:
             fields.append(f'{col}=%s')
             values.append(body[col])

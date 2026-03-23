@@ -14,7 +14,8 @@ USE cims;
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cims_users (
     id          INT          NOT NULL AUTO_INCREMENT COMMENT '개인 고유 ID (자동 발행)',
-    name        VARCHAR(128) NOT NULL DEFAULT '' COMMENT '표시 이름',
+    name        VARCHAR(128) NOT NULL COMMENT '표시 이름',
+    email       VARCHAR(255) NOT NULL DEFAULT '' COMMENT '이메일',
     org_id      VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '소속 조직 ID',
     details     TEXT                  DEFAULT NULL COMMENT '세부사항',
     create_time DATETIME              DEFAULT NULL,

@@ -13,22 +13,21 @@ export interface Subscription {
 export interface UserSummary {
   id: number          // person ID (auto-increment)
   name: string
+  email: string
   org_id: string
   details?: string | null
-  call_count: number
-  ptt_count: number
   reject_id: string[]
+  call_subscriptions: Subscription[]
+  ptt_subscriptions: Subscription[]
   create_time?: string | null
   update_time?: string | null
 }
 
-export interface UserDetail extends Omit<UserSummary, 'call_count' | 'ptt_count'> {
-  call_subscriptions: Subscription[]
-  ptt_subscriptions: Subscription[]
-}
+// UserDetail is same shape as UserSummary (list API now includes subscriptions)
+export type UserDetail = UserSummary
 
 export type UserInput = {
-  name: string; org_id: string; details?: string; reject_id?: string[]
+  name: string; email?: string; org_id: string; details?: string; reject_id?: string[]
 }
 
 const enc = (s: string) => encodeURIComponent(s)
@@ -40,7 +39,6 @@ export const usersApi = {
   update: (id: number, data: Partial<UserInput>)            => api.put<{id:number}>(`/users/${id}`, data),
   delete: (id: number)                                      => api.delete<{id:number}>(`/users/${id}`),
 
-  listSubs:   (pid: number, svc: 'call'|'ptt')                                          => api.get<{subscriptions: Subscription[]}>(`/users/${pid}/${svc}`).then(r => r.subscriptions),
   addSub:     (pid: number, svc: 'call'|'ptt', sub: Partial<Subscription>)              => api.post<{id:string}>(`/users/${pid}/${svc}`, sub),
   updateSub:  (pid: number, svc: 'call'|'ptt', msisdn: string, data: Partial<Subscription>) => api.put<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`, data),
   deleteSub:  (pid: number, svc: 'call'|'ptt', msisdn: string)                          => api.delete<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`),
