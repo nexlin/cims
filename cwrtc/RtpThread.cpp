@@ -1,286 +1,181 @@
-/* 
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
+/*
+ * RtpThread.cpp - DTLS-SRTP (ë¸Œë¼ìš°ì €) â†” í‰ë¬¸ RTP (CMP) ë¦´ë ˆì´
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
+ * íë¦„:
+ *  1. ë¸Œë¼ìš°ì € ICE (STUN) ì²˜ë¦¬
+ *  2. DTLS í•¸ë“œì…°ì´í¬ â†’ SRTP í‚¤ ì¶”ì¶œ
+ *  3. ì–‘ë°©í–¥ íŒ¨í‚· ë¦´ë ˆì´:
+ *     ë¸Œë¼ìš°ì € SRTP â†’ srtp_unprotect â†’ CMP RTP
+ *     CMP RTP       â†’ srtp_protect   â†’ ë¸Œë¼ìš°ì € SRTP
  */
-
 #include "SipPlatformDefine.h"
 #include "ServerUtility.h"
 #include "StunMessage.h"
 #include "SdpMessage.h"
-#include "HttpCallBack.h"
 #include "RtpThread.h"
-#include "UserMap.h"
 #include "srtp.h"
-#include "Server.h"
+#include "Log.h"
 #include "MemoryDebug.h"
 
 #include "RtpThreadArg.hpp"
 #include "RtpThreadDtls.hpp"
 
-/**
- * @ingroup TestWebRtc
- * @brief SDP ¿¡¼­ ICE »ç¿ëÀÚ ¾ÆÀÌµð ¹× ICE ºñ¹Ð¹øÈ£¸¦ °¡Á®¿Â´Ù.
- * @param pszSdp			SDP
- * @param strIceUser	ICE »ç¿ëÀÚ ¾ÆÀÌµð
- * @param strIcePwd		ICE ºñ¹Ð¹øÈ£
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
-bool GetIceUserPwd( const char * pszSdp, std::string & strIceUser, std::string & strIcePwd )
+static bool GetIceUserPwd(const char* pszSdp, std::string& strIceUser, std::string& strIcePwd)
 {
-	CSdpMessage clsSdp;
-	SDP_MEDIA_LIST::iterator itML;
-	SDP_ATTRIBUTE_LIST::iterator itAL;
+    CSdpMessage clsSdp;
+    if (clsSdp.Parse(pszSdp, strlen(pszSdp)) == -1) return false;
 
-	if( clsSdp.Parse( pszSdp, strlen(pszSdp) ) == -1 ) return false;
-
-	for( itML = clsSdp.m_clsMediaList.begin(); itML != clsSdp.m_clsMediaList.end(); ++itML )
-	{
-		if( !strcmp( itML->m_strMedia.c_str(), "audio" ) )
-		{
-			for( itAL = itML->m_clsAttributeList.begin(); itAL != itML->m_clsAttributeList.end(); ++itAL )
-			{
-				if( !strcmp( itAL->m_strName.c_str(), "ice-ufrag" ) )
-				{
-					strIceUser = itAL->m_strValue;
-				}
-				else if( !strcmp( itAL->m_strName.c_str(), "ice-pwd" ) )
-				{
-					strIcePwd = itAL->m_strValue;
-					return true;
-				}
-			}
-		}
-	}
-
-	return false;
+    for (auto& media : clsSdp.m_clsMediaList) {
+        if (media.m_strMedia != "audio") continue;
+        for (auto& attr : media.m_clsAttributeList) {
+            if (attr.m_strName == "ice-ufrag") strIceUser = attr.m_strValue;
+            else if (attr.m_strName == "ice-pwd") {
+                strIcePwd = attr.m_strValue;
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
-/**
- * @ingroup TestWebRtc
- * @brief RTP Àü¼Û/¼ö½Å ¾²·¹µå
- * @param lpParameter 
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
-THREAD_API RtpThread( LPVOID lpParameter )
+THREAD_API RtpThread(LPVOID lpParameter)
 {
-	CRtpThreadArg * pclsArg = (CRtpThreadArg *)lpParameter;
-	CUserInfo clsUserInfo;
+    CRtpThreadArg* pclsArg = (CRtpThreadArg*)lpParameter;
 
-	char szSdp[8192], szPacket[1024], szWebRTCIp[21], szPbxIp[21];
-	unsigned short iWebRTCPort = 0, iPbxPort = 0;
-	int iPacketLen, n;
-	CStunMessage clsStunRequest;
-	std::string strIceUser, strIcePwd;
-	pollfd sttPoll[2];
-	srtp_t psttSrtpTx = NULL, psttSrtpRx = NULL;
-	bool bDtls = false, bSendRtpToWebRTC = false, bEdge = false;
+    char  szPacket[4096], szWebRTCIp[64], szPbxIp[64];
+    unsigned short iWebRTCPort = 0, iPbxPort = 0;
+    int   iPacketLen, n;
+    pollfd sttPoll[2];
 
-	szWebRTCIp[0] = '\0';
-	szPbxIp[0] = '\0';
+    std::string strIceUser, strIcePwd;
+    srtp_t psttSrtpTx = NULL, psttSrtpRx = NULL;
+    bool   bDtls = false, bSendRtpToWebRTC = false;
 
-	if( gclsUserMap.Select( pclsArg->m_strUserId.c_str(), clsUserInfo ) == false )
-	{
-		goto FUNC_END;
-	}
+    szWebRTCIp[0] = '\0';
+    szPbxIp[0]    = '\0';
 
-	if( strstr( clsUserInfo.m_strUserAgent.c_str(), "Edge" ) )
-	{
-		bEdge = true;
-	}
+    // ë¸Œë¼ìš°ì € SDPì—ì„œ ICE ì •ë³´ ì¶”ì¶œ
+    GetIceUserPwd(pclsArg->m_strBrowserSdp.c_str(), strIceUser, strIcePwd);
+    strIceUser.append(":lMRb");  // append cwrtc's ufrag
 
-	GetIceUserPwd( pclsArg->m_strSdp.c_str(), strIceUser, strIcePwd );
-	strIceUser.append( ":lMRb" );
+    // CMPê°€ ì´ë¯¸ ì•Œë ¤ì§„ ê²½ìš° PBX IP ì´ˆê¸°í™” (ì°©ì‹  ì‹œ)
+    if (!pclsArg->m_strCmpIp.empty() && pclsArg->m_iCmpPort > 0) {
+        snprintf(szPbxIp, sizeof(szPbxIp), "%s", pclsArg->m_strCmpIp.c_str());
+        iPbxPort = (unsigned short)pclsArg->m_iCmpPort;
+    }
 
-	snprintf( szSdp, sizeof(szSdp), "v=0\r\n"
-		"o=- 4532014611503881976 0 IN IP4 %s\r\n"
-		"s=-\r\n"
-		"t=0 0\r\n"
-		"m=audio %d UDP/TLS/RTP/SAVPF 0\r\n"
-		"c=IN IP4 %s\r\n"
-		"a=rtpmap:0 PCMU/8000\r\n"
-		"a=sendrecv\r\n"
-		"a=ice-ufrag:lMRb\r\n"
-		"a=ice-pwd:%s\r\n"
-		"a=fingerprint:sha-256 %s\r\n"
-		"a=candidate:1 1 udp 2130706431 %s %d typ host\r\n"
-		"a=ssrc:100 msid:1234 1234\r\n"
-		"a=rtcp-mux\r\n"
-		, gstrLocalIp.c_str(), pclsArg->m_iWebRtcUdpPort, gstrLocalIp.c_str(), pclsArg->m_strIcePwd.c_str(), gclsKeyCert.m_strFingerPrint.c_str(), gstrLocalIp.c_str(), pclsArg->m_iWebRtcUdpPort );
-	gclsHttpCallBack.Send( clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort, "res|invite|180|%s", szSdp );
+    TcpSetPollIn(sttPoll[0], pclsArg->m_hWebRtcUdp);
+    TcpSetPollIn(sttPoll[1], pclsArg->m_hPbxUdp);
 
-	TcpSetPollIn( sttPoll[0], pclsArg->m_hWebRtcUdp );
-	TcpSetPollIn( sttPoll[1], pclsArg->m_hPbxUdp );
+    CLog::Print(LOG_INFO, "RtpThread[%s] Start dtls=%d rtp=%d cmp=%s:%d",
+        pclsArg->m_strCallId.c_str(),
+        pclsArg->m_iWebRtcUdpPort, pclsArg->m_iPbxUdpPort,
+        pclsArg->m_strCmpIp.c_str(), pclsArg->m_iCmpPort);
 
-	while( pclsArg->m_bStop == false )
-	{
-		n = poll( sttPoll, 2, 1000 );
-		if( n <= 0 ) continue;
-		
-		if( sttPoll[0].revents & POLLIN )
-		{
-			iPacketLen = sizeof(szPacket);
-			UdpRecv( pclsArg->m_hWebRtcUdp, szPacket, &iPacketLen, szWebRTCIp, sizeof(szWebRTCIp), &iWebRTCPort );
+    while (!pclsArg->m_bStop) {
+        n = poll(sttPoll, 2, 1000);
+        if (n <= 0) continue;
 
-			if( iPacketLen >= 20 && szPacket[0] == 0x00 && szPacket[1] == 0x01 )
-			{
-				if( clsStunRequest.Parse( szPacket, iPacketLen ) == -1 )
-				{
-					continue;
-				}
+        // â”€â”€ ë¸Œë¼ìš°ì € ì¸¡ ì†Œì¼“ â”€â”€
+        if (sttPoll[0].revents & POLLIN) {
+            iPacketLen = sizeof(szPacket);
+            UdpRecv(pclsArg->m_hWebRtcUdp, szPacket, &iPacketLen, szWebRTCIp, sizeof(szWebRTCIp), &iWebRTCPort);
 
-				// STUN ÀÀ´ä ¸Þ½ÃÁö »ý¼º ¹× Àü¼Û
-				CStunMessage * pclsStunResponse = clsStunRequest.CreateResponse( true );
-				if( pclsStunResponse == NULL )
-				{
-					continue;
-				}
+            if (iPacketLen >= 20 && (unsigned char)szPacket[0] == 0x00 && (unsigned char)szPacket[1] == 0x01) {
+                // ICE STUN Binding Request â†’ ì‘ë‹µ + cwrtcâ†’ë¸Œë¼ìš°ì € STUN Request ì „ì†¡
+                CStunMessage clsStunReq;
+                if (clsStunReq.Parse(szPacket, iPacketLen) == -1) continue;
 
-				pclsStunResponse->m_strPassword = pclsArg->m_strIcePwd;
-				pclsStunResponse->AddXorMappedAddress( szWebRTCIp, iWebRTCPort );
-				pclsStunResponse->AddMessageIntegrity();
-				pclsStunResponse->AddFingerPrint();
-				iPacketLen = pclsStunResponse->ToString( szPacket, sizeof(szPacket) );
-				delete pclsStunResponse;
+                CStunMessage* pResp = clsStunReq.CreateResponse(true);
+                if (!pResp) continue;
 
-				UdpSend( pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort );
+                pResp->m_strPassword = pclsArg->m_strIcePwd;
+                pResp->AddXorMappedAddress(szWebRTCIp, iWebRTCPort);
+                pResp->AddMessageIntegrity();
+                pResp->AddFingerPrint();
+                iPacketLen = pResp->ToString(szPacket, sizeof(szPacket));
+                delete pResp;
+                UdpSend(pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort);
 
-				// STUN ¿äÃ» ¸Þ½ÃÁö »ý¼º ¹× Àü¼Û
-				clsStunRequest.m_clsAttributeList.clear();
-				clsStunRequest.m_strPassword = strIcePwd;
-				clsStunRequest.AddUserName( strIceUser.c_str() );
-				clsStunRequest.AddMessageIntegrity();
-				clsStunRequest.AddFingerPrint();
+                // cwrtcâ†’ë¸Œë¼ìš°ì € binding request
+                clsStunReq.m_clsAttributeList.clear();
+                clsStunReq.m_strPassword = strIcePwd;
+                clsStunReq.AddUserName(strIceUser.c_str());
+                clsStunReq.AddMessageIntegrity();
+                clsStunReq.AddFingerPrint();
+                iPacketLen = clsStunReq.ToString(szPacket, sizeof(szPacket));
+                UdpSend(pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort);
 
-				iPacketLen = clsStunRequest.ToString( szPacket, sizeof(szPacket) );
+            } else if (!bDtls && iPacketLen >= 13 &&
+                       (unsigned char)szPacket[0] >= 20 && (unsigned char)szPacket[0] <= 63) {
+                // DTLS ClientHello (or other DTLS record)
+                SSL* psttSsl;
+                struct sockaddr_in addr{};
+                addr.sin_family = AF_INET;
+                addr.sin_port   = htons(iWebRTCPort);
+                inet_pton(AF_INET, szWebRTCIp, &addr.sin_addr.s_addr);
 
-				UdpSend( pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort );
-			}
-			else if( iPacketLen >= 20 && szPacket[0] == 0x01 && szPacket[1] == 0x01 )
-			{
-				if( bDtls == false )
-				{
-					// DTLS ¿¬°á
-					SSL * psttSsl;
-					struct	sockaddr_in	addr;
+                if (connect(pclsArg->m_hWebRtcUdp, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+                    CLog::Print(LOG_ERROR, "RtpThread[%s] DTLS connect error", pclsArg->m_strCallId.c_str());
+                } else if ((psttSsl = SSL_new(gpsttClientCtx)) != NULL) {
+                    SSL_set_fd(psttSsl, (int)pclsArg->m_hWebRtcUdp);
+                    SSL_set_tlsext_use_srtp(psttSsl, "SRTP_AES128_CM_SHA1_80");
 
-					addr.sin_family = AF_INET;
-					addr.sin_port   = htons(iWebRTCPort);
+                    if (SSL_connect(psttSsl) != -1) {
+                        uint8_t szMaterial[60];
+                        SSL_export_keying_material(psttSsl, szMaterial, sizeof(szMaterial),
+                                                   "EXTRACTOR-dtls_srtp", 19, NULL, 0, 0);
+                        uint8_t* pLocalKey   = szMaterial;
+                        uint8_t* pRemoteKey  = pLocalKey   + 16;
+                        uint8_t* pLocalSalt  = pRemoteKey  + 16;
+                        uint8_t* pRemoteSalt = pLocalSalt  + 14;
+                        SrtpCreate(&psttSrtpTx, pLocalKey,  pLocalSalt,  false);
+                        SrtpCreate(&psttSrtpRx, pRemoteKey, pRemoteSalt, true);
+                        bDtls = true;
+                        CLog::Print(LOG_INFO, "RtpThread[%s] DTLS OK, SRTP ready", pclsArg->m_strCallId.c_str());
+                    } else {
+                        CLog::Print(LOG_ERROR, "RtpThread[%s] SSL_connect failed", pclsArg->m_strCallId.c_str());
+                    }
+                    SSL_free(psttSsl);
+                }
 
-					inet_pton( AF_INET, szWebRTCIp, &addr.sin_addr.s_addr );
-					if( connect( pclsArg->m_hWebRtcUdp, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR )
-					{
-						printf( "connect error\n" );
-					}
-					else if( (psttSsl = SSL_new( gpsttClientCtx ) ) == NULL )
-					{
-						printf( "ssl_new error\n" );
-					}
-					else
-					{
-						SSL_set_fd( psttSsl, (int)pclsArg->m_hWebRtcUdp );
-						SSL_set_tlsext_use_srtp( psttSsl, "SRTP_AES128_CM_SHA1_80" );
+            } else if (iPbxPort > 0 && bDtls) {
+                // SRTP íŒ¨í‚· â†’ ë³µí˜¸í™” â†’ CMPë¡œ ì „ë‹¬
+                if (psttSrtpRx) srtp_unprotect(psttSrtpRx, szPacket, &iPacketLen);
+                UdpSend(pclsArg->m_hPbxUdp, szPacket, iPacketLen, szPbxIp, iPbxPort);
+                bSendRtpToWebRTC = true;
+            }
+        }
 
-						if( bEdge )
-						{
-							// MS Edge ºê¶ó¿ìÀú¿Í ¿¬µ¿ÇÏ±â À§ÇÑ ¿É¼Ç
-							SSL_set_cipher_list( psttSsl, "ECDHE-RSA-AES256-GCM-SHA384" );
-						}
+        // â”€â”€ CMP ì¸¡ ì†Œì¼“ â”€â”€
+        if (sttPoll[1].revents & POLLIN) {
+            iPacketLen = sizeof(szPacket);
+            UdpRecv(pclsArg->m_hPbxUdp, szPacket, &iPacketLen, szPbxIp, sizeof(szPbxIp), &iPbxPort);
 
-						if( SSL_connect( psttSsl ) == -1 )
-						{
-							printf( "SSL_connect error\n" );
-						}
-						else
-						{
-							uint8_t szMaterial[60];
-							uint8_t * pszLocalKey, * pszLocalSalt, * pszRemoteKey, * pszRemoteSalt;
+            if (bSendRtpToWebRTC && iWebRTCPort > 0) {
+                // SSRC ê³ ì • (ë¸Œë¼ìš°ì €ê°€ ê¸°ëŒ€í•˜ëŠ” SSRCë¡œ êµì²´)
+                int32_t iSsrc = htonl(100);
+                memcpy(szPacket + 8, &iSsrc, 4);
 
-							SSL_export_keying_material( psttSsl, szMaterial, sizeof(szMaterial), "EXTRACTOR-dtls_srtp", 19, NULL, 0, 0 );
+                if (psttSrtpTx) srtp_protect(psttSrtpTx, szPacket, &iPacketLen);
+                UdpSend(pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort);
+            }
+        }
+    }
 
-							pszLocalKey = szMaterial;
-							pszRemoteKey = pszLocalKey + 16;
-							pszLocalSalt = pszRemoteKey + 16;
-							pszRemoteSalt = pszLocalSalt + 14;
+    if (psttSrtpTx) srtp_dealloc(psttSrtpTx);
+    if (psttSrtpRx) srtp_dealloc(psttSrtpRx);
 
-							SrtpCreate( &psttSrtpTx, pszLocalKey, pszLocalSalt, false );
-							SrtpCreate( &psttSrtpRx, pszRemoteKey, pszRemoteSalt, true );
-						}
-
-						SSL_free( psttSsl );
-					}
-
-					bDtls = true;
-				}
-			}
-			else
-			{
-				if( iPbxPort > 0 )
-				{
-					if( psttSrtpRx )
-					{
-						srtp_unprotect( psttSrtpRx, szPacket, &iPacketLen );
-					}
-
-					UdpSend( pclsArg->m_hPbxUdp, szPacket, iPacketLen, szPbxIp, iPbxPort );
-					bSendRtpToWebRTC = true;
-				}
-			}
-		}
-
-		if( sttPoll[1].revents & POLLIN )
-		{
-			iPacketLen = sizeof(szPacket);
-			UdpRecv( pclsArg->m_hPbxUdp, szPacket, &iPacketLen, szPbxIp, sizeof(szPbxIp), &iPbxPort );
-
-			if( bSendRtpToWebRTC )
-			{
-				int32_t iSsrc = htonl( 100 );
-				memcpy( szPacket + 8, &iSsrc, 4 );
-
-				if( psttSrtpTx )
-				{
-					srtp_protect( psttSrtpTx, szPacket, &iPacketLen );
-				}
-
-				UdpSend( pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort );
-			}
-		}
-	}
-
-FUNC_END:
-	if( psttSrtpTx ) srtp_dealloc( psttSrtpTx );
-	if( psttSrtpRx ) srtp_dealloc( psttSrtpRx );
-
-	gclsUserMap.Update( pclsArg->m_strUserId.c_str(), pclsArg, true );
-	delete pclsArg;
+    CLog::Print(LOG_INFO, "RtpThread[%s] Stopped", pclsArg->m_strCallId.c_str());
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
-	ERR_remove_thread_state( NULL );
+    ERR_remove_thread_state(NULL);
 #endif
-
-	return 0;
+    delete pclsArg;
+    return 0;
 }
 
-/**
- * @ingroup TestWebRtc
- * @brief RTP ¾²·¹µå¸¦ ½ÃÀÛÇÑ´Ù.
- * @param pclsArg RTP ¾²·¹µå Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
-bool StartRtpThread( CRtpThreadArg * pclsArg )
+bool StartRtpThread(CRtpThreadArg* pclsArg)
 {
-	return StartThread( "RtpThread", RtpThread, pclsArg );
+    return StartThread("RtpThread", RtpThread, pclsArg);
 }

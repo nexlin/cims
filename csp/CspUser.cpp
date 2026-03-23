@@ -92,6 +92,7 @@ bool CspUserMap::_loadUserFromFile(std::string strUserId, CspUser &clsUser) {
     
     if (jsonUser.Has("passwd")) clsUser.m_strPassWord = jsonUser.GetString("passwd");
     if (jsonUser.Has("org_id")) clsUser.m_strOrganizationId = jsonUser.GetString("org_id");
+    if (jsonUser.Has("service_type")) clsUser.m_strServiceType = jsonUser.GetString("service_type");
     
     std::string dnd = jsonUser.GetString("dnd");
     clsUser.m_bDnd = (dnd == "true");

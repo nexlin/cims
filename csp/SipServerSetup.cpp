@@ -86,6 +86,7 @@ CSipServerSetup::CSipServerSetup()
       m_bUseRegisterSession( false ),
       m_iUserTimeout( 3600 ),
       m_iDbPort( 3306 ),
+      m_strServiceMode( "both" ),
       m_iLogLevel( 0 ),
       m_iLogMaxSize( 20000000 ),
       m_iMonitorPort( 6000 ),
@@ -176,6 +177,10 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (db.Has("User"))     m_strDbUser   = db.GetString("User");
                 if (db.Has("Password")) m_strDbPasswd = db.GetString("Password");
                 if (db.Has("DbName"))   m_strDbName   = db.GetString("DbName");
+            }
+
+            if (setup.Has("ServiceMode")) {
+                m_strServiceMode = setup.GetString("ServiceMode");
             }
             
             if (setup.Has("Cdr")) {

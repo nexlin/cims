@@ -1,7 +1,8 @@
 {
-    "username": "1001",
-    "passwd": "1234",
+    "username": "+821357007009",
+    "passwd": "123456",
     "org_id": "1",
+    "service_type": "voip",
     "dnd": "false",
     "forward_id": "",
     "reject_id": []

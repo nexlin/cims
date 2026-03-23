@@ -121,6 +121,11 @@ bool CGroupMap::Select(const char *pszGroupId, CspPttGroup &clsGroup ) {
     return bRes;
 }
 
+bool CGroupMap::Contains( const char *pszGroupId ) {
+    std::lock_guard<std::recursive_mutex> lock(m_clsMutex);
+    return m_clsMap.find( pszGroupId ) != m_clsMap.end();
+}
+
 /**
  * @brief Clear map
  */

@@ -1,0 +1,269 @@
+export type PhoneState =
+  | 'disconnected'
+  | 'connecting'
+  | 'registering'
+  | 'registered'
+  | 'calling'
+  | 'ringing'
+  | 'incoming'
+  | 'active'
+
+export interface IncomingInfo {
+  callId: string
+  from: string
+  sdp: string
+  ptt: boolean
+}
+
+export interface PhoneCallbacks {
+  onState: (s: PhoneState) => void
+  onIncoming: (info: IncomingInfo) => void
+  onError: (msg: string) => void
+}
+
+export class PhoneClient {
+  private ws: WebSocket | null = null
+  private pc: RTCPeerConnection | null = null
+  private localStream: MediaStream | null = null
+  private audioEl: HTMLAudioElement | null = null
+  private state: PhoneState = 'disconnected'
+  private activeCallId = ''
+  private pendingIncoming: IncomingInfo | null = null
+  private cb: PhoneCallbacks
+
+  constructor(cb: PhoneCallbacks) {
+    this.cb = cb
+  }
+
+  setAudioElement(el: HTMLAudioElement) {
+    this.audioEl = el
+  }
+
+  getState(): PhoneState { return this.state }
+  getActiveCallId(): string { return this.activeCallId }
+  getPendingIncoming(): IncomingInfo | null { return this.pendingIncoming }
+
+  private setState(s: PhoneState) {
+    this.state = s
+    this.cb.onState(s)
+  }
+
+  private send(obj: object) {
+    if (this.ws?.readyState === WebSocket.OPEN)
+      this.ws.send(JSON.stringify(obj))
+  }
+
+  // ── Connection ──────────────────────────────────────────────────────────────
+
+  connect(wsUrl: string, user: string, password: string, domain: string, authId?: string) {
+    if (this.ws) return
+    this.setState('connecting')
+    try {
+      this.ws = new WebSocket(wsUrl)
+    } catch {
+      this.cb.onError('Invalid WebSocket URL')
+      this.setState('disconnected')
+      return
+    }
+
+    this.ws.onopen = () => {
+      this.setState('registering')
+      this.send({ type: 'register', user, password, domain, auth_id: authId || user })
+    }
+
+    this.ws.onmessage = (e) => {
+      try { this.handleMessage(JSON.parse(e.data)) }
+      catch { /* ignore malformed */ }
+    }
+
+    this.ws.onclose = () => {
+      this.fullCleanup()
+      this.setState('disconnected')
+    }
+
+    this.ws.onerror = () => {
+      this.cb.onError('WebSocket connection failed')
+    }
+  }
+
+  disconnect() {
+    this.ws?.close()
+    this.ws = null
+    this.fullCleanup()
+    this.setState('disconnected')
+  }
+
+  // ── Message handler ─────────────────────────────────────────────────────────
+
+  private handleMessage(msg: Record<string, string>) {
+    switch (msg.type) {
+      case 'registered':
+        this.setState('registered')
+        break
+
+      case 'register_failed':
+        this.cb.onError(`등록 실패: ${msg.reason ?? 'auth'}`)
+        this.setState('disconnected')
+        break
+
+      case 'progress':
+        if (this.state === 'calling') this.setState('ringing')
+        break
+
+      case 'answered':
+        // Outgoing: cwrtc sends DTLS SDP as answer
+        this.activeCallId = msg.call_id
+        if (this.pc) {
+          this.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp })
+            .then(() => this.setState('active'))
+            .catch(err => this.cb.onError(`SDP answer error: ${err}`))
+        }
+        break
+
+      case 'incoming':
+        this.pendingIncoming = {
+          callId: msg.call_id,
+          from: msg.from,
+          sdp: msg.sdp,
+          ptt: msg.ptt === 'true',
+        }
+        this.cb.onIncoming(this.pendingIncoming)
+        this.setState('incoming')
+        break
+
+      case 'ended':
+        this.closePC()
+        this.activeCallId = ''
+        this.pendingIncoming = null
+        if (this.state !== 'disconnected') this.setState('registered')
+        break
+    }
+  }
+
+  // ── Outgoing call ───────────────────────────────────────────────────────────
+
+  async call(to: string): Promise<void> {
+    if (this.state !== 'registered') return
+
+    const stream = await this.getMic()
+    if (!stream) return
+    this.localStream = stream
+
+    this.pc = this.createPC()
+    this.localStream.getTracks().forEach(t => this.pc!.addTrack(t, this.localStream!))
+
+    const offer = await this.pc.createOffer()
+    await this.pc.setLocalDescription(offer)
+    await this.waitForIce()
+
+    this.setState('calling')
+    this.send({ type: 'call', to, sdp: this.pc.localDescription!.sdp })
+  }
+
+  // ── Incoming call answer ────────────────────────────────────────────────────
+
+  async answer(): Promise<void> {
+    if (this.state !== 'incoming' || !this.pendingIncoming) return
+    const info = this.pendingIncoming
+
+    const stream = await this.getMic()
+    if (!stream) return
+    this.localStream = stream
+
+    this.pc = this.createPC()
+    this.localStream.getTracks().forEach(t => this.pc!.addTrack(t, this.localStream!))
+
+    await this.pc.setRemoteDescription({ type: 'offer', sdp: info.sdp })
+    const ans = await this.pc.createAnswer()
+    await this.pc.setLocalDescription(ans)
+    await this.waitForIce()
+
+    this.activeCallId = info.callId
+    this.pendingIncoming = null
+    this.send({ type: 'answer', call_id: info.callId, sdp: this.pc.localDescription!.sdp })
+    this.setState('active')
+  }
+
+  reject() {
+    if (this.state !== 'incoming' || !this.pendingIncoming) return
+    this.send({ type: 'hangup', call_id: this.pendingIncoming.callId })
+    this.pendingIncoming = null
+    this.setState('registered')
+  }
+
+  hangup() {
+    const callId = this.activeCallId || this.pendingIncoming?.callId
+    if (callId) this.send({ type: 'hangup', call_id: callId })
+    this.closePC()
+    this.activeCallId = ''
+    this.pendingIncoming = null
+    if (this.state !== 'disconnected') this.setState('registered')
+  }
+
+  // ── PTT floor control ───────────────────────────────────────────────────────
+
+  setPttFloor(hold: boolean) {
+    if (!this.localStream) return
+    this.localStream.getAudioTracks().forEach(t => { t.enabled = hold })
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  private async getMic(): Promise<MediaStream | null> {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.cb.onError('마이크 접근 불가: HTTPS 또는 localhost 환경이 필요합니다 (insecure origin)')
+      return null
+    }
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    } catch (err: unknown) {
+      const name = (err as DOMException)?.name ?? ''
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError')
+        this.cb.onError('마이크 권한이 거부되었습니다. 브라우저 설정에서 허용하세요.')
+      else if (name === 'NotFoundError')
+        this.cb.onError('마이크를 찾을 수 없습니다.')
+      else
+        this.cb.onError(`마이크 접근 실패: ${name || String(err)}`)
+      return null
+    }
+  }
+
+  private createPC(): RTCPeerConnection {
+    const pc = new RTCPeerConnection({ iceServers: [] })
+    pc.ontrack = (e) => {
+      if (this.audioEl && e.streams[0]) {
+        this.audioEl.srcObject = e.streams[0]
+        this.audioEl.play().catch(() => {})
+      }
+    }
+    return pc
+  }
+
+  private waitForIce(): Promise<void> {
+    return new Promise(resolve => {
+      if (!this.pc || this.pc.iceGatheringState === 'complete') { resolve(); return }
+      const handler = () => {
+        if (this.pc?.iceGatheringState === 'complete') {
+          this.pc.removeEventListener('icegatheringstatechange', handler)
+          resolve()
+        }
+      }
+      this.pc.addEventListener('icegatheringstatechange', handler)
+      setTimeout(resolve, 3000)  // 3s fallback
+    })
+  }
+
+  private closePC() {
+    this.pc?.close()
+    this.pc = null
+    this.localStream?.getTracks().forEach(t => t.stop())
+    this.localStream = null
+    if (this.audioEl) this.audioEl.srcObject = null
+  }
+
+  private fullCleanup() {
+    this.closePC()
+    this.activeCallId = ''
+    this.pendingIncoming = null
+  }
+}

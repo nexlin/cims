@@ -1,0 +1,20 @@
+{
+    "Setup": {
+        "LocalIp": "192.168.199.129",
+        "WsPort": 8080,
+        "DocRoot": "html",
+        "Sip": {
+            "ServerIp": "127.0.0.1",
+            "ServerPort": 5060,
+            "Domain": "csp",
+            "LocalPort": 5062
+        },
+        "Rtp": {
+            "PortBase": 50100,
+            "PortCount": 50
+        },
+        "Log": {
+            "Dir": "log"
+        }
+    }
+}

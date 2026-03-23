@@ -148,6 +148,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
 
+    std::string strServiceType = "voip";
     MYSQL_ROW row = mysql_fetch_row(pRes);
     if (!row) {
         mysql_free_result(pRes);
@@ -166,9 +167,11 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
             mysql_free_result(pRes);
             return false;
         }
+        strServiceType = "ptt";
     }
 
     clsUser.m_strId             = row[0] ? row[0] : "";
+    clsUser.m_strServiceType    = strServiceType;
     clsUser.m_strName           = row[1] ? row[1] : "";
     clsUser.m_strOrganizationId = row[2] ? row[2] : "";
     clsUser.m_strAuthId         = row[3] ? row[3] : "";

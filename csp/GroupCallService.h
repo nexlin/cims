@@ -79,6 +79,7 @@ private:
         int iPort;
         std::string strIp;
         size_t nMemberHash;
+        std::string strSessionCallId; // active CSP-initiated session call_id for DB logging
     };
     std::map<std::string, GroupRtpInfo> m_mapGroupRtp;
 

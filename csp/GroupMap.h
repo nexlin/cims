@@ -33,6 +33,9 @@ public:
     /** Select a group by ID */
     bool Select( const char *pszGroupId, CspPttGroup &clsGroup );
 
+    /** Check if a group ID exists */
+    bool Contains( const char *pszGroupId );
+
     // find group list by user-ID
     void IterateInternal( std::function<void(const CspPttGroup&)> fnCallback );
 

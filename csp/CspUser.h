@@ -61,6 +61,9 @@ public:
     // 착신전환 ( Call Forward ) 
     std::string m_strForward;
 
+    // 서비스 타입: "voip" | "ptt" | "both"
+    std::string m_strServiceType;
+
     // 소속 아이디
     std::string m_strOrganizationId;
 

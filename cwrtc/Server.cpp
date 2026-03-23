@@ -1,93 +1,55 @@
-/* 
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
- */
-
 #include "HttpCallBack.h"
-#include "Directory.h"
-#include "Log.h"
+#include "CwrtcSetup.h"
+#include "SipAgent.h"
 #include "RtpThread.h"
+#include "Log.h"
+#include "Directory.h"
+#include "TcpStackSetup.h"
 #include "MemoryDebug.h"
 
-std::string gstrLocalIp;
-
-bool StartServer( )
+bool StartServer(const char* pszConfigFile)
 {
-	CTcpStackSetup clsHttpSetup;
+    if (!gclsCwrtcSetup.Load(pszConfigFile)) return false;
 
-	const char * pszDocumentRoot = "C:\\OpenProject\\CppSipStack\\trunk\\TestWebRtcVideo\\html";
-	const char * pszPemFile = NULL;
+    // Î°úÍ∑∏ Ï¥àÍ∏∞Ìôî
+    CLog::SetDirectory(gclsCwrtcSetup.m_strLogDir.c_str());
+    CLog::SetLevel(LOG_INFO | LOG_DEBUG | LOG_NETWORK);
 
-#ifdef WIN32
-	CLog::SetDirectory( "c:\\temp\\http" );
-#ifdef _DEBUG
-	CLog::SetLevel( LOG_INFO | LOG_DEBUG | LOG_NETWORK );
-#endif
-#else
-	CLog::SetDirectory( "/tmp/http" );
-	CLog::SetLevel( LOG_INFO | LOG_DEBUG | LOG_NETWORK );
-#endif
+    // ÎÑ§Ìä∏ÏõåÌÅ¨ + DTLS Ï¥àÍ∏∞Ìôî
+    InitNetwork();
+    InitDtls();
 
-	InitNetwork();
-	InitDtls();
+    // WebSocket HTTP ÏÑúÎ≤Ñ ÏãúÏûë
+    CTcpStackSetup clsHttpSetup;
+    clsHttpSetup.m_iListenPort        = gclsCwrtcSetup.m_iWsPort;
+    clsHttpSetup.m_iMaxSocketPerThread = 100;
+    clsHttpSetup.m_iThreadMaxCount     = 0;
+    clsHttpSetup.m_bUseThreadPipe      = false;
 
-	// HTTP ºˆΩ≈ ∆˜∆Æ π¯»£∏¶ º≥¡§«—¥Ÿ.
-	clsHttpSetup.m_iListenPort = 8080;
-	clsHttpSetup.m_iMaxSocketPerThread = 1;
-	clsHttpSetup.m_iThreadMaxCount = 0;
-	clsHttpSetup.m_bUseThreadPipe = false;
+    gclsHttpCallBack.m_strDocumentRoot = gclsCwrtcSetup.m_strDocRoot;
+    if (!CDirectory::IsDirectory(gclsHttpCallBack.m_strDocumentRoot.c_str())) {
+        printf("[%s] doc root not found ‚Äî WS only mode\n",
+               gclsHttpCallBack.m_strDocumentRoot.c_str());
+    }
 
-	if( pszPemFile )
-	{
-		clsHttpSetup.m_iListenPort = 443;
-		clsHttpSetup.m_bUseTls = true;
-		clsHttpSetup.m_strCertFile = pszPemFile;
-	}
+    if (!gclsHttpStack.Start(&clsHttpSetup, &gclsHttpCallBack)) {
+        printf("HttpStack.Start failed (port %d)\n", gclsCwrtcSetup.m_iWsPort);
+        return false;
+    }
+    CLog::Print(LOG_INFO, "WebSocket server started (port %d)", gclsCwrtcSetup.m_iWsPort);
 
-	// HTTP º≠πˆø°º≠ ªÁøÎ«“ Document root ∆˙¥ı∏¶ º≥¡§«—¥Ÿ.
-	gclsHttpCallBack.m_strDocumentRoot = pszDocumentRoot;
+    // SIP UA ÏãúÏûë
+    if (!gclsSipAgent.Start()) return false;
 
-	if( CDirectory::IsDirectory( gclsHttpCallBack.m_strDocumentRoot.c_str() ) == false )
-	{
-		printf( "[%s] is not directory\n", gclsHttpCallBack.m_strDocumentRoot.c_str() );
-		return false;
-	}
-
-	// HTTP º≠πˆ∏¶ Ω√¿€«—¥Ÿ. HTTP ø‰√ª¿Ã ºˆΩ≈µ«∏È ¿Ãø° ¥Î«— ¿Ã∫•∆Æ∏¶ CSimpleHttpServer ∞¥√º∑Œ ¿¸¥ﬁ«—¥Ÿ.
-	if( gclsHttpStack.Start( &clsHttpSetup, &gclsHttpCallBack ) == false )
-	{
-		printf( "gclsHttpStack.Start error\n" );
-		return false;
-	}
-
-	return true;
+    return true;
 }
 
 bool StopServer()
 {
-	FinalDtls();
-	gclsHttpStack.Stop();
-	SSLFinal();
-
-	// ∏µÁ æ≤∑πµÂ∞° ¡æ∑·µ… ∂ß±Ó¡ˆ ¥Î±‚«—¥Ÿ.
-	sleep(2);
-
-#ifdef WIN32
-	CLog::Release();
-#endif
-
-	return 0;
+    gclsSipAgent.Stop();
+    FinalDtls();
+    gclsHttpStack.Stop();
+    SSLFinal();
+    sleep(1);
+    return true;
 }

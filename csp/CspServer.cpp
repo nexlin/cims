@@ -107,8 +107,8 @@ int ServiceMain() {
     });
     gclsGroupCallService.StartMonitor();
 
-    // DB 연결 (UserDataFolder 또는 GroupDataFolder 가 비어 있으면 DB 모드)
-    bool bNeedDb = gclsSetup.m_strUserDataFolder.empty() || gclsSetup.m_strGroupDataFolder.empty();
+    // DB 연결 (DbHost 가 설정된 경우 항상 연결)
+    bool bNeedDb = !gclsSetup.m_strDbHost.empty();
     if ( bNeedDb ) {
         CLog::Print( LOG_SYSTEM, "Connecting to DB %s:%d/%s ...",
                      gclsSetup.m_strDbHost.c_str(), gclsSetup.m_iDbPort, gclsSetup.m_strDbName.c_str() );

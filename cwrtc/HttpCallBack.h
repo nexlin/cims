@@ -1,50 +1,36 @@
-/* 
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
- */
-
-#ifndef _SIMPLE_HTTP_SERVER_H_
-#define _SIMPLE_HTTP_SERVER_H_
-
+#pragma once
+#include "HttpStackCallBack.h"
 #include "HttpStack.h"
-#include "StringUtility.h"
+#include <string>
 
 /**
- * @ingroup TestWebRtc
- * @brief HTTP ¹× WebSocket callback Å¬·¡½º
+ * WebSocket JSON í•¸ë“¤ëŸ¬
+ *
+ * JSON í”„ë¡œí† ì½œ:
+ *  register   : {"type":"register","user":"...","password":"...","domain":"...","auth_id":"..."}
+ *  call       : {"type":"call","to":"...","sdp":"..."}
+ *  answer     : {"type":"answer","call_id":"...","sdp":"..."}
+ *  hangup     : {"type":"hangup","call_id":"..."}
+ *  ptt_push   : {"type":"ptt_push","call_id":"..."}
+ *  ptt_release: {"type":"ptt_release","call_id":"..."}
  */
 class CHttpCallBack : public IHttpStackCallBack
 {
 public:
-	CHttpCallBack();
-	virtual ~CHttpCallBack();
+    CHttpCallBack();
+    ~CHttpCallBack() override = default;
 
-	virtual bool RecvHttpRequest( CHttpMessage * pclsRequest, CHttpMessage * pclsResponse );
+    bool RecvHttpRequest(CHttpMessage* pclsRequest, CHttpMessage* pclsResponse) override;
+    void WebSocketConnected(const char* pszClientIp, int iClientPort) override;
+    void WebSocketClosed(const char* pszClientIp, int iClientPort) override;
+    bool WebSocketData(const char* pszClientIp, int iClientPort,
+                       std::string& strData, CHttpStackSession* pclsSession) override;
 
-	virtual void WebSocketConnected( const char * pszClientIp, int iClientPort );
-	virtual void WebSocketClosed( const char * pszClientIp, int iClientPort );
-	virtual bool WebSocketData( const char * pszClientIp, int iClientPort, std::string & strData, CHttpStackSession * pclsSession );
+    bool SendText(const char* pszClientIp, int iClientPort, const char* pszText);
 
-	bool Send( const char * pszClientIp, int iClientPort, const char * fmt, ... );
-
-	std::string m_strDocumentRoot;
-	bool m_bStop;
+    std::string m_strDocumentRoot;
+    bool        m_bStop;
 };
 
-extern CHttpStack			gclsHttpStack;
-extern CHttpCallBack	gclsHttpCallBack;
-
-#endif
+extern CHttpStack    gclsHttpStack;
+extern CHttpCallBack gclsHttpCallBack;

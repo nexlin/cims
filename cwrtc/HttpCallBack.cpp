@@ -1,349 +1,168 @@
-/* 
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
- */
-
 #include "HttpCallBack.h"
 #include "HttpStatusCode.h"
 #include "FileUtility.h"
 #include "Directory.h"
 #include "Log.h"
-#include "UserMap.h"
-#include "RtpThread.h"
+#include "SessionMap.h"
+#include "SipAgent.h"
+#include "SimpleJson.h"
 #include "MemoryDebug.h"
+#include <cstring>
 
-CHttpStack gclsHttpStack;
-CHttpCallBack	gclsHttpCallBack;
+CHttpStack    gclsHttpStack;
+CHttpCallBack gclsHttpCallBack;
 
 CHttpCallBack::CHttpCallBack() : m_bStop(false)
 {
 }
 
-CHttpCallBack::~CHttpCallBack()
+// â”€â”€â”€ HTTP ì •ì  íŒŒì¼ ì„œë¹™ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+bool CHttpCallBack::RecvHttpRequest(CHttpMessage* pclsRequest, CHttpMessage* pclsResponse)
 {
+    // ë³´ì•ˆ: '..' ê²½ë¡œ ì°¨ë‹¨
+    if (strstr(pclsRequest->m_strReqUri.c_str(), "..")) {
+        pclsResponse->m_iStatusCode = HTTP_NOT_FOUND;
+        return true;
+    }
+
+    std::string strPath = m_strDocumentRoot;
+    if (pclsRequest->m_strReqUri == "/") {
+        CDirectory::AppendName(strPath, "index.html");
+    } else {
+        strPath.append(pclsRequest->m_strReqUri);
+    }
+
+    if (!IsExistFile(strPath.c_str())) {
+        pclsResponse->m_iStatusCode = HTTP_NOT_FOUND;
+        return true;
+    }
+
+    // MIME type
+    std::string strExt;
+    GetFileExt(strPath.c_str(), strExt);
+    const char* e = strExt.c_str();
+    if      (!strcmp(e,"html")||!strcmp(e,"htm")) pclsResponse->m_strContentType = "text/html";
+    else if (!strcmp(e,"css"))  pclsResponse->m_strContentType = "text/css";
+    else if (!strcmp(e,"js"))   pclsResponse->m_strContentType = "text/javascript";
+    else if (!strcmp(e,"png"))  pclsResponse->m_strContentType = "image/png";
+    else if (!strcmp(e,"gif"))  pclsResponse->m_strContentType = "image/gif";
+    else if (!strcmp(e,"jpg")||!strcmp(e,"jpeg")) pclsResponse->m_strContentType = "image/jpeg";
+    else { pclsResponse->m_iStatusCode = HTTP_NOT_FOUND; return true; }
+
+    FILE* fd = fopen(strPath.c_str(), "rb");
+    if (!fd) { pclsResponse->m_iStatusCode = HTTP_NOT_FOUND; return true; }
+    char buf[8192]; int n;
+    while ((n = fread(buf, 1, sizeof(buf), fd)) > 0)
+        pclsResponse->m_strBody.append(buf, n);
+    fclose(fd);
+    pclsResponse->m_iStatusCode = HTTP_OK;
+    return true;
 }
 
-/**
- * @ingroup TestWebRtc
- * @brief HTTP ¿äÃ» ¼ö½Å ÀÌº¥Æ® callback
- * @param pclsRequest		HTTP ¿äÃ» ¸Ş½ÃÁö
- * @param pclsResponse	HTTP ÀÀ´ä ¸Ş½ÃÁö - ÀÀ¿ë¿¡¼­ ÀúÀåÇÑ´Ù.
- * @returns ÀÀ¿ë¿¡¼­ HTTP ÀÀ´ä ¸Ş½ÃÁö¸¦ Á¤»óÀûÀ¸·Î »ı¼ºÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
-bool CHttpCallBack::RecvHttpRequest( CHttpMessage * pclsRequest, CHttpMessage * pclsResponse )
+// â”€â”€â”€ WebSocket ì—°ê²° ì´ë²¤íŠ¸ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+void CHttpCallBack::WebSocketConnected(const char* pszClientIp, int iClientPort)
 {
-	std::string strPath = m_strDocumentRoot;
-	std::string strExt;
-
-	//CLog::Print( LOG_DEBUG, "req uri[%s]", pclsRequest->m_strReqUri.c_str() );
-
-	// º¸¾È»ó .. À» Æ÷ÇÔÇÑ URL À» ¹«½ÃÇÑ´Ù.
-	if( strstr( pclsRequest->m_strReqUri.c_str(), ".." ) )
-	{
-		pclsResponse->m_iStatusCode = HTTP_NOT_FOUND;
-		return true;
-	}
-
-#ifdef _DEBUG
-	// ¸Ş¸ğ¸® ´©¼ö °Ë»ç¸¦ À§ÇØ¼­ exit.html À» ¼ö½ÅÇÏ¸é ÇÁ·Î±×·¥À» Á¾·áÇÑ´Ù.
-	if( !strcmp( pclsRequest->m_strReqUri.c_str(), "/exit.html" ) )
-	{
-		pclsResponse->m_iStatusCode = HTTP_NOT_FOUND;
-		m_bStop = true;
-		return true;
-	}
-#endif
-
-	if( !strcmp( pclsRequest->m_strReqUri.c_str(), "/" ) )
-	{
-		CDirectory::AppendName( strPath, "index.html" );
-	}
-	else
-	{
-#ifdef WIN32
-		ReplaceString( pclsRequest->m_strReqUri, "/", "\\" );
-#endif
-
-		strPath.append( pclsRequest->m_strReqUri );
-	}
-
-	if( IsExistFile( strPath.c_str() ) == false )
-	{
-		pclsResponse->m_iStatusCode = HTTP_NOT_FOUND;
-		return true;
-	}
-
-	// ÆÄÀÏº° Content-Type À» ¼³Á¤ÇÑ´Ù.
-	GetFileExt( strPath.c_str(), strExt );
-	const char * pszExt = strExt.c_str();
-	
-	if( !strcmp( pszExt, "html" ) || !strcmp( pszExt, "htm" ) )
-	{
-		pclsResponse->m_strContentType = "text/html";
-	}
-	else if( !strcmp( pszExt, "css" ) )
-	{
-		pclsResponse->m_strContentType = "text/css";
-	}
-	else if( !strcmp( pszExt, "js" ) )
-	{
-		pclsResponse->m_strContentType = "text/javascript";
-	}
-	else if( !strcmp( pszExt, "png" ) || !strcmp( pszExt, "gif" ) )
-	{
-		pclsResponse->m_strContentType = "image/";
-		pclsResponse->m_strContentType.append( pszExt );
-	}
-	else if( !strcmp( pszExt, "jpg" ) || !strcmp( pszExt, "jpeg" ) )
-	{
-		pclsResponse->m_strContentType = "image/jpeg";
-	}
-	else
-	{
-		pclsResponse->m_iStatusCode = HTTP_NOT_FOUND;
-		return true;
-	}
-
-	// ÆÄÀÏÀ» ÀĞ¾î¼­ HTTP body ¿¡ ÀúÀåÇÑ´Ù.
-	FILE * fd = fopen( strPath.c_str(), "rb" );
-	if( fd == NULL )
-	{
-		pclsResponse->m_iStatusCode = HTTP_NOT_FOUND;
-		return true;
-	}
-
-	int n;
-	char szBuf[8192];
-
-	while( ( n = fread( szBuf, 1, sizeof(szBuf), fd ) ) > 0 )
-	{
-		pclsResponse->m_strBody.append( szBuf, n );
-	}
-
-	fclose( fd );
-
-	pclsResponse->m_iStatusCode = HTTP_OK;
-
-	return true;
+    CLog::Print(LOG_INFO, "WS connected [%s:%d]", pszClientIp, iClientPort);
 }
 
-/**
- * @ingroup TestWebRtc
- * @brief WebSocket Å¬¶óÀÌ¾ğÆ® TCP ¿¬°á ½ÃÀÛ ÀÌº¥Æ® callback
- * @param pszClientIp WebSocket Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iClientPort WebSocket Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- */
-void CHttpCallBack::WebSocketConnected( const char * pszClientIp, int iClientPort )
+void CHttpCallBack::WebSocketClosed(const char* pszClientIp, int iClientPort)
 {
-	printf( "WebSocket[%s:%d] connected\n", pszClientIp, iClientPort );
+    CLog::Print(LOG_INFO, "WS closed [%s:%d]", pszClientIp, iClientPort);
+
+    // ì‚¬ìš©ì í†µí™” ì¢…ë£Œ ì²˜ë¦¬
+    std::string strUserId = gclsSessionMap.GetUserIdByWs(pszClientIp, iClientPort);
+    if (!strUserId.empty()) {
+        CWsClient cli;
+        if (gclsSessionMap.GetClientByWs(pszClientIp, iClientPort, cli)) {
+            if (!cli.strActiveCallId.empty()) {
+                gclsSipAgent.HangupCall(cli.strActiveCallId);
+            }
+            gclsSipAgent.UnregisterUser(strUserId, cli.strDomain);
+        }
+        gclsSessionMap.DeleteClient(pszClientIp, iClientPort);
+    }
 }
 
-/**
- * @ingroup TestWebRtc
- * @brief WebSocket Å¬¶óÀÌ¾ğÆ® TCP ¿¬°á Á¾·á ÀÌº¥Æ® callback
- * @param pszClientIp WebSocket Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iClientPort WebSocket Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- */
-void CHttpCallBack::WebSocketClosed( const char * pszClientIp, int iClientPort )
+// â”€â”€â”€ WebSocket ë©”ì‹œì§€ ì²˜ë¦¬ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+bool CHttpCallBack::WebSocketData(const char* pszClientIp, int iClientPort,
+                                  std::string& strData, CHttpStackSession* pclsSession)
 {
-	printf( "WebSocket[%s:%d] closed\n", pszClientIp, iClientPort );
+    CLog::Print(LOG_NETWORK, "WS[%s:%d] recv: %s", pszClientIp, iClientPort, strData.c_str());
 
-	std::string strUserId;
-	CUserInfo clsUserInfo;
+    SimpleJson::JsonNode msg = SimpleJson::JsonNode::Parse(strData);
+    if (msg.type != SimpleJson::JSON_OBJECT) return false;
 
-	if( gclsUserMap.SelectUserId( pszClientIp, iClientPort, strUserId ) )
-	{
-		if( gclsUserMap.Select( strUserId.c_str(), clsUserInfo ) )
-		{
-			gclsUserMap.Delete( strUserId.c_str() );
-		}
-	}
+    std::string strType = msg.GetString("type");
+
+    // â”€â”€ register â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (strType == "register") {
+        std::string strUser     = msg.GetString("user");
+        std::string strPassword = msg.GetString("password");
+        std::string strDomain   = msg.GetString("domain");
+        std::string strAuthId   = msg.GetString("auth_id");
+
+        if (strUser.empty() || strPassword.empty()) {
+            SendText(pszClientIp, iClientPort,
+                R"({"type":"register_failed","reason":"missing_fields"})");
+            return true;
+        }
+
+        gclsSessionMap.InsertClient(strUser, pszClientIp, iClientPort,
+                                    strDomain, strPassword, strAuthId);
+        gclsSipAgent.RegisterUser(strUser, strPassword, strDomain, strAuthId);
+        // ì‹¤ì œ ì‘ë‹µì€ EventRegister ì½œë°±ì—ì„œ ì „ì†¡
+        return true;
+    }
+
+    // â”€â”€ call (ë°œì‹ ) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (strType == "call") {
+        std::string strTo  = msg.GetString("to");
+        std::string strSdp = msg.GetString("sdp");
+
+        std::string strUserId = gclsSessionMap.GetUserIdByWs(pszClientIp, iClientPort);
+        if (strUserId.empty() || strTo.empty() || strSdp.empty()) {
+            SendText(pszClientIp, iClientPort, R"({"type":"ended","reason":"invalid"})");
+            return true;
+        }
+
+        std::string strCallId;
+        if (!gclsSipAgent.StartOutgoingCall(strUserId, strTo, strSdp,
+                                            pszClientIp, iClientPort, strCallId)) {
+            SendText(pszClientIp, iClientPort, R"({"type":"ended","reason":"error"})");
+        }
+        return true;
+    }
+
+    // â”€â”€ answer (ì°©ì‹  ìˆ˜ë½) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (strType == "answer") {
+        std::string strCallId = msg.GetString("call_id");
+        std::string strSdp    = msg.GetString("sdp");
+
+        if (strCallId.empty() || strSdp.empty()) return true;
+        gclsSipAgent.AcceptIncomingCall(strCallId, strSdp);
+        return true;
+    }
+
+    // â”€â”€ hangup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (strType == "hangup") {
+        std::string strCallId = msg.GetString("call_id");
+        if (!strCallId.empty()) gclsSipAgent.HangupCall(strCallId);
+        return true;
+    }
+
+    CLog::Print(LOG_INFO, "WS unknown type: %s", strType.c_str());
+    return true;
 }
 
-/**
- * @ingroup TestWebRtc
- * @brief WebSocket Å¬¶óÀÌ¾ğÆ® µ¥ÀÌÅÍ ¼ö½Å ÀÌº¥Æ® callback
- * @param pszClientIp WebSocket Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iClientPort WebSocket Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @param strData			WebSocket Å¬¶óÀÌ¾ğÆ®°¡ Àü¼ÛÇÑ µ¥ÀÌÅÍ
- * @param pclsSession	HTTP ¼¼¼Ç Á¤º¸
- * @returns WebSocket Å¬¶óÀÌ¾ğÆ® ¿¬°áÀ» À¯ÁöÇÏ·Á¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
-bool CHttpCallBack::WebSocketData( const char * pszClientIp, int iClientPort, std::string & strData, CHttpStackSession * pclsSession )
+// â”€â”€â”€ ì „ì†¡ í—¬í¼ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+bool CHttpCallBack::SendText(const char* pszClientIp, int iClientPort, const char* pszText)
 {
-	CLog::Print( LOG_NETWORK, "WebSocket[%s:%d] recv[%s]", pszClientIp, iClientPort, strData.c_str() );
-	printf( "WebSocket[%s:%d] recv[%s]\n", pszClientIp, iClientPort, strData.c_str() );
-
-	STRING_VECTOR clsList;
-
-	SplitString( strData.c_str(), clsList, '|' );
-
-	int iCount = clsList.size();
-
-	if( iCount < 2 )
-	{
-		return false;
-	}
-
-	bool bReq = true;
-	if( strcmp( clsList[0].c_str(), "req" ) ) bReq = false;
-
-	const char * pszCommand = clsList[1].c_str();
-	std::string strUserId;
-
-	if( !strcmp( pszCommand, "register" ) )
-	{
-		if( iCount < 5 )
-		{
-			printf( "register request arg is not correct\n" );
-			return false;
-		}
-
-		if( gclsUserMap.Insert( clsList[2].c_str(), clsList[3].c_str(), clsList[4].c_str(), pszClientIp, iClientPort, pclsSession->m_strUserAgent.c_str() ) == false )
-		{
-			Send( pszClientIp, iClientPort, "res|register|500" );
-		}
-		else
-		{
-			Send( pszClientIp, iClientPort, "res|register|200" );
-		}
-	}
-	else if( !strcmp( pszCommand, "invite" ) )
-	{
-		if( bReq )
-		{
-			if( iCount < 4 )
-			{
-				printf( "invite request arg is not correct\n" );
-				return false;
-			}
-
-			const char * pszToId = clsList[2].c_str();
-			const char * pszSdp = clsList[3].c_str();
-			CUserInfo clsUserInfo;
-
-			CRtpThreadArg * pclsRtpArg = new CRtpThreadArg();
-			if( pclsRtpArg == NULL )
-			{
-				Send( pszClientIp, iClientPort, "res|invite|500" );
-				return true;
-			}
-
-			pclsRtpArg->m_strUserId = strUserId;
-			pclsRtpArg->m_strToId = pszToId;
-			pclsRtpArg->m_strSdp = pszSdp;
-			pclsRtpArg->m_bStartCall = true;
-
-			if( pclsRtpArg->CreateSocket() == false || 
-					gclsUserMap.Update( strUserId.c_str(), pclsRtpArg, false ) == false ||
-					StartRtpThread( pclsRtpArg ) == false )
-			{
-				delete pclsRtpArg;
-				Send( pszClientIp, iClientPort, "res|invite|500" );
-				return true;
-			}
-		}
-		else
-		{
-			if( iCount < 3 )
-			{
-				printf( "invite response arg is not correct\n" );
-				return false;
-			}
-
-			CUserInfo clsUserInfo;
-
-			if( gclsUserMap.SelectUserId( pszClientIp, iClientPort, strUserId ) == false || gclsUserMap.Select( strUserId.c_str(), clsUserInfo ) == false )
-			{
-				return true;
-			}
-
-			int iStatus = atoi( clsList[2].c_str() );
-
-			if( iStatus == 200 && iCount >= 4 )
-			{
-				CRtpThreadArg * pclsRtpArg = new CRtpThreadArg();
-				if( pclsRtpArg == NULL )
-				{
-					Send( pszClientIp, iClientPort, "req|bye" );
-					return true;
-				}
-
-				const char * pszSdp = clsList[3].c_str();
-
-				pclsRtpArg->m_strUserId = strUserId;
-				pclsRtpArg->m_strSdp = pszSdp;
-				pclsRtpArg->m_bStartCall = false;
-
-				if( pclsRtpArg->CreateSocket() == false || 
-						gclsUserMap.Update( strUserId.c_str(), pclsRtpArg, false ) == false ||
-						StartRtpThread( pclsRtpArg ) == false )
-				{
-					delete pclsRtpArg;
-					Send( pszClientIp, iClientPort, "req|bye" );
-					return true;
-				}
-			}
-		}
-	}
-	else if( !strcmp( pszCommand, "bye" ) )
-	{
-		std::string strUserId;
-		CUserInfo clsUserInfo;
-
-		if( gclsUserMap.SelectUserId( pszClientIp, iClientPort, strUserId ) == false || gclsUserMap.Select( strUserId.c_str(), clsUserInfo ) == false )
-		{
-			Send( pszClientIp, iClientPort, "res|invite|403" );
-			return true;
-		}
-
-		if( clsUserInfo.m_pclsRtpArg )
-		{
-			clsUserInfo.m_pclsRtpArg->m_bStop = true;
-			gclsUserMap.Update( strUserId.c_str(), clsUserInfo.m_pclsRtpArg, true );
-		}
-	}
-
-	return true;
-}
-
-/**
- * @ingroup TestWebRtc
- * @brief WebSocket Å¬¶óÀÌ¾ğÆ®·Î ÆĞÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszClientIp WebSocket Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iClientPort WebSocket Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @param fmt					Àü¼Û ¹®ÀÚ¿­
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
-bool CHttpCallBack::Send( const char * pszClientIp, int iClientPort, const char * fmt, ... )
-{
-	va_list	ap;
-	char		szBuf[8192];
-	int			iBufLen;
-
-	va_start( ap, fmt );
-	iBufLen = vsnprintf( szBuf, sizeof(szBuf)-1, fmt, ap );
-	va_end( ap );
-
-	if( gclsHttpStack.SendWebSocketPacket( pszClientIp, iClientPort, szBuf, iBufLen ) )
-	{
-		printf( "WebSocket[%s:%d] send[%s]\n", pszClientIp, iClientPort, szBuf );
-		CLog::Print( LOG_NETWORK, "WebSocket[%s:%d] send[%s]", pszClientIp, iClientPort, szBuf );
-		return true;
-	}
-
-	return false;
+    int iLen = (int)strlen(pszText);
+    CLog::Print(LOG_NETWORK, "WS[%s:%d] send: %s", pszClientIp, iClientPort, pszText);
+    return gclsHttpStack.SendWebSocketPacket(pszClientIp, iClientPort,
+                                              const_cast<char*>(pszText), iLen);
 }

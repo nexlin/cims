@@ -264,6 +264,7 @@ LINK_LIBRARIES( ${PASF_LIB} pthread rt m)
 add_subdirectory(cmp)
 add_subdirectory(csp)
 add_subdirectory(cspsim)
+add_subdirectory(cwrtc)
 
 # --- Distribution Target ---
 add_custom_target(dist

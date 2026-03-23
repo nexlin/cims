@@ -5,6 +5,7 @@
 #include "GroupMap.h"
 #include "CspUser.h"
 #include "DbManager.h"
+#include "SipServerSetup.h"
 
 
 bool CSipServer::CheckAuthrization( CSipMessage *pclsMessage ) {
@@ -145,15 +146,44 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
         return StopCall( pszCallId, SIP_DECLINE );
     }
 
+    // ── Service mode / service_type enforcement ──────────────────────
+    {
+        // Look up caller's service type (file-based map or auth cache)
+        CspUser clsFromUser;
+        bool bFromKnown = gclsCspUserMap.isAlive( pszFrom, clsFromUser );
+
+        // Check if destination is a group (PTT call)
+        bool bToGroup = gclsGroupMap.Contains( pszTo );
+
+        const std::string& mode = gclsSetup.m_strServiceMode;
+
+        if ( bToGroup ) {
+            // PTT group call: terminal originated INVITE to a group is NOT allowed
+            // (CSP initiates group sessions via CheckGroupIntegrity)
+            CLog::Print( LOG_INFO, "EventIncomingCall: PTT terminal(%s) sent INVITE to group(%s) - rejected 403", pszFrom, pszTo );
+            return StopCall( pszCallId, SIP_FORBIDDEN );
+        }
+
+        // VoIP call: check mode and caller service_type
+        if ( mode == "ptt" ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: VoIP call rejected (ServiceMode=ptt)" );
+            return StopCall( pszCallId, SIP_FORBIDDEN );
+        }
+        if ( bFromKnown && !clsFromUser.m_strServiceType.empty() && clsFromUser.m_strServiceType == "ptt" ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: PTT-only user(%s) cannot originate VoIP call - rejected 403", pszFrom );
+            return StopCall( pszCallId, SIP_FORBIDDEN );
+        }
+    }
+
     //
     if ( gclsCspUserMap.isAlive( pszTo, clsUser ) == false ) {
-        // Check if it is a Group Call
+        // Check if it is a Group Call (reached here only if group check above allowed it)
         CspPttGroup clsGroup;
         if ( gclsGroupMap.Select( pszTo, clsGroup ) ) {
              CLog::Print( LOG_DEBUG, "EventIncomingCall to(%s) is Group(%s)", pszTo, clsGroup._name.c_str() );
-             CSipCallRoute clsRouteTemp; 
+             CSipCallRoute clsRouteTemp;
              clsUserInfo.GetCallRoute( clsRouteTemp );
-             
+
              if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsRouteTemp ) ) {
                  // RoutePrefix check logic below might be redundant or needed for other cases?
                  // Original logic fell through. ProcessGroupCall returns true if handled?

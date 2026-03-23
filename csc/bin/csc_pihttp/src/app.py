@@ -45,6 +45,7 @@ if __name__ == '__main__':
 
     from csc_service import load_shared_data, CSC_HANDLER_LIST
     from cims_admin import CIMS_ADMIN_HANDLER_LIST
+    from cims_auth import CIMS_AUTH_HANDLER_LIST
 
     http_server = None
     try:
@@ -98,11 +99,11 @@ if __name__ == '__main__':
 
         http_server = HttpServer(ip, port, ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile)
         http_server.add_dynamic_rules(CSC_HANDLER_LIST)
-        # CIMS admin API: pass config so handlers can open DB connections
+        # CIMS admin/auth API: pass config so handlers can open DB connections
         cims_kwargs = {'config': config}
         http_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_ADMIN_HANDLER_LIST
+            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST
         ])
         http_server.start()
 

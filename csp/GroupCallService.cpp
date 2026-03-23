@@ -16,6 +16,7 @@
 #include "CspPttGroup.h"
 #include "SipMessage.h"
 #include <sstream>
+#include <ctime>
 
 // Notify subscribers about group changes
 extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
@@ -393,47 +394,53 @@ void CGroupCallService::CheckGroupIntegrity() {
         {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
             if (m_mapGroupRtp.find(group._id) == m_mapGroupRtp.end()) {
-                // Try sync 
-                // Unlock to avoid Sync calling AddGroup blocking? CmpClient is separate lock.
                 lock.unlock();
                 std::string ip; int port;
                 if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port)) {
                      lock.lock();
-                     m_mapGroupRtp[group._id] = { port, ip, 0 }; // Hash 0 for now or calc it
+                     m_mapGroupRtp[group._id] = { port, ip, 0, "" };
                 } else {
                      return; // Skip this group if alloc fails
                 }
             }
         }
-        
-        // CLog::Print( LOG_DEBUG, "CheckGroupIntegrity: Checking Group(%s) Members(%d)", group._id.c_str(), (int)group._pusers.size() );
+
+        // Collect registered members that need inviting
+        std::vector<std::string> vecToInvite;
         for ( const auto& pUser : group._pusers ) {
              if ( !pUser ) continue;
-             
-             // [GROUP CALL] Only invite if active or online? 
-             // Logic: InviteMember sends INVITE.
-             // We need User ID.
              std::string strUserId = pUser->_id;
-             
-             // ...
-             // Previously: mem.m_strId
-             // Now: pUser->_id (pointer)
-             
-             // Check if user is already in session? 
-             // Logic seems to be: Iterate members, Join/Invite them.
-             
              CUserInfo clsUser;
              if ( gclsUserMap.Select( strUserId.c_str(), clsUser ) ) {
                  std::unique_lock<std::recursive_mutex> lock(m_mutex);
                  if ( m_mapUserCall.find(strUserId) == m_mapUserCall.end() ) {
-                     lock.unlock();
-                     CLog::Print( LOG_DEBUG, "CheckGroupIntegrity: User(%s) in Group(%s) missing from active calls. Inviting.", strUserId.c_str(), group._id.c_str() );
-                     InviteMember( strUserId.c_str(), group._id.c_str() );
+                     vecToInvite.push_back(strUserId);
                  }
-             } else {
-                 // Debug why user not found
-                 // CLog::Print( LOG_DEBUG, "CheckGroupIntegrity: User(%s) not found in UserMap (Not Registered?)", strUserId.c_str() );
              }
+        }
+
+        if ( vecToInvite.empty() ) return;
+
+        // Ensure a call log entry exists for this group session before inviting
+        if ( gclsDbManager.IsConnected() ) {
+            std::unique_lock<std::recursive_mutex> lock(m_mutex);
+            auto itRtp = m_mapGroupRtp.find(group._id);
+            if ( itRtp != m_mapGroupRtp.end() && itRtp->second.strSessionCallId.empty() ) {
+                char szCallId[160];
+                snprintf( szCallId, sizeof(szCallId), "csp-group-%s-%ld",
+                          group._id.c_str(), (long)time(NULL) );
+                itRtp->second.strSessionCallId = szCallId;
+                lock.unlock();
+                gclsDbManager.InsertCallLog( szCallId, true, group._id, "CSP", group._id );
+                CLog::Print( LOG_INFO, "CheckGroupIntegrity: Created call log for Group(%s) CallId(%s)",
+                             group._id.c_str(), szCallId );
+            }
+        }
+
+        for ( const auto& strUserId : vecToInvite ) {
+             CLog::Print( LOG_DEBUG, "CheckGroupIntegrity: User(%s) in Group(%s) missing from active calls. Inviting.",
+                          strUserId.c_str(), group._id.c_str() );
+             InviteMember( strUserId.c_str(), group._id.c_str() );
         }
     });
 }
@@ -508,6 +515,11 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
             }
             if ( !bStillActive ) {
                 gclsDbManager.EndGroupCallLog( strGroupId );
+                // Clear session call_id so next CheckGroupIntegrity creates a fresh log
+                auto itRtp = m_mapGroupRtp.find(strGroupId);
+                if ( itRtp != m_mapGroupRtp.end() ) {
+                    itRtp->second.strSessionCallId.clear();
+                }
             }
         }
 

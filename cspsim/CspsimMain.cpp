@@ -228,14 +228,22 @@ static void RunScenario(std::vector<SimSession*>& sessions,
     }
 
     // 4. PTT 그룹통화
+    // PTT 단말은 발신하지 않음 — CSP가 CheckGroupIntegrity 로 자동 초대
+    // 시뮬레이터는 등록/구독 후 CSP의 INVITE 를 기다려 응답만 함
     if (eScenario == E_SCENARIO_GROUP_CALL || eScenario == E_SCENARIO_FULL) {
-        printf("[Scenario] Starting group call → %s\n", strGroupId.c_str());
         if (!sessions.empty() && sessions[0]->m_bPttMode) {
-            sessions[0]->StartGroupCall(strGroupId);
+            printf("[Scenario] PTT mode: waiting for CSP to invite (call_duration=%ds)...\n", iCallDuration);
+            for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
+            printf("[Scenario] PTT wait done, stopping\n");
+            for (auto* s : sessions) s->StopCall();
+        } else {
+            // VoIP group call (legacy)
+            printf("[Scenario] Starting group call → %s\n", strGroupId.c_str());
+            if (!sessions.empty()) sessions[0]->StartGroupCall(strGroupId);
+            for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
+            printf("[Scenario] Ending group call\n");
+            for (auto* s : sessions) s->StopCall();
         }
-        for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
-        printf("[Scenario] Ending group call\n");
-        for (auto* s : sessions) s->StopCall();
     }
 }
 
