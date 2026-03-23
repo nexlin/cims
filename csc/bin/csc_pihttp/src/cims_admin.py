@@ -629,7 +629,175 @@ async def _remove_member(group_id: str, user_id: str, config):
 #  Handler list (registered in app.py)
 # ──────────────────────────────────────────────────────────────
 
+
+# ──────────────────────────────────────────────────────────────
+#  Call logs handler
+# ──────────────────────────────────────────────────────────────
+
+_CALL_LOGS_BASE = '/api/v1/call/logs'
+
+_END_REASON_KO = {
+    'normal': '정상종료', 'busy': '통화중', 'cancel': '취소',
+    'timeout': '시간초과', 'error': '오류',
+}
+
+
+def _call_log_row(row: dict) -> dict:
+    row['invite_time'] = _dt(row['invite_time'])
+    row['answer_time'] = _dt(row['answer_time'])
+    row['end_time']    = _dt(row['end_time'])
+    row['end_reason_ko'] = _END_REASON_KO.get(row.get('end_reason') or '', '')
+    return row
+
+
+def _tables_exist(cur) -> bool:
+    cur.execute(
+        "SELECT COUNT(*) AS cnt FROM information_schema.TABLES "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cims_call_logs'"
+    )
+    return cur.fetchone()['cnt'] > 0
+
+
+async def handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """
+    GET /api/v1/call/logs
+        ?state=ringing|active|ended   (default: all)
+        ?caller=MSISDN
+        ?callee=MSISDN
+        ?msisdn=MSISDN                (caller OR callee OR participant)
+        ?group_id=ID
+        ?call_type=voip|ptt
+        ?from_dt=YYYY-MM-DD
+        ?to_dt=YYYY-MM-DD
+        ?limit=N                      (default 200, max 1000)
+        ?offset=N                     (default 0)
+
+    GET /api/v1/call/logs/active      (shorthand: state=ringing,active)
+    """
+    from urllib.parse import urlparse, parse_qs, unquote
+
+    config = kwargs.get('config', {})
+    parsed = urlparse(handler_args.full_path)
+    qs     = parse_qs(parsed.query)
+
+    def qp(name, default=None):
+        vals = qs.get(name)
+        return unquote(vals[0]) if vals else default
+
+    # distinguish /call/logs vs /call/logs/active
+    path_tail = parsed.path.rstrip('/')
+    active_only = path_tail.endswith('/active')
+
+    if handler_args.method.upper() != 'GET':
+        return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
+    state     = qp('state')
+    caller    = qp('caller')
+    callee    = qp('callee')
+    msisdn    = qp('msisdn')
+    group_id  = qp('group_id')
+    call_type = qp('call_type')
+    from_dt   = qp('from_dt')
+    to_dt     = qp('to_dt')
+    limit     = min(int(qp('limit', 200)), 1000)
+    offset    = int(qp('offset', 0))
+
+    if active_only:
+        state = 'active_ringing'  # special token
+
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                if not _tables_exist(cur):
+                    return HandlerResult(status=503, body={
+                        'error': 'Call log tables not created yet. Run: sudo mysql cims < sql/migrate_call_logs.sql'
+                    })
+
+                # ── build WHERE ──
+                where = []
+                params = []
+
+                if state == 'active_ringing':
+                    where.append("l.state IN ('ringing','active')")
+                elif state:
+                    where.append("l.state = %s")
+                    params.append(state)
+
+                if caller:
+                    where.append("l.initiator = %s")
+                    params.append(caller)
+                if callee:
+                    where.append("l.callee = %s")
+                    params.append(callee)
+                if group_id:
+                    where.append("l.group_id = %s")
+                    params.append(group_id)
+                if call_type:
+                    where.append("l.call_type = %s")
+                    params.append(call_type)
+                if from_dt:
+                    where.append("l.invite_time >= %s")
+                    params.append(from_dt + ' 00:00:00')
+                if to_dt:
+                    where.append("l.invite_time <= %s")
+                    params.append(to_dt + ' 23:59:59')
+
+                # msisdn: caller OR callee OR participant
+                if msisdn:
+                    where.append(
+                        "(l.initiator = %s OR l.callee = %s OR EXISTS("
+                        " SELECT 1 FROM cims_call_participants cp"
+                        " WHERE cp.log_id = l.id AND cp.msisdn = %s))"
+                    )
+                    params += [msisdn, msisdn, msisdn]
+
+                where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+                # ── total count ──
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM cims_call_logs l {where_sql}",
+                    params
+                )
+                total = cur.fetchone()['cnt']
+
+                # ── main query ──
+                cur.execute(
+                    f"SELECT l.id, l.call_id, l.call_type, l.group_id, "
+                    f"l.initiator, l.callee, l.state, "
+                    f"l.invite_time, l.answer_time, l.end_time, "
+                    f"l.duration, l.sip_status, l.end_reason "
+                    f"FROM cims_call_logs l {where_sql} "
+                    f"ORDER BY l.invite_time DESC "
+                    f"LIMIT %s OFFSET %s",
+                    params + [limit, offset]
+                )
+                logs = cur.fetchall()
+
+                for row in logs:
+                    _call_log_row(row)
+
+                    # attach participants
+                    cur.execute(
+                        "SELECT msisdn, role, join_time, leave_time "
+                        "FROM cims_call_participants WHERE log_id = %s "
+                        "ORDER BY role, join_time",
+                        (row['id'],)
+                    )
+                    parts = cur.fetchall()
+                    for p in parts:
+                        p['join_time']  = _dt(p['join_time'])
+                        p['leave_time'] = _dt(p['leave_time'])
+                    row['participants'] = parts
+
+        return HandlerResult(status=200, body={
+            'total': total, 'limit': limit, 'offset': offset, 'logs': logs
+        })
+    except pymysql.Error as e:
+        return HandlerResult(status=500, body={'error': str(e)})
+
+
 CIMS_ADMIN_HANDLER_LIST = [
-    (_USERS_BASE,  handle_users,      {}),
-    (_GROUPS_BASE, handle_ptt_groups, {}),
+    (_USERS_BASE,    handle_users,      {}),
+    (_GROUPS_BASE,   handle_ptt_groups, {}),
+    (_CALL_LOGS_BASE, handle_call_logs, {}),
 ]

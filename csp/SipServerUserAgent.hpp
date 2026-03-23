@@ -4,6 +4,7 @@
 
 #include "GroupMap.h"
 #include "CspUser.h"
+#include "DbManager.h"
 
 
 bool CSipServer::CheckAuthrization( CSipMessage *pclsMessage ) {
@@ -308,6 +309,13 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
 
         CLog::Print( LOG_ERROR, "EventIncomingCall(%s) StartCall error", pszCallId );
         return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
+    }
+
+    // [CALL LOG] VoIP 세션 기록 — INVITE 수신 시점
+    if ( gclsDbManager.IsConnected() ) {
+        gclsDbManager.InsertCallLog( pszCallId, false, "", pszFrom, pszTo );
+        gclsDbManager.InsertParticipant( pszCallId, pszFrom, "caller", true );
+        gclsDbManager.InsertParticipant( pszCallId, pszTo,   "callee", false );
     }
 }
 

@@ -34,6 +34,7 @@
 #include "TimeString.h"
 #include "UserMap.h"
 #include "CspUser.h"
+#include "DbManager.h"
 #include "SubscriptionManager.h"
 #include "UserMap.h"
 #include "SipMessage.h"
@@ -256,6 +257,14 @@ void CSipServer::SaveCdr( const char *pszCallId, int iSipStatus ) {
             fclose( fd );
         }
         m_clsMutex.release();
+
+        // [CALL LOG] VoIP 통화 종료 DB 기록
+        if ( gclsDbManager.IsConnected() ) {
+            time_t tAnswer = clsCdr.m_sttStartTime.tv_sec;
+            time_t tEnd    = clsCdr.m_sttEndTime.tv_sec
+                             ? clsCdr.m_sttEndTime.tv_sec : time(nullptr);
+            gclsDbManager.UpdateCallLogEnded( clsCdr.m_strCallId, tAnswer, tEnd, iSipStatus );
+        }
     }
 }
 

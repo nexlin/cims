@@ -10,6 +10,7 @@
 #include "Log.h"
 #include <cstring>
 #include <ctime>
+#include <cstdio>
 
 CDbManager gclsDbManager;
 
@@ -290,4 +291,180 @@ bool CDbManager::LoadAllGroups( CGroupMap& clsMap )
 
     CLog::Print(LOG_INFO, "[DB] LoadAllGroups: %d groups loaded", (int)vecGroupIds.size());
     return true;
+}
+
+// ─────────────────────────────────────────────
+//  Call log operations
+// ─────────────────────────────────────────────
+
+static std::string TimeToSql( time_t t )
+{
+    if ( t == 0 ) return "NULL";
+    char buf[48];
+    struct tm tm_val;
+    localtime_r( &t, &tm_val );
+    snprintf( buf, sizeof(buf), "'%04d-%02d-%02d %02d:%02d:%02d'",
+              tm_val.tm_year + 1900, tm_val.tm_mon + 1, tm_val.tm_mday,
+              tm_val.tm_hour, tm_val.tm_min, tm_val.tm_sec );
+    return buf;
+}
+
+bool CDbManager::InsertCallLog( const std::string& strCallId, bool bPtt,
+                                  const std::string& strGroupId,
+                                  const std::string& strInitiator,
+                                  const std::string& strCallee )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    std::string strType    = bPtt ? "ptt" : "voip";
+    std::string strGroupVal = strGroupId.empty() ? "NULL" : "'" + Escape(strGroupId) + "'";
+
+    std::string strSql =
+        "INSERT IGNORE INTO cims_call_logs "
+        "(call_id, call_type, group_id, initiator, callee, state, invite_time) VALUES ('"
+        + Escape(strCallId) + "','" + strType + "'," + strGroupVal + ",'"
+        + Escape(strInitiator) + "','" + Escape(strCallee) + "','ringing',NOW())";
+
+    return ExecuteQuery(strSql);
+}
+
+bool CDbManager::UpdateCallLogEnded( const std::string& strCallId,
+                                      time_t tAnswer, time_t tEnd, int iSipStatus )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    std::string strAnswer = TimeToSql(tAnswer);
+    std::string strEnd    = tEnd ? TimeToSql(tEnd) : "NOW()";
+    int iDuration = (tAnswer > 0 && tEnd > tAnswer) ? (int)(tEnd - tAnswer) : 0;
+
+    // map SIP status to end_reason
+    const char* pszReason = "normal";
+    if      (iSipStatus == 486)       pszReason = "busy";
+    else if (iSipStatus == 487)       pszReason = "cancel";
+    else if (iSipStatus == 408)       pszReason = "timeout";
+    else if (iSipStatus >= 400)       pszReason = "error";
+
+    char szDur[16];
+    snprintf(szDur, sizeof(szDur), "%d", iDuration);
+
+    std::string strState = (tAnswer > 0) ? "ended" : "ended";
+
+    std::string strSql =
+        "UPDATE cims_call_logs SET state='ended',"
+        " answer_time=" + strAnswer + ","
+        " end_time=" + strEnd + ","
+        " duration=" + szDur + ","
+        " sip_status=" + std::to_string(iSipStatus) + ","
+        " end_reason='" + pszReason + "'"
+        " WHERE call_id='" + Escape(strCallId) + "'";
+
+    // also mark all participants left
+    ExecuteQuery(
+        "UPDATE cims_call_participants cp "
+        "JOIN cims_call_logs cl ON cl.id = cp.log_id "
+        "SET cp.leave_time=NOW() "
+        "WHERE cl.call_id='" + Escape(strCallId) + "' AND cp.leave_time IS NULL"
+    );
+
+    return ExecuteQuery(strSql);
+}
+
+bool CDbManager::UpdateCallLogActivePtt( const std::string& strGroupId )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    return ExecuteQuery(
+        "UPDATE cims_call_logs SET state='active', answer_time=NOW() "
+        "WHERE group_id='" + Escape(strGroupId) + "' AND state='ringing' "
+        "ORDER BY invite_time DESC LIMIT 1"
+    );
+}
+
+bool CDbManager::EndGroupCallLog( const std::string& strGroupId )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    // duration = answer_time → NOW()
+    ExecuteQuery(
+        "UPDATE cims_call_logs "
+        "SET state='ended', end_time=NOW(), "
+        "duration=TIMESTAMPDIFF(SECOND, answer_time, NOW()), "
+        "sip_status=200, end_reason='normal' "
+        "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active') "
+        "ORDER BY invite_time DESC LIMIT 1"
+    );
+
+    // mark all remaining participants left
+    return ExecuteQuery(
+        "UPDATE cims_call_participants cp "
+        "JOIN cims_call_logs cl ON cl.id = cp.log_id "
+        "SET cp.leave_time=NOW() "
+        "WHERE cl.group_id='" + Escape(strGroupId) + "' AND cp.leave_time IS NULL"
+    );
+}
+
+bool CDbManager::InsertParticipant( const std::string& strCallId,
+                                     const std::string& strMsisdn,
+                                     const std::string& strRole,
+                                     bool bJoinNow )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    std::string strJoin = bJoinNow ? "NOW()" : "NULL";
+    return ExecuteQuery(
+        "INSERT IGNORE INTO cims_call_participants (log_id, msisdn, role, join_time) "
+        "SELECT id,'" + Escape(strMsisdn) + "','" + Escape(strRole) + "'," + strJoin + " "
+        "FROM cims_call_logs WHERE call_id='" + Escape(strCallId) + "' LIMIT 1"
+    );
+}
+
+bool CDbManager::InsertGroupParticipant( const std::string& strGroupId,
+                                          const std::string& strMsisdn )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    return ExecuteQuery(
+        "INSERT IGNORE INTO cims_call_participants (log_id, msisdn, role, join_time) "
+        "SELECT id,'" + Escape(strMsisdn) + "','member',NULL "
+        "FROM cims_call_logs "
+        "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active') "
+        "ORDER BY invite_time DESC LIMIT 1"
+    );
+}
+
+bool CDbManager::UpdateParticipantJoined( const std::string& strGroupId,
+                                           const std::string& strMsisdn )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    return ExecuteQuery(
+        "UPDATE cims_call_participants cp "
+        "JOIN cims_call_logs cl ON cl.id = cp.log_id "
+        "SET cp.join_time=NOW() "
+        "WHERE cl.group_id='" + Escape(strGroupId) + "' "
+        "AND cp.msisdn='" + Escape(strMsisdn) + "' AND cp.join_time IS NULL "
+        "AND cl.state IN ('ringing','active')"
+    );
+}
+
+bool CDbManager::UpdateParticipantLeft( const std::string& strGroupId,
+                                         const std::string& strMsisdn )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    return ExecuteQuery(
+        "UPDATE cims_call_participants cp "
+        "JOIN cims_call_logs cl ON cl.id = cp.log_id "
+        "SET cp.leave_time=NOW() "
+        "WHERE cl.group_id='" + Escape(strGroupId) + "' "
+        "AND cp.msisdn='" + Escape(strMsisdn) + "' AND cp.leave_time IS NULL"
+    );
 }

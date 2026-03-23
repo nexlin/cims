@@ -55,6 +55,44 @@ public:
     /** 전체 그룹을 DB에서 읽어 맵에 로드한다 */
     bool LoadAllGroups( CGroupMap& clsMap );
 
+    // ─────────────────────────────────────────────
+    //  Call log operations
+    // ─────────────────────────────────────────────
+
+    /** 통화 세션을 DB에 기록한다 (INVITE 시점, state=ringing) */
+    bool InsertCallLog( const std::string& strCallId, bool bPtt,
+                        const std::string& strGroupId,
+                        const std::string& strInitiator,
+                        const std::string& strCallee );
+
+    /** VoIP 통화 종료 시 CDR 정보로 업데이트 */
+    bool UpdateCallLogEnded( const std::string& strCallId,
+                              time_t tAnswer, time_t tEnd, int iSipStatus );
+
+    /** PTT: 그룹 세션을 active 로 변경 (최초 멤버 응답 시) */
+    bool UpdateCallLogActivePtt( const std::string& strGroupId );
+
+    /** PTT: 그룹 세션 종료 (마지막 멤버 이탈 시) */
+    bool EndGroupCallLog( const std::string& strGroupId );
+
+    /** 통화 참여자를 추가한다 */
+    bool InsertParticipant( const std::string& strCallId,
+                             const std::string& strMsisdn,
+                             const std::string& strRole,
+                             bool bJoinNow );
+
+    /** PTT: group_id 기준 활성 세션에 참여자를 추가한다 (invited, join_time=NULL) */
+    bool InsertGroupParticipant( const std::string& strGroupId,
+                                  const std::string& strMsisdn );
+
+    /** PTT: 참여자 연결 완료 (OnCallStarted) */
+    bool UpdateParticipantJoined( const std::string& strGroupId,
+                                   const std::string& strMsisdn );
+
+    /** PTT: 참여자 이탈 (OnCallTerminated) */
+    bool UpdateParticipantLeft( const std::string& strGroupId,
+                                 const std::string& strMsisdn );
+
 private:
     MYSQL*  m_pMysql;
     mutable std::recursive_mutex m_mutex;

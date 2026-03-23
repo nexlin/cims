@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { ToastProvider } from './components/Toast'
 import UsersPage from './pages/UsersPage'
 import GroupsPage from './pages/GroupsPage'
+import CallLogsPage from './pages/CallLogsPage'
 import './index.css'
 
-type Tab = 'users' | 'groups'
+type Tab = 'users' | 'groups' | 'calls'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('users')
@@ -30,12 +31,19 @@ export default function App() {
             >
               📢 PTT 그룹 관리
             </button>
+            <button
+              className={`tab-btn${tab === 'calls' ? ' tab-btn--active' : ''}`}
+              onClick={() => setTab('calls')}
+            >
+              📞 통화현황
+            </button>
           </nav>
         </header>
 
         <main className="app-main">
           {tab === 'users'  && <UsersPage />}
           {tab === 'groups' && <GroupsPage />}
+          {tab === 'calls'  && <CallLogsPage />}
         </main>
       </div>
     </ToastProvider>

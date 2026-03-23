@@ -5,6 +5,7 @@
 #include "GroupCallService.h"
 #include "GroupMap.h"
 #include "SipServer.h"
+#include "DbManager.h"
 #include "Log.h"
 #include "SipUserAgent.h"
 #include "CallMap.h"
@@ -75,6 +76,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         m_mapUserCall[pszCallerInfo] = pszCallId;
         m_mapCallSession[pszCallId] = { pszGroupId, pszCallerInfo, pszCallerInfo };
         CLog::Print( LOG_INFO, "ProcessGroupCall: AcceptCall OK → Caller(%s) SharedPort(%d)", pszCallerInfo, iSharedPort );
+
+        // [CALL LOG] PTT 그룹 세션 기록
+        if ( gclsDbManager.IsConnected() ) {
+            gclsDbManager.InsertCallLog( pszCallId, true, pszGroupId, pszCallerInfo, pszGroupId );
+            gclsDbManager.InsertParticipant( pszCallId, pszCallerInfo, "caller", true );
+        }
     } else {
         CLog::Print( LOG_ERROR, "ProcessGroupCall: No shared RTP port for Group(%s)", pszGroupId );
         return false;
@@ -222,6 +229,11 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
              m_mapUserCall.erase(pszUserId);
              m_mapCallSession.erase(strCallId);
              return false;
+         }
+
+         // [CALL LOG] PTT 멤버 초대 기록 (join_time은 OnCallStarted에서 설정)
+         if ( gclsDbManager.IsConnected() ) {
+             gclsDbManager.InsertGroupParticipant( pszGroupId, pszUserId );
          }
     } else {
          CLog::Print( LOG_ERROR, "InviteMember CreateCall failed" );
@@ -451,6 +463,12 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
         } else {
              CLog::Print( LOG_ERROR, "OnCallStarted: JoinGroup failed for %s", info.strGroupId.c_str() );
         }
+
+        // [CALL LOG] 참여자 연결 완료, 세션 active 전환
+        if ( gclsDbManager.IsConnected() ) {
+            gclsDbManager.UpdateParticipantJoined( info.strGroupId, info.strMemberId );
+            gclsDbManager.UpdateCallLogActivePtt( info.strGroupId );
+        }
     }
 }
 
@@ -458,15 +476,18 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
 bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
     std::unique_lock<std::recursive_mutex> lock(m_mutex);
     CLog::Print( LOG_DEBUG, "OnCallTerminated: Enter CallId=%s", strCallId.c_str() );
-    
+
     // Check if it's a group call session
     auto it = m_mapCallSession.find(strCallId);
     if (it != m_mapCallSession.end()) {
         CallSessionInfo& info = it->second;
-        gclsCmpClient.LeaveGroup(info.strGroupId, info.strSessionId);
-        
+        std::string strGroupId = info.strGroupId;
+        std::string strMemberId = info.strMemberId;
+
+        gclsCmpClient.LeaveGroup(strGroupId, info.strSessionId);
+
         m_mapCallSession.erase(it);
-        
+
         // Remove from user map
         for(auto uIt = m_mapUserCall.begin(); uIt != m_mapUserCall.end(); ++uIt) {
             if (uIt->second == strCallId) {
@@ -475,6 +496,21 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
             }
         }
         CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
+
+        // [CALL LOG] 참여자 이탈; 남은 참여자 없으면 세션 종료
+        if ( gclsDbManager.IsConnected() ) {
+            gclsDbManager.UpdateParticipantLeft( strGroupId, strMemberId );
+
+            // 해당 그룹에 활성 참여자가 남아 있는지 확인
+            bool bStillActive = false;
+            for ( const auto& kv : m_mapCallSession ) {
+                if ( kv.second.strGroupId == strGroupId ) { bStillActive = true; break; }
+            }
+            if ( !bStillActive ) {
+                gclsDbManager.EndGroupCallLog( strGroupId );
+            }
+        }
+
         return true;
     }
 
