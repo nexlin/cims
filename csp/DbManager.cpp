@@ -180,9 +180,9 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
 
     mysql_free_result(pRes);
 
-    // 착신 거부 목록 로드 (person ID 기준)
+    // 착신 거부 목록 로드 (person_id는 INT이므로 따옴표 없이 사용)
     clsUser.m_vecReject.clear();
-    strSql = "SELECT reject_id FROM cims_user_rejects WHERE user_id='" + Escape(strPersonId) + "'";
+    strSql = "SELECT reject_id FROM cims_user_rejects WHERE user_id=" + strPersonId;
     pRes = ExecuteSelect(strSql);
     if (pRes) {
         while ((row = mysql_fetch_row(pRes)) != nullptr) {

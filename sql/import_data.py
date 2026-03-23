@@ -96,18 +96,23 @@ def import_users(conn, user_dir):
         create_time = data.get("create_time") or None
         update_time = data.get("update_time") or None
 
-        # 1. Insert into cims_users (base info)
-        sql_base = """
-            INSERT INTO cims_users
-                (id, name, org_id, details, create_time, update_time)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                name=VALUES(name),
-                org_id=VALUES(org_id),
-                details=VALUES(details),
-                update_time=VALUES(update_time)
-        """
-        cur.execute(sql_base, (user_id, name, org_id, details, create_time, update_time))
+        # 1. Insert into cims_users (id 는 AUTO_INCREMENT — 지정하지 않음)
+        #    이미 같은 MSISDN으로 call/ptt 구독이 존재하면 user_id를 재사용
+        cur.execute(
+            "SELECT cu.user_id FROM cims_call_users cu WHERE cu.id=%s "
+            "UNION SELECT pu.user_id FROM cims_ptt_users pu WHERE pu.id=%s LIMIT 1",
+            (user_id, user_id)
+        )
+        row = cur.fetchone()
+        if row:
+            person_id = row[0]  # 이미 해당 MSISDN의 개인 레코드가 있음
+        else:
+            cur.execute(
+                "INSERT INTO cims_users (name, org_id, details, create_time, update_time) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (name, org_id, details, create_time, update_time)
+            )
+            person_id = cur.lastrowid
 
         # 2. Insert auth into cims_call_users or cims_ptt_users based on auth_id domain
         if "@ptt." in auth_id:
@@ -129,20 +134,20 @@ def import_users(conn, user_dir):
             )
             auth_table = "cims_call_users"
 
-        cur.execute(sql_auth, (user_id, user_id, auth_id, passwd, dnd, forward_id))
+        cur.execute(sql_auth, (user_id, person_id, auth_id, passwd, dnd, forward_id))
 
         # 3. 착신거부 목록
         reject_ids = data.get("reject_id", [])
         if reject_ids:
-            cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (user_id,))
+            cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
             for rid in reject_ids:
                 cur.execute(
                     "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
-                    (user_id, rid)
+                    (person_id, rid)
                 )
 
         count += 1
-        print(f"[User] Imported {user_id}  auth_id={auth_id}  table={auth_table}")
+        print(f"[User] Imported {user_id}  person_id={person_id}  auth_id={auth_id}  table={auth_table}")
 
     conn.commit()
     cur.close()

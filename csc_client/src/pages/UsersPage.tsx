@@ -18,7 +18,6 @@ const EMPTY_SUB_FORM: SubForm = {
 
 // ── Person form state ─────────────────────────────────────────
 interface FormState {
-  id: string
   name: string
   org_id: string
   details: string
@@ -26,7 +25,7 @@ interface FormState {
 }
 
 const EMPTY_FORM: FormState = {
-  id: '', name: '', org_id: '', details: '', reject_id: [],
+  name: '', org_id: '', details: '', reject_id: [],
 }
 
 // ── Detail modal tab type ─────────────────────────────────────
@@ -40,7 +39,7 @@ export default function UsersPage() {
 
   // person add/edit form modal
   const [formOpen, setFormOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [rejectStr, setRejectStr] = useState('')
   const [saving, setSaving] = useState(false)
@@ -78,7 +77,7 @@ export default function UsersPage() {
   useEffect(() => { load() }, [load])
 
   // ── refresh detail ─────────────────────────────────────────
-  const refreshDetail = useCallback(async (pid: string) => {
+  const refreshDetail = useCallback(async (pid: number) => {
     try {
       const d = await usersApi.get(pid)
       setDetail(d)
@@ -99,7 +98,6 @@ export default function UsersPage() {
   function openEdit(u: UserSummary) {
     setEditingId(u.id)
     setForm({
-      id: u.id,
       name: u.name,
       org_id: u.org_id,
       details: u.details ?? '',
@@ -124,7 +122,6 @@ export default function UsersPage() {
         show('가입자 정보가 수정되었습니다.')
       } else {
         const payload: UserInput = {
-          id: form.id,
           name: form.name,
           org_id: form.org_id,
           details: form.details || undefined,
@@ -247,7 +244,7 @@ export default function UsersPage() {
   }
 
   const filtered = users.filter(u =>
-    u.id.includes(search) ||
+    String(u.id).includes(search) ||
     u.name.toLowerCase().includes(search.toLowerCase()) ||
     u.org_id.toLowerCase().includes(search.toLowerCase())
   )
@@ -320,15 +317,6 @@ export default function UsersPage() {
         <Modal title={editingId ? `가입자 편집 — ${editingId}` : '가입자 추가'} onClose={() => setFormOpen(false)}>
           <div className="form-section-title">기본정보</div>
           <div className="form-grid">
-            <label>ID (개인 식별자) *</label>
-            <input
-              className="form-input"
-              value={form.id}
-              disabled={!!editingId}
-              onChange={e => setForm(f => ({ ...f, id: e.target.value }))}
-              placeholder="+821357007001"
-            />
-
             <label>이름</label>
             <input
               className="form-input"

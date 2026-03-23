@@ -13,7 +13,7 @@ USE cims;
 --  가입자 기본 정보 (Users)
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cims_users (
-    id          VARCHAR(64)  NOT NULL COMMENT 'MSISDN (E.164)',
+    id          INT          NOT NULL AUTO_INCREMENT COMMENT '개인 고유 ID (자동 발행)',
     name        VARCHAR(128) NOT NULL DEFAULT '' COMMENT '표시 이름',
     org_id      VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '소속 조직 ID',
     details     TEXT                  DEFAULT NULL COMMENT '세부사항',
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS cims_users (
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cims_call_users (
     id            VARCHAR(64)  NOT NULL COMMENT 'VoLTE MSISDN (E.164)',
-    user_id       VARCHAR(64)  NOT NULL COMMENT 'cims_users.id 참조 (개인 ID)',
+    user_id       INT          NOT NULL COMMENT 'cims_users.id 참조 (개인 ID)',
     auth_id       VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 인증 ID (IMPI)',
     passwd        VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 패스워드',
     dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS cims_call_users (
     logout_time   DATETIME              DEFAULT NULL,
     PRIMARY KEY (id),
     KEY idx_user_id (user_id),
-    CONSTRAINT fk_call_user2 FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
+    CONSTRAINT fk_call_user FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='VoLTE 가입자 인증 정보';
 
 -- ─────────────────────────────────────────────
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS cims_call_users (
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cims_ptt_users (
     id            VARCHAR(64)  NOT NULL COMMENT 'PTT MSISDN (E.164)',
-    user_id       VARCHAR(64)  NOT NULL COMMENT 'cims_users.id 참조 (개인 ID)',
+    user_id       INT          NOT NULL COMMENT 'cims_users.id 참조 (개인 ID)',
     auth_id       VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 인증 ID (IMPI)',
     passwd        VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 패스워드',
     dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
@@ -53,16 +53,17 @@ CREATE TABLE IF NOT EXISTS cims_ptt_users (
     logout_time   DATETIME              DEFAULT NULL,
     PRIMARY KEY (id),
     KEY idx_user_id (user_id),
-    CONSTRAINT fk_ptt_user2 FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
+    CONSTRAINT fk_ptt_user FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PTT 가입자 인증 정보';
 
 -- ─────────────────────────────────────────────
 --  착신거부 목록 (User Reject List)
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cims_user_rejects (
-    user_id   VARCHAR(64) NOT NULL COMMENT '가입자 ID',
-    reject_id VARCHAR(64) NOT NULL COMMENT '거부할 발신자 ID',
-    PRIMARY KEY (user_id, reject_id)
+    user_id   INT         NOT NULL COMMENT '가입자 ID (cims_users.id)',
+    reject_id VARCHAR(64) NOT NULL COMMENT '거부할 발신자 MSISDN',
+    PRIMARY KEY (user_id, reject_id),
+    CONSTRAINT fk_reject_user FOREIGN KEY (user_id) REFERENCES cims_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='가입자별 착신거부 목록';
 

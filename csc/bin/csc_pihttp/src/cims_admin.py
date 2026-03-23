@@ -195,9 +195,6 @@ async def _get_user(person_id: str, config):
 async def _create_user(body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
-    person_id = body.get('id', '').strip()
-    if not person_id:
-        return HandlerResult(status=400, body={'error': 'id is required'})
 
     name       = body.get('name', '')
     org_id     = body.get('org_id', '')
@@ -208,13 +205,13 @@ async def _create_user(body, config):
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO cims_users "
-                "(id, name, org_id, details, create_time, update_time) "
-                "VALUES (%s, %s, %s, %s, NOW(), NOW())",
-                (person_id, name, org_id, details)
+                "(name, org_id, details, create_time, update_time) "
+                "VALUES (%s, %s, %s, NOW(), NOW())",
+                (name, org_id, details)
             )
+            person_id = cur.lastrowid
 
             if reject_ids:
-                cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
                 for rid in reject_ids:
                     cur.execute(
                         "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
