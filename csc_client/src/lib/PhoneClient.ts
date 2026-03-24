@@ -19,6 +19,8 @@ export interface PhoneCallbacks {
   onState: (s: PhoneState) => void
   onIncoming: (info: IncomingInfo) => void
   onError: (msg: string) => void
+  onFloor?: (speaker: string | null) => void
+  onMemberStatus?: (userId: string, connected: boolean) => void
 }
 
 export class PhoneClient {
@@ -30,6 +32,9 @@ export class PhoneClient {
   private activeCallId = ''
   private pendingIncoming: IncomingInfo | null = null
   private cb: PhoneCallbacks
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private connArgs: { wsUrl: string; user: string; password: string; domain: string; authId?: string } | null = null
+  private intentionalClose = false
 
   constructor(cb: PhoneCallbacks) {
     this.cb = cb
@@ -57,6 +62,8 @@ export class PhoneClient {
 
   connect(wsUrl: string, user: string, password: string, domain: string, authId?: string) {
     if (this.ws) return
+    this.connArgs = { wsUrl, user, password, domain, authId }
+    this.intentionalClose = false
     this.setState('connecting')
     try {
       this.ws = new WebSocket(wsUrl)
@@ -67,6 +74,7 @@ export class PhoneClient {
     }
 
     this.ws.onopen = () => {
+      if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
       this.setState('registering')
       this.send({ type: 'register', user, password, domain, auth_id: authId || user })
     }
@@ -77,8 +85,16 @@ export class PhoneClient {
     }
 
     this.ws.onclose = () => {
+      this.ws = null
       this.fullCleanup()
       this.setState('disconnected')
+      if (!this.intentionalClose && this.connArgs) {
+        const args = this.connArgs
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null
+          this.connect(args.wsUrl, args.user, args.password, args.domain, args.authId)
+        }, 3000)
+      }
     }
 
     this.ws.onerror = () => {
@@ -87,6 +103,8 @@ export class PhoneClient {
   }
 
   disconnect() {
+    this.intentionalClose = true
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
     this.ws?.close()
     this.ws = null
     this.fullCleanup()
@@ -129,6 +147,22 @@ export class PhoneClient {
         }
         this.cb.onIncoming(this.pendingIncoming)
         this.setState('incoming')
+        break
+
+      case 'ptt_floor':
+        this.cb.onFloor?.(msg.speaker ?? null)
+        break
+
+      case 'ptt_idle':
+        this.cb.onFloor?.(null)
+        break
+
+      case 'ptt_member_joined':
+        this.cb.onMemberStatus?.(msg.user_id, true)
+        break
+
+      case 'ptt_member_left':
+        this.cb.onMemberStatus?.(msg.user_id, false)
         break
 
       case 'ended':
@@ -202,9 +236,15 @@ export class PhoneClient {
 
   // ── PTT floor control ───────────────────────────────────────────────────────
 
-  setPttFloor(hold: boolean) {
-    if (!this.localStream) return
-    this.localStream.getAudioTracks().forEach(t => { t.enabled = hold })
+  setPttFloor(active: boolean) {
+    // Mute/unmute mic track
+    if (this.localStream)
+      this.localStream.getAudioTracks().forEach(t => { t.enabled = active })
+    // Send floor request/release to cwrtc
+    if (active)
+      this.send({ type: 'ptt_request', call_id: this.activeCallId })
+    else
+      this.send({ type: 'ptt_release', call_id: this.activeCallId })
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

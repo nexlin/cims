@@ -27,6 +27,8 @@ bool CSipAgent::Start()
     clsSetup.m_iUdpThreadCount = 2;
     clsSetup.m_iLocalTcpPort   = 0;
     clsSetup.m_iLocalTlsPort   = 0;
+    if (!gclsCwrtcSetup.m_strUserAgent.empty())
+        clsSetup.m_strUserAgent = gclsCwrtcSetup.m_strUserAgent;
 
     if (!gclsSipUserAgent.Start(clsSetup, this)) {
         CLog::Print(LOG_ERROR, "CSipAgent: SipUserAgent.Start failed");
@@ -78,20 +80,26 @@ std::string CSipAgent::BuildDtlsSdp(int iDtlsPort, bool bPtt)
     const char* fp  = gclsKeyCert.m_strFingerPrint.c_str();
     const char* pwd = "FNPRfT4qUaVOKa0ivkn64mMY";
 
-    const char* codecs   = bPtt ? "0 8 99 98" : "0 8";
-    const char* rtplines = bPtt
-        ? "a=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\n"
-          "a=rtpmap:99 AMR-WB/16000\r\na=rtpmap:98 AMR-NB/8000\r\n"
-        : "a=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\n";
+    (void)bPtt;  // AMR-WB used for both PTT and VoIP
 
     snprintf(buf, sizeof(buf),
         "v=0\r\no=cwrtc 0 0 IN IP4 %s\r\ns=-\r\nt=0 0\r\n"
-        "m=audio %d UDP/TLS/RTP/SAVPF %s\r\nc=IN IP4 %s\r\n"
-        "%s"
+        "m=audio %d UDP/TLS/RTP/SAVPF 99\r\nc=IN IP4 %s\r\n"
+        "a=rtpmap:99 AMR-WB/16000\r\na=fmtp:99\r\n"
+        "a=sendrecv\r\na=ice-ufrag:lMRb\r\na=ice-pwd:%s\r\n"
+        "a=fingerprint:sha-256 %s\r\na=setup:active\r\n"
+        "a=candidate:1 1 udp 2130706431 %s %d typ host\r\na=rtcp-mux\r\n"
+        "m=video %d UDP/TLS/RTP/SAVPF 97\r\nc=IN IP4 %s\r\n"
+        "a=rtpmap:97 H264/90000\r\n"
+        "a=fmtp:97 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n"
         "a=sendrecv\r\na=ice-ufrag:lMRb\r\na=ice-pwd:%s\r\n"
         "a=fingerprint:sha-256 %s\r\na=setup:active\r\n"
         "a=candidate:1 1 udp 2130706431 %s %d typ host\r\na=rtcp-mux\r\n",
-        ip, iDtlsPort, codecs, ip, rtplines, pwd, fp, ip, iDtlsPort);
+        ip,
+        iDtlsPort, ip,
+        pwd, fp, ip, iDtlsPort,
+        iDtlsPort + 2, ip,
+        pwd, fp, ip, iDtlsPort + 2);
     return buf;
 }
 
@@ -101,8 +109,8 @@ std::string CSipAgent::BuildPlainRtpSdp(int iRtpPort)
     const char* ip = gclsCwrtcSetup.m_strLocalIp.c_str();
     snprintf(buf, sizeof(buf),
         "v=0\r\no=cwrtc 0 0 IN IP4 %s\r\ns=-\r\nt=0 0\r\n"
-        "m=audio %d RTP/AVP 0 8\r\nc=IN IP4 %s\r\n"
-        "a=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=sendrecv\r\n",
+        "m=audio %d RTP/AVP 99\r\nc=IN IP4 %s\r\n"
+        "a=rtpmap:99 AMR-WB/16000\r\na=fmtp:99\r\na=sendrecv\r\n",
         ip, iRtpPort, ip);
     return buf;
 }
@@ -127,6 +135,17 @@ bool CSipAgent::RegisterUser(const std::string& userId, const std::string& passw
     info.m_strPassWord   = password;
     info.m_strAuthId     = authId.empty() ? userId : authId;
     info.m_iLoginTimeout = 3600;
+
+    // P-Preferred-Identity: sip:{userId}@{domain}
+    {
+        std::string strPPId = "<sip:" + userId + "@" + info.m_strDomain + ">";
+        info.m_strPPreferredIdentity = strPPId;
+    }
+
+    // P-Access-Network-Info: 설정값 사용, 없으면 기본값
+    info.m_strPAccessNetworkInfo = gclsCwrtcSetup.m_strPAccessNetworkInfo.empty()
+        ? ""
+        : gclsCwrtcSetup.m_strPAccessNetworkInfo;
 
     if (!gclsSipUserAgent.InsertRegisterInfo(info))
         gclsSipUserAgent.UpdateRegisterInfo(info);
@@ -175,8 +194,13 @@ bool CSipAgent::StartOutgoingCall(const std::string& fromUser, const std::string
     clsRtp.m_iCodec = 0;
     clsRtp.m_clsCodecList = {0, 8};
 
-    std::string strFrom = fromUser + "@" + gclsCwrtcSetup.m_strSipDomain;
-    std::string strTo   = toUser   + "@" + gclsCwrtcSetup.m_strSipDomain;
+    // Per-user domain stored at registration time (call → m_strSipDomain, ptt → m_strPttDomain)
+    CWsClient cli;
+    std::string strUserDomain = gclsCwrtcSetup.m_strSipDomain;
+    if (gclsSessionMap.GetClientByUser(fromUser, cli) && !cli.strDomain.empty())
+        strUserDomain = cli.strDomain;
+    std::string strFrom = fromUser + "@" + strUserDomain;
+    std::string strTo   = toUser   + "@" + strUserDomain;
 
     CSipCallRoute clsRoute;
     clsRoute.m_strDestIp  = gclsCwrtcSetup.m_strSipIp;
@@ -218,6 +242,19 @@ bool CSipAgent::AcceptIncomingCall(const std::string& callId, const std::string&
 
     gclsSessionMap.UpdateCallBrowserSdp(callId, browserSdp);
 
+    if (sess.bAutoAnswered) {
+        // PTT Answer-Mode:Auto 통화: SIP 200 OK는 이미 전송됨.
+        // 브라우저 SDP가 도착했으므로 RTP thread만 시작.
+        if (sess.pclsRtpArg) {
+            sess.pclsRtpArg->m_strBrowserSdp = browserSdp;
+            StartRtpThread(sess.pclsRtpArg);
+            gclsSessionMap.UpdateCallRtpArg(callId, nullptr);
+            CLog::Print(LOG_INFO, "AcceptIncomingCall: PTT RTP thread started for %s", callId.c_str());
+        }
+        return true;
+    }
+
+    // 일반 착신 통화: RTP thread 시작 + 200 OK 전송
     if (sess.pclsRtpArg) {
         sess.pclsRtpArg->m_strBrowserSdp = browserSdp;
         StartRtpThread(sess.pclsRtpArg);
@@ -254,8 +291,11 @@ void CSipAgent::EventRegister(CSipServerInfo* pclsInfo, int iStatus)
     CWsClient cli;
     if (!gclsSessionMap.GetClientByUser(pclsInfo->m_strUserId, cli)) return;
 
+    bool bSuccess = (iStatus > 0);
+    gclsSessionMap.SetClientSipRegistered(pclsInfo->m_strUserId, bSuccess);
+
     SimpleJson::JsonNode msg;
-    if (iStatus > 0) {
+    if (bSuccess) {
         msg.Set("type", "registered");
         msg.Set("user", pclsInfo->m_strUserId);
     } else {
@@ -318,20 +358,41 @@ void CSipAgent::EventIncomingCall(const char* pszCallId, const char* pszFrom,
     sess.pclsRtpArg    = pArg;
     gclsSessionMap.InsertCall(sess);
 
-    // 180 Ringing
+    // 180 Ringing (PTT 포함 모두 전송 — 3GPP 단말이 180 응답을 기대함)
     CSipCallRtp clsRingRtp;
     clsRingRtp.SetIpPort(gclsCwrtcSetup.m_strLocalIp.c_str(), iRtpPort, 1);
-    clsRingRtp.m_iCodec = 0;
+    clsRingRtp.m_iCodec = bPtt ? 99 : 0;
     gclsSipUserAgent.RingCall(pszCallId, &clsRingRtp);
 
-    // 브라우저에 DTLS offer 전달
     std::string strDtlsSdp = BuildDtlsSdp(iDtlsPort, bPtt);
     SimpleJson::JsonNode msg;
-    msg.Set("type",    "incoming");
-    msg.Set("call_id", pszCallId);
-    msg.Set("from",    strFrom);
-    msg.Set("sdp",     strDtlsSdp);
-    msg.Set("ptt",     bPtt ? "true" : "false");
+
+    if (bPtt) {
+        // Answer-Mode: Auto — CSP 측에 즉시 200 OK 전송
+        CSipCallRtp clsAcceptRtp;
+        clsAcceptRtp.SetIpPort(gclsCwrtcSetup.m_strLocalIp.c_str(), iRtpPort, 1);
+        clsAcceptRtp.m_iCodec = 99;
+        clsAcceptRtp.m_clsCodecList = {99, 98, 0, 8};
+        gclsSipUserAgent.AcceptCall(pszCallId, &clsAcceptRtp);
+        gclsSessionMap.SetCallAutoAnswered(pszCallId);  // 200 OK 전송 완료 마킹
+        gclsSessionMap.UpdateCallRtpArg(pszCallId, nullptr); // RTP thread는 브라우저 SDP 수신 후 시작
+
+        // 브라우저에 PTT 자동 참여 알림 (브라우저는 WebRTC 연결만 수립하면 됨)
+        msg.Set("type",    "ptt_auto_answer");
+        msg.Set("call_id", pszCallId);
+        msg.Set("from",    strFrom);
+        msg.Set("sdp",     strDtlsSdp);
+
+        CLog::Print(LOG_INFO, "EventIncomingCall: PTT Answer-Mode:Auto → 200 OK sent for %s", pszCallId);
+    } else {
+        // 일반 통화: 브라우저의 수락 대기
+        msg.Set("type",    "incoming");
+        msg.Set("call_id", pszCallId);
+        msg.Set("from",    strFrom);
+        msg.Set("sdp",     strDtlsSdp);
+        msg.Set("ptt",     "false");
+    }
+
     SendWsJson(cli.strWsIp, cli.iWsPort, msg.ToString());
 
     CLog::Print(LOG_INFO, "EventIncomingCall: %s→%s callId=%s dtls=%d rtp=%d cmp=%s:%d",

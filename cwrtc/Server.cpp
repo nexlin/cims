@@ -12,6 +12,7 @@ bool StartServer(const char* pszConfigFile)
     if (!gclsCwrtcSetup.Load(pszConfigFile)) return false;
 
     // 로그 초기화
+    CLog::SetPrefix("cwrtc");
     CLog::SetDirectory(gclsCwrtcSetup.m_strLogDir.c_str());
     CLog::SetLevel(LOG_INFO | LOG_DEBUG | LOG_NETWORK);
 
@@ -25,6 +26,13 @@ bool StartServer(const char* pszConfigFile)
     clsHttpSetup.m_iMaxSocketPerThread = 100;
     clsHttpSetup.m_iThreadMaxCount     = 0;
     clsHttpSetup.m_bUseThreadPipe      = false;
+
+    // WSS(TLS WebSocket) 설정
+    if (gclsCwrtcSetup.m_bWss && !gclsCwrtcSetup.m_strCertFile.empty()) {
+        clsHttpSetup.m_bUseTls    = true;
+        clsHttpSetup.m_strCertFile = gclsCwrtcSetup.m_strCertFile;
+        CLog::Print(LOG_INFO, "WSS enabled: cert=%s", gclsCwrtcSetup.m_strCertFile.c_str());
+    }
 
     gclsHttpCallBack.m_strDocumentRoot = gclsCwrtcSetup.m_strDocRoot;
     if (!CDirectory::IsDirectory(gclsHttpCallBack.m_strDocumentRoot.c_str())) {

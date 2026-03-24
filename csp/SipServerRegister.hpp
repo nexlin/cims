@@ -1,28 +1,7 @@
-/*
- * Copyright (C) 2012 Yee Young Han <websearch@naver.com> (http://blog.naver.com/websearch)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
 #include "GroupCallService.h"
+#include "GroupMap.h"
+#include "CspPttGroup.h"
 
-/**
- * @ingroup CspServer
- * @brief SIP 응답 메시지에 WWW-Authenticate 헤더를 추가한다.
- * @param psttResponse SIP 응답 메시지
- * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
- */
 bool AddChallenge( CSipMessage * psttResponse )
 {
 	CSipChallenge clsChallenge;
@@ -36,6 +15,7 @@ bool AddChallenge( CSipMessage * psttResponse )
 	}
 
 	clsChallenge.m_strType = "Digest";
+	clsChallenge.m_strAlgorithm = "MD5";
 	clsChallenge.m_strNonce = szNonce;
 	clsChallenge.m_strRealm = gclsSetup.m_strRealm;
 	clsChallenge.m_strQop = "auth";
@@ -174,6 +154,7 @@ ECheckAuthResult CheckAuthorization( CSipCredential * pclsCredential, const char
  */
 bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 {
+	// Min-Expires 체크 (등록 요청에만 적용)
 	if( pclsMessage->m_iExpires > 0 && gclsSetup.m_iMinRegisterTimeout != 0 )
 	{
 		if( pclsMessage->m_iExpires < gclsSetup.m_iMinRegisterTimeout )
@@ -187,15 +168,7 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		}
 	}
 
-	// [UNREGISTER] Skip authentication for de-registration (expires=0)
-	if( pclsMessage->GetExpires() == 0 )
-	{
-		gclsUserMap.Delete( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str() );
-		SendResponse( pclsMessage, SIP_OK );
-		return true;
-	}
-
-	// [AUTH] Check Authorization header for registration
+	// [AUTH] 등록/해제 모두 Digest 인증 필수 (RFC 3261 §10.3)
 	SIP_CREDENTIAL_LIST::iterator	itCL = pclsMessage->m_clsAuthorizationList.begin();
 
 	if( itCL == pclsMessage->m_clsAuthorizationList.end() )
@@ -218,6 +191,15 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		break;
 	}
 
+	// [UNREGISTER] 인증 통과 후 등록 해제
+	if( pclsMessage->GetExpires() == 0 )
+	{
+		gclsUserMap.Delete( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str() );
+		SendResponse( pclsMessage, SIP_OK );
+		CLog::Print( LOG_INFO, "RecvRequestRegister: user(%s) unregistered", pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str() );
+		return true;
+	}
+
 	// [REGISTER] Process registration
 	CSipFrom clsContact;
 
@@ -228,6 +210,18 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 
 		pclsResponse->m_clsContactList.push_back( clsContact );
 		pclsResponse->AddHeader( "Expires", 3600 );
+		pclsResponse->AddHeader( "Supported", "path,100rel,precondition" );
+
+		// Service-Route: CSP 자신을 S-CSCF로 지정 (IMS 단말의 이후 요청 라우팅 기준)
+		{
+			char szServiceRoute[512];
+			snprintf( szServiceRoute, sizeof(szServiceRoute),
+				"<sip:%s@%s:%d;lr>",
+				gclsSetup.m_strRealm.c_str(),
+				gclsSetup.m_strLocalIp.c_str(),
+				gclsSetup.m_iUdpPort );
+			pclsResponse->AddHeader( "Service-Route", szServiceRoute );
+		}
 
 		// P-Associated-URI: IMS 단말이 등록 완료 처리에 필요로 하는 헤더
 		{
@@ -243,6 +237,22 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		// [FIX for P2P Call] Update CspUserMap (JSON Map) registration time.
 		// Otherwise isAlive returns false (timeout) because time is 0.
 		gclsCspUserMap.registerUser( clsUser.m_strId, "" ); // Password already verified during Auth
+
+		// [PTT] Auto-invite PTT user to all their groups immediately on registration
+		if ( clsUser.m_strServiceType == "ptt" || clsUser.m_strServiceType == "both" ) {
+			std::string strUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+			CLog::Print( LOG_INFO, "RecvRequestRegister: PTT user(%s) registered, auto-joining groups", strUserId.c_str() );
+			gclsGroupMap.IterateInternal( [&strUserId]( const CspPttGroup& group ) {
+				for ( const auto& pUser : group._pusers ) {
+					if ( pUser && pUser->_id == strUserId ) {
+						CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s)",
+						             strUserId.c_str(), group._id.c_str() );
+						gclsGroupCallService.InviteMember( strUserId.c_str(), group._id.c_str() );
+						break;
+					}
+				}
+			} );
+		}
 	}
 	else
 	{

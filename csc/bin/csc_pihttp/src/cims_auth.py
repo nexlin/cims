@@ -91,8 +91,9 @@ def _dt(val):
 
 
 def _user_with_subs(cur, user_id: int) -> dict:
+    # 소프트폰 자동 등록에 passwd 필요 → 본인 조회이므로 포함
     cur.execute(
-        "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+        "SELECT id, auth_id, passwd, dnd, forward_id, register_time, logout_time "
         "FROM cims_call_users WHERE user_id=%s ORDER BY id",
         (user_id,)
     )
@@ -103,7 +104,7 @@ def _user_with_subs(cur, user_id: int) -> dict:
         s['logout_time']   = _dt(s['logout_time'])
 
     cur.execute(
-        "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+        "SELECT id, auth_id, passwd, dnd, forward_id, register_time, logout_time "
         "FROM cims_ptt_users WHERE user_id=%s ORDER BY id",
         (user_id,)
     )

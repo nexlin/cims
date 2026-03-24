@@ -57,6 +57,7 @@ int ServiceMain() {
         CLog::Print( LOG_ERROR, "config filename(%s) read error", GetConfigFileName() );
         return -1;
     }
+    CLog::SetPrefix( "csp" );
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
     CLog::Print( LOG_SYSTEM, "CspServer is started ( version-%s %s %s )", CSP_SERVER_VERSION, __DATE__, __TIME__ );
     CLog::Print( LOG_DEBUG, "CspServer[%s]", CDirectory::GetProgramDirectory() );
@@ -84,6 +85,7 @@ int ServiceMain() {
 
     clsSetup.m_strUserAgent = "csp_";
     clsSetup.m_strUserAgent.append( CSP_SERVER_VERSION );
+    clsSetup.m_strDomain = gclsSetup.m_strRealm;  // realm as SIP domain for From/To/P-Asserted-Identity
     clsSetup.m_iStackExecutePeriod = gclsSetup.m_iStackExecutePeriod;
     clsSetup.m_iTimerD = gclsSetup.m_iTimerD;
     clsSetup.m_iTimerJ = gclsSetup.m_iTimerJ;

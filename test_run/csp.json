@@ -7,7 +7,7 @@
             "TcpPort": 25061,
             "TcpThreadCount": 2,
             "TcpRecvTimeout": 600,
-            "Realm": "csp",
+            "Realm": "ims.mnc033.mcc450.3gppnetwork.org",
             "TlsPort": 0,
             "MinRegisterTimeout": 10,
             "StackExecutePeriod": 20

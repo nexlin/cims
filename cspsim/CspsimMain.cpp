@@ -286,6 +286,7 @@ int main(int argc, char* argv[])
     else if (strScenario == "full")       eScenario = E_SCENARIO_FULL;
 
     // 로깅 설정
+    CLog::SetPrefix("cspsim");
     CLog::SetDirectory("log");
     EnumLogLevel eLevel = (EnumLogLevel)(LOG_INFO | LOG_ERROR | LOG_SYSTEM);
     if (bVerbose) eLevel = (EnumLogLevel)(eLevel | LOG_NETWORK | LOG_DEBUG);

@@ -16,6 +16,9 @@ struct CWsClient {
     std::string strWsIp;
     int         iWsPort;
     std::string strActiveCallId;  // 현재 통화 callId (없으면 "")
+    bool        bSipRegistered;   // CSP SIP 등록 완료 여부
+
+    CWsClient() : iWsPort(0), bSipRegistered(false) {}
 };
 
 /**
@@ -32,10 +35,12 @@ struct CCallSession {
     bool        bPtt;           // PTT 그룹 콜 여부
     std::string strGroupId;     // PTT 그룹 ID
     bool        bOutgoing;      // true: 브라우저→CSP, false: CSP→브라우저
+    bool        bAutoAnswered;  // Answer-Mode:Auto로 SIP 200 OK 이미 전송됨
     std::string strBrowserSdp;  // 브라우저의 SDP offer/answer (ICE 정보 추출용)
     CRtpThreadArg* pclsRtpArg;
 
-    CCallSession() : iWsPort(0), iCmpPort(0), bPtt(false), bOutgoing(false), pclsRtpArg(nullptr) {}
+    CCallSession() : iWsPort(0), iCmpPort(0), bPtt(false), bOutgoing(false),
+                     bAutoAnswered(false), pclsRtpArg(nullptr) {}
 };
 
 /**
@@ -50,6 +55,8 @@ public:
     bool   GetClientByUser(const std::string& userId, CWsClient& out);
     bool   GetClientByWs(const std::string& wsIp, int wsPort, CWsClient& out);
     std::string GetUserIdByWs(const std::string& wsIp, int wsPort);
+    bool   SetClientSipRegistered(const std::string& userId, bool bRegistered);
+    bool   SetCallAutoAnswered(const std::string& callId);
 
     // 통화 세션 관리
     bool   InsertCall(const CCallSession& sess);

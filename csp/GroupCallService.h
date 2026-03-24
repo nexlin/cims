@@ -49,6 +49,9 @@ public:
     bool OnCallTerminated( const std::string& strCallId );
     void OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort );
 
+    /** Called by CSC interface when group/user config changes externally */
+    void OnGroupConfigChanged();
+
 private:
     void MonitorLoop();
     void SyncGroupsState();
@@ -60,7 +63,9 @@ private:
      * @param clsGroup PTT group info
      * @return XML string
      */
-    static std::string BuildGroupInfoXml( const class CspPttGroup& clsGroup, const std::string& strUserId );
+    static std::string BuildGroupInfoXml( const class CspPttGroup& clsGroup,
+                                          const std::string& strUserId,
+                                          const std::string& strCallerId );
 
     /**
      * @brief Wrap SDP and group XML into multipart/mixed body, update INVITE message
@@ -80,6 +85,7 @@ private:
         std::string strIp;
         size_t nMemberHash;
         std::string strSessionCallId; // active CSP-initiated session call_id for DB logging
+        std::string strCallerId;      // 그룹 통화를 개시한 사용자 ID (mcptt-calling-user-id)
     };
     std::map<std::string, GroupRtpInfo> m_mapGroupRtp;
 

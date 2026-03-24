@@ -62,13 +62,17 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
     }
 
+    // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
+    if ( m_mapGroupRtp.find(pszGroupId) != m_mapGroupRtp.end() ) {
+        m_mapGroupRtp[pszGroupId].strCallerId = pszCallerInfo;
+    }
+
     // 2. 발신자(Caller)에게 공유 RTP 포트로 200 OK 응답
     if ( iSharedPort > 0 ) {
         CSipCallRtp clsCallerRtp;
         clsCallerRtp.SetIpPort( strSharedIp.c_str(), iSharedPort, SOCKET_COUNT_PER_MEDIA );
-        clsCallerRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;
-        clsCallerRtp.m_clsCodecList.push_back(0);
-        clsCallerRtp.m_clsCodecList.push_back(8);
+        clsCallerRtp.m_iCodec = 99;  // AMR-WB only
+        clsCallerRtp.m_clsCodecList.push_back(99);
         if ( !gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp ) ) {
             CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
             return false;
@@ -168,13 +172,9 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     // Use Shared IP/Port
     clsRtp.SetIpPort( strSharedIp.c_str(), iSharedPort, SOCKET_COUNT_PER_MEDIA );
     
-    // Codecs
-    clsRtp.m_clsCodecList.push_back(99); 
-    clsRtp.m_clsCodecList.push_back(98);
-    clsRtp.m_clsCodecList.push_back(0);   
-    clsRtp.m_clsCodecList.push_back(8);   
-    clsRtp.m_clsCodecList.push_back(101); 
-    clsRtp.m_iCodec = 99; 
+    // Codecs — AMR-WB only (payload 99)
+    clsRtp.m_clsCodecList.push_back(99);
+    clsRtp.m_iCodec = 99;
 
     // 4. Create Call
     std::string strCallId;
@@ -184,15 +184,27 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
 
          // 4-1. Add PTT group info XML to INVITE (multipart/mixed: mcptt-info+xml + SDP)
          if ( pclsInvite != NULL ) {
-             // To 헤더: 개인 AOR → 그룹 PSI로 변경 (prearranged 그룹콜 식별)
-             pclsInvite->m_clsTo.m_clsUri.Set( SIP_PROTOCOL, pszGroupId, gclsSetup.m_strRealm.c_str() );
+             // To: 는 개인 AOR 유지 (cwrtc가 WS 클라이언트를 찾는 데 필요)
+             // 그룹 식별은 Contact(isfocus), P-Called-Party-ID, XML body로 전달
 
-             std::string strGroupXml = BuildGroupInfoXml( clsGroup, pszUserId );
+             // 발신자 ID 조회 (mcptt-calling-user-id)
+             std::string strCallerId;
+             {
+                 auto itRtp = m_mapGroupRtp.find(pszGroupId);
+                 if ( itRtp != m_mapGroupRtp.end() && !itRtp->second.strCallerId.empty() )
+                     strCallerId = itRtp->second.strCallerId;
+                 else
+                     strCallerId = pszGroupId; // fallback
+             }
+
+             std::string strGroupXml = BuildGroupInfoXml( clsGroup, pszUserId, strCallerId );
              WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iSharedPort + 1 );
 
              // MCPTT capability required
              pclsInvite->AddHeader( "Accept-Contact",
                  "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";+g.3gpp.mcptt;require;explicit" );
+             // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
+             pclsInvite->AddHeader( "Answer-Mode", "Auto" );
              // Callee identity
              char szPCalledParty[256];
              snprintf( szPCalledParty, sizeof(szPCalledParty), "<sip:%s@%s>",
@@ -200,13 +212,14 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
              pclsInvite->AddHeader( "P-Called-Party-ID", szPCalledParty );
              // Group call priority
              pclsInvite->AddHeader( "Resource-Priority", "mcpttp.6" );
-             // isfocus: indicate server is conference focus for this group call
-             const std::string& strLocalIp = gclsUserAgent.m_clsSipStack.m_clsSetup.m_strLocalIp;
-             int iLocalPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
+             // isfocus: indicate server is conference focus for this group call (domain-based URI)
              char szContact[256];
-             snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>;isfocus",
-                      pszGroupId, strLocalIp.c_str(), iLocalPort);
+             snprintf(szContact, sizeof(szContact), "<sip:%s@%s>;isfocus",
+                      pszGroupId, gclsSetup.m_strRealm.c_str());
              pclsInvite->AddHeader("Contact", szContact);
+             // Session timer (RFC 4028) — required by many MCPTT implementations
+             pclsInvite->AddHeader("Session-Expires", "7200;refresher=uac");
+             pclsInvite->AddHeader("Min-SE", "180");
          }
 
          // Insert into CallMap (But manage Port cleanup ourselves)
@@ -263,24 +276,42 @@ void CGroupCallService::StopMonitor() {
 }
 
 void CGroupCallService::MonitorLoop() {
-    while ( m_bMonitorRunning ) {
-        std::this_thread::sleep_for( std::chrono::seconds(5) );
-        if ( !m_bMonitorRunning ) break;
-        
-        // 1. Reload Group Map (File Monitoring)
-        if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
-            gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
-        }
-        
-        // 2. Sync Existence (Add New, Remove Deleted)
-        SyncGroupsState();
-        
-        // 3. Check Calls (Kick removed members)
-        CheckMemberState();
+    // Initial sync on startup
+    SyncGroupsState();
+    CheckGroupIntegrity();
 
-        // 4. Invite Missing Members
-        CheckGroupIntegrity();
+    int iTickSec = 0;
+    while ( m_bMonitorRunning ) {
+        std::this_thread::sleep_for( std::chrono::seconds(1) );
+        if ( !m_bMonitorRunning ) break;
+        ++iTickSec;
+
+        // Periodic member state check (every 10s) — detects dead calls
+        if ( iTickSec % 10 == 0 ) {
+            CheckMemberState();
+            CheckGroupIntegrity();
+        }
+
+        // Heavy group config reload from disk only every 60s as a fallback
+        // (primary refresh path is OnGroupConfigChanged() called by CSC interface)
+        if ( iTickSec % 60 == 0 ) {
+            if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
+                gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
+            }
+            SyncGroupsState();
+            iTickSec = 0;
+        }
     }
+}
+
+void CGroupCallService::OnGroupConfigChanged() {
+    CLog::Print( LOG_INFO, "OnGroupConfigChanged: Reloading group config and re-syncing" );
+    if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
+        gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
+    }
+    SyncGroupsState();
+    CheckMemberState();
+    CheckGroupIntegrity();
 }
 
 void CGroupCallService::SyncGroupsState() {
@@ -533,7 +564,9 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
  * @brief Build PTT group info XML body per 3GPP TS 24.379 MCPTT spec
  *        Content-Type: application/vnd.3gpp.mcptt-info+xml
  */
-std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup& clsGroup, const std::string& strUserId )
+std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup& clsGroup,
+                                                   const std::string& strUserId,
+                                                   const std::string& strCallerId )
 {
     std::ostringstream oss;
 
@@ -543,7 +576,7 @@ std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup& clsGroup, c
         << "  <mcptt-Params>\r\n"
         << "    <session-type>prearranged</session-type>\r\n"
         << "    <mcptt-request-uri>tel:" << strUserId << "</mcptt-request-uri>\r\n"
-        << "    <mcptt-calling-user-id>tel:" << clsGroup._id << "</mcptt-calling-user-id>\r\n"
+        << "    <mcptt-calling-user-id>tel:" << strCallerId << "</mcptt-calling-user-id>\r\n"
         << "    <mcptt-calling-group-id>tel:" << clsGroup._id << "</mcptt-calling-group-id>\r\n"
         << "  </mcptt-Params>\r\n"
         << "</mcpttinfo>\r\n";

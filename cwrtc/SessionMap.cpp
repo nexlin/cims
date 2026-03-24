@@ -72,6 +72,26 @@ std::string CSessionMap::GetUserIdByWs(const std::string& wsIp, int wsPort)
     return uid;
 }
 
+bool CSessionMap::SetCallAutoAnswered(const std::string& callId)
+{
+    m_clsMutex.acquire();
+    auto it = m_clsCallMap.find(callId);
+    bool found = (it != m_clsCallMap.end());
+    if (found) it->second.bAutoAnswered = true;
+    m_clsMutex.release();
+    return found;
+}
+
+bool CSessionMap::SetClientSipRegistered(const std::string& userId, bool bRegistered)
+{
+    m_clsMutex.acquire();
+    auto it = m_clsClientMap.find(userId);
+    bool found = (it != m_clsClientMap.end());
+    if (found) it->second.bSipRegistered = bRegistered;
+    m_clsMutex.release();
+    return found;
+}
+
 bool CSessionMap::InsertCall(const CCallSession& sess)
 {
     m_clsMutex.acquire();

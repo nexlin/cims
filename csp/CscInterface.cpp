@@ -1,6 +1,7 @@
 #include "CscInterface.h"
 #include "Log.h"
-#include "SipServer.h" // For triggering Notify logic
+#include "SipServer.h"
+#include "GroupCallService.h"
 
 #ifdef WIN32
 #include <winsock2.h>
@@ -132,11 +133,12 @@ void CCscInterface::ProcessMessage(const std::string& strMsg) {
     CLog::Print(LOG_INFO, "CscInterface Event: %s, URI: %s, Action: %s, ETag: %s", 
         strEvent.c_str(), strUri.c_str(), strAction.c_str(), strEtag.c_str());
 
-    if (strEvent == "group_change" || strEvent == "user_change") {
-        // Trigger SIP NOTIFY Logic
-        // Defined in SipServer.h/cpp (Needs to be added)
-        // gclsSipServer.SendGlobalNotify(strUri, strEtag, strAction); 
-        // For now, assume this method exists or link to it
+    if (strEvent == "group_change") {
+        extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
+        SendSipNotify(strUri, strEtag, strAction);
+        // Reload group config and re-sync CMP sessions / re-invite members
+        gclsGroupCallService.OnGroupConfigChanged();
+    } else if (strEvent == "user_change") {
         extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
         SendSipNotify(strUri, strEtag, strAction);
     }

@@ -5,6 +5,7 @@
 #include "Log.h"
 #include "SessionMap.h"
 #include "SipAgent.h"
+#include "CwrtcSetup.h"
 #include "SimpleJson.h"
 #include "MemoryDebug.h"
 #include <cstring>
@@ -110,6 +111,18 @@ bool CHttpCallBack::WebSocketData(const char* pszClientIp, int iClientPort,
             return true;
         }
 
+        // API 토큰 인증 (설정된 경우)
+        if (!gclsCwrtcSetup.m_strApiToken.empty()) {
+            std::string strToken = msg.GetString("token");
+            if (strToken != gclsCwrtcSetup.m_strApiToken) {
+                CLog::Print(LOG_INFO, "WS[%s:%d] register rejected: invalid token (user=%s)",
+                    pszClientIp, iClientPort, strUser.c_str());
+                SendText(pszClientIp, iClientPort,
+                    R"({"type":"register_failed","reason":"unauthorized"})");
+                return true;
+            }
+        }
+
         gclsSessionMap.InsertClient(strUser, pszClientIp, iClientPort,
                                     strDomain, strPassword, strAuthId);
         gclsSipAgent.RegisterUser(strUser, strPassword, strDomain, strAuthId);
@@ -122,8 +135,17 @@ bool CHttpCallBack::WebSocketData(const char* pszClientIp, int iClientPort,
         std::string strTo  = msg.GetString("to");
         std::string strSdp = msg.GetString("sdp");
 
-        std::string strUserId = gclsSessionMap.GetUserIdByWs(pszClientIp, iClientPort);
-        if (strUserId.empty() || strTo.empty() || strSdp.empty()) {
+        // SIP 등록 완료된 클라이언트만 발신 허용
+        CWsClient cliCheck;
+        if (!gclsSessionMap.GetClientByWs(pszClientIp, iClientPort, cliCheck) ||
+            !cliCheck.bSipRegistered) {
+            CLog::Print(LOG_INFO, "WS[%s:%d] call rejected: SIP not registered", pszClientIp, iClientPort);
+            SendText(pszClientIp, iClientPort, R"({"type":"ended","reason":"not_registered"})");
+            return true;
+        }
+
+        std::string strUserId = cliCheck.strUserId;
+        if (strTo.empty() || strSdp.empty()) {
             SendText(pszClientIp, iClientPort, R"({"type":"ended","reason":"invalid"})");
             return true;
         }
