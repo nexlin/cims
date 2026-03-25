@@ -16,9 +16,11 @@ from util.log_util import Logger
 from idms_storage import IdmsStorage
 
 # --- Configuration & Data ---
-SECRET_KEY = "my_secret_key"
+SECRET_KEY = "mcptt_jwt_secret_change_me"
 IDMS_ISSUER = "idms.mcptt.com"
 KMS_URI = "kms.mcptt.com"
+IDMS_DOMAIN = "mcptt.com"
+KMS_CLIENT_REQ_URL = "http://localhost:4420/keymanagement/identity/v1/init"
 USERS = {}
 GROUPS = {}
 TOKENS = {}
@@ -29,14 +31,13 @@ storage = IdmsStorage()
 
 logger = Logger()
 
-# TTL 설정 (테스트용 - 짧은 시간)
-AUTH_CODE_TTL = 10  # 10초 (테스트용)
-ACCESS_TOKEN_TTL = 30  # 30초 (테스트용)
-REFRESH_TOKEN_TTL = 60  # 1분 (테스트용)
+# TTL 설정 (config에서 읽음, 기본값은 프로덕션 값)
+AUTH_CODE_TTL = 60               # 60초
+ACCESS_TOKEN_TTL = 3600          # 1시간
+REFRESH_TOKEN_TTL = 7 * 24 * 3600  # 7일
 
-#AUTH_CODE_TTL = 60              # 60초
-#ACCESS_TOKEN_TTL = 3600         # 1시간
-#REFRESH_TOKEN_TTL = 7 * 24 * 3600  # 7일
+CSP_NOTIFY_IP = "127.0.0.1"
+CSP_NOTIFY_PORT = 4421
 
 def load_shared_data(config):
     # Do not reassign global variables, modify them in place
@@ -79,6 +80,34 @@ def load_shared_data(config):
                     logger.log_info(f"Loaded User: {uri}")
             except Exception as e:
                 logger.log_error(f"Error loading user {fpath}: {e}")
+
+    # Read IdMs config
+    global SECRET_KEY, IDMS_ISSUER, KMS_URI, IDMS_DOMAIN, KMS_CLIENT_REQ_URL
+    global AUTH_CODE_TTL, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL
+    idms_config = config.get('IdMs', {})
+    if idms_config.get('JwtSecret'):
+        SECRET_KEY = idms_config['JwtSecret']
+    if idms_config.get('Issuer'):
+        IDMS_ISSUER = idms_config['Issuer']
+    if idms_config.get('KmsUri'):
+        KMS_URI = idms_config['KmsUri']
+    if idms_config.get('Domain'):
+        IDMS_DOMAIN = idms_config['Domain']
+    if idms_config.get('KmsClientReqUrl'):
+        KMS_CLIENT_REQ_URL = idms_config['KmsClientReqUrl']
+    if idms_config.get('AuthCodeTtl'):
+        AUTH_CODE_TTL = int(idms_config['AuthCodeTtl'])
+    if idms_config.get('AccessTokenTtl'):
+        ACCESS_TOKEN_TTL = int(idms_config['AccessTokenTtl'])
+    if idms_config.get('RefreshTokenTtl'):
+        REFRESH_TOKEN_TTL = int(idms_config['RefreshTokenTtl'])
+
+    global CSP_NOTIFY_IP, CSP_NOTIFY_PORT
+    notify_cfg = config.get('CspNotify', {})
+    if notify_cfg.get('Ip'):
+        CSP_NOTIFY_IP = notify_cfg['Ip']
+    if notify_cfg.get('Port'):
+        CSP_NOTIFY_PORT = int(notify_cfg['Port'])
 
     global GROUP_DIR
     if group_path:
@@ -135,7 +164,7 @@ def notify_csp(event_type, uri, action, etag=""):
         # Timeout to avoid blocking
         # Connect to CSP (Localhost 4421) - UDP
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(msg.encode('utf-8'), ('127.0.0.1', 4421))
+        sock.sendto(msg.encode('utf-8'), (CSP_NOTIFY_IP, CSP_NOTIFY_PORT))
         sock.close()
         logger.log_info(f"Notify Sent: {msg}")
     except Exception as e:
@@ -297,6 +326,9 @@ def get_group_xml(group_uri):
     </list>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
+    <mcpttgi:on-network-hang-time>3</mcpttgi:on-network-hang-time>
+    <mcpttgi:on-network-max-duration>3600</mcpttgi:on-network-max-duration>
+    <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
     <cp:ruleset>
       <cp:rule id="a7c">
          <cp:actions>
@@ -322,19 +354,51 @@ def get_user_profile_xml(user_uri):
     user = USERS.get(user_uri)
     if not user:
         return None, None
-        
+
+    display_name = user.get('name', user_uri)
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<MCPTTUserID index="{user_uri}">
-    <uri-entry>http://csc.mcptt.com/org.3gpp.mcptt.user-profile/users/{user_uri}</uri-entry>
-    <display-name xml:lang="en-us">{user_uri}</display-name>
-</MCPTTUserID>"""
+<mcptt-user-profile xmlns="urn:3gpp:ns:mcpttUserProfile:1.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  user-profile-index="1">
+  <Name>
+    <display-name xml:lang="en">{display_name}</display-name>
+  </Name>
+  <Common>
+    <MCPTTUserID>{user_uri}</MCPTTUserID>
+    <PrivateCall>
+      <MaxSimultaneousCallsN6>1</MaxSimultaneousCallsN6>
+      <MaxCallsN7>1</MaxCallsN7>
+      <EmergencyCall>
+        <MCPTTUserID>{user_uri}</MCPTTUserID>
+      </EmergencyCall>
+    </PrivateCall>
+    <EmergencyAlert>
+      <MCPTTUserID>{user_uri}</MCPTTUserID>
+    </EmergencyAlert>
+  </Common>
+  <OnNetwork>
+    <MCPTTUserID>{user_uri}</MCPTTUserID>
+  </OnNetwork>
+</mcptt-user-profile>"""
     return xml, user['profile_etag']
 
 def get_service_config_xml(user_uri):
     xml = """<?xml version="1.0" encoding="UTF-8"?>
-<num-levels-group-hierarchy>3</num-levels-group-hierarchy>
-<num-levels-user-hierarchy>3</num-levels-user-hierarchy>"""
-    return xml, "VTGvRnMgDsXzkhmnQ8HIETX9ZsidQRLv"
+<mcptt-service-config xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <num-levels-group-hierarchy>3</num-levels-group-hierarchy>
+  <num-levels-user-hierarchy>3</num-levels-user-hierarchy>
+  <max-affiliations-N2>10</max-affiliations-N2>
+  <allow-create-delete-group>true</allow-create-delete-group>
+  <allow-private-call>true</allow-private-call>
+  <allow-emergency-call>true</allow-emergency-call>
+  <allow-alert>true</allow-alert>
+  <on-network>
+    <allow-transmit-request>true</allow-transmit-request>
+    <max-on-network-affiliations-N2>10</max-on-network-affiliations-N2>
+  </on-network>
+</mcptt-service-config>"""
+    return xml, "svcfg_etag_v1"
 
 def get_kms_init_xml(user_uri):
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -344,10 +408,10 @@ def get_kms_init_xml(user_uri):
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <KmsResponse Version="1.1.0" xmlns="http://org.csc.kms" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
 <KmsUri>{KMS_URI}</KmsUri>
-<UserUri>{user_uri}@ps-lte.com</UserUri>
+<UserUri>{user_uri}@{IDMS_DOMAIN}</UserUri>
 <Time>{now.isoformat()}</Time>
 <KmsId>kmsprovider12345</KmsId>
-<ClientReqUrl>http://10.121.2.90/keymanagement/identity/v1/init</ClientReqUrl>
+<ClientReqUrl>{KMS_CLIENT_REQ_URL}</ClientReqUrl>
 <KmsMessage>
 <KmsInit Version="1.0.0">
 <KmsCertificate Version="1.0.0" Role="Root">
@@ -372,10 +436,10 @@ def get_kms_keyprov_xml(user_uri):
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <KmsResponse Version="1.1.0" xmlns="http://org.csc.kms" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
 <KmsUri>{KMS_URI}</KmsUri>
-<UserUri>{user_uri}@ptt.mnc031.mcc450.3gppnetwork.org</UserUri>
+<UserUri>{user_uri}@{IDMS_DOMAIN}</UserUri>
 <Time>{now.isoformat()}</Time>
 <KmsId>kmsprovider12345</KmsId>
-<ClientReqUrl>http://10.121.2.90/keymanagement/identity/v1/init</ClientReqUrl>
+<ClientReqUrl>{KMS_CLIENT_REQ_URL}</ClientReqUrl>
 <KmsMessage>
 <KmsInit Version="1.0.0">
 <KmsCertificate Version="1.0.0" Role="Root">
@@ -621,19 +685,54 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     
     return HandlerResult(status=400, body={"error": "unsupported_grant_type"}, media_type="application/json")
 
-# GMS: Group Management (GET, PUT, DELETE)
-async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    # Path: /org.openmobilealliance.groups/users/{user_id}/{group_id}
-    
+# GMS: List groups for a user
+# GET /org.openmobilealliance.groups/users/{user_uri}
+async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return HandlerResult(status=401, body="Missing or Invalid Token")
 
     path = args.full_path
-    parts = path.split('/')
-    # ['', 'org...', 'users', 'user_id', 'group_id']
+    parts = [p for p in path.split('/') if p]
+    # parts: ['org.openmobilealliance.groups', 'users', 'user_uri']
+    user_uri = parts[-1] if len(parts) >= 3 else token_payload.get('mcptt_id', '')
+
+    logger.log_info(f"[GMS] List groups for user: {user_uri}")
+
+    result = []
+    for group_uri, group in GROUPS.items():
+        for member in group.get('members', []):
+            if member['uri'] == user_uri:
+                result.append({
+                    "uri": group_uri,
+                    "display_name": group['display_name'],
+                    "etag": group['etag'],
+                    "member_count": len(group['members']),
+                })
+                break
+
+    return HandlerResult(status=200, body=result, media_type='application/json')
+
+
+# GMS: unified handler — dispatches on path depth
+# GET  /org.openmobilealliance.groups/users/{user_uri}              → list user's groups (JSON)
+# GET/PUT/DELETE /org.openmobilealliance.groups/users/{user_uri}/{group_uri} → specific group
+async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    token_payload = extract_token(args.headers.get('authorization'))
+    if not token_payload:
+        return HandlerResult(status=401, body="Missing or Invalid Token")
+
+    path = args.full_path
+    parts = [p for p in path.split('/') if p]
+    # ['org.openmobilealliance.groups', 'users', 'user_uri']        → list
+    # ['org.openmobilealliance.groups', 'users', 'user_uri', 'group_uri'] → specific
+
+    if len(parts) == 3 and args.method == 'GET':
+        # Delegate to list handler
+        return await handle_user_groups(args, kwargs)
+
     group_uri = parts[-1]
-    user_uri = parts[-2] # Corrected from -3
+    user_uri = parts[-2]
 
     logger.log_info(f"[GMS] Group Management: {args.method} {group_uri}")
 
@@ -641,16 +740,17 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
         if args.method == 'GET':
             xml, etag = get_group_xml(group_uri)
             if xml:
+                if_none_match = args.headers.get('if-none-match', '')
+                if if_none_match and if_none_match == etag:
+                    return HandlerResult(status=304)
                 return HandlerResult(status=200, body=xml, media_type='application/vnd.oma.poc.groups+xml', headers={'Etag': etag})
             else:
                 return HandlerResult(status=404)
 
         elif args.method == 'PUT':
-            # Create or Update Group
-            # Ideally we parse the XML body, but for mock purposes we just create a valid entry
             display_name = f"Group {group_uri}"
             now_str = datetime.datetime.now().isoformat()
-            
+
             GROUPS[group_uri] = {
                 "display_name": display_name,
                 "etag": f"etag_{int(time.time())}",
@@ -660,13 +760,9 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                     {"uri": user_uri, "name": "Owner", "role": "owner", "priority": 5, "joined_at": now_str}
                 ]
             }
-            # Persist to file
             save_group_to_file(group_uri, GROUPS[group_uri])
-            
-            # [FIX] Notify CSP
             notify_csp("group_change", group_uri, "PUT", GROUPS[group_uri].get('etag', ''))
-            
-            # Return current state
+
             xml, etag = get_group_xml(group_uri)
             return HandlerResult(status=200, body=xml, media_type='application/vnd.oma.poc.groups+xml', headers={'Etag': etag})
 
@@ -707,8 +803,11 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 
     logger.log_info(f"[CMS] User Profile: {user_uri}")
     xml, etag = get_user_profile_xml(user_uri)
-    
+
     if xml:
+        if_none_match = args.headers.get('if-none-match', '')
+        if if_none_match and if_none_match == etag:
+            return HandlerResult(status=304)
         return HandlerResult(status=200, body=xml, media_type='application/vnd.3gpp.mcptt-user-profile+xml', headers={'Etag': etag})
     else:
         return HandlerResult(status=404)
@@ -730,9 +829,11 @@ async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
 
     logger.log_info(f"[CMS] Service Config: {user_uri}")
     xml, etag = get_service_config_xml(user_uri)
-    
+
     if xml:
-        # Note: Content-Type for service-config isn't strictly defined in my snippet, using application/xml or similar
+        if_none_match = args.headers.get('if-none-match', '')
+        if if_none_match and if_none_match == etag:
+            return HandlerResult(status=304)
         return HandlerResult(status=200, body=xml, media_type='application/vnd.3gpp.mcptt-service-config+xml', headers={'Etag': etag})
     else:
         return HandlerResult(status=404)
@@ -760,13 +861,52 @@ async def handle_kms_keyprov(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     xml = get_kms_keyprov_xml(user_uri)
     return HandlerResult(status=200, body=xml, media_type='application/xml')
 
-# Route Mapping
+# IdMS: Token Introspection (RFC 7662)
+async def handle_token_introspect(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    # POST /idms/introspect
+    if args.method != 'POST':
+        return HandlerResult(status=405)
+
+    data = args.body
+    token = None
+    if isinstance(data, dict):
+        token = data.get('token')
+    elif isinstance(data, str):
+        for part in data.split('&'):
+            if part.startswith('token='):
+                token = part[6:]
+                break
+
+    if not token:
+        return HandlerResult(status=400, body={"error": "invalid_request"}, media_type="application/json")
+
+    payload = validate_access_token(token)
+    if payload:
+        scope = payload.get("scope", [])
+        return HandlerResult(status=200, body={
+            "active": True,
+            "mcptt_id": payload.get("mcptt_id"),
+            "aud": payload.get("aud"),
+            "exp": payload.get("exp"),
+            "iat": payload.get("iat"),
+            "scope": " ".join(scope) if isinstance(scope, list) else scope
+        }, media_type="application/json")
+    else:
+        return HandlerResult(status=200, body={"active": False}, media_type="application/json")
+
+
+# Route Mapping (MCPTT server — port 4430)
 CSC_HANDLER_LIST = [
-    ("/idms/authreq", handle_auth_req, {}),
-    ("/idms/tokenreq", handle_token_req, {}),
-    ("/org.openmobilealliance.groups/users", handle_group_management, {}), # Prefix match
-    ("/org.3gpp.mcptt.user-profile/users", handle_user_profile, {}), # Prefix match
-    ("/org.3gpp.mcptt.service-config/users", handle_service_config, {}), # Prefix match
-    ("/keymanagement/identity/v1/init", handle_kms_init, {}),
+    # IdMS (3GPP TS 33.180 / OAuth 2.0 PKCE)
+    ("/idms/authreq",     handle_auth_req,          {}),
+    ("/idms/tokenreq",    handle_token_req,          {}),
+    ("/idms/introspect",  handle_token_introspect,   {}),
+    # GMS — list: GET /users/{user_uri}  |  CRUD: /users/{user_uri}/{group_uri}
+    ("/org.openmobilealliance.groups/users", handle_group_management, {}),
+    # CMS (3GPP TS 24.484)
+    ("/org.3gpp.mcptt.user-profile/users",   handle_user_profile,   {}),
+    ("/org.3gpp.mcptt.service-config/users", handle_service_config,  {}),
+    # KMS (3GPP TS 33.180 / MIKEY-SAKKE)
+    ("/keymanagement/identity/v1/init",    handle_kms_init,    {}),
     ("/keymanagement/identity/v1/keyprov", handle_kms_keyprov, {}),
 ]

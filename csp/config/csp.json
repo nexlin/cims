@@ -1,0 +1,58 @@
+{
+    "Setup": {
+        "Sip": {
+            "LocalIp": "@CSP_IP@",
+            "UdpPort": 5060,
+            "UdpThreadCount": 2,
+            "TcpPort": 25061,
+            "TcpThreadCount": 2,
+            "TcpRecvTimeout": 600,
+            "Realm": "@SIP_DOMAIN@",
+            "TlsPort": 5061,
+            "TlsAcceptTimeout": 10,
+            "CertFile": "cert/csp.pem",
+            "MinRegisterTimeout": 60,
+            "CallPickupId": "**",
+            "StackExecutePeriod": 20
+        },
+        "RtpRelay": {
+            "UseRtpRelay": true,
+            "CmpIp": "@CMP_IP@",
+            "CmpPort": 9000,
+            "LocalCmpIp": "@CSP_IP@",
+            "LocalCmpPort": 9001
+        },
+        "Log": {
+            "Folder": "log",
+            "MaxSize": 10000000,
+            "Level": {
+                "Debug": true,
+                "Info": true,
+                "Network": true,
+                "Sql": false
+            }
+        },
+        "DataFolder": {
+            "User": "user",
+            "SipServer": "route",
+            "Group": "group"
+        },
+        "Database": {
+            "Host": "@DB_HOST@",
+            "Port": 3306,
+            "User": "@DB_USER@",
+            "Password": "@DB_PASSWORD@",
+            "DbName": "cims"
+        },
+        "Cdr": {
+            "Folder": "log/cdr"
+        },
+        "Monitor": {
+            "Port": 16000,
+            "ClientIpList": ["@CSP_IP@"]
+        },
+        "Security": {
+            "DenySipUserAgentList": ["friendly-scanner", "sundayddr"]
+        }
+    }
+}

@@ -19,8 +19,16 @@ from pathlib import PurePath
 from util.pi_http.http_handler import HandlerArgs, HandlerResult
 
 # ── 상수 ──────────────────────────────────────────────────────
-_SECRET    = 'cims_jwt_secret_2024'
+_SECRET    = 'cims_jwt_secret_change_me'
 _TTL_SEC   = 86400 * 7   # 7일
+
+
+def init(config: dict) -> None:
+    """Read JWT secret from config. Call once at startup."""
+    global _SECRET
+    secret = config.get('CimsAuth', {}).get('JwtSecret')
+    if secret:
+        _SECRET = secret
 
 
 # ── 공통 유틸 ──────────────────────────────────────────────────

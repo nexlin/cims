@@ -269,13 +269,13 @@ add_subdirectory(cwrtc)
 # --- Distribution Target ---
 add_custom_target(dist
     COMMENT "Creating distribution package..."
-    
-    # 1. Create Directory Structure
+
+    # ── 1. 디렉터리 생성 ───────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/bin
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/config
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/cert
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/log
-    
+
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/bin
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/config
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/cert
@@ -283,41 +283,67 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/group
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/route
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/log
-    
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/SipClient/bin
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/SipClient/config
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/SipClient/cert
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/SipClient/log
 
-    # 2. Copy Binaries (Assuming they are in bin/ after build)
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cmp ${CMAKE_BINARY_DIR}/dist/cmp/bin/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/csp ${CMAKE_BINARY_DIR}/dist/csp/bin/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/SipClient ${CMAKE_BINARY_DIR}/dist/SipClient/bin/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.sh ${CMAKE_BINARY_DIR}/dist/csp/bin/
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cwrtc/bin
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cwrtc/config
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cwrtc/cert
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cwrtc/html
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cwrtc/log
 
-    # 3. Copy Configurations
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/cmp.json ${CMAKE_BINARY_DIR}/dist/cmp/config/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.json ${CMAKE_BINARY_DIR}/dist/csp/config/
-    
-    # Copy CSP Resources to new locations
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/User ${CMAKE_BINARY_DIR}/dist/csp/user
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/Group ${CMAKE_BINARY_DIR}/dist/csp/group
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/SipServerXml ${CMAKE_BINARY_DIR}/dist/csp/route
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csc/src
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csc/config
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csc/cert
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csc/log
 
-    # 4. Copy Certificates
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem ${CMAKE_BINARY_DIR}/dist/csp/cert/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem ${CMAKE_BINARY_DIR}/dist/SipClient/cert/
-    
-    # 5. Add README (Optional, can be created)
-    COMMAND ${CMAKE_COMMAND} -E echo "Distribution Package Created."
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/console
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/phone
 
-    # cspsim Distribution (Integrated into dist)
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cspsim/bin
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cspsim/log
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cspsim ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClient.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
+
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/run
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/log
+
+    # ── 2. 바이너리 복사 ────────────────────────────────────────
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cmp      ${CMAKE_BINARY_DIR}/dist/cmp/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/csp      ${CMAKE_BINARY_DIR}/dist/csp/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.sh   ${CMAKE_BINARY_DIR}/dist/csp/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cwrtc    ${CMAKE_BINARY_DIR}/dist/cwrtc/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cspsim   ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClient.xml       ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClientCaller.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/csp/csp.pem ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
+
+    # ── 3. 설정 템플릿 복사 (@PLACEHOLDER@ 포함, configure.sh 로 채움) ──
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/config/cmp.json      ${CMAKE_BINARY_DIR}/dist/cmp/config/cmp.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/config/csp.json      ${CMAKE_BINARY_DIR}/dist/csp/config/csp.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/config/cwrtc.json  ${CMAKE_BINARY_DIR}/dist/cwrtc/config/cwrtc.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/bin/csc_pihttp/config/csc.dist.json ${CMAKE_BINARY_DIR}/dist/csc/config/csc.json
+
+    # ── 4. CSP 데이터 복사 ─────────────────────────────────────
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/User        ${CMAKE_BINARY_DIR}/dist/csp/user
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/Group       ${CMAKE_BINARY_DIR}/dist/csp/group
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/SipServerXml ${CMAKE_BINARY_DIR}/dist/csp/route
+
+    # ── 5. 인증서 복사 ─────────────────────────────────────────
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem  ${CMAKE_BINARY_DIR}/dist/csp/cert/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem  ${CMAKE_BINARY_DIR}/dist/cwrtc/cert/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem  ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
+
+    # ── 6. CSC Python 소스 복사 ────────────────────────────────
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/bin/csc_pihttp/src ${CMAKE_BINARY_DIR}/dist/csc/src
+
+    # ── 7. Web UI nginx 설정 복사 ──────────────────────────────
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-console/nginx.conf ${CMAKE_BINARY_DIR}/dist/console/nginx.conf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-phone/nginx.conf   ${CMAKE_BINARY_DIR}/dist/phone/nginx.conf
+
+    # ── 8. 관리 스크립트 복사 ──────────────────────────────────
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/configure.sh ${CMAKE_BINARY_DIR}/dist/configure.sh
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims.sh      ${CMAKE_BINARY_DIR}/dist/cims.sh
+    COMMAND chmod +x ${CMAKE_BINARY_DIR}/dist/configure.sh ${CMAKE_BINARY_DIR}/dist/cims.sh
+
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E echo "=== dist 생성 완료: ${CMAKE_BINARY_DIR}/dist/ ==="
+    COMMAND ${CMAKE_COMMAND} -E echo "  다음 단계: cd build/dist && ./configure.sh --local-ip <IP>"
 )
 
 # Independent cspsim distribution target

@@ -3,6 +3,10 @@ import os
 import time
 import traceback
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))
+_CONFIG_PATH = os.path.join(_COMPONENT_ROOT, 'config', 'csc.json')
+
 from util.pi_http.http_server import HttpServer
 from util.log_util import Logger
 
@@ -25,55 +29,40 @@ if __name__ == '__main__':
     # set arguments
 
     # init logger
-    logger = Logger(log_dir="../logs", log_file_prefix="app", retention_day=30)
+    logger = Logger(log_dir=os.path.join(_COMPONENT_ROOT, "log"), log_file_prefix="app", retention_day=30)
     
     # Load Config
     import json
     def load_config():
-        # Configuration file location: csc/bin/csc_pihttp/config/csc.json
-        # app.py is in csc/bin/csc_pihttp/src/
+        # Configuration file location resolved via _CONFIG_PATH (absolute)
         try:
-            with open('../config/csc.json', 'r') as f:
+            with open(_CONFIG_PATH, 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
-            logger.log_error("Config file not found at ../config/csc.json. Trying ../../../config/csc.json")
-            try:
-                with open('../../../config/csc.json', 'r') as f:
-                    return json.load(f)
-            except:
-                return {}
+            logger.log_error(f"Config file not found at {_CONFIG_PATH}")
+            return {}
 
     from csc_service import load_shared_data, CSC_HANDLER_LIST
     from cims_admin import CIMS_ADMIN_HANDLER_LIST
+    import cims_auth
     from cims_auth import CIMS_AUTH_HANDLER_LIST
 
-    http_server = None
+    admin_server = None
+    mcptt_server = None
     try:
         logger.log_info(f'==================== start ====================')
-        
+
         config = load_config()
-        
-        # Adjust data paths in config to be absolute or relative to where we run app.py
-        # csc.json has "Data": { "User": "../user", "Group": "../group" } relative to csc/bin
-        # We need to make them relative to csc/bin/csc_pihttp/src if they are relative.
-        # Actually, let's just cheat and hardcode fix or assume user runs from correct dir.
-        # Better: Fix paths in config object before passing to load_shared_data
+        cims_auth.init(config)
+
+        # Adjust relative data paths
         if 'Data' in config:
-            # Original: ../user -> csc/user
-            # Current CWD: csc/bin/csc_pihttp/src
-            # Target: ../../../user
             for key in ['User', 'Group']:
-                if config['Data'].get(key, '').startswith('..'):
-                     # Assuming original meant one level up from bin, which is csc root.
-                     # We are 3 levels down from csc root (bin/csc_pihttp/src).
-                     # So replace .. with ../../.. 
-                     # Wait, original was in csc/bin and loaded ../user. So user is in csc/user.
-                     # We are in csc/bin/csc_pihttp/src. 
-                     # Path to csc/user is ../../../user.
-                     config['Data'][key] = os.path.join("../../..", config['Data'][key].replace('..', '.'))
-            
+                val = config['Data'].get(key, '')
+                if val and not os.path.isabs(val):
+                    config['Data'][key] = os.path.normpath(os.path.join(_COMPONENT_ROOT, val))
             load_shared_data(config)
-            
+
         # [Test Support] Inject dummy data if empty so tests pass without real JSON files
         from csc_service import USERS, GROUPS
         if not USERS:
@@ -83,29 +72,42 @@ if __name__ == '__main__':
             logger.log_info("No groups loaded. Injecting dummy group for test.")
             GROUPS["tel:+2000"] = {"display_name": "Test Group", "etag": "etag_2000", "members": []}
 
-        # Server Config
-        server_conf = config.get('Server', {'Ip': '0.0.0.0', 'Port': 8080})
-        ip = server_conf.get('Ip', '0.0.0.0')
-        port = server_conf.get('Port', 8080)
-
-        # SSL Config
-        ssl_keyfile = "server.key" if os.path.exists("server.key") else None
-        ssl_certfile = "server.crt" if os.path.exists("server.crt") else None
-
+        # SSL certificates (shared by both servers)
+        _cert_dir = os.path.join(_COMPONENT_ROOT, 'cert')
+        ssl_keyfile  = os.path.join(_cert_dir, 'server.key')  if os.path.exists(os.path.join(_cert_dir, 'server.key'))  else None
+        ssl_certfile = os.path.join(_cert_dir, 'server.crt') if os.path.exists(os.path.join(_cert_dir, 'server.crt')) else None
         if ssl_keyfile and ssl_certfile:
             logger.log_info(f"SSL Enabled. Key: {ssl_keyfile}, Cert: {ssl_certfile}")
         else:
-            logger.log_info("SSL Disabled (Files not found)")
+            logger.log_info("SSL Disabled (server.key / server.crt not found)")
 
-        http_server = HttpServer(ip, port, ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile)
-        http_server.add_dynamic_rules(CSC_HANDLER_LIST)
-        # CIMS admin/auth API: pass config so handlers can open DB connections
+        # ── Admin server (CIMS Web API) ──────────────────────────────────────
+        admin_conf = config.get('Server', {'Ip': '0.0.0.0', 'Port': 4420})
         cims_kwargs = {'config': config}
-        http_server.add_dynamic_rules([
+        admin_server = HttpServer(
+            admin_conf.get('Ip', '0.0.0.0'),
+            admin_conf.get('Port', 4420),
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile,
+        )
+        admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST
         ])
-        http_server.start()
+        admin_server.start()
+        logger.log_info(f"Admin server started on port {admin_conf.get('Port', 4420)}")
+
+        # ── MCPTT server (IdMS / GMS / CMS / KMS) ───────────────────────────
+        mcptt_conf = config.get('McpttServer', {'Ip': '0.0.0.0', 'Port': 4430})
+        mcptt_server = HttpServer(
+            mcptt_conf.get('Ip', '0.0.0.0'),
+            mcptt_conf.get('Port', 4430),
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile,
+        )
+        mcptt_server.add_dynamic_rules(CSC_HANDLER_LIST)
+        mcptt_server.start()
+        logger.log_info(f"MCPTT server started on port {mcptt_conf.get('Port', 4430)}")
 
         while True:
             time.sleep(1)
@@ -113,4 +115,5 @@ if __name__ == '__main__':
     except Exception as e:
         tb_str = traceback.format_exc()
         logger.log_error(f'==================== stop : {e} : {tb_str} ====================')
-        if http_server: http_server.stop(5)
+        if admin_server:  admin_server.stop(5)
+        if mcptt_server:  mcptt_server.stop(5)

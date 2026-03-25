@@ -5,13 +5,19 @@
         "CertFile": "../cert/cert.pem",
         "KeyFile": "../cert/key.pem"
     },
+    "McpttServer": {
+        "Ip": "0.0.0.0",
+        "Port": 4430,
+        "CertFile": "../cert/cert.pem",
+        "KeyFile": "../cert/key.pem"
+    },
     "Log": {
         "File": "../log/csc.log",
         "Level": "DEBUG"
     },
     "Data": {
-        "User": "/home/agapeoom/cims/csp/dist/User",
-        "Group": "/home/agapeoom/cims/csp/dist/Group"
+        "User": "../../../csp/User",
+        "Group": "../../../csp/Group"
     },
     "Database": {
         "Host": "localhost",
@@ -25,5 +31,22 @@
         "User": "cims",
         "Password": "cims1234",
         "Db": "cims"
+    },
+    "IdMs": {
+        "JwtSecret": "mcptt_jwt_secret_change_me",
+        "Issuer": "idms.mcptt.com",
+        "AuthCodeTtl": 60,
+        "AccessTokenTtl": 3600,
+        "RefreshTokenTtl": 604800,
+        "KmsUri": "kms.mcptt.com",
+        "KmsClientReqUrl": "http://localhost:4420/keymanagement/identity/v1/init",
+        "Domain": "mcptt.com"
+    },
+    "CimsAuth": {
+        "JwtSecret": "cims_jwt_secret_change_me"
+    },
+    "CspNotify": {
+        "Ip": "127.0.0.1",
+        "Port": 4421
     }
 }
