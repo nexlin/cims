@@ -212,12 +212,17 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		pclsResponse->AddHeader( "Expires", 3600 );
 		pclsResponse->AddHeader( "Supported", "path,100rel,precondition" );
 
+		// 서비스 타입에 따라 도메인 선택 (PTT → PttRealm, 나머지 → VoipRealm)
+		const std::string & strRegDomain = (clsUser.m_strServiceType == "ptt")
+			? gclsSetup.m_strPttRealm
+			: gclsSetup.m_strVoipRealm;
+
 		// Service-Route: CSP 자신을 S-CSCF로 지정 (IMS 단말의 이후 요청 라우팅 기준)
 		{
 			char szServiceRoute[512];
 			snprintf( szServiceRoute, sizeof(szServiceRoute),
 				"<sip:%s@%s:%d;lr>",
-				gclsSetup.m_strRealm.c_str(),
+				strRegDomain.c_str(),
 				gclsSetup.m_strLocalIp.c_str(),
 				gclsSetup.m_iUdpPort );
 			pclsResponse->AddHeader( "Service-Route", szServiceRoute );
@@ -227,8 +232,7 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		{
 			char szPAUri[512];
 			const std::string & strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
-			const std::string & strDomain = gclsSetup.m_strRealm;
-			snprintf( szPAUri, sizeof(szPAUri), "<sip:%s@%s>", strUser.c_str(), strDomain.c_str() );
+			snprintf( szPAUri, sizeof(szPAUri), "<sip:%s@%s>", strUser.c_str(), strRegDomain.c_str() );
 			pclsResponse->AddHeader( "P-Associated-URI", szPAUri );
 		}
 

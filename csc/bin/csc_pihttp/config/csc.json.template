@@ -15,13 +15,6 @@
         "User": "../csp/user",
         "Group": "../csp/group"
     },
-    "Database": {
-        "Host": "@DB_HOST@",
-        "Port": 3306,
-        "User": "@DB_USER@",
-        "Password": "@DB_PASSWORD@",
-        "Db": "csc_idms"
-    },
     "CimsDatabase": {
         "Host": "@DB_HOST@",
         "Port": 3306,
@@ -31,13 +24,13 @@
     },
     "IdMs": {
         "JwtSecret": "@IDMS_JWT_SECRET@",
-        "Issuer": "idms.@MCPTT_DOMAIN@",
+        "Issuer": "idms.@PTT_DOMAIN@",
         "AuthCodeTtl": 60,
         "AccessTokenTtl": 3600,
         "RefreshTokenTtl": 604800,
-        "KmsUri": "kms.@MCPTT_DOMAIN@",
+        "KmsUri": "kms.@PTT_DOMAIN@",
         "KmsClientReqUrl": "https://@CSC_HOST@:4420/keymanagement/identity/v1/init",
-        "Domain": "@MCPTT_DOMAIN@"
+        "Domain": "@PTT_DOMAIN@"
     },
     "CimsAuth": {
         "JwtSecret": "@CIMS_JWT_SECRET@"

@@ -129,6 +129,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (sip.Has("UdpPort")) m_iUdpPort = (int)sip.GetInt("UdpPort");
                 if (sip.Has("UdpThreadCount")) m_iUdpThreadCount = (int)sip.GetInt("UdpThreadCount");
                 if (sip.Has("Realm")) m_strRealm = sip.GetString("Realm");
+                if (sip.Has("VoipRealm")) m_strVoipRealm = sip.GetString("VoipRealm");
+                if (sip.Has("PttRealm")) m_strPttRealm = sip.GetString("PttRealm");
                 if (sip.Has("TcpPort")) m_iTcpPort = (int)sip.GetInt("TcpPort");
                 if (sip.Has("TcpThreadCount")) m_iTcpThreadCount = (int)sip.GetInt("TcpThreadCount");
                 if (sip.Has("TcpRecvTimeout")) m_iTcpRecvTimeout = (int)sip.GetInt("TcpRecvTimeout");
@@ -241,9 +243,13 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
             
         }
         
+        // VoipRealm / PttRealm 미지정 시 Realm 으로 fallback
+        if (m_strVoipRealm.empty()) m_strVoipRealm = m_strRealm;
+        if (m_strPttRealm.empty())  m_strPttRealm  = m_strRealm;
+
         m_strFileName = pszFileName;
         SetFileSizeTime();
-        
+
         // Auto-detect IP logic same as below... duplicating for now or refactor.
         if (m_strLocalIp == "0.0.0.0") {
              int fd = socket(AF_INET, SOCK_DGRAM, 0);

@@ -114,10 +114,10 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
 
 def _has_email_column(cur) -> bool:
-    """Check whether cims_users.email column exists (migration may not have run yet)."""
+    """Check whether users.email column exists (migration may not have run yet)."""
     cur.execute(
         "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cims_users' AND COLUMN_NAME='email'"
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='email'"
     )
     return cur.fetchone()['cnt'] > 0
 
@@ -130,7 +130,7 @@ async def _list_users(config):
             cur.execute(
                 f"SELECT u.id, u.name{email_col}, u.org_id, u.details, "
                 "u.create_time, u.update_time "
-                "FROM cims_users u "
+                "FROM users u "
                 "ORDER BY u.id"
             )
             rows = cur.fetchall()
@@ -141,14 +141,14 @@ async def _list_users(config):
                 row['update_time'] = _dt(row['update_time'])
                 # attach reject list
                 cur.execute(
-                    "SELECT reject_id FROM cims_user_rejects WHERE user_id=%s",
+                    "SELECT reject_id FROM user_rejects WHERE user_id=%s",
                     (row['id'],)
                 )
                 row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
                 # attach subscriptions
                 cur.execute(
                     "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
-                    "FROM cims_call_users WHERE user_id=%s ORDER BY id",
+                    "FROM voip_subscriptions WHERE user_id=%s ORDER BY id",
                     (row['id'],)
                 )
                 call_subs = cur.fetchall()
@@ -160,7 +160,7 @@ async def _list_users(config):
 
                 cur.execute(
                     "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
-                    "FROM cims_ptt_users WHERE user_id=%s ORDER BY id",
+                    "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                     (row['id'],)
                 )
                 ptt_subs = cur.fetchall()
@@ -179,7 +179,7 @@ async def _get_user(person_id: str, config):
             email_col = ", email" if has_email else ""
             cur.execute(
                 f"SELECT id, name{email_col}, org_id, details, create_time, update_time "
-                "FROM cims_users WHERE id=%s",
+                "FROM users WHERE id=%s",
                 (person_id,)
             )
             row = cur.fetchone()
@@ -192,7 +192,7 @@ async def _get_user(person_id: str, config):
 
             # reject list
             cur.execute(
-                "SELECT reject_id FROM cims_user_rejects WHERE user_id=%s",
+                "SELECT reject_id FROM user_rejects WHERE user_id=%s",
                 (person_id,)
             )
             row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
@@ -200,7 +200,7 @@ async def _get_user(person_id: str, config):
             # call subscriptions
             cur.execute(
                 "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
-                "FROM cims_call_users WHERE user_id=%s ORDER BY id",
+                "FROM voip_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
             call_subs = cur.fetchall()
@@ -213,7 +213,7 @@ async def _get_user(person_id: str, config):
             # ptt subscriptions
             cur.execute(
                 "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
-                "FROM cims_ptt_users WHERE user_id=%s ORDER BY id",
+                "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
             ptt_subs = cur.fetchall()
@@ -243,14 +243,14 @@ async def _create_user(body, config):
             has_email = _has_email_column(cur)
             if has_email:
                 cur.execute(
-                    "INSERT INTO cims_users "
+                    "INSERT INTO users "
                     "(name, email, org_id, details, create_time, update_time) "
                     "VALUES (%s, %s, %s, %s, NOW(), NOW())",
                     (name, email, org_id, details)
                 )
             else:
                 cur.execute(
-                    "INSERT INTO cims_users "
+                    "INSERT INTO users "
                     "(name, org_id, details, create_time, update_time) "
                     "VALUES (%s, %s, %s, NOW(), NOW())",
                     (name, org_id, details)
@@ -260,7 +260,7 @@ async def _create_user(body, config):
             if reject_ids:
                 for rid in reject_ids:
                     cur.execute(
-                        "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
+                        "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
                         (person_id, rid)
                     )
     return HandlerResult(status=201, body={'id': person_id})
@@ -283,28 +283,28 @@ async def _update_user(person_id: str, body, config):
         with _get_db(config) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"UPDATE cims_users SET {', '.join(fields)} WHERE id=%s",
+                    f"UPDATE users SET {', '.join(fields)} WHERE id=%s",
                     values
                 )
                 if cur.rowcount == 0:
                     return HandlerResult(status=404, body={'error': 'User not found'})
                 if 'reject_id' in body:
-                    cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
+                    cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
                     for rid in body['reject_id']:
                         cur.execute(
-                            "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
+                            "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
                             (person_id, rid)
                         )
     elif 'reject_id' in body:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM cims_users WHERE id=%s", (person_id,))
+                cur.execute("SELECT id FROM users WHERE id=%s", (person_id,))
                 if cur.fetchone() is None:
                     return HandlerResult(status=404, body={'error': 'User not found'})
-                cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
+                cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
                 for rid in body['reject_id']:
                     cur.execute(
-                        "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
+                        "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
                         (person_id, rid)
                     )
     else:
@@ -316,8 +316,8 @@ async def _update_user(person_id: str, body, config):
 async def _delete_user(person_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
-            cur.execute("DELETE FROM cims_users WHERE id=%s", (person_id,))
+            cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
+            cur.execute("DELETE FROM users WHERE id=%s", (person_id,))
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'User not found'})
     return HandlerResult(status=200, body={'id': person_id})
@@ -328,14 +328,16 @@ async def _delete_user(person_id: str, config):
 # ──────────────────────────────────────────────────────────────
 
 def _sub_table(svc: str) -> str:
-    return 'cims_call_users' if svc == 'call' else 'cims_ptt_users'
+    return 'voip_subscriptions' if svc == 'call' else 'ptt_subscriptions'
+
+
 
 
 async def _list_subscriptions(person_id: str, svc: str, config):
     table = _sub_table(svc)
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM cims_users WHERE id=%s", (person_id,))
+            cur.execute("SELECT id FROM users WHERE id=%s", (person_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
@@ -366,7 +368,7 @@ async def _add_subscription(person_id: str, svc: str, body, config):
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM cims_users WHERE id=%s", (person_id,))
+            cur.execute("SELECT id FROM users WHERE id=%s", (person_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
@@ -472,11 +474,11 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 async def _list_groups(config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, name FROM cims_ptt_groups ORDER BY id")
+            cur.execute("SELECT id, name FROM ptt_groups ORDER BY id")
             groups = cur.fetchall()
             for g in groups:
                 cur.execute(
-                    "SELECT user_id, priority FROM cims_ptt_group_members "
+                    "SELECT user_id, priority FROM ptt_group_members "
                     "WHERE group_id=%s ORDER BY priority",
                     (g['id'],)
                 )
@@ -488,14 +490,14 @@ async def _get_group(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name FROM cims_ptt_groups WHERE id=%s",
+                "SELECT id, name FROM ptt_groups WHERE id=%s",
                 (group_id,)
             )
             group = cur.fetchone()
             if group is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             cur.execute(
-                "SELECT user_id, priority FROM cims_ptt_group_members "
+                "SELECT user_id, priority FROM ptt_group_members "
                 "WHERE group_id=%s ORDER BY priority",
                 (group_id,)
             )
@@ -515,7 +517,7 @@ async def _create_group(body, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO cims_ptt_groups (id, name) VALUES (%s, %s)",
+                "INSERT INTO ptt_groups (id, name) VALUES (%s, %s)",
                 (group_id, name)
             )
             for m in members:
@@ -523,7 +525,7 @@ async def _create_group(body, config):
                 prio = int(m.get('priority', 0))
                 if uid:
                     cur.execute(
-                        "INSERT IGNORE INTO cims_ptt_group_members "
+                        "INSERT IGNORE INTO ptt_group_members "
                         "(group_id, user_id, priority) VALUES (%s, %s, %s)",
                         (group_id, uid, prio)
                     )
@@ -538,14 +540,14 @@ async def _update_group(group_id: str, body, config):
         with conn.cursor() as cur:
             if 'name' in body:
                 cur.execute(
-                    "UPDATE cims_ptt_groups SET name=%s WHERE id=%s",
+                    "UPDATE ptt_groups SET name=%s WHERE id=%s",
                     (body['name'], group_id)
                 )
                 if cur.rowcount == 0:
                     return HandlerResult(status=404, body={'error': 'Group not found'})
             if 'members' in body:
                 cur.execute(
-                    "DELETE FROM cims_ptt_group_members WHERE group_id=%s",
+                    "DELETE FROM ptt_group_members WHERE group_id=%s",
                     (group_id,)
                 )
                 for m in body['members']:
@@ -553,7 +555,7 @@ async def _update_group(group_id: str, body, config):
                     prio = int(m.get('priority', 0))
                     if uid:
                         cur.execute(
-                            "INSERT IGNORE INTO cims_ptt_group_members "
+                            "INSERT IGNORE INTO ptt_group_members "
                             "(group_id, user_id, priority) VALUES (%s, %s, %s)",
                             (group_id, uid, prio)
                         )
@@ -564,11 +566,11 @@ async def _delete_group(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM cims_ptt_group_members WHERE group_id=%s",
+                "DELETE FROM ptt_group_members WHERE group_id=%s",
                 (group_id,)
             )
             cur.execute(
-                "DELETE FROM cims_ptt_groups WHERE id=%s",
+                "DELETE FROM ptt_groups WHERE id=%s",
                 (group_id,)
             )
             if cur.rowcount == 0:
@@ -579,11 +581,11 @@ async def _delete_group(group_id: str, config):
 async def _list_members(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM cims_ptt_groups WHERE id=%s", (group_id,))
+            cur.execute("SELECT id FROM ptt_groups WHERE id=%s", (group_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             cur.execute(
-                "SELECT user_id, priority FROM cims_ptt_group_members "
+                "SELECT user_id, priority FROM ptt_group_members "
                 "WHERE group_id=%s ORDER BY priority",
                 (group_id,)
             )
@@ -601,11 +603,11 @@ async def _add_member(group_id: str, body, config):
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM cims_ptt_groups WHERE id=%s", (group_id,))
+            cur.execute("SELECT id FROM ptt_groups WHERE id=%s", (group_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             cur.execute(
-                "INSERT INTO cims_ptt_group_members (group_id, user_id, priority) "
+                "INSERT INTO ptt_group_members (group_id, user_id, priority) "
                 "VALUES (%s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE priority=VALUES(priority)",
                 (group_id, user_id, priority)
@@ -617,7 +619,7 @@ async def _remove_member(group_id: str, user_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM cims_ptt_group_members WHERE group_id=%s AND user_id=%s",
+                "DELETE FROM ptt_group_members WHERE group_id=%s AND user_id=%s",
                 (group_id, user_id)
             )
             if cur.rowcount == 0:
@@ -653,7 +655,7 @@ def _call_log_row(row: dict) -> dict:
 def _tables_exist(cur) -> bool:
     cur.execute(
         "SELECT COUNT(*) AS cnt FROM information_schema.TABLES "
-        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cims_call_logs'"
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='voip_call_logs'"
     )
     return cur.fetchone()['cnt'] > 0
 
@@ -665,7 +667,7 @@ async def handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         ?caller=MSISDN
         ?callee=MSISDN
         ?msisdn=MSISDN                (caller OR callee OR participant)
-        ?group_id=ID
+        ?group_id=ID                  (PTT only)
         ?call_type=voip|ptt
         ?from_dt=YYYY-MM-DD
         ?to_dt=YYYY-MM-DD
@@ -713,74 +715,110 @@ async def handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
                         'error': 'Call log tables not created yet. Run: sudo mysql cims < sql/migrate_call_logs.sql'
                     })
 
-                # ── build WHERE ──
-                where = []
-                params = []
+                # ── build per-table WHERE clauses ──
+                # voip_call_logs columns: id, call_id, initiator, callee, state, invite_time, ...
+                # ptt_call_logs  columns: id, call_id, group_id, initiator, state, invite_time, ...
 
-                if state == 'active_ringing':
-                    where.append("l.state IN ('ringing','active')")
-                elif state:
-                    where.append("l.state = %s")
-                    params.append(state)
+                def _build_where(for_ptt: bool):
+                    w = []
+                    p = []
+                    if state == 'active_ringing':
+                        w.append("l.state IN ('ringing','active')")
+                    elif state:
+                        w.append("l.state = %s")
+                        p.append(state)
+                    if caller:
+                        w.append("l.initiator = %s")
+                        p.append(caller)
+                    if from_dt:
+                        w.append("l.invite_time >= %s")
+                        p.append(from_dt + ' 00:00:00')
+                    if to_dt:
+                        w.append("l.invite_time <= %s")
+                        p.append(to_dt + ' 23:59:59')
+                    if for_ptt:
+                        if group_id:
+                            w.append("l.group_id = %s")
+                            p.append(group_id)
+                        if msisdn:
+                            w.append(
+                                "(l.initiator = %s OR EXISTS("
+                                " SELECT 1 FROM ptt_call_participants cp"
+                                " WHERE cp.log_id = l.id AND cp.msisdn = %s))"
+                            )
+                            p += [msisdn, msisdn]
+                    else:
+                        if callee:
+                            w.append("l.callee = %s")
+                            p.append(callee)
+                        if msisdn:
+                            w.append(
+                                "(l.initiator = %s OR l.callee = %s OR EXISTS("
+                                " SELECT 1 FROM voip_call_participants cp"
+                                " WHERE cp.log_id = l.id AND cp.msisdn = %s))"
+                            )
+                            p += [msisdn, msisdn, msisdn]
+                    return ("WHERE " + " AND ".join(w)) if w else "", p
 
-                if caller:
-                    where.append("l.initiator = %s")
-                    params.append(caller)
-                if callee:
-                    where.append("l.callee = %s")
-                    params.append(callee)
-                if group_id:
-                    where.append("l.group_id = %s")
-                    params.append(group_id)
-                if call_type:
-                    where.append("l.call_type = %s")
-                    params.append(call_type)
-                if from_dt:
-                    where.append("l.invite_time >= %s")
-                    params.append(from_dt + ' 00:00:00')
-                if to_dt:
-                    where.append("l.invite_time <= %s")
-                    params.append(to_dt + ' 23:59:59')
+                # determine which tables to query
+                use_voip = call_type != 'ptt'
+                use_ptt  = call_type != 'voip'
 
-                # msisdn: caller OR callee OR participant
-                if msisdn:
-                    where.append(
-                        "(l.initiator = %s OR l.callee = %s OR EXISTS("
-                        " SELECT 1 FROM cims_call_participants cp"
-                        " WHERE cp.log_id = l.id AND cp.msisdn = %s))"
+                # ── build UNION query ──
+                union_parts = []
+                union_params = []
+
+                if use_voip:
+                    voip_where, voip_params = _build_where(for_ptt=False)
+                    union_parts.append(
+                        f"SELECT l.id, l.call_id, 'voip' AS call_type, "
+                        f"NULL AS group_id, "
+                        f"l.initiator, l.callee, l.state, "
+                        f"l.invite_time, l.answer_time, l.end_time, "
+                        f"l.duration, l.sip_status, l.end_reason "
+                        f"FROM voip_call_logs l {voip_where}"
                     )
-                    params += [msisdn, msisdn, msisdn]
+                    union_params += voip_params
 
-                where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+                if use_ptt:
+                    ptt_where, ptt_params = _build_where(for_ptt=True)
+                    union_parts.append(
+                        f"SELECT l.id, l.call_id, 'ptt' AS call_type, "
+                        f"l.group_id, "
+                        f"l.initiator, NULL AS callee, l.state, "
+                        f"l.invite_time, l.answer_time, l.end_time, "
+                        f"l.duration, NULL AS sip_status, l.end_reason "
+                        f"FROM ptt_call_logs l {ptt_where}"
+                    )
+                    union_params += ptt_params
+
+                union_sql = " UNION ALL ".join(union_parts)
 
                 # ── total count ──
                 cur.execute(
-                    f"SELECT COUNT(*) AS cnt FROM cims_call_logs l {where_sql}",
-                    params
+                    f"SELECT COUNT(*) AS cnt FROM ({union_sql}) AS combined",
+                    union_params
                 )
                 total = cur.fetchone()['cnt']
 
                 # ── main query ──
                 cur.execute(
-                    f"SELECT l.id, l.call_id, l.call_type, l.group_id, "
-                    f"l.initiator, l.callee, l.state, "
-                    f"l.invite_time, l.answer_time, l.end_time, "
-                    f"l.duration, l.sip_status, l.end_reason "
-                    f"FROM cims_call_logs l {where_sql} "
-                    f"ORDER BY l.invite_time DESC "
+                    f"SELECT * FROM ({union_sql}) AS combined "
+                    f"ORDER BY invite_time DESC "
                     f"LIMIT %s OFFSET %s",
-                    params + [limit, offset]
+                    union_params + [limit, offset]
                 )
                 logs = cur.fetchall()
 
                 for row in logs:
                     _call_log_row(row)
 
-                    # attach participants
+                    # attach participants from the correct split table
+                    parts_table = 'ptt_call_participants' if row['call_type'] == 'ptt' else 'voip_call_participants'
                     cur.execute(
-                        "SELECT msisdn, role, join_time, leave_time "
-                        "FROM cims_call_participants WHERE log_id = %s "
-                        "ORDER BY role, join_time",
+                        f"SELECT msisdn, role, join_time, leave_time "
+                        f"FROM {parts_table} WHERE log_id = %s "
+                        f"ORDER BY role, join_time",
                         (row['id'],)
                     )
                     parts = cur.fetchall()

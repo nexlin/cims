@@ -85,7 +85,7 @@ int ServiceMain() {
 
     clsSetup.m_strUserAgent = "csp_";
     clsSetup.m_strUserAgent.append( CSP_SERVER_VERSION );
-    clsSetup.m_strDomain = gclsSetup.m_strRealm;  // realm as SIP domain for From/To/P-Asserted-Identity
+    clsSetup.m_strDomain = gclsSetup.m_strVoipRealm;  // VoIP SIP domain for From/To/P-Asserted-Identity
     clsSetup.m_iStackExecutePeriod = gclsSetup.m_iStackExecutePeriod;
     clsSetup.m_iTimerD = gclsSetup.m_iTimerD;
     clsSetup.m_iTimerJ = gclsSetup.m_iTimerJ;
@@ -120,19 +120,23 @@ int ServiceMain() {
         }
     }
 
+    // Load groups: files first (base), then DB (overwrites — DB has higher priority)
     if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
         CLog::Print( LOG_SYSTEM, "Loading GroupMap from %s...", gclsSetup.m_strGroupDataFolder.c_str() );
         gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
-    } else if ( gclsDbManager.IsConnected() ) {
+    }
+    if ( gclsDbManager.IsConnected() ) {
         CLog::Print( LOG_SYSTEM, "Loading GroupMap from DB..." );
         gclsGroupMap.LoadFromDb();
     }
 
+    // Load users: files first (base), DB used on-demand with higher priority
     if ( gclsSetup.m_strUserDataFolder.length() > 0 ) {
         CLog::Print( LOG_SYSTEM, "Loading CspUserMap from %s...", gclsSetup.m_strUserDataFolder.c_str() );
         gclsCspUserMap.Load( gclsSetup.m_strUserDataFolder.c_str() );
-    } else if ( gclsDbManager.IsConnected() ) {
-        CLog::Print( LOG_SYSTEM, "User data: DB mode (on-demand loading)" );
+    }
+    if ( gclsDbManager.IsConnected() ) {
+        CLog::Print( LOG_SYSTEM, "User data: DB active (on-demand, takes priority over files)" );
     }
 
     {
@@ -176,7 +180,8 @@ int ServiceMain() {
             gclsSipServerMap.SetSipUserAgentRegisterInfo();
             if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
                 gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
-            } else if ( gclsDbManager.IsConnected() ) {
+            }
+            if ( gclsDbManager.IsConnected() ) {
                 gclsGroupMap.LoadFromDb();
             }
         }

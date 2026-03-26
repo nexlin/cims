@@ -8,6 +8,8 @@
             "TcpThreadCount": 2,
             "TcpRecvTimeout": 600,
             "Realm": "@SIP_DOMAIN@",
+            "VoipRealm": "@VOIP_DOMAIN@",
+            "PttRealm": "@PTT_DOMAIN@",
             "TlsPort": 5061,
             "TlsAcceptTimeout": 10,
             "CertFile": "cert/csp.pem",

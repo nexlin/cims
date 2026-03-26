@@ -142,7 +142,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     // Try call users first (query by subscription MSISDN = id)
     std::string strSql =
         "SELECT cu.id, u.name, u.org_id, cu.auth_id, cu.passwd, cu.dnd, cu.forward_id, u.id AS person_id "
-        "FROM cims_call_users cu JOIN cims_users u ON cu.user_id = u.id "
+        "FROM voip_subscriptions cu JOIN users u ON cu.user_id = u.id "
         "WHERE cu.id='" + Escape(strUserId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
@@ -156,7 +156,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
         // Try PTT users
         strSql =
             "SELECT pu.id, u.name, u.org_id, pu.auth_id, pu.passwd, pu.dnd, pu.forward_id, u.id AS person_id "
-            "FROM cims_ptt_users pu JOIN cims_users u ON pu.user_id = u.id "
+            "FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
             "WHERE pu.id='" + Escape(strUserId) + "'";
 
         pRes = ExecuteSelect(strSql);
@@ -179,14 +179,14 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     clsUser.m_bDnd              = row[5] ? (atoi(row[5]) != 0) : false;
     clsUser.m_strForward        = row[6] ? row[6] : "";
     clsUser._loadTime           = time(nullptr);
-    // row[7] = person_id (cims_users.id) used for reject list lookup
+    // row[7] = person_id (users.id) used for reject list lookup
     std::string strPersonId     = row[7] ? row[7] : strUserId;
 
     mysql_free_result(pRes);
 
     // 착신 거부 목록 로드 (person_id는 INT이므로 따옴표 없이 사용)
     clsUser.m_vecReject.clear();
-    strSql = "SELECT reject_id FROM cims_user_rejects WHERE user_id=" + strPersonId;
+    strSql = "SELECT reject_id FROM user_rejects WHERE user_id=" + strPersonId;
     pRes = ExecuteSelect(strSql);
     if (pRes) {
         while ((row = mysql_fetch_row(pRes)) != nullptr) {
@@ -203,8 +203,8 @@ bool CDbManager::UpdateRegisterTime( const std::string& strUserId )
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
-    ExecuteQuery("UPDATE cims_call_users SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'");
-    ExecuteQuery("UPDATE cims_ptt_users  SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'");
+    ExecuteQuery("UPDATE voip_subscriptions SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'");
+    ExecuteQuery("UPDATE ptt_subscriptions  SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'");
     return true;
 }
 
@@ -213,8 +213,8 @@ bool CDbManager::UpdateLogoutTime( const std::string& strUserId )
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
-    ExecuteQuery("UPDATE cims_call_users SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'");
-    ExecuteQuery("UPDATE cims_ptt_users  SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'");
+    ExecuteQuery("UPDATE voip_subscriptions SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'");
+    ExecuteQuery("UPDATE ptt_subscriptions  SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'");
     return true;
 }
 
@@ -229,7 +229,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
 
     // 그룹 기본 정보
     std::string strSql =
-        "SELECT id, name FROM cims_ptt_groups WHERE id='" + Escape(strGroupId) + "'";
+        "SELECT id, name FROM ptt_groups WHERE id='" + Escape(strGroupId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
@@ -247,7 +247,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
 
     // 멤버 목록
     strSql =
-        "SELECT user_id, priority FROM cims_ptt_group_members "
+        "SELECT user_id, priority FROM ptt_group_members "
         "WHERE group_id='" + Escape(strGroupId) + "' ORDER BY priority";
 
     pRes = ExecuteSelect(strSql);
@@ -273,7 +273,7 @@ bool CDbManager::LoadAllGroups( CGroupMap& clsMap )
     if (!m_pMysql && !Reconnect()) return false;
 
     // 전체 그룹 ID 목록 조회
-    MYSQL_RES* pRes = ExecuteSelect("SELECT id FROM cims_ptt_groups");
+    MYSQL_RES* pRes = ExecuteSelect("SELECT id FROM ptt_groups");
     if (!pRes) return false;
 
     std::vector<std::string> vecGroupIds;
@@ -320,14 +320,21 @@ bool CDbManager::InsertCallLog( const std::string& strCallId, bool bPtt,
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
-    std::string strType    = bPtt ? "ptt" : "voip";
-    std::string strGroupVal = strGroupId.empty() ? "NULL" : "'" + Escape(strGroupId) + "'";
-
-    std::string strSql =
-        "INSERT IGNORE INTO cims_call_logs "
-        "(call_id, call_type, group_id, initiator, callee, state, invite_time) VALUES ('"
-        + Escape(strCallId) + "','" + strType + "'," + strGroupVal + ",'"
-        + Escape(strInitiator) + "','" + Escape(strCallee) + "','ringing',NOW())";
+    std::string strSql;
+    if (bPtt) {
+        std::string strGroupVal = strGroupId.empty() ? "''" : "'" + Escape(strGroupId) + "'";
+        strSql =
+            "INSERT IGNORE INTO ptt_call_logs "
+            "(call_id, group_id, initiator, state, invite_time) VALUES ('"
+            + Escape(strCallId) + "'," + strGroupVal + ",'"
+            + Escape(strInitiator) + "','ringing',NOW())";
+    } else {
+        strSql =
+            "INSERT IGNORE INTO voip_call_logs "
+            "(call_id, initiator, callee, state, invite_time) VALUES ('"
+            + Escape(strCallId) + "','"
+            + Escape(strInitiator) + "','" + Escape(strCallee) + "','ringing',NOW())";
+    }
 
     return ExecuteQuery(strSql);
 }
@@ -355,7 +362,7 @@ bool CDbManager::UpdateCallLogEnded( const std::string& strCallId,
     std::string strState = (tAnswer > 0) ? "ended" : "ended";
 
     std::string strSql =
-        "UPDATE cims_call_logs SET state='ended',"
+        "UPDATE voip_call_logs SET state='ended',"
         " answer_time=" + strAnswer + ","
         " end_time=" + strEnd + ","
         " duration=" + szDur + ","
@@ -365,8 +372,8 @@ bool CDbManager::UpdateCallLogEnded( const std::string& strCallId,
 
     // also mark all participants left
     ExecuteQuery(
-        "UPDATE cims_call_participants cp "
-        "JOIN cims_call_logs cl ON cl.id = cp.log_id "
+        "UPDATE voip_call_participants cp "
+        "JOIN voip_call_logs cl ON cl.id = cp.log_id "
         "SET cp.leave_time=NOW() "
         "WHERE cl.call_id='" + Escape(strCallId) + "' AND cp.leave_time IS NULL"
     );
@@ -380,7 +387,7 @@ bool CDbManager::UpdateCallLogActivePtt( const std::string& strGroupId )
     if (!m_pMysql && !Reconnect()) return false;
 
     return ExecuteQuery(
-        "UPDATE cims_call_logs SET state='active', answer_time=NOW() "
+        "UPDATE ptt_call_logs SET state='active', answer_time=NOW() "
         "WHERE group_id='" + Escape(strGroupId) + "' AND state='ringing' "
         "ORDER BY invite_time DESC LIMIT 1"
     );
@@ -393,18 +400,18 @@ bool CDbManager::EndGroupCallLog( const std::string& strGroupId )
 
     // duration = answer_time → NOW()
     ExecuteQuery(
-        "UPDATE cims_call_logs "
+        "UPDATE ptt_call_logs "
         "SET state='ended', end_time=NOW(), "
         "duration=TIMESTAMPDIFF(SECOND, answer_time, NOW()), "
-        "sip_status=200, end_reason='normal' "
+        "end_reason='normal' "
         "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active') "
         "ORDER BY invite_time DESC LIMIT 1"
     );
 
     // mark all remaining participants left
     return ExecuteQuery(
-        "UPDATE cims_call_participants cp "
-        "JOIN cims_call_logs cl ON cl.id = cp.log_id "
+        "UPDATE ptt_call_participants cp "
+        "JOIN ptt_call_logs cl ON cl.id = cp.log_id "
         "SET cp.leave_time=NOW() "
         "WHERE cl.group_id='" + Escape(strGroupId) + "' AND cp.leave_time IS NULL"
     );
@@ -420,9 +427,9 @@ bool CDbManager::InsertParticipant( const std::string& strCallId,
 
     std::string strJoin = bJoinNow ? "NOW()" : "NULL";
     return ExecuteQuery(
-        "INSERT IGNORE INTO cims_call_participants (log_id, msisdn, role, join_time) "
+        "INSERT IGNORE INTO voip_call_participants (log_id, msisdn, role, join_time) "
         "SELECT id,'" + Escape(strMsisdn) + "','" + Escape(strRole) + "'," + strJoin + " "
-        "FROM cims_call_logs WHERE call_id='" + Escape(strCallId) + "' LIMIT 1"
+        "FROM voip_call_logs WHERE call_id='" + Escape(strCallId) + "' LIMIT 1"
     );
 }
 
@@ -433,9 +440,9 @@ bool CDbManager::InsertGroupParticipant( const std::string& strGroupId,
     if (!m_pMysql && !Reconnect()) return false;
 
     return ExecuteQuery(
-        "INSERT IGNORE INTO cims_call_participants (log_id, msisdn, role, join_time) "
+        "INSERT IGNORE INTO ptt_call_participants (log_id, msisdn, role, join_time) "
         "SELECT id,'" + Escape(strMsisdn) + "','member',NULL "
-        "FROM cims_call_logs "
+        "FROM ptt_call_logs "
         "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active') "
         "ORDER BY invite_time DESC LIMIT 1"
     );
@@ -448,8 +455,8 @@ bool CDbManager::UpdateParticipantJoined( const std::string& strGroupId,
     if (!m_pMysql && !Reconnect()) return false;
 
     return ExecuteQuery(
-        "UPDATE cims_call_participants cp "
-        "JOIN cims_call_logs cl ON cl.id = cp.log_id "
+        "UPDATE ptt_call_participants cp "
+        "JOIN ptt_call_logs cl ON cl.id = cp.log_id "
         "SET cp.join_time=NOW() "
         "WHERE cl.group_id='" + Escape(strGroupId) + "' "
         "AND cp.msisdn='" + Escape(strMsisdn) + "' AND cp.join_time IS NULL "
@@ -464,8 +471,8 @@ bool CDbManager::UpdateParticipantLeft( const std::string& strGroupId,
     if (!m_pMysql && !Reconnect()) return false;
 
     return ExecuteQuery(
-        "UPDATE cims_call_participants cp "
-        "JOIN cims_call_logs cl ON cl.id = cp.log_id "
+        "UPDATE ptt_call_participants cp "
+        "JOIN ptt_call_logs cl ON cl.id = cp.log_id "
         "SET cp.leave_time=NOW() "
         "WHERE cl.group_id='" + Escape(strGroupId) + "' "
         "AND cp.msisdn='" + Escape(strMsisdn) + "' AND cp.leave_time IS NULL"

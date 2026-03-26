@@ -1,9 +1,9 @@
 -- ============================================================
--- Migration: add email column to cims_users
+-- Migration: add email column to users
 -- 실행: sudo mysql cims < migrate_add_email.sql
 -- ============================================================
 
-ALTER TABLE cims_users
+ALTER TABLE users
   ADD COLUMN email VARCHAR(255) NOT NULL DEFAULT '' COMMENT '이메일' AFTER name,
   MODIFY COLUMN name VARCHAR(128) NOT NULL COMMENT '표시 이름';
 
@@ -11,4 +11,4 @@ ALTER TABLE cims_users
 GRANT ALTER ON cims.* TO 'cims'@'localhost';
 FLUSH PRIVILEGES;
 
-SELECT 'Migration complete. email column added to cims_users.' AS result;
+SELECT 'Migration complete. email column added to users.' AS result;

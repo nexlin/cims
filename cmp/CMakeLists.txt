@@ -31,6 +31,6 @@ install(TARGETS ${TEST_SRCS}
 		LIBRARY DESTINATION ${PMPROC_LIB_PATH}
 		ARCHIVE DESTINATION ${PMPROC_LIB_PATH})
 
-install(FILES cmp.conf cmp.json DESTINATION ${PMPROC_BIN_PATH}/../config)
+install(FILES cmp.json.template DESTINATION ${PMPROC_BIN_PATH}/../config)
 
 

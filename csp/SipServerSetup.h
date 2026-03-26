@@ -84,8 +84,14 @@ public:
     /** IPv6 사용 유무 */
     bool m_bIpv6;
 
-    /** SIP 통신을 위한 realm */
+    /** SIP 통신을 위한 realm (인증 challenge 기본값, VoipRealm/PttRealm 미지정 시 fallback) */
     std::string m_strRealm;
+
+    /** 일반 VoIP 통화에 사용하는 SIP 도메인 (미지정 시 Realm 사용) */
+    std::string m_strVoipRealm;
+
+    /** PTT 그룹 통화에 사용하는 SIP 도메인 (미지정 시 Realm 사용) */
+    std::string m_strPttRealm;
 
     /** SIP REGISTER timeout 최소 시간 */
     int m_iMinRegisterTimeout;

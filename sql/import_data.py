@@ -96,11 +96,11 @@ def import_users(conn, user_dir):
         create_time = data.get("create_time") or None
         update_time = data.get("update_time") or None
 
-        # 1. Insert into cims_users (id 는 AUTO_INCREMENT — 지정하지 않음)
+        # 1. Insert into users (id 는 AUTO_INCREMENT — 지정하지 않음)
         #    이미 같은 MSISDN으로 call/ptt 구독이 존재하면 user_id를 재사용
         cur.execute(
-            "SELECT cu.user_id FROM cims_call_users cu WHERE cu.id=%s "
-            "UNION SELECT pu.user_id FROM cims_ptt_users pu WHERE pu.id=%s LIMIT 1",
+            "SELECT cu.user_id FROM voip_subscriptions cu WHERE cu.id=%s "
+            "UNION SELECT pu.user_id FROM ptt_subscriptions pu WHERE pu.id=%s LIMIT 1",
             (user_id, user_id)
         )
         row = cur.fetchone()
@@ -108,41 +108,41 @@ def import_users(conn, user_dir):
             person_id = row[0]  # 이미 해당 MSISDN의 개인 레코드가 있음
         else:
             cur.execute(
-                "INSERT INTO cims_users (name, org_id, details, create_time, update_time) "
+                "INSERT INTO users (name, org_id, details, create_time, update_time) "
                 "VALUES (%s, %s, %s, %s, %s)",
                 (name, org_id, details, create_time, update_time)
             )
             person_id = cur.lastrowid
 
-        # 2. Insert auth into cims_call_users or cims_ptt_users based on auth_id domain
+        # 2. Insert auth into voip_subscriptions or ptt_subscriptions based on auth_id domain
         if "@ptt." in auth_id:
             sql_auth = (
-                "INSERT INTO cims_ptt_users (id, user_id, auth_id, passwd, dnd, forward_id) "
+                "INSERT INTO ptt_subscriptions (id, user_id, auth_id, passwd, dnd, forward_id) "
                 "VALUES (%s, %s, %s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE "
                 "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
                 "dnd=VALUES(dnd), forward_id=VALUES(forward_id)"
             )
-            auth_table = "cims_ptt_users"
+            auth_table = "ptt_subscriptions"
         else:
             sql_auth = (
-                "INSERT INTO cims_call_users (id, user_id, auth_id, passwd, dnd, forward_id) "
+                "INSERT INTO voip_subscriptions (id, user_id, auth_id, passwd, dnd, forward_id) "
                 "VALUES (%s, %s, %s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE "
                 "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
                 "dnd=VALUES(dnd), forward_id=VALUES(forward_id)"
             )
-            auth_table = "cims_call_users"
+            auth_table = "voip_subscriptions"
 
         cur.execute(sql_auth, (user_id, person_id, auth_id, passwd, dnd, forward_id))
 
         # 3. 착신거부 목록
         reject_ids = data.get("reject_id", [])
         if reject_ids:
-            cur.execute("DELETE FROM cims_user_rejects WHERE user_id=%s", (person_id,))
+            cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
             for rid in reject_ids:
                 cur.execute(
-                    "INSERT IGNORE INTO cims_user_rejects (user_id, reject_id) VALUES (%s, %s)",
+                    "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
                     (person_id, rid)
                 )
 
@@ -176,19 +176,19 @@ def import_groups(conn, group_dir):
         name = data.get("name", group_id)
 
         cur.execute(
-            "INSERT INTO cims_ptt_groups (id, name) VALUES (%s, %s) "
+            "INSERT INTO ptt_groups (id, name) VALUES (%s, %s) "
             "ON DUPLICATE KEY UPDATE name=VALUES(name)",
             (group_id, name)
         )
 
         # 멤버 목록 교체
-        cur.execute("DELETE FROM cims_ptt_group_members WHERE group_id=%s", (group_id,))
+        cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (group_id,))
         for member in data.get("users", []):
             uid   = member.get("id", "")
             prio  = int(member.get("priority", 0))
             if uid:
                 cur.execute(
-                    "INSERT INTO cims_ptt_group_members (group_id, user_id, priority) VALUES (%s, %s, %s)",
+                    "INSERT INTO ptt_group_members (group_id, user_id, priority) VALUES (%s, %s, %s)",
                     (group_id, uid, prio)
                 )
                 print(f"[Group] {group_id} ← member {uid} (priority={prio})")

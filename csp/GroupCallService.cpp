@@ -208,14 +208,14 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
              // Callee identity
              char szPCalledParty[256];
              snprintf( szPCalledParty, sizeof(szPCalledParty), "<sip:%s@%s>",
-                       pszUserId, gclsSetup.m_strRealm.c_str() );
+                       pszUserId, gclsSetup.m_strPttRealm.c_str() );
              pclsInvite->AddHeader( "P-Called-Party-ID", szPCalledParty );
              // Group call priority
              pclsInvite->AddHeader( "Resource-Priority", "mcpttp.6" );
              // isfocus: indicate server is conference focus for this group call (domain-based URI)
              char szContact[256];
              snprintf(szContact, sizeof(szContact), "<sip:%s@%s>;isfocus",
-                      pszGroupId, gclsSetup.m_strRealm.c_str());
+                      pszGroupId, gclsSetup.m_strPttRealm.c_str());
              pclsInvite->AddHeader("Contact", szContact);
              // Session timer (RFC 4028) — required by many MCPTT implementations
              pclsInvite->AddHeader("Session-Expires", "7200;refresher=uac");
@@ -298,6 +298,9 @@ void CGroupCallService::MonitorLoop() {
             if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
                 gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
             }
+            if ( gclsDbManager.IsConnected() ) {
+                gclsGroupMap.LoadFromDb();
+            }
             SyncGroupsState();
             iTickSec = 0;
         }
@@ -308,6 +311,9 @@ void CGroupCallService::OnGroupConfigChanged() {
     CLog::Print( LOG_INFO, "OnGroupConfigChanged: Reloading group config and re-syncing" );
     if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
         gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
+    }
+    if ( gclsDbManager.IsConnected() ) {
+        gclsGroupMap.LoadFromDb();
     }
     SyncGroupsState();
     CheckMemberState();

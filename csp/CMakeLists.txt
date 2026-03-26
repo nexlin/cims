@@ -85,7 +85,7 @@ install(TARGETS csp DESTINATION bin)
 install(PROGRAMS csp.sh DESTINATION bin)
 
 # 2. Configuration (config/)
-install(FILES csp.xml csp.json DESTINATION config)
+install(FILES csp.xml csp.json.template DESTINATION config)
 install(DIRECTORY User Group DESTINATION .)
 install(DIRECTORY DESTINATION config/cdr)
 

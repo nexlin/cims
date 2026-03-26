@@ -28,7 +28,7 @@ def load_config():
 
 def main():
     config = load_config()
-    db_config = config.get('Database')
+    db_config = config.get('CimsDatabase')
     
     storage = IdmsStorage()
     if db_config:

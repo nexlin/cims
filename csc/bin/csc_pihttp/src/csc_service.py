@@ -47,7 +47,7 @@ def load_shared_data(config):
     # Config keys match csc.json structure
     user_path = config.get('Data', {}).get('User')
     group_path = config.get('Data', {}).get('Group')
-    db_config = config.get('Database')
+    db_config = config.get('CimsDatabase')
 
     # Initialize MariaDB Storage
     if db_config:

@@ -45,6 +45,9 @@ is_running() { local pid; pid="$(read_pid "$1")"; [[ -n $pid ]] && kill -0 "$pid
 kill_stray() {
     local pattern="$1"
     local port="${2:-}"
+    local proto="${3:-udp}"   # udp | tcp
+
+    # 1) 패턴으로 프로세스 종료
     local pids; pids=$(pgrep -f "$pattern" 2>/dev/null || true)
     if [[ -n $pids ]]; then
         warn "기존 프로세스 정리: $pattern (pid=$pids)"
@@ -53,11 +56,34 @@ kill_stray() {
         while [[ -n $(pgrep -f "$pattern" 2>/dev/null) ]] && (( i <= 15 )); do
             sleep 0.2; i=$(( i + 1 ))
         done
-        if [[ -n $port ]]; then
-            i=1
-            while ss -tlnp | grep -q ":${port} " && (( i <= 10 )); do
-                sleep 0.2; i=$(( i + 1 ))
-            done
+        pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+        [[ -n $pids ]] && kill -9 $pids 2>/dev/null || true
+    fi
+
+    # 2) 포트를 점유 중인 프로세스 종료 (PID 파일 없는 좀비 대비)
+    if [[ -n $port ]]; then
+        local port_pids
+        if [[ $proto == "tcp" ]]; then
+            port_pids=$(ss -tlnp 2>/dev/null | awk -v p=":$port " '$4 ~ p {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}' || true)
+        else
+            port_pids=$(ss -ulnp 2>/dev/null | awk -v p=":$port " '$5 ~ p {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}' || true)
+        fi
+        if [[ -n $port_pids ]]; then
+            warn "포트 $port ($proto) 점유 프로세스 종료: pid=$port_pids"
+            kill $port_pids 2>/dev/null || true
+            local i=1
+            if [[ $proto == "tcp" ]]; then
+                while [[ -n $(ss -tlnp 2>/dev/null | awk -v p=":$port " '$4 ~ p {print 1}') ]] && (( i <= 20 )); do
+                    sleep 0.2; i=$(( i + 1 ))
+                done
+                port_pids=$(ss -tlnp 2>/dev/null | awk -v p=":$port " '$4 ~ p {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}' || true)
+            else
+                while [[ -n $(ss -ulnp 2>/dev/null | awk -v p=":$port " '$5 ~ p {print 1}') ]] && (( i <= 20 )); do
+                    sleep 0.2; i=$(( i + 1 ))
+                done
+                port_pids=$(ss -ulnp 2>/dev/null | awk -v p=":$port " '$5 ~ p {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}' || true)
+            fi
+            [[ -n $port_pids ]] && kill -9 $port_pids 2>/dev/null || true
         fi
     fi
 }
@@ -104,10 +130,11 @@ start_cwrtc() {
 }
 
 start_csc() {
+    local csc_port; csc_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csc/config/csc.json')); print(d['Server']['Port'])" 2>/dev/null || echo 4420)
     if is_running csc; then warn "CSC 이미 실행 중 (pid=$(read_pid csc))"; return 0; fi
     [[ ! -f "$DIST_DIR/csc/src/app.py" ]] && err "CSC 소스 없음 (make dist 실행 필요)" && return 1
-    kill_stray "csc/src/app.py"
-    info "CSC (REST API 서버) 시작..."
+    kill_stray "csc/src/app.py" "$csc_port" tcp
+    info "CSC (REST API 서버) 시작... (port=$csc_port)"
     cd "$DIST_DIR/csc/src"
     python3 app.py >> "$LOG_DIR/csc.log" 2>&1 &
     save_pid csc $!
@@ -117,19 +144,20 @@ start_csc() {
 
 start_console() {
     if is_running console; then warn "console 이미 실행 중 (pid=$(read_pid console))"; return 0; fi
-    if [[ -d "$DIST_DIR/console/dist" ]]; then
-        # dist 모드: 정적 빌드 서빙
-        kill_stray "serve.*console"
-        info "console (Admin Web UI) 정적 서빙 시작... (port 3001)"
-        cd "$DIST_DIR/console"
-        npx --yes serve dist -l 3001 >> "$LOG_DIR/console.log" 2>&1 &
-        save_pid console $!
-    elif [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then
-        # 소스 모드: Vite 개발 서버
+    # 포트 3001 점유 프로세스(serve 좀비 포함) 먼저 정리
+    kill_stray "serve dist -l 3001" 3001 tcp
+    if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then
+        # 소스 모드: Vite 개발 서버 (API proxy 포함)
         kill_stray "vite.*cims-console"
         info "console (Admin Web UI) 개발 서버 시작... (port 3001)"
         cd "$SRC_CONSOLE"
         npm run dev >> "$LOG_DIR/console.log" 2>&1 &
+        save_pid console $!
+    elif [[ -d "$DIST_DIR/console/dist" ]]; then
+        # dist 전용 모드: 정적 서빙 (proxy 없음 — nginx 필요)
+        info "console (Admin Web UI) 정적 서빙 시작... (port 3001)"
+        cd "$DIST_DIR/console"
+        npx --yes serve dist -l 3001 >> "$LOG_DIR/console.log" 2>&1 &
         save_pid console $!
     else
         err "console 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1
@@ -140,17 +168,20 @@ start_console() {
 
 start_phone() {
     if is_running phone; then warn "phone 이미 실행 중 (pid=$(read_pid phone))"; return 0; fi
-    if [[ -d "$DIST_DIR/phone/dist" ]]; then
-        kill_stray "serve.*phone"
-        info "phone (MCPTT UE Web) 정적 서빙 시작... (port 3000)"
-        cd "$DIST_DIR/phone"
-        npx --yes serve dist -l 3000 >> "$LOG_DIR/phone.log" 2>&1 &
-        save_pid phone $!
-    elif [[ -n "$SRC_PHONE" && -d "$SRC_PHONE" ]]; then
+    # 포트 3000 점유 프로세스(serve 좀비 포함) 먼저 정리
+    kill_stray "serve dist -l 3000" 3000 tcp
+    if [[ -n "$SRC_PHONE" && -d "$SRC_PHONE" ]]; then
+        # 소스 모드: Vite 개발 서버 (API proxy 포함)
         kill_stray "vite.*cims-phone"
         info "phone (MCPTT UE Web) 개발 서버 시작... (port 3000)"
         cd "$SRC_PHONE"
         npm run dev >> "$LOG_DIR/phone.log" 2>&1 &
+        save_pid phone $!
+    elif [[ -d "$DIST_DIR/phone/dist" ]]; then
+        # dist 전용 모드: 정적 서빙 (proxy 없음 — nginx 필요)
+        info "phone (MCPTT UE Web) 정적 서빙 시작... (port 3000)"
+        cd "$DIST_DIR/phone"
+        npx --yes serve dist -l 3000 >> "$LOG_DIR/phone.log" 2>&1 &
         save_pid phone $!
     else
         err "phone 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1
@@ -174,6 +205,13 @@ stop_one() {
         warn "$name: 이미 중지됨 (pid=$pid)"
     fi
     rm -f "$(pidfile "$name")"
+}
+
+stop_csc() {
+    local csc_port; csc_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csc/config/csc.json')); print(d['Server']['Port'])" 2>/dev/null || echo 4420)
+    stop_one csc
+    # PID 파일 없이 남아있는 스트레이 프로세스도 정리
+    kill_stray "csc/src/app.py" "$csc_port" tcp
 }
 
 # ── 상태 출력 ──────────────────────────────────────────────────
@@ -369,7 +407,11 @@ cmd_stop() {
     local target="${1:-all}"
     if [[ $target == "all" ]]; then
         header "=== 전체 중지 ==="
-        for c in "${COMPONENTS[@]}"; do stop_one "$c"; done
+        for c in "${COMPONENTS[@]}"; do
+            if [[ $c == "csc" ]]; then stop_csc; else stop_one "$c"; fi
+        done
+    elif [[ $target == "csc" ]]; then
+        stop_csc
     else
         stop_one "$target"
     fi

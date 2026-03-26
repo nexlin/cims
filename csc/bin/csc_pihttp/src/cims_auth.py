@@ -102,7 +102,7 @@ def _user_with_subs(cur, user_id: int) -> dict:
     # 소프트폰 자동 등록에 passwd 필요 → 본인 조회이므로 포함
     cur.execute(
         "SELECT id, auth_id, passwd, dnd, forward_id, register_time, logout_time "
-        "FROM cims_call_users WHERE user_id=%s ORDER BY id",
+        "FROM voip_subscriptions WHERE user_id=%s ORDER BY id",
         (user_id,)
     )
     call_subs = cur.fetchall()
@@ -113,7 +113,7 @@ def _user_with_subs(cur, user_id: int) -> dict:
 
     cur.execute(
         "SELECT id, auth_id, passwd, dnd, forward_id, register_time, logout_time "
-        "FROM cims_ptt_users WHERE user_id=%s ORDER BY id",
+        "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
         (user_id,)
     )
     ptt_subs = cur.fetchall()
@@ -170,7 +170,7 @@ async def _login(body, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name, email, role FROM cims_users "
+                "SELECT id, name, email, role FROM users "
                 "WHERE email=%s AND password=%s",
                 (email, _hash(password))
             )
@@ -200,17 +200,17 @@ async def _register(body, config):
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM cims_users WHERE email=%s", (email,))
+            cur.execute("SELECT id FROM users WHERE email=%s", (email,))
             if cur.fetchone():
                 return HandlerResult(status=409, body={'error': '이미 사용 중인 이메일입니다'})
             cur.execute(
-                "INSERT INTO cims_users (name, email, password, role, org_id, create_time, update_time) "
+                "INSERT INTO users (name, email, password, role, org_id, create_time, update_time) "
                 "VALUES (%s, %s, %s, 'user', '', NOW(), NOW())",
                 (name, email, _hash(password))
             )
             uid = cur.lastrowid
             cur.execute(
-                "SELECT id, name, email, role FROM cims_users WHERE id=%s", (uid,)
+                "SELECT id, name, email, role FROM users WHERE id=%s", (uid,)
             )
             user = cur.fetchone()
 
@@ -227,7 +227,7 @@ async def _me(handler_args, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name, email, role FROM cims_users WHERE id=%s",
+                "SELECT id, name, email, role FROM users WHERE id=%s",
                 (int(payload['sub']),)
             )
             user = cur.fetchone()
@@ -258,13 +258,13 @@ async def _change_password(handler_args, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM cims_users WHERE id=%s AND password=%s",
+                "SELECT id FROM users WHERE id=%s AND password=%s",
                 (uid, _hash(old_pw))
             )
             if cur.fetchone() is None:
                 return HandlerResult(status=401, body={'error': '현재 비밀번호가 올바르지 않습니다'})
             cur.execute(
-                "UPDATE cims_users SET password=%s, update_time=NOW() WHERE id=%s",
+                "UPDATE users SET password=%s, update_time=NOW() WHERE id=%s",
                 (_hash(new_pw), uid)
             )
 

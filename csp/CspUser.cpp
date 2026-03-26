@@ -180,10 +180,12 @@ bool CspUserMap::Select( const char *pszUserId, CspUser &clsXmlUser ) {
     m_clsMutex.release();
 
     if (!bRes) {
-        if (!gclsSetup.m_strUserDataFolder.empty()) {
-            bRes = _loadUserFromFile(pszUserId, clsXmlUser);
-        } else {
+        // DB first (if connected), file as fallback
+        if (gclsDbManager.IsConnected()) {
             bRes = gclsDbManager.SelectUser(pszUserId, clsXmlUser);
+        }
+        if (!bRes && !gclsSetup.m_strUserDataFolder.empty()) {
+            bRes = _loadUserFromFile(pszUserId, clsXmlUser);
         }
         if (bRes) Insert(clsXmlUser);
     }
@@ -204,11 +206,12 @@ bool CspUserMap::registerUser(std::string strUserId, std::string strPassWord ) {
     m_clsMutex.release();
 
     if (!bRes) {
-        // 캐시 미스 → 파일 또는 DB에서 로드
-        if (!gclsSetup.m_strUserDataFolder.empty()) {
-            bRes = _loadUserFromFile(strUserId, user);
-        } else {
+        // DB first (if connected), file as fallback
+        if (gclsDbManager.IsConnected()) {
             bRes = gclsDbManager.SelectUser(strUserId, user);
+        }
+        if (!bRes && !gclsSetup.m_strUserDataFolder.empty()) {
+            bRes = _loadUserFromFile(strUserId, user);
         }
         if (bRes) Insert(user);
     }
@@ -220,8 +223,8 @@ bool CspUserMap::registerUser(std::string strUserId, std::string strPassWord ) {
     user.m_iRegisterTime = time(NULL);
     _update(user);
 
-    // DB 모드: register_time 동기화
-    if (gclsSetup.m_strUserDataFolder.empty()) {
+    // register_time 동기화 (DB 연결된 경우 항상)
+    if (gclsDbManager.IsConnected()) {
         gclsDbManager.UpdateRegisterTime(strUserId);
     }
     return true;
@@ -244,8 +247,8 @@ bool CspUserMap::unregisterUser(std::string strUserId ) {
     user.m_iLogoutTime = time(NULL);
     _update(user);
 
-    // DB 모드: logout_time 동기화
-    if (gclsSetup.m_strUserDataFolder.empty()) {
+    // logout_time 동기화 (DB 연결된 경우 항상)
+    if (gclsDbManager.IsConnected()) {
         gclsDbManager.UpdateLogoutTime(strUserId);
     }
     return true;
