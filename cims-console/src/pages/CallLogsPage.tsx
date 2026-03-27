@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { callsApi, type CallLog, type CallParticipant } from '../api/calls'
 import Modal from '../components/Modal'
+import FlowPage from './FlowPage'
 import { useToast } from '../components/Toast'
 
 // ── helpers ───────────────────────────────────────────────────
@@ -65,6 +66,15 @@ export default function CallLogsPage() {
 
   // detail modal
   const [detail, setDetail] = useState<CallLog | null>(null)
+
+  // flow modal
+  const [flowTarget, setFlowTarget] = useState<{ callId: string; date: string } | null>(null)
+
+  function openFlow(log: CallLog, e: React.MouseEvent) {
+    e.stopPropagation()
+    const date = log.invite_time ? log.invite_time.substring(0, 10).replace(/-/g, '') : undefined
+    setFlowTarget({ callId: log.call_id, date: date ?? '' })
+  }
 
   // ── load live ────────────────────────────────────────────────
   const loadLive = useCallback(async () => {
@@ -170,6 +180,16 @@ export default function CallLogsPage() {
         <td className="ts">{fmtDuration(log.duration)}</td>
         {showParticipants && <td>{renderParticipants(log.participants)}</td>}
         {!showParticipants && <td className="ts">{log.end_reason_ko || (log.sip_status ? String(log.sip_status) : '—')}</td>}
+        <td>
+          <button
+            className="btn btn--sm btn--outline"
+            title="메시지 플로우"
+            onClick={(e) => openFlow(log, e)}
+            style={{ fontSize: 11, padding: '2px 6px' }}
+          >
+            플로우
+          </button>
+        </td>
       </tr>
     )
   }
@@ -220,6 +240,7 @@ export default function CallLogsPage() {
                     <th>시작 시각</th>
                     <th>경과 시간</th>
                     <th>참여자</th>
+                    <th style={{ width: 60 }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -295,6 +316,7 @@ export default function CallLogsPage() {
                       <th>시작 시각</th>
                       <th>통화 시간</th>
                       <th>종료 사유</th>
+                      <th style={{ width: 60 }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -316,6 +338,15 @@ export default function CallLogsPage() {
             </>
           )}
         </>
+      )}
+
+      {/* ── flow modal ── */}
+      {flowTarget && (
+        <FlowPage
+          callId={flowTarget.callId}
+          date={flowTarget.date || undefined}
+          onClose={() => setFlowTarget(null)}
+        />
       )}
 
       {/* ── detail modal ── */}

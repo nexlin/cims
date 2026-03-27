@@ -1,5 +1,6 @@
 #include "HttpCallBack.h"
 #include "CwrtcSetup.h"
+#include "MsgLogger.h"
 #include "SipAgent.h"
 #include "RtpThread.h"
 #include "Log.h"
@@ -15,6 +16,7 @@ bool StartServer(const char* pszConfigFile)
     CLog::SetPrefix("cwrtc");
     CLog::SetDirectory(gclsCwrtcSetup.m_strLogDir.c_str());
     CLog::SetLevel(LOG_INFO | LOG_DEBUG | LOG_NETWORK);
+    gclsMsgLogger.Init(gclsCwrtcSetup.m_strMsgLogDir, "cwrtc");
 
     // 네트워크 + DTLS 초기화
     InitNetwork();

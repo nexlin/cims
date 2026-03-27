@@ -49,6 +49,9 @@
         "Cdr": {
             "Folder": "log/cdr"
         },
+        "MsgLog": {
+            "Dir": "@MSG_LOG_DIR@"
+        },
         "Monitor": {
             "Port": 16000,
             "ClientIpList": ["@CSP_IP@"]

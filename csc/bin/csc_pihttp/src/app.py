@@ -46,6 +46,8 @@ if __name__ == '__main__':
     from cims_admin import CIMS_ADMIN_HANDLER_LIST
     import cims_auth
     from cims_auth import CIMS_AUTH_HANDLER_LIST
+    import csc_flow
+    from csc_flow import FLOW_HANDLER_LIST
 
     admin_server = None
     mcptt_server = None
@@ -54,6 +56,7 @@ if __name__ == '__main__':
 
         config = load_config()
         cims_auth.init(config)
+        csc_flow.init(config.get("MsgLogDir", ""))
 
         # Adjust relative data paths
         if 'Data' in config:
@@ -94,6 +97,7 @@ if __name__ == '__main__':
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST
         ])
+        admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
         admin_server.start()
         logger.log_info(f"Admin server started on port {admin_conf.get('Port', 4420)}")
 

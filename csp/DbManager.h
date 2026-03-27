@@ -7,10 +7,12 @@
 #define _DB_MANAGER_H_
 
 #include <string>
+#include <vector>
 #include <mutex>
 #include <mariadb/mysql.h>
 
 class CspUser;
+class CspUserMap;
 class CspPttGroup;
 class CGroupMap;
 
@@ -54,6 +56,12 @@ public:
 
     /** 전체 그룹을 DB에서 읽어 맵에 로드한다 */
     bool LoadAllGroups( CGroupMap& clsMap );
+
+    /** 특정 사용자가 속한 그룹 ID 목록을 조회한다 */
+    bool SelectGroupsByUser( const std::string& strUserId, std::vector<std::string>& vecGroupIds );
+
+    /** 전체 가입자를 DB에서 읽어 맵에 로드한다 */
+    bool LoadAllUsers( CspUserMap& clsMap );
 
     // ─────────────────────────────────────────────
     //  Call log operations

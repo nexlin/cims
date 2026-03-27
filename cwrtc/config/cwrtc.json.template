@@ -2,6 +2,8 @@
     "Setup": {
         "LocalIp": "@CWRTC_IP@",
         "WsPort": 8080,
+        "Wss": 1,
+        "CertFile": "cert/csp.pem",
         "DocRoot": "html",
         "UserAgent": "CWRTC_1.0",
         "AccessNetworkInfo": "IEEE-802.11",
@@ -18,6 +20,9 @@
         },
         "Log": {
             "Dir": "log"
+        },
+        "MsgLog": {
+            "Dir": "@MSG_LOG_DIR@"
         }
     }
 }

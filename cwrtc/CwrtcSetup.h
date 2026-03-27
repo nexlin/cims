@@ -24,6 +24,7 @@ public:
     int         m_iRtpPortBase;     // RTP 포트 풀 시작 (default 50100)
     int         m_iRtpPortCount;    // 포트 쌍 수 (default 50)
     std::string m_strLogDir;        // 로그 디렉터리
+    std::string m_strMsgLogDir;     // 메시지 로그 공유 스토리지 (ext_mnt 루트)
     std::string m_strDocRoot;       // HTML 문서 루트
 };
 

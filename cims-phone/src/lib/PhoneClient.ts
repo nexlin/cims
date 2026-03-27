@@ -149,6 +149,19 @@ export class PhoneClient {
         this.setState('incoming')
         break
 
+      // CSP가 PTT 그룹 콜로 초대 → cwrtc가 SIP 200 OK 자동 응답 완료.
+      // 브라우저는 제공된 SDP로 WebRTC 연결만 수립하면 됨.
+      case 'ptt_auto_answer':
+        this.pendingIncoming = {
+          callId: msg.call_id,
+          from: msg.from,
+          sdp: msg.sdp,
+          ptt: true,
+        }
+        this.setState('incoming')
+        this.cb.onIncoming(this.pendingIncoming)
+        break
+
       case 'ptt_floor':
         this.cb.onFloor?.(msg.speaker ?? null)
         break

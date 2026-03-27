@@ -42,6 +42,12 @@ public:
      */
     bool InviteMember( const char *pszUserId, const char *pszGroupId );
 
+    /**
+     * @brief Forcibly clear any stale active call entry for userId.
+     *        Called before auto-invite on REGISTER to handle WS reconnect races.
+     */
+    void ClearUserCall( const std::string& strUserId );
+
     // Recovery & Monitor
     void StartMonitor();
     void StopMonitor();

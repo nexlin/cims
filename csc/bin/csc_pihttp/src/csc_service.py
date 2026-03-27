@@ -54,30 +54,52 @@ def load_shared_data(config):
         storage.init_db(db_config)
         logger.log_info("MariaDB Initialized for IDMS Storage")
     
-    if user_path:
-        # Load Users: ../user/XX/XX/XX/XX/XXXXXXXXXX.json
-        logger.log_info(f"Loading users from {user_path}...")
-        # Resolve path relative to CWD (which should be csc/bin/csc_pihttp/src, so default ../../user)
-        # But config path in csc.json is usually "../user", so relative to bin location.
-        # We need to make sure we look in the right place.
-        # Assuming app is run from csc/bin/csc_pihttp/src
-        
+    # Load users: DB primary, file fallback
+    db_users_loaded = False
+    if db_config:
+        try:
+            import pymysql, pymysql.cursors
+            conn = pymysql.connect(
+                host=db_config.get('Host', '127.0.0.1'),
+                port=int(db_config.get('Port', 3306)),
+                user=db_config.get('User', 'root'),
+                password=db_config.get('Password', ''),
+                database=db_config.get('Db', 'cims'),
+                charset='utf8mb4',
+                cursorclass=pymysql.cursors.DictCursor,
+            )
+            with conn:
+                with conn.cursor() as cur:
+                    for table in ('voip_subscriptions', 'ptt_subscriptions'):
+                        cur.execute(f"SELECT id, passwd FROM {table}")
+                        for row in cur.fetchall():
+                            uid = row['id']
+                            pw  = row['passwd'] or ''
+                            uri = f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}"
+                            if uri not in USERS:
+                                USERS[uri] = {"password": pw, "name": uid, "profile_etag": "etag_" + uri}
+                                logger.log_info(f"Loaded DB User: {uri}")
+            db_users_loaded = True
+            logger.log_info(f"Users loaded from DB: {len(USERS)}")
+        except Exception as e:
+            logger.log_error(f"DB user load failed, will fall back to files: {e}")
+
+    if not db_users_loaded and user_path:
+        logger.log_info(f"Loading users from files (DB unavailable): {user_path}...")
         user_files = glob.glob(os.path.join(user_path, '**', '*.json'), recursive=True)
         for fpath in user_files:
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     filename = os.path.basename(fpath).split('.')[0]
-                    # Fix: Handle numbers with '+' prefix correctly, e.g., '+82571900034'
                     user_id = filename
                     uri = f"tel:{user_id}" if user_id.startswith('+') else f"tel:+{user_id}"
-                    
                     USERS[uri] = {
                         "password": data.get('passwd', 'password123'),
                         "name": data.get('name', 'Unknown User'),
                         "profile_etag": "etag_" + uri
                     }
-                    logger.log_info(f"Loaded User: {uri}")
+                    logger.log_info(f"Loaded File User: {uri}")
             except Exception as e:
                 logger.log_error(f"Error loading user {fpath}: {e}")
 
@@ -111,43 +133,82 @@ def load_shared_data(config):
 
     global GROUP_DIR
     if group_path:
-        GROUP_DIR = group_path # Store for saving later
-        logger.log_info(f"Loading groups from {group_path}...")
+        GROUP_DIR = group_path
+
+    # Load groups: DB primary, file fallback
+    db_groups_loaded = False
+    if db_config:
+        try:
+            import pymysql, pymysql.cursors
+            conn = pymysql.connect(
+                host=db_config.get('Host', '127.0.0.1'),
+                port=int(db_config.get('Port', 3306)),
+                user=db_config.get('User', 'root'),
+                password=db_config.get('Password', ''),
+                database=db_config.get('Db', 'cims'),
+                charset='utf8mb4',
+                cursorclass=pymysql.cursors.DictCursor,
+            )
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, name FROM ptt_groups")
+                    for row in cur.fetchall():
+                        gid = row['id']
+                        uri = f"tel:{gid}" if gid.startswith('+') else f"tel:+{gid}"
+                        GROUPS[uri] = {
+                            "display_name": row['name'],
+                            "etag": f"etag_{gid}",
+                            "created_by": "", "created_at": "",
+                            "members": []
+                        }
+                    cur.execute("SELECT group_id, user_id, priority FROM ptt_group_members ORDER BY group_id, priority")
+                    for row in cur.fetchall():
+                        gid = row['group_id']
+                        g_uri = f"tel:{gid}" if gid.startswith('+') else f"tel:+{gid}"
+                        uid = row['user_id']
+                        m_uri = f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}"
+                        if g_uri in GROUPS:
+                            GROUPS[g_uri]['members'].append({
+                                "uri": m_uri, "name": m_uri,
+                                "role": "participant", "priority": row['priority'], "joined_at": ""
+                            })
+                    for uri in GROUPS:
+                        logger.log_info(f"Loaded DB Group: {uri} ({len(GROUPS[uri]['members'])} members)")
+            db_groups_loaded = True
+            logger.log_info(f"Groups loaded from DB: {len(GROUPS)}")
+        except Exception as e:
+            logger.log_error(f"DB group load failed, will fall back to files: {e}")
+
+    # JSON 파일 그룹 로드 (DB 미연결 시 폴백)
+    if not db_groups_loaded and group_path:
+        logger.log_info(f"Loading groups from files (DB unavailable): {group_path}...")
         group_files = glob.glob(os.path.join(group_path, '*.json'))
         for fpath in group_files:
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     group_id = os.path.basename(fpath).split('.')[0]
-                    uri = f"tel:+{group_id}"
-                    logger.log_info(f"Loaded Group: {uri}")
-                    
+                    uri = f"tel:{group_id}" if group_id.startswith('+') else f"tel:+{group_id}"
                     members = []
                     for m in data.get('users', []):
-                        m_id = m.get('id')
+                        m_id = m.get('id', '')
                         if m_id:
-                            m_uri = f"tel:+{m_id}"
-                            priority = m.get('priority', 5) # Default priority 5
-                            role = m.get('role', 'participant')
-                            joined_at = m.get('joined_at', '')
-                            # Name is not usually saved in JSON for users as they are refs, but we can try to find it or verify
+                            m_uri = f"tel:{m_id}" if m_id.startswith('+') else f"tel:+{m_id}"
                             members.append({
-                                "uri": m_uri, 
-                                "name": m_uri, 
-                                "role": role, 
-                                "priority": priority,
-                                "joined_at": joined_at
+                                "uri": m_uri, "name": m_uri,
+                                "role": m.get('role', 'participant'),
+                                "priority": m.get('priority', 5), "joined_at": ""
                             })
-
                     GROUPS[uri] = {
                         "display_name": data.get('name', 'Group'),
-                        "etag": data.get('etag', "etag_" + uri),
+                        "etag": data.get('etag', f"etag_{uri}"),
                         "created_by": data.get('created_by', ''),
                         "created_at": data.get('created_at', ''),
                         "members": members
                     }
+                    logger.log_info(f"Loaded File Group: {uri}")
             except Exception as e:
-                 logger.log_error(f"Error loading group {fpath}: {e}")
+                logger.log_error(f"Error loading group {fpath}: {e}")
 
 # [FIX] Notify CSP logic
 def notify_csp(event_type, uri, action, etag=""):
@@ -512,13 +573,19 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # 사용자 인증
     if user_name not in USERS:
         logger.log_error(f"[IdMS] Auth Req Failed: user {user_name} not found in USERS keys: {list(USERS.keys())}")
-        location = f"{redirect_uri}?error=auth_fail&state={state}"
-        return HandlerResult(status=302, headers={"Location": location})
-    
+        return HandlerResult(
+            status=401,
+            body={"error": "access_denied", "error_description": "사용자를 찾을 수 없습니다"},
+            media_type="application/json"
+        )
+
     if USERS[user_name]['password'] != user_password:
-        logger.log_error(f"[IdMS] Auth Req Failed: Password mismatch for {user_name}. Expected {USERS[user_name]['password']}, got {user_password}")
-        location = f"{redirect_uri}?error=auth_fail&state={state}"
-        return HandlerResult(status=302, headers={"Location": location})
+        logger.log_error(f"[IdMS] Auth Req Failed: Password mismatch for {user_name}")
+        return HandlerResult(
+            status=401,
+            body={"error": "access_denied", "error_description": "비밀번호가 올바르지 않습니다"},
+            media_type="application/json"
+        )
 
     # auth-code 생성
     code = str(uuid.uuid4())
@@ -692,10 +759,11 @@ async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     if not token_payload:
         return HandlerResult(status=401, body="Missing or Invalid Token")
 
+    from urllib.parse import unquote
     path = args.full_path
     parts = [p for p in path.split('/') if p]
     # parts: ['org.openmobilealliance.groups', 'users', 'user_uri']
-    user_uri = parts[-1] if len(parts) >= 3 else token_payload.get('mcptt_id', '')
+    user_uri = unquote(parts[-1]) if len(parts) >= 3 else token_payload.get('mcptt_id', '')
 
     logger.log_info(f"[GMS] List groups for user: {user_uri}")
 
@@ -711,7 +779,8 @@ async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
                 })
                 break
 
-    return HandlerResult(status=200, body=result, media_type='application/json')
+    import json as _json
+    return HandlerResult(status=200, body=_json.dumps(result), media_type='application/json')
 
 
 # GMS: unified handler — dispatches on path depth
@@ -731,8 +800,9 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
         # Delegate to list handler
         return await handle_user_groups(args, kwargs)
 
-    group_uri = parts[-1]
-    user_uri = parts[-2]
+    from urllib.parse import unquote
+    group_uri = unquote(parts[-1])
+    user_uri = unquote(parts[-2])
 
     logger.log_info(f"[GMS] Group Management: {args.method} {group_uri}")
 

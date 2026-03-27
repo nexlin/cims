@@ -64,24 +64,24 @@ kill_stray() {
     if [[ -n $port ]]; then
         local port_pids
         if [[ $proto == "tcp" ]]; then
-            port_pids=$(ss -tlnp 2>/dev/null | awk -v p=":$port " '$4 ~ p {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}' || true)
+            port_pids=$(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
         else
-            port_pids=$(ss -ulnp 2>/dev/null | awk -v p=":$port " '$5 ~ p {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}' || true)
+            port_pids=$(ss -ulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
         fi
         if [[ -n $port_pids ]]; then
             warn "포트 $port ($proto) 점유 프로세스 종료: pid=$port_pids"
             kill $port_pids 2>/dev/null || true
             local i=1
             if [[ $proto == "tcp" ]]; then
-                while [[ -n $(ss -tlnp 2>/dev/null | awk -v p=":$port " '$4 ~ p {print 1}') ]] && (( i <= 20 )); do
+                while [[ -n $(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print 1}') ]] && (( i <= 20 )); do
                     sleep 0.2; i=$(( i + 1 ))
                 done
-                port_pids=$(ss -tlnp 2>/dev/null | awk -v p=":$port " '$4 ~ p {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}' || true)
+                port_pids=$(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
             else
-                while [[ -n $(ss -ulnp 2>/dev/null | awk -v p=":$port " '$5 ~ p {print 1}') ]] && (( i <= 20 )); do
+                while [[ -n $(ss -ulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print 1}') ]] && (( i <= 20 )); do
                     sleep 0.2; i=$(( i + 1 ))
                 done
-                port_pids=$(ss -ulnp 2>/dev/null | awk -v p=":$port " '$5 ~ p {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}' || true)
+                port_pids=$(ss -ulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
             fi
             [[ -n $port_pids ]] && kill -9 $port_pids 2>/dev/null || true
         fi
@@ -155,9 +155,15 @@ start_console() {
         save_pid console $!
     elif [[ -d "$DIST_DIR/console/dist" ]]; then
         # dist 전용 모드: 정적 서빙 (proxy 없음 — nginx 필요)
-        info "console (Admin Web UI) 정적 서빙 시작... (port 3001)"
+        info "console (Admin Web UI) 정적 서빙 시작... (port 3001, HTTPS)"
         cd "$DIST_DIR/console"
-        npx --yes serve dist -l 3001 >> "$LOG_DIR/console.log" 2>&1 &
+        _SSL_KEY="$DIST_DIR/csc/cert/server.key"
+        _SSL_CERT="$DIST_DIR/csc/cert/server.crt"
+        if [[ -f "$_SSL_KEY" && -f "$_SSL_CERT" ]]; then
+            npx --yes serve dist -l 3001 --ssl-cert "$_SSL_CERT" --ssl-key "$_SSL_KEY" >> "$LOG_DIR/console.log" 2>&1 &
+        else
+            npx --yes serve dist -l 3001 >> "$LOG_DIR/console.log" 2>&1 &
+        fi
         save_pid console $!
     else
         err "console 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1
@@ -179,9 +185,15 @@ start_phone() {
         save_pid phone $!
     elif [[ -d "$DIST_DIR/phone/dist" ]]; then
         # dist 전용 모드: 정적 서빙 (proxy 없음 — nginx 필요)
-        info "phone (MCPTT UE Web) 정적 서빙 시작... (port 3000)"
+        info "phone (MCPTT UE Web) 정적 서빙 시작... (port 3000, HTTPS)"
         cd "$DIST_DIR/phone"
-        npx --yes serve dist -l 3000 >> "$LOG_DIR/phone.log" 2>&1 &
+        _SSL_KEY="$DIST_DIR/csc/cert/server.key"
+        _SSL_CERT="$DIST_DIR/csc/cert/server.crt"
+        if [[ -f "$_SSL_KEY" && -f "$_SSL_CERT" ]]; then
+            npx --yes serve dist -l 3000 --ssl-cert "$_SSL_CERT" --ssl-key "$_SSL_KEY" >> "$LOG_DIR/phone.log" 2>&1 &
+        else
+            npx --yes serve dist -l 3000 >> "$LOG_DIR/phone.log" 2>&1 &
+        fi
         save_pid phone $!
     else
         err "phone 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1

@@ -20,7 +20,7 @@ function Shell() {
           </div>
           <div className="app-user">
             <span className="app-user-name">
-              {user.display_name} <small style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{user.mcptt_id}</small>
+              {user.name} <small style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{user.email}</small>
             </span>
             <button className="btn btn--ghost btn--sm" onClick={logout}>로그아웃</button>
           </div>

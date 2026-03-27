@@ -1,4 +1,5 @@
 #include "CmpClient.h"
+#include "MsgLogger.h"
 #include "SimpleJson.h"
 #include <chrono>
 #include <sys/socket.h>
@@ -184,7 +185,12 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
     
     CLog::Print(LOG_DEBUG, "CmpClient::AddSession: %s", req.ToString().c_str());
 
+    std::string strReqBody = req.ToString();
+    gclsMsgLogger.Log( strSessionId.c_str(), "csp", "cmp", "JSON", "add", strReqBody.c_str() );
+
     if (!SendRequestAndWait(req, strResp)) return false;
+
+    gclsMsgLogger.Log( strSessionId.c_str(), "cmp", "csp", "JSON", "add-resp", strResp.c_str() );
 
     // Response Body: CSP_MAIN <sessId> CMP_MAIN <cmpSess> OK <ip> <port> <vport>
     // The response is now expected to be JSON.
@@ -200,7 +206,7 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
         iLocalVideoPort = respNode.Get("local_video_port").AsInt();
         return true;
     }
-    
+
     return false;
 }
 
@@ -254,7 +260,11 @@ bool CCmpClient::RemoveSession(const std::string& strSessionId) {
 
     std::string strResp;
     CLog::Print(LOG_DEBUG, "CmpClient::RemoveSession: %s", req.ToString().c_str());
-    return SendRequestAndWait(req, strResp);
+    std::string strReqBody = req.ToString();
+    gclsMsgLogger.Log( strSessionId.c_str(), "csp", "cmp", "JSON", "remove", strReqBody.c_str() );
+    bool bRet = SendRequestAndWait(req, strResp);
+    gclsMsgLogger.Log( strSessionId.c_str(), "cmp", "csp", "JSON", "remove-resp", strResp.c_str() );
+    return bRet;
 }
 
 bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort) {
@@ -280,8 +290,11 @@ bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::
     req.Set("cmp_sess_id", "0");
 
     std::string strResp;
-    
+    std::string strReqBody = req.ToString();
+    gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "addgroup", strReqBody.c_str() );
+
     if (SendRequestAndWait(req, strResp)) {
+        gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "addgroup-resp", strResp.c_str() );
         SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse(strResp);
         if (respNode.type != SimpleJson::JSON_OBJECT) {
             CLog::Print(LOG_ERROR, "CmpClient::AddGroup: Failed to parse JSON response: %s", strResp.c_str());
@@ -289,7 +302,7 @@ bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::
         }
 
         if (respNode.Has("status") && respNode.Get("status").AsString() == "OK") {
-            strIp = respNode.Get("ip").AsString(); 
+            strIp = respNode.Get("ip").AsString();
             iPort = respNode.Get("port").AsInt();
             CLog::Print(LOG_INFO, "CmpClient::AddGroup Success: %s:%d Members: %d", strIp.c_str(), iPort, (int)vecMembers.size());
             return true;
@@ -338,7 +351,11 @@ bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& str
     req.Set("cmp_sess_id", "0");
 
     std::string resp;
-    return SendRequestAndWait(req, resp);
+    std::string strReqBody = req.ToString();
+    gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "joingroup", strReqBody.c_str() );
+    bool bRet = SendRequestAndWait(req, resp);
+    gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "joingroup-resp", resp.c_str() );
+    return bRet;
 }
 
 bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& strSessionId) {
@@ -353,7 +370,11 @@ bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& st
     req.Set("cmp_sess_id", "0");
 
     std::string resp;
-    return SendRequestAndWait(req, resp);
+    std::string strReqBody = req.ToString();
+    gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "leavegroup", strReqBody.c_str() );
+    bool bRet = SendRequestAndWait(req, resp);
+    gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "leavegroup-resp", resp.c_str() );
+    return bRet;
 }
 
 bool CCmpClient::RemoveGroup(const std::string& strGroupId) {

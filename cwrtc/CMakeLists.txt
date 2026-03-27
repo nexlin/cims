@@ -31,6 +31,7 @@ set(SOURCES
     HttpCallBack.cpp
     RtpThread.cpp
     Server.cpp
+    MsgLogger.cpp
 )
 
 add_executable(cwrtc ${SOURCES})

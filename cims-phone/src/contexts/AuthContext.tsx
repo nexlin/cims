@@ -1,76 +1,42 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { idmsLogin, idmsRefresh } from '../api/idms'
-import { getUserProfile } from '../api/cms'
-
-export interface McpttUser {
-  mcptt_id:     string   // "tel:+82571900001"
-  phone_number: string   // "+82571900001"
-  display_name: string
-  access_token:  string
-  refresh_token: string
-  password:      string  // kept for SIP registration
-}
+import { authApi } from '../api/auth'
+import type { CimsUser } from '../api/auth'
 
 interface AuthCtx {
-  user:    McpttUser | null
+  user:    CimsUser | null
   loading: boolean
-  login:   (phoneNumber: string, password: string) => Promise<void>
+  login:   (email: string, password: string) => Promise<void>
   logout:  () => void
 }
 
-const Ctx = createContext<AuthCtx>({ user: null, loading: true, login: async () => {}, logout: () => {} })
+const Ctx = createContext<AuthCtx>({
+  user: null, loading: true, login: async () => {}, logout: () => {},
+})
 
-const SESSION_KEY = 'mcptt_session'
+const TOKEN_KEY = 'cims_token'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user,    setUser]    = useState<McpttUser | null>(null)
+  const [user,    setUser]    = useState<CimsUser | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const raw = localStorage.getItem(SESSION_KEY)
-    if (!raw) { setLoading(false); return }
-    try {
-      const session: McpttUser = JSON.parse(raw)
-      idmsRefresh(session.refresh_token)
-        .then(tokens => {
-          const updated = { ...session, access_token: tokens.access_token, refresh_token: tokens.refresh_token }
-          localStorage.setItem(SESSION_KEY, JSON.stringify(updated))
-          setUser(updated)
-        })
-        .catch(() => localStorage.removeItem(SESSION_KEY))
-        .finally(() => setLoading(false))
-    } catch {
-      localStorage.removeItem(SESSION_KEY)
-      setLoading(false)
-    }
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (!token) { setLoading(false); return }
+    authApi.me()
+      .then(u => setUser(u))
+      .catch(() => localStorage.removeItem(TOKEN_KEY))
+      .finally(() => setLoading(false))
   }, [])
 
-  async function login(phoneNumber: string, password: string) {
-    const tokens = await idmsLogin(phoneNumber, password)
-    const phone  = tokens.mcptt_id.replace(/^tel:/, '')
-
-    // Try to get display name from CMS; fall back to phone number
-    let display_name = phone
-    try {
-      const profile = await getUserProfile(tokens.mcptt_id, tokens.access_token)
-      display_name = profile.display_name || phone
-    } catch { /* ignore */ }
-
-    const mcpttUser: McpttUser = {
-      mcptt_id:     tokens.mcptt_id,
-      phone_number: phone,
-      display_name,
-      access_token:  tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      password,
-    }
-    localStorage.setItem(SESSION_KEY, JSON.stringify(mcpttUser))
-    setUser(mcpttUser)
+  async function login(email: string, password: string) {
+    const { token, user } = await authApi.login(email, password)
+    localStorage.setItem(TOKEN_KEY, token)
+    setUser(user)
   }
 
   function logout() {
-    localStorage.removeItem(SESSION_KEY)
+    localStorage.removeItem(TOKEN_KEY)
     setUser(null)
   }
 
@@ -78,3 +44,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function useAuth() { return useContext(Ctx) }
+export type { CimsUser }

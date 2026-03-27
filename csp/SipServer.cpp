@@ -1,5 +1,6 @@
 #include "SipServer.h"
 
+#include "MsgLogger.h"
 #include "CallMap.h"
 #include "CspServer.h"
 #include "Directory.h"
@@ -62,6 +63,18 @@ bool CSipServer::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     std::string strCallId;
     pclsMessage->GetCallId( strCallId );
     CLog::Print( LOG_DEBUG, "RecvRequest: Method=%s CallId=%s", pclsMessage->m_strSipMethod.c_str(), strCallId.c_str() );
+
+    if ( gclsMsgLogger.IsEnabled() && !strCallId.empty() ) {
+        // Via 포트로 발신 컴포넌트 판별 (5062 = cwrtc, 나머지 = ue)
+        const char* pszFrom = "ue";
+        if ( !pclsMessage->m_clsViaList.empty() &&
+             pclsMessage->m_clsViaList.front().m_iPort == 5062 )
+            pszFrom = "cwrtc";
+        char szSipBuf[8192];
+        pclsMessage->ToString( szSipBuf, sizeof(szSipBuf) );
+        gclsMsgLogger.Log( strCallId.c_str(), pszFrom, "csp",
+                           "SIP", pclsMessage->m_strSipMethod.c_str(), szSipBuf );
+    }
     if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
         return RecvRequestRegister( iThreadId, pclsMessage );
     } else if ( pclsMessage->IsMethod( "SUBSCRIBE" ) ) {
@@ -160,6 +173,22 @@ bool CSipServer::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
  * @returns SIP 응답 메시지를 처리하면 true 를 리턴하고 그렇지 않으면 false 를 리턴한다.
  */
 bool CSipServer::RecvResponse( int iThreadId, CSipMessage *pclsMessage ) {
+    if ( gclsMsgLogger.IsEnabled() ) {
+        std::string strCallId;
+        pclsMessage->GetCallId( strCallId );
+        if ( !strCallId.empty() ) {
+            const char* pszFrom = "ue";
+            if ( !pclsMessage->m_clsViaList.empty() &&
+                 pclsMessage->m_clsViaList.front().m_iPort == 5062 )
+                pszFrom = "cwrtc";
+            char szLabel[32];
+            snprintf( szLabel, sizeof(szLabel), "%d", pclsMessage->m_iStatusCode );
+            char szSipBuf[8192];
+            pclsMessage->ToString( szSipBuf, sizeof(szSipBuf) );
+            gclsMsgLogger.Log( strCallId.c_str(), pszFrom, "csp",
+                               "SIP", szLabel, szSipBuf );
+        }
+    }
     return false;
 }
 
@@ -184,6 +213,24 @@ bool CSipServer::SendTimeout( int iThreadId, CSipMessage *pclsMessage ) {
 bool CSipServer::SendResponse( CSipMessage *pclsMessage, int iStatusCode ) {
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatusCode );
     if ( pclsResponse == NULL ) return false;
+
+    if ( gclsMsgLogger.IsEnabled() ) {
+        std::string strCallId;
+        pclsMessage->GetCallId( strCallId );
+        if ( !strCallId.empty() ) {
+            const char* pszTo = "ue";
+            if ( !pclsMessage->m_clsViaList.empty() &&
+                 pclsMessage->m_clsViaList.front().m_iPort == 5062 )
+                pszTo = "cwrtc";
+            char szLabel[64];
+            snprintf( szLabel, sizeof(szLabel), "%d %s",
+                      iStatusCode, pclsResponse->m_strReasonPhrase.c_str() );
+            char szSipBuf[8192];
+            pclsResponse->ToString( szSipBuf, sizeof(szSipBuf) );
+            gclsMsgLogger.Log( strCallId.c_str(), "csp", pszTo,
+                               "SIP", szLabel, szSipBuf );
+        }
+    }
 
     gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
 

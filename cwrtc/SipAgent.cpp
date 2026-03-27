@@ -251,6 +251,29 @@ bool CSipAgent::AcceptIncomingCall(const std::string& callId, const std::string&
             gclsSessionMap.UpdateCallRtpArg(callId, nullptr);
             CLog::Print(LOG_INFO, "AcceptIncomingCall: PTT RTP thread started for %s", callId.c_str());
         }
+
+        // PTT 그룹 내 다른 멤버들에게 참석 알림
+        {
+            std::vector<CCallSession> groupSessions;
+            gclsSessionMap.GetPttSessionsByGroup(sess.strPeerUserId, groupSessions);
+            for (const auto& other : groupSessions) {
+                if (other.strCallId == callId) continue;
+
+                // 기존 멤버 → 새 멤버 참석 알림
+                SimpleJson::JsonNode joinedOther;
+                joinedOther.Set("type",    "ptt_member_joined");
+                joinedOther.Set("call_id", other.strCallId);
+                joinedOther.Set("user_id", sess.strUserId);
+                SendWsJson(other.strWsIp, other.iWsPort, joinedOther.ToString());
+
+                // 새 멤버 → 기존 멤버 목록 알림
+                SimpleJson::JsonNode joinedSelf;
+                joinedSelf.Set("type",    "ptt_member_joined");
+                joinedSelf.Set("call_id", callId);
+                joinedSelf.Set("user_id", other.strUserId);
+                SendWsJson(sess.strWsIp, sess.iWsPort, joinedSelf.ToString());
+            }
+        }
         return true;
     }
 
@@ -449,6 +472,20 @@ void CSipAgent::EventCallEnd(const char* pszCallId, int iSipCode)
     if (!gclsSessionMap.GetCall(pszCallId, sess)) return;
 
     if (sess.pclsRtpArg) sess.pclsRtpArg->m_bStop = true;
+
+    // PTT: 그룹 내 다른 멤버들에게 이탈 알림 (DeleteCall 전에 조회)
+    if (sess.bPtt) {
+        std::vector<CCallSession> groupSessions;
+        gclsSessionMap.GetPttSessionsByGroup(sess.strPeerUserId, groupSessions);
+        for (const auto& other : groupSessions) {
+            if (other.strCallId == pszCallId) continue;
+            SimpleJson::JsonNode leftMsg;
+            leftMsg.Set("type",    "ptt_member_left");
+            leftMsg.Set("call_id", other.strCallId);
+            leftMsg.Set("user_id", sess.strUserId);
+            SendWsJson(other.strWsIp, other.iWsPort, leftMsg.ToString());
+        }
+    }
 
     SimpleJson::JsonNode msg;
     msg.Set("type",     "ended");

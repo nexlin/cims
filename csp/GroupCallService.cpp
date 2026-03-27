@@ -103,6 +103,24 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     return true;
 }
 
+void CGroupCallService::ClearUserCall( const std::string& strUserId )
+{
+    std::unique_lock<std::recursive_mutex> lock(m_mutex);
+    auto it = m_mapUserCall.find(strUserId);
+    if ( it == m_mapUserCall.end() ) return;
+
+    std::string strCallId = it->second;
+    CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing stale callId=%s before re-invite",
+                 strUserId.c_str(), strCallId.c_str() );
+
+    auto itSess = m_mapCallSession.find(strCallId);
+    if ( itSess != m_mapCallSession.end() ) {
+        gclsCmpClient.LeaveGroup( itSess->second.strGroupId, itSess->second.strSessionId );
+        m_mapCallSession.erase(itSess);
+    }
+    m_mapUserCall.erase(it);
+}
+
 /**
  * @brief Invite a member to a group call using Shared RTP Session
  */
@@ -292,14 +310,12 @@ void CGroupCallService::MonitorLoop() {
             CheckGroupIntegrity();
         }
 
-        // Heavy group config reload from disk only every 60s as a fallback
-        // (primary refresh path is OnGroupConfigChanged() called by CSC interface)
+        // Heavy group config reload every 60s — DB primary, file fallback (matches CspServer.cpp policy)
         if ( iTickSec % 60 == 0 ) {
-            if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
-                gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
-            }
             if ( gclsDbManager.IsConnected() ) {
                 gclsGroupMap.LoadFromDb();
+            } else if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
+                gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
             }
             SyncGroupsState();
             iTickSec = 0;
@@ -309,11 +325,10 @@ void CGroupCallService::MonitorLoop() {
 
 void CGroupCallService::OnGroupConfigChanged() {
     CLog::Print( LOG_INFO, "OnGroupConfigChanged: Reloading group config and re-syncing" );
-    if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
-        gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
-    }
     if ( gclsDbManager.IsConnected() ) {
         gclsGroupMap.LoadFromDb();
+    } else if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
+        gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
     }
     SyncGroupsState();
     CheckMemberState();

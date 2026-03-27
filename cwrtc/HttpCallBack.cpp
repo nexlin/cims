@@ -1,4 +1,5 @@
 #include "HttpCallBack.h"
+#include "MsgLogger.h"
 #include "HttpStatusCode.h"
 #include "FileUtility.h"
 #include "Directory.h"
@@ -94,6 +95,15 @@ bool CHttpCallBack::WebSocketData(const char* pszClientIp, int iClientPort,
     CLog::Print(LOG_NETWORK, "WS[%s:%d] recv: %s", pszClientIp, iClientPort, strData.c_str());
 
     SimpleJson::JsonNode msg = SimpleJson::JsonNode::Parse(strData);
+
+    // 메시지에 call_id 가 있으면 기록
+    if (gclsMsgLogger.IsEnabled() && msg.type == SimpleJson::JSON_OBJECT && msg.Has("call_id")) {
+        std::string strMsgCallId = msg.GetString("call_id");
+        std::string strMsgType   = msg.Has("type") ? msg.GetString("type") : "ws";
+        if (!strMsgCallId.empty())
+            gclsMsgLogger.Log( strMsgCallId.c_str(), "ue", "cwrtc",
+                               "WS", strMsgType.c_str(), strData.c_str() );
+    }
     if (msg.type != SimpleJson::JSON_OBJECT) return false;
 
     std::string strType = msg.GetString("type");
@@ -144,6 +154,13 @@ bool CHttpCallBack::WebSocketData(const char* pszClientIp, int iClientPort,
             return true;
         }
 
+        // PTT 착신 단말은 발신 불가 (이미 PTT 세션 활성 중이거나 PTT 클라이언트)
+        if (!cliCheck.strActiveCallId.empty()) {
+            CLog::Print(LOG_INFO, "WS[%s:%d] call rejected: already in active call", pszClientIp, iClientPort);
+            SendText(pszClientIp, iClientPort, R"({"type":"ended","reason":"busy"})");
+            return true;
+        }
+
         std::string strUserId = cliCheck.strUserId;
         if (strTo.empty() || strSdp.empty()) {
             SendText(pszClientIp, iClientPort, R"({"type":"ended","reason":"invalid"})");
@@ -185,6 +202,18 @@ bool CHttpCallBack::SendText(const char* pszClientIp, int iClientPort, const cha
 {
     int iLen = (int)strlen(pszText);
     CLog::Print(LOG_NETWORK, "WS[%s:%d] send: %s", pszClientIp, iClientPort, pszText);
+
+    if (gclsMsgLogger.IsEnabled()) {
+        SimpleJson::JsonNode sendMsg = SimpleJson::JsonNode::Parse(std::string(pszText, iLen));
+        if (sendMsg.type == SimpleJson::JSON_OBJECT && sendMsg.Has("call_id")) {
+            std::string strMsgCallId = sendMsg.GetString("call_id");
+            std::string strMsgType   = sendMsg.Has("type") ? sendMsg.GetString("type") : "ws";
+            if (!strMsgCallId.empty())
+                gclsMsgLogger.Log( strMsgCallId.c_str(), "cwrtc", "ue",
+                                   "WS", strMsgType.c_str(), pszText );
+        }
+    }
+
     return gclsHttpStack.SendWebSocketPacket(pszClientIp, iClientPort,
                                               const_cast<char*>(pszText), iLen);
 }

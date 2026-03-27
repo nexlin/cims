@@ -2,49 +2,43 @@ import { useEffect, useRef, useState } from 'react'
 import { PhoneClient } from '../lib/PhoneClient'
 import type { PhoneState, IncomingInfo } from '../lib/PhoneClient'
 import { useAuth } from '../contexts/AuthContext'
-import type { McpttUser } from '../contexts/AuthContext'
+import type { Subscription } from '../api/auth'
+import { idmsLogin } from '../api/idms'
 import { listMyGroups } from '../api/gms'
-import type { GmsGroup, GmsMember } from '../api/gms'
+import type { GmsGroup } from '../api/gms'
 
-// Vite 프록시 /cwrtc → ws://127.0.0.1:8080 (cwrtc WebSocket)
-// 페이지와 동일한 origin 사용 → HTTP/HTTPS 환경 무관
-const CWRTC_WS   = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/cwrtc`
-const CALL_DOMAIN = 'ims.mnc033.mcc450.3gppnetwork.org'
-const PTT_DOMAIN  = 'ptt.mnc033.mcc450.3gppnetwork.org'
+// Vite 프록시 /cwrtc → ws(s)://host/cwrtc
+const CWRTC_WS = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/cwrtc`
 
-const STATE_LABEL: Record<PhoneState, string> = {
-  disconnected: '연결 안됨',
-  connecting:   '연결 중...',
-  registering:  '등록 중...',
-  registered:   '대기',
-  calling:      '발신 중...',
-  ringing:      '벨 울리는 중...',
-  incoming:     '착신',
-  active:       '통화 중',
+// auth_id (e.g. "450033@ims.example.com") 에서 도메인 추출
+function domainOf(authId: string): string {
+  return authId.includes('@') ? authId.split('@')[1] : authId
 }
 
+const STATE_LABEL: Record<PhoneState, string> = {
+  disconnected: '연결 안됨',  connecting:  '연결 중...',
+  registering:  '등록 중...', registered:  '대기',
+  calling:      '발신 중...', ringing:     '벨 울리는 중...',
+  incoming:     '착신',       active:      '통화 중',
+}
 const STATE_COLOR: Record<PhoneState, string> = {
   disconnected: '#9ca3af', connecting:  '#d97706', registering: '#d97706',
   registered:   '#16a34a', calling:     '#2563eb', ringing:     '#2563eb',
   incoming:     '#dc2626', active:      '#16a34a',
 }
 
-// ── Call Panel ───────────────────────────────────────────────────────────────
+// ── Call Panel ────────────────────────────────────────────────────────────────
 
-interface Contact { name: string; msisdn: string }
-
-function CallPanel({ user }: { user: McpttUser }) {
+function CallPanel({ sub }: { sub: Subscription }) {
   const [state,    setState]    = useState<PhoneState>('disconnected')
   const [incoming, setIncoming] = useState<IncomingInfo | null>(null)
   const [dialTo,   setDialTo]   = useState('')
   const [activeTo, setActiveTo] = useState('')
   const [error,    setError]    = useState('')
-  const [contacts, setContacts] = useState<Contact[]>([])
 
   const clientRef = useRef<PhoneClient | null>(null)
   const audioRef  = useRef<HTMLAudioElement | null>(null)
 
-  // Init PhoneClient and auto-connect
   useEffect(() => {
     const client = new PhoneClient({
       onState: (s) => {
@@ -57,28 +51,9 @@ function CallPanel({ user }: { user: McpttUser }) {
     })
     clientRef.current = client
     if (audioRef.current) client.setAudioElement(audioRef.current)
-    client.connect(CWRTC_WS, user.phone_number, user.password, CALL_DOMAIN, user.phone_number)
+    client.connect(CWRTC_WS, sub.id, sub.passwd, domainOf(sub.auth_id), sub.auth_id)
     return () => { client.disconnect() }
-  }, [user.phone_number, user.password])
-
-  // Load contacts from GMS: collect unique members across all groups, excluding self
-  useEffect(() => {
-    listMyGroups(user.mcptt_id, user.access_token).then(groups => {
-      const seen = new Set<string>()
-      const list: Contact[] = []
-      for (const g of groups) {
-        for (const m of g.members) {
-          if (m.uri === user.mcptt_id) continue
-          const msisdn = m.uri.replace(/^tel:/, '')
-          if (!seen.has(msisdn)) {
-            seen.add(msisdn)
-            list.push({ name: m.name, msisdn })
-          }
-        }
-      }
-      setContacts(list)
-    }).catch(() => {})
-  }, [user.mcptt_id, user.access_token])
+  }, [sub.id, sub.passwd, sub.auth_id])
 
   function doCall(to: string) {
     const t = to.trim()
@@ -87,20 +62,15 @@ function CallPanel({ user }: { user: McpttUser }) {
     clientRef.current?.call(t)
   }
 
-  function handleAnswer() { clientRef.current?.answer(); setIncoming(null) }
-  function handleReject() { clientRef.current?.reject(); setIncoming(null) }
-  function handleHangup() { clientRef.current?.hangup() }
-
   const isBusy = state === 'calling' || state === 'ringing' || state === 'active'
 
   return (
     <div className="sp-panel">
       <audio ref={audioRef} autoPlay style={{ display: 'none' }} />
 
-      {/* ── Header ── */}
       <div className="sp-header">
         <span className="sp-badge sp-badge--call">📞 통화</span>
-        <span className="sp-number">{user.phone_number}</span>
+        <span className="sp-number">{sub.id}</span>
         <div className="sp-conn">
           <span className="sp-dot" style={{ background: STATE_COLOR[state] }} />
           <span className="sp-state">{STATE_LABEL[state]}</span>
@@ -109,49 +79,28 @@ function CallPanel({ user }: { user: McpttUser }) {
 
       {error && <div className="sp-error">{error}</div>}
 
-      {/* ── 착신 ── */}
       {state === 'incoming' && incoming && (
         <div className="sp-incoming">
           <div className="sp-incoming-from">📲 {incoming.from}</div>
           <div className="sp-incoming-btns">
-            <button className="btn btn--primary" onClick={handleAnswer}>📞 수신</button>
-            <button className="btn btn--danger"  onClick={handleReject}>📵 거절</button>
+            <button className="btn btn--primary"
+              onClick={() => { clientRef.current?.answer(); setIncoming(null) }}>📞 수신</button>
+            <button className="btn btn--danger"
+              onClick={() => { clientRef.current?.reject(); setIncoming(null) }}>📵 거절</button>
           </div>
         </div>
       )}
 
-      {/* ── 통화 중 ── */}
       {isBusy && (
         <div className="sp-active">
           <div className="sp-active-state">{STATE_LABEL[state]}</div>
           <div className="sp-active-peer">{activeTo}</div>
-          <button className="btn btn--danger" onClick={handleHangup}>📵 종료</button>
+          <button className="btn btn--danger" onClick={() => clientRef.current?.hangup()}>📵 종료</button>
         </div>
       )}
 
-      {/* ── 대기 중: 연락처 + 다이얼패드 ── */}
       {!isBusy && state !== 'incoming' && (
         <>
-          <div className="sp-section">연락처</div>
-          <div className="sp-contacts">
-            {contacts.length === 0
-              ? <div className="sp-empty-hint">연락처 없음</div>
-              : contacts.map(c => (
-                <div key={c.msisdn}
-                  className="sp-contact"
-                  onClick={() => state === 'registered' && doCall(c.msisdn)}
-                >
-                  <span className="sp-contact-name">{c.name}</span>
-                  <span className="sp-contact-num">{c.msisdn}</span>
-                  {state === 'registered' && (
-                    <button className="sp-contact-btn"
-                      onClick={e => { e.stopPropagation(); doCall(c.msisdn) }}>📞</button>
-                  )}
-                </div>
-              ))
-            }
-          </div>
-
           <div className="sp-section">전화 걸기</div>
           <div className="sp-dialpad">
             <div className="sp-dial-row">
@@ -183,21 +132,18 @@ function CallPanel({ user }: { user: McpttUser }) {
   )
 }
 
-// ── PTT Panel ────────────────────────────────────────────────────────────────
+// ── PTT Panel ─────────────────────────────────────────────────────────────────
 
 interface PttMember {
-  uri:       string   // full tel: URI
-  priority:  number
-  name:      string
-  connected: boolean
+  uri: string; priority: number; name: string; connected: boolean
 }
 
-type PttGroup = GmsGroup
-
-function PttPanel({ user }: { user: McpttUser }) {
+function PttPanel({ sub }: { sub: Subscription }) {
+  const [authStatus,    setAuthStatus]    = useState<'pending'|'ok'|'fail'>('pending')
+  const [accessToken,   setAccessToken]   = useState('')
   const [state,         setState]         = useState<PhoneState>('disconnected')
   const [error,         setError]         = useState('')
-  const [groups,        setGroups]        = useState<PttGroup[]>([])
+  const [groups,        setGroups]        = useState<GmsGroup[]>([])
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [members,       setMembers]       = useState<PttMember[]>([])
   const [speaker,       setSpeaker]       = useState<string | null>(null)
@@ -206,30 +152,35 @@ function PttPanel({ user }: { user: McpttUser }) {
   const clientRef      = useRef<PhoneClient | null>(null)
   const audioRef       = useRef<HTMLAudioElement | null>(null)
   const activeGroupRef = useRef<string | null>(null)
-  const groupsRef      = useRef<PttGroup[]>([])
+  const groupsRef      = useRef<GmsGroup[]>([])
   const membersRef     = useRef<PttMember[]>([])
   const floorOnRef     = useRef(false)
+  const stateRef       = useRef<PhoneState>('disconnected')
 
   useEffect(() => { activeGroupRef.current = activeGroupId }, [activeGroupId])
   useEffect(() => { groupsRef.current = groups }, [groups])
   useEffect(() => { membersRef.current = members }, [members])
   useEffect(() => { floorOnRef.current = floorOn }, [floorOn])
+  useEffect(() => { stateRef.current = state }, [state])
 
-  // 화자 변경 → 우선순위가 높은 사람이 발언 시 내 플로어 자동 해제
+  // Step 1: MCPTT IdMs 인증
   useEffect(() => {
-    if (!speaker || speaker === user.mcptt_id) return
-    if (!floorOnRef.current) return
-    const speakerMember = membersRef.current.find(m => m.uri === speaker)
-    const myMember      = membersRef.current.find(m => m.uri === user.mcptt_id)
-    if (speakerMember && myMember && speakerMember.priority < myMember.priority) {
-      setFloorOn(false)
-      floorOnRef.current = false
-      clientRef.current?.setPttFloor(false)
-    }
-  }, [speaker, user.mcptt_id])
+    const mcpttId = sub.id.startsWith('tel:') ? sub.id : `tel:${sub.id}`
+    idmsLogin(mcpttId, sub.passwd)
+      .then(tokens => {
+        setAccessToken(tokens.access_token)
+        setAuthStatus('ok')
+      })
+      .catch(err => {
+        setError(`IdMs 인증 실패: ${(err as Error).message}`)
+        setAuthStatus('fail')
+      })
+  }, [sub.id, sub.passwd])
 
-  // Init PhoneClient
+  // Step 2: PhoneClient 연결 (IdMs 인증 완료 후)
   useEffect(() => {
+    if (authStatus !== 'ok') return
+
     const client = new PhoneClient({
       onState: (s) => {
         setState(s)
@@ -245,6 +196,7 @@ function PttPanel({ user }: { user: McpttUser }) {
       },
       onIncoming: (info) => {
         if (info.ptt) {
+          // PTT 자동 수락
           client.answer().catch(() => {})
           const gid = info.from.replace(/^sip:/, '').split('@')[0]
           setActiveGroupId(gid); activeGroupRef.current = gid
@@ -253,55 +205,69 @@ function PttPanel({ user }: { user: McpttUser }) {
       onError: (msg) => { setError(msg); setTimeout(() => setError(''), 6000) },
       onFloor: (spk) => setSpeaker(spk),
       onMemberStatus: (userId, connected) => {
-        setMembers(ms => ms.map(m => m.uri === userId ? { ...m, connected } : m))
+        // GMS uri = "tel:+82...", cwrtc user_id = "+82..." → 정규화 비교
+        const bare = (id: string) => id.replace(/^tel:/, '').replace(/^sip:/, '').split('@')[0]
+        const uid = bare(userId)
+        setMembers(ms => ms.map(m => bare(m.uri) === uid ? { ...m, connected } : m))
       },
     })
     clientRef.current = client
     if (audioRef.current) client.setAudioElement(audioRef.current)
-    client.connect(CWRTC_WS, user.phone_number, user.password, PTT_DOMAIN, user.phone_number)
+    client.connect(CWRTC_WS, sub.id, sub.passwd, domainOf(sub.auth_id), sub.auth_id)
     return () => { client.disconnect() }
-  }, [user.phone_number, user.password])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStatus])
 
-  // Load groups from GMS; filter to groups where self is a member
+  // Step 3: 그룹 목록 로드 (access_token 확보 후)
   useEffect(() => {
-    listMyGroups(user.mcptt_id, user.access_token).then(all => {
-      setGroups(all.filter(g => g.members.some((m: GmsMember) => m.uri === user.mcptt_id)))
-    }).catch(() => {})
-  }, [user.mcptt_id, user.access_token])
+    if (!accessToken) return
+    const mcpttId = sub.id.startsWith('tel:') ? sub.id : `tel:${sub.id}`
+    listMyGroups(mcpttId, accessToken)
+      .then(all => setGroups(all))
+      .catch(() => {})
+  }, [accessToken, sub.id])
 
-  // 활성 그룹 멤버 목록 갱신
+  // 활성 그룹 멤버 목록 갱신 (activeGroupId 또는 groups 변경 시 재실행)
   useEffect(() => {
     if (!activeGroupId) { setMembers([]); return }
-    const g = groupsRef.current.find(g => g.id === activeGroupId)
+    const g = groups.find(g => g.id === activeGroupId)
     if (!g) { setMembers([]); return }
-    const ms: PttMember[] = g.members
-      .slice()
-      .sort((a, b) => a.priority - b.priority)
-      .map(m => ({ uri: m.uri, priority: m.priority, name: m.name || m.uri, connected: false }))
-    setMembers(ms)
-    membersRef.current = ms
-  }, [activeGroupId])
+    const bare = (id: string) => id.replace(/^tel:/, '').replace(/^sip:/, '').split('@')[0]
+    const myId = bare(sub.id)
+    const isActive = stateRef.current === 'active'
+    const ms = g.members.slice().sort((a, b) => a.priority - b.priority)
+      .map(m => {
+        const prev = membersRef.current.find(em => em.uri === m.uri)
+        // 본인이고 active 상태면 connected=true, 아니면 기존 상태 보존
+        const connected = (isActive && bare(m.uri) === myId) || (prev?.connected ?? false)
+        return { uri: m.uri, priority: m.priority, name: m.name || m.uri, connected }
+      })
+    setMembers(ms); membersRef.current = ms
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroupId, groups])
 
-  // 등록 완료 후 첫 번째 그룹 자동 접속
+  // state → active/registered 전환 시 본인 connected 상태 동기화
   useEffect(() => {
-    if (state === 'registered' && groupsRef.current.length > 0 && !activeGroupRef.current) {
-      doJoin(groupsRef.current[0].id)
+    const bare = (id: string) => id.replace(/^tel:/, '').replace(/^sip:/, '').split('@')[0]
+    const myId = bare(sub.id)
+    if (state === 'active') {
+      setMembers(ms => ms.map(m => bare(m.uri) === myId ? { ...m, connected: true } : m))
     }
+    // registered 전환(통화 종료)은 onState 핸들러에서 전체 false 처리
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
 
-  function doJoin(groupId: string) {
-    const client = clientRef.current
-    if (!client) return
-    const cur = client.getState()
-    if (cur === 'active' || cur === 'calling' || cur === 'ringing') {
-      client.hangup()
-      setTimeout(() => { setActiveGroupId(groupId); activeGroupRef.current = groupId; setSpeaker(null); setFloorOn(false); client.call(groupId) }, 300)
-    } else if (cur === 'registered') {
-      setActiveGroupId(groupId); activeGroupRef.current = groupId; setSpeaker(null); setFloorOn(false)
-      client.call(groupId)
+  // 고우선순위 화자 발언 시 내 플로어 자동 해제
+  useEffect(() => {
+    if (!speaker || speaker === sub.id) return
+    if (!floorOnRef.current) return
+    const spkMember = membersRef.current.find(m => m.uri === speaker)
+    const myMember  = membersRef.current.find(m => m.uri === sub.id || m.uri === `tel:${sub.id}`)
+    if (spkMember && myMember && spkMember.priority < myMember.priority) {
+      setFloorOn(false); floorOnRef.current = false
+      clientRef.current?.setPttFloor(false)
     }
-  }
+  }, [speaker, sub.id])
 
   function handleLeave() {
     clientRef.current?.hangup()
@@ -317,125 +283,151 @@ function PttPanel({ user }: { user: McpttUser }) {
 
   const inCall = state === 'active' || state === 'calling' || state === 'ringing'
 
+  // SIP 등록 완료 여부 (통화 중이어도 등록 상태는 유지됨)
+  const isSipRegistered = state !== 'disconnected' && state !== 'connecting' && state !== 'registering'
+  const regDotColor  = isSipRegistered ? '#16a34a' : (state === 'disconnected' ? '#9ca3af' : '#d97706')
+  const regLabel     = isSipRegistered ? '등록됨'  : STATE_LABEL[state]
+
   return (
     <div className="sp-panel">
       <audio ref={audioRef} autoPlay style={{ display: 'none' }} />
 
-      {/* ── Header ── */}
       <div className="sp-header">
         <span className="sp-badge sp-badge--ptt">🎙 PTT</span>
-        <span className="sp-number">{user.phone_number}</span>
+        <span className="sp-number">{sub.id}</span>
         <div className="sp-conn">
-          <span className="sp-dot" style={{ background: STATE_COLOR[state] }} />
-          <span className="sp-state">{STATE_LABEL[state]}</span>
+          {authStatus === 'pending'
+            ? <span className="sp-state" style={{ color: '#d97706' }}>인증 중...</span>
+            : authStatus === 'fail'
+            ? <span className="sp-state" style={{ color: '#dc2626' }}>인증 실패</span>
+            : <>
+                <span className="sp-dot" style={{ background: regDotColor }} />
+                <span className="sp-state">{regLabel}</span>
+              </>
+          }
         </div>
       </div>
 
       {error && <div className="sp-error">{error}</div>}
 
-      {/* ── 그룹 목록 ── */}
-      <div className="sp-section">PTT 그룹</div>
-      <div className="sp-groups">
-        {groups.length === 0
-          ? <div className="sp-empty-hint">소속 그룹 없음</div>
-          : groups.map(g => {
-            const isActive = g.id === activeGroupId
-            return (
-              <div key={g.id}>
-                {/* 그룹 헤더 행 */}
-                <div
-                  className={`sp-group${isActive ? ' sp-group--active' : ''}`}
-                  onClick={() => !isActive && state === 'registered' && doJoin(g.id)}
-                  style={{ cursor: !isActive && state === 'registered' ? 'pointer' : 'default' }}
-                >
-                  <span className="sp-group-dot"
-                    style={{ background: isActive ? STATE_COLOR[state] : '#d1d5db' }} />
-                  <div className="sp-group-info">
-                    <span className="sp-group-name">{g.display_name}</span>
-                    <span className="sp-group-id">{g.id}</span>
-                  </div>
-                  <span className="sp-group-state">
-                    {isActive ? STATE_LABEL[state] : '미접속'}
-                  </span>
-                  {!isActive && state === 'registered' && (
-                    <button className="btn btn--sm btn--outline sp-join-btn"
-                      onClick={e => { e.stopPropagation(); doJoin(g.id) }}>접속</button>
-                  )}
-                  {isActive && inCall && (
-                    <button className="btn btn--sm btn--danger sp-join-btn"
-                      onClick={e => { e.stopPropagation(); handleLeave() }}>나가기</button>
-                  )}
-                </div>
-
-                {/* 활성 그룹 멤버 목록 */}
-                {isActive && members.length > 0 && (
-                  <div className="sp-members">
-                    <div className="sp-members-head">
-                      <span className="sp-mh-pri">우선</span>
-                      <span className="sp-mh-name">이름 / 번호</span>
-                      <span className="sp-mh-status">상태</span>
+      {authStatus === 'ok' && (
+        <>
+          <div className="sp-section">PTT 그룹</div>
+          <div className="sp-groups">
+            {groups.length === 0
+              ? <div className="sp-empty-hint">소속 그룹 없음</div>
+              : groups.map(g => {
+                const isActive = g.id === activeGroupId
+                const totalCount = g.members.length || g.member_count
+                const connectedCount = isActive ? members.filter(m => m.connected).length : 0
+                return (
+                  <div key={g.id}>
+                    <div
+                      className={`sp-group${isActive ? ' sp-group--active' : ''}`}
+                      style={{ cursor: 'default' }}
+                    >
+                      <span className="sp-group-dot"
+                        style={{ background: isActive && state === 'active' ? '#16a34a' : isActive ? '#d97706' : '#d1d5db' }} />
+                      <div className="sp-group-info">
+                        <span className="sp-group-name">{g.display_name}</span>
+                        <span className="sp-group-id">{g.id}</span>
+                      </div>
+                      <span className="sp-group-state">
+                        {isActive && state === 'active'
+                          ? `${connectedCount}/${totalCount}명`
+                          : `0/${totalCount}명`}
+                      </span>
+                      {isActive && inCall && (
+                        <button className="btn btn--sm btn--danger sp-join-btn"
+                          onClick={e => { e.stopPropagation(); handleLeave() }}>나가기</button>
+                      )}
                     </div>
-                    {members.map(m => {
-                      const isSpeaker = m.uri === speaker
-                      const isMe      = m.uri === user.mcptt_id
-                      return (
-                        <div key={m.uri}
-                          className={`sp-member${isSpeaker ? ' sp-member--speaker' : ''}${isMe ? ' sp-member--me' : ''}`}
-                        >
-                          <span className="sp-m-pri">{m.priority}</span>
-                          <div className="sp-m-info">
-                            <span className="sp-m-name">
-                              {m.name}{isMe && <span className="sp-me-tag">나</span>}
-                            </span>
-                            <span className="sp-m-id">{m.uri}</span>
-                          </div>
-                          <div className="sp-m-status">
-                            {isSpeaker
-                              ? <span className="sp-speaker-badge">🎤 화자</span>
-                              : <span className="sp-conn-dot"
-                                  style={{ background: m.connected ? '#16a34a' : '#d1d5db' }} />
-                            }
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })
-        }
-      </div>
 
-      {/* ── PTT Toggle 버튼 ── */}
-      <div className="sp-ptt-footer">
-        {state === 'active' && activeGroupId ? (
-          <button
-            className={`sp-push-btn${floorOn ? ' sp-push-btn--on' : ''}`}
-            onClick={handleFloorToggle}
-          >
-            {floorOn ? '🔴 PUSH (송신 중)' : '⚫ PUSH'}
-          </button>
-        ) : (state === 'calling' || state === 'ringing') ? (
-          <div className="sp-ptt-waiting">{STATE_LABEL[state]}</div>
-        ) : (
-          <div className="sp-ptt-waiting">그룹에 접속하세요</div>
-        )}
-      </div>
+                    {isActive && members.length > 0 && (
+                      <div className="sp-members">
+                        <div className="sp-members-head">
+                          <span className="sp-mh-pri">우선</span>
+                          <span className="sp-mh-name">이름 / 번호</span>
+                          <span className="sp-mh-status">상태</span>
+                        </div>
+                        {members.map(m => {
+                          const isSpeaker = m.uri === speaker
+                          const isMe      = m.uri === sub.id || m.uri === `tel:${sub.id}`
+                          return (
+                            <div key={m.uri}
+                              className={`sp-member${isSpeaker ? ' sp-member--speaker' : ''}${isMe ? ' sp-member--me' : ''}`}
+                            >
+                              <span className="sp-m-pri">{m.priority}</span>
+                              <div className="sp-m-info">
+                                <span className="sp-m-name">
+                                  {m.name}{isMe && <span className="sp-me-tag">나</span>}
+                                </span>
+                                <span className="sp-m-id">{m.uri}</span>
+                              </div>
+                              <div className="sp-m-status">
+                                {isSpeaker
+                                  ? <span className="sp-speaker-badge">🎤 화자</span>
+                                  : <span className="sp-conn-dot"
+                                      style={{ background: m.connected ? '#16a34a' : '#d1d5db' }} />
+                                }
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            }
+          </div>
+
+          <div className="sp-ptt-footer">
+            {state === 'active' && activeGroupId
+              ? <button
+                  className={`sp-push-btn${floorOn ? ' sp-push-btn--on' : ''}`}
+                  onClick={handleFloorToggle}
+                >
+                  {floorOn ? '🔴 PUSH (송신 중)' : '⚫ PUSH'}
+                </button>
+              : (state === 'calling' || state === 'ringing')
+              ? <div className="sp-ptt-waiting">{STATE_LABEL[state]}</div>
+              : <div className="sp-ptt-waiting">착신 대기 중</div>
+            }
+          </div>
+        </>
+      )}
     </div>
   )
 }
 
-// ── Main Page ────────────────────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function PhonePage() {
   const { user } = useAuth()
   if (!user) return null
 
+  const hasCall = user.call_subscriptions.length > 0
+  const hasPtt  = user.ptt_subscriptions.length  > 0
+
+  if (!hasCall && !hasPtt) {
+    return (
+      <div className="sp-page">
+        <div className="sp-empty-hint" style={{ padding: '2rem' }}>
+          등록된 VoIP / PTT 번호가 없습니다.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="sp-page">
-      <CallPanel user={user} />
-      <PttPanel  user={user} />
+      {user.call_subscriptions.map(sub => (
+        <CallPanel key={sub.id} sub={sub} />
+      ))}
+      {user.ptt_subscriptions.map(sub => (
+        <PttPanel key={sub.id} sub={sub} />
+      ))}
     </div>
   )
 }

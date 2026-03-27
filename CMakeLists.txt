@@ -295,6 +295,7 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csc/cert
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csc/log
 
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/ext_mnt
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/console
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/phone
 
@@ -328,6 +329,8 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem  ${CMAKE_BINARY_DIR}/dist/csp/cert/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem  ${CMAKE_BINARY_DIR}/dist/cwrtc/cert/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem  ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/cert/server.key ${CMAKE_BINARY_DIR}/dist/csc/cert/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/cert/server.crt ${CMAKE_BINARY_DIR}/dist/csc/cert/
 
     # ── 6. CSC Python 소스 복사 ────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/bin/csc_pihttp/src ${CMAKE_BINARY_DIR}/dist/csc/src

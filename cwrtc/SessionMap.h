@@ -2,6 +2,7 @@
 #include "SipMutex.h"
 #include <string>
 #include <map>
+#include <vector>
 
 struct CRtpThreadArg;  // forward declaration
 
@@ -66,6 +67,8 @@ public:
     bool   UpdateCallBrowserSdp(const std::string& callId, const std::string& sdp);
     bool   DeleteCall(const std::string& callId);
     void   ClearUserActiveCall(const std::string& userId);
+    /** PTT 그룹 ID(strPeerUserId)가 일치하는 활성 통화 세션 목록 반환 */
+    void   GetPttSessionsByGroup(const std::string& groupId, std::vector<CCallSession>& out);
 
 private:
     // key: userId

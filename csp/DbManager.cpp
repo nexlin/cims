@@ -267,6 +267,65 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
     return true;
 }
 
+bool CDbManager::LoadAllUsers( CspUserMap& clsMap )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    int count = 0;
+    const char* aTables[] = { "voip_subscriptions", "ptt_subscriptions" };
+    const char* aTypes[]  = { "voip", "ptt" };
+
+    for (int i = 0; i < 2; ++i) {
+        std::string strSql =
+            std::string("SELECT s.id, u.name, u.org_id, s.auth_id, s.passwd, s.dnd, s.forward_id, u.id "
+            "FROM ") + aTables[i] + " s JOIN users u ON s.user_id = u.id";
+
+        MYSQL_RES* pRes = ExecuteSelect(strSql);
+        if (!pRes) continue;
+
+        MYSQL_ROW row;
+        while ((row = mysql_fetch_row(pRes)) != nullptr) {
+            CspUser clsUser;
+            clsUser.m_strId             = row[0] ? row[0] : "";
+            clsUser.m_strServiceType    = aTypes[i];
+            clsUser.m_strName           = row[1] ? row[1] : "";
+            clsUser.m_strOrganizationId = row[2] ? row[2] : "";
+            clsUser.m_strAuthId         = row[3] ? row[3] : "";
+            clsUser.m_strPassWord       = row[4] ? row[4] : "";
+            clsUser.m_bDnd              = row[5] ? (atoi(row[5]) != 0) : false;
+            clsUser.m_strForward        = row[6] ? row[6] : "";
+            clsUser._loadTime           = time(nullptr);
+            if (!clsUser.m_strId.empty()) {
+                clsMap.Insert(clsUser);
+                ++count;
+            }
+        }
+        mysql_free_result(pRes);
+    }
+
+    CLog::Print(LOG_INFO, "[DB] LoadAllUsers: %d users loaded", count);
+    return count > 0;
+}
+
+bool CDbManager::SelectGroupsByUser( const std::string& strUserId, std::vector<std::string>& vecGroupIds )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    std::string strSql =
+        "SELECT group_id FROM ptt_group_members WHERE user_id='" + Escape(strUserId) + "'";
+    MYSQL_RES* pRes = ExecuteSelect(strSql);
+    if (!pRes) return false;
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(pRes)) != nullptr) {
+        if (row[0]) vecGroupIds.push_back(row[0]);
+    }
+    mysql_free_result(pRes);
+    return true;
+}
+
 bool CDbManager::LoadAllGroups( CGroupMap& clsMap )
 {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);

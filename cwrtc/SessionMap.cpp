@@ -165,3 +165,13 @@ void CSessionMap::ClearUserActiveCall(const std::string& userId)
     if (it != m_clsClientMap.end()) it->second.strActiveCallId = "";
     m_clsMutex.release();
 }
+
+void CSessionMap::GetPttSessionsByGroup(const std::string& groupId, std::vector<CCallSession>& out)
+{
+    m_clsMutex.acquire();
+    for (auto const& kv : m_clsCallMap) {
+        if (kv.second.bPtt && kv.second.strPeerUserId == groupId)
+            out.push_back(kv.second);
+    }
+    m_clsMutex.release();
+}

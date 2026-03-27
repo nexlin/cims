@@ -153,6 +153,9 @@ public:
     /** 로그 폴더 */
     std::string m_strLogFolder;
 
+    /** 메시지 로그 공유 스토리지 디렉터리 (ext_mnt 루트, 비어 있으면 비활성화) */
+    std::string m_strMsgLogDir;
+
     /** 로그 레벨 */
     int m_iLogLevel;
 

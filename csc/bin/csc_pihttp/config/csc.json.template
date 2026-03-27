@@ -38,5 +38,6 @@
     "CspNotify": {
         "Ip": "@CSP_IP@",
         "Port": 4421
-    }
+    },
+    "MsgLogDir": "@MSG_LOG_DIR@"
 }

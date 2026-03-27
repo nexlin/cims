@@ -66,6 +66,11 @@ bool CCwrtcSetup::Load(const char* pszConfigFile)
         if (log.Has("Dir")) m_strLogDir = log.GetString("Dir");
     }
 
+    SimpleJson::JsonNode msglog = setup.Get("MsgLog");
+    if (msglog.type == SimpleJson::JSON_OBJECT) {
+        if (msglog.Has("Dir")) m_strMsgLogDir = msglog.GetString("Dir");
+    }
+
     CLog::Print(LOG_INFO, "CwrtcSetup: LocalIp=%s WsPort=%d SipIp=%s:%d Domain=%s SipLocalPort=%d RtpBase=%d",
         m_strLocalIp.c_str(), m_iWsPort,
         m_strSipIp.c_str(), m_iSipPort, m_strSipDomain.c_str(), m_iSipLocalPort,

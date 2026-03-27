@@ -190,6 +190,11 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (cdr.Has("Folder")) m_strCdrFolder = cdr.GetString("Folder");
             }
 
+            if (setup.Has("MsgLog")) {
+                SimpleJson::JsonNode msglog = setup.Get("MsgLog");
+                if (msglog.Has("Dir")) m_strMsgLogDir = msglog.GetString("Dir");
+            }
+
             // Monitor
             m_clsMonitorIpMap.DeleteAll();
             if (setup.Has("Monitor")) {

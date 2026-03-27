@@ -17,6 +17,7 @@
  */
 #include "CspServer.h"
 
+#include "MsgLogger.h"
 #include "CallMap.h"
 #include "CmpClient.h"
 #include "DbManager.h"
@@ -59,6 +60,7 @@ int ServiceMain() {
     }
     CLog::SetPrefix( "csp" );
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
+    gclsMsgLogger.Init( gclsSetup.m_strMsgLogDir, "csp" );
     CLog::Print( LOG_SYSTEM, "CspServer is started ( version-%s %s %s )", CSP_SERVER_VERSION, __DATE__, __TIME__ );
     CLog::Print( LOG_DEBUG, "CspServer[%s]", CDirectory::GetProgramDirectory() );
     if ( gclsSetup.m_strCdrFolder.empty() == false ) {
@@ -120,23 +122,22 @@ int ServiceMain() {
         }
     }
 
-    // Load groups: files first (base), then DB (overwrites — DB has higher priority)
-    if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
-        CLog::Print( LOG_SYSTEM, "Loading GroupMap from %s...", gclsSetup.m_strGroupDataFolder.c_str() );
+    // Load groups: DB primary, file fallback
+    if ( gclsDbManager.IsConnected() ) {
+        CLog::Print( LOG_SYSTEM, "Loading GroupMap from DB (primary)..." );
+        gclsGroupMap.LoadFromDb();
+    } else if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
+        CLog::Print( LOG_SYSTEM, "Loading GroupMap from files (DB unavailable): %s", gclsSetup.m_strGroupDataFolder.c_str() );
         gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
     }
-    if ( gclsDbManager.IsConnected() ) {
-        CLog::Print( LOG_SYSTEM, "Loading GroupMap from DB..." );
-        gclsGroupMap.LoadFromDb();
-    }
 
-    // Load users: files first (base), DB used on-demand with higher priority
-    if ( gclsSetup.m_strUserDataFolder.length() > 0 ) {
-        CLog::Print( LOG_SYSTEM, "Loading CspUserMap from %s...", gclsSetup.m_strUserDataFolder.c_str() );
-        gclsCspUserMap.Load( gclsSetup.m_strUserDataFolder.c_str() );
-    }
+    // Load users: DB primary, file fallback
     if ( gclsDbManager.IsConnected() ) {
-        CLog::Print( LOG_SYSTEM, "User data: DB active (on-demand, takes priority over files)" );
+        CLog::Print( LOG_SYSTEM, "Loading CspUserMap from DB (primary)..." );
+        gclsCspUserMap.LoadFromDb();
+    } else if ( gclsSetup.m_strUserDataFolder.length() > 0 ) {
+        CLog::Print( LOG_SYSTEM, "Loading CspUserMap from files (DB unavailable): %s", gclsSetup.m_strUserDataFolder.c_str() );
+        gclsCspUserMap.Load( gclsSetup.m_strUserDataFolder.c_str() );
     }
 
     {
@@ -178,11 +179,10 @@ int ServiceMain() {
         if ( iSecond % 60 == 0 ) {
             gclsSipServerMap.Load();
             gclsSipServerMap.SetSipUserAgentRegisterInfo();
-            if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
-                gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
-            }
             if ( gclsDbManager.IsConnected() ) {
                 gclsGroupMap.LoadFromDb();
+            } else if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
+                gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
             }
         }
         if ( iSecond == 3600 ) {

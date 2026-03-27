@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 
 export default function LoginPage() {
   const { login } = useAuth()
-  const [phone,   setPhone]   = useState('')
+  const [email,   setEmail]   = useState('')
   const [pw,      setPw]      = useState('')
   const [error,   setError]   = useState('')
   const [loading, setLoading] = useState(false)
@@ -11,10 +11,10 @@ export default function LoginPage() {
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    if (!phone || !pw) { setError('전화번호와 비밀번호를 입력하세요'); return }
+    if (!email || !pw) { setError('이메일과 비밀번호를 입력하세요'); return }
     setLoading(true)
     try {
-      await login(phone, pw)
+      await login(email, pw)
     } catch (err: unknown) {
       setError((err as Error).message)
     } finally { setLoading(false) }
@@ -29,12 +29,13 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleLogin} className="auth-form">
-          <h2 className="auth-title">MCPTT 로그인</h2>
+          <h2 className="auth-title">로그인</h2>
           <input
             className="form-input"
-            placeholder="MCPTT ID (전화번호) — 예: +82571900001"
-            value={phone}
-            onChange={e => setPhone(e.target.value)}
+            type="email"
+            placeholder="이메일"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
             autoFocus
           />
           <input
@@ -46,7 +47,7 @@ export default function LoginPage() {
           />
           {error && <div className="auth-error">{error}</div>}
           <button className="btn btn--primary" type="submit" disabled={loading}>
-            {loading ? '로그인 중...' : 'MCPTT 로그인'}
+            {loading ? '로그인 중...' : '로그인'}
           </button>
         </form>
       </div>

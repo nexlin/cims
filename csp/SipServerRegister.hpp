@@ -1,6 +1,7 @@
 #include "GroupCallService.h"
 #include "GroupMap.h"
 #include "CspPttGroup.h"
+#include "DbManager.h"
 
 bool AddChallenge( CSipMessage * psttResponse )
 {
@@ -246,16 +247,32 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		if ( clsUser.m_strServiceType == "ptt" || clsUser.m_strServiceType == "both" ) {
 			std::string strUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
 			CLog::Print( LOG_INFO, "RecvRequestRegister: PTT user(%s) registered, auto-joining groups", strUserId.c_str() );
-			gclsGroupMap.IterateInternal( [&strUserId]( const CspPttGroup& group ) {
-				for ( const auto& pUser : group._pusers ) {
-					if ( pUser && pUser->_id == strUserId ) {
-						CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s)",
-						             strUserId.c_str(), group._id.c_str() );
-						gclsGroupCallService.InviteMember( strUserId.c_str(), group._id.c_str() );
-						break;
-					}
+
+			// WS 재연결 레이스 처리: 이전 세션의 stale callId 항목을 먼저 제거
+			gclsGroupCallService.ClearUserCall( strUserId );
+
+			// DB가 연결된 경우 직접 조회 (메모리 맵 stale 방지)
+			if ( gclsDbManager.IsConnected() ) {
+				std::vector<std::string> vecGroupIds;
+				gclsDbManager.SelectGroupsByUser( strUserId, vecGroupIds );
+				for ( const auto& gid : vecGroupIds ) {
+					CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s) [DB]",
+					             strUserId.c_str(), gid.c_str() );
+					gclsGroupCallService.InviteMember( strUserId.c_str(), gid.c_str() );
 				}
-			} );
+			} else {
+				// DB 미연결 시 메모리 맵 사용 (파일 폴백)
+				gclsGroupMap.IterateInternal( [&strUserId]( const CspPttGroup& group ) {
+					for ( const auto& pUser : group._pusers ) {
+						if ( pUser && pUser->_id == strUserId ) {
+							CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s) [map]",
+							             strUserId.c_str(), group._id.c_str() );
+							gclsGroupCallService.InviteMember( strUserId.c_str(), group._id.c_str() );
+							break;
+						}
+					}
+				} );
+			}
 		}
 	}
 	else
