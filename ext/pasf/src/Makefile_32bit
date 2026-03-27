@@ -1,0 +1,40 @@
+
+CFLAGS = -g -DDEBUG -DUSE_STD_SHARED_PTR -DPDEBUG
+
+CC = gcc
+CXX = g++ -m32
+AR  = ar
+
+#OBJS	= prunnable.o pworker.o phandler.o pevent.o psocket.o ptcpcliaio.o ptcpsrvaio.o 
+OBJS	= pworker.o phandler.o pmodule.o prunnable.o pipcaio.o psocket.o ptcpcliaio.o ptcpclihandler.o ptcpsrvaio.o ptcpsrvhandler.o ptcpsrvsockhandler.o pudpaio.o pudphandler.o
+#OBJS	= pworker.o phandler.o pmodule.o psocket.o pstream.o ptcpcliaio.o ptcpsrvaio.o ptcpclihdl.o ptcpsrvhdl.o
+SRCS = $(OBJS:.o=.cpp)
+
+
+# base include
+
+INCS = -I./include -I../include
+LIBS = 
+
+TARGET = libpasf.a
+TDIR = ../lib
+
+.SUFFIXES : .c .cpp .o
+.c.o:
+	$(CC) $(CFLAGS) $(INCS)-c -o $*.o $<
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(AR) -r $(TDIR)/$(TARGET) $(OBJS)
+
+.cpp.o:
+	$(CXX) $(CFLAGS) $(INCS) -c -o $*.o $<
+
+clean:
+	rm -f $(TDIR)/$(TARGET) $(OBJS) core.* 
+ 
+
+dep :
+	gccmakedep $(INCS) $(SRCS)
+

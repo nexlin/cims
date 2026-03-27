@@ -29,7 +29,13 @@ csp/psip_build/
 csp/dist/
 
 # External dependencies (build artifacts, source archives)
-ext/
+# 빌드시 자동 다운로드되는 항목만 제외 (opencore-amr, vo-amrwbenc, pasf 등은 git에 포함)
+ext/googletest/
+ext/oneTBB_down/
+ext/alsa-lib-*/
+ext/alsa-lib-*.tar.bz2
+ext/alsa-lib-build/
+ext/ffmpeg-*/
 
 # Test run logs
 test_run/log/

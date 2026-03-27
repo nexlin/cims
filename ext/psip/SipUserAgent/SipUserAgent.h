@@ -1,0 +1,154 @@
+#ifndef _SIP_USER_AGENT_H_
+#define _SIP_USER_AGENT_H_
+
+#include "SipStack.h"
+#include "SipServerInfo.h"
+#include "SipUserAgentCallBack.h"
+#include "SipDialog.h"
+
+
+class CSipCallRoute
+{
+public:
+	CSipCallRoute() : m_iDestPort(0), m_eTransport( E_SIP_UDP ), m_b100rel(false)
+	{}
+
+	std::string	m_strDestIp;
+
+	int					m_iDestPort;
+
+	ESipTransport	m_eTransport;
+
+	bool				m_b100rel;
+};
+
+typedef MAP< std::string, CSipDialog > SIP_DIALOG_MAP;
+
+typedef std::list< std::string > SIP_CALL_ID_LIST;
+
+class CSipUserAgent : public ISipStackCallBack
+{
+public:
+	CSipUserAgent();
+	~CSipUserAgent();
+
+	// SipUserAgentLogin.hpp : �α��� ����
+	bool InsertRegisterInfo( CSipServerInfo & clsInfo );
+	bool UpdateRegisterInfo( CSipServerInfo & clsInfo );
+	bool DeleteRegisterInfo( CSipServerInfo & clsInfo );
+
+	bool Start( CSipStackSetup & clsSetup, ISipUserAgentCallBack * pclsCallBack, ISipStackSecurityCallBack * pclsSecurityCallBack = NULL );
+	bool Stop( );
+	void Final();
+
+	bool StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId );
+	bool StopCall( const char * pszCallId, int iSipCode = 0 );
+	bool StopCall( const char * pszCallId, const char * pszForward );
+	bool RingCall( const char * pszCallId, CSipCallRtp * pclsRtp );
+	bool RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp );
+	bool AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp );
+
+	bool HoldCall( const char * pszCallId, ERtpDirection eDirection = E_RTP_SEND );
+	bool ResumeCall( const char * pszCallId );
+
+	int GetCallCount( );
+	void GetCallIdList( SIP_CALL_ID_LIST & clsList );
+	void StopCallAll( );
+
+	bool CreateCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId, CSipMessage ** ppclsInvite );
+	bool StartCall( const char * pszCallId, CSipMessage * pclsInvite );
+	bool Delete( const char * pszCallId );
+
+	bool TransferCallBlind( const char * pszCallId, const char * pszTo );
+	bool TransferCall( const char * pszCallId, const char * pszToCallId );
+
+	// SipStackAgentSms.hpp
+	bool SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute );
+
+	// SipUserAgentSend.hpp
+	bool SendReInvite( const char * pszCallId, CSipCallRtp * pclsRtp );
+	bool SendNotify( const char * pszCallId, int iSipCode );
+	bool SendDtmf( const char * pszCallId, char cDtmf );
+	bool SendPrack( const char * pszCallId, CSipCallRtp * pclsRtp );
+
+	// SipUserAgentUtil.hpp
+	bool GetRemoteCallRtp( const char * pszCallId, CSipCallRtp * pclsRtp );
+	bool GetToId( const char * pszCallId, std::string & strToId );
+	bool GetFromId( const char * pszCallId, std::string & strFromId );
+	bool GetContact( const char * pszCallId, CSipCallRoute * pclsRoute );
+	bool GetCdr( const char * pszCallId, CSipCdr * pclsCdr );
+	bool GetInviteHeaderValue( const char * pszCallId, const char * pszHeaderName, std::string & strValue );
+	int GetRSeq( const char * pszCallId );
+
+	void SetRSeq( const char * pszCallId, int iRSeq );
+
+	bool IsRingCall( const char * pszCallId, const char * pszTo );
+	bool Is100rel( const char * pszCallId );
+	bool IsHold( const char * pszCallId );
+	bool IsConnected( const char * pszCallId );
+
+	CSipMessage * DeleteIncomingCall( const char * pszCallId );
+
+	// SipUserAgentMonitor.hpp
+	void GetDialogString( CMonitorString & strBuf );
+	void GetServerString( CMonitorString & strBuf );
+
+	// SipUserAgentSipStack.hpp : ISipStackCallBack 
+	virtual bool RecvRequest( int iThreadId, CSipMessage * pclsMessage );
+	virtual bool RecvResponse( int iThreadId, CSipMessage * pclsMessage );
+	virtual bool SendTimeout( int iThreadId, CSipMessage * pclsMessage );
+	virtual void TcpSessionEnd( const char * pszIp, int iPort, ESipTransport eTransport );
+	virtual void ThreadEnd( int iThreadId );
+
+	SIP_SERVER_INFO_LIST	m_clsRegisterList;
+	CSipMutex							m_clsRegisterMutex;
+
+	CSipStack							m_clsSipStack;
+
+	bool m_bStopEvent;
+
+private:
+	void DeleteRegisterInfoAll( );
+	void DeRegister( );
+
+	bool RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessage );
+
+	bool RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage );
+	bool RecvInviteResponse( int iThreadId, CSipMessage * pclsMessage );
+	
+	bool RecvByeRequest( int iThreadId, CSipMessage * pclsMessage );
+
+	bool RecvCancelRequest( int iThreadId, CSipMessage * pclsMessage );
+
+	bool RecvReferRequest( int iThreadId, CSipMessage * pclsMessage );
+	bool RecvReferResponse( int iThreadId, CSipMessage * pclsMessage );
+
+	bool RecvNotifyRequest( int iThreadId, CSipMessage * pclsMessage );
+
+	bool RecvMessageRequest( int iThreadId, CSipMessage * pclsMessage );
+
+	bool RecvPrackRequest( int iThreadId, CSipMessage * pclsMessage );
+
+	bool RecvOptionsRequest( int iThreadId, CSipMessage * pclsMessage );
+
+	bool SendInvite( CSipDialog & clsDialog );
+	bool SetCallEnd( const char * pszCallId );
+	void Delete( SIP_DIALOG_MAP::iterator & itMap );
+
+	bool SetInviteResponse( std::string & strCallId, CSipMessage * pclsMessage, CSipCallRtp * pclsRtp, bool & bReInvite );
+	bool GetSipCallRtp( CSipMessage * pclsMessage, CSipCallRtp & clsRtp );
+
+	int GetSeqNum( );
+
+	ISipUserAgentCallBack * m_pclsCallBack;
+
+	SIP_DIALOG_MAP			m_clsDialogMap;
+	CSipMutex						m_clsDialogMutex;
+
+	int									m_iSeq;
+	CSipMutex						m_clsMutex;
+
+	bool								m_bStart;
+};
+
+#endif

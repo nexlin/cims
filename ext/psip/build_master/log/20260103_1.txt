@@ -1,0 +1,232 @@
+[20:25:54.123444] [NETWORK] [735DC0BFF6C0] UdpRecv(192.168.0.58:5060) [SIP/2.0 200 OK
+Via: SIP/2.0/UDP 192.168.0.58:5080;rport=5080;branch=z9hG4bKWCSSyfqahWqJyXZK2187cf722yXZa2
+Max-Forwards: 70
+From: <sip:1010@192.168.0.58>;tag=132849479
+To: <sip:1010@192.168.0.58>;tag=919875480
+Call-ID: WCSSyfqahWqJyXZK233ebdc4ayXz92@192.168.0.58
+CSeq: 1 REGISTER
+Contact: <sip:1010@192.168.0.58:5080>
+Content-Length: 0
+User-Agent: CspServer_0.25_esip_0.33
+Expires: 3600
+
+]
+[20:25:54.123771] [NETWORK] [735DBFBFD6C0] UdpSend(192.168.0.58:5060) [REGISTER sip:192.168.0.58 SIP/2.0
+Via: SIP/2.0/UDP 192.168.0.58:5080;rport;branch=z9hG4bKWCSSyfqahWqJyXZK2187cf722yXZa2
+Route: <sip:192.168.0.58:5060;lr>
+Max-Forwards: 70
+From: <sip:1010@192.168.0.58>;tag=132849479
+To: <sip:1010@192.168.0.58>
+Call-ID: WCSSyfqahWqJyXZK233ebdc4ayXz92@192.168.0.58
+CSeq: 1 REGISTER
+Contact: <sip:1010@192.168.0.58:5080>
+Content-Length: 0
+Expires: 600
+User-Agent: esip_0.33
+
+]
+[20:25:54.123840] [DEBUG] [735DC0BFF6C0] EventRegister(200)
+[20:26:06.224452] [NETWORK] [7894549FF6C0] UdpRecv(127.0.0.1:5060) [SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:5082;rport=5082;branch=z9hG4bKWCSSPyaaaOuJZXYRn768edbZXYVn
+Max-Forwards: 70
+From: <sip:1000@127.0.0.1>;tag=1408183596
+To: <sip:1000@127.0.0.1>;tag=919875481
+Call-ID: WCSSPyaaaOuJZXYRn38ca1a9fZXYun@127.0.0.1
+CSeq: 1 REGISTER
+Contact: <sip:1000@127.0.0.1:5082>
+Content-Length: 0
+User-Agent: CspServer_0.25_esip_0.33
+Expires: 3600
+
+]
+[20:26:06.224671] [NETWORK] [7894539FD6C0] UdpSend(127.0.0.1:5060) [REGISTER sip:127.0.0.1 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:5082;rport;branch=z9hG4bKWCSSPyaaaOuJZXYRn768edbZXYVn
+Route: <sip:127.0.0.1:5060;lr>
+Max-Forwards: 70
+From: <sip:1000@127.0.0.1>;tag=1408183596
+To: <sip:1000@127.0.0.1>
+Call-ID: WCSSPyaaaOuJZXYRn38ca1a9fZXYun@127.0.0.1
+CSeq: 1 REGISTER
+Contact: <sip:1000@127.0.0.1:5082>
+Content-Length: 0
+Expires: 600
+User-Agent: esip_0.33
+
+]
+[20:26:06.224755] [DEBUG] [7894549FF6C0] EventRegister(200)
+[20:26:29.737906] [NETWORK] [789455764B80] UdpSend(127.0.0.1:5060) [INVITE sip:1010@127.0.0.1 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:5082;rport;branch=z9hG4bKWCSSPyaaaOuJZXYRn768edd5Pyyi
+Route: <sip:127.0.0.1:5060;lr>
+Max-Forwards: 70
+From: <sip:1000@127.0.0.1:5082>;tag=1408183597
+To: <sip:1010@127.0.0.1>
+Call-ID: WCSSPyaaaOuJZXYRn38ca1aa05PZ5i@127.0.0.1
+CSeq: 1 INVITE
+Contact: <sip:1000@127.0.0.1:5082>
+Content-Type: application/sdp
+Content-Length: 182
+User-Agent: esip_0.33
+P-Asserted-Identity: <sip:1000@127.0.0.1:5082>
+Diversion: <sip:1000@127.0.0.1:5082>
+
+v=0
+o=CSS 4 1 IN IP4 127.0.0.1
+s=hak
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 10002 RTP/AVP 0 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendrecv
+]
+[20:26:29.739195] [NETWORK] [7894549FF6C0] UdpRecv(127.0.0.1:5060) [SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:5082;rport=5082;branch=z9hG4bKWCSSPyaaaOuJZXYRn768edd5Pyyi
+Max-Forwards: 70
+From: <sip:1000@127.0.0.1:5082>;tag=1408183597
+To: <sip:1010@127.0.0.1>
+Call-ID: WCSSPyaaaOuJZXYRn38ca1aa05PZ5i@127.0.0.1
+CSeq: 1 INVITE
+Contact: <sip:1010@0.0.0.0:5060>
+Content-Length: 0
+User-Agent: CspServer_0.25_esip_0.33
+
+]
+[20:26:29.739274] [NETWORK] [7894549FF6C0] UdpRecv(127.0.0.1:5060) [SIP/2.0 180 Ringing
+Via: SIP/2.0/UDP 127.0.0.1:5082;rport=5082;branch=z9hG4bKWCSSPyaaaOuJZXYRn768edd5Pyyi
+Max-Forwards: 70
+From: <sip:1000@127.0.0.1:5082>;tag=1408183597
+To: <sip:1010@127.0.0.1>;tag=919875482
+Call-ID: WCSSPyaaaOuJZXYRn38ca1aa05PZ5i@127.0.0.1
+CSeq: 1 INVITE
+Contact: <sip:1010@0.0.0.0:5060>
+Content-Length: 0
+User-Agent: CspServer_0.25_esip_0.33
+
+]
+[20:26:29.740925] [NETWORK] [735DC0BFF6C0] UdpRecv(192.168.0.58:5060) [INVITE sip:1010@192.168.0.58:5080 SIP/2.0
+Via: SIP/2.0/UDP 0.0.0.0:5060;rport;branch=z9hG4bKWCSSaaaaagiJ_pR_04b63e5c75PzNJ
+Route: <sip:192.168.0.58:5080;lr>
+Max-Forwards: 70
+From: <sip:1000@0.0.0.0>;tag=919875483
+To: <sip:1010@192.168.0.58:5080>
+Call-ID: WCSSaaaaagiJ_pR_0c450b05PzdJ@0.0.0.0
+CSeq: 1 INVITE
+Contact: <sip:1000@0.0.0.0:5060>
+Content-Type: application/sdp
+Content-Length: 178
+User-Agent: CspServer_0.25_esip_0.33
+P-Asserted-Identity: <sip:1000@0.0.0.0:5060>
+Diversion: <sip:1000@0.0.0.0:5060>
+
+v=0
+o=CSS 4 1 IN IP4 0.0.0.0
+s=hak
+c=IN IP4 0.0.0.0
+t=0 0
+m=audio 10008 RTP/AVP 0 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendrecv
+]
+[20:26:29.741325] [NETWORK] [735DC0BFF6C0] UdpSend(192.168.0.58:5060) [SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 0.0.0.0:5060;rport=5060;branch=z9hG4bKWCSSaaaaagiJ_pR_04b63e5c75PzNJ;received=192.168.0.58
+Max-Forwards: 70
+From: <sip:1000@0.0.0.0>;tag=919875483
+To: <sip:1010@192.168.0.58:5080>
+Call-ID: WCSSaaaaagiJ_pR_0c450b05PzdJ@0.0.0.0
+CSeq: 1 INVITE
+Contact: <sip:1010@192.168.0.58:5080>
+Content-Length: 0
+User-Agent: esip_0.33
+
+]
+[20:26:29.741449] [NETWORK] [735DC0BFF6C0] UdpSend(192.168.0.58:5060) [SIP/2.0 180 Ringing
+Via: SIP/2.0/UDP 0.0.0.0:5060;rport=5060;branch=z9hG4bKWCSSaaaaagiJ_pR_04b63e5c75PzNJ;received=192.168.0.58
+Max-Forwards: 70
+From: <sip:1000@0.0.0.0>;tag=919875483
+To: <sip:1010@192.168.0.58:5080>;tag=132849480
+Call-ID: WCSSaaaaagiJ_pR_0c450b05PzdJ@0.0.0.0
+CSeq: 1 INVITE
+Contact: <sip:1010@192.168.0.58:5080>
+Content-Length: 0
+User-Agent: esip_0.33
+
+]
+[20:26:34.743092] [NETWORK] [7894549FF6C0] UdpRecv(127.0.0.1:5060) [SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:5082;rport=5082;branch=z9hG4bKWCSSPyaaaOuJZXYRn768edd5Pyyi
+Max-Forwards: 70
+From: <sip:1000@127.0.0.1:5082>;tag=1408183597
+To: <sip:1010@127.0.0.1>;tag=919875482
+Call-ID: WCSSPyaaaOuJZXYRn38ca1aa05PZ5i@127.0.0.1
+CSeq: 1 INVITE
+Contact: <sip:1010@0.0.0.0:5060>
+Content-Type: application/sdp
+Content-Length: 178
+User-Agent: CspServer_0.25_esip_0.33
+
+v=0
+o=CSS 4 1 IN IP4 0.0.0.0
+s=hak
+c=IN IP4 0.0.0.0
+t=0 0
+m=audio 10010 RTP/AVP 0 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendrecv
+]
+[20:26:34.743231] [NETWORK] [7894549FF6C0] UdpSend(127.0.0.1:5060) [ACK sip:1010@0.0.0.0:5060 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:5082;rport;branch=z9hG4bKWCSSPyaaaOuJZXYRn768ede6XyEK
+Route: <sip:127.0.0.1:5060;lr>
+Max-Forwards: 70
+From: <sip:1000@127.0.0.1:5082>;tag=1408183597
+To: <sip:1010@127.0.0.1>;tag=919875482
+Call-ID: WCSSPyaaaOuJZXYRn38ca1aa05PZ5i@127.0.0.1
+CSeq: 1 ACK
+Contact: <sip:1000@127.0.0.1:5082>
+Content-Length: 0
+User-Agent: esip_0.33
+P-Asserted-Identity: <sip:1000@127.0.0.1:5082>
+Diversion: <sip:1000@127.0.0.1:5082>
+
+]
+[20:26:34.747278] [NETWORK] [735DC0BFF6C0] UdpSend(192.168.0.58:5060) [SIP/2.0 200 OK
+Via: SIP/2.0/UDP 0.0.0.0:5060;rport=5060;branch=z9hG4bKWCSSaaaaagiJ_pR_04b63e5c75PzNJ;received=192.168.0.58
+Max-Forwards: 70
+From: <sip:1000@0.0.0.0>;tag=919875483
+To: <sip:1010@192.168.0.58:5080>;tag=132849480
+Call-ID: WCSSaaaaagiJ_pR_0c450b05PzdJ@0.0.0.0
+CSeq: 1 INVITE
+Contact: <sip:1010@192.168.0.58:5080>
+Content-Type: application/sdp
+Content-Length: 188
+User-Agent: esip_0.33
+
+v=0
+o=CSS 4 1 IN IP4 192.168.0.58
+s=hak
+c=IN IP4 192.168.0.58
+t=0 0
+m=audio 10000 RTP/AVP 0 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendrecv
+]
+[20:26:34.747390] [NETWORK] [735DC0BFF6C0] UdpRecv(192.168.0.58:5060) [ACK sip:1010@192.168.0.58:5080 SIP/2.0
+Via: SIP/2.0/UDP 0.0.0.0:5060;rport;branch=z9hG4bKWCSSaaaaagiJ_pR_04b63e5c86XYBK
+Route: <sip:192.168.0.58:5080;lr>
+Max-Forwards: 70
+From: <sip:1000@0.0.0.0>;tag=919875483
+To: <sip:1010@192.168.0.58:5080>;tag=132849480
+Call-ID: WCSSaaaaagiJ_pR_0c450b05PzdJ@0.0.0.0
+CSeq: 1 ACK
+Contact: <sip:1000@0.0.0.0:5060>
+Content-Length: 0
+User-Agent: CspServer_0.25_esip_0.33
+P-Asserted-Identity: <sip:1000@0.0.0.0:5060>
+Diversion: <sip:1000@0.0.0.0:5060>
+
+]

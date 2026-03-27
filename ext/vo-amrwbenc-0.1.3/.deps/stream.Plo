@@ -1,0 +1,8 @@
+stream.lo: amrwbenc/src/stream.c /usr/include/stdc-predef.h \
+ amrwbenc/inc/stream.h common/include/voMem.h common/include/voIndex.h \
+ common/include/voType.h
+/usr/include/stdc-predef.h:
+amrwbenc/inc/stream.h:
+common/include/voMem.h:
+common/include/voIndex.h:
+common/include/voType.h:

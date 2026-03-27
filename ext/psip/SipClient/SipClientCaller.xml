@@ -1,0 +1,22 @@
+<SipClient>
+  <Sip>
+    <LocalIp>127.0.0.1</LocalIp>
+    <UdpPort>5082</UdpPort>
+  </Sip>
+  <To>
+    <Id>2000</Id>
+    <Ip>127.0.0.1</Ip>
+    <Port>5060</Port>
+    <Domain>127.0.0.1</Domain>
+  </To>
+  <SipServer>
+    <Ip>127.0.0.1</Ip>
+    <Port>5060</Port>
+    <UserId>1000</UserId>
+    <PassWord>1234</PassWord>
+  </SipServer>
+  <Audio>
+    <Speaker>plughw:0,0</Speaker>
+    <Mic>plughw:0,0</Mic>
+  </Audio>
+</SipClient>
