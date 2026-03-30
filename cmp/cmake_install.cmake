@@ -12,7 +12,7 @@ if(NOT DEFINED CMAKE_INSTALL_CONFIG_NAME)
     string(REGEX REPLACE "^[^A-Za-z0-9_]+" ""
            CMAKE_INSTALL_CONFIG_NAME "${BUILD_TYPE}")
   else()
-    set(CMAKE_INSTALL_CONFIG_NAME "")
+    set(CMAKE_INSTALL_CONFIG_NAME "RelWithDebInfo")
   endif()
   message(STATUS "Install configuration: \"${CMAKE_INSTALL_CONFIG_NAME}\"")
 endif()
@@ -43,30 +43,34 @@ if(NOT DEFINED CMAKE_OBJDUMP)
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  if(EXISTS "$ENV{DESTDIR}/home/nex/work/cims/bin/cmp" AND
-     NOT IS_SYMLINK "$ENV{DESTDIR}/home/nex/work/cims/bin/cmp")
+  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/cmp" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/cmp")
     file(RPATH_CHECK
-         FILE "$ENV{DESTDIR}/home/nex/work/cims/bin/cmp"
+         FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/cmp"
          RPATH "")
   endif()
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE FILES "/home/nex/work/cims/bin/cmp")
+  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/cmp" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/cmp")
+    file(RPATH_CHANGE
+         FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/cmp"
+         OLD_RPATH "/home/nex/work/cims/ext/pasf/lib}:"
+         NEW_RPATH "")
+    if(CMAKE_INSTALL_DO_STRIP)
+      execute_process(COMMAND "/usr/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/cmp")
+    endif()
+  endif()
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
   list(APPEND CMAKE_ABSOLUTE_DESTINATION_FILES
-   "/home/nex/work/cims/bin/cmp")
+   "/../config/cmp.json.template")
   if(CMAKE_WARN_ON_ABSOLUTE_INSTALL_DESTINATION)
     message(WARNING "ABSOLUTE path INSTALL DESTINATION : ${CMAKE_ABSOLUTE_DESTINATION_FILES}")
   endif()
   if(CMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION)
     message(FATAL_ERROR "ABSOLUTE path INSTALL DESTINATION forbidden (by caller): ${CMAKE_ABSOLUTE_DESTINATION_FILES}")
   endif()
-  file(INSTALL DESTINATION "/home/nex/work/cims/bin" TYPE EXECUTABLE FILES "/home/nex/work/cims/bin/cmp")
-  if(EXISTS "$ENV{DESTDIR}/home/nex/work/cims/bin/cmp" AND
-     NOT IS_SYMLINK "$ENV{DESTDIR}/home/nex/work/cims/bin/cmp")
-    file(RPATH_CHANGE
-         FILE "$ENV{DESTDIR}/home/nex/work/cims/bin/cmp"
-         OLD_RPATH "/home/nex/work/cims/pkg/l_ffmpeg/lib:/home/nex/work/cims/pkg/x264/lib:/home/nex/work/cims/ext/googletest/lib64:/home/nex/work/cims/pkg/amtrtp/lib:/home/nex/work/cims/ext/pdk-3.2.5:/home/nex/work/cims/pkg/opencore-amr/lib:/home/nex/work/cims/pkg/vo-amrwbenc-0.1.3/lib:/home/nex/work/cims/pkg/oneTBB/lib:/home/nex/work/cims/pkg/jitter:/home/nex/work/cims/ext/pasf/lib}:"
-         NEW_RPATH "")
-    if(CMAKE_INSTALL_DO_STRIP)
-      execute_process(COMMAND "/usr/bin/strip" "$ENV{DESTDIR}/home/nex/work/cims/bin/cmp")
-    endif()
-  endif()
+  file(INSTALL DESTINATION "/../config" TYPE FILE FILES "/home/nex/work/cims/cmp/cmp.json.template")
 endif()
 

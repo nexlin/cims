@@ -229,7 +229,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
 
     // 그룹 기본 정보
     std::string strSql =
-        "SELECT id, name FROM ptt_groups WHERE id='" + Escape(strGroupId) + "'";
+        "SELECT id, name, video_enabled FROM ptt_groups WHERE id='" + Escape(strGroupId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
@@ -241,8 +241,9 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
     }
 
     clsGroup.Clear();
-    clsGroup._id   = row[0] ? row[0] : "";
-    clsGroup._name = row[1] ? row[1] : "";
+    clsGroup._id           = row[0] ? row[0] : "";
+    clsGroup._name         = row[1] ? row[1] : "";
+    clsGroup._videoEnabled = row[2] ? (atoi(row[2]) != 0) : false;
     mysql_free_result(pRes);
 
     // 멤버 목록

@@ -1,4 +1,5 @@
 #include "PRtpHandler.h"
+#include "CmpLog.h"
 #include "McpttGroup.h"
 #include <unistd.h>
 #include <sys/select.h>
@@ -27,18 +28,18 @@ bool PRtpTrans::init(const std::string & ipLoc, unsigned int portLoc, unsigned i
 {
     PAutoLock lock(_mutex);
     bool res = _rtpSock.init(ipLoc, portLoc);
-    printf("1. PRtpTrans::init rtp %s:%d\n", ipLoc.c_str(), portLoc);
+    LOG_INFO("PRtpTrans", "init rtp %s:%d", ipLoc.c_str(), portLoc);
     if(res) {
         // Init RTCP on port + 1
-        printf("2. PRtpTrans::init rtcp %s:%d\n", ipLoc.c_str(), portLoc + 1);
+        LOG_INFO("PRtpTrans", "init rtcp %s:%d", ipLoc.c_str(), portLoc + 1);
         res = _rtcpSock.init(ipLoc, portLoc + 1);
     }
     
     if (res && videoPortLoc > 0) {
-        printf("3. PRtpTrans::init video rtp %s:%d\n", ipLoc.c_str(), videoPortLoc);
+        LOG_INFO("PRtpTrans", "init video rtp %s:%d", ipLoc.c_str(), videoPortLoc);
         res = _videoRtpSock.init(ipLoc, videoPortLoc);
         if (res) {
-            printf("4. PRtpTrans::init video rtcp %s:%d\n", ipLoc.c_str(), videoPortLoc + 1);
+            LOG_INFO("PRtpTrans", "init video rtcp %s:%d", ipLoc.c_str(), videoPortLoc + 1);
             res = _videoRtcpSock.init(ipLoc, videoPortLoc + 1);
         }
     }
@@ -84,7 +85,7 @@ bool PRtpTrans::setRmt(const std::string & ipRmt, unsigned int portRmt, unsigned
     
     if (idx < 0 || idx > 1) {
         // Invalid index
-        printf("PRtpTrans::setRmt Invalid Index %d\n", idx);
+        LOG_ERROR("PRtpTrans", "setRmt invalid index %d", idx);
         return false;
     }
 
@@ -188,7 +189,7 @@ bool PRtpTrans::proc()
             PAutoLock lock(_mutex);
             len = _rtpSock.recv(pkt, sizeof(pkt), ipRmt, portRmt);
             pGroup = _group;
-            //printf("[DEBUG] RTP Packet: IP=%s Port=%d Len=%d PT=%d SenderId=%s group=%p\n", ipRmt.c_str(), portRmt, len, pkt[1], "test", pGroup);
+            LOG_DEBUG("PRtpTrans", "RTP ip=%s port=%d len=%d pt=%d group=%p", ipRmt.c_str(), portRmt, len, pkt[1], (void*)pGroup);
         }
 
         if (len > 0) {               
@@ -309,7 +310,7 @@ bool PRtpTrans::proc()
             len = _videoRtcpSock.recv(rtcpBuf, sizeof(rtcpBuf), ipRmt, portRmt);
             if (len > 0) {
                 // Relay Video RTCP
-                //printf("RX V-RTCP: len=%d from %s:%d\n", len, ipRmt.c_str(), portRmt);
+                LOG_DEBUG("PRtpTrans", "Video RTCP rx len=%d from %s:%d", len, ipRmt.c_str(), portRmt);
                 int srcIdx = -1;
                 // RTCP depends, usually videoPort + 1
                 if (_peers[0].active && portRmt == _peers[0].videoPort + 1 && ipRmt == _peers[0].ip) srcIdx = 0;

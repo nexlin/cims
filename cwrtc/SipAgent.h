@@ -32,8 +32,8 @@ public:
 
 private:
     bool AllocPorts(int& iDtlsPort, int& iRtpPort);
-    std::string BuildDtlsSdp(int iDtlsPort, bool bPtt);
-    std::string BuildPlainRtpSdp(int iRtpPort);
+    std::string BuildDtlsSdp(int iDtlsPort, int iAudioPt, bool bVideoEnabled);
+    std::string BuildPlainRtpSdp(int iRtpPort, int iAudioPt);
     void SendWsJson(const std::string& wsIp, int wsPort, const std::string& json);
 };
 

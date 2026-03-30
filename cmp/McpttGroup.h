@@ -26,16 +26,24 @@ enum FloorOpCode {
     FLOOR_REVOKE  = 7
 };
 
+// 고정 헤더 (12 bytes RTCP APP + 8 bytes app-data)
 struct FloorControlPacket {
-    unsigned char version_subtype; // V=2, P=0, Subtype=... 
+    unsigned char version_subtype; // V=2, P=0, Subtype=...
     unsigned char type;            // PT=204 (APP)
-    unsigned short length; 
+    unsigned short length;
     unsigned int ssrc;             // SSRC of sender
     char name[4];                  // "MCPT"
     unsigned char opcode;          // FloorOpCode
-    unsigned char reserved[3];     // Padding/Reserved
-    unsigned int user_id;          // User ID requesting/holding floor (simplified)
+    unsigned char id_len;          // speaker identity 문자열 길이 (0이면 없음)
+    unsigned short reserved;
+    // 가변: char speaker_id[id_len] + padding (4-byte aligned)
 };
+
+// Floor 패킷 빌드 헬퍼 (speaker_id 문자열 포함)
+int BuildFloorPacket(char* buf, int bufSize, unsigned char opcode,
+                     unsigned int ssrc, const std::string& speakerId);
+// Floor 패킷에서 speaker_id 추출
+std::string ParseFloorSpeakerId(const char* buf, int len);
 
 class McpttGroup {
 public:
@@ -72,7 +80,7 @@ private:
     void sendVideoToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     void sendVideoRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     void sendToMember(const std::string& sessionId, const char* data, int len);
-    void broadcastFloorStatus(unsigned char opcode, unsigned int userId);
+    void broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId);
 
     std::string _groupId;
     
@@ -80,6 +88,7 @@ private:
         std::string id;
         std::string ip;
         int port;
+        unsigned int ssrc;   // 멤버 SSRC (joinGroup 시 할당)
     };
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority
@@ -88,7 +97,8 @@ private:
     // Floor State
     bool _floorTaken;
     std::string _floorOwnerSessionId;
-    unsigned int _floorOwnerUserId;
+    unsigned int _floorOwnerSsrc;
+    static unsigned int _nextSsrc;  // SSRC 할당 카운터
 
 
 

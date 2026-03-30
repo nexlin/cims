@@ -120,6 +120,7 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
     packet.Set("payload", payload);
 
     std::string strPacket = packet.ToString();
+    CLog::Print(LOG_DEBUG, "CmpClient TX → %s:%d : %s", m_strCmpIp.c_str(), m_iCmpPort, strPacket.c_str());
 
     struct sockaddr_in servaddr;
     memset(&servaddr, 0, sizeof(servaddr));
@@ -148,6 +149,7 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
         } else {
             strResponse = pTrans->strResponse;
             bResult = pTrans->bSuccess;
+            CLog::Print(LOG_DEBUG, "CmpClient RX ← %s", strResponse.c_str());
         }
     } 
 

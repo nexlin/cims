@@ -19,6 +19,40 @@
 
 #include "RtpThreadArg.hpp"
 #include "RtpThreadDtls.hpp"
+#include "HttpCallBack.h"
+#include "SimpleJson.h"
+
+// Floor Control 패킷 헤더 (CMP McpttGroup과 동일)
+#pragma pack(push, 1)
+struct CwrtcFloorHdr {
+    uint8_t  ver_subtype;  // 0x80 (V=2)
+    uint8_t  pt;           // 204 (APP)
+    uint16_t length;
+    uint32_t ssrc;
+    char     name[4];      // "MCPT"
+    uint8_t  opcode;
+    uint8_t  id_len;       // speaker identity 문자열 길이
+    uint16_t reserved;
+};
+#pragma pack(pop)
+
+enum CwrtcFloorOp {
+    CWRTC_FLOOR_REQUEST = 1,
+    CWRTC_FLOOR_GRANT   = 2,
+    CWRTC_FLOOR_REJECT  = 3,
+    CWRTC_FLOOR_RELEASE = 4,
+    CWRTC_FLOOR_IDLE    = 5,
+    CWRTC_FLOOR_TAKEN   = 6,
+};
+
+// 패킷에서 speaker identity 추출
+static std::string ExtractSpeakerId(const char* buf, int len) {
+    if (len < (int)sizeof(CwrtcFloorHdr)) return "";
+    const CwrtcFloorHdr* h = (const CwrtcFloorHdr*)buf;
+    int idLen = h->id_len;
+    if (idLen <= 0 || (int)sizeof(CwrtcFloorHdr) + idLen > len) return "";
+    return std::string(buf + sizeof(CwrtcFloorHdr), idLen);
+}
 
 static bool GetIceUserPwd(const char* pszSdp, std::string& strIceUser, std::string& strIcePwd)
 {
@@ -45,7 +79,7 @@ THREAD_API RtpThread(LPVOID lpParameter)
     char  szPacket[4096], szWebRTCIp[64], szPbxIp[64];
     unsigned short iWebRTCPort = 0, iPbxPort = 0;
     int   iPacketLen, n;
-    pollfd sttPoll[2];
+    pollfd sttPoll[3];  // [0]=DTLS(브라우저), [1]=RTP(CMP), [2]=RTCP(CMP)
 
     std::string strIceUser, strIcePwd;
     srtp_t psttSrtpTx = NULL, psttSrtpRx = NULL;
@@ -66,14 +100,16 @@ THREAD_API RtpThread(LPVOID lpParameter)
 
     TcpSetPollIn(sttPoll[0], pclsArg->m_hWebRtcUdp);
     TcpSetPollIn(sttPoll[1], pclsArg->m_hPbxUdp);
+    TcpSetPollIn(sttPoll[2], pclsArg->m_hPbxRtcpUdp);
 
-    CLog::Print(LOG_INFO, "RtpThread[%s] Start dtls=%d rtp=%d cmp=%s:%d",
+    CLog::Print(LOG_INFO, "RtpThread[%s] Start dtls=%d rtp=%d rtcp=%d cmp=%s:%d ws=%s:%d",
         pclsArg->m_strCallId.c_str(),
-        pclsArg->m_iWebRtcUdpPort, pclsArg->m_iPbxUdpPort,
-        pclsArg->m_strCmpIp.c_str(), pclsArg->m_iCmpPort);
+        pclsArg->m_iWebRtcUdpPort, pclsArg->m_iPbxUdpPort, pclsArg->m_iPbxRtcpPort,
+        pclsArg->m_strCmpIp.c_str(), pclsArg->m_iCmpPort,
+        pclsArg->m_strWsIp.c_str(), pclsArg->m_iWsPort);
 
     while (!pclsArg->m_bStop) {
-        n = poll(sttPoll, 2, 1000);
+        n = poll(sttPoll, 3, 1000);
         if (n <= 0) continue;
 
         // ── 브라우저 측 소켓 ──
@@ -147,7 +183,7 @@ THREAD_API RtpThread(LPVOID lpParameter)
             }
         }
 
-        // ── CMP 측 소켓 ──
+        // ── CMP 오디오 RTP ──
         if (sttPoll[1].revents & POLLIN) {
             iPacketLen = sizeof(szPacket);
             UdpRecv(pclsArg->m_hPbxUdp, szPacket, &iPacketLen, szPbxIp, sizeof(szPbxIp), &iPbxPort);
@@ -161,6 +197,55 @@ THREAD_API RtpThread(LPVOID lpParameter)
                 UdpSend(pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort);
             }
         }
+
+        // ── CMP RTCP (Floor Control) ──
+        if (sttPoll[2].revents & POLLIN) {
+            char szRtcp[1024];
+            char szRtcpIp[64];
+            unsigned short iRtcpPort = 0;
+            int iRtcpLen = sizeof(szRtcp);
+            UdpRecv(pclsArg->m_hPbxRtcpUdp, szRtcp, &iRtcpLen, szRtcpIp, sizeof(szRtcpIp), &iRtcpPort);
+
+            if (iRtcpLen >= (int)sizeof(CwrtcFloorHdr)) {
+                CwrtcFloorHdr* pHdr = (CwrtcFloorHdr*)szRtcp;
+                if (pHdr->pt == 204 && memcmp(pHdr->name, "MCPT", 4) == 0) {
+                    uint8_t opcode = pHdr->opcode;
+                    std::string strSpeaker = ExtractSpeakerId(szRtcp, iRtcpLen);
+
+                    CLog::Print(LOG_INFO, "RtpThread[%s] Floor RTCP opcode=%d speaker=%s from CMP %s:%d",
+                        pclsArg->m_strCallId.c_str(), opcode, strSpeaker.c_str(), szRtcpIp, iRtcpPort);
+
+                    if (!pclsArg->m_strWsIp.empty() && pclsArg->m_iWsPort > 0) {
+                        SimpleJson::JsonNode wsMsg;
+                        wsMsg.Set("call_id", pclsArg->m_strCallId);
+
+                        if (opcode == CWRTC_FLOOR_GRANT || opcode == CWRTC_FLOOR_TAKEN) {
+                            wsMsg.Set("type", "ptt_floor");
+                            wsMsg.Set("speaker", strSpeaker);
+                            CLog::Print(LOG_INFO, "RtpThread[%s] → ptt_floor speaker=%s → WS[%s:%d]",
+                                pclsArg->m_strCallId.c_str(), strSpeaker.c_str(),
+                                pclsArg->m_strWsIp.c_str(), pclsArg->m_iWsPort);
+                        } else if (opcode == CWRTC_FLOOR_IDLE) {
+                            wsMsg.Set("type", "ptt_idle");
+                            CLog::Print(LOG_INFO, "RtpThread[%s] → ptt_idle → WS[%s:%d]",
+                                pclsArg->m_strCallId.c_str(),
+                                pclsArg->m_strWsIp.c_str(), pclsArg->m_iWsPort);
+                        } else if (opcode == CWRTC_FLOOR_REJECT) {
+                            wsMsg.Set("type", "ptt_floor");
+                            wsMsg.Set("speaker", std::string(""));
+                            CLog::Print(LOG_INFO, "RtpThread[%s] → ptt_floor(reject) → WS[%s:%d]",
+                                pclsArg->m_strCallId.c_str(),
+                                pclsArg->m_strWsIp.c_str(), pclsArg->m_iWsPort);
+                        }
+
+                        if (wsMsg.Has("type"))
+                            gclsHttpCallBack.SendText(pclsArg->m_strWsIp.c_str(),
+                                                      pclsArg->m_iWsPort,
+                                                      wsMsg.ToString().c_str());
+                    }
+                }
+            }
+        }
     }
 
     if (psttSrtpTx) srtp_dealloc(psttSrtpTx);
@@ -171,7 +256,7 @@ THREAD_API RtpThread(LPVOID lpParameter)
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
     ERR_remove_thread_state(NULL);
 #endif
-    delete pclsArg;
+    // pclsArg는 EventCallEnd에서 삭제 (floor control 등 외부 참조 유지)
     return 0;
 }
 

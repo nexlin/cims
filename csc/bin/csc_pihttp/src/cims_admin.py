@@ -474,9 +474,10 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 async def _list_groups(config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, name FROM ptt_groups ORDER BY id")
+            cur.execute("SELECT id, name, video_enabled FROM ptt_groups ORDER BY id")
             groups = cur.fetchall()
             for g in groups:
+                g['video_enabled'] = bool(g.get('video_enabled', 0))
                 cur.execute(
                     "SELECT user_id, priority FROM ptt_group_members "
                     "WHERE group_id=%s ORDER BY priority",
@@ -490,12 +491,13 @@ async def _get_group(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name FROM ptt_groups WHERE id=%s",
+                "SELECT id, name, video_enabled FROM ptt_groups WHERE id=%s",
                 (group_id,)
             )
             group = cur.fetchone()
             if group is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
+            group['video_enabled'] = bool(group.get('video_enabled', 0))
             cur.execute(
                 "SELECT user_id, priority FROM ptt_group_members "
                 "WHERE group_id=%s ORDER BY priority",
@@ -511,14 +513,15 @@ async def _create_group(body, config):
     group_id = body.get('id', '').strip()
     if not group_id:
         return HandlerResult(status=400, body={'error': 'id is required'})
-    name    = body.get('name', group_id)
-    members = body.get('members', [])
+    name          = body.get('name', group_id)
+    video_enabled = 1 if body.get('video_enabled', False) else 0
+    members       = body.get('members', [])
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO ptt_groups (id, name) VALUES (%s, %s)",
-                (group_id, name)
+                "INSERT INTO ptt_groups (id, name, video_enabled) VALUES (%s, %s, %s)",
+                (group_id, name, video_enabled)
             )
             for m in members:
                 uid  = m.get('user_id', m.get('id', ''))
@@ -538,10 +541,19 @@ async def _update_group(group_id: str, body, config):
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            update_fields = []
+            update_vals   = []
             if 'name' in body:
+                update_fields.append('name=%s')
+                update_vals.append(body['name'])
+            if 'video_enabled' in body:
+                update_fields.append('video_enabled=%s')
+                update_vals.append(1 if body['video_enabled'] else 0)
+            if update_fields:
+                update_vals.append(group_id)
                 cur.execute(
-                    "UPDATE ptt_groups SET name=%s WHERE id=%s",
-                    (body['name'], group_id)
+                    "UPDATE ptt_groups SET " + ", ".join(update_fields) + " WHERE id=%s",
+                    update_vals
                 )
                 if cur.rowcount == 0:
                     return HandlerResult(status=404, body={'error': 'Group not found'})

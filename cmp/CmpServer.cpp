@@ -1,4 +1,5 @@
 #include "CmpServer.h"
+#include "CmpLog.h"
 #include "SimpleJson.h"
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -31,8 +32,6 @@ CmpServer::CmpServer(const std::string& name, const std::string& configFile)
 CmpServer::~CmpServer() {
     stopServer();
     for(auto const& [name, group] : _groups) {
-        // delete group; // PModule/destructor might be an issue. McpttGroup should be deleted clearly.
-        // Actually, _groups stores McpttGroup* which we new'd.
         delete group;
     }
     _groups.clear();
@@ -47,7 +46,7 @@ CmpServer::~CmpServer() {
 bool CmpServer::startServer() {
     _udpFd = socket(AF_INET, SOCK_DGRAM, 0);
     if (_udpFd < 0) {
-        perror("socket");
+        LOG_ERROR("CmpServer", "socket() failed: %s", strerror(errno));
         return false;
     }
 
@@ -58,7 +57,7 @@ bool CmpServer::startServer() {
     addr.sin_port = htons(_serverPort);
 
     if (bind(_udpFd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("bind");
+        LOG_ERROR("CmpServer", "bind() failed on %s:%d: %s", _serverIp.c_str(), _serverPort, strerror(errno));
         close(_udpFd);
         return false;
     }
@@ -68,6 +67,7 @@ bool CmpServer::startServer() {
         this->runControlLoop();
     }).detach();
 
+    LOG_INFO("CmpServer", "Server listening on %s:%d", _serverIp.c_str(), _serverPort);
     return true;
 }
 
@@ -77,6 +77,7 @@ void CmpServer::stopServer() {
         ::close(_udpFd);
         _udpFd = -1;
     }
+    LOG_INFO("CmpServer", "Server stopped");
 }
 
 void CmpServer::runControlLoop() {
@@ -88,7 +89,7 @@ void CmpServer::runControlLoop() {
         int len = recvfrom(_udpFd, buf, sizeof(buf) - 1, 0, (struct sockaddr*)&clientAddr, &addrLen);
         if (len > 0) {
             buf[len] = '\0';
-            //printf("[CmpServer] Recv %d bytes from %s:%d: %s\n", len, inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port), buf);
+            LOG_DEBUG("CmpServer", "Recv %d bytes from %s:%d", len, inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
             std::string ip = inet_ntoa(clientAddr.sin_addr);
             int port = ntohs(clientAddr.sin_port);
             handlePacket(buf, len, ip, port);
@@ -106,7 +107,7 @@ void CmpServer::handlePacket(char* buf, int len, const std::string& ip, int port
     
     // Check trans_id and payload
     if (root.type != SimpleJson::JSON_OBJECT) {
-        printf("[CmpServer] Invalid JSON Packet: %s\n", strPacket.c_str());
+        LOG_ERROR("CmpServer", "Invalid JSON Packet from %s:%d: %s", ip.c_str(), port, strPacket.c_str());
         return;
     }
 
@@ -114,7 +115,7 @@ void CmpServer::handlePacket(char* buf, int len, const std::string& ip, int port
     SimpleJson::JsonNode payload = root.Get("payload");
     
     if (payload.type != SimpleJson::JSON_OBJECT) {
-        printf("[CmpServer] Missing Payload: %s\n", strPacket.c_str());
+        LOG_ERROR("CmpServer", "Missing Payload from %s:%d: %s", ip.c_str(), port, strPacket.c_str());
         return;
     }
 
@@ -123,7 +124,7 @@ void CmpServer::handlePacket(char* buf, int len, const std::string& ip, int port
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower); // normalize
 
     // Dispatch
-    //printf("[CmpServer] Dispatching cmd=%s transId=%d\n", cmd.c_str(), transId);
+    LOG_DEBUG("CmpServer", "Dispatching cmd=%s transId=%d from %s:%d", cmd.c_str(), transId, ip.c_str(), port);
     if (cmd == "add") processAdd(payload, ip, port, transId);
     else if (cmd == "remove") processRemove(payload, ip, port, transId);
     else if (cmd == "alive") processAlive(payload, ip, port, transId);
@@ -134,7 +135,7 @@ void CmpServer::handlePacket(char* buf, int len, const std::string& ip, int port
     else if (cmd == "modifygroup") processModifyGroup(payload, ip, port, transId);
     else if (cmd == "modify") processModify(payload, ip, port, transId);
     else {
-        printf("[CmpServer] Unknown CMD: %s\n", cmd.c_str());
+        LOG_WARN("CmpServer", "Unknown CMD: %s from %s:%d", cmd.c_str(), ip.c_str(), port);
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Unknown Command");
@@ -143,7 +144,7 @@ void CmpServer::handlePacket(char* buf, int len, const std::string& ip, int port
 }
 
 void CmpServer::sendResponse(const std::string& ip, int port, const std::string& msg) {
-    //printf("[CmpServer] Sending %d bytes to %s:%d: %s\n", msg.length(), ip.c_str(), port, msg.c_str());
+    LOG_DEBUG("CmpServer", "Sending %lu bytes to %s:%d", msg.length(), ip.c_str(), port);
     if (_udpFd != -1) {
         struct sockaddr_in cliaddr;
         memset(&cliaddr, 0, sizeof(cliaddr));
@@ -151,7 +152,9 @@ void CmpServer::sendResponse(const std::string& ip, int port, const std::string&
         cliaddr.sin_port = htons(port);
         cliaddr.sin_addr.s_addr = inet_addr(ip.c_str());
         int sent = sendto(_udpFd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&cliaddr, sizeof(cliaddr));
-        //printf("[CmpServer] Sent %d bytes to %s:%d: %s\n", sent, ip.c_str(), port, msg.c_str());
+        if (sent < 0) {
+            LOG_ERROR("CmpServer", "sendto failed to %s:%d: %s", ip.c_str(), port, strerror(errno));
+        }
     }
 }
 
@@ -210,12 +213,13 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
         resp.Set("response", respBody.ToString()); 
         sendResponse(ip, port, resp.ToString());
         
-        printf("[ADD] ID=%s Rmt=%s:%d -> Loc=%s:%d\n", sessionId.c_str(), rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
+        LOG_INFO("CmpServer", "ADD session=%s remote=%s:%d -> local=%s:%d", sessionId.c_str(), rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
     } else {
          SimpleJson::JsonNode resp;
          resp.Set("trans_id", transId);
          resp.Set("response", "ERROR No Resource");
          sendResponse(ip, port, resp.ToString());
+         LOG_WARN("CmpServer", "ADD session=%s FAILED: no available resource", sessionId.c_str());
     }
 }
 
@@ -228,6 +232,9 @@ void CmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::st
         rtp->reset();
         freeResource(rtp);
         _sessions.erase(sessionId);
+        LOG_INFO("CmpServer", "REMOVE session=%s", sessionId.c_str());
+    } else {
+        LOG_WARN("CmpServer", "REMOVE session=%s not found", sessionId.c_str());
     }
     
     SimpleJson::JsonNode resp;
@@ -237,6 +244,7 @@ void CmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::st
 }
 
 void CmpServer::processModify(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    LOG_DEBUG("CmpServer", "MODIFY -> delegating to processAdd");
     processAdd(payload, ip, port, transId);
 }
 
@@ -267,9 +275,11 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
                   sharedSession->setWorkerName(wname);
                   addHandler(wname, sharedSession);
              }
+             LOG_INFO("CmpServer", "ADDGROUP group=%s port=%d (new)", groupId.c_str(), sharedPort);
         } else {
              delete group;
              group = NULL;
+             LOG_WARN("CmpServer", "ADDGROUP group=%s FAILED: no available resource", groupId.c_str());
         }
     } else {
         group = _groups[groupId];
@@ -277,9 +287,8 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
         if (sharedSession) {
             sharedPort = sharedSession->getLocalPort();
         }
+        LOG_DEBUG("CmpServer", "ADDGROUP group=%s port=%d (existing)", groupId.c_str(), sharedPort);
     }
-
-    printf("[CmpServer] processAddGroup Group=%p SharedSession=%p Port=%d\n", group, sharedSession, sharedPort);
 
     if (group) {
         if (!membersStr.empty()) {
@@ -330,11 +339,13 @@ void CmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std:
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
         sendResponse(ip, port, resp.ToString());
+        LOG_INFO("CmpServer", "JOINGROUP group=%s session=%s %s:%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort);
     } else {
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Group Not Found");
         sendResponse(ip, port, resp.ToString());
+        LOG_WARN("CmpServer", "JOINGROUP group=%s not found", groupId.c_str());
     }
 }
 
@@ -351,11 +362,13 @@ void CmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const std
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
         sendResponse(ip, port, resp.ToString());
+        LOG_INFO("CmpServer", "LEAVEGROUP group=%s session=%s", groupId.c_str(), sessionId.c_str());
     } else {
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Group Not Found");
         sendResponse(ip, port, resp.ToString());
+        LOG_WARN("CmpServer", "LEAVEGROUP group=%s not found", groupId.c_str());
     }
 }
 
@@ -371,15 +384,18 @@ void CmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const st
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
         sendResponse(ip, port, resp.ToString());
+        LOG_INFO("CmpServer", "REMOVEGROUP group=%s", groupId.c_str());
     } else {
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Group Not Found");
         sendResponse(ip, port, resp.ToString());
+        LOG_WARN("CmpServer", "REMOVEGROUP group=%s not found", groupId.c_str());
     }
 }
 
 void CmpServer::processModifyGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+     LOG_DEBUG("CmpServer", "MODIFYGROUP -> delegating to processAddGroup");
      processAddGroup(payload, ip, port, transId);
 }
 
@@ -387,11 +403,9 @@ void CmpServer::loadConfig() {
     std::ifstream t(_configFile);
     if (!t.is_open()) {
         if (_configFile.find(".json") != std::string::npos) {
-             printf("Failed to open config file: %s\n", _configFile.c_str());
+             LOG_ERROR("CmpServer", "Failed to open config file: %s", _configFile.c_str());
              return;
         }
-        // Fallback to old logic if file not json or failed? 
-        // For now, assume if extension is .json, we use JSON loader.
     }
     
     // Check extension
@@ -409,12 +423,7 @@ void CmpServer::loadConfig() {
         if (root.Has("ServerPort")) _serverPort = (int)root.GetInt("ServerPort");
         
         if (root.Has("EnableDtmfPtt")) {
-             // Supports boolean or int in JSON
              SimpleJson::JsonNode val = root.Get("EnableDtmfPtt");
-             // Minimal parser stores bool as ??? 
-             // Int check:
-             // Our parser doesn't have explicit BOOL type, likely stores "true"/"false" as string or 0/1 as int.
-             // Let's check string, then int.
              std::string sVal = root.GetString("EnableDtmfPtt");
              if (sVal == "true") _dtmfPttEnable = true;
              else if (sVal == "false") _dtmfPttEnable = false;
@@ -424,8 +433,23 @@ void CmpServer::loadConfig() {
         if (root.Has("DtmfPushDigit")) _dtmfPushDigit = root.GetString("DtmfPushDigit");
         if (root.Has("DtmfReleaseDigit")) _dtmfReleaseDigit = root.GetString("DtmfReleaseDigit");
         
-        // CspIp/Port if needed
+        // Log configuration
+        std::string logDir = root.Has("LogDir") ? root.GetString("LogDir") : "";
+        int logMaxSizeMB = root.Has("LogMaxSizeMB") ? (int)root.GetInt("LogMaxSizeMB") : 10;
+        int logMaxFiles = root.Has("LogMaxFiles") ? (int)root.GetInt("LogMaxFiles") : 5;
         
+        if (!logDir.empty()) {
+            CmpLog::Instance().InitFile(logDir, "cmp", logMaxSizeMB, logMaxFiles);
+        }
+        
+        if (root.Has("LogLevel")) {
+            std::string lvl = root.GetString("LogLevel");
+            if (lvl == "DEBUG" || lvl == "debug") CmpLog::Instance().SetLevel(CMP_LOG_DEBUG);
+            else if (lvl == "WARN" || lvl == "warn") CmpLog::Instance().SetLevel(CMP_LOG_WARN);
+            else if (lvl == "ERROR" || lvl == "error") CmpLog::Instance().SetLevel(CMP_LOG_ERROR);
+            else CmpLog::Instance().SetLevel(CMP_LOG_INFO);
+        }
+
     } else {
         // Legacy .conf loader
         FILE* fp = fopen(_configFile.c_str(), "r");
@@ -448,7 +472,7 @@ void CmpServer::loadConfig() {
         }
     }
 
-    printf("Config: RtpStartPort=%d, RtpPoolSize=%d, RtpIp=%s, ServerIp=%s, ServerPort=%d, DtmfPtt=%d Push=%s Rel=%s\n", 
+    LOG_INFO("CmpServer", "Config: RtpStartPort=%d RtpPoolSize=%d RtpIp=%s ServerIp=%s ServerPort=%d DtmfPtt=%d Push=%s Rel=%s", 
            _rtpStartPort, _rtpPoolSize, _rtpIp.c_str(), _serverIp.c_str(), _serverPort, 
            _dtmfPttEnable, _dtmfPushDigit.c_str(), _dtmfReleaseDigit.c_str());
 }
@@ -463,16 +487,19 @@ void CmpServer::initResourcePool() {
              _resourcePool.push_back(rtp);
              _freeResources.push_back(rtp);
         } else {
-             printf("Failed to init resource on port %d\n", currentPort);
+             LOG_ERROR("CmpServer", "Failed to init resource on port %d", currentPort);
              delete rtp;
         }
         currentPort += 4;
     }
-    printf("Initialized %lu resources\n", _resourcePool.size());
+    LOG_INFO("CmpServer", "Initialized %lu resources (port %d-%d)", _resourcePool.size(), _rtpStartPort, currentPort - 4);
 }
 
 PRtpTrans* CmpServer::allocResource(std::string& rtpIp, int& rtpPort, int& videoPort) {
-    if (_freeResources.empty()) return NULL;
+    if (_freeResources.empty()) {
+        LOG_WARN("CmpServer", "allocResource: no free resources");
+        return NULL;
+    }
     
     PRtpTrans* rtp = _freeResources.back();
     _freeResources.pop_back();
@@ -481,13 +508,13 @@ PRtpTrans* CmpServer::allocResource(std::string& rtpIp, int& rtpPort, int& video
     rtpPort = rtp->getLocalPort(); 
     videoPort = rtp->getLocalVideoPort();
     
-    printf("[CmpServer] allocResource: Returning port %d (Remaining %lu)\n", rtpPort, _freeResources.size());
+    LOG_INFO("CmpServer", "allocResource: port=%d (remaining %lu)", rtpPort, _freeResources.size());
     return rtp;
 }
 
 void CmpServer::freeResource(PRtpTrans* rtp) {
     if (rtp) {
-        printf("[CmpServer] freeResource: Freeing port %d\n", rtp->getLocalPort());
+        LOG_INFO("CmpServer", "freeResource: port=%d", rtp->getLocalPort());
         _freeResources.push_back(rtp);
     }
 }

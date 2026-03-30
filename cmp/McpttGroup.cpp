@@ -1,10 +1,48 @@
 #include "McpttGroup.h"
+#include "CmpLog.h"
 #include "PRtpHandler.h"
 #include <cstring>
 #include <arpa/inet.h>
 
-McpttGroup::McpttGroup(const std::string& groupId) 
-    : _groupId(groupId), _sharedSession(NULL), _floorTaken(false), _floorOwnerUserId(0)
+unsigned int McpttGroup::_nextSsrc = 1000;
+
+// ── Floor 패킷 빌드/파싱 헬퍼 ─────────────────────────────────────────────────
+
+int BuildFloorPacket(char* buf, int bufSize, unsigned char opcode,
+                     unsigned int ssrc, const std::string& speakerId)
+{
+    int idLen = (int)speakerId.size();
+    int padded = (idLen + 3) & ~3;  // 4-byte 정렬
+    int total = 12 + 4 + padded;    // RTCP APP 헤더(12) + opcode+id_len+reserved(4) + speakerId
+    if (total > bufSize) return 0;
+
+    memset(buf, 0, total);
+    FloorControlPacket* pkt = (FloorControlPacket*)buf;
+    pkt->version_subtype = 0x80;
+    pkt->type   = RTCP_PT_APP;
+    pkt->length = htons((uint16_t)(total / 4 - 1));
+    pkt->ssrc   = htonl(ssrc);
+    memcpy(pkt->name, "MCPT", 4);
+    pkt->opcode = opcode;
+    pkt->id_len = (unsigned char)idLen;
+
+    if (idLen > 0)
+        memcpy(buf + sizeof(FloorControlPacket), speakerId.c_str(), idLen);
+
+    return total;
+}
+
+std::string ParseFloorSpeakerId(const char* buf, int len)
+{
+    if (len < (int)sizeof(FloorControlPacket)) return "";
+    const FloorControlPacket* pkt = (const FloorControlPacket*)buf;
+    int idLen = pkt->id_len;
+    if (idLen <= 0 || (int)sizeof(FloorControlPacket) + idLen > len) return "";
+    return std::string(buf + sizeof(FloorControlPacket), idLen);
+}
+
+McpttGroup::McpttGroup(const std::string& groupId)
+    : _groupId(groupId), _sharedSession(NULL), _floorTaken(false), _floorOwnerSsrc(0)
 {
 }
 
@@ -19,50 +57,48 @@ void McpttGroup::setSharedSession(PRtpTrans* session) {
 }
 
 void McpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port) {
-    printf("0. [McpttGroup:%s] Adding Member Session=%s IP=%s Port=%d\n", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port);
+    LOG_INFO("McpttGroup", "[%s] addMember session=%s ip=%s port=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port);
     PAutoLock lock(_mutex);
     Peer peer;
     peer.id = sessionId;
     peer.ip = ip;
     peer.port = port;
+    peer.ssrc = _nextSsrc++;
     _members[sessionId] = peer;
-    printf("1. [McpttGroup:%s] Added Member Session=%s IP=%s Port=%d\n", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port);
+    LOG_INFO("McpttGroup", "[%s] Member added session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
     
     // If floor is taken, notify new member
     if (_floorTaken) {
-         // Construct Floor Taken packet
-         FloorControlPacket pkt;
-         memset(&pkt, 0, sizeof(pkt));
-         pkt.version_subtype = 0x80; // V=2
-         pkt.type = RTCP_PT_APP;
-         pkt.length = htons(sizeof(FloorControlPacket)/4 - 1);
-         memcpy(pkt.name, "MCPT", 4);
-         pkt.opcode = FLOOR_TAKEN;
-         pkt.user_id = htonl(_floorOwnerUserId);
-         
-         sendToMember(sessionId, (char*)&pkt, sizeof(pkt));
+         char pktBuf[256];
+         int pktLen = BuildFloorPacket(pktBuf, sizeof(pktBuf), FLOOR_TAKEN,
+                                       _floorOwnerSsrc, _floorOwnerSessionId);
+         if (pktLen > 0)
+             sendToMember(sessionId, pktBuf, pktLen);
+         LOG_DEBUG("McpttGroup", "[%s] Notified new member %s about floor taken by %s",
+                   _groupId.c_str(), sessionId.c_str(), _floorOwnerSessionId.c_str());
     }
 }
 
 void McpttGroup::removeMember(const std::string& sessionId) {
     PAutoLock lock(_mutex);
     _members.erase(sessionId);
-    printf("[McpttGroup:%s] Member %s left.\n", _groupId.c_str(), sessionId.c_str());
+    // Throttled: suppress repeated "Member left" within 2 seconds
+    LOG_THROTTLE(2, "McpttGroup", "[%s] Member %s left. (remaining=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
 
     if ( _floorTaken && (_floorOwnerSessionId == sessionId) ) {
         // Owner left, release floor
         _floorTaken = false;
         _floorOwnerSessionId = "";
-        _floorOwnerUserId = 0;
-        broadcastFloorStatus(FLOOR_IDLE, 0);
-        printf("[McpttGroup:%s] Floor owner left. Floor IDLE.\n", _groupId.c_str());
+        _floorOwnerSsrc = 0;
+        broadcastFloorStatus(FLOOR_IDLE, 0, "");
+        LOG_INFO("McpttGroup", "[%s] Floor owner %s left. Floor -> IDLE", _groupId.c_str(), sessionId.c_str());
     }
 }
 
 void McpttGroup::updatePriorities(const std::map<std::string, int>& priorities) {
     PAutoLock lock(_mutex);
     _priorities = priorities;
-    printf("[McpttGroup:%s] Priorities updated for %lu members.\n", _groupId.c_str(), _priorities.size());
+    LOG_INFO("McpttGroup", "[%s] Priorities updated for %lu members", _groupId.c_str(), _priorities.size());
 }
 
 void McpttGroup::setDtmfConfig(bool enable, const std::string& pushDigit, const std::string& releaseDigit) {
@@ -70,7 +106,7 @@ void McpttGroup::setDtmfConfig(bool enable, const std::string& pushDigit, const 
     _dtmfEnable = enable;
     _dtmfPushDigit = pushDigit;
     _dtmfReleaseDigit = releaseDigit;
-    printf("[McpttGroup:%s] DTMF Config: Enable=%d Push=%s Release=%s\n", _groupId.c_str(), enable, pushDigit.c_str(), releaseDigit.c_str());
+    LOG_INFO("McpttGroup", "[%s] DTMF config: enable=%d push=%s release=%s", _groupId.c_str(), enable, pushDigit.c_str(), releaseDigit.c_str());
 }
 
 bool McpttGroup::hasMember(const std::string& sessionId) {
@@ -79,50 +115,57 @@ bool McpttGroup::hasMember(const std::string& sessionId) {
 }
 
 void McpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int len) {
-    if (len < sizeof(FloorControlPacket)) {
-         return;
+    if (len < (int)sizeof(FloorControlPacket)) {
+        LOG_DEBUG("McpttGroup", "[%s] RTCP too short len=%d from %s:%d", _groupId.c_str(), len, ip.c_str(), port);
+        return;
     }
-    
-    // Check sender
+
+    // Check sender — peer.port는 RTP 포트, RTCP source port = peer.port + 1
     std::string sessionId = "";
+    unsigned int senderSsrc = 0;
     {
         PAutoLock lock(_mutex);
         for(auto const& [sid, peer] : _members) {
-            if (peer.ip == ip && peer.port == port + 1) { // RTCP port match (+1) check? Or usually peer.port is RTP.
+            if (peer.ip == ip && peer.port + 1 == port) {
                 sessionId = sid;
+                senderSsrc = peer.ssrc;
                 break;
             }
-            // Loose match for RTCP port? Or strict? 
-            // Usually RTCP is RTP+1. But NAT might change it.
-            // For now assume Strict RTP+1 matching peer.port+1
-            // OR check if peer.port matches port (maybe multiplexed?)
-            // Assuming peer.port is RTP. so peer.port+1 == port.
         }
     }
-    
+
     if (sessionId == "") {
-         // Unknown sender
-         return;
+        LOG_DEBUG("McpttGroup", "[%s] RTCP from unknown sender %s:%d (members=%lu)",
+                  _groupId.c_str(), ip.c_str(), port, _members.size());
+        return;
     }
 
     FloorControlPacket* pkt = (FloorControlPacket*)buf;
-    
-    // Validate PT and Name
-    if (pkt->type != RTCP_PT_APP) return;
-    if (memcmp(pkt->name, "MCPT", 4) != 0) return;
 
-    unsigned int userId = ntohl(pkt->user_id);
+    if (pkt->type != RTCP_PT_APP) {
+        LOG_DEBUG("McpttGroup", "[%s] RTCP pt=%d (not APP=204), skip", _groupId.c_str(), pkt->type);
+        return;
+    }
+    if (memcmp(pkt->name, "MCPT", 4) != 0) {
+        LOG_DEBUG("McpttGroup", "[%s] RTCP APP name mismatch, skip", _groupId.c_str());
+        return;
+    }
+
     unsigned char opcode = pkt->opcode;
-    
-    printf("RTCP App Valid. OpCode=%d UserId=%u Session=%s\n", opcode, userId, sessionId.c_str());
+    unsigned int pktSsrc = ntohl(pkt->ssrc);
 
-    // Dispatch
+    static const char* opcodeStr[] = {"?","REQUEST","GRANT","REJECT","RELEASE","IDLE","TAKEN","REVOKE"};
+    const char* opName = (opcode < 8) ? opcodeStr[opcode] : "?";
+    LOG_INFO("McpttGroup", "[%s] Floor RTCP opcode=%d(%s) ssrc=%u session=%s from %s:%d",
+             _groupId.c_str(), opcode, opName, pktSsrc, sessionId.c_str(), ip.c_str(), port);
+
+    // Dispatch — senderSsrc는 CMP가 할당한 SSRC
     switch(opcode) {
         case FLOOR_REQUEST:
-            handleFloorRequest(sessionId, userId);
+            handleFloorRequest(sessionId, senderSsrc);
             break;
         case FLOOR_RELEASE:
-            handleFloorRelease(sessionId, userId);
+            handleFloorRelease(sessionId, senderSsrc);
             break;
         default:
             break;
@@ -132,41 +175,32 @@ void McpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int le
 void McpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int len) {
     std::string action = "NONE";
     std::string actionSenderId = "";
-    unsigned int actionUserId = 0;
+    unsigned int actionSsrc = 0;
 
     {
         PAutoLock lock(_mutex);
-        
+
         // Find sender session
         std::string senderId = "";
+        unsigned int senderSsrc = 0;
         for(auto const& [sid, peer] : _members) {
             if (peer.ip == ip && peer.port == port) {
                 senderId = sid;
-                break;
+                senderSsrc = peer.ssrc;
                 break;
             }
         }
         
         if (senderId == "") {
-             // DEBUG: Log unknown sender occasionally?
-             // printf("[DEBUG] Unknown Sender: IP=%s Port=%d\n", ip.c_str(), port);
+             LOG_DEBUG("McpttGroup", "[%s] RTP from unknown sender %s:%d", _groupId.c_str(), ip.c_str(), port);
         }
         
         unsigned char pt = (unsigned char)(buf[1] & 0x7F);
-        //printf("RTP Packet: IP=%s Port=%d Len=%d PT=%d SenderId=%s\n", ip.c_str(), port, len, pt, senderId.c_str());
+        LOG_DEBUG("McpttGroup", "[%s] RTP ip=%s port=%d len=%d pt=%d sender=%s", _groupId.c_str(), ip.c_str(), port, len, pt, senderId.c_str());
+
         if (senderId != "") {
             // [DTMF Check]
             if (_dtmfEnable && len > 12) { 
-                // DEBUG: Print potentially valid DTMF packets or all packets if needed
-                // Rate limit or just print for now since user says "nothing happens".
-                /*
-                if (pt == 101) {
-                    printf("[DEBUG] RTP Packet: IP=%s Port=%d Len=%d PT=%d SenderId=%s\n", ip.c_str(), port, len, pt, senderId.c_str());
-                } else if (pt != 0 && pt != 98) { // Ignore typical audio
-                    printf("[DEBUG] Unknown PT Packet: IP=%s Port=%d Len=%d PT=%d SenderId=%s\n", ip.c_str(), port, len, pt, senderId.c_str());
-                }
-                */
-
                 if (pt == 101) { 
                     unsigned char digitCode = (unsigned char)buf[12];
                     bool endBit = (buf[13] & 0x80) != 0; 
@@ -179,36 +213,32 @@ void McpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int len
                     
                     if (digitChar != 0 && endBit) {
                         std::string dStr(1, digitChar);
-                        
-                        unsigned int uId = 0;
-                        try { uId = std::stoul(senderId); } catch (...) { uId = 9999; }
 
                         if (dStr == _dtmfPushDigit) {
-                            printf("[McpttGroup:%s] DTMF Push: %c from %s\n", _groupId.c_str(), digitChar, senderId.c_str());
+                            LOG_INFO("McpttGroup", "[%s] DTMF Push '%c' from %s", _groupId.c_str(), digitChar, senderId.c_str());
                             action = "REQUEST";
                             actionSenderId = senderId;
-                            actionUserId = uId;
+                            actionSsrc = senderSsrc;
                         } else if (dStr == _dtmfReleaseDigit) {
-                            printf("[McpttGroup:%s] DTMF Release: %c from %s\n", _groupId.c_str(), digitChar, senderId.c_str());
+                            LOG_INFO("McpttGroup", "[%s] DTMF Release '%c' from %s", _groupId.c_str(), digitChar, senderId.c_str());
                             action = "RELEASE";
                             actionSenderId = senderId;
-                            actionUserId = uId;
+                            actionSsrc = senderSsrc;
                         }
                     }
                 }
             }
 
             if (_floorTaken && _floorOwnerSessionId == senderId) {
-                //printf("[McpttGroup:%s] Forwarding RTP Packet: IP=%s Port=%d Len=%d PT=%d SenderId=%s\n", _groupId.c_str(), ip.c_str(), port, len, pt, senderId.c_str());
                 sendAudioToAll(buf, len, ip, port);
             }
         }
     } // Lock releases here
 
     if (action == "REQUEST") {
-        handleFloorRequest(actionSenderId, actionUserId);
+        handleFloorRequest(actionSenderId, actionSsrc);
     } else if (action == "RELEASE") {
-        handleFloorRelease(actionSenderId, actionUserId);
+        handleFloorRelease(actionSenderId, actionSsrc);
     }
 }
 
@@ -219,14 +249,8 @@ void McpttGroup::onVideoRtpPacket(const std::string& ip, int port, char* buf, in
     
     std::string senderId = "";
     for(auto const& [sid, peer] : _members) {
-        if (peer.ip == ip && peer.port == port) { // Video port check? 
-            // For simplicity, assume video port matches peer.port (if multiplexed) or separate mapping.
-            // But we didn't store video port in Peer struct. Assuming audio-only for now or same IP/Port logic caveat.
-            // If Peer has videoPort, we should check peer.videoPort.
-            // But Peer struct only has 'port'.
-            // Let's assume we ignore video for this refactor or assume audio forwarding logic applies.
+        if (peer.ip == ip && peer.port == port) {
             senderId = sid; 
-            // WARNING: Video port handling incomplete in Peer struct. Focusing on Audio per request.
             break;
         }
     }
@@ -236,19 +260,14 @@ void McpttGroup::onVideoRtpPacket(const std::string& ip, int port, char* buf, in
     if (_sharedSession) {
          for (auto const& [sid, peer] : _members) {
             if (sid != senderId) {
-                // Video port?? We need to know Peer's video port.
-                // Assuming peer.port + 2 or stored video port.
-                // Current Peer struct missing videoPort.
-                // Added note: Video forwarding disabled/broken in this refactor until Peer struct updated.
-                // _sharedSession->sendVideoTo(peer.ip, peer.port+?, buf, len);
+                // Video forwarding placeholder — Peer struct missing videoPort
             }
         }
     }
 }
 
-void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int userId) {
+void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int ssrc) {
     PAutoLock lock(_mutex);
-    // Check Priority
     int requesterPrio = 999;
     if (_priorities.find(sessionId) != _priorities.end()) requesterPrio = _priorities[sessionId];
 
@@ -256,107 +275,77 @@ void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int u
         // Grant Floor
         _floorTaken = true;
         _floorOwnerSessionId = sessionId;
-        _floorOwnerUserId = userId;
-        
-        // Send Grant to Requestor
-        FloorControlPacket response;
-        memset(&response, 0, sizeof(response));
-        response.version_subtype = 0x80;
-        response.type = RTCP_PT_APP;
-        response.length = htons(sizeof(FloorControlPacket)/4 - 1);
-        memcpy(response.name, "MCPT", 4);
-        response.opcode = FLOOR_GRANT;
-        response.user_id = htonl(userId);
-        
-        sendToMember(sessionId, (char*)&response, sizeof(response));
-        
-        // Broadcast Taken to others
-        broadcastFloorStatus(FLOOR_TAKEN, userId);
-        
-        printf("[McpttGroup:%s] Floor GRANTED to User %u (Session %s) Prio=%d\n", _groupId.c_str(), userId, sessionId.c_str(), requesterPrio);
+        _floorOwnerSsrc = ssrc;
+
+        // Send Grant to Requestor (speakerId = 자기 자신)
+        char grantBuf[256];
+        int grantLen = BuildFloorPacket(grantBuf, sizeof(grantBuf), FLOOR_GRANT, ssrc, sessionId);
+        if (grantLen > 0) sendToMember(sessionId, grantBuf, grantLen);
+
+        // Broadcast Taken to all (화자 identity 포함)
+        broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
+
+        LOG_INFO("McpttGroup", "[%s] Floor GRANTED to session=%s ssrc=%u prio=%d",
+                 _groupId.c_str(), sessionId.c_str(), ssrc, requesterPrio);
     } else {
         if (_floorOwnerSessionId == sessionId) return;
 
-        // Check Preemption (Lower Value = Higher Priority)
         int ownerPrio = 999;
         if (_priorities.find(_floorOwnerSessionId) != _priorities.end()) ownerPrio = _priorities[_floorOwnerSessionId];
 
         if (requesterPrio < ownerPrio) {
             // PREEMPTION
-            printf("[McpttGroup:%s] Floor PREEMPTED by User %u (Prio %d) from User %u (Prio %d)\n", 
-                   _groupId.c_str(), userId, requesterPrio, _floorOwnerUserId, ownerPrio);
+            LOG_INFO("McpttGroup", "[%s] Floor PREEMPTED by %s (prio=%d) from %s (prio=%d)",
+                   _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
 
             // Revoke Current
-            FloorControlPacket revoke;
-            memset(&revoke, 0, sizeof(revoke));
-            revoke.version_subtype = 0x80;
-            revoke.type = RTCP_PT_APP;
-            revoke.length = htons(sizeof(FloorControlPacket)/4 - 1);
-            memcpy(revoke.name, "MCPT", 4);
-            revoke.opcode = FLOOR_REVOKE;
-            revoke.user_id = htonl(_floorOwnerUserId);
-            sendToMember(_floorOwnerSessionId, (char*)&revoke, sizeof(revoke));
+            char revBuf[256];
+            int revLen = BuildFloorPacket(revBuf, sizeof(revBuf), FLOOR_REVOKE, _floorOwnerSsrc, _floorOwnerSessionId);
+            if (revLen > 0) sendToMember(_floorOwnerSessionId, revBuf, revLen);
 
             // Grant New
             _floorOwnerSessionId = sessionId;
-            _floorOwnerUserId = userId;
-            
-            FloorControlPacket grant;
-            memset(&grant, 0, sizeof(grant));
-            grant.version_subtype = 0x80;
-            grant.type = RTCP_PT_APP;
-            grant.length = htons(sizeof(FloorControlPacket)/4 - 1);
-            memcpy(grant.name, "MCPT", 4);
-            grant.opcode = FLOOR_GRANT;
-            grant.user_id = htonl(userId);
-            sendToMember(sessionId, (char*)&grant, sizeof(grant));
-            
+            _floorOwnerSsrc = ssrc;
+
+            char grantBuf[256];
+            int grantLen = BuildFloorPacket(grantBuf, sizeof(grantBuf), FLOOR_GRANT, ssrc, sessionId);
+            if (grantLen > 0) sendToMember(sessionId, grantBuf, grantLen);
+
             // Broadcast Taken (New Owner)
-            broadcastFloorStatus(FLOOR_TAKEN, userId);
-            printf("[McpttGroup:%s] Floor PREEMPTED by User %u (Prio %d) from User %u (Prio %d)\n", 
-                   _groupId.c_str(), userId, requesterPrio, _floorOwnerUserId, ownerPrio);
+            broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
         } else {
             // REJECT
-            FloorControlPacket response;
-            memset(&response, 0, sizeof(response));
-            response.version_subtype = 0x80;
-            response.type = RTCP_PT_APP;
-            response.length = htons(sizeof(FloorControlPacket)/4 - 1);
-            memcpy(response.name, "MCPT", 4);
-            response.opcode = FLOOR_REJECT;
-            response.user_id = htonl(userId);
-            
-            sendToMember(sessionId, (char*)&response, sizeof(response));
-            printf("[McpttGroup:%s] Floor REJECTED for User %u (Prio %d). Owned by %u (Prio %d)\n", 
-                   _groupId.c_str(), userId, requesterPrio, _floorOwnerUserId, ownerPrio);
+            char rejBuf[256];
+            int rejLen = BuildFloorPacket(rejBuf, sizeof(rejBuf), FLOOR_REJECT, ssrc, sessionId);
+            if (rejLen > 0) sendToMember(sessionId, rejBuf, rejLen);
+            LOG_INFO("McpttGroup", "[%s] Floor REJECTED session=%s (prio=%d). Owner=%s (prio=%d)",
+                   _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
         }
     }
 }
 
-void McpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int userId) {
+void McpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int ssrc) {
     PAutoLock lock(_mutex);
     if (_floorTaken && _floorOwnerSessionId == sessionId) {
         _floorTaken = false;
         _floorOwnerSessionId = "";
-        _floorOwnerUserId = 0;
-        
-        broadcastFloorStatus(FLOOR_IDLE, 0);
-        printf("[McpttGroup:%s] Floor RELEASED by User %u (Session %s)\n", _groupId.c_str(), userId, sessionId.c_str());
+        _floorOwnerSsrc = 0;
+
+        broadcastFloorStatus(FLOOR_IDLE, 0, "");
+        LOG_INFO("McpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
     }
 }
 
-void McpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int userId) {
-    FloorControlPacket pkt;
-    memset(&pkt, 0, sizeof(pkt));
-    pkt.version_subtype = 0x80;
-    pkt.type = RTCP_PT_APP;
-    pkt.length = htons(sizeof(FloorControlPacket)/4 - 1);
-    memcpy(pkt.name, "MCPT", 4);
-    pkt.opcode = opcode;
-    pkt.user_id = htonl(userId);
-    
-    // Floor Control is RTCP (Audio RTCP for now)
-    sendAudioRtcpToAll((char*)&pkt, sizeof(pkt), "", 0);
+void McpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId) {
+    static const char* opcodeStr[] = {"?","REQUEST","GRANT","REJECT","RELEASE","IDLE","TAKEN","REVOKE"};
+    const char* opName = (opcode < 8) ? opcodeStr[opcode] : "?";
+    LOG_INFO("McpttGroup", "[%s] broadcastFloorStatus opcode=%d(%s) speaker=%s ssrc=%u → %lu members",
+             _groupId.c_str(), opcode, opName, speakerId.c_str(), ssrc, _members.size());
+
+    char pktBuf[256];
+    int pktLen = BuildFloorPacket(pktBuf, sizeof(pktBuf), opcode, ssrc, speakerId);
+    if (pktLen > 0)
+        sendAudioRtcpToAll(pktBuf, pktLen, "", 0);
 }
 
 void McpttGroup::sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
@@ -382,9 +371,7 @@ void McpttGroup::sendAudioRtcpToAll(const char* data, int len, const std::string
 void McpttGroup::sendVideoToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
     if (_sharedSession) {
         for (auto const& [sid, peer] : _members) {
-            // Check Peer Video Port? Current Peer struct lacks it.
-            // Placeholder: Assuming no video forwarding until Peer updated.
-             // _sharedSession->sendVideoTo(peer.ip, peer.videoPort, (char*)data, len); 
+            // Video forwarding placeholder — Peer struct missing videoPort
         }
     }
 }
@@ -392,7 +379,7 @@ void McpttGroup::sendVideoToAll(const char* data, int len, const std::string& ex
 void McpttGroup::sendVideoRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
     if (_sharedSession) {
         for (auto const& [sid, peer] : _members) {
-             // _sharedSession->sendVideoTo(peer.ip, peer.videoPort + 1, (char*)data, len); 
+             // Video forwarding placeholder
         }
     }
 }
@@ -400,6 +387,11 @@ void McpttGroup::sendVideoRtcpToAll(const char* data, int len, const std::string
 void McpttGroup::sendToMember(const std::string& sessionId, const char* data, int len) {
     if (_sharedSession && _members.find(sessionId) != _members.end()) {
         const Peer& peer = _members[sessionId];
-        _sharedSession->sendTo(peer.ip, peer.port + 1, (char*)data, len); // Assuming RTCP
+        LOG_INFO("McpttGroup", "[%s] sendToMember session=%s → %s:%d (RTCP)",
+                 _groupId.c_str(), sessionId.c_str(), peer.ip.c_str(), peer.port + 1);
+        _sharedSession->sendTo(peer.ip, peer.port + 1, (char*)data, len);
+    } else {
+        LOG_ERROR("McpttGroup", "[%s] sendToMember session=%s not found or no sharedSession",
+                  _groupId.c_str(), sessionId.c_str());
     }
 }

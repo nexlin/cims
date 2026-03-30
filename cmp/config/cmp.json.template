@@ -8,5 +8,9 @@
     "DtmfPushDigit": "*",
     "DtmfReleaseDigit": "#",
     "CspIp": "@CSP_IP@",
-    "CspPort": 9001
+    "CspPort": 9001,
+    "LogDir": "log",
+    "LogMaxSizeMB": 10,
+    "LogMaxFiles": 5,
+    "LogLevel": "INFO"
 }

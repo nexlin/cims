@@ -5,11 +5,18 @@
 #include "Directory.h"
 #include "Log.h"
 #include "SessionMap.h"
+#include "RtpThread.h"
 #include "SipAgent.h"
 #include "CwrtcSetup.h"
 #include "SimpleJson.h"
 #include "MemoryDebug.h"
 #include <cstring>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+
+// (SendFloorControl 삭제 — RtpThread의 RTCP 소켓을 사용하도록 변경)
 
 CHttpStack    gclsHttpStack;
 CHttpCallBack gclsHttpCallBack;
@@ -189,6 +196,46 @@ bool CHttpCallBack::WebSocketData(const char* pszClientIp, int iClientPort,
     if (strType == "hangup") {
         std::string strCallId = msg.GetString("call_id");
         if (!strCallId.empty()) gclsSipAgent.HangupCall(strCallId);
+        return true;
+    }
+
+    // ── ptt_request (PUSH — 발언권 요청) ─────────────────────────────────────
+    if (strType == "ptt_request") {
+        std::string strCallId = msg.GetString("call_id");
+        CCallSession sess;
+        if (!strCallId.empty() && gclsSessionMap.GetCall(strCallId, sess)) {
+            if (sess.pclsRtpArg) {
+                CLog::Print(LOG_INFO, "WS[%s:%d] ptt_request callId=%s → RTCP FLOOR_REQUEST via RtpThread",
+                    pszClientIp, iClientPort, strCallId.c_str());
+                sess.pclsRtpArg->SendFloorViaCmp(1 /* FLOOR_REQUEST */);
+            } else {
+                CLog::Print(LOG_INFO, "WS[%s:%d] ptt_request callId=%s — RtpThread 없음",
+                    pszClientIp, iClientPort, strCallId.c_str());
+            }
+        } else {
+            CLog::Print(LOG_INFO, "WS[%s:%d] ptt_request — callId=%s 세션 없음",
+                pszClientIp, iClientPort, strCallId.c_str());
+        }
+        return true;
+    }
+
+    // ── ptt_release (RELEASE — 발언권 반납) ──────────────────────────────────
+    if (strType == "ptt_release") {
+        std::string strCallId = msg.GetString("call_id");
+        CCallSession sess;
+        if (!strCallId.empty() && gclsSessionMap.GetCall(strCallId, sess)) {
+            if (sess.pclsRtpArg) {
+                CLog::Print(LOG_INFO, "WS[%s:%d] ptt_release callId=%s → RTCP FLOOR_RELEASE via RtpThread",
+                    pszClientIp, iClientPort, strCallId.c_str());
+                sess.pclsRtpArg->SendFloorViaCmp(4 /* FLOOR_RELEASE */);
+            } else {
+                CLog::Print(LOG_INFO, "WS[%s:%d] ptt_release callId=%s — RtpThread 없음",
+                    pszClientIp, iClientPort, strCallId.c_str());
+            }
+        } else {
+            CLog::Print(LOG_INFO, "WS[%s:%d] ptt_release — callId=%s 세션 없음",
+                pszClientIp, iClientPort, strCallId.c_str());
+        }
         return true;
     }
 

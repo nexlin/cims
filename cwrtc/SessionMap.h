@@ -38,10 +38,15 @@ struct CCallSession {
     bool        bOutgoing;      // true: 브라우저→CSP, false: CSP→브라우저
     bool        bAutoAnswered;  // Answer-Mode:Auto로 SIP 200 OK 이미 전송됨
     std::string strBrowserSdp;  // 브라우저의 SDP offer/answer (ICE 정보 추출용)
+    int         iAudioPt;       // 오디오 페이로드 타입: 111=Opus, 99=AMR-WB
+    bool        bVideoEnabled;  // H.264 비디오 릴레이 활성화
+    int         iDtlsPort;      // 할당된 DTLS 포트 (FreePorts 호출용)
+    int         iRtpPort;       // 할당된 RTP 포트 (FreePorts 호출용)
     CRtpThreadArg* pclsRtpArg;
 
     CCallSession() : iWsPort(0), iCmpPort(0), bPtt(false), bOutgoing(false),
-                     bAutoAnswered(false), pclsRtpArg(nullptr) {}
+                     bAutoAnswered(false), iAudioPt(99), bVideoEnabled(false),
+                     iDtlsPort(0), iRtpPort(0), pclsRtpArg(nullptr) {}
 };
 
 /**

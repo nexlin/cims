@@ -11,6 +11,7 @@ export type PhoneState =
 export interface IncomingInfo {
   callId: string
   from: string
+  groupId?: string   // PTT 그룹 ID (ptt_auto_answer 전용)
   sdp: string
   ptt: boolean
 }
@@ -114,6 +115,7 @@ export class PhoneClient {
   // ── Message handler ─────────────────────────────────────────────────────────
 
   private handleMessage(msg: Record<string, string>) {
+    console.log('[PhoneClient] handleMessage:', msg)
     switch (msg.type) {
       case 'registered':
         this.setState('registered')
@@ -155,6 +157,7 @@ export class PhoneClient {
         this.pendingIncoming = {
           callId: msg.call_id,
           from: msg.from,
+          groupId: msg.group_id || undefined,
           sdp: msg.sdp,
           ptt: true,
         }
@@ -213,22 +216,36 @@ export class PhoneClient {
     if (this.state !== 'incoming' || !this.pendingIncoming) return
     const info = this.pendingIncoming
 
-    const stream = await this.getMic()
-    if (!stream) return
-    this.localStream = stream
+    if (!info.ptt) {
+      // 일반 통화: 마이크 필수
+      const stream = await this.getMic()
+      if (!stream) return
+      this.localStream = stream
+    }
+    // PTT: 초기 수신에는 마이크 불필요 — setPttFloor(true) 시 지연 획득
 
-    this.pc = this.createPC()
-    this.localStream.getTracks().forEach(t => this.pc!.addTrack(t, this.localStream!))
+    try {
+      this.pc = this.createPC()
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(t => this.pc!.addTrack(t, this.localStream!))
+      } else {
+        // PTT 수신 전용: 오디오 수신 트랜시버 명시 설정
+        this.pc.addTransceiver('audio', { direction: 'recvonly' })
+      }
 
-    await this.pc.setRemoteDescription({ type: 'offer', sdp: info.sdp })
-    const ans = await this.pc.createAnswer()
-    await this.pc.setLocalDescription(ans)
-    await this.waitForIce()
+      await this.pc.setRemoteDescription({ type: 'offer', sdp: info.sdp })
+      const ans = await this.pc.createAnswer()
+      await this.pc.setLocalDescription(ans)
+      await this.waitForIce()
 
-    this.activeCallId = info.callId
-    this.pendingIncoming = null
-    this.send({ type: 'answer', call_id: info.callId, sdp: this.pc.localDescription!.sdp })
-    this.setState('active')
+      this.activeCallId = info.callId
+      this.pendingIncoming = null
+      this.send({ type: 'answer', call_id: info.callId, sdp: this.pc.localDescription!.sdp })
+      this.setState('active')
+    } catch (e: unknown) {
+      this.cb.onError(`PTT answer 실패: ${(e as Error)?.message ?? String(e)}`)
+      console.error('[PhoneClient] answer() error:', e)
+    }
   }
 
   reject() {
@@ -250,14 +267,27 @@ export class PhoneClient {
   // ── PTT floor control ───────────────────────────────────────────────────────
 
   setPttFloor(active: boolean) {
-    // Mute/unmute mic track
-    if (this.localStream)
-      this.localStream.getAudioTracks().forEach(t => { t.enabled = active })
-    // Send floor request/release to cwrtc
-    if (active)
+    if (active) {
+      // PUSH: 마이크가 없으면 지연 획득 후 트랙 추가
+      if (!this.localStream) {
+        this.getMic().then(stream => {
+          if (!stream || !this.pc) return
+          this.localStream = stream
+          stream.getAudioTracks().forEach(t => {
+            this.pc!.addTrack(t, stream)
+            t.enabled = true
+          })
+          this.send({ type: 'ptt_request', call_id: this.activeCallId })
+        })
+        return
+      }
+      this.localStream.getAudioTracks().forEach(t => { t.enabled = true })
       this.send({ type: 'ptt_request', call_id: this.activeCallId })
-    else
+    } else {
+      if (this.localStream)
+        this.localStream.getAudioTracks().forEach(t => { t.enabled = false })
       this.send({ type: 'ptt_release', call_id: this.activeCallId })
+    }
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -286,7 +316,7 @@ export class PhoneClient {
     pc.ontrack = (e) => {
       if (this.audioEl && e.streams[0]) {
         this.audioEl.srcObject = e.streams[0]
-        this.audioEl.play().catch(() => {})
+        this.audioEl.play().catch(() => { })
       }
     }
     return pc

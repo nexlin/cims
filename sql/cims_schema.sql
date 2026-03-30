@@ -72,8 +72,9 @@ CREATE TABLE IF NOT EXISTS user_rejects (
 --  PTT 그룹 (Groups)
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ptt_groups (
-    id   VARCHAR(64)  NOT NULL COMMENT '그룹 번호 (E.164)',
-    name VARCHAR(128) NOT NULL DEFAULT '' COMMENT '그룹명',
+    id            VARCHAR(64)  NOT NULL COMMENT '그룹 번호 (E.164)',
+    name          VARCHAR(128) NOT NULL DEFAULT '' COMMENT '그룹명',
+    video_enabled TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'H.264 비디오 릴레이 활성화',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='PTT 그룹 정보';

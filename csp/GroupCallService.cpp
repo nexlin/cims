@@ -71,7 +71,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     if ( iSharedPort > 0 ) {
         CSipCallRtp clsCallerRtp;
         clsCallerRtp.SetIpPort( strSharedIp.c_str(), iSharedPort, SOCKET_COUNT_PER_MEDIA );
-        clsCallerRtp.m_iCodec = 99;  // AMR-WB only
+        clsCallerRtp.m_iCodec = 99;  // AMR-WB (기본 코덱, 서버 설정으로 추후 변경)
         clsCallerRtp.m_clsCodecList.push_back(99);
         if ( !gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp ) ) {
             CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
@@ -189,8 +189,8 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     CSipCallRtp clsRtp;
     // Use Shared IP/Port
     clsRtp.SetIpPort( strSharedIp.c_str(), iSharedPort, SOCKET_COUNT_PER_MEDIA );
-    
-    // Codecs — AMR-WB only (payload 99)
+
+    // AMR-WB (기본 코덱, 서버 설정으로 추후 변경)
     clsRtp.m_clsCodecList.push_back(99);
     clsRtp.m_iCodec = 99;
 

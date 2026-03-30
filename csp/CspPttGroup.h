@@ -43,6 +43,9 @@ public:
     /** Member List (List of Group Members) */
     std::vector<std::shared_ptr<CspPttUser>> _pusers;
 
+    /** Video relay enabled (H.264) */
+    bool _videoEnabled;
+
     /** Parsing method */
     bool load( std::string groupId );
     void Clear();

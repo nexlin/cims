@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include "CmpLog.h"
 
 #define SOCKET_ERROR -1
 
@@ -50,7 +51,7 @@ public :
    {  
       _fd = socket(AF_INET, SOCK_DGRAM, 0);
       if(_fd == INVALID_SOCKET) {
-	      fprintf(stderr, "Can't create socket!(ip=%s, port=%d)\n", ip.c_str(), port);
+	      LOG_ERROR("CRtpSocket", "Can't create socket (ip=%s port=%d)", ip.c_str(), port);
 	      return false;
       }
 
@@ -61,7 +62,7 @@ public :
    
       int ret =  bind(_fd, (sockaddr*)&_addrLoc, sizeof(_addrLoc));
       if(ret == -1) {
-	      fprintf(stderr, "Can't bind socket!(ip=%s, port=%d) Error: %s\n", ip.c_str(), port, strerror(errno));
+	      LOG_ERROR("CRtpSocket", "Can't bind socket (ip=%s port=%d): %s", ip.c_str(), port, strerror(errno));
 	      return false;
       }
 
@@ -105,7 +106,7 @@ public :
    {
       int ret = sendto(_fd, pkt, len, 0, (sockaddr*)&_addrRmt, sizeof(struct sockaddr));
       if (ret < 0) {
-          fprintf(stderr, "sendto failed: %s (fd=%d)\n", strerror(errno), _fd);
+          LOG_ERROR("CRtpSocket", "sendto failed: %s (fd=%d)", strerror(errno), _fd);
       }
       return ret;
    }

@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 
-CspPttGroup::CspPttGroup() {
+CspPttGroup::CspPttGroup() : _videoEnabled(false) {
 }
 
 CspPttGroup::~CspPttGroup() {
@@ -55,7 +55,9 @@ bool CspPttGroup::load( std::string groupId ) {
     _id = baseName;
     
     if (root.Has("name")) _name = root.GetString("name");
-    
+
+    if (root.Has("video_enabled")) _videoEnabled = (root.GetInt("video_enabled") != 0);
+
     if (root.Has("users")) {
         SimpleJson::JsonNode users = root.Get("users");
         if (users.type == SimpleJson::JSON_ARRAY) {
@@ -80,6 +82,6 @@ bool CspPttGroup::load( std::string groupId ) {
 void CspPttGroup::Clear() {
     _id.clear();
     _name.clear();
-    // smart pointers handle deletion
+    _videoEnabled = false;
     _pusers.clear();
 }

@@ -433,18 +433,22 @@ void CSipServer::EventCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
             CLog::Print( LOG_DEBUG, "EventCallStart: GetAudioPort=%d m_iPort=%d IP=%s", iRemoteAudio, pclsRtp->m_iPort, pclsRtp->m_strIp.c_str() );
 
             if (iRemoteAudio <= 0 && pclsRtp->m_iPort > 0) iRemoteAudio = pclsRtp->m_iPort;
-            
+
             if (iRemoteAudio > 0) {
                 CLog::Print( LOG_DEBUG, "EventCallStart: Calling OnCallStarted with %s:%d", pclsRtp->m_strIp.c_str(), iRemoteAudio );
                 gclsGroupCallService.OnCallStarted(pszCallId, pclsRtp->m_strIp, iRemoteAudio);
             }
-            
+
             std::string strRelayIp = gclsSetup.m_strLocalIp;
             if (!strAllocatedIp.empty()) {
                 strRelayIp = strAllocatedIp;
             }
 
             pclsRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+        } else if ( clsCallInfo.m_iPeerRtpPort > 0 ) {
+            // pclsRtp 없는 PTT 그룹 통화: cwrtc RTP 포트로 JoinGroup
+            CLog::Print( LOG_DEBUG, "EventCallStart: PTT fallback OnCallStarted (no RTP info) sharedPort=%d", clsCallInfo.m_iPeerRtpPort );
+            gclsGroupCallService.OnCallStarted(pszCallId, gclsSetup.m_strLocalIp, clsCallInfo.m_iPeerRtpPort);
         }
 
 

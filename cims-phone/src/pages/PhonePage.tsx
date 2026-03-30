@@ -198,7 +198,8 @@ function PttPanel({ sub }: { sub: Subscription }) {
         if (info.ptt) {
           // PTT 자동 수락
           client.answer().catch(() => {})
-          const gid = info.from.replace(/^sip:/, '').split('@')[0]
+          // group_id 우선, 없으면 from 필드에서 추출
+          const gid = info.groupId || info.from.replace(/^sip:/, '').replace(/^tel:/, '').split('@')[0]
           setActiveGroupId(gid); activeGroupRef.current = gid
         }
       },
@@ -390,6 +391,8 @@ function PttPanel({ sub }: { sub: Subscription }) {
                 >
                   {floorOn ? '🔴 PUSH (송신 중)' : '⚫ PUSH'}
                 </button>
+              : state === 'incoming'
+              ? <div className="sp-ptt-waiting">PTT 연결 중...</div>
               : (state === 'calling' || state === 'ringing')
               ? <div className="sp-ptt-waiting">{STATE_LABEL[state]}</div>
               : <div className="sp-ptt-waiting">착신 대기 중</div>
