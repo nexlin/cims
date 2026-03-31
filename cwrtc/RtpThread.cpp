@@ -141,6 +141,7 @@ THREAD_API RtpThread(LPVOID lpParameter)
     srtp_t psttVideoSrtpTx = NULL, psttVideoSrtpRx = NULL;
     bool   bVideoDtls = false, bSendVideoRtpToWebRTC = false;
 
+
     szWebRTCIp[0] = '\0';
     szPbxIp[0]    = '\0';
 
@@ -215,44 +216,48 @@ THREAD_API RtpThread(LPVOID lpParameter)
                 iPacketLen = clsStunReq.ToString(szPacket, sizeof(szPacket));
                 UdpSend(pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort);
 
-            } else if (!bDtls && iPacketLen >= 13 &&
-                       (unsigned char)szPacket[0] >= 20 && (unsigned char)szPacket[0] <= 63) {
-                // DTLS ClientHello (or other DTLS record)
-                SSL* psttSsl;
-                struct sockaddr_in addr{};
-                addr.sin_family = AF_INET;
-                addr.sin_port   = htons(iWebRTCPort);
-                inet_pton(AF_INET, szWebRTCIp, &addr.sin_addr.s_addr);
+                // ICE 완료 후 즉시 DTLS 핸드셰이크 시작 (cwrtc = setup:active = DTLS client)
+                if (!bDtls) {
+                    SSL* psttSsl;
+                    struct sockaddr_in addr{};
+                    addr.sin_family = AF_INET;
+                    addr.sin_port   = htons(iWebRTCPort);
+                    inet_pton(AF_INET, szWebRTCIp, &addr.sin_addr.s_addr);
 
-                if (connect(pclsArg->m_hWebRtcUdp, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-                    CLog::Print(LOG_ERROR, "RtpThread[%s] DTLS connect error", pclsArg->m_strCallId.c_str());
-                } else if ((psttSsl = SSL_new(gpsttClientCtx)) != NULL) {
-                    SSL_set_fd(psttSsl, (int)pclsArg->m_hWebRtcUdp);
-                    SSL_set_tlsext_use_srtp(psttSsl, "SRTP_AES128_CM_SHA1_80");
+                    if (connect(pclsArg->m_hWebRtcUdp, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+                        CLog::Print(LOG_ERROR, "RtpThread[%s] Audio DTLS connect error", pclsArg->m_strCallId.c_str());
+                    } else if ((psttSsl = SSL_new(gpsttClientCtx)) != NULL) {
+                        SSL_set_fd(psttSsl, (int)pclsArg->m_hWebRtcUdp);
+                        SSL_set_tlsext_use_srtp(psttSsl, "SRTP_AES128_CM_SHA1_80");
 
-                    if (SSL_connect(psttSsl) != -1) {
-                        uint8_t szMaterial[60];
-                        SSL_export_keying_material(psttSsl, szMaterial, sizeof(szMaterial),
-                                                   "EXTRACTOR-dtls_srtp", 19, NULL, 0, 0);
-                        uint8_t* pLocalKey   = szMaterial;
-                        uint8_t* pRemoteKey  = pLocalKey   + 16;
-                        uint8_t* pLocalSalt  = pRemoteKey  + 16;
-                        uint8_t* pRemoteSalt = pLocalSalt  + 14;
-                        SrtpCreate(&psttSrtpTx, pLocalKey,  pLocalSalt,  false);
-                        SrtpCreate(&psttSrtpRx, pRemoteKey, pRemoteSalt, true);
-                        bDtls = true;
-                        CLog::Print(LOG_INFO, "RtpThread[%s] Audio DTLS OK, SRTP ready", pclsArg->m_strCallId.c_str());
-                    } else {
-                        CLog::Print(LOG_ERROR, "RtpThread[%s] Audio SSL_connect failed", pclsArg->m_strCallId.c_str());
+                        if (SSL_connect(psttSsl) != -1) {
+                            uint8_t szMaterial[60];
+                            SSL_export_keying_material(psttSsl, szMaterial, sizeof(szMaterial),
+                                                       "EXTRACTOR-dtls_srtp", 19, NULL, 0, 0);
+                            uint8_t* pLocalKey   = szMaterial;
+                            uint8_t* pRemoteKey  = pLocalKey   + 16;
+                            uint8_t* pLocalSalt  = pRemoteKey  + 16;
+                            uint8_t* pRemoteSalt = pLocalSalt  + 14;
+                            SrtpCreate(&psttSrtpTx, pLocalKey,  pLocalSalt,  false);
+                            SrtpCreate(&psttSrtpRx, pRemoteKey, pRemoteSalt, true);
+                            bDtls = true;
+                            bSendRtpToWebRTC = true;  // DTLS 완료 즉시 CMP→브라우저 릴레이 활성화
+                            CLog::Print(LOG_INFO, "RtpThread[%s] Audio DTLS OK, SRTP ready", pclsArg->m_strCallId.c_str());
+                        } else {
+                            CLog::Print(LOG_ERROR, "RtpThread[%s] Audio SSL_connect failed", pclsArg->m_strCallId.c_str());
+                        }
+                        SSL_free(psttSsl);
                     }
-                    SSL_free(psttSsl);
                 }
 
-            } else if (iPbxPort > 0 && bDtls) {
-                // SRTP 패킷 → 복호화 → CMP로 전달
-                if (psttSrtpRx) srtp_unprotect(psttSrtpRx, szPacket, &iPacketLen);
-                UdpSend(pclsArg->m_hPbxUdp, szPacket, iPacketLen, szPbxIp, iPbxPort);
-                bSendRtpToWebRTC = true;
+            } else if (iPbxPort > 0 && bDtls &&
+                       iPacketLen >= 12 && (unsigned char)szPacket[0] >= 128 && (unsigned char)szPacket[0] <= 191) {
+                // RTP/SRTP 패킷만 처리 (STUN keepalive 등 제외)
+                err_status_t err = err_status_ok;
+                if (psttSrtpRx) err = srtp_unprotect(psttSrtpRx, szPacket, &iPacketLen);
+                if (err == err_status_ok) {
+                    UdpSend(pclsArg->m_hPbxUdp, szPacket, iPacketLen, szPbxIp, iPbxPort);
+                }
             }
         }
 
@@ -261,11 +266,9 @@ THREAD_API RtpThread(LPVOID lpParameter)
             iPacketLen = sizeof(szPacket);
             UdpRecv(pclsArg->m_hPbxUdp, szPacket, &iPacketLen, szPbxIp, sizeof(szPbxIp), &iPbxPort);
 
-            if (bSendRtpToWebRTC && iWebRTCPort > 0) {
-                // SSRC 고정 (브라우저가 기대하는 오디오 SSRC=100)
-                int32_t iSsrc = htonl(100);
-                memcpy(szPacket + 8, &iSsrc, 4);
-
+            if (bSendRtpToWebRTC && iWebRTCPort > 0 &&
+                iPacketLen >= 12 && (unsigned char)szPacket[0] >= 128 && (unsigned char)szPacket[0] <= 191) {
+                // CMP가 수신자별 SSRC+seq를 관리 — cwrtc는 투명 전달
                 if (psttSrtpTx) srtp_protect(psttSrtpTx, szPacket, &iPacketLen);
                 UdpSend(pclsArg->m_hWebRtcUdp, szPacket, iPacketLen, szWebRTCIp, iWebRTCPort);
             }
@@ -349,21 +352,26 @@ THREAD_API RtpThread(LPVOID lpParameter)
                         iPacketLen = clsStunReq.ToString(szPacket, sizeof(szPacket));
                         UdpSend(pclsArg->m_hVideoWebRtcUdp, szPacket, iPacketLen,
                                 szVideoWebRTCIp, iVideoWebRTCPort);
+
+                        // ICE 완료 후 즉시 비디오 DTLS 핸드셰이크 시작
+                        if (!bVideoDtls) {
+                            if (DoVideoDtls(pclsArg->m_hVideoWebRtcUdp, szVideoWebRTCIp, iVideoWebRTCPort,
+                                            &psttVideoSrtpTx, &psttVideoSrtpRx, pclsArg->m_strCallId)) {
+                                bVideoDtls = true;
+                                bSendVideoRtpToWebRTC = true;  // DTLS 완료 즉시 비디오 릴레이 활성화
+                            }
+                        }
                     }
                 }
 
-            } else if (!bVideoDtls && iPacketLen >= 13 &&
-                       (unsigned char)szPacket[0] >= 20 && (unsigned char)szPacket[0] <= 63) {
-                // 비디오 DTLS 핸드셰이크
-                if (DoVideoDtls(pclsArg->m_hVideoWebRtcUdp, szVideoWebRTCIp, iVideoWebRTCPort,
-                                &psttVideoSrtpTx, &psttVideoSrtpRx, pclsArg->m_strCallId)) {
-                    bVideoDtls = true;
+            } else if (iVideoPbxPort > 0 && bVideoDtls &&
+                       iPacketLen >= 12 && (unsigned char)szPacket[0] >= 128 && (unsigned char)szPacket[0] <= 191) {
+                // 비디오 RTP/SRTP만 처리
+                err_status_t err = err_status_ok;
+                if (psttVideoSrtpRx) err = srtp_unprotect(psttVideoSrtpRx, szPacket, &iPacketLen);
+                if (err == err_status_ok) {
+                    UdpSend(pclsArg->m_hVideoPbxUdp, szPacket, iPacketLen, szVideoPbxIp, iVideoPbxPort);
                 }
-
-            } else if (iVideoPbxPort > 0 && bVideoDtls) {
-                // 비디오 SRTP → 복호화 → CMP 비디오 RTP 포트로 전달
-                if (psttVideoSrtpRx) srtp_unprotect(psttVideoSrtpRx, szPacket, &iPacketLen);
-                UdpSend(pclsArg->m_hVideoPbxUdp, szPacket, iPacketLen, szVideoPbxIp, iVideoPbxPort);
                 bSendVideoRtpToWebRTC = true;
             }
         }
@@ -374,11 +382,9 @@ THREAD_API RtpThread(LPVOID lpParameter)
             UdpRecv(pclsArg->m_hVideoPbxUdp, szPacket, &iPacketLen,
                     szVideoPbxIp, sizeof(szVideoPbxIp), &iVideoPbxPort);
 
-            if (bSendVideoRtpToWebRTC && iVideoWebRTCPort > 0) {
-                // 비디오 SSRC 고정 (오디오=100, 비디오=200)
-                int32_t iSsrc = htonl(200);
-                memcpy(szPacket + 8, &iSsrc, 4);
-
+            if (bSendVideoRtpToWebRTC && iVideoWebRTCPort > 0 &&
+                iPacketLen >= 12 && (unsigned char)szPacket[0] >= 128 && (unsigned char)szPacket[0] <= 191) {
+                // CMP가 수신자별 SSRC+seq를 관리 — cwrtc는 투명 전달
                 if (psttVideoSrtpTx) srtp_protect(psttVideoSrtpTx, szPacket, &iPacketLen);
                 UdpSend(pclsArg->m_hVideoWebRtcUdp, szPacket, iPacketLen,
                         szVideoWebRTCIp, iVideoWebRTCPort);

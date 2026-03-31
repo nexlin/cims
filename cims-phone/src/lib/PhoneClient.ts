@@ -24,6 +24,7 @@ export interface PhoneCallbacks {
   onFloorReject?: () => void
   onMemberStatus?: (userId: string, connected: boolean) => void
   onLocalVideo?: (stream: MediaStream | null) => void
+  onAudioLevel?: (level: number) => void  // 0~1 실시간 음량
 }
 
 export class PhoneClient {
@@ -33,6 +34,8 @@ export class PhoneClient {
   private audioEl: HTMLAudioElement | null = null
   private videoEl: HTMLVideoElement | null = null
   private videoEnabled = false
+  private remoteVideoStream: MediaStream | null = null
+  private remoteAudioStream: MediaStream | null = null
   private state: PhoneState = 'disconnected'
   private activeCallId = ''
   private pendingIncoming: IncomingInfo | null = null
@@ -41,6 +44,9 @@ export class PhoneClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private connArgs: { wsUrl: string; user: string; password: string; domain: string; authId?: string } | null = null
   private intentionalClose = false
+  private audioCtx: AudioContext | null = null
+  private analyser: AnalyserNode | null = null
+  private levelTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(cb: PhoneCallbacks) {
     this.cb = cb
@@ -247,15 +253,26 @@ export class PhoneClient {
 
     try {
       this.pc = this.createPC()
-      if (this.localStream) {
-        this.localStream.getTracks().forEach(t => this.pc!.addTrack(t, this.localStream!))
-      } else {
-        // PTT 수신 전용: 오디오 수신 트랜시버 명시 설정
-        this.pc.addTransceiver('audio', { direction: 'recvonly' })
-      }
-      // 비디오 활성화 그룹: 비디오 수신 트랜시버 추가
+
+      // PTT: 초기에 무음 트랙으로 sendrecv 확보 → PUSH 시 replaceTrack으로 실제 미디어 교체
+      const silentCtx = new AudioContext()
+      const oscillator = silentCtx.createOscillator()
+      const dst = silentCtx.createMediaStreamDestination()
+      oscillator.connect(dst)
+      oscillator.start()
+      const silentAudioTrack = dst.stream.getAudioTracks()[0]
+      silentAudioTrack.enabled = false  // 무음
+
+      this.pc.addTrack(silentAudioTrack, dst.stream)
+
       if (this.videoEnabled) {
-        this.pc.addTransceiver('video', { direction: 'recvonly' })
+        // 비디오: 빈 캔버스 트랙으로 sendrecv 확보
+        const canvas = document.createElement('canvas')
+        canvas.width = 2; canvas.height = 2
+        const videoStream = canvas.captureStream(1)
+        const dummyVideoTrack = videoStream.getVideoTracks()[0]
+        dummyVideoTrack.enabled = false
+        this.pc.addTrack(dummyVideoTrack, videoStream)
       }
 
       await this.pc.setRemoteDescription({ type: 'offer', sdp: info.sdp })
@@ -289,43 +306,64 @@ export class PhoneClient {
     if (this.state !== 'disconnected') this.setState('registered')
   }
 
+  // 사용자 인터랙션 시 오디오 재생 보장
+  ensureAudioPlaying() {
+    if (this.audioEl && this.audioEl.srcObject) {
+      this.audioEl.play().catch(() => {})
+    }
+  }
+
   // ── PTT floor control ───────────────────────────────────────────────────────
 
   setPttFloor(active: boolean) {
     if (active) {
-      // PUSH: 마이크(+카메라) 획득 후 트랙 추가
-      if (!this.localStream) {
-        const constraints = { audio: true, video: this.videoEnabled }
-        navigator.mediaDevices.getUserMedia(constraints).then(stream => {
-          if (!this.pc) return
+      // PUSH: 마이크(+카메라) 획득 후 replaceTrack으로 transceiver에 트랙 교체
+      const constraints = { audio: true, video: this.videoEnabled }
+      navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+        if (!this.pc) return
+        this.localStream?.getTracks().forEach(t => t.stop())
+        this.localStream = stream
+
+        // mid 기반으로 정확한 transceiver 매칭 (mid:0=audio, mid:1=video)
+        for (const tr of this.pc.getTransceivers()) {
+          if (tr.mid === '0') {
+            const t = stream.getAudioTracks()[0]
+            if (t) tr.sender.replaceTrack(t)
+          } else if (tr.mid === '1') {
+            const t = stream.getVideoTracks()[0]
+            if (t) tr.sender.replaceTrack(t)
+          }
+        }
+
+        if (this.videoEnabled) this.cb.onLocalVideo?.(stream)
+        this.send({ type: 'ptt_request', call_id: this.activeCallId })
+      }).catch(() => {
+        this.getMic().then(stream => {
+          if (!stream || !this.pc) return
           this.localStream = stream
-          stream.getTracks().forEach(t => {
-            this.pc!.addTrack(t, stream)
-            t.enabled = true
-          })
-          // 화자 자신의 카메라 프리뷰
-          if (this.videoEnabled) this.cb.onLocalVideo?.(stream)
+          for (const tr of this.pc.getTransceivers()) {
+            if (tr.mid === '0') {
+              const t = stream.getAudioTracks()[0]
+              if (t) tr.sender.replaceTrack(t)
+            }
+          }
           this.send({ type: 'ptt_request', call_id: this.activeCallId })
-        }).catch(() => {
-          this.getMic().then(stream => {
-            if (!stream || !this.pc) return
-            this.localStream = stream
-            stream.getAudioTracks().forEach(t => {
-              this.pc!.addTrack(t, stream)
-              t.enabled = true
-            })
-            this.send({ type: 'ptt_request', call_id: this.activeCallId })
-          })
         })
-        return
-      }
-      this.localStream.getTracks().forEach(t => { t.enabled = true })
-      if (this.videoEnabled) this.cb.onLocalVideo?.(this.localStream)
-      this.send({ type: 'ptt_request', call_id: this.activeCallId })
+      })
     } else {
-      if (this.localStream) {
-        this.localStream.getTracks().forEach(t => { t.enabled = false })
-        this.cb.onLocalVideo?.(null)
+      // RELEASE: 트랙 제거 (null로 교체) + 스트림 정리
+      if (this.pc) {
+        for (const tr of this.pc.getTransceivers()) {
+          tr.sender.replaceTrack(null)
+        }
+      }
+      this.localStream?.getTracks().forEach(t => t.stop())
+      this.localStream = null
+      // 로컬 카메라 프리뷰 해제 → 리모트 비디오 복원
+      this.cb.onLocalVideo?.(null)
+      if (this.videoEl && this.remoteVideoStream) {
+        this.videoEl.srcObject = this.remoteVideoStream
+        this.videoEl.play().catch(() => {})
       }
       this.send({ type: 'ptt_release', call_id: this.activeCallId })
     }
@@ -356,16 +394,50 @@ export class PhoneClient {
     const pc = new RTCPeerConnection({ iceServers: [] })
     pc.ontrack = (e) => {
       const track = e.track
-      if (track.kind === 'video' && this.videoEl) {
-        // 비디오 트랙은 videoEl에 연결
-        this.videoEl.srcObject = e.streams[0] || new MediaStream([track])
-        this.videoEl.play().catch(() => { })
-      } else if (track.kind === 'audio' && this.audioEl) {
-        this.audioEl.srcObject = e.streams[0] || new MediaStream([track])
-        this.audioEl.play().catch(() => { })
+      console.log('[PhoneClient] ontrack:', track.kind, 'readyState:', track.readyState, 'mid:', e.transceiver?.mid)
+      if (track.kind === 'video') {
+        this.remoteVideoStream = e.streams[0] || new MediaStream([track])
+        if (this.videoEl) {
+          this.videoEl.srcObject = this.remoteVideoStream
+          this.videoEl.play().catch(() => { })
+        }
+      } else if (track.kind === 'audio') {
+        this.remoteAudioStream = e.streams[0] || new MediaStream([track])
+        if (this.audioEl) {
+          this.audioEl.srcObject = this.remoteAudioStream
+          this.audioEl.play().catch(() => {})
+        }
+        this.startAudioLevelMonitor(this.remoteAudioStream)
       }
     }
     return pc
+  }
+
+  private startAudioLevelMonitor(stream: MediaStream) {
+    this.stopAudioLevelMonitor()
+    try {
+      this.audioCtx = new AudioContext()
+      const source = this.audioCtx.createMediaStreamSource(stream)
+      this.analyser = this.audioCtx.createAnalyser()
+      this.analyser.fftSize = 256
+      source.connect(this.analyser)
+      const dataArray = new Uint8Array(this.analyser.frequencyBinCount)
+      this.levelTimer = setInterval(() => {
+        if (!this.analyser) return
+        this.analyser.getByteFrequencyData(dataArray)
+        let sum = 0
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]
+        const avg = sum / dataArray.length / 255  // 0~1
+        this.cb.onAudioLevel?.(avg)
+      }, 100)
+    } catch { /* AudioContext not supported */ }
+  }
+
+  private stopAudioLevelMonitor() {
+    if (this.levelTimer) { clearInterval(this.levelTimer); this.levelTimer = null }
+    if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null }
+    this.analyser = null
+    this.cb.onAudioLevel?.(0)
   }
 
   private waitForIce(): Promise<void> {
@@ -383,10 +455,13 @@ export class PhoneClient {
   }
 
   private closePC() {
+    this.stopAudioLevelMonitor()
     this.pc?.close()
     this.pc = null
     this.localStream?.getTracks().forEach(t => t.stop())
     this.localStream = null
+    this.remoteVideoStream = null
+    this.remoteAudioStream = null
     if (this.audioEl) this.audioEl.srcObject = null
     if (this.videoEl) this.videoEl.srcObject = null
   }

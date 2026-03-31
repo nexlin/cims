@@ -555,8 +555,11 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
         strMemberId = it->second.strMemberId;
     }
     // 2. lock 해제 후 외부 호출 (CMP, DB)
-    if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort) ) {
-         CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort );
+    // 비디오 포트: cwrtc의 비디오 RTP = 오디오 RTP + 3 (포트 레이아웃: audio_dtls+0, audio_rtp+1, audio_rtcp+2, video_dtls+3, video_rtp+4)
+    // iRemotePort = audio RTP → video RTP = iRemotePort + 3
+    int iVideoPort = iRemotePort + 3;
+    if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort, iVideoPort) ) {
+         CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d video=%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort, iVideoPort );
     } else {
          CLog::Print( LOG_ERROR, "OnCallStarted: JoinGroup failed for %s", strGroupId.c_str() );
     }

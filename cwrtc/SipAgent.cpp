@@ -97,32 +97,33 @@ std::string CSipAgent::BuildDtlsSdp(int iDtlsPort, int iAudioPt, bool bVideoEnab
         snprintf(szAudioCodec, sizeof(szAudioCodec),
             "a=rtpmap:99 AMR-WB/16000\r\na=fmtp:99 octet-align=1\r\n");
 
-    // 오디오 섹션
+    // 오디오 섹션 (a=mid:0 필수 — Chrome WebRTC 호환)
     char szAudio[768];
     snprintf(szAudio, sizeof(szAudio),
         "m=audio %d UDP/TLS/RTP/SAVPF %d\r\nc=IN IP4 %s\r\n"
         "%s"
-        "a=sendrecv\r\na=ice-ufrag:lMRb\r\na=ice-pwd:%s\r\n"
+        "a=mid:0\r\na=sendrecv\r\na=ice-ufrag:lMRb\r\na=ice-pwd:%s\r\n"
         "a=fingerprint:sha-256 %s\r\na=setup:active\r\n"
         "a=candidate:1 1 udp 2130706431 %s %d typ host\r\na=rtcp-mux\r\n",
         iDtlsPort, iAudioPt, ip,
         szAudioCodec,
         pwd, fp, ip, iDtlsPort);
 
-    // 비디오 섹션 (옵션) — video DTLS는 base+3 (audio: +0, +1, +2 이후)
+    // 비디오 섹션 (옵션) — video DTLS는 base+3, a=mid:1
     char szVideo[512] = "";
     if (bVideoEnabled) {
         snprintf(szVideo, sizeof(szVideo),
             "m=video %d UDP/TLS/RTP/SAVPF 97\r\nc=IN IP4 %s\r\n"
             "a=rtpmap:97 H264/90000\r\n"
             "a=fmtp:97 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n"
-            "a=sendrecv\r\na=ice-ufrag:lMRb\r\na=ice-pwd:%s\r\n"
+            "a=mid:1\r\na=sendrecv\r\na=ice-ufrag:lMRb\r\na=ice-pwd:%s\r\n"
             "a=fingerprint:sha-256 %s\r\na=setup:active\r\n"
             "a=candidate:1 1 udp 2130706431 %s %d typ host\r\na=rtcp-mux\r\n",
             iDtlsPort + 3, ip,
             pwd, fp, ip, iDtlsPort + 3);
     }
 
+    // 세션 레벨 속성 (BUNDLE 비활성화 — cwrtc는 미디어별 별도 전송)
     snprintf(buf, sizeof(buf),
         "v=0\r\no=cwrtc 0 0 IN IP4 %s\r\ns=-\r\nt=0 0\r\n%s%s",
         ip, szAudio, szVideo);

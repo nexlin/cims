@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include <set>
+#include <cstdint>
 #include "pbase.h"
 
 // Forward declaration
@@ -90,6 +91,10 @@ private:
         int port;
         unsigned int ssrc;   // 멤버 SSRC (joinGroup 시 할당)
         int videoPort;
+        uint16_t audioSeqOut;   // 수신자별 오디오 시퀀스 카운터
+        uint16_t videoSeqOut;   // 수신자별 비디오 시퀀스 카운터
+        uint32_t audioSsrcOut;  // 수신자에게 보내는 고정 오디오 SSRC
+        uint32_t videoSsrcOut;  // 수신자에게 보내는 고정 비디오 SSRC
     };
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority

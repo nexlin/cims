@@ -65,6 +65,10 @@ void McpttGroup::addMember(const std::string& sessionId, const std::string& ip, 
     peer.port = port;
     peer.videoPort = videoPort;
     peer.ssrc = _nextSsrc++;
+    peer.audioSeqOut = 0;
+    peer.videoSeqOut = 0;
+    peer.audioSsrcOut = 1000 + _nextSsrc;  // 수신자별 고정 SSRC
+    peer.videoSsrcOut = 2000 + _nextSsrc;
     _members[sessionId] = peer;
     LOG_INFO("McpttGroup", "[%s] Member added session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
     
@@ -344,12 +348,19 @@ void McpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, c
 }
 
 void McpttGroup::sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
-    if (_sharedSession) {
-        for (auto const& [sid, peer] : _members) {
-            if (peer.ip == excludeIp && peer.port == excludePort) continue;
-            // Audio RTP: Peer Port
-            _sharedSession->sendTo(peer.ip, peer.port, (char*)data, len); 
-        }
+    if (!_sharedSession || len < 12) return;
+    for (auto& [sid, peer] : _members) {
+        if (peer.ip == excludeIp && peer.port == excludePort) continue;
+        // 수신자별 SSRC + 시퀀스 번호 재작성
+        char pkt[4096];
+        if (len > (int)sizeof(pkt)) continue;
+        memcpy(pkt, data, len);
+        peer.audioSeqOut++;
+        uint16_t netSeq = htons(peer.audioSeqOut);
+        memcpy(pkt + 2, &netSeq, 2);
+        uint32_t netSsrc = htonl(peer.audioSsrcOut);
+        memcpy(pkt + 8, &netSsrc, 4);
+        _sharedSession->sendTo(peer.ip, peer.port, pkt, len);
     }
 }
 
@@ -364,12 +375,19 @@ void McpttGroup::sendAudioRtcpToAll(const char* data, int len, const std::string
 }
 
 void McpttGroup::sendVideoToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
-    if (_sharedSession) {
-        for (auto const& [sid, peer] : _members) {
-            if (peer.ip == excludeIp && peer.videoPort == excludePort) continue;
-            if (peer.videoPort > 0) {
-                _sharedSession->sendVideoTo(peer.ip, peer.videoPort, (char*)data, len);
-            }
+    if (!_sharedSession || len < 12) return;
+    for (auto& [sid, peer] : _members) {
+        if (peer.ip == excludeIp && peer.videoPort == excludePort) continue;
+        if (peer.videoPort > 0) {
+            char pkt[4096];
+            if (len > (int)sizeof(pkt)) continue;
+            memcpy(pkt, data, len);
+            peer.videoSeqOut++;
+            uint16_t netSeq = htons(peer.videoSeqOut);
+            memcpy(pkt + 2, &netSeq, 2);
+            uint32_t netSsrc = htonl(peer.videoSsrcOut);
+            memcpy(pkt + 8, &netSsrc, 4);
+            _sharedSession->sendVideoTo(peer.ip, peer.videoPort, pkt, len);
         }
     }
 }

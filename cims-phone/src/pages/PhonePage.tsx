@@ -154,6 +154,7 @@ function PttPanel({ sub }: { sub: Subscription }) {
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
   // 그룹별 audio ref (볼륨 조절용)
   const groupAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
+  const [audioLevel, setAudioLevel] = useState(0)
 
   // Step 1: MCPTT IdMs 인증
   useEffect(() => {
@@ -210,18 +211,21 @@ function PttPanel({ sub }: { sub: Subscription }) {
         })
       },
       onLocalVideo: (stream) => {
-        // 화자 자신의 카메라 프리뷰 → 활성 비디오 그룹의 video 엘리먼트에 표시
-        for (const gid in videoRefs.current) {
-          const el = videoRefs.current[gid]
-          if (el) {
-            if (stream) {
+        // PhoneClient가 videoEl.srcObject를 직접 관리
+        // 여기서는 추가 작업 불필요 (PhoneClient.setPttFloor에서 처리)
+        if (stream && clientRef.current) {
+          // 화자 자신의 카메라 → videoEl에 로컬 스트림 표시
+          for (const gid in videoRefs.current) {
+            const el = videoRefs.current[gid]
+            if (el) {
               el.srcObject = stream
-              el.muted = true
+              el.muted = true  // 자기 소리 피드백 방지
             }
-            // stream===null이면 리모트 비디오가 다시 표시됨 (ontrack에서)
           }
         }
+        // stream===null이면 PhoneClient가 remoteVideoStream으로 자동 복원
       },
+      onAudioLevel: (level) => setAudioLevel(level),
       onMemberStatus: (userId, connected) => {
         const uid = bare(userId)
         setSessions(prev => {
@@ -291,6 +295,8 @@ function PttPanel({ sub }: { sub: Subscription }) {
 
   // PUSH 토글
   const handleFloorToggle = useCallback((gid: string) => {
+    // 사용자 인터랙션 시 오디오 재생 보장 (autoplay 정책 대응)
+    clientRef.current?.ensureAudioPlaying()
     setSessions(prev => {
       const sess = prev[gid]
       if (!sess) return prev
@@ -309,12 +315,17 @@ function PttPanel({ sub }: { sub: Subscription }) {
     })
   }, [])
 
+  // 페이지 어디든 클릭하면 오디오 재생 보장
+  const handlePanelClick = useCallback(() => {
+    clientRef.current?.ensureAudioPlaying()
+  }, [])
+
   const isSipRegistered = state !== 'disconnected' && state !== 'connecting' && state !== 'registering'
   const regDotColor  = isSipRegistered ? '#16a34a' : (state === 'disconnected' ? '#9ca3af' : '#d97706')
   const regLabel     = isSipRegistered ? '등록됨'  : STATE_LABEL[state]
 
   return (
-    <div className="sp-panel">
+    <div className="sp-panel" onClick={handlePanelClick}>
       <audio ref={audioRef} autoPlay style={{ display: 'none' }} />
 
       <div className="sp-header">
@@ -415,7 +426,14 @@ function PttPanel({ sub }: { sub: Subscription }) {
                               </div>
                               <div className="sp-m-status">
                                 {isSpeaker
-                                  ? <span className="sp-speaker-badge">🎤 화자</span>
+                                  ? <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <span className="sp-speaker-badge">🎤</span>
+                                      <div style={{ width: 40, height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                                        <div style={{ width: `${Math.min(audioLevel * 300, 100)}%`, height: '100%',
+                                                       background: audioLevel > 0.15 ? '#16a34a' : audioLevel > 0.05 ? '#d97706' : '#d1d5db',
+                                                       borderRadius: 4, transition: 'width 0.1s' }} />
+                                      </div>
+                                    </div>
                                   : <span className="sp-conn-dot"
                                       style={{ background: m.connected ? '#16a34a' : '#d1d5db' }} />}
                               </div>
