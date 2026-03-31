@@ -20,6 +20,7 @@
 #include "RtpThreadArg.hpp"
 #include "RtpThreadDtls.hpp"
 #include "HttpCallBack.h"
+#include "SessionMap.h"
 #include "SimpleJson.h"
 
 // Floor Control 패킷 헤더 (CMP McpttGroup과 동일)
@@ -72,6 +73,46 @@ static bool GetIceUserPwd(const char* pszSdp, std::string& strIceUser, std::stri
     return false;
 }
 
+// 비디오 DTLS 핸드셰이크 및 SRTP 키 추출 (오디오와 동일한 패턴)
+static bool DoVideoDtls(Socket hSock, const char* szIp, unsigned short iPort,
+                        srtp_t* ppTx, srtp_t* ppRx, const std::string& strCallId)
+{
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port   = htons(iPort);
+    inet_pton(AF_INET, szIp, &addr.sin_addr.s_addr);
+
+    if (connect(hSock, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        CLog::Print(LOG_ERROR, "RtpThread[%s] Video DTLS connect error", strCallId.c_str());
+        return false;
+    }
+
+    SSL* psttSsl = SSL_new(gpsttClientCtx);
+    if (!psttSsl) return false;
+
+    SSL_set_fd(psttSsl, (int)hSock);
+    SSL_set_tlsext_use_srtp(psttSsl, "SRTP_AES128_CM_SHA1_80");
+
+    bool bOk = false;
+    if (SSL_connect(psttSsl) != -1) {
+        uint8_t szMaterial[60];
+        SSL_export_keying_material(psttSsl, szMaterial, sizeof(szMaterial),
+                                   "EXTRACTOR-dtls_srtp", 19, NULL, 0, 0);
+        uint8_t* pLocalKey   = szMaterial;
+        uint8_t* pRemoteKey  = pLocalKey   + 16;
+        uint8_t* pLocalSalt  = pRemoteKey  + 16;
+        uint8_t* pRemoteSalt = pLocalSalt  + 14;
+        SrtpCreate(ppTx, pLocalKey,  pLocalSalt,  false);
+        SrtpCreate(ppRx, pRemoteKey, pRemoteSalt, true);
+        bOk = true;
+        CLog::Print(LOG_INFO, "RtpThread[%s] Video DTLS OK, SRTP ready", strCallId.c_str());
+    } else {
+        CLog::Print(LOG_ERROR, "RtpThread[%s] Video SSL_connect failed", strCallId.c_str());
+    }
+    SSL_free(psttSsl);
+    return bOk;
+}
+
 THREAD_API RtpThread(LPVOID lpParameter)
 {
     CRtpThreadArg* pclsArg = (CRtpThreadArg*)lpParameter;
@@ -79,11 +120,26 @@ THREAD_API RtpThread(LPVOID lpParameter)
     char  szPacket[4096], szWebRTCIp[64], szPbxIp[64];
     unsigned short iWebRTCPort = 0, iPbxPort = 0;
     int   iPacketLen, n;
-    pollfd sttPoll[3];  // [0]=DTLS(브라우저), [1]=RTP(CMP), [2]=RTCP(CMP)
+
+    // 비디오용 브라우저 주소 (비디오는 별도 DTLS 소켓이므로 별도 주소 추적)
+    char  szVideoWebRTCIp[64] = "";
+    unsigned short iVideoWebRTCPort = 0;
+    char  szVideoPbxIp[64] = "";
+    unsigned short iVideoPbxPort = 0;
+
+    // poll: [0]=audio DTLS, [1]=audio RTP(CMP), [2]=audio RTCP(CMP),
+    //       [3]=video DTLS(브라우저), [4]=video RTP(CMP)
+    int iPollCount = 3;
+    pollfd sttPoll[5];
+    memset(sttPoll, 0, sizeof(sttPoll));
 
     std::string strIceUser, strIcePwd;
     srtp_t psttSrtpTx = NULL, psttSrtpRx = NULL;
     bool   bDtls = false, bSendRtpToWebRTC = false;
+
+    // 비디오 SRTP 컨텍스트 (별도 DTLS 세션에서 키 추출)
+    srtp_t psttVideoSrtpTx = NULL, psttVideoSrtpRx = NULL;
+    bool   bVideoDtls = false, bSendVideoRtpToWebRTC = false;
 
     szWebRTCIp[0] = '\0';
     szPbxIp[0]    = '\0';
@@ -97,22 +153,39 @@ THREAD_API RtpThread(LPVOID lpParameter)
         snprintf(szPbxIp, sizeof(szPbxIp), "%s", pclsArg->m_strCmpIp.c_str());
         iPbxPort = (unsigned short)pclsArg->m_iCmpPort;
     }
+    if (pclsArg->m_bVideoEnabled && !pclsArg->m_strCmpIp.empty() && pclsArg->m_iCmpVideoPort > 0) {
+        snprintf(szVideoPbxIp, sizeof(szVideoPbxIp), "%s", pclsArg->m_strCmpIp.c_str());
+        iVideoPbxPort = (unsigned short)pclsArg->m_iCmpVideoPort;
+    }
 
     TcpSetPollIn(sttPoll[0], pclsArg->m_hWebRtcUdp);
     TcpSetPollIn(sttPoll[1], pclsArg->m_hPbxUdp);
     TcpSetPollIn(sttPoll[2], pclsArg->m_hPbxRtcpUdp);
 
-    CLog::Print(LOG_INFO, "RtpThread[%s] Start dtls=%d rtp=%d rtcp=%d cmp=%s:%d ws=%s:%d",
+    if (pclsArg->m_bVideoEnabled) {
+        TcpSetPollIn(sttPoll[3], pclsArg->m_hVideoWebRtcUdp);
+        TcpSetPollIn(sttPoll[4], pclsArg->m_hVideoPbxUdp);
+        iPollCount = 5;
+    }
+
+    CLog::Print(LOG_INFO, "RtpThread[%s] Start dtls=%d rtp=%d rtcp=%d cmp=%s:%d ws=%s:%d video=%d",
         pclsArg->m_strCallId.c_str(),
         pclsArg->m_iWebRtcUdpPort, pclsArg->m_iPbxUdpPort, pclsArg->m_iPbxRtcpPort,
         pclsArg->m_strCmpIp.c_str(), pclsArg->m_iCmpPort,
-        pclsArg->m_strWsIp.c_str(), pclsArg->m_iWsPort);
+        pclsArg->m_strWsIp.c_str(), pclsArg->m_iWsPort,
+        (int)pclsArg->m_bVideoEnabled);
+    if (pclsArg->m_bVideoEnabled) {
+        CLog::Print(LOG_INFO, "RtpThread[%s] Video dtls=%d rtp=%d cmpVideo=%d",
+            pclsArg->m_strCallId.c_str(),
+            pclsArg->m_iVideoWebRtcUdpPort, pclsArg->m_iVideoPbxUdpPort,
+            pclsArg->m_iCmpVideoPort);
+    }
 
     while (!pclsArg->m_bStop) {
-        n = poll(sttPoll, 3, 1000);
+        n = poll(sttPoll, iPollCount, 1000);
         if (n <= 0) continue;
 
-        // ── 브라우저 측 소켓 ──
+        // ── [0] 오디오 브라우저 측 소켓 ──
         if (sttPoll[0].revents & POLLIN) {
             iPacketLen = sizeof(szPacket);
             UdpRecv(pclsArg->m_hWebRtcUdp, szPacket, &iPacketLen, szWebRTCIp, sizeof(szWebRTCIp), &iWebRTCPort);
@@ -168,9 +241,9 @@ THREAD_API RtpThread(LPVOID lpParameter)
                         SrtpCreate(&psttSrtpTx, pLocalKey,  pLocalSalt,  false);
                         SrtpCreate(&psttSrtpRx, pRemoteKey, pRemoteSalt, true);
                         bDtls = true;
-                        CLog::Print(LOG_INFO, "RtpThread[%s] DTLS OK, SRTP ready", pclsArg->m_strCallId.c_str());
+                        CLog::Print(LOG_INFO, "RtpThread[%s] Audio DTLS OK, SRTP ready", pclsArg->m_strCallId.c_str());
                     } else {
-                        CLog::Print(LOG_ERROR, "RtpThread[%s] SSL_connect failed", pclsArg->m_strCallId.c_str());
+                        CLog::Print(LOG_ERROR, "RtpThread[%s] Audio SSL_connect failed", pclsArg->m_strCallId.c_str());
                     }
                     SSL_free(psttSsl);
                 }
@@ -183,13 +256,13 @@ THREAD_API RtpThread(LPVOID lpParameter)
             }
         }
 
-        // ── CMP 오디오 RTP ──
+        // ── [1] CMP 오디오 RTP ──
         if (sttPoll[1].revents & POLLIN) {
             iPacketLen = sizeof(szPacket);
             UdpRecv(pclsArg->m_hPbxUdp, szPacket, &iPacketLen, szPbxIp, sizeof(szPbxIp), &iPbxPort);
 
             if (bSendRtpToWebRTC && iWebRTCPort > 0) {
-                // SSRC 고정 (브라우저가 기대하는 SSRC로 교체)
+                // SSRC 고정 (브라우저가 기대하는 오디오 SSRC=100)
                 int32_t iSsrc = htonl(100);
                 memcpy(szPacket + 8, &iSsrc, 4);
 
@@ -198,7 +271,7 @@ THREAD_API RtpThread(LPVOID lpParameter)
             }
         }
 
-        // ── CMP RTCP (Floor Control) ──
+        // ── [2] CMP RTCP (Floor Control) ──
         if (sttPoll[2].revents & POLLIN) {
             char szRtcp[1024];
             char szRtcpIp[64];
@@ -231,9 +304,8 @@ THREAD_API RtpThread(LPVOID lpParameter)
                                 pclsArg->m_strCallId.c_str(),
                                 pclsArg->m_strWsIp.c_str(), pclsArg->m_iWsPort);
                         } else if (opcode == CWRTC_FLOOR_REJECT) {
-                            wsMsg.Set("type", "ptt_floor");
-                            wsMsg.Set("speaker", std::string(""));
-                            CLog::Print(LOG_INFO, "RtpThread[%s] → ptt_floor(reject) → WS[%s:%d]",
+                            wsMsg.Set("type", "ptt_reject");
+                            CLog::Print(LOG_INFO, "RtpThread[%s] → ptt_reject → WS[%s:%d]",
                                 pclsArg->m_strCallId.c_str(),
                                 pclsArg->m_strWsIp.c_str(), pclsArg->m_iWsPort);
                         }
@@ -246,17 +318,89 @@ THREAD_API RtpThread(LPVOID lpParameter)
                 }
             }
         }
+
+        // ── [3] 비디오 브라우저 측 소켓 (STUN/DTLS/SRTP) ──
+        if (pclsArg->m_bVideoEnabled && sttPoll[3].revents & POLLIN) {
+            iPacketLen = sizeof(szPacket);
+            UdpRecv(pclsArg->m_hVideoWebRtcUdp, szPacket, &iPacketLen,
+                    szVideoWebRTCIp, sizeof(szVideoWebRTCIp), &iVideoWebRTCPort);
+
+            if (iPacketLen >= 20 && (unsigned char)szPacket[0] == 0x00 && (unsigned char)szPacket[1] == 0x01) {
+                // ICE STUN Binding Request (비디오 컴포넌트)
+                CStunMessage clsStunReq;
+                if (clsStunReq.Parse(szPacket, iPacketLen) != -1) {
+                    CStunMessage* pResp = clsStunReq.CreateResponse(true);
+                    if (pResp) {
+                        pResp->m_strPassword = pclsArg->m_strIcePwd;
+                        pResp->AddXorMappedAddress(szVideoWebRTCIp, iVideoWebRTCPort);
+                        pResp->AddMessageIntegrity();
+                        pResp->AddFingerPrint();
+                        iPacketLen = pResp->ToString(szPacket, sizeof(szPacket));
+                        delete pResp;
+                        UdpSend(pclsArg->m_hVideoWebRtcUdp, szPacket, iPacketLen,
+                                szVideoWebRTCIp, iVideoWebRTCPort);
+
+                        // cwrtc→브라우저 binding request (비디오)
+                        clsStunReq.m_clsAttributeList.clear();
+                        clsStunReq.m_strPassword = strIcePwd;
+                        clsStunReq.AddUserName(strIceUser.c_str());
+                        clsStunReq.AddMessageIntegrity();
+                        clsStunReq.AddFingerPrint();
+                        iPacketLen = clsStunReq.ToString(szPacket, sizeof(szPacket));
+                        UdpSend(pclsArg->m_hVideoWebRtcUdp, szPacket, iPacketLen,
+                                szVideoWebRTCIp, iVideoWebRTCPort);
+                    }
+                }
+
+            } else if (!bVideoDtls && iPacketLen >= 13 &&
+                       (unsigned char)szPacket[0] >= 20 && (unsigned char)szPacket[0] <= 63) {
+                // 비디오 DTLS 핸드셰이크
+                if (DoVideoDtls(pclsArg->m_hVideoWebRtcUdp, szVideoWebRTCIp, iVideoWebRTCPort,
+                                &psttVideoSrtpTx, &psttVideoSrtpRx, pclsArg->m_strCallId)) {
+                    bVideoDtls = true;
+                }
+
+            } else if (iVideoPbxPort > 0 && bVideoDtls) {
+                // 비디오 SRTP → 복호화 → CMP 비디오 RTP 포트로 전달
+                if (psttVideoSrtpRx) srtp_unprotect(psttVideoSrtpRx, szPacket, &iPacketLen);
+                UdpSend(pclsArg->m_hVideoPbxUdp, szPacket, iPacketLen, szVideoPbxIp, iVideoPbxPort);
+                bSendVideoRtpToWebRTC = true;
+            }
+        }
+
+        // ── [4] CMP 비디오 RTP ──
+        if (pclsArg->m_bVideoEnabled && sttPoll[4].revents & POLLIN) {
+            iPacketLen = sizeof(szPacket);
+            UdpRecv(pclsArg->m_hVideoPbxUdp, szPacket, &iPacketLen,
+                    szVideoPbxIp, sizeof(szVideoPbxIp), &iVideoPbxPort);
+
+            if (bSendVideoRtpToWebRTC && iVideoWebRTCPort > 0) {
+                // 비디오 SSRC 고정 (오디오=100, 비디오=200)
+                int32_t iSsrc = htonl(200);
+                memcpy(szPacket + 8, &iSsrc, 4);
+
+                if (psttVideoSrtpTx) srtp_protect(psttVideoSrtpTx, szPacket, &iPacketLen);
+                UdpSend(pclsArg->m_hVideoWebRtcUdp, szPacket, iPacketLen,
+                        szVideoWebRTCIp, iVideoWebRTCPort);
+            }
+        }
     }
 
+    // 오디오 SRTP 해제
     if (psttSrtpTx) srtp_dealloc(psttSrtpTx);
     if (psttSrtpRx) srtp_dealloc(psttSrtpRx);
+    // 비디오 SRTP 해제
+    if (psttVideoSrtpTx) srtp_dealloc(psttVideoSrtpTx);
+    if (psttVideoSrtpRx) srtp_dealloc(psttVideoSrtpRx);
 
     CLog::Print(LOG_INFO, "RtpThread[%s] Stopped", pclsArg->m_strCallId.c_str());
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
     ERR_remove_thread_state(NULL);
 #endif
-    // pclsArg는 EventCallEnd에서 삭제 (floor control 등 외부 참조 유지)
+    // 세션에서 포인터 제거 후 자체 삭제
+    gclsSessionMap.UpdateCallRtpArg(pclsArg->m_strCallId, nullptr);
+    delete pclsArg;
     return 0;
 }
 

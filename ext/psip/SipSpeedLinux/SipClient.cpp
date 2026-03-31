@@ -86,7 +86,7 @@ void CSipClient::EventRegister( CSipServerInfo * pclsInfo, int iStatus )
 	}
 }
 
-void CSipClient::EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp )
+void CSipClient::EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipMessage * pclsMessage )
 {
 	CSipCallRtp clsRtp;
 

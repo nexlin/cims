@@ -395,7 +395,7 @@ void SessionSipClient::EventRegister(CSipServerInfo* pclsInfo, int iStatus) {
 }
 
 void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszFrom,
-                                          const char* pszTo, CSipCallRtp* pclsRtp) {
+                                          const char* pszTo, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage) {
     printf("[%d] INVITE from=%s to=%s\n", m_pOwner->m_iId, pszFrom, pszTo);
 
     if (m_pInviteId) *m_pInviteId = pszCallId;

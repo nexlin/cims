@@ -23,7 +23,7 @@ public:
 
     virtual void EventRegister( CSipServerInfo * pclsInfo, int iStatus );
     virtual void EventIncomingCall( const char * pszCallId, const char * pszFrom,
-                                    const char * pszTo, CSipCallRtp * pclsRtp );
+                                    const char * pszTo, CSipCallRtp * pclsRtp, CSipMessage * pclsMessage = NULL );
     virtual void EventCallStart( const char * pszCallId, CSipCallRtp * pclsRtp );
     virtual void EventCallEnd( const char * pszCallId, int iSipStatus );
 

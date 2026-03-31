@@ -56,13 +56,14 @@ void McpttGroup::setSharedSession(PRtpTrans* session) {
     _sharedSession = session;
 }
 
-void McpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port) {
-    LOG_INFO("McpttGroup", "[%s] addMember session=%s ip=%s port=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port);
+void McpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int videoPort) {
+    LOG_INFO("McpttGroup", "[%s] addMember session=%s ip=%s port=%d videoPort=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, videoPort);
     PAutoLock lock(_mutex);
     Peer peer;
     peer.id = sessionId;
     peer.ip = ip;
     peer.port = port;
+    peer.videoPort = videoPort;
     peer.ssrc = _nextSsrc++;
     _members[sessionId] = peer;
     LOG_INFO("McpttGroup", "[%s] Member added session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
@@ -244,26 +245,20 @@ void McpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int len
 
 void McpttGroup::onVideoRtpPacket(const std::string& ip, int port, char* buf, int len) {
     PAutoLock lock(_mutex);
-    
+
     if (!_floorTaken) return;
-    
+
     std::string senderId = "";
     for(auto const& [sid, peer] : _members) {
-        if (peer.ip == ip && peer.port == port) {
-            senderId = sid; 
+        if (peer.ip == ip && peer.videoPort == port) {
+            senderId = sid;
             break;
         }
     }
-    
+
     if (senderId == "" || _floorOwnerSessionId != senderId) return;
 
-    if (_sharedSession) {
-         for (auto const& [sid, peer] : _members) {
-            if (sid != senderId) {
-                // Video forwarding placeholder — Peer struct missing videoPort
-            }
-        }
-    }
+    sendVideoToAll(buf, len, ip, port);
 }
 
 void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int ssrc) {
@@ -371,7 +366,10 @@ void McpttGroup::sendAudioRtcpToAll(const char* data, int len, const std::string
 void McpttGroup::sendVideoToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
     if (_sharedSession) {
         for (auto const& [sid, peer] : _members) {
-            // Video forwarding placeholder — Peer struct missing videoPort
+            if (peer.ip == excludeIp && peer.videoPort == excludePort) continue;
+            if (peer.videoPort > 0) {
+                _sharedSession->sendVideoTo(peer.ip, peer.videoPort, (char*)data, len);
+            }
         }
     }
 }
@@ -379,7 +377,10 @@ void McpttGroup::sendVideoToAll(const char* data, int len, const std::string& ex
 void McpttGroup::sendVideoRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
     if (_sharedSession) {
         for (auto const& [sid, peer] : _members) {
-             // Video forwarding placeholder
+            if (peer.ip == excludeIp && peer.videoPort + 1 == excludePort) continue;
+            if (peer.videoPort > 0) {
+                _sharedSession->sendVideoTo(peer.ip, peer.videoPort + 1, (char*)data, len);
+            }
         }
     }
 }

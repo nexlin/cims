@@ -50,21 +50,30 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
 
     // 1. CMP 공유 RTP 포트 확보 (포트가 0이면 재시도)
     int iSharedPort = -1;
+    int iSharedVideoPort = 0;
     std::string strSharedIp;
-    if ( m_mapGroupRtp.find(pszGroupId) != m_mapGroupRtp.end() &&
-         m_mapGroupRtp[pszGroupId].iPort > 0 ) {
-        iSharedPort = m_mapGroupRtp[pszGroupId].iPort;
-        strSharedIp = m_mapGroupRtp[pszGroupId].strIp;
+    {
+        std::unique_lock<std::recursive_mutex> lock(m_mutex);
+        if ( m_mapGroupRtp.find(pszGroupId) != m_mapGroupRtp.end() &&
+             m_mapGroupRtp[pszGroupId].iPort > 0 ) {
+            iSharedPort = m_mapGroupRtp[pszGroupId].iPort;
+            iSharedVideoPort = m_mapGroupRtp[pszGroupId].iVideoPort;
+            strSharedIp = m_mapGroupRtp[pszGroupId].strIp;
+        }
     }
     if ( iSharedPort <= 0 ) {
-        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort ) ) {
-            m_mapGroupRtp[pszGroupId] = { iSharedPort, strSharedIp, 0 };
+        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort ) ) {
+            std::unique_lock<std::recursive_mutex> lock(m_mutex);
+            m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled };
         }
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
-    if ( m_mapGroupRtp.find(pszGroupId) != m_mapGroupRtp.end() ) {
-        m_mapGroupRtp[pszGroupId].strCallerId = pszCallerInfo;
+    {
+        std::unique_lock<std::recursive_mutex> lock(m_mutex);
+        if ( m_mapGroupRtp.find(pszGroupId) != m_mapGroupRtp.end() ) {
+            m_mapGroupRtp[pszGroupId].strCallerId = pszCallerInfo;
+        }
     }
 
     // 2. 발신자(Caller)에게 공유 RTP 포트로 200 OK 응답
@@ -78,8 +87,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             return false;
         }
         // 발신자 호출 추적
-        m_mapUserCall[pszCallerInfo] = pszCallId;
-        m_mapCallSession[pszCallId] = { pszGroupId, pszCallerInfo, pszCallerInfo };
+        {
+            std::unique_lock<std::recursive_mutex> lock(m_mutex);
+            m_mapUserCall[pszCallerInfo] = pszCallId;
+            m_mapCallSession[pszCallId] = { pszGroupId, pszCallerInfo, pszCallerInfo };
+        }
         CLog::Print( LOG_INFO, "ProcessGroupCall: AcceptCall OK → Caller(%s) SharedPort(%d)", pszCallerInfo, iSharedPort );
 
         // [CALL LOG] PTT 그룹 세션 기록
@@ -105,20 +117,27 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
 
 void CGroupCallService::ClearUserCall( const std::string& strUserId )
 {
-    std::unique_lock<std::recursive_mutex> lock(m_mutex);
-    auto it = m_mapUserCall.find(strUserId);
-    if ( it == m_mapUserCall.end() ) return;
+    std::string strGroupId, strSessionId;
+    {
+        std::unique_lock<std::recursive_mutex> lock(m_mutex);
+        auto it = m_mapUserCall.find(strUserId);
+        if ( it == m_mapUserCall.end() ) return;
 
-    std::string strCallId = it->second;
-    CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing stale callId=%s before re-invite",
-                 strUserId.c_str(), strCallId.c_str() );
+        std::string strCallId = it->second;
+        CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing stale callId=%s before re-invite",
+                     strUserId.c_str(), strCallId.c_str() );
 
-    auto itSess = m_mapCallSession.find(strCallId);
-    if ( itSess != m_mapCallSession.end() ) {
-        gclsCmpClient.LeaveGroup( itSess->second.strGroupId, itSess->second.strSessionId );
-        m_mapCallSession.erase(itSess);
+        auto itSess = m_mapCallSession.find(strCallId);
+        if ( itSess != m_mapCallSession.end() ) {
+            strGroupId  = itSess->second.strGroupId;
+            strSessionId = itSess->second.strSessionId;
+            m_mapCallSession.erase(itSess);
+        }
+        m_mapUserCall.erase(it);
     }
-    m_mapUserCall.erase(it);
+    // lock 해제 후 CMP 호출
+    if ( !strGroupId.empty() )
+        gclsCmpClient.LeaveGroup( strGroupId, strSessionId );
 }
 
 /**
@@ -166,15 +185,20 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     clsUserInfo.GetCallRoute( clsRoute );
 
     // 2. Get Shared Group Port
+    int iSharedVideoPort = 0;
+    bool bVideoEnabled = false;
     if ( m_mapGroupRtp.find(pszGroupId) != m_mapGroupRtp.end() ) {
         iSharedPort = m_mapGroupRtp[pszGroupId].iPort;
+        iSharedVideoPort = m_mapGroupRtp[pszGroupId].iVideoPort;
         strSharedIp = m_mapGroupRtp[pszGroupId].strIp;
+        bVideoEnabled = m_mapGroupRtp[pszGroupId].bVideoEnabled;
     } else {
         // Try to allocate now
         CspPttGroup clsGroup;
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
-            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort ) ) {
-                 m_mapGroupRtp[pszGroupId] = { iSharedPort, strSharedIp, 0 }; // Initial hash 0 or calc
+            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort ) ) {
+                 bVideoEnabled = clsGroup._videoEnabled;
+                 m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled };
             } else {
                  CLog::Print( LOG_ERROR, "InviteMember(%s) Failed to get/alloc Shared Port for Group %s", pszUserId, pszGroupId );
                  return false;
@@ -238,6 +262,12 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
              // Session timer (RFC 4028) — required by many MCPTT implementations
              pclsInvite->AddHeader("Session-Expires", "7200;refresher=uac");
              pclsInvite->AddHeader("Min-SE", "180");
+             // 비디오 활성화 전달 (cwrtc가 SDP에 H.264 포함 여부 결정)
+             if (bVideoEnabled && iSharedVideoPort > 0) {
+                 char szVideo[64];
+                 snprintf(szVideo, sizeof(szVideo), "%d", iSharedVideoPort);
+                 pclsInvite->AddHeader("X-Video-Port", szVideo);
+             }
          }
 
          // Insert into CallMap (But manage Port cleanup ourselves)
@@ -353,10 +383,10 @@ void CGroupCallService::SyncGroupsState() {
             // NEW GROUP
             lock.unlock(); // Release lock for network op
             
-            std::string ip; int port;
-            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port ) ) {
+            std::string ip; int port; int videoPort = 0;
+            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, videoPort ) ) {
                 std::unique_lock<std::recursive_mutex> lock2(m_mutex);
-                m_mapGroupRtp[group._id] = { port, ip, nHash };
+                m_mapGroupRtp[group._id] = { port, videoPort, ip, nHash, "", "", group._videoEnabled };
                 CLog::Print( LOG_INFO, "SyncGroupsState: Added Group(%s) -> %s:%d (MemHash:%lu)", group._id.c_str(), ip.c_str(), port, nHash );
             }
         } else {
@@ -447,10 +477,10 @@ void CGroupCallService::CheckGroupIntegrity() {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
             if (m_mapGroupRtp.find(group._id) == m_mapGroupRtp.end()) {
                 lock.unlock();
-                std::string ip; int port;
-                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port)) {
+                std::string ip; int port; int videoPort = 0;
+                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, videoPort)) {
                      lock.lock();
-                     m_mapGroupRtp[group._id] = { port, ip, 0, "" };
+                     m_mapGroupRtp[group._id] = { port, videoPort, ip, 0, "", "", group._videoEnabled };
                 } else {
                      return; // Skip this group if alloc fails
                 }
@@ -512,73 +542,81 @@ void CGroupCallService::OnCmpStatusChanged( bool bConnected ) {
 
 // 200 OK Received -> Join Group Helper
 void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort ) {
-    std::unique_lock<std::recursive_mutex> lock(m_mutex);
-    auto it = m_mapCallSession.find(strCallId);
-    if (it != m_mapCallSession.end()) {
-        CallSessionInfo& info = it->second;
-        // Join Group in CMP (Register Peer)
-        if ( gclsCmpClient.JoinGroup(info.strGroupId, info.strSessionId, strRemoteIp, iRemotePort) ) {
-             CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d)", info.strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort );
-        } else {
-             CLog::Print( LOG_ERROR, "OnCallStarted: JoinGroup failed for %s", info.strGroupId.c_str() );
-        }
+    std::string strGroupId, strSessionId, strMemberId;
 
-        // [CALL LOG] 참여자 연결 완료, 세션 active 전환
-        if ( gclsDbManager.IsConnected() ) {
-            gclsDbManager.UpdateParticipantJoined( info.strGroupId, info.strMemberId );
-            gclsDbManager.UpdateCallLogActivePtt( info.strGroupId );
-        }
+    // 1. lock 보유 중 맵 조회만 수행
+    {
+        std::unique_lock<std::recursive_mutex> lock(m_mutex);
+        auto it = m_mapCallSession.find(strCallId);
+        if (it == m_mapCallSession.end()) return;
+
+        strGroupId  = it->second.strGroupId;
+        strSessionId = it->second.strSessionId;
+        strMemberId = it->second.strMemberId;
+    }
+    // 2. lock 해제 후 외부 호출 (CMP, DB)
+    if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort) ) {
+         CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort );
+    } else {
+         CLog::Print( LOG_ERROR, "OnCallStarted: JoinGroup failed for %s", strGroupId.c_str() );
+    }
+
+    if ( gclsDbManager.IsConnected() ) {
+        gclsDbManager.UpdateParticipantJoined( strGroupId, strMemberId );
+        gclsDbManager.UpdateCallLogActivePtt( strGroupId );
     }
 }
 
 // BYE/Error -> Leave Group
 bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
-    std::unique_lock<std::recursive_mutex> lock(m_mutex);
-    CLog::Print( LOG_DEBUG, "OnCallTerminated: Enter CallId=%s", strCallId.c_str() );
+    std::string strGroupId, strMemberId, strSessionId;
+    bool bStillActive = false;
+    bool bFound = false;
 
-    // Check if it's a group call session
-    auto it = m_mapCallSession.find(strCallId);
-    if (it != m_mapCallSession.end()) {
-        CallSessionInfo& info = it->second;
-        std::string strGroupId = info.strGroupId;
-        std::string strMemberId = info.strMemberId;
+    // 1. lock 보유 중 맵 조회/수정만 수행 (외부 호출 금지)
+    {
+        std::unique_lock<std::recursive_mutex> lock(m_mutex);
+        CLog::Print( LOG_DEBUG, "OnCallTerminated: Enter CallId=%s", strCallId.c_str() );
 
-        gclsCmpClient.LeaveGroup(strGroupId, info.strSessionId);
+        auto it = m_mapCallSession.find(strCallId);
+        if (it == m_mapCallSession.end()) return false;
+
+        strGroupId  = it->second.strGroupId;
+        strMemberId = it->second.strMemberId;
+        strSessionId = it->second.strSessionId;
 
         m_mapCallSession.erase(it);
 
-        // Remove from user map
         for(auto uIt = m_mapUserCall.begin(); uIt != m_mapUserCall.end(); ++uIt) {
             if (uIt->second == strCallId) {
                 m_mapUserCall.erase(uIt);
                 break;
             }
         }
-        CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
 
-        // [CALL LOG] 참여자 이탈; 남은 참여자 없으면 세션 종료
-        if ( gclsDbManager.IsConnected() ) {
-            gclsDbManager.UpdateParticipantLeft( strGroupId, strMemberId );
-
-            // 해당 그룹에 활성 참여자가 남아 있는지 확인
-            bool bStillActive = false;
-            for ( const auto& kv : m_mapCallSession ) {
-                if ( kv.second.strGroupId == strGroupId ) { bStillActive = true; break; }
-            }
-            if ( !bStillActive ) {
-                gclsDbManager.EndGroupCallLog( strGroupId );
-                // Clear session call_id so next CheckGroupIntegrity creates a fresh log
-                auto itRtp = m_mapGroupRtp.find(strGroupId);
-                if ( itRtp != m_mapGroupRtp.end() ) {
-                    itRtp->second.strSessionCallId.clear();
-                }
+        for ( const auto& kv : m_mapCallSession ) {
+            if ( kv.second.strGroupId == strGroupId ) { bStillActive = true; break; }
+        }
+        if ( !bStillActive ) {
+            auto itRtp = m_mapGroupRtp.find(strGroupId);
+            if ( itRtp != m_mapGroupRtp.end() ) {
+                itRtp->second.strSessionCallId.clear();
             }
         }
+        bFound = true;
+    }
+    // 2. lock 해제 후 외부 호출 (CMP, DB)
+    CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
+    gclsCmpClient.LeaveGroup(strGroupId, strSessionId);
 
-        return true;
+    if ( gclsDbManager.IsConnected() ) {
+        gclsDbManager.UpdateParticipantLeft( strGroupId, strMemberId );
+        if ( !bStillActive ) {
+            gclsDbManager.EndGroupCallLog( strGroupId );
+        }
     }
 
-    return false;
+    return bFound;
 }
 
 /**

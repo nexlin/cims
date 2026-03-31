@@ -88,10 +88,12 @@ private:
 
     struct GroupRtpInfo {
         int iPort;
+        int iVideoPort;
         std::string strIp;
         size_t nMemberHash;
-        std::string strSessionCallId; // active CSP-initiated session call_id for DB logging
-        std::string strCallerId;      // 그룹 통화를 개시한 사용자 ID (mcptt-calling-user-id)
+        std::string strSessionCallId;
+        std::string strCallerId;
+        bool bVideoEnabled;
     };
     std::map<std::string, GroupRtpInfo> m_mapGroupRtp;
 

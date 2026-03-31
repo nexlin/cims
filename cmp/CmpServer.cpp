@@ -286,6 +286,8 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
         sharedSession = group->getSharedSession();
         if (sharedSession) {
             sharedPort = sharedSession->getLocalPort();
+            sharedVideoPort = sharedSession->getLocalVideoPort();
+            sharedIp = _rtpIp;  // 기존 그룹도 RTP IP 사용
         }
         LOG_DEBUG("CmpServer", "ADDGROUP group=%s port=%d (existing)", groupId.c_str(), sharedPort);
     }
@@ -313,8 +315,9 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
         respBody.Set("status", "OK");
         respBody.Set("ip", sharedIp);
         respBody.Set("port", sharedPort);
-        
-        resp.Set("response", respBody.ToString()); 
+        respBody.Set("video_port", sharedVideoPort);
+
+        resp.Set("response", respBody.ToString());
         sendResponse(ip, port, resp.ToString());
     } else {
          SimpleJson::JsonNode resp;
@@ -329,11 +332,12 @@ void CmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std:
     std::string sessionId = payload.GetString("session_id");
     std::string userIp = payload.GetString("user_ip");
     int userPort = (int)payload.GetInt("user_port");
+    int userVideoPort = (int)payload.GetInt("user_video_port");
 
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         McpttGroup* group = _groups[groupId];
-        group->addMember(sessionId, userIp, userPort);
+        group->addMember(sessionId, userIp, userPort, userVideoPort);
         
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);

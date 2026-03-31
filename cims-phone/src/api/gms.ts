@@ -10,6 +10,7 @@ export interface GmsGroup {
   uri: string        // "tel:+82571900000"
   id: string         // "+82571900000" (without tel: prefix)
   display_name: string
+  video_enabled: boolean
   etag: string
   member_count: number
   members: GmsMember[]
@@ -24,6 +25,15 @@ function parseGroupXml(xml: string, groupUri: string): GmsGroup {
   const doc = parser.parseFromString(xml, 'application/xml')
 
   const display_name = doc.querySelector('display-name')?.textContent || groupUri
+  // 네임스페이스 접두사 포함 (mcpttgi:mcptt-video) → getElementsByTagNameNS 또는 로컬명 검색
+  let video_enabled = false
+  const allEls = doc.getElementsByTagName('*')
+  for (let i = 0; i < allEls.length; i++) {
+    if (allEls[i].localName === 'mcptt-video') {
+      video_enabled = allEls[i].textContent === 'true'
+      break
+    }
+  }
 
   const members: GmsMember[] = []
   doc.querySelectorAll('list > entry').forEach(entry => {
@@ -34,7 +44,7 @@ function parseGroupXml(xml: string, groupUri: string): GmsGroup {
     if (uri) members.push({ uri, name, priority })
   })
 
-  return { uri: groupUri, id: uriToId(groupUri), display_name, etag: '', member_count: members.length, members }
+  return { uri: groupUri, id: uriToId(groupUri), display_name, video_enabled, etag: '', member_count: members.length, members }
 }
 
 export async function listMyGroups(userUri: string, accessToken: string): Promise<GmsGroup[]> {
@@ -58,7 +68,7 @@ export async function listMyGroups(userUri: string, accessToken: string): Promis
         const g = parseGroupXml(xml, summary.uri)
         return { ...g, etag: summary.etag }
       } catch {
-        return { uri: summary.uri, id: uriToId(summary.uri), display_name: summary.display_name, etag: summary.etag, member_count: summary.member_count, members: [] }
+        return { uri: summary.uri, id: uriToId(summary.uri), display_name: summary.display_name, video_enabled: false, etag: summary.etag, member_count: summary.member_count, members: [] }
       }
     })
   )

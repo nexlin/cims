@@ -131,7 +131,7 @@ bool CSipServer::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
  * @param pclsRtp		RTP 정보 저장 객체
  */
 void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo,
-                                    CSipCallRtp *pclsRtp ) {
+                                    CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
     // Converted printf to CLog (matches line 139 roughly but keeping for trace)
     CLog::Print( LOG_DEBUG, "EventIncomingCall: CallId=%s From=%s To=%s", pszCallId, pszFrom, pszTo );
     CspUser clsUser;

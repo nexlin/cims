@@ -19,7 +19,7 @@
 #ifndef _SIP_USER_AGENT_CALLBACK_H_
 #define _SIP_USER_AGENT_CALLBACK_H_
 
-// ÀÀ¿ëÀ¸·Î SDP ¹Ìµð¾î ¸®½ºÆ®¸¦ Àü´ÞÇÒ ¶§¿¡ »ç¿ëµÈ´Ù.
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ SDP ï¿½Ìµï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ®ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½È´ï¿½.
 //#define USE_MEDIA_LIST
 
 #include "SipStackDefine.h"
@@ -31,7 +31,7 @@ typedef std::list< int > CODEC_LIST;
 
 /**
  * @ingroup SipUserAgent
- * @brief RTP Á¤º¸ ÀúÀå Å¬·¡½º
+ * @brief RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ Å¬ï¿½ï¿½ï¿½ï¿½
  */
 class CSipCallRtp
 {
@@ -45,30 +45,30 @@ public:
 	int GetAudioPort( );
 	int GetVideoPort( );
 
-	/** IP ÁÖ¼Ò */
+	/** IP ï¿½Ö¼ï¿½ */
 	std::string	m_strIp;
 
-	/** Æ÷Æ® ¹øÈ£ */
+	/** ï¿½ï¿½Æ® ï¿½ï¿½È£ */
 	int					m_iPort;
 
-	/** ¼±ÅÃµÈ ÄÚµ¦ ¹øÈ£ */
+	/** ï¿½ï¿½ï¿½Ãµï¿½ ï¿½Úµï¿½ ï¿½ï¿½È£ */
 	int					m_iCodec;
 
-	/** Àü¼Û/¼ö½Å */
+	/** ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ */
 	ERtpDirection	m_eDirection;
 
-	/** ÀüÃ¼ ÄÚµ¦ ¸®½ºÆ® */
+	/** ï¿½ï¿½Ã¼ ï¿½Úµï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	CODEC_LIST	m_clsCodecList;
 
 #ifdef USE_MEDIA_LIST
-	/** ÀüÃ¼ ¹Ìµð¾î ¸®½ºÆ® */
+	/** ï¿½ï¿½Ã¼ ï¿½Ìµï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SDP_MEDIA_LIST	m_clsMediaList;
 #endif
 };
 
 /**
  * @ingroup SipUserAgent
- * @brief CSipUserAgent ÀÇ ÀÌº¥Æ®¸¦ ÀÀ¿ë ÇÁ·Î±×·¥À¸·Î Àü´ÞÇÏ´Â callback ÀÎÅÍÆäÀÌ½º
+ * @brief CSipUserAgent ï¿½ï¿½ ï¿½Ìºï¿½Æ®ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Î±×·ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ callback ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì½ï¿½
  */
 class ISipUserAgentCallBack
 {
@@ -77,121 +77,121 @@ public:
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP REGISTER ÀÀ´ä ¸Þ½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
-	 * @param pclsInfo	SIP REGISTER ÀÀ´ä ¸Þ½ÃÁö¸¦ Àü¼ÛÇÑ IP-PBX Á¤º¸ ÀúÀå °´Ã¼
-	 * @param iStatus		SIP REGISTER ÀÀ´ä ÄÚµå
+	 * @brief SIP REGISTER ï¿½ï¿½ï¿½ï¿½ ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
+	 * @param pclsInfo	SIP REGISTER ï¿½ï¿½ï¿½ï¿½ ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ IP-PBX ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+	 * @param iStatus		SIP REGISTER ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½
 	 */
 	virtual void EventRegister( CSipServerInfo * pclsInfo, int iStatus ) = 0;
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP ÅëÈ­ ¿äÃ» ¼ö½Å¿¡ ´ëÇÑ ÀÎÁõ È®ÀÎ ÀÌº¥Æ® ÇÚµé·¯
-	 * @param pclsMessage	SIP INVITE ¿äÃ» ¸Þ½ÃÁö
-	 * @return ÀÎÁõ¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+	 * @brief SIP ï¿½ï¿½È­ ï¿½ï¿½Ã» ï¿½ï¿½ï¿½Å¿ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ È®ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
+	 * @param pclsMessage	SIP INVITE ï¿½ï¿½Ã» ï¿½Þ½ï¿½ï¿½ï¿½
+	 * @return ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
 	 */
 	virtual bool EventIncomingRequestAuth( CSipMessage * pclsMessage ){ return true; };
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP ÅëÈ­ ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief SIP ï¿½ï¿½È­ ï¿½ï¿½Ã» ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param	pszCallId	SIP Call-ID
-	 * @param pszFrom		SIP From »ç¿ëÀÚ ¾ÆÀÌµð
-	 * @param pszTo			SIP To »ç¿ëÀÚ ¾ÆÀÌµð
-	 * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
+	 * @param pszFrom		SIP From ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+	 * @param pszTo			SIP To ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+	 * @param pclsRtp		RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
 	 */
-	virtual void EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp ) = 0;
+	virtual void EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipMessage * pclsMessage = NULL ) = 0;
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP Ring / Session Progress ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief SIP Ring / Session Progress ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param	pszCallId		SIP Call-ID
-	 * @param iSipStatus	SIP ÀÀ´ä ÄÚµå
-	 * @param pclsRtp			RTP Á¤º¸ ÀúÀå °´Ã¼
+	 * @param iSipStatus	SIP ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½
+	 * @param pclsRtp			RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
 	 */
 	virtual void EventCallRing( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp ) = 0;
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP ÅëÈ­ ¿¬°á ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief SIP ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param	pszCallId	SIP Call-ID
-	 * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
+	 * @param pclsRtp		RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
 	 */
 	virtual void EventCallStart( const char * pszCallId, CSipCallRtp * pclsRtp ) = 0;
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP ÅëÈ­ Á¾·á ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief SIP ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param	pszCallId		SIP Call-ID
-	 * @param iSipStatus	SIP ÀÀ´ä ÄÚµå. INVITE ¿¡ ´ëÇÑ ¿À·ù ÀÀ´äÀ¸·Î ÀüÈ­°¡ Á¾·áµÈ °æ¿ì, INVITE ÀÇ ÀÀ´ä ÄÚµå¸¦ ÀúÀåÇÑ´Ù.
+	 * @param iSipStatus	SIP ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½. INVITE ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È­ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½, INVITE ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Úµå¸¦ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
 	 */
 	virtual void EventCallEnd( const char * pszCallId, int iSipStatus ) = 0;
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP ReINVITE ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief SIP ReINVITE ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param pszCallId				SIP Call-ID
-	 * @param pclsRemoteRtp		»ó´ë¹æ RTP Á¤º¸ ÀúÀå °´Ã¼
-	 * @param pclsLocalRtp		³» RTP Á¤º¸ ÀúÀå °´Ã¼
+	 * @param pclsRemoteRtp		ï¿½ï¿½ï¿½ï¿½ RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+	 * @param pclsLocalRtp		ï¿½ï¿½ RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
 	 */
 	virtual void EventReInvite( const char * pszCallId, CSipCallRtp * pclsRemoteRtp, CSipCallRtp * pclsLocalRtp ){};
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP ReINVITE ÀÀ´ä ¸Þ½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief SIP ReINVITE ï¿½ï¿½ï¿½ï¿½ ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param	pszCallId	SIP Call-ID
-	 * @param iSipStatus	SIP ÀÀ´ä ÄÚµå
-	 * @param pclsRemoteRtp		»ó´ë¹æ RTP Á¤º¸ ÀúÀå °´Ã¼
+	 * @param iSipStatus	SIP ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½
+	 * @param pclsRemoteRtp		ï¿½ï¿½ï¿½ï¿½ RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
 	 */
 	virtual void EventReInviteResponse( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRemoteRtp ){};
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP PRACK ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief SIP PRACK ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param	pszCallId	SIP Call-ID
-	 * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
+	 * @param pclsRtp		RTP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
 	 */
 	virtual void EventPrack( const char * pszCallId, CSipCallRtp * pclsRtp ){};
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief Screened / Unscreened Transfer ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief Screened / Unscreened Transfer ï¿½ï¿½Ã» ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param pszCallId					SIP Call-ID
-	 * @param pszReferToCallId	ÀüÈ­°¡ Àü´ÞµÉ SIP Call-ID
-	 * @param bScreenedTransfer Screened Transfer ÀÌ¸é true °¡ ÀÔ·ÂµÇ°í Unscreened Transfer ÀÌ¸é false °¡ ÀÔ·ÂµÈ´Ù.
-	 * @returns ¿äÃ»À» ¼ö¶ôÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+	 * @param pszReferToCallId	ï¿½ï¿½È­ï¿½ï¿½ ï¿½ï¿½ï¿½Þµï¿½ SIP Call-ID
+	 * @param bScreenedTransfer Screened Transfer ï¿½Ì¸ï¿½ true ï¿½ï¿½ ï¿½Ô·ÂµÇ°ï¿½ Unscreened Transfer ï¿½Ì¸ï¿½ false ï¿½ï¿½ ï¿½Ô·ÂµÈ´ï¿½.
+	 * @returns ï¿½ï¿½Ã»ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
 	 */
 	virtual bool EventTransfer( const char * pszCallId, const char * pszReferToCallId, bool bScreenedTransfer ){ return false; };
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief Blind Transfer ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief Blind Transfer ï¿½ï¿½Ã» ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param pszCallId			SIP Call-ID
-	 * @param pszReferToId	ÀüÈ­°¡ Àü´ÞµÉ »ç¿ëÀÚ ¾ÆÀÌµð
-	 * @returns ¿äÃ»À» ¼ö¶ôÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+	 * @param pszReferToId	ï¿½ï¿½È­ï¿½ï¿½ ï¿½ï¿½ï¿½Þµï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+	 * @returns ï¿½ï¿½Ã»ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
 	 */
 	virtual bool EventBlindTransfer( const char * pszCallId, const char * pszReferToId ){ return false; };
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP ÅëÈ­ Àü´Þ ÀÀ´ä ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
+	 * @brief SIP ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
 	 * @param	pszCallId		SIP Call-ID
-	 * @param iSipStatus	SIP ÀÀ´ä ÄÚµå.
+	 * @param iSipStatus	SIP ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½.
 	 */
 	virtual void EventTransferResponse( const char * pszCallId, int iSipStatus ){};
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP MESSAGE ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
-	 * @param pszFrom		SIP From »ç¿ëÀÚ ¾ÆÀÌµð
-	 * @param pszTo			SIP To »ç¿ëÀÚ ¾ÆÀÌµð
-	 * @param pclsMessage	SIP ¸Þ½ÃÁö
+	 * @brief SIP MESSAGE ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
+	 * @param pszFrom		SIP From ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+	 * @param pszTo			SIP To ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+	 * @param pclsMessage	SIP ï¿½Þ½ï¿½ï¿½ï¿½
 	 */
 	virtual bool EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage ){ return false; };
 
 	/**
 	 * @ingroup SipUserAgent
-	 * @brief SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå°¡ Á¾·áµÊÀ» ¾Ë·ÁÁÖ´Â ÀÌº¥Æ® ÇÚµé·¯
-	 * @param iThreadId UDP ¾²·¹µå ¹øÈ£
+	 * @brief SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½å°¡ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ë·ï¿½ï¿½Ö´ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
+	 * @param iThreadId UDP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È£
 	 */
 	virtual void EventThreadEnd( int iThreadId ){};
 };

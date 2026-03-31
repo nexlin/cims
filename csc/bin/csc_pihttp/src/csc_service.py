@@ -151,12 +151,13 @@ def load_shared_data(config):
             )
             with conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id, name FROM ptt_groups")
+                    cur.execute("SELECT id, name, video_enabled FROM ptt_groups")
                     for row in cur.fetchall():
                         gid = row['id']
                         uri = f"tel:{gid}" if gid.startswith('+') else f"tel:+{gid}"
                         GROUPS[uri] = {
                             "display_name": row['name'],
+                            "video_enabled": bool(row.get('video_enabled', 0)),
                             "etag": f"etag_{gid}",
                             "created_by": "", "created_at": "",
                             "members": []
@@ -383,8 +384,10 @@ def get_group_xml(group_uri):
         <mcpttgi:user-priority>{member.get('priority', 5)}</mcpttgi:user-priority>
       </entry>"""
       
-    xml += """
+    video_val = 'true' if group.get('video_enabled') else 'false'
+    xml += f"""
     </list>
+    <mcpttgi:mcptt-video>{video_val}</mcpttgi:mcptt-video>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
     <mcpttgi:on-network-hang-time>3</mcpttgi:on-network-hang-time>

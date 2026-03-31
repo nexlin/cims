@@ -5,6 +5,9 @@ CRtpThreadArg::CRtpThreadArg()
     : m_hWebRtcUdp(INVALID_SOCKET), m_hPbxUdp(INVALID_SOCKET)
     , m_hPbxRtcpUdp(INVALID_SOCKET)
     , m_iWebRtcUdpPort(0), m_iPbxUdpPort(0), m_iPbxRtcpPort(0)
+    , m_hVideoWebRtcUdp(INVALID_SOCKET), m_hVideoPbxUdp(INVALID_SOCKET)
+    , m_iVideoWebRtcUdpPort(0), m_iVideoPbxUdpPort(0)
+    , m_iCmpVideoPort(0), m_bVideoEnabled(false)
     , m_bStop(false), m_iCmpPort(0)
     , m_iWsPort(0)
 {
@@ -17,6 +20,7 @@ CRtpThreadArg::~CRtpThreadArg()
 
 bool CRtpThreadArg::CreateSocket(int iDtlsPort, int iRtpPort)
 {
+    // 오디오: dtls=base+0, rtp=base+1, rtcp=base+2
     m_hWebRtcUdp  = UdpListen(iDtlsPort,      NULL);
     m_hPbxUdp     = UdpListen(iRtpPort,        NULL);
     m_hPbxRtcpUdp = UdpListen(iRtpPort + 1,   NULL);  // CMP RTCP 수신용
@@ -31,6 +35,23 @@ bool CRtpThreadArg::CreateSocket(int iDtlsPort, int iRtpPort)
     m_iPbxUdpPort    = iRtpPort;
     m_iPbxRtcpPort   = iRtpPort + 1;
     m_strIcePwd      = "FNPRfT4qUaVOKa0ivkn64mMY";
+
+    // 비디오: video_dtls=base+3, video_rtp=base+4 (base = iDtlsPort)
+    if (m_bVideoEnabled) {
+        int iVideoDtlsPort = iDtlsPort + 3;
+        int iVideoRtpPort  = iDtlsPort + 4;
+        m_hVideoWebRtcUdp = UdpListen(iVideoDtlsPort, NULL);
+        m_hVideoPbxUdp    = UdpListen(iVideoRtpPort,  NULL);
+
+        if (m_hVideoWebRtcUdp == INVALID_SOCKET || m_hVideoPbxUdp == INVALID_SOCKET) {
+            Close();
+            return false;
+        }
+
+        m_iVideoWebRtcUdpPort = iVideoDtlsPort;
+        m_iVideoPbxUdpPort    = iVideoRtpPort;
+    }
+
     return true;
 }
 
@@ -48,9 +69,19 @@ void CRtpThreadArg::Close()
         closesocket(m_hPbxRtcpUdp);
         m_hPbxRtcpUdp = INVALID_SOCKET;
     }
-    m_iWebRtcUdpPort = 0;
-    m_iPbxUdpPort    = 0;
-    m_iPbxRtcpPort   = 0;
+    if (m_hVideoWebRtcUdp != INVALID_SOCKET) {
+        closesocket(m_hVideoWebRtcUdp);
+        m_hVideoWebRtcUdp = INVALID_SOCKET;
+    }
+    if (m_hVideoPbxUdp != INVALID_SOCKET) {
+        closesocket(m_hVideoPbxUdp);
+        m_hVideoPbxUdp = INVALID_SOCKET;
+    }
+    m_iWebRtcUdpPort      = 0;
+    m_iPbxUdpPort         = 0;
+    m_iPbxRtcpPort        = 0;
+    m_iVideoWebRtcUdpPort = 0;
+    m_iVideoPbxUdpPort    = 0;
 }
 
 void CRtpThreadArg::SendFloorViaCmp(uint8_t opcode)

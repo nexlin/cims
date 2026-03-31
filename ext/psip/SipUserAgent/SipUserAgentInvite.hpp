@@ -18,10 +18,10 @@
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP INVITE ¿äÃ» ¸Þ½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµð
- * @param pclsMessage ¼ö½ÅµÈ SIP ¿äÃ» ¸Þ½ÃÁö
- * @returns Á¤»óÀûÀ¸·Î Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP INVITE ï¿½ï¿½Ã» ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
+ * @param iThreadId		SIP stack ï¿½ï¿½ UDP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+ * @param pclsMessage ï¿½ï¿½ï¿½Åµï¿½ SIP ï¿½ï¿½Ã» ï¿½Þ½ï¿½ï¿½ï¿½
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage )
 {
@@ -45,7 +45,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		return true;
 	}
 
-	// ReINVITE ÀÎÁö °Ë»çÇÑ´Ù.
+	// ReINVITE ï¿½ï¿½ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½Ñ´ï¿½.
 	m_clsDialogMutex.acquire();
 	itMap = m_clsDialogMap.find( strCallId );
 	if( itMap != m_clsDialogMap.end() )
@@ -75,7 +75,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		return true;
 	}
 
-	// »õ·Î¿î INVITE ÀÎ °æ¿ì
+	// ï¿½ï¿½ï¿½Î¿ï¿½ INVITE ï¿½ï¿½ ï¿½ï¿½ï¿½
 	SipMakeTag( szTag, sizeof(szTag) );
 
 	if( m_pclsCallBack )
@@ -86,12 +86,12 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		}
 	}
 
-	// 180 Ring À» Àü¼ÛÇÑ´Ù.
+	// 180 Ring ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
 	pclsResponse = pclsMessage->CreateResponse( SIP_RINGING, szTag );
 	if( pclsResponse == NULL ) return false;
 	m_clsSipStack.SendSipMessage( pclsResponse );
 
-	// Dialog ¸¦ »ý¼ºÇÑ´Ù.
+	// Dialog ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
 	CSipDialog	clsDialog( &m_clsSipStack );
 	bool bError = false;
 
@@ -131,7 +131,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 	}
 	clsDialog.m_bSendCall = false;
 
-	// Dialog ¸¦ ÀúÀåÇÑ´Ù.
+	// Dialog ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
 	m_clsDialogMutex.acquire();
 	itMap = m_clsDialogMap.find( strCallId );
 	if( itMap == m_clsDialogMap.end() )
@@ -156,7 +156,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		if( m_pclsCallBack )
 		{
 			m_pclsCallBack->EventIncomingCall( strCallId.c_str(), pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str()
-				, pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str(), &clsRtp );
+				, pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str(), &clsRtp, pclsMessage );
 		}
 	}
 
@@ -165,10 +165,10 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP INVITE ÀÀ´ä ¸Þ½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµð
- * @param pclsMessage ¼ö½ÅµÈ SIP ¿äÃ» ¸Þ½ÃÁö
- * @returns Á¤»óÀûÀ¸·Î Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP INVITE ï¿½ï¿½ï¿½ï¿½ ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
+ * @param iThreadId		SIP stack ï¿½ï¿½ UDP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+ * @param pclsMessage ï¿½ï¿½ï¿½Åµï¿½ SIP ï¿½ï¿½Ã» ï¿½Þ½ï¿½ï¿½ï¿½
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::RecvInviteResponse( int iThreadId, CSipMessage * pclsMessage )
 {

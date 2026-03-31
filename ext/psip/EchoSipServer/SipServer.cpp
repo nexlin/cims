@@ -35,9 +35,9 @@ CSipServer::~CSipServer()
 
 /**
  * @ingroup EchoSipServer
- * @brief SIP ¼­¹ö¸¦ ½ÃÀÛÇÑ´Ù.
- * @param clsSetup SIP stack ¼³Á¤ Ç×¸ñÀ» ÀúÀåÇÑ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param clsSetup SIP stack ï¿½ï¿½ï¿½ï¿½ ï¿½×¸ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipServer::Start( CSipStackSetup & clsSetup )
 {
@@ -57,11 +57,11 @@ bool CSipServer::EventIncomingRequestAuth( CSipMessage * pclsMessage )
 	return true;
 }
 
-void CSipServer::EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp )
+void CSipServer::EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipMessage * pclsMessage )
 {
 	CSipCallRoute clsRoute;
 	std::string strCallId;
-	CSipMessage * pclsMessage;
+	CSipMessage * pclsMsg;
 
 	if( gclsUserAgent.GetContact( pszCallId, &clsRoute ) == false )
 	{

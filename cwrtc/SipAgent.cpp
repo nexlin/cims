@@ -52,29 +52,31 @@ bool CSipAgent::AllocPorts(int& iDtlsPort, int& iRtpPort)
     std::lock_guard<std::mutex> lock(gsPortMutex);
     int base  = gclsCwrtcSetup.m_iRtpPortBase;
     int count = gclsCwrtcSetup.m_iRtpPortCount;
-    // 3포트 단위: dtls, rtp(=dtls+1), rtcp(=dtls+2)
+    // 6포트 단위: audio_dtls(+0), audio_rtp(+1), audio_rtcp(+2),
+    //             video_dtls(+3), video_rtp(+4), video_rtcp(+5)
     for (int i = 0; i < count; ++i) {
-        int dtls = base + i * 3;
-        int rtp  = dtls + 1;
-        int rtcp = dtls + 2;
-        if (!gsUsedPorts.count(dtls) && !gsUsedPorts.count(rtp) && !gsUsedPorts.count(rtcp)) {
-            gsUsedPorts.insert(dtls);
-            gsUsedPorts.insert(rtp);
-            gsUsedPorts.insert(rtcp);
+        int dtls = base + i * 6;
+        bool bFree = true;
+        for (int j = 0; j < 6; ++j) {
+            if (gsUsedPorts.count(dtls + j)) { bFree = false; break; }
+        }
+        if (bFree) {
+            for (int j = 0; j < 6; ++j)
+                gsUsedPorts.insert(dtls + j);
             iDtlsPort = dtls;
-            iRtpPort  = rtp;
+            iRtpPort  = dtls + 1;
             return true;
         }
     }
     return false;
 }
 
-static void FreePorts(int d, int r)
+static void FreePorts(int d, int /*r*/)
 {
     std::lock_guard<std::mutex> lock(gsPortMutex);
-    gsUsedPorts.erase(d);
-    gsUsedPorts.erase(r);
-    gsUsedPorts.erase(r + 1);  // RTCP 포트도 해제
+    // 6포트 블록 전체 해제: audio_dtls(+0)~video_rtcp(+5)
+    for (int j = 0; j < 6; ++j)
+        gsUsedPorts.erase(d + j);
 }
 
 // ── SDP builders ──────────────────────────────────────────────────────────────
@@ -107,7 +109,7 @@ std::string CSipAgent::BuildDtlsSdp(int iDtlsPort, int iAudioPt, bool bVideoEnab
         szAudioCodec,
         pwd, fp, ip, iDtlsPort);
 
-    // 비디오 섹션 (옵션)
+    // 비디오 섹션 (옵션) — video DTLS는 base+3 (audio: +0, +1, +2 이후)
     char szVideo[512] = "";
     if (bVideoEnabled) {
         snprintf(szVideo, sizeof(szVideo),
@@ -117,8 +119,8 @@ std::string CSipAgent::BuildDtlsSdp(int iDtlsPort, int iAudioPt, bool bVideoEnab
             "a=sendrecv\r\na=ice-ufrag:lMRb\r\na=ice-pwd:%s\r\n"
             "a=fingerprint:sha-256 %s\r\na=setup:active\r\n"
             "a=candidate:1 1 udp 2130706431 %s %d typ host\r\na=rtcp-mux\r\n",
-            iDtlsPort + 2, ip,
-            pwd, fp, ip, iDtlsPort + 2);
+            iDtlsPort + 3, ip,
+            pwd, fp, ip, iDtlsPort + 3);
     }
 
     snprintf(buf, sizeof(buf),
@@ -363,7 +365,7 @@ void CSipAgent::EventRegister(CSipServerInfo* pclsInfo, int iStatus)
 }
 
 void CSipAgent::EventIncomingCall(const char* pszCallId, const char* pszFrom,
-                                  const char* pszTo, CSipCallRtp* pclsRtp)
+                                  const char* pszTo, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage)
 {
     // AOR에서 user 부분 추출
     auto strip = [](const char* s) -> std::string {
@@ -394,7 +396,26 @@ void CSipAgent::EventIncomingCall(const char* pszCallId, const char* pszFrom,
         return;
     }
 
+    // 비디오 활성화 여부: CSP가 X-Video-Port 헤더로 CMP 비디오 포트를 전달
+    bool bVideoEnabled = false;
+    int  iCmpVideoPort = 0;
+    if (pclsMessage) {
+        CSipHeader* pVideoHdr = pclsMessage->GetHeader("X-Video-Port");
+        CLog::Print(LOG_INFO, "EventIncomingCall: pclsMessage=%p headerCount=%d X-Video-Port hdr=%p",
+                    pclsMessage, (int)pclsMessage->m_clsHeaderList.size(), pVideoHdr);
+        if (pVideoHdr && !pVideoHdr->m_strValue.empty()) {
+            iCmpVideoPort = atoi(pVideoHdr->m_strValue.c_str());
+            if (iCmpVideoPort > 0) bVideoEnabled = true;
+            CLog::Print(LOG_INFO, "EventIncomingCall: X-Video-Port=%d → video=%d",
+                        iCmpVideoPort, (int)bVideoEnabled);
+        }
+    } else {
+        CLog::Print(LOG_INFO, "EventIncomingCall: pclsMessage is NULL");
+    }
+
     CRtpThreadArg* pArg = new CRtpThreadArg();
+    pArg->m_bVideoEnabled = bVideoEnabled;
+    pArg->m_iCmpVideoPort = iCmpVideoPort;
     if (!pArg->CreateSocket(iDtlsPort, iRtpPort)) {
         delete pArg; FreePorts(iDtlsPort, iRtpPort);
         gclsSipUserAgent.StopCall(pszCallId, SIP_SERVICE_UNAVAILABLE);
@@ -417,7 +438,7 @@ void CSipAgent::EventIncomingCall(const char* pszCallId, const char* pszFrom,
     sess.iCmpPort      = iCmpPort;
     sess.bPtt          = bPtt;
     sess.iAudioPt      = iAudioPt;
-    sess.bVideoEnabled = false;  // TODO: 그룹 설정에서 전달받을 때 활성화
+    sess.bVideoEnabled = bVideoEnabled;
     sess.bOutgoing     = false;
     sess.iDtlsPort     = iDtlsPort;
     sess.iRtpPort      = iRtpPort;
@@ -523,10 +544,7 @@ void CSipAgent::EventCallEnd(const char* pszCallId, int iSipCode)
 
     if (sess.pclsRtpArg) {
         sess.pclsRtpArg->m_bStop = true;
-        // RtpThread 종료 대기 후 삭제 (짧은 대기 — thread는 poll 1s timeout)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-        delete sess.pclsRtpArg;
-        gclsSessionMap.UpdateCallRtpArg(pszCallId, nullptr);
+        // RtpThread는 m_bStop 감지 후 자체 종료 — delete는 RtpThread에서 수행
     }
 
     // PTT: 그룹 내 다른 멤버들에게 이탈 알림 (DeleteCall 전에 조회)

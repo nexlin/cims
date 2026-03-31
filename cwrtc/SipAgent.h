@@ -25,7 +25,7 @@ public:
     // ISipUserAgentCallBack (정확한 시그니처)
     void EventRegister(CSipServerInfo* pclsInfo, int iStatus) override;
     void EventIncomingCall(const char* pszCallId, const char* pszFrom, const char* pszTo,
-                           CSipCallRtp* pclsRtp) override;
+                           CSipCallRtp* pclsRtp, CSipMessage* pclsMessage = NULL) override;
     void EventCallRing(const char* pszCallId, int iSipStatus, CSipCallRtp* pclsRtp) override;
     void EventCallStart(const char* pszCallId, CSipCallRtp* pclsRtp) override;
     void EventCallEnd(const char* pszCallId, int iSipStatus) override;

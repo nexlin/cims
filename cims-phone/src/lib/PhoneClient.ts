@@ -21,7 +21,9 @@ export interface PhoneCallbacks {
   onIncoming: (info: IncomingInfo) => void
   onError: (msg: string) => void
   onFloor?: (speaker: string | null) => void
+  onFloorReject?: () => void
   onMemberStatus?: (userId: string, connected: boolean) => void
+  onLocalVideo?: (stream: MediaStream | null) => void
 }
 
 export class PhoneClient {
@@ -29,11 +31,14 @@ export class PhoneClient {
   private pc: RTCPeerConnection | null = null
   private localStream: MediaStream | null = null
   private audioEl: HTMLAudioElement | null = null
+  private videoEl: HTMLVideoElement | null = null
+  private videoEnabled = false
   private state: PhoneState = 'disconnected'
   private activeCallId = ''
   private pendingIncoming: IncomingInfo | null = null
   private cb: PhoneCallbacks
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private pingTimer: ReturnType<typeof setInterval> | null = null
   private connArgs: { wsUrl: string; user: string; password: string; domain: string; authId?: string } | null = null
   private intentionalClose = false
 
@@ -43,6 +48,14 @@ export class PhoneClient {
 
   setAudioElement(el: HTMLAudioElement) {
     this.audioEl = el
+  }
+
+  setVideoElement(el: HTMLVideoElement | null) {
+    this.videoEl = el
+  }
+
+  setVideoEnabled(enabled: boolean) {
+    this.videoEnabled = enabled
   }
 
   getState(): PhoneState { return this.state }
@@ -76,6 +89,8 @@ export class PhoneClient {
 
     this.ws.onopen = () => {
       if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
+      // 30초 간격 ping으로 WS 연결 유지 (프록시/TLS 타임아웃 방지)
+      this.pingTimer = setInterval(() => { this.send({ type: 'ping' }) }, 30000)
       this.setState('registering')
       this.send({ type: 'register', user, password, domain, auth_id: authId || user })
     }
@@ -87,6 +102,7 @@ export class PhoneClient {
 
     this.ws.onclose = () => {
       this.ws = null
+      if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null }
       this.fullCleanup()
       this.setState('disconnected')
       if (!this.intentionalClose && this.connArgs) {
@@ -106,6 +122,7 @@ export class PhoneClient {
   disconnect() {
     this.intentionalClose = true
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null }
     this.ws?.close()
     this.ws = null
     this.fullCleanup()
@@ -167,6 +184,10 @@ export class PhoneClient {
 
       case 'ptt_floor':
         this.cb.onFloor?.(msg.speaker ?? null)
+        break
+
+      case 'ptt_reject':
+        this.cb.onFloorReject?.()
         break
 
       case 'ptt_idle':
@@ -232,6 +253,10 @@ export class PhoneClient {
         // PTT 수신 전용: 오디오 수신 트랜시버 명시 설정
         this.pc.addTransceiver('audio', { direction: 'recvonly' })
       }
+      // 비디오 활성화 그룹: 비디오 수신 트랜시버 추가
+      if (this.videoEnabled) {
+        this.pc.addTransceiver('video', { direction: 'recvonly' })
+      }
 
       await this.pc.setRemoteDescription({ type: 'offer', sdp: info.sdp })
       const ans = await this.pc.createAnswer()
@@ -268,24 +293,40 @@ export class PhoneClient {
 
   setPttFloor(active: boolean) {
     if (active) {
-      // PUSH: 마이크가 없으면 지연 획득 후 트랙 추가
+      // PUSH: 마이크(+카메라) 획득 후 트랙 추가
       if (!this.localStream) {
-        this.getMic().then(stream => {
-          if (!stream || !this.pc) return
+        const constraints = { audio: true, video: this.videoEnabled }
+        navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+          if (!this.pc) return
           this.localStream = stream
-          stream.getAudioTracks().forEach(t => {
+          stream.getTracks().forEach(t => {
             this.pc!.addTrack(t, stream)
             t.enabled = true
           })
+          // 화자 자신의 카메라 프리뷰
+          if (this.videoEnabled) this.cb.onLocalVideo?.(stream)
           this.send({ type: 'ptt_request', call_id: this.activeCallId })
+        }).catch(() => {
+          this.getMic().then(stream => {
+            if (!stream || !this.pc) return
+            this.localStream = stream
+            stream.getAudioTracks().forEach(t => {
+              this.pc!.addTrack(t, stream)
+              t.enabled = true
+            })
+            this.send({ type: 'ptt_request', call_id: this.activeCallId })
+          })
         })
         return
       }
-      this.localStream.getAudioTracks().forEach(t => { t.enabled = true })
+      this.localStream.getTracks().forEach(t => { t.enabled = true })
+      if (this.videoEnabled) this.cb.onLocalVideo?.(this.localStream)
       this.send({ type: 'ptt_request', call_id: this.activeCallId })
     } else {
-      if (this.localStream)
-        this.localStream.getAudioTracks().forEach(t => { t.enabled = false })
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(t => { t.enabled = false })
+        this.cb.onLocalVideo?.(null)
+      }
       this.send({ type: 'ptt_release', call_id: this.activeCallId })
     }
   }
@@ -314,8 +355,13 @@ export class PhoneClient {
   private createPC(): RTCPeerConnection {
     const pc = new RTCPeerConnection({ iceServers: [] })
     pc.ontrack = (e) => {
-      if (this.audioEl && e.streams[0]) {
-        this.audioEl.srcObject = e.streams[0]
+      const track = e.track
+      if (track.kind === 'video' && this.videoEl) {
+        // 비디오 트랙은 videoEl에 연결
+        this.videoEl.srcObject = e.streams[0] || new MediaStream([track])
+        this.videoEl.play().catch(() => { })
+      } else if (track.kind === 'audio' && this.audioEl) {
+        this.audioEl.srcObject = e.streams[0] || new MediaStream([track])
         this.audioEl.play().catch(() => { })
       }
     }
@@ -342,6 +388,7 @@ export class PhoneClient {
     this.localStream?.getTracks().forEach(t => t.stop())
     this.localStream = null
     if (this.audioEl) this.audioEl.srcObject = null
+    if (this.videoEl) this.videoEl.srcObject = null
   }
 
   private fullCleanup() {

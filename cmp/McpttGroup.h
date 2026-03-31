@@ -52,7 +52,7 @@ public:
 
     void setSharedSession(PRtpTrans* session);
     PRtpTrans* getSharedSession() const { return _sharedSession; }
-    void addMember(const std::string& sessionId, const std::string& ip, int port);
+    void addMember(const std::string& sessionId, const std::string& ip, int port, int videoPort = 0);
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -89,6 +89,7 @@ private:
         std::string ip;
         int port;
         unsigned int ssrc;   // 멤버 SSRC (joinGroup 시 할당)
+        int videoPort;
     };
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority

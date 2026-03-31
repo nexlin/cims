@@ -12,12 +12,22 @@ public:
     bool CreateSocket(int iDtlsPort, int iRtpPort);
     void Close();
 
+    // 오디오 소켓
     Socket        m_hWebRtcUdp;
     Socket        m_hPbxUdp;
     Socket        m_hPbxRtcpUdp;   // CMP RTCP 수신 소켓 (iRtpPort+1)
     int           m_iWebRtcUdpPort;
     int           m_iPbxUdpPort;
     int           m_iPbxRtcpPort;   // = m_iPbxUdpPort + 1
+
+    // 비디오 소켓 (bVideoEnabled == true일 때만 유효)
+    Socket        m_hVideoWebRtcUdp;   // 비디오 DTLS (브라우저)
+    Socket        m_hVideoPbxUdp;      // 비디오 RTP (CMP)
+    int           m_iVideoWebRtcUdpPort;
+    int           m_iVideoPbxUdpPort;
+    int           m_iCmpVideoPort;     // CMP 비디오 RTP 포트
+    bool          m_bVideoEnabled;
+
     volatile bool m_bStop;
 
     std::string   m_strCallId;
