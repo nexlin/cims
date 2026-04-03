@@ -48,6 +48,8 @@ if __name__ == '__main__':
     from cims_auth import CIMS_AUTH_HANDLER_LIST
     import csc_flow
     from csc_flow import FLOW_HANDLER_LIST
+    from cims_recording import CIMS_RECORDING_HANDLER_LIST
+    from cims_stats import CIMS_STATS_HANDLER_LIST
 
     admin_server = None
     mcptt_server = None
@@ -98,6 +100,10 @@ if __name__ == '__main__':
             for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST
         ])
         admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_RECORDING_HANDLER_LIST + CIMS_STATS_HANDLER_LIST
+        ])
         admin_server.start()
         logger.log_info(f"Admin server started on port {admin_conf.get('Port', 4420)}")
 

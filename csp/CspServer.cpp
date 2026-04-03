@@ -41,6 +41,7 @@
 #include "SubscriptionManager.h"
 #include "UserMap.h"
 #include "SipUri.h"
+#include "ModuleDispatcher.h"
 
 // Forward Declaration for Notify Helpers
 void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
@@ -154,7 +155,7 @@ int ServiceMain() {
     if ( gclsCscInterface.Start( 4421 ) == false ) {
         CLog::Print( LOG_ERROR, "CscInterface start error (Port 4421)" );
     }
-    if ( gclsSipServer.Start( clsSetup ) == false ) {
+    if ( gclsDispatcher.Start( clsSetup ) == false ) {
         CLog::Print( LOG_ERROR, "SipServer start error" );
         CLog::Print( LOG_ERROR, "SipServer start error (check logs/permissions/ports)" );
         return -1;

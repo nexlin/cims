@@ -68,6 +68,9 @@ public:
 	// SipUserAgentSend.hpp
 	bool SendReInvite( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool SendNotify( const char * pszCallId, int iSipCode );
+	bool SendNotifyWithBody( const char * pszCallId, const char * pszEvent,
+	                         const char * pszContentType, const char * pszContentSubType,
+	                         const std::string & strBody );
 	bool SendDtmf( const char * pszCallId, char cDtmf );
 	bool SendPrack( const char * pszCallId, CSipCallRtp * pclsRtp );
 

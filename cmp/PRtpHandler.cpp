@@ -1,11 +1,13 @@
 #include "PRtpHandler.h"
 #include "CmpLog.h"
 #include "McpttGroup.h"
+#include "RtpRecorder.h"
 #include <unistd.h>
 #include <sys/select.h>
 #include <errno.h>
 
-PRtpTrans::PRtpTrans(const std::string & name) : PHandler(name), _group(NULL), _myName(name), _sessionId(name), _localPort(0), _localVideoPort(0) {
+PRtpTrans::PRtpTrans(const std::string & name) : PHandler(name), _group(NULL), _myName(name), _sessionId(name), _localPort(0), _localVideoPort(0),
+    _recording(false), _recorderA(NULL), _recorderB(NULL), _recorderVA(NULL), _recorderVB(NULL) {
     for(int i=0; i<2; ++i) {
         _peers[i].active = false;
         memset(&_peers[i].addrRtp, 0, sizeof(sockaddr_in));
@@ -174,49 +176,9 @@ bool PRtpTrans::proc()
     char rtcpBuf[2048];
     char pkt[1600];
     
-    // Process RTP
-    while (true) {
-        int rtpFd;
-        {
-            PAutoLock lock(_mutex);
-            rtpFd = _rtpSock.getFd();
-        }
-        if (rtpFd == INVALID_SOCKET) break;
+    // ── RTCP (floor control) 먼저 처리 → floor 상태 업데이트 후 RTP 포워딩 ──
 
-        int len = 0;
-        McpttGroup* pGroup = NULL;
-        {
-            PAutoLock lock(_mutex);
-            len = _rtpSock.recv(pkt, sizeof(pkt), ipRmt, portRmt);
-            pGroup = _group;
-            LOG_DEBUG("PRtpTrans", "RTP ip=%s port=%d len=%d pt=%d group=%p", ipRmt.c_str(), portRmt, len, pkt[1], (void*)pGroup);
-        }
-
-        if (len > 0) {               
-            if (pGroup) {
-                pGroup->onRtpPacket(ipRmt, portRmt, pkt, len);
-            } else {
-                PAutoLock lock(_mutex);
-                // Relay Logic
-                int srcIdx = -1;
-                if (_peers[0].active && portRmt == _peers[0].port && ipRmt == _peers[0].ip) srcIdx = 0;
-                else if (_peers[1].active && portRmt == _peers[1].port && ipRmt == _peers[1].ip) srcIdx = 1;
-                
-                if (srcIdx != -1) {
-                    int dstIdx = (srcIdx == 0) ? 1 : 0;
-                    if (_peers[dstIdx].active) {
-                        _rtpSock.sendTo(pkt, len, &_peers[dstIdx].addrRtp);
-                    }
-                } else if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
-                    _rtpSock.send(pkt, len); 
-                }
-            }
-        }
-        
-        if (len <= 0) break;
-    }
-
-    // Process RTCP
+    // Process Audio RTCP (floor control)
     while(true) {
          int rtcpFd;
          {
@@ -255,6 +217,91 @@ bool PRtpTrans::proc()
          if (len <= 0) break;
     }
 
+    // Process Video RTCP
+    while(true) {
+        int rtcpFd;
+        {
+            PAutoLock lock(_mutex);
+            rtcpFd = _videoRtcpSock.getFd();
+        }
+        if (rtcpFd == INVALID_SOCKET) break;
+
+        int len = 0;
+        {
+            PAutoLock lock(_mutex);
+            len = _videoRtcpSock.recv(rtcpBuf, sizeof(rtcpBuf), ipRmt, portRmt);
+            if (len > 0) {
+                // Relay Video RTCP
+                LOG_DEBUG("PRtpTrans", "Video RTCP rx len=%d from %s:%d", len, ipRmt.c_str(), portRmt);
+                int srcIdx = -1;
+                if (_peers[0].active && portRmt == _peers[0].videoPort + 1 && ipRmt == _peers[0].ip) srcIdx = 0;
+                else if (_peers[1].active && portRmt == _peers[1].videoPort + 1 && ipRmt == _peers[1].ip) srcIdx = 1;
+
+                if (srcIdx != -1) {
+                    int dstIdx = (srcIdx == 0) ? 1 : 0;
+                    if (_peers[dstIdx].active && _peers[dstIdx].videoPort > 0) {
+                        _videoRtcpSock.sendTo(rtcpBuf, len, &_peers[dstIdx].addrVideoRtcp);
+                    }
+                } else {
+                    if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
+                        _videoRtcpSock.send(rtcpBuf, len);
+                    }
+                }
+            }
+        }
+
+        if (len <= 0) break;
+    }
+
+    // ── RTP (미디어) 처리 — floor 상태가 이미 최신이므로 즉시 포워딩 가능 ──
+
+    // Process Audio RTP
+    while (true) {
+        int rtpFd;
+        {
+            PAutoLock lock(_mutex);
+            rtpFd = _rtpSock.getFd();
+        }
+        if (rtpFd == INVALID_SOCKET) break;
+
+        int len = 0;
+        McpttGroup* pGroup = NULL;
+        {
+            PAutoLock lock(_mutex);
+            len = _rtpSock.recv(pkt, sizeof(pkt), ipRmt, portRmt);
+            pGroup = _group;
+            LOG_DEBUG("PRtpTrans", "RTP ip=%s port=%d len=%d pt=%d group=%p", ipRmt.c_str(), portRmt, len, pkt[1], (void*)pGroup);
+        }
+
+        if (len > 0) {
+            if (pGroup) {
+                pGroup->onRtpPacket(ipRmt, portRmt, pkt, len);
+            } else {
+                PAutoLock lock(_mutex);
+                // Relay Logic
+                int srcIdx = -1;
+                if (_peers[0].active && portRmt == _peers[0].port && ipRmt == _peers[0].ip) srcIdx = 0;
+                else if (_peers[1].active && portRmt == _peers[1].port && ipRmt == _peers[1].ip) srcIdx = 1;
+
+                if (srcIdx != -1) {
+                    int dstIdx = (srcIdx == 0) ? 1 : 0;
+                    if (_peers[dstIdx].active) {
+                        _rtpSock.sendTo(pkt, len, &_peers[dstIdx].addrRtp);
+                    }
+                    // 녹취: 방향별 기록
+                    if (_recording) {
+                        if (srcIdx == 0 && _recorderA) _recorderA->WritePacket(pkt, len);
+                        else if (srcIdx == 1 && _recorderB) _recorderB->WritePacket(pkt, len);
+                    }
+                } else if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
+                    _rtpSock.send(pkt, len);
+                }
+            }
+        }
+
+        if (len <= 0) break;
+    }
+
     // Process Video RTP
     while (true) {
         int rtpFd;
@@ -280,55 +327,27 @@ bool PRtpTrans::proc()
                   int srcIdx = -1;
                   if (_peers[0].active && portRmt == _peers[0].videoPort && ipRmt == _peers[0].ip) srcIdx = 0;
                   else if (_peers[1].active && portRmt == _peers[1].videoPort && ipRmt == _peers[1].ip) srcIdx = 1;
-                  
+
                   if (srcIdx != -1) {
                       int dstIdx = (srcIdx == 0) ? 1 : 0;
                       if (_peers[dstIdx].active && _peers[dstIdx].videoPort > 0) {
                           _videoRtpSock.sendTo(pkt, len, &_peers[dstIdx].addrVideoRtp);
+                      }
+                      // 영상 녹취
+                      if (_recording) {
+                          RtpRecorder* vRec = (srcIdx == 0) ? _recorderVA : _recorderVB;
+                          if (vRec && !vRec->IsRecording()) {
+                              // Lazy start: 첫 영상 패킷에서 녹취 시작
+                              vRec->Start(_recordRawDir + "/" + _recordSessionId + ((srcIdx == 0) ? "_va.rtp" : "_vb.rtp"));
+                          }
+                          if (vRec) vRec->WritePacket(pkt, len);
                       }
                   } else if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
                       _videoRtpSock.send(pkt, len);
                   }
              }
         }
-        
-        if (len <= 0) break;
-    }
 
-    // Process Video RTCP
-    while(true) {
-        int rtcpFd;
-        {
-            PAutoLock lock(_mutex);
-            rtcpFd = _videoRtcpSock.getFd();
-        }
-        if (rtcpFd == INVALID_SOCKET) break;
-
-        int len = 0;
-        {
-            PAutoLock lock(_mutex);
-            len = _videoRtcpSock.recv(rtcpBuf, sizeof(rtcpBuf), ipRmt, portRmt);
-            if (len > 0) {
-                // Relay Video RTCP
-                LOG_DEBUG("PRtpTrans", "Video RTCP rx len=%d from %s:%d", len, ipRmt.c_str(), portRmt);
-                int srcIdx = -1;
-                // RTCP depends, usually videoPort + 1
-                if (_peers[0].active && portRmt == _peers[0].videoPort + 1 && ipRmt == _peers[0].ip) srcIdx = 0;
-                else if (_peers[1].active && portRmt == _peers[1].videoPort + 1 && ipRmt == _peers[1].ip) srcIdx = 1;
-                
-                if (srcIdx != -1) {
-                    int dstIdx = (srcIdx == 0) ? 1 : 0;
-                    if (_peers[dstIdx].active && _peers[dstIdx].videoPort > 0) {
-                        _videoRtcpSock.sendTo(rtcpBuf, len, &_peers[dstIdx].addrVideoRtcp);
-                    }
-                } else {
-                    if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
-                        _videoRtcpSock.send(rtcpBuf, len);
-                    }
-                }
-            }
-        }
-        
         if (len <= 0) break;
     }
 
@@ -346,10 +365,12 @@ bool PRtpTrans::proc(int id, const std::string & name, PEvent::Ptr spEvent) {
 }
 
 void PRtpTrans::reset() {
+    stopRecording();
+
     PAutoLock lock(_mutex);
     _sessionId = "";
     _group = NULL;
-    
+
     for(int i=0; i<2; ++i) {
         _peers[i].active = false;
         _peers[i].ip = "";
@@ -360,4 +381,44 @@ void PRtpTrans::reset() {
         memset(&_peers[i].addrVideoRtp, 0, sizeof(sockaddr_in));
         memset(&_peers[i].addrVideoRtcp, 0, sizeof(sockaddr_in));
     }
+}
+
+void PRtpTrans::startRecording(const std::string& rawDir, const std::string& sessionId) {
+    _recordRawDir = rawDir;
+    _recordSessionId = sessionId;
+
+    _recorderA = new RtpRecorder();
+    _recorderB = new RtpRecorder();
+    _recorderA->Start(rawDir + "/" + sessionId + "_a.rtp");
+    _recorderB->Start(rawDir + "/" + sessionId + "_b.rtp");
+
+    _recorderVA = new RtpRecorder();
+    _recorderVB = new RtpRecorder();
+    // 영상 녹취는 실제 영상 패킷이 올 때만 활성화 (lazy start)
+
+    _recording = true;
+    LOG_INFO("PRtpTrans", "Recording started: session=%s", sessionId.c_str());
+}
+
+void PRtpTrans::stopRecording() {
+    if (!_recording) return;
+    _recording = false;
+
+    std::string audioPathA, audioPathB, videoPathA, videoPathB;
+
+    if (_recorderA) { _recorderA->Stop(); audioPathA = _recorderA->GetRawPath(); delete _recorderA; _recorderA = NULL; }
+    if (_recorderB) { _recorderB->Stop(); audioPathB = _recorderB->GetRawPath(); delete _recorderB; _recorderB = NULL; }
+    if (_recorderVA) {
+        if (_recorderVA->IsRecording()) { _recorderVA->Stop(); videoPathA = _recorderVA->GetRawPath(); }
+        delete _recorderVA; _recorderVA = NULL;
+    }
+    if (_recorderVB) {
+        if (_recorderVB->IsRecording()) { _recorderVB->Stop(); videoPathB = _recorderVB->GetRawPath(); }
+        delete _recorderVB; _recorderVB = NULL;
+    }
+
+    LOG_INFO("PRtpTrans", "Recording stopped: session=%s, enqueueing transcode", _recordSessionId.c_str());
+
+    // TODO: 트랜스코딩 큐에 등록하고 DB 업데이트 콜백 연결
+    // 현재는 raw 파일만 보존
 }

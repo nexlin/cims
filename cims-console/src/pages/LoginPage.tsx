@@ -8,7 +8,7 @@ export default function LoginPage() {
   const { login, user, refresh } = useAuth()
   const [mode,    setMode]    = useState<Mode>('login')
   const [name,    setName]    = useState('')
-  const [email,   setEmail]   = useState('')
+  const [loginId,   setLoginId]   = useState('')
   const [pw,      setPw]      = useState('')
   const [pw2,     setPw2]     = useState('')
   const [oldPw,   setOldPw]   = useState('')
@@ -20,10 +20,10 @@ export default function LoginPage() {
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault(); reset()
-    if (!email || !pw) { setError('이메일과 비밀번호를 입력하세요'); return }
+    if (!loginId || !pw) { setError('아이디와 비밀번호를 입력하세요'); return }
     setLoading(true)
     try {
-      const res = await authApi.login(email, pw)
+      const res = await authApi.login(loginId, pw)
       login(res.token, res.user)
     } catch (err: unknown) {
       setError((err as Error).message)
@@ -32,12 +32,12 @@ export default function LoginPage() {
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault(); reset()
-    if (!name || !email || !pw) { setError('모든 항목을 입력하세요'); return }
+    if (!name || !loginId || !pw) { setError('모든 항목을 입력하세요'); return }
     if (pw !== pw2) { setError('비밀번호가 일치하지 않습니다'); return }
     if (pw.length < 4) { setError('비밀번호는 4자 이상이어야 합니다'); return }
     setLoading(true)
     try {
-      const res = await authApi.register(name, email, pw)
+      const res = await authApi.register(name, loginId, pw)
       login(res.token, res.user)
     } catch (err: unknown) {
       setError((err as Error).message)
@@ -102,8 +102,8 @@ export default function LoginPage() {
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="auth-form">
             <h2 className="auth-title">로그인</h2>
-            <input className="form-input" placeholder="이메일 (아이디)"
-              value={email} onChange={e => setEmail(e.target.value)} autoFocus />
+            <input className="form-input" placeholder="아이디"
+              value={loginId} onChange={e => setLoginId(e.target.value)} autoFocus />
             <input className="form-input" type="password" placeholder="비밀번호"
               value={pw} onChange={e => setPw(e.target.value)} />
             {error && <div className="auth-error">{error}</div>}
@@ -122,8 +122,8 @@ export default function LoginPage() {
             <h2 className="auth-title">회원가입</h2>
             <input className="form-input" placeholder="이름"
               value={name} onChange={e => setName(e.target.value)} autoFocus />
-            <input className="form-input" placeholder="이메일 (아이디)"
-              value={email} onChange={e => setEmail(e.target.value)} />
+            <input className="form-input" placeholder="아이디"
+              value={loginId} onChange={e => setLoginId(e.target.value)} />
             <input className="form-input" type="password" placeholder="비밀번호 (4자 이상)"
               value={pw} onChange={e => setPw(e.target.value)} />
             <input className="form-input" type="password" placeholder="비밀번호 확인"

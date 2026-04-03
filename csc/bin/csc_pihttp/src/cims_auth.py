@@ -39,10 +39,10 @@ def _hash(pw: str) -> str:
 
 def _make_token(user: dict) -> str:
     payload = {
-        'sub':   str(user['id']),
-        'email': user['email'],
-        'role':  user['role'],
-        'exp':   datetime.datetime.utcnow() + datetime.timedelta(seconds=_TTL_SEC),
+        'sub':      str(user['id']),
+        'login_id': user['login_id'],
+        'role':     user['role'],
+        'exp':      datetime.datetime.utcnow() + datetime.timedelta(seconds=_TTL_SEC),
     }
     return jwt.encode(payload, _SECRET, algorithm='HS256')
 
@@ -162,21 +162,21 @@ async def handle_auth(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
 async def _login(body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON 형식이 아닙니다'})
-    email    = (body.get('email')    or '').strip()
+    login_id = (body.get('login_id') or '').strip()
     password = (body.get('password') or '').strip()
-    if not email or not password:
-        return HandlerResult(status=400, body={'error': '이메일과 비밀번호를 입력하세요'})
+    if not login_id or not password:
+        return HandlerResult(status=400, body={'error': '아이디와 비밀번호를 입력하세요'})
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name, email, role FROM users "
-                "WHERE email=%s AND password=%s",
-                (email, _hash(password))
+                "SELECT id, name, login_id, role FROM users "
+                "WHERE login_id=%s AND password=%s",
+                (login_id, _hash(password))
             )
             user = cur.fetchone()
             if user is None:
-                return HandlerResult(status=401, body={'error': '이메일 또는 비밀번호가 잘못되었습니다'})
+                return HandlerResult(status=401, body={'error': '아이디 또는 비밀번호가 잘못되었습니다'})
             subs = _user_with_subs(cur, user['id'])
 
     user.update(subs)
@@ -188,29 +188,29 @@ async def _register(body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON 형식이 아닙니다'})
     name     = (body.get('name')     or '').strip()
-    email    = (body.get('email')    or '').strip()
+    login_id = (body.get('login_id') or '').strip()
     password = (body.get('password') or '').strip()
 
     if not name:
         return HandlerResult(status=400, body={'error': '이름을 입력하세요'})
-    if not email:
-        return HandlerResult(status=400, body={'error': '이메일을 입력하세요'})
+    if not login_id:
+        return HandlerResult(status=400, body={'error': '아이디를 입력하세요'})
     if not password or len(password) < 4:
         return HandlerResult(status=400, body={'error': '비밀번호는 4자 이상이어야 합니다'})
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM users WHERE email=%s", (email,))
+            cur.execute("SELECT id FROM users WHERE login_id=%s", (login_id,))
             if cur.fetchone():
-                return HandlerResult(status=409, body={'error': '이미 사용 중인 이메일입니다'})
+                return HandlerResult(status=409, body={'error': '이미 사용 중인 아이디입니다'})
             cur.execute(
-                "INSERT INTO users (name, email, password, role, org_id, create_time, update_time) "
+                "INSERT INTO users (name, login_id, password, role, org_id, create_time, update_time) "
                 "VALUES (%s, %s, %s, 'user', '', NOW(), NOW())",
-                (name, email, _hash(password))
+                (name, login_id, _hash(password))
             )
             uid = cur.lastrowid
             cur.execute(
-                "SELECT id, name, email, role FROM users WHERE id=%s", (uid,)
+                "SELECT id, name, login_id, role FROM users WHERE id=%s", (uid,)
             )
             user = cur.fetchone()
 
@@ -227,7 +227,7 @@ async def _me(handler_args, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name, email, role FROM users WHERE id=%s",
+                "SELECT id, name, login_id, role FROM users WHERE id=%s",
                 (int(payload['sub']),)
             )
             user = cur.fetchone()

@@ -148,6 +148,14 @@ public:
     std::string m_strServiceMode;
 
     // ================================================================
+    // IMS 역할 활성화 (기본값: 모두 true)
+
+    bool m_bRoleCscf;
+    bool m_bRoleTas;
+    bool m_bRolePttAs;
+    bool m_bRoleIbcf;
+
+    // ================================================================
     // 로그 기능
 
     /** 로그 폴더 */
@@ -176,6 +184,11 @@ public:
     std::string m_strCmpIp;
     int m_iCmpPort;
     int m_iLocalCmpPort; // Local port to receive CMP messages
+
+    // ================================================================
+    // 녹취 설정
+    bool m_bRecordEnable;
+    std::string m_strRecordDir;       // NAS 마운트 경로 (raw + converted 공유)
 
     // ================================================================
     // 보안 기능

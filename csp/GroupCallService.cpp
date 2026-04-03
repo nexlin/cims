@@ -64,7 +64,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     if ( iSharedPort <= 0 ) {
         if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort ) ) {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
-            m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled };
+            m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
         }
     }
 
@@ -145,10 +145,30 @@ void CGroupCallService::ClearUserCall( const std::string& strUserId )
  */
 bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGroupId ) {
     std::unique_lock<std::recursive_mutex> lock(m_mutex);
-    
-    // Check active
+
+    // 활성 호가 남아있으면 정리 후 재시도
     if ( m_mapUserCall.find(pszUserId) != m_mapUserCall.end() ) {
-        return false;
+        std::string strStaleCallId = m_mapUserCall[pszUserId];
+        CLog::Print( LOG_INFO, "InviteMember(%s, %s): stale call exists (%s), clearing",
+                     pszUserId, pszGroupId, strStaleCallId.c_str() );
+
+        // stale 세션 정리
+        std::string strStaleGroup, strStaleSession;
+        auto itSess = m_mapCallSession.find(strStaleCallId);
+        if (itSess != m_mapCallSession.end()) {
+            strStaleGroup = itSess->second.strGroupId;
+            strStaleSession = itSess->second.strSessionId;
+            m_mapCallSession.erase(itSess);
+        }
+        m_mapUserCall.erase(pszUserId);
+
+        // lock 해제하고 CMP 정리
+        lock.unlock();
+        if (!strStaleGroup.empty()) {
+            gclsCmpClient.LeaveGroup(strStaleGroup, strStaleSession);
+        }
+        // 재획득 후 계속 진행
+        lock.lock();
     }
     
     CUserInfo clsUserInfo;
@@ -198,7 +218,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
             if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort ) ) {
                  bVideoEnabled = clsGroup._videoEnabled;
-                 m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled };
+                 m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled, 0 };
             } else {
                  CLog::Print( LOG_ERROR, "InviteMember(%s) Failed to get/alloc Shared Port for Group %s", pszUserId, pszGroupId );
                  return false;
@@ -386,7 +406,7 @@ void CGroupCallService::SyncGroupsState() {
             std::string ip; int port; int videoPort = 0;
             if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, videoPort ) ) {
                 std::unique_lock<std::recursive_mutex> lock2(m_mutex);
-                m_mapGroupRtp[group._id] = { port, videoPort, ip, nHash, "", "", group._videoEnabled };
+                m_mapGroupRtp[group._id] = { port, videoPort, ip, nHash, "", "", group._videoEnabled, 0 };
                 CLog::Print( LOG_INFO, "SyncGroupsState: Added Group(%s) -> %s:%d (MemHash:%lu)", group._id.c_str(), ip.c_str(), port, nHash );
             }
         } else {
@@ -480,7 +500,7 @@ void CGroupCallService::CheckGroupIntegrity() {
                 std::string ip; int port; int videoPort = 0;
                 if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, videoPort)) {
                      lock.lock();
-                     m_mapGroupRtp[group._id] = { port, videoPort, ip, 0, "", "", group._videoEnabled };
+                     m_mapGroupRtp[group._id] = { port, videoPort, ip, 0, "", "", group._videoEnabled, 0 };
                 } else {
                      return; // Skip this group if alloc fails
                 }
@@ -568,6 +588,9 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
         gclsDbManager.UpdateParticipantJoined( strGroupId, strMemberId );
         gclsDbManager.UpdateCallLogActivePtt( strGroupId );
     }
+
+    // RFC 4575: Notify all active participants about new member joining
+    SendConferenceNotify(strGroupId, strMemberId, "connected", "full");
 }
 
 // BYE/Error -> Leave Group
@@ -619,8 +642,69 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
         }
     }
 
+    // RFC 4575: Notify remaining participants about member leaving
+    if (bStillActive) {
+        SendConferenceNotify(strGroupId, strMemberId, "disconnected", "deleted");
+    }
+
     return bFound;
 }
+
+// ─────────────────────────────────────────────────────────
+// Conference Event Package (RFC 4575) — in-dialog NOTIFY
+// ─────────────────────────────────────────────────────────
+
+void CGroupCallService::SendConferenceNotify(const std::string& strGroupId,
+                                              const std::string& strChangedUser,
+                                              const std::string& strStatus,
+                                              const std::string& strJoining)
+{
+    // 1. Collect all active call-IDs for this group + bump version
+    std::vector<std::string> vecCallIds;
+    int iVersion = 0;
+    {
+        std::unique_lock<std::recursive_mutex> lock(m_mutex);
+        auto itRtp = m_mapGroupRtp.find(strGroupId);
+        if (itRtp != m_mapGroupRtp.end()) {
+            itRtp->second.iConfVersion++;
+            iVersion = itRtp->second.iConfVersion;
+        }
+
+        for (const auto& kv : m_mapCallSession) {
+            if (kv.second.strGroupId == strGroupId) {
+                vecCallIds.push_back(kv.first);
+            }
+        }
+    }
+
+    if (vecCallIds.empty()) return;
+
+    // 2. Build conference-info+xml body (RFC 4575 partial update)
+    std::ostringstream oss;
+    oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+        << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
+        << "  entity=\"sip:" << strGroupId << "@" << gclsSetup.m_strPttRealm << "\"\r\n"
+        << "  state=\"partial\" version=\"" << iVersion << "\">\r\n"
+        << "  <users>\r\n"
+        << "    <user entity=\"tel:" << strChangedUser << "\" state=\"" << strJoining << "\">\r\n"
+        << "      <endpoint entity=\"tel:" << strChangedUser << "\">\r\n"
+        << "        <status>" << strStatus << "</status>\r\n"
+        << "      </endpoint>\r\n"
+        << "    </user>\r\n"
+        << "  </users>\r\n"
+        << "</conference-info>\r\n";
+    std::string strBody = oss.str();
+
+    // 3. Send in-dialog NOTIFY to each active participant via SipUserAgent
+    for (const auto& strCallId : vecCallIds) {
+        gclsUserAgent.SendNotifyWithBody(strCallId.c_str(), "conference",
+                                          "application", "conference-info+xml", strBody);
+    }
+
+    CLog::Print(LOG_INFO, "SendConferenceNotify: Group(%s) User(%s) Status(%s) Joining(%s) → %d participants",
+                strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), strJoining.c_str(), (int)vecCallIds.size());
+}
+
 
 /**
  * @brief Build PTT group info XML body per 3GPP TS 24.379 MCPTT spec

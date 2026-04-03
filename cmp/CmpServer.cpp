@@ -134,6 +134,7 @@ void CmpServer::handlePacket(char* buf, int len, const std::string& ip, int port
     else if (cmd == "removegroup") processRemoveGroup(payload, ip, port, transId);
     else if (cmd == "modifygroup") processModifyGroup(payload, ip, port, transId);
     else if (cmd == "modify") processModify(payload, ip, port, transId);
+    else if (cmd == "stats") processStats(payload, ip, port, transId);
     else {
         LOG_WARN("CmpServer", "Unknown CMD: %s from %s:%d", cmd.c_str(), ip.c_str(), port);
         SimpleJson::JsonNode resp;
@@ -165,6 +166,46 @@ void CmpServer::processAlive(const SimpleJson::JsonNode& payload, const std::str
     sendResponse(ip, port, resp.ToString());
 }
 
+void CmpServer::processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    PAutoLock lock(_mutex);
+
+    int sessionCount = (int)_sessions.size();
+    int groupCount = (int)_groups.size();
+    int freeCount = (int)_freeResources.size();
+    int totalPorts = _rtpPoolSize;
+    int usedPorts = totalPorts - freeCount;
+
+    // 그룹별 상세 (멤버수, floor 화자)
+    std::string groupsJson = "[";
+    bool first = true;
+    for (auto const& [gid, group] : _groups) {
+        if (!first) groupsJson += ",";
+        first = false;
+        groupsJson += "{\"group_id\":\"" + gid + "\"";
+        groupsJson += ",\"members\":" + std::to_string(group->getMemberCount());
+        std::string holder = group->getFloorHolder();
+        if (!holder.empty()) {
+            groupsJson += ",\"floor_holder\":\"" + holder + "\"";
+        }
+        groupsJson += "}";
+    }
+    groupsJson += "]";
+
+    std::string body = "{\"trans_id\":" + std::to_string(transId)
+        + ",\"response\":{\"status\":\"OK\""
+        + ",\"sessions\":" + std::to_string(sessionCount)
+        + ",\"groups\":" + std::to_string(groupCount)
+        + ",\"rtp_ports_total\":" + std::to_string(totalPorts)
+        + ",\"rtp_ports_used\":" + std::to_string(usedPorts)
+        + ",\"rtp_ports_free\":" + std::to_string(freeCount)
+        + ",\"record_enable\":" + (_recordEnable ? "true" : "false")
+        + ",\"group_details\":" + groupsJson
+        + "}}";
+
+    sendResponse(ip, port, body);
+    LOG_INFO("CmpServer", "STATS: sessions=%d groups=%d ports=%d/%d", sessionCount, groupCount, usedPorts, totalPorts);
+}
+
 void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string sessionId = payload.GetString("session_id");
     std::string rmtIp = payload.GetString("remote_ip");
@@ -184,6 +225,7 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
         if (rtp) {
             rtp->setSessionId(sessionId);
             _sessions[sessionId] = rtp;
+            if (_recordEnable) rtp->startRecording(_recordDir, sessionId);
         }
     } else {
         rtp = _sessions[sessionId];
@@ -267,6 +309,7 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
              sharedSession->setGroup(group);
              group->setDtmfConfig(_dtmfPttEnable, _dtmfPushDigit, _dtmfReleaseDigit);
              group->setSharedSession(sharedSession);
+             if (_recordEnable) group->setRecording(true, _recordDir);
              _groups[groupId] = group;
 
              static int workerIdx = 0;
@@ -476,9 +519,32 @@ void CmpServer::loadConfig() {
         }
     }
 
-    LOG_INFO("CmpServer", "Config: RtpStartPort=%d RtpPoolSize=%d RtpIp=%s ServerIp=%s ServerPort=%d DtmfPtt=%d Push=%s Rel=%s", 
-           _rtpStartPort, _rtpPoolSize, _rtpIp.c_str(), _serverIp.c_str(), _serverPort, 
-           _dtmfPttEnable, _dtmfPushDigit.c_str(), _dtmfReleaseDigit.c_str());
+    // Recording config
+    _recordEnable = false;
+    _recordDir = "recordings/raw";
+    if (_configFile.substr(_configFile.find_last_of(".") + 1) == "json") {
+        std::ifstream t2(_configFile);
+        if (t2.is_open()) {
+            std::stringstream buf2;
+            buf2 << t2.rdbuf();
+            SimpleJson::JsonNode root2 = SimpleJson::JsonNode::Parse(buf2.str());
+            if (root2.Has("RecordEnable")) {
+                std::string rv = root2.GetString("RecordEnable");
+                _recordEnable = (rv == "true");
+            }
+            if (root2.Has("RecordDir")) _recordDir = root2.GetString("RecordDir");
+        }
+    }
+
+    if (_recordEnable) {
+        std::string mkdirCmd = "mkdir -p " + _recordDir;
+        system(mkdirCmd.c_str());
+    }
+
+    LOG_INFO("CmpServer", "Config: RtpStartPort=%d RtpPoolSize=%d RtpIp=%s ServerIp=%s ServerPort=%d DtmfPtt=%d Push=%s Rel=%s Record=%d RecordDir=%s",
+           _rtpStartPort, _rtpPoolSize, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
+           _dtmfPttEnable, _dtmfPushDigit.c_str(), _dtmfReleaseDigit.c_str(),
+           _recordEnable, _recordDir.c_str());
 }
 
 void CmpServer::initResourcePool() {

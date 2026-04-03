@@ -58,6 +58,18 @@ public:
     /** Called by CSC interface when group/user config changes externally */
     void OnGroupConfigChanged();
 
+    /**
+     * @brief Send RFC 4575 conference-info NOTIFY to all active participants in a group
+     * @param strGroupId  Group ID
+     * @param strChangedUser  The user entity that changed (added/removed/joined/left)
+     * @param strStatus  "connected", "disconnected", "pending"
+     * @param strJoining "added", "removed", "updated"
+     */
+    void SendConferenceNotify(const std::string& strGroupId,
+                              const std::string& strChangedUser,
+                              const std::string& strStatus,
+                              const std::string& strJoining);
+
 private:
     void MonitorLoop();
     void SyncGroupsState();
@@ -94,6 +106,7 @@ private:
         std::string strSessionCallId;
         std::string strCallerId;
         bool bVideoEnabled;
+        int iConfVersion;   // RFC 4575 conference-info version counter
     };
     std::map<std::string, GroupRtpInfo> m_mapGroupRtp;
 

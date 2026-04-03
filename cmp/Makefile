@@ -271,6 +271,30 @@ PRtpHandler.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f cmp/CMakeFiles/cmp.dir/build.make cmp/CMakeFiles/cmp.dir/PRtpHandler.cpp.s
 .PHONY : PRtpHandler.cpp.s
 
+RtpRecorder.o: RtpRecorder.cpp.o
+.PHONY : RtpRecorder.o
+
+# target to build an object file
+RtpRecorder.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f cmp/CMakeFiles/cmp.dir/build.make cmp/CMakeFiles/cmp.dir/RtpRecorder.cpp.o
+.PHONY : RtpRecorder.cpp.o
+
+RtpRecorder.i: RtpRecorder.cpp.i
+.PHONY : RtpRecorder.i
+
+# target to preprocess a source file
+RtpRecorder.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f cmp/CMakeFiles/cmp.dir/build.make cmp/CMakeFiles/cmp.dir/RtpRecorder.cpp.i
+.PHONY : RtpRecorder.cpp.i
+
+RtpRecorder.s: RtpRecorder.cpp.s
+.PHONY : RtpRecorder.s
+
+# target to generate assembly for a file
+RtpRecorder.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f cmp/CMakeFiles/cmp.dir/build.make cmp/CMakeFiles/cmp.dir/RtpRecorder.cpp.s
+.PHONY : RtpRecorder.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -296,6 +320,9 @@ help:
 	@echo "... PRtpHandler.o"
 	@echo "... PRtpHandler.i"
 	@echo "... PRtpHandler.s"
+	@echo "... RtpRecorder.o"
+	@echo "... RtpRecorder.i"
+	@echo "... RtpRecorder.s"
 .PHONY : help
 
 

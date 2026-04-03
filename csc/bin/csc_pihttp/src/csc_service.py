@@ -162,15 +162,24 @@ def load_shared_data(config):
                             "created_by": "", "created_at": "",
                             "members": []
                         }
-                    cur.execute("SELECT group_id, user_id, priority FROM ptt_group_members ORDER BY group_id, priority")
+                    # 멤버 목록 + users 테이블에서 이름 조회
+                    cur.execute(
+                        "SELECT gm.group_id, gm.user_id, gm.priority, "
+                        "       ps.auth_id, u.name AS user_name "
+                        "FROM ptt_group_members gm "
+                        "LEFT JOIN ptt_subscriptions ps ON ps.id = gm.user_id "
+                        "LEFT JOIN users u ON u.id = ps.user_id "
+                        "ORDER BY gm.group_id, gm.priority"
+                    )
                     for row in cur.fetchall():
                         gid = row['group_id']
                         g_uri = f"tel:{gid}" if gid.startswith('+') else f"tel:+{gid}"
                         uid = row['user_id']
                         m_uri = f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}"
+                        m_name = row.get('user_name') or m_uri
                         if g_uri in GROUPS:
                             GROUPS[g_uri]['members'].append({
-                                "uri": m_uri, "name": m_uri,
+                                "uri": m_uri, "name": m_name,
                                 "role": "participant", "priority": row['priority'], "joined_at": ""
                             })
                     for uri in GROUPS:

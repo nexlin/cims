@@ -2,6 +2,15 @@
 #include "Log.h"
 #include "SipServer.h"
 #include "GroupCallService.h"
+#include "CspUser.h"
+#include "DbManager.h"
+#include "ModuleDispatcher.h"
+#include "CallMap.h"
+#include "UserMap.h"
+#include "RtpMap.h"
+#include "SipServerSetup.h"
+
+#include <sstream>
 
 #ifdef WIN32
 #include <winsock2.h>
@@ -94,7 +103,7 @@ void CCscInterface::ListenerLoop() {
         if (bytesRead > 0) {
             buffer[bytesRead] = '\0';
             std::string strMsg(buffer);
-            ProcessMessage(strMsg);
+            ProcessMessage(strMsg, clientAddr);
         } else if (bytesRead < 0) {
             // Error or Timeout
             // CLog::Print(LOG_ERROR, "CscInterface: Recvfrom failed");
@@ -106,7 +115,7 @@ void CCscInterface::ListenerLoop() {
 
 // Simple JSON Parser
 // Expected: {"event": "group_change", "uri": "tel:+...", "action": "PUT", "etag": "..."}
-void CCscInterface::ProcessMessage(const std::string& strMsg) {
+void CCscInterface::ProcessMessage(const std::string& strMsg, const struct sockaddr_in& clientAddr) {
     // Helper lambda to get value by key
     auto getVal = [&](const std::string& key) -> std::string {
         std::string searchKey = "\"" + key + "\"";
@@ -138,8 +147,59 @@ void CCscInterface::ProcessMessage(const std::string& strMsg) {
         SendSipNotify(strUri, strEtag, strAction);
         // Reload group config and re-sync CMP sessions / re-invite members
         gclsGroupCallService.OnGroupConfigChanged();
+    } else if (strEvent == "stats") {
+        // stats 요청 → 현재 CSP 상태를 JSON으로 응답
+        USER_ID_LIST regList;
+        gclsUserMap.GetRegisteredUsers(regList);
+        int regUsers = (int)regList.size();
+        // active_calls: DB 기반 정확한 수 (B2BUA + Proxy 모두 포함)
+        int activeCalls = 0;
+        bool dbConnected = gclsDbManager.IsConnected();
+        if (dbConnected) {
+            activeCalls = gclsDbManager.GetActiveVoipCallCount();
+        } else {
+            activeCalls = gclsCallMap.GetCount();
+        }
+
+        std::ostringstream oss;
+        oss << "{\"status\":\"OK\""
+            << ",\"registered_users\":" << regUsers
+            << ",\"active_calls\":" << activeCalls
+            << ",\"db_connected\":" << (dbConnected ? "true" : "false")
+            << ",\"roles\":{\"CSCF\":" << (gclsSetup.m_bRoleCscf ? "true" : "false")
+            << ",\"TAS\":" << (gclsSetup.m_bRoleTas ? "true" : "false")
+            << ",\"PTT_AS\":" << (gclsSetup.m_bRolePttAs ? "true" : "false")
+            << ",\"IBCF\":" << (gclsSetup.m_bRoleIbcf ? "true" : "false")
+            << "}}";
+
+        std::string resp = oss.str();
+        sendto(m_iServerSock, resp.c_str(), resp.size(), 0,
+               (const struct sockaddr*)&clientAddr, sizeof(clientAddr));
+
+        CLog::Print(LOG_INFO, "CscInterface: Stats response sent (reg=%d calls=%d)", regUsers, activeCalls);
     } else if (strEvent == "user_change") {
         extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
         SendSipNotify(strUri, strEtag, strAction);
+
+        // 가입자 캐시 즉시 갱신
+        std::string strUserId = strUri;
+        // tel:+821001 → 821001
+        if (strUserId.substr(0, 5) == "tel:+") {
+            strUserId = strUserId.substr(5);
+        } else if (strUserId.substr(0, 4) == "tel:") {
+            strUserId = strUserId.substr(4);
+        }
+
+        if (strAction == "DELETE") {
+            gclsCspUserMap.Remove(strUserId);
+            CLog::Print(LOG_INFO, "CscInterface: User cache removed [%s]", strUserId.c_str());
+        } else {
+            // POST (신규) 또는 PUT (수정) — DB에서 다시 읽어 캐시 갱신
+            if (gclsCspUserMap.ReloadFromDb(strUserId)) {
+                CLog::Print(LOG_INFO, "CscInterface: User cache updated [%s]", strUserId.c_str());
+            } else {
+                CLog::Print(LOG_ERROR, "CscInterface: User not found in DB [%s]", strUserId.c_str());
+            }
+        }
     }
 }

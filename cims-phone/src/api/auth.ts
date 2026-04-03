@@ -13,7 +13,7 @@ export interface Subscription {
 export interface CimsUser {
   id:                 number
   name:               string
-  email:              string
+  login_id:           string
   role:               string
   call_subscriptions: Subscription[]
   ptt_subscriptions:  Subscription[]
@@ -25,8 +25,8 @@ interface AuthResponse {
 }
 
 export const authApi = {
-  login: (email: string, password: string) =>
-    api.post<AuthResponse>('/auth/login', { email, password }),
+  login: (login_id: string, password: string) =>
+    api.post<AuthResponse>('/auth/login', { login_id, password }),
   me: () =>
     api.get<CimsUser>('/auth/me'),
 }

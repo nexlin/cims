@@ -298,6 +298,34 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
     // To 헤더의 사용자가 나인지 확인
     if (pclsMessage->m_clsTo.m_clsUri.m_strUser != m_strUser) return false;
 
+    // Conference Event NOTIFY (RFC 4575, in-dialog) 처리
+    CSipHeader* pEvtHdr = pclsMessage->GetHeader("Event");
+    std::string strEvt = pEvtHdr ? pEvtHdr->m_strValue : "";
+    if (strEvt.find("conference") != std::string::npos) {
+        m_stats.iConfNotify++;
+        printf("[%d] [CONF] Conference NOTIFY received (v%d)\n", m_iId, m_stats.iConfNotify.load());
+        // conference-info+xml 에서 user entity/status 추출
+        const std::string& body = pclsMessage->m_strBody;
+        // <user entity="tel:+82571900005" state="full">
+        size_t upos = body.find("entity=\"tel:");
+        if (upos != std::string::npos) {
+            size_t uend = body.find("\"", upos + 12);
+            std::string user = (uend != std::string::npos) ? body.substr(upos + 12, uend - upos - 12) : "?";
+            // <status>connected</status>
+            size_t spos = body.find("<status>");
+            std::string status = "?";
+            if (spos != std::string::npos) {
+                size_t send = body.find("</status>", spos);
+                if (send != std::string::npos) status = body.substr(spos + 8, send - spos - 8);
+            }
+            printf("[%d] [CONF]   user=%s status=%s\n", m_iId, user.c_str(), status.c_str());
+        }
+        // 200 OK 응답
+        CSipMessage* pRes = pclsMessage->CreateResponseWithToTag(200);
+        if (pRes) m_clsUserAgent.m_clsSipStack.SendSipMessage(pRes);
+        return true;
+    }
+
     HandleNotify(pclsMessage);
 
     // 200 OK 응답
@@ -414,10 +442,16 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         printf("[%d] [PTT] Sending 200 OK\n", m_pOwner->m_iId);
         m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
         if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
+
+        // PTT 서버 초대 방식에서는 EventCallStart가 발생하지 않을 수 있으므로
+        // AcceptCall 성공 후 직접 통화 성공 기록
+        m_pOwner->m_bInCall = true;
+        m_pOwner->m_stats.iCallOk++;
+        printf("[%d] [PTT] Call accepted (group invite)\n", m_pOwner->m_iId);
     } else {
-        // VoIP 모드: 180 Ringing → 3초 → 200 OK
+        // VoIP 모드: 180 Ringing → 1초 → 200 OK
         m_pUserAgent->RingCall(pszCallId, 180, NULL);
-        sleep(3);
+        sleep(1);
         CSipCallRtp clsLocalRtp;
         clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
         clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
@@ -429,8 +463,11 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 
 void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRtp) {
     CSipClient::EventCallStart(pszCallId, pclsRtp);
-    m_pOwner->m_bInCall = true;
-    m_pOwner->m_stats.iCallOk++;
+    // PTT 착신은 EventIncomingCall에서 이미 카운팅했으므로 중복 방지
+    if (!m_pOwner->m_bInCall) {
+        m_pOwner->m_bInCall = true;
+        m_pOwner->m_stats.iCallOk++;
+    }
     long long ms = SimSession::NowMs() - m_pOwner->m_stats.tCallStart;
     m_pOwner->m_stats.llTotalCallMs += ms;
     printf("[%d] CALL STARTED CallId=%s (%lldms)\n", m_pOwner->m_iId, pszCallId, ms);

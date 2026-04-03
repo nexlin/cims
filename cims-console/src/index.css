@@ -810,3 +810,17 @@ body { background: var(--bg); min-height: 100vh; }
 }
 .phone-key:hover  { background: var(--bg); }
 .phone-key:active { background: #dbeafe; }
+
+/* ── Docs viewer ─────────────────────────────────────────── */
+.docs-content { font-size: 14px; line-height: 1.7; color: var(--text); max-width: 900px; }
+.docs-content h1 { font-size: 22px; font-weight: 700; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--primary); }
+.docs-content h2 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; color: var(--primary); }
+.docs-content h3 { font-size: 15px; font-weight: 600; margin: 16px 0 6px; }
+.docs-content code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'Consolas', monospace; }
+.docs-content pre { background: #1e1e2e; color: #cdd6f4; padding: 14px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+.docs-content pre code { background: none; color: inherit; padding: 0; font-size: 12px; }
+.docs-content li { margin-left: 20px; list-style: disc; }
+.docs-content td { padding: 4px 10px; border: 1px solid var(--border); font-size: 13px; }
+.docs-content tr:first-child td { font-weight: 600; background: #f3f4f6; }
+.docs-content strong { font-weight: 600; }
+.docs-content blockquote { border-left: 3px solid var(--primary); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }

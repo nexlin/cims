@@ -96,7 +96,7 @@ static std::string GetLocalIp() {
 // ─────────────────────────────────────────────
 static void PrintStats(const std::vector<SimSession*>& sessions) {
     int totalReg = 0, failReg = 0, gmsOk = 0, cmsOk = 0;
-    int notifyRecv = 0, callOk = 0, callFail = 0, callEnd = 0;
+    int notifyRecv = 0, confNotify = 0, callOk = 0, callFail = 0, callEnd = 0;
     long long totalRegMs = 0, totalCallMs = 0;
     int registered = 0, inCall = 0;
 
@@ -106,6 +106,7 @@ static void PrintStats(const std::vector<SimSession*>& sessions) {
         gmsOk      += s->m_stats.iGmsOk.load();
         cmsOk      += s->m_stats.iCmsOk.load();
         notifyRecv += s->m_stats.iNotifyRecv.load();
+        confNotify += s->m_stats.iConfNotify.load();
         callOk     += s->m_stats.iCallOk.load();
         callFail   += s->m_stats.iCallFail.load();
         callEnd    += s->m_stats.iCallEnd.load();
@@ -122,6 +123,7 @@ static void PrintStats(const std::vector<SimSession*>& sessions) {
     printf("  GMS Subscribed: %d\n", gmsOk);
     printf("  CMS Subscribed: %d\n", cmsOk);
     printf("  NOTIFY Recv   : %d\n", notifyRecv);
+    printf("  Conf NOTIFY   : %d\n", confNotify);
     printf("  Active Calls  : %d\n", inCall);
     printf("  Call OK/End   : %d / %d  (fail=%d)\n", callOk, callEnd, callFail);
     printf("  Avg Call Setup: %lldms\n", callOk ? totalCallMs / callOk : 0LL);
@@ -168,6 +170,9 @@ static void PrintUsage(const char* pszBin) {
 // ─────────────────────────────────────────────
 //  자동 시나리오 실행 스레드
 // ─────────────────────────────────────────────
+static std::atomic<bool> g_bScenarioDone(false);
+static std::atomic<bool> g_bQuit(false);
+
 static void RunScenario(std::vector<SimSession*>& sessions,
                         ESimScenario eScenario,
                         int iCallDuration,
@@ -245,6 +250,8 @@ static void RunScenario(std::vector<SimSession*>& sessions,
             for (auto* s : sessions) s->StopCall();
         }
     }
+
+    g_bScenarioDone = true;
 }
 
 // ─────────────────────────────────────────────
@@ -252,6 +259,10 @@ static void RunScenario(std::vector<SimSession*>& sessions,
 // ─────────────────────────────────────────────
 int main(int argc, char* argv[])
 {
+    // 파이프 출력 시 버퍼링 비활성화 (자동화 테스트 호환)
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
     if (HasFlag(argc, argv, "-help") || HasFlag(argc, argv, "--help") || argc < 2) {
         PrintUsage(argv[0]);
         return 0;
@@ -312,8 +323,31 @@ int main(int argc, char* argv[])
         int iLocalPort = iLocalBasePort + (i * 2); // SIP + 여유
 
         std::string strUser   = MakeUserId(strStartUser, i);
-        std::string strAuthId = strExplicitAuthId;
-        if (strAuthId.empty()) {
+        std::string strAuthId;
+        if (!strExplicitAuthId.empty() && i > 0) {
+            // 명시적 auth_id의 숫자 부분을 offset만큼 증가
+            // 예: 450033100000002@domain → 450033100000003@domain (i=1)
+            std::string base = strExplicitAuthId;
+            size_t atPos = base.find('@');
+            std::string suffix = (atPos != std::string::npos) ? base.substr(atPos) : "";
+            std::string prefix = (atPos != std::string::npos) ? base.substr(0, atPos) : base;
+            // 끝에서 연속 숫자 찾기
+            int numStart = (int)prefix.size();
+            while (numStart > 0 && isdigit(prefix[numStart - 1])) numStart--;
+            if (numStart < (int)prefix.size()) {
+                long long num = atoll(prefix.c_str() + numStart);
+                num += i;
+                char buf[32];
+                // 원본 자릿수 유지
+                int digits = (int)prefix.size() - numStart;
+                snprintf(buf, sizeof(buf), "%0*lld", digits, num);
+                strAuthId = prefix.substr(0, numStart) + buf + suffix;
+            } else {
+                strAuthId = strExplicitAuthId; // 숫자 없으면 그대로
+            }
+        } else if (!strExplicitAuthId.empty()) {
+            strAuthId = strExplicitAuthId;
+        } else {
             if (bPttMode && !strUser.empty() && strUser[0] == '+') {
                 // PTT + E.164: 자동 유도 (45033 + MSISDN숫자 + @domain)
                 strAuthId = DerivePttAuthId(strUser, strDomain);
@@ -356,9 +390,19 @@ int main(int argc, char* argv[])
                                      strGroupId);
     }
 
-    // 대화형 명령 루프
+    // 시나리오 모드: 완료 대기 후 바로 종료 (stdin 루프 진입 안함)
+    if (eScenario != E_SCENARIO_NONE) {
+        if (scenarioThread.joinable()) scenarioThread.join();
+        printf("\n최종 통계:\n");
+        PrintStats(sessions);
+        printf("세션 종료 중...\n");
+        _exit(0);
+    }
+
+    // 대화형 명령 루프 (시나리오 없는 대화형 모드)
     char szCommand[256];
-    while (fgets(szCommand, sizeof(szCommand), stdin)) {
+    while (true) {
+        if (!fgets(szCommand, sizeof(szCommand), stdin)) break;
         // 개행 제거
         char* nl = strchr(szCommand, '\n');
         if (nl) *nl = '\0';
@@ -413,10 +457,11 @@ int main(int argc, char* argv[])
         }
     }
 
-    // 정리
+    // 대화형 모드 종료 후 시나리오 스레드 정리 (시나리오 모드는 위에서 이미 종료)
     if (scenarioThread.joinable()) scenarioThread.join();
     printf("\n최종 통계:\n");
     PrintStats(sessions);
+    fflush(stdout);
 
     printf("세션 종료 중...\n");
     for (auto* s : sessions) delete s;

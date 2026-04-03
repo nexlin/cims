@@ -6,7 +6,7 @@ import type { CimsUser } from '../api/auth'
 interface AuthCtx {
   user:    CimsUser | null
   loading: boolean
-  login:   (email: string, password: string) => Promise<void>
+  login:   (loginId: string, password: string) => Promise<void>
   logout:  () => void
 }
 
@@ -29,8 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [])
 
-  async function login(email: string, password: string) {
-    const { token, user } = await authApi.login(email, password)
+  async function login(loginId: string, password: string) {
+    const { token, user } = await authApi.login(loginId, password)
     localStorage.setItem(TOKEN_KEY, token)
     setUser(user)
   }

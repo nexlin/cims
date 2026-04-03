@@ -13,7 +13,7 @@ export interface Subscription {
 export interface UserSummary {
   id: number          // person ID (auto-increment)
   name: string
-  email: string
+  login_id: string
   org_id: string
   details?: string | null
   reject_id: string[]
@@ -27,7 +27,7 @@ export interface UserSummary {
 export type UserDetail = UserSummary
 
 export type UserInput = {
-  name: string; email?: string; org_id: string; details?: string; reject_id?: string[]
+  name: string; login_id?: string; org_id: string; details?: string; reject_id?: string[]
 }
 
 const enc = (s: string) => encodeURIComponent(s)

@@ -73,6 +73,12 @@ public:
                         const std::string& strInitiator,
                         const std::string& strCallee );
 
+    /** 현재 활성 VoIP 통화 수 (state IN ('ringing','active')) */
+    int GetActiveVoipCallCount();
+
+    /** VoIP 통화 응답 시 state=active 로 변경 */
+    bool UpdateCallLogActive( const std::string& strCallId );
+
     /** VoIP 통화 종료 시 CDR 정보로 업데이트 */
     bool UpdateCallLogEnded( const std::string& strCallId,
                               time_t tAnswer, time_t tEnd, int iSipStatus );

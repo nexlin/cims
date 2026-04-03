@@ -9,6 +9,7 @@
 #include "PRtpHandler.h"
 #include "McpttGroup.h"
 #include "SimpleJson.h"
+#include "RtpRecorder.h"
 
 class CmpServer : public PModule {
 public:
@@ -33,6 +34,7 @@ protected:
     void processRemoveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processJoinGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processLeaveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    void processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
 
     void sendResponse(const std::string& ip, int port, const std::string& msg);
 
@@ -68,6 +70,10 @@ private:
 
     std::vector<PRtpTrans*> _resourcePool; // Pre-allocated list
     std::vector<PRtpTrans*> _freeResources; // Available for use
+
+    // Recording config
+    bool _recordEnable;
+    std::string _recordDir;
 };
 
 #endif // __CMP_SERVER_H__

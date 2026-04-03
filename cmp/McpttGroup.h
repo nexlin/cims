@@ -10,6 +10,7 @@
 
 // Forward declaration
 class PRtpTrans;
+class RtpRecorder;
 
 // RTCP APP Packet for Floor Control (Simplified)
 // 3GPP TS 24.379 uses specific RTCP APP packets. 
@@ -74,6 +75,9 @@ public:
     void updatePriorities(const std::map<std::string, int>& priorities);
     void setDtmfConfig(bool enable, const std::string& pushDigit, const std::string& releaseDigit);
 
+    int getMemberCount() const { return (int)_members.size(); }
+    std::string getFloorHolder() const { return _floorTaken ? _floorOwnerSessionId : ""; }
+
 private:
     void sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     void sendAudioRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
@@ -114,6 +118,21 @@ private:
     std::string _dtmfReleaseDigit;
     
     PMutex _mutex;
+
+    // 녹취
+    bool _recordEnable;
+    std::string _recordDir;
+    int _segmentSeq;
+    RtpRecorder* _segRecorderAudio;
+    RtpRecorder* _segRecorderVideo;
+    std::string _segSpeakerId;
+
+public:
+    void setRecording(bool enable, const std::string& dir);
+
+private:
+    void startSegment(const std::string& speakerId);
+    void stopSegment();
 };
 
 #endif // __MCPTT_GROUP_H__

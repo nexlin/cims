@@ -27,6 +27,7 @@
 #define INVALID_SOCKET           (-1)
 
 class McpttGroup; // Forward declaration
+class RtpRecorder;
 
 class CRtpSocket 
 {
@@ -210,8 +211,22 @@ public:
   void setWorkerName(const std::string& name) { _workerName = name; }
   std::string getWorkerName() const { return _workerName; }
 
+  // 녹취
+  void startRecording(const std::string& rawDir, const std::string& sessionId);
+  void stopRecording();
+  bool isRecording() const { return _recording; }
+
 private:
   std::string _workerName;
+
+  // 녹취 (양방향)
+  bool _recording;
+  RtpRecorder* _recorderA;      // peer[0] → peer[1] 방향 음성
+  RtpRecorder* _recorderB;      // peer[1] → peer[0] 방향 음성
+  RtpRecorder* _recorderVA;     // peer[0] 영상
+  RtpRecorder* _recorderVB;     // peer[1] 영상
+  std::string _recordSessionId;
+  std::string _recordRawDir;
 };
 
 #endif // __PRTP_HANDLER_H__

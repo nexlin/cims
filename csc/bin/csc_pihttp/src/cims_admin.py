@@ -22,6 +22,7 @@ import pymysql
 import pymysql.cursors
 
 from util.pi_http.http_handler import HandlerArgs, HandlerResult
+from csc_service import notify_csp
 
 # ──────────────────────────────────────────────────────────────
 #  DB helper
@@ -233,10 +234,20 @@ async def _create_user(body, config):
     if not name:
         return HandlerResult(status=400, body={'error': 'name is required'})
 
+    login_id   = body.get('login_id', '').strip()
+    password   = body.get('password', '')
     email      = body.get('email', '')
     org_id     = body.get('org_id', '')
     details    = body.get('details') or None
     reject_ids = body.get('reject_id', [])
+
+    # login_id 미지정 시 name 기반 자동 생성
+    if not login_id:
+        login_id = name.replace(' ', '_').lower()
+
+    # password → SHA-256 해시
+    import hashlib
+    pw_hash = hashlib.sha256(password.encode()).hexdigest() if password else ''
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -244,16 +255,16 @@ async def _create_user(body, config):
             if has_email:
                 cur.execute(
                     "INSERT INTO users "
-                    "(name, email, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, %s, NOW(), NOW())",
-                    (name, email, org_id, details)
+                    "(name, login_id, password, email, org_id, details, create_time, update_time) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())",
+                    (name, login_id, pw_hash, email, org_id, details)
                 )
             else:
                 cur.execute(
                     "INSERT INTO users "
-                    "(name, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, NOW(), NOW())",
-                    (name, org_id, details)
+                    "(name, login_id, password, org_id, details, create_time, update_time) "
+                    "VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
+                    (name, login_id, pw_hash, org_id, details)
                 )
             person_id = cur.lastrowid
 
@@ -314,12 +325,21 @@ async def _update_user(person_id: str, body, config):
 
 
 async def _delete_user(person_id: str, config):
+    sub_ids = []
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            # 삭제 전 연관 subscription ID 수집
+            for table in ('voip_subscriptions', 'ptt_subscriptions'):
+                cur.execute(f"SELECT id FROM {table} WHERE user_id=%s", (person_id,))
+                sub_ids.extend(r['id'] for r in cur.fetchall())
+            cur.execute("DELETE FROM voip_subscriptions WHERE user_id=%s", (person_id,))
+            cur.execute("DELETE FROM ptt_subscriptions WHERE user_id=%s", (person_id,))
             cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
             cur.execute("DELETE FROM users WHERE id=%s", (person_id,))
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'User not found'})
+    for sid in sub_ids:
+        notify_csp("user_change", f"tel:{sid}", "DELETE")
     return HandlerResult(status=200, body={'id': person_id})
 
 
@@ -376,6 +396,7 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 f"VALUES (%s, %s, %s, %s, %s, %s)",
                 (msisdn, person_id, auth_id, passwd, dnd, forward_id)
             )
+    notify_csp("user_change", f"tel:{msisdn}", "POST")
     return HandlerResult(status=201, body={'id': msisdn})
 
 
@@ -398,6 +419,7 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
+    notify_csp("user_change", f"tel:{msisdn}", "PUT")
     return HandlerResult(status=200, body={'id': msisdn})
 
 
@@ -411,6 +433,7 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
+    notify_csp("user_change", f"tel:{msisdn}", "DELETE")
     return HandlerResult(status=200, body={'id': msisdn})
 
 
@@ -532,6 +555,7 @@ async def _create_group(body, config):
                         "(group_id, user_id, priority) VALUES (%s, %s, %s)",
                         (group_id, uid, prio)
                     )
+    notify_csp("group_change", f"tel:{group_id}", "POST")
     return HandlerResult(status=201, body={'id': group_id})
 
 
@@ -571,6 +595,7 @@ async def _update_group(group_id: str, body, config):
                             "(group_id, user_id, priority) VALUES (%s, %s, %s)",
                             (group_id, uid, prio)
                         )
+    notify_csp("group_change", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
 
 
@@ -587,6 +612,7 @@ async def _delete_group(group_id: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
+    notify_csp("group_change", f"tel:{group_id}", "DELETE")
     return HandlerResult(status=200, body={'id': group_id})
 
 
@@ -624,6 +650,7 @@ async def _add_member(group_id: str, body, config):
                 "ON DUPLICATE KEY UPDATE priority=VALUES(priority)",
                 (group_id, user_id, priority)
             )
+    notify_csp("group_change", f"tel:{group_id}", "PUT")
     return HandlerResult(status=201, body={'group_id': group_id, 'user_id': user_id})
 
 
@@ -636,6 +663,7 @@ async def _remove_member(group_id: str, user_id: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Member not found'})
+    notify_csp("group_change", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'group_id': group_id, 'user_id': user_id})
 
 

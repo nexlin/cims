@@ -247,6 +247,30 @@ CscInterface.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CscInterface.cpp.s
 .PHONY : CscInterface.cpp.s
 
+CscfModule.o: CscfModule.cpp.o
+.PHONY : CscfModule.o
+
+# target to build an object file
+CscfModule.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CscfModule.cpp.o
+.PHONY : CscfModule.cpp.o
+
+CscfModule.i: CscfModule.cpp.i
+.PHONY : CscfModule.i
+
+# target to preprocess a source file
+CscfModule.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CscfModule.cpp.i
+.PHONY : CscfModule.cpp.i
+
+CscfModule.s: CscfModule.cpp.s
+.PHONY : CscfModule.s
+
+# target to generate assembly for a file
+CscfModule.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CscfModule.cpp.s
+.PHONY : CscfModule.cpp.s
+
 CspPttGroup.o: CspPttGroup.cpp.o
 .PHONY : CspPttGroup.o
 
@@ -415,6 +439,54 @@ GroupMap.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/GroupMap.cpp.s
 .PHONY : GroupMap.cpp.s
 
+IbcfModule.o: IbcfModule.cpp.o
+.PHONY : IbcfModule.o
+
+# target to build an object file
+IbcfModule.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/IbcfModule.cpp.o
+.PHONY : IbcfModule.cpp.o
+
+IbcfModule.i: IbcfModule.cpp.i
+.PHONY : IbcfModule.i
+
+# target to preprocess a source file
+IbcfModule.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/IbcfModule.cpp.i
+.PHONY : IbcfModule.cpp.i
+
+IbcfModule.s: IbcfModule.cpp.s
+.PHONY : IbcfModule.s
+
+# target to generate assembly for a file
+IbcfModule.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/IbcfModule.cpp.s
+.PHONY : IbcfModule.cpp.s
+
+ModuleDispatcher.o: ModuleDispatcher.cpp.o
+.PHONY : ModuleDispatcher.o
+
+# target to build an object file
+ModuleDispatcher.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/ModuleDispatcher.cpp.o
+.PHONY : ModuleDispatcher.cpp.o
+
+ModuleDispatcher.i: ModuleDispatcher.cpp.i
+.PHONY : ModuleDispatcher.i
+
+# target to preprocess a source file
+ModuleDispatcher.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/ModuleDispatcher.cpp.i
+.PHONY : ModuleDispatcher.cpp.i
+
+ModuleDispatcher.s: ModuleDispatcher.cpp.s
+.PHONY : ModuleDispatcher.s
+
+# target to generate assembly for a file
+ModuleDispatcher.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/ModuleDispatcher.cpp.s
+.PHONY : ModuleDispatcher.cpp.s
+
 Monitor.o: Monitor.cpp.o
 .PHONY : Monitor.o
 
@@ -486,6 +558,30 @@ NonceMap.s: NonceMap.cpp.s
 NonceMap.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/NonceMap.cpp.s
 .PHONY : NonceMap.cpp.s
+
+PttAsModule.o: PttAsModule.cpp.o
+.PHONY : PttAsModule.o
+
+# target to build an object file
+PttAsModule.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/PttAsModule.cpp.o
+.PHONY : PttAsModule.cpp.o
+
+PttAsModule.i: PttAsModule.cpp.i
+.PHONY : PttAsModule.i
+
+# target to preprocess a source file
+PttAsModule.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/PttAsModule.cpp.i
+.PHONY : PttAsModule.cpp.i
+
+PttAsModule.s: PttAsModule.cpp.s
+.PHONY : PttAsModule.s
+
+# target to generate assembly for a file
+PttAsModule.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/PttAsModule.cpp.s
+.PHONY : PttAsModule.cpp.s
 
 RtpMap.o: RtpMap.cpp.o
 .PHONY : RtpMap.o
@@ -631,6 +727,30 @@ SubscriptionManager.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/SubscriptionManager.cpp.s
 .PHONY : SubscriptionManager.cpp.s
 
+TasModule.o: TasModule.cpp.o
+.PHONY : TasModule.o
+
+# target to build an object file
+TasModule.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/TasModule.cpp.o
+.PHONY : TasModule.cpp.o
+
+TasModule.i: TasModule.cpp.i
+.PHONY : TasModule.i
+
+# target to preprocess a source file
+TasModule.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/TasModule.cpp.i
+.PHONY : TasModule.cpp.i
+
+TasModule.s: TasModule.cpp.s
+.PHONY : TasModule.s
+
+# target to generate assembly for a file
+TasModule.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/TasModule.cpp.s
+.PHONY : TasModule.cpp.s
+
 UserMap.o: UserMap.cpp.o
 .PHONY : UserMap.o
 
@@ -677,6 +797,9 @@ help:
 	@echo "... CscInterface.o"
 	@echo "... CscInterface.i"
 	@echo "... CscInterface.s"
+	@echo "... CscfModule.o"
+	@echo "... CscfModule.i"
+	@echo "... CscfModule.s"
 	@echo "... CspPttGroup.o"
 	@echo "... CspPttGroup.i"
 	@echo "... CspPttGroup.s"
@@ -698,6 +821,12 @@ help:
 	@echo "... GroupMap.o"
 	@echo "... GroupMap.i"
 	@echo "... GroupMap.s"
+	@echo "... IbcfModule.o"
+	@echo "... IbcfModule.i"
+	@echo "... IbcfModule.s"
+	@echo "... ModuleDispatcher.o"
+	@echo "... ModuleDispatcher.i"
+	@echo "... ModuleDispatcher.s"
 	@echo "... Monitor.o"
 	@echo "... Monitor.i"
 	@echo "... Monitor.s"
@@ -707,6 +836,9 @@ help:
 	@echo "... NonceMap.o"
 	@echo "... NonceMap.i"
 	@echo "... NonceMap.s"
+	@echo "... PttAsModule.o"
+	@echo "... PttAsModule.i"
+	@echo "... PttAsModule.s"
 	@echo "... RtpMap.o"
 	@echo "... RtpMap.i"
 	@echo "... RtpMap.s"
@@ -725,6 +857,9 @@ help:
 	@echo "... SubscriptionManager.o"
 	@echo "... SubscriptionManager.i"
 	@echo "... SubscriptionManager.s"
+	@echo "... TasModule.o"
+	@echo "... TasModule.i"
+	@echo "... TasModule.s"
 	@echo "... UserMap.o"
 	@echo "... UserMap.i"
 	@echo "... UserMap.s"

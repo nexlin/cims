@@ -18,10 +18,10 @@
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP NOTIFY ¿äÃ» ¸Þ½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµð
- * @param pclsMessage ¼ö½ÅµÈ SIP ¿äÃ» ¸Þ½ÃÁö
- * @returns Á¤»óÀûÀ¸·Î Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP NOTIFY ï¿½ï¿½Ã» ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® ï¿½Úµé·¯
+ * @param iThreadId		SIP stack ï¿½ï¿½ UDP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+ * @param pclsMessage ï¿½ï¿½ï¿½Åµï¿½ SIP ï¿½ï¿½Ã» ï¿½Þ½ï¿½ï¿½ï¿½
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::RecvNotifyRequest( int iThreadId, CSipMessage * pclsMessage )
 {
@@ -64,15 +64,18 @@ bool CSipUserAgent::RecvNotifyRequest( int iThreadId, CSipMessage * pclsMessage 
 					}
 				}
 			}
+
+			CSipMessage * pclsResponse = pclsMessage->CreateResponse( SIP_OK );
+			if( pclsResponse )
+			{
+				m_clsSipStack.SendSipMessage( pclsResponse );
+			}
+
+			return true;
 		}
 
-		CSipMessage * pclsResponse = pclsMessage->CreateResponse( SIP_OK );
-		if( pclsResponse )
-		{
-			m_clsSipStack.SendSipMessage( pclsResponse );
-		}
-
-		return true;
+		// Non-refer in-dialog NOTIFY (e.g., conference event) â€” pass to callback chain
+		return false;
 	}
 
 	m_clsSipStack.SendSipMessage( pclsMessage->CreateResponse( SIP_NOT_FOUND ) );

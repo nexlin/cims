@@ -91,6 +91,35 @@ bool CSipUserAgent::SendNotify(const char *pszCallId, int iSipCode) {
 
 /**
  * @ingroup SipUserAgent
+ * @brief 특정 Call-ID dialog에 in-dialog NOTIFY를 전송한다 (범용).
+ */
+bool CSipUserAgent::SendNotifyWithBody(const char *pszCallId, const char *pszEvent,
+                                        const char *pszContentType, const char *pszContentSubType,
+                                        const std::string &strBody) {
+  SIP_DIALOG_MAP::iterator itMap;
+  CSipMessage *pclsRequest = NULL;
+
+  m_clsDialogMutex.acquire();
+  itMap = m_clsDialogMap.find(pszCallId);
+  if (itMap != m_clsDialogMap.end()) {
+    pclsRequest = itMap->second.CreateNotify();
+  }
+  m_clsDialogMutex.release();
+
+  if (pclsRequest) {
+    pclsRequest->m_clsContentType.Set(pszContentType, pszContentSubType);
+    pclsRequest->AddHeader("Event", pszEvent);
+    pclsRequest->AddHeader("Subscription-State", "active");
+    pclsRequest->m_strBody = strBody;
+    pclsRequest->m_iContentLength = (int)strBody.size();
+    m_clsSipStack.SendSipMessage(pclsRequest);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * @ingroup SipUserAgent
  * @brief INFO 메시지로 DTMF 를 전송한다.
  * @param pszCallId SIP Call-ID
  * @param cDtmf			DTMF 문자. '0' ~ '9' 및 '*', '#'

@@ -56,7 +56,7 @@ body { background: var(--bg); min-height: 100vh; }
 .tab-btn:hover { background: var(--bg); color: var(--text); }
 .tab-btn--active { background: #eff6ff; color: var(--primary); font-weight: 600; }
 
-.app-main { flex: 1; padding: 24px; }
+.app-main { flex: 1; padding: 8px; overflow: hidden; }
 
 /* ── Page / panel layout ───────────────────────────────────── */
 .page { display: flex; flex-direction: column; gap: 16px; }
@@ -242,18 +242,19 @@ body { background: var(--bg); min-height: 100vh; }
 .sp-page {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  align-items: flex-start;
+  gap: 8px;
+  align-items: stretch;
+  height: calc(100vh - 70px);
 }
 
 .sp-panel {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  width: 320px;
+  width: 340px;
   flex-shrink: 0;
   box-shadow: var(--shadow);
 }
@@ -417,8 +418,8 @@ body { background: var(--bg); min-height: 100vh; }
 /* PTT groups */
 .sp-groups {
   overflow-y: auto;
-  max-height: 220px;
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
 }
 .sp-group {
   display: flex;
@@ -457,6 +458,65 @@ body { background: var(--bg); min-height: 100vh; }
   background: #f9fafb;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+  max-height: 200px;
+  overflow-y: auto;
+}
+.sp-group-toggle {
+  background: none; border: none; cursor: pointer;
+  font-size: 11px; color: var(--text-muted); padding: 2px 6px;
+  border-radius: 4px; flex-shrink: 0;
+}
+.sp-group-toggle:hover { background: var(--bg); }
+.sp-push-inline {
+  padding: 4px 10px; border-radius: var(--radius);
+  border: 2px solid var(--border); background: #f3f4f6;
+  font-size: 11px; font-weight: 700; cursor: pointer;
+  user-select: none; flex-shrink: 0; white-space: nowrap;
+  transition: background .1s, border-color .1s;
+}
+.sp-push-inline:hover { border-color: var(--primary); background: #eff6ff; }
+.sp-push-inline--on {
+  background: #fee2e2; border-color: var(--danger);
+  color: var(--danger);
+  box-shadow: 0 0 0 2px rgba(220,38,38,.12);
+}
+.sp-mute-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; padding: 2px 4px; flex-shrink: 0;
+  border-radius: 4px;
+}
+.sp-mute-btn:hover { background: var(--bg); }
+.sp-speaker-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 14px; font-size: 11px; font-weight: 600;
+  color: #15803d; background: #f0fdf4;
+  border-top: 1px solid #dcfce7;
+}
+.sp-level-bar {
+  width: 4px; height: 16px; background: #e5e7eb;
+  border-radius: 2px; overflow: hidden;
+  display: flex; flex-direction: column-reverse;
+  flex-shrink: 0;
+}
+.sp-level-fill {
+  width: 100%; border-radius: 2px;
+  transition: height 0.08s;
+}
+/* 영상 미지원 시 화자 표시 영역 */
+.sp-speaker-area {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 6px; padding: 16px 14px;
+  background: #f0fdf4; border-top: 1px solid #dcfce7;
+  min-height: 60px;
+}
+.sp-speaker-area-name {
+  font-size: 14px; font-weight: 700; color: #15803d;
+}
+.sp-speaker-area-idle {
+  display: flex; align-items: center; justify-content: center;
+  padding: 12px 14px; color: #9ca3af; font-size: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .sp-members-head {
@@ -595,3 +655,17 @@ body { background: var(--bg); min-height: 100vh; }
 
 /* ── empty state ─────────────────────────────────────────────── */
 .empty { padding: 48px; text-align: center; color: var(--text-muted); }
+
+/* ── Docs viewer ─────────────────────────────────────────── */
+.docs-content { font-size: 14px; line-height: 1.7; color: var(--text); max-width: 900px; }
+.docs-content h1 { font-size: 22px; font-weight: 700; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--primary); }
+.docs-content h2 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; color: var(--primary); }
+.docs-content h3 { font-size: 15px; font-weight: 600; margin: 16px 0 6px; }
+.docs-content code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'Consolas', monospace; }
+.docs-content pre { background: #1e1e2e; color: #cdd6f4; padding: 14px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+.docs-content pre code { background: none; color: inherit; padding: 0; font-size: 12px; }
+.docs-content li { margin-left: 20px; list-style: disc; }
+.docs-content td { padding: 4px 10px; border: 1px solid var(--border); font-size: 13px; }
+.docs-content tr:first-child td { font-weight: 600; background: #f3f4f6; }
+.docs-content strong { font-weight: 600; }
+.docs-content blockquote { border-left: 3px solid var(--primary); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }

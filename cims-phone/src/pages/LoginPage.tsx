@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 
 export default function LoginPage() {
   const { login } = useAuth()
-  const [email,   setEmail]   = useState('')
+  const [loginId, setLoginId] = useState('')
   const [pw,      setPw]      = useState('')
   const [error,   setError]   = useState('')
   const [loading, setLoading] = useState(false)
@@ -11,10 +11,10 @@ export default function LoginPage() {
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    if (!email || !pw) { setError('이메일과 비밀번호를 입력하세요'); return }
+    if (!loginId || !pw) { setError('아이디와 비밀번호를 입력하세요'); return }
     setLoading(true)
     try {
-      await login(email, pw)
+      await login(loginId, pw)
     } catch (err: unknown) {
       setError((err as Error).message)
     } finally { setLoading(false) }
@@ -32,10 +32,9 @@ export default function LoginPage() {
           <h2 className="auth-title">로그인</h2>
           <input
             className="form-input"
-            type="email"
-            placeholder="이메일"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
+            placeholder="아이디"
+            value={loginId}
+            onChange={e => setLoginId(e.target.value)}
             autoFocus
           />
           <input

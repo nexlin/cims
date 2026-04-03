@@ -47,6 +47,8 @@ export class PhoneClient {
   private audioCtx: AudioContext | null = null
   private analyser: AnalyserNode | null = null
   private levelTimer: ReturnType<typeof setInterval> | null = null
+  private audioUnlocked = false
+  private audioUnlockHandler: (() => void) | null = null
 
   constructor(cb: PhoneCallbacks) {
     this.cb = cb
@@ -62,11 +64,35 @@ export class PhoneClient {
 
   setVideoEnabled(enabled: boolean) {
     this.videoEnabled = enabled
+    // 화자 중 실시간 반영: 비디오 트랙 교체
+    if (this.pc && this.localStream) {
+      const videoTr = this.pc.getTransceivers().find(tr => tr.mid === '1')
+      if (videoTr) {
+        if (enabled) {
+          // 카메라 재획득 후 교체
+          navigator.mediaDevices.getUserMedia({ video: true }).then(vs => {
+            const vt = vs.getVideoTracks()[0]
+            if (vt) {
+              // 기존 로컬 비디오 트랙 정리
+              this.localStream?.getVideoTracks().forEach(t => t.stop())
+              this.localStream?.addTrack(vt)
+              videoTr.sender.replaceTrack(vt)
+              this.cb.onLocalVideo?.(this.localStream)
+            }
+          }).catch(() => {})
+        } else {
+          // 비디오 트랙 제거
+          this.localStream.getVideoTracks().forEach(t => { t.stop(); this.localStream?.removeTrack(t) })
+          videoTr.sender.replaceTrack(null)
+        }
+      }
+    }
   }
 
   getState(): PhoneState { return this.state }
   getActiveCallId(): string { return this.activeCallId }
   getPendingIncoming(): IncomingInfo | null { return this.pendingIncoming }
+  getRemoteVideoStream(): MediaStream | null { return this.remoteVideoStream }
 
   private setState(s: PhoneState) {
     this.state = s
@@ -309,7 +335,14 @@ export class PhoneClient {
   // 사용자 인터랙션 시 오디오 재생 보장
   ensureAudioPlaying() {
     if (this.audioEl && this.audioEl.srcObject) {
-      this.audioEl.play().catch(() => {})
+      this.audioEl.play().then(() => {
+        this.audioUnlocked = true
+        this.removeAudioUnlockListener()
+      }).catch(() => {})
+    }
+    // AudioContext도 resume (음량 레벨 모니터링용)
+    if (this.audioCtx?.state === 'suspended') {
+      this.audioCtx.resume().catch(() => {})
     }
   }
 
@@ -336,6 +369,8 @@ export class PhoneClient {
         }
 
         if (this.videoEnabled) this.cb.onLocalVideo?.(stream)
+        // 본인 발화 시 로컬 오디오 레벨 모니터링
+        this.startAudioLevelMonitor(stream)
         this.send({ type: 'ptt_request', call_id: this.activeCallId })
       }).catch(() => {
         this.getMic().then(stream => {
@@ -347,6 +382,7 @@ export class PhoneClient {
               if (t) tr.sender.replaceTrack(t)
             }
           }
+          this.startAudioLevelMonitor(stream)
           this.send({ type: 'ptt_request', call_id: this.activeCallId })
         })
       })
@@ -359,6 +395,8 @@ export class PhoneClient {
       }
       this.localStream?.getTracks().forEach(t => t.stop())
       this.localStream = null
+      // 리모트 오디오 레벨 모니터링으로 복원
+      if (this.remoteAudioStream) this.startAudioLevelMonitor(this.remoteAudioStream)
       // 로컬 카메라 프리뷰 해제 → 리모트 비디오 복원
       this.cb.onLocalVideo?.(null)
       if (this.videoEl && this.remoteVideoStream) {
@@ -401,11 +439,26 @@ export class PhoneClient {
           this.videoEl.srcObject = this.remoteVideoStream
           this.videoEl.play().catch(() => { })
         }
+        // 상대방 비디오 트랙 mute/unmute 감지 → 잔상 제거
+        track.onmute = () => {
+          if (this.videoEl) { this.videoEl.srcObject = null; this.videoEl.load() }
+        }
+        track.onunmute = () => {
+          if (this.videoEl && this.remoteVideoStream) {
+            this.videoEl.srcObject = this.remoteVideoStream
+            this.videoEl.play().catch(() => {})
+          }
+        }
       } else if (track.kind === 'audio') {
         this.remoteAudioStream = e.streams[0] || new MediaStream([track])
         if (this.audioEl) {
           this.audioEl.srcObject = this.remoteAudioStream
-          this.audioEl.play().catch(() => {})
+          this.audioEl.play().then(() => {
+            this.audioUnlocked = true
+            this.removeAudioUnlockListener()
+          }).catch(() => {
+            if (!this.audioUnlocked) this.installAudioUnlockListener()
+          })
         }
         this.startAudioLevelMonitor(this.remoteAudioStream)
       }
@@ -417,6 +470,10 @@ export class PhoneClient {
     this.stopAudioLevelMonitor()
     try {
       this.audioCtx = new AudioContext()
+      // AudioContext가 suspended 상태일 수 있음 → resume
+      if (this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {})
+      }
       const source = this.audioCtx.createMediaStreamSource(stream)
       this.analyser = this.audioCtx.createAnalyser()
       this.analyser.fftSize = 256
@@ -424,12 +481,18 @@ export class PhoneClient {
       const dataArray = new Uint8Array(this.analyser.frequencyBinCount)
       this.levelTimer = setInterval(() => {
         if (!this.analyser) return
-        this.analyser.getByteFrequencyData(dataArray)
-        let sum = 0
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]
-        const avg = sum / dataArray.length / 255  // 0~1
-        this.cb.onAudioLevel?.(avg)
-      }, 100)
+        // suspended 상태면 resume 재시도
+        if (this.audioCtx?.state === 'suspended') {
+          this.audioCtx.resume().catch(() => {})
+        }
+        this.analyser.getByteTimeDomainData(dataArray)
+        let peak = 0
+        for (let i = 0; i < dataArray.length; i++) {
+          const v = Math.abs(dataArray[i] - 128)
+          if (v > peak) peak = v
+        }
+        this.cb.onAudioLevel?.(peak / 128)  // 0~1 피크 레벨
+      }, 80)
     } catch { /* AudioContext not supported */ }
   }
 
@@ -454,8 +517,35 @@ export class PhoneClient {
     })
   }
 
+  private installAudioUnlockListener() {
+    if (this.audioUnlockHandler) return
+    this.audioUnlockHandler = () => {
+      if (this.audioEl && this.audioEl.srcObject) {
+        this.audioEl.play().then(() => {
+          this.audioUnlocked = true
+          this.removeAudioUnlockListener()
+        }).catch(() => {})
+      }
+    }
+    const events = ['click', 'touchstart', 'keydown'] as const
+    for (const ev of events) {
+      document.addEventListener(ev, this.audioUnlockHandler, { once: false })
+    }
+  }
+
+  private removeAudioUnlockListener() {
+    if (!this.audioUnlockHandler) return
+    const events = ['click', 'touchstart', 'keydown'] as const
+    for (const ev of events) {
+      document.removeEventListener(ev, this.audioUnlockHandler)
+    }
+    this.audioUnlockHandler = null
+  }
+
   private closePC() {
     this.stopAudioLevelMonitor()
+    this.removeAudioUnlockListener()
+    this.audioUnlocked = false
     this.pc?.close()
     this.pc = null
     this.localStream?.getTracks().forEach(t => t.stop())

@@ -3,6 +3,15 @@ import { usersApi, type UserSummary, type UserInput, type Subscription } from '.
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 
+/** +82 제거 후 XXX-XXXX-XXXX 형태로 포맷 (UI 표시용) */
+function fmtPhone(raw: string): string {
+  let num = raw.replace(/^tel:/, '').replace(/^sip:/, '').split('@')[0]
+  if (num.startsWith('+82')) num = '0' + num.slice(3)
+  while (num.length < 11) num = '0' + num
+  if (num.length === 11) return `${num.slice(0,3)}-${num.slice(3,7)}-${num.slice(7)}`
+  return num
+}
+
 // ── Subscription form ─────────────────────────────────────────
 interface SubForm {
   id: string
@@ -16,12 +25,12 @@ const EMPTY_SUB: SubForm = { id: '', auth_id: '', passwd: '', dnd: false, forwar
 // ── Person form ───────────────────────────────────────────────
 interface PersonForm {
   name: string
-  email: string
+  login_id: string
   org_id: string
   details: string
   reject_id: string[]
 }
-const EMPTY_PERSON: PersonForm = { name: '', email: '', org_id: '', details: '', reject_id: [] }
+const EMPTY_PERSON: PersonForm = { name: '', login_id: '', org_id: '', details: '', reject_id: [] }
 
 export default function UsersPage() {
   const { show } = useToast()
@@ -69,7 +78,7 @@ export default function UsersPage() {
 
   function openEdit(u: UserSummary) {
     setEditingId(u.id)
-    setPersonForm({ name: u.name, email: u.email, org_id: u.org_id, details: u.details ?? '', reject_id: u.reject_id })
+    setPersonForm({ name: u.name, login_id: u.login_id, org_id: u.org_id, details: u.details ?? '', reject_id: u.reject_id })
     setRejectStr(u.reject_id.join(', '))
     setPersonOpen(true)
   }
@@ -80,7 +89,7 @@ export default function UsersPage() {
     try {
       const payload: UserInput = {
         name: personForm.name,
-        email: personForm.email,
+        login_id: personForm.login_id,
         org_id: personForm.org_id,
         details: personForm.details || undefined,
         reject_id: rejectIds,
@@ -160,7 +169,7 @@ export default function UsersPage() {
   // ── filter ──────────────────────────────────────────────────
   const filtered = users.filter(u =>
     u.name.toLowerCase().includes(search.toLowerCase()) ||
-    u.email.toLowerCase().includes(search.toLowerCase()) ||
+    u.login_id.toLowerCase().includes(search.toLowerCase()) ||
     u.org_id.toLowerCase().includes(search.toLowerCase()) ||
     u.call_subscriptions.some(s => s.id.includes(search)) ||
     u.ptt_subscriptions.some(s => s.id.includes(search))
@@ -172,7 +181,7 @@ export default function UsersPage() {
       <div className="toolbar">
         <input
           className="search-input"
-          placeholder="이름 / 이메일 / 조직 / 번호 검색…"
+          placeholder="이름 / 아이디 / 조직 / 번호 검색…"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -202,7 +211,7 @@ export default function UsersPage() {
                 <tr key={u.id}>
                   <td>
                     <div style={{ fontWeight: 500 }}>{u.name}</div>
-                    {u.email && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{u.email}</div>}
+                    {u.login_id && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{u.login_id}</div>}
                   </td>
                   <td>{u.org_id || '—'}</td>
 
@@ -212,7 +221,7 @@ export default function UsersPage() {
                       {u.call_subscriptions.map(s => (
                         <span key={s.id} className="sub-chip sub-chip--call">
                           <button className="sub-chip-label" onClick={() => openEditSub(u.id, 'call', s)} title="편집">
-                            {s.id}
+                            {fmtPhone(s.id)}
                           </button>
                           <button className="sub-chip-del" onClick={() => handleDeleteSub(u.id, 'call', s.id)} title="삭제">×</button>
                         </span>
@@ -227,7 +236,7 @@ export default function UsersPage() {
                       {u.ptt_subscriptions.map(s => (
                         <span key={s.id} className="sub-chip sub-chip--ptt">
                           <button className="sub-chip-label" onClick={() => openEditSub(u.id, 'ptt', s)} title="편집">
-                            {s.id}
+                            {fmtPhone(s.id)}
                           </button>
                           <button className="sub-chip-del" onClick={() => handleDeleteSub(u.id, 'ptt', s.id)} title="삭제">×</button>
                         </span>
@@ -259,13 +268,12 @@ export default function UsersPage() {
               placeholder="표시 이름"
             />
 
-            <label>이메일</label>
+            <label>아이디</label>
             <input
               className="form-input"
-              type="email"
-              value={personForm.email}
-              onChange={e => setPersonForm(f => ({ ...f, email: e.target.value }))}
-              placeholder="user@example.com"
+              value={personForm.login_id}
+              onChange={e => setPersonForm(f => ({ ...f, login_id: e.target.value }))}
+              placeholder="test001"
             />
 
             <label>조직 ID</label>

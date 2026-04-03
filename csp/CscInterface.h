@@ -19,7 +19,7 @@ public:
 
 private:
     void ListenerLoop();
-    void ProcessMessage(const std::string& strMsg);
+    void ProcessMessage(const std::string& strMsg, const struct sockaddr_in& clientAddr);
 
     int m_iPort;
     int m_iServerSock;

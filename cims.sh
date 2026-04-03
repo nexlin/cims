@@ -9,16 +9,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── 실행 위치 자동 감지 ────────────────────────────────────────
-# dist/ 디렉터리 안에서 실행 시: DIST_DIR = 현재 디렉터리
 # 소스 트리에서 실행 시:         DIST_DIR = build/dist/
-if [[ -f "$SCRIPT_DIR/csp/bin/csp" ]]; then
-    DIST_DIR="$SCRIPT_DIR"
-    SRC_CONSOLE=""
-    SRC_PHONE=""
-else
+# dist/ 디렉터리 안에서 실행 시: DIST_DIR = 현재 디렉터리
+if [[ -f "$SCRIPT_DIR/CMakeLists.txt" ]]; then
     DIST_DIR="$SCRIPT_DIR/build/dist"
     SRC_CONSOLE="$SCRIPT_DIR/cims-console"
     SRC_PHONE="$SCRIPT_DIR/cims-phone"
+else
+    DIST_DIR="$SCRIPT_DIR"
+    SRC_CONSOLE=""
+    SRC_PHONE=""
 fi
 
 PID_DIR="$DIST_DIR/run"

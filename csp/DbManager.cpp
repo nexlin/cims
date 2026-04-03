@@ -399,6 +399,39 @@ bool CDbManager::InsertCallLog( const std::string& strCallId, bool bPtt,
     return ExecuteQuery(strSql);
 }
 
+int CDbManager::GetActiveVoipCallCount()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return 0;
+
+    std::string strSql =
+        "SELECT COUNT(*) AS cnt FROM voip_call_logs WHERE state IN ('ringing','active')";
+
+    if (mysql_query(m_pMysql, strSql.c_str()) != 0) return 0;
+
+    MYSQL_RES* pRes = mysql_store_result(m_pMysql);
+    if (!pRes) return 0;
+
+    int count = 0;
+    MYSQL_ROW row = mysql_fetch_row(pRes);
+    if (row && row[0]) count = atoi(row[0]);
+    mysql_free_result(pRes);
+
+    return count;
+}
+
+bool CDbManager::UpdateCallLogActive( const std::string& strCallId )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    std::string strSql =
+        "UPDATE voip_call_logs SET state='active', answer_time=NOW()"
+        " WHERE call_id='" + Escape(strCallId) + "' AND state='ringing'";
+
+    return ExecuteQuery(strSql);
+}
+
 bool CDbManager::UpdateCallLogEnded( const std::string& strCallId,
                                       time_t tAnswer, time_t tEnd, int iSipStatus )
 {

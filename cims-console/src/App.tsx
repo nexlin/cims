@@ -5,14 +5,18 @@ import UsersPage from './pages/UsersPage'
 import GroupsPage from './pages/GroupsPage'
 import CallLogsPage from './pages/CallLogsPage'
 import LoginPage from './pages/LoginPage'
+import DocsPage from './pages/DocsPage'
+import DashboardPage from './pages/DashboardPage'
+import ServiceStatusPage from './pages/ServiceStatusPage'
+import StatsPage from './pages/StatsPage'
 import { authApi } from './api/auth'
 import './index.css'
 
-type Tab = 'users' | 'groups' | 'calls'
+type Tab = 'dashboard' | 'users' | 'groups' | 'service' | 'history' | 'stats' | 'docs'
 
 function Shell() {
   const { user, loading, logout, refresh } = useAuth()
-  const [tab,       setTab]       = useState<Tab>('users')
+  const [tab,       setTab]       = useState<Tab>('dashboard')
   const [showChgPw, setShowChgPw] = useState(false)
   const [chgError,  setChgError]  = useState('')
   const [chgOk,     setChgOk]     = useState('')
@@ -52,17 +56,29 @@ function Shell() {
           <nav className="tab-nav">
             {isAdmin && (
               <>
+                <button className={`tab-btn${tab === 'dashboard' ? ' tab-btn--active' : ''}`} onClick={() => setTab('dashboard')}>
+                  대시보드
+                </button>
                 <button className={`tab-btn${tab === 'users'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('users')}>
-                  👤 가입자 관리
+                  가입자 관리
                 </button>
                 <button className={`tab-btn${tab === 'groups' ? ' tab-btn--active' : ''}`} onClick={() => setTab('groups')}>
-                  📢 PTT 그룹 관리
+                  PTT 그룹
                 </button>
-                <button className={`tab-btn${tab === 'calls'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('calls')}>
-                  📞 통화현황
+                <button className={`tab-btn${tab === 'service' ? ' tab-btn--active' : ''}`} onClick={() => setTab('service')}>
+                  서비스 상태
+                </button>
+                <button className={`tab-btn${tab === 'history' ? ' tab-btn--active' : ''}`} onClick={() => setTab('history')}>
+                  서비스 이력
+                </button>
+                <button className={`tab-btn${tab === 'stats' ? ' tab-btn--active' : ''}`} onClick={() => setTab('stats')}>
+                  통계
                 </button>
               </>
             )}
+            <button className={`tab-btn${tab === 'docs' ? ' tab-btn--active' : ''}`} onClick={() => setTab('docs')}>
+              문서
+            </button>
           </nav>
           <div className="app-user">
             <span className="app-user-name">{user.name}</span>
@@ -81,15 +97,18 @@ function Shell() {
             </div>
           ) : (
             <>
-              {tab === 'users'  && <UsersPage />}
-              {tab === 'groups' && <GroupsPage />}
-              {tab === 'calls'  && <CallLogsPage />}
+              {tab === 'dashboard' && <DashboardPage />}
+              {tab === 'users'     && <UsersPage />}
+              {tab === 'groups'    && <GroupsPage />}
+              {tab === 'service'   && <ServiceStatusPage />}
+              {tab === 'history'   && <CallLogsPage />}
+              {tab === 'stats'     && <StatsPage />}
+              {tab === 'docs'      && <DocsPage />}
             </>
           )}
         </main>
       </div>
 
-      {/* 비밀번호 변경 모달 */}
       {showChgPw && (
         <div className="modal-overlay" onClick={() => setShowChgPw(false)}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>

@@ -28,6 +28,15 @@ const STATE_COLOR: Record<PhoneState, string> = {
 
 const bare = (id: string) => id.replace(/^tel:/, '').replace(/^sip:/, '').split('@')[0]
 
+/** +82 제거 후 XXX-XXXX-XXXX 형태로 포맷 (UI 표시용) */
+function fmtPhone(raw: string): string {
+  let num = bare(raw)
+  if (num.startsWith('+82')) num = '0' + num.slice(3)
+  while (num.length < 11) num = '0' + num
+  if (num.length === 11) return `${num.slice(0,3)}-${num.slice(3,7)}-${num.slice(7)}`
+  return num
+}
+
 // ── Call Panel (VoIP 1:1) ────────────────────────────────────────────────────
 
 function CallPanel({ sub }: { sub: Subscription }) {
@@ -70,7 +79,7 @@ function CallPanel({ sub }: { sub: Subscription }) {
       <audio ref={audioRef} autoPlay style={{ display: 'none' }} />
       <div className="sp-header">
         <span className="sp-badge sp-badge--call">📞 통화</span>
-        <span className="sp-number">{sub.id}</span>
+        <span className="sp-number">{fmtPhone(sub.id)}</span>
         <div className="sp-conn">
           <span className="sp-dot" style={{ background: STATE_COLOR[state] }} />
           <span className="sp-state">{STATE_LABEL[state]}</span>
@@ -79,7 +88,7 @@ function CallPanel({ sub }: { sub: Subscription }) {
       {error && <div className="sp-error">{error}</div>}
       {state === 'incoming' && incoming && (
         <div className="sp-incoming">
-          <div className="sp-incoming-from">📲 {incoming.from}</div>
+          <div className="sp-incoming-from">📲 {fmtPhone(incoming.from)}</div>
           <div className="sp-incoming-btns">
             <button className="btn btn--primary"
               onClick={() => { clientRef.current?.answer(); setIncoming(null) }}>📞 수신</button>
@@ -147,6 +156,10 @@ function PttPanel({ sub }: { sub: Subscription }) {
   const [groups,      setGroups]      = useState<GmsGroup[]>([])
   // 그룹별 세션: key = groupId
   const [sessions, setSessions] = useState<Record<string, GroupSession>>({})
+  // 멤버 목록 토글 상태
+  const [memberOpen, setMemberOpen] = useState<Record<string, boolean>>({})
+  // 비디오 on/off 토글 (기본: on)
+  const [videoOn, setVideoOn] = useState<Record<string, boolean>>({})
 
   const clientRef = useRef<PhoneClient | null>(null)
   const audioRef  = useRef<HTMLAudioElement | null>(null)
@@ -188,13 +201,34 @@ function PttPanel({ sub }: { sub: Subscription }) {
       },
       onError: (msg) => { setError(msg); setTimeout(() => setError(''), 6000) },
       onFloor: (spk) => {
-        // callId로 그룹 찾기
         setSessions(prev => {
           const next = { ...prev }
+          // 본인이 화자인지 확인 (floorOn 상태)
+          let iAmSpeaker = false
           for (const gid in next) {
-            // floor 이벤트는 현재 활성 callId에 대해 옴
             next[gid] = { ...next[gid], speaker: spk }
+            if (next[gid].floorOn) iAmSpeaker = true
           }
+
+          // 비디오 처리 (setState 내부에서 ref 조작 — 동기적으로 실행됨)
+          if (!spk) {
+            // 화자 없음 → 잔상 제거
+            for (const gid in videoRefs.current) {
+              const el = videoRefs.current[gid]
+              if (el) { el.srcObject = null; el.load() }
+            }
+          } else if (!iAmSpeaker) {
+            // 다른 사람이 화자 → 리모트 비디오 복원
+            const remoteVideo = client.getRemoteVideoStream?.()
+            if (remoteVideo) {
+              for (const gid in videoRefs.current) {
+                const el = videoRefs.current[gid]
+                if (el) { el.srcObject = remoteVideo; el.play().catch(() => {}) }
+              }
+            }
+          }
+          // 본인이 화자면 onLocalVideo에서 이미 로컬 스트림 설정됨 → 건드리지 않음
+
           return next
         })
       },
@@ -223,7 +257,7 @@ function PttPanel({ sub }: { sub: Subscription }) {
             }
           }
         }
-        // stream===null이면 PhoneClient가 remoteVideoStream으로 자동 복원
+        // stream===null → PUSH 해제, 리모트 비디오 복원은 PhoneClient가 처리
       },
       onAudioLevel: (level) => setAudioLevel(level),
       onMemberStatus: (userId, connected) => {
@@ -330,7 +364,7 @@ function PttPanel({ sub }: { sub: Subscription }) {
 
       <div className="sp-header">
         <span className="sp-badge sp-badge--ptt">🎙 PTT</span>
-        <span className="sp-number">{sub.id}</span>
+        <span className="sp-number">{fmtPhone(sub.id)}</span>
         <div className="sp-conn">
           {authStatus === 'pending'
             ? <span className="sp-state" style={{ color: '#d97706' }}>인증 중...</span>
@@ -358,9 +392,12 @@ function PttPanel({ sub }: { sub: Subscription }) {
                 const totalCount = g.members.length || g.member_count
                 const connectedCount = isActive ? sess.members.filter(m => m.connected).length : 0
 
+                {
+                const isMembersOpen = memberOpen[g.id] ?? false
+
                 return (
                   <div key={g.id} className="sp-group-card">
-                    {/* 그룹 헤더 */}
+                    {/* 그룹 헤더: 이름 + PUSH + 음소거 + 토글 */}
                     <div className={`sp-group${isActive ? ' sp-group--active' : ''}`}
                       style={{ cursor: 'default' }}>
                       <span className="sp-group-dot"
@@ -368,43 +405,114 @@ function PttPanel({ sub }: { sub: Subscription }) {
                       <div className="sp-group-info">
                         <span className="sp-group-name">
                           {g.display_name}
-                          {g.video_enabled && <span style={{ marginLeft: 4, fontSize: '0.75em', color: '#2563eb' }}>[Video]</span>}
+                          {g.video_enabled && <span style={{ marginLeft: 4, fontSize: '0.75em', color: '#2563eb' }}>[V]</span>}
                         </span>
-                        <span className="sp-group-id">{g.id}</span>
+                        <span className="sp-group-id">{fmtPhone(g.id)} · {isActive ? `${connectedCount}/${totalCount}` : `0/${totalCount}`}</span>
                       </div>
-                      <span className="sp-group-state">
-                        {isActive ? `${connectedCount}/${totalCount}명` : `0/${totalCount}명`}
-                      </span>
+                      {/* PUSH 버튼 (그룹명 오른쪽) */}
+                      {isActive && (
+                        <button
+                          className={`sp-push-inline${sess.floorOn ? ' sp-push-inline--on' : ''}`}
+                          onClick={() => handleFloorToggle(g.id)}>
+                          {sess.floorOn ? '🔴' : '⚫'} PUSH
+                        </button>
+                      )}
+                      {/* 음소거 토글 */}
+                      {isActive && (
+                        <button className="sp-mute-btn"
+                          onClick={() => handleVolumeChange(g.id, sess.volume > 0 ? 0 : 100)}
+                          title={sess.volume > 0 ? '음소거' : '음소거 해제'}>
+                          {sess.volume > 0 ? '🔊' : '🔇'}
+                        </button>
+                      )}
+                      {/* 비디오 송신 on/off 토글 */}
+                      {isActive && g.video_enabled && (
+                        <button className="sp-mute-btn"
+                          onClick={() => {
+                            const next = videoOn[g.id] === false
+                            setVideoOn(prev => ({ ...prev, [g.id]: next }))
+                            clientRef.current?.setVideoEnabled(next)
+                          }}
+                          title={videoOn[g.id] === false ? '영상 송신 켜기' : '영상 송신 끄기'}>
+                          {videoOn[g.id] === false ? '📷' : '📹'}
+                        </button>
+                      )}
+                      {isActive && sess.members.length > 0 && (
+                        <button className="sp-group-toggle"
+                          onClick={() => setMemberOpen(prev => ({ ...prev, [g.id]: !prev[g.id] }))}>
+                          {isMembersOpen ? '▲' : '▼'}
+                        </button>
+                      )}
                     </div>
 
-                    {/* 비디오 영역 (video_enabled 그룹만) */}
-                    {isActive && g.video_enabled && (
-                      <div style={{ position: 'relative', background: '#000', borderRadius: 8,
-                                    overflow: 'hidden', margin: '4px 0', aspectRatio: '4/3' }}>
-                        <video
-                          ref={el => setVideoRef(g.id, el)}
-                          autoPlay playsInline muted
-                          style={{
-                            width: '100%', height: '100%', objectFit: 'contain',
-                            transform: `rotate(${sess.videoRotation}deg)`,
-                          }} />
-                        <button onClick={() => handleRotate(g.id)}
-                          style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.5)',
-                                   color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px',
-                                   cursor: 'pointer', fontSize: 14 }}>
-                          ↻ 회전
-                        </button>
-                        {sess.floorOn && (
-                          <span style={{ position: 'absolute', top: 4, left: 4, background: 'rgba(220,38,38,0.8)',
-                                         color: '#fff', borderRadius: 4, padding: '2px 6px', fontSize: 11 }}>
-                            송신 중
-                          </span>
-                        )}
-                      </div>
-                    )}
+                    {(() => {
+                      if (!isActive) return null
+                      // 화자 URI → 이름 변환
+                      const speakerName = sess.speaker
+                        ? (sess.members.find(m => bare(m.uri) === bare(sess.speaker!))?.name || fmtPhone(sess.speaker))
+                        : null
+                      const levelPct = Math.min(audioLevel * 150, 100)
+                      const levelColor = audioLevel > 0.3 ? '#16a34a' : audioLevel > 0.1 ? '#d97706' : '#9ca3af'
 
-                    {/* 멤버 목록 */}
-                    {isActive && sess.members.length > 0 && (
+                      return (<>
+                        {/* 영상 미지원: 화자 표시 영역 */}
+                        {!g.video_enabled && (
+                          sess.speaker ? (
+                            <div className="sp-speaker-area">
+                              <span className="sp-speaker-area-name">🎤 {speakerName}</span>
+                              <div className="sp-level-bar">
+                                <div className="sp-level-fill"
+                                  style={{ height: `${levelPct}%`, background: levelColor }} />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="sp-speaker-area-idle">대기 중</div>
+                          )
+                        )}
+
+                        {/* 비디오 영역 (항상 표시) */}
+                        {g.video_enabled && (
+                          <div style={{ position: 'relative', background: '#000',
+                                        overflow: 'hidden', margin: '0', aspectRatio: '4/3' }}>
+                            <video
+                              ref={el => setVideoRef(g.id, el)}
+                              autoPlay playsInline muted
+                              style={{
+                                width: '100%', height: '100%', objectFit: 'contain',
+                                transform: `rotate(${sess.videoRotation}deg)`,
+                              }} />
+                            <button onClick={() => handleRotate(g.id)}
+                              style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.5)',
+                                       color: '#fff', border: 'none', borderRadius: 4, padding: '2px 6px',
+                                       cursor: 'pointer', fontSize: 12 }}>
+                              ↻
+                            </button>
+                            {sess.floorOn && (
+                              <span style={{ position: 'absolute', top: 4, left: 4, background: 'rgba(220,38,38,0.8)',
+                                             color: '#fff', borderRadius: 4, padding: '2px 6px', fontSize: 10 }}>
+                                송신 중
+                              </span>
+                            )}
+                            {/* 화자 오버레이 (비디오 하단) */}
+                            {sess.speaker && (
+                              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0,
+                                            background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
+                                            padding: '16px 10px 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>🎤 {speakerName}</span>
+                                <div className="sp-level-bar" style={{ height: 14, background: 'rgba(255,255,255,0.3)' }}>
+                                  <div className="sp-level-fill"
+                                    style={{ height: `${levelPct}%`, background: levelColor }} />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                      </>)
+                    })()}
+
+                    {/* 멤버 목록 (토글) */}
+                    {isActive && isMembersOpen && sess.members.length > 0 && (
                       <div className="sp-members">
                         <div className="sp-members-head">
                           <span className="sp-mh-pri">우선</span>
@@ -422,18 +530,11 @@ function PttPanel({ sub }: { sub: Subscription }) {
                                 <span className="sp-m-name">
                                   {m.name}{isMe && <span className="sp-me-tag">나</span>}
                                 </span>
-                                <span className="sp-m-id">{m.uri}</span>
+                                <span className="sp-m-id">{fmtPhone(m.uri)}</span>
                               </div>
                               <div className="sp-m-status">
                                 {isSpeaker
-                                  ? <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                      <span className="sp-speaker-badge">🎤</span>
-                                      <div style={{ width: 40, height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
-                                        <div style={{ width: `${Math.min(audioLevel * 300, 100)}%`, height: '100%',
-                                                       background: audioLevel > 0.15 ? '#16a34a' : audioLevel > 0.05 ? '#d97706' : '#d1d5db',
-                                                       borderRadius: 4, transition: 'width 0.1s' }} />
-                                      </div>
-                                    </div>
+                                  ? <span className="sp-speaker-badge">🎤</span>
                                   : <span className="sp-conn-dot"
                                       style={{ background: m.connected ? '#16a34a' : '#d1d5db' }} />}
                               </div>
@@ -443,32 +544,14 @@ function PttPanel({ sub }: { sub: Subscription }) {
                       </div>
                     )}
 
-                    {/* 그룹별 PUSH 버튼 + 볼륨 */}
-                    {isActive && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
-                        <button
-                          className={`sp-push-btn${sess.floorOn ? ' sp-push-btn--on' : ''}`}
-                          onClick={() => handleFloorToggle(g.id)}
-                          style={{ flex: 1 }}>
-                          {sess.floorOn ? '🔴 PUSH (송신 중)' : '⚫ PUSH'}
-                        </button>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 90 }}>
-                          <span style={{ fontSize: 12 }}>🔊</span>
-                          <input type="range" min={0} max={100} value={sess.volume}
-                            onChange={e => handleVolumeChange(g.id, Number(e.target.value))}
-                            style={{ width: 70, accentColor: '#2563eb' }} />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 비활성 그룹 상태 */}
+                    {/* 비활성 그룹 */}
                     {!isActive && (
-                      <div style={{ textAlign: 'center', padding: '4px 0', fontSize: 12, color: '#9ca3af' }}>
-                        착신 대기 중
+                      <div style={{ textAlign: 'center', padding: '4px 0', fontSize: 11, color: '#9ca3af' }}>
+                        대기 중
                       </div>
                     )}
                   </div>
-                )
+                )}
               })
             }
           </div>

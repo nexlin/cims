@@ -113,13 +113,13 @@ public:
     void Insert( CspUser &clsXmlUser );
     bool Load( const char *pszDirName );
     bool LoadFromDb();
-    
+    bool Remove(std::string strUserId);
+    bool ReloadFromDb(std::string strUserId);
 
 private:
     CSP_USER_MAP m_clsMap;
     CSipMutex m_clsMutex;
     bool _loadUserFromFile(std::string strUserId, CspUser &clsUser);
-    
 
     bool _remove(std::string strUserId);
     bool _update(CspUser &clsUser);

@@ -268,6 +268,23 @@ bool CspUserMap::_remove(std::string strUserId) {
     return true;
 }
 
+bool CspUserMap::Remove(std::string strUserId) {
+    return _remove(strUserId);
+}
+
+bool CspUserMap::ReloadFromDb(std::string strUserId) {
+    CspUser clsUser;
+    bool bLoaded = false;
+    if (gclsDbManager.IsConnected()) {
+        bLoaded = gclsDbManager.SelectUser(strUserId, clsUser);
+    }
+    if (bLoaded) {
+        Insert(clsUser);
+        return true;
+    }
+    return false;
+}
+
 static bool ScanUserFiles( const char *pszDirName, std::list<std::string> &clsUserList ) {
     FILE_LIST clsFileList;
     if ( CDirectory::List( pszDirName, clsFileList ) == false ) return false;

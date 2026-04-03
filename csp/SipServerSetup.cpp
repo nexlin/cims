@@ -93,6 +93,12 @@ CSipServerSetup::CSipServerSetup()
       m_strCmpIp( "127.0.0.1" ),
       m_iCmpPort( 9000 ),
       m_iLocalCmpPort( 9001 ),
+      m_bRoleCscf( true ),
+      m_bRoleTas( true ),
+      m_bRolePttAs( true ),
+      m_bRoleIbcf( true ),
+      m_bRecordEnable( false ),
+      m_strRecordDir( "/mnt/nas/cims/recordings" ),
       m_iFileSize( 0 ) {
 }
 
@@ -184,7 +190,23 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
             if (setup.Has("ServiceMode")) {
                 m_strServiceMode = setup.GetString("ServiceMode");
             }
+
+            // IMS 역할 설정 (미지정 시 모두 활성화)
+            if (setup.Has("Roles")) {
+                SimpleJson::JsonNode roles = setup.Get("Roles");
+                if (roles.Has("CSCF"))   m_bRoleCscf   = (roles.GetString("CSCF")   == "true");
+                if (roles.Has("TAS"))    m_bRoleTas    = (roles.GetString("TAS")    == "true");
+                if (roles.Has("PTT_AS")) m_bRolePttAs  = (roles.GetString("PTT_AS") == "true");
+                if (roles.Has("IBCF"))   m_bRoleIbcf   = (roles.GetString("IBCF")   == "true");
+            }
             
+            // 녹취 설정
+            if (setup.Has("Recording")) {
+                SimpleJson::JsonNode rec = setup.Get("Recording");
+                if (rec.Has("Enable")) m_bRecordEnable = (rec.GetString("Enable") == "true");
+                if (rec.Has("Dir"))    m_strRecordDir  = rec.GetString("Dir");
+            }
+
             if (setup.Has("Cdr")) {
                 SimpleJson::JsonNode cdr = setup.Get("Cdr");
                 if (cdr.Has("Folder")) m_strCdrFolder = cdr.GetString("Folder");

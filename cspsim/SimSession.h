@@ -39,6 +39,7 @@ struct SimStats {
     std::atomic<int> iGmsOk{0};       // GMS SUBSCRIBE 성공
     std::atomic<int> iCmsOk{0};       // CMS SUBSCRIBE 성공
     std::atomic<int> iNotifyRecv{0};  // NOTIFY 수신 횟수
+    std::atomic<int> iConfNotify{0};  // Conference NOTIFY 수신 횟수
     std::atomic<int> iCallOk{0};      // 통화 성공 (CallStart 이벤트)
     std::atomic<int> iCallFail{0};    // 통화 실패
     std::atomic<int> iCallEnd{0};     // 통화 종료

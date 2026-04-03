@@ -6,33 +6,13 @@
 #include "CspUser.h"
 #include "DbManager.h"
 #include "SipServerSetup.h"
+#include "CscfModule.h"
+#include "ModuleDispatcher.h"
+#include "CspSipServer.h"
 
 
 bool CSipServer::CheckAuthrization( CSipMessage *pclsMessage ) {
-    SIP_CREDENTIAL_LIST::iterator itCL = pclsMessage->m_clsAuthorizationList.begin();
-
-    if ( itCL == pclsMessage->m_clsAuthorizationList.end() ) {
-        SendUnAuthorizedResponse( pclsMessage );
-        return false;
-    }
-
-    CspUser clsUser;
-
-    ECheckAuthResult eRes = CheckAuthorization( &( *itCL ), pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), pclsMessage->m_strSipMethod.c_str(), clsUser );
-    switch ( eRes ) {
-        case E_AUTH_NONCE_NOT_FOUND:
-            SendUnAuthorizedResponse( pclsMessage );
-            return false;
-        case E_AUTH_ERROR:
-            SendResponse( pclsMessage, SIP_FORBIDDEN );
-            return false;
-        default:
-            break;
-    }
-
-    gclsUserMap.Insert( pclsMessage, NULL, &clsUser );
-
-    return true;
+    return CCscfModule::CheckAuthrization( pclsMessage );
 }
 
 /**
@@ -132,39 +112,33 @@ bool CSipServer::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
  */
 void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                     CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
-    // Converted printf to CLog (matches line 139 roughly but keeping for trace)
     CLog::Print( LOG_DEBUG, "EventIncomingCall: CallId=%s From=%s To=%s", pszCallId, pszFrom, pszTo );
     CspUser clsUser;
     CUserInfo clsUserInfo;
     bool bRoutePrefix = false;
     std::string strTo;
 
-    CLog::Print( LOG_DEBUG, "EventIncomingCall(%s,%s,%s)", pszCallId, pszFrom, pszTo );
-
     if ( strlen( pszTo ) == 0 ) {
         CLog::Print( LOG_DEBUG, "EventIncomingCall to(%s) is not defined", pszTo );
         return StopCall( pszCallId, SIP_DECLINE );
     }
 
-    // ── Service mode / service_type enforcement ──────────────────────
+    // ── 모듈 라우팅 ──────────────────────────────────────────
+
+    // 1. PTT-AS: 그룹 번호 대상
+    if ( gclsDispatcher.GetPttAs()->IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
+        // 단말 직접 그룹 INVITE는 거부 (CSP가 그룹 세션을 관리)
+        CLog::Print( LOG_INFO, "EventIncomingCall: PTT terminal(%s) sent INVITE to group(%s) - rejected 403", pszFrom, pszTo );
+        gclsDispatcher.SetCallOwner( pszCallId, gclsDispatcher.GetPttAs() );
+        return StopCall( pszCallId, SIP_FORBIDDEN );
+    }
+
+    // 서비스 모드 체크
     {
-        // Look up caller's service type (file-based map or auth cache)
         CspUser clsFromUser;
         bool bFromKnown = gclsCspUserMap.isAlive( pszFrom, clsFromUser );
-
-        // Check if destination is a group (PTT call)
-        bool bToGroup = gclsGroupMap.Contains( pszTo );
-
         const std::string& mode = gclsSetup.m_strServiceMode;
 
-        if ( bToGroup ) {
-            // PTT group call: terminal originated INVITE to a group is NOT allowed
-            // (CSP initiates group sessions via CheckGroupIntegrity)
-            CLog::Print( LOG_INFO, "EventIncomingCall: PTT terminal(%s) sent INVITE to group(%s) - rejected 403", pszFrom, pszTo );
-            return StopCall( pszCallId, SIP_FORBIDDEN );
-        }
-
-        // VoIP call: check mode and caller service_type
         if ( mode == "ptt" ) {
             CLog::Print( LOG_INFO, "EventIncomingCall: VoIP call rejected (ServiceMode=ptt)" );
             return StopCall( pszCallId, SIP_FORBIDDEN );
@@ -175,43 +149,25 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
         }
     }
 
-    //
     if ( gclsCspUserMap.isAlive( pszTo, clsUser ) == false ) {
-        // Check if it is a Group Call (reached here only if group check above allowed it)
+        // 2. PTT-AS: 그룹콜 (비등록 대상)
         CspPttGroup clsGroup;
-        if ( gclsGroupMap.Select( pszTo, clsGroup ) ) {
-             CLog::Print( LOG_DEBUG, "EventIncomingCall to(%s) is Group(%s)", pszTo, clsGroup._name.c_str() );
-             CSipCallRoute clsRouteTemp;
-             clsUserInfo.GetCallRoute( clsRouteTemp );
+        if ( gclsDispatcher.GetPttAs()->IsEnabled() && gclsGroupMap.Select( pszTo, clsGroup ) ) {
+            CLog::Print( LOG_DEBUG, "EventIncomingCall to(%s) is Group(%s)", pszTo, clsGroup._name.c_str() );
+            CSipCallRoute clsRouteTemp;
+            clsUserInfo.GetCallRoute( clsRouteTemp );
 
-             if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsRouteTemp ) ) {
-                 // RoutePrefix check logic below might be redundant or needed for other cases?
-                 // Original logic fell through. ProcessGroupCall returns true if handled?
-                 // If ProcessGroupCall initiates actions, we should return?
-                 // Checking ProcessGroupCall return type: bool.
-                 // Assuming true means handled.
-                 return;
-             }
+            if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsRouteTemp ) ) {
+                gclsDispatcher.SetCallOwner( pszCallId, gclsDispatcher.GetPttAs() );
+                return;
+            }
         }
-
-        // [GROUP CALL HOOK]
-        /*
-        CSipCallRoute clsRouteTemp; 
-        // clsUserInfo is empty here so GetCallRoute might just result in defaults.
-        clsUserInfo.GetCallRoute( clsRouteTemp );
-        
-        // Pass route
-        if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsRouteTemp ) ) {
-             return;
-        }
-        */
 
         CLog::Print( LOG_DEBUG, "## 1 EventIncomingCall: CallId=%s From=%s To=%s", pszCallId, pszFrom, pszTo );
 
+        // 3. IBCF: 트렁크 라우팅
         CspSipServer clsSipServer;
-
-        // 로그인 대상 사용자가 아니면 연동할 IP-PBX 가 존재하는지 검사한다.
-        if ( gclsSipServerMap.SelectRoutePrefix( pszTo, clsSipServer, strTo ) ) {
+        if ( gclsDispatcher.GetIbcf()->IsEnabled() && gclsSipServerMap.SelectRoutePrefix( pszTo, clsSipServer, strTo ) ) {
             clsUser.m_strId = clsSipServer.m_strUserId;
             clsUser.m_strPassWord = clsSipServer.m_strPassWord;
 
@@ -223,33 +179,39 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
             pszTo = strTo.c_str();
 
             bRoutePrefix = true;
-            CLog::Print( LOG_DEBUG, "EventIncomingCall routePrefix IP-PBX(%s:%d)", clsUserInfo.m_strIp.c_str(),
+            gclsDispatcher.SetCallOwner( pszCallId, gclsDispatcher.GetIbcf() );
+            CLog::Print( LOG_DEBUG, "EventIncomingCall routePrefix IP-PBX(%s:%d) [IBCF]", clsUserInfo.m_strIp.c_str(),
                          clsUserInfo.m_iPort );
-        } else if ( gclsSipServerMap.SelectIncomingRoute( NULL, pszTo, strTo ) ) {
+        } else if ( gclsDispatcher.GetIbcf()->IsEnabled() && gclsSipServerMap.SelectIncomingRoute( NULL, pszTo, strTo ) ) {
             if ( gclsCspUserMap.isAlive( strTo, clsUser ) == false ) {
                 CLog::Print( LOG_DEBUG, "EventIncomingCall from(%s) to(%s) is not found - dest to(%s)", pszFrom, pszTo, strTo.c_str() );
                 return StopCall( pszCallId, SIP_NOT_FOUND );
             }
+            gclsDispatcher.SetCallOwner( pszCallId, gclsDispatcher.GetIbcf() );
         } else if ( gclsSetup.IsCallPickupId( pszTo ) ) {
+            // 4. TAS: 콜픽업
+            gclsDispatcher.SetCallOwner( pszCallId, gclsDispatcher.GetTas() );
             return PickUp( pszCallId, pszFrom, pszTo, pclsRtp );
         } else {
             CLog::Print( LOG_DEBUG, "EventIncomingCall from(%s) to(%s) is not found in XML or DB", pszFrom, pszTo );
             return StopCall( pszCallId, SIP_NOT_FOUND );
         }
     }
-    //CLog::Print( LOG_DEBUG, "EventIncomingCall from(%s) to(%s)", pszFrom, pszTo );
+
+    // 5. TAS: 서비스 로직 (DND, 착신전환, 착신거부)
+    if ( gclsDispatcher.GetCallOwner( pszCallId ) == NULL ) {
+        gclsDispatcher.SetCallOwner( pszCallId, gclsDispatcher.GetTas() );
+    }
 
     if ( clsUser.isDnd() || clsUser.isReject(pszFrom) ) {
-        // 사용자가 DND 또는 거부 설정되어 있으면 통화 요청을 거절한다.
-        CLog::Print( LOG_DEBUG, "EventIncomingCall from(%s) to(%s) is DND or Reject", pszFrom, pszTo );
+        CLog::Print( LOG_DEBUG, "EventIncomingCall from(%s) to(%s) is DND or Reject [TAS]", pszFrom, pszTo );
         return StopCall( pszCallId, SIP_DECLINE );
     }
 
     if ( clsUser.isCallForward() ) {
-        CLog::Print( LOG_DEBUG, "EventIncomingCall from(%s) to(%s) is CallForward(%s)", pszFrom, pszTo,
+        CLog::Print( LOG_DEBUG, "EventIncomingCall from(%s) to(%s) is CallForward(%s) [TAS]", pszFrom, pszTo,
                      clsUser.m_strForward.c_str() );
 
-        // 사용자가 착신전환 설정되어 있으면 착신전환 처리한다.
         CSipMessage *pclsInvite = gclsUserAgent.DeleteIncomingCall( pszCallId );
         if ( pclsInvite ) {
             CSipMessage *pclsResponse = pclsInvite->CreateResponseWithToTag( SIP_MOVED_TEMPORARILY );
@@ -273,6 +235,8 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
         return StopCall( pszCallId, SIP_MOVED_TEMPORARILY );
     }
 
+    // ── B2BUA 호 설정 (TAS/IBCF 공통) ──────────────────────
+
     if ( bRoutePrefix == false ) {
         CLog::Print( LOG_DEBUG, "## 5 EventIncomingCall: CallId=%s From=%s To=%s", pszCallId, pszFrom, pszTo );
         if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) {
@@ -291,27 +255,24 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
             return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
         }
 
-        // [FIX] Update CMP with Caller Info (Peer A)
-        // Replaced unsafe Select with thread-safe SetIpPort calls
         CLog::Print( LOG_DEBUG, "EventIncomingCall: Update Caller Info (Peer A) for Port %d", iStartPort );
-             
-        // Video (Index 2)
+
         if (pclsRtp->GetMediaCount() >= 2) {
              int iVideoPort = pclsRtp->GetVideoPort();
              if (iVideoPort > 0) {
                   gclsRtpMap.SetIpPort(iStartPort, 2, inet_addr(pclsRtp->m_strIp.c_str()), iVideoPort);
              }
         }
-             
+
         int iAudioPort = pclsRtp->GetAudioPort();
         if (iAudioPort <= 0 && pclsRtp->m_iPort > 0) {
              iAudioPort = pclsRtp->m_iPort;
         }
-             
+
         if (iAudioPort > 0) {
              gclsRtpMap.SetIpPort(iStartPort, 0, inet_addr(pclsRtp->m_strIp.c_str()), iAudioPort);
         }
-        
+
         std::string strRelayIp = gclsSetup.m_strLocalIp;
         std::string strAllocatedIp;
         if (gclsRtpMap.GetLocalIp(iStartPort, strAllocatedIp) && !strAllocatedIp.empty()) {
@@ -333,6 +294,8 @@ void CSipServer::EventIncomingCall( const char *pszCallId, const char *pszFrom, 
     }
 
     gclsCallMap.Insert( pszCallId, strCallId.c_str(), iStartPort );
+    // Peer CallId 에도 동일한 소유권 설정
+    gclsDispatcher.SetCallOwner( strCallId.c_str(), gclsDispatcher.GetCallOwner( pszCallId ) );
 
     if ( gclsUserAgent.StartCall( strCallId.c_str(), pclsInvite ) == false ) {
         gclsCallMap.Delete( pszCallId );
@@ -502,16 +465,14 @@ void CSipServer::EventCallEnd( const char *pszCallId, int iSipStatus ) {
         }
 
         gclsUserAgent.StopCall( clsCallInfo.m_strPeerCallId.c_str() );
-        
-        // [GROUP CALL RECOVERY]
-        // OnCallTerminated returns true if it handled cleanup (Group Call). 
-        // If true, we keep the port (handled by GroupService ref/shared logic).
-        // Wait, for Shared Session, we NEVER delete the port via CallMap.
-        // GroupService manages it.
-        // So if OnCallTerminated returns true, we pass FALSE to bStopPort.
+
         bool bIsGroup = gclsGroupCallService.OnCallTerminated( pszCallId );
-        
+
         gclsCallMap.Delete( pszCallId, !bIsGroup );
+
+        // 콜 소유권 정리
+        gclsDispatcher.RemoveCallOwner( pszCallId );
+        gclsDispatcher.RemoveCallOwner( clsCallInfo.m_strPeerCallId.c_str() );
     } else {
         std::string strCallId;
 
@@ -519,6 +480,8 @@ void CSipServer::EventCallEnd( const char *pszCallId, int iSipStatus ) {
             gclsUserAgent.SendNotify( strCallId.c_str(), iSipStatus );
             gclsTransCallMap.Delete( pszCallId );
         }
+
+        gclsDispatcher.RemoveCallOwner( pszCallId );
     }
 }
 
