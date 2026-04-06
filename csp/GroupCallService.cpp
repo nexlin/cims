@@ -12,6 +12,7 @@
 #include "CmpClient.h"
 #include "RtpMap.h"
 #include "UserMap.h"
+#include "RecordPath.h"
 #include "SipServerSetup.h"
 #include "CspPttGroup.h"
 #include "SipMessage.h"
@@ -52,6 +53,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     int iSharedPort = -1;
     int iSharedVideoPort = 0;
     std::string strSharedIp;
+    std::string strRecordDir;  // 녹취 경로 (CSP가 결정)
     {
         std::unique_lock<std::recursive_mutex> lock(m_mutex);
         if ( m_mapGroupRtp.find(pszGroupId) != m_mapGroupRtp.end() &&
@@ -62,7 +64,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
     }
     if ( iSharedPort <= 0 ) {
-        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort ) ) {
+        if ( gclsSetup.m_bRecordEnable ) {
+            strRecordDir = CRecordPath::BuildPttDir(
+                gclsSetup.m_strRecordDir, pszCallerInfo, pszGroupId);
+        }
+        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir ) ) {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
             m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
         }
@@ -97,7 +103,13 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         // [CALL LOG] PTT 그룹 세션 기록
         if ( gclsDbManager.IsConnected() ) {
             gclsDbManager.InsertCallLog( pszCallId, true, pszGroupId, pszCallerInfo, pszGroupId );
-            gclsDbManager.InsertParticipant( pszCallId, pszCallerInfo, "caller", true );
+            gclsDbManager.InsertGroupParticipant( pszGroupId, pszCallerInfo );
+            gclsDbManager.UpdateParticipantJoined( pszGroupId, pszCallerInfo );
+            // 녹취 DB 레코드 삽입
+            if ( gclsSetup.m_bRecordEnable && !strRecordDir.empty() ) {
+                gclsDbManager.InsertRecording( pszCallId, "ptt", pszGroupId,
+                    pszCallerInfo, pszGroupId, strRecordDir, false );
+            }
         }
     } else {
         CLog::Print( LOG_ERROR, "ProcessGroupCall: No shared RTP port for Group(%s)", pszGroupId );
@@ -118,13 +130,14 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
 void CGroupCallService::ClearUserCall( const std::string& strUserId )
 {
     std::string strGroupId, strSessionId;
+    bool bStillActive = false;
     {
         std::unique_lock<std::recursive_mutex> lock(m_mutex);
         auto it = m_mapUserCall.find(strUserId);
         if ( it == m_mapUserCall.end() ) return;
 
         std::string strCallId = it->second;
-        CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing stale callId=%s before re-invite",
+        CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing stale callId=%s",
                      strUserId.c_str(), strCallId.c_str() );
 
         auto itSess = m_mapCallSession.find(strCallId);
@@ -134,10 +147,29 @@ void CGroupCallService::ClearUserCall( const std::string& strUserId )
             m_mapCallSession.erase(itSess);
         }
         m_mapUserCall.erase(it);
+
+        // 해당 그룹에 아직 다른 멤버가 남아있는지 확인
+        for ( const auto& kv : m_mapCallSession ) {
+            if ( kv.second.strGroupId == strGroupId ) { bStillActive = true; break; }
+        }
+        if ( !bStillActive && !strGroupId.empty() ) {
+            auto itRtp = m_mapGroupRtp.find(strGroupId);
+            if ( itRtp != m_mapGroupRtp.end() ) {
+                itRtp->second.strSessionCallId.clear();
+            }
+        }
     }
-    // lock 해제 후 CMP 호출
-    if ( !strGroupId.empty() )
+    // lock 해제 후 CMP/DB 호출
+    if ( !strGroupId.empty() ) {
         gclsCmpClient.LeaveGroup( strGroupId, strSessionId );
+
+        if ( gclsDbManager.IsConnected() ) {
+            gclsDbManager.UpdateParticipantLeft( strGroupId, strUserId );
+            if ( !bStillActive ) {
+                gclsDbManager.EndGroupCallLog( strGroupId );
+            }
+        }
+    }
 }
 
 /**
@@ -216,7 +248,12 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         // Try to allocate now
         CspPttGroup clsGroup;
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
-            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort ) ) {
+            std::string strRecordDir;
+            if ( gclsSetup.m_bRecordEnable ) {
+                strRecordDir = CRecordPath::BuildPttDir(
+                    gclsSetup.m_strRecordDir, pszUserId, pszGroupId);
+            }
+            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir ) ) {
                  bVideoEnabled = clsGroup._videoEnabled;
                  m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled, 0 };
             } else {
@@ -315,6 +352,14 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
 
          // [CALL LOG] PTT 멤버 초대 기록 (join_time은 OnCallStarted에서 설정)
          if ( gclsDbManager.IsConnected() ) {
+             // auto-join 시 해당 그룹에 활성 call log가 없으면 자동 생성
+             if ( !gclsDbManager.HasActiveGroupCall( pszGroupId ) ) {
+                 std::string strAutoCallId = "csp-autojoin-" + std::string(pszGroupId)
+                                             + "-" + std::to_string((long long)time(NULL));
+                 gclsDbManager.InsertCallLog( strAutoCallId.c_str(), true,
+                                              pszGroupId, "CSP", pszGroupId );
+                 gclsDbManager.UpdateCallLogActivePtt( pszGroupId );
+             }
              gclsDbManager.InsertGroupParticipant( pszGroupId, pszUserId );
          }
     } else {

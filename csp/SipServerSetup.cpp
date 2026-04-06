@@ -85,6 +85,7 @@ CSipServerSetup::CSipServerSetup()
       m_iSendOptionsPeriod( 0 ),
       m_bUseRegisterSession( false ),
       m_iUserTimeout( 3600 ),
+      m_iStaleCallTimeout( 300 ),
       m_iDbPort( 3306 ),
       m_strServiceMode( "both" ),
       m_iLogLevel( 0 ),
@@ -146,6 +147,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (sip.Has("CallPickupId")) m_strCallPickupId = sip.GetString("CallPickupId");
                 if (sip.Has("StackExecutePeriod")) m_iStackExecutePeriod = (int)sip.GetInt("StackExecutePeriod");
                 if (sip.Has("UserTimeout")) m_iUserTimeout = (int)sip.GetInt("UserTimeout");
+                if (sip.Has("StaleCallTimeout")) m_iStaleCallTimeout = (int)sip.GetInt("StaleCallTimeout");
+                if (sip.Has("SendOptionsPeriod")) m_iSendOptionsPeriod = (int)sip.GetInt("SendOptionsPeriod");
             }
 
             if (setup.Has("RtpRelay")) {

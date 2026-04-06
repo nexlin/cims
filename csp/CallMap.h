@@ -42,6 +42,9 @@ public:
 
     /** 상대 SIP 클라이언트와 연동하는 RTP relay 포트 번호. RTP relay 기능을 사용하지 않으면 -1 이 저장된다. */
     int m_iPeerRtpPort;
+
+    /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
+    time_t m_iLastActivityTime;
 };
 
 /**
@@ -69,6 +72,7 @@ public:
     bool Delete( const char *pszCallId, bool bStopPort = true );
     bool DeleteOne( const char *pszCallId );
 
+    void DeleteTimeout( int iTimeoutSec );
     void StopCallAll();
     int GetCount();
 

@@ -259,6 +259,11 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
 
     // 메시지 로깅
     if (gclsMsgLogger.IsEnabled() && !strCallId.empty()) {
+        // caller/callee 정보 등록 (최초 1회 캐시)
+        gclsMsgLogger.SetCallInfo(strCallId.c_str(),
+            pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(),
+            pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str());
+
         const char* pszFrom = "ue";
         if (!pclsMessage->m_clsViaList.empty() && pclsMessage->m_clsViaList.front().m_iPort == 5062)
             pszFrom = "cwrtc";

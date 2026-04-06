@@ -24,6 +24,126 @@ from util.pi_http.http_handler import HandlerArgs, HandlerResult
 _transcoding_locks = {}
 _transcoding_mutex = threading.Lock()
 
+import struct
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _strip_rtp_to_amrwb(raw_rtp_path: str, out_amr_path: str) -> bool:
+    """raw RTP 파일에서 RTP 헤더를 제거하고 AMR-WB payload만 추출한다.
+
+    raw 파일 형식: [uint32_t len][RTP packet][uint32_t len][RTP packet]...
+    AMR-WB RTP payload (RFC 4867 octet-aligned):
+      [CMR 1byte][ToC 1byte][frame data]
+    출력: AMR-WB 파일 헤더("#!AMR-WB\\n") + frame data 연속
+    """
+    try:
+        with open(raw_rtp_path, 'rb') as fin, open(out_amr_path, 'wb') as fout:
+            fout.write(b'#!AMR-WB\n')
+            while True:
+                lenbuf = fin.read(4)
+                if len(lenbuf) < 4:
+                    break
+                pkt_len = struct.unpack('<I', lenbuf)[0]
+                pkt = fin.read(pkt_len)
+                if len(pkt) < pkt_len:
+                    break
+                if pkt_len < 12:
+                    continue  # too short for RTP
+                # RTP 헤더 파싱: V(2)+P(1)+X(1)+CC(4) = 1byte, PT 1byte, seq 2, ts 4, ssrc 4
+                cc = pkt[0] & 0x0F
+                has_ext = (pkt[0] >> 4) & 0x01
+                hdr_len = 12 + cc * 4
+                if has_ext and hdr_len + 4 <= pkt_len:
+                    ext_len = struct.unpack_from('>H', pkt, hdr_len + 2)[0]
+                    hdr_len += 4 + ext_len * 4
+                if hdr_len >= pkt_len:
+                    continue
+                payload = pkt[hdr_len:]
+                # AMR-WB RTP payload: CMR(1) + ToC(1) + frame_data
+                if len(payload) > 2:
+                    toc = payload[1]
+                    ft = (toc >> 3) & 0x0F
+                    # AMR-WB frame type → ToC byte for .amr file: F(1)+FT(4)+Q(1)+pad(2)
+                    amr_toc = 0x04 | (ft << 3) | ((toc >> 2) & 0x01) << 2
+                    fout.write(bytes([amr_toc]))
+                    fout.write(payload[2:])  # frame data (without CMR and RTP ToC)
+        return os.path.exists(out_amr_path) and os.path.getsize(out_amr_path) > 9
+    except Exception as e:
+        logger.error("_strip_rtp_to_amrwb error: %s", e)
+        return False
+
+
+def _strip_rtp_to_h264(raw_rtp_path: str, out_h264_path: str) -> bool:
+    """raw RTP 파일에서 RTP 헤더를 제거하고 H.264 Annex-B NAL 스트림을 추출한다.
+
+    H.264 RTP (RFC 6184): Single NAL / FU-A fragmentation 처리
+    출력: [00 00 00 01][NAL unit]... (Annex-B 형식)
+    """
+    START_CODE = b'\x00\x00\x00\x01'
+    fu_buffer = bytearray()
+    fu_nal_hdr = 0
+
+    try:
+        with open(raw_rtp_path, 'rb') as fin, open(out_h264_path, 'wb') as fout:
+            while True:
+                lenbuf = fin.read(4)
+                if len(lenbuf) < 4:
+                    break
+                pkt_len = struct.unpack('<I', lenbuf)[0]
+                pkt = fin.read(pkt_len)
+                if len(pkt) < pkt_len or pkt_len < 12:
+                    continue
+                cc = pkt[0] & 0x0F
+                has_ext = (pkt[0] >> 4) & 0x01
+                hdr_len = 12 + cc * 4
+                if has_ext and hdr_len + 4 <= pkt_len:
+                    ext_len = struct.unpack_from('>H', pkt, hdr_len + 2)[0]
+                    hdr_len += 4 + ext_len * 4
+                if hdr_len >= pkt_len:
+                    continue
+                payload = pkt[hdr_len:]
+                if len(payload) < 1:
+                    continue
+
+                nal_type = payload[0] & 0x1F
+                if nal_type >= 1 and nal_type <= 23:
+                    # Single NAL unit
+                    fout.write(START_CODE + payload)
+                elif nal_type == 28:
+                    # FU-A: fragmented NAL
+                    if len(payload) < 2:
+                        continue
+                    fu_indicator = payload[0]
+                    fu_header = payload[1]
+                    start = (fu_header >> 7) & 1
+                    end = (fu_header >> 6) & 1
+                    nal_t = fu_header & 0x1F
+
+                    if start:
+                        fu_nal_hdr = (fu_indicator & 0xE0) | nal_t
+                        fu_buffer = bytearray([fu_nal_hdr])
+                        fu_buffer.extend(payload[2:])
+                    else:
+                        fu_buffer.extend(payload[2:])
+
+                    if end and fu_buffer:
+                        fout.write(START_CODE + bytes(fu_buffer))
+                        fu_buffer = bytearray()
+                elif nal_type == 24:
+                    # STAP-A: aggregated NALs
+                    off = 1
+                    while off + 2 <= len(payload):
+                        nal_sz = struct.unpack_from('>H', payload, off)[0]
+                        off += 2
+                        if off + nal_sz <= len(payload):
+                            fout.write(START_CODE + payload[off:off+nal_sz])
+                        off += nal_sz
+        return os.path.exists(out_h264_path) and os.path.getsize(out_h264_path) > 4
+    except Exception as e:
+        logger.error("_strip_rtp_to_h264 error: %s", e)
+        return False
+
 
 def _get_db(config: dict):
     db = config.get('CimsDatabase', {})
@@ -85,33 +205,76 @@ def _transcode_recording(rec_id: int, config: dict):
     raw_b = rec.get('raw_path_b', '')
     has_video = rec.get('has_video', 0)
 
-    # 출력 디렉터리
-    from datetime import datetime
-    dt = rec['start_time'] or datetime.now()
-    out_dir = os.path.join(rec_cfg['converted_dir'], 'voip',
-                           dt.strftime('%Y'), dt.strftime('%m'), dt.strftime('%d'))
+    # 출력 디렉터리: raw 파일과 같은 폴더에 저장
+    out_dir = os.path.dirname(raw_a) if raw_a else rec_cfg.get('converted_dir', '/tmp')
     os.makedirs(out_dir, exist_ok=True)
 
-    call_id = rec['call_id']
-    audio_path = os.path.join(out_dir, f"{call_id}.mp3")
+    audio_path = None
     success = True
     file_size = 0
 
     try:
-        # 음성 변환: raw RTP → MP3
-        # raw 파일 형식이 [4-byte len][RTP packet]... 이므로 payload 추출 필요
-        # 간단한 접근: raw 파일을 그대로 ffmpeg에 전달하되, 실패하면 raw 보존
-        if raw_a and os.path.exists(raw_a):
-            ret = subprocess.run(
-                ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                 '-f', 'amr', '-i', raw_a,
-                 '-ar', '16000', '-ac', '1', audio_path],
-                capture_output=True, timeout=300
-            )
-            if ret.returncode != 0:
-                # raw 형식 직접 변환 실패 시 — raw 파일 경로만 보존
-                audio_path = raw_a
-                success = True  # raw 파일이라도 있으면 OK
+        video_path_a = None
+        video_path_b = None
+
+        for side, raw_audio, raw_video in [
+            ('a', raw_a, rec.get('raw_path_va', '')),
+            ('b', raw_b, rec.get('raw_path_vb', '')),
+        ]:
+            if not raw_audio or not os.path.exists(raw_audio):
+                continue
+
+            amr_tmp = raw_audio + '.amr'
+            has_video_side = (raw_video and os.path.exists(raw_video)
+                              and os.path.getsize(raw_video) > 0)
+
+            if has_video_side:
+                # audio + video → MP4 muxing
+                h264_tmp = raw_video + '.h264'
+                mp4_out = os.path.join(out_dir, f"recording_{side}.mp4")
+
+                amr_ok = _strip_rtp_to_amrwb(raw_audio, amr_tmp)
+                h264_ok = _strip_rtp_to_h264(raw_video, h264_tmp)
+
+                if amr_ok and h264_ok:
+                    ret = subprocess.run(
+                        ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                         '-i', amr_tmp, '-f', 'h264', '-i', h264_tmp,
+                         '-c:a', 'aac', '-ar', '16000', '-ac', '1',
+                         '-c:v', 'copy', '-movflags', '+faststart', mp4_out],
+                        capture_output=True, timeout=300
+                    )
+                    if ret.returncode == 0:
+                        if side == 'a':
+                            video_path_a = mp4_out
+                            audio_path = mp4_out
+                        else:
+                            video_path_b = mp4_out
+                    else:
+                        logger.warning("ffmpeg mux(%s) failed: %s", side, ret.stderr.decode(errors='replace'))
+                for tmp in [amr_tmp, h264_tmp]:
+                    try: os.remove(tmp)
+                    except: pass
+            else:
+                # audio only → WAV (LPCM 16kHz mono 16bit)
+                wav_out = os.path.join(out_dir, f"recording_{side}.wav")
+                if _strip_rtp_to_amrwb(raw_audio, amr_tmp):
+                    ret = subprocess.run(
+                        ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                         '-i', amr_tmp,
+                         '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav_out],
+                        capture_output=True, timeout=300
+                    )
+                    if ret.returncode == 0:
+                        if side == 'a' and audio_path is None:
+                            audio_path = wav_out
+                    else:
+                        logger.warning("ffmpeg wav(%s) failed: %s", side, ret.stderr.decode(errors='replace'))
+                try: os.remove(amr_tmp)
+                except: pass
+
+        if not audio_path:
+            audio_path = raw_a  # fallback
 
         if os.path.exists(audio_path):
             file_size = os.path.getsize(audio_path)
@@ -119,8 +282,9 @@ def _transcode_recording(rec_id: int, config: dict):
         with _get_db(config) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE recordings SET status='ready', audio_path=%s, file_size=%s WHERE id=%s",
-                    (audio_path, file_size, rec_id)
+                    "UPDATE recordings SET status='ready', audio_path=%s, "
+                    "video_path_a=%s, video_path_b=%s, file_size=%s WHERE id=%s",
+                    (audio_path, video_path_a, video_path_b, file_size, rec_id)
                 )
     except Exception as e:
         with _get_db(config) as conn:
@@ -154,26 +318,55 @@ def _transcode_segment(rec_id: int, seq: int, config: dict):
             )
 
     raw_audio = seg.get('raw_audio_path', '')
-    group_id = seg.get('group_id', 'unknown')
+    raw_video = seg.get('raw_video_path', '')
+    has_video_seg = seg.get('has_video', 0) and raw_video and os.path.exists(raw_video) and os.path.getsize(raw_video) > 0
 
-    from datetime import datetime
-    dt = seg.get('rec_start') or datetime.now()
-    out_dir = os.path.join(rec_cfg['converted_dir'], 'ptt', group_id,
-                           dt.strftime('%Y'), dt.strftime('%m'), dt.strftime('%d'))
+    # 출력: raw 파일과 같은 폴더에 저장
+    out_dir = os.path.dirname(raw_audio) if raw_audio else '/tmp'
     os.makedirs(out_dir, exist_ok=True)
 
-    out_path = os.path.join(out_dir, f"seg_{seq:04d}.mp3")
+    if has_video_seg:
+        out_path = os.path.join(out_dir, f"seg_{seq:04d}.mp4")
+    else:
+        out_path = os.path.join(out_dir, f"seg_{seq:04d}.wav")
 
     try:
         if raw_audio and os.path.exists(raw_audio):
-            ret = subprocess.run(
-                ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                 '-f', 'amr', '-i', raw_audio,
-                 '-ar', '16000', '-ac', '1', out_path],
-                capture_output=True, timeout=120
-            )
-            if ret.returncode != 0:
-                out_path = raw_audio
+            amr_tmp = raw_audio + '.amr'
+
+            if has_video_seg:
+                # audio + video → MP4 muxing
+                h264_tmp = raw_video + '.h264'
+                amr_ok = _strip_rtp_to_amrwb(raw_audio, amr_tmp)
+                h264_ok = _strip_rtp_to_h264(raw_video, h264_tmp)
+                if amr_ok and h264_ok:
+                    ret = subprocess.run(
+                        ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                         '-i', amr_tmp, '-f', 'h264', '-i', h264_tmp,
+                         '-c:a', 'aac', '-ar', '16000', '-ac', '1',
+                         '-c:v', 'copy', '-movflags', '+faststart', out_path],
+                        capture_output=True, timeout=120
+                    )
+                    if ret.returncode != 0:
+                        out_path = raw_audio
+                for tmp in [amr_tmp, h264_tmp]:
+                    try: os.remove(tmp)
+                    except: pass
+            else:
+                # audio only → WAV (LPCM 16kHz mono 16bit)
+                if _strip_rtp_to_amrwb(raw_audio, amr_tmp):
+                    ret = subprocess.run(
+                        ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                         '-i', amr_tmp,
+                         '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', out_path],
+                        capture_output=True, timeout=120
+                    )
+                    if ret.returncode != 0:
+                        out_path = raw_audio
+                    try: os.remove(amr_tmp)
+                    except: pass
+                else:
+                    out_path = raw_audio
 
         file_size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
 
@@ -428,8 +621,9 @@ async def _stream_audio(rec_id, config):
     if not path or not os.path.exists(path):
         return HandlerResult(status=404, body={'error': 'Audio file not found'})
 
+    ct = 'audio/wav' if path.endswith('.wav') else 'audio/mpeg'
     return HandlerResult(status=200, body=path, headers={
-        'Content-Type': 'audio/mpeg', 'X-File-Path': path
+        'Content-Type': ct, 'X-File-Path': path
     })
 
 
@@ -497,7 +691,9 @@ async def _stream_segment(rec_id, seq, config):
             if row['has_video'] and row['video_path'] and os.path.exists(row['video_path']):
                 path, ct = row['video_path'], 'video/mp4'
             else:
-                path, ct = row['audio_path'], 'audio/mpeg'
+                ap = row['audio_path'] or ''
+                ct = 'audio/wav' if ap.endswith('.wav') else 'audio/mpeg'
+                path = ap
 
     if not path or not os.path.exists(path):
         return HandlerResult(status=404, body={'error': 'File not found'})

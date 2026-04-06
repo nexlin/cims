@@ -223,10 +223,15 @@ bool CCscfModule::RecvRequestRegister(int iThreadId, CSipMessage* pclsMessage) {
 
     // UNREGISTER
     if (pclsMessage->GetExpires() == 0) {
-        gclsUserMap.Delete(pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str());
+        std::string strUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+        gclsUserMap.Delete(strUserId.c_str());
+        // DB logout_time 갱신 + CspUserMap 캐시 업데이트
+        gclsCspUserMap.unregisterUser(strUserId);
+        // PTT 그룹콜 세션 정리 (활성 호 있으면 BYE + DB 갱신)
+        gclsGroupCallService.ClearUserCall(strUserId);
         SendResponse(pclsMessage, SIP_OK);
         CLog::Print(LOG_INFO, "RecvRequestRegister: user(%s) unregistered",
-                    pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str());
+                    strUserId.c_str());
         return true;
     }
 

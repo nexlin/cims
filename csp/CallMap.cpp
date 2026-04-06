@@ -26,7 +26,8 @@
 CCallMap gclsCallMap;
 CCallMap gclsTransCallMap;
 
-CCallInfo::CCallInfo() : m_bRecv( false ), m_iPeerRtpPort( -1 ) {
+CCallInfo::CCallInfo() : m_bRecv( false ), m_iPeerRtpPort( -1 ), m_iLastActivityTime( 0 ) {
+    time( &m_iLastActivityTime );
 }
 
 CCallMap::CCallMap() {
@@ -249,6 +250,34 @@ bool CCallMap::DeleteOne( const char *pszCallId ) {
     }
     m_clsMutex.release();
     return bRes;
+}
+
+/**
+ * @ingroup CspServer
+ * @brief 마지막 activity 이후 iTimeoutSec 초가 지난 stale 통화를 종료한다.
+ * @param iTimeoutSec 타임아웃 시간 (초)
+ */
+void CCallMap::DeleteTimeout( int iTimeoutSec ) {
+    if ( iTimeoutSec <= 0 ) return;
+
+    std::list<std::string> clsStaleList;
+    time_t iNow;
+    time( &iNow );
+
+    m_clsMutex.acquire();
+    for ( auto itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
+        if ( itMap->second.m_iLastActivityTime > 0 &&
+             ( iNow - itMap->second.m_iLastActivityTime ) >= iTimeoutSec ) {
+            clsStaleList.push_back( itMap->first );
+        }
+    }
+    m_clsMutex.release();
+
+    for ( const auto &strCallId : clsStaleList ) {
+        CLog::Print( LOG_INFO, "Stale call timeout: CallId(%s) — sending BYE", strCallId.c_str() );
+        gclsUserAgent.StopCall( strCallId.c_str() );
+        Delete( strCallId.c_str() );
+    }
 }
 
 /**

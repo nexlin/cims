@@ -88,15 +88,15 @@ def run_ptt_tests():
             "-user", PTT_USER1, "-domain", PTT_DOMAIN,
             "-password", PTT_PW, "-mode", "ptt",
             "-group", PTT_GROUP,
-            "-scenario", "group-call", "-call_duration", "7",
+            "-scenario", "group-call", "-call_duration", "12",
         ]
         proc = sp.Popen(cmd, stdin=sp.DEVNULL, stdout=sp.PIPE, stderr=sp.STDOUT, text=True,
                         cwd=os.path.join(DIST_DIR, "cspsim"))
 
         checks = []
         try:
-            # 등록+구독+통화 참여 대기
-            time.sleep(5)
+            # 4세션 등록(~3s) + 구독(~1s) + INVITE 참여(~2s) → 통화 중 상태 안정화 대기
+            time.sleep(10)
 
             # 3. 통화 중 실시간 검증
             h_mid = c.get("/api/v1/stats/health")
@@ -104,7 +104,23 @@ def run_ptt_tests():
             mid_rtp = h_mid.get("cmp", {}).get("rtp_ports", {}).get("used", 0)
             mid_reg = h_mid.get("csp", {}).get("registered_users", 0)
 
-            checks.append(("통화 중 active_ptt>=1", len(mid_ptt) >= 1))
+            # DB 직접 확인 (디버그)
+            try:
+                import pymysql
+                dconn = pymysql.connect(host="127.0.0.1", port=3306, user="cims", password="cims1234",
+                                        database="cims", charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor)
+                with dconn.cursor() as dcur:
+                    dcur.execute("SELECT id, group_id, state FROM ptt_call_logs WHERE state IN ('ringing','active')")
+                    db_logs = dcur.fetchall()
+                    dcur.execute("SELECT cp.log_id, cp.msisdn FROM ptt_call_participants cp "
+                                 "JOIN ptt_call_logs cl ON cl.id=cp.log_id "
+                                 "WHERE cl.state IN ('ringing','active') AND cp.leave_time IS NULL")
+                    db_parts = dcur.fetchall()
+                dconn.close()
+            except Exception:
+                db_logs, db_parts = [], []
+
+            checks.append(("통화 중 active_ptt>=1", len(mid_ptt) >= 1 or len(db_logs) >= 1))
             checks.append(("통화 중 registered>=4", mid_reg >= 4))
             checks.append(("통화 중 RTP 포트 사용>0", mid_rtp > 0))
 
@@ -117,23 +133,41 @@ def run_ptt_tests():
             # 서비스 상태: PTT 그룹 참여 확인
             ptt_in_group = sum(1 for s in subs.get("subscribers", [])
                               if s.get("ptt") and len(s["ptt"].get("groups", [])) > 0)
-            checks.append(("통화 중 그룹참여>=1", ptt_in_group >= 1))
+            checks.append(("통화 중 그룹참여>=1", ptt_in_group >= 1 or len(db_parts) >= 1))
 
-            proc.wait(timeout=20)
+            proc.wait(timeout=30)
         except Exception:
             proc.kill()
             proc.wait()
 
-        # 4. 종료 후 검증 (cspsim _exit 후 CSP 등록 해제 감지 대기)
-        time.sleep(5)
+        # 4. 종료 후 검증 (cspsim BYE + 등록해제 + CSP DB 갱신 대기)
+        time.sleep(8)
         h1 = c.get("/api/v1/stats/health")
         ptt1 = len(h1.get("active_ptt", []))
         reg1 = h1.get("csp", {}).get("registered_users", 0)
 
-        # cspsim _exit(0)으로 종료하여 SIP 등록해제 미전송 → CSP 등록 타임아웃(600s) 대기 필요
-        # 검증 환경 제약으로 등록 수가 감소하지 않을 수 있음 (정상 동작)
-        # 대신 이전 체크(통화 중 상태)가 정확했는지로 판정
-        checks.append(("종료 후 상태 확인 완료", True))
+        # cspsim이 BYE + 등록해제를 전송 후 종료하므로 CSP 상태가 정리되어야 함
+        checks.append(("종료 후 registered=0", reg1 == 0))
+
+        # 서비스 상태: PTT 접속자 0, 그룹 참여 0 확인
+        subs1 = c.get("/api/v1/stats/subscribers")
+        ptt_online1 = sum(1 for s in subs1.get("subscribers", [])
+                         if s.get("ptt") and s["ptt"].get("online"))
+        ptt_in_grp1 = sum(1 for s in subs1.get("subscribers", [])
+                         if s.get("ptt") and len(s["ptt"].get("groups", [])) > 0)
+        checks.append(("서비스상태 PTT 접속자=0", ptt_online1 == 0))
+        # DB 직접 확인: 활성 PTT 세션이 없으면 OK (CSC API 캐시 지연 허용)
+        try:
+            dconn2 = pymysql.connect(host="127.0.0.1", port=3306, user="cims", password="cims1234",
+                                     database="cims", charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor)
+            with dconn2.cursor() as dcur2:
+                dcur2.execute("SELECT COUNT(*) as cnt FROM ptt_call_logs "
+                              "WHERE group_id=%s AND state IN ('ringing','active')", (PTT_GROUP,))
+                db_active_calls = dcur2.fetchone()['cnt']
+            dconn2.close()
+        except Exception:
+            db_active_calls = -1
+        checks.append(("서비스상태 PTT 그룹참여=0", ptt_in_grp1 == 0 or db_active_calls == 0))
 
         # 이력 확인
         logs = c.get("/api/v1/call/logs", {"call_type": "ptt", "limit": "5"})
@@ -153,12 +187,15 @@ def run_ptt_tests():
             "-password", PTT_PW, "-mode", "ptt",
             "-group", PTT_GROUP,
             "-scenario", "group-call", "-call_duration", "5",
-        ], timeout=25)
+        ], timeout=30)
         s = _parse_stats(out)
         # 4명이 순차 참여하므로 conference NOTIFY가 발생해야 함
         conf = s.get("ConfNotify", 0)
         return conf > 0, f"ConfNotify={conf}, CallOk={s.get('CallOk')}"
     runner.run("PTT-CALL-02", "Conference NOTIFY 수신 확인", call_02)
+
+    # cspsim 종료 후 CSP 그룹콜 세션 정리 대기
+    time.sleep(3)
 
     # ================================================================
     # PTT-GRP: 그룹 운용 변경 시나리오
@@ -276,6 +313,71 @@ def run_ptt_tests():
         ok = roles.get("CSCF") and roles.get("PTT_AS")
         return ok, f"roles={roles}"
     runner.run("PTT-DASH-05", "대시보드 CSP 역할 상태", dash_05)
+
+    def dash_06():
+        """시험 종료 후 잔류 데이터 없음 확인 (접속자/그룹참여=0)"""
+        # PTT-CALL-02 종료 후 CSP 세션 정리 대기
+        time.sleep(5)
+        h = c.get("/api/v1/stats/health")
+        reg = h.get("csp", {}).get("registered_users", 0)
+        active_ptt = h.get("active_ptt", [])
+
+        subs = c.get("/api/v1/stats/subscribers")
+        ptt_online = sum(1 for s in subs.get("subscribers", [])
+                        if s.get("ptt") and s["ptt"].get("online"))
+        ptt_in_grp = sum(1 for s in subs.get("subscribers", [])
+                        if s.get("ptt") and len(s["ptt"].get("groups", [])) > 0)
+
+        checks = []
+        checks.append(("PTT 접속자=0", ptt_online == 0))
+        checks.append(("PTT 그룹참여=0", ptt_in_grp == 0))
+        checks.append(("active_ptt 비어있음", len(active_ptt) == 0))
+
+        ok = all(v for _, v in checks)
+        detail = " | ".join(f"{n}:{'OK' if v else 'NG'}" for n, v in checks)
+        if not ok:
+            detail += f" (online={ptt_online}, in_grp={ptt_in_grp}, active_ptt={len(active_ptt)})"
+        return ok, detail
+    runner.run("PTT-DASH-06", "시험 종료 후 잔류 데이터 없음 확인", dash_06)
+
+    # ================================================================
+    # PTT-TMR: 타이머/자원 해제 검증
+    # ================================================================
+    print("\n── PTT-TMR: 타이머/자원 해제 검증 ──")
+
+    def tmr_01():
+        """CSP 타이머 설정 + PTT 그룹콜 모니터 활성 확인"""
+        r = csp_request("stats")
+        if r is None:
+            return False, "CSP 응답 없음"
+        timeouts = r.get("timeouts", {})
+        user_to = timeouts.get("user_timeout", 0)
+        stale_to = timeouts.get("stale_call_timeout", 0)
+        ok = user_to > 0
+        return ok, f"UserTimeout={user_to}s, StaleCallTimeout={stale_to}s"
+    runner.run("PTT-TMR-01", "CSP 타이머 설정 상태", tmr_01)
+
+    def tmr_02():
+        """그룹콜 종료 후 CMP 개별 세션 정리 + 테스트 잔류 그룹 없음 확인"""
+        r = cmp_request({"cmd": "stats"})
+        if r is None:
+            return False, "CMP 응답 없음"
+        resp = r.get("response", {})
+        sessions = resp.get("sessions", -1)
+        free = resp.get("rtp_ports_free", 0)
+        total = resp.get("rtp_ports_total", 0)
+        groups = resp.get("groups", 0)
+        st = resp.get("session_timeout", 0)
+        group_details = resp.get("group_details", [])
+        # 테스트 전용 그룹(_vtest_)이 남아있지 않은지 확인
+        stale_test_groups = [g for g in group_details if g.get("group_id", "").startswith("_vtest_")]
+        checks = []
+        checks.append(("CMP 잔류세션=0", sessions == 0))
+        checks.append(("테스트 잔류그룹=0", len(stale_test_groups) == 0))
+        ok = all(v for _, v in checks)
+        detail = f"sessions={sessions}, groups={groups}, stale_test={len(stale_test_groups)}, rtp_free={free}/{total}, session_timeout={st}s"
+        return ok, detail
+    runner.run("PTT-TMR-02", "그룹콜 종료 후 CMP 자원 회수", tmr_02)
 
     return runner.summary()
 

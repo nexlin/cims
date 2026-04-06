@@ -123,6 +123,9 @@ public:
     /** User Alive Check Timeout (Seconds) */
     int m_iUserTimeout;
 
+    /** Stale Call Timeout (Seconds) — 마지막 SIP activity 이후 무응답 통화 자동 종료 (0=비활성) */
+    int m_iStaleCallTimeout;
+
     // ================================================================
     // DB 연동 설정 (UserDataFolder / GroupDataFolder 가 비어 있을 때 사용)
 

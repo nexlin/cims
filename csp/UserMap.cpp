@@ -213,24 +213,31 @@ bool CUserMap::SetIpPort( const char *pszUserId, const char *pszIp, int iPort ) 
  * @param iTimeout 만료된 시간 이후에 대기 시간 (초단위)
  */
 void CUserMap::DeleteTimeout( int iTimeout ) {
+    USER_ID_LIST clsDummy;
+    DeleteTimeout( iTimeout, clsDummy );
+}
+
+/**
+ * @ingroup CspServer
+ * @brief 만료된 사용자를 자료구조에서 삭제하고, 삭제된 사용자 ID 를 clsDeletedList 에 저장한다.
+ * @param iTimeout       만료 이후 대기 시간 (초단위)
+ * @param clsDeletedList 삭제된 사용자 ID 를 받는 리스트
+ */
+void CUserMap::DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList ) {
     USER_MAP::iterator itMap, itNext;
     time_t iTime;
 
+    clsDeletedList.clear();
     time( &iTime );
 
     m_clsMutex.acquire();
-    for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
-    LOOP_START:
+    for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ) {
         if ( iTime > ( itMap->second.m_iLoginTime + itMap->second.m_iLoginTimeout + iTimeout ) ) {
-            itNext = itMap;
-            ++itNext;
-
             CLog::Print( LOG_DEBUG, "user(%s) is deleted - timeout", itMap->first.c_str() );
-
-            m_clsMap.erase( itMap );
-            if ( itNext == m_clsMap.end() ) break;
-            itMap = itNext;
-            goto LOOP_START;
+            clsDeletedList.push_back( itMap->first );
+            itMap = m_clsMap.erase( itMap );
+        } else {
+            ++itMap;
         }
     }
     m_clsMutex.release();

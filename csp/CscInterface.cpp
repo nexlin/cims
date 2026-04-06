@@ -170,6 +170,10 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
             << ",\"TAS\":" << (gclsSetup.m_bRoleTas ? "true" : "false")
             << ",\"PTT_AS\":" << (gclsSetup.m_bRolePttAs ? "true" : "false")
             << ",\"IBCF\":" << (gclsSetup.m_bRoleIbcf ? "true" : "false")
+            << "}"
+            << ",\"timeouts\":{\"user_timeout\":" << gclsSetup.m_iUserTimeout
+            << ",\"stale_call_timeout\":" << gclsSetup.m_iStaleCallTimeout
+            << ",\"send_options_period\":" << gclsSetup.m_iSendOptionsPeriod
             << "}}";
 
         std::string resp = oss.str();

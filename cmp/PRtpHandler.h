@@ -211,6 +211,11 @@ public:
   void setWorkerName(const std::string& name) { _workerName = name; }
   std::string getWorkerName() const { return _workerName; }
 
+  /** 마지막 RTP 패킷 수신 시간 갱신 */
+  void touchActivity() { time(&_lastActivityTime); }
+  /** 마지막 activity 시간 반환 */
+  time_t getLastActivityTime() const { return _lastActivityTime; }
+
   // 녹취
   void startRecording(const std::string& rawDir, const std::string& sessionId);
   void stopRecording();
@@ -218,6 +223,7 @@ public:
 
 private:
   std::string _workerName;
+  time_t _lastActivityTime;
 
   // 녹취 (양방향)
   bool _recording;

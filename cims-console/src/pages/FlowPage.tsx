@@ -20,6 +20,8 @@ const PROTO_COLOR: Record<string, string> = {
   SIP:  '#4b8cda',
   JSON: '#e6832a',
   WS:   '#57b65a',
+  RTP:  '#d94bbf',
+  RTCP: '#9b59b6',
 }
 
 function protoColor(proto: string) {

@@ -83,11 +83,20 @@ public:
     bool UpdateCallLogEnded( const std::string& strCallId,
                               time_t tAnswer, time_t tEnd, int iSipStatus );
 
+    /** PTT: 해당 그룹에 활성 세션(ringing/active)이 존재하는지 확인 */
+    bool HasActiveGroupCall( const std::string& strGroupId );
+
     /** PTT: 그룹 세션을 active 로 변경 (최초 멤버 응답 시) */
     bool UpdateCallLogActivePtt( const std::string& strGroupId );
 
     /** PTT: 그룹 세션 종료 (마지막 멤버 이탈 시) */
     bool EndGroupCallLog( const std::string& strGroupId );
+
+    /** 녹취 레코드를 recordings 테이블에 삽입한다 */
+    bool InsertRecording( const std::string& strCallId, const std::string& strCallType,
+                          const std::string& strGroupId,
+                          const std::string& strCaller, const std::string& strCallee,
+                          const std::string& strRecordDir, bool bHasVideo );
 
     /** 통화 참여자를 추가한다 */
     bool InsertParticipant( const std::string& strCallId,

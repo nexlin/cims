@@ -24,13 +24,15 @@ public:
     bool Init(const std::string& strCmpIp, int iCmpPort, int iLocalPort);
     
     // Returns assigned local IP/Port from CMP
-    bool AddSession(const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort);
+    bool AddSession(const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort,
+                    const std::string& strRecordDir = "");
     bool UpdateSession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx, std::string& strLocalIp, int& iLocalPort);
     bool RemoveSession(const std::string& strSessionId);
     bool Alive();
 
 
-    bool AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iVideoPort);
+    bool AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iVideoPort,
+                  const std::string& strRecordDir = "");
     bool ModifyGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers);
     bool JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strIp, int iPort, int iVideoPort = 0);
     bool LeaveGroup(const std::string& strGroupId, const std::string& strSessionId);

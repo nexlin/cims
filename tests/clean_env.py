@@ -52,11 +52,47 @@ def clean_and_restart():
             cur.execute("SELECT id, auth_id FROM voip_subscriptions WHERE auth_id NOT LIKE '%%@%%'")
             for row in cur.fetchall():
                 msisdn = row['id']
-                # +821357007NNN → 45003310000NNN@domain
-                seq = msisdn[-3:]
-                auth_id = f"45003310000{seq}@ims.mnc033.mcc450.3gppnetwork.org"
+                # 동일 시리즈의 정상 행에서 auth_id 패턴을 참조
+                # +821357007002 → 450033100000002, +821357007003 → 450033100000003
+                # 마지막 숫자를 교체
+                cur.execute(
+                    "SELECT auth_id FROM voip_subscriptions WHERE id != %s AND auth_id LIKE '%%@%%' LIMIT 1",
+                    (msisdn,)
+                )
+                ref = cur.fetchone()
+                if ref:
+                    ref_auth = ref['auth_id']
+                    # 참조 auth_id의 마지막 숫자를 현재 msisdn의 마지막 숫자로 교체
+                    at_pos = ref_auth.index('@')
+                    prefix = ref_auth[:at_pos]
+                    suffix = ref_auth[at_pos:]
+                    # prefix 끝의 숫자를 msisdn 끝 숫자로 교체
+                    last = msisdn[-1]
+                    auth_id = prefix[:-1] + last + suffix
+                else:
+                    auth_id = msisdn + "@ims.mnc033.mcc450.3gppnetwork.org"
                 cur.execute("UPDATE voip_subscriptions SET auth_id=%s WHERE id=%s", (auth_id, msisdn))
                 print(f"    VoIP auth_id 수정: {msisdn} → {auth_id}")
+
+            # 녹취 테이블 존재 확인 및 생성
+            cur.execute("SHOW TABLES LIKE 'recordings'")
+            if not cur.fetchone():
+                print("    recordings/recording_segments 테이블 생성...")
+                sql_path = os.path.join(CIMS_ROOT, "sql", "migrate_recordings.sql")
+                if os.path.exists(sql_path):
+                    with open(sql_path) as sf:
+                        stmts = sf.read().split(';')
+                        for stmt in stmts:
+                            stmt = stmt.strip()
+                            if stmt:
+                                cur.execute(stmt)
+                    print("    녹취 테이블 생성 완료")
+            else:
+                # 녹취 테이블 초기화
+                cur.execute("DELETE FROM recording_segments")
+                print(f"    recording_segments 초기화 ({cur.rowcount}건 삭제)")
+                cur.execute("DELETE FROM recordings")
+                print(f"    recordings 초기화 ({cur.rowcount}건 삭제)")
 
             # register_time / logout_time 초기화
             cur.execute("UPDATE voip_subscriptions SET register_time=NULL, logout_time=NULL")

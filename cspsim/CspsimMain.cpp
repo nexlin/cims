@@ -154,6 +154,7 @@ static void PrintUsage(const char* pszBin) {
     printf("                             group-call   - 등록 + 구독 + 그룹통화 (PTT)\n");
     printf("                             full         - 전체 반복\n");
     printf("  -call_duration <secs>    통화 유지 시간 (default: 10)\n");
+    printf("  -media_file  <path>      AMR-WB 미디어 파일 (PT=99 전송, 생략 시 합성 RTP)\n");
     printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
     printf("  -verbose                 SIP 메시지 상세 로그\n\n");
     printf("Commands (실행 중):\n");
@@ -282,6 +283,7 @@ int main(int argc, char* argv[])
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
+    std::string strMediaFile  = GetArg(argc, argv, "-media_file",  "");
     int iIntervalMs            = atoi(GetArg(argc, argv, "-interval",    "100").c_str());
     bool bVerbose              = HasFlag(argc, argv, "-verbose");
     bool bPttMode              = (strMode == "ptt");
@@ -368,6 +370,9 @@ int main(int argc, char* argv[])
             strGroupId
         );
 
+        if (!strMediaFile.empty()) {
+            s->m_clsRtpThread.SetMediaFile(strMediaFile);
+        }
         if (s->Start()) {
             sessions.push_back(s);
         } else {
@@ -390,12 +395,28 @@ int main(int argc, char* argv[])
                                      strGroupId);
     }
 
-    // 시나리오 모드: 완료 대기 후 바로 종료 (stdin 루프 진입 안함)
+    // 시나리오 모드: 완료 대기 → 세션 정리 → 종료 (stdin 루프 진입 안함)
     if (eScenario != E_SCENARIO_NONE) {
         if (scenarioThread.joinable()) scenarioThread.join();
         printf("\n최종 통계:\n");
         PrintStats(sessions);
+
+        // 세션 정리: BYE + 등록 해제 전송
         printf("세션 종료 중...\n");
+        // 먼저 모든 활성 통화 종료 (BYE 전송)
+        for (auto* s : sessions) s->StopCall();
+        // BYE 처리 대기 (서버측 OnCallTerminated + DB 갱신 시간 확보)
+        usleep(1500000 + iCount * 300000);
+
+        // SIP 스택 종료 (REGISTER Expires=0 전송 → 등록 해제)
+        for (auto* s : sessions) {
+            s->m_clsRtpThread.Stop();
+            s->m_clsUserAgent.Stop();
+        }
+        // 등록 해제 처리 대기 (401 challenge + re-REGISTER)
+        usleep(1000000 + iCount * 200000);
+
+        // 타임아웃 보호: 네트워크 지연으로 정리가 오래 걸리면 강제 종료
         _exit(0);
     }
 

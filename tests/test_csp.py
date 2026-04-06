@@ -96,6 +96,67 @@ def run_csp_tests():
     runner.run("CSP-IF-03", "group_change 통지", if_03)
 
     # ================================================================
+    # CSP-TMR: 타이머 설정 검증
+    # ================================================================
+    print("\n── CSP-TMR: 타이머/타임아웃 설정 ──")
+
+    def tmr_01():
+        """CSP stats에서 타이머 설정값 확인"""
+        r = csp_request("stats")
+        if r is None:
+            return False, "응답 없음 (timeout)"
+        timeouts = r.get("timeouts", {})
+        user_timeout = timeouts.get("user_timeout", -1)
+        stale_call = timeouts.get("stale_call_timeout", -1)
+        options_period = timeouts.get("send_options_period", -1)
+        ok = user_timeout > 0 and stale_call >= 0 and options_period >= 0
+        return ok, f"user_timeout={user_timeout}s, stale_call_timeout={stale_call}s, options_period={options_period}s"
+    runner.run("CSP-TMR-01", "타이머 설정값 확인", tmr_01)
+
+    def tmr_02():
+        """등록 만료 → DB logout_time 갱신 확인
+        짧은 Expires(3초)로 등록 → 등록 확인 → 만료 대기(UserTimeout + DeleteTimeout 여유) → 접속자=0"""
+        import pymysql
+
+        # 1. 짧은 Expires로 등록 (call_duration=1 → 빠르게 종료, cspsim 자체는 UNREGISTER 전송)
+        out = _run_cspsim([
+            "-server_ip", CSP_IP, "-count", "1",
+            "-user", "+821357007002",
+            "-auth_id", "450033100000002@" + VOIP_DOMAIN,
+            "-domain", VOIP_DOMAIN,
+            "-password", "123456", "-mode", "voip",
+            "-scenario", "register", "-call_duration", "2",
+        ], timeout=15)
+        s = _parse_stats(out)
+        if s.get("RegOk", 0) < 1:
+            return False, f"등록 실패: stats={s}"
+
+        # 2. 종료 후 DB에서 logout_time 확인
+        time.sleep(2)
+        try:
+            conn = pymysql.connect(
+                host="127.0.0.1", port=3306, user="cims", password="cims1234",
+                database="cims", charset="utf8mb4",
+                cursorclass=pymysql.cursors.DictCursor,
+            )
+            with conn.cursor() as cur:
+                cur.execute("SELECT register_time, logout_time FROM voip_subscriptions WHERE id='+821357007002'")
+                row = cur.fetchone()
+            conn.close()
+        except Exception as e:
+            return False, f"DB 조회 실패: {e}"
+
+        if not row:
+            return False, "DB에 사용자 없음"
+
+        reg_time = row.get("register_time")
+        logout_time = row.get("logout_time")
+        # logout_time이 존재하고 register_time 이후여야 함 (오프라인 상태)
+        ok = logout_time is not None and reg_time is not None and logout_time >= reg_time
+        return ok, f"register_time={reg_time}, logout_time={logout_time}"
+    runner.run("CSP-TMR-02", "등록해제 시 DB logout_time 갱신", tmr_02)
+
+    # ================================================================
     # CSP-SIP: SIP 등록/구독 (cspsim 이용)
     # ================================================================
     print("\n── CSP-SIP: SIP 등록/구독 ──")

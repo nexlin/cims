@@ -1,21 +1,14 @@
 """
 csc_flow.py — 메시지 플로우 API
 
-GET /api/v1/flow/list?date=YYYYMMDD
-    → 해당 날짜(없으면 오늘)의 call_id 목록 반환
+디렉터리 구조:
+  msg_logs/YYYY/MM/DD/{prefix}/{caller}/{HHmmss}_{caller}_{callee}_{id}.d/*.jsonl
 
-GET /api/v1/flow/{call_id}?date=YYYYMMDD
-    → call_id 별 JSONL 파일을 병합·시간순 정렬하여 반환
+GET /api/v1/flow/list?date=YYYY-MM-DD (또는 YYYYMMDD)
+    → 해당 날짜의 통화 디렉터리 목록 반환
 
-응답 형식 (application/json):
-    {
-      "call_id": "...",
-      "date": "YYYYMMDD",
-      "messages": [
-        {"ts":"16:05:30.123456","from":"cwrtc","to":"csp","proto":"SIP","label":"REGISTER","body":"..."},
-        ...
-      ]
-    }
+GET /api/v1/flow/{dir_name}?date=YYYY-MM-DD
+    → 해당 디렉터리의 JSONL 파일을 병합·시간순 정렬하여 반환
 """
 
 import json
@@ -34,28 +27,67 @@ def init(msg_log_dir: str) -> None:
     _msg_log_dir = msg_log_dir
 
 
-def _today_str() -> str:
-    return datetime.now().strftime("%Y%m%d")
+def _parse_date(date_str: str) -> tuple:
+    """YYYYMMDD 또는 YYYY-MM-DD → (YYYY, MM, DD)"""
+    d = date_str.replace("-", "")
+    if len(d) == 8:
+        return d[:4], d[4:6], d[6:8]
+    now = datetime.now()
+    return now.strftime("%Y"), now.strftime("%m"), now.strftime("%d")
 
 
-def _list_call_ids(date_str: str) -> list:
+def _today_date() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _date_dir(date_str: str) -> str:
+    """msg_logs/YYYY/MM/DD 경로 반환"""
+    yyyy, mm, dd = _parse_date(date_str)
+    return os.path.join(_msg_log_dir, "msg_logs", yyyy, mm, dd)
+
+
+def _find_call_dirs(date_str: str) -> list:
+    """해당 날짜의 .d 디렉터리 목록을 재귀 탐색하여 반환"""
     if not _msg_log_dir:
         return []
-    date_dir = os.path.join(_msg_log_dir, "msg_logs", date_str)
-    if not os.path.isdir(date_dir):
+    base = _date_dir(date_str)
+    if not os.path.isdir(base):
         return []
-    return sorted(
-        e for e in os.listdir(date_dir)
-        if os.path.isdir(os.path.join(date_dir, e))
-    )
+
+    result = []
+    # msg_logs/YYYY/MM/DD/{prefix}/{caller}/{xxx}.d
+    pattern = os.path.join(base, "*", "*", "*.d")
+    for d in sorted(_glob.glob(pattern)):
+        if os.path.isdir(d):
+            # 상대 이름만 (표시용)
+            rel = os.path.relpath(d, base)
+            dir_name = os.path.basename(d)
+            result.append({
+                "dir_name": dir_name,
+                "rel_path": rel,
+                "full_path": d,
+            })
+    return result
 
 
-def _load_messages(date_str: str, call_id: str) -> list:
-    """JSONL 파일들을 병합하고 타임스탬프로 정렬"""
-    if not _msg_log_dir:
-        return []
-    call_dir = os.path.join(_msg_log_dir, "msg_logs", date_str, call_id)
-    if not os.path.isdir(call_dir):
+def _find_call_dir_by_name(date_str: str, dir_name: str) -> str:
+    """dir_name(.d 이름)으로 전체 경로를 찾는다"""
+    base = _date_dir(date_str)
+    pattern = os.path.join(base, "*", "*", dir_name)
+    matches = _glob.glob(pattern)
+    if matches:
+        return matches[0]
+
+    # fallback: 기존 flat 구조 호환 (msg_logs/YYYYMMDD/{call_id}/)
+    legacy = os.path.join(_msg_log_dir, "msg_logs", date_str.replace("-", ""), dir_name)
+    if os.path.isdir(legacy):
+        return legacy
+    return ""
+
+
+def _load_messages(call_dir: str) -> list:
+    """디렉터리 내 JSONL 파일들을 병합하고 타임스탬프로 정렬"""
+    if not call_dir or not os.path.isdir(call_dir):
         return []
 
     messages = []
@@ -77,34 +109,34 @@ def _load_messages(date_str: str, call_id: str) -> list:
 
 
 # ── HTTP 핸들러 ──────────────────────────────────────────────────────────────
-# 라우터는 prefix 매칭이므로 /api/v1/flow 한 개의 핸들러에서 분기
 
 async def _handle_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     if handler_args.method != "GET":
         return HandlerResult(status=405, body="Method Not Allowed")
 
-    # full_path 예: /api/v1/flow/list  or  /api/v1/flow/<call_id>
     full_path = handler_args.full_path or ""
-    # /api/v1/flow 이후 세그먼트
-    after = full_path[len("/api/v1/flow"):]  # e.g. "" or "/list" or "/some-call-id"
-    after = after.lstrip("/")
+    after = full_path[len("/api/v1/flow"):].lstrip("/")
 
-    date_str = (handler_args.query_params or {}).get("date", _today_str())
+    date_str = (handler_args.query_params or {}).get("date", _today_date())
 
     if after == "" or after == "list":
-        call_ids = _list_call_ids(date_str)
-        body = json.dumps({"date": date_str, "call_ids": call_ids})
+        dirs = _find_call_dirs(date_str)
+        call_ids = [d["dir_name"] for d in dirs]
+        body = json.dumps({"date": date_str, "call_ids": call_ids, "count": len(call_ids)})
         return HandlerResult(status=200, body=body, media_type="application/json")
 
-    # call_id lookup
-    call_id = unquote(after)
-    messages = _load_messages(date_str, call_id)
-    if not messages and not os.path.isdir(
-        os.path.join(_msg_log_dir, "msg_logs", date_str, call_id)
-    ):
-        return HandlerResult(status=404, body=f"call_id '{call_id}' not found for date {date_str}")
+    # call_id (dir_name) lookup
+    dir_name = unquote(after)
+    call_dir = _find_call_dir_by_name(date_str, dir_name)
+    if not call_dir:
+        return HandlerResult(status=404, body=f"'{dir_name}' not found for date {date_str}")
 
-    body = json.dumps({"call_id": call_id, "date": date_str, "messages": messages})
+    messages = _load_messages(call_dir)
+    body = json.dumps({
+        "call_id": dir_name,
+        "date": date_str,
+        "messages": messages,
+    })
     return HandlerResult(status=200, body=body, media_type="application/json")
 
 

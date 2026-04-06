@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <iostream>
+#include <thread>
 //#include "pbase.h"
 #include "pmodule.h"
 #include "PRtpHandler.h"
@@ -74,6 +75,13 @@ private:
     // Recording config
     bool _recordEnable;
     std::string _recordDir;
+
+    // Session timeout (seconds, 0=disabled)
+    int _sessionTimeout;
+
+    // Timeout check thread
+    std::thread _timeoutThread;
+    void timeoutLoop();
 };
 
 #endif // __CMP_SERVER_H__

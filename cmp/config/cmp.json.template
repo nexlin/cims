@@ -9,6 +9,7 @@
     "DtmfReleaseDigit": "#",
     "CspIp": "@CSP_IP@",
     "CspPort": 9001,
+    "SessionTimeout": 600,
     "LogDir": "log",
     "LogMaxSizeMB": 10,
     "LogMaxFiles": 5,

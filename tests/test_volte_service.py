@@ -4,7 +4,7 @@ VoLTE 서비스 검증: 운용 설정 + cspsim 기반 통화 시나리오 + 대�
 import sys, os, time, subprocess, re
 sys.path.insert(0, os.path.dirname(__file__))
 
-from conftest import CscClient, csp_request, TestRunner
+from conftest import CscClient, csp_request, cmp_request, TestRunner
 
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build", "dist"))
 CSPSIM = os.path.join(DIST_DIR, "cspsim", "bin", "cspsim")
@@ -113,12 +113,22 @@ def run_volte_tests():
 
         checks = []
         checks.append(("cspsim CallOk>=1", call_ok))
+        checks.append(("종료 후 active_calls=0", calls1 == 0))
         checks.append(("종료 후 active_voip 비어있음", len(active_voip) == 0))
-        # 이력: ended 또는 ringing(Proxy 모드에서 BYE 갱신이 비동기적일 수 있음)
+        checks.append(("종료 후 registered=0", reg1 == 0))
+
+        # 서비스 상태: 접속자 0 확인
+        subs1 = c.get("/api/v1/stats/subscribers")
+        voip_online1 = sum(1 for s in subs1.get("subscribers", [])
+                          if s.get("voip") and s["voip"].get("online"))
+        checks.append(("서비스상태 VoIP 접속자=0", voip_online1 == 0))
+
+        # 이력 검증
         recent_logs = [l for l in log_list if l.get("call_type") == "voip" and l.get("initiator") == VOIP_USER1]
         checks.append(("이력 존재", len(recent_logs) > 0))
         if recent_logs:
             checks.append(("이력 callee 정확", recent_logs[0].get("callee") == VOIP_USER2))
+            checks.append(("이력 state=ended", recent_logs[0].get("state") == "ended"))
 
         all_ok = all(v for _, v in checks)
         detail = " | ".join(f"{n}:{'OK' if v else 'NG'}" for n, v in checks)
@@ -166,12 +176,13 @@ def run_volte_tests():
             proc.kill()
             proc.wait()
 
-        # 종료 후 확인
-        time.sleep(1)
+        # 종료 후 확인 (cspsim이 BYE+등록해제 전송 후 종료)
+        time.sleep(2)
         h_end = c.get("/api/v1/stats/health")
         end_calls = h_end.get("csp", {}).get("active_calls", 0)
-        # cspsim _exit(0) 후 CSP 등록 해제 감지까지 지연 가능
-        checks.append(("종료 후 active_calls 감소", end_calls <= 1))
+        end_reg = h_end.get("csp", {}).get("registered_users", 0)
+        checks.append(("종료 후 active_calls=0", end_calls == 0))
+        checks.append(("종료 후 registered=0", end_reg == 0))
 
         all_ok = all(v for _, v in checks)
         detail = " | ".join(f"{n}:{'OK' if v else 'NG'}" for n, v in checks)
@@ -257,6 +268,82 @@ def run_volte_tests():
         log_list = logs.get("logs", [])
         return ok, f"total={logs.get('total')}, recent={len(log_list)}건"
     runner.run("VoLTE-DASH-04", "VoIP 통화 이력 조회", dash_04)
+
+    def dash_05():
+        """서비스 상태 잔류 데이터 없음 확인 (시험 종료 후 접속자/활성호=0)"""
+        h = c.get("/api/v1/stats/health")
+        reg = h.get("csp", {}).get("registered_users", 0)
+        calls = h.get("csp", {}).get("active_calls", 0)
+        active_voip = h.get("active_voip", [])
+        # ringing 상태로 남은 stale 이력 없는지 확인
+        ringing = [v for v in active_voip if v.get("state") == "ringing"]
+
+        subs = c.get("/api/v1/stats/subscribers")
+        voip_online = sum(1 for s in subs.get("subscribers", [])
+                         if s.get("voip") and s["voip"].get("online"))
+
+        checks = []
+        checks.append(("registered=0", reg == 0))
+        checks.append(("active_calls=0", calls == 0))
+        checks.append(("active_voip 비어있음", len(active_voip) == 0))
+        checks.append(("ringing 잔류 없음", len(ringing) == 0))
+        checks.append(("VoIP 접속자=0", voip_online == 0))
+
+        ok = all(v for _, v in checks)
+        detail = " | ".join(f"{n}:{'OK' if v else 'NG'}" for n, v in checks)
+        if not ok:
+            detail += f" (reg={reg}, calls={calls}, voip_active={len(active_voip)}, online={voip_online})"
+        return ok, detail
+    runner.run("VoLTE-DASH-05", "시험 종료 후 잔류 데이터 없음 확인", dash_05)
+
+    # ================================================================
+    # VoLTE-TMR: 타이머/타임아웃 검증
+    # ================================================================
+    print("\n── VoLTE-TMR: 타이머/자원 해제 검증 ──")
+
+    def tmr_01():
+        """CSP 타이머 설정 활성 상태 확인"""
+        r = csp_request("stats")
+        if r is None:
+            return False, "CSP 응답 없음"
+        timeouts = r.get("timeouts", {})
+        user_to = timeouts.get("user_timeout", 0)
+        stale_to = timeouts.get("stale_call_timeout", 0)
+        checks = []
+        checks.append(("UserTimeout>0", user_to > 0))
+        checks.append(("StaleCallTimeout>=0", stale_to >= 0))
+        ok = all(v for _, v in checks)
+        detail = f"UserTimeout={user_to}s, StaleCallTimeout={stale_to}s"
+        return ok, detail
+    runner.run("VoLTE-TMR-01", "CSP 타이머 설정 활성 상태", tmr_01)
+
+    def tmr_02():
+        """CMP 세션 타임아웃 설정 활성 상태 확인"""
+        r = cmp_request({"cmd": "stats"})
+        if r is None:
+            return False, "CMP 응답 없음"
+        resp = r.get("response", {})
+        st = resp.get("session_timeout", 0)
+        ok = st > 0
+        return ok, f"SessionTimeout={st}s"
+    runner.run("VoLTE-TMR-02", "CMP 세션 타임아웃 설정 활성 상태", tmr_02)
+
+    def tmr_03():
+        """통화 종료 후 CMP VoIP 개별 세션 잔류 없음 확인"""
+        r = cmp_request({"cmd": "stats"})
+        if r is None:
+            return False, "CMP 응답 없음"
+        resp = r.get("response", {})
+        sessions = resp.get("sessions", -1)
+        free = resp.get("rtp_ports_free", 0)
+        total = resp.get("rtp_ports_total", 0)
+        st = resp.get("session_timeout", 0)
+        # VoIP 개별 세션(1:1)은 0이어야 함
+        # PTT 그룹은 운용 그룹이므로 포트 점유 정상
+        ok = sessions == 0
+        detail = f"sessions={sessions}, rtp_free={free}/{total}, session_timeout={st}s"
+        return ok, detail
+    runner.run("VoLTE-TMR-03", "통화 종료 후 CMP VoIP 세션 정리 확인", tmr_03)
 
     return runner.summary()
 

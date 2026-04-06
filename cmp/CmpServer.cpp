@@ -17,7 +17,7 @@
 #include <fstream>
 
 CmpServer::CmpServer(const std::string& name, const std::string& configFile)
-    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile)
+    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600)
 {
     loadConfig();
     initResourcePool();
@@ -67,12 +67,19 @@ bool CmpServer::startServer() {
         this->runControlLoop();
     }).detach();
 
+    // Session timeout 체크 스레드 시작
+    if (_sessionTimeout > 0) {
+        _timeoutThread = std::thread([this]() { this->timeoutLoop(); });
+        LOG_INFO("CmpServer", "Session timeout thread started (timeout=%ds)", _sessionTimeout);
+    }
+
     LOG_INFO("CmpServer", "Server listening on %s:%d", _serverIp.c_str(), _serverPort);
     return true;
 }
 
 void CmpServer::stopServer() {
     _running = false;
+    if (_timeoutThread.joinable()) _timeoutThread.join();
     if (_udpFd >= 0) {
         ::close(_udpFd);
         _udpFd = -1;
@@ -199,6 +206,7 @@ void CmpServer::processStats(const SimpleJson::JsonNode& payload, const std::str
         + ",\"rtp_ports_used\":" + std::to_string(usedPorts)
         + ",\"rtp_ports_free\":" + std::to_string(freeCount)
         + ",\"record_enable\":" + (_recordEnable ? "true" : "false")
+        + ",\"session_timeout\":" + std::to_string(_sessionTimeout)
         + ",\"group_details\":" + groupsJson
         + "}}";
 
@@ -225,7 +233,6 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
         if (rtp) {
             rtp->setSessionId(sessionId);
             _sessions[sessionId] = rtp;
-            if (_recordEnable) rtp->startRecording(_recordDir, sessionId);
         }
     } else {
         rtp = _sessions[sessionId];
@@ -237,12 +244,18 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
         if (rmtPort > 0) {
              rtp->setRmt(rmtIp, rmtPort, rmtVideoPort, peerIdx);
         }
-        
+
         static int workerIdx = 0;
         if (rtp->getWorkerName().empty()) {
              std::string wname = formatStr("RtpWorker_%d", workerIdx++ % 4);
              rtp->setWorkerName(wname);
              addHandler(wname, rtp);
+        }
+
+        // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취 (없으면 녹취 안 함)
+        std::string recordDir = payload.GetString("record_dir");
+        if (!recordDir.empty() && !rtp->isRecording()) {
+            rtp->startRecording(recordDir, sessionId);
         }
         
         SimpleJson::JsonNode resp;
@@ -309,7 +322,11 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
              sharedSession->setGroup(group);
              group->setDtmfConfig(_dtmfPttEnable, _dtmfPushDigit, _dtmfReleaseDigit);
              group->setSharedSession(sharedSession);
-             if (_recordEnable) group->setRecording(true, _recordDir);
+             // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
+             std::string recordDir = payload.GetString("record_dir");
+             if (!recordDir.empty()) {
+                 group->setRecording(true, recordDir);
+             }
              _groups[groupId] = group;
 
              static int workerIdx = 0;
@@ -479,6 +496,7 @@ void CmpServer::loadConfig() {
         
         if (root.Has("DtmfPushDigit")) _dtmfPushDigit = root.GetString("DtmfPushDigit");
         if (root.Has("DtmfReleaseDigit")) _dtmfReleaseDigit = root.GetString("DtmfReleaseDigit");
+        if (root.Has("SessionTimeout")) _sessionTimeout = (int)root.GetInt("SessionTimeout");
         
         // Log configuration
         std::string logDir = root.Has("LogDir") ? root.GetString("LogDir") : "";
@@ -541,10 +559,10 @@ void CmpServer::loadConfig() {
         system(mkdirCmd.c_str());
     }
 
-    LOG_INFO("CmpServer", "Config: RtpStartPort=%d RtpPoolSize=%d RtpIp=%s ServerIp=%s ServerPort=%d DtmfPtt=%d Push=%s Rel=%s Record=%d RecordDir=%s",
+    LOG_INFO("CmpServer", "Config: RtpStartPort=%d RtpPoolSize=%d RtpIp=%s ServerIp=%s ServerPort=%d DtmfPtt=%d Push=%s Rel=%s Record=%d RecordDir=%s SessionTimeout=%d",
            _rtpStartPort, _rtpPoolSize, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
            _dtmfPttEnable, _dtmfPushDigit.c_str(), _dtmfReleaseDigit.c_str(),
-           _recordEnable, _recordDir.c_str());
+           _recordEnable, _recordDir.c_str(), _sessionTimeout);
 }
 
 void CmpServer::initResourcePool() {
@@ -586,5 +604,63 @@ void CmpServer::freeResource(PRtpTrans* rtp) {
     if (rtp) {
         LOG_INFO("CmpServer", "freeResource: port=%d", rtp->getLocalPort());
         _freeResources.push_back(rtp);
+    }
+}
+
+void CmpServer::timeoutLoop() {
+    while (_running) {
+        // 60초마다 체크
+        for (int i = 0; i < 60 && _running; ++i) {
+            msleep(1000);
+        }
+        if (!_running) break;
+
+        time_t now;
+        time(&now);
+
+        // Stale 개별 세션 정리
+        std::vector<std::string> staleSessionIds;
+        {
+            PAutoLock lock(_mutex);
+            for (auto const& [sid, rtp] : _sessions) {
+                if (rtp && (now - rtp->getLastActivityTime()) >= _sessionTimeout) {
+                    staleSessionIds.push_back(sid);
+                }
+            }
+        }
+        for (const auto& sid : staleSessionIds) {
+            LOG_INFO("CmpServer", "Session timeout: session=%s — auto cleanup", sid.c_str());
+            PAutoLock lock(_mutex);
+            auto it = _sessions.find(sid);
+            if (it != _sessions.end()) {
+                PRtpTrans* rtp = it->second;
+                delHandler(rtp->getWorkerName(), rtp);
+                rtp->reset();
+                freeResource(rtp);
+                _sessions.erase(it);
+            }
+        }
+
+        // Stale 그룹 세션 정리 (공유 RTP에 패킷이 없는 그룹)
+        std::vector<std::string> staleGroupIds;
+        {
+            PAutoLock lock(_mutex);
+            for (auto const& [gid, group] : _groups) {
+                PRtpTrans* shared = group->getSharedSession();
+                if (shared && group->getMemberCount() == 0 &&
+                    (now - shared->getLastActivityTime()) >= _sessionTimeout) {
+                    staleGroupIds.push_back(gid);
+                }
+            }
+        }
+        for (const auto& gid : staleGroupIds) {
+            LOG_INFO("CmpServer", "Group timeout: group=%s (no members, no activity) — auto cleanup", gid.c_str());
+            PAutoLock lock(_mutex);
+            auto it = _groups.find(gid);
+            if (it != _groups.end()) {
+                delete it->second;
+                _groups.erase(it);
+            }
+        }
     }
 }

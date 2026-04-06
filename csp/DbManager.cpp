@@ -474,6 +474,24 @@ bool CDbManager::UpdateCallLogEnded( const std::string& strCallId,
     return ExecuteQuery(strSql);
 }
 
+bool CDbManager::HasActiveGroupCall( const std::string& strGroupId )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    std::string strSql =
+        "SELECT COUNT(*) AS cnt FROM ptt_call_logs "
+        "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active')";
+
+    MYSQL_RES* pRes = ExecuteSelect(strSql);
+    if (!pRes) return false;
+
+    MYSQL_ROW row = mysql_fetch_row(pRes);
+    int cnt = (row && row[0]) ? atoi(row[0]) : 0;
+    mysql_free_result(pRes);
+    return cnt > 0;
+}
+
 bool CDbManager::UpdateCallLogActivePtt( const std::string& strGroupId )
 {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
@@ -497,8 +515,7 @@ bool CDbManager::EndGroupCallLog( const std::string& strGroupId )
         "SET state='ended', end_time=NOW(), "
         "duration=TIMESTAMPDIFF(SECOND, answer_time, NOW()), "
         "end_reason='normal' "
-        "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active') "
-        "ORDER BY invite_time DESC LIMIT 1"
+        "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active')"
     );
 
     // mark all remaining participants left
@@ -508,6 +525,34 @@ bool CDbManager::EndGroupCallLog( const std::string& strGroupId )
         "SET cp.leave_time=NOW() "
         "WHERE cl.group_id='" + Escape(strGroupId) + "' AND cp.leave_time IS NULL"
     );
+}
+
+bool CDbManager::InsertRecording( const std::string& strCallId, const std::string& strCallType,
+                                   const std::string& strGroupId,
+                                   const std::string& strCaller, const std::string& strCallee,
+                                   const std::string& strRecordDir, bool bHasVideo )
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return false;
+
+    std::string rawA  = strRecordDir + "/raw_a.rtp";
+    std::string rawB  = strRecordDir + "/raw_b.rtp";
+    std::string rawVA = bHasVideo ? strRecordDir + "/raw_va.rtp" : "";
+    std::string rawVB = bHasVideo ? strRecordDir + "/raw_vb.rtp" : "";
+
+    std::string strSql =
+        "INSERT IGNORE INTO recordings "
+        "(call_id, call_type, group_id, caller, callee, start_time, "
+        " raw_path_a, raw_path_b, raw_path_va, raw_path_vb, has_video, status) "
+        "VALUES ('" + Escape(strCallId) + "','" + Escape(strCallType) + "',"
+        + (strGroupId.empty() ? "NULL" : "'" + Escape(strGroupId) + "'") + ","
+        "'" + Escape(strCaller) + "','" + Escape(strCallee) + "',NOW(),"
+        "'" + Escape(rawA) + "','" + Escape(rawB) + "',"
+        + (rawVA.empty() ? "NULL" : "'" + Escape(rawVA) + "'") + ","
+        + (rawVB.empty() ? "NULL" : "'" + Escape(rawVB) + "'") + ","
+        + (bHasVideo ? "1" : "0") + ",'raw')";
+
+    return ExecuteQuery(strSql);
 }
 
 bool CDbManager::InsertParticipant( const std::string& strCallId,

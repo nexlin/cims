@@ -7,7 +7,8 @@
 #include <errno.h>
 
 PRtpTrans::PRtpTrans(const std::string & name) : PHandler(name), _group(NULL), _myName(name), _sessionId(name), _localPort(0), _localVideoPort(0),
-    _recording(false), _recorderA(NULL), _recorderB(NULL), _recorderVA(NULL), _recorderVB(NULL) {
+    _lastActivityTime(0), _recording(false), _recorderA(NULL), _recorderB(NULL), _recorderVA(NULL), _recorderVB(NULL) {
+    time(&_lastActivityTime);
     for(int i=0; i<2; ++i) {
         _peers[i].active = false;
         memset(&_peers[i].addrRtp, 0, sizeof(sockaddr_in));
@@ -274,6 +275,7 @@ bool PRtpTrans::proc()
         }
 
         if (len > 0) {
+            touchActivity();
             if (pGroup) {
                 pGroup->onRtpPacket(ipRmt, portRmt, pkt, len);
             } else {
@@ -338,7 +340,7 @@ bool PRtpTrans::proc()
                           RtpRecorder* vRec = (srcIdx == 0) ? _recorderVA : _recorderVB;
                           if (vRec && !vRec->IsRecording()) {
                               // Lazy start: 첫 영상 패킷에서 녹취 시작
-                              vRec->Start(_recordRawDir + "/" + _recordSessionId + ((srcIdx == 0) ? "_va.rtp" : "_vb.rtp"));
+                              vRec->Start(_recordRawDir + ((srcIdx == 0) ? "/raw_va.rtp" : "/raw_vb.rtp"));
                           }
                           if (vRec) vRec->WritePacket(pkt, len);
                       }
@@ -387,17 +389,30 @@ void PRtpTrans::startRecording(const std::string& rawDir, const std::string& ses
     _recordRawDir = rawDir;
     _recordSessionId = sessionId;
 
+    // record_dir 디렉터리 재귀 생성
+    {
+        std::string path = rawDir;
+        for (size_t i = 1; i < path.size(); ++i) {
+            if (path[i] == '/') {
+                path[i] = '\0';
+                mkdir(path.c_str(), 0755);
+                path[i] = '/';
+            }
+        }
+        mkdir(path.c_str(), 0755);
+    }
+
     _recorderA = new RtpRecorder();
     _recorderB = new RtpRecorder();
-    _recorderA->Start(rawDir + "/" + sessionId + "_a.rtp");
-    _recorderB->Start(rawDir + "/" + sessionId + "_b.rtp");
+    _recorderA->Start(rawDir + "/raw_a.rtp");
+    _recorderB->Start(rawDir + "/raw_b.rtp");
 
     _recorderVA = new RtpRecorder();
     _recorderVB = new RtpRecorder();
     // 영상 녹취는 실제 영상 패킷이 올 때만 활성화 (lazy start)
 
     _recording = true;
-    LOG_INFO("PRtpTrans", "Recording started: session=%s", sessionId.c_str());
+    LOG_INFO("PRtpTrans", "Recording started: dir=%s session=%s", rawDir.c_str(), sessionId.c_str());
 }
 
 void PRtpTrans::stopRecording() {

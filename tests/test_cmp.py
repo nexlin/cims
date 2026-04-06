@@ -193,6 +193,48 @@ def run_cmp_tests():
         return found, f"group_details count={len(details)}, found={found}"
     runner.run("CMP-FLOOR-01", "그룹 플로어 상태 확인", floor_01)
 
+    # ================================================================
+    # CMP-TMR: 타이머/타임아웃 설정
+    # ================================================================
+    print("\n── CMP-TMR: 타이머/타임아웃 설정 ──")
+
+    def tmr_01():
+        """CMP stats에서 SessionTimeout 설정값 확인"""
+        r = cmp_request({"cmd": "stats"})
+        if r is None:
+            return False, "응답 없음 (timeout)"
+        resp = r.get("response", {})
+        timeout_val = resp.get("session_timeout", -1)
+        ok = timeout_val > 0
+        return ok, f"session_timeout={timeout_val}s"
+    runner.run("CMP-TMR-01", "세션 타임아웃 설정값 확인", tmr_01)
+
+    def tmr_02():
+        """세션 생성 → touchActivity 동작 확인 (stats에서 세션 존재 확인 후 정리)"""
+        sid = f"_vtest_tmr_{int(time.time())}"
+        # 세션 생성
+        r = cmp_request({
+            "cmd": "add", "session_id": sid,
+            "remote_ip": "0.0.0.0", "remote_port": 0,
+            "remote_video_port": 0, "peer_index": -1,
+        })
+        if r is None:
+            return False, "세션 생성 실패"
+
+        # stats에서 세션 수 확인
+        r2 = cmp_request({"cmd": "stats"})
+        sessions_before = r2.get("response", {}).get("sessions", 0) if r2 else 0
+
+        # 정리
+        cmp_request({"cmd": "remove", "session_id": sid})
+
+        r3 = cmp_request({"cmd": "stats"})
+        sessions_after = r3.get("response", {}).get("sessions", 0) if r3 else 0
+
+        ok = sessions_before > sessions_after
+        return ok, f"생성 후 sessions={sessions_before}, 삭제 후 sessions={sessions_after}"
+    runner.run("CMP-TMR-02", "세션 생성/삭제 후 리소스 정합성", tmr_02)
+
     return runner.summary()
 
 

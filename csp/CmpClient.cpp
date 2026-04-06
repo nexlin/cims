@@ -168,7 +168,8 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
 // The original SendRequestAndWait is removed as per instruction to modify it.
 // If a string-based SendRequestAndWait is still needed, it would be an overload.
 
-bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort) {
+bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort,
+                            const std::string& strRecordDir) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "add");
     req.Set("session_id", strSessionId);
@@ -176,9 +177,10 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
     req.Set("remote_port", 0);
     req.Set("remote_video_port", 0);
     req.Set("peer_index", 0);
+    if (!strRecordDir.empty()) req.Set("record_dir", strRecordDir);
 
     // Header info (legacy args)
-    req.Set("csp_id", "CSP_MAIN"); 
+    req.Set("csp_id", "CSP_MAIN");
     req.Set("csp_sess_id", strSessionId);
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
@@ -269,13 +271,13 @@ bool CCmpClient::RemoveSession(const std::string& strSessionId) {
     return bRet;
 }
 
-bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iVideoPort) {
-    // Format: addgroup <groupId> <count> <mem1:prio1> <mem2:prio2> ...
-    
+bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iVideoPort,
+                          const std::string& strRecordDir) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "addgroup");
     req.Set("group_id", strGroupId);
     req.Set("count", (int)vecMembers.size());
+    if (!strRecordDir.empty()) req.Set("record_dir", strRecordDir);
     
     std::stringstream ssMembers;
     for(size_t i=0; i<vecMembers.size(); ++i) {

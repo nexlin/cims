@@ -20,6 +20,7 @@
 #define _RTP_THREAD_H_
 
 #include "SipUdp.h"
+#include <vector>
 
 class CRtpThread
 {
@@ -31,8 +32,11 @@ public:
 	bool Destroy( );
 	bool Start( const char * pszDestIp, int iDestPort );
 	bool Stop( );
-    
+
     bool SendFloorControl(int iOpCode);
+
+    /** 미디어 파일 경로 (AMR-WB raw 프레임 파일) 설정 — 비어있으면 합성 RTP */
+    void SetMediaFile(const std::string& strPath) { m_strMediaFile = strPath; }
 
 	Socket	m_hSocket;
 	int			m_iPort;
@@ -41,6 +45,7 @@ public:
 	bool		m_bRecvThreadRun;
 	std::string	m_strDestIp;
 	int					m_iDestPort;
+    std::string m_strMediaFile;
 };
 
 #endif

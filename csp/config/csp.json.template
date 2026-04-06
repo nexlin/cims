@@ -15,7 +15,10 @@
             "CertFile": "cert/csp.pem",
             "MinRegisterTimeout": 60,
             "CallPickupId": "**",
-            "StackExecutePeriod": 20
+            "StackExecutePeriod": 20,
+            "UserTimeout": 3600,
+            "StaleCallTimeout": 300,
+            "SendOptionsPeriod": 0
         },
         "RtpRelay": {
             "UseRtpRelay": true,

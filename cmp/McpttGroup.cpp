@@ -519,8 +519,8 @@ void McpttGroup::sendToMember(const std::string& sessionId, const char* data, in
 void McpttGroup::setRecording(bool enable, const std::string& dir) {
     _recordEnable = enable;
     _recordDir = dir;
-    if (enable) {
-        std::string mkdirCmd = "mkdir -p " + dir + "/" + _groupId;
+    if (enable && !dir.empty()) {
+        std::string mkdirCmd = "mkdir -p " + dir;
         system(mkdirCmd.c_str());
     }
 }
@@ -534,7 +534,8 @@ void McpttGroup::startSegment(const std::string& speakerId) {
     char seqStr[32];
     snprintf(seqStr, sizeof(seqStr), "seg_%04d", _segmentSeq);
 
-    std::string basePath = _recordDir + "/" + _groupId + "/" + seqStr;
+    // record_dir은 CSP가 결정한 전체 경로 (groupId 하위 디렉터리 불필요)
+    std::string basePath = _recordDir + "/" + seqStr;
 
     _segRecorderAudio = new RtpRecorder();
     _segRecorderAudio->Start(basePath + "_audio.rtp");

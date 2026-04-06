@@ -82,6 +82,7 @@ public:
     bool SetIpPort( const char *pszUserId, const char *pszIp, int iPort );
 
     void DeleteTimeout( int iTimeout );
+    void DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList );
     void SendOptions();
 
     void GetRegisteredUsers( USER_ID_LIST &clsList );

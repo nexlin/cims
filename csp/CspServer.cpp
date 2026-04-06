@@ -172,10 +172,24 @@ int ServiceMain() {
         ++iSecond;
         if ( iSecond % 10 == 0 ) {
             gclsNonceMap.DeleteTimeout( 1000 );
-            gclsUserMap.DeleteTimeout( 1000 );
+
+            // 등록 만료 사용자 삭제 → DB logout_time 동기화 + PTT 세션 정리
+            USER_ID_LIST clsExpiredUsers;
+            gclsUserMap.DeleteTimeout( 1000, clsExpiredUsers );
+            for ( const auto &strUserId : clsExpiredUsers ) {
+                CLog::Print( LOG_INFO, "Registration expired: user(%s) — syncing DB and cleaning resources",
+                             strUserId.c_str() );
+                gclsCspUserMap.unregisterUser( strUserId );
+                gclsGroupCallService.ClearUserCall( strUserId );
+            }
+
             gclsUserMap.SendOptions();
             gclsSubscriptionManager.CheckExpired();
-            //gclsCspUserMap.DeleteTimeout( 1000 );
+        }
+        // Stale Call 타이머 (30초마다 체크)
+        if ( iSecond % 30 == 0 && gclsSetup.m_iStaleCallTimeout > 0 ) {
+            gclsCallMap.DeleteTimeout( gclsSetup.m_iStaleCallTimeout );
+            gclsTransCallMap.DeleteTimeout( gclsSetup.m_iStaleCallTimeout );
         }
         if ( iSecond % 60 == 0 ) {
             gclsSipServerMap.Load();
