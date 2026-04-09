@@ -174,7 +174,9 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
             << ",\"timeouts\":{\"user_timeout\":" << gclsSetup.m_iUserTimeout
             << ",\"stale_call_timeout\":" << gclsSetup.m_iStaleCallTimeout
             << ",\"send_options_period\":" << gclsSetup.m_iSendOptionsPeriod
-            << "}}";
+            << "}"
+            << ",\"record_enable\":" << (gclsSetup.m_bRecordEnable ? "true" : "false")
+            << "}";
 
         std::string resp = oss.str();
         sendto(m_iServerSock, resp.c_str(), resp.size(), 0,

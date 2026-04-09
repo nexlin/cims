@@ -37,7 +37,11 @@ export const usersApi = {
   get:    (id: number)                                      => api.get<UserDetail>(`/users/${id}`),
   create: (data: UserInput)                                 => api.post<{id:number}>('/users', data),
   update: (id: number, data: Partial<UserInput>)            => api.put<{id:number}>(`/users/${id}`, data),
-  delete: (id: number)                                      => api.delete<{id:number}>(`/users/${id}`),
+  delete:      (id: number)                                  => api.delete<{id:number}>(`/users/${id}`),
+  batchDelete: (ids: number[])                               => api.delete<{deleted:number, errors:Array<{id:number,error:string}>}>('/users/batch', {ids}),
+
+  importExcel: (base64: string)                              => api.post<{total:number, created_users:number, created_voip:number, created_ptt:number, errors:Array<{row:number,sheet:string,error:string}>}>('/users/import', {file_base64: base64}),
+  templateUrl: '/api/v1/users/import/template',
 
   addSub:     (pid: number, svc: 'call'|'ptt', sub: Partial<Subscription>)              => api.post<{id:string}>(`/users/${pid}/${svc}`, sub),
   updateSub:  (pid: number, svc: 'call'|'ptt', msisdn: string, data: Partial<Subscription>) => api.put<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`, data),

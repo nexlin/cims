@@ -55,6 +55,13 @@
         "MsgLog": {
             "Dir": "@MSG_LOG_DIR@"
         },
+        "ServiceLog": {
+            "Dir": "@SERVICE_LOG_DIR@"
+        },
+        "Recording": {
+            "Enable": true,
+            "Dir": "@RECORD_DIR@"
+        },
         "Monitor": {
             "Port": 16000,
             "ClientIpList": ["@CSP_IP@"]

@@ -86,6 +86,9 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                 return await _create_user(handler_args.body, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
+        if person_id == 'batch' and method == 'DELETE':
+            return await _batch_delete_users(handler_args.body, config)
+
         if sub is None:
             if method == 'GET':
                 return await _get_user(person_id, config)
@@ -129,7 +132,7 @@ async def _list_users(config):
             has_email = _has_email_column(cur)
             email_col = ", u.email" if has_email else ""
             cur.execute(
-                f"SELECT u.id, u.name{email_col}, u.org_id, u.details, "
+                f"SELECT u.id, u.name, u.login_id{email_col}, u.org_id, u.details, "
                 "u.create_time, u.update_time "
                 "FROM users u "
                 "ORDER BY u.id"
@@ -343,6 +346,29 @@ async def _delete_user(person_id: str, config):
     return HandlerResult(status=200, body={'id': person_id})
 
 
+async def _batch_delete_users(body, config):
+    """다수의 가입자를 한번에 삭제"""
+    ids = body.get('ids', []) if body else []
+    if not ids:
+        return HandlerResult(status=400, body={'error': 'ids 필드가 필요합니다'})
+
+    deleted = 0
+    errors = []
+    for pid in ids:
+        try:
+            result = await _delete_user(str(pid), config)
+            if result.status == 200:
+                deleted += 1
+            else:
+                errors.append({'id': pid, 'error': 'not found'})
+        except Exception as e:
+            errors.append({'id': pid, 'error': str(e)})
+
+    return HandlerResult(status=200, body={
+        'deleted': deleted, 'errors': errors
+    })
+
+
 # ──────────────────────────────────────────────────────────────
 #  Subscription handlers (call / ptt)
 # ──────────────────────────────────────────────────────────────
@@ -497,10 +523,17 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 async def _list_groups(config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, name, video_enabled FROM ptt_groups ORDER BY id")
+            cur.execute(
+                "SELECT id, name, video_enabled, priority, encryption, emergency_call, "
+                "org_code, session_start, session_end FROM ptt_groups ORDER BY id"
+            )
             groups = cur.fetchall()
             for g in groups:
                 g['video_enabled'] = bool(g.get('video_enabled', 0))
+                g['encryption'] = bool(g.get('encryption', 0))
+                g['emergency_call'] = bool(g.get('emergency_call', 0))
+                if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
+                if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
                 cur.execute(
                     "SELECT user_id, priority FROM ptt_group_members "
                     "WHERE group_id=%s ORDER BY priority",
@@ -514,13 +547,18 @@ async def _get_group(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name, video_enabled FROM ptt_groups WHERE id=%s",
+                "SELECT id, name, video_enabled, priority, encryption, emergency_call, "
+                "org_code, session_start, session_end FROM ptt_groups WHERE id=%s",
                 (group_id,)
             )
             group = cur.fetchone()
             if group is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             group['video_enabled'] = bool(group.get('video_enabled', 0))
+            group['encryption'] = bool(group.get('encryption', 0))
+            group['emergency_call'] = bool(group.get('emergency_call', 0))
+            if group.get('session_start'): group['session_start'] = group['session_start'].isoformat()
+            if group.get('session_end'): group['session_end'] = group['session_end'].isoformat()
             cur.execute(
                 "SELECT user_id, priority FROM ptt_group_members "
                 "WHERE group_id=%s ORDER BY priority",
@@ -536,15 +574,24 @@ async def _create_group(body, config):
     group_id = body.get('id', '').strip()
     if not group_id:
         return HandlerResult(status=400, body={'error': 'id is required'})
-    name          = body.get('name', group_id)
-    video_enabled = 1 if body.get('video_enabled', False) else 0
-    members       = body.get('members', [])
+    name           = body.get('name', group_id)
+    video_enabled  = 1 if body.get('video_enabled', False) else 0
+    priority       = int(body.get('priority', 5))
+    encryption     = 1 if body.get('encryption', False) else 0
+    emergency_call = 1 if body.get('emergency_call', False) else 0
+    org_code       = body.get('org_code', '') or None
+    session_start  = body.get('session_start') or None
+    session_end    = body.get('session_end') or None
+    members        = body.get('members', [])
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO ptt_groups (id, name, video_enabled) VALUES (%s, %s, %s)",
-                (group_id, name, video_enabled)
+                "INSERT INTO ptt_groups (id, name, video_enabled, priority, encryption, "
+                "emergency_call, org_code, session_start, session_end) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (group_id, name, video_enabled, priority, encryption,
+                 emergency_call, org_code, session_start, session_end)
             )
             for m in members:
                 uid  = m.get('user_id', m.get('id', ''))
@@ -573,6 +620,22 @@ async def _update_group(group_id: str, body, config):
             if 'video_enabled' in body:
                 update_fields.append('video_enabled=%s')
                 update_vals.append(1 if body['video_enabled'] else 0)
+            for fld in ('priority',):
+                if fld in body:
+                    update_fields.append(f'{fld}=%s')
+                    update_vals.append(int(body[fld]))
+            for fld in ('encryption', 'emergency_call'):
+                if fld in body:
+                    update_fields.append(f'{fld}=%s')
+                    update_vals.append(1 if body[fld] else 0)
+            for fld in ('org_code',):
+                if fld in body:
+                    update_fields.append(f'{fld}=%s')
+                    update_vals.append(body[fld] or None)
+            for fld in ('session_start', 'session_end'):
+                if fld in body:
+                    update_fields.append(f'{fld}=%s')
+                    update_vals.append(body[fld] or None)
             if update_fields:
                 update_vals.append(group_id)
                 cur.execute(
@@ -874,8 +937,219 @@ async def handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         return HandlerResult(status=500, body={'error': str(e)})
 
 
+# ──────────────────────────────────────────────────────────────
+#  Excel Import / Template
+# ──────────────────────────────────────────────────────────────
+
+_IMPORT_BASE = '/api/v1/users/import'
+
+
+async def handle_import(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    config = kwargs.get('config', {})
+    method = handler_args.method.upper()
+    parts = _path_parts(handler_args.full_path, _IMPORT_BASE)
+
+    if len(parts) >= 1 and parts[0] == 'template' and method == 'GET':
+        return _generate_template()
+
+    if method == 'POST':
+        return await _process_import(handler_args, config)
+
+    return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
+
+def _generate_template():
+    """빈 Excel 템플릿 생성 후 반환"""
+    import openpyxl
+    import io
+
+    wb = openpyxl.Workbook()
+    # Sheet 1: users
+    ws1 = wb.active
+    ws1.title = 'users'
+    ws1.append(['name', 'login_id', 'org_code', 'details', 'reject_ids'])
+    ws1.append(['홍길동', 'hong', 'DEV_01', '개발1팀', '+8210001,+8210002'])
+
+    # Sheet 2: voip_subscriptions
+    ws2 = wb.create_sheet('voip_subscriptions')
+    ws2.append(['name', 'msisdn', 'auth_id', 'password', 'dnd', 'forward_id'])
+    ws2.append(['홍길동', '+821357007100', '45003310000100@ims.domain', '123456', 'N', ''])
+
+    # Sheet 3: ptt_subscriptions
+    ws3 = wb.create_sheet('ptt_subscriptions')
+    ws3.append(['name', 'msisdn', 'auth_id', 'password', 'dnd'])
+    ws3.append(['홍길동', '+82571900100', '', '123456', 'N'])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return HandlerResult(status=200, body=buf.getvalue(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="cims_import_template.xlsx"',
+    })
+
+
+async def _process_import(handler_args: HandlerArgs, config):
+    """Excel 파일을 파싱하여 가입자/구독 일괄 등록"""
+    import openpyxl
+    import io
+
+    # multipart body에서 파일 데이터 추출
+    file_data = handler_args.raw_body if hasattr(handler_args, 'raw_body') else None
+    if not file_data:
+        # JSON body에 base64 인코딩된 파일이 올 수도 있음
+        body = handler_args.body or {}
+        if 'file_base64' in body:
+            import base64
+            file_data = base64.b64decode(body['file_base64'])
+        else:
+            return HandlerResult(status=400, body={'error': 'file_base64 필드가 필요합니다'})
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_data))
+    except Exception as e:
+        return HandlerResult(status=400, body={'error': f'Excel 파일 파싱 실패: {e}'})
+
+    result = {'created_users': 0, 'created_voip': 0, 'created_ptt': 0, 'errors': []}
+    name_to_id = {}  # name → person_id 매핑
+
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            # 기존 사용자 name → id 매핑 로드
+            cur.execute("SELECT id, name FROM users")
+            for row in cur.fetchall():
+                name_to_id[row['name']] = row['id']
+
+            # Sheet 1: users
+            if 'users' in wb.sheetnames:
+                ws = wb['users']
+                headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+                for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    rd = dict(zip(headers, row))
+                    name = str(rd.get('name', '') or '').strip()
+                    if not name:
+                        result['errors'].append({'row': i, 'sheet': 'users', 'error': 'name 필수'})
+                        continue
+                    if name in name_to_id:
+                        continue  # 이미 존재, 스킵
+
+                    login_id = str(rd.get('login_id', '') or '').strip()
+                    org_id = str(rd.get('org_code', '') or '').strip()
+                    details = str(rd.get('details', '') or '').strip()
+                    reject_ids = str(rd.get('reject_ids', '') or '').strip()
+
+                    try:
+                        cur.execute(
+                            "INSERT INTO users (name, login_id, org_id, details) VALUES (%s,%s,%s,%s)",
+                            (name, login_id, org_id, details)
+                        )
+                        pid = cur.lastrowid
+                        name_to_id[name] = pid
+                        result['created_users'] += 1
+
+                        if reject_ids:
+                            for rid in reject_ids.split(','):
+                                rid = rid.strip()
+                                if rid:
+                                    cur.execute(
+                                        "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s,%s)",
+                                        (pid, rid)
+                                    )
+                    except Exception as e:
+                        result['errors'].append({'row': i, 'sheet': 'users', 'error': str(e)})
+
+            # Sheet 2: voip_subscriptions
+            if 'voip_subscriptions' in wb.sheetnames:
+                ws = wb['voip_subscriptions']
+                headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+                for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    rd = dict(zip(headers, row))
+                    name = str(rd.get('name', '') or '').strip()
+                    msisdn = str(rd.get('msisdn', '') or '').strip()
+                    if not name or not msisdn:
+                        result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': 'name/msisdn 필수'})
+                        continue
+
+                    pid = name_to_id.get(name)
+                    if not pid:
+                        # 자동 생성
+                        try:
+                            cur.execute("INSERT INTO users (name) VALUES (%s)", (name,))
+                            pid = cur.lastrowid
+                            name_to_id[name] = pid
+                            result['created_users'] += 1
+                        except Exception as e:
+                            result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': f'사용자 생성 실패: {e}'})
+                            continue
+
+                    auth_id = str(rd.get('auth_id', '') or '').strip() or msisdn
+                    passwd = str(rd.get('password', '') or '').strip() or '123456'
+                    dnd = 1 if str(rd.get('dnd', '')).upper() in ('Y', 'YES', '1', 'TRUE') else 0
+                    forward_id = str(rd.get('forward_id', '') or '').strip()
+
+                    try:
+                        cur.execute(
+                            "INSERT IGNORE INTO voip_subscriptions (id, user_id, auth_id, passwd, dnd, forward_id) "
+                            "VALUES (%s,%s,%s,%s,%s,%s)",
+                            (msisdn, pid, auth_id, passwd, dnd, forward_id)
+                        )
+                        if cur.rowcount > 0:
+                            result['created_voip'] += 1
+                            notify_csp("user_change", f"tel:{msisdn}", "PUT")
+                        else:
+                            result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': f'MSISDN 중복: {msisdn}'})
+                    except Exception as e:
+                        result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': str(e)})
+
+            # Sheet 3: ptt_subscriptions
+            if 'ptt_subscriptions' in wb.sheetnames:
+                ws = wb['ptt_subscriptions']
+                headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+                for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    rd = dict(zip(headers, row))
+                    name = str(rd.get('name', '') or '').strip()
+                    msisdn = str(rd.get('msisdn', '') or '').strip()
+                    if not name or not msisdn:
+                        result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': 'name/msisdn 필수'})
+                        continue
+
+                    pid = name_to_id.get(name)
+                    if not pid:
+                        try:
+                            cur.execute("INSERT INTO users (name) VALUES (%s)", (name,))
+                            pid = cur.lastrowid
+                            name_to_id[name] = pid
+                            result['created_users'] += 1
+                        except Exception as e:
+                            result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': f'사용자 생성 실패: {e}'})
+                            continue
+
+                    auth_id = str(rd.get('auth_id', '') or '').strip() or msisdn
+                    passwd = str(rd.get('password', '') or '').strip() or '123456'
+                    dnd = 1 if str(rd.get('dnd', '')).upper() in ('Y', 'YES', '1', 'TRUE') else 0
+
+                    try:
+                        cur.execute(
+                            "INSERT IGNORE INTO ptt_subscriptions (id, user_id, auth_id, passwd, dnd) "
+                            "VALUES (%s,%s,%s,%s,%s)",
+                            (msisdn, pid, auth_id, passwd, dnd)
+                        )
+                        if cur.rowcount > 0:
+                            result['created_ptt'] += 1
+                            notify_csp("user_change", f"tel:{msisdn}", "PUT")
+                        else:
+                            result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': f'MSISDN 중복: {msisdn}'})
+                    except Exception as e:
+                        result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': str(e)})
+
+    result['total'] = result['created_users'] + result['created_voip'] + result['created_ptt']
+    return HandlerResult(status=200, body=result)
+
+
 CIMS_ADMIN_HANDLER_LIST = [
     (_USERS_BASE,    handle_users,      {}),
+    (_IMPORT_BASE,   handle_import,     {}),
     (_GROUPS_BASE,   handle_ptt_groups, {}),
-    (_CALL_LOGS_BASE, handle_call_logs, {}),
+    # call_logs는 csc_flow.py의 파일시스템 기반 API로 이동
 ]

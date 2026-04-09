@@ -52,6 +52,80 @@ def run_ptt_tests():
     c.login()
 
     # ================================================================
+    # PTT-MCPTT: MCPTT HTTPS 시나리오 (IdMS/GMS/CMS)
+    # ================================================================
+    print("\n── PTT-MCPTT: MCPTT HTTPS 인증/설정 ──")
+
+    MCPTT_BASE = "https://127.0.0.1:4430"
+    import requests, hashlib, base64, secrets
+    mcptt_session = requests.Session()
+    mcptt_session.verify = False
+
+    def mcptt_01():
+        """IdMS 인증 (OAuth2 PKCE) → access_token 발급"""
+        # PKCE 생성
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=')
+        challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).decode().rstrip('=')
+
+        # 1. Auth Request
+        r1 = mcptt_session.get(f"{MCPTT_BASE}/idms/authreq", params={
+            "client_id": "MCPTT_UE",
+            "user_name": f"tel:{PTT_USER1}",
+            "user_password": PTT_PW,
+            "redirect_uri": "http://localhost/callback",
+            "state": "test_state",
+            "scope": "openid mcptt",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        })
+        if r1.status_code != 200:
+            return False, f"authreq failed: {r1.status_code} {r1.text[:100]}"
+        code = r1.json().get("code")
+        if not code:
+            return False, f"authreq no code: {r1.json()}"
+
+        # 2. Token Request
+        r2 = mcptt_session.post(f"{MCPTT_BASE}/idms/tokenreq", json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "redirect_uri": "http://localhost/callback",
+            "client_id": "MCPTT_UE",
+        })
+        if r2.status_code != 200:
+            return False, f"tokenreq failed: {r2.status_code} {r2.text[:100]}"
+        tokens = r2.json()
+        ok = "access_token" in tokens and "refresh_token" in tokens
+        # 토큰 저장 (후속 테스트용)
+        mcptt_session.headers["Authorization"] = f"Bearer {tokens.get('access_token', '')}"
+        return ok, f"access_token={'OK' if tokens.get('access_token') else 'NG'}, refresh={'OK' if tokens.get('refresh_token') else 'NG'}"
+    runner.run("PTT-MCPTT-01", "IdMS 인증 (PKCE) + 토큰 발급", mcptt_01)
+
+    def mcptt_02():
+        """GMS 그룹 목록 조회"""
+        r = mcptt_session.get(f"{MCPTT_BASE}/org.openmobilealliance.groups/users/tel:{PTT_USER1}")
+        ok = r.status_code == 200
+        groups = r.json() if ok else []
+        return ok, f"status={r.status_code}, groups={len(groups)}건"
+    runner.run("PTT-MCPTT-02", "GMS 그룹 목록 조회", mcptt_02)
+
+    def mcptt_03():
+        """CMS 사용자 프로필 조회"""
+        r = mcptt_session.get(f"{MCPTT_BASE}/org.3gpp.mcptt.user-profile/users/tel:{PTT_USER1}/user-profile")
+        ok = r.status_code == 200
+        return ok, f"status={r.status_code}, content_type={r.headers.get('content-type','')[:40]}"
+    runner.run("PTT-MCPTT-03", "CMS 사용자 프로필 조회", mcptt_03)
+
+    def mcptt_04():
+        """CMS 서비스 설정 조회"""
+        r = mcptt_session.get(f"{MCPTT_BASE}/org.3gpp.mcptt.service-config/users/tel:{PTT_USER1}/service-config")
+        ok = r.status_code == 200
+        return ok, f"status={r.status_code}"
+    runner.run("PTT-MCPTT-04", "CMS 서비스 설정 조회", mcptt_04)
+
+    # ================================================================
     # PTT-REG: 등록 + 구독
     # ================================================================
     print("\n── PTT-REG: 등록 및 구독 ──")
@@ -170,7 +244,7 @@ def run_ptt_tests():
         checks.append(("서비스상태 PTT 그룹참여=0", ptt_in_grp1 == 0 or db_active_calls == 0))
 
         # 이력 확인
-        logs = c.get("/api/v1/call/logs", {"call_type": "ptt", "limit": "5"})
+        logs = c.get("/api/v1/call/logs", {"call_type": "ptt", "limit": "5", "date": time.strftime("%Y-%m-%d")})
         ptt_logs = [l for l in logs.get("logs", []) if l.get("call_type") == "ptt"]
         checks.append(("PTT 이력 존재", len(ptt_logs) > 0))
 
@@ -300,7 +374,7 @@ def run_ptt_tests():
 
     def dash_04():
         """PTT 통화 이력 조회"""
-        logs = c.get("/api/v1/call/logs", {"call_type": "ptt", "limit": "10"})
+        logs = c.get("/api/v1/call/logs", {"call_type": "ptt", "limit": "10", "date": time.strftime("%Y-%m-%d")})
         ok = logs["_status"] == 200 and "logs" in logs
         log_list = logs.get("logs", [])
         return ok, f"total={logs.get('total')}, recent={len(log_list)}건"

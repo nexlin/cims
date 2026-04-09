@@ -227,9 +227,11 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
-    // 그룹 기본 정보
+    // 그룹 기본 정보 (확장 필드 포함)
     std::string strSql =
-        "SELECT id, name, video_enabled FROM ptt_groups WHERE id='" + Escape(strGroupId) + "'";
+        "SELECT id, name, video_enabled, priority, encryption, emergency_call, "
+        "org_code, UNIX_TIMESTAMP(session_start) AS ss, UNIX_TIMESTAMP(session_end) AS se "
+        "FROM ptt_groups WHERE id='" + Escape(strGroupId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
@@ -241,9 +243,15 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
     }
 
     clsGroup.Clear();
-    clsGroup._id           = row[0] ? row[0] : "";
-    clsGroup._name         = row[1] ? row[1] : "";
-    clsGroup._videoEnabled = row[2] ? (atoi(row[2]) != 0) : false;
+    clsGroup._id             = row[0] ? row[0] : "";
+    clsGroup._name           = row[1] ? row[1] : "";
+    clsGroup._videoEnabled   = row[2] ? (atoi(row[2]) != 0) : false;
+    clsGroup._priority       = row[3] ? atoi(row[3]) : 5;
+    clsGroup._encryption     = row[4] ? (atoi(row[4]) != 0) : false;
+    clsGroup._emergencyCall  = row[5] ? (atoi(row[5]) != 0) : false;
+    clsGroup._orgCode        = row[6] ? row[6] : "";
+    clsGroup._sessionStart   = row[7] ? (time_t)atoll(row[7]) : 0;
+    clsGroup._sessionEnd     = row[8] ? (time_t)atoll(row[8]) : 0;
     mysql_free_result(pRes);
 
     // 멤버 목록

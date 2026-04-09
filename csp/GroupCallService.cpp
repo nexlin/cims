@@ -13,6 +13,7 @@
 #include "RtpMap.h"
 #include "UserMap.h"
 #include "RecordPath.h"
+#include "CallDir.h"
 #include "SipServerSetup.h"
 #include "CspPttGroup.h"
 #include "SipMessage.h"
@@ -46,8 +47,19 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         return false;
     }
 
-    CLog::Print( LOG_INFO, "Processing Group Call GroupId(%s) Name(%s) Caller(%s)",
-                 pszGroupId, clsGroup._name.c_str(), pszCallerInfo );
+    CLog::Print( LOG_INFO, "Processing Group Call GroupId(%s) Name(%s) Caller(%s) Priority(%d)",
+                 pszGroupId, clsGroup._name.c_str(), pszCallerInfo, clsGroup._priority );
+
+    // 세션 시간 확인: 현재시간이 session_start~session_end 범위 내인지
+    time_t tNow = time(NULL);
+    if ( clsGroup._sessionStart > 0 && tNow < clsGroup._sessionStart ) {
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session not started yet", pszGroupId );
+        return false;
+    }
+    if ( clsGroup._sessionEnd > 0 && tNow > clsGroup._sessionEnd ) {
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session expired", pszGroupId );
+        return false;
+    }
 
     // 1. CMP 공유 RTP 포트 확보 (포트가 0이면 재시도)
     int iSharedPort = -1;
@@ -64,9 +76,10 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
     }
     if ( iSharedPort <= 0 ) {
-        if ( gclsSetup.m_bRecordEnable ) {
-            strRecordDir = CRecordPath::BuildPttDir(
-                gclsSetup.m_strRecordDir, pszCallerInfo, pszGroupId);
+        // 녹취 경로: CallDir 통합 디렉터리 사용
+        if ( gclsCallDir.IsEnabled() ) {
+            strRecordDir = gclsCallDir.GetPttDir(pszGroupId);
+            gclsCallDir.PttSessionStart(pszGroupId, pszCallId, pszCallerInfo);
         }
         if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir ) ) {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
@@ -125,6 +138,13 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     }
 
     return true;
+}
+
+std::string CGroupCallService::GetGroupIdByCallId(const std::string& strCallId) {
+    std::unique_lock<std::recursive_mutex> lock(m_mutex);
+    auto it = m_mapCallSession.find(strCallId);
+    if (it != m_mapCallSession.end()) return it->second.strGroupId;
+    return "";
 }
 
 void CGroupCallService::ClearUserCall( const std::string& strUserId )
@@ -249,9 +269,9 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         CspPttGroup clsGroup;
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
             std::string strRecordDir;
-            if ( gclsSetup.m_bRecordEnable ) {
-                strRecordDir = CRecordPath::BuildPttDir(
-                    gclsSetup.m_strRecordDir, pszUserId, pszGroupId);
+            if ( gclsCallDir.IsEnabled() ) {
+                strRecordDir = gclsCallDir.GetPttDir(pszGroupId);
+                gclsCallDir.PttSessionStart(pszGroupId, "autojoin", pszUserId);
             }
             if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir ) ) {
                  bVideoEnabled = clsGroup._videoEnabled;

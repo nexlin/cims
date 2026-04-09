@@ -48,6 +48,9 @@ public:
      */
     void ClearUserCall( const std::string& strUserId );
 
+    /** callId가 PTT 그룹콜에 속하는지 확인. 속하면 groupId 반환, 아니면 빈 문자열 */
+    std::string GetGroupIdByCallId(const std::string& strCallId);
+
     // Recovery & Monitor
     void StartMonitor();
     void StopMonitor();

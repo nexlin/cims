@@ -41,12 +41,15 @@ export default function CallLogsPage() {
   const [fFromDt, setFFromDt] = useState('')
   const [fToDt, setFToDt] = useState('')
 
+  const [fEndReason, setFEndReason] = useState('')
+  const [autoRefresh, setAutoRefresh] = useState(false)
+
   const [detail, setDetail] = useState<CallLog | null>(null)
   const [flowTarget, setFlowTarget] = useState<{ callId: string; date: string } | null>(null)
 
   function openFlow(log: CallLog, e: React.MouseEvent) {
     e.stopPropagation()
-    const date = log.invite_time ? log.invite_time.substring(0, 10).replace(/-/g, '') : undefined
+    const date = log.invite_time ? log.invite_time.substring(0, 10) : undefined
     setFlowTarget({ callId: log.call_id, date: date ?? '' })
   }
 
@@ -54,12 +57,10 @@ export default function CallLogsPage() {
     setLoading(true)
     try {
       const r = await callsApi.list({
-        state: 'ended',
         msisdn: fMsisdn || undefined,
         group_id: fGroupId || undefined,
         call_type: fType || undefined,
-        from_dt: fFromDt || undefined,
-        to_dt: fToDt || undefined,
+        date: fFromDt || undefined,
         limit: PAGE_SIZE,
         offset: p * PAGE_SIZE,
       })
@@ -73,6 +74,12 @@ export default function CallLogsPage() {
   }, [show, fMsisdn, fGroupId, fType, fFromDt, fToDt])
 
   useEffect(() => { setPage(0); load(0) }, [load])
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    const iv = setInterval(() => load(page), 10000)
+    return () => clearInterval(iv)
+  }, [autoRefresh, load, page])
 
   function handleSearch() { setPage(0); load(0) }
   function handlePageChange(p: number) { setPage(p); load(p) }
@@ -96,7 +103,19 @@ export default function CallLogsPage() {
         <input type="date" className="form-input" value={fFromDt} onChange={e => setFFromDt(e.target.value)} style={{ width: 140 }} />
         <span className="ts">~</span>
         <input type="date" className="form-input" value={fToDt} onChange={e => setFToDt(e.target.value)} style={{ width: 140 }} />
+        <select className="form-input" value={fEndReason} onChange={e => setFEndReason(e.target.value)} style={{ width: 110 }}>
+          <option value="">종료사유</option>
+          <option value="normal">정상종료</option>
+          <option value="no_answer">무응답</option>
+          <option value="busy">통화중</option>
+          <option value="rejected">거절</option>
+          <option value="error">오류</option>
+        </select>
         <button className="btn btn--primary" onClick={handleSearch}>검색</button>
+        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
+          자동갱신
+        </label>
         <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 13 }}>총 {total}건</span>
       </div>
 
@@ -198,7 +217,18 @@ export default function CallLogsPage() {
               </table>
             </>
           )}
-          <div className="modal-footer"><button className="btn btn--ghost" onClick={() => setDetail(null)}>닫기</button></div>
+          <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn--sm btn--outline" onClick={() => { if (detail) openFlow(detail, null as unknown as React.MouseEvent); }}>
+                플로우 보기
+              </button>
+              <button className="btn btn--sm btn--outline" style={{ color: 'var(--danger)' }}
+                onClick={() => window.open(`/api/v1/recordings?call_type=${detail.call_type}&caller=${encodeURIComponent(detail.initiator)}&limit=1`, '_blank')}>
+                녹취 조회
+              </button>
+            </div>
+            <button className="btn btn--ghost" onClick={() => setDetail(null)}>닫기</button>
+          </div>
         </Modal>
       )}
     </div>

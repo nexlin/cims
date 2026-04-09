@@ -8,7 +8,9 @@
 #include <fstream>
 #include <sstream>
 
-CspPttGroup::CspPttGroup() : _videoEnabled(false) {
+CspPttGroup::CspPttGroup()
+    : _videoEnabled(false), _priority(5), _encryption(false),
+      _emergencyCall(false), _sessionStart(0), _sessionEnd(0) {
 }
 
 CspPttGroup::~CspPttGroup() {

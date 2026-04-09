@@ -18,7 +18,10 @@
 #include "CspServer.h"
 
 #include "MsgLogger.h"
+#include "CallDir.h"
 #include "CallMap.h"
+
+CCallDir gclsCallDir;
 #include "CmpClient.h"
 #include "DbManager.h"
 #include "CspServerDefine.h"
@@ -62,6 +65,7 @@ int ServiceMain() {
     CLog::SetPrefix( "csp" );
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
     gclsMsgLogger.Init( gclsSetup.m_strMsgLogDir, "csp" );
+    gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp" );
     CLog::Print( LOG_SYSTEM, "CspServer is started ( version-%s %s %s )", CSP_SERVER_VERSION, __DATE__, __TIME__ );
     CLog::Print( LOG_DEBUG, "CspServer[%s]", CDirectory::GetProgramDirectory() );
     if ( gclsSetup.m_strCdrFolder.empty() == false ) {

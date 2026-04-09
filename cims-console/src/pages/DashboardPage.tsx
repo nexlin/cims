@@ -76,19 +76,27 @@ export default function DashboardPage() {
         <KpiCard label="RTP 포트" value={`${data.cmp.rtp_ports.used}/${data.cmp.rtp_ports.total}`} unit={`(${rtpPct}%)`} />
       </div>
 
-      {/* 역할 상태 */}
+      {/* 역할 + 타이머 설정 */}
       <div className="panel" style={{ padding: 16 }}>
         <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>CSP 모듈 역할</div>
-        <div style={{ display: 'flex', gap: 16 }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
           {Object.entries(data.csp.roles).map(([k, v]) => (
             <span key={k} className={`badge ${v ? 'badge--green' : 'badge--gray'}`}>
               {k}: {v ? 'ON' : 'OFF'}
             </span>
           ))}
-          <span style={{ marginLeft: 'auto' }} className={`badge ${data.cmp.record_enable ? 'badge--blue' : 'badge--gray'}`}>
-            녹취: {data.cmp.record_enable ? 'ON' : 'OFF'}
+          <span style={{ marginLeft: 'auto' }} className={`badge ${data.record_enable ? 'badge--blue' : 'badge--gray'}`}>
+            녹취: {data.record_enable ? 'ON' : 'OFF'}
           </span>
         </div>
+        {data.csp.timeouts && (
+          <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+            <span>등록 만료: {data.csp.timeouts.user_timeout}초</span>
+            <span>Stale Call: {data.csp.timeouts.stale_call_timeout}초</span>
+            <span>OPTIONS 주기: {data.csp.timeouts.send_options_period || '비활성'}초</span>
+            {data.cmp.session_timeout != null && <span>CMP 세션: {data.cmp.session_timeout}초</span>}
+          </div>
+        )}
       </div>
 
       {/* 알람 */}

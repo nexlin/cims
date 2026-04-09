@@ -39,12 +39,27 @@ public:
     /** Group Name */
     std::string _name;
 
-
     /** Member List (List of Group Members) */
     std::vector<std::shared_ptr<CspPttUser>> _pusers;
 
     /** Video relay enabled (H.264) */
     bool _videoEnabled;
+
+    /** 그룹 우선순위 (1=최고, 10=최저) */
+    int _priority;
+
+    /** 암호화 여부 (SRTP) */
+    bool _encryption;
+
+    /** 긴급통화 허용 여부 */
+    bool _emergencyCall;
+
+    /** 소속 조직 코드 */
+    std::string _orgCode;
+
+    /** 세션 시작/종료 시간 (0=즉시/무기한) */
+    time_t _sessionStart;
+    time_t _sessionEnd;
 
     /** Parsing method */
     bool load( std::string groupId );

@@ -58,6 +58,58 @@ export default function UsersPage() {
   const [editSubForm, setEditSubForm] = useState<SubForm>(EMPTY_SUB)
   const [editSubSaving, setEditSubSaving] = useState(false)
 
+  // Excel import
+  const [importOpen, setImportOpen] = useState(false)
+  const [importResult, setImportResult] = useState<{total:number, created_users:number, created_voip:number, created_ptt:number, errors:Array<{row:number,sheet:string,error:string}>} | null>(null)
+  const [importLoading, setImportLoading] = useState(false)
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportLoading(true)
+    setImportResult(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+      const result = await usersApi.importExcel(base64)
+      setImportResult(result)
+      if (result.total > 0) load()
+    } catch (err: unknown) {
+      show(String(err), 'err')
+    } finally {
+      setImportLoading(false)
+      e.target.value = ''  // reset file input
+    }
+  }
+
+  // 다중 선택 삭제
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+
+  function toggleSelect(id: number) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  function toggleSelectAll(filtered: UserSummary[]) {
+    if (selected.size === filtered.length && filtered.every(u => selected.has(u.id))) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(filtered.map(u => u.id)))
+    }
+  }
+  async function handleBatchDelete() {
+    if (selected.size === 0) return
+    if (!confirm(`${selected.size}명의 가입자와 관련 구독을 삭제합니다.\n되돌릴 수 없습니다.`)) return
+    try {
+      const result = await usersApi.batchDelete(Array.from(selected))
+      show(`${result.deleted}건 삭제 완료${result.errors.length ? `, ${result.errors.length}건 실패` : ''}`, result.errors.length ? 'err' : 'ok')
+      setSelected(new Set())
+      load()
+    } catch (e: unknown) { show(String(e), 'err') }
+  }
+
   // ── load ────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true)
@@ -185,8 +237,14 @@ export default function UsersPage() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <button className="btn btn--primary" onClick={openAdd}>＋ 가입자 추가</button>
-        <button className="btn btn--ghost" onClick={load}>↻ 새로고침</button>
+        <button className="btn btn--primary" onClick={openAdd}>＋ 추가</button>
+        <button className="btn btn--outline" onClick={() => setImportOpen(true)}>Excel 가져오기</button>
+        {selected.size > 0 && (
+          <button className="btn btn--danger" onClick={handleBatchDelete}>
+            선택 삭제 ({selected.size}건)
+          </button>
+        )}
+        <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
       </div>
 
       {/* table */}
@@ -197,6 +255,11 @@ export default function UsersPage() {
           <table className="data-table">
             <thead>
               <tr>
+                <th style={{ width: 36 }}>
+                  <input type="checkbox"
+                    checked={filtered.length > 0 && filtered.every(u => selected.has(u.id))}
+                    onChange={() => toggleSelectAll(filtered)} />
+                </th>
                 <th>이름</th>
                 <th>조직</th>
                 <th>Call 번호</th>
@@ -206,9 +269,12 @@ export default function UsersPage() {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={5} className="empty-cell">가입자 없음</td></tr>
+                <tr><td colSpan={6} className="empty-cell">가입자 없음</td></tr>
               ) : filtered.map(u => (
-                <tr key={u.id}>
+                <tr key={u.id} style={selected.has(u.id) ? { background: 'rgba(74,144,217,0.1)' } : undefined}>
+                  <td onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggleSelect(u.id)} />
+                  </td>
                   <td>
                     <div style={{ fontWeight: 500 }}>{u.name}</div>
                     {u.login_id && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{u.login_id}</div>}
@@ -428,6 +494,55 @@ export default function UsersPage() {
           <div className="modal-footer">
             <button className="btn btn--ghost" onClick={() => setDelTarget(null)}>취소</button>
             <button className="btn btn--danger" onClick={handleDelete}>삭제</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Excel Import 모달 ── */}
+      {importOpen && (
+        <Modal title="Excel 가져오기" onClose={() => { setImportOpen(false); setImportResult(null) }}>
+          <div className="modal-body">
+            <p style={{ marginBottom: 12 }}>
+              가입자, VoIP 구독, PTT 구독을 Excel 파일(.xlsx)로 일괄 등록합니다.
+            </p>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+              <label className="btn btn--primary" style={{ cursor: 'pointer' }}>
+                파일 선택
+                <input type="file" accept=".xlsx" onChange={handleImportFile} style={{ display: 'none' }} />
+              </label>
+              <a href={usersApi.templateUrl} className="btn btn--outline" download>
+                템플릿 다운로드
+              </a>
+              {importLoading && <span className="ts">처리 중...</span>}
+            </div>
+
+            {importResult && (
+              <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 16 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>등록 결과</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 16px', fontSize: 14 }}>
+                  <span>가입자 생성:</span><span><strong>{importResult.created_users}</strong>건</span>
+                  <span>VoIP 구독 생성:</span><span><strong>{importResult.created_voip}</strong>건</span>
+                  <span>PTT 구독 생성:</span><span><strong>{importResult.created_ptt}</strong>건</span>
+                </div>
+                {importResult.errors.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ color: 'var(--danger)', fontWeight: 600, marginBottom: 4 }}>
+                      오류 {importResult.errors.length}건
+                    </div>
+                    <div style={{ maxHeight: 200, overflow: 'auto', fontSize: 12 }}>
+                      {importResult.errors.map((e, i) => (
+                        <div key={i} style={{ color: 'var(--danger)', padding: '2px 0' }}>
+                          [{e.sheet}] 행 {e.row}: {e.error}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="modal-footer">
+            <button className="btn btn--ghost" onClick={() => { setImportOpen(false); setImportResult(null) }}>닫기</button>
           </div>
         </Modal>
       )}

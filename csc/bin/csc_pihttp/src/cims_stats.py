@@ -186,8 +186,8 @@ async def _health(config: dict) -> HandlerResult:
                 'used': cmp.get('rtp_ports_used', 0),
                 'free': cmp.get('rtp_ports_free', 0),
             },
-            'record_enable': cmp.get('record_enable', False),
         },
+        'record_enable': csp.get('record_enable', False),
     }
 
     # 활성 통화 목록 (DB에서)

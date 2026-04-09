@@ -205,7 +205,6 @@ void CmpServer::processStats(const SimpleJson::JsonNode& payload, const std::str
         + ",\"rtp_ports_total\":" + std::to_string(totalPorts)
         + ",\"rtp_ports_used\":" + std::to_string(usedPorts)
         + ",\"rtp_ports_free\":" + std::to_string(freeCount)
-        + ",\"record_enable\":" + (_recordEnable ? "true" : "false")
         + ",\"session_timeout\":" + std::to_string(_sessionTimeout)
         + ",\"group_details\":" + groupsJson
         + "}}";

@@ -39,6 +39,8 @@ export interface CallLogsQuery {
   msisdn?: string
   group_id?: string
   call_type?: string
+  date?: string
+  hour?: string
   from_dt?: string
   to_dt?: string
   limit?: number
@@ -53,6 +55,8 @@ function buildQs(q: CallLogsQuery): string {
   if (q.msisdn)    p.set('msisdn', q.msisdn)
   if (q.group_id)  p.set('group_id', q.group_id)
   if (q.call_type) p.set('call_type', q.call_type)
+  if (q.date)      p.set('date', q.date)
+  if (q.hour)      p.set('hour', q.hour)
   if (q.from_dt)   p.set('from_dt', q.from_dt)
   if (q.to_dt)     p.set('to_dt', q.to_dt)
   if (q.limit)     p.set('limit', String(q.limit))

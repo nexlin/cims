@@ -1,65 +1,45 @@
 #pragma once
 /**
- * MsgLogger.h  —  컴포넌트 간 메시지를 공유 스토리지(NAS/ext_mnt)에 기록
+ * MsgLogger.h — 인터페이스별 메시지 통계 로그 (body 미포함, 카운트용)
  *
- * 디렉터리 구조:
- *   {ext_mnt}/msg_logs/{YYYY}/{MM}/{DD}/{prefix}/{caller}/{HHmmss}_{caller}_{callee}_{callid_short}.d/{component}.jsonl
+ * 디렉터리: {MsgLogDir}/{component}/YYYY/MM/DD/HH/{interface}.jsonl
  *
- * JSONL 포맷 (1줄 = 1메시지):
- *   {"ts":"HH:MM:SS.us","from":"cwrtc","to":"csp","proto":"SIP",
- *    "label":"REGISTER","body":"REGISTER sip:..."}
+ * JSONL: {"ts":"HH:MM:SS","dir":"in|out","proto":"SIP","method":"INVITE","peer":"+821357007002"}
  */
 
 #include <string>
-#include <map>
 #include <mutex>
 
 class CMsgLogger {
 public:
     CMsgLogger() = default;
 
-    void Init(const std::string& extMntDir, const std::string& component);
-
-    bool IsEnabled() const { return !m_strLogDir.empty(); }
-
-    /**
-     * @brief 통화의 caller/callee 정보를 등록한다 (최초 1회).
-     *        이후 같은 callId로 Log() 호출 시 이 정보로 디렉터리를 생성한다.
-     */
-    void SetCallInfo(const char* callId, const char* caller, const char* callee);
+    void Init(const std::string& msgLogDir, const std::string& component);
+    bool IsEnabled() const { return !m_strBaseDir.empty(); }
 
     /**
-     * 메시지 1건 기록
+     * 메시지 1건 기록 (통계용, body 미포함)
+     * @param iface     인터페이스명 ("sip", "csc", "cmp", "mcptt", "console")
+     * @param dir       방향 ("in" 또는 "out")
+     * @param proto     프로토콜 ("SIP", "JSON", "HTTPS")
+     * @param method    메서드/상태 ("INVITE", "200", "add", "GET /api/...")
+     * @param peer      상대방 식별 (번호, IP 등, 생략 가능)
      */
-    void Log(const char* callId,
-             const char* from,
-             const char* to,
-             const char* proto,
-             const char* label,
-             const char* body);
+    void Log(const char* iface, const char* dir, const char* proto,
+             const char* method, const char* peer = "");
+
+    // 하위 호환: 기존 API (callId 무시, iface="sip" 자동)
+    void SetCallInfo(const char*, const char*, const char*) {}
+    void Log(const char* callId, const char* from, const char* to,
+             const char* proto, const char* label, const char* body);
 
 private:
-    std::string m_strLogDir;    // {ext_mnt}/msg_logs
-    std::string m_strComponent; // "csp", "cwrtc", "cmp"
+    std::string m_strBaseDir;   // {MsgLogDir}/{component}
     std::mutex  m_mtx;
 
-    // callId → 디렉터리 경로 캐시 (한 번 생성하면 재사용)
-    std::map<std::string, std::string> m_mapCallDir;
-
-    struct CallInfo {
-        std::string strCaller;
-        std::string strCallee;
-    };
-    std::map<std::string, CallInfo> m_mapCallInfo;
-
-    std::string BuildCallDir(const std::string& callId);
-    bool        EnsureDirRecursive(const std::string& path);
-    static std::string SanitizeForPath(const std::string& s, int maxLen = 40);
-    static std::string CallerPrefix(const std::string& caller);
-    static std::string EscapeJson(const std::string& s);
+    static bool EnsureDirRecursive(const std::string& path);
     static std::string GetTimestamp();
-    static void        GetDateParts(std::string& yyyy, std::string& mm, std::string& dd);
-    static std::string GetTimeShort();  // HHmmss
+    static void GetDateHourParts(std::string& yyyy, std::string& mm, std::string& dd, std::string& hh);
 };
 
 extern CMsgLogger gclsMsgLogger;

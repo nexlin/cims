@@ -39,5 +39,6 @@
         "Ip": "@CSP_IP@",
         "Port": 4421
     },
-    "MsgLogDir": "@MSG_LOG_DIR@"
+    "MsgLogDir": "@MSG_LOG_DIR@",
+    "ServiceLogDir": "@SERVICE_LOG_DIR@"
 }

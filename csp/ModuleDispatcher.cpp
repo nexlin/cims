@@ -12,6 +12,7 @@
 #include "ModuleDispatcher.h"
 
 #include "MsgLogger.h"
+#include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
 #include "CspServer.h"
@@ -133,7 +134,7 @@ bool CModuleDispatcher::SendResponse(CSipMessage* pclsMessage, int iStatusCode) 
     CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag(iStatusCode);
     if (pclsResponse == NULL) return false;
 
-    if (gclsMsgLogger.IsEnabled()) {
+    {
         std::string strCallId;
         pclsMessage->GetCallId(strCallId);
         if (!strCallId.empty()) {
@@ -144,7 +145,15 @@ bool CModuleDispatcher::SendResponse(CSipMessage* pclsMessage, int iStatusCode) 
             snprintf(szLabel, sizeof(szLabel), "%d %s", iStatusCode, pclsResponse->m_strReasonPhrase.c_str());
             char szSipBuf[8192];
             pclsResponse->ToString(szSipBuf, sizeof(szSipBuf));
-            gclsMsgLogger.Log(strCallId.c_str(), "csp", pszTo, "SIP", szLabel, szSipBuf);
+            if (gclsCallDir.IsEnabled()) {
+                std::string gid = gclsGroupCallService.GetGroupIdByCallId(strCallId);
+                if (!gid.empty())
+                    gclsCallDir.LogPtt(gid, "csp", pszTo, "SIP", szLabel, szSipBuf);
+                else
+                    gclsCallDir.LogVoip(strCallId, "csp", pszTo, "SIP", szLabel, szSipBuf);
+            }
+            if (gclsMsgLogger.IsEnabled())
+                gclsMsgLogger.Log(strCallId.c_str(), "csp", pszTo, "SIP", szLabel, szSipBuf);
         }
     }
     gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResponse);
@@ -189,6 +198,10 @@ void CModuleDispatcher::SaveCdr(const char* pszCallId, int iSipStatus) {
             time_t tAnswer = clsCdr.m_sttStartTime.tv_sec;
             time_t tEnd = clsCdr.m_sttEndTime.tv_sec ? clsCdr.m_sttEndTime.tv_sec : time(nullptr);
             gclsDbManager.UpdateCallLogEnded(clsCdr.m_strCallId, tAnswer, tEnd, iSipStatus);
+        }
+        if (gclsCallDir.IsEnabled()) {
+            int dur = (int)(clsCdr.m_sttEndTime.tv_sec - clsCdr.m_sttStartTime.tv_sec);
+            gclsCallDir.VoipCallEnd(clsCdr.m_strCallId, "normal", dur > 0 ? dur : 0);
         }
     }
 }
@@ -257,13 +270,33 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
     std::string strCallId;
     pclsMessage->GetCallId(strCallId);
 
-    // 메시지 로깅
+    // 메시지 로깅 (CallDir 통합 디렉터리 — VoIP/PTT 분기)
+    if (gclsCallDir.IsEnabled() && !strCallId.empty()) {
+        const char* pszFrom = "ue";
+        if (!pclsMessage->m_clsViaList.empty() && pclsMessage->m_clsViaList.front().m_iPort == 5062)
+            pszFrom = "cwrtc";
+        char szSipBuf[8192];
+        pclsMessage->ToString(szSipBuf, sizeof(szSipBuf));
+
+        std::string strGroupId = gclsGroupCallService.GetGroupIdByCallId(strCallId);
+        if (!strGroupId.empty()) {
+            // PTT: 그룹 디렉터리에 기록
+            gclsCallDir.LogPtt(strGroupId, pszFrom, "csp", "SIP",
+                               pclsMessage->m_strSipMethod.c_str(), szSipBuf);
+        } else {
+            // VoIP: call_id 디렉터리에 기록
+            gclsCallDir.GetVoipDir(strCallId,
+                pclsMessage->m_clsFrom.m_clsUri.m_strUser,
+                pclsMessage->m_clsTo.m_clsUri.m_strUser);
+            gclsCallDir.LogVoip(strCallId, pszFrom, "csp", "SIP",
+                                   pclsMessage->m_strSipMethod.c_str(), szSipBuf);
+        }
+    }
+    // 기존 MsgLogger도 유지 (하위 호환)
     if (gclsMsgLogger.IsEnabled() && !strCallId.empty()) {
-        // caller/callee 정보 등록 (최초 1회 캐시)
         gclsMsgLogger.SetCallInfo(strCallId.c_str(),
             pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(),
             pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str());
-
         const char* pszFrom = "ue";
         if (!pclsMessage->m_clsViaList.empty() && pclsMessage->m_clsViaList.front().m_iPort == 5062)
             pszFrom = "cwrtc";
@@ -337,6 +370,12 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
                     gclsDbManager.InsertParticipant(strCallId, strFrom, "caller", true);
                     gclsDbManager.InsertParticipant(strCallId, strTo, "callee", false);
                 }
+                // CallDir: call.json 생성
+                if (gclsCallDir.IsEnabled()) {
+                    gclsCallDir.VoipCallStart(strCallId, strFrom, strTo);
+                    gclsCallDir.VoipAddParticipant(strCallId, strFrom, "caller");
+                    gclsCallDir.VoipAddParticipant(strCallId, strTo, "callee");
+                }
 
                 return ProxyInvite(pclsMessage, clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort, clsUserInfo.m_eTransport);
             }
@@ -370,9 +409,12 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
             gclsUserAgent.m_clsSipStack.SendSipMessage(pclsFwd);
 
             if (pclsMessage->IsMethod(SIP_METHOD_BYE)) {
-                // Proxy 통화 종료 → DB state=ended 갱신
+                // Proxy 통화 종료
                 if (gclsDbManager.IsConnected()) {
                     gclsDbManager.UpdateCallLogEnded(strCallId, 0, time(NULL), 200);
+                }
+                if (gclsCallDir.IsEnabled()) {
+                    gclsCallDir.VoipCallEnd(strCallId, "normal", 0);
                 }
                 RemoveProxyCall(strCallId);
                 RemoveCallOwner(strCallId.c_str());
@@ -389,7 +431,7 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
 
 bool CModuleDispatcher::RecvResponse(int iThreadId, CSipMessage* pclsMessage) {
     // 메시지 로깅
-    if (gclsMsgLogger.IsEnabled()) {
+    {
         std::string strCallId;
         pclsMessage->GetCallId(strCallId);
         if (!strCallId.empty()) {
@@ -400,7 +442,15 @@ bool CModuleDispatcher::RecvResponse(int iThreadId, CSipMessage* pclsMessage) {
             snprintf(szLabel, sizeof(szLabel), "%d", pclsMessage->m_iStatusCode);
             char szSipBuf[8192];
             pclsMessage->ToString(szSipBuf, sizeof(szSipBuf));
-            gclsMsgLogger.Log(strCallId.c_str(), pszFrom, "csp", "SIP", szLabel, szSipBuf);
+            if (gclsCallDir.IsEnabled()) {
+                std::string gid = gclsGroupCallService.GetGroupIdByCallId(strCallId);
+                if (!gid.empty())
+                    gclsCallDir.LogPtt(gid, pszFrom, "csp", "SIP", szLabel, szSipBuf);
+                else
+                    gclsCallDir.LogVoip(strCallId, pszFrom, "csp", "SIP", szLabel, szSipBuf);
+            }
+            if (gclsMsgLogger.IsEnabled())
+                gclsMsgLogger.Log(strCallId.c_str(), pszFrom, "csp", "SIP", szLabel, szSipBuf);
         }
     }
 
@@ -646,6 +696,11 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
         gclsDbManager.InsertCallLog(pszCallId, false, "", pszFrom, pszTo);
         gclsDbManager.InsertParticipant(pszCallId, pszFrom, "caller", true);
         gclsDbManager.InsertParticipant(pszCallId, pszTo, "callee", false);
+    }
+    if (gclsCallDir.IsEnabled()) {
+        gclsCallDir.VoipCallStart(pszCallId, pszFrom, pszTo);
+        gclsCallDir.VoipAddParticipant(pszCallId, pszFrom, "caller");
+        gclsCallDir.VoipAddParticipant(pszCallId, pszTo, "callee");
     }
 }
 

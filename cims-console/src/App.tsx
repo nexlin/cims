@@ -1,31 +1,53 @@
 import { useState } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ToastProvider } from './components/Toast'
-import UsersPage from './pages/UsersPage'
-import GroupsPage from './pages/GroupsPage'
-import CallLogsPage from './pages/CallLogsPage'
+import Sidebar, { type PageId } from './components/Sidebar'
 import LoginPage from './pages/LoginPage'
-import DocsPage from './pages/DocsPage'
 import DashboardPage from './pages/DashboardPage'
+import OrganizationsPage from './pages/OrganizationsPage'
+import MembersPage from './pages/MembersPage'
+import SubscriptionsPage from './pages/SubscriptionsPage'
+import PttGroupsPage from './pages/PttGroupsPage'
 import ServiceStatusPage from './pages/ServiceStatusPage'
+import CallLogsPage from './pages/CallLogsPage'
+import RecordingsPage from './pages/RecordingsPage'
 import StatsPage from './pages/StatsPage'
+import DocsPage from './pages/DocsPage'
 import { authApi } from './api/auth'
 import './index.css'
 
-type Tab = 'dashboard' | 'users' | 'groups' | 'service' | 'history' | 'stats' | 'docs'
+const PAGE_TITLES: Record<PageId, string> = {
+  'dashboard': '대시보드',
+  'org': '조직 관리',
+  'members': '구성원 관리',
+  'subscriptions': 'VoLTE/PTT 번호 관리',
+  'ptt-groups': 'PTT 그룹 관리',
+  'service-status': '실시간 서비스 상태',
+  'history-volte': 'VoLTE 서비스 이력',
+  'history-ptt': 'PTT 서비스 이력',
+  'stats-volte': 'VoLTE 통계',
+  'stats-ptt': 'PTT 통계',
+  'stats-sip': 'SIP 메시지 통계',
+  'stats-cmp': 'CMP 인터페이스 통계',
+  'stats-csc': 'CSC 인터페이스 통계',
+  'stats-https': 'HTTPS 메시지 통계',
+  'recordings': '녹취 관리',
+  'verification': '시스템 검증',
+  'docs': '문서',
+}
 
 function Shell() {
   const { user, loading, logout, refresh } = useAuth()
-  const [tab,       setTab]       = useState<Tab>('dashboard')
+  const [page, setPage] = useState<PageId>('dashboard')
   const [showChgPw, setShowChgPw] = useState(false)
-  const [chgError,  setChgError]  = useState('')
-  const [chgOk,     setChgOk]     = useState('')
+  const [chgError, setChgError] = useState('')
+  const [chgOk, setChgOk] = useState('')
   const [oldPw, setOldPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [newPw2, setNewPw2] = useState('')
 
   if (loading) return <div className="auth-loading">로딩 중...</div>
-  if (!user)   return <LoginPage />
+  if (!user) return <LoginPage />
 
   const isAdmin = user.role === 'admin'
 
@@ -45,68 +67,52 @@ function Shell() {
     }
   }
 
+  function renderPage() {
+    if (!isAdmin && page !== 'docs') {
+      return <div className="empty" style={{ marginTop: 80 }}>관리자 권한이 필요합니다</div>
+    }
+    switch (page) {
+      case 'dashboard':       return <DashboardPage />
+      case 'org':             return <OrganizationsPage />
+      case 'members':         return <MembersPage />
+      case 'subscriptions':   return <SubscriptionsPage />
+      case 'ptt-groups':      return <PttGroupsPage />
+      case 'service-status':  return <ServiceStatusPage />
+      case 'history-volte':   return <CallLogsPage />
+      case 'history-ptt':     return <CallLogsPage />
+      case 'stats-volte':     return <StatsPage />
+      case 'stats-ptt':       return <StatsPage />
+      case 'stats-sip':       return <StatsPage />
+      case 'stats-cmp':       return <StatsPage />
+      case 'stats-csc':       return <StatsPage />
+      case 'stats-https':     return <StatsPage />
+      case 'recordings':      return <RecordingsPage />
+      case 'verification':    return <div className="empty">검증 페이지 (준비 중)</div>
+      case 'docs':            return <DocsPage />
+      default:                return <DashboardPage />
+    }
+  }
+
   return (
     <ToastProvider>
-      <div className="app">
-        <header className="app-header">
-          <div className="app-logo">
-            <span className="app-logo-icon">📡</span>
-            <span className="app-logo-text">CIMS Console</span>
-          </div>
-          <nav className="tab-nav">
-            {isAdmin && (
-              <>
-                <button className={`tab-btn${tab === 'dashboard' ? ' tab-btn--active' : ''}`} onClick={() => setTab('dashboard')}>
-                  대시보드
-                </button>
-                <button className={`tab-btn${tab === 'users'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('users')}>
-                  가입자 관리
-                </button>
-                <button className={`tab-btn${tab === 'groups' ? ' tab-btn--active' : ''}`} onClick={() => setTab('groups')}>
-                  PTT 그룹
-                </button>
-                <button className={`tab-btn${tab === 'service' ? ' tab-btn--active' : ''}`} onClick={() => setTab('service')}>
-                  서비스 상태
-                </button>
-                <button className={`tab-btn${tab === 'history' ? ' tab-btn--active' : ''}`} onClick={() => setTab('history')}>
-                  서비스 이력
-                </button>
-                <button className={`tab-btn${tab === 'stats' ? ' tab-btn--active' : ''}`} onClick={() => setTab('stats')}>
-                  통계
-                </button>
-              </>
-            )}
-            <button className={`tab-btn${tab === 'docs' ? ' tab-btn--active' : ''}`} onClick={() => setTab('docs')}>
-              문서
-            </button>
-          </nav>
-          <div className="app-user">
-            <span className="app-user-name">{user.name}</span>
-            <span className={`badge ${user.role === 'admin' ? 'badge--blue' : 'badge--gray'}`}>
-              {user.role === 'admin' ? '관리자' : '사용자'}
-            </span>
-            <button className="btn btn--ghost btn--sm" onClick={() => setShowChgPw(true)}>🔑</button>
-            <button className="btn btn--ghost btn--sm" onClick={logout}>로그아웃</button>
-          </div>
-        </header>
+      <div className="app-layout">
+        <Sidebar
+          current={page}
+          onNavigate={setPage}
+          userName={user.name}
+          userRole={user.role}
+          onLogout={logout}
+          onChangePw={() => setShowChgPw(true)}
+        />
 
-        <main className="app-main">
-          {!isAdmin ? (
-            <div className="empty" style={{ marginTop: 80, fontSize: 16 }}>
-              관리자 권한이 필요합니다
-            </div>
-          ) : (
-            <>
-              {tab === 'dashboard' && <DashboardPage />}
-              {tab === 'users'     && <UsersPage />}
-              {tab === 'groups'    && <GroupsPage />}
-              {tab === 'service'   && <ServiceStatusPage />}
-              {tab === 'history'   && <CallLogsPage />}
-              {tab === 'stats'     && <StatsPage />}
-              {tab === 'docs'      && <DocsPage />}
-            </>
-          )}
-        </main>
+        <div className="app-content">
+          <div className="app-content-header">
+            {PAGE_TITLES[page] || ''}
+          </div>
+          <div className="app-content-body">
+            {renderPage()}
+          </div>
+        </div>
       </div>
 
       {showChgPw && (
@@ -130,7 +136,7 @@ function Shell() {
                     onChange={e => setNewPw2(e.target.value)} />
                 </div>
                 {chgError && <div className="auth-error" style={{ marginTop: 12 }}>{chgError}</div>}
-                {chgOk    && <div className="auth-ok"    style={{ marginTop: 12 }}>{chgOk}</div>}
+                {chgOk && <div className="auth-ok" style={{ marginTop: 12 }}>{chgOk}</div>}
               </div>
               <div className="modal-footer">
                 <button className="btn btn--outline" type="button" onClick={() => setShowChgPw(false)}>취소</button>

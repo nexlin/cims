@@ -8,6 +8,7 @@ import datetime
 import jwt
 import asyncio
 import hashlib
+import csc_logger
 import base64
 from typing import Dict, Tuple, Optional, List
 
@@ -151,13 +152,22 @@ def load_shared_data(config):
             )
             with conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id, name, video_enabled FROM ptt_groups")
+                    cur.execute(
+                        "SELECT id, name, video_enabled, priority, encryption, "
+                        "emergency_call, org_code, session_start, session_end FROM ptt_groups"
+                    )
                     for row in cur.fetchall():
                         gid = row['id']
                         uri = f"tel:{gid}" if gid.startswith('+') else f"tel:+{gid}"
                         GROUPS[uri] = {
                             "display_name": row['name'],
                             "video_enabled": bool(row.get('video_enabled', 0)),
+                            "priority": row.get('priority', 5),
+                            "encryption": bool(row.get('encryption', 0)),
+                            "emergency_call": bool(row.get('emergency_call', 0)),
+                            "org_code": row.get('org_code', ''),
+                            "session_start": row['session_start'].isoformat() if row.get('session_start') else None,
+                            "session_end": row['session_end'].isoformat() if row.get('session_end') else None,
                             "etag": f"etag_{gid}",
                             "created_by": "", "created_at": "",
                             "members": []
@@ -394,6 +404,10 @@ def get_group_xml(group_uri):
       </entry>"""
       
     video_val = 'true' if group.get('video_enabled') else 'false'
+    grp_priority = group.get('priority', 5)
+    encryption_val = 'true' if group.get('encryption') else 'false'
+    emergency_val = 'true' if group.get('emergency_call') else 'false'
+    org_code = group.get('org_code', '')
     xml += f"""
     </list>
     <mcpttgi:mcptt-video>{video_val}</mcpttgi:mcptt-video>
@@ -402,10 +416,12 @@ def get_group_xml(group_uri):
     <mcpttgi:on-network-hang-time>3</mcpttgi:on-network-hang-time>
     <mcpttgi:on-network-max-duration>3600</mcpttgi:on-network-max-duration>
     <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
+    <mcpttgi:on-network-group-priority>{grp_priority}</mcpttgi:on-network-group-priority>
+    <mcpttgi:on-network-encryption>{encryption_val}</mcpttgi:on-network-encryption>
     <cp:ruleset>
       <cp:rule id="a7c">
          <cp:actions>
-          <mcpttgi:allow-MCPTT-emergency-call>true</mcpttgi:allow-MCPTT-emergency-call>
+          <mcpttgi:allow-MCPTT-emergency-call>{emergency_val}</mcpttgi:allow-MCPTT-emergency-call>
           <mcpttgi:allow-imminent-peril-call>true</mcpttgi:allow-imminent-peril-call>
           <mcpttgi:allow-MCPTT-emergency-alert>true</mcpttgi:allow-MCPTT-emergency-alert>
         </cp:actions>
@@ -417,8 +433,11 @@ def get_group_xml(group_uri):
        <mcpttgi:mcptt-speech/>
       </oxe:group-media>
      </oxe:service>
-    </oxe:supported-services>
-    <mcpttgi:on-network-group-priority>5</mcpttgi:on-network-group-priority>
+    </oxe:supported-services>"""
+    if org_code:
+        xml += f"""
+    <mcpttgi:org-code>{org_code}</mcpttgi:org-code>"""
+    xml += """
   </list-service>
 </group>"""
     return xml, group['etag']
@@ -546,6 +565,7 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # GET /idms/authreq?client_id=...
     params = args.query_params
     user_name = params.get('user_name')
+    csc_logger.log_msg("mcptt", "in", "HTTPS", "IdMS authreq", user_name or "")
     user_password = params.get('user_password')
     client_id = params.get('client_id', 'MCPTT_UE')
     redirect_uri = params.get('redirect_uri')
@@ -634,6 +654,7 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 # IdMS: Token Req
 async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # POST /idms/tokenreq
+    csc_logger.log_msg("mcptt", "in", "HTTPS", "IdMS tokenreq")
     data = args.body
     if not isinstance(data, dict):
         return HandlerResult(status=400, body={"error": "invalid_request"}, media_type="application/json")
@@ -805,6 +826,14 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
 
     path = args.full_path
     parts = [p for p in path.split('/') if p]
+
+    # 서비스 로그: GMS 요청 기록 (그룹 ID가 있으면 해당 그룹 디렉터리에)
+    group_uri = parts[3] if len(parts) >= 4 else ""
+    user_uri = parts[2] if len(parts) >= 3 else ""
+    gid = group_uri.replace("tel:", "").replace("sip:", "").split("@")[0] if group_uri else ""
+    csc_logger.log_msg("mcptt", "in", "HTTPS", f"GMS {args.method}", user_uri)
+    if gid:
+        csc_logger.log_ptt_service(gid, "in", "HTTPS", f"GMS {args.method} {user_uri}", "")
     # ['org.openmobilealliance.groups', 'users', 'user_uri']        → list
     # ['org.openmobilealliance.groups', 'users', 'user_uri', 'group_uri'] → specific
 
@@ -871,6 +900,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
 # CMS: User Profile
 async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # GET /org.3gpp.mcptt.user-profile/users/{user_id}/user-profile
+    csc_logger.log_msg("mcptt", "in", "HTTPS", "CMS user-profile")
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return HandlerResult(status=401, body="Missing or Invalid Token")
@@ -897,6 +927,7 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 # CMS: Service Config
 async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # GET /org.3gpp.mcptt.service-config/users/{user_id}/service-config
+    csc_logger.log_msg("mcptt", "in", "HTTPS", "CMS service-config")
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return HandlerResult(status=401, body="Missing or Invalid Token")

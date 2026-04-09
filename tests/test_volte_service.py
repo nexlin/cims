@@ -103,7 +103,7 @@ def run_volte_tests():
         active_voip = h1.get("active_voip", [])
 
         # 4. 이력: state=ended 이고 발/착신 번호 정확한지
-        logs = c.get("/api/v1/call/logs", {"call_type": "voip", "limit": "5"})
+        logs = c.get("/api/v1/call/logs", {"call_type": "voip", "limit": "5", "date": time.strftime("%Y-%m-%d")})
         log_list = logs.get("logs", [])
         ended_logs = [l for l in log_list if l.get("state") == "ended" and l.get("initiator") == VOIP_USER1]
 
@@ -263,7 +263,7 @@ def run_volte_tests():
 
     def dash_04():
         """VoIP 통화 이력 조회"""
-        logs = c.get("/api/v1/call/logs", {"call_type": "voip", "limit": "10"})
+        logs = c.get("/api/v1/call/logs", {"call_type": "voip", "limit": "10", "date": time.strftime("%Y-%m-%d")})
         ok = logs["_status"] == 200 and "logs" in logs
         log_list = logs.get("logs", [])
         return ok, f"total={logs.get('total')}, recent={len(log_list)}건"

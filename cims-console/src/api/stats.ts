@@ -7,13 +7,15 @@ export interface HealthResponse {
     active_calls: number
     db_connected: boolean
     roles: { CSCF: boolean; TAS: boolean; PTT_AS: boolean; IBCF: boolean }
+    timeouts?: { user_timeout: number; stale_call_timeout: number; send_options_period: number }
   }
   cmp: {
     sessions: number
     groups: number
     rtp_ports: { total: number; used: number; free: number }
-    record_enable: boolean
+    session_timeout?: number
   }
+  record_enable: boolean
   active_voip: Array<{ call_id: string; initiator: string; callee: string; state: string; invite_time: string }>
   active_ptt: Array<{ call_id: string; group_id: string; initiator: string; state: string; invite_time: string }>
 }

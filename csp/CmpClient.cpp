@@ -1,5 +1,6 @@
 #include "CmpClient.h"
 #include "MsgLogger.h"
+#include "CallDir.h"
 #include "SimpleJson.h"
 #include <chrono>
 #include <sys/socket.h>
@@ -190,10 +191,12 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
     CLog::Print(LOG_DEBUG, "CmpClient::AddSession: %s", req.ToString().c_str());
 
     std::string strReqBody = req.ToString();
+    gclsCallDir.LogVoip(strSessionId, "csp", "cmp", "JSON", "add", strReqBody.c_str() );
     gclsMsgLogger.Log( strSessionId.c_str(), "csp", "cmp", "JSON", "add", strReqBody.c_str() );
 
     if (!SendRequestAndWait(req, strResp)) return false;
 
+    gclsCallDir.LogVoip(strSessionId, "cmp", "csp", "JSON", "add-resp", strResp.c_str() );
     gclsMsgLogger.Log( strSessionId.c_str(), "cmp", "csp", "JSON", "add-resp", strResp.c_str() );
 
     // Response Body: CSP_MAIN <sessId> CMP_MAIN <cmpSess> OK <ip> <port> <vport>
@@ -265,8 +268,10 @@ bool CCmpClient::RemoveSession(const std::string& strSessionId) {
     std::string strResp;
     CLog::Print(LOG_DEBUG, "CmpClient::RemoveSession: %s", req.ToString().c_str());
     std::string strReqBody = req.ToString();
+    gclsCallDir.LogVoip(strSessionId, "csp", "cmp", "JSON", "remove", strReqBody.c_str() );
     gclsMsgLogger.Log( strSessionId.c_str(), "csp", "cmp", "JSON", "remove", strReqBody.c_str() );
     bool bRet = SendRequestAndWait(req, strResp);
+    gclsCallDir.LogVoip(strSessionId, "cmp", "csp", "JSON", "remove-resp", strResp.c_str() );
     gclsMsgLogger.Log( strSessionId.c_str(), "cmp", "csp", "JSON", "remove-resp", strResp.c_str() );
     return bRet;
 }
@@ -295,9 +300,11 @@ bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::
 
     std::string strResp;
     std::string strReqBody = req.ToString();
+    gclsCallDir.LogPtt(strGroupId, "csp", "cmp", "JSON", "addgroup", strReqBody.c_str() );
     gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "addgroup", strReqBody.c_str() );
 
     if (SendRequestAndWait(req, strResp)) {
+        gclsCallDir.LogPtt(strGroupId, "cmp", "csp", "JSON", "addgroup-resp", strResp.c_str() );
         gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "addgroup-resp", strResp.c_str() );
         SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse(strResp);
         if (respNode.type != SimpleJson::JSON_OBJECT) {
@@ -358,8 +365,10 @@ bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& str
 
     std::string resp;
     std::string strReqBody = req.ToString();
+    gclsCallDir.LogPtt(strGroupId, "csp", "cmp", "JSON", "joingroup", strReqBody.c_str() );
     gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "joingroup", strReqBody.c_str() );
     bool bRet = SendRequestAndWait(req, resp);
+    gclsCallDir.LogPtt(strGroupId, "cmp", "csp", "JSON", "joingroup-resp", resp.c_str() );
     gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "joingroup-resp", resp.c_str() );
     return bRet;
 }
@@ -377,8 +386,10 @@ bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& st
 
     std::string resp;
     std::string strReqBody = req.ToString();
+    gclsCallDir.LogPtt(strGroupId, "csp", "cmp", "JSON", "leavegroup", strReqBody.c_str() );
     gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "leavegroup", strReqBody.c_str() );
     bool bRet = SendRequestAndWait(req, resp);
+    gclsCallDir.LogPtt(strGroupId, "cmp", "csp", "JSON", "leavegroup-resp", resp.c_str() );
     gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "leavegroup-resp", resp.c_str() );
     return bRet;
 }

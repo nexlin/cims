@@ -176,14 +176,23 @@ def run_media_tests():
     print("\n── MEDIA-REC: 녹취 파일 검증 ──")
 
     def rec_01():
-        """녹취 활성화 상태 확인 (CMP stats)"""
-        r = cmp_request({"cmd": "stats"})
+        """녹취 활성화 상태 확인 (CSP 설정)"""
+        r = csp_request("stats")
         if r is None:
-            return False, "CMP 응답 없음"
-        resp = r.get("response", {})
-        rec_enable = resp.get("record_enable", False)
-        return rec_enable, f"record_enable={rec_enable}"
-    runner.run("MEDIA-REC-01", "CMP 녹취 활성화 상태", rec_01)
+            return False, "CSP 응답 없음"
+        # CSP config에서 Recording.Enable 확인
+        import json
+        csp_cfg_path = os.path.join(DIST_DIR, "csp", "config", "csp.json")
+        try:
+            with open(csp_cfg_path) as f:
+                cfg = json.load(f)
+            rec_enable = cfg.get("Setup", {}).get("Recording", {}).get("Enable", False)
+            rec_dir = cfg.get("Setup", {}).get("Recording", {}).get("Dir", "")
+            ok = rec_enable and bool(rec_dir)
+            return ok, f"Recording.Enable={rec_enable}, Dir={rec_dir[:40]}"
+        except Exception as e:
+            return False, f"설정 읽기 실패: {e}"
+    runner.run("MEDIA-REC-01", "CSP 녹취 설정 활성화 상태", rec_01)
 
     def rec_02():
         """CMP에 세션 생성 → RTP 전송 → 녹취 raw 파일에 패킷 기록 확인"""

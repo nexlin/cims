@@ -40,6 +40,8 @@ PTT_DOMAIN="ptt.mnc001.mcc001.3gppnetwork.org"
 IDMS_JWT_SECRET=""
 CIMS_JWT_SECRET=""
 MSG_LOG_DIR=""
+SERVICE_LOG_DIR=""
+RECORD_DIR=""
 
 usage() {
     cat <<EOF
@@ -64,8 +66,10 @@ ${BOLD}도메인:${NC}
   --voip-domain  DOM  VoIP 통화 SIP 도메인 (기본: sip-domain 값 사용)
   --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: ptt.cims.local)
 
-${BOLD}메시지 로그:${NC}
-  --msg-log-dir  DIR  공유 메시지 로그 디렉터리 (기본: DIST_DIR/ext_mnt)
+${BOLD}로그/녹취:${NC}
+  --msg-log-dir      DIR  메시지 통계 로그 디렉터리 (기본: DIST_DIR/ext_mnt/msg_log)
+  --service-log-dir  DIR  서비스 이력/Flow 로그 디렉터리 (기본: DIST_DIR/ext_mnt/service_log)
+  --record-dir       DIR  녹취 파일 디렉터리 (기본: DIST_DIR/ext_mnt/recordings)
 
 ${BOLD}보안:${NC}
   --idms-secret  SEC  IdMS JWT 시크릿 (기본: 랜덤 생성)
@@ -96,8 +100,10 @@ while [[ $# -gt 0 ]]; do
         --sip-domain)   SIP_DOMAIN="$2";    shift 2 ;;
         --voip-domain)  VOIP_DOMAIN="$2";   shift 2 ;;
         --ptt-domain)   PTT_DOMAIN="$2";    shift 2 ;;
-        --msg-log-dir)  MSG_LOG_DIR="$2";       shift 2 ;;
-        --idms-secret)  IDMS_JWT_SECRET="$2"; shift 2 ;;
+        --msg-log-dir)      MSG_LOG_DIR="$2";       shift 2 ;;
+        --service-log-dir)  SERVICE_LOG_DIR="$2";   shift 2 ;;
+        --record-dir)       RECORD_DIR="$2";        shift 2 ;;
+        --idms-secret)      IDMS_JWT_SECRET="$2";   shift 2 ;;
         --cims-secret)  CIMS_JWT_SECRET="$2"; shift 2 ;;
         --help|-h)      usage; exit 0 ;;
         *) echo "알 수 없는 옵션: $1"; echo ""; usage; exit 1 ;;
@@ -113,9 +119,11 @@ CWRTC_IP="${CWRTC_IP:-$LOCAL_IP}"
 CSC_HOST="${CSC_HOST:-$LOCAL_IP}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
 
-# MSG_LOG_DIR 기본값: DIST_DIR/ext_mnt
+# 로그/녹취 디렉터리 기본값
 MSG_LOG_DIR="${MSG_LOG_DIR:-$DIST_DIR/ext_mnt/msg_log}"
-mkdir -p "$MSG_LOG_DIR"
+SERVICE_LOG_DIR="${SERVICE_LOG_DIR:-$DIST_DIR/ext_mnt/service_log}"
+RECORD_DIR="${RECORD_DIR:-$DIST_DIR/ext_mnt/recordings}"
+mkdir -p "$MSG_LOG_DIR" "$SERVICE_LOG_DIR" "$RECORD_DIR"
 
 # JWT 시크릿 랜덤 생성 (미설정 시)
 if [[ -z "$IDMS_JWT_SECRET" ]]; then
@@ -135,8 +143,10 @@ echo "  DB_HOST     = $DB_HOST / $DB_USER"
 echo "  SIP_DOMAIN  = $SIP_DOMAIN (auth realm)"
 echo "  VOIP_DOMAIN = $VOIP_DOMAIN"
 echo "  PTT_DOMAIN  = $PTT_DOMAIN"
-echo "  MSG_LOG_DIR = $MSG_LOG_DIR"
-echo "  DIST_DIR    = $DIST_DIR"
+echo "  MSG_LOG_DIR     = $MSG_LOG_DIR"
+echo "  SERVICE_LOG_DIR = $SERVICE_LOG_DIR"
+echo "  RECORD_DIR      = $RECORD_DIR"
+echo "  DIST_DIR        = $DIST_DIR"
 echo ""
 
 # ── 플레이스홀더 치환 함수 ──────────────────────────────────────
@@ -159,6 +169,8 @@ apply_template() {
         -e "s|@IDMS_JWT_SECRET@|${IDMS_JWT_SECRET}|g" \
         -e "s|@CIMS_JWT_SECRET@|${CIMS_JWT_SECRET}|g" \
         -e "s|@MSG_LOG_DIR@|${MSG_LOG_DIR}|g" \
+        -e "s|@SERVICE_LOG_DIR@|${SERVICE_LOG_DIR}|g" \
+        -e "s|@RECORD_DIR@|${RECORD_DIR}|g" \
         "$src" > "$dst"
     ok "생성: $dst"
 }
