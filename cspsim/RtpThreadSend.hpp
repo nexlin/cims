@@ -107,9 +107,9 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
           payload[1] = 0x44;
           payloadLen = 2;
 
-          // Frame data
-          memcpy(payload + payloadLen, vecFrames[iFrameIdx].data(), vecFrames[iFrameIdx].size());
-          payloadLen += vecFrames[iFrameIdx].size();
+          // Frame data (원본 프레임의 첫 바이트는 ToC이므로 건너뜀)
+          memcpy(payload + payloadLen, vecFrames[iFrameIdx].data() + 1, vecFrames[iFrameIdx].size() - 1);
+          payloadLen += vecFrames[iFrameIdx].size() - 1;
 
           psttRtpHeader->SetSeq(sSeq);
           psttRtpHeader->SetTimeStamp(iTimeStamp);
@@ -151,4 +151,190 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
   pRtpThread->m_bSendThreadRun = false;
 
   return 0;
+}
+
+/**
+ * @brief H.264 Annex B 파일에서 NAL 유닛을 파싱하여 로드한다.
+ * @param strPath  H.264 Annex B raw 파일 경로 (0x00000001 startcode)
+ * @param vecNals  (출력) NAL 유닛 데이터 벡터 (startcode 제외)
+ * @return 성공 시 true
+ */
+static bool LoadH264Nals(const std::string& strPath,
+                         std::vector<std::vector<uint8_t>>& vecNals) {
+    FILE* fp = fopen(strPath.c_str(), "rb");
+    if (!fp) return false;
+
+    fseek(fp, 0, SEEK_END);
+    long lFileSize = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    if (lFileSize <= 4) { fclose(fp); return false; }
+
+    std::vector<uint8_t> buf(lFileSize);
+    if ((long)fread(buf.data(), 1, lFileSize, fp) != lFileSize) {
+        fclose(fp);
+        return false;
+    }
+    fclose(fp);
+
+    // Find NAL units separated by 0x00000001
+    std::vector<long> offsets;
+    for (long i = 0; i + 3 < lFileSize; ++i) {
+        if (buf[i] == 0x00 && buf[i+1] == 0x00 && buf[i+2] == 0x00 && buf[i+3] == 0x01) {
+            offsets.push_back(i);
+        }
+    }
+
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        long nalStart = offsets[i] + 4; // skip startcode
+        long nalEnd = (i + 1 < offsets.size()) ? offsets[i + 1] : lFileSize;
+        if (nalEnd > nalStart) {
+            vecNals.push_back(std::vector<uint8_t>(buf.begin() + nalStart, buf.begin() + nalEnd));
+        }
+    }
+
+    return !vecNals.empty();
+}
+
+THREAD_API RtpThreadVideoSend(LPVOID lpParameter) {
+    CRtpThread *pRtpThread = (CRtpThread *)lpParameter;
+
+    pRtpThread->m_bVideoSendThreadRun = true;
+
+    // Load H.264 NAL units from file
+    std::vector<std::vector<uint8_t>> vecNals;
+    if (!LoadH264Nals(pRtpThread->m_strVideoFile, vecNals)) {
+        printf("[VIDEO-RTP] Failed to load H.264 file: %s\n",
+               pRtpThread->m_strVideoFile.c_str());
+        pRtpThread->m_bVideoSendThreadRun = false;
+        return 0;
+    }
+    printf("[VIDEO-RTP] Loaded %d NAL units from %s\n",
+           (int)vecNals.size(), pRtpThread->m_strVideoFile.c_str());
+
+    uint16_t sSeq = 0;
+    uint32_t iTimeStamp = 0;
+    uint32_t iSsrc = htonl(300);
+    int iNalIdx = 0;
+    int iTotalNals = (int)vecNals.size();
+    const int MAX_RTP_PAYLOAD = 1200;
+    // Video dest port = audio dest port + 2
+    int iVideoDestPort = pRtpThread->m_iDestPort + 2;
+
+    while (pRtpThread->m_bStopEvent == false) {
+        const std::vector<uint8_t>& nal = vecNals[iNalIdx];
+        int iNalSize = (int)nal.size();
+
+        if (iNalSize <= MAX_RTP_PAYLOAD) {
+            // Single NAL unit packet - fits in one RTP packet
+            char szPacket[1500];
+            RtpHeader *psttRtpHeader = (RtpHeader *)szPacket;
+
+            psttRtpHeader->SetVersion(2);
+            psttRtpHeader->SetPadding(0);
+            psttRtpHeader->SetExtension(0);
+            psttRtpHeader->SetCC(0);
+            psttRtpHeader->SetMarker(1); // last (only) packet of this NAL = access unit end
+            psttRtpHeader->SetPT(96);
+            psttRtpHeader->SetSeq(sSeq++);
+            psttRtpHeader->SetTimeStamp(iTimeStamp);
+            psttRtpHeader->ssrc = iSsrc;
+
+            memcpy(szPacket + sizeof(RtpHeader), nal.data(), iNalSize);
+
+            UdpSend(pRtpThread->m_hVideoSocket, szPacket,
+                    (int)sizeof(RtpHeader) + iNalSize,
+                    pRtpThread->m_strDestIp.c_str(), iVideoDestPort);
+        } else {
+            // FU-A fragmentation (RFC 6184)
+            uint8_t nalHeader = nal[0];
+            uint8_t nalType = nalHeader & 0x1F;
+            uint8_t nri = nalHeader & 0x60;
+            // FU indicator: same NRI, type=28 (FU-A)
+            uint8_t fuIndicator = (nri | 28);
+
+            int iOffset = 1; // skip NAL header byte (included in FU header)
+            int iRemaining = iNalSize - 1;
+            bool bFirst = true;
+
+            while (iRemaining > 0 && pRtpThread->m_bStopEvent == false) {
+                int iChunk = (iRemaining > MAX_RTP_PAYLOAD - 2) ? (MAX_RTP_PAYLOAD - 2) : iRemaining;
+                bool bLast = (iRemaining - iChunk <= 0);
+
+                char szPacket[1500];
+                RtpHeader *psttRtpHeader = (RtpHeader *)szPacket;
+
+                psttRtpHeader->SetVersion(2);
+                psttRtpHeader->SetPadding(0);
+                psttRtpHeader->SetExtension(0);
+                psttRtpHeader->SetCC(0);
+                psttRtpHeader->SetMarker(bLast ? 1 : 0);
+                psttRtpHeader->SetPT(96);
+                psttRtpHeader->SetSeq(sSeq++);
+                psttRtpHeader->SetTimeStamp(iTimeStamp);
+                psttRtpHeader->ssrc = iSsrc;
+
+                char* payload = szPacket + sizeof(RtpHeader);
+                // FU indicator
+                payload[0] = (char)fuIndicator;
+                // FU header: S=start, E=end, R=0, Type=nalType
+                uint8_t fuHeader = nalType;
+                if (bFirst) fuHeader |= 0x80; // S bit
+                if (bLast)  fuHeader |= 0x40; // E bit
+                payload[1] = (char)fuHeader;
+
+                memcpy(payload + 2, nal.data() + iOffset, iChunk);
+
+                UdpSend(pRtpThread->m_hVideoSocket, szPacket,
+                        (int)sizeof(RtpHeader) + 2 + iChunk,
+                        pRtpThread->m_strDestIp.c_str(), iVideoDestPort);
+
+                iOffset += iChunk;
+                iRemaining -= iChunk;
+                bFirst = false;
+
+                // FU-A 패킷 간 대기 (UDP 수신 버퍼 오버플로우 방지)
+                if (iRemaining > 0) usleep(500);
+            }
+        }
+
+        // Advance to next NAL
+        ++iNalIdx;
+        if (iNalIdx >= iTotalNals) iNalIdx = 0; // loop
+
+        // 프레임 NAL(IDR=5, non-IDR=1)에서만 timestamp 증가 + sleep
+        // SPS(7)/PPS(8)/SEI(6)는 비프레임이므로 즉시 전송
+        uint8_t curNalType = nal[0] & 0x1F;
+        if (curNalType == 1 || curNalType == 5) {
+            // 프레임레이트: NAL 파일의 프레임 수에서 자동 계산
+            // 기본 ts_inc = 90000/15 = 6000 (15fps)
+            static int s_iFrameTsInc = 0;
+            static int s_iFrameSleepMs = 0;
+            if (s_iFrameTsInc == 0) {
+                // 프레임 NAL 수 카운트
+                int iFrameCount = 0;
+                for (const auto& n : vecNals) {
+                    uint8_t t = n[0] & 0x1F;
+                    if (t == 1 || t == 5) iFrameCount++;
+                }
+                // 원본 콘텐츠 길이 (프레임 수 * 기본 간격)에서 역산
+                // 원본 15fps 기준: ts_inc = 6000
+                s_iFrameTsInc = 6000;
+                s_iFrameSleepMs = 67;
+                if (iFrameCount > 0) {
+                    // 첫 루프 기준으로 실제 fps 추정
+                    double fps = (double)iFrameCount / ((double)iFrameCount * 6000.0 / 90000.0);
+                    s_iFrameSleepMs = (int)(1000.0 / fps);
+                }
+                printf("[VIDEO-RTP] Frame NALs=%d, ts_inc=%d, sleep=%dms\n",
+                       iFrameCount, s_iFrameTsInc, s_iFrameSleepMs);
+            }
+            iTimeStamp += s_iFrameTsInc;
+            MiliSleep(s_iFrameSleepMs);
+        }
+    }
+
+    pRtpThread->m_bVideoSendThreadRun = false;
+
+    return 0;
 }

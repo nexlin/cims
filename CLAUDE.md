@@ -69,16 +69,16 @@ IMS 역할 기반 모듈형 SIP 서버. 단일 프로세스에서 CSCF + TAS + P
 
 ```
 SIP (5060) → CModuleDispatcher (ISipStackCallBack + ISipUserAgentCallBack)
-               ├─ CCscfModule  — REGISTER, SUBSCRIBE, 인증, Proxy INVITE (Call-ID 유지)
-               ├─ CTasModule   — VoIP 부가서비스: DND, 착신전환, 착신거부, 콜픽업
+               ├─ CCscfModule  — REGISTER, SUBSCRIBE, 인증
+               ├─ CTasModule   — VoIP B2BUA 호 처리: DND, 착신전환, 착신거부, 콜픽업
                ├─ CPttAsModule — PTT 그룹콜 (GroupCallService 래핑)
                └─ CIbcfModule  — IP-PBX 트렁크 라우팅
 ```
 
-#### 콜백 순서와 Proxy/B2BUA 분기
+#### 콜백 순서 (B2BUA 전용)
 `[CModuleDispatcher, CSipUserAgent]` 순서로 등록.
-- **Proxy 모드**: 일반 VoIP 호(DND/착신전환 없음) → ModuleDispatcher가 직접 처리, Call-ID 유지, Via/Record-Route 추가
-- **B2BUA 모드**: PTT 그룹콜, 트렁크, 착신전환 → CSipUserAgent로 전달, 새 Call-ID 생성
+- **모든 VoIP 호**: ModuleDispatcher가 REGISTER/SUBSCRIBE만 직접 처리, INVITE는 CSipUserAgent(B2BUA)로 전달
+- **B2BUA**: 새 Call-ID 생성, CMP 경유 RTP relay, Session-ID로 양 leg 매핑
 
 #### 핵심 클래스
 - **`CModuleDispatcher`** (`ModuleDispatcher.h/.cpp`) — 중앙 디스패처, 콜 소유권 추적, 모든 SIP 이벤트 라우팅
@@ -87,7 +87,9 @@ SIP (5060) → CModuleDispatcher (ISipStackCallBack + ISipUserAgentCallBack)
 - **`CGroupCallService`** — PTT 그룹콜 오케스트레이션 (multipart INVITE: SDP + `application/vnd.oma.poc.groups+xml`)
 - **`CSubscriptionManager`** — SIP SUBSCRIBE/NOTIFY 상태 관리 (GMS/CMS)
 - **`CspUserMap`** / **`CGroupMap`** — 가입자/그룹 메모리 캐시 (DB primary, JSON fallback)
-- **`CCmpClient`** — CMP 연동 (JSON-over-UDP)
+- **`CCmpClient`** — CMP 연동 (JSON-over-UDP, `record_dir` 전달)
+- **`CCallDir`** (`CallDir.h`) — Session-ID 기반 서비스 로깅 (call.json, participants.jsonl, session.json)
+- **`SipMessageLogger`** (`SipMessageLogger.h/.cpp`) — ILogCallBack 구현, psip SIP TX/RX + CMP JSON 메시지를 `{MsgLogDir}/csp/sip/YYYY/MM/DD/HH/sip.jsonl`에 기록
 
 #### 역할 설정 (`csp.json`)
 ```json
@@ -123,24 +125,22 @@ Automated SIP/RTP client for load and functional testing.
 - **`SimSession`** — Single SIP UA: registers, subscribes, makes/receives calls, sends RTP
 - **`CspsimMain`** — Spawns N parallel SimSessions, drives scenarios, collects statistics
 
-### Key data flow: VoIP call (Proxy mode — CSCF)
-1. A sends `INVITE sip:B@csp` → `CModuleDispatcher::RecvRequest()` (1st callback)
-2. CSCF checks: B is registered, no DND/forward → **Proxy mode**
-3. CSP copies INVITE, adds Via + Record-Route, forwards to B (Call-ID preserved)
-4. B responds 180/200 → CSP removes top Via, forwards to A
-5. RTP flows directly between A and B (or via CMP relay)
-
-### Key data flow: VoIP call (B2BUA mode — TAS/IBCF)
-1. A sends `INVITE sip:B@csp` → Proxy declines (DND/forward/trunk) → `CSipUserAgent` (2nd callback)
-2. `EventIncomingCall()` → TAS checks DND/forward → B2BUA `CreateCall()` (new Call-ID)
-3. CSP bridges two independent SIP dialogs via `CCallMap`
+### Key data flow: VoIP call (B2BUA — all calls via CMP)
+1. A sends `INVITE sip:B@csp` → `CModuleDispatcher::RecvRequest()` → forwards to `CSipUserAgent`
+2. `EventIncomingCall()` → TAS checks DND/forward → B2BUA `CreateCall()` (new Call-ID for B-leg)
+3. CSP generates **Session-ID**, maps both leg Call-IDs → same Session-ID → same `.d` directory
+4. CSP sends CMP `add` for RTP relay, bridges two independent SIP dialogs via `CCallMap`
+5. `session.json` in `.d` directory stores `{session_id, call_ids: [leg_a, leg_b]}` for correlation
+6. SIP stack sends only 100 Trying; 180 Ringing is forwarded from callee (no auto-180)
+7. RTP always flows through CMP relay
 
 ### Key data flow: PTT group call (PTT-AS)
 1. CSP `CheckGroupIntegrity()` detects group change → PTT-AS initiates session
-2. CSP requests shared RTP group from CMP (`addGroup`)
-3. CSP sends multipart `INVITE` to each member (SDP + OMA POC XML with member list)
-4. Members respond 200 OK → CSP instructs CMP `joinGroup` per member
-5. Audio flows through CMP's `McpttGroup`; floor is controlled by RTCP APP
+2. CSP requests shared RTP group from CMP (`addGroup` with `record_dir`)
+3. CMP allocates shared RTP port
+4. CSP sends multipart `INVITE` to each member (SDP + OMA POC XML with member list)
+5. Members respond 200 OK → CSP instructs CMP `joinGroup` per member
+6. Audio flows through CMP's `McpttGroup`; floor is controlled by RTCP APP
 
 ### Key data flow: CSC subscriptions (CSCF)
 1. Client sends `SUBSCRIBE Event: gms` (or `cms`)
@@ -152,6 +152,19 @@ Automated SIP/RTP client for load and functional testing.
 1. Console UI → `cims_admin.py` CRUD → DB 수정 → `notify_csp()` UDP 전송
 2. `CCscInterface` 수신 → `user_change`: `CspUserMap` 캐시 즉시 갱신/삭제
 3. `group_change`: 그룹 설정 reload + CMP 동기화 + GMS NOTIFY 발송
+
+### Key data flow: Service logging (separated)
+
+**Service Log** (`service_log/{type}/YYYY/MM/DD/HH/.../*.d/`):
+1. CSP creates session directory via `CCallDir`
+2. CSP writes `call.json` (call metadata), `participants.jsonl`, `session.json` (Session-ID + Call-ID mapping)
+3. CSP passes `record_dir` to CMP via `add`/`addgroup` JSON command
+4. CMP writes recording files (`raw_a.rtp`, `raw_b.rtp`, `seg_*.rtp`) to session directory
+
+**SIP Log** (`msg_log/csp/sip/YYYY/MM/DD/HH/sip.jsonl`):
+1. `SipMessageLogger` (ILogCallBack) captures all SIP TX/RX from psip stack + CMP JSON messages
+2. Each line includes Call-ID, method, from/to, direction, full message text
+3. Flow API searches `sip.jsonl` by Call-ID to reconstruct B2BUA message flow (both legs via Session-ID)
 
 ## Configuration Files
 

@@ -20,7 +20,7 @@
 #define _SIP_USER_AGENT_CALLBACK_H_
 
 // �������� SDP �̵�� ����Ʈ�� ������ ���� ���ȴ�.
-//#define USE_MEDIA_LIST
+#define USE_MEDIA_LIST
 
 #include "SipStackDefine.h"
 #include "SipServerInfo.h"

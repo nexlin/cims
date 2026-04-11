@@ -128,12 +128,9 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
             return await _subscribers_status(config)
 
         if parts[0] == 'messages':
-            gran = qp('granularity', '1h')
-            from_dt = qp('from')
-            to_dt = qp('to')
-            proto = qp('proto')
+            iface = parts[1] if len(parts) > 1 else None  # sip, cmp, csc, https
             date = qp('date')
-            return await _messages_stats(config, gran, from_dt, to_dt, proto, date)
+            return await _messages_stats_v2(config, iface, date)
 
         if parts[0] == 'service':
             svc = parts[1] if len(parts) > 1 else 'summary'
@@ -225,8 +222,74 @@ async def _health(config: dict) -> HandlerResult:
 #  Message stats (Part 3.1)
 # ──────────────────────────────────────────────────────────────
 
+async def _messages_stats_v2(config, iface, date) -> HandlerResult:
+    """msg_log JSONL 기반 인터페이스별 메시지 통계"""
+    import glob as _glob
+
+    if not date:
+        date = datetime.now().strftime('%Y-%m-%d')
+    d = date.replace('-', '')
+    yyyy, mm, dd = d[:4], d[4:6], d[6:8]
+
+    msg_log_dir = config.get('MsgLogDir', '')
+    if not msg_log_dir:
+        return HandlerResult(status=200, body={'date': date, 'interface': iface, 'buckets': [], 'method_counts': {}})
+
+    # 인터페이스 → 파일 매핑
+    iface_map = {
+        'sip': ('csp', 'sip.jsonl'),
+        'cmp': ('csp', 'cmp.jsonl'),
+        'csc': ('csp', 'csc.jsonl'),
+        'https': ('csc', 'mcptt.jsonl'),
+    }
+
+    if iface and iface in iface_map:
+        comp, fname = iface_map[iface]
+        patterns = [os.path.join(msg_log_dir, comp, yyyy, mm, dd, '*', fname)]
+    else:
+        # 전체: 모든 인터페이스
+        patterns = [os.path.join(msg_log_dir, comp, yyyy, mm, dd, '*', fn) for comp, fn in iface_map.values()]
+
+    # JSONL 파싱 → 시간대별 + 메서드별 집계
+    hourly = {}  # hour → count
+    method_counts = {}  # method → count
+
+    for pattern in patterns:
+        for fpath in _glob.glob(pattern):
+            try:
+                with open(fpath, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            ts = entry.get('ts', '')
+                            hour = int(ts.split(':')[0]) if ':' in ts else 0
+                            method = entry.get('method', 'unknown')
+
+                            hourly[hour] = hourly.get(hour, 0) + 1
+                            method_counts[method] = method_counts.get(method, 0) + 1
+                        except:
+                            pass
+            except:
+                pass
+
+    buckets = [{'hour': h, 'count': hourly.get(h, 0)} for h in range(24)]
+    # method_counts를 카운트 내림차순 정렬
+    sorted_methods = dict(sorted(method_counts.items(), key=lambda x: -x[1]))
+
+    return HandlerResult(status=200, body={
+        'date': date,
+        'interface': iface,
+        'total': sum(hourly.values()),
+        'buckets': buckets,
+        'method_counts': sorted_methods,
+    })
+
+
 async def _messages_stats(config, gran, from_dt, to_dt, proto, date) -> HandlerResult:
-    # 메시지 통계는 NAS msg_log jsonl 파싱
+    # 레거시: DB 기반 (하위 호환)
     # 현재는 DB call_logs 기반 간이 구현 (향후 jsonl 파싱 배치로 확장)
     if not date:
         date = datetime.now().strftime('%Y-%m-%d')

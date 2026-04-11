@@ -374,6 +374,8 @@ void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int s
 
         LOG_INFO("McpttGroup", "[%s] Floor GRANTED to session=%s ssrc=%u prio=%d",
                  _groupId.c_str(), sessionId.c_str(), ssrc, requesterPrio);
+        if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "floor-grant",
+                               ("speaker=" + sessionId).c_str());
 
         // 녹취: 새 세그먼트 시작
         if (_recordEnable) startSegment(sessionId);
@@ -413,6 +415,7 @@ void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int s
             if (rejLen > 0) sendToMember(sessionId, rejBuf, rejLen);
             LOG_INFO("McpttGroup", "[%s] Floor REJECTED session=%s (prio=%d). Owner=%s (prio=%d)",
                    _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
+            if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "floor-reject", "");
         }
     }
 }
@@ -429,6 +432,8 @@ void McpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int s
 
         broadcastFloorStatus(FLOOR_IDLE, 0, "");
         LOG_INFO("McpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
+        if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "floor-release",
+                               ("speaker=" + sessionId).c_str());
     }
 }
 

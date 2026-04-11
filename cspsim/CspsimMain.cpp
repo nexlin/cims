@@ -155,6 +155,7 @@ static void PrintUsage(const char* pszBin) {
     printf("                             full         - 전체 반복\n");
     printf("  -call_duration <secs>    통화 유지 시간 (default: 10)\n");
     printf("  -media_file  <path>      AMR-WB 미디어 파일 (PT=99 전송, 생략 시 합성 RTP)\n");
+    printf("  -video_file  <path>      H.264 Annex B 비디오 파일 (PT=96 전송)\n");
     printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
     printf("  -verbose                 SIP 메시지 상세 로그\n\n");
     printf("Commands (실행 중):\n");
@@ -284,6 +285,7 @@ int main(int argc, char* argv[])
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
     std::string strMediaFile  = GetArg(argc, argv, "-media_file",  "");
+    std::string strVideoFile  = GetArg(argc, argv, "-video_file",  "");
     int iIntervalMs            = atoi(GetArg(argc, argv, "-interval",    "100").c_str());
     bool bVerbose              = HasFlag(argc, argv, "-verbose");
     bool bPttMode              = (strMode == "ptt");
@@ -372,6 +374,9 @@ int main(int argc, char* argv[])
 
         if (!strMediaFile.empty()) {
             s->m_clsRtpThread.SetMediaFile(strMediaFile);
+        }
+        if (!strVideoFile.empty()) {
+            s->m_clsRtpThread.SetVideoFile(strVideoFile);
         }
         if (s->Start()) {
             sessions.push_back(s);

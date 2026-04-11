@@ -52,7 +52,9 @@ bool CheckError(int n, const char *pszLog) {
 
 CRtpThread::CRtpThread()
     : m_hSocket(INVALID_SOCKET), m_iPort(0), m_bStopEvent(false),
-      m_bSendThreadRun(false), m_bRecvThreadRun(false) {}
+      m_bSendThreadRun(false), m_bRecvThreadRun(false),
+      m_hVideoSocket(INVALID_SOCKET), m_iVideoPort(0),
+      m_bVideoSendThreadRun(false) {}
 
 CRtpThread::~CRtpThread() { Destroy(); }
 
@@ -73,6 +75,17 @@ bool CRtpThread::Create() {
     return false;
   }
 
+  // Video socket: audio port + 2 (convention)
+  if (!m_strVideoFile.empty()) {
+    m_hVideoSocket = UdpListen(m_iPort + 2, NULL);
+    if (m_hVideoSocket != INVALID_SOCKET) {
+      m_iVideoPort = m_iPort + 2;
+      printf("[RTP] Video socket created on port %d\n", m_iVideoPort);
+    } else {
+      printf("[RTP] Warning: failed to create video socket on port %d\n", m_iPort + 2);
+    }
+  }
+
   return true;
 }
 
@@ -80,6 +93,11 @@ bool CRtpThread::Destroy() {
   if (m_hSocket != INVALID_SOCKET) {
     closesocket(m_hSocket);
     m_hSocket = INVALID_SOCKET;
+  }
+
+  if (m_hVideoSocket != INVALID_SOCKET) {
+    closesocket(m_hVideoSocket);
+    m_hVideoSocket = INVALID_SOCKET;
   }
 
   return true;
@@ -107,6 +125,13 @@ bool CRtpThread::Start(const char *pszDestIp, int iDestPort) {
     Stop();
     return false;
   }
+
+  // Launch video send thread if video file is configured and socket is ready
+  if (m_hVideoSocket != INVALID_SOCKET && !m_strVideoFile.empty()) {
+    if (StartThread("RtpThreadVideoSend", RtpThreadVideoSend, this) == false) {
+      printf("[RTP] Warning: failed to start video send thread\n");
+    }
+  }
 #endif
 
   return true;
@@ -116,7 +141,8 @@ bool CRtpThread::Stop() {
   m_bStopEvent = true;
 
   for (int i = 0; i < 100; ++i) {
-    if (m_bSendThreadRun == false && m_bRecvThreadRun == false) {
+    if (m_bSendThreadRun == false && m_bRecvThreadRun == false
+        && m_bVideoSendThreadRun == false) {
       break;
     }
 

@@ -166,7 +166,7 @@ export default function SubscriptionsPage() {
   return (
     <div style={{display:'flex',gap:12,alignItems:'stretch',height:'calc(100vh - 100px)'}}>
       {/* 좌측 트리: 좁게, 상하 최대 */}
-      <div className="panel" style={{width:190,minWidth:190,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <div className="panel" style={{flex:'0 0 33%',maxWidth:'33%',display:'flex',flexDirection:'column',overflow:'hidden'}}>
         <div style={{padding:'8px 10px',fontWeight:600,fontSize:12,borderBottom:'1px solid var(--border)',flexShrink:0}}>조직 / 구성원</div>
         {loading?<div className="empty" style={{padding:12,fontSize:12}}>로딩 중...</div>:(
           <div style={{flex:1,overflowY:'auto'}}>

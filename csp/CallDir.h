@@ -22,20 +22,105 @@ public:
 
     bool IsEnabled() const { return !m_strCallsDir.empty(); }
 
+    // ── Session-ID 관리 ────────────────────────────────
+
+    /** Session-ID 생성 (통화 세션 고유 ID) */
+    static std::string GenerateSessionId() {
+        char buf[64];
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        struct tm t;
+        localtime_r(&ts.tv_sec, &t);
+        snprintf(buf, sizeof(buf), "S%04d%02d%02d%02d%02d%02d%06ld",
+                 t.tm_year+1900, t.tm_mon+1, t.tm_mday,
+                 t.tm_hour, t.tm_min, t.tm_sec, ts.tv_nsec/1000);
+        return buf;
+    }
+
+    /** Call-ID → Session-ID 매핑 등록 (B2BUA에서 두 leg 모두 등록) */
+    void MapCallToSession(const std::string& strCallId, const std::string& strSessionId) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_mapCallSession[strCallId] = strSessionId;
+    }
+
+    /** Call-ID에서 Session-ID 조회 (없으면 빈 문자열) */
+    std::string GetSessionId(const std::string& strCallId) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        auto it = m_mapCallSession.find(strCallId);
+        return (it != m_mapCallSession.end()) ? it->second : "";
+    }
+
+    /** Session-ID에서 log_dir 조회 */
+    std::string GetSessionDir(const std::string& strSessionId) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        return _dir(strSessionId);
+    }
+
+    /** Write session mapping (session.json) to the .d directory */
+    void WriteSessionMapping(const std::string& strSessionId,
+                              const std::string& strCallIdA,
+                              const std::string& strCallIdB) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        std::string dir = _dir(strSessionId);
+        if (dir.empty()) {
+            // Try via call-id
+            dir = _dir(strCallIdA);
+        }
+        if (dir.empty()) return;
+        std::string path = dir + "/session.json";
+        FILE* f = fopen(path.c_str(), "w");
+        if (!f) return;
+        fprintf(f, "{\"session_id\":\"%s\",\"call_ids\":[\"%s\",\"%s\"]}\n",
+                Esc(strSessionId).c_str(),
+                Esc(strCallIdA).c_str(),
+                Esc(strCallIdB).c_str());
+        fclose(f);
+    }
+
     // ── VoIP ─────────────────────────────────────────────
+
+    /** VoIP 세션 디렉터리 생성. Session-ID 기반. */
     std::string GetVoipDir(const std::string& strCallId,
                             const std::string& strCaller,
                             const std::string& strCallee = "") {
         std::lock_guard<std::mutex> lock(m_mtx);
+        // Call-ID → Session-ID 매핑이 있으면 해당 세션 디렉터리 반환
+        auto itSess = m_mapCallSession.find(strCallId);
+        if (itSess != m_mapCallSession.end()) {
+            auto itDir = m_mapDir.find(itSess->second);
+            if (itDir != m_mapDir.end()) {
+                m_mapDir[strCallId] = itDir->second;
+                return itDir->second;
+            }
+            // Session-ID는 있지만 디렉터리 없음 — 발신 leg으로 다시 조회
+            for (auto& [cid, sid] : m_mapCallSession) {
+                if (sid == itSess->second && cid != strCallId) {
+                    auto itDir2 = m_mapDir.find(cid);
+                    if (itDir2 != m_mapDir.end()) {
+                        m_mapDir[itSess->second] = itDir2->second;
+                        m_mapDir[strCallId] = itDir2->second;
+                        return itDir2->second;
+                    }
+                }
+            }
+        }
+        // 기존 Call-ID로도 조회
         auto it = m_mapDir.find(strCallId);
         if (it != m_mapDir.end()) return it->second;
+
+        // 새 디렉터리 생성 (Session-ID가 있으면 사용, 없으면 Call-ID)
+        std::string key = strCallId;
+        if (itSess != m_mapCallSession.end()) key = itSess->second;
+
         std::string yyyy, mm, dd, hh;
         DateHour(yyyy, mm, dd, hh);
         std::string sc = San(strCaller, 20);
         std::string dir = m_strCallsDir + "/voip/" + yyyy + "/" + mm + "/" + dd + "/" + hh
-                        + "/" + Prefix(sc) + "/" + sc + "/" + San(strCallId, 80) + ".d";
+                        + "/" + Prefix(sc) + "/" + sc + "/" + San(key, 80) + ".d";
         MkdirP(dir);
-        m_mapDir[strCallId] = dir;
+        m_mapDir[key] = dir;
+        // Call-ID로도 같은 디렉터리를 찾을 수 있게
+        if (key != strCallId) m_mapDir[strCallId] = dir;
         return dir;
     }
 
@@ -57,6 +142,20 @@ public:
             "\"duration\":0,\"end_reason\":null}\n",
             Esc(strCallId).c_str(), Esc(strCaller).c_str(), Esc(strCallee).c_str(), ts);
         fclose(f);
+    }
+
+    void VoipCallAnswer(const std::string& strCallId) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        std::string dir = _dir(strCallId);
+        if (dir.empty()) return;
+        std::string path = dir + "/call.json";
+        std::string c = _readFile(path);
+        if (c.empty()) return;
+        char ts[32]; IsoNow(ts, sizeof(ts));
+        _replace(c, "\"state\":\"ringing\"", "\"state\":\"active\"");
+        _replace(c, "\"answer_time\":null", std::string("\"answer_time\":\"") + ts + "\"");
+        FILE* f = fopen(path.c_str(), "w");
+        if (f) { fputs(c.c_str(), f); fclose(f); }
     }
 
     void VoipCallEnd(const std::string& strCallId, const std::string& strReason = "normal", int iDur = 0) {
@@ -83,59 +182,156 @@ public:
     }
 
     // ── PTT ──────────────────────────────────────────────
-    std::string GetPttDir(const std::string& strGroupId) {
-        std::string yyyy, mm, dd, hh;
-        DateHour(yyyy, mm, dd, hh);
-        std::string key = strGroupId + "_" + hh;
+
+    /** PTT 세션 디렉터리 (groupId → active session dir) */
+    std::string GetPttSessionDir(const std::string& strGroupId) {
         std::lock_guard<std::mutex> lock(m_mtx);
-        auto it = m_mapDir.find(key);
-        if (it != m_mapDir.end()) return it->second;
+        auto it = m_mapPttSession.find(strGroupId);
+        if (it != m_mapPttSession.end()) return it->second;
+
+        // 새 세션 디렉터리 생성
+        char tsBuf[32];
+        {
+            time_t n = time(nullptr); struct tm t; localtime_r(&n, &t);
+            snprintf(tsBuf, sizeof(tsBuf), "%04d%02d%02d_%02d%02d%02d",
+                     t.tm_year+1900, t.tm_mon+1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
+        }
         std::string sg = San(strGroupId, 20);
-        std::string dir = m_strCallsDir + "/ptt/" + yyyy + "/" + mm + "/" + dd + "/" + hh
-                        + "/" + Prefix(sg) + "/" + sg + ".d";
+        std::string dir = m_strCallsDir + "/ptt/" + sg + "/sessions/" + tsBuf + ".d";
         MkdirP(dir);
-        m_mapDir[key] = dir;
+        MkdirP(dir + "/recordings");
+        MkdirP(dir + "/daily");
+        m_mapPttSession[strGroupId] = dir;
+        m_mapPttSessionId[strGroupId] = tsBuf;
         return dir;
     }
 
     void PttSessionStart(const std::string& strGroupId,
                           const std::string& strCallId,
-                          const std::string& strInitiator) {
+                          const std::string& strInitiator,
+                          const std::string& strGroupJson = "{}") {
         std::lock_guard<std::mutex> lock(m_mtx);
-        std::string dir = _pttDir(strGroupId);
-        if (dir.empty()) return;
+        // Ensure session dir exists (unlocked helper)
+        std::string dir;
+        {
+            auto it = m_mapPttSession.find(strGroupId);
+            if (it != m_mapPttSession.end()) {
+                dir = it->second;
+            }
+        }
+        if (dir.empty()) {
+            // create via unlock-relock pattern not needed since _pttSessionDirLocked does not lock
+            char tsBuf[32];
+            {
+                time_t n = time(nullptr); struct tm t; localtime_r(&n, &t);
+                snprintf(tsBuf, sizeof(tsBuf), "%04d%02d%02d_%02d%02d%02d",
+                         t.tm_year+1900, t.tm_mon+1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
+            }
+            std::string sg = San(strGroupId, 20);
+            dir = m_strCallsDir + "/ptt/" + sg + "/sessions/" + tsBuf + ".d";
+            MkdirP(dir);
+            MkdirP(dir + "/recordings");
+            MkdirP(dir + "/daily");
+            m_mapPttSession[strGroupId] = dir;
+            m_mapPttSessionId[strGroupId] = tsBuf;
+        }
+
         char ts[32]; IsoNow(ts, sizeof(ts));
-        FILE* f = fopen((dir + "/call.jsonl").c_str(), "a");
+        // Write session.json
+        std::string path = dir + "/session.json";
+        FILE* f = fopen(path.c_str(), "w");
         if (f) {
             fprintf(f,
-                "{\"call_id\":\"%s\",\"group_id\":\"%s\","
-                "\"initiator\":\"%s\",\"state\":\"active\","
-                "\"start_time\":\"%s\"}\n",
-                Esc(strCallId).c_str(), Esc(strGroupId).c_str(),
-                Esc(strInitiator).c_str(), ts);
+                "{\"session_id\":\"%s\",\"group_id\":\"%s\","
+                "\"call_id\":\"%s\",\"initiator\":\"%s\","
+                "\"state\":\"active\",\"start_time\":\"%s\","
+                "\"group_snapshot\":%s}\n",
+                Esc(m_mapPttSessionId[strGroupId]).c_str(),
+                Esc(strGroupId).c_str(),
+                Esc(strCallId).c_str(),
+                Esc(strInitiator).c_str(), ts,
+                strGroupJson.c_str());
             fclose(f);
         }
-    }
-
-    void PttSessionEnd(const std::string& strGroupId, const std::string& strCallId) {
-        std::lock_guard<std::mutex> lock(m_mtx);
-        std::string dir = _pttDir(strGroupId);
-        if (dir.empty()) return;
-        _appendIndex(dir, strGroupId, "ptt");
-    }
-
-    void PttAddParticipant(const std::string& strGroupId,
-                            const std::string& strMsisdn, const std::string& strRole) {
-        std::lock_guard<std::mutex> lock(m_mtx);
-        std::string dir = _pttDir(strGroupId);
-        if (dir.empty()) return;
-        char ts[32]; IsoNow(ts, sizeof(ts));
-        FILE* f = fopen((dir + "/participants.jsonl").c_str(), "a");
+        // Append to group index.jsonl
+        std::string sg = San(strGroupId, 20);
+        std::string indexPath = m_strCallsDir + "/ptt/" + sg + "/index.jsonl";
+        f = fopen(indexPath.c_str(), "a");
         if (f) {
-            fprintf(f, "{\"msisdn\":\"%s\",\"role\":\"%s\",\"join_time\":\"%s\",\"leave_time\":null}\n",
-                    Esc(strMsisdn).c_str(), strRole.c_str(), ts);
+            fprintf(f, "{\"ts\":\"%s\",\"type\":\"session_start\",\"session_id\":\"%s\","
+                    "\"call_id\":\"%s\",\"initiator\":\"%s\"}\n",
+                    ts, Esc(m_mapPttSessionId[strGroupId]).c_str(),
+                    Esc(strCallId).c_str(), Esc(strInitiator).c_str());
             fclose(f);
         }
+    }
+
+    void PttSessionEnd(const std::string& strGroupId) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        auto it = m_mapPttSession.find(strGroupId);
+        if (it == m_mapPttSession.end()) return;
+        std::string dir = it->second;
+
+        // Read session.json, update state→ended, write end_time
+        std::string path = dir + "/session.json";
+        std::string c = _readFile(path);
+        if (!c.empty()) {
+            char ts[32]; IsoNow(ts, sizeof(ts));
+            _replace(c, "\"state\":\"active\"", "\"state\":\"ended\"");
+            // Insert end_time before closing brace
+            size_t lastBrace = c.rfind('}');
+            if (lastBrace != std::string::npos) {
+                c.insert(lastBrace, std::string(",\"end_time\":\"") + ts + "\"");
+            }
+            FILE* f = fopen(path.c_str(), "w");
+            if (f) { fputs(c.c_str(), f); fclose(f); }
+
+            // Append end event to index.jsonl
+            std::string sg = San(strGroupId, 20);
+            std::string indexPath = m_strCallsDir + "/ptt/" + sg + "/index.jsonl";
+            f = fopen(indexPath.c_str(), "a");
+            if (f) {
+                auto itId = m_mapPttSessionId.find(strGroupId);
+                std::string sid = (itId != m_mapPttSessionId.end()) ? itId->second : "";
+                fprintf(f, "{\"ts\":\"%s\",\"type\":\"session_end\",\"session_id\":\"%s\"}\n",
+                        ts, Esc(sid).c_str());
+                fclose(f);
+            }
+        }
+
+        m_mapPttSession.erase(strGroupId);
+        m_mapPttSessionId.erase(strGroupId);
+    }
+
+    void PttLogEvent(const std::string& strGroupId,
+                     const std::string& strType,
+                     const std::string& strJsonData) {
+        if (m_strCallsDir.empty()) return;
+        std::lock_guard<std::mutex> lock(m_mtx);
+        auto it = m_mapPttSession.find(strGroupId);
+        if (it == m_mapPttSession.end()) return;
+        std::string dir = it->second;
+        char ts[32]; IsoNow(ts, sizeof(ts));
+
+        // Build merged line: {"ts":"...","type":"...", ...data fields}
+        std::string line = "{\"ts\":\"" + std::string(ts) + "\",\"type\":\"" + Esc(strType) + "\"";
+        // Merge jsonData fields (strip outer braces)
+        if (!strJsonData.empty() && strJsonData.front() == '{' && strJsonData.back() == '}') {
+            std::string inner = strJsonData.substr(1, strJsonData.size() - 2);
+            if (!inner.empty()) {
+                line += "," + inner;
+            }
+        }
+        line += "}";
+
+        // Append to events.jsonl
+        FILE* f = fopen((dir + "/events.jsonl").c_str(), "a");
+        if (f) { fprintf(f, "%s\n", line.c_str()); fclose(f); }
+
+        // Append to daily/YYYY-MM-DD.jsonl
+        std::string dailyFile = dir + "/daily/" + std::string(ts, 10) + ".jsonl";
+        f = fopen(dailyFile.c_str(), "a");
+        if (f) { fprintf(f, "%s\n", line.c_str()); fclose(f); }
     }
 
     // ── Flow 메시지 기록 ────────────────────────────
@@ -143,10 +339,14 @@ public:
                   const char* from, const char* to,
                   const char* proto, const char* label, const char* body) {
         if (m_strCallsDir.empty()) return;
-        GetVoipDir(strCallId, "unknown");
-        std::lock_guard<std::mutex> lock(m_mtx);
-        std::string dir = _dir(strCallId);
+        std::string dir = GetVoipDir(strCallId, "unknown");
         if (dir.empty()) return;
+        _writeJsonlSafe(dir, from, to, proto, label, body);
+    }
+
+    void _writeJsonlSafe(const std::string& dir, const char* from, const char* to,
+                          const char* proto, const char* label, const char* body) {
+        std::lock_guard<std::mutex> lock(m_mtx);
         _writeJsonl(dir, from, to, proto, label, body);
     }
 
@@ -154,27 +354,25 @@ public:
                  const char* from, const char* to,
                  const char* proto, const char* label, const char* body) {
         if (m_strCallsDir.empty()) return;
-        std::string dir = GetPttDir(strGroupId);
+        std::string dir = GetPttSessionDir(strGroupId);
         if (dir.empty()) return;
         std::lock_guard<std::mutex> lock(m_mtx);
         _writeJsonl(dir, from, to, proto, label, body);
     }
 
+    /** JSON string escaper (public for external callers) */
+    static std::string JsonEsc(const std::string& s) { return Esc(s); }
+
 private:
     std::string m_strCallsDir;
     std::string m_strComponent;
     std::mutex  m_mtx;
-    std::map<std::string, std::string> m_mapDir;
+    std::map<std::string, std::string> m_mapDir;          // key(sessionId or callId) → dir path
+    std::map<std::string, std::string> m_mapCallSession;  // callId → sessionId
+    std::map<std::string, std::string> m_mapPttSession;   // groupId → active session dir
+    std::map<std::string, std::string> m_mapPttSessionId; // groupId → session start time string
 
     std::string _dir(const std::string& key) {
-        auto it = m_mapDir.find(key);
-        return (it != m_mapDir.end()) ? it->second : "";
-    }
-
-    std::string _pttDir(const std::string& strGroupId) {
-        std::string yyyy, mm, dd, hh;
-        DateHour(yyyy, mm, dd, hh);
-        std::string key = strGroupId + "_" + hh;
         auto it = m_mapDir.find(key);
         return (it != m_mapDir.end()) ? it->second : "";
     }

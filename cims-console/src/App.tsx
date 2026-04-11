@@ -9,9 +9,12 @@ import MembersPage from './pages/MembersPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import PttGroupsPage from './pages/PttGroupsPage'
 import ServiceStatusPage from './pages/ServiceStatusPage'
-import CallLogsPage from './pages/CallLogsPage'
-import RecordingsPage from './pages/RecordingsPage'
+import VolteHistoryPage from './pages/VolteHistoryPage'
+import PttHistoryPage from './pages/PttHistoryPage'
+// RecordingsPage는 VoLTE/PTT 이력 상세에 통합
 import StatsPage from './pages/StatsPage'
+import StatsMessagesPage from './pages/StatsMessagesPage'
+import VerificationPage from './pages/VerificationPage'
 import DocsPage from './pages/DocsPage'
 import { authApi } from './api/auth'
 import './index.css'
@@ -31,7 +34,6 @@ const PAGE_TITLES: Record<PageId, string> = {
   'stats-cmp': 'CMP 인터페이스 통계',
   'stats-csc': 'CSC 인터페이스 통계',
   'stats-https': 'HTTPS 메시지 통계',
-  'recordings': '녹취 관리',
   'verification': '시스템 검증',
   'docs': '문서',
 }
@@ -78,16 +80,15 @@ function Shell() {
       case 'subscriptions':   return <SubscriptionsPage />
       case 'ptt-groups':      return <PttGroupsPage />
       case 'service-status':  return <ServiceStatusPage />
-      case 'history-volte':   return <CallLogsPage />
-      case 'history-ptt':     return <CallLogsPage />
+      case 'history-volte':   return <VolteHistoryPage />
+      case 'history-ptt':     return <PttHistoryPage />
       case 'stats-volte':     return <StatsPage />
       case 'stats-ptt':       return <StatsPage />
-      case 'stats-sip':       return <StatsPage />
-      case 'stats-cmp':       return <StatsPage />
-      case 'stats-csc':       return <StatsPage />
-      case 'stats-https':     return <StatsPage />
-      case 'recordings':      return <RecordingsPage />
-      case 'verification':    return <div className="empty">검증 페이지 (준비 중)</div>
+      case 'stats-sip':       return <StatsMessagesPage iface="sip" />
+      case 'stats-cmp':       return <StatsMessagesPage iface="cmp" />
+      case 'stats-csc':       return <StatsMessagesPage iface="csc" />
+      case 'stats-https':     return <StatsMessagesPage iface="https" />
+      case 'verification':    return <VerificationPage />
       case 'docs':            return <DocsPage />
       default:                return <DashboardPage />
     }
@@ -104,14 +105,9 @@ function Shell() {
           onLogout={logout}
           onChangePw={() => setShowChgPw(true)}
         />
-
         <div className="app-content">
-          <div className="app-content-header">
-            {PAGE_TITLES[page] || ''}
-          </div>
-          <div className="app-content-body">
-            {renderPage()}
-          </div>
+          <div className="app-content-header">{PAGE_TITLES[page] || ''}</div>
+          <div className="app-content-body">{renderPage()}</div>
         </div>
       </div>
 
@@ -126,14 +122,11 @@ function Shell() {
               <div className="modal-body">
                 <div className="form-grid">
                   <label>현재 비밀번호</label>
-                  <input className="form-input" type="password" value={oldPw}
-                    onChange={e => setOldPw(e.target.value)} />
+                  <input className="form-input" type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} />
                   <label>새 비밀번호</label>
-                  <input className="form-input" type="password" value={newPw}
-                    onChange={e => setNewPw(e.target.value)} />
+                  <input className="form-input" type="password" value={newPw} onChange={e => setNewPw(e.target.value)} />
                   <label>새 비밀번호 확인</label>
-                  <input className="form-input" type="password" value={newPw2}
-                    onChange={e => setNewPw2(e.target.value)} />
+                  <input className="form-input" type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)} />
                 </div>
                 {chgError && <div className="auth-error" style={{ marginTop: 12 }}>{chgError}</div>}
                 {chgOk && <div className="auth-ok" style={{ marginTop: 12 }}>{chgOk}</div>}

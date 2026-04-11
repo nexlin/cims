@@ -256,7 +256,15 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
         if (!recordDir.empty() && !rtp->isRecording()) {
             rtp->startRecording(recordDir, sessionId);
         }
-        
+
+        // CSP가 전달한 log_dir이 있으면 CMP flow 로그 기록 경로로 저장
+        std::string logDir = payload.GetString("log_dir");
+        if (!logDir.empty()) {
+            _logDirs[sessionId] = logDir;
+            logFlow(sessionId, "cmp", "cmp", "INT", "session-start",
+                    ("port=" + std::to_string(rtpPort)).c_str());
+        }
+
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         SimpleJson::JsonNode respBody;
@@ -282,10 +290,12 @@ void CmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::st
     PAutoLock lock(_mutex);
     if (_sessions.find(sessionId) != _sessions.end()) {
         PRtpTrans* rtp = _sessions[sessionId];
+        logFlow(sessionId, "cmp", "cmp", "INT", "session-end", "");
         delHandler(rtp->getWorkerName(), rtp);
         rtp->reset();
         freeResource(rtp);
         _sessions.erase(sessionId);
+        _logDirs.erase(sessionId);
         LOG_INFO("CmpServer", "REMOVE session=%s", sessionId.c_str());
     } else {
         LOG_WARN("CmpServer", "REMOVE session=%s not found", sessionId.c_str());
@@ -316,6 +326,11 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
 
     if (_groups.find(groupId) == _groups.end()) {
         group = new McpttGroup(groupId);
+        // Floor 이벤트 로그 콜백 설정
+        group->setLogCallback([this](const std::string& key, const char* from, const char* to,
+                                      const char* proto, const char* label, const char* body) {
+            logFlow(key, from, to, proto, label, body);
+        });
         sharedSession = allocResource(sharedIp, sharedPort, sharedVideoPort);
         if (sharedSession) {
              sharedSession->setGroup(group);
@@ -326,6 +341,11 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
              if (!recordDir.empty()) {
                  group->setRecording(true, recordDir);
              }
+             // CSP가 전달한 log_dir이 있으면 CMP flow 로그 기록 경로로 저장
+             std::string logDir = payload.GetString("log_dir");
+             if (!logDir.empty()) {
+                 _logDirs[groupId] = logDir;
+             }
              _groups[groupId] = group;
 
              static int workerIdx = 0;
@@ -334,6 +354,8 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
                   sharedSession->setWorkerName(wname);
                   addHandler(wname, sharedSession);
              }
+             logFlow(groupId, "cmp", "cmp", "INT", "group-start",
+                     ("port=" + std::to_string(sharedPort)).c_str());
              LOG_INFO("CmpServer", "ADDGROUP group=%s port=%d (new)", groupId.c_str(), sharedPort);
         } else {
              delete group;
@@ -347,6 +369,11 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
             sharedPort = sharedSession->getLocalPort();
             sharedVideoPort = sharedSession->getLocalVideoPort();
             sharedIp = _rtpIp;  // 기존 그룹도 RTP IP 사용
+        }
+        // 기존 그룹이더라도 log_dir이 새로 전달되면 갱신
+        std::string logDir = payload.GetString("log_dir");
+        if (!logDir.empty() && _logDirs.find(groupId) == _logDirs.end()) {
+            _logDirs[groupId] = logDir;
         }
         LOG_DEBUG("CmpServer", "ADDGROUP group=%s port=%d (existing)", groupId.c_str(), sharedPort);
     }
@@ -397,7 +424,10 @@ void CmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std:
     if (_groups.find(groupId) != _groups.end()) {
         McpttGroup* group = _groups[groupId];
         group->addMember(sessionId, userIp, userPort, userVideoPort);
-        
+        logFlow(groupId, "cmp", "cmp", "RTP",
+                ("join(" + sessionId + ")").c_str(),
+                (userIp + ":" + std::to_string(userPort)).c_str());
+
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
@@ -420,7 +450,9 @@ void CmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const std
     if (_groups.find(groupId) != _groups.end()) {
         McpttGroup* group = _groups[groupId];
         group->removeMember(sessionId);
-        
+        logFlow(groupId, "cmp", "cmp", "RTP",
+                ("leave(" + sessionId + ")").c_str(), "");
+
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
@@ -440,9 +472,11 @@ void CmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const st
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         McpttGroup* group = _groups[groupId];
+        logFlow(groupId, "cmp", "cmp", "INT", "group-end", "");
         delete group;
         _groups.erase(groupId);
-        
+        _logDirs.erase(groupId);
+
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
@@ -633,10 +667,12 @@ void CmpServer::timeoutLoop() {
             auto it = _sessions.find(sid);
             if (it != _sessions.end()) {
                 PRtpTrans* rtp = it->second;
+                logFlow(sid, "cmp", "cmp", "INT", "session-timeout", "");
                 delHandler(rtp->getWorkerName(), rtp);
                 rtp->reset();
                 freeResource(rtp);
                 _sessions.erase(it);
+                _logDirs.erase(sid);
             }
         }
 
@@ -657,9 +693,64 @@ void CmpServer::timeoutLoop() {
             PAutoLock lock(_mutex);
             auto it = _groups.find(gid);
             if (it != _groups.end()) {
+                logFlow(gid, "cmp", "cmp", "INT", "group-timeout", "");
                 delete it->second;
                 _groups.erase(it);
+                _logDirs.erase(gid);
             }
         }
+    }
+}
+
+void CmpServer::logFlow(const std::string& key, const char* from, const char* to,
+                         const char* proto, const char* label, const char* body) {
+    auto it = _logDirs.find(key);
+    if (it == _logDirs.end() || it->second.empty()) return;
+
+    // timestamp (HH:MM:SS.microsec)
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    struct tm t;
+    localtime_r(&ts.tv_sec, &t);
+    char tsBuf[32];
+    snprintf(tsBuf, sizeof(tsBuf), "%02d:%02d:%02d.%06ld",
+             t.tm_hour, t.tm_min, t.tm_sec, ts.tv_nsec / 1000);
+
+    // JSON escape helper (simple)
+    auto esc = [](const char* s) -> std::string {
+        if (!s) return "";
+        std::string r;
+        r.reserve(strlen(s) + 16);
+        for (const char* p = s; *p; ++p) {
+            switch (*p) {
+                case '"':  r += "\\\""; break;
+                case '\\': r += "\\\\"; break;
+                case '\n': r += "\\n";  break;
+                case '\r': r += "\\r";  break;
+                case '\t': r += "\\t";  break;
+                default:
+                    if ((unsigned char)*p < 0x20) {
+                        char h[8]; snprintf(h, 8, "\\u%04x", (unsigned char)*p); r += h;
+                    } else {
+                        r += *p;
+                    }
+            }
+        }
+        return r;
+    };
+
+    std::string line =
+        std::string("{\"ts\":\"") + tsBuf + "\","
+        "\"from\":\"" + (from ? from : "") + "\","
+        "\"to\":\"" + (to ? to : "") + "\","
+        "\"proto\":\"" + (proto ? proto : "") + "\","
+        "\"label\":\"" + esc(label) + "\","
+        "\"body\":\"" + esc(body) + "\"}";
+
+    std::string path = it->second + "/cmp.jsonl";
+    FILE* f = fopen(path.c_str(), "a");
+    if (f) {
+        fprintf(f, "%s\n", line.c_str());
+        fclose(f);
     }
 }

@@ -176,7 +176,7 @@ CRtpMap::~CRtpMap() {
  * @param iSocketCount 생성할 UDP 소켓 개수
  * @returns RTP 포트 번호를 리턴한다.
  */
-int CRtpMap::CreatePort( int iSocketCount ) {
+int CRtpMap::CreatePort( int iSocketCount, const std::string& strRecordDir, const std::string& strLogDir ) {
     bool bRes = false;
     CRtpInfo clsInfo( iSocketCount );
     
@@ -205,7 +205,7 @@ int CRtpMap::CreatePort( int iSocketCount ) {
     int iLocalPort = 0;
     int iLocalVideoPort = 0;
 
-    if (gclsCmpClient.AddSession(strSessionId, strLocalIp, iLocalPort, iLocalVideoPort)) {
+    if (gclsCmpClient.AddSession(strSessionId, strLocalIp, iLocalPort, iLocalVideoPort, strRecordDir, strLogDir)) {
         // CmpServer returned allocated ports
         clsInfo.m_iStartPort = iLocalPort; 
         clsInfo.m_strLocalIp = strLocalIp; // Store Allocated IP
@@ -370,6 +370,18 @@ bool CRtpMap::GetLocalIp( int iPort, std::string &strLocalIp ) {
     RTP_MAP::iterator itMap = m_clsMap.find( iPort );
     if ( itMap != m_clsMap.end() ) {
         strLocalIp = itMap->second.m_strLocalIp;
+        bRes = true;
+    }
+    m_clsMutex.release();
+    return bRes;
+}
+
+bool CRtpMap::GetSessionId( int iPort, std::string &strSessionId ) {
+    m_clsMutex.acquire();
+    bool bRes = false;
+    RTP_MAP::iterator itMap = m_clsMap.find( iPort );
+    if ( itMap != m_clsMap.end() ) {
+        strSessionId = itMap->second.m_strSessionId;
         bRes = true;
     }
     m_clsMutex.release();

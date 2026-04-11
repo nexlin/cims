@@ -11,6 +11,11 @@ CSPSIM = os.path.join(DIST_DIR, "cspsim", "bin", "cspsim")
 CSP_IP = "127.0.0.1"
 VOIP_DOMAIN = "ims.mnc033.mcc450.3gppnetwork.org"
 
+# 미디어 파일 경로
+MEDIA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media")
+AUDIO_FILE = os.path.join(MEDIA_DIR, "8050001000004_audio.amrwb")
+VIDEO_FILE = os.path.join(MEDIA_DIR, "8050001000004_video.h264")
+
 # DB에 존재하는 VoIP 사용자
 VOIP_USER1 = "+821357007002"
 VOIP_AUTH1 = "450033100000002@" + VOIP_DOMAIN
@@ -85,13 +90,14 @@ def run_volte_tests():
         calls0 = h0.get("csp", {}).get("active_calls", 0)
         reg0 = h0.get("csp", {}).get("registered_users", 0)
 
-        # 2. cspsim으로 통화 실행 (3초 유지)
+        # 2. cspsim으로 통화 실행 (10초 유지, 음성+영상 미디어 전송)
         out = _run_cspsim([
             "-server_ip", CSP_IP, "-count", "2",
             "-user", VOIP_USER1, "-auth_id", VOIP_AUTH1,
             "-domain", VOIP_DOMAIN, "-password", VOIP_PW,
-            "-mode", "voip", "-scenario", "call", "-call_duration", "3",
-        ], timeout=20)
+            "-mode", "voip", "-scenario", "call", "-call_duration", "10",
+            "-media_file", AUDIO_FILE, "-video_file", VIDEO_FILE,
+        ], timeout=35)
         s = _parse_stats(out)
         call_ok = s.get("CallOk", 0) >= 1
 
@@ -144,7 +150,8 @@ def run_volte_tests():
             "-server_ip", CSP_IP, "-count", "2",
             "-user", VOIP_USER1, "-auth_id", VOIP_AUTH1,
             "-domain", VOIP_DOMAIN, "-password", VOIP_PW,
-            "-mode", "voip", "-scenario", "call", "-call_duration", "5",
+            "-mode", "voip", "-scenario", "call", "-call_duration", "10",
+            "-media_file", AUDIO_FILE, "-video_file", VIDEO_FILE,
         ]
         proc = sp.Popen(cmd, stdin=sp.DEVNULL, stdout=sp.PIPE, stderr=sp.STDOUT, text=True,
                         cwd=os.path.join(DIST_DIR, "cspsim"))
@@ -171,7 +178,7 @@ def run_volte_tests():
             checks.append(("active_calls<=registered/2", mid_calls <= mid_reg // 2 if mid_reg > 0 else True))
 
             # 종료 대기
-            proc.wait(timeout=15)
+            proc.wait(timeout=30)
         except Exception:
             proc.kill()
             proc.wait()

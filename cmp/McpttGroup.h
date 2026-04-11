@@ -6,6 +6,7 @@
 #include <vector>
 #include <set>
 #include <cstdint>
+#include <functional>
 #include "pbase.h"
 
 // Forward declaration
@@ -75,6 +76,11 @@ public:
     void updatePriorities(const std::map<std::string, int>& priorities);
     void setDtmfConfig(bool enable, const std::string& pushDigit, const std::string& releaseDigit);
 
+    // Floor 이벤트 로그 콜백 (CmpServer::logFlow 연결용)
+    using LogFlowFunc = std::function<void(const std::string& key, const char* from, const char* to,
+                                            const char* proto, const char* label, const char* body)>;
+    void setLogCallback(LogFlowFunc fn) { _logFlow = fn; }
+
     int getMemberCount() const { return (int)_members.size(); }
     std::string getFloorHolder() const { return _floorTaken ? _floorOwnerSessionId : ""; }
 
@@ -118,6 +124,7 @@ private:
     std::string _dtmfReleaseDigit;
     
     PMutex _mutex;
+    LogFlowFunc _logFlow;  // floor event log callback
 
     // 녹취
     bool _recordEnable;

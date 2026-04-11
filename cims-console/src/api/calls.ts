@@ -22,6 +22,8 @@ export interface CallLog {
   sip_status: number | null
   end_reason: string | null
   end_reason_ko: string
+  has_recording?: boolean
+  dir_name?: string
   participants: CallParticipant[]
 }
 

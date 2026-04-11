@@ -51,7 +51,12 @@ private:
     
     std::map<std::string, PRtpTrans*> _sessions;
     std::map<std::string, McpttGroup*> _groups;
+    std::map<std::string, std::string> _logDirs;  // session_id/group_id → log_dir
     PMutex _mutex;
+
+    // CMP flow 로그 기록 (log_dir/cmp.jsonl)
+    void logFlow(const std::string& key, const char* from, const char* to,
+                 const char* proto, const char* label, const char* body = "");
 
     // Resource Pool
     int _rtpStartPort;

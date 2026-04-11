@@ -6,7 +6,6 @@ export type PageId =
   | 'service-status'
   | 'history-volte' | 'history-ptt'
   | 'stats-volte' | 'stats-ptt' | 'stats-sip' | 'stats-cmp' | 'stats-csc' | 'stats-https'
-  | 'recordings'
   | 'verification'
   | 'docs'
 
@@ -33,7 +32,6 @@ const MENU: MenuItem[] = [
     children: [
       { id: 'history-volte', label: 'VoLTE' },
       { id: 'history-ptt', label: 'PTT' },
-      { id: 'recordings', label: '녹취' },
     ],
   },
   {

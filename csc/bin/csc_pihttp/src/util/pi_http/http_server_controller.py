@@ -1,11 +1,12 @@
 import copy
+import os
 
 import numpy as np
 import pandas as pd
 from readerwriterlock import rwlock
 from typing import Dict, Tuple, Optional
 from fastapi import APIRouter, Request
-from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response, FileResponse
 
 from util.pi_http.http_util import HttpUtil, HttpException
 from util.pi_http.http_handler import BodyData, Server_Dynamic_Handler, HandlerResult, HandlerArgs
@@ -42,6 +43,11 @@ def _http_response(accept_format: str, result: HandlerResult) -> Response:
     if isinstance(body, (bytes, bytearray, memoryview)):
         return Response(content=body, status_code=status, headers=headers, media_type=media or "application/octet-stream")
     if isinstance(body, str):
+        # X-File-Path 헤더가 있으면 파일 스트리밍
+        file_path = headers.pop('X-File-Path', None) if headers else None
+        if file_path and os.path.isfile(file_path):
+            ct = headers.pop('Content-Type', None) if headers else None
+            return FileResponse(path=file_path, media_type=ct or media or 'application/octet-stream', headers=headers)
         return PlainTextResponse(content=body, status_code=status, headers=headers, media_type=media or "text/plain")
     return Response(status_code=status, headers=headers)
 

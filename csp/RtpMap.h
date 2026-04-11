@@ -48,7 +48,7 @@ public:
     CRtpMap();
     ~CRtpMap();
 
-    int CreatePort( int iSocketCount );
+    int CreatePort( int iSocketCount, const std::string& strRecordDir = "", const std::string& strLogDir = "" );
 
     bool Select( int iPort, CRtpInfo **ppclsRtpInfo );
     bool SetStop( int iPort );
@@ -60,6 +60,7 @@ public:
     // [FIX] Thread-safe wrappers
     bool SetIpPort( int iPort, int iIndex, uint32_t iIp, uint16_t sPort, int iPeerIdx = 0 );
     bool GetLocalIp( int iPort, std::string &strLocalIp );
+    bool GetSessionId( int iPort, std::string &strSessionId );
 
 private:
     RTP_MAP m_clsMap;

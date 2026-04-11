@@ -1,6 +1,7 @@
 #include "SimSession.h"
 #include "SipUtility.h"
 #include "SipMd5.h"
+#include "SdpMedia.h"
 #include "Log.h"
 #include <sstream>
 #include <chrono>
@@ -202,7 +203,32 @@ void SimSession::StartCall(const std::string& strTarget) {
 
     clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
     clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
-    clsRtp.m_iCodec = 0; // PCMU
+    // AMR-WB (PT=99) when media file is provided, otherwise PCMU (PT=0)
+    clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : 99;
+
+#ifdef USE_MEDIA_LIST
+    // Audio media line
+    {
+        int audioCodec = clsRtp.m_iCodec;
+        CSdpMedia clsAudio("audio", m_clsRtpThread.m_iPort, "RTP/AVP");
+        clsAudio.AddFmt(audioCodec);
+        if (audioCodec == 99) {
+            clsAudio.AddAttribute("rtpmap", "99 AMR-WB/16000/1");
+            clsAudio.AddAttribute("fmtp", "99 mode-change-capability=2; max-red=0; octet-align=1");
+        } else {
+            clsAudio.AddAttribute("rtpmap", "0 PCMU/8000");
+        }
+        clsRtp.m_clsMediaList.push_back(clsAudio);
+    }
+    // Video media line (if video file set)
+    if (m_clsRtpThread.m_iVideoPort > 0) {
+        CSdpMedia clsVideo("video", m_clsRtpThread.m_iVideoPort, "RTP/AVP");
+        clsVideo.AddFmt(96);
+        clsVideo.AddAttribute("rtpmap", "96 H264/90000");
+        clsVideo.AddAttribute("fmtp", "96 profile-level-id=42C016; packetization-mode=1");
+        clsRtp.m_clsMediaList.push_back(clsVideo);
+    }
+#endif
 
     clsRoute.m_strDestIp  = m_strServerIp;
     clsRoute.m_iDestPort  = m_iServerPort;
@@ -456,6 +482,29 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
         clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
         clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;
+
+#ifdef USE_MEDIA_LIST
+        // 200 OK SDP에 audio + video 미디어 포함
+        {
+            CSdpMedia clsAudio("audio", m_pOwner->m_clsRtpThread.m_iPort, "RTP/AVP");
+            clsAudio.AddFmt(clsLocalRtp.m_iCodec);
+            if (clsLocalRtp.m_iCodec == 99) {
+                clsAudio.AddAttribute("rtpmap", "99 AMR-WB/16000/1");
+                clsAudio.AddAttribute("fmtp", "99 mode-change-capability=2; max-red=0; octet-align=1");
+            } else {
+                clsAudio.AddAttribute("rtpmap", "0 PCMU/8000");
+            }
+            clsLocalRtp.m_clsMediaList.push_back(clsAudio);
+        }
+        if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0) {
+            CSdpMedia clsVideo("video", m_pOwner->m_clsRtpThread.m_iVideoPort, "RTP/AVP");
+            clsVideo.AddFmt(96);
+            clsVideo.AddAttribute("rtpmap", "96 H264/90000");
+            clsVideo.AddAttribute("fmtp", "96 profile-level-id=42C016; packetization-mode=1");
+            clsLocalRtp.m_clsMediaList.push_back(clsVideo);
+        }
+#endif
+
         m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
         if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
     }

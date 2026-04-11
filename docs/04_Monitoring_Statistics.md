@@ -1,6 +1,6 @@
 # CIMS 모니터링·이력·통계 설계서
 
-> 버전: 2.0 (2026-04-03)
+> 버전: 4.0 (2026-04-10)
 
 ---
 
@@ -24,22 +24,28 @@ Console UI에서 제공하는 운영 기능을 3개 파트로 구분한다.
 
 ```
 ext_mnt/                                ← 공유 스토리지 마운트 포인트
-  ├─ msg_log/                            ← 메시지 로그 (CSP/CSC/CMP 각각 기록)
-  │   └─ {YYYYMMDD}/
-  │       └─ {call_id}/
-  │           ├─ csp.jsonl               ← CSP SIP 메시지
-  │           ├─ csc.jsonl               ← CSC API 메시지
-  │           └─ cmp.jsonl               ← CMP RTP 제어 메시지
+  ├─ msg_log/                            ← SIP/인터페이스 메시지 로그 (full message body 포함)
+  │   └─ csp/sip/                        ← CSP SIP 메시지 (SipMessageLogger)
+  │       └─ {YYYY}/{MM}/{DD}/{HH}/
+  │           └─ sip.jsonl               ← Call-ID, method, from/to, direction, full SIP text
   │
-  ├─ recordings/                         ← 통화 녹취
-  │   ├─ raw/                            ← CMP가 기록하는 RTP 덤프
-  │   │   ├─ {session_id}_a.rtp
-  │   │   ├─ {session_id}_b.rtp
-  │   │   └─ {group_id}/
-  │   │       └─ seg_{seq}_audio.rtp
-  │   └─ converted/                      ← CSC가 on-demand 변환한 캐시
-  │       ├─ voip/{YYYY}/{MM}/{DD}/
-  │       └─ ptt/{group_id}/{YYYY}/{MM}/{DD}/
+  ├─ service_log/                        ← 서비스 이력 + Flow + 녹취 (body 포함)
+  │   ├─ voip/{YYYY}/{MM}/{DD}/{HH}/     ← VoIP 통화 이력
+  │   │   └─ {prefix}/{caller}/{session_id}.d/
+  │   │       ├─ call.json               ← 통화 메타 (state, times, reason)
+  │   │       ├─ participants.jsonl      ← 참여자
+  │   │       ├─ session.json            ← Session-ID ↔ Call-ID 매핑 {session_id, call_ids: [leg_a, leg_b]}
+  │   │       ├─ raw_a.rtp              ← 녹취 raw RTP (발신측)
+  │   │       └─ raw_b.rtp              ← 녹취 raw RTP (착신측)
+  │   │
+  │   ├─ ptt/{YYYY}/{MM}/{DD}/{HH}/      ← PTT 그룹통화 이력
+  │   │   └─ {prefix}/{group_id}.d/
+  │   │       ├─ call.jsonl              ← 세션별 누적 JSONL
+  │   │       ├─ participants.jsonl      ← 참여자
+  │   │       └─ seg_*.rtp              ← 발언 단위 녹취 raw
+  │   │
+  │   └─ {type}/{YYYY}/{MM}/{DD}/{HH}/
+  │       └─ index.json                  ← 시간 단위 인덱스 (JSONL)
   │
   └─ stats/                              ← 통계 집계 결과 캐시
       └─ {YYYYMMDD}/
@@ -48,22 +54,27 @@ ext_mnt/                                ← 공유 스토리지 마운트 포인
           └─ 1h.json                     ← 1시간 단위 (90일 보관)
 ```
 
+#### Session-ID 기반 통합 로깅
+
+B2BUA 모드에서는 하나의 통화가 두 개의 Call-ID로 분리된다. Session-ID는 이를 하나의 세션으로 통합하여 로깅한다.
+
+- **Session-ID 형식**: `S{YYYYMMDDHHMMSS}{microseconds}` (예: `S20260410143015123456`)
+- **생성 시점**: B2BUA `CreateCall()` 시 CSP가 생성
+- **매핑**: 발신 leg Call-ID + 착신 leg Call-ID → 동일 Session-ID → 동일 `.d` 디렉터리
+- **record_dir 전달**: CSP가 CMP에 세션 디렉터리 경로를 전달, CMP가 녹취 raw RTP 기록
+- **session.json**: `.d` 디렉터리에 `{session_id, call_ids: [leg_a, leg_b]}` 저장, Flow 재구성 시 양 leg 상관 분석에 사용
+
 ### DB 역할 (최소화)
 
-```
-call_logs (voip_call_logs / ptt_call_logs)
-  ├─ call_id, initiator, callee, group_id
-  ├─ state, invite_time, answer_time, end_time, duration
-  ├─ end_reason, sip_status
-  ├─ msg_log_dir          ← NAS 메시지 로그 디렉터리 경로
-  ├─ rec_status           ← 녹취 상태 (none/raw/ready/failed)
-  └─ rec_raw_path         ← NAS 녹취 raw 파일 경로
+통화 이력은 **파일 기반**(call.json / call.jsonl)으로 저장하며, DB는 사용하지 않는다.
+통화 이력 조회는 `service_log/` 디렉터리를 직접 스캔하거나 `index.json`을 참조한다.
 
-recording_segments (PTT 발언 단위)
-  ├─ call_id, seq, speaker_id
-  ├─ start_time, end_time, duration_ms
-  ├─ raw_audio_path, raw_video_path
-  └─ status (raw/ready/failed)
+DB에 저장하는 데이터:
+```
+subscriptions       ← 가입자 구독 정보 (VoIP/PTT)
+ptt_groups          ← PTT 그룹 설정 (멤버, 우선순위, 암호화 등)
+organizations       ← 조직 트리 (code_path 기반)
+admin_users         ← 관리자 계정
 ```
 
 ---
@@ -94,8 +105,8 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 
 | 항목 | 설명 | 소스 |
 |------|------|------|
-| 활성 VoIP 호 수 | B2BUA + Proxy 진행 중 | CSP `gclsCallMap.GetCount()` + `m_mapProxyCall.size()` |
-| 활성 호 목록 | CallId, 발신, 착신, 시작시간, 상태(ringing/active), 모듈(TAS/IBCF/CSCF) | CSP `gclsCallMap` + `m_mapCallOwner` |
+| 활성 VoIP 호 수 | B2BUA 진행 중 | CSP `gclsCallMap.GetCount()` |
+| 활성 호 목록 | CallId, 발신, 착신, 시작시간, 상태(ringing/active), 모듈(TAS/IBCF) | CSP `gclsCallMap` + `m_mapCallOwner` |
 | RTP 포트 사용률 | 사용중 / 전체 | CSP `gclsRtpMap` 또는 CMP `_freeResources` |
 
 ### 1.4 PTT 그룹통화 상태
@@ -141,7 +152,7 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 │                                                              │
 │  ── VoIP 활성 통화 ──────────────────────────────────────    │
 │  발신    착신    시작      상태    모듈                        │
-│  1001   1002   14:30:15  active  CSCF(Proxy)                │
+│  1001   1002   14:30:15  active  TAS(B2BUA)                  │
 │  1003   1004   14:32:00  ringing TAS(B2BUA)                 │
 │                                                              │
 │  ── PTT 그룹 세션 ──────────────────────────────────────    │
@@ -160,15 +171,20 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 ### 2.1 데이터 기록 흐름
 
 ```
+통화 시작:
+  CSP → service_log/{type}/.../session.d/call.json    (통화 메타 생성, state=ringing)
+  CSP → service_log/.../session.d/session.json         (Session-ID ↔ Call-ID 매핑)
+  CSP → CMP: add/addgroup + record_dir 파라미터 전달
+  SipMessageLogger → msg_log/csp/sip/.../sip.jsonl    (SIP TX/RX 기록 시작)
+
 통화 중:
-  CSP → ext_mnt/msg_log/{date}/{call_id}/csp.jsonl  (SIP 메시지 비동기 기록)
-  CSC → ext_mnt/msg_log/{date}/{call_id}/csc.jsonl  (API 메시지)
-  CMP → ext_mnt/msg_log/{date}/{call_id}/cmp.jsonl  (RTP 제어)
-  CMP → ext_mnt/recordings/raw/{session_id}_*.rtp   (RTP 녹취 비동기 기록)
+  SipMessageLogger → msg_log/csp/sip/.../sip.jsonl    (모든 SIP 메시지 + CMP JSON, Call-ID 포함)
+  CMP → service_log/.../session.d/raw_a.rtp           (발신측 RTP 녹취, record_dir)
+  CMP → service_log/.../session.d/raw_b.rtp           (착신측 RTP 녹취, record_dir)
 
 통화 종료:
-  CSP → DB: call_logs 행 INSERT/UPDATE (최소 메타 + NAS 경로)
-  CMP → DB: recording_segments (PTT 발언 단위)
+  CSP → service_log/.../session.d/call.json 업데이트  (state=ended, end_time, reason)
+  CSP → service_log/.../index.json 추가               (시간 단위 인덱스)
 ```
 
 ### 2.2 VoIP 통화 이력
@@ -177,16 +193,15 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 
 | 필드 | 설명 | 소스 |
 |------|------|------|
-| call_id | SIP Call-ID | DB |
-| initiator | 발신자 | DB |
-| callee | 착신자 | DB |
-| invite_time | 호 시도 시간 | DB |
-| answer_time | 응답 시간 | DB |
-| end_time | 종료 시간 | DB |
-| duration | 통화 시간(초) | DB |
-| end_reason | 종료 사유 (normal/busy/cancel/timeout/error) | DB |
-| sip_status | SIP 응답 코드 | DB |
-| rec_status | 녹취 상태 (none/raw/ready) | DB |
+| call_id | SIP Call-ID (또는 Session-ID) | call.json |
+| initiator | 발신자 | call.json |
+| callee | 착신자 | call.json |
+| invite_time | 호 시도 시간 | call.json |
+| answer_time | 응답 시간 | call.json |
+| end_time | 종료 시간 | call.json |
+| duration | 통화 시간(초) | call.json |
+| end_reason | 종료 사유 (normal/busy/cancel/timeout/error) | call.json |
+| has_recording | 녹취 존재 여부 | 파일 존재 체크 |
 
 #### 상세 보기 (클릭 시)
 
@@ -198,24 +213,27 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 │                                                               │
 │  ┌─ 통화 정보 ────────────────────────────────────────────┐  │
 │  │ 발신: 1001    착신: 1002    시간: 2:35                  │  │
-│  │ 상태: 정상종료  SIP: 200    모듈: CSCF(Proxy)           │  │
+│  │ 상태: 정상종료  SIP: 200    모듈: TAS(B2BUA)            │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                               │
 │  ┌─ 메시지 Flow ──────────────────────────────────────────┐  │
 │  │                                                         │  │
-│  │  UE(1001)         CSP            CMP          UE(1002) │  │
+│  │  UEᴼ(1001)        CSP            CMP          UEᵀ(1002)│  │
 │  │    │── INVITE ───→│               │              │      │  │
 │  │    │               │── add ──────→│              │      │  │
-│  │    │               │←─ OK ────────│              │      │  │
+│  │    │               │←─ add-resp ──│              │      │  │
 │  │    │               │── INVITE ──────────────────→│      │  │
 │  │    │←── 180 ───────│←──────────── 180 ───────────│      │  │
 │  │    │←── 200 ───────│←──────────── 200 ───────────│      │  │
 │  │    │── ACK ───────→│── ACK ─────────────────────→│      │  │
-│  │    │    ~~~ 통화 중 (RTP) ~~~                     │      │  │
+│  │    │    ~~~ 통화 중 (RTP via CMP) ~~~             │      │  │
 │  │    │── BYE ───────→│── BYE ─────────────────────→│      │  │
 │  │    │←── 200 ───────│←──────────── 200 ───────────│      │  │
 │  │    │               │── remove ──→│              │      │  │
+│  │    │               │←─ remove-resp│              │      │  │
 │  │                                                         │  │
+│  │  * csp.jsonl: CSP SIP 메시지 (from/to: ue_o, csp, ue_t)│  │
+│  │  * cmp.jsonl: CMP RTP 제어 (session-start/end)          │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                               │
 │  ┌─ 녹취 재생 ───────────────────────────────────────────┐  │
@@ -227,16 +245,30 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 
 #### 메시지 Flow 데이터 소스
 
-NAS의 `msg_log/{date}/{call_id}/` 디렉터리에서 `csp.jsonl` + `cmp.jsonl`을 읽어 시간순 정렬:
+`msg_log/csp/sip/YYYY/MM/DD/HH/sip.jsonl`에서 Call-ID로 검색하여 B2BUA 양 leg 메시지를 시간순 재구성:
+
+1. `session.json`에서 `call_ids: [leg_a, leg_b]` 읽음
+2. `sip.jsonl`에서 양 Call-ID로 검색 → 시간순 병합
+3. ACK 포함 완전한 B2BUA Flow 표시
 
 ```jsonl
-{"ts":"2026-04-03T14:30:15.123","from":"ue","to":"csp","proto":"SIP","label":"INVITE","body":"..."}
-{"ts":"2026-04-03T14:30:15.130","from":"csp","to":"cmp","proto":"JSON","label":"add","body":"..."}
-{"ts":"2026-04-03T14:30:15.145","from":"cmp","to":"csp","proto":"JSON","label":"OK","body":"..."}
-{"ts":"2026-04-03T14:30:15.150","from":"csp","to":"ue","proto":"SIP","label":"INVITE","body":"..."}
+{"ts":"14:30:15.123","call_id":"leg_a_xxx","dir":"RX","method":"INVITE","from":"1001","to":"1002","msg":"..."}
+{"ts":"14:30:15.130","call_id":"","dir":"TX","method":"","from":"csp","to":"cmp","msg":"{\"cmd\":\"add\",...}"}
+{"ts":"14:30:15.150","call_id":"leg_b_yyy","dir":"TX","method":"INVITE","from":"csp","to":"1002","msg":"..."}
+{"ts":"14:30:16.200","call_id":"leg_b_yyy","dir":"RX","method":"180","from":"1002","to":"csp","msg":"..."}
+{"ts":"14:30:16.201","call_id":"leg_a_xxx","dir":"TX","method":"180","from":"csp","to":"1001","msg":"..."}
 ```
 
-CSC에서 call_id로 디렉터리를 찾아 jsonl 파일들을 파싱하여 Flow 데이터 반환.
+- **sip.jsonl**: SipMessageLogger(ILogCallBack)가 기록. psip SIP TX/RX + CMP JSON 메시지 (전체 SIP text 포함)
+- Flow API: `session.json`의 Call-ID로 `sip.jsonl` 검색 → B2BUA 양 leg 상관 분석
+
+CSC의 Flow API (`GET /api/v1/flow/{session_id}?date=...`)에서 session.json 읽고 sip.jsonl 검색 반환.
+
+#### Console UI: Flow 상세 페이지
+
+FlowPage는 상단 SVG 시퀀스 다이어그램 + 하단 메시지 목록/상세로 구성:
+- 상단: UE(발신) ↔ CSP ↔ CMP ↔ UE(착신) 간 화살표 다이어그램
+- 하단: 메시지 클릭 시 전체 SIP text 표시
 
 ### 2.3 PTT 통화 이력
 
@@ -292,27 +324,57 @@ CSC에서 call_id로 디렉터리를 찾아 jsonl 파일들을 파싱하여 Flow
 ### 2.4 API 설계
 
 ```
-# 통화 이력 (VoIP + PTT 통합)
-GET /api/v1/call/logs                    목록 (기존 + rec_status 추가)
-GET /api/v1/call/logs/active             실시간 활성 통화
+# 통화 이력 (파일 기반, VoIP/PTT 분리)
+GET /api/v1/call/logs?date=YYYY-MM-DD&hour=HH&call_type=voip|ptt&msisdn=...&limit=50
 
-# 메시지 Flow (NAS jsonl 파싱)
-GET /api/v1/call/logs/{call_id}/flow     메시지 Flow 데이터
+# 메시지 Flow (sip.jsonl에서 Call-ID 검색, session.json으로 B2BUA 상관)
+GET /api/v1/flow/{session_id}?date=YYYY-MM-DD&hour=HH
+GET /api/v1/flow/list?date=YYYY-MM-DD&hour=HH
 
-# 녹취 재생 (on-demand 트랜스코딩)
-GET /api/v1/call/logs/{call_id}/audio              VoIP 음성
-GET /api/v1/call/logs/{call_id}/video?side=a|b     VoIP 영상
-GET /api/v1/call/logs/{call_id}/segments           PTT 발언 목록
-GET /api/v1/call/logs/{call_id}/segments/{seq}/audio  PTT 발언 재생
+# 녹취 재생
+GET /api/v1/recordings/{call_id}/audio?date=YYYY-MM-DD
+GET /api/v1/recordings/{call_id}/video?date=YYYY-MM-DD
+GET /api/v1/recordings?date=YYYY-MM-DD&call_type=voip|ptt
 ```
 
-녹취 API를 `recordings/` 가 아닌 `call/logs/{call_id}/` 하위로 통합하여 통화 이력에서 바로 접근.
+모든 API는 `service_log/` 디렉터리를 직접 스캔하여 데이터 반환 (DB 미사용).
+
+### 2.5 녹취 파일 형식 및 트랜스코딩
+
+#### Raw RTP 녹취 형식
+
+CMP RtpRecorder가 기록하는 raw 파일 형식 (`.rtp`):
+```
+[uint32 len][int64 recv_usec][rtp_pkt]  ← 패킷 반복
+```
+- `len`: RTP 패킷 길이 (4바이트)
+- `recv_usec`: 수신 시각 wall-clock (마이크로초, 8바이트) — 오디오/비디오 동기화에 사용
+- `rtp_pkt`: 원본 RTP 패킷
+
+#### 트랜스코딩 파이프라인
+
+**음성 (Audio)**:
+1. RTP → AMR-WB 페이로드 추출 (DTX 인식: 타임스탬프 기반 NO_DATA 프레임 삽입)
+2. AMR-WB → PCM 16kHz 디코딩
+3. 발신측 + 착신측 PCM → amix 필터로 믹싱
+4. 믹싱 PCM → WAV 출력
+
+**영상 (Video)**:
+1. RTP → H.264 NAL 재조립 (FU-A fragment reassembly)
+2. 프레임레이트: RTP 타임스탬프로부터 자동 계산
+3. 발신측(좌) + 착신측(우) → side-by-side 합성 + 오디오 믹싱
+4. recv_usec 오프셋으로 오디오/비디오 동기화 (`-itsoffset`)
+5. → MP4 출력
+
+#### Console UI: VoLTE 이력 상세
+
+VolteHistoryPage 상세 모달에서 오디오 플레이어 + 비디오 플레이어 제공.
 
 ---
 
 ## Part 3. 통계
 
-NAS의 raw 데이터(msg_log, recordings, DB call_logs)를 기반으로 통계를 집계한다.
+NAS의 raw 데이터(`msg_log/` 인터페이스 통계, `service_log/` 서비스 이력)를 기반으로 통계를 집계한다.
 UI에서 **5분 / 10분 / 1시간 / 1일 / 1월 / 1년** 단위를 선택하여 조회 가능.
 
 ### 3.0 시간 단위 (Granularity)
@@ -336,7 +398,7 @@ GET /api/v1/stats/...?granularity=5m&from=...&to=...
 각 프로토콜별 메시지 수를 선택한 시간 단위로 집계.
 
 #### 데이터 소스
-NAS `msg_log/{date}/{call_id}/*.jsonl` 파일에서 `proto`, `label`, `ts` 필드를 집계.
+NAS `msg_log/csp/sip/{YYYY}/{MM}/{DD}/{HH}/sip.jsonl` 파일에서 `method`, `dir`, `ts` 필드를 집계.
 
 #### 통계 항목
 
@@ -381,7 +443,7 @@ NAS `msg_log/{date}/{call_id}/*.jsonl` 파일에서 `proto`, `label`, `ts` 필�
 
 ### 3.2 서비스 통계
 
-DB의 `call_logs` 테이블 + NAS 녹취 정보를 기반으로 서비스 품질 지표를 산출.
+`service_log/` 디렉터리의 `call.json`/`call.jsonl` + 녹취 정보를 기반으로 서비스 품질 지표를 산출.
 시간 단위 선택에 따라 집계 범위가 변경됨.
 
 #### VoIP 서비스 통계
@@ -625,9 +687,9 @@ GET /api/v1/stats/service/summary?granularity=1d&date=2026-04-03
 
 | 컴포넌트 | 기록 (NAS) | DB | Console 제공 |
 |----------|-----------|-----|-------------|
-| **CSP** | msg_log/{call_id}/csp.jsonl (SIP 비동기) | call_logs INSERT/UPDATE (최소 메타) | - |
-| **CMP** | msg_log/{call_id}/cmp.jsonl (제어 비동기) + recordings/raw/*.rtp (녹취 비동기) | recording_segments (PTT) | - |
-| **CSC** | msg_log/{call_id}/csc.jsonl (API 비동기) | - | REST API: 이력조회, Flow 파싱, 녹취 on-demand 변환, 통계 집계 |
+| **CSP** | msg_log/csp/sip/.../sip.jsonl (SipMessageLogger) + service_log/.../call.json, session.json, participants.jsonl | - | - |
+| **CMP** | service_log/.../*.rtp (녹취 raw, record_dir) | - | - |
+| **CSC** | - | - | REST API: 이력조회, Flow(sip.jsonl 검색), 녹취 on-demand 변환, 통계 집계 |
 | **Console** | - | - | UI: 대시보드, 이력+Flow+녹취, 통계 차트 |
 
 ---
@@ -639,3 +701,4 @@ GET /api/v1/stats/service/summary?granularity=1d&date=2026-04-03
 | 2026-04-02 | 1.0 | 초기 정의 — CSP 모듈별 상태/통계 항목 |
 | 2026-04-03 | 2.0 | 3파트 재설계 — 실시간 모니터링 / 서비스 이력(Flow+녹취 통합) / 통계 |
 | 2026-04-03 | 2.1 | Part 3 통계 보완 — 다중 시간 단위(5m/10m/1h/1d/1M/1y), 계층적 집계/저장, DB 스키마 |
+| 2026-04-10 | 4.0 | VoLTE B2BUA 전환: Proxy 모드 제거, SipMessageLogger(sip.jsonl) 기반 Flow, session.json 매핑, 녹취 recv_usec 추가, 트랜스코딩(DTX/FU-A/sync) 상세화 |

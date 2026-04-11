@@ -75,16 +75,31 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             strSharedIp = m_mapGroupRtp[pszGroupId].strIp;
         }
     }
-    if ( iSharedPort <= 0 ) {
-        // 녹취 경로: CallDir 통합 디렉터리 사용
-        if ( gclsCallDir.IsEnabled() ) {
-            strRecordDir = gclsCallDir.GetPttDir(pszGroupId);
-            gclsCallDir.PttSessionStart(pszGroupId, pszCallId, pszCallerInfo);
+    // 세션 시작 기록 (그룹이 이미 CMP에 있어도 통화 기록은 필요)
+    if ( gclsCallDir.IsEnabled() ) {
+        strRecordDir = gclsCallDir.GetPttSessionDir(pszGroupId);
+        // Build group snapshot JSON
+        std::string strSnapshot = "{\"name\":\"" + CCallDir::JsonEsc(clsGroup._name) + "\",\"members\":[";
+        bool bFirst = true;
+        for (size_t i = 0; i < clsGroup._pusers.size(); ++i) {
+            if (!clsGroup._pusers[i]) continue;
+            if (!bFirst) strSnapshot += ",";
+            bFirst = false;
+            strSnapshot += "{\"id\":\"" + clsGroup._pusers[i]->_id + "\",\"priority\":" + std::to_string(clsGroup._pusers[i]->_priority) + "}";
         }
-        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir ) ) {
+        strSnapshot += "]}";
+        gclsCallDir.PttSessionStart(pszGroupId, pszCallId, pszCallerInfo, strSnapshot);
+    }
+
+    if ( iSharedPort <= 0 ) {
+        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir, strRecordDir ) ) {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
             m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
         }
+    } else if ( !strRecordDir.empty() ) {
+        // 그룹이 이미 CMP에 있지만 log_dir 전달이 필요 → addgroup 재호출 (기존 그룹 유지, log_dir만 갱신)
+        std::string tmpIp; int tmpPort = 0; int tmpVPort = 0;
+        gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpPort, tmpVPort, strRecordDir, strRecordDir );
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
@@ -183,6 +198,14 @@ void CGroupCallService::ClearUserCall( const std::string& strUserId )
     if ( !strGroupId.empty() ) {
         gclsCmpClient.LeaveGroup( strGroupId, strSessionId );
 
+        // PTT history: member leave event
+        if ( gclsCallDir.IsEnabled() ) {
+            gclsCallDir.PttLogEvent(strGroupId, "member_leave", "{\"member\":\"" + strUserId + "\"}");
+            if ( !bStillActive ) {
+                gclsCallDir.PttSessionEnd(strGroupId);
+            }
+        }
+
         if ( gclsDbManager.IsConnected() ) {
             gclsDbManager.UpdateParticipantLeft( strGroupId, strUserId );
             if ( !bStillActive ) {
@@ -270,10 +293,20 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
             std::string strRecordDir;
             if ( gclsCallDir.IsEnabled() ) {
-                strRecordDir = gclsCallDir.GetPttDir(pszGroupId);
-                gclsCallDir.PttSessionStart(pszGroupId, "autojoin", pszUserId);
+                strRecordDir = gclsCallDir.GetPttSessionDir(pszGroupId);
+                // Build group snapshot JSON for autojoin
+                std::string strSnapshot = "{\"name\":\"" + CCallDir::JsonEsc(clsGroup._name) + "\",\"members\":[";
+                bool bFirst = true;
+                for (size_t i = 0; i < clsGroup._pusers.size(); ++i) {
+                    if (!clsGroup._pusers[i]) continue;
+                    if (!bFirst) strSnapshot += ",";
+                    bFirst = false;
+                    strSnapshot += "{\"id\":\"" + clsGroup._pusers[i]->_id + "\",\"priority\":" + std::to_string(clsGroup._pusers[i]->_priority) + "}";
+                }
+                strSnapshot += "]}";
+                gclsCallDir.PttSessionStart(pszGroupId, "autojoin", pszUserId, strSnapshot);
             }
-            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir ) ) {
+            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir, strRecordDir ) ) {
                  bVideoEnabled = clsGroup._videoEnabled;
                  m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled, 0 };
             } else {
@@ -467,9 +500,13 @@ void CGroupCallService::SyncGroupsState() {
         if ( itRtp == m_mapGroupRtp.end() ) {
             // NEW GROUP
             lock.unlock(); // Release lock for network op
-            
+
             std::string ip; int port; int videoPort = 0;
-            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, videoPort ) ) {
+            std::string strLogDir;
+            if ( gclsCallDir.IsEnabled() ) {
+                strLogDir = gclsCallDir.GetPttSessionDir(group._id);
+            }
+            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, videoPort, strLogDir, strLogDir ) ) {
                 std::unique_lock<std::recursive_mutex> lock2(m_mutex);
                 m_mapGroupRtp[group._id] = { port, videoPort, ip, nHash, "", "", group._videoEnabled, 0 };
                 CLog::Print( LOG_INFO, "SyncGroupsState: Added Group(%s) -> %s:%d (MemHash:%lu)", group._id.c_str(), ip.c_str(), port, nHash );
@@ -563,7 +600,11 @@ void CGroupCallService::CheckGroupIntegrity() {
             if (m_mapGroupRtp.find(group._id) == m_mapGroupRtp.end()) {
                 lock.unlock();
                 std::string ip; int port; int videoPort = 0;
-                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, videoPort)) {
+                std::string strLogDir;
+                if ( gclsCallDir.IsEnabled() ) {
+                    strLogDir = gclsCallDir.GetPttSessionDir(group._id);
+                }
+                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, videoPort, strLogDir, strLogDir)) {
                      lock.lock();
                      m_mapGroupRtp[group._id] = { port, videoPort, ip, 0, "", "", group._videoEnabled, 0 };
                 } else {
@@ -645,6 +686,9 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
     int iVideoPort = iRemotePort + 3;
     if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort, iVideoPort) ) {
          CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d video=%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort, iVideoPort );
+         if ( gclsCallDir.IsEnabled() ) {
+             gclsCallDir.PttLogEvent(strGroupId, "member_join", "{\"member\":\"" + strMemberId + "\"}");
+         }
     } else {
          CLog::Print( LOG_ERROR, "OnCallStarted: JoinGroup failed for %s", strGroupId.c_str() );
     }
@@ -699,6 +743,14 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
     gclsCmpClient.LeaveGroup(strGroupId, strSessionId);
+
+    // PTT history: member leave event
+    if ( gclsCallDir.IsEnabled() ) {
+        gclsCallDir.PttLogEvent(strGroupId, "member_leave", "{\"member\":\"" + strMemberId + "\"}");
+        if ( !bStillActive ) {
+            gclsCallDir.PttSessionEnd(strGroupId);
+        }
+    }
 
     if ( gclsDbManager.IsConnected() ) {
         gclsDbManager.UpdateParticipantLeft( strGroupId, strMemberId );

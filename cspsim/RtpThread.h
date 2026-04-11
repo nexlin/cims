@@ -38,6 +38,9 @@ public:
     /** 미디어 파일 경로 (AMR-WB raw 프레임 파일) 설정 — 비어있으면 합성 RTP */
     void SetMediaFile(const std::string& strPath) { m_strMediaFile = strPath; }
 
+    /** 비디오 파일 경로 (H.264 Annex B raw NAL 파일) 설정 */
+    void SetVideoFile(const std::string& strPath) { m_strVideoFile = strPath; }
+
 	Socket	m_hSocket;
 	int			m_iPort;
 	bool		m_bStopEvent;
@@ -46,6 +49,12 @@ public:
 	std::string	m_strDestIp;
 	int					m_iDestPort;
     std::string m_strMediaFile;
+
+    // Video RTP
+    Socket  m_hVideoSocket;
+    int     m_iVideoPort;
+    bool    m_bVideoSendThreadRun;
+    std::string m_strVideoFile;
 };
 
 #endif

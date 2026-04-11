@@ -237,6 +237,16 @@ OPEN_FILE:
 	vsnprintf( szBuf, sizeof(szBuf)-1, fmt, ap );
 	va_end( ap );
 
+	// Copy formatted buffer for callback invocation after mutex release
+	char szCbBuf[LOG_MAX_SIZE];
+	bool bCallBack = false;
+	if( m_pclsCallBack )
+	{
+		strncpy( szCbBuf, szBuf, sizeof(szCbBuf) - 1 );
+		szCbBuf[sizeof(szCbBuf) - 1] = '\0';
+		bCallBack = true;
+	}
+
 	if( m_pThreadMutex && m_pThreadMutex->acquire() == false ) return -1;
 
 	if( m_sttFd )
@@ -262,6 +272,7 @@ OPEN_FILE:
 #else
 		m_pclsCallBack->Print( iLevel, "[%u] %s", (unsigned long)pthread_self(), szBuf );
 #endif
+		bCallBack = false;  // Already called via else-if path
 	}
 	else
 	{
@@ -275,6 +286,16 @@ OPEN_FILE:
 	}
 
 	if( m_pThreadMutex ) m_pThreadMutex->release();
+
+	// Invoke callback after mutex release (when file was open and callback exists)
+	if( bCallBack && m_pclsCallBack )
+	{
+#ifdef WIN32
+		m_pclsCallBack->Print( iLevel, "[%u] %s", GetCurrentThreadId(), szCbBuf );
+#else
+		m_pclsCallBack->Print( iLevel, "[%lu] %s", (unsigned long)pthread_self(), szCbBuf );
+#endif
+	}
 
 	return iResult;
 }

@@ -92,6 +92,8 @@ private:
         std::string strClientIp;
         int iClientPort;
         ESipTransport eTransport;
+        int iRtpPort;       // CMP RTP relay 포트 (0 = 미사용)
+        ProxyCallInfo() : iClientPort(0), eTransport(E_SIP_UDP), iRtpPort(0) {}
     };
     std::map<std::string, ProxyCallInfo> m_mapProxyCall;
     CSipMutex m_clsProxyMutex;

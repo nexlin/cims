@@ -71,10 +71,10 @@ public :
       flags = fcntl(_fd, F_GETFL, 0);
       fcntl(_fd, F_SETFL, flags | O_NONBLOCK);
 
-      int nRet = 256 * 20;;
+      int nRet = 256 * 1024;  // 256KB
       setsockopt(_fd, SOL_SOCKET, SO_SNDBUF, (char*)&nRet, sizeof(nRet));
 
-      nRet = 256 * 20;;
+      nRet = 256 * 1024;  // 256KB (영상 FU-A 버스트 대응)
       setsockopt(_fd, SOL_SOCKET, SO_RCVBUF, (char*)&nRet, sizeof(nRet));
 
       memset(&_addrRmt, 0, sizeof(_addrRmt));

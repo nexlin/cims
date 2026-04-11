@@ -145,13 +145,6 @@ bool CModuleDispatcher::SendResponse(CSipMessage* pclsMessage, int iStatusCode) 
             snprintf(szLabel, sizeof(szLabel), "%d %s", iStatusCode, pclsResponse->m_strReasonPhrase.c_str());
             char szSipBuf[8192];
             pclsResponse->ToString(szSipBuf, sizeof(szSipBuf));
-            if (gclsCallDir.IsEnabled()) {
-                std::string gid = gclsGroupCallService.GetGroupIdByCallId(strCallId);
-                if (!gid.empty())
-                    gclsCallDir.LogPtt(gid, "csp", pszTo, "SIP", szLabel, szSipBuf);
-                else
-                    gclsCallDir.LogVoip(strCallId, "csp", pszTo, "SIP", szLabel, szSipBuf);
-            }
             if (gclsMsgLogger.IsEnabled())
                 gclsMsgLogger.Log(strCallId.c_str(), "csp", pszTo, "SIP", szLabel, szSipBuf);
         }
@@ -206,60 +199,7 @@ void CModuleDispatcher::SaveCdr(const char* pszCallId, int iSipStatus) {
     }
 }
 
-// ──────────────────────────────────────────────────────────────
-//  CSCF Proxy — INVITE 포워딩 (Call-ID 유지)
-// ──────────────────────────────────────────────────────────────
-
-bool CModuleDispatcher::ProxyInvite(CSipMessage* pclsMessage, const char* pszDestIp, int iDestPort, ESipTransport eTransport) {
-    CSipMessage* pclsRequest = new CSipMessage();
-    *pclsRequest = *pclsMessage;
-
-    // Via 추가 (CSP 자신)
-    const std::string& strLocalIp = gclsUserAgent.m_clsSipStack.m_clsSetup.m_strLocalIp;
-    int iLocalPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
-
-    SIP_VIA_LIST::iterator itVia = pclsRequest->m_clsViaList.begin();
-    std::string strBranch;
-    if (itVia != pclsRequest->m_clsViaList.end()) {
-        const char* pszBranch = itVia->SelectParamValue(SIP_BRANCH);
-        if (pszBranch) {
-            strBranch = pszBranch;
-            strBranch.append("_cscf");
-        }
-    }
-    pclsRequest->AddVia(strLocalIp.c_str(), iLocalPort, strBranch.c_str());
-
-    // Record-Route 추가 (CSP 가 dialog 경로에 포함)
-    pclsRequest->AddRecordRoute(strLocalIp.c_str(), iLocalPort);
-
-    // Route 헤더 조작
-    if (!pclsRequest->m_clsRouteList.empty()) {
-        pclsRequest->m_clsRouteList.pop_front();
-    }
-    pclsRequest->AddRoute(pszDestIp, iDestPort, eTransport);
-
-    // Request-URI 를 착신자로 설정
-    pclsRequest->m_clsReqUri.m_strHost = pszDestIp;
-    pclsRequest->m_clsReqUri.m_iPort = iDestPort;
-
-    // Max-Forwards 감소
-    if (pclsRequest->m_iMaxForwards > 0) pclsRequest->m_iMaxForwards--;
-
-    // Proxy call 정보 저장 (응답 시 Via 제거용)
-    std::string strCallId;
-    pclsRequest->GetCallId(strCallId);
-    ProxyCallInfo proxyInfo;
-    proxyInfo.strClientIp = pclsMessage->m_strClientIp;
-    proxyInfo.iClientPort = pclsMessage->m_iClientPort;
-    proxyInfo.eTransport = pclsMessage->m_eTransport;
-    SetProxyCall(strCallId, proxyInfo);
-
-    CLog::Print(LOG_INFO, "CSCF Proxy INVITE: CallId=%s → %s:%d [Call-ID preserved]",
-        strCallId.c_str(), pszDestIp, iDestPort);
-
-    gclsUserAgent.m_clsSipStack.SendSipMessage(pclsRequest);
-    return true;
-}
+// (Proxy 모드 제거됨 — 모든 VoIP INVITE는 B2BUA + CMP 경유)
 
 // ──────────────────────────────────────────────────────────────
 //  ISipStackCallBack — RecvRequest
@@ -270,29 +210,7 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
     std::string strCallId;
     pclsMessage->GetCallId(strCallId);
 
-    // 메시지 로깅 (CallDir 통합 디렉터리 — VoIP/PTT 분기)
-    if (gclsCallDir.IsEnabled() && !strCallId.empty()) {
-        const char* pszFrom = "ue";
-        if (!pclsMessage->m_clsViaList.empty() && pclsMessage->m_clsViaList.front().m_iPort == 5062)
-            pszFrom = "cwrtc";
-        char szSipBuf[8192];
-        pclsMessage->ToString(szSipBuf, sizeof(szSipBuf));
-
-        std::string strGroupId = gclsGroupCallService.GetGroupIdByCallId(strCallId);
-        if (!strGroupId.empty()) {
-            // PTT: 그룹 디렉터리에 기록
-            gclsCallDir.LogPtt(strGroupId, pszFrom, "csp", "SIP",
-                               pclsMessage->m_strSipMethod.c_str(), szSipBuf);
-        } else {
-            // VoIP: call_id 디렉터리에 기록
-            gclsCallDir.GetVoipDir(strCallId,
-                pclsMessage->m_clsFrom.m_clsUri.m_strUser,
-                pclsMessage->m_clsTo.m_clsUri.m_strUser);
-            gclsCallDir.LogVoip(strCallId, pszFrom, "csp", "SIP",
-                                   pclsMessage->m_strSipMethod.c_str(), szSipBuf);
-        }
-    }
-    // 기존 MsgLogger도 유지 (하위 호환)
+    // 기존 MsgLogger 유지 (하위 호환)
     if (gclsMsgLogger.IsEnabled() && !strCallId.empty()) {
         gclsMsgLogger.SetCallInfo(strCallId.c_str(),
             pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(),
@@ -327,23 +245,13 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
             return false;
         }
 
-        // 착신자가 등록된 일반 가입자 → Proxy 모드 시도
+        // TAS 서비스 판단: DND, 착신거부
         CspUser clsToUser;
         if (gclsCspUserMap.isAlive(strTo.c_str(), clsToUser)) {
-            // TAS 서비스 판단: DND, 착신전환, 착신거부
-            CspUser clsFromUser;
-            gclsCspUserMap.Select(strFrom.c_str(), clsFromUser);
-
             if (clsToUser.isDnd() || clsToUser.isReject(strFrom.c_str())) {
-                CLog::Print(LOG_INFO, "CSCF Proxy: Rejected by TAS (DND/Reject) From=%s To=%s", strFrom.c_str(), strTo.c_str());
+                CLog::Print(LOG_INFO, "CSCF: Rejected by TAS (DND/Reject) From=%s To=%s", strFrom.c_str(), strTo.c_str());
                 SendResponse(pclsMessage, SIP_DECLINE);
                 return true;
-            }
-
-            if (clsToUser.isCallForward()) {
-                // 착신전환 → B2BUA 필요 (302 응답 생성)
-                CLog::Print(LOG_DEBUG, "CSCF Proxy: CallForward detected → B2BUA fallback");
-                return false;
             }
 
             // 서비스 모드 체크
@@ -352,78 +260,10 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
                 SendResponse(pclsMessage, SIP_FORBIDDEN);
                 return true;
             }
-
-            // Proxy 포워딩: 착신자의 등록 주소로 전달
-            CUserInfo clsUserInfo;
-            if (gclsUserMap.Select(strTo.c_str(), clsUserInfo)) {
-                SetCallOwner(strCallId.c_str(), &m_clsCscf);
-
-                // RTP Relay: proxy 모드에서도 SDP 의 IP/Port 를 relay 주소로 변경
-                // (향후 구현 — 현재는 단순 포워딩)
-
-                CLog::Print(LOG_INFO, "CSCF Proxy: %s → %s (%s:%d) [Call-ID preserved]",
-                    strFrom.c_str(), strTo.c_str(), clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort);
-
-                // [CALL LOG]
-                if (gclsDbManager.IsConnected()) {
-                    gclsDbManager.InsertCallLog(strCallId, false, "", strFrom, strTo);
-                    gclsDbManager.InsertParticipant(strCallId, strFrom, "caller", true);
-                    gclsDbManager.InsertParticipant(strCallId, strTo, "callee", false);
-                }
-                // CallDir: call.json 생성
-                if (gclsCallDir.IsEnabled()) {
-                    gclsCallDir.VoipCallStart(strCallId, strFrom, strTo);
-                    gclsCallDir.VoipAddParticipant(strCallId, strFrom, "caller");
-                    gclsCallDir.VoipAddParticipant(strCallId, strTo, "callee");
-                }
-
-                return ProxyInvite(pclsMessage, clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort, clsUserInfo.m_eTransport);
-            }
         }
 
-        // 그 외 → B2BUA (return false → UserAgent 처리)
+        // 모든 VoIP INVITE → B2BUA (CMP 경유)
         return false;
-    }
-
-    // BYE/CANCEL/ACK for proxy calls → 포워딩
-    if (pclsMessage->IsMethod(SIP_METHOD_BYE) || pclsMessage->IsMethod(SIP_METHOD_CANCEL)) {
-        ProxyCallInfo proxyInfo;
-        if (GetProxyCall(strCallId, proxyInfo)) {
-            // Proxy 콜의 BYE/CANCEL → 상대방에게 포워딩
-            CSipMessage* pclsFwd = new CSipMessage();
-            *pclsFwd = *pclsMessage;
-
-            const std::string& strLocalIp = gclsUserAgent.m_clsSipStack.m_clsSetup.m_strLocalIp;
-            int iLocalPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
-
-            std::string strBranch;
-            if (!pclsFwd->m_clsViaList.empty()) {
-                const char* pszBranch = pclsFwd->m_clsViaList.front().SelectParamValue(SIP_BRANCH);
-                if (pszBranch) { strBranch = pszBranch; strBranch.append("_cscf"); }
-            }
-            pclsFwd->AddVia(strLocalIp.c_str(), iLocalPort, strBranch.c_str());
-
-            if (!pclsFwd->m_clsRouteList.empty()) pclsFwd->m_clsRouteList.pop_front();
-            if (pclsFwd->m_iMaxForwards > 0) pclsFwd->m_iMaxForwards--;
-
-            gclsUserAgent.m_clsSipStack.SendSipMessage(pclsFwd);
-
-            if (pclsMessage->IsMethod(SIP_METHOD_BYE)) {
-                // Proxy 통화 종료
-                if (gclsDbManager.IsConnected()) {
-                    gclsDbManager.UpdateCallLogEnded(strCallId, 0, time(NULL), 200);
-                }
-                if (gclsCallDir.IsEnabled()) {
-                    gclsCallDir.VoipCallEnd(strCallId, "normal", 0);
-                }
-                RemoveProxyCall(strCallId);
-                RemoveCallOwner(strCallId.c_str());
-            }
-
-            CLog::Print(LOG_INFO, "CSCF Proxy %s forwarded: CallId=%s",
-                pclsMessage->m_strSipMethod.c_str(), strCallId.c_str());
-            return true;
-        }
     }
 
     return false;
@@ -442,53 +282,9 @@ bool CModuleDispatcher::RecvResponse(int iThreadId, CSipMessage* pclsMessage) {
             snprintf(szLabel, sizeof(szLabel), "%d", pclsMessage->m_iStatusCode);
             char szSipBuf[8192];
             pclsMessage->ToString(szSipBuf, sizeof(szSipBuf));
-            if (gclsCallDir.IsEnabled()) {
-                std::string gid = gclsGroupCallService.GetGroupIdByCallId(strCallId);
-                if (!gid.empty())
-                    gclsCallDir.LogPtt(gid, pszFrom, "csp", "SIP", szLabel, szSipBuf);
-                else
-                    gclsCallDir.LogVoip(strCallId, pszFrom, "csp", "SIP", szLabel, szSipBuf);
-            }
             if (gclsMsgLogger.IsEnabled())
                 gclsMsgLogger.Log(strCallId.c_str(), pszFrom, "csp", "SIP", szLabel, szSipBuf);
         }
-    }
-
-    // Proxy 콜 응답 → 상위 Via 제거 후 발신자에게 전달
-    std::string strCallId;
-    pclsMessage->GetCallId(strCallId);
-
-    ProxyCallInfo proxyInfo;
-    if (GetProxyCall(strCallId, proxyInfo)) {
-        CSipMessage* pclsFwd = new CSipMessage();
-        *pclsFwd = *pclsMessage;
-
-        // 최상위 Via (CSP 자신) 제거
-        if (!pclsFwd->m_clsViaList.empty()) {
-            pclsFwd->m_clsViaList.pop_front();
-        }
-
-        CLog::Print(LOG_INFO, "CSCF Proxy Response %d forwarded: CallId=%s",
-            pclsMessage->m_iStatusCode, strCallId.c_str());
-
-        gclsUserAgent.m_clsSipStack.SendSipMessage(pclsFwd);
-
-        // Proxy 통화 DB 상태 갱신
-        if (gclsDbManager.IsConnected()) {
-            if (pclsMessage->m_iStatusCode == 200 && pclsMessage->m_clsCSeq.m_strMethod == "INVITE") {
-                gclsDbManager.UpdateCallLogActive(strCallId);
-            } else if (pclsMessage->m_iStatusCode >= 300) {
-                gclsDbManager.UpdateCallLogEnded(strCallId, 0, time(NULL), pclsMessage->m_iStatusCode);
-            }
-        }
-
-        // 최종 에러 응답(>=300)이면 정리
-        if (pclsMessage->m_iStatusCode >= 300) {
-            RemoveProxyCall(strCallId);
-            RemoveCallOwner(strCallId.c_str());
-        }
-
-        return true;
     }
 
     return false;
@@ -659,8 +455,23 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
     std::string strCallId;
     CSipCallRoute clsRoute;
 
+    // B2BUA: Session-ID 생성 + 발신 leg 매핑
+    std::string strSessionId;
+    if (gclsCallDir.IsEnabled()) {
+        strSessionId = CCallDir::GenerateSessionId();
+        gclsCallDir.MapCallToSession(pszCallId, strSessionId);
+        // Session-ID로 디렉터리 생성
+        gclsCallDir.GetVoipDir(pszCallId, pszFrom, pszTo);
+    }
+
     if (gclsSetup.m_bUseRtpRelay) {
-        iStartPort = gclsRtpMap.CreatePort(SOCKET_COUNT_PER_MEDIA * pclsRtp->GetMediaCount());
+        // 녹취 경로: Recording 활성화 시 세션 디렉터리 사용
+        std::string strRecordDir, strLogDir;
+        if (gclsSetup.m_bRecordEnable && gclsCallDir.IsEnabled()) {
+            strRecordDir = gclsCallDir.GetVoipDir(pszCallId, pszFrom, pszTo);
+            strLogDir = strRecordDir;
+        }
+        iStartPort = gclsRtpMap.CreatePort(SOCKET_COUNT_PER_MEDIA * pclsRtp->GetMediaCount(), strRecordDir, strLogDir);
         if (iStartPort == -1) return StopCall(pszCallId, SIP_INTERNAL_SERVER_ERROR);
 
         if (pclsRtp->GetMediaCount() >= 2) {
@@ -675,6 +486,7 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
         std::string strAllocatedIp;
         if (gclsRtpMap.GetLocalIp(iStartPort, strAllocatedIp) && !strAllocatedIp.empty()) strRelayIp = strAllocatedIp;
         pclsRtp->SetIpPort(strRelayIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA);
+
     }
 
     clsUserInfo.GetCallRoute(clsRoute);
@@ -686,6 +498,12 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
 
     gclsCallMap.Insert(pszCallId, strCallId.c_str(), iStartPort);
     SetCallOwner(strCallId.c_str(), GetCallOwner(pszCallId));
+
+    // B2BUA: 착신 leg도 같은 Session-ID에 매핑
+    if (gclsCallDir.IsEnabled() && !strSessionId.empty()) {
+        gclsCallDir.MapCallToSession(strCallId, strSessionId);
+        gclsCallDir.WriteSessionMapping(strSessionId, pszCallId, strCallId);
+    }
 
     if (gclsUserAgent.StartCall(strCallId.c_str(), pclsInvite) == false) {
         gclsCallMap.Delete(pszCallId);
@@ -726,6 +544,18 @@ void CModuleDispatcher::EventCallStart(const char* pszCallId, CSipCallRtp* pclsR
     CLog::Print(LOG_DEBUG, "EventCallStart(%s)", pszCallId);
 
     if (gclsCallMap.Select(pszCallId, clsCallInfo)) {
+        // Service log: VoipCallAnswer
+        if (gclsCallDir.IsEnabled()) {
+            std::string strOrigCallId = pszCallId;
+            if (!gclsCallDir.GetSessionId(pszCallId).empty()) strOrigCallId = pszCallId;
+            else if (!clsCallInfo.m_strPeerCallId.empty() && !gclsCallDir.GetSessionId(clsCallInfo.m_strPeerCallId).empty())
+                strOrigCallId = clsCallInfo.m_strPeerCallId;
+            else if (!clsCallInfo.m_strPeerCallId.empty()) strOrigCallId = clsCallInfo.m_strPeerCallId;
+            std::string gid = gclsGroupCallService.GetGroupIdByCallId(pszCallId);
+            if (gid.empty()) {
+                gclsCallDir.VoipCallAnswer(strOrigCallId);
+            }
+        }
         if (pclsRtp && clsCallInfo.m_iPeerRtpPort > 0) {
             int iRtpPort = clsCallInfo.m_iPeerRtpPort;
             std::string strAllocatedIp;
@@ -783,6 +613,18 @@ void CModuleDispatcher::EventCallEnd(const char* pszCallId, int iSipStatus) {
     CLog::Print(LOG_DEBUG, "EventCallEnd(%s:%d)", pszCallId, iSipStatus);
 
     if (gclsCallMap.Select(pszCallId, clsCallInfo)) {
+        // Service log: VoipCallEnd
+        if (gclsCallDir.IsEnabled()) {
+            std::string strOrigCallId = pszCallId;
+            if (!gclsCallDir.GetSessionId(pszCallId).empty()) strOrigCallId = pszCallId;
+            else if (!clsCallInfo.m_strPeerCallId.empty() && !gclsCallDir.GetSessionId(clsCallInfo.m_strPeerCallId).empty())
+                strOrigCallId = clsCallInfo.m_strPeerCallId;
+            else if (!clsCallInfo.m_strPeerCallId.empty()) strOrigCallId = clsCallInfo.m_strPeerCallId;
+            std::string gid = gclsGroupCallService.GetGroupIdByCallId(pszCallId);
+            if (gid.empty()) {
+                gclsCallDir.VoipCallEnd(strOrigCallId, iSipStatus == 200 ? "normal" : "error", 0);
+            }
+        }
         if (clsCallInfo.m_bRecv) SaveCdr(pszCallId, iSipStatus);
         else SaveCdr(clsCallInfo.m_strPeerCallId.c_str(), iSipStatus);
 

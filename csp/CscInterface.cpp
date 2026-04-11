@@ -9,6 +9,7 @@
 #include "UserMap.h"
 #include "RtpMap.h"
 #include "SipServerSetup.h"
+#include "CallDir.h"
 
 #include <sstream>
 
@@ -145,6 +146,15 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
     if (strEvent == "group_change") {
         extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
         SendSipNotify(strUri, strEtag, strAction);
+        // Log config_change event to active PTT session history
+        {
+            // Extract group ID from URI (strip "tel:" prefix if present)
+            std::string strGroupId = strUri;
+            if (strGroupId.substr(0, 4) == "tel:") strGroupId = strGroupId.substr(4);
+            if (gclsCallDir.IsEnabled()) {
+                gclsCallDir.PttLogEvent(strGroupId, "config_change", "{\"action\":\"" + strAction + "\"}");
+            }
+        }
         // Reload group config and re-sync CMP sessions / re-invite members
         gclsGroupCallService.OnGroupConfigChanged();
     } else if (strEvent == "stats") {

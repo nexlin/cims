@@ -86,10 +86,10 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		}
 	}
 
-	// 180 Ring �� �����Ѵ�.
-	pclsResponse = pclsMessage->CreateResponse( SIP_RINGING, szTag );
-	if( pclsResponse == NULL ) return false;
-	m_clsSipStack.SendSipMessage( pclsResponse );
+	// 100 Trying 즉시 응답 (180은 착신 단말 응답 후 B2BUA에서 전달)
+	pclsResponse = pclsMessage->CreateResponse( SIP_TRYING );
+	if( pclsResponse ) m_clsSipStack.SendSipMessage( pclsResponse );
+	pclsResponse = NULL;
 
 	// Dialog �� �����Ѵ�.
 	CSipDialog	clsDialog( &m_clsSipStack );

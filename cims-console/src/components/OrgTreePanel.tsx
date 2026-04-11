@@ -63,7 +63,7 @@ export default function OrgTreePanel({ selectedPath, onSelect, style }: OrgTreeP
   }
 
   return (
-    <div className="panel" style={{ minWidth: 200, maxWidth: 240, ...style }}>
+    <div className="panel" style={{ minWidth: 150, maxWidth: 180, width: 150, ...style }}>
       <div style={{ padding: '10px 12px', fontWeight: 600, fontSize: 13, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>조직</span>
         <button className="btn btn--ghost btn--sm" style={{ fontSize: 11 }}

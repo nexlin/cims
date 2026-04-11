@@ -631,6 +631,30 @@ RtpThread.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/RtpThread.cpp.s
 .PHONY : RtpThread.cpp.s
 
+SipMessageLogger.o: SipMessageLogger.cpp.o
+.PHONY : SipMessageLogger.o
+
+# target to build an object file
+SipMessageLogger.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/SipMessageLogger.cpp.o
+.PHONY : SipMessageLogger.cpp.o
+
+SipMessageLogger.i: SipMessageLogger.cpp.i
+.PHONY : SipMessageLogger.i
+
+# target to preprocess a source file
+SipMessageLogger.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/SipMessageLogger.cpp.i
+.PHONY : SipMessageLogger.cpp.i
+
+SipMessageLogger.s: SipMessageLogger.cpp.s
+.PHONY : SipMessageLogger.s
+
+# target to generate assembly for a file
+SipMessageLogger.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/SipMessageLogger.cpp.s
+.PHONY : SipMessageLogger.cpp.s
+
 SipServer.o: SipServer.cpp.o
 .PHONY : SipServer.o
 
@@ -845,6 +869,9 @@ help:
 	@echo "... RtpThread.o"
 	@echo "... RtpThread.i"
 	@echo "... RtpThread.s"
+	@echo "... SipMessageLogger.o"
+	@echo "... SipMessageLogger.i"
+	@echo "... SipMessageLogger.s"
 	@echo "... SipServer.o"
 	@echo "... SipServer.i"
 	@echo "... SipServer.s"

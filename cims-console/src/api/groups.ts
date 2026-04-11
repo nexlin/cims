@@ -9,6 +9,13 @@ export interface Group {
   id: string
   name: string
   members: Member[]
+  priority?: number
+  encryption?: boolean
+  emergency_call?: boolean
+  video_enabled?: boolean
+  org_code?: string
+  session_start?: string | null
+  session_end?: string | null
 }
 
 export type GroupInput = Omit<Group, 'members'> & { members?: Member[] }
