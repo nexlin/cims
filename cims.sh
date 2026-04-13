@@ -301,10 +301,12 @@ cmd_configure() {
 
 # ── cspsim ─────────────────────────────────────────────────────
 cmd_sim() {
-    local mode="voip" scenario="call" count=2
-    local user="1001" domain="csp" password="1234" group="1000"
+    local orig_dir="$PWD"
+    local mode="voip" scenario="call" count="" use_db=true
+    local user="" domain="" password="" group=""
     local server_ip; server_ip=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csp/config/csp.json')); print(d['Setup']['Sip']['LocalIp'])" 2>/dev/null || echo "127.0.0.1")
     local duration=10
+    local extra_args=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -317,26 +319,117 @@ cmd_sim() {
             -group)    group="$2";    shift 2 ;;
             -duration) duration="$2"; shift 2 ;;
             -ip)       server_ip="$2"; shift 2 ;;
-            *)         break ;;
+            -no-db)    use_db=false;   shift ;;
+            *)         extra_args+=("$1"); shift ;;
         esac
     done
 
+    header "=== 검증 환경 초기화 ==="
+
+    # 1) CMP/CSP 재시작 (깨끗한 상태)
+    info "서비스 재시작..."
+    for svc in csp cmp; do
+        if is_running "$svc"; then stop_one "$svc" > /dev/null 2>&1; fi
+    done
+    sleep 0.5
+
+    # 2) 로그 정리
+    info "로그 및 녹취 정리..."
+    rm -f "$LOG_DIR"/cmp.log "$LOG_DIR"/cmp_*.log
+    rm -f "$LOG_DIR"/csp.log "$LOG_DIR"/csp_*.log
+    rm -rf "$DIST_DIR/ext_mnt/service_log"
+    rm -rf "$DIST_DIR/ext_mnt/msg_log"
+    mkdir -p "$DIST_DIR/ext_mnt/service_log" "$DIST_DIR/ext_mnt/msg_log"
+
+    # 3) CMP → CSP 순서로 시작
+    start_cmp
+    start_csp
+    echo ""
+
     header "=== cspsim 실행 ==="
-    info "mode=$mode  scenario=$scenario  count=$count"
-    info "server=$server_ip:5060  duration=${duration}s"
+
+    # DB 모드: csp.json에서 가입자 정보 자동 로드
+    local db_arg=""
+    if $use_db && [[ -f "$DIST_DIR/csp/config/csp.json" ]]; then
+        db_arg="-db $DIST_DIR/csp/config/csp.json"
+        info "DB 모드: csp.json에서 가입자 정보 자동 로드"
+
+        # PTT 모드에서 그룹 미지정 시 DB에서 첫 번째 그룹 자동 설정
+        if [[ $mode == "ptt" && -z "$group" ]]; then
+            group=$(python3 -c "
+import json, pymysql
+d=json.load(open('$DIST_DIR/csp/config/csp.json'))
+db=d['Setup']['Database']
+c=pymysql.connect(host=db['Host'],port=db['Port'],user=db['User'],password=db['Password'],database=db['DbName'])
+cur=c.cursor(); cur.execute('SELECT id FROM ptt_groups ORDER BY id LIMIT 1')
+r=cur.fetchone(); print(r[0] if r else ''); c.close()
+" 2>/dev/null || true)
+            [[ -n "$group" ]] && info "PTT 그룹 자동 감지: $group"
+        fi
+    fi
+    group="${group:-1000}"
+
+    local sim_args=(
+        -server_ip "$server_ip"
+        -mode "$mode"
+        -scenario "$scenario"
+        -call_duration "$duration"
+        -group "$group"
+    )
+
+    # DB 모드일 때 -db 추가, user/domain/password 미지정이면 DB에서 자동
+    if [[ -n "$db_arg" ]]; then
+        sim_args+=($db_arg)
+    fi
+    # 명시적 지정된 옵션만 전달
+    [[ -n "$count" ]]    && sim_args+=(-count "$count")
+    [[ -n "$user" ]]     && sim_args+=(-user "$user")
+    [[ -n "$domain" ]]   && sim_args+=(-domain "$domain")
+    [[ -n "$password" ]] && sim_args+=(-password "$password")
+
+    # extra_args 내 경로 옵션(-media_dir, -media_file, -video_file)을 절대경로로 변환
+    local resolved_extra=()
+    local i=0
+    while [[ $i -lt ${#extra_args[@]} ]]; do
+        case "${extra_args[$i]}" in
+            -media_dir|-media_file|-video_file)
+                resolved_extra+=("${extra_args[$i]}")
+                i=$((i+1))
+                if [[ $i -lt ${#extra_args[@]} ]]; then
+                    resolved_extra+=("$(cd "$orig_dir" 2>/dev/null && realpath "${extra_args[$i]}" 2>/dev/null || echo "${extra_args[$i]}")")
+                fi
+                ;;
+            *) resolved_extra+=("${extra_args[$i]}") ;;
+        esac
+        i=$((i+1))
+    done
+
+    info "mode=$mode  scenario=$scenario  server=$server_ip:5060  duration=${duration}s"
     echo ""
     cd "$DIST_DIR/cspsim"
-    bin/cspsim \
-        -server_ip "$server_ip" \
-        -count "$count" \
-        -user "$user" \
-        -domain "$domain" \
-        -password "$password" \
-        -mode "$mode" \
-        -group "$group" \
-        -scenario "$scenario" \
-        -call_duration "$duration" \
-        "$@"
+    bin/cspsim "${sim_args[@]}" "${resolved_extra[@]+"${resolved_extra[@]}"}"
+
+    # 검증 결과 출력
+    echo ""
+    header "=== 검증 결과 ==="
+
+    # 녹취 파일 확인
+    local rec_files; rec_files=$(find "$DIST_DIR/ext_mnt/service_log" -name "raw_*.rtp" -size +0 2>/dev/null | wc -l)
+    local rec_zero;  rec_zero=$(find "$DIST_DIR/ext_mnt/service_log" -name "raw_*.rtp" -size 0 2>/dev/null | wc -l)
+    if [[ $rec_files -gt 0 ]]; then
+        ok "녹취: ${rec_files}개 파일 정상"
+        find "$DIST_DIR/ext_mnt/service_log" -name "raw_*.rtp" -size +0 -exec ls -lh {} \; 2>/dev/null | sed 's/^/  /'
+    elif [[ $rec_zero -gt 0 ]]; then
+        err "녹취: ${rec_zero}개 파일 0바이트"
+    else
+        warn "녹취: 파일 없음"
+    fi
+
+    # CMP 로그에서 Symmetric RTP 확인
+    local sym_count; sym_count=$(grep -c "Symmetric RTP" "$LOG_DIR"/cmp*.log 2>/dev/null || true); sym_count=${sym_count:-0}
+    [[ $sym_count -gt 0 ]] && info "Symmetric RTP IP 학습: ${sym_count}회"
+
+    echo ""
 }
 
 # ── 로그 보기 ──────────────────────────────────────────────────
@@ -374,9 +467,10 @@ ${BOLD}시뮬레이터:${NC}
   sim [options]
     -mode     voip|ptt
     -scenario register|call|group-call|full
-    -count    N
-    -ip       IP   (CSP 서버 IP)
+    -count    N       (미지정 시 DB 가입자 전체)
+    -ip       IP      (CSP 서버 IP, 미지정 시 csp.json에서)
     -duration SEC
+    -no-db            (DB 미사용, 수동 지정 모드)
 
 ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]

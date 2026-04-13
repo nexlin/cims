@@ -6,7 +6,9 @@ export interface FlowMessage {
   to: string
   proto: string   // "SIP" | "JSON" | "WS"
   label: string   // 요약 (예: "REGISTER", "200 OK", "add")
-  body: string    // 원문
+  body?: string   // 원문 (lazy loading — 선택 시 별도 조회)
+  seq?: number    // interface jsonl line number (for body lookup)
+  iface?: string  // interface name: "sip" | "cmp" | "csc" (for body lookup)
 }
 
 export interface FlowResponse {
@@ -20,6 +22,10 @@ export interface FlowListResponse {
   call_ids: string[]
 }
 
+export interface FlowBodyResponse {
+  body: string
+}
+
 export const flowApi = {
   list(date?: string): Promise<FlowListResponse> {
     const q = date ? `?date=${date}` : ''
@@ -28,5 +34,19 @@ export const flowApi = {
   get(callId: string, date?: string): Promise<FlowResponse> {
     const q = date ? `?date=${date}` : ''
     return api.get(`/flow/${encodeURIComponent(callId)}${q}`)
+  },
+  /** 메시지 body 조회 (interface jsonl seq 기반, fallback: ts+dir) */
+  getBody(date: string, hour: string | undefined, seq?: number, ts?: string, dir?: string, proto?: string, iface?: string): Promise<FlowBodyResponse> {
+    const params = new URLSearchParams({ date })
+    if (hour) params.set('hour', hour)
+    if (seq && seq > 0) {
+      params.set('seq', String(seq))
+      if (iface) params.set('iface', iface)
+    } else {
+      if (ts) params.set('ts', ts)
+      if (dir) params.set('dir', dir)
+      if (proto) params.set('proto', proto)
+    }
+    return api.get(`/flow/body?${params.toString()}`)
   },
 }

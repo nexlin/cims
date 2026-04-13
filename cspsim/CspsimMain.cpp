@@ -11,9 +11,126 @@
 #include <thread>
 #include <atomic>
 #include <algorithm>
+#include <dirent.h>
+#include <fstream>
+#include <mariadb/mysql.h>
 
 #include "SimSession.h"
+#include "SimpleJson.h"
 #include "Log.h"
+
+// ─────────────────────────────────────────────
+//  DB 가입자 정보
+// ─────────────────────────────────────────────
+struct DbSubscriber {
+    std::string id;           // MSISDN (e.g. +821357007001)
+    std::string authId;       // Digest auth_id
+    std::string password;
+    std::string serviceType;  // "voip" or "ptt"
+};
+
+static bool LoadSubscribersFromDb(const std::string& strCspJson,
+                                   const std::string& strFilterMode,
+                                   const std::string& strGroupId,
+                                   std::vector<DbSubscriber>& vecOut,
+                                   std::string& strRealm)
+{
+    // csp.json 파일 읽기
+    std::ifstream ifs(strCspJson);
+    if (!ifs.is_open()) {
+        printf("[DB] csp.json 파일 열기 실패: %s\n", strCspJson.c_str());
+        return false;
+    }
+    std::string strJson((std::istreambuf_iterator<char>(ifs)),
+                         std::istreambuf_iterator<char>());
+    ifs.close();
+
+    SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(strJson);
+    SimpleJson::JsonNode setup = root.Get("Setup");
+
+    // Realm 추출
+    SimpleJson::JsonNode sip = setup.Get("Sip");
+    if (sip.Has("Realm")) strRealm = sip.GetString("Realm");
+
+    // DB 접속 정보
+    SimpleJson::JsonNode db = setup.Get("Database");
+    std::string dbHost = db.Has("Host") ? db.GetString("Host") : "127.0.0.1";
+    int         dbPort = db.Has("Port") ? (int)db.GetInt("Port") : 3306;
+    std::string dbUser = db.Has("User") ? db.GetString("User") : "cims";
+    std::string dbPass = db.Has("Password") ? db.GetString("Password") : "";
+    std::string dbName = db.Has("DbName") ? db.GetString("DbName") : "cims";
+
+    MYSQL* pMysql = mysql_init(NULL);
+    if (!pMysql) { printf("[DB] mysql_init 실패\n"); return false; }
+
+    if (!mysql_real_connect(pMysql, dbHost.c_str(), dbUser.c_str(), dbPass.c_str(),
+                            dbName.c_str(), dbPort, NULL, 0)) {
+        printf("[DB] 접속 실패: %s\n", mysql_error(pMysql));
+        mysql_close(pMysql);
+        return false;
+    }
+    mysql_set_character_set(pMysql, "utf8mb4");
+
+    // VoIP 가입자
+    if (strFilterMode.empty() || strFilterMode == "voip") {
+        const char* sql = "SELECT cu.id, cu.auth_id, cu.passwd "
+                          "FROM voip_subscriptions cu JOIN users u ON cu.user_id = u.id "
+                          "ORDER BY cu.id";
+        if (mysql_query(pMysql, sql) == 0) {
+            MYSQL_RES* res = mysql_store_result(pMysql);
+            if (res) {
+                MYSQL_ROW row;
+                while ((row = mysql_fetch_row(res))) {
+                    DbSubscriber sub;
+                    sub.id          = row[0] ? row[0] : "";
+                    sub.authId      = row[1] ? row[1] : sub.id;
+                    sub.password    = row[2] ? row[2] : "";
+                    sub.serviceType = "voip";
+                    vecOut.push_back(sub);
+                }
+                mysql_free_result(res);
+            }
+        }
+    }
+
+    // PTT 가입자 (그룹 ID 지정 시 해당 그룹 멤버만 로드)
+    if (strFilterMode.empty() || strFilterMode == "ptt") {
+        std::string sql;
+        if (!strGroupId.empty()) {
+            // 그룹 멤버만 로드 (그룹 멤버 순서 = priority 순)
+            sql = "SELECT pu.id, pu.auth_id, pu.passwd "
+                  "FROM ptt_subscriptions pu "
+                  "JOIN users u ON pu.user_id = u.id "
+                  "JOIN ptt_group_members gm ON gm.user_id = pu.id "
+                  "WHERE gm.group_id='" + strGroupId + "' "
+                  "ORDER BY gm.priority, pu.id";
+        } else {
+            sql = "SELECT pu.id, pu.auth_id, pu.passwd "
+                  "FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
+                  "ORDER BY pu.id";
+        }
+        if (mysql_query(pMysql, sql.c_str()) == 0) {
+            MYSQL_RES* res = mysql_store_result(pMysql);
+            if (res) {
+                MYSQL_ROW row;
+                while ((row = mysql_fetch_row(res))) {
+                    DbSubscriber sub;
+                    sub.id          = row[0] ? row[0] : "";
+                    sub.authId      = row[1] ? row[1] : sub.id;
+                    sub.password    = row[2] ? row[2] : "";
+                    sub.serviceType = "ptt";
+                    vecOut.push_back(sub);
+                }
+                mysql_free_result(res);
+            }
+        }
+    }
+
+    mysql_close(pMysql);
+    printf("[DB] %d명 가입자 로드 완료 (%s)\n", (int)vecOut.size(),
+           strFilterMode.empty() ? "all" : strFilterMode.c_str());
+    return !vecOut.empty();
+}
 
 // ─────────────────────────────────────────────
 //  콘솔 로거
@@ -92,6 +209,26 @@ static std::string GetLocalIp() {
 }
 
 // ─────────────────────────────────────────────
+//  미디어 디렉토리에서 파일 목록 수집
+// ─────────────────────────────────────────────
+static std::vector<std::string> ListFilesInDir(const std::string& strDir, const std::string& strSuffix) {
+    std::vector<std::string> vecFiles;
+    DIR* dir = opendir(strDir.c_str());
+    if (!dir) return vecFiles;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != NULL) {
+        std::string name = ent->d_name;
+        if (name.size() >= strSuffix.size() &&
+            name.compare(name.size() - strSuffix.size(), strSuffix.size(), strSuffix) == 0) {
+            vecFiles.push_back(strDir + "/" + name);
+        }
+    }
+    closedir(dir);
+    std::sort(vecFiles.begin(), vecFiles.end());
+    return vecFiles;
+}
+
+// ─────────────────────────────────────────────
 //  집계 통계 출력
 // ─────────────────────────────────────────────
 static void PrintStats(const std::vector<SimSession*>& sessions) {
@@ -155,8 +292,10 @@ static void PrintUsage(const char* pszBin) {
     printf("                             full         - 전체 반복\n");
     printf("  -call_duration <secs>    통화 유지 시간 (default: 10)\n");
     printf("  -media_file  <path>      AMR-WB 미디어 파일 (PT=99 전송, 생략 시 합성 RTP)\n");
+    printf("  -media_dir   <dir>       미디어 디렉토리 (세션별 라운드로빈 할당)\n");
     printf("  -video_file  <path>      H.264 Annex B 비디오 파일 (PT=96 전송)\n");
     printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
+    printf("  -db          <csp.json>  DB에서 가입자 정보 로드 (user/auth_id/password/domain 자동 설정)\n");
     printf("  -verbose                 SIP 메시지 상세 로그\n\n");
     printf("Commands (실행 중):\n");
     printf("  s           - 통계 출력\n");
@@ -234,14 +373,59 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         return;
     }
 
-    // 4. PTT 그룹통화
+    // 4. PTT 그룹통화 — 플로어 제어 순환 발언
     // PTT 단말은 발신하지 않음 — CSP가 CheckGroupIntegrity 로 자동 초대
     // 시뮬레이터는 등록/구독 후 CSP의 INVITE 를 기다려 응답만 함
     if (eScenario == E_SCENARIO_GROUP_CALL || eScenario == E_SCENARIO_FULL) {
         if (!sessions.empty() && sessions[0]->m_bPttMode) {
-            printf("[Scenario] PTT mode: waiting for CSP to invite (call_duration=%ds)...\n", iCallDuration);
-            for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
-            printf("[Scenario] PTT wait done, stopping\n");
+            printf("[Scenario] PTT mode: waiting for CSP to invite all members...\n");
+
+            // Wait for all members to join (max 15s)
+            bool bAllJoined = false;
+            for (int retry = 0; retry < 150; ++retry) {
+                int joinCount = 0;
+                for (auto* s : sessions) if (s->m_bInCall) joinCount++;
+                if (joinCount == (int)sessions.size()) { bAllJoined = true; break; }
+                usleep(100000);
+            }
+            {
+                int joinCount = 0;
+                for (auto* s : sessions) if (s->m_bInCall) joinCount++;
+                printf("[Scenario] %d/%d members in call (allJoined=%s)\n",
+                       joinCount, (int)sessions.size(), bAllJoined ? "yes" : "no");
+            }
+
+            if (bAllJoined) {
+                // Rotating floor control: each member speaks in order
+                printf("[Scenario] Starting floor control rotation (%d members)...\n", (int)sessions.size());
+                for (int i = 0; i < (int)sessions.size(); ++i) {
+                    if (!sessions[i]->m_bInCall) {
+                        printf("[Scenario] Member %d (%s) not in call, skipping\n",
+                               i, sessions[i]->m_strUser.c_str());
+                        continue;
+                    }
+                    printf("[Scenario] Member %d (%s): PTT Request (floor)\n",
+                           i, sessions[i]->m_strUser.c_str());
+                    sessions[i]->SendPttRequest();
+
+                    // Speaking time: 5 seconds
+                    for (int t = 0; t < 50; ++t) usleep(100000);
+
+                    printf("[Scenario] Member %d (%s): PTT Release\n",
+                           i, sessions[i]->m_strUser.c_str());
+                    sessions[i]->SendPttRelease();
+
+                    // 1 second gap between speakers
+                    usleep(1000000);
+                }
+                printf("[Scenario] Floor rotation complete\n");
+            } else {
+                // Fallback: wait for call_duration if not all joined
+                printf("[Scenario] Not all members joined, waiting %ds...\n", iCallDuration);
+                for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
+            }
+
+            printf("[Scenario] PTT scenario done, stopping calls\n");
             for (auto* s : sessions) s->StopCall();
         } else {
             // VoIP group call (legacy)
@@ -285,19 +469,37 @@ int main(int argc, char* argv[])
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
     std::string strMediaFile  = GetArg(argc, argv, "-media_file",  "");
+    std::string strMediaDir   = GetArg(argc, argv, "-media_dir",   "");
     std::string strVideoFile  = GetArg(argc, argv, "-video_file",  "");
     int iIntervalMs            = atoi(GetArg(argc, argv, "-interval",    "100").c_str());
+    std::string strDbConfig   = GetArg(argc, argv, "-db",            "");
     bool bVerbose              = HasFlag(argc, argv, "-verbose");
     bool bPttMode              = (strMode == "ptt");
 
     if (strLocalIp.empty()) strLocalIp = GetLocalIp();
+
+    // DB 모드: csp.json에서 가입자 정보 로드
+    std::vector<DbSubscriber> vecDbSubs;
+    bool bDbMode = false;
+    if (!strDbConfig.empty()) {
+        std::string strDbRealm;
+        if (LoadSubscribersFromDb(strDbConfig, strMode, bPttMode ? strGroupId : "", vecDbSubs, strDbRealm)) {
+            bDbMode = true;
+            if (!strDbRealm.empty() && strDomain == "csp") {
+                strDomain = strDbRealm;  // -domain 미지정 시 DB realm 사용
+            }
+            if (iCount <= 1 && !HasFlag(argc, argv, "-count")) {
+                iCount = (int)vecDbSubs.size();
+            }
+        }
+    }
 
     // 시나리오 선택
     ESimScenario eScenario = E_SCENARIO_NONE;
     if      (strScenario == "register")   eScenario = E_SCENARIO_REGISTER;
     else if (strScenario == "subscribe")  eScenario = E_SCENARIO_SUBSCRIBE;
     else if (strScenario == "call")       eScenario = E_SCENARIO_CALL;
-    else if (strScenario == "group-call") eScenario = E_SCENARIO_GROUP_CALL;
+    else if (strScenario == "group-call" || strScenario == "group_call") eScenario = E_SCENARIO_GROUP_CALL;
     else if (strScenario == "full")       eScenario = E_SCENARIO_FULL;
 
     // 로깅 설정
@@ -316,8 +518,19 @@ int main(int argc, char* argv[])
     printf("  단말수 : %d개  (시작ID: %s)\n", iCount, strStartUser.c_str());
     printf("  모드   : %s\n", bPttMode ? "PTT" : "VoIP");
     if (bPttMode) printf("  그룹ID : %s\n", strGroupId.c_str());
+    if (bDbMode) printf("  DB가입자: %d명 로드 (domain: %s)\n", (int)vecDbSubs.size(), strDomain.c_str());
     if (!strScenario.empty()) printf("  시나리오: %s\n", strScenario.c_str());
+    if (!strMediaDir.empty()) printf("  미디어디렉토리: %s\n", strMediaDir.c_str());
     printf("\n");
+
+    // 미디어 디렉토리에서 파일 목록 수집
+    std::vector<std::string> vecAudioFiles;
+    std::vector<std::string> vecVideoFiles;
+    if (!strMediaDir.empty()) {
+        vecAudioFiles = ListFilesInDir(strMediaDir, "_audio.amrwb");
+        vecVideoFiles = ListFilesInDir(strMediaDir, "_video.h264");
+        printf("  미디어 파일 수: audio=%d, video=%d\n", (int)vecAudioFiles.size(), (int)vecVideoFiles.size());
+    }
 
     // 세션 생성 및 시작
     std::vector<SimSession*> sessions;
@@ -326,37 +539,40 @@ int main(int argc, char* argv[])
     for (int i = 0; i < iCount; i++) {
         int iLocalPort = iLocalBasePort + (i * 2); // SIP + 여유
 
-        std::string strUser   = MakeUserId(strStartUser, i);
-        std::string strAuthId;
-        if (!strExplicitAuthId.empty() && i > 0) {
-            // 명시적 auth_id의 숫자 부분을 offset만큼 증가
-            // 예: 450033100000002@domain → 450033100000003@domain (i=1)
-            std::string base = strExplicitAuthId;
-            size_t atPos = base.find('@');
-            std::string suffix = (atPos != std::string::npos) ? base.substr(atPos) : "";
-            std::string prefix = (atPos != std::string::npos) ? base.substr(0, atPos) : base;
-            // 끝에서 연속 숫자 찾기
-            int numStart = (int)prefix.size();
-            while (numStart > 0 && isdigit(prefix[numStart - 1])) numStart--;
-            if (numStart < (int)prefix.size()) {
-                long long num = atoll(prefix.c_str() + numStart);
-                num += i;
-                char buf[32];
-                // 원본 자릿수 유지
-                int digits = (int)prefix.size() - numStart;
-                snprintf(buf, sizeof(buf), "%0*lld", digits, num);
-                strAuthId = prefix.substr(0, numStart) + buf + suffix;
-            } else {
-                strAuthId = strExplicitAuthId; // 숫자 없으면 그대로
-            }
-        } else if (!strExplicitAuthId.empty()) {
-            strAuthId = strExplicitAuthId;
+        std::string strUser, strAuthId, strPwd;
+        if (bDbMode && i < (int)vecDbSubs.size()) {
+            // DB 모드: 가입자 정보에서 직접 설정
+            strUser   = vecDbSubs[i].id;
+            strAuthId = vecDbSubs[i].authId;
+            strPwd    = vecDbSubs[i].password;
         } else {
-            if (bPttMode && !strUser.empty() && strUser[0] == '+') {
-                // PTT + E.164: 자동 유도 (45033 + MSISDN숫자 + @domain)
-                strAuthId = DerivePttAuthId(strUser, strDomain);
+            strUser = MakeUserId(strStartUser, i);
+            strPwd  = strPassword;
+            if (!strExplicitAuthId.empty() && i > 0) {
+                std::string base = strExplicitAuthId;
+                size_t atPos = base.find('@');
+                std::string suffix = (atPos != std::string::npos) ? base.substr(atPos) : "";
+                std::string prefix = (atPos != std::string::npos) ? base.substr(0, atPos) : base;
+                int numStart = (int)prefix.size();
+                while (numStart > 0 && isdigit(prefix[numStart - 1])) numStart--;
+                if (numStart < (int)prefix.size()) {
+                    long long num = atoll(prefix.c_str() + numStart);
+                    num += i;
+                    char buf[32];
+                    int digits = (int)prefix.size() - numStart;
+                    snprintf(buf, sizeof(buf), "%0*lld", digits, num);
+                    strAuthId = prefix.substr(0, numStart) + buf + suffix;
+                } else {
+                    strAuthId = strExplicitAuthId;
+                }
+            } else if (!strExplicitAuthId.empty()) {
+                strAuthId = strExplicitAuthId;
             } else {
-                strAuthId = strUser;
+                if (bPttMode && !strUser.empty() && strUser[0] == '+') {
+                    strAuthId = DerivePttAuthId(strUser, strDomain);
+                } else {
+                    strAuthId = strUser;
+                }
             }
         }
 
@@ -365,17 +581,26 @@ int main(int argc, char* argv[])
             strUser,
             strAuthId,
             strDomain,
-            strPassword,
+            strPwd,
             strServerIp, iServerPort,
             strLocalIp,  iLocalPort,
             bPttMode,
             strGroupId
         );
 
-        if (!strMediaFile.empty()) {
+        // Per-session media files from directory (round-robin)
+        if (!vecAudioFiles.empty()) {
+            std::string audioFile = vecAudioFiles[i % vecAudioFiles.size()];
+            s->m_clsRtpThread.SetMediaFile(audioFile);
+            printf("[%d] Audio: %s\n", i, audioFile.c_str());
+        } else if (!strMediaFile.empty()) {
             s->m_clsRtpThread.SetMediaFile(strMediaFile);
         }
-        if (!strVideoFile.empty()) {
+        if (!vecVideoFiles.empty()) {
+            std::string videoFile = vecVideoFiles[i % vecVideoFiles.size()];
+            s->m_clsRtpThread.SetVideoFile(videoFile);
+            printf("[%d] Video: %s\n", i, videoFile.c_str());
+        } else if (!strVideoFile.empty()) {
             s->m_clsRtpThread.SetVideoFile(strVideoFile);
         }
         if (s->Start()) {

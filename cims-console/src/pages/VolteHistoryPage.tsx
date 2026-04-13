@@ -55,10 +55,10 @@ export default function VolteHistoryPage() {
         <div className="table-wrap">
           <table className="data-table">
             <thead><tr>
-              <th>발신</th><th>착신</th><th>상태</th><th>시작시간</th><th>응답시간</th><th>종료시간</th><th>통화시간</th><th>종료사유</th><th style={{width:160}}>작업</th>
+              <th>유형</th><th>발신</th><th>착신</th><th>상태</th><th>시작시간</th><th>응답시간</th><th>종료시간</th><th>통화시간</th><th>종료사유</th><th style={{width:160}}>작업</th>
             </tr></thead>
             <tbody>
-              {logs.length===0?<tr><td colSpan={9} className="empty-cell">이력 없음</td></tr>:
+              {logs.length===0?<tr><td colSpan={10} className="empty-cell">이력 없음</td></tr>:
               logs.map(l=>{
                 // 통화시간: answer→end (answer 없으면 duration 그대로)
                 const dur = l.answer_time && l.end_time
@@ -66,6 +66,7 @@ export default function VolteHistoryPage() {
                   : l.duration
                 return (
                 <tr key={l.id} style={{cursor:'pointer'}} onClick={()=>setDetail(l)}>
+                  <td><span className={`badge ${l.call_type==='voip_video'?'badge--blue':'badge--gray'}`} style={{fontSize:10}}>{l.call_type==='voip_video'?'영상':'음성'}</span></td>
                   <td>{l.initiator}</td>
                   <td>{l.callee||'—'}</td>
                   <td><span className={`badge ${l.state==='ended'?'badge--gray':l.state==='active'?'badge--green':l.state==='ringing'?'badge--blue':'badge--gray'}`}>{l.state==='ended'?'종료':l.state==='active'?'통화중':l.state==='ringing'?'호출중':l.state||'—'}</span></td>
@@ -120,18 +121,15 @@ export default function VolteHistoryPage() {
             <div style={{marginTop:12}}>
               <div className="form-section-title">녹취 재생</div>
               <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:8}}>
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span className="badge badge--blue" style={{fontSize:10,minWidth:32,textAlign:'center'}}>음성</span>
-                  <audio controls preload="none" style={{height:32,flex:1}}>
-                    <source src={`/api/v1/recordings/${encodeURIComponent(detail.dir_name || detail.call_id)}/audio?date=${detail.invite_time?.substring(0,10)||''}`} type="audio/wav" />
-                  </audio>
-                </div>
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span className="badge badge--green" style={{fontSize:10,minWidth:32,textAlign:'center'}}>영상</span>
-                  <video controls preload="none" style={{maxHeight:240,maxWidth:'100%',borderRadius:6,background:'#000'}}>
+                {detail.call_type === 'voip_video' ? (
+                  <video controls preload="none" style={{maxHeight:320,maxWidth:'100%',borderRadius:6,background:'#000'}}>
                     <source src={`/api/v1/recordings/${encodeURIComponent(detail.dir_name || detail.call_id)}/video?date=${detail.invite_time?.substring(0,10)||''}`} type="video/mp4" />
                   </video>
-                </div>
+                ) : (
+                  <audio controls preload="none" style={{height:32,width:'100%'}}>
+                    <source src={`/api/v1/recordings/${encodeURIComponent(detail.dir_name || detail.call_id)}/audio?date=${detail.invite_time?.substring(0,10)||''}`} type="audio/wav" />
+                  </audio>
+                )}
               </div>
             </div>
           )}

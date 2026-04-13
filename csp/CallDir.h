@@ -125,22 +125,24 @@ public:
     }
 
     void VoipCallStart(const std::string& strCallId,
-                        const std::string& strCaller, const std::string& strCallee) {
+                        const std::string& strCaller, const std::string& strCallee,
+                        bool bVideo = false) {
         std::lock_guard<std::mutex> lock(m_mtx);
         std::string dir = _dir(strCallId);
         if (dir.empty()) return;
         std::string path = dir + "/call.json";
         struct stat st; if (stat(path.c_str(), &st) == 0) return;
         char ts[32]; IsoNow(ts, sizeof(ts));
+        const char* pszCallType = bVideo ? "voip_video" : "voip";
         FILE* f = fopen(path.c_str(), "w");
         if (!f) return;
         fprintf(f,
-            "{\"call_id\":\"%s\",\"call_type\":\"voip\","
+            "{\"call_id\":\"%s\",\"call_type\":\"%s\","
             "\"initiator\":\"%s\",\"callee\":\"%s\","
             "\"state\":\"ringing\",\"invite_time\":\"%s\","
             "\"answer_time\":null,\"end_time\":null,"
             "\"duration\":0,\"end_reason\":null}\n",
-            Esc(strCallId).c_str(), Esc(strCaller).c_str(), Esc(strCallee).c_str(), ts);
+            Esc(strCallId).c_str(), pszCallType, Esc(strCaller).c_str(), Esc(strCallee).c_str(), ts);
         fclose(f);
     }
 
@@ -183,26 +185,40 @@ public:
 
     // ── PTT ──────────────────────────────────────────────
 
-    /** PTT 세션 디렉터리 (groupId → active session dir) */
-    std::string GetPttSessionDir(const std::string& strGroupId) {
+    /** PTT 세션 디렉터리 — DB session_start 기반.
+     *  session_start가 같으면 CSP 재시작해도 동일 디렉터리 반환.
+     *  session_start가 빈 문자열이면 "permanent" (상시 세션). */
+    std::string GetPttSessionDir(const std::string& strGroupId,
+                                  const std::string& strSessionStart = "") {
         std::lock_guard<std::mutex> lock(m_mtx);
-        auto it = m_mapPttSession.find(strGroupId);
-        if (it != m_mapPttSession.end()) return it->second;
 
-        // 새 세션 디렉터리 생성
-        char tsBuf[32];
-        {
-            time_t n = time(nullptr); struct tm t; localtime_r(&n, &t);
-            snprintf(tsBuf, sizeof(tsBuf), "%04d%02d%02d_%02d%02d%02d",
-                     t.tm_year+1900, t.tm_mon+1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
+        // 이미 활성 세션이 있고 session_start가 같으면 재사용
+        auto it = m_mapPttSession.find(strGroupId);
+        if (it != m_mapPttSession.end()) {
+            // session_start가 변경된 경우에만 새 세션 생성
+            auto itId = m_mapPttSessionId.find(strGroupId);
+            std::string curKey = (itId != m_mapPttSessionId.end()) ? itId->second : "";
+            std::string newKey = _sessionKey(strSessionStart);
+            if (curKey == newKey) return it->second;
+            // session_start 변경 → 이전 세션 종료 (state=ended)
+            _endSessionLocked(strGroupId);
         }
+
+        // 세션 키: session_start 기반 (없으면 "permanent")
+        std::string sessKey = _sessionKey(strSessionStart);
         std::string sg = San(strGroupId, 20);
-        std::string dir = m_strCallsDir + "/ptt/" + sg + "/sessions/" + tsBuf + ".d";
-        MkdirP(dir);
-        MkdirP(dir + "/recordings");
-        MkdirP(dir + "/daily");
+        std::string dir = m_strCallsDir + "/ptt/" + sg + "/sessions/" + sessKey + ".d";
+
+        // 이미 디렉터리가 존재하면 (CSP 재시작) 그대로 사용
+        struct stat st;
+        if (stat(dir.c_str(), &st) != 0) {
+            MkdirP(dir);
+            MkdirP(dir + "/recordings");
+            MkdirP(dir + "/daily");
+        }
+
         m_mapPttSession[strGroupId] = dir;
-        m_mapPttSessionId[strGroupId] = tsBuf;
+        m_mapPttSessionId[strGroupId] = sessKey;
         return dir;
     }
 
@@ -210,35 +226,18 @@ public:
                           const std::string& strCallId,
                           const std::string& strInitiator,
                           const std::string& strGroupJson = "{}") {
+        // GetPttSessionDir가 이미 호출된 상태여야 함
         std::lock_guard<std::mutex> lock(m_mtx);
-        // Ensure session dir exists (unlocked helper)
-        std::string dir;
-        {
-            auto it = m_mapPttSession.find(strGroupId);
-            if (it != m_mapPttSession.end()) {
-                dir = it->second;
-            }
-        }
-        if (dir.empty()) {
-            // create via unlock-relock pattern not needed since _pttSessionDirLocked does not lock
-            char tsBuf[32];
-            {
-                time_t n = time(nullptr); struct tm t; localtime_r(&n, &t);
-                snprintf(tsBuf, sizeof(tsBuf), "%04d%02d%02d_%02d%02d%02d",
-                         t.tm_year+1900, t.tm_mon+1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
-            }
-            std::string sg = San(strGroupId, 20);
-            dir = m_strCallsDir + "/ptt/" + sg + "/sessions/" + tsBuf + ".d";
-            MkdirP(dir);
-            MkdirP(dir + "/recordings");
-            MkdirP(dir + "/daily");
-            m_mapPttSession[strGroupId] = dir;
-            m_mapPttSessionId[strGroupId] = tsBuf;
-        }
+        auto it = m_mapPttSession.find(strGroupId);
+        if (it == m_mapPttSession.end()) return;
+        std::string dir = it->second;
+
+        // session.json이 이미 존재하면 덮어쓰지 않음 (CSP 재시작 시 보호)
+        std::string path = dir + "/session.json";
+        struct stat st;
+        if (stat(path.c_str(), &st) == 0) return;
 
         char ts[32]; IsoNow(ts, sizeof(ts));
-        // Write session.json
-        std::string path = dir + "/session.json";
         FILE* f = fopen(path.c_str(), "w");
         if (f) {
             fprintf(f,
@@ -268,39 +267,7 @@ public:
 
     void PttSessionEnd(const std::string& strGroupId) {
         std::lock_guard<std::mutex> lock(m_mtx);
-        auto it = m_mapPttSession.find(strGroupId);
-        if (it == m_mapPttSession.end()) return;
-        std::string dir = it->second;
-
-        // Read session.json, update state→ended, write end_time
-        std::string path = dir + "/session.json";
-        std::string c = _readFile(path);
-        if (!c.empty()) {
-            char ts[32]; IsoNow(ts, sizeof(ts));
-            _replace(c, "\"state\":\"active\"", "\"state\":\"ended\"");
-            // Insert end_time before closing brace
-            size_t lastBrace = c.rfind('}');
-            if (lastBrace != std::string::npos) {
-                c.insert(lastBrace, std::string(",\"end_time\":\"") + ts + "\"");
-            }
-            FILE* f = fopen(path.c_str(), "w");
-            if (f) { fputs(c.c_str(), f); fclose(f); }
-
-            // Append end event to index.jsonl
-            std::string sg = San(strGroupId, 20);
-            std::string indexPath = m_strCallsDir + "/ptt/" + sg + "/index.jsonl";
-            f = fopen(indexPath.c_str(), "a");
-            if (f) {
-                auto itId = m_mapPttSessionId.find(strGroupId);
-                std::string sid = (itId != m_mapPttSessionId.end()) ? itId->second : "";
-                fprintf(f, "{\"ts\":\"%s\",\"type\":\"session_end\",\"session_id\":\"%s\"}\n",
-                        ts, Esc(sid).c_str());
-                fclose(f);
-            }
-        }
-
-        m_mapPttSession.erase(strGroupId);
-        m_mapPttSessionId.erase(strGroupId);
+        _endSessionLocked(strGroupId);
     }
 
     void PttLogEvent(const std::string& strGroupId,
@@ -373,8 +340,52 @@ private:
     std::map<std::string, std::string> m_mapPttSessionId; // groupId → session start time string
 
     std::string _dir(const std::string& key) {
+        // 1) 직접 조회
         auto it = m_mapDir.find(key);
-        return (it != m_mapDir.end()) ? it->second : "";
+        if (it != m_mapDir.end()) return it->second;
+        // 2) Call-ID → Session-ID → dir 간접 조회 (B2BUA 착신 leg 대응)
+        auto itSess = m_mapCallSession.find(key);
+        if (itSess != m_mapCallSession.end()) {
+            auto itDir = m_mapDir.find(itSess->second);
+            if (itDir != m_mapDir.end()) {
+                m_mapDir[key] = itDir->second;  // 캐시
+                return itDir->second;
+            }
+        }
+        return "";
+    }
+
+    /** session_start → 디렉터리 키 변환: "2026-04-11T09:00:00" → "20260411_090000", 빈값 → "permanent" */
+    static std::string _sessionKey(const std::string& sessionStart) {
+        if (sessionStart.empty()) return "permanent";
+        std::string k;
+        for (char c : sessionStart) {
+            if (c >= '0' && c <= '9') k += c;
+        }
+        // "20260411090000" → "20260411_090000"
+        if (k.size() >= 14) return k.substr(0,8) + "_" + k.substr(8,6);
+        if (k.size() >= 8) return k.substr(0,8) + "_000000";
+        return k.empty() ? "permanent" : k;
+    }
+
+    /** 세션 종료 (lock 이미 획득된 상태에서 호출) */
+    void _endSessionLocked(const std::string& strGroupId) {
+        auto it = m_mapPttSession.find(strGroupId);
+        if (it == m_mapPttSession.end()) return;
+        std::string dir = it->second;
+        std::string path = dir + "/session.json";
+        std::string c = _readFile(path);
+        if (!c.empty()) {
+            char ts[32]; IsoNow(ts, sizeof(ts));
+            _replace(c, "\"state\":\"active\"", "\"state\":\"ended\"");
+            size_t lb = c.rfind('}');
+            if (lb != std::string::npos)
+                c.insert(lb, std::string(",\"end_time\":\"") + ts + "\"");
+            FILE* f = fopen(path.c_str(), "w");
+            if (f) { fputs(c.c_str(), f); fclose(f); }
+        }
+        m_mapPttSession.erase(strGroupId);
+        m_mapPttSessionId.erase(strGroupId);
     }
 
     void _writeJsonl(const std::string& dir, const char* from, const char* to,

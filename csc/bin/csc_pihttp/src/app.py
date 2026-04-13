@@ -42,7 +42,7 @@ if __name__ == '__main__':
             logger.log_error(f"Config file not found at {_CONFIG_PATH}")
             return {}
 
-    from csc_service import load_shared_data, CSC_HANDLER_LIST
+    from csc_service import load_shared_data, CSC_HANDLER_LIST, notify_csp
     from cims_admin import CIMS_ADMIN_HANDLER_LIST
     import cims_auth
     from cims_auth import CIMS_AUTH_HANDLER_LIST
@@ -61,10 +61,16 @@ if __name__ == '__main__':
         config = load_config()
         cims_auth.init(config)
         _msg_log_dir = config.get("MsgLogDir", "")
-        _sip_log_dir = os.path.join(_msg_log_dir, "csp", "sip") if _msg_log_dir else ""
+        _service_log_dir = config.get("ServiceLogDir", _msg_log_dir)
+        # Extract system_id from CSP config or CspNotify, default "csp_01"
+        _system_id = config.get("SystemId", "csp_01")
+        # Legacy: sip_log_dir is {MsgLogDir}/csp for old-format fallback
+        _sip_log_dir = os.path.join(_msg_log_dir, "csp") if _msg_log_dir else ""
         csc_flow.init(
-            service_log_dir=config.get("ServiceLogDir", _msg_log_dir),
+            service_log_dir=_service_log_dir,
             sip_log_dir=_sip_log_dir,
+            msg_log_dir=_msg_log_dir,
+            system_id=_system_id,
         )
 
         import csc_logger
@@ -137,6 +143,13 @@ if __name__ == '__main__':
         mcptt_server.add_dynamic_rules(CSC_HANDLER_LIST)
         mcptt_server.start()
         logger.log_info(f"MCPTT server started on port {mcptt_conf.get('Port', 4430)}")
+
+        # Notify CSP that CSC has (re)started so it resyncs all state from DB
+        try:
+            notify_csp("CSC_RESTART", "", "START")
+            logger.log_info("CSC_RESTART notification sent to CSP")
+        except Exception as e:
+            logger.log_error(f"CSC_RESTART notification failed: {e}")
 
         while True:
             time.sleep(1)

@@ -170,6 +170,9 @@ public:
     /** 서비스 로그 디렉터리 — 통화 이력/Flow/녹취용 (빈 값이면 비활성화) */
     std::string m_strServiceLogDir;
 
+    /** 시스템 식별자 (로그 디렉터리 하위 구분) — 기본값: "csp_01" */
+    std::string m_strSystemId;
+
     /** 로그 레벨 */
     int m_iLogLevel;
 

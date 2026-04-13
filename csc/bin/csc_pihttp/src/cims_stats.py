@@ -74,7 +74,7 @@ def _get_csp_stats(config: dict) -> dict:
     notify = config.get('CspNotify', {})
     ip = notify.get('Ip', '127.0.0.1')
     port = int(notify.get('Port', 4421))
-    resp = _udp_request(ip, port, {"event": "stats", "uri": "", "action": ""})
+    resp = _udp_request(ip, port, {"event": "STATS_REQUEST", "uri": "", "action": ""})
     return resp if resp.get('status') == 'OK' else {}
 
 
@@ -85,7 +85,7 @@ def _get_cmp_stats(config: dict) -> dict:
     cmp_port = int(config.get('CmpPort', 9000))
     resp = _udp_request(cmp_ip, cmp_port, {
         "trans_id": int(time.time()) % 100000,
-        "payload": {"cmd": "stats"}
+        "payload": {"cmd": "STATS_REQUEST"}
     })
     if isinstance(resp.get('response'), dict):
         return resp['response']

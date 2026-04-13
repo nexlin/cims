@@ -7,6 +7,18 @@
 #include "SipServer.h"
 #include "DbManager.h"
 #include "Log.h"
+#include <ctime>
+
+// time_t → ISO string helper
+static std::string TimeToIso(time_t t) {
+    if (t == 0) return "";
+    char buf[32];
+    struct tm tm;
+    localtime_r(&t, &tm);
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
+             tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    return buf;
+}
 #include "SipUserAgent.h"
 #include "CallMap.h"
 #include "CmpClient.h"
@@ -77,7 +89,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     }
     // 세션 시작 기록 (그룹이 이미 CMP에 있어도 통화 기록은 필요)
     if ( gclsCallDir.IsEnabled() ) {
-        strRecordDir = gclsCallDir.GetPttSessionDir(pszGroupId);
+        strRecordDir = gclsCallDir.GetPttSessionDir(pszGroupId, TimeToIso(clsGroup._sessionStart));
         // Build group snapshot JSON
         std::string strSnapshot = "{\"name\":\"" + CCallDir::JsonEsc(clsGroup._name) + "\",\"members\":[";
         bool bFirst = true;
@@ -293,7 +305,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
             std::string strRecordDir;
             if ( gclsCallDir.IsEnabled() ) {
-                strRecordDir = gclsCallDir.GetPttSessionDir(pszGroupId);
+                strRecordDir = gclsCallDir.GetPttSessionDir(pszGroupId, TimeToIso(clsGroup._sessionStart));
                 // Build group snapshot JSON for autojoin
                 std::string strSnapshot = "{\"name\":\"" + CCallDir::JsonEsc(clsGroup._name) + "\",\"members\":[";
                 bool bFirst = true;
@@ -504,7 +516,7 @@ void CGroupCallService::SyncGroupsState() {
             std::string ip; int port; int videoPort = 0;
             std::string strLogDir;
             if ( gclsCallDir.IsEnabled() ) {
-                strLogDir = gclsCallDir.GetPttSessionDir(group._id);
+                strLogDir = gclsCallDir.GetPttSessionDir(group._id, TimeToIso(group._sessionStart));
             }
             if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, videoPort, strLogDir, strLogDir ) ) {
                 std::unique_lock<std::recursive_mutex> lock2(m_mutex);
@@ -602,7 +614,7 @@ void CGroupCallService::CheckGroupIntegrity() {
                 std::string ip; int port; int videoPort = 0;
                 std::string strLogDir;
                 if ( gclsCallDir.IsEnabled() ) {
-                    strLogDir = gclsCallDir.GetPttSessionDir(group._id);
+                    strLogDir = gclsCallDir.GetPttSessionDir(group._id, TimeToIso(group._sessionStart));
                 }
                 if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, videoPort, strLogDir, strLogDir)) {
                      lock.lock();

@@ -516,7 +516,8 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
         gclsDbManager.InsertParticipant(pszCallId, pszTo, "callee", false);
     }
     if (gclsCallDir.IsEnabled()) {
-        gclsCallDir.VoipCallStart(pszCallId, pszFrom, pszTo);
+        bool bVideo = (pclsRtp->GetMediaCount() >= 2 && pclsRtp->GetVideoPort() > 0);
+        gclsCallDir.VoipCallStart(pszCallId, pszFrom, pszTo, bVideo);
         gclsCallDir.VoipAddParticipant(pszCallId, pszFrom, "caller");
         gclsCallDir.VoipAddParticipant(pszCallId, pszTo, "callee");
     }

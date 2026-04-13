@@ -22,4 +22,4 @@ def notify_csp(event_type, uri, action, etag=""):
     except Exception as e:
         print(f"Failed: {e}")
 
-notify_csp("group_change", "tel:+8888", "PUT", "test_script")
+notify_csp("GROUP_CHANGED", "tel:+8888", "PUT", "test_script")

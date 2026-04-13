@@ -51,7 +51,7 @@ bool CheckError(int n, const char *pszLog) {
 
 
 CRtpThread::CRtpThread()
-    : m_hSocket(INVALID_SOCKET), m_iPort(0), m_bStopEvent(false),
+    : m_hSocket(INVALID_SOCKET), m_hRtcpSocket(INVALID_SOCKET), m_iPort(0), m_bStopEvent(false),
       m_bSendThreadRun(false), m_bRecvThreadRun(false),
       m_hVideoSocket(INVALID_SOCKET), m_iVideoPort(0),
       m_bVideoSendThreadRun(false) {}
@@ -75,6 +75,12 @@ bool CRtpThread::Create() {
     return false;
   }
 
+  // RTCP socket: RTP port + 1
+  m_hRtcpSocket = UdpListen(m_iPort + 1, NULL);
+  if (m_hRtcpSocket == INVALID_SOCKET) {
+    printf("[RTP] Warning: failed to create RTCP socket on port %d\n", m_iPort + 1);
+  }
+
   // Video socket: audio port + 2 (convention)
   if (!m_strVideoFile.empty()) {
     m_hVideoSocket = UdpListen(m_iPort + 2, NULL);
@@ -94,7 +100,10 @@ bool CRtpThread::Destroy() {
     closesocket(m_hSocket);
     m_hSocket = INVALID_SOCKET;
   }
-
+  if (m_hRtcpSocket != INVALID_SOCKET) {
+    closesocket(m_hRtcpSocket);
+    m_hRtcpSocket = INVALID_SOCKET;
+  }
   if (m_hVideoSocket != INVALID_SOCKET) {
     closesocket(m_hVideoSocket);
     m_hVideoSocket = INVALID_SOCKET;
@@ -155,7 +164,8 @@ bool CRtpThread::Stop() {
 }
 
 bool CRtpThread::SendFloorControl(int iOpCode) {
-    if (m_hSocket == INVALID_SOCKET) return false;
+    Socket hSock = (m_hRtcpSocket != INVALID_SOCKET) ? m_hRtcpSocket : m_hSocket;
+    if (hSock == INVALID_SOCKET) return false;
 
     // Construct RTCP APP Packet
     // Header (4 bytes) + SSRC (4 bytes) + Name (4 bytes) + Data (variable)
@@ -209,7 +219,7 @@ bool CRtpThread::SendFloorControl(int iOpCode) {
     startAddr.sin_addr.s_addr = inet_addr(m_strDestIp.c_str());
     startAddr.sin_port = htons(m_iDestPort + 1); // RTCP Port
     
-    int n = sendto(m_hSocket, (const char*)buffer, packetLen, 0, (struct sockaddr *)&startAddr, sizeof(startAddr));
+    int n = sendto(hSock, (const char*)buffer, packetLen, 0, (struct sockaddr *)&startAddr, sizeof(startAddr));
     if (n < 0) {
         printf("SendFloorControl error: %s\n", strerror(errno));
         return false;

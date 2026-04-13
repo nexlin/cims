@@ -17,16 +17,17 @@
 #include <fstream>
 
 CmpServer::CmpServer(const std::string& name, const std::string& configFile)
-    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600)
+    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _rtpWorkerCount(4)
 {
     loadConfig();
-    initResourcePool();
 
-    // Initialize a few workers for RTP processing
-    for(int i=0; i<4; ++i) {
+    // Worker 스레드를 먼저 생성해야 initResourcePool()의 addHandler()가 동작함
+    for(int i=0; i<_rtpWorkerCount; ++i) {
         std::string wname = formatStr("RtpWorker_%d", i);
         addWorker(wname, 1, 2048, true);
     }
+
+    initResourcePool();
 }
 
 CmpServer::~CmpServer() {
@@ -128,20 +129,22 @@ void CmpServer::handlePacket(char* buf, int len, const std::string& ip, int port
 
     // Extract CMD
     std::string cmd = payload.GetString("cmd");
-    std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower); // normalize
+    // Normalize to uppercase for matching
+    std::string cmdUpper = cmd;
+    std::transform(cmdUpper.begin(), cmdUpper.end(), cmdUpper.begin(), ::toupper);
 
     // Dispatch
     LOG_DEBUG("CmpServer", "Dispatching cmd=%s transId=%d from %s:%d", cmd.c_str(), transId, ip.c_str(), port);
-    if (cmd == "add") processAdd(payload, ip, port, transId);
-    else if (cmd == "remove") processRemove(payload, ip, port, transId);
-    else if (cmd == "alive") processAlive(payload, ip, port, transId);
-    else if (cmd == "addgroup") processAddGroup(payload, ip, port, transId);
-    else if (cmd == "joingroup") processJoinGroup(payload, ip, port, transId);
-    else if (cmd == "leavegroup") processLeaveGroup(payload, ip, port, transId);
-    else if (cmd == "removegroup") processRemoveGroup(payload, ip, port, transId);
-    else if (cmd == "modifygroup") processModifyGroup(payload, ip, port, transId);
-    else if (cmd == "modify") processModify(payload, ip, port, transId);
-    else if (cmd == "stats") processStats(payload, ip, port, transId);
+    if (cmdUpper == "ADD_SESSION" || cmdUpper == "ADD") processAdd(payload, ip, port, transId);
+    else if (cmdUpper == "REMOVE_SESSION" || cmdUpper == "REMOVE") processRemove(payload, ip, port, transId);
+    else if (cmdUpper == "HEARTBEAT" || cmdUpper == "ALIVE") processAlive(payload, ip, port, transId);
+    else if (cmdUpper == "ADD_GROUP" || cmdUpper == "ADDGROUP") processAddGroup(payload, ip, port, transId);
+    else if (cmdUpper == "JOIN_GROUP" || cmdUpper == "JOINGROUP") processJoinGroup(payload, ip, port, transId);
+    else if (cmdUpper == "LEAVE_GROUP" || cmdUpper == "LEAVEGROUP") processLeaveGroup(payload, ip, port, transId);
+    else if (cmdUpper == "REMOVE_GROUP" || cmdUpper == "REMOVEGROUP") processRemoveGroup(payload, ip, port, transId);
+    else if (cmdUpper == "MODIFY_GROUP" || cmdUpper == "MODIFY_GROUP") processModifyGroup(payload, ip, port, transId);
+    else if (cmdUpper == "MODIFY_SESSION" || cmdUpper == "MODIFY") processModify(payload, ip, port, transId);
+    else if (cmdUpper == "STATS_REQUEST" || cmdUpper == "STATS") processStats(payload, ip, port, transId);
     else {
         LOG_WARN("CmpServer", "Unknown CMD: %s from %s:%d", cmd.c_str(), ip.c_str(), port);
         SimpleJson::JsonNode resp;
@@ -235,6 +238,7 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
         }
     } else {
         rtp = _sessions[sessionId];
+        rtpIp = _rtpIp;  // RTP IP는 항상 설정값 사용
         rtpPort = rtp->getLocalPort(); // reuse existing
         videoPort = rtp->getLocalVideoPort();
     }
@@ -244,12 +248,7 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
              rtp->setRmt(rmtIp, rmtPort, rmtVideoPort, peerIdx);
         }
 
-        static int workerIdx = 0;
-        if (rtp->getWorkerName().empty()) {
-             std::string wname = formatStr("RtpWorker_%d", workerIdx++ % 4);
-             rtp->setWorkerName(wname);
-             addHandler(wname, rtp);
-        }
+        // Worker thread는 initResourcePool()에서 영구 등록됨 — 여기서 추가 불필요
 
         // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취 (없으면 녹취 안 함)
         std::string recordDir = payload.GetString("record_dir");
@@ -261,7 +260,7 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
         std::string logDir = payload.GetString("log_dir");
         if (!logDir.empty()) {
             _logDirs[sessionId] = logDir;
-            logFlow(sessionId, "cmp", "cmp", "INT", "session-start",
+            logFlow(sessionId, "cmp", "cmp", "INT", "SESSION_START",
                     ("port=" + std::to_string(rtpPort)).c_str());
         }
 
@@ -275,13 +274,13 @@ void CmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::strin
         resp.Set("response", respBody.ToString()); 
         sendResponse(ip, port, resp.ToString());
         
-        LOG_INFO("CmpServer", "ADD session=%s remote=%s:%d -> local=%s:%d", sessionId.c_str(), rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
+        LOG_INFO("CmpServer", "ADD_SESSION session=%s remote=%s:%d -> local=%s:%d", sessionId.c_str(), rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
     } else {
          SimpleJson::JsonNode resp;
          resp.Set("trans_id", transId);
          resp.Set("response", "ERROR No Resource");
          sendResponse(ip, port, resp.ToString());
-         LOG_WARN("CmpServer", "ADD session=%s FAILED: no available resource", sessionId.c_str());
+         LOG_WARN("CmpServer", "ADD_SESSION session=%s FAILED: no available resource", sessionId.c_str());
     }
 }
 
@@ -290,15 +289,15 @@ void CmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::st
     PAutoLock lock(_mutex);
     if (_sessions.find(sessionId) != _sessions.end()) {
         PRtpTrans* rtp = _sessions[sessionId];
-        logFlow(sessionId, "cmp", "cmp", "INT", "session-end", "");
-        delHandler(rtp->getWorkerName(), rtp);
+        logFlow(sessionId, "cmp", "cmp", "INT", "SESSION_END", "");
+        // worker thread는 유지 (초기화 시 등록, 프로세스 종료까지 동작)
         rtp->reset();
         freeResource(rtp);
         _sessions.erase(sessionId);
         _logDirs.erase(sessionId);
-        LOG_INFO("CmpServer", "REMOVE session=%s", sessionId.c_str());
+        LOG_INFO("CmpServer", "REMOVE_SESSION session=%s", sessionId.c_str());
     } else {
-        LOG_WARN("CmpServer", "REMOVE session=%s not found", sessionId.c_str());
+        LOG_WARN("CmpServer", "REMOVE_SESSION session=%s not found", sessionId.c_str());
     }
     
     SimpleJson::JsonNode resp;
@@ -350,17 +349,17 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
 
              static int workerIdx = 0;
              if (sharedSession->getWorkerName().empty()) {
-                  std::string wname = formatStr("RtpWorker_%d", workerIdx++ % 4);
+                  std::string wname = formatStr("RtpWorker_%d", workerIdx++ % _rtpWorkerCount);
                   sharedSession->setWorkerName(wname);
                   addHandler(wname, sharedSession);
              }
-             logFlow(groupId, "cmp", "cmp", "INT", "group-start",
+             logFlow(groupId, "cmp", "cmp", "INT", "GROUP_START",
                      ("port=" + std::to_string(sharedPort)).c_str());
-             LOG_INFO("CmpServer", "ADDGROUP group=%s port=%d (new)", groupId.c_str(), sharedPort);
+             LOG_INFO("CmpServer", "ADD_GROUP group=%s port=%d (new)", groupId.c_str(), sharedPort);
         } else {
              delete group;
              group = NULL;
-             LOG_WARN("CmpServer", "ADDGROUP group=%s FAILED: no available resource", groupId.c_str());
+             LOG_WARN("CmpServer", "ADD_GROUP group=%s FAILED: no available resource", groupId.c_str());
         }
     } else {
         group = _groups[groupId];
@@ -370,12 +369,16 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
             sharedVideoPort = sharedSession->getLocalVideoPort();
             sharedIp = _rtpIp;  // 기존 그룹도 RTP IP 사용
         }
-        // 기존 그룹이더라도 log_dir이 새로 전달되면 갱신
+        // 기존 그룹이더라도 log_dir/record_dir이 새로 전달되면 갱신
         std::string logDir = payload.GetString("log_dir");
         if (!logDir.empty() && _logDirs.find(groupId) == _logDirs.end()) {
             _logDirs[groupId] = logDir;
         }
-        LOG_DEBUG("CmpServer", "ADDGROUP group=%s port=%d (existing)", groupId.c_str(), sharedPort);
+        std::string recordDir = payload.GetString("record_dir");
+        if (!recordDir.empty() && !group->isRecordEnabled()) {
+            group->setRecording(true, recordDir);
+        }
+        LOG_DEBUG("CmpServer", "ADD_GROUP group=%s port=%d (existing)", groupId.c_str(), sharedPort);
     }
 
     if (group) {
@@ -425,20 +428,20 @@ void CmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std:
         McpttGroup* group = _groups[groupId];
         group->addMember(sessionId, userIp, userPort, userVideoPort);
         logFlow(groupId, "cmp", "cmp", "RTP",
-                ("join(" + sessionId + ")").c_str(),
+                ("JOIN(" + sessionId + ")").c_str(),
                 (userIp + ":" + std::to_string(userPort)).c_str());
 
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
         sendResponse(ip, port, resp.ToString());
-        LOG_INFO("CmpServer", "JOINGROUP group=%s session=%s %s:%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort);
+        LOG_INFO("CmpServer", "JOIN_GROUP group=%s session=%s %s:%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort);
     } else {
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Group Not Found");
         sendResponse(ip, port, resp.ToString());
-        LOG_WARN("CmpServer", "JOINGROUP group=%s not found", groupId.c_str());
+        LOG_WARN("CmpServer", "JOIN_GROUP group=%s not found", groupId.c_str());
     }
 }
 
@@ -451,19 +454,19 @@ void CmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const std
         McpttGroup* group = _groups[groupId];
         group->removeMember(sessionId);
         logFlow(groupId, "cmp", "cmp", "RTP",
-                ("leave(" + sessionId + ")").c_str(), "");
+                ("LEAVE(" + sessionId + ")").c_str(), "");
 
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
         sendResponse(ip, port, resp.ToString());
-        LOG_INFO("CmpServer", "LEAVEGROUP group=%s session=%s", groupId.c_str(), sessionId.c_str());
+        LOG_INFO("CmpServer", "LEAVE_GROUP group=%s session=%s", groupId.c_str(), sessionId.c_str());
     } else {
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Group Not Found");
         sendResponse(ip, port, resp.ToString());
-        LOG_WARN("CmpServer", "LEAVEGROUP group=%s not found", groupId.c_str());
+        LOG_WARN("CmpServer", "LEAVE_GROUP group=%s not found", groupId.c_str());
     }
 }
 
@@ -472,7 +475,7 @@ void CmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const st
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         McpttGroup* group = _groups[groupId];
-        logFlow(groupId, "cmp", "cmp", "INT", "group-end", "");
+        logFlow(groupId, "cmp", "cmp", "INT", "GROUP_END", "");
         delete group;
         _groups.erase(groupId);
         _logDirs.erase(groupId);
@@ -481,18 +484,18 @@ void CmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const st
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
         sendResponse(ip, port, resp.ToString());
-        LOG_INFO("CmpServer", "REMOVEGROUP group=%s", groupId.c_str());
+        LOG_INFO("CmpServer", "REMOVE_GROUP group=%s", groupId.c_str());
     } else {
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Group Not Found");
         sendResponse(ip, port, resp.ToString());
-        LOG_WARN("CmpServer", "REMOVEGROUP group=%s not found", groupId.c_str());
+        LOG_WARN("CmpServer", "REMOVE_GROUP group=%s not found", groupId.c_str());
     }
 }
 
 void CmpServer::processModifyGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
-     LOG_DEBUG("CmpServer", "MODIFYGROUP -> delegating to processAddGroup");
+     LOG_DEBUG("CmpServer", "MODIFY_GROUP -> delegating to processAddGroup");
      processAddGroup(payload, ip, port, transId);
 }
 
@@ -530,6 +533,10 @@ void CmpServer::loadConfig() {
         if (root.Has("DtmfPushDigit")) _dtmfPushDigit = root.GetString("DtmfPushDigit");
         if (root.Has("DtmfReleaseDigit")) _dtmfReleaseDigit = root.GetString("DtmfReleaseDigit");
         if (root.Has("SessionTimeout")) _sessionTimeout = (int)root.GetInt("SessionTimeout");
+        if (root.Has("RtpWorkerCount")) {
+            int w = (int)root.GetInt("RtpWorkerCount");
+            if (w >= 1 && w <= 32) _rtpWorkerCount = w;
+        }
         
         // Log configuration
         std::string logDir = root.Has("LogDir") ? root.GetString("LogDir") : "";
@@ -592,8 +599,8 @@ void CmpServer::loadConfig() {
         system(mkdirCmd.c_str());
     }
 
-    LOG_INFO("CmpServer", "Config: RtpStartPort=%d RtpPoolSize=%d RtpIp=%s ServerIp=%s ServerPort=%d DtmfPtt=%d Push=%s Rel=%s Record=%d RecordDir=%s SessionTimeout=%d",
-           _rtpStartPort, _rtpPoolSize, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
+    LOG_INFO("CmpServer", "Config: RtpStartPort=%d RtpPoolSize=%d RtpWorkerCount=%d RtpIp=%s ServerIp=%s ServerPort=%d DtmfPtt=%d Push=%s Rel=%s Record=%d RecordDir=%s SessionTimeout=%d",
+           _rtpStartPort, _rtpPoolSize, _rtpWorkerCount, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
            _dtmfPttEnable, _dtmfPushDigit.c_str(), _dtmfReleaseDigit.c_str(),
            _recordEnable, _recordDir.c_str(), _sessionTimeout);
 }
@@ -605,6 +612,10 @@ void CmpServer::initResourcePool() {
         PRtpTrans* rtp = new PRtpTrans(name);
         
         if (rtp->init(_rtpIp, currentPort, currentPort + 2)) {
+             // Worker thread 영구 등록 (프로세스 종료까지 proc() 상시 동작)
+             std::string wname = formatStr("RtpWorker_%d", i % _rtpWorkerCount);
+             rtp->setWorkerName(wname);
+             addHandler(wname, rtp);
              _resourcePool.push_back(rtp);
              _freeResources.push_back(rtp);
         } else {
@@ -667,8 +678,7 @@ void CmpServer::timeoutLoop() {
             auto it = _sessions.find(sid);
             if (it != _sessions.end()) {
                 PRtpTrans* rtp = it->second;
-                logFlow(sid, "cmp", "cmp", "INT", "session-timeout", "");
-                delHandler(rtp->getWorkerName(), rtp);
+                logFlow(sid, "cmp", "cmp", "INT", "SESSION_TIMEOUT", "");
                 rtp->reset();
                 freeResource(rtp);
                 _sessions.erase(it);
@@ -693,7 +703,7 @@ void CmpServer::timeoutLoop() {
             PAutoLock lock(_mutex);
             auto it = _groups.find(gid);
             if (it != _groups.end()) {
-                logFlow(gid, "cmp", "cmp", "INT", "group-timeout", "");
+                logFlow(gid, "cmp", "cmp", "INT", "GROUP_TIMEOUT", "");
                 delete it->second;
                 _groups.erase(it);
                 _logDirs.erase(gid);

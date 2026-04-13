@@ -106,6 +106,9 @@ bool PRtpTrans::setRmt(const std::string & ipRmt, unsigned int portRmt, unsigned
         addr.sin_port = htons(port);
     };
 
+    LOG_INFO("PRtpTrans", "setRmt peer[%d] = %s:%d video=%d session=%s",
+             idx, ipRmt.c_str(), portRmt, videoPortRmt, _sessionId.c_str());
+
     makeAddr(_peers[idx].addrRtp, ipRmt, portRmt);
     makeAddr(_peers[idx].addrRtcp, ipRmt, portRmt + 1);
     if (videoPortRmt > 0) {
@@ -204,13 +207,24 @@ bool PRtpTrans::proc()
                   int srcIdx = -1;
                   if (_peers[0].active && portRmt == _peers[0].port + 1 && ipRmt == _peers[0].ip) srcIdx = 0;
                   else if (_peers[1].active && portRmt == _peers[1].port + 1 && ipRmt == _peers[1].ip) srcIdx = 1;
+                  else if (_peers[0].active && portRmt == _peers[0].port + 1) {
+                      _peers[0].ip = ipRmt;
+                      _peers[0].addrRtp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                      _peers[0].addrRtcp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                      srcIdx = 0;
+                  } else if (_peers[1].active && portRmt == _peers[1].port + 1) {
+                      _peers[1].ip = ipRmt;
+                      _peers[1].addrRtp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                      _peers[1].addrRtcp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                      srcIdx = 1;
+                  }
 
                   if (srcIdx != -1) {
                       int dstIdx = (srcIdx == 0) ? 1 : 0;
                       if (_peers[dstIdx].active) {
                           _rtcpSock.sendTo(rtcpBuf, len, &_peers[dstIdx].addrRtcp);
                       }
-                  } else if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
+                  } else if (_peers[0].active && !_peers[1].active) {
                        _rtcpSock.send(rtcpBuf, len);
                   }
              }
@@ -237,16 +251,25 @@ bool PRtpTrans::proc()
                 int srcIdx = -1;
                 if (_peers[0].active && portRmt == _peers[0].videoPort + 1 && ipRmt == _peers[0].ip) srcIdx = 0;
                 else if (_peers[1].active && portRmt == _peers[1].videoPort + 1 && ipRmt == _peers[1].ip) srcIdx = 1;
+                else if (_peers[0].active && _peers[0].videoPort > 0 && portRmt == _peers[0].videoPort + 1) {
+                    _peers[0].ip = ipRmt;
+                    _peers[0].addrVideoRtp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                    _peers[0].addrVideoRtcp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                    srcIdx = 0;
+                } else if (_peers[1].active && _peers[1].videoPort > 0 && portRmt == _peers[1].videoPort + 1) {
+                    _peers[1].ip = ipRmt;
+                    _peers[1].addrVideoRtp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                    _peers[1].addrVideoRtcp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                    srcIdx = 1;
+                }
 
                 if (srcIdx != -1) {
                     int dstIdx = (srcIdx == 0) ? 1 : 0;
                     if (_peers[dstIdx].active && _peers[dstIdx].videoPort > 0) {
                         _videoRtcpSock.sendTo(rtcpBuf, len, &_peers[dstIdx].addrVideoRtcp);
                     }
-                } else {
-                    if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
-                        _videoRtcpSock.send(rtcpBuf, len);
-                    }
+                } else if (_peers[0].active && !_peers[1].active) {
+                    _videoRtcpSock.send(rtcpBuf, len);
                 }
             }
         }
@@ -271,7 +294,6 @@ bool PRtpTrans::proc()
             PAutoLock lock(_mutex);
             len = _rtpSock.recv(pkt, sizeof(pkt), ipRmt, portRmt);
             pGroup = _group;
-            LOG_DEBUG("PRtpTrans", "RTP ip=%s port=%d len=%d pt=%d group=%p", ipRmt.c_str(), portRmt, len, pkt[1], (void*)pGroup);
         }
 
         if (len > 0) {
@@ -280,10 +302,26 @@ bool PRtpTrans::proc()
                 pGroup->onRtpPacket(ipRmt, portRmt, pkt, len);
             } else {
                 PAutoLock lock(_mutex);
-                // Relay Logic
+                // Symmetric RTP: exact match first, then port-only match with IP learning
                 int srcIdx = -1;
                 if (_peers[0].active && portRmt == _peers[0].port && ipRmt == _peers[0].ip) srcIdx = 0;
                 else if (_peers[1].active && portRmt == _peers[1].port && ipRmt == _peers[1].ip) srcIdx = 1;
+                else if (_peers[0].active && portRmt == _peers[0].port && ipRmt != _peers[0].ip) {
+                    // Port matches but IP differs (NAT/loopback) — learn actual source IP
+                    LOG_INFO("PRtpTrans", "Symmetric RTP: peer[0] IP learned %s -> %s (port %d)",
+                             _peers[0].ip.c_str(), ipRmt.c_str(), portRmt);
+                    _peers[0].ip = ipRmt;
+                    _peers[0].addrRtp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                    _peers[0].addrRtcp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                    srcIdx = 0;
+                } else if (_peers[1].active && portRmt == _peers[1].port && ipRmt != _peers[1].ip) {
+                    LOG_INFO("PRtpTrans", "Symmetric RTP: peer[1] IP learned %s -> %s (port %d)",
+                             _peers[1].ip.c_str(), ipRmt.c_str(), portRmt);
+                    _peers[1].ip = ipRmt;
+                    _peers[1].addrRtp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                    _peers[1].addrRtcp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                    srcIdx = 1;
+                }
 
                 if (srcIdx != -1) {
                     int dstIdx = (srcIdx == 0) ? 1 : 0;
@@ -295,7 +333,7 @@ bool PRtpTrans::proc()
                         if (srcIdx == 0 && _recorderA) _recorderA->WritePacket(pkt, len);
                         else if (srcIdx == 1 && _recorderB) _recorderB->WritePacket(pkt, len);
                     }
-                } else if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
+                } else if (_peers[0].active && !_peers[1].active) {
                     _rtpSock.send(pkt, len);
                 }
             }
@@ -329,6 +367,21 @@ bool PRtpTrans::proc()
                   int srcIdx = -1;
                   if (_peers[0].active && portRmt == _peers[0].videoPort && ipRmt == _peers[0].ip) srcIdx = 0;
                   else if (_peers[1].active && portRmt == _peers[1].videoPort && ipRmt == _peers[1].ip) srcIdx = 1;
+                  else if (_peers[0].active && _peers[0].videoPort > 0 && portRmt == _peers[0].videoPort) {
+                      LOG_INFO("PRtpTrans", "Symmetric RTP: video peer[0] IP learned %s -> %s (port %d)",
+                               _peers[0].ip.c_str(), ipRmt.c_str(), portRmt);
+                      _peers[0].ip = ipRmt;
+                      _peers[0].addrVideoRtp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                      _peers[0].addrVideoRtcp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                      srcIdx = 0;
+                  } else if (_peers[1].active && _peers[1].videoPort > 0 && portRmt == _peers[1].videoPort) {
+                      LOG_INFO("PRtpTrans", "Symmetric RTP: video peer[1] IP learned %s -> %s (port %d)",
+                               _peers[1].ip.c_str(), ipRmt.c_str(), portRmt);
+                      _peers[1].ip = ipRmt;
+                      _peers[1].addrVideoRtp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                      _peers[1].addrVideoRtcp.sin_addr.s_addr = inet_addr(ipRmt.c_str());
+                      srcIdx = 1;
+                  }
 
                   if (srcIdx != -1) {
                       int dstIdx = (srcIdx == 0) ? 1 : 0;
@@ -344,7 +397,7 @@ bool PRtpTrans::proc()
                           }
                           if (vRec) vRec->WritePacket(pkt, len);
                       }
-                  } else if (_peers[0].active && !_peers[1].active && srcIdx == 0) {
+                  } else if (_peers[0].active && !_peers[1].active) {
                       _videoRtpSock.send(pkt, len);
                   }
              }
@@ -353,12 +406,6 @@ bool PRtpTrans::proc()
         if (len <= 0) break;
     }
 
-    return true; // Return true to be called again immediately? Or false to yield?
-    // Usually false yields a bit, true loops immediately.
-    // If we return true always, one worker might spin 100% CPU.
-    // Ideally we return true if we did work, false if idle?
-    // Let's return false to be safe and avoid CPU 100% in this loop if pasf doesn't sleep.
-    // But original code returned false.
     return false;
 }
 
@@ -371,6 +418,7 @@ void PRtpTrans::reset() {
 
     PAutoLock lock(_mutex);
     _sessionId = "";
+    // _workerName 유지 — worker thread는 영구 동작
     _group = NULL;
 
     for(int i=0; i<2; ++i) {
@@ -436,4 +484,126 @@ void PRtpTrans::stopRecording() {
 
     // TODO: 트랜스코딩 큐에 등록하고 DB 업데이트 콜백 연결
     // 현재는 raw 파일만 보존
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PPttTrans — PTT 전용 핸들러 (audio RTP + floor control)
+// ═══════════════════════════════════════════════════════════════
+
+PPttTrans::PPttTrans(const std::string& name)
+    : PHandler(name), _group(NULL), _sessionId(name),
+      _localRtpPort(0), _localFloorPort(0), _lastActivityTime(0)
+{
+    time(&_lastActivityTime);
+}
+
+PPttTrans::~PPttTrans() { final(); }
+
+bool PPttTrans::init(const std::string& ip, unsigned int rtpPort, unsigned int floorPort) {
+    PAutoLock lock(_mutex);
+    bool res = _rtpSock.init(ip, rtpPort);
+    if (res) {
+        LOG_INFO("PPttTrans", "init rtp %s:%d", ip.c_str(), rtpPort);
+    }
+    if (res && floorPort > 0) {
+        res = _floorSock.init(ip, floorPort);
+        if (res) {
+            LOG_INFO("PPttTrans", "init floor %s:%d", ip.c_str(), floorPort);
+        }
+    }
+    if (res) {
+        _localRtpPort = rtpPort;
+        _localFloorPort = floorPort;
+    }
+    return res;
+}
+
+bool PPttTrans::final() {
+    PAutoLock lock(_mutex);
+    _floorSock.final();
+    return _rtpSock.final();
+}
+
+void PPttTrans::setGroup(McpttGroup* group) {
+    PAutoLock lock(_mutex);
+    _group = group;
+}
+
+void PPttTrans::sendFloorTo(const std::string& ip, int port, char* data, int len) {
+    PAutoLock lock(_mutex);
+    if (_floorSock.getFd() != INVALID_SOCKET) {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = inet_addr(ip.c_str());
+        addr.sin_port = htons(port);
+        _floorSock.sendTo(data, len, &addr);
+    }
+}
+
+bool PPttTrans::proc() {
+    std::string ipRmt;
+    int portRmt;
+    char pkt[1600];
+
+    // ── Floor control 패킷 수신 ──
+    while (true) {
+        int floorFd;
+        {
+            PAutoLock lock(_mutex);
+            floorFd = _floorSock.getFd();
+        }
+        if (floorFd == INVALID_SOCKET) break;
+
+        int len = 0;
+        McpttGroup* pGroup = NULL;
+        {
+            PAutoLock lock(_mutex);
+            len = _floorSock.recv(pkt, sizeof(pkt), ipRmt, portRmt);
+            pGroup = _group;
+        }
+
+        if (len > 0 && pGroup) {
+            pGroup->onFloorPacket(ipRmt, portRmt, pkt, len);
+        }
+        if (len <= 0) break;
+    }
+
+    // ── Audio RTP 수신 ──
+    while (true) {
+        int rtpFd;
+        {
+            PAutoLock lock(_mutex);
+            rtpFd = _rtpSock.getFd();
+        }
+        if (rtpFd == INVALID_SOCKET) break;
+
+        int len = 0;
+        McpttGroup* pGroup = NULL;
+        {
+            PAutoLock lock(_mutex);
+            len = _rtpSock.recv(pkt, sizeof(pkt), ipRmt, portRmt);
+            pGroup = _group;
+        }
+
+        if (len > 0) {
+            touchActivity();
+            if (pGroup) {
+                pGroup->onRtpPacket(ipRmt, portRmt, pkt, len);
+            }
+        }
+        if (len <= 0) break;
+    }
+
+    return false;
+}
+
+bool PPttTrans::proc(int id, const std::string& name, PEvent::Ptr spEvent) {
+    return false;
+}
+
+void PPttTrans::reset() {
+    PAutoLock lock(_mutex);
+    _sessionId = "";
+    _group = NULL;
 }

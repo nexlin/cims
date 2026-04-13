@@ -5,7 +5,7 @@ import type { FlowMessage } from '../api/flow'
 import FlowPage from './FlowPage'
 import { useToast } from '../components/Toast'
 
-function fmtTime(iso: string | null | undefined) {
+export function fmtTime(iso: string | null | undefined) {
   if (!iso) return '--'
   // Handle both ISO and compact formats
   const s = iso.replace('T', ' ')

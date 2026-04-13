@@ -235,4 +235,53 @@ private:
   std::string _recordRawDir;
 };
 
+// ─── PTT 전용 핸들러 ─────────────────────────────────────────
+// audio RTP (+ RTCP 비활성) + floor control (m=application UDP MCPTT)
+class PPttTrans : public PHandler
+{
+private:
+  CRtpSocket _rtpSock;           // audio RTP
+  CRtpSocket _floorSock;         // floor control (m=application)
+
+  PMutex     _mutex;
+  McpttGroup* _group;
+  std::string _sessionId;
+
+  unsigned int _localRtpPort;
+  unsigned int _localFloorPort;
+
+public:
+  PPttTrans(const std::string& name);
+  virtual ~PPttTrans();
+
+  bool init(const std::string& ip, unsigned int rtpPort, unsigned int floorPort);
+  bool final();
+
+  unsigned int getLocalRtpPort() const { return _localRtpPort; }
+  unsigned int getLocalFloorPort() const { return _localFloorPort; }
+
+  void setSessionId(const std::string& id) { _sessionId = id; }
+  std::string getSessionId() const { return _sessionId; }
+
+  void setGroup(McpttGroup* group);
+  McpttGroup* getGroup() const { return _group; }
+
+  // Floor control 소켓 — McpttGroup에서 직접 사용
+  void sendFloorTo(const std::string& ip, int port, char* data, int len);
+
+  bool proc();
+  bool proc(int id, const std::string& name, PEvent::Ptr spEvent);
+
+  void reset();
+  void setWorkerName(const std::string& name) { _workerName = name; }
+  std::string getWorkerName() const { return _workerName; }
+
+  void touchActivity() { time(&_lastActivityTime); }
+  time_t getLastActivityTime() const { return _lastActivityTime; }
+
+private:
+  std::string _workerName;
+  time_t _lastActivityTime;
+};
+
 #endif // __PRTP_HANDLER_H__

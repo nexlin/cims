@@ -872,7 +872,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                 ]
             }
             save_group_to_file(group_uri, GROUPS[group_uri])
-            notify_csp("group_change", group_uri, "PUT", GROUPS[group_uri].get('etag', ''))
+            notify_csp("GROUP_CHANGED", group_uri, "PUT", GROUPS[group_uri].get('etag', ''))
 
             xml, etag = get_group_xml(group_uri)
             return HandlerResult(status=200, body=xml, media_type='application/vnd.oma.poc.groups+xml', headers={'Etag': etag})
@@ -884,7 +884,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                 delete_group_file(group_uri)
                 
                 # [FIX] Notify CSP
-                notify_csp("group_change", group_uri, "DELETE", "")
+                notify_csp("GROUP_CHANGED", group_uri, "DELETE", "")
 
                 return HandlerResult(status=200)
             else:

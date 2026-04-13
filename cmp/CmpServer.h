@@ -77,6 +77,9 @@ private:
     std::vector<PRtpTrans*> _resourcePool; // Pre-allocated list
     std::vector<PRtpTrans*> _freeResources; // Available for use
 
+    // Worker config
+    int _rtpWorkerCount;
+
     // Recording config
     bool _recordEnable;
     std::string _recordDir;

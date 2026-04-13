@@ -3,17 +3,31 @@
 
 #include "Log.h"
 #include <string>
+#include <map>
 #include <mutex>
 #include <cstdio>
 
 /**
- * @brief SIP/CMP message logger that captures LOG_NETWORK callbacks from psip
+ * @brief Unified message logger for SIP/CMP/CSC protocols
  *
- * Parses psip network log format:
- *   TX: "[threadid] UdpSend(IP:PORT) \n[SIP message text]"
- *   RX: "[threadid] UdpRecv(IP:PORT) \n[SIP message text]"
+ * Writes to two outputs per message:
+ *   1. {service}_flow.jsonl (always) — compact, no body
+ *      - phone_flow.jsonl  (VoLTE)
+ *      - ptt_flow.jsonl    (PTT)
+ *      - system_flow.jsonl (system/admin)
+ *   2. Per-service per-protocol detail file (when raw logging enabled):
+ *      - phone_sip.jsonl / phone_cmp.jsonl
+ *      - ptt_sip.jsonl   / ptt_cmp.jsonl
+ *      - system_csc.jsonl
  *
- * Writes JSONL to {baseDir}/YYYY/MM/DD/HH/sip.jsonl with hourly rotation.
+ * Directory: {baseDir}/YYYY/MM/DD/HH/
+ * Hourly rotation: all files rotate together.
+ *
+ * Service classification:
+ *   - SIP: domain in Request-URI/To → VoipRealm="phone", PttRealm="ptt", else "system"
+ *   - CMP: caller specifies ("phone" or "ptt")
+ *   - CSC: always "system"
+ *   - HEARTBEAT/OPTIONS: always "system"
  */
 class CSipMessageLogger : public ILogCallBack
 {
@@ -21,30 +35,63 @@ public:
     CSipMessageLogger();
     ~CSipMessageLogger();
 
-    /** Initialize with base directory for log output */
-    void Init(const std::string& strBaseDir);
+    /** Initialize with separate base directories for flow/message logs */
+    void Init(const std::string& strFlowBaseDir,
+              const std::string& strMsgBaseDir,
+              const std::string& strSystemId,
+              bool bRawLogEnabled = true);
+
+    /** Set realm strings for service classification */
+    void SetRealms(const std::string& strVoipRealm, const std::string& strPttRealm);
 
     bool IsEnabled() const { return m_bEnabled; }
+    bool IsRawLogEnabled() const { return m_bRawLogEnabled; }
 
-    /** ILogCallBack::Print - receives formatted log string from CLog */
+    /** ILogCallBack::Print — SIP 스택 콜백 (from/to = ue↔csp 기본) */
     void Print(EnumLogLevel eLevel, const char* fmt, ...) override;
 
-    /** Log a CMP JSON protocol message */
-    void LogCmp(const char* pszDir, const char* pszPeer,
-                const char* pszMethod, const char* pszBody);
+    /** 인터페이스 메시지 기록 — 호출자가 from/to 직접 전달 */
+    void LogMessage(const char* pszFrom, const char* pszTo,
+                    const char* pszProto, const char* pszMethod,
+                    const char* pszPeer, const char* pszBody,
+                    const char* pszService = "system");
 
 private:
-    /** Write a single JSONL line to the hourly log file */
-    void WriteJsonl(const char* pszTs, const char* pszDir, const char* pszPeer,
-                    const char* pszCallId, const char* pszMethod,
-                    const char* pszFromUri, const char* pszToUri,
-                    const char* pszProto, const char* pszMsg);
+    /** Determine service from SIP message domain */
+    std::string ClassifyService(const char* pszMsg, const std::string& strCallId, const std::string& strMethod);
+
+    /** Write {system_id}_{service}_flow.jsonl compact line (always), includes seq + iface linkage */
+    void WriteFlowLine(const char* pszService, const char* pszTs,
+                       const char* pszFrom, const char* pszTo,
+                       const char* pszProto, const char* pszMethod,
+                       const char* pszCallId, const char* pszFromUri, const char* pszToUri,
+                       const char* pszPeer, int iSeq, const char* pszIface);
+
+    /** Write to {system_id}_{iface}.jsonl, returns line number (seq) */
+    int WriteInterfaceLine(const char* pszIface, const char* pszTs, const char* pszDir,
+                           const char* pszPeer, const char* pszProto,
+                           const char* pszMsg);
+
+    /** Ensure hourly directories and rotate files if needed */
+    void EnsureHourlyFiles(const std::string& strFlowHourDir, const std::string& strMsgHourDir);
+
+    /** Close all open files */
+    void CloseAllFiles();
 
     /** Ensure directory exists (recursive) */
     static bool MkdirP(const std::string& path);
 
-    /** Get current hourly directory path */
-    std::string GetHourlyDir();
+    /** Get current hourly directory path for flow logs */
+    std::string GetFlowHourDir();
+
+    /** Get current hourly directory path for message logs */
+    std::string GetMsgHourDir();
+
+    /** Get interface FILE* for a given interface, open lazily */
+    FILE* GetInterfaceFile(const char* pszIface);
+
+    /** Get sequence counter for a given interface */
+    int& GetIfaceSeq(const char* pszIface);
 
     /** Get current timestamp string HH:MM:SS.uuuuuu */
     static std::string GetTimestamp();
@@ -61,13 +108,39 @@ private:
     /** Extract URI user part from a From/To header value */
     static std::string ExtractUriUser(const std::string& strHeaderValue);
 
-    std::string m_strBaseDir;
+    /** Get flow FILE* for a given service, open lazily */
+    FILE* GetFlowFile(const char* pszService);
+
+    std::string m_strFlowBaseDir;   // service_log base
+    std::string m_strMsgBaseDir;    // msg_log base
+    std::string m_strSystemId;      // e.g. "csp_01"
     bool        m_bEnabled;
+    bool        m_bRawLogEnabled;
     std::mutex  m_mtx;
 
+    // Realm configuration for service classification
+    std::string m_strVoipRealm;
+    std::string m_strPttRealm;
+
+    // Call-ID → service cache for SIP correlation
+    std::map<std::string, std::string> m_mapCallService;
+
     // Current open file state (hourly rotation)
-    std::string m_strCurrentHourDir;
-    FILE*       m_pFile;
+    std::string m_strCurrentFlowHourDir;
+    std::string m_strCurrentMsgHourDir;
+
+    // Per-service flow files (always open)
+    FILE*       m_pPhoneFlowFile;
+    FILE*       m_pPttFlowFile;
+    FILE*       m_pSystemFlowFile;
+
+    // Per-interface message files (replaces single raw file)
+    FILE*       m_pSipFile;
+    FILE*       m_pCmpFile;
+    FILE*       m_pCscFile;
+    int         m_iSipSeq;         // current line number (1-based)
+    int         m_iCmpSeq;
+    int         m_iCscSeq;
 };
 
 extern CSipMessageLogger gclsSipLogger;

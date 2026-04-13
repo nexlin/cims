@@ -1,4 +1,5 @@
 #include "CscInterface.h"
+#include "SipMessageLogger.h"
 #include "Log.h"
 #include "SipServer.h"
 #include "GroupCallService.h"
@@ -140,10 +141,19 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
     std::string strAction = getVal("action");
     std::string strEtag = getVal("etag");
 
-    CLog::Print(LOG_INFO, "CscInterface Event: %s, URI: %s, Action: %s, ETag: %s", 
+    CLog::Print(LOG_INFO, "CscInterface Event: %s, URI: %s, Action: %s, ETag: %s",
         strEvent.c_str(), strUri.c_str(), strAction.c_str(), strEtag.c_str());
 
-    if (strEvent == "group_change") {
+    // CSC admin 메시지를 SIP 로그에 기록
+    {
+        char peerBuf[64];
+        snprintf(peerBuf, sizeof(peerBuf), "%s:%d",
+                 inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+        std::string strLabel = strEvent + "(" + strAction + ")";
+        gclsSipLogger.LogMessage("csc", "csp", "CSC", strLabel.c_str(), peerBuf, strMsg.c_str(), "system");
+    }
+
+    if (strEvent == "GROUP_CHANGED") {
         extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
         SendSipNotify(strUri, strEtag, strAction);
         // Log config_change event to active PTT session history
@@ -157,7 +167,7 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
         }
         // Reload group config and re-sync CMP sessions / re-invite members
         gclsGroupCallService.OnGroupConfigChanged();
-    } else if (strEvent == "stats") {
+    } else if (strEvent == "STATS_REQUEST") {
         // stats 요청 → 현재 CSP 상태를 JSON으로 응답
         USER_ID_LIST regList;
         gclsUserMap.GetRegisteredUsers(regList);
@@ -189,11 +199,28 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
             << "}";
 
         std::string resp = oss.str();
+
+        // TX 로그: CSC에 응답 전송 기록
+        {
+            char peerBuf[64];
+            snprintf(peerBuf, sizeof(peerBuf), "%s:%d",
+                     inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+            gclsSipLogger.LogMessage("csp", "csc", "CSC", "STATS_RESPONSE", peerBuf, resp.c_str(), "system");
+        }
+
         sendto(m_iServerSock, resp.c_str(), resp.size(), 0,
                (const struct sockaddr*)&clientAddr, sizeof(clientAddr));
 
         CLog::Print(LOG_INFO, "CscInterface: Stats response sent (reg=%d calls=%d)", regUsers, activeCalls);
-    } else if (strEvent == "user_change") {
+    } else if (strEvent == "CSC_RESTART") {
+        CLog::Print(LOG_INFO, "CscInterface: CSC_RESTART received — resyncing all group and user state from DB");
+
+        // Resync user map from DB
+        gclsCspUserMap.LoadFromDb();
+
+        // Trigger full group resync (SyncGroupsState)
+        gclsGroupCallService.OnGroupConfigChanged();
+    } else if (strEvent == "USER_CHANGED") {
         extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
         SendSipNotify(strUri, strEtag, strAction);
 

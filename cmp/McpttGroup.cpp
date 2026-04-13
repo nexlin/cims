@@ -45,12 +45,12 @@ std::string ParseFloorSpeakerId(const char* buf, int len)
 
 McpttGroup::McpttGroup(const std::string& groupId)
     : _groupId(groupId), _sharedSession(NULL), _floorTaken(false), _floorOwnerSsrc(0),
-      _recordEnable(false), _segmentSeq(0), _segRecorderAudio(NULL), _segRecorderVideo(NULL)
+      _recordEnable(false), _sessionRecorderAudio(NULL), _sessionRecorderVideo(NULL)
 {
 }
 
 McpttGroup::~McpttGroup() {
-    stopSegment();
+    stopRecording();
     PAutoLock lock(_mutex);
     _members.clear();
 }
@@ -95,8 +95,6 @@ void McpttGroup::removeMember(const std::string& sessionId) {
     LOG_THROTTLE(2, "McpttGroup", "[%s] Member %s left. (remaining=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
 
     if ( _floorTaken && (_floorOwnerSessionId == sessionId) ) {
-        // 녹취: 발언 세그먼트 종료
-        if (_recordEnable) stopSegment();
 
         // Owner left, release floor
         _floorTaken = false;
@@ -142,31 +140,6 @@ void McpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int le
                 sessionId = sid;
                 senderSsrc = peer.ssrc;
                 break;
-            }
-        }
-    }
-
-    // Port latching for RTCP: IP 일치하지만 RTCP 포트 불일치 시 오디오 포트 업데이트
-    if (sessionId == "") {
-        std::string candidateId = "";
-        unsigned int candidateSsrc = 0;
-        int matchCount = 0;
-        {
-            PAutoLock lock(_mutex);
-            for(auto const& [sid, peer] : _members) {
-                if (peer.ip == ip) {
-                    candidateId = sid;
-                    candidateSsrc = peer.ssrc;
-                    matchCount++;
-                }
-            }
-            if (matchCount == 1) {
-                int expectedRtpPort = port - 1;  // RTCP port = RTP port + 1
-                LOG_INFO("McpttGroup", "[%s] RTCP port latching: %s audio %d -> %d (session=%s)",
-                         _groupId.c_str(), ip.c_str(), _members[candidateId].port, expectedRtpPort, candidateId.c_str());
-                _members[candidateId].port = expectedRtpPort;
-                sessionId = candidateId;
-                senderSsrc = candidateSsrc;
             }
         }
     }
@@ -288,9 +261,9 @@ void McpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int len
 
             if (_floorTaken && _floorOwnerSessionId == senderId) {
                 sendAudioToAll(buf, len, ip, port);
-                // 녹취: 발언 음성 기록
-                if (_recordEnable && _segRecorderAudio && _segRecorderAudio->IsRecording()) {
-                    _segRecorderAudio->WritePacket(buf, len);
+                // 녹취: 세션 단일 파일에 기록
+                if (_recordEnable && _sessionRecorderAudio && _sessionRecorderAudio->IsRecording()) {
+                    _sessionRecorderAudio->WritePacket(buf, len);
                 }
             }
         }
@@ -374,11 +347,11 @@ void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int s
 
         LOG_INFO("McpttGroup", "[%s] Floor GRANTED to session=%s ssrc=%u prio=%d",
                  _groupId.c_str(), sessionId.c_str(), ssrc, requesterPrio);
-        if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "floor-grant",
+        if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "FLOOR_GRANT",
                                ("speaker=" + sessionId).c_str());
 
-        // 녹취: 새 세그먼트 시작
-        if (_recordEnable) startSegment(sessionId);
+        // 녹취: 세션 녹취 아직 시작 안됐으면 시작
+        if (_recordEnable && !_sessionRecorderAudio) startRecording();
     } else {
         if (_floorOwnerSessionId == sessionId) return;
 
@@ -395,8 +368,7 @@ void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int s
             int revLen = BuildFloorPacket(revBuf, sizeof(revBuf), FLOOR_REVOKE, _floorOwnerSsrc, _floorOwnerSessionId);
             if (revLen > 0) sendToMember(_floorOwnerSessionId, revBuf, revLen);
 
-            // 녹취: 이전 발언 세그먼트 종료 + 새 세그먼트 시작
-            if (_recordEnable) { stopSegment(); startSegment(sessionId); }
+            // 세션 녹취는 단일 파일 — preemption 시 별도 처리 불필요
 
             // Grant New
             _floorOwnerSessionId = sessionId;
@@ -415,7 +387,7 @@ void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int s
             if (rejLen > 0) sendToMember(sessionId, rejBuf, rejLen);
             LOG_INFO("McpttGroup", "[%s] Floor REJECTED session=%s (prio=%d). Owner=%s (prio=%d)",
                    _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
-            if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "floor-reject", "");
+            if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "FLOOR_REJECT", "");
         }
     }
 }
@@ -423,16 +395,13 @@ void McpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int s
 void McpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int ssrc) {
     PAutoLock lock(_mutex);
     if (_floorTaken && _floorOwnerSessionId == sessionId) {
-        // 녹취: 발언 세그먼트 종료
-        if (_recordEnable) stopSegment();
-
         _floorTaken = false;
         _floorOwnerSessionId = "";
         _floorOwnerSsrc = 0;
 
         broadcastFloorStatus(FLOOR_IDLE, 0, "");
         LOG_INFO("McpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
-        if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "floor-release",
+        if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "FLOOR_RELEASE",
                                ("speaker=" + sessionId).c_str());
     }
 }
@@ -527,54 +496,38 @@ void McpttGroup::setRecording(bool enable, const std::string& dir) {
     if (enable && !dir.empty()) {
         std::string mkdirCmd = "mkdir -p " + dir;
         system(mkdirCmd.c_str());
+        startRecording();
     }
 }
 
-void McpttGroup::startSegment(const std::string& speakerId) {
-    stopSegment();
+void McpttGroup::startRecording() {
+    if (_sessionRecorderAudio) return;  // 이미 녹취 중
+    if (_recordDir.empty()) return;
 
-    _segmentSeq++;
-    _segSpeakerId = speakerId;
+    _sessionRecorderAudio = new RtpRecorder();
+    _sessionRecorderAudio->Start(_recordDir + "/raw_audio.rtp");
 
-    char seqStr[32];
-    snprintf(seqStr, sizeof(seqStr), "seg_%04d", _segmentSeq);
-
-    // record_dir은 CSP가 결정한 전체 경로 (groupId 하위 디렉터리 불필요)
-    std::string basePath = _recordDir + "/" + seqStr;
-
-    _segRecorderAudio = new RtpRecorder();
-    _segRecorderAudio->Start(basePath + "_audio.rtp");
-
-    _segRecorderVideo = new RtpRecorder();
+    _sessionRecorderVideo = new RtpRecorder();
     // 영상은 lazy start (onVideoRtpPacket에서 시작)
 
-    LOG_INFO("McpttGroup", "[%s] Segment %d started: speaker=%s",
-             _groupId.c_str(), _segmentSeq, speakerId.c_str());
+    LOG_INFO("McpttGroup", "[%s] Session recording started: dir=%s",
+             _groupId.c_str(), _recordDir.c_str());
 }
 
-void McpttGroup::stopSegment() {
-    if (!_segRecorderAudio && !_segRecorderVideo) return;
+void McpttGroup::stopRecording() {
+    if (!_sessionRecorderAudio && !_sessionRecorderVideo) return;
 
-    std::string audioRaw, videoRaw;
-
-    if (_segRecorderAudio) {
-        _segRecorderAudio->Stop();
-        audioRaw = _segRecorderAudio->GetRawPath();
-        delete _segRecorderAudio;
-        _segRecorderAudio = NULL;
+    if (_sessionRecorderAudio) {
+        _sessionRecorderAudio->Stop();
+        delete _sessionRecorderAudio;
+        _sessionRecorderAudio = NULL;
     }
-    if (_segRecorderVideo) {
-        if (_segRecorderVideo->IsRecording()) {
-            _segRecorderVideo->Stop();
-            videoRaw = _segRecorderVideo->GetRawPath();
-        }
-        delete _segRecorderVideo;
-        _segRecorderVideo = NULL;
+    if (_sessionRecorderVideo) {
+        if (_sessionRecorderVideo->IsRecording()) _sessionRecorderVideo->Stop();
+        delete _sessionRecorderVideo;
+        _sessionRecorderVideo = NULL;
     }
 
-    LOG_INFO("McpttGroup", "[%s] Segment %d stopped: speaker=%s",
-             _groupId.c_str(), _segmentSeq, _segSpeakerId.c_str());
-
-    // TODO: 트랜스코딩 큐 등록 + DB 업데이트
-    // TranscodeQueue::Instance().Enqueue(audioRaw, videoRaw, outputPath, callback);
+    LOG_INFO("McpttGroup", "[%s] Session recording stopped: dir=%s",
+             _groupId.c_str(), _recordDir.c_str());
 }

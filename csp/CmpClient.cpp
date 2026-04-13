@@ -123,8 +123,19 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
     std::string strPacket = packet.ToString();
     CLog::Print(LOG_DEBUG, "CmpClient TX → %s:%d : %s", m_strCmpIp.c_str(), m_iCmpPort, strPacket.c_str());
     if (gclsSipLogger.IsEnabled()) {
-        gclsSipLogger.LogCmp("TX", (m_strCmpIp + ":" + std::to_string(m_iCmpPort)).c_str(),
-                             payload.GetString("cmd").c_str(), strPacket.c_str());
+        // Determine service from CMP command type
+        std::string strCmd = payload.GetString("cmd");
+        const char* pszSvc = "system";
+        if (strCmd == "ADD_SESSION" || strCmd == "REMOVE_SESSION" || strCmd == "MODIFY_SESSION") {
+            pszSvc = "phone";
+        } else if (strCmd == "ADD_GROUP" || strCmd == "REMOVE_GROUP" || strCmd == "JOIN_GROUP" ||
+                   strCmd == "LEAVE_GROUP" || strCmd == "MODIFY_GROUP") {
+            pszSvc = "ptt";
+        }
+        gclsSipLogger.LogMessage("csp", "cmp", "JSON",
+                                 strCmd.c_str(),
+                                 (m_strCmpIp + ":" + std::to_string(m_iCmpPort)).c_str(),
+                                 strPacket.c_str(), pszSvc);
     }
 
     struct sockaddr_in servaddr;
@@ -176,7 +187,7 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
 bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort,
                             const std::string& strRecordDir, const std::string& strLogDir) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "add");
+    req.Set("cmd", "ADD_SESSION");
     req.Set("session_id", strSessionId);
     req.Set("remote_ip", "0.0.0.0"); // Placeholder for add
     req.Set("remote_port", 0);
@@ -222,7 +233,7 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
 
 bool CCmpClient::UpdateSession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx, std::string& strLocalIp, int& iLocalPort) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "add"); // "add" is used for update in the original protocol
+    req.Set("cmd", "ADD_SESSION"); // "ADD_SESSION" is used for update in the original protocol
     req.Set("session_id", strSessionId);
     req.Set("remote_ip", strRmtIp);
     req.Set("remote_port", iRmtPort);
@@ -259,7 +270,7 @@ bool CCmpClient::UpdateSession(const std::string& strSessionId, const std::strin
 
 bool CCmpClient::RemoveSession(const std::string& strSessionId) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "remove");
+    req.Set("cmd", "REMOVE_SESSION");
     req.Set("session_id", strSessionId);
 
     // Header info (legacy args)
@@ -280,7 +291,7 @@ bool CCmpClient::RemoveSession(const std::string& strSessionId) {
 bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iVideoPort,
                           const std::string& strRecordDir, const std::string& strLogDir) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "addgroup");
+    req.Set("cmd", "ADD_GROUP");
     req.Set("group_id", strGroupId);
     req.Set("count", (int)vecMembers.size());
     if (!strRecordDir.empty()) req.Set("record_dir", strRecordDir);
@@ -328,7 +339,7 @@ bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::
 
 bool CCmpClient::ModifyGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "modifygroup");
+    req.Set("cmd", "MODIFY_GROUP");
     req.Set("group_id", strGroupId);
     
     std::stringstream ssMembers;
@@ -351,7 +362,7 @@ bool CCmpClient::ModifyGroup(const std::string& strGroupId, const std::vector<st
 
 bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strUserIp, int iUserPort, int iVideoPort) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "joingroup");
+    req.Set("cmd", "JOIN_GROUP");
     req.Set("group_id", strGroupId);
     req.Set("session_id", strSessionId);
     req.Set("user_ip", strUserIp);
@@ -373,7 +384,7 @@ bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& str
 
 bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& strSessionId) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "leavegroup");
+    req.Set("cmd", "LEAVE_GROUP");
     req.Set("group_id", strGroupId);
     req.Set("session_id", strSessionId);
 
@@ -392,7 +403,7 @@ bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& st
 
 bool CCmpClient::RemoveGroup(const std::string& strGroupId) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "removegroup");
+    req.Set("cmd", "REMOVE_GROUP");
     req.Set("group_id", strGroupId);
 
     // Header info (legacy args)
@@ -407,7 +418,7 @@ bool CCmpClient::RemoveGroup(const std::string& strGroupId) {
 
 bool CCmpClient::Alive() {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "alive");
+    req.Set("cmd", "HEARTBEAT");
     req.Set("csp_id", "CSP_MAIN"); 
     req.Set("csp_sess_id", "0");
     req.Set("cmp_id", "CMP_MAIN");
@@ -442,13 +453,23 @@ void CCmpClient::RecvLoop() {
                  }
                  
                  if (gclsSipLogger.IsEnabled()) {
-                     std::string strCmd = "response";
+                     std::string strCmd = "RESPONSE";
                      if (root.Has("payload")) {
                          SimpleJson::JsonNode pl = root.Get("payload");
                          if (pl.Has("cmd")) strCmd = pl.GetString("cmd");
                      }
-                     gclsSipLogger.LogCmp("RX", (m_strCmpIp + ":" + std::to_string(m_iCmpPort)).c_str(),
-                                          strCmd.c_str(), strPacket.c_str());
+                     // Determine service from CMP response command
+                     const char* pszSvc = "system";
+                     std::string strCmdUpper = strCmd;
+                     if (strCmdUpper.find("SESSION") != std::string::npos) {
+                         pszSvc = "phone";
+                     } else if (strCmdUpper.find("GROUP") != std::string::npos) {
+                         pszSvc = "ptt";
+                     }
+                     gclsSipLogger.LogMessage("cmp", "csp", "JSON",
+                                              strCmd.c_str(),
+                                              (m_strCmpIp + ":" + std::to_string(m_iCmpPort)).c_str(),
+                                              strPacket.c_str(), pszSvc);
                  }
                  // Notify Transaction matches
                  OnTransactionComplete(transId, true, respBody);

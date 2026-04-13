@@ -34,9 +34,8 @@ CSC_HOST=""
 DB_HOST=""
 DB_USER="cims"
 DB_PASSWORD="cims1234"
-SIP_DOMAIN="ims.mnc001.mcc001.3gppnetwork.org"
-VOIP_DOMAIN="ims.mnc001.mcc001.3gppnetwork.org"
-PTT_DOMAIN="ptt.mnc001.mcc001.3gppnetwork.org"
+VOLTE_DOMAIN=""
+PTT_DOMAIN=""
 IDMS_JWT_SECRET=""
 CIMS_JWT_SECRET=""
 MSG_LOG_DIR=""
@@ -57,14 +56,13 @@ ${BOLD}서버 IP:${NC}
   --csc-host   HOST  CSC 서버 호스트명/IP
 
 ${BOLD}데이터베이스:${NC}
-  --db-host    HOST  MariaDB 호스트 (기본: local-ip)
+  --db-host    HOST  MariaDB 호스트 (기본: 127.0.0.1)
   --db-user    USER  DB 사용자 (기본: cims)
   --db-password PWD  DB 비밀번호 (기본: cims1234)
 
 ${BOLD}도메인:${NC}
-  --sip-domain   DOM  SIP 인증 Realm / 기본 도메인 (기본: cims.local)
-  --voip-domain  DOM  VoIP 통화 SIP 도메인 (기본: sip-domain 값 사용)
-  --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: ptt.cims.local)
+  --volte-domain DOM  VoLTE SIP 도메인 / 인증 Realm (기본: ims.mnc001.mcc001.3gppnetwork.org)
+  --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: volte-domain의 ims→ptt 치환)
 
 ${BOLD}로그/녹취:${NC}
   --msg-log-dir      DIR  메시지 통계 로그 디렉터리 (기본: DIST_DIR/ext_mnt/msg_log)
@@ -77,12 +75,13 @@ ${BOLD}보안:${NC}
 
 ${BOLD}예시:${NC}
   # 단일 서버 배포
-  $(basename "$0") --local-ip 192.168.1.10 --db-password mypass --sip-domain ims.mycompany.com
+  $(basename "$0") --local-ip 192.168.1.10 --db-password mypass \\
+                   --volte-domain ims.mnc033.mcc450.3gppnetwork.org
 
   # 다중 서버 배포
   $(basename "$0") --csp-ip 192.168.1.10 --cmp-ip 192.168.1.11 \\
                    --cwrtc-ip 192.168.1.12 --csc-host 192.168.1.13 \\
-                   --db-host 192.168.1.14 --sip-domain ims.mycompany.com
+                   --db-host 192.168.1.14 --volte-domain ims.mycompany.com
 EOF
 }
 
@@ -97,8 +96,7 @@ while [[ $# -gt 0 ]]; do
         --db-host)      DB_HOST="$2";       shift 2 ;;
         --db-user)      DB_USER="$2";       shift 2 ;;
         --db-password)  DB_PASSWORD="$2";   shift 2 ;;
-        --sip-domain)   SIP_DOMAIN="$2";    shift 2 ;;
-        --voip-domain)  VOIP_DOMAIN="$2";   shift 2 ;;
+        --volte-domain) VOLTE_DOMAIN="$2";  shift 2 ;;
         --ptt-domain)   PTT_DOMAIN="$2";    shift 2 ;;
         --msg-log-dir)      MSG_LOG_DIR="$2";       shift 2 ;;
         --service-log-dir)  SERVICE_LOG_DIR="$2";   shift 2 ;;
@@ -110,14 +108,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 미설정 값은 local-ip로
+# 미설정 값은 기본값으로
 CSP_IP="${CSP_IP:-$LOCAL_IP}"
-# VoipDomain 미설정 시 SipDomain과 동일
-VOIP_DOMAIN="${VOIP_DOMAIN:-$SIP_DOMAIN}"
 CMP_IP="${CMP_IP:-$LOCAL_IP}"
 CWRTC_IP="${CWRTC_IP:-$LOCAL_IP}"
 CSC_HOST="${CSC_HOST:-$LOCAL_IP}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
+VOLTE_DOMAIN="${VOLTE_DOMAIN:-ims.mnc001.mcc001.3gppnetwork.org}"
+PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^ims\./ptt./')}"
 
 # 로그/녹취 디렉터리 기본값
 MSG_LOG_DIR="${MSG_LOG_DIR:-$DIST_DIR/ext_mnt/msg_log}"
@@ -135,14 +133,13 @@ fi
 
 echo ""
 info "배포 설정:"
-echo "  CSP_IP      = $CSP_IP"
-echo "  CMP_IP      = $CMP_IP"
-echo "  CWRTC_IP    = $CWRTC_IP"
-echo "  CSC_HOST    = $CSC_HOST"
-echo "  DB_HOST     = $DB_HOST / $DB_USER"
-echo "  SIP_DOMAIN  = $SIP_DOMAIN (auth realm)"
-echo "  VOIP_DOMAIN = $VOIP_DOMAIN"
-echo "  PTT_DOMAIN  = $PTT_DOMAIN"
+echo "  CSP_IP       = $CSP_IP"
+echo "  CMP_IP       = $CMP_IP"
+echo "  CWRTC_IP     = $CWRTC_IP"
+echo "  CSC_HOST     = $CSC_HOST"
+echo "  DB_HOST      = $DB_HOST / $DB_USER"
+echo "  VOLTE_DOMAIN = $VOLTE_DOMAIN"
+echo "  PTT_DOMAIN   = $PTT_DOMAIN"
 echo "  MSG_LOG_DIR     = $MSG_LOG_DIR"
 echo "  SERVICE_LOG_DIR = $SERVICE_LOG_DIR"
 echo "  RECORD_DIR      = $RECORD_DIR"
@@ -163,8 +160,7 @@ apply_template() {
         -e "s|@DB_HOST@|${DB_HOST}|g" \
         -e "s|@DB_USER@|${DB_USER}|g" \
         -e "s|@DB_PASSWORD@|${DB_PASSWORD}|g" \
-        -e "s|@SIP_DOMAIN@|${SIP_DOMAIN}|g" \
-        -e "s|@VOIP_DOMAIN@|${VOIP_DOMAIN}|g" \
+        -e "s|@VOLTE_DOMAIN@|${VOLTE_DOMAIN}|g" \
         -e "s|@PTT_DOMAIN@|${PTT_DOMAIN}|g" \
         -e "s|@IDMS_JWT_SECRET@|${IDMS_JWT_SECRET}|g" \
         -e "s|@CIMS_JWT_SECRET@|${CIMS_JWT_SECRET}|g" \
@@ -176,7 +172,6 @@ apply_template() {
 }
 
 # ── dist 설정 파일 생성 ─────────────────────────────────────────
-# Dist mode: templates are *.template files alongside the configs
 apply_template "$DIST_DIR/cmp/config/cmp.json.template"                    "$DIST_DIR/cmp/config/cmp.json"
 apply_template "$DIST_DIR/csp/config/csp.json.template"                    "$DIST_DIR/csp/config/csp.json"
 apply_template "$DIST_DIR/cwrtc/config/cwrtc.json.template"                "$DIST_DIR/cwrtc/config/cwrtc.json"
@@ -213,7 +208,6 @@ EOF
 fi
 
 # ── DB 접속 권한 SQL 생성 ───────────────────────────────────────
-# DB가 별도 서버일 경우, 아래 SQL을 DB 서버에서 실행해야 합니다.
 DB_GRANT_SQL="$DIST_DIR/sql/grant_db_access.sql"
 mkdir -p "$(dirname "$DB_GRANT_SQL")"
 cat > "$DB_GRANT_SQL" <<EOF

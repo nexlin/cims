@@ -1,7 +1,7 @@
 {
     "Setup": {
         "Sip": {
-            "LocalIp": "192.168.199.129",
+            "LocalIp": "192.168.0.2",
             "UdpPort": 5060,
             "UdpThreadCount": 2,
             "TcpPort": 25061,

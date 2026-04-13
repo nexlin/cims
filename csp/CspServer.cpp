@@ -67,7 +67,9 @@ int ServiceMain() {
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
     gclsMsgLogger.Init( gclsSetup.m_strMsgLogDir, "csp" );
     gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp" );
-    gclsSipLogger.Init( gclsSetup.m_strMsgLogDir + "/csp/sip" );
+    std::string sysId = gclsSetup.m_strSystemId.empty() ? "csp_01" : gclsSetup.m_strSystemId;
+    gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId );
+    gclsSipLogger.SetRealms( gclsSetup.m_strVoipRealm, gclsSetup.m_strPttRealm );
     CLog::SetCallBack( &gclsSipLogger );
     CLog::Print( LOG_SYSTEM, "CspServer is started ( version-%s %s %s )", CSP_SERVER_VERSION, __DATE__, __TIME__ );
     CLog::Print( LOG_DEBUG, "CspServer[%s]", CDirectory::GetProgramDirectory() );

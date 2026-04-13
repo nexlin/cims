@@ -225,6 +225,13 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (svclog.Has("Dir")) m_strServiceLogDir = svclog.GetString("Dir");
             }
 
+            if (setup.Has("SystemId")) {
+                m_strSystemId = setup.GetString("SystemId");
+            }
+            if (m_strSystemId.empty()) {
+                m_strSystemId = "csp_01";
+            }
+
             // Monitor
             m_clsMonitorIpMap.DeleteAll();
             if (setup.Has("Monitor")) {

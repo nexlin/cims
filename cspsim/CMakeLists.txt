@@ -16,6 +16,7 @@ target_include_directories(cspsim PRIVATE
     ${CMAKE_SOURCE_DIR}/ext/psip/XmlParser
     ${CMAKE_SOURCE_DIR}/ext/psip/SipPlatform
     ${CMAKE_SOURCE_DIR}/ext/psip/openssl/include
+    ${CMAKE_SOURCE_DIR}/include
 )
 
 # Assuming libraries are built and available in build/csp/psip_build
@@ -36,4 +37,5 @@ target_link_libraries(cspsim PRIVATE
     ssl
     crypto
     pthread
+    mariadb
 )

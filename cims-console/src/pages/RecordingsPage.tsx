@@ -259,21 +259,16 @@ export default function RecordingsPage() {
               {/* VoIP: 재생 버튼 */}
               {detail.call_type === 'voip' && (
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                  <button className="btn btn--primary"
-                    onClick={() => { setPlayUrl(recordingsApi.audioUrl(detail.id)); setPlayType('audio') }}>
-                    음성 재생
-                  </button>
-                  {detail.has_video && (
-                    <>
-                      <button className="btn btn--outline"
-                        onClick={() => { setPlayUrl(recordingsApi.videoUrl(detail.id, 'a')); setPlayType('video') }}>
-                        발신측 영상
-                      </button>
-                      <button className="btn btn--outline"
-                        onClick={() => { setPlayUrl(recordingsApi.videoUrl(detail.id, 'b')); setPlayType('video') }}>
-                        착신측 영상
-                      </button>
-                    </>
+                  {detail.has_video ? (
+                    <button className="btn btn--primary"
+                      onClick={() => { setPlayUrl(recordingsApi.videoUrl(detail.id)); setPlayType('video') }}>
+                      영상 재생
+                    </button>
+                  ) : (
+                    <button className="btn btn--primary"
+                      onClick={() => { setPlayUrl(recordingsApi.audioUrl(detail.id)); setPlayType('audio') }}>
+                      음성 재생
+                    </button>
                   )}
                 </div>
               )}

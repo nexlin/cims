@@ -342,7 +342,7 @@ async def _delete_user(person_id: str, config):
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'User not found'})
     for sid in sub_ids:
-        notify_csp("user_change", f"tel:{sid}", "DELETE")
+        notify_csp("USER_CHANGED", f"tel:{sid}", "DELETE")
     return HandlerResult(status=200, body={'id': person_id})
 
 
@@ -422,7 +422,7 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 f"VALUES (%s, %s, %s, %s, %s, %s)",
                 (msisdn, person_id, auth_id, passwd, dnd, forward_id)
             )
-    notify_csp("user_change", f"tel:{msisdn}", "POST")
+    notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     return HandlerResult(status=201, body={'id': msisdn})
 
 
@@ -445,7 +445,7 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
-    notify_csp("user_change", f"tel:{msisdn}", "PUT")
+    notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
     return HandlerResult(status=200, body={'id': msisdn})
 
 
@@ -459,7 +459,7 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
-    notify_csp("user_change", f"tel:{msisdn}", "DELETE")
+    notify_csp("USER_CHANGED", f"tel:{msisdn}", "DELETE")
     return HandlerResult(status=200, body={'id': msisdn})
 
 
@@ -602,7 +602,7 @@ async def _create_group(body, config):
                         "(group_id, user_id, priority) VALUES (%s, %s, %s)",
                         (group_id, uid, prio)
                     )
-    notify_csp("group_change", f"tel:{group_id}", "POST")
+    notify_csp("GROUP_CHANGED", f"tel:{group_id}", "POST")
     return HandlerResult(status=201, body={'id': group_id})
 
 
@@ -658,7 +658,7 @@ async def _update_group(group_id: str, body, config):
                             "(group_id, user_id, priority) VALUES (%s, %s, %s)",
                             (group_id, uid, prio)
                         )
-    notify_csp("group_change", f"tel:{group_id}", "PUT")
+    notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
 
 
@@ -675,7 +675,7 @@ async def _delete_group(group_id: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
-    notify_csp("group_change", f"tel:{group_id}", "DELETE")
+    notify_csp("GROUP_CHANGED", f"tel:{group_id}", "DELETE")
     return HandlerResult(status=200, body={'id': group_id})
 
 
@@ -713,7 +713,7 @@ async def _add_member(group_id: str, body, config):
                 "ON DUPLICATE KEY UPDATE priority=VALUES(priority)",
                 (group_id, user_id, priority)
             )
-    notify_csp("group_change", f"tel:{group_id}", "PUT")
+    notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=201, body={'group_id': group_id, 'user_id': user_id})
 
 
@@ -726,7 +726,7 @@ async def _remove_member(group_id: str, user_id: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Member not found'})
-    notify_csp("group_change", f"tel:{group_id}", "PUT")
+    notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'group_id': group_id, 'user_id': user_id})
 
 
@@ -1096,7 +1096,7 @@ async def _process_import(handler_args: HandlerArgs, config):
                         )
                         if cur.rowcount > 0:
                             result['created_voip'] += 1
-                            notify_csp("user_change", f"tel:{msisdn}", "PUT")
+                            notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
                         else:
                             result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': f'MSISDN 중복: {msisdn}'})
                     except Exception as e:
@@ -1137,7 +1137,7 @@ async def _process_import(handler_args: HandlerArgs, config):
                         )
                         if cur.rowcount > 0:
                             result['created_ptt'] += 1
-                            notify_csp("user_change", f"tel:{msisdn}", "PUT")
+                            notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
                         else:
                             result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': f'MSISDN 중복: {msisdn}'})
                     except Exception as e:

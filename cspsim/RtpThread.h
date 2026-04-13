@@ -42,6 +42,7 @@ public:
     void SetVideoFile(const std::string& strPath) { m_strVideoFile = strPath; }
 
 	Socket	m_hSocket;
+	Socket	m_hRtcpSocket;    // RTCP 소켓 (RTP 포트 + 1)
 	int			m_iPort;
 	bool		m_bStopEvent;
 	bool		m_bSendThreadRun;

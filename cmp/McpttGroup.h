@@ -126,20 +126,17 @@ private:
     PMutex _mutex;
     LogFlowFunc _logFlow;  // floor event log callback
 
-    // 녹취
+    // 녹취 (세션 단위 — PTT는 한 시점에 한 명만 발언하므로 단일 파일로 충분)
     bool _recordEnable;
     std::string _recordDir;
-    int _segmentSeq;
-    RtpRecorder* _segRecorderAudio;
-    RtpRecorder* _segRecorderVideo;
-    std::string _segSpeakerId;
+    RtpRecorder* _sessionRecorderAudio;
+    RtpRecorder* _sessionRecorderVideo;
 
 public:
     void setRecording(bool enable, const std::string& dir);
-
-private:
-    void startSegment(const std::string& speakerId);
-    void stopSegment();
+    bool isRecordEnabled() const { return _recordEnable; }
+    void startRecording();
+    void stopRecording();
 };
 
 #endif // __MCPTT_GROUP_H__
