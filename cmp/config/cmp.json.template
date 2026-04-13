@@ -1,6 +1,9 @@
 {
     "RtpStartPort": 50000,
     "RtpPoolSize": 20,
+    "PttRtpStartPort": 52000,
+    "PttRtpPoolSize": 10,
+    "PttFloorStartPort": 54000,
     "RtpWorkerCount": 4,
     "RtpIp": "@CMP_IP@",
     "ServerIp": "0.0.0.0",

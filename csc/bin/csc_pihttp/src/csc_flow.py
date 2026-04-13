@@ -222,8 +222,9 @@ def _read_jsonl(path: str) -> list:
 
 
 def _has_recording(d_dir: str) -> bool:
-    for fn in ('recording_mixed.wav', 'recording_mixed.mp4', 'raw_a.rtp'):
-        if os.path.exists(os.path.join(d_dir, fn)):
+    for fn in ('recording_mixed.wav', 'recording_mixed.mp4', 'raw_a.rtp', 'raw_audio.rtp'):
+        p = os.path.join(d_dir, fn)
+        if os.path.exists(p) and os.path.getsize(p) > 0:
             return True
     return False
 
@@ -430,6 +431,21 @@ def _transcode_audio(d_dir: str) -> str:
     tmps = [amr_a, amr_b, wav_a, wav_b]
 
     try:
+        # PTT: raw_audio.rtp (단일 파일)
+        ptt_raw = os.path.join(d_dir, 'raw_audio.rtp')
+        if os.path.exists(ptt_raw) and os.path.getsize(ptt_raw) > 0:
+            amr_ptt = os.path.join(d_dir, 'raw_audio.rtp.amr')
+            tmps.append(amr_ptt)
+            ok_ptt = _strip_rtp_to_amrwb(ptt_raw, amr_ptt)
+            if ok_ptt:
+                subprocess.run(['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                                '-i', amr_ptt, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', out],
+                               capture_output=True, timeout=60)
+                for t in tmps:
+                    try: os.remove(t)
+                    except: pass
+                return out if os.path.exists(out) and os.path.getsize(out) > 44 else ''
+
         ok_a = _strip_rtp_to_amrwb(os.path.join(d_dir, 'raw_a.rtp'), amr_a)
         ok_b = _strip_rtp_to_amrwb(os.path.join(d_dir, 'raw_b.rtp'), amr_b)
 
@@ -1196,13 +1212,67 @@ def _load_ptt_events(d_dir: str, date: str = None) -> list:
     return events
 
 
+def _sip_raw_to_flow(obj: dict) -> dict:
+    """raw sip.jsonl 항목({ts, dir, peer, proto, msg})을 flow 형식으로 변환"""
+    import re
+    msg = obj.get("msg", "")
+    direction = obj.get("dir", "")  # RX or TX
+    ts = obj.get("ts", "")
+    peer = obj.get("peer", "")
+
+    # SIP 메서드/상태 추출
+    first_line = msg.split("\r\n")[0] if msg else ""
+    method = ""
+    if first_line.startswith("SIP/"):
+        # Response: SIP/2.0 200 OK
+        parts = first_line.split(" ", 2)
+        method = parts[1] + " " + (parts[2] if len(parts) > 2 else "") if len(parts) >= 2 else first_line
+    else:
+        # Request: INVITE sip:... SIP/2.0
+        method = first_line.split(" ")[0] if first_line else ""
+
+    # Call-ID 추출
+    call_id = ""
+    m = re.search(r'Call-ID:\s*(.+)', msg, re.IGNORECASE)
+    if m:
+        call_id = m.group(1).strip()
+
+    # From/To URI 추출
+    from_uri = ""
+    to_uri = ""
+    m = re.search(r'From:\s*<?([^>;]+)', msg, re.IGNORECASE)
+    if m:
+        from_uri = m.group(1).strip()
+    m = re.search(r'To:\s*<?([^>;]+)', msg, re.IGNORECASE)
+    if m:
+        to_uri = m.group(1).strip()
+
+    # from/to actor
+    if direction == "RX":
+        from_actor, to_actor = "ue", "csp"
+    else:
+        from_actor, to_actor = "csp", "ue"
+
+    return {
+        "ts": ts,
+        "from": from_actor,
+        "to": to_actor,
+        "proto": "SIP",
+        "method": method,
+        "call_id": call_id,
+        "from_uri": from_uri,
+        "to_uri": to_uri,
+        "peer": peer,
+    }
+
+
 def _search_sip_for_group(group_id: str, date_str: str) -> list:
-    """ptt_flow.jsonl에서 group_id 관련 메시지 검색.
-    SIP: from_uri/to_uri에 group_id 포함. CMP/CSC: SIP 시간 범위 내 전부 포함."""
-    if not _sip_log_dir or not group_id:
+    """ptt_flow.jsonl + sip.jsonl에서 group_id 관련 메시지 검색.
+    SIP: from_uri/to_uri 또는 msg 본문에 group_id 포함. CMP/CSC: SIP 시간 범위 내 전부 포함."""
+    if not group_id:
         return []
 
-    # 1차: SIP 메시지 (group_id 매칭)
+    # 1차: ptt_flow.jsonl (SIP + CMP 혼합)
     sip_results = []
     all_non_sip = []
     flow_paths = _resolve_flow_paths(date_str, None, "ptt")
@@ -1224,10 +1294,38 @@ def _search_sip_for_group(group_id: str, date_str: str) -> list:
                         if group_id in from_uri or group_id in to_uri:
                             sip_results.append(obj)
                     else:
-                        # CMP/CSC: 나중에 시간 범위로 필터
                         all_non_sip.append(obj)
         except Exception as e:
-            logger.error("_search_sip_for_group: %s", e)
+            logger.error("_search_sip_for_group flow: %s", e)
+
+    # 2차: msg_log의 sip.jsonl에서도 group_id 검색 (ptt_flow.jsonl에 SIP가 누락된 경우)
+    if not sip_results:
+        yyyy, mm, dd = _date_parts(date_str)
+        sip_detail_paths = []
+        for hh in [f"{h:02d}" for h in range(24)]:
+            # New: {MsgLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_sip.jsonl
+            if _msg_log_dir:
+                p = os.path.join(_msg_log_dir, yyyy, mm, dd, hh, _system_id,
+                                 f"{_system_id}_sip.jsonl")
+                if os.path.exists(p):
+                    sip_detail_paths.append(p)
+        for jsonl_path in sip_detail_paths:
+            try:
+                with open(jsonl_path, 'r') as f:
+                    for line in f:
+                        if group_id not in line:
+                            continue
+                        line = line.strip()
+                        if not line: continue
+                        try:
+                            obj = json.loads(line)
+                        except: continue
+                        msg_body = obj.get("msg", "")
+                        if group_id in msg_body:
+                            # raw SIP 메시지에서 flow 형식으로 변환
+                            sip_results.append(_sip_raw_to_flow(obj))
+            except Exception as e:
+                logger.error("_search_sip_for_group sip detail: %s", e)
 
     # 2차: CMP/CSC 메시지를 SIP 시간 범위 내로 필터
     results = list(sip_results)
@@ -1329,6 +1427,21 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
 
     session_dir = unquote(parts[1])
 
+    if len(parts) >= 3 and parts[2] == "audio":
+        # ── PTT 세션 녹취 오디오 ──
+        d_dir = _find_ptt_session_dir(group_id, session_dir)
+        if not d_dir:
+            return HandlerResult(status=404, body=json.dumps({"error": "Session not found"}))
+
+        mixed_wav = os.path.join(d_dir, 'recording_mixed.wav')
+        if not (os.path.exists(mixed_wav) and os.path.getsize(mixed_wav) > 44):
+            mixed_wav = _transcode_audio(d_dir)
+        if mixed_wav and os.path.exists(mixed_wav) and os.path.getsize(mixed_wav) > 44:
+            return HandlerResult(status=200, body=mixed_wav, headers={
+                'Content-Type': 'audio/wav', 'X-File-Path': mixed_wav
+            })
+        return HandlerResult(status=404, body=json.dumps({"error": "No recording available"}))
+
     if len(parts) >= 3 and parts[2] == "flow":
         # ── SIP Flow ──
         date_str = _qp("date", datetime.now().strftime("%Y-%m-%d"))
@@ -1424,11 +1537,13 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         # participants 정보도 포함
         participants = _load_participants(d_dir)
 
+        has_rec = _has_recording(d_dir) if d_dir else False
         return HandlerResult(status=200, body=json.dumps({
             "session": session_meta or {},
             "group_snapshot": group_snapshot,
             "events": events,
             "participants": participants,
+            "has_recording": has_rec,
         }), media_type="application/json")
 
 

@@ -42,8 +42,11 @@ protected:
     // Resource Management
     void loadConfig();
     void initResourcePool();
+    void initPttResourcePool();
     PRtpTrans* allocResource(std::string& rtpIp, int& rtpPort, int& videoPort);
     void freeResource(PRtpTrans* rtp);
+    PPttTrans* allocPttResource(std::string& rtpIp, int& rtpPort, int& floorPort);
+    void freePttResource(PPttTrans* ptt);
 
 private:
     int _udpFd;
@@ -58,15 +61,20 @@ private:
     void logFlow(const std::string& key, const char* from, const char* to,
                  const char* proto, const char* label, const char* body = "");
 
-    // Resource Pool
+    // VoIP Resource Pool
     int _rtpStartPort;
     int _rtpPoolSize;
     std::string _rtpIp;
-    
+
+    // PTT Resource Pool
+    int _pttRtpStartPort;
+    int _pttRtpPoolSize;
+    int _pttFloorStartPort;
+
     // Server Config
     std::string _serverIp;
     int _serverPort;
-    
+
     // DTMF PTT Config
     bool _dtmfPttEnable;
     std::string _dtmfPushDigit;
@@ -74,8 +82,13 @@ private:
 
     std::string _configFile;
 
-    std::vector<PRtpTrans*> _resourcePool; // Pre-allocated list
-    std::vector<PRtpTrans*> _freeResources; // Available for use
+    // VoIP 리소스 (PRtpTrans, 4포트 블록)
+    std::vector<PRtpTrans*> _resourcePool;
+    std::vector<PRtpTrans*> _freeResources;
+
+    // PTT 리소스 (PPttTrans, audio RTP + floor control)
+    std::vector<PPttTrans*> _pttPool;
+    std::vector<PPttTrans*> _freePttResources;
 
     // Worker config
     int _rtpWorkerCount;

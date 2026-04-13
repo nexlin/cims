@@ -11,6 +11,7 @@
 
 // Forward declaration
 class PRtpTrans;
+class PPttTrans;
 class RtpRecorder;
 
 // RTCP APP Packet for Floor Control (Simplified)
@@ -53,9 +54,11 @@ public:
     McpttGroup(const std::string& groupId);
     virtual ~McpttGroup();
 
-    void setSharedSession(PRtpTrans* session);
+    void setSharedSession(PRtpTrans* session) { _sharedSession = session; }
     PRtpTrans* getSharedSession() const { return _sharedSession; }
-    void addMember(const std::string& sessionId, const std::string& ip, int port, int videoPort = 0);
+    void setPttSession(PPttTrans* session) { _pttSession = session; }
+    PPttTrans* getPttSession() const { return _pttSession; }
+    void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0);
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -63,8 +66,10 @@ public:
     void handleFloorRequest(const std::string& sessionId, unsigned int userId);
     void handleFloorRelease(const std::string& sessionId, unsigned int userId);
 
-    // Called by PRtpTrans when an RTCP packet is received
+    // Called by PRtpTrans when an RTCP packet is received (legacy)
     void onRtcpPacket(const std::string& ip, int port, char* buf, int len);
+    // Called by PPttTrans when a floor control packet is received (m=application)
+    void onFloorPacket(const std::string& ip, int port, char* buf, int len);
 
     // Called by PRtpTrans when an RTP packet is received
     void onRtpPacket(const std::string& ip, int port, char* buf, int len);
@@ -99,6 +104,7 @@ private:
         std::string id;
         std::string ip;
         int port;
+        int floorPort;       // floor control 포트 (m=application)
         unsigned int ssrc;   // 멤버 SSRC (joinGroup 시 할당)
         int videoPort;
         uint16_t audioSeqOut;   // 수신자별 오디오 시퀀스 카운터
@@ -108,7 +114,8 @@ private:
     };
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority
-    PRtpTrans* _sharedSession; // The shared RTP session
+    PRtpTrans* _sharedSession;   // VoIP 공유 세션 (legacy)
+    PPttTrans* _pttSession;      // PTT 전용 세션 (audio RTP + floor)
     
     // Floor State
     bool _floorTaken;

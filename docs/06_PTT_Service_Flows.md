@@ -1,6 +1,7 @@
 # PTT 서비스 케이스 및 메시지 Flow
 
 **작성일:** 2026-04-03
+**최종 수정:** 2026-04-13 (CMP VoIP/PTT 핸들러 분리 반영)
 
 ---
 
@@ -199,8 +200,10 @@ UE(단말)                CSP                          CMP
   │                      │   (session-type,           │
   │                      │    group-id, caller-id)    │
   │                      │  Part2: SDP                │
-  │                      │   (공유 RTP 포트 +         │
-  │                      │    m=application floor)    │
+  │                      │   m=audio {CMP RTP 포트}   │
+  │                      │   m=application {CMP Floor} │
+  │                      │   (CMP AddGroup 응답의      │
+  │                      │    floor_port 사용)         │
   │                      │                            │
   │ ── 180 Ringing ───► │                            │
   │ ── 200 OK ────────► │                            │
@@ -208,7 +211,8 @@ UE(단말)                CSP                          CMP
   │                      │ [OnCallStarted]            │
   │                      │ ── joingroup ────────────► │  RTP 수신 시작
   │                      │    {group_id, session_id,  │
-  │                      │     user_ip, user_port}    │
+  │                      │     user_ip, user_port,    │
+  │                      │     user_floor_port}       │
   │ ◄── ACK ──────────── │                            │
   │                      │                            │
   │                      │ [SendConferenceNotify]     │
@@ -246,10 +250,13 @@ UE                      CSP
 CSP                                    CMP
  │  [기동: MonitorLoop → SyncGroupsState]
  │                                      │
- │  ──── addgroup ──────────────────►   │  그룹별 공유 RTP 포트 할당
- │       {group_id,                     │  (audio + video + RTCP)
- │        members: "u1:p1,u2:p2,..."}   │
- │  ◄─── {ip, port, video_port} ───    │
+ │  ──── addgroup ──────────────────►   │  PPttTrans 풀에서 할당:
+ │       {group_id,                     │  Audio RTP (52000~) +
+ │        members: "u1:p1,u2:p2,..."}   │  Floor Control (54000~)
+ │  ◄─── {ip, port, floor_port} ───    │
+ │                                      │
+ │  CSP: GroupRtpInfo에 floor_port 저장 │
+ │  → INVITE SDP m=application 포트로 사용
  │                                      │
  │  (DB의 모든 그룹에 대해 반복)         │
 ```
@@ -279,33 +286,47 @@ UE                      CSP                          CMP
 
 ### C1. 플로어 요청 및 획득
 
+Floor Control은 m=application 전용 소켓(PPttTrans._floorSock)을 통해 처리된다.
+레거시 단말은 DTMF(PT=101)로 대체 가능하다.
+
 ```
-UE-A (발언 요청)         CMP                        UE-B,C (수신)
+UE-A (발언 요청)         CMP (PPttTrans)             UE-B,C (수신)
   │                      │                            │
-  │ ── RTCP APP ──────► │  op=FLOOR_REQUEST (1)      │
-  │    (RTCP port)       │                            │
+  │ ── Floor Pkt ──────► │  op=FLOOR_REQUEST (1)      │
+  │  (m=application port)│  [PPttTrans._floorSock 수신]│
+  │                      │  → McpttGroup::onFloorPacket()
+  │                      │                            │
   │                      │  [우선순위 확인]             │
   │                      │  플로어 미사용 + A가 요청:  │
   │                      │                            │
-  │ ◄── RTCP APP ─────── │  op=FLOOR_GRANT (2)       │
-  │                      │  speaker_id=A              │
+  │ ◄── Floor Pkt ─────── │  op=FLOOR_GRANT (2)       │
+  │  (m=application port)│  speaker_id=A              │
+  │                      │  [PPttTrans::sendFloorTo()]│
   │                      │                            │
-  │                      │ ── RTCP APP ─────────────► │  op=FLOOR_TAKEN (6)
-  │                      │    speaker_id=A            │
+  │                      │ ── Floor Pkt ────────────► │  op=FLOOR_TAKEN (6)
+  │                      │  (각 멤버 floor port로)     │  speaker_id=A
   │                      │                            │
   │ ── RTP Audio ──────► │ ── RTP Forward ──────────► │  A의 음성 → B,C에 전달
-  │ ── RTP Video ──────► │ ── RTP Forward ──────────► │  (SSRC 재작성)
+  │  (m=audio port)      │  [PPttTrans._rtpSock 수신]  │  (수신자별 SSRC/seq 재작성)
+```
+
+**DTMF 대체 (레거시 단말):**
+```
+UE-A ── RTP (PT=101, digit='*', endBit=1) ──► CMP
+  → McpttGroup::onRtpPacket() → DTMF 감지 → handleFloorRequest()
 ```
 
 ### C2. 플로어 해제
 
 ```
-UE-A (화자)              CMP                        UE-B,C
+UE-A (화자)              CMP (PPttTrans)             UE-B,C
   │                      │                            │
-  │ ── RTCP APP ──────► │  op=FLOOR_RELEASE (4)      │
+  │ ── Floor Pkt ──────► │  op=FLOOR_RELEASE (4)      │
+  │  (m=application port)│  [onFloorPacket]           │
   │                      │                            │
-  │ ◄── RTCP APP ─────── │  op=FLOOR_IDLE (5)        │
-  │                      │ ── RTCP APP ─────────────► │  op=FLOOR_IDLE (5)
+  │ ◄── Floor Pkt ─────── │  op=FLOOR_IDLE (5)        │
+  │                      │ ── Floor Pkt ────────────► │  op=FLOOR_IDLE (5)
+  │                      │  (각 멤버 floor port로)     │
 ```
 
 ### C3. 플로어 우선순위 선점
@@ -315,15 +336,15 @@ UE-B (낮은 우선순위, 현재 화자)   CMP              UE-A (높은 우선
   │                                │                │
   │  (B가 화자 중)                  │                │
   │                                │                │
-  │                                │ ◄── RTCP APP ─ │  op=FLOOR_REQUEST (1)
+  │                                │ ◄── Floor Pkt  │  op=FLOOR_REQUEST (1)
   │                                │  [A > B 우선순위] │
   │                                │                │
-  │ ◄── RTCP APP ────────────────── │  op=FLOOR_REVOKE (7)
-  │                                │                │
-  │                                │ ── RTCP APP ──► │  op=FLOOR_GRANT (2)
+  │ ◄── Floor Pkt ─────────────── │  op=FLOOR_REVOKE (7)
+  │   (B의 floor port로)           │                │
+  │                                │ ── Floor Pkt ─► │  op=FLOOR_GRANT (2)
   │                                │    speaker_id=A │
   │                                │                │
-  │                                │ ── FLOOR_TAKEN ► ALL (speaker=A)
+  │                                │ ── FLOOR_TAKEN ► ALL (각 멤버 floor port)
 ```
 
 ### C4. 멤버 퇴장 (정상 BYE)
@@ -513,9 +534,13 @@ CSP                                    CMP
 | UE ↔ CSP | SIP/UDP | 5060 | REGISTER, INVITE, BYE, SUBSCRIBE, NOTIFY |
 | CSP → CMP | UDP JSON | 9000 | addgroup, modifygroup, removegroup, joingroup, leavegroup |
 | CSC → CSP | UDP JSON | 4421 | group_change, user_change, stats |
-| UE ↔ CMP | RTP/RTCP | 50000+ | 음성/영상 데이터, MCPTT 플로어 제어 |
+| UE ↔ CMP (Audio) | RTP/UDP | 52000-52018 | PTT 음성 데이터 (PPttTrans._rtpSock) |
+| UE ↔ CMP (Floor) | RTCP APP/UDP | 54000-54018 | MCPTT Floor Control (PPttTrans._floorSock) |
 | CSP → UE (in-dialog) | SIP NOTIFY | (dialog) | Event: conference, conference-info+xml |
 | CSP → UE (out-dialog) | SIP NOTIFY | (subscription) | Event: xcap-diff |
+
+> **참고:** VoIP 1:1 통화는 별도의 PRtpTrans 풀(50000-50079)을 사용한다.
+> PTT와 VoIP 포트 대역이 분리되어 리소스 독립 관리가 가능하다.
 
 ### MCPTT Floor Control RTCP APP 코드
 

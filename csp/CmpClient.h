@@ -31,10 +31,10 @@ public:
     bool Alive();
 
 
-    bool AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iVideoPort,
+    bool AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iFloorPort, int& iVideoPort,
                   const std::string& strRecordDir = "", const std::string& strLogDir = "");
     bool ModifyGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers);
-    bool JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strIp, int iPort, int iVideoPort = 0);
+    bool JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strIp, int iPort, int iFloorPort = 0, int iVideoPort = 0);
     bool LeaveGroup(const std::string& strGroupId, const std::string& strSessionId);
     bool RemoveGroup(const std::string& strGroupId);
 

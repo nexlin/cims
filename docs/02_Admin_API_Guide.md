@@ -987,3 +987,213 @@ users (1) ──────── (N) voip_subscriptions
 ### 통화현황
 - 실시간 PTT 세션 상태
 - 통화 로그 조회
+
+---
+
+## 9. 조직 관리 API (`/api/v1/organizations`)
+
+### 9.1 조직 목록 조회
+
+```
+GET /api/v1/organizations
+Authorization: Bearer <token>
+```
+
+**응답 200:**
+```json
+[
+  {"id": 1, "name": "본부", "code": "HQ", "parent_id": null},
+  {"id": 2, "name": "작전과", "code": "OPS", "parent_id": 1}
+]
+```
+
+### 9.2 조직 생성
+
+```
+POST /api/v1/organizations
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{"name": "작전과", "code": "OPS", "parent_id": 1}
+```
+
+### 9.3 조직 수정/삭제
+
+```
+PUT /api/v1/organizations/{org_id}
+DELETE /api/v1/organizations/{org_id}
+```
+
+---
+
+## 10. 통계/상태 API (`/api/v1/stats`)
+
+### 10.1 시스템 상태
+
+```
+GET /api/v1/stats/health
+Authorization: Bearer <token>
+```
+
+**응답 200:**
+```json
+{
+  "csp": {"status": "running", "registered_users": 42, "active_calls": 3},
+  "cmp": {"status": "running", "sessions": 3, "groups": 1,
+          "rtp_ports_total": 20, "rtp_ports_used": 5},
+  "db": {"status": "connected"},
+  "csc": {"status": "running", "uptime": 86400}
+}
+```
+
+### 10.2 가입자 통계
+
+```
+GET /api/v1/stats/subscribers
+```
+
+**응답 200:**
+```json
+{
+  "total_users": 100,
+  "voip_subscriptions": 80,
+  "ptt_subscriptions": 60,
+  "ptt_groups": 10,
+  "registered_now": 42
+}
+```
+
+### 10.3 서비스 통계 요약
+
+```
+GET /api/v1/stats/service/summary?date=2026-04-13
+```
+
+**응답 200:**
+```json
+{
+  "date": "2026-04-13",
+  "voip": {"total_calls": 150, "answered": 120, "missed": 30, "avg_duration": 45},
+  "ptt": {"total_sessions": 20, "total_floor_grants": 85, "avg_members": 4}
+}
+```
+
+---
+
+## 11. 통화 이력/Flow API (`/api/v1/call`, `/api/v1/flow`)
+
+### 11.1 통화 이력 조회
+
+```
+GET /api/v1/call/logs?type=voip&date_from=2026-04-13&page=1&limit=20
+Authorization: Bearer <token>
+```
+
+**응답 200:**
+```json
+{
+  "total": 150,
+  "page": 1,
+  "items": [
+    {
+      "call_id": "abc123",
+      "call_type": "voip",
+      "caller": "+821001",
+      "callee": "+821002",
+      "state": "ended",
+      "invite_time": "2026-04-13T14:30:00",
+      "answer_time": "2026-04-13T14:30:02",
+      "end_time": "2026-04-13T14:31:15",
+      "duration": 73,
+      "end_reason": "normal"
+    }
+  ]
+}
+```
+
+### 11.2 SIP 메시지 Flow 조회
+
+```
+GET /api/v1/flow/{session_id}
+```
+
+**응답 200:**
+```json
+{
+  "session_id": "S20260413143000123",
+  "call_ids": ["abc123", "def456"],
+  "messages": [
+    {
+      "ts": "14:30:00.123",
+      "seq": 1,
+      "from": "ue",
+      "to": "csp",
+      "proto": "SIP",
+      "method": "INVITE",
+      "call_id": "abc123",
+      "from_uri": "sip:1001@csp",
+      "to_uri": "sip:1002@csp"
+    }
+  ]
+}
+```
+
+---
+
+## 12. 녹취 API (`/api/v1/recordings`)
+
+### 12.1 녹취 목록
+
+```
+GET /api/v1/recordings?call_type=voip&date_from=2026-04-13
+Authorization: Bearer <token>
+```
+
+**응답 200:**
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "call_id": "abc123",
+      "call_type": "voip",
+      "caller": "+821001",
+      "callee": "+821002",
+      "status": "ready",
+      "has_video": false,
+      "created_at": "2026-04-13T14:30:00"
+    }
+  ]
+}
+```
+
+### 12.2 녹취 파일 다운로드
+
+```
+GET /api/v1/recordings/{id}/audio   → audio/mpeg (MP3)
+GET /api/v1/recordings/{id}/video   → video/mp4
+```
+
+---
+
+## 13. 검증 API (`/api/v1/verification`)
+
+시스템 구성요소별 기능 검증 엔드포인트.
+
+```
+GET /api/v1/verification/run
+Authorization: Bearer <token>
+```
+
+**응답 200:**
+```json
+{
+  "results": [
+    {"test": "db_connection", "status": "pass"},
+    {"test": "csp_alive", "status": "pass"},
+    {"test": "cmp_alive", "status": "pass"},
+    {"test": "sip_register", "status": "pass"},
+    {"test": "rtp_relay", "status": "pass"}
+  ]
+}
+```

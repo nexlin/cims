@@ -288,7 +288,7 @@ bool CCmpClient::RemoveSession(const std::string& strSessionId) {
     return bRet;
 }
 
-bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iVideoPort,
+bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iFloorPort, int& iVideoPort,
                           const std::string& strRecordDir, const std::string& strLogDir) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "ADD_GROUP");
@@ -326,8 +326,9 @@ bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::
         if (respNode.Has("status") && respNode.Get("status").AsString() == "OK") {
             strIp = respNode.Get("ip").AsString();
             iPort = respNode.Get("port").AsInt();
+            iFloorPort = respNode.Has("floor_port") ? respNode.Get("floor_port").AsInt() : 0;
             iVideoPort = respNode.Has("video_port") ? respNode.Get("video_port").AsInt() : 0;
-            CLog::Print(LOG_INFO, "CmpClient::AddGroup Success: %s:%d video=%d Members: %d", strIp.c_str(), iPort, iVideoPort, (int)vecMembers.size());
+            CLog::Print(LOG_INFO, "CmpClient::AddGroup Success: %s:%d floor=%d video=%d Members: %d", strIp.c_str(), iPort, iFloorPort, iVideoPort, (int)vecMembers.size());
             return true;
         }
         CLog::Print(LOG_ERROR, "CmpClient::AddGroup Fail: Status not OK. Resp: %s", strResp.c_str());
@@ -360,13 +361,14 @@ bool CCmpClient::ModifyGroup(const std::string& strGroupId, const std::vector<st
     return SendRequestAndWait(req, strResp);
 }
 
-bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strUserIp, int iUserPort, int iVideoPort) {
+bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strUserIp, int iUserPort, int iFloorPort, int iVideoPort) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "JOIN_GROUP");
     req.Set("group_id", strGroupId);
     req.Set("session_id", strSessionId);
     req.Set("user_ip", strUserIp);
     req.Set("user_port", iUserPort);
+    if (iFloorPort > 0) req.Set("user_floor_port", iFloorPort);
     if (iVideoPort > 0) req.Set("user_video_port", iVideoPort);
     
     req.Set("csp_id", "CSP_MAIN");

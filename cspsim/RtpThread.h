@@ -49,6 +49,7 @@ public:
 	bool		m_bRecvThreadRun;
 	std::string	m_strDestIp;
 	int					m_iDestPort;
+	int					m_iDestFloorPort;  // m=application floor control 포트 (0이면 audio+1)
     std::string m_strMediaFile;
 
     // Video RTP

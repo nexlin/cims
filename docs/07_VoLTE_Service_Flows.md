@@ -1,6 +1,7 @@
 # VoLTE(VoIP) 서비스 케이스 및 메시지 Flow
 
 **작성일:** 2026-04-03
+**최종 수정:** 2026-04-13 (CMP VoIP/PTT 핸들러 분리 반영)
 
 ---
 
@@ -282,12 +283,14 @@ UE-A                    CSP                          UE-B
 
 ### C8. RTP 릴레이 통화 (CMP 경유)
 
+VoIP 통화는 PRtpTrans(4포트 블록: Audio RTP/RTCP + Video RTP/RTCP, 50000~ 대역)을 사용한다.
+
 ```
 UE-A                    CSP (B2BUA)           CMP              UE-B
   │                      │                     │                │
   │ ── INVITE B ───────► │                     │                │
-  │                      │ ── add ───────────► │ 세션 할당      │
-  │                      │ ◄── {ip,port} ───── │                │
+  │                      │ ── add ───────────► │ PRtpTrans 할당 │
+  │                      │ ◄── {ip,port} ───── │ (50000~ 대역)  │
   │                      │                     │                │
   │                      │ ── INVITE B ─────────────────────► │
   │                      │    SDP: CMP relay IP:port          │

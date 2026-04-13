@@ -112,10 +112,13 @@ Config: `csp/csp.json`. User/group data: DB (MariaDB) primary, `csp/User/` / `cs
 RTP relay and floor control server, controlled entirely via JSON commands over UDP from CSP.
 
 - **`CmpServer`** — Listens on UDP (default port 9000), dispatches commands
-- **`PRtpHandler`** — Per-session RTP forwarding (pthread-based); allocates ports from a pool (default 50000–50019)
-- **`McpttGroup`** — Group RTP mixing and MCPTT floor control via RTCP APP packets (op-codes: REQUEST=1, GRANT=2, RELEASE=4, IDLE=5)
+- **`PRtpTrans`** — VoIP RTP 핸들러: 4포트 블록 (Audio RTP/RTCP + Video RTP/RTCP), 포트 50000~ 대역
+- **`PPttTrans`** — PTT 전용 핸들러: Audio RTP(52000~) + Floor Control(54000~) 독립 소켓
+- **`McpttGroup`** — Group RTP mixing and MCPTT floor control via RTCP APP packets on `m=application` 전용 소켓 (op-codes: REQUEST=1, GRANT=2, RELEASE=4, IDLE=5)
 
-CMP command verbs: `add`, `modify`, `remove`, `addGroup`, `removeGroup`, `joinGroup`, `leaveGroup`.
+VoIP/PTT 리소스 풀 분리: VoIP(`PRtpTrans`, `RtpStartPort`), PTT(`PPttTrans`, `PttRtpStartPort`+`PttFloorStartPort`)
+
+CMP command verbs: `add`, `modify`, `remove`, `addGroup`(→floor_port 응답), `removeGroup`, `joinGroup`(+user_floor_port), `leaveGroup`.
 
 Config: `cmp/cmp.json`.
 
@@ -139,8 +142,8 @@ Automated SIP/RTP client for load and functional testing.
 2. CSP requests shared RTP group from CMP (`addGroup` with `record_dir`)
 3. CMP allocates shared RTP port
 4. CSP sends multipart `INVITE` to each member (SDP + OMA POC XML with member list)
-5. Members respond 200 OK → CSP instructs CMP `joinGroup` per member
-6. Audio flows through CMP's `McpttGroup`; floor is controlled by RTCP APP
+5. Members respond 200 OK → CSP extracts `m=application` port → CMP `joinGroup` (user_floor_port 포함)
+6. Audio flows through CMP `PPttTrans._rtpSock`; floor controlled via `PPttTrans._floorSock` (m=application 전용)
 
 ### Key data flow: CSC subscriptions (CSCF)
 1. Client sends `SUBSCRIBE Event: gms` (or `cms`)
@@ -171,7 +174,7 @@ Automated SIP/RTP client for load and functional testing.
 | File | Purpose |
 |---|---|
 | `csp/csp.json` | CSP IP/ports, realm, RTP relay, Roles (CSCF/TAS/PTT_AS/IBCF), DB, log config |
-| `cmp/cmp.json` | CMP IP, control port, RTP port pool, DTMF PTT digits |
+| `cmp/cmp.json` | CMP IP, control port, VoIP RTP pool (50000~), PTT RTP pool (52000~), PTT Floor pool (54000~), DTMF PTT digits |
 | `csp/User/{id}.json` | User credentials, DND flag, call forward/reject rules (DB fallback) |
 | `csp/Group/{id}.json` | Group name and member list with priorities (DB fallback) |
 | `csp/SipServerXml/*.xml` | SIP routing rules (IP-PBX trunk, IBCF) |

@@ -56,7 +56,7 @@ public:
     void StopMonitor();
     void OnCmpStatusChanged( bool bConnected );
     bool OnCallTerminated( const std::string& strCallId );
-    void OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort );
+    void OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort, int iRemoteFloorPort = 0 );
 
     /** Called by CSC interface when group/user config changes externally */
     void OnGroupConfigChanged();
@@ -103,6 +103,7 @@ private:
 
     struct GroupRtpInfo {
         int iPort;
+        int iFloorPort;
         int iVideoPort;
         std::string strIp;
         size_t nMemberHash;

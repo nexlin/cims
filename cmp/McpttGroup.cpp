@@ -44,7 +44,8 @@ std::string ParseFloorSpeakerId(const char* buf, int len)
 }
 
 McpttGroup::McpttGroup(const std::string& groupId)
-    : _groupId(groupId), _sharedSession(NULL), _floorTaken(false), _floorOwnerSsrc(0),
+    : _groupId(groupId), _sharedSession(NULL), _pttSession(NULL),
+      _floorTaken(false), _floorOwnerSsrc(0),
       _recordEnable(false), _sessionRecorderAudio(NULL), _sessionRecorderVideo(NULL)
 {
 }
@@ -55,18 +56,14 @@ McpttGroup::~McpttGroup() {
     _members.clear();
 }
 
-void McpttGroup::setSharedSession(PRtpTrans* session) {
-    PAutoLock lock(_mutex);
-    _sharedSession = session;
-}
-
-void McpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int videoPort) {
-    LOG_INFO("McpttGroup", "[%s] addMember session=%s ip=%s port=%d videoPort=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, videoPort);
+void McpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort, int videoPort) {
+    LOG_INFO("McpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort);
     PAutoLock lock(_mutex);
     Peer peer;
     peer.id = sessionId;
     peer.ip = ip;
     peer.port = port;
+    peer.floorPort = floorPort;
     peer.videoPort = videoPort;
     peer.ssrc = _nextSsrc++;
     peer.audioSeqOut = 0;
@@ -122,6 +119,54 @@ void McpttGroup::setDtmfConfig(bool enable, const std::string& pushDigit, const 
 bool McpttGroup::hasMember(const std::string& sessionId) {
     PAutoLock lock(_mutex);
     return _members.find(sessionId) != _members.end();
+}
+
+void McpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int len) {
+    if (len < (int)sizeof(FloorControlPacket)) return;
+
+    // 멤버의 floorPort로 매칭
+    std::string sessionId = "";
+    unsigned int senderSsrc = 0;
+    {
+        PAutoLock lock(_mutex);
+        for (auto const& [sid, peer] : _members) {
+            if (peer.ip == ip && peer.floorPort == port) {
+                sessionId = sid;
+                senderSsrc = peer.ssrc;
+                break;
+            }
+        }
+        // Symmetric floor: port-only match with IP learning
+        if (sessionId.empty()) {
+            for (auto& [sid, peer] : _members) {
+                if (peer.floorPort == port) {
+                    LOG_INFO("McpttGroup", "[%s] Floor IP learned %s -> %s (port %d, session=%s)",
+                             _groupId.c_str(), peer.ip.c_str(), ip.c_str(), port, sid.c_str());
+                    peer.ip = ip;
+                    sessionId = sid;
+                    senderSsrc = peer.ssrc;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (sessionId.empty()) {
+        LOG_INFO("McpttGroup", "[%s] Floor from unknown %s:%d", _groupId.c_str(), ip.c_str(), port);
+        return;
+    }
+
+    FloorControlPacket* pkt = (FloorControlPacket*)buf;
+    if (pkt->type != RTCP_PT_APP) return;
+
+    unsigned char opcode = pkt->opcode;
+    static const char* opcodeStr[] = {"?","REQUEST","GRANT","REJECT","RELEASE","IDLE","TAKEN","REVOKE"};
+    const char* opName = (opcode < 8) ? opcodeStr[opcode] : "?";
+    LOG_INFO("McpttGroup", "[%s] Floor %s from session=%s %s:%d",
+             _groupId.c_str(), opName, sessionId.c_str(), ip.c_str(), port);
+
+    if (opcode == FLOOR_REQUEST) handleFloorRequest(sessionId, senderSsrc);
+    else if (opcode == FLOOR_RELEASE) handleFloorRelease(sessionId, senderSsrc);
 }
 
 void McpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int len) {
@@ -475,14 +520,19 @@ void McpttGroup::sendVideoRtcpToAll(const char* data, int len, const std::string
 }
 
 void McpttGroup::sendToMember(const std::string& sessionId, const char* data, int len) {
-    if (_sharedSession && _members.find(sessionId) != _members.end()) {
-        const Peer& peer = _members[sessionId];
-        LOG_INFO("McpttGroup", "[%s] sendToMember session=%s → %s:%d (RTCP)",
-                 _groupId.c_str(), sessionId.c_str(), peer.ip.c_str(), peer.port + 1);
+    if (_members.find(sessionId) == _members.end()) {
+        LOG_ERROR("McpttGroup", "[%s] sendToMember session=%s not found", _groupId.c_str(), sessionId.c_str());
+        return;
+    }
+    const Peer& peer = _members[sessionId];
+    // PPttTrans의 floor 소켓으로 전송 (규격: m=application 포트)
+    if (_pttSession && peer.floorPort > 0) {
+        LOG_INFO("McpttGroup", "[%s] sendFloor session=%s → %s:%d",
+                 _groupId.c_str(), sessionId.c_str(), peer.ip.c_str(), peer.floorPort);
+        _pttSession->sendFloorTo(peer.ip, peer.floorPort, (char*)data, len);
+    } else if (_sharedSession) {
+        // fallback: legacy RTCP 방식
         _sharedSession->sendTo(peer.ip, peer.port + 1, (char*)data, len);
-    } else {
-        LOG_ERROR("McpttGroup", "[%s] sendToMember session=%s not found or no sharedSession",
-                  _groupId.c_str(), sessionId.c_str());
     }
 }
 

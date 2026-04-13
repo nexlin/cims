@@ -53,6 +53,7 @@ bool CheckError(int n, const char *pszLog) {
 CRtpThread::CRtpThread()
     : m_hSocket(INVALID_SOCKET), m_hRtcpSocket(INVALID_SOCKET), m_iPort(0), m_bStopEvent(false),
       m_bSendThreadRun(false), m_bRecvThreadRun(false),
+      m_iDestFloorPort(0),
       m_hVideoSocket(INVALID_SOCKET), m_iVideoPort(0),
       m_bVideoSendThreadRun(false) {}
 
@@ -217,7 +218,8 @@ bool CRtpThread::SendFloorControl(int iOpCode) {
     memset(&startAddr, 0, sizeof(startAddr));
     startAddr.sin_family = AF_INET;
     startAddr.sin_addr.s_addr = inet_addr(m_strDestIp.c_str());
-    startAddr.sin_port = htons(m_iDestPort + 1); // RTCP Port
+    int floorPort = (m_iDestFloorPort > 0) ? m_iDestFloorPort : (m_iDestPort + 1);
+    startAddr.sin_port = htons(floorPort); // Floor control port (m=application)
     
     int n = sendto(hSock, (const char*)buffer, packetLen, 0, (struct sockaddr *)&startAddr, sizeof(startAddr));
     if (n < 0) {

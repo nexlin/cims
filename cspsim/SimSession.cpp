@@ -467,7 +467,20 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 
         printf("[%d] [PTT] Sending 200 OK\n", m_pOwner->m_iId);
         m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
-        if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
+        if (pclsRtp) {
+            m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
+            // SDP에서 m=application 포트 추출 (floor control)
+            if (pclsMessage && !pclsMessage->m_strBody.empty()) {
+                size_t pos = pclsMessage->m_strBody.find("m=application ");
+                if (pos != std::string::npos) {
+                    int floorPort = atoi(pclsMessage->m_strBody.c_str() + pos + 14);
+                    if (floorPort > 0) {
+                        m_pOwner->m_clsRtpThread.m_iDestFloorPort = floorPort;
+                        printf("[%d] [PTT] Floor port from SDP: %d\n", m_pOwner->m_iId, floorPort);
+                    }
+                }
+            }
+        }
 
         // PTT 서버 초대 방식에서는 EventCallStart가 발생하지 않을 수 있으므로
         // AcceptCall 성공 후 직접 통화 성공 기록

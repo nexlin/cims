@@ -104,14 +104,15 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     }
 
     if ( iSharedPort <= 0 ) {
-        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir, strRecordDir ) ) {
+        int iSharedFloorPort = 0;
+        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir ) ) {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
-            m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
+            m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
         }
     } else if ( !strRecordDir.empty() ) {
         // 그룹이 이미 CMP에 있지만 log_dir 전달이 필요 → addgroup 재호출 (기존 그룹 유지, log_dir만 갱신)
-        std::string tmpIp; int tmpPort = 0; int tmpVPort = 0;
-        gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpPort, tmpVPort, strRecordDir, strRecordDir );
+        std::string tmpIp; int tmpPort = 0; int tmpFPort = 0; int tmpVPort = 0;
+        gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpPort, tmpFPort, tmpVPort, strRecordDir, strRecordDir );
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
@@ -318,9 +319,10 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 strSnapshot += "]}";
                 gclsCallDir.PttSessionStart(pszGroupId, "autojoin", pszUserId, strSnapshot);
             }
-            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedVideoPort, strRecordDir, strRecordDir ) ) {
+            int iSharedFloorPort = 0;
+            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir ) ) {
                  bVideoEnabled = clsGroup._videoEnabled;
-                 m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled, 0 };
+                 m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled, 0 };
             } else {
                  CLog::Print( LOG_ERROR, "InviteMember(%s) Failed to get/alloc Shared Port for Group %s", pszUserId, pszGroupId );
                  return false;
@@ -362,7 +364,14 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
              }
 
              std::string strGroupXml = BuildGroupInfoXml( clsGroup, pszUserId, strCallerId );
-             WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iSharedPort + 1 );
+             // CMP floor port 사용 (m_mapGroupRtp에서 조회)
+             int iFloorPort = iSharedPort + 1;  // fallback
+             {
+                 auto itRtp2 = m_mapGroupRtp.find(pszGroupId);
+                 if (itRtp2 != m_mapGroupRtp.end() && itRtp2->second.iFloorPort > 0)
+                     iFloorPort = itRtp2->second.iFloorPort;
+             }
+             WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iFloorPort );
 
              // MCPTT capability required
              pclsInvite->AddHeader( "Accept-Contact",
@@ -513,15 +522,15 @@ void CGroupCallService::SyncGroupsState() {
             // NEW GROUP
             lock.unlock(); // Release lock for network op
 
-            std::string ip; int port; int videoPort = 0;
+            std::string ip; int port; int floorPort = 0; int videoPort = 0;
             std::string strLogDir;
             if ( gclsCallDir.IsEnabled() ) {
                 strLogDir = gclsCallDir.GetPttSessionDir(group._id, TimeToIso(group._sessionStart));
             }
-            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, videoPort, strLogDir, strLogDir ) ) {
+            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir ) ) {
                 std::unique_lock<std::recursive_mutex> lock2(m_mutex);
-                m_mapGroupRtp[group._id] = { port, videoPort, ip, nHash, "", "", group._videoEnabled, 0 };
-                CLog::Print( LOG_INFO, "SyncGroupsState: Added Group(%s) -> %s:%d (MemHash:%lu)", group._id.c_str(), ip.c_str(), port, nHash );
+                m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip, nHash, "", "", group._videoEnabled, 0 };
+                CLog::Print( LOG_INFO, "SyncGroupsState: Added Group(%s) -> %s:%d floor=%d (MemHash:%lu)", group._id.c_str(), ip.c_str(), port, floorPort, nHash );
             }
         } else {
             // EXISTING GROUP - Check for Diff
@@ -611,14 +620,14 @@ void CGroupCallService::CheckGroupIntegrity() {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
             if (m_mapGroupRtp.find(group._id) == m_mapGroupRtp.end()) {
                 lock.unlock();
-                std::string ip; int port; int videoPort = 0;
+                std::string ip; int port; int floorPort = 0; int videoPort = 0;
                 std::string strLogDir;
                 if ( gclsCallDir.IsEnabled() ) {
                     strLogDir = gclsCallDir.GetPttSessionDir(group._id, TimeToIso(group._sessionStart));
                 }
-                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, videoPort, strLogDir, strLogDir)) {
+                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir)) {
                      lock.lock();
-                     m_mapGroupRtp[group._id] = { port, videoPort, ip, 0, "", "", group._videoEnabled, 0 };
+                     m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip, 0, "", "", group._videoEnabled, 0 };
                 } else {
                      return; // Skip this group if alloc fails
                 }
@@ -679,8 +688,9 @@ void CGroupCallService::OnCmpStatusChanged( bool bConnected ) {
 }
 
 // 200 OK Received -> Join Group Helper
-void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort ) {
+void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort, int iRemoteFloorPort ) {
     std::string strGroupId, strSessionId, strMemberId;
+    int iCmpFloorPort = 0;
 
     // 1. lock 보유 중 맵 조회만 수행
     {
@@ -691,13 +701,20 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
         strGroupId  = it->second.strGroupId;
         strSessionId = it->second.strSessionId;
         strMemberId = it->second.strMemberId;
+
+        // CMP에서 할당한 floor_port 조회 (멤버 SDP에서 파싱 불필요)
+        auto itRtp = m_mapGroupRtp.find(strGroupId);
+        if (itRtp != m_mapGroupRtp.end()) {
+            iCmpFloorPort = itRtp->second.iFloorPort;
+        }
     }
     // 2. lock 해제 후 외부 호출 (CMP, DB)
-    // 비디오 포트: cwrtc의 비디오 RTP = 오디오 RTP + 3 (포트 레이아웃: audio_dtls+0, audio_rtp+1, audio_rtcp+2, video_dtls+3, video_rtp+4)
-    // iRemotePort = audio RTP → video RTP = iRemotePort + 3
+    // UE의 floor port: SDP m=application 포트 = 오디오 RTP + 1 (cspsim 기본 레이아웃)
+    int iFloorPort = iRemoteFloorPort > 0 ? iRemoteFloorPort : (iRemotePort + 1);
+    // 비디오 포트: cwrtc의 비디오 RTP = 오디오 RTP + 3
     int iVideoPort = iRemotePort + 3;
-    if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort, iVideoPort) ) {
-         CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d video=%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort, iVideoPort );
+    if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort) ) {
+         CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d floor=%d video=%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort, iFloorPort, iVideoPort );
          if ( gclsCallDir.IsEnabled() ) {
              gclsCallDir.PttLogEvent(strGroupId, "member_join", "{\"member\":\"" + strMemberId + "\"}");
          }

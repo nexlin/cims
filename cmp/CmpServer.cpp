@@ -17,7 +17,8 @@
 #include <fstream>
 
 CmpServer::CmpServer(const std::string& name, const std::string& configFile)
-    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _rtpWorkerCount(4)
+    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _rtpWorkerCount(4),
+      _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000)
 {
     loadConfig();
 
@@ -28,6 +29,7 @@ CmpServer::CmpServer(const std::string& name, const std::string& configFile)
     }
 
     initResourcePool();
+    initPttResourcePool();
 }
 
 CmpServer::~CmpServer() {
@@ -42,6 +44,12 @@ CmpServer::~CmpServer() {
     }
     _resourcePool.clear();
     _freeResources.clear();
+
+    for(auto* ptt : _pttPool) {
+        delete ptt;
+    }
+    _pttPool.clear();
+    _freePttResources.clear();
 }
 
 bool CmpServer::startServer() {
@@ -315,47 +323,40 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
     std::string groupId = payload.GetString("group_id");
     std::string membersStr = payload.GetString("members"); 
     
-    std::string sharedIp = _serverIp;
+    std::string sharedIp = _rtpIp;
     int sharedPort = 0;
+    int sharedFloorPort = 0;
     int sharedVideoPort = 0;
-    
+
     PAutoLock lock(_mutex);
-    PRtpTrans* sharedSession = NULL;
+    PPttTrans* pttSession = NULL;
     McpttGroup* group = NULL;
 
     if (_groups.find(groupId) == _groups.end()) {
         group = new McpttGroup(groupId);
-        // Floor 이벤트 로그 콜백 설정
         group->setLogCallback([this](const std::string& key, const char* from, const char* to,
                                       const char* proto, const char* label, const char* body) {
             logFlow(key, from, to, proto, label, body);
         });
-        sharedSession = allocResource(sharedIp, sharedPort, sharedVideoPort);
-        if (sharedSession) {
-             sharedSession->setGroup(group);
+        pttSession = allocPttResource(sharedIp, sharedPort, sharedFloorPort);
+        if (pttSession) {
+             pttSession->setGroup(group);
              group->setDtmfConfig(_dtmfPttEnable, _dtmfPushDigit, _dtmfReleaseDigit);
-             group->setSharedSession(sharedSession);
+             group->setPttSession(pttSession);
              // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
              std::string recordDir = payload.GetString("record_dir");
              if (!recordDir.empty()) {
                  group->setRecording(true, recordDir);
              }
-             // CSP가 전달한 log_dir이 있으면 CMP flow 로그 기록 경로로 저장
              std::string logDir = payload.GetString("log_dir");
              if (!logDir.empty()) {
                  _logDirs[groupId] = logDir;
              }
              _groups[groupId] = group;
 
-             static int workerIdx = 0;
-             if (sharedSession->getWorkerName().empty()) {
-                  std::string wname = formatStr("RtpWorker_%d", workerIdx++ % _rtpWorkerCount);
-                  sharedSession->setWorkerName(wname);
-                  addHandler(wname, sharedSession);
-             }
              logFlow(groupId, "cmp", "cmp", "INT", "GROUP_START",
-                     ("port=" + std::to_string(sharedPort)).c_str());
-             LOG_INFO("CmpServer", "ADD_GROUP group=%s port=%d (new)", groupId.c_str(), sharedPort);
+                     ("rtp=" + std::to_string(sharedPort) + " floor=" + std::to_string(sharedFloorPort)).c_str());
+             LOG_INFO("CmpServer", "ADD_GROUP group=%s rtp=%d floor=%d (new)", groupId.c_str(), sharedPort, sharedFloorPort);
         } else {
              delete group;
              group = NULL;
@@ -363,11 +364,11 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
         }
     } else {
         group = _groups[groupId];
-        sharedSession = group->getSharedSession();
-        if (sharedSession) {
-            sharedPort = sharedSession->getLocalPort();
-            sharedVideoPort = sharedSession->getLocalVideoPort();
-            sharedIp = _rtpIp;  // 기존 그룹도 RTP IP 사용
+        pttSession = group->getPttSession();
+        if (pttSession) {
+            sharedPort = pttSession->getLocalRtpPort();
+            sharedFloorPort = pttSession->getLocalFloorPort();
+            sharedIp = _rtpIp;
         }
         // 기존 그룹이더라도 log_dir/record_dir이 새로 전달되면 갱신
         std::string logDir = payload.GetString("log_dir");
@@ -378,7 +379,7 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
         if (!recordDir.empty() && !group->isRecordEnabled()) {
             group->setRecording(true, recordDir);
         }
-        LOG_DEBUG("CmpServer", "ADD_GROUP group=%s port=%d (existing)", groupId.c_str(), sharedPort);
+        LOG_DEBUG("CmpServer", "ADD_GROUP group=%s rtp=%d floor=%d (existing)", groupId.c_str(), sharedPort, sharedFloorPort);
     }
 
     if (group) {
@@ -404,6 +405,7 @@ void CmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::
         respBody.Set("status", "OK");
         respBody.Set("ip", sharedIp);
         respBody.Set("port", sharedPort);
+        respBody.Set("floor_port", sharedFloorPort);
         respBody.Set("video_port", sharedVideoPort);
 
         resp.Set("response", respBody.ToString());
@@ -421,12 +423,13 @@ void CmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std:
     std::string sessionId = payload.GetString("session_id");
     std::string userIp = payload.GetString("user_ip");
     int userPort = (int)payload.GetInt("user_port");
+    int userFloorPort = (int)payload.GetInt("user_floor_port");
     int userVideoPort = (int)payload.GetInt("user_video_port");
 
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         McpttGroup* group = _groups[groupId];
-        group->addMember(sessionId, userIp, userPort, userVideoPort);
+        group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort);
         logFlow(groupId, "cmp", "cmp", "RTP",
                 ("JOIN(" + sessionId + ")").c_str(),
                 (userIp + ":" + std::to_string(userPort)).c_str());
@@ -476,6 +479,9 @@ void CmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const st
     if (_groups.find(groupId) != _groups.end()) {
         McpttGroup* group = _groups[groupId];
         logFlow(groupId, "cmp", "cmp", "INT", "GROUP_END", "");
+        // PTT 리소스 반환
+        PPttTrans* ptt = group->getPttSession();
+        if (ptt) { ptt->reset(); freePttResource(ptt); }
         delete group;
         _groups.erase(groupId);
         _logDirs.erase(groupId);
@@ -537,6 +543,10 @@ void CmpServer::loadConfig() {
             int w = (int)root.GetInt("RtpWorkerCount");
             if (w >= 1 && w <= 32) _rtpWorkerCount = w;
         }
+        // PTT 리소스 풀 설정
+        if (root.Has("PttRtpStartPort")) _pttRtpStartPort = (int)root.GetInt("PttRtpStartPort");
+        if (root.Has("PttRtpPoolSize")) _pttRtpPoolSize = (int)root.GetInt("PttRtpPoolSize");
+        if (root.Has("PttFloorStartPort")) _pttFloorStartPort = (int)root.GetInt("PttFloorStartPort");
         
         // Log configuration
         std::string logDir = root.Has("LogDir") ? root.GetString("LogDir") : "";
@@ -599,10 +609,10 @@ void CmpServer::loadConfig() {
         system(mkdirCmd.c_str());
     }
 
-    LOG_INFO("CmpServer", "Config: RtpStartPort=%d RtpPoolSize=%d RtpWorkerCount=%d RtpIp=%s ServerIp=%s ServerPort=%d DtmfPtt=%d Push=%s Rel=%s Record=%d RecordDir=%s SessionTimeout=%d",
-           _rtpStartPort, _rtpPoolSize, _rtpWorkerCount, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
-           _dtmfPttEnable, _dtmfPushDigit.c_str(), _dtmfReleaseDigit.c_str(),
-           _recordEnable, _recordDir.c_str(), _sessionTimeout);
+    LOG_INFO("CmpServer", "Config: VoIP(port=%d pool=%d) PTT(rtp=%d floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d",
+           _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttFloorStartPort, _pttRtpPoolSize,
+           _rtpWorkerCount, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
+           _dtmfPttEnable, _sessionTimeout);
 }
 
 void CmpServer::initResourcePool() {
@@ -624,7 +634,31 @@ void CmpServer::initResourcePool() {
         }
         currentPort += 4;
     }
-    LOG_INFO("CmpServer", "Initialized %lu resources (port %d-%d)", _resourcePool.size(), _rtpStartPort, currentPort - 4);
+    LOG_INFO("CmpServer", "VoIP pool: %lu resources (port %d-%d)", _resourcePool.size(), _rtpStartPort, currentPort - 4);
+}
+
+void CmpServer::initPttResourcePool() {
+    int rtpPort = _pttRtpStartPort;
+    int floorPort = _pttFloorStartPort;
+    for (int i = 0; i < _pttRtpPoolSize; ++i) {
+        std::string name = formatStr("PttRtp_%d", i);
+        PPttTrans* ptt = new PPttTrans(name);
+
+        if (ptt->init(_rtpIp, rtpPort, floorPort)) {
+            std::string wname = formatStr("RtpWorker_%d", i % _rtpWorkerCount);
+            ptt->setWorkerName(wname);
+            addHandler(wname, ptt);
+            _pttPool.push_back(ptt);
+            _freePttResources.push_back(ptt);
+        } else {
+            LOG_ERROR("CmpServer", "Failed to init PTT resource rtp=%d floor=%d", rtpPort, floorPort);
+            delete ptt;
+        }
+        rtpPort += 2;    // audio RTP만 (RTCP 없음)
+        floorPort += 2;  // floor + 여유
+    }
+    LOG_INFO("CmpServer", "PTT pool: %lu resources (rtp %d-%d, floor %d-%d)",
+             _pttPool.size(), _pttRtpStartPort, rtpPort - 2, _pttFloorStartPort, floorPort - 2);
 }
 
 PRtpTrans* CmpServer::allocResource(std::string& rtpIp, int& rtpPort, int& videoPort) {
@@ -648,6 +682,27 @@ void CmpServer::freeResource(PRtpTrans* rtp) {
     if (rtp) {
         LOG_INFO("CmpServer", "freeResource: port=%d", rtp->getLocalPort());
         _freeResources.push_back(rtp);
+    }
+}
+
+PPttTrans* CmpServer::allocPttResource(std::string& rtpIp, int& rtpPort, int& floorPort) {
+    if (_freePttResources.empty()) {
+        LOG_WARN("CmpServer", "allocPttResource: no free PTT resources");
+        return NULL;
+    }
+    PPttTrans* ptt = _freePttResources.back();
+    _freePttResources.pop_back();
+    rtpIp = _rtpIp;
+    rtpPort = ptt->getLocalRtpPort();
+    floorPort = ptt->getLocalFloorPort();
+    LOG_INFO("CmpServer", "allocPttResource: rtp=%d floor=%d (remaining %lu)", rtpPort, floorPort, _freePttResources.size());
+    return ptt;
+}
+
+void CmpServer::freePttResource(PPttTrans* ptt) {
+    if (ptt) {
+        LOG_INFO("CmpServer", "freePttResource: rtp=%d floor=%d", ptt->getLocalRtpPort(), ptt->getLocalFloorPort());
+        _freePttResources.push_back(ptt);
     }
 }
 

@@ -91,32 +91,48 @@ CMP는 트랜스코딩을 **절대 하지 않음**. raw 파일만 저장하고 �
 4. CSP → DB: recordings 레코드 생성 (status='raw')
 ```
 
-### 3.3 PTT 그룹콜 (발언 단위)
+### 3.3 PTT 그룹콜 (세션 단위)
+
+PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하게 연속 기록).
 
 ```
-1. CSP → CMP: addGroup(group_id, record=true)
-2. Floor GRANT (발언 시작):
-   → raw/{group_id}/seg_{seq}_audio.rtp 생성
-   → raw/{group_id}/seg_{seq}_video.rtp (영상 있을 때)
-3. Floor RELEASE (발언 종료):
-   → 파일 close
-   → CSP 또는 CMP → DB: recording_segments 추가 (status='raw')
-4. 다음 발언 → 새 세그먼트 파일 생성 (즉시, 세션 종료 대기 없음)
+1. CSP → CMP: addGroup(group_id, record_dir=세션디렉토리)
+2. CMP: McpttGroup::setRecording(true, record_dir)
+   → {record_dir}/raw_audio.rtp 생성
+3. Floor GRANT → 해당 화자의 RTP 수신 시 raw_audio.rtp에 연속 기록
+4. Floor RELEASE → 다음 GRANT까지 기록 일시 중지 (파일은 유지)
+5. 세션 종료 → McpttGroup::stopRecording() → 파일 close
 ```
 
-### 3.4 CSC: on-demand 트랜스코딩
+**파일 구조:**
+```
+{ServiceLogDir}/ptt/{group_id}/sessions/{session_key}.d/
+  ├── raw_audio.rtp          # 세션 전체 음성 (RTP 원본)
+  ├── recording_mixed.wav    # 트랜스코딩 캐시 (최초 재생 시 생성)
+  ├── session.json           # 세션 메타데이터
+  ├── events.jsonl           # Floor/참가 이벤트
+  └── cmp.jsonl              # CMP 내부 이벤트
+```
+
+### 3.4 CSC: on-demand 트랜스코딩 (파일시스템 기반)
+
+DB 미사용. 세션 디렉토리에서 직접 raw RTP를 트랜스코딩.
 
 ```
-Console UI: GET /api/v1/recordings/{id}/audio
+Console UI: GET /api/v1/ptt/history/{gid}/{session}/audio
   ↓
-CSC: DB 조회 → status 확인
-  ├─ status='ready' → 캐싱된 mp3/mp4 파일 스트리밍 (즉시)
-  ├─ status='transcoding' → 202 Accepted (변환 중)
-  └─ status='raw' → ffmpeg 변환 시작
-       ↓
-     ffmpeg: raw RTP → mp3/mp4
-       ↓
-     DB 업데이트: status='ready', file path/size 기록
+CSC (csc_flow.py):
+  1. 세션 디렉토리 탐색 → .d 폴더
+  2. recording_mixed.wav 캐시 확인
+     ├─ 캐시 존재 → 즉시 스트리밍 (audio/wav)
+     └─ 캐시 없음 → _transcode_audio(d_dir)
+          │
+          ├─ PTT: raw_audio.rtp → AMR-WB strip → ffmpeg PCM → recording_mixed.wav
+          └─ VoIP: raw_a.rtp + raw_b.rtp → AMR-WB strip → ffmpeg → amix → recording_mixed.wav
+  3. recording_mixed.wav 스트리밍
+
+VoIP 녹취: GET /api/v1/recordings/{call_id}/audio
+  → 동일한 _transcode_audio() 로직 적용
        ↓
      변환된 파일 스트리밍 (또는 202 → 클라이언트 재시도)
 ```

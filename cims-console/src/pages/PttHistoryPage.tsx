@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { groupsApi, type Group } from '../api/groups'
 import { pttApi, type PttSession, type PttEvent } from '../api/ptt'
 import type { FlowMessage } from '../api/flow'
@@ -60,6 +60,10 @@ export default function PttHistoryPage() {
   const [autoRefresh, setAR] = useState(false)
   const [flow, setFlow] = useState<{ groupId: string; sessionDir: string; date: string; messages?: FlowMessage[] } | null>(null)
   const [flowLoading, setFlowLoading] = useState(false)
+
+  // Recording playback state (filesystem-based)
+  const [playingUrl, setPlayingUrl] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
 
   // Load groups
   const loadGroups = useCallback(async () => {
@@ -161,6 +165,12 @@ export default function PttHistoryPage() {
     }
   }
 
+  // Play PTT session recording (filesystem-based)
+  const playRecording = (groupId: string, sessionDir: string) => {
+    const url = `/api/v1/ptt/history/${encodeURIComponent(groupId)}/${encodeURIComponent(sessionDir)}/audio`
+    setPlayingUrl(url)
+  }
+
   const openFlow = async (groupId: string, sessionDir: string) => {
     setFlowLoading(true)
     try {
@@ -220,7 +230,7 @@ export default function PttHistoryPage() {
                 style={{
                   border: '1px solid var(--border)',
                   borderRadius: 8,
-                  background: 'var(--bg-card, #1a2233)',
+                  background: 'var(--surface, #ffffff)',
                   overflow: 'hidden',
                 }}
               >
@@ -232,7 +242,7 @@ export default function PttHistoryPage() {
                     alignItems: 'center',
                     gap: 12,
                     cursor: 'pointer',
-                    background: 'var(--bg-card-header, #1e2a3d)',
+                    background: '#f0f4f8',
                     borderBottom: isExpanded ? '1px solid var(--border)' : 'none',
                   }}
                   onClick={() => toggleCard(g.id)}
@@ -274,7 +284,7 @@ export default function PttHistoryPage() {
                               padding: 12,
                               borderRadius: 6,
                               border: '1px solid var(--border)',
-                              background: isLatest ? 'var(--bg-highlight, #1c2a40)' : 'transparent',
+                              background: isLatest ? '#f7f9fc' : 'transparent',
                             }}
                           >
                             {/* Session header */}
@@ -304,6 +314,12 @@ export default function PttHistoryPage() {
                                   onClick={e => { e.stopPropagation(); openFlow(g.id, sess.dir) }}
                                 >
                                   Flow 보기
+                                </button>
+                                <button
+                                  className="btn btn--sm btn--outline"
+                                  onClick={e => { e.stopPropagation(); playRecording(g.id, sess.dir) }}
+                                >
+                                  &#9654; 녹취
                                 </button>
                               </div>
                             </div>
@@ -336,7 +352,7 @@ export default function PttHistoryPage() {
                                       <span style={{ color: disp.color, fontSize: 14, width: 18, textAlign: 'center' }}>
                                         {disp.icon}
                                       </span>
-                                      <span style={{ color: 'var(--text-primary, #c8d8f0)' }}>
+                                      <span style={{ color: 'var(--text, #1a1d2e)' }}>
                                         {ev.member && <span style={{ fontWeight: 500 }}>{ev.member} </span>}
                                         {disp.label}
                                         {ev.duration != null && (
@@ -348,6 +364,8 @@ export default function PttHistoryPage() {
                                 })}
                               </div>
                             )}
+
+                            {/* Recording section removed - use inline player via 녹취 button */}
                           </div>
                         )
                       })
@@ -357,6 +375,44 @@ export default function PttHistoryPage() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Audio Player (sticky bottom) */}
+      {playingUrl && (
+        <div style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 200,
+          right: 0,
+          background: '#ffffff',
+          borderTop: '1px solid var(--border)',
+          padding: '8px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          zIndex: 50,
+          boxShadow: '0 -2px 8px rgba(0,0,0,.08)',
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap' }}>
+            PTT 녹취 재생
+          </span>
+          <audio
+            ref={audioRef}
+            src={playingUrl}
+            controls
+            autoPlay
+            preload="auto"
+            style={{ flex: 1, height: 36 }}
+            onEnded={() => setPlayingUrl(null)}
+          />
+          <button
+            className="btn btn--sm btn--outline"
+            style={{ padding: '2px 10px', fontSize: 11 }}
+            onClick={() => { setPlayingUrl(null); if (audioRef.current) audioRef.current.pause() }}
+          >
+            닫기
+          </button>
         </div>
       )}
 
