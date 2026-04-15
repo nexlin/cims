@@ -48,7 +48,9 @@ public:
     CRtpMap();
     ~CRtpMap();
 
-    int CreatePort( int iSocketCount, const std::string& strRecordDir = "", const std::string& strLogDir = "" );
+    int CreatePort( int iSocketCount, const std::string& strRecordDir = "", const std::string& strLogDir = "",
+                    const std::string& strCaller = "", const std::string& strCallee = "",
+                    const std::string& strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0 );
 
     bool Select( int iPort, CRtpInfo **ppclsRtpInfo );
     bool SetStop( int iPort );

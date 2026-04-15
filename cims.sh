@@ -299,6 +299,31 @@ cmd_configure() {
     fi
 }
 
+# ── 데이터 정리 ───────────────────────────────────────────────
+cmd_clean() {
+    local target="${1:-all}"
+
+    header "=== 데이터 정리 ==="
+
+    if [[ $target == "all" || $target == "log" ]]; then
+        info "로그 정리..."
+        rm -f "$LOG_DIR"/cmp.log "$LOG_DIR"/cmp_*.log
+        rm -f "$LOG_DIR"/csp.log "$LOG_DIR"/csp_*.log
+        rm -f "$LOG_DIR"/cwrtc.log "$LOG_DIR"/csc.log
+        ok "로그 정리 완료"
+    fi
+
+    if [[ $target == "all" || $target == "data" ]]; then
+        info "서비스 이력/녹취/메시지 로그 정리..."
+        rm -rf "$DIST_DIR/ext_mnt/service_log"
+        rm -rf "$DIST_DIR/ext_mnt/msg_log"
+        mkdir -p "$DIST_DIR/ext_mnt/service_log" "$DIST_DIR/ext_mnt/msg_log"
+        ok "서비스 데이터 정리 완료"
+    fi
+
+    echo ""
+}
+
 # ── cspsim ─────────────────────────────────────────────────────
 cmd_sim() {
     local orig_dir="$PWD"
@@ -306,6 +331,8 @@ cmd_sim() {
     local user="" domain="" password="" group=""
     local server_ip; server_ip=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csp/config/csp.json')); print(d['Setup']['Sip']['LocalIp'])" 2>/dev/null || echo "127.0.0.1")
     local duration=10
+    local do_clean=false
+    local run_bg=false
     local extra_args=()
 
     while [[ $# -gt 0 ]]; do
@@ -320,31 +347,23 @@ cmd_sim() {
             -duration) duration="$2"; shift 2 ;;
             -ip)       server_ip="$2"; shift 2 ;;
             -no-db)    use_db=false;   shift ;;
+            --clean)   do_clean=true;  shift ;;
+            --bg)      run_bg=true;    shift ;;
             *)         extra_args+=("$1"); shift ;;
         esac
     done
 
-    header "=== 검증 환경 초기화 ==="
-
-    # 1) CMP/CSP 재시작 (깨끗한 상태)
-    info "서비스 재시작..."
-    for svc in csp cmp; do
-        if is_running "$svc"; then stop_one "$svc" > /dev/null 2>&1; fi
-    done
-    sleep 0.5
-
-    # 2) 로그 정리
-    info "로그 및 녹취 정리..."
-    rm -f "$LOG_DIR"/cmp.log "$LOG_DIR"/cmp_*.log
-    rm -f "$LOG_DIR"/csp.log "$LOG_DIR"/csp_*.log
-    rm -rf "$DIST_DIR/ext_mnt/service_log"
-    rm -rf "$DIST_DIR/ext_mnt/msg_log"
-    mkdir -p "$DIST_DIR/ext_mnt/service_log" "$DIST_DIR/ext_mnt/msg_log"
-
-    # 3) CMP → CSP 순서로 시작
-    start_cmp
-    start_csp
-    echo ""
+    # --clean 플래그 시 정리 후 서비스 재시작
+    if $do_clean; then
+        cmd_clean all
+        for svc in csp cmp; do
+            if is_running "$svc"; then stop_one "$svc" > /dev/null 2>&1; fi
+        done
+        sleep 0.5
+        start_cmp
+        start_csp
+        echo ""
+    fi
 
     header "=== cspsim 실행 ==="
 
@@ -387,6 +406,16 @@ r=cur.fetchone(); print(r[0] if r else ''); c.close()
     [[ -n "$domain" ]]   && sim_args+=(-domain "$domain")
     [[ -n "$password" ]] && sim_args+=(-password "$password")
 
+    # 미디어 파일 미지정 시 기본 미디어 디렉터리 자동 설정 (AMR-WB + H.264)
+    local has_media=false
+    for arg in "${extra_args[@]+"${extra_args[@]}"}"; do
+        case "$arg" in -media_file|-media_dir|-video_file) has_media=true ;; esac
+    done
+    if ! $has_media && [[ -d "$DIST_DIR/cspsim/media" ]]; then
+        extra_args+=(-media_dir "$DIST_DIR/cspsim/media")
+        info "기본 미디어 디렉터리 사용: $DIST_DIR/cspsim/media"
+    fi
+
     # extra_args 내 경로 옵션(-media_dir, -media_file, -video_file)을 절대경로로 변환
     local resolved_extra=()
     local i=0
@@ -407,6 +436,15 @@ r=cur.fetchone(); print(r[0] if r else ''); c.close()
     info "mode=$mode  scenario=$scenario  server=$server_ip:5060  duration=${duration}s"
     echo ""
     cd "$DIST_DIR/cspsim"
+
+    if $run_bg; then
+        bin/cspsim "${sim_args[@]}" "${resolved_extra[@]+"${resolved_extra[@]}"}" >> "$LOG_DIR/cspsim_${mode}_$(date +%H%M%S).log" 2>&1 &
+        local sim_pid=$!
+        ok "cspsim 백그라운드 실행 (pid=$sim_pid, mode=$mode)"
+        info "로그: $LOG_DIR/cspsim_${mode}_$(date +%H%M%S).log"
+        return 0
+    fi
+
     bin/cspsim "${sim_args[@]}" "${resolved_extra[@]+"${resolved_extra[@]}"}"
 
     # 검증 결과 출력
@@ -414,11 +452,11 @@ r=cur.fetchone(); print(r[0] if r else ''); c.close()
     header "=== 검증 결과 ==="
 
     # 녹취 파일 확인
-    local rec_files; rec_files=$(find "$DIST_DIR/ext_mnt/service_log" -name "raw_*.rtp" -size +0 2>/dev/null | wc -l)
-    local rec_zero;  rec_zero=$(find "$DIST_DIR/ext_mnt/service_log" -name "raw_*.rtp" -size 0 2>/dev/null | wc -l)
+    local rec_files; rec_files=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size +0 2>/dev/null | wc -l)
+    local rec_zero;  rec_zero=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size 0 2>/dev/null | wc -l)
     if [[ $rec_files -gt 0 ]]; then
         ok "녹취: ${rec_files}개 파일 정상"
-        find "$DIST_DIR/ext_mnt/service_log" -name "raw_*.rtp" -size +0 -exec ls -lh {} \; 2>/dev/null | sed 's/^/  /'
+        find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size +0 -exec ls -lh {} \; 2>/dev/null | sed 's/^/  /'
     elif [[ $rec_zero -gt 0 ]]; then
         err "녹취: ${rec_zero}개 파일 0바이트"
     else
@@ -466,11 +504,17 @@ ${BOLD}빌드 & 설정:${NC}
 ${BOLD}시뮬레이터:${NC}
   sim [options]
     -mode     voip|ptt
-    -scenario register|call|group-call|full
+    -scenario register|call|group_call|full
     -count    N       (미지정 시 DB 가입자 전체)
+    -group    ID      (PTT 그룹 ID, 미지정 시 DB 첫 번째 그룹)
     -ip       IP      (CSP 서버 IP, 미지정 시 csp.json에서)
     -duration SEC
     -no-db            (DB 미사용, 수동 지정 모드)
+    --clean           (실행 전 데이터 정리 + 서비스 재시작)
+    --bg              (백그라운드 실행, 동시 여러 인스턴스 가능)
+
+${BOLD}데이터 정리:${NC}
+  clean [all|log|data]   로그/서비스이력/녹취 삭제 (기본: all)
 
 ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]
@@ -485,9 +529,14 @@ ${BOLD}예시:${NC}
   ./configure.sh --local-ip 192.168.1.10
   ./cims.sh start
 
+  # 시뮬레이터 (동시 실행)
+  $(basename "$0") clean                                  # 데이터 정리
+  $(basename "$0") sim -mode ptt -group +82571910001      # 영상 PTT 포그라운드
+  $(basename "$0") sim -mode ptt -group +82571910001 --bg # 영상 PTT 백그라운드
+  $(basename "$0") sim -mode voip --bg                    # VoIP 동시 실행
+
   $(basename "$0") stop all
   $(basename "$0") status
-  $(basename "$0") sim -mode ptt -scenario group-call -count 4
   $(basename "$0") log csp
 EOF
 }
@@ -538,6 +587,7 @@ case "${1:-}" in
     build)     shift; cmd_build "${1:-}" ;;
     configure) shift; cmd_configure "$@" ;;
     sim)       shift; cmd_sim "$@" ;;
+    clean)     shift; cmd_clean "${1:-all}" ;;
     log)       shift; cmd_log "${1:-csp}" ;;
     help|--help|-h) usage ;;
     "") usage ;;

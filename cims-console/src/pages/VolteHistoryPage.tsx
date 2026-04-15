@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { callsApi, type CallLog } from '../api/calls'
+import { recordingsApi, type RecordingSegment } from '../api/recordings'
 import Modal from '../components/Modal'
 import FlowPage from './FlowPage'
+import SegmentPlayer from '../components/SegmentPlayer'
 import { useToast } from '../components/Toast'
 
 function fmtDur(s: number|null) { if(!s||s<=0)return '—'; const m=Math.floor(s/60); return m>0?`${m}분${s%60}초`:`${s}초` }
@@ -20,6 +22,7 @@ export default function VolteHistoryPage() {
   const [autoRefresh,setAR]=useState(false)
   const [detail,setDetail]=useState<CallLog|null>(null)
   const [flow,setFlow]=useState<{callId:string,date:string}|null>(null)
+  const [recPlayer,setRecPlayer]=useState<{id:string,segments:RecordingSegment[],callType:'voip'|'ptt'|'voip_video',caller:string,callee:string}|null>(null)
 
   const load=useCallback(async(p:number)=>{
     setLoading(true)
@@ -32,6 +35,18 @@ export default function VolteHistoryPage() {
 
   useEffect(()=>{setPage(0);load(0)},[load])
   useEffect(()=>{if(!autoRefresh)return;const iv=setInterval(()=>load(page),10000);return()=>clearInterval(iv)},[autoRefresh,load,page])
+
+  const openRecording = async (l: CallLog) => {
+    if (!l.dir_name) { show('녹취 디렉터리 정보 없음', 'err'); return }
+    try {
+      const rec = await recordingsApi.get(l.dir_name)
+      if (rec.segments && rec.segments.length > 0) {
+        setRecPlayer({ id: l.dir_name, segments: rec.segments, callType: rec.call_type as 'voip'|'voip_video', caller: l.initiator, callee: l.callee })
+      } else {
+        show('세그먼트 없음', 'err')
+      }
+    } catch (e: unknown) { show(String(e), 'err') }
+  }
 
   const totalPages=Math.ceil(total/PS)
 
@@ -78,7 +93,9 @@ export default function VolteHistoryPage() {
                   <td style={{display:'flex',gap:4,alignItems:'center'}}>
                     <button className="btn btn--sm btn--outline" onClick={e=>{e.stopPropagation();setFlow({callId:l.call_id,date:l.invite_time?.substring(0,10)||''})}}>플로우</button>
                     {l.has_recording && (
-                      <span className="badge badge--green" style={{fontSize:10,cursor:'default'}} title="녹취 있음">REC</span>
+                      <button className="btn btn--sm btn--outline" style={{fontSize:10,padding:'1px 6px'}}
+                        onClick={e=>{e.stopPropagation();openRecording(l)}}
+                        title="녹취 재생">&#9654; 녹취</button>
                     )}
                   </td>
                 </tr>
@@ -93,6 +110,21 @@ export default function VolteHistoryPage() {
         <span className="ts">{page+1}/{totalPages} (총 {total}건)</span>
         <button className="btn btn--sm btn--outline" disabled={page>=totalPages-1} onClick={()=>{setPage(page+1);load(page+1)}}>다음 →</button>
       </div>}
+
+      {recPlayer && (
+        <div className="modal-overlay" onClick={()=>setRecPlayer(null)}>
+          <div className="modal-box" style={{maxWidth:1360, width:'95vw'}} onClick={e=>e.stopPropagation()}>
+            <SegmentPlayer
+              segments={recPlayer.segments}
+              recordingId={recPlayer.id}
+              callType={recPlayer.callType}
+              caller={recPlayer.caller}
+              callee={recPlayer.callee}
+              onClose={()=>setRecPlayer(null)}
+            />
+          </div>
+        </div>
+      )}
 
       {flow&&<FlowPage callId={flow.callId} date={flow.date} onClose={()=>setFlow(null)}/>}
 
@@ -120,16 +152,10 @@ export default function VolteHistoryPage() {
           {detail.has_recording && (
             <div style={{marginTop:12}}>
               <div className="form-section-title">녹취 재생</div>
-              <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:8}}>
-                {detail.call_type === 'voip_video' ? (
-                  <video controls preload="none" style={{maxHeight:320,maxWidth:'100%',borderRadius:6,background:'#000'}}>
-                    <source src={`/api/v1/recordings/${encodeURIComponent(detail.dir_name || detail.call_id)}/video?date=${detail.invite_time?.substring(0,10)||''}`} type="video/mp4" />
-                  </video>
-                ) : (
-                  <audio controls preload="none" style={{height:32,width:'100%'}}>
-                    <source src={`/api/v1/recordings/${encodeURIComponent(detail.dir_name || detail.call_id)}/audio?date=${detail.invite_time?.substring(0,10)||''}`} type="audio/wav" />
-                  </audio>
-                )}
+              <div style={{marginTop:8}}>
+                <button className="btn btn--primary btn--sm" onClick={()=>{setDetail(null);openRecording(detail)}}>
+                  &#9654; 세그먼트 재생
+                </button>
               </div>
             </div>
           )}

@@ -39,20 +39,15 @@ Socket UdpSocket( bool bIpv6 )
  */
 Socket UdpListen( unsigned short iPort, const char * pszIp, bool bIpv6 )
 {
-	if( iPort == 0 )
-	{
-		return INVALID_SOCKET;
-	}
-	
 	Socket iFd;
 	int n;
-	
+
 	iFd = socket( bIpv6 ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP );
 	if( iFd == INVALID_SOCKET )
 	{
 		return INVALID_SOCKET;
 	}
-	
+
 #ifndef WINXP
 	if( bIpv6 )
 	{
@@ -60,7 +55,7 @@ Socket UdpListen( unsigned short iPort, const char * pszIp, bool bIpv6 )
 		memset((char*) &(addr),0, sizeof((addr)));
 		addr.sin6_family = AF_INET6;
 		addr.sin6_port = htons(iPort);
-		
+
 		if( pszIp )
 		{
 			inet_pton( AF_INET6, pszIp, &addr.sin6_addr );
@@ -79,7 +74,7 @@ Socket UdpListen( unsigned short iPort, const char * pszIp, bool bIpv6 )
 		memset((char*) &(addr),0, sizeof((addr)));
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(iPort);
-		
+
 		if( pszIp )
 		{
 #ifdef WINXP
@@ -92,17 +87,36 @@ Socket UdpListen( unsigned short iPort, const char * pszIp, bool bIpv6 )
 		{
 			addr.sin_addr.s_addr = htonl(INADDR_ANY);
 		}
-	
+
 		n = bind( iFd,(struct sockaddr*)&addr, sizeof(addr));
 	}
-	
+
 	if( n != 0 )
 	{
 	  closesocket( iFd );
 	  return INVALID_SOCKET;
 	}
-	
+
 	return iFd;
+}
+
+/**
+ * @ingroup SipPlatform
+ * @brief 소켓에 바인딩된 실제 포트 번호를 조회한다. (port 0 자동할당 후 사용)
+ * @param iFd		소켓 핸들
+ * @return	포트 번호. 실패 시 0.
+ */
+unsigned short GetSocketPort( Socket iFd )
+{
+	if( iFd == INVALID_SOCKET ) return 0;
+
+	struct sockaddr_in addr;
+	socklen_t addrLen = sizeof(addr);
+	if( getsockname( iFd, (struct sockaddr*)&addr, &addrLen ) == 0 )
+	{
+		return ntohs( addr.sin_port );
+	}
+	return 0;
 }
 
 /**

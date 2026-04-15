@@ -48,9 +48,15 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(strJson);
     SimpleJson::JsonNode setup = root.Get("Setup");
 
-    // Realm 추출
+    // Realm 추출 (모드별: PTT → PttRealm, VoIP → VoipRealm → Realm fallback)
     SimpleJson::JsonNode sip = setup.Get("Sip");
-    if (sip.Has("Realm")) strRealm = sip.GetString("Realm");
+    if (strFilterMode == "ptt" && sip.Has("PttRealm")) {
+        strRealm = sip.GetString("PttRealm");
+    } else if (sip.Has("VoipRealm")) {
+        strRealm = sip.GetString("VoipRealm");
+    } else if (sip.Has("Realm")) {
+        strRealm = sip.GetString("Realm");
+    }
 
     // DB 접속 정보
     SimpleJson::JsonNode db = setup.Get("Database");
@@ -294,6 +300,7 @@ static void PrintUsage(const char* pszBin) {
     printf("  -media_file  <path>      AMR-WB 미디어 파일 (PT=99 전송, 생략 시 합성 RTP)\n");
     printf("  -media_dir   <dir>       미디어 디렉토리 (세션별 라운드로빈 할당)\n");
     printf("  -video_file  <path>      H.264 Annex B 비디오 파일 (PT=96 전송)\n");
+    printf("  -no_video                비디오 비활성화 (음성 전용 통화)\n");
     printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
     printf("  -db          <csp.json>  DB에서 가입자 정보 로드 (user/auth_id/password/domain 자동 설정)\n");
     printf("  -verbose                 SIP 메시지 상세 로그\n\n");
@@ -458,7 +465,7 @@ int main(int argc, char* argv[])
     std::string strServerIp   = GetArg(argc, argv, "-server_ip",   "127.0.0.1");
     int iServerPort            = atoi(GetArg(argc, argv, "-server_port", "5060").c_str());
     std::string strLocalIp    = GetArg(argc, argv, "-local_ip",    "");
-    int iLocalBasePort         = atoi(GetArg(argc, argv, "-local_port",  "6000").c_str());
+    int iLocalBasePort         = atoi(GetArg(argc, argv, "-local_port",  "0").c_str());
     int iCount                 = atoi(GetArg(argc, argv, "-count",       "1").c_str());
     std::string strStartUser  = GetArg(argc, argv, "-user",        "1000");
     std::string strExplicitAuthId = GetArg(argc, argv, "-auth_id", "");
@@ -471,6 +478,7 @@ int main(int argc, char* argv[])
     std::string strMediaFile  = GetArg(argc, argv, "-media_file",  "");
     std::string strMediaDir   = GetArg(argc, argv, "-media_dir",   "");
     std::string strVideoFile  = GetArg(argc, argv, "-video_file",  "");
+    bool bNoVideo              = HasFlag(argc, argv, "-no_video");
     int iIntervalMs            = atoi(GetArg(argc, argv, "-interval",    "100").c_str());
     std::string strDbConfig   = GetArg(argc, argv, "-db",            "");
     bool bVerbose              = HasFlag(argc, argv, "-verbose");
@@ -514,7 +522,10 @@ int main(int argc, char* argv[])
     printf("║           CSP SIM - 단말 시뮬레이터       ║\n");
     printf("╚══════════════════════════════════════════╝\n");
     printf("  서버   : %s:%d\n", strServerIp.c_str(), iServerPort);
-    printf("  로컬   : %s (시작포트 %d)\n", strLocalIp.c_str(), iLocalBasePort);
+    if (iLocalBasePort > 0)
+        printf("  로컬   : %s (시작포트 %d)\n", strLocalIp.c_str(), iLocalBasePort);
+    else
+        printf("  로컬   : %s (자동 포트 할당)\n", strLocalIp.c_str());
     printf("  단말수 : %d개  (시작ID: %s)\n", iCount, strStartUser.c_str());
     printf("  모드   : %s\n", bPttMode ? "PTT" : "VoIP");
     if (bPttMode) printf("  그룹ID : %s\n", strGroupId.c_str());
@@ -528,8 +539,12 @@ int main(int argc, char* argv[])
     std::vector<std::string> vecVideoFiles;
     if (!strMediaDir.empty()) {
         vecAudioFiles = ListFilesInDir(strMediaDir, "_audio.amrwb");
-        vecVideoFiles = ListFilesInDir(strMediaDir, "_video.h264");
-        printf("  미디어 파일 수: audio=%d, video=%d\n", (int)vecAudioFiles.size(), (int)vecVideoFiles.size());
+        if (!bNoVideo) {
+            vecVideoFiles = ListFilesInDir(strMediaDir, "_video.h264");
+        }
+        printf("  미디어 파일 수: audio=%d, video=%d%s\n",
+               (int)vecAudioFiles.size(), (int)vecVideoFiles.size(),
+               bNoVideo ? " (video disabled)" : "");
     }
 
     // 세션 생성 및 시작
@@ -537,7 +552,7 @@ int main(int argc, char* argv[])
     sessions.reserve(iCount);
 
     for (int i = 0; i < iCount; i++) {
-        int iLocalPort = iLocalBasePort + (i * 2); // SIP + 여유
+        int iLocalPort = (iLocalBasePort > 0) ? iLocalBasePort + (i * 2) : 0;
 
         std::string strUser, strAuthId, strPwd;
         if (bDbMode && i < (int)vecDbSubs.size()) {
@@ -596,12 +611,14 @@ int main(int argc, char* argv[])
         } else if (!strMediaFile.empty()) {
             s->m_clsRtpThread.SetMediaFile(strMediaFile);
         }
-        if (!vecVideoFiles.empty()) {
-            std::string videoFile = vecVideoFiles[i % vecVideoFiles.size()];
-            s->m_clsRtpThread.SetVideoFile(videoFile);
-            printf("[%d] Video: %s\n", i, videoFile.c_str());
-        } else if (!strVideoFile.empty()) {
-            s->m_clsRtpThread.SetVideoFile(strVideoFile);
+        if (!bNoVideo) {
+            if (!vecVideoFiles.empty()) {
+                std::string videoFile = vecVideoFiles[i % vecVideoFiles.size()];
+                s->m_clsRtpThread.SetVideoFile(videoFile);
+                printf("[%d] Video: %s\n", i, videoFile.c_str());
+            } else if (!strVideoFile.empty()) {
+                s->m_clsRtpThread.SetVideoFile(strVideoFile);
+            }
         }
         if (s->Start()) {
             sessions.push_back(s);

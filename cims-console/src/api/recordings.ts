@@ -1,9 +1,8 @@
 import { api } from './client'
 
 export interface Recording {
-  id: number
-  call_id: string
-  call_type: 'voip' | 'ptt'
+  id: string                  // 세션 디렉터리 상대경로
+  call_type: 'voip' | 'ptt' | 'voip_video'
   group_id: string | null
   caller: string
   callee: string | null
@@ -11,8 +10,7 @@ export interface Recording {
   end_time: string | null
   duration: number
   has_video: boolean
-  file_size: number
-  status: 'raw' | 'transcoding' | 'ready' | 'failed'
+  status: 'recording' | 'raw' | 'transcoding' | 'ready' | 'failed'
   segment_count: number
   total_speech_ms: number
   segments?: RecordingSegment[]
@@ -21,12 +19,14 @@ export interface Recording {
 export interface RecordingSegment {
   seq: number
   speaker_id: string
+  caller?: string
+  callee?: string
   start_time: string
   end_time: string | null
   duration_ms: number
   has_video: boolean
   file_size: number
-  status: 'raw' | 'transcoding' | 'ready' | 'failed'
+  status: 'recording' | 'raw' | 'transcoding' | 'ready' | 'failed'
 }
 
 export interface RecordingsResponse {
@@ -59,24 +59,33 @@ function buildQs(q: RecordingsQuery): string {
   return s ? '?' + s : ''
 }
 
+// 경로 내 특수문자(+, 공백 등)만 인코딩, 슬래시는 유지
+function encPath(id: string): string {
+  return id.split('/').map(encodeURIComponent).join('/')
+}
+
 export const recordingsApi = {
   list: (q: RecordingsQuery = {}) =>
     api.get<RecordingsResponse>(`/recordings${buildQs(q)}`),
 
-  get: (id: number) =>
-    api.get<Recording>(`/recordings/${id}`),
+  get: (id: string) =>
+    api.get<Recording>(`/recordings/${encPath(id)}`),
 
-  delete: (id: number) =>
-    api.delete<{ id: number }>(`/recordings/${id}`),
+  delete: (id: string) =>
+    api.delete<{ id: string }>(`/recordings/${encPath(id)}`),
 
-  audioUrl: (id: number) => `/api/v1/recordings/${id}/audio`,
+  audioUrl: (id: string) =>
+    `/api/v1/recordings/${encPath(id)}/audio`,
 
-  videoUrl: (id: number, side: 'a' | 'b' = 'a') =>
-    `/api/v1/recordings/${id}/video?side=${side}`,
+  videoUrl: (id: string, side: 'a' | 'b' = 'a') =>
+    `/api/v1/recordings/${encPath(id)}/video?side=${side}`,
 
-  segmentAudioUrl: (id: number, seq: number) =>
-    `/api/v1/recordings/${id}/segments/${seq}/audio`,
+  segmentAudioUrl: (id: string, seq: number) =>
+    `/api/v1/recordings/${encPath(id)}/segments/${seq}/audio`,
 
-  segments: (id: number) =>
-    api.get<{ recording_id: number; segments: RecordingSegment[] }>(`/recordings/${id}/segments`),
+  segmentVideoUrl: (id: string, seq: number) =>
+    `/api/v1/recordings/${encPath(id)}/segments/${seq}/video`,
+
+  segments: (id: string) =>
+    api.get<{ id: string; segments: RecordingSegment[] }>(`/recordings/${encPath(id)}/segments`),
 }

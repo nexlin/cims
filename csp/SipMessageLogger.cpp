@@ -81,20 +81,22 @@ std::string CSipMessageLogger::ClassifyService(const char* pszMsg, const std::st
         }
 
         std::string strToRaw = ExtractHeader(pszMsg, "To:", "t:");
+        std::string strFromRaw = ExtractHeader(pszMsg, "From:", "f:");
 
-        // Check domains
+        // PTT 우선: MCPTT 키워드(Accept-Contact, P-Asserted-Identity) 또는 PTT realm
         std::string strService = "system";
-        if (!m_strVoipRealm.empty()) {
-            if (strReqUri.find(m_strVoipRealm) != std::string::npos ||
-                strToRaw.find(m_strVoipRealm) != std::string::npos) {
-                strService = "phone";
-            }
-        }
-        if (strService == "system" && !m_strPttRealm.empty()) {
-            if (strReqUri.find(m_strPttRealm) != std::string::npos ||
-                strToRaw.find(m_strPttRealm) != std::string::npos) {
-                strService = "ptt";
-            }
+        bool bMcptt = (strstr(pszMsg, "mcptt") != NULL || strstr(pszMsg, "MCPTT") != NULL);
+
+        if (bMcptt || (!m_strPttRealm.empty() && (
+                strReqUri.find(m_strPttRealm) != std::string::npos ||
+                strToRaw.find(m_strPttRealm) != std::string::npos ||
+                strFromRaw.find(m_strPttRealm) != std::string::npos))) {
+            strService = "ptt";
+        } else if (!m_strVoipRealm.empty() && (
+                strReqUri.find(m_strVoipRealm) != std::string::npos ||
+                strToRaw.find(m_strVoipRealm) != std::string::npos ||
+                strFromRaw.find(m_strVoipRealm) != std::string::npos)) {
+            strService = "phone";
         }
 
         // Cache for subsequent messages with same Call-ID
@@ -316,13 +318,13 @@ FILE* CSipMessageLogger::GetFlowFile(const char* pszService)
 
     if (strcmp(pszService, "phone") == 0) {
         ppFile = &m_pPhoneFlowFile;
-        strFileName = m_strSystemId + "_phone_flow.jsonl";
+        strFileName = m_strSystemId + "_phone.flow.jsonl";
     } else if (strcmp(pszService, "ptt") == 0) {
         ppFile = &m_pPttFlowFile;
-        strFileName = m_strSystemId + "_ptt_flow.jsonl";
+        strFileName = m_strSystemId + "_ptt.flow.jsonl";
     } else {
         ppFile = &m_pSystemFlowFile;
-        strFileName = m_strSystemId + "_system_flow.jsonl";
+        strFileName = m_strSystemId + "_system.flow.jsonl";
     }
 
     if (!*ppFile) {
@@ -407,10 +409,9 @@ std::string CSipMessageLogger::GetFlowHourDir()
     struct tm t;
     localtime_r(&now, &t);
     char buf[256];
-    snprintf(buf, sizeof(buf), "%s/%04d/%02d/%02d/%02d/%s",
+    snprintf(buf, sizeof(buf), "%s/%04d/%02d/%02d/%02d",
              m_strFlowBaseDir.c_str(),
-             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour,
-             m_strSystemId.c_str());
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
     return buf;
 }
 
@@ -421,10 +422,9 @@ std::string CSipMessageLogger::GetMsgHourDir()
     struct tm t;
     localtime_r(&now, &t);
     char buf[256];
-    snprintf(buf, sizeof(buf), "%s/%04d/%02d/%02d/%02d/%s",
+    snprintf(buf, sizeof(buf), "%s/%04d/%02d/%02d/%02d",
              m_strMsgBaseDir.c_str(),
-             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour,
-             m_strSystemId.c_str());
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
     return buf;
 }
 

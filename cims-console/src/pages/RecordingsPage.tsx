@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { recordingsApi, type Recording, type RecordingSegment, type RecordingsQuery } from '../api/recordings'
 import { useToast } from '../components/Toast'
+import SegmentPlayer from '../components/SegmentPlayer'
 
 function fmtDuration(sec: number): string {
   const m = Math.floor(sec / 60)
@@ -19,18 +20,12 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString('ko-KR')
 }
 
-function fmtSize(bytes: number): string {
-  if (bytes <= 0) return '-'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1048576).toFixed(1)} MB`
-}
-
 function statusBadge(status: string) {
   switch (status) {
     case 'ready':       return <span className="badge badge--green">완료</span>
     case 'transcoding': return <span className="badge badge--blue">변환중</span>
     case 'raw':         return <span className="badge badge--gray">미변환</span>
+    case 'recording':   return <span className="badge badge--blue" style={{ animation: 'pulse 1.5s infinite' }}>녹취중</span>
     case 'failed':      return <span className="badge badge--red">실패</span>
     default:            return <span className="badge">{status}</span>
   }
@@ -57,6 +52,7 @@ export default function RecordingsPage() {
   const [segments, setSegments] = useState<RecordingSegment[]>([])
   const [playUrl, setPlayUrl] = useState('')
   const [playType, setPlayType] = useState<'audio' | 'video'>('audio')
+  const [showSegPlayer, setShowSegPlayer] = useState(false)
   const playerRef = useRef<HTMLAudioElement | HTMLVideoElement>(null)
 
   const load = useCallback(async () => {
@@ -83,7 +79,8 @@ export default function RecordingsPage() {
     try {
       const full = await recordingsApi.get(rec.id)
       setDetail(full)
-      if (full.call_type === 'ptt' && full.segments) {
+      setShowSegPlayer(false)
+      if (full.segments && full.segments.length > 0) {
         setSegments(full.segments)
       } else {
         setSegments([])
@@ -103,12 +100,12 @@ export default function RecordingsPage() {
     }
   }
 
-  function playSegment(recId: number, seg: RecordingSegment) {
+  function playSegment(recId: string, seg: RecordingSegment) {
     setPlayUrl(recordingsApi.segmentAudioUrl(recId, seg.seq))
     setPlayType(seg.has_video ? 'video' : 'audio')
   }
 
-  async function handleDelete(id: number) {
+  async function handleDelete(id: string) {
     if (!confirm('녹취를 삭제하시겠습니까?')) return
     try {
       await recordingsApi.delete(id)
@@ -189,8 +186,15 @@ export default function RecordingsPage() {
                 <td>{statusBadge(rec.status)}</td>
                 <td>
                   <button className="btn btn--ghost btn--sm"
-                    onClick={e => { e.stopPropagation(); playRecording(rec) }}
-                    disabled={rec.call_type === 'ptt'}>
+                    onClick={e => {
+                      e.stopPropagation()
+                      if (rec.segment_count > 0) {
+                        openDetail(rec).then(() => setShowSegPlayer(true))
+                      } else {
+                        playRecording(rec)
+                      }
+                    }}
+                    disabled={rec.call_type === 'ptt' && rec.segment_count === 0}>
                     ▶
                   </button>
                 </td>
@@ -213,12 +217,24 @@ export default function RecordingsPage() {
         )}
       </div>
 
-      {/* 플레이어 */}
-      {playUrl && (
+      {/* 세그먼트 플레이어 */}
+      {showSegPlayer && detail && segments.length > 0 && (
+        <SegmentPlayer
+          segments={segments}
+          recordingId={detail.id}
+          callType={detail.call_type}
+          caller={detail.caller}
+          callee={detail.callee || undefined}
+          onClose={() => setShowSegPlayer(false)}
+        />
+      )}
+
+      {/* 단일 파일 플레이어 (세그먼트 없는 경우) */}
+      {playUrl && !showSegPlayer && (
         <div className="panel" style={{ padding: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <strong>재생</strong>
-            <button className="btn btn--ghost btn--sm" onClick={() => setPlayUrl('')}>✕ 닫기</button>
+            <button className="btn btn--ghost btn--sm" onClick={() => setPlayUrl('')}>닫기</button>
           </div>
           {playType === 'video' ? (
             <video ref={playerRef as React.RefObject<HTMLVideoElement>}
@@ -252,14 +268,18 @@ export default function RecordingsPage() {
                 <label>종료</label><span>{detail.end_time ? `${fmtDate(detail.end_time)} ${fmtTime(detail.end_time)}` : '진행중'}</span>
                 <label>길이</label><span>{fmtDuration(detail.duration)}</span>
                 <label>영상</label><span>{detail.has_video ? '있음' : '없음'}</span>
-                <label>크기</label><span>{fmtSize(detail.file_size)}</span>
                 <label>상태</label><span>{statusBadge(detail.status)}</span>
               </div>
 
               {/* VoIP: 재생 버튼 */}
               {detail.call_type === 'voip' && (
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                  {detail.has_video ? (
+                  {segments.length > 0 ? (
+                    <button className="btn btn--primary"
+                      onClick={() => { setDetail(null); setShowSegPlayer(true) }}>
+                      세그먼트 재생 ({segments.length}건)
+                    </button>
+                  ) : detail.has_video ? (
                     <button className="btn btn--primary"
                       onClick={() => { setPlayUrl(recordingsApi.videoUrl(detail.id)); setPlayType('video') }}>
                       영상 재생
@@ -276,8 +296,14 @@ export default function RecordingsPage() {
               {/* PTT: 세그먼트 목록 */}
               {detail.call_type === 'ptt' && segments.length > 0 && (
                 <>
-                  <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14 }}>
-                    발언 목록 ({segments.length}건, 총 {fmtDuration(Math.floor(detail.total_speech_ms / 1000))})
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>
+                      발언 목록 ({segments.length}건, 총 {fmtDuration(Math.floor(detail.total_speech_ms / 1000))})
+                    </span>
+                    <button className="btn btn--primary btn--sm"
+                      onClick={() => { setDetail(null); setShowSegPlayer(true) }}>
+                      전체 재생
+                    </button>
                   </div>
                   <table className="data-table">
                     <thead>

@@ -46,6 +46,7 @@ inline int GetError() { return errno; }
 
 Socket UdpSocket( bool bIpv6 = false );
 Socket UdpListen( unsigned short iPort, const char * pszIp, bool bIpv6 = false );
+unsigned short GetSocketPort( Socket iFd );
 
 bool UdpRecv( Socket iFd, char * pszBuf, int * piLen, unsigned int * piIp, unsigned short* piPort );
 bool UdpRecv( Socket iFd, char * pszBuf, int * piLen, IN6_ADDR * psttIp, unsigned short* piPort );

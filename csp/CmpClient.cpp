@@ -1,5 +1,4 @@
 #include "CmpClient.h"
-#include "MsgLogger.h"
 #include "SipMessageLogger.h"
 #include "SimpleJson.h"
 #include <chrono>
@@ -185,16 +184,20 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
 // If a string-based SendRequestAndWait is still needed, it would be an overload.
 
 bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort,
-                            const std::string& strRecordDir, const std::string& strLogDir) {
+                            const std::string& strRecordDir, const std::string& strLogDir,
+                            const std::string& strCaller, const std::string& strCallee,
+                            const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "ADD_SESSION");
     req.Set("session_id", strSessionId);
-    req.Set("remote_ip", "0.0.0.0"); // Placeholder for add
-    req.Set("remote_port", 0);
-    req.Set("remote_video_port", 0);
+    req.Set("remote_ip", strRmtIp.empty() ? "0.0.0.0" : strRmtIp);
+    req.Set("remote_port", iRmtPort);
+    req.Set("remote_video_port", iRmtVideoPort);
     req.Set("peer_index", 0);
     if (!strRecordDir.empty()) req.Set("record_dir", strRecordDir);
     if (!strLogDir.empty()) req.Set("log_dir", strLogDir);
+    if (!strCaller.empty()) req.Set("caller", strCaller);
+    if (!strCallee.empty()) req.Set("callee", strCallee);
 
     // Header info (legacy args)
     req.Set("csp_id", "CSP_MAIN");
@@ -207,11 +210,9 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
     CLog::Print(LOG_DEBUG, "CmpClient::AddSession: %s", req.ToString().c_str());
 
     std::string strReqBody = req.ToString();
-    gclsMsgLogger.Log( strSessionId.c_str(), "csp", "cmp", "JSON", "add", strReqBody.c_str() );
 
     if (!SendRequestAndWait(req, strResp)) return false;
 
-    gclsMsgLogger.Log( strSessionId.c_str(), "cmp", "csp", "JSON", "add-resp", strResp.c_str() );
 
     // Response Body: CSP_MAIN <sessId> CMP_MAIN <cmpSess> OK <ip> <port> <vport>
     // The response is now expected to be JSON.
@@ -231,9 +232,30 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
     return false;
 }
 
+bool CCmpClient::ModifySession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx) {
+    SimpleJson::JsonNode req;
+    req.Set("cmd", "MODIFY_SESSION");
+    req.Set("session_id", strSessionId);
+    req.Set("remote_ip", strRmtIp);
+    req.Set("remote_port", iRmtPort);
+    req.Set("remote_video_port", iRmtVideoPort);
+    req.Set("peer_index", iPeerIdx);
+    req.Set("csp_id", "CSP_MAIN");
+    req.Set("csp_sess_id", strSessionId);
+    req.Set("cmp_id", "CMP_MAIN");
+    req.Set("cmp_sess_id", "0");
+
+    std::string strResp;
+    std::string strReqBody = req.ToString();
+
+    if (!SendRequestAndWait(req, strResp)) return false;
+
+    return true;
+}
+
 bool CCmpClient::UpdateSession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx, std::string& strLocalIp, int& iLocalPort) {
     SimpleJson::JsonNode req;
-    req.Set("cmd", "ADD_SESSION"); // "ADD_SESSION" is used for update in the original protocol
+    req.Set("cmd", "MODIFY_SESSION");
     req.Set("session_id", strSessionId);
     req.Set("remote_ip", strRmtIp);
     req.Set("remote_port", iRmtPort);
@@ -282,21 +304,20 @@ bool CCmpClient::RemoveSession(const std::string& strSessionId) {
     std::string strResp;
     CLog::Print(LOG_DEBUG, "CmpClient::RemoveSession: %s", req.ToString().c_str());
     std::string strReqBody = req.ToString();
-    gclsMsgLogger.Log( strSessionId.c_str(), "csp", "cmp", "JSON", "remove", strReqBody.c_str() );
     bool bRet = SendRequestAndWait(req, strResp);
-    gclsMsgLogger.Log( strSessionId.c_str(), "cmp", "csp", "JSON", "remove-resp", strResp.c_str() );
     return bRet;
 }
 
 bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iFloorPort, int& iVideoPort,
-                          const std::string& strRecordDir, const std::string& strLogDir) {
+                          const std::string& strRecordDir, const std::string& strLogDir, bool bVideoEnabled) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "ADD_GROUP");
     req.Set("group_id", strGroupId);
     req.Set("count", (int)vecMembers.size());
     if (!strRecordDir.empty()) req.Set("record_dir", strRecordDir);
     if (!strLogDir.empty()) req.Set("log_dir", strLogDir);
-    
+    if (bVideoEnabled) req.Set("video_enabled", 1);
+
     std::stringstream ssMembers;
     for(size_t i=0; i<vecMembers.size(); ++i) {
         if (!vecMembers[i]) continue;
@@ -313,10 +334,8 @@ bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::
 
     std::string strResp;
     std::string strReqBody = req.ToString();
-    gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "addgroup", strReqBody.c_str() );
 
     if (SendRequestAndWait(req, strResp)) {
-        gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "addgroup-resp", strResp.c_str() );
         SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse(strResp);
         if (respNode.type != SimpleJson::JSON_OBJECT) {
             CLog::Print(LOG_ERROR, "CmpClient::AddGroup: Failed to parse JSON response: %s", strResp.c_str());
@@ -378,9 +397,7 @@ bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& str
 
     std::string resp;
     std::string strReqBody = req.ToString();
-    gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "joingroup", strReqBody.c_str() );
     bool bRet = SendRequestAndWait(req, resp);
-    gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "joingroup-resp", resp.c_str() );
     return bRet;
 }
 
@@ -397,9 +414,7 @@ bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& st
 
     std::string resp;
     std::string strReqBody = req.ToString();
-    gclsMsgLogger.Log( strGroupId.c_str(), "csp", "cmp", "JSON", "leavegroup", strReqBody.c_str() );
     bool bRet = SendRequestAndWait(req, resp);
-    gclsMsgLogger.Log( strGroupId.c_str(), "cmp", "csp", "JSON", "leavegroup-resp", resp.c_str() );
     return bRet;
 }
 
@@ -455,23 +470,33 @@ void CCmpClient::RecvLoop() {
                  }
                  
                  if (gclsSipLogger.IsEnabled()) {
-                     std::string strCmd = "RESPONSE";
-                     if (root.Has("payload")) {
-                         SimpleJson::JsonNode pl = root.Get("payload");
-                         if (pl.Has("cmd")) strCmd = pl.GetString("cmd");
+                     // 응답에서 원래 명령 추출 (trans_id로 매칭)
+                     std::string strCmd;
+                     {
+                         std::lock_guard<std::mutex> lk(m_mutexTrans);
+                         auto it = m_mapTransactions.find(transId);
+                         if (it != m_mapTransactions.end()) {
+                             // 요청 payload에서 cmd 추출
+                             // trans_id → 원래 요청 매핑은 없으므로, 응답 body에서 status 확인
+                         }
                      }
-                     // Determine service from CMP response command
+                     // 응답 body에서 상태 추출
+                     bool bOk = (respBody.find("OK") != std::string::npos);
+                     std::string strStatus = bOk ? "OK" : "ERROR";
+
+                     // 서비스 결정: 응답에 SESSION/GROUP 포함 여부
                      const char* pszSvc = "system";
-                     std::string strCmdUpper = strCmd;
-                     if (strCmdUpper.find("SESSION") != std::string::npos) {
+                     if (respBody.find("local_port") != std::string::npos ||
+                         respBody.find("session") != std::string::npos) {
                          pszSvc = "phone";
-                     } else if (strCmdUpper.find("GROUP") != std::string::npos) {
+                     } else if (respBody.find("floor") != std::string::npos ||
+                                respBody.find("group") != std::string::npos) {
                          pszSvc = "ptt";
                      }
                      gclsSipLogger.LogMessage("cmp", "csp", "JSON",
-                                              strCmd.c_str(),
+                                              strStatus.c_str(),
                                               (m_strCmpIp + ":" + std::to_string(m_iCmpPort)).c_str(),
-                                              strPacket.c_str(), pszSvc);
+                                              respBody.c_str(), pszSvc);
                  }
                  // Notify Transaction matches
                  OnTransactionComplete(transId, true, respBody);

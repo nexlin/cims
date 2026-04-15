@@ -105,14 +105,14 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
 
     if ( iSharedPort <= 0 ) {
         int iSharedFloorPort = 0;
-        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir ) ) {
+        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir, clsGroup._videoEnabled ) ) {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
             m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
         }
     } else if ( !strRecordDir.empty() ) {
         // 그룹이 이미 CMP에 있지만 log_dir 전달이 필요 → addgroup 재호출 (기존 그룹 유지, log_dir만 갱신)
         std::string tmpIp; int tmpPort = 0; int tmpFPort = 0; int tmpVPort = 0;
-        gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpPort, tmpFPort, tmpVPort, strRecordDir, strRecordDir );
+        gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpPort, tmpFPort, tmpVPort, strRecordDir, strRecordDir, clsGroup._videoEnabled );
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
@@ -688,7 +688,7 @@ void CGroupCallService::OnCmpStatusChanged( bool bConnected ) {
 }
 
 // 200 OK Received -> Join Group Helper
-void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort, int iRemoteFloorPort ) {
+void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort, int iRemoteFloorPort, int iRemoteVideoPort ) {
     std::string strGroupId, strSessionId, strMemberId;
     int iCmpFloorPort = 0;
 
@@ -709,10 +709,8 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
         }
     }
     // 2. lock 해제 후 외부 호출 (CMP, DB)
-    // UE의 floor port: SDP m=application 포트 = 오디오 RTP + 1 (cspsim 기본 레이아웃)
     int iFloorPort = iRemoteFloorPort > 0 ? iRemoteFloorPort : (iRemotePort + 1);
-    // 비디오 포트: cwrtc의 비디오 RTP = 오디오 RTP + 3
-    int iVideoPort = iRemotePort + 3;
+    int iVideoPort = iRemoteVideoPort > 0 ? iRemoteVideoPort : (iRemotePort + 2);
     if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort) ) {
          CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d floor=%d video=%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort, iFloorPort, iVideoPort );
          if ( gclsCallDir.IsEnabled() ) {

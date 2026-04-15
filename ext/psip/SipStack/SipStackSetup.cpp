@@ -92,11 +92,8 @@ bool CSipStackSetup::Check( )
 		m_iTcpThreadCount = 0;
 	}
 
-	if( m_iLocalUdpPort == 0 && m_iLocalTcpPort == 0 && m_iLocalTlsPort == 0 )
-	{
-		CLog::Print( LOG_ERROR, "%s udp/tcp/tls port is 0", __FUNCTION__ );
-		return false;
-	}
+	// port 0 은 OS 자동할당을 의미하므로, 모든 포트가 비활성인 경우만 차단
+	// (UdpThreadCount > 0 이면 port 0 이어도 UDP 소켓 생성 허용)
 	
 	if( m_iTcpMaxSocketPerThread < 0 ) 
 	{

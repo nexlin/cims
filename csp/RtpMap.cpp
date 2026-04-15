@@ -176,7 +176,9 @@ CRtpMap::~CRtpMap() {
  * @param iSocketCount 생성할 UDP 소켓 개수
  * @returns RTP 포트 번호를 리턴한다.
  */
-int CRtpMap::CreatePort( int iSocketCount, const std::string& strRecordDir, const std::string& strLogDir ) {
+int CRtpMap::CreatePort( int iSocketCount, const std::string& strRecordDir, const std::string& strLogDir,
+                         const std::string& strCaller, const std::string& strCallee,
+                         const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort ) {
     bool bRes = false;
     CRtpInfo clsInfo( iSocketCount );
     
@@ -205,7 +207,7 @@ int CRtpMap::CreatePort( int iSocketCount, const std::string& strRecordDir, cons
     int iLocalPort = 0;
     int iLocalVideoPort = 0;
 
-    if (gclsCmpClient.AddSession(strSessionId, strLocalIp, iLocalPort, iLocalVideoPort, strRecordDir, strLogDir)) {
+    if (gclsCmpClient.AddSession(strSessionId, strLocalIp, iLocalPort, iLocalVideoPort, strRecordDir, strLogDir, strCaller, strCallee, strRmtIp, iRmtPort, iRmtVideoPort)) {
         // CmpServer returned allocated ports
         clsInfo.m_iStartPort = iLocalPort; 
         clsInfo.m_strLocalIp = strLocalIp; // Store Allocated IP

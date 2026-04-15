@@ -31,7 +31,7 @@
 
 /**
  * @ingroup SipStack
- * @brief »ý¼ºÀÚ - ³»ºÎ º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ°°í transaction list ¿Í SIP stack À» ¿¬°á½ÃÅ²´Ù.
+ * @brief ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ - ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ê±ï¿½È­ï¿½ï¿½Å°ï¿½ï¿½ transaction list ï¿½ï¿½ SIP stack ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Å²ï¿½ï¿½.
  */
 CSipStack::CSipStack()
 {
@@ -58,7 +58,7 @@ CSipStack::CSipStack()
 
 /**
  * @ingroup SipStack
- * @brief ¼Ò¸êÀÚ
+ * @brief ï¿½Ò¸ï¿½ï¿½ï¿½
  */
 CSipStack::~CSipStack()
 {
@@ -66,9 +66,9 @@ CSipStack::~CSipStack()
 
 /**
  * @ingroup SipStack
- * @brief SIP stack À» ½ÃÀÛÇÑ´Ù. SIP stack ¾²·¹µå¿Í network ¼ö½Å ¾²·¹µå¸¦ ½ÃÀÛÇÑ´Ù.
- * @param clsSetup SIP stack ¼³Á¤ Ç×¸ñ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP stack ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½. SIP stack ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ network ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½å¸¦ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param clsSetup SIP stack ï¿½ï¿½ï¿½ï¿½ ï¿½×¸ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipStack::Start( CSipStackSetup & clsSetup )
 {
@@ -86,13 +86,20 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 
 	InitNetwork();
 
-	if( m_clsSetup.m_iLocalUdpPort > 0 )
+	if( m_clsSetup.m_iLocalUdpPort > 0 || m_clsSetup.m_iUdpThreadCount > 0 )
 	{
 		m_hUdpSocket = UdpListen( m_clsSetup.m_iLocalUdpPort, NULL, m_clsSetup.m_bIpv6 );
 		if( m_hUdpSocket == INVALID_SOCKET )
 		{
 			CLog::Print( LOG_ERROR, "UdpListen(%d) error", m_clsSetup.m_iLocalUdpPort );
 			return false;
+		}
+
+		// port 0 ìžë™í• ë‹¹ ì‹œ ì‹¤ì œ í¬íŠ¸ë¥¼ ë°˜ì˜
+		if( m_clsSetup.m_iLocalUdpPort == 0 )
+		{
+			m_clsSetup.m_iLocalUdpPort = GetSocketPort( m_hUdpSocket );
+			CLog::Print( LOG_INFO, "UDP auto-assigned port %d", m_clsSetup.m_iLocalUdpPort );
 		}
 	}
 
@@ -174,7 +181,7 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 	}
 #endif
 
-	if( m_clsSetup.m_iLocalUdpPort > 0 )
+	if( m_hUdpSocket != INVALID_SOCKET )
 	{
 		if( StartSipUdpThread( this ) == false )
 		{
@@ -214,8 +221,8 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 
 /**
  * @ingroup SipStack
- * @brief SIP stack À» ÁßÁö½ÃÅ²´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í SIP stack ÀÌ ½ÇÇàµÇÁö ¾Ê¾Ò°Å³ª Á¾·á ÀÌº¥Æ® Ã³¸® ÁßÀÌ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP stack ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å²ï¿½ï¿½.
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ SIP stack ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ê¾Ò°Å³ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ® Ã³ï¿½ï¿½ ï¿½ï¿½ï¿½Ì¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipStack::Stop( )
 {
@@ -232,10 +239,10 @@ bool CSipStack::Stop( )
 
 /**
  * @ingroup SipStack
- * @brief SIP stack À» ½ÇÇàÇÑ´Ù.
- *				SIP stack ÀÌ °ü¸®ÇÏ´Â Transaction List ¸¦ ÁÖ±âÀûÀ¸·Î Á¡°ËÇÏ¿©¼­ Re-Transmit ¶Ç´Â Timeout µîÀ» Ã³¸®ÇÏ±â À§ÇØ¼­ º» ÇÔ¼ö¸¦ 20ms °£°ÝÀ¸·Î È£ÃâÇØ ÁÖ¾î¾ß ÇÑ´Ù.
- * @param psttTime ÇöÀç ½Ã°£
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief SIP stack ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ *				SIP stack ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ Transaction List ï¿½ï¿½ ï¿½Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¿ï¿½ï¿½ï¿½ Re-Transmit ï¿½Ç´ï¿½ Timeout ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½ï¿½Ï±ï¿½ ï¿½ï¿½ï¿½Ø¼ï¿½ ï¿½ï¿½ ï¿½Ô¼ï¿½ï¿½ï¿½ 20ms ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ È£ï¿½ï¿½ï¿½ï¿½ ï¿½Ö¾ï¿½ï¿½ ï¿½Ñ´ï¿½.
+ * @param psttTime ï¿½ï¿½ï¿½ï¿½ ï¿½Ã°ï¿½
+ * @returns true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipStack::Execute( struct timeval * psttTime )
 {
@@ -249,8 +256,8 @@ bool CSipStack::Execute( struct timeval * psttTime )
 
 /**
  * @ingroup SipStack
- * @brief UDP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå °³¼ö¸¦ Áõ°¡½ÃÅ²´Ù.
- * @param iThreadId UDP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå °³¼ö¸¦ Áõ°¡½ÃÅ°±â Àü¿¡ UDP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå °³¼ö¸¦ ÀúÀåÇÒ º¯¼ö
+ * @brief UDP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å²ï¿½ï¿½.
+ * @param iThreadId UDP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å°ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ UDP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
  */
 void CSipStack::IncreateUdpThreadCount( int & iThreadId )
 {
@@ -262,7 +269,7 @@ void CSipStack::IncreateUdpThreadCount( int & iThreadId )
 
 /**
  * @ingroup SipStack
- * @brief UDP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå °³¼ö¸¦ °¨¼Ò½ÃÅ²´Ù.
+ * @brief UDP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ò½ï¿½Å²ï¿½ï¿½.
  */
 void CSipStack::DecreateUdpThreadCount()
 {
@@ -273,8 +280,8 @@ void CSipStack::DecreateUdpThreadCount()
 
 /**
  * @ingroup SipStack
- * @brief TCP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå °³¼ö¸¦ Áõ°¡½ÃÅ²´Ù.
- * @param iThreadId UDP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå °³¼ö¸¦ Áõ°¡½ÃÅ°±â Àü¿¡ UDP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå °³¼ö¸¦ ÀúÀåÇÒ º¯¼ö
+ * @brief TCP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å²ï¿½ï¿½.
+ * @param iThreadId UDP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å°ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ UDP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
  */
 void CSipStack::IncreateTcpThreadCount( int & iThreadId )
 {
@@ -286,7 +293,7 @@ void CSipStack::IncreateTcpThreadCount( int & iThreadId )
 
 /**
  * @ingroup SipStack
- * @brief TCP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå °³¼ö¸¦ °¨¼Ò½ÃÅ²´Ù.
+ * @brief TCP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ò½ï¿½Å²ï¿½ï¿½.
  */
 void CSipStack::DecreateTcpThreadCount()
 {
@@ -297,8 +304,8 @@ void CSipStack::DecreateTcpThreadCount()
 
 /**
  * @ingroup SipStack
- * @brief Transaction List ÀÇ Á¤º¸¸¦ ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf		¹®ÀÚ¿­ º¯¼ö
+ * @brief Transaction List ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ú¿ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param strBuf		ï¿½ï¿½ï¿½Ú¿ï¿½ ï¿½ï¿½ï¿½ï¿½
  */
 void CSipStack::GetString( CMonitorString & strBuf )
 {
@@ -313,8 +320,8 @@ void CSipStack::GetString( CMonitorString & strBuf )
 
 /**
  * @ingroup SipStack
- * @brief Invite Client Transaction Á¤º¸¸¦ ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf ¹®ÀÚ¿­ º¯¼ö
+ * @brief Invite Client Transaction ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ú¿ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param strBuf ï¿½ï¿½ï¿½Ú¿ï¿½ ï¿½ï¿½ï¿½ï¿½
  */
 void CSipStack::GetICTString( CMonitorString & strBuf )
 {
@@ -323,7 +330,7 @@ void CSipStack::GetICTString( CMonitorString & strBuf )
 
 /**
  * @ingroup SipStack
- * @brief ÇÁ·Î¼¼½º°¡ Á¾·áµÉ ¶§¿¡ ÃÖÁ¾ÀûÀ¸·Î ½ÇÇàÇÏ¿©¼­ openssl ¸Þ¸ð¸® ´©¼ö¸¦ Ãâ·ÂÇÏÁö ¾Ê´Â´Ù. 
+ * @brief ï¿½ï¿½ï¿½Î¼ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¿ï¿½ï¿½ï¿½ openssl ï¿½Þ¸ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ê´Â´ï¿½. 
  */
 void CSipStack::Final()
 {
@@ -334,7 +341,7 @@ void CSipStack::Final()
 
 /**
  * @ingroup SipStack
- * @brief ¸ðµç SIP transaction À» »èÁ¦ÇÑ´Ù.
+ * @brief ï¿½ï¿½ï¿½ SIP transaction ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 void CSipStack::DeleteAllTransaction()
 {
@@ -348,8 +355,8 @@ void CSipStack::DeleteAllTransaction()
 
 /**
  * @ingroup SipStack
- * @brief ICT transcation map À» °¡Á®¿Â´Ù.
- * @param clsMap [out] transcation map ÀúÀå º¯¼ö
+ * @brief ICT transcation map ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Â´ï¿½.
+ * @param clsMap [out] transcation map ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
  */
 void CSipStack::GetICTMap( INVITE_TRANSACTION_MAP & clsMap )
 {
@@ -358,9 +365,9 @@ void CSipStack::GetICTMap( INVITE_TRANSACTION_MAP & clsMap )
 
 /**
  * @ingroup SipStack
- * @brief UDP SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå¿¡ Á¾·á SIP ¸Þ½ÃÁö¸¦ Àü¼ÛÇÏ°í SIP stack ¾²·¹µå¿¡ Á¾·á ÀÌº¥Æ®¸¦ ¼³Á¤ÇÑ ÈÄ, ¸ðµç ¾²·¹µå°¡ Á¾·áÇÒ ¶§±îÁö ´ë±âÇÑ ÈÄ,
- *				¼ÒÄÏ ÇÚµéÀ» Á¾·á½ÃÅ²´Ù.
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief UDP SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½å¿¡ ï¿½ï¿½ï¿½ï¿½ SIP ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ SIP stack ï¿½ï¿½ï¿½ï¿½ï¿½å¿¡ ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ®ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½, ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½å°¡ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½,
+ *				ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Å²ï¿½ï¿½.
+ * @returns true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipStack::_Stop( )
 {
@@ -368,7 +375,7 @@ bool CSipStack::_Stop( )
 
 	if( m_clsSetup.m_iLocalUdpPort > 0 )
 	{
-		// SIP ¸Þ½ÃÁö ¼ö½Å ¾²·¹µå°¡ N °³ ½ÇÇàµÇ¹Ç·Î N ÃÊ ´ë±âÇÏ´Â °ÍÀ» ¹æÁöÇÏ±â À§ÇÑ ÄÚµåÀÌ´Ù.
+		// SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½å°¡ N ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ç¹Ç·ï¿½ N ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï±ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½ï¿½Ì´ï¿½.
 		Socket hSocket = UdpSocket();
 
 		if( hSocket != INVALID_SOCKET )
@@ -384,7 +391,7 @@ bool CSipStack::_Stop( )
 
 	gclsSipQueue.BroadCast();
 
-	// ¸ðµç ¾²·¹µå°¡ Á¾·áÇÒ ¶§±îÁö ´ë±âÇÑ´Ù.
+	// ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½å°¡ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
 	while( m_iUdpThreadRunCount > 0 || m_iTcpThreadRunCount > 0 || m_bStackThreadRun || GetTcpConnectingCount() > 0 )
 	{
 		MiliSleep( 20 );
@@ -426,8 +433,8 @@ bool CSipStack::_Stop( )
 
 /**
  * @ingroup SipStack
- * @brief TCP/TLS ¿¬°á ÁøÇàÁßÀÎ ¾²·¹µå °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns TCP/TLS ¿¬°á ÁøÇàÁßÀÎ ¾²·¹µå °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief TCP/TLS ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @returns TCP/TLS ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 int CSipStack::GetTcpConnectingCount( )
 {

@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { groupsApi, type Group } from '../api/groups'
 import { pttApi, type PttSession, type PttEvent } from '../api/ptt'
+import { recordingsApi, type RecordingSegment } from '../api/recordings'
 import type { FlowMessage } from '../api/flow'
 import FlowPage from './FlowPage'
+import SegmentPlayer from '../components/SegmentPlayer'
 import { useToast } from '../components/Toast'
 
 export function fmtTime(iso: string | null | undefined) {
@@ -61,9 +63,8 @@ export default function PttHistoryPage() {
   const [flow, setFlow] = useState<{ groupId: string; sessionDir: string; date: string; messages?: FlowMessage[] } | null>(null)
   const [flowLoading, setFlowLoading] = useState(false)
 
-  // Recording playback state (filesystem-based)
-  const [playingUrl, setPlayingUrl] = useState<string | null>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
+  // Recording playback state (SegmentPlayer 팝업)
+  const [recPlayer, setRecPlayer] = useState<{id:string, segments:RecordingSegment[], groupId:string}|null>(null)
 
   // Load groups
   const loadGroups = useCallback(async () => {
@@ -165,10 +166,21 @@ export default function PttHistoryPage() {
     }
   }
 
-  // Play PTT session recording (filesystem-based)
-  const playRecording = (groupId: string, sessionDir: string) => {
-    const url = `/api/v1/ptt/history/${encodeURIComponent(groupId)}/${encodeURIComponent(sessionDir)}/audio`
-    setPlayingUrl(url)
+  // Play PTT session recording (SegmentPlayer 팝업)
+  const playRecording = async (groupId: string, sessionDir: string) => {
+    // 녹취 디렉터리: ptt/{groupId}/sessions/{sessionDir}.d
+    const dirName = sessionDir.endsWith('.d') ? sessionDir : `${sessionDir}.d`
+    const recId = `ptt/${groupId}/sessions/${dirName}`
+    try {
+      const rec = await recordingsApi.get(recId)
+      if (rec.segments && rec.segments.length > 0) {
+        setRecPlayer({ id: recId, segments: rec.segments, groupId })
+      } else {
+        show('녹취 세그먼트 없음', 'err')
+      }
+    } catch (e: unknown) {
+      show(String(e), 'err')
+    }
   }
 
   const openFlow = async (groupId: string, sessionDir: string) => {
@@ -252,6 +264,10 @@ export default function PttHistoryPage() {
                   </span>
                   <span style={{ fontWeight: 600, fontSize: 14 }}>
                     {g.name || g.id}
+                  </span>
+                  <span className={`badge ${g.video_enabled ? 'badge--blue' : 'badge--gray'}`}
+                        style={{ fontSize: 10, padding: '1px 6px' }}>
+                    {g.video_enabled ? '영상' : '음성'}
                   </span>
                   <span className="ts" style={{ color: 'var(--text-muted)' }}>
                     ({g.id})
@@ -378,41 +394,17 @@ export default function PttHistoryPage() {
         </div>
       )}
 
-      {/* Audio Player (sticky bottom) */}
-      {playingUrl && (
-        <div style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 200,
-          right: 0,
-          background: '#ffffff',
-          borderTop: '1px solid var(--border)',
-          padding: '8px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          zIndex: 50,
-          boxShadow: '0 -2px 8px rgba(0,0,0,.08)',
-        }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap' }}>
-            PTT 녹취 재생
-          </span>
-          <audio
-            ref={audioRef}
-            src={playingUrl}
-            controls
-            autoPlay
-            preload="auto"
-            style={{ flex: 1, height: 36 }}
-            onEnded={() => setPlayingUrl(null)}
-          />
-          <button
-            className="btn btn--sm btn--outline"
-            style={{ padding: '2px 10px', fontSize: 11 }}
-            onClick={() => { setPlayingUrl(null); if (audioRef.current) audioRef.current.pause() }}
-          >
-            닫기
-          </button>
+      {/* PTT 녹취 SegmentPlayer 팝업 */}
+      {recPlayer && (
+        <div className="modal-overlay" onClick={() => setRecPlayer(null)}>
+          <div className="modal-box" style={{ width: 800, maxWidth: 'calc(100vw - 40px)' }} onClick={e => e.stopPropagation()}>
+            <SegmentPlayer
+              segments={recPlayer.segments}
+              recordingId={recPlayer.id}
+              callType="ptt"
+              onClose={() => setRecPlayer(null)}
+            />
+          </div>
         </div>
       )}
 

@@ -50,6 +50,7 @@ public:
 	std::string	m_strDestIp;
 	int					m_iDestPort;
 	int					m_iDestFloorPort;  // m=application floor control 포트 (0이면 audio+1)
+	int					m_iDestVideoPort;  // 서버 비디오 포트 (0이면 audio+2)
     std::string m_strMediaFile;
 
     // Video RTP

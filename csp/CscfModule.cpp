@@ -17,7 +17,6 @@
 #include "CspPttGroup.h"
 #include "SubscriptionManager.h"
 #include "SipUtility.h"
-#include "MsgLogger.h"
 #include "Log.h"
 
 extern CSipUserAgent gclsUserAgent;
@@ -149,24 +148,6 @@ bool CCscfModule::CheckAuthrization(CSipMessage* pclsMessage) {
 bool CCscfModule::SendResponse(CSipMessage* pclsMessage, int iStatusCode) {
     CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag(iStatusCode);
     if (pclsResponse == NULL) return false;
-
-    if (gclsMsgLogger.IsEnabled()) {
-        std::string strCallId;
-        pclsMessage->GetCallId(strCallId);
-        if (!strCallId.empty()) {
-            const char* pszTo = "ue";
-            if (!pclsMessage->m_clsViaList.empty() &&
-                pclsMessage->m_clsViaList.front().m_iPort == 5062)
-                pszTo = "cwrtc";
-            char szLabel[64];
-            snprintf(szLabel, sizeof(szLabel), "%d %s",
-                     iStatusCode, pclsResponse->m_strReasonPhrase.c_str());
-            char szSipBuf[8192];
-            pclsResponse->ToString(szSipBuf, sizeof(szSipBuf));
-            gclsMsgLogger.Log(strCallId.c_str(), "csp", pszTo,
-                              "SIP", szLabel, szSipBuf);
-        }
-    }
 
     gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResponse);
     return true;

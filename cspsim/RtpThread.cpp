@@ -53,7 +53,7 @@ bool CheckError(int n, const char *pszLog) {
 CRtpThread::CRtpThread()
     : m_hSocket(INVALID_SOCKET), m_hRtcpSocket(INVALID_SOCKET), m_iPort(0), m_bStopEvent(false),
       m_bSendThreadRun(false), m_bRecvThreadRun(false),
-      m_iDestFloorPort(0),
+      m_iDestFloorPort(0), m_iDestVideoPort(0),
       m_hVideoSocket(INVALID_SOCKET), m_iVideoPort(0),
       m_bVideoSendThreadRun(false) {}
 
@@ -64,17 +64,13 @@ bool CRtpThread::Create() {
     return true;
   }
 
-  for (int i = 10000; i < 11000; i += 2) {
-    m_hSocket = UdpListen(i, NULL);
-    if (m_hSocket != INVALID_SOCKET) {
-      m_iPort = i;
-      break;
-    }
-  }
-
+  // OS 자동 포트 할당 후 RTCP=rtp+1, Video=rtp+2 순차 바인딩
+  // (CSP/CMP가 포트 오프셋 관계를 전제하므로 유지)
+  m_hSocket = UdpListen(0, NULL);
   if (m_hSocket == INVALID_SOCKET) {
     return false;
   }
+  m_iPort = GetSocketPort(m_hSocket);
 
   // RTCP socket: RTP port + 1
   m_hRtcpSocket = UdpListen(m_iPort + 1, NULL);
@@ -82,7 +78,7 @@ bool CRtpThread::Create() {
     printf("[RTP] Warning: failed to create RTCP socket on port %d\n", m_iPort + 1);
   }
 
-  // Video socket: audio port + 2 (convention)
+  // Video socket: RTP port + 2
   if (!m_strVideoFile.empty()) {
     m_hVideoSocket = UdpListen(m_iPort + 2, NULL);
     if (m_hVideoSocket != INVALID_SOCKET) {

@@ -398,8 +398,9 @@ void CSipServer::EventCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
             if (iRemoteAudio <= 0 && pclsRtp->m_iPort > 0) iRemoteAudio = pclsRtp->m_iPort;
 
             if (iRemoteAudio > 0) {
-                CLog::Print( LOG_DEBUG, "EventCallStart: Calling OnCallStarted with %s:%d", pclsRtp->m_strIp.c_str(), iRemoteAudio );
-                gclsGroupCallService.OnCallStarted(pszCallId, pclsRtp->m_strIp, iRemoteAudio);
+                int iRemoteVideo = pclsRtp->GetVideoPort();
+                CLog::Print( LOG_DEBUG, "EventCallStart: Calling OnCallStarted with %s:%d video=%d", pclsRtp->m_strIp.c_str(), iRemoteAudio, iRemoteVideo );
+                gclsGroupCallService.OnCallStarted(pszCallId, pclsRtp->m_strIp, iRemoteAudio, 0, iRemoteVideo);
             }
 
             std::string strRelayIp = gclsSetup.m_strLocalIp;

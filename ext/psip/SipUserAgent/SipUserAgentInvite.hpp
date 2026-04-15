@@ -86,10 +86,13 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		}
 	}
 
-	// 100 Trying 즉시 응답 (180은 착신 단말 응답 후 B2BUA에서 전달)
-	pclsResponse = pclsMessage->CreateResponse( SIP_TRYING );
-	if( pclsResponse ) m_clsSipStack.SendSipMessage( pclsResponse );
-	pclsResponse = NULL;
+	// 100 Trying: SIP 스택 IST(SipISTList)가 자동 전송하므로 m_bSendTrying=true이면 중복 방지
+	if( !m_clsSipStack.m_clsSetup.m_bSendTrying )
+	{
+		pclsResponse = pclsMessage->CreateResponse( SIP_TRYING );
+		if( pclsResponse ) m_clsSipStack.SendSipMessage( pclsResponse );
+		pclsResponse = NULL;
+	}
 
 	// Dialog �� �����Ѵ�.
 	CSipDialog	clsDialog( &m_clsSipStack );

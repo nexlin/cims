@@ -17,7 +17,6 @@
  */
 #include "CspServer.h"
 
-#include "MsgLogger.h"
 #include "CallDir.h"
 #include "CallMap.h"
 #include "SipMessageLogger.h"
@@ -65,7 +64,6 @@ int ServiceMain() {
     }
     CLog::SetPrefix( "csp" );
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
-    gclsMsgLogger.Init( gclsSetup.m_strMsgLogDir, "csp" );
     gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp" );
     std::string sysId = gclsSetup.m_strSystemId.empty() ? "csp_01" : gclsSetup.m_strSystemId;
     gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId );

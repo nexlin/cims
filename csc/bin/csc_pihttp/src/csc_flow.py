@@ -222,10 +222,17 @@ def _read_jsonl(path: str) -> list:
 
 
 def _has_recording(d_dir: str) -> bool:
+    # 구 형식 (단일 파일)
     for fn in ('recording_mixed.wav', 'recording_mixed.mp4', 'raw_a.rtp', 'raw_audio.rtp'):
         p = os.path.join(d_dir, fn)
         if os.path.exists(p) and os.path.getsize(p) > 0:
             return True
+    # 신 형식 (세그먼트): segments.jsonl 또는 seg_*_*.rtp 파일 존재
+    if os.path.exists(os.path.join(d_dir, 'segments.jsonl')):
+        return True
+    import glob as _glob
+    if _glob.glob(os.path.join(d_dir, 'seg_*_*.rtp')):
+        return True
     return False
 
 
@@ -603,10 +610,11 @@ def _load_session_json(d_dir: str) -> dict:
 
 
 def _resolve_flow_paths(date_str: str, hour: str, service: str) -> list:
-    """서비스별 flow.jsonl 경로 목록 반환 (fallback 포함)
+    """서비스별 flow.jsonl 경로 목록 반환 (CSP + CMP 통합)
 
-    New structure: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{service}_flow.jsonl
-    Legacy:        {sip_log_dir}/YYYY/MM/DD/HH/{service}_flow.jsonl
+    New: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}_{service}.flow.jsonl  (CSP)
+         {ServiceLogDir}/YYYY/MM/DD/HH/cmp_01_{service}.flow.jsonl       (CMP)
+    Legacy: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{service}_flow.jsonl
     """
     if not _sip_log_dir and not _calls_dir:
         return []
@@ -614,30 +622,36 @@ def _resolve_flow_paths(date_str: str, hour: str, service: str) -> list:
     hours = [hour.zfill(2)] if hour else [f"{h:02d}" for h in range(24)]
     paths = []
     for hh in hours:
-        # 1) New structure: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{service}_flow.jsonl
-        if _calls_dir:
-            new_base = os.path.join(_calls_dir, yyyy, mm, dd, hh, _system_id)
-            new_path = os.path.join(new_base, f"{_system_id}_{service}_flow.jsonl")
+        base_dir = os.path.join(_calls_dir, yyyy, mm, dd, hh) if _calls_dir else ""
+
+        if base_dir:
+            # 1) New: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}_{service}.flow.jsonl
+            new_path = os.path.join(base_dir, f"{_system_id}_{service}.flow.jsonl")
             if os.path.exists(new_path):
                 paths.append(new_path)
+
+            # CMP flow는 디버깅용으로 같은 디렉터리에 존재하지만
+            # 기본 call flow에는 CSP flow만 사용 (CSP가 csp↔cmp 메시지를 이미 기록)
+            # CMP flow (cmp_01_*.flow.jsonl)는 CMP 디버깅 시 별도 조회
+
+            # 이미 찾았으면 레거시 스킵
+            if paths:
                 continue
 
-        # 2) Legacy: {sip_log_dir}/YYYY/MM/DD/HH/{service}_flow.jsonl
+            # 3) Legacy: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{service}_flow.jsonl
+            legacy_sub = os.path.join(base_dir, _system_id, f"{_system_id}_{service}_flow.jsonl")
+            if os.path.exists(legacy_sub):
+                paths.append(legacy_sub)
+                continue
+
+        # 4) Legacy fallback: {sip_log_dir}
         if _sip_log_dir:
             base = os.path.join(_sip_log_dir, yyyy, mm, dd, hh)
-            svc_path = os.path.join(base, f"{service}_flow.jsonl")
-            if os.path.exists(svc_path):
-                paths.append(svc_path)
-                continue
-            # 3) fallback: legacy flow.jsonl
-            legacy = os.path.join(base, "flow.jsonl")
-            if os.path.exists(legacy):
-                paths.append(legacy)
-                continue
-            # 4) fallback: legacy sip.jsonl
-            old = os.path.join(base, "sip.jsonl")
-            if os.path.exists(old):
-                paths.append(old)
+            for pattern in [f"{service}_flow.jsonl", "flow.jsonl", "sip.jsonl"]:
+                p = os.path.join(base, pattern)
+                if os.path.exists(p):
+                    paths.append(p)
+                    break
     return paths
 
 
@@ -702,13 +716,19 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip") 
     hh = hour.zfill(2)
 
     # Determine interface file path
-    # 1) New structure: {MsgLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{iface}.jsonl
+    # 1) New: {MsgLogDir}/YYYY/MM/DD/HH/{system_id}_{iface}.jsonl (서브디렉터리 없음)
     path = ""
     if _msg_log_dir:
-        new_path = os.path.join(_msg_log_dir, yyyy, mm, dd, hh, _system_id,
+        new_path = os.path.join(_msg_log_dir, yyyy, mm, dd, hh,
                                 f"{_system_id}_{iface}.jsonl")
         if os.path.exists(new_path):
             path = new_path
+        else:
+            # Legacy: {MsgLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{iface}.jsonl
+            legacy_path = os.path.join(_msg_log_dir, yyyy, mm, dd, hh, _system_id,
+                                       f"{_system_id}_{iface}.jsonl")
+            if os.path.exists(legacy_path):
+                path = legacy_path
 
     # 2) New structure under sip_log_dir
     if not path and _sip_log_dir:
@@ -782,7 +802,7 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
         return []
 
     # Map call_type to service for flow file selection
-    service = "phone" if call_type == "voip" else "ptt"
+    service = "phone" if call_type.startswith("voip") else "ptt"
     results = []
     flow_paths = _resolve_flow_paths(date_str, hour, service)
 
@@ -806,9 +826,9 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                     # CMP heartbeat 필터링
                     method = obj.get("method", "")
                     mu = method.upper()
-                    if mu in ("HEARTBEAT", "RESPONSE"):
+                    if mu in ("HEARTBEAT",):
                         continue
-                    if call_type == "voip" and mu in ("ADD_GROUP", "REMOVE_GROUP", "JOIN_GROUP",
+                    if call_type.startswith("voip") and mu in ("ADD_GROUP", "REMOVE_GROUP", "JOIN_GROUP",
                                                        "LEAVE_GROUP", "MODIFY_GROUP"):
                         continue
                     if call_type == "ptt" and mu in ("ADD_SESSION", "REMOVE_SESSION", "MODIFY_SESSION"):
@@ -842,13 +862,19 @@ def _flow_msg_from_log(obj: dict, call_ids: list = None) -> dict:
         if to_actor == "ue":
             to_actor = "ue_o" if msg_cid == call_ids[0] else "ue_t"
 
-    return {
+    result = {
         "ts": obj.get("ts", ""),
         "from": from_actor,
         "to": to_actor,
         "proto": proto,
         "label": method,
     }
+    # seq + iface (body 조회 링크)
+    if obj.get("seq"):
+        result["seq"] = obj["seq"]
+    if obj.get("iface"):
+        result["iface"] = obj["iface"]
+    return result
 
 
 def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> list:
@@ -905,35 +931,12 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
     for obj in cmp_msgs:
         messages.append(_flow_msg_from_log(obj, call_ids))
 
-    # Secondary: CMP cmp.jsonl from session directory (floor/media events)
-    cmp_jsonl = os.path.join(d_dir, 'cmp.jsonl')
-    if os.path.exists(cmp_jsonl):
-        cmp_events = _read_jsonl(cmp_jsonl)
-        # Collect timestamps already present from sip.jsonl + cmp search
-        existing_ts = set()
-        for obj in sip_msgs:
-            existing_ts.add(obj.get('ts', ''))
-        for obj in cmp_msgs:
-            existing_ts.add(obj.get('ts', ''))
-        for evt in cmp_events:
-            if evt.get('ts', '') not in existing_ts:
-                evt_proto = evt.get('proto', 'INT')
-                evt_label = evt.get('label', evt.get('event', ''))
-                if evt_proto == 'MCPTT':
-                    fm_from, fm_to = 'cmp', 'cmp'
-                else:
-                    fm_from, fm_to = 'cmp', 'cmp'
-                messages.append({
-                    'ts': evt.get('ts', ''),
-                    'from': fm_from,
-                    'to': fm_to,
-                    'proto': evt_proto,
-                    'label': evt_label,
-                    'body': json.dumps(evt),
-                })
+    # CMP flow는 이제 통합 디렉터리의 cmp_01_{service}.flow.jsonl에서 읽힘
+    # (_search_cmp_messages → _resolve_flow_paths에서 자동 포함)
 
     # 시간순 정렬
     messages.sort(key=lambda m: m.get("ts", ""))
+
     return messages
 
 
@@ -1002,7 +1005,7 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                 continue
             cj['participants'] = _load_participants(d)
             cj['has_recording'] = _has_recording(d)
-            cj['dir_name'] = os.path.basename(d).replace('.d', '')
+            cj['dir_name'] = os.path.relpath(d, _calls_dir) if _calls_dir else os.path.basename(d).replace('.d', '')
             logs.append(cj)
     else:
         # index에서 dir 경로로 call.json 로드
@@ -1017,7 +1020,7 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                 if cj:
                     cj['participants'] = _load_participants(d_dir)
                     cj['has_recording'] = _has_recording(d_dir)
-                    cj['dir_name'] = os.path.basename(d_dir).replace('.d', '')
+                    cj['dir_name'] = os.path.relpath(d_dir, _calls_dir) if _calls_dir else os.path.basename(d_dir).replace('.d', '')
                     logs.append(cj)
 
     # 필터
@@ -1074,7 +1077,7 @@ async def _handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> Handler
                 cj = _load_call_json(d)
                 if call_type and cj.get('call_type') != call_type:
                     continue
-                cj['dir_name'] = os.path.basename(d).replace('.d', '')
+                cj['dir_name'] = os.path.relpath(d, _calls_dir) if _calls_dir else os.path.basename(d).replace('.d', '')
                 cj['has_recording'] = True
                 recordings.append(cj)
 

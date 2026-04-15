@@ -11,7 +11,6 @@
 
 #include "ModuleDispatcher.h"
 
-#include "MsgLogger.h"
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
@@ -134,21 +133,6 @@ bool CModuleDispatcher::SendResponse(CSipMessage* pclsMessage, int iStatusCode) 
     CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag(iStatusCode);
     if (pclsResponse == NULL) return false;
 
-    {
-        std::string strCallId;
-        pclsMessage->GetCallId(strCallId);
-        if (!strCallId.empty()) {
-            const char* pszTo = "ue";
-            if (!pclsMessage->m_clsViaList.empty() && pclsMessage->m_clsViaList.front().m_iPort == 5062)
-                pszTo = "cwrtc";
-            char szLabel[64];
-            snprintf(szLabel, sizeof(szLabel), "%d %s", iStatusCode, pclsResponse->m_strReasonPhrase.c_str());
-            char szSipBuf[8192];
-            pclsResponse->ToString(szSipBuf, sizeof(szSipBuf));
-            if (gclsMsgLogger.IsEnabled())
-                gclsMsgLogger.Log(strCallId.c_str(), "csp", pszTo, "SIP", szLabel, szSipBuf);
-        }
-    }
     gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResponse);
     return true;
 }
@@ -210,19 +194,6 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
     std::string strCallId;
     pclsMessage->GetCallId(strCallId);
 
-    // 기존 MsgLogger 유지 (하위 호환)
-    if (gclsMsgLogger.IsEnabled() && !strCallId.empty()) {
-        gclsMsgLogger.SetCallInfo(strCallId.c_str(),
-            pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(),
-            pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str());
-        const char* pszFrom = "ue";
-        if (!pclsMessage->m_clsViaList.empty() && pclsMessage->m_clsViaList.front().m_iPort == 5062)
-            pszFrom = "cwrtc";
-        char szSipBuf[8192];
-        pclsMessage->ToString(szSipBuf, sizeof(szSipBuf));
-        gclsMsgLogger.Log(strCallId.c_str(), pszFrom, "csp", "SIP", pclsMessage->m_strSipMethod.c_str(), szSipBuf);
-    }
-
     // REGISTER, SUBSCRIBE → CSCF 모듈
     if (m_clsCscf.IsEnabled() && m_clsCscf.OnSipRequest(iThreadId, pclsMessage)) {
         return true;
@@ -271,22 +242,6 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
 
 bool CModuleDispatcher::RecvResponse(int iThreadId, CSipMessage* pclsMessage) {
     // 메시지 로깅
-    {
-        std::string strCallId;
-        pclsMessage->GetCallId(strCallId);
-        if (!strCallId.empty()) {
-            const char* pszFrom = "ue";
-            if (!pclsMessage->m_clsViaList.empty() && pclsMessage->m_clsViaList.front().m_iPort == 5062)
-                pszFrom = "cwrtc";
-            char szLabel[32];
-            snprintf(szLabel, sizeof(szLabel), "%d", pclsMessage->m_iStatusCode);
-            char szSipBuf[8192];
-            pclsMessage->ToString(szSipBuf, sizeof(szSipBuf));
-            if (gclsMsgLogger.IsEnabled())
-                gclsMsgLogger.Log(strCallId.c_str(), pszFrom, "csp", "SIP", szLabel, szSipBuf);
-        }
-    }
-
     return false;
 }
 
@@ -471,16 +426,15 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
             strRecordDir = gclsCallDir.GetVoipDir(pszCallId, pszFrom, pszTo);
             strLogDir = strRecordDir;
         }
-        iStartPort = gclsRtpMap.CreatePort(SOCKET_COUNT_PER_MEDIA * pclsRtp->GetMediaCount(), strRecordDir, strLogDir);
-        if (iStartPort == -1) return StopCall(pszCallId, SIP_INTERNAL_SERVER_ERROR);
-
-        if (pclsRtp->GetMediaCount() >= 2) {
-            int iVideoPort = pclsRtp->GetVideoPort();
-            if (iVideoPort > 0) gclsRtpMap.SetIpPort(iStartPort, 2, inet_addr(pclsRtp->m_strIp.c_str()), iVideoPort);
-        }
+        // 발신측 RTP 주소를 ADD_SESSION에 포함 (생성 + peer[0] 한번에)
         int iAudioPort = pclsRtp->GetAudioPort();
         if (iAudioPort <= 0 && pclsRtp->m_iPort > 0) iAudioPort = pclsRtp->m_iPort;
-        if (iAudioPort > 0) gclsRtpMap.SetIpPort(iStartPort, 0, inet_addr(pclsRtp->m_strIp.c_str()), iAudioPort);
+        int iVideoPort = (pclsRtp->GetMediaCount() >= 2) ? pclsRtp->GetVideoPort() : 0;
+
+        iStartPort = gclsRtpMap.CreatePort(SOCKET_COUNT_PER_MEDIA * pclsRtp->GetMediaCount(), strRecordDir, strLogDir,
+                                          pszFrom ? pszFrom : "", pszTo ? pszTo : "",
+                                          pclsRtp->m_strIp, iAudioPort, iVideoPort);
+        if (iStartPort == -1) return StopCall(pszCallId, SIP_INTERNAL_SERVER_ERROR);
 
         std::string strRelayIp = gclsSetup.m_strLocalIp;
         std::string strAllocatedIp;
@@ -575,7 +529,10 @@ void CModuleDispatcher::EventCallStart(const char* pszCallId, CSipCallRtp* pclsR
 
             int iRemoteAudio = pclsRtp->GetAudioPort();
             if (iRemoteAudio <= 0 && pclsRtp->m_iPort > 0) iRemoteAudio = pclsRtp->m_iPort;
-            if (iRemoteAudio > 0) gclsGroupCallService.OnCallStarted(pszCallId, pclsRtp->m_strIp, iRemoteAudio);
+            if (iRemoteAudio > 0) {
+                int iRemoteVideo = pclsRtp->GetVideoPort();
+                gclsGroupCallService.OnCallStarted(pszCallId, pclsRtp->m_strIp, iRemoteAudio, 0, iRemoteVideo);
+            }
 
             std::string strRelayIp = gclsSetup.m_strLocalIp;
             if (!strAllocatedIp.empty()) strRelayIp = strAllocatedIp;
@@ -629,9 +586,10 @@ void CModuleDispatcher::EventCallEnd(const char* pszCallId, int iSipStatus) {
         if (clsCallInfo.m_bRecv) SaveCdr(pszCallId, iSipStatus);
         else SaveCdr(clsCallInfo.m_strPeerCallId.c_str(), iSipStatus);
 
-        gclsUserAgent.StopCall(clsCallInfo.m_strPeerCallId.c_str());
+        // CMP 리소스 해제 → BYE 순서 (리소스 먼저 해제 후 SIP 종료)
         bool bIsGroup = gclsGroupCallService.OnCallTerminated(pszCallId);
         gclsCallMap.Delete(pszCallId, !bIsGroup);
+        gclsUserAgent.StopCall(clsCallInfo.m_strPeerCallId.c_str());
 
         RemoveCallOwner(pszCallId);
         RemoveCallOwner(clsCallInfo.m_strPeerCallId.c_str());

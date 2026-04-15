@@ -55,6 +55,7 @@ SimSession::SimSession(int id,
 
     m_clsSetup.m_iLocalUdpPort = m_iLocalPort;
     m_clsSetup.m_strLocalIp    = m_strLocalIp;
+    m_clsSetup.m_strDomain     = m_strDomain;
 
     m_clsUserAgent.InsertRegisterInfo(m_clsServerInfo);
 }
@@ -74,6 +75,12 @@ bool SimSession::Start() {
         printf("[%d] SIP stack start error (port %d)\n", m_iId, m_iLocalPort);
         m_stats.iRegFail++;
         return false;
+    }
+
+    // port 0 자동할당 시 SipStack에서 실제 포트를 읽어 반영
+    if (m_iLocalPort == 0) {
+        m_iLocalPort = m_clsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
+        m_clsSetup.m_iLocalUdpPort = m_iLocalPort;
     }
 
     // 추가 콜백 등록: SUBSCRIBE/NOTIFY는 여기서 처리
@@ -124,7 +131,7 @@ void SimSession::SendSubscribe(const std::string& strPsi,
     pMsg->m_strSipMethod = "SUBSCRIBE";
 
     // Request-URI: sip:gms_psi@domain
-    pMsg->m_clsReqUri.Set("sip", strPsi.c_str(), m_strServerIp.c_str(), m_iServerPort);
+    pMsg->m_clsReqUri.Set("sip", strPsi.c_str(), m_strDomain.c_str(), m_iServerPort);
 
     // Via
     char szBranch[SIP_BRANCH_MAX_SIZE];
@@ -132,11 +139,11 @@ void SimSession::SendSubscribe(const std::string& strPsi,
     pMsg->AddVia(strLocalIp.c_str(), iLocalPort, szBranch);
 
     // From
-    pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), strLocalIp.c_str(), iLocalPort);
+    pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
     pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
 
     // To
-    pMsg->m_clsTo.m_clsUri.Set("sip", strPsi.c_str(), m_strServerIp.c_str(), m_iServerPort);
+    pMsg->m_clsTo.m_clsUri.Set("sip", strPsi.c_str(), m_strDomain.c_str(), 0);
 
     // Call-ID
     pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
@@ -465,6 +472,28 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
         clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;
 
+#ifdef USE_MEDIA_LIST
+        // PTT 200 OK SDP: audio + video (비디오 파일이 있는 경우)
+        {
+            CSdpMedia clsAudio("audio", m_pOwner->m_clsRtpThread.m_iPort, "RTP/AVP");
+            clsAudio.AddFmt(clsLocalRtp.m_iCodec);
+            if (clsLocalRtp.m_iCodec == 99) {
+                clsAudio.AddAttribute("rtpmap", "99 AMR-WB/16000/1");
+                clsAudio.AddAttribute("fmtp", "99 mode-change-capability=2; max-red=0; octet-align=1");
+            } else {
+                clsAudio.AddAttribute("rtpmap", "0 PCMU/8000");
+            }
+            clsLocalRtp.m_clsMediaList.push_back(clsAudio);
+        }
+        if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0) {
+            CSdpMedia clsVideo("video", m_pOwner->m_clsRtpThread.m_iVideoPort, "RTP/AVP");
+            clsVideo.AddFmt(96);
+            clsVideo.AddAttribute("rtpmap", "96 H264/90000");
+            clsVideo.AddAttribute("fmtp", "96 profile-level-id=42C016; packetization-mode=1");
+            clsLocalRtp.m_clsMediaList.push_back(clsVideo);
+        }
+#endif
+
         printf("[%d] [PTT] Sending 200 OK\n", m_pOwner->m_iId);
         m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
         if (pclsRtp) {
@@ -477,6 +506,17 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
                     if (floorPort > 0) {
                         m_pOwner->m_clsRtpThread.m_iDestFloorPort = floorPort;
                         printf("[%d] [PTT] Floor port from SDP: %d\n", m_pOwner->m_iId, floorPort);
+                    }
+                }
+            }
+            // X-Video-Port 헤더에서 비디오 포트 추출
+            if (pclsMessage) {
+                CSipHeader* pVideoHdr = pclsMessage->GetHeader("X-Video-Port");
+                if (pVideoHdr && !pVideoHdr->m_strValue.empty()) {
+                    int vp = atoi(pVideoHdr->m_strValue.c_str());
+                    if (vp > 0) {
+                        m_pOwner->m_clsRtpThread.m_iDestVideoPort = vp;
+                        printf("[%d] [PTT] Video port from header: %d\n", m_pOwner->m_iId, vp);
                     }
                 }
             }
@@ -519,6 +559,8 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 #endif
 
         m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
+        // 200 OK 후 150ms 대기 → RTP 송출 시작 (CMP 녹취 세그먼트 초반에 SPS/PPS 포함 보장)
+        usleep(150000);
         if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
     }
 }
