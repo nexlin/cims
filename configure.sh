@@ -118,10 +118,10 @@ VOLTE_DOMAIN="${VOLTE_DOMAIN:-ims.mnc001.mcc001.3gppnetwork.org}"
 PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^ims\./ptt./')}"
 
 # 로그/녹취 디렉터리 기본값
-MSG_LOG_DIR="${MSG_LOG_DIR:-$DIST_DIR/ext_mnt/msg_log}"
 SERVICE_LOG_DIR="${SERVICE_LOG_DIR:-$DIST_DIR/ext_mnt/service_log}"
+MSG_LOG_DIR="${MSG_LOG_DIR:-$SERVICE_LOG_DIR}"
 RECORD_DIR="${RECORD_DIR:-$DIST_DIR/ext_mnt/recordings}"
-mkdir -p "$MSG_LOG_DIR" "$SERVICE_LOG_DIR" "$RECORD_DIR"
+mkdir -p "$SERVICE_LOG_DIR" "$RECORD_DIR"
 
 # JWT 시크릿 랜덤 생성 (미설정 시)
 if [[ -z "$IDMS_JWT_SECRET" ]]; then

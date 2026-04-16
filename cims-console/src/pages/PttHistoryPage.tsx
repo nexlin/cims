@@ -60,7 +60,7 @@ export default function PttHistoryPage() {
   const [fGroup, setFG] = useState('')
   const [fDate, setFD] = useState(() => new Date().toISOString().substring(0, 10))
   const [autoRefresh, setAR] = useState(false)
-  const [flow, setFlow] = useState<{ groupId: string; sessionDir: string; date: string; messages?: FlowMessage[] } | null>(null)
+  const [flow, setFlow] = useState<{ groupId: string; sessionDir: string; date: string; nodes?: Record<string, FlowMessage[]>; messages?: FlowMessage[] } | null>(null)
   const [flowLoading, setFlowLoading] = useState(false)
 
   // Recording playback state (SegmentPlayer 팝업)
@@ -187,10 +187,9 @@ export default function PttHistoryPage() {
     setFlowLoading(true)
     try {
       const resp = await pttApi.flow(groupId, sessionDir, fDate || undefined)
-      setFlow({ groupId, sessionDir, date: fDate, messages: resp.messages })
+      setFlow({ groupId, sessionDir, date: fDate, nodes: resp.nodes, messages: resp.messages })
     } catch (e: unknown) {
       show(String(e), 'err')
-      // Open FlowPage anyway, it will try to fetch itself
       setFlow({ groupId, sessionDir, date: fDate })
     } finally {
       setFlowLoading(false)
@@ -414,6 +413,7 @@ export default function PttHistoryPage() {
           callId={flow.groupId}
           date={flow.date}
           onClose={() => setFlow(null)}
+          prefetchedNodes={flow.nodes}
           prefetchedMessages={flow.messages}
         />
       )}

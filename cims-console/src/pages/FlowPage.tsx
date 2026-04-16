@@ -179,7 +179,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
               </>}
               <text x={(x1 + x2) / 2} y={y + ARROW_Y_OFFSET - 4}
                 textAnchor="middle" fill={col} fontSize={11} fontWeight="bold">
-                {msg.label}
+                {msg.label}{msg.detail ? `(${msg.detail})` : ''}
               </text>
             </g>
           )
@@ -263,7 +263,7 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
               const labelY = y + ARROW_Y_OFFSET - 4
               return (
                 <text x={mx} y={labelY} textAnchor="middle" fill={col} fontSize={11} fontWeight="bold">
-                  {msg.label}
+                  {msg.label}{msg.detail ? `(${msg.detail})` : ''}
                 </text>
               )
             })()}
@@ -296,6 +296,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
           <tr style={{ position: 'sticky', top: 0, background: '#f0f1f3', zIndex: 1 }}>
             <th style={thStyle}>#</th>
             <th style={thStyle}>시각</th>
+            <th style={thStyle}>모듈</th>
             <th style={thStyle}>From</th>
             <th style={thStyle}></th>
             <th style={thStyle}>To</th>
@@ -317,6 +318,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
               >
                 <td style={tdStyle}>{i + 1}</td>
                 <td style={tdStyle}>{msg.ts.slice(0, 12)}</td>
+                <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: 10 }}>{(msg.node || '').replace(/_\d+$/, '').toUpperCase()}</td>
                 <td style={{ ...tdStyle, color: '#1a1d2e' }}>{actorLabel(msg.from)}</td>
                 <td style={{ ...tdStyle, color: '#7a8fa8' }}>{'\u2192'}</td>
                 <td style={{ ...tdStyle, color: '#1a1d2e' }}>{actorLabel(msg.to)}</td>
@@ -333,7 +335,9 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                     {msg.proto}
                   </span>
                 </td>
-                <td style={{ ...tdStyle, fontWeight: 600, color: protoColor(msg.proto) }}>{msg.label}</td>
+                <td style={{ ...tdStyle, fontWeight: 600, color: protoColor(msg.proto) }}>
+                  {msg.label}{msg.detail ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({msg.detail})</span> : ''}
+                </td>
               </tr>
             )
           })}
@@ -365,31 +369,61 @@ interface FlowPageProps {
   callId: string
   date?: string
   onClose: () => void
-  /** Pre-fetched messages. When provided, skips the API call. */
+  prefetchedNodes?: Record<string, FlowMessage[]>
   prefetchedMessages?: FlowMessage[]
 }
 
-export default function FlowPage({ callId, date, onClose, prefetchedMessages }: FlowPageProps) {
-  const [messages, setMessages] = useState<FlowMessage[]>(prefetchedMessages ?? [])
+export default function FlowPage({ callId, date, onClose, prefetchedNodes, prefetchedMessages }: FlowPageProps) {
+  const [allNodes, setAllNodes] = useState<Record<string, FlowMessage[]>>({})
+  const [enabledNodes, setEnabledNodes] = useState<Set<string>>(new Set())
   const [loading,  setLoading]  = useState(!prefetchedMessages)
   const [error,    setError]    = useState<string | null>(null)
   const [selIdx,   setSelIdx]   = useState<number | null>(null)
   const [bodyText, setBodyText] = useState<string | null>(null)
   const [bodyLoading, setBodyLoading] = useState(false)
+  const [highlightTxId, setHighlightTxId] = useState<string | null>(null)
+
+  // nodes 구조 또는 messages 배열을 allNodes로 변환
+  const applyResponse = useCallback((r: { nodes?: Record<string, FlowMessage[]>; messages?: FlowMessage[] }) => {
+    if (r.nodes) {
+      // 각 메시지에 node 필드 보장
+      const processed: Record<string, FlowMessage[]> = {}
+      for (const [node, msgs] of Object.entries(r.nodes)) {
+        processed[node] = msgs.map(m => ({ ...m, node }))
+      }
+      setAllNodes(processed)
+      setEnabledNodes(new Set(Object.keys(processed)))
+    } else if (r.messages) {
+      // 레거시: 단일 배열 → 'all' 노드
+      setAllNodes({ all: r.messages })
+      setEnabledNodes(new Set(['all']))
+    }
+  }, [])
 
   useEffect(() => {
+    if (prefetchedNodes) {
+      applyResponse({ nodes: prefetchedNodes })
+      setLoading(false)
+      return
+    }
     if (prefetchedMessages) {
-      setMessages(prefetchedMessages)
+      applyResponse({ messages: prefetchedMessages })
       setLoading(false)
       return
     }
     setLoading(true)
     setError(null)
     flowApi.get(callId, date)
-      .then(r => setMessages(r.messages))
+      .then(r => applyResponse(r))
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [callId, date, prefetchedMessages])
+  }, [callId, date, prefetchedNodes, prefetchedMessages, applyResponse])
+
+  // 선택된 노드의 메시지를 합쳐서 시간순 정렬
+  const messages = Object.entries(allNodes)
+    .filter(([node]) => enabledNodes.has(node))
+    .flatMap(([, msgs]) => msgs)
+    .sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
 
   function handleSelect(idx: number) {
     const newIdx = selIdx === idx ? null : idx
@@ -430,6 +464,25 @@ export default function FlowPage({ callId, date, onClose, prefetchedMessages }: 
       onClose={onClose}
       fullscreen
     >
+      {/* 노드 필터 */}
+      {Object.keys(allNodes).length > 0 && (
+        <div style={{ display: 'flex', gap: 12, padding: '6px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, alignItems: 'center' }}>
+          <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>노드:</span>
+          {Object.keys(allNodes).map(node => (
+            <label key={node} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input type="checkbox" checked={enabledNodes.has(node)}
+                onChange={() => setEnabledNodes(prev => {
+                  const next = new Set(prev)
+                  if (next.has(node)) next.delete(node); else next.add(node)
+                  return next
+                })} />
+              {(node || '').toUpperCase()}
+              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({allNodes[node]?.length || 0})</span>
+            </label>
+          ))}
+        </div>
+      )}
+
       {loading && <div className="empty">로딩 중…</div>}
       {error   && <div className="empty" style={{ color: '#e96' }}>오류: {error}</div>}
 

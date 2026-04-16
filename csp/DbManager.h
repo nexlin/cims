@@ -83,6 +83,9 @@ public:
     bool UpdateCallLogEnded( const std::string& strCallId,
                               time_t tAnswer, time_t tEnd, int iSipStatus );
 
+    /** PTT: session_seq 증가 후 새 값 반환 (그룹 세션 시작 시) */
+    int IncrementSessionSeq( const std::string& strGroupId );
+
     /** PTT: 해당 그룹에 활성 세션(ringing/active)이 존재하는지 확인 */
     bool HasActiveGroupCall( const std::string& strGroupId );
 

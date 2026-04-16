@@ -72,8 +72,7 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     peer.videoSsrcOut = 2000 + _nextSsrc;
     _members[sessionId] = peer;
     LOG_INFO("PMcpttGroup", "[%s] Member added session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
-    if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "cmp", "MCPTT", "MEMBER_JOIN",
-                           ("ip=" + ip + " rtp=" + std::to_string(port)).c_str());
+    if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "MEMBER_JOIN", sessionId.c_str());
     
     // If floor is taken, notify new member
     if (_floorTaken) {
@@ -91,7 +90,7 @@ void PMcpttGroup::removeMember(const std::string& sessionId) {
     PAutoLock lock(_mutex);
     _members.erase(sessionId);
     LOG_INFO("PMcpttGroup", "[%s] Member %s left. (remaining=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
-    if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "cmp", "MCPTT", "MEMBER_LEAVE", "");
+    if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "MEMBER_LEAVE", sessionId.c_str());
 
     if ( _floorTaken && (_floorOwnerSessionId == sessionId) ) {
 
@@ -353,8 +352,7 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
 
         LOG_INFO("PMcpttGroup", "[%s] Floor GRANTED to session=%s ssrc=%u prio=%d",
                  _groupId.c_str(), sessionId.c_str(), ssrc, requesterPrio);
-        if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "FLOOR_GRANT",
-                               ("speaker=" + sessionId).c_str());
+        if (_logFlow) _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", sessionId.c_str());
 
         // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작
         if (_recordEnable && !_recorder) startRecording();
@@ -406,7 +404,7 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
             if (rejLen > 0) sendToMember(sessionId, rejBuf, rejLen);
             LOG_INFO("PMcpttGroup", "[%s] Floor REJECTED session=%s (prio=%d). Owner=%s (prio=%d)",
                    _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
-            if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "FLOOR_REJECT", "");
+            if (_logFlow) _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REJECT", sessionId.c_str());
         }
     }
 }
@@ -425,8 +423,7 @@ void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int 
 
         broadcastFloorStatus(FLOOR_IDLE, 0, "");
         LOG_INFO("PMcpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
-        if (_logFlow) _logFlow(_groupId, sessionId.c_str(), "floor", "MCPTT", "FLOOR_RELEASE",
-                               ("speaker=" + sessionId).c_str());
+        if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "FLOOR_RELEASE", sessionId.c_str());
     }
 }
 

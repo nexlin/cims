@@ -6,6 +6,7 @@
 #include "GroupMap.h"
 #include "SipServer.h"
 #include "DbManager.h"
+#include "SipMessageLogger.h"
 #include "Log.h"
 #include <ctime>
 
@@ -105,7 +106,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
 
     if ( iSharedPort <= 0 ) {
         int iSharedFloorPort = 0;
-        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir, clsGroup._videoEnabled ) ) {
+        // session_seq 증가 (그룹 세션 시작)
+        int iSessionSeq = gclsDbManager.IncrementSessionSeq(pszGroupId);
+        clsGroup._sessionSeq = iSessionSeq;
+        CLog::Print(LOG_INFO, "GroupCall: session_seq=%d for group %s", iSessionSeq, pszGroupId);
+        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir, clsGroup._videoEnabled, iSessionSeq ) ) {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
             m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
         }
@@ -348,6 +353,9 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
 
     if ( gclsUserAgent.CreateCall( pszGroupId, pszUserId, &clsRtp, &clsRoute, strCallId, &pclsInvite ) ) {
 
+         // SIP flow에 sesid(groupId) 등록
+         gclsSipLogger.SetCallSesId(strCallId, pszGroupId, std::to_string(clsGroup._sessionSeq));
+
          // 4-1. Add PTT group info XML to INVITE (multipart/mixed: mcptt-info+xml + SDP)
          if ( pclsInvite != NULL ) {
              // To: 는 개인 AOR 유지 (cwrtc가 WS 클라이언트를 찾는 데 필요)
@@ -527,7 +535,7 @@ void CGroupCallService::SyncGroupsState() {
             if ( gclsCallDir.IsEnabled() ) {
                 strLogDir = gclsCallDir.GetPttSessionDir(group._id, TimeToIso(group._sessionStart));
             }
-            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir ) ) {
+            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir, false, group._sessionSeq ) ) {
                 std::unique_lock<std::recursive_mutex> lock2(m_mutex);
                 m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip, nHash, "", "", group._videoEnabled, 0 };
                 CLog::Print( LOG_INFO, "SyncGroupsState: Added Group(%s) -> %s:%d floor=%d (MemHash:%lu)", group._id.c_str(), ip.c_str(), port, floorPort, nHash );
@@ -625,7 +633,7 @@ void CGroupCallService::CheckGroupIntegrity() {
                 if ( gclsCallDir.IsEnabled() ) {
                     strLogDir = gclsCallDir.GetPttSessionDir(group._id, TimeToIso(group._sessionStart));
                 }
-                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir)) {
+                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir, false, group._sessionSeq)) {
                      lock.lock();
                      m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip, 0, "", "", group._videoEnabled, 0 };
                 } else {

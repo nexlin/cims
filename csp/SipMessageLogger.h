@@ -54,18 +54,26 @@ public:
     void LogMessage(const char* pszFrom, const char* pszTo,
                     const char* pszProto, const char* pszMethod,
                     const char* pszPeer, const char* pszBody,
-                    const char* pszService = "system");
+                    const char* pszService = "system",
+                    const char* pszTxId = "",
+                    const char* pszSesId = "",
+                    const char* pszDetail = "");
+
+    /** Call-ID에 sesid/subid 매핑 등록 (INVITE 전에 호출) */
+    void SetCallSesId(const std::string& strCallId, const std::string& strSesId, const std::string& strSubId = "");
 
 private:
     /** Determine service from SIP message domain */
     std::string ClassifyService(const char* pszMsg, const std::string& strCallId, const std::string& strMethod);
 
-    /** Write {system_id}_{service}_flow.jsonl compact line (always), includes seq + iface linkage */
+    /** 통합 flow.jsonl 기록 */
     void WriteFlowLine(const char* pszService, const char* pszTs,
                        const char* pszFrom, const char* pszTo,
                        const char* pszProto, const char* pszMethod,
-                       const char* pszCallId, const char* pszFromUri, const char* pszToUri,
-                       const char* pszPeer, int iSeq, const char* pszIface);
+                       const char* pszDetail = "",
+                       const char* pszTxId = "",
+                       const char* pszSesId = "", const char* pszSubId = "",
+                       int iSeq = 0, const char* pszIface = "");
 
     /** Write to {system_id}_{iface}.jsonl, returns line number (seq) */
     int WriteInterfaceLine(const char* pszIface, const char* pszTs, const char* pszDir,
@@ -108,12 +116,13 @@ private:
     /** Extract URI user part from a From/To header value */
     static std::string ExtractUriUser(const std::string& strHeaderValue);
 
-    /** Get flow FILE* for a given service, open lazily */
-    FILE* GetFlowFile(const char* pszService);
+    /** Get flow FILE*, open lazily */
+    FILE* GetFlowFile();
 
     std::string m_strFlowBaseDir;   // service_log base
     std::string m_strMsgBaseDir;    // msg_log base
-    std::string m_strSystemId;      // e.g. "csp_01"
+    std::string m_strSystemId;      // e.g. "csp_01" (파일명용)
+    std::string m_strNodeName;      // e.g. "csp" (flow node 필드용)
     bool        m_bEnabled;
     bool        m_bRawLogEnabled;
     std::mutex  m_mtx;
@@ -124,15 +133,16 @@ private:
 
     // Call-ID → service cache for SIP correlation
     std::map<std::string, std::string> m_mapCallService;
+    // Call-ID → sesid/subid cache (GroupCallService가 등록)
+    std::map<std::string, std::string> m_mapCallSesId;
+    std::map<std::string, std::string> m_mapCallSubId;
 
     // Current open file state (hourly rotation)
     std::string m_strCurrentFlowHourDir;
     std::string m_strCurrentMsgHourDir;
 
-    // Per-service flow files (always open)
-    FILE*       m_pPhoneFlowFile;
-    FILE*       m_pPttFlowFile;
-    FILE*       m_pSystemFlowFile;
+    // Flow file (통합, 노드당 1파일)
+    FILE*       m_pFlowFile;
 
     // Per-interface message files (replaces single raw file)
     FILE*       m_pSipFile;

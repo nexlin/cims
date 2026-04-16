@@ -140,9 +140,10 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
     std::string strUri = getVal("uri");
     std::string strAction = getVal("action");
     std::string strEtag = getVal("etag");
+    std::string strTransId = getVal("trans_id");
 
-    CLog::Print(LOG_INFO, "CscInterface Event: %s, URI: %s, Action: %s, ETag: %s",
-        strEvent.c_str(), strUri.c_str(), strAction.c_str(), strEtag.c_str());
+    CLog::Print(LOG_INFO, "CscInterface Event: %s, URI: %s, Action: %s, TransId: %s",
+        strEvent.c_str(), strUri.c_str(), strAction.c_str(), strTransId.c_str());
 
     // CSC admin 메시지를 SIP 로그에 기록
     {
@@ -150,7 +151,8 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
         snprintf(peerBuf, sizeof(peerBuf), "%s:%d",
                  inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
         std::string strLabel = strEvent + "(" + strAction + ")";
-        gclsSipLogger.LogMessage("csc", "csp", "CSC", strLabel.c_str(), peerBuf, strMsg.c_str(), "system");
+        gclsSipLogger.LogMessage("csc", "csp", "CSC", strLabel.c_str(), peerBuf, strMsg.c_str(), "system",
+                                 strTransId.c_str());
     }
 
     if (strEvent == "GROUP_CHANGED") {

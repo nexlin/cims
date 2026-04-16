@@ -231,9 +231,14 @@ def load_shared_data(config):
                 logger.log_error(f"Error loading group {fpath}: {e}")
 
 # [FIX] Notify CSP logic
+_notify_seq = 0
+
 def notify_csp(event_type, uri, action, etag=""):
+    global _notify_seq
+    _notify_seq += 1
     try:
         data = {
+            "trans_id": str(_notify_seq),
             "event": event_type,
             "uri": uri,
             "action": action,

@@ -15,8 +15,11 @@
     "CspIp": "@CSP_IP@",
     "CspPort": 9001,
     "SessionTimeout": 600,
-    "ServiceLogDir": "@SERVICE_LOG_DIR@",
-    "MsgLogDir": "@MSG_LOG_DIR@",
+    "ServiceLogging": {
+        "Dir": "@SERVICE_LOG_DIR@",
+        "Enable": ["csp"],
+        "MediaTypes": ["floor", "dtmf"]
+    },
     "SystemId": "cmp_01",
     "LogDir": "log",
     "LogMaxSizeMB": 10,

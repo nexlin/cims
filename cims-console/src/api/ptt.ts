@@ -34,7 +34,8 @@ export interface PttSessionEventsResponse {
 export interface PttFlowResponse {
   call_id: string
   date: string
-  messages: FlowMessage[]
+  nodes?: Record<string, FlowMessage[]>
+  messages?: FlowMessage[]
 }
 
 export const pttApi = {

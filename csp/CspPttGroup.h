@@ -61,6 +61,9 @@ public:
     time_t _sessionStart;
     time_t _sessionEnd;
 
+    /** 세션 시퀀스 (그룹 재시작마다 증가, flow subid용) */
+    int _sessionSeq;
+
     /** Parsing method */
     bool load( std::string groupId );
     void Clear();

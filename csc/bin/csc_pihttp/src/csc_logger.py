@@ -17,7 +17,7 @@ _msg_log_dir: str = ""
 def init(service_log_dir: str = "", msg_log_dir: str = ""):
     global _service_log_dir, _msg_log_dir
     _service_log_dir = service_log_dir
-    _msg_log_dir = msg_log_dir
+    _msg_log_dir = msg_log_dir if msg_log_dir else service_log_dir
 
 
 def _ensure_dir(path: str):

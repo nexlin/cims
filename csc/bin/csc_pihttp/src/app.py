@@ -61,29 +61,28 @@ if __name__ == '__main__':
 
         config = load_config()
         cims_auth.init(config)
-        _msg_log_dir = config.get("MsgLogDir", "")
-        _service_log_dir = config.get("ServiceLogDir", _msg_log_dir)
-        # Extract system_id from CSP config or CspNotify, default "csp_01"
+
+        # ServiceLogging 설정 (신규 통합)
+        sl = config.get("ServiceLogging", {})
+        _service_log_dir = sl.get("Dir", "")
+        # 레거시 호환
+        if not _service_log_dir:
+            _service_log_dir = config.get("ServiceLogDir", config.get("MsgLogDir", ""))
         _system_id = config.get("SystemId", "csp_01")
-        # Legacy: sip_log_dir is {MsgLogDir}/csp for old-format fallback
-        _sip_log_dir = os.path.join(_msg_log_dir, "csp") if _msg_log_dir else ""
+
         csc_flow.init(
             service_log_dir=_service_log_dir,
-            sip_log_dir=_sip_log_dir,
-            msg_log_dir=_msg_log_dir,
             system_id=_system_id,
         )
 
         import csc_logger
-        # 검증 디렉터리 (소스 트리의 tests/)
         tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'tests'))
         if not os.path.isdir(tests_dir):
             tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))
         ver_init(tests_dir)
 
         csc_logger.init(
-            service_log_dir=config.get("ServiceLogDir", ""),
-            msg_log_dir=config.get("MsgLogDir", ""),
+            service_log_dir=_service_log_dir,
         )
 
         cims_recording.init(service_log_dir=_service_log_dir)

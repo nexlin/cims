@@ -18,7 +18,7 @@
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _rtpWorkerCount(4),
       _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _segmentIntervalSec(60),
-      _phoneFlowFile(nullptr), _pttFlowFile(nullptr), _bodyFile(nullptr)
+      _flowFile(nullptr), _msgFile(nullptr), _msgSeq(0), _lastRxSeq(0), _bodyFile(nullptr)
 {
     loadConfig();
 
@@ -141,16 +141,21 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     std::string cmdUpper = cmd;
     std::transform(cmdUpper.begin(), cmdUpper.end(), cmdUpper.begin(), ::toupper);
 
+    // 원문 기록 (수신)
+    std::string peerStr = ip + ":" + std::to_string(port);
+    std::string ts = getTimestamp();
+    _lastRxSeq = writeMsgLine(ts.c_str(), "RX", peerStr.c_str(), "JSON", strPacket.c_str());
+
     // Dispatch
     LOG_DEBUG("PCmpServer", "Dispatching cmd=%s transId=%d from %s:%d", cmd.c_str(), transId, ip.c_str(), port);
     if (cmdUpper == "ADD_SESSION" || cmdUpper == "ADD") processAdd(payload, ip, port, transId);
     else if (cmdUpper == "REMOVE_SESSION" || cmdUpper == "REMOVE") processRemove(payload, ip, port, transId);
     else if (cmdUpper == "HEARTBEAT" || cmdUpper == "ALIVE") processAlive(payload, ip, port, transId);
-    else if (cmdUpper == "ADD_GROUP" || cmdUpper == "ADDGROUP") processAddGroup(payload, ip, port, transId);
-    else if (cmdUpper == "JOIN_GROUP" || cmdUpper == "JOINGROUP") processJoinGroup(payload, ip, port, transId);
-    else if (cmdUpper == "LEAVE_GROUP" || cmdUpper == "LEAVEGROUP") processLeaveGroup(payload, ip, port, transId);
-    else if (cmdUpper == "REMOVE_GROUP" || cmdUpper == "REMOVEGROUP") processRemoveGroup(payload, ip, port, transId);
-    else if (cmdUpper == "MODIFY_GROUP" || cmdUpper == "MODIFY_GROUP") processModifyGroup(payload, ip, port, transId);
+    else if (cmdUpper == "ADD_PTT_GROUP" || cmdUpper == "ADD_GROUP" || cmdUpper == "ADDGROUP") processAddGroup(payload, ip, port, transId);
+    else if (cmdUpper == "JOIN_PTT_GROUP" || cmdUpper == "JOIN_GROUP" || cmdUpper == "JOINGROUP") processJoinGroup(payload, ip, port, transId);
+    else if (cmdUpper == "LEAVE_PTT_GROUP" || cmdUpper == "LEAVE_GROUP" || cmdUpper == "LEAVEGROUP") processLeaveGroup(payload, ip, port, transId);
+    else if (cmdUpper == "REMOVE_PTT_GROUP" || cmdUpper == "REMOVE_GROUP" || cmdUpper == "REMOVEGROUP") processRemoveGroup(payload, ip, port, transId);
+    else if (cmdUpper == "MODIFY_PTT_GROUP" || cmdUpper == "MODIFY_GROUP") processModifyGroup(payload, ip, port, transId);
     else if (cmdUpper == "MODIFY_SESSION" || cmdUpper == "MODIFY") processModify(payload, ip, port, transId);
     else if (cmdUpper == "STATS_REQUEST" || cmdUpper == "STATS") processStats(payload, ip, port, transId);
     else {
@@ -162,7 +167,11 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     }
 }
 
-void PCmpServer::sendResponse(const std::string& ip, int port, const std::string& msg) {
+int PCmpServer::sendResponse(const std::string& ip, int port, const std::string& msg) {
+    // 원문 기록 (송신)
+    std::string peerStr = ip + ":" + std::to_string(port);
+    std::string ts = getTimestamp();
+    int txSeq = writeMsgLine(ts.c_str(), "TX", peerStr.c_str(), "JSON", msg.c_str());
     LOG_DEBUG("PCmpServer", "Sending %lu bytes to %s:%d", msg.length(), ip.c_str(), port);
     if (_udpFd != -1) {
         struct sockaddr_in cliaddr;
@@ -175,6 +184,7 @@ void PCmpServer::sendResponse(const std::string& ip, int port, const std::string
             LOG_ERROR("PCmpServer", "sendto failed to %s:%d: %s", ip.c_str(), port, strerror(errno));
         }
     }
+    return txSeq;
 }
 
 void PCmpServer::processAlive(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
@@ -271,8 +281,9 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
         // CMP flow + body 로그
         std::string peerStr = ip + ":" + std::to_string(port);
         logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
+        std::string txIdStr = std::to_string(transId);
         logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(),
-                ("session=" + sessionId + " remote=" + rmtIp + ":" + std::to_string(rmtPort)).c_str());
+                sessionId.c_str(), txIdStr.c_str());
         logFlow(sessionId, "cmp", "cmp", "INT", "SESSION_START",
                 ("port=" + std::to_string(rtpPort)).c_str());
 
@@ -286,7 +297,8 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
         resp.Set("response", respBody.ToString());
 
         logFlow(sessionId, "cmp", "csp", "JSON", "OK",
-                ("local=" + rtpIp + ":" + std::to_string(rtpPort)).c_str());
+                ("local=" + rtpIp + ":" + std::to_string(rtpPort)).c_str(),
+                txIdStr.c_str());
         logBody("TX", peerStr.c_str(), "JSON", respBody.ToString().c_str());
 
         sendResponse(ip, port, resp.ToString());
@@ -306,7 +318,8 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
 
     std::string peerStr = ip + ":" + std::to_string(port);
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
-    logFlow(sessionId, "csp", "cmp", "JSON", "REMOVE_SESSION", ("session=" + sessionId).c_str());
+    std::string txIdStr = std::to_string(transId);
+    logFlow(sessionId, "csp", "cmp", "JSON", "REMOVE_SESSION", sessionId.c_str(), txIdStr.c_str());
 
     if (_sessions.find(sessionId) != _sessions.end()) {
         PRtpRelay* rtp = _sessions[sessionId];
@@ -319,7 +332,7 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
         LOG_WARN("PCmpServer", "REMOVE_SESSION session=%s not found", sessionId.c_str());
     }
 
-    logFlow(sessionId, "cmp", "csp", "JSON", "OK", "");
+    logFlow(sessionId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str());
     logBody("TX", peerStr.c_str(), "JSON", "OK");
 
     SimpleJson::JsonNode resp;
@@ -336,6 +349,12 @@ void PCmpServer::processModify(const SimpleJson::JsonNode& payload, const std::s
 void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string groupId = payload.GetString("group_id");
     std::string membersStr = payload.GetString("members");
+    std::string sesid = payload.GetString("sesid");
+    if (sesid.empty()) sesid = groupId;
+    std::string subid = payload.GetString("subid");
+    if (!subid.empty()) _groupSubId[groupId] = subid;
+    std::string txIdStr = std::to_string(transId);
+    logFlow(groupId, "csp", "cmp", "JSON", "ADD_PTT_GROUP", groupId.c_str(), txIdStr.c_str(), "ptt", sesid.c_str(), subid.c_str(), _lastRxSeq, "csp");
 
     std::string sharedIp = _rtpIp;
     int sharedPort = 0;
@@ -422,11 +441,13 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
         respBody.Set("video_port", sharedVideoPort);
 
         resp.Set("response", respBody.ToString());
-        sendResponse(ip, port, resp.ToString());
+        int txSeq = sendResponse(ip, port, resp.ToString());
+        logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), "ptt", sesid.c_str(), subid.c_str(), txSeq, "csp");
     } else {
          SimpleJson::JsonNode resp;
          resp.Set("trans_id", transId);
          resp.Set("response", "ERROR Allocation Fail");
+         logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Allocation Fail", txIdStr.c_str(), "ptt", groupId.c_str());
          sendResponse(ip, port, resp.ToString());
     }
 }
@@ -439,20 +460,23 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     int userFloorPort = (int)payload.GetInt("user_floor_port");
     int userVideoPort = (int)payload.GetInt("user_video_port");
 
+    std::string txIdStr = std::to_string(transId);
+    logFlow(groupId, "csp", "cmp", "JSON", "JOIN_PTT_GROUP", sessionId.c_str(), txIdStr.c_str(), "ptt", groupId.c_str(), "", _lastRxSeq, "csp");
+
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort);
-        logFlow(groupId, "cmp", "cmp", "RTP",
-                ("JOIN(" + sessionId + ")").c_str(),
-                (userIp + ":" + std::to_string(userPort)).c_str());
 
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
-        sendResponse(ip, port, resp.ToString());
+        int txSeq = sendResponse(ip, port, resp.ToString());
+        logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), "ptt", groupId.c_str(), "", txSeq, "csp");
         LOG_INFO("PCmpServer", "JOIN_GROUP group=%s session=%s %s:%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort);
     } else {
+        logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), "ptt", groupId.c_str());
+
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Group Not Found");
@@ -464,20 +488,22 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
 void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string groupId = payload.GetString("group_id");
     std::string sessionId = payload.GetString("session_id");
+    std::string txIdStr = std::to_string(transId);
+    logFlow(groupId, "csp", "cmp", "JSON", "LEAVE_PTT_GROUP", sessionId.c_str(), txIdStr.c_str(), "ptt", groupId.c_str());
 
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         group->removeMember(sessionId);
-        logFlow(groupId, "cmp", "cmp", "RTP",
-                ("LEAVE(" + sessionId + ")").c_str(), "");
 
+        logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), "ptt", groupId.c_str());
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "OK");
         sendResponse(ip, port, resp.ToString());
         LOG_INFO("PCmpServer", "LEAVE_GROUP group=%s session=%s", groupId.c_str(), sessionId.c_str());
     } else {
+        logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), "ptt", groupId.c_str());
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("response", "ERROR Group Not Found");
@@ -615,10 +641,21 @@ void PCmpServer::loadConfig() {
             }
             if (root2.Has("RecordDir")) _recordDir = root2.GetString("RecordDir");
             if (root2.Has("SegmentIntervalSec")) _segmentIntervalSec = root2.Get("SegmentIntervalSec").AsInt();
-            if (root2.Has("ServiceLogDir")) _serviceLogDir = root2.GetString("ServiceLogDir");
-            if (root2.Has("MsgLogDir")) _msgLogDir = root2.GetString("MsgLogDir");
+            // ServiceLogging 설정 (신규)
+            if (root2.Has("ServiceLogging")) {
+                SimpleJson::JsonNode sl = root2.Get("ServiceLogging");
+                if (sl.Has("Dir")) _serviceLogDir = sl.GetString("Dir");
+            }
+            // 레거시 호환
+            if (_serviceLogDir.empty() && root2.Has("ServiceLogDir"))
+                _serviceLogDir = root2.GetString("ServiceLogDir");
+            _msgLogDir = _serviceLogDir; // 통합 디렉토리
             if (root2.Has("SystemId")) _systemId = root2.GetString("SystemId");
             else _systemId = "cmp_01";
+            // node 필드용: "cmp_01" → "cmp"
+            _nodeName = _systemId;
+            auto upos = _nodeName.find('_');
+            if (upos != std::string::npos) _nodeName = _nodeName.substr(0, upos);
         }
     }
 
@@ -822,33 +859,66 @@ void PCmpServer::ensureFlowHourDir() {
     std::string hourDir = getFlowHourDir();
     if (hourDir == _currentFlowHourDir) return;
 
-    // 시간 변경 → 파일 닫고 새로 열기
-    if (_phoneFlowFile) { fclose(_phoneFlowFile); _phoneFlowFile = nullptr; }
-    if (_pttFlowFile)   { fclose(_pttFlowFile);   _pttFlowFile = nullptr; }
+    if (_flowFile) { fclose(_flowFile); _flowFile = nullptr; }
+    if (_msgFile) { fclose(_msgFile); _msgFile = nullptr; }
 
     mkdirP(hourDir);
     _currentFlowHourDir = hourDir;
 
-    std::string phoneFile = hourDir + "/" + _systemId + "_phone.flow.jsonl";
-    std::string pttFile   = hourDir + "/" + _systemId + "_ptt.flow.jsonl";
-    _phoneFlowFile = fopen(phoneFile.c_str(), "a");
-    _pttFlowFile   = fopen(pttFile.c_str(), "a");
+    _flowFile = fopen((hourDir + "/" + _systemId + ".flow.jsonl").c_str(), "a");
+    _msgFile = fopen((hourDir + "/" + _systemId + "_csp.msg.jsonl").c_str(), "a");
+    _msgSeq = 0;
+    // 기존 라인 수 카운트 (seq 연속성)
+    if (_msgFile) {
+        fseek(_msgFile, 0, SEEK_SET);
+        char buf[4096];
+        while (fgets(buf, sizeof(buf), _msgFile)) _msgSeq++;
+        fseek(_msgFile, 0, SEEK_END);
+    }
+}
+
+int PCmpServer::writeMsgLine(const char* ts, const char* dir, const char* peer, const char* proto, const char* msg) {
+    if (!_msgFile || !msg || !msg[0]) return 0;
+    _msgSeq++;
+    auto esc = [](const char* s) -> std::string {
+        if (!s) return "";
+        std::string r;
+        for (const char* p = s; *p; ++p) {
+            if (*p == '"') r += "\\\"";
+            else if (*p == '\\') r += "\\\\";
+            else if (*p == '\n') r += "\\n";
+            else if (*p == '\r') r += "\\r";
+            else r += *p;
+        }
+        return r;
+    };
+    fprintf(_msgFile, "{\"ts\":\"%s\",\"dir\":\"%s\",\"peer\":\"%s\",\"proto\":\"%s\",\"msg\":\"%s\"}\n",
+            ts ? ts : "", dir ? dir : "", peer ? peer : "", proto ? proto : "", esc(msg).c_str());
+    fflush(_msgFile);
+    return _msgSeq;
 }
 
 void PCmpServer::logFlow(const std::string& key, const char* from, const char* to,
-                         const char* proto, const char* label, const char* body) {
+                         const char* proto, const char* label, const char* detail,
+                         const char* txId, const char* service,
+                         const char* sesid, const char* subid,
+                         int seq, const char* iface) {
     if (_serviceLogDir.empty()) return;
 
     ensureFlowHourDir();
 
-    // 서비스 분류: _sessions에 있으면 phone, _groups에 있으면 ptt
-    bool isPhone = (_sessions.find(key) != _sessions.end());
-    FILE* f = isPhone ? _phoneFlowFile : _pttFlowFile;
+    FILE* f = _flowFile;
     if (!f) return;
+
+    // service 결정: 파라미터 > 자동 판별
+    const char* svc = (service && service[0]) ? service : "common";
+    if (!service || !service[0]) {
+        if (_sessions.find(key) != _sessions.end()) svc = "volte";
+        else if (_groups.find(key) != _groups.end()) svc = "ptt";
+    }
 
     std::string ts = getTimestamp();
 
-    // JSON escape
     auto esc = [](const char* s) -> std::string {
         if (!s) return "";
         std::string r;
@@ -864,11 +934,33 @@ void PCmpServer::logFlow(const std::string& key, const char* from, const char* t
         return r;
     };
 
-    fprintf(f,
-        "{\"ts\":\"%s\",\"from\":\"%s\",\"to\":\"%s\","
-        "\"proto\":\"%s\",\"method\":\"%s\",\"body\":\"%s\"}\n",
-        ts.c_str(), from ? from : "", to ? to : "",
-        proto ? proto : "", esc(label).c_str(), esc(body).c_str());
+    fprintf(f, "{\"ts\":\"%s\",\"node\":\"%s\",\"service\":\"%s\",\"from\":\"%s\",\"to\":\"%s\","
+        "\"proto\":\"%s\",\"method\":\"%s\"",
+        ts.c_str(), _nodeName.c_str(), svc, from ? from : "", to ? to : "",
+        proto ? proto : "", esc(label).c_str());
+
+    if (detail && detail[0])
+        fprintf(f, ",\"detail\":\"%s\"", esc(detail).c_str());
+    if (txId && txId[0])
+        fprintf(f, ",\"mid\":\"%s\"", esc(txId).c_str());
+    // sesid: 파라미터 > key(groupId/sessionId) fallback
+    const char* actualSesid = (sesid && sesid[0]) ? sesid : key.c_str();
+    if (actualSesid && actualSesid[0])
+        fprintf(f, ",\"sesid\":\"%s\"", esc(actualSesid).c_str());
+    // subid: 파라미터 > _groupSubId 캐시 fallback
+    std::string actualSubid = (subid && subid[0]) ? subid : "";
+    if (actualSubid.empty()) {
+        auto itSub = _groupSubId.find(key);
+        if (itSub != _groupSubId.end()) actualSubid = itSub->second;
+    }
+    if (!actualSubid.empty())
+        fprintf(f, ",\"subid\":\"%s\"", esc(actualSubid.c_str()).c_str());
+    if (seq > 0)
+        fprintf(f, ",\"seq\":%d", seq);
+    if (iface && iface[0])
+        fprintf(f, ",\"iface\":\"%s\"", iface);
+
+    fprintf(f, "}\n");
     fflush(f);
 }
 

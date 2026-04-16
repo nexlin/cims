@@ -35,7 +35,8 @@ public:
 
 
     bool AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iFloorPort, int& iVideoPort,
-                  const std::string& strRecordDir = "", const std::string& strLogDir = "", bool bVideoEnabled = false);
+                  const std::string& strRecordDir = "", const std::string& strLogDir = "", bool bVideoEnabled = false,
+                  int iSessionSeq = 0);
     bool ModifyGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers);
     bool JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strIp, int iPort, int iFloorPort = 0, int iVideoPort = 0);
     bool LeaveGroup(const std::string& strGroupId, const std::string& strSessionId);
@@ -48,7 +49,9 @@ private:
     // Async Request/Response
     struct Transaction {
         unsigned int id;
-        std::string strResponse; 
+        std::string strResponse;
+        std::string strSesId;    // flow sesid (응답 기록용)
+        std::string strService;  // flow service (응답 기록용)
         std::condition_variable cv;
         std::mutex mutex;
         bool bCompleted;

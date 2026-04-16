@@ -36,11 +36,11 @@ _system_id: str = "csp_01"
 
 def init(service_log_dir: str, sip_log_dir: str = "",
          msg_log_dir: str = "", system_id: str = "csp_01") -> None:
-    """ServiceLogDir, SipLogDir, MsgLogDir, SystemId 경로 설정"""
+    """ServiceLogging Dir 설정 (통합 디렉토리)"""
     global _calls_dir, _sip_log_dir, _msg_log_dir, _system_id
     _calls_dir = service_log_dir if service_log_dir else ""
-    _sip_log_dir = sip_log_dir if sip_log_dir else ""
-    _msg_log_dir = msg_log_dir if msg_log_dir else ""
+    _sip_log_dir = sip_log_dir if sip_log_dir else _calls_dir
+    _msg_log_dir = msg_log_dir if msg_log_dir else _calls_dir
     _system_id = system_id if system_id else "csp_01"
 
 
@@ -610,11 +610,10 @@ def _load_session_json(d_dir: str) -> dict:
 
 
 def _resolve_flow_paths(date_str: str, hour: str, service: str) -> list:
-    """서비스별 flow.jsonl 경로 목록 반환 (CSP + CMP 통합)
+    """통합 flow.jsonl 경로 목록 반환 (모든 노드)
 
-    New: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}_{service}.flow.jsonl  (CSP)
-         {ServiceLogDir}/YYYY/MM/DD/HH/cmp_01_{service}.flow.jsonl       (CMP)
-    Legacy: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{service}_flow.jsonl
+    New: {ServiceLogDir}/YYYY/MM/DD/HH/{node_id}.flow.jsonl (csp_01.flow.jsonl, cmp_01.flow.jsonl)
+    Legacy: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}_{service}.flow.jsonl
     """
     if not _sip_log_dir and not _calls_dir:
         return []
@@ -625,26 +624,25 @@ def _resolve_flow_paths(date_str: str, hour: str, service: str) -> list:
         base_dir = os.path.join(_calls_dir, yyyy, mm, dd, hh) if _calls_dir else ""
 
         if base_dir:
-            # 1) New: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}_{service}.flow.jsonl
-            new_path = os.path.join(base_dir, f"{_system_id}_{service}.flow.jsonl")
-            if os.path.exists(new_path):
-                paths.append(new_path)
-
-            # CMP flow는 디버깅용으로 같은 디렉터리에 존재하지만
-            # 기본 call flow에는 CSP flow만 사용 (CSP가 csp↔cmp 메시지를 이미 기록)
-            # CMP flow (cmp_01_*.flow.jsonl)는 CMP 디버깅 시 별도 조회
-
-            # 이미 찾았으면 레거시 스킵
-            if paths:
+            # 1) New 통합: {node_id}.flow.jsonl (와일드카드로 모든 노드)
+            import glob
+            pattern_new = os.path.join(base_dir, "*.flow.jsonl")
+            found_new = sorted(glob.glob(pattern_new))
+            if found_new:
+                paths.extend(found_new)
                 continue
 
-            # 3) Legacy: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{service}_flow.jsonl
-            legacy_sub = os.path.join(base_dir, _system_id, f"{_system_id}_{service}_flow.jsonl")
-            if os.path.exists(legacy_sub):
-                paths.append(legacy_sub)
+            # 2) Legacy: {system_id}_{service}.flow.jsonl
+            legacy_path = os.path.join(base_dir, f"{_system_id}_{service}.flow.jsonl")
+            if os.path.exists(legacy_path):
+                paths.append(legacy_path)
+                # CMP legacy도 추가
+                cmp_path = os.path.join(base_dir, f"cmp_01_{service}.flow.jsonl")
+                if os.path.exists(cmp_path):
+                    paths.append(cmp_path)
                 continue
 
-        # 4) Legacy fallback: {sip_log_dir}
+        # 3) Legacy fallback: {sip_log_dir}
         if _sip_log_dir:
             base = os.path.join(_sip_log_dir, yyyy, mm, dd, hh)
             for pattern in [f"{service}_flow.jsonl", "flow.jsonl", "sip.jsonl"]:
@@ -716,19 +714,23 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip") 
     hh = hour.zfill(2)
 
     # Determine interface file path
-    # 1) New: {MsgLogDir}/YYYY/MM/DD/HH/{system_id}_{iface}.jsonl (서브디렉터리 없음)
+    # 1) 통합: {Dir}/YYYY/MM/DD/HH/{node}_{iface}.msg.jsonl
     path = ""
     if _msg_log_dir:
-        new_path = os.path.join(_msg_log_dir, yyyy, mm, dd, hh,
-                                f"{_system_id}_{iface}.jsonl")
-        if os.path.exists(new_path):
-            path = new_path
-        else:
-            # Legacy: {MsgLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{iface}.jsonl
-            legacy_path = os.path.join(_msg_log_dir, yyyy, mm, dd, hh, _system_id,
-                                       f"{_system_id}_{iface}.jsonl")
-            if os.path.exists(legacy_path):
-                path = legacy_path
+        # 모든 노드의 msg 파일 탐색 ({node}_{iface}.msg.jsonl)
+        import glob
+        base = os.path.join(_msg_log_dir, yyyy, mm, dd, hh)
+        for pattern in [f"*_{iface}.msg.jsonl", f"{_system_id}_{iface}.msg.jsonl",
+                        f"{_system_id}_{iface}.jsonl"]:
+            matches = glob.glob(os.path.join(base, pattern))
+            if matches:
+                path = matches[0]
+                break
+        if not path:
+            # 레거시: {Dir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{iface}.jsonl
+            legacy = os.path.join(base, _system_id, f"{_system_id}_{iface}.jsonl")
+            if os.path.exists(legacy):
+                path = legacy
 
     # 2) New structure under sip_log_dir
     if not path and _sip_log_dir:
@@ -869,11 +871,26 @@ def _flow_msg_from_log(obj: dict, call_ids: list = None) -> dict:
         "proto": proto,
         "label": method,
     }
-    # seq + iface (body 조회 링크)
+    if obj.get("node"):
+        result["node"] = obj["node"]
+    if obj.get("service"):
+        result["service"] = obj["service"]
+    if obj.get("mid"):
+        result["mid"] = obj["mid"]
+    elif obj.get("tx_id"):  # 레거시 호환
+        result["mid"] = obj["tx_id"]
     if obj.get("seq"):
         result["seq"] = obj["seq"]
     if obj.get("iface"):
         result["iface"] = obj["iface"]
+    if obj.get("detail"):
+        result["detail"] = obj["detail"]
+    elif obj.get("body"):
+        result["detail"] = obj["body"]
+    if obj.get("sesid"):
+        result["sesid"] = obj["sesid"]
+    if obj.get("subid"):
+        result["subid"] = obj["subid"]
     return result
 
 
@@ -972,8 +989,25 @@ async def _handle_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         # fallback: 기존 csp.jsonl 기반
         messages = _load_messages(d_dir)
 
+    # 노드별 배열로 분류
+    nodes: dict[str, list] = {}
+    for m in messages:
+        node = m.get('node', 'unknown')
+        if node == 'unknown':
+            if m.get('iface') == 'sip' or m.get('proto') == 'SIP':
+                node = 'csp'
+            elif m.get('proto') in ('INT', 'RTP', 'MCPTT'):
+                node = 'cmp'
+            else:
+                node = 'csp'
+        if node not in nodes:
+            nodes[node] = []
+        nodes[node].append(m)
+    for node_msgs in nodes.values():
+        node_msgs.sort(key=lambda m: m.get('ts', ''))
+
     return HandlerResult(status=200, body=json.dumps({
-        "call_id": call_id, "date": date_str, "messages": messages,
+        "call_id": call_id, "date": date_str, "nodes": nodes,
     }), media_type="application/json")
 
 
@@ -1289,6 +1323,12 @@ def _search_sip_for_group(group_id: str, date_str: str) -> list:
                     try:
                         obj = json.loads(line)
                     except: continue
+
+                    # 통합 파일: service 필드로 필터 (없으면 레거시 — 전부 포함)
+                    svc = obj.get("service", "")
+                    if svc and svc != "ptt":
+                        continue
+
                     proto = obj.get("proto", "SIP")
 
                     if proto == "SIP":
@@ -1306,12 +1346,18 @@ def _search_sip_for_group(group_id: str, date_str: str) -> list:
         yyyy, mm, dd = _date_parts(date_str)
         sip_detail_paths = []
         for hh in [f"{h:02d}" for h in range(24)]:
-            # New: {MsgLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_sip.jsonl
+            # New: {Dir}/YYYY/MM/DD/HH/{system_id}_sip.msg.jsonl (통합)
             if _msg_log_dir:
-                p = os.path.join(_msg_log_dir, yyyy, mm, dd, hh, _system_id,
-                                 f"{_system_id}_sip.jsonl")
+                p = os.path.join(_msg_log_dir, yyyy, mm, dd, hh,
+                                 f"{_system_id}_sip.msg.jsonl")
                 if os.path.exists(p):
                     sip_detail_paths.append(p)
+                else:
+                    # 레거시: {Dir}/YYYY/MM/DD/HH/{system_id}/{system_id}_sip.jsonl
+                    p2 = os.path.join(_msg_log_dir, yyyy, mm, dd, hh, _system_id,
+                                      f"{_system_id}_sip.jsonl")
+                    if os.path.exists(p2):
+                        sip_detail_paths.append(p2)
         for jsonl_path in sip_detail_paths:
             try:
                 with open(jsonl_path, 'r') as f:
@@ -1446,71 +1492,116 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         return HandlerResult(status=404, body=json.dumps({"error": "No recording available"}))
 
     if len(parts) >= 3 and parts[2] == "flow":
-        # ── SIP Flow ──
+        # ── Flow: 모든 노드의 flow.jsonl 읽기 → service 필터 → 노드별 배열 ──
         date_str = _qp("date", datetime.now().strftime("%Y-%m-%d"))
+        flow_paths = _resolve_flow_paths(date_str, None, "ptt")
 
-        # 1) flow.jsonl에서 group_id로 SIP+CSC 메시지 검색
-        sip_msgs = _search_sip_for_group(group_id, date_str)
+        # 모든 ptt flow 수집 → sesid 기반 매칭
+        all_ptt_msgs = []
+        for jsonl_path in flow_paths:
+            try:
+                with open(jsonl_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except:
+                            continue
+                        svc = obj.get("service", "")
+                        if svc and svc != "ptt":
+                            continue
+                        all_ptt_msgs.append(obj)
+            except Exception as e:
+                logger.error("flow read error: %s", e)
 
-        # 2) SIP 메시지 시간 범위로 CMP 메시지 검색
-        time_start, time_end = "", ""
-        if sip_msgs:
-            times = [m.get("ts", "") for m in sip_msgs if m.get("ts")]
-            if times:
-                time_start = min(times)
-                te = max(times)
-                try:
-                    parts = te.split(":")
-                    secs = float(parts[2]) + 2.0
-                    if secs >= 60: secs -= 60; parts[1] = f"{int(parts[1])+1:02d}"
-                    parts[2] = f"{secs:09.6f}"
-                    time_end = ":".join(parts)
-                except:
-                    time_end = te
-        cmp_msgs = _search_cmp_messages([], date_str,
-                                         time_start=time_start, time_end=time_end,
-                                         call_type="ptt") if time_start else []
+        # sesid 기반 매칭: sesid == group_id인 메시지 (SIP + non-SIP 모두)
+        # sesid가 없는 레거시는 detail/from_uri/to_uri에서 group_id 검색 (fallback)
+        matched_subids = set()
+        all_matched = []
+        sip_times = []
 
-        all_msgs = sip_msgs + cmp_msgs
+        for obj in all_ptt_msgs:
+            sesid_val = obj.get("sesid", "")
+            if sesid_val == group_id:
+                # sesid 정확 매칭
+                all_matched.append(obj)
+                if obj.get("proto") == "SIP" and obj.get("ts"):
+                    sip_times.append(obj["ts"])
+                    subid = obj.get("subid", "")
+                    if subid:
+                        matched_subids.add(subid)
+            elif not sesid_val:
+                # sesid 없는 메시지: detail/subid에서 group_id 검색 (레거시 fallback)
+                detail = obj.get("detail", "")
+                if group_id in detail:
+                    all_matched.append(obj)
+                    if obj.get("proto") == "SIP" and obj.get("ts"):
+                        sip_times.append(obj["ts"])
+                        subid = obj.get("subid", "")
+                        if subid:
+                            matched_subids.add(subid)
+
+        # 같은 subid(Call-ID)를 가진 SIP 응답도 포함 (sesid가 없을 수 있음)
+        if matched_subids:
+            for obj in all_ptt_msgs:
+                if obj in all_matched:
+                    continue
+                if obj.get("proto") == "SIP":
+                    subid = obj.get("subid", "")
+                    if subid in matched_subids:
+                        all_matched.append(obj)
+                        if obj.get("ts"):
+                            sip_times.append(obj["ts"])
+
+        # non-SIP 메시지를 SIP 시간 범위로 필터
+        if sip_times:
+            t_start = min(sip_times)
+            t_end = max(sip_times)
+            # 2초 여유
+            try:
+                te_parts = t_end.split(":")
+                secs = float(te_parts[2]) + 2.0
+                if secs >= 60:
+                    secs -= 60
+                    te_parts[1] = f"{int(te_parts[1])+1:02d}"
+                te_parts[2] = f"{secs:09.6f}"
+                t_end = ":".join(te_parts)
+            except:
+                pass
+            filtered = []
+            for obj in all_matched:
+                if obj.get("proto") == "SIP":
+                    filtered.append(obj)
+                else:
+                    ts = obj.get("ts", "")
+                    if ts and t_start <= ts <= t_end:
+                        filtered.append(obj)
+        else:
+            filtered = all_matched
+
+        # B2BUA call_ids (ue_o/ue_t 구분용)
         d_dir = _find_ptt_session_dir(group_id, session_dir)
         call_ids = []
         if d_dir:
             session = _load_session_json(d_dir)
-            call_ids = session.get("call_ids", [])
+            call_ids = session.get("call_ids", []) if session else []
 
-        # flow.jsonl의 from/to를 그대로 사용
-        messages = []
-        for obj in all_msgs:
-            messages.append(_flow_msg_from_log(obj, call_ids))
-        # Secondary: CMP cmp.jsonl (floor events from session dir)
-        if d_dir:
-            cmp_jsonl = os.path.join(d_dir, 'cmp.jsonl')
-            if os.path.exists(cmp_jsonl):
-                cmp_events = _read_jsonl(cmp_jsonl)
-                # Only add CMP events that aren't already in sip.jsonl
-                sip_ts_set = {obj.get('ts', '') for obj in all_msgs}
-                for evt in cmp_events:
-                    if evt.get('ts', '') not in sip_ts_set:
-                        evt_proto = evt.get('proto', 'INT')
-                        evt_label = evt.get('label', evt.get('event', ''))
-                        if evt_proto == 'MCPTT':
-                            fm_from, fm_to = 'cmp', 'cmp'
-                        else:
-                            fm_from, fm_to = 'cmp', 'cmp'
-                        messages.append({
-                            'ts': evt.get('ts', ''),
-                            'from': fm_from,
-                            'to': fm_to,
-                            'proto': evt_proto,
-                            'label': evt_label,
-                            'body': json.dumps(evt),
-                        })
+        # FlowMessage 변환 → 노드별 분류
+        nodes: dict[str, list] = {}
+        for obj in filtered:
+            msg = _flow_msg_from_log(obj, call_ids)
+            node = msg.get("node", "unknown")
+            if node not in nodes:
+                nodes[node] = []
+            nodes[node].append(msg)
 
-        # sip.jsonl 기록 순서 + CMP 병합 후 시간순 정렬
-        messages.sort(key=lambda m: m.get('ts', ''))
+        for node_msgs in nodes.values():
+            node_msgs.sort(key=lambda m: m.get("ts", ""))
 
         return HandlerResult(status=200, body=json.dumps({
-            "call_id": group_id, "date": date_str, "messages": messages,
+            "call_id": group_id, "date": date_str, "nodes": nodes,
         }), media_type="application/json")
 
     else:

@@ -230,7 +230,8 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
     // 그룹 기본 정보 (확장 필드 포함)
     std::string strSql =
         "SELECT id, name, video_enabled, priority, encryption, emergency_call, "
-        "org_code, UNIX_TIMESTAMP(session_start) AS ss, UNIX_TIMESTAMP(session_end) AS se "
+        "org_code, UNIX_TIMESTAMP(session_start) AS ss, UNIX_TIMESTAMP(session_end) AS se, "
+        "session_seq "
         "FROM ptt_groups WHERE id='" + Escape(strGroupId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
@@ -252,6 +253,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
     clsGroup._orgCode        = row[6] ? row[6] : "";
     clsGroup._sessionStart   = row[7] ? (time_t)atoll(row[7]) : 0;
     clsGroup._sessionEnd     = row[8] ? (time_t)atoll(row[8]) : 0;
+    clsGroup._sessionSeq     = row[9] ? atoi(row[9]) : 1;
     mysql_free_result(pRes);
 
     // 멤버 목록
@@ -623,4 +625,18 @@ bool CDbManager::UpdateParticipantLeft( const std::string& strGroupId,
         "WHERE cl.group_id='" + Escape(strGroupId) + "' "
         "AND cp.msisdn='" + Escape(strMsisdn) + "' AND cp.leave_time IS NULL"
     );
+}
+
+int CDbManager::IncrementSessionSeq(const std::string& strGroupId) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_pMysql && !Reconnect()) return 1;
+
+    ExecuteQuery("UPDATE ptt_groups SET session_seq = session_seq + 1 WHERE id='" + Escape(strGroupId) + "'");
+
+    MYSQL_RES* pRes = ExecuteSelect("SELECT session_seq FROM ptt_groups WHERE id='" + Escape(strGroupId) + "'");
+    if (!pRes) return 1;
+    MYSQL_ROW row = mysql_fetch_row(pRes);
+    int seq = row && row[0] ? atoi(row[0]) : 1;
+    mysql_free_result(pRes);
+    return seq;
 }

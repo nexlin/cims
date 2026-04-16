@@ -52,15 +52,10 @@
         "Cdr": {
             "Folder": "log/cdr"
         },
-        "MsgLog": {
-            "Dir": "@MSG_LOG_DIR@"
-        },
-        "ServiceLog": {
-            "Dir": "@SERVICE_LOG_DIR@"
-        },
-        "Recording": {
-            "Enable": true,
-            "Dir": "@RECORD_DIR@"
+        "ServiceLogging": {
+            "Dir": "@SERVICE_LOG_DIR@",
+            "Enable": ["sip", "cmp", "csc"],
+            "Recording": true
         },
         "Monitor": {
             "Port": 16000,

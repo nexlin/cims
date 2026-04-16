@@ -14,7 +14,7 @@ static const size_t MAX_CALLID_CACHE = 10000;
 
 CSipMessageLogger::CSipMessageLogger()
     : m_bEnabled(false), m_bRawLogEnabled(true),
-      m_pPhoneFlowFile(NULL), m_pPttFlowFile(NULL), m_pSystemFlowFile(NULL),
+      m_pFlowFile(NULL),
       m_pSipFile(NULL), m_pCmpFile(NULL), m_pCscFile(NULL),
       m_iSipSeq(0), m_iCmpSeq(0), m_iCscSeq(0)
 {
@@ -29,9 +29,7 @@ CSipMessageLogger::~CSipMessageLogger()
 void CSipMessageLogger::CloseAllFiles()
 {
     // Called under m_mtx lock
-    if (m_pPhoneFlowFile)  { fclose(m_pPhoneFlowFile);  m_pPhoneFlowFile = NULL; }
-    if (m_pPttFlowFile)    { fclose(m_pPttFlowFile);    m_pPttFlowFile = NULL; }
-    if (m_pSystemFlowFile) { fclose(m_pSystemFlowFile); m_pSystemFlowFile = NULL; }
+    if (m_pFlowFile)       { fclose(m_pFlowFile);       m_pFlowFile = NULL; }
     if (m_pSipFile)        { fclose(m_pSipFile);        m_pSipFile = NULL; }
     if (m_pCmpFile)        { fclose(m_pCmpFile);        m_pCmpFile = NULL; }
     if (m_pCscFile)        { fclose(m_pCscFile);        m_pCscFile = NULL; }
@@ -46,10 +44,24 @@ void CSipMessageLogger::Init(const std::string& strFlowBaseDir,
     m_strFlowBaseDir = strFlowBaseDir;
     m_strMsgBaseDir = strMsgBaseDir;
     m_strSystemId = strSystemId.empty() ? "csp_01" : strSystemId;
+    // node 필드용: "csp_01" → "csp" (언더스코어+숫자 제거)
+    m_strNodeName = m_strSystemId;
+    auto upos = m_strNodeName.find('_');
+    if (upos != std::string::npos) m_strNodeName = m_strNodeName.substr(0, upos);
     m_bRawLogEnabled = bRawLogEnabled;
     if (!m_strFlowBaseDir.empty()) MkdirP(m_strFlowBaseDir);
     if (!m_strMsgBaseDir.empty()) MkdirP(m_strMsgBaseDir);
     m_bEnabled = true;
+}
+
+void CSipMessageLogger::SetCallSesId(const std::string& strCallId, const std::string& strSesId, const std::string& strSubId) {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    if (!strCallId.empty() && !strSesId.empty()) {
+        m_mapCallSesId[strCallId] = strSesId;
+    }
+    if (!strCallId.empty() && !strSubId.empty()) {
+        m_mapCallSubId[strCallId] = strSubId;
+    }
 }
 
 void CSipMessageLogger::SetRealms(const std::string& strVoipRealm, const std::string& strPttRealm)
@@ -193,6 +205,7 @@ void CSipMessageLogger::Print(EnumLogLevel eLevel, const char* fmt, ...)
     std::string strToRaw = ExtractHeader(pszSipMsg, "To:", "t:");
     std::string strFromUri = ExtractUriUser(strFromRaw);
     std::string strToUri = ExtractUriUser(strToRaw);
+    std::string strCSeq = ExtractHeader(pszSipMsg, "CSeq:", NULL);
 
     std::string strTs = GetTimestamp();
     std::string strFlowHourDir = GetFlowHourDir();
@@ -219,16 +232,48 @@ void CSipMessageLogger::Print(EnumLogLevel eLevel, const char* fmt, ...)
         iSeq = WriteInterfaceLine("sip", strTs.c_str(), pszDir, szPeer, "SIP", pszSipMsg);
     }
 
-    // 2. {system_id}_{service}_flow.jsonl (with seq + iface linkage)
+    // SIP은 CSP 단독 기록이므로 mid 불필요
+
+    // detail 생성: INVITE=from→to, REGISTER=user, 응답=빈값
+    std::string strDetail;
+    if (strMethod == "INVITE" && !strFromUri.empty() && !strToUri.empty()) {
+        strDetail = strFromUri + "\xe2\x86\x92" + strToUri;  // UTF-8 →
+    } else if (strMethod == "REGISTER" && !strFromUri.empty()) {
+        strDetail = strFromUri;
+    } else if (strMethod == "SUBSCRIBE" && !strToUri.empty()) {
+        strDetail = strToUri;
+    } else if (strMethod == "BYE" && !strFromUri.empty()) {
+        strDetail = strFromUri;
+    }
+
+    // sesid 조회: Call-ID → sesid 캐시 (GroupCallService가 등록)
+    std::string strSesId;
+    auto itSes = m_mapCallSesId.find(strCallId);
+    if (itSes != m_mapCallSesId.end()) strSesId = itSes->second;
+
+    // subid: VoLTE=Call-ID(leg 구분), PTT=session_seq(캐시 조회)
+    std::string strSubId;
+    if (strService == "phone" || strService == "volte") {
+        strSubId = strCallId;
+    } else {
+        auto itSub = m_mapCallSubId.find(strCallId);
+        if (itSub != m_mapCallSubId.end()) strSubId = itSub->second;
+    }
+
+    // 2. flow.jsonl (SIP: mid 불필요)
     WriteFlowLine(strService.c_str(), strTs.c_str(), pszFrom, pszTo, "SIP",
-                  strMethod.c_str(), strCallId.c_str(),
-                  strFromUri.c_str(), strToUri.c_str(), szPeer, iSeq, "sip");
+                  strMethod.c_str(), strDetail.c_str(), "",
+                  strSesId.c_str(), strSubId.c_str(),
+                  iSeq, "sip");
 }
 
 void CSipMessageLogger::LogMessage(const char* pszFrom, const char* pszTo,
                                     const char* pszProto, const char* pszMethod,
                                     const char* pszPeer, const char* pszBody,
-                                    const char* pszService)
+                                    const char* pszService,
+                                    const char* pszTxId,
+                                    const char* pszSesId,
+                                    const char* pszDetail)
 {
     if (!m_bEnabled) return;
 
@@ -258,10 +303,12 @@ void CSipMessageLogger::LogMessage(const char* pszFrom, const char* pszTo,
                                   proto, pszBody ? pszBody : "");
     }
 
-    // 2. {system_id}_{service}_flow.jsonl (with seq + iface linkage)
+    // 2. flow.jsonl
     WriteFlowLine(service, strTs.c_str(), pszFrom ? pszFrom : "", pszTo ? pszTo : "",
                   proto, pszMethod ? pszMethod : "",
-                  "", "", "", pszPeer ? pszPeer : "", iSeq, iface);
+                  pszDetail ? pszDetail : "", pszTxId ? pszTxId : "",
+                  pszSesId ? pszSesId : "", "",
+                  iSeq, iface);
 }
 
 void CSipMessageLogger::EnsureHourlyFiles(const std::string& strFlowHourDir,
@@ -293,7 +340,7 @@ void CSipMessageLogger::EnsureHourlyFiles(const std::string& strFlowHourDir,
         int* seqs[] = { &m_iSipSeq, &m_iCmpSeq, &m_iCscSeq };
 
         for (int i = 0; i < 3; i++) {
-            std::string path = strMsgHourDir + "/" + m_strSystemId + "_" + ifaces[i] + ".jsonl";
+            std::string path = strMsgHourDir + "/" + m_strSystemId + "_" + ifaces[i] + ".msg.jsonl";
             *files[i] = fopen(path.c_str(), "a+");
             *seqs[i] = 0;
             if (*files[i]) {
@@ -308,29 +355,14 @@ void CSipMessageLogger::EnsureHourlyFiles(const std::string& strFlowHourDir,
     // Flow files are opened on first write (lazy) via GetFlowFile()
 }
 
-FILE* CSipMessageLogger::GetFlowFile(const char* pszService)
+FILE* CSipMessageLogger::GetFlowFile()
 {
-    // Called under m_mtx lock
     if (m_strCurrentFlowHourDir.empty()) return NULL;
-
-    FILE** ppFile = NULL;
-    std::string strFileName;
-
-    if (strcmp(pszService, "phone") == 0) {
-        ppFile = &m_pPhoneFlowFile;
-        strFileName = m_strSystemId + "_phone.flow.jsonl";
-    } else if (strcmp(pszService, "ptt") == 0) {
-        ppFile = &m_pPttFlowFile;
-        strFileName = m_strSystemId + "_ptt.flow.jsonl";
-    } else {
-        ppFile = &m_pSystemFlowFile;
-        strFileName = m_strSystemId + "_system.flow.jsonl";
+    if (!m_pFlowFile) {
+        std::string path = m_strCurrentFlowHourDir + "/" + m_strSystemId + ".flow.jsonl";
+        m_pFlowFile = fopen(path.c_str(), "a");
     }
-
-    if (!*ppFile) {
-        *ppFile = fopen((m_strCurrentFlowHourDir + "/" + strFileName).c_str(), "a");
-    }
-    return *ppFile;
+    return m_pFlowFile;
 }
 
 FILE* CSipMessageLogger::GetInterfaceFile(const char* pszIface)
@@ -352,29 +384,42 @@ int& CSipMessageLogger::GetIfaceSeq(const char* pszIface)
 void CSipMessageLogger::WriteFlowLine(const char* pszService,
                                        const char* pszTs, const char* pszFrom, const char* pszTo,
                                        const char* pszProto, const char* pszMethod,
-                                       const char* pszCallId, const char* pszFromUri, const char* pszToUri,
-                                       const char* pszPeer, int iSeq, const char* pszIface)
+                                       const char* pszDetail,
+                                       const char* pszTxId,
+                                       const char* pszSesId, const char* pszSubId,
+                                       int iSeq, const char* pszIface)
 {
-    // Called under m_mtx lock
-    FILE* pFile = GetFlowFile(pszService);
+    FILE* pFile = GetFlowFile();
     if (!pFile) return;
 
+    const char* svc = "common";
+    if (pszService) {
+        if (strcmp(pszService, "phone") == 0) svc = "volte";
+        else if (strcmp(pszService, "ptt") == 0) svc = "ptt";
+    }
+
     fprintf(pFile,
-        "{\"ts\":\"%s\",\"from\":\"%s\",\"to\":\"%s\","
-        "\"proto\":\"%s\",\"method\":\"%s\",\"call_id\":\"%s\","
-        "\"from_uri\":\"%s\",\"to_uri\":\"%s\",\"peer\":\"%s\","
-        "\"seq\":%d,\"iface\":\"%s\"}\n",
+        "{\"ts\":\"%s\",\"node\":\"%s\",\"service\":\"%s\",\"from\":\"%s\",\"to\":\"%s\","
+        "\"proto\":\"%s\",\"method\":\"%s\"",
         pszTs ? pszTs : "",
-        pszFrom ? pszFrom : "",
-        pszTo ? pszTo : "",
-        pszProto ? pszProto : "",
-        JsonEsc(pszMethod).c_str(),
-        JsonEsc(pszCallId).c_str(),
-        JsonEsc(pszFromUri).c_str(),
-        JsonEsc(pszToUri).c_str(),
-        pszPeer ? pszPeer : "",
-        iSeq,
-        pszIface ? pszIface : "sip");
+        m_strNodeName.c_str(), svc,
+        pszFrom ? pszFrom : "", pszTo ? pszTo : "",
+        pszProto ? pszProto : "", JsonEsc(pszMethod).c_str());
+
+    if (pszDetail && pszDetail[0])
+        fprintf(pFile, ",\"detail\":\"%s\"", JsonEsc(pszDetail).c_str());
+    if (pszTxId && pszTxId[0])
+        fprintf(pFile, ",\"mid\":\"%s\"", JsonEsc(pszTxId).c_str());
+    if (pszSesId && pszSesId[0])
+        fprintf(pFile, ",\"sesid\":\"%s\"", JsonEsc(pszSesId).c_str());
+    if (pszSubId && pszSubId[0])
+        fprintf(pFile, ",\"subid\":\"%s\"", JsonEsc(pszSubId).c_str());
+    if (iSeq > 0)
+        fprintf(pFile, ",\"seq\":%d", iSeq);
+    if (pszIface && pszIface[0])
+        fprintf(pFile, ",\"iface\":\"%s\"", pszIface);
+
+    fprintf(pFile, "}\n");
     fflush(pFile);
 }
 

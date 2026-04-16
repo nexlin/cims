@@ -39,6 +39,8 @@
         "Ip": "@CSP_IP@",
         "Port": 4421
     },
-    "MsgLogDir": "@MSG_LOG_DIR@",
-    "ServiceLogDir": "@SERVICE_LOG_DIR@"
+    "ServiceLogging": {
+        "Dir": "@SERVICE_LOG_DIR@",
+        "Enable": ["csp", "ue"]
+    }
 }

@@ -215,15 +215,31 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (cdr.Has("Folder")) m_strCdrFolder = cdr.GetString("Folder");
             }
 
-            if (setup.Has("MsgLog")) {
-                SimpleJson::JsonNode msglog = setup.Get("MsgLog");
-                if (msglog.Has("Dir")) m_strMsgLogDir = msglog.GetString("Dir");
+            // ServiceLogging 설정 (신규 — Dir 통합)
+            if (setup.Has("ServiceLogging")) {
+                SimpleJson::JsonNode sl = setup.Get("ServiceLogging");
+                if (sl.Has("Dir")) {
+                    m_strServiceLogDir = sl.GetString("Dir");
+                    m_strMsgLogDir = m_strServiceLogDir; // 통합 디렉토리
+                }
+                if (sl.Has("Recording")) {
+                    std::string rv = sl.GetString("Recording");
+                    m_bRecordEnable = (rv == "true" || rv == "1");
+                    // record_dir = ServiceLogDir (통합)
+                    if (m_bRecordEnable && m_strRecordDir.empty())
+                        m_strRecordDir = m_strServiceLogDir;
+                }
             }
-
-            if (setup.Has("ServiceLog")) {
+            // 레거시 호환
+            if (m_strServiceLogDir.empty() && setup.Has("ServiceLog")) {
                 SimpleJson::JsonNode svclog = setup.Get("ServiceLog");
                 if (svclog.Has("Dir")) m_strServiceLogDir = svclog.GetString("Dir");
             }
+            if (m_strMsgLogDir.empty() && setup.Has("MsgLog")) {
+                SimpleJson::JsonNode msglog = setup.Get("MsgLog");
+                if (msglog.Has("Dir")) m_strMsgLogDir = msglog.GetString("Dir");
+            }
+            if (m_strMsgLogDir.empty()) m_strMsgLogDir = m_strServiceLogDir;
 
             if (setup.Has("SystemId")) {
                 m_strSystemId = setup.GetString("SystemId");
