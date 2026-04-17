@@ -14,6 +14,7 @@
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
+#include "SipMessageLogger.h"
 #include "CspServer.h"
 #include "CspSipServer.h"
 #include "CspUser.h"
@@ -431,9 +432,13 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
         if (iAudioPort <= 0 && pclsRtp->m_iPort > 0) iAudioPort = pclsRtp->m_iPort;
         int iVideoPort = (pclsRtp->GetMediaCount() >= 2) ? pclsRtp->GetVideoPort() : 0;
 
+        // sesid: 수신 INVITE의 Call-ID로 이미 발행되어 있으면 재사용, 없으면 발행
+        std::string strSesId = gclsSipLogger.GetOrIssueSesId(pszCallId, pszFrom ? pszFrom : "");
+
         iStartPort = gclsRtpMap.CreatePort(SOCKET_COUNT_PER_MEDIA * pclsRtp->GetMediaCount(), strRecordDir, strLogDir,
                                           pszFrom ? pszFrom : "", pszTo ? pszTo : "",
-                                          pclsRtp->m_strIp, iAudioPort, iVideoPort);
+                                          pclsRtp->m_strIp, iAudioPort, iVideoPort,
+                                          strSesId);
         if (iStartPort == -1) return StopCall(pszCallId, SIP_INTERNAL_SERVER_ERROR);
 
         std::string strRelayIp = gclsSetup.m_strLocalIp;
@@ -450,13 +455,28 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
     if (gclsUserAgent.CreateCall(pszFrom, pszTo, pclsRtp, &clsRoute, strCallId, &pclsInvite) == false)
         return StopCall(pszCallId, SIP_INTERNAL_SERVER_ERROR);
 
+    // P-Asserted-Identity: B2BUA 발신 leg에 인증된 발신자 신원 전달 (3GPP TS 24.229)
+    if (pclsInvite) {
+        std::string strDomain = gclsSetup.GetDomainForService("volte");
+        if (strDomain.empty()) strDomain = gclsSetup.m_strAuthRealm;
+        char szPAI[512];
+        snprintf(szPAI, sizeof(szPAI), "<sip:%s@%s>", pszFrom ? pszFrom : "", strDomain.c_str());
+        pclsInvite->AddHeader("P-Asserted-Identity", szPAI);
+    }
+
     gclsCallMap.Insert(pszCallId, strCallId.c_str(), iStartPort);
     SetCallOwner(strCallId.c_str(), GetCallOwner(pszCallId));
 
-    // B2BUA: 착신 leg도 같은 Session-ID에 매핑
+    // B2BUA: 착신 leg Call-ID에도 발신 leg의 sesid 계승 등록
+    std::string strLegASesId = gclsSipLogger.GetSesIdByCallId(pszCallId);
+    if (!strLegASesId.empty() && !strCallId.empty()) {
+        gclsSipLogger.SetCallSesId(strCallId, strLegASesId);
+    }
+
+    // B2BUA: 착신 leg도 같은 Session-ID에 매핑 + session.json에 sesid 기록
     if (gclsCallDir.IsEnabled() && !strSessionId.empty()) {
         gclsCallDir.MapCallToSession(strCallId, strSessionId);
-        gclsCallDir.WriteSessionMapping(strSessionId, pszCallId, strCallId);
+        gclsCallDir.WriteSessionMapping(strSessionId, pszCallId, strCallId, strLegASesId);
     }
 
     if (gclsUserAgent.StartCall(strCallId.c_str(), pclsInvite) == false) {

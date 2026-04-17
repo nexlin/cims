@@ -59,7 +59,8 @@ public:
     /** Write session mapping (session.json) to the .d directory */
     void WriteSessionMapping(const std::string& strSessionId,
                               const std::string& strCallIdA,
-                              const std::string& strCallIdB) {
+                              const std::string& strCallIdB,
+                              const std::string& strSesId = "") {
         std::lock_guard<std::mutex> lock(m_mtx);
         std::string dir = _dir(strSessionId);
         if (dir.empty()) {
@@ -70,10 +71,18 @@ public:
         std::string path = dir + "/session.json";
         FILE* f = fopen(path.c_str(), "w");
         if (!f) return;
-        fprintf(f, "{\"session_id\":\"%s\",\"call_ids\":[\"%s\",\"%s\"]}\n",
-                Esc(strSessionId).c_str(),
-                Esc(strCallIdA).c_str(),
-                Esc(strCallIdB).c_str());
+        if (strSesId.empty()) {
+            fprintf(f, "{\"session_id\":\"%s\",\"call_ids\":[\"%s\",\"%s\"]}\n",
+                    Esc(strSessionId).c_str(),
+                    Esc(strCallIdA).c_str(),
+                    Esc(strCallIdB).c_str());
+        } else {
+            fprintf(f, "{\"session_id\":\"%s\",\"sesid\":\"%s\",\"call_ids\":[\"%s\",\"%s\"]}\n",
+                    Esc(strSessionId).c_str(),
+                    Esc(strSesId).c_str(),
+                    Esc(strCallIdA).c_str(),
+                    Esc(strCallIdB).c_str());
+        }
         fclose(f);
     }
 

@@ -45,6 +45,27 @@ CGroupCallService gclsGroupCallService;
 CGroupCallService::CGroupCallService() : m_bMonitorRunning(false) {
 }
 
+// ── PTT 그룹 세션 통일 sesid ─────────────────────────────────────
+// 그룹 세션이 존재하는 동안 발급된 동일한 sesid 를
+// ADD_PTT_GROUP / JOIN_PTT_GROUP / LEAVE_PTT_GROUP / REMOVE_PTT_GROUP
+// + PTT SIP INVITE/ACK/BYE/NOTIFY 모두에 전달.
+std::string CGroupCallService::GetOrIssueGroupSesId(const std::string& strGroupId) {
+    std::unique_lock<std::recursive_mutex> lock(m_mutex);
+    auto it = m_mapGroupSesId.find(strGroupId);
+    if (it != m_mapGroupSesId.end() && !it->second.empty()) return it->second;
+    // caller 자리에 group_id 를 넣어 PTT Flow 검색에서 "group_id in sesid" 매칭 가능
+    std::string sid = CSipMessageLogger::IssueSesId(strGroupId, "csp");
+    m_mapGroupSesId[strGroupId] = sid;
+    CLog::Print(LOG_INFO, "GroupSesId issued: group=%s sesid=%s",
+                strGroupId.c_str(), sid.c_str());
+    return sid;
+}
+
+void CGroupCallService::RemoveGroupSesId(const std::string& strGroupId) {
+    std::unique_lock<std::recursive_mutex> lock(m_mutex);
+    m_mapGroupSesId.erase(strGroupId);
+}
+
 CGroupCallService::~CGroupCallService() {
     StopMonitor();
 }
@@ -110,14 +131,16 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         int iSessionSeq = gclsDbManager.IncrementSessionSeq(pszGroupId);
         clsGroup._sessionSeq = iSessionSeq;
         CLog::Print(LOG_INFO, "GroupCall: session_seq=%d for group %s", iSessionSeq, pszGroupId);
-        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir, clsGroup._videoEnabled, iSessionSeq ) ) {
+        std::string strGroupSesId = GetOrIssueGroupSesId(pszGroupId);
+        if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir, clsGroup._videoEnabled, iSessionSeq, strGroupSesId ) ) {
             std::unique_lock<std::recursive_mutex> lock(m_mutex);
             m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
         }
     } else if ( !strRecordDir.empty() ) {
         // 그룹이 이미 CMP에 있지만 log_dir 전달이 필요 → addgroup 재호출 (기존 그룹 유지, log_dir만 갱신)
         std::string tmpIp; int tmpPort = 0; int tmpFPort = 0; int tmpVPort = 0;
-        gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpPort, tmpFPort, tmpVPort, strRecordDir, strRecordDir, clsGroup._videoEnabled );
+        std::string strGroupSesId = GetOrIssueGroupSesId(pszGroupId);
+        gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpPort, tmpFPort, tmpVPort, strRecordDir, strRecordDir, clsGroup._videoEnabled, 0, strGroupSesId );
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
@@ -130,6 +153,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
 
     // 2. 발신자(Caller)에게 공유 RTP 포트로 200 OK 응답
     if ( iSharedPort > 0 ) {
+        // PTT 발신 Dialog 도 mcptt realm 사용 (200 OK 의 From/To/Contact 도메인)
+        {
+            std::string strMcpttDomain = gclsSetup.GetDomainForService("mcptt");
+            if ( !strMcpttDomain.empty() )
+                gclsUserAgent.SetCallDomain( pszCallId, strMcpttDomain.c_str() );
+        }
         CSipCallRtp clsCallerRtp;
         clsCallerRtp.SetIpPort( strSharedIp.c_str(), iSharedPort, SOCKET_COUNT_PER_MEDIA );
         clsCallerRtp.m_iCodec = 99;  // AMR-WB (기본 코덱, 서버 설정으로 추후 변경)
@@ -214,7 +243,7 @@ void CGroupCallService::ClearUserCall( const std::string& strUserId )
     }
     // lock 해제 후 CMP/DB 호출
     if ( !strGroupId.empty() ) {
-        gclsCmpClient.LeaveGroup( strGroupId, strSessionId );
+        gclsCmpClient.LeaveGroup( strGroupId, strSessionId, GetOrIssueGroupSesId(strGroupId) );
 
         // PTT history: member leave event
         if ( gclsCallDir.IsEnabled() ) {
@@ -258,7 +287,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         // lock 해제하고 CMP 정리
         lock.unlock();
         if (!strStaleGroup.empty()) {
-            gclsCmpClient.LeaveGroup(strStaleGroup, strStaleSession);
+            gclsCmpClient.LeaveGroup(strStaleGroup, strStaleSession, GetOrIssueGroupSesId(strStaleGroup));
         }
         // 재획득 후 계속 진행
         lock.lock();
@@ -325,7 +354,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 gclsCallDir.PttSessionStart(pszGroupId, "autojoin", pszUserId, strSnapshot);
             }
             int iSharedFloorPort = 0;
-            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir ) ) {
+            if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort, iSharedVideoPort, strRecordDir, strRecordDir, false, 0, GetOrIssueGroupSesId(pszGroupId) ) ) {
                  bVideoEnabled = clsGroup._videoEnabled;
                  m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled, 0 };
             } else {
@@ -351,10 +380,14 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     std::string strCallId;
     CSipMessage *pclsInvite = NULL;
 
-    if ( gclsUserAgent.CreateCall( pszGroupId, pszUserId, &clsRtp, &clsRoute, strCallId, &pclsInvite ) ) {
+    // PTT 멤버 Dialog — mcptt realm 도메인으로 INVITE 생성 (From/To/Request-URI/PAI 모두 mcptt)
+    std::string strMcpttDomain = gclsSetup.GetDomainForService("mcptt");
+    if ( gclsUserAgent.CreateCall( pszGroupId, pszUserId, &clsRtp, &clsRoute, strCallId, &pclsInvite,
+                                    strMcpttDomain.empty() ? NULL : strMcpttDomain.c_str() ) ) {
 
-         // SIP flow에 sesid(groupId) 등록
-         gclsSipLogger.SetCallSesId(strCallId, pszGroupId, std::to_string(clsGroup._sessionSeq));
+         // SIP flow에 그룹 세션 공통 sesid 등록 (ADD/JOIN/INVITE 동일 sesid 유지)
+         std::string strGroupSesId = GetOrIssueGroupSesId(pszGroupId);
+         gclsSipLogger.SetCallSesId(strCallId, strGroupSesId, std::to_string(clsGroup._sessionSeq));
 
          // 4-1. Add PTT group info XML to INVITE (multipart/mixed: mcptt-info+xml + SDP)
          if ( pclsInvite != NULL ) {
@@ -381,22 +414,26 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
              }
              WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iFloorPort );
 
-             // MCPTT capability required
+             // MCPTT capability required (3GPP TS 24.379 §6.3.1)
              pclsInvite->AddHeader( "Accept-Contact",
                  "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";+g.3gpp.mcptt;require;explicit" );
+             // P-Preferred-Service: MCPTT ICSI 선언 (3GPP TS 24.379 §6.3.1, RFC 6050)
+             pclsInvite->AddHeader( "P-Preferred-Service",
+                 "urn:urn-7:3gpp-service.ims.icsi.mcptt" );
              // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
              pclsInvite->AddHeader( "Answer-Mode", "Auto" );
-             // Callee identity
+             // Callee identity (MCPTT 도메인 사용)
+             std::string strMcpttDomain = gclsSetup.GetDomainForService("mcptt");
              char szPCalledParty[256];
              snprintf( szPCalledParty, sizeof(szPCalledParty), "<sip:%s@%s>",
-                       pszUserId, gclsSetup.m_strPttRealm.c_str() );
+                       pszUserId, strMcpttDomain.c_str() );
              pclsInvite->AddHeader( "P-Called-Party-ID", szPCalledParty );
              // Group call priority
              pclsInvite->AddHeader( "Resource-Priority", "mcpttp.6" );
              // isfocus: indicate server is conference focus for this group call (domain-based URI)
              char szContact[256];
              snprintf(szContact, sizeof(szContact), "<sip:%s@%s>;isfocus",
-                      pszGroupId, gclsSetup.m_strPttRealm.c_str());
+                      pszGroupId, strMcpttDomain.c_str());
              pclsInvite->AddHeader("Contact", szContact);
              // Session timer (RFC 4028) — required by many MCPTT implementations
              pclsInvite->AddHeader("Session-Expires", "7200;refresher=uac");
@@ -535,7 +572,8 @@ void CGroupCallService::SyncGroupsState() {
             if ( gclsCallDir.IsEnabled() ) {
                 strLogDir = gclsCallDir.GetPttSessionDir(group._id, TimeToIso(group._sessionStart));
             }
-            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir, false, group._sessionSeq ) ) {
+            std::string strGroupSesId = GetOrIssueGroupSesId(group._id);
+            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir, false, group._sessionSeq, strGroupSesId ) ) {
                 std::unique_lock<std::recursive_mutex> lock2(m_mutex);
                 m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip, nHash, "", "", group._videoEnabled, 0 };
                 CLog::Print( LOG_INFO, "SyncGroupsState: Added Group(%s) -> %s:%d floor=%d (MemHash:%lu)", group._id.c_str(), ip.c_str(), port, floorPort, nHash );
@@ -546,7 +584,7 @@ void CGroupCallService::SyncGroupsState() {
                 // CHANGED
                 lock.unlock();
                 CLog::Print( LOG_INFO, "SyncGroupsState: Group(%s) Config Changed. Sending ModifyGroup.", group._id.c_str() );
-                if ( gclsCmpClient.ModifyGroup( group._id, group._pusers ) ) {
+                if ( gclsCmpClient.ModifyGroup( group._id, group._pusers, GetOrIssueGroupSesId(group._id) ) ) {
                     std::unique_lock<std::recursive_mutex> lock2(m_mutex);
                     m_mapGroupRtp[group._id].nMemberHash = nHash;
                 }
@@ -572,10 +610,11 @@ void CGroupCallService::SyncGroupsState() {
         CLog::Print( LOG_INFO, "SyncGroupsState: Group(%s) removed from config. Cleaning up.", strGroupId.c_str() );
         // Notify GMS subscribers about group deletion before removing
         SendSipNotify("tel:" + strGroupId, "deleted_" + std::to_string(time(NULL)), "DELETE");
-        gclsCmpClient.RemoveGroup(strGroupId);
+        gclsCmpClient.RemoveGroup(strGroupId, GetOrIssueGroupSesId(strGroupId));
 
         std::unique_lock<std::recursive_mutex> lock(m_mutex);
         m_mapGroupRtp.erase(strGroupId);
+        RemoveGroupSesId(strGroupId);
     }
 }
 
@@ -633,7 +672,8 @@ void CGroupCallService::CheckGroupIntegrity() {
                 if ( gclsCallDir.IsEnabled() ) {
                     strLogDir = gclsCallDir.GetPttSessionDir(group._id, TimeToIso(group._sessionStart));
                 }
-                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir, false, group._sessionSeq)) {
+                std::string strGroupSesId = GetOrIssueGroupSesId(group._id);
+                if (gclsCmpClient.AddGroup(group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir, false, group._sessionSeq, strGroupSesId)) {
                      lock.lock();
                      m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip, 0, "", "", group._videoEnabled, 0 };
                 } else {
@@ -719,7 +759,7 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     int iFloorPort = iRemoteFloorPort > 0 ? iRemoteFloorPort : (iRemotePort + 1);
     int iVideoPort = iRemoteVideoPort > 0 ? iRemoteVideoPort : (iRemotePort + 2);
-    if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort) ) {
+    if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort, GetOrIssueGroupSesId(strGroupId)) ) {
          CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d floor=%d video=%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort, iFloorPort, iVideoPort );
          if ( gclsCallDir.IsEnabled() ) {
              gclsCallDir.PttLogEvent(strGroupId, "member_join", "{\"member\":\"" + strMemberId + "\"}");
@@ -777,7 +817,7 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
     }
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
-    gclsCmpClient.LeaveGroup(strGroupId, strSessionId);
+    gclsCmpClient.LeaveGroup(strGroupId, strSessionId, GetOrIssueGroupSesId(strGroupId));
 
     // PTT history: member leave event
     if ( gclsCallDir.IsEnabled() ) {
@@ -832,10 +872,11 @@ void CGroupCallService::SendConferenceNotify(const std::string& strGroupId,
     if (vecCallIds.empty()) return;
 
     // 2. Build conference-info+xml body (RFC 4575 partial update)
+    std::string strMcpttDomain = gclsSetup.GetDomainForService("mcptt");
     std::ostringstream oss;
     oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
         << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
-        << "  entity=\"sip:" << strGroupId << "@" << gclsSetup.m_strPttRealm << "\"\r\n"
+        << "  entity=\"sip:" << strGroupId << "@" << strMcpttDomain << "\"\r\n"
         << "  state=\"partial\" version=\"" << iVersion << "\">\r\n"
         << "  <users>\r\n"
         << "    <user entity=\"tel:" << strChangedUser << "\" state=\"" << strJoining << "\">\r\n"

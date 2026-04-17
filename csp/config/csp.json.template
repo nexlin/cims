@@ -7,9 +7,7 @@
             "TcpPort": 25061,
             "TcpThreadCount": 2,
             "TcpRecvTimeout": 600,
-            "Realm": "@VOLTE_DOMAIN@",
-            "VoipRealm": "@VOLTE_DOMAIN@",
-            "PttRealm": "@PTT_DOMAIN@",
+            "AuthRealm": "@VOLTE_DOMAIN@",
             "TlsPort": 5061,
             "TlsAcceptTimeout": 10,
             "CertFile": "cert/csp.pem",
@@ -20,6 +18,10 @@
             "StaleCallTimeout": 300,
             "SendOptionsPeriod": 0
         },
+        "Realm": [
+            { "service": "volte", "domains": ["@VOLTE_DOMAIN@"] },
+            { "service": "mcptt", "domains": ["@PTT_DOMAIN@"] }
+        ],
         "RtpRelay": {
             "UseRtpRelay": true,
             "CmpIp": "@CMP_IP@",

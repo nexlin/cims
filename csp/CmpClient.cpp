@@ -111,12 +111,27 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
         std::lock_guard<std::mutex> lock(m_mutexTrans);
         transId = m_iNextTransId++;
         pTrans->id = transId;
-        // flow 기록용 sesid/service 저장 (응답 수신 시 사용)
+        // flow 기록용 sesid/service/caller/callee 저장 (응답 수신 시 사용)
         pTrans->strSesId = payload.GetString("sesid");
-        std::string cmd = payload.GetString("cmd");
-        if (cmd.find("PTT") != std::string::npos) pTrans->strService = "ptt";
-        else if (cmd.find("SESSION") != std::string::npos) pTrans->strService = "phone";
+        if (pTrans->strSesId.empty()) pTrans->strSesId = payload.GetString("session_id");
+        if (pTrans->strSesId.empty()) pTrans->strSesId = payload.GetString("group_id");
+        pTrans->strCaller = payload.GetString("caller");
+        pTrans->strCallee = payload.GetString("callee");
+        // payload 에 service 필드가 있으면 그대로 사용, 없으면 cmd 기반 자동 결정
+        std::string strSvc = payload.GetString("service");
+        if (strSvc.empty()) {
+            std::string cmd = payload.GetString("cmd");
+            if (cmd.find("PTT") != std::string::npos) strSvc = "mcptt";
+            else if (cmd.find("SESSION") != std::string::npos) strSvc = "volte";
+            else strSvc = "system";
+        }
+        pTrans->strService = strSvc;
         m_mapTransactions[transId] = pTrans;
+    }
+
+    // payload 에 service 필드가 없으면 Transaction 계산 결과로 주입
+    if (payload.GetString("service").empty() && !pTrans->strService.empty()) {
+        const_cast<SimpleJson::JsonNode&>(payload).Set("service", pTrans->strService);
     }
 
     // Construct Packet (JSON wrapper)
@@ -127,39 +142,42 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
     std::string strPacket = packet.ToString();
     CLog::Print(LOG_DEBUG, "CmpClient TX → %s:%d : %s", m_strCmpIp.c_str(), m_iCmpPort, strPacket.c_str());
     if (gclsSipLogger.IsEnabled()) {
-        // Determine service from CMP command type
         std::string strCmd = payload.GetString("cmd");
-        const char* pszSvc = "system";
-        if (strCmd == "ADD_SESSION" || strCmd == "REMOVE_SESSION" || strCmd == "MODIFY_SESSION") {
-            pszSvc = "phone";
-        } else if (strCmd == "ADD_PTT_GROUP" || strCmd == "REMOVE_PTT_GROUP" || strCmd == "JOIN_PTT_GROUP" ||
-                   strCmd == "LEAVE_PTT_GROUP" || strCmd == "MODIFY_PTT_GROUP") {
-            pszSvc = "ptt";
-        }
+        // service: Transaction 에 저장된 값 (payload.service 기반)
+        const char* pszSvc = pTrans->strService.empty() ? "system" : pTrans->strService.c_str();
         std::string strTxId = std::to_string(transId);
         std::string strSesId = payload.GetString("sesid");
         if (strSesId.empty()) strSesId = payload.GetString("session_id");
+        if (strSesId.empty()) strSesId = payload.GetString("group_id");
 
         // detail: method별 결정
         std::string strDetail;
+        std::string caller = payload.GetString("caller");
+        std::string callee = payload.GetString("callee");
+        int iPeerIdx = (int)payload.GetInt("peer_index", -1);
         if (strCmd == "ADD_PTT_GROUP" || strCmd == "REMOVE_PTT_GROUP") {
             strDetail = payload.GetString("group_id");
         } else if (strCmd == "JOIN_PTT_GROUP" || strCmd == "LEAVE_PTT_GROUP") {
             strDetail = payload.GetString("session_id");
         } else if (strCmd == "ADD_SESSION") {
-            std::string caller = payload.GetString("caller");
-            std::string callee = payload.GetString("callee");
+            if (!caller.empty() && !callee.empty()) strDetail = caller + "\xe2\x86\x92" + callee;
+            else if (!caller.empty()) strDetail = caller;
+            else strDetail = payload.GetString("session_id");
+        } else if (strCmd == "MODIFY_SESSION") {
+            if (iPeerIdx == 1 && !callee.empty()) strDetail = callee;
+            else if (iPeerIdx == 0 && !caller.empty()) strDetail = caller;
+            else if (!caller.empty() && !callee.empty()) strDetail = caller + "\xe2\x86\x92" + callee;
+        } else if (strCmd == "REMOVE_SESSION") {
             if (!caller.empty() && !callee.empty()) strDetail = caller + "\xe2\x86\x92" + callee;
             else strDetail = payload.GetString("session_id");
-        } else if (strCmd == "REMOVE_SESSION") {
-            strDetail = payload.GetString("session_id");
         }
 
         gclsSipLogger.LogMessage("csp", "cmp", "JSON",
                                  strCmd.c_str(),
                                  (m_strCmpIp + ":" + std::to_string(m_iCmpPort)).c_str(),
                                  strPacket.c_str(), pszSvc, strTxId.c_str(),
-                                 strSesId.c_str(), strDetail.c_str());
+                                 strSesId.c_str(), strDetail.c_str(),
+                                 caller.c_str(), callee.c_str());
     }
 
     struct sockaddr_in servaddr;
@@ -208,10 +226,18 @@ bool CCmpClient::SendRequestAndWait(const SimpleJson::JsonNode& payload, std::st
 // The original SendRequestAndWait is removed as per instruction to modify it.
 // If a string-based SendRequestAndWait is still needed, it would be an overload.
 
+std::string CCmpClient::GetSesIdByKey(const std::string& strKey) {
+    std::lock_guard<std::mutex> lock(m_mutexSesid);
+    auto it = m_mapKeyToSesid.find(strKey);
+    if (it != m_mapKeyToSesid.end()) return it->second;
+    return "";
+}
+
 bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort,
                             const std::string& strRecordDir, const std::string& strLogDir,
                             const std::string& strCaller, const std::string& strCallee,
-                            const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort) {
+                            const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort,
+                            const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "ADD_SESSION");
     req.Set("session_id", strSessionId);
@@ -223,6 +249,16 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
     if (!strLogDir.empty()) req.Set("log_dir", strLogDir);
     if (!strCaller.empty()) req.Set("caller", strCaller);
     if (!strCallee.empty()) req.Set("callee", strCallee);
+
+    // sesid: 호출자 제공 > 발행
+    std::string strFinalSesId = strSesId.empty()
+        ? CSipMessageLogger::IssueSesId(strCaller, "csp")
+        : strSesId;
+    req.Set("sesid", strFinalSesId);
+    {
+        std::lock_guard<std::mutex> lock(m_mutexSesid);
+        m_mapKeyToSesid[strSessionId] = strFinalSesId;
+    }
 
     // Header info (legacy args)
     req.Set("csp_id", "CSP_MAIN");
@@ -257,7 +293,9 @@ bool CCmpClient::AddSession(const std::string& strSessionId, std::string& strLoc
     return false;
 }
 
-bool CCmpClient::ModifySession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx) {
+bool CCmpClient::ModifySession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx,
+                                const std::string& strCaller, const std::string& strCallee,
+                                const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "MODIFY_SESSION");
     req.Set("session_id", strSessionId);
@@ -265,6 +303,19 @@ bool CCmpClient::ModifySession(const std::string& strSessionId, const std::strin
     req.Set("remote_port", iRmtPort);
     req.Set("remote_video_port", iRmtVideoPort);
     req.Set("peer_index", iPeerIdx);
+    if (!strCaller.empty()) req.Set("caller", strCaller);
+    if (!strCallee.empty()) req.Set("callee", strCallee);
+
+    // sesid: 파라미터 > 캐시 > 발행
+    std::string strFinalSesId = strSesId;
+    if (strFinalSesId.empty()) strFinalSesId = GetSesIdByKey(strSessionId);
+    if (strFinalSesId.empty()) strFinalSesId = CSipMessageLogger::IssueSesId(strCaller, "csp");
+    req.Set("sesid", strFinalSesId);
+    {
+        std::lock_guard<std::mutex> lock(m_mutexSesid);
+        m_mapKeyToSesid[strSessionId] = strFinalSesId;
+    }
+
     req.Set("csp_id", "CSP_MAIN");
     req.Set("csp_sess_id", strSessionId);
     req.Set("cmp_id", "CMP_MAIN");
@@ -278,7 +329,10 @@ bool CCmpClient::ModifySession(const std::string& strSessionId, const std::strin
     return true;
 }
 
-bool CCmpClient::UpdateSession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx, std::string& strLocalIp, int& iLocalPort) {
+bool CCmpClient::UpdateSession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx,
+                                const std::string& strCaller, const std::string& strCallee,
+                                std::string& strLocalIp, int& iLocalPort,
+                                const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "MODIFY_SESSION");
     req.Set("session_id", strSessionId);
@@ -286,9 +340,21 @@ bool CCmpClient::UpdateSession(const std::string& strSessionId, const std::strin
     req.Set("remote_port", iRmtPort);
     req.Set("remote_video_port", iRmtVideoPort);
     req.Set("peer_index", iPeerIdx);
+    if (!strCaller.empty()) req.Set("caller", strCaller);
+    if (!strCallee.empty()) req.Set("callee", strCallee);
+
+    // sesid: 파라미터 > 캐시 > 발행
+    std::string strFinalSesId = strSesId;
+    if (strFinalSesId.empty()) strFinalSesId = GetSesIdByKey(strSessionId);
+    if (strFinalSesId.empty()) strFinalSesId = CSipMessageLogger::IssueSesId(strCaller, "csp");
+    req.Set("sesid", strFinalSesId);
+    {
+        std::lock_guard<std::mutex> lock(m_mutexSesid);
+        m_mapKeyToSesid[strSessionId] = strFinalSesId;
+    }
 
     // Header info (legacy args)
-    req.Set("csp_id", "CSP_MAIN"); 
+    req.Set("csp_id", "CSP_MAIN");
     req.Set("csp_sess_id", strSessionId);
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
@@ -315,13 +381,28 @@ bool CCmpClient::UpdateSession(const std::string& strSessionId, const std::strin
     return false;
 }
 
-bool CCmpClient::RemoveSession(const std::string& strSessionId) {
+bool CCmpClient::RemoveSession(const std::string& strSessionId,
+                                const std::string& strCaller, const std::string& strCallee,
+                                const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "REMOVE_SESSION");
     req.Set("session_id", strSessionId);
+    if (!strCaller.empty()) req.Set("caller", strCaller);
+    if (!strCallee.empty()) req.Set("callee", strCallee);
+
+    // sesid: 파라미터 > 캐시 > 발행
+    std::string strFinalSesId = strSesId;
+    if (strFinalSesId.empty()) strFinalSesId = GetSesIdByKey(strSessionId);
+    if (strFinalSesId.empty()) strFinalSesId = CSipMessageLogger::IssueSesId(strCaller, "csp");
+    req.Set("sesid", strFinalSesId);
+    // Remove 후 캐시 정리
+    {
+        std::lock_guard<std::mutex> lock(m_mutexSesid);
+        m_mapKeyToSesid.erase(strSessionId);
+    }
 
     // Header info (legacy args)
-    req.Set("csp_id", "CSP_MAIN"); 
+    req.Set("csp_id", "CSP_MAIN");
     req.Set("csp_sess_id", strSessionId);
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
@@ -335,11 +416,22 @@ bool CCmpClient::RemoveSession(const std::string& strSessionId) {
 
 bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iFloorPort, int& iVideoPort,
                           const std::string& strRecordDir, const std::string& strLogDir, bool bVideoEnabled,
-                          int iSessionSeq) {
+                          int iSessionSeq,
+                          const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "ADD_PTT_GROUP");
     req.Set("group_id", strGroupId);
-    req.Set("sesid", strGroupId);
+
+    // sesid: 파라미터 > 캐시 > 발행 (caller=group_id의 세션 시작 UE 정보가 없으면 빈값)
+    std::string strFinalSesId = strSesId;
+    if (strFinalSesId.empty()) strFinalSesId = GetSesIdByKey(strGroupId);
+    if (strFinalSesId.empty()) strFinalSesId = CSipMessageLogger::IssueSesId("", "csp");
+    req.Set("sesid", strFinalSesId);
+    {
+        std::lock_guard<std::mutex> lock(m_mutexSesid);
+        m_mapKeyToSesid[strGroupId] = strFinalSesId;
+    }
+
     req.Set("subid", std::to_string(iSessionSeq > 0 ? iSessionSeq : 1));
     req.Set("count", (int)vecMembers.size());
     if (!strRecordDir.empty()) req.Set("record_dir", strRecordDir);
@@ -355,7 +447,7 @@ bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::
     req.Set("members", ssMembers.str());
 
     // Header info (legacy args)
-    req.Set("csp_id", "CSP_MAIN"); 
+    req.Set("csp_id", "CSP_MAIN");
     req.Set("csp_sess_id", "0");
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
@@ -385,11 +477,16 @@ bool CCmpClient::AddGroup(const std::string& strGroupId, const std::vector<std::
     return false;
 }
 
-bool CCmpClient::ModifyGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers) {
+bool CCmpClient::ModifyGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers,
+                              const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "MODIFY_GROUP");
     req.Set("group_id", strGroupId);
-    
+
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey(strGroupId) : strSesId;
+    if (strFinalSesId.empty()) strFinalSesId = CSipMessageLogger::IssueSesId("", "csp");
+    req.Set("sesid", strFinalSesId);
+
     std::stringstream ssMembers;
     for(size_t i=0; i<vecMembers.size(); ++i) {
         if (!vecMembers[i]) continue;
@@ -399,28 +496,33 @@ bool CCmpClient::ModifyGroup(const std::string& strGroupId, const std::vector<st
     req.Set("members", ssMembers.str());
 
     // Header info (legacy args)
-    req.Set("csp_id", "CSP_MAIN"); 
+    req.Set("csp_id", "CSP_MAIN");
     req.Set("csp_sess_id", "0");
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
-    
+
     std::string strResp;
     return SendRequestAndWait(req, strResp);
 }
 
-bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strUserIp, int iUserPort, int iFloorPort, int iVideoPort) {
+bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strUserIp, int iUserPort, int iFloorPort, int iVideoPort,
+                            const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "JOIN_PTT_GROUP");
     req.Set("group_id", strGroupId);
-    req.Set("sesid", strGroupId);
+
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey(strGroupId) : strSesId;
+    if (strFinalSesId.empty()) strFinalSesId = CSipMessageLogger::IssueSesId("", "csp");
+    req.Set("sesid", strFinalSesId);
+
     req.Set("session_id", strSessionId);
     req.Set("user_ip", strUserIp);
     req.Set("user_port", iUserPort);
     if (iFloorPort > 0) req.Set("user_floor_port", iFloorPort);
     if (iVideoPort > 0) req.Set("user_video_port", iVideoPort);
-    
+
     req.Set("csp_id", "CSP_MAIN");
-    req.Set("csp_sess_id", strSessionId); 
+    req.Set("csp_sess_id", strSessionId);
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
 
@@ -430,15 +532,20 @@ bool CCmpClient::JoinGroup(const std::string& strGroupId, const std::string& str
     return bRet;
 }
 
-bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& strSessionId) {
+bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& strSessionId,
+                             const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "LEAVE_PTT_GROUP");
     req.Set("group_id", strGroupId);
-    req.Set("sesid", strGroupId);
+
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey(strGroupId) : strSesId;
+    if (strFinalSesId.empty()) strFinalSesId = CSipMessageLogger::IssueSesId("", "csp");
+    req.Set("sesid", strFinalSesId);
+
     req.Set("session_id", strSessionId);
 
     req.Set("csp_id", "CSP_MAIN");
-    req.Set("csp_sess_id", strSessionId); 
+    req.Set("csp_sess_id", strSessionId);
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
 
@@ -448,14 +555,22 @@ bool CCmpClient::LeaveGroup(const std::string& strGroupId, const std::string& st
     return bRet;
 }
 
-bool CCmpClient::RemoveGroup(const std::string& strGroupId) {
+bool CCmpClient::RemoveGroup(const std::string& strGroupId,
+                              const std::string& strSesId) {
     SimpleJson::JsonNode req;
     req.Set("cmd", "REMOVE_PTT_GROUP");
     req.Set("group_id", strGroupId);
-    req.Set("sesid", strGroupId);
+
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey(strGroupId) : strSesId;
+    if (strFinalSesId.empty()) strFinalSesId = CSipMessageLogger::IssueSesId("", "csp");
+    req.Set("sesid", strFinalSesId);
+    {
+        std::lock_guard<std::mutex> lock(m_mutexSesid);
+        m_mapKeyToSesid.erase(strGroupId);
+    }
 
     // Header info (legacy args)
-    req.Set("csp_id", "CSP_MAIN"); 
+    req.Set("csp_id", "CSP_MAIN");
     req.Set("csp_sess_id", "0");
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
@@ -467,11 +582,13 @@ bool CCmpClient::RemoveGroup(const std::string& strGroupId) {
 bool CCmpClient::Alive() {
     SimpleJson::JsonNode req;
     req.Set("cmd", "HEARTBEAT");
-    req.Set("csp_id", "CSP_MAIN"); 
+    // HEARTBEAT는 매 번 신규 sesid 발행 (요청/응답 쌍은 같은 sesid)
+    req.Set("sesid", CSipMessageLogger::IssueSesId("", "csp"));
+    req.Set("csp_id", "CSP_MAIN");
     req.Set("csp_sess_id", "0");
     req.Set("cmp_id", "CMP_MAIN");
     req.Set("cmp_sess_id", "0");
-    
+
     std::string resp;
     return SendRequestAndWait(req, resp);
 }
@@ -515,14 +632,16 @@ void CCmpClient::RecvLoop() {
                      bool bOk = (respBody.find("OK") != std::string::npos);
                      std::string strStatus = bOk ? "OK" : "ERROR";
 
-                     // Transaction에서 sesid/service 조회
-                     std::string strRxSesId, strRxSvc;
+                     // Transaction에서 sesid/service/caller/callee 조회
+                     std::string strRxSesId, strRxSvc, strRxCaller, strRxCallee;
                      {
                          std::lock_guard<std::mutex> lk2(m_mutexTrans);
                          auto itT = m_mapTransactions.find(transId);
                          if (itT != m_mapTransactions.end()) {
-                             strRxSesId = itT->second->strSesId;
-                             strRxSvc = itT->second->strService;
+                             strRxSesId  = itT->second->strSesId;
+                             strRxSvc    = itT->second->strService;
+                             strRxCaller = itT->second->strCaller;
+                             strRxCallee = itT->second->strCallee;
                          }
                      }
                      const char* pszSvc = strRxSvc.empty() ? "system" : strRxSvc.c_str();
@@ -531,7 +650,8 @@ void CCmpClient::RecvLoop() {
                                               strStatus.c_str(),
                                               (m_strCmpIp + ":" + std::to_string(m_iCmpPort)).c_str(),
                                               strPacket.c_str(), pszSvc, strRxTxId.c_str(),
-                                              strRxSesId.c_str(), "");
+                                              strRxSesId.c_str(), "",
+                                              strRxCaller.c_str(), strRxCallee.c_str());
                  }
                  // Notify Transaction matches
                  OnTransactionComplete(transId, true, respBody);

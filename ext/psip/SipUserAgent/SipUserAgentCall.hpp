@@ -18,13 +18,13 @@
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP еКх╜ ©Дц╩ ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы.
- * @param pszFrom		╧ъ╫еюз ╬фюл╣П
- * @param pszTo			╪Ж╫еюз ╬фюл╣П
- * @param pclsRtp		local RTP а╓╨╦ юЗюЕ ╟╢ц╪
- * @param pclsRoute SIP ╦ч╫цаЖ ╦ЯюШаЖ аж╪р юЗюЕ ╟╢ц╪
- * @param strCallId ╩Щ╪╨╣х INVITE ╦ч╫цаЖюг Call-ID ╟║ юЗюЕ╣и ╨╞╪Ж
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @brief SIP О©╫О©╫х╜ О©╫О©╫ц╩ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
+ * @param pszFrom		О©╫ъ╫О©╫О©╫О©╫ О©╫О©╫О©╫л╣О©╫
+ * @param pszTo			О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫л╣О©╫
+ * @param pclsRtp		local RTP О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫ц╪
+ * @param pclsRoute SIP О©╫ч╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫ж╪О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫ц╪
+ * @param strCallId О©╫О©╫О©╫О©╫О©╫О©╫ INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ Call-ID О©╫О©╫ О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId )
 {
@@ -60,13 +60,13 @@ bool CSipUserAgent::StartCall( const char * pszFrom, const char * pszTo, CSipCal
 
 /**
  * @ingroup SipUserAgent
- * @brief еКх╜╦╕ а╬╥Агя╢ы. 
- *				еКх╜ ©Дц╩ю╩ ╨╦Ё╩╟М ©╛╟А╣гаЖ ╬йю╦╦И еКх╜ цК╪р ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы.
- *				еКх╜ ©╛╟А╣г╬Зю╦╦И еКх╜ а╬╥А ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы.
- *				еКх╜ ╪Ж╤Тюн ╟Ф©Л еКх╜ ╟еюЩ юю╢Д ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы.
+ * @brief О©╫О©╫х╜О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫. 
+ *				О©╫О©╫х╜ О©╫О©╫ц╩О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫х╜ О©╫О©╫О©╫ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
+ *				О©╫О©╫х╜ О©╫О©╫О©╫О©╫г╬О©╫О©╫О©╫О©╫О©╫ О©╫О©╫х╜ О©╫О©╫О©╫О©╫ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
+ *				О©╫О©╫х╜ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫ О©╫О©╫х╜ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  * @param pszCallId SIP Call-ID
- * @param iSipCode	еКх╜ ©Дц╩ю╩ ╟еюЩгр ╤╖©║ юЭ╪шгр SIP status code
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @param iSipCode	О©╫О©╫х╜ О©╫О©╫ц╩О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ SIP status code
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode )
 {
@@ -122,10 +122,10 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode )
 
 /**
  * @ingroup SipUserAgent
- * @brief бЬ╫е юЭх╞гя╢ы.
+ * @brief О©╫О©╫О©╫О©╫ О©╫О©╫х╞О©╫я╢О©╫.
  * @param pszCallId		SIP Call-ID
- * @param pszForward	бЬ╫е юЭх╞ юЭх╜╧Ьхё
- * @returns бЬ╫е юЭх╞©║ ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╠в╥╦аЖ ╬йю╦╦И false ╦╕ ╦╝еогя╢ы.
+ * @param pszForward	О©╫О©╫О©╫О©╫ О©╫О©╫х╞ О©╫О©╫х╜О©╫О©╫хё
+ * @returns О©╫О©╫О©╫О©╫ О©╫О©╫х╞О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫в╥О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::StopCall( const char * pszCallId, const char * pszForward )
 {
@@ -160,10 +160,10 @@ bool CSipUserAgent::StopCall( const char * pszCallId, const char * pszForward )
 
 /**
  * @ingroup SipUserAgent
- * @brief 183 юю╢Д ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы. SIP е╛╤Сюл╬Пф╝©║╪╜ 183 юю╢Д ╦ч╫цаЖ╦╕ юЭ╪шгр ╤╖©║ ╩Г©К╣х╢ы.
+ * @brief 183 О©╫О©╫О©╫О©╫ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫. SIP е╛О©╫О©╫О©╫л╬О©╫ф╝О©╫О©╫О©╫О©╫ 183 О©╫О©╫О©╫О©╫ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫х╢О©╫.
  * @param pszCallId SIP Call-ID
- * @param pclsRtp		local RTP а╓╨╦ юЗюЕ ╟╢ц╪
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @param pclsRtp		local RTP О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫ц╪
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::RingCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
@@ -211,11 +211,11 @@ bool CSipUserAgent::RingCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP еКх╜ ©Дц╩©║ ╢Кгя Ring / Session Progress юю╢Д ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы. IP-PBX ©║╪╜ Ring / Session Progress ╦ч╫цаЖ╦╕ юЭ╢чгр ╤╖©║ ╩Г©К╣х╢ы.
+ * @brief SIP О©╫О©╫х╜ О©╫О©╫ц╩О©╫О©╫ О©╫О©╫О©╫О©╫ Ring / Session Progress О©╫О©╫О©╫О©╫ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫. IP-PBX О©╫О©╫О©╫О©╫ Ring / Session Progress О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫х╢О©╫.
  * @param pszCallId		SIP Call-ID
- * @param iSipStatus	SIP юю╢Д дз╣Е
- * @param pclsRtp			local RTP а╓╨╦ юЗюЕ ╟╢ц╪
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @param iSipStatus	SIP О©╫О©╫О©╫О©╫ О©╫з╣О©╫
+ * @param pclsRtp			local RTP О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫ц╪
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp )
 {
@@ -263,10 +263,10 @@ bool CSipUserAgent::RingCall( const char * pszCallId, int iSipStatus, CSipCallRt
 
 /**
  * @ingroup SipUserAgent
- * @brief ╪Ж╫е╣х еКх╜╦╕ ╪Ж╤Тгя╢ы.
+ * @brief О©╫О©╫О©╫е╣О©╫ О©╫О©╫х╜О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  * @param pszCallId SIP Call-ID
- * @param pclsRtp		local RTP а╓╨╦ юЗюЕ ╟╢ц╪
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @param pclsRtp		local RTP О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫ц╪
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
@@ -310,10 +310,10 @@ bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 
 /**
  * @ingroup SipUserAgent
- * @brief еКх╜ hold ©Дц╩ ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы.
+ * @brief О©╫О©╫х╜ hold О©╫О©╫ц╩ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  * @param pszCallId SIP Call-ID
- * @param eDirection	╧л╣П╬Н direction
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @param eDirection	О©╫л╣О©╫О©╫ direction
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::HoldCall( const char * pszCallId, ERtpDirection eDirection )
 {
@@ -341,9 +341,9 @@ bool CSipUserAgent::HoldCall( const char * pszCallId, ERtpDirection eDirection )
 
 /**
  * @ingroup SipUserAgent
- * @brief еКх╜ resume ©Дц╩ ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы.
+ * @brief О©╫О©╫х╜ resume О©╫О©╫ц╩ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  * @param pszCallId SIP Call-ID
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::ResumeCall( const char * pszCallId )
 {
@@ -371,8 +371,8 @@ bool CSipUserAgent::ResumeCall( const char * pszCallId )
 
 /**
  * @ingroup SipUserAgent
- * @brief	еКх╜ ╟Ё╪Ж╦╕ ╦╝еогя╢ы.
- * @returns еКх╜ ╟Ё╪Ж╦╕ ╦╝еогя╢ы.
+ * @brief	О©╫О©╫х╜ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
+ * @returns О©╫О©╫х╜ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 int CSipUserAgent::GetCallCount( )
 {
@@ -387,8 +387,8 @@ int CSipUserAgent::GetCallCount( )
 
 /**
  * @ingroup SipUserAgent
- * @brief ╦П╣Г еКх╜юг SIP Call-ID ╦╕ ╦╝╫╨ф╝©║ юЗюЕгя╢ы.
- * @param clsList SIP Call-ID ╦╕ юЗюЕгр ╨╞╪Ж
+ * @brief О©╫О©╫О©╫ О©╫О©╫х╜О©╫О©╫ SIP Call-ID О©╫О©╫ О©╫О©╫О©╫О©╫ф╝О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
+ * @param clsList SIP Call-ID О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫
  */
 void CSipUserAgent::GetCallIdList( SIP_CALL_ID_LIST & clsList )
 {
@@ -406,7 +406,7 @@ void CSipUserAgent::GetCallIdList( SIP_CALL_ID_LIST & clsList )
 
 /**
  * @ingroup SipUserAgent
- * @brief ╦П╣Г еКх╜╦╕ а╬╥А╫це╡╢ы.
+ * @brief О©╫О©╫О©╫ О©╫О©╫х╜О©╫О©╫ О©╫О©╫О©╫О©╫О©╫е╡О©╫О©╫.
  */
 void CSipUserAgent::StopCallAll( )
 {
@@ -423,21 +423,22 @@ void CSipUserAgent::StopCallAll( )
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP INVITE ╦ч╫цаЖ╦╕ ╩Щ╪╨го╟М Dialog ©║ юЗюЕгя╢ы. ╨╩ ╦ч╪р╣Е╢б SIP INVITE ╦ч╫цаЖ╦╕ юЭ╪шгоаЖ╢б ╬й╢б╢ы. 
- *				╨╩ ╦ч╪р╣Е╥н ╩Щ╪╨╣х SIP INVITE ╦ч╫цаЖ╦╕ юЭ╪шго╥а╦И StartCall( const char * pszCallId, CSipMessage * pclsInvite ) ╦ч╪р╣Е╦╕ ╫ггЮгь╬ъ гя╢ы.
- *				╨╩ ╦ч╪р╣Е╟║ ╟Ё╧ъ╣х юлю╞╢б StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId ) ю╩ хёцБгя хд,
- *				юю©К га╥н╠в╥╔©║╪╜ ╩Щ╪╨╣х SIP Call-ID ╦╕ юз╥А╠╦а╤©║ юЗюЕго╠Б юЭ©║ SIP INVITE юю╢Д ╦ч╫цаЖ╦╕ ╪Ж╫его╦И юю©К га╥н╠в╥╔©║╪╜ гь╢Г еКх╜ а╓╨╦╟║
- *				юз╥А╠╦а╤©║ ╬Ь╬Н╪╜ а╓╩СюШю╦╥н цЁ╦╝гоаЖ ╦Ь го╠Б ╤╖╧╝©║ юл╦╕ ╧ФаЖго╠Б ю╖гь╪╜ SIP INVITE ╦ч╫цаЖ©м SIP Dialog ╦╕ ╩Щ╪╨го©╘╪╜ SIP Call-ID ╦╕
- *				юю©К га╥н╠в╥╔©║ юЭ╢чго©╘ юю©К га╥н╠в╥╔ юз╥А╠╦а╤©║ юЗюЕгя хд, SIP INVITE ╦ч╫цаЖ╦╕ юЭ╪шго╠Б ю╖гтюл╢ы.
- * @param pszFrom		╧ъ╫еюз ╬фюл╣П
- * @param pszTo			╪Ж╫еюз ╬фюл╣П
- * @param pclsRtp		local RTP а╓╨╦ юЗюЕ ╟╢ц╪
- * @param pclsRoute SIP ╦ч╫цаЖ ╦ЯюШаЖ аж╪р юЗюЕ ╟╢ц╪
- * @param strCallId ╩Щ╪╨╣х INVITE ╦ч╫цаЖюг Call-ID ╟║ юЗюЕ╣и ╨╞╪Ж
- * @param ppclsInvite	╩Щ╪╨╣х SIP INVITE ╦ч╫цаЖ╟║ юЗюЕ╣и ╨╞╪Ж
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @brief SIP INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ Dialog О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫. О©╫О©╫ О©╫ч╪р╣О©╫О©╫ SIP INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫О©╫О©╫О©╫О©╫ О©╫й╢б╢О©╫. 
+ *				О©╫О©╫ О©╫ч╪р╣О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ SIP INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╥О©╫О©╫О©╫ StartCall( const char * pszCallId, CSipMessage * pclsInvite ) О©╫ч╪р╣Е╦╕ О©╫О©╫О©╫О©╫О©╫ь╬О©╫ О©╫я╢О©╫.
+ *				О©╫О©╫ О©╫ч╪р╣Е╟║ О©╫О©╫О©╫ъ╣О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId ) О©╫О©╫ хёО©╫О©╫О©╫О©╫ О©╫О©╫,
+ *				О©╫О©╫О©╫О©╫ О©╫О©╫О©╫н╠в╥О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ SIP Call-ID О©╫О©╫ О©╫з╥А╠╦О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╠О©╫ О©╫О©╫О©╫О©╫ SIP INVITE О©╫О©╫О©╫О©╫ О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫н╠в╥О©╫О©╫О©╫О©╫О©╫ О©╫ь╢О©╫ О©╫О©╫х╜ О©╫О©╫О©╫О©╫О©╫О©╫
+ *				О©╫з╥А╠╦О©╫О©╫О©╫О©╫ О©╫О©╫О©╫Н╪╜ О©╫О©╫О©╫О©╫О©╫О©╫О©╫О©╫О©╫О©╫ цЁО©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫ О©╫о╠О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫л╦О©╫ О©╫О©╫О©╫О©╫О©╫о╠О©╫ О©╫О©╫О©╫ь╪О©╫ SIP INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ SIP Dialog О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о©О©╫О©╫О©╫ SIP Call-ID О©╫О©╫
+ *				О©╫О©╫О©╫О©╫ О©╫О©╫О©╫н╠в╥О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о©О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫н╠в╥О©╫ О©╫з╥А╠╦О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫, SIP INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╠О©╫ О©╫О©╫О©╫О©╫О©╫л╢О©╫.
+ * @param pszFrom		О©╫ъ╫О©╫О©╫О©╫ О©╫О©╫О©╫л╣О©╫
+ * @param pszTo			О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫л╣О©╫
+ * @param pclsRtp		local RTP О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫ц╪
+ * @param pclsRoute SIP О©╫ч╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫ж╪О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫ц╪
+ * @param strCallId О©╫О©╫О©╫О©╫О©╫О©╫ INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ Call-ID О©╫О©╫ О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫
+ * @param ppclsInvite	О©╫О©╫О©╫О©╫О©╫О©╫ SIP INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
-bool CSipUserAgent::CreateCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId, CSipMessage ** ppclsInvite )
+bool CSipUserAgent::CreateCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId, CSipMessage ** ppclsInvite,
+                                 const char * pszOverrideDomain )
 {
 	if( pszFrom == NULL || pszTo == NULL ) return false;
 	if( pclsRtp == NULL || pclsRoute == NULL ) return false;
@@ -456,6 +457,10 @@ bool CSipUserAgent::CreateCall( const char * pszFrom, const char * pszTo, CSipCa
 
 	clsDialog.m_strFromId = pszFrom;
 	clsDialog.m_strToId = pszTo;
+
+	// per-dialog override К▐└К╘■Л²╦ Л═│Л ╘ (INVITE Л┐²Л└╠ Л═└Л≈░ Л└╦М▄┘К░≤Л√╢Л∙╪ М∙╗)
+	if( pszOverrideDomain && pszOverrideDomain[0] )
+		clsDialog.m_strOverrideDomain = pszOverrideDomain;
 
 	clsDialog.SetLocalRtp( pclsRtp );
 
@@ -510,10 +515,10 @@ bool CSipUserAgent::CreateCall( const char * pszFrom, const char * pszTo, CSipCa
 
 /**
  * @ingroup SipUserAgent
- * @brief CreateCall ╦ч╪р╣Е╥н ╩Щ╪╨╣х INVITE ╦ч╫цаЖ╦╕ юЭ╪шгя╢ы.
+ * @brief CreateCall О©╫ч╪р╣О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ INVITE О©╫ч╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  * @param pszCallId		SIP Call-ID
- * @param pclsInvite	SIP INVITE ╦ч╫цаЖ
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @param pclsInvite	SIP INVITE О©╫ч╫О©╫О©╫О©╫
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::StartCall( const char * pszCallId, CSipMessage * pclsInvite )
 {
@@ -530,10 +535,10 @@ bool CSipUserAgent::StartCall( const char * pszCallId, CSipMessage * pclsInvite 
 
 /**
  * @ingroup SipUserAgent
- * @brief Blind transfer ╦╕ ╫ггЮгя╢ы.
+ * @brief Blind transfer О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  * @param pszCallId SIP Call-ID
- * @param pszTo			еКх╜ юЭ╢чю╩ ╧чю╩ ╬фюл╣П
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @param pszTo			О©╫О©╫х╜ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫л╣О©╫
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::TransferCallBlind( const char * pszCallId, const char * pszTo )
 {
@@ -566,10 +571,10 @@ bool CSipUserAgent::TransferCallBlind( const char * pszCallId, const char * pszT
 
 /**
  * @ingroup SipUserAgent
- * @brief Screened / Unscreened transfer ╦╕ ╫ггЮгя╢ы.
+ * @brief Screened / Unscreened transfer О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  * @param pszCallId		SIP Call-ID
- * @param pszToCallId	еКх╜ юЭ╢чю╩ ╧чю╩ SIP Call-ID
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
+ * @param pszToCallId	О©╫О©╫х╜ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ SIP Call-ID
+ * @returns О©╫О©╫О©╫О©╫О©╫о╦О©╫ true О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╟О©╫ О©╫О©╫О©╫О©╫О©╫о╦О©╫ false О©╫О©╫ О©╫О©╫О©╫О©╫О©╫я╢О©╫.
  */
 bool CSipUserAgent::TransferCall( const char * pszCallId, const char * pszToCallId )
 {

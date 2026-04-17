@@ -37,7 +37,8 @@ protected:
     void processLeaveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
 
-    int sendResponse(const std::string& ip, int port, const std::string& msg);
+    int sendResponse(const std::string& ip, int port, const std::string& msg,
+                     const char* caller = "", const char* callee = "");
 
     // Resource Management
     void loadConfig();
@@ -55,7 +56,14 @@ private:
     std::map<std::string, PRtpRelay*> _sessions;
     std::map<std::string, PMcpttGroup*> _groups;
     std::map<std::string, std::string> _groupSubId;  // groupId → subid(session_seq)
+    std::map<std::string, std::string> _sesidMap;    // sessionId 또는 groupId → sesid (flow 상관용)
+    std::map<std::string, std::string> _serviceMap;  // sessionId 또는 groupId → service (payload 계승)
     PMutex _mutex;
+
+    // sesid 발행 유틸: {caller}::cmp::{us_ts}::{counter}
+    static std::string issueSesid(const std::string& caller);
+    // key에 매핑된 sesid 조회, 없으면 발행하여 저장
+    std::string getOrIssueSesid(const std::string& key, const std::string& caller);
 
     // CMP flow 로그 (통합 디렉터리: {ServiceLogDir}/YYYY/MM/DD/HH/cmp_01_{service}.flow.jsonl)
     std::string _serviceLogDir;
@@ -71,8 +79,10 @@ private:
                  const char* proto, const char* label, const char* detail = "",
                  const char* txId = "", const char* service = "",
                  const char* sesid = "", const char* subid = "",
-                 int seq = 0, const char* iface = "");
-    int writeMsgLine(const char* ts, const char* dir, const char* peer, const char* proto, const char* msg);
+                 int seq = 0, const char* iface = "",
+                 const char* caller = "", const char* callee = "");
+    int writeMsgLine(const char* ts, const char* dir, const char* peer, const char* proto, const char* msg,
+                     const char* caller = "", const char* callee = "");
     void logBody(const char* dir, const char* peer, const char* proto, const char* msg);
     void ensureFlowHourDir();
     std::string getFlowHourDir();
@@ -125,6 +135,15 @@ private:
 
     // Session timeout (seconds, 0=disabled)
     int _sessionTimeout;
+
+    // Flow 로깅 enable flags (cmp.json: Logging.Flow.{floor,dtmf,rtcp})
+    bool _logFlowFloor;   // MCPTT floor control RTCP APP 메시지 기록 여부
+    bool _logFlowDtmf;    // RFC 2833/4733 DTMF 이벤트 기록 여부
+    bool _logFlowRtcp;    // 일반 RTCP(SR/RR/SDES/BYE) 기록 여부
+public:
+    bool getLogFlowFloor() const { return _logFlowFloor; }
+    bool getLogFlowDtmf()  const { return _logFlowDtmf; }
+    bool getLogFlowRtcp()  const { return _logFlowRtcp; }
 
     // Timeout check thread
     std::thread _timeoutThread;

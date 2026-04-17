@@ -82,11 +82,18 @@ public:
     using LogFlowFunc = std::function<void(const std::string& key, const char* from, const char* to,
                                             const char* proto, const char* label, const char* body)>;
     void setLogCallback(LogFlowFunc fn) { _logFlow = fn; }
+    /** RTCP SR/RR/SDES/BYE 등 일반 RTCP 메시지도 Flow 에 기록할지 여부 */
+    void setRtcpLogEnable(bool b) { _rtcpLogEnable = b; }
 
     int getMemberCount() const { return (int)_members.size(); }
     std::string getFloorHolder() const { return _floorTaken ? _floorOwnerSessionId : ""; }
 
 private:
+    /** DTMF(RFC2833/4733) 이벤트 Flow 기록 헬퍼.
+     *  detail JSON: {"digit":"X","duration":ms,"volume":V,"user":"..."}
+     *  PCmpServer 의 _logFlow 콜백을 통해 proto="DTMF", label="DTMF" 로 기록. */
+    void _dtmfFlowLog(const std::string& senderId, char digit, unsigned short duration, unsigned char volume);
+
     void sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     void sendAudioRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     // Video functions for future use
@@ -128,6 +135,7 @@ private:
     
     PMutex _mutex;
     LogFlowFunc _logFlow;  // floor event log callback
+    bool _rtcpLogEnable = false; // 일반 RTCP 로깅 활성화 플래그
 
     // 녹취 (Floor 단위 세그먼트 — 화자 교대 시 파일 분할)
     bool _recordEnable;

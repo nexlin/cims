@@ -700,10 +700,15 @@ def _resolve_detail_path(date_str: str, hh: str, service: str, proto: str) -> st
     return ""
 
 
-def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip") -> str:
+def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
+                         node: str = "") -> str:
     """인터페이스별 jsonl의 seq번째 줄에서 msg 필드 반환
 
-    New: {MsgLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{iface}.jsonl
+    node가 지정되면 {node}_*_{iface}.msg.jsonl 로 명확히 선택.
+    예: node="cmp", iface="csp" → cmp_01_csp.msg.jsonl
+    node 미지정 시 *_{iface}.msg.jsonl 글롭 (레거시 호환).
+
+    New: {MsgLogDir}/YYYY/MM/DD/HH/{node}_{iface}.msg.jsonl
     Legacy: {sip_log_dir}/YYYY/MM/DD/HH/raw.jsonl
     """
     if seq <= 0:
@@ -717,12 +722,18 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip") 
     # 1) 통합: {Dir}/YYYY/MM/DD/HH/{node}_{iface}.msg.jsonl
     path = ""
     if _msg_log_dir:
-        # 모든 노드의 msg 파일 탐색 ({node}_{iface}.msg.jsonl)
         import glob
         base = os.path.join(_msg_log_dir, yyyy, mm, dd, hh)
-        for pattern in [f"*_{iface}.msg.jsonl", f"{_system_id}_{iface}.msg.jsonl",
-                        f"{_system_id}_{iface}.jsonl"]:
-            matches = glob.glob(os.path.join(base, pattern))
+        patterns = []
+        if node:
+            # node 기준 정확한 매칭 (csp/cmp/csc 중 하나)
+            patterns.append(f"{node}_*_{iface}.msg.jsonl")
+            patterns.append(f"{node}_{iface}.msg.jsonl")
+        patterns.extend([f"*_{iface}.msg.jsonl",
+                          f"{_system_id}_{iface}.msg.jsonl",
+                          f"{_system_id}_{iface}.jsonl"])
+        for pattern in patterns:
+            matches = sorted(glob.glob(os.path.join(base, pattern)))
             if matches:
                 path = matches[0]
                 break
@@ -761,7 +772,8 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip") 
 
 
 def _search_sip_messages(call_ids: list, date_str: str, hour: str = None, service: str = "phone") -> list:
-    """서비스별 flow.jsonl에서 call_ids에 해당하는 SIP 메시지 검색 (compact, body 없음)"""
+    """서비스별 flow.jsonl에서 call_ids에 해당하는 SIP 메시지 검색 (compact, body 없음).
+    flow.jsonl은 Call-ID를 `subid` 필드에 기록하므로 `subid` 우선, 레거시 `call_id` fallback."""
     if not _sip_log_dir or not call_ids:
         return []
 
@@ -787,7 +799,7 @@ def _search_sip_messages(call_ids: list, date_str: str, hour: str = None, servic
                     # flow.jsonl의 SIP 메시지만 (proto 없거나 SIP)
                     if obj.get("proto", "SIP") != "SIP":
                         continue
-                    msg_cid = obj.get("call_id", "")
+                    msg_cid = obj.get("subid") or obj.get("call_id", "")
                     if msg_cid in call_id_set:
                         results.append(obj)
         except Exception as e:
@@ -798,8 +810,12 @@ def _search_sip_messages(call_ids: list, date_str: str, hour: str = None, servic
 
 def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                          time_start: str = "", time_end: str = "",
-                         call_type: str = "voip") -> list:
-    """서비스별 flow.jsonl에서 CMP(proto=JSON)/CSC(proto=CSC) 메시지 중 시간 범위에 해당하는 것 검색"""
+                         call_type: str = "voip",
+                         sesid_set: set = None) -> list:
+    """서비스별 flow.jsonl에서 CMP(proto=JSON)/CSC(proto=CSC) 메시지 검색.
+    sesid_set 이 주어지면 해당 sesid 와 일치하는 메시지만 반환 (타 호 섞임 방지).
+    그렇지 않으면 legacy fallback: 시간 범위 기반 검색.
+    """
     if not _sip_log_dir:
         return []
 
@@ -825,7 +841,6 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                         continue
                     if obj.get("proto") not in ("JSON", "CSC"):
                         continue
-                    # CMP heartbeat 필터링
                     method = obj.get("method", "")
                     mu = method.upper()
                     if mu in ("HEARTBEAT",):
@@ -835,7 +850,16 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                         continue
                     if call_type == "ptt" and mu in ("ADD_SESSION", "REMOVE_SESSION", "MODIFY_SESSION"):
                         continue
-                    # 시간 범위 필터
+
+                    # ── 1차 필터: sesid 일치 (가장 정확) ──
+                    if sesid_set:
+                        msg_sesid = obj.get("sesid", "")
+                        if msg_sesid not in sesid_set:
+                            continue
+                        results.append(obj)
+                        continue
+
+                    # ── fallback: 시간 범위 필터 (sesid 없는 legacy 로그 대응) ──
                     ts = obj.get("ts", "")
                     if time_start and ts < time_start:
                         continue
@@ -855,7 +879,8 @@ def _flow_msg_from_log(obj: dict, call_ids: list = None) -> dict:
     method = obj.get("method", "")
     from_actor = obj.get("from", "")
     to_actor = obj.get("to", "")
-    msg_cid = obj.get("call_id", "")
+    # SIP Call-ID는 flow.jsonl에 `subid` 필드로 저장됨 (legacy fallback: call_id)
+    msg_cid = obj.get("subid") or obj.get("call_id", "")
 
     # VoIP B2BUA: SIP ue를 call_id로 ue_o/ue_t 구분
     if proto == "SIP" and call_ids and len(call_ids) >= 2:
@@ -918,14 +943,19 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
     # SIP 메시지 검색 (VoIP → phone)
     sip_msgs = _search_sip_messages(call_ids, date_str, hour, service="phone")
 
-    # 시간 범위 추출 (CMP 메시지 필터링용, 1초 여유)
+    # 해당 호의 sesid 모음 (CMP 메시지 필터링 기준 — 가장 정확한 방법)
+    sesid_set = set()
+    for m in sip_msgs:
+        s = m.get("sesid", "")
+        if s: sesid_set.add(s)
+
+    # 시간 범위 (sesid 미사용 시 fallback, 2초 여유)
     time_start = ""
     time_end = ""
     if sip_msgs:
         times = [m.get("ts", "") for m in sip_msgs if m.get("ts")]
         if times:
             time_start = min(times)
-            # time_end에 2초 여유 추가 (BYE 직후 CMP remove/response 포함)
             te = max(times)
             try:
                 parts = te.split(":")
@@ -937,9 +967,10 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
             except:
                 time_end = te
 
-    # CMP 메시지 검색 (시간 범위 내, call_type에 따라 필터)
+    # CMP 메시지 검색: sesid 우선, 없으면 시간 범위 fallback
     ct = call_json.get("call_type", "voip") if call_json else "voip"
-    cmp_msgs = _search_cmp_messages(call_ids, date_str, hour, time_start, time_end, ct)
+    cmp_msgs = _search_cmp_messages(call_ids, date_str, hour, time_start, time_end, ct,
+                                     sesid_set=sesid_set if sesid_set else None)
 
     # FlowMessage 형식으로 변환
     messages = []
@@ -1166,6 +1197,72 @@ async def _handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> Handler
 
 # ── PTT History API ──
 
+def _derive_session_meta_from_events(d_dir: str) -> dict:
+    """session.json이 없을 때 events.jsonl에서 메타데이터 추출"""
+    events_path = os.path.join(d_dir, "events.jsonl")
+    if not os.path.exists(events_path):
+        return {}
+    events = _read_jsonl(events_path)
+    if not events:
+        return {}
+    events.sort(key=lambda e: e.get("ts", ""))
+
+    members = set()
+    initiator = ""
+    start_time = ""
+    end_time = ""
+    state = "active"
+
+    for ev in events:
+        t = ev.get("type", "")
+        ts = ev.get("ts", "")
+        if not start_time and ts:
+            start_time = ts
+        if ts:
+            end_time = ts
+        if t == "session_start":
+            if ev.get("initiator"):
+                initiator = ev["initiator"]
+        elif t == "session_end":
+            state = "ended"
+        elif t == "member_join":
+            m = ev.get("member")
+            if m:
+                members.add(m)
+                if not initiator:
+                    initiator = m
+        elif t == "member_leave":
+            pass
+
+    # 녹취 segment 존재 시 initiator를 speaker로 대체 (session_start 없는 경우)
+    if not initiator:
+        seg_path = os.path.join(d_dir, "segments.jsonl")
+        if os.path.exists(seg_path):
+            segs = _read_jsonl(seg_path)
+            if segs:
+                initiator = segs[0].get("speaker_id", "") or initiator
+
+    # 마지막 이벤트가 member_leave이고 모든 멤버가 이탈했으면 ended 추정
+    joined = set()
+    for ev in events:
+        t = ev.get("type", "")
+        m = ev.get("member")
+        if t == "member_join" and m:
+            joined.add(m)
+        elif t == "member_leave" and m:
+            joined.discard(m)
+    if not joined:
+        state = "ended"
+
+    return {
+        "start_time": start_time,
+        "end_time": end_time if state == "ended" else None,
+        "state": state,
+        "initiator": initiator,
+        "member_count": len(members),
+    }
+
+
 def _find_ptt_sessions(group_id: str) -> list:
     """PTT 그룹의 세션 디렉터리 목록 반환"""
     if not _calls_dir:
@@ -1191,8 +1288,9 @@ def _find_ptt_sessions(group_id: str) -> list:
         if os.path.isdir(d_path) and entry.endswith(".d"):
             sj = _load_session_json(d_path)
             if not sj:
-                # session.json 없으면 디렉터리 이름에서 추론
+                # session.json 없으면 디렉터리 이름에서 추론 + events.jsonl fallback
                 sj = {"session_id": entry.replace(".d", "")}
+                sj.update(_derive_session_meta_from_events(d_path))
             sj["dir"] = entry.replace(".d", "")
             result.append(sj)
     return result
@@ -1492,101 +1590,93 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         return HandlerResult(status=404, body=json.dumps({"error": "No recording available"}))
 
     if len(parts) >= 3 and parts[2] == "flow":
-        # ── Flow: 모든 노드의 flow.jsonl 읽기 → service 필터 → 노드별 배열 ──
+        # ── Flow: 모든 노드의 flow.jsonl 읽기 → 필터 → 노드별 배열 ──
         date_str = _qp("date", datetime.now().strftime("%Y-%m-%d"))
         flow_paths = _resolve_flow_paths(date_str, None, "ptt")
 
-        # 모든 ptt flow 수집 → sesid 기반 매칭
+        # 세션의 시간 범위: events.jsonl에서 추출 (ISO 형식 → HH:MM:SS.ffffff)
+        def _iso_to_hms(iso: str) -> str:
+            if not iso: return ""
+            if "T" in iso:
+                return iso.split("T", 1)[1][:15]
+            return iso[:15]
+
+        d_dir = _find_ptt_session_dir(group_id, session_dir)
+        session_meta = _load_session_json(d_dir) if d_dir else {}
+        events = _load_ptt_events(d_dir) if d_dir else []
+        ev_times = [e.get("ts", "") for e in events if e.get("ts")]
+        ses_t_start = _iso_to_hms(min(ev_times)) if ev_times else ""
+        ses_t_end = _iso_to_hms(max(ev_times)) if ev_times else ""
+        # 여유 버퍼: 시작 1초 전 ~ 종료 2초 후
+        if ses_t_start:
+            try:
+                parts_s = ses_t_start.split(":")
+                secs = float(parts_s[2]) - 1.0
+                if secs < 0: secs = 0
+                parts_s[2] = f"{secs:09.6f}"
+                ses_t_start = ":".join(parts_s)
+            except: pass
+        if ses_t_end:
+            try:
+                parts_e = ses_t_end.split(":")
+                secs = float(parts_e[2]) + 2.0
+                if secs >= 60:
+                    secs -= 60
+                    parts_e[1] = f"{int(parts_e[1])+1:02d}"
+                parts_e[2] = f"{secs:09.6f}"
+                ses_t_end = ":".join(parts_e)
+            except: pass
+
+        # 세션 시간 범위 내 mcptt 서비스 flow 수집
         all_ptt_msgs = []
         for jsonl_path in flow_paths:
             try:
                 with open(jsonl_path, 'r') as f:
                     for line in f:
                         line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            obj = json.loads(line)
-                        except:
-                            continue
+                        if not line: continue
+                        try: obj = json.loads(line)
+                        except: continue
                         svc = obj.get("service", "")
-                        if svc and svc != "ptt":
-                            continue
+                        if svc not in ("mcptt", "ptt", ""): continue
+                        ts = obj.get("ts", "")
+                        if ses_t_start and ts and ts < ses_t_start: continue
+                        if ses_t_end and ts and ts > ses_t_end: continue
                         all_ptt_msgs.append(obj)
             except Exception as e:
                 logger.error("flow read error: %s", e)
 
-        # sesid 기반 매칭: sesid == group_id인 메시지 (SIP + non-SIP 모두)
-        # sesid가 없는 레거시는 detail/from_uri/to_uri에서 group_id 검색 (fallback)
+        # 그룹 관련 메시지 매칭:
+        # 1) SIP: detail/subid/sesid 에 group_id 포함
+        # 2) CMP(JSON): detail 에 group_id 포함 또는 ADD/REMOVE_PTT_GROUP 계열
         matched_subids = set()
         all_matched = []
-        sip_times = []
-
         for obj in all_ptt_msgs:
-            sesid_val = obj.get("sesid", "")
-            if sesid_val == group_id:
-                # sesid 정확 매칭
+            detail = obj.get("detail", "") or ""
+            sesid_val = obj.get("sesid", "") or ""
+            subid_val = obj.get("subid", "") or ""
+            hit = False
+            if group_id and (group_id in detail or group_id in sesid_val or group_id in subid_val):
+                hit = True
+            # session_id(JOIN/LEAVE)는 sesid==group_id 이거나 detail에 group_id 검색
+            if hit:
                 all_matched.append(obj)
-                if obj.get("proto") == "SIP" and obj.get("ts"):
-                    sip_times.append(obj["ts"])
-                    subid = obj.get("subid", "")
-                    if subid:
-                        matched_subids.add(subid)
-            elif not sesid_val:
-                # sesid 없는 메시지: detail/subid에서 group_id 검색 (레거시 fallback)
-                detail = obj.get("detail", "")
-                if group_id in detail:
-                    all_matched.append(obj)
-                    if obj.get("proto") == "SIP" and obj.get("ts"):
-                        sip_times.append(obj["ts"])
-                        subid = obj.get("subid", "")
-                        if subid:
-                            matched_subids.add(subid)
+                if obj.get("proto") == "SIP" and subid_val:
+                    matched_subids.add(subid_val)
 
-        # 같은 subid(Call-ID)를 가진 SIP 응답도 포함 (sesid가 없을 수 있음)
+        # 같은 subid(Call-ID)를 가진 SIP 응답도 포함
         if matched_subids:
             for obj in all_ptt_msgs:
-                if obj in all_matched:
-                    continue
+                if obj in all_matched: continue
                 if obj.get("proto") == "SIP":
-                    subid = obj.get("subid", "")
-                    if subid in matched_subids:
+                    sub = obj.get("subid", "")
+                    if sub and sub in matched_subids:
                         all_matched.append(obj)
-                        if obj.get("ts"):
-                            sip_times.append(obj["ts"])
 
-        # non-SIP 메시지를 SIP 시간 범위로 필터
-        if sip_times:
-            t_start = min(sip_times)
-            t_end = max(sip_times)
-            # 2초 여유
-            try:
-                te_parts = t_end.split(":")
-                secs = float(te_parts[2]) + 2.0
-                if secs >= 60:
-                    secs -= 60
-                    te_parts[1] = f"{int(te_parts[1])+1:02d}"
-                te_parts[2] = f"{secs:09.6f}"
-                t_end = ":".join(te_parts)
-            except:
-                pass
-            filtered = []
-            for obj in all_matched:
-                if obj.get("proto") == "SIP":
-                    filtered.append(obj)
-                else:
-                    ts = obj.get("ts", "")
-                    if ts and t_start <= ts <= t_end:
-                        filtered.append(obj)
-        else:
-            filtered = all_matched
+        filtered = all_matched
 
         # B2BUA call_ids (ue_o/ue_t 구분용)
-        d_dir = _find_ptt_session_dir(group_id, session_dir)
-        call_ids = []
-        if d_dir:
-            session = _load_session_json(d_dir)
-            call_ids = session.get("call_ids", []) if session else []
+        call_ids = session_meta.get("call_ids", []) if session_meta else []
 
         # FlowMessage 변환 → 노드별 분류
         nodes: dict[str, list] = {}
@@ -1624,12 +1714,32 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         call_json = _load_call_json(d_dir)
         if call_json and not session_meta:
             session_meta = call_json
+        if not session_meta:
+            session_meta = {"session_id": session_dir}
+            session_meta.update(_derive_session_meta_from_events(d_dir))
 
         group_snapshot = session_meta.get("group_snapshot", {}) if session_meta else {}
         events = _load_ptt_events(d_dir, date)
 
-        # participants 정보도 포함
+        # participants 정보도 포함 (없으면 events에서 유도)
         participants = _load_participants(d_dir)
+        if not participants and events:
+            member_times = {}  # msisdn → {join, leave}
+            for ev in events:
+                m = ev.get("member")
+                if not m:
+                    continue
+                if m not in member_times:
+                    member_times[m] = {"msisdn": m, "role": "member",
+                                        "join_time": None, "leave_time": None}
+                ts = ev.get("ts")
+                t = ev.get("type", "")
+                if t == "member_join":
+                    if not member_times[m]["join_time"]:
+                        member_times[m]["join_time"] = ts
+                elif t == "member_leave":
+                    member_times[m]["leave_time"] = ts
+            participants = list(member_times.values())
 
         has_rec = _has_recording(d_dir) if d_dir else False
         return HandlerResult(status=200, body=json.dumps({
@@ -1706,15 +1816,16 @@ async def _handle_flow_body(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     hour = _qval("hour")
     seq_str = _qval("seq", "")
     iface = _qval("iface", "sip")
+    node = _qval("node", "")  # 여러 노드 msg 파일 존재 시 정확한 선택
 
-    # New: seq-based lookup ({system_id}_{iface}.jsonl)
+    # New: seq-based lookup ({node}_*_{iface}.msg.jsonl)
     if seq_str and hour:
         try:
             seq = int(seq_str)
         except ValueError:
             seq = 0
         if seq > 0:
-            body = _lookup_body_by_seq(date_str, hour, seq, iface=iface)
+            body = _lookup_body_by_seq(date_str, hour, seq, iface=iface, node=node)
             return HandlerResult(status=200, body=json.dumps({"body": body}),
                                  media_type="application/json")
 

@@ -18,7 +18,12 @@
     "ServiceLogging": {
         "Dir": "@SERVICE_LOG_DIR@",
         "Enable": ["csp"],
-        "MediaTypes": ["floor", "dtmf"]
+        "MediaTypes": ["floor", "dtmf"],
+        "Flow": {
+            "Floor": true,
+            "Dtmf": true,
+            "Rtcp": false
+        }
     },
     "SystemId": "cmp_01",
     "LogDir": "log",

@@ -20,7 +20,9 @@
 #define _SIP_SERVER_SETUP_H_
 
 #include <list>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "StringMap.h"
 #include "XmlElement.h"
@@ -84,14 +86,23 @@ public:
     /** IPv6 사용 유무 */
     bool m_bIpv6;
 
-    /** SIP 통신을 위한 realm (인증 challenge 기본값, VoipRealm/PttRealm 미지정 시 fallback) */
-    std::string m_strRealm;
+    /** IMS Digest 인증용 realm (WWW-Authenticate 의 realm 파라미터).
+     *  미지정 시 m_mapDomainToService 의 첫 도메인으로 fallback. */
+    std::string m_strAuthRealm;
 
-    /** 일반 VoIP 통화에 사용하는 SIP 도메인 (미지정 시 Realm 사용) */
-    std::string m_strVoipRealm;
+    /** Realm 설정 배열을 flatten 한 도메인 → service 매핑.
+     *  config:  "Realm": [{"service":"volte","domains":[...]}, {"service":"mcptt","domains":[...]}]
+     *  예: "ims.mnc001..." → "volte" / "ptt.mnc001..." → "mcptt" */
+    std::map<std::string, std::string> m_mapDomainToService;
 
-    /** PTT 그룹 통화에 사용하는 SIP 도메인 (미지정 시 Realm 사용) */
-    std::string m_strPttRealm;
+    /** service → domains 역매핑 (SIP INVITE/REGISTER 생성 시 서비스별 대표 도메인 조회) */
+    std::map<std::string, std::vector<std::string>> m_mapServiceToDomains;
+
+    /** service 에 대한 대표 도메인 반환 (첫 도메인). 없으면 빈 문자열. */
+    std::string GetDomainForService(const std::string& strService) const;
+
+    /** 도메인이 어느 service 에 속하는지 반환. 미매칭 시 빈 문자열. */
+    std::string GetServiceForDomain(const std::string& strDomain) const;
 
     /** SIP REGISTER timeout 최소 시간 */
     int m_iMinRegisterTimeout;

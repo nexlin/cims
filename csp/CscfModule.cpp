@@ -42,7 +42,7 @@ bool CCscfModule::AddChallenge(CSipMessage* psttResponse) {
     clsChallenge.m_strType = "Digest";
     clsChallenge.m_strAlgorithm = "MD5";
     clsChallenge.m_strNonce = szNonce;
-    clsChallenge.m_strRealm = gclsSetup.m_strRealm;
+    clsChallenge.m_strRealm = gclsSetup.m_strAuthRealm;
     clsChallenge.m_strQop = "auth";
 
     psttResponse->m_clsWwwAuthenticateList.push_back(clsChallenge);
@@ -226,9 +226,9 @@ bool CCscfModule::RecvRequestRegister(int iThreadId, CSipMessage* pclsMessage) {
         pclsResponse->AddHeader("Expires", 3600);
         pclsResponse->AddHeader("Supported", "path,100rel,precondition");
 
-        const std::string& strRegDomain = (clsUser.m_strServiceType == "ptt")
-            ? gclsSetup.m_strPttRealm
-            : gclsSetup.m_strVoipRealm;
+        const std::string strRegDomain = (clsUser.m_strServiceType == "ptt")
+            ? gclsSetup.GetDomainForService("mcptt")
+            : gclsSetup.GetDomainForService("volte");
 
         {
             char szServiceRoute[512];
@@ -245,6 +245,8 @@ bool CCscfModule::RecvRequestRegister(int iThreadId, CSipMessage* pclsMessage) {
             const std::string& strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
             snprintf(szPAUri, sizeof(szPAUri), "<sip:%s@%s>", strUser.c_str(), strRegDomain.c_str());
             pclsResponse->AddHeader("P-Associated-URI", szPAUri);
+            // P-Asserted-Identity (3GPP TS 24.229 §5.4.3.2) — 인증된 사용자 신원
+            pclsResponse->AddHeader("P-Asserted-Identity", szPAUri);
         }
 
         gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResponse);

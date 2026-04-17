@@ -27,20 +27,36 @@ public:
     bool AddSession(const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort,
                     const std::string& strRecordDir = "", const std::string& strLogDir = "",
                     const std::string& strCaller = "", const std::string& strCallee = "",
-                    const std::string& strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0);
-    bool ModifySession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx);
-    bool UpdateSession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx, std::string& strLocalIp, int& iLocalPort);
-    bool RemoveSession(const std::string& strSessionId);
+                    const std::string& strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
+                    const std::string& strSesId = "");
+    bool ModifySession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx,
+                       const std::string& strCaller = "", const std::string& strCallee = "",
+                       const std::string& strSesId = "");
+    bool UpdateSession(const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort, int iPeerIdx,
+                       const std::string& strCaller, const std::string& strCallee,
+                       std::string& strLocalIp, int& iLocalPort,
+                       const std::string& strSesId = "");
+    bool RemoveSession(const std::string& strSessionId,
+                       const std::string& strCaller = "", const std::string& strCallee = "",
+                       const std::string& strSesId = "");
     bool Alive();
 
 
     bool AddGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers, std::string& strIp, int& iPort, int& iFloorPort, int& iVideoPort,
                   const std::string& strRecordDir = "", const std::string& strLogDir = "", bool bVideoEnabled = false,
-                  int iSessionSeq = 0);
-    bool ModifyGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers);
-    bool JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strIp, int iPort, int iFloorPort = 0, int iVideoPort = 0);
-    bool LeaveGroup(const std::string& strGroupId, const std::string& strSessionId);
-    bool RemoveGroup(const std::string& strGroupId);
+                  int iSessionSeq = 0,
+                  const std::string& strSesId = "");
+    bool ModifyGroup(const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers,
+                     const std::string& strSesId = "");
+    bool JoinGroup(const std::string& strGroupId, const std::string& strSessionId, const std::string& strIp, int iPort, int iFloorPort = 0, int iVideoPort = 0,
+                   const std::string& strSesId = "");
+    bool LeaveGroup(const std::string& strGroupId, const std::string& strSessionId,
+                    const std::string& strSesId = "");
+    bool RemoveGroup(const std::string& strGroupId,
+                     const std::string& strSesId = "");
+
+    /** 세션/그룹별 기 발행된 sesid 조회 (없으면 빈문자열) */
+    std::string GetSesIdByKey(const std::string& strKey);
 
 private:
     CCmpClient();
@@ -52,6 +68,8 @@ private:
         std::string strResponse;
         std::string strSesId;    // flow sesid (응답 기록용)
         std::string strService;  // flow service (응답 기록용)
+        std::string strCaller;   // 발신 MSISDN (응답 기록용)
+        std::string strCallee;   // 착신 MSISDN (응답 기록용)
         std::condition_variable cv;
         std::mutex mutex;
         bool bCompleted;
@@ -78,6 +96,10 @@ private:
     std::mutex m_mutexTrans;
     std::map<unsigned int, std::shared_ptr<Transaction>> m_mapTransactions;
     unsigned int m_iNextTransId;
+
+    // session_id/group_id → sesid 캐시 (Modify/Remove 시 재사용)
+    std::mutex m_mutexSesid;
+    std::map<std::string, std::string> m_mapKeyToSesid;
 
     // Threads
     std::atomic<bool> m_bKeepAliveRunning;

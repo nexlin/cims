@@ -257,7 +257,17 @@ cmd_status() {
 cmd_build() {
     [[ -z "$SRC_CONSOLE" ]] && err "build 명령은 소스 트리에서만 실행 가능" && exit 1
     header "=== C++ 빌드 ==="
-    local jobs=${1:-$(nproc)}
+    # 인자 파싱: "-j N" / "-jN" / "N" / 생략(nproc) 지원
+    local jobs=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -j)    shift; jobs="${1:-}"; shift ;;
+            -j*)   jobs="${1#-j}"; shift ;;
+            [0-9]*) jobs="$1"; shift ;;
+            *)     shift ;;
+        esac
+    done
+    [[ -z "$jobs" ]] && jobs=$(nproc)
     mkdir -p "$SCRIPT_DIR/build"
     cd "$SCRIPT_DIR/build"
     cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo > "$LOG_DIR/cmake.log" 2>&1
@@ -407,13 +417,31 @@ r=cur.fetchone(); print(r[0] if r else ''); c.close()
     [[ -n "$password" ]] && sim_args+=(-password "$password")
 
     # 미디어 파일 미지정 시 기본 미디어 디렉터리 자동 설정 (AMR-WB + H.264)
+    # -no_video 가 있으면 비디오 파일이 없는 음성 전용 미디어 경로 사용
     local has_media=false
+    local no_video=false
     for arg in "${extra_args[@]+"${extra_args[@]}"}"; do
-        case "$arg" in -media_file|-media_dir|-video_file) has_media=true ;; esac
+        case "$arg" in
+            -media_file|-media_dir|-video_file) has_media=true ;;
+            -no_video|--no-video)               no_video=true ;;
+        esac
     done
     if ! $has_media && [[ -d "$DIST_DIR/cspsim/media" ]]; then
-        extra_args+=(-media_dir "$DIST_DIR/cspsim/media")
-        info "기본 미디어 디렉터리 사용: $DIST_DIR/cspsim/media"
+        if $no_video && [[ -d "$DIST_DIR/cspsim/media/audio_only" ]]; then
+            extra_args+=(-media_dir "$DIST_DIR/cspsim/media/audio_only")
+            info "음성 전용 미디어 디렉터리 사용 (-no_video): $DIST_DIR/cspsim/media/audio_only"
+        elif $no_video; then
+            # 음성 파일만 찾기: *_audio.amrwb 중 첫 파일 선택 (media_file 옵션)
+            local audio_file
+            audio_file=$(ls "$DIST_DIR/cspsim/media/"*_audio.amrwb 2>/dev/null | head -1)
+            if [[ -n "$audio_file" ]]; then
+                extra_args+=(-media_file "$audio_file")
+                info "음성 전용 미디어 파일 사용 (-no_video): $audio_file"
+            fi
+        else
+            extra_args+=(-media_dir "$DIST_DIR/cspsim/media")
+            info "기본 미디어 디렉터리 사용: $DIST_DIR/cspsim/media"
+        fi
     fi
 
     # extra_args 내 경로 옵션(-media_dir, -media_file, -video_file)을 절대경로로 변환
@@ -544,9 +572,8 @@ EOF
 # ── 메인 ───────────────────────────────────────────────────────
 COMPONENTS=(cmp csp cwrtc csc console phone)
 
-cmd_start() {
-    local target="${1:-all}"
-    case "$target" in
+_start_one() {
+    case "$1" in
         all)     start_cmp; start_csp; sleep 0.5; start_cwrtc; start_csc; start_console; start_phone ;;
         cmp)     start_cmp ;;
         csp)     start_csp ;;
@@ -554,37 +581,49 @@ cmd_start() {
         csc)     start_csc ;;
         console) start_console ;;
         phone)   start_phone ;;
-        *) err "알 수 없는 컴포넌트: $target"; exit 1 ;;
+        *) err "알 수 없는 컴포넌트: $1"; return 1 ;;
+    esac
+}
+
+cmd_start() {
+    # 여러 이름을 공백/쉼표로 받을 수 있음. 생략 시 all.
+    if [[ $# -eq 0 ]]; then _start_one all; return; fi
+    local t
+    for t in "$@"; do _start_one "$t"; done
+}
+
+_stop_one() {
+    case "$1" in
+        all)
+            header "=== 전체 중지 ==="
+            for c in "${COMPONENTS[@]}"; do
+                if [[ $c == "csc" ]]; then stop_csc; else stop_one "$c"; fi
+            done
+            ;;
+        csc) stop_csc ;;
+        *) stop_one "$1" ;;
     esac
 }
 
 cmd_stop() {
-    local target="${1:-all}"
-    if [[ $target == "all" ]]; then
-        header "=== 전체 중지 ==="
-        for c in "${COMPONENTS[@]}"; do
-            if [[ $c == "csc" ]]; then stop_csc; else stop_one "$c"; fi
-        done
-    elif [[ $target == "csc" ]]; then
-        stop_csc
-    else
-        stop_one "$target"
-    fi
+    if [[ $# -eq 0 ]]; then _stop_one all; return; fi
+    local t
+    for t in "$@"; do _stop_one "$t"; done
 }
 
 cmd_restart() {
-    local target="${1:-all}"
-    cmd_stop "$target"
+    if [[ $# -eq 0 ]]; then cmd_stop all; sleep 1; cmd_start all; return; fi
+    cmd_stop "$@"
     sleep 1
-    cmd_start "$target"
+    cmd_start "$@"
 }
 
 case "${1:-}" in
-    start)     shift; header "=== CIMS 시작 ==="; cmd_start "${1:-all}"; echo ""; cmd_status ;;
-    stop)      shift; cmd_stop "${1:-all}"; echo ""; cmd_status ;;
-    restart)   shift; header "=== CIMS 재시작 ==="; cmd_restart "${1:-all}"; echo ""; cmd_status ;;
+    start)     shift; header "=== CIMS 시작 ==="; cmd_start "$@"; echo ""; cmd_status ;;
+    stop)      shift; cmd_stop "$@"; echo ""; cmd_status ;;
+    restart)   shift; header "=== CIMS 재시작 ==="; cmd_restart "$@"; echo ""; cmd_status ;;
     status)    cmd_status ;;
-    build)     shift; cmd_build "${1:-}" ;;
+    build)     shift; cmd_build "$@" ;;
     configure) shift; cmd_configure "$@" ;;
     sim)       shift; cmd_sim "$@" ;;
     clean)     shift; cmd_clean "${1:-all}" ;;

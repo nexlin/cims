@@ -64,62 +64,167 @@ void CSipMessageLogger::SetCallSesId(const std::string& strCallId, const std::st
     }
 }
 
-void CSipMessageLogger::SetRealms(const std::string& strVoipRealm, const std::string& strPttRealm)
+std::string CSipMessageLogger::IssueSesId(const std::string& strCaller, const char* pszModule)
 {
-    m_strVoipRealm = strVoipRealm;
-    m_strPttRealm = strPttRealm;
+    // 포맷: {caller}::{module}::{yyyymmddHHMMSSuuuuuu}::{counter}
+    // counter: 동일 us_ts가 연속될 때 1씩 증가
+    static std::mutex sMtx;
+    static std::string sLastTs;
+    static unsigned int sCounter = 0;
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm t;
+    localtime_r(&tv.tv_sec, &t);
+    char tsBuf[32];
+    snprintf(tsBuf, sizeof(tsBuf), "%04d%02d%02d%02d%02d%02d%06ld",
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+             t.tm_hour, t.tm_min, t.tm_sec, (long)tv.tv_usec);
+
+    unsigned int counter;
+    std::string ts(tsBuf);
+    {
+        std::lock_guard<std::mutex> lock(sMtx);
+        if (ts == sLastTs) {
+            ++sCounter;
+        } else {
+            sLastTs = ts;
+            sCounter = 1;
+        }
+        counter = sCounter;
+    }
+
+    const char* mod = (pszModule && pszModule[0]) ? pszModule : "csp";
+    std::string r;
+    r.reserve(strCaller.size() + 50);
+    r.append(strCaller);
+    r.append("::");
+    r.append(mod);
+    r.append("::");
+    r.append(ts);
+    r.append("::");
+    r.append(std::to_string(counter));
+    return r;
+}
+
+std::string CSipMessageLogger::GetOrIssueSesId(const std::string& strCallId,
+                                                 const std::string& strCaller)
+{
+    std::lock_guard<std::mutex> lock(m_mtx);
+    if (!strCallId.empty()) {
+        auto it = m_mapCallSesId.find(strCallId);
+        if (it != m_mapCallSesId.end() && !it->second.empty()) return it->second;
+    }
+    std::string sid = IssueSesId(strCaller, "csp");
+    if (!strCallId.empty()) {
+        // Call-ID 캐시 크기 제한
+        if (m_mapCallSesId.size() >= MAX_CALLID_CACHE) {
+            m_mapCallSesId.erase(m_mapCallSesId.begin());
+        }
+        m_mapCallSesId[strCallId] = sid;
+    }
+    return sid;
+}
+
+std::string CSipMessageLogger::GetSesIdByCallId(const std::string& strCallId)
+{
+    std::lock_guard<std::mutex> lock(m_mtx);
+    auto it = m_mapCallSesId.find(strCallId);
+    if (it != m_mapCallSesId.end()) return it->second;
+    return "";
+}
+
+void CSipMessageLogger::SetDomainServiceMap(const std::map<std::string, std::string>& mapDomainToService)
+{
+    // 초기화 시점(CspServer 시작 직후)에만 호출되므로 락 없이 안전.
+    // 이후 Print() 에서 m_mtx 보호 하에 read-only 로만 접근.
+    m_mapDomainToService = mapDomainToService;
+}
+
+/**
+ * 호스트 문자열에서 도메인 부분 추출.
+ * "<sip:user@host:port>;tag=X" 혹은 "sip:user@host" 등 다양한 패턴 수용.
+ */
+static std::string ExtractDomainFromUri(const std::string& strUri)
+{
+    if (strUri.empty()) return "";
+
+    // Skip leading "<" and scheme (sip:/sips:/tel:)
+    size_t start = 0;
+    if (strUri[0] == '<') start = 1;
+
+    size_t colon = strUri.find(':', start);
+    if (colon == std::string::npos) return "";
+    start = colon + 1;
+
+    // 찾을 끝: ';' '>' ',' ' ' '\r' '\n'
+    size_t end = strUri.size();
+    for (size_t i = start; i < strUri.size(); ++i) {
+        char c = strUri[i];
+        if (c == ';' || c == '>' || c == ',' || c == ' ' || c == '\r' || c == '\n') {
+            end = i;
+            break;
+        }
+    }
+
+    // user@host 에서 host 추출
+    std::string uriBody = strUri.substr(start, end - start);
+    size_t at = uriBody.find('@');
+    std::string hostPort = (at != std::string::npos) ? uriBody.substr(at + 1) : uriBody;
+
+    // host:port 에서 host
+    size_t pcolon = hostPort.find(':');
+    if (pcolon != std::string::npos) hostPort = hostPort.substr(0, pcolon);
+
+    return hostPort;
 }
 
 std::string CSipMessageLogger::ClassifyService(const char* pszMsg, const std::string& strCallId, const std::string& strMethod)
 {
-    // HEARTBEAT and OPTIONS are always system
+    // 주의: 이 함수는 Print()에서 m_mtx 를 이미 잡은 상태에서 호출되므로
+    //       내부에서 m_mtx 를 재획득하지 않는다 (std::mutex 는 재귀 불가).
     if (strMethod == "OPTIONS" || strMethod == "HEARTBEAT") {
         return "system";
     }
 
-    // For requests (INVITE, REGISTER, SUBSCRIBE, etc.), extract domain from Request-URI and To header
-    // For responses (100/180/200/etc.), lookup by Call-ID cache
     bool bIsResponse = (pszMsg && strncmp(pszMsg, "SIP/2.0", 7) == 0);
 
     if (!bIsResponse && pszMsg) {
-        // Extract Request-URI domain and To header domain
+        // Request-URI 도메인 추출 (첫 줄: "METHOD sip:user@domain SIP/2.0")
         std::string strReqUri;
-        // Request-URI is on the first line: "METHOD sip:user@domain ..."
         const char* pFirstSpace = strchr(pszMsg, ' ');
         if (pFirstSpace) {
             const char* pEnd = pFirstSpace + 1;
             while (*pEnd && *pEnd != ' ' && *pEnd != '\r' && *pEnd != '\n') pEnd++;
             strReqUri = std::string(pFirstSpace + 1, pEnd);
         }
-
         std::string strToRaw = ExtractHeader(pszMsg, "To:", "t:");
         std::string strFromRaw = ExtractHeader(pszMsg, "From:", "f:");
 
-        // PTT 우선: MCPTT 키워드(Accept-Contact, P-Asserted-Identity) 또는 PTT realm
-        std::string strService = "system";
-        bool bMcptt = (strstr(pszMsg, "mcptt") != NULL || strstr(pszMsg, "MCPTT") != NULL);
+        std::string strReqDomain = ExtractDomainFromUri(strReqUri);
+        std::string strToDomain  = ExtractDomainFromUri(strToRaw);
+        std::string strFromDomain = ExtractDomainFromUri(strFromRaw);
 
-        if (bMcptt || (!m_strPttRealm.empty() && (
-                strReqUri.find(m_strPttRealm) != std::string::npos ||
-                strToRaw.find(m_strPttRealm) != std::string::npos ||
-                strFromRaw.find(m_strPttRealm) != std::string::npos))) {
-            strService = "ptt";
-        } else if (!m_strVoipRealm.empty() && (
-                strReqUri.find(m_strVoipRealm) != std::string::npos ||
-                strToRaw.find(m_strVoipRealm) != std::string::npos ||
-                strFromRaw.find(m_strVoipRealm) != std::string::npos)) {
-            strService = "phone";
+        // Request-URI → To → From 순서로 lookup 하여 첫 매치 반환.
+        // TX/RX 판별은 Print()에서 메시지 이후에 결정되므로 여기는 공통 로직.
+        std::string strService;
+        auto it = m_mapDomainToService.find(strReqDomain);
+        if (it == m_mapDomainToService.end()) it = m_mapDomainToService.find(strToDomain);
+        if (it == m_mapDomainToService.end()) it = m_mapDomainToService.find(strFromDomain);
+        if (it != m_mapDomainToService.end()) strService = it->second;
+
+        if (strService.empty()) {
+            // 도메인 미등록 → 빈값 ("" — flow에서 service key 생략)
+            return "";
         }
 
-        // Cache for subsequent messages with same Call-ID
-        if (!strCallId.empty() && strService != "system") {
-            // Evict oldest entries if cache is too large
+        // Cache for subsequent responses with same Call-ID
+        if (!strCallId.empty()) {
             if (m_mapCallService.size() > MAX_CALLID_CACHE) {
-                // Simple eviction: clear half the cache
-                auto it = m_mapCallService.begin();
+                auto itE = m_mapCallService.begin();
                 size_t half = m_mapCallService.size() / 2;
-                for (size_t i = 0; i < half && it != m_mapCallService.end(); ++i) {
-                    it = m_mapCallService.erase(it);
+                for (size_t i = 0; i < half && itE != m_mapCallService.end(); ++i) {
+                    itE = m_mapCallService.erase(itE);
                 }
             }
             m_mapCallService[strCallId] = strService;
@@ -128,15 +233,13 @@ std::string CSipMessageLogger::ClassifyService(const char* pszMsg, const std::st
         return strService;
     }
 
-    // Response or non-parseable: lookup by Call-ID
+    // Response: Call-ID 캐시에서 조회
     if (!strCallId.empty()) {
         auto it = m_mapCallService.find(strCallId);
-        if (it != m_mapCallService.end()) {
-            return it->second;
-        }
+        if (it != m_mapCallService.end()) return it->second;
     }
 
-    return "system";
+    return "";
 }
 
 /**
@@ -229,7 +332,8 @@ void CSipMessageLogger::Print(EnumLogLevel eLevel, const char* fmt, ...)
     // 1. {system_id}_sip.jsonl (per-interface)
     int iSeq = 0;
     if (m_bRawLogEnabled) {
-        iSeq = WriteInterfaceLine("sip", strTs.c_str(), pszDir, szPeer, "SIP", pszSipMsg);
+        iSeq = WriteInterfaceLine("sip", strTs.c_str(), pszDir, szPeer, "SIP", pszSipMsg,
+                                   strFromUri.c_str(), strToUri.c_str());
     }
 
     // SIP은 CSP 단독 기록이므로 mid 불필요
@@ -246,10 +350,25 @@ void CSipMessageLogger::Print(EnumLogLevel eLevel, const char* fmt, ...)
         strDetail = strFromUri;
     }
 
-    // sesid 조회: Call-ID → sesid 캐시 (GroupCallService가 등록)
+    // sesid 조회/발행: 같은 Call-ID는 동일 sesid 유지
+    // REGISTER/INVITE/SUBSCRIBE 등 모든 SIP 메시지에 대해 발행/계승
     std::string strSesId;
-    auto itSes = m_mapCallSesId.find(strCallId);
-    if (itSes != m_mapCallSesId.end()) strSesId = itSes->second;
+    if (!strCallId.empty()) {
+        auto itSes = m_mapCallSesId.find(strCallId);
+        if (itSes != m_mapCallSesId.end() && !itSes->second.empty()) {
+            strSesId = itSes->second;
+        } else {
+            // 신규 발행: caller = From URI (있을 때)
+            strSesId = IssueSesId(strFromUri, "csp");
+            if (m_mapCallSesId.size() >= MAX_CALLID_CACHE) {
+                m_mapCallSesId.erase(m_mapCallSesId.begin());
+            }
+            m_mapCallSesId[strCallId] = strSesId;
+        }
+    } else {
+        // Call-ID 없는 경우(드문 상황): 일회성 sesid
+        strSesId = IssueSesId(strFromUri, "csp");
+    }
 
     // subid: VoLTE=Call-ID(leg 구분), PTT=session_seq(캐시 조회)
     std::string strSubId;
@@ -261,10 +380,12 @@ void CSipMessageLogger::Print(EnumLogLevel eLevel, const char* fmt, ...)
     }
 
     // 2. flow.jsonl (SIP: mid 불필요)
+    //    caller/callee는 From/To URI에서 추출 (Request/Response 모두 동일하게 From=originator, To=target)
     WriteFlowLine(strService.c_str(), strTs.c_str(), pszFrom, pszTo, "SIP",
                   strMethod.c_str(), strDetail.c_str(), "",
                   strSesId.c_str(), strSubId.c_str(),
-                  iSeq, "sip");
+                  iSeq, "sip",
+                  strFromUri.c_str(), strToUri.c_str());
 }
 
 void CSipMessageLogger::LogMessage(const char* pszFrom, const char* pszTo,
@@ -273,14 +394,16 @@ void CSipMessageLogger::LogMessage(const char* pszFrom, const char* pszTo,
                                     const char* pszService,
                                     const char* pszTxId,
                                     const char* pszSesId,
-                                    const char* pszDetail)
+                                    const char* pszDetail,
+                                    const char* pszCaller,
+                                    const char* pszCallee)
 {
     if (!m_bEnabled) return;
 
     std::string strTs = GetTimestamp();
     const char* proto = (pszProto && *pszProto) ? pszProto : "JSON";
     const char* pszDir = (pszFrom && strcmp(pszFrom, "csp") == 0) ? "TX" : "RX";
-    const char* service = (pszService && *pszService) ? pszService : "system";
+    const char* service = (pszService && *pszService) ? pszService : "";
     std::string strFlowHourDir = GetFlowHourDir();
     std::string strMsgHourDir = GetMsgHourDir();
 
@@ -300,7 +423,8 @@ void CSipMessageLogger::LogMessage(const char* pszFrom, const char* pszTo,
     if (m_bRawLogEnabled) {
         iSeq = WriteInterfaceLine(iface, strTs.c_str(), pszDir,
                                   pszPeer ? pszPeer : "",
-                                  proto, pszBody ? pszBody : "");
+                                  proto, pszBody ? pszBody : "",
+                                  pszCaller, pszCallee);
     }
 
     // 2. flow.jsonl
@@ -308,7 +432,8 @@ void CSipMessageLogger::LogMessage(const char* pszFrom, const char* pszTo,
                   proto, pszMethod ? pszMethod : "",
                   pszDetail ? pszDetail : "", pszTxId ? pszTxId : "",
                   pszSesId ? pszSesId : "", "",
-                  iSeq, iface);
+                  iSeq, iface,
+                  pszCaller, pszCallee);
 }
 
 void CSipMessageLogger::EnsureHourlyFiles(const std::string& strFlowHourDir,
@@ -387,45 +512,51 @@ void CSipMessageLogger::WriteFlowLine(const char* pszService,
                                        const char* pszDetail,
                                        const char* pszTxId,
                                        const char* pszSesId, const char* pszSubId,
-                                       int iSeq, const char* pszIface)
+                                       int iSeq, const char* pszIface,
+                                       const char* pszCaller, const char* pszCallee)
 {
     FILE* pFile = GetFlowFile();
     if (!pFile) return;
 
-    const char* svc = "common";
-    if (pszService) {
-        if (strcmp(pszService, "phone") == 0) svc = "volte";
-        else if (strcmp(pszService, "ptt") == 0) svc = "ptt";
-    }
+    // 순서: ts, service, caller, callee, sesid, subid, node, from, to,
+    //       proto, method, detail, mid, seq, iface
+    // 빈 값은 key 생략.
+    bool bFirst = true;
+    auto emit = [&](const char* key, const std::string& val, bool isNumeric = false, int iNum = 0) {
+        if (!isNumeric && val.empty()) return;
+        if (!bFirst) fprintf(pFile, ",");
+        bFirst = false;
+        if (isNumeric) {
+            fprintf(pFile, "\"%s\":%d", key, iNum);
+        } else {
+            fprintf(pFile, "\"%s\":\"%s\"", key, val.c_str());
+        }
+    };
 
-    fprintf(pFile,
-        "{\"ts\":\"%s\",\"node\":\"%s\",\"service\":\"%s\",\"from\":\"%s\",\"to\":\"%s\","
-        "\"proto\":\"%s\",\"method\":\"%s\"",
-        pszTs ? pszTs : "",
-        m_strNodeName.c_str(), svc,
-        pszFrom ? pszFrom : "", pszTo ? pszTo : "",
-        pszProto ? pszProto : "", JsonEsc(pszMethod).c_str());
-
-    if (pszDetail && pszDetail[0])
-        fprintf(pFile, ",\"detail\":\"%s\"", JsonEsc(pszDetail).c_str());
-    if (pszTxId && pszTxId[0])
-        fprintf(pFile, ",\"mid\":\"%s\"", JsonEsc(pszTxId).c_str());
-    if (pszSesId && pszSesId[0])
-        fprintf(pFile, ",\"sesid\":\"%s\"", JsonEsc(pszSesId).c_str());
-    if (pszSubId && pszSubId[0])
-        fprintf(pFile, ",\"subid\":\"%s\"", JsonEsc(pszSubId).c_str());
-    if (iSeq > 0)
-        fprintf(pFile, ",\"seq\":%d", iSeq);
-    if (pszIface && pszIface[0])
-        fprintf(pFile, ",\"iface\":\"%s\"", pszIface);
-
+    fprintf(pFile, "{");
+    emit("ts",      pszTs ? pszTs : "");
+    emit("service", pszService ? pszService : "");
+    emit("caller",  pszCaller ? JsonEsc(pszCaller) : "");
+    emit("callee",  pszCallee ? JsonEsc(pszCallee) : "");
+    emit("sesid",   pszSesId ? JsonEsc(pszSesId) : "");
+    emit("subid",   pszSubId ? JsonEsc(pszSubId) : "");
+    emit("node",    m_strNodeName);
+    emit("from",    pszFrom ? pszFrom : "");
+    emit("to",      pszTo ? pszTo : "");
+    emit("proto",   pszProto ? pszProto : "");
+    emit("method",  pszMethod ? JsonEsc(pszMethod) : "");
+    emit("detail",  pszDetail ? JsonEsc(pszDetail) : "");
+    emit("mid",     pszTxId ? JsonEsc(pszTxId) : "");
+    if (iSeq > 0) emit("seq", "", true, iSeq);
+    emit("iface",   pszIface ? pszIface : "");
     fprintf(pFile, "}\n");
     fflush(pFile);
 }
 
 int CSipMessageLogger::WriteInterfaceLine(const char* pszIface, const char* pszTs, const char* pszDir,
                                            const char* pszPeer, const char* pszProto,
-                                           const char* pszMsg)
+                                           const char* pszMsg,
+                                           const char* pszCaller, const char* pszCallee)
 {
     // Called under m_mtx lock
     FILE* pFile = GetInterfaceFile(pszIface);
@@ -435,13 +566,16 @@ int CSipMessageLogger::WriteInterfaceLine(const char* pszIface, const char* pszT
 
     int& iSeq = GetIfaceSeq(pszIface);
     iSeq++;
-    fprintf(pFile,
-        "{\"ts\":\"%s\",\"dir\":\"%s\",\"peer\":\"%s\",\"proto\":\"%s\",\"msg\":\"%s\"}\n",
-        pszTs ? pszTs : "",
-        pszDir ? pszDir : "",
-        pszPeer ? pszPeer : "",
-        pszProto ? pszProto : "",
-        strEscMsg.c_str());
+
+    // 순서: ts, dir, peer, caller, callee, proto, msg
+    fprintf(pFile, "{\"ts\":\"%s\",\"dir\":\"%s\",\"peer\":\"%s\"",
+            pszTs ? pszTs : "", pszDir ? pszDir : "", pszPeer ? pszPeer : "");
+    if (pszCaller && pszCaller[0])
+        fprintf(pFile, ",\"caller\":\"%s\"", JsonEsc(pszCaller).c_str());
+    if (pszCallee && pszCallee[0])
+        fprintf(pFile, ",\"callee\":\"%s\"", JsonEsc(pszCallee).c_str());
+    fprintf(pFile, ",\"proto\":\"%s\",\"msg\":\"%s\"}\n",
+            pszProto ? pszProto : "", strEscMsg.c_str());
     fflush(pFile);
 
     return iSeq;

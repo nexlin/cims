@@ -55,7 +55,10 @@ public:
 	void GetCallIdList( SIP_CALL_ID_LIST & clsList );
 	void StopCallAll( );
 
-	bool CreateCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId, CSipMessage ** ppclsInvite );
+	/** pszOverrideDomain: 지정 시 Dialog 에 per-dialog 도메인 override 설정
+	 *  (INVITE 생성 전에 설정되므로 INVITE 의 From/To/Request-URI 도 반영됨) */
+	bool CreateCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId, CSipMessage ** ppclsInvite,
+	                 const char * pszOverrideDomain = NULL );
 	bool StartCall( const char * pszCallId, CSipMessage * pclsInvite );
 	bool Delete( const char * pszCallId );
 
@@ -84,6 +87,12 @@ public:
 	int GetRSeq( const char * pszCallId );
 
 	void SetRSeq( const char * pszCallId, int iRSeq );
+
+	/** 특정 Call 의 Dialog 에 per-dialog override 도메인 지정.
+	 *  From/To/Request-URI/P-Asserted-Identity 생성 시 전역 도메인 대신 사용.
+	 *  주로 MCPTT 그룹콜에서 mcptt realm 강제 용도.
+	 *  @returns Dialog 존재 시 true, 없으면 false */
+	bool SetCallDomain( const char * pszCallId, const char * pszDomain );
 
 	bool IsRingCall( const char * pszCallId, const char * pszTo );
 	bool Is100rel( const char * pszCallId );

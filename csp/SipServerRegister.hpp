@@ -18,7 +18,8 @@ bool AddChallenge( CSipMessage * psttResponse )
 	clsChallenge.m_strType = "Digest";
 	clsChallenge.m_strAlgorithm = "MD5";
 	clsChallenge.m_strNonce = szNonce;
-	clsChallenge.m_strRealm = gclsSetup.m_strRealm;
+	// IMS Digest realm = AuthRealm 설정값 (미지정 시 Realm[0].domains[0]로 이미 fallback됨)
+	clsChallenge.m_strRealm = gclsSetup.m_strAuthRealm;
 	clsChallenge.m_strQop = "auth";
 
 	psttResponse->m_clsWwwAuthenticateList.push_back( clsChallenge );
@@ -213,10 +214,10 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		pclsResponse->AddHeader( "Expires", 3600 );
 		pclsResponse->AddHeader( "Supported", "path,100rel,precondition" );
 
-		// 서비스 타입에 따라 도메인 선택 (PTT → PttRealm, 나머지 → VoipRealm)
-		const std::string & strRegDomain = (clsUser.m_strServiceType == "ptt")
-			? gclsSetup.m_strPttRealm
-			: gclsSetup.m_strVoipRealm;
+		// 서비스 타입에 따라 도메인 선택 (PTT → mcptt 도메인, 나머지 → volte 도메인)
+		const std::string strRegDomain = (clsUser.m_strServiceType == "ptt")
+			? gclsSetup.GetDomainForService("mcptt")
+			: gclsSetup.GetDomainForService("volte");
 
 		// Service-Route: CSP 자신을 S-CSCF로 지정 (IMS 단말의 이후 요청 라우팅 기준)
 		{
@@ -230,11 +231,13 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage * pclsMessage )
 		}
 
 		// P-Associated-URI: IMS 단말이 등록 완료 처리에 필요로 하는 헤더
+		// P-Asserted-Identity (3GPP TS 24.229 §5.4.3.2): 인증된 사용자 신원
 		{
 			char szPAUri[512];
 			const std::string & strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
 			snprintf( szPAUri, sizeof(szPAUri), "<sip:%s@%s>", strUser.c_str(), strRegDomain.c_str() );
 			pclsResponse->AddHeader( "P-Associated-URI", szPAUri );
+			pclsResponse->AddHeader( "P-Asserted-Identity", szPAUri );
 		}
 
 		gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );

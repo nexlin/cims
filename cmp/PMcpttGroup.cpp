@@ -202,7 +202,28 @@ void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int l
 
     FloorControlPacket* pkt = (FloorControlPacket*)buf;
 
+    // RTCP SR(200)/RR(201)/SDES(202)/BYE(203) 선택적 Flow 기록
     if (pkt->type != RTCP_PT_APP) {
+        if (_logFlow && _rtcpLogEnable) {
+            unsigned short rtcpLen = (((unsigned char)buf[2]) << 8) | ((unsigned char)buf[3]);
+            unsigned int rtcpSsrc = 0;
+            if (len >= 8) {
+                rtcpSsrc = (((unsigned char)buf[4]) << 24) | (((unsigned char)buf[5]) << 16) |
+                           (((unsigned char)buf[6]) << 8)  |  ((unsigned char)buf[7]);
+            }
+            const char* rtcpName = "RTCP";
+            switch (pkt->type) {
+                case 200: rtcpName = "SR";   break;
+                case 201: rtcpName = "RR";   break;
+                case 202: rtcpName = "SDES"; break;
+                case 203: rtcpName = "BYE";  break;
+            }
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "{\"type\":%u,\"pt\":\"%s\",\"ssrc\":%u,\"len\":%u,\"user\":\"%s\"}",
+                     (unsigned)pkt->type, rtcpName, rtcpSsrc, (unsigned)(rtcpLen * 4 + 4), sessionId.c_str());
+            _logFlow(_groupId, "ue", "cmp", "RTCP", rtcpName, detail);
+        }
         LOG_DEBUG("PMcpttGroup", "[%s] RTCP pt=%d (not APP=204), skip", _groupId.c_str(), pkt->type);
         return;
     }
@@ -218,6 +239,24 @@ void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int l
     const char* opName = (opcode < 8) ? opcodeStr[opcode] : "?";
     LOG_INFO("PMcpttGroup", "[%s] Floor RTCP opcode=%d(%s) ssrc=%u session=%s from %s:%d",
              _groupId.c_str(), opcode, opName, pktSsrc, sessionId.c_str(), ip.c_str(), port);
+
+    // 수신한 모든 Floor op-code 를 Flow 에 기록 (JSON detail)
+    //   direction: UE → CMP (RTCP APP 수신)
+    //   detail JSON: {"op":"REQUEST","user":"+82...","ssrc":N,"prio":P}
+    if (_logFlow) {
+        int prio = 999;
+        {
+            PAutoLock lock(_mutex);
+            auto itP = _priorities.find(sessionId);
+            if (itP != _priorities.end()) prio = itP->second;
+        }
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d}",
+                 opName, sessionId.c_str(), pktSsrc, prio);
+        std::string label = std::string("FLOOR_") + opName;
+        _logFlow(_groupId, "ue", "cmp", "MCPTT", label.c_str(), detail);
+    }
 
     // Dispatch — senderSsrc는 CMP가 할당한 SSRC
     switch(opcode) {
@@ -260,21 +299,26 @@ void PMcpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int le
         LOG_DEBUG("PMcpttGroup", "[%s] RTP ip=%s port=%d len=%d pt=%d sender=%s", _groupId.c_str(), ip.c_str(), port, len, pt, senderId.c_str());
 
         if (senderId != "") {
-            // [DTMF Check]
-            if (_dtmfEnable && len > 12) { 
-                if (pt == 101) { 
-                    unsigned char digitCode = (unsigned char)buf[12];
-                    bool endBit = (buf[13] & 0x80) != 0; 
-                    
-                    char digitChar = 0;
-                    if (digitCode >= 0 && digitCode <= 9) digitChar = '0' + digitCode;
-                    else if (digitCode == 10) digitChar = '*';
-                    else if (digitCode == 11) digitChar = '#';
-                    else if (digitCode >= 12 && digitCode <= 15) digitChar = 'A' + (digitCode - 12);
-                    
-                    if (digitChar != 0 && endBit) {
-                        std::string dStr(1, digitChar);
+            // [DTMF Check] — RFC 2833/4733 telephone-event (PT 101)
+            if (len > 12 && pt == 101) {
+                unsigned char digitCode = (unsigned char)buf[12];
+                bool endBit = (buf[13] & 0x80) != 0;
+                unsigned char volume = buf[13] & 0x3F;
+                unsigned short duration = (((unsigned char)buf[14]) << 8) | ((unsigned char)buf[15]);
 
+                char digitChar = 0;
+                if (digitCode >= 0 && digitCode <= 9) digitChar = '0' + digitCode;
+                else if (digitCode == 10) digitChar = '*';
+                else if (digitCode == 11) digitChar = '#';
+                else if (digitCode >= 12 && digitCode <= 15) digitChar = 'A' + (digitCode - 12);
+
+                if (digitChar != 0 && endBit) {
+                    // Flow 로깅: END bit 시점에만 기록 (중복 방지)
+                    _dtmfFlowLog(senderId, digitChar, duration, volume);
+
+                    // PTT DTMF push/release 판별 (설정된 경우)
+                    if (_dtmfEnable) {
+                        std::string dStr(1, digitChar);
                         if (dStr == _dtmfPushDigit) {
                             LOG_INFO("PMcpttGroup", "[%s] DTMF Push '%c' from %s", _groupId.c_str(), digitChar, senderId.c_str());
                             action = "REQUEST";
@@ -352,7 +396,13 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
 
         LOG_INFO("PMcpttGroup", "[%s] Floor GRANTED to session=%s ssrc=%u prio=%d",
                  _groupId.c_str(), sessionId.c_str(), ssrc, requesterPrio);
-        if (_logFlow) _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", sessionId.c_str());
+        if (_logFlow) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "{\"op\":\"GRANT\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d}",
+                     sessionId.c_str(), ssrc, requesterPrio);
+            _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", detail);
+        }
 
         // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작
         if (_recordEnable && !_recorder) startRecording();
@@ -404,7 +454,13 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
             if (rejLen > 0) sendToMember(sessionId, rejBuf, rejLen);
             LOG_INFO("PMcpttGroup", "[%s] Floor REJECTED session=%s (prio=%d). Owner=%s (prio=%d)",
                    _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
-            if (_logFlow) _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REJECT", sessionId.c_str());
+            if (_logFlow) {
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "{\"op\":\"REJECT\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d,\"owner\":\"%s\",\"owner_prio\":%d}",
+                         sessionId.c_str(), ssrc, requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
+                _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REJECT", detail);
+            }
         }
     }
 }
@@ -423,7 +479,7 @@ void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int 
 
         broadcastFloorStatus(FLOOR_IDLE, 0, "");
         LOG_INFO("PMcpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
-        if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "FLOOR_RELEASE", sessionId.c_str());
+        // RX FLOOR_RELEASE 는 onRtcpPacket 에서 이미 기록됨 (중복 방지)
     }
 }
 
@@ -437,6 +493,16 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
     int pktLen = BuildFloorPacket(pktBuf, sizeof(pktBuf), opcode, ssrc, speakerId);
     if (pktLen > 0)
         sendAudioRtcpToAll(pktBuf, pktLen, "", 0);
+
+    // CMP → UE 전체 브로드캐스트 Flow 기록 (TAKEN/IDLE/REVOKE 등)
+    if (_logFlow) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"%s\",\"speaker\":\"%s\",\"ssrc\":%u,\"members\":%zu}",
+                 opName, speakerId.c_str(), ssrc, _members.size());
+        std::string label = std::string("FLOOR_") + opName;
+        _logFlow(_groupId, "cmp", "ue", "MCPTT", label.c_str(), detail);
+    }
 }
 
 void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
@@ -545,4 +611,16 @@ void PMcpttGroup::stopRecording() {
 
     LOG_INFO("PMcpttGroup", "[%s] Recording stopped: dir=%s",
              _groupId.c_str(), _recordDir.c_str());
+}
+
+void PMcpttGroup::_dtmfFlowLog(const std::string& senderId, char digit,
+                                unsigned short duration, unsigned char volume) {
+    if (!_logFlow) return;
+    // detail JSON: {"digit":"X","duration_ms":N,"volume":V,"user":"..."}
+    // duration 단위: 시간단위(8kHz 샘플). ms 변환 = duration / 8
+    char detail[256];
+    snprintf(detail, sizeof(detail),
+             "{\"digit\":\"%c\",\"duration_ms\":%u,\"volume\":%u,\"user\":\"%s\"}",
+             digit, (unsigned)(duration / 8), (unsigned)volume, senderId.c_str());
+    _logFlow(_groupId, "ue", "cmp", "DTMF", "DTMF", detail);
 }

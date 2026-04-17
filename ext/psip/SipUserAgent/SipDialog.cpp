@@ -532,7 +532,11 @@ CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 	}
 	else
 	{
-		pclsMessage->m_clsReqUri.Set( SIP_PROTOCOL, m_strToId.c_str(), m_strContactIp.c_str(), m_iContactPort );
+		// per-dialog override 도메인이 있으면 우선 사용 (예: MCPTT → mcptt realm)
+		const std::string& strReqDomain = !m_strOverrideDomain.empty()
+			? m_strOverrideDomain
+			: m_strContactIp;
+		pclsMessage->m_clsReqUri.Set( SIP_PROTOCOL, m_strToId.c_str(), strReqDomain.c_str(), m_iContactPort );
 		pclsMessage->m_clsReqUri.InsertTransport( m_eTransport );
 	}
 
@@ -563,17 +567,22 @@ CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 
 	pclsMessage->m_clsCSeq.Set( iSeq, pszSipMethod );
 
-	const std::string& strLocalDomain = m_pclsSipStack->m_clsSetup.m_strDomain.empty()
-		? m_pclsSipStack->m_clsSetup.m_strLocalIp
-		: m_pclsSipStack->m_clsSetup.m_strDomain;
+	// per-dialog override 가 있으면 From 도메인에 우선 적용
+	const std::string& strLocalDomain = !m_strOverrideDomain.empty()
+		? m_strOverrideDomain
+		: ( m_pclsSipStack->m_clsSetup.m_strDomain.empty()
+			? m_pclsSipStack->m_clsSetup.m_strLocalIp
+			: m_pclsSipStack->m_clsSetup.m_strDomain );
 
 	pclsMessage->m_clsFrom.m_clsUri.Set( SIP_PROTOCOL, m_strFromId.c_str(), strLocalDomain.c_str(), 0 );
 	pclsMessage->m_clsFrom.InsertParam( SIP_TAG, m_strFromTag.c_str() );
 
-	// To: use domain (AOR) when available; routing happens via Request-URI
-	const std::string& strToDomain = m_pclsSipStack->m_clsSetup.m_strDomain.empty()
-		? m_strContactIp
-		: m_pclsSipStack->m_clsSetup.m_strDomain;
+	// To: use domain (AOR) when available; override 도메인 최우선
+	const std::string& strToDomain = !m_strOverrideDomain.empty()
+		? m_strOverrideDomain
+		: ( m_pclsSipStack->m_clsSetup.m_strDomain.empty()
+			? m_strContactIp
+			: m_pclsSipStack->m_clsSetup.m_strDomain );
 	pclsMessage->m_clsTo.m_clsUri.Set( SIP_PROTOCOL, m_strToId.c_str(), strToDomain.c_str(), 0 );
 	if( m_strToTag.empty() == false )
 	{

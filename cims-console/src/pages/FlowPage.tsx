@@ -79,12 +79,15 @@ const ARROW_Y_OFFSET = 16  // 텍스트 기준선 아래 화살표 위치
 
 // proto별 색상
 const PROTO_COLOR: Record<string, string> = {
-  SIP:  '#4b8cda',
-  JSON: '#e6832a',
-  CSC:  '#2ecc71',
-  WS:   '#57b65a',
-  RTP:  '#d94bbf',
-  RTCP: '#9b59b6',
+  SIP:   '#4b8cda',
+  JSON:  '#e6832a',
+  CSC:   '#2ecc71',
+  WS:    '#57b65a',
+  RTP:   '#d94bbf',
+  RTCP:  '#9b59b6',
+  MCPTT: '#b9770e',   // MCPTT floor control (RTCP APP)
+  DTMF:  '#c0392b',   // RFC 2833/4733 telephone-event
+  INT:   '#7f8c8d',   // CMP 내부 이벤트
 }
 
 function protoColor(proto: string) {
@@ -381,7 +384,6 @@ export default function FlowPage({ callId, date, onClose, prefetchedNodes, prefe
   const [selIdx,   setSelIdx]   = useState<number | null>(null)
   const [bodyText, setBodyText] = useState<string | null>(null)
   const [bodyLoading, setBodyLoading] = useState(false)
-  const [highlightTxId, setHighlightTxId] = useState<string | null>(null)
 
   // nodes 구조 또는 messages 배열을 allNodes로 변환
   const applyResponse = useCallback((r: { nodes?: Record<string, FlowMessage[]>; messages?: FlowMessage[] }) => {
@@ -445,8 +447,11 @@ export default function FlowPage({ callId, date, onClose, prefetchedNodes, prefe
       const proto = detailProto(msg)
       const iface = msg.iface
 
+      // node: flow 엔트리의 node 필드에서 접미사 제거 (cmp_01 → cmp)
+      const nodeStr = (msg.node || '').replace(/_\d+$/, '')
+
       setBodyLoading(true)
-      flowApi.getBody(d, hour, seq, msg.ts, dir, proto, iface)
+      flowApi.getBody(d, hour, seq, msg.ts, dir, proto, iface, nodeStr)
         .then(r => setBodyText(r.body || ''))
         .catch(() => setBodyText('(body 조회 실패)'))
         .finally(() => setBodyLoading(false))

@@ -141,18 +141,39 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
     std::string strAction = getVal("action");
     std::string strEtag = getVal("etag");
     std::string strTransId = getVal("trans_id");
+    std::string strSesId = getVal("sesid");
+    std::string strService = getVal("service");
+    // CSC가 sesid/service를 안 보낸 경우 보수적 기본값 적용
+    if (strSesId.empty()) {
+        strSesId = CSipMessageLogger::IssueSesId("", "csp");
+    }
+    if (strService.empty()) strService = "system";
 
-    CLog::Print(LOG_INFO, "CscInterface Event: %s, URI: %s, Action: %s, TransId: %s",
-        strEvent.c_str(), strUri.c_str(), strAction.c_str(), strTransId.c_str());
+    // caller 파생: uri 에서 추출 (tel:+82... 또는 sip:user@domain)
+    std::string strCaller;
+    if (!strUri.empty()) {
+        if (strUri.compare(0, 4, "tel:") == 0) strCaller = strUri.substr(4);
+        else if (strUri.compare(0, 4, "sip:") == 0) {
+            std::string tail = strUri.substr(4);
+            size_t at = tail.find('@');
+            strCaller = (at != std::string::npos) ? tail.substr(0, at) : tail;
+        }
+    }
 
-    // CSC admin 메시지를 SIP 로그에 기록
+    CLog::Print(LOG_INFO, "CscInterface Event: %s, URI: %s, Action: %s, TransId: %s, SesId: %s, Service: %s",
+        strEvent.c_str(), strUri.c_str(), strAction.c_str(),
+        strTransId.c_str(), strSesId.c_str(), strService.c_str());
+
+    // CSC admin 메시지를 SIP 로그에 기록 (sesid/service/caller 포함)
     {
         char peerBuf[64];
         snprintf(peerBuf, sizeof(peerBuf), "%s:%d",
                  inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
         std::string strLabel = strEvent + "(" + strAction + ")";
-        gclsSipLogger.LogMessage("csc", "csp", "CSC", strLabel.c_str(), peerBuf, strMsg.c_str(), "system",
-                                 strTransId.c_str());
+        gclsSipLogger.LogMessage("csc", "csp", "CSC", strLabel.c_str(), peerBuf, strMsg.c_str(),
+                                 strService.c_str(),
+                                 strTransId.c_str(), strSesId.c_str(),
+                                 "", strCaller.c_str(), "");
     }
 
     if (strEvent == "GROUP_CHANGED") {
@@ -202,12 +223,14 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
 
         std::string resp = oss.str();
 
-        // TX 로그: CSC에 응답 전송 기록
+        // TX 로그: CSC에 응답 전송 기록 (요청의 sesid/service 계승)
         {
             char peerBuf[64];
             snprintf(peerBuf, sizeof(peerBuf), "%s:%d",
                      inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
-            gclsSipLogger.LogMessage("csp", "csc", "CSC", "STATS_RESPONSE", peerBuf, resp.c_str(), "system");
+            gclsSipLogger.LogMessage("csp", "csc", "CSC", "STATS_RESPONSE", peerBuf, resp.c_str(),
+                                     strService.c_str(),
+                                     strTransId.c_str(), strSesId.c_str());
         }
 
         sendto(m_iServerSock, resp.c_str(), resp.size(), 0,

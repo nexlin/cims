@@ -41,13 +41,16 @@ export const flowApi = {
     const q = date ? `?date=${date}` : ''
     return api.get(`/flow/${encodeURIComponent(callId)}${q}`)
   },
-  /** 메시지 body 조회 (interface jsonl seq 기반, fallback: ts+dir) */
-  getBody(date: string, hour: string | undefined, seq?: number, ts?: string, dir?: string, proto?: string, iface?: string): Promise<FlowBodyResponse> {
+  /** 메시지 body 조회 (interface jsonl seq 기반, fallback: ts+dir)
+   *  node: 'csp' | 'cmp' | 'csc' — 여러 노드가 같은 iface에 msg 파일을 쓸 때 정확한 파일 선택에 사용
+   */
+  getBody(date: string, hour: string | undefined, seq?: number, ts?: string, dir?: string, proto?: string, iface?: string, node?: string): Promise<FlowBodyResponse> {
     const params = new URLSearchParams({ date })
     if (hour) params.set('hour', hour)
     if (seq && seq > 0) {
       params.set('seq', String(seq))
       if (iface) params.set('iface', iface)
+      if (node) params.set('node', node)
     } else {
       if (ts) params.set('ts', ts)
       if (dir) params.set('dir', dir)

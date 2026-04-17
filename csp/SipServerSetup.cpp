@@ -135,9 +135,7 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (sip.Has("LocalIp")) m_strLocalIp = sip.GetString("LocalIp");
                 if (sip.Has("UdpPort")) m_iUdpPort = (int)sip.GetInt("UdpPort");
                 if (sip.Has("UdpThreadCount")) m_iUdpThreadCount = (int)sip.GetInt("UdpThreadCount");
-                if (sip.Has("Realm")) m_strRealm = sip.GetString("Realm");
-                if (sip.Has("VoipRealm")) m_strVoipRealm = sip.GetString("VoipRealm");
-                if (sip.Has("PttRealm")) m_strPttRealm = sip.GetString("PttRealm");
+                if (sip.Has("AuthRealm")) m_strAuthRealm = sip.GetString("AuthRealm");
                 if (sip.Has("TcpPort")) m_iTcpPort = (int)sip.GetInt("TcpPort");
                 if (sip.Has("TcpThreadCount")) m_iTcpThreadCount = (int)sip.GetInt("TcpThreadCount");
                 if (sip.Has("TcpRecvTimeout")) m_iTcpRecvTimeout = (int)sip.GetInt("TcpRecvTimeout");
@@ -298,12 +296,57 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                      }
                 }
             }
-            
+
+            // ── Realm 배열 파싱: "Realm": [{"service":"volte","domains":[...]}, ...] ──
+            m_mapDomainToService.clear();
+            m_mapServiceToDomains.clear();
+            if (setup.Has("Realm")) {
+                SimpleJson::JsonNode realmArr = setup.Get("Realm");
+                if (realmArr.type == SimpleJson::JSON_ARRAY) {
+                    for (size_t i = 0; i < realmArr.Size(); ++i) {
+                        SimpleJson::JsonNode entry = realmArr.At(i);
+                        if (entry.type != SimpleJson::JSON_OBJECT) continue;
+
+                        std::string strService = entry.GetString("service");
+                        if (strService.empty()) {
+                            CLog::Print(LOG_ERROR, "Setup: Realm[%zu] missing 'service'", i);
+                            continue;
+                        }
+
+                        if (!entry.Has("domains")) {
+                            CLog::Print(LOG_ERROR, "Setup: Realm[%zu] (service=%s) missing 'domains'",
+                                        i, strService.c_str());
+                            continue;
+                        }
+                        SimpleJson::JsonNode domArr = entry.Get("domains");
+                        if (domArr.type != SimpleJson::JSON_ARRAY) {
+                            CLog::Print(LOG_ERROR, "Setup: Realm[%zu] 'domains' must be array", i);
+                            continue;
+                        }
+
+                        for (size_t j = 0; j < domArr.Size(); ++j) {
+                            std::string strDomain = domArr.At(j).AsString();
+                            if (strDomain.empty()) continue;
+                            // 도메인 중복 검증
+                            auto it = m_mapDomainToService.find(strDomain);
+                            if (it != m_mapDomainToService.end() && it->second != strService) {
+                                CLog::Print(LOG_ERROR,
+                                    "Setup: domain '%s' assigned to multiple services ('%s' and '%s')",
+                                    strDomain.c_str(), it->second.c_str(), strService.c_str());
+                                return false;
+                            }
+                            m_mapDomainToService[strDomain] = strService;
+                            m_mapServiceToDomains[strService].push_back(strDomain);
+                        }
+                    }
+                }
+            }
+
+            // AuthRealm 미지정 시 첫 도메인으로 fallback
+            if (m_strAuthRealm.empty() && !m_mapDomainToService.empty()) {
+                m_strAuthRealm = m_mapDomainToService.begin()->first;
+            }
         }
-        
-        // VoipRealm / PttRealm 미지정 시 Realm 으로 fallback
-        if (m_strVoipRealm.empty()) m_strVoipRealm = m_strRealm;
-        if (m_strPttRealm.empty())  m_strPttRealm  = m_strRealm;
 
         m_strFileName = pszFileName;
         SetFileSizeTime();
@@ -513,4 +556,26 @@ void CSipServerSetup::SetFileSizeTime() {
         m_iFileSize = clsStat.st_size;
         m_iFileTime = clsStat.st_mtime;
     }
+}
+
+/**
+ * @ingroup CspServer
+ * @brief service 의 대표 도메인 반환 (Realm 설정에 등록된 첫 도메인).
+ */
+std::string CSipServerSetup::GetDomainForService(const std::string& strService) const {
+    auto it = m_mapServiceToDomains.find(strService);
+    if (it != m_mapServiceToDomains.end() && !it->second.empty()) {
+        return it->second.front();
+    }
+    return "";
+}
+
+/**
+ * @ingroup CspServer
+ * @brief 도메인이 속한 service 반환. 미매칭 시 빈 문자열.
+ */
+std::string CSipServerSetup::GetServiceForDomain(const std::string& strDomain) const {
+    auto it = m_mapDomainToService.find(strDomain);
+    if (it != m_mapDomainToService.end()) return it->second;
+    return "";
 }

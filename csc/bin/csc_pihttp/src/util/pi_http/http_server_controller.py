@@ -100,6 +100,18 @@ class HealthRouteProc:
 
 class DynamicRouteProc:
 
+    # 전역 pre/post 훅 (호출자가 set_request_hooks 로 등록).
+    # pre(handler_args, base_path) → None
+    # post(handler_args, base_path, handler_result) → None
+    _pre_hook = None
+    _post_hook = None
+
+    @classmethod
+    def set_request_hooks(cls, pre=None, post=None):
+        """앱 초기화 시 호출. pre 는 handler 실행 직전, post 는 직후 실행."""
+        cls._pre_hook = pre
+        cls._post_hook = post
+
     def __init__(self):
         self._logger = Logger()
         self._routes: Dict[str, Tuple[Server_Dynamic_Handler, dict]] = {}
@@ -140,10 +152,16 @@ class DynamicRouteProc:
             else:
                 kwargs = copy.deepcopy(kwargs)
 
-        # execute handler
+        # execute handler (pre/post 훅 실행 — 예외 발생해도 핸들러 진행 방해하지 않음)
         try:
+            if DynamicRouteProc._pre_hook:
+                try: DynamicRouteProc._pre_hook(handler_args, match_base_path)
+                except Exception as eh: self._logger.log_error(f"pre_hook error: {eh}")
             handler_result = await handler(handler_args, kwargs)
             self._logger.log_verbose(f"HttpServer : route({full_path}) : rsp={handler_result.status}")
+            if DynamicRouteProc._post_hook:
+                try: DynamicRouteProc._post_hook(handler_args, match_base_path, handler_result)
+                except Exception as eh: self._logger.log_error(f"post_hook error: {eh}")
             accept_format = req.headers.get("accept", "")
             res = _http_response(accept_format, handler_result)
             return res

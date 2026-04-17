@@ -67,7 +67,7 @@ int ServiceMain() {
     gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp" );
     std::string sysId = gclsSetup.m_strSystemId.empty() ? "csp_01" : gclsSetup.m_strSystemId;
     gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId );
-    gclsSipLogger.SetRealms( gclsSetup.m_strVoipRealm, gclsSetup.m_strPttRealm );
+    gclsSipLogger.SetDomainServiceMap( gclsSetup.m_mapDomainToService );
     CLog::SetCallBack( &gclsSipLogger );
     CLog::Print( LOG_SYSTEM, "CspServer is started ( version-%s %s %s )", CSP_SERVER_VERSION, __DATE__, __TIME__ );
     CLog::Print( LOG_DEBUG, "CspServer[%s]", CDirectory::GetProgramDirectory() );
@@ -95,7 +95,13 @@ int ServiceMain() {
 
     clsSetup.m_strUserAgent = "csp_";
     clsSetup.m_strUserAgent.append( CSP_SERVER_VERSION );
-    clsSetup.m_strDomain = gclsSetup.m_strVoipRealm;  // VoIP SIP domain for From/To/P-Asserted-Identity
+    // VoIP SIP domain for From/To/P-Asserted-Identity (Realm 설정의 volte 도메인)
+    clsSetup.m_strDomain = gclsSetup.GetDomainForService("volte");
+    if (clsSetup.m_strDomain.empty()) {
+        // volte 미설정이면 첫 도메인 사용 (단일 service 배포)
+        if (!gclsSetup.m_mapDomainToService.empty())
+            clsSetup.m_strDomain = gclsSetup.m_mapDomainToService.begin()->first;
+    }
     clsSetup.m_iStackExecutePeriod = gclsSetup.m_iStackExecutePeriod;
     clsSetup.m_iTimerD = gclsSetup.m_iTimerD;
     clsSetup.m_iTimerJ = gclsSetup.m_iTimerJ;

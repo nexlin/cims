@@ -121,7 +121,8 @@ void CRtpInfo::SetIpPort( int iIndex, uint32_t iIp, uint16_t sPort, int iPeerIdx
             iRmtVideoPort = m_piPort[2];
         }
 
-        gclsCmpClient.UpdateSession(m_strSessionId, szIp, sPort, iRmtVideoPort, iPeerIdx, locIp, locPort);
+        gclsCmpClient.UpdateSession(m_strSessionId, szIp, sPort, iRmtVideoPort, iPeerIdx,
+                                     m_strCaller, m_strCallee, locIp, locPort, m_strSesId);
     }
 }
 
@@ -178,7 +179,8 @@ CRtpMap::~CRtpMap() {
  */
 int CRtpMap::CreatePort( int iSocketCount, const std::string& strRecordDir, const std::string& strLogDir,
                          const std::string& strCaller, const std::string& strCallee,
-                         const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort ) {
+                         const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort,
+                         const std::string& strSesId ) {
     bool bRes = false;
     CRtpInfo clsInfo( iSocketCount );
     
@@ -202,12 +204,15 @@ int CRtpMap::CreatePort( int iSocketCount, const std::string& strRecordDir, cons
     m_clsMutex.release();
     
     clsInfo.m_strSessionId = strSessionId;
+    clsInfo.m_strCaller = strCaller;
+    clsInfo.m_strCallee = strCallee;
+    clsInfo.m_strSesId = strSesId;
 
     std::string strLocalIp;
     int iLocalPort = 0;
     int iLocalVideoPort = 0;
 
-    if (gclsCmpClient.AddSession(strSessionId, strLocalIp, iLocalPort, iLocalVideoPort, strRecordDir, strLogDir, strCaller, strCallee, strRmtIp, iRmtPort, iRmtVideoPort)) {
+    if (gclsCmpClient.AddSession(strSessionId, strLocalIp, iLocalPort, iLocalVideoPort, strRecordDir, strLogDir, strCaller, strCallee, strRmtIp, iRmtPort, iRmtVideoPort, strSesId)) {
         // CmpServer returned allocated ports
         clsInfo.m_iStartPort = iLocalPort; 
         clsInfo.m_strLocalIp = strLocalIp; // Store Allocated IP
@@ -291,7 +296,10 @@ bool CRtpMap::Delete( int iPort ) {
         // [FIX] Ensure resources are freed
         itMap->second.Close(); 
         
-        gclsCmpClient.RemoveSession(itMap->second.m_strSessionId);
+        gclsCmpClient.RemoveSession(itMap->second.m_strSessionId,
+                                     itMap->second.m_strCaller,
+                                     itMap->second.m_strCallee,
+                                     itMap->second.m_strSesId);
         m_clsMap.erase( itMap );
         bRes = true;
     }

@@ -233,25 +233,64 @@ def load_shared_data(config):
 # [FIX] Notify CSP logic
 _notify_seq = 0
 
-def notify_csp(event_type, uri, action, etag=""):
+def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""):
+    """CSC → CSP UDP notify.
+    sesid/service 를 payload에 실어 CSP가 flow 로그 상관관계를 유지할 수 있게 함.
+    - sesid 미지정 시 자동 발행 (caller 또는 빈값 기반)
+    - caller 미지정 시 uri에서 자동 추출
+    - service 미지정 시 이벤트 타입으로 추정:
+        CSC_RESTART → system, *_CHANGED/* → console (admin 트리거), 그 외 → mcptt
+    """
     global _notify_seq
     _notify_seq += 1
     try:
+        # caller 미지정 시 uri에서 추출 (tel:+82..., sip:user@domain)
+        if not caller and uri:
+            if uri.startswith("tel:"):
+                caller = uri[4:]
+            elif uri.startswith("sip:"):
+                caller = uri[4:].split("@", 1)[0]
+        if not sesid:
+            sesid = csc_logger.issue_sesid(caller, "csc")
+        if not service:
+            if event_type in ("CSC_RESTART", "HEARTBEAT", "STATS_REQUEST", "STATS_RESPONSE"):
+                service = "system"
+            elif event_type in ("USER_CHANGED", "GROUP_CHANGED"):
+                # admin(console) 트리거로 발생하는 이벤트
+                service = "console"
+            else:
+                service = "mcptt"
+
         data = {
             "trans_id": str(_notify_seq),
             "event": event_type,
             "uri": uri,
             "action": action,
-            "etag": etag
+            "etag": etag,
+            "sesid": sesid,
+            "service": service,
         }
         msg = json.dumps(data)
-        
-        # Connect to CSP (Localhost 4421)
-        # Timeout to avoid blocking
+
         # Connect to CSP (Localhost 4421) - UDP
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(msg.encode('utf-8'), (CSP_NOTIFY_IP, CSP_NOTIFY_PORT))
         sock.close()
+
+        # CSC 자체 flow/msg 로그에도 기록 (iface=csp)
+        csc_logger.log_flow(
+            service=service,
+            from_actor="csc", to_actor="csp",
+            proto="CSC", method=event_type,
+            detail=f"{action} {uri}".strip() if (action or uri) else "",
+            sesid=sesid,
+            iface="csp",
+            body=msg,
+            peer=f"{CSP_NOTIFY_IP}:{CSP_NOTIFY_PORT}",
+            mid=str(_notify_seq),
+            caller=caller,
+        )
+
         logger.log_info(f"Notify Sent: {msg}")
     except Exception as e:
         logger.log_error(f"Notify Failed: {e}")
@@ -570,7 +609,7 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # GET /idms/authreq?client_id=...
     params = args.query_params
     user_name = params.get('user_name')
-    csc_logger.log_msg("mcptt", "in", "HTTPS", "IdMS authreq", user_name or "")
+    # (로깅은 pi_http post_hook 에서 자동 처리)
     user_password = params.get('user_password')
     client_id = params.get('client_id', 'MCPTT_UE')
     redirect_uri = params.get('redirect_uri')
@@ -659,7 +698,7 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 # IdMS: Token Req
 async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # POST /idms/tokenreq
-    csc_logger.log_msg("mcptt", "in", "HTTPS", "IdMS tokenreq")
+    # (로깅은 pi_http post_hook 에서 자동 처리)
     data = args.body
     if not isinstance(data, dict):
         return HandlerResult(status=400, body={"error": "invalid_request"}, media_type="application/json")
@@ -836,7 +875,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
     group_uri = parts[3] if len(parts) >= 4 else ""
     user_uri = parts[2] if len(parts) >= 3 else ""
     gid = group_uri.replace("tel:", "").replace("sip:", "").split("@")[0] if group_uri else ""
-    csc_logger.log_msg("mcptt", "in", "HTTPS", f"GMS {args.method}", user_uri)
+    # GMS base log 는 post_hook 에서 자동, 그룹별 participants.jsonl 만 별도 기록
     if gid:
         csc_logger.log_ptt_service(gid, "in", "HTTPS", f"GMS {args.method} {user_uri}", "")
     # ['org.openmobilealliance.groups', 'users', 'user_uri']        → list
@@ -905,7 +944,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
 # CMS: User Profile
 async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # GET /org.3gpp.mcptt.user-profile/users/{user_id}/user-profile
-    csc_logger.log_msg("mcptt", "in", "HTTPS", "CMS user-profile")
+    # (로깅은 pi_http post_hook 에서 자동 처리)
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return HandlerResult(status=401, body="Missing or Invalid Token")
@@ -932,7 +971,7 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 # CMS: Service Config
 async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # GET /org.3gpp.mcptt.service-config/users/{user_id}/service-config
-    csc_logger.log_msg("mcptt", "in", "HTTPS", "CMS service-config")
+    # (로깅은 pi_http post_hook 에서 자동 처리)
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return HandlerResult(status=401, body="Missing or Invalid Token")

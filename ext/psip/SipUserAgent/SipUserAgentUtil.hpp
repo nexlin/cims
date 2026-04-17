@@ -18,10 +18,10 @@
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP Call-ID ·Î ÅëÈ­¸¦ °Ë»öÇÑ ÈÄ, °Ë»öµÈ °á°ú·Î peer RTP Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
+ * @brief SIP Call-ID ï¿½ï¿½ ï¿½ï¿½È­ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½, ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ peer RTP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @param pclsRtp		peer RTP Á¤º¸¸¦ ÀúÀåÇÒ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param pclsRtp		peer RTP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::GetRemoteCallRtp( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
@@ -41,10 +41,10 @@ bool CSipUserAgent::GetRemoteCallRtp( const char * pszCallId, CSipCallRtp * pcls
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP Call-ID ·Î ÅëÈ­¸¦ °Ë»öÇÑ ÈÄ, °Ë»öµÈ °á°ú·Î peer ¾ÆÀÌµð¸¦ ÀúÀåÇÑ´Ù.
+ * @brief SIP Call-ID ï¿½ï¿½ ï¿½ï¿½È­ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½, ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ peer ï¿½ï¿½ï¿½Ìµï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @param strToId		peer ¾ÆÀÌµð¸¦ ÀúÀåÇÒ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param strToId		peer ï¿½ï¿½ï¿½Ìµï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::GetToId( const char * pszCallId, std::string & strToId )
 {
@@ -67,10 +67,10 @@ bool CSipUserAgent::GetToId( const char * pszCallId, std::string & strToId )
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP Call-ID ·Î ÅëÈ­¸¦ °Ë»öÇÑ ÈÄ, °Ë»öµÈ °á°ú·Î my ¾ÆÀÌµð¸¦ ÀúÀåÇÑ´Ù.
+ * @brief SIP Call-ID ï¿½ï¿½ ï¿½ï¿½È­ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½, ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ my ï¿½ï¿½ï¿½Ìµï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @param strFromId		my ¾ÆÀÌµð¸¦ ÀúÀåÇÒ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param strFromId		my ï¿½ï¿½ï¿½Ìµï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::GetFromId( const char * pszCallId, std::string & strFromId )
 {
@@ -93,10 +93,10 @@ bool CSipUserAgent::GetFromId( const char * pszCallId, std::string & strFromId )
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP Call-ID ·Î ÅëÈ­¸¦ °Ë»öÇÑ ÈÄ, °Ë»öµÈ °á°ú·Î ÀüÈ­ »ó´ë¹æÀÇ Contact Á¤º¸¸¦ CSipCallRoute °´Ã¼¿¡ ÀúÀåÇÑ´Ù.
+ * @brief SIP Call-ID ï¿½ï¿½ ï¿½ï¿½È­ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½, ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Contact ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ CSipCallRoute ï¿½ï¿½Ã¼ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @param pclsRoute ÀüÈ­ »ó´ë¹æÀÇ Contact Á¤º¸¸¦ ÀúÀåÇÒ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param pclsRoute ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Contact ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::GetContact( const char * pszCallId, CSipCallRoute * pclsRoute )
 {
@@ -119,10 +119,10 @@ bool CSipUserAgent::GetContact( const char * pszCallId, CSipCallRoute * pclsRout
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP Call-ID ·Î ÅëÈ­¸¦ °Ë»öÇÑ ÈÄ, °Ë»öµÈ °á°úÀÇ CDR Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
+ * @brief SIP Call-ID ï¿½ï¿½ ï¿½ï¿½È­ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½, ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ CDR ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @param pclsCdr		CDR Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param pclsCdr		CDR ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::GetCdr( const char * pszCallId, CSipCdr * pclsCdr )
 {
@@ -143,12 +143,12 @@ bool CSipUserAgent::GetCdr( const char * pszCallId, CSipCdr * pclsCdr )
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP INVITE ¸Þ½ÃÁö¸¦ ¼ö½ÅÇÑ °æ¿ì, ÇØ´ç SIP INVITE ¸Þ½ÃÁö¿¡¼­ Çì´õ ÀÌ¸§À» °Ë»öÇÏ¿©¼­ ÀÌ¿¡ ´ëÇÑ °ªÀ» ¸®ÅÏÇÑ´Ù.
- *				¸ðµç Çì´õ¸¦ °Ë»öÇÏ´Â °ÍÀº ¾Æ´Ï°í CSipMessage ÀÇ m_clsHeaderList ¿¡ ÀúÀåµÈ Çì´õ¸¸ °Ë»öÇÑ´Ù.
+ * @brief SIP INVITE ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½, ï¿½Ø´ï¿½ SIP INVITE ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½Ì¸ï¿½ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½Ï¿ï¿½ï¿½ï¿½ ï¿½Ì¿ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ *				ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½Ï´ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Æ´Ï°ï¿½ CSipMessage ï¿½ï¿½ m_clsHeaderList ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId			SIP Call-ID
- * @param pszHeaderName Çì´õ ÀÌ¸§
- * @param strValue			Çì´õÀÇ °ªÀ» ÀúÀåÇÒ º¯¼ö
- * @returns °Ë»ö¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param pszHeaderName ï¿½ï¿½ï¿½ ï¿½Ì¸ï¿½
+ * @param strValue			ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+ * @returns ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::GetInviteHeaderValue( const char * pszCallId, const char * pszHeaderName, std::string & strValue )
 {
@@ -176,9 +176,9 @@ bool CSipUserAgent::GetInviteHeaderValue( const char * pszCallId, const char * p
 
 /**
  * @ingroup SipUserAgent
- * @brief Dialog ÀÇ RSeq °ªÀ» ¸®ÅÏÇÑ´Ù.
+ * @brief Dialog ï¿½ï¿½ RSeq ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @returns Dialog ¿¡ RSeq °¡ Á¸ÀçÇÏ¸é RSeq °ªÀ» ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 À» ¸®ÅÏÇÑ´Ù.
+ * @returns Dialog ï¿½ï¿½ RSeq ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ RSeq ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ -1 ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 int CSipUserAgent::GetRSeq( const char * pszCallId )
 {
@@ -198,9 +198,9 @@ int CSipUserAgent::GetRSeq( const char * pszCallId )
 
 /**
  * @ingroup SipUserAgent
- * @brief Dialog ÀÇ RSeq °ªÀ» ¼³Á¤ÇÑ´Ù.
+ * @brief Dialog ï¿½ï¿½ RSeq ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @param iRSeq RSeq °ª
+ * @param iRSeq RSeq ï¿½ï¿½
  */
 void CSipUserAgent::SetRSeq( const char * pszCallId, int iRSeq )
 {
@@ -216,10 +216,38 @@ void CSipUserAgent::SetRSeq( const char * pszCallId, int iRSeq )
 }
 
 /**
- * @brief ÅëÈ­°¡ ¿¬°á ¿äÃ» ÁßÀÎÁö È®ÀÎÇÑ´Ù.
+ * @ingroup SipUserAgent
+ * @brief Call-ID ì— í•´ë‹¹í•˜ëŠ” Dialog ì— override ë„ë©”ì¸ ì„¤ì •.
+ *        ì´í›„ ì´ Dialog ì—ì„œ ìƒì„±ë˜ëŠ” ëª¨ë“  SIP ë©”ì‹œì§€ì˜ From/To/Request-URI ë„ë©”ì¸ì´
+ *        ì „ì—­ SipStackSetup::m_strDomain ëŒ€ì‹  ì´ ê°’ìœ¼ë¡œ ëŒ€ì²´ëœë‹¤.
  * @param pszCallId SIP Call-ID
- * @param pszTo			SIP TO ¾ÆÀÌµð
- * @returns ÅëÈ­°¡ ¿¬°áµÇ¾úÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @param pszDomain ì„¤ì •í•  ë„ë©”ì¸ (ì˜ˆ: "ptt.mnc001.mcc001.3gppnetwork.org")
+ * @returns Dialog ì¡´ìž¬ ì‹œ true, ì—†ìœ¼ë©´ false
+ */
+bool CSipUserAgent::SetCallDomain( const char * pszCallId, const char * pszDomain )
+{
+	if( !pszCallId || !pszDomain ) return false;
+
+	SIP_DIALOG_MAP::iterator itMap;
+	bool bFound = false;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		itMap->second.m_strOverrideDomain = pszDomain;
+		bFound = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bFound;
+}
+
+/**
+ * @brief ï¿½ï¿½È­ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã» ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ È®ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param pszCallId SIP Call-ID
+ * @param pszTo			SIP TO ï¿½ï¿½ï¿½Ìµï¿½
+ * @returns ï¿½ï¿½È­ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ç¾ï¿½ï¿½ï¿½ï¿½ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::IsRingCall( const char * pszCallId, const char * pszTo )
 {
@@ -252,9 +280,9 @@ bool CSipUserAgent::IsRingCall( const char * pszCallId, const char * pszTo )
 
 /**
  * @ingroup SipUserAgent
- * @brief 100rel ±â´ÉÀÌ È°¼ºÈ­ À¯¹«¸¦ °Ë»öÇÑ´Ù.
+ * @brief 100rel ï¿½ï¿½ï¿½ï¿½ï¿½ È°ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @returns 100rel ±â´ÉÀÌ È°¼ºÈ­µÇ¾î ÀÖÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @returns 100rel ï¿½ï¿½ï¿½ï¿½ï¿½ È°ï¿½ï¿½È­ï¿½Ç¾ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::Is100rel( const char * pszCallId )
 {
@@ -278,9 +306,9 @@ bool CSipUserAgent::Is100rel( const char * pszCallId )
 
 /**
  * @ingroup SipUserAgent
- * @brief hold ÀÎÁö °Ë»çÇÑ´Ù.
+ * @brief hold ï¿½ï¿½ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @returns hold ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @returns hold ï¿½Ì¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::IsHold( const char * pszCallId )
 {
@@ -303,9 +331,9 @@ bool CSipUserAgent::IsHold( const char * pszCallId )
 
 /**
  * @ingroup SipUserAgent
- * @brief ÅëÈ­ ¿¬°áµÇ¾ú´ÂÁö °Ë»çÇÑ´Ù.
+ * @brief ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½Ç¾ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @returns ÅëÈ­ ¿¬°áµÇ¾úÀ¸¸é true ·Î ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @returns ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½Ç¾ï¿½ï¿½ï¿½ï¿½ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½×·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::IsConnected( const char * pszCallId )
 {
@@ -328,9 +356,9 @@ bool CSipUserAgent::IsConnected( const char * pszCallId )
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP ÅëÈ­ ¿äÃ» INVITE ¸Þ½ÃÁö¸¦ °Ë»öÇÑ´Ù.
+ * @brief SIP ï¿½ï¿½È­ ï¿½ï¿½Ã» INVITE ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½Ñ´ï¿½.
  * @param pszCallId SIP Call-ID
- * @returns ¼º°øÇÏ¸é SIP ÅëÈ­ ¿äÃ» INVITE ¸Þ½ÃÁö¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é NULL ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ SIP ï¿½ï¿½È­ ï¿½ï¿½Ã» INVITE ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ NULL ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 CSipMessage * CSipUserAgent::DeleteIncomingCall( const char * pszCallId )
 {

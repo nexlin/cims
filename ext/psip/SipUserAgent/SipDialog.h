@@ -25,7 +25,7 @@
 
 /**
  * @ingroup SipUserAgent
- * @brief SIP Dialog Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
+ * @brief SIP Dialog ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ Å¬ï¿½ï¿½ï¿½ï¿½
  */
 class CSipDialog
 {
@@ -33,43 +33,48 @@ public:
 	CSipDialog( CSipStack * pclsSipStack );
 	~CSipDialog();
 
-	/** SIP From Çì´õ¿¡ ÀúÀåµÇ´Â »ç¿ëÀÚ ¾ÆÀÌµğ */
+	/** SIP From ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ç´ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½ */
 	std::string	m_strFromId;
 
-	/** SIP From Çì´õ¿¡ ÀúÀåµÇ´Â tag */
+	/** SIP From ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ç´ï¿½ tag */
 	std::string	m_strFromTag;
 
-	/** SIP To Çì´õ¿¡ ÀúÀåµÇ´Â »ç¿ëÀÚ ¾ÆÀÌµğ */
+	/** SIP To ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ç´ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½ */
 	std::string	m_strToId;
 
-	/** SIP To Çì´õ¿¡ ÀúÀåµÇ´Â tag */
+	/** SIP To ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ç´ï¿½ tag */
 	std::string	m_strToTag;
 
 	/** SIP Call-ID */
 	std::string m_strCallId;
 
-	/** SIP Top Via Çì´õÀÇ branch */
+	/** SIP Top Via ï¿½ï¿½ï¿½ï¿½ï¿½ branch */
 	std::string m_strViaBranch;
 
-	/** SIP CSeq Çì´õÀÇ ¹øÈ£ */
+	/** SIP CSeq ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È£ */
 	int					m_iSeq;
 
-	/** SIP CSeq Çì´õÀÇ ´ÙÀ½ ¹øÈ£ ( PRACK ´ÙÀ½¿¡ Àü¼ÛÇÒ ¸Ş½ÃÁö¸¦ À§ÇØ¼­ »ç¿ëµÊ ) */
+	/** SIP CSeq ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È£ ( PRACK ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ø¼ï¿½ ï¿½ï¿½ï¿½ï¿½ ) */
 	int					m_iNextSeq;
 
-	/** SIP ¿äÃ» ¸Ş½ÃÁö¸¦ Àü¼ÛÇÒ IP ÁÖ¼Ò */
+	/** SIP ï¿½ï¿½Ã» ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ IP ï¿½Ö¼ï¿½ */
 	std::string	m_strContactIp;
 
-	/** SIP ¿äÃ» ¸Ş½ÃÁö¸¦ Àü¼ÛÇÒ Æ÷Æ® ¹øÈ£ */
+	/** SIP ï¿½ï¿½Ã» ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Æ® ï¿½ï¿½È£ */
 	int					m_iContactPort;
 
-	/** SIP ¿äÃ» ¸Ş½ÃÁö¸¦ Àü¼ÛÇÒ transport */
+	/** SIP ï¿½ï¿½Ã» ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ transport */
 	ESipTransport	m_eTransport;
 
-	/** local RTP IP ÁÖ¼Ò */
+	/** Per-dialog override domain for From/To/Request-URI.
+	 *  Empty â†’ ì „ì—­ CSipStackSetup::m_strDomain fallback.
+	 *  ì˜ˆ) MCPTT ê·¸ë£¹ ì½œì—ì„œ mcptt ë„ë©”ì¸ìœ¼ë¡œ ê°•ì œ ì‚¬ìš©. */
+	std::string	m_strOverrideDomain;
+
+	/** local RTP IP ï¿½Ö¼ï¿½ */
 	std::string	m_strLocalRtpIp;
 
-	/** local RTP Æ÷Æ® ¹øÈ£ */
+	/** local RTP ï¿½ï¿½Æ® ï¿½ï¿½È£ */
 	int					m_iLocalRtpPort;
 
 	/** local RTP direction ( sendrecv, sendonly, recvonly, inactive ) */
@@ -80,10 +85,10 @@ public:
 	SDP_MEDIA_LIST	m_clsLocalMediaList;
 #endif
 
-	/** remote RTP IP ÁÖ¼Ò */
+	/** remote RTP IP ï¿½Ö¼ï¿½ */
 	std::string	m_strRemoteRtpIp;
 
-	/** remote RTP Æ÷Æ® ¹øÈ£ */
+	/** remote RTP ï¿½ï¿½Æ® ï¿½ï¿½È£ */
 	int					m_iRemoteRtpPort;
 
 	/** remote RTP direction ( sendrecv, sendonly, recvonly, inactive ) */
@@ -94,12 +99,12 @@ public:
 	SDP_MEDIA_LIST	m_clsRemoteMediaList;
 #endif
 
-	/** ÄÚµ¦ */
+	/** ï¿½Úµï¿½ */
 	int					m_iCodec;
 
 	CODEC_LIST	m_clsCodecList;
 
-	/** SIP ¿äÃ» ¸Ş½ÃÁö¿¡ ÀúÀåµÉ Request Uri */
+	/** SIP ï¿½ï¿½Ã» ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ Request Uri */
 	std::string	m_strContactUri;
 
 	/** RSeq */
@@ -108,22 +113,22 @@ public:
 	/** 100rel */
 	bool				m_b100rel;
 
-	/** INVITE Àü¼Û/¼ö½Å ½Ã°£ */
+	/** INVITE ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ ï¿½Ã°ï¿½ */
 	struct timeval m_sttInviteTime;
 
-	/** CANCEL Àü¼Û ½Ã°£ */
+	/** CANCEL ï¿½ï¿½ï¿½ï¿½ ï¿½Ã°ï¿½ */
 	struct timeval m_sttCancelTime;
 
-	/** ÅëÈ­ ½ÃÀÛ ½Ã°£ */
+	/** ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½ ï¿½Ã°ï¿½ */
 	struct timeval m_sttStartTime;
 
-	/** ÅëÈ­ Á¾·á ½Ã°£ */
+	/** ï¿½ï¿½È­ ï¿½ï¿½ï¿½ï¿½ ï¿½Ã°ï¿½ */
 	struct timeval m_sttEndTime;
 
-	/** ¼ö½ÅµÈ INVITE ¸Ş½ÃÁö */
+	/** ï¿½ï¿½ï¿½Åµï¿½ INVITE ï¿½Ş½ï¿½ï¿½ï¿½ */
 	CSipMessage * m_pclsInvite;
 
-	/** ¼ö½ÅµÈ INVITE ¸Ş½ÃÁö¿¡ ÀúÀåµÈ Record-Route ¸®½ºÆ®·Î »ı¼ºÇÑ Route ¸®½ºÆ® */
+	/** ï¿½ï¿½ï¿½Åµï¿½ INVITE ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ Record-Route ï¿½ï¿½ï¿½ï¿½Æ®ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Route ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_FROM_LIST	m_clsRouteList;
 
 	CSipStack		* m_pclsSipStack;
@@ -131,7 +136,7 @@ public:
 	/** SDP session version */
 	int	m_iSessionVersion;
 
-	/** ¹ß½Å ÀüÈ­ÀÎ°¡? */
+	/** ï¿½ß½ï¿½ ï¿½ï¿½È­ï¿½Î°ï¿½? */
 	bool m_bSendCall;
 
 	CSipMessage * CreateInvite( );

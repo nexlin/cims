@@ -41,8 +41,8 @@ public:
               const std::string& strSystemId,
               bool bRawLogEnabled = true);
 
-    /** Set realm strings for service classification */
-    void SetRealms(const std::string& strVoipRealm, const std::string& strPttRealm);
+    /** Config 의 "Realm" 배열에서 빌드된 domain→service 매핑을 주입 */
+    void SetDomainServiceMap(const std::map<std::string, std::string>& mapDomainToService);
 
     bool IsEnabled() const { return m_bEnabled; }
     bool IsRawLogEnabled() const { return m_bRawLogEnabled; }
@@ -57,28 +57,49 @@ public:
                     const char* pszService = "system",
                     const char* pszTxId = "",
                     const char* pszSesId = "",
-                    const char* pszDetail = "");
+                    const char* pszDetail = "",
+                    const char* pszCaller = "",
+                    const char* pszCallee = "");
 
     /** Call-ID에 sesid/subid 매핑 등록 (INVITE 전에 호출) */
     void SetCallSesId(const std::string& strCallId, const std::string& strSesId, const std::string& strSubId = "");
+
+    /** 신규 sesid 발행 — 포맷: {caller}::{module}::{us_ts}::{counter}
+     *  caller가 비어있으면 leading "::"로 시작 */
+    static std::string IssueSesId(const std::string& strCaller,
+                                   const char* pszModule = "csp");
+
+    /** Call-ID에 매핑된 sesid 반환. 없으면 신규 발행하여 저장. */
+    std::string GetOrIssueSesId(const std::string& strCallId,
+                                 const std::string& strCaller);
+
+    /** Call-ID에 매핑된 sesid 단순 조회 (없으면 빈문자열) */
+    std::string GetSesIdByCallId(const std::string& strCallId);
 
 private:
     /** Determine service from SIP message domain */
     std::string ClassifyService(const char* pszMsg, const std::string& strCallId, const std::string& strMethod);
 
-    /** 통합 flow.jsonl 기록 */
+    /** 통합 flow.jsonl 기록.
+     *  필드 순서: ts, service, caller, callee, sesid, subid, node, from, to,
+     *            proto, method, detail, mid, seq, iface
+     *  빈 값은 key 생략. */
     void WriteFlowLine(const char* pszService, const char* pszTs,
                        const char* pszFrom, const char* pszTo,
                        const char* pszProto, const char* pszMethod,
                        const char* pszDetail = "",
                        const char* pszTxId = "",
                        const char* pszSesId = "", const char* pszSubId = "",
-                       int iSeq = 0, const char* pszIface = "");
+                       int iSeq = 0, const char* pszIface = "",
+                       const char* pszCaller = "", const char* pszCallee = "");
 
-    /** Write to {system_id}_{iface}.jsonl, returns line number (seq) */
+    /** Write to {system_id}_{iface}.msg.jsonl, returns line number (seq).
+     *  필드 순서: ts, dir, peer, caller, callee, proto, msg
+     *  빈 값은 key 생략. */
     int WriteInterfaceLine(const char* pszIface, const char* pszTs, const char* pszDir,
                            const char* pszPeer, const char* pszProto,
-                           const char* pszMsg);
+                           const char* pszMsg,
+                           const char* pszCaller = "", const char* pszCallee = "");
 
     /** Ensure hourly directories and rotate files if needed */
     void EnsureHourlyFiles(const std::string& strFlowHourDir, const std::string& strMsgHourDir);
@@ -127,9 +148,8 @@ private:
     bool        m_bRawLogEnabled;
     std::mutex  m_mtx;
 
-    // Realm configuration for service classification
-    std::string m_strVoipRealm;
-    std::string m_strPttRealm;
+    // Realm configuration for service classification (domain → service name)
+    std::map<std::string, std::string> m_mapDomainToService;
 
     // Call-ID → service cache for SIP correlation
     std::map<std::string, std::string> m_mapCallService;

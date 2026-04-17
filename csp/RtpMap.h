@@ -16,6 +16,9 @@ public:
     CRtpInfo( uint8_t iSocketCount = SOCKET_COUNT_PER_MEDIA );
     
     std::string m_strSessionId;
+    std::string m_strCaller;   // peer_index=0 MSISDN
+    std::string m_strCallee;   // peer_index=1 MSISDN
+    std::string m_strSesId;    // Flow 상관용 sesid
 
     Socket *m_phSocket;
     uint32_t *m_piIp;
@@ -50,7 +53,8 @@ public:
 
     int CreatePort( int iSocketCount, const std::string& strRecordDir = "", const std::string& strLogDir = "",
                     const std::string& strCaller = "", const std::string& strCallee = "",
-                    const std::string& strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0 );
+                    const std::string& strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
+                    const std::string& strSesId = "" );
 
     bool Select( int iPort, CRtpInfo **ppclsRtpInfo );
     bool SetStop( int iPort );

@@ -87,6 +87,79 @@ if __name__ == '__main__':
 
         cims_recording.init(service_log_dir=_service_log_dir)
 
+        # ── pi_http 요청 로깅 훅 등록 (admin/mcptt 자동 로깅) ──
+        from util.pi_http.http_server_controller import DynamicRouteProc
+
+        # base_path 접두어 → service 매핑 (긴 prefix 우선 매칭)
+        _BASE_PATH_SERVICE = [
+            ("/idms/",                                 "mcptt"),
+            ("/org.openmobilealliance.groups",         "mcptt"),
+            ("/org.3gpp.mcptt",                        "mcptt"),
+            ("/keymanagement/",                        "mcptt"),
+            ("/api/v1/",                               "console"),
+        ]
+
+        def _route_to_service(full_path: str) -> str:
+            for prefix, svc in _BASE_PATH_SERVICE:
+                if full_path.startswith(prefix):
+                    return svc
+            return ""
+
+        def _extract_caller(handler_args) -> str:
+            """Authorization Bearer JWT → login_id 추출. 없으면 body/query 에서 user 후보."""
+            try:
+                payload = cims_auth.extract_token(handler_args)
+                if payload:
+                    return payload.get("login_id") or str(payload.get("sub", "")) or ""
+            except Exception:
+                pass
+            # query string 'user_name' 또는 body 'login_id' (IdMS authreq 등)
+            qp = handler_args.query_params or {}
+            if qp.get("user_name"): return qp["user_name"]
+            body = handler_args.body or {}
+            if isinstance(body, dict):
+                if body.get("login_id"): return body["login_id"]
+                if body.get("user_name"): return body["user_name"]
+            return ""
+
+        def _post_hook(handler_args, base_path, handler_result):
+            """모든 dynamic 요청 완료 후 flow/msg 로그 기록."""
+            try:
+                # 로그 제외: health check, WebSocket 업그레이드, 빈 경로
+                if not handler_args.full_path or handler_args.full_path == "/health":
+                    return
+                service = _route_to_service(handler_args.full_path)
+                if not service:
+                    service = "console"  # 기본: admin UI 추정
+
+                caller = _extract_caller(handler_args)
+                peer = f"{getattr(handler_args,'client_ip','')}:{getattr(handler_args,'client_port','')}"
+                status = getattr(handler_result, "status", 0)
+
+                # IdMS/GMS/CMS sub-function prefix 로 method 구성
+                path = handler_args.full_path
+                sub = ""
+                if path.startswith("/idms/"):                    sub = "IdMS"
+                elif path.startswith("/org.openmobilealliance"): sub = "GMS"
+                elif path.startswith("/org.3gpp.mcptt"):         sub = "CMS"
+                elif path.startswith("/keymanagement"):          sub = "KMS"
+
+                mname = f"{handler_args.method} {path}" if not sub else f"{sub}/{handler_args.method} {path}"
+                detail = f"status={status}"
+
+                csc_logger.log_flow(
+                    service=service,
+                    from_actor="ue", to_actor="csc",
+                    proto="HTTPS", method=mname,
+                    detail=detail,
+                    iface="ue", peer=peer,
+                    caller=caller,
+                )
+            except Exception as e:
+                logger.log_error(f"post_hook error: {e}")
+
+        DynamicRouteProc.set_request_hooks(pre=None, post=_post_hook)
+
         # Adjust relative data paths
         if 'Data' in config:
             for key in ['User', 'Group']:

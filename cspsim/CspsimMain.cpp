@@ -48,14 +48,41 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(strJson);
     SimpleJson::JsonNode setup = root.Get("Setup");
 
-    // Realm 추출 (모드별: PTT → PttRealm, VoIP → VoipRealm → Realm fallback)
+    // Realm 추출 — 신 포맷 "Realm": [{"service":..., "domains":[...]}] 우선.
+    // 모드별 대응: PTT → mcptt 도메인, VoIP → volte 도메인.
     SimpleJson::JsonNode sip = setup.Get("Sip");
-    if (strFilterMode == "ptt" && sip.Has("PttRealm")) {
-        strRealm = sip.GetString("PttRealm");
-    } else if (sip.Has("VoipRealm")) {
-        strRealm = sip.GetString("VoipRealm");
-    } else if (sip.Has("Realm")) {
-        strRealm = sip.GetString("Realm");
+    const std::string strTargetSvc = (strFilterMode == "ptt") ? "mcptt" : "volte";
+    if (setup.Has("Realm")) {
+        SimpleJson::JsonNode realmArr = setup.Get("Realm");
+        if (realmArr.type == SimpleJson::JSON_ARRAY) {
+            for (size_t i = 0; i < realmArr.Size(); ++i) {
+                SimpleJson::JsonNode entry = realmArr.At(i);
+                if (entry.GetString("service") == strTargetSvc && entry.Has("domains")) {
+                    SimpleJson::JsonNode domArr = entry.Get("domains");
+                    if (domArr.type == SimpleJson::JSON_ARRAY && domArr.Size() > 0) {
+                        strRealm = domArr.At(0).AsString();
+                        break;
+                    }
+                }
+            }
+            // 첫 매칭 실패 시 배열의 첫 항목 첫 도메인 fallback (단일-service 배포 대비)
+            if (strRealm.empty() && realmArr.Size() > 0) {
+                SimpleJson::JsonNode entry = realmArr.At(0);
+                if (entry.Has("domains")) {
+                    SimpleJson::JsonNode domArr = entry.Get("domains");
+                    if (domArr.type == SimpleJson::JSON_ARRAY && domArr.Size() > 0)
+                        strRealm = domArr.At(0).AsString();
+                }
+            }
+        }
+    }
+    // Legacy fallback (VoipRealm/PttRealm/Realm) — 이전 설정 호환
+    if (strRealm.empty()) {
+        if (strFilterMode == "ptt" && sip.Has("PttRealm"))      strRealm = sip.GetString("PttRealm");
+        else if (sip.Has("VoipRealm"))                          strRealm = sip.GetString("VoipRealm");
+        else if (sip.Has("Realm") && sip.Get("Realm").type == SimpleJson::JSON_STRING)
+                                                                strRealm = sip.GetString("Realm");
+        else if (sip.Has("AuthRealm"))                          strRealm = sip.GetString("AuthRealm");
     }
 
     // DB 접속 정보
