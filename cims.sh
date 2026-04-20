@@ -227,17 +227,59 @@ stop_csc() {
 }
 
 # ── 상태 출력 ──────────────────────────────────────────────────
+# 컴포넌트별 리스닝 포트 (외부 기동 감지용)
+_svc_port_proto() {
+    case "$1" in
+        cmp)     echo "9000:udp" ;;
+        csp)     echo "5060:udp" ;;
+        cwrtc)   echo "8080:tcp" ;;
+        csc)     echo "4420:tcp" ;;
+        console) echo "3001:tcp" ;;
+        phone)   echo "3000:tcp" ;;
+        *)       echo "" ;;
+    esac
+}
+
+# 포트를 점유 중인 프로세스 PID 반환 (없으면 빈 문자열)
+_pid_by_port() {
+    local pp="$1" port proto
+    port="${pp%%:*}"; proto="${pp##*:}"
+    [[ -z $port ]] && return
+    # ss -H: no header,  -lnp: listening + numeric + processes
+    local line pid
+    if [[ $proto == "udp" ]]; then
+        line=$(ss -Hulnp 2>/dev/null | awk -v p=":$port" '$5 ~ p {print; exit}')
+    else
+        line=$(ss -Htlnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print; exit}')
+    fi
+    [[ -z $line ]] && return
+    pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+    echo "$pid"
+}
+
 status_one() {
     local name="$1"
     local pid; pid="$(read_pid "$name")"
-    if [[ -z $pid ]]; then
-        echo -e "  ${RED}●${NC} $(printf '%-12s' "$name")  중지됨"
-    elif kill -0 "$pid" 2>/dev/null; then
+    if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
         echo -e "  ${GREEN}●${NC} $(printf '%-12s' "$name")  실행 중  (pid=$pid)"
-    else
+        return
+    fi
+    # PID 파일 있는데 프로세스 없음 — 비정상 종료
+    if [[ -n $pid ]]; then
         echo -e "  ${YELLOW}●${NC} $(printf '%-12s' "$name")  비정상 종료 (pid=$pid)"
         rm -f "$(pidfile "$name")"
+        return
     fi
+    # PID 파일 없음 — 포트 리스너로 외부 기동 여부 확인 (B: cims.sh 밖에서 기동된 경우)
+    local pp; pp="$(_svc_port_proto "$name")"
+    if [[ -n $pp ]]; then
+        local ext_pid; ext_pid="$(_pid_by_port "$pp")"
+        if [[ -n $ext_pid ]]; then
+            echo -e "  ${YELLOW}●${NC} $(printf '%-12s' "$name")  실행 중(외부)  (pid=$ext_pid, port=${pp%:*})"
+            return
+        fi
+    fi
+    echo -e "  ${RED}●${NC} $(printf '%-12s' "$name")  중지됨"
 }
 
 cmd_status() {
@@ -547,6 +589,12 @@ ${BOLD}데이터 정리:${NC}
 ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]
 
+${BOLD}배포 패키지 (Console 업로드용):${NC}
+  pkg -v <version> [-m <changelog>] [name...]
+                                 컴포넌트를 tar.gz 로 묶고 meta.json 을 최상위에 포함
+                                 (기본: 전체. 이름 지정 시 해당 컴포넌트만)
+                                 예: ./cims.sh pkg -v 1.0.2 -m "INVITE 도메인 수정" csp
+
 ${BOLD}예시:${NC}
   # 빌드 → 설정 → 시작 (소스 트리)
   $(basename "$0") build
@@ -611,6 +659,151 @@ cmd_stop() {
     for t in "$@"; do _stop_one "$t"; done
 }
 
+cmd_pkg() {
+    # 컴포넌트별 배포 tarball 생성 → build/dist/packages/<name>-<ver>.tar.gz
+    # 각 tarball 최상위에 meta.json (name, version, description, build/git/changelog) 포함
+    local version=""
+    local changelog=""
+    local targets=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -v|--version)   version="$2"; shift 2 ;;
+            -m|--changelog) changelog="$2"; shift 2 ;;
+            -*) err "알 수 없는 옵션: $1"; return 1 ;;
+            *)  targets+=("$1"); shift ;;
+        esac
+    done
+    if [[ -z $version ]]; then
+        err "버전 필수: -v <version> (예: -v 1.0.0)"
+        return 1
+    fi
+    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp csp cwrtc csc console phone cspsim agent)
+
+    if [[ ! -d $DIST_DIR ]]; then
+        err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
+        return 1
+    fi
+
+    # 컴포넌트별 소스 루트 매핑 — 각 소스 루트의 pkg.json 에서 name/description 를 가져옴
+    # (dist/ 밖에서 실행되는 경우만 소스 루트가 있으며, 그 외에는 dist/<comp>/pkg.json 로 fallback)
+    _src_root_for() {
+        case "$1" in
+            csp)     echo "$SCRIPT_DIR/csp" ;;
+            cmp)     echo "$SCRIPT_DIR/cmp" ;;
+            csc)     echo "$SCRIPT_DIR/csc" ;;
+            cwrtc)   echo "$SCRIPT_DIR/cwrtc" ;;
+            console) echo "$SCRIPT_DIR/cims-console" ;;
+            phone)   echo "$SCRIPT_DIR/cims-phone" ;;
+            cspsim)  echo "$SCRIPT_DIR/cspsim" ;;
+            agent)   echo "$SCRIPT_DIR/agent" ;;
+            *)       echo "" ;;
+        esac
+    }
+
+    # Git 정보 (가능한 경우)
+    local git_sha="" git_branch=""
+    if git -C "$SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+        git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "")
+        git_branch=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    fi
+    local packaged_at; packaged_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local packaged_by="${USER:-unknown}@$(hostname -s 2>/dev/null || echo unknown)"
+
+    local out_dir="$DIST_DIR/packages"
+    mkdir -p "$out_dir"
+
+    local t src_sub tar_file build_date
+    for t in "${targets[@]}"; do
+        case "$t" in
+            cmp|csp|cwrtc|csc|console|phone|cspsim|agent) src_sub="$t" ;;
+            *) err "알 수 없는 컴포넌트: $t"; continue ;;
+        esac
+        if [[ ! -d "$DIST_DIR/$src_sub" ]]; then
+            warn "skip: $DIST_DIR/$src_sub 없음"; continue
+        fi
+
+        # build_date = 컴포넌트 dist 디렉토리 안에서 가장 최근 파일의 mtime
+        build_date=$(find "$DIST_DIR/$src_sub" -type f -printf '%T@\n' 2>/dev/null \
+                        | sort -nr | head -1 \
+                        | xargs -I{} date -u -d @{} +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+
+        # 소스 루트 pkg.json 에서 description 을 읽음 (없으면 dist/<comp>/pkg.json fallback)
+        local comp_meta=""
+        local src_root; src_root=$(_src_root_for "$t")
+        for cand in "$src_root/pkg.json" "$DIST_DIR/$t/pkg.json"; do
+            [[ -n $cand && -f $cand ]] && comp_meta="$cand" && break
+        done
+        [[ -z $comp_meta ]] && warn "$t: pkg.json 없음 — description 공란"
+
+        # meta.json 생성 (DIST_DIR 안에 임시로 작성 → tar 루트에 추가 후 삭제)
+        local tmp_meta="$DIST_DIR/.pkgmeta.$$.json"
+        python3 - "$comp_meta" "$t" "$version" "$build_date" "$git_sha" "$git_branch" \
+                  "$packaged_at" "$packaged_by" "$changelog" <<'PYEOF' > "$tmp_meta"
+import sys, json, os
+meta_file, name, version, build_date, git_sha, git_branch, packaged_at, packaged_by, changelog = sys.argv[1:]
+desc = ""
+# 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "..." }
+if meta_file and os.path.isfile(meta_file):
+    try:
+        with open(meta_file, 'r', encoding='utf-8') as f:
+            entry = json.load(f)
+        if isinstance(entry, dict):
+            # 단일 컴포넌트 스키마
+            if "description" in entry:
+                desc = entry.get("description", "")
+            # 구(舊) 레지스트리 스키마 (후방 호환)
+            elif name in entry and isinstance(entry[name], dict):
+                desc = entry[name].get("description", "")
+    except Exception:
+        pass
+meta = {
+    "name": name,
+    "version": version,
+    "description": desc,
+    "build_date": build_date or None,
+    "git_sha": git_sha or None,
+    "git_branch": git_branch or None,
+    "packaged_at": packaged_at,
+    "packaged_by": packaged_by,
+    "changelog": changelog or "",
+}
+print(json.dumps(meta, indent=2, ensure_ascii=False))
+PYEOF
+
+        tar_file="$out_dir/${t}-${version}.tar.gz"
+        info "패키징: $t-$version  (git=$git_sha/$git_branch)"
+
+        # tar 구성: meta.json(루트) + <component>/ + cims.sh
+        local meta_basename=".pkgmeta.$$.json"
+        # 런타임 산출물/상태 디렉토리는 배포에서 제외
+        #  log/         : 서비스 로그 (csp/csc 등)
+        #  run/         : pid 파일
+        #  cache/       : CSC 설정 캐시 (고정값이 아닌 현재 상태)
+        #  packages/    : CSC 가 수집한 업로드 tarball (신규 배포에 포함되면 중복 팽창)
+        #  dist/        : 번들러 산출물 이 아닌 상위 dist 와 혼동 방지 (cwrtc/dist 등 없음)
+        ( cd "$DIST_DIR" && \
+            tar czf "$tar_file" \
+                --exclude="$src_sub/log" \
+                --exclude="$src_sub/run" \
+                --exclude="$src_sub/cache" \
+                --exclude="$src_sub/packages" \
+                --exclude="$src_sub/cdr" \
+                --exclude='*.pid' --exclude='*.pyc' \
+                --exclude='__pycache__' --exclude='.cache' \
+                --transform="s|^$meta_basename\$|meta.json|" \
+                "$meta_basename" \
+                "$src_sub" $( [[ -f cims.sh ]] && echo cims.sh ) )
+        rm -f "$tmp_meta"
+        local size; size=$(stat -c%s "$tar_file" 2>/dev/null || echo 0)
+        ok "$(basename "$tar_file") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo "${size}B"))"
+    done
+
+    header "생성된 패키지 (업로드 대상):"
+    ls -lh "$out_dir"/*.tar.gz 2>/dev/null | awk '{printf "  %s  %s\n", $5, $9}'
+    echo ""
+    info "Console 에서 업로드: 배포 관리 → 패키지 → ＋ 업로드 (파일만 선택하면 meta 자동 인식)"
+}
+
 cmd_restart() {
     if [[ $# -eq 0 ]]; then cmd_stop all; sleep 1; cmd_start all; return; fi
     cmd_stop "$@"
@@ -628,6 +821,7 @@ case "${1:-}" in
     sim)       shift; cmd_sim "$@" ;;
     clean)     shift; cmd_clean "${1:-all}" ;;
     log)       shift; cmd_log "${1:-csp}" ;;
+    pkg)       shift; cmd_pkg "$@" ;;
     help|--help|-h) usage ;;
     "") usage ;;
     *) err "알 수 없는 명령: $1"; echo ""; usage; exit 1 ;;

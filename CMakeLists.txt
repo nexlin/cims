@@ -335,6 +335,18 @@ add_custom_target(dist
     # ── 6. CSC Python 소스 복사 ────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/bin/csc_pihttp/src ${CMAKE_BINARY_DIR}/dist/csc/src
 
+    # ── 6b. Agent 에셋 복사 (CSC 가 /install-agent.sh 로 서빙) ──
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/agent ${CMAKE_BINARY_DIR}/dist/agent
+
+    # ── 6c. 컴포넌트별 pkg.json 복사 (cims.sh pkg 가 description 에 사용) ──
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/pkg.json          ${CMAKE_BINARY_DIR}/dist/csp/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/pkg.json          ${CMAKE_BINARY_DIR}/dist/cmp/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/pkg.json          ${CMAKE_BINARY_DIR}/dist/csc/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/pkg.json        ${CMAKE_BINARY_DIR}/dist/cwrtc/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-console/pkg.json ${CMAKE_BINARY_DIR}/dist/console/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-phone/pkg.json   ${CMAKE_BINARY_DIR}/dist/phone/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cspsim/pkg.json       ${CMAKE_BINARY_DIR}/dist/cspsim/pkg.json
+
     # ── 7. Web UI nginx 설정 복사 ──────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-console/nginx.conf ${CMAKE_BINARY_DIR}/dist/console/nginx.conf
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-phone/nginx.conf   ${CMAKE_BINARY_DIR}/dist/phone/nginx.conf

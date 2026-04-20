@@ -62,6 +62,47 @@ async def _get_body_from_request(req: Request) -> Optional[BodyData]:
             elif media_type == "application/x-www-form-urlencoded":
                 form_data = await req.form()
                 body_data = dict(form_data)
+            elif media_type == "multipart/form-data":
+                # 이진 업로드 지원 — UploadFile 은 bytes 로 읽어서 dict 에 담음
+                import time as _t
+                _t0 = _t.monotonic()
+                form_data = await req.form()
+                _t1 = _t.monotonic()
+                body_data = {}
+                total_bytes = 0
+                for k, v in form_data.multi_items():
+                    if hasattr(v, "read") and hasattr(v, "filename"):
+                        body_data[k] = await v.read()
+                        body_data[f"{k}__filename"] = v.filename
+                        total_bytes += len(body_data[k])
+                    else:
+                        body_data[k] = v
+                _t2 = _t.monotonic()
+                if total_bytes > 1024*1024:   # 1MB 이상만 로그
+                    Logger().log_info(
+                        f"[multipart] body={total_bytes/1024/1024:.1f}MB "
+                        f"form_parse={int((_t1-_t0)*1000)}ms "
+                        f"read={int((_t2-_t1)*1000)}ms "
+                        f"rate={total_bytes/max(_t1-_t0,1e-6)/1024/1024:.1f}MB/s"
+                    )
+            elif media_type == "application/octet-stream":
+                # 원시 바이너리 — stream 으로 통째 읽음 (multipart 오버헤드 제거)
+                import time as _t
+                _t0 = _t.monotonic()
+                chunks = []
+                total = 0
+                async for chunk in req.stream():
+                    if chunk:
+                        chunks.append(chunk)
+                        total += len(chunk)
+                body_data = b"".join(chunks)
+                _t1 = _t.monotonic()
+                if total > 1024*1024:
+                    Logger().log_info(
+                        f"[raw-upload] body={total/1024/1024:.1f}MB "
+                        f"read={int((_t1-_t0)*1000)}ms "
+                        f"rate={total/max(_t1-_t0,1e-6)/1024/1024:.1f}MB/s"
+                    )
             elif media_type == "text/csv":
                 body_data = []
                 async for csv_row in HttpUtil.iter_csv_rows_from_stream(req.stream(), encoding=charset):

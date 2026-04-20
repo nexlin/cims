@@ -58,6 +58,8 @@ if __name__ == '__main__':
     from csc_internal import CSC_INTERNAL_HANDLER_LIST
     from cims_csp_runtime import CIMS_CSP_RUNTIME_HANDLER_LIST
     from cims_service_control import CIMS_SERVICE_CONTROL_HANDLER_LIST
+    from cims_agent_admin import CIMS_AGENT_ADMIN_HANDLER_LIST, CIMS_AGENT_PUBLIC_HANDLER_LIST
+    from cims_agent_api import CIMS_AGENT_API_HANDLER_LIST
 
     admin_server = None
     mcptt_server = None
@@ -239,6 +241,21 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_SERVICE_CONTROL_HANDLER_LIST
+        ])
+        # P10: Agent 레지스트리 + 패키지 + 배포 관리 (admin JWT)
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_AGENT_ADMIN_HANDLER_LIST
+        ])
+        # P10: Agent 전용 API (agent token 인증, JWT 우회)
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_AGENT_API_HANDLER_LIST
+        ])
+        # P10: 공개 정적 에셋 — install 스크립트 / agent 바이너리
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_AGENT_PUBLIC_HANDLER_LIST
         ])
         admin_server.start()
         logger.log_info(f"Admin server started on port {admin_conf.get('Port', 4420)}")

@@ -1,5 +1,16 @@
 const BASE = '/api/v1'
 
+export class ApiError extends Error {
+  status: number
+  data: Record<string, unknown>
+  constructor(message: string, status: number, data: Record<string, unknown>) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.data = data
+  }
+}
+
 function getToken(): string | null {
   return localStorage.getItem('cims_token')
 }
@@ -20,7 +31,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       localStorage.removeItem('cims_token')
       window.location.reload()
     }
-    throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`)
+    const obj = (data ?? {}) as Record<string, unknown>
+    const msg = (typeof obj.error === 'string' && obj.error) || `HTTP ${res.status}`
+    throw new ApiError(msg, res.status, obj)
   }
   return data as T
 }

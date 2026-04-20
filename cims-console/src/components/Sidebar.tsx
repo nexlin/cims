@@ -7,6 +7,7 @@ export type PageId =
   | 'history-volte' | 'history-ptt'
   | 'stats-volte' | 'stats-ptt' | 'stats-sip' | 'stats-cmp' | 'stats-csc' | 'stats-https'
   | 'csp-services' | 'csp-listeners' | 'csp-trunks' | 'csp-routes' | 'csp-access' | 'services'
+  | 'agents' | 'packages' | 'deployments'
   | 'verification'
   | 'docs'
 
@@ -55,6 +56,14 @@ const MENU: MenuItem[] = [
       { id: 'csp-routes',    label: '라우팅 규칙' },
       { id: 'csp-access',    label: '접근제어' },
       { id: 'services',      label: '프로세스 제어' },
+    ],
+  },
+  {
+    label: '배포 관리',
+    children: [
+      { id: 'agents',      label: '서버 Agent' },
+      { id: 'packages',    label: '패키지' },
+      { id: 'deployments', label: '배포' },
     ],
   },
   { id: 'verification', label: '검증' },
