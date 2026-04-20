@@ -11,6 +11,7 @@
 #include "RtpMap.h"
 #include "SipServerSetup.h"
 #include "CallDir.h"
+#include "CspConfigCache.h"
 
 #include <sstream>
 
@@ -245,6 +246,25 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
 
         // Trigger full group resync (SyncGroupsState)
         gclsGroupCallService.OnGroupConfigChanged();
+
+        // 런타임 설정도 전체 재로드
+        gclsCspConfigCache.RefreshAll();
+    } else if (strEvent == "LISTENER_CHANGED") {
+        CLog::Print(LOG_INFO, "CscInterface: LISTENER_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
+        gclsCspConfigCache.RefreshEntity(CACHE_LISTENER);
+        // TODO(P2): 리스너 hot-reload — 현재는 캐시만 갱신, 적용은 추후 phase
+    } else if (strEvent == "TRUNK_CHANGED") {
+        CLog::Print(LOG_INFO, "CscInterface: TRUNK_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
+        gclsCspConfigCache.RefreshEntity(CACHE_TRUNK);
+        // TODO(P3): 트렁크 적용
+    } else if (strEvent == "ROUTE_RULE_CHANGED") {
+        CLog::Print(LOG_INFO, "CscInterface: ROUTE_RULE_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
+        gclsCspConfigCache.RefreshEntity(CACHE_ROUTE);
+        // TODO(P4): 라우팅 규칙 적용
+    } else if (strEvent == "ACCESS_LIST_CHANGED") {
+        CLog::Print(LOG_INFO, "CscInterface: ACCESS_LIST_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
+        gclsCspConfigCache.RefreshEntity(CACHE_ACCESS);
+        // TODO(P5): 접근제어 적용
     } else if (strEvent == "USER_CHANGED") {
         extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
         SendSipNotify(strUri, strEtag, strAction);

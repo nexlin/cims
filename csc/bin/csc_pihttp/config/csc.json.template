@@ -39,6 +39,8 @@
         "Ip": "@CSP_IP@",
         "Port": 4421
     },
+    "ConfigCacheDir": "cache",
+    "InternalToken": "@INTERNAL_TOKEN@",
     "ServiceLogging": {
         "Dir": "@SERVICE_LOG_DIR@",
         "Enable": ["csp", "ue"]

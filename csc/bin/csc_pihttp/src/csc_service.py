@@ -255,8 +255,12 @@ def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""
         if not service:
             if event_type in ("CSC_RESTART", "HEARTBEAT", "STATS_REQUEST", "STATS_RESPONSE"):
                 service = "system"
-            elif event_type in ("USER_CHANGED", "GROUP_CHANGED"):
-                # admin(console) 트리거로 발생하는 이벤트
+            elif event_type in (
+                "USER_CHANGED", "GROUP_CHANGED",
+                # CSP 런타임 설정 변경 알림 (admin 트리거)
+                "LISTENER_CHANGED", "TRUNK_CHANGED",
+                "ROUTE_RULE_CHANGED", "ACCESS_LIST_CHANGED",
+            ):
                 service = "console"
             else:
                 service = "mcptt"
@@ -294,6 +298,86 @@ def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""
         logger.log_info(f"Notify Sent: {msg}")
     except Exception as e:
         logger.log_error(f"Notify Failed: {e}")
+
+
+_CONFIG_EVENT_BY_ENTITY = {
+    "listener": "LISTENER_CHANGED",
+    "trunk":    "TRUNK_CHANGED",
+    "route":    "ROUTE_RULE_CHANGED",
+    "access":   "ACCESS_LIST_CHANGED",
+}
+
+
+def notify_config_change(entity: str, entity_id, action: str,
+                          actor: str = "", reason: str = "") -> None:
+    """CSP 런타임 설정 변경 알림.
+    - admin API 가 DB CUD 완료 후 호출
+    - CSC 메모리/파일 캐시를 해당 entity 만 재조회 (write-through)
+    - ETag 포함 UDP notify → CSP 가 HTTP pull 로 동기화
+
+    Args:
+        entity: 'listener' | 'trunk' | 'route' | 'access'
+        entity_id: DB id (int) 또는 조합 키
+        action: 'CREATE' | 'UPDATE' | 'DELETE'
+        actor: 감사로그용 변경자 (JWT sub)
+        reason: 감사로그용 사유
+    """
+    event = _CONFIG_EVENT_BY_ENTITY.get(entity)
+    if not event:
+        logger.log_warning(f"notify_config_change: unknown entity {entity}")
+        return
+
+    # 캐시 새로고침 (DB→메모리→파일)
+    etag = ""
+    try:
+        import csc_config_cache as _cfg
+        if _cfg.CONFIG_CACHE is not None and not _cfg.CONFIG_CACHE.is_read_only():
+            _cfg.CONFIG_CACHE.refresh_entity(entity)
+            etag = _cfg.CONFIG_CACHE.get_meta(entity).get("etag", "")
+    except Exception as e:
+        logger.log_error(f"notify_config_change: cache refresh failed: {e}")
+
+    uri = f"{entity}/{entity_id}"
+    notify_csp(event, uri=uri, action=action, etag=etag,
+               caller=actor or "admin", service="console")
+
+
+def audit_config_change(db_cfg: dict, actor: str, actor_ip: str,
+                        entity: str, entity_id, action: str,
+                        before: dict = None, after: dict = None,
+                        etag_before: str = "", etag_after: str = "",
+                        reason: str = "") -> None:
+    """csp_config_audit 테이블에 변경 이력 기록. DB 실패는 조용히 삼킴(운영 기능 차단 안 함)."""
+    try:
+        import pymysql
+        import json as _json
+        conn = pymysql.connect(
+            host=db_cfg.get("Host", "127.0.0.1"),
+            port=int(db_cfg.get("Port", 3306)),
+            user=db_cfg.get("User", "root"),
+            password=db_cfg.get("Password", ""),
+            database=db_cfg.get("Db", "cims"),
+            charset="utf8mb4",
+            autocommit=True,
+            connect_timeout=2,
+        )
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO csp_config_audit "
+                    "(actor, actor_ip, entity, entity_id, action, before_json, after_json, "
+                    " etag_before, etag_after, reason) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (actor, actor_ip, entity, str(entity_id), action,
+                     _json.dumps(before) if before else None,
+                     _json.dumps(after)  if after  else None,
+                     etag_before, etag_after, reason[:512] if reason else None),
+                )
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.log_warning(f"audit_config_change: {e}")
+
 
 def save_group_to_file(group_uri, group_data):
     if not GROUP_DIR:

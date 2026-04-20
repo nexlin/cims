@@ -29,6 +29,12 @@
             "LocalCmpIp": "@CSP_IP@",
             "LocalCmpPort": 9001
         },
+        "CscInternal": {
+            "Ip": "127.0.0.1",
+            "Port": 4422,
+            "Token": "@INTERNAL_TOKEN@"
+        },
+        "ConfigCacheDir": "cache",
         "Log": {
             "Folder": "log",
             "MaxSize": 10000000,

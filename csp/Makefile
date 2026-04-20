@@ -271,6 +271,30 @@ CscfModule.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CscfModule.cpp.s
 .PHONY : CscfModule.cpp.s
 
+CspConfigCache.o: CspConfigCache.cpp.o
+.PHONY : CspConfigCache.o
+
+# target to build an object file
+CspConfigCache.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspConfigCache.cpp.o
+.PHONY : CspConfigCache.cpp.o
+
+CspConfigCache.i: CspConfigCache.cpp.i
+.PHONY : CspConfigCache.i
+
+# target to preprocess a source file
+CspConfigCache.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspConfigCache.cpp.i
+.PHONY : CspConfigCache.cpp.i
+
+CspConfigCache.s: CspConfigCache.cpp.s
+.PHONY : CspConfigCache.s
+
+# target to generate assembly for a file
+CspConfigCache.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspConfigCache.cpp.s
+.PHONY : CspConfigCache.cpp.s
+
 CspPttGroup.o: CspPttGroup.cpp.o
 .PHONY : CspPttGroup.o
 
@@ -824,6 +848,9 @@ help:
 	@echo "... CscfModule.o"
 	@echo "... CscfModule.i"
 	@echo "... CscfModule.s"
+	@echo "... CspConfigCache.o"
+	@echo "... CspConfigCache.i"
+	@echo "... CspConfigCache.s"
 	@echo "... CspPttGroup.o"
 	@echo "... CspPttGroup.i"
 	@echo "... CspPttGroup.s"

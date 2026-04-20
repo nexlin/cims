@@ -206,6 +206,13 @@ public:
     int m_iLocalCmpPort; // Local port to receive CMP messages
 
     // ================================================================
+    // CSC 내부 API 연동 (런타임 설정 pull)
+    std::string m_strCscInternalIp;    // 보통 127.0.0.1
+    int         m_iCscInternalPort;    // 기본 4422
+    std::string m_strCscInternalToken; // X-Csp-Internal-Token 값
+    std::string m_strConfigCacheDir;   // 로컬 설정 스냅샷 저장 경로
+
+    // ================================================================
     // 녹취 설정
     bool m_bRecordEnable;
     std::string m_strRecordDir;       // NAS 마운트 경로 (raw + converted 공유)

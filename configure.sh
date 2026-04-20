@@ -130,6 +130,10 @@ fi
 if [[ -z "$CIMS_JWT_SECRET" ]]; then
     CIMS_JWT_SECRET="$(openssl rand -base64 32 2>/dev/null || echo 'cims_jwt_secret_change_me')"
 fi
+# CSC↔CSP 내부 API shared secret (loopback only + header token 2중 보호용)
+if [[ -z "${INTERNAL_TOKEN:-}" ]]; then
+    INTERNAL_TOKEN="$(openssl rand -hex 24 2>/dev/null || echo 'csc_internal_token_change_me')"
+fi
 
 echo ""
 info "배포 설정:"
@@ -164,6 +168,7 @@ apply_template() {
         -e "s|@PTT_DOMAIN@|${PTT_DOMAIN}|g" \
         -e "s|@IDMS_JWT_SECRET@|${IDMS_JWT_SECRET}|g" \
         -e "s|@CIMS_JWT_SECRET@|${CIMS_JWT_SECRET}|g" \
+        -e "s|@INTERNAL_TOKEN@|${INTERNAL_TOKEN}|g" \
         -e "s|@MSG_LOG_DIR@|${MSG_LOG_DIR}|g" \
         -e "s|@SERVICE_LOG_DIR@|${SERVICE_LOG_DIR}|g" \
         -e "s|@RECORD_DIR@|${RECORD_DIR}|g" \

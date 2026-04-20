@@ -23,6 +23,7 @@
 
 CCallDir gclsCallDir;
 #include "CmpClient.h"
+#include "CspConfigCache.h"
 #include "DbManager.h"
 #include "CspServerDefine.h"
 #include "CspServerVersion.h"
@@ -112,6 +113,24 @@ int ServiceMain() {
     ServerSignal();
     CLog::Print( LOG_SYSTEM, "Loading SipServerMap..." );
     gclsSipServerMap.Load();
+
+    // CSP 런타임 설정 캐시 (로컬 파일 우선 + CSC HTTP pull 비동기 새로고침)
+    {
+        std::string strCacheDir = gclsSetup.m_strConfigCacheDir;
+        if (!strCacheDir.empty() && strCacheDir[0] != '/') {
+            // 상대경로 → 프로그램 기동 디렉토리 기준으로 절대화
+            strCacheDir = std::string(CDirectory::GetProgramDirectory()) + "/" + strCacheDir;
+        }
+        gclsCspConfigCache.Init(strCacheDir,
+                                 gclsSetup.m_strCscInternalIp,
+                                 gclsSetup.m_iCscInternalPort,
+                                 gclsSetup.m_strCscInternalToken);
+        gclsCspConfigCache.LoadInitial();
+        CLog::Print(LOG_SYSTEM,
+                    "ConfigCache initialized (csc_reachable=%s cacheDir=%s)",
+                    gclsCspConfigCache.IsCscReachable() ? "true" : "false",
+                    strCacheDir.c_str());
+    }
 
     // [FIX] Init CMP Client before loading groups (which triggers AddGroup)
     if ( !gclsCmpClient.Init( gclsSetup.m_strCmpIp, gclsSetup.m_iCmpPort, gclsSetup.m_iLocalCmpPort ) ) {

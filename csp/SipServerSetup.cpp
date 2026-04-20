@@ -94,6 +94,9 @@ CSipServerSetup::CSipServerSetup()
       m_strCmpIp( "127.0.0.1" ),
       m_iCmpPort( 9000 ),
       m_iLocalCmpPort( 9001 ),
+      m_strCscInternalIp( "127.0.0.1" ),
+      m_iCscInternalPort( 4422 ),
+      m_strConfigCacheDir( "cache" ),
       m_bRoleCscf( true ),
       m_bRoleTas( true ),
       m_bRolePttAs( true ),
@@ -151,11 +154,20 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
 
             if (setup.Has("RtpRelay")) {
                 SimpleJson::JsonNode rtp = setup.Get("RtpRelay");
-                if (rtp.Has("UseRtpRelay")) m_bUseRtpRelay = (rtp.Get("UseRtpRelay").AsString() == "true"); 
+                if (rtp.Has("UseRtpRelay")) m_bUseRtpRelay = (rtp.Get("UseRtpRelay").AsString() == "true");
                 if (rtp.Has("CmpIp")) m_strCmpIp = rtp.GetString("CmpIp");
                 if (rtp.Has("CmpPort")) m_iCmpPort = (int)rtp.GetInt("CmpPort");
                 if (rtp.Has("LocalCmpPort")) m_iLocalCmpPort = (int)rtp.GetInt("LocalCmpPort");
             }
+
+            // CSC 내부 API (런타임 설정 pull)
+            if (setup.Has("CscInternal")) {
+                SimpleJson::JsonNode ci = setup.Get("CscInternal");
+                if (ci.Has("Ip"))    m_strCscInternalIp    = ci.GetString("Ip");
+                if (ci.Has("Port"))  m_iCscInternalPort    = (int)ci.GetInt("Port");
+                if (ci.Has("Token")) m_strCscInternalToken = ci.GetString("Token");
+            }
+            if (setup.Has("ConfigCacheDir")) m_strConfigCacheDir = setup.GetString("ConfigCacheDir");
 
              if (setup.Has("Log")) {
                 SimpleJson::JsonNode log = setup.Get("Log");

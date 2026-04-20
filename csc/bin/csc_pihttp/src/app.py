@@ -53,6 +53,9 @@ if __name__ == '__main__':
     from cims_stats import CIMS_STATS_HANDLER_LIST
     from cims_org import CIMS_ORG_HANDLER_LIST
     from cims_verification import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
+    import csc_config_cache
+    import csc_internal
+    from csc_internal import CSC_INTERNAL_HANDLER_LIST
 
     admin_server = None
     mcptt_server = None
@@ -168,6 +171,26 @@ if __name__ == '__main__':
                     config['Data'][key] = os.path.normpath(os.path.join(_COMPONENT_ROOT, val))
             load_shared_data(config)
 
+        # CSP 런타임 설정 캐시 (DB→mem→file). DB 장애 시 파일 캐시로 read-only 모드 작동.
+        _cache_path = config.get('ConfigCacheDir')
+        if _cache_path and not os.path.isabs(_cache_path):
+            _cache_path = os.path.normpath(os.path.join(_COMPONENT_ROOT, _cache_path))
+        if not _cache_path:
+            _cache_path = os.path.normpath(os.path.join(_COMPONENT_ROOT, 'cache'))
+        config['ConfigCacheDir'] = _cache_path
+        try:
+            _cc = csc_config_cache.init_config_cache(config)
+            logger.log_info(
+                f"ConfigCache ready (read_only={_cc.is_read_only()}) dir={_cache_path} "
+                f"listeners={len(_cc.get_all('listener'))} trunks={len(_cc.get_all('trunk'))} "
+                f"routes={len(_cc.get_all('route'))} access={len(_cc.get_all('access'))}"
+            )
+        except Exception as _e:
+            logger.log_error(f"ConfigCache init failed: {_e}")
+
+        # CSP 전용 내부 API 초기화 (shared secret + loopback only)
+        csc_internal.init(config)
+
         # [Test Support] Inject dummy data if empty so tests pass without real JSON files
         from csc_service import USERS, GROUPS
         if not USERS:
@@ -219,6 +242,18 @@ if __name__ == '__main__':
         mcptt_server.add_dynamic_rules(CSC_HANDLER_LIST)
         mcptt_server.start()
         logger.log_info(f"MCPTT server started on port {mcptt_conf.get('Port', 4430)}")
+
+        # ── CSP 전용 내부 API — loopback 전용 plain HTTP ─────────────────
+        _internal_conf = config.get('InternalServer', {'Ip': '127.0.0.1', 'Port': 4422})
+        internal_server = HttpServer(
+            _internal_conf.get('Ip', '127.0.0.1'),
+            _internal_conf.get('Port', 4422),
+            ssl_keyfile=None,   # plain HTTP
+            ssl_certfile=None,
+        )
+        internal_server.add_dynamic_rules(CSC_INTERNAL_HANDLER_LIST)
+        internal_server.start()
+        logger.log_info(f"Internal server started on {_internal_conf.get('Ip')}:{_internal_conf.get('Port', 4422)} (plain HTTP, loopback+token)")
 
         # Notify CSP that CSC has (re)started so it resyncs all state from DB
         try:
