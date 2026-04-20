@@ -14,6 +14,7 @@
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
+#include "CspTrunkManager.h"
 #include "SipMessageLogger.h"
 #include "CspServer.h"
 #include "CspSipServer.h"
@@ -195,6 +196,17 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
     std::string strCallId;
     pclsMessage->GetCallId(strCallId);
 
+    // OPTIONS → 표준 200 OK 자동 응답 (RFC 3261 §11.2).
+    //   트렁크 헬스체크(상대 CSP/Kamailio 등)용. 본 프로세스의 capability 를 간소히 알림.
+    if (pclsMessage->IsMethod(SIP_METHOD_OPTIONS)) {
+        CSipMessage* pclsResp = pclsMessage->CreateResponse(SIP_OK);
+        if (pclsResp) {
+            pclsResp->AddHeader("Allow", "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, MESSAGE, REFER");
+            gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResp);
+        }
+        return true;
+    }
+
     // REGISTER, SUBSCRIBE → CSCF 모듈
     if (m_clsCscf.IsEnabled() && m_clsCscf.OnSipRequest(iThreadId, pclsMessage)) {
         return true;
@@ -242,7 +254,17 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
 }
 
 bool CModuleDispatcher::RecvResponse(int iThreadId, CSipMessage* pclsMessage) {
-    // 메시지 로깅
+    if (pclsMessage && pclsMessage->m_clsCSeq.m_strMethod == SIP_METHOD_OPTIONS) {
+        // OPTIONS 응답은 트렁크 헬스체크 매칭 시도
+        std::string callId = pclsMessage->m_clsCallId.m_strName;
+        if (!pclsMessage->m_clsCallId.m_strHost.empty()) {
+            callId += "@";
+            callId += pclsMessage->m_clsCallId.m_strHost;
+        }
+        if (!callId.empty()) {
+            gclsTrunkManager.OnSipResponse(callId, pclsMessage->m_iStatusCode);
+        }
+    }
     return false;
 }
 

@@ -13,6 +13,7 @@
 #include "CallDir.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
+#include "CspTrunkManager.h"
 
 #include <sstream>
 
@@ -220,8 +221,30 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
             << ",\"stale_call_timeout\":" << gclsSetup.m_iStaleCallTimeout
             << ",\"send_options_period\":" << gclsSetup.m_iSendOptionsPeriod
             << "}"
-            << ",\"record_enable\":" << (gclsSetup.m_bRecordEnable ? "true" : "false")
-            << "}";
+            << ",\"record_enable\":" << (gclsSetup.m_bRecordEnable ? "true" : "false");
+
+        // 트렁크 상태
+        {
+            std::vector<CCspTrunkManager::StatusEntry> trunks;
+            gclsTrunkManager.GetStatus(trunks);
+            oss << ",\"trunks\":[";
+            for (size_t i = 0; i < trunks.size(); ++i) {
+                const auto& t = trunks[i];
+                if (i) oss << ",";
+                oss << "{\"id\":" << t.id
+                    << ",\"name\":\"" << t.name << "\""
+                    << ",\"remote\":\"" << t.remote << "\""
+                    << ",\"enabled\":" << (t.enabled ? "true" : "false")
+                    << ",\"alive\":" << (t.alive ? "true" : "false")
+                    << ",\"last_rtt_ms\":" << t.last_rtt_ms
+                    << ",\"last_ping\":" << (long long)t.last_ping
+                    << ",\"last_reply\":" << (long long)t.last_reply
+                    << ",\"fail_count\":" << t.fail_count
+                    << "}";
+            }
+            oss << "]";
+        }
+        oss << "}";
 
         std::string resp = oss.str();
 
@@ -251,6 +274,7 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
         // 런타임 설정도 전체 재로드
         gclsCspConfigCache.RefreshAll();
         gclsListenerManager.Sync();
+        gclsTrunkManager.Sync();
     } else if (strEvent == "LISTENER_CHANGED") {
         CLog::Print(LOG_INFO, "CscInterface: LISTENER_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_LISTENER);
@@ -258,7 +282,7 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
     } else if (strEvent == "TRUNK_CHANGED") {
         CLog::Print(LOG_INFO, "CscInterface: TRUNK_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_TRUNK);
-        // TODO(P3): 트렁크 적용
+        gclsTrunkManager.Sync();
     } else if (strEvent == "ROUTE_RULE_CHANGED") {
         CLog::Print(LOG_INFO, "CscInterface: ROUTE_RULE_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_ROUTE);

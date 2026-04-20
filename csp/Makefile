@@ -391,6 +391,30 @@ CspSipServer.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspSipServer.cpp.s
 .PHONY : CspSipServer.cpp.s
 
+CspTrunkManager.o: CspTrunkManager.cpp.o
+.PHONY : CspTrunkManager.o
+
+# target to build an object file
+CspTrunkManager.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspTrunkManager.cpp.o
+.PHONY : CspTrunkManager.cpp.o
+
+CspTrunkManager.i: CspTrunkManager.cpp.i
+.PHONY : CspTrunkManager.i
+
+# target to preprocess a source file
+CspTrunkManager.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspTrunkManager.cpp.i
+.PHONY : CspTrunkManager.cpp.i
+
+CspTrunkManager.s: CspTrunkManager.cpp.s
+.PHONY : CspTrunkManager.s
+
+# target to generate assembly for a file
+CspTrunkManager.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspTrunkManager.cpp.s
+.PHONY : CspTrunkManager.cpp.s
+
 CspUser.o: CspUser.cpp.o
 .PHONY : CspUser.o
 
@@ -887,6 +911,9 @@ help:
 	@echo "... CspSipServer.o"
 	@echo "... CspSipServer.i"
 	@echo "... CspSipServer.s"
+	@echo "... CspTrunkManager.o"
+	@echo "... CspTrunkManager.i"
+	@echo "... CspTrunkManager.s"
 	@echo "... CspUser.o"
 	@echo "... CspUser.i"
 	@echo "... CspUser.s"

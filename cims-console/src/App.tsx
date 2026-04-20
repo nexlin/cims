@@ -16,6 +16,7 @@ import StatsPage from './pages/StatsPage'
 import StatsMessagesPage from './pages/StatsMessagesPage'
 import VerificationPage from './pages/VerificationPage'
 import SipListenersPage from './pages/SipListenersPage'
+import SipTrunksPage from './pages/SipTrunksPage'
 import DocsPage from './pages/DocsPage'
 import { authApi } from './api/auth'
 import './index.css'
@@ -36,6 +37,7 @@ const PAGE_TITLES: Record<PageId, string> = {
   'stats-csc': 'CSC 인터페이스 통계',
   'stats-https': 'HTTPS 메시지 통계',
   'csp-listeners': 'SIP 리스너 (CSP)',
+  'csp-trunks': 'SIP 트렁크 (CSP)',
   'verification': '시스템 검증',
   'docs': '문서',
 }
@@ -91,6 +93,7 @@ function Shell() {
       case 'stats-csc':       return <StatsMessagesPage iface="csc" />
       case 'stats-https':     return <StatsMessagesPage iface="https" />
       case 'csp-listeners':   return <SipListenersPage />
+      case 'csp-trunks':      return <SipTrunksPage />
       case 'verification':    return <VerificationPage />
       case 'docs':            return <DocsPage />
       default:                return <DashboardPage />

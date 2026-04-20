@@ -8,6 +8,17 @@ export interface HealthResponse {
     db_connected: boolean
     roles: { CSCF: boolean; TAS: boolean; PTT_AS: boolean; IBCF: boolean }
     timeouts?: { user_timeout: number; stale_call_timeout: number; send_options_period: number }
+    trunks?: Array<{
+      id: number
+      name: string
+      remote: string
+      enabled: boolean
+      alive: boolean
+      last_rtt_ms: number
+      last_ping: number
+      last_reply: number
+      fail_count: number
+    }>
   }
   cmp: {
     sessions: number
