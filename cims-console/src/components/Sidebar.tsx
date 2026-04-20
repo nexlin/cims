@@ -6,6 +6,7 @@ export type PageId =
   | 'service-status'
   | 'history-volte' | 'history-ptt'
   | 'stats-volte' | 'stats-ptt' | 'stats-sip' | 'stats-cmp' | 'stats-csc' | 'stats-https'
+  | 'csp-listeners'
   | 'verification'
   | 'docs'
 
@@ -43,6 +44,12 @@ const MENU: MenuItem[] = [
       { id: 'stats-cmp', label: 'CMP' },
       { id: 'stats-csc', label: 'CSC' },
       { id: 'stats-https', label: 'HTTPS' },
+    ],
+  },
+  {
+    label: 'CSP 설정',
+    children: [
+      { id: 'csp-listeners', label: 'SIP 리스너' },
     ],
   },
   { id: 'verification', label: '검증' },

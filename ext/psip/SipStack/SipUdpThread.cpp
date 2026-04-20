@@ -36,13 +36,14 @@ THREAD_API SipUdpListenerThread( LPVOID lpParameter )
 		if( pListener->m_hSocket == INVALID_SOCKET ) break;
 
 		TcpSetPollIn( arrPoll[0], pListener->m_hSocket );
-		pclsSipStack->m_clsUdpRecvMutex.acquire();
+		// per-listener mutex — 다른 리스너의 recv 스레드를 차단하지 않음
+		pListener->m_clsRecvMutex.acquire();
 		n = poll( arrPoll, 1, 1000 );
 		if( n > 0 && pListener->m_hSocket != INVALID_SOCKET )
 		{
 			iPacketSize = sizeof(szPacket);
 			bRes = UdpRecv( pListener->m_hSocket, szPacket, &iPacketSize, szIp, sizeof(szIp), &sPort, pListener->m_bIpv6 );
-			pclsSipStack->m_clsUdpRecvMutex.release();
+			pListener->m_clsRecvMutex.release();
 
 			if( bRes )
 			{
@@ -53,7 +54,7 @@ THREAD_API SipUdpListenerThread( LPVOID lpParameter )
 		}
 		else
 		{
-			pclsSipStack->m_clsUdpRecvMutex.release();
+			pListener->m_clsRecvMutex.release();
 		}
 	}
 

@@ -56,6 +56,7 @@ if __name__ == '__main__':
     import csc_config_cache
     import csc_internal
     from csc_internal import CSC_INTERNAL_HANDLER_LIST
+    from cims_csp_runtime import CIMS_CSP_RUNTIME_HANDLER_LIST
 
     admin_server = None
     mcptt_server = None
@@ -227,6 +228,11 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_STATS_HANDLER_LIST + CIMS_ORG_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST
+        ])
+        # CSP 런타임 설정 관리 API (P2: listener, P3~: trunk/route/access 확장 예정)
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_CSP_RUNTIME_HANDLER_LIST
         ])
         admin_server.start()
         logger.log_info(f"Admin server started on port {admin_conf.get('Port', 4420)}")

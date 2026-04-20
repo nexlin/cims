@@ -14,6 +14,7 @@
 #include <string>
 #include <atomic>
 #include "SipTcp.h"
+#include "SipMutex.h"
 
 class CSipStack;
 
@@ -56,6 +57,10 @@ public:
 
     /** 부모 stack back-pointer (스레드가 RecvSipMessage 호출 시 필요). */
     CSipStack*    m_pclsStack;
+
+    /** 이 리스너의 recv 스레드들이 서로 경합하지 않도록 per-listener mutex.
+     *  전역 m_clsUdpRecvMutex 대신 사용해 다른 리스너의 poll 을 차단하지 않는다. */
+    CSipMutex     m_clsRecvMutex;
 };
 
 #endif // _SIP_STACK_LISTENER_H_
