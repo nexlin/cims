@@ -77,6 +77,13 @@ class CmpServer : public PModule {
     std::map<std::string, PRtpTrans*> _sessions;   // VoIP 세션
     std::map<std::string, McpttGroup*> _groups;     // PTT 그룹
     std::map<std::string, std::string> _logDirs;    // key → log 경로
+    std::map<std::string, std::string> _sesidMap;   // key → sesid (CSP 발급 상속)
+    std::map<std::string, std::string> _serviceMap; // key → service (volte/mcptt/...)
+
+    // Flow 로그 항목별 활성화 플래그 (cmp.json ServiceLogging.Flow)
+    bool _logFlowFloor;   // Floor opcode
+    bool _logFlowDtmf;    // DTMF (RFC2833/4733)
+    bool _logFlowRtcp;    // RTCP SR/RR/SDES/BYE
 
     // VoIP 리소스 풀
     std::vector<PRtpTrans*> _resourcePool;
@@ -87,6 +94,13 @@ class CmpServer : public PModule {
     std::vector<PPttTrans*> _freePttResources;
 };
 ```
+
+**Flow/Msg 로깅 공통 필드:**
+
+- CSP 가 payload 에 동봉한 `service` / `sesid` / `caller` / `callee` 를 key(session_id/group_id) 별로 저장
+- 이후 응답 및 후속 이벤트(RTP/Floor/DTMF/RTCP) 로그에 동일 값을 상속하여 **CSP↔CMP 양측 Flow 가 단일 sesid 로 묶이도록** 보장
+- Flow 로그 필드 순서·생략 규칙은 CSP 측과 동일 (`ts, service, caller, callee, sesid, subid, node, from, to, proto, method, detail, mid, seq, iface`)
+- 전체 규격은 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) 참고
 
 **초기화 순서:**
 
@@ -641,17 +655,71 @@ setRecording(enable, dir)
 
 ---
 
-## 7. CMP Flow 로그
+## 7. CMP Flow/Msg 로깅
 
-**logFlow() — JSONL 형식:**
+### 7.1 출력 레이아웃
 
-파일: `{log_dir}/cmp.jsonl`
+```
+{MsgLogDir}/cmp/{service}/YYYY/MM/DD/HH/
+  ├─ {systemId}.flow.jsonl            (Flow 요약)
+  └─ {systemId}_{node}.msg.jsonl      (원문 — node = csp/ue/...)
+```
+
+- `service` : CSP 가 payload 에 넣은 값 (volte/mcptt/system/console)
+- `node`    : 상대 모듈 약식 이름
+
+### 7.2 Flow 엔트리 형식
+
+필드 순서 + 빈 키 생략 규칙은 CSP 와 동일. 대표 예:
+
+```jsonc
+// PTT 그룹 생성 응답
+{"ts":"14:32:56.123","service":"mcptt","caller":"+82571910001","sesid":"+82571910001::csp::1713...::1",
+ "subid":"","node":"csp","from":"cmp","to":"csp","proto":"INT","method":"ADD_PTT_GROUP",
+ "mid":12,"seq":13,"iface":"cmp"}
+
+// Floor GRANT 브로드캐스트 (CMP → UE)
+{"ts":"14:33:05.789","service":"mcptt","caller":"+82571910001","sesid":"+82571910001::csp::1713...::1",
+ "from":"cmp","to":"ue","proto":"MCPTT","method":"FLOOR_GRANT",
+ "detail":"{\"speaker\":\"+82571900001\",\"ssrc\":1005}"}
+
+// DTMF (RFC2833/4733, end-bit only)
+{"ts":"14:33:10.001","service":"mcptt","caller":"+82571910001","sesid":"...",
+ "from":"ue","to":"cmp","proto":"DTMF","method":"DTMF",
+ "detail":"{\"digit\":\"*\",\"duration_ms\":120,\"volume\":10,\"user\":\"+82571900001\"}"}
+```
+
+### 7.3 Flow 항목별 활성화
+
+`cmp.json` 의 `ServiceLogging.Flow` 로 노이즈가 많은 이벤트를 선택적으로 끈다:
 
 ```json
-{"ts":"14:32:56.123456","from":"cmp","to":"cmp","proto":"INT","label":"SESSION_START","body":"port=50000"}
-{"ts":"14:32:57.456789","from":"cmp","to":"cmp","proto":"RTP","label":"JOIN(1001)","body":"192.168.1.100:30000"}
-{"ts":"14:33:05.789012","from":"1001","to":"floor","proto":"MCPTT","label":"FLOOR_GRANT","body":"speaker=1001"}
+"ServiceLogging": {
+  "Dir": "/data/msg_log",
+  "Enable": ["csp"],
+  "MediaTypes": ["floor","dtmf"],
+  "Flow": {
+    "Floor": true,
+    "Dtmf":  true,
+    "Rtcp":  false
+  }
+}
 ```
+
+| 플래그 | 기록 대상 |
+|--------|-----------|
+| `Flow.Floor` | RTCP APP (MCPT) opcode 전체 (REQUEST/GRANT/REJECT/RELEASE/IDLE/TAKEN/REVOKE) |
+| `Flow.Dtmf`  | RFC 2833/4733 telephone-event end-bit, digit/duration/volume JSON detail |
+| `Flow.Rtcp`  | 일반 RTCP SR/RR/SDES/BYE (기본 off — 패킷 빈도 높음) |
+
+### 7.4 Floor/DTMF 기록 경로
+
+```
+onRtcpPacket/onFloorPacket → _dtmfFlowLog / logFlow(proto=MCPTT)
+broadcastFloorStatus(TAKEN/IDLE/REVOKE) → logFlow(from=cmp, to=ue, proto=MCPTT)
+```
+
+- `speaker_id` / `ssrc` / `user` 는 JSON detail 에 포함되어 Console UI 의 메시지 상세창에서 파싱 가능
 
 ---
 
@@ -688,6 +756,16 @@ CmpServer (PModule)
   "EnableDtmfPtt": true,         // DTMF Floor Control 활성화
   "DtmfPushDigit": "*",          // Floor REQUEST 숫자
   "DtmfReleaseDigit": "#",       // Floor RELEASE 숫자
+  "ServiceLogging": {
+    "Dir": "/data/msg_log",
+    "Enable": ["csp"],           // 원문 저장 대상 노드
+    "MediaTypes": ["floor","dtmf"],
+    "Flow": {
+      "Floor": true,             // RTCP APP (MCPT) opcode 전체
+      "Dtmf":  true,             // RFC 2833/4733 end-bit
+      "Rtcp":  false             // SR/RR/SDES/BYE (빈도↑)
+    }
+  },
   "SessionTimeout": 600,         // 세션 타임아웃 (초, 0=비활성)
   "LogDir": "log",               // 로그 디렉토리
   "LogMaxSizeMB": 10,            // 로그 파일 최대 크기
@@ -708,3 +786,9 @@ CmpServer (PModule)
 | VoIP Video | RTP/UDP | 50002-50079 (4n+2) | bi | UE |
 | PTT Audio | RTP/UDP | 52000-52018 | bi | UE (CSP 경유) |
 | PTT Floor | RTCP APP/UDP | 54000-54018 | bi | UE |
+
+---
+
+## 11. 관련 문서
+
+- [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) — Flow/Msg 로깅 공통 규격, sesid 상속, CSP↔CMP 인터페이스 필드

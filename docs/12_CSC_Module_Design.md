@@ -500,22 +500,52 @@ MIKEY-SAKKE 기반 키 관리 (SRTP 키 교환).
 
 ### 5.1 알림 메커니즘
 
-CSC에서 가입자/그룹 변경 시 UDP JSON으로 CSP에 즉시 알림.
+CSC에서 가입자/그룹 변경 시 UDP JSON으로 CSP에 즉시 알림. 알림 메시지에는 **sesid/caller/service 상관 필드**가 함께 포함되어, CSP/CMP 의 Flow 로그와 동일 sesid 로 묶인다.
 
 **전송:**
 
 ```python
-def notify_csp(event, uri="", action="", etag=""):
+def notify_csp(event, uri="", action="", etag="",
+               sesid="", caller="", service=""):
+    # service 미지정 시 event 타입 기준 자동 매핑
+    #   USER_CHANGED / GROUP_CHANGED → "mcptt" (PTT 구독/그룹)
+    #                                   "volte" (VoIP 구독)
+    #   STATS_REQUEST / CSC_RESTART   → "system"
+    #   Admin API 로그                → "console"
+    if not service:
+        service = _derive_service(event)
+    if not sesid:
+        sesid = csc_logger.issue_sesid(caller or uri, module="csc")
     msg = json.dumps({
-        "event": event,
-        "uri": uri,
-        "action": action,
-        "etag": etag
+        "event": event, "uri": uri, "action": action, "etag": etag,
+        "sesid": sesid, "caller": caller, "service": service,
     })
     sock.sendto(msg.encode(), (CSP_IP, CSP_PORT))  # 4421
 ```
 
-### 5.2 이벤트 타입
+전체 필드 규격은 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) § 7 (CSC → CSP) 참고.
+
+### 5.2 pi_http 미들웨어 (Admin API 로깅)
+
+Admin/MCPTT API 요청을 서비스별 Flow 로그로 자동 기록하기 위해 `pi_http.http_server_controller.DynamicRouteProc` 에 pre/post hook 을 등록:
+
+```python
+DynamicRouteProc.set_request_hooks(pre=_pre_hook, post=_post_hook)
+```
+
+- `_pre_hook` : 요청 수신 시 JWT Bearer 토큰에서 caller 추출 (`cims_auth.extract_token`), 요청 path prefix 를 service 로 매핑
+- `_post_hook` : 핸들러 반환 후 `csc_logger.log_flow()` 호출 (body 는 `log_msg`)
+
+| 경로 prefix | service |
+|-------------|---------|
+| `/api/v1/*` | `console` |
+| `/idms/*` | `mcptt` |
+| `/org.openmobilealliance*`, `/org.3gpp.mcptt*` | `mcptt` |
+| `/keymanagement/*` | `mcptt` |
+
+개별 핸들러는 별도의 `log_msg` 호출 없이도 자동으로 Flow/Msg 로그에 기록된다.
+
+### 5.3 이벤트 타입
 
 | 이벤트 | 트리거 | CSP 처리 |
 |--------|--------|----------|
@@ -524,7 +554,7 @@ def notify_csp(event, uri="", action="", etag=""):
 | `STATS_REQUEST` | 상태 조회 | CSP 통계 응답 반환 |
 | `CSC_RESTART` | CSC 재시작 | DB 전체 재동기화 |
 
-### 5.3 동기화 흐름
+### 5.4 동기화 흐름
 
 ```
 Console UI → REST API → DB 수정 → notify_csp()
@@ -767,12 +797,12 @@ csc/
 │   │   ├── cims_stats.py           # 통계
 │   │   ├── cims_recording.py       # 녹취
 │   │   ├── cims_verification.py    # 검증
-│   │   ├── csc_service.py          # MCPTT 서비스 + notify_csp()
+│   │   ├── csc_service.py          # MCPTT 서비스 + notify_csp(sesid/caller/service)
 │   │   ├── csc_flow.py             # 통화 이력/Flow API
-│   │   ├── csc_logger.py           # 로깅
+│   │   ├── csc_logger.py           # sesid 발급/상속, log_flow/log_msg/log_console
 │   │   ├── idms_storage.py         # IdMS 스토리지
 │   │   └── util/
-│   │       ├── pi_http/            # HTTP 서버/핸들러 프레임워크
+│   │       ├── pi_http/            # HTTP 서버/핸들러 프레임워크 (pre/post hook)
 │   │       ├── db/                 # ORM (MySQL/Oracle)
 │   │       ├── log_util.py
 │   │       ├── net_util.py
@@ -782,3 +812,9 @@ csc/
 │   └── cert/                       # TLS 인증서
 └── venv/                           # Python 가상환경
 ```
+
+---
+
+## 10. 관련 문서
+
+- [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) — Flow/Msg 로깅 공통 규격, sesid 발급/상속, CSC→CSP 인터페이스 필드

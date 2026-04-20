@@ -231,6 +231,31 @@ CMP AddGroup 응답 → {port, floor_port, video_port}
             └→ CMP McpttGroup::addMember(floorPort=UE floor 포트)
 ```
 
+**그룹 단위 통일 sesid:**
+
+PTT 그룹 세션에 대한 모든 모듈간 메시지(`ADD_PTT_GROUP`, `JOIN_PTT_GROUP`, `LEAVE_PTT_GROUP`, `REMOVE_PTT_GROUP`)와 SIP INVITE leg 들이 동일 sesid 를 공유하도록 per-group 매핑 유지:
+
+```cpp
+class CGroupCallService {
+    std::map<std::string, std::string> m_mapGroupSesId;  // group_id → sesid
+    std::string GetOrIssueGroupSesId(const std::string& groupId);
+    void        RemoveGroupSesId(const std::string& groupId);
+};
+```
+
+- sesid 형식: `{group_id}::csp::{us_ts}::{counter}` (caller 자리에 group_id)
+- 그룹 해체(`REMOVE_PTT_GROUP` 완료) 시 매핑 제거
+- Console UI 의 PTT Flow 보기는 이 sesid 로 CSP/CMP 양쪽 로그를 하나의 세션으로 병합
+
+**MCPTT 도메인 per-dialog override:**
+
+PTT INVITE 의 Request-URI / From / To / P-Asserted-Identity 도메인이 Digest realm(AuthRealm) 이나 VoLTE 도메인과 섞이지 않도록 psip `CSipDialog::m_strOverrideDomain` 를 설정. 두 가지 경로:
+
+- `CSipUserAgent::CreateCall(... , overrideDomain)` — InviteMember 시 mcptt 도메인 지정
+- `CSipUserAgent::SetCallDomain(callId, domain)` — AcceptCall 이후 leg 에 사후 적용
+
+자세한 설정은 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) § 7 참고.
+
 **그룹 데이터 (CspPttGroup):**
 
 ```cpp
@@ -331,6 +356,22 @@ CCmpClient
 | `ALIVE` | 연결 상태 확인 | OK |
 | `STATS` | CMP 통계 조회 | sessions, groups, rtp_ports 등 |
 
+**Flow 메타 필드 (모든 Session/Group API 파라미터):**
+
+`CCmpClient` 의 Session/Group 메서드는 공통으로 다음 파라미터를 받아 payload 에 `service/sesid/caller/callee` 로 주입:
+
+```cpp
+bool AddSession(const std::string& sesid,
+                const std::string& service,   // "volte" | "mcptt" | ...
+                const std::string& caller,
+                const std::string& callee,
+                const std::string& sessionId,
+                const std::string& remoteIp, int remotePort, ...);
+```
+
+- `service` 는 cmd 이름을 기준으로 자동 결정 (ADD_GROUP/JOIN_GROUP/... → mcptt, ADD_SESSION → volte 등) 되지만 명시 인자가 우선.
+- 응답 Flow 엔트리는 `Transaction` 에 저장된 caller/callee/sesid/service 를 그대로 상속.
+
 **트랜잭션 처리:**
 
 ```
@@ -419,45 +460,54 @@ gclsCallDir.WriteSessionMapping(sessionId, incomingCallId, outgoingCallId);
 
 **파일:** `SipMessageLogger.h/.cpp`
 
-psip SIP 스택의 ILogCallBack 구현. 모든 SIP TX/RX와 CMP JSON 메시지를 기록.
+psip SIP 스택의 ILogCallBack 구현. 모든 SIP TX/RX와 CMP/CSC JSON 메시지를 기록. sesid 발급 및 서비스 분류의 중앙 허브.
 
-**서비스 분류:**
+**서비스 분류 (도메인 기반):**
 
-| 분류 | 판별 기준 | 파일명 접미사 |
-|------|-----------|---------------|
-| phone | domain = VoipRealm | `_phone_flow.jsonl` |
-| ptt | domain = PttRealm | `_ptt_flow.jsonl` |
-| system | 기타 (CSC, 시스템) | `_system_flow.jsonl` |
+`SipServerSetup::Realm` 배열에서 도메인 → 서비스 매핑을 로드한 후 `SetDomainServiceMap()` 으로 주입. SIP From/To 도메인을 맵에서 조회하여 `volte` / `mcptt` / `system` / `console` 중 하나로 분류한다. MCPTT 키워드 fallback 은 제거 — 도메인 매칭 전용.
+
+**sesid API:**
+
+| 메서드 | 역할 |
+|--------|------|
+| `IssueSesId(caller, module="csp")` | 새 sesid 발급 (`{caller}::{module}::{us_ts}::{counter}`) |
+| `GetOrIssueSesId(callId, caller)` | Call-ID 기반 sesid 조회/없으면 발급 |
+| `GetSesIdByCallId(callId)` | Call-ID → sesid 조회 (없으면 "") |
+| `SetCallSesId(callId, sesid)` | B2BUA leg 간 sesid 명시적 상속 |
 
 **출력 파일:**
 
 ```
-{MsgLogDir}/YYYY/MM/DD/HH/
-  ├─ {systemId}_phone_flow.jsonl   (VoIP 흐름 요약)
-  ├─ {systemId}_ptt_flow.jsonl     (PTT 흐름 요약)
-  ├─ {systemId}_system_flow.jsonl  (관리 흐름)
-  ├─ {systemId}_sip.jsonl          (SIP 원문)
-  ├─ {systemId}_cmp.jsonl          (CMP 명령 원문)
-  └─ {systemId}_csc.jsonl          (CSC 이벤트 원문)
+{MsgLogDir}/csp/{service}/YYYY/MM/DD/HH/
+  ├─ {systemId}.flow.jsonl          (서비스별 Flow 요약)
+  └─ {systemId}_{node}.msg.jsonl    (원문 저장; node = sip/cmp/csc)
 ```
 
-**Flow 로그 형식:**
+> `service` 는 volte/mcptt/system/console. `node` 는 원문 소스(sip/cmp/csc).
+
+**Flow 로그 필드 순서 (빈 키 생략):**
 
 ```json
 {
   "ts": "12:34:56.123456",
-  "seq": 42,
+  "service": "volte",
+  "caller": "+821357007001",
+  "callee": "+821357007002",
+  "sesid": "+821357007001::csp::1713340376123456::1",
+  "subid": "abc123@1.2.3.4",
+  "node": "sip",
   "from": "ue",
   "to": "csp",
   "proto": "SIP",
   "method": "INVITE",
-  "call_id": "abc123@1.2.3.4",
-  "from_uri": "sip:1001@phone.domain",
-  "to_uri": "sip:1002@phone.domain",
-  "peer": "192.168.1.100:5060",
-  "iface_ref": "sip:45"
+  "detail": "sip:+821357007002@ims.mnc001...",
+  "mid": 42,
+  "seq": 101,
+  "iface": "sip"
 }
 ```
+
+전체 규격·사례는 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) 참고.
 
 ### 3.9 CSubscriptionManager
 
@@ -624,8 +674,13 @@ struct CallMapEntry {
       "LocalPort": 5060,
       "TcpPort": 25061,
       "TlsPort": 5061,
-      "Realm": "csp",
-      "PttRealm": "ptt.csp",
+      "AuthRealm": "csp",
+      "Realm": [
+        { "service": "volte",   "domains": ["ims.mnc001.mcc450.3gppnetwork.org"] },
+        { "service": "mcptt",   "domains": ["ptt.mnc001.mcc450.3gppnetwork.org"] },
+        { "service": "system",  "domains": ["csp"] },
+        { "service": "console", "domains": ["csc"] }
+      ],
       "UdpThreadCount": 2,
       "TcpThreadCount": 2,
       "TcpCallBackThreadCount": 5,
@@ -708,3 +763,9 @@ ServiceMain()
 | CMP 응답 | JSON/UDP | 9001 | CMP (미디어) |
 | CSC 이벤트 | JSON/UDP | 4421 | CSC (관리) |
 | IP-PBX | SIP/UDP | 5060 | 외부 SIP 서버 |
+
+---
+
+## 9. 관련 문서
+
+- [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) — Flow 로깅, sesid, Realm 배열, 모듈 간 인터페이스의 공통 필드(`service`/`sesid`/`caller`/`callee`) 규격

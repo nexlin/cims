@@ -54,11 +54,11 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 |---------|------|--------|------|
 | `LocalIp` | string | "0.0.0.0" | SIP 바인드 IP |
 | `LocalPort` | int | 5060 | SIP UDP 포트 |
-| `Realm` | string | "csp" | SIP Digest 인증 realm |
+| `AuthRealm` | string | "csp" | SIP Digest 인증 realm (서비스 도메인과 독립) |
+| `Realm` | array | — | 서비스별 도메인 배열 `[{"service":"volte"/"mcptt"/"system"/"console","domains":["..."]}]` |
 | `CmpIp` | string | "127.0.0.1" | CMP 서버 IP |
 | `CmpPort` | int | 9000 | CMP 제어 포트 |
 | `LocalCmpPort` | int | 9001 | CSP의 CMP 응답 수신 포트 |
-| `PttRealm` | string | "ptt.domain" | PTT SIP realm |
 | `DataFolder` | string | "../csp" | User/Group JSON 폴더 경로 |
 | `Database.Host` | string | "127.0.0.1" | MySQL 호스트 |
 | `Database.Port` | int | 3306 | MySQL 포트 |
@@ -71,11 +71,15 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 {
   "LocalIp": "192.168.0.2",
   "LocalPort": 5060,
-  "Realm": "csp",
+  "AuthRealm": "csp",
+  "Realm": [
+    { "service": "volte",  "domains": ["ims.mnc001.mcc450.3gppnetwork.org"] },
+    { "service": "mcptt",  "domains": ["ptt.mnc001.mcc450.3gppnetwork.org"] },
+    { "service": "system", "domains": ["csp"] }
+  ],
   "CmpIp": "192.168.0.2",
   "CmpPort": 9000,
   "LocalCmpPort": 9001,
-  "PttRealm": "ptt.mnc033.mcc450.3gppnetwork.org",
   "DataFolder": "../csp",
   "Database": {
     "Host": "127.0.0.1",
@@ -175,9 +179,11 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 ```json
 {
   "trans_id": <순차 정수>,
-  "payload": { <명령별 JSON> }
+  "payload": { <명령별 JSON + service + sesid + caller + callee> }
 }
 ```
+
+> **Flow/sesid 메타 필드**: 모든 CSP↔CMP payload 는 `service` (volte/mcptt/system/console), `sesid` (`{caller}::{module}::{ts}::{counter}`), `caller`, `callee` 를 포함합니다. CMP 는 이 값을 저장해 응답 Flow 로그에 상속하여 세션 상관관계를 유지합니다. 전체 규격은 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) 참고.
 
 모든 응답:
 ```json
@@ -906,7 +912,18 @@ curl -k -X PUT "https://192.168.0.2:4420/api/v1/ptt/groups/%2B82571910001" \
 
 ---
 
-## 7. 참조 규격
+## 7. 관련 문서
+
+| 문서 | 설명 |
+|------|------|
+| [10_CSP_Module_Design.md](./10_CSP_Module_Design.md) | CSP 내부 모듈 설계 |
+| [11_CMP_Module_Design.md](./11_CMP_Module_Design.md) | CMP 내부 모듈 설계 |
+| [12_CSC_Module_Design.md](./12_CSC_Module_Design.md) | CSC 내부 모듈 설계 |
+| [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) | Flow/Msg 로깅, sesid, Realm, 모듈 간 프로토콜 필드 |
+
+---
+
+## 8. 참조 규격
 
 | 규격 | 내용 |
 |------|------|
