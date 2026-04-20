@@ -884,6 +884,173 @@ def _matches_all(matches: list, sample: dict) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────
+#  Access control handler
+# ──────────────────────────────────────────────────────────────
+
+_ACCESS_BASE = "/api/v1/csp/access"
+
+
+def _access_row_to_json(r: dict) -> dict:
+    return {
+        "id": r["id"],
+        "scope": r["scope"],
+        "scope_ref_id": r.get("scope_ref_id"),
+        "kind": r["kind"],
+        "match_type": r["match_type"],
+        "value": r["value"],
+        "enabled": bool(r["enabled"]),
+        "priority": r["priority"],
+        "note": r.get("note"),
+        "etag": r.get("etag") or "",
+        "create_time": r["create_time"].isoformat() if r.get("create_time") else None,
+        "update_time": r["update_time"].isoformat() if r.get("update_time") else None,
+    }
+
+
+async def handle_access(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    config = kwargs.get("config", {})
+    tail = _path_tail(handler_args.full_path, _ACCESS_BASE)
+    method = handler_args.method.upper()
+
+    if len(tail) == 0:
+        if method == "GET":  return await _list_access(config)
+        if method == "POST": return await _create_access(handler_args, config)
+        return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+
+    try: aid = int(tail[0])
+    except (TypeError, ValueError):
+        return HandlerResult(status=400, body={"error": "invalid_id"}, media_type="application/json")
+
+    if method == "GET":    return await _get_access(aid, config)
+    if method == "PUT":    return await _update_access(handler_args, aid, config)
+    if method == "DELETE": return await _delete_access(handler_args, aid, config)
+    return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+
+
+async def _list_access(config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM routing_access_list ORDER BY priority, id")
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return HandlerResult(status=200, body={"items": [_access_row_to_json(r) for r in rows]},
+                         media_type="application/json")
+
+
+async def _get_access(aid: int, config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM routing_access_list WHERE id=%s", (aid,))
+            r = cur.fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    return HandlerResult(status=200, body=_access_row_to_json(r), media_type="application/json")
+
+
+async def _create_access(handler_args: HandlerArgs, config):
+    body = _parse_body(handler_args)
+    scope = (body.get("scope") or "global").lower()
+    kind  = (body.get("kind")  or "allow").lower()
+    mtype = (body.get("match_type") or "ip").lower()
+    value = (body.get("value") or "").strip()
+    if not value:
+        return HandlerResult(status=400, body={"error": "value required"}, media_type="application/json")
+    if scope not in ("global", "listener", "trunk"):
+        return HandlerResult(status=400, body={"error": "invalid_scope"}, media_type="application/json")
+    if kind not in ("allow", "deny"):
+        return HandlerResult(status=400, body={"error": "invalid_kind"}, media_type="application/json")
+    if mtype not in ("ip", "cidr", "ua_regex"):
+        return HandlerResult(status=400, body={"error": "invalid_match_type"}, media_type="application/json")
+    etag = _compute_etag()
+    enabled = 0 if body.get("enabled") in (False, "false", 0, "0") else 1
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO routing_access_list "
+                "(scope, scope_ref_id, kind, match_type, value, enabled, priority, note, etag) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (scope, body.get("scope_ref_id") or None, kind, mtype, value,
+                 enabled, int(body.get("priority") or 100),
+                 body.get("note"), etag),
+            )
+            new_id = cur.lastrowid
+            cur.execute("SELECT * FROM routing_access_list WHERE id=%s", (new_id,))
+            r = cur.fetchone()
+    finally:
+        conn.close()
+    rowJson = _access_row_to_json(r)
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "access", new_id, "CREATE", after=rowJson, etag_after=etag)
+    notify_config_change("access", new_id, "CREATE", actor=actor)
+    return HandlerResult(status=201, body=rowJson, media_type="application/json")
+
+
+async def _update_access(handler_args: HandlerArgs, aid: int, config):
+    body = _parse_body(handler_args)
+    if not body:
+        return HandlerResult(status=400, body={"error": "empty_body"}, media_type="application/json")
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM routing_access_list WHERE id=%s", (aid,))
+            before = cur.fetchone()
+            if not before:
+                return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+            etag_before = before.get("etag", "")
+            fields = []; values = []
+            for col in ("scope", "scope_ref_id", "kind", "match_type", "value", "priority", "note"):
+                if col in body:
+                    fields.append(f"{col}=%s"); values.append(body[col])
+            if "enabled" in body:
+                fields.append("enabled=%s"); values.append(0 if body["enabled"] in (False, "false", 0, "0") else 1)
+            if not fields:
+                return HandlerResult(status=400, body={"error": "no_updatable_fields"}, media_type="application/json")
+            etag_after = _compute_etag()
+            fields.append("etag=%s"); values.append(etag_after)
+            values.append(aid)
+            cur.execute(f"UPDATE routing_access_list SET {', '.join(fields)} WHERE id=%s", values)
+            cur.execute("SELECT * FROM routing_access_list WHERE id=%s", (aid,))
+            after = cur.fetchone()
+    finally:
+        conn.close()
+    afterJson = _access_row_to_json(after)
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "access", aid, "UPDATE",
+                        before=_access_row_to_json(before), after=afterJson,
+                        etag_before=etag_before, etag_after=etag_after)
+    notify_config_change("access", aid, "UPDATE", actor=actor)
+    return HandlerResult(status=200, body=afterJson, media_type="application/json")
+
+
+async def _delete_access(handler_args: HandlerArgs, aid: int, config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM routing_access_list WHERE id=%s", (aid,))
+            before = cur.fetchone()
+            if not before:
+                return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+            cur.execute("DELETE FROM routing_access_list WHERE id=%s", (aid,))
+    finally:
+        conn.close()
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "access", aid, "DELETE",
+                        before=_access_row_to_json(before),
+                        etag_before=before.get("etag", ""))
+    notify_config_change("access", aid, "DELETE", actor=actor)
+    return HandlerResult(status=204, body=None, media_type="application/json")
+
+
+# ──────────────────────────────────────────────────────────────
 #  Handler list
 # ──────────────────────────────────────────────────────────────
 
@@ -891,4 +1058,5 @@ CIMS_CSP_RUNTIME_HANDLER_LIST = (
     (_LISTENER_BASE, handle_listeners, {}),
     (_TRUNK_BASE,    handle_trunks,    {}),
     (_ROUTE_BASE,    handle_routes,    {}),
+    (_ACCESS_BASE,   handle_access,    {}),
 )

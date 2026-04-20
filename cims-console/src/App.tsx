@@ -18,6 +18,7 @@ import VerificationPage from './pages/VerificationPage'
 import SipListenersPage from './pages/SipListenersPage'
 import SipTrunksPage from './pages/SipTrunksPage'
 import SipRoutesPage from './pages/SipRoutesPage'
+import SipAccessPage from './pages/SipAccessPage'
 import DocsPage from './pages/DocsPage'
 import { authApi } from './api/auth'
 import './index.css'
@@ -40,6 +41,7 @@ const PAGE_TITLES: Record<PageId, string> = {
   'csp-listeners': 'SIP 리스너 (CSP)',
   'csp-trunks': 'SIP 트렁크 (CSP)',
   'csp-routes': 'SIP 라우팅 규칙 (CSP)',
+  'csp-access': 'SIP 접근제어 (CSP)',
   'verification': '시스템 검증',
   'docs': '문서',
 }
@@ -97,6 +99,7 @@ function Shell() {
       case 'csp-listeners':   return <SipListenersPage />
       case 'csp-trunks':      return <SipTrunksPage />
       case 'csp-routes':      return <SipRoutesPage />
+      case 'csp-access':      return <SipAccessPage />
       case 'verification':    return <VerificationPage />
       case 'docs':            return <DocsPage />
       default:                return <DashboardPage />

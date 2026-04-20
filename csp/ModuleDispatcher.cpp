@@ -14,6 +14,7 @@
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
+#include "CspAccessControl.h"
 #include "CspRouteEngine.h"
 #include "CspTrunkManager.h"
 #include "SipMessageLogger.h"
@@ -196,6 +197,20 @@ void CModuleDispatcher::SaveCdr(const char* pszCallId, int iSipStatus) {
 bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
     std::string strCallId;
     pclsMessage->GetCallId(strCallId);
+
+    // 접근제어 (ACL + rate limit) — 모든 SIP 요청 처리 앞단
+    {
+        CCspAccessControl::Decision d = gclsAccessControl.Check(
+            pclsMessage->m_strClientIp, 0, pclsMessage->m_strUserAgent);
+        if (!d.allowed) {
+            CLog::Print(LOG_INFO, "AccessControl: denied src=%s reason=%s code=%d",
+                        pclsMessage->m_strClientIp.c_str(), d.reason.c_str(), d.http_code);
+            // 429 는 SIP 에서 직접적 매핑이 없으므로 503 Service Unavailable 로 매핑
+            int status = (d.http_code == 429) ? 503 : 403;
+            SendResponse(pclsMessage, status);
+            return true;
+        }
+    }
 
     // OPTIONS → 표준 200 OK 자동 응답 (RFC 3261 §11.2).
     //   트렁크 헬스체크(상대 CSP/Kamailio 등)용. 본 프로세스의 capability 를 간소히 알림.

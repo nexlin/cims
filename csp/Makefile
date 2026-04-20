@@ -271,6 +271,30 @@ CscfModule.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CscfModule.cpp.s
 .PHONY : CscfModule.cpp.s
 
+CspAccessControl.o: CspAccessControl.cpp.o
+.PHONY : CspAccessControl.o
+
+# target to build an object file
+CspAccessControl.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAccessControl.cpp.o
+.PHONY : CspAccessControl.cpp.o
+
+CspAccessControl.i: CspAccessControl.cpp.i
+.PHONY : CspAccessControl.i
+
+# target to preprocess a source file
+CspAccessControl.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAccessControl.cpp.i
+.PHONY : CspAccessControl.cpp.i
+
+CspAccessControl.s: CspAccessControl.cpp.s
+.PHONY : CspAccessControl.s
+
+# target to generate assembly for a file
+CspAccessControl.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAccessControl.cpp.s
+.PHONY : CspAccessControl.cpp.s
+
 CspConfigCache.o: CspConfigCache.cpp.o
 .PHONY : CspConfigCache.o
 
@@ -920,6 +944,9 @@ help:
 	@echo "... CscfModule.o"
 	@echo "... CscfModule.i"
 	@echo "... CscfModule.s"
+	@echo "... CspAccessControl.o"
+	@echo "... CspAccessControl.i"
+	@echo "... CspAccessControl.s"
 	@echo "... CspConfigCache.o"
 	@echo "... CspConfigCache.i"
 	@echo "... CspConfigCache.s"

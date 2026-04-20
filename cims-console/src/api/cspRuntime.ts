@@ -126,6 +126,44 @@ export const cspRuntimeApi = {
   deleteRoute: (id: number) => api.delete<null>(`/csp/routes/${id}`),
   dryrunRoute: (sample: RouteDryRunSample) =>
     api.post<RouteDryRunResult>('/csp/routes/dryrun', { sample }),
+
+  listAccess:  () => api.get<{ items: AccessEntry[] }>('/csp/access').then(r => r.items),
+  getAccess:   (id: number) => api.get<AccessEntry>(`/csp/access/${id}`),
+  createAccess: (body: AccessEntryInput) => api.post<AccessEntry>('/csp/access', body),
+  updateAccess: (id: number, body: Partial<AccessEntryInput>) => api.put<AccessEntry>(`/csp/access/${id}`, body),
+  deleteAccess: (id: number) => api.delete<null>(`/csp/access/${id}`),
+}
+
+// ── Access control types ───────────────────────────────────
+
+export type AccessScope = 'global' | 'listener' | 'trunk'
+export type AccessKind = 'allow' | 'deny'
+export type AccessMatchType = 'ip' | 'cidr' | 'ua_regex'
+
+export interface AccessEntry {
+  id: number
+  scope: AccessScope
+  scope_ref_id: number | null
+  kind: AccessKind
+  match_type: AccessMatchType
+  value: string
+  enabled: boolean
+  priority: number
+  note: string | null
+  etag: string
+  create_time: string | null
+  update_time: string | null
+}
+
+export interface AccessEntryInput {
+  scope?: AccessScope
+  scope_ref_id?: number | null
+  kind: AccessKind
+  match_type: AccessMatchType
+  value: string
+  enabled?: boolean
+  priority?: number
+  note?: string | null
 }
 
 // ── Routing rule types ─────────────────────────────────────
