@@ -104,19 +104,29 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     }
     mysql_set_character_set(pMysql, "utf8mb4");
 
+    // P8: auth_id 컬럼 제거 — imsi + sip_service.domain 조합으로 authId 구성
     // VoIP 가입자
     if (strFilterMode.empty() || strFilterMode == "voip") {
-        const char* sql = "SELECT cu.id, cu.auth_id, cu.passwd "
-                          "FROM voip_subscriptions cu JOIN users u ON cu.user_id = u.id "
-                          "ORDER BY cu.id";
+        const char* sql =
+            "SELECT cu.id, COALESCE(cu.imsi,''), cu.passwd, "
+            "       COALESCE(s.domain,'') "
+            "FROM voip_subscriptions cu "
+            "LEFT JOIN sip_service s ON cu.service_id = s.id "
+            "ORDER BY cu.id";
         if (mysql_query(pMysql, sql) == 0) {
             MYSQL_RES* res = mysql_store_result(pMysql);
             if (res) {
                 MYSQL_ROW row;
                 while ((row = mysql_fetch_row(res))) {
                     DbSubscriber sub;
-                    sub.id          = row[0] ? row[0] : "";
-                    sub.authId      = row[1] ? row[1] : sub.id;
+                    sub.id       = row[0] ? row[0] : "";
+                    std::string imsi   = row[1] ? row[1] : "";
+                    std::string domain = row[3] ? row[3] : "";
+                    if (!imsi.empty() && !domain.empty()) {
+                        sub.authId = imsi + "@" + domain;
+                    } else {
+                        sub.authId = sub.id;    // fallback
+                    }
                     sub.password    = row[2] ? row[2] : "";
                     sub.serviceType = "voip";
                     vecOut.push_back(sub);
@@ -131,15 +141,18 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
         std::string sql;
         if (!strGroupId.empty()) {
             // 그룹 멤버만 로드 (그룹 멤버 순서 = priority 순)
-            sql = "SELECT pu.id, pu.auth_id, pu.passwd "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd, "
+                  "       COALESCE(s.domain,'') "
                   "FROM ptt_subscriptions pu "
-                  "JOIN users u ON pu.user_id = u.id "
+                  "LEFT JOIN sip_service s ON pu.service_id = s.id "
                   "JOIN ptt_group_members gm ON gm.user_id = pu.id "
                   "WHERE gm.group_id='" + strGroupId + "' "
                   "ORDER BY gm.priority, pu.id";
         } else {
-            sql = "SELECT pu.id, pu.auth_id, pu.passwd "
-                  "FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd, "
+                  "       COALESCE(s.domain,'') "
+                  "FROM ptt_subscriptions pu "
+                  "LEFT JOIN sip_service s ON pu.service_id = s.id "
                   "ORDER BY pu.id";
         }
         if (mysql_query(pMysql, sql.c_str()) == 0) {
@@ -148,8 +161,14 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                 MYSQL_ROW row;
                 while ((row = mysql_fetch_row(res))) {
                     DbSubscriber sub;
-                    sub.id          = row[0] ? row[0] : "";
-                    sub.authId      = row[1] ? row[1] : sub.id;
+                    sub.id       = row[0] ? row[0] : "";
+                    std::string imsi   = row[1] ? row[1] : "";
+                    std::string domain = row[3] ? row[3] : "";
+                    if (!imsi.empty() && !domain.empty()) {
+                        sub.authId = imsi + "@" + domain;
+                    } else {
+                        sub.authId = sub.id;
+                    }
                     sub.password    = row[2] ? row[2] : "";
                     sub.serviceType = "ptt";
                     vecOut.push_back(sub);

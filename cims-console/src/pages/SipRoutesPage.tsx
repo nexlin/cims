@@ -3,7 +3,7 @@ import {
   cspRuntimeApi,
   type RouteRule, type RouteRuleInput, type MatchCond, type TransformStep,
   type MatchOp, type TransformAction, type TargetMode, type FailAction,
-  type SipTrunk, type RouteDryRunSample, type RouteDryRunResult,
+  type SipTrunk, type SipService, type RouteDryRunSample, type RouteDryRunResult,
 } from '../api/cspRuntime'
 import { useToast } from '../components/Toast'
 
@@ -20,7 +20,7 @@ const TRANSFORM_ACTIONS: TransformAction[] = [
   'strip_prefix', 'add_prefix',
   'set_transport', 'set_privacy', 'anonymize_from',
 ]
-const TARGET_MODES: TargetMode[] = ['trunk', 'priority_list', 'round_robin', 'weighted', 'reject']
+const TARGET_MODES: TargetMode[] = ['trunk', 'service', 'priority_list', 'round_robin', 'weighted', 'reject']
 const FAIL_ACTIONS: FailAction[] = ['reject', 'fallback', 'next_rule']
 
 const EMPTY_RULE: RouteRuleInput = {
@@ -38,6 +38,7 @@ export default function SipRoutesPage() {
   const { show } = useToast()
   const [items, setItems] = useState<RouteRule[]>([])
   const [trunks, setTrunks] = useState<SipTrunk[]>([])
+  const [services, setServices] = useState<SipService[]>([])
   const [loading, setLoading] = useState(true)
 
   const [editOpen, setEditOpen] = useState(false)
@@ -57,12 +58,14 @@ export default function SipRoutesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [rules, ts] = await Promise.all([
+      const [rules, ts, svcs] = await Promise.all([
         cspRuntimeApi.listRoutes(),
         cspRuntimeApi.listTrunks(),
+        cspRuntimeApi.listServices(),
       ])
       setItems(rules)
       setTrunks(ts)
+      setServices(svcs)
     } catch (e) {
       show(`조회 실패: ${(e as Error).message}`, 'err')
     } finally {
@@ -88,7 +91,7 @@ export default function SipRoutesPage() {
       description: row.description ?? '',
       match: row.match,
       transform: row.transform,
-      target: { mode: row.target.mode, trunk_id: row.target.trunk_id },
+      target: { mode: row.target.mode, trunk_id: row.target.trunk_id, service_id: row.target.service_id ?? null },
       fail: { ...row.fail },
     }
     setForm(f)
@@ -327,6 +330,23 @@ export default function SipRoutesPage() {
                           <option value="">— 선택 —</option>
                           {trunks.map(t => <option key={t.id} value={t.id}>{t.name} ({t.remote_ip}:{t.remote_port})</option>)}
                         </select>
+                      </>
+                    )}
+                    {form.target?.mode === 'service' && (
+                      <>
+                        <label>Service</label>
+                        <select className="form-input" value={form.target?.service_id ?? ''}
+                          onChange={e => setForm(f => ({
+                            ...f, target: { ...f.target!, service_id: e.target.value ? parseInt(e.target.value, 10) : null },
+                          }))}>
+                          <option value="">— 선택 —</option>
+                          {services.map(sv => <option key={sv.id} value={sv.id}>
+                            {sv.name} ({sv.kind}/{sv.domain})
+                          </option>)}
+                        </select>
+                        <div style={{ gridColumn: 'span 2', fontSize: 12, color: '#666' }}>
+                          (해당 서비스의 alive 트렁크 중 failover_priority 순으로 자동 선택)
+                        </div>
                       </>
                     )}
                   </div>

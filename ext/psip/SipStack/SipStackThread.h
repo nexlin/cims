@@ -24,6 +24,12 @@
 bool StartSipUdpThread( CSipStack * pclsSipStack );
 /** P2: 특정 UDP 리스너에 대해 recv 스레드(들) 기동. iCount < 0 이면 setup 값 사용. */
 bool StartSipUdpThreadForListener( CSipStack * pclsSipStack, CSipStackUdpListener * pListener, int iCount );
+
+/** P8: 현재 수신 처리 스레드가 담당하는 listener id 조회.
+ *  inbound 정책 평가(service.inbound_policy=restricted) 시 CscfModule 등이 사용. */
+extern thread_local int t_iCurrentListenerId;
+inline int GetCurrentInboundListenerId() { return t_iCurrentListenerId; }
+
 bool StartSipStackThread( CSipStack * pclsSipStack );
 
 // SipQueueThread.cpp

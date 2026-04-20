@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { usersApi, type UserSummary, type Subscription } from '../api/users'
 import { orgApi, type Organization } from '../api/organizations'
+import { cspRuntimeApi, type SipService } from '../api/cspRuntime'
 import { useToast } from '../components/Toast'
 
 // ── 조직+구성원 통합 트리 노드 ─────────────────────
@@ -47,11 +48,16 @@ export default function PttMsisdnPage() {
   const [editMsisdn, setEditMsisdn] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Subscription>>({})
   const [adding, setAdding] = useState(false)
-  const [addForm, setAddForm] = useState<Partial<Subscription>>({ id:'', auth_id:'', passwd:'123456', dnd:false, forward_id:'' })
+  const [addForm, setAddForm] = useState<Partial<Subscription>>({ id:'', imsi:'', service_id:null, passwd:'123456', dnd:false, forward_id:'' })
+  const [services, setServices] = useState<SipService[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { const [u,o] = await Promise.all([usersApi.list(), orgApi.list()]); setUsers(u); setOrgs(o); setExpanded(new Set(o.map(x=>x.id))) }
+    try {
+      const [u,o,svcs] = await Promise.all([usersApi.list(), orgApi.list(), cspRuntimeApi.listServices()])
+      setUsers(u); setOrgs(o); setExpanded(new Set(o.map(x=>x.id)))
+      setServices(svcs.filter(s => s.kind === 'ptt'))
+    }
     catch (e: unknown) { show(String(e), 'err') }
     finally { setLoading(false) }
   }, [show])
@@ -72,13 +78,21 @@ export default function PttMsisdnPage() {
   function toggleExp(id: number) { setExpanded(p => { const n=new Set(p); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
   function select(u: UserSummary) { setSelectedUser(u); setEditMsisdn(null); setAdding(false) }
 
-  function startEdit(s: Subscription) { setEditMsisdn(s.id); setAdding(false); setEditForm({auth_id:s.auth_id,passwd:'',dnd:s.dnd,forward_id:s.forward_id}) }
+  function startEdit(s: Subscription) {
+    setEditMsisdn(s.id); setAdding(false)
+    setEditForm({ service_id: s.service_id ?? null, imsi: s.imsi ?? '',
+                   passwd:'', dnd: s.dnd, forward_id: s.forward_id })
+  }
   async function saveEdit() {
     if(!selectedUser||!editMsisdn) return
     const d: Partial<Subscription> = {...editForm}; if(!d.passwd) delete d.passwd
     try { await usersApi.updateSub(selectedUser.id,'ptt',editMsisdn,d); show('수정','ok'); setEditMsisdn(null); load() } catch(e:unknown){show(String(e),'err')}
   }
-  function startAdd() { setAdding(true); setEditMsisdn(null); setAddForm({id:'',auth_id:'',passwd:'123456',dnd:false,forward_id:''}) }
+  function startAdd() {
+    setAdding(true); setEditMsisdn(null)
+    setAddForm({ id:'', service_id: services[0]?.id ?? null, imsi:'',
+                 passwd:'123456', dnd:false, forward_id:'' })
+  }
   async function saveAdd() {
     if(!selectedUser||!addForm.id){show('MSISDN 필수','err');return}
     try { await usersApi.addSub(selectedUser.id,'ptt',addForm); show('추가','ok'); setAdding(false); load() } catch(e:unknown){show(String(e),'err')}
@@ -129,7 +143,17 @@ export default function PttMsisdnPage() {
                     {ed ? (
                       <div style={{ display:'grid', gridTemplateColumns:'100px 1fr 100px 1fr', gap:'8px 12px', alignItems:'center', fontSize:13 }}>
                         <span style={{fontWeight:600}}>MSISDN</span><span style={{fontWeight:600,gridColumn:'span 3'}}>{s.id}</span>
-                        <span>Auth ID</span><input className="form-input" value={editForm.auth_id||''} onChange={e=>setEditForm({...editForm,auth_id:e.target.value})} style={{gridColumn:'span 3'}} />
+                        <span>Service *</span>
+                        <select className="form-input" value={editForm.service_id ?? ''}
+                          onChange={e=>setEditForm({...editForm, service_id: e.target.value ? parseInt(e.target.value,10) : null})}
+                          style={{gridColumn:'span 3'}}>
+                          <option value="">— 선택 (비우면 REGISTER 거부) —</option>
+                          {services.map(sv => <option key={sv.id} value={sv.id}>{sv.name} ({sv.domain})</option>)}
+                        </select>
+                        <span>IMSI</span>
+                        <input className="form-input" placeholder="예: 450033100000001 (숫자)" value={editForm.imsi||''}
+                          onChange={e=>setEditForm({...editForm,imsi:e.target.value})}
+                          style={{gridColumn:'span 3'}} />
                         <span>비밀번호</span><input className="form-input" type="password" placeholder="변경 시 입력" value={editForm.passwd||''} onChange={e=>setEditForm({...editForm,passwd:e.target.value})} />
                         <span>DND</span><label style={{display:'flex',alignItems:'center',gap:6}}><input type="checkbox" checked={editForm.dnd||false} onChange={e=>setEditForm({...editForm,dnd:e.target.checked})} />{editForm.dnd?'ON':'OFF'}</label>
                         <span>착신전환</span><input className="form-input" value={editForm.forward_id||''} onChange={e=>setEditForm({...editForm,forward_id:e.target.value})} style={{gridColumn:'span 3'}} />
@@ -141,7 +165,19 @@ export default function PttMsisdnPage() {
                     ) : (
                       <div style={{ display:'flex', alignItems:'center', gap:16, fontSize:13 }}>
                         <span style={{fontWeight:700,fontSize:14,minWidth:160}}>{s.id}</span>
-                        <span className="ts" style={{flex:1}}>Auth: {s.auth_id?.substring(0,30)}{(s.auth_id?.length||0)>30?'...':''}</span>
+                        {(() => {
+                          const svc = services.find(x => x.id === s.service_id)
+                          return svc ? (
+                            <span className="tag" style={{background:'#4a90d9',color:'#fff',fontSize:11}}>
+                              {svc.name}
+                            </span>
+                          ) : (
+                            <span className="badge badge--red" style={{fontSize:11}}>NO SERVICE</span>
+                          )
+                        })()}
+                        <span className="ts" style={{flex:1, fontFamily:'monospace', fontSize:11}}>
+                          {s.imsi ? `${s.imsi}@<domain>` : `auth:${(s.auth_id||'').substring(0,30)}`}
+                        </span>
                         <span className={`badge ${s.dnd?'badge--red':'badge--gray'}`} style={{fontSize:11}}>DND:{s.dnd?'ON':'OFF'}</span>
                         {s.forward_id&&<span className="ts">→{s.forward_id}</span>}
                         <button className="btn btn--sm btn--outline" onClick={()=>startEdit(s)}>편집</button>
@@ -156,7 +192,17 @@ export default function PttMsisdnPage() {
                 <div className="panel" style={{ padding:16, borderStyle:'dashed' }}>
                   <div style={{ display:'grid', gridTemplateColumns:'100px 1fr 100px 1fr', gap:'8px 12px', alignItems:'center', fontSize:13 }}>
                     <span>MSISDN *</span><input className="form-input" placeholder="+821357007xxx" value={addForm.id||''} onChange={e=>setAddForm({...addForm,id:e.target.value})} autoFocus style={{gridColumn:'span 3'}} />
-                    <span>Auth ID</span><input className="form-input" placeholder="미입력 시 자동" value={addForm.auth_id||''} onChange={e=>setAddForm({...addForm,auth_id:e.target.value})} style={{gridColumn:'span 3'}} />
+                    <span>Service *</span>
+                    <select className="form-input" value={addForm.service_id ?? ''}
+                      onChange={e=>setAddForm({...addForm, service_id: e.target.value ? parseInt(e.target.value,10) : null})}
+                      style={{gridColumn:'span 3'}}>
+                      <option value="">— 선택 —</option>
+                      {services.map(sv => <option key={sv.id} value={sv.id}>{sv.name} ({sv.domain})</option>)}
+                    </select>
+                    <span>IMSI *</span>
+                    <input className="form-input" placeholder="예: 450033100000001 (숫자만)"
+                      value={addForm.imsi||''} onChange={e=>setAddForm({...addForm,imsi:e.target.value})}
+                      style={{gridColumn:'span 3'}} />
                     <span>비밀번호</span><input className="form-input" value={addForm.passwd||''} onChange={e=>setAddForm({...addForm,passwd:e.target.value})} />
                     <span>DND</span><label style={{display:'flex',alignItems:'center',gap:6}}><input type="checkbox" checked={addForm.dnd||false} onChange={e=>setAddForm({...addForm,dnd:e.target.checked})} />{addForm.dnd?'ON':'OFF'}</label>
                     <span>착신전환</span><input className="form-input" placeholder="번호" value={addForm.forward_id||''} onChange={e=>setAddForm({...addForm,forward_id:e.target.value})} style={{gridColumn:'span 3'}} />

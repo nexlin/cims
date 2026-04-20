@@ -7,6 +7,7 @@
 #include "CscfModule.h"
 #include "CspServiceMap.h"
 #include "SipServerSetup.h"
+#include "SipStackThread.h"    // GetCurrentInboundListenerId()
 #include "SipServer.h"
 #include "SipMd5.h"
 #include "NonceMap.h"
@@ -107,13 +108,30 @@ ECheckAuthResult CCscfModule::CheckAuthorization(CSipCredential* pclsCredential,
 
     // 서비스 정보 로드 → effective username 결정
     ServiceInfo svc = gclsServiceMap.GetById(clsXmlUser.m_iServiceId);
+
+    // P8: inbound_policy=restricted 이면 현재 수신 listener 가 허용 리스너에 포함돼야 함
+    if (svc.id > 0 && svc.inbound_policy == "restricted") {
+        int iListenerId = GetCurrentInboundListenerId();
+        bool bAllowed = false;
+        for (int lid : svc.listeners) {
+            if (lid == iListenerId) { bAllowed = true; break; }
+        }
+        if (!bAllowed) {
+            CLog::Print(LOG_ERROR, "Auth reject: service=%s inbound_policy=restricted, "
+                        "listener_id=%d not in service.listeners",
+                        svc.name.c_str(), iListenerId);
+            return E_AUTH_ERROR;
+        }
+    }
+
     std::string strExpectedUser;
     if (svc.id > 0 && !clsXmlUser.m_strImsi.empty()) {
-        // 신규 경로: IMSI + service.domain
+        // P8: IMSI + service.domain 만 지원 (auth_id fallback 제거)
         strExpectedUser = clsXmlUser.m_strImsi + "@" + svc.domain;
     } else {
-        // 레거시 fallback: 저장된 auth_id 그대로
-        strExpectedUser = clsXmlUser.m_strAuthId;
+        CLog::Print(LOG_ERROR, "Auth reject: user=%s service_id=%d imsi='%s' — 데이터 불완전",
+                    pszFromId, clsXmlUser.m_iServiceId, clsXmlUser.m_strImsi.c_str());
+        return E_AUTH_ERROR;
     }
 
     if (strExpectedUser != pclsCredential->m_strUserName) {

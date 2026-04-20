@@ -83,6 +83,17 @@ ALTER TABLE ptt_subscriptions
     ADD KEY IF NOT EXISTS idx_ptt_service (service_id);
 
 -- ─────────────────────────────────────────────
+--  routing_rule: target.mode="service" 지원 + service_id FK
+-- ─────────────────────────────────────────────
+ALTER TABLE routing_rule
+    MODIFY COLUMN target_mode
+        ENUM('trunk','service','priority_list','round_robin','weighted','reject') NOT NULL DEFAULT 'trunk',
+    ADD COLUMN IF NOT EXISTS target_service_id INT DEFAULT NULL
+        COMMENT 'target_mode=service 일 때 참조할 sip_service.id',
+    ADD FOREIGN KEY IF NOT EXISTS fk_rule_service (target_service_id)
+        REFERENCES sip_service(id) ON DELETE SET NULL;
+
+-- ─────────────────────────────────────────────
 --  csp_config_audit entity 확장 (service 추가)
 -- ─────────────────────────────────────────────
 -- entity 필드는 VARCHAR 이라 변경 불필요

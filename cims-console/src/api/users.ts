@@ -2,10 +2,12 @@ import { api } from './client'
 
 export interface Subscription {
   id: string          // MSISDN of this line
-  auth_id: string
+  auth_id: string     // legacy fallback (IMSI 정규화 후 P8 에서 제거 예정)
   passwd?: string
   dnd: boolean
   forward_id: string
+  service_id?: number | null    // P7: 소속 서비스 (NULL 이면 REGISTER 거부)
+  imsi?: string | null          // P7: IMSI 등 user 파트 (service.domain 과 결합)
   register_time?: string | null
   logout_time?: string | null
 }

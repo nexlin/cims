@@ -47,6 +47,8 @@ export interface SipTrunk {
   id: number
   name: string
   enabled: boolean
+  service_id: number | null
+  failover_priority: number
   remote_ip: string
   remote_port: number
   remote_domain: string
@@ -76,6 +78,8 @@ export interface SipTrunkCreate {
   remote_domain?: string
   protocol?: 'UDP' | 'TCP' | 'TLS'
   enabled?: boolean
+  service_id?: number | null
+  failover_priority?: number
   outbound_proxy_ip?: string | null
   outbound_proxy_port?: number | null
   register_to_remote?: boolean
@@ -216,7 +220,7 @@ export type TransformAction =
   | 'add_header' | 'remove_header' | 'replace_header'
   | 'strip_prefix' | 'add_prefix'
   | 'set_transport' | 'set_privacy' | 'anonymize_from'
-export type TargetMode = 'trunk' | 'priority_list' | 'round_robin' | 'weighted' | 'reject'
+export type TargetMode = 'trunk' | 'service' | 'priority_list' | 'round_robin' | 'weighted' | 'reject'
 export type FailAction = 'reject' | 'fallback' | 'next_rule'
 
 export interface MatchCond {
@@ -242,7 +246,7 @@ export interface RouteRule {
   description: string | null
   match: MatchCond[]
   transform: TransformStep[]
-  target: { mode: TargetMode; trunk_id: number | null; json: unknown | null }
+  target: { mode: TargetMode; trunk_id: number | null; service_id?: number | null; json: unknown | null }
   fail: {
     action: FailAction
     code: number
@@ -265,7 +269,7 @@ export interface RouteRuleInput {
   description?: string
   match?: MatchCond[]
   transform?: TransformStep[]
-  target?: { mode?: TargetMode; trunk_id?: number | null; json?: unknown }
+  target?: { mode?: TargetMode; trunk_id?: number | null; service_id?: number | null; json?: unknown }
   fail?: Partial<RouteRule['fail']>
 }
 

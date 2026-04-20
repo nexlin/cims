@@ -140,8 +140,10 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     if (!m_pMysql && !Reconnect()) return false;
 
     // Try call users first (query by subscription MSISDN = id)
+    //  P8: auth_id 컬럼 제거 완료 — imsi+service_id 만 사용
     std::string strSql =
-        "SELECT cu.id, u.name, u.org_id, cu.auth_id, cu.passwd, cu.dnd, cu.forward_id, u.id AS person_id "
+        "SELECT cu.id, u.name, u.org_id, cu.passwd, cu.dnd, cu.forward_id, u.id AS person_id, "
+        "       COALESCE(cu.service_id,0), COALESCE(cu.imsi,'') "
         "FROM voip_subscriptions cu JOIN users u ON cu.user_id = u.id "
         "WHERE cu.id='" + Escape(strUserId) + "'";
 
@@ -155,7 +157,8 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
 
         // Try PTT users
         strSql =
-            "SELECT pu.id, u.name, u.org_id, pu.auth_id, pu.passwd, pu.dnd, pu.forward_id, u.id AS person_id "
+            "SELECT pu.id, u.name, u.org_id, pu.passwd, pu.dnd, pu.forward_id, u.id AS person_id, "
+            "       COALESCE(pu.service_id,0), COALESCE(pu.imsi,'') "
             "FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
             "WHERE pu.id='" + Escape(strUserId) + "'";
 
@@ -174,13 +177,14 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     clsUser.m_strServiceType    = strServiceType;
     clsUser.m_strName           = row[1] ? row[1] : "";
     clsUser.m_strOrganizationId = row[2] ? row[2] : "";
-    clsUser.m_strAuthId         = row[3] ? row[3] : "";
-    clsUser.m_strPassWord       = row[4] ? row[4] : "";
-    clsUser.m_bDnd              = row[5] ? (atoi(row[5]) != 0) : false;
-    clsUser.m_strForward        = row[6] ? row[6] : "";
+    clsUser.m_strPassWord       = row[3] ? row[3] : "";
+    clsUser.m_bDnd              = row[4] ? (atoi(row[4]) != 0) : false;
+    clsUser.m_strForward        = row[5] ? row[5] : "";
+    // row[6] = person_id (users.id) used for reject list lookup
+    std::string strPersonId     = row[6] ? row[6] : strUserId;
+    clsUser.m_iServiceId        = row[7] ? atoi(row[7]) : 0;
+    clsUser.m_strImsi           = row[8] ? row[8] : "";
     clsUser._loadTime           = time(nullptr);
-    // row[7] = person_id (users.id) used for reject list lookup
-    std::string strPersonId     = row[7] ? row[7] : strUserId;
 
     mysql_free_result(pRes);
 
@@ -288,9 +292,9 @@ bool CDbManager::LoadAllUsers( CspUserMap& clsMap )
     const char* aTypes[]  = { "voip", "ptt" };
 
     for (int i = 0; i < 2; ++i) {
-        // P7: service_id, imsi 컬럼 포함
+        // P8: auth_id 제거 — imsi + service_id 만 사용
         std::string strSql =
-            std::string("SELECT s.id, u.name, u.org_id, s.auth_id, s.passwd, s.dnd, s.forward_id, u.id, "
+            std::string("SELECT s.id, u.name, u.org_id, s.passwd, s.dnd, s.forward_id, u.id, "
             "       COALESCE(s.service_id, 0), COALESCE(s.imsi, '') "
             "FROM ") + aTables[i] + " s JOIN users u ON s.user_id = u.id";
 
@@ -304,12 +308,11 @@ bool CDbManager::LoadAllUsers( CspUserMap& clsMap )
             clsUser.m_strServiceType    = aTypes[i];
             clsUser.m_strName           = row[1] ? row[1] : "";
             clsUser.m_strOrganizationId = row[2] ? row[2] : "";
-            clsUser.m_strAuthId         = row[3] ? row[3] : "";
-            clsUser.m_strPassWord       = row[4] ? row[4] : "";
-            clsUser.m_bDnd              = row[5] ? (atoi(row[5]) != 0) : false;
-            clsUser.m_strForward        = row[6] ? row[6] : "";
-            clsUser.m_iServiceId        = row[8] ? atoi(row[8]) : 0;
-            clsUser.m_strImsi           = row[9] ? row[9] : "";
+            clsUser.m_strPassWord       = row[3] ? row[3] : "";
+            clsUser.m_bDnd              = row[4] ? (atoi(row[4]) != 0) : false;
+            clsUser.m_strForward        = row[5] ? row[5] : "";
+            clsUser.m_iServiceId        = row[7] ? atoi(row[7]) : 0;
+            clsUser.m_strImsi           = row[8] ? row[8] : "";
             clsUser._loadTime           = time(nullptr);
             if (!clsUser.m_strId.empty()) {
                 clsMap.Insert(clsUser);

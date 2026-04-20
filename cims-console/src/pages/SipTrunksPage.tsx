@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { cspRuntimeApi, type SipTrunk, type SipTrunkCreate, type SipTrunkStatus } from '../api/cspRuntime'
+import { cspRuntimeApi, type SipTrunk, type SipTrunkCreate, type SipTrunkStatus, type SipService } from '../api/cspRuntime'
 import { statsApi } from '../api/stats'
 import { useToast } from '../components/Toast'
 
@@ -7,6 +7,8 @@ type Mode = 'form' | 'json'
 
 const EMPTY_FORM: SipTrunkCreate = {
   name: '',
+  service_id: null,
+  failover_priority: 100,
   remote_ip: '',
   remote_port: 5060,
   remote_domain: '',
@@ -26,6 +28,7 @@ const EMPTY_FORM: SipTrunkCreate = {
 export default function SipTrunksPage() {
   const { show } = useToast()
   const [items, setItems] = useState<SipTrunk[]>([])
+  const [services, setServices] = useState<SipService[]>([])
   const [status, setStatus] = useState<Record<number, SipTrunkStatus>>({})
   const [loading, setLoading] = useState(true)
 
@@ -50,8 +53,12 @@ export default function SipTrunksPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const list = await cspRuntimeApi.listTrunks()
+      const [list, svcs] = await Promise.all([
+        cspRuntimeApi.listTrunks(),
+        cspRuntimeApi.listServices(),
+      ])
       setItems(list)
+      setServices(svcs)
     } catch (e) {
       show(`트렁크 목록 조회 실패: ${(e as Error).message}`, 'err')
     } finally {
@@ -209,6 +216,15 @@ export default function SipTrunksPage() {
                   <label>이름</label>
                   <input className="form-input" value={form.name}
                     onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+                  <label>Service</label>
+                  <select className="form-input" value={form.service_id ?? ''}
+                    onChange={e => setForm(f => ({ ...f, service_id: e.target.value ? parseInt(e.target.value, 10) : null }))}>
+                    <option value="">— 미지정 —</option>
+                    {services.map(sv => <option key={sv.id} value={sv.id}>{sv.name} ({sv.kind}/{sv.domain})</option>)}
+                  </select>
+                  <label>Failover 순위</label>
+                  <input className="form-input" type="number" value={form.failover_priority ?? 100}
+                    onChange={e => setForm(f => ({ ...f, failover_priority: parseInt(e.target.value || '0', 10) }))} />
                   <label>원격 IP</label>
                   <input className="form-input" value={form.remote_ip}
                     onChange={e => setForm(f => ({ ...f, remote_ip: e.target.value }))} />

@@ -3,6 +3,10 @@
 #include "Log.h"
 #include "MemoryDebug.h"
 
+/** 수신 스레드별로 현재 처리 중인 UDP listener id 를 저장.
+ *  CSP 의 CscfModule 등이 inbound 정책 판정 시 조회한다. 처리 완료 후 0 으로 리셋. */
+thread_local int t_iCurrentListenerId = 0;
+
 
 static bool SipMessageProcess( CSipStack * pclsSipStack, int iThreadId, const char * pszBuf, int iBufLen, const char * pszIp, unsigned short iPort )
 {
@@ -49,7 +53,10 @@ THREAD_API SipUdpListenerThread( LPVOID lpParameter )
 			{
 				if( iPacketSize < SIP_PACKET_MIN_SIZE || szPacket[0] == '\0' || szPacket[0] == '\r' || szPacket[0] == '\n' ) continue;
 
+				// P8: 현재 수신 listener id 노출 (CspServiceMap 의 inbound_policy 체크용)
+				t_iCurrentListenerId = pListener->m_iId;
 				SipMessageProcess( pclsSipStack, iThreadId, szPacket, iPacketSize, szIp, sPort );
+				t_iCurrentListenerId = 0;
 			}
 		}
 		else

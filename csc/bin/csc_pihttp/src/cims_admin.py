@@ -151,7 +151,7 @@ async def _list_users(config):
                 row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
                 # attach subscriptions
                 cur.execute(
-                    "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                    "SELECT id, service_id, imsi, dnd, forward_id, register_time, logout_time "
                     "FROM voip_subscriptions WHERE user_id=%s ORDER BY id",
                     (row['id'],)
                 )
@@ -163,7 +163,7 @@ async def _list_users(config):
                 row['call_subscriptions'] = call_subs
 
                 cur.execute(
-                    "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                    "SELECT id, service_id, imsi, dnd, forward_id, register_time, logout_time "
                     "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                     (row['id'],)
                 )
@@ -203,7 +203,7 @@ async def _get_user(person_id: str, config):
 
             # call subscriptions
             cur.execute(
-                "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                "SELECT id, service_id, imsi, dnd, forward_id, register_time, logout_time "
                 "FROM voip_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -216,7 +216,7 @@ async def _get_user(person_id: str, config):
 
             # ptt subscriptions
             cur.execute(
-                "SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                "SELECT id, service_id, imsi, dnd, forward_id, register_time, logout_time "
                 "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -387,7 +387,8 @@ async def _list_subscriptions(person_id: str, svc: str, config):
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
-                f"SELECT id, auth_id, dnd, forward_id, register_time, logout_time "
+                f"SELECT id, service_id, imsi, dnd, forward_id, "
+                f"       register_time, logout_time "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -406,7 +407,18 @@ async def _add_subscription(person_id: str, svc: str, body, config):
     if not msisdn:
         return HandlerResult(status=400, body={'error': 'id (MSISDN) is required'})
 
-    auth_id    = body.get('auth_id', msisdn)
+    # P7: service_id + imsi (IMSI 는 user 파트, service.domain 과 런타임 결합)
+    service_id = body.get('service_id')
+    if service_id in (None, 0, '', '0'):
+        service_id = None
+    else:
+        try: service_id = int(service_id)
+        except Exception:
+            return HandlerResult(status=400, body={'error': 'invalid service_id'})
+    imsi       = (body.get('imsi') or '').strip() or None
+    # P8: auth_id 제거 — imsi 필수
+    if not imsi:
+        return HandlerResult(status=400, body={'error': 'imsi required'})
     passwd     = body.get('passwd', '')
     dnd        = 1 if body.get('dnd', False) else 0
     forward_id = body.get('forward_id', '')
@@ -418,9 +430,9 @@ async def _add_subscription(person_id: str, svc: str, body, config):
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
-                f"INSERT INTO {table} (id, user_id, auth_id, passwd, dnd, forward_id) "
-                f"VALUES (%s, %s, %s, %s, %s, %s)",
-                (msisdn, person_id, auth_id, passwd, dnd, forward_id)
+                f"INSERT INTO {table} (id, user_id, service_id, imsi, passwd, dnd, forward_id) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (msisdn, person_id, service_id, imsi, passwd, dnd, forward_id)
             )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     return HandlerResult(status=201, body={'id': msisdn})
@@ -430,18 +442,34 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
-    auth_id    = body.get('auth_id', msisdn)
     passwd     = body.get('passwd', '')
     dnd        = 1 if body.get('dnd', False) else 0
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
 
+    # service_id/imsi 는 부분 업데이트 — 키가 있을 때만 반영
+    fields = ["passwd=%s", "dnd=%s", "forward_id=%s"]
+    values = [passwd, dnd, forward_id]
+    if 'service_id' in body:
+        sid = body.get('service_id')
+        if sid in (None, 0, '', '0'):
+            fields.append("service_id=NULL")
+        else:
+            try: sid = int(sid)
+            except Exception:
+                return HandlerResult(status=400, body={'error': 'invalid service_id'})
+            fields.append("service_id=%s"); values.append(sid)
+    if 'imsi' in body:
+        imsi = (body.get('imsi') or '').strip() or None
+        fields.append("imsi=%s"); values.append(imsi)
+    values.extend([msisdn, person_id])
+
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE {table} SET auth_id=%s, passwd=%s, dnd=%s, forward_id=%s "
+                f"UPDATE {table} SET {', '.join(fields)} "
                 f"WHERE id=%s AND user_id=%s",
-                (auth_id, passwd, dnd, forward_id, msisdn, person_id)
+                values
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
@@ -972,12 +1000,12 @@ def _generate_template():
 
     # Sheet 2: voip_subscriptions
     ws2 = wb.create_sheet('voip_subscriptions')
-    ws2.append(['name', 'msisdn', 'auth_id', 'password', 'dnd', 'forward_id'])
+    ws2.append(['name', 'msisdn', 'service_id', 'imsi', 'password', 'dnd', 'forward_id'])
     ws2.append(['홍길동', '+821357007100', '45003310000100@ims.domain', '123456', 'N', ''])
 
     # Sheet 3: ptt_subscriptions
     ws3 = wb.create_sheet('ptt_subscriptions')
-    ws3.append(['name', 'msisdn', 'auth_id', 'password', 'dnd'])
+    ws3.append(['name', 'msisdn', 'service_id', 'imsi', 'password', 'dnd'])
     ws3.append(['홍길동', '+82571900100', '', '123456', 'N'])
 
     buf = io.BytesIO()
@@ -1083,16 +1111,19 @@ async def _process_import(handler_args: HandlerArgs, config):
                             result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': f'사용자 생성 실패: {e}'})
                             continue
 
-                    auth_id = str(rd.get('auth_id', '') or '').strip() or msisdn
+                    imsi    = str(rd.get('imsi', '') or '').strip() or msisdn.lstrip('+')
+                    svc_id  = rd.get('service_id')
+                    try: svc_id = int(svc_id) if svc_id not in (None, '', 0) else None
+                    except Exception: svc_id = None
                     passwd = str(rd.get('password', '') or '').strip() or '123456'
                     dnd = 1 if str(rd.get('dnd', '')).upper() in ('Y', 'YES', '1', 'TRUE') else 0
                     forward_id = str(rd.get('forward_id', '') or '').strip()
 
                     try:
                         cur.execute(
-                            "INSERT IGNORE INTO voip_subscriptions (id, user_id, auth_id, passwd, dnd, forward_id) "
-                            "VALUES (%s,%s,%s,%s,%s,%s)",
-                            (msisdn, pid, auth_id, passwd, dnd, forward_id)
+                            "INSERT IGNORE INTO voip_subscriptions (id, user_id, service_id, imsi, passwd, dnd, forward_id) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                            (msisdn, pid, svc_id, imsi, passwd, dnd, forward_id)
                         )
                         if cur.rowcount > 0:
                             result['created_voip'] += 1
@@ -1125,15 +1156,18 @@ async def _process_import(handler_args: HandlerArgs, config):
                             result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': f'사용자 생성 실패: {e}'})
                             continue
 
-                    auth_id = str(rd.get('auth_id', '') or '').strip() or msisdn
+                    imsi    = str(rd.get('imsi', '') or '').strip() or msisdn.lstrip('+')
+                    svc_id  = rd.get('service_id')
+                    try: svc_id = int(svc_id) if svc_id not in (None, '', 0) else None
+                    except Exception: svc_id = None
                     passwd = str(rd.get('password', '') or '').strip() or '123456'
                     dnd = 1 if str(rd.get('dnd', '')).upper() in ('Y', 'YES', '1', 'TRUE') else 0
 
                     try:
                         cur.execute(
-                            "INSERT IGNORE INTO ptt_subscriptions (id, user_id, auth_id, passwd, dnd) "
-                            "VALUES (%s,%s,%s,%s,%s)",
-                            (msisdn, pid, auth_id, passwd, dnd)
+                            "INSERT IGNORE INTO ptt_subscriptions (id, user_id, service_id, imsi, passwd, dnd) "
+                            "VALUES (%s,%s,%s,%s,%s,%s)",
+                            (msisdn, pid, svc_id, imsi, passwd, dnd)
                         )
                         if cur.rowcount > 0:
                             result['created_ptt'] += 1

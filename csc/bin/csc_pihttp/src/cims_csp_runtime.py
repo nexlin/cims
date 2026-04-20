@@ -319,6 +319,8 @@ def _trunk_row_to_json(r: dict) -> dict:
         "id": r["id"],
         "name": r["name"],
         "enabled": bool(r["enabled"]),
+        "service_id": r.get("service_id"),
+        "failover_priority": r.get("failover_priority", 100),
         "remote_ip": r["remote_ip"],
         "remote_port": r["remote_port"],
         "remote_domain": r["remote_domain"] or "",
@@ -404,15 +406,22 @@ async def _create_trunk(handler_args: HandlerArgs, config):
     conn = _get_db(config)
     try:
         with conn.cursor() as cur:
+            svc_id = body.get("service_id")
+            if svc_id in (None, 0, "", "0"): svc_id = None
+            else:
+                try: svc_id = int(svc_id)
+                except Exception: svc_id = None
             cur.execute(
                 "INSERT INTO sip_trunk "
-                "(name, enabled, remote_ip, remote_port, remote_domain, protocol, "
+                "(name, enabled, service_id, failover_priority, "
+                " remote_ip, remote_port, remote_domain, protocol, "
                 " outbound_proxy_ip, outbound_proxy_port, "
                 " register_to_remote, auth_user, auth_password, auth_realm, register_expires, "
                 " options_ping_sec, options_dead_threshold, "
                 " srv_lookup, dns_fallback, max_concurrent_calls, cps_limit, note, etag) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (name, enabled, ip, port, body.get("remote_domain", ""), proto,
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (name, enabled, svc_id, int(body.get("failover_priority") or 100),
+                 ip, port, body.get("remote_domain", ""), proto,
                  body.get("outbound_proxy_ip"), body.get("outbound_proxy_port"),
                  1 if body.get("register_to_remote") else 0,
                  body.get("auth_user"), body.get("auth_password"), body.get("auth_realm"),
@@ -456,7 +465,8 @@ async def _update_trunk(handler_args: HandlerArgs, tid: int, config):
                 return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
             etag_before = before.get("etag", "")
 
-            updatable_cols = ("name", "remote_ip", "remote_port", "remote_domain", "protocol",
+            updatable_cols = ("name", "service_id", "failover_priority",
+                              "remote_ip", "remote_port", "remote_domain", "protocol",
                               "outbound_proxy_ip", "outbound_proxy_port",
                               "auth_user", "auth_password", "auth_realm", "register_expires",
                               "options_ping_sec", "options_dead_threshold",
@@ -558,6 +568,7 @@ def _rule_to_json(r: dict, matches: list, transforms: list) -> dict:
         "target": {
             "mode": r["target_mode"],
             "trunk_id": r.get("target_trunk_id"),
+            "service_id": r.get("target_service_id"),
             "json": json.loads(r["target_json"]) if r.get("target_json") else None,
         },
         "fail": {
@@ -672,6 +683,7 @@ def _rule_fields_from_body(body: dict) -> tuple:
     target = body.get("target") or {}
     target_mode = (target.get("mode") or "trunk").lower()
     target_trunk_id = target.get("trunk_id") or None
+    target_service_id = target.get("service_id") or None
     target_json_raw = target.get("json")
     target_json = json.dumps(target_json_raw) if target_json_raw is not None else None
     fail = body.get("fail") or {}
@@ -682,14 +694,14 @@ def _rule_fields_from_body(body: dict) -> tuple:
     timeout_ms = int(fail.get("timeout_ms") or 4000)
     retry_count = int(fail.get("retry_count") or 0)
     return (name, enabled, priority, description, target_mode, target_trunk_id,
-            target_json, fail_action, fail_code, fail_reason,
+            target_service_id, target_json, fail_action, fail_code, fail_reason,
             fallback_trunk_id, timeout_ms, retry_count)
 
 
 async def _create_route(handler_args: HandlerArgs, config):
     body = _parse_body(handler_args)
     (name, enabled, priority, description, target_mode, target_trunk_id,
-     target_json, fail_action, fail_code, fail_reason,
+     target_service_id, target_json, fail_action, fail_code, fail_reason,
      fallback_trunk_id, timeout_ms, retry_count) = _rule_fields_from_body(body)
     if not name:
         return HandlerResult(status=400, body={"error": "name required"}, media_type="application/json")
@@ -699,12 +711,14 @@ async def _create_route(handler_args: HandlerArgs, config):
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO routing_rule "
-                "(name, enabled, priority, description, target_mode, target_trunk_id, "
-                " target_json, fail_action, fail_code, fail_reason, fallback_trunk_id, "
+                "(name, enabled, priority, description, "
+                " target_mode, target_trunk_id, target_service_id, target_json, "
+                " fail_action, fail_code, fail_reason, fallback_trunk_id, "
                 " timeout_ms, retry_count, etag) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (name, enabled, priority, description, target_mode, target_trunk_id,
-                 target_json, fail_action, fail_code, fail_reason,
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (name, enabled, priority, description,
+                 target_mode, target_trunk_id, target_service_id, target_json,
+                 fail_action, fail_code, fail_reason,
                  fallback_trunk_id, timeout_ms, retry_count, etag),
             )
             new_id = cur.lastrowid
@@ -728,7 +742,7 @@ async def _update_route(handler_args: HandlerArgs, rid: int, config):
     if not body:
         return HandlerResult(status=400, body={"error": "empty_body"}, media_type="application/json")
     (name, enabled, priority, description, target_mode, target_trunk_id,
-     target_json, fail_action, fail_code, fail_reason,
+     target_service_id, target_json, fail_action, fail_code, fail_reason,
      fallback_trunk_id, timeout_ms, retry_count) = _rule_fields_from_body(body)
     etag = _compute_etag()
     conn = _get_db(config)
@@ -740,12 +754,13 @@ async def _update_route(handler_args: HandlerArgs, rid: int, config):
             cur.execute(
                 "UPDATE routing_rule SET "
                 "name=%s, enabled=%s, priority=%s, description=%s, "
-                "target_mode=%s, target_trunk_id=%s, target_json=%s, "
+                "target_mode=%s, target_trunk_id=%s, target_service_id=%s, target_json=%s, "
                 "fail_action=%s, fail_code=%s, fail_reason=%s, fallback_trunk_id=%s, "
                 "timeout_ms=%s, retry_count=%s, etag=%s "
                 "WHERE id=%s",
-                (name, enabled, priority, description, target_mode, target_trunk_id,
-                 target_json, fail_action, fail_code, fail_reason,
+                (name, enabled, priority, description,
+                 target_mode, target_trunk_id, target_service_id, target_json,
+                 fail_action, fail_code, fail_reason,
                  fallback_trunk_id, timeout_ms, retry_count, etag, rid),
             )
             # match/transform 는 항상 재작성
