@@ -47,6 +47,9 @@ bool PRtpRelay::final() {
 }
 
 void PRtpRelay::reset() {
+    // 녹취 종료 먼저 — _recorder 포인터는 lock 하에서 nullptr 로 교체되어
+    // 이후 proc() 의 writePacket 경합이 차단된다. 실제 finishSegment + delete
+    // 는 lock 을 놓은 상태에서 수행되어 파일 I/O 가 세션 상태 정리를 지연시키지 않는다.
     stopRecording();
     PAutoLock lock(_mutex);
     _sessionId = "";
@@ -289,13 +292,24 @@ void PRtpRelay::startRecording(const std::string& rawDir, const std::string& ses
 }
 
 void PRtpRelay::stopRecording() {
-    if (!_recorder) return;
+    // 포인터 swap 은 lock 하에 수행해 proc() 의 동시 writePacket 경합을 막는다.
+    // finishSegment + delete 는 lock 바깥에서 실행되어 파일 I/O 중에도 RTP relay 가
+    // 블로킹되지 않는다. finishSegment 내부는 _closeTrack() 가 fclose → rename 을
+    // 수행하므로 .recording 임시 파일이 최종 파일로 승격되어 녹취가 온전히 마감된다.
+    PSyncRtpRecorder* oldRecorder = nullptr;
+    {
+        PAutoLock lock(_mutex);
+        oldRecorder = _recorder;
+        _recorder = nullptr;
+        _firstRtpReceived = false;
+        _segStartUsec = 0;
+    }
+    if (!oldRecorder) return;
 
-    if (_recorder->isActive())
-        _recorder->finishSegment();
+    if (oldRecorder->isActive())
+        oldRecorder->finishSegment();
 
-    delete _recorder;
-    _recorder = nullptr;
+    delete oldRecorder;
 
     LOG_INFO("PRtpRelay", "Recording stopped");
 }

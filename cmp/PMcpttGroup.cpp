@@ -51,6 +51,8 @@ PMcpttGroup::PMcpttGroup(const std::string& groupId)
 }
 
 PMcpttGroup::~PMcpttGroup() {
+    // 녹취 종료 먼저 — stopRecording() 이 _recorder 포인터를 lock 하에서 swap 하여
+    // onRtpPacket/onVideoRtpPacket 의 writePacket 경합이 차단된다. 이후 멤버 정리.
     stopRecording();
     PAutoLock lock(_mutex);
     _members.clear();
@@ -601,13 +603,23 @@ void PMcpttGroup::startRecording() {
 }
 
 void PMcpttGroup::stopRecording() {
-    if (!_recorder) return;
+    // 포인터 swap 은 lock 하에 수행 — onRtpPacket/onVideoRtpPacket/handleFloor* 의
+    // 동시 writePacket/finishSegment 호출과 경합하지 않도록 보호.
+    // 실제 finishSegment + delete 는 lock 바깥에서 수행해 파일 I/O 가 RTP 경로를
+    // 블로킹하지 않게 한다. finishSegment → _closeTrack 이 fclose + rename 을
+    // 수행하므로 .recording 임시 파일이 최종 파일로 승격되어 녹취가 온전히 마감된다.
+    PSyncRtpRecorder* oldRecorder = nullptr;
+    {
+        PAutoLock lock(_mutex);
+        oldRecorder = _recorder;
+        _recorder = NULL;
+    }
+    if (!oldRecorder) return;
 
-    if (_recorder->isActive())
-        _recorder->finishSegment();
+    if (oldRecorder->isActive())
+        oldRecorder->finishSegment();
 
-    delete _recorder;
-    _recorder = NULL;
+    delete oldRecorder;
 
     LOG_INFO("PMcpttGroup", "[%s] Recording stopped: dir=%s",
              _groupId.c_str(), _recordDir.c_str());
