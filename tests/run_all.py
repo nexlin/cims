@@ -15,6 +15,7 @@ from test_e2e import run_e2e_tests
 from test_volte_service import run_volte_tests
 from test_ptt_service import run_ptt_tests
 from test_media import run_media_tests
+from test_sip_runtime import run_sip_runtime_tests
 from clean_env import clean_and_restart
 
 
@@ -103,45 +104,51 @@ def main():
 
     # 1. CMP (의존성 없음, 먼저 실행)
     print("\n" + "=" * 60)
-    print("  [1/7] CMP 모듈 검증")
+    print("  [1/8] CMP 모듈 검증")
     print("=" * 60)
     modules.append(run_cmp_tests())
 
     # 2. CSP (CMP 의존)
     print("\n" + "=" * 60)
-    print("  [2/7] CSP 모듈 검증")
+    print("  [2/8] CSP 모듈 검증")
     print("=" * 60)
     modules.append(run_csp_tests())
 
     # 3. CSC (독립)
     print("\n" + "=" * 60)
-    print("  [3/7] CSC 모듈 검증")
+    print("  [3/8] CSC 모듈 검증")
     print("=" * 60)
     modules.append(run_csc_tests())
 
     # 4. E2E (전체 연동)
     print("\n" + "=" * 60)
-    print("  [4/7] 연동/E2E 검증")
+    print("  [4/8] 연동/E2E 검증")
     print("=" * 60)
     modules.append(run_e2e_tests())
 
     # 5. VoLTE 서비스 검증
     print("\n" + "=" * 60)
-    print("  [5/7] VoLTE 서비스 검증")
+    print("  [5/8] VoLTE 서비스 검증")
     print("=" * 60)
     modules.append(run_volte_tests())
 
     # 6. PTT 서비스 검증
     print("\n" + "=" * 60)
-    print("  [6/7] PTT 서비스 검증")
+    print("  [6/8] PTT 서비스 검증")
     print("=" * 60)
     modules.append(run_ptt_tests())
 
     # 7. 미디어/녹취 검증
     print("\n" + "=" * 60)
-    print("  [7/7] 미디어/녹취 검증")
+    print("  [7/8] 미디어/녹취 검증")
     print("=" * 60)
     modules.append(run_media_tests())
+
+    # 8. SIP 런타임 설정 (P1~P6)
+    print("\n" + "=" * 60)
+    print("  [8/8] SIP 런타임 설정 검증 (P1~P6)")
+    print("=" * 60)
+    modules.append(run_sip_runtime_tests())
 
     elapsed = time.time() - t0
 
