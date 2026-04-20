@@ -4,18 +4,14 @@ CSP 모듈 검증: CscInterface UDP + cspsim 기반 SIP 시나리오
 import sys, os, time, subprocess, re
 sys.path.insert(0, os.path.dirname(__file__))
 
-from conftest import csp_request, TestRunner
+from conftest import (
+    csp_request, TestRunner,
+    CSP_IP, CSP_REALM, VOLTE_DOMAIN as VOIP_DOMAIN, PTT_DOMAIN,
+)
 
 # cspsim 바이너리 경로
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build", "dist"))
 CSPSIM = os.path.join(DIST_DIR, "cspsim", "bin", "cspsim")
-CSP_IP = "127.0.0.1"
-
-# DB의 실제 사용자 정보 (auth_id의 domain이 CSP realm과 다를 수 있으므로
-# cspsim의 -domain은 CSP realm 기준으로 설정)
-CSP_REALM = "ims.mnc001.mcc001.3gppnetwork.org"
-PTT_DOMAIN = "ptt.mnc033.mcc450.3gppnetwork.org"
-VOIP_DOMAIN = "ims.mnc033.mcc450.3gppnetwork.org"
 
 
 def _run_cspsim(args, timeout=30):

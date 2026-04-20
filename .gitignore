@@ -52,3 +52,4 @@ node_modules/
 .DS_Store
 .vscode/
 .idea/
+tests/test_env.json

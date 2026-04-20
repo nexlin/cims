@@ -4,7 +4,10 @@
 import sys, os, time, subprocess, re, struct, socket, json
 sys.path.insert(0, os.path.dirname(__file__))
 
-from conftest import CscClient, csp_request, cmp_request, TestRunner
+from conftest import (
+    CscClient, csp_request, cmp_request, TestRunner,
+    CSP_IP, VOLTE_DOMAIN as VOIP_DOMAIN, PTT_DOMAIN,
+)
 
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build", "dist"))
 
@@ -24,9 +27,7 @@ def _get_cmp_rtp_ip():
     return "127.0.0.1"
 CSPSIM = os.path.join(DIST_DIR, "cspsim", "bin", "cspsim")
 MEDIA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "media"))
-CSP_IP = "127.0.0.1"
-VOIP_DOMAIN = "ims.mnc033.mcc450.3gppnetwork.org"
-PTT_DOMAIN = "ptt.mnc033.mcc450.3gppnetwork.org"
+# CSP_IP, VOIP_DOMAIN, PTT_DOMAIN 은 conftest 에서 import
 
 VOIP_USER1 = "+821357007002"
 VOIP_AUTH1 = "450033100000002@" + VOIP_DOMAIN

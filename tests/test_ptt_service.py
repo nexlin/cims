@@ -4,12 +4,13 @@ PTT 서비스 검증: 그룹 운용 + cspsim 기반 그룹통화 + 대시보드/
 import sys, os, time, subprocess, re
 sys.path.insert(0, os.path.dirname(__file__))
 
-from conftest import CscClient, csp_request, cmp_request, TestRunner
+from conftest import (
+    CscClient, csp_request, cmp_request, TestRunner,
+    CSP_IP, PTT_DOMAIN,
+)
 
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build", "dist"))
 CSPSIM = os.path.join(DIST_DIR, "cspsim", "bin", "cspsim")
-CSP_IP = "127.0.0.1"
-PTT_DOMAIN = "ptt.mnc033.mcc450.3gppnetwork.org"
 
 # DB에 존재하는 PTT 사용자/그룹
 PTT_USER1 = "+82571900001"

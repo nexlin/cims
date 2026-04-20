@@ -1,29 +1,106 @@
 """
 CIMS 검증 공통 설정 및 유틸리티
+
+서버 IP/포트/도메인 같은 환경 상수는 `tests/test_env.json` (configure.sh 가
+현재 배포 값으로 생성) 에서 읽어 중앙화한다. 파일이 없으면 csp.json 에서
+자동 감지, 그것도 실패하면 127.0.0.1 fallback.
 """
 import json
+import os
 import socket
 import time
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ── 서버 설정 ──────────────────────────────────────────────────
-CSC_BASE = "https://127.0.0.1:4420"
-CSP_NOTIFY_IP = "127.0.0.1"
-CSP_NOTIFY_PORT = 4421
-CMP_IP = "127.0.0.1"
-CMP_PORT = 9000
+# ── 환경 로더 ─────────────────────────────────────────────────
+
+def _load_test_env() -> dict:
+    """tests/test_env.json → 없으면 csp.json fallback → 127.0.0.1 최종 fallback."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    env_file = os.path.join(here, "test_env.json")
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # csp.json fallback — 실제 배포의 LocalIp 자동 감지
+    src_root = os.path.abspath(os.path.join(here, ".."))
+    candidates = [
+        os.path.join(src_root, "build", "dist", "csp", "config", "csp.json"),
+        os.path.join(src_root, "dist", "csp", "config", "csp.json"),
+    ]
+    csp_ip = "127.0.0.1"
+    volte_domain = "ims.mnc001.mcc001.3gppnetwork.org"
+    ptt_domain   = "ptt.mnc001.mcc001.3gppnetwork.org"
+    for p in candidates:
+        if not os.path.exists(p): continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                cfg = json.load(f)
+            setup = cfg.get("Setup", {})
+            ip = setup.get("Sip", {}).get("LocalIp")
+            if ip and ip != "0.0.0.0": csp_ip = ip
+            for r in setup.get("Realm", []):
+                svc = r.get("service"); doms = r.get("domains") or []
+                if svc == "volte" and doms: volte_domain = doms[0]
+                if svc == "mcptt" and doms: ptt_domain   = doms[0]
+            break
+        except Exception:
+            continue
+    return {
+        "csp": {"ip": csp_ip, "sip_udp_port": 5060, "notify_udp_port": 4421,
+                 "monitor_tcp_port": 16000},
+        "cmp": {"ip": csp_ip, "control_port": 9000},
+        "csc": {"host": "127.0.0.1", "admin_port": 4420, "mcptt_port": 4430},
+        "domains": {"volte": volte_domain, "mcptt": ptt_domain,
+                    "csp_realm": volte_domain},
+        "db": {"host": "127.0.0.1", "port": 3306, "user": "cims",
+               "password": "cims1234", "database": "cims"},
+        "admin": {"login_id": "admin", "password": "1234"},
+        "test_users": {"voip_msisdn": "+8299990001",
+                        "ptt_msisdn": "+8299990002",
+                        "group_id": "+8299991000",
+                        "prefix": "_vtest_"},
+    }
+
+
+_ENV = _load_test_env()
+
+# ── 서버 설정 (env 파일 또는 자동감지) ─────────────────────────
+CSP_IP = _ENV["csp"]["ip"]
+CSP_SIP_PORT = _ENV["csp"]["sip_udp_port"]
+CSP_NOTIFY_IP = _ENV["csp"]["ip"]
+CSP_NOTIFY_PORT = _ENV["csp"]["notify_udp_port"]
+CMP_IP = _ENV["cmp"]["ip"]
+CMP_PORT = _ENV["cmp"]["control_port"]
+CSC_HOST = _ENV["csc"]["host"]
+CSC_ADMIN_PORT = _ENV["csc"]["admin_port"]
+CSC_MCPTT_PORT = _ENV["csc"]["mcptt_port"]
+CSC_BASE = f"https://{CSC_HOST}:{CSC_ADMIN_PORT}"
+
+# 도메인
+VOLTE_DOMAIN = _ENV["domains"]["volte"]
+PTT_DOMAIN = _ENV["domains"]["mcptt"]
+CSP_REALM = _ENV["domains"]["csp_realm"]
+
+# DB
+DB_HOST = _ENV["db"]["host"]
+DB_PORT = _ENV["db"]["port"]
+DB_USER = _ENV["db"]["user"]
+DB_PASSWORD = _ENV["db"]["password"]
+DB_NAME = _ENV["db"]["database"]
 
 # 관리자 계정
-ADMIN_LOGIN = "admin"
-ADMIN_PW = "1234"
+ADMIN_LOGIN = _ENV["admin"]["login_id"]
+ADMIN_PW = _ENV["admin"]["password"]
 
 # 테스트용 데이터 접두어 (정리 용이)
-TEST_PREFIX = "_vtest_"
-TEST_VOIP_MSISDN = "+8299990001"
-TEST_PTT_MSISDN = "+8299990002"
-TEST_GROUP_ID = "+8299991000"
+TEST_PREFIX = _ENV["test_users"]["prefix"]
+TEST_VOIP_MSISDN = _ENV["test_users"]["voip_msisdn"]
+TEST_PTT_MSISDN = _ENV["test_users"]["ptt_msisdn"]
+TEST_GROUP_ID = _ENV["test_users"]["group_id"]
 
 
 # ── HTTP 헬퍼 ──────────────────────────────────────────────────

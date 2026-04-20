@@ -4,12 +4,13 @@ VoLTE 서비스 검증: 운용 설정 + cspsim 기반 통화 시나리오 + 대�
 import sys, os, time, subprocess, re
 sys.path.insert(0, os.path.dirname(__file__))
 
-from conftest import CscClient, csp_request, cmp_request, TestRunner
+from conftest import (
+    CscClient, csp_request, cmp_request, TestRunner,
+    CSP_IP, VOLTE_DOMAIN as VOIP_DOMAIN,
+)
 
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build", "dist"))
 CSPSIM = os.path.join(DIST_DIR, "cspsim", "bin", "cspsim")
-CSP_IP = "127.0.0.1"
-VOIP_DOMAIN = "ims.mnc033.mcc450.3gppnetwork.org"
 
 # 미디어 파일 경로
 MEDIA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media")

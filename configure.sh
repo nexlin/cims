@@ -172,6 +172,7 @@ apply_template() {
         -e "s|@MSG_LOG_DIR@|${MSG_LOG_DIR}|g" \
         -e "s|@SERVICE_LOG_DIR@|${SERVICE_LOG_DIR}|g" \
         -e "s|@RECORD_DIR@|${RECORD_DIR}|g" \
+        -e "s|@DIST_DIR@|${DIST_DIR}|g" \
         "$src" > "$dst"
     ok "생성: $dst"
 }
@@ -181,6 +182,13 @@ apply_template "$DIST_DIR/cmp/config/cmp.json.template"                    "$DIS
 apply_template "$DIST_DIR/csp/config/csp.json.template"                    "$DIST_DIR/csp/config/csp.json"
 apply_template "$DIST_DIR/cwrtc/config/cwrtc.json.template"                "$DIST_DIR/cwrtc/config/cwrtc.json"
 apply_template "$DIST_DIR/csc/config/csc.json.template"                    "$DIST_DIR/csc/config/csc.json"
+
+# ── 시험 환경 설정 파일 생성 (소스 트리 tests/ 에만) ────────────
+# 테스트가 실제 배포 IP/도메인/DB 를 자동으로 사용하도록 한다.
+# 하드코딩 드리프트 방지.
+if [[ -n "$SRC_DIR" && -f "$SRC_DIR/tests/test_env.json.template" ]]; then
+    apply_template "$SRC_DIR/tests/test_env.json.template"                 "$SRC_DIR/tests/test_env.json"
+fi
 
 # ── 개발용 Vite env 파일 생성 (소스 트리에서만) ─────────────────
 if [[ -n "$SRC_DIR" ]]; then
