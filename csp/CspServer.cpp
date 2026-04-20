@@ -25,6 +25,7 @@ CCallDir gclsCallDir;
 #include "CmpClient.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
+#include "CspRouteEngine.h"
 #include "CspTrunkManager.h"
 #include "DbManager.h"
 #include "CspServerDefine.h"
@@ -201,6 +202,9 @@ int ServiceMain() {
 
     // 트렁크 레지스트리 + 헬스 체크 스레드
     gclsTrunkManager.Start();
+
+    // 라우팅 규칙 엔진 — 캐시에서 규칙 로드
+    gclsRouteEngine.Sync();
     if ( gclsSetup.m_iMonitorPort > 0 ) {
         gclsMonitor.m_iMonitorPort = gclsSetup.m_iMonitorPort;
         StartMonitorServerThread( &gclsMonitor );

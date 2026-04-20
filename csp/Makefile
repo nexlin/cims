@@ -343,6 +343,30 @@ CspPttGroup.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspPttGroup.cpp.s
 .PHONY : CspPttGroup.cpp.s
 
+CspRouteEngine.o: CspRouteEngine.cpp.o
+.PHONY : CspRouteEngine.o
+
+# target to build an object file
+CspRouteEngine.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteEngine.cpp.o
+.PHONY : CspRouteEngine.cpp.o
+
+CspRouteEngine.i: CspRouteEngine.cpp.i
+.PHONY : CspRouteEngine.i
+
+# target to preprocess a source file
+CspRouteEngine.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteEngine.cpp.i
+.PHONY : CspRouteEngine.cpp.i
+
+CspRouteEngine.s: CspRouteEngine.cpp.s
+.PHONY : CspRouteEngine.s
+
+# target to generate assembly for a file
+CspRouteEngine.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteEngine.cpp.s
+.PHONY : CspRouteEngine.cpp.s
+
 CspServer.o: CspServer.cpp.o
 .PHONY : CspServer.o
 
@@ -905,6 +929,9 @@ help:
 	@echo "... CspPttGroup.o"
 	@echo "... CspPttGroup.i"
 	@echo "... CspPttGroup.s"
+	@echo "... CspRouteEngine.o"
+	@echo "... CspRouteEngine.i"
+	@echo "... CspRouteEngine.s"
 	@echo "... CspServer.o"
 	@echo "... CspServer.i"
 	@echo "... CspServer.s"

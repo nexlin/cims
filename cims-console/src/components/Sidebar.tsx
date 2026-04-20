@@ -6,7 +6,7 @@ export type PageId =
   | 'service-status'
   | 'history-volte' | 'history-ptt'
   | 'stats-volte' | 'stats-ptt' | 'stats-sip' | 'stats-cmp' | 'stats-csc' | 'stats-https'
-  | 'csp-listeners' | 'csp-trunks'
+  | 'csp-listeners' | 'csp-trunks' | 'csp-routes'
   | 'verification'
   | 'docs'
 
@@ -51,6 +51,7 @@ const MENU: MenuItem[] = [
     children: [
       { id: 'csp-listeners', label: 'SIP 리스너' },
       { id: 'csp-trunks',    label: 'SIP 트렁크' },
+      { id: 'csp-routes',    label: '라우팅 규칙' },
     ],
   },
   { id: 'verification', label: '검증' },

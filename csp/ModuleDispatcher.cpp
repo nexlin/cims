@@ -14,6 +14,7 @@
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
+#include "CspRouteEngine.h"
 #include "CspTrunkManager.h"
 #include "SipMessageLogger.h"
 #include "CspServer.h"
@@ -222,7 +223,33 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
             return false;
         }
 
-        // 트렁크 라우팅 → B2BUA
+        // 라우팅 규칙 평가 — 매칭되면 transform 적용 후 결과에 따라 forward/reject
+        {
+            RouteContext ctx;
+            ctx.source_ip = pclsMessage->m_strClientIp;
+            RouteDecision decision = gclsRouteEngine.Evaluate(pclsMessage, ctx);
+            if (decision.matched) {
+                CLog::Print(LOG_INFO, "RouteEngine: matched rule_id=%d name=%s",
+                            decision.rule_id, decision.rule_name.c_str());
+                if (decision.reject) {
+                    CLog::Print(LOG_INFO, "RouteEngine: reject %d %s",
+                                decision.fail_code, decision.fail_reason.c_str());
+                    SendResponse(pclsMessage, decision.fail_code);
+                    return true;
+                }
+                if (decision.target_trunk_id > 0) {
+                    // Transform 을 forward 전에 적용 → B2BUA 가 변경된 메시지로 레그 생성
+                    gclsRouteEngine.ApplyTransforms(pclsMessage, decision.apply);
+                    // B2BUA 가 처리하도록 false 반환 (기존 IBCF 경로와 동일)
+                    return false;
+                }
+                // 타겟 트렁크가 없는데도 매칭됐다면 설정 오류 — 404 응답
+                SendResponse(pclsMessage, decision.fail_code > 0 ? decision.fail_code : 404);
+                return true;
+            }
+        }
+
+        // 레거시 IBCF (routing_rule 미설정 시 기존 XML 경로 사용) — 빈 map 이면 false 반환
         CspSipServer clsSipServer;
         std::string strRouteTo;
         if (gclsSipServerMap.SelectRoutePrefix(strTo.c_str(), clsSipServer, strRouteTo)) {

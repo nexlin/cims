@@ -13,6 +13,7 @@
 #include "CallDir.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
+#include "CspRouteEngine.h"
 #include "CspTrunkManager.h"
 
 #include <sstream>
@@ -275,6 +276,7 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
         gclsCspConfigCache.RefreshAll();
         gclsListenerManager.Sync();
         gclsTrunkManager.Sync();
+        gclsRouteEngine.Sync();
     } else if (strEvent == "LISTENER_CHANGED") {
         CLog::Print(LOG_INFO, "CscInterface: LISTENER_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_LISTENER);
@@ -286,7 +288,7 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
     } else if (strEvent == "ROUTE_RULE_CHANGED") {
         CLog::Print(LOG_INFO, "CscInterface: ROUTE_RULE_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_ROUTE);
-        // TODO(P4): 라우팅 규칙 적용
+        gclsRouteEngine.Sync();
     } else if (strEvent == "ACCESS_LIST_CHANGED") {
         CLog::Print(LOG_INFO, "CscInterface: ACCESS_LIST_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_ACCESS);

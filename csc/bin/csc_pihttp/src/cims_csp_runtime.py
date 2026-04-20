@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from typing import Optional
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
@@ -517,10 +518,377 @@ async def _delete_trunk(handler_args: HandlerArgs, tid: int, config):
 
 
 # ──────────────────────────────────────────────────────────────
+#  Route rule handler
+# ──────────────────────────────────────────────────────────────
+
+_ROUTE_BASE = "/api/v1/csp/routes"
+
+
+def _load_rule_full(cur, rule_id: int) -> Optional[dict]:
+    cur.execute("SELECT * FROM routing_rule WHERE id=%s", (rule_id,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    cur.execute("SELECT * FROM routing_rule_match WHERE rule_id=%s ORDER BY seq", (rule_id,))
+    matches = cur.fetchall()
+    cur.execute("SELECT * FROM routing_rule_transform WHERE rule_id=%s ORDER BY seq", (rule_id,))
+    transforms = cur.fetchall()
+    return _rule_to_json(r, matches, transforms)
+
+
+def _rule_to_json(r: dict, matches: list, transforms: list) -> dict:
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "enabled": bool(r["enabled"]),
+        "priority": r["priority"],
+        "description": r.get("description"),
+        "match": [
+            {
+                "field": m["field"], "op": m["op"], "value": m["value"],
+                "invert": bool(m.get("invert")), "seq": m.get("seq", 0),
+            } for m in matches
+        ],
+        "transform": [
+            {
+                "action": t["action"], "target": t.get("target"),
+                "value": t.get("value"), "seq": t.get("seq", 0),
+            } for t in transforms
+        ],
+        "target": {
+            "mode": r["target_mode"],
+            "trunk_id": r.get("target_trunk_id"),
+            "json": json.loads(r["target_json"]) if r.get("target_json") else None,
+        },
+        "fail": {
+            "action": r["fail_action"],
+            "code": r["fail_code"],
+            "reason": r["fail_reason"],
+            "fallback": r.get("fallback_trunk_id"),
+            "timeout_ms": r["timeout_ms"],
+            "retry_count": r["retry_count"],
+        },
+        "hit_count": r.get("hit_count", 0),
+        "last_hit_time": r["last_hit_time"].isoformat() if r.get("last_hit_time") else None,
+        "etag": r.get("etag") or "",
+        "create_time": r["create_time"].isoformat() if r.get("create_time") else None,
+        "update_time": r["update_time"].isoformat() if r.get("update_time") else None,
+    }
+
+
+def _write_rule_subtables(cur, rule_id: int, body: dict):
+    """match/transform 배열을 새로 쓴다 (기존 row 삭제 후 insert)."""
+    cur.execute("DELETE FROM routing_rule_match     WHERE rule_id=%s", (rule_id,))
+    cur.execute("DELETE FROM routing_rule_transform WHERE rule_id=%s", (rule_id,))
+    for i, m in enumerate(body.get("match") or []):
+        if not m.get("field"): continue
+        cur.execute(
+            "INSERT INTO routing_rule_match (rule_id, field, op, value, invert, seq) "
+            "VALUES (%s,%s,%s,%s,%s,%s)",
+            (rule_id, m["field"], m.get("op", "equals"), m.get("value", ""),
+             1 if m.get("invert") else 0, m.get("seq", i)),
+        )
+    for i, t in enumerate(body.get("transform") or []):
+        if not t.get("action"): continue
+        cur.execute(
+            "INSERT INTO routing_rule_transform (rule_id, action, target, value, seq) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            (rule_id, t["action"], t.get("target"), t.get("value"), t.get("seq", i)),
+        )
+
+
+async def handle_routes(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    config = kwargs.get("config", {})
+    # sub-path: /dryrun, /{id}, /{id}/hits
+    path = urlparse(handler_args.full_path).path
+    rel = path[len(_ROUTE_BASE):].strip("/")
+    parts = [unquote(p) for p in rel.split("/")] if rel else []
+    method = handler_args.method.upper()
+
+    # Special paths
+    if parts and parts[0] == "dryrun":
+        if method != "POST":
+            return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+        return await _dryrun(handler_args, config)
+
+    if len(parts) >= 2 and parts[1] == "hits":
+        if method != "GET":
+            return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+        try: rid = int(parts[0])
+        except ValueError:
+            return HandlerResult(status=400, body={"error": "invalid_id"}, media_type="application/json")
+        return await _get_hits(rid, config)
+
+    if len(parts) == 0:
+        if method == "GET":  return await _list_routes(config)
+        if method == "POST": return await _create_route(handler_args, config)
+        return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+
+    try: rid = int(parts[0])
+    except (TypeError, ValueError):
+        return HandlerResult(status=400, body={"error": "invalid_id"}, media_type="application/json")
+
+    if method == "GET":    return await _get_route(rid, config)
+    if method == "PUT":    return await _update_route(handler_args, rid, config)
+    if method == "DELETE": return await _delete_route(handler_args, rid, config)
+    return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+
+
+async def _list_routes(config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM routing_rule ORDER BY priority, id")
+            rows = cur.fetchall()
+            items = []
+            for r in rows:
+                cur.execute("SELECT * FROM routing_rule_match WHERE rule_id=%s ORDER BY seq", (r["id"],))
+                matches = cur.fetchall()
+                cur.execute("SELECT * FROM routing_rule_transform WHERE rule_id=%s ORDER BY seq", (r["id"],))
+                transforms = cur.fetchall()
+                items.append(_rule_to_json(r, matches, transforms))
+    finally:
+        conn.close()
+    return HandlerResult(status=200, body={"items": items}, media_type="application/json")
+
+
+async def _get_route(rid: int, config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            row = _load_rule_full(cur, rid)
+    finally:
+        conn.close()
+    if not row:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    return HandlerResult(status=200, body=row, media_type="application/json")
+
+
+def _rule_fields_from_body(body: dict) -> tuple:
+    name = (body.get("name") or "").strip()
+    priority = int(body.get("priority") or 100)
+    description = body.get("description") or ""
+    enabled = 0 if body.get("enabled") in (False, "false", 0, "0") else 1
+    target = body.get("target") or {}
+    target_mode = (target.get("mode") or "trunk").lower()
+    target_trunk_id = target.get("trunk_id") or None
+    target_json_raw = target.get("json")
+    target_json = json.dumps(target_json_raw) if target_json_raw is not None else None
+    fail = body.get("fail") or {}
+    fail_action = (fail.get("action") or "reject").lower()
+    fail_code = int(fail.get("code") or 404)
+    fail_reason = fail.get("reason") or "Not Found"
+    fallback_trunk_id = fail.get("fallback") or None
+    timeout_ms = int(fail.get("timeout_ms") or 4000)
+    retry_count = int(fail.get("retry_count") or 0)
+    return (name, enabled, priority, description, target_mode, target_trunk_id,
+            target_json, fail_action, fail_code, fail_reason,
+            fallback_trunk_id, timeout_ms, retry_count)
+
+
+async def _create_route(handler_args: HandlerArgs, config):
+    body = _parse_body(handler_args)
+    (name, enabled, priority, description, target_mode, target_trunk_id,
+     target_json, fail_action, fail_code, fail_reason,
+     fallback_trunk_id, timeout_ms, retry_count) = _rule_fields_from_body(body)
+    if not name:
+        return HandlerResult(status=400, body={"error": "name required"}, media_type="application/json")
+    etag = _compute_etag()
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO routing_rule "
+                "(name, enabled, priority, description, target_mode, target_trunk_id, "
+                " target_json, fail_action, fail_code, fail_reason, fallback_trunk_id, "
+                " timeout_ms, retry_count, etag) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (name, enabled, priority, description, target_mode, target_trunk_id,
+                 target_json, fail_action, fail_code, fail_reason,
+                 fallback_trunk_id, timeout_ms, retry_count, etag),
+            )
+            new_id = cur.lastrowid
+            _write_rule_subtables(cur, new_id, body)
+            full = _load_rule_full(cur, new_id)
+    except pymysql.err.IntegrityError as e:
+        return HandlerResult(status=409, body={"error": "conflict", "detail": str(e)},
+                             media_type="application/json")
+    finally:
+        conn.close()
+
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "route", new_id, "CREATE", after=full, etag_after=etag)
+    notify_config_change("route", new_id, "CREATE", actor=actor)
+    return HandlerResult(status=201, body=full, media_type="application/json")
+
+
+async def _update_route(handler_args: HandlerArgs, rid: int, config):
+    body = _parse_body(handler_args)
+    if not body:
+        return HandlerResult(status=400, body={"error": "empty_body"}, media_type="application/json")
+    (name, enabled, priority, description, target_mode, target_trunk_id,
+     target_json, fail_action, fail_code, fail_reason,
+     fallback_trunk_id, timeout_ms, retry_count) = _rule_fields_from_body(body)
+    etag = _compute_etag()
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            before = _load_rule_full(cur, rid)
+            if not before:
+                return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+            cur.execute(
+                "UPDATE routing_rule SET "
+                "name=%s, enabled=%s, priority=%s, description=%s, "
+                "target_mode=%s, target_trunk_id=%s, target_json=%s, "
+                "fail_action=%s, fail_code=%s, fail_reason=%s, fallback_trunk_id=%s, "
+                "timeout_ms=%s, retry_count=%s, etag=%s "
+                "WHERE id=%s",
+                (name, enabled, priority, description, target_mode, target_trunk_id,
+                 target_json, fail_action, fail_code, fail_reason,
+                 fallback_trunk_id, timeout_ms, retry_count, etag, rid),
+            )
+            # match/transform 는 항상 재작성
+            _write_rule_subtables(cur, rid, body)
+            after = _load_rule_full(cur, rid)
+    except pymysql.err.IntegrityError as e:
+        return HandlerResult(status=409, body={"error": "conflict", "detail": str(e)},
+                             media_type="application/json")
+    finally:
+        conn.close()
+
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "route", rid, "UPDATE", before=before, after=after,
+                        etag_before=before.get("etag", ""), etag_after=etag)
+    notify_config_change("route", rid, "UPDATE", actor=actor)
+    return HandlerResult(status=200, body=after, media_type="application/json")
+
+
+async def _delete_route(handler_args: HandlerArgs, rid: int, config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            before = _load_rule_full(cur, rid)
+            if not before:
+                return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+            cur.execute("DELETE FROM routing_rule WHERE id=%s", (rid,))
+    finally:
+        conn.close()
+
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "route", rid, "DELETE", before=before,
+                        etag_before=before.get("etag", ""))
+    notify_config_change("route", rid, "DELETE", actor=actor)
+    return HandlerResult(status=204, body=None, media_type="application/json")
+
+
+async def _get_hits(rid: int, config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, hit_count, last_hit_time FROM routing_rule WHERE id=%s", (rid,))
+            r = cur.fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    return HandlerResult(status=200, body={
+        "id": r["id"], "name": r["name"],
+        "hit_count": r.get("hit_count", 0),
+        "last_hit_time": r["last_hit_time"].isoformat() if r.get("last_hit_time") else None,
+    }, media_type="application/json")
+
+
+async def _dryrun(handler_args: HandlerArgs, config):
+    """샘플 SIP 메시지로 규칙 평가. 순수 Python 구현 — CSP 에 질의하지 않음.
+
+    요청 body 예:
+      {
+        "sample": {
+          "method": "INVITE",
+          "req_uri_user": "82231112222",
+          "req_uri_host": "example.com",
+          "from_uri": "sip:1001@ims.mnc001...",
+          "to_uri":   "sip:82231112222@ims.mnc001...",
+          "source_ip": "1.2.3.4",
+          "headers": {"P-Asserted-Identity": "..."}
+        }
+      }
+
+    응답:
+      {"matched": true, "rule_id":N, "rule_name":"...", "apply":[...], "target":{...}}
+      또는 {"matched": false}
+    """
+    body = _parse_body(handler_args)
+    sample = body.get("sample") or {}
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM routing_rule WHERE enabled=1 ORDER BY priority, id")
+            rules = cur.fetchall()
+            for r in rules:
+                cur.execute("SELECT * FROM routing_rule_match WHERE rule_id=%s ORDER BY seq", (r["id"],))
+                matches = cur.fetchall()
+                if _matches_all(matches, sample):
+                    cur.execute("SELECT * FROM routing_rule_transform WHERE rule_id=%s ORDER BY seq", (r["id"],))
+                    transforms = cur.fetchall()
+                    return HandlerResult(status=200, body={
+                        "matched": True,
+                        "rule_id": r["id"],
+                        "rule_name": r["name"],
+                        "apply": [
+                            {"action": t["action"], "target": t.get("target"), "value": t.get("value")}
+                            for t in transforms
+                        ],
+                        "target": {
+                            "mode": r["target_mode"],
+                            "trunk_id": r.get("target_trunk_id"),
+                        },
+                    }, media_type="application/json")
+    finally:
+        conn.close()
+    return HandlerResult(status=200, body={"matched": False}, media_type="application/json")
+
+
+def _matches_all(matches: list, sample: dict) -> bool:
+    headers = sample.get("headers") or {}
+    def _val(field: str) -> str:
+        if field.startswith("header:"):
+            name = field[7:]
+            for k, v in headers.items():
+                if k.lower() == name.lower():
+                    return str(v)
+            return ""
+        return str(sample.get(field, ""))
+    for m in matches:
+        v = _val(m["field"])
+        ok = False
+        op = m.get("op", "equals")
+        val = m.get("value", "")
+        if op == "equals":       ok = v == val
+        elif op == "not_equals": ok = v != val
+        elif op == "prefix":     ok = v.startswith(val)
+        elif op == "suffix":     ok = v.endswith(val)
+        elif op == "contains":   ok = val in v
+        elif op == "regex":
+            import re
+            try: ok = bool(re.search(val, v))
+            except Exception: ok = False
+        if m.get("invert"):
+            ok = not ok
+        if not ok:
+            return False
+    return True
+
+
+# ──────────────────────────────────────────────────────────────
 #  Handler list
 # ──────────────────────────────────────────────────────────────
 
 CIMS_CSP_RUNTIME_HANDLER_LIST = (
     (_LISTENER_BASE, handle_listeners, {}),
     (_TRUNK_BASE,    handle_trunks,    {}),
+    (_ROUTE_BASE,    handle_routes,    {}),
 )
