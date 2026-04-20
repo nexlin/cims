@@ -82,6 +82,8 @@ void CCspTrunkManager::_loadFromCache() {
         }
         t->name   = row.GetString("name");
         t->enabled = (row.GetString("enabled") != "false" && row.GetString("enabled") != "0");
+        t->serviceId        = (int)row.GetInt("service_id", 0);
+        t->failoverPriority = (int)row.GetInt("failover_priority", 100);
 
         // remote 하위 객체 또는 평면 필드 두 가지 지원 (캐시는 중첩 객체 형태)
         SimpleJson::JsonNode remote = row.Get("remote");
@@ -320,6 +322,30 @@ void CCspTrunkManager::GetStatus(std::vector<StatusEntry>& out) {
         e.last_ping    = t->lastPingAt.load();
         e.last_reply   = t->lastReplyAt.load();
         e.fail_count   = t->consecutiveFailures.load();
+        e.service_id       = t->serviceId;
+        e.failover_priority= t->failoverPriority;
         out.push_back(e);
     }
+}
+
+void CCspTrunkManager::GetTrunksByService(int service_id, std::vector<TrunkRef>& out) {
+    out.clear();
+    std::lock_guard<std::mutex> lk(m_mutex);
+    for (auto& kv : m_mapTrunks) {
+        TrunkRuntime* t = kv.second;
+        if (!t->enabled || t->serviceId != service_id) continue;
+        TrunkRef r;
+        r.id                 = t->id;
+        r.remote_ip          = t->remoteIp;
+        r.remote_port        = t->remotePort;
+        r.protocol           = t->protocol;
+        r.alive              = t->alive.load();
+        r.failover_priority  = t->failoverPriority;
+        out.push_back(r);
+    }
+    // priority 오름차순 (낮을수록 먼저), alive 먼저
+    std::sort(out.begin(), out.end(), [](const TrunkRef& a, const TrunkRef& b){
+        if (a.alive != b.alive) return a.alive;   // alive 우선
+        return a.failover_priority < b.failover_priority;
+    });
 }

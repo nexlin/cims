@@ -37,13 +37,14 @@ from util.log_util import Logger
 
 logger = Logger()
 
-ENTITIES = ("listener", "trunk", "route", "access")
+ENTITIES = ("listener", "trunk", "route", "access", "service")
 
 _FILE_BY_ENTITY = {
     "listener": "listeners.json",
     "trunk":    "trunks.json",
     "route":    "routes.json",
     "access":   "access.json",
+    "service":  "services.json",
 }
 
 
@@ -117,6 +118,8 @@ def _row_trunk(r: dict) -> dict:
         "id": r["id"],
         "name": r["name"],
         "enabled": bool(r["enabled"]),
+        "service_id": r.get("service_id"),
+        "failover_priority": r.get("failover_priority", 100),
         "remote": {
             "ip": r["remote_ip"],
             "port": r["remote_port"],
@@ -188,6 +191,22 @@ def _row_rule(r: dict, matches: List[dict], transforms: List[dict]) -> dict:
             "timeout_ms":   r["timeout_ms"],
             "retry_count":  r["retry_count"],
         },
+        "etag": r.get("etag") or "",
+    }
+
+
+def _row_service(r: dict, listener_ids: list) -> dict:
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "kind": r["kind"],
+        "domain": r["domain"],
+        "auth_realm": r.get("auth_realm"),
+        "inbound_policy": r["inbound_policy"],
+        "priority": r["priority"],
+        "enabled": bool(r["enabled"]),
+        "note": r.get("note"),
+        "listeners": listener_ids,
         "etag": r.get("etag") or "",
     }
 
@@ -301,6 +320,16 @@ class CscConfigCache:
                 elif entity == "access":
                     cur.execute("SELECT * FROM routing_access_list ORDER BY priority, id")
                     rows = [_row_access(r) for r in cur.fetchall()]
+                elif entity == "service":
+                    cur.execute("SELECT * FROM sip_service ORDER BY priority, id")
+                    svc_rows = cur.fetchall()
+                    rows = []
+                    for sr in svc_rows:
+                        cur.execute(
+                            "SELECT listener_id FROM sip_service_listener WHERE service_id=%s",
+                            (sr["id"],))
+                        listener_ids = [row["listener_id"] for row in cur.fetchall()]
+                        rows.append(_row_service(sr, listener_ids))
                 else:
                     rows = []
             return rows

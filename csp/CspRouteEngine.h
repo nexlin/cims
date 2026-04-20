@@ -52,8 +52,9 @@ struct RouteRule {
     std::vector<RouteMatchCond>        matches;      // AND 조합
     std::vector<RouteTransformAction>  transforms;   // 순서대로 적용
 
-    std::string target_mode = "trunk";   // trunk | priority_list | round_robin | reject
+    std::string target_mode = "trunk";   // trunk | service | priority_list | round_robin | reject
     int         target_trunk_id = 0;
+    int         target_service_id = 0;   // target_mode=="service" 일 때
     std::string target_json;              // priority_list / weighted 용 raw JSON
 
     std::string fail_action = "reject";   // reject | fallback | next_rule

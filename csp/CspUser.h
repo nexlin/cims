@@ -52,6 +52,13 @@ public:
     // SIP 비밀번호
     std::string m_strPassWord;
 
+    // P7: 서비스 귀속 + IMSI (user 파트)
+    //   - service.domain 과 결합하여 Digest username (full IMPI) 구성
+    //   - m_iServiceId == 0 이면 REGISTER 거부
+    //   - m_strImsi 가 비면 m_strAuthId 를 fallback 으로 사용
+    int         m_iServiceId = 0;
+    std::string m_strImsi;
+
     // 착신거부 ( Do Not Disturb ) 
     bool m_bDnd;
 

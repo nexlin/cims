@@ -27,6 +27,7 @@ CCallDir gclsCallDir;
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
 #include "CspRouteEngine.h"
+#include "CspServiceMap.h"
 #include "CspTrunkManager.h"
 #include "DbManager.h"
 #include "CspServerDefine.h"
@@ -210,6 +211,9 @@ int ServiceMain() {
     // 접근제어 + rate limit 초기화
     gclsAccessControl.Sync();
     gclsAccessControl.SetRateLimit(0, 0);   // 기본 비활성. SetupRead 에서 덮어쓸 수 있음.
+
+    // 서비스 맵 초기 로드 (인증/라우팅/트렁크가 의존)
+    gclsServiceMap.Sync();
     if ( gclsSetup.m_iMonitorPort > 0 ) {
         gclsMonitor.m_iMonitorPort = gclsSetup.m_iMonitorPort;
         StartMonitorServerThread( &gclsMonitor );

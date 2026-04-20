@@ -6,7 +6,7 @@ export type PageId =
   | 'service-status'
   | 'history-volte' | 'history-ptt'
   | 'stats-volte' | 'stats-ptt' | 'stats-sip' | 'stats-cmp' | 'stats-csc' | 'stats-https'
-  | 'csp-listeners' | 'csp-trunks' | 'csp-routes' | 'csp-access' | 'services'
+  | 'csp-services' | 'csp-listeners' | 'csp-trunks' | 'csp-routes' | 'csp-access' | 'services'
   | 'verification'
   | 'docs'
 
@@ -49,6 +49,7 @@ const MENU: MenuItem[] = [
   {
     label: 'CSP 설정',
     children: [
+      { id: 'csp-services',  label: 'SIP 서비스' },
       { id: 'csp-listeners', label: 'SIP 리스너' },
       { id: 'csp-trunks',    label: 'SIP 트렁크' },
       { id: 'csp-routes',    label: '라우팅 규칙' },

@@ -1051,6 +1051,205 @@ async def _delete_access(handler_args: HandlerArgs, aid: int, config):
 
 
 # ──────────────────────────────────────────────────────────────
+#  Service handler (P7)
+# ──────────────────────────────────────────────────────────────
+
+_SERVICE_BASE = "/api/v1/csp/services"
+
+
+def _service_row_to_json(r: dict, listener_ids: list) -> dict:
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "kind": r["kind"],
+        "domain": r["domain"],
+        "auth_realm": r.get("auth_realm"),
+        "inbound_policy": r["inbound_policy"],
+        "priority": r["priority"],
+        "enabled": bool(r["enabled"]),
+        "listeners": listener_ids,
+        "note": r.get("note"),
+        "etag": r.get("etag") or "",
+        "create_time": r["create_time"].isoformat() if r.get("create_time") else None,
+        "update_time": r["update_time"].isoformat() if r.get("update_time") else None,
+    }
+
+
+def _load_service_full(cur, sid: int):
+    cur.execute("SELECT * FROM sip_service WHERE id=%s", (sid,))
+    r = cur.fetchone()
+    if not r: return None
+    cur.execute("SELECT listener_id FROM sip_service_listener WHERE service_id=%s", (sid,))
+    listener_ids = [row["listener_id"] for row in cur.fetchall()]
+    return _service_row_to_json(r, listener_ids)
+
+
+def _write_service_listeners(cur, sid: int, listener_ids):
+    cur.execute("DELETE FROM sip_service_listener WHERE service_id=%s", (sid,))
+    for lid in (listener_ids or []):
+        try: lid = int(lid)
+        except Exception: continue
+        cur.execute("INSERT IGNORE INTO sip_service_listener (service_id, listener_id) VALUES (%s,%s)",
+                    (sid, lid))
+
+
+async def handle_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    config = kwargs.get("config", {})
+    tail = _path_tail(handler_args.full_path, _SERVICE_BASE)
+    method = handler_args.method.upper()
+
+    if len(tail) == 0:
+        if method == "GET":  return await _list_services(config)
+        if method == "POST": return await _create_service(handler_args, config)
+        return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+
+    try: sid = int(tail[0])
+    except (TypeError, ValueError):
+        return HandlerResult(status=400, body={"error": "invalid_id"}, media_type="application/json")
+
+    if method == "GET":    return await _get_service(sid, config)
+    if method == "PUT":    return await _update_service(handler_args, sid, config)
+    if method == "DELETE": return await _delete_service(handler_args, sid, config)
+    return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+
+
+async def _list_services(config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM sip_service ORDER BY priority, id")
+            rows = cur.fetchall()
+            items = []
+            for r in rows:
+                cur.execute("SELECT listener_id FROM sip_service_listener WHERE service_id=%s", (r["id"],))
+                lids = [lr["listener_id"] for lr in cur.fetchall()]
+                items.append(_service_row_to_json(r, lids))
+    finally:
+        conn.close()
+    return HandlerResult(status=200, body={"items": items}, media_type="application/json")
+
+
+async def _get_service(sid: int, config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            row = _load_service_full(cur, sid)
+    finally:
+        conn.close()
+    if not row:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    return HandlerResult(status=200, body=row, media_type="application/json")
+
+
+def _service_fields_from_body(body: dict):
+    return (
+        (body.get("name") or "").strip(),
+        (body.get("kind") or "").strip(),
+        (body.get("domain") or "").strip(),
+        body.get("auth_realm"),
+        (body.get("inbound_policy") or "any").lower(),
+        int(body.get("priority") or 100),
+        0 if body.get("enabled") in (False, "false", 0, "0") else 1,
+        body.get("note"),
+    )
+
+
+async def _create_service(handler_args: HandlerArgs, config):
+    body = _parse_body(handler_args)
+    name, kind, domain, auth_realm, policy, priority, enabled, note = _service_fields_from_body(body)
+    if not name or not kind or not domain:
+        return HandlerResult(status=400, body={"error": "name/kind/domain required"},
+                             media_type="application/json")
+    if kind not in ("voip", "ptt", "ibcf", "system", "console"):
+        return HandlerResult(status=400, body={"error": "invalid_kind"}, media_type="application/json")
+    if policy not in ("any", "restricted"):
+        return HandlerResult(status=400, body={"error": "invalid_inbound_policy"}, media_type="application/json")
+
+    etag = _compute_etag()
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO sip_service (name, kind, domain, auth_realm, inbound_policy, priority, enabled, note, etag) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (name, kind, domain, auth_realm, policy, priority, enabled, note, etag),
+            )
+            new_id = cur.lastrowid
+            _write_service_listeners(cur, new_id, body.get("listeners"))
+            full = _load_service_full(cur, new_id)
+    except pymysql.err.IntegrityError as e:
+        return HandlerResult(status=409, body={"error": "conflict", "detail": str(e)},
+                             media_type="application/json")
+    finally:
+        conn.close()
+
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "service", new_id, "CREATE", after=full, etag_after=etag)
+    notify_config_change("service", new_id, "CREATE", actor=actor)
+    return HandlerResult(status=201, body=full, media_type="application/json")
+
+
+async def _update_service(handler_args: HandlerArgs, sid: int, config):
+    body = _parse_body(handler_args)
+    if not body:
+        return HandlerResult(status=400, body={"error": "empty_body"}, media_type="application/json")
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            before = _load_service_full(cur, sid)
+            if not before:
+                return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+            etag_before = before.get("etag", "")
+            fields = []; values = []
+            for col in ("name", "kind", "domain", "auth_realm", "inbound_policy",
+                        "priority", "note"):
+                if col in body:
+                    fields.append(f"{col}=%s"); values.append(body[col])
+            if "enabled" in body:
+                fields.append("enabled=%s")
+                values.append(0 if body["enabled"] in (False, "false", 0, "0") else 1)
+            etag_after = _compute_etag()
+            if fields:
+                fields.append("etag=%s"); values.append(etag_after); values.append(sid)
+                cur.execute(f"UPDATE sip_service SET {', '.join(fields)} WHERE id=%s", values)
+            if "listeners" in body:
+                _write_service_listeners(cur, sid, body["listeners"])
+            after = _load_service_full(cur, sid)
+    except pymysql.err.IntegrityError as e:
+        return HandlerResult(status=409, body={"error": "conflict", "detail": str(e)},
+                             media_type="application/json")
+    finally:
+        conn.close()
+
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "service", sid, "UPDATE", before=before, after=after,
+                        etag_before=etag_before, etag_after=etag_after)
+    notify_config_change("service", sid, "UPDATE", actor=actor)
+    return HandlerResult(status=200, body=after, media_type="application/json")
+
+
+async def _delete_service(handler_args: HandlerArgs, sid: int, config):
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            before = _load_service_full(cur, sid)
+            if not before:
+                return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+            cur.execute("DELETE FROM sip_service WHERE id=%s", (sid,))
+    finally:
+        conn.close()
+
+    actor = _actor_from_headers(handler_args.headers)
+    audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
+                        "service", sid, "DELETE", before=before,
+                        etag_before=before.get("etag", ""))
+    notify_config_change("service", sid, "DELETE", actor=actor)
+    return HandlerResult(status=204, body=None, media_type="application/json")
+
+
+# ──────────────────────────────────────────────────────────────
 #  Handler list
 # ──────────────────────────────────────────────────────────────
 
@@ -1059,4 +1258,5 @@ CIMS_CSP_RUNTIME_HANDLER_LIST = (
     (_TRUNK_BASE,    handle_trunks,    {}),
     (_ROUTE_BASE,    handle_routes,    {}),
     (_ACCESS_BASE,   handle_access,    {}),
+    (_SERVICE_BASE,  handle_services,  {}),
 )

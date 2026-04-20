@@ -30,6 +30,7 @@ enum CspCacheEntity {
     CACHE_TRUNK,
     CACHE_ROUTE,
     CACHE_ACCESS,
+    CACHE_SERVICE,
     CACHE_COUNT
 };
 

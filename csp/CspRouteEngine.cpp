@@ -127,8 +127,9 @@ static RouteRule _parseRule(const SimpleJson::JsonNode& row) {
 
     SimpleJson::JsonNode tgt = row.Get("target");
     if (tgt.type == SimpleJson::JSON_OBJECT) {
-        r.target_mode     = tgt.GetString("mode", "trunk");
-        r.target_trunk_id = (int)tgt.GetInt("trunk_id", 0);
+        r.target_mode       = tgt.GetString("mode", "trunk");
+        r.target_trunk_id   = (int)tgt.GetInt("trunk_id", 0);
+        r.target_service_id = (int)tgt.GetInt("service_id", 0);
         SimpleJson::JsonNode tgtJson = tgt.Get("json");
         if (tgtJson.type != SimpleJson::JSON_NULL) r.target_json = tgtJson.ToString();
     }
@@ -221,6 +222,23 @@ RouteDecision CCspRouteEngine::Evaluate(const CSipMessage* pclsMessage, const Ro
         } else if (r.target_mode == "trunk") {
             _fillTargetFromTrunk(d, r.target_trunk_id);
             if (d.target_trunk_id == 0) {
+                d.reject = (r.fail_action == "reject");
+                d.fail_code = r.fail_code;
+                d.fail_reason = r.fail_reason;
+            }
+        } else if (r.target_mode == "service") {
+            // 서비스 내 alive 트렁크 중 failover_priority 순 선택
+            std::vector<CCspTrunkManager::TrunkRef> refs;
+            gclsTrunkManager.GetTrunksByService(r.target_service_id, refs);
+            int chosen = 0;
+            for (const auto& tr : refs) {
+                if (tr.alive) { chosen = tr.id; break; }
+            }
+            // 모두 dead 면 fallback: 첫번째(enabled) 트렁크라도 시도
+            if (chosen == 0 && !refs.empty()) chosen = refs.front().id;
+            if (chosen > 0) {
+                _fillTargetFromTrunk(d, chosen);
+            } else {
                 d.reject = (r.fail_action == "reject");
                 d.fail_code = r.fail_code;
                 d.fail_reason = r.fail_reason;

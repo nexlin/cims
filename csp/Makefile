@@ -415,6 +415,30 @@ CspServer.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspServer.cpp.s
 .PHONY : CspServer.cpp.s
 
+CspServiceMap.o: CspServiceMap.cpp.o
+.PHONY : CspServiceMap.o
+
+# target to build an object file
+CspServiceMap.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspServiceMap.cpp.o
+.PHONY : CspServiceMap.cpp.o
+
+CspServiceMap.i: CspServiceMap.cpp.i
+.PHONY : CspServiceMap.i
+
+# target to preprocess a source file
+CspServiceMap.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspServiceMap.cpp.i
+.PHONY : CspServiceMap.cpp.i
+
+CspServiceMap.s: CspServiceMap.cpp.s
+.PHONY : CspServiceMap.s
+
+# target to generate assembly for a file
+CspServiceMap.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspServiceMap.cpp.s
+.PHONY : CspServiceMap.cpp.s
+
 CspSipServer.o: CspSipServer.cpp.o
 .PHONY : CspSipServer.o
 
@@ -962,6 +986,9 @@ help:
 	@echo "... CspServer.o"
 	@echo "... CspServer.i"
 	@echo "... CspServer.s"
+	@echo "... CspServiceMap.o"
+	@echo "... CspServiceMap.i"
+	@echo "... CspServiceMap.s"
 	@echo "... CspSipServer.o"
 	@echo "... CspSipServer.i"
 	@echo "... CspSipServer.s"

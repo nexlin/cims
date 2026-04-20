@@ -27,6 +27,8 @@ struct TrunkRuntime {
     int         id;
     std::string name;
     bool        enabled;
+    int         serviceId = 0;          // P7: 소속 서비스 (0 = 미지정)
+    int         failoverPriority = 100; // P7: 같은 서비스 내 순위
     std::string remoteIp;
     int         remotePort;
     std::string remoteDomain;
@@ -77,8 +79,22 @@ public:
         time_t last_ping;
         time_t last_reply;
         int  fail_count;
+        int  service_id = 0;
+        int  failover_priority = 100;
     };
     void GetStatus(std::vector<StatusEntry>& out);
+
+    /** 서비스별 alive 트렁크를 우선순위 순으로 나열.
+     *  RouteEngine 이 target.mode=service 일 때 호출. */
+    struct TrunkRef {
+        int id;
+        std::string remote_ip;
+        int         remote_port;
+        std::string protocol;
+        bool        alive;
+        int         failover_priority;
+    };
+    void GetTrunksByService(int service_id, std::vector<TrunkRef>& out);
 
 private:
     void _healthLoop();

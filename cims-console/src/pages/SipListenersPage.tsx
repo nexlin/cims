@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { cspRuntimeApi, type SipListener, type SipListenerCreate, type SipProtocol, type SipService } from '../api/cspRuntime'
+import { cspRuntimeApi, type SipListener, type SipListenerCreate, type SipProtocol, type ServiceSlug } from '../api/cspRuntime'
 import { useToast } from '../components/Toast'
 
 type Mode = 'form' | 'json'
 
 const PROTOCOLS: SipProtocol[] = ['UDP', 'TCP', 'TLS', 'WS', 'WSS']
-const SERVICES: SipService[] = ['volte', 'mcptt', 'system', 'console']
+const SERVICES: ServiceSlug[] = ['volte', 'mcptt', 'system', 'console']
 
 const EMPTY_FORM: SipListenerCreate = {
   name: '',
@@ -227,7 +227,7 @@ export default function SipListenersPage() {
                   </select>
                   <label>Service</label>
                   <select className="form-input" value={form.service}
-                    onChange={e => setForm(f => ({ ...f, service: e.target.value as SipService }))}>
+                    onChange={e => setForm(f => ({ ...f, service: e.target.value as ServiceSlug }))}>
                     {SERVICES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <label>Domain</label>

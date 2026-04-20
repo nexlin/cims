@@ -1,7 +1,7 @@
 import { api } from './client'
 
 export type SipProtocol = 'UDP' | 'TCP' | 'TLS' | 'WS' | 'WSS'
-export type SipService = 'volte' | 'mcptt' | 'system' | 'console'
+export type ServiceSlug = 'volte' | 'mcptt' | 'system' | 'console'
 
 export interface SipListener {
   id: number
@@ -11,7 +11,7 @@ export interface SipListener {
   bind_port: number
   protocol: SipProtocol
   domain: string
-  service: SipService
+  service: ServiceSlug
   tls_cert_path: string | null
   tls_key_path: string | null
   tls_ca_path: string | null
@@ -30,7 +30,7 @@ export interface SipListenerCreate {
   bind_port: number
   protocol: SipProtocol
   domain?: string
-  service: SipService
+  service: ServiceSlug
   enabled?: boolean
   thread_count?: number
   tls_cert_path?: string | null
@@ -132,6 +132,45 @@ export const cspRuntimeApi = {
   createAccess: (body: AccessEntryInput) => api.post<AccessEntry>('/csp/access', body),
   updateAccess: (id: number, body: Partial<AccessEntryInput>) => api.put<AccessEntry>(`/csp/access/${id}`, body),
   deleteAccess: (id: number) => api.delete<null>(`/csp/access/${id}`),
+
+  listServices:  () => api.get<{ items: SipService[] }>('/csp/services').then(r => r.items),
+  getService:    (id: number) => api.get<SipService>(`/csp/services/${id}`),
+  createService: (body: SipServiceInput) => api.post<SipService>('/csp/services', body),
+  updateService: (id: number, body: Partial<SipServiceInput>) => api.put<SipService>(`/csp/services/${id}`, body),
+  deleteService: (id: number) => api.delete<null>(`/csp/services/${id}`),
+}
+
+// ── Service types (P7) ────────────────────────────────────
+
+export type ServiceKind = 'voip' | 'ptt' | 'ibcf' | 'system' | 'console'
+export type InboundPolicy = 'any' | 'restricted'
+
+export interface SipService {
+  id: number
+  name: string
+  kind: ServiceKind
+  domain: string
+  auth_realm: string | null
+  inbound_policy: InboundPolicy
+  priority: number
+  enabled: boolean
+  listeners: number[]
+  note: string | null
+  etag: string
+  create_time: string | null
+  update_time: string | null
+}
+
+export interface SipServiceInput {
+  name: string
+  kind: ServiceKind
+  domain: string
+  auth_realm?: string | null
+  inbound_policy?: InboundPolicy
+  priority?: number
+  enabled?: boolean
+  listeners?: number[]
+  note?: string | null
 }
 
 // ── Access control types ───────────────────────────────────

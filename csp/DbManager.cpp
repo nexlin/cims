@@ -288,8 +288,10 @@ bool CDbManager::LoadAllUsers( CspUserMap& clsMap )
     const char* aTypes[]  = { "voip", "ptt" };
 
     for (int i = 0; i < 2; ++i) {
+        // P7: service_id, imsi 컬럼 포함
         std::string strSql =
-            std::string("SELECT s.id, u.name, u.org_id, s.auth_id, s.passwd, s.dnd, s.forward_id, u.id "
+            std::string("SELECT s.id, u.name, u.org_id, s.auth_id, s.passwd, s.dnd, s.forward_id, u.id, "
+            "       COALESCE(s.service_id, 0), COALESCE(s.imsi, '') "
             "FROM ") + aTables[i] + " s JOIN users u ON s.user_id = u.id";
 
         MYSQL_RES* pRes = ExecuteSelect(strSql);
@@ -306,6 +308,8 @@ bool CDbManager::LoadAllUsers( CspUserMap& clsMap )
             clsUser.m_strPassWord       = row[4] ? row[4] : "";
             clsUser.m_bDnd              = row[5] ? (atoi(row[5]) != 0) : false;
             clsUser.m_strForward        = row[6] ? row[6] : "";
+            clsUser.m_iServiceId        = row[8] ? atoi(row[8]) : 0;
+            clsUser.m_strImsi           = row[9] ? row[9] : "";
             clsUser._loadTime           = time(nullptr);
             if (!clsUser.m_strId.empty()) {
                 clsMap.Insert(clsUser);

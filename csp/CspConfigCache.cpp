@@ -32,6 +32,7 @@ const EntityMeta kEntityMeta[CACHE_COUNT] = {
     {"trunk",    "trunks.json",    "/api/internal/config/trunk"   },
     {"route",    "routes.json",    "/api/internal/config/route"   },
     {"access",   "access.json",    "/api/internal/config/access"  },
+    {"service",  "services.json",  "/api/internal/config/service" },
 };
 
 void _mkdirP(const std::string& path) {

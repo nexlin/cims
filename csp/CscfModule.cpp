@@ -5,6 +5,7 @@
  */
 
 #include "CscfModule.h"
+#include "CspServiceMap.h"
 #include "SipServerSetup.h"
 #include "SipServer.h"
 #include "SipMd5.h"
@@ -30,7 +31,7 @@ bool CCscfModule::IsEnabled() const {
 //  인증 헬퍼 (static)
 // ──────────────────────────────────────────────────────────────
 
-bool CCscfModule::AddChallenge(CSipMessage* psttResponse) {
+bool CCscfModule::AddChallenge(CSipMessage* psttResponse, const std::string& strRealmOverride) {
     CSipChallenge clsChallenge;
     char szNonce[33];
 
@@ -42,18 +43,19 @@ bool CCscfModule::AddChallenge(CSipMessage* psttResponse) {
     clsChallenge.m_strType = "Digest";
     clsChallenge.m_strAlgorithm = "MD5";
     clsChallenge.m_strNonce = szNonce;
-    clsChallenge.m_strRealm = gclsSetup.m_strAuthRealm;
+    clsChallenge.m_strRealm = strRealmOverride.empty() ? gclsSetup.m_strAuthRealm : strRealmOverride;
     clsChallenge.m_strQop = "auth";
 
     psttResponse->m_clsWwwAuthenticateList.push_back(clsChallenge);
     return true;
 }
 
-bool CCscfModule::SendUnAuthorizedResponse(CSipMessage* pclsMessage) {
+bool CCscfModule::SendUnAuthorizedResponse(CSipMessage* pclsMessage,
+                                             const std::string& strRealmOverride) {
     CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag(SIP_UNAUTHORIZED);
     if (pclsResponse == NULL) return false;
 
-    AddChallenge(pclsResponse);
+    AddChallenge(pclsResponse, strRealmOverride);
     gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResponse);
     return true;
 }
@@ -96,7 +98,29 @@ ECheckAuthResult CCscfModule::CheckAuthorization(CSipCredential* pclsCredential,
     if (pclsCredential->m_strUserName.empty()) return E_AUTH_ERROR;
     if (gclsNonceMap.Select(pclsCredential->m_strNonce.c_str()) == false) return E_AUTH_NONCE_NOT_FOUND;
     if (gclsCspUserMap.Select(pszFromId, clsXmlUser) == false) return E_AUTH_ERROR;
-    if (clsXmlUser.m_strAuthId != pclsCredential->m_strUserName) return E_AUTH_ERROR;
+
+    // P7: 가입자의 service_id 가 0(미지정)이면 REGISTER 거부
+    if (clsXmlUser.m_iServiceId <= 0) {
+        CLog::Print(LOG_ERROR, "Auth reject: user=%s has no service binding", pszFromId);
+        return E_AUTH_ERROR;
+    }
+
+    // 서비스 정보 로드 → effective username 결정
+    ServiceInfo svc = gclsServiceMap.GetById(clsXmlUser.m_iServiceId);
+    std::string strExpectedUser;
+    if (svc.id > 0 && !clsXmlUser.m_strImsi.empty()) {
+        // 신규 경로: IMSI + service.domain
+        strExpectedUser = clsXmlUser.m_strImsi + "@" + svc.domain;
+    } else {
+        // 레거시 fallback: 저장된 auth_id 그대로
+        strExpectedUser = clsXmlUser.m_strAuthId;
+    }
+
+    if (strExpectedUser != pclsCredential->m_strUserName) {
+        CLog::Print(LOG_ERROR, "Auth reject: username mismatch (got=%s, expected=%s)",
+                    pclsCredential->m_strUserName.c_str(), strExpectedUser.c_str());
+        return E_AUTH_ERROR;
+    }
 
     const char* pszQop    = pclsCredential->m_strQop.empty()        ? NULL : pclsCredential->m_strQop.c_str();
     const char* pszNc     = pclsCredential->m_strNonceCount.empty() ? NULL : pclsCredential->m_strNonceCount.c_str();

@@ -15,6 +15,7 @@
 #include "CspAccessControl.h"
 #include "CspListenerManager.h"
 #include "CspRouteEngine.h"
+#include "CspServiceMap.h"
 #include "CspTrunkManager.h"
 
 #include <sstream>
@@ -275,6 +276,7 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
 
         // 런타임 설정도 전체 재로드
         gclsCspConfigCache.RefreshAll();
+        gclsServiceMap.Sync();
         gclsListenerManager.Sync();
         gclsTrunkManager.Sync();
         gclsRouteEngine.Sync();
@@ -295,6 +297,10 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
         CLog::Print(LOG_INFO, "CscInterface: ACCESS_LIST_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_ACCESS);
         gclsAccessControl.Sync();
+    } else if (strEvent == "SERVICE_CHANGED") {
+        CLog::Print(LOG_INFO, "CscInterface: SERVICE_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
+        gclsCspConfigCache.RefreshEntity(CACHE_SERVICE);
+        gclsServiceMap.Sync();
     } else if (strEvent == "USER_CHANGED") {
         extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
         SendSipNotify(strUri, strEtag, strAction);
