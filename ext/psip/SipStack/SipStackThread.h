@@ -22,6 +22,8 @@
 #include "SipStack.h"
 
 bool StartSipUdpThread( CSipStack * pclsSipStack );
+/** P2: 특정 UDP 리스너에 대해 recv 스레드(들) 기동. iCount < 0 이면 setup 값 사용. */
+bool StartSipUdpThreadForListener( CSipStack * pclsSipStack, CSipStackUdpListener * pListener, int iCount );
 bool StartSipStackThread( CSipStack * pclsSipStack );
 
 // SipQueueThread.cpp

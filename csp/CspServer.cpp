@@ -24,6 +24,7 @@
 CCallDir gclsCallDir;
 #include "CmpClient.h"
 #include "CspConfigCache.h"
+#include "CspListenerManager.h"
 #include "DbManager.h"
 #include "CspServerDefine.h"
 #include "CspServerVersion.h"
@@ -193,6 +194,9 @@ int ServiceMain() {
         return -1;
     }
     CLog::Print( LOG_SYSTEM, "SipServer started successfully." );
+
+    // DB 의 추가 UDP 리스너들을 psip 에 등록 (기본 리스너는 Start 에서 생성됨)
+    gclsListenerManager.Sync();
     if ( gclsSetup.m_iMonitorPort > 0 ) {
         gclsMonitor.m_iMonitorPort = gclsSetup.m_iMonitorPort;
         StartMonitorServerThread( &gclsMonitor );

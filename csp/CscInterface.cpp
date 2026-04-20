@@ -12,6 +12,7 @@
 #include "SipServerSetup.h"
 #include "CallDir.h"
 #include "CspConfigCache.h"
+#include "CspListenerManager.h"
 
 #include <sstream>
 
@@ -249,10 +250,11 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
 
         // 런타임 설정도 전체 재로드
         gclsCspConfigCache.RefreshAll();
+        gclsListenerManager.Sync();
     } else if (strEvent == "LISTENER_CHANGED") {
         CLog::Print(LOG_INFO, "CscInterface: LISTENER_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_LISTENER);
-        // TODO(P2): 리스너 hot-reload — 현재는 캐시만 갱신, 적용은 추후 phase
+        gclsListenerManager.Sync();
     } else if (strEvent == "TRUNK_CHANGED") {
         CLog::Print(LOG_INFO, "CscInterface: TRUNK_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
         gclsCspConfigCache.RefreshEntity(CACHE_TRUNK);

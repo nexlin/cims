@@ -28,20 +28,23 @@
 #include "SipNISTList.h"
 #include "SipStackSetup.h"
 #include "SipStackCallBack.h"
+#include "SipStackListener.h"
 #include "TcpThreadList.h"
 #include "TcpSocketMap.h"
 #include "TcpConnectMap.h"
+
+#include <vector>
 
 typedef std::list< ISipStackCallBack * > SIP_STACK_CALLBACK_LIST;
 
 /**
  * @defgroup SipStack SipStack
- * SIP Stack ¶óÀÌºê·¯¸®
+ * SIP Stack ï¿½ï¿½ï¿½Ìºê·¯ï¿½ï¿½
  */
 
 /**
  * @ingroup SipStack
- * @brief SIP stack Å¬·¡½º
+ * @brief SIP stack Å¬ï¿½ï¿½ï¿½ï¿½
  */
 class CSipStack
 {
@@ -51,6 +54,22 @@ public:
 
 	bool Start( CSipStackSetup & clsSetup );
 	bool Stop( );
+
+	// â”€â”€ UDP ë‹¤ì¤‘ ë¦¬ìŠ¤ë„ˆ hot-reload API (P2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	/** UDP ë¦¬ìŠ¤ë„ˆë¥¼ ëŸ°íƒ€ì„ì— ì¶”ê°€. ì„±ê³µ ì‹œ outId ì— ì‹¤ì œ ì†Œì¼“ fd ë˜ëŠ” ë‚´ë¶€ ì¸ë±ìŠ¤ ë°˜í™˜.
+	 *  iExtId: CSP ìª½ì—ì„œ ë°œê¸‰í•œ ë…¼ë¦¬ ID (DB csp_listener.id). 0 ì´ë©´ ë‚´ë¶€ auto-assign.
+	 *  strBindIp ê°€ ë¹ˆ ë¬¸ìì—´ì´ë©´ stack ì˜ m_strLocalIp ì‚¬ìš© (INADDR_ANY ëŠ” "0.0.0.0").
+	 *  í¬íŠ¸ ì¶©ëŒì´ë‚˜ ì†Œì¼“ ì‹¤íŒ¨ ì‹œ false ë°˜í™˜. */
+	bool AddUdpListener( int iExtId, const char* pszBindIp, int iPort,
+	                     int iThreadCount, int& outId );
+
+	/** UDP ë¦¬ìŠ¤ë„ˆë¥¼ ì œê±°(drain í›„ ì†Œì¼“ close, ìŠ¤ë ˆë“œ ì¢…ë£Œ ëŒ€ê¸°).
+	 *  iExtId ë¡œ ì°¾ìŒ. ê¸°ë³¸ ë¦¬ìŠ¤ë„ˆ(Start ì‹œ ìƒì„±ëœ ì²« ë²ˆì§¸)ë„ ì œê±° ê°€ëŠ¥í•˜ì§€ë§Œ ê·¸ ê²½ìš°
+	 *  m_hUdpSocket alias ê°€ ë‹¤ë¥¸ ì‚´ì•„ìˆëŠ” ë¦¬ìŠ¤ë„ˆë¡œ ì´ë™í•œë‹¤. */
+	bool RemoveUdpListener( int iExtId );
+
+	/** í˜„ì¬ ë“±ë¡ëœ UDP ë¦¬ìŠ¤ë„ˆ ìŠ¤ëƒ…ìƒ· (ë””ë²„ê·¸/ëª¨ë‹ˆí„°ë§). */
+	void GetUdpListenerInfo( std::vector<CSipStackUdpListener*>& outList );
 
 	bool Execute( struct timeval * psttTime );
 
@@ -86,21 +105,24 @@ public:
 	bool Send( CSipMessage * pclsMessage, bool bCheckMessage = true );
 	bool Send( const char * pszMessage, const char * pszIp, unsigned short iPort, ESipTransport eTransport );
 
-	bool	m_bStopEvent;						// SIP stack thread Á¾·á ÀÌº¥Æ®
-	bool	m_bStackThreadRun;			// SIP stack thread °¡ ½ÇÇà Áß¿¡ ÀÖ´Â°¡?
+	bool	m_bStopEvent;						// SIP stack thread ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ®
+	bool	m_bStackThreadRun;			// SIP stack thread ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ß¿ï¿½ ï¿½Ö´Â°ï¿½?
 
-	Socket m_hUdpSocket;					// UDP SIP ¸Ş½ÃÁö Àü¼Û/¼ö½Å ¼ÒÄÏ ÇÚµé
-	Socket m_hTcpSocket;					// TCP SIP ¸Ş½ÃÁö¸¦ À§ÇÑ ¼­¹ö ¼ÒÄÏ ÇÚµé
+	/** ê¸°ë³¸ UDP ì†Œì¼“ â€” í•˜ìœ„ í˜¸í™˜(Send ê²½ë¡œì—ì„œ ì‚¬ìš©).
+	 *  ë‹¤ì¤‘ ë¦¬ìŠ¤ë„ˆ í™˜ê²½ì—ì„œëŠ” m_vecUdpListeners[0].m_hSocket ê³¼ ë™ì¼.
+	 *  ë¦¬ìŠ¤ë„ˆ ì œê±° ì‹œ alias ë¥¼ ë‹¤ë¥¸ ì‚´ì•„ìˆëŠ” ë¦¬ìŠ¤ë„ˆë¡œ ì´ë™í•˜ê±°ë‚˜ INVALID_SOCKET. */
+	Socket m_hUdpSocket;
+	Socket m_hTcpSocket;					// TCP SIP ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½
 
-	CSipMutex m_clsUdpRecvMutex;	// SIP ¸Ş½ÃÁö ¼ö½Å ¹ÂÅØ½º
-	CSipStackSetup	m_clsSetup;		// SIP stack ¼³Á¤
+	CSipMutex m_clsUdpRecvMutex;	// SIP ï¿½Ş½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ø½ï¿½
+	CSipStackSetup	m_clsSetup;		// SIP stack ï¿½ï¿½ï¿½ï¿½
 
 	CThreadList			m_clsTcpThreadList;
 	CTcpSocketMap		m_clsTcpSocketMap;
 	CTcpConnectMap	m_clsTcpConnectMap;
 
 #ifdef USE_TLS
-	Socket m_hTlsSocket;					// TLS SIP ¸Ş½ÃÁö¸¦ À§ÇÑ ¼­¹ö ¼ÒÄÏ ÇÚµé
+	Socket m_hTlsSocket;					// TLS SIP ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½
 
 	CThreadList			m_clsTlsThreadList;
 	CTcpSocketMap		m_clsTlsSocketMap;
@@ -109,11 +131,11 @@ public:
 
 private:
 	bool	 m_bStarted;
-	int		 m_iUdpThreadRunCount;	// UDP ¼ö½Å ¾²·¹µå °³¼ö
-	int		 m_iTcpThreadRunCount;	// TCP ¼ö½Å ¾²·¹µå °³¼ö
+	int		 m_iUdpThreadRunCount;	// UDP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+	int		 m_iTcpThreadRunCount;	// TCP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
 
 	CSipMutex m_clsMutex;
-	CSipMutex m_clsUdpSendMutex;	// SIP ¸Ş½ÃÁö Àü¼Û ¹ÂÅØ½º
+	CSipMutex m_clsUdpSendMutex;	// SIP ï¿½Ş½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ø½ï¿½
 
 	CSipICTList		m_clsICT;
 	CSipNICTList	m_clsNICT;
@@ -123,6 +145,14 @@ private:
 	SIP_STACK_CALLBACK_LIST	m_clsCallBackList;
 	ISipStackSecurityCallBack * m_pclsSecurityCallBack;
 
+	// UDP ë‹¤ì¤‘ ë¦¬ìŠ¤ë„ˆ (P2: hot-reload)
+	std::vector<CSipStackUdpListener*> m_vecUdpListeners;
+	CSipMutex m_clsUdpListenerMutex;
+	int m_iNextUdpListenerExtId;
+
+	bool _StartUdpListenerLocked( CSipStackUdpListener* pListener );
+	void _StopUdpListenerLocked( CSipStackUdpListener* pListener );
+	void _RefreshPrimaryUdpSocketLocked();
 	bool _Stop( );
 	int GetTcpConnectingCount( );
 	void CheckSipMessage( CSipMessage * pclsMessage );

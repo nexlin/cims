@@ -47,6 +47,7 @@ CSipStack::CSipStack()
 	m_bStarted = false;
 	m_iUdpThreadRunCount = 0;
 	m_iTcpThreadRunCount = 0;
+	m_iNextUdpListenerExtId = 0;
 
 	m_clsICT.SetSipStack( this );
 	m_clsNICT.SetSipStack( this );
@@ -86,21 +87,35 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 
 	InitNetwork();
 
+	// 기본 UDP 리스너 — setup 의 포트/IP 로 생성. 스레드는 후속 StartSipUdpThread 에서 기동.
 	if( m_clsSetup.m_iLocalUdpPort > 0 || m_clsSetup.m_iUdpThreadCount > 0 )
 	{
-		m_hUdpSocket = UdpListen( m_clsSetup.m_iLocalUdpPort, NULL, m_clsSetup.m_bIpv6 );
-		if( m_hUdpSocket == INVALID_SOCKET )
+		CSipStackUdpListener * pListener = new CSipStackUdpListener();
+		pListener->m_iId          = 0;   // 기본 리스너 = 0
+		pListener->m_strBindIp    = m_clsSetup.m_strLocalIp;
+		pListener->m_iPort        = m_clsSetup.m_iLocalUdpPort;
+		pListener->m_iThreadCount = m_clsSetup.m_iUdpThreadCount;
+		pListener->m_bIpv6        = m_clsSetup.m_bIpv6;
+		pListener->m_pclsStack    = this;
+
+		if( !_StartUdpListenerLocked( pListener ) )
 		{
 			CLog::Print( LOG_ERROR, "UdpListen(%d) error", m_clsSetup.m_iLocalUdpPort );
+			delete pListener;
 			return false;
 		}
 
 		// port 0 자동할당 시 실제 포트를 반영
 		if( m_clsSetup.m_iLocalUdpPort == 0 )
 		{
-			m_clsSetup.m_iLocalUdpPort = GetSocketPort( m_hUdpSocket );
+			m_clsSetup.m_iLocalUdpPort = pListener->m_iPort;
 			CLog::Print( LOG_INFO, "UDP auto-assigned port %d", m_clsSetup.m_iLocalUdpPort );
 		}
+
+		m_clsUdpListenerMutex.acquire();
+		m_vecUdpListeners.push_back( pListener );
+		m_hUdpSocket = pListener->m_hSocket;   // 하위 호환 alias
+		m_clsUdpListenerMutex.release();
 	}
 
 	if( m_clsSetup.m_iLocalTcpPort > 0 )
@@ -397,11 +412,20 @@ bool CSipStack::_Stop( )
 		MiliSleep( 20 );
 	}
 
-	if( m_hUdpSocket != INVALID_SOCKET )
+	// UDP 리스너 전체 정리 (m_hUdpSocket 은 alias 이므로 별도 close 불필요)
+	m_clsUdpListenerMutex.acquire();
+	for( auto* pListener : m_vecUdpListeners )
 	{
-		closesocket( m_hUdpSocket );
-		m_hUdpSocket = INVALID_SOCKET;
+		if( pListener->m_hSocket != INVALID_SOCKET )
+		{
+			closesocket( pListener->m_hSocket );
+			pListener->m_hSocket = INVALID_SOCKET;
+		}
+		delete pListener;
 	}
+	m_vecUdpListeners.clear();
+	m_hUdpSocket = INVALID_SOCKET;
+	m_clsUdpListenerMutex.release();
 
 	if( m_hTcpSocket != INVALID_SOCKET )
 	{
@@ -445,4 +469,167 @@ int CSipStack::GetTcpConnectingCount( )
 #endif
 
 	return iCount;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  P2: UDP 다중 리스너 hot-reload API
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 단일 UDP 리스너를 bind 하고 내부 상태만 초기화.
+ * 스레드 기동은 호출자(Start 경로 또는 AddUdpListener)가 별도 수행.
+ * 호출 시점에 m_clsUdpListenerMutex 보유 상태가 아니어야 함(내부에서 UdpListen 은 block-on-bind).
+ */
+bool CSipStack::_StartUdpListenerLocked( CSipStackUdpListener * pListener )
+{
+	if( !pListener ) return false;
+
+	const char * pszBindIp = pListener->m_strBindIp.empty() ? NULL : pListener->m_strBindIp.c_str();
+	Socket hSock = UdpListen( (unsigned short)pListener->m_iPort, pszBindIp, pListener->m_bIpv6 );
+	if( hSock == INVALID_SOCKET )
+	{
+		return false;
+	}
+
+	// 자동 할당 포트 반영
+	if( pListener->m_iPort == 0 )
+	{
+		pListener->m_iPort = GetSocketPort( hSock );
+	}
+	pListener->m_hSocket = hSock;
+	pListener->m_bDrain  = false;
+	return true;
+}
+
+/**
+ * Drain → socket close → active threads 0 대기.
+ * 호출 전에 m_clsUdpListenerMutex 보유 상태에서 pListener 가 벡터에서 제거되어 있어야 함.
+ * 여기서는 스레드 종료 루프만 수행.
+ */
+void CSipStack::_StopUdpListenerLocked( CSipStackUdpListener * pListener )
+{
+	if( !pListener ) return;
+	pListener->m_bDrain = true;
+
+	// 스레드들이 poll 에서 깨어나 drain flag 확인 후 종료할 시간을 줌
+	Socket hSock = pListener->m_hSocket;
+	pListener->m_hSocket = INVALID_SOCKET;
+	if( hSock != INVALID_SOCKET )
+	{
+		// 스레드가 poll 에 블록돼 있을 수 있으므로 self-send 로 깨움
+		Socket hWake = UdpSocket();
+		if( hWake != INVALID_SOCKET )
+		{
+			for( int i = 0; i < pListener->m_iThreadCount; ++i )
+			{
+				UdpSend( hWake, "\r\n", 2, "127.0.0.1", pListener->m_iPort );
+			}
+			closesocket( hWake );
+		}
+		closesocket( hSock );
+	}
+
+	int iWaitMs = 0;
+	while( pListener->m_iActiveThreads.load() > 0 && iWaitMs < 3000 )
+	{
+		MiliSleep( 20 );
+		iWaitMs += 20;
+	}
+}
+
+/** m_hUdpSocket alias 를 살아있는 첫 번째 리스너로 갱신. 모두 제거됐으면 INVALID_SOCKET. */
+void CSipStack::_RefreshPrimaryUdpSocketLocked()
+{
+	for( auto* pL : m_vecUdpListeners )
+	{
+		if( pL && pL->m_hSocket != INVALID_SOCKET )
+		{
+			m_hUdpSocket = pL->m_hSocket;
+			return;
+		}
+	}
+	m_hUdpSocket = INVALID_SOCKET;
+}
+
+bool CSipStack::AddUdpListener( int iExtId, const char* pszBindIp, int iPort,
+                                 int iThreadCount, int& outId )
+{
+	if( !m_bStarted ) return false;
+
+	CSipStackUdpListener * pListener = new CSipStackUdpListener();
+	pListener->m_iId          = (iExtId != 0) ? iExtId : (++m_iNextUdpListenerExtId);
+	pListener->m_strBindIp    = (pszBindIp && *pszBindIp) ? pszBindIp : m_clsSetup.m_strLocalIp;
+	pListener->m_iPort        = iPort;
+	pListener->m_iThreadCount = (iThreadCount > 0) ? iThreadCount : 1;
+	pListener->m_bIpv6        = m_clsSetup.m_bIpv6;
+	pListener->m_pclsStack    = this;
+
+	if( !_StartUdpListenerLocked( pListener ) )
+	{
+		CLog::Print( LOG_ERROR, "AddUdpListener: bind failed ip=%s port=%d",
+		             pListener->m_strBindIp.c_str(), pListener->m_iPort );
+		delete pListener;
+		return false;
+	}
+
+	if( !StartSipUdpThreadForListener( this, pListener, pListener->m_iThreadCount ) )
+	{
+		CLog::Print( LOG_ERROR, "AddUdpListener: thread start failed id=%d", pListener->m_iId );
+		closesocket( pListener->m_hSocket );
+		delete pListener;
+		return false;
+	}
+
+	m_clsUdpListenerMutex.acquire();
+	m_vecUdpListeners.push_back( pListener );
+	if( m_hUdpSocket == INVALID_SOCKET ) m_hUdpSocket = pListener->m_hSocket;
+	m_clsUdpListenerMutex.release();
+
+	outId = pListener->m_iId;
+	CLog::Print( LOG_INFO, "AddUdpListener id=%d %s:%d threads=%d",
+	             pListener->m_iId, pListener->m_strBindIp.c_str(),
+	             pListener->m_iPort, pListener->m_iThreadCount );
+	return true;
+}
+
+bool CSipStack::RemoveUdpListener( int iExtId )
+{
+	if( !m_bStarted ) return false;
+
+	CSipStackUdpListener * pTarget = NULL;
+	m_clsUdpListenerMutex.acquire();
+	for( auto it = m_vecUdpListeners.begin(); it != m_vecUdpListeners.end(); ++it )
+	{
+		if( *it && (*it)->m_iId == iExtId )
+		{
+			pTarget = *it;
+			m_vecUdpListeners.erase( it );
+			break;
+		}
+	}
+	if( pTarget && m_hUdpSocket == pTarget->m_hSocket )
+	{
+		// alias 를 다른 살아있는 리스너로
+		_RefreshPrimaryUdpSocketLocked();
+	}
+	m_clsUdpListenerMutex.release();
+
+	if( !pTarget )
+	{
+		CLog::Print( LOG_ERROR, "RemoveUdpListener: id=%d not found", iExtId );
+		return false;
+	}
+
+	_StopUdpListenerLocked( pTarget );
+	CLog::Print( LOG_INFO, "RemoveUdpListener id=%d %s:%d stopped",
+	             pTarget->m_iId, pTarget->m_strBindIp.c_str(), pTarget->m_iPort );
+	delete pTarget;
+	return true;
+}
+
+void CSipStack::GetUdpListenerInfo( std::vector<CSipStackUdpListener*>& outList )
+{
+	m_clsUdpListenerMutex.acquire();
+	outList = m_vecUdpListeners;
+	m_clsUdpListenerMutex.release();
 }
