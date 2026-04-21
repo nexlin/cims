@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS agent_deployment (
 CREATE TABLE IF NOT EXISTS agent_job (
     id              INT PRIMARY KEY AUTO_INCREMENT,
     agent_id        INT NOT NULL,
-    job_type        ENUM('install','upgrade','uninstall',
+    job_type        ENUM('install','upgrade','upgrade_agent','uninstall',
                          'start','stop','restart',
                          'update_config','collect_log','exec','health_check')
                       NOT NULL,

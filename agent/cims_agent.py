@@ -52,7 +52,15 @@ DEFAULT_STATE_DIR = os.environ.get(
     "CIMS_AGENT_STATE",
     os.path.expanduser("~/.local/state/cims-agent"),
 )
-DEFAULT_INSTALL_ROOT = os.environ.get("CIMS_AGENT_INSTALL_ROOT", "/opt/cims")
+# 설치 루트 결정 우선순위:
+#   1) CIMS_AGENT_INSTALL_ROOT 환경변수
+#   2) <agent 바이너리 디렉토리>/modules    ← 권장 (agent 설치 디렉토리 기준 체계적 배치)
+# 이전 기본값 /opt/cims 는 root 권한 필요했는데 user-mode 설치와 맞지 않음.
+_AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_INSTALL_ROOT = os.environ.get(
+    "CIMS_AGENT_INSTALL_ROOT",
+    os.path.join(_AGENT_DIR, "modules"),
+)
 DEFAULT_HEARTBEAT_SEC = 30
 DEFAULT_METRIC_SEC = 60
 AGENT_VERSION = "0.1.0"
@@ -310,6 +318,26 @@ def job_health_check(params: dict) -> tuple:
     return 0, " ".join(results), ""
 
 
+def job_upgrade_agent(csc_url: str, session_token: str) -> tuple:
+    """새 agent 바이너리를 CSC 에서 받아 자기 자신 교체. 호출자가 종료 처리."""
+    src_url = f"{csc_url}/cims_agent.py"
+    status, data, meta = http_get_binary(src_url, {"X-Agent-Token": session_token})
+    if status != 200 or not data or len(data) < 1024:
+        return 1, "", f"download failed status={status} size={len(data) if data else 0}"
+    my_path = os.path.abspath(__file__)
+    new_path = my_path + ".new"
+    try:
+        with open(new_path, "wb") as f:
+            f.write(data)
+        os.chmod(new_path, 0o755)
+        os.replace(new_path, my_path)   # atomic
+    except Exception as e:
+        try: os.unlink(new_path)
+        except Exception: pass
+        return 2, "", f"replace failed: {e}"
+    return 0, f"upgraded {my_path} ({len(data)} bytes) — restarting", ""
+
+
 def execute_job(job: dict, csc_url: str, session_token: str) -> dict:
     jt = job["type"]
     params = job.get("params") or {}
@@ -318,6 +346,8 @@ def execute_job(job: dict, csc_url: str, session_token: str) -> dict:
             rc, out, err = job_install(params, csc_url, session_token)
         elif jt == "upgrade":
             rc, out, err = job_install(params, csc_url, session_token)
+        elif jt == "upgrade_agent":
+            rc, out, err = job_upgrade_agent(csc_url, session_token)
         elif jt in ("start", "stop", "restart"):
             rc, out, err = job_process_control(params, jt)
         elif jt == "uninstall":
@@ -383,11 +413,15 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
             if status == 200:
                 jobs = resp.get("jobs") or []
                 for job in jobs:
-                    print(f"[agent] exec job id={job['id']} type={job['type']}")
+                    print(f"[agent] exec job id={job['id']} type={job['type']}", flush=True)
                     result = execute_job(job, csc_url, state.session_token)
                     rep_status, rep_body = http_post(f"{csc_url}/api/agent/report", result,
                                                       headers={"X-Agent-Token": state.session_token})
-                    print(f"[agent] report status={rep_status} rc={result['result_code']}")
+                    print(f"[agent] report status={rep_status} rc={result['result_code']}", flush=True)
+                    # upgrade_agent 성공 시 자기 자신 종료 → systemd Restart=always 가 새 바이너리로 재기동
+                    if job["type"] == "upgrade_agent" and result["result_code"] == 0:
+                        print("[agent] upgrade done — exiting for systemd restart", flush=True)
+                        return 0
 
             if time.time() >= next_metric:
                 metrics = collect_metrics()

@@ -7,7 +7,7 @@ export type PageId =
   | 'history-volte' | 'history-ptt'
   | 'stats-volte' | 'stats-ptt' | 'stats-sip' | 'stats-cmp' | 'stats-csc' | 'stats-https'
   | 'csp-services' | 'csp-listeners' | 'csp-trunks' | 'csp-routes' | 'csp-access' | 'services'
-  | 'agents' | 'packages' | 'deployments'
+  | 'deploy'
   | 'verification'
   | 'docs'
 
@@ -58,14 +58,7 @@ const MENU: MenuItem[] = [
       { id: 'services',      label: '프로세스 제어' },
     ],
   },
-  {
-    label: '배포 관리',
-    children: [
-      { id: 'agents',      label: '서버 Agent' },
-      { id: 'packages',    label: '패키지' },
-      { id: 'deployments', label: '배포' },
-    ],
-  },
+  { id: 'deploy', label: '배포 관리' },
   { id: 'verification', label: '검증' },
   { id: 'docs', label: '문서' },
 ]

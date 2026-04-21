@@ -21,9 +21,7 @@ import SipRoutesPage from './pages/SipRoutesPage'
 import SipAccessPage from './pages/SipAccessPage'
 import SipServicesPage from './pages/SipServicesPage'
 import ServicesPage from './pages/ServicesPage'
-import AgentsPage from './pages/AgentsPage'
-import PackagesPage from './pages/PackagesPage'
-import DeploymentsPage from './pages/DeploymentsPage'
+import DeploymentsDashboardPage from './pages/DeploymentsDashboardPage'
 import DocsPage from './pages/DocsPage'
 import { authApi } from './api/auth'
 import './index.css'
@@ -49,9 +47,7 @@ const PAGE_TITLES: Record<PageId, string> = {
   'csp-services': 'SIP 서비스 (CSP)',
   'csp-access': 'SIP 접근제어 (CSP)',
   'services':   '서비스 프로세스 제어',
-  'agents':       '서버 Agent',
-  'packages':     '배포 패키지',
-  'deployments':  '배포 관리',
+  'deploy':       '배포 관리',
   'verification': '시스템 검증',
   'docs': '문서',
 }
@@ -112,9 +108,7 @@ function Shell() {
       case 'csp-services':    return <SipServicesPage />
       case 'csp-access':      return <SipAccessPage />
       case 'services':        return <ServicesPage />
-      case 'agents':          return <AgentsPage />
-      case 'packages':        return <PackagesPage />
-      case 'deployments':     return <DeploymentsPage />
+      case 'deploy':          return <DeploymentsDashboardPage />
       case 'verification':    return <VerificationPage />
       case 'docs':            return <DocsPage />
       default:                return <DashboardPage />

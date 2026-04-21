@@ -43,8 +43,10 @@ _DEPLOYMENT_BASE  = "/api/v1/deployments"
 
 _DEFAULT_PKG_DIR    = "packages"
 _DEFAULT_BACKUP_DIR = "packages_trash"
-# CSC 루트 = 이 파일이 있는 src/ 의 부모 디렉토리 (= csc/)
-_COMPONENT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+# CSC 루트 = 이 파일이 있는 handlers/ 의 두 단계 부모 (csc/src/handlers → csc/)
+_COMPONENT_ROOT = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+)
 
 
 def _resolve_pkg_paths(config: dict) -> tuple:
@@ -169,6 +171,8 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _revoke_agent(handler_args, aid, config)
         if action == "metrics" and method == "GET":
             return await _agent_metrics(aid, config)
+        if action == "upgrade" and method == "POST":
+            return await _upgrade_agent_binary(handler_args, aid, config)
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
 
@@ -310,6 +314,32 @@ async def _revoke_agent(handler_args: HandlerArgs, aid: int, config):
     finally:
         conn.close()
     return HandlerResult(status=200, body={"ok": True, "id": aid}, media_type="application/json")
+
+
+async def _upgrade_agent_binary(handler_args: HandlerArgs, aid: int, config):
+    """Agent 자기 바이너리 업그레이드 job 큐잉.
+    Agent 가 heartbeat 로 pickup → /cims_agent.py 다운로드 → 자기 교체 → 종료 → systemd 재기동."""
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name FROM cims_agent WHERE id=%s", (aid,))
+            row = cur.fetchone()
+            if not row:
+                return HandlerResult(status=404, body={"error": "agent_not_found"},
+                                     media_type="application/json")
+            cur.execute(
+                "INSERT INTO agent_job (agent_id, job_type, params, status) "
+                "VALUES (%s, 'upgrade_agent', %s, 'queued')",
+                (aid, json.dumps({}))
+            )
+            job_id = cur.lastrowid
+    finally:
+        conn.close()
+    logger.log_info(f"[agent-upgrade] queued job_id={job_id} agent_id={aid} name={row['name']}")
+    return HandlerResult(status=202,
+                         body={"ok": True, "agent_id": aid, "job_id": job_id,
+                               "hint": "agent 가 다음 heartbeat 에서 pickup 후 재시작됩니다 (수 초 내)"},
+                         media_type="application/json")
 
 
 async def _agent_metrics(aid: int, config):
