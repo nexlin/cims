@@ -15,19 +15,17 @@ export interface UploadHandle<T> {
   abort: () => void
 }
 
-// 대용량 업로드는 Vite dev proxy 경유 시 백프레셔 이슈가 있어 CSC 에 직접 전송.
-// 프로덕션(동일 오리진)에선 상대 경로 사용.
+// 업로드 URL — 기본은 상대 경로(Vite 프록시 또는 동일 오리진).
+// VITE_CSC_DIRECT=1 환경변수로 dev 모드에서만 4420 직접 전송 전환 가능 (인증서 신뢰 필요).
+// CORS + 자체서명 인증서 이중신뢰 이슈를 피하려면 상대 경로 유지 권장.
 function buildUploadUrl(path: string): string {
-  // prod 빌드 / 오리진이 4420 인 경우: 상대 경로
-  const loc = window.location
-  if ((import.meta as unknown as { env: Record<string, string> }).env?.PROD
-      || loc.port === '4420' || loc.port === '') {
-    return `${BASE}${path}`
-  }
-  // dev: CSC 직접 (host + :4420, 같은 scheme)
   const env = (import.meta as unknown as { env: Record<string, string> }).env || {}
-  const port = env.VITE_CSC_PORT || '4420'
-  return `${loc.protocol}//${loc.hostname}:${port}${BASE}${path}`
+  if (env.VITE_CSC_DIRECT === '1' && env.PROD !== 'true') {
+    const loc = window.location
+    const port = env.VITE_CSC_PORT || '4420'
+    return `${loc.protocol}//${loc.hostname}:${port}${BASE}${path}`
+  }
+  return `${BASE}${path}`
 }
 
 // raw 바이너리 업로드 (multipart 오버헤드 제거) — Content-Type: application/octet-stream

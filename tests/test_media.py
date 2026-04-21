@@ -345,7 +345,7 @@ def run_media_tests():
         raw_path = rtp_files[0]
 
         # RTP 헤더 스트리핑 테스트
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'csc', 'bin', 'csc_pihttp', 'src'))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'csc', 'src'))
         try:
             from cims_recording import _strip_rtp_to_amrwb
             import tempfile

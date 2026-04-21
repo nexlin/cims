@@ -132,11 +132,11 @@ start_cwrtc() {
 start_csc() {
     local csc_port; csc_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csc/config/csc.json')); print(d['Server']['Port'])" 2>/dev/null || echo 4420)
     if is_running csc; then warn "CSC 이미 실행 중 (pid=$(read_pid csc))"; return 0; fi
-    [[ ! -f "$DIST_DIR/csc/src/app.py" ]] && err "CSC 소스 없음 (make dist 실행 필요)" && return 1
-    kill_stray "csc/src/app.py" "$csc_port" tcp
+    [[ ! -f "$DIST_DIR/csc/src/csc_app.py" ]] && err "CSC 소스 없음 (make dist 실행 필요)" && return 1
+    kill_stray "csc/src/csc_app.py" "$csc_port" tcp
     info "CSC (REST API 서버) 시작... (port=$csc_port)"
     cd "$DIST_DIR/csc/src"
-    python3 app.py >> "$LOG_DIR/csc.log" 2>&1 &
+    python3 csc_app.py >> "$LOG_DIR/csc.log" 2>&1 &
     save_pid csc $!
     sleep 1.5
     is_running csc && ok "CSC 시작 완료 (pid=$(read_pid csc))" || { err "CSC 시작 실패"; tail -3 "$LOG_DIR/csc.log" | sed 's/^/  /'; }
@@ -223,7 +223,7 @@ stop_csc() {
     local csc_port; csc_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csc/config/csc.json')); print(d['Server']['Port'])" 2>/dev/null || echo 4420)
     stop_one csc
     # PID 파일 없이 남아있는 스트레이 프로세스도 정리
-    kill_stray "csc/src/app.py" "$csc_port" tcp
+    kill_stray "csc/src/csc_app.py" "$csc_port" tcp
 }
 
 # ── 상태 출력 ──────────────────────────────────────────────────
@@ -299,14 +299,20 @@ cmd_status() {
 cmd_build() {
     [[ -z "$SRC_CONSOLE" ]] && err "build 명령은 소스 트리에서만 실행 가능" && exit 1
     header "=== C++ 빌드 ==="
-    # 인자 파싱: "-j N" / "-jN" / "N" / 생략(nproc) 지원
+    # 인자 파싱: "-j N" / "-jN" / "N" / --no-pkg / -v <ver> / -m <msg>
     local jobs=""
+    local do_pkg=1
+    local pkg_version=""
+    local pkg_changelog=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -j)    shift; jobs="${1:-}"; shift ;;
-            -j*)   jobs="${1#-j}"; shift ;;
-            [0-9]*) jobs="$1"; shift ;;
-            *)     shift ;;
+            -j)         shift; jobs="${1:-}"; shift ;;
+            -j*)        jobs="${1#-j}"; shift ;;
+            --no-pkg)   do_pkg=0; shift ;;
+            -v|--version) pkg_version="$2"; shift 2 ;;
+            -m|--changelog) pkg_changelog="$2"; shift 2 ;;
+            [0-9]*)     jobs="$1"; shift ;;
+            *)          shift ;;
         esac
     done
     [[ -z "$jobs" ]] && jobs=$(nproc)
@@ -336,6 +342,17 @@ cmd_build() {
 
     echo ""
     ok "전체 빌드 완료 → $DIST_DIR"
+
+    # 배포 패키지 자동 생성 (기본 ON, --no-pkg 로 스킵)
+    if [[ $do_pkg -eq 1 ]]; then
+        echo ""
+        header "=== 배포 패키지 생성 (자동) ==="
+        local pkg_args=()
+        [[ -n $pkg_version   ]] && pkg_args+=(-v "$pkg_version")
+        [[ -n $pkg_changelog ]] && pkg_args+=(-m "$pkg_changelog")
+        cmd_pkg "${pkg_args[@]}"
+    fi
+
     echo ""
     info "다음 단계: ./configure.sh --local-ip <서버IP> [--db-password <PW>]"
 }
@@ -568,7 +585,14 @@ ${BOLD}서비스 명령:${NC}
   status                                          상태 확인
 
 ${BOLD}빌드 & 설정:${NC}
-  build  [-j N]        C++ + Web UI 빌드 후 dist 생성 (소스 트리에서만)
+  build  [-j N] [-v X.Y.Z] [-m "note"] [--no-pkg]
+                       C++ + Web UI 빌드 → dist → (자동) 배포 패키지 생성
+                       -v 생략 시 각 모듈 pkg.json 의 patch 가 auto-bump (예: 0.0.3 → 0.0.4)
+                       -v 지정 시 모든 모듈 해당 버전 + pkg.json 에 반영
+                       --no-pkg 면 패키지 생성 건너뜀
+  sync   [targets]     C++ 빌드 없이 Python/스크립트/메타만 dist 로 복사
+                       targets: csc | agent | scripts | pkg-meta | console | phone | all
+                       (기본: all — C++ 제외. 예: ./cims.sh sync csc && ./cims.sh restart csc)
   configure [options]  서버 IP/DB 설정 → configure.sh 에 위임
 
 ${BOLD}시뮬레이터:${NC}
@@ -590,10 +614,12 @@ ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]
 
 ${BOLD}배포 패키지 (Console 업로드용):${NC}
-  pkg -v <version> [-m <changelog>] [name...]
-                                 컴포넌트를 tar.gz 로 묶고 meta.json 을 최상위에 포함
-                                 (기본: 전체. 이름 지정 시 해당 컴포넌트만)
-                                 예: ./cims.sh pkg -v 1.0.2 -m "INVITE 도메인 수정" csp
+  pkg [-v X.Y.Z] [--no-bump] [-m <changelog>] [name...]
+                                 tar.gz 생성 + meta.json 포함. 기본: auto-bump patch.
+                                 -v 지정 시 해당 버전 강제 + pkg.json 반영
+                                 --no-bump 면 현재 pkg.json 버전 그대로 (재패키징)
+                                 예: ./cims.sh pkg               # 0.0.3 → 0.0.4 자동
+                                     ./cims.sh pkg -v 1.0.0 csp  # csp 만 1.0.0 강제
 
 ${BOLD}예시:${NC}
   # 빌드 → 설정 → 시작 (소스 트리)
@@ -659,24 +685,192 @@ cmd_stop() {
     for t in "$@"; do _stop_one "$t"; done
 }
 
+cmd_sync() {
+    # 소스 트리 → dist 로 Python/스크립트/메타를 복사 (C++ 빌드 없이 빠른 배포).
+    # Usage: ./cims.sh sync [csc|agent|scripts|pkg-meta|console|phone|all]
+    if [[ -z "$SRC_CONSOLE" ]]; then
+        err "sync 명령은 소스 트리에서만 실행 가능 (dist 안에서는 의미 없음)"
+        return 1
+    fi
+    if [[ ! -d $DIST_DIR ]]; then
+        err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build 한 번 실행)"
+        return 1
+    fi
+
+    local targets=("$@")
+    [[ ${#targets[@]} -eq 0 ]] && targets=(all)
+
+    local did_csc=0 did_agent=0 did_scripts=0 did_pkg=0 did_console=0 did_phone=0
+    for t in "${targets[@]}"; do
+        case "$t" in
+            all) did_csc=1 did_agent=1 did_scripts=1 did_pkg=1 ;;
+            csc)       did_csc=1 ;;
+            agent)     did_agent=1 ;;
+            scripts)   did_scripts=1 ;;
+            pkg-meta)  did_pkg=1 ;;
+            console)   did_console=1 ;;
+            phone)     did_phone=1 ;;
+            *) err "알 수 없는 sync 대상: $t"; return 1 ;;
+        esac
+    done
+
+    local n_changed=0
+
+    # ── CSC Python 소스 ──────────────────────────────────────────
+    if [[ $did_csc -eq 1 ]]; then
+        mkdir -p "$DIST_DIR/csc/src"
+        # rsync 가 있으면 사용, 없으면 cp -r (목적지 깨끗이)
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a --delete-excluded \
+                --exclude='__pycache__' --exclude='*.pyc' \
+                "$SCRIPT_DIR/csc/src/" "$DIST_DIR/csc/src/"
+        else
+            cp -r "$SCRIPT_DIR/csc/src/." "$DIST_DIR/csc/src/"
+        fi
+        ok "csc/src ← $SCRIPT_DIR/csc/src"
+        n_changed=$((n_changed+1))
+    fi
+
+    # ── Agent 바이너리 + install 스크립트 ────────────────────────
+    if [[ $did_agent -eq 1 ]]; then
+        mkdir -p "$DIST_DIR/agent"
+        cp -f "$SCRIPT_DIR/agent/cims_agent.py"     "$DIST_DIR/agent/"
+        cp -f "$SCRIPT_DIR/agent/install-agent.sh"  "$DIST_DIR/agent/"
+        chmod +x "$DIST_DIR/agent/install-agent.sh"
+        [[ -f "$SCRIPT_DIR/agent/pkg.json" ]] && cp -f "$SCRIPT_DIR/agent/pkg.json" "$DIST_DIR/agent/"
+        ok "agent ← $SCRIPT_DIR/agent"
+        n_changed=$((n_changed+1))
+    fi
+
+    # ── 관리 스크립트 (cims.sh, configure.sh) ────────────────────
+    if [[ $did_scripts -eq 1 ]]; then
+        cp -f "$SCRIPT_DIR/cims.sh"      "$DIST_DIR/cims.sh"      && chmod +x "$DIST_DIR/cims.sh"
+        cp -f "$SCRIPT_DIR/configure.sh" "$DIST_DIR/configure.sh" && chmod +x "$DIST_DIR/configure.sh"
+        ok "scripts ← cims.sh, configure.sh"
+        n_changed=$((n_changed+1))
+    fi
+
+    # ── 컴포넌트별 pkg.json (description 소스) ──────────────────
+    if [[ $did_pkg -eq 1 ]]; then
+        for t in csp cmp csc cwrtc cspsim; do
+            [[ -f "$SCRIPT_DIR/$t/pkg.json" ]] && cp -f "$SCRIPT_DIR/$t/pkg.json" "$DIST_DIR/$t/pkg.json" 2>/dev/null || true
+        done
+        [[ -f "$SCRIPT_DIR/cims-console/pkg.json" ]] && cp -f "$SCRIPT_DIR/cims-console/pkg.json" "$DIST_DIR/console/pkg.json" 2>/dev/null || true
+        [[ -f "$SCRIPT_DIR/cims-phone/pkg.json"   ]] && cp -f "$SCRIPT_DIR/cims-phone/pkg.json"   "$DIST_DIR/phone/pkg.json"   2>/dev/null || true
+        ok "pkg-meta ← 각 모듈 루트의 pkg.json"
+        n_changed=$((n_changed+1))
+    fi
+
+    # ── Console 정적 빌드 (Vite) ─────────────────────────────────
+    if [[ $did_console -eq 1 ]]; then
+        ( cd "$SRC_CONSOLE" && npm run build 2>&1 | tail -3 )
+        if [[ -d "$SRC_CONSOLE/dist" ]]; then
+            mkdir -p "$DIST_DIR/console"
+            rm -rf "$DIST_DIR/console/dist"
+            cp -r "$SRC_CONSOLE/dist" "$DIST_DIR/console/dist"
+            cp -f "$SRC_CONSOLE/nginx.conf" "$DIST_DIR/console/nginx.conf" 2>/dev/null || true
+            ok "console ← cims-console/dist"
+        else
+            err "cims-console/dist 없음 (빌드 실패?)"
+        fi
+        n_changed=$((n_changed+1))
+    fi
+
+    # ── Phone 정적 빌드 ─────────────────────────────────────────
+    if [[ $did_phone -eq 1 ]]; then
+        ( cd "$SRC_PHONE" && npm run build 2>&1 | tail -3 )
+        if [[ -d "$SRC_PHONE/dist" ]]; then
+            mkdir -p "$DIST_DIR/phone"
+            rm -rf "$DIST_DIR/phone/dist"
+            cp -r "$SRC_PHONE/dist" "$DIST_DIR/phone/dist"
+            cp -f "$SRC_PHONE/nginx.conf" "$DIST_DIR/phone/nginx.conf" 2>/dev/null || true
+            ok "phone ← cims-phone/dist"
+        else
+            err "cims-phone/dist 없음 (빌드 실패?)"
+        fi
+        n_changed=$((n_changed+1))
+    fi
+
+    echo ""
+    info "sync 완료 ($n_changed 개 대상). 서비스 재기동: ./cims.sh restart <name>"
+}
+
+# 버전 유틸리티 — pkg.json 에 저장된 semver 를 읽고/bump/쓰기
+_pkg_read_version() {
+    local pkg="$1"
+    [[ -z $pkg || ! -f $pkg ]] && { echo ""; return; }
+    python3 - "$pkg" <<'PY' 2>/dev/null || echo ""
+import sys, json
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        d = json.load(f)
+    print(d.get('version', '') if isinstance(d, dict) else '')
+except Exception:
+    print('')
+PY
+}
+
+_pkg_bump_patch() {
+    local ver="$1"
+    [[ -z $ver ]] && ver="0.0.0"
+    local major minor patch
+    IFS='.' read -r major minor patch <<< "$ver"
+    major="${major:-0}"; minor="${minor:-0}"; patch="${patch:-0}"
+    # patch 에 숫자 아닌 것이 섞여 있으면 0 으로 리셋 (예: 1.0.0-rc1)
+    [[ ! "$patch" =~ ^[0-9]+$ ]] && patch=0
+    echo "${major}.${minor}.$((patch+1))"
+}
+
+_pkg_write_version() {
+    local pkg="$1" new_ver="$2"
+    [[ -z $pkg || ! -f $pkg || -z $new_ver ]] && return
+    python3 - "$pkg" "$new_ver" <<'PY' 2>/dev/null
+import sys, json
+p, v = sys.argv[1], sys.argv[2]
+try:
+    with open(p, 'r', encoding='utf-8') as f:
+        d = json.load(f)
+except Exception:
+    d = {}
+if not isinstance(d, dict): d = {}
+d['version'] = v
+with open(p, 'w', encoding='utf-8') as f:
+    json.dump(d, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+PY
+}
+
+# (meta_file, explicit_ver, no_bump) → 실제 적용할 버전
+_resolve_version() {
+    local meta="$1" explicit="$2" nobump="$3"
+    if [[ -n $explicit ]]; then echo "$explicit"; return; fi
+    local cur; cur=$(_pkg_read_version "$meta")
+    [[ -z $cur ]] && cur="0.0.0"
+    if [[ "$nobump" == "1" ]]; then echo "$cur"; return; fi
+    _pkg_bump_patch "$cur"
+}
+
 cmd_pkg() {
     # 컴포넌트별 배포 tarball 생성 → build/dist/packages/<name>-<ver>.tar.gz
     # 각 tarball 최상위에 meta.json (name, version, description, build/git/changelog) 포함
+    #
+    # 버전 결정 로직:
+    #   1) -v <ver> 지정: 모든 대상 모듈이 그 버전 사용 + pkg.json 업데이트
+    #   2) --no-bump:     현재 pkg.json 의 version 그대로 사용 (재패키징)
+    #   3) 기본:          pkg.json 의 patch 를 +1 (auto-bump) + pkg.json 업데이트
     local version=""
     local changelog=""
+    local no_bump=0
     local targets=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -v|--version)   version="$2"; shift 2 ;;
             -m|--changelog) changelog="$2"; shift 2 ;;
+            --no-bump)      no_bump=1; shift ;;
             -*) err "알 수 없는 옵션: $1"; return 1 ;;
             *)  targets+=("$1"); shift ;;
         esac
     done
-    if [[ -z $version ]]; then
-        err "버전 필수: -v <version> (예: -v 1.0.0)"
-        return 1
-    fi
     [[ ${#targets[@]} -eq 0 ]] && targets=(cmp csp cwrtc csc console phone cspsim agent)
 
     if [[ ! -d $DIST_DIR ]]; then
@@ -727,7 +921,7 @@ cmd_pkg() {
                         | sort -nr | head -1 \
                         | xargs -I{} date -u -d @{} +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
 
-        # 소스 루트 pkg.json 에서 description 을 읽음 (없으면 dist/<comp>/pkg.json fallback)
+        # 소스 루트 pkg.json 에서 description/version 을 읽음 (없으면 dist/<comp>/pkg.json fallback)
         local comp_meta=""
         local src_root; src_root=$(_src_root_for "$t")
         for cand in "$src_root/pkg.json" "$DIST_DIR/$t/pkg.json"; do
@@ -735,9 +929,18 @@ cmd_pkg() {
         done
         [[ -z $comp_meta ]] && warn "$t: pkg.json 없음 — description 공란"
 
+        # 이 모듈의 실제 적용 버전 결정 (explicit > no-bump > auto-bump patch)
+        local comp_ver; comp_ver=$(_resolve_version "$comp_meta" "$version" "$no_bump")
+        # pkg.json 에 반영 (소스 + dist 둘 다)
+        if [[ -n $comp_ver ]]; then
+            [[ -n $comp_meta ]] && _pkg_write_version "$comp_meta" "$comp_ver"
+            local dist_meta="$DIST_DIR/$t/pkg.json"
+            [[ -f $dist_meta && "$dist_meta" != "$comp_meta" ]] && _pkg_write_version "$dist_meta" "$comp_ver"
+        fi
+
         # meta.json 생성 (DIST_DIR 안에 임시로 작성 → tar 루트에 추가 후 삭제)
         local tmp_meta="$DIST_DIR/.pkgmeta.$$.json"
-        python3 - "$comp_meta" "$t" "$version" "$build_date" "$git_sha" "$git_branch" \
+        python3 - "$comp_meta" "$t" "$comp_ver" "$build_date" "$git_sha" "$git_branch" \
                   "$packaged_at" "$packaged_by" "$changelog" <<'PYEOF' > "$tmp_meta"
 import sys, json, os
 meta_file, name, version, build_date, git_sha, git_branch, packaged_at, packaged_by, changelog = sys.argv[1:]
@@ -770,8 +973,8 @@ meta = {
 print(json.dumps(meta, indent=2, ensure_ascii=False))
 PYEOF
 
-        tar_file="$out_dir/${t}-${version}.tar.gz"
-        info "패키징: $t-$version  (git=$git_sha/$git_branch)"
+        tar_file="$out_dir/${t}-${comp_ver}.tar.gz"
+        info "패키징: $t-$comp_ver  (git=$git_sha/$git_branch)"
 
         # tar 구성: meta.json(루트) + <component>/ + cims.sh
         local meta_basename=".pkgmeta.$$.json"
@@ -822,6 +1025,7 @@ case "${1:-}" in
     clean)     shift; cmd_clean "${1:-all}" ;;
     log)       shift; cmd_log "${1:-csp}" ;;
     pkg)       shift; cmd_pkg "$@" ;;
+    sync)      shift; cmd_sync "$@" ;;
     help|--help|-h) usage ;;
     "") usage ;;
     *) err "알 수 없는 명령: $1"; echo ""; usage; exit 1 ;;

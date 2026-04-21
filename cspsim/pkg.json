@@ -1,4 +1,5 @@
 {
   "name": "cspsim",
-  "description": "Test Simulator"
+  "description": "Test Simulator",
+  "version": "0.0.1"
 }

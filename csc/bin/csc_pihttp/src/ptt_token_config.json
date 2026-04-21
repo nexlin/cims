@@ -1,9 +1,0 @@
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJtY3B0dF9pZCI6InRlbDorMjAwMSIsImF1ZCI6Im1jcHR0X2NsaWVudCIsImV4cCI6MTc3MDcwODk3NSwic2NvcGUiOlsib3BlbmlkIiwiM2dwcDptY3B0dDpwdHRfc2VydmVyIl19.GpFiAIPLpAXgARv7IJTrqNKidjM-iZD-0fQ0_YoUc_o",
-  "refresh_token": "ffb7b8f1-5e5d-43f3-8dd7-a4a3959f33cf",
-  "id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJtY3B0dF9pZCI6InRlbDorMjAwMSIsImlzcyI6ImlkbXMubWNwdHQuY29tIiwic3ViIjoiODFmNjJmN2YtNWViOC00YjY0LTgyNDctNDRjNTg3NzkxN2RlIiwiYXVkIjoibWNwdHRfY2xpZW50IiwiZXhwIjoxNzcwNzA4OTc1LCJpYXQiOjE3NzA3MDUzNzV9.CG2gwELCHCkOqWTdsh5FFuY6wfJ4Xm8UGOSAThAJtbE",
-  "expires_at": 1770708975,
-  "user_id": "tel:+2001",
-  "client_id": "MCPTT_UE",
-  "scope": "openid 3gpp:mcptt:ptt_server"
-}

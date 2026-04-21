@@ -1,0 +1,52 @@
+{
+    "Server": {
+        "Ip": "0.0.0.0",
+        "Port": 4420
+    },
+    "McpttServer": {
+        "Ip": "0.0.0.0",
+        "Port": 4430
+    },
+    "Log": {
+        "File": "log/csc.log",
+        "Level": "INFO"
+    },
+    "Data": {
+        "User": "../csp/user",
+        "Group": "../csp/group"
+    },
+    "CimsDatabase": {
+        "Host": "@DB_HOST@",
+        "Port": 3306,
+        "User": "@DB_USER@",
+        "Password": "@DB_PASSWORD@",
+        "Db": "cims"
+    },
+    "IdMs": {
+        "JwtSecret": "@IDMS_JWT_SECRET@",
+        "Issuer": "idms.@PTT_DOMAIN@",
+        "AuthCodeTtl": 60,
+        "AccessTokenTtl": 3600,
+        "RefreshTokenTtl": 604800,
+        "KmsUri": "kms.@PTT_DOMAIN@",
+        "KmsClientReqUrl": "https://@CSC_HOST@:4420/keymanagement/identity/v1/init",
+        "Domain": "@PTT_DOMAIN@"
+    },
+    "CimsAuth": {
+        "JwtSecret": "@CIMS_JWT_SECRET@"
+    },
+    "CspNotify": {
+        "Ip": "@CSP_IP@",
+        "Port": 4421
+    },
+    "ConfigCacheDir": "cache",
+    "Packages": {
+        "Dir":       "packages",
+        "BackupDir": "packages_trash"
+    },
+    "InternalToken": "@INTERNAL_TOKEN@",
+    "ServiceLogging": {
+        "Dir": "@SERVICE_LOG_DIR@",
+        "Enable": ["csp", "ue"]
+    }
+}

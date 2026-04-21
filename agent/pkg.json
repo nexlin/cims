@@ -1,4 +1,5 @@
 {
   "name": "agent",
-  "description": "CIMS Agent — 배포/프로세스 제어 데몬"
+  "description": "CIMS Agent — 배포/프로세스 제어 데몬",
+  "version": "0.0.1"
 }

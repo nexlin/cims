@@ -88,8 +88,19 @@ fi
 
 if [[ "$USE_SYSTEMD" == "yes" ]]; then
     UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-    UNIT_FILE="$UNIT_DIR/cims-agent.service"
+    # unit 이름에 agent 이름 포함 → 같은 유저로 여러 agent 공존 가능
+    # 안전한 파일명: 영문/숫자/하이픈 외는 '-' 로 치환
+    UNIT_SAFE="$(echo "$AGENT_NAME" | tr -c 'A-Za-z0-9-' '-' | sed 's/-\+/-/g; s/^-//; s/-$//')"
+    [[ -z "$UNIT_SAFE" ]] && UNIT_SAFE="default"
+    UNIT_NAME="cims-agent-${UNIT_SAFE}.service"
+    UNIT_FILE="$UNIT_DIR/$UNIT_NAME"
     mkdir -p "$UNIT_DIR"
+
+    # 레거시 unit 파일(cims-agent.service) 이 다른 agent 를 가리키고 있으면 경고
+    LEGACY_UNIT="$UNIT_DIR/cims-agent.service"
+    if [[ -f "$LEGACY_UNIT" ]] && ! grep -q "WorkingDirectory=$INSTALL_DIR" "$LEGACY_UNIT" 2>/dev/null; then
+        echo "※ 레거시 unit $LEGACY_UNIT 이 다른 경로를 가리킴 — 덮어쓰지 않음"
+    fi
 
     echo "==> Writing user systemd unit: $UNIT_FILE"
     cat > "$UNIT_FILE" <<EOF
@@ -114,13 +125,20 @@ WantedBy=default.target
 EOF
 
     systemctl --user daemon-reload
-    systemctl --user enable --now cims-agent.service
+    # enable --now 는 이미 active 면 재시작 안 함 → 명시적으로 restart
+    systemctl --user enable "$UNIT_NAME"
+    if systemctl --user is-active --quiet "$UNIT_NAME"; then
+        echo "==> 기존 agent 프로세스 재시작 (새 설정 반영)"
+        systemctl --user restart "$UNIT_NAME"
+    else
+        systemctl --user start "$UNIT_NAME"
+    fi
 
     echo "==> Status:"
-    systemctl --user --no-pager status cims-agent || true
+    systemctl --user --no-pager status "$UNIT_NAME" || true
     echo ""
-    echo "로그:   journalctl --user -u cims-agent -f"
-    echo "제어:   systemctl --user {status|restart|stop} cims-agent"
+    echo "로그:   journalctl --user -u $UNIT_NAME -f"
+    echo "제어:   systemctl --user {status|restart|stop} $UNIT_NAME"
     if ! loginctl show-user "$USER" 2>/dev/null | grep -q '^Linger=yes'; then
         echo ""
         echo "※ 로그아웃 후에도 자동 기동되려면 (1회):"

@@ -1,4 +1,5 @@
 {
   "name": "phone",
-  "description": "Phone(PTT) UE 웹 클라이언트"
+  "description": "Phone(PTT) UE 웹 클라이언트",
+  "version": "0.0.1"
 }

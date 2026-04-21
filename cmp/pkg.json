@@ -1,4 +1,5 @@
 {
   "name": "cmp",
-  "description": "CIMS Media Processor — RTP/RTCP relay + PTT mixing + 녹취"
+  "description": "CIMS Media Processor — RTP/RTCP relay + PTT mixing + 녹취",
+  "version": "0.0.1"
 }

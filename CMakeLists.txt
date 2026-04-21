@@ -318,7 +318,7 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/config/cmp.json.template      ${CMAKE_BINARY_DIR}/dist/cmp/config/cmp.json.template
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/config/csp.json.template      ${CMAKE_BINARY_DIR}/dist/csp/config/csp.json.template
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/config/cwrtc.json.template  ${CMAKE_BINARY_DIR}/dist/cwrtc/config/cwrtc.json.template
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/bin/csc_pihttp/config/csc.json.template ${CMAKE_BINARY_DIR}/dist/csc/config/csc.json.template
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/csc.json.template ${CMAKE_BINARY_DIR}/dist/csc/config/csc.json.template
 
     # ── 4. CSP 데이터 복사 ─────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/User        ${CMAKE_BINARY_DIR}/dist/csp/user
@@ -333,7 +333,7 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/cert/server.crt ${CMAKE_BINARY_DIR}/dist/csc/cert/
 
     # ── 6. CSC Python 소스 복사 ────────────────────────────────
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/bin/csc_pihttp/src ${CMAKE_BINARY_DIR}/dist/csc/src
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/src ${CMAKE_BINARY_DIR}/dist/csc/src
 
     # ── 6b. Agent 에셋 복사 (CSC 가 /install-agent.sh 로 서빙) ──
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/agent ${CMAKE_BINARY_DIR}/dist/agent
