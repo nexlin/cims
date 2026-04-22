@@ -10,7 +10,7 @@ export interface CallParticipant {
 export interface CallLog {
   id: number
   call_id: string
-  call_type: 'voip' | 'voip_video' | 'ptt'
+  call_type: 'volte' | 'voip_video' | 'ptt'
   group_id: string | null
   initiator: string
   callee: string

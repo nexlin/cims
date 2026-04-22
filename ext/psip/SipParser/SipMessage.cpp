@@ -28,7 +28,7 @@
 CSipMessage::CSipMessage()
     : m_iStatusCode(-1), m_iContentLength(0), m_iExpires(-1),
       m_iMaxForwards(-1), m_eTransport(E_SIP_UDP), m_iClientPort(0),
-      m_bUseCompact(false), m_iUseCount(0) {}
+      m_iListenerId(-1), m_bUseCompact(false), m_iUseCount(0) {}
 
 CSipMessage::~CSipMessage() {}
 
@@ -633,6 +633,7 @@ void CSipMessage::Clear() {
   m_eTransport = E_SIP_UDP;
   m_strClientIp.clear();
   m_iClientPort = -1;
+  m_iListenerId = -1;
 
   m_bUseCompact = false;
   m_iUseCount = 0;

@@ -1,0 +1,289 @@
+# CIMS 기능 보완 검증 절차
+
+> 목적: CIMS 패키지의 빈번한 기능 보완 시 신속한 안정화를 위해 검증을 3단계로 체계화한다.
+> 적용 범위: CSP/CMP/CSC/Console/Agent 중 어느 한 모듈이라도 변경되면 본 절차를 따른다.
+
+---
+
+## 0. 공통 원칙
+
+### 0.1 TB-CSC / TB-Console / TB-agent (상시 테스트베드)
+
+검증 대상 모듈이 Phase 1~3 진행 중 반복 재기동되더라도 UI 세션이 끊기지 않고, 개발 단계에서 tarball 메타/설정이 각 모듈에 실제로 반영되는지까지 확인할 수 있도록 **TB 3종** 을 상시 동작시킨다.
+
+| 서비스 | 포트 | 역할 |
+|---|---|---|
+| TB-CSC | 4419 | 패키지/에이전트/배포/설정 템플릿/검증 실행 관리. 상시 동작 |
+| TB-Console | 3000 | TB-CSC UI. 모듈관리 + 배포 + 검증 실행/리포트 뷰 |
+| TB-agent | sync 9902 | TB-CSC 에 enroll, 자기 호스트에 검증 대상 모듈을 설치/기동/재설정. install_path: `/tmp/cims-tb-agent/` |
+| 검증 대상 CSC | 4420 | Phase 2~3 에서 TB-agent 로 배포되는 대상 |
+| 검증 대상 Console | 3001 | Phase 2~3 중 검증용으로 기동 |
+| Phone | 3002 | MCPTT UE Web (3000 에서 이전) |
+
+**재기동 규칙**: TB 3종은 Phase 진행 중 내리지 않는다. **소스 변경 후 빌드되어 번들/바이너리 해시가 갱신된 경우에만** 자동 재기동한다. DB 는 공유 (`cims`). TB-agent state(enroll/cert) 는 `/tmp/cims-tb-agent/state/` 에 유지되어 재기동 시 재사용.
+
+### 0.2 Phase 별 역할 구분 (중요)
+
+**Phase 1 — 기능 검증의 중심.** 기능 보완 시 대부분의 검증은 여기서 끝나야 한다.
+- 모든 기능·회귀 시나리오 검증
+- TB-CSC/TB-Console 을 통한 설정 반영 검증 포함
+- 빌드·기동·config overlay·런타임 통합 동작 확인
+
+**Phase 2 — 배포 기능 검증.** 기능 검증은 Phase 1 에서 이미 완료된 전제. Phase 2 는 **새 릴리즈 tarball 을 TB-CSC 로 업로드/배포했을 때 대상 CSC/Console 이 정상 기동**되는지만 검증한다.
+
+**Phase 3 — New-CSC 경유 배포 검증.** TB-CSC 가 배포한 New-CSC(4420) 가 다시 CSP/CMP/Sim 을 배포할 때의 체인 검증. **기능 회귀는 수행하지 않는다** (Phase 1 에서 끝나야 함). Phase 3 는 배포 체인의 무결성만 본다.
+
+> 즉, 같은 회귀 시나리오를 Phase 1/3 에서 반복 실행하지 않는다. Phase 1 이 충분히 검증되었다는 전제에서, Phase 2/3 는 배포 메커니즘 자체만 확인한다.
+
+### 0.3 초기화 범위
+
+검증 전 환경 초기화 시 **가입자 정보는 보존**, 그 외 운영 데이터는 모두 초기화한다. TB-CSC/TB-Console 은 **건드리지 않는다**.
+
+| 구분 | 테이블 / 자원 | 동작 |
+|---|---|---|
+| 보존 | `users`, `organizations`, `voip_subscriptions`, `ptt_subscriptions`, `ptt_groups`, `ptt_group_members`, `user_rejects` | 그대로 둔다 |
+| 보존 (TB) | TB-CSC(4419) 및 TB-Console(3000) 프로세스, 인증서, 로그 | 그대로 둔다 |
+| 초기화 (모듈 설정) | `sip_service`, `sip_service_listener`, `csp_listener`, `sip_trunk`, `routing_rule*`, `routing_access_list`, `csp_config_audit` 등 런타임 config 계열 | TRUNCATE |
+| 초기화 (배포 등록) | `cims_instance`, `cims_agent`, `cims_package`, `agent_deployment`, `agent_job`, `agent_metric` | TRUNCATE |
+| 초기화 (세션/로그) | `auth_codes`, `refresh_tokens`, `voip_call_logs`, `ptt_call_logs`, `*_participants`, `recordings`, `recording_segments`, `stats_*` | TRUNCATE |
+| 초기화 (파일) | `build/dist/<server>/modules/**`, agent install_path (예: `/tmp/cims-agent-*`), `service_log/`, `msg_log/`, `cert/agent_mtls/issued` 발급 cert | rm -rf |
+| 초기화 (프로세스) | 검증 대상 csc(4420)/csp/cmp/cspsim/agent/console(3001) | `cims.sh reset` |
+
+`cims.sh reset` 은 위 범위를 자동 처리하며 TB 는 제외한다.
+
+### 0.4 외부 연동 IP
+
+- 테스트 서버는 DHCP. 외부 연동용 IP 는 **`ens160` 인터페이스의 IP** 로 가정한다.
+- `cims.sh preflight` 가 `ens160` IP 를 자동 감지해 리포트에 기록.
+- `configure.sh --local-ip <ens160_ip>` 로 tarball 재구성 (localhost 는 외부 접근 불가).
+
+### 0.5 사전조건 체크리스트
+
+- [ ] `git status` clean, 브랜치/커밋 해시 기록
+- [ ] pending DB migration 적용 완료
+- [ ] `ens160` IP 확인
+- [ ] 포트 충돌 없음 (4419, 4420, 3000, 3001, 3002, 5060, 5061, 9000, 9001, **9902**(TB-agent sync))
+- [ ] TB 3종 동작 확인 (`cims.sh status` 에서 tb-csc / tb-console / tb-agent running)
+- [ ] TB-agent 가 TB-CSC 에 `approved` 상태로 enrolled (`cims_agent` 테이블)
+- [ ] mTLS 모드 검증이면 TB-CSC 의 `Agent.MtlsEnabled: true` 확인
+
+### 0.6 합격 기준 (공통)
+
+- 빌드: warning/error 0
+- 대상 모듈 기동 후 로그에 `ERROR`/`FATAL` 없음
+- Phase 별 회귀 시나리오 전부 PASS
+- Flow/Msg 로그 무결성 (sesid 일관, body seq 매칭)
+
+### 0.7 Phase 1 검증 시나리오 (5단계 + 회귀)
+
+Phase 1 은 **tarball 빌드 결과물이 TB-agent 를 통해 검증 대상 모듈에 올바르게 반영되는지를 e2e 로 확인** 하는 것이 목적. 아래 5단계가 모두 PASS 해야 합격.
+
+**A. 설정 반영 5단계** (TB 3종 전제)
+
+1. **tarball 메타 무결성** — `cims.sh pkg --no-bump` 로 모듈 tarball 생성 → TB-CSC `/packages` 업로드.
+   - DB 의 `cims_package.name/version/description/meta_json/config_template_json` 이 소스 `pkg.json` + `config_template.json` 과 정확히 일치.
+2. **TB-agent 배포** — TB-Console `POST /deployments { agent=tb-agent, package=<module> }`.
+   - `/tmp/cims-tb-agent/modules/<module>/<version>/` 에 tarball 추출. meta.json, config_template.json 동반.
+3. **static config overlay** — TB-Console `PUT /deployments/:id/config { config: {...flat dot-keys...}, queue_update: true }`.
+   - `agent_deployment.config_json` 저장 + TB-agent 가 `install_path/config.json` 작성 → 재기동 후 모듈 런타임 동작 변화 (예: AuthRealm → REGISTER 인증 도메인 반영).
+4. **dynamic collection sync** — TB-Console `PUT /deployments/:id/collection/:name { records, signal:true }`.
+   - TB-agent 가 `install_path/config/<name>.jsonl` 재작성 → SIGUSR1 → 모듈이 **재기동 없이** reload (예: listener 추가 → 새 포트 bind).
+5. **회귀 시나리오 (B)** — 설정 반영된 상태에서 실행, 전부 PASS.
+
+**B. 기존 회귀 시나리오 (고정 — 기능 보호용)**
+
+1. **cspsim REGISTER × N** — `-auth_id "<IMSI>@<domain>"` 필수. 성공률 100%.
+2. **VoIP 2자 통화 (B2BUA)** — 녹취 `seg_*.rtp` 생성, 양 leg 동일 `sesid`, `session.json` 의 `call_ids`.
+3. **PTT 그룹콜 (5 member)** — multipart INVITE, Conference NOTIFY, floor port 협상, `m=application` 분리.
+4. **CSC 가입자/그룹 변경 → NOTIFY** — admin API CRUD → `notify_csp` → 캐시 갱신 + GMS/CMS NOTIFY.
+5. **CSC subscribe (IdMS/GMS/CMS)** — TB-Console Flow 페이지 nodes 순서 정상.
+6. **(mTLS 모드) Cert rotation e2e** — `cert_rotate_pending=1` → heartbeat `cert_rotate:true` → agent rotate → exit → 재기동 후 새 cert 적용.
+
+`cims.sh verify phase1` 및 TB-Console `/testbed/phase1` 실행 버튼이 위 A 5단계를 순차 수행하고 각 단계 결과를 리포트에 기록한다.
+
+### 0.8 리포트 양식
+
+경로: `verify_reports/<YYYYMMDD_HHMMSS>_<phase>.md` (TB-Console `/testbed/verify` 에서 자동 저장/조회)
+
+내용:
+- 환경: 브랜치/커밋, `ens160` IP, DB migration 버전, 빌드 해시
+- Phase 별 체크리스트 PASS/FAIL
+- Phase 1: 시나리오 결과 (번호별 PASS/FAIL + 로그 경로)
+- Phase 2/3: 배포 단계별 성공 여부 + 검증 대상 모듈 health
+- 이슈: severity (Blocker / Major / Minor), 재현 절차, 로그 스니펫 경로
+
+### 0.9 롤백/재시작 지점
+
+**원칙: Phase 2 또는 Phase 3 에서 이슈 발생 시 Phase 1 부터 재수행한다.**
+Phase 1 이 충분히 검증되었다면 Phase 2/3 에서 기능 이슈가 발생해서는 안 된다는 전제. Phase 2/3 의 기능 이슈는 Phase 1 검증 미흡. 단 **배포 메커니즘 이슈**(agent enroll 실패, config overlay 누락 등)는 해당 Phase 내에서 보완 후 재수행 허용.
+
+---
+
+## Phase 0 — 변경 분석 (진입 전 필수)
+
+기능 보완 작업 착수 전 리포트 서두에 기록한다.
+
+- 변경 범위 / 영향 모듈 (CSP / CMP / CSC / Console / Agent)
+- 추가/변경 DB 테이블 · migration 스크립트
+- 변경된 config template (`csp.json.template`, `config_template.json`, `cmp.json`)
+- 회귀 리스크 플래그: Flow/Msg 포맷, `sesid` 규약, B2BUA 라우팅, CMP 포트 풀, mTLS 인증서 발급 경로 등 "건드리면 광범위하게 깨지는" 영역 해당 여부
+- TB-Console 모듈관리에서 설정 템플릿 편집이 필요한 변경인지 여부
+
+---
+
+## Phase 1 — 기능 검증 (필수, 대부분의 검증을 여기서 끝냄)
+
+기능 보완의 본 검증 단계. **새로 추가/수정한 기능 + 0.7 회귀 시나리오 전체** 가 여기서 통과해야 한다.
+
+### 1.1 초기화
+- `cims.sh reset` — 검증 대상만 초기화, TB 는 유지 (0.3 범위)
+
+### 1.2 빌드
+- `cims.sh build`
+- warning/error 0 확인, 번들 해시 바뀌면 TB 도 자동 재기동
+
+### 1.3 Configure
+- `cims.sh configure --local-ip <ens160_ip>`
+- `csp.json`, `cmp.json`, `csc.json` (4420 용), `csc-tb.json` (4419 용) 재생성
+- TB-Console `.env` 분기 적용
+
+### 1.4 수동 기동 (검증 대상 한정, TB 는 이미 동작 중)
+순서: CMP → CSP → CSC → (필요 시) 검증 대상 Console
+
+```bash
+cims.sh start cmp csp csc
+```
+
+### 1.5 Health Check
+- 리슨 포트: 4419 / 4420 / 3000 / 9000 / 5060 / 5061
+- 로그 `ERROR`/`FATAL` 없음
+- TB-CSC → 검증 대상 CSC HEARTBEAT 정상
+
+### 1.6 기능 검증 (본 단계의 핵심)
+
+TB-Console `/testbed/phase1` 에서 **▶ 실행** 클릭 → 0.7 의 A(설정 반영 5단계) + B(회귀 6항목) 순차 실행 → 리포트 자동 생성.
+
+추가로 수동 확인:
+1. **이번 보완된 기능** — Phase 0 변경 분석의 대상 기능 직접 조작.
+2. **TB-Console 모듈관리** — 패키지 업로드 직후 버전/설정 템플릿이 tarball 과 일치하는지 시각 확인.
+3. **TB-Console 배포 > 서버** — TB-agent 상태(approved, heartbeat, sync_port=9902) 확인.
+
+### 1.7 결과 리포팅
+- TB-Console `/testbed/verify` 또는 `verify_reports/<ts>_phase1.md`
+- 0.8 양식 준수
+
+### 1.8 이슈 처리
+- Blocker/Major 존재 시 **코드 보완 → Phase 1 의 1.1 부터 재수행**
+- Minor 는 리포트 기록 후 진행 여부 판단
+
+**Phase 1 이 모든 항목 PASS 한 이후에만 Phase 2 로 진입한다.**
+
+---
+
+## Phase 2 — 배포 기능 검증 (릴리즈 직전, 배포 기능 자체만)
+
+Phase 1 의 기능 검증이 끝난 전제 하에, **새 릴리즈 tarball 을 TB-CSC 로 배포했을 때 대상 CSC/Console 이 정상 기동되는지**만 확인한다. 기능 회귀는 반복하지 않는다.
+
+### 2.1 초기화
+- `cims.sh reset` (TB 유지)
+
+### 2.2 빌드 & 패키지
+```bash
+cims.sh build            # warning/error 0
+cims.sh pkg --no-bump    # 버전 고정 tarball 생성
+cims.sh configure --local-ip <ens160_ip>
+```
+
+### 2.3 TB-Console 에서 배포
+1. TB-Console(`https://<ens160_ip>:3000/`) 접속, admin 로그인
+2. **배포 > 패키지** 업로드 (cims-csc-<ver>.tar.gz 등)
+3. **배포 > 서버** 에서 검증 대상 호스트 agent 등록
+4. CSC / Console 모듈 배포 (자동 설치 → 기동)
+5. 검증 대상 CSC(4420) / Console(3001) 정상 기동 확인
+
+### 2.4 검증 항목 (배포 기능 한정)
+- agent enroll 성공 (인증서 발급, mTLS 모드면 cert 유효성)
+- 패키지 해시 일치 (tarball → install_path)
+- scalar config overlay 반영 (`install_path/config.json`)
+- collection (`config/*.jsonl`) 전달
+- 모듈 기동 성공 (프로세스 리슨, health 체크)
+- TB-CSC → 검증 대상 CSC HEARTBEAT 정상
+
+### 2.5 결과 리포팅
+- `verify_reports/<ts>_phase2.md`
+- **배포 체크리스트** (위 2.4 항목) PASS/FAIL
+
+### 2.6 이슈 처리
+- 배포 기능 이슈 → Phase 2 내에서 보완 후 재수행 (Phase 1 재수행 불필요)
+- 기능 회귀 발견 시 → 반드시 Phase 1 부터 재수행 (Phase 1 검증이 미흡했다는 신호)
+
+---
+
+## Phase 3 — New-CSC 경유 CSP/CMP/Sim 배포 검증 (릴리즈 직전, 배포 체인)
+
+Phase 2 에서 배포된 New-CSC(4420) 가 다시 CSP/CMP/Sim 을 배포할 때의 **체인 동작** 만 확인한다. 기능 회귀는 반복하지 않는다.
+
+### 3.1 배포 (New-CSC API 이용)
+New-Console(`https://<ens160_ip>:3001/`) 에서 실행:
+
+1. `csp-server/` 대상 agent 설치 → CSP 패키지 배포 → 기동
+2. `cmp-server/` 대상 agent 설치 → CMP 패키지 배포 → 기동
+3. `sim-server/` 대상 agent 설치 → Simulator 배포 → 기동
+
+설정 원칙: Phase 1 과 동일한 실제 시험 환경을 재현 (IP·포트·realm·도메인·그룹 ID).
+
+### 3.2 검증 항목 (배포 체인 한정)
+- New-CSC → 각 agent enroll / heartbeat 정상
+- 패키지 해시 일치
+- config overlay, collection 전달 정상
+- CSP/CMP/Sim 프로세스 리슨 포트 정상 (5060/5061/9000)
+- 각 모듈 startup 로그 `ERROR`/`FATAL` 없음
+- **서비스 smoke-test 1건만** (REGISTER 1개 성공 여부) — 배포 체인이 실제 트래픽으로 이어지는지 확인용. 기능 회귀는 Phase 1 에서 끝났으므로 반복 안 함.
+
+### 3.3 결과 리포팅
+- `verify_reports/<ts>_phase3.md`
+- 배포 체크리스트 + smoke-test 결과
+
+### 3.4 이슈 처리
+- 배포 체인 이슈 → Phase 3 내에서 보완 후 재수행
+- smoke-test 실패 시 → Phase 2 의 배포 또는 Phase 1 의 기능 누락 의심, 원점 재수행
+
+---
+
+## 부록 A. 알려진 함정 (2026-04-22 기준 누적)
+
+- `cims.sh pkg` 는 patch +1. 버전 고정은 `--no-bump` 필수.
+- `make dist` 이후 `configure.sh` 로 IP 재반영 필수.
+- localhost 설정으로는 외부 접근 불가 → 반드시 `ens160` IP 사용.
+- cspsim REGISTER 성공은 `-auth_id "IMSI@domain"` 형식 필수. `cims.sh verify phase1` 은 DB 에서 자동 조회.
+- TB-CSC 의 mTLS 기능: `Agent.MtlsEnabled: true` overlay 필수.
+- 동일 호스트에 여러 agent: `CIMS_AGENT_SYNC_PORT` env 로 주입 (CLI 인자 미지원).
+- Agent cert rotate 는 `exit(0)` 만 수행. 재기동은 systemd/supervisor 책임.
+- TB-Console 빌드 분기: `VITE_ADMIN_TARGET=https://127.0.0.1:4419 npm run build` → `build/dist/console-tb/dist`.
+
+## 부록 B. 주요 명령어 요약
+
+```bash
+# 환경
+ip -4 addr show ens160
+git rev-parse --short HEAD
+
+# TB 는 항상 돌고 있어야 함 (cims.sh status 에서 tb-csc, tb-console running 확인)
+cims.sh status
+
+# Phase 1: 기능 검증
+cims.sh verify phase1         # 자동 (preflight → reset → build → configure → start → 시나리오 → 리포트)
+# 또는 TB-Console /testbed/verify 에서 UI 로 실행
+
+# Phase 2: 배포 기능 검증 (TB-Console 에서 UI 진행 권장)
+cims.sh build
+cims.sh pkg --no-bump
+# TB-Console → 배포 > 패키지 업로드 → 대상 호스트에 배포
+
+# Phase 3: New-CSC 경유 배포 체인 (New-Console 3001 에서 UI 진행)
+```
+
+## 부록 C. 문서 관리
+
+- 본 문서는 검증 절차의 SSOT. 진행 중 보완은 리포트 후 본 문서에 반영.
+- 변경 이력은 git 으로 관리.

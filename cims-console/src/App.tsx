@@ -1,52 +1,30 @@
 import { useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ToastProvider } from './components/Toast'
-import Sidebar, { type PageId } from './components/Sidebar'
+import Sidebar from './components/Sidebar'
+import Header from './components/Header'
+import SubTabs from './components/SubTabs'
 import LoginPage from './pages/LoginPage'
-import DashboardPage from './pages/DashboardPage'
-import OrganizationsPage from './pages/OrganizationsPage'
-import MembersPage from './pages/MembersPage'
-import SubscriptionsPage from './pages/SubscriptionsPage'
-import PttGroupsPage from './pages/PttGroupsPage'
-import ServiceStatusPage from './pages/ServiceStatusPage'
-import VolteHistoryPage from './pages/VolteHistoryPage'
-import PttHistoryPage from './pages/PttHistoryPage'
-// RecordingsPage는 VoLTE/PTT 이력 상세에 통합
-import StatsPage from './pages/StatsPage'
-import StatsMessagesPage from './pages/StatsMessagesPage'
-import VerificationPage from './pages/VerificationPage'
-import ServicesPage from './pages/ServicesPage'
-import PackagesPage from './pages/PackagesPage'
-import ServersPage from './pages/ServersPage'
-import DocsPage from './pages/DocsPage'
+import { FLAT_ROUTES } from './routes'
 import { authApi } from './api/auth'
 import './index.css'
 
-const PAGE_TITLES: Record<PageId, string> = {
-  'dashboard': '대시보드',
-  'org': '조직 관리',
-  'members': '구성원 관리',
-  'subscriptions': 'VoLTE/PTT 번호 관리',
-  'ptt-groups': 'PTT 그룹 관리',
-  'service-status': '실시간 서비스 상태',
-  'history-volte': 'VoLTE 서비스 이력',
-  'history-ptt': 'PTT 서비스 이력',
-  'stats-volte': 'VoLTE 통계',
-  'stats-ptt': 'PTT 통계',
-  'stats-sip': 'SIP 메시지 통계',
-  'stats-cmp': 'CMP 인터페이스 통계',
-  'stats-csc': 'CSC 인터페이스 통계',
-  'stats-https': 'HTTPS 메시지 통계',
-  'services':   '서비스 프로세스 제어',
-  'packages':     '패키지 관리',
-  'servers':      '서버 관리',
-  'verification': '시스템 검증',
-  'docs': '문서',
+const SIDEBAR_COLLAPSED_KEY = 'cims_sidebar_collapsed'
+
+function RouteGuard({ children, adminOnly }: { children: React.ReactNode; adminOnly?: boolean }) {
+  const { user } = useAuth()
+  if (adminOnly && user?.role !== 'admin') {
+    return <div className="empty" style={{ marginTop: 80 }}>관리자 권한이 필요합니다</div>
+  }
+  return <>{children}</>
 }
 
 function Shell() {
   const { user, loading, logout, refresh } = useAuth()
-  const [page, setPage] = useState<PageId>('dashboard')
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  })
   const [showChgPw, setShowChgPw] = useState(false)
   const [chgError, setChgError] = useState('')
   const [chgOk, setChgOk] = useState('')
@@ -57,7 +35,13 @@ function Shell() {
   if (loading) return <div className="auth-loading">로딩 중...</div>
   if (!user) return <LoginPage />
 
-  const isAdmin = user.role === 'admin'
+  function toggleSidebar() {
+    setCollapsed(prev => {
+      const next = !prev
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0')
+      return next
+    })
+  }
 
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault()
@@ -75,49 +59,36 @@ function Shell() {
     }
   }
 
-  function renderPage() {
-    if (!isAdmin && page !== 'docs') {
-      return <div className="empty" style={{ marginTop: 80 }}>관리자 권한이 필요합니다</div>
-    }
-    switch (page) {
-      case 'dashboard':       return <DashboardPage />
-      case 'org':             return <OrganizationsPage />
-      case 'members':         return <MembersPage />
-      case 'subscriptions':   return <SubscriptionsPage />
-      case 'ptt-groups':      return <PttGroupsPage />
-      case 'service-status':  return <ServiceStatusPage />
-      case 'history-volte':   return <VolteHistoryPage />
-      case 'history-ptt':     return <PttHistoryPage />
-      case 'stats-volte':     return <StatsPage />
-      case 'stats-ptt':       return <StatsPage />
-      case 'stats-sip':       return <StatsMessagesPage iface="sip" />
-      case 'stats-cmp':       return <StatsMessagesPage iface="cmp" />
-      case 'stats-csc':       return <StatsMessagesPage iface="csc" />
-      case 'stats-https':     return <StatsMessagesPage iface="https" />
-      case 'services':        return <ServicesPage />
-      case 'packages':        return <PackagesPage />
-      case 'servers':         return <ServersPage />
-      case 'verification':    return <VerificationPage />
-      case 'docs':            return <DocsPage />
-      default:                return <DashboardPage />
-    }
-  }
-
   return (
     <ToastProvider>
-      <div className="app-layout">
-        <Sidebar
-          current={page}
-          onNavigate={setPage}
+      <div className={`app-layout ${collapsed ? 'app-layout--collapsed' : ''}`}>
+        <Header
           userName={user.name}
           userRole={user.role}
+          onToggleSidebar={toggleSidebar}
           onLogout={logout}
           onChangePw={() => setShowChgPw(true)}
         />
-        <div className="app-content">
-          <div className="app-content-header">{PAGE_TITLES[page] || ''}</div>
-          <div className="app-content-body">{renderPage()}</div>
-        </div>
+        <Sidebar collapsed={collapsed} />
+        <main className="app-content">
+          <SubTabs />
+          <div className="app-content-body">
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              {FLAT_ROUTES.map(r => {
+                const Comp = r.component
+                return (
+                  <Route
+                    key={r.path}
+                    path={r.path}
+                    element={<RouteGuard adminOnly={r.adminOnly}><Comp /></RouteGuard>}
+                  />
+                )
+              })}
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </div>
+        </main>
       </div>
 
       {showChgPw && (
@@ -154,8 +125,10 @@ function Shell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Shell />
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Shell />
+      </AuthProvider>
+    </BrowserRouter>
   )
 }

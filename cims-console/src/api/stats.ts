@@ -132,7 +132,7 @@ export const statsApi = {
     return api.get<MessagesResponse>(`/stats/messages${s ? '?' + s : ''}`)
   },
 
-  service: (svc: 'voip' | 'ptt' | 'summary', params: { granularity?: string; from?: string; to?: string; date?: string }) => {
+  service: (svc: 'volte' | 'ptt' | 'summary', params: { granularity?: string; from?: string; to?: string; date?: string }) => {
     const p = new URLSearchParams()
     if (params.granularity) p.set('granularity', params.granularity)
     if (params.from) p.set('from', params.from)

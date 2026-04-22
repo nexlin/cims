@@ -97,7 +97,7 @@ export default function CallLogsPage() {
           value={fGroupId} onChange={e => setFGroupId(e.target.value)} style={{ maxWidth: 120 }} />
         <select className="form-input" value={fType} onChange={e => setFType(e.target.value)} style={{ width: 90 }}>
           <option value="">전체유형</option>
-          <option value="voip">VoIP</option>
+          <option value="volte">VoIP</option>
           <option value="ptt">PTT</option>
         </select>
         <input type="date" className="form-input" value={fFromDt} onChange={e => setFFromDt(e.target.value)} style={{ width: 140 }} />
@@ -145,7 +145,7 @@ export default function CallLogsPage() {
                     <td>
                       <div>{log.initiator}</div>
                       {log.call_type === 'ptt' && log.group_id && <div className="ts">그룹: {log.group_id}</div>}
-                      {log.call_type === 'voip' && <div className="ts">→ {log.callee}</div>}
+                      {log.call_type === 'volte' && <div className="ts">→ {log.callee}</div>}
                     </td>
                     <td><StateChip state={log.state} /></td>
                     <td className="ts">{fmtTime(log.invite_time)}</td>

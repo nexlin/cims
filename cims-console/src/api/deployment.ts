@@ -133,7 +133,9 @@ export interface PackageMeta {
 export interface ConfigTemplateField {
   key: string
   label: string
+  // v3 추가: string_list (tags), ref, ref_list, object_list
   type: 'string' | 'int' | 'bool' | 'enum' | 'path' | 'password'
+        | 'string_list' | 'ref' | 'ref_list' | 'object_list'
   default?: unknown
   help?: string
   required?: boolean
@@ -143,6 +145,12 @@ export interface ConfigTemplateField {
   min?: number              // int
   max?: number              // int
   reload_hint?: string
+  readonly?: boolean        // collection schema 전용
+  auto?: string             // collection schema 전용 (e.g. "uuid")
+  // ref / ref_list 용 — 다른 collection 의 어떤 필드를 참조할지
+  ref_collection?: string
+  // object_list 용 — 중첩 객체의 필드 스키마
+  item_schema?: { fields: ConfigTemplateField[] }
 }
 
 export interface ConfigTemplateSection {
@@ -265,6 +273,8 @@ export const deploymentApi = {
   uploadPackageFile: (file: File, force: boolean,
                       onProgress?: (p: UploadProgress) => void): UploadHandle<SipPackage> =>
     uploadMultipart<SipPackage>('/packages', file, force, onProgress),
+  updatePackage: (id: number, body: { description?: string; config_template?: ConfigTemplate | null }) =>
+    api.put<SipPackage>(`/packages/${id}`, body),
   deletePackage: (id: number) => api.delete<null>(`/packages/${id}`),
 
   // deployments
@@ -295,4 +305,42 @@ export const deploymentApi = {
       `/deployments/${id}/collection/${name}`,
       { records, signal }
     ),
+
+  // Phase 1 로컬 모듈 overlay 설정
+  getModuleConfig: (name: string) =>
+    api.get<ModuleConfigView>(`/modules/${name}/config`),
+  putModuleConfig: (name: string, values: Record<string, unknown>) =>
+    api.put<ModuleConfigPutResult>(`/modules/${name}/config`, { values }),
+
+  // Phase 1 로컬 모듈 collection (jsonl) — DeploymentCollection 과 response 스키마 호환
+  getModuleCollection: (name: string, collKey: string) =>
+    api.get<{ records: Record<string, unknown>[]; schema: CollectionSchema }>(
+      `/modules/${name}/collection/${collKey}`
+    ),
+  putModuleCollection: (name: string, collKey: string,
+                        records: Record<string, unknown>[], signal = true) =>
+    api.put<{ ok: boolean; count: number; signaled: number[] }>(
+      `/modules/${name}/collection/${collKey}`,
+      { records, signal }
+    ),
+}
+
+// ──────────────── Module overlay (local Phase 1) ────────────────
+export interface ModuleConfigView {
+  module: string
+  version: string
+  template: ConfigTemplate
+  current: Record<string, unknown>
+  overlay_path: string
+  owned_keys: string[]
+}
+
+export interface ModuleConfigPutResult {
+  ok: boolean
+  module: string
+  applied: number
+  removed: number
+  current: Record<string, unknown>
+  overlay_path: string
+  restart_required: boolean
 }

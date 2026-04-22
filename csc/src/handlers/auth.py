@@ -1,10 +1,13 @@
 """
 CIMS Web Auth API
 Routes:
-  POST /api/v1/auth/login      - 로그인 (email + password → JWT)
+  POST /api/v1/auth/login      - 로그인 (login_id + password → JWT + 최소 user)
   POST /api/v1/auth/register   - 회원가입 (role=user 고정)
-  GET  /api/v1/auth/me         - 내 정보 (JWT 필요)
   PUT  /api/v1/auth/password   - 비밀번호 변경 (JWT 필요)
+
+v3 (2026-04-22): 로그인과 프로파일/가입자 정보 분리.
+  /users/me              — 프로파일 (handlers/users.py)
+  /users/me/subscriptions — 본인 가입자 배열 (Phone UE 용)
 """
 
 import hashlib
@@ -101,8 +104,8 @@ def _dt(val):
 def _user_with_subs(cur, user_id: int) -> dict:
     # 소프트폰 자동 등록에 passwd 필요 → 본인 조회이므로 포함
     cur.execute(
-        "SELECT id, service_id, imsi, passwd, dnd, forward_id, register_time, logout_time "
-        "FROM voip_subscriptions WHERE user_id=%s ORDER BY id",
+        "SELECT id, service_ref, imsi, passwd, dnd, forward_id, register_time, logout_time "
+        "FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
         (user_id,)
     )
     call_subs = cur.fetchall()
@@ -112,7 +115,7 @@ def _user_with_subs(cur, user_id: int) -> dict:
         s['logout_time']   = _dt(s['logout_time'])
 
     cur.execute(
-        "SELECT id, service_id, imsi, passwd, dnd, forward_id, register_time, logout_time "
+        "SELECT id, service_ref, imsi, passwd, dnd, forward_id, register_time, logout_time "
         "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
         (user_id,)
     )
@@ -150,10 +153,9 @@ async def handle_auth(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
             return await _login(handler_args.body, config)
         if action == 'register' and method == 'POST':
             return await _register(handler_args.body, config)
-        if action == 'me'       and method == 'GET':
-            return await _me(handler_args, config)
         if action == 'password' and method == 'PUT':
             return await _change_password(handler_args, config)
+        # v3 (2026-04-22): /auth/me 제거 — /users/me 로 이관
         return HandlerResult(status=404, body={'error': 'Not Found'})
     except pymysql.Error as e:
         return HandlerResult(status=500, body={'error': str(e)})
@@ -177,9 +179,9 @@ async def _login(body, config):
             user = cur.fetchone()
             if user is None:
                 return HandlerResult(status=401, body={'error': '아이디 또는 비밀번호가 잘못되었습니다'})
-            subs = _user_with_subs(cur, user['id'])
 
-    user.update(subs)
+    # v3: 로그인 응답은 토큰 + 최소 user 정보만.
+    #   가입자 정보는 /users/me/subscriptions 로 분리 (Phone UE 가 별도 호출).
     token = _make_token(user)
     return HandlerResult(status=200, body={'token': token, 'user': user})
 
@@ -218,25 +220,6 @@ async def _register(body, config):
     user.update({'call_subscriptions': [], 'ptt_subscriptions': []})
     return HandlerResult(status=201, body={'token': token, 'user': user})
 
-
-async def _me(handler_args, config):
-    payload, err = require_auth(handler_args)
-    if err:
-        return err
-
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, login_id, role FROM users WHERE id=%s",
-                (int(payload['sub']),)
-            )
-            user = cur.fetchone()
-            if user is None:
-                return HandlerResult(status=404, body={'error': '사용자를 찾을 수 없습니다'})
-            subs = _user_with_subs(cur, user['id'])
-
-    user.update(subs)
-    return HandlerResult(status=200, body=user)
 
 
 async def _change_password(handler_args, config):

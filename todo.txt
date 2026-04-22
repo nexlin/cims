@@ -1,0 +1,8 @@
+미완 (다음 세션 첫 행동):                                                                                                                               
+  - cspsim 통화로 state 파일 생성/승격/삭제 사이클 확인 (토큰 부족으로 중단).                                                                             
+                                                                                                                                                          
+  기록:                                                                                                                                                   
+  - verify_reports/20260422_224051_session_end_state.md — 이번 세션 상세 리포트.                                                                          
+  - memory/project_phase_status.md — (B) 완료로 업데이트, 리포트 목록 추가.                  
+    
+다음 세션에 smoke test 재개 + /api/v1/stats/subscribers (DROP 된 테이블 참조 중, 500 에러) 수정 후 (A/C/D/E) 진행하시면 됩니다.  

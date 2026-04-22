@@ -1,15 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useToast } from '../../components/Toast'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useToast } from '../Toast'
 import {
   deploymentApi, type ConfigTemplateCollection, type ConfigTemplateField,
 } from '../../api/deployment'
 
 type Record_ = Record<string, unknown>
 
-export default function CollectionEditor({ deploymentId, collection }: {
-  deploymentId: number
+// ref 필드의 옵션 (collection name → option list) 을 전역 캐시로 관리.
+// 한 페이지에서 여러 editor 가 열려도 중복 fetch 방지.
+type RefOptions = Record<string, string[]>
+const refOptionsCache: { current: RefOptions } = { current: {} }
+
+export type ModuleConfigEditorSource =
+  | { type: 'deployment'; deploymentId: number }
+  | { type: 'module';     moduleName: string }
+
+interface Props {
+  source: ModuleConfigEditorSource
   collection: ConfigTemplateCollection
-}) {
+}
+
+export default function ModuleConfigEditor({ source, collection }: Props) {
   const { show } = useToast()
   const [records, setRecords]   = useState<Record_[]>([])
   const [original, setOriginal] = useState<Record_[]>([])
@@ -17,14 +28,66 @@ export default function CollectionEditor({ deploymentId, collection }: {
   const [saving, setSaving]     = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
+  const [tagFilter, setTagFilter] = useState<string>('')
+  const [refOpts, setRefOpts]     = useState<RefOptions>(refOptionsCache.current)
+  const refOptsLoaded = useRef(new Set<string>())
 
   const fields = collection.schema.fields
   const idField = collection.schema.id_field || 'id'
 
+  // ref/ref_list 필드가 참조하는 collection 들 자동 fetch
+  useEffect(() => {
+    const needs = new Set<string>()
+    const walk = (fs: ConfigTemplateField[]) => {
+      for (const f of fs) {
+        if ((f.type === 'ref' || f.type === 'ref_list') && f.ref_collection) {
+          needs.add(f.ref_collection)
+        }
+        if (f.type === 'object_list' && f.item_schema) walk(f.item_schema.fields)
+      }
+    }
+    walk(fields)
+    const todo = Array.from(needs).filter(c => !refOptsLoaded.current.has(c))
+    if (todo.length === 0) return
+    todo.forEach(c => refOptsLoaded.current.add(c))
+    const getter = source.type === 'deployment'
+      ? (key: string) => deploymentApi.getDeploymentCollection(source.deploymentId, key)
+      : (key: string) => deploymentApi.getModuleCollection(source.moduleName, key)
+    Promise.all(todo.map(async c => {
+      try {
+        const r = await getter(c)
+        const names = (r.records as Record_[])
+          .map(rec => String(rec['name'] || rec['id'] || ''))
+          .filter(s => !!s)
+        return [c, names] as [string, string[]]
+      } catch {
+        return [c, [] as string[]] as [string, string[]]
+      }
+    })).then(pairs => {
+      const merge: RefOptions = { ...refOptionsCache.current }
+      for (const [c, v] of pairs) merge[c] = v
+      refOptionsCache.current = merge
+      setRefOpts({ ...merge })
+    })
+  }, [fields, source])
+
+  // source 분기 fetch/save
+  const fetchCollection = useCallback(() => {
+    return source.type === 'deployment'
+      ? deploymentApi.getDeploymentCollection(source.deploymentId, collection.key)
+      : deploymentApi.getModuleCollection(source.moduleName, collection.key)
+  }, [source, collection.key])
+
+  const saveCollection = useCallback((recs: Record_[]) => {
+    return source.type === 'deployment'
+      ? deploymentApi.putDeploymentCollection(source.deploymentId, collection.key, recs, true)
+      : deploymentApi.putModuleCollection(source.moduleName, collection.key, recs, true)
+  }, [source, collection.key])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await deploymentApi.getDeploymentCollection(deploymentId, collection.key)
+      const r = await fetchCollection()
       setRecords(r.records)
       setOriginal(JSON.parse(JSON.stringify(r.records)))
     } catch (e) {
@@ -32,7 +95,7 @@ export default function CollectionEditor({ deploymentId, collection }: {
     } finally {
       setLoading(false)
     }
-  }, [deploymentId, collection.key, collection.title, show])
+  }, [fetchCollection, collection.title, show])
 
   useEffect(() => { void load() }, [load])
 
@@ -63,9 +126,7 @@ export default function CollectionEditor({ deploymentId, collection }: {
   async function save() {
     setSaving(true)
     try {
-      const r = await deploymentApi.putDeploymentCollection(
-        deploymentId, collection.key, records, true
-      )
+      const r = await saveCollection(records)
       show(`${collection.title} 저장됨 (${r.count}개, signal: ${r.signaled.length ? r.signaled.join(',') : 'n/a'})`, 'ok')
       setOriginal(JSON.parse(JSON.stringify(records)))
     } catch (e) {
@@ -84,8 +145,25 @@ export default function CollectionEditor({ deploymentId, collection }: {
     !f.readonly && (showAdvanced || !f.advanced)
   )
   const summaryFields = fields.filter(f =>
-    !f.advanced && !f.readonly
+    !f.advanced && !f.readonly && f.type !== 'object_list'
   ).slice(0, 4) // 목록 테이블에 표시할 주요 필드 (최대 4개)
+
+  // tag 기반 필터링 + 전체 태그 집합 수집
+  const allTags = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of records) {
+      const t = r['tags']
+      if (Array.isArray(t)) for (const v of t) if (typeof v === 'string' && v) s.add(v)
+    }
+    return Array.from(s).sort()
+  }, [records])
+  const visibleIdx = useMemo(() => {
+    if (!tagFilter) return records.map((_, i) => i)
+    return records
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => Array.isArray(r['tags']) && (r['tags'] as unknown[]).includes(tagFilter))
+      .map(({ i }) => i)
+  }, [records, tagFilter])
 
   if (loading) return <div className="empty" style={{ padding: 20 }}>로딩 중...</div>
 
@@ -100,6 +178,21 @@ export default function CollectionEditor({ deploymentId, collection }: {
         </div>
       )}
 
+      {/* tag filter chip */}
+      {allTags.length > 0 && (
+        <div style={{ marginBottom: 8, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: '#666' }}>태그 필터:</span>
+          <button
+            className={`btn btn--sm ${tagFilter === '' ? 'btn--primary' : 'btn--outline'}`}
+            onClick={() => setTagFilter('')}>전체</button>
+          {allTags.map(t => (
+            <button key={t}
+              className={`btn btn--sm ${tagFilter === t ? 'btn--primary' : 'btn--outline'}`}
+              onClick={() => setTagFilter(t)}>{t}</button>
+          ))}
+        </div>
+      )}
+
       {/* 행 목록 */}
       <table className="data-table" style={{ width: '100%' }}>
         <thead>
@@ -109,18 +202,21 @@ export default function CollectionEditor({ deploymentId, collection }: {
           </tr>
         </thead>
         <tbody>
-          {records.length === 0 ? (
+          {visibleIdx.length === 0 ? (
             <tr><td colSpan={summaryFields.length + 1} style={{ textAlign: 'center', color: '#888', padding: 20 }}>
-              행 없음 — "＋ 추가" 로 생성
+              {records.length === 0 ? '행 없음 — "＋ 추가" 로 생성' : '태그 필터 결과 없음'}
             </td></tr>
           ) : (
-            records.map((r, i) => (
-              <RowDisplay key={String(r[idField] || i)} row={r}
-                summaryFields={summaryFields}
-                active={editingIdx === i}
-                onEdit={() => setEditingIdx(editingIdx === i ? null : i)}
-                onRemove={() => removeRow(i)} />
-            ))
+            visibleIdx.map(i => {
+              const r = records[i]
+              return (
+                <RowDisplay key={String(r[idField] || i)} row={r}
+                  summaryFields={summaryFields}
+                  active={editingIdx === i}
+                  onEdit={() => setEditingIdx(editingIdx === i ? null : i)}
+                  onRemove={() => removeRow(i)} />
+              )
+            })
           )}
         </tbody>
       </table>
@@ -145,6 +241,7 @@ export default function CollectionEditor({ deploymentId, collection }: {
             {visibleFields.map(f => (
               <FieldEditor key={f.key} field={f}
                 value={records[editingIdx][f.key]}
+                refOpts={refOpts}
                 onChange={v => updateField(editingIdx, f.key, v)} />
             ))}
           </div>
@@ -195,12 +292,19 @@ function formatValue(v: unknown, f: ConfigTemplateField): string {
   if (v === undefined || v === null || v === '') return '—'
   if (f.type === 'bool') return v ? '✓' : ''
   if (f.type === 'password') return '••••'
+  if (f.type === 'string_list' || f.type === 'ref_list') {
+    return Array.isArray(v) ? (v.length ? v.join(', ') : '—') : String(v)
+  }
+  if (f.type === 'object_list') {
+    return Array.isArray(v) ? `${v.length}개` : '—'
+  }
   return String(v)
 }
 
-function FieldEditor({ field, value, onChange }: {
+function FieldEditor({ field, value, refOpts, onChange }: {
   field: ConfigTemplateField
   value: unknown
+  refOpts: RefOptions
   onChange: (v: unknown) => void
 }) {
   return (
@@ -210,7 +314,7 @@ function FieldEditor({ field, value, onChange }: {
         {field.required && <span style={{ color: '#e74c3c', marginLeft: 4 }}>*</span>}
       </label>
       <div>
-        {renderInput(field, value, onChange)}
+        {renderInput(field, value, onChange, refOpts)}
         {field.help && (
           <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>{field.help}</div>
         )}
@@ -219,7 +323,8 @@ function FieldEditor({ field, value, onChange }: {
   )
 }
 
-function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unknown) => void) {
+function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unknown) => void,
+                     refOpts: RefOptions = {}) {
   if (f.type === 'bool') {
     return <input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} />
   }
@@ -246,9 +351,111 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
         onChange={e => onChange(e.target.value)} />
     )
   }
+  if (f.type === 'ref') {
+    const options = (f.ref_collection && refOpts[f.ref_collection]) || []
+    return (
+      <select className="form-input" value={(value as string) ?? ''}
+        onChange={e => onChange(e.target.value)}>
+        <option value="">(선택 안함)</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    )
+  }
+  if (f.type === 'string_list') {
+    // 콤마 분리 입력 ↔ 문자열 배열
+    const arr = Array.isArray(value) ? (value as unknown[]).map(String) : []
+    return (
+      <input className="form-input" type="text"
+        value={arr.join(', ')}
+        placeholder="콤마로 구분"
+        onChange={e => {
+          const raw = e.target.value
+          const parts = raw.split(',').map(s => s.trim()).filter(s => s !== '')
+          onChange(parts)
+        }} />
+    )
+  }
+  if (f.type === 'ref_list') {
+    const options = (f.ref_collection && refOpts[f.ref_collection]) || []
+    const selected = new Set(Array.isArray(value) ? (value as unknown[]).map(String) : [])
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 120, overflowY: 'auto',
+                    border: '1px solid #ddd', borderRadius: 4, padding: 4 }}>
+        {options.length === 0 ? (
+          <div style={{ fontSize: 11, color: '#999' }}>(참조할 항목 없음)</div>
+        ) : options.map(o => (
+          <label key={o} style={{ fontSize: 12 }}>
+            <input type="checkbox" checked={selected.has(o)}
+              onChange={e => {
+                const next = new Set(selected)
+                if (e.target.checked) next.add(o); else next.delete(o)
+                onChange(Array.from(next))
+              }} /> {o}
+          </label>
+        ))}
+      </div>
+    )
+  }
+  if (f.type === 'object_list') {
+    return <ObjectListEditor field={f} value={value} onChange={onChange} refOpts={refOpts} />
+  }
   return (
     <input className="form-input" type="text"
       value={(value as string) ?? ''}
       onChange={e => onChange(e.target.value)} />
+  )
+}
+
+function ObjectListEditor({ field, value, onChange, refOpts }: {
+  field: ConfigTemplateField
+  value: unknown
+  onChange: (v: unknown) => void
+  refOpts: RefOptions
+}) {
+  const items = Array.isArray(value) ? (value as Record_[]) : []
+  const itemFields = field.item_schema?.fields || []
+  function addItem() {
+    const r: Record_ = {}
+    for (const f of itemFields) {
+      if (f.default !== undefined) r[f.key] = f.default
+    }
+    onChange([...items, r])
+  }
+  function removeItem(i: number) {
+    onChange(items.filter((_, idx) => idx !== i))
+  }
+  function updateItemField(i: number, key: string, v: unknown) {
+    onChange(items.map((it, idx) => idx === i ? { ...it, [key]: v } : it))
+  }
+  return (
+    <div style={{ border: '1px dashed #bbb', borderRadius: 4, padding: 6 }}>
+      {items.length === 0 ? (
+        <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>항목 없음</div>
+      ) : (
+        <table style={{ width: '100%', fontSize: 12 }}>
+          <thead>
+            <tr>
+              {itemFields.map(f => <th key={f.key} style={{ textAlign: 'left' }}>{f.label}</th>)}
+              <th style={{ width: 40 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, i) => (
+              <tr key={i}>
+                {itemFields.map(f => (
+                  <td key={f.key} style={{ padding: '2px 4px' }}>
+                    {renderInput(f, it[f.key], (v) => updateItemField(i, f.key, v), refOpts)}
+                  </td>
+                ))}
+                <td>
+                  <button className="btn btn--sm btn--danger" onClick={() => removeItem(i)}>×</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <button className="btn btn--sm btn--outline" onClick={addItem} style={{ marginTop: 4 }}>＋ 항목</button>
+    </div>
   )
 }

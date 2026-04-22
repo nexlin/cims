@@ -8,7 +8,7 @@ CSC Agent/Package/Deployment Admin API (P10).
   /api/v1/agents/{id}/metrics   GET — 최근 리소스 메트릭
 
   /api/v1/packages              GET list / POST upload (multipart or base64)
-  /api/v1/packages/{id}         GET / DELETE
+  /api/v1/packages/{id}         GET / PUT (config_template/description) / DELETE
 
   /api/v1/deployments           GET list / POST create (agent × package)
   /api/v1/deployments/{id}      GET / PUT / DELETE
@@ -412,6 +412,7 @@ async def handle_packages(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
         except (TypeError, ValueError):
             return HandlerResult(status=400, body={"error": "invalid_id"}, media_type="application/json")
         if method == "GET":    return await _get_package(pid, config)
+        if method == "PUT":    return await _update_package(handler_args, pid, config)
         if method == "DELETE": return await _delete_package(pid, config)
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
@@ -659,6 +660,59 @@ def _move_to_backup(file_path: str, backup_dir: str) -> str:
         return dst
     except Exception:
         return ""
+
+
+async def _update_package(handler_args: HandlerArgs, pid: int, config):
+    """패키지 메타/설정 템플릿 수정. 파일·sha256 은 불변 (재업로드로 교체)."""
+    try:
+        body = handler_args.body
+        if isinstance(body, (bytes, bytearray)):
+            body = body.decode("utf-8")
+        if isinstance(body, str):
+            body = json.loads(body) if body.strip() else {}
+        body = body or {}
+    except Exception as e:
+        return HandlerResult(status=400, body={"error": f"invalid_body: {e}"}, media_type="application/json")
+
+    updates = []
+    params: list = []
+    if "description" in body:
+        d = body.get("description")
+        if d is not None and not isinstance(d, str):
+            return HandlerResult(status=400, body={"error": "description_must_be_string"}, media_type="application/json")
+        updates.append("description=%s")
+        params.append(d)
+    if "config_template" in body:
+        tmpl = body.get("config_template")
+        if tmpl is None:
+            updates.append("config_template_json=NULL")
+        else:
+            if not isinstance(tmpl, dict):
+                return HandlerResult(status=400, body={"error": "config_template_must_be_object"}, media_type="application/json")
+            updates.append("config_template_json=%s")
+            params.append(json.dumps(tmpl, ensure_ascii=False))
+
+    if not updates:
+        return HandlerResult(status=400, body={"error": "nothing_to_update"}, media_type="application/json")
+
+    params.append(pid)
+    sql = f"UPDATE cims_package SET {', '.join(updates)} WHERE id=%s"
+
+    def _run_update():
+        conn = _get_db(config)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                affected = cur.rowcount
+            conn.commit()
+            return affected
+        finally:
+            conn.close()
+
+    affected = await asyncio.to_thread(_run_update)
+    if affected == 0:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    return await _get_package(pid, config)
 
 
 async def _delete_package(pid: int, config):

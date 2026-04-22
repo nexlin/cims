@@ -11,6 +11,7 @@ Routes:
 """
 
 import os
+import glob
 import json
 import socket
 import time
@@ -76,6 +77,37 @@ def _get_csp_stats(config: dict) -> dict:
     port = int(notify.get('Port', 4421))
     resp = _udp_request(ip, port, {"event": "STATS_REQUEST", "uri": "", "action": ""})
     return resp if resp.get('status') == 'OK' else {}
+
+
+def _service_log_dir(config: dict) -> str:
+    """ServiceLogDir 를 config 에서 조회. csc_app.py 와 동일 로직."""
+    sl = config.get('ServiceLogging', {})
+    d = sl.get('Dir', '')
+    if not d:
+        d = config.get('ServiceLogDir', config.get('MsgLogDir', ''))
+    return d
+
+
+def _load_active_states(config: dict, kind: str) -> list:
+    """{ServiceLogDir}/state/{kind}/*.json 을 읽어 가입자별 활성 상태 리스트 반환.
+       CSP 가 원자 쓰기(.tmp+rename)로 관리하므로 부분 쓰기 읽음은 없음.
+       .tmp 잔여 파일은 무시.
+    """
+    base = _service_log_dir(config)
+    if not base:
+        return []
+    pattern = os.path.join(base, 'state', kind, '*.json')
+    items = []
+    for fpath in glob.glob(pattern):
+        if fpath.endswith('.tmp'):
+            continue
+        try:
+            with open(fpath, 'r') as f:
+                items.append(json.loads(f.read()))
+        except Exception:
+            # 경합/파일 깨짐 등 — 조용히 skip
+            pass
+    return items
 
 
 def _get_cmp_stats(config: dict) -> dict:
@@ -187,33 +219,56 @@ async def _health(config: dict) -> HandlerResult:
         'record_enable': csp.get('record_enable', False),
     }
 
-    # 활성 통화 목록 (DB에서)
-    try:
-        with _get_db(config) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT call_id, initiator, callee, state, invite_time "
-                    "FROM voip_call_logs WHERE state IN ('ringing','active') "
-                    "ORDER BY invite_time DESC LIMIT 50"
-                )
-                voip_active = cur.fetchall()
-                for r in voip_active:
-                    r['invite_time'] = _dt(r['invite_time'])
+    # v3 (2026-04-22): 가입자별 state 파일 기반 실시간 활성 통화 조회.
+    #   CSP 가 {ServiceLogDir}/state/{volte,ptt}/{subscriber}.json 에 원자 쓰기로 관리.
+    #   VoLTE: 한 통화당 caller+callee 2개 파일 → call_id 로 dedup 해서 통화 목록.
+    #   PTT: 가입자별 참여 상태 → group_id 별 집계.
+    volte_states = _load_active_states(config, 'volte')
+    ptt_states = _load_active_states(config, 'ptt')
 
-                cur.execute(
-                    "SELECT call_id, group_id, initiator, state, invite_time "
-                    "FROM ptt_call_logs WHERE state IN ('ringing','active') "
-                    "ORDER BY invite_time DESC LIMIT 50"
-                )
-                ptt_active = cur.fetchall()
-                for r in ptt_active:
-                    r['invite_time'] = _dt(r['invite_time'])
+    # VoLTE: call_id 기준 dedup (caller 쪽을 우선)
+    voip_calls = {}
+    for st in volte_states:
+        cid = st.get('call_id', '')
+        if not cid:
+            continue
+        entry = voip_calls.setdefault(cid, {
+            'call_id': cid,
+            'session_id': st.get('session_id', ''),
+            'state': st.get('state'),
+            'video': st.get('video', False),
+            'started_at': st.get('started_at'),
+            'answered_at': st.get('answered_at'),
+        })
+        role = st.get('role', '')
+        sub = st.get('subscriber_id', '')
+        if role == 'caller':
+            entry['caller'] = sub
+            entry['callee'] = st.get('peer_id', entry.get('callee', ''))
+        elif role == 'callee':
+            entry['callee'] = sub
+            entry.setdefault('caller', st.get('peer_id', ''))
+    result['active_voip'] = sorted(voip_calls.values(), key=lambda x: x.get('started_at') or '')
 
-                result['active_voip'] = voip_active
-                result['active_ptt'] = ptt_active
-    except Exception:
-        result['active_voip'] = []
-        result['active_ptt'] = []
+    # PTT: group_id 별 참여자 집계
+    ptt_groups = {}
+    for st in ptt_states:
+        gid = st.get('group_id', '')
+        if not gid:
+            continue
+        grp = ptt_groups.setdefault(gid, {
+            'group_id': gid,
+            'session_id': st.get('session_id', ''),
+            'started_at': st.get('started_at'),
+            'members': [],
+            'initiator': None,
+        })
+        sub = st.get('subscriber_id', '')
+        role = st.get('role', 'member')
+        if role == 'initiator':
+            grp['initiator'] = sub
+        grp['members'].append({'subscriber_id': sub, 'role': role})
+    result['active_ptt'] = sorted(ptt_groups.values(), key=lambda x: x.get('started_at') or '')
 
     return HandlerResult(status=200, body=result)
 
@@ -300,7 +355,7 @@ async def _messages_stats(config, gran, from_dt, to_dt, proto, date) -> HandlerR
                 # SIP 메시지 통계 간이 구현: INVITE 수를 시간대별 집계
                 cur.execute(
                     "SELECT HOUR(invite_time) AS h, COUNT(*) AS cnt "
-                    "FROM voip_call_logs WHERE DATE(invite_time) = %s "
+                    "FROM volte_call_logs WHERE DATE(invite_time) = %s "
                     "GROUP BY HOUR(invite_time) ORDER BY h",
                     (date,)
                 )
@@ -349,7 +404,7 @@ async def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResu
     try:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
-                if svc in ('voip', 'summary'):
+                if svc in ('volte', 'summary'):
                     voip = _calc_voip_stats(cur, from_dt, to_dt, gran)
                 else:
                     voip = None
@@ -361,7 +416,7 @@ async def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResu
 
         result = {'granularity': gran, 'from': from_dt, 'to': to_dt}
         if voip:
-            result['voip'] = voip
+            result['volte'] = voip
         if ptt:
             result['ptt'] = ptt
 
@@ -377,7 +432,7 @@ def _calc_voip_stats(cur, from_dt, to_dt, gran):
         "SUM(CASE WHEN state='ended' AND sip_status=200 THEN 1 ELSE 0 END) AS success, "
         "AVG(CASE WHEN duration > 0 THEN duration ELSE NULL END) AS avg_duration, "
         "MAX(duration) AS max_duration "
-        "FROM voip_call_logs WHERE invite_time BETWEEN %s AND %s",
+        "FROM volte_call_logs WHERE invite_time BETWEEN %s AND %s",
         (from_dt, to_dt)
     )
     row = cur.fetchone()
@@ -387,7 +442,7 @@ def _calc_voip_stats(cur, from_dt, to_dt, gran):
 
     # 실패 사유 분포
     cur.execute(
-        "SELECT end_reason, COUNT(*) AS cnt FROM voip_call_logs "
+        "SELECT end_reason, COUNT(*) AS cnt FROM volte_call_logs "
         "WHERE invite_time BETWEEN %s AND %s AND state='ended' "
         "GROUP BY end_reason",
         (from_dt, to_dt)
@@ -399,7 +454,7 @@ def _calc_voip_stats(cur, from_dt, to_dt, gran):
         cur.execute(
             "SELECT HOUR(invite_time) AS h, COUNT(*) AS cnt, "
             "SUM(CASE WHEN sip_status=200 THEN 1 ELSE 0 END) AS ok "
-            "FROM voip_call_logs WHERE invite_time BETWEEN %s AND %s "
+            "FROM volte_call_logs WHERE invite_time BETWEEN %s AND %s "
             "GROUP BY HOUR(invite_time) ORDER BY h",
             (from_dt, to_dt)
         )
@@ -413,7 +468,7 @@ def _calc_voip_stats(cur, from_dt, to_dt, gran):
         cur.execute(
             "SELECT DATE(invite_time) AS d, COUNT(*) AS cnt, "
             "SUM(CASE WHEN sip_status=200 THEN 1 ELSE 0 END) AS ok "
-            "FROM voip_call_logs WHERE invite_time BETWEEN %s AND %s "
+            "FROM volte_call_logs WHERE invite_time BETWEEN %s AND %s "
             "GROUP BY DATE(invite_time) ORDER BY d",
             (from_dt, to_dt)
         )
@@ -499,7 +554,7 @@ async def _subscribers_status(config: dict) -> HandlerResult:
                     "ps.id AS ptt_id, ps.auth_id AS ptt_auth_id, "
                     "ps.register_time AS ptt_reg_time, ps.logout_time AS ptt_logout_time "
                     "FROM users u "
-                    "LEFT JOIN voip_subscriptions vs ON vs.user_id = u.id "
+                    "LEFT JOIN volte_subscriptions vs ON vs.user_id = u.id "
                     "LEFT JOIN ptt_subscriptions ps ON ps.user_id = u.id "
                     "ORDER BY u.name"
                 )
@@ -508,7 +563,7 @@ async def _subscribers_status(config: dict) -> HandlerResult:
                 # 현재 활성 VoIP 통화 (가입자별)
                 cur.execute(
                     "SELECT l.initiator, l.callee, l.state, l.invite_time, l.call_id "
-                    "FROM voip_call_logs l WHERE l.state IN ('ringing','active')"
+                    "FROM volte_call_logs l WHERE l.state IN ('ringing','active')"
                 )
                 voip_active = {}
                 for r in cur.fetchall():
@@ -609,12 +664,12 @@ async def _subscribers_status(config: dict) -> HandlerResult:
                     sub = {
                         'person_id': row['person_id'],
                         'name': row['name'],
-                        'voip': None,
+                        'volte': None,
                         'ptt': None,
                     }
 
                     if voip_id:
-                        sub['voip'] = {
+                        sub['volte'] = {
                             'msisdn': voip_id,
                             'online': voip_online,
                             'register_time': _dt(row.get('voip_reg_time')),

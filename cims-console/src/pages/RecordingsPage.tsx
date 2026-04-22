@@ -127,7 +127,7 @@ export default function RecordingsPage() {
         <select className="form-input" style={{ width: 120 }}
           value={callType} onChange={e => { setCallType(e.target.value); setPage(0) }}>
           <option value="">전체</option>
-          <option value="voip">VoIP</option>
+          <option value="volte">VoIP</option>
           <option value="ptt">PTT</option>
         </select>
         <input className="search-input" placeholder="발신자/착신자 검색"
@@ -169,8 +169,8 @@ export default function RecordingsPage() {
               <tr key={rec.id} style={{ cursor: 'pointer' }}
                 onClick={() => openDetail(rec)}>
                 <td>
-                  <span className={`badge ${rec.call_type === 'voip' ? 'badge--blue' : 'badge--green'}`}>
-                    {rec.call_type === 'voip' ? 'VoIP' : 'PTT'}
+                  <span className={`badge ${rec.call_type === 'volte' ? 'badge--blue' : 'badge--green'}`}>
+                    {rec.call_type === 'volte' ? 'VoIP' : 'PTT'}
                   </span>
                 </td>
                 <td>{rec.caller}</td>
@@ -261,8 +261,8 @@ export default function RecordingsPage() {
               {/* 메타 정보 */}
               <div className="form-grid" style={{ marginBottom: 16 }}>
                 <label>유형</label>
-                <span className={`badge ${detail.call_type === 'voip' ? 'badge--blue' : 'badge--green'}`}>
-                  {detail.call_type === 'voip' ? 'VoIP' : 'PTT'}
+                <span className={`badge ${detail.call_type === 'volte' ? 'badge--blue' : 'badge--green'}`}>
+                  {detail.call_type === 'volte' ? 'VoIP' : 'PTT'}
                 </span>
                 <label>시작</label><span>{fmtDate(detail.start_time)} {fmtTime(detail.start_time)}</span>
                 <label>종료</label><span>{detail.end_time ? `${fmtDate(detail.end_time)} ${fmtTime(detail.end_time)}` : '진행중'}</span>
@@ -272,7 +272,7 @@ export default function RecordingsPage() {
               </div>
 
               {/* VoIP: 재생 버튼 */}
-              {detail.call_type === 'voip' && (
+              {detail.call_type === 'volte' && (
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                   {segments.length > 0 ? (
                     <button className="btn btn--primary"

@@ -62,14 +62,14 @@ def _find_all_d_dirs(date_str: str, hour: str = None, call_type: str = None) -> 
     if not _calls_dir:
         return []
     yyyy, mm, dd = _date_parts(date_str)
-    types = [call_type] if call_type else ['voip', 'ptt']
+    types = [call_type] if call_type else ['volte', 'ptt']
     result = []
     for ct in types:
         if hour:
             base = os.path.join(_calls_dir, ct, yyyy, mm, dd, hour.zfill(2))
         else:
             base = os.path.join(_calls_dir, ct, yyyy, mm, dd)
-        if ct == 'voip':
+        if ct == 'volte':
             # voip: HH/{prefix}/{caller}/{call_id}.d
             pat = os.path.join(base, "**", "*.d") if hour else os.path.join(base, "*", "**", "*.d")
         else:
@@ -771,7 +771,7 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
     return ""
 
 
-def _search_sip_messages(call_ids: list, date_str: str, hour: str = None, service: str = "phone") -> list:
+def _search_sip_messages(call_ids: list, date_str: str, hour: str = None, service: str = "volte") -> list:
     """서비스별 flow.jsonl에서 call_ids에 해당하는 SIP 메시지 검색 (compact, body 없음).
     flow.jsonl은 Call-ID를 `subid` 필드에 기록하므로 `subid` 우선, 레거시 `call_id` fallback."""
     if not _sip_log_dir or not call_ids:
@@ -810,7 +810,7 @@ def _search_sip_messages(call_ids: list, date_str: str, hour: str = None, servic
 
 def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                          time_start: str = "", time_end: str = "",
-                         call_type: str = "voip",
+                         call_type: str = "volte",
                          sesid_set: set = None) -> list:
     """서비스별 flow.jsonl에서 CMP(proto=JSON)/CSC(proto=CSC) 메시지 검색.
     sesid_set 이 주어지면 해당 sesid 와 일치하는 메시지만 반환 (타 호 섞임 방지).
@@ -820,7 +820,7 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
         return []
 
     # Map call_type to service for flow file selection
-    service = "phone" if call_type.startswith("voip") else "ptt"
+    service = "volte" if call_type.startswith("volte") else "ptt"
     results = []
     flow_paths = _resolve_flow_paths(date_str, hour, service)
 
@@ -845,7 +845,7 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                     mu = method.upper()
                     if mu in ("HEARTBEAT",):
                         continue
-                    if call_type.startswith("voip") and mu in ("ADD_GROUP", "REMOVE_GROUP", "JOIN_GROUP",
+                    if call_type.startswith("volte") and mu in ("ADD_GROUP", "REMOVE_GROUP", "JOIN_GROUP",
                                                        "LEAVE_GROUP", "MODIFY_GROUP"):
                         continue
                     if call_type == "ptt" and mu in ("ADD_SESSION", "REMOVE_SESSION", "MODIFY_SESSION"):
@@ -941,7 +941,7 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
         return _load_messages(d_dir)
 
     # SIP 메시지 검색 (VoIP → phone)
-    sip_msgs = _search_sip_messages(call_ids, date_str, hour, service="phone")
+    sip_msgs = _search_sip_messages(call_ids, date_str, hour, service="volte")
 
     # 해당 호의 sesid 모음 (CMP 메시지 필터링 기준 — 가장 정확한 방법)
     sesid_set = set()
@@ -968,7 +968,7 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
                 time_end = te
 
     # CMP 메시지 검색: sesid 우선, 없으면 시간 범위 fallback
-    ct = call_json.get("call_type", "voip") if call_json else "voip"
+    ct = call_json.get("call_type", "volte") if call_json else "volte"
     cmp_msgs = _search_cmp_messages(call_ids, date_str, hour, time_start, time_end, ct,
                                      sesid_set=sesid_set if sesid_set else None)
 
@@ -1090,8 +1090,8 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 
     # 필터
     if call_type:
-        if call_type == 'voip':
-            logs = [l for l in logs if l.get('call_type', '').startswith('voip')]
+        if call_type == 'volte':
+            logs = [l for l in logs if l.get('call_type', '').startswith('volte')]
         else:
             logs = [l for l in logs if l.get('call_type') == call_type]
     if msisdn:
@@ -1767,7 +1767,7 @@ def _lookup_body_from_detail(date_str: str, hour: str, ts: str, direction: str, 
         hh_from_ts = ts[:2] if len(ts) >= 2 else ""
         hours = [hh_from_ts] if hh_from_ts else [f"{h:02d}" for h in range(24)]
 
-    services = [service] if service else ["phone", "ptt", "system"]
+    services = [service] if service else ["volte", "ptt", "system"]
 
     for hh in hours:
         for svc in services:

@@ -1,6 +1,6 @@
 import { api } from './client'
 
-export type ServiceName = 'cmp' | 'csp' | 'cwrtc' | 'csc' | 'console' | 'phone'
+export type ServiceName = 'cmp' | 'csp' | 'cwrtc' | 'csc' | 'console' | 'phone' | 'agent'
 export type ServiceAction = 'start' | 'stop' | 'restart'
 
 export interface ServicesStatus {

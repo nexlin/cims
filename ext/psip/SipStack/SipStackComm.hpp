@@ -230,6 +230,12 @@ bool CSipStack::RecvSipMessage( int iThreadId, const char * pszBuf, int iBufLen,
 	pclsMessage->m_strClientIp = pszIp;
 	pclsMessage->m_iClientPort = iPort;
 	pclsMessage->m_eTransport = eTransport;
+	// UDP 수신 경로에서 SipUdpListenerThread 가 세팅한 thread-local id 를 메시지로 전달.
+	// (TCP/TLS 경로는 현재 미지원 — 단일 리스너 구조이므로 -1 유지)
+	extern thread_local int t_iCurrentListenerId;
+	if (eTransport == E_SIP_UDP && t_iCurrentListenerId > 0) {
+		pclsMessage->m_iListenerId = t_iCurrentListenerId;
+	}
 
 	RecvSipMessage( iThreadId, pclsMessage );
 

@@ -29,12 +29,16 @@ static void _cspReloadHandler(int) { g_reloadFlag = 1; }
 
 CCallDir gclsCallDir;
 #include "CmpClient.h"
-#include "CspAccessControl.h"
+#include "CspAclPolicyEngine.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
-#include "CspRouteEngine.h"
+#include "CspLocalNodeMap.h"
+#include "CspRemoteNodeMap.h"
+#include "CspRouteMap.h"
+#include "CspRouteSetMap.h"
+#include "CspRoutingPolicyEngine.h"
+#include "CspRuleEvaluator.h"
 #include "CspServiceMap.h"
-#include "CspTrunkManager.h"
 #include "DbManager.h"
 #include "CspServerDefine.h"
 #include "CspServerVersion.h"
@@ -79,7 +83,9 @@ int ServiceMain() {
     gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp" );
     std::string sysId = gclsSetup.m_strSystemId.empty() ? "csp_01" : gclsSetup.m_strSystemId;
     gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId );
-    gclsSipLogger.SetDomainServiceMap( gclsSetup.m_mapDomainToService );
+    // v3 (2026-04-22): domain→kind 매핑은 AccessServiceMap 이 SOT.
+    //   Sync 는 아래 clsSetup 설정 블록에서 수행.
+    //   초기 SipLogger 는 빈 맵으로 시작 — AccessServiceMap.Sync() 후 재설정됨.
     CLog::SetCallBack( &gclsSipLogger );
     CLog::Print( LOG_SYSTEM, "CspServer is started ( version-%s %s %s )", CSP_SERVER_VERSION, __DATE__, __TIME__ );
     if ( !gclsSetup.m_strOverlayPath.empty() ) {
@@ -111,13 +117,19 @@ int ServiceMain() {
 
     clsSetup.m_strUserAgent = "csp_";
     clsSetup.m_strUserAgent.append( CSP_SERVER_VERSION );
-    // VoIP SIP domain for From/To/P-Asserted-Identity (Realm 설정의 volte 도메인)
-    clsSetup.m_strDomain = gclsSetup.GetDomainForService("volte");
-    if (clsSetup.m_strDomain.empty()) {
-        // volte 미설정이면 첫 도메인 사용 (단일 service 배포)
-        if (!gclsSetup.m_mapDomainToService.empty())
-            clsSetup.m_strDomain = gclsSetup.m_mapDomainToService.begin()->first;
+    // v3 (2026-04-22): VoIP 도메인은 AccessServiceMap 이 SOT. 이 시점엔 Sync 전이므로
+    //   ConfigCache 선로드 + AccessServiceMap 선 Sync 후 조회.
+    {
+        std::string strJsonlDir = gclsSetup.m_strConfigJsonlDir;
+        if (!strJsonlDir.empty() && strJsonlDir[0] != '/') {
+            strJsonlDir = std::string(CDirectory::GetProgramDirectory()) + "/" + strJsonlDir;
+        }
+        gclsCspConfigCache.Init(strJsonlDir);
+        gclsCspConfigCache.LoadInitial();
+        gclsAccessServiceMap_Sync_compat();
+        gclsSipLogger.SetDomainServiceMap(gclsServiceMap.BuildDomainToKindMap());
     }
+    clsSetup.m_strDomain = gclsServiceMap.GetDomainByKind("volte");
     clsSetup.m_iStackExecutePeriod = gclsSetup.m_iStackExecutePeriod;
     clsSetup.m_iTimerD = gclsSetup.m_iTimerD;
     clsSetup.m_iTimerJ = gclsSetup.m_iTimerJ;
@@ -131,16 +143,9 @@ int ServiceMain() {
 
     // CSP 런타임 설정 캐시 — jsonl 전용 (Phase C 이후).
     //   agent 가 관리하는 install_path/config/*.jsonl 을 SIGUSR1 수신 시마다 재로드.
-    {
-        std::string strJsonlDir = gclsSetup.m_strConfigJsonlDir;
-        if (!strJsonlDir.empty() && strJsonlDir[0] != '/') {
-            strJsonlDir = std::string(CDirectory::GetProgramDirectory()) + "/" + strJsonlDir;
-        }
-        gclsCspConfigCache.Init(strJsonlDir);
-        gclsCspConfigCache.LoadInitial();
-        CLog::Print(LOG_SYSTEM, "ConfigCache initialized (jsonlDir=%s)",
-                    strJsonlDir.empty() ? "(none)" : strJsonlDir.c_str());
-    }
+    //   v3: 이미 위 clsSetup.m_strDomain 설정 블록에서 Init+LoadInitial 완료. 여기선 로그만.
+    CLog::Print(LOG_SYSTEM, "ConfigCache initialized (jsonlDir=%s)",
+                gclsSetup.m_strConfigJsonlDir.empty() ? "(none)" : gclsSetup.m_strConfigJsonlDir.c_str());
 
     // [FIX] Init CMP Client before loading groups (which triggers AddGroup)
     if ( !gclsCmpClient.Init( gclsSetup.m_strCmpIp, gclsSetup.m_iCmpPort, gclsSetup.m_iLocalCmpPort ) ) {
@@ -208,21 +213,27 @@ int ServiceMain() {
     //   핸들러에서는 플래그만 세팅, 실제 reload 는 메인 루프에서 수행.
     signal( SIGUSR1, _cspReloadHandler );
 
-    // DB 의 추가 UDP 리스너들을 psip 에 등록 (기본 리스너는 Start 에서 생성됨)
+    // v3 (2026-04-22): 9-collection 로드 순서 (sip_runtime_config.md §4.3)
+    //   1) LocalNode / RemoteNode   (의존성 없음)
+    //   2) Route                    (LN, RN 참조)
+    //   3) RouteSet                 (Route 참조)
+    //   4) Rule                     (의존성 없음)
+    //   5) RuleSet                  (Rule 참조) — RuleEvaluator 가 둘 다 로드
+    //   6/7) RoutingPolicy / AclPolicy (RuleSet + Route/Access 참조) — 후속 스테이지
+    //   8) AccessService            (LocalNode 참조)
+    gclsLocalNodeMap.Sync();
+    gclsRemoteNodeMap.Sync();
+    gclsRouteMap.Sync();
+    gclsRouteMap.ValidateRefs();        // LocalNode/RemoteNode 존재 확인
+    gclsRouteSetMap.Sync();
+    gclsRouteSetMap.ValidateRefs();     // Route 존재 확인
+    gclsRuleEvaluator.LoadAll();        // rules + rule_sets
+    gclsRoutingPolicyEngine.Sync();     // routing_policies
+    gclsAclPolicyEngine.Sync();         // acl_policies
+    gclsAccessServiceMap_Sync_compat(); // (임시) 기존 gclsServiceMap.Sync() 호출
+
+    // psip 실제 UDP 리스너 bind (동일 local_nodes.jsonl 을 다른 용도로 소비)
     gclsListenerManager.Sync();
-
-    // 트렁크 레지스트리 + 헬스 체크 스레드
-    gclsTrunkManager.Start();
-
-    // 라우팅 규칙 엔진 — 캐시에서 규칙 로드
-    gclsRouteEngine.Sync();
-
-    // 접근제어 + rate limit 초기화
-    gclsAccessControl.Sync();
-    gclsAccessControl.SetRateLimit(0, 0);   // 기본 비활성. SetupRead 에서 덮어쓸 수 있음.
-
-    // 서비스 맵 초기 로드 (인증/라우팅/트렁크가 의존)
-    gclsServiceMap.Sync();
     if ( gclsSetup.m_iMonitorPort > 0 ) {
         gclsMonitor.m_iMonitorPort = gclsSetup.m_iMonitorPort;
         StartMonitorServerThread( &gclsMonitor );
@@ -236,13 +247,19 @@ int ServiceMain() {
         // SIGUSR1 수신 → jsonl 재로드 + 관리자 Sync()
         if ( g_reloadFlag ) {
             g_reloadFlag = 0;
-            CLog::Print( LOG_SYSTEM, "SIGUSR1: reloading jsonl config" );
+            CLog::Print( LOG_SYSTEM, "SIGUSR1: reloading jsonl config (v3 9-collection)" );
             gclsCspConfigCache.ReloadFromJsonl();
+            gclsLocalNodeMap.Sync();
+            gclsRemoteNodeMap.Sync();
+            gclsRouteMap.Sync();
+            gclsRouteMap.ValidateRefs();
+            gclsRouteSetMap.Sync();
+            gclsRouteSetMap.ValidateRefs();
+            gclsRuleEvaluator.LoadAll();
+            gclsRoutingPolicyEngine.Sync();
+            gclsAclPolicyEngine.Sync();
+            gclsAccessServiceMap_Sync_compat();
             gclsListenerManager.Sync();
-            gclsTrunkManager.Sync();
-            gclsRouteEngine.Sync();
-            gclsAccessControl.Sync();
-            gclsServiceMap.Sync();
         }
 
         if ( iSecond % 10 == 0 ) {

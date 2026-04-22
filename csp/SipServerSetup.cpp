@@ -201,7 +201,7 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (sip.Has("LocalIp")) m_strLocalIp = sip.GetString("LocalIp");
                 if (sip.Has("UdpPort")) m_iUdpPort = (int)sip.GetInt("UdpPort");
                 if (sip.Has("UdpThreadCount")) m_iUdpThreadCount = (int)sip.GetInt("UdpThreadCount");
-                if (sip.Has("AuthRealm")) m_strAuthRealm = sip.GetString("AuthRealm");
+                // v3: Setup.Sip.AuthRealm 제거 — access_services.auth_realm 이 SOT
                 if (sip.Has("TcpPort")) m_iTcpPort = (int)sip.GetInt("TcpPort");
                 if (sip.Has("TcpThreadCount")) m_iTcpThreadCount = (int)sip.GetInt("TcpThreadCount");
                 if (sip.Has("TcpRecvTimeout")) m_iTcpRecvTimeout = (int)sip.GetInt("TcpRecvTimeout");
@@ -392,55 +392,7 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 }
             }
 
-            // ── Realm 배열 파싱: "Realm": [{"service":"volte","domains":[...]}, ...] ──
-            m_mapDomainToService.clear();
-            m_mapServiceToDomains.clear();
-            if (setup.Has("Realm")) {
-                SimpleJson::JsonNode realmArr = setup.Get("Realm");
-                if (realmArr.type == SimpleJson::JSON_ARRAY) {
-                    for (size_t i = 0; i < realmArr.Size(); ++i) {
-                        SimpleJson::JsonNode entry = realmArr.At(i);
-                        if (entry.type != SimpleJson::JSON_OBJECT) continue;
-
-                        std::string strService = entry.GetString("service");
-                        if (strService.empty()) {
-                            CLog::Print(LOG_ERROR, "Setup: Realm[%zu] missing 'service'", i);
-                            continue;
-                        }
-
-                        if (!entry.Has("domains")) {
-                            CLog::Print(LOG_ERROR, "Setup: Realm[%zu] (service=%s) missing 'domains'",
-                                        i, strService.c_str());
-                            continue;
-                        }
-                        SimpleJson::JsonNode domArr = entry.Get("domains");
-                        if (domArr.type != SimpleJson::JSON_ARRAY) {
-                            CLog::Print(LOG_ERROR, "Setup: Realm[%zu] 'domains' must be array", i);
-                            continue;
-                        }
-
-                        for (size_t j = 0; j < domArr.Size(); ++j) {
-                            std::string strDomain = domArr.At(j).AsString();
-                            if (strDomain.empty()) continue;
-                            // 도메인 중복 검증
-                            auto it = m_mapDomainToService.find(strDomain);
-                            if (it != m_mapDomainToService.end() && it->second != strService) {
-                                CLog::Print(LOG_ERROR,
-                                    "Setup: domain '%s' assigned to multiple services ('%s' and '%s')",
-                                    strDomain.c_str(), it->second.c_str(), strService.c_str());
-                                return false;
-                            }
-                            m_mapDomainToService[strDomain] = strService;
-                            m_mapServiceToDomains[strService].push_back(strDomain);
-                        }
-                    }
-                }
-            }
-
-            // AuthRealm 미지정 시 첫 도메인으로 fallback
-            if (m_strAuthRealm.empty() && !m_mapDomainToService.empty()) {
-                m_strAuthRealm = m_mapDomainToService.begin()->first;
-            }
+            // v3 (2026-04-22): Setup.Realm 파싱 제거 — access_services.jsonl 이 SOT.
         }
 
         m_strFileName = pszFileName;
@@ -653,24 +605,5 @@ void CSipServerSetup::SetFileSizeTime() {
     }
 }
 
-/**
- * @ingroup CspServer
- * @brief service 의 대표 도메인 반환 (Realm 설정에 등록된 첫 도메인).
- */
-std::string CSipServerSetup::GetDomainForService(const std::string& strService) const {
-    auto it = m_mapServiceToDomains.find(strService);
-    if (it != m_mapServiceToDomains.end() && !it->second.empty()) {
-        return it->second.front();
-    }
-    return "";
-}
-
-/**
- * @ingroup CspServer
- * @brief 도메인이 속한 service 반환. 미매칭 시 빈 문자열.
- */
-std::string CSipServerSetup::GetServiceForDomain(const std::string& strDomain) const {
-    auto it = m_mapDomainToService.find(strDomain);
-    if (it != m_mapDomainToService.end()) return it->second;
-    return "";
-}
+// v3 (2026-04-22): GetDomainForService / GetServiceForDomain 제거.
+//   대체: gclsServiceMap.GetDomainByKind() / gclsServiceMap.GetByDomain().kind

@@ -4,7 +4,7 @@ import { useToast } from '../components/Toast'
 
 type SubTab = 'messages' | 'service'
 type Granularity = '5m' | '10m' | '1h' | '1d' | '1M' | '1y'
-type SvcType = 'voip' | 'ptt'
+type SvcType = 'volte' | 'ptt'
 
 const GRAN_LABELS: Record<Granularity, string> = {
   '5m': '5분', '10m': '10분', '1h': '1시간', '1d': '1일', '1M': '1월', '1y': '1년'
@@ -54,7 +54,7 @@ export default function StatsPage() {
   const [subTab, setSubTab] = useState<SubTab>('service')
   const [gran, setGran] = useState<Granularity>('1h')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [svcType, setSvcType] = useState<SvcType>('voip')
+  const [svcType, setSvcType] = useState<SvcType>('volte')
 
   // 메시지 통계
   const [msgData, setMsgData] = useState<MessagesResponse | null>(null)
@@ -113,7 +113,7 @@ export default function StatsPage() {
 
         {subTab === 'service' && (
           <select className="form-input" value={svcType} onChange={e => setSvcType(e.target.value as SvcType)} style={{ width: 100 }}>
-            <option value="voip">VoIP</option>
+            <option value="volte">VoIP</option>
             <option value="ptt">PTT</option>
           </select>
         )}

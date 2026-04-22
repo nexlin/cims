@@ -26,7 +26,7 @@ struct DbSubscriber {
     std::string id;           // MSISDN (e.g. +821357007001)
     std::string authId;       // Digest auth_id
     std::string password;
-    std::string serviceType;  // "voip" or "ptt"
+    std::string serviceType;  // "volte" or "ptt"
 };
 
 static bool LoadSubscribersFromDb(const std::string& strCspJson,
@@ -48,42 +48,9 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(strJson);
     SimpleJson::JsonNode setup = root.Get("Setup");
 
-    // Realm 추출 — 신 포맷 "Realm": [{"service":..., "domains":[...]}] 우선.
-    // 모드별 대응: PTT → mcptt 도메인, VoIP → volte 도메인.
-    SimpleJson::JsonNode sip = setup.Get("Sip");
-    const std::string strTargetSvc = (strFilterMode == "ptt") ? "mcptt" : "volte";
-    if (setup.Has("Realm")) {
-        SimpleJson::JsonNode realmArr = setup.Get("Realm");
-        if (realmArr.type == SimpleJson::JSON_ARRAY) {
-            for (size_t i = 0; i < realmArr.Size(); ++i) {
-                SimpleJson::JsonNode entry = realmArr.At(i);
-                if (entry.GetString("service") == strTargetSvc && entry.Has("domains")) {
-                    SimpleJson::JsonNode domArr = entry.Get("domains");
-                    if (domArr.type == SimpleJson::JSON_ARRAY && domArr.Size() > 0) {
-                        strRealm = domArr.At(0).AsString();
-                        break;
-                    }
-                }
-            }
-            // 첫 매칭 실패 시 배열의 첫 항목 첫 도메인 fallback (단일-service 배포 대비)
-            if (strRealm.empty() && realmArr.Size() > 0) {
-                SimpleJson::JsonNode entry = realmArr.At(0);
-                if (entry.Has("domains")) {
-                    SimpleJson::JsonNode domArr = entry.Get("domains");
-                    if (domArr.type == SimpleJson::JSON_ARRAY && domArr.Size() > 0)
-                        strRealm = domArr.At(0).AsString();
-                }
-            }
-        }
-    }
-    // Legacy fallback (VoipRealm/PttRealm/Realm) — 이전 설정 호환
-    if (strRealm.empty()) {
-        if (strFilterMode == "ptt" && sip.Has("PttRealm"))      strRealm = sip.GetString("PttRealm");
-        else if (sip.Has("VoipRealm"))                          strRealm = sip.GetString("VoipRealm");
-        else if (sip.Has("Realm") && sip.Get("Realm").type == SimpleJson::JSON_STRING)
-                                                                strRealm = sip.GetString("Realm");
-        else if (sip.Has("AuthRealm"))                          strRealm = sip.GetString("AuthRealm");
-    }
+    // v3 (2026-04-22): Setup.Realm/AuthRealm 제거됨. domain 은 CLI -domain 인자 우선.
+    //   여기서 strRealm 은 호출자 참조용으로 빈 값 두거나 Sip.LocalIp 로 fallback.
+    (void)setup;
 
     // DB 접속 정보
     SimpleJson::JsonNode db = setup.Get("Database");
@@ -104,14 +71,14 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     }
     mysql_set_character_set(pMysql, "utf8mb4");
 
-    // P8: auth_id 컬럼 제거 — imsi + sip_service.domain 조합으로 authId 구성
+    // v3 (2026-04-22): domain 은 CLI 인자 (-domain) 로 결정.
+    //   DB 쿼리는 id / imsi / passwd 만. authId 는 SimSession 생성 시 imsi+@+strDomain 으로 조립.
+    //   (sub.authId 는 imsi 만 담아 뒀다가 상위에서 완성)
     // VoIP 가입자
-    if (strFilterMode.empty() || strFilterMode == "voip") {
+    if (strFilterMode.empty() || strFilterMode == "volte") {
         const char* sql =
-            "SELECT cu.id, COALESCE(cu.imsi,''), cu.passwd, "
-            "       COALESCE(s.domain,'') "
-            "FROM voip_subscriptions cu "
-            "LEFT JOIN sip_service s ON cu.service_id = s.id "
+            "SELECT cu.id, COALESCE(cu.imsi,''), cu.passwd "
+            "FROM volte_subscriptions cu "
             "ORDER BY cu.id";
         if (mysql_query(pMysql, sql) == 0) {
             MYSQL_RES* res = mysql_store_result(pMysql);
@@ -120,15 +87,10 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                 while ((row = mysql_fetch_row(res))) {
                     DbSubscriber sub;
                     sub.id       = row[0] ? row[0] : "";
-                    std::string imsi   = row[1] ? row[1] : "";
-                    std::string domain = row[3] ? row[3] : "";
-                    if (!imsi.empty() && !domain.empty()) {
-                        sub.authId = imsi + "@" + domain;
-                    } else {
-                        sub.authId = sub.id;    // fallback
-                    }
+                    std::string imsi = row[1] ? row[1] : "";
+                    sub.authId = imsi;   // domain 은 상위에서 붙임
                     sub.password    = row[2] ? row[2] : "";
-                    sub.serviceType = "voip";
+                    sub.serviceType = "volte";
                     vecOut.push_back(sub);
                 }
                 mysql_free_result(res);
@@ -140,19 +102,14 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     if (strFilterMode.empty() || strFilterMode == "ptt") {
         std::string sql;
         if (!strGroupId.empty()) {
-            // 그룹 멤버만 로드 (그룹 멤버 순서 = priority 순)
-            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd, "
-                  "       COALESCE(s.domain,'') "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd "
                   "FROM ptt_subscriptions pu "
-                  "LEFT JOIN sip_service s ON pu.service_id = s.id "
                   "JOIN ptt_group_members gm ON gm.user_id = pu.id "
                   "WHERE gm.group_id='" + strGroupId + "' "
                   "ORDER BY gm.priority, pu.id";
         } else {
-            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd, "
-                  "       COALESCE(s.domain,'') "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd "
                   "FROM ptt_subscriptions pu "
-                  "LEFT JOIN sip_service s ON pu.service_id = s.id "
                   "ORDER BY pu.id";
         }
         if (mysql_query(pMysql, sql.c_str()) == 0) {
@@ -162,13 +119,8 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                 while ((row = mysql_fetch_row(res))) {
                     DbSubscriber sub;
                     sub.id       = row[0] ? row[0] : "";
-                    std::string imsi   = row[1] ? row[1] : "";
-                    std::string domain = row[3] ? row[3] : "";
-                    if (!imsi.empty() && !domain.empty()) {
-                        sub.authId = imsi + "@" + domain;
-                    } else {
-                        sub.authId = sub.id;
-                    }
+                    std::string imsi = row[1] ? row[1] : "";
+                    sub.authId = imsi;   // domain 은 상위에서 붙임
                     sub.password    = row[2] ? row[2] : "";
                     sub.serviceType = "ptt";
                     vecOut.push_back(sub);
@@ -517,7 +469,7 @@ int main(int argc, char* argv[])
     std::string strExplicitAuthId = GetArg(argc, argv, "-auth_id", "");
     std::string strDomain     = GetArg(argc, argv, "-domain",     "csp");
     std::string strPassword   = GetArg(argc, argv, "-password",   "1234");
-    std::string strMode       = GetArg(argc, argv, "-mode",       "voip");
+    std::string strMode       = GetArg(argc, argv, "-mode",       "volte");
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
@@ -602,9 +554,13 @@ int main(int argc, char* argv[])
 
         std::string strUser, strAuthId, strPwd;
         if (bDbMode && i < (int)vecDbSubs.size()) {
-            // DB 모드: 가입자 정보에서 직접 설정
+            // DB 모드: v3 — authId 는 DB 의 imsi + CLI -domain 으로 조립
             strUser   = vecDbSubs[i].id;
-            strAuthId = vecDbSubs[i].authId;
+            if (!vecDbSubs[i].authId.empty() && vecDbSubs[i].authId.find('@') == std::string::npos) {
+                strAuthId = vecDbSubs[i].authId + "@" + strDomain;
+            } else {
+                strAuthId = vecDbSubs[i].authId;  // 이미 @ 포함(레거시)이거나 빈 값
+            }
             strPwd    = vecDbSubs[i].password;
         } else {
             strUser = MakeUserId(strStartUser, i);

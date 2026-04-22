@@ -52,11 +52,11 @@ public:
     // SIP 비밀번호
     std::string m_strPassWord;
 
-    // P7: 서비스 귀속 + IMSI (user 파트)
+    // v3 (2026-04-22): 서비스 귀속을 name 기반 참조로 이전.
+    //   - m_strServiceRef = access_services.name (빈 문자열이면 REGISTER 거부)
     //   - service.domain 과 결합하여 Digest username (full IMPI) 구성
-    //   - m_iServiceId == 0 이면 REGISTER 거부
     //   - m_strImsi 가 비면 m_strAuthId 를 fallback 으로 사용
-    int         m_iServiceId = 0;
+    std::string m_strServiceRef;   // access_services.name 참조
     std::string m_strImsi;
 
     // 착신거부 ( Do Not Disturb ) 
@@ -68,7 +68,7 @@ public:
     // 착신전환 ( Call Forward ) 
     std::string m_strForward;
 
-    // 서비스 타입: "voip" | "ptt" | "both"
+    // 서비스 타입: "volte" | "ptt" | "both"
     std::string m_strServiceType;
 
     // 소속 아이디

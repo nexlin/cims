@@ -11,17 +11,24 @@ CCspConfigCache gclsCspConfigCache;
 
 namespace {
 
+// v3: 9 collection 이름 (로그용)
 const char* kEntityName[CACHE_COUNT] = {
-    "listener", "trunk", "route", "access", "service",
+    "local_node", "remote_node", "route", "route_set",
+    "rule", "rule_set", "routing_policy", "acl_policy",
+    "access_service",
 };
 
-// agent 가 관리하는 jsonl 파일명
+// agent 가 관리하는 jsonl 파일명 (kEntityName 과 순서 동일)
 const char* kJsonlFile[CACHE_COUNT] = {
-    "listeners.jsonl",
-    "trunks.jsonl",
+    "local_nodes.jsonl",
+    "remote_nodes.jsonl",
     "routes.jsonl",
-    "acl.jsonl",
-    "services.jsonl",
+    "route_sets.jsonl",
+    "rules.jsonl",
+    "rule_sets.jsonl",
+    "routing_policies.jsonl",
+    "acl_policies.jsonl",
+    "access_services.jsonl",
 };
 
 } // namespace

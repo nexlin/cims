@@ -1,55 +1,95 @@
 {
-  "version": 1,
+  "version": 2,
   "sections": [
     {
       "key": "sip",
-      "title": "SIP",
-      "description": "프로세스 공통 SIP 설정 (리스너/트렁크/라우팅/ACL 은 별도 콜렉션)",
+      "title": "SIP Stack",
+      "description": "프로세스 공통 SIP stack 설정 (수신 포트는 local_nodes 콜렉션으로 이관)",
       "fields": [
         {
-          "key": "Setup.Sip.AuthRealm", "label": "Realm / Auth Domain",
-          "type": "string", "default": "csp",
-          "required": true, "restart": true,
-          "help": "SIP Digest 인증에 사용되는 realm"
+          "key": "Setup.Sip.LocalIp", "label": "Local IP",
+          "type": "string", "default": "0.0.0.0",
+          "restart": true,
+          "help": "서버가 사용하는 주 IP. 0.0.0.0 이면 부팅 시 자동 탐지."
         },
         {
-          "key": "Setup.Sip.UdpPort", "label": "기본 UDP 포트 (bootstrap)",
+          "key": "Setup.Sip.UdpPort", "label": "Bootstrap UDP 포트",
           "type": "int", "default": 5060, "min": 1, "max": 65535,
           "restart": true,
-          "help": "리스너 콜렉션 로드 전까지 최소 동작할 bootstrap 포트"
+          "help": "local_nodes 로드 실패 시 최소 동작용 bootstrap 포트 (한 개). 정식 수신 포트는 local_nodes 에서 정의."
+        },
+        {
+          "key": "Setup.Sip.UdpThreadCount", "label": "UDP 수신 스레드 수",
+          "type": "int", "default": 2, "min": 1, "max": 32,
+          "restart": true
+        },
+        {
+          "key": "Setup.Sip.StackExecutePeriod", "label": "Stack tick (ms)",
+          "type": "int", "default": 20, "min": 1, "max": 1000,
+          "restart": true
+        },
+        {
+          "key": "Setup.Sip.MinRegisterTimeout", "label": "최소 REGISTER timeout (s)",
+          "type": "int", "default": 60, "min": 10,
+          "restart": true
+        },
+        {
+          "key": "Setup.Sip.UserTimeout", "label": "User Alive Timeout (s)",
+          "type": "int", "default": 3600, "min": 60,
+          "restart": true
+        },
+        {
+          "key": "Setup.Sip.StaleCallTimeout", "label": "Stale Call Timeout (s)",
+          "type": "int", "default": 300, "min": 0,
+          "restart": true,
+          "help": "0 = 비활성. 마지막 SIP activity 이후 무응답 통화 자동 종료."
+        },
+        {
+          "key": "Setup.Sip.CallPickupId", "label": "Call Pickup ID",
+          "type": "string", "default": "**",
+          "restart": true,
+          "help": "TAS 의 Call Pickup 기능용 트리거 전화번호."
+        },
+        {
+          "key": "Setup.Sip.SendOptionsPeriod", "label": "UE OPTIONS keepalive (s)",
+          "type": "int", "default": 0, "min": 0,
+          "restart": true,
+          "help": "0 = 비활성. 양의 값이면 등록된 UE 에 주기적으로 OPTIONS 전송."
         }
       ]
     },
     {
       "key": "roles",
       "title": "역할 (Roles)",
-      "description": "활성화할 SIP 서버 역할",
+      "description": "활성화할 IMS 서버 역할. AccessService 와 무관하게 전역 스위치.",
       "fields": [
-        { "key": "Setup.Roles.CSCF",   "label": "CSCF (가입자 등록)",    "type": "bool", "default": true,  "restart": true },
-        { "key": "Setup.Roles.TAS",    "label": "TAS (VoLTE B2BUA)",    "type": "bool", "default": true,  "restart": true },
-        { "key": "Setup.Roles.PTT_AS", "label": "PTT-AS (그룹콜)",      "type": "bool", "default": true,  "restart": true },
-        { "key": "Setup.Roles.IBCF",   "label": "IBCF (IP-PBX 트렁크)", "type": "bool", "default": false, "restart": true }
+        { "key": "Setup.Roles.CSCF",   "label": "CSCF (가입자 등록/인증)", "type": "bool", "default": true,  "restart": true },
+        { "key": "Setup.Roles.TAS",    "label": "TAS (VoIP B2BUA)",        "type": "bool", "default": true,  "restart": true },
+        { "key": "Setup.Roles.PTT_AS", "label": "PTT-AS (그룹콜)",         "type": "bool", "default": true,  "restart": true },
+        { "key": "Setup.Roles.IBCF",   "label": "IBCF (IMS 피어링)",       "type": "bool", "default": false, "restart": true }
+      ]
+    },
+    {
+      "key": "rtp_relay",
+      "title": "RTP Relay (CMP 연동)",
+      "description": "미디어 릴레이용 CMP 연동 정보",
+      "fields": [
+        { "key": "Setup.RtpRelay.UseRtpRelay", "label": "RTP Relay 사용", "type": "bool",   "default": true,  "restart": true },
+        { "key": "Setup.RtpRelay.CmpIp",       "label": "CMP IP",         "type": "string", "default": "127.0.0.1", "restart": true },
+        { "key": "Setup.RtpRelay.CmpPort",     "label": "CMP 제어 포트",  "type": "int",    "default": 9000, "min": 1, "max": 65535, "restart": true },
+        { "key": "Setup.RtpRelay.LocalCmpPort","label": "Local 수신 포트","type": "int",    "default": 9001, "min": 1, "max": 65535, "restart": true }
       ]
     },
     {
       "key": "log",
       "title": "로깅",
       "fields": [
-        {
-          "key": "Setup.Log.Folder", "label": "로그 디렉토리",
-          "type": "path", "default": "./log",
-          "restart": true
-        },
-        {
-          "key": "Setup.Log.MaxSize", "label": "로그 파일 최대 크기 (bytes)",
-          "type": "int", "default": 10000000, "min": 1000000,
-          "restart": true
-        },
-        { "key": "Setup.Log.Level.Debug",   "label": "Debug 로그", "type": "bool", "default": true,  "restart": false,
-          "reload_hint": "SIGUSR1 로 즉시 반영 (향후 지원)" },
-        { "key": "Setup.Log.Level.Info",    "label": "Info 로그",  "type": "bool", "default": true,  "restart": false },
-        { "key": "Setup.Log.Level.Network", "label": "Network 로그","type": "bool", "default": true,  "restart": false },
-        { "key": "Setup.Log.Level.Sql",     "label": "SQL 로그",   "type": "bool", "default": false, "restart": false }
+        { "key": "Setup.Log.Folder",        "label": "로그 디렉토리",              "type": "path", "default": "./log", "restart": true },
+        { "key": "Setup.Log.MaxSize",       "label": "로그 파일 최대 크기 (bytes)", "type": "int",  "default": 10000000, "min": 1000000, "restart": true },
+        { "key": "Setup.Log.Level.Debug",   "label": "Debug 로그",    "type": "bool", "default": true,  "restart": false, "reload_hint": "SIGUSR1 로 즉시 반영 (향후 지원)" },
+        { "key": "Setup.Log.Level.Info",    "label": "Info 로그",     "type": "bool", "default": true,  "restart": false },
+        { "key": "Setup.Log.Level.Network", "label": "Network 로그",  "type": "bool", "default": true,  "restart": false },
+        { "key": "Setup.Log.Level.Sql",     "label": "SQL 로그",      "type": "bool", "default": false, "restart": false }
       ]
     },
     {
@@ -67,125 +107,300 @@
   ],
   "collections": [
     {
-      "key": "listeners",
-      "title": "SIP 리스너",
-      "description": "수신 바인딩 (IP/포트/프로토콜 조합)",
+      "key": "local_nodes",
+      "title": "Local Node (수신 엔드포인트)",
+      "description": "CSP 가 수신하는 bind 포트. access/peering/mgmt edge 로 구분.",
       "restart": false,
-      "reload_hint": "저장 시 CSP 가 SIGUSR1 로 즉시 rebind",
+      "reload_hint": "저장 시 CSP SIGUSR1 로 rebind",
       "schema": {
         "primary_key": ["id"],
         "id_field": "id",
         "id_type": "uuid",
-        "unique_keys": [["bind_ip", "bind_port", "protocol"]],
+        "unique_keys": [["bind_ip", "bind_port", "protocol"], ["name"]],
         "fields": [
           { "key": "id",              "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
           { "key": "name",            "label": "이름", "type": "string", "required": true },
+          { "key": "enabled",         "label": "활성", "type": "bool", "default": true },
+          { "key": "edge",            "label": "Edge 분류", "type": "enum", "options": ["access", "peering", "mgmt"], "default": "access", "required": true,
+            "help": "access=UE 수신, peering=IMS 피어링 수신, mgmt=관리 전용" },
           { "key": "bind_ip",         "label": "바인딩 IP", "type": "string", "default": "0.0.0.0", "required": true },
           { "key": "bind_port",       "label": "포트", "type": "int", "default": 5060, "min": 1, "max": 65535, "required": true },
           { "key": "protocol",        "label": "프로토콜", "type": "enum", "options": ["UDP","TCP","TLS","WS","WSS"], "default": "UDP", "required": true },
-          { "key": "domain",          "label": "도메인", "type": "string", "default": "" },
-          { "key": "service",         "label": "서비스", "type": "enum", "options": ["volte","mcptt","system","console"], "default": "volte" },
-          { "key": "enabled",         "label": "활성", "type": "bool", "default": true },
-          { "key": "thread_count",    "label": "스레드 수", "type": "int", "default": 2, "min": 1, "max": 32, "advanced": true },
           { "key": "tls_cert_path",   "label": "TLS cert", "type": "path", "advanced": true },
           { "key": "tls_key_path",    "label": "TLS key",  "type": "path", "advanced": true },
           { "key": "tls_ca_path",     "label": "TLS CA",   "type": "path", "advanced": true },
           { "key": "tls_verify_peer", "label": "Peer 검증", "type": "bool", "default": false, "advanced": true },
-          { "key": "max_connections", "label": "최대 연결", "type": "int", "default": 0, "min": 0, "advanced": true },
+          { "key": "max_connections", "label": "최대 연결 수", "type": "int", "default": 0, "min": 0, "advanced": true,
+            "help": "0 = 무제한. TCP/TLS 에만 적용." },
+          { "key": "tags",            "label": "태그", "type": "string_list", "default": [] },
           { "key": "note",            "label": "메모", "type": "string", "default": "" }
         ]
       },
-      "storage": { "kind": "jsonl", "file": "config/listeners.jsonl" }
+      "storage": { "kind": "jsonl", "file": "config/local_nodes.jsonl" }
     },
     {
-      "key": "trunks",
-      "title": "SIP 트렁크",
-      "description": "외부 피어(IP-PBX, 상위 proxy) 연동",
+      "key": "remote_nodes",
+      "title": "Remote Node (피어 서버)",
+      "description": "외부 IMS/PBX 피어의 접속 정보. 순수 transport 만 (인증정보는 Route 에서).",
       "restart": false,
       "reload_hint": "저장 시 CSP SIGUSR1 reload",
       "schema": {
         "primary_key": ["id"],
-        "id_field": "id", "id_type": "uuid",
+        "id_field": "id",
+        "id_type": "uuid",
         "unique_keys": [["name"]],
+        "fields": [
+          { "key": "id",             "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
+          { "key": "name",           "label": "이름", "type": "string", "required": true },
+          { "key": "enabled",        "label": "활성", "type": "bool", "default": true },
+          { "key": "ip",             "label": "IP/Host", "type": "string", "required": true },
+          { "key": "port",           "label": "포트", "type": "int", "default": 5060, "min": 1, "max": 65535, "required": true },
+          { "key": "protocol",       "label": "프로토콜", "type": "enum", "options": ["UDP","TCP","TLS"], "default": "UDP", "required": true },
+          { "key": "remote_domain",  "label": "원격 SIP domain", "type": "string", "default": "",
+            "help": "피어의 SIP URI host. Outgoing Request-URI/To 에 사용." },
+          { "key": "srv_lookup",     "label": "SRV lookup", "type": "bool", "default": false, "advanced": true },
+          { "key": "dns_fallback",   "label": "DNS A fallback", "type": "bool", "default": true, "advanced": true },
+          { "key": "tls_verify",     "label": "TLS peer 검증", "type": "bool", "default": false, "advanced": true },
+          { "key": "tags",           "label": "태그", "type": "string_list", "default": [] },
+          { "key": "note",           "label": "메모", "type": "string", "default": "" }
+        ]
+      },
+      "storage": { "kind": "jsonl", "file": "config/remote_nodes.jsonl" }
+    },
+    {
+      "key": "routes",
+      "title": "Route (LN ↔ RN 연결)",
+      "description": "Local Node 와 Remote Node 간 1:1 연결 파라미터. (local_node_ref, remote_node_ref) unique.",
+      "restart": false,
+      "reload_hint": "저장 시 CSP SIGUSR1 reload",
+      "schema": {
+        "primary_key": ["id"],
+        "id_field": "id",
+        "id_type": "uuid",
+        "unique_keys": [["name"], ["local_node_ref", "remote_node_ref"]],
         "fields": [
           { "key": "id",                     "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
           { "key": "name",                   "label": "이름", "type": "string", "required": true },
           { "key": "enabled",                "label": "활성", "type": "bool", "default": true },
-          { "key": "service",                "label": "서비스", "type": "enum", "options": ["volte","mcptt","system","console"], "default": "volte" },
-          { "key": "failover_priority",      "label": "우선순위", "type": "int", "default": 100 },
-          { "key": "remote_ip",              "label": "원격 IP", "type": "string", "required": true },
-          { "key": "remote_port",            "label": "원격 포트", "type": "int", "default": 5060, "min": 1, "max": 65535 },
-          { "key": "remote_domain",          "label": "원격 도메인", "type": "string", "default": "" },
-          { "key": "protocol",               "label": "프로토콜", "type": "enum", "options": ["UDP","TCP","TLS"], "default": "UDP" },
+          { "key": "local_node_ref",         "label": "Local Node", "type": "ref", "ref_collection": "local_nodes", "required": true },
+          { "key": "remote_node_ref",        "label": "Remote Node", "type": "ref", "ref_collection": "remote_nodes", "required": true },
           { "key": "outbound_proxy_ip",      "label": "outbound proxy IP", "type": "string", "default": "", "advanced": true },
           { "key": "outbound_proxy_port",    "label": "outbound proxy port", "type": "int", "default": 0, "advanced": true },
           { "key": "register_to_remote",     "label": "REGISTER 전송", "type": "bool", "default": false },
+          { "key": "register_expires",       "label": "REGISTER expires (s)", "type": "int", "default": 3600, "advanced": true },
           { "key": "auth_user",              "label": "Auth user", "type": "string", "default": "" },
           { "key": "auth_password",          "label": "Auth password", "type": "password", "default": "" },
           { "key": "auth_realm",             "label": "Auth realm", "type": "string", "default": "" },
-          { "key": "register_expires",       "label": "REGISTER expires(s)", "type": "int", "default": 3600, "advanced": true },
-          { "key": "options_ping_sec",       "label": "OPTIONS ping(s)", "type": "int", "default": 30, "advanced": true },
-          { "key": "options_dead_threshold", "label": "dead threshold", "type": "int", "default": 3, "advanced": true },
-          { "key": "srv_lookup",             "label": "SRV lookup", "type": "bool", "default": false, "advanced": true },
-          { "key": "dns_fallback",           "label": "DNS fallback", "type": "bool", "default": true, "advanced": true },
-          { "key": "max_concurrent_calls",   "label": "동시 호 제한", "type": "int", "default": 0, "advanced": true },
-          { "key": "cps_limit",              "label": "CPS 제한", "type": "int", "default": 0, "advanced": true },
+          { "key": "max_concurrent_calls",   "label": "동시 호 제한", "type": "int", "default": 0, "min": 0, "advanced": true,
+            "help": "0 = 무제한" },
+          { "key": "cps_limit",              "label": "CPS 제한", "type": "int", "default": 0, "min": 0, "advanced": true },
+          { "key": "tags",                   "label": "태그", "type": "string_list", "default": [] },
           { "key": "note",                   "label": "메모", "type": "string", "default": "" }
-        ]
-      },
-      "storage": { "kind": "jsonl", "file": "config/trunks.jsonl" }
-    },
-    {
-      "key": "routes",
-      "title": "라우팅 규칙",
-      "description": "수신 요청 → 목적지 선택/변환 규칙",
-      "restart": false,
-      "reload_hint": "저장 시 CSP SIGUSR1 reload",
-      "schema": {
-        "primary_key": ["id"],
-        "id_field": "id", "id_type": "uuid",
-        "fields": [
-          { "key": "id",          "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
-          { "key": "name",        "label": "이름", "type": "string", "required": true },
-          { "key": "enabled",     "label": "활성", "type": "bool", "default": true },
-          { "key": "priority",    "label": "우선순위", "type": "int", "default": 100 },
-          { "key": "service",     "label": "서비스", "type": "enum", "options": ["volte","mcptt","system","console","any"], "default": "any" },
-          { "key": "match_json",  "label": "Match (JSON array)", "type": "string",
-            "help": "예: [{\"field\":\"req_uri_user\",\"op\":\"prefix\",\"value\":\"010\"}]" },
-          { "key": "transforms_json", "label": "Transforms (JSON array)", "type": "string", "advanced": true },
-          { "key": "target_mode", "label": "target mode", "type": "enum",
-            "options": ["trunk","service","priority_list","round_robin","weighted","reject"], "default": "trunk" },
-          { "key": "target_ref",  "label": "target 이름/참조", "type": "string", "default": "" },
-          { "key": "fail_action", "label": "실패 시", "type": "enum", "options": ["reject","fallback","next_rule"], "default": "next_rule" },
-          { "key": "note",        "label": "메모", "type": "string", "default": "" }
         ]
       },
       "storage": { "kind": "jsonl", "file": "config/routes.jsonl" }
     },
     {
-      "key": "acl",
-      "title": "접근 제어",
-      "description": "IP/CIDR/UA 기반 allow/deny",
+      "key": "route_sets",
+      "title": "Route Set (클러스터 + 분배 정책)",
+      "description": "Route 여러 개를 묶어 부하분배/failover. peering 클러스터 단위.",
       "restart": false,
       "reload_hint": "저장 시 CSP SIGUSR1 reload",
       "schema": {
         "primary_key": ["id"],
-        "id_field": "id", "id_type": "uuid",
+        "id_field": "id",
+        "id_type": "uuid",
+        "unique_keys": [["name"]],
         "fields": [
-          { "key": "id",            "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
-          { "key": "enabled",       "label": "활성", "type": "bool", "default": true },
-          { "key": "scope",         "label": "범위", "type": "enum", "options": ["global","listener","trunk"], "default": "global" },
-          { "key": "scope_ref",     "label": "listener/trunk 이름", "type": "string", "default": "",
-            "help": "scope 가 listener/trunk 일 때 해당 항목 이름" },
-          { "key": "kind",          "label": "종류", "type": "enum", "options": ["allow","deny"], "default": "deny", "required": true },
-          { "key": "match_type",    "label": "매치", "type": "enum", "options": ["ip","cidr","ua_regex"], "default": "cidr", "required": true },
-          { "key": "value",         "label": "값", "type": "string", "required": true,
-            "help": "ip: 1.2.3.4 · cidr: 1.2.3.0/24 · ua_regex: ^sipp.*" },
-          { "key": "priority",      "label": "우선순위", "type": "int", "default": 100 },
-          { "key": "note",          "label": "메모", "type": "string", "default": "" }
+          { "key": "id",                       "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
+          { "key": "name",                     "label": "이름", "type": "string", "required": true },
+          { "key": "enabled",                  "label": "활성", "type": "bool", "default": true },
+          { "key": "distribution_policy",      "label": "분배 정책", "type": "enum",
+            "options": ["failover", "round_robin", "weighted", "hash_by_caller"], "default": "failover", "required": true },
+          { "key": "members",                  "label": "Route 멤버", "type": "object_list",
+            "required": true,
+            "item_schema": {
+              "fields": [
+                { "key": "route_ref", "label": "Route", "type": "ref", "ref_collection": "routes", "required": true },
+                { "key": "priority",  "label": "우선순위", "type": "int", "default": 100, "min": 1,
+                  "help": "failover: 낮을수록 먼저 선택" },
+                { "key": "weight",    "label": "가중치", "type": "int", "default": 1, "min": 0,
+                  "help": "weighted: 비율. 0 = 분배 제외" }
+              ]
+            }
+          },
+          { "key": "health_check_mode",        "label": "헬스체크 방식", "type": "enum",
+            "options": ["options_ping", "invite_response", "none"], "default": "options_ping" },
+          { "key": "health_check_interval_sec","label": "헬스체크 주기 (s)", "type": "int", "default": 30, "min": 1, "advanced": true },
+          { "key": "health_check_dead_threshold","label": "dead 판정 임계",   "type": "int", "default": 3,  "min": 1, "advanced": true },
+          { "key": "health_check_recovery_probes","label": "recovery 임계",    "type": "int", "default": 1,  "min": 1, "advanced": true },
+          { "key": "fallback_policy",          "label": "전체 dead 시",
+            "type": "enum", "options": ["reject", "next_policy"], "default": "reject" },
+          { "key": "tags",                     "label": "태그", "type": "string_list", "default": [] },
+          { "key": "note",                     "label": "메모", "type": "string", "default": "" }
         ]
       },
-      "storage": { "kind": "jsonl", "file": "config/acl.jsonl" }
+      "storage": { "kind": "jsonl", "file": "config/route_sets.jsonl" }
+    },
+    {
+      "key": "rules",
+      "title": "Rule (원자 조건)",
+      "description": "SIP 메시지 요소 1개에 대한 단일 조건. tags 로 용도(acl/routing/transform) 힌트.",
+      "restart": false,
+      "reload_hint": "저장 시 CSP SIGUSR1 reload",
+      "schema": {
+        "primary_key": ["id"],
+        "id_field": "id",
+        "id_type": "uuid",
+        "unique_keys": [["name"]],
+        "fields": [
+          { "key": "id",      "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
+          { "key": "name",    "label": "이름", "type": "string", "required": true },
+          { "key": "enabled", "label": "활성", "type": "bool", "default": true },
+          { "key": "field",   "label": "대상 필드", "type": "enum", "required": true,
+            "options": [
+              "from_uri_host", "from_uri_user",
+              "to_uri_host",   "to_uri_user",
+              "req_uri_host",  "req_uri_user",
+              "src_ip",        "dst_ip",
+              "user_agent",    "method",
+              "p_asserted_identity", "via_host"
+            ]
+          },
+          { "key": "op",      "label": "연산자", "type": "enum", "required": true,
+            "options": ["eq", "ne", "prefix", "suffix", "contains", "regex", "in_cidr", "in_list", "exists", "not_exists"]
+          },
+          { "key": "value",   "label": "값", "type": "string", "default": "",
+            "help": "in_list 는 콤마 분리. in_cidr 은 1.2.3.0/24. regex 는 POSIX ERE. exists/not_exists 는 무시." },
+          { "key": "tags",    "label": "태그", "type": "string_list", "default": [],
+            "help": "권장: acl / routing / transform / inbound-filter / audit" },
+          { "key": "note",    "label": "메모", "type": "string", "default": "" }
+        ]
+      },
+      "storage": { "kind": "jsonl", "file": "config/rules.jsonl" }
+    },
+    {
+      "key": "rule_sets",
+      "title": "Rule Set (AND/OR 조합)",
+      "description": "Rule 들을 flat AND/OR 로 조합. Routing/ACL/Transform 에서 공용.",
+      "restart": false,
+      "reload_hint": "저장 시 CSP SIGUSR1 reload",
+      "schema": {
+        "primary_key": ["id"],
+        "id_field": "id",
+        "id_type": "uuid",
+        "unique_keys": [["name"]],
+        "fields": [
+          { "key": "id",         "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
+          { "key": "name",       "label": "이름", "type": "string", "required": true },
+          { "key": "enabled",    "label": "활성", "type": "bool", "default": true },
+          { "key": "combinator", "label": "조합자", "type": "enum", "options": ["AND", "OR"], "default": "AND", "required": true },
+          { "key": "members",    "label": "Rule 멤버", "type": "object_list", "required": true,
+            "item_schema": {
+              "fields": [
+                { "key": "rule_ref", "label": "Rule", "type": "ref", "ref_collection": "rules", "required": true },
+                { "key": "negate",   "label": "NOT", "type": "bool", "default": false }
+              ]
+            }
+          },
+          { "key": "tags",       "label": "태그", "type": "string_list", "default": [] },
+          { "key": "note",       "label": "메모", "type": "string", "default": "" }
+        ]
+      },
+      "storage": { "kind": "jsonl", "file": "config/rule_sets.jsonl" }
+    },
+    {
+      "key": "routing_policies",
+      "title": "Routing Policy",
+      "description": "Rule Set 이 match 하면 Route Set 또는 Access Service 로 전달.",
+      "restart": false,
+      "reload_hint": "저장 시 CSP SIGUSR1 reload",
+      "schema": {
+        "primary_key": ["id"],
+        "id_field": "id",
+        "id_type": "uuid",
+        "unique_keys": [["name"]],
+        "fields": [
+          { "key": "id",                        "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
+          { "key": "name",                      "label": "이름", "type": "string", "required": true },
+          { "key": "enabled",                   "label": "활성", "type": "bool", "default": true },
+          { "key": "priority",                  "label": "우선순위", "type": "int", "default": 100, "min": 1,
+            "help": "낮을수록 먼저 평가. 첫 match 적용." },
+          { "key": "match_rule_set_ref",        "label": "매치 Rule Set", "type": "ref", "ref_collection": "rule_sets", "default": "",
+            "help": "비워두면 catch-all (항상 match)" },
+          { "key": "target_type",               "label": "Target 종류", "type": "enum",
+            "options": ["route_set", "access_service", "reject"], "default": "route_set", "required": true },
+          { "key": "target_ref",                "label": "Target 참조", "type": "string", "default": "",
+            "help": "route_set: route_sets.name / access_service: access_services.name / reject: 무시" },
+          { "key": "transform_rule_set_refs",   "label": "변환 Rule Sets (예약)", "type": "string_list", "default": [],
+            "help": "향후 메시지 변환 용. 현재 런타임 미구현 (reserved)" },
+          { "key": "fail_action",               "label": "실패 시", "type": "enum",
+            "options": ["reject", "next_policy"], "default": "next_policy" },
+          { "key": "tags",                      "label": "태그", "type": "string_list", "default": [] },
+          { "key": "note",                      "label": "메모", "type": "string", "default": "" }
+        ]
+      },
+      "storage": { "kind": "jsonl", "file": "config/routing_policies.jsonl" }
+    },
+    {
+      "key": "acl_policies",
+      "title": "ACL Policy",
+      "description": "Rule Set 이 match 하면 allow/deny. scope 단위로 적용.",
+      "restart": false,
+      "reload_hint": "저장 시 CSP SIGUSR1 reload",
+      "schema": {
+        "primary_key": ["id"],
+        "id_field": "id",
+        "id_type": "uuid",
+        "unique_keys": [["name"]],
+        "fields": [
+          { "key": "id",                 "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
+          { "key": "name",               "label": "이름", "type": "string", "required": true },
+          { "key": "enabled",            "label": "활성", "type": "bool", "default": true },
+          { "key": "priority",           "label": "우선순위", "type": "int", "default": 100, "min": 1 },
+          { "key": "match_rule_set_ref", "label": "매치 Rule Set", "type": "ref", "ref_collection": "rule_sets", "required": true },
+          { "key": "scope",              "label": "범위", "type": "enum",
+            "options": ["global", "local_node", "route", "route_set"], "default": "global" },
+          { "key": "scope_ref",          "label": "scope 참조", "type": "string", "default": "",
+            "help": "scope=global 이면 무시. 그 외엔 해당 collection 의 name." },
+          { "key": "action",             "label": "동작", "type": "enum", "options": ["allow", "deny"], "default": "deny", "required": true },
+          { "key": "tags",               "label": "태그", "type": "string_list", "default": [] },
+          { "key": "note",               "label": "메모", "type": "string", "default": "" }
+        ]
+      },
+      "storage": { "kind": "jsonl", "file": "config/acl_policies.jsonl" }
+    },
+    {
+      "key": "access_services",
+      "title": "Access Service (UE 직접 서비스)",
+      "description": "VoIP/PTT 가입자가 직접 붙는 서비스. domain + auth_realm + 허용 Local Node.",
+      "restart": false,
+      "reload_hint": "저장 시 CSP SIGUSR1 reload",
+      "schema": {
+        "primary_key": ["id"],
+        "id_field": "id",
+        "id_type": "uuid",
+        "unique_keys": [["name"]],
+        "fields": [
+          { "key": "id",                       "label": "ID", "type": "string", "readonly": true, "auto": "uuid" },
+          { "key": "name",                     "label": "이름", "type": "string", "required": true },
+          { "key": "enabled",                  "label": "활성", "type": "bool", "default": true },
+          { "key": "kind",                     "label": "종류", "type": "enum", "options": ["volte", "ptt"], "default": "volte", "required": true },
+          { "key": "domain",                   "label": "도메인", "type": "string", "required": true,
+            "help": "UE 의 IMPU/IMPI 조립에 사용. REGISTER 시 username = imsi@<domain>" },
+          { "key": "auth_realm",               "label": "Auth realm", "type": "string", "default": "",
+            "help": "비우면 domain 상속. Digest challenge 의 realm." },
+          { "key": "inbound_policy",           "label": "Inbound 정책", "type": "enum",
+            "options": ["any", "restricted"], "default": "any" },
+          { "key": "allowed_local_node_refs",  "label": "허용 Local Node", "type": "ref_list",
+            "ref_collection": "local_nodes", "default": [],
+            "help": "inbound_policy=restricted 일 때 필수. 해당 Local Node 로 들어온 요청만 이 서비스로 귀속." },
+          { "key": "priority",                 "label": "우선순위", "type": "int", "default": 100, "min": 1 },
+          { "key": "tags",                     "label": "태그", "type": "string_list", "default": [] },
+          { "key": "note",                     "label": "메모", "type": "string", "default": "" }
+        ]
+      },
+      "storage": { "kind": "jsonl", "file": "config/access_services.jsonl" }
     }
   ]
 }

@@ -140,17 +140,17 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     if (!m_pMysql && !Reconnect()) return false;
 
     // Try call users first (query by subscription MSISDN = id)
-    //  P8: auth_id 컬럼 제거 완료 — imsi+service_id 만 사용
+    //  v3 (2026-04-22): service_id INT → service_ref VARCHAR (access_services.name 참조)
     std::string strSql =
         "SELECT cu.id, u.name, u.org_id, cu.passwd, cu.dnd, cu.forward_id, u.id AS person_id, "
-        "       COALESCE(cu.service_id,0), COALESCE(cu.imsi,'') "
-        "FROM voip_subscriptions cu JOIN users u ON cu.user_id = u.id "
+        "       COALESCE(cu.service_ref,''), COALESCE(cu.imsi,'') "
+        "FROM volte_subscriptions cu JOIN users u ON cu.user_id = u.id "
         "WHERE cu.id='" + Escape(strUserId) + "'";
 
     MYSQL_RES* pRes = ExecuteSelect(strSql);
     if (!pRes) return false;
 
-    std::string strServiceType = "voip";
+    std::string strServiceType = "volte";
     MYSQL_ROW row = mysql_fetch_row(pRes);
     if (!row) {
         mysql_free_result(pRes);
@@ -158,7 +158,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
         // Try PTT users
         strSql =
             "SELECT pu.id, u.name, u.org_id, pu.passwd, pu.dnd, pu.forward_id, u.id AS person_id, "
-            "       COALESCE(pu.service_id,0), COALESCE(pu.imsi,'') "
+            "       COALESCE(pu.service_ref,''), COALESCE(pu.imsi,'') "
             "FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
             "WHERE pu.id='" + Escape(strUserId) + "'";
 
@@ -182,7 +182,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser )
     clsUser.m_strForward        = row[5] ? row[5] : "";
     // row[6] = person_id (users.id) used for reject list lookup
     std::string strPersonId     = row[6] ? row[6] : strUserId;
-    clsUser.m_iServiceId        = row[7] ? atoi(row[7]) : 0;
+    clsUser.m_strServiceRef     = row[7] ? row[7] : "";
     clsUser.m_strImsi           = row[8] ? row[8] : "";
     clsUser._loadTime           = time(nullptr);
 
@@ -207,7 +207,7 @@ bool CDbManager::UpdateRegisterTime( const std::string& strUserId )
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
-    ExecuteQuery("UPDATE voip_subscriptions SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'");
+    ExecuteQuery("UPDATE volte_subscriptions SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'");
     ExecuteQuery("UPDATE ptt_subscriptions  SET register_time=NOW() WHERE id='" + Escape(strUserId) + "'");
     return true;
 }
@@ -217,7 +217,7 @@ bool CDbManager::UpdateLogoutTime( const std::string& strUserId )
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_pMysql && !Reconnect()) return false;
 
-    ExecuteQuery("UPDATE voip_subscriptions SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'");
+    ExecuteQuery("UPDATE volte_subscriptions SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'");
     ExecuteQuery("UPDATE ptt_subscriptions  SET logout_time=NOW() WHERE id='" + Escape(strUserId) + "'");
     return true;
 }
@@ -288,14 +288,14 @@ bool CDbManager::LoadAllUsers( CspUserMap& clsMap )
     if (!m_pMysql && !Reconnect()) return false;
 
     int count = 0;
-    const char* aTables[] = { "voip_subscriptions", "ptt_subscriptions" };
-    const char* aTypes[]  = { "voip", "ptt" };
+    const char* aTables[] = { "volte_subscriptions", "ptt_subscriptions" };
+    const char* aTypes[]  = { "volte", "ptt" };
 
     for (int i = 0; i < 2; ++i) {
-        // P8: auth_id 제거 — imsi + service_id 만 사용
+        // v3 (2026-04-22): service_id INT → service_ref VARCHAR (access_services.name 참조)
         std::string strSql =
             std::string("SELECT s.id, u.name, u.org_id, s.passwd, s.dnd, s.forward_id, u.id, "
-            "       COALESCE(s.service_id, 0), COALESCE(s.imsi, '') "
+            "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, '') "
             "FROM ") + aTables[i] + " s JOIN users u ON s.user_id = u.id";
 
         MYSQL_RES* pRes = ExecuteSelect(strSql);
@@ -311,7 +311,7 @@ bool CDbManager::LoadAllUsers( CspUserMap& clsMap )
             clsUser.m_strPassWord       = row[3] ? row[3] : "";
             clsUser.m_bDnd              = row[4] ? (atoi(row[4]) != 0) : false;
             clsUser.m_strForward        = row[5] ? row[5] : "";
-            clsUser.m_iServiceId        = row[7] ? atoi(row[7]) : 0;
+            clsUser.m_strServiceRef     = row[7] ? row[7] : "";
             clsUser.m_strImsi           = row[8] ? row[8] : "";
             clsUser._loadTime           = time(nullptr);
             if (!clsUser.m_strId.empty()) {
@@ -389,160 +389,36 @@ static std::string TimeToSql( time_t t )
     return buf;
 }
 
-bool CDbManager::InsertCallLog( const std::string& strCallId, bool bPtt,
-                                  const std::string& strGroupId,
-                                  const std::string& strInitiator,
-                                  const std::string& strCallee )
+// v3 (2026-04-22): Call/PTT log 는 파일 기반 (service_log/{type}/YYYY/MM/DD/HH/.../*.d/call.json) 이 SOT.
+//   CspServer 의 CCallDir 가 파일 작성, CSC 의 /api/v1/call/logs 가 파일 스캔.
+//   아래 DbManager 함수들은 레거시 호환 no-op (빌드/링크 유지용).
+
+bool CDbManager::InsertCallLog( const std::string&, bool, const std::string&,
+                                  const std::string&, const std::string& )
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    std::string strSql;
-    if (bPtt) {
-        std::string strGroupVal = strGroupId.empty() ? "''" : "'" + Escape(strGroupId) + "'";
-        strSql =
-            "INSERT IGNORE INTO ptt_call_logs "
-            "(call_id, group_id, initiator, state, invite_time) VALUES ('"
-            + Escape(strCallId) + "'," + strGroupVal + ",'"
-            + Escape(strInitiator) + "','ringing',NOW())";
-    } else {
-        strSql =
-            "INSERT IGNORE INTO voip_call_logs "
-            "(call_id, initiator, callee, state, invite_time) VALUES ('"
-            + Escape(strCallId) + "','"
-            + Escape(strInitiator) + "','" + Escape(strCallee) + "','ringing',NOW())";
-    }
-
-    return ExecuteQuery(strSql);
+    return true;   // no-op, file-based CallDir 가 담당
 }
 
 int CDbManager::GetActiveVoipCallCount()
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return 0;
-
-    std::string strSql =
-        "SELECT COUNT(*) AS cnt FROM voip_call_logs WHERE state IN ('ringing','active')";
-
-    if (mysql_query(m_pMysql, strSql.c_str()) != 0) return 0;
-
-    MYSQL_RES* pRes = mysql_store_result(m_pMysql);
-    if (!pRes) return 0;
-
-    int count = 0;
-    MYSQL_ROW row = mysql_fetch_row(pRes);
-    if (row && row[0]) count = atoi(row[0]);
-    mysql_free_result(pRes);
-
-    return count;
+    return 0;   // no-op, 파일 기반 조회는 CSC 가 수행
 }
 
-bool CDbManager::UpdateCallLogActive( const std::string& strCallId )
+bool CDbManager::UpdateCallLogActive( const std::string& ) { return true; }
+
+bool CDbManager::UpdateCallLogEnded( const std::string&, time_t, time_t, int )
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    std::string strSql =
-        "UPDATE voip_call_logs SET state='active', answer_time=NOW()"
-        " WHERE call_id='" + Escape(strCallId) + "' AND state='ringing'";
-
-    return ExecuteQuery(strSql);
+    return true;   // no-op
 }
 
-bool CDbManager::UpdateCallLogEnded( const std::string& strCallId,
-                                      time_t tAnswer, time_t tEnd, int iSipStatus )
+bool CDbManager::HasActiveGroupCall( const std::string& )
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    std::string strAnswer = TimeToSql(tAnswer);
-    std::string strEnd    = tEnd ? TimeToSql(tEnd) : "NOW()";
-    int iDuration = (tAnswer > 0 && tEnd > tAnswer) ? (int)(tEnd - tAnswer) : 0;
-
-    // map SIP status to end_reason
-    const char* pszReason = "normal";
-    if      (iSipStatus == 486)       pszReason = "busy";
-    else if (iSipStatus == 487)       pszReason = "cancel";
-    else if (iSipStatus == 408)       pszReason = "timeout";
-    else if (iSipStatus >= 400)       pszReason = "error";
-
-    char szDur[16];
-    snprintf(szDur, sizeof(szDur), "%d", iDuration);
-
-    std::string strState = (tAnswer > 0) ? "ended" : "ended";
-
-    std::string strSql =
-        "UPDATE voip_call_logs SET state='ended',"
-        " answer_time=" + strAnswer + ","
-        " end_time=" + strEnd + ","
-        " duration=" + szDur + ","
-        " sip_status=" + std::to_string(iSipStatus) + ","
-        " end_reason='" + pszReason + "'"
-        " WHERE call_id='" + Escape(strCallId) + "'";
-
-    // also mark all participants left
-    ExecuteQuery(
-        "UPDATE voip_call_participants cp "
-        "JOIN voip_call_logs cl ON cl.id = cp.log_id "
-        "SET cp.leave_time=NOW() "
-        "WHERE cl.call_id='" + Escape(strCallId) + "' AND cp.leave_time IS NULL"
-    );
-
-    return ExecuteQuery(strSql);
+    return false;   // no-op, 그룹 상태는 GroupCallService 내 메모리/파일 기반
 }
 
-bool CDbManager::HasActiveGroupCall( const std::string& strGroupId )
-{
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
+bool CDbManager::UpdateCallLogActivePtt( const std::string& ) { return true; }
 
-    std::string strSql =
-        "SELECT COUNT(*) AS cnt FROM ptt_call_logs "
-        "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active')";
-
-    MYSQL_RES* pRes = ExecuteSelect(strSql);
-    if (!pRes) return false;
-
-    MYSQL_ROW row = mysql_fetch_row(pRes);
-    int cnt = (row && row[0]) ? atoi(row[0]) : 0;
-    mysql_free_result(pRes);
-    return cnt > 0;
-}
-
-bool CDbManager::UpdateCallLogActivePtt( const std::string& strGroupId )
-{
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    return ExecuteQuery(
-        "UPDATE ptt_call_logs SET state='active', answer_time=NOW() "
-        "WHERE group_id='" + Escape(strGroupId) + "' AND state='ringing' "
-        "ORDER BY invite_time DESC LIMIT 1"
-    );
-}
-
-bool CDbManager::EndGroupCallLog( const std::string& strGroupId )
-{
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    // duration = answer_time → NOW()
-    ExecuteQuery(
-        "UPDATE ptt_call_logs "
-        "SET state='ended', end_time=NOW(), "
-        "duration=TIMESTAMPDIFF(SECOND, answer_time, NOW()), "
-        "end_reason='normal' "
-        "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active')"
-    );
-
-    // mark all remaining participants left
-    return ExecuteQuery(
-        "UPDATE ptt_call_participants cp "
-        "JOIN ptt_call_logs cl ON cl.id = cp.log_id "
-        "SET cp.leave_time=NOW() "
-        "WHERE cl.group_id='" + Escape(strGroupId) + "' AND cp.leave_time IS NULL"
-    );
-}
+bool CDbManager::EndGroupCallLog( const std::string& ) { return true; }
 
 bool CDbManager::InsertRecording( const std::string& strCallId, const std::string& strCallType,
                                    const std::string& strGroupId,
@@ -572,67 +448,12 @@ bool CDbManager::InsertRecording( const std::string& strCallId, const std::strin
     return ExecuteQuery(strSql);
 }
 
-bool CDbManager::InsertParticipant( const std::string& strCallId,
-                                     const std::string& strMsisdn,
-                                     const std::string& strRole,
-                                     bool bJoinNow )
-{
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    std::string strJoin = bJoinNow ? "NOW()" : "NULL";
-    return ExecuteQuery(
-        "INSERT IGNORE INTO voip_call_participants (log_id, msisdn, role, join_time) "
-        "SELECT id,'" + Escape(strMsisdn) + "','" + Escape(strRole) + "'," + strJoin + " "
-        "FROM voip_call_logs WHERE call_id='" + Escape(strCallId) + "' LIMIT 1"
-    );
-}
-
-bool CDbManager::InsertGroupParticipant( const std::string& strGroupId,
-                                          const std::string& strMsisdn )
-{
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    return ExecuteQuery(
-        "INSERT IGNORE INTO ptt_call_participants (log_id, msisdn, role, join_time) "
-        "SELECT id,'" + Escape(strMsisdn) + "','member',NULL "
-        "FROM ptt_call_logs "
-        "WHERE group_id='" + Escape(strGroupId) + "' AND state IN ('ringing','active') "
-        "ORDER BY invite_time DESC LIMIT 1"
-    );
-}
-
-bool CDbManager::UpdateParticipantJoined( const std::string& strGroupId,
-                                           const std::string& strMsisdn )
-{
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    return ExecuteQuery(
-        "UPDATE ptt_call_participants cp "
-        "JOIN ptt_call_logs cl ON cl.id = cp.log_id "
-        "SET cp.join_time=NOW() "
-        "WHERE cl.group_id='" + Escape(strGroupId) + "' "
-        "AND cp.msisdn='" + Escape(strMsisdn) + "' AND cp.join_time IS NULL "
-        "AND cl.state IN ('ringing','active')"
-    );
-}
-
-bool CDbManager::UpdateParticipantLeft( const std::string& strGroupId,
-                                         const std::string& strMsisdn )
-{
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_pMysql && !Reconnect()) return false;
-
-    return ExecuteQuery(
-        "UPDATE ptt_call_participants cp "
-        "JOIN ptt_call_logs cl ON cl.id = cp.log_id "
-        "SET cp.leave_time=NOW() "
-        "WHERE cl.group_id='" + Escape(strGroupId) + "' "
-        "AND cp.msisdn='" + Escape(strMsisdn) + "' AND cp.leave_time IS NULL"
-    );
-}
+// v3: 참가자 기록은 파일 (participants.jsonl) 기반 SOT.
+bool CDbManager::InsertParticipant( const std::string&, const std::string&,
+                                     const std::string&, bool ) { return true; }
+bool CDbManager::InsertGroupParticipant( const std::string&, const std::string& ) { return true; }
+bool CDbManager::UpdateParticipantJoined( const std::string&, const std::string& ) { return true; }
+bool CDbManager::UpdateParticipantLeft( const std::string&, const std::string& ) { return true; }
 
 int CDbManager::IncrementSessionSeq(const std::string& strGroupId) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);

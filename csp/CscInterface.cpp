@@ -12,11 +12,9 @@
 #include "SipServerSetup.h"
 #include "CallDir.h"
 #include "CspConfigCache.h"
-#include "CspAccessControl.h"
 #include "CspListenerManager.h"
-#include "CspRouteEngine.h"
+#include "CspRouteMap.h"
 #include "CspServiceMap.h"
-#include "CspTrunkManager.h"
 
 #include <sstream>
 
@@ -226,23 +224,20 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
             << "}"
             << ",\"record_enable\":" << (gclsSetup.m_bRecordEnable ? "true" : "false");
 
-        // 트렁크 상태
+        // v3 (2026-04-22): 트렁크 상태 — RouteMap/RouteSetMap 기반으로 재표현.
+        //   Route 의 런타임 alive/RTT 를 리스트로 출력.
         {
-            std::vector<CCspTrunkManager::StatusEntry> trunks;
-            gclsTrunkManager.GetStatus(trunks);
-            oss << ",\"trunks\":[";
-            for (size_t i = 0; i < trunks.size(); ++i) {
-                const auto& t = trunks[i];
+            auto routes = gclsRouteMap.GetAll();
+            oss << ",\"routes\":[";
+            for (size_t i = 0; i < routes.size(); ++i) {
+                const auto& r = routes[i];
                 if (i) oss << ",";
-                oss << "{\"id\":" << t.id
-                    << ",\"name\":\"" << t.name << "\""
-                    << ",\"remote\":\"" << t.remote << "\""
-                    << ",\"enabled\":" << (t.enabled ? "true" : "false")
-                    << ",\"alive\":" << (t.alive ? "true" : "false")
-                    << ",\"last_rtt_ms\":" << t.last_rtt_ms
-                    << ",\"last_ping\":" << (long long)t.last_ping
-                    << ",\"last_reply\":" << (long long)t.last_reply
-                    << ",\"fail_count\":" << t.fail_count
+                bool alive = gclsRouteMap.IsAlive(r.name);
+                oss << "{\"name\":\"" << r.name << "\""
+                    << ",\"local_node_ref\":\"" << r.local_node_ref << "\""
+                    << ",\"remote_node_ref\":\"" << r.remote_node_ref << "\""
+                    << ",\"enabled\":" << (r.enabled ? "true" : "false")
+                    << ",\"alive\":" << (alive ? "true" : "false")
                     << "}";
             }
             oss << "]";

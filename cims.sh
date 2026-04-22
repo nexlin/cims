@@ -93,7 +93,10 @@ kill_stray() {
 start_cmp() {
     if is_running cmp; then warn "CMP 이미 실행 중 (pid=$(read_pid cmp))"; return 0; fi
     [[ ! -f "$DIST_DIR/cmp/bin/cmp" ]] && err "cmp 바이너리 없음: $DIST_DIR/cmp/bin/cmp (make dist 실행 필요)" && return 1
-    kill_stray "cmp/bin/cmp"
+    # ControlPort: top-level ServerPort 우선, template 스키마(Setup.Listen.ControlPort) fallback
+    local ctrl_port
+    ctrl_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/cmp/config/cmp.json')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
+    kill_stray "cmp/bin/cmp" "$ctrl_port" udp
     info "CMP 시작..."
     cd "$DIST_DIR/cmp"
     bin/cmp config/cmp.json >> "$LOG_DIR/cmp.log" 2>&1 &
@@ -393,6 +396,580 @@ cmd_clean() {
     echo ""
 }
 
+# ── 검증용 초기화 (가입자 보존) ───────────────────────────────
+# docs/VERIFICATION_PROCESS.md §0.1 초기화 범위에 따름.
+# 보존: users, organizations, volte_subscriptions, ptt_subscriptions,
+#       ptt_groups, ptt_group_members, user_rejects
+# 초기화: 런타임 설정 / 배포 등록 / 세션·로그성 테이블 + 파일 + 프로세스
+cmd_reset() {
+    local target="all"
+    local extra_paths=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --files) target="files"; shift ;;
+            --db)    target="db";    shift ;;
+            --all|all) target="all"; shift ;;
+            --path)  extra_paths+=("$2"); shift 2 ;;
+            -*) err "알 수 없는 reset 옵션: $1"; return 1 ;;
+            *)  shift ;;
+        esac
+    done
+
+    header "=== 검증 환경 초기화 (가입자 보존) ==="
+
+    # 1) 서비스 정지 — DB 연결 정리 + 파일 잠금 해제
+    info "서비스 정지..."
+    cmd_stop all >/dev/null 2>&1 || true
+
+    # 1-b) 외부 기동 / PID 파일 없는 프로세스도 포트 기반으로 강제 종료
+    #      (console npm serve, 다른 경로의 cmp/csp 바이너리 등)
+    info "잔존 프로세스 포트 기반 정리..."
+    local _rp _port _proto _pids _round
+    for _round in 1 2; do
+        local _killed=0
+        for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "3000:tcp" "3001:tcp" "8080:tcp"; do
+            _port="${_rp%%:*}"; _proto="${_rp##*:}"
+            if [[ $_proto == "tcp" ]]; then
+                _pids=$(ss -Htlnp 2>/dev/null | awk -v pt=":$_port" '$4 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
+            else
+                _pids=$(ss -Hulnp 2>/dev/null | awk -v pt=":$_port" '$5 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
+            fi
+            if [[ -n $_pids ]]; then
+                warn "port $_port/$_proto 점유자 강제 종료: $_pids"
+                if [[ $_round -eq 1 ]]; then
+                    kill $_pids 2>/dev/null || true
+                else
+                    kill -9 $_pids 2>/dev/null || true
+                fi
+                _killed=1
+            fi
+        done
+        [[ $_killed -eq 0 ]] && break
+        sleep 0.5
+    done
+
+    # 2) 파일 초기화
+    if [[ $target == "all" || $target == "files" ]]; then
+        info "로그 정리..."
+        rm -f "$LOG_DIR"/*.log "$LOG_DIR"/*_*.log 2>/dev/null || true
+
+        info "서비스이력/메시지 로그 정리..."
+        rm -rf "$DIST_DIR/ext_mnt/service_log" "$DIST_DIR/ext_mnt/msg_log" 2>/dev/null || true
+        mkdir -p "$DIST_DIR/ext_mnt/service_log" "$DIST_DIR/ext_mnt/msg_log"
+
+        info "Agent 설치 경로 정리 (/tmp/cims-agent-*)..."
+        rm -rf /tmp/cims-agent-* 2>/dev/null || true
+
+        info "발급 인증서 정리 (cert/agent_mtls/issued)..."
+        rm -rf "$DIST_DIR/csc/cert/agent_mtls/issued" 2>/dev/null || true
+        [[ -n "$SRC_CONSOLE" ]] && rm -rf "$SCRIPT_DIR/csc/cert/agent_mtls/issued" 2>/dev/null || true
+
+        local p
+        for p in "${extra_paths[@]+"${extra_paths[@]}"}"; do
+            [[ -e "$p" ]] && { info "추가 경로 정리: $p"; rm -rf "$p"; }
+        done
+        ok "파일 정리 완료"
+    fi
+
+    # 3) DB 초기화 (가입자 테이블 보존, 나머지 TRUNCATE)
+    if [[ $target == "all" || $target == "db" ]]; then
+        local cfg="$DIST_DIR/csp/config/csp.json"
+        [[ ! -f $cfg && -n "$SRC_CONSOLE" ]] && cfg="$SCRIPT_DIR/csp/csp.json"
+        if [[ ! -f $cfg ]]; then
+            warn "csp.json 없음 — DB 초기화 건너뜀"
+        else
+            info "DB 초기화 (가입자 테이블 보존)..."
+            python3 - "$cfg" <<'PY'
+import json, sys
+try:
+    import pymysql
+except ImportError:
+    print("[ERROR] pymysql 미설치: pip install pymysql"); sys.exit(1)
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+db = d.get('Setup', {}).get('Database', {})
+if not db:
+    print("[WARN] csp.json 에 Database 섹션 없음"); sys.exit(0)
+
+PRESERVE = {
+    'users', 'organizations',
+    'volte_subscriptions', 'ptt_subscriptions',
+    'ptt_groups', 'ptt_group_members',
+    'user_rejects',
+}
+TRUNCATE = [
+    # 모듈 런타임 설정 (대부분 deprecated — 존재 시 제거)
+    'sip_service', 'sip_service_listener',
+    'csp_listener', 'sip_trunk',
+    'routing_rule', 'routing_rule_match',
+    'routing_rule_transform', 'routing_access_list', 'csp_config_audit',
+    # 배포 등록
+    'cims_instance', 'cims_agent', 'cims_package',
+    'agent_deployment', 'agent_job', 'agent_metric',
+    # 세션/이력/녹취/통계
+    'voip_call_logs', 'ptt_call_logs',
+    'voip_call_participants', 'ptt_call_participants',
+    'recordings', 'recording_segments',
+    'stats_daily', 'stats_monthly', 'stats_yearly',
+    # IdMS 토큰
+    'auth_codes', 'refresh_tokens',
+]
+
+conn = pymysql.connect(
+    host=db['Host'], port=int(db.get('Port', 3306)),
+    user=db['User'], password=db['Password'], database=db['DbName'],
+)
+cur = conn.cursor()
+cur.execute(
+    "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=%s",
+    (db['DbName'],),
+)
+existing = {r[0] for r in cur.fetchall()}
+
+cur.execute("SET FOREIGN_KEY_CHECKS=0")
+done, skip, blocked = [], [], []
+for t in TRUNCATE:
+    if t in PRESERVE:
+        blocked.append(t); continue
+    if t in existing:
+        cur.execute(f"TRUNCATE TABLE `{t}`"); done.append(t)
+    else:
+        skip.append(t)
+# _deprecated 접미사 테이블도 함께 비움 (migrate_deprecate_* 로 rename 된 것)
+for t in sorted(existing):
+    if t.endswith('_deprecated'):
+        cur.execute(f"TRUNCATE TABLE `{t}`"); done.append(t)
+cur.execute("SET FOREIGN_KEY_CHECKS=1")
+conn.commit()
+conn.close()
+
+print(f"  TRUNCATE 완료: {len(done)}건")
+for t in done:
+    print(f"    - {t}")
+if skip:
+    print(f"  SKIP (테이블 미존재): {len(skip)}건")
+print(f"  보존(가입자): {', '.join(sorted(PRESERVE))}")
+PY
+            [[ $? -eq 0 ]] && ok "DB 초기화 완료" || err "DB 초기화 실패"
+        fi
+    fi
+
+    echo ""
+}
+
+# ── 사전조건 확인 ─────────────────────────────────────────────
+cmd_preflight() {
+    header "=== Preflight 체크 ==="
+
+    # 1) ens160 IP
+    local ip; ip=$(ip -4 -o addr show ens160 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
+    if [[ -n $ip ]]; then
+        ok "ens160 IP: $ip"
+    else
+        err "ens160 인터페이스 없음 — 외부 연동 IP 확인 필요"
+    fi
+
+    # 2) Git 상태
+    if git -C "$SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+        local br sha
+        br=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+        sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+        if [[ -z "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]]; then
+            ok "git: $br @ $sha (clean)"
+        else
+            warn "git: $br @ $sha (uncommitted changes)"
+        fi
+    fi
+
+    # 3) 포트 점유 확인
+    local ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "3000:tcp" "3001:tcp")
+    local pp port proto line pid
+    for pp in "${ports[@]}"; do
+        port="${pp%%:*}"; proto="${pp##*:}"
+        if [[ $proto == "tcp" ]]; then
+            line=$(ss -Htlnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print; exit}' || true)
+        else
+            line=$(ss -Hulnp 2>/dev/null | awk -v p=":$port" '$5 ~ p {print; exit}' || true)
+        fi
+        if [[ -n $line ]]; then
+            pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+            warn "port $port/$proto 점유 중 (pid=${pid:-?})"
+        else
+            ok "port $port/$proto 가용"
+        fi
+    done
+
+    # 4) DB 연결 확인
+    local cfg="$DIST_DIR/csp/config/csp.json"
+    [[ ! -f $cfg && -n "$SRC_CONSOLE" ]] && cfg="$SCRIPT_DIR/csp/csp.json"
+    if [[ -f $cfg ]]; then
+        if python3 - "$cfg" 2>/dev/null <<'PY'
+import json, sys
+try: import pymysql
+except ImportError: sys.exit(2)
+with open(sys.argv[1]) as f: d=json.load(f)
+db=d['Setup']['Database']
+pymysql.connect(host=db['Host'], port=int(db.get('Port',3306)),
+                user=db['User'], password=db['Password'],
+                database=db['DbName']).close()
+PY
+        then
+            ok "DB 연결 OK"
+        else
+            warn "DB 연결 실패 또는 pymysql 미설치"
+        fi
+    else
+        warn "csp.json 없음 — DB 점검 건너뜀"
+    fi
+
+    echo ""
+}
+
+# ── Phase 1 검증 자동화 ──────────────────────────────────────
+# docs/VERIFICATION_PROCESS.md Phase 1 (개발 단계 검증) 자동 실행
+# 흐름: preflight → reset → build → configure → start → health → 회귀 시나리오 → 리포트
+cmd_verify() {
+    local phase="${1:-phase1}"
+    shift || true
+    case "$phase" in
+        phase1|1) _verify_phase1 "$@" ;;
+        *) err "지원하지 않는 phase: $phase (phase1 만 지원)"; return 1 ;;
+    esac
+}
+
+_verify_phase1() {
+    [[ -z "$SRC_CONSOLE" ]] && { err "verify phase1 은 소스 트리에서만 실행 가능"; return 1; }
+
+    local skip_build=0 skip_reset=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --skip-build) skip_build=1; shift ;;
+            --skip-reset) skip_reset=1; shift ;;
+            *) err "알 수 없는 옵션: $1"; return 1 ;;
+        esac
+    done
+
+    local ts; ts=$(date +%Y%m%d_%H%M%S)
+    local report_dir="$SCRIPT_DIR/verify_reports"
+    mkdir -p "$report_dir"
+    local report="$report_dir/${ts}_phase1.md"
+    local ens_ip; ens_ip=$(ip -4 -o addr show ens160 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
+    local git_sha; git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+    local git_branch; git_branch=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+
+    header "=== Phase 1 검증 시작 ==="
+    info "리포트: $report"
+    echo ""
+
+    {
+        echo "# Phase 1 Verification Report"
+        echo ""
+        echo "- Timestamp: $ts"
+        echo "- Host: $(hostname 2>/dev/null || echo ?)"
+        echo "- ens160 IP: ${ens_ip:-N/A}"
+        echo "- Git: $git_branch @ $git_sha"
+        [[ $skip_build -eq 1 ]] && echo "- skip-build: yes"
+        [[ $skip_reset -eq 1 ]] && echo "- skip-reset: yes"
+        echo ""
+    } > "$report"
+
+    # 1) Preflight
+    echo "## 1. Preflight" >> "$report"
+    echo '```' >> "$report"
+    cmd_preflight 2>&1 | tee -a "$report" || true
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 2) Reset (가입자 보존)
+    if [[ $skip_reset -eq 0 ]]; then
+        echo "## 2. Reset (가입자 보존)" >> "$report"
+        echo '```' >> "$report"
+        cmd_reset --all 2>&1 | tee -a "$report" || true
+        echo '```' >> "$report"
+    else
+        echo "## 2. Reset — SKIPPED" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 3) Build
+    if [[ $skip_build -eq 0 ]]; then
+        echo "## 3. Build (--no-pkg)" >> "$report"
+        echo '```' >> "$report"
+        if ! cmd_build --no-pkg 2>&1 | tail -40 | tee -a "$report"; then
+            echo '```' >> "$report"
+            echo "**빌드 실패 — 검증 중단**" >> "$report"
+            err "빌드 실패. 리포트: $report"
+            return 1
+        fi
+        echo '```' >> "$report"
+    else
+        echo "## 3. Build — SKIPPED" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 4) Configure (ens160 IP 반영)
+    echo "## 4. Configure" >> "$report"
+    echo '```' >> "$report"
+    if [[ -n "$ens_ip" ]]; then
+        cmd_configure --local-ip "$ens_ip" 2>&1 | tail -15 | tee -a "$report" || true
+    else
+        warn "ens160 IP 없음 — configure 건너뜀"
+        echo "(ens160 없음 — 스킵)" >> "$report"
+    fi
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 5) Start — 전체 모듈 기동 (cwrtc/phone 은 옵션성이지만 수동 검증 편의를 위해 모두 기동)
+    echo "## 5. Start (cmp → csp → csc → cwrtc → console → phone)" >> "$report"
+    echo '```' >> "$report"
+    cmd_start cmp csp csc 2>&1 | tee -a "$report" || true
+    # cwrtc/console/phone 은 실패해도 회귀 시나리오에 영향 없음 (기동만 시도)
+    cmd_start cwrtc console phone 2>&1 | tee -a "$report" || true
+    sleep 2
+    cmd_status | tee -a "$report" || true
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 5.5) Package auto-upload — reset 로 cims_package 비워진 상태를 tarball 로 채움.
+    #      Console 테스트베드 > 모듈관리 에서 버전/템플릿/설정 데이터가 정상 표시되도록.
+    echo "## 5.5 Package auto-upload" >> "$report"
+    {
+        local pkg_dir="$DIST_DIR/packages"
+        if [[ ! -d "$pkg_dir" ]]; then
+            warn "packages 디렉토리 없음 — pkg upload 스킵"
+            echo "(packages 디렉토리 없음)" >> "$report"
+        else
+            local login_host="${ens_ip:-127.0.0.1}"
+            # CSC 로그인 → JWT 획득
+            local token
+            token=$(curl -sk -X POST "https://${login_host}:4420/api/v1/auth/login" \
+                         -H 'Content-Type: application/json' \
+                         -d '{"login_id":"admin","password":"1234"}' 2>/dev/null \
+                    | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin); print(d.get("token",""))
+except Exception: print("")' 2>/dev/null)
+            if [[ -z "$token" ]]; then
+                warn "CSC admin 로그인 실패 — pkg upload 스킵"
+                echo "- admin 로그인 실패" >> "$report"
+            else
+                echo '```' >> "$report"
+                local uploaded=0
+                for t in "$pkg_dir"/*.tar.gz; do
+                    [[ -f "$t" ]] || continue
+                    local fname; fname=$(basename "$t")
+                    local code; code=$(curl -sk -o /dev/null -w "%{http_code}" \
+                        -X POST "https://${login_host}:4420/api/v1/packages" \
+                        -H "Authorization: Bearer $token" \
+                        -F "file=@$t;filename=$fname" -F "force=true" 2>/dev/null)
+                    if [[ "$code" == "200" || "$code" == "201" ]]; then
+                        echo "  [OK]  $fname"; uploaded=$((uploaded+1))
+                    else
+                        echo "  [FAIL $code] $fname"
+                    fi
+                done | tee -a "$report"
+                echo '```' >> "$report"
+                ok "packages 업로드: ${uploaded}건"
+            fi
+        fi
+    }
+    echo "" >> "$report"
+
+    # 6) Health check
+    echo "## 6. Health check" >> "$report"
+    local err_cnt=0 n lf
+    for lf in "$LOG_DIR/csp.log" "$LOG_DIR/cmp.log" "$LOG_DIR/csc.log"; do
+        [[ -f $lf ]] || continue
+        n=$(grep -cE "ERROR|FATAL" "$lf" 2>/dev/null || true); n=${n:-0}
+        err_cnt=$(( err_cnt + n ))
+    done
+    if [[ $err_cnt -eq 0 ]]; then
+        ok "ERROR/FATAL: 0"
+        echo "- ERROR/FATAL: 0" >> "$report"
+    else
+        warn "ERROR/FATAL: ${err_cnt}건"
+        echo "- ERROR/FATAL: ${err_cnt}건" >> "$report"
+        echo '```' >> "$report"
+        grep -E "ERROR|FATAL" "$LOG_DIR"/csp.log "$LOG_DIR"/cmp.log "$LOG_DIR"/csc.log 2>/dev/null | head -30 >> "$report" || true
+        echo '```' >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 7) 회귀 시나리오 (§0.5)
+    echo "## 7. Regression Scenarios" >> "$report"
+    local sim_ip="${ens_ip:-127.0.0.1}"
+
+    # 7.0 가입자 정보 수집 + v3 access_services.jsonl 시드
+    #   v3 (2026-04-22): csp.json 의 Setup.Realm 제거 → access_services.jsonl 이 domain SOT.
+    #   verify 시점에 DB subscription.service_ref 를 읽고, 해당 name 의 access_service 가 없으면
+    #   자동 시드 (voip-default / ptt-default, domain='csp'). SIGUSR1 로 CSP 재로드.
+    local VOIP_USER="" VOIP_PWD="" VOIP_AUTH="" VOIP_DOM=""
+    local PTT_USER=""  PTT_PWD=""  PTT_DOM=""   PTT_GROUP=""
+    eval "$(python3 - "$DIST_DIR/csp/config/csp.json" "$DIST_DIR/config" 2>/dev/null <<'PY' || true
+import json, sys, os, pymysql
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+s = d.get('Setup', {})
+cfg_dir = sys.argv[2]  # install_path/config (v3 jsonl 경로)
+
+db = s.get('Database', {})
+voip_user = voip_pwd = voip_imsi = voip_ref = ''
+ptt_user  = ptt_pwd  = ptt_imsi  = ptt_ref  = ''
+ptt_group = ''
+try:
+    conn = pymysql.connect(host=db['Host'], port=int(db.get('Port',3306)),
+                           user=db['User'], password=db['Password'], database=db['DbName'])
+    cur = conn.cursor()
+    # v3: service_ref + imsi 로 가입자 선택 (service_ref 있는 것 우선)
+    cur.execute("SELECT id,passwd,imsi,service_ref FROM volte_subscriptions "
+                "WHERE id LIKE '+%' AND passwd<>'' AND service_ref<>'' AND imsi<>'' "
+                "ORDER BY id LIMIT 1")
+    r = cur.fetchone()
+    if r: voip_user, voip_pwd, voip_imsi, voip_ref = r[0], r[1] or '', r[2] or '', r[3] or ''
+    cur.execute("SELECT id,passwd,imsi,service_ref FROM ptt_subscriptions "
+                "WHERE id LIKE '+%' AND passwd<>'' AND service_ref<>'' AND imsi<>'' "
+                "ORDER BY id LIMIT 1")
+    r = cur.fetchone()
+    if r: ptt_user, ptt_pwd, ptt_imsi, ptt_ref = r[0], r[1] or '', r[2] or '', r[3] or ''
+    cur.execute("SELECT id FROM ptt_groups ORDER BY id LIMIT 1")
+    r = cur.fetchone()
+    if r: ptt_group = r[0]
+    conn.close()
+except Exception:
+    pass
+
+# access_services.jsonl 자동 시드 — reset 시 파일 재작성 (이전 kind 불일치 레코드 제거).
+as_path = os.path.join(cfg_dir, 'access_services.jsonl')
+existing_names = set()   # v3: 덮어쓰기 모드라 빈 set
+
+import uuid
+# v3: voip/ptt domain 분리 — BuildDomainToKindMap 이 한 domain 에 한 kind 만 매핑하도록.
+#     subscription 의 imsi@<domain> 이 CSP 에서 Digest realm 과 일치해야 하므로
+#     cspsim 에도 동일한 domain 을 넘겨야 함 (아래 VOIP_DOM/PTT_DOM 에 반영).
+seeded = []
+def seed(name, kind, domain):
+    if name in existing_names or not name: return None
+    r = {
+        'id': uuid.uuid4().hex,
+        'name': name,
+        'enabled': True,
+        'kind': kind,
+        'domain': domain,
+        'auth_realm': domain,
+        'inbound_policy': 'any',
+        'allowed_local_node_refs': [],
+        'priority': 100,
+        'tags': ['verify-seed'],
+        'note': 'auto-seeded by cims.sh verify phase1',
+    }
+    seeded.append(r)
+    existing_names.add(name)
+    return r
+
+seed(voip_ref, 'volte', 'ims.mnc033.mcc450.3gppnetwork.org')
+seed(ptt_ref,  'ptt',   'ptt.mnc033.mcc450.3gppnetwork.org')
+
+if seeded:
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(as_path, 'w') as f:   # v3: 덮어쓰기
+        for r in seeded:
+            f.write(json.dumps(r, ensure_ascii=False) + '\n')
+    # SIGUSR1 to CSP PID + reload 완료 대기 (race 방지)
+    import time as _time
+    run_dir = os.path.dirname(os.path.dirname(cfg_dir)) + '/run'
+    pid_file = os.path.join(run_dir, 'csp.pid')
+    try:
+        with open(pid_file) as pf:
+            pid = int(pf.read().strip())
+        os.kill(pid, 10)  # SIGUSR1
+        _time.sleep(2)     # CSP 가 ReloadFromJsonl → ServiceMap.Sync 완료까지 대기
+    except Exception:
+        pass
+
+volte_dom = 'ims.mnc033.mcc450.3gppnetwork.org'
+mcptt_dom = 'ptt.mnc033.mcc450.3gppnetwork.org'
+voip_auth = f"{voip_imsi}@{volte_dom}" if voip_imsi else ''
+ptt_auth  = f"{ptt_imsi}@{mcptt_dom}"  if ptt_imsi  else ''
+
+def shq(v): return "'" + str(v).replace("'", "'\\''") + "'"
+print(f"VOIP_USER={shq(voip_user)}")
+print(f"VOIP_PWD={shq(voip_pwd)}")
+print(f"VOIP_AUTH={shq(voip_auth)}")
+print(f"VOIP_DOM={shq(volte_dom)}")
+print(f"PTT_USER={shq(ptt_user)}")
+print(f"PTT_PWD={shq(ptt_pwd)}")
+print(f"PTT_DOM={shq(mcptt_dom)}")
+print(f"PTT_GROUP={shq(ptt_group)}")
+print(f"SEEDED={shq(str(len(seeded)))}")
+PY
+)"
+
+    {
+        echo "### 7.0 가입자 정보 (DB 기반, 시나리오 파라미터)"
+        echo '```'
+        echo "VoIP: user=$VOIP_USER  domain=$VOIP_DOM  auth_id=$VOIP_AUTH"
+        echo "PTT : user=$PTT_USER   domain=$PTT_DOM   group=$PTT_GROUP"
+        echo '```'
+        echo ""
+    } >> "$report"
+
+    # 7.1 VoIP 2자 통화 (B2BUA)
+    echo "### 7.1 VoIP 2자 통화 (B2BUA)" >> "$report"
+    echo '```' >> "$report"
+    if [[ -z $VOIP_USER ]]; then
+        warn "volte_subscriptions 에 유효 가입자 없음 — VoIP 시나리오 스킵"
+        echo "(VoIP 가입자 없음 — 스킵)" >> "$report"
+    else
+        local voip_args=(-no-db -mode voip -scenario call -count 2 -duration 5 -ip "$sim_ip"
+                         -user "$VOIP_USER" -domain "$VOIP_DOM" -password "$VOIP_PWD")
+        [[ -n $VOIP_AUTH ]] && voip_args+=(-auth_id "$VOIP_AUTH")
+        cmd_sim "${voip_args[@]}" 2>&1 | tail -30 | tee -a "$report" || true
+    fi
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 7.2 PTT 그룹콜 (5 member) — v3: imsi+domain 명시적 전달 (DerivePttAuthId 의존 제거)
+    echo "### 7.2 PTT 그룹콜 (5 member)" >> "$report"
+    echo '```' >> "$report"
+    if [[ -z $PTT_USER || -z $PTT_GROUP ]]; then
+        warn "ptt_subscriptions/ptt_groups 데이터 부족 — PTT 시나리오 스킵"
+        echo "(PTT 가입자/그룹 없음 — 스킵)" >> "$report"
+    else
+        # DB 모드로 전환하여 cspsim 이 count 맞는 가입자들을 DB 에서 직접 선택하도록 함.
+        # -domain 명시 — cspsim 이 DB 가입자 imsi 와 이 도메인을 결합하여 auth_id 조립.
+        local ptt_args=(-mode ptt -scenario group_call -count 5 -duration 10 -ip "$sim_ip"
+                        -domain "$PTT_DOM" -group "$PTT_GROUP")
+        cmd_sim "${ptt_args[@]}" 2>&1 | tail -30 | tee -a "$report" || true
+    fi
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 8) 결과 요약
+    echo "## 8. 결과 요약" >> "$report"
+    local rec_ok rec_zero sip_lines
+    rec_ok=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size +0 2>/dev/null | wc -l || true)
+    rec_zero=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size 0 2>/dev/null | wc -l || true)
+    sip_lines=$(find "$DIST_DIR/ext_mnt/msg_log" -name "*.jsonl" -exec cat {} + 2>/dev/null | wc -l || true)
+    {
+        echo "- 녹취 파일(size>0): ${rec_ok:-0}개"
+        echo "- 녹취 파일(0바이트): ${rec_zero:-0}개"
+        echo "- SIP/msg 로그 라인: ${sip_lines:-0}"
+        echo "- ERROR/FATAL 누적: ${err_cnt}건"
+        echo ""
+        echo "### 수동 검증 항목 (Console 접속 필요)"
+        echo "- [ ] Console Flow 페이지 nodes 순서"
+        echo "- [ ] sesid 일관성 (SIP ↔ CMP)"
+        echo "- [ ] CSC 가입자/그룹 CRUD → NOTIFY"
+        echo "- [ ] (mTLS 모드) cert rotation e2e"
+    } >> "$report"
+
+    header "=== Phase 1 검증 종료 ==="
+    info "리포트: $report"
+    echo ""
+}
+
 # ── cspsim ─────────────────────────────────────────────────────
 cmd_sim() {
     local orig_dir="$PWD"
@@ -609,6 +1186,17 @@ ${BOLD}시뮬레이터:${NC}
 
 ${BOLD}데이터 정리:${NC}
   clean [all|log|data]   로그/서비스이력/녹취 삭제 (기본: all)
+
+${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
+  reset  [--all|--files|--db] [--path <dir>]
+                        가입자 테이블 보존 상태로 설정/배포/세션 DB + 파일 + 프로세스 초기화
+                        (보존: users, organizations, volte_subscriptions,
+                         ptt_subscriptions, ptt_groups, ptt_group_members, user_rejects)
+  preflight             사전조건 확인 (ens160 IP, 포트 점유, git 상태, DB 연결)
+  verify [phase1] [--skip-build|--skip-reset]
+                        Phase 1 전체 자동 실행: preflight → reset → build →
+                        configure(ens160 IP) → start → health → 회귀 시나리오 → 리포트
+                        → verify_reports/<ts>_phase1.md
 
 ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]
@@ -980,13 +1568,20 @@ if service is not None:
 print(json.dumps(meta, indent=2, ensure_ascii=False))
 PYEOF
 
-        # config_template.json: 소스 루트에 있으면 tarball 루트에 함께 포함
+        # config_template.json: v3 (2026-04-22) 부터 소스의 config/ 아래.
+        #   tarball 에는 그대로 최상위(/config_template.json) 로 포함 (agents.py 가 루트에서 파싱).
         local tmp_tmpl="$DIST_DIR/.pkgtmpl.$$.json"
         local tmpl_basename=".pkgtmpl.$$.json"
         local has_template=0
-        if [[ -n "$src_root" && -f "$src_root/config_template.json" ]]; then
-            cp "$src_root/config_template.json" "$tmp_tmpl"
-            has_template=1
+        if [[ -n "$src_root" ]]; then
+            local _tmpl_src=""
+            if   [[ -f "$src_root/config/config_template.json" ]]; then _tmpl_src="$src_root/config/config_template.json"
+            elif [[ -f "$src_root/config_template.json"       ]]; then _tmpl_src="$src_root/config_template.json"   # legacy fallback
+            fi
+            if [[ -n "$_tmpl_src" ]]; then
+                cp "$_tmpl_src" "$tmp_tmpl"
+                has_template=1
+            fi
         fi
 
         tar_file="$out_dir/${t}-${comp_ver}.tar.gz"
@@ -1042,6 +1637,9 @@ case "${1:-}" in
     configure) shift; cmd_configure "$@" ;;
     sim)       shift; cmd_sim "$@" ;;
     clean)     shift; cmd_clean "${1:-all}" ;;
+    reset)     shift; cmd_reset "$@" ;;
+    preflight) cmd_preflight ;;
+    verify)    shift; cmd_verify "$@" ;;
     log)       shift; cmd_log "${1:-csp}" ;;
     pkg)       shift; cmd_pkg "$@" ;;
     sync)      shift; cmd_sync "$@" ;;

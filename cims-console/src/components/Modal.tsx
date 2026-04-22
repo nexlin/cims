@@ -17,17 +17,15 @@ export default function Modal({ title, onClose, children, wide, fullscreen, widt
   }, [onClose])
 
   if (fullscreen) {
-    // 사이드바 메뉴를 제외한 콘텐츠 영역 전체 사용 (position: absolute within app-content)
+    // position: fixed — 상단 헤더 높이와 왼쪽 사이드바 폭은 CSS 변수
+    // (--header-h, --sidebar-w) 로 주입. app-content 의 스크롤에 영향받지 않음.
     return (
-      <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-        zIndex: 100, background: 'var(--bg)', display: 'flex', flexDirection: 'column',
-      }}>
-        <div className="modal-header" style={{ flex: '0 0 auto' }}>
+      <div className="modal-fullscreen">
+        <div className="modal-header">
           <span className="modal-title">{title}</span>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
-        <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>
+        <div className="modal-body-area">{children}</div>
       </div>
     )
   }

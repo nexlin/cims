@@ -114,7 +114,7 @@ CMP_IP="${CMP_IP:-$LOCAL_IP}"
 CWRTC_IP="${CWRTC_IP:-$LOCAL_IP}"
 CSC_HOST="${CSC_HOST:-$LOCAL_IP}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
-VOLTE_DOMAIN="${VOLTE_DOMAIN:-ims.mnc001.mcc001.3gppnetwork.org}"
+VOLTE_DOMAIN="${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
 PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^ims\./ptt./')}"
 
 # 로그/녹취 디렉터리 기본값

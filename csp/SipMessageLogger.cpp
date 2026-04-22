@@ -371,8 +371,9 @@ void CSipMessageLogger::Print(EnumLogLevel eLevel, const char* fmt, ...)
     }
 
     // subid: VoLTE=Call-ID(leg 구분), PTT=session_seq(캐시 조회)
+    //   v3 (2026-04-22): AccessService.kind = "volte" 사용. 기존 "volte"/"volte" 도 호환.
     std::string strSubId;
-    if (strService == "phone" || strService == "volte") {
+    if (strService == "volte") {
         strSubId = strCallId;
     } else {
         auto itSub = m_mapCallSubId.find(strCallId);

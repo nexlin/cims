@@ -146,7 +146,7 @@ export const cspRuntimeApi = {
 
 // ── Service types (P7) ────────────────────────────────────
 
-export type ServiceKind = 'voip' | 'ptt' | 'ibcf' | 'system' | 'console'
+export type ServiceKind = 'volte' | 'ptt' | 'ibcf' | 'system' | 'console'
 export type InboundPolicy = 'any' | 'restricted'
 
 export interface SipService {

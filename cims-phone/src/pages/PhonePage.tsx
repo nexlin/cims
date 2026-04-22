@@ -564,11 +564,11 @@ function PttPanel({ sub }: { sub: Subscription }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function PhonePage() {
-  const { user } = useAuth()
+  const { user, callSubscriptions, pttSubscriptions } = useAuth()
   if (!user) return null
 
-  const hasCall = user.call_subscriptions.length > 0
-  const hasPtt  = user.ptt_subscriptions.length  > 0
+  const hasCall = callSubscriptions.length > 0
+  const hasPtt  = pttSubscriptions.length  > 0
 
   if (!hasCall && !hasPtt) {
     return (
@@ -582,10 +582,10 @@ export default function PhonePage() {
 
   return (
     <div className="sp-page">
-      {user.call_subscriptions.map(sub => (
+      {callSubscriptions.map(sub => (
         <CallPanel key={sub.id} sub={sub} />
       ))}
-      {user.ptt_subscriptions.map(sub => (
+      {pttSubscriptions.map(sub => (
         <PttPanel key={sub.id} sub={sub} />
       ))}
     </div>

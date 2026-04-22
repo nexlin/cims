@@ -2,7 +2,7 @@ import { api } from './client'
 
 export interface Recording {
   id: string                  // 세션 디렉터리 상대경로
-  call_type: 'voip' | 'ptt' | 'voip_video'
+  call_type: 'volte' | 'ptt' | 'voip_video'
   group_id: string | null
   caller: string
   callee: string | null

@@ -86,23 +86,9 @@ public:
     /** IPv6 사용 유무 */
     bool m_bIpv6;
 
-    /** IMS Digest 인증용 realm (WWW-Authenticate 의 realm 파라미터).
-     *  미지정 시 m_mapDomainToService 의 첫 도메인으로 fallback. */
-    std::string m_strAuthRealm;
-
-    /** Realm 설정 배열을 flatten 한 도메인 → service 매핑.
-     *  config:  "Realm": [{"service":"volte","domains":[...]}, {"service":"mcptt","domains":[...]}]
-     *  예: "ims.mnc001..." → "volte" / "ptt.mnc001..." → "mcptt" */
-    std::map<std::string, std::string> m_mapDomainToService;
-
-    /** service → domains 역매핑 (SIP INVITE/REGISTER 생성 시 서비스별 대표 도메인 조회) */
-    std::map<std::string, std::vector<std::string>> m_mapServiceToDomains;
-
-    /** service 에 대한 대표 도메인 반환 (첫 도메인). 없으면 빈 문자열. */
-    std::string GetDomainForService(const std::string& strService) const;
-
-    /** 도메인이 어느 service 에 속하는지 반환. 미매칭 시 빈 문자열. */
-    std::string GetServiceForDomain(const std::string& strDomain) const;
+    // v3 (2026-04-22): Realm/AuthRealm 필드 제거.
+    //   domain/auth_realm 은 access_services.jsonl (CspAccessServiceMap) 이 SOT.
+    //   도메인→서비스 매핑은 CCspServiceMap::BuildDomainToKindMap().
 
     /** SIP REGISTER timeout 최소 시간 */
     int m_iMinRegisterTimeout;
@@ -156,7 +142,7 @@ public:
     std::string m_strDbName;
 
     // ================================================================
-    // 서비스 모드: "voip" | "ptt" | "both" (기본값: "both")
+    // 서비스 모드: "volte" | "ptt" | "both" (기본값: "both")
 
     /** 서비스 모드 */
     std::string m_strServiceMode;

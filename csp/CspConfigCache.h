@@ -21,20 +21,27 @@ inline int CspUuidToIntId(const std::string& uuid) {
 }
 
 /**
- * CSP 런타임 설정 캐시 — jsonl 전용 (P10 Phase C 이후)
+ * CSP 런타임 설정 캐시 — jsonl 전용 (P10 Phase C 이후, v3 9-collection 2026-04-22)
  *
- *   Agent 가 관리하는 install_path/config/*.jsonl 이 유일한 원천.
+ *   Agent 가 관리하는 install_path/config 의 jsonl 파일들이 유일한 원천.
  *   SIGUSR1 수신 시 ReloadFromJsonl() 로 메모리 캐시 재구성.
  *
- *   기존의 DB(CSC) HTTP pull 모드 및 로컬 cache/*.json 스냅샷은 Phase C 에서 완전 제거.
+ *   기존의 DB(CSC) HTTP pull 모드 및 로컬 cache 스냅샷은 Phase C 에서 완전 제거.
  */
 
+// v3 (2026-04-22) — 9 collection 재설계
+// 구 CACHE_LISTENER/TRUNK/ROUTE/ACCESS/SERVICE 는 제거 (hard cutover).
+// 파일명 매핑은 CspConfigCache.cpp 의 kJsonlFile[] 참조.
 enum CspCacheEntity {
-    CACHE_LISTENER = 0,
-    CACHE_TRUNK,
-    CACHE_ROUTE,
-    CACHE_ACCESS,
-    CACHE_SERVICE,
+    CACHE_LOCAL_NODE = 0,     // local_nodes.jsonl
+    CACHE_REMOTE_NODE,        // remote_nodes.jsonl
+    CACHE_ROUTE,              // routes.jsonl  (의미 변경: (LN,RN) pair)
+    CACHE_ROUTE_SET,          // route_sets.jsonl
+    CACHE_RULE,               // rules.jsonl
+    CACHE_RULE_SET,           // rule_sets.jsonl
+    CACHE_ROUTING_POLICY,     // routing_policies.jsonl
+    CACHE_ACL_POLICY,         // acl_policies.jsonl
+    CACHE_ACCESS_SERVICE,     // access_services.jsonl
     CACHE_COUNT
 };
 

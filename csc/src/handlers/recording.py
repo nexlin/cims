@@ -219,7 +219,7 @@ def _scan_voip_sessions(base: str, caller: str = '', from_dt: str = '', to_dt: s
     """VoIP 세션 디렉터리를 스캔하여 녹취 목록 반환.
     디렉터리: {base}/voip/YYYY/MM/DD/HH/{prefix}/{caller}/{session}.d/
     """
-    voip_root = os.path.join(base, 'voip')
+    voip_root = os.path.join(base, 'volte')
     if not os.path.isdir(voip_root):
         return [], 0
 
@@ -266,7 +266,7 @@ def _scan_voip_sessions(base: str, caller: str = '', from_dt: str = '', to_dt: s
 
         results.append({
             'dir': d,
-            'call_type': meta.get('call_type', 'voip'),
+            'call_type': meta.get('call_type', 'volte'),
             'caller': meta.get('initiator', ''),
             'callee': meta.get('callee', ''),
             'group_id': None,
@@ -706,13 +706,13 @@ def _parse_rec_route(parts: tuple):
     parts 끝에서부터 역방향으로 예약어를 탐지하여 분리.
 
     예시:
-      ('voip','2026','04','14','10','+82..','S2026...d')
+      ('volte','2026','04','14','10','+82..','S2026...d')
         → session_dir='voip/2026/04/14/10/+82../S2026...d', action=None, extra=()
-      ('voip','2026','04','14','10','+82..','S2026...d','segments')
+      ('volte','2026','04','14','10','+82..','S2026...d','segments')
         → session_dir=..., action='segments', extra=()
-      ('voip','2026','04','14','10','+82..','S2026...d','segments','1','audio')
+      ('volte','2026','04','14','10','+82..','S2026...d','segments','1','audio')
         → session_dir=..., action='segments', extra=('1','audio')
-      ('voip','2026','04','14','10','+82..','S2026...d','audio')
+      ('volte','2026','04','14','10','+82..','S2026...d','audio')
         → session_dir=..., action='audio', extra=()
     """
     if not parts:
@@ -810,7 +810,7 @@ async def _list_recordings(base: str, qs: dict) -> HandlerResult:
                                        limit=9999, offset=0)
         all_recs.extend(voip)
 
-    if call_type != 'voip':
+    if call_type != 'volte':
         ptt, _ = _scan_ptt_sessions(base, group_id=group_id, caller=caller,
                                      from_dt=from_dt, to_dt=to_dt, limit=9999, offset=0)
         all_recs.extend(ptt)
@@ -844,7 +844,7 @@ async def _get_recording(base: str, rel_dir: str) -> HandlerResult:
         rec_dir = d
         rec = {
             'id': rel_dir,
-            'call_type': meta.get('call_type', 'voip'),
+            'call_type': meta.get('call_type', 'volte'),
             'caller': meta.get('initiator', ''),
             'callee': meta.get('callee', ''),
             'group_id': None,

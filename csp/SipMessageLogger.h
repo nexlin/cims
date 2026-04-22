@@ -24,8 +24,8 @@
  * Hourly rotation: all files rotate together.
  *
  * Service classification:
- *   - SIP: domain in Request-URI/To → VoipRealm="phone", PttRealm="ptt", else "system"
- *   - CMP: caller specifies ("phone" or "ptt")
+ *   - SIP: domain in Request-URI/To → volte (IMS domain), ptt (PTT domain), else "system"
+ *   - CMP: caller specifies ("volte" or "ptt")
  *   - CSC: always "system"
  *   - HEARTBEAT/OPTIONS: always "system"
  */

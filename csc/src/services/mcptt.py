@@ -71,7 +71,7 @@ def load_shared_data(config):
             )
             with conn:
                 with conn.cursor() as cur:
-                    for table in ('voip_subscriptions', 'ptt_subscriptions'):
+                    for table in ('volte_subscriptions', 'ptt_subscriptions'):
                         cur.execute(f"SELECT id, passwd FROM {table}")
                         for row in cur.fetchall():
                             uid = row['id']

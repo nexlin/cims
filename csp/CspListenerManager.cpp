@@ -16,7 +16,10 @@ bool CCspListenerManager::_shouldManage(const std::string& protocol) const {
 }
 
 bool CCspListenerManager::Sync() {
-    SimpleJson::JsonNode items = gclsCspConfigCache.GetItems(CACHE_LISTENER);
+    // v3 (2026-04-22): local_nodes.jsonl 을 소비. 스키마 호환 — 기존 필드 그대로.
+    // (id/name/bind_ip/bind_port/protocol/enabled). 새로 추가된 `edge` 필드는
+    // 이 매니저에서는 무시 (UDP 수신 관리에만 집중).
+    SimpleJson::JsonNode items = gclsCspConfigCache.GetItems(CACHE_LOCAL_NODE);
     if (items.type != SimpleJson::JSON_ARRAY) {
         CLog::Print(LOG_ERROR, "ListenerManager: cache items not array");
         return false;

@@ -22,12 +22,12 @@ export default function VolteHistoryPage() {
   const [autoRefresh,setAR]=useState(false)
   const [detail,setDetail]=useState<CallLog|null>(null)
   const [flow,setFlow]=useState<{callId:string,date:string}|null>(null)
-  const [recPlayer,setRecPlayer]=useState<{id:string,segments:RecordingSegment[],callType:'voip'|'ptt'|'voip_video',caller:string,callee:string}|null>(null)
+  const [recPlayer,setRecPlayer]=useState<{id:string,segments:RecordingSegment[],callType:'volte'|'ptt'|'voip_video',caller:string,callee:string}|null>(null)
 
   const load=useCallback(async(p:number)=>{
     setLoading(true)
     try{
-      const r=await callsApi.list({call_type:'voip',msisdn:fMsisdn||undefined,date:fDate||undefined,limit:PS,offset:p*PS})
+      const r=await callsApi.list({call_type:'volte',msisdn:fMsisdn||undefined,date:fDate||undefined,limit:PS,offset:p*PS})
       setLogs(r.logs);setTotal(r.total)
     }catch(e:unknown){show(String(e),'err')}
     finally{setLoading(false)}
@@ -41,7 +41,7 @@ export default function VolteHistoryPage() {
     try {
       const rec = await recordingsApi.get(l.dir_name)
       if (rec.segments && rec.segments.length > 0) {
-        setRecPlayer({ id: l.dir_name, segments: rec.segments, callType: rec.call_type as 'voip'|'voip_video', caller: l.initiator, callee: l.callee })
+        setRecPlayer({ id: l.dir_name, segments: rec.segments, callType: rec.call_type as 'volte'|'voip_video', caller: l.initiator, callee: l.callee })
       } else {
         show('세그먼트 없음', 'err')
       }

@@ -32,7 +32,7 @@
 
 /**
  * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
+ * @brief SIP ï¿½Ş½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ Å¬ï¿½ï¿½ï¿½ï¿½
  */
 class CSipMessage
 {
@@ -40,7 +40,7 @@ public:
 	CSipMessage();
 	~CSipMessage();
 
-	/** SIP ¸Ş¼Òµå ( INVITE, CANCEL, ACK, BYE, REFER µî ) */
+	/** SIP ï¿½Ş¼Òµï¿½ ( INVITE, CANCEL, ACK, BYE, REFER ï¿½ï¿½ ) */
 	std::string		m_strSipMethod;
 
 	/** SIP request URI */
@@ -49,96 +49,102 @@ public:
 	/** SIP version ( SIP/2.0 ) */
 	std::string		m_strSipVersion;
 
-	/** SIP ÀÀ´ä ÄÚµå. SIP ÀÀ´ä ¸Ş½ÃÁöÀÎ °æ¿ì¿¡¸¸ 0 º¸´Ù Å« °ªÀ» °¡Áö°í ÀÖ´Ù. */
+	/** SIP ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½. SIP ï¿½ï¿½ï¿½ï¿½ ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ì¿¡ï¿½ï¿½ 0 ï¿½ï¿½ï¿½ï¿½ Å« ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ö´ï¿½. */
 	int						m_iStatusCode;
 
-	/** SIP ÀÀ´ä ¸Ş½ÃÁö */
+	/** SIP ï¿½ï¿½ï¿½ï¿½ ï¿½Ş½ï¿½ï¿½ï¿½ */
 	std::string		m_strReasonPhrase;
 
-	/** SIP From Çì´õ */
+	/** SIP From ï¿½ï¿½ï¿½ */
 	CSipFrom			m_clsFrom;
 
-	/** SIP To Çì´õ */
+	/** SIP To ï¿½ï¿½ï¿½ */
 	CSipFrom			m_clsTo;
 
-	/** SIP Via Çì´õ ¸®½ºÆ® */
+	/** SIP Via ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_VIA_LIST	m_clsViaList;
 
-	/** SIP Contact Çì´õ ¸®½ºÆ® */
+	/** SIP Contact ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_FROM_LIST	m_clsContactList;
 
-	/** SIP Record-Route Çì´õ ¸®½ºÆ® */
+	/** SIP Record-Route ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_FROM_LIST	m_clsRecordRouteList;
 
-	/** SIP Route Çì´õ ¸®½ºÆ® */
+	/** SIP Route ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_FROM_LIST	m_clsRouteList;
 
 #ifdef USE_ACCEPT_HEADER
-	/** SIP Accept Çì´õ ¸®½ºÆ® */
+	/** SIP Accept ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_CONTENT_TYPE_LIST	m_clsAcceptList;
 
-	/** SIP Accept-Encoding Çì´õ ¸®½ºÆ® */
+	/** SIP Accept-Encoding ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_ACCEPT_DATA_LIST	m_clsAcceptEncodingList;
 
-	/** SIP Accept-Language Çì´õ ¸®½ºÆ® */
+	/** SIP Accept-Language ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_ACCEPT_DATA_LIST	m_clsAcceptLanguageList;
 #endif
 
-	/** SIP Authorization Çì´õ ¸®½ºÆ® */
+	/** SIP Authorization ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_CREDENTIAL_LIST		m_clsAuthorizationList;
 
-	/** SIP Www-Authenticate Çì´õ ¸®½ºÆ® */
+	/** SIP Www-Authenticate ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_CHALLENGE_LIST		m_clsWwwAuthenticateList;
 
-	/** SIP Proxy-Authorization Çì´õ ¸®½ºÆ® */
+	/** SIP Proxy-Authorization ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_CREDENTIAL_LIST		m_clsProxyAuthorizationList;
 
-	/** SIP Proxy-Authenticate Çì´õ ¸®½ºÆ® */
+	/** SIP Proxy-Authenticate ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® */
 	SIP_CHALLENGE_LIST		m_clsProxyAuthenticateList;
 
-	/** SIP Çì´õ ¸®½ºÆ®. CSipMessage ¿¡¼­ ±¸ºĞÇÏ¿©¼­ Á¤ÀÇÇÑ Çì´õ¿¡ ÀúÀåµÇÁö ¾Ê´Â Çì´õµéÀ» ÀúÀåÇÑ´Ù. */
+	/** SIP ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ®. CSipMessage ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¿ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ê´ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½. */
 	SIP_HEADER_LIST				m_clsHeaderList;
 
-	/** SIP CSeq Çì´õ */
+	/** SIP CSeq ï¿½ï¿½ï¿½ */
 	CSipCSeq				m_clsCSeq;
 
-	/** SIP Call-ID Çì´õ */
+	/** SIP Call-ID ï¿½ï¿½ï¿½ */
 	CSipCallId			m_clsCallId;
 
-	/** SIP Content-Type Çì´õ */
+	/** SIP Content-Type ï¿½ï¿½ï¿½ */
 	CSipContentType	m_clsContentType;
 
-	/** SIP Content-Length Çì´õÀÇ °ª */
+	/** SIP Content-Length ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ */
 	int							m_iContentLength;
 
-	/** SIP Expires Çì´õÀÇ °ª */
+	/** SIP Expires ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ */
 	int							m_iExpires;
 
-	/** SIP Max-Forwards Çì´õÀÇ °ª */
+	/** SIP Max-Forwards ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ */
 	int							m_iMaxForwards;
 
-	/** SIP User-Agent Çì´õ */
+	/** SIP User-Agent ï¿½ï¿½ï¿½ */
 	std::string			m_strUserAgent;
 
-	/** SIP body ¸Ş½ÃÁö */
+	/** SIP body ï¿½Ş½ï¿½ï¿½ï¿½ */
 	std::string			m_strBody;
 
-	/** ³×Æ®¿öÅ©·Î Àü¼ÛÇÒ SIP ¸Ş½ÃÁö */
+	/** ï¿½ï¿½Æ®ï¿½ï¿½Å©ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ SIP ï¿½Ş½ï¿½ï¿½ï¿½ */
 	std::string			m_strPacket;
 
-	/** ³×Æ®¿öÅ©·Î Àü¼Û/¼ö½ÅµÈ SIP ¸Ş½ÃÁöÀÇ transport */
+	/** ï¿½ï¿½Æ®ï¿½ï¿½Å©ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½Åµï¿½ SIP ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ transport */
 	ESipTransport		m_eTransport;
 
-	/** SIP ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ Å¬¶óÀÌ¾ğÆ®ÀÇ IP ÁÖ¼Ò */
+	/** SIP ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Å¬ï¿½ï¿½ï¿½Ì¾ï¿½Æ®ï¿½ï¿½ IP ï¿½Ö¼ï¿½ */
 	std::string			m_strClientIp;
 
-	/** SIP ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ Å¬¶óÀÌ¾ğÆ®ÀÇ Æ÷Æ® ¹øÈ£ */
+	/** SIP ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œ í´ë¼ì´ì–¸íŠ¸ì˜ í¬íŠ¸ ë²ˆí˜¸ */
 	int							m_iClientPort;
 
-	/** SIP ¸Ş½ÃÁö¸¦ compact form À¸·Î »ı¼ºÇÏ´ÂÁö ¼³Á¤ */
+	/** ìˆ˜ì‹  ë¦¬ìŠ¤ë„ˆ ì‹ë³„ì (CSP v3 í™•ì¥, 2026-04-22).
+	 *  UDP ìˆ˜ì‹  ì‹œ SipStack ì´ í•´ë‹¹ CSipStackUdpListener.m_iId ê°’ì„ ì„¸íŒ….
+	 *  CSP LocalNodeMap ì€ ì´ int ë¡œ LocalNode ì—­ì¡°íšŒ ê°€ëŠ¥.
+	 *  ì†¡ì‹ /ë¯¸ì§€ì • ì‹œ -1. */
+	int							m_iListenerId;
+
+	/** SIP ï¿½Ş½ï¿½ï¿½ï¿½ï¿½ï¿½ compact form ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ */
 	bool						m_bUseCompact;
 
-	/** °´Ã¼ »ç¿ë °³¼ö */
+	/** ï¿½ï¿½Ã¼ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ */
 	int8_t					m_iUseCount;
 
 	int Parse( const char * pszText, int iTextLen );

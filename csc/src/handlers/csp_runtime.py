@@ -1175,7 +1175,7 @@ async def _create_service(handler_args: HandlerArgs, config):
     if not name or not kind or not domain:
         return HandlerResult(status=400, body={"error": "name/kind/domain required"},
                              media_type="application/json")
-    if kind not in ("voip", "ptt", "ibcf", "system", "console"):
+    if kind not in ("volte", "ptt", "ibcf", "system", "console"):
         return HandlerResult(status=400, body={"error": "invalid_kind"}, media_type="application/json")
     if policy not in ("any", "restricted"):
         return HandlerResult(status=400, body={"error": "invalid_inbound_policy"}, media_type="application/json")

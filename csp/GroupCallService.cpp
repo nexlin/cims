@@ -7,6 +7,7 @@
 #include "SipServer.h"
 #include "DbManager.h"
 #include "SipMessageLogger.h"
+#include "CspServiceMap.h"
 #include "Log.h"
 #include <ctime>
 
@@ -155,7 +156,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     if ( iSharedPort > 0 ) {
         // PTT 발신 Dialog 도 mcptt realm 사용 (200 OK 의 From/To/Contact 도메인)
         {
-            std::string strMcpttDomain = gclsSetup.GetDomainForService("mcptt");
+            std::string strMcpttDomain = gclsServiceMap.GetDomainByKind("ptt");
             if ( !strMcpttDomain.empty() )
                 gclsUserAgent.SetCallDomain( pszCallId, strMcpttDomain.c_str() );
         }
@@ -247,7 +248,7 @@ void CGroupCallService::ClearUserCall( const std::string& strUserId )
 
         // PTT history: member leave event
         if ( gclsCallDir.IsEnabled() ) {
-            gclsCallDir.PttLogEvent(strGroupId, "member_leave", "{\"member\":\"" + strUserId + "\"}");
+            gclsCallDir.PttMemberLeave(strGroupId, strUserId);
             if ( !bStillActive ) {
                 gclsCallDir.PttSessionEnd(strGroupId);
             }
@@ -381,7 +382,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     CSipMessage *pclsInvite = NULL;
 
     // PTT 멤버 Dialog — mcptt realm 도메인으로 INVITE 생성 (From/To/Request-URI/PAI 모두 mcptt)
-    std::string strMcpttDomain = gclsSetup.GetDomainForService("mcptt");
+    std::string strMcpttDomain = gclsServiceMap.GetDomainByKind("ptt");
     if ( gclsUserAgent.CreateCall( pszGroupId, pszUserId, &clsRtp, &clsRoute, strCallId, &pclsInvite,
                                     strMcpttDomain.empty() ? NULL : strMcpttDomain.c_str() ) ) {
 
@@ -423,7 +424,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
              // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
              pclsInvite->AddHeader( "Answer-Mode", "Auto" );
              // Callee identity (MCPTT 도메인 사용)
-             std::string strMcpttDomain = gclsSetup.GetDomainForService("mcptt");
+             std::string strMcpttDomain = gclsServiceMap.GetDomainByKind("ptt");
              char szPCalledParty[256];
              snprintf( szPCalledParty, sizeof(szPCalledParty), "<sip:%s@%s>",
                        pszUserId, strMcpttDomain.c_str() );
@@ -762,7 +763,7 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
     if ( gclsCmpClient.JoinGroup(strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort, GetOrIssueGroupSesId(strGroupId)) ) {
          CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d floor=%d video=%d)", strGroupId.c_str(), strRemoteIp.c_str(), iRemotePort, iFloorPort, iVideoPort );
          if ( gclsCallDir.IsEnabled() ) {
-             gclsCallDir.PttLogEvent(strGroupId, "member_join", "{\"member\":\"" + strMemberId + "\"}");
+             gclsCallDir.PttMemberJoin(strGroupId, strMemberId, strCallId);
          }
     } else {
          CLog::Print( LOG_ERROR, "OnCallStarted: JoinGroup failed for %s", strGroupId.c_str() );
@@ -821,7 +822,7 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
 
     // PTT history: member leave event
     if ( gclsCallDir.IsEnabled() ) {
-        gclsCallDir.PttLogEvent(strGroupId, "member_leave", "{\"member\":\"" + strMemberId + "\"}");
+        gclsCallDir.PttMemberLeave(strGroupId, strMemberId);
         if ( !bStillActive ) {
             gclsCallDir.PttSessionEnd(strGroupId);
         }
@@ -872,7 +873,7 @@ void CGroupCallService::SendConferenceNotify(const std::string& strGroupId,
     if (vecCallIds.empty()) return;
 
     // 2. Build conference-info+xml body (RFC 4575 partial update)
-    std::string strMcpttDomain = gclsSetup.GetDomainForService("mcptt");
+    std::string strMcpttDomain = gclsServiceMap.GetDomainByKind("ptt");
     std::ostringstream oss;
     oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
         << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"

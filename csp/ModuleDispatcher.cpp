@@ -14,9 +14,12 @@
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
-#include "CspAccessControl.h"
-#include "CspRouteEngine.h"
-#include "CspTrunkManager.h"
+#include "CspAclPolicyEngine.h"
+#include "CspLocalNodeMap.h"
+#include "CspRemoteNodeMap.h"
+#include "CspRouteMap.h"
+#include "CspRoutingPolicyEngine.h"
+#include "CspServiceMap.h"
 #include "SipMessageLogger.h"
 #include "CspServer.h"
 #include "CspSipServer.h"
@@ -198,16 +201,31 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
     std::string strCallId;
     pclsMessage->GetCallId(strCallId);
 
-    // 접근제어 (ACL + rate limit) — 모든 SIP 요청 처리 앞단
+    // v3 (2026-04-22): 접근제어 — AclPolicyEngine (rule_set 기반).
+    //   psip v3 확장으로 수신 listener 식별 가능 → scope=local_node 동작.
+    //   scope=route/route_set 는 inbound 시점 unknown (outbound 결정 이후에 적용 가능).
+    std::string strLocalNodeName;
+    if (pclsMessage->m_iListenerId > 0) {
+        LocalNodeInfo ln = gclsLocalNodeMap.GetByIntId(pclsMessage->m_iListenerId);
+        if (ln.IsValid()) strLocalNodeName = ln.name;
+    }
     {
-        CCspAccessControl::Decision d = gclsAccessControl.Check(
-            pclsMessage->m_strClientIp, 0, pclsMessage->m_strUserAgent);
+        MessageCtx mctx;
+        mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
+        mctx.from_uri_user = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+        mctx.to_uri_host   = pclsMessage->m_clsTo.m_clsUri.m_strHost;
+        mctx.to_uri_user   = pclsMessage->m_clsTo.m_clsUri.m_strUser;
+        mctx.req_uri_host  = pclsMessage->m_clsReqUri.m_strHost;
+        mctx.req_uri_user  = pclsMessage->m_clsReqUri.m_strUser;
+        mctx.src_ip        = pclsMessage->m_strClientIp;
+        mctx.user_agent    = pclsMessage->m_strUserAgent;
+        mctx.method        = pclsMessage->m_strSipMethod;
+        AclDecision d = gclsAclPolicyEngine.Check(mctx, strLocalNodeName, "", "");
         if (!d.allowed) {
-            CLog::Print(LOG_INFO, "AccessControl: denied src=%s reason=%s code=%d",
-                        pclsMessage->m_strClientIp.c_str(), d.reason.c_str(), d.http_code);
-            // 429 는 SIP 에서 직접적 매핑이 없으므로 503 Service Unavailable 로 매핑
-            int status = (d.http_code == 429) ? 503 : 403;
-            SendResponse(pclsMessage, status);
+            CLog::Print(LOG_INFO, "AclPolicy: denied src=%s local_node=%s policy=%s",
+                        pclsMessage->m_strClientIp.c_str(),
+                        strLocalNodeName.c_str(), d.matched_policy.c_str());
+            SendResponse(pclsMessage, 403);
             return true;
         }
     }
@@ -238,33 +256,45 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
             return false;
         }
 
-        // 라우팅 규칙 평가 — 매칭되면 transform 적용 후 결과에 따라 forward/reject
+        // v3 (2026-04-22): routing_policies 평가 — REJECT 즉시 반영.
+        //   route_set/access_service 분기는 후속 스테이지에서 배선 (현재는 로그만).
         {
-            RouteContext ctx;
-            ctx.source_ip = pclsMessage->m_strClientIp;
-            RouteDecision decision = gclsRouteEngine.Evaluate(pclsMessage, ctx);
-            if (decision.matched) {
-                CLog::Print(LOG_INFO, "RouteEngine: matched rule_id=%d name=%s",
-                            decision.rule_id, decision.rule_name.c_str());
-                if (decision.reject) {
-                    CLog::Print(LOG_INFO, "RouteEngine: reject %d %s",
-                                decision.fail_code, decision.fail_reason.c_str());
-                    SendResponse(pclsMessage, decision.fail_code);
-                    return true;
-                }
-                if (decision.target_trunk_id > 0) {
-                    // Transform 을 forward 전에 적용 → B2BUA 가 변경된 메시지로 레그 생성
-                    gclsRouteEngine.ApplyTransforms(pclsMessage, decision.apply);
-                    // B2BUA 가 처리하도록 false 반환 (기존 IBCF 경로와 동일)
-                    return false;
-                }
-                // 타겟 트렁크가 없는데도 매칭됐다면 설정 오류 — 404 응답
-                SendResponse(pclsMessage, decision.fail_code > 0 ? decision.fail_code : 404);
+            MessageCtx mctx;
+            mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
+            mctx.from_uri_user = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+            mctx.to_uri_host   = pclsMessage->m_clsTo.m_clsUri.m_strHost;
+            mctx.to_uri_user   = pclsMessage->m_clsTo.m_clsUri.m_strUser;
+            mctx.req_uri_host  = pclsMessage->m_clsReqUri.m_strHost;
+            mctx.req_uri_user  = pclsMessage->m_clsReqUri.m_strUser;
+            mctx.src_ip        = pclsMessage->m_strClientIp;
+            mctx.user_agent    = pclsMessage->m_strUserAgent;
+            mctx.method        = pclsMessage->m_strSipMethod;
+            std::string hashKey = mctx.from_uri_user + "@" + mctx.from_uri_host;
+            RoutingDecision rd = gclsRoutingPolicyEngine.Decide(mctx, hashKey);
+            if (rd.type == ROUTING_REJECT) {
+                CLog::Print(LOG_INFO,
+                    "RoutingPolicyEngine: reject policy='%s' reason='%s'",
+                    rd.matched_policy.c_str(), rd.reason.c_str());
+                SendResponse(pclsMessage, 403);
                 return true;
+            }
+            if (rd.type == ROUTING_ROUTE_SET) {
+                // TODO(S후속): picked_route → outbound transport 배선 후 forward.
+                CLog::Print(LOG_INFO,
+                    "RoutingPolicyEngine: match policy='%s' route_set='%s' picked_route='%s' (not yet wired, falling back to legacy)",
+                    rd.matched_policy.c_str(), rd.target_name.c_str(), rd.picked_route.c_str());
+            }
+            if (rd.type == ROUTING_ACCESS_SERVICE) {
+                CLog::Print(LOG_INFO,
+                    "RoutingPolicyEngine: match policy='%s' access_service='%s' (falling back to legacy TAS path)",
+                    rd.matched_policy.c_str(), rd.target_name.c_str());
             }
         }
 
-        // 레거시 IBCF (routing_rule 미설정 시 기존 XML 경로 사용) — 빈 map 이면 false 반환
+        // v3 (2026-04-22): 구 RouteEngine 경로 제거. 라우팅 결정은 위 RoutingPolicyEngine 이 담당.
+        //                  ROUTING_ROUTE_SET 경로의 실제 outbound 배선은 EventIncomingCall 에서 수행.
+
+        // 레거시 IBCF XML 경로 (기존 SipServerXml) — 빈 map 이면 false 반환
         CspSipServer clsSipServer;
         std::string strRouteTo;
         if (gclsSipServerMap.SelectRoutePrefix(strTo.c_str(), clsSipServer, strRouteTo)) {
@@ -296,17 +326,9 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
 }
 
 bool CModuleDispatcher::RecvResponse(int iThreadId, CSipMessage* pclsMessage) {
-    if (pclsMessage && pclsMessage->m_clsCSeq.m_strMethod == SIP_METHOD_OPTIONS) {
-        // OPTIONS 응답은 트렁크 헬스체크 매칭 시도
-        std::string callId = pclsMessage->m_clsCallId.m_strName;
-        if (!pclsMessage->m_clsCallId.m_strHost.empty()) {
-            callId += "@";
-            callId += pclsMessage->m_clsCallId.m_strHost;
-        }
-        if (!callId.empty()) {
-            gclsTrunkManager.OnSipResponse(callId, pclsMessage->m_iStatusCode);
-        }
-    }
+    // v3 (2026-04-22): OPTIONS 헬스체크는 RouteSet 의 health_check 가 담당하도록 이관 예정.
+    //   현 스테이지는 헬스체크 송신/수신 자체를 아직 구현 안함.
+    (void)iThreadId; (void)pclsMessage;
     return false;
 }
 
@@ -420,9 +442,58 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
             }
         }
 
-        // IBCF: 트렁크
+        // v3 (2026-04-22): RoutingPolicyEngine → RouteSet.SelectRoute → RemoteNode outbound.
+        //   IBCF 역할 enabled 인 경우만 시도 (역할 off 면 legacy 경로 skip).
+        bool v3Routed = false;
+        if (m_clsIbcf.IsEnabled()) {
+            MessageCtx mctx;
+            mctx.from_uri_user = pszFrom;
+            mctx.to_uri_user   = pszTo;
+            if (pclsMessage) {
+                mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
+                mctx.to_uri_host   = pclsMessage->m_clsTo.m_clsUri.m_strHost;
+                mctx.req_uri_user  = pclsMessage->m_clsReqUri.m_strUser;
+                mctx.req_uri_host  = pclsMessage->m_clsReqUri.m_strHost;
+                mctx.src_ip        = pclsMessage->m_strClientIp;
+                mctx.user_agent    = pclsMessage->m_strUserAgent;
+                mctx.method        = pclsMessage->m_strSipMethod;
+            }
+            std::string hashKey = std::string(pszFrom ? pszFrom : "");
+            RoutingDecision rd = gclsRoutingPolicyEngine.Decide(mctx, hashKey);
+            if (rd.type == ROUTING_ROUTE_SET && !rd.picked_route.empty()) {
+                RouteConfig rc = gclsRouteMap.GetByName(rd.picked_route);
+                RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName(rc.remote_node_ref);
+                if (!rc.name.empty() && rn.IsValid() && !rn.ip.empty()) {
+                    clsUser.m_strId       = rc.auth_user;
+                    clsUser.m_strPassWord = rc.auth_password;
+                    clsUserInfo.m_strIp   = rn.ip;
+                    clsUserInfo.m_iPort   = rn.port;
+                    clsUserInfo.m_eTransport =
+                        (rn.protocol == "TCP") ? E_SIP_TCP :
+                        (rn.protocol == "TLS") ? E_SIP_TLS : E_SIP_UDP;
+                    // pszTo 유지 — 피어에 전달할 R-URI user.
+                    // pszFrom 은 auth_user 가 있으면 바꾸고, 없으면 원본 유지.
+                    if (!rc.auth_user.empty()) pszFrom = clsUser.m_strId.c_str();
+                    bRoutePrefix = true;
+                    SetCallOwner(pszCallId, &m_clsIbcf);
+                    v3Routed = true;
+                    CLog::Print(LOG_INFO,
+                        "RoutingPolicyEngine: outbound via route_set='%s' route='%s' → %s:%d/%s",
+                        rd.target_name.c_str(), rd.picked_route.c_str(),
+                        rn.ip.c_str(), rn.port, rn.protocol.c_str());
+                }
+            } else if (rd.type == ROUTING_REJECT) {
+                CLog::Print(LOG_INFO, "RoutingPolicyEngine: reject policy='%s' reason='%s'",
+                            rd.matched_policy.c_str(), rd.reason.c_str());
+                return StopCall(pszCallId, SIP_FORBIDDEN);
+            }
+        }
+
+        // 레거시 IBCF: 트렁크 (v3 에서 결정 못 한 경우 fallback)
         CspSipServer clsSipServer;
-        if (m_clsIbcf.IsEnabled() && gclsSipServerMap.SelectRoutePrefix(pszTo, clsSipServer, strTo)) {
+        if (v3Routed) {
+            // 이미 위에서 outbound 설정 완료 — 아래 legacy 블록 skip
+        } else if (m_clsIbcf.IsEnabled() && gclsSipServerMap.SelectRoutePrefix(pszTo, clsSipServer, strTo)) {
             clsUser.m_strId = clsSipServer.m_strUserId;
             clsUser.m_strPassWord = clsSipServer.m_strPassWord;
             clsUserInfo.m_strIp = clsSipServer.m_strIp;
@@ -521,8 +592,7 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
 
     // P-Asserted-Identity: B2BUA 발신 leg에 인증된 발신자 신원 전달 (3GPP TS 24.229)
     if (pclsInvite) {
-        std::string strDomain = gclsSetup.GetDomainForService("volte");
-        if (strDomain.empty()) strDomain = gclsSetup.m_strAuthRealm;
+        std::string strDomain = gclsServiceMap.GetDomainByKind("volte");
         char szPAI[512];
         snprintf(szPAI, sizeof(szPAI), "<sip:%s@%s>", pszFrom ? pszFrom : "", strDomain.c_str());
         pclsInvite->AddHeader("P-Asserted-Identity", szPAI);

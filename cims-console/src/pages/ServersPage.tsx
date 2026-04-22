@@ -6,7 +6,7 @@ import {
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
-import DeploymentConfigModal from './deploy/DeploymentConfigModal'
+import ModuleConfigModal from '../components/module/ModuleConfigModal'
 
 export default function ServersPage() {
   const { show } = useToast()
@@ -202,7 +202,7 @@ export default function ServersPage() {
       {metricsFor &&
         <MetricsModal agent={metricsFor} onClose={() => setMetricsFor(null)} />}
       {configFor &&
-        <DeploymentConfigModal deployment={configFor}
+        <ModuleConfigModal source={{ type: 'deployment', deployment: configFor }}
           onClose={() => setConfigFor(null)} onDone={load} />}
     </div>
   )

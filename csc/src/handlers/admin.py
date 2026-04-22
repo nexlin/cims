@@ -78,6 +78,12 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
     sub_id    = parts[2] if len(parts) > 2 else None   # MSISDN of the subscription
     method    = handler_args.method.upper()
 
+    # v3 (2026-04-22): /api/v1/users/me[/...] 경로는 users.py 가 담당 (본인 리소스).
+    #   admin.handle_users 는 /api/v1/users/:pid (관리자 CRUD) 만 담당.
+    if person_id == 'me':
+        from . import users as _users
+        return await _users.handle_users(handler_args, kwargs)
+
     try:
         if person_id is None:
             if method == 'GET':
@@ -151,8 +157,8 @@ async def _list_users(config):
                 row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
                 # attach subscriptions
                 cur.execute(
-                    "SELECT id, service_id, imsi, dnd, forward_id, register_time, logout_time "
-                    "FROM voip_subscriptions WHERE user_id=%s ORDER BY id",
+                    "SELECT id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
+                    "FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
                     (row['id'],)
                 )
                 call_subs = cur.fetchall()
@@ -163,7 +169,7 @@ async def _list_users(config):
                 row['call_subscriptions'] = call_subs
 
                 cur.execute(
-                    "SELECT id, service_id, imsi, dnd, forward_id, register_time, logout_time "
+                    "SELECT id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
                     "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                     (row['id'],)
                 )
@@ -203,8 +209,8 @@ async def _get_user(person_id: str, config):
 
             # call subscriptions
             cur.execute(
-                "SELECT id, service_id, imsi, dnd, forward_id, register_time, logout_time "
-                "FROM voip_subscriptions WHERE user_id=%s ORDER BY id",
+                "SELECT id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
+                "FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
             call_subs = cur.fetchall()
@@ -216,7 +222,7 @@ async def _get_user(person_id: str, config):
 
             # ptt subscriptions
             cur.execute(
-                "SELECT id, service_id, imsi, dnd, forward_id, register_time, logout_time "
+                "SELECT id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
                 "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -332,10 +338,10 @@ async def _delete_user(person_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             # 삭제 전 연관 subscription ID 수집
-            for table in ('voip_subscriptions', 'ptt_subscriptions'):
+            for table in ('volte_subscriptions', 'ptt_subscriptions'):
                 cur.execute(f"SELECT id FROM {table} WHERE user_id=%s", (person_id,))
                 sub_ids.extend(r['id'] for r in cur.fetchall())
-            cur.execute("DELETE FROM voip_subscriptions WHERE user_id=%s", (person_id,))
+            cur.execute("DELETE FROM volte_subscriptions WHERE user_id=%s", (person_id,))
             cur.execute("DELETE FROM ptt_subscriptions WHERE user_id=%s", (person_id,))
             cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
             cur.execute("DELETE FROM users WHERE id=%s", (person_id,))
@@ -374,7 +380,7 @@ async def _batch_delete_users(body, config):
 # ──────────────────────────────────────────────────────────────
 
 def _sub_table(svc: str) -> str:
-    return 'voip_subscriptions' if svc == 'call' else 'ptt_subscriptions'
+    return 'volte_subscriptions' if svc == 'call' else 'ptt_subscriptions'
 
 
 
@@ -387,7 +393,7 @@ async def _list_subscriptions(person_id: str, svc: str, config):
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
-                f"SELECT id, service_id, imsi, dnd, forward_id, "
+                f"SELECT id, service_ref, imsi, dnd, forward_id, "
                 f"       register_time, logout_time "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
@@ -407,14 +413,12 @@ async def _add_subscription(person_id: str, svc: str, body, config):
     if not msisdn:
         return HandlerResult(status=400, body={'error': 'id (MSISDN) is required'})
 
-    # P7: service_id + imsi (IMSI 는 user 파트, service.domain 과 런타임 결합)
-    service_id = body.get('service_id')
-    if service_id in (None, 0, '', '0'):
-        service_id = None
+    # v3 (2026-04-22): service_ref 는 access_services.name 을 참조하는 VARCHAR
+    service_ref = body.get('service_ref')
+    if service_ref in (None, '', 0, '0'):
+        service_ref = None
     else:
-        try: service_id = int(service_id)
-        except Exception:
-            return HandlerResult(status=400, body={'error': 'invalid service_id'})
+        service_ref = str(service_ref).strip() or None
     imsi       = (body.get('imsi') or '').strip() or None
     # P8: auth_id 제거 — imsi 필수
     if not imsi:
@@ -430,9 +434,9 @@ async def _add_subscription(person_id: str, svc: str, body, config):
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
-                f"INSERT INTO {table} (id, user_id, service_id, imsi, passwd, dnd, forward_id) "
+                f"INSERT INTO {table} (id, user_id, service_ref, imsi, passwd, dnd, forward_id) "
                 f"VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (msisdn, person_id, service_id, imsi, passwd, dnd, forward_id)
+                (msisdn, person_id, service_ref, imsi, passwd, dnd, forward_id)
             )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     return HandlerResult(status=201, body={'id': msisdn})
@@ -447,18 +451,15 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
 
-    # service_id/imsi 는 부분 업데이트 — 키가 있을 때만 반영
+    # service_ref/imsi 는 부분 업데이트 — 키가 있을 때만 반영
     fields = ["passwd=%s", "dnd=%s", "forward_id=%s"]
     values = [passwd, dnd, forward_id]
-    if 'service_id' in body:
-        sid = body.get('service_id')
-        if sid in (None, 0, '', '0'):
-            fields.append("service_id=NULL")
+    if 'service_ref' in body:
+        sid = body.get('service_ref')
+        if sid in (None, '', 0, '0'):
+            fields.append("service_ref=NULL")
         else:
-            try: sid = int(sid)
-            except Exception:
-                return HandlerResult(status=400, body={'error': 'invalid service_id'})
-            fields.append("service_id=%s"); values.append(sid)
+            fields.append("service_ref=%s"); values.append(str(sid).strip())
     if 'imsi' in body:
         imsi = (body.get('imsi') or '').strip() or None
         fields.append("imsi=%s"); values.append(imsi)
@@ -764,208 +765,6 @@ async def _remove_member(group_id: str, user_id: str, config):
 
 
 # ──────────────────────────────────────────────────────────────
-#  Call logs handler
-# ──────────────────────────────────────────────────────────────
-
-_CALL_LOGS_BASE = '/api/v1/call/logs'
-
-_END_REASON_KO = {
-    'normal': '정상종료', 'busy': '통화중', 'cancel': '취소',
-    'timeout': '시간초과', 'error': '오류',
-}
-
-
-def _call_log_row(row: dict) -> dict:
-    row['invite_time'] = _dt(row['invite_time'])
-    row['answer_time'] = _dt(row['answer_time'])
-    row['end_time']    = _dt(row['end_time'])
-    row['end_reason_ko'] = _END_REASON_KO.get(row.get('end_reason') or '', '')
-    return row
-
-
-def _tables_exist(cur) -> bool:
-    cur.execute(
-        "SELECT COUNT(*) AS cnt FROM information_schema.TABLES "
-        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='voip_call_logs'"
-    )
-    return cur.fetchone()['cnt'] > 0
-
-
-async def handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """
-    GET /api/v1/call/logs
-        ?state=ringing|active|ended   (default: all)
-        ?caller=MSISDN
-        ?callee=MSISDN
-        ?msisdn=MSISDN                (caller OR callee OR participant)
-        ?group_id=ID                  (PTT only)
-        ?call_type=voip|ptt
-        ?from_dt=YYYY-MM-DD
-        ?to_dt=YYYY-MM-DD
-        ?limit=N                      (default 200, max 1000)
-        ?offset=N                     (default 0)
-
-    GET /api/v1/call/logs/active      (shorthand: state=ringing,active)
-    """
-    from urllib.parse import urlparse, parse_qs, unquote
-
-    config = kwargs.get('config', {})
-    parsed = urlparse(handler_args.full_path)
-    qs     = parse_qs(parsed.query)
-
-    def qp(name, default=None):
-        vals = qs.get(name)
-        return unquote(vals[0]) if vals else default
-
-    # distinguish /call/logs vs /call/logs/active
-    path_tail = parsed.path.rstrip('/')
-    active_only = path_tail.endswith('/active')
-
-    if handler_args.method.upper() != 'GET':
-        return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
-
-    state     = qp('state')
-    caller    = qp('caller')
-    callee    = qp('callee')
-    msisdn    = qp('msisdn')
-    group_id  = qp('group_id')
-    call_type = qp('call_type')
-    from_dt   = qp('from_dt')
-    to_dt     = qp('to_dt')
-    limit     = min(int(qp('limit', 200)), 1000)
-    offset    = int(qp('offset', 0))
-
-    if active_only:
-        state = 'active_ringing'  # special token
-
-    try:
-        with _get_db(config) as conn:
-            with conn.cursor() as cur:
-                if not _tables_exist(cur):
-                    return HandlerResult(status=503, body={
-                        'error': 'Call log tables not created yet. Run: sudo mysql cims < sql/migrate_call_logs.sql'
-                    })
-
-                # ── build per-table WHERE clauses ──
-                # voip_call_logs columns: id, call_id, initiator, callee, state, invite_time, ...
-                # ptt_call_logs  columns: id, call_id, group_id, initiator, state, invite_time, ...
-
-                def _build_where(for_ptt: bool):
-                    w = []
-                    p = []
-                    if state == 'active_ringing':
-                        w.append("l.state IN ('ringing','active')")
-                    elif state:
-                        w.append("l.state = %s")
-                        p.append(state)
-                    if caller:
-                        w.append("l.initiator = %s")
-                        p.append(caller)
-                    if from_dt:
-                        w.append("l.invite_time >= %s")
-                        p.append(from_dt + ' 00:00:00')
-                    if to_dt:
-                        w.append("l.invite_time <= %s")
-                        p.append(to_dt + ' 23:59:59')
-                    if for_ptt:
-                        if group_id:
-                            w.append("l.group_id = %s")
-                            p.append(group_id)
-                        if msisdn:
-                            w.append(
-                                "(l.initiator = %s OR EXISTS("
-                                " SELECT 1 FROM ptt_call_participants cp"
-                                " WHERE cp.log_id = l.id AND cp.msisdn = %s))"
-                            )
-                            p += [msisdn, msisdn]
-                    else:
-                        if callee:
-                            w.append("l.callee = %s")
-                            p.append(callee)
-                        if msisdn:
-                            w.append(
-                                "(l.initiator = %s OR l.callee = %s OR EXISTS("
-                                " SELECT 1 FROM voip_call_participants cp"
-                                " WHERE cp.log_id = l.id AND cp.msisdn = %s))"
-                            )
-                            p += [msisdn, msisdn, msisdn]
-                    return ("WHERE " + " AND ".join(w)) if w else "", p
-
-                # determine which tables to query
-                use_voip = call_type != 'ptt'
-                use_ptt  = call_type != 'voip'
-
-                # ── build UNION query ──
-                union_parts = []
-                union_params = []
-
-                if use_voip:
-                    voip_where, voip_params = _build_where(for_ptt=False)
-                    union_parts.append(
-                        f"SELECT l.id, l.call_id, 'voip' AS call_type, "
-                        f"NULL AS group_id, "
-                        f"l.initiator, l.callee, l.state, "
-                        f"l.invite_time, l.answer_time, l.end_time, "
-                        f"l.duration, l.sip_status, l.end_reason "
-                        f"FROM voip_call_logs l {voip_where}"
-                    )
-                    union_params += voip_params
-
-                if use_ptt:
-                    ptt_where, ptt_params = _build_where(for_ptt=True)
-                    union_parts.append(
-                        f"SELECT l.id, l.call_id, 'ptt' AS call_type, "
-                        f"l.group_id, "
-                        f"l.initiator, NULL AS callee, l.state, "
-                        f"l.invite_time, l.answer_time, l.end_time, "
-                        f"l.duration, NULL AS sip_status, l.end_reason "
-                        f"FROM ptt_call_logs l {ptt_where}"
-                    )
-                    union_params += ptt_params
-
-                union_sql = " UNION ALL ".join(union_parts)
-
-                # ── total count ──
-                cur.execute(
-                    f"SELECT COUNT(*) AS cnt FROM ({union_sql}) AS combined",
-                    union_params
-                )
-                total = cur.fetchone()['cnt']
-
-                # ── main query ──
-                cur.execute(
-                    f"SELECT * FROM ({union_sql}) AS combined "
-                    f"ORDER BY invite_time DESC "
-                    f"LIMIT %s OFFSET %s",
-                    union_params + [limit, offset]
-                )
-                logs = cur.fetchall()
-
-                for row in logs:
-                    _call_log_row(row)
-
-                    # attach participants from the correct split table
-                    parts_table = 'ptt_call_participants' if row['call_type'] == 'ptt' else 'voip_call_participants'
-                    cur.execute(
-                        f"SELECT msisdn, role, join_time, leave_time "
-                        f"FROM {parts_table} WHERE log_id = %s "
-                        f"ORDER BY role, join_time",
-                        (row['id'],)
-                    )
-                    parts = cur.fetchall()
-                    for p in parts:
-                        p['join_time']  = _dt(p['join_time'])
-                        p['leave_time'] = _dt(p['leave_time'])
-                    row['participants'] = parts
-
-        return HandlerResult(status=200, body={
-            'total': total, 'limit': limit, 'offset': offset, 'logs': logs
-        })
-    except pymysql.Error as e:
-        return HandlerResult(status=500, body={'error': str(e)})
-
-
-# ──────────────────────────────────────────────────────────────
 #  Excel Import / Template
 # ──────────────────────────────────────────────────────────────
 
@@ -998,14 +797,14 @@ def _generate_template():
     ws1.append(['name', 'login_id', 'org_code', 'details', 'reject_ids'])
     ws1.append(['홍길동', 'hong', 'DEV_01', '개발1팀', '+8210001,+8210002'])
 
-    # Sheet 2: voip_subscriptions
-    ws2 = wb.create_sheet('voip_subscriptions')
-    ws2.append(['name', 'msisdn', 'service_id', 'imsi', 'password', 'dnd', 'forward_id'])
+    # Sheet 2: volte_subscriptions
+    ws2 = wb.create_sheet('volte_subscriptions')
+    ws2.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'dnd', 'forward_id'])
     ws2.append(['홍길동', '+821357007100', '45003310000100@ims.domain', '123456', 'N', ''])
 
     # Sheet 3: ptt_subscriptions
     ws3 = wb.create_sheet('ptt_subscriptions')
-    ws3.append(['name', 'msisdn', 'service_id', 'imsi', 'password', 'dnd'])
+    ws3.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'dnd'])
     ws3.append(['홍길동', '+82571900100', '', '123456', 'N'])
 
     buf = io.BytesIO()
@@ -1087,16 +886,16 @@ async def _process_import(handler_args: HandlerArgs, config):
                     except Exception as e:
                         result['errors'].append({'row': i, 'sheet': 'users', 'error': str(e)})
 
-            # Sheet 2: voip_subscriptions
-            if 'voip_subscriptions' in wb.sheetnames:
-                ws = wb['voip_subscriptions']
+            # Sheet 2: volte_subscriptions
+            if 'volte_subscriptions' in wb.sheetnames:
+                ws = wb['volte_subscriptions']
                 headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
                 for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                     rd = dict(zip(headers, row))
                     name = str(rd.get('name', '') or '').strip()
                     msisdn = str(rd.get('msisdn', '') or '').strip()
                     if not name or not msisdn:
-                        result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': 'name/msisdn 필수'})
+                        result['errors'].append({'row': i, 'sheet': 'volte_subscriptions', 'error': 'name/msisdn 필수'})
                         continue
 
                     pid = name_to_id.get(name)
@@ -1108,20 +907,20 @@ async def _process_import(handler_args: HandlerArgs, config):
                             name_to_id[name] = pid
                             result['created_users'] += 1
                         except Exception as e:
-                            result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': f'사용자 생성 실패: {e}'})
+                            result['errors'].append({'row': i, 'sheet': 'volte_subscriptions', 'error': f'사용자 생성 실패: {e}'})
                             continue
 
                     imsi    = str(rd.get('imsi', '') or '').strip() or msisdn.lstrip('+')
-                    svc_id  = rd.get('service_id')
-                    try: svc_id = int(svc_id) if svc_id not in (None, '', 0) else None
-                    except Exception: svc_id = None
+                    svc_id  = rd.get('service_ref')
+                    svc_id = str(svc_id).strip() if svc_id not in (None, "", 0) else None
+                    # v3: service_ref 는 문자열
                     passwd = str(rd.get('password', '') or '').strip() or '123456'
                     dnd = 1 if str(rd.get('dnd', '')).upper() in ('Y', 'YES', '1', 'TRUE') else 0
                     forward_id = str(rd.get('forward_id', '') or '').strip()
 
                     try:
                         cur.execute(
-                            "INSERT IGNORE INTO voip_subscriptions (id, user_id, service_id, imsi, passwd, dnd, forward_id) "
+                            "INSERT IGNORE INTO volte_subscriptions (id, user_id, service_ref, imsi, passwd, dnd, forward_id) "
                             "VALUES (%s,%s,%s,%s,%s,%s,%s)",
                             (msisdn, pid, svc_id, imsi, passwd, dnd, forward_id)
                         )
@@ -1129,9 +928,9 @@ async def _process_import(handler_args: HandlerArgs, config):
                             result['created_voip'] += 1
                             notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
                         else:
-                            result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': f'MSISDN 중복: {msisdn}'})
+                            result['errors'].append({'row': i, 'sheet': 'volte_subscriptions', 'error': f'MSISDN 중복: {msisdn}'})
                     except Exception as e:
-                        result['errors'].append({'row': i, 'sheet': 'voip_subscriptions', 'error': str(e)})
+                        result['errors'].append({'row': i, 'sheet': 'volte_subscriptions', 'error': str(e)})
 
             # Sheet 3: ptt_subscriptions
             if 'ptt_subscriptions' in wb.sheetnames:
@@ -1157,15 +956,15 @@ async def _process_import(handler_args: HandlerArgs, config):
                             continue
 
                     imsi    = str(rd.get('imsi', '') or '').strip() or msisdn.lstrip('+')
-                    svc_id  = rd.get('service_id')
-                    try: svc_id = int(svc_id) if svc_id not in (None, '', 0) else None
-                    except Exception: svc_id = None
+                    svc_id  = rd.get('service_ref')
+                    svc_id = str(svc_id).strip() if svc_id not in (None, "", 0) else None
+                    # v3: service_ref 는 문자열
                     passwd = str(rd.get('password', '') or '').strip() or '123456'
                     dnd = 1 if str(rd.get('dnd', '')).upper() in ('Y', 'YES', '1', 'TRUE') else 0
 
                     try:
                         cur.execute(
-                            "INSERT IGNORE INTO ptt_subscriptions (id, user_id, service_id, imsi, passwd, dnd) "
+                            "INSERT IGNORE INTO ptt_subscriptions (id, user_id, service_ref, imsi, passwd, dnd) "
                             "VALUES (%s,%s,%s,%s,%s,%s)",
                             (msisdn, pid, svc_id, imsi, passwd, dnd)
                         )

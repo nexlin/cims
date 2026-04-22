@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "key": "listen",
+      "title": "Listen / 제어",
+      "description": "CSP ↔ CMP JSON 제어 채널 바인딩",
+      "fields": [
+        {
+          "key": "ServerIp", "label": "바인딩 IP",
+          "type": "string", "default": "0.0.0.0",
+          "required": true, "restart": true,
+          "help": "CMP 제어 소켓 바인딩 IP (0.0.0.0 = any)"
+        },
+        {
+          "key": "ServerPort", "label": "제어 포트",
+          "type": "int", "default": 9000, "min": 1, "max": 65535,
+          "required": true, "restart": true,
+          "help": "CSC/CSP → CMP 제어용 UDP 포트"
+        },
+        {
+          "key": "RtpIp", "label": "RTP 외부 IP",
+          "type": "string", "default": "",
+          "restart": true,
+          "help": "SDP 에 기재되는 미디어 IP (외부 접근용). 미지정 시 ServerIp 사용."
+        },
+        {
+          "key": "CspIp", "label": "CSP IP",
+          "type": "string", "default": "",
+          "restart": true,
+          "help": "상향 CSP 주소 (CMP → CSP 알림용)"
+        },
+        {
+          "key": "CspPort", "label": "CSP Port",
+          "type": "int", "default": 9001, "min": 1, "max": 65535,
+          "restart": true
+        }
+      ]
+    },
+    {
+      "key": "rtp_pool",
+      "title": "RTP 포트 풀",
+      "description": "VoIP / PTT 리소스 풀 분리 (각 start + pool_size)",
+      "fields": [
+        {
+          "key": "RtpStartPort", "label": "VoIP RTP 시작 포트",
+          "type": "int", "default": 50000, "min": 1024, "max": 65000,
+          "restart": true,
+          "help": "4 포트 블록 (Audio RTP/RTCP + Video RTP/RTCP) 단위로 할당"
+        },
+        {
+          "key": "RtpPoolSize", "label": "VoIP RTP 풀 크기",
+          "type": "int", "default": 20, "min": 1, "max": 10000,
+          "restart": true
+        },
+        {
+          "key": "PttRtpStartPort", "label": "PTT RTP 시작 포트",
+          "type": "int", "default": 52000, "min": 1024, "max": 65000,
+          "restart": true
+        },
+        {
+          "key": "PttRtpPoolSize", "label": "PTT RTP 풀 크기",
+          "type": "int", "default": 10, "min": 1, "max": 10000,
+          "restart": true
+        },
+        {
+          "key": "PttFloorStartPort", "label": "PTT Floor 시작 포트",
+          "type": "int", "default": 54000, "min": 1024, "max": 65000,
+          "restart": true,
+          "help": "m=application (RTCP APP) 전용 소켓"
+        },
+        {
+          "key": "PttVideoStartPort", "label": "PTT Video 시작 포트",
+          "type": "int", "default": 56000, "min": 1024, "max": 65000,
+          "restart": true
+        },
+        {
+          "key": "RtpWorkerCount", "label": "RTP Worker 스레드 수",
+          "type": "int", "default": 4, "min": 1, "max": 32,
+          "restart": true
+        }
+      ]
+    },
+    {
+      "key": "dtmf_ptt",
+      "title": "DTMF PTT",
+      "description": "VoIP 단말에서 DTMF 로 PTT Push/Release 를 시뮬레이션",
+      "fields": [
+        {
+          "key": "EnableDtmfPtt", "label": "DTMF PTT 사용",
+          "type": "bool", "default": true, "restart": true
+        },
+        {
+          "key": "DtmfPushDigit", "label": "Push 디지트",
+          "type": "string", "default": "*", "restart": true
+        },
+        {
+          "key": "DtmfReleaseDigit", "label": "Release 디지트",
+          "type": "string", "default": "#", "restart": true
+        }
+      ]
+    },
+    {
+      "key": "session",
+      "title": "세션",
+      "fields": [
+        {
+          "key": "SessionTimeout", "label": "세션 타임아웃 (초)",
+          "type": "int", "default": 600, "min": 30, "max": 86400,
+          "restart": true,
+          "help": "마지막 RTP 수신 후 해당 초 동안 활동이 없으면 세션 제거"
+        }
+      ]
+    },
+    {
+      "key": "log",
+      "title": "로깅",
+      "fields": [
+        {
+          "key": "LogLevel", "label": "로그 레벨",
+          "type": "enum", "options": ["DEBUG", "INFO", "WARN", "ERROR"],
+          "default": "INFO",
+          "restart": true
+        },
+        {
+          "key": "LogDir", "label": "로그 디렉토리",
+          "type": "path", "default": "log", "restart": true
+        },
+        {
+          "key": "LogMaxSizeMB", "label": "로그 파일 최대 크기 (MB)",
+          "type": "int", "default": 10, "min": 1, "max": 1024,
+          "restart": true
+        },
+        {
+          "key": "LogMaxFiles", "label": "로그 파일 최대 개수",
+          "type": "int", "default": 5, "min": 1, "max": 100,
+          "restart": true
+        },
+        {
+          "key": "SystemId", "label": "시스템 ID",
+          "type": "string", "default": "cmp_01", "restart": true,
+          "help": "Flow/Msg 로그 파일명 접두어 (cmp_01.flow.jsonl 등)"
+        }
+      ]
+    }
+  ]
+}

@@ -1,290 +1,433 @@
-# SIP 서비스 모델 (Service-Trunk 주축)
+# SIP 설정 모델 (Local/Remote Node + Rule/RuleSet + Policy)
 
-> **저장소 변경 주의** (2026-04-21 이후): listener/trunk/route/acl/service 는 DB 테이블이 아니라
-> 각 Deployment 의 `install_path/config/*.jsonl` 에 저장됩니다. 이 문서는 **데이터 모델/의미** 를
-> 다루고, 저장/반영 경로는 `sip_runtime_config.md`, `package_and_template.md` 를 참조하세요.
-
-CSP 를 **서비스(Service) 중심** 으로 재구성한 P7 단계의 설계 문서. Listener 는 infrastructure, Trunk 는 peering 수단, Service 는 비즈니스 경계.
-
----
-
-## 1. 개념
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                  Service (비즈니스 경계)                      │
-│   domain: ims.mnc001.mcc001.3gppnetwork.org                   │
-│   kind:   voip | ptt | ibcf | system | console                │
-│   auth_realm: (Digest challenge 용 — NULL 이면 domain 상속)   │
-│                                                               │
-│   ├── Subscribers (UE 직접 접속)                              │
-│   │    └ voip_subscriptions.service_id / ptt_subscriptions    │
-│   │    └ REGISTER 시 (imsi@domain) 로 Digest 인증             │
-│   │                                                           │
-│   ├── Trunks (원격 peer 서버 — outbound)                      │
-│   │    └ sip_trunk.service_id                                 │
-│   │    └ failover_priority 순으로 alive 트렁크 자동 선택      │
-│   │                                                           │
-│   └── Listeners (inbound — 선택적 제한)                       │
-│        └ inbound_policy='any'(기본) → 모든 리스너에서 수신   │
-│        └ inbound_policy='restricted' → sip_service_listener 만│
-└──────────────────────────────────────────────────────────────┘
-```
-
-Listener 는 "누가 나에게 연결할 수 있는 포트" 이고, Trunk 는 "내가 연결하는 외부 서버", Service 는 "같은 도메인을 공유하는 가입자+피어링 묶음".
+> **2026-04-22 개정 (v3)** — 기존 `service + trunk + route + acl` flat 4-collection 모델을
+> telco IBCF 계열의 **LocalNode / RemoteNode / Route / RouteSet + Rule / RuleSet + Policy**
+> 9-collection 모델로 재설계. Access(UE facing) 와 Peering(IMS 연동) 을 하이브리드로 구분.
+>
+> 이 문서는 **데이터 모델/의미** 만 다루며, 저장/반영 경로는 `sip_runtime_config.md`,
+> 패키지 형식은 `package_and_template.md` 를 참조.
 
 ---
 
-## 2. 인증 흐름 (IMSI 정규화)
-
-### 저장 형태
-
-```sql
-voip_subscriptions:
-  id:         "+821357007001"
-  user_id:    3
-  service_id: 1                    ← P7 신규
-  imsi:       "450033100000001"    ← P7 신규 (user 파트)
-  passwd:     "123456"
-  -- auth_id: 레거시 fallback (IMSI 정규화 완료 후 P8 에서 제거 예정)
-```
-
-### REGISTER 시
+## 0. 핵심 개념 (Telco IBCF 관례)
 
 ```
-1. UE → REGISTER
-    Authorization: Digest username="450033100000001@ims.mnc001.mcc001.3gppnetwork.org"
-                   realm="ims.mnc001.mcc001.3gppnetwork.org"
-                   response=<MD5 계산값>
-
-2. CSP (CscfModule):
-    2-1. From URI user → voip_subscriptions 에서 조회
-    2-2. service_id=0 이면 REJECT (결정 #2)
-    2-3. sip_service 에서 service_id=1 조회 → domain, auth_realm
-    2-4. 기대 username = imsi + "@" + service.domain
-         = "450033100000001@ims.mnc001.mcc001..."
-    2-5. UE 의 username 과 완전 일치 확인
-    2-6. HA1 = MD5(username : realm : password) — UE 와 동일 계산
-    2-7. 일치 → 200 OK
+Local Node         CSP 가 수신/송신하는 엔드포인트(bind 포트)
+Remote Node        외부 피어(IMS/PBX 서버)의 접속 정보 (순수 transport)
+Route              Local Node ↔ Remote Node 간 1:1 연결 파라미터
+                   (auth, proxy, REGISTER 옵션, 동시호 제한 등)
+                   (local_node_ref, remote_node_ref) unique
+Route Set          Route 여러 개 묶어 분배/failover 정책 적용 (cluster)
+Rule               SIP 메시지 1개 필드에 대한 단일 조건
+Rule Set           Rule 들을 flat AND/OR 로 조합
+Routing Policy     Rule Set match → Route Set 또는 Access Service 로 전달
+ACL Policy         Rule Set match → allow/deny (scope: global/local_node/route/route_set)
+Access Service     UE 가 직접 붙는 서비스(voip/ptt) — domain + auth_realm + 허용 LN
 ```
 
-**효과**: 서비스 도메인 변경 시 `sip_service.domain` 한 줄만 UPDATE. 가입자 전체 migration 불필요.
+재사용성이 원칙이다:
+- 같은 Remote Node 가 여러 Route 에 속할 수 있다 (LN 만 다른 경우)
+- 같은 Rule 이 Routing 과 ACL 양쪽 Rule Set 에 속할 수 있다 (`tags[]` 로 용도 힌트)
+- 같은 Route 가 여러 Route Set 에 속할 수 있고, 각 Set 마다 다른 priority/weight
 
 ---
 
-## 3. 엔티티 관계
+## 1. 엔티티 관계도
 
 ```
-sip_service (id, name, kind, domain, auth_realm, inbound_policy, priority, ...)
-    │
-    ├── 1:N → voip_subscriptions.service_id
-    ├── 1:N → ptt_subscriptions.service_id
-    ├── 1:N → sip_trunk.service_id
-    └── 1:N → sip_service_listener.listener_id  (N:M via link table)
-                └── csp_listener.id
-```
+ ┌──────────────┐          ┌──────────────┐
+ │  LocalNode   │          │  RemoteNode  │   (순수 transport)
+ │ (listener)   │          │              │
+ │  edge:       │          │              │
+ │   access     │          │              │
+ │   peering    │          │              │
+ │   mgmt       │          │              │
+ └──────┬───────┘          └──────┬───────┘
+        │                         │
+        │ 1             1         │
+        └──────►┌───────────┐◄────┘
+                │   Route   │  (LN, RN) unique
+                │  + auth   │
+                │  + proxy  │
+                │  + limits │
+                └─────┬─────┘
+                      │ N
+                      ▼
+               ┌────────────┐    distribution_policy:
+               │  RouteSet  │      failover | round_robin |
+               │            │      weighted | hash_by_caller
+               └─────┬──────┘    health_check (OPTIONS ping)
+                     │
+                     │ target_ref
+                     ▼
+          ┌──────────────────────┐
+          │   RoutingPolicy      │── match ── RuleSet ── N rules
+          │   priority 순 평가    │                       (tags)
+          │   target: route_set  │
+          │         | access_svc │
+          │         | reject     │
+          └──────────────────────┘
 
-### 스키마 발췌
+          ┌──────────────────────┐
+          │   AclPolicy          │── match ── RuleSet  (Rule 공유)
+          │   scope:             │
+          │     global           │
+          │     local_node       │
+          │     route            │
+          │     route_set        │
+          │   action: allow/deny │
+          └──────────────────────┘
 
-```sql
-CREATE TABLE sip_service (
-    id              INT PRIMARY KEY AUTO_INCREMENT,
-    name            VARCHAR(64) UNIQUE,
-    kind            ENUM('voip','ptt','ibcf','system','console'),
-    domain          VARCHAR(255),
-    auth_realm      VARCHAR(255) DEFAULT NULL,
-    inbound_policy  ENUM('any','restricted') DEFAULT 'any',
-    priority        INT DEFAULT 100,
-    enabled         TINYINT(1) DEFAULT 1,
-    ...
-);
-
-ALTER TABLE voip_subscriptions
-    ADD COLUMN service_id INT,
-    ADD COLUMN imsi VARCHAR(32);
-
-ALTER TABLE ptt_subscriptions
-    ADD COLUMN service_id INT,
-    ADD COLUMN imsi VARCHAR(32);
-
-ALTER TABLE sip_trunk
-    ADD COLUMN service_id INT,
-    ADD COLUMN failover_priority INT DEFAULT 100;
-
-CREATE TABLE sip_service_listener (
-    service_id INT, listener_id INT,
-    PRIMARY KEY (service_id, listener_id)
-);
+          ┌──────────────────────────┐
+          │   AccessService          │── listeners[] → LocalNode
+          │   kind: voip | ptt       │        (restricted 일 때)
+          │   domain, auth_realm     │
+          │   inbound_policy         │
+          └──────────────────────────┘
 ```
 
 ---
 
-## 4. Inbound 처리 시나리오
+## 2. 각 엔티티
 
-### Case A — 로컬 UE REGISTER
+### 2-1. LocalNode
+
+CSP 가 수신하는 bind 포트. 기존 listener 와 동일한 역할에 `edge` 분류를 추가.
+
+| 필드 | 의미 |
+|---|---|
+| `edge` | `access` (UE 수신) / `peering` (IMS 피어링) / `mgmt` (관리) |
+| `bind_ip`, `bind_port`, `protocol` | 기본 transport |
+| `tls_*` | TLS 전용 (protocol=TLS 일 때) |
+| `tags[]` | 자유 태그 (예: `volte`, `peering-kt`) |
+
+### 2-2. RemoteNode
+
+피어의 접속 정보만 보관. **auth 정보는 여기 두지 않는다** (Route 에서 관리).
+
+| 필드 | 의미 |
+|---|---|
+| `ip`, `port`, `protocol` | transport |
+| `remote_domain` | SIP URI host (outgoing Request-URI/To 의 host 로 사용) |
+| `srv_lookup`, `dns_fallback`, `tls_verify` | 고급 transport 옵션 |
+
+### 2-3. Route — (LocalNode, RemoteNode) unique
+
+LN 과 RN 을 묶은 실제 연결. auth 및 outbound 파라미터는 전부 여기.
+
+| 필드 | 의미 |
+|---|---|
+| `local_node_ref`, `remote_node_ref` | 필수. pair unique. |
+| `outbound_proxy_ip`, `outbound_proxy_port` | RN 앞에 proxy 가 있을 때 |
+| `register_to_remote`, `register_expires` | trunk REGISTER 가 필요한 경우 |
+| `auth_user`, `auth_password`, `auth_realm` | REGISTER/challenge 대응용 |
+| `max_concurrent_calls`, `cps_limit` | 용량 제한 |
+
+### 2-4. RouteSet — Route 묶음 + 분배 정책
+
+Peering cluster (1:1:1, 1 active + N standby 등) 를 표현.
+
+| 필드 | 의미 |
+|---|---|
+| `distribution_policy` | `failover` / `round_robin` / `weighted` / `hash_by_caller` |
+| `members[].route_ref` | 포함할 Route |
+| `members[].priority` | failover 순서 (낮을수록 우선) |
+| `members[].weight` | weighted 분배 비율 |
+| `health_check_*` | OPTIONS ping 주기 / dead 임계 / recovery 임계 |
+| `fallback_policy` | 전체 dead 시 `reject` / `next_policy` |
+
+같은 Route 가 다른 RouteSet 에 다른 priority 로 속할 수 있다.
+
+### 2-5. Rule — 원자 조건
+
+SIP 메시지의 한 필드 + 연산자 + 값.
+
+지원 필드(1차):
 
 ```
-UE → REGISTER sip:alice@ims.mnc001...
-        │
-        ▼ (Listener 5060 수신)
-  CscfModule
-    → From host "ims.mnc001..." 에 매칭되는 service = volte-main
-    → voip_subscriptions.service_id = 1 인 가입자 탐색
-    → imsi + "@" + service.domain 으로 Digest 검증
-    → 200 OK + Contact 저장
+from_uri_host   from_uri_user
+to_uri_host     to_uri_user
+req_uri_host    req_uri_user
+src_ip          dst_ip
+user_agent      method
+p_asserted_identity   via_host
 ```
 
-### Case B — 로컬 onnet 통화 (같은 service 내)
+지원 연산자(1차):
 
 ```
-UE A → INVITE sip:+82571900002@ims.mnc001...
-        │
-        ▼
-  ModuleDispatcher
-    → To URI host 매칭 service = volte-main
-    → voip_subscriptions WHERE service_id=volte-main 에서 수신자 탐색
-    → B-leg INVITE (Contact IP 로) — 트렁크 경유 안 함
+eq        ne        prefix    suffix    contains
+regex     in_cidr   in_list   exists    not_exists
 ```
 
-### Case C — offnet 통화 (라우팅 규칙)
+`tags[]` 가 중요: 같은 Rule 이 다양한 RuleSet 에 재사용될 때 용도를 구분한다.
 
-```
-UE A → INVITE sip:+82100000000@ims.kt.co.kr
-        │
-        ▼
-  RouteEngine
-    → match: to_uri_host suffix "kt.co.kr"
-    → target.mode = "service"
-    → target.service_id = 3 (volte-kt-peering)
-        │
-        ▼
-  TrunkManager.GetTrunksByService(3)
-    → alive=true + failover_priority 순 정렬
-    → 첫 번째 alive 트렁크 선택 (모두 dead 면 첫 번째 시도)
-        │
-        ▼
-  선택된 트렁크로 B-leg INVITE
-```
+권장 태그 규약:
 
-### Case D — 외부 트렁크에서 incoming
+| 카테고리 | 값 | 의미 |
+|---|---|---|
+| 용도 | `acl`, `routing`, `transform`, `inbound-filter`, `audit` | RuleSet 의 맥락 힌트 |
+| 도메인 | `volte`, `ptt`, `ibcf`, `peering-<name>` | 어떤 서비스군에 관계 |
+| 환경 | `prod`, `test`, `experimental` | 배포 스테이지 |
 
-```
-KT IMS → INVITE sip:+821357007001@ims.mnc001...
-        │
-        ▼ (Listener 5060 수신)
-  ModuleDispatcher
-    → To URI host = "ims.mnc001..." → service = volte-main
-    → voip_subscriptions 에서 피호출자 탐색
-    → B-leg INVITE (로컬 UE Contact 로)
-```
+UI 는 tag filter chip 으로 목록을 필터. Policy 가 다른 용도 태그의 RuleSet 을 참조해도 **경고만** 띄우며 막지는 않는다 (재사용 유지).
+
+### 2-6. RuleSet — flat AND/OR 조합
+
+`combinator` = `AND` | `OR`. 1차 버전은 중첩 없음.
+
+| 필드 | 의미 |
+|---|---|
+| `combinator` | 전체 조합 방식 |
+| `members[].rule_ref` | 포함할 Rule |
+| `members[].negate` | 해당 Rule 의 결과 반전 (NOT) |
+
+평가 규칙:
+- `AND`: 모든 member 가 true (negate 고려) → RuleSet true
+- `OR`: 하나라도 true → RuleSet true
+- member 0개 → `true` (catch-all 용이하게)
+
+### 2-7. RoutingPolicy — match → target
+
+Rule Set 이 match 하면 target 으로 호를 routing.
+
+| 필드 | 의미 |
+|---|---|
+| `priority` | 낮을수록 먼저 평가. 첫 match 적용. |
+| `match_rule_set_ref` | 비우면 항상 match (catch-all) |
+| `target_type` | `route_set` / `access_service` / `reject` |
+| `target_ref` | target_type 에 따른 참조 대상 |
+| `transform_rule_set_refs[]` | **예약 필드** — 1차에서 런타임 미구현 |
+| `fail_action` | target=route_set 이 모두 dead 일 때 `reject` / `next_policy` |
+
+### 2-8. AclPolicy — match → allow/deny
+
+Rule Set 이 match 하면 action.
+
+| 필드 | 의미 |
+|---|---|
+| `priority` | 낮을수록 먼저 평가 |
+| `match_rule_set_ref` | 필수 |
+| `scope` | `global` / `local_node` / `route` / `route_set` |
+| `scope_ref` | scope ≠ global 일 때 해당 collection 의 name |
+| `action` | `allow` / `deny` |
+
+Rule 은 Routing 과 ACL 이 공유. RuleEvaluator 하나가 양쪽을 처리.
+
+### 2-9. AccessService — UE 서비스
+
+UE 가 직접 REGISTER 하는 서비스 도메인.
+
+| 필드 | 의미 |
+|---|---|
+| `kind` | `voip` / `ptt` (IBCF 는 이 collection 에 없음) |
+| `domain` | IMPU/IMPI 조립용. Digest username = `imsi@<domain>` |
+| `auth_realm` | 비우면 domain 상속 |
+| `inbound_policy` | `any` / `restricted` |
+| `allowed_local_node_refs[]` | restricted 일 때 허용 LocalNode 목록 |
+| `priority` | 같은 domain 중복 시 먼저 매칭될 순서 |
 
 ---
 
-## 5. 회복탄력성 관점
+## 3. 인증 흐름 (변경 없음 — Access 경로)
 
-P1 에서 구축한 3층 캐시를 그대로 계승:
+기존 v2 모델과 동일. Access Service 가 이 흐름의 "service" 역할.
 
 ```
-DB sip_service (master)
-    ↕ (주기 sync + on-change notify)
-CSC 메모리 + csc/cache/services.json
-    ↕ (CSP HTTP pull + 로컬 스냅샷)
-CSP 메모리 (CspServiceMap) + csp/cache/services.json
+UE → REGISTER
+  Authorization: Digest username="<imsi>@<access_service.domain>"
+                 realm="<access_service.auth_realm or domain>"
+                 response=MD5(...)
+
+CSP (CscfModule):
+  1. From URI user + host → AccessServiceMap.GetByDomain(host)
+     (inbound_policy=restricted 이면 수신 Local Node 가 allowed_local_node_refs 에 있는지 확인)
+  2. voip_subscriptions/ptt_subscriptions 에서 service_id 로 가입자 조회
+  3. 기대 username = imsi + "@" + service.domain 비교
+  4. HA1 = MD5(username : realm : password)
+  5. 일치 → 200 OK + Contact 저장 + (binding_key → service_id) 맵 유지
 ```
 
-DB 또는 CSC 장애 시에도 CSP 는 로컬 파일에서 서비스 정의 로드하여 SIP 인증/라우팅 계속 수행.
+v2 의 `sip_service.domain/auth_realm` 과 동일 의미. 이름만 `access_services.*` 로 이전.
 
 ---
 
-## 6. Hot-reload 이벤트
+## 4. 서비스 판별 우선순위 (INVITE 등 후속 요청)
 
-`SERVICE_CHANGED` UDP notify 수신 시:
-```cpp
-gclsCspConfigCache.RefreshEntity(CACHE_SERVICE);
-gclsServiceMap.Sync();
+From URI 단독 매칭은 **fallback 으로 강등**. IMS 표준을 참고한 계층적 판별:
+
+```
+1. 수신 Local Node 가 restricted AccessService 1개와만 연결
+      → 그 서비스 확정. 끝.
+
+2. src_addr/Call-ID → REGISTER binding 조회 (CspUserMap)
+      → 인증된 UE 면 binding.service_id 확정. 끝.
+
+3. 수신 Local Node 가 edge=peering + 어떤 RoutingPolicy 가 선평가
+      → 해당 RoutingPolicy.target 기반 라우팅 (service 개념 없이 RouteSet 로 직행)
+
+4. From URI host 가 AccessService.domain 과 일치 (best-effort fallback)
+
+5. Request-URI host 가 AccessService.domain 과 일치
+
+6. 매칭 실패 → 403 reject 또는 RoutingPolicy 의 catch-all
 ```
 
-이후 모든 신규 REGISTER/INVITE 는 새 서비스 정의로 평가. 이미 등록된 UE 는 다음 re-REGISTER 때까지 이전 상태 유지.
+1/2 가 주 경로. 3 은 IBCF incoming. 4/5 는 의심스러운 fallback (로그에 `svc_source=from_header_fallback` 표식).
 
 ---
 
-## 7. Console UI
+## 5. 배치 패턴
 
-**SIP 서비스 페이지** (`SipServicesPage.tsx`)
+### 5-1. 최소 (테스트)
 
-- 목록: id, name, kind, domain, auth_realm, inbound_policy, priority, enabled
-- 폼 편집:
-  - kind 드롭다운 (voip/ptt/ibcf/system/console)
-  - domain (URI 매칭 + IMPI 조립용)
-  - auth_realm (선택 — 비우면 domain)
-  - inbound_policy (any/restricted)
-  - restricted 선택 시 listener 체크박스 다중선택
+```
+LocalNode   :5060 UDP (access)
+RemoteNode  없음
+AccessService volte-test (domain=csp, allowed LN = :5060)
+```
 
-**기존 페이지와의 연동 (P8 예정)**:
-- 가입자 편집 → service 드롭다운
-- 트렁크 편집 → service 드롭다운
-- 라우팅 규칙 target.mode 에 "service" 옵션 추가
+### 5-2. 표준 (VoLTE + PTT + 1 peering)
+
+```
+LocalNodes:
+  lb-access-udp  :5060 UDP  edge=access
+  lb-access-tls  :5061 TLS  edge=access
+  lb-peering     :5070 UDP  edge=peering
+
+RemoteNodes:
+  kt-sbc-1 10.0.0.1:5060
+  kt-sbc-2 10.0.0.2:5060
+  kt-sbc-3 10.0.0.3:5060
+
+Routes:
+  r-kt-1  (lb-peering, kt-sbc-1)
+  r-kt-2  (lb-peering, kt-sbc-2)
+  r-kt-3  (lb-peering, kt-sbc-3)
+
+RouteSets:
+  rs-kt  round_robin  [r-kt-1 w=1, r-kt-2 w=1, r-kt-3 w=1]
+
+Rules:
+  rule-kt-domain  to_uri_host suffix "kt.co.kr"
+
+RuleSets:
+  rs-kt-outbound  AND [rule-kt-domain]
+
+RoutingPolicies:
+  rp-kt-out  priority=50  match=rs-kt-outbound  target=route_set:rs-kt
+  rp-default priority=1000 match=""  target=access_service:volte-main (catch-all)
+
+AccessServices:
+  volte-main  voip  domain=ims.mnc001... allowed_ln=[lb-access-udp, lb-access-tls]
+  ptt-main    ptt   domain=ptt.mnc001... allowed_ln=[lb-access-udp]
+```
+
+### 5-3. 다중 peering + restricted access
+
+위 구성 + peering-skt 추가. AclPolicy 로 특정 CIDR 만 허용.
 
 ---
 
-## 8. 관련 파일
+## 5a. 식별자 (LocalNode / listener_id)
+
+수신 엔드포인트의 3가지 식별자:
+
+- **`LocalNode.id`** (UUID 문자열) — jsonl 영구 PK
+- **`LocalNode.name`** (문자열) — 다른 collection 의 참조 대상
+- **`listener_id`** (양의 int) — psip 내부 소켓 id. `CspUuidToIntId(LocalNode.id)` 로 파생
+
+`AccessService.allowed_local_node_refs[]` 는 **name 배열**. 내부 파생 필드 `listeners[]` 는 **int
+배열** (psip 에 맞춘 해시값). 런타임 매칭은 listener_id 기준.
+
+수신 SIP 메시지의 `CSipMessage.m_iListenerId` 가 이 int id. ACL scope=local_node 와 restricted 정책
+모두 이 값으로 매칭.
+
+## 6. 서비스 판별 소스 코드 위치 (목표)
+
+| 기능 | 클래스 (목표) | 비고 |
+|---|---|---|
+| Rule 평가 엔진 | `CRuleEvaluator` (신규) | ACL/Routing 공용 |
+| Rule/RuleSet 캐시 | `CspConfigCache` (CACHE_RULE, CACHE_RULE_SET) | jsonl 로더 |
+| Routing 결정 | `CRoutingPolicyEngine` (기존 `CspRouteEngine` 재작성) | |
+| ACL 결정 | `CAclPolicyEngine` (기존 `CspAccessControl` 재작성) | |
+| RemoteNode/Route/RouteSet 캐시 | `CspRemoteNodeMap`, `CspRouteMap`, `CspRouteSetMap` | 신규 분리 (기존 `CspTrunkManager` 해체) |
+| Access service 캐시 | `CspAccessServiceMap` (기존 `CspServiceMap` 개명 + kind=ibcf 제거) | |
+
+---
+
+## 7. 마이그레이션 (hard cutover)
+
+이 프로젝트는 개발 단계이므로 호환기간 없이 일괄 전환.
+
+### 7-1. 변환 규칙 (스크립트)
+
+| 구 레코드 | 신 레코드 |
+|---|---|
+| `services.jsonl` kind=voip/ptt 1건 | `access_services.jsonl` 1건 |
+| `services.jsonl` kind=ibcf 1건 | `route_sets.jsonl` 1건 (members = 그 service 의 trunks 변환 결과) |
+| `trunks.jsonl` 1건 | `remote_nodes.jsonl` 1건 + `routes.jsonl` 1건 + 해당 RouteSet.members 에 추가 |
+| `listeners.jsonl` 1건 | `local_nodes.jsonl` 1건 (service 필드 제거, edge 는 protocol/비고로 추론) |
+| `routes.jsonl` 구 1건 (match + target) | `rules.jsonl` N + `rule_sets.jsonl` 1 + `routing_policies.jsonl` 1 |
+| `acl.jsonl` 1건 | `rules.jsonl` 1 + `rule_sets.jsonl` 1 + `acl_policies.jsonl` 1 |
+
+구 파일은 변환 후 삭제(또는 `*.bak` 이동).
+
+### 7-2. csp.json 변화
+
+- `Setup.Sip.AuthRealm` 제거 (AccessService 가 realm 의 SOT)
+- `Setup.Realm[]` 제거 (AccessService 가 domain 의 SOT)
+- `Setup.Roles` 유지
+- `Setup.RtpRelay`, `Setup.Database`, `Setup.Log`, `Setup.Monitor`, `Setup.Security`, `Setup.ServiceLogging`, `Setup.Cdr`, `Setup.DataFolder`, `Setup.SystemId` 유지
+
+---
+
+## 8. 관련 파일 (구조 변경 후 목표)
 
 ### CSP (C++)
 
 | 파일 | 역할 |
 |------|------|
-| `csp/CspServiceMap.{h,cpp}` | 서비스 캐시 + domain/id 조회 |
-| `csp/CscfModule.cpp` | Digest 검증에 service.domain + imsi 사용 |
-| `csp/CspUser.h` | `m_iServiceId`, `m_strImsi` 필드 추가 |
-| `csp/DbManager.cpp` | subscription 로딩에 service_id/imsi 컬럼 추가 |
-| `csp/CspTrunkManager.{h,cpp}` | `GetTrunksByService(id)` 추가 |
-| `csp/CspRouteEngine.{h,cpp}` | `target.mode="service"` 지원 |
-| `csp/CspConfigCache.{h,cpp}` | `CACHE_SERVICE` 엔티티 추가 |
-| `csp/CscInterface.cpp` | `SERVICE_CHANGED` 이벤트 수신 |
+| `csp/CspConfigCache.{h,cpp}` | 9 collection 로딩 (entity enum 확장) |
+| `csp/CspLocalNodeMap.{h,cpp}` | (개명) 기존 CspListenerManager |
+| `csp/CspRemoteNodeMap.{h,cpp}` | 신규 — RemoteNode 캐시 |
+| `csp/CspRouteMap.{h,cpp}` | 신규 — Route 캐시 + (LN, RN) 조회 |
+| `csp/CspRouteSetMap.{h,cpp}` | 신규 — RouteSet + 분배 상태 |
+| `csp/CspRuleEvaluator.{h,cpp}` | 신규 — Rule/RuleSet 평가 엔진 |
+| `csp/CspRoutingPolicyEngine.{h,cpp}` | 기존 CspRouteEngine 재작성 |
+| `csp/CspAclPolicyEngine.{h,cpp}` | 기존 CspAccessControl 재작성 |
+| `csp/CspAccessServiceMap.{h,cpp}` | 기존 CspServiceMap 개명 (voip/ptt 만) |
+| `csp/SipServerSetup.{h,cpp}` | Realm/AuthRealm 로직 삭제, Setup.Sip 축소 |
 
-### CSC (Python)
-
-| 파일 | 역할 |
-|------|------|
-| `csc/.../csc_config_cache.py` | ENTITIES 에 "service" 추가 |
-| `csc/.../cims_csp_runtime.py` | `/api/v1/csp/services` CRUD |
-
-### Console UI
+### Console
 
 | 파일 | 역할 |
 |------|------|
-| `cims-console/src/api/cspRuntime.ts` | `SipService`/`SipServiceInput` 타입 + CRUD |
-| `cims-console/src/pages/SipServicesPage.tsx` | 서비스 관리 페이지 |
+| `cims-console/src/components/module/ModuleConfigEditor.tsx` | 9개 탭 렌더, tag filter chip, ref 필드 dropdown |
 
-### 스키마
+### 문서
 
-| 파일 | 내용 |
+| 파일 | 역할 |
 |------|------|
-| `sql/migrate_sip_service.sql` | sip_service + ALTER subscriptions/trunks + seed |
+| `docs/design/features/sip_service_model.md` | 이 문서 (v3) |
+| `docs/design/features/sip_runtime_config.md` | collection 목록 / Init 시그니처 최신화 |
 
 ---
 
-## 9. 마이그레이션
+## 9. 미구현/예약
 
-```bash
-sudo mysql cims < sql/migrate_sip_service.sql
-```
-
-수행 내용:
-1. `sip_service` 테이블 생성 + 기본 2개 서비스 seed (volte-main, mcptt-main)
-2. `voip_subscriptions`/`ptt_subscriptions` 에 `service_id`/`imsi` 컬럼 추가
-3. 기존 auth_id 패턴 `<숫자>@<domain>` 에서 IMSI 추출 + 도메인 기반 서비스 자동 매핑
-4. `sip_trunk` 에 `service_id`/`failover_priority` 컬럼 추가 (수동 매핑 필요)
-5. `sip_service_listener` 링크 테이블 생성 (restricted 정책용)
+| 항목 | 예정 |
+|------|------|
+| RuleSet 중첩 (tree AND/OR/NOT) | 2차 |
+| `routing_policies.transform_rule_set_refs` 런타임 적용 (메시지 변환) | 2차 |
+| 헬스체크 `invite_response` 모드 | 2차 (1차는 `options_ping` 만) |
+| `hash_by_caller` 분배 | 2차 |
+| Rule field: `record_route`, `p_charging_vector` 등 | 필요시 추가 |
 
 ---
 
-## 10. 미구현/후속
+## 10. 변경 내역
 
-| 항목 | 대상 |
-|------|------|
-| 가입자 Console UI 에 service 드롭다운 | P7.8 |
-| 트렁크/라우팅 rule 편집에 service 선택 | P7.8 |
-| `auth_id` 컬럼 제거 (IMSI 정규화 완료 후) | P8 |
-| Inbound policy=restricted 의 listener 매칭 런타임 적용 | P8 |
-| cross-service call routing (서비스 간 호) | P9 |
+- **v3 (2026-04-22)**: LocalNode/RemoteNode/Route/RouteSet/Rule/RuleSet/Policy 9 collection 재설계. AccessService 분리. Trunk/Service 단일 개념 폐기.
+- **v2 (2026-04-21)**: jsonl 전환 (DB → install_path/config/*.jsonl).
+- **v1 (P7)**: sip_service 중심 최초 설계 (DB 시절).

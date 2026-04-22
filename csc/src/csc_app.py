@@ -74,6 +74,7 @@ if __name__ == '__main__':
     from handlers       import auth, recording
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
     from handlers.auth           import CIMS_AUTH_HANDLER_LIST
+    from handlers.users          import CIMS_USERS_HANDLER_LIST
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
     from handlers.stats          import CIMS_STATS_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
@@ -82,6 +83,7 @@ if __name__ == '__main__':
     from handlers.service_control import CIMS_SERVICE_CONTROL_HANDLER_LIST
     from handlers.agents         import CIMS_AGENT_ADMIN_HANDLER_LIST, CIMS_AGENT_PUBLIC_HANDLER_LIST
     from handlers.agent_api      import CIMS_AGENT_API_HANDLER_LIST
+    from handlers.modules        import CIMS_MODULES_HANDLER_LIST
     from services.flow_logger    import FLOW_HANDLER_LIST
 
     admin_server = None
@@ -243,7 +245,7 @@ if __name__ == '__main__':
         )
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST
+            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_USERS_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST
         ])
         admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
         admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
@@ -265,6 +267,11 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_AGENT_ADMIN_HANDLER_LIST
+        ])
+        # Phase 1: 모듈 overlay 설정 API (로컬 dist 대상)
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_MODULES_HANDLER_LIST
         ])
         # P10: Agent 전용 API (agent token 인증, JWT 우회)
         admin_server.add_dynamic_rules([

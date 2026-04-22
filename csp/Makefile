@@ -271,29 +271,29 @@ CscfModule.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CscfModule.cpp.s
 .PHONY : CscfModule.cpp.s
 
-CspAccessControl.o: CspAccessControl.cpp.o
-.PHONY : CspAccessControl.o
+CspAclPolicyEngine.o: CspAclPolicyEngine.cpp.o
+.PHONY : CspAclPolicyEngine.o
 
 # target to build an object file
-CspAccessControl.cpp.o:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAccessControl.cpp.o
-.PHONY : CspAccessControl.cpp.o
+CspAclPolicyEngine.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAclPolicyEngine.cpp.o
+.PHONY : CspAclPolicyEngine.cpp.o
 
-CspAccessControl.i: CspAccessControl.cpp.i
-.PHONY : CspAccessControl.i
+CspAclPolicyEngine.i: CspAclPolicyEngine.cpp.i
+.PHONY : CspAclPolicyEngine.i
 
 # target to preprocess a source file
-CspAccessControl.cpp.i:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAccessControl.cpp.i
-.PHONY : CspAccessControl.cpp.i
+CspAclPolicyEngine.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAclPolicyEngine.cpp.i
+.PHONY : CspAclPolicyEngine.cpp.i
 
-CspAccessControl.s: CspAccessControl.cpp.s
-.PHONY : CspAccessControl.s
+CspAclPolicyEngine.s: CspAclPolicyEngine.cpp.s
+.PHONY : CspAclPolicyEngine.s
 
 # target to generate assembly for a file
-CspAccessControl.cpp.s:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAccessControl.cpp.s
-.PHONY : CspAccessControl.cpp.s
+CspAclPolicyEngine.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAclPolicyEngine.cpp.s
+.PHONY : CspAclPolicyEngine.cpp.s
 
 CspConfigCache.o: CspConfigCache.cpp.o
 .PHONY : CspConfigCache.o
@@ -343,6 +343,30 @@ CspListenerManager.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspListenerManager.cpp.s
 .PHONY : CspListenerManager.cpp.s
 
+CspLocalNodeMap.o: CspLocalNodeMap.cpp.o
+.PHONY : CspLocalNodeMap.o
+
+# target to build an object file
+CspLocalNodeMap.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspLocalNodeMap.cpp.o
+.PHONY : CspLocalNodeMap.cpp.o
+
+CspLocalNodeMap.i: CspLocalNodeMap.cpp.i
+.PHONY : CspLocalNodeMap.i
+
+# target to preprocess a source file
+CspLocalNodeMap.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspLocalNodeMap.cpp.i
+.PHONY : CspLocalNodeMap.cpp.i
+
+CspLocalNodeMap.s: CspLocalNodeMap.cpp.s
+.PHONY : CspLocalNodeMap.s
+
+# target to generate assembly for a file
+CspLocalNodeMap.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspLocalNodeMap.cpp.s
+.PHONY : CspLocalNodeMap.cpp.s
+
 CspPttGroup.o: CspPttGroup.cpp.o
 .PHONY : CspPttGroup.o
 
@@ -367,29 +391,125 @@ CspPttGroup.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspPttGroup.cpp.s
 .PHONY : CspPttGroup.cpp.s
 
-CspRouteEngine.o: CspRouteEngine.cpp.o
-.PHONY : CspRouteEngine.o
+CspRemoteNodeMap.o: CspRemoteNodeMap.cpp.o
+.PHONY : CspRemoteNodeMap.o
 
 # target to build an object file
-CspRouteEngine.cpp.o:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteEngine.cpp.o
-.PHONY : CspRouteEngine.cpp.o
+CspRemoteNodeMap.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRemoteNodeMap.cpp.o
+.PHONY : CspRemoteNodeMap.cpp.o
 
-CspRouteEngine.i: CspRouteEngine.cpp.i
-.PHONY : CspRouteEngine.i
+CspRemoteNodeMap.i: CspRemoteNodeMap.cpp.i
+.PHONY : CspRemoteNodeMap.i
 
 # target to preprocess a source file
-CspRouteEngine.cpp.i:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteEngine.cpp.i
-.PHONY : CspRouteEngine.cpp.i
+CspRemoteNodeMap.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRemoteNodeMap.cpp.i
+.PHONY : CspRemoteNodeMap.cpp.i
 
-CspRouteEngine.s: CspRouteEngine.cpp.s
-.PHONY : CspRouteEngine.s
+CspRemoteNodeMap.s: CspRemoteNodeMap.cpp.s
+.PHONY : CspRemoteNodeMap.s
 
 # target to generate assembly for a file
-CspRouteEngine.cpp.s:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteEngine.cpp.s
-.PHONY : CspRouteEngine.cpp.s
+CspRemoteNodeMap.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRemoteNodeMap.cpp.s
+.PHONY : CspRemoteNodeMap.cpp.s
+
+CspRouteMap.o: CspRouteMap.cpp.o
+.PHONY : CspRouteMap.o
+
+# target to build an object file
+CspRouteMap.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteMap.cpp.o
+.PHONY : CspRouteMap.cpp.o
+
+CspRouteMap.i: CspRouteMap.cpp.i
+.PHONY : CspRouteMap.i
+
+# target to preprocess a source file
+CspRouteMap.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteMap.cpp.i
+.PHONY : CspRouteMap.cpp.i
+
+CspRouteMap.s: CspRouteMap.cpp.s
+.PHONY : CspRouteMap.s
+
+# target to generate assembly for a file
+CspRouteMap.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteMap.cpp.s
+.PHONY : CspRouteMap.cpp.s
+
+CspRouteSetMap.o: CspRouteSetMap.cpp.o
+.PHONY : CspRouteSetMap.o
+
+# target to build an object file
+CspRouteSetMap.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteSetMap.cpp.o
+.PHONY : CspRouteSetMap.cpp.o
+
+CspRouteSetMap.i: CspRouteSetMap.cpp.i
+.PHONY : CspRouteSetMap.i
+
+# target to preprocess a source file
+CspRouteSetMap.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteSetMap.cpp.i
+.PHONY : CspRouteSetMap.cpp.i
+
+CspRouteSetMap.s: CspRouteSetMap.cpp.s
+.PHONY : CspRouteSetMap.s
+
+# target to generate assembly for a file
+CspRouteSetMap.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRouteSetMap.cpp.s
+.PHONY : CspRouteSetMap.cpp.s
+
+CspRoutingPolicyEngine.o: CspRoutingPolicyEngine.cpp.o
+.PHONY : CspRoutingPolicyEngine.o
+
+# target to build an object file
+CspRoutingPolicyEngine.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRoutingPolicyEngine.cpp.o
+.PHONY : CspRoutingPolicyEngine.cpp.o
+
+CspRoutingPolicyEngine.i: CspRoutingPolicyEngine.cpp.i
+.PHONY : CspRoutingPolicyEngine.i
+
+# target to preprocess a source file
+CspRoutingPolicyEngine.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRoutingPolicyEngine.cpp.i
+.PHONY : CspRoutingPolicyEngine.cpp.i
+
+CspRoutingPolicyEngine.s: CspRoutingPolicyEngine.cpp.s
+.PHONY : CspRoutingPolicyEngine.s
+
+# target to generate assembly for a file
+CspRoutingPolicyEngine.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRoutingPolicyEngine.cpp.s
+.PHONY : CspRoutingPolicyEngine.cpp.s
+
+CspRuleEvaluator.o: CspRuleEvaluator.cpp.o
+.PHONY : CspRuleEvaluator.o
+
+# target to build an object file
+CspRuleEvaluator.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRuleEvaluator.cpp.o
+.PHONY : CspRuleEvaluator.cpp.o
+
+CspRuleEvaluator.i: CspRuleEvaluator.cpp.i
+.PHONY : CspRuleEvaluator.i
+
+# target to preprocess a source file
+CspRuleEvaluator.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRuleEvaluator.cpp.i
+.PHONY : CspRuleEvaluator.cpp.i
+
+CspRuleEvaluator.s: CspRuleEvaluator.cpp.s
+.PHONY : CspRuleEvaluator.s
+
+# target to generate assembly for a file
+CspRuleEvaluator.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspRuleEvaluator.cpp.s
+.PHONY : CspRuleEvaluator.cpp.s
 
 CspServer.o: CspServer.cpp.o
 .PHONY : CspServer.o
@@ -462,30 +582,6 @@ CspSipServer.s: CspSipServer.cpp.s
 CspSipServer.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspSipServer.cpp.s
 .PHONY : CspSipServer.cpp.s
-
-CspTrunkManager.o: CspTrunkManager.cpp.o
-.PHONY : CspTrunkManager.o
-
-# target to build an object file
-CspTrunkManager.cpp.o:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspTrunkManager.cpp.o
-.PHONY : CspTrunkManager.cpp.o
-
-CspTrunkManager.i: CspTrunkManager.cpp.i
-.PHONY : CspTrunkManager.i
-
-# target to preprocess a source file
-CspTrunkManager.cpp.i:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspTrunkManager.cpp.i
-.PHONY : CspTrunkManager.cpp.i
-
-CspTrunkManager.s: CspTrunkManager.cpp.s
-.PHONY : CspTrunkManager.s
-
-# target to generate assembly for a file
-CspTrunkManager.cpp.s:
-	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspTrunkManager.cpp.s
-.PHONY : CspTrunkManager.cpp.s
 
 CspUser.o: CspUser.cpp.o
 .PHONY : CspUser.o
@@ -968,21 +1064,36 @@ help:
 	@echo "... CscfModule.o"
 	@echo "... CscfModule.i"
 	@echo "... CscfModule.s"
-	@echo "... CspAccessControl.o"
-	@echo "... CspAccessControl.i"
-	@echo "... CspAccessControl.s"
+	@echo "... CspAclPolicyEngine.o"
+	@echo "... CspAclPolicyEngine.i"
+	@echo "... CspAclPolicyEngine.s"
 	@echo "... CspConfigCache.o"
 	@echo "... CspConfigCache.i"
 	@echo "... CspConfigCache.s"
 	@echo "... CspListenerManager.o"
 	@echo "... CspListenerManager.i"
 	@echo "... CspListenerManager.s"
+	@echo "... CspLocalNodeMap.o"
+	@echo "... CspLocalNodeMap.i"
+	@echo "... CspLocalNodeMap.s"
 	@echo "... CspPttGroup.o"
 	@echo "... CspPttGroup.i"
 	@echo "... CspPttGroup.s"
-	@echo "... CspRouteEngine.o"
-	@echo "... CspRouteEngine.i"
-	@echo "... CspRouteEngine.s"
+	@echo "... CspRemoteNodeMap.o"
+	@echo "... CspRemoteNodeMap.i"
+	@echo "... CspRemoteNodeMap.s"
+	@echo "... CspRouteMap.o"
+	@echo "... CspRouteMap.i"
+	@echo "... CspRouteMap.s"
+	@echo "... CspRouteSetMap.o"
+	@echo "... CspRouteSetMap.i"
+	@echo "... CspRouteSetMap.s"
+	@echo "... CspRoutingPolicyEngine.o"
+	@echo "... CspRoutingPolicyEngine.i"
+	@echo "... CspRoutingPolicyEngine.s"
+	@echo "... CspRuleEvaluator.o"
+	@echo "... CspRuleEvaluator.i"
+	@echo "... CspRuleEvaluator.s"
 	@echo "... CspServer.o"
 	@echo "... CspServer.i"
 	@echo "... CspServer.s"
@@ -992,9 +1103,6 @@ help:
 	@echo "... CspSipServer.o"
 	@echo "... CspSipServer.i"
 	@echo "... CspSipServer.s"
-	@echo "... CspTrunkManager.o"
-	@echo "... CspTrunkManager.i"
-	@echo "... CspTrunkManager.s"
 	@echo "... CspUser.o"
 	@echo "... CspUser.i"
 	@echo "... CspUser.s"

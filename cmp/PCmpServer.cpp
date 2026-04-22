@@ -786,6 +786,25 @@ void PCmpServer::processModifyGroup(const SimpleJson::JsonNode& payload, const s
      processAddGroup(payload, ip, port, transId);
 }
 
+// flat dot-path key → root 중첩 경로에 set (CSP 와 동일 overlay 규칙).
+static void _cmpSetByDotPath(SimpleJson::JsonNode& parent, const std::string& dotPath,
+                             const SimpleJson::JsonNode& value) {
+    size_t pos = dotPath.find('.');
+    if (pos == std::string::npos) {
+        parent.Set(dotPath, value);
+        return;
+    }
+    std::string head = dotPath.substr(0, pos);
+    std::string rest = dotPath.substr(pos + 1);
+    SimpleJson::JsonNode sub = parent.Has(head) ? parent.Get(head) : SimpleJson::JsonNode();
+    if (sub.type != SimpleJson::JSON_OBJECT) {
+        sub = SimpleJson::JsonNode();
+        sub.type = SimpleJson::JSON_OBJECT;
+    }
+    _cmpSetByDotPath(sub, rest, value);
+    parent.Set(head, sub);
+}
+
 void PCmpServer::loadConfig() {
     std::ifstream t(_configFile);
     if (!t.is_open()) {
@@ -794,14 +813,44 @@ void PCmpServer::loadConfig() {
              return;
         }
     }
-    
+
     // Check extension
     if (_configFile.substr(_configFile.find_last_of(".") + 1) == "json") {
         std::stringstream buffer;
         buffer << t.rdbuf();
         std::string jsonContent = buffer.str();
-        
+
         SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(jsonContent);
+
+        // Deployment overlay: <cmp.json 디렉토리>/../../config.json (install_path/config.json).
+        // flat key → nested 로 merge. CIMS_DEPLOYMENT_CONFIG 환경변수가 우선.
+        do {
+            std::string overlayPath;
+            if (const char* env = getenv("CIMS_DEPLOYMENT_CONFIG")) {
+                if (*env) overlayPath = env;
+            }
+            if (overlayPath.empty()) {
+                std::string dir = _configFile;
+                size_t s = dir.find_last_of('/');
+                if (s != std::string::npos) dir = dir.substr(0, s);
+                std::string cand = dir + "/../../config.json";
+                std::ifstream f(cand);
+                if (f) overlayPath = cand;
+            }
+            if (overlayPath.empty()) break;
+            std::ifstream of(overlayPath);
+            if (!of) break;
+            std::stringstream ob; ob << of.rdbuf();
+            SimpleJson::JsonNode over = SimpleJson::JsonNode::Parse(ob.str());
+            if (over.type != SimpleJson::JSON_OBJECT) break;
+            int applied = 0;
+            for (const auto& kv : over.objects) {
+                _cmpSetByDotPath(root, kv.first, kv.second);
+                ++applied;
+            }
+            LOG_INFO("PCmpServer", "overlay applied: %s (%d keys)",
+                     overlayPath.c_str(), applied);
+        } while (false);
         
         if (root.Has("RtpStartPort")) _rtpStartPort = (int)root.GetInt("RtpStartPort");
         if (root.Has("RtpPoolSize")) _rtpPoolSize = (int)root.GetInt("RtpPoolSize");

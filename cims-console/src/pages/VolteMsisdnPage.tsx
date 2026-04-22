@@ -56,7 +56,7 @@ export default function VolteMsisdnPage() {
     try {
       const [u,o,svcs] = await Promise.all([usersApi.list(), orgApi.list(), cspRuntimeApi.listServices()])
       setUsers(u); setOrgs(o); setExpanded(new Set(o.map(x=>x.id)))
-      setServices(svcs.filter(s => s.kind === 'voip'))
+      setServices(svcs.filter(s => s.kind === 'volte'))
     }
     catch (e: unknown) { show(String(e), 'err') }
     finally { setLoading(false) }

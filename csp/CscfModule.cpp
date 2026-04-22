@@ -44,7 +44,14 @@ bool CCscfModule::AddChallenge(CSipMessage* psttResponse, const std::string& str
     clsChallenge.m_strType = "Digest";
     clsChallenge.m_strAlgorithm = "MD5";
     clsChallenge.m_strNonce = szNonce;
-    clsChallenge.m_strRealm = strRealmOverride.empty() ? gclsSetup.m_strAuthRealm : strRealmOverride;
+    // v3 (2026-04-22): fallback realm 은 access_services 의 첫 voip 서비스 auth_realm/domain.
+    //   strRealmOverride 가 있으면 그걸 우선 사용 (호출자가 요청의 From host 로 결정한 값).
+    std::string strFallbackRealm;
+    if (strRealmOverride.empty()) {
+        ServiceInfo svcFb = gclsServiceMap.GetByKind("volte");
+        strFallbackRealm = CCspServiceMap::EffectiveRealm(svcFb);
+    }
+    clsChallenge.m_strRealm = strRealmOverride.empty() ? strFallbackRealm : strRealmOverride;
     clsChallenge.m_strQop = "auth";
 
     psttResponse->m_clsWwwAuthenticateList.push_back(clsChallenge);
@@ -100,37 +107,34 @@ ECheckAuthResult CCscfModule::CheckAuthorization(CSipCredential* pclsCredential,
     if (gclsNonceMap.Select(pclsCredential->m_strNonce.c_str()) == false) return E_AUTH_NONCE_NOT_FOUND;
     if (gclsCspUserMap.Select(pszFromId, clsXmlUser) == false) return E_AUTH_ERROR;
 
-    // P7: 가입자의 service_id 가 0(미지정)이면 REGISTER 거부
-    if (clsXmlUser.m_iServiceId <= 0) {
+    // v3 (2026-04-22): 가입자의 service_ref 가 비어있으면 REGISTER 거부
+    if (clsXmlUser.m_strServiceRef.empty()) {
         CLog::Print(LOG_ERROR, "Auth reject: user=%s has no service binding", pszFromId);
         return E_AUTH_ERROR;
     }
 
     // 서비스 정보 로드 → effective username 결정
-    ServiceInfo svc = gclsServiceMap.GetById(clsXmlUser.m_iServiceId);
+    ServiceInfo svc = gclsServiceMap.GetByName(clsXmlUser.m_strServiceRef);
 
-    // P8: inbound_policy=restricted 이면 현재 수신 listener 가 허용 리스너에 포함돼야 함
-    if (svc.id > 0 && svc.inbound_policy == "restricted") {
+    // v3 (2026-04-22): inbound_policy=restricted 검증.
+    //   psip 확장으로 메시지에 listener_id 가 담기지만, 이 함수 시그니처에는 메시지가 없어
+    //   thread-local (GetCurrentInboundListenerId) 를 계속 사용. 두 경로 모두 결과 동일.
+    if (svc.id > 0) {
         int iListenerId = GetCurrentInboundListenerId();
-        bool bAllowed = false;
-        for (int lid : svc.listeners) {
-            if (lid == iListenerId) { bAllowed = true; break; }
-        }
-        if (!bAllowed) {
-            CLog::Print(LOG_ERROR, "Auth reject: service=%s inbound_policy=restricted, "
-                        "listener_id=%d not in service.listeners",
-                        svc.name.c_str(), iListenerId);
+        if (!CCspServiceMap::IsInboundAllowed(svc, iListenerId)) {
+            CLog::Print(LOG_ERROR, "Auth reject: service=%s inbound_policy=%s listener_id=%d",
+                        svc.name.c_str(), svc.inbound_policy.c_str(), iListenerId);
             return E_AUTH_ERROR;
         }
     }
 
     std::string strExpectedUser;
     if (svc.id > 0 && !clsXmlUser.m_strImsi.empty()) {
-        // P8: IMSI + service.domain 만 지원 (auth_id fallback 제거)
+        // v3: IMSI + service.domain
         strExpectedUser = clsXmlUser.m_strImsi + "@" + svc.domain;
     } else {
-        CLog::Print(LOG_ERROR, "Auth reject: user=%s service_id=%d imsi='%s' — 데이터 불완전",
-                    pszFromId, clsXmlUser.m_iServiceId, clsXmlUser.m_strImsi.c_str());
+        CLog::Print(LOG_ERROR, "Auth reject: user=%s service_ref='%s' imsi='%s' — 데이터 불완전",
+                    pszFromId, clsXmlUser.m_strServiceRef.c_str(), clsXmlUser.m_strImsi.c_str());
         return E_AUTH_ERROR;
     }
 
@@ -268,9 +272,10 @@ bool CCscfModule::RecvRequestRegister(int iThreadId, CSipMessage* pclsMessage) {
         pclsResponse->AddHeader("Expires", 3600);
         pclsResponse->AddHeader("Supported", "path,100rel,precondition");
 
+        // v3 (2026-04-22): AccessServiceMap 이 SOT. fallback 은 Setup.Realm (레거시).
         const std::string strRegDomain = (clsUser.m_strServiceType == "ptt")
-            ? gclsSetup.GetDomainForService("mcptt")
-            : gclsSetup.GetDomainForService("volte");
+            ? gclsServiceMap.GetDomainByKind("ptt")
+            : gclsServiceMap.GetDomainByKind("volte");
 
         {
             char szServiceRoute[512];
