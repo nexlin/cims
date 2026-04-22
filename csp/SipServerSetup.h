@@ -206,11 +206,12 @@ public:
     int m_iLocalCmpPort; // Local port to receive CMP messages
 
     // ================================================================
-    // CSC 내부 API 연동 (런타임 설정 pull)
-    std::string m_strCscInternalIp;    // 보통 127.0.0.1
-    int         m_iCscInternalPort;    // 기본 4422
-    std::string m_strCscInternalToken; // X-Csp-Internal-Token 값
-    std::string m_strConfigCacheDir;   // 로컬 설정 스냅샷 저장 경로
+    // 런타임 설정 jsonl 디렉토리 (agent 관리)
+    std::string m_strConfigJsonlDir;   // agent 관리 config/ 디렉토리
+
+    // Deployment config overlay 추적 (Read() 는 CLog 초기화 전 호출되므로 로그는 SIPServerStart 에서 출력)
+    std::string m_strOverlayPath;      // 적용된 overlay 파일 경로 (빈 문자열 = 없음)
+    int         m_iOverlayKeys = 0;    // 적용된 키 개수
 
     // ================================================================
     // 녹취 설정

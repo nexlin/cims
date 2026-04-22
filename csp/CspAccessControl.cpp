@@ -43,7 +43,7 @@ bool CCspAccessControl::Sync() {
             SimpleJson::JsonNode row = items.At(i);
             if (row.type != SimpleJson::JSON_OBJECT) continue;
             AccessEntry e;
-            e.id           = (int)row.GetInt("id");
+            e.id           = CspUuidToIntId(row.GetString("id"));  // jsonl UUID → int
             e.scope        = row.GetString("scope", "global");
             e.scope_ref_id = (int)row.GetInt("scope_ref_id", 0);
             e.kind         = row.GetString("kind", "allow");

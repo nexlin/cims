@@ -44,7 +44,6 @@
         "Dir":       "packages",
         "BackupDir": "packages_trash"
     },
-    "InternalToken": "@INTERNAL_TOKEN@",
     "ServiceLogging": {
         "Dir": "@SERVICE_LOG_DIR@",
         "Enable": ["csp", "ue"]

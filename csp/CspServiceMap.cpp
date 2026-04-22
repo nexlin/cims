@@ -1,5 +1,6 @@
 #include "CspServiceMap.h"
 #include "CspConfigCache.h"
+#include "SipServerSetup.h"
 #include "Log.h"
 #include <algorithm>
 
@@ -46,6 +47,21 @@ ServiceInfo CCspServiceMap::GetById(int id) const {
     std::lock_guard<std::mutex> lk(m_mutex);
     for (const auto& s : m_services) {
         if (s.id == id) return s;
+    }
+    // Legacy compat: jsonl 에 service 가 하나도 정의되지 않았고 요청 id > 0 이면
+    // Setup 의 AuthRealm 을 domain 으로 가진 default service 를 돌려준다.
+    // (ptt_subscriptions/voip_subscriptions 의 service_id 가 있지만 service.jsonl 이 없을 때 사용)
+    if (m_services.empty() && id > 0) {
+        ServiceInfo fb;
+        fb.id             = id;
+        fb.name           = "default-compat";
+        fb.kind           = "compat";
+        fb.domain         = gclsSetup.m_strAuthRealm;
+        fb.auth_realm     = gclsSetup.m_strAuthRealm;
+        fb.inbound_policy = "any";
+        fb.priority       = 100;
+        fb.enabled        = true;
+        return fb;
     }
     return ServiceInfo();
 }

@@ -15,13 +15,9 @@ import PttHistoryPage from './pages/PttHistoryPage'
 import StatsPage from './pages/StatsPage'
 import StatsMessagesPage from './pages/StatsMessagesPage'
 import VerificationPage from './pages/VerificationPage'
-import SipListenersPage from './pages/SipListenersPage'
-import SipTrunksPage from './pages/SipTrunksPage'
-import SipRoutesPage from './pages/SipRoutesPage'
-import SipAccessPage from './pages/SipAccessPage'
-import SipServicesPage from './pages/SipServicesPage'
 import ServicesPage from './pages/ServicesPage'
-import DeploymentsDashboardPage from './pages/DeploymentsDashboardPage'
+import PackagesPage from './pages/PackagesPage'
+import ServersPage from './pages/ServersPage'
 import DocsPage from './pages/DocsPage'
 import { authApi } from './api/auth'
 import './index.css'
@@ -41,13 +37,9 @@ const PAGE_TITLES: Record<PageId, string> = {
   'stats-cmp': 'CMP 인터페이스 통계',
   'stats-csc': 'CSC 인터페이스 통계',
   'stats-https': 'HTTPS 메시지 통계',
-  'csp-listeners': 'SIP 리스너 (CSP)',
-  'csp-trunks': 'SIP 트렁크 (CSP)',
-  'csp-routes': 'SIP 라우팅 규칙 (CSP)',
-  'csp-services': 'SIP 서비스 (CSP)',
-  'csp-access': 'SIP 접근제어 (CSP)',
   'services':   '서비스 프로세스 제어',
-  'deploy':       '배포 관리',
+  'packages':     '패키지 관리',
+  'servers':      '서버 관리',
   'verification': '시스템 검증',
   'docs': '문서',
 }
@@ -102,13 +94,9 @@ function Shell() {
       case 'stats-cmp':       return <StatsMessagesPage iface="cmp" />
       case 'stats-csc':       return <StatsMessagesPage iface="csc" />
       case 'stats-https':     return <StatsMessagesPage iface="https" />
-      case 'csp-listeners':   return <SipListenersPage />
-      case 'csp-trunks':      return <SipTrunksPage />
-      case 'csp-routes':      return <SipRoutesPage />
-      case 'csp-services':    return <SipServicesPage />
-      case 'csp-access':      return <SipAccessPage />
       case 'services':        return <ServicesPage />
-      case 'deploy':          return <DeploymentsDashboardPage />
+      case 'packages':        return <PackagesPage />
+      case 'servers':         return <ServersPage />
       case 'verification':    return <VerificationPage />
       case 'docs':            return <DocsPage />
       default:                return <DashboardPage />

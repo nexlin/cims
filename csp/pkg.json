@@ -1,5 +1,26 @@
 {
   "name": "csp",
   "description": "CIMS Signaling Processor — SIP signaling (CSCF/TAS/PTT-AS/IBCF) 통합 서버",
-  "version": "0.0.1"
+  "version": "0.0.1",
+  "service": {
+    "functions": [
+      {
+        "name": "volte",
+        "desc": "VoLTE 호처리"
+      },
+      {
+        "name": "ptt",
+        "desc": "PTT 호처리"
+      },
+      {
+        "name": "ibcf",
+        "desc": "IBCF (IP-PBX 트렁크)"
+      }
+    ],
+    "processes": [
+      "CSP",
+      "PSP",
+      "ISP"
+    ]
+  }
 }

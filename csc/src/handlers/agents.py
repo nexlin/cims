@@ -368,8 +368,14 @@ async def _agent_metrics(aid: int, config):
 #  Packages
 # ════════════════════════════════════════════════════════════
 
-def _package_to_json(r: dict) -> dict:
-    return {
+def _package_to_json(r: dict, include_full: bool = True) -> dict:
+    """Package row → JSON.
+
+    include_full=True (default): meta_json / config_template_json 파싱하여 함께 반환.
+      - 리스트 조회도 추가 모달에서 바로 써야 하므로 기본 포함.
+      - 필요 시 include_full=False 로 최소 필드만 반환.
+    """
+    out = {
         "id": r["id"],
         "name": r["name"],
         "version": r["version"],
@@ -380,6 +386,17 @@ def _package_to_json(r: dict) -> dict:
         "uploaded_by": r["uploaded_by"],
         "uploaded_at": _dt(r["uploaded_at"]),
     }
+    if include_full:
+        out["meta"]            = _safe_json(r.get("meta_json"))
+        out["config_template"] = _safe_json(r.get("config_template_json"))
+    return out
+
+
+def _safe_json(raw):
+    if not raw: return None
+    if isinstance(raw, (dict, list)): return raw
+    try: return json.loads(raw)
+    except Exception: return None
 
 
 async def handle_packages(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
@@ -437,6 +454,22 @@ def _extract_meta_from_tarball(raw: bytes) -> dict | None:
         return None
 
 
+def _extract_config_template_from_tarball(raw: bytes) -> dict | None:
+    """tar.gz 최상위의 config_template.json 을 파싱 (없으면 None)."""
+    import io, tarfile
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
+            try:
+                m = tf.getmember("config_template.json")
+            except KeyError:
+                return None
+            f = tf.extractfile(m)
+            if not f: return None
+            return json.loads(f.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
 # ─── 동기 블로킹 작업들 (thread executor 에서 호출) ─────────────
 def _read_file(path: str) -> bytes:
     with open(path, "rb") as f:
@@ -469,18 +502,22 @@ def _pkg_existing(config, name: str, version: str):
 
 
 def _pkg_upsert(config, name: str, version: str, fpath: str, fsize: int,
-                fsha: str, full_desc: str, actor: str):
+                fsha: str, full_desc: str, actor: str,
+                meta_json: str | None, template_json: str | None):
     conn = _get_db(config)
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO cims_package (name, version, file_path, file_size, sha256, "
-                "                          description, uploaded_by) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s) "
+                "                          description, uploaded_by, "
+                "                          meta_json, config_template_json) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
                 "ON DUPLICATE KEY UPDATE file_path=VALUES(file_path), file_size=VALUES(file_size), "
                 "  sha256=VALUES(sha256), description=VALUES(description), "
-                "  uploaded_by=VALUES(uploaded_by), uploaded_at=NOW()",
-                (name, version, fpath, fsize, fsha, full_desc, actor)
+                "  uploaded_by=VALUES(uploaded_by), uploaded_at=NOW(), "
+                "  meta_json=VALUES(meta_json), config_template_json=VALUES(config_template_json)",
+                (name, version, fpath, fsize, fsha, full_desc, actor,
+                 meta_json, template_json)
             )
             cur.execute("SELECT * FROM cims_package WHERE name=%s AND version=%s", (name, version))
             return cur.fetchone()
@@ -539,8 +576,9 @@ async def _create_package(handler_args: HandlerArgs, config):
                              media_type="application/json")
 
 
-    # 2) meta.json 파싱 (tarball decompress → thread 로 offload)
-    meta = await asyncio.to_thread(_extract_meta_from_tarball, raw) or {}
+    # 2) meta.json + config_template.json 파싱 (tarball decompress → thread 로 offload)
+    meta     = await asyncio.to_thread(_extract_meta_from_tarball, raw) or {}
+    template = await asyncio.to_thread(_extract_config_template_from_tarball, raw)
     name        = (meta.get("name")        or body.get("name")        or "").strip()
     version     = (meta.get("version")     or body.get("version")     or "").strip()
     description = (meta.get("description") or body.get("description") or "")
@@ -587,19 +625,16 @@ async def _create_package(handler_args: HandlerArgs, config):
     full_desc = " | ".join(desc_lines)[:255]
 
     # 6) DB insert/update (blocking → thread)
+    meta_str     = json.dumps(meta, ensure_ascii=False) if meta else None
+    template_str = json.dumps(template, ensure_ascii=False) if template else None
     row = await asyncio.to_thread(
-        _pkg_upsert, config, name, version, fpath, fsize, fsha, full_desc, actor
+        _pkg_upsert, config, name, version, fpath, fsize, fsha, full_desc, actor,
+        meta_str, template_str,
     )
 
     result = _package_to_json(row)
-    # 원본 meta 필드도 응답에 포함 (UI 가 preview 표시)
-    if meta:
-        result["meta"] = {
-            "build_date": build_date, "git_sha": git_sha, "git_branch": git_branch,
-            "changelog": changelog, "packaged_at": meta.get("packaged_at"),
-            "packaged_by": meta.get("packaged_by"),
-        }
     logger.log_info(f"[pkg-upload] done {name} {version} size={fsize} "
+                    f"template={'yes' if template else 'no'} "
                     f"handler_ms={int((_t.monotonic()-_t_handler_start)*1000)}")
     return HandlerResult(status=201, body=result, media_type="application/json")
 
@@ -673,14 +708,28 @@ def _deployment_to_json(r: dict) -> dict:
         "package_version": r.get("package_version"),
         "instance_id":  r["instance_id"],
         "instance_name": r.get("instance_name"),
-        "service_kind": r["service_kind"],
+        "process_name": r.get("process_name"),
+        "service_functions": _split_csv(r.get("service_functions")),
         "status":       r["status"],
         "install_path": r["install_path"],
         "deployed_at":  _dt(r["deployed_at"]),
         "last_job_id":  r["last_job_id"],
         "note":         r["note"],
+        "config":       _safe_json(r.get("config_json")),
+        "config_applied_at": _dt(r.get("config_applied_at")),
         "create_time":  _dt(r["create_time"]),
     }
+
+
+def _split_csv(s):
+    if not s: return []
+    return [x.strip() for x in str(s).split(",") if x.strip()]
+
+
+def _join_csv(lst):
+    if not lst: return ""
+    if isinstance(lst, str): return lst
+    return ",".join(str(x).strip() for x in lst if str(x).strip())
 
 
 async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
@@ -701,7 +750,92 @@ async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> Handler
             if method == "DELETE": return await _delete_deployment(did, config)
         elif len(tail) == 2 and tail[1] == "job" and method == "POST":
             return await _queue_job(handler_args, did, config)
+        elif len(tail) == 2 and tail[1] == "config":
+            if method == "GET":  return await _get_deployment_config(did, config)
+            if method == "PUT":  return await _put_deployment_config(handler_args, did, config)
+        elif len(tail) == 3 and tail[1] == "collection":
+            name = tail[2]
+            if method == "GET":  return await _get_deployment_collection(did, name, config)
+            if method == "PUT":  return await _put_deployment_collection(handler_args, did, name, config)
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+
+
+async def _get_deployment_config(did: int, config):
+    """해당 배포의 현재 설정 값 + 참조 템플릿을 함께 반환."""
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT d.config_json, d.config_applied_at, "
+                "       p.config_template_json, p.meta_json "
+                "FROM agent_deployment d "
+                "LEFT JOIN cims_package p ON d.package_id = p.id "
+                "WHERE d.id=%s", (did,))
+            r = cur.fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    return HandlerResult(status=200,
+        body={
+            "config":             _safe_json(r.get("config_json")) or {},
+            "config_applied_at":  _dt(r.get("config_applied_at")),
+            "template":           _safe_json(r.get("config_template_json")),
+            "meta":               _safe_json(r.get("meta_json")),
+        },
+        media_type="application/json")
+
+
+async def _put_deployment_config(handler_args, did: int, config):
+    """설정 값 저장. body = { "config": {<key>: <value>, ...}, "queue_update"?: bool }
+
+    queue_update=true (기본) 이면 update_config job 을 자동 큐잉.
+    """
+    body = _parse_body(handler_args)
+    values = body.get("config")
+    if not isinstance(values, dict):
+        return HandlerResult(status=400, body={"error": "config dict required"},
+                             media_type="application/json")
+    queue_update = body.get("queue_update", True)
+
+    conn = _get_db(config)
+    job_id = None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM agent_deployment WHERE id=%s", (did,))
+            dep = cur.fetchone()
+            if not dep:
+                return HandlerResult(status=404, body={"error": "not_found"},
+                                     media_type="application/json")
+            cur.execute(
+                "UPDATE agent_deployment SET config_json=%s WHERE id=%s",
+                (json.dumps(values, ensure_ascii=False), did)
+            )
+            if queue_update:
+                cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (did,))
+                dep_full = cur.fetchone()
+                params = {
+                    "deployment_id": did,
+                    "package_id":    dep_full["package_id"],
+                    "package_name":  dep_full["package_name"],
+                    "package_version": dep_full["package_version"],
+                    "process_name":  dep_full.get("process_name"),
+                    "service_functions": _split_csv(dep_full.get("service_functions")),
+                    "install_path":  dep_full["install_path"],
+                    "instance_id":   dep_full["instance_id"],
+                    "config":        values,
+                }
+                cur.execute(
+                    "INSERT INTO agent_job (agent_id, job_type, params, status) "
+                    "VALUES (%s, 'update_config', %s, 'queued')",
+                    (dep["agent_id"], json.dumps(params))
+                )
+                job_id = cur.lastrowid
+    finally:
+        conn.close()
+    return HandlerResult(status=200,
+        body={"ok": True, "job_id": job_id},
+        media_type="application/json")
 
 
 _SELECT_DEPLOY = ("""
@@ -745,7 +879,8 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     agent_id     = body.get("agent_id")
     package_id   = body.get("package_id")
     instance_id  = body.get("instance_id")
-    service_kind = (body.get("service_kind") or "").strip()
+    process_name = (body.get("process_name") or body.get("service_kind") or "").strip()
+    functions    = _join_csv(body.get("service_functions"))
     install_path = (body.get("install_path") or "").strip() or None
     if not agent_id or not package_id:
         return HandlerResult(status=400, body={"error": "agent_id and package_id required"},
@@ -755,9 +890,11 @@ async def _create_deployment(handler_args: HandlerArgs, config):
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_deployment (agent_id, package_id, instance_id, "
-                "                              service_kind, install_path, note) "
-                "VALUES (%s,%s,%s,%s,%s,%s)",
-                (agent_id, package_id, instance_id, service_kind, install_path, body.get("note"))
+                "                              process_name, service_functions, "
+                "                              install_path, note) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (agent_id, package_id, instance_id, process_name, functions,
+                 install_path, body.get("note"))
             )
             new_id = cur.lastrowid
             cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (new_id,))
@@ -773,9 +910,15 @@ async def _create_deployment(handler_args: HandlerArgs, config):
 async def _update_deployment(handler_args: HandlerArgs, did: int, config):
     body = _parse_body(handler_args)
     fields = []; values = []
-    for col in ("instance_id", "service_kind", "install_path", "note"):
+    # service_kind 는 하위호환 별칭 → process_name 으로 매핑
+    if "service_kind" in body and "process_name" not in body:
+        body["process_name"] = body["service_kind"]
+    for col in ("instance_id", "process_name", "install_path", "note"):
         if col in body:
             fields.append(f"{col}=%s"); values.append(body[col])
+    if "service_functions" in body:
+        fields.append("service_functions=%s")
+        values.append(_join_csv(body["service_functions"]))
     if not fields:
         return HandlerResult(status=400, body={"error": "no_updatable_fields"}, media_type="application/json")
     values.append(did)
@@ -825,9 +968,11 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
                 "package_id":    dep["package_id"],
                 "package_name":  dep["package_name"],
                 "package_version": dep["package_version"],
-                "service_kind":  dep["service_kind"],
+                "process_name":  dep.get("process_name"),
+                "service_functions": _split_csv(dep.get("service_functions")),
                 "install_path":  dep["install_path"],
                 "instance_id":   dep["instance_id"],
+                "config":        _safe_json(dep.get("config_json")),
                 "extra":         body.get("extra") or {},
             }
             cur.execute(
@@ -854,12 +999,29 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
 #  인증 없음 (enrollment_token 이 페이로드의 인증 역할)
 # ════════════════════════════════════════════════════════════
 
-_AGENT_ASSET_CANDIDATES = (
-    # 배포: build/dist/agent/  (현재 파일=csc/src/handlers/agents.py 기준 ../../../agent)
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "agent")),
-    # 개발: repo_root/agent/   (csc/src/handlers/ 기준 ../../../../agent)
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "agent")),
-)
+def _agent_asset_candidates():
+    """Agent asset 탐색 후보. 실행 컨텍스트에 따라 다양.
+
+    CSC 는 다음 중 한 곳에서 실행:
+      1. 개발 소스: <repo>/csc/src/csc_app.py → asset at <repo>/agent/
+      2. 빌드 스테이징: build/dist/csc/src/csc_app.py → build/dist/agent/
+      3. Agent 배포: install_path/csc/src/csc_app.py → install_path/../../../agent/ (dist 원본)
+      4. 환경 변수 CIMS_AGENT_ASSET_DIR 직접 지정
+    """
+    cands = []
+    env = os.environ.get("CIMS_AGENT_ASSET_DIR")
+    if env: cands.append(env)
+    here = os.path.dirname(__file__)
+    for up in (3, 4, 5, 6):
+        cands.append(os.path.abspath(os.path.join(here, *([".."] * up), "agent")))
+    # dedup 순서 유지
+    seen = set(); out = []
+    for c in cands:
+        if c not in seen:
+            seen.add(c); out.append(c)
+    return tuple(out)
+
+_AGENT_ASSET_CANDIDATES = _agent_asset_candidates()
 
 
 def _find_agent_asset(filename: str) -> str | None:
@@ -888,6 +1050,201 @@ async def _serve_agent_binary(handler_args: HandlerArgs, kwargs: dict) -> Handle
     with open(p, "rb") as f:
         return HandlerResult(status=200, body=f.read(),
                              media_type="text/x-python")
+
+
+# ════════════════════════════════════════════════════════════
+#  Collection proxy (CSC → Agent sync REST)
+# ════════════════════════════════════════════════════════════
+
+def _fetch_deployment_for_proxy(did: int, config):
+    """proxy 에 필요한 deployment + agent 정보 동시 조회. (sync — asyncio.to_thread 로 호출)"""
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT d.id, d.install_path, d.package_id, "
+                "       a.id AS agent_id, a.name AS agent_name, a.status AS agent_status, "
+                "       a.ip_address, a.sync_port, a.agent_token, "
+                "       p.config_template_json "
+                "FROM agent_deployment d "
+                "LEFT JOIN cims_agent    a ON d.agent_id   = a.id "
+                "LEFT JOIN cims_package  p ON d.package_id = p.id "
+                "WHERE d.id=%s", (did,))
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def _collection_schema(template_json, name: str):
+    """template.collections 에서 key=name 인 항목의 schema 를 찾아 반환. 없으면 None."""
+    tmpl = _safe_json(template_json)
+    if not isinstance(tmpl, dict): return None, None
+    for c in tmpl.get("collections") or []:
+        if c.get("key") == name:
+            return c.get("schema") or {}, c
+    return None, None
+
+
+def _validate_record(schema: dict, record: dict) -> list:
+    """schema.fields 로 record 기본 검증. 오류 목록 반환 (빈 목록이면 OK)."""
+    if not isinstance(record, dict): return ["record_must_be_object"]
+    errors = []
+    known = {f["key"]: f for f in schema.get("fields", [])}
+    for key, fdef in known.items():
+        if fdef.get("required") and record.get(key) in (None, ""):
+            # auto 필드 (uuid 등) 는 서버가 채움
+            if fdef.get("auto"):
+                continue
+            errors.append(f"{key}: required")
+        val = record.get(key)
+        if val is None: continue
+        t = fdef.get("type")
+        if t == "int" and not isinstance(val, bool) and not isinstance(val, int):
+            try: int(val)
+            except Exception: errors.append(f"{key}: int expected")
+        elif t == "bool" and not isinstance(val, bool):
+            errors.append(f"{key}: bool expected")
+        elif t == "enum":
+            opts = fdef.get("options") or []
+            if opts and val not in opts:
+                errors.append(f"{key}: must be one of {opts}")
+    return errors
+
+
+def _agent_proxy_call(method: str, agent: dict, path: str,
+                      query: dict = None, body: dict = None,
+                      timeout: int = 15, config: dict = None) -> tuple:
+    """Agent 의 sync REST 로 TLS 요청. (status, json_body) 반환.
+
+    per-agent mTLS: agent.mtls_enabled=1 인 레코드만 client cert 로 연결.
+    그렇지 않은 agent (MtlsEnabled 활성화 전 enroll 된 레거시 포함) 는 기존처럼
+    X-Agent-Token 단독 TLS (검증 없음) 로 통신.
+    """
+    import urllib.parse, urllib.request, ssl as _ssl
+    ip = agent.get("ip_address") or "127.0.0.1"
+    port = agent.get("sync_port")
+    if not port:
+        return 0, {"error": "agent sync_port unknown (아직 heartbeat 보고 전일 수 있음)"}
+    qs = ("?" + urllib.parse.urlencode(query)) if query else ""
+    url = f"https://{ip}:{port}{path}{qs}"
+    data = None
+    headers = {"X-Agent-Token": agent.get("agent_token") or ""}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+
+    # per-agent mTLS: 레코드에 mtls_enabled=1 이면 CSC client cert 로 mTLS 연결
+    if agent.get("mtls_enabled"):
+        mtls_cfg = (config or {}).get("Agent") or {}
+        mtls_dir = mtls_cfg.get("MtlsDir") or "cert/agent_mtls"
+        if not os.path.isabs(mtls_dir):
+            mtls_dir = os.path.abspath(mtls_dir)
+        ca_crt     = os.path.join(mtls_dir, "ca.crt")
+        client_crt = os.path.join(mtls_dir, "csc_client.crt")
+        client_key = os.path.join(mtls_dir, "csc_client.key")
+        if os.path.isfile(ca_crt) and os.path.isfile(client_crt) and os.path.isfile(client_key):
+            ctx.verify_mode = _ssl.CERT_REQUIRED
+            ctx.load_verify_locations(ca_crt)
+            ctx.load_cert_chain(certfile=client_crt, keyfile=client_key)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try: b = json.loads(e.read().decode("utf-8"))
+        except Exception: b = {"error": f"HTTP {e.code}"}
+        return e.code, b
+    except Exception as e:
+        return 0, {"error": str(e)}
+
+
+async def _get_deployment_collection(did: int, name: str, config):
+    dep = await asyncio.to_thread(_fetch_deployment_for_proxy, did, config)
+    if not dep:
+        return HandlerResult(status=404, body={"error": "deployment_not_found"},
+                             media_type="application/json")
+    if not dep.get("install_path"):
+        return HandlerResult(status=409, body={"error": "not_installed",
+                                                "hint": "install 먼저 실행"},
+                             media_type="application/json")
+    schema, _ = _collection_schema(dep.get("config_template_json"), name)
+    if schema is None:
+        return HandlerResult(status=404,
+            body={"error": "collection_not_in_template", "name": name},
+            media_type="application/json")
+
+    status, resp = await asyncio.to_thread(
+        _agent_proxy_call, "GET", dep,
+        "/collection", {"install_path": dep["install_path"], "name": name},
+        None, 15, config,
+    )
+    if status == 200:
+        return HandlerResult(status=200,
+            body={"records": resp.get("records") or [], "schema": schema},
+            media_type="application/json")
+    return HandlerResult(status=status or 502,
+        body={"error": "agent_proxy_failed", "detail": resp},
+        media_type="application/json")
+
+
+async def _put_deployment_collection(handler_args, did: int, name: str, config):
+    dep = await asyncio.to_thread(_fetch_deployment_for_proxy, did, config)
+    if not dep:
+        return HandlerResult(status=404, body={"error": "deployment_not_found"},
+                             media_type="application/json")
+    if not dep.get("install_path"):
+        return HandlerResult(status=409, body={"error": "not_installed"},
+                             media_type="application/json")
+    schema, _ = _collection_schema(dep.get("config_template_json"), name)
+    if schema is None:
+        return HandlerResult(status=404,
+            body={"error": "collection_not_in_template", "name": name},
+            media_type="application/json")
+
+    body = _parse_body(handler_args)
+    records = body.get("records")
+    if not isinstance(records, list):
+        return HandlerResult(status=400, body={"error": "records array required"},
+                             media_type="application/json")
+
+    # validation + auto id 부여
+    import uuid as _uuid
+    id_field = schema.get("id_field") or "id"
+    id_type  = schema.get("id_type") or "uuid"
+    all_errors = []
+    for i, r in enumerate(records):
+        if not isinstance(r, dict):
+            all_errors.append({"index": i, "errors": ["not_object"]})
+            continue
+        # auto id
+        if id_type == "uuid" and not r.get(id_field):
+            r[id_field] = _uuid.uuid4().hex[:16]
+        errs = _validate_record(schema, r)
+        if errs:
+            all_errors.append({"index": i, "errors": errs})
+    if all_errors:
+        return HandlerResult(status=400,
+            body={"error": "validation_failed", "details": all_errors},
+            media_type="application/json")
+
+    do_signal = body.get("signal", True)
+    status, resp = await asyncio.to_thread(
+        _agent_proxy_call, "PUT", dep,
+        "/collection", {"install_path": dep["install_path"], "name": name},
+        {"records": records, "signal": do_signal}, 15, config,
+    )
+    if status == 200:
+        return HandlerResult(status=200,
+            body={"ok": True, "count": resp.get("count"),
+                  "signaled": resp.get("signaled") or []},
+            media_type="application/json")
+    return HandlerResult(status=status or 502,
+        body={"error": "agent_proxy_failed", "detail": resp},
+        media_type="application/json")
 
 
 # ════════════════════════════════════════════════════════════

@@ -67,7 +67,8 @@ void CCspTrunkManager::_loadFromCache() {
     for (size_t i = 0; i < items.Size(); ++i) {
         SimpleJson::JsonNode row = items.At(i);
         if (row.type != SimpleJson::JSON_OBJECT) continue;
-        int id = (int)row.GetInt("id");
+        // id 는 jsonl UUID 문자열 → 안정적 int 매핑
+        int id = CspUuidToIntId(row.GetString("id"));
         if (id <= 0) continue;
 
         // 기존 runtime 이 있으면 상태 보존

@@ -1,5 +1,26 @@
 {
   "name": "cmp",
   "description": "CIMS Media Processor — RTP/RTCP relay + PTT mixing + 녹취",
-  "version": "0.0.1"
+  "version": "0.0.1",
+  "service": {
+    "functions": [
+      {
+        "name": "voip_relay",
+        "desc": "VoIP RTP Relay"
+      },
+      {
+        "name": "ptt_mix",
+        "desc": "PTT RTP Mixing + Floor Control"
+      },
+      {
+        "name": "record",
+        "desc": "녹취"
+      }
+    ],
+    "processes": [
+      "CMP",
+      "PMP",
+      "IMP"
+    ]
+  }
 }

@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "key": "network",
+      "title": "네트워크",
+      "fields": [
+        {
+          "key": "Listen.Ip", "label": "바인딩 IP",
+          "type": "string", "default": "0.0.0.0",
+          "required": true, "restart": true
+        },
+        {
+          "key": "Listen.ControlPort", "label": "제어 포트 (CSC/CSP ↔ CMP JSON)",
+          "type": "int", "default": 9000, "min": 1, "max": 65535,
+          "required": true, "restart": true
+        }
+      ]
+    },
+    {
+      "key": "rtp_pool",
+      "title": "RTP 포트 풀",
+      "description": "VoIP / PTT 리소스 풀 분리",
+      "fields": [
+        {
+          "key": "Rtp.VoipStartPort", "label": "VoIP RTP 시작 포트",
+          "type": "int", "default": 50000, "min": 1024, "max": 60000,
+          "restart": true,
+          "help": "4 포트 블록 (Audio RTP/RTCP + Video RTP/RTCP)"
+        },
+        {
+          "key": "Rtp.PttRtpStartPort", "label": "PTT RTP 시작 포트",
+          "type": "int", "default": 52000, "min": 1024, "max": 60000,
+          "restart": true
+        },
+        {
+          "key": "Rtp.PttFloorStartPort", "label": "PTT Floor 시작 포트",
+          "type": "int", "default": 54000, "min": 1024, "max": 60000,
+          "restart": true
+        }
+      ]
+    },
+    {
+      "key": "log",
+      "title": "로깅",
+      "fields": [
+        {
+          "key": "LogLevel", "label": "로그 레벨",
+          "type": "enum", "options": ["debug","info","warn","error"],
+          "default": "info",
+          "restart": false
+        },
+        {
+          "key": "LogDir", "label": "로그 디렉토리",
+          "type": "path", "default": "./log", "restart": true
+        }
+      ]
+    }
+  ]
+}

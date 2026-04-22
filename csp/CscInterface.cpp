@@ -266,7 +266,7 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
 
         CLog::Print(LOG_INFO, "CscInterface: Stats response sent (reg=%d calls=%d)", regUsers, activeCalls);
     } else if (strEvent == "CSC_RESTART") {
-        CLog::Print(LOG_INFO, "CscInterface: CSC_RESTART received — resyncing all group and user state from DB");
+        CLog::Print(LOG_INFO, "CscInterface: CSC_RESTART received — resyncing group/user state from DB");
 
         // Resync user map from DB
         gclsCspUserMap.LoadFromDb();
@@ -274,33 +274,15 @@ void CCscInterface::ProcessMessage(const std::string& strMsg, const struct socka
         // Trigger full group resync (SyncGroupsState)
         gclsGroupCallService.OnGroupConfigChanged();
 
-        // 런타임 설정도 전체 재로드
-        gclsCspConfigCache.RefreshAll();
-        gclsServiceMap.Sync();
-        gclsListenerManager.Sync();
-        gclsTrunkManager.Sync();
-        gclsRouteEngine.Sync();
-        gclsAccessControl.Sync();
-    } else if (strEvent == "LISTENER_CHANGED") {
-        CLog::Print(LOG_INFO, "CscInterface: LISTENER_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
-        gclsCspConfigCache.RefreshEntity(CACHE_LISTENER);
-        gclsListenerManager.Sync();
-    } else if (strEvent == "TRUNK_CHANGED") {
-        CLog::Print(LOG_INFO, "CscInterface: TRUNK_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
-        gclsCspConfigCache.RefreshEntity(CACHE_TRUNK);
-        gclsTrunkManager.Sync();
-    } else if (strEvent == "ROUTE_RULE_CHANGED") {
-        CLog::Print(LOG_INFO, "CscInterface: ROUTE_RULE_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
-        gclsCspConfigCache.RefreshEntity(CACHE_ROUTE);
-        gclsRouteEngine.Sync();
-    } else if (strEvent == "ACCESS_LIST_CHANGED") {
-        CLog::Print(LOG_INFO, "CscInterface: ACCESS_LIST_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
-        gclsCspConfigCache.RefreshEntity(CACHE_ACCESS);
-        gclsAccessControl.Sync();
-    } else if (strEvent == "SERVICE_CHANGED") {
-        CLog::Print(LOG_INFO, "CscInterface: SERVICE_CHANGED uri=%s action=%s", strUri.c_str(), strAction.c_str());
-        gclsCspConfigCache.RefreshEntity(CACHE_SERVICE);
-        gclsServiceMap.Sync();
+        // 동적 설정(listener/trunk/route/acl/service) 는 jsonl + SIGUSR1 경로로 반영됨.
+        // CSC_RESTART 는 이제 사용자/그룹 상태만 담당.
+    } else if (strEvent == "LISTENER_CHANGED" || strEvent == "TRUNK_CHANGED" ||
+               strEvent == "ROUTE_RULE_CHANGED" || strEvent == "ACCESS_LIST_CHANGED" ||
+               strEvent == "SERVICE_CHANGED") {
+        // Phase C 이후: 동적 설정은 agent → jsonl → SIGUSR1 경로로만 반영.
+        // 이 이벤트는 Phase B 이전의 HTTP pull 경로용으로 더 이상 수신하지 않음.
+        CLog::Print(LOG_DEBUG, "CscInterface: ignoring deprecated event %s (use SIGUSR1 path)",
+                    strEvent.c_str());
     } else if (strEvent == "USER_CHANGED") {
         extern void SendSipNotify(const std::string& uri, const std::string& etag, const std::string& action);
         SendSipNotify(strUri, strEtag, strAction);

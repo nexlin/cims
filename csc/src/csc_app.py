@@ -33,17 +33,44 @@ if __name__ == '__main__':
     
     # Load Config
     import json
+    def _apply_overlay(root: dict, flat: dict) -> int:
+        """Flat dot-path config ({"Server.Port": 5420}) 를 root 에 재귀 merge."""
+        applied = 0
+        for key, val in flat.items():
+            cur = root
+            parts = str(key).split('.')
+            for p in parts[:-1]:
+                if p not in cur or not isinstance(cur[p], dict):
+                    cur[p] = {}
+                cur = cur[p]
+            cur[parts[-1]] = val
+            applied += 1
+        return applied
+
     def load_config():
         # Configuration file location resolved via _CONFIG_PATH (absolute)
         try:
             with open(_CONFIG_PATH, 'r') as f:
-                return json.load(f)
+                c = json.load(f)
         except FileNotFoundError:
             logger.log_error(f"Config file not found at {_CONFIG_PATH}")
             return {}
+        # Deployment overlay: install_path/config.json 이 있으면 flat key 를 nested 로 merge.
+        # _CONFIG_PATH = install_path/csc/config/csc.json → install_path/config.json 이 overlay.
+        try:
+            overlay = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'config.json'))
+            if os.path.isfile(overlay):
+                with open(overlay, 'r') as f:
+                    flat = json.load(f)
+                if isinstance(flat, dict) and flat:
+                    n = _apply_overlay(c, flat)
+                    logger.log_info(f"CSC overlay applied: {overlay} ({n} keys)")
+        except Exception as e:
+            logger.log_error(f"CSC overlay failed: {e}")
+        return c
 
     from services.mcptt import load_shared_data, CSC_HANDLER_LIST, notify_csp
-    from services       import flow_logger, logger as csc_logger, config_cache, internal_api
+    from services       import flow_logger, logger as csc_logger, config_cache
     from handlers       import auth, recording
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
     from handlers.auth           import CIMS_AUTH_HANDLER_LIST
@@ -56,7 +83,6 @@ if __name__ == '__main__':
     from handlers.agents         import CIMS_AGENT_ADMIN_HANDLER_LIST, CIMS_AGENT_PUBLIC_HANDLER_LIST
     from handlers.agent_api      import CIMS_AGENT_API_HANDLER_LIST
     from services.flow_logger    import FLOW_HANDLER_LIST
-    from services.internal_api   import CSC_INTERNAL_HANDLER_LIST
 
     admin_server = None
     mcptt_server = None
@@ -188,9 +214,6 @@ if __name__ == '__main__':
         except Exception as _e:
             logger.log_error(f"ConfigCache init failed: {_e}")
 
-        # CSP 전용 내부 API 초기화 (shared secret + loopback only)
-        internal_api.init(config)
-
         # [Test Support] Inject dummy data if empty so tests pass without real JSON files
         from services.mcptt import USERS, GROUPS
         if not USERS:
@@ -268,18 +291,6 @@ if __name__ == '__main__':
         mcptt_server.start()
         logger.log_info(f"MCPTT server started on port {mcptt_conf.get('Port', 4430)}")
 
-        # ── CSP 전용 내부 API — loopback 전용 plain HTTP ─────────────────
-        _internal_conf = config.get('InternalServer', {'Ip': '127.0.0.1', 'Port': 4422})
-        internal_server = HttpServer(
-            _internal_conf.get('Ip', '127.0.0.1'),
-            _internal_conf.get('Port', 4422),
-            ssl_keyfile=None,   # plain HTTP
-            ssl_certfile=None,
-        )
-        internal_server.add_dynamic_rules(CSC_INTERNAL_HANDLER_LIST)
-        internal_server.start()
-        logger.log_info(f"Internal server started on {_internal_conf.get('Ip')}:{_internal_conf.get('Port', 4422)} (plain HTTP, loopback+token)")
-
         # Notify CSP that CSC has (re)started so it resyncs all state from DB
         try:
             notify_csp("CSC_RESTART", "", "START")
@@ -291,8 +302,10 @@ if __name__ == '__main__':
         # heartbeat 이 STALE_SEC 이상 안 오면 online/approved → offline 로 전이.
         # 기본 90s (agent 의 기본 heartbeat 30s × 3).
         from handlers.agents import _get_db as _agent_db_conn
+        from handlers.agent_api import _AGENT_CERT_ROTATE_THRESHOLD_DAYS
         STALE_SEC = int(config.get('AgentStaleSec', 90))
         SWEEP_INTERVAL = 30
+        CERT_SWEEP_INTERVAL = int(config.get('AgentCertSweepSec', 3600))  # 기본 1시간
 
         def _sweep_stale_agents():
             try:
@@ -315,14 +328,44 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[agent-sweep] error: {e}")
 
+        def _sweep_cert_rotate():
+            """mtls_enabled=1 이고 cert 가 THRESHOLD 일 이내 만료 예정인 agent 를 표식.
+            다음 heartbeat 응답에서 rotate 지시가 내려간다."""
+            try:
+                conn = _agent_db_conn(config)
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE cims_agent SET cert_rotate_pending=1 "
+                            "WHERE mtls_enabled=1 "
+                            "  AND cert_expires_at IS NOT NULL "
+                            "  AND cert_rotate_pending=0 "
+                            "  AND cert_expires_at <= NOW() + INTERVAL %s DAY",
+                            (_AGENT_CERT_ROTATE_THRESHOLD_DAYS,)
+                        )
+                        n = cur.rowcount
+                        if n > 0:
+                            logger.log_info(f"[cert-sweep] flagged {n} agent(s) for cert rotation "
+                                            f"(threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d)")
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.log_error(f"[cert-sweep] error: {e}")
+
         logger.log_info(f"[agent-sweep] stale threshold={STALE_SEC}s, interval={SWEEP_INTERVAL}s")
+        logger.log_info(f"[cert-sweep] rotate threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d, "
+                        f"interval={CERT_SWEEP_INTERVAL}s")
         _last_sweep = 0
+        _last_cert_sweep = 0
         while True:
             time.sleep(1)
             _now = time.time()
             if _now - _last_sweep >= SWEEP_INTERVAL:
                 _sweep_stale_agents()
                 _last_sweep = _now
+            if _now - _last_cert_sweep >= CERT_SWEEP_INTERVAL:
+                _sweep_cert_rotate()
+                _last_cert_sweep = _now
 
     except Exception as e:
         tb_str = traceback.format_exc()

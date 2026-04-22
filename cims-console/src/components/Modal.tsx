@@ -6,9 +6,10 @@ interface Props {
   children: ReactNode
   wide?: boolean
   fullscreen?: boolean
+  width?: number | string
 }
 
-export default function Modal({ title, onClose, children, wide, fullscreen }: Props) {
+export default function Modal({ title, onClose, children, wide, fullscreen, width }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
@@ -35,6 +36,7 @@ export default function Modal({ title, onClose, children, wide, fullscreen }: Pr
     <div className="modal-overlay" onClick={onClose}>
       <div
         className={`modal-box${wide ? ' modal-box--wide' : ''}`}
+        style={width ? { width } : undefined}
         onClick={e => e.stopPropagation()}
       >
         <div className="modal-header">

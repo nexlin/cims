@@ -6,8 +6,8 @@ export type PageId =
   | 'service-status'
   | 'history-volte' | 'history-ptt'
   | 'stats-volte' | 'stats-ptt' | 'stats-sip' | 'stats-cmp' | 'stats-csc' | 'stats-https'
-  | 'csp-services' | 'csp-listeners' | 'csp-trunks' | 'csp-routes' | 'csp-access' | 'services'
-  | 'deploy'
+  | 'services'
+  | 'packages' | 'servers'
   | 'verification'
   | 'docs'
 
@@ -47,18 +47,9 @@ const MENU: MenuItem[] = [
       { id: 'stats-https', label: 'HTTPS' },
     ],
   },
-  {
-    label: 'CSP 설정',
-    children: [
-      { id: 'csp-services',  label: 'SIP 서비스' },
-      { id: 'csp-listeners', label: 'SIP 리스너' },
-      { id: 'csp-trunks',    label: 'SIP 트렁크' },
-      { id: 'csp-routes',    label: '라우팅 규칙' },
-      { id: 'csp-access',    label: '접근제어' },
-      { id: 'services',      label: '프로세스 제어' },
-    ],
-  },
-  { id: 'deploy', label: '배포 관리' },
+  { id: 'services', label: '프로세스 제어' },
+  { id: 'packages', label: '패키지 관리' },
+  { id: 'servers',  label: '서버 관리' },
   { id: 'verification', label: '검증' },
   { id: 'docs', label: '문서' },
 ]

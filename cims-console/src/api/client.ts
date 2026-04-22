@@ -1,5 +1,17 @@
 const BASE = '/api/v1'
 
+// 상대경로(Vite dev proxy / nginx proxy) 또는 직접 모드 (VITE_CSC_DIRECT=1) 자동 분기.
+// 직접 모드는 console 정적 서빙 호스트와 다른 포트에 있는 CSC 로 CORS 호출 (CSC 가 CORS 허용).
+function buildApiUrl(path: string): string {
+  const env = (import.meta as unknown as { env: Record<string, string> }).env || {}
+  if (env.VITE_CSC_DIRECT === '1' && env.PROD !== 'true') {
+    const loc = window.location
+    const port = env.VITE_CSC_PORT || '4420'
+    return `${loc.protocol}//${loc.hostname}:${port}${BASE}${path}`
+  }
+  return `${BASE}${path}`
+}
+
 export class ApiError extends Error {
   status: number
   data: Record<string, unknown>
@@ -20,7 +32,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(buildApiUrl(path), {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,

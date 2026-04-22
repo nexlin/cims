@@ -6,23 +6,27 @@
 #include <map>
 #include <ctime>
 #include <mutex>
+#include <functional>
 #include "SimpleJson.h"
 
+/** jsonl 레코드의 id (UUID hex 문자열) 를 안정적인 양의 int 로 매핑.
+ *  같은 uuid → 항상 같은 int (재부팅 후에도 동일). std::hash 의 deterministic
+ *  동작에 의존하므로 같은 컴파일러 환경에서 일관됨.
+ *  빈 문자열이면 0 반환.
+ */
+inline int CspUuidToIntId(const std::string& uuid) {
+    if (uuid.empty()) return 0;
+    size_t h = std::hash<std::string>{}(uuid);
+    return (int)(h & 0x7FFFFFFF);   // 31-bit 양수
+}
+
 /**
- * CSP 런타임 설정 캐시
+ * CSP 런타임 설정 캐시 — jsonl 전용 (P10 Phase C 이후)
  *
- *   DB(CSC) → HTTP pull → 메모리 → csp/cache/*.json
+ *   Agent 가 관리하는 install_path/config/*.jsonl 이 유일한 원천.
+ *   SIGUSR1 수신 시 ReloadFromJsonl() 로 메모리 캐시 재구성.
  *
- * 기동 순서:
- *   1. 로컬 스냅샷 파일 우선 로드 → 즉시 서비스 가능 상태로 진입
- *   2. 비동기로 CSC 에 HTTP GET 시도 → 성공 시 원자적으로 교체
- *   3. 실패 시 로컬 캐시 유지 + 주기 재시도
- *
- * 변경 수신:
- *   CCscInterface 가 LISTENER_CHANGED 등 이벤트 수신 → 해당 entity 만 HTTP pull → 교체
- *
- * 캐시가 전혀 없는 최초 부팅:
- *   csp.json 의 Bootstrap 블록(최소 1 리스너/realm) 으로 임시 동작
+ *   기존의 DB(CSC) HTTP pull 모드 및 로컬 cache/*.json 스냅샷은 Phase C 에서 완전 제거.
  */
 
 enum CspCacheEntity {
@@ -40,65 +44,35 @@ public:
     ~CCspConfigCache();
 
     /** 기동 시 1회 호출.
-     *  @param cacheDir   로컬 스냅샷 디렉토리 경로 (예: "csp/cache")
-     *  @param cscHost    CSC 내부 API 호스트 (보통 127.0.0.1)
-     *  @param cscPort    CSC 내부 API 포트 (기본 4422)
-     *  @param token      shared secret (X-Csp-Internal-Token)
+     *  @param jsonlDir   agent 가 관리하는 jsonl 디렉토리 절대 경로.
+     *                    listeners.jsonl / trunks.jsonl / routes.jsonl / acl.jsonl / services.jsonl 을 참조.
      */
-    bool Init(const std::string& cacheDir,
-              const std::string& cscHost,
-              int cscPort,
-              const std::string& token);
+    bool Init(const std::string& jsonlDir);
 
-    /** 로컬 캐시 로드 → CSC 새로고침 시도 → 성공/실패 여부 반환. 비동기 백그라운드 재시도는 별도. */
-    bool LoadInitial();
+    /** jsonl 디렉토리가 설정되어 있으면 true. false 면 CSP 는 동적 설정 없이 동작. */
+    bool IsJsonlMode() const { return !m_strJsonlDir.empty(); }
 
-    /** 개별 entity 를 CSC 에서 pull 하고 캐시/파일 갱신. CCscInterface 이벤트에서 호출. */
-    bool RefreshEntity(CspCacheEntity e);
-
-    /** 전체 entity 를 CSC 에서 pull. 예: CSC_RESTART 수신 시. */
-    bool RefreshAll();
+    /** 초기 로드 (Init 직후 1회) 및 SIGUSR1 수신 시 재로드. */
+    bool LoadInitial() { return ReloadFromJsonl(); }
+    bool ReloadFromJsonl();
 
     /** 현재 메모리 캐시의 items 배열을 JSON 으로 반환 (읽기 전용 복사). */
     SimpleJson::JsonNode GetItems(CspCacheEntity e);
 
-    /** entity 에 대한 현재 etag. */
-    std::string GetEtag(CspCacheEntity e);
-
-    /** CSC 연결 성공 여부 최근 상태. false 면 로컬 캐시로만 운영 중. */
-    bool IsCscReachable() const { return m_bCscReachable; }
-
     static const char* EntityName(CspCacheEntity e);
-    static const char* EntityFileName(CspCacheEntity e);
 
 private:
     struct EntityState {
         SimpleJson::JsonNode items;  // JSON array
-        std::string          etag;
         time_t               updatedAt = 0;
-        std::string          source;  // "db" | "file" | "empty"
+        std::string          source;  // "jsonl" | "jsonl-empty"
     };
 
-    bool _loadFromFile(CspCacheEntity e);
-    bool _saveToFile(CspCacheEntity e);
-    bool _atomicWriteJson(const std::string& path, const std::string& content);
-    bool _httpGet(const std::string& path,
-                  const std::string& ifNoneMatch,
-                  int& outStatus,
-                  std::string& outBody,
-                  std::string& outEtag);
-    bool _applyPullResponse(CspCacheEntity e,
-                            const std::string& body,
-                            const std::string& etag);
+    bool _loadFromJsonl(CspCacheEntity e);
 
-    std::string m_strCacheDir;
-    std::string m_strCscHost;
-    int         m_iCscPort = 4422;
-    std::string m_strToken;
-
+    std::string m_strJsonlDir;
     std::mutex  m_mutex;
     EntityState m_entities[CACHE_COUNT];
-    bool        m_bCscReachable = false;
 };
 
 extern CCspConfigCache gclsCspConfigCache;

@@ -116,6 +116,66 @@ export interface AgentMetric {
 }
 
 // ──────────────── Package ────────────────
+export interface PackageMeta {
+  name?: string
+  version?: string
+  description?: string
+  build_date?: string
+  git_sha?: string
+  git_branch?: string
+  service?: {
+    functions?: Array<{ name: string; desc?: string }>
+    processes?: string[]
+  }
+  [key: string]: unknown
+}
+
+export interface ConfigTemplateField {
+  key: string
+  label: string
+  type: 'string' | 'int' | 'bool' | 'enum' | 'path' | 'password'
+  default?: unknown
+  help?: string
+  required?: boolean
+  restart?: boolean
+  advanced?: boolean
+  options?: string[]        // enum
+  min?: number              // int
+  max?: number              // int
+  reload_hint?: string
+}
+
+export interface ConfigTemplateSection {
+  key: string
+  title: string
+  description?: string
+  fields: ConfigTemplateField[]
+}
+
+export interface CollectionSchema {
+  primary_key?: string[]
+  id_field?: string
+  id_type?: 'uuid' | 'int' | 'string'
+  unique_keys?: string[][]
+  fields: ConfigTemplateField[]
+}
+
+export interface ConfigTemplateCollection {
+  key: string
+  title: string
+  description?: string
+  restart?: boolean
+  reload_hint?: string
+  schema: CollectionSchema
+  storage?: { kind: string; file?: string }
+}
+
+export interface ConfigTemplate {
+  version: number
+  sections: ConfigTemplateSection[]
+  collections?: ConfigTemplateCollection[]
+}
+
 export interface SipPackage {
   id: number
   name: string
@@ -126,6 +186,8 @@ export interface SipPackage {
   description: string | null
   uploaded_by: string | null
   uploaded_at: string | null
+  meta?: PackageMeta | null
+  config_template?: ConfigTemplate | null
 }
 
 export interface PackageCreateInput {
@@ -148,12 +210,15 @@ export interface Deployment {
   package_version: string | null
   instance_id: number | null
   instance_name: string | null
-  service_kind: string | null
+  process_name: string | null
+  service_functions: string[]     // machine names
   status: 'pending' | 'deploying' | 'running' | 'stopped' | 'failed' | 'removed'
   install_path: string | null
   deployed_at: string | null
   last_job_id: number | null
   note: string | null
+  config: Record<string, unknown> | null
+  config_applied_at: string | null
   create_time: string | null
 }
 
@@ -161,9 +226,17 @@ export interface DeploymentCreateInput {
   agent_id: number
   package_id: number
   instance_id?: number | null
-  service_kind?: string
+  process_name?: string
+  service_functions?: string[]
   install_path?: string
   note?: string
+}
+
+export interface DeploymentConfigView {
+  config: Record<string, unknown>
+  config_applied_at: string | null
+  template: ConfigTemplate | null
+  meta: PackageMeta | null
 }
 
 export type JobType =
@@ -203,4 +276,23 @@ export const deploymentApi = {
   deleteDeployment: (id: number) => api.delete<null>(`/deployments/${id}`),
   queueJob: (id: number, job_type: JobType, extra?: Record<string, unknown>) =>
     api.post<{ job_id: number; status: string }>(`/deployments/${id}/job`, { job_type, extra }),
+
+  // deployment config (템플릿 기반)
+  getDeploymentConfig: (id: number) =>
+    api.get<DeploymentConfigView>(`/deployments/${id}/config`),
+  putDeploymentConfig: (id: number, values: Record<string, unknown>, queue_update = true) =>
+    api.put<{ ok: boolean; job_id: number | null }>(`/deployments/${id}/config`,
+      { config: values, queue_update }),
+
+  // deployment collections (jsonl-on-target via agent sync REST)
+  getDeploymentCollection: (id: number, name: string) =>
+    api.get<{ records: Record<string, unknown>[]; schema: CollectionSchema }>(
+      `/deployments/${id}/collection/${name}`
+    ),
+  putDeploymentCollection: (id: number, name: string,
+                            records: Record<string, unknown>[], signal = true) =>
+    api.put<{ ok: boolean; count: number; signaled: number[] }>(
+      `/deployments/${id}/collection/${name}`,
+      { records, signal }
+    ),
 }

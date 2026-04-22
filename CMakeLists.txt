@@ -333,9 +333,12 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/cert/server.crt ${CMAKE_BINARY_DIR}/dist/csc/cert/
 
     # ── 6. CSC Python 소스 복사 ────────────────────────────────
+    # copy_directory 는 기존 파일을 덮어쓰지만 삭제된 소스 파일은 반영 안 됨 → 먼저 rm -rf
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/csc/src
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/src ${CMAKE_BINARY_DIR}/dist/csc/src
 
     # ── 6b. Agent 에셋 복사 (CSC 가 /install-agent.sh 로 서빙) ──
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/agent
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/agent ${CMAKE_BINARY_DIR}/dist/agent
 
     # ── 6c. 컴포넌트별 pkg.json 복사 (cims.sh pkg 가 description 에 사용) ──

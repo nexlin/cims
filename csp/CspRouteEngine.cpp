@@ -94,7 +94,7 @@ bool CCspRouteEngine::_matchOne(const RouteMatchCond& c, const CSipMessage* msg,
 
 static RouteRule _parseRule(const SimpleJson::JsonNode& row) {
     RouteRule r;
-    r.id          = (int)row.GetInt("id");
+    r.id          = CspUuidToIntId(row.GetString("id"));  // jsonl UUID → int
     r.name        = row.GetString("name");
     r.enabled     = (row.GetString("enabled") != "false" && row.GetString("enabled") != "0");
     r.priority    = (int)row.GetInt("priority", 100);

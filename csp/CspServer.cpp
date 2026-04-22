@@ -17,7 +17,13 @@
  */
 #include "CspServer.h"
 
+#include <csignal>
 #include "CallDir.h"
+
+// SIGUSR1 reload 플래그 (file-scope). 신호 핸들러는 set-only, 실제 reload 는 메인 루프에서.
+static volatile sig_atomic_t g_reloadFlag = 0;
+static void _cspReloadHandler(int) { g_reloadFlag = 1; }
+
 #include "CallMap.h"
 #include "SipMessageLogger.h"
 
@@ -76,6 +82,10 @@ int ServiceMain() {
     gclsSipLogger.SetDomainServiceMap( gclsSetup.m_mapDomainToService );
     CLog::SetCallBack( &gclsSipLogger );
     CLog::Print( LOG_SYSTEM, "CspServer is started ( version-%s %s %s )", CSP_SERVER_VERSION, __DATE__, __TIME__ );
+    if ( !gclsSetup.m_strOverlayPath.empty() ) {
+        CLog::Print( LOG_SYSTEM, "SipServerSetup: overlay %s applied (%d keys)",
+                     gclsSetup.m_strOverlayPath.c_str(), gclsSetup.m_iOverlayKeys );
+    }
     CLog::Print( LOG_DEBUG, "CspServer[%s]", CDirectory::GetProgramDirectory() );
     if ( gclsSetup.m_strCdrFolder.empty() == false ) {
         CDirectory::Create( gclsSetup.m_strCdrFolder.c_str() );
@@ -119,22 +129,17 @@ int ServiceMain() {
     CLog::Print( LOG_SYSTEM, "Loading SipServerMap..." );
     gclsSipServerMap.Load();
 
-    // CSP 런타임 설정 캐시 (로컬 파일 우선 + CSC HTTP pull 비동기 새로고침)
+    // CSP 런타임 설정 캐시 — jsonl 전용 (Phase C 이후).
+    //   agent 가 관리하는 install_path/config/*.jsonl 을 SIGUSR1 수신 시마다 재로드.
     {
-        std::string strCacheDir = gclsSetup.m_strConfigCacheDir;
-        if (!strCacheDir.empty() && strCacheDir[0] != '/') {
-            // 상대경로 → 프로그램 기동 디렉토리 기준으로 절대화
-            strCacheDir = std::string(CDirectory::GetProgramDirectory()) + "/" + strCacheDir;
+        std::string strJsonlDir = gclsSetup.m_strConfigJsonlDir;
+        if (!strJsonlDir.empty() && strJsonlDir[0] != '/') {
+            strJsonlDir = std::string(CDirectory::GetProgramDirectory()) + "/" + strJsonlDir;
         }
-        gclsCspConfigCache.Init(strCacheDir,
-                                 gclsSetup.m_strCscInternalIp,
-                                 gclsSetup.m_iCscInternalPort,
-                                 gclsSetup.m_strCscInternalToken);
+        gclsCspConfigCache.Init(strJsonlDir);
         gclsCspConfigCache.LoadInitial();
-        CLog::Print(LOG_SYSTEM,
-                    "ConfigCache initialized (csc_reachable=%s cacheDir=%s)",
-                    gclsCspConfigCache.IsCscReachable() ? "true" : "false",
-                    strCacheDir.c_str());
+        CLog::Print(LOG_SYSTEM, "ConfigCache initialized (jsonlDir=%s)",
+                    strJsonlDir.empty() ? "(none)" : strJsonlDir.c_str());
     }
 
     // [FIX] Init CMP Client before loading groups (which triggers AddGroup)
@@ -199,6 +204,10 @@ int ServiceMain() {
     }
     CLog::Print( LOG_SYSTEM, "SipServer started successfully." );
 
+    // SIGUSR1: agent 가 jsonl 쓰기 직후 보내는 reload 시그널.
+    //   핸들러에서는 플래그만 세팅, 실제 reload 는 메인 루프에서 수행.
+    signal( SIGUSR1, _cspReloadHandler );
+
     // DB 의 추가 UDP 리스너들을 psip 에 등록 (기본 리스너는 Start 에서 생성됨)
     gclsListenerManager.Sync();
 
@@ -223,6 +232,19 @@ int ServiceMain() {
     while ( gbStop == false ) {
         sleep( 1 );
         ++iSecond;
+
+        // SIGUSR1 수신 → jsonl 재로드 + 관리자 Sync()
+        if ( g_reloadFlag ) {
+            g_reloadFlag = 0;
+            CLog::Print( LOG_SYSTEM, "SIGUSR1: reloading jsonl config" );
+            gclsCspConfigCache.ReloadFromJsonl();
+            gclsListenerManager.Sync();
+            gclsTrunkManager.Sync();
+            gclsRouteEngine.Sync();
+            gclsAccessControl.Sync();
+            gclsServiceMap.Sync();
+        }
+
         if ( iSecond % 10 == 0 ) {
             gclsNonceMap.DeleteTimeout( 1000 );
 

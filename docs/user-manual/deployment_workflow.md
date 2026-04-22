@@ -1,0 +1,102 @@
+# Console 배포 작업 순서
+
+Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 표준 절차.
+
+## 0. 전제
+
+- CSC/Console 이미 구동 중
+- 관리자 계정으로 Console 로그인 (`https://<CSC>:3001`)
+
+## 1. 패키지 업로드
+
+**메뉴**: 좌측 `패키지 관리`
+
+1. `＋ 패키지 업로드` 클릭
+2. 빌드된 tarball (`<module>-<version>.tar.gz`) 을 선택 (여러 개 동시 가능)
+3. "업로드" → 완료될 때까지 대기
+4. 좌측 모듈 목록에서 업로드된 모듈이 보임 (버전 수 뱃지 표시)
+5. 버전 카드 펼치면 `config_template.json` 유무 · 크기 · SHA256 확인 가능
+
+**재업로드**: 동일 (모듈명, 버전) 업로드 시 자동으로 덮어쓰기.
+
+## 2. 서버 등록
+
+**메뉴**: 좌측 `서버 관리`
+
+1. `＋ 서버 등록` 클릭
+2. 서버 이름 입력 → `등록`
+3. 출력되는 `install-agent.sh` 명령어를 복사
+4. 대상 호스트에서 운영 계정으로 실행:
+   ```bash
+   mkdir /opt/cims-agent && cd /opt/cims-agent
+   curl -k https://<CSC>:4420/install-agent.sh | bash -s -- \
+     --csc-url https://<CSC>:4420 \
+     --enrollment-token <TOKEN> \
+     --name <이름>
+   ```
+5. Console 로 돌아오면 서버 상태가 `pending → approved → online` 으로 진행됨
+
+## 3. 모듈 추가 (Deployment 생성)
+
+**위치**: 서버 관리 → 서버 선택 → `모듈` 탭 → `＋ 모듈 추가`
+
+1. **Module** 선택 (예: `csp`)
+2. **Version** 선택 (예: `0.0.1` / 최신)
+3. **Process** 선택 — `CSP` (통합), `PSP` (PTT 전용), `ISP` (IBCF 전용) 중
+4. **Functions** 선택 — process 별로 체크박스 (`volte`, `ptt`, `ibcf`)
+5. 메모 (선택) → `추가`
+
+→ Deployment 가 `pending` 상태로 생성됨. 아직 파일 없음.
+
+## 4. 설정 입력
+
+**위치**: 해당 모듈 row → `⚙ 설정` 버튼
+
+### 4.1 scalar 설정 (탭: "설정")
+
+- `config_template.json` 의 sections 가 폼으로 렌더링
+- 🔁 재기동 필요 / ⚡ 즉시 적용 표시
+- 변경한 필드는 ● 표시
+- 저장 시 `update_config` job 큐잉
+
+### 4.2 collection 설정 (탭: "리스너" 등)
+
+- deployment 가 **install 되어 있어야** 활성화 (pending 상태에선 에러)
+- `＋ 추가` → 행 편집 → `저장`
+- 저장 시 Agent 의 jsonl 에 즉시 반영 + SIGUSR1 시그널 (CSP 가 실행 중이면 즉시 rebind)
+
+## 5. 설치 (Install)
+
+**위치**: 모듈 row → `설치` 버튼 (pending 상태에서만)
+
+- 내부적으로 `install` job 큐잉 → Agent 가 heartbeat(30s) 시 pickup
+- 완료까지 최대 ~1분. Status 가 `stopped` 로 전환
+
+## 6. 시작 (Start)
+
+**위치**: 모듈 row → `▶ Start`
+
+- `start` job → Agent 가 `install_path/cims.sh start <process>` 실행
+- 성공 시 `running`
+
+## 7. 이후 운영
+
+| 작업 | 메뉴 / 버튼 |
+|---|---|
+| 설정 변경 | ⚙ 설정 (탭 선택) |
+| 재기동 | ↻ (Restart) |
+| 중지 | ■ (Stop) |
+| 재설치 (같은 or 상위 버전) | 설치 |
+| 모듈 제거 | ✕ (Delete deployment) |
+| 서버 세션 폐기 | 서버 헤더의 "폐기" |
+| Agent 바이너리 업그레이드 | "↑ 업그레이드" |
+
+## 8. 문제 해결
+
+| 증상 | 확인 |
+|---|---|
+| Agent status 가 `approved` 에서 `online` 으로 안 바뀜 | 대상 호스트에서 `./run.sh` 실행됐는지, CSC URL 유효한지 |
+| "＋ 모듈 추가" 에서 모듈 목록이 비어있음 | 1. 패키지 업로드 먼저 |
+| 설정 저장 시 `not_installed` | 설치 버튼 먼저 눌러 deployment.install_path 생성 |
+| Collection 탭에서 `agent_proxy_failed` | Agent 가 heartbeat 보내 `sync_port` 가 DB 에 기록됐는지, 방화벽 9900 포트 |
+| `signaled:[]` 로 반환 (빈 배열) | `install_path/run/*.pid` 파일이 없음. CSP 가 pid 를 쓰도록 실행 중이어야 함 |

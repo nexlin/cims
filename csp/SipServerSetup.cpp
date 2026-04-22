@@ -19,6 +19,8 @@
 #include "SipServerSetup.h"
 
 #include <string.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -94,9 +96,6 @@ CSipServerSetup::CSipServerSetup()
       m_strCmpIp( "127.0.0.1" ),
       m_iCmpPort( 9000 ),
       m_iLocalCmpPort( 9001 ),
-      m_strCscInternalIp( "127.0.0.1" ),
-      m_iCscInternalPort( 4422 ),
-      m_strConfigCacheDir( "cache" ),
       m_bRoleCscf( true ),
       m_bRoleTas( true ),
       m_bRolePttAs( true ),
@@ -119,6 +118,51 @@ CSipServerSetup::~CSipServerSetup() {
  * @param pszFileName 설정 파일 full path
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
+// config.json overlay: flat 키 ("Setup.Sip.AuthRealm": "csp") 를 root 의 중첩 경로에 set.
+// 같은 경로가 이미 있으면 덮어씀. 템플릿 렌더링 결과가 이 형태.
+static void _setByDotPath(SimpleJson::JsonNode& parent, const std::string& dotPath,
+                          const SimpleJson::JsonNode& value) {
+    size_t pos = dotPath.find('.');
+    if (pos == std::string::npos) {
+        parent.Set(dotPath, value);
+        return;
+    }
+    std::string head = dotPath.substr(0, pos);
+    std::string rest = dotPath.substr(pos + 1);
+    SimpleJson::JsonNode sub = parent.Has(head) ? parent.Get(head) : SimpleJson::JsonNode();
+    if (sub.type != SimpleJson::JSON_OBJECT) {
+        sub = SimpleJson::JsonNode();
+        sub.type = SimpleJson::JSON_OBJECT;
+    }
+    _setByDotPath(sub, rest, value);
+    parent.Set(head, sub);
+}
+
+// install_path 기준으로 overlay 파일 경로 탐색. 시도 순서:
+//   1) CIMS_DEPLOYMENT_CONFIG 환경변수
+//   2) <csp.json 디렉토리>/../../config.json     (install_path/config.json, 배포 배치)
+//   3) (없음) — overlay 생략
+static std::string _findDeploymentConfig(const std::string& cspJsonPath) {
+    if (const char* env = getenv("CIMS_DEPLOYMENT_CONFIG")) {
+        if (*env) {
+            std::ifstream f(env);
+            if (f) return env;
+        }
+    }
+    // csp.json 경로에서 ../../config.json 유도
+    std::string dir = cspJsonPath;
+    size_t s = dir.find_last_of('/');
+    if (s != std::string::npos) dir = dir.substr(0, s);
+    // dir = install_path/csp/config  →  ../.. = install_path
+    std::string cand = dir + "/../../config.json";
+    std::ifstream f(cand);
+    if (f) {
+        // 정규화는 하지 않음 (원본 상대 경로 보존)
+        return cand;
+    }
+    return "";
+}
+
 bool CSipServerSetup::Read( const char *pszFileName ) {
     std::string strFileName = pszFileName;
     if (strFileName.substr(strFileName.find_last_of(".") + 1) == "json") {
@@ -126,9 +170,28 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
         if (!t.is_open()) return false;
         std::stringstream buffer;
         buffer << t.rdbuf();
-        
+
         SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(buffer.str());
         if (root.type != SimpleJson::JSON_OBJECT) return false;
+
+        // Deployment overlay: install_path/config.json 을 flat key → nested 로 merge.
+        // 주의: Read() 는 CLog 초기화 전에 호출되므로 여기선 로그 없이 적용만 하고,
+        //       결과는 m_strOverlayPath / m_iOverlayKeys 에 기록해 CspServer 가 나중에 출력.
+        std::string overlayPath = _findDeploymentConfig(pszFileName);
+        if (!overlayPath.empty()) {
+            std::ifstream of(overlayPath);
+            std::stringstream ob; ob << of.rdbuf();
+            SimpleJson::JsonNode over = SimpleJson::JsonNode::Parse(ob.str());
+            if (over.type == SimpleJson::JSON_OBJECT) {
+                int applied = 0;
+                for (const auto& kv : over.objects) {
+                    _setByDotPath(root, kv.first, kv.second);
+                    ++applied;
+                }
+                m_strOverlayPath = overlayPath;
+                m_iOverlayKeys   = applied;
+            }
+        }
 
         if (root.Has("Setup")) {
             SimpleJson::JsonNode setup = root.Get("Setup");
@@ -160,14 +223,34 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (rtp.Has("LocalCmpPort")) m_iLocalCmpPort = (int)rtp.GetInt("LocalCmpPort");
             }
 
-            // CSC 내부 API (런타임 설정 pull)
-            if (setup.Has("CscInternal")) {
-                SimpleJson::JsonNode ci = setup.Get("CscInternal");
-                if (ci.Has("Ip"))    m_strCscInternalIp    = ci.GetString("Ip");
-                if (ci.Has("Port"))  m_iCscInternalPort    = (int)ci.GetInt("Port");
-                if (ci.Has("Token")) m_strCscInternalToken = ci.GetString("Token");
+            if (setup.Has("ConfigJsonlDir")) m_strConfigJsonlDir = setup.GetString("ConfigJsonlDir");
+
+            // ConfigJsonlDir fallback: 설정값이 비어있거나 존재하지 않는 경로면
+            // install_path/config 로 자동 추정. install_path 는 csp.json 의 부모×3.
+            // (cspJsonPath = install_path/csp/config/csp.json, 상대/절대 모두 지원)
+            {
+                struct stat st;
+                bool exists = !m_strConfigJsonlDir.empty()
+                              && stat(m_strConfigJsonlDir.c_str(), &st) == 0
+                              && S_ISDIR(st.st_mode);
+                if (!exists) {
+                    char abs[PATH_MAX] = {0};
+                    if (realpath(pszFileName, abs) != nullptr) {
+                        std::string p = abs;
+                        for (int i = 0; i < 3; ++i) {
+                            size_t s = p.find_last_of('/');
+                            if (s == std::string::npos) { p.clear(); break; }
+                            p.erase(s);
+                        }
+                        if (!p.empty()) {
+                            std::string cand = p + "/config";
+                            if (stat(cand.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                                m_strConfigJsonlDir = cand;
+                            }
+                        }
+                    }
+                }
             }
-            if (setup.Has("ConfigCacheDir")) m_strConfigCacheDir = setup.GetString("ConfigCacheDir");
 
              if (setup.Has("Log")) {
                 SimpleJson::JsonNode log = setup.Get("Log");

@@ -945,7 +945,8 @@ cmd_pkg() {
 import sys, json, os
 meta_file, name, version, build_date, git_sha, git_branch, packaged_at, packaged_by, changelog = sys.argv[1:]
 desc = ""
-# 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "..." }
+service = None
+# 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "...", "service": {...} }
 if meta_file and os.path.isfile(meta_file):
     try:
         with open(meta_file, 'r', encoding='utf-8') as f:
@@ -954,9 +955,13 @@ if meta_file and os.path.isfile(meta_file):
             # 단일 컴포넌트 스키마
             if "description" in entry:
                 desc = entry.get("description", "")
+                if isinstance(entry.get("service"), dict):
+                    service = entry["service"]
             # 구(舊) 레지스트리 스키마 (후방 호환)
             elif name in entry and isinstance(entry[name], dict):
                 desc = entry[name].get("description", "")
+                if isinstance(entry[name].get("service"), dict):
+                    service = entry[name]["service"]
     except Exception:
         pass
 meta = {
@@ -970,13 +975,24 @@ meta = {
     "packaged_by": packaged_by,
     "changelog": changelog or "",
 }
+if service is not None:
+    meta["service"] = service
 print(json.dumps(meta, indent=2, ensure_ascii=False))
 PYEOF
+
+        # config_template.json: 소스 루트에 있으면 tarball 루트에 함께 포함
+        local tmp_tmpl="$DIST_DIR/.pkgtmpl.$$.json"
+        local tmpl_basename=".pkgtmpl.$$.json"
+        local has_template=0
+        if [[ -n "$src_root" && -f "$src_root/config_template.json" ]]; then
+            cp "$src_root/config_template.json" "$tmp_tmpl"
+            has_template=1
+        fi
 
         tar_file="$out_dir/${t}-${comp_ver}.tar.gz"
         info "패키징: $t-$comp_ver  (git=$git_sha/$git_branch)"
 
-        # tar 구성: meta.json(루트) + <component>/ + cims.sh
+        # tar 구성: meta.json(루트) + config_template.json(루트, 있을 때) + <component>/ + cims.sh
         local meta_basename=".pkgmeta.$$.json"
         # 런타임 산출물/상태 디렉토리는 배포에서 제외
         #  log/         : 서비스 로그 (csp/csc 등)
@@ -994,9 +1010,12 @@ PYEOF
                 --exclude='*.pid' --exclude='*.pyc' \
                 --exclude='__pycache__' --exclude='.cache' \
                 --transform="s|^$meta_basename\$|meta.json|" \
+                --transform="s|^$tmpl_basename\$|config_template.json|" \
                 "$meta_basename" \
+                $( [[ $has_template -eq 1 ]] && echo "$tmpl_basename" ) \
                 "$src_sub" $( [[ -f cims.sh ]] && echo cims.sh ) )
         rm -f "$tmp_meta"
+        [[ $has_template -eq 1 ]] && rm -f "$tmp_tmpl"
         local size; size=$(stat -c%s "$tar_file" 2>/dev/null || echo 0)
         ok "$(basename "$tar_file") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo "${size}B"))"
     done
