@@ -1,5 +1,6 @@
 #include "CspAddressing.h"
 #include "CspLocalNodeMap.h"
+#include "CspServiceMap.h"
 #include "SipServerSetup.h"
 
 namespace CspAddressing {
@@ -48,6 +49,19 @@ std::string GetLocalRtpAddress() {
 
 std::string GetLocalXcapAddress() {
     return gclsSetup.m_strLocalIp;
+}
+
+std::string GetServerIdentityForService(const std::string& kind) {
+    // 1) access_services 에서 kind 매칭되는 첫 enabled 서비스 조회
+    ServiceInfo svc = gclsServiceMap.GetByKind(kind);
+    if (svc.id > 0) {
+        // 1a) server_identity_uri 명시 → 그대로 반환
+        if (!svc.server_identity_uri.empty()) return svc.server_identity_uri;
+        // 1b) domain 기반 자동 조립
+        if (!svc.domain.empty()) return "sip:cspserver@" + svc.domain;
+    }
+    // 2) 서비스 매칭 실패 → primary LocalIp fallback (R5.a 동작)
+    return "sip:cspserver@" + gclsSetup.m_strLocalIp;
 }
 
 } // namespace CspAddressing

@@ -25,11 +25,12 @@ bool CCspServiceMap::Sync() {
             } else {
                 s.id = (int)row.GetInt("id");
             }
-            s.name           = row.GetString("name");
-            s.kind           = row.GetString("kind");
-            s.domain         = row.GetString("domain");
-            s.auth_realm     = row.GetString("auth_realm");
-            s.inbound_policy = row.GetString("inbound_policy", "any");
+            s.name                = row.GetString("name");
+            s.kind                = row.GetString("kind");
+            s.domain              = row.GetString("domain");
+            s.auth_realm          = row.GetString("auth_realm");
+            s.server_identity_uri = row.GetString("server_identity_uri");
+            s.inbound_policy      = row.GetString("inbound_policy", "any");
             s.priority       = (int)row.GetInt("priority", 100);
             std::string en   = row.GetString("enabled");
             s.enabled        = (en != "false" && en != "0");

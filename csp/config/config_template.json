@@ -417,6 +417,8 @@
             "help": "UE 의 IMPU/IMPI 조립에 사용. REGISTER 시 username = imsi@<domain>" },
           { "key": "auth_realm",               "label": "Auth realm", "type": "string", "default": "",
             "help": "비우면 domain 상속. Digest challenge 의 realm." },
+          { "key": "server_identity_uri",      "label": "Server Identity URI", "type": "string", "default": "",
+            "help": "CSP 가 발신하는 SIP 메시지의 From URI 로 사용 (예: sip:cspserver@ims.mnc033.mcc450.3gppnetwork.org). 비우면 sip:cspserver@<domain> 자동 조립. R6." },
           { "key": "inbound_policy",           "label": "Inbound 정책", "type": "enum",
             "options": ["any", "restricted"], "default": "any" },
           { "key": "allowed_local_node_refs",  "label": "허용 Local Node", "type": "ref_list",

@@ -21,6 +21,7 @@ struct ServiceInfo {
     std::string kind;                      // voip | ptt  (v3: ibcf/system/console 제거)
     std::string domain;
     std::string auth_realm;                // 비어있으면 domain 상속
+    std::string server_identity_uri;       // R6: CSP 발신 From URI. 비면 sip:cspserver@{domain} 자동.
     std::string inbound_policy;            // any | restricted
     int         priority = 100;
     bool        enabled = true;

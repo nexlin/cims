@@ -48,6 +48,12 @@ std::string GetLocalRtpAddress();
  *  R6 이후 access_services 의 server_identity_uri 로 확장 예정. */
 std::string GetLocalXcapAddress();
 
+/** R6: 해당 서비스(kind="volte"|"ptt")에 대한 CSP server identity URI.
+ *  access_services.server_identity_uri 가 명시되면 그것 반환.
+ *  비면 sip:cspserver@{domain} 자동 조립.
+ *  서비스 매칭 실패 시 sip:cspserver@{LocalIp} primary fallback. */
+std::string GetServerIdentityForService(const std::string& kind);
+
 } // namespace CspAddressing
 
 #endif // __CSP_ADDRESSING_H__
