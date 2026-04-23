@@ -151,6 +151,12 @@ export interface ConfigTemplateField {
   ref_collection?: string
   // object_list 용 — 중첩 객체의 필드 스키마
   item_schema?: { fields: ConfigTemplateField[] }
+  // v2 _infra: 고급 설정 토글로만 노출
+  hidden?: boolean
+  // v2 _infra: section.groups[].key 와 매칭되는 sub-group 분류
+  group?: string
+  // deploy-time 치환값 (@VAR@ 포함). UI 는 무시.
+  deploy_value?: unknown
 }
 
 export interface ConfigTemplateSection {
@@ -158,6 +164,10 @@ export interface ConfigTemplateSection {
   title: string
   description?: string
   fields: ConfigTemplateField[]
+  // v2: 섹션 전체를 고급 설정 토글로만 노출 (_infra 등)
+  hidden?: boolean
+  // v2: 섹션 내부 sub-header 정의. field.group 으로 필드 정렬.
+  groups?: { key: string; title: string; description?: string }[]
 }
 
 export interface CollectionSchema {

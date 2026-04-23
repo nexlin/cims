@@ -36,6 +36,7 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
   const [initial, setInitial]     = useState<Record<string, FieldValue>>({})
   const [appliedAt, setAppliedAt] = useState<string | null>(null)
   const [tab, setTab]             = useState<Tab>('scalar')
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   // 제목/식별자
   const title = source.type === 'deployment'
@@ -191,15 +192,23 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
             <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
               {tab === 'scalar' ? (
                 <>
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
-                    <span style={{ marginRight: 12 }}>🔁 재기동 필요 · ⚡ 즉시 적용</span>
+                  <div style={{ fontSize: 12, color: '#666', marginBottom: 12,
+                                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span>🔁 재기동 필요 · ⚡ 즉시 적용</span>
                     {appliedAt && <span>· 마지막 적용: {appliedAt}</span>}
+                    <label style={{ marginLeft: 'auto', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={showAdvanced}
+                        onChange={e => setShowAdvanced(e.target.checked)} />
+                      {' '}고급 설정 (배포/인프라)
+                    </label>
                   </div>
-                  {template.sections.map(sec => (
-                    <SectionBlock key={sec.key} section={sec} values={values}
-                      changed={changed}
-                      onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))} />
-                  ))}
+                  {template.sections
+                    .filter(sec => showAdvanced || !sec.hidden)
+                    .map(sec => (
+                      <SectionBlock key={sec.key} section={sec} values={values}
+                        changed={changed} showAdvanced={showAdvanced}
+                        onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))} />
+                    ))}
                   {restartRequired && (
                     <div style={{
                       marginTop: 12, padding: 10, background: '#fff3e0',
@@ -252,40 +261,101 @@ function TabBtn({ active, children, onClick }: {
   )
 }
 
-function SectionBlock({ section, values, changed, onChange }: {
-  section: { key: string; title: string; description?: string; fields: ConfigTemplateField[] }
+function SectionBlock({ section, values, changed, showAdvanced, onChange }: {
+  section: {
+    key: string; title: string; description?: string
+    fields: ConfigTemplateField[]
+    hidden?: boolean
+    groups?: { key: string; title: string; description?: string }[]
+  }
   values: Record<string, FieldValue>
   changed: Set<string>
+  showAdvanced: boolean
   onChange: (key: string, v: FieldValue) => void
 }) {
-  const [collapsed, setCollapsed] = useState(false)
+  // hidden section 은 기본 접힘 (pull-down 으로만 노출)
+  const [collapsed, setCollapsed] = useState(!!section.hidden)
+
+  // 가시 필드 — field.hidden 은 showAdvanced 토글로만 노출
+  const visibleFields = section.fields.filter(f => showAdvanced || !f.hidden)
+
+  // 필드를 group 단위로 묶기 — groups 정의 없으면 단일 묶음.
+  // 그룹 선언된 순서대로 정렬하고, 소속 없는 필드는 '기타' 로.
+  const groupDefs = section.groups || []
+  type Bucket = { key: string; title: string; description?: string; fields: ConfigTemplateField[] }
+  const buckets: Bucket[] = []
+  if (groupDefs.length === 0) {
+    buckets.push({ key: '__all__', title: '', fields: visibleFields })
+  } else {
+    const byKey = new Map<string, Bucket>()
+    for (const g of groupDefs) {
+      const b: Bucket = { key: g.key, title: g.title, description: g.description, fields: [] }
+      byKey.set(g.key, b); buckets.push(b)
+    }
+    const misc: Bucket = { key: '__misc__', title: '기타', fields: [] }
+    for (const f of visibleFields) {
+      const target = f.group && byKey.get(f.group)
+      if (target) target.fields.push(f)
+      else misc.fields.push(f)
+    }
+    if (misc.fields.length) buckets.push(misc)
+  }
+  const nonEmptyBuckets = buckets.filter(b => b.fields.length > 0)
+
   return (
     <div style={{
       border: '1px solid #e5e5e5', borderRadius: 6, marginBottom: 12,
       background: '#fff',
+      ...(section.hidden ? { borderStyle: 'dashed', background: '#fcfbf7' } : {}),
     }}>
       <div onClick={() => setCollapsed(c => !c)}
         style={{
           padding: '10px 14px', cursor: 'pointer', userSelect: 'none',
           display: 'flex', alignItems: 'baseline', gap: 8,
           borderBottom: collapsed ? 'none' : '1px solid #eee',
-          background: '#fafafa',
+          background: section.hidden ? '#f5efe0' : '#fafafa',
         }}>
         <span style={{ color: '#999', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
         <b>{section.title}</b>
+        {section.hidden && (
+          <span style={{
+            fontSize: 10, padding: '1px 6px', borderRadius: 3,
+            background: '#e67e22', color: '#fff',
+          }}>고급</span>
+        )}
         {section.description && (
           <span style={{ fontSize: 11, color: '#888' }}>— {section.description}</span>
         )}
       </div>
       {!collapsed && (
-        <div style={{ padding: 12, display: 'grid',
-                      gridTemplateColumns: '200px 1fr', rowGap: 10, columnGap: 10,
-                      alignItems: 'start' }}>
-          {section.fields.map(f => (
-            <FieldRow key={f.key} field={f}
-              value={values[f.key]}
-              isChanged={changed.has(f.key)}
-              onChange={v => onChange(f.key, v)} />
+        <div style={{ padding: 12 }}>
+          {nonEmptyBuckets.map((b, idx) => (
+            <div key={b.key} style={{ marginBottom: idx === nonEmptyBuckets.length - 1 ? 0 : 14 }}>
+              {b.title && (
+                <div style={{
+                  fontSize: 12, fontWeight: 600, color: '#555',
+                  borderBottom: '1px solid #eee', paddingBottom: 4, marginBottom: 8,
+                  display: 'flex', alignItems: 'baseline', gap: 6,
+                }}>
+                  <span>{b.title}</span>
+                  {b.description && (
+                    <span style={{ fontSize: 10, fontWeight: 400, color: '#888' }}>— {b.description}</span>
+                  )}
+                </div>
+              )}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '200px 1fr', rowGap: 10, columnGap: 10,
+                alignItems: 'start',
+              }}>
+                {b.fields.map(f => (
+                  <FieldRow key={f.key} field={f}
+                    value={values[f.key]}
+                    isChanged={changed.has(f.key)}
+                    onChange={v => onChange(f.key, v)} />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -300,6 +370,14 @@ function FieldRow({ field, value, isChanged, onChange }: {
   onChange: (v: FieldValue) => void
 }) {
   const needsRestart = field.restart !== false
+  const badgeStyle: React.CSSProperties = {
+    display: 'inline-block', fontSize: 10, padding: '1px 5px',
+    borderRadius: 3, marginLeft: 6, fontWeight: 500,
+    background: needsRestart ? '#fbe9e7' : '#e8f5e9',
+    color:      needsRestart ? '#c0392b' : '#1e7d34',
+    border: `1px solid ${needsRestart ? '#f5c6a7' : '#b7e0bd'}`,
+    whiteSpace: 'nowrap',
+  }
   return (
     <>
       <label style={{
@@ -307,8 +385,8 @@ function FieldRow({ field, value, isChanged, onChange }: {
         color: isChanged ? '#2980b9' : undefined,
       }}>
         <span>{field.label}</span>
-        <span style={{ marginLeft: 6 }} title={needsRestart ? '재기동 필요' : '즉시 적용'}>
-          {needsRestart ? '🔁' : '⚡'}
+        <span style={badgeStyle} title={needsRestart ? '재기동 후 반영' : '저장 즉시 반영'}>
+          {needsRestart ? '🔁 재기동' : '⚡ 즉시'}
         </span>
         {field.required && <span style={{ color: '#e74c3c', marginLeft: 4 }}>*</span>}
         {isChanged && <span style={{ marginLeft: 6, color: '#2980b9', fontSize: 11 }}>●</span>}
