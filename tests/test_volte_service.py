@@ -62,7 +62,7 @@ def run_volte_tests():
             "-server_ip", CSP_IP, "-count", "1",
             "-user", VOIP_USER1, "-auth_id", VOIP_AUTH1,
             "-domain", VOIP_DOMAIN, "-password", VOIP_PW,
-            "-mode", "voip", "-scenario", "register", "-call_duration", "2",
+            "-mode", "volte", "-scenario", "register", "-call_duration", "2",
         ], timeout=15)
         s = _parse_stats(out)
         return s.get("RegOk", 0) >= 1, f"stats={s}"
@@ -73,7 +73,7 @@ def run_volte_tests():
             "-server_ip", CSP_IP, "-count", "1",
             "-user", VOIP_USER1, "-auth_id", VOIP_AUTH1,
             "-domain", VOIP_DOMAIN, "-password", "wrongpw",
-            "-mode", "voip", "-scenario", "register", "-call_duration", "2",
+            "-mode", "volte", "-scenario", "register", "-call_duration", "2",
         ], timeout=15)
         s = _parse_stats(out)
         return s.get("RegOk", 0) == 0, f"stats={s}"
@@ -96,7 +96,7 @@ def run_volte_tests():
             "-server_ip", CSP_IP, "-count", "2",
             "-user", VOIP_USER1, "-auth_id", VOIP_AUTH1,
             "-domain", VOIP_DOMAIN, "-password", VOIP_PW,
-            "-mode", "voip", "-scenario", "call", "-call_duration", "10",
+            "-mode", "volte", "-scenario", "call", "-call_duration", "10",
             "-media_file", AUDIO_FILE, "-video_file", VIDEO_FILE,
         ], timeout=35)
         s = _parse_stats(out)
@@ -151,7 +151,7 @@ def run_volte_tests():
             "-server_ip", CSP_IP, "-count", "2",
             "-user", VOIP_USER1, "-auth_id", VOIP_AUTH1,
             "-domain", VOIP_DOMAIN, "-password", VOIP_PW,
-            "-mode", "voip", "-scenario", "call", "-call_duration", "10",
+            "-mode", "volte", "-scenario", "call", "-call_duration", "10",
             "-media_file", AUDIO_FILE, "-video_file", VIDEO_FILE,
         ]
         proc = sp.Popen(cmd, stdin=sp.DEVNULL, stdout=sp.PIPE, stderr=sp.STDOUT, text=True,

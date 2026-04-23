@@ -140,7 +140,7 @@ def run_media_tests():
             "-server_ip", CSP_IP, "-count", "2",
             "-user", VOIP_USER1, "-auth_id", VOIP_AUTH1,
             "-domain", VOIP_DOMAIN, "-password", VOIP_PW,
-            "-mode", "voip", "-scenario", "call", "-call_duration", "3",
+            "-mode", "volte", "-scenario", "call", "-call_duration", "3",
             "-media_file", AMRWB_FILE,
         ], timeout=20)
         s = _parse_stats(out)

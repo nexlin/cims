@@ -57,7 +57,7 @@ step3_start() {
 step4_voip_voice_1() {
     echo "=== STEP 4: VoLTE 음성 #1 (60s) ==="
     cd "$DIST/cspsim"
-    $SIM -server_ip $SERVER -mode voip -scenario call -count 2 -call_duration 60 \
+    $SIM -server_ip $SERVER -mode volte -scenario call -count 2 -call_duration 60 \
         $MEDIA -no_video $DB
 }
 
@@ -67,7 +67,7 @@ step4_voip_voice_1() {
 step5_voip_voice_2() {
     echo "=== STEP 5: VoLTE 음성 #2 (60s) ==="
     cd "$DIST/cspsim"
-    $SIM -server_ip $SERVER -mode voip -scenario call -count 2 -call_duration 60 \
+    $SIM -server_ip $SERVER -mode volte -scenario call -count 2 -call_duration 60 \
         $MEDIA -no_video $DB
 }
 
@@ -77,7 +77,7 @@ step5_voip_voice_2() {
 step6_voip_video_1() {
     echo "=== STEP 6: VoLTE 영상 #1 (60s) ==="
     cd "$DIST/cspsim"
-    $SIM -server_ip $SERVER -mode voip -scenario call -count 2 -call_duration 60 \
+    $SIM -server_ip $SERVER -mode volte -scenario call -count 2 -call_duration 60 \
         $MEDIA $DB
 }
 
@@ -87,7 +87,7 @@ step6_voip_video_1() {
 step7_voip_video_2() {
     echo "=== STEP 7: VoLTE 영상 #2 (60s) ==="
     cd "$DIST/cspsim"
-    $SIM -server_ip $SERVER -mode voip -scenario call -count 2 -call_duration 60 \
+    $SIM -server_ip $SERVER -mode volte -scenario call -count 2 -call_duration 60 \
         $MEDIA $DB
 }
 

@@ -120,7 +120,7 @@ def run_csp_tests():
             "-user", "+821357007002",
             "-auth_id", "450033100000002@" + VOIP_DOMAIN,
             "-domain", VOIP_DOMAIN,
-            "-password", "123456", "-mode", "voip",
+            "-password", "123456", "-mode", "volte",
             "-scenario", "register", "-call_duration", "2",
         ], timeout=15)
         s = _parse_stats(out)
@@ -227,7 +227,7 @@ def run_csp_tests():
             "-user", "+821357007002",
             "-auth_id", "450033100000002@" + VOIP_DOMAIN,
             "-domain", VOIP_DOMAIN,
-            "-password", "123456", "-mode", "voip",
+            "-password", "123456", "-mode", "volte",
             "-scenario", "call", "-call_duration", "3",
         ], timeout=25)
         s = _parse_stats(out)

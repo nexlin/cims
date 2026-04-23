@@ -904,7 +904,7 @@ PY
         warn "volte_subscriptions 에 유효 가입자 없음 — VoIP 시나리오 스킵"
         echo "(VoIP 가입자 없음 — 스킵)" >> "$report"
     else
-        local voip_args=(-no-db -mode voip -scenario call -count 2 -duration 5 -ip "$sim_ip"
+        local voip_args=(-no-db -mode volte -scenario call -count 2 -duration 5 -ip "$sim_ip"
                          -user "$VOIP_USER" -domain "$VOIP_DOM" -password "$VOIP_PWD")
         [[ -n $VOIP_AUTH ]] && voip_args+=(-auth_id "$VOIP_AUTH")
         cmd_sim "${voip_args[@]}" 2>&1 | tail -30 | tee -a "$report" || true
@@ -960,7 +960,7 @@ PY
 # ── cspsim ─────────────────────────────────────────────────────
 cmd_sim() {
     local orig_dir="$PWD"
-    local mode="voip" scenario="call" count="" use_db=true
+    local mode="volte" scenario="call" count="" use_db=true
     local user="" domain="" password="" group=""
     local server_ip; server_ip=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csp/config/csp.json')); print(d['Setup']['Sip']['LocalIp'])" 2>/dev/null || echo "127.0.0.1")
     local duration=10
@@ -1017,6 +1017,27 @@ cur=c.cursor(); cur.execute('SELECT id FROM ptt_groups ORDER BY id LIMIT 1')
 r=cur.fetchone(); print(r[0] if r else ''); c.close()
 " 2>/dev/null || true)
             [[ -n "$group" ]] && info "PTT 그룹 자동 감지: $group"
+        fi
+
+        # DB 모드 + domain 미지정: access_services.jsonl 에서 mode(volte|ptt) 매칭 domain 자동 추출.
+        # cspsim 이 DB 가입자 imsi + 이 domain 을 결합해 IMPI(auth_id) 조립.
+        local as_file="$DIST_DIR/config/access_services.jsonl"
+        if [[ -z "$domain" && -f "$as_file" ]]; then
+            domain=$(python3 -c "
+import json, sys
+best = None
+for line in open('$as_file'):
+    line = line.strip()
+    if not line: continue
+    try: r = json.loads(line)
+    except: continue
+    if r.get('kind') != '$mode': continue
+    if r.get('enabled') is False: continue
+    if best is None or int(r.get('priority', 100)) < int(best.get('priority', 100)):
+        best = r
+print(best.get('domain','') if best else '')
+" 2>/dev/null || true)
+            [[ -n "$domain" ]] && info "Domain 자동 감지 (kind=$mode): $domain"
         fi
     fi
     group="${group:-1000}"
@@ -1164,7 +1185,7 @@ ${BOLD}3단계 분리: 빌드 → 시험환경 설정 → 패키지화${NC}
 
 ${BOLD}시뮬레이터:${NC}
   sim [options]
-    -mode     voip|ptt
+    -mode     volte|ptt
     -scenario register|call|group_call|full
     -count    N       (미지정 시 DB 가입자 전체)
     -group    ID      (PTT 그룹 ID, 미지정 시 DB 첫 번째 그룹)
@@ -1221,7 +1242,7 @@ ${BOLD}예시:${NC}
   $(basename "$0") clean                                  # 데이터 정리
   $(basename "$0") sim -mode ptt -group +82571910001      # 영상 PTT 포그라운드
   $(basename "$0") sim -mode ptt -group +82571910001 --bg # 영상 PTT 백그라운드
-  $(basename "$0") sim -mode voip --bg                    # VoIP 동시 실행
+  $(basename "$0") sim -mode volte --bg                   # VoLTE 동시 실행
 
   $(basename "$0") stop all
   $(basename "$0") status
