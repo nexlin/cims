@@ -67,25 +67,30 @@
       ]
     },
     {
-      "key": "roles",
-      "title": "역할 (Roles)",
-      "description": "활성화할 IMS 서버 역할. AccessService 와 무관하게 전역 스위치.",
+      "key": "functions",
+      "title": "기능 (Functions)",
+      "description": "활성화할 IMS 서버 기능. AccessService 와 무관하게 전역 스위치.",
       "fields": [
         { "key": "Setup.Roles.CSCF",   "label": "CSCF (가입자 등록/인증)", "type": "bool", "default": true,  "restart": true },
-        { "key": "Setup.Roles.TAS",    "label": "TAS (VoIP B2BUA)",        "type": "bool", "default": true,  "restart": true },
+        { "key": "Setup.Roles.TAS",    "label": "TAS (VoLTE B2BUA)",       "type": "bool", "default": true,  "restart": true },
         { "key": "Setup.Roles.PTT_AS", "label": "PTT-AS (그룹콜)",         "type": "bool", "default": true,  "restart": true },
         { "key": "Setup.Roles.IBCF",   "label": "IBCF (IMS 피어링)",       "type": "bool", "default": false, "restart": true }
       ]
     },
     {
-      "key": "rtp_relay",
-      "title": "RTP Relay (CMP 연동)",
-      "description": "미디어 릴레이용 CMP 연동 정보",
+      "key": "media_server",
+      "title": "미디어서버 연동",
+      "description": "VoLTE/PTT 미디어 relay 및 녹취를 담당하는 미디어서버(CMP) 연동 설정.",
       "fields": [
-        { "key": "Setup.RtpRelay.UseRtpRelay", "label": "RTP Relay 사용", "type": "bool",   "default": true,  "restart": true },
-        { "key": "Setup.RtpRelay.CmpIp",       "label": "CMP IP",         "type": "string", "default": "127.0.0.1", "deploy_value": "@CMP_IP@", "restart": true },
-        { "key": "Setup.RtpRelay.CmpPort",     "label": "CMP 제어 포트",  "type": "int",    "default": 9000, "min": 1, "max": 65535, "restart": true },
-        { "key": "Setup.RtpRelay.LocalCmpPort","label": "Local 수신 포트","type": "int",    "default": 9001, "min": 1, "max": 65535, "restart": true }
+        { "key": "Setup.MediaServer.Enable",       "label": "미디어서버 사용",     "type": "bool",   "default": true,  "restart": true },
+        { "key": "Setup.MediaServer.Host",         "label": "미디어서버 주소",     "type": "string", "default": "127.0.0.1", "deploy_value": "@CMP_IP@", "restart": true,
+          "help": "미디어서버(CMP)의 IP 또는 호스트명." },
+        { "key": "Setup.MediaServer.ControlPort",  "label": "제어 포트",           "type": "int",    "default": 9000, "min": 1, "max": 65535, "restart": true,
+          "help": "미디어서버의 JSON-over-UDP 제어 수신 포트." },
+        { "key": "Setup.MediaServer.LocalPort",    "label": "Local 수신 포트",     "type": "int",    "default": 9001, "min": 1, "max": 65535, "restart": true,
+          "help": "CSP 가 미디어서버 응답을 받을 로컬 포트." },
+        { "key": "Setup.MediaServer.LocalIp",      "label": "Local 수신 IP",       "type": "string", "default": "0.0.0.0", "deploy_value": "@CSP_IP@", "restart": true,
+          "help": "CSP 가 미디어서버 응답을 받을 로컬 bind IP. 0.0.0.0 이면 모든 인터페이스." }
       ]
     },
     {
@@ -115,39 +120,44 @@
     {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
-      "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움. 모든 필드는 hidden: true.",
+      "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움. 모든 필드는 hidden: true. UI 렌더링 시 group 속성으로 sub-header 분류.",
       "hidden": true,
+      "groups": [
+        { "key": "sip_fallback",    "title": "SIP 엔드포인트 (fallback)" },
+        { "key": "data_folder",     "title": "레거시 데이터 폴더" },
+        { "key": "service_logging", "title": "서비스 로깅" },
+        { "key": "monitor",         "title": "Monitor API" },
+        { "key": "security",        "title": "보안" }
+      ],
       "fields": [
-        { "key": "Setup.Sip.LocalIp",           "label": "Local IP (fallback)",        "type": "string",     "default": "0.0.0.0",  "deploy_value": "@CSP_IP@", "hidden": true, "restart": true,
+        { "key": "Setup.Sip.LocalIp",           "label": "Local IP (fallback)",        "group": "sip_fallback",    "type": "string",     "default": "0.0.0.0",  "deploy_value": "@CSP_IP@", "hidden": true, "restart": true,
           "help": "primary local_node 가 없을 때 fallback. 정상 경로는 local_nodes 의 primary 항목에서 자동 주입." },
-        { "key": "Setup.Sip.UdpPort",           "label": "UDP Port (fallback)",        "type": "int",        "default": 5060, "min": 1, "max": 65535, "hidden": true, "restart": true,
-          "help": "primary local_node 가 없을 때 fallback. 정상 경로는 local_nodes 의 primary 항목에서 자동 주입." },
-        { "key": "Setup.Sip.TcpPort",           "label": "TCP Port (fallback)",        "type": "int",        "default": 25061,      "hidden": true, "restart": true,
+        { "key": "Setup.Sip.UdpPort",           "label": "UDP Port (fallback)",        "group": "sip_fallback",    "type": "int",        "default": 5060, "min": 1, "max": 65535, "hidden": true, "restart": true,
+          "help": "primary local_node 가 없을 때 fallback." },
+        { "key": "Setup.Sip.TcpPort",           "label": "TCP Port (fallback)",        "group": "sip_fallback",    "type": "int",        "default": 25061,      "hidden": true, "restart": true,
           "help": "primary local_node TCP 가 없을 때 fallback." },
-        { "key": "Setup.Sip.TcpThreadCount",    "label": "TCP 수신 스레드",            "type": "int",        "default": 2,          "hidden": true, "restart": true },
-        { "key": "Setup.Sip.TcpRecvTimeout",    "label": "TCP 수신 timeout (s)",       "type": "int",        "default": 600,        "hidden": true, "restart": true },
-        { "key": "Setup.Sip.TlsPort",           "label": "TLS Port (fallback)",        "type": "int",        "default": 5061,       "hidden": true, "restart": true,
+        { "key": "Setup.Sip.TcpThreadCount",    "label": "TCP 수신 스레드",            "group": "sip_fallback",    "type": "int",        "default": 2,          "hidden": true, "restart": true },
+        { "key": "Setup.Sip.TcpRecvTimeout",    "label": "TCP 수신 timeout (s)",       "group": "sip_fallback",    "type": "int",        "default": 600,        "hidden": true, "restart": true },
+        { "key": "Setup.Sip.TlsPort",           "label": "TLS Port (fallback)",        "group": "sip_fallback",    "type": "int",        "default": 5061,       "hidden": true, "restart": true,
           "help": "primary local_node TLS 가 없을 때 fallback." },
-        { "key": "Setup.Sip.TlsAcceptTimeout",  "label": "TLS accept timeout (s)",     "type": "int",        "default": 10,         "hidden": true, "restart": true },
-        { "key": "Setup.Sip.CertFile",          "label": "TLS 인증서 파일 (fallback)", "type": "path",       "default": "cert/csp.pem", "hidden": true, "restart": true,
+        { "key": "Setup.Sip.TlsAcceptTimeout",  "label": "TLS accept timeout (s)",     "group": "sip_fallback",    "type": "int",        "default": 10,         "hidden": true, "restart": true },
+        { "key": "Setup.Sip.CertFile",          "label": "TLS 인증서 파일 (fallback)", "group": "sip_fallback",    "type": "path",       "default": "cert/csp.pem", "hidden": true, "restart": true,
           "help": "local_node 에 tls_cert_path 미지정 시 stack-global 용." },
 
-        { "key": "Setup.RtpRelay.LocalCmpIp",   "label": "CMP 수신용 Local IP",        "type": "string",     "default": "0.0.0.0",  "deploy_value": "@CSP_IP@", "hidden": true, "restart": true },
-
-        { "key": "Setup.DataFolder.User",       "label": "User 데이터 폴더 (legacy)",  "type": "path",       "default": "user",     "hidden": true, "restart": true,
+        { "key": "Setup.DataFolder.User",       "label": "User 데이터 폴더 (legacy)",  "group": "data_folder",     "type": "path",       "default": "user",     "hidden": true, "restart": true,
           "help": "DB 가 SOT. 이 폴더는 DB 미연결 시 fallback." },
-        { "key": "Setup.DataFolder.Group",      "label": "Group 데이터 폴더 (legacy)", "type": "path",       "default": "group",    "hidden": true, "restart": true,
+        { "key": "Setup.DataFolder.Group",      "label": "Group 데이터 폴더 (legacy)", "group": "data_folder",     "type": "path",       "default": "group",    "hidden": true, "restart": true,
           "help": "DB 가 SOT. 이 폴더는 DB 미연결 시 fallback." },
 
-        { "key": "Setup.ServiceLogging.Dir",    "label": "서비스 로그 루트",           "type": "path",       "default": "service_log", "deploy_value": "@SERVICE_LOG_DIR@", "hidden": true, "restart": true,
-          "help": "녹취(call.d/*.rtp) + SIP/CMP/CSC msg.jsonl + flow.jsonl 저장 루트." },
-        { "key": "Setup.ServiceLogging.Enable", "label": "서비스 로그 인터페이스",     "type": "string_list","default": ["sip", "cmp", "csc"], "hidden": true, "restart": true },
-        { "key": "Setup.ServiceLogging.Recording","label": "녹취 활성화",              "type": "bool",       "default": true,       "hidden": true, "restart": true },
+        { "key": "Setup.ServiceLogging.Dir",    "label": "서비스 로그 루트",           "group": "service_logging", "type": "path",       "default": "service_log", "deploy_value": "@SERVICE_LOG_DIR@", "hidden": true, "restart": true,
+          "help": "녹취(call.d/*.rtp) + SIP/미디어서버/CSC msg.jsonl + flow.jsonl 저장 루트." },
+        { "key": "Setup.ServiceLogging.Enable", "label": "서비스 로그 인터페이스",     "group": "service_logging", "type": "string_list","default": ["sip", "cmp", "csc"], "hidden": true, "restart": true },
+        { "key": "Setup.ServiceLogging.Recording","label": "녹취 활성화",              "group": "service_logging", "type": "bool",       "default": true,       "hidden": true, "restart": true },
 
-        { "key": "Setup.Monitor.Port",          "label": "Monitor API Port",           "type": "int",        "default": 16000,      "hidden": true, "restart": true },
-        { "key": "Setup.Monitor.ClientIpList",  "label": "Monitor 접근 허용 IP",       "type": "string_list","default": ["127.0.0.1"], "deploy_value": ["@CSP_IP@"], "hidden": true, "restart": true },
+        { "key": "Setup.Monitor.Port",          "label": "Monitor API Port",           "group": "monitor",         "type": "int",        "default": 16000,      "hidden": true, "restart": true },
+        { "key": "Setup.Monitor.ClientIpList",  "label": "Monitor 접근 허용 IP",       "group": "monitor",         "type": "string_list","default": ["127.0.0.1"], "deploy_value": ["@CSP_IP@"], "hidden": true, "restart": true },
 
-        { "key": "Setup.Security.DenySipUserAgentList", "label": "차단 User-Agent 목록", "type": "string_list", "default": ["friendly-scanner", "sundayddr"], "hidden": true, "restart": false,
+        { "key": "Setup.Security.DenySipUserAgentList", "label": "차단 User-Agent 목록", "group": "security",      "type": "string_list", "default": ["friendly-scanner", "sundayddr"], "hidden": true, "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 다음 request 부터 적용." }
       ]
     }

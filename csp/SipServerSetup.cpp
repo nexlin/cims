@@ -215,11 +215,20 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (sip.Has("SendOptionsPeriod")) m_iSendOptionsPeriod = (int)sip.GetInt("SendOptionsPeriod");
             }
 
-            if (setup.Has("RtpRelay")) {
+            // 미디어서버 연동 설정 (2026-04-23 rename: RtpRelay → MediaServer).
+            //   신규 key 를 우선 파싱, 기존 RtpRelay 는 배포된 csp.json 호환을 위해 fallback.
+            if (setup.Has("MediaServer")) {
+                SimpleJson::JsonNode ms = setup.Get("MediaServer");
+                if (ms.Has("Enable"))       m_bUseRtpRelay  = (ms.Get("Enable").AsString() == "true");
+                if (ms.Has("Host"))         m_strCmpIp      = ms.GetString("Host");
+                if (ms.Has("ControlPort"))  m_iCmpPort      = (int)ms.GetInt("ControlPort");
+                if (ms.Has("LocalPort"))    m_iLocalCmpPort = (int)ms.GetInt("LocalPort");
+                // LocalIp 는 현재 C++ 바인딩 없음 (렌더링 용도). 추후 CmpClient bind 확장 시 연결.
+            } else if (setup.Has("RtpRelay")) {
                 SimpleJson::JsonNode rtp = setup.Get("RtpRelay");
-                if (rtp.Has("UseRtpRelay")) m_bUseRtpRelay = (rtp.Get("UseRtpRelay").AsString() == "true");
-                if (rtp.Has("CmpIp")) m_strCmpIp = rtp.GetString("CmpIp");
-                if (rtp.Has("CmpPort")) m_iCmpPort = (int)rtp.GetInt("CmpPort");
+                if (rtp.Has("UseRtpRelay"))  m_bUseRtpRelay  = (rtp.Get("UseRtpRelay").AsString() == "true");
+                if (rtp.Has("CmpIp"))        m_strCmpIp      = rtp.GetString("CmpIp");
+                if (rtp.Has("CmpPort"))      m_iCmpPort      = (int)rtp.GetInt("CmpPort");
                 if (rtp.Has("LocalCmpPort")) m_iLocalCmpPort = (int)rtp.GetInt("LocalCmpPort");
             }
 
