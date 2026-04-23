@@ -38,6 +38,7 @@ CCallDir gclsCallDir;
 #include "CspRouteMap.h"
 #include "CspRouteSetMap.h"
 #include "CspRoutingPolicyEngine.h"
+#include "CspPendingRouteMap.h"
 #include "CspRuleEvaluator.h"
 #include "CspServiceMap.h"
 #include "DbManager.h"
@@ -151,6 +152,10 @@ int ServiceMain() {
     }
     clsSetup.m_iLocalUdpPort = gclsSetup.m_iUdpPort;
     clsSetup.m_iUdpThreadCount = gclsSetup.m_iUdpThreadCount;
+    // G9 TODO (2026-04-23): TCP/TLS primary 도 R1 의 UDP 처럼 local_nodes 에서 protocol 별 자동 주입되도록
+    //   CspLocalNodeMap::GetPrimary(protocol) 확장 필요. 현재는 _infra Setup.Sip.TcpPort/TlsPort 값 직접 사용.
+    //   local_nodes 에 동일 TCP/TLS 리스너 추가 시 ListenerManager 가 "already bound by bootstrap — skip" 로 중복 회피.
+    //   Phase 2 배포 전 대형 리팩토링 항목. 현재는 UDP primary 로 대부분 커버되므로 기능 영향 없음.
     clsSetup.m_iLocalTcpPort = gclsSetup.m_iTcpPort;
     clsSetup.m_iTcpThreadCount = gclsSetup.m_iTcpThreadCount;
     clsSetup.m_iTcpCallBackThreadCount = gclsSetup.m_iTcpCallBackThreadCount;
@@ -314,6 +319,13 @@ int ServiceMain() {
         if ( iSecond % 30 == 0 && gclsSetup.m_iStaleCallTimeout > 0 ) {
             gclsCallMap.DeleteTimeout( gclsSetup.m_iStaleCallTimeout );
             gclsTransCallMap.DeleteTimeout( gclsSetup.m_iStaleCallTimeout );
+        }
+        // PendingRouteMap — RecvRequest 저장분 중 EventIncomingCall 까지 도달 못한 고아 항목 정리 (30s)
+        if ( iSecond % 30 == 0 ) {
+            size_t nRemoved = gclsPendingRouteMap.CleanupExpired( std::chrono::seconds(30) );
+            if ( nRemoved > 0 ) {
+                CLog::Print( LOG_INFO, "PendingRouteMap: cleaned %zu expired entries", nRemoved );
+            }
         }
         if ( iSecond % 60 == 0 ) {
             gclsSipServerMap.Load();

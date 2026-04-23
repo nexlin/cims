@@ -20,6 +20,7 @@
 #include "CspRemoteNodeMap.h"
 #include "CspRouteMap.h"
 #include "CspRoutingPolicyEngine.h"
+#include "CspPendingRouteMap.h"
 #include "CspServiceMap.h"
 #include "SipMessageLogger.h"
 #include "CspServer.h"
@@ -281,22 +282,27 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
                 return true;
             }
             if (rd.type == ROUTING_ROUTE_SET) {
-                // R8 (2026-04-23): picked_route → RouteConfig → RemoteNode → Route header 주입.
-                //   이후 return false 로 UserAgent(B2BUA) 에 넘기면 Route 를 따라 outbound forward.
+                // G1 (2026-04-23): picked_route → RouteConfig → RemoteNode 정보를 PendingRouteMap 에
+                //   Call-ID 로 저장. CSipUserAgent 가 dialog 를 만들어 EventIncomingCall 을 호출하면
+                //   거기서 Take() 로 꺼내 B2BUA B-leg peer 로 사용한다.
+                //   (직전 구현의 AddRoute()→return false 경로는 B-leg 메시지에 carry-over 되지 않아 무효였음.)
                 RouteConfig rc = gclsRouteMap.GetByName(rd.picked_route);
                 if (rc.IsValid()) {
                     RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName(rc.remote_node_ref);
                     if (rn.IsValid() && !rn.ip.empty() && rn.port > 0) {
-                        ESipTransport eT = E_SIP_UDP;
-                        if      (rn.protocol == "TCP") eT = E_SIP_TCP;
-                        else if (rn.protocol == "TLS") eT = E_SIP_TLS;
-                        pclsMessage->AddRoute(rn.ip.c_str(), rn.port, eT);
+                        PendingRouteEntry pe;
+                        pe.remote_ip   = rn.ip;
+                        pe.remote_port = rn.port;
+                        pe.protocol    = rn.protocol;
+                        pe.route_name  = rd.picked_route;
+                        pe.route_set   = rd.target_name;
+                        pe.policy_name = rd.matched_policy;
+                        gclsPendingRouteMap.Insert(strCallId, pe);
                         CLog::Print(LOG_SYSTEM,
-                            "RoutingPolicyEngine: policy='%s' route_set='%s' picked_route='%s' → RemoteNode %s (%s:%d %s)",
+                            "RoutingPolicyEngine: policy='%s' route_set='%s' picked_route='%s' → RemoteNode %s (%s:%d %s) [pending callId=%s]",
                             rd.matched_policy.c_str(), rd.target_name.c_str(), rd.picked_route.c_str(),
-                            rn.name.c_str(), rn.ip.c_str(), rn.port, rn.protocol.c_str());
-                        // return false → CSipUserAgent B2BUA forward. Route header 가 outbound 결정.
-                        return false;
+                            rn.name.c_str(), rn.ip.c_str(), rn.port, rn.protocol.c_str(),
+                            strCallId.c_str());
                     } else {
                         CLog::Print(LOG_ERROR,
                             "RoutingPolicyEngine: picked_route='%s' remote_node_ref='%s' 조회 실패 — legacy fallback",
@@ -307,9 +313,8 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
                         "RoutingPolicyEngine: picked_route='%s' Route 조회 실패 — legacy fallback",
                         rd.picked_route.c_str());
                 }
-            }
-            if (rd.type == ROUTING_ACCESS_SERVICE) {
-                // R8: access_service target 은 UE 에게 라우팅 (TAS/B2BUA 레거시 경로가 이미 처리).
+            } else if (rd.type == ROUTING_ACCESS_SERVICE) {
+                // ACCESS_SERVICE target 은 UE 에게 라우팅 (TAS/B2BUA 레거시 경로가 처리).
                 //   명시적 분기 없이 legacy TAS 판단 로직(DND/reject)으로 진행 → 로그만.
                 CLog::Print(LOG_INFO,
                     "RoutingPolicyEngine: match policy='%s' access_service='%s' (legacy TAS path)",
@@ -458,7 +463,38 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
             return StopCall(pszCallId, SIP_FORBIDDEN);
     }
 
-    if (gclsCspUserMap.isAlive(pszTo, clsUser) == false) {
+    // G1 (2026-04-23): Routing policy 결정 (RecvRequest 에서 PendingRouteMap 에 넣어둔 것) 을 먼저 소비.
+    //   있으면 callee 가 내부 가입자여도 외부 peer 로 B2BUA forward (Routing policy 가 우선).
+    //   없으면 아래 내부 가입자 경로 (PTT 그룹 / legacy IBCF / TAS) 로 진행.
+    //   Route 의 auth_user/password 는 Route map 재조회로 보강 (RemoteNode 에는 auth 정보 없음).
+    bool v3Routed = false;
+    {
+        PendingRouteEntry pe;
+        std::string strCallIdKey = pszCallId ? pszCallId : "";
+        if (!strCallIdKey.empty() && gclsPendingRouteMap.Take(strCallIdKey, pe)) {
+            RouteConfig rc = gclsRouteMap.GetByName(pe.route_name);
+            if (!rc.auth_user.empty()) {
+                clsUser.m_strId       = rc.auth_user;
+                clsUser.m_strPassWord = rc.auth_password;
+                pszFrom               = clsUser.m_strId.c_str();
+            }
+            clsUserInfo.m_strIp   = pe.remote_ip;
+            clsUserInfo.m_iPort   = pe.remote_port;
+            clsUserInfo.m_eTransport =
+                (pe.protocol == "TCP") ? E_SIP_TCP :
+                (pe.protocol == "TLS") ? E_SIP_TLS : E_SIP_UDP;
+            bRoutePrefix = true;
+            SetCallOwner(pszCallId, &m_clsIbcf);
+            v3Routed = true;
+            CLog::Print(LOG_SYSTEM,
+                "RoutingPolicyEngine: outbound via route_set='%s' route='%s' policy='%s' → %s:%d/%s [callId=%s]",
+                pe.route_set.c_str(), pe.route_name.c_str(), pe.policy_name.c_str(),
+                pe.remote_ip.c_str(), pe.remote_port, pe.protocol.c_str(),
+                pszCallId ? pszCallId : "");
+        }
+    }
+
+    if (!v3Routed && gclsCspUserMap.isAlive(pszTo, clsUser) == false) {
         CspPttGroup clsGroup;
         if (m_clsPttAs.IsEnabled() && gclsGroupMap.Select(pszTo, clsGroup)) {
             CSipCallRoute clsRouteTemp;
@@ -469,58 +505,9 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
             }
         }
 
-        // v3 (2026-04-22): RoutingPolicyEngine → RouteSet.SelectRoute → RemoteNode outbound.
-        //   IBCF 역할 enabled 인 경우만 시도 (역할 off 면 legacy 경로 skip).
-        bool v3Routed = false;
-        if (m_clsIbcf.IsEnabled()) {
-            MessageCtx mctx;
-            mctx.from_uri_user = pszFrom;
-            mctx.to_uri_user   = pszTo;
-            if (pclsMessage) {
-                mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
-                mctx.to_uri_host   = pclsMessage->m_clsTo.m_clsUri.m_strHost;
-                mctx.req_uri_user  = pclsMessage->m_clsReqUri.m_strUser;
-                mctx.req_uri_host  = pclsMessage->m_clsReqUri.m_strHost;
-                mctx.src_ip        = pclsMessage->m_strClientIp;
-                mctx.user_agent    = pclsMessage->m_strUserAgent;
-                mctx.method        = pclsMessage->m_strSipMethod;
-            }
-            std::string hashKey = std::string(pszFrom ? pszFrom : "");
-            RoutingDecision rd = gclsRoutingPolicyEngine.Decide(mctx, hashKey);
-            if (rd.type == ROUTING_ROUTE_SET && !rd.picked_route.empty()) {
-                RouteConfig rc = gclsRouteMap.GetByName(rd.picked_route);
-                RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName(rc.remote_node_ref);
-                if (!rc.name.empty() && rn.IsValid() && !rn.ip.empty()) {
-                    clsUser.m_strId       = rc.auth_user;
-                    clsUser.m_strPassWord = rc.auth_password;
-                    clsUserInfo.m_strIp   = rn.ip;
-                    clsUserInfo.m_iPort   = rn.port;
-                    clsUserInfo.m_eTransport =
-                        (rn.protocol == "TCP") ? E_SIP_TCP :
-                        (rn.protocol == "TLS") ? E_SIP_TLS : E_SIP_UDP;
-                    // pszTo 유지 — 피어에 전달할 R-URI user.
-                    // pszFrom 은 auth_user 가 있으면 바꾸고, 없으면 원본 유지.
-                    if (!rc.auth_user.empty()) pszFrom = clsUser.m_strId.c_str();
-                    bRoutePrefix = true;
-                    SetCallOwner(pszCallId, &m_clsIbcf);
-                    v3Routed = true;
-                    CLog::Print(LOG_INFO,
-                        "RoutingPolicyEngine: outbound via route_set='%s' route='%s' → %s:%d/%s",
-                        rd.target_name.c_str(), rd.picked_route.c_str(),
-                        rn.ip.c_str(), rn.port, rn.protocol.c_str());
-                }
-            } else if (rd.type == ROUTING_REJECT) {
-                CLog::Print(LOG_INFO, "RoutingPolicyEngine: reject policy='%s' reason='%s'",
-                            rd.matched_policy.c_str(), rd.reason.c_str());
-                return StopCall(pszCallId, SIP_FORBIDDEN);
-            }
-        }
-
-        // 레거시 IBCF: 트렁크 (v3 에서 결정 못 한 경우 fallback)
+        // 레거시 IBCF: 트렁크 (routing policy 매칭 실패 시 fallback)
         CspSipServer clsSipServer;
-        if (v3Routed) {
-            // 이미 위에서 outbound 설정 완료 — 아래 legacy 블록 skip
-        } else if (m_clsIbcf.IsEnabled() && gclsSipServerMap.SelectRoutePrefix(pszTo, clsSipServer, strTo)) {
+        if (m_clsIbcf.IsEnabled() && gclsSipServerMap.SelectRoutePrefix(pszTo, clsSipServer, strTo)) {
             clsUser.m_strId = clsSipServer.m_strUserId;
             clsUser.m_strPassWord = clsSipServer.m_strPassWord;
             clsUserInfo.m_strIp = clsSipServer.m_strIp;

@@ -391,6 +391,30 @@ CspLocalNodeMap.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspLocalNodeMap.cpp.s
 .PHONY : CspLocalNodeMap.cpp.s
 
+CspPendingRouteMap.o: CspPendingRouteMap.cpp.o
+.PHONY : CspPendingRouteMap.o
+
+# target to build an object file
+CspPendingRouteMap.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspPendingRouteMap.cpp.o
+.PHONY : CspPendingRouteMap.cpp.o
+
+CspPendingRouteMap.i: CspPendingRouteMap.cpp.i
+.PHONY : CspPendingRouteMap.i
+
+# target to preprocess a source file
+CspPendingRouteMap.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspPendingRouteMap.cpp.i
+.PHONY : CspPendingRouteMap.cpp.i
+
+CspPendingRouteMap.s: CspPendingRouteMap.cpp.s
+.PHONY : CspPendingRouteMap.s
+
+# target to generate assembly for a file
+CspPendingRouteMap.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspPendingRouteMap.cpp.s
+.PHONY : CspPendingRouteMap.cpp.s
+
 CspPttGroup.o: CspPttGroup.cpp.o
 .PHONY : CspPttGroup.o
 
@@ -1103,6 +1127,9 @@ help:
 	@echo "... CspLocalNodeMap.o"
 	@echo "... CspLocalNodeMap.i"
 	@echo "... CspLocalNodeMap.s"
+	@echo "... CspPendingRouteMap.o"
+	@echo "... CspPendingRouteMap.i"
+	@echo "... CspPendingRouteMap.s"
 	@echo "... CspPttGroup.o"
 	@echo "... CspPttGroup.i"
 	@echo "... CspPttGroup.s"
