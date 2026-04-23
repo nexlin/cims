@@ -314,12 +314,13 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClient.xml       ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClientCaller.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
 
-    # ── 3. 설정 템플릿 복사 (@PLACEHOLDER@ 포함, configure.sh 로 채움) ──
-    #    CSP 는 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/config/cmp.json.template      ${CMAKE_BINARY_DIR}/dist/cmp/config/cmp.json.template
+    # ── 3. 설정 템플릿 복사 (deploy_value: "@PLACEHOLDER@" 포함, configure.sh 로 채움) ──
+    #    CSP/CMP/CSC 모두 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.
+    #    cwrtc 만 레거시 .json.template 유지 (향후 전환 대상).
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/cmp/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csp/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/config/cwrtc.json.template  ${CMAKE_BINARY_DIR}/dist/cwrtc/config/cwrtc.json.template
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/csc.json.template ${CMAKE_BINARY_DIR}/dist/csc/config/csc.json.template
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csc/config/config_template.json
 
     # ── 4. CSP 데이터 복사 ─────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/User        ${CMAKE_BINARY_DIR}/dist/csp/user

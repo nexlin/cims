@@ -233,10 +233,10 @@ PY
 }
 
 # ── dist 설정 파일 생성 ─────────────────────────────────────────
-apply_template "$DIST_DIR/cmp/config/cmp.json.template"                    "$DIST_DIR/cmp/config/cmp.json"
+apply_config_template "$DIST_DIR/cmp/config/config_template.json"          "$DIST_DIR/cmp/config/cmp.json"
 apply_config_template "$DIST_DIR/csp/config/config_template.json"          "$DIST_DIR/csp/config/csp.json"
 apply_template "$DIST_DIR/cwrtc/config/cwrtc.json.template"                "$DIST_DIR/cwrtc/config/cwrtc.json"
-apply_template "$DIST_DIR/csc/config/csc.json.template"                    "$DIST_DIR/csc/config/csc.json"
+apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIST_DIR/csc/config/csc.json"
 
 # ── 시험 환경 설정 파일 생성 (소스 트리 tests/ 에만) ────────────
 # 테스트가 실제 배포 IP/도메인/DB 를 자동으로 사용하도록 한다.
