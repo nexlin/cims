@@ -1,20 +1,52 @@
 #include "CspAddressing.h"
+#include "CspLocalNodeMap.h"
 #include "SipServerSetup.h"
 
 namespace CspAddressing {
 
-std::string GetLocalSipAddress() {
-    // R5.a: 단일 LocalIp 반환. R5.b 에서 per-route / per-listener 로 확장.
+/** bind_ip=0.0.0.0/공백 이면 CSP 의 advertised primary IP(gclsSetup.m_strLocalIp) 반환.
+ *  그 외에는 로컬 노드의 구체 bind_ip 그대로. */
+static std::string _resolveBindIp(const LocalNodeInfo& n) {
+    if (n.bind_ip.empty() || n.bind_ip == "0.0.0.0") return gclsSetup.m_strLocalIp;
+    return n.bind_ip;
+}
+
+std::string GetLocalSipAddress(int inbound_listener_id) {
+    if (inbound_listener_id > 0) {
+        LocalNodeInfo n = gclsLocalNodeMap.GetByIntId(inbound_listener_id);
+        if (n.IsValid()) return _resolveBindIp(n);
+    }
+    return gclsSetup.m_strLocalIp;
+}
+
+std::string GetLocalSipAddressForOutbound(const std::string& proto,
+                                          const std::string& edge_preference) {
+    std::vector<LocalNodeInfo> all = gclsLocalNodeMap.GetAll();
+
+    // 1차: protocol + edge 일치
+    if (!edge_preference.empty()) {
+        for (const auto& n : all) {
+            if (!n.enabled) continue;
+            if (!proto.empty() && n.protocol != proto) continue;
+            if (n.edge != edge_preference) continue;
+            return _resolveBindIp(n);
+        }
+    }
+    // 2차: protocol 만 일치
+    for (const auto& n : all) {
+        if (!n.enabled) continue;
+        if (!proto.empty() && n.protocol != proto) continue;
+        return _resolveBindIp(n);
+    }
+    // 3차: primary fallback
     return gclsSetup.m_strLocalIp;
 }
 
 std::string GetLocalRtpAddress() {
-    // R5.a: 단일 LocalIp 반환. CMP 가 별도 호스트 배포되면 별도 설정으로 분리 예정.
     return gclsSetup.m_strLocalIp;
 }
 
 std::string GetLocalXcapAddress() {
-    // R5.a: 단일 LocalIp 반환. R6 에서 access_services.server_identity_uri 로 확장.
     return gclsSetup.m_strLocalIp;
 }
 

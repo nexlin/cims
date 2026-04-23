@@ -280,7 +280,9 @@ bool CCscfModule::RecvRequestRegister(int iThreadId, CSipMessage* pclsMessage) {
 
         {
             char szServiceRoute[512];
-            const std::string strSipAddr = CspAddressing::GetLocalSipAddress();
+            // R5.b: 응답은 수신 listener 기준으로 Service-Route 생성
+            const std::string strSipAddr =
+                CspAddressing::GetLocalSipAddress(GetCurrentInboundListenerId());
             snprintf(szServiceRoute, sizeof(szServiceRoute),
                 "<sip:%s@%s:%d;lr>",
                 strRegDomain.c_str(),

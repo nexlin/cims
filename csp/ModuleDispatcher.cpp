@@ -37,6 +37,7 @@
 #include "SipMd5.h"
 #include "SipServerMap.h"
 #include "SipServerSetup.h"
+#include "SipStackThread.h"   // GetCurrentInboundListenerId()
 #include "SipUtility.h"
 #include "SipUserAgent.h"
 #include "SubscriptionManager.h"
@@ -528,7 +529,9 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
                 CSipFrom clsContact;
                 clsContact.m_clsUri.m_strProtocol = SIP_PROTOCOL;
                 clsContact.m_clsUri.m_strUser = clsUser.m_strForward;
-                clsContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress();
+                // R5.b: 302 Moved Temporarily 는 수신 listener 기준으로 Contact 생성
+                clsContact.m_clsUri.m_strHost =
+                    CspAddressing::GetLocalSipAddress(GetCurrentInboundListenerId());
                 clsContact.m_clsUri.m_iPort = gclsSetup.m_iUdpPort;
                 pclsResponse->m_clsContactList.push_back(clsContact);
                 gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResponse);

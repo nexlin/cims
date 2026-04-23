@@ -292,7 +292,9 @@ void CUserMap::SendOptions() {
         pclsMessage->m_strSipMethod = SIP_METHOD_OPTIONS;
         pclsMessage->m_clsReqUri.Set( SIP_PROTOCOL, itList->c_str(), clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort );
 
-        const std::string strSipAddr = CspAddressing::GetLocalSipAddress();
+        // R5.b: OPTIONS keepalive 는 UE(access edge) 로 outbound. UDP access 리스너 선택.
+        const std::string strSipAddr =
+            CspAddressing::GetLocalSipAddressForOutbound("UDP", "access");
         pclsMessage->m_clsFrom.m_clsUri.Set( SIP_PROTOCOL, "cspserver", strSipAddr.c_str() );
         pclsMessage->m_clsFrom.InsertTag();
 
