@@ -7,9 +7,10 @@
       "description": "SIP 스택 공통 정책. 수신 엔드포인트(bind_ip/bind_port)는 local_nodes 콜렉션에서 정의되며, CSP 인스턴스의 identity(From/Via/Contact 생성용 Local IP/Port)는 local_nodes 의 primary 항목에서 자동 주입됨.",
       "fields": [
         {
-          "key": "Setup.Sip.UdpThreadCount", "label": "UDP 수신 스레드 수",
+          "key": "Setup.Sip.UdpThreadCount", "label": "UDP 수신 스레드 수 (fallback)",
           "type": "int", "default": 2, "min": 1, "max": 32,
-          "restart": true
+          "restart": true,
+          "help": "local_nodes.thread_count 가 SOT. 이 값은 local_nodes 에 thread_count 가 미지정된 리스너용 fallback."
         },
         {
           "key": "Setup.Sip.StackExecutePeriod", "label": "Stack tick (ms)",

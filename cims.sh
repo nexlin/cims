@@ -845,6 +845,9 @@ def seed(name, kind, domain):
         'priority': 100,
         'tags': ['verify-seed'],
         'note': 'auto-seeded by cims.sh verify phase1',
+        # G6 (2026-04-23): IMS 규격 대응 — OPTIONS/요청 From URI 의 CSP identity.
+        #   비우면 CspAddressing::GetServerIdentityForService 가 domain 기반으로 auto-조립.
+        'server_identity_uri': f'sip:cspserver@{domain}',
     }
     seeded.append(r)
     existing_names.add(name)

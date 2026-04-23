@@ -40,7 +40,7 @@ Start CMP (media server) before CSP (call server):
 **Simulator** (test client):
 ```bash
 # VoIP call test (2 sessions)
-./bin/cspsim -server_ip 127.0.0.1 -count 2 -user 1001 -domain csp -password 1234 -mode voip -scenario call -call_duration 5
+./bin/cspsim -server_ip 127.0.0.1 -count 2 -user 1001 -domain csp -password 1234 -mode volte -scenario call -call_duration 5
 
 # PTT group call test (4 sessions)
 ./bin/cspsim -server_ip 127.0.0.1 -count 4 -user 1001 -domain csp -password 1234 -mode ptt -group 1000 -scenario group_call -call_duration 10
