@@ -5,7 +5,7 @@ import traceback
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))
-_CONFIG_PATH = os.path.join(_COMPONENT_ROOT, 'config', 'csc.json')
+_CONFIG_PATH = os.environ.get('CIMS_CSC_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'csc.json')
 
 from httpsrv.server import HttpServer
 from util.log_util import Logger

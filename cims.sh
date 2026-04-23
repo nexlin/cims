@@ -177,25 +177,25 @@ start_console() {
 
 start_phone() {
     if is_running phone; then warn "phone 이미 실행 중 (pid=$(read_pid phone))"; return 0; fi
-    # 포트 3000 점유 프로세스(serve 좀비 포함) 먼저 정리
-    kill_stray "serve dist -l 3000" 3000 tcp
+    # 포트 3002 점유 프로세스(serve 좀비 포함) 먼저 정리
+    kill_stray "serve dist -l 3002" 3002 tcp
     if [[ -n "$SRC_PHONE" && -d "$SRC_PHONE" ]]; then
         # 소스 모드: Vite 개발 서버 (API proxy 포함)
         kill_stray "vite.*cims-phone"
-        info "phone (MCPTT UE Web) 개발 서버 시작... (port 3000)"
+        info "phone (MCPTT UE Web) 개발 서버 시작... (port 3002)"
         cd "$SRC_PHONE"
         npm run dev >> "$LOG_DIR/phone.log" 2>&1 &
         save_pid phone $!
     elif [[ -d "$DIST_DIR/phone/dist" ]]; then
         # dist 전용 모드: 정적 서빙 (proxy 없음 — nginx 필요)
-        info "phone (MCPTT UE Web) 정적 서빙 시작... (port 3000, HTTPS)"
+        info "phone (MCPTT UE Web) 정적 서빙 시작... (port 3002, HTTPS)"
         cd "$DIST_DIR/phone"
         _SSL_KEY="$DIST_DIR/csc/cert/server.key"
         _SSL_CERT="$DIST_DIR/csc/cert/server.crt"
         if [[ -f "$_SSL_KEY" && -f "$_SSL_CERT" ]]; then
-            npx --yes serve dist -l 3000 --ssl-cert "$_SSL_CERT" --ssl-key "$_SSL_KEY" >> "$LOG_DIR/phone.log" 2>&1 &
+            npx --yes serve dist -l 3002 --ssl-cert "$_SSL_CERT" --ssl-key "$_SSL_KEY" >> "$LOG_DIR/phone.log" 2>&1 &
         else
-            npx --yes serve dist -l 3000 >> "$LOG_DIR/phone.log" 2>&1 &
+            npx --yes serve dist -l 3002 >> "$LOG_DIR/phone.log" 2>&1 &
         fi
         save_pid phone $!
     else
@@ -203,6 +203,162 @@ start_phone() {
     fi
     sleep 2
     is_running phone && ok "phone 시작 완료 (pid=$(read_pid phone))" || { err "phone 시작 실패"; tail -3 "$LOG_DIR/phone.log" | sed 's/^/  /'; }
+}
+
+# ── TB (Test-Bed) 3종: TB-CSC(4419) / TB-Console(3000) / TB-agent(9902) ─
+# TB 는 검증 Phase 1~3 진행 중 UI 세션 유지용 임시 기동 모듈.
+# 검증 대상(cmp/csp/cwrtc/csc/console/phone) 과 달리 `start`/`stop all` 에 포함되지 않음.
+# 명시적으로 `cims.sh start tb-csc` / `start tb` 등으로만 조작.
+
+start_tb_csc() {
+    if is_running tb-csc; then warn "TB-CSC 이미 실행 중 (pid=$(read_pid tb-csc))"; return 0; fi
+    local tb_cfg="$DIST_DIR/csc/config/csc-tb.json"
+    [[ ! -f "$tb_cfg" ]] && err "TB-CSC config 없음: $tb_cfg  (./configure.sh 실행)" && return 1
+    [[ ! -f "$DIST_DIR/csc/src/csc_app.py" ]] && err "CSC 소스 없음 (make dist 실행 필요)" && return 1
+    kill_stray "CIMS_CSC_CONFIG=.*csc-tb.json" 4419 tcp
+    info "TB-CSC (4419) 시작..."
+    cd "$DIST_DIR/csc/src"
+    CIMS_CSC_CONFIG="$tb_cfg" python3 csc_app.py >> "$LOG_DIR/tb-csc.log" 2>&1 &
+    save_pid tb-csc $!
+    sleep 1.5
+    is_running tb-csc && ok "TB-CSC 시작 완료 (pid=$(read_pid tb-csc), port=4419)" \
+        || { err "TB-CSC 시작 실패"; tail -3 "$LOG_DIR/tb-csc.log" | sed 's/^/  /'; }
+}
+
+start_tb_console() {
+    if is_running tb-console; then warn "TB-Console 이미 실행 중 (pid=$(read_pid tb-console))"; return 0; fi
+    # dev 모드 기반 (vite proxy 로 /api → TB-CSC 4419 전달). 소스 트리에서만 동작.
+    if [[ -z "$SRC_CONSOLE" || ! -d "$SRC_CONSOLE" ]]; then
+        err "TB-Console 은 소스 트리에서만 기동 (vite dev proxy 필요). SRC_CONSOLE=$SRC_CONSOLE"
+        return 1
+    fi
+    [[ ! -f "$SRC_CONSOLE/.env.tb.local" ]] && err ".env.tb.local 없음. ./cims.sh configure 실행" && return 1
+    kill_stray "vite.*--mode tb" 3000 tcp
+    info "TB-Console (Admin Web UI for TB-CSC) dev 서버 시작... (port 3000, mode=tb, target=:4419)"
+    cd "$SRC_CONSOLE"
+    npm run dev -- --mode tb --port 3000 --host >> "$LOG_DIR/tb-console.log" 2>&1 &
+    save_pid tb-console $!
+    sleep 3
+    is_running tb-console && ok "TB-Console 시작 완료 (pid=$(read_pid tb-console), port=3000)" \
+        || { err "TB-Console 시작 실패"; tail -5 "$LOG_DIR/tb-console.log" | sed 's/^/  /'; }
+}
+
+start_tb_agent() {
+    if is_running tb-agent; then warn "TB-agent 이미 실행 중 (pid=$(read_pid tb-agent))"; return 0; fi
+    local agent_py="$DIST_DIR/agent/cims_agent.py"
+    [[ ! -f "$agent_py" ]] && err "agent 소스 없음: $agent_py (make dist 실행 필요)" && return 1
+    local state_dir="/tmp/cims-tb-agent/state"
+    local install_root="/tmp/cims-tb-agent/modules"
+    mkdir -p "$state_dir" "$install_root"
+    kill_stray "cims_agent.py --csc-url.*:4419" 9902 tcp
+
+    local csc_url="https://127.0.0.1:4419"
+    local enroll_opt=""
+    # state(session_token) 가 없으면 enrollment token 이 필요.
+    if [[ ! -f "$state_dir/agent.json" ]]; then
+        if [[ -n "${CIMS_TB_ENROLLMENT_TOKEN:-}" ]]; then
+            enroll_opt="--enrollment-token $CIMS_TB_ENROLLMENT_TOKEN"
+        else
+            # TB-CSC 가 기동되어 있으면 자동 발급 시도 (cims.sh tb-enroll 헬퍼).
+            warn "TB-agent state 없음. CIMS_TB_ENROLLMENT_TOKEN 미설정 → 자동 enrollment 시도"
+            local tok
+            tok="$(_tb_issue_enrollment_token 2>/dev/null || true)"
+            if [[ -n "$tok" ]]; then
+                enroll_opt="--enrollment-token $tok"
+                ok "enrollment token 자동 발급 완료"
+            else
+                err "자동 발급 실패. 'CIMS_TB_ENROLLMENT_TOKEN=<TOK> cims.sh start tb-agent' 또는 TB-CSC 먼저 기동"
+                return 1
+            fi
+        fi
+    fi
+    info "TB-agent 시작... (sync 9902, state=$state_dir)"
+    cd "$(dirname "$agent_py")"
+    CIMS_AGENT_INSTALL_ROOT="$install_root" \
+    CIMS_AGENT_SYNC_PORT=9902 \
+    python3 "$agent_py" \
+        --csc-url "$csc_url" \
+        --name tb-agent-local \
+        --state-dir "$state_dir" \
+        $enroll_opt \
+        >> "$LOG_DIR/tb-agent.log" 2>&1 &
+    save_pid tb-agent $!
+    sleep 2
+    is_running tb-agent && ok "TB-agent 시작 완료 (pid=$(read_pid tb-agent))" \
+        || { err "TB-agent 시작 실패"; tail -5 "$LOG_DIR/tb-agent.log" | sed 's/^/  /'; }
+}
+
+# TB-CSC 에 admin 로그인 → 새 agent 레코드 생성 → enrollment_token 반환.
+# 성공 시 token 한 줄을 stdout 에. 실패 시 비어있는 stdout + 비-0 exit.
+#
+# 이미 name="tb-agent-local" agent 가 있으면 재생성 불가 (409) → 409 시 기존 레코드 삭제 후 재시도.
+_tb_issue_enrollment_token() {
+    local base="https://127.0.0.1:4419"
+    local admin_id="${CIMS_TB_ADMIN_ID:-admin}"
+    local admin_pw="${CIMS_TB_ADMIN_PASSWORD:-1234}"
+    local name="tb-agent-local"
+    # 살아있는지 간단 확인 (aut/login endpoint POST)
+    local login_resp; login_resp=$(curl -sk --max-time 3 -X POST "$base/api/v1/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"login_id\":\"$admin_id\",\"password\":\"$admin_pw\"}" 2>/dev/null)
+    local token; token=$(echo "$login_resp" | python3 -c \
+        'import sys,json
+try: d=json.load(sys.stdin); print(d.get("access_token") or d.get("token") or "")
+except: pass' 2>/dev/null)
+    [[ -z "$token" ]] && { echo "login failed: $login_resp" >&2; return 1; }
+
+    local create_resp; create_resp=$(curl -sk -w '\n__HTTP__%{http_code}' \
+        -X POST "$base/api/v1/agents" \
+        -H "Authorization: Bearer $token" \
+        -H 'Content-Type: application/json' \
+        -d "{\"name\":\"$name\"}" 2>/dev/null)
+    local http="${create_resp##*__HTTP__}"
+    local body="${create_resp%$'\n'__HTTP__*}"
+
+    if [[ "$http" == "409" ]]; then
+        # 같은 이름 레코드 존재 → id 조회 후 삭제, 재생성.
+        local aid; aid=$(curl -sk "$base/api/v1/agents" \
+            -H "Authorization: Bearer $token" 2>/dev/null \
+            | python3 -c 'import sys,json
+d=json.load(sys.stdin); items=d if isinstance(d,list) else d.get("items") or d.get("agents") or []
+for r in items:
+    if r.get("name")=="'"$name"'": print(r.get("id")); break' 2>/dev/null)
+        if [[ -n "$aid" ]]; then
+            curl -sk -X DELETE "$base/api/v1/agents/$aid" \
+                -H "Authorization: Bearer $token" >/dev/null 2>&1 || true
+            create_resp=$(curl -sk -w '\n__HTTP__%{http_code}' \
+                -X POST "$base/api/v1/agents" \
+                -H "Authorization: Bearer $token" \
+                -H 'Content-Type: application/json' \
+                -d "{\"name\":\"$name\"}" 2>/dev/null)
+            http="${create_resp##*__HTTP__}"
+            body="${create_resp%$'\n'__HTTP__*}"
+        fi
+    fi
+
+    if [[ "$http" != "201" && "$http" != "200" ]]; then
+        echo "agent create failed (http=$http): $body" >&2
+        return 1
+    fi
+
+    local tok aid
+    tok=$(echo "$body" | python3 -c \
+        'import sys,json
+try: d=json.load(sys.stdin); print(d.get("enrollment_token") or "")
+except: pass' 2>/dev/null)
+    aid=$(echo "$body" | python3 -c \
+        'import sys,json
+try: d=json.load(sys.stdin); print(d.get("id") or "")
+except: pass' 2>/dev/null)
+    [[ -z "$tok" ]] && { echo "no enrollment_token in response: $body" >&2; return 1; }
+
+    # agent pending → approved 전환 (heartbeat 전에 approve 안 되어 있으면 거절될 수 있음)
+    if [[ -n "$aid" ]]; then
+        curl -sk -X POST "$base/api/v1/agents/$aid/approve" \
+            -H "Authorization: Bearer $token" >/dev/null 2>&1 || true
+    fi
+
+    echo "$tok"
 }
 
 # ── 중지 ───────────────────────────────────────────────────────
@@ -233,13 +389,16 @@ stop_csc() {
 # 컴포넌트별 리스닝 포트 (외부 기동 감지용)
 _svc_port_proto() {
     case "$1" in
-        cmp)     echo "9000:udp" ;;
-        csp)     echo "5060:udp" ;;
-        cwrtc)   echo "8080:tcp" ;;
-        csc)     echo "4420:tcp" ;;
-        console) echo "3001:tcp" ;;
-        phone)   echo "3000:tcp" ;;
-        *)       echo "" ;;
+        cmp)        echo "9000:udp" ;;
+        csp)        echo "5060:udp" ;;
+        cwrtc)      echo "8080:tcp" ;;
+        csc)        echo "4420:tcp" ;;
+        console)    echo "3001:tcp" ;;
+        phone)      echo "3002:tcp" ;;
+        tb-csc)     echo "4419:tcp" ;;
+        tb-console) echo "3000:tcp" ;;
+        tb-agent)   echo "9902:tcp" ;;
+        *)          echo "" ;;
     esac
 }
 
@@ -289,12 +448,18 @@ cmd_status() {
     header "=== CIMS 상태 ==="
     echo -e "  실행 디렉터리: ${CYAN}$DIST_DIR${NC}"
     echo ""
+    echo -e "  ${BOLD}[검증 대상]${NC}"
     status_one cmp
     status_one csp
     status_one cwrtc
     status_one csc
     status_one console
     status_one phone
+    echo ""
+    echo -e "  ${BOLD}[TB (Test-Bed — Phase 2/3 UI 유지용 상시 기동)]${NC}"
+    status_one tb-csc
+    status_one tb-console
+    status_one tb-agent
     echo ""
 }
 
@@ -331,6 +496,9 @@ cmd_build() {
     npm run build
     cp -r dist "$DIST_DIR/console/"
     ok "cims-console 빌드 완료"
+    # TB-Console 은 dev 모드 기반 (vite proxy 필요) → 별도 dist 빌드 불필요.
+    # configure.sh 가 .env.tb.local 에 VITE_ADMIN_TARGET=https://127.0.0.1:4419 를 기록하고,
+    # cims.sh start tb-console 이 npm run dev -- --mode tb --port 3000 으로 기동한다.
 
     header "=== Web UI 빌드 (cims-phone) ==="
     cd "$SRC_PHONE"
@@ -399,10 +567,14 @@ cmd_reset() {
         esac
     done
 
-    header "=== 검증 환경 초기화 (가입자 보존) ==="
+    header "=== 검증 환경 초기화 (가입자 보존, TB 3종 유지) ==="
+    info "TB 3종(TB-CSC 4419 / TB-Console 3000 / TB-agent 9902) 은 건드리지 않음."
+    # 참고: DB 의 cims_agent 는 TRUNCATE 대상이라 TB-agent 의 enrolled 상태가 사라짐.
+    # → reset 후 'cims.sh stop tb-agent && rm -rf /tmp/cims-tb-agent/state && cims.sh start tb-agent'
+    #   로 재-enroll 하거나, TB-agent 가 heartbeat 401 수신 시 자체 재-enroll 하도록 향후 개선 예정.
 
     # 1) 서비스 정지 — DB 연결 정리 + 파일 잠금 해제
-    info "서비스 정지..."
+    info "서비스 정지 (검증 대상만)..."
     cmd_stop all >/dev/null 2>&1 || true
 
     # 1-b) 외부 기동 / PID 파일 없는 프로세스도 포트 기반으로 강제 종료
@@ -411,7 +583,8 @@ cmd_reset() {
     local _rp _port _proto _pids _round
     for _round in 1 2; do
         local _killed=0
-        for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "3000:tcp" "3001:tcp" "8080:tcp"; do
+        # reset 은 검증 대상만 정리 — TB 포트(4419/3000/9902) 는 제외해 상시 동작 보장
+        for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "3001:tcp" "3002:tcp" "8080:tcp"; do
             _port="${_rp%%:*}"; _proto="${_rp##*:}"
             if [[ $_proto == "tcp" ]]; then
                 _pids=$(ss -Htlnp 2>/dev/null | awk -v pt=":$_port" '$4 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
@@ -566,9 +739,13 @@ cmd_preflight() {
     fi
 
     # 3) 포트 점유 확인
-    local ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "3000:tcp" "3001:tcp")
-    local pp port proto line pid
-    for pp in "${ports[@]}"; do
+    # 검증 대상 포트 — 기동 전엔 "가용" 이어야 정상.
+    # TB 포트(4419/3000/9902) 는 반대로 "점유" 되어 있어야 정상 (TB 3종 상시 동작 전제).
+    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "3001:tcp" "3002:tcp" "8080:tcp")
+    local tb_ports=("4419:tcp:TB-CSC" "3000:tcp:TB-Console" "9902:tcp:TB-agent")
+    local pp port proto line pid label
+    info "[검증 대상] 기동 전엔 가용해야 함"
+    for pp in "${target_ports[@]}"; do
         port="${pp%%:*}"; proto="${pp##*:}"
         if [[ $proto == "tcp" ]]; then
             line=$(ss -Htlnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print; exit}' || true)
@@ -580,6 +757,17 @@ cmd_preflight() {
             warn "port $port/$proto 점유 중 (pid=${pid:-?})"
         else
             ok "port $port/$proto 가용"
+        fi
+    done
+    info "[TB 3종] 상시 기동 중이어야 정상"
+    for pp in "${tb_ports[@]}"; do
+        port="${pp%%:*}"; label="${pp##*:}"; proto="$(echo "$pp" | cut -d: -f2)"
+        line=$(ss -Htlnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print; exit}' || true)
+        if [[ -n $line ]]; then
+            pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+            ok "$label (port $port/tcp) 동작 중 (pid=${pid:-?})"
+        else
+            warn "$label (port $port/tcp) 미동작 — 'cims.sh start tb' 필요"
         fi
     done
 
@@ -1258,13 +1446,17 @@ COMPONENTS=(cmp csp cwrtc csc console phone)
 
 _start_one() {
     case "$1" in
-        all)     start_cmp; start_csp; sleep 0.5; start_cwrtc; start_csc; start_console; start_phone ;;
-        cmp)     start_cmp ;;
-        csp)     start_csp ;;
-        cwrtc)   start_cwrtc ;;
-        csc)     start_csc ;;
-        console) start_console ;;
-        phone)   start_phone ;;
+        all)        start_cmp; start_csp; sleep 0.5; start_cwrtc; start_csc; start_console; start_phone ;;
+        tb)         start_tb_csc; sleep 0.5; start_tb_console; start_tb_agent ;;
+        cmp)        start_cmp ;;
+        csp)        start_csp ;;
+        cwrtc)      start_cwrtc ;;
+        csc)        start_csc ;;
+        console)    start_console ;;
+        phone)      start_phone ;;
+        tb-csc)     start_tb_csc ;;
+        tb-console) start_tb_console ;;
+        tb-agent)   start_tb_agent ;;
         *) err "알 수 없는 컴포넌트: $1"; return 1 ;;
     esac
 }
@@ -1279,10 +1471,16 @@ cmd_start() {
 _stop_one() {
     case "$1" in
         all)
-            header "=== 전체 중지 ==="
+            header "=== 전체 중지 (검증 대상만, TB 유지) ==="
             for c in "${COMPONENTS[@]}"; do
                 if [[ $c == "csc" ]]; then stop_csc; else stop_one "$c"; fi
             done
+            ;;
+        tb)
+            header "=== TB 3종 중지 ==="
+            stop_one tb-agent
+            stop_one tb-console
+            stop_one tb-csc
             ;;
         csc) stop_csc ;;
         *) stop_one "$1" ;;

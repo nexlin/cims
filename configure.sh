@@ -238,6 +238,35 @@ apply_config_template "$DIST_DIR/csp/config/config_template.json"          "$DIS
 apply_template "$DIST_DIR/cwrtc/config/cwrtc.json.template"                "$DIST_DIR/cwrtc/config/cwrtc.json"
 apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIST_DIR/csc/config/csc.json"
 
+# ── TB-CSC (4419) overlay: csc.json 을 기반으로 포트/경로만 치환 ─
+#   TB 는 검증 Phase 진행 중 UI 세션 유지용 임시 기동 모듈.
+#   DB/시크릿/도메인은 검증 대상 CSC(4420)와 공유. 포트와 파일 경로만 분리한다.
+apply_csc_tb_overlay() {
+    local base="$1"    # csc.json
+    local dst="$2"     # csc-tb.json
+    [[ ! -f "$base" ]] && warn "csc base config 없음: $base" && return
+    python3 - "$base" "$dst" <<'PY'
+import json, sys
+BASE, DST = sys.argv[1], sys.argv[2]
+with open(BASE) as f:
+    c = json.load(f)
+c.setdefault('Server', {})['Port'] = 4419
+c.setdefault('McpttServer', {})['Port'] = 4431
+c.setdefault('Log', {})['File'] = 'log/csc_tb.log'
+c.setdefault('Packages', {})['Dir'] = 'packages_tb'
+c['Packages']['BackupDir'] = 'packages_tb_trash'
+c['ConfigCacheDir'] = 'cache_tb'
+# IdMs.KmsClientReqUrl 의 4420 → 4419 일관성 유지
+idms = c.setdefault('IdMs', {})
+if isinstance(idms.get('KmsClientReqUrl'), str):
+    idms['KmsClientReqUrl'] = idms['KmsClientReqUrl'].replace(':4420/', ':4419/')
+with open(DST, 'w') as f:
+    json.dump(c, f, indent=4, ensure_ascii=False)
+PY
+    ok "생성: $dst (TB-CSC 4419 overlay)"
+}
+apply_csc_tb_overlay "$DIST_DIR/csc/config/csc.json" "$DIST_DIR/csc/config/csc-tb.json"
+
 # ── 시험 환경 설정 파일 생성 (소스 트리 tests/ 에만) ────────────
 # 테스트가 실제 배포 IP/도메인/DB 를 자동으로 사용하도록 한다.
 # 하드코딩 드리프트 방지.
@@ -254,11 +283,17 @@ if [[ -n "$SRC_DIR" ]]; then
         CSC_SCHEME="http"
     fi
 
-    # cims-console/.env.local  (Vite dev proxy 대상)
+    # cims-console/.env.local  (Vite dev proxy 대상 — 검증 대상 CSC 4420)
     cat > "$SRC_DIR/cims-console/.env.local" <<EOF
 VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4420
 EOF
     ok "생성: $SRC_DIR/cims-console/.env.local"
+
+    # cims-console/.env.tb.local  (TB-Console 전용, TB-CSC 4419 로 proxy)
+    cat > "$SRC_DIR/cims-console/.env.tb.local" <<EOF
+VITE_ADMIN_TARGET=${CSC_SCHEME}://127.0.0.1:4419
+EOF
+    ok "생성: $SRC_DIR/cims-console/.env.tb.local"
 
     # cwrtc WSS 여부 자동 감지
     CWRTC_WS_SCHEME="ws"
