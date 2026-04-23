@@ -37,6 +37,7 @@ bool CCspLocalNodeMap::Sync() {
             n.bind_port       = (int)row.GetInt("bind_port", 0);
             n.protocol        = row.GetString("protocol", "UDP");
             n.enabled         = _boolish(row.GetString("enabled"), true);
+            n.is_primary      = _boolish(row.GetString("is_primary"), false);
             n.tls_cert_path   = row.GetString("tls_cert_path");
             n.tls_key_path    = row.GetString("tls_key_path");
             n.tls_ca_path     = row.GetString("tls_ca_path");
@@ -94,6 +95,38 @@ std::vector<LocalNodeInfo> CCspLocalNodeMap::GetAll() const {
     out.reserve(m_byName.size());
     for (const auto& kv : m_byName) out.push_back(kv.second);
     return out;
+}
+
+LocalNodeInfo CCspLocalNodeMap::GetPrimary() const {
+    // m_byName 은 std::map 이므로 iteration 이 이미 name 사전식 오름차순.
+    std::lock_guard<std::mutex> lk(m_mutex);
+
+    // Rule 1: enabled=true && is_primary=true
+    LocalNodeInfo found;
+    int primaryCount = 0;
+    for (const auto& kv : m_byName) {
+        const LocalNodeInfo& n = kv.second;
+        if (!n.enabled || !n.is_primary) continue;
+        if (primaryCount == 0) found = n;
+        ++primaryCount;
+    }
+    if (primaryCount > 1) {
+        CLog::Print(LOG_ERROR, "LocalNodeMap: multiple is_primary=true nodes (%d) — using '%s'",
+                    primaryCount, found.name.c_str());
+    }
+    if (primaryCount >= 1) return found;
+
+    // Rule 2: enabled=true && edge=access && protocol=UDP
+    for (const auto& kv : m_byName) {
+        const LocalNodeInfo& n = kv.second;
+        if (!n.enabled) continue;
+        if (n.edge != "access") continue;
+        if (n.protocol != "UDP") continue;
+        return n;
+    }
+
+    // Rule 3: 없음
+    return LocalNodeInfo();
 }
 
 size_t CCspLocalNodeMap::Size() const {

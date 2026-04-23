@@ -74,23 +74,11 @@
 - Phase 별 회귀 시나리오 전부 PASS
 - Flow/Msg 로그 무결성 (sesid 일관, body seq 매칭)
 
-### 0.7 Phase 1 검증 시나리오 (5단계 + 회귀)
+### 0.7 Phase 1 검증 시나리오 (회귀 6항목)
 
-Phase 1 은 **tarball 빌드 결과물이 TB-agent 를 통해 검증 대상 모듈에 올바르게 반영되는지를 e2e 로 확인** 하는 것이 목적. 아래 5단계가 모두 PASS 해야 합격.
+Phase 1 은 **`build/dist/` 안에서 직접 기동·기능 검증** 하는 단계. tarball 생성/업로드/TB-agent 배포 검증은 **Phase 2** 에서 수행한다. 아래 회귀 6항목이 모두 PASS 해야 합격.
 
-**A. 설정 반영 5단계** (TB 3종 전제)
-
-1. **tarball 메타 무결성** — `cims.sh pkg --no-bump` 로 모듈 tarball 생성 → TB-CSC `/packages` 업로드.
-   - DB 의 `cims_package.name/version/description/meta_json/config_template_json` 이 소스 `pkg.json` + `config_template.json` 과 정확히 일치.
-2. **TB-agent 배포** — TB-Console `POST /deployments { agent=tb-agent, package=<module> }`.
-   - `/tmp/cims-tb-agent/modules/<module>/<version>/` 에 tarball 추출. meta.json, config_template.json 동반.
-3. **static config overlay** — TB-Console `PUT /deployments/:id/config { config: {...flat dot-keys...}, queue_update: true }`.
-   - `agent_deployment.config_json` 저장 + TB-agent 가 `install_path/config.json` 작성 → 재기동 후 모듈 런타임 동작 변화 (예: AuthRealm → REGISTER 인증 도메인 반영).
-4. **dynamic collection sync** — TB-Console `PUT /deployments/:id/collection/:name { records, signal:true }`.
-   - TB-agent 가 `install_path/config/<name>.jsonl` 재작성 → SIGUSR1 → 모듈이 **재기동 없이** reload (예: listener 추가 → 새 포트 bind).
-5. **회귀 시나리오 (B)** — 설정 반영된 상태에서 실행, 전부 PASS.
-
-**B. 기존 회귀 시나리오 (고정 — 기능 보호용)**
+**기존 회귀 시나리오 (고정 — 기능 보호용)**
 
 1. **cspsim REGISTER × N** — `-auth_id "<IMSI>@<domain>"` 필수. 성공률 100%.
 2. **VoIP 2자 통화 (B2BUA)** — 녹취 `seg_*.rtp` 생성, 양 leg 동일 `sesid`, `session.json` 의 `call_ids`.
@@ -99,7 +87,9 @@ Phase 1 은 **tarball 빌드 결과물이 TB-agent 를 통해 검증 대상 모�
 5. **CSC subscribe (IdMS/GMS/CMS)** — TB-Console Flow 페이지 nodes 순서 정상.
 6. **(mTLS 모드) Cert rotation e2e** — `cert_rotate_pending=1` → heartbeat `cert_rotate:true` → agent rotate → exit → 재기동 후 새 cert 적용.
 
-`cims.sh verify phase1` 및 TB-Console `/testbed/phase1` 실행 버튼이 위 A 5단계를 순차 수행하고 각 단계 결과를 리포트에 기록한다.
+`cims.sh verify phase1` 및 TB-Console `/testbed/phase1` 실행 버튼이 위 6항목을 순차 수행하고 결과를 리포트에 기록한다.
+
+> Phase 2 로 넘어가기 전 별도 확인 항목(tarball 메타 무결성, TB-agent 배포, static config overlay, dynamic collection sync)은 2.4 참고.
 
 ### 0.8 리포트 양식
 
@@ -138,21 +128,27 @@ Phase 1 이 충분히 검증되었다면 Phase 2/3 에서 기능 이슈가 발�
 ### 1.1 초기화
 - `cims.sh reset` — 검증 대상만 초기화, TB 는 유지 (0.3 범위)
 
-### 1.2 빌드
+### 1.2 빌드 [1/3]
 - `cims.sh build`
-- warning/error 0 확인, 번들 해시 바뀌면 TB 도 자동 재기동
+- C++ + Web UI 빌드 결과가 `build/dist/` 에 적재된다. 환경값 반영은 [2/3] configure 책임.
+- 배포 tarball 은 생성하지 않는다 — Phase 1 은 `build/dist/` 안에서 직접 기동·검증한다.
+- warning/error 0 확인, 번들 해시 바뀌면 TB 도 자동 재기동.
+- (배포 tarball 생성은 Phase 2 의 [3/3] `cims.sh pkg` 단계에서 수행)
 
-### 1.3 Configure
+### 1.3 Configure [2/3]
 - `cims.sh configure --local-ip <ens160_ip>`
-- `csp.json`, `cmp.json`, `csc.json` (4420 용), `csc-tb.json` (4419 용) 재생성
+- 시험환경 설정. `csp.json`, `cmp.json`, `csc.json` (4420 용), `csc-tb.json` (4419 용) 재생성
+- CSP 는 `csp/config/config_template.json` 의 `deploy_value` 를 통해 환경변수 치환 후 `csp.json` 생성
 - TB-Console `.env` 분기 적용
 
-### 1.4 수동 기동 (검증 대상 한정, TB 는 이미 동작 중)
-순서: CMP → CSP → CSC → (필요 시) 검증 대상 Console
+### 1.4 수동 기동 (검증 대상 전체 기동, TB 는 이미 동작 중)
+순서: CMP → CSP → CWRTC → CSC → Console → Phone
 
 ```bash
-cims.sh start cmp csp csc
+cims.sh start          # 인자 생략 = 전체 모듈
 ```
+
+개별 모듈만 재기동할 때는 `cims.sh start <name>` / `cims.sh restart <name>` 사용 (name ∈ cmp/csp/cwrtc/csc/console/phone).
 
 ### 1.5 Health Check
 - 리슨 포트: 4419 / 4420 / 3000 / 9000 / 5060 / 5061
@@ -161,12 +157,15 @@ cims.sh start cmp csp csc
 
 ### 1.6 기능 검증 (본 단계의 핵심)
 
-TB-Console `/testbed/phase1` 에서 **▶ 실행** 클릭 → 0.7 의 A(설정 반영 5단계) + B(회귀 6항목) 순차 실행 → 리포트 자동 생성.
+TB-Console `/testbed/phase1` 에서 **▶ 실행** 클릭 → 0.7 회귀 6항목 순차 실행 → 리포트 자동 생성.
 
 추가로 수동 확인:
 1. **이번 보완된 기능** — Phase 0 변경 분석의 대상 기능 직접 조작.
-2. **TB-Console 모듈관리** — 패키지 업로드 직후 버전/설정 템플릿이 tarball 과 일치하는지 시각 확인.
-3. **TB-Console 배포 > 서버** — TB-agent 상태(approved, heartbeat, sync_port=9902) 확인.
+2. **build/dist 내부 동작** — 검증 대상 모듈이 `build/dist/<모듈>/` 경로에서 직접 기동되어 로그/녹취/Flow 가 정상 출력되는지 확인.
+3. **Console > 테스트베드 > 모듈관리** — 각 모듈의 **버전 / 설정 템플릿 / 설정** 이 `build/dist/<모듈>/pkg.json` + `config_template.json` 에서 읽혀 표시되는지 확인. 스칼라 값 편집 시 overlay 가 `build/dist/config.json` 에 저장되고 재기동 후 반영되는지 확인.
+4. (tarball 업로드·TB-agent 배포 검증은 Phase 2 에서 수행)
+
+> **정보 흐름**: Phase 1 에서는 `build/dist/` 가 SOT. `/api/v1/packages` 및 `/api/v1/modules` 가 dist 파일을 직접 읽어 Console 에 노출한다. 동일 구조의 파일들이 Phase 2 의 `cims.sh pkg` 단계에서 그대로 tarball 로 묶인다.
 
 ### 1.7 결과 리포팅
 - TB-Console `/testbed/verify` 또는 `verify_reports/<ts>_phase1.md`
@@ -187,12 +186,20 @@ Phase 1 의 기능 검증이 끝난 전제 하에, **새 릴리즈 tarball 을 T
 ### 2.1 초기화
 - `cims.sh reset` (TB 유지)
 
-### 2.2 빌드 & 패키지
+### 2.2 빌드 & 설정 & 패키지 (3단계 분리)
+Phase 1 통과 후, **배포 tarball 은 여기서만 생성**한다. 세 단계는 완전 독립:
+
 ```bash
-cims.sh build            # warning/error 0
-cims.sh pkg --no-bump    # 버전 고정 tarball 생성
-cims.sh configure --local-ip <ens160_ip>
+cims.sh build                               # [1/3] warning/error 0 → build/dist 갱신 (tarball 없음)
+cims.sh configure --local-ip <ens160_ip>    # [2/3] 시험환경 설정 (IP/DB/도메인)
+cims.sh pkg --no-bump                       # [3/3] build/dist/<모듈>/ 을 tarball 로 묶음
+                                            #       → build/dist/packages/*.tar.gz
 ```
+
+- `cims.sh build` / `configure` 는 Phase 1 에서 이미 실행되었을 것이므로, 소스·환경 변경이 없다면 생략 가능.
+- `cims.sh pkg` 는 `build/dist` 가 있어야 함 — Phase 1 에서 Console 이 표시/편집한 **바로 그 파일**을 tarball 로 묶는다. 즉 Phase 1 에서 확인한 구성이 tarball 에 1:1 반영된다.
+- tarball 루트에는 `meta.json` (pkg.json 에서 유도) + `config_template.json` (sibling 복사본) 이 함께 포함되므로 TB-CSC 업로드 시 `cims_package.config_template_json` 이 자동 채워진다.
+- 버전 bump 가 필요하면 `cims.sh pkg -v X.Y.Z` 또는 `--no-bump` 생략(자동 patch+1).
 
 ### 2.3 TB-Console 에서 배포
 1. TB-Console(`https://<ens160_ip>:3000/`) 접속, admin 로그인
@@ -271,13 +278,14 @@ git rev-parse --short HEAD
 # TB 는 항상 돌고 있어야 함 (cims.sh status 에서 tb-csc, tb-console running 확인)
 cims.sh status
 
-# Phase 1: 기능 검증
-cims.sh verify phase1         # 자동 (preflight → reset → build → configure → start → 시나리오 → 리포트)
+# Phase 1: 기능 검증 (build/dist 안에서 기동 — tarball 생성 없음)
+cims.sh verify phase1         # 자동 (preflight → reset → [1/3] build → [2/3] configure → start all → 시나리오 → 리포트)
 # 또는 TB-Console /testbed/verify 에서 UI 로 실행
 
-# Phase 2: 배포 기능 검증 (TB-Console 에서 UI 진행 권장)
-cims.sh build
-cims.sh pkg --no-bump
+# Phase 2: 배포 기능 검증 — build/configure/pkg 3단계 분리
+cims.sh build                 # [1/3] Phase 1 에서 빌드했다면 생략 가능
+cims.sh configure --local-ip <ens160_ip>   # [2/3] 환경 변경 없으면 생략 가능
+cims.sh pkg --no-bump         # [3/3] tarball 생성 (버전 고정)
 # TB-Console → 배포 > 패키지 업로드 → 대상 호스트에 배포
 
 # Phase 3: New-CSC 경유 배포 체인 (New-Console 3001 에서 UI 진행)

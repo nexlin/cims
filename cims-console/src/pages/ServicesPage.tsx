@@ -351,17 +351,34 @@ export default function ServicesPage() {
         </Modal>
       )}
 
-      {configModule && (() => {
-        const versions = packagesByModule[configModule] || []
-        const v = selectedVersion[configModule] || versions[0]?.version
-        return (
-          <ModuleConfigModal
-            source={{ type: 'module', name: configModule, version: v }}
-            onClose={() => setConfigModule(null)}
-            onDone={() => { setNeedsRestart(s => ({ ...s, [configModule]: true })) }}
-          />
-        )
-      })()}
+      {configModule && (
+        <ConfigModalWrapper
+          moduleName={configModule}
+          version={selectedVersion[configModule] || (packagesByModule[configModule] || [])[0]?.version}
+          onClose={() => setConfigModule(null)}
+          onDone={() => { setNeedsRestart(s => ({ ...s, [configModule]: true })) }}
+        />
+      )}
     </div>
   )
+}
+
+/** source 객체의 reference 가 매 렌더마다 바뀌면 ModuleConfigModal 내부의 useEffect 가
+ *  재실행돼 collection edit 중인 행이 서버 응답으로 덮어써진다 (추가 중 화면 사라짐 버그).
+ *  이 얇은 래퍼가 source 를 useMemo 로 고정해서, 부모의 5s polling re-render 가
+ *  모달 내부 로직에 전파되지 않도록 한다.
+ */
+function ConfigModalWrapper({
+  moduleName, version, onClose, onDone,
+}: {
+  moduleName: string
+  version: string | undefined
+  onClose: () => void
+  onDone: () => void
+}) {
+  const source = useMemo(
+    () => ({ type: 'module' as const, name: moduleName, version }),
+    [moduleName, version]
+  )
+  return <ModuleConfigModal source={source} onClose={onClose} onDone={onDone} />
 }

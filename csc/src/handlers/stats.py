@@ -539,19 +539,57 @@ def _calc_ptt_stats(cur, from_dt, to_dt, gran):
 # ──────────────────────────────────────────────────────────────
 
 async def _subscribers_status(config: dict) -> HandlerResult:
-    """모든 가입자의 VoIP/PTT 접속 상태 + 통화 상태를 반환"""
+    """모든 가입자의 VoLTE/PTT 접속 상태 + 실시간 통화 상태 반환.
+       v3: call_logs 테이블 DROP 후 state 파일이 SOT — CSP 가
+       {ServiceLogDir}/state/{volte|ptt}/{subscriber}.json 에 원자 쓰기로 관리한다."""
 
+    # 1) state 파일에서 active 통화 인덱스 구축
+    volte_states = _load_active_states(config, 'volte')
+    ptt_states = _load_active_states(config, 'ptt')
+
+    voip_active_by_sub = {}   # subscriber_id → [{call_id, peer, role, state, invite_time}]
+    for st in volte_states:
+        sub = st.get('subscriber_id', '')
+        if not sub:
+            continue
+        voip_active_by_sub.setdefault(sub, []).append({
+            'call_id': st.get('call_id', ''),
+            'peer': st.get('peer_id', ''),
+            'role': st.get('role', ''),
+            'state': st.get('state', ''),
+            'invite_time': st.get('started_at'),
+            'answered_at': st.get('answered_at'),
+            'video': st.get('video', False),
+        })
+
+    # PTT: 그룹별 참여자 집계 (active_members = state 파일 기반)
+    group_active_members = {}  # group_id → count
+    for st in ptt_states:
+        gid = st.get('group_id', '')
+        if gid:
+            group_active_members[gid] = group_active_members.get(gid, 0) + 1
+
+    # CMP 에서 floor holder 조회 시도 (실패해도 무관)
+    group_floor_holder = {}
+    try:
+        cmp_stats = _get_cmp_stats(config)
+        for gd in (cmp_stats or {}).get('group_details', []) or []:
+            gid = gd.get('group_id', '')
+            if gid and gd.get('floor_holder'):
+                group_floor_holder[gid] = gd['floor_holder']
+    except Exception:
+        pass
+
+    # 2) DB 에서 가입자 목록 + ptt_group_members total count 조회
     subscribers = []
-
     try:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
-                # 모든 가입자 (voip + ptt subscriptions)
                 cur.execute(
                     "SELECT u.id AS person_id, u.name, "
-                    "vs.id AS voip_id, vs.auth_id AS voip_auth_id, "
+                    "vs.id AS voip_id, vs.imsi AS voip_imsi, vs.service_ref AS voip_service_ref, "
                     "vs.register_time AS voip_reg_time, vs.logout_time AS voip_logout_time, "
-                    "ps.id AS ptt_id, ps.auth_id AS ptt_auth_id, "
+                    "ps.id AS ptt_id, ps.imsi AS ptt_imsi, ps.service_ref AS ptt_service_ref, "
                     "ps.register_time AS ptt_reg_time, ps.logout_time AS ptt_logout_time "
                     "FROM users u "
                     "LEFT JOIN volte_subscriptions vs ON vs.user_id = u.id "
@@ -560,97 +598,40 @@ async def _subscribers_status(config: dict) -> HandlerResult:
                 )
                 rows = cur.fetchall()
 
-                # 현재 활성 VoIP 통화 (가입자별)
-                cur.execute(
-                    "SELECT l.initiator, l.callee, l.state, l.invite_time, l.call_id "
-                    "FROM volte_call_logs l WHERE l.state IN ('ringing','active')"
-                )
-                voip_active = {}
-                for r in cur.fetchall():
-                    r['invite_time'] = _dt(r['invite_time'])
-                    for msisdn in (r['initiator'], r['callee']):
-                        if msisdn:
-                            if msisdn not in voip_active:
-                                voip_active[msisdn] = []
-                            voip_active[msisdn].append({
-                                'call_id': r['call_id'],
-                                'peer': r['callee'] if msisdn == r['initiator'] else r['initiator'],
-                                'role': 'caller' if msisdn == r['initiator'] else 'callee',
-                                'state': r['state'],
-                                'invite_time': r['invite_time'],
-                            })
+                # ptt_group_members 의 그룹별 총 멤버 수 캐시
+                group_total = {}
+                if group_active_members:
+                    placeholders = ','.join(['%s'] * len(group_active_members))
+                    cur.execute(
+                        f"SELECT group_id, COUNT(*) AS cnt FROM ptt_group_members "
+                        f"WHERE group_id IN ({placeholders}) GROUP BY group_id",
+                        tuple(group_active_members.keys())
+                    )
+                    for r in cur.fetchall():
+                        group_total[r['group_id']] = r['cnt']
 
-                # 현재 활성 PTT 그룹 세션 — 그룹별 참여자 목록 수집
-                cur.execute(
-                    "SELECT l.id AS log_id, l.call_id, l.group_id, l.initiator, l.state, l.invite_time "
-                    "FROM ptt_call_logs l WHERE l.state IN ('ringing','active')"
-                )
-                active_ptt_sessions = cur.fetchall()
-
-                # 그룹별 메타 정보 구축: 총 멤버수, 참여 멤버수, 화자
-                group_meta = {}  # group_id → { total_members, active_members, floor_holder }
-                for sess in active_ptt_sessions:
-                    gid = sess['group_id']
-                    if gid and gid not in group_meta:
-                        # 총 멤버수 (ptt_group_members)
-                        cur.execute(
-                            "SELECT COUNT(*) AS cnt FROM ptt_group_members WHERE group_id=%s", (gid,)
-                        )
-                        total_m = cur.fetchone()['cnt']
-
-                        # 현재 참여 멤버수 (ptt_call_participants에서 leave_time IS NULL)
-                        cur.execute(
-                            "SELECT COUNT(*) AS cnt FROM ptt_call_participants "
-                            "WHERE log_id=%s AND leave_time IS NULL", (sess['log_id'],)
-                        )
-                        active_m = cur.fetchone()['cnt']
-
-                        # 화자 정보: initiator를 기본으로 사용 (CMP floor 상태는 DB에 없으므로)
-                        # 향후 CMP stats에서 floor_holder를 받아올 수 있음
-                        group_meta[gid] = {
-                            'total_members': total_m,
-                            'active_members': active_m,
-                            'floor_holder': None,  # 향후 CMP 연동
-                        }
-
-                # CMP에서 그룹별 floor 화자 정보 수집 시도
-                cmp_stats = _get_cmp_stats(config)
-                if cmp_stats and cmp_stats.get('group_details'):
-                    for gd in cmp_stats['group_details']:
-                        gid = gd.get('group_id', '')
-                        if gid in group_meta and gd.get('floor_holder'):
-                            group_meta[gid]['floor_holder'] = gd['floor_holder']
-
-                # 가입자별 PTT 그룹 참여 매핑
-                cur.execute(
-                    "SELECT l.call_id, l.group_id, l.state, l.invite_time, p.msisdn "
-                    "FROM ptt_call_logs l "
-                    "JOIN ptt_call_participants p ON p.log_id = l.id "
-                    "WHERE l.state IN ('ringing','active') AND p.leave_time IS NULL"
-                )
-                ptt_active = {}
-                for r in cur.fetchall():
-                    msisdn = r['msisdn']
-                    gid = r['group_id']
-                    meta = group_meta.get(gid, {})
-                    if msisdn not in ptt_active:
-                        ptt_active[msisdn] = []
-                    ptt_active[msisdn].append({
-                        'call_id': r['call_id'],
+                # 가입자별 PTT 참여 레코드 구축 (state 파일로부터)
+                ptt_active_by_sub = {}
+                for st in ptt_states:
+                    sub = st.get('subscriber_id', '')
+                    gid = st.get('group_id', '')
+                    if not sub:
+                        continue
+                    ptt_active_by_sub.setdefault(sub, []).append({
+                        'call_id': st.get('call_id', ''),
                         'group_id': gid,
-                        'state': r['state'],
-                        'invite_time': _dt(r['invite_time']),
-                        'total_members': meta.get('total_members', 0),
-                        'active_members': meta.get('active_members', 0),
-                        'floor_holder': meta.get('floor_holder'),
+                        'state': st.get('state', 'active'),
+                        'role': st.get('role', 'member'),
+                        'invite_time': st.get('started_at'),
+                        'total_members': group_total.get(gid, 0),
+                        'active_members': group_active_members.get(gid, 0),
+                        'floor_holder': group_floor_holder.get(gid),
                     })
 
-                # 조합
                 for row in rows:
                     voip_id = row.get('voip_id')
                     ptt_id = row.get('ptt_id')
 
-                    # 접속 상태 판단: register_time > logout_time 이면 접속 중
                     voip_online = False
                     if voip_id and row.get('voip_reg_time'):
                         if not row.get('voip_logout_time') or row['voip_reg_time'] > row['voip_logout_time']:
@@ -673,7 +654,7 @@ async def _subscribers_status(config: dict) -> HandlerResult:
                             'msisdn': voip_id,
                             'online': voip_online,
                             'register_time': _dt(row.get('voip_reg_time')),
-                            'calls': voip_active.get(voip_id, []),
+                            'calls': voip_active_by_sub.get(voip_id, []),
                         }
 
                     if ptt_id:
@@ -681,7 +662,7 @@ async def _subscribers_status(config: dict) -> HandlerResult:
                             'msisdn': ptt_id,
                             'online': ptt_online,
                             'register_time': _dt(row.get('ptt_reg_time')),
-                            'groups': ptt_active.get(ptt_id, []),
+                            'groups': ptt_active_by_sub.get(ptt_id, []),
                         }
 
                     subscribers.append(sub)

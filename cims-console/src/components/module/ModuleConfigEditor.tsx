@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
   deploymentApi, type ConfigTemplateCollection, type ConfigTemplateField,
@@ -20,7 +20,7 @@ interface Props {
   collection: ConfigTemplateCollection
 }
 
-export default function ModuleConfigEditor({ source, collection }: Props) {
+function ModuleConfigEditorInner({ source, collection }: Props) {
   const { show } = useToast()
   const [records, setRecords]   = useState<Record_[]>([])
   const [original, setOriginal] = useState<Record_[]>([])
@@ -261,6 +261,15 @@ export default function ModuleConfigEditor({ source, collection }: Props) {
     </div>
   )
 }
+
+/** 부모 (ModuleConfigModal) 가 재렌더링될 때, props (source, collection) 가
+ *  동일 reference 이면 editor 재렌더 자체를 막는다. addRow 등 로컬 state 가
+ *  상위 polling 에 의해 초기화되는 것을 방지하는 최종 방어선. */
+const ModuleConfigEditor = memo(
+  ModuleConfigEditorInner,
+  (prev, next) => prev.source === next.source && prev.collection === next.collection
+)
+export default ModuleConfigEditor
 
 function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
   row: Record_

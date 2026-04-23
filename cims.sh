@@ -302,20 +302,16 @@ cmd_status() {
 cmd_build() {
     [[ -z "$SRC_CONSOLE" ]] && err "build 명령은 소스 트리에서만 실행 가능" && exit 1
     header "=== C++ 빌드 ==="
-    # 인자 파싱: "-j N" / "-jN" / "N" / --no-pkg / -v <ver> / -m <msg>
+    # 3단계 중 1단계: 실제 빌드 + 배포시 필요한 파일을 build/dist 로 복사.
+    # 시험환경 설정은 `cims.sh configure`, 패키지화는 `cims.sh pkg` 로 완전 분리.
+    # 인자: -j N / -jN / N (병렬 작업 수)
     local jobs=""
-    local do_pkg=1
-    local pkg_version=""
-    local pkg_changelog=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -j)         shift; jobs="${1:-}"; shift ;;
             -j*)        jobs="${1#-j}"; shift ;;
-            --no-pkg)   do_pkg=0; shift ;;
-            -v|--version) pkg_version="$2"; shift 2 ;;
-            -m|--changelog) pkg_changelog="$2"; shift 2 ;;
             [0-9]*)     jobs="$1"; shift ;;
-            *)          shift ;;
+            *)          err "알 수 없는 옵션: $1 (build 단계는 인자 없이 실행)"; return 1 ;;
         esac
     done
     [[ -z "$jobs" ]] && jobs=$(nproc)
@@ -325,7 +321,7 @@ cmd_build() {
     make -j"$jobs" 2>&1 | tee "$LOG_DIR/make.log" | grep -E "^\[|error:|Error" | tail -20
     ok "C++ 빌드 완료"
 
-    header "=== dist 패키지 생성 ==="
+    header "=== dist 디렉토리 생성 ==="
     make dist 2>&1 | tee -a "$LOG_DIR/make.log" | tail -5
     ok "dist 생성 완료 → $DIST_DIR"
 
@@ -344,31 +340,19 @@ cmd_build() {
     ok "cims-phone 빌드 완료"
 
     echo ""
-    ok "전체 빌드 완료 → $DIST_DIR"
-
-    # 배포 패키지 자동 생성 (기본 ON, --no-pkg 로 스킵)
-    if [[ $do_pkg -eq 1 ]]; then
-        echo ""
-        header "=== 배포 패키지 생성 (자동) ==="
-        local pkg_args=()
-        [[ -n $pkg_version   ]] && pkg_args+=(-v "$pkg_version")
-        [[ -n $pkg_changelog ]] && pkg_args+=(-m "$pkg_changelog")
-        cmd_pkg "${pkg_args[@]}"
-    fi
-
+    ok "[1/3] build 완료 → $DIST_DIR"
     echo ""
-    info "다음 단계: ./configure.sh --local-ip <서버IP> [--db-password <PW>]"
+    info "다음 단계:"
+    info "  [2/3] ./cims.sh configure --local-ip <서버IP> [--db-password <PW>]   # 시험환경 설정"
+    info "        ./cims.sh start                                                # Phase 1 기능 검증"
+    info "  [3/3] ./cims.sh pkg [-v X.Y.Z]                                       # 배포 패키지화"
 }
 
 # ── configure ──────────────────────────────────────────────────
+# 3단계 중 2단계: 배포 전 시험 환경 설정. 로컬 네트워크 IP / DB 접속정보 /
+# 도메인 / 로그·녹취 경로 등 환경 의존값을 build/dist 의 설정 파일에 반영한다.
 cmd_configure() {
-    if [[ -n "$SRC_CONSOLE" ]]; then
-        # Source tree mode
-        "$SCRIPT_DIR/configure.sh" "$@"
-    else
-        # Dist mode
-        "$SCRIPT_DIR/configure.sh" "$@"
-    fi
+    "$SCRIPT_DIR/configure.sh" "$@"
 }
 
 # ── 데이터 정리 ───────────────────────────────────────────────
@@ -691,11 +675,11 @@ _verify_phase1() {
     fi
     echo "" >> "$report"
 
-    # 3) Build
+    # 3) Build (dist 만 — tarball 은 Phase 2 에서 별도 pkg)
     if [[ $skip_build -eq 0 ]]; then
-        echo "## 3. Build (--no-pkg)" >> "$report"
+        echo "## 3. Build (dist only)" >> "$report"
         echo '```' >> "$report"
-        if ! cmd_build --no-pkg 2>&1 | tail -40 | tee -a "$report"; then
+        if ! cmd_build 2>&1 | tail -40 | tee -a "$report"; then
             echo '```' >> "$report"
             echo "**빌드 실패 — 검증 중단**" >> "$report"
             err "빌드 실패. 리포트: $report"
@@ -719,12 +703,10 @@ _verify_phase1() {
     echo '```' >> "$report"
     echo "" >> "$report"
 
-    # 5) Start — 전체 모듈 기동 (cwrtc/phone 은 옵션성이지만 수동 검증 편의를 위해 모두 기동)
-    echo "## 5. Start (cmp → csp → csc → cwrtc → console → phone)" >> "$report"
+    # 5) Start — 전체 모듈 기동 (cmp → csp → cwrtc → csc → console → phone)
+    echo "## 5. Start (all)" >> "$report"
     echo '```' >> "$report"
-    cmd_start cmp csp csc 2>&1 | tee -a "$report" || true
-    # cwrtc/console/phone 은 실패해도 회귀 시나리오에 영향 없음 (기동만 시도)
-    cmd_start cwrtc console phone 2>&1 | tee -a "$report" || true
+    cmd_start 2>&1 | tee -a "$report" || true
     sleep 2
     cmd_status | tee -a "$report" || true
     echo '```' >> "$report"
@@ -951,11 +933,16 @@ PY
     local rec_ok rec_zero sip_lines
     rec_ok=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size +0 2>/dev/null | wc -l || true)
     rec_zero=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size 0 2>/dev/null | wc -l || true)
-    sip_lines=$(find "$DIST_DIR/ext_mnt/msg_log" -name "*.jsonl" -exec cat {} + 2>/dev/null | wc -l || true)
+    # ServiceLogging 통합 (2026-04-23): msg_log 가 service_log/YYYY/MM/DD/HH/ 로 이동.
+    # *_sip.msg.jsonl / *_cmp.msg.jsonl / *_csc.msg.jsonl / *.flow.jsonl 합산.
+    local msg_lines flow_lines
+    msg_lines=$(find "$DIST_DIR/ext_mnt/service_log" -maxdepth 5 -name "*.msg.jsonl" -exec cat {} + 2>/dev/null | wc -l || true)
+    flow_lines=$(find "$DIST_DIR/ext_mnt/service_log" -maxdepth 5 -name "*.flow.jsonl" -exec cat {} + 2>/dev/null | wc -l || true)
+    sip_lines=$(( ${msg_lines:-0} + ${flow_lines:-0} ))
     {
         echo "- 녹취 파일(size>0): ${rec_ok:-0}개"
         echo "- 녹취 파일(0바이트): ${rec_zero:-0}개"
-        echo "- SIP/msg 로그 라인: ${sip_lines:-0}"
+        echo "- SIP/msg 로그 라인: ${sip_lines:-0} (msg=${msg_lines:-0}, flow=${flow_lines:-0})"
         echo "- ERROR/FATAL 누적: ${err_cnt}건"
         echo ""
         echo "### 수동 검증 항목 (Console 접속 필요)"
@@ -1161,16 +1148,19 @@ ${BOLD}서비스 명령:${NC}
   restart [name|all]                              재시작
   status                                          상태 확인
 
-${BOLD}빌드 & 설정:${NC}
-  build  [-j N] [-v X.Y.Z] [-m "note"] [--no-pkg]
-                       C++ + Web UI 빌드 → dist → (자동) 배포 패키지 생성
-                       -v 생략 시 각 모듈 pkg.json 의 patch 가 auto-bump (예: 0.0.3 → 0.0.4)
-                       -v 지정 시 모든 모듈 해당 버전 + pkg.json 에 반영
-                       --no-pkg 면 패키지 생성 건너뜀
+${BOLD}3단계 분리: 빌드 → 시험환경 설정 → 패키지화${NC}
+  [1/3] build  [-j N]
+                       C++ + Web UI 빌드 → build/dist 복사만 수행.
+                       환경값 반영 없음 (configure 단계 책임).
+  [2/3] configure [options]
+                       시험환경 설정. 로컬 네트워크 IP / DB / 도메인 / 로그경로를
+                       build/dist 의 설정 파일에 반영 → configure.sh 에 위임.
+  [3/3] pkg [-v ...] [--no-bump] [-m ...]
+                       배포 tarball 생성 (아래 "배포 패키지" 섹션 참조).
+
   sync   [targets]     C++ 빌드 없이 Python/스크립트/메타만 dist 로 복사
                        targets: csc | agent | scripts | pkg-meta | console | phone | all
                        (기본: all — C++ 제외. 예: ./cims.sh sync csc && ./cims.sh restart csc)
-  configure [options]  서버 IP/DB 설정 → configure.sh 에 위임
 
 ${BOLD}시뮬레이터:${NC}
   sim [options]
@@ -1194,29 +1184,37 @@ ${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
                          ptt_subscriptions, ptt_groups, ptt_group_members, user_rejects)
   preflight             사전조건 확인 (ens160 IP, 포트 점유, git 상태, DB 연결)
   verify [phase1] [--skip-build|--skip-reset]
-                        Phase 1 전체 자동 실행: preflight → reset → build →
-                        configure(ens160 IP) → start → health → 회귀 시나리오 → 리포트
+                        Phase 1 전체 자동 실행: preflight → reset → [1/3] build →
+                        [2/3] configure(ens160 IP) → start (전체) → health → 회귀 시나리오 → 리포트
                         → verify_reports/<ts>_phase1.md
+                        ([3/3] pkg 는 포함 안 함 — Phase 2 에서 별도 실행)
 
 ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]
 
-${BOLD}배포 패키지 (Console 업로드용):${NC}
+${BOLD}배포 패키지 (Console 업로드용) — [3/3] 단계:${NC}
   pkg [-v X.Y.Z] [--no-bump] [-m <changelog>] [name...]
-                                 tar.gz 생성 + meta.json 포함. 기본: auto-bump patch.
+                                 configure 완료된 build/dist 를 모듈별 tar.gz 로 패키징.
+                                 각 tarball 최상위: meta.json (name/version/설명) +
+                                 config_template.json (설정 스키마) + <모듈>/ 파일.
+                                 기본: auto-bump patch.
                                  -v 지정 시 해당 버전 강제 + pkg.json 반영
                                  --no-bump 면 현재 pkg.json 버전 그대로 (재패키징)
                                  예: ./cims.sh pkg               # 0.0.3 → 0.0.4 자동
                                      ./cims.sh pkg -v 1.0.0 csp  # csp 만 1.0.0 강제
 
 ${BOLD}예시:${NC}
-  # 빌드 → 설정 → 시작 (소스 트리)
+  # [1/3] 빌드 → [2/3] 시험환경 설정 → 기동 (소스 트리)
   $(basename "$0") build
-  ./configure.sh --local-ip 192.168.1.10 --db-password secret
+  $(basename "$0") configure --local-ip 192.168.1.10 --db-password secret
   $(basename "$0") start
 
+  # [3/3] 배포 패키지 생성 (Phase 1 검증 통과 후)
+  $(basename "$0") pkg                            # 모든 모듈 auto-bump
+  $(basename "$0") pkg -v 1.2.0 csp               # csp 만 1.2.0 강제
+
   # 배포 서버에서 (dist/ 내부)
-  ./configure.sh --local-ip 192.168.1.10
+  ./cims.sh configure --local-ip 192.168.1.10
   ./cims.sh start
 
   # 시뮬레이터 (동시 실행)
@@ -1439,8 +1437,10 @@ _resolve_version() {
 }
 
 cmd_pkg() {
-    # 컴포넌트별 배포 tarball 생성 → build/dist/packages/<name>-<ver>.tar.gz
-    # 각 tarball 최상위에 meta.json (name, version, description, build/git/changelog) 포함
+    # 3단계 중 3단계 (패키지화): configure 까지 끝난 build/dist 를 모듈별 tarball 로 묶는다.
+    # 출력: build/dist/packages/<name>-<ver>.tar.gz
+    # 각 tarball 최상위에 meta.json (name, version, description, build/git/changelog) +
+    # config_template.json (설정 스키마) 포함.
     #
     # 버전 결정 로직:
     #   1) -v <ver> 지정: 모든 대상 모듈이 그 버전 사용 + pkg.json 업데이트
@@ -1615,7 +1615,7 @@ PYEOF
         ok "$(basename "$tar_file") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo "${size}B"))"
     done
 
-    header "생성된 패키지 (업로드 대상):"
+    header "[3/3] 생성된 패키지 (업로드 대상):"
     ls -lh "$out_dir"/*.tar.gz 2>/dev/null | awk '{printf "  %s  %s\n", $5, $9}'
     echo ""
     info "Console 에서 업로드: 배포 관리 → 패키지 → ＋ 업로드 (파일만 선택하면 meta 자동 인식)"

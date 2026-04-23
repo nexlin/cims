@@ -22,6 +22,7 @@ struct LocalNodeInfo {
     int         bind_port = 0;
     std::string protocol;           // UDP | TCP | TLS | WS | WSS
     bool        enabled = true;
+    bool        is_primary = false; // CSP 인스턴스 identity (Setup.Sip.LocalIp/UdpPort) 의 근원
     std::string tls_cert_path;
     std::string tls_key_path;
     std::string tls_ca_path;
@@ -52,6 +53,13 @@ public:
 
     /** 전체 스냅샷. */
     std::vector<LocalNodeInfo> GetAll() const;
+
+    /** CSP 인스턴스의 primary local_node 조회. 선택 규칙:
+     *  1) is_primary=true && enabled=true  (여러 개면 name 사전식 첫 번째 + WARN)
+     *  2) enabled=true && edge=access && protocol=UDP  (name 사전식 첫 번째)
+     *  3) 없음 → IsValid()==false 반환. 호출자가 _infra fallback 사용.
+     *  R1 에서 gclsSetup.m_strLocalIp/m_iUdpPort 초기 주입에 사용. */
+    LocalNodeInfo GetPrimary() const;
 
     size_t Size() const;
     bool   HasName(const std::string& name) const;

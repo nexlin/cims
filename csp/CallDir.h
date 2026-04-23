@@ -612,13 +612,18 @@ private:
         ::unlink(_stateFilePath("ptt", subId).c_str());
     }
 
-    /** 특정 call_id 에 매칭되는 volte state 파일 삭제 (caller + callee 동시 정리) */
+    /** 특정 call_id 에 매칭되는 volte state 파일 삭제 (caller + callee 동시 정리).
+     *  B2BUA 두 leg 의 state 파일은 동일 session_id 로 저장되므로 session_id 로 매칭한다 —
+     *  어느 leg 의 call_id 로 호출되어도 양쪽 파일이 모두 정리된다. */
     void _removeVoipStatesByCallId(const std::string& strCallId) {
         if (m_strCallsDir.empty() || strCallId.empty()) return;
+        std::string sessId = _sessionIdByCallId(strCallId);
+        std::string needle = sessId.empty()
+            ? "\"call_id\":\"" + Esc(strCallId) + "\""
+            : "\"session_id\":\"" + Esc(sessId) + "\"";
         std::string dir = m_strCallsDir + "/state/volte";
         DIR* d = opendir(dir.c_str());
         if (!d) return;
-        std::string needle = "\"call_id\":\"" + Esc(strCallId) + "\"";
         struct dirent* ent;
         while ((ent = readdir(d)) != nullptr) {
             if (ent->d_name[0] == '.') continue;
@@ -631,13 +636,17 @@ private:
         closedir(d);
     }
 
-    /** VoIP Answer 시 state 파일 state=ringing → active + answered_at 업데이트 */
+    /** VoIP Answer 시 state 파일 state=ringing → active + answered_at 업데이트.
+     *  session_id 매칭 (leg A/B 어느 call_id 로 호출되든 양쪽 state 파일 갱신). */
     void _promoteVoipStates(const std::string& strCallId, const char* ts) {
         if (m_strCallsDir.empty() || strCallId.empty()) return;
+        std::string sessId = _sessionIdByCallId(strCallId);
+        std::string needle = sessId.empty()
+            ? "\"call_id\":\"" + Esc(strCallId) + "\""
+            : "\"session_id\":\"" + Esc(sessId) + "\"";
         std::string dir = m_strCallsDir + "/state/volte";
         DIR* d = opendir(dir.c_str());
         if (!d) return;
-        std::string needle = "\"call_id\":\"" + Esc(strCallId) + "\"";
         struct dirent* ent;
         while ((ent = readdir(d)) != nullptr) {
             if (ent->d_name[0] == '.') continue;

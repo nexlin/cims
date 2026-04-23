@@ -42,10 +42,14 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
     ? `${source.deployment.package_name} v${source.deployment.package_version} — 설정`
     : `${source.name}${source.version ? ` v${source.version}` : ''} — 설정 (로컬)`
 
-  // Editor 에 전달할 source
-  const editorSource: ModuleConfigEditorSource = source.type === 'deployment'
-    ? { type: 'deployment', deploymentId: source.deployment.id }
-    : { type: 'module',     moduleName: source.name }
+  // Editor 에 전달할 source — 매 렌더마다 새 객체를 만들면 Editor 가 useEffect 재실행 →
+  // 편집 중이던 행이 서버 응답으로 덮어써진다. identity 고정 필수.
+  const editorSource: ModuleConfigEditorSource = useMemo(
+    () => source.type === 'deployment'
+      ? { type: 'deployment', deploymentId: source.deployment.id }
+      : { type: 'module',     moduleName: source.name },
+    [source]
+  )
 
   // source 분기 fetch
   const fetchConfig = useCallback(async () => {

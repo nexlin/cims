@@ -81,9 +81,48 @@ def _parse_body(handler_args: HandlerArgs) -> dict:
     return {}
 
 
-def _load_latest_template(name: str, config: dict) -> Optional[dict]:
-    """cims_package 에서 name 의 가장 최신 버전 config_template_json 반환.
-    version 을 문자열 내림차순으로 단순 정렬 (id DESC 로 최근 업로드 우선)."""
+def _dist_module_template_path(name: str) -> Optional[str]:
+    """dist/<name>/ 안에서 config_template.json 을 찾는다. 현재 컴포넌트별 배치가 둘로 나뉘어 있음:
+       - csp: dist/csp/config/config_template.json
+       - 기타: dist/<name>/config_template.json
+    존재하는 파일 경로 리턴, 없으면 None.
+    """
+    base = os.path.join(_dist_root(), name)
+    for rel in ("config/config_template.json", "config_template.json"):
+        p = os.path.join(base, rel)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _load_dist_module(name: str) -> Optional[dict]:
+    """dist/<name>/pkg.json + config_template.json 을 읽어 `{version, template}` 구조 반환.
+       pkg.json 이 없으면 None (= 이 모듈은 dist 에 없음)."""
+    base = os.path.join(_dist_root(), name)
+    pkg = os.path.join(base, "pkg.json")
+    if not os.path.isfile(pkg):
+        return None
+    try:
+        with open(pkg, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception as e:
+        logger.log_error(f"dist pkg.json read failed: {pkg}: {e}")
+        return None
+    version = meta.get("version") or ""
+    tmpl: dict = {}
+    tmpl_path = _dist_module_template_path(name)
+    if tmpl_path:
+        try:
+            with open(tmpl_path, "r", encoding="utf-8") as f:
+                tmpl = json.load(f) or {}
+        except Exception as e:
+            logger.log_error(f"dist config_template read failed: {tmpl_path}: {e}")
+    return {"version": version, "template": tmpl, "source": "dist",
+            "pkg_path": pkg, "template_path": tmpl_path or ""}
+
+
+def _load_db_module(name: str, config: dict) -> Optional[dict]:
+    """cims_package 최신 버전의 version + config_template_json 을 읽어 리턴. 없으면 None."""
     def _q():
         conn = _get_db(config)
         try:
@@ -99,8 +138,17 @@ def _load_latest_template(name: str, config: dict) -> Optional[dict]:
     row = _q()
     if not row:
         return None
-    tmpl = _safe_json(row.get("config_template_json"))
-    return {"version": row.get("version"), "template": tmpl or {}}
+    tmpl = _safe_json(row.get("config_template_json")) or {}
+    return {"version": row.get("version"), "template": tmpl, "source": "db"}
+
+
+def _load_latest_template(name: str, config: dict) -> Optional[dict]:
+    """Phase 1 검증: dist/<name>/ 가 있으면 그걸 우선 사용. 없으면 DB 로 fallback.
+       리턴 shape: {version, template, source}."""
+    d = _load_dist_module(name)
+    if d is not None:
+        return d
+    return _load_db_module(name, config)
 
 
 def _template_field_map(template: dict) -> dict:
@@ -203,9 +251,44 @@ async def handle_modules(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
                          media_type="application/json")
 
 
+def _scan_dist_modules() -> list:
+    """dist_root 하위 각 서브디렉토리에서 pkg.json 을 찾아 모듈 리스트 반환.
+       리턴: [{name, version, source:'dist', pkg_path}]."""
+    root = _dist_root()
+    out = []
+    try:
+        entries = sorted(os.listdir(root))
+    except FileNotFoundError:
+        return out
+    for entry in entries:
+        base = os.path.join(root, entry)
+        pkg = os.path.join(base, "pkg.json")
+        if not os.path.isfile(pkg):
+            continue
+        try:
+            with open(pkg, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            continue
+        name = (meta.get("name") or entry).strip()
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "version": meta.get("version") or "",
+            "source": "dist",
+            "pkg_path": pkg,
+        })
+    return out
+
+
 async def _list_modules(config: dict) -> HandlerResult:
-    """등록된 패키지의 모듈명 + 최신 버전 목록."""
-    def _q():
+    """등록된 모듈 목록. dist (build/dist/<name>/pkg.json) 를 우선, 이후 cims_package (DB) merge.
+       동일 name 은 dist 값을 우선 사용."""
+    dist_items = await asyncio.to_thread(_scan_dist_modules)
+    seen = {m["name"] for m in dist_items}
+
+    def _q_db():
         conn = _get_db(config)
         try:
             with conn.cursor() as cur:
@@ -224,14 +307,31 @@ async def _list_modules(config: dict) -> HandlerResult:
                 return cur.fetchall()
         finally:
             conn.close()
-    rows = await asyncio.to_thread(_q)
+
+    try:
+        db_rows = await asyncio.to_thread(_q_db)
+    except Exception as e:
+        logger.log_error(f"list_modules db fallback failed: {e}")
+        db_rows = []
+
     items = [
-        {"name": r["name"], "latest_version": r["version"], "package_id": r["id"]}
-        for r in rows
+        {"name": m["name"], "latest_version": m["version"],
+         "source": "dist", "pkg_path": m["pkg_path"]}
+        for m in dist_items
     ]
+    for r in db_rows:
+        if r["name"] in seen:
+            continue
+        items.append({
+            "name": r["name"], "latest_version": r["version"],
+            "source": "db", "package_id": r["id"],
+        })
     items.sort(key=lambda x: x["name"])
-    return HandlerResult(status=200, body={"items": items, "overlay": _overlay_path()},
-                         media_type="application/json")
+    return HandlerResult(status=200, body={
+        "items": items,
+        "overlay": _overlay_path(),
+        "dist_root": _dist_root(),
+    }, media_type="application/json")
 
 
 async def _get_module_config(name: str, config: dict) -> HandlerResult:
@@ -420,7 +520,10 @@ def _signal_module(module_name: str) -> list:
 
 
 def _load_latest_package_template(name: str, config: dict) -> Optional[dict]:
-    """cims_package 최신 버전의 config_template_json (dict) 반환. 없으면 None."""
+    """최신 config_template_json (dict) 반환. dist/<name> 우선, 이후 cims_package (DB) fallback."""
+    d = _load_dist_module(name)
+    if d is not None:
+        return d.get("template") or {}
     def _q():
         conn = _get_db(config)
         try:
@@ -436,7 +539,7 @@ def _load_latest_package_template(name: str, config: dict) -> Optional[dict]:
     row = _q()
     if not row:
         return None
-    return row.get("config_template_json")
+    return _safe_json(row.get("config_template_json"))
 
 
 async def _get_module_collection(name: str, coll_key: str, config: dict) -> HandlerResult:

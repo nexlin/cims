@@ -97,6 +97,49 @@ int ServiceMain() {
         CDirectory::Create( gclsSetup.m_strCdrFolder.c_str() );
     }
     CSipStackSetup clsSetup;
+
+    // v3 (2026-04-22): VoIP 도메인은 AccessServiceMap 이 SOT. 이 시점엔 Sync 전이므로
+    //   ConfigCache 선로드 + LocalNodeMap/AccessServiceMap 선 Sync 후 조회.
+    // R1 (2026-04-23): primary local_node 에서 Setup.Sip.LocalIp/UdpPort 를 유도하기 위해
+    //   LocalNodeMap 도 clsSetup 복사 전에 Sync 한다. (기존 line 224 호출은 제거)
+    {
+        std::string strJsonlDir = gclsSetup.m_strConfigJsonlDir;
+        if (!strJsonlDir.empty() && strJsonlDir[0] != '/') {
+            strJsonlDir = std::string(CDirectory::GetProgramDirectory()) + "/" + strJsonlDir;
+        }
+        gclsCspConfigCache.Init(strJsonlDir);
+        gclsCspConfigCache.LoadInitial();
+        gclsLocalNodeMap.Sync();
+        gclsAccessServiceMap_Sync_compat();
+        gclsSipLogger.SetDomainServiceMap(gclsServiceMap.BuildDomainToKindMap());
+    }
+
+    // R1: primary local_node → gclsSetup.m_strLocalIp/m_iUdpPort override.
+    //   local_nodes 가 CSP identity 의 SOT. bind_ip=0.0.0.0 은 GetLocalIp() 자동탐지로 치환.
+    //   primary 가 없으면 _infra 의 Setup.Sip.LocalIp/UdpPort 를 fallback 으로 사용.
+    {
+        LocalNodeInfo primary = gclsLocalNodeMap.GetPrimary();
+        if ( primary.IsValid() ) {
+            std::string ip = primary.bind_ip;
+            if ( ip.empty() || ip == "0.0.0.0" || ip == "::" ) {
+                std::string auto_ip;
+                GetLocalIp( auto_ip );
+                if ( !auto_ip.empty() ) ip = auto_ip;
+            }
+            if ( !ip.empty() )            gclsSetup.m_strLocalIp = ip;
+            if ( primary.bind_port > 0 )  gclsSetup.m_iUdpPort   = primary.bind_port;
+            CLog::Print( LOG_SYSTEM, "primary local_node '%s' → LocalIp=%s UdpPort=%d",
+                         primary.name.c_str(), gclsSetup.m_strLocalIp.c_str(), gclsSetup.m_iUdpPort );
+            if ( !primary.protocol.empty() && primary.protocol != "UDP" ) {
+                CLog::Print( LOG_INFO, "primary local_node protocol=%s (not UDP) — using for identity only",
+                             primary.protocol.c_str() );
+            }
+        } else {
+            CLog::Print( LOG_INFO, "no primary local_node — using _infra Setup.Sip.LocalIp=%s UdpPort=%d",
+                         gclsSetup.m_strLocalIp.c_str(), gclsSetup.m_iUdpPort );
+        }
+    }
+
     if ( gclsSetup.m_strLocalIp.empty() ) {
         // N개의 IP주소를 사용하는 호스트에서는 SIP 프로토콜로 사용할 IP주소를 직접 입력해 주세요.
         // Vmware 등을 사용하는 경우 N개의 IP주소가 호스트에 존재합니다.
@@ -117,18 +160,6 @@ int ServiceMain() {
 
     clsSetup.m_strUserAgent = "csp_";
     clsSetup.m_strUserAgent.append( CSP_SERVER_VERSION );
-    // v3 (2026-04-22): VoIP 도메인은 AccessServiceMap 이 SOT. 이 시점엔 Sync 전이므로
-    //   ConfigCache 선로드 + AccessServiceMap 선 Sync 후 조회.
-    {
-        std::string strJsonlDir = gclsSetup.m_strConfigJsonlDir;
-        if (!strJsonlDir.empty() && strJsonlDir[0] != '/') {
-            strJsonlDir = std::string(CDirectory::GetProgramDirectory()) + "/" + strJsonlDir;
-        }
-        gclsCspConfigCache.Init(strJsonlDir);
-        gclsCspConfigCache.LoadInitial();
-        gclsAccessServiceMap_Sync_compat();
-        gclsSipLogger.SetDomainServiceMap(gclsServiceMap.BuildDomainToKindMap());
-    }
     clsSetup.m_strDomain = gclsServiceMap.GetDomainByKind("volte");
     clsSetup.m_iStackExecutePeriod = gclsSetup.m_iStackExecutePeriod;
     clsSetup.m_iTimerD = gclsSetup.m_iTimerD;
@@ -221,7 +252,7 @@ int ServiceMain() {
     //   5) RuleSet                  (Rule 참조) — RuleEvaluator 가 둘 다 로드
     //   6/7) RoutingPolicy / AclPolicy (RuleSet + Route/Access 참조) — 후속 스테이지
     //   8) AccessService            (LocalNode 참조)
-    gclsLocalNodeMap.Sync();
+    // R1 (2026-04-23): LocalNodeMap 은 기동 초기 (Setup 결정 시) 이미 Sync 됨 → 여기서는 생략.
     gclsRemoteNodeMap.Sync();
     gclsRouteMap.Sync();
     gclsRouteMap.ValidateRefs();        // LocalNode/RemoteNode 존재 확인

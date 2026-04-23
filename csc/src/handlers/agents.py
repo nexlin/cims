@@ -417,19 +417,107 @@ async def handle_packages(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
 
-async def _list_packages(config):
-    conn = _get_db(config)
+def _dist_root_for_packages() -> str:
+    env = os.environ.get("CIMS_DIST_DIR")
+    if env:
+        return env
+    return os.path.normpath(os.path.join(_COMPONENT_ROOT, ".."))
+
+
+def _scan_dist_virtual_packages() -> list:
+    """build/dist/<name>/pkg.json + config_template.json 을 읽어 synthetic package entry 로 반환.
+       Phase 1 검증용 — 아직 tarball 을 만들지 않은 상태에서도 Console 모듈관리 가 버전/템플릿/설정을 표시하게 함.
+
+       id 는 음수 (`-(offset+1)`) 로 발급 — 실제 cims_package row 와 충돌하지 않음.
+       source='dist' 필드가 tarball upload 건과 구분된다.
+    """
+    import datetime
+    root = _dist_root_for_packages()
+    out = []
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM cims_package ORDER BY name, id DESC")
-            rows = cur.fetchall()
-    finally:
-        conn.close()
-    return HandlerResult(status=200, body={"items": [_package_to_json(r) for r in rows]},
-                         media_type="application/json")
+        entries = sorted(os.listdir(root))
+    except FileNotFoundError:
+        return out
+    idx = 0
+    for entry in entries:
+        base = os.path.join(root, entry)
+        pkg = os.path.join(base, "pkg.json")
+        if not os.path.isfile(pkg):
+            continue
+        try:
+            with open(pkg, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            continue
+        name = (meta.get("name") or entry).strip()
+        if not name:
+            continue
+        # config_template.json 위치 (컴포넌트별 분기)
+        tmpl = None
+        for rel in ("config/config_template.json", "config_template.json"):
+            tpath = os.path.join(base, rel)
+            if os.path.isfile(tpath):
+                try:
+                    with open(tpath, "r", encoding="utf-8") as f:
+                        tmpl = json.load(f)
+                except Exception:
+                    tmpl = None
+                break
+        try:
+            mtime = datetime.datetime.utcfromtimestamp(os.path.getmtime(pkg)).isoformat(timespec="seconds") + "Z"
+        except OSError:
+            mtime = None
+        idx += 1
+        out.append({
+            "id":            -idx,
+            "name":          name,
+            "version":       meta.get("version") or "",
+            "file_path":     base,
+            "file_size":     0,
+            "sha256":        "",
+            "description":   meta.get("description") or "",
+            "uploaded_by":   "dist",
+            "uploaded_at":   mtime,
+            "source":        "dist",
+            "meta":          meta,
+            "config_template": tmpl,
+        })
+    return out
+
+
+async def _list_packages(config):
+    """cims_package (DB, tarball 업로드 분) + build/dist 디렉토리 스캔 결과를 합쳐 반환.
+       동일 name 이 dist + DB 에 모두 있으면 둘 다 돌려준다 (frontend 에서 source 로 구분).
+    """
+    def _q():
+        conn = _get_db(config)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM cims_package ORDER BY name, id DESC")
+                return cur.fetchall()
+        finally:
+            conn.close()
+    try:
+        rows = await asyncio.to_thread(_q)
+    except Exception as e:
+        logger.log_error(f"list_packages db fallback failed: {e}")
+        rows = []
+    db_items = [dict(_package_to_json(r), source="db") for r in rows]
+    dist_items = await asyncio.to_thread(_scan_dist_virtual_packages)
+    # dist 먼저 (같은 name 이면 DB 최신 버전이 그 아래 정렬되어 비교 가능)
+    items = dist_items + db_items
+    items.sort(key=lambda x: (x.get("name", ""), 0 if x.get("source") == "dist" else 1))
+    return HandlerResult(status=200, body={"items": items}, media_type="application/json")
 
 
 async def _get_package(pid: int, config):
+    # pid < 0 → dist 가상 package. _list_packages 의 index 와 동일하게 스캔해서 찾는다.
+    if pid < 0:
+        items = await asyncio.to_thread(_scan_dist_virtual_packages)
+        for it in items:
+            if it.get("id") == pid:
+                return HandlerResult(status=200, body=it, media_type="application/json")
+        return HandlerResult(status=404, body={"error": "dist_not_found"}, media_type="application/json")
     conn = _get_db(config)
     try:
         with conn.cursor() as cur:
@@ -664,6 +752,11 @@ def _move_to_backup(file_path: str, backup_dir: str) -> str:
 
 async def _update_package(handler_args: HandlerArgs, pid: int, config):
     """패키지 메타/설정 템플릿 수정. 파일·sha256 은 불변 (재업로드로 교체)."""
+    if pid < 0:
+        return HandlerResult(status=400,
+            body={"error": "dist_package_readonly",
+                  "hint": "build/dist 모듈은 pkg.json / config_template.json 파일 수정 → cims.sh build 로 반영"},
+            media_type="application/json")
     try:
         body = handler_args.body
         if isinstance(body, (bytes, bytearray)):
@@ -716,6 +809,11 @@ async def _update_package(handler_args: HandlerArgs, pid: int, config):
 
 
 async def _delete_package(pid: int, config):
+    if pid < 0:
+        return HandlerResult(status=400,
+            body={"error": "dist_package_readonly",
+                  "hint": "build/dist 모듈은 파일시스템에서 직접 삭제하세요"},
+            media_type="application/json")
     # DB 에서 메타 조회 + 삭제 (blocking → thread)
     row = await asyncio.to_thread(_pkg_delete_row, config, pid)
     if row is None:

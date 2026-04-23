@@ -177,9 +177,64 @@ apply_template() {
     ok "생성: $dst"
 }
 
+# ── config_template.json → 런타임 config 생성 (A안 통합 렌더러) ─
+#   sections[*].fields 의 dotted key 를 중첩 dict 로 구축. deploy_value 가 있으면 그 값을,
+#   아니면 default 를 사용한다. 모든 @VAR@ 플레이스홀더는 환경변수로 치환.
+apply_config_template() {
+    local src="$1"
+    local dst="$2"
+    [[ ! -f "$src" ]] && warn "템플릿 없음: $src" && return
+    mkdir -p "$(dirname "$dst")"
+    CSP_IP="$CSP_IP" CMP_IP="$CMP_IP" CWRTC_IP="$CWRTC_IP" CSC_HOST="$CSC_HOST" \
+    DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
+    VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" \
+    IDMS_JWT_SECRET="$IDMS_JWT_SECRET" CIMS_JWT_SECRET="$CIMS_JWT_SECRET" \
+    INTERNAL_TOKEN="$INTERNAL_TOKEN" \
+    MSG_LOG_DIR="$MSG_LOG_DIR" SERVICE_LOG_DIR="$SERVICE_LOG_DIR" \
+    RECORD_DIR="$RECORD_DIR" DIST_DIR="$DIST_DIR" \
+    python3 - "$src" "$dst" <<'PY'
+import json, os, re, sys
+
+SRC, DST = sys.argv[1], sys.argv[2]
+ENV_PAT = re.compile(r'@([A-Z_][A-Z0-9_]*)@')
+
+def subst(v):
+    if isinstance(v, str):
+        return ENV_PAT.sub(lambda m: os.environ.get(m.group(1), m.group(0)), v)
+    if isinstance(v, list):
+        return [subst(x) for x in v]
+    if isinstance(v, dict):
+        return {k: subst(x) for k, x in v.items()}
+    return v
+
+def set_path(root, dotted, value):
+    cur = root
+    keys = dotted.split('.')
+    for k in keys[:-1]:
+        cur = cur.setdefault(k, {})
+    cur[keys[-1]] = value
+
+with open(SRC) as f:
+    tpl = json.load(f)
+
+out = {}
+for section in tpl.get('sections', []):
+    for field in section.get('fields', []):
+        key = field.get('key')
+        if not key:
+            continue
+        val = field['deploy_value'] if 'deploy_value' in field else field.get('default')
+        set_path(out, key, subst(val))
+
+with open(DST, 'w') as f:
+    json.dump(out, f, indent=4, ensure_ascii=False)
+PY
+    ok "생성: $dst"
+}
+
 # ── dist 설정 파일 생성 ─────────────────────────────────────────
 apply_template "$DIST_DIR/cmp/config/cmp.json.template"                    "$DIST_DIR/cmp/config/cmp.json"
-apply_template "$DIST_DIR/csp/config/csp.json.template"                    "$DIST_DIR/csp/config/csp.json"
+apply_config_template "$DIST_DIR/csp/config/config_template.json"          "$DIST_DIR/csp/config/csp.json"
 apply_template "$DIST_DIR/cwrtc/config/cwrtc.json.template"                "$DIST_DIR/cwrtc/config/cwrtc.json"
 apply_template "$DIST_DIR/csc/config/csc.json.template"                    "$DIST_DIR/csc/config/csc.json"
 
