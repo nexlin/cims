@@ -21,6 +21,7 @@ struct LocalNodeInfo {
     std::string bind_ip;
     int         bind_port = 0;
     std::string protocol;           // UDP | TCP | TLS | WS | WSS
+    int         thread_count = 0;   // R2: per-listener UDP 수신 스레드 수. 0=fallback → Setup.Sip.UdpThreadCount.
     bool        enabled = true;
     bool        is_primary = false; // CSP 인스턴스 identity (Setup.Sip.LocalIp/UdpPort) 의 근원
     std::string tls_cert_path;

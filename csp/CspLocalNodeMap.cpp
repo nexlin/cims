@@ -36,6 +36,7 @@ bool CCspLocalNodeMap::Sync() {
             n.bind_ip         = row.GetString("bind_ip", "0.0.0.0");
             n.bind_port       = (int)row.GetInt("bind_port", 0);
             n.protocol        = row.GetString("protocol", "UDP");
+            n.thread_count    = (int)row.GetInt("thread_count", 0);
             n.enabled         = _boolish(row.GetString("enabled"), true);
             n.is_primary      = _boolish(row.GetString("is_primary"), false);
             n.tls_cert_path   = row.GetString("tls_cert_path");

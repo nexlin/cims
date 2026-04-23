@@ -151,6 +151,8 @@
           { "key": "bind_ip",         "label": "바인딩 IP", "type": "string", "default": "0.0.0.0", "required": true },
           { "key": "bind_port",       "label": "포트", "type": "int", "default": 5060, "min": 1, "max": 65535, "required": true },
           { "key": "protocol",        "label": "프로토콜", "type": "enum", "options": ["UDP","TCP","TLS","WS","WSS"], "default": "UDP", "required": true },
+          { "key": "thread_count",    "label": "수신 스레드 수", "type": "int", "default": 2, "min": 1, "max": 32,
+            "help": "이 리스너의 UDP 수신 스레드 수. 0 또는 미지정 시 Setup.Sip.UdpThreadCount 로 fallback. TCP/TLS 는 R3+ 확장 대상." },
           { "key": "tls_cert_path",   "label": "TLS cert", "type": "path", "advanced": true },
           { "key": "tls_key_path",    "label": "TLS key",  "type": "path", "advanced": true },
           { "key": "tls_ca_path",     "label": "TLS CA",   "type": "path", "advanced": true },

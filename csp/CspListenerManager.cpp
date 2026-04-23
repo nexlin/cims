@@ -56,6 +56,11 @@ bool CCspListenerManager::Sync() {
         m.bindIp   = row.GetString("bind_ip", "0.0.0.0");
         m.port     = (int)row.GetInt("bind_port");
         m.protocol = proto;
+        // R2: per-listener thread_count. 0/미지정 → Setup.Sip.UdpThreadCount fallback.
+        int iThreads = (int)row.GetInt("thread_count", 0);
+        if (iThreads <= 0) iThreads = gclsSetup.m_iUdpThreadCount;
+        if (iThreads <= 0) iThreads = 1;
+        m.threadCount = iThreads;
         if (m.port <= 0 || m.id == 0) continue;
 
         if (isAlreadyBound(m.bindIp, m.port)) {
@@ -93,13 +98,13 @@ bool CCspListenerManager::Sync() {
         int iOutId = 0;
         const char* pszIp = d.bindIp.empty() ? NULL : d.bindIp.c_str();
         if (gclsUserAgent.m_clsSipStack.AddUdpListener(d.id, pszIp, d.port,
-                                                       gclsSetup.m_iUdpThreadCount, iOutId)) {
+                                                       d.threadCount, iOutId)) {
             stillManaged.push_back(d);
-            CLog::Print(LOG_SYSTEM, "ListenerManager: added id=%d %s:%d",
-                        d.id, d.bindIp.c_str(), d.port);
+            CLog::Print(LOG_SYSTEM, "ListenerManager: added id=%d %s:%d threads=%d",
+                        d.id, d.bindIp.c_str(), d.port, d.threadCount);
         } else {
-            CLog::Print(LOG_ERROR, "ListenerManager: add failed id=%d %s:%d",
-                        d.id, d.bindIp.c_str(), d.port);
+            CLog::Print(LOG_ERROR, "ListenerManager: add failed id=%d %s:%d threads=%d",
+                        d.id, d.bindIp.c_str(), d.port, d.threadCount);
         }
     }
 

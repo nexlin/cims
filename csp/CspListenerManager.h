@@ -32,6 +32,7 @@ private:
         std::string bindIp;
         int         port;
         std::string protocol;
+        int         threadCount;  // R2: per-listener UDP 수신 스레드 수 (실효 적용값)
     };
 
     std::mutex m_mutex;
