@@ -286,7 +286,7 @@ static void PrintUsage(const char* pszBin) {
     printf("  -auth_id     <auth_id>   Digest 인증 ID (PTT E.164는 자동 유도)\n");
     printf("  -domain      <domain>    SIP 도메인 (default: csp)\n");
     printf("  -password    <pwd>       패스워드 (default: 1234)\n");
-    printf("  -mode        <voip|ptt>  단말 유형 (default: voip)\n");
+    printf("  -mode        <volte|ptt> 단말 유형 (default: volte)\n");
     printf("  -group       <group_id>  PTT 그룹 ID (default: 1000)\n");
     printf("  -scenario    <name>      자동 시나리오:\n");
     printf("                             register     - 등록만\n");
@@ -295,6 +295,7 @@ static void PrintUsage(const char* pszBin) {
     printf("                             group-call   - 등록 + 구독 + 그룹통화 (PTT)\n");
     printf("                             full         - 전체 반복\n");
     printf("  -call_duration <secs>    통화 유지 시간 (default: 10)\n");
+    printf("  -callee_override <user>  call 시나리오 에서 INVITE target 을 덮음 (외부 peer 라우팅 시험용)\n");
     printf("  -media_file  <path>      AMR-WB 미디어 파일 (PT=99 전송, 생략 시 합성 RTP)\n");
     printf("  -media_dir   <dir>       미디어 디렉토리 (세션별 라운드로빈 할당)\n");
     printf("  -video_file  <path>      H.264 Annex B 비디오 파일 (PT=96 전송)\n");
@@ -322,7 +323,8 @@ static std::atomic<bool> g_bQuit(false);
 static void RunScenario(std::vector<SimSession*>& sessions,
                         ESimScenario eScenario,
                         int iCallDuration,
-                        const std::string& strGroupId)
+                        const std::string& strGroupId,
+                        const std::string& strCalleeOverride = "")
 {
     // 1. 모든 단말이 등록될 때까지 대기 (최대 30초)
     printf("[Scenario] Waiting for registration...\n");
@@ -366,11 +368,19 @@ static void RunScenario(std::vector<SimSession*>& sessions,
 
     // 3. 통화 시나리오
     if (eScenario == E_SCENARIO_CALL) {
-        printf("[Scenario] Starting paired calls...\n");
-        for (int i = 0; i + 1 < (int)sessions.size(); i += 2) {
-            std::string strTarget = sessions[i + 1]->m_strUser;
-            sessions[i]->StartCall(strTarget);
-            usleep(200000);
+        if (!strCalleeOverride.empty()) {
+            printf("[Scenario] Starting calls (callee_override='%s')...\n", strCalleeOverride.c_str());
+            for (auto* s : sessions) {
+                s->StartCall(strCalleeOverride);
+                usleep(200000);
+            }
+        } else {
+            printf("[Scenario] Starting paired calls...\n");
+            for (int i = 0; i + 1 < (int)sessions.size(); i += 2) {
+                std::string strTarget = sessions[i + 1]->m_strUser;
+                sessions[i]->StartCall(strTarget);
+                usleep(200000);
+            }
         }
         for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
         printf("[Scenario] Ending calls...\n");
@@ -473,6 +483,9 @@ int main(int argc, char* argv[])
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
+    // G8 (2026-04-23): 외부 peer routing 시험용. 비우면 기존 pair 로직 유지.
+    //   값이 있으면 call scenario 의 모든 outbound INVITE target 을 이 user 로 덮음.
+    std::string strCalleeOverride = GetArg(argc, argv, "-callee_override", "");
     std::string strMediaFile  = GetArg(argc, argv, "-media_file",  "");
     std::string strMediaDir   = GetArg(argc, argv, "-media_dir",   "");
     std::string strVideoFile  = GetArg(argc, argv, "-video_file",  "");
@@ -641,7 +654,8 @@ int main(int argc, char* argv[])
                                      std::ref(sessions),
                                      eScenario,
                                      iCallDuration,
-                                     strGroupId);
+                                     strGroupId,
+                                     strCalleeOverride);
     }
 
     // 시나리오 모드: 완료 대기 → 세션 정리 → 종료 (stdin 루프 진입 안함)
