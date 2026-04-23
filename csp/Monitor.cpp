@@ -8,7 +8,6 @@
 #include "RtpMap.h"
 #include "ServerService.h"
 #include "SipServer.h"
-#include "SipServerMap.h"
 #include "SipServerSetup.h"
 #include "SipTcp.h"
 #include "UserMap.h"
@@ -31,7 +30,8 @@ bool CMonitor::RecvRequest( const char *pszRequest, CMonitorString &strResponse 
     if ( !strcmp( pszRequest, MC_CALL_MAP_LIST ) ) {
         gclsCallMap.GetString( strResponse );
     } else if ( !strcmp( pszRequest, MC_SIP_SERVER_MAP_LIST ) ) {
-        gclsSipServerMap.GetString( strResponse );
+        // G10 (2026-04-23): SipServerMap 제거. 빈 응답.
+        (void)strResponse;
     } else if ( !strcmp( pszRequest, MC_USER_MAP_LIST ) ) {
         gclsUserMap.GetString( strResponse );
     } else if ( !strcmp( pszRequest, MC_RTP_MAP_LIST ) ) {

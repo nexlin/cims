@@ -52,7 +52,6 @@ CCallDir gclsCallDir;
 #include "ServerService.h"
 #include "ServerUtility.h"
 #include "SipServer.h"
-#include "SipServerMap.h"
 #include "SipServerSetup.h"
 #include "SipUserAgentVersion.h"
 #include "UserMap.h"
@@ -199,8 +198,7 @@ int ServiceMain() {
     Fork( gbFork );
     SetCoreDumpEnable();
     ServerSignal();
-    CLog::Print( LOG_SYSTEM, "Loading SipServerMap..." );
-    gclsSipServerMap.Load();
+    // G10 (2026-04-23): SipServerMap (legacy IBCF XML) 제거. routes/remote_nodes 체계가 SOT.
 
     // CSP 런타임 설정 캐시 — jsonl 전용 (Phase C 이후).
     //   agent 가 관리하는 install_path/config/*.jsonl 을 SIGUSR1 수신 시마다 재로드.
@@ -352,8 +350,7 @@ int ServiceMain() {
             }
         }
         if ( iSecond % 60 == 0 ) {
-            gclsSipServerMap.Load();
-            gclsSipServerMap.SetSipUserAgentRegisterInfo();
+            // G10 (2026-04-23): SipServerMap periodic reload 제거.
             if ( gclsDbManager.IsConnected() ) {
                 gclsGroupMap.LoadFromDb();
             } else if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {

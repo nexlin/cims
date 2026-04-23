@@ -24,7 +24,6 @@
 #include "CspServiceMap.h"
 #include "SipMessageLogger.h"
 #include "CspServer.h"
-#include "CspSipServer.h"
 #include "CspUser.h"
 #include "CspPttGroup.h"
 #include "DbManager.h"
@@ -36,7 +35,6 @@
 #include "NonceMap.h"
 #include "RtpMap.h"
 #include "SipMd5.h"
-#include "SipServerMap.h"
 #include "SipServerSetup.h"
 #include "SipStackThread.h"   // GetCurrentInboundListenerId()
 #include "SipUtility.h"
@@ -70,7 +68,8 @@ void CModuleDispatcher::InitModules() {
 }
 
 bool CModuleDispatcher::Start(CSipStackSetup& clsSetup) {
-    gclsSipServerMap.SetSipUserAgentRegisterInfo();
+    // G10 (2026-04-23): SipServerMap (legacy IBCF XML) 제거. routing_policies/routes/
+    //   remote_nodes 체계가 SOT. REGISTER_TO_REMOTE 는 별도 워커로 이관 예정.
 
     // UserAgent 시작 (내부적으로 CSipStack 시작 + UserAgent 를 콜백 등록)
     if (gclsUserAgent.Start(clsSetup, this, this) == false) return false;
@@ -322,16 +321,8 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
             }
         }
 
-        // v3 (2026-04-22): 구 RouteEngine 경로 제거. 라우팅 결정은 위 RoutingPolicyEngine 이 담당.
-        //                  ROUTE_SET wiring 은 R8 에서 완료 — 매칭되면 위에서 return false.
-        //                  매칭 실패 (NO_MATCH) 또는 RemoteNode 조회 실패 시 아래 legacy 경로로 폴백.
-
-        // 레거시 IBCF XML 경로 (기존 SipServerXml) — 빈 map 이면 false 반환
-        CspSipServer clsSipServer;
-        std::string strRouteTo;
-        if (gclsSipServerMap.SelectRoutePrefix(strTo.c_str(), clsSipServer, strRouteTo)) {
-            return false;
-        }
+        // G1/G8/G10 (2026-04-23): 외부 peer routing 은 routing_policies 매칭 시 PendingRouteMap
+        //   경유로 결정. 여기까지 도달한 INVITE 는 내부 B2BUA 처리 대상 (CSipUserAgent 위임).
 
         // TAS 서비스 판단: DND, 착신거부
         CspUser clsToUser;
@@ -389,7 +380,9 @@ bool CModuleDispatcher::IsDenyIp(const char* pszIp) { return false; }
 // ──────────────────────────────────────────────────────────────
 
 void CModuleDispatcher::EventRegister(CSipServerInfo* pclsInfo, int iStatus) {
-    gclsSipServerMap.Set(pclsInfo, iStatus);
+    // G10 (2026-04-23): IBCF XML 기반 outbound REGISTER 상태 업데이트 제거.
+    //   routes.register_to_remote 워커가 이관 예정 (현재 미구현).
+    (void)pclsInfo; (void)iStatus;
 }
 
 bool CModuleDispatcher::EventIncomingRequestAuth(CSipMessage* pclsMessage) {
@@ -403,21 +396,17 @@ bool CModuleDispatcher::EventIncomingRequestAuth(CSipMessage* pclsMessage) {
         return false;
     }
 
-    if (gclsSipServerMap.Select(strIp.c_str(), pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str())) {
-        return true;
-    }
+    // G10 (2026-04-23): IBCF XML trunk 기반 incoming auth skip/routing 제거.
+    //   외부 peer 인바운드는 AclPolicy (remote_nodes 기반) 에서 평가되어야 함 (추후 확장).
 
     CspUser clsCspUser;
     bool bCspUserFound = gclsCspUserMap.Select(pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsCspUser);
 
     if (gclsUserMap.Select(pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsUserInfo) == false && !bCspUserFound) {
-        std::string strDestToId;
         if (pclsMessage->IsMethod(SIP_METHOD_BYE)) {
             std::string strCallId;
             pclsMessage->GetCallId(strCallId);
             if (gclsCallMap.Select(strCallId.c_str())) return true;
-        } else if (gclsSipServerMap.SelectIncomingRoute(strIp.c_str(), pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str(), strDestToId)) {
-            return true;
         }
 
         if (CCscfModule::CheckAuthrization(pclsMessage) == false) return false;
@@ -505,27 +494,14 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
             }
         }
 
-        // 레거시 IBCF: 트렁크 (routing policy 매칭 실패 시 fallback)
-        CspSipServer clsSipServer;
-        if (m_clsIbcf.IsEnabled() && gclsSipServerMap.SelectRoutePrefix(pszTo, clsSipServer, strTo)) {
-            clsUser.m_strId = clsSipServer.m_strUserId;
-            clsUser.m_strPassWord = clsSipServer.m_strPassWord;
-            clsUserInfo.m_strIp = clsSipServer.m_strIp;
-            clsUserInfo.m_iPort = clsSipServer.m_iPort;
-            clsUserInfo.m_eTransport = E_SIP_UDP;
-            pszFrom = clsUser.m_strId.c_str();
-            pszTo = strTo.c_str();
-            bRoutePrefix = true;
-            SetCallOwner(pszCallId, &m_clsIbcf);
-        } else if (m_clsIbcf.IsEnabled() && gclsSipServerMap.SelectIncomingRoute(NULL, pszTo, strTo)) {
-            if (gclsCspUserMap.isAlive(strTo, clsUser) == false) return StopCall(pszCallId, SIP_NOT_FOUND);
-            SetCallOwner(pszCallId, &m_clsIbcf);
-        } else if (gclsSetup.IsCallPickupId(pszTo)) {
+        // G10 (2026-04-23): 레거시 IBCF XML trunk (SipServerMap) 경로 제거.
+        //   외부 peer 라우팅은 routing_policies + PendingRouteMap (G1) 으로 결정.
+        //   여기까지 도달한 "내부에 없는 callee" 는 CallPickup 외에는 NOT_FOUND.
+        if (gclsSetup.IsCallPickupId(pszTo)) {
             SetCallOwner(pszCallId, &m_clsTas);
             return PickUp(pszCallId, pszFrom, pszTo, pclsRtp);
-        } else {
-            return StopCall(pszCallId, SIP_NOT_FOUND);
         }
+        return StopCall(pszCallId, SIP_NOT_FOUND);
     }
 
     if (GetCallOwner(pszCallId) == NULL) SetCallOwner(pszCallId, &m_clsTas);

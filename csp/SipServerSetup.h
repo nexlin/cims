@@ -104,9 +104,6 @@ public:
     /** 사용자 계정 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strUserDataFolder;
 
-    /** IP-PBX 정보 저장 폴더 */
-    std::string m_strSipServerDataFolder;
-
     /** 그룹 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strGroupDataFolder;
 

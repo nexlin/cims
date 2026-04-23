@@ -113,7 +113,6 @@
         { "key": "Setup.RtpRelay.LocalCmpIp",   "type": "string",     "default": "0.0.0.0",  "deploy_value": "@CSP_IP@", "hidden": true },
 
         { "key": "Setup.DataFolder.User",       "type": "path",       "default": "user",     "hidden": true },
-        { "key": "Setup.DataFolder.SipServer",  "type": "path",       "default": "route",    "hidden": true },
         { "key": "Setup.DataFolder.Group",      "type": "path",       "default": "group",    "hidden": true },
 
         { "key": "Setup.Cdr.Folder",            "type": "path",       "default": "log/cdr",  "hidden": true },

@@ -270,8 +270,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
             if (setup.Has("DataFolder")) {
                 SimpleJson::JsonNode dataDir = setup.Get("DataFolder");
                 if (dataDir.Has("User")) m_strUserDataFolder = dataDir.GetString("User");
-                if (dataDir.Has("SipServer")) m_strSipServerDataFolder = dataDir.GetString("SipServer");
                 if (dataDir.Has("Group")) m_strGroupDataFolder = dataDir.GetString("Group");
+                // G10 (2026-04-23): DataFolder.SipServer 제거 — SipServerMap legacy 제거와 동반.
             }
 
             if (setup.Has("Database")) {
