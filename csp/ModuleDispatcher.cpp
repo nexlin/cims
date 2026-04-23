@@ -281,20 +281,45 @@ bool CModuleDispatcher::RecvRequest(int iThreadId, CSipMessage* pclsMessage) {
                 return true;
             }
             if (rd.type == ROUTING_ROUTE_SET) {
-                // TODO(S후속): picked_route → outbound transport 배선 후 forward.
-                CLog::Print(LOG_INFO,
-                    "RoutingPolicyEngine: match policy='%s' route_set='%s' picked_route='%s' (not yet wired, falling back to legacy)",
-                    rd.matched_policy.c_str(), rd.target_name.c_str(), rd.picked_route.c_str());
+                // R8 (2026-04-23): picked_route → RouteConfig → RemoteNode → Route header 주입.
+                //   이후 return false 로 UserAgent(B2BUA) 에 넘기면 Route 를 따라 outbound forward.
+                RouteConfig rc = gclsRouteMap.GetByName(rd.picked_route);
+                if (rc.IsValid()) {
+                    RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName(rc.remote_node_ref);
+                    if (rn.IsValid() && !rn.ip.empty() && rn.port > 0) {
+                        ESipTransport eT = E_SIP_UDP;
+                        if      (rn.protocol == "TCP") eT = E_SIP_TCP;
+                        else if (rn.protocol == "TLS") eT = E_SIP_TLS;
+                        pclsMessage->AddRoute(rn.ip.c_str(), rn.port, eT);
+                        CLog::Print(LOG_SYSTEM,
+                            "RoutingPolicyEngine: policy='%s' route_set='%s' picked_route='%s' → RemoteNode %s (%s:%d %s)",
+                            rd.matched_policy.c_str(), rd.target_name.c_str(), rd.picked_route.c_str(),
+                            rn.name.c_str(), rn.ip.c_str(), rn.port, rn.protocol.c_str());
+                        // return false → CSipUserAgent B2BUA forward. Route header 가 outbound 결정.
+                        return false;
+                    } else {
+                        CLog::Print(LOG_ERROR,
+                            "RoutingPolicyEngine: picked_route='%s' remote_node_ref='%s' 조회 실패 — legacy fallback",
+                            rd.picked_route.c_str(), rc.remote_node_ref.c_str());
+                    }
+                } else {
+                    CLog::Print(LOG_ERROR,
+                        "RoutingPolicyEngine: picked_route='%s' Route 조회 실패 — legacy fallback",
+                        rd.picked_route.c_str());
+                }
             }
             if (rd.type == ROUTING_ACCESS_SERVICE) {
+                // R8: access_service target 은 UE 에게 라우팅 (TAS/B2BUA 레거시 경로가 이미 처리).
+                //   명시적 분기 없이 legacy TAS 판단 로직(DND/reject)으로 진행 → 로그만.
                 CLog::Print(LOG_INFO,
-                    "RoutingPolicyEngine: match policy='%s' access_service='%s' (falling back to legacy TAS path)",
+                    "RoutingPolicyEngine: match policy='%s' access_service='%s' (legacy TAS path)",
                     rd.matched_policy.c_str(), rd.target_name.c_str());
             }
         }
 
         // v3 (2026-04-22): 구 RouteEngine 경로 제거. 라우팅 결정은 위 RoutingPolicyEngine 이 담당.
-        //                  ROUTING_ROUTE_SET 경로의 실제 outbound 배선은 EventIncomingCall 에서 수행.
+        //                  ROUTE_SET wiring 은 R8 에서 완료 — 매칭되면 위에서 return false.
+        //                  매칭 실패 (NO_MATCH) 또는 RemoteNode 조회 실패 시 아래 legacy 경로로 폴백.
 
         // 레거시 IBCF XML 경로 (기존 SipServerXml) — 빈 map 이면 false 반환
         CspSipServer clsSipServer;
