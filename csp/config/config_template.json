@@ -2,9 +2,9 @@
   "version": 2,
   "sections": [
     {
-      "key": "sip",
+      "key": "sip_stack",
       "title": "SIP Stack",
-      "description": "SIP 스택 공통 정책. 수신 엔드포인트(bind_ip/bind_port)는 local_nodes 콜렉션에서 정의되며, CSP 인스턴스의 identity(From/Via/Contact 생성용 Local IP/Port)는 local_nodes 의 primary 항목에서 자동 주입됨.",
+      "description": "SIP 스택 내부 운용 (스레드/틱). 수신 엔드포인트(bind_ip/bind_port)와 CSP identity 는 local_nodes 콜렉션에서 정의.",
       "fields": [
         {
           "key": "Setup.Sip.UdpThreadCount", "label": "UDP 수신 스레드 수 (fallback)",
@@ -15,35 +15,54 @@
         {
           "key": "Setup.Sip.StackExecutePeriod", "label": "Stack tick (ms)",
           "type": "int", "default": 20, "min": 1, "max": 1000,
-          "restart": true
-        },
+          "restart": true,
+          "help": "psip Stack 내부 타이머 tick 주기. 변경 시 CSP 재기동 필요."
+        }
+      ]
+    },
+    {
+      "key": "cscf",
+      "title": "CSCF (가입자 등록/관리)",
+      "description": "REGISTER/SUBSCRIBE 처리 모듈 정책. 역할 토글은 Roles.CSCF.",
+      "fields": [
         {
           "key": "Setup.Sip.MinRegisterTimeout", "label": "최소 REGISTER timeout (s)",
           "type": "int", "default": 60, "min": 10,
-          "restart": true
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 REGISTER 응답부터 적용."
         },
         {
           "key": "Setup.Sip.UserTimeout", "label": "User Alive Timeout (s)",
           "type": "int", "default": 3600, "min": 60,
-          "restart": true
-        },
-        {
-          "key": "Setup.Sip.StaleCallTimeout", "label": "Stale Call Timeout (s)",
-          "type": "int", "default": 300, "min": 0,
-          "restart": true,
-          "help": "0 = 비활성. 마지막 SIP activity 이후 무응답 통화 자동 종료."
-        },
-        {
-          "key": "Setup.Sip.CallPickupId", "label": "Call Pickup ID",
-          "type": "string", "default": "**",
-          "restart": true,
-          "help": "TAS 의 Call Pickup 기능용 트리거 전화번호."
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 만료 주기부터 적용."
         },
         {
           "key": "Setup.Sip.SendOptionsPeriod", "label": "UE OPTIONS keepalive (s)",
           "type": "int", "default": 0, "min": 0,
-          "restart": true,
-          "help": "0 = 비활성. 양의 값이면 등록된 UE 에 주기적으로 OPTIONS 전송."
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 0 = 비활성. 양의 값이면 등록된 UE 에 주기적 OPTIONS."
+        }
+      ]
+    },
+    {
+      "key": "tas",
+      "title": "TAS (VoLTE 서비스)",
+      "description": "VoLTE B2BUA 및 부가 서비스(당겨받기/착신거부/DND) 정책. 역할 토글은 Roles.TAS.",
+      "fields": [
+        {
+          "key": "Setup.Sip.CallPickupId", "label": "Call Pickup ID (당겨받기)",
+          "type": "string", "default": "**",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 INVITE 부터 적용.",
+          "help": "VoLTE 당겨받기 기능 트리거 전화번호."
+        },
+        {
+          "key": "Setup.Sip.StaleCallTimeout", "label": "Stale Call Timeout (s)",
+          "type": "int", "default": 300, "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 30 초 주기 체크에서 다음 cycle 부터 적용.",
+          "help": "0 = 비활성. 마지막 SIP activity 이후 무응답 통화 자동 종료."
         }
       ]
     },
@@ -96,35 +115,40 @@
     {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
-      "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움.",
+      "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움. 모든 필드는 hidden: true.",
       "hidden": true,
       "fields": [
-        { "key": "Setup.Sip.LocalIp",           "type": "string",     "default": "0.0.0.0",  "deploy_value": "@CSP_IP@", "hidden": true,
+        { "key": "Setup.Sip.LocalIp",           "label": "Local IP (fallback)",        "type": "string",     "default": "0.0.0.0",  "deploy_value": "@CSP_IP@", "hidden": true, "restart": true,
           "help": "primary local_node 가 없을 때 fallback. 정상 경로는 local_nodes 의 primary 항목에서 자동 주입." },
-        { "key": "Setup.Sip.UdpPort",           "type": "int",        "default": 5060, "min": 1, "max": 65535, "hidden": true,
+        { "key": "Setup.Sip.UdpPort",           "label": "UDP Port (fallback)",        "type": "int",        "default": 5060, "min": 1, "max": 65535, "hidden": true, "restart": true,
           "help": "primary local_node 가 없을 때 fallback. 정상 경로는 local_nodes 의 primary 항목에서 자동 주입." },
-        { "key": "Setup.Sip.TcpPort",           "type": "int",        "default": 25061,      "hidden": true },
-        { "key": "Setup.Sip.TcpThreadCount",    "type": "int",        "default": 2,          "hidden": true },
-        { "key": "Setup.Sip.TcpRecvTimeout",    "type": "int",        "default": 600,        "hidden": true },
-        { "key": "Setup.Sip.TlsPort",           "type": "int",        "default": 5061,       "hidden": true },
-        { "key": "Setup.Sip.TlsAcceptTimeout",  "type": "int",        "default": 10,         "hidden": true },
-        { "key": "Setup.Sip.CertFile",          "type": "path",       "default": "cert/csp.pem", "hidden": true },
+        { "key": "Setup.Sip.TcpPort",           "label": "TCP Port (fallback)",        "type": "int",        "default": 25061,      "hidden": true, "restart": true,
+          "help": "primary local_node TCP 가 없을 때 fallback." },
+        { "key": "Setup.Sip.TcpThreadCount",    "label": "TCP 수신 스레드",            "type": "int",        "default": 2,          "hidden": true, "restart": true },
+        { "key": "Setup.Sip.TcpRecvTimeout",    "label": "TCP 수신 timeout (s)",       "type": "int",        "default": 600,        "hidden": true, "restart": true },
+        { "key": "Setup.Sip.TlsPort",           "label": "TLS Port (fallback)",        "type": "int",        "default": 5061,       "hidden": true, "restart": true,
+          "help": "primary local_node TLS 가 없을 때 fallback." },
+        { "key": "Setup.Sip.TlsAcceptTimeout",  "label": "TLS accept timeout (s)",     "type": "int",        "default": 10,         "hidden": true, "restart": true },
+        { "key": "Setup.Sip.CertFile",          "label": "TLS 인증서 파일 (fallback)", "type": "path",       "default": "cert/csp.pem", "hidden": true, "restart": true,
+          "help": "local_node 에 tls_cert_path 미지정 시 stack-global 용." },
 
-        { "key": "Setup.RtpRelay.LocalCmpIp",   "type": "string",     "default": "0.0.0.0",  "deploy_value": "@CSP_IP@", "hidden": true },
+        { "key": "Setup.RtpRelay.LocalCmpIp",   "label": "CMP 수신용 Local IP",        "type": "string",     "default": "0.0.0.0",  "deploy_value": "@CSP_IP@", "hidden": true, "restart": true },
 
-        { "key": "Setup.DataFolder.User",       "type": "path",       "default": "user",     "hidden": true },
-        { "key": "Setup.DataFolder.Group",      "type": "path",       "default": "group",    "hidden": true },
+        { "key": "Setup.DataFolder.User",       "label": "User 데이터 폴더 (legacy)",  "type": "path",       "default": "user",     "hidden": true, "restart": true,
+          "help": "DB 가 SOT. 이 폴더는 DB 미연결 시 fallback." },
+        { "key": "Setup.DataFolder.Group",      "label": "Group 데이터 폴더 (legacy)", "type": "path",       "default": "group",    "hidden": true, "restart": true,
+          "help": "DB 가 SOT. 이 폴더는 DB 미연결 시 fallback." },
 
-        { "key": "Setup.Cdr.Folder",            "type": "path",       "default": "log/cdr",  "hidden": true },
+        { "key": "Setup.ServiceLogging.Dir",    "label": "서비스 로그 루트",           "type": "path",       "default": "service_log", "deploy_value": "@SERVICE_LOG_DIR@", "hidden": true, "restart": true,
+          "help": "녹취(call.d/*.rtp) + SIP/CMP/CSC msg.jsonl + flow.jsonl 저장 루트." },
+        { "key": "Setup.ServiceLogging.Enable", "label": "서비스 로그 인터페이스",     "type": "string_list","default": ["sip", "cmp", "csc"], "hidden": true, "restart": true },
+        { "key": "Setup.ServiceLogging.Recording","label": "녹취 활성화",              "type": "bool",       "default": true,       "hidden": true, "restart": true },
 
-        { "key": "Setup.ServiceLogging.Dir",    "type": "path",       "default": "service_log", "deploy_value": "@SERVICE_LOG_DIR@", "hidden": true },
-        { "key": "Setup.ServiceLogging.Enable", "type": "string_list","default": ["sip", "cmp", "csc"], "hidden": true },
-        { "key": "Setup.ServiceLogging.Recording","type": "bool",     "default": true,       "hidden": true },
+        { "key": "Setup.Monitor.Port",          "label": "Monitor API Port",           "type": "int",        "default": 16000,      "hidden": true, "restart": true },
+        { "key": "Setup.Monitor.ClientIpList",  "label": "Monitor 접근 허용 IP",       "type": "string_list","default": ["127.0.0.1"], "deploy_value": ["@CSP_IP@"], "hidden": true, "restart": true },
 
-        { "key": "Setup.Monitor.Port",          "type": "int",        "default": 16000,      "hidden": true },
-        { "key": "Setup.Monitor.ClientIpList",  "type": "string_list","default": ["127.0.0.1"], "deploy_value": ["@CSP_IP@"], "hidden": true },
-
-        { "key": "Setup.Security.DenySipUserAgentList", "type": "string_list", "default": ["friendly-scanner", "sundayddr"], "hidden": true }
+        { "key": "Setup.Security.DenySipUserAgentList", "label": "차단 User-Agent 목록", "type": "string_list", "default": ["friendly-scanner", "sundayddr"], "hidden": true, "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 request 부터 적용." }
       ]
     }
   ],
