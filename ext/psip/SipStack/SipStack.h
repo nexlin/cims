@@ -178,6 +178,10 @@ private:
 	 *  매칭 실패 시 m_hUdpSocket (primary) 반환. response 는 primary 유지 (호출자에서 분기). */
 	Socket _SelectUdpSocketForViaRequest( CSipMessage * pclsMessage );
 
+	/** R5.b'': 지정된 listener id 의 UDP socket 반환. response path 에서 요청이 수신된
+	 *  listener 로 응답을 돌려보내기 위해 사용. id <= 0 이거나 매칭 실패 시 primary fallback. */
+	Socket _SelectUdpSocketByListenerId( int iListenerId );
+
 	// TCP 다중 리스너 (R3: hot-reload)
 	std::vector<CSipStackTcpListener*> m_vecTcpListeners;
 	CSipMutex m_clsTcpListenerMutex;

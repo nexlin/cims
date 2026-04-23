@@ -344,11 +344,15 @@ bool CSipStack::Send( CSipMessage * pclsMessage, bool bCheckMessage )
 	if( eTransport == E_SIP_UDP )
 	{
 		// R5.b': Request 의 경우 Via[0] (우리 source) 와 매칭되는 listener socket 사용.
-		// Response 는 primary 로 유지 — inbound listener 추적은 R5.b'' 범위.
-		Socket hSendSocket = m_hUdpSocket;
+		// R5.b'': Response 는 요청이 수신된 listener (m_iListenerId) 로 회신.
+		Socket hSendSocket;
 		if( pclsMessage->IsRequest() )
 		{
 			hSendSocket = _SelectUdpSocketForViaRequest( pclsMessage );
+		}
+		else
+		{
+			hSendSocket = _SelectUdpSocketByListenerId( pclsMessage->m_iListenerId );
 		}
 
 		m_clsUdpSendMutex.acquire();

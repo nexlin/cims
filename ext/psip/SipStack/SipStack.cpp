@@ -642,6 +642,26 @@ Socket CSipStack::_SelectUdpSocketForViaRequest( CSipMessage * pclsMessage )
 	return result;
 }
 
+// ── R5.b'': listener id 로 UDP socket 선택 (response path) ──
+Socket CSipStack::_SelectUdpSocketByListenerId( int iListenerId )
+{
+	if( iListenerId <= 0 ) return m_hUdpSocket;
+
+	m_clsUdpListenerMutex.acquire();
+	Socket result = m_hUdpSocket;
+	for( auto * pL : m_vecUdpListeners )
+	{
+		if( !pL || pL->m_hSocket == INVALID_SOCKET ) continue;
+		if( pL->m_iId == iListenerId )
+		{
+			result = pL->m_hSocket;
+			break;
+		}
+	}
+	m_clsUdpListenerMutex.release();
+	return result;
+}
+
 bool CSipStack::AddUdpListener( int iExtId, const char* pszBindIp, int iPort,
                                  int iThreadCount, int& outId )
 {

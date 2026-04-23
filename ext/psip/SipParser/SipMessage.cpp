@@ -971,6 +971,8 @@ CSipMessage *CSipMessage::CreateResponse(int iStatus, const char *pszToTag) {
   pclsResponse->m_clsCallId = m_clsCallId;
   pclsResponse->m_clsCSeq = m_clsCSeq;
   pclsResponse->m_eTransport = m_eTransport;
+  // R5.b'': 응답은 요청이 수신된 listener 로 돌아가야 하므로 id 계승
+  pclsResponse->m_iListenerId = m_iListenerId;
 
   if (iStatus != SIP_TRYING) {
     // 100 Trying 은 SIP Record-Route 헤더를 포함하지 않아도 된다.
@@ -1007,6 +1009,8 @@ CSipMessage *CSipMessage::CreateResponseWithToTag(int iStatus) {
   pclsResponse->m_clsCallId = m_clsCallId;
   pclsResponse->m_clsCSeq = m_clsCSeq;
   pclsResponse->m_eTransport = m_eTransport;
+  // R5.b'': 응답은 요청이 수신된 listener 로 돌아가야 하므로 id 계승
+  pclsResponse->m_iListenerId = m_iListenerId;
 
   if (pclsResponse->m_clsTo.SelectParam(SIP_TAG) == false) {
     pclsResponse->m_clsTo.InsertTag();
