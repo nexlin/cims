@@ -63,7 +63,11 @@ bool CCspListenerManager::_addListenerToStack(const ManagedInfo& m, int& outId) 
         return gclsUserAgent.m_clsSipStack.AddTcpListener(m.id, pszIp, m.port, outId);
 #ifdef USE_TLS
     } else if (m.protocol == "TLS") {
-        return gclsUserAgent.m_clsSipStack.AddTlsListener(m.id, pszIp, m.port, outId);
+        const char* pszCert = m.tlsCertPath.empty() ? NULL : m.tlsCertPath.c_str();
+        const char* pszKey  = m.tlsKeyPath.empty()  ? NULL : m.tlsKeyPath.c_str();
+        const char* pszCa   = m.tlsCaPath.empty()   ? NULL : m.tlsCaPath.c_str();
+        return gclsUserAgent.m_clsSipStack.AddTlsListener(m.id, pszIp, m.port,
+                                                          pszCert, pszKey, pszCa, outId);
 #endif
     }
     return false;
@@ -126,14 +130,17 @@ bool CCspListenerManager::Sync() {
             continue;
         }
 
-        // TLS cert path 경고 (R4 범위 밖)
+        // R5.c: TLS per-listener cert 경로 수집. 빈 값이면 stack-global cert 사용.
         if (m.protocol == "TLS") {
-            std::string strCert = row.GetString("tls_cert_path");
-            if (!strCert.empty()) {
+            m.tlsCertPath = row.GetString("tls_cert_path");
+            m.tlsKeyPath  = row.GetString("tls_key_path");
+            m.tlsCaPath   = row.GetString("tls_ca_path");
+            if (!m.tlsCertPath.empty()) {
                 CLog::Print(LOG_INFO,
-                    "ListenerManager: id=%d TLS tls_cert_path='%s' recorded but per-listener cert "
-                    "not applied (stack-global cert used — see Setup.Sip.CertFile). R5+.",
-                    m.id, strCert.c_str());
+                    "ListenerManager: id=%d TLS per-listener cert='%s' key='%s' ca='%s'",
+                    m.id, m.tlsCertPath.c_str(),
+                    m.tlsKeyPath.empty() ? "<same as cert>" : m.tlsKeyPath.c_str(),
+                    m.tlsCaPath.empty() ? "<none>" : m.tlsCaPath.c_str());
             }
         }
 

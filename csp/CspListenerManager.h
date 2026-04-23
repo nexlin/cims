@@ -37,6 +37,9 @@ private:
         int         port;
         std::string protocol;     // "UDP" | "TCP" | "TLS"
         int         threadCount;  // R2: UDP 수신 스레드 수. TCP/TLS 는 무시.
+        std::string tlsCertPath;  // R5.c: TLS 전용. 비어있으면 stack-global cert 사용.
+        std::string tlsKeyPath;
+        std::string tlsCaPath;
     };
 
     std::mutex m_mutex;

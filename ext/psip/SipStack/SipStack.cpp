@@ -484,7 +484,7 @@ bool CSipStack::_Stop( )
 	m_clsTcpSocketMap.DeleteAll();
 
 #ifdef USE_TLS
-	// R3: TLS 리스너 전체 정리.
+	// R3 + R5.c: TLS 리스너 전체 정리. per-listener SSL_CTX 가 있으면 free.
 	m_clsTlsListenerMutex.acquire();
 	for( auto* pListener : m_vecTlsListeners )
 	{
@@ -492,6 +492,11 @@ bool CSipStack::_Stop( )
 		{
 			closesocket( pListener->m_hSocket );
 			pListener->m_hSocket = INVALID_SOCKET;
+		}
+		if( pListener->m_pSslCtx )
+		{
+			SSLServerCtxFree( pListener->m_pSslCtx );
+			pListener->m_pSslCtx = NULL;
 		}
 		delete pListener;
 	}
@@ -834,6 +839,11 @@ void CSipStack::_StopTlsListenerLocked( CSipStackTlsListener * pListener )
 		closesocket( pListener->m_hSocket );
 		pListener->m_hSocket = INVALID_SOCKET;
 	}
+	if( pListener->m_pSslCtx )
+	{
+		SSLServerCtxFree( pListener->m_pSslCtx );
+		pListener->m_pSslCtx = NULL;
+	}
 }
 
 void CSipStack::_RefreshPrimaryTlsSocketLocked()
@@ -848,7 +858,9 @@ void CSipStack::_RefreshPrimaryTlsSocketLocked()
 	}
 }
 
-bool CSipStack::AddTlsListener( int iExtId, const char* pszBindIp, int iPort, int& outId )
+bool CSipStack::AddTlsListener( int iExtId, const char* pszBindIp, int iPort,
+                                const char* pszCertFile, const char* pszKeyFile, const char* pszCaCertFile,
+                                int& outId )
 {
 	if( !m_bStarted ) return false;
 
@@ -859,10 +871,27 @@ bool CSipStack::AddTlsListener( int iExtId, const char* pszBindIp, int iPort, in
 	pListener->m_bIpv6     = m_clsSetup.m_bIpv6;
 	pListener->m_pclsStack = this;
 
+	// R5.c: per-listener cert 지정 시 독립 SSL_CTX 생성. 없으면 stack-global 유지(m_pSslCtx=NULL).
+	if( pszCertFile && *pszCertFile )
+	{
+		pListener->m_strCertFile   = pszCertFile;
+		pListener->m_strKeyFile    = ( pszKeyFile && *pszKeyFile ) ? pszKeyFile : "";
+		pListener->m_strCaCertFile = ( pszCaCertFile && *pszCaCertFile ) ? pszCaCertFile : "";
+		pListener->m_pSslCtx = SSLServerCtxCreate( pszCertFile, pszKeyFile, pszCaCertFile );
+		if( pListener->m_pSslCtx == NULL )
+		{
+			CLog::Print( LOG_ERROR, "AddTlsListener: SSLServerCtxCreate failed id=%d cert=%s",
+			             pListener->m_iId, pszCertFile );
+			delete pListener;
+			return false;
+		}
+	}
+
 	if( !_StartTlsListenerLocked( pListener ) )
 	{
 		CLog::Print( LOG_ERROR, "AddTlsListener: bind failed ip=%s port=%d",
 		             pListener->m_strBindIp.c_str(), pListener->m_iPort );
+		SSLServerCtxFree( pListener->m_pSslCtx );
 		delete pListener;
 		return false;
 	}
@@ -871,6 +900,7 @@ bool CSipStack::AddTlsListener( int iExtId, const char* pszBindIp, int iPort, in
 	{
 		CLog::Print( LOG_ERROR, "AddTlsListener: thread start failed id=%d", pListener->m_iId );
 		closesocket( pListener->m_hSocket );
+		SSLServerCtxFree( pListener->m_pSslCtx );
 		delete pListener;
 		return false;
 	}
@@ -881,8 +911,9 @@ bool CSipStack::AddTlsListener( int iExtId, const char* pszBindIp, int iPort, in
 	m_clsTlsListenerMutex.release();
 
 	outId = pListener->m_iId;
-	CLog::Print( LOG_INFO, "AddTlsListener id=%d %s:%d",
-	             pListener->m_iId, pListener->m_strBindIp.c_str(), pListener->m_iPort );
+	CLog::Print( LOG_INFO, "AddTlsListener id=%d %s:%d cert=%s",
+	             pListener->m_iId, pListener->m_strBindIp.c_str(), pListener->m_iPort,
+	             pListener->m_strCertFile.empty() ? "<stack-global>" : pListener->m_strCertFile.c_str() );
 	return true;
 }
 

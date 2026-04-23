@@ -93,8 +93,13 @@ public:
 };
 
 #ifdef USE_TLS
-/** 단일 TLS 리스너 (R3). TCP 와 동일 구조, worker pool 은 m_clsTlsThreadList.
- *  (인증서는 현재 stack-global SSLServerStart 로 관리 — per-listener cert 는 R4 이후) */
+// forward-declare openssl SSL_CTX 를 최소 의존성으로 잡기 위해 원타입 별칭 사용
+struct ssl_ctx_st;
+typedef struct ssl_ctx_st SSL_CTX;
+
+/** 단일 TLS 리스너 (R3, R5.c 에서 per-listener cert 확장).
+ *  TCP 와 동일 구조, worker pool 은 m_clsTlsThreadList 공유.
+ *  m_pSslCtx 가 유효하면 accept 시 per-listener SSL_CTX 사용, NULL 이면 stack-global. */
 class CSipStackTlsListener
 {
 public:
@@ -105,7 +110,8 @@ public:
           m_iActiveThreads(0),
           m_bDrain(false),
           m_bIpv6(false),
-          m_pclsStack(NULL)
+          m_pclsStack(NULL),
+          m_pSslCtx(NULL)
     {}
 
     int           m_iId;
@@ -116,6 +122,12 @@ public:
     std::atomic<bool> m_bDrain;
     bool          m_bIpv6;
     CSipStack*    m_pclsStack;
+
+    // R5.c: per-listener TLS 인증서
+    std::string   m_strCertFile;
+    std::string   m_strKeyFile;
+    std::string   m_strCaCertFile;
+    SSL_CTX*      m_pSslCtx;   // NULL → stack-global gpsttServerCtx 사용
 };
 #endif
 

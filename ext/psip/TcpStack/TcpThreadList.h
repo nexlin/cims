@@ -31,12 +31,16 @@ class CTcpStack;
 
 /**
  * @ingroup TcpStack
- * @brief TCP ¾²·¹µå¿¡ TCP ¼¼¼ÇÀ» Àü´ŞÇÒ ¶§¿¡ »ç¿ëµÇ´Â Å¬·¡½º - m_bUseThreadPipe °¡ true ÀÏ ¶§¿¡ »ç¿ëµÈ´Ù.
+ * @brief TCP ï¿½ï¿½ï¿½ï¿½ï¿½å¿¡ TCP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ç´ï¿½ Å¬ï¿½ï¿½ï¿½ï¿½ - m_bUseThreadPipe ï¿½ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½È´ï¿½.
  */
 class CTcpComm
 {
 public:
+#ifdef USE_TLS
+	CTcpComm() : m_hSocket(INVALID_SOCKET), m_iPort(0), m_psttSsl(NULL), m_pSslCtx(NULL), m_bClient(false)
+#else
 	CTcpComm() : m_hSocket(INVALID_SOCKET), m_iPort(0), m_psttSsl(NULL), m_bClient(false)
+#endif
 	{
 		m_szIp[0] = '\0';
 	}
@@ -59,17 +63,22 @@ public:
 	}
 
 	Socket	m_hSocket;
-	char		m_szIp[INET6_ADDRSTRLEN];	// ÆĞÅ¶À¸·Î Àü¼ÛµÇ¹Ç·Î std::string À» »ç¿ëÇÒ ¼ö ¾ø´Ù.
+	char		m_szIp[INET6_ADDRSTRLEN];	// ï¿½ï¿½Å¶ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ÛµÇ¹Ç·ï¿½ std::string ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½.
 	int			m_iPort;
 	SSL			* m_psttSsl;
+#ifdef USE_TLS
+	/** R5.c: accept thread ê°€ per-listener SSL_CTX ë¥¼ worker ë¡œ ì „ë‹¬.
+	 *  NULL ì´ë©´ worker ëŠ” global gpsttServerCtx ì‚¬ìš© (í•˜ìœ„ í˜¸í™˜). */
+	SSL_CTX		* m_pSslCtx;
+#endif
 
-	/** TCP client ·Î ¼­¹ö¿¡ ¿¬°áµÈ °æ¿ì¿¡ true ÀÌ´Ù. */
+	/** TCP client ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ì¿¡ true ï¿½Ì´ï¿½. */
 	bool		m_bClient;
 };
 
 /**
  * @ingroup TcpStack
- * @brief ¾²·¹µå ¸®½ºÆ®¿¡ Æ÷ÇÔµÇ´Â ÇÏ³ªÀÇ ¾²·¹µå Á¤º¸ ÀúÀå Å¬·¡½º
+ * @brief ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ®ï¿½ï¿½ ï¿½ï¿½ï¿½ÔµÇ´ï¿½ ï¿½Ï³ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ Å¬ï¿½ï¿½ï¿½ï¿½
  */
 class CTcpThreadInfo
 {
@@ -79,9 +88,9 @@ public:
 
 	void Close();
 
-	int				m_iIndex;				// ¾²·¹µå ÀÎµ¦½º
-	Socket		m_hSend;				// ¼Û½Å pipe
-	Socket		m_hRecv;				// ¼ö½Å pipe
+	int				m_iIndex;				// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Îµï¿½ï¿½ï¿½
+	Socket		m_hSend;				// ï¿½Û½ï¿½ pipe
+	Socket		m_hRecv;				// ï¿½ï¿½ï¿½ï¿½ pipe
 
 	CTcpStackSessionList	m_clsSessionList;
 	CTcpStack	* m_pclsStack;
@@ -91,7 +100,7 @@ typedef std::vector< CTcpThreadInfo * > TCP_THREAD_LIST;
 
 /**
  * @ingroup TcpStack
- * @brief ¾²·¹µå ¸®½ºÆ® ÀÚ·á±¸Á¶
+ * @brief ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ® ï¿½Ú·á±¸ï¿½ï¿½
  */
 class CTcpThreadList
 {

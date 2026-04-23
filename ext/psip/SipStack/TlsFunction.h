@@ -39,6 +39,17 @@ bool SSLClientStop( );
 
 void SSLFinal();
 
+// ── R5.c: per-listener SSL_CTX ─────────────────────────
+/** 독립 SSL_CTX 생성 + cert/key 로드. 성공 시 새 SSL_CTX 반환, 실패 시 NULL.
+ *  szKeyFile 이 NULL 또는 빈 문자열이면 szCertFile 에서 key 도 로드 (combined PEM).
+ *  szCaCertFile 이 유효하면 client cert 검증 활성화 (mTLS).
+ *  호출자가 SSLServerCtxFree() 로 해제 책임. */
+SSL_CTX * SSLServerCtxCreate( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile );
+void SSLServerCtxFree( SSL_CTX * ctx );
+
+/** 지정된 ctx 로 accept. ctx 가 NULL 이면 기본 global server ctx 사용. */
+bool SSLAcceptWithCtx( Socket iFd, SSL_CTX * ctx, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout );
+
 bool SSLConnect( Socket iFd, SSL ** ppsttSsl );
 bool SSLAccept( Socket iFd, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout );
 int SSLSend( SSL * ssl, const char * szBuf, int iBufLen );

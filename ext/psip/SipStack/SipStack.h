@@ -80,8 +80,13 @@ public:
 	void GetTcpListenerInfo( std::vector<CSipStackTcpListener*>& outList );
 
 #ifdef USE_TLS
-	// ── TLS 다중 리스너 hot-reload API (R3) ─────────────────────────
-	bool AddTlsListener( int iExtId, const char* pszBindIp, int iPort, int& outId );
+	// ── TLS 다중 리스너 hot-reload API (R3 + R5.c) ─────────────────────────
+	/** R5.c: optional per-listener cert. pszCertFile 이 NULL/빈 문자열이면 stack-global ctx 사용.
+	 *  pszKeyFile 이 NULL/빈 문자열이면 pszCertFile 에서 key 도 로드 (combined PEM).
+	 *  pszCaCertFile 이 유효하면 mTLS (client cert 검증) 활성화. */
+	bool AddTlsListener( int iExtId, const char* pszBindIp, int iPort,
+	                     const char* pszCertFile, const char* pszKeyFile, const char* pszCaCertFile,
+	                     int& outId );
 	bool RemoveTlsListener( int iExtId );
 	void GetTlsListenerInfo( std::vector<CSipStackTlsListener*>& outList );
 #endif

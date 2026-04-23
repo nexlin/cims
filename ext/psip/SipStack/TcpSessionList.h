@@ -28,12 +28,16 @@
 
 /**
  * @ingroup SipStack
- * @brief TCP ╬╡╥╧╣Е©║ TCP ╪╪╪гю╩ юЭ╢чгр ╤╖©║ ╩Г©К╣г╢б е╛╥║╫╨
+ * @brief TCP О©╫О©╫О©╫О©╫О©╫Е©║ TCP О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫г╢О©╫ е╛О©╫О©╫О©╫О©╫
  */
 class CTcpComm
 {
 public:
+#ifdef USE_TLS
+	CTcpComm() : m_iPort(0), m_psttSsl(NULL), m_pSslCtx(NULL), m_cUseTimeout(1)
+#else
 	CTcpComm() : m_iPort(0), m_psttSsl(NULL), m_cUseTimeout(1)
+#endif
 	{
 		m_szIp[0] = '\0';
 	}
@@ -58,9 +62,14 @@ public:
 	}
 
 	Socket	m_hSocket;
-	char		m_szIp[INET6_ADDRSTRLEN];	// фпе╤ю╦╥н юЭ╪ш╣г╧г╥н std::string ю╩ ╩Г©Кгр ╪Ж ╬Ь╢ы.
+	char		m_szIp[INET6_ADDRSTRLEN];	// О©╫О©╫е╤О©╫О©╫О©╫О©╫ О©╫О©╫О©╫ш╣г╧г╥О©╫ std::string О©╫О©╫ О©╫О©╫О©╫О©╫О©╫ О©╫О©╫ О©╫О©╫О©╫О©╫.
 	int			m_iPort;
 	SSL			* m_psttSsl;
+#ifdef USE_TLS
+	/** R5.c: accept thread Й╟─ per-listener SSL_CTX К╔╪ worker К║° Л═└К▀╛.
+	 *  NULL Л²╢К╘╢ worker К┼■ global gpsttServerCtx Л┌╛Л ╘ (М∙≤Л°└ М≤╦М≥≤). */
+	SSL_CTX		* m_pSslCtx;
+#endif
 
 private:
 	char		m_cUseTimeout;
@@ -68,7 +77,7 @@ private:
 
 /**
  * @ingroup SipStack
- * @brief TCP ╬╡╥╧╣Е ╨╟╥н ╟Э╦╝го╢б TCP ╪╪╪г а╓╨╦
+ * @brief TCP О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╢О©╫ TCP О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫
  */
 class CTcpSessionListInfo
 {
@@ -96,7 +105,7 @@ class CSipStack;
 
 /**
  * @ingroup SipStack
- * @brief TCP ╬╡╥╧╣Е ╨╟╥н ╟Э╦╝го╢б TCP ╪╪╪г а╓╨╦╦╕ юЗюЕго╢б е╛╥║╫╨
+ * @brief TCP О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╢О©╫ TCP О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫О©╫ О©╫О©╫О©╫О©╫О©╫о╢О©╫ е╛О©╫О©╫О©╫О©╫
  */
 class CTcpSessionList
 {

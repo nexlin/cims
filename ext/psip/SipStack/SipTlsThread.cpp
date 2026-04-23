@@ -103,7 +103,8 @@ THREAD_API SipTlsThread( LPVOID lpParameter )
 					SSL	* psttSsl;
 					bool	bRes = false;
 
-					if( SSLAccept( clsTcpComm.m_hSocket, &psttSsl, false, 0, pclsSipStack->m_clsSetup.m_iTlsAcceptTimeout * 1000 ) )
+					// R5.c: listener 별 SSL_CTX 가 있으면 그걸 사용, 없으면 global.
+					if( SSLAcceptWithCtx( clsTcpComm.m_hSocket, clsTcpComm.m_pSslCtx, &psttSsl, false, 0, pclsSipStack->m_clsSetup.m_iTlsAcceptTimeout * 1000 ) )
 					{
 						if( clsSessionList.Insert( clsTcpComm, psttSsl ) )
 						{
@@ -271,6 +272,8 @@ THREAD_API SipTlsListenerThread( LPVOID lpParameter )
 			if( hConnFd == INVALID_SOCKET ) continue;
 
 			clsTcpComm.m_hSocket = hConnFd;
+			// R5.c: listener 의 per-listener SSL_CTX 를 worker 로 전달 (NULL 이면 stack-global)
+			clsTcpComm.m_pSslCtx = pListener->m_pSslCtx;
 
 			if( pclsSipStack->m_clsTlsThreadList.SendCommand(
 			        (char *)&clsTcpComm, sizeof(clsTcpComm) ) == false )

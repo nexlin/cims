@@ -347,6 +347,143 @@ bool SSLConnect( Socket iFd, SSL ** ppsttSsl )
  * @param iAcceptTimeout		SSL ���� ��û ó�� �ִ� �ð� ( ms ���� )
  * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
  */
+// ── R5.c: per-listener SSL_CTX helpers ─────────────────────────
+SSL_CTX * SSLServerCtxCreate( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile )
+{
+	if( szCertFile == NULL || szCertFile[0] == '\0' ) return NULL;
+	if( IsExistFile( szCertFile ) == false )
+	{
+		CLog::Print( LOG_ERROR, "SSLServerCtxCreate: cert file '%s' not found", szCertFile );
+		return NULL;
+	}
+	if( SSLStart() == false ) return NULL;
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	const SSL_METHOD * pMeth = TLS_server_method();
+#else
+	SSL_METHOD * pMeth = TLSv1_server_method();
+#endif
+	SSL_CTX * ctx = SSL_CTX_new( pMeth );
+	if( ctx == NULL )
+	{
+		CLog::Print( LOG_ERROR, "SSLServerCtxCreate: SSL_CTX_new error" );
+		return NULL;
+	}
+
+	if( SSL_CTX_use_certificate_file( ctx, szCertFile, SSL_FILETYPE_PEM ) <= 0 )
+	{
+		CLog::Print( LOG_ERROR, "SSLServerCtxCreate: use_certificate_file('%s') error", szCertFile );
+		SSLPrintError();
+		SSL_CTX_free( ctx );
+		return NULL;
+	}
+
+	const char * pszKey = ( szKeyFile && szKeyFile[0] ) ? szKeyFile : szCertFile;
+	if( SSL_CTX_use_PrivateKey_file( ctx, pszKey, SSL_FILETYPE_PEM ) <= 0 )
+	{
+		CLog::Print( LOG_ERROR, "SSLServerCtxCreate: use_PrivateKey_file('%s') error", pszKey );
+		SSLPrintError();
+		SSL_CTX_free( ctx );
+		return NULL;
+	}
+
+	if( !SSL_CTX_check_private_key( ctx ) )
+	{
+		CLog::Print( LOG_ERROR, "SSLServerCtxCreate: private key does not match certificate" );
+		SSL_CTX_free( ctx );
+		return NULL;
+	}
+
+	if( szCaCertFile && szCaCertFile[0] )
+	{
+		if( SSL_CTX_load_verify_locations( ctx, szCaCertFile, NULL ) == 0 )
+		{
+			CLog::Print( LOG_ERROR, "SSLServerCtxCreate: load_verify_locations('%s') error", szCaCertFile );
+			SSL_CTX_free( ctx );
+			return NULL;
+		}
+		SSL_CTX_set_verify( ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL );
+	}
+
+	return ctx;
+}
+
+void SSLServerCtxFree( SSL_CTX * ctx )
+{
+	if( ctx ) SSL_CTX_free( ctx );
+}
+
+bool SSLAcceptWithCtx( Socket iFd, SSL_CTX * ctx, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout )
+{
+	SSL_CTX * pUse = ctx ? ctx : gpsttServerCtx;
+	SSL * psttSsl;
+
+	if( (psttSsl = SSL_new( pUse )) == NULL )
+	{
+		CLog::Print( LOG_ERROR, "SSLAcceptWithCtx: SSL_new() error" );
+		return false;
+	}
+
+	SSL_set_fd( psttSsl, (int)iFd );
+
+	if( iAcceptTimeout > 0 )
+	{
+#ifdef WIN32
+		int iTimeout = iAcceptTimeout;
+		setsockopt( iFd, SOL_SOCKET, SO_RCVTIMEO, (char *)&iTimeout, sizeof(iTimeout) );
+#else
+		struct timeval sttTime;
+		sttTime.tv_sec = iAcceptTimeout / 1000;
+		sttTime.tv_usec = ( iAcceptTimeout % 1000 ) * 1000;
+		if( setsockopt( iFd, SOL_SOCKET, SO_RCVTIMEO, &sttTime, sizeof(sttTime) ) == -1 )
+		{
+			CLog::Print( LOG_ERROR, "SSLAcceptWithCtx: SO_RCVTIMEO error(%d)", GetError() );
+		}
+#endif
+	}
+
+	try
+	{
+		if( bCheckClientCert )
+		{
+			SSL_set_verify( psttSsl, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT | SSL_VERIFY_CLIENT_ONCE, NULL );
+			SSL_set_verify_depth( psttSsl, iVerifyDepth );
+		}
+		if( SSL_accept( psttSsl ) == -1 )
+		{
+			CLog::Print( LOG_ERROR, "SSLAcceptWithCtx: SSL_accept() error" );
+			SSLPrintError();
+			SSL_free( psttSsl );
+			return false;
+		}
+	}
+	catch( ... )
+	{
+		CLog::Print( LOG_ERROR, "[SSL] SSLAcceptWithCtx() undefined error" );
+		SSL_free( psttSsl );
+		return false;
+	}
+
+	if( iAcceptTimeout > 0 )
+	{
+#ifdef WIN32
+		int iTimeout = 0;
+		setsockopt( iFd, SOL_SOCKET, SO_RCVTIMEO, (char *)&iTimeout, sizeof(iTimeout) );
+#else
+		struct timeval sttTime;
+		sttTime.tv_sec = 0;
+		sttTime.tv_usec = 0;
+		if( setsockopt( iFd, SOL_SOCKET, SO_RCVTIMEO, &sttTime, sizeof(sttTime) ) == -1 )
+		{
+			CLog::Print( LOG_ERROR, "SSLAcceptWithCtx: reset SO_RCVTIMEO error(%d)", GetError() );
+		}
+#endif
+	}
+
+	*ppsttSsl = psttSsl;
+	return true;
+}
+
 bool SSLAccept( Socket iFd, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout )
 {
 	SSL * psttSsl;
