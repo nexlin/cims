@@ -100,6 +100,7 @@ std::vector<LocalNodeInfo> CCspLocalNodeMap::GetAll() const {
 
 LocalNodeInfo CCspLocalNodeMap::GetPrimary() const {
     // m_byName 은 std::map 이므로 iteration 이 이미 name 사전식 오름차순.
+    // 기존 R1 semantics 유지: is_primary=true 면 protocol 무관 identity 주입.
     std::lock_guard<std::mutex> lk(m_mutex);
 
     // Rule 1: enabled=true && is_primary=true
@@ -123,6 +124,40 @@ LocalNodeInfo CCspLocalNodeMap::GetPrimary() const {
         if (!n.enabled) continue;
         if (n.edge != "access") continue;
         if (n.protocol != "UDP") continue;
+        return n;
+    }
+
+    // Rule 3: 없음
+    return LocalNodeInfo();
+}
+
+LocalNodeInfo CCspLocalNodeMap::GetPrimaryByProtocol(const std::string& protocol) const {
+    // G9: protocol 엄격 필터. TCP/TLS primary 주입에 사용.
+    std::lock_guard<std::mutex> lk(m_mutex);
+
+    // Rule 1: enabled=true && is_primary=true && protocol match
+    LocalNodeInfo found;
+    int primaryCount = 0;
+    for (const auto& kv : m_byName) {
+        const LocalNodeInfo& n = kv.second;
+        if (!n.enabled || !n.is_primary) continue;
+        if (n.protocol != protocol) continue;
+        if (primaryCount == 0) found = n;
+        ++primaryCount;
+    }
+    if (primaryCount > 1) {
+        CLog::Print(LOG_ERROR,
+                    "LocalNodeMap: multiple is_primary=true for protocol=%s (%d) — using '%s'",
+                    protocol.c_str(), primaryCount, found.name.c_str());
+    }
+    if (primaryCount >= 1) return found;
+
+    // Rule 2: enabled=true && edge=access && protocol match
+    for (const auto& kv : m_byName) {
+        const LocalNodeInfo& n = kv.second;
+        if (!n.enabled) continue;
+        if (n.edge != "access") continue;
+        if (n.protocol != protocol) continue;
         return n;
     }
 

@@ -152,10 +152,34 @@ int ServiceMain() {
     }
     clsSetup.m_iLocalUdpPort = gclsSetup.m_iUdpPort;
     clsSetup.m_iUdpThreadCount = gclsSetup.m_iUdpThreadCount;
-    // G9 TODO (2026-04-23): TCP/TLS primary 도 R1 의 UDP 처럼 local_nodes 에서 protocol 별 자동 주입되도록
-    //   CspLocalNodeMap::GetPrimary(protocol) 확장 필요. 현재는 _infra Setup.Sip.TcpPort/TlsPort 값 직접 사용.
-    //   local_nodes 에 동일 TCP/TLS 리스너 추가 시 ListenerManager 가 "already bound by bootstrap — skip" 로 중복 회피.
-    //   Phase 2 배포 전 대형 리팩토링 항목. 현재는 UDP primary 로 대부분 커버되므로 기능 영향 없음.
+
+    // G9 (2026-04-23): TCP/TLS primary 도 local_nodes 에서 protocol 별 자동 주입.
+    //   UDP primary 와 대칭. 조회 실패 시 _infra Setup.Sip.TcpPort/TlsPort/CertFile 값 유지.
+    //   local_nodes 에 동일 TCP/TLS 리스너가 추가되면 ListenerManager 가 "already bound by
+    //   bootstrap — skip" 로 중복 회피하므로 기존 보조 listener 설정도 안전하게 동작.
+    {
+        LocalNodeInfo tcpPrimary = gclsLocalNodeMap.GetPrimaryByProtocol("TCP");
+        if (tcpPrimary.IsValid() && tcpPrimary.bind_port > 0) {
+            gclsSetup.m_iTcpPort = tcpPrimary.bind_port;
+            CLog::Print(LOG_SYSTEM, "primary local_node '%s' (TCP) → TcpPort=%d",
+                        tcpPrimary.name.c_str(), gclsSetup.m_iTcpPort);
+        }
+        LocalNodeInfo tlsPrimary = gclsLocalNodeMap.GetPrimaryByProtocol("TLS");
+        if (tlsPrimary.IsValid() && tlsPrimary.bind_port > 0) {
+            gclsSetup.m_iTlsPort = tlsPrimary.bind_port;
+            // 인증서 경로는 local_nodes 에 명시되어 있을 때만 override.
+            if (!tlsPrimary.tls_cert_path.empty()) {
+                gclsSetup.m_strCertFile = tlsPrimary.tls_cert_path;
+            }
+            if (!tlsPrimary.tls_ca_path.empty()) {
+                gclsSetup.m_strCaCertFile = tlsPrimary.tls_ca_path;
+            }
+            CLog::Print(LOG_SYSTEM, "primary local_node '%s' (TLS) → TlsPort=%d cert=%s",
+                        tlsPrimary.name.c_str(), gclsSetup.m_iTlsPort,
+                        gclsSetup.m_strCertFile.c_str());
+        }
+    }
+
     clsSetup.m_iLocalTcpPort = gclsSetup.m_iTcpPort;
     clsSetup.m_iTcpThreadCount = gclsSetup.m_iTcpThreadCount;
     clsSetup.m_iTcpCallBackThreadCount = gclsSetup.m_iTcpCallBackThreadCount;

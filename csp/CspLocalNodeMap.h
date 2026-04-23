@@ -62,6 +62,13 @@ public:
      *  R1 에서 gclsSetup.m_strLocalIp/m_iUdpPort 초기 주입에 사용. */
     LocalNodeInfo GetPrimary() const;
 
+    /** protocol 별 primary 조회 (G9, 2026-04-23). 선택 규칙:
+     *  1) is_primary=true && enabled=true && protocol==<인자> (Rule 1)
+     *  2) enabled=true && edge=access && protocol==<인자>     (Rule 2)
+     *  3) 없음 → IsValid()==false. 호출자가 _infra fallback 사용.
+     *  CspServer 의 TCP/TLS primary 주입에 사용. UDP 는 GetPrimary() 와 일관. */
+    LocalNodeInfo GetPrimaryByProtocol(const std::string& protocol) const;
+
     size_t Size() const;
     bool   HasName(const std::string& name) const;
 
