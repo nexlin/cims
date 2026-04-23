@@ -71,6 +71,21 @@ public:
 	/** 현재 등록된 UDP 리스너 스냅샷 (디버그/모니터링). */
 	void GetUdpListenerInfo( std::vector<CSipStackUdpListener*>& outList );
 
+	// ── TCP 다중 리스너 hot-reload API (R3) ─────────────────────────
+	/** TCP 리스너를 런타임에 추가. 성공 시 outId 에 실제 할당된 ID 반환.
+	 *  iExtId: CSP 쪽 논리 ID. 0 이면 내부 auto-assign.
+	 *  strBindIp 가 빈 문자열이면 stack 의 m_strLocalIp 사용. */
+	bool AddTcpListener( int iExtId, const char* pszBindIp, int iPort, int& outId );
+	bool RemoveTcpListener( int iExtId );
+	void GetTcpListenerInfo( std::vector<CSipStackTcpListener*>& outList );
+
+#ifdef USE_TLS
+	// ── TLS 다중 리스너 hot-reload API (R3) ─────────────────────────
+	bool AddTlsListener( int iExtId, const char* pszBindIp, int iPort, int& outId );
+	bool RemoveTlsListener( int iExtId );
+	void GetTlsListenerInfo( std::vector<CSipStackTlsListener*>& outList );
+#endif
+
 	bool Execute( struct timeval * psttTime );
 
 	void IncreateUdpThreadCount( int & iThreadId );
@@ -153,6 +168,27 @@ private:
 	bool _StartUdpListenerLocked( CSipStackUdpListener* pListener );
 	void _StopUdpListenerLocked( CSipStackUdpListener* pListener );
 	void _RefreshPrimaryUdpSocketLocked();
+
+	// TCP 다중 리스너 (R3: hot-reload)
+	std::vector<CSipStackTcpListener*> m_vecTcpListeners;
+	CSipMutex m_clsTcpListenerMutex;
+	int m_iNextTcpListenerExtId;
+
+	bool _StartTcpListenerLocked( CSipStackTcpListener* pListener );
+	void _StopTcpListenerLocked( CSipStackTcpListener* pListener );
+	void _RefreshPrimaryTcpSocketLocked();
+
+#ifdef USE_TLS
+	// TLS 다중 리스너 (R3: hot-reload)
+	std::vector<CSipStackTlsListener*> m_vecTlsListeners;
+	CSipMutex m_clsTlsListenerMutex;
+	int m_iNextTlsListenerExtId;
+
+	bool _StartTlsListenerLocked( CSipStackTlsListener* pListener );
+	void _StopTlsListenerLocked( CSipStackTlsListener* pListener );
+	void _RefreshPrimaryTlsSocketLocked();
+#endif
+
 	bool _Stop( );
 	int GetTcpConnectingCount( );
 	void CheckSipMessage( CSipMessage * pclsMessage );

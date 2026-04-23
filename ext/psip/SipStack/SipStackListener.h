@@ -5,7 +5,9 @@
  * (동일 프로세스에서 여러 IP/포트로 listen) 와 무중단 add/remove 를 위해
  * 각 리스너를 이 클래스로 분리 관리한다.
  *
- * P2 scope: UDP 만 다중화. TCP/TLS 는 단일 리스너 구조 유지(후속 phase).
+ * R3 (2026-04-23): UDP 에 더해 TCP/TLS 도 다중 리스너 지원. TCP/TLS 는 리스너당
+ * accept thread 1개 + shared worker thread pool (m_clsTcpThreadList / m_clsTlsThreadList)
+ * 을 공유하는 구조. UDP 는 리스너당 recv thread N개 (per-listener pool).
  */
 
 #ifndef _SIP_STACK_LISTENER_H_
@@ -62,5 +64,59 @@ public:
      *  전역 m_clsUdpRecvMutex 대신 사용해 다른 리스너의 poll 을 차단하지 않는다. */
     CSipMutex     m_clsRecvMutex;
 };
+
+/** 단일 TCP 리스너 (R3).
+ *  accept thread 1개가 m_hSocket 을 poll/accept → 받은 connection 을
+ *  stack 의 shared m_clsTcpThreadList (worker pool) 로 SendCommand 배분. */
+class CSipStackTcpListener
+{
+public:
+    CSipStackTcpListener()
+        : m_iId(0),
+          m_hSocket(INVALID_SOCKET),
+          m_iPort(0),
+          m_iActiveThreads(0),
+          m_bDrain(false),
+          m_bIpv6(false),
+          m_pclsStack(NULL)
+    {}
+
+    /** CSP 에서 발급한 논리 ID (0 = Start 시 생성된 primary 리스너). */
+    int           m_iId;
+    Socket        m_hSocket;
+    std::string   m_strBindIp;
+    int           m_iPort;
+    std::atomic<int>  m_iActiveThreads;  // accept thread 1개 기준
+    std::atomic<bool> m_bDrain;
+    bool          m_bIpv6;
+    CSipStack*    m_pclsStack;
+};
+
+#ifdef USE_TLS
+/** 단일 TLS 리스너 (R3). TCP 와 동일 구조, worker pool 은 m_clsTlsThreadList.
+ *  (인증서는 현재 stack-global SSLServerStart 로 관리 — per-listener cert 는 R4 이후) */
+class CSipStackTlsListener
+{
+public:
+    CSipStackTlsListener()
+        : m_iId(0),
+          m_hSocket(INVALID_SOCKET),
+          m_iPort(0),
+          m_iActiveThreads(0),
+          m_bDrain(false),
+          m_bIpv6(false),
+          m_pclsStack(NULL)
+    {}
+
+    int           m_iId;
+    Socket        m_hSocket;
+    std::string   m_strBindIp;
+    int           m_iPort;
+    std::atomic<int>  m_iActiveThreads;
+    std::atomic<bool> m_bDrain;
+    bool          m_bIpv6;
+    CSipStack*    m_pclsStack;
+};
+#endif
 
 #endif // _SIP_STACK_LISTENER_H_

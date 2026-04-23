@@ -39,6 +39,8 @@ bool StartSipQueueThread( CSipStack * pclsSipStack );
 THREAD_API SipTcpThread( LPVOID lpParameter );
 
 bool StartSipTcpListenThread( CSipStack * pclsSipStack );
+/** R3: 특정 TCP 리스너에 대해 accept 스레드 기동. */
+bool StartSipTcpListenThreadForListener( CSipStackTcpListener * pListener );
 
 // SipTcpClientThread.cpp
 bool StartSipTcpClientThread( CSipStack * pclsSipStack, const char * pszIp, int iPort, CSipMessage * pclsSipMessage );
@@ -52,6 +54,8 @@ bool StartSipTlsClientThread( CSipStack * pclsSipStack, const char * pszIp, int 
 THREAD_API SipTlsThread( LPVOID lpParameter );
 
 bool StartSipTlsListenThread( CSipStack * pclsSipStack );
+/** R3: 특정 TLS 리스너에 대해 accept 스레드 기동. */
+bool StartSipTlsListenThreadForListener( CSipStackTlsListener * pListener );
 
 #endif
 

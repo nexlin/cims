@@ -17,6 +17,7 @@
  */
 
 #include "SipStackThread.h"
+#include "SipStackListener.h"
 #include "TcpSessionList.h"
 #include "ServerUtility.h"
 #include "SipQueue.h"
@@ -196,4 +197,64 @@ FUNC_END:
 bool StartSipTcpListenThread( CSipStack * pclsSipStack )
 {
 	return StartThread( "SipTcpListenThread", SipTcpListenThread, pclsSipStack );
+}
+
+// ── R3: per-listener TCP accept thread ─────────────────────────
+/**
+ * @brief 특정 CSipStackTcpListener 의 socket 을 단독 poll/accept 하여
+ *        shared worker pool (m_clsTcpThreadList) 로 배분.
+ * @param lpParameter CSipStackTcpListener*
+ */
+THREAD_API SipTcpListenerThread( LPVOID lpParameter )
+{
+	CSipStackTcpListener * pListener = (CSipStackTcpListener *)lpParameter;
+	CSipStack * pclsSipStack = pListener->m_pclsStack;
+	struct pollfd arrPollFd[1];
+	int		n, iThreadId = 0;
+	Socket	hConnFd;
+	CTcpComm clsTcpComm;
+
+	if( pListener->m_hSocket == INVALID_SOCKET )
+	{
+		CLog::Print( LOG_ERROR, "%s listener id=%d socket == INVALID_SOCKET",
+		             __FUNCTION__, pListener->m_iId );
+		return 0;
+	}
+
+	pclsSipStack->IncreateTcpThreadCount( iThreadId );
+	pListener->m_iActiveThreads.fetch_add( 1 );
+
+	TcpSetPollIn( arrPollFd[0], pListener->m_hSocket );
+
+	while( pclsSipStack->m_bStopEvent == false && pListener->m_bDrain.load() == false )
+	{
+		n = poll( arrPollFd, 1, 1000 );
+		if( n > 0 )
+		{
+			if( !(arrPollFd[0].revents & POLLIN) ) continue;
+
+			hConnFd = TcpAccept( arrPollFd[0].fd,
+			                     clsTcpComm.m_szIp, sizeof(clsTcpComm.m_szIp),
+			                     &clsTcpComm.m_iPort,
+			                     pclsSipStack->m_clsSetup.m_bIpv6 );
+			if( hConnFd == INVALID_SOCKET ) continue;
+
+			clsTcpComm.m_hSocket = hConnFd;
+
+			if( pclsSipStack->m_clsTcpThreadList.SendCommand(
+			        (char *)&clsTcpComm, sizeof(clsTcpComm) ) == false )
+			{
+				closesocket( hConnFd );
+			}
+		}
+	}
+
+	pListener->m_iActiveThreads.fetch_sub( 1 );
+	pclsSipStack->DecreateTcpThreadCount();
+	return 0;
+}
+
+bool StartSipTcpListenThreadForListener( CSipStackTcpListener * pListener )
+{
+	return StartThread( "SipTcpListenerThread", SipTcpListenerThread, pListener );
 }

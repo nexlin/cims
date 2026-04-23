@@ -21,6 +21,7 @@
 #ifdef USE_TLS
 
 #include "SipStackThread.h"
+#include "SipStackListener.h"
 #include "TcpSessionList.h"
 #include "ServerUtility.h"
 #include "SipQueue.h"
@@ -232,6 +233,61 @@ FUNC_END:
 bool StartSipTlsListenThread( CSipStack * pclsSipStack )
 {
 	return StartThread( "SipTlsListenThread", SipTlsListenThread, pclsSipStack );
+}
+
+// ── R3: per-listener TLS accept thread ─────────────────────────
+THREAD_API SipTlsListenerThread( LPVOID lpParameter )
+{
+	CSipStackTlsListener * pListener = (CSipStackTlsListener *)lpParameter;
+	CSipStack * pclsSipStack = pListener->m_pclsStack;
+	struct pollfd arrPollFd[1];
+	int		n, iThreadId = 0;
+	Socket	hConnFd;
+	CTcpComm clsTcpComm;
+
+	if( pListener->m_hSocket == INVALID_SOCKET )
+	{
+		CLog::Print( LOG_ERROR, "%s listener id=%d socket == INVALID_SOCKET",
+		             __FUNCTION__, pListener->m_iId );
+		return 0;
+	}
+
+	pclsSipStack->IncreateTcpThreadCount( iThreadId );
+	pListener->m_iActiveThreads.fetch_add( 1 );
+
+	TcpSetPollIn( arrPollFd[0], pListener->m_hSocket );
+
+	while( pclsSipStack->m_bStopEvent == false && pListener->m_bDrain.load() == false )
+	{
+		n = poll( arrPollFd, 1, 1000 );
+		if( n > 0 )
+		{
+			if( !(arrPollFd[0].revents & POLLIN) ) continue;
+
+			hConnFd = TcpAccept( arrPollFd[0].fd,
+			                     clsTcpComm.m_szIp, sizeof(clsTcpComm.m_szIp),
+			                     &clsTcpComm.m_iPort,
+			                     pclsSipStack->m_clsSetup.m_bIpv6 );
+			if( hConnFd == INVALID_SOCKET ) continue;
+
+			clsTcpComm.m_hSocket = hConnFd;
+
+			if( pclsSipStack->m_clsTlsThreadList.SendCommand(
+			        (char *)&clsTcpComm, sizeof(clsTcpComm) ) == false )
+			{
+				closesocket( hConnFd );
+			}
+		}
+	}
+
+	pListener->m_iActiveThreads.fetch_sub( 1 );
+	pclsSipStack->DecreateTcpThreadCount();
+	return 0;
+}
+
+bool StartSipTlsListenThreadForListener( CSipStackTlsListener * pListener )
+{
+	return StartThread( "SipTlsListenerThread", SipTlsListenerThread, pListener );
 }
 
 #endif

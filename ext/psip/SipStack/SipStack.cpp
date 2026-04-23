@@ -48,6 +48,10 @@ CSipStack::CSipStack()
 	m_iUdpThreadRunCount = 0;
 	m_iTcpThreadRunCount = 0;
 	m_iNextUdpListenerExtId = 0;
+	m_iNextTcpListenerExtId = 0;
+#ifdef USE_TLS
+	m_iNextTlsListenerExtId = 0;
+#endif
 
 	m_clsICT.SetSipStack( this );
 	m_clsNICT.SetSipStack( this );
@@ -120,10 +124,18 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 
 	if( m_clsSetup.m_iLocalTcpPort > 0 )
 	{
-		m_hTcpSocket = TcpListen( m_clsSetup.m_iLocalTcpPort, 255, NULL, m_clsSetup.m_bIpv6 );
-		if( m_hTcpSocket == INVALID_SOCKET ) 
+		// R3: primary TCP 리스너를 vector 기반으로 생성. m_hTcpSocket 은 alias 로 유지.
+		CSipStackTcpListener * pTcpPrimary = new CSipStackTcpListener();
+		pTcpPrimary->m_iId      = 0;
+		pTcpPrimary->m_strBindIp = m_clsSetup.m_strLocalIp;
+		pTcpPrimary->m_iPort    = m_clsSetup.m_iLocalTcpPort;
+		pTcpPrimary->m_bIpv6    = m_clsSetup.m_bIpv6;
+		pTcpPrimary->m_pclsStack = this;
+
+		if( !_StartTcpListenerLocked( pTcpPrimary ) )
 		{
 			CLog::Print( LOG_ERROR, "TcpListen(%d) error", m_clsSetup.m_iLocalTcpPort );
+			delete pTcpPrimary;
 			_Stop();
 			return false;
 		}
@@ -132,16 +144,25 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 		if( m_clsTcpThreadList.Init( m_clsSetup.m_iTcpThreadCount, m_clsSetup.m_iTcpThreadCount, SipTcpThread, this ) == false )
 		{
 			CLog::Print( LOG_ERROR, "m_clsTcpThreadList.Init() error" );
+			closesocket( pTcpPrimary->m_hSocket );
+			delete pTcpPrimary;
 			_Stop();
 			return false;
 		}
 
-		if( StartSipTcpListenThread( this ) == false )
+		if( StartSipTcpListenThreadForListener( pTcpPrimary ) == false )
 		{
-			CLog::Print( LOG_ERROR, "StartSipTcpListenThread() error" );
+			CLog::Print( LOG_ERROR, "StartSipTcpListenThreadForListener() error" );
+			closesocket( pTcpPrimary->m_hSocket );
+			delete pTcpPrimary;
 			_Stop();
 			return false;
 		}
+
+		m_clsTcpListenerMutex.acquire();
+		m_vecTcpListeners.push_back( pTcpPrimary );
+		m_hTcpSocket = pTcpPrimary->m_hSocket;
+		m_clsTcpListenerMutex.release();
 	}
 
 #ifdef USE_TLS
@@ -154,10 +175,18 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 			return false;
 		}
 
-		m_hTlsSocket = TcpListen( m_clsSetup.m_iLocalTlsPort, 255, NULL, m_clsSetup.m_bIpv6 );
-		if( m_hTlsSocket == INVALID_SOCKET ) 
+		// R3: primary TLS 리스너를 vector 기반으로 생성.
+		CSipStackTlsListener * pTlsPrimary = new CSipStackTlsListener();
+		pTlsPrimary->m_iId       = 0;
+		pTlsPrimary->m_strBindIp = m_clsSetup.m_strLocalIp;
+		pTlsPrimary->m_iPort     = m_clsSetup.m_iLocalTlsPort;
+		pTlsPrimary->m_bIpv6     = m_clsSetup.m_bIpv6;
+		pTlsPrimary->m_pclsStack = this;
+
+		if( !_StartTlsListenerLocked( pTlsPrimary ) )
 		{
-				CLog::Print( LOG_ERROR, "TcpListen(%d) error", m_clsSetup.m_iLocalTlsPort );
+			CLog::Print( LOG_ERROR, "TcpListen(%d) error", m_clsSetup.m_iLocalTlsPort );
+			delete pTlsPrimary;
 			_Stop();
 			return false;
 		}
@@ -166,16 +195,25 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 		if( m_clsTlsThreadList.Init( m_clsSetup.m_iTcpThreadCount, m_clsSetup.m_iTcpThreadCount, SipTlsThread, this ) == false )
 		{
 			CLog::Print( LOG_ERROR, "m_clsTlsThreadList.Init() error" );
+			closesocket( pTlsPrimary->m_hSocket );
+			delete pTlsPrimary;
 			_Stop();
 			return false;
 		}
 
-		if( StartSipTlsListenThread( this ) == false )
+		if( StartSipTlsListenThreadForListener( pTlsPrimary ) == false )
 		{
-			CLog::Print( LOG_ERROR, "StartSipTlsListenThread() error" );
+			CLog::Print( LOG_ERROR, "StartSipTlsListenThreadForListener() error" );
+			closesocket( pTlsPrimary->m_hSocket );
+			delete pTlsPrimary;
 			_Stop();
 			return false;
 		}
+
+		m_clsTlsListenerMutex.acquire();
+		m_vecTlsListeners.push_back( pTlsPrimary );
+		m_hTlsSocket = pTlsPrimary->m_hSocket;
+		m_clsTlsListenerMutex.release();
 	}
 	else if( m_clsSetup.m_bTlsClient )
 	{
@@ -427,21 +465,39 @@ bool CSipStack::_Stop( )
 	m_hUdpSocket = INVALID_SOCKET;
 	m_clsUdpListenerMutex.release();
 
-	if( m_hTcpSocket != INVALID_SOCKET )
+	// R3: TCP 리스너 전체 정리. m_hTcpSocket 은 primary alias 이므로 별도 close 불필요.
+	m_clsTcpListenerMutex.acquire();
+	for( auto* pListener : m_vecTcpListeners )
 	{
-		closesocket( m_hTcpSocket );
-		m_hTcpSocket = INVALID_SOCKET;
+		if( pListener->m_hSocket != INVALID_SOCKET )
+		{
+			closesocket( pListener->m_hSocket );
+			pListener->m_hSocket = INVALID_SOCKET;
+		}
+		delete pListener;
 	}
+	m_vecTcpListeners.clear();
+	m_hTcpSocket = INVALID_SOCKET;
+	m_clsTcpListenerMutex.release();
 
 	m_clsTcpThreadList.Final();
 	m_clsTcpSocketMap.DeleteAll();
 
 #ifdef USE_TLS
-	if( m_hTlsSocket != INVALID_SOCKET )
+	// R3: TLS 리스너 전체 정리.
+	m_clsTlsListenerMutex.acquire();
+	for( auto* pListener : m_vecTlsListeners )
 	{
-		closesocket( m_hTlsSocket );
-		m_hTlsSocket = INVALID_SOCKET;
+		if( pListener->m_hSocket != INVALID_SOCKET )
+		{
+			closesocket( pListener->m_hSocket );
+			pListener->m_hSocket = INVALID_SOCKET;
+		}
+		delete pListener;
 	}
+	m_vecTlsListeners.clear();
+	m_hTlsSocket = INVALID_SOCKET;
+	m_clsTlsListenerMutex.release();
 
 	m_clsTlsThreadList.Final();
 	m_clsTlsSocketMap.DeleteAll();
@@ -633,3 +689,238 @@ void CSipStack::GetUdpListenerInfo( std::vector<CSipStackUdpListener*>& outList 
 	outList = m_vecUdpListeners;
 	m_clsUdpListenerMutex.release();
 }
+
+// ── R3: TCP multi-listener implementation ─────────────────────────
+
+bool CSipStack::_StartTcpListenerLocked( CSipStackTcpListener * pListener )
+{
+	const char * pszBindIp = pListener->m_strBindIp.empty() ? NULL : pListener->m_strBindIp.c_str();
+	pListener->m_hSocket = TcpListen( pListener->m_iPort, 255, pszBindIp, pListener->m_bIpv6 );
+	if( pListener->m_hSocket == INVALID_SOCKET )
+	{
+		return false;
+	}
+	return true;
+}
+
+void CSipStack::_StopTcpListenerLocked( CSipStackTcpListener * pListener )
+{
+	pListener->m_bDrain.store( true );
+	// accept 스레드가 1초 poll timeout 마다 drain 감지. 최대 2초 대기.
+	for( int i = 0; i < 40; ++i )
+	{
+		if( pListener->m_iActiveThreads.load() == 0 ) break;
+		MiliSleep( 50 );
+	}
+	if( pListener->m_hSocket != INVALID_SOCKET )
+	{
+		closesocket( pListener->m_hSocket );
+		pListener->m_hSocket = INVALID_SOCKET;
+	}
+}
+
+void CSipStack::_RefreshPrimaryTcpSocketLocked()
+{
+	if( m_vecTcpListeners.empty() )
+	{
+		m_hTcpSocket = INVALID_SOCKET;
+	}
+	else
+	{
+		m_hTcpSocket = m_vecTcpListeners.front()->m_hSocket;
+	}
+}
+
+bool CSipStack::AddTcpListener( int iExtId, const char* pszBindIp, int iPort, int& outId )
+{
+	if( !m_bStarted ) return false;
+
+	CSipStackTcpListener * pListener = new CSipStackTcpListener();
+	pListener->m_iId       = (iExtId != 0) ? iExtId : (++m_iNextTcpListenerExtId);
+	pListener->m_strBindIp = (pszBindIp && *pszBindIp) ? pszBindIp : m_clsSetup.m_strLocalIp;
+	pListener->m_iPort     = iPort;
+	pListener->m_bIpv6     = m_clsSetup.m_bIpv6;
+	pListener->m_pclsStack = this;
+
+	if( !_StartTcpListenerLocked( pListener ) )
+	{
+		CLog::Print( LOG_ERROR, "AddTcpListener: bind failed ip=%s port=%d",
+		             pListener->m_strBindIp.c_str(), pListener->m_iPort );
+		delete pListener;
+		return false;
+	}
+
+	if( !StartSipTcpListenThreadForListener( pListener ) )
+	{
+		CLog::Print( LOG_ERROR, "AddTcpListener: thread start failed id=%d", pListener->m_iId );
+		closesocket( pListener->m_hSocket );
+		delete pListener;
+		return false;
+	}
+
+	m_clsTcpListenerMutex.acquire();
+	m_vecTcpListeners.push_back( pListener );
+	if( m_hTcpSocket == INVALID_SOCKET ) m_hTcpSocket = pListener->m_hSocket;
+	m_clsTcpListenerMutex.release();
+
+	outId = pListener->m_iId;
+	CLog::Print( LOG_INFO, "AddTcpListener id=%d %s:%d",
+	             pListener->m_iId, pListener->m_strBindIp.c_str(), pListener->m_iPort );
+	return true;
+}
+
+bool CSipStack::RemoveTcpListener( int iExtId )
+{
+	if( !m_bStarted ) return false;
+
+	CSipStackTcpListener * pTarget = NULL;
+	m_clsTcpListenerMutex.acquire();
+	for( auto it = m_vecTcpListeners.begin(); it != m_vecTcpListeners.end(); ++it )
+	{
+		if( (*it)->m_iId == iExtId )
+		{
+			pTarget = *it;
+			m_vecTcpListeners.erase( it );
+			break;
+		}
+	}
+	_RefreshPrimaryTcpSocketLocked();
+	m_clsTcpListenerMutex.release();
+
+	if( !pTarget )
+	{
+		CLog::Print( LOG_ERROR, "RemoveTcpListener: id=%d not found", iExtId );
+		return false;
+	}
+
+	_StopTcpListenerLocked( pTarget );
+	CLog::Print( LOG_INFO, "RemoveTcpListener id=%d %s:%d stopped",
+	             pTarget->m_iId, pTarget->m_strBindIp.c_str(), pTarget->m_iPort );
+	delete pTarget;
+	return true;
+}
+
+void CSipStack::GetTcpListenerInfo( std::vector<CSipStackTcpListener*>& outList )
+{
+	m_clsTcpListenerMutex.acquire();
+	outList = m_vecTcpListeners;
+	m_clsTcpListenerMutex.release();
+}
+
+#ifdef USE_TLS
+// ── R3: TLS multi-listener implementation ─────────────────────────
+
+bool CSipStack::_StartTlsListenerLocked( CSipStackTlsListener * pListener )
+{
+	const char * pszBindIp = pListener->m_strBindIp.empty() ? NULL : pListener->m_strBindIp.c_str();
+	pListener->m_hSocket = TcpListen( pListener->m_iPort, 255, pszBindIp, pListener->m_bIpv6 );
+	if( pListener->m_hSocket == INVALID_SOCKET )
+	{
+		return false;
+	}
+	return true;
+}
+
+void CSipStack::_StopTlsListenerLocked( CSipStackTlsListener * pListener )
+{
+	pListener->m_bDrain.store( true );
+	for( int i = 0; i < 40; ++i )
+	{
+		if( pListener->m_iActiveThreads.load() == 0 ) break;
+		MiliSleep( 50 );
+	}
+	if( pListener->m_hSocket != INVALID_SOCKET )
+	{
+		closesocket( pListener->m_hSocket );
+		pListener->m_hSocket = INVALID_SOCKET;
+	}
+}
+
+void CSipStack::_RefreshPrimaryTlsSocketLocked()
+{
+	if( m_vecTlsListeners.empty() )
+	{
+		m_hTlsSocket = INVALID_SOCKET;
+	}
+	else
+	{
+		m_hTlsSocket = m_vecTlsListeners.front()->m_hSocket;
+	}
+}
+
+bool CSipStack::AddTlsListener( int iExtId, const char* pszBindIp, int iPort, int& outId )
+{
+	if( !m_bStarted ) return false;
+
+	CSipStackTlsListener * pListener = new CSipStackTlsListener();
+	pListener->m_iId       = (iExtId != 0) ? iExtId : (++m_iNextTlsListenerExtId);
+	pListener->m_strBindIp = (pszBindIp && *pszBindIp) ? pszBindIp : m_clsSetup.m_strLocalIp;
+	pListener->m_iPort     = iPort;
+	pListener->m_bIpv6     = m_clsSetup.m_bIpv6;
+	pListener->m_pclsStack = this;
+
+	if( !_StartTlsListenerLocked( pListener ) )
+	{
+		CLog::Print( LOG_ERROR, "AddTlsListener: bind failed ip=%s port=%d",
+		             pListener->m_strBindIp.c_str(), pListener->m_iPort );
+		delete pListener;
+		return false;
+	}
+
+	if( !StartSipTlsListenThreadForListener( pListener ) )
+	{
+		CLog::Print( LOG_ERROR, "AddTlsListener: thread start failed id=%d", pListener->m_iId );
+		closesocket( pListener->m_hSocket );
+		delete pListener;
+		return false;
+	}
+
+	m_clsTlsListenerMutex.acquire();
+	m_vecTlsListeners.push_back( pListener );
+	if( m_hTlsSocket == INVALID_SOCKET ) m_hTlsSocket = pListener->m_hSocket;
+	m_clsTlsListenerMutex.release();
+
+	outId = pListener->m_iId;
+	CLog::Print( LOG_INFO, "AddTlsListener id=%d %s:%d",
+	             pListener->m_iId, pListener->m_strBindIp.c_str(), pListener->m_iPort );
+	return true;
+}
+
+bool CSipStack::RemoveTlsListener( int iExtId )
+{
+	if( !m_bStarted ) return false;
+
+	CSipStackTlsListener * pTarget = NULL;
+	m_clsTlsListenerMutex.acquire();
+	for( auto it = m_vecTlsListeners.begin(); it != m_vecTlsListeners.end(); ++it )
+	{
+		if( (*it)->m_iId == iExtId )
+		{
+			pTarget = *it;
+			m_vecTlsListeners.erase( it );
+			break;
+		}
+	}
+	_RefreshPrimaryTlsSocketLocked();
+	m_clsTlsListenerMutex.release();
+
+	if( !pTarget )
+	{
+		CLog::Print( LOG_ERROR, "RemoveTlsListener: id=%d not found", iExtId );
+		return false;
+	}
+
+	_StopTlsListenerLocked( pTarget );
+	CLog::Print( LOG_INFO, "RemoveTlsListener id=%d %s:%d stopped",
+	             pTarget->m_iId, pTarget->m_strBindIp.c_str(), pTarget->m_iPort );
+	delete pTarget;
+	return true;
+}
+
+void CSipStack::GetTlsListenerInfo( std::vector<CSipStackTlsListener*>& outList )
+{
+	m_clsTlsListenerMutex.acquire();
+	outList = m_vecTlsListeners;
+	m_clsTlsListenerMutex.release();
+}
+#endif // USE_TLS
