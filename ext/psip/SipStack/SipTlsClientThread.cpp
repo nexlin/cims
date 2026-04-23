@@ -30,15 +30,16 @@ public:
 	std::string m_strIp;
 	int					m_iPort;
 	CSipMessage * m_pclsSipMessage;
+	std::string m_strSourceIp;  // R5.b''': outbound connect ì‹œ bind í•  ë¡œì»¬ source IP
 };
 
 #ifdef USE_TLS
 
 /**
  * @ingroup SipStack
- * @brief TLS Å¬¶óÀÌ¾ðÆ® ¼¼¼Ç ¿¬°áÀ» À§ÇÑ ¾²·¹µå ÇÔ¼ö
- * @param lpParameter CThreadListEntry °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
+ * @brief TLS Å¬ï¿½ï¿½ï¿½Ì¾ï¿½Æ® ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ô¼ï¿½
+ * @param lpParameter CThreadListEntry ï¿½ï¿½Ã¼ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+ * @returns 0 ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 THREAD_API SipTlsClientThread( LPVOID lpParameter )
 {
@@ -50,7 +51,10 @@ THREAD_API SipTlsClientThread( LPVOID lpParameter )
 
 	CLog::Print( LOG_DEBUG, "%s(%s:%d) start", __FUNCTION__, pclsArg->m_strIp.c_str(), pclsArg->m_iPort );
 
-	Socket hSocket = TcpConnect( pclsArg->m_strIp.c_str(), pclsArg->m_iPort, pclsArg->m_pclsSipStack->m_clsSetup.m_iTcpConnectTimeout );
+	// R5.b''': Via[0] ë˜ëŠ” per-route ë¡œ ì„ íƒëœ source IP ë¡œ bind í›„ connect
+	Socket hSocket = TcpConnectFrom( pclsArg->m_strSourceIp.empty() ? NULL : pclsArg->m_strSourceIp.c_str(),
+	                                 pclsArg->m_strIp.c_str(), pclsArg->m_iPort,
+	                                 pclsArg->m_pclsSipStack->m_clsSetup.m_iTcpConnectTimeout );
 	if( hSocket != INVALID_SOCKET )
 	{
 		SSL * psttSsl;
@@ -199,19 +203,19 @@ THREAD_API SipTlsClientThread( LPVOID lpParameter )
 
 /**
  * @ingroup SipStack
- * @brief TCP ÇÁ·ÎÅäÄÝ·Î SIP ¸Þ½ÃÁö ¼ö½Å ¹× SIP ¼ö½Å ÀÌº¥Æ®¸¦ Ã³¸®ÇÏ´Â Thread Pool À» ½ÃÀÛÇÑ´Ù.
- * @param pclsSipStack		SIP stack Æ÷ÀÎÅÍ
- * @param pszIp						SIP ¸Þ½ÃÁö¸¦ Àü¼ÛÇÒ IP ÁÖ¼Ò
- * @param iPort						SIP ¸Þ½ÃÁö¸¦ Àü¼ÛÇÒ Æ÷Æ® ¹øÈ£
- * @param pclsSipMessage	Àü¼ÛÇÒ SIP ¸Þ½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief TCP ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý·ï¿½ SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ SIP ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ®ï¿½ï¿½ Ã³ï¿½ï¿½ï¿½Ï´ï¿½ Thread Pool ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param pclsSipStack		SIP stack ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+ * @param pszIp						SIP ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ IP ï¿½Ö¼ï¿½
+ * @param iPort						SIP ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Æ® ï¿½ï¿½È£
+ * @param pclsSipMessage	ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ SIP ï¿½Þ½ï¿½ï¿½ï¿½
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool StartSipTlsClientThread( CSipStack * pclsSipStack, const char * pszIp, int iPort, CSipMessage * pclsSipMessage )
 {
 #ifdef USE_TLS
 	if( pclsSipStack->m_clsTlsConnectMap.Insert( pszIp, iPort ) == false )
 	{
-		// ÀÌ¹Ì TCP ¼¼¼Ç ¿¬°á Áß¿¡ ÀÖÀ¸¹Ç·Î »õ·Î¿î TCP ¼¼¼Ç ¿¬°á½ÃµµÇÏÁö ¾Ê´Â´Ù.
+		// ï¿½Ì¹ï¿½ TCP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ß¿ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ ï¿½ï¿½ï¿½Î¿ï¿½ TCP ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ãµï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ê´Â´ï¿½.
 		pclsSipStack->m_clsTlsConnectMap.Insert( pszIp, iPort, pclsSipMessage );
 		return true;
 	}
@@ -223,6 +227,12 @@ bool StartSipTlsClientThread( CSipStack * pclsSipStack, const char * pszIp, int 
 	pclsArg->m_strIp = pszIp;
 	pclsArg->m_iPort = iPort;
 	pclsArg->m_pclsSipMessage = pclsSipMessage;
+
+	// R5.b''': Via[0] host ê°€ ìœ íš¨í•˜ë©´ outbound source IP ë¡œ bind
+	if( pclsSipMessage && !pclsSipMessage->m_clsViaList.empty() )
+	{
+		pclsArg->m_strSourceIp = pclsSipMessage->m_clsViaList.front().m_strHost;
+	}
 
 	++pclsArg->m_pclsSipMessage->m_iUseCount;
 

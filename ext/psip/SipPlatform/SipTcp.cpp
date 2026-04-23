@@ -100,6 +100,112 @@ bool GetIpByName( const char * szHostName, char * szIp, int iLen )
  * @param iTimeout	연결 timeout 시간 ( 초단위 ) - 0 이상으로 설정해야 연결 timeout 기능이 동작한다.
  * @returns 성공하면 연결된 TCP 소켓을 리턴하고 그렇지 않으면 INVALID_SOCKET 를 리턴한다.
  */
+Socket TcpConnectFrom( const char * pszSrcIp, const char * pszIp, int iPort, int iTimeout )
+{
+	char		szIp[INET6_ADDRSTRLEN];
+	Socket	fd;
+
+	if( pszIp == NULL || *pszIp == '\0' ) return INVALID_SOCKET;
+
+	memset( szIp, 0, sizeof(szIp) );
+	if( isdigit(pszIp[0]) == 0 )
+	{
+		GetIpByName( pszIp, szIp, sizeof(szIp) );
+	}
+	else
+	{
+		snprintf( szIp, sizeof(szIp), "%s", pszIp );
+	}
+
+	bool bHaveSrc = ( pszSrcIp && *pszSrcIp && strcmp(pszSrcIp, "0.0.0.0") != 0 );
+	bool bIpv6 = ( strstr( szIp, ":" ) != NULL );
+
+#ifndef WINXP
+	if( bIpv6 )
+	{
+		struct sockaddr_in6 addr;
+		if( ( fd = socket( AF_INET6, SOCK_STREAM, 0 )) == INVALID_SOCKET ) return INVALID_SOCKET;
+		if( bHaveSrc )
+		{
+			struct sockaddr_in6 src;
+			memset( &src, 0, sizeof(src) );
+			src.sin6_family = AF_INET6;
+			src.sin6_port = 0;
+			inet_pton( AF_INET6, pszSrcIp, &src.sin6_addr );
+			if( bind( fd, (struct sockaddr*)&src, sizeof(src) ) == SOCKET_ERROR )
+			{
+				closesocket( fd );
+				return INVALID_SOCKET;
+			}
+		}
+		memset( &addr, 0, sizeof(addr) );
+		addr.sin6_family = AF_INET6;
+		addr.sin6_port = htons(iPort);
+		inet_pton( AF_INET6, szIp, &addr.sin6_addr );
+#ifndef WIN32
+		if( iTimeout > 0 )
+		{
+			if( ConnectTimeout( fd, (struct sockaddr *)&addr, sizeof(addr), iTimeout ) != 0 )
+			{
+				closesocket( fd ); return INVALID_SOCKET;
+			}
+		}
+		else
+#endif
+		if( connect( fd, (struct sockaddr *)&addr, sizeof(addr) ) == SOCKET_ERROR )
+		{
+			closesocket( fd ); return INVALID_SOCKET;
+		}
+	}
+	else
+#endif
+	{
+		struct sockaddr_in addr;
+		if( ( fd = socket( AF_INET, SOCK_STREAM, 0 )) == INVALID_SOCKET ) return INVALID_SOCKET;
+		if( bHaveSrc )
+		{
+			struct sockaddr_in src;
+			memset( &src, 0, sizeof(src) );
+			src.sin_family = AF_INET;
+			src.sin_port = 0;
+#ifdef WINXP
+			src.sin_addr.s_addr = inet_addr( pszSrcIp );
+#else
+			inet_pton( AF_INET, pszSrcIp, &src.sin_addr.s_addr );
+#endif
+			if( bind( fd, (struct sockaddr*)&src, sizeof(src) ) == SOCKET_ERROR )
+			{
+				closesocket( fd );
+				return INVALID_SOCKET;
+			}
+		}
+		memset( &addr, 0, sizeof(addr) );
+		addr.sin_family = AF_INET;
+		addr.sin_port = htons(iPort);
+#ifdef WINXP
+		addr.sin_addr.s_addr = inet_addr( szIp );
+#else
+		inet_pton( AF_INET, szIp, &addr.sin_addr.s_addr );
+#endif
+#ifndef WIN32
+		if( iTimeout > 0 )
+		{
+			if( ConnectTimeout( fd, (struct sockaddr *)&addr, sizeof(addr), iTimeout ) != 0 )
+			{
+				closesocket( fd ); return INVALID_SOCKET;
+			}
+		}
+		else
+#endif
+		if( connect( fd, (struct sockaddr *)&addr, sizeof(addr) ) == SOCKET_ERROR )
+		{
+			closesocket( fd ); return INVALID_SOCKET;
+		}
+	}
+
+	return fd;
+}
+
 Socket TcpConnect( const char * pszIp, int iPort, int iTimeout )
 {
 	char		szIp[INET6_ADDRSTRLEN];
