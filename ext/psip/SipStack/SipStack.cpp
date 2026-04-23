@@ -612,6 +612,36 @@ void CSipStack::_RefreshPrimaryUdpSocketLocked()
 	m_hUdpSocket = INVALID_SOCKET;
 }
 
+// ── R5.b': outbound request Via[0] 와 매칭되는 UDP listener socket 선택 ──
+Socket CSipStack::_SelectUdpSocketForViaRequest( CSipMessage * pclsMessage )
+{
+	if( pclsMessage == NULL || pclsMessage->m_clsViaList.empty() ) return m_hUdpSocket;
+
+	// CheckSipMessage 가 Request 에 Via 를 자동 추가하므로 Via[0] = 우리 source.
+	const CSipVia & clsVia = pclsMessage->m_clsViaList.front();
+	int iViaPort = clsVia.m_iPort;
+	if( iViaPort <= 0 ) return m_hUdpSocket;
+
+	const std::string & strViaHost = clsVia.m_strHost;
+
+	m_clsUdpListenerMutex.acquire();
+	Socket result = m_hUdpSocket;
+	for( auto * pL : m_vecUdpListeners )
+	{
+		if( !pL || pL->m_hSocket == INVALID_SOCKET ) continue;
+		if( pL->m_iPort != iViaPort ) continue;
+		// bind_ip == via host (exact) 이거나, bind_ip=0.0.0.0/empty (any-interface) 면 사용 가능.
+		if( pL->m_strBindIp == strViaHost ||
+		    pL->m_strBindIp == "0.0.0.0" || pL->m_strBindIp.empty() )
+		{
+			result = pL->m_hSocket;
+			break;
+		}
+	}
+	m_clsUdpListenerMutex.release();
+	return result;
+}
+
 bool CSipStack::AddUdpListener( int iExtId, const char* pszBindIp, int iPort,
                                  int iThreadCount, int& outId )
 {

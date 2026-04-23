@@ -174,6 +174,10 @@ private:
 	void _StopUdpListenerLocked( CSipStackUdpListener* pListener );
 	void _RefreshPrimaryUdpSocketLocked();
 
+	/** R5.b': outbound UDP request 의 Via[0] host/port 와 매칭되는 listener socket 선택.
+	 *  매칭 실패 시 m_hUdpSocket (primary) 반환. response 는 primary 유지 (호출자에서 분기). */
+	Socket _SelectUdpSocketForViaRequest( CSipMessage * pclsMessage );
+
 	// TCP 다중 리스너 (R3: hot-reload)
 	std::vector<CSipStackTcpListener*> m_vecTcpListeners;
 	CSipMutex m_clsTcpListenerMutex;

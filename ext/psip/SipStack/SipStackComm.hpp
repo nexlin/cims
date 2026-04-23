@@ -343,8 +343,16 @@ bool CSipStack::Send( CSipMessage * pclsMessage, bool bCheckMessage )
 
 	if( eTransport == E_SIP_UDP )
 	{
+		// R5.b': Request 의 경우 Via[0] (우리 source) 와 매칭되는 listener socket 사용.
+		// Response 는 primary 로 유지 — inbound listener 추적은 R5.b'' 범위.
+		Socket hSendSocket = m_hUdpSocket;
+		if( pclsMessage->IsRequest() )
+		{
+			hSendSocket = _SelectUdpSocketForViaRequest( pclsMessage );
+		}
+
 		m_clsUdpSendMutex.acquire();
-		bRes = UdpSend( m_hUdpSocket, pclsMessage->m_strPacket.c_str(), (int)pclsMessage->m_strPacket.length(), pszIp, iPort );
+		bRes = UdpSend( hSendSocket, pclsMessage->m_strPacket.c_str(), (int)pclsMessage->m_strPacket.length(), pszIp, iPort );
 		m_clsUdpSendMutex.release();
 
 		CLog::Print( LOG_NETWORK, "UdpSend(%s:%d) \n[%s]", pszIp, iPort, pclsMessage->m_strPacket.c_str() );
