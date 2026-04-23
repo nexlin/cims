@@ -107,8 +107,6 @@ public:
     /** 그룹 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strGroupDataFolder;
 
-    /** CDR 파일 저장 폴더 */
-    std::string m_strCdrFolder;
 
     /** SIP REGISTER 를 전송한 후, 수신한 401 응답의 Authenticate 를 저장하여서 다음 주기의 SIP REGISTER 메시지를 생성할
      * 때에 사용하는 경우 true 로 설정한다. */

@@ -303,10 +303,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if (rec.Has("Dir"))    m_strRecordDir  = rec.GetString("Dir");
             }
 
-            if (setup.Has("Cdr")) {
-                SimpleJson::JsonNode cdr = setup.Get("Cdr");
-                if (cdr.Has("Folder")) m_strCdrFolder = cdr.GetString("Folder");
-            }
+            // G10+ (2026-04-23): Setup.Cdr.Folder 제거. service_log 의 call.json / participants.jsonl
+            //   + DB call_logs 테이블이 CDR 역할을 대체.
 
             // ServiceLogging 설정 (신규 — Dir 통합)
             if (setup.Has("ServiceLogging")) {

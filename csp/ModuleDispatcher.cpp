@@ -148,47 +148,23 @@ bool CModuleDispatcher::SendResponse(CSipMessage* pclsMessage, int iStatusCode) 
 
 void CModuleDispatcher::StopCall(const char* pszCallId, int iResponseCode) {
     CLog::Print(LOG_DEBUG, "StopCall: CallId=%s Code=%d", pszCallId, iResponseCode);
-    SaveCdr(pszCallId, iResponseCode);
+    OnCallEnded(pszCallId, iResponseCode);
     gclsUserAgent.StopCall(pszCallId, iResponseCode);
 }
 
-void CModuleDispatcher::SaveCdr(const char* pszCallId, int iSipStatus) {
-    if (gclsSetup.m_strCdrFolder.empty()) return;
-
+void CModuleDispatcher::OnCallEnded(const char* pszCallId, int iSipStatus) {
+    // 기존 CDR CSV 파일은 제거됨 (service_log 로 대체). DB + service_log 종료 기록만 남김.
     CSipCdr clsCdr;
-    if (gclsUserAgent.GetCdr(pszCallId, &clsCdr)) {
-        char szInviteTime[15], szStartTime[15], szEndTime[15];
-        if (clsCdr.m_sttInviteTime.tv_sec) GetDateTimeString(clsCdr.m_sttInviteTime.tv_sec, szInviteTime, sizeof(szInviteTime));
-        else szInviteTime[0] = '\0';
-        if (clsCdr.m_sttStartTime.tv_sec) GetDateTimeString(clsCdr.m_sttStartTime.tv_sec, szStartTime, sizeof(szStartTime));
-        else szStartTime[0] = '\0';
-        if (clsCdr.m_sttEndTime.tv_sec) GetDateTimeString(clsCdr.m_sttEndTime.tv_sec, szEndTime, sizeof(szEndTime));
-        else GetDateTimeString(szEndTime, sizeof(szEndTime));
+    if (!gclsUserAgent.GetCdr(pszCallId, &clsCdr)) return;
 
-        std::string strFileName = gclsSetup.m_strCdrFolder;
-        char szFileName[20];
-        GetDateString(szFileName, sizeof(szFileName));
-        strcat(szFileName, ".csv");
-        CDirectory::AppendName(strFileName, szFileName);
-
-        m_clsMutex.acquire();
-        FILE* fd = fopen(strFileName.c_str(), "a");
-        if (fd) {
-            fprintf(fd, "%s,%s,%s,%s,%s,%d,%s\n", clsCdr.m_strFromId.c_str(), clsCdr.m_strToId.c_str(),
-                    szInviteTime, szStartTime, szEndTime, iSipStatus, clsCdr.m_strCallId.c_str());
-            fclose(fd);
-        }
-        m_clsMutex.release();
-
-        if (gclsDbManager.IsConnected()) {
-            time_t tAnswer = clsCdr.m_sttStartTime.tv_sec;
-            time_t tEnd = clsCdr.m_sttEndTime.tv_sec ? clsCdr.m_sttEndTime.tv_sec : time(nullptr);
-            gclsDbManager.UpdateCallLogEnded(clsCdr.m_strCallId, tAnswer, tEnd, iSipStatus);
-        }
-        if (gclsCallDir.IsEnabled()) {
-            int dur = (int)(clsCdr.m_sttEndTime.tv_sec - clsCdr.m_sttStartTime.tv_sec);
-            gclsCallDir.VoipCallEnd(clsCdr.m_strCallId, "normal", dur > 0 ? dur : 0);
-        }
+    if (gclsDbManager.IsConnected()) {
+        time_t tAnswer = clsCdr.m_sttStartTime.tv_sec;
+        time_t tEnd    = clsCdr.m_sttEndTime.tv_sec ? clsCdr.m_sttEndTime.tv_sec : time(nullptr);
+        gclsDbManager.UpdateCallLogEnded(clsCdr.m_strCallId, tAnswer, tEnd, iSipStatus);
+    }
+    if (gclsCallDir.IsEnabled()) {
+        int dur = (int)(clsCdr.m_sttEndTime.tv_sec - clsCdr.m_sttStartTime.tv_sec);
+        gclsCallDir.VoipCallEnd(clsCdr.m_strCallId, "normal", dur > 0 ? dur : 0);
     }
 }
 
@@ -729,8 +705,8 @@ void CModuleDispatcher::EventCallEnd(const char* pszCallId, int iSipStatus) {
                 gclsCallDir.VoipCallEnd(strOrigCallId, iSipStatus == 200 ? "normal" : "error", 0);
             }
         }
-        if (clsCallInfo.m_bRecv) SaveCdr(pszCallId, iSipStatus);
-        else SaveCdr(clsCallInfo.m_strPeerCallId.c_str(), iSipStatus);
+        if (clsCallInfo.m_bRecv) OnCallEnded(pszCallId, iSipStatus);
+        else OnCallEnded(clsCallInfo.m_strPeerCallId.c_str(), iSipStatus);
 
         // CMP 리소스 해제 → BYE 순서 (리소스 먼저 해제 후 SIP 종료)
         bool bIsGroup = gclsGroupCallService.OnCallTerminated(pszCallId);

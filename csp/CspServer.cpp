@@ -94,9 +94,7 @@ int ServiceMain() {
                      gclsSetup.m_strOverlayPath.c_str(), gclsSetup.m_iOverlayKeys );
     }
     CLog::Print( LOG_DEBUG, "CspServer[%s]", CDirectory::GetProgramDirectory() );
-    if ( gclsSetup.m_strCdrFolder.empty() == false ) {
-        CDirectory::Create( gclsSetup.m_strCdrFolder.c_str() );
-    }
+    // G10+ (2026-04-23): CDR CSV 폴더 생성 제거 — service_log 로 대체됨.
     CSipStackSetup clsSetup;
 
     // v3 (2026-04-22): VoIP 도메인은 AccessServiceMap 이 SOT. 이 시점엔 Sync 전이므로
@@ -303,10 +301,13 @@ int ServiceMain() {
         sleep( 1 );
         ++iSecond;
 
-        // SIGUSR1 수신 → jsonl 재로드 + 관리자 Sync()
+        // SIGUSR1 수신 → scalar csp.json + jsonl 재로드 + 관리자 Sync()
         if ( g_reloadFlag ) {
             g_reloadFlag = 0;
-            CLog::Print( LOG_SYSTEM, "SIGUSR1: reloading jsonl config (v3 9-collection)" );
+            CLog::Print( LOG_SYSTEM, "SIGUSR1: reloading scalar config + jsonl (v3 9-collection)" );
+            // scalar csp.json 재파싱 → gclsSetup 의 단순 값(CallPickupId/Timeout 류) 즉시 반영.
+            //   bootstrap 성 필드(UdpThreadCount, DB 연결 등)는 재기동이 필요 — 여기서 반영해도 기존 객체엔 미적용.
+            gclsSetup.Read();
             gclsCspConfigCache.ReloadFromJsonl();
             gclsLocalNodeMap.Sync();
             gclsRemoteNodeMap.Sync();

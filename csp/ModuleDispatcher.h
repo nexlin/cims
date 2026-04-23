@@ -39,7 +39,7 @@ public:
     // 공유 헬퍼
     bool SendResponse(CSipMessage* pclsMessage, int iStatusCode);
     void StopCall(const char* pszCallId, int iResponseCode);
-    void SaveCdr(const char* pszCallId, int iSipStatus);
+    void OnCallEnded(const char* pszCallId, int iSipStatus);
 
     // 모듈 접근자
     CCscfModule*  GetCscf()  { return &m_clsCscf; }
