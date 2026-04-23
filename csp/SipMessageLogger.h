@@ -94,12 +94,13 @@ private:
                        const char* pszCaller = "", const char* pszCallee = "");
 
     /** Write to {system_id}_{iface}.msg.jsonl, returns line number (seq).
-     *  필드 순서: ts, dir, peer, caller, callee, proto, msg
+     *  필드 순서: ts, dir, peer, caller, callee, sesid, proto, msg
      *  빈 값은 key 생략. */
     int WriteInterfaceLine(const char* pszIface, const char* pszTs, const char* pszDir,
                            const char* pszPeer, const char* pszProto,
                            const char* pszMsg,
-                           const char* pszCaller = "", const char* pszCallee = "");
+                           const char* pszCaller = "", const char* pszCallee = "",
+                           const char* pszSesId = "");
 
     /** Ensure hourly directories and rotate files if needed */
     void EnsureHourlyFiles(const std::string& strFlowHourDir, const std::string& strMsgHourDir);

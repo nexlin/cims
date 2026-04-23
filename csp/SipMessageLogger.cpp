@@ -329,29 +329,8 @@ void CSipMessageLogger::Print(EnumLogLevel eLevel, const char* fmt, ...)
     const char* pszFrom = (strcmp(pszDir, "TX") == 0) ? "csp" : "ue";
     const char* pszTo   = (strcmp(pszDir, "TX") == 0) ? "ue"  : "csp";
 
-    // 1. {system_id}_sip.jsonl (per-interface)
-    int iSeq = 0;
-    if (m_bRawLogEnabled) {
-        iSeq = WriteInterfaceLine("sip", strTs.c_str(), pszDir, szPeer, "SIP", pszSipMsg,
-                                   strFromUri.c_str(), strToUri.c_str());
-    }
-
-    // SIP은 CSP 단독 기록이므로 mid 불필요
-
-    // detail 생성: INVITE=from→to, REGISTER=user, 응답=빈값
-    std::string strDetail;
-    if (strMethod == "INVITE" && !strFromUri.empty() && !strToUri.empty()) {
-        strDetail = strFromUri + "\xe2\x86\x92" + strToUri;  // UTF-8 →
-    } else if (strMethod == "REGISTER" && !strFromUri.empty()) {
-        strDetail = strFromUri;
-    } else if (strMethod == "SUBSCRIBE" && !strToUri.empty()) {
-        strDetail = strToUri;
-    } else if (strMethod == "BYE" && !strFromUri.empty()) {
-        strDetail = strFromUri;
-    }
-
-    // sesid 조회/발행: 같은 Call-ID는 동일 sesid 유지
-    // REGISTER/INVITE/SUBSCRIBE 등 모든 SIP 메시지에 대해 발행/계승
+    // sesid 조회/발행 (msg.jsonl 기록 전에 결정) — 같은 Call-ID 는 동일 sesid 유지.
+    //   REGISTER/INVITE/SUBSCRIBE 등 모든 SIP 메시지에 발행/계승.
     std::string strSesId;
     if (!strCallId.empty()) {
         auto itSes = m_mapCallSesId.find(strCallId);
@@ -368,6 +347,28 @@ void CSipMessageLogger::Print(EnumLogLevel eLevel, const char* fmt, ...)
     } else {
         // Call-ID 없는 경우(드문 상황): 일회성 sesid
         strSesId = IssueSesId(strFromUri, "csp");
+    }
+
+    // 1. {system_id}_sip.jsonl (per-interface) — sesid embed (G7, 2026-04-23)
+    int iSeq = 0;
+    if (m_bRawLogEnabled) {
+        iSeq = WriteInterfaceLine("sip", strTs.c_str(), pszDir, szPeer, "SIP", pszSipMsg,
+                                   strFromUri.c_str(), strToUri.c_str(),
+                                   strSesId.c_str());
+    }
+
+    // SIP은 CSP 단독 기록이므로 mid 불필요
+
+    // detail 생성: INVITE=from→to, REGISTER=user, 응답=빈값
+    std::string strDetail;
+    if (strMethod == "INVITE" && !strFromUri.empty() && !strToUri.empty()) {
+        strDetail = strFromUri + "\xe2\x86\x92" + strToUri;  // UTF-8 →
+    } else if (strMethod == "REGISTER" && !strFromUri.empty()) {
+        strDetail = strFromUri;
+    } else if (strMethod == "SUBSCRIBE" && !strToUri.empty()) {
+        strDetail = strToUri;
+    } else if (strMethod == "BYE" && !strFromUri.empty()) {
+        strDetail = strFromUri;
     }
 
     // subid: VoLTE=Call-ID(leg 구분), PTT=session_seq(캐시 조회)
@@ -419,13 +420,14 @@ void CSipMessageLogger::LogMessage(const char* pszFrom, const char* pszTo,
     std::lock_guard<std::mutex> lock(m_mtx);
     EnsureHourlyFiles(strFlowHourDir, strMsgHourDir);
 
-    // 1. {system_id}_{iface}.jsonl (per-interface)
+    // 1. {system_id}_{iface}.jsonl (per-interface) — G7 sesid embed
     int iSeq = 0;
     if (m_bRawLogEnabled) {
         iSeq = WriteInterfaceLine(iface, strTs.c_str(), pszDir,
                                   pszPeer ? pszPeer : "",
                                   proto, pszBody ? pszBody : "",
-                                  pszCaller, pszCallee);
+                                  pszCaller, pszCallee,
+                                  pszSesId ? pszSesId : "");
     }
 
     // 2. flow.jsonl
@@ -557,7 +559,8 @@ void CSipMessageLogger::WriteFlowLine(const char* pszService,
 int CSipMessageLogger::WriteInterfaceLine(const char* pszIface, const char* pszTs, const char* pszDir,
                                            const char* pszPeer, const char* pszProto,
                                            const char* pszMsg,
-                                           const char* pszCaller, const char* pszCallee)
+                                           const char* pszCaller, const char* pszCallee,
+                                           const char* pszSesId)
 {
     // Called under m_mtx lock
     FILE* pFile = GetInterfaceFile(pszIface);
@@ -568,13 +571,15 @@ int CSipMessageLogger::WriteInterfaceLine(const char* pszIface, const char* pszT
     int& iSeq = GetIfaceSeq(pszIface);
     iSeq++;
 
-    // 순서: ts, dir, peer, caller, callee, proto, msg
+    // 순서: ts, dir, peer, caller, callee, sesid, proto, msg
     fprintf(pFile, "{\"ts\":\"%s\",\"dir\":\"%s\",\"peer\":\"%s\"",
             pszTs ? pszTs : "", pszDir ? pszDir : "", pszPeer ? pszPeer : "");
     if (pszCaller && pszCaller[0])
         fprintf(pFile, ",\"caller\":\"%s\"", JsonEsc(pszCaller).c_str());
     if (pszCallee && pszCallee[0])
         fprintf(pFile, ",\"callee\":\"%s\"", JsonEsc(pszCallee).c_str());
+    if (pszSesId && pszSesId[0])
+        fprintf(pFile, ",\"sesid\":\"%s\"", JsonEsc(pszSesId).c_str());
     fprintf(pFile, ",\"proto\":\"%s\",\"msg\":\"%s\"}\n",
             pszProto ? pszProto : "", strEscMsg.c_str());
     fflush(pFile);
