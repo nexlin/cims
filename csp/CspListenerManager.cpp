@@ -10,33 +10,86 @@ extern CSipUserAgent gclsUserAgent;
 
 CCspListenerManager gclsListenerManager;
 
+std::string CCspListenerManager::_normalizeProtocol(const std::string& protocol) const {
+    std::string p;
+    p.reserve(protocol.size());
+    for (char c : protocol) p.push_back((c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c);
+    if (p == "UDP" || p == "TCP" || p == "TLS") return p;
+    return std::string();  // WS/WSS 등 psip 미지원
+}
+
 bool CCspListenerManager::_shouldManage(const std::string& protocol) const {
-    // P2: UDP 만. 다른 프로토콜 (TCP/TLS/WS/WSS) 은 후속 phase.
-    return protocol == "UDP" || protocol == "udp";
+    return !_normalizeProtocol(protocol).empty();
+}
+
+bool CCspListenerManager::_isAlreadyBound(const std::string& protocol,
+                                           const std::string& ip, int port) const {
+    auto ipMatch = [&](const std::string& existIp) {
+        if (ip == "0.0.0.0" || ip.empty()) return true;
+        if (existIp == "0.0.0.0" || existIp.empty()) return true;
+        return existIp == ip;
+    };
+
+    if (protocol == "UDP") {
+        std::vector<CSipStackUdpListener*> v;
+        gclsUserAgent.m_clsSipStack.GetUdpListenerInfo(v);
+        for (auto* e : v) {
+            if (e && e->m_iPort == port && ipMatch(e->m_strBindIp)) return true;
+        }
+    } else if (protocol == "TCP") {
+        std::vector<CSipStackTcpListener*> v;
+        gclsUserAgent.m_clsSipStack.GetTcpListenerInfo(v);
+        for (auto* e : v) {
+            if (e && e->m_iPort == port && ipMatch(e->m_strBindIp)) return true;
+        }
+#ifdef USE_TLS
+    } else if (protocol == "TLS") {
+        std::vector<CSipStackTlsListener*> v;
+        gclsUserAgent.m_clsSipStack.GetTlsListenerInfo(v);
+        for (auto* e : v) {
+            if (e && e->m_iPort == port && ipMatch(e->m_strBindIp)) return true;
+        }
+#endif
+    }
+    return false;
+}
+
+bool CCspListenerManager::_addListenerToStack(const ManagedInfo& m, int& outId) {
+    const char* pszIp = m.bindIp.empty() ? NULL : m.bindIp.c_str();
+    if (m.protocol == "UDP") {
+        return gclsUserAgent.m_clsSipStack.AddUdpListener(m.id, pszIp, m.port,
+                                                          m.threadCount, outId);
+    } else if (m.protocol == "TCP") {
+        return gclsUserAgent.m_clsSipStack.AddTcpListener(m.id, pszIp, m.port, outId);
+#ifdef USE_TLS
+    } else if (m.protocol == "TLS") {
+        return gclsUserAgent.m_clsSipStack.AddTlsListener(m.id, pszIp, m.port, outId);
+#endif
+    }
+    return false;
+}
+
+bool CCspListenerManager::_removeListenerFromStack(const ManagedInfo& m) {
+    if (m.protocol == "UDP") {
+        return gclsUserAgent.m_clsSipStack.RemoveUdpListener(m.id);
+    } else if (m.protocol == "TCP") {
+        return gclsUserAgent.m_clsSipStack.RemoveTcpListener(m.id);
+#ifdef USE_TLS
+    } else if (m.protocol == "TLS") {
+        return gclsUserAgent.m_clsSipStack.RemoveTlsListener(m.id);
+#endif
+    }
+    return false;
 }
 
 bool CCspListenerManager::Sync() {
-    // v3 (2026-04-22): local_nodes.jsonl 을 소비. 스키마 호환 — 기존 필드 그대로.
-    // (id/name/bind_ip/bind_port/protocol/enabled). 새로 추가된 `edge` 필드는
-    // 이 매니저에서는 무시 (UDP 수신 관리에만 집중).
+    // R4 (2026-04-23): local_nodes.jsonl 을 소비. UDP + TCP + TLS 지원.
+    // 인증서는 stack-global (Setup.Sip.CertFile), per-listener cert 는 R5+.
     SimpleJson::JsonNode items = gclsCspConfigCache.GetItems(CACHE_LOCAL_NODE);
     if (items.type != SimpleJson::JSON_ARRAY) {
         CLog::Print(LOG_ERROR, "ListenerManager: cache items not array");
         return false;
     }
-
-    std::vector<CSipStackUdpListener*> existing;
-    gclsUserAgent.m_clsSipStack.GetUdpListenerInfo(existing);
-    auto isAlreadyBound = [&](const std::string& ip, int port) {
-        for (auto* e : existing) {
-            if (!e) continue;
-            if (e->m_iPort != port) continue;
-            if (ip == "0.0.0.0" || ip.empty()) return true;
-            if (e->m_strBindIp == "0.0.0.0" || e->m_strBindIp.empty()) return true;
-            if (e->m_strBindIp == ip) return true;
-        }
-        return false;
-    };
 
     std::vector<ManagedInfo> desired;
     for (size_t i = 0; i < items.Size(); ++i) {
@@ -44,31 +97,46 @@ bool CCspListenerManager::Sync() {
         if (row.type != SimpleJson::JSON_OBJECT) continue;
         std::string strEnabled = row.GetString("enabled");
         if (strEnabled == "false" || strEnabled == "0") continue;
-        std::string proto = row.GetString("protocol", "UDP");
+        std::string protoRaw = row.GetString("protocol", "UDP");
+        std::string proto    = _normalizeProtocol(protoRaw);
+
         ManagedInfo m;
-        // id 는 UUID 문자열 → 안정적 int 로 매핑
-        m.id       = CspUuidToIntId(row.GetString("id"));
-        if (!_shouldManage(proto)) {
-            CLog::Print(LOG_DEBUG, "ListenerManager: skip non-UDP id=%d proto=%s",
-                        m.id, proto.c_str());
+        m.id = CspUuidToIntId(row.GetString("id"));
+        if (proto.empty()) {
+            CLog::Print(LOG_DEBUG, "ListenerManager: skip unsupported proto id=%d proto=%s",
+                        m.id, protoRaw.c_str());
             continue;
         }
         m.bindIp   = row.GetString("bind_ip", "0.0.0.0");
         m.port     = (int)row.GetInt("bind_port");
         m.protocol = proto;
-        // R2: per-listener thread_count. 0/미지정 → Setup.Sip.UdpThreadCount fallback.
+
+        // thread_count: UDP 만 의미. TCP/TLS 는 accept thread 고정 1.
         int iThreads = (int)row.GetInt("thread_count", 0);
         if (iThreads <= 0) iThreads = gclsSetup.m_iUdpThreadCount;
         if (iThreads <= 0) iThreads = 1;
         m.threadCount = iThreads;
+
         if (m.port <= 0 || m.id == 0) continue;
 
-        if (isAlreadyBound(m.bindIp, m.port)) {
+        if (_isAlreadyBound(m.protocol, m.bindIp, m.port)) {
             CLog::Print(LOG_INFO,
-                        "ListenerManager: id=%d %s:%d already bound by bootstrap — skip",
-                        m.id, m.bindIp.c_str(), m.port);
+                        "ListenerManager: id=%d %s %s:%d already bound by bootstrap — skip",
+                        m.id, m.protocol.c_str(), m.bindIp.c_str(), m.port);
             continue;
         }
+
+        // TLS cert path 경고 (R4 범위 밖)
+        if (m.protocol == "TLS") {
+            std::string strCert = row.GetString("tls_cert_path");
+            if (!strCert.empty()) {
+                CLog::Print(LOG_INFO,
+                    "ListenerManager: id=%d TLS tls_cert_path='%s' recorded but per-listener cert "
+                    "not applied (stack-global cert used — see Setup.Sip.CertFile). R5+.",
+                    m.id, strCert.c_str());
+            }
+        }
+
         desired.push_back(m);
     }
 
@@ -82,11 +150,12 @@ bool CCspListenerManager::Sync() {
             stillManaged.push_back(m);
             continue;
         }
-        if (gclsUserAgent.m_clsSipStack.RemoveUdpListener(m.id)) {
-            CLog::Print(LOG_SYSTEM, "ListenerManager: removed id=%d %s:%d",
-                        m.id, m.bindIp.c_str(), m.port);
+        if (_removeListenerFromStack(m)) {
+            CLog::Print(LOG_SYSTEM, "ListenerManager: removed id=%d %s %s:%d",
+                        m.id, m.protocol.c_str(), m.bindIp.c_str(), m.port);
         } else {
-            CLog::Print(LOG_ERROR, "ListenerManager: remove failed id=%d", m.id);
+            CLog::Print(LOG_ERROR, "ListenerManager: remove failed id=%d %s",
+                        m.id, m.protocol.c_str());
         }
     }
 
@@ -96,15 +165,18 @@ bool CCspListenerManager::Sync() {
     for (const auto& d : desired) {
         if (managedIds.find(d.id) != managedIds.end()) continue;
         int iOutId = 0;
-        const char* pszIp = d.bindIp.empty() ? NULL : d.bindIp.c_str();
-        if (gclsUserAgent.m_clsSipStack.AddUdpListener(d.id, pszIp, d.port,
-                                                       d.threadCount, iOutId)) {
+        if (_addListenerToStack(d, iOutId)) {
             stillManaged.push_back(d);
-            CLog::Print(LOG_SYSTEM, "ListenerManager: added id=%d %s:%d threads=%d",
-                        d.id, d.bindIp.c_str(), d.port, d.threadCount);
+            if (d.protocol == "UDP") {
+                CLog::Print(LOG_SYSTEM, "ListenerManager: added id=%d %s %s:%d threads=%d",
+                            d.id, d.protocol.c_str(), d.bindIp.c_str(), d.port, d.threadCount);
+            } else {
+                CLog::Print(LOG_SYSTEM, "ListenerManager: added id=%d %s %s:%d",
+                            d.id, d.protocol.c_str(), d.bindIp.c_str(), d.port);
+            }
         } else {
-            CLog::Print(LOG_ERROR, "ListenerManager: add failed id=%d %s:%d threads=%d",
-                        d.id, d.bindIp.c_str(), d.port, d.threadCount);
+            CLog::Print(LOG_ERROR, "ListenerManager: add failed id=%d %s %s:%d",
+                        d.id, d.protocol.c_str(), d.bindIp.c_str(), d.port);
         }
     }
 
