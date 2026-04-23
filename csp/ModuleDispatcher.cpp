@@ -15,6 +15,7 @@
 #include "CallMap.h"
 #include "CmpClient.h"
 #include "CspAclPolicyEngine.h"
+#include "CspAddressing.h"
 #include "CspLocalNodeMap.h"
 #include "CspRemoteNodeMap.h"
 #include "CspRouteMap.h"
@@ -527,7 +528,7 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
                 CSipFrom clsContact;
                 clsContact.m_clsUri.m_strProtocol = SIP_PROTOCOL;
                 clsContact.m_clsUri.m_strUser = clsUser.m_strForward;
-                clsContact.m_clsUri.m_strHost = gclsSetup.m_strLocalIp;
+                clsContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress();
                 clsContact.m_clsUri.m_iPort = gclsSetup.m_iUdpPort;
                 pclsResponse->m_clsContactList.push_back(clsContact);
                 gclsUserAgent.m_clsSipStack.SendSipMessage(pclsResponse);
@@ -576,7 +577,7 @@ void CModuleDispatcher::EventIncomingCall(const char* pszCallId, const char* psz
                                           strSesId);
         if (iStartPort == -1) return StopCall(pszCallId, SIP_INTERNAL_SERVER_ERROR);
 
-        std::string strRelayIp = gclsSetup.m_strLocalIp;
+        std::string strRelayIp = CspAddressing::GetLocalRtpAddress();
         std::string strAllocatedIp;
         if (gclsRtpMap.GetLocalIp(iStartPort, strAllocatedIp) && !strAllocatedIp.empty()) strRelayIp = strAllocatedIp;
         pclsRtp->SetIpPort(strRelayIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA);
@@ -638,7 +639,7 @@ void CModuleDispatcher::EventCallRing(const char* pszCallId, int iSipStatus, CSi
     if (gclsCallMap.Select(pszCallId, clsCallInfo)) {
         if (pclsRtp && clsCallInfo.m_iPeerRtpPort > 0) {
             pclsRtp->m_iPort = clsCallInfo.m_iPeerRtpPort;
-            pclsRtp->m_strIp = gclsSetup.m_strLocalIp;
+            pclsRtp->m_strIp = CspAddressing::GetLocalRtpAddress();
         }
         int iRSeq = gclsUserAgent.GetRSeq(pszCallId);
         if (iRSeq != -1) gclsUserAgent.SetRSeq(clsCallInfo.m_strPeerCallId.c_str(), iRSeq);
@@ -688,11 +689,11 @@ void CModuleDispatcher::EventCallStart(const char* pszCallId, CSipCallRtp* pclsR
                 gclsGroupCallService.OnCallStarted(pszCallId, pclsRtp->m_strIp, iRemoteAudio, 0, iRemoteVideo);
             }
 
-            std::string strRelayIp = gclsSetup.m_strLocalIp;
+            std::string strRelayIp = CspAddressing::GetLocalRtpAddress();
             if (!strAllocatedIp.empty()) strRelayIp = strAllocatedIp;
             pclsRtp->SetIpPort(strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
         } else if (clsCallInfo.m_iPeerRtpPort > 0) {
-            gclsGroupCallService.OnCallStarted(pszCallId, gclsSetup.m_strLocalIp, clsCallInfo.m_iPeerRtpPort);
+            gclsGroupCallService.OnCallStarted(pszCallId, CspAddressing::GetLocalRtpAddress(), clsCallInfo.m_iPeerRtpPort);
         }
 
         if (gclsUserAgent.IsConnected(clsCallInfo.m_strPeerCallId.c_str())) {
@@ -710,7 +711,7 @@ void CModuleDispatcher::EventCallStart(const char* pszCallId, CSipCallRtp* pclsR
         }
         if (pclsRtp && clsCallInfo.m_iPeerRtpPort > 0) {
             iStartPort = clsCallInfo.m_iPeerRtpPort - 2;
-            pclsRtp->SetIpPort(gclsSetup.m_strLocalIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
+            pclsRtp->SetIpPort(CspAddressing::GetLocalRtpAddress().c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
         }
         gclsUserAgent.SendReInvite(strReferToCallId.c_str(), pclsRtp);
         gclsCallMap.Insert(strReferToCallId.c_str(), pszCallId, iStartPort);
@@ -761,7 +762,7 @@ void CModuleDispatcher::EventReInvite(const char* pszCallId, CSipCallRtp* pclsRe
     CCallInfo clsCallInfo;
     if (gclsCallMap.Select(pszCallId, clsCallInfo)) {
         if (pclsRemoteRtp && clsCallInfo.m_iPeerRtpPort > 0) {
-            pclsRemoteRtp->SetIpPort(gclsSetup.m_strLocalIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
+            pclsRemoteRtp->SetIpPort(CspAddressing::GetLocalRtpAddress().c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
         }
         gclsUserAgent.SendReInvite(clsCallInfo.m_strPeerCallId.c_str(), pclsRemoteRtp);
     }
@@ -771,7 +772,7 @@ void CModuleDispatcher::EventPrack(const char* pszCallId, CSipCallRtp* pclsRtp) 
     CCallInfo clsCallInfo;
     if (gclsCallMap.Select(pszCallId, clsCallInfo)) {
         if (pclsRtp && clsCallInfo.m_iPeerRtpPort > 0) {
-            pclsRtp->SetIpPort(gclsSetup.m_strLocalIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
+            pclsRtp->SetIpPort(CspAddressing::GetLocalRtpAddress().c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
         }
         gclsUserAgent.SendPrack(clsCallInfo.m_strPeerCallId.c_str(), pclsRtp);
     }
@@ -791,8 +792,9 @@ bool CModuleDispatcher::EventTransfer(const char* pszCallId, const char* pszRefe
     clsRtp.SetDirection(E_RTP_SEND_RECV);
 
     if (gclsSetup.m_bUseRtpRelay) {
-        if (bScreenedTransfer) clsRtp.SetIpPort(gclsSetup.m_strLocalIp.c_str(), clsReferToCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
-        else clsRtp.SetIpPort(gclsSetup.m_strLocalIp.c_str(), clsReferToCallInfo.m_iPeerRtpPort + 2, SOCKET_COUNT_PER_MEDIA);
+        const std::string strRtpAddr = CspAddressing::GetLocalRtpAddress();
+        if (bScreenedTransfer) clsRtp.SetIpPort(strRtpAddr.c_str(), clsReferToCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA);
+        else clsRtp.SetIpPort(strRtpAddr.c_str(), clsReferToCallInfo.m_iPeerRtpPort + 2, SOCKET_COUNT_PER_MEDIA);
     }
 
     if (bScreenedTransfer) {
@@ -800,7 +802,7 @@ bool CModuleDispatcher::EventTransfer(const char* pszCallId, const char* pszRefe
         if (gclsUserAgent.GetRemoteCallRtp(clsReferToCallInfo.m_strPeerCallId.c_str(), &clsReferToRtp) == false) return false;
         clsReferToRtp.SetDirection(E_RTP_SEND_RECV);
         if (gclsSetup.m_bUseRtpRelay)
-            clsReferToRtp.SetIpPort(gclsSetup.m_strLocalIp.c_str(), clsReferToCallInfo.m_iPeerRtpPort + 2, SOCKET_COUNT_PER_MEDIA);
+            clsReferToRtp.SetIpPort(CspAddressing::GetLocalRtpAddress().c_str(), clsReferToCallInfo.m_iPeerRtpPort + 2, SOCKET_COUNT_PER_MEDIA);
         gclsCallMap.Insert(clsCallInfo.m_strPeerCallId.c_str(), clsReferToCallInfo.m_strPeerCallId.c_str(), clsReferToCallInfo.m_iPeerRtpPort);
         gclsUserAgent.SendReInvite(clsCallInfo.m_strPeerCallId.c_str(), &clsReferToRtp);
         gclsUserAgent.SendReInvite(clsReferToCallInfo.m_strPeerCallId.c_str(), &clsRtp);
@@ -846,7 +848,7 @@ bool CModuleDispatcher::EventBlindTransfer(const char* pszCallId, const char* ps
     if (gclsSetup.m_bUseRtpRelay) {
         iStartPort = gclsRtpMap.CreatePort(SOCKET_COUNT_PER_MEDIA * clsRtp.GetMediaCount());
         if (iStartPort == -1) return false;
-        clsRtp.SetIpPort(gclsSetup.m_strLocalIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA);
+        clsRtp.SetIpPort(CspAddressing::GetLocalRtpAddress().c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA);
     }
 
     clsUserInfo.GetCallRoute(clsRoute);
@@ -890,7 +892,7 @@ void CModuleDispatcher::PickUp(const char* pszCallId, const char* pszFrom, const
                     if (pclsRtp) {
                         if (clsOldCallInfo.m_iPeerRtpPort > 0) {
                             pclsRtp->m_iPort = clsOldCallInfo.m_iPeerRtpPort;
-                            pclsRtp->m_strIp = gclsSetup.m_strLocalIp;
+                            pclsRtp->m_strIp = CspAddressing::GetLocalRtpAddress();
                         }
                         pclsRtp->m_iCodec = clsRemoteRtp.m_iCodec;
                     }

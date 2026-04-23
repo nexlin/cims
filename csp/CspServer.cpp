@@ -16,6 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #include "CspServer.h"
+#include "CspAddressing.h"
 
 #include <csignal>
 #include "CallDir.h"
@@ -360,7 +361,7 @@ extern CSipUserAgent gclsUserAgent;
  */
 static std::string BuildXcapDiffBody(const SubscriptionInfo& sub, const std::string& etag,
                                      const std::string& strChangedId) {
-    const std::string strXcapRoot = "http://" + gclsSetup.m_strLocalIp + ":4420/";
+    const std::string strXcapRoot = "http://" + CspAddressing::GetLocalXcapAddress() + ":4420/";
     std::string strBody;
     strBody  = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
     strBody += "<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"";

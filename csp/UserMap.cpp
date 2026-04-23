@@ -18,6 +18,7 @@
 
 #include "UserMap.h"
 
+#include "CspAddressing.h"
 #include "Log.h"
 #include "MemoryDebug.h"
 #include "SipParserDefine.h"
@@ -291,13 +292,14 @@ void CUserMap::SendOptions() {
         pclsMessage->m_strSipMethod = SIP_METHOD_OPTIONS;
         pclsMessage->m_clsReqUri.Set( SIP_PROTOCOL, itList->c_str(), clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort );
 
-        pclsMessage->m_clsFrom.m_clsUri.Set( SIP_PROTOCOL, "cspserver", gclsSetup.m_strLocalIp.c_str() );
+        const std::string strSipAddr = CspAddressing::GetLocalSipAddress();
+        pclsMessage->m_clsFrom.m_clsUri.Set( SIP_PROTOCOL, "cspserver", strSipAddr.c_str() );
         pclsMessage->m_clsFrom.InsertTag();
 
         pclsMessage->m_clsTo.m_clsUri.Set( SIP_PROTOCOL, itList->c_str(), clsUserInfo.m_strIp.c_str(),
                                            clsUserInfo.m_iPort );
 
-        pclsMessage->m_clsCallId.Make( gclsSetup.m_strLocalIp.c_str() );
+        pclsMessage->m_clsCallId.Make( strSipAddr.c_str() );
 
         pclsMessage->m_clsCSeq.Set( clsUserInfo.m_iOptionsSeq, SIP_METHOD_OPTIONS );
         pclsMessage->AddRoute( clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort );

@@ -295,6 +295,30 @@ CspAclPolicyEngine.cpp.s:
 	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAclPolicyEngine.cpp.s
 .PHONY : CspAclPolicyEngine.cpp.s
 
+CspAddressing.o: CspAddressing.cpp.o
+.PHONY : CspAddressing.o
+
+# target to build an object file
+CspAddressing.cpp.o:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAddressing.cpp.o
+.PHONY : CspAddressing.cpp.o
+
+CspAddressing.i: CspAddressing.cpp.i
+.PHONY : CspAddressing.i
+
+# target to preprocess a source file
+CspAddressing.cpp.i:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAddressing.cpp.i
+.PHONY : CspAddressing.cpp.i
+
+CspAddressing.s: CspAddressing.cpp.s
+.PHONY : CspAddressing.s
+
+# target to generate assembly for a file
+CspAddressing.cpp.s:
+	cd /home/nex/work/cims && $(MAKE) $(MAKESILENT) -f csp/CMakeFiles/csp.dir/build.make csp/CMakeFiles/csp.dir/CspAddressing.cpp.s
+.PHONY : CspAddressing.cpp.s
+
 CspConfigCache.o: CspConfigCache.cpp.o
 .PHONY : CspConfigCache.o
 
@@ -1067,6 +1091,9 @@ help:
 	@echo "... CspAclPolicyEngine.o"
 	@echo "... CspAclPolicyEngine.i"
 	@echo "... CspAclPolicyEngine.s"
+	@echo "... CspAddressing.o"
+	@echo "... CspAddressing.i"
+	@echo "... CspAddressing.s"
 	@echo "... CspConfigCache.o"
 	@echo "... CspConfigCache.i"
 	@echo "... CspConfigCache.s"

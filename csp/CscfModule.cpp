@@ -5,6 +5,7 @@
  */
 
 #include "CscfModule.h"
+#include "CspAddressing.h"
 #include "CspServiceMap.h"
 #include "SipServerSetup.h"
 #include "SipStackThread.h"    // GetCurrentInboundListenerId()
@@ -279,10 +280,11 @@ bool CCscfModule::RecvRequestRegister(int iThreadId, CSipMessage* pclsMessage) {
 
         {
             char szServiceRoute[512];
+            const std::string strSipAddr = CspAddressing::GetLocalSipAddress();
             snprintf(szServiceRoute, sizeof(szServiceRoute),
                 "<sip:%s@%s:%d;lr>",
                 strRegDomain.c_str(),
-                gclsSetup.m_strLocalIp.c_str(),
+                strSipAddr.c_str(),
                 gclsSetup.m_iUdpPort);
             pclsResponse->AddHeader("Service-Route", szServiceRoute);
         }
