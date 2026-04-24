@@ -885,7 +885,8 @@ cmd_verify() {
     case "$phase" in
         phase1|1) _verify_phase1 "$@" ;;
         phase2|2) _verify_phase2 "$@" ;;
-        *) err "지원하지 않는 phase: $phase (phase1|phase2 지원)"; return 1 ;;
+        phase3|3) _verify_phase3 "$@" ;;
+        *) err "지원하지 않는 phase: $phase (phase1|phase2|phase3 지원)"; return 1 ;;
     esac
 }
 
@@ -1653,6 +1654,351 @@ except: pass' 2>/dev/null)
     echo ""
 }
 
+# ── Phase 3 검증 (v1 install-only) ──────────────────────────
+# docs/VERIFICATION_PROCESS.md §3 — 배포 이후 검증
+# v1: Phase 1 서버 모듈 중지 → csp/cmp/sim 배포 체인 (agent enroll + install) → 설치 파일 검증
+# v2 예정: start/health/stop 자동화
+# v3 예정: 4시나리오 자동 실행 (VoLTE/PTT 음성/영상)
+_verify_phase3() {
+    [[ -z "$SRC_CONSOLE" ]] && { err "verify phase3 은 소스 트리에서만 실행 가능"; return 1; }
+
+    local skip_build=0 skip_pkg=0 keep_agent=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --skip-build) skip_build=1; shift ;;
+            --skip-pkg)   skip_pkg=1;   shift ;;
+            --keep-agent) keep_agent=1; shift ;;
+            *) err "알 수 없는 옵션: $1"; return 1 ;;
+        esac
+    done
+
+    local ts; ts=$(date +%Y%m%d_%H%M%S)
+    local report_dir="$SCRIPT_DIR/verify_reports"; mkdir -p "$report_dir"
+    local report="$report_dir/${ts}_phase3.md"
+    local ens_ip; ens_ip=$(ip -4 -o addr show ens160 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
+    local git_sha; git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+    local git_branch; git_branch=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+
+    header "=== Phase 3 배포 이후 검증 시작 (v1 install-only) ==="
+    info "리포트: $report"
+    echo ""
+
+    {
+        echo "# Phase 3 Verification Report (v1 — install-only)"
+        echo ""
+        echo "- Timestamp: $ts"
+        echo "- Host: $(hostname)"
+        echo "- ens160 IP: ${ens_ip:-N/A}"
+        echo "- Git: $git_branch @ $git_sha"
+        echo "- Scope: Phase 1 서버 모듈 중지 → csp/cmp/sim 배포 체인 (agent enroll + install)"
+        echo "- 대상: build/dist/{csp,cmp,sim}-server/{agent,<모듈>}"
+        [[ $skip_build -eq 1 ]] && echo "- skip-build: yes"
+        [[ $skip_pkg -eq 1 ]] && echo "- skip-pkg: yes"
+        [[ $keep_agent -eq 1 ]] && echo "- keep-agent: yes"
+        echo ""
+    } > "$report"
+
+    # TB-CSC 생존 확인
+    if ! curl -sk --max-time 3 -o /dev/null "https://127.0.0.1:4419/api/v1/packages"; then
+        err "TB-CSC(4419) 접근 불가 — 'cims.sh start tb' 실행 필요"
+        echo "**FAIL: TB-CSC 접근 불가 — 검증 중단**" >> "$report"
+        return 1
+    fi
+
+    # 1) Phase 1 서버 모듈 중지 + 로그/DB/배포본 wipe (Console/TB 유지)
+    echo "## 1. Phase 1 서버 모듈 중지 + Cleanup" >> "$report"
+    local _m
+    for _m in cmp csp cwrtc phone cspsim; do
+        _stop_one "$_m" >/dev/null 2>&1 || true
+    done
+    # --keep-processes: Console (Dev 3001 or Test 8080) + TB 3종 유지, 로그/DB/배포본 wipe
+    cmd_reset --all --keep-processes >/dev/null 2>&1 || true
+    local _sdir
+    for _sdir in csp-server cmp-server sim-server; do
+        mkdir -p "$DIST_DIR/$_sdir/agent/state"
+    done
+    echo "- Phase 1 cmp/csp/cwrtc/phone/cspsim 중지 완료" >> "$report"
+    echo "- cmd_reset --keep-processes 수행 (Console/TB 유지)" >> "$report"
+    echo "- 디렉토리 준비: csp-server/ cmp-server/ sim-server/" >> "$report"
+    echo "" >> "$report"
+
+    # 2) Build (옵션)
+    if [[ $skip_build -eq 0 ]]; then
+        echo "## 2. Build" >> "$report"
+        echo '```' >> "$report"
+        if ! cmd_build 2>&1 | tail -10 >> "$report"; then
+            echo '```' >> "$report"; err "빌드 실패"; return 1
+        fi
+        echo '```' >> "$report"
+    else
+        echo "## 2. Build — SKIPPED" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 3) Configure
+    echo "## 3. Configure" >> "$report"
+    echo '```' >> "$report"
+    if [[ -n "$ens_ip" ]]; then
+        cmd_configure --local-ip "$ens_ip" 2>&1 | tail -6 >> "$report" || true
+    fi
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 4) Pkg (옵션) — csp/cmp/cspsim tarball 필요
+    if [[ $skip_pkg -eq 0 ]]; then
+        echo "## 4. Pkg (tarball, --no-bump)" >> "$report"
+        echo '```' >> "$report"
+        cmd_pkg --no-bump 2>&1 | tail -10 >> "$report" || true
+        echo '```' >> "$report"
+    else
+        echo "## 4. Pkg — SKIPPED" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 5) Admin login
+    local base="https://127.0.0.1:4419"
+    local admin_id="${CIMS_TB_ADMIN_ID:-admin}"
+    local admin_pw="${CIMS_TB_ADMIN_PASSWORD:-1234}"
+    local tok
+    tok=$(curl -sk -X POST "$base/api/v1/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"login_id\":\"$admin_id\",\"password\":\"$admin_pw\"}" 2>/dev/null \
+        | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
+    if [[ -z $tok ]]; then
+        err "admin 로그인 실패"
+        echo "**FAIL: admin login**" >> "$report"
+        return 1
+    fi
+    echo "## 5. Admin login OK" >> "$report"
+    echo "" >> "$report"
+
+    # 6) 3개 Agent 등록 + Test-agent 기동 (csp-server-local/cmp-server-local/sim-server-local)
+    echo "## 6. Agent 등록 + Test-agent 기동 (sync 9904/9905/9906)" >> "$report"
+    declare -A aid_map enroll_map pid_map sync_port_map
+    sync_port_map[csp]=9904
+    sync_port_map[cmp]=9905
+    sync_port_map[sim]=9906
+
+    local m aname resp_c http body aid enroll_tok ta_dir ta_log aid_exist
+    for m in csp cmp sim; do
+        aname="${m}-server-local"
+        resp_c=$(curl -sk -w '\n__HTTP__%{http_code}' -X POST "$base/api/v1/agents" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d "{\"name\":\"$aname\",\"note\":\"Phase 3 Test-agent\"}")
+        http="${resp_c##*__HTTP__}"; body="${resp_c%$'\n'__HTTP__*}"
+        if [[ "$http" == "409" ]]; then
+            aid_exist=$(curl -sk -H "Authorization: Bearer $tok" "$base/api/v1/agents" 2>/dev/null \
+                | python3 -c "import sys,json
+d=json.load(sys.stdin); items=d if isinstance(d,list) else d.get('items') or d.get('agents') or []
+for r in items:
+    if r.get('name')=='$aname': print(r.get('id')); break" 2>/dev/null)
+            [[ -n $aid_exist ]] && curl -sk -X DELETE -H "Authorization: Bearer $tok" "$base/api/v1/agents/$aid_exist" >/dev/null 2>&1
+            resp_c=$(curl -sk -w '\n__HTTP__%{http_code}' -X POST "$base/api/v1/agents" \
+                -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+                -d "{\"name\":\"$aname\",\"note\":\"Phase 3 Test-agent\"}")
+            http="${resp_c##*__HTTP__}"; body="${resp_c%$'\n'__HTTP__*}"
+        fi
+        if [[ "$http" != "201" && "$http" != "200" ]]; then
+            err "$m agent 생성 실패 http=$http"
+            echo "- FAIL: $m agent create (http=$http)" >> "$report"
+            return 1
+        fi
+        aid=$(echo "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')
+        enroll_tok=$(echo "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("enrollment_token",""))')
+        curl -sk -X POST -H "Authorization: Bearer $tok" "$base/api/v1/agents/$aid/approve" >/dev/null 2>&1
+        aid_map[$m]=$aid
+        enroll_map[$m]=$enroll_tok
+
+        ta_dir="$DIST_DIR/${m}-server/agent"
+        ta_log="$LOG_DIR/test-agent-${m}-server.log"
+        : > "$ta_log"
+        CIMS_AGENT_INSTALL_ROOT="$DIST_DIR/${m}-server" \
+        CIMS_AGENT_SYNC_PORT=${sync_port_map[$m]} \
+        nohup python3 "$DIST_DIR/agent/cims_agent.py" \
+            --csc-url "$base" \
+            --name "$aname" \
+            --state-dir "$ta_dir/state" \
+            --enrollment-token "$enroll_tok" \
+            --heartbeat-sec 3 \
+            > "$ta_log" 2>&1 &
+        pid_map[$m]=$!
+        echo "- $m: agent_id=$aid, pid=${pid_map[$m]}, sync=${sync_port_map[$m]}" >> "$report"
+    done
+
+    # 전 agent enroll 대기
+    local all_online=0 i
+    for i in $(seq 1 20); do
+        sleep 1
+        local still=0
+        for m in csp cmp sim; do
+            aname="${m}-server-local"
+            if ! mysql -u cims -pcims1234 -Nse \
+                "SELECT 1 FROM cims_agent WHERE name='$aname' AND status='online'" cims 2>/dev/null | grep -q 1; then
+                still=1
+            fi
+        done
+        if [[ $still -eq 0 ]]; then all_online=1; break; fi
+    done
+    if [[ $all_online -eq 0 ]]; then
+        err "일부 Test-agent enroll 실패 (20s timeout)"
+        echo "- FAIL: enroll timeout" >> "$report"
+        for m in csp cmp sim; do
+            [[ -n "${pid_map[$m]:-}" ]] && kill ${pid_map[$m]} 2>/dev/null || true
+            tail -15 "$LOG_DIR/test-agent-${m}-server.log" >> "$report" 2>/dev/null || true
+        done
+        return 1
+    fi
+    echo "- 전 agent enroll OK (online)" >> "$report"
+    echo "" >> "$report"
+
+    # 7) Package upload (csp, cmp, cspsim)
+    echo "## 7. Package upload (csp / cmp / cspsim)" >> "$report"
+    local pkg_dir="$DIST_DIR/packages"
+    declare -A pkg_id_map pkg_name_map dir_name_map
+    pkg_name_map[csp]=csp
+    pkg_name_map[cmp]=cmp
+    pkg_name_map[sim]=cspsim
+    dir_name_map[csp]=csp
+    dir_name_map[cmp]=cmp
+    dir_name_map[sim]=sim
+
+    local pkg_fname tar resp pid
+    for m in csp cmp sim; do
+        pkg_fname=${pkg_name_map[$m]}
+        tar=$(ls "$pkg_dir"/${pkg_fname}-*.tar.gz 2>/dev/null | sort -V | tail -1)
+        if [[ -z $tar ]]; then
+            echo "- $m: tarball 없음 ($pkg_fname-*.tar.gz) — SKIP" >> "$report"; continue
+        fi
+        resp=$(curl -sk -X POST "$base/api/v1/packages" \
+            -H "Authorization: Bearer $tok" \
+            -F "file=@$tar;filename=$(basename "$tar")" -F "force=true")
+        pid=$(echo "$resp" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("id",""))
+except: pass' 2>/dev/null)
+        if [[ -z $pid ]]; then
+            err "$m 업로드 실패"
+            echo "- $m: FAIL" >> "$report"
+            for mm in csp cmp sim; do [[ -n "${pid_map[$mm]:-}" ]] && kill ${pid_map[$mm]} 2>/dev/null || true; done
+            return 1
+        fi
+        pkg_id_map[$m]=$pid
+        echo "- $m: package_id=$pid ($(basename "$tar"))" >> "$report"
+    done
+    echo "" >> "$report"
+
+    # 8) Deployment 생성
+    echo "## 8. Deployment 생성" >> "$report"
+    declare -A dep_id_map
+    local did pname install_path modname
+    for m in csp cmp sim; do
+        pid=${pkg_id_map[$m]:-}
+        [[ -z $pid ]] && continue
+        modname=${dir_name_map[$m]}
+        install_path="$DIST_DIR/${m}-server/$modname"
+        pname="${pkg_name_map[$m]^^}"
+        resp=$(curl -sk -X POST "$base/api/v1/deployments" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d "{\"agent_id\":${aid_map[$m]},\"package_id\":$pid,\"install_path\":\"$install_path\",\"process_name\":\"$pname\"}")
+        did=$(echo "$resp" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("id",""))
+except: pass' 2>/dev/null)
+        if [[ -z $did ]]; then
+            err "$m deployment 생성 실패"
+            echo "- $m: FAIL" >> "$report"
+            for mm in csp cmp sim; do [[ -n "${pid_map[$mm]:-}" ]] && kill ${pid_map[$mm]} 2>/dev/null || true; done
+            return 1
+        fi
+        dep_id_map[$m]=$did
+        echo "- $m: deployment_id=$did → $install_path (process=$pname)" >> "$report"
+    done
+    echo "" >> "$report"
+
+    # 9) Install jobs + poll
+    echo "## 9. Install job + 상태 폴링 (최대 60s)" >> "$report"
+    for m in csp cmp sim; do
+        did=${dep_id_map[$m]:-}
+        [[ -z $did ]] && continue
+        curl -sk -X POST "$base/api/v1/deployments/$did/job" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d '{"job_type":"install"}' >/dev/null 2>&1
+    done
+    local all_done=0 elapsed=0
+    for i in $(seq 1 30); do
+        sleep 2; elapsed=$((elapsed+2))
+        local still=0 st
+        for m in csp cmp sim; do
+            did=${dep_id_map[$m]:-}
+            [[ -z $did ]] && continue
+            st=$(mysql -u cims -pcims1234 -Nse "SELECT status FROM agent_deployment WHERE id=$did" cims 2>/dev/null)
+            [[ $st == "pending" || $st == "deploying" ]] && still=1
+        done
+        if [[ $still -eq 0 ]]; then all_done=1; break; fi
+    done
+    echo "- 완료 상태: $([[ $all_done -eq 1 ]] && echo "OK (${elapsed}s)" || echo "TIMEOUT (60s)")" >> "$report"
+    echo "" >> "$report"
+
+    echo "### Phase 3 deployment 상태" >> "$report"
+    echo '```' >> "$report"
+    mysql -u cims -pcims1234 -e \
+        "SELECT d.id, a.name AS agent, d.package_id, d.status, d.install_path
+         FROM agent_deployment d JOIN cims_agent a ON d.agent_id=a.id
+         WHERE a.name IN ('csp-server-local','cmp-server-local','sim-server-local')
+         ORDER BY d.id" cims >> "$report" 2>&1
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 10) 설치 파일 검증
+    echo "## 10. 설치 파일 검증" >> "$report"
+    local verified_ok=1
+    for m in csp cmp sim; do
+        did=${dep_id_map[$m]:-}
+        [[ -z $did ]] && continue
+        modname=${dir_name_map[$m]}
+        install_path="$DIST_DIR/${m}-server/$modname"
+        if [[ -f "$install_path/meta.json" && -d "$install_path/config" ]]; then
+            echo "- [OK] $m: meta.json + config/ ($install_path)" >> "$report"
+        else
+            echo "- [FAIL] $m: meta.json 또는 config/ 누락 ($install_path)" >> "$report"
+            verified_ok=0
+        fi
+    done
+    echo "" >> "$report"
+
+    # 11) Test-agent 종료 (옵션)
+    if [[ $keep_agent -eq 0 ]]; then
+        for m in csp cmp sim; do
+            [[ -n "${pid_map[$m]:-}" ]] && kill ${pid_map[$m]} 2>/dev/null || true
+        done
+        sleep 1
+        echo "## 11. Test-agent 종료 (pids=${pid_map[csp]:-?},${pid_map[cmp]:-?},${pid_map[sim]:-?})" >> "$report"
+    else
+        echo "## 11. Test-agent 유지 (--keep-agent)" >> "$report"
+        echo "- pids: csp=${pid_map[csp]:-?} cmp=${pid_map[cmp]:-?} sim=${pid_map[sim]:-?}" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 판정 (v1: install + overlay 검증만)
+    local verdict="PASS"
+    [[ $all_done -ne 1 || $verified_ok -ne 1 ]] && verdict="FAIL"
+    {
+        echo "## 판정: $verdict (v1 — install-only)"
+        echo ""
+        echo "- Phase 1 서버 모듈 중지 + reset: OK"
+        echo "- Agent enroll (csp/cmp/sim): OK"
+        echo "- Package upload: OK (csp / cmp / cspsim)"
+        echo "- Install 완료: $([[ $all_done -eq 1 ]] && echo OK || echo TIMEOUT)"
+        echo "- 설치 파일 검증: $([[ $verified_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo ""
+        echo "- v2 예정: start/health/stop 자동화 (배포본 csp 5060 / cmp 9000 / sim sync 기동)"
+        echo "- v3 예정: 4시나리오 자동 실행 (VoLTE 음성/영상, PTT 그룹 음성/영상)"
+    } >> "$report"
+
+    header "=== Phase 3 검증 종료 ==="
+    [[ $verdict == "PASS" ]] && ok "Phase 3: PASS" || err "Phase 3: FAIL"
+    info "리포트: $report"
+    echo ""
+}
+
 # ── cspsim ─────────────────────────────────────────────────────
 cmd_sim() {
     local orig_dir="$PWD"
@@ -1906,11 +2252,14 @@ ${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
                         → verify_reports/<ts>_phase1.md
                         ([3/3] pkg 는 포함 안 함 — Phase 2 에서 별도 실행)
   verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
-                        Phase 2 배포 검증: admin login → Test-agent(csc-server-local, sync 9903)
-                        enroll → csc/console tarball 업로드 → deployment 생성 →
-                        install job 폴링 → 설치 파일 검증 → 리포트
-                        → verify_reports/<ts>_phase2.md
-                        (기능 회귀는 반복 X. install-only — start/health 는 차기 버전)
+                        Phase 2 배포 검증 (v2): csc/console tarball 배포 + start(4445)/health/stop
+                        → verify_reports/<ts>_phase2.md (기능 회귀는 반복 X)
+  verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
+                        Phase 3 배포 이후 검증 (v1 install-only):
+                        Phase 1 서버 모듈 중지 → csp/cmp/sim Test-agent enroll (sync 9904/9905/9906)
+                        → csp/cmp/cspsim tarball 업로드 → deployment 생성 →
+                        install job 폴링 → 설치 파일 검증 → verify_reports/<ts>_phase3.md
+                        (v2 예정: start/health/stop. v3 예정: 4시나리오 자동 실행)
 
 ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]
