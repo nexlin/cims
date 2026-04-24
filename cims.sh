@@ -569,9 +569,8 @@ cmd_reset() {
 
     header "=== 검증 환경 초기화 (가입자 보존, TB 3종 유지) ==="
     info "TB 3종(TB-CSC 4419 / TB-Console 3000 / TB-agent 9902) 은 건드리지 않음."
-    # 참고: DB 의 cims_agent 는 TRUNCATE 대상이라 TB-agent 의 enrolled 상태가 사라짐.
-    # → reset 후 'cims.sh stop tb-agent && rm -rf /tmp/cims-tb-agent/state && cims.sh start tb-agent'
-    #   로 재-enroll 하거나, TB-agent 가 heartbeat 401 수신 시 자체 재-enroll 하도록 향후 개선 예정.
+    # cims_agent 는 TRUNCATE 하지 않고 name='tb-agent-local' 레코드만 보존 (I1 fix).
+    # → reset 후에도 TB-agent 의 session_token 이 유효해 heartbeat 가 401 없이 동작한다.
 
     # 1) 서비스 정지 — DB 연결 정리 + 파일 잠금 해제
     info "서비스 정지 (검증 대상만)..."
@@ -660,8 +659,8 @@ TRUNCATE = [
     'csp_listener', 'sip_trunk',
     'routing_rule', 'routing_rule_match',
     'routing_rule_transform', 'routing_access_list', 'csp_config_audit',
-    # 배포 등록
-    'cims_instance', 'cims_agent', 'cims_package',
+    # 배포 등록 (cims_agent 는 TB 레코드 보존 위해 아래서 별도 DELETE)
+    'cims_instance', 'cims_package',
     'agent_deployment', 'agent_job', 'agent_metric',
     # 세션/이력/녹취/통계
     'voip_call_logs', 'ptt_call_logs',
@@ -671,6 +670,10 @@ TRUNCATE = [
     # IdMS 토큰
     'auth_codes', 'refresh_tokens',
 ]
+# cims_agent: TB-agent(name='tb-agent-local') 레코드만 보존, 나머지 삭제.
+# env CIMS_TB_AGENT_NAME 으로 override 가능.
+import os as _os
+TB_AGENT_NAME = _os.environ.get('CIMS_TB_AGENT_NAME', 'tb-agent-local')
 
 conn = pymysql.connect(
     host=db['Host'], port=int(db.get('Port', 3306)),
@@ -692,6 +695,20 @@ for t in TRUNCATE:
         cur.execute(f"TRUNCATE TABLE `{t}`"); done.append(t)
     else:
         skip.append(t)
+# cims_agent: TB-agent 레코드는 보존, 나머지만 삭제 (I1)
+tb_preserved = 0
+if 'cims_agent' in existing:
+    cur.execute(
+        "DELETE FROM cims_agent WHERE name <> %s",
+        (TB_AGENT_NAME,),
+    )
+    deleted = cur.rowcount
+    cur.execute(
+        "SELECT COUNT(*) FROM cims_agent WHERE name = %s",
+        (TB_AGENT_NAME,),
+    )
+    tb_preserved = cur.fetchone()[0]
+    done.append(f"cims_agent (DELETE {deleted}건, TB 보존 {tb_preserved}건)")
 # _deprecated 접미사 테이블도 함께 비움 (migrate_deprecate_* 로 rename 된 것)
 for t in sorted(existing):
     if t.endswith('_deprecated'):
@@ -700,12 +717,14 @@ cur.execute("SET FOREIGN_KEY_CHECKS=1")
 conn.commit()
 conn.close()
 
-print(f"  TRUNCATE 완료: {len(done)}건")
+print(f"  TRUNCATE/DELETE 완료: {len(done)}건")
 for t in done:
     print(f"    - {t}")
 if skip:
     print(f"  SKIP (테이블 미존재): {len(skip)}건")
 print(f"  보존(가입자): {', '.join(sorted(PRESERVE))}")
+if tb_preserved == 0:
+    print(f"  [WARN] cims_agent 에 name='{TB_AGENT_NAME}' 레코드 없음 — TB-agent 재-enroll 필요")
 PY
             [[ $? -eq 0 ]] && ok "DB 초기화 완료" || err "DB 초기화 실패"
         fi

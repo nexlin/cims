@@ -43,8 +43,9 @@
 |---|---|---|
 | 보존 | `users`, `organizations`, `voip_subscriptions`, `ptt_subscriptions`, `ptt_groups`, `ptt_group_members`, `user_rejects` | 그대로 둔다 |
 | 보존 (TB) | TB-CSC(4419) 및 TB-Console(3000) 프로세스, 인증서, 로그 | 그대로 둔다 |
+| 보존 (TB-agent 레코드) | `cims_agent` 의 `name='tb-agent-local'` 행 (session_token 포함) | 조건부 보존 |
 | 초기화 (모듈 설정) | `sip_service`, `sip_service_listener`, `csp_listener`, `sip_trunk`, `routing_rule*`, `routing_access_list`, `csp_config_audit` 등 런타임 config 계열 | TRUNCATE |
-| 초기화 (배포 등록) | `cims_instance`, `cims_agent`, `cims_package`, `agent_deployment`, `agent_job`, `agent_metric` | TRUNCATE |
+| 초기화 (배포 등록) | `cims_instance`, `cims_package`, `agent_deployment`, `agent_job`, `agent_metric` (`cims_agent` 은 `name<>'tb-agent-local'` 만 DELETE) | TRUNCATE / 조건부 DELETE |
 | 초기화 (세션/로그) | `auth_codes`, `refresh_tokens`, `voip_call_logs`, `ptt_call_logs`, `*_participants`, `recordings`, `recording_segments`, `stats_*` | TRUNCATE |
 | 초기화 (파일) | `build/dist/<모듈>/modules/**` (Phase 1 직접 기동본), `build/dist/{csc,csp,cmp,sim}-server/` (Phase 2/3 배포 대상, 0.10 참조), `service_log/`, `msg_log/`, `cert/agent_mtls/issued` 발급 cert | rm -rf |
 | 초기화 (프로세스) | 검증 대상 csc(4420)/csp/cmp/cspsim/agent/console(3001) | `cims.sh reset` |
@@ -122,7 +123,7 @@ build/dist/
 ├── phone/         # Phase 1 직접 기동            (Test-Phone, 5060) — 유지 
 ├── cwrtc/         # Phase 1 직접 기동            (Test-CWRTC, 5061) — 유지
 ├── cspsim/        # Phase 1 직접 기동            (Test-CSPSIM, 9000) — 시험후 종료
-├── csc-server/    # Phase 2: Test-agent & Test-csc를 가 csc 모듈 배포 (4420 기동)
+├── csc-server/    # Phase 2: Test-agent & Test-csc를 가 csc, console 모듈 배포 (4420 기동)
 ├── csp-server/    # Phase 3: csc 가 agent + csp 모듈 배포
 ├── cmp-server/    # Phase 3: csc 가 agent + cmp 모듈 배포
 └── sim-server/    # Phase 3: csc 가 agent + sim(cspsim) 모듈 배포
