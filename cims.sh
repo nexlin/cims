@@ -1714,7 +1714,8 @@ _verify_phase3() {
         echo "- Host: $(hostname)"
         echo "- ens160 IP: ${ens_ip:-N/A}"
         echo "- Git: $git_branch @ $git_sha"
-        echo "- Scope: Phase 1 서버 모듈 중지 → csp/cmp/sim 배포 체인 (agent enroll + install)"
+        echo "- Scope: Phase 1 서버 모듈 중지 → **배포본 csc(4445) 의 API 를 주체로** csp/cmp/sim 배포 체인"
+        echo "- 진입 조건: Phase 2 에서 csc-server/csc 가 4445 overlay 로 기동된 상태"
         echo "- 대상: build/dist/{csp,cmp,sim}-server/{agent,<모듈>}"
         [[ $skip_build -eq 1 ]] && echo "- skip-build: yes"
         [[ $skip_pkg -eq 1 ]] && echo "- skip-pkg: yes"
@@ -1722,10 +1723,18 @@ _verify_phase3() {
         echo ""
     } > "$report"
 
-    # TB-CSC 생존 확인
-    if ! curl -sk --max-time 3 -o /dev/null "https://127.0.0.1:4419/api/v1/packages"; then
-        err "TB-CSC(4419) 접근 불가 — 'cims.sh start tb' 실행 필요"
-        echo "**FAIL: TB-CSC 접근 불가 — 검증 중단**" >> "$report"
+    # 진입 조건: Phase 2 배포본 csc (4445 overlay) 가 기동 상태여야 함.
+    # Phase 3 는 이 csc 의 API 를 배포 주체로 사용 (docs §3: "csc 가 Phase 3 배포 주체").
+    # TB-CSC(4419) 는 Phase 2 실행 자체에는 필요하지만, Phase 3 의 배포 체인은 배포본 csc 경유.
+    local base="https://127.0.0.1:4445"   # Phase 2 에서 배포된 csc (Server.Port=4445 overlay)
+    if ! ss -tln 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)4445$'; then
+        err "배포본 csc(4445) 접근 불가 — Phase 2 선행 실행 필요: ./cims.sh verify phase2 --skip-build --skip-pkg"
+        echo "**FAIL: 배포본 csc(4445) 없음. Phase 3 는 Phase 2 완료 전제 — Phase 2 먼저 실행.**" >> "$report"
+        return 1
+    fi
+    if ! curl -sk --max-time 3 -o /dev/null "$base/api/v1/packages"; then
+        err "배포본 csc($base) HTTP 접근 불가"
+        echo "**FAIL: 배포본 csc($base) HTTP 접근 불가**" >> "$report"
         return 1
     fi
 
@@ -1787,8 +1796,7 @@ _verify_phase3() {
     fi
     echo "" >> "$report"
 
-    # 5) Admin login
-    local base="https://127.0.0.1:4419"
+    # 5) Admin login (배포본 csc 4445 — DB 공유이므로 admin/1234 동일)
     local admin_id="${CIMS_TB_ADMIN_ID:-admin}"
     local admin_pw="${CIMS_TB_ADMIN_PASSWORD:-1234}"
     local tok
@@ -1797,11 +1805,11 @@ _verify_phase3() {
         -d "{\"login_id\":\"$admin_id\",\"password\":\"$admin_pw\"}" 2>/dev/null \
         | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
     if [[ -z $tok ]]; then
-        err "admin 로그인 실패"
-        echo "**FAIL: admin login**" >> "$report"
+        err "admin 로그인 실패 (배포본 csc $base)"
+        echo "**FAIL: admin login ($base)**" >> "$report"
         return 1
     fi
-    echo "## 5. Admin login OK" >> "$report"
+    echo "## 5. Admin login OK (배포본 csc $base)" >> "$report"
     echo "" >> "$report"
 
     # 6) 3개 Agent 등록 + Test-agent 기동 (csp-server-local/cmp-server-local/sim-server-local)
