@@ -10,13 +10,17 @@
 
 ### 0.1 3단계 구조 (한눈에)
 
-| Phase | 단계 | 목적 | 장소 | 기능 검증 |
+| Phase | 단계 | 목적 | 장소 | 결과 |
 |---|---|---|---|---|
-| **1** | 배포 **전** | 개발/보완 확인 + 기본 회귀 | `build/dist/<모듈>/` (직접 기동) | ✅ 기본 4시나리오 + 추가 3시나리오 + 보완 사항 |
-| **2** | 배포 **과정** | tarball → TB-CSC → agent 배포 메커니즘 | `build/dist/csc-server/` | ✗ (배포 메커니즘 한정) |
-| **3** | 배포 **이후** | 배포본에서 기본 회귀 + 보완 재확인 | `build/dist/{csc,csp,cmp,sim}-server/` | ✅ 기본 4시나리오 + 보완 사항 (Phase 1 과 동일 범위) |
+| **1** | 배포 **전** | 개발/보완 + 회귀 본진 | `build/dist/<모듈>/` (직접 기동) | 기능 PASS |
+| **2** | 배포 **과정** + **환경 구축** | tarball → agent 배포 체인 + **전 모듈(csc/console/csp/cmp/cspsim) install + 기동** | `build/dist/{csc,csp,cmp,sim}-server/` | 배포본 전체 기동 상태 유지 |
+| **3** | 배포 **이후** | 배포본에서 **서비스 기능 검증** | Phase 2 기동 환경 그대로 | 기본 4시나리오 PASS |
 
-**Phase 3 의 의의**: Phase 1 의 단순 반복이 아니라 "실제 배포 환경에서 같은 결과가 나오는지" 를 검증. 배포 실수·환경 의존 버그는 여기서만 잡힌다.
+**원칙 (2026-04-25 재설계)**:
+- **Phase 2 가 환경 구축까지 책임** — csc/console/csp/cmp/cspsim 을 모두 install + start. Phase 3 진입 조건 충족 상태로 종료.
+- **Phase 3 는 검증 전용** — 배포나 agent enroll 안 함. 4시나리오 + 개발/보완 확인만.
+- **데이터 wipe 는 Phase 2 시작 시만** — Phase 3 는 wipe 없음 (Phase 2 에서 wipe 한 데이터로 시나리오 실행).
+- Phase 3 의 목적은 "실제 배포 환경에서 기능 검증". 배포 실수·환경 의존 버그 검출.
 
 ### 0.2 구성 — TB 3종 / Test-* / 배포본
 
@@ -176,126 +180,136 @@ cims.sh verify phase1   # (1)~(7) 자동. (8) 유지는 기본 동작.
 
 ---
 
-## 2. Phase 2 — 배포 과정 검증
+## 2. Phase 2 — 배포 과정 + 환경 구축
 
-Phase 1 에서 확인된 구성이 tarball 로 묶여 TB-CSC 를 거쳐 대상 호스트에 정확히 배치되는지 — **배포 메커니즘 자체만** 검증. 기능 회귀는 반복하지 않는다.
+Phase 1 에서 확인된 구성을 tarball 로 묶어 배포 체인을 따라 설치·기동까지 수행한다. **csc/console/csp/cmp/cspsim 전 모듈** 을 `build/dist/{csc,csp,cmp,sim}-server/` 에 배포하고 sim 을 제외한 모든 모듈을 기동 상태로 종료 — Phase 3 진입 조건을 충족한다.
 
-### 2.1 단계
+### 2.1 단계 (22단계)
 
-**(1) tarball 생성** — `cims.sh pkg --no-bump` → `build/dist/packages/*.tar.gz`. tarball 루트에 `meta.json` + `config_template.json` 포함. Phase 1 에서 Console 이 표시/편집한 바로 그 파일이 1:1 반영됨.
+**데이터 wipe** (시작 시, 3단계 중 유일한 wipe 시점):
+**(1) Cleanup** — `cmd_reset --keep-processes` (Phase 1 Test-\* 유지, 로그/DB/ext_mnt wipe, 가입자 보존).
+**(2) Build / (3) Configure / (4) Pkg** — 옵션 (`--skip-build`, `--skip-pkg` 로 생략 가능).
 
-**(2) TB-CSC 업로드** — TB-Console(`https://<ens160>:3000/`) → 배포 > 패키지 → `cims-csc-<ver>.tar.gz` + `cims-console-<ver>.tar.gz` 업로드. TB-CSC 가 `cims_package.config_template_json` 자동 채움.
+**csc-server 배포 (TB-CSC 4419 경유)**:
+**(5) admin login** (TB-CSC) →
+**(6) csc-server-local agent 등록** (`cims_agent.py`, sync **9903**) →
+**(7) Test-agent 기동 + enroll 대기** →
+**(8) csc + console tarball 업로드** →
+**(9) deployment 생성** (csc overlay `{"Server.Port":4445}`, console overlay `{"Port":8081}`) →
+**(10) install job 폴링** →
+**(11) 설치 파일 검증** →
+**(12) config overlay 반영 확인** →
+**(13) csc Start (4445 LISTEN)** →
+**(14) csc Health** (`tcp:4445=open`).
 
-**(3) Test-agent enroll** — TB-Console 에서 csc-server 호스트 등록 → `cims_agent.py --name csc-server-local --sync-port 9903` 기동 → TB-CSC 에 enroll/approve. `verify phase2` 자동화가 `--heartbeat-sec 3` 으로 구동.
+**console 기동**:
+**(15) console Start (8081 HTTPS LISTEN)** — 배포본 console 은 config overlay `Port=8081` 로 `serve dist --ssl-cert` 기동 (Test-Console 8080 과 분리).
 
-**(4) 모듈 배포** — Test-agent 가 tarball 수령 → `build/dist/csc-server/{csc, console}/` 에 설치.
+**csp/cmp/cspsim 배포 (배포본 csc 4445 경유 — csc 가 Phase 3 배포 주체)**:
+**(16) 배포본 csc admin login** (cims DB 공유 → admin/1234 동일) →
+**(17) csp + cmp + cspsim tarball 업로드** (배포본 csc) →
+**(18) 3개 agent 등록 + Test-agent 기동** (sync **9904/9905/9906**, `--csc-url https://127.0.0.1:4445`) →
+**(19) deployment 생성** →
+**(20) install job 폴링** →
+**(21) csp (5060/udp) + cmp (9000/udp) Start** (sim 은 install-only — cspsim 단발 실행이라 `_start_one` case 없음).
 
-**(5) config overlay 검증** — `POST /api/v1/deployments` body 의 `config` 가 `install_path/config.json` 에 반영되는지 확인. `agent_deployment.config_json` 컬럼을 경유.
-
-**(6) Start / Health / Stop** — csc 만 자동 (`Server.Port=4445` overlay 로 기동 → Phase 1 Test-CSC 4421 / 배포본 운영 4420 모두와 분리). 포트 LISTEN + `tcp:4445=open` + stop cleanup 확인.
-
-> **console 은 install-only** — 운영 console:80 기동은 Phase 3 진입 시 설계 (cap_net_bind vs reverse proxy) 확정 후 자동화.
+**종료**:
+**(22) 기본**: 전 배포본 기동 유지 (Phase 3 진입 조건 충족). `--stop-after` 지정 시 전체 정리.
 
 ### 2.2 자동 명령
 
 ```bash
-cims.sh verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
+cims.sh verify phase2 [--skip-build] [--skip-pkg] [--stop-after]
 ```
 
-내부: `cmd_reset --keep-processes` (Phase 1 모듈 유지) → build → configure → pkg → admin login → agent enroll → tarball upload → install → overlay 검증 → start (4445) → health → stop → Test-agent 종료. 16단계 상세는 `verify_reports/<ts>_phase2.md` 참조.
+기본: 완료 후 csc(4445) + console(8081) + csp(5060) + cmp(9000) + Test-agent 4개 모두 유지.
+`--stop-after`: 검증 후 전부 정리 (배포 메커니즘 cleanup 검증 전용).
 
 ### 2.3 합격 조건
 
-- Agent enroll OK (mTLS 모드면 cert 유효성)
-- Tarball 해시 일치 (tarball → install_path)
-- Install 완료
-- Config overlay 반영
-- CSC Start (4445 LISTEN) + Health (tcp:4445=open) + Stop cleanup 전부 OK
+- Agent enroll OK × 4 (csc-server-local + csp/cmp/sim-server-local)
+- Tarball 업로드 OK × 5 (csc / console / csp / cmp / cspsim)
+- Install 완료 × 5
+- Config overlay 반영 (`Server.Port=4445` on csc, `Port=8081` on console)
+- Start + Health OK × 4 (csc / console / csp / cmp)
+- sim: install-only
+- 종료 후 모든 배포본 기동 유지
 
 ### 2.4 이슈 처리
 
-- 배포 메커니즘 이슈 → Phase 2 내 보완 후 재수행 (Phase 1 재수행 불필요)
-- 기능 이슈 발견 → Phase 1 으로 회귀 (Phase 1 검증 미흡 신호)
+- 배포 체인 이슈 → Phase 2 내 보완 후 재수행 (Phase 1 재수행 불필요)
+- 기능 이슈 발견 → Phase 1 회귀 (Phase 1 검증 미흡 신호)
+
+### 2.5 함정
+
+- **`--skip-pkg` + tarball stale**: 소스 수정 후 `sync all` + `pkg --no-bump` 없이 `--skip-pkg` 사용 시 tarball 속 cims.sh / config 가 과거값. 특히 **start_console overlay 로직** 은 tarball 속 cims.sh 에 반영되어야 동작. ens160 IP 변경 시에도 동일 (csp.json LocalIp stale).
+- **TB-CSC 재기동**: verification.py 등 csc 소스 수정 후에는 `cims.sh sync csc` + `restart tb-csc` 필수.
 
 ---
 
-## 3. Phase 3 — 배포 이후 검증
+## 3. Phase 3 — 서비스 검증 전용
 
-Phase 2 로 배포된 csc 를 주체로 csp/cmp/sim 배포 체인을 완성하고, **실제 운영 포트에서 Phase 1 과 동일한 기능 결과가 나오는지** 재확인. 배포 실수·환경 의존 버그 검출.
+Phase 2 에서 배포·기동된 환경 (csc/console/csp/cmp) 에서 **기본 4시나리오 + 개발/보완 사항** 을 검증. 배포나 agent enroll 은 수행하지 않으며 데이터 wipe 도 없음.
 
 ### 3.1 진입 조건
 
-- **Phase 1 모듈 일부만 유지**: Console (Dev-Console 3001 또는 Test-Console 8080) 만 유지 — 사용자 UI 세션 유지용. **서버 모듈 (csp / cmp / cwrtc / phone / cspsim) 은 전부 중지**. 포트 충돌 (5060/9000/8443 등) 및 공유 로그/DB wipe 시 충돌 방지.
-- Phase 2 완료: `build/dist/csc-server/csc` 기동 상태 (4420 운영 또는 4445 overlay)
-- TB 3종 유지
-- Test-CSC (4421) 는 중지 또는 유지 (배포본 csc 와 포트 분리되므로 공존 가능. 단 Console 의 proxy 대상이 Test-CSC 면 유지)
+Phase 2 완료 — 다음 4개 포트가 모두 LISTEN 상태여야 함:
+- `4445/tcp` — 배포본 csc (API 제공)
+- `8081/tcp` — 배포본 console (UI)
+- `5060/udp` — 배포본 csp (SIP)
+- `9000/udp` — 배포본 cmp (미디어 제어)
+
+미충족 시 즉시 FAIL + "Phase 2 선행 실행 필요" 안내.
 
 ### 3.2 단계
 
-**(1) csc → csp/cmp/sim 배포 체인 완성**
-Console 80 (배포본) 또는 TB-Console (3000) 에서:
-- `csp-server` / `cmp-server` / `sim-server` 호스트 등록 → 각 agent enroll
-  - 동일 호스트 다중 agent 는 `CIMS_AGENT_SYNC_PORT` env 로 sync 포트 분리
-- 각 agent 가 csc 로부터 tarball 수령 → `build/dist/<x>-server/<모듈>/` 에 설치
+**(1) 진입 조건 체크** — 위 4포트 LISTEN 확인.
 
-**(2) 배포본 모듈 설정**
-Console 모듈관리에서 각 모듈 scalar overlay + collection 편집. agent heartbeat 로 수집 → `config.json` / `config/*.jsonl` 내려감.
-- csp: listen IP/포트, realm, routing rules, SIP trunk
-- cmp: RtpStartPort, PttRtpStartPort, PttFloorStartPort, CSP address
-- sim: csp server IP, 테스트 계정/그룹
+**(2) 시나리오 준비**:
+- DB (`volte_subscriptions` / `ptt_subscriptions` / `ptt_groups`) 에서 가입자·그룹 선택
+- **배포본 csp jsonlDir** (`build/dist/csp-server/csp/config/`) 에 `access_services.jsonl` 시드 (volte / ptt kind 분리)
+- 배포본 csp 에 `SIGUSR1` — ConfigCache reload
 
-설정 원칙: Phase 1 과 동일한 실제 시험 환경을 재현 (IP·포트·realm·도메인·그룹 ID).
+**(3) 4시나리오 실행** (`cspsim` → 배포본 csp 5060):
+- **3.1 VoLTE 음성 2자** (`-mode volte -count 2 -no_video`)
+- **3.2 VoLTE 영상 2자** (`-mode volte -count 2`, video 포함)
+- **3.3 PTT 그룹 음성 5인** (`-mode ptt -scenario group_call -count 5 -no_video`)
+- **3.4 PTT 그룹 영상 5인** (`-mode ptt -scenario group_call -count 5`)
+- 판정: 각 시나리오 실행 후 `seg_*.rtp` 녹취 파일 +1 이상 → PASS
 
-**(3) 로그/DB wipe**
-`cims.sh reset` 실행 — §0.5 범위 (가입자 보존, 로그 폴더·서비스로그·녹취·DB 런타임 테이블 전부 wipe, TB 유지). Phase 1 서버 모듈은 §3.1 에서 이미 중지됐으므로 파일 잠금·포트 충돌 없음.
+**(4) 결과 요약** — 녹취(size>0/0바이트), SIP msg/flow 로그, 배포본 csp/cmp 로그 ERROR/FATAL 카운트.
 
-> 로그 폴더와 DB 는 Phase 1/2/3 간 공유 구조 (`build/dist/log/`, `ext_mnt/{service_log,msg_log}/`, `cims` DB) — Phase 3 에서의 깨끗한 데이터 확인을 위해 이 단계 필수.
+**(5) 리포팅** — `verify_reports/<ts>_phase3.md`.
 
-**(4) 배포본 실행**
-순서: csc (이미 기동) → csp → cmp → sim → console:80.
-- Console 에서 각 모듈 start
-- 리슨 확인: csp(5060/5061/25061), cmp(9000 + RTP 풀), sim (sync only), console (80)
-- TB-CSC → 배포본 csc HEARTBEAT 정상
-
-**(5) 검증** — 배포본 console (80) 에 접속 → §0.9 **기본 4시나리오 재수행** (VoLTE 음성/영상, PTT 그룹 음성/영상) + 개발/보완 사항 재확인.
-- Phase 1 과 동일 결과 (Flow 메시지, sesid 일관, 녹취, NOTIFY 등) 확인
-- 차이 발생 시 → 배포 설정 누락 또는 환경 의존 버그 의심
-
-**(6) 리포팅** — `verify_reports/<ts>_phase3.md`. 배포 체인 + §0.9 4시나리오 결과 + 보완 사항 결과.
+종료 시 전체 환경 유지 (데이터 wipe 없음, 모듈 stop 없음).
 
 ### 3.3 자동 명령
 
 ```bash
-cims.sh verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
+cims.sh verify phase3
 ```
 
-**현재 범위 (v3, 2026-04-24)**:
-- Phase 1 서버 모듈 중지 (cmp/csp/cwrtc/phone/cspsim) — Console·TB 유지
-- `cmd_reset --keep-processes` 로 로그/DB/배포본 wipe
-- 3개 Test-agent (csp/cmp/sim-server-local, sync 9904·9905·9906) enroll
-- csp/cmp/cspsim tarball 업로드 + deployment 생성
-- Install job 폴링 + 설치 파일 검증 (meta.json + config/)
-- **csp·cmp**: Start job (포트 LISTEN 대기) → Health check
-- **배포본 csp jsonlDir 에 access_services.jsonl 시드 + SIGUSR1 reload**
-- **4시나리오 실행 (cspsim → 배포본 csp, §0.9)**:
-  - 14.1 VoLTE 음성 2자 통화 (-no_video)
-  - 14.2 VoLTE 영상 2자 통화 (기본 video 포함)
-  - 14.3 PTT 그룹 음성 통화 5인 (-no_video)
-  - 14.4 PTT 그룹 영상 통화 5인
-  - 판정: 각 시나리오 실행 후 `seg_*.rtp` 녹취 파일 +1 이상 생성 → PASS
-- 시나리오 후 csp·cmp Stop + Test-agent 종료
-- sim: install-only (cspsim 은 4시나리오에서 cmd_sim 경유 단발 실행)
+옵션 없음 (Phase 2 결과물에 의존).
 
-**Console Phase 3 UI**: 별도 작업. 사용자가 배포본 기동 후 Console 에서 모듈관리 + 4시나리오 실행하는 워크플로우 지원 (현재는 `verify phase3` CLI 자동화로 대체).
+### 3.4 합격 조건
 
-**주의 (함정)**: `--skip-pkg` 사용 시 tarball 속 config (csp.json LocalIp 등) 가 stale 하면 start 실패 (UdpListen error). ens160 IP 변경 후에는 configure + pkg 재실행 필수.
+- 진입 조건 4포트 전부 LISTEN
+- 4시나리오 4/4 PASS
+- 배포본 csp/cmp ERROR/FATAL 0 (권장)
 
-### 3.4 이슈 처리
+### 3.5 이슈 처리
 
-- **배포 체인 이슈** (enroll 실패, config 미전달, 리슨 실패) → Phase 3 내 보완 후 재수행
-- **기능 이슈** (4시나리오 또는 보완 사항 실패) — 원인 판별:
-  - Phase 1 에서 같은 증상 재현됨 → 코드 이슈, Phase 1 부터 재수행
+- 진입 조건 미충족 → Phase 2 선행 실행
+- 시나리오 실패 — 원인 판별:
+  - Phase 1 에서 같은 증상 재현 → 코드 이슈, Phase 1 부터 재수행
   - Phase 1 재현 안 됨 → 배포 경로·설정·환경 의존 버그, Phase 2 배포 설계 재검토
+- 개발/보완 사항 실패 → Console (8081) 에서 직접 재현 확인 + 이슈 리포트
+
+### 3.6 Console 진입점
+
+배포본 console (`https://<ens160>:8081/`) 에 접속하여:
+- 모듈관리: 배포된 csc/csp/cmp/sim 설정 확인·편집
+- 검증 페이지 (`/testbed/verify`): Phase 1/2/3 실행 버튼 + 리포트 조회
 
 ---
 
@@ -327,17 +341,20 @@ cims.sh start tb
 # Phase 1 — 배포 전 검증
 cims.sh verify phase1
 
-# Phase 2 — 배포 과정 검증
+# Phase 2 — 배포 과정 + 환경 구축 (csc/console/csp/cmp/cspsim install + start)
 cims.sh build
 cims.sh configure --local-ip <ens160_ip>
-cims.sh pkg --no-bump
-cims.sh verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
+cims.sh pkg --no-bump                           # tarball 속 cims.sh/config 최신화 필수
+cims.sh verify phase2 [--skip-build] [--skip-pkg] [--stop-after]
+                                  # 기본: csc 4445 + console 8081 + csp 5060 + cmp 9000 기동 유지
+                                  # --stop-after: 검증 후 전체 정리
 
-# Phase 3 — 배포 이후 검증
-cims.sh verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
-                                 # v3 (2026-04-24): install + csp/cmp start/health/stop +
-                                 # 4시나리오 자동 실행 (VoLTE 음성/영상 + PTT 그룹 음성/영상)
-                                 # 판정: 각 시나리오 seg_*.rtp 녹취 +1 이상 생성 → PASS
+# Phase 3 — 서비스 검증 전용 (Phase 2 완료 상태 전제)
+cims.sh verify phase3             # 4시나리오 (VoLTE 음성/영상 + PTT 그룹 음성/영상)
+                                  # 판정: 각 시나리오 seg_*.rtp 녹취 +1 이상 → PASS
+
+# Console 진입점 (Phase 2 이후)
+# https://<ens160>:8081/  — 배포본 console UI (모듈관리 + 검증 실행)
 ```
 
 ## 부록 C. 문서 관리
