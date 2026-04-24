@@ -1964,32 +1964,138 @@ except: pass' 2>/dev/null)
     done
     echo "" >> "$report"
 
-    # 11) Test-agent 종료 (옵션)
+    # ── v2: Start / Health / Stop (csp, cmp) ──
+    # sim 은 _start_one 에 case 없어 start/stop 미지원 → install-only 유지 (cspsim 은 cmd_sim 으로 단발 실행)
+    # 주의: agent 가 process_name.lower() → cims.sh start csp/cmp 호출 → Phase 1 바이너리가 기동됨.
+    # 배포 메커니즘 (agent → cims.sh 체인) 검증에 집중. 실배포본 바이너리 기동은 pkg shim cims.sh 후속 작업.
+    declare -A port_map proto_map
+    port_map[csp]=5060; proto_map[csp]=udp
+    port_map[cmp]=9000; proto_map[cmp]=udp
+
+    # 11) Start jobs (csp, cmp)
+    echo "## 11. Start jobs (csp / cmp)" >> "$report"
+    for m in csp cmp; do
+        did=${dep_id_map[$m]:-}
+        [[ -z $did ]] && continue
+        curl -sk -X POST "$base/api/v1/deployments/$did/job" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d '{"job_type":"start"}' >/dev/null 2>&1
+    done
+    # 12) Port LISTEN 대기 (csp 5060/udp, cmp 9000/udp, 최대 20s)
+    local start_ok=1
+    local port proto waited found
+    for m in csp cmp; do
+        port=${port_map[$m]}; proto=${proto_map[$m]}
+        found=0; waited=0
+        for i in $(seq 1 20); do
+            sleep 1; waited=$((waited+1))
+            if [[ $proto == udp ]]; then
+                if ss -uln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then found=1; break; fi
+            else
+                if ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then found=1; break; fi
+            fi
+        done
+        if [[ $found -eq 1 ]]; then
+            echo "- [OK] $m: port $port/$proto LISTEN (${waited}s)" >> "$report"
+        else
+            echo "- [FAIL] $m: port $port/$proto LISTEN 실패 (20s timeout)" >> "$report"
+            start_ok=0
+        fi
+    done
+    echo "" >> "$report"
+
+    # 13) Health check jobs
+    echo "## 13. Health check jobs (csp / cmp)" >> "$report"
+    local health_ok=1
+    local hresp hjid row hstatus hrc hout
+    for m in csp cmp; do
+        did=${dep_id_map[$m]:-}
+        [[ -z $did ]] && continue
+        hresp=$(curl -sk -X POST "$base/api/v1/deployments/$did/job" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d '{"job_type":"health_check"}')
+        hjid=$(echo "$hresp" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("job_id",""))
+except: pass' 2>/dev/null)
+        hstatus="(pending)"; hrc=""; hout=""
+        for i in $(seq 1 15); do
+            sleep 1
+            row=$(mysql -u cims -pcims1234 -Nse \
+                "SELECT status, result_code, COALESCE(result_stdout,'') FROM agent_job WHERE id=$hjid" cims 2>/dev/null)
+            hstatus=$(echo "$row" | awk -F'\t' '{print $1}')
+            hrc=$(echo "$row" | awk -F'\t' '{print $2}')
+            hout=$(echo "$row" | awk -F'\t' '{print $3}')
+            [[ $hstatus == "succeeded" || $hstatus == "failed" ]] && break
+        done
+        if [[ $hstatus == "succeeded" && $hrc == "0" ]]; then
+            echo "- [OK] $m: $hout" >> "$report"
+        else
+            echo "- [FAIL] $m: status=$hstatus rc=$hrc out=$hout" >> "$report"
+            health_ok=0
+        fi
+    done
+    echo "" >> "$report"
+
+    # 14) Stop jobs
+    echo "## 14. Stop jobs (csp / cmp)" >> "$report"
+    for m in csp cmp; do
+        did=${dep_id_map[$m]:-}
+        [[ -z $did ]] && continue
+        curl -sk -X POST "$base/api/v1/deployments/$did/job" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d '{"job_type":"stop"}' >/dev/null 2>&1
+    done
+    local stop_ok=1
+    local gone
+    for m in csp cmp; do
+        port=${port_map[$m]}; proto=${proto_map[$m]}
+        gone=0
+        for i in $(seq 1 10); do
+            sleep 1
+            if [[ $proto == udp ]]; then
+                if ! ss -uln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then gone=1; break; fi
+            else
+                if ! ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then gone=1; break; fi
+            fi
+        done
+        if [[ $gone -eq 1 ]]; then
+            echo "- [OK] $m: port $port/$proto 해제" >> "$report"
+        else
+            echo "- [WARN] $m: port $port/$proto 여전히 LISTEN (10s)" >> "$report"
+            stop_ok=0
+        fi
+    done
+    echo "" >> "$report"
+
+    # 15) Test-agent 종료 (옵션)
     if [[ $keep_agent -eq 0 ]]; then
         for m in csp cmp sim; do
             [[ -n "${pid_map[$m]:-}" ]] && kill ${pid_map[$m]} 2>/dev/null || true
         done
         sleep 1
-        echo "## 11. Test-agent 종료 (pids=${pid_map[csp]:-?},${pid_map[cmp]:-?},${pid_map[sim]:-?})" >> "$report"
+        echo "## 15. Test-agent 종료 (pids=${pid_map[csp]:-?},${pid_map[cmp]:-?},${pid_map[sim]:-?})" >> "$report"
     else
-        echo "## 11. Test-agent 유지 (--keep-agent)" >> "$report"
+        echo "## 15. Test-agent 유지 (--keep-agent)" >> "$report"
         echo "- pids: csp=${pid_map[csp]:-?} cmp=${pid_map[cmp]:-?} sim=${pid_map[sim]:-?}" >> "$report"
     fi
     echo "" >> "$report"
 
-    # 판정 (v1: install + overlay 검증만)
+    # 판정 (v2: install + start + health OK 면 PASS; stop 은 WARN 허용)
     local verdict="PASS"
-    [[ $all_done -ne 1 || $verified_ok -ne 1 ]] && verdict="FAIL"
+    [[ $all_done -ne 1 || $verified_ok -ne 1 || $start_ok -ne 1 || $health_ok -ne 1 ]] && verdict="FAIL"
     {
-        echo "## 판정: $verdict (v1 — install-only)"
+        echo "## 판정: $verdict (v2 — install + start/health/stop, csp·cmp 한정)"
         echo ""
         echo "- Phase 1 서버 모듈 중지 + reset: OK"
         echo "- Agent enroll (csp/cmp/sim): OK"
         echo "- Package upload: OK (csp / cmp / cspsim)"
         echo "- Install 완료: $([[ $all_done -eq 1 ]] && echo OK || echo TIMEOUT)"
         echo "- 설치 파일 검증: $([[ $verified_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo "- Start (csp 5060/udp, cmp 9000/udp): $([[ $start_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo "- Health check: $([[ $health_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo "- Stop cleanup: $([[ $stop_ok -eq 1 ]] && echo OK || echo WARN)"
         echo ""
-        echo "- v2 예정: start/health/stop 자동화 (배포본 csp 5060 / cmp 9000 / sim sync 기동)"
+        echo "- sim 은 install-only 유지 (cspsim 은 cmd_sim 으로 단발 실행 — 4시나리오 실행 시 별도 호출)"
         echo "- v3 예정: 4시나리오 자동 실행 (VoLTE 음성/영상, PTT 그룹 음성/영상)"
     } >> "$report"
 
