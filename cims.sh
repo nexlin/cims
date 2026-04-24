@@ -2036,8 +2036,192 @@ except: pass' 2>/dev/null)
     done
     echo "" >> "$report"
 
-    # 14) Stop jobs
-    echo "## 14. Stop jobs (csp / cmp)" >> "$report"
+    # ── v3: 기본 4시나리오 실행 (배포본 csp 대상) ──
+    # Phase 1 §7 의 cspsim 실행 로직을 배포본 csp 대상으로 재수행.
+    # 시드 대상: 배포본 csp 의 jsonl dir (build/dist/csp-server/csp/config), pid: csp-server/csp/run/csp.pid.
+    # 판정: 각 시나리오 종료 후 seg_*.rtp 녹취 파일 +1 이상 생성되면 PASS.
+    local sim_ip="${ens_ip:-127.0.0.1}"
+    local deployed_cfg_dir="$DIST_DIR/csp-server/csp/config"
+    local deployed_csp_pid="$DIST_DIR/csp-server/csp/run/csp.pid"
+    local VOIP_USER="" VOIP_PWD="" VOIP_AUTH="" VOIP_DOM=""
+    local PTT_USER=""  PTT_PWD=""  PTT_DOM=""   PTT_GROUP=""
+
+    echo "## 14. 기본 4시나리오 준비 (배포본 csp 대상)" >> "$report"
+    eval "$(python3 - "$DIST_DIR/csp/config/csp.json" "$deployed_cfg_dir" "$deployed_csp_pid" 2>/dev/null <<'PY' || true
+import json, sys, os, pymysql, uuid, time
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+cfg_dir  = sys.argv[2]
+pid_file = sys.argv[3]
+db = d.get('Setup', {}).get('Database', {})
+voip_user = voip_pwd = voip_imsi = voip_ref = ''
+ptt_user  = ptt_pwd  = ptt_imsi  = ptt_ref  = ''
+ptt_group = ''
+try:
+    conn = pymysql.connect(host=db['Host'], port=int(db.get('Port',3306)),
+                           user=db['User'], password=db['Password'], database=db['DbName'])
+    cur = conn.cursor()
+    cur.execute("SELECT id,passwd,imsi,service_ref FROM volte_subscriptions "
+                "WHERE id LIKE '+%' AND passwd<>'' AND service_ref<>'' AND imsi<>'' "
+                "ORDER BY id LIMIT 1")
+    r = cur.fetchone()
+    if r: voip_user, voip_pwd, voip_imsi, voip_ref = r[0], r[1] or '', r[2] or '', r[3] or ''
+    cur.execute("SELECT id,passwd,imsi,service_ref FROM ptt_subscriptions "
+                "WHERE id LIKE '+%' AND passwd<>'' AND service_ref<>'' AND imsi<>'' "
+                "ORDER BY id LIMIT 1")
+    r = cur.fetchone()
+    if r: ptt_user, ptt_pwd, ptt_imsi, ptt_ref = r[0], r[1] or '', r[2] or '', r[3] or ''
+    cur.execute("SELECT id FROM ptt_groups ORDER BY id LIMIT 1")
+    r = cur.fetchone()
+    if r: ptt_group = r[0]
+    conn.close()
+except Exception:
+    pass
+
+# 배포본 csp 의 config 디렉토리에 access_services.jsonl 시드 (Phase 1 과 동일한 형식)
+as_path = os.path.join(cfg_dir, 'access_services.jsonl')
+seeded = []
+def seed(name, kind, domain):
+    if not name: return
+    seeded.append({
+        'id': uuid.uuid4().hex, 'name': name, 'enabled': True,
+        'kind': kind, 'domain': domain, 'auth_realm': domain,
+        'inbound_policy': 'any', 'allowed_local_node_refs': [],
+        'priority': 100, 'tags': ['verify-phase3-seed'],
+        'note': 'auto-seeded by cims.sh verify phase3',
+        'server_identity_uri': f'sip:cspserver@{domain}',
+    })
+
+seed(voip_ref, 'volte', 'ims.mnc033.mcc450.3gppnetwork.org')
+seed(ptt_ref,  'ptt',   'ptt.mnc033.mcc450.3gppnetwork.org')
+
+if seeded:
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(as_path, 'w') as f:
+        for r in seeded: f.write(json.dumps(r, ensure_ascii=False) + '\n')
+    try:
+        with open(pid_file) as pf: pid = int(pf.read().strip())
+        os.kill(pid, 10)  # SIGUSR1
+        time.sleep(2)
+    except Exception:
+        pass
+
+volte_dom = 'ims.mnc033.mcc450.3gppnetwork.org'
+mcptt_dom = 'ptt.mnc033.mcc450.3gppnetwork.org'
+voip_auth = f"{voip_imsi}@{volte_dom}" if voip_imsi else ''
+ptt_auth  = f"{ptt_imsi}@{mcptt_dom}"  if ptt_imsi  else ''
+
+def shq(v): return "'" + str(v).replace("'", "'\\''") + "'"
+print(f"VOIP_USER={shq(voip_user)}")
+print(f"VOIP_PWD={shq(voip_pwd)}")
+print(f"VOIP_AUTH={shq(voip_auth)}")
+print(f"VOIP_DOM={shq(volte_dom)}")
+print(f"PTT_USER={shq(ptt_user)}")
+print(f"PTT_PWD={shq(ptt_pwd)}")
+print(f"PTT_DOM={shq(mcptt_dom)}")
+print(f"PTT_GROUP={shq(ptt_group)}")
+PY
+)"
+    {
+        echo "### 14.0 가입자 정보 + access_services.jsonl 시드"
+        echo '```'
+        echo "VoIP: user=$VOIP_USER  domain=$VOIP_DOM  auth_id=$VOIP_AUTH"
+        echo "PTT : user=$PTT_USER   domain=$PTT_DOM   group=$PTT_GROUP"
+        echo "배포본 jsonlDir: $deployed_cfg_dir"
+        echo "csp pid (SIGUSR1 대상): $(cat "$deployed_csp_pid" 2>/dev/null || echo 'N/A')"
+        echo '```'
+        echo ""
+    } >> "$report"
+
+    # 시나리오 실행 헬퍼 (녹취 파일 증분으로 pass 판정)
+    local scen_pass=0 scen_total=4
+    _p3_run_scenario() {
+        local title="$1"; shift
+        local rec_before rec_after delta
+        rec_before=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" 2>/dev/null | wc -l)
+        echo "### $title" >> "$report"
+        echo '```' >> "$report"
+        cmd_sim "$@" 2>&1 | tail -25 | tee -a "$report" >/dev/null || true
+        rec_after=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" 2>/dev/null | wc -l)
+        delta=$((rec_after-rec_before))
+        echo '```' >> "$report"
+        if [[ $delta -ge 1 ]]; then
+            echo "- [PASS] 녹취 파일 +$delta 생성" >> "$report"
+            scen_pass=$((scen_pass+1))
+        else
+            echo "- [FAIL] 녹취 파일 미생성 (delta=$delta)" >> "$report"
+        fi
+        echo "" >> "$report"
+    }
+
+    # 14.1 VoLTE 음성 2자 통화
+    if [[ -n $VOIP_USER ]]; then
+        _p3_run_scenario "14.1 VoLTE 음성 2자 통화" \
+            -no-db -mode volte -scenario call -count 2 -duration 5 -ip "$sim_ip" \
+            -user "$VOIP_USER" -domain "$VOIP_DOM" -password "$VOIP_PWD" \
+            ${VOIP_AUTH:+-auth_id "$VOIP_AUTH"} -no_video
+    else
+        echo "### 14.1 VoLTE 음성 — SKIP (가입자 없음)" >> "$report"; echo "" >> "$report"
+    fi
+
+    # 14.2 VoLTE 영상 2자 통화 (기본 video 포함)
+    if [[ -n $VOIP_USER ]]; then
+        _p3_run_scenario "14.2 VoLTE 영상 2자 통화" \
+            -no-db -mode volte -scenario call -count 2 -duration 5 -ip "$sim_ip" \
+            -user "$VOIP_USER" -domain "$VOIP_DOM" -password "$VOIP_PWD" \
+            ${VOIP_AUTH:+-auth_id "$VOIP_AUTH"}
+    else
+        echo "### 14.2 VoLTE 영상 — SKIP (가입자 없음)" >> "$report"; echo "" >> "$report"
+    fi
+
+    # 14.3 PTT 그룹 음성 (5인)
+    if [[ -n $PTT_USER && -n $PTT_GROUP ]]; then
+        _p3_run_scenario "14.3 PTT 그룹 음성 통화 (5인)" \
+            -mode ptt -scenario group_call -count 5 -duration 10 -ip "$sim_ip" \
+            -domain "$PTT_DOM" -group "$PTT_GROUP" -no_video
+    else
+        echo "### 14.3 PTT 음성 — SKIP (PTT 가입자/그룹 없음)" >> "$report"; echo "" >> "$report"
+    fi
+
+    # 14.4 PTT 그룹 영상 (5인)
+    if [[ -n $PTT_USER && -n $PTT_GROUP ]]; then
+        _p3_run_scenario "14.4 PTT 그룹 영상 통화 (5인)" \
+            -mode ptt -scenario group_call -count 5 -duration 10 -ip "$sim_ip" \
+            -domain "$PTT_DOM" -group "$PTT_GROUP"
+    else
+        echo "### 14.4 PTT 영상 — SKIP (PTT 가입자/그룹 없음)" >> "$report"; echo "" >> "$report"
+    fi
+
+    # 15) 4시나리오 요약
+    echo "## 15. 시나리오 요약" >> "$report"
+    local rec_ok rec_zero msg_lines flow_lines sip_lines err_cnt
+    rec_ok=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size +0 2>/dev/null | wc -l)
+    rec_zero=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size 0 2>/dev/null | wc -l)
+    msg_lines=$(find "$DIST_DIR/ext_mnt/service_log" -maxdepth 5 -name "*.msg.jsonl" -exec cat {} + 2>/dev/null | wc -l)
+    flow_lines=$(find "$DIST_DIR/ext_mnt/service_log" -maxdepth 5 -name "*.flow.jsonl" -exec cat {} + 2>/dev/null | wc -l)
+    sip_lines=$(( ${msg_lines:-0} + ${flow_lines:-0} ))
+    local _p3_logs=() _lf
+    for _lf in "$DIST_DIR/csp-server/csp/csp/log/"csp_*.log "$DIST_DIR/cmp-server/cmp/cmp/log/"cmp_*.log; do
+        [[ -f "$_lf" ]] && _p3_logs+=("$_lf")
+    done
+    if [[ ${#_p3_logs[@]} -gt 0 ]]; then
+        err_cnt=$(cat "${_p3_logs[@]}" 2>/dev/null | grep -cE "ERROR|FATAL" || true)
+    else
+        err_cnt=0
+    fi
+    {
+        echo "- 시나리오 PASS: $scen_pass / $scen_total"
+        echo "- 녹취 파일(size>0): ${rec_ok:-0}개"
+        echo "- 녹취 파일(0바이트): ${rec_zero:-0}개"
+        echo "- SIP msg/flow 로그 라인: ${sip_lines:-0} (msg=${msg_lines:-0}, flow=${flow_lines:-0})"
+        echo "- 배포본 csp/cmp ERROR/FATAL: ${err_cnt:-0}"
+    } >> "$report"
+    echo "" >> "$report"
+
+    # 16) Stop jobs
+    echo "## 16. Stop jobs (csp / cmp)" >> "$report"
     for m in csp cmp; do
         did=${dep_id_map[$m]:-}
         [[ -z $did ]] && continue
@@ -2067,24 +2251,25 @@ except: pass' 2>/dev/null)
     done
     echo "" >> "$report"
 
-    # 15) Test-agent 종료 (옵션)
+    # 17) Test-agent 종료 (옵션)
     if [[ $keep_agent -eq 0 ]]; then
         for m in csp cmp sim; do
             [[ -n "${pid_map[$m]:-}" ]] && kill ${pid_map[$m]} 2>/dev/null || true
         done
         sleep 1
-        echo "## 15. Test-agent 종료 (pids=${pid_map[csp]:-?},${pid_map[cmp]:-?},${pid_map[sim]:-?})" >> "$report"
+        echo "## 17. Test-agent 종료 (pids=${pid_map[csp]:-?},${pid_map[cmp]:-?},${pid_map[sim]:-?})" >> "$report"
     else
-        echo "## 15. Test-agent 유지 (--keep-agent)" >> "$report"
+        echo "## 17. Test-agent 유지 (--keep-agent)" >> "$report"
         echo "- pids: csp=${pid_map[csp]:-?} cmp=${pid_map[cmp]:-?} sim=${pid_map[sim]:-?}" >> "$report"
     fi
     echo "" >> "$report"
 
-    # 판정 (v2: install + start + health OK 면 PASS; stop 은 WARN 허용)
+    # 판정 (v3: install + start + health + 4시나리오 PASS 면 PASS; stop 은 WARN 허용)
     local verdict="PASS"
     [[ $all_done -ne 1 || $verified_ok -ne 1 || $start_ok -ne 1 || $health_ok -ne 1 ]] && verdict="FAIL"
+    [[ $scen_pass -lt $scen_total ]] && verdict="FAIL"
     {
-        echo "## 판정: $verdict (v2 — install + start/health/stop, csp·cmp 한정)"
+        echo "## 판정: $verdict (v3 — install + start/health/stop + 4시나리오)"
         echo ""
         echo "- Phase 1 서버 모듈 중지 + reset: OK"
         echo "- Agent enroll (csp/cmp/sim): OK"
@@ -2093,10 +2278,11 @@ except: pass' 2>/dev/null)
         echo "- 설치 파일 검증: $([[ $verified_ok -eq 1 ]] && echo OK || echo FAIL)"
         echo "- Start (csp 5060/udp, cmp 9000/udp): $([[ $start_ok -eq 1 ]] && echo OK || echo FAIL)"
         echo "- Health check: $([[ $health_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo "- **4시나리오 PASS**: $scen_pass / $scen_total"
         echo "- Stop cleanup: $([[ $stop_ok -eq 1 ]] && echo OK || echo WARN)"
         echo ""
-        echo "- sim 은 install-only 유지 (cspsim 은 cmd_sim 으로 단발 실행 — 4시나리오 실행 시 별도 호출)"
-        echo "- v3 예정: 4시나리오 자동 실행 (VoLTE 음성/영상, PTT 그룹 음성/영상)"
+        echo "- sim 은 install-only 유지 (cspsim 은 cmd_sim 경유 단발 실행)"
+        echo "- 시나리오 판정 기준: 각 시나리오 실행 후 녹취 파일(seg_*.rtp) 생성 수"
     } >> "$report"
 
     header "=== Phase 3 검증 종료 ==="
