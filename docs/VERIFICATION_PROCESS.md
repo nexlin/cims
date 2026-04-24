@@ -46,7 +46,7 @@
 | 초기화 (모듈 설정) | `sip_service`, `sip_service_listener`, `csp_listener`, `sip_trunk`, `routing_rule*`, `routing_access_list`, `csp_config_audit` 등 런타임 config 계열 | TRUNCATE |
 | 초기화 (배포 등록) | `cims_instance`, `cims_agent`, `cims_package`, `agent_deployment`, `agent_job`, `agent_metric` | TRUNCATE |
 | 초기화 (세션/로그) | `auth_codes`, `refresh_tokens`, `voip_call_logs`, `ptt_call_logs`, `*_participants`, `recordings`, `recording_segments`, `stats_*` | TRUNCATE |
-| 초기화 (파일) | `build/dist/<server>/modules/**`, agent install_path (예: `/tmp/cims-agent-*`), `service_log/`, `msg_log/`, `cert/agent_mtls/issued` 발급 cert | rm -rf |
+| 초기화 (파일) | `build/dist/<모듈>/modules/**` (Phase 1 직접 기동본), `build/dist/{csc,csp,cmp,sim}-server/` (Phase 2/3 배포 대상, 0.10 참조), `service_log/`, `msg_log/`, `cert/agent_mtls/issued` 발급 cert | rm -rf |
 | 초기화 (프로세스) | 검증 대상 csc(4420)/csp/cmp/cspsim/agent/console(3001) | `cims.sh reset` |
 
 `cims.sh reset` 은 위 범위를 자동 처리하며 TB 는 제외한다.
@@ -106,6 +106,49 @@ Phase 1 은 **`build/dist/` 안에서 직접 기동·기능 검증** 하는 단�
 
 **원칙: Phase 2 또는 Phase 3 에서 이슈 발생 시 Phase 1 부터 재수행한다.**
 Phase 1 이 충분히 검증되었다면 Phase 2/3 에서 기능 이슈가 발생해서는 안 된다는 전제. Phase 2/3 의 기능 이슈는 Phase 1 검증 미흡. 단 **배포 메커니즘 이슈**(agent enroll 실패, config overlay 누락 등)는 해당 Phase 내에서 보완 후 재수행 허용.
+
+### 0.10 Phase 2/3 배포 대상 디렉토리 및 명명 규칙
+
+Phase 2/3 에서는 agent 와 각 모듈을 **대상 호스트별 디렉토리** 에 분리 설치하여, Phase 1 의 `build/dist/<모듈>/` 직접 기동본과 물리적으로 구분한다. 이로써 배포 기능의 end-to-end 가 독립적으로 검증된다.
+
+**디렉토리 레이아웃**
+
+```
+build/dist/
+├── csc/           # Phase 1 직접 기동            (Test-CSC, 4420) — 유지
+├── csp/           # Phase 1 직접 기동            (Test-CSP, 4421) — 유지
+├── cmp/           # Phase 1 직접 기동            (Test-CMP, 4422) — 유지
+├── console/       # Phase 1 직접 기동            (Test-Console, 3001) — 유지
+├── phone/         # Phase 1 직접 기동            (Test-Phone, 5060) — 유지 
+├── cwrtc/         # Phase 1 직접 기동            (Test-CWRTC, 5061) — 유지
+├── cspsim/        # Phase 1 직접 기동            (Test-CSPSIM, 9000) — 시험후 종료
+├── csc-server/    # Phase 2: Test-agent & Test-csc를 가 csc 모듈 배포 (4420 기동)
+├── csp-server/    # Phase 3: csc 가 agent + csp 모듈 배포
+├── cmp-server/    # Phase 3: csc 가 agent + cmp 모듈 배포
+└── sim-server/    # Phase 3: csc 가 agent + sim(cspsim) 모듈 배포
+```
+
+> ※ 위 Phase 1 직접 기동 포트(4421/4422/5060/5061/9000 등)는 **tentative** — 실제 서비스 포트(CSP SIP 5060·TCP 25061·TLS 5061 / CMP UDP 9000 / Phone 웹 3002 등)와 관리·admin 포트의 구분이 필요하며 구현·실측 시 조정될 수 있다.
+
+**각 `<x>-server/` 내부 규약**
+
+```
+<x>-server/
+├── agent/         # cims_agent (sync, enroll state, 발급 cert)
+├── <모듈>/        # 배포된 모듈 (pkg.json, config.json overlay, modules/**)
+└── config/        # agent → 모듈로 전달된 collection (*.jsonl)
+```
+(csc-server 의 `<모듈>` = `csc/` (+ 옵션 `console/`), csp-server = `csp/`, cmp-server = `cmp/`, sim-server = `sim/`)
+
+**명명 규칙 (문서 내 용어 통일)**
+
+- **csc** — Phase 2 에서 `csc-server/csc/` 로 배포된 CSC 인스턴스 (4420). Phase 3 배포의 주체. 기존 "검증 대상 CSC" / "New-CSC" 표기와 동의.
+- **console** — Phase 2 에서 `csc-server/console/` 로 배포된 Console 인스턴스 (3001). Phase 3 UI 진입점.
+- **csp / cmp / sim** — Phase 3 에서 csc 로부터 각각 `csp-server/csp/`, `cmp-server/cmp/`, `sim-server/sim/` 로 배포된 인스턴스.
+- **Test-\<X\>** — Phase 1 에서 `build/dist/<모듈>/` 로 직접 기동한 인스턴스의 별칭 (Test-CSC / Test-CSP / Test-CMP / Test-Console / Test-Phone / Test-CWRTC / Test-CSPSIM).
+- **Test-agent** — Phase 2 에서 `csc-server/agent/` 로 TB-CSC 가 설치한 **per-host agent**. TB-agent(TB-CSC 자체에 상주하는 검증 환경 제어용 상시 agent, sync 9902)와는 별개 개체.
+
+**초기화 관계**: `cims.sh reset` 은 `build/dist/*-server/` 전체를 초기화 범위에 포함 (0.3 참조).
 
 ---
 
@@ -201,12 +244,17 @@ cims.sh pkg --no-bump                       # [3/3] build/dist/<모듈>/ 을 tar
 - tarball 루트에는 `meta.json` (pkg.json 에서 유도) + `config_template.json` (sibling 복사본) 이 함께 포함되므로 TB-CSC 업로드 시 `cims_package.config_template_json` 이 자동 채워진다.
 - 버전 bump 가 필요하면 `cims.sh pkg -v X.Y.Z` 또는 `--no-bump` 생략(자동 patch+1).
 
-### 2.3 TB-Console 에서 배포
+### 2.3 TB-Console 에서 배포 (대상: `build/dist/csc-server/`)
+
+Phase 2 의 배포 대상 디렉토리는 `build/dist/csc-server/` (0.10 참조). TB-agent 가 해당 호스트에 먼저 **Test-agent** 를 설치하고, 그 agent 가 이어서 csc / console 모듈을 하위 디렉토리에 배치한다.
+
 1. TB-Console(`https://<ens160_ip>:3000/`) 접속, admin 로그인
-2. **배포 > 패키지** 업로드 (cims-csc-<ver>.tar.gz 등)
-3. **배포 > 서버** 에서 검증 대상 호스트 agent 등록
-4. CSC / Console 모듈 배포 (자동 설치 → 기동)
-5. 검증 대상 CSC(4420) / Console(3001) 정상 기동 확인
+2. **배포 > 패키지** 업로드: `cims-csc-<ver>.tar.gz` (필요 시 `cims-console-<ver>.tar.gz` 도)
+3. **배포 > 서버** 에서 **csc-server** 호스트 등록 → Test-agent enroll
+   - install_path: `build/dist/csc-server/agent/`
+4. **csc** 모듈 배포 → `build/dist/csc-server/csc/` 에 설치 · 기동 (4420)
+5. **console** 모듈 배포 (Phase 3 UI 진입점) → `build/dist/csc-server/console/` 에 설치 · 기동 (3001)
+6. 기동 확인: csc(4420) / console(3001) 리슨, TB-CSC → csc HEARTBEAT 정상
 
 ### 2.4 검증 항목 (배포 기능 한정)
 - agent enroll 성공 (인증서 발급, mTLS 모드면 cert 유효성)
@@ -230,14 +278,39 @@ cims.sh pkg --no-bump                       # [3/3] build/dist/<모듈>/ 을 tar
 
 Phase 2 에서 배포된 New-CSC(4420) 가 다시 CSP/CMP/Sim 을 배포할 때의 **체인 동작** 만 확인한다. 기능 회귀는 반복하지 않는다.
 
-### 3.1 배포 (New-CSC API 이용)
-New-Console(`https://<ens160_ip>:3001/`) 에서 실행:
+### 3.1 배포 (csc 경유, Console 에서 실행)
 
-1. `csp-server/` 대상 agent 설치 → CSP 패키지 배포 → 기동
-2. `cmp-server/` 대상 agent 설치 → CMP 패키지 배포 → 기동
-3. `sim-server/` 대상 agent 설치 → Simulator 배포 → 기동
+Phase 2 에서 `csc-server/` 로 배포된 **csc** 가 Phase 3 의 배포 주체가 된다. 대상 디렉토리 구조는 0.10 참조 (`csp-server/`, `cmp-server/`, `sim-server/`).
 
-설정 원칙: Phase 1 과 동일한 실제 시험 환경을 재현 (IP·포트·realm·도메인·그룹 ID).
+Console(`https://<ens160_ip>:3001/`) 에서 아래 순서로 실행:
+
+#### (1) agent 설치
+각 대상 호스트에 agent 를 먼저 배포. 동일 호스트에 여러 agent 공존 시 `CIMS_AGENT_SYNC_PORT` env 로 sync 포트 분리.
+
+1. **csp-server** 호스트 등록 → agent enroll → `build/dist/csp-server/agent/`
+2. **cmp-server** 호스트 등록 → agent enroll → `build/dist/cmp-server/agent/`
+3. **sim-server** 호스트 등록 → agent enroll → `build/dist/sim-server/agent/`
+
+#### (2) 모듈 배포
+각 agent 가 csc 로부터 tarball 을 수령해 자기 호스트의 모듈 디렉토리에 설치.
+
+1. **csp** 패키지 배포 → `build/dist/csp-server/csp/`
+2. **cmp** 패키지 배포 → `build/dist/cmp-server/cmp/`
+3. **sim** 패키지 배포 → `build/dist/sim-server/sim/`
+
+#### (3) 모듈 설정
+각 모듈의 설정 템플릿에 Phase 1 과 동일한 실제 시험 환경을 반영 (IP·포트·realm·도메인·그룹 ID·CMP 포트 풀). Console 에서 편집하면 agent 가 heartbeat 시 수집해 해당 모듈의 `config.json` / `config/*.jsonl` 로 내려준다. 재기동이 필요한 필드는 Console 에서 restart 배지로 표시.
+
+1. Console > **모듈관리 > csp** → scalar overlay (listen IP/포트, realm) + collection (routing rules, SIP trunk 등)
+2. Console > **모듈관리 > cmp** → scalar overlay (RtpStartPort, PttRtpStartPort, PttFloorStartPort, CSP address)
+3. Console > **모듈관리 > sim** → scalar overlay (csp server IP, 테스트 계정/그룹)
+
+#### (4) 기동 및 smoke-test
+1. csp → cmp → sim 순으로 기동 (의존성 순)
+2. 리슨 포트 확인: csp(5060/5061/25061), cmp(9000 + RTP 풀), sim(sync only)
+3. **REGISTER 1건 smoke-test** — Console 의 실행 버튼 또는 `build/dist/sim-server/sim/cspsim -count 1 -scenario register` 로 1건만. 배포 체인이 실제 트래픽으로 이어지는지만 확인. **기능 회귀는 Phase 1 에서 끝난 것으로 간주하며 반복하지 않는다**.
+
+> 설정 원칙: Phase 1 과 동일한 실제 시험 환경을 재현 (IP·포트·realm·도메인·그룹 ID).
 
 ### 3.2 검증 항목 (배포 체인 한정)
 - New-CSC → 각 agent enroll / heartbeat 정상
