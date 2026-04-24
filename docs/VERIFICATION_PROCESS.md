@@ -1,417 +1,329 @@
-# CIMS 기능 보완 검증 절차
+# CIMS 검증 절차
 
-> 목적: CIMS 패키지의 빈번한 기능 보완 시 신속한 안정화를 위해 검증을 3단계로 체계화한다.
-> 적용 범위: CSP/CMP/CSC/Console/Agent 중 어느 한 모듈이라도 변경되면 본 절차를 따른다.
+> **목적**: CIMS 패키지를 개발/보완한 뒤 배포 전 / 배포 과정 / 배포 이후 3단계로 검증한다.
+> **적용 범위**: agent · csc · csp · cmp · cwrtc · console · phone · simulator 중 한 모듈이라도 변경되면 본 절차를 따른다.
+> **원본 SSOT**: 이 문서. 진행 중 보완은 검증 리포트에 기록 후 본 문서에 반영.
 
 ---
 
-## 0. 공통 원칙
+## 0. 공통
 
-### 0.1 TB-CSC / TB-Console / TB-agent (상시 테스트베드)
+### 0.1 3단계 구조 (한눈에)
 
-검증 대상 모듈이 Phase 1~3 진행 중 반복 재기동되더라도 UI 세션이 끊기지 않고, 개발 단계에서 tarball 메타/설정이 각 모듈에 실제로 반영되는지까지 확인할 수 있도록 **TB 3종** 을 상시 동작시킨다.
+| Phase | 단계 | 목적 | 장소 | 기능 검증 |
+|---|---|---|---|---|
+| **1** | 배포 **전** | 개발/보완 확인 + 기본 회귀 | `build/dist/<모듈>/` (직접 기동) | ✅ 기본 4시나리오 + 추가 3시나리오 + 보완 사항 |
+| **2** | 배포 **과정** | tarball → TB-CSC → agent 배포 메커니즘 | `build/dist/csc-server/` | ✗ (배포 메커니즘 한정) |
+| **3** | 배포 **이후** | 배포본에서 기본 회귀 + 보완 재확인 | `build/dist/{csc,csp,cmp,sim}-server/` | ✅ 기본 4시나리오 + 보완 사항 (Phase 1 과 동일 범위) |
 
-| 서비스 | 포트 | 역할 |
-|---|---|---|
-| TB-CSC | 4419 | 패키지/에이전트/배포/설정 템플릿/검증 실행 관리. 상시 동작 |
-| TB-Console | 3000 | TB-CSC UI. 모듈관리 + 배포 + 검증 실행/리포트 뷰 |
-| TB-agent | sync 9902 | TB-CSC 에 enroll, 자기 호스트에 검증 대상 모듈을 설치/기동/재설정. install_path: `/tmp/cims-tb-agent/` |
-| Test-CSC | 4421 | Phase 1 기능 검증용 직접 기동본 (build/dist/csc/) |
-| Dev-Console | 3001 | Phase 1 개발용 — `cims-console/` 소스 트리 Vite dev. Test-CSC 4421 로 `/api` proxy. |
-| Test-Console | 8080 | Phase 1 dist 검증용 — `build/dist/console/dist` 정적 서빙 (HTTPS). |
-| Test-CWRTC | 8443 | Phase 1 WebRTC WSS (2026-04-24 8080 → 8443 HTTPS alt 이전 완료). |
-| 배포 대상 CSC | 4420 | Phase 2~3 에서 TB-agent 로 배포되는 운영 포트 (별도 디렉토리) |
-| 배포 대상 console | 80 | Phase 2~3 운영 포트 (Test-Console 과 분리) |
-| Phone | 3002 | MCPTT UE Web (3000 에서 이전) |
+**Phase 3 의 의의**: Phase 1 의 단순 반복이 아니라 "실제 배포 환경에서 같은 결과가 나오는지" 를 검증. 배포 실수·환경 의존 버그는 여기서만 잡힌다.
 
-> Console 3분화: 같은 코드베이스(`cims-console/`)가 기동 모드에 따라 **Dev-Console (소스 Vite dev, 3001)** / **Test-Console (dist 정적 서빙, 8080)** / **배포본 console (운영, 80)** 의 세 인스턴스 형태로 동작한다. `cims.sh start console` 은 SRC_CONSOLE 존재 여부로 Dev/Test 모드를 자동 분기.
+### 0.2 구성 — TB 3종 / Test-* / 배포본
 
-**재기동 규칙**: TB 3종은 Phase 진행 중 내리지 않는다. **소스 변경 후 빌드되어 번들/바이너리 해시가 갱신된 경우에만** 자동 재기동한다. DB 는 공유 (`cims`). TB-agent state(enroll/cert) 는 `/tmp/cims-tb-agent/state/` 에 유지되어 재기동 시 재사용.
+| 구분 | 서비스 | 포트 | 역할 |
+|---|---|---|---|
+| **TB** (상시) | TB-CSC | 4419 | 패키지·에이전트·배포 관리 (Phase 2/3 제어용) |
+| | TB-Console | 3000 | TB-CSC UI (`cims-console/` vite dev, `--mode tb`) |
+| | TB-agent | sync 9902 | TB-CSC 에 enroll, 검증 대상 모듈 설치 |
+| **Phase 1 Test-\*** (`build/dist/<모듈>/`) | Test-CSC | 4421 | CSC 직접 기동본 |
+| | Dev-Console | 3001 | `cims-console/` 소스 vite dev (Test-CSC 4421 proxy) |
+| | Test-Console | 8080 | `build/dist/console/dist` 정적 HTTPS 서빙 |
+| | Test-CSP | 5060·5061·25061 | SIP 서버 |
+| | Test-CMP | 9000 + RTP 풀 | 미디어 relay |
+| | Test-CWRTC | 8443 (WSS) | WebRTC 게이트웨이 |
+| | Test-Phone | 3002 | MCPTT UE Web |
+| | Test-CSPSIM | 9000 | cspsim (시험 중에만) |
+| **Phase 2/3 배포본** | csc | 4420 | Phase 2 배포, Phase 3 배포 주체 |
+| | console | 80 | Phase 3 UI 진입점 (cap_net_bind 또는 reverse proxy) |
+| | csp / cmp / sim | 5060·5061 / 9000 / sync | Phase 3 배포 체인 |
+| | Test-agent | sync 9903 | per-host agent (csc-server-local 등) |
 
-### 0.2 Phase 별 역할 구분 (중요)
+> **명명 규칙**
+> - **TB-\*** — 상시 테스트베드 (환경 제어용). Phase 진행 중 내리지 않는다.
+> - **Test-\*** — Phase 1 의 `build/dist/<모듈>/` 직접 기동 인스턴스 별칭.
+> - **배포본** (무접두) — Phase 2/3 에서 agent 경유로 설치된 운영 인스턴스. `<x>-server/<모듈>/` 경로.
+> - **Test-agent** ≠ **TB-agent** — Test-agent 는 per-host (csc-server-local 등), TB-agent 는 sync 9902 로 상시 동작하는 환경 제어용.
+> - **Console 3분화**: 같은 `cims-console/` 코드베이스가 Dev-Console (소스 vite, 3001) / Test-Console (dist HTTPS, 8080) / 배포본 console (80) 으로 분기. `cims.sh start console` 이 SRC_CONSOLE 존재 여부로 자동 분기.
 
-**Phase 1 — 기능 검증의 중심.** 기능 보완 시 대부분의 검증은 여기서 끝나야 한다.
-- 모든 기능·회귀 시나리오 검증
-- TB-CSC/TB-Console 을 통한 설정 반영 검증 포함
-- 빌드·기동·config overlay·런타임 통합 동작 확인
+### 0.3 포트 공존 설계
 
-**Phase 2 — 배포 기능 검증.** 기능 검증은 Phase 1 에서 이미 완료된 전제. Phase 2 는 **새 릴리즈 tarball 을 TB-CSC 로 업로드/배포했을 때 대상 CSC/Console 이 정상 기동**되는지만 검증한다.
+포트 번호 전체는 §0.2 표 참조. 핵심 원칙:
 
-**Phase 3 — New-CSC 경유 배포 검증.** TB-CSC 가 배포한 New-CSC(4420) 가 다시 CSP/CMP/Sim 을 배포할 때의 체인 검증. **기능 회귀는 수행하지 않는다** (Phase 1 에서 끝나야 함). Phase 3 는 배포 체인의 무결성만 본다.
+- **Phase 1 Test-\*** (dev/debug 포트) 와 **Phase 2·3 배포본** (운영 포트) 은 번호가 달라 동일 호스트에서 공존 가능 — Test-CSC 4421 vs 배포본 csc 4420, Dev-Console 3001 vs 배포본 console 80 등.
+- **TCP 4421 ↔ UDP 4421** 은 완전히 다른 서비스 (Test-CSC admin TCP / CSP CscInterface UDP, `csp/CspServer.cpp:259`). proto 다름이라 무충돌.
+- **`verify phase2` 자동화** 는 csc Start job 을 `Server.Port=4445` overlay 로 기동 → Phase 1 Test-CSC 4421 / 배포본 4420 과 모두 분리.
+- **Phase 3 에서 포트 충돌 발생 지점**: csp (5060 · 5061), cmp (9000), cwrtc (8443), phone (3002), cspsim (9000) — Phase 1 과 배포본이 같은 운영 포트. 그러므로 Phase 3 진입 시 Phase 1 서버 모듈 중지 (§3.1).
 
-> 즉, 같은 회귀 시나리오를 Phase 1/3 에서 반복 실행하지 않는다. Phase 1 이 충분히 검증되었다는 전제에서, Phase 2/3 는 배포 메커니즘 자체만 확인한다.
-
-### 0.3 초기화 범위
-
-검증 전 환경 초기화 시 **가입자 정보는 보존**, 그 외 운영 데이터는 모두 초기화한다. TB-CSC/TB-Console 은 **건드리지 않는다**.
-
-| 구분 | 테이블 / 자원 | 동작 |
-|---|---|---|
-| 보존 | `users`, `organizations`, `voip_subscriptions`, `ptt_subscriptions`, `ptt_groups`, `ptt_group_members`, `user_rejects` | 그대로 둔다 |
-| 보존 (TB) | TB-CSC(4419) 및 TB-Console(3000) 프로세스, 인증서, 로그 | 그대로 둔다 |
-| 보존 (TB-agent 레코드) | `cims_agent` 의 `name='tb-agent-local'` 행 (session_token 포함) | 조건부 보존 |
-| 초기화 (모듈 설정) | `sip_service`, `sip_service_listener`, `csp_listener`, `sip_trunk`, `routing_rule*`, `routing_access_list`, `csp_config_audit` 등 런타임 config 계열 | TRUNCATE |
-| 초기화 (배포 등록) | `cims_instance`, `cims_package`, `agent_deployment`, `agent_job`, `agent_metric` (`cims_agent` 은 `name<>'tb-agent-local'` 만 DELETE) | TRUNCATE / 조건부 DELETE |
-| 초기화 (세션/로그) | `auth_codes`, `refresh_tokens`, `voip_call_logs`, `ptt_call_logs`, `*_participants`, `recordings`, `recording_segments`, `stats_*` | TRUNCATE |
-| 초기화 (파일) | `build/dist/<모듈>/modules/**` (Phase 1 직접 기동본), `build/dist/{csc,csp,cmp,sim}-server/` (Phase 2/3 배포 대상, 0.10 참조), `service_log/`, `msg_log/`, `cert/agent_mtls/issued` 발급 cert | rm -rf |
-| 초기화 (프로세스) | Test-CSC(4421)/Dev-Console(3001) 또는 Test-Console(8080)/csp/cmp/cspsim/agent + 배포 대상 csc(4420) | `cims.sh reset` |
-
-`cims.sh reset` 은 위 범위를 자동 처리하며 TB 는 제외한다.
-
-### 0.4 외부 연동 IP
-
-- 테스트 서버는 DHCP. 외부 연동용 IP 는 **`ens160` 인터페이스의 IP** 로 가정한다.
-- `cims.sh preflight` 가 `ens160` IP 를 자동 감지해 리포트에 기록.
-- `configure.sh --local-ip <ens160_ip>` 로 tarball 재구성 (localhost 는 외부 접근 불가).
-
-### 0.5 사전조건 체크리스트
-
-- [ ] `git status` clean, 브랜치/커밋 해시 기록
-- [ ] pending DB migration 적용 완료
-- [ ] `ens160` IP 확인
-- [ ] 포트 충돌 없음 (4419 TB-CSC, 4420 배포 csc, 4421 Test-CSC, 3000 TB-Console, 3001 Dev-Console, 3002 phone, 8080 Test-Console, 8443 Test-CWRTC, 5060, 5061, 9000, 9001, **9902** TB-agent sync, 9903 Test-agent sync)
-- [ ] TB 3종 동작 확인 (`cims.sh status` 에서 tb-csc / tb-console / tb-agent running)
-- [ ] TB-agent 가 TB-CSC 에 `approved` 상태로 enrolled (`cims_agent` 테이블)
-- [ ] mTLS 모드 검증이면 TB-CSC 의 `Agent.MtlsEnabled: true` 확인
-
-### 0.6 합격 기준 (공통)
-
-- 빌드: warning/error 0
-- 대상 모듈 기동 후 로그에 `ERROR`/`FATAL` 없음
-- Phase 별 회귀 시나리오 전부 PASS
-- Flow/Msg 로그 무결성 (sesid 일관, body seq 매칭)
-
-### 0.7 Phase 1 검증 시나리오 (회귀 6항목)
-
-Phase 1 은 **`build/dist/` 안에서 직접 기동·기능 검증** 하는 단계. tarball 생성/업로드/TB-agent 배포 검증은 **Phase 2** 에서 수행한다. 아래 회귀 6항목이 모두 PASS 해야 합격.
-
-**기존 회귀 시나리오 (고정 — 기능 보호용)**
-
-1. **cspsim REGISTER × N** — `-auth_id "<IMSI>@<domain>"` 필수. 성공률 100%.
-2. **VoIP 2자 통화 (B2BUA)** — 녹취 `seg_*.rtp` 생성, 양 leg 동일 `sesid`, `session.json` 의 `call_ids`.
-3. **PTT 그룹콜 (5 member)** — multipart INVITE, Conference NOTIFY, floor port 협상, `m=application` 분리.
-4. **CSC 가입자/그룹 변경 → NOTIFY** — admin API CRUD → `notify_csp` → 캐시 갱신 + GMS/CMS NOTIFY.
-5. **CSC subscribe (IdMS/GMS/CMS)** — TB-Console Flow 페이지 nodes 순서 정상.
-6. **(mTLS 모드) Cert rotation e2e** — `cert_rotate_pending=1` → heartbeat `cert_rotate:true` → agent rotate → exit → 재기동 후 새 cert 적용.
-
-`cims.sh verify phase1` 및 TB-Console `/testbed/phase1` 실행 버튼이 위 6항목을 순차 수행하고 결과를 리포트에 기록한다.
-
-> Phase 2 로 넘어가기 전 별도 확인 항목(tarball 메타 무결성, TB-agent 배포, static config overlay, dynamic collection sync)은 2.4 참고.
-
-### 0.8 리포트 양식
-
-경로: `verify_reports/<YYYYMMDD_HHMMSS>_<phase>.md` (TB-Console `/testbed/verify` 에서 자동 저장/조회)
-
-내용:
-- 환경: 브랜치/커밋, `ens160` IP, DB migration 버전, 빌드 해시
-- Phase 별 체크리스트 PASS/FAIL
-- Phase 1: 시나리오 결과 (번호별 PASS/FAIL + 로그 경로)
-- Phase 2/3: 배포 단계별 성공 여부 + 검증 대상 모듈 health
-- 이슈: severity (Blocker / Major / Minor), 재현 절차, 로그 스니펫 경로
-
-### 0.9 롤백/재시작 지점
-
-**원칙: Phase 2 또는 Phase 3 에서 이슈 발생 시 Phase 1 부터 재수행한다.**
-Phase 1 이 충분히 검증되었다면 Phase 2/3 에서 기능 이슈가 발생해서는 안 된다는 전제. Phase 2/3 의 기능 이슈는 Phase 1 검증 미흡. 단 **배포 메커니즘 이슈**(agent enroll 실패, config overlay 누락 등)는 해당 Phase 내에서 보완 후 재수행 허용.
-
-### 0.10 Phase 2/3 배포 대상 디렉토리 및 명명 규칙
-
-Phase 2/3 에서는 agent 와 각 모듈을 **대상 호스트별 디렉토리** 에 분리 설치하여, Phase 1 의 `build/dist/<모듈>/` 직접 기동본과 물리적으로 구분한다. 이로써 배포 기능의 end-to-end 가 독립적으로 검증된다.
-
-**디렉토리 레이아웃**
+### 0.4 디렉토리 레이아웃
 
 ```
 build/dist/
-├── csc/           # Phase 1 직접 기동            (Test-CSC, 4421) — 유지
-├── csp/           # Phase 1 직접 기동            (Test-CSP) — 유지
-├── cmp/           # Phase 1 직접 기동            (Test-CMP) — 유지
-├── console/       # Phase 1 직접 기동            (Test-Console, 8080) — 유지
-├── phone/         # Phase 1 직접 기동            (Test-Phone, 5060) — 유지 
-├── cwrtc/         # Phase 1 직접 기동            (Test-CWRTC, WSS 8443) — 유지
-├── cspsim/        # Phase 1 직접 기동            (Test-CSPSIM, 9000) — 시험후 종료
-├── csc-server/    # Phase 2: Test-agent & Test-csc를 가 csc(4420), console(80) 모듈 배포
-├── csp-server/    # Phase 3: csc 가 agent + csp 모듈 배포
-├── cmp-server/    # Phase 3: csc 가 agent + cmp 모듈 배포
-└── sim-server/    # Phase 3: csc 가 agent + sim(cspsim) 모듈 배포
+├── csc/ csp/ cmp/ cwrtc/ console/ phone/ cspsim/   # Phase 1 직접 기동 (Test-*)
+├── csc-server/{agent, csc, console, config/}       # Phase 2 배포 대상
+├── csp-server/{agent, csp, config/}                # Phase 3 배포 대상
+├── cmp-server/{agent, cmp, config/}                # Phase 3 배포 대상
+└── sim-server/{agent, sim, config/}                # Phase 3 배포 대상
 ```
 
-> ※ 포트 체계 (설계):
-> - **Phase 1 (Test-\*, dev/debug 포트)**: Test-CSC **4421** / Dev-Console **3001** (소스 vite dev) / Test-Console **8080** (dist 정적 서빙) / Test-CWRTC **8443** (구 8080 → HTTPS alt 이전 완료) — 모두 운영 포트와 분리되어 Phase 2 배포본(csc 4420 / console 80)과 동일 호스트에서 공존 가능.
-> - **Phase 2 (csc-server 배포본, 운영 포트)**: csc 4420 / console 80.
-> - **공용/서비스 포트**: Test-CSP SIP UDP 5060·TCP 25061·TLS 5061, Test-CMP UDP 9000, Test-Phone SIP 5060 (UE client), Test-CSPSIM 9000 (시험 종료 후 소켓 해제).
-> - **Console 3분화 확정 (2026-04-24)**: Dev-Console 3001 / Test-Console 8080 / 배포본 console 80. `cims.sh start console` 이 SRC_CONSOLE 존재 여부로 자동 분기.
-> - **Test-CWRTC 8443 이전 완료 (2026-04-24)**: 이전 8080 → 8443 (HTTPS alt). cwrtc.json.template `Setup.WsPort=8443`, configure.sh `VITE_CWRTC_TARGET=...:8443`, cims.sh `_svc_port_proto cwrtc 8443:tcp`, cims-phone vite proxy + nginx.conf 8443 갱신. 8080 은 Test-Console 단독 사용.
+각 `<x>-server/` 내부: `agent/` (cims_agent + state + 발급 cert) · `<모듈>/` (pkg.json + config.json overlay + modules/**) · `config/` (collection jsonl).
 
-**각 `<x>-server/` 내부 규약**
+### 0.5 초기화 범위
 
-```
-<x>-server/
-├── agent/         # cims_agent (sync, enroll state, 발급 cert)
-├── <모듈>/        # 배포된 모듈 (pkg.json, config.json overlay, modules/**)
-└── config/        # agent → 모듈로 전달된 collection (*.jsonl)
-```
-(csc-server 의 `<모듈>` = `csc/` (+ 옵션 `console/`), csp-server = `csp/`, cmp-server = `cmp/`, sim-server = `sim/`)
+`cims.sh reset` 이 수행. 가입자 정보는 보존, 그 외 운영 데이터는 전부 정리. TB 3종은 건드리지 않는다.
 
-**명명 규칙 (문서 내 용어 통일)**
+| 구분 | 대상 | 동작 |
+|---|---|---|
+| **보존 (가입자)** | `users`, `organizations`, `*_subscriptions`, `ptt_groups`, `ptt_group_members`, `user_rejects` | 그대로 |
+| **보존 (TB)** | TB-CSC / TB-Console / TB-agent 프로세스 · 인증서 · 로그 | 그대로 |
+| **보존 (TB-agent 레코드)** | `cims_agent` 의 `name='tb-agent-local'` | DELETE 제외 |
+| **초기화 (DB)** | 런타임 설정 · 배포 등록 · 세션/이력/녹취/통계 테이블, `cims_agent` (TB 외) | TRUNCATE / 조건부 DELETE |
+| **초기화 (파일)** | `build/dist/log/*.log`, `ext_mnt/service_log/`, `ext_mnt/msg_log/`, `build/dist/*-server/`, `cert/agent_mtls/issued/` | rm -rf |
+| **초기화 (프로세스)** | 검증 대상 모듈 + Test-agent | kill |
 
-- **csc** — Phase 2 에서 `csc-server/csc/` 로 배포된 CSC 인스턴스 (포트 4420, 운영). Phase 3 배포의 주체. 기존 "검증 대상 CSC" / "New-CSC" 표기와 동의.
-- **console** — Phase 2 에서 `csc-server/console/` 로 배포된 Console 인스턴스 (포트 80, 운영). Phase 3 UI 진입점.
-- **csp / cmp / sim** — Phase 3 에서 csc 로부터 각각 `csp-server/csp/`, `cmp-server/cmp/`, `sim-server/sim/` 로 배포된 인스턴스.
-- **Test-\<X\>** — Phase 1 에서 `build/dist/<모듈>/` 로 직접 기동한 인스턴스의 별칭 (Test-CSC / Test-CSP / Test-CMP / Test-Console / Test-Phone / Test-CWRTC / Test-CSPSIM).
-- **Test-agent** — Phase 2 에서 `csc-server/agent/` 로 TB-CSC 가 설치한 **per-host agent**. TB-agent(TB-CSC 자체에 상주하는 검증 환경 제어용 상시 agent, sync 9902)와는 별개 개체.
+**옵션**:
+- `cims.sh reset` — 전체 초기화 (TB 제외)
+- `cims.sh reset --keep-processes` — Phase 1 모듈 프로세스 유지, 로그/DB/배포본 디렉토리만 wipe (`verify phase2` 자동 흐름 내부에서 사용)
 
-**초기화 관계**: `cims.sh reset` 은 `build/dist/*-server/` 전체를 초기화 범위에 포함 (0.3 참조).
+### 0.6 외부 IP
 
-> **2026-04-24 현재 Phase 3 미구현**. `csp-server/`, `cmp-server/`, `sim-server/` 의 과거 실험물 (run.sh, install-agent.sh, modules/, state/, agent.log 등 2026-04-22 잔재) 은 0.10 의 신규 트리(`<x>-server/{agent,<모듈>,config}/`) 와 불일치. `cims.sh reset` 시 자동 정리됨. Phase 3 본 구현 (`_verify_phase3`, Console Phase 3 UI, `csp/cmp/sim` 배포 체인) 은 Phase 2 v2 안정화 후 별도 작업으로 착수.
+테스트 서버 DHCP. 외부 연동용 IP 는 `ens160` 인터페이스 IP. `cims.sh preflight` 자동 감지. `configure.sh --local-ip <ens160_ip>` 로 반영. localhost 는 외부 접근 불가.
+
+### 0.7 합격 기준 (공통)
+
+- 빌드: warning/error 0
+- 런타임 로그: ERROR/FATAL 0
+- Phase 별 시나리오 전부 PASS
+- Flow/Msg 로그 무결성 (sesid 일관, body seq 매칭)
+
+### 0.8 리포트 양식
+
+경로: `verify_reports/<YYYYMMDD_HHMMSS>_<phase>.md` (TB-Console `/testbed/verify` 자동 저장/조회)
+
+내용: 환경 (브랜치/commit/ens160/migration/해시) · 단계별 PASS/FAIL · 시나리오 결과 · 이슈 (severity + 재현)
+
+### 0.9 기본 검증 4시나리오 (Phase 1/3 공통)
+
+가입자 정보 기반, Console 에서 실행. Phase 1 은 Dev/Test-Console (3001/8080), Phase 3 은 배포본 console (80) 에서 수행.
+
+| # | 시나리오 | 확인 포인트 |
+|---|---|---|
+| (1) | **VoLTE 음성 2자 통화** (B2BUA) | REGISTER × 2 성공 · INVITE 통화 연결 · 녹취 `seg_*.rtp` · 양 leg 동일 `sesid` · `session.json` 의 `call_ids` 쌍 |
+| (2) | **VoLTE 영상 2자 통화** (B2BUA) | (1) + 영상 RTP m-line 협상 · 양방향 비디오 패킷 흐름 |
+| (3) | **PTT 그룹 음성 통화** (5인) | multipart INVITE (SDP + OMA POC XML) · Conference NOTIFY · floor port 협상 · `m=application` 분리 · 플로어 요청/그랜트 동작 |
+| (4) | **PTT 그룹 영상 통화** (5인) | (3) + 영상 stream + 그룹 멤버 간 영상 분배 |
+
+### 0.10 Phase 1 전용 추가 시나리오
+
+Phase 1 에서만 수행 (Phase 3 는 §0.9 4시나리오만):
+
+- **CSC 가입자/그룹 변경 → NOTIFY** — admin API CRUD → `notify_csp` → `CspUserMap`/`CGroupMap` 캐시 갱신 → GMS/CMS NOTIFY 발송
+- **SUBSCRIBE/NOTIFY 전체 흐름** (IdMS / GMS / CMS) — TB-Console Flow 페이지 nodes 순서 정상
+- **(mTLS 모드) Cert rotation e2e** — `cert_rotate_pending=1` → heartbeat `cert_rotate:true` → agent rotate → `exit(0)` → 재기동 후 새 cert 적용
 
 ---
 
-## Phase 0 — 변경 분석 (진입 전 필수)
+## 1. Phase 1 — 배포 전 검증
 
-기능 보완 작업 착수 전 리포트 서두에 기록한다.
+개발·보완 완료 후, **`build/dist/` 안에서 직접 기동** 하여 기능 회귀와 보완 사항을 확인. Phase 1 PASS 가 Phase 2 진입 조건.
 
-- 변경 범위 / 영향 모듈 (CSP / CMP / CSC / Console / Agent)
-- 추가/변경 DB 테이블 · migration 스크립트
-- 변경된 config template (`csp.json.template`, `config_template.json`, `cmp.json`)
-- 회귀 리스크 플래그: Flow/Msg 포맷, `sesid` 규약, B2BUA 라우팅, CMP 포트 풀, mTLS 인증서 발급 경로 등 "건드리면 광범위하게 깨지는" 영역 해당 여부
-- TB-Console 모듈관리에서 설정 템플릿 편집이 필요한 변경인지 여부
+### 1.1 사전 확인
 
----
+리포트 서두에 기록:
 
-## Phase 1 — 기능 검증 (필수, 대부분의 검증을 여기서 끝냄)
+- 변경 범위 / 영향 모듈 (agent / csc / csp / cmp / cwrtc / console / phone / simulator)
+- 추가/변경 DB migration 스크립트
+- 변경된 config template (`csp.json.template`, `config_template.json`, `cmp.json`, `cwrtc.json.template` 등)
+- 회귀 리스크 플래그: Flow/Msg 포맷, sesid 규약, B2BUA 라우팅, CMP 포트 풀, mTLS cert 발급 경로 등 "건드리면 광범위하게 깨지는" 영역 해당 여부
+- `git status` clean, 브랜치/커밋 해시 기록
+- `ens160` IP 확인 (`cims.sh preflight`)
+- TB 3종 동작 확인
 
-기능 보완의 본 검증 단계. **새로 추가/수정한 기능 + 0.7 회귀 시나리오 전체** 가 여기서 통과해야 한다.
+### 1.2 단계
 
-### 1.1 초기화
-- `cims.sh reset` — 검증 대상만 초기화, TB 는 유지 (0.3 범위)
+**(1) 빌드** — `cims.sh build` → C++ + Web UI 빌드 결과가 `build/dist/` 에 적재. warning/error 0 확인. 번들 해시 갱신 시 TB 도 자동 재기동.
 
-### 1.2 빌드 [1/3]
-- `cims.sh build`
-- C++ + Web UI 빌드 결과가 `build/dist/` 에 적재된다. 환경값 반영은 [2/3] configure 책임.
-- 배포 tarball 은 생성하지 않는다 — Phase 1 은 `build/dist/` 안에서 직접 기동·검증한다.
-- warning/error 0 확인, 번들 해시 바뀌면 TB 도 자동 재기동.
-- (배포 tarball 생성은 Phase 2 의 [3/3] `cims.sh pkg` 단계에서 수행)
+**(2) 복사/sync** — Python/스크립트만 바꾼 경우 `cims.sh sync <target>` (csc · agent · scripts · pkg-meta · console · phone) 으로 빠른 동기화. C++ 변경은 (1) 에서 자동 배치됨.
 
-### 1.3 Configure [2/3]
-- `cims.sh configure --local-ip <ens160_ip>`
-- 시험환경 설정. `csp.json`, `cmp.json`, `csc.json` (Test-CSC 4421), `csc-tb.json` (TB-CSC 4419) 재생성
-- CSP 는 `csp/config/config_template.json` 의 `deploy_value` 를 통해 환경변수 치환 후 `csp.json` 생성
-- TB-Console `.env` 분기 적용
+**(3) 설정** — `cims.sh configure --local-ip <ens160_ip>` → `csp.json` · `cmp.json` · `csc.json` (Test-CSC 4421) · `csc-tb.json` (TB-CSC 4419) · `cwrtc.json` · Vite `.env.local` 전부 재생성.
 
-### 1.4 수동 기동 (검증 대상 전체 기동, TB 는 이미 동작 중)
-순서: CMP → CSP → CWRTC → CSC → Console → Phone
+**(4) 초기화** — `cims.sh reset` → §0.5 범위 자동 처리 (가입자 보존, 그 외 DB/로그/녹취/service_log/msg_log/발급 cert/배포본 디렉토리 전부 wipe, TB 유지).
+
+**(5) 실행** — `cims.sh start` → 순서 CMP → CSP → CWRTC → CSC → Console → Phone. 개별 재기동은 `cims.sh start <name>` / `restart <name>`.
+
+**(6) 검증**:
+- Dev-Console (3001) 또는 Test-Console (8080) 에서 TB-Console `/testbed/phase1` → ▶ 실행 — §0.9 4시나리오 + §0.10 Phase 1 추가 3시나리오 순차 수행
+- 개발/보완 사항 직접 조작 (§1.1 에서 식별된 기능)
+- Console > 테스트베드 > 모듈관리 — 버전/설정 템플릿/overlay 반영 확인
+
+**(7) 리포팅** — `verify_reports/<ts>_phase1.md` 자동 생성. §0.8 양식.
+
+**(8) 모듈 유지** — (5) 에서 기동한 모듈을 그대로 둠. 사용자가 추가 시험/Console 확인을 수행할 수 있도록.
+
+### 1.3 자동 명령
 
 ```bash
-cims.sh start          # 인자 생략 = 전체 모듈
+cims.sh verify phase1   # (1)~(7) 자동. (8) 유지는 기본 동작.
 ```
 
-개별 모듈만 재기동할 때는 `cims.sh start <name>` / `cims.sh restart <name>` 사용 (name ∈ cmp/csp/cwrtc/csc/console/phone).
+내부 흐름: preflight → reset → build → configure → start → §0.9/§0.10 시나리오 → 리포트.
 
-### 1.5 Health Check
-- 리슨 포트: 4419 (TB-CSC), 4421 (Test-CSC), 3000 (TB-Console), 3001 (Dev-Console) 또는 8080 (Test-Console), 8443 (Test-CWRTC), 9000 (cmp), 5060 (csp UDP), 5061 (csp TCP)
-- 로그 `ERROR`/`FATAL` 없음
-- TB-CSC → 검증 대상 CSC HEARTBEAT 정상
+### 1.4 이슈 처리
 
-### 1.6 기능 검증 (본 단계의 핵심)
+- Blocker / Major → 코드 보완 후 Phase 1 의 (1) 부터 재수행
+- Minor → 리포트 기록 후 진행 판단
 
-TB-Console `/testbed/phase1` 에서 **▶ 실행** 클릭 → 0.7 회귀 6항목 순차 실행 → 리포트 자동 생성.
-
-추가로 수동 확인:
-1. **이번 보완된 기능** — Phase 0 변경 분석의 대상 기능 직접 조작.
-2. **build/dist 내부 동작** — 검증 대상 모듈이 `build/dist/<모듈>/` 경로에서 직접 기동되어 로그/녹취/Flow 가 정상 출력되는지 확인.
-3. **Console > 테스트베드 > 모듈관리** — 각 모듈의 **버전 / 설정 템플릿 / 설정** 이 `build/dist/<모듈>/pkg.json` + `config_template.json` 에서 읽혀 표시되는지 확인. 스칼라 값 편집 시 overlay 가 `build/dist/config.json` 에 저장되고 재기동 후 반영되는지 확인.
-4. (tarball 업로드·TB-agent 배포 검증은 Phase 2 에서 수행)
-
-> **정보 흐름**: Phase 1 에서는 `build/dist/` 가 SOT. `/api/v1/packages` 및 `/api/v1/modules` 가 dist 파일을 직접 읽어 Console 에 노출한다. 동일 구조의 파일들이 Phase 2 의 `cims.sh pkg` 단계에서 그대로 tarball 로 묶인다.
-
-### 1.7 결과 리포팅
-- TB-Console `/testbed/verify` 또는 `verify_reports/<ts>_phase1.md`
-- 0.8 양식 준수
-
-### 1.8 이슈 처리
-- Blocker/Major 존재 시 **코드 보완 → Phase 1 의 1.1 부터 재수행**
-- Minor 는 리포트 기록 후 진행 여부 판단
-
-**Phase 1 이 모든 항목 PASS 한 이후에만 Phase 2 로 진입한다.**
+**Phase 1 전 항목 PASS 이후에만 Phase 2 로 진입.**
 
 ---
 
-## Phase 2 — 배포 기능 검증 (릴리즈 직전, 배포 기능 자체만)
+## 2. Phase 2 — 배포 과정 검증
 
-Phase 1 의 기능 검증이 끝난 전제 하에, **새 릴리즈 tarball 을 TB-CSC 로 배포했을 때 대상 CSC/Console 이 정상 기동되는지**만 확인한다. 기능 회귀는 반복하지 않는다.
+Phase 1 에서 확인된 구성이 tarball 로 묶여 TB-CSC 를 거쳐 대상 호스트에 정확히 배치되는지 — **배포 메커니즘 자체만** 검증. 기능 회귀는 반복하지 않는다.
 
-### 2.1 초기화
-- `cims.sh reset` (TB 유지)
-- **`cims.sh verify phase2` 자동 흐름 내부에서는 `cmd_reset --keep-processes` 가 호출됨** — Phase 1 Test-* 프로세스(Test-CSC/Dev-Console/Test-Console/csp/cmp/cwrtc/phone)는 그대로 두고, 로그(`build/dist/log/`, `service_log/`, `msg_log/`) + DB(가입자 보존) + `build/dist/csc-server/` + 발급 cert 만 wipe. `verify_reports/` 는 보존.
+### 2.1 단계
 
-### 2.2 빌드 & 설정 & 패키지 (3단계 분리)
-Phase 1 통과 후, **배포 tarball 은 여기서만 생성**한다. 세 단계는 완전 독립:
+**(1) tarball 생성** — `cims.sh pkg --no-bump` → `build/dist/packages/*.tar.gz`. tarball 루트에 `meta.json` + `config_template.json` 포함. Phase 1 에서 Console 이 표시/편집한 바로 그 파일이 1:1 반영됨.
+
+**(2) TB-CSC 업로드** — TB-Console(`https://<ens160>:3000/`) → 배포 > 패키지 → `cims-csc-<ver>.tar.gz` + `cims-console-<ver>.tar.gz` 업로드. TB-CSC 가 `cims_package.config_template_json` 자동 채움.
+
+**(3) Test-agent enroll** — TB-Console 에서 csc-server 호스트 등록 → `cims_agent.py --name csc-server-local --sync-port 9903` 기동 → TB-CSC 에 enroll/approve. `verify phase2` 자동화가 `--heartbeat-sec 3` 으로 구동.
+
+**(4) 모듈 배포** — Test-agent 가 tarball 수령 → `build/dist/csc-server/{csc, console}/` 에 설치.
+
+**(5) config overlay 검증** — `POST /api/v1/deployments` body 의 `config` 가 `install_path/config.json` 에 반영되는지 확인. `agent_deployment.config_json` 컬럼을 경유.
+
+**(6) Start / Health / Stop** — csc 만 자동 (`Server.Port=4445` overlay 로 기동 → Phase 1 Test-CSC 4421 / 배포본 운영 4420 모두와 분리). 포트 LISTEN + `tcp:4445=open` + stop cleanup 확인.
+
+> **console 은 install-only** — 운영 console:80 기동은 Phase 3 진입 시 설계 (cap_net_bind vs reverse proxy) 확정 후 자동화.
+
+### 2.2 자동 명령
 
 ```bash
-cims.sh build                               # [1/3] warning/error 0 → build/dist 갱신 (tarball 없음)
-cims.sh configure --local-ip <ens160_ip>    # [2/3] 시험환경 설정 (IP/DB/도메인)
-cims.sh pkg --no-bump                       # [3/3] build/dist/<모듈>/ 을 tarball 로 묶음
-                                            #       → build/dist/packages/*.tar.gz
+cims.sh verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
 ```
 
-- `cims.sh build` / `configure` 는 Phase 1 에서 이미 실행되었을 것이므로, 소스·환경 변경이 없다면 생략 가능.
-- `cims.sh pkg` 는 `build/dist` 가 있어야 함 — Phase 1 에서 Console 이 표시/편집한 **바로 그 파일**을 tarball 로 묶는다. 즉 Phase 1 에서 확인한 구성이 tarball 에 1:1 반영된다.
-- tarball 루트에는 `meta.json` (pkg.json 에서 유도) + `config_template.json` (sibling 복사본) 이 함께 포함되므로 TB-CSC 업로드 시 `cims_package.config_template_json` 이 자동 채워진다.
-- 버전 bump 가 필요하면 `cims.sh pkg -v X.Y.Z` 또는 `--no-bump` 생략(자동 patch+1).
+내부: `cmd_reset --keep-processes` (Phase 1 모듈 유지) → build → configure → pkg → admin login → agent enroll → tarball upload → install → overlay 검증 → start (4445) → health → stop → Test-agent 종료. 16단계 상세는 `verify_reports/<ts>_phase2.md` 참조.
 
-### 2.3 TB-Console 에서 배포 (대상: `build/dist/csc-server/`)
+### 2.3 합격 조건
 
-Phase 2 의 배포 대상 디렉토리는 `build/dist/csc-server/` (0.10 참조). TB-agent 가 해당 호스트에 먼저 **Test-agent** 를 설치하고, 그 agent 가 이어서 csc / console 모듈을 하위 디렉토리에 배치한다.
+- Agent enroll OK (mTLS 모드면 cert 유효성)
+- Tarball 해시 일치 (tarball → install_path)
+- Install 완료
+- Config overlay 반영
+- CSC Start (4445 LISTEN) + Health (tcp:4445=open) + Stop cleanup 전부 OK
 
-1. TB-Console(`https://<ens160_ip>:3000/`) 접속, admin 로그인
-2. **배포 > 패키지** 업로드: `cims-csc-<ver>.tar.gz` (필요 시 `cims-console-<ver>.tar.gz` 도)
-3. **배포 > 서버** 에서 **csc-server** 호스트 등록 → Test-agent enroll
-   - install_path: `build/dist/csc-server/agent/`
-4. **csc** 모듈 배포 → `build/dist/csc-server/csc/` 에 설치 · 기동 (포트 4420)
-5. **console** 모듈 배포 (Phase 3 UI 진입점) → `build/dist/csc-server/console/` 에 설치 · 기동 (포트 80)
-6. 기동 확인: csc(4420) / console(80) 리슨, TB-CSC → csc HEARTBEAT 정상
+### 2.4 이슈 처리
 
-### 2.4 검증 항목 (배포 기능 한정)
-- agent enroll 성공 (인증서 발급, mTLS 모드면 cert 유효성)
-- 패키지 해시 일치 (tarball → install_path)
-- scalar config overlay 반영 (`install_path/config.json`)
-- collection (`config/*.jsonl`) 전달
-- 모듈 기동 성공 (프로세스 리슨, health 체크)
-- TB-CSC → 검증 대상 CSC HEARTBEAT 정상
-
-### 2.4.1 `cims.sh verify phase2` 자동화 범위 (v2, 2026-04-24)
-
-`cims.sh verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]` 는 위 2.4 항목 중 csc 배포본에 대해 end-to-end 를 자동 수행한다. v2 에서 install-only 를 넘어 **start/health/stop 까지** 커버한다. Phase 1 csc(4420) 와 병립하도록 Phase 2 csc 는 **Server.Port=4445** 로 overlay 되어 기동된다.
-
-1. Cleanup — `cmd_reset --keep-processes` 호출 (Phase 1 Test-* 유지, 로그/DB/csc-server/ 초기화)
-2. Build (`--skip-build` 가능)
-3. Configure (ens160)
-4. Pkg tarball (`--skip-pkg` 가능)
-5. Admin login (admin/1234) → JWT
-6. Agent 등록 (name=csc-server-local) + approve
-7. Test-agent 기동 (sync 9903, `--heartbeat-sec 3`)
-8. csc+console tarball 업로드
-9. Deployment 생성 (csc 에 `{"Server.Port":4445}` overlay 포함)
-10. Install job queue + 폴링
-11. 설치 파일 검증 (meta.json + config/)
-12. `install_path/config.json` overlay 반영 확인
-13. **Start job** (csc) + 포트 4445 LISTEN 대기 (최대 25s)
-14. **Health check job** + `tcp:4445=open` 확인 (최대 15s)
-15. **Stop job** (cleanup) + 포트 해제 확인
-16. Test-agent 종료 (`--keep-agent` 로 유지 가능)
-
-**PASS 조건**: Install/overlay/start/health 모두 OK (stop 은 WARN 허용).
-
-**console 은 install-only** 유지 — 운영 console:80 기동은 nginx (cap_net_bind 또는 reverse proxy) vs vite preview 설계 결정이 필요하며, 이는 Phase 3 준비 (csc → csp/cmp/sim 배포 체인) 와 함께 재논의 예정. Phase 2 v2 단계에서는 console 패키지가 설치만 되고 기동되지 않는 것이 정상.
-
-### 2.5 결과 리포팅
-- `verify_reports/<ts>_phase2.md`
-- **배포 체크리스트** (위 2.4 항목) PASS/FAIL
-
-### 2.6 이슈 처리
-- 배포 기능 이슈 → Phase 2 내에서 보완 후 재수행 (Phase 1 재수행 불필요)
-- 기능 회귀 발견 시 → 반드시 Phase 1 부터 재수행 (Phase 1 검증이 미흡했다는 신호)
+- 배포 메커니즘 이슈 → Phase 2 내 보완 후 재수행 (Phase 1 재수행 불필요)
+- 기능 이슈 발견 → Phase 1 으로 회귀 (Phase 1 검증 미흡 신호)
 
 ---
 
-## Phase 3 — New-CSC 경유 CSP/CMP/Sim 배포 검증 (릴리즈 직전, 배포 체인)
+## 3. Phase 3 — 배포 이후 검증
 
-Phase 2 에서 배포된 New-CSC(4420) 가 다시 CSP/CMP/Sim 을 배포할 때의 **체인 동작** 만 확인한다. 기능 회귀는 반복하지 않는다.
+Phase 2 로 배포된 csc 를 주체로 csp/cmp/sim 배포 체인을 완성하고, **실제 운영 포트에서 Phase 1 과 동일한 기능 결과가 나오는지** 재확인. 배포 실수·환경 의존 버그 검출.
 
-### 3.1 배포 (csc 경유, Console 에서 실행)
+### 3.1 진입 조건
 
-> **2026-04-24 현재: Phase 3 미구현.**
-> - `cims.sh verify phase3` (자동 검증 함수 `_verify_phase3`) 미작성.
-> - Console Phase 3 UI (csp/cmp/sim 배포 진입점) 미작성.
-> - `build/dist/{csp,cmp,sim}-server/` 의 0.10 신규 트리(`<x>-server/{agent,<모듈>,config}/`) 적용 미완 — 과거 실험물 잔재가 남아있을 수 있음 (`cims.sh reset` 으로 정리됨).
-> - 우선순위: Phase 2 v2 안정화 (console:80 기동 자동화 포함) 완료 후 본격 착수. 그때까지 본 절 §3.1~§3.3 은 **설계 참조 문서** 로만 의미를 가짐.
+- **Phase 1 모듈 일부만 유지**: Console (Dev-Console 3001 또는 Test-Console 8080) 만 유지 — 사용자 UI 세션 유지용. **서버 모듈 (csp / cmp / cwrtc / phone / cspsim) 은 전부 중지**. 포트 충돌 (5060/9000/8443 등) 및 공유 로그/DB wipe 시 충돌 방지.
+- Phase 2 완료: `build/dist/csc-server/csc` 기동 상태 (4420 운영 또는 4445 overlay)
+- TB 3종 유지
+- Test-CSC (4421) 는 중지 또는 유지 (배포본 csc 와 포트 분리되므로 공존 가능. 단 Console 의 proxy 대상이 Test-CSC 면 유지)
 
-Phase 2 에서 `csc-server/` 로 배포된 **csc** 가 Phase 3 의 배포 주체가 된다. 대상 디렉토리 구조는 0.10 참조 (`csp-server/`, `cmp-server/`, `sim-server/`).
+### 3.2 단계
 
-Console(`http://<ens160_ip>/` — 포트 80) 에서 아래 순서로 실행:
+**(1) csc → csp/cmp/sim 배포 체인 완성**
+Console 80 (배포본) 또는 TB-Console (3000) 에서:
+- `csp-server` / `cmp-server` / `sim-server` 호스트 등록 → 각 agent enroll
+  - 동일 호스트 다중 agent 는 `CIMS_AGENT_SYNC_PORT` env 로 sync 포트 분리
+- 각 agent 가 csc 로부터 tarball 수령 → `build/dist/<x>-server/<모듈>/` 에 설치
 
-#### (1) agent 설치
-각 대상 호스트에 agent 를 먼저 배포. 동일 호스트에 여러 agent 공존 시 `CIMS_AGENT_SYNC_PORT` env 로 sync 포트 분리.
+**(2) 배포본 모듈 설정**
+Console 모듈관리에서 각 모듈 scalar overlay + collection 편집. agent heartbeat 로 수집 → `config.json` / `config/*.jsonl` 내려감.
+- csp: listen IP/포트, realm, routing rules, SIP trunk
+- cmp: RtpStartPort, PttRtpStartPort, PttFloorStartPort, CSP address
+- sim: csp server IP, 테스트 계정/그룹
 
-1. **csp-server** 호스트 등록 → agent enroll → `build/dist/csp-server/agent/`
-2. **cmp-server** 호스트 등록 → agent enroll → `build/dist/cmp-server/agent/`
-3. **sim-server** 호스트 등록 → agent enroll → `build/dist/sim-server/agent/`
+설정 원칙: Phase 1 과 동일한 실제 시험 환경을 재현 (IP·포트·realm·도메인·그룹 ID).
 
-#### (2) 모듈 배포
-각 agent 가 csc 로부터 tarball 을 수령해 자기 호스트의 모듈 디렉토리에 설치.
+**(3) 로그/DB wipe**
+`cims.sh reset` 실행 — §0.5 범위 (가입자 보존, 로그 폴더·서비스로그·녹취·DB 런타임 테이블 전부 wipe, TB 유지). Phase 1 서버 모듈은 §3.1 에서 이미 중지됐으므로 파일 잠금·포트 충돌 없음.
 
-1. **csp** 패키지 배포 → `build/dist/csp-server/csp/`
-2. **cmp** 패키지 배포 → `build/dist/cmp-server/cmp/`
-3. **sim** 패키지 배포 → `build/dist/sim-server/sim/`
+> 로그 폴더와 DB 는 Phase 1/2/3 간 공유 구조 (`build/dist/log/`, `ext_mnt/{service_log,msg_log}/`, `cims` DB) — Phase 3 에서의 깨끗한 데이터 확인을 위해 이 단계 필수.
 
-#### (3) 모듈 설정
-각 모듈의 설정 템플릿에 Phase 1 과 동일한 실제 시험 환경을 반영 (IP·포트·realm·도메인·그룹 ID·CMP 포트 풀). Console 에서 편집하면 agent 가 heartbeat 시 수집해 해당 모듈의 `config.json` / `config/*.jsonl` 로 내려준다. 재기동이 필요한 필드는 Console 에서 restart 배지로 표시.
+**(4) 배포본 실행**
+순서: csc (이미 기동) → csp → cmp → sim → console:80.
+- Console 에서 각 모듈 start
+- 리슨 확인: csp(5060/5061/25061), cmp(9000 + RTP 풀), sim (sync only), console (80)
+- TB-CSC → 배포본 csc HEARTBEAT 정상
 
-1. Console > **모듈관리 > csp** → scalar overlay (listen IP/포트, realm) + collection (routing rules, SIP trunk 등)
-2. Console > **모듈관리 > cmp** → scalar overlay (RtpStartPort, PttRtpStartPort, PttFloorStartPort, CSP address)
-3. Console > **모듈관리 > sim** → scalar overlay (csp server IP, 테스트 계정/그룹)
+**(5) 검증** — 배포본 console (80) 에 접속 → §0.9 **기본 4시나리오 재수행** (VoLTE 음성/영상, PTT 그룹 음성/영상) + 개발/보완 사항 재확인.
+- Phase 1 과 동일 결과 (Flow 메시지, sesid 일관, 녹취, NOTIFY 등) 확인
+- 차이 발생 시 → 배포 설정 누락 또는 환경 의존 버그 의심
 
-#### (4) 기동 및 smoke-test
-1. csp → cmp → sim 순으로 기동 (의존성 순)
-2. 리슨 포트 확인: csp(5060/5061/25061), cmp(9000 + RTP 풀), sim(sync only)
-3. **REGISTER 1건 smoke-test** — Console 의 실행 버튼 또는 `build/dist/sim-server/sim/cspsim -count 1 -scenario register` 로 1건만. 배포 체인이 실제 트래픽으로 이어지는지만 확인. **기능 회귀는 Phase 1 에서 끝난 것으로 간주하며 반복하지 않는다**.
+**(6) 리포팅** — `verify_reports/<ts>_phase3.md`. 배포 체인 + §0.9 4시나리오 결과 + 보완 사항 결과.
 
-> 설정 원칙: Phase 1 과 동일한 실제 시험 환경을 재현 (IP·포트·realm·도메인·그룹 ID).
+### 3.3 자동 명령
 
-### 3.2 검증 항목 (배포 체인 한정)
-- New-CSC → 각 agent enroll / heartbeat 정상
-- 패키지 해시 일치
-- config overlay, collection 전달 정상
-- CSP/CMP/Sim 프로세스 리슨 포트 정상 (5060/5061/9000)
-- 각 모듈 startup 로그 `ERROR`/`FATAL` 없음
-- **서비스 smoke-test 1건만** (REGISTER 1개 성공 여부) — 배포 체인이 실제 트래픽으로 이어지는지 확인용. 기능 회귀는 Phase 1 에서 끝났으므로 반복 안 함.
+```bash
+cims.sh verify phase3   # 예정 — 현재 (2026-04-24) 미구현
+```
 
-### 3.3 결과 리포팅
-- `verify_reports/<ts>_phase3.md`
-- 배포 체크리스트 + smoke-test 결과
+**2026-04-24 현재**: `_verify_phase3` 함수, Console Phase 3 UI, `build/dist/{csp,cmp,sim}-server/{agent,<모듈>,config}/` 트리 모두 미구현. 본 절차는 Console + 수동으로 수행. Phase 2 v2 안정화 후 자동화 착수.
 
 ### 3.4 이슈 처리
-- 배포 체인 이슈 → Phase 3 내에서 보완 후 재수행
-- smoke-test 실패 시 → Phase 2 의 배포 또는 Phase 1 의 기능 누락 의심, 원점 재수행
+
+- **배포 체인 이슈** (enroll 실패, config 미전달, 리슨 실패) → Phase 3 내 보완 후 재수행
+- **기능 이슈** (4시나리오 또는 보완 사항 실패) — 원인 판별:
+  - Phase 1 에서 같은 증상 재현됨 → 코드 이슈, Phase 1 부터 재수행
+  - Phase 1 재현 안 됨 → 배포 경로·설정·환경 의존 버그, Phase 2 배포 설계 재검토
 
 ---
 
-## 부록 A. 알려진 함정 (2026-04-22 기준 누적)
+## 부록 A. 알려진 함정
 
-- `cims.sh pkg` 는 patch +1. 버전 고정은 `--no-bump` 필수.
-- `make dist` 이후 `configure.sh` 로 IP 재반영 필수.
-- localhost 설정으로는 외부 접근 불가 → 반드시 `ens160` IP 사용.
-- cspsim REGISTER 성공은 `-auth_id "IMSI@domain"` 형식 필수. `cims.sh verify phase1` 은 DB 에서 자동 조회.
-- TB-CSC 의 mTLS 기능: `Agent.MtlsEnabled: true` overlay 필수.
-- 동일 호스트에 여러 agent: `CIMS_AGENT_SYNC_PORT` env 로 주입 (CLI 인자 미지원).
+- `cims.sh pkg` 는 patch +1 자동. 버전 고정은 `--no-bump` 필수.
+- `make dist` 이후 반드시 `configure.sh` 재실행 (IP 반영).
+- localhost 로는 외부 접근 불가 — 반드시 `ens160` IP.
+- cspsim REGISTER: `-auth_id "IMSI@domain"` 필수 (`verify phase1` 은 DB 자동 조회).
+- TB-CSC mTLS 모드: `Agent.MtlsEnabled: true` overlay 필수.
+- 같은 호스트 다중 agent: `CIMS_AGENT_SYNC_PORT` env 주입 (CLI 미지원).
 - Agent cert rotate 는 `exit(0)` 만 수행. 재기동은 systemd/supervisor 책임.
-- TB-Console 은 **Vite dev 모드 전용** (`npm run dev -- --mode tb --port 3000`). dist 정적 서빙은 `/api` proxy 가 없어 미지원 — TB-CSC 로의 라우팅이 필요하면 별도 nginx conf 필요. (I3 Minor)
-- Console 3분화: 같은 `cims-console/` 코드베이스가 SRC_CONSOLE 존재 여부에 따라 Dev-Console (3001, 소스 vite) ↔ Test-Console (8080, dist 정적 서빙 HTTPS) 로 분기. `cims.sh start console` 단일 명령.
+- TB-Console 은 vite dev 모드 전용. dist 정적 서빙은 `/api` proxy 없음 → 별도 nginx conf 필요.
+- **verify phase2 `--skip-pkg` 함정**: 소스 수정 후 `sync all` + `pkg --no-bump` 하지 않으면 tarball 속 `cims.sh` / `cims_agent.py` 가 stale → start/health 가 옛 로직 사용.
+- **cwrtc.json LocalIp stale 함정**: `ens160` IP 변경 시 configure 재실행 없으면 cwrtc SIP UA UDP bind 실패 (`UdpListen(5062) error`).
 
-## 부록 B. 주요 명령어 요약
+## 부록 B. 주요 명령어
 
 ```bash
-# 환경
+# 환경 확인
 ip -4 addr show ens160
 git rev-parse --short HEAD
-
-# TB 는 항상 돌고 있어야 함 (cims.sh status 에서 tb-csc, tb-console running 확인)
 cims.sh status
+cims.sh preflight
 
-# Phase 1: 기능 검증 (build/dist 안에서 기동 — tarball 생성 없음)
-cims.sh verify phase1         # 자동 (preflight → reset → [1/3] build → [2/3] configure → start all → 시나리오 → 리포트)
-# 또는 TB-Console /testbed/verify 에서 UI 로 실행
+# TB 3종 (상시)
+cims.sh start tb
 
-# Phase 2: 배포 기능 검증 — build/configure/pkg 3단계 분리
-cims.sh build                 # [1/3] Phase 1 에서 빌드했다면 생략 가능
-cims.sh configure --local-ip <ens160_ip>   # [2/3] 환경 변경 없으면 생략 가능
-cims.sh pkg --no-bump         # [3/3] tarball 생성 (버전 고정)
-# TB-Console → 배포 > 패키지 업로드 → 대상 호스트에 배포
+# Phase 1 — 배포 전 검증
+cims.sh verify phase1
 
-# Phase 3: New-CSC 경유 배포 체인 (Phase 2 에서 배포된 console 80 에서 UI 진행)
+# Phase 2 — 배포 과정 검증
+cims.sh build
+cims.sh configure --local-ip <ens160_ip>
+cims.sh pkg --no-bump
+cims.sh verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
+
+# Phase 3 — 배포 이후 검증 (현재 수동)
+# (1) 서버 모듈 중지: cims.sh stop cmp csp cwrtc phone
+# (2) Console 에서 csp/cmp/sim 배포 체인 + 설정
+# (3) cims.sh reset
+# (4) Console 에서 배포본 기동
+# (5) Console 80 에서 §0.9 4시나리오 + 보완 사항 실행
 ```
 
 ## 부록 C. 문서 관리
 
-- 본 문서는 검증 절차의 SSOT. 진행 중 보완은 리포트 후 본 문서에 반영.
-- 변경 이력은 git 으로 관리.
+- 본 문서는 검증 절차의 SSOT. 변경 이력은 git 관리.
+- 진행 중 보완은 검증 리포트에 먼저 기록 후 본 문서에 반영.
+- 사용자 용어 정의 변경 시 §0.2 명명 규칙과 §0.9/§0.10 시나리오 정의 동기화 필수.
