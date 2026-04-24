@@ -388,9 +388,41 @@ def job_process_control(params: dict, job_type: str) -> tuple:
 
 
 def job_health_check(params: dict) -> tuple:
-    """간단한 헬스 체크 — 설정된 포트에 TCP/UDP 연결 시도."""
+    """간단한 헬스 체크 — 설정된 포트에 TCP/UDP 연결 시도.
+
+    포트 결정 우선순위:
+      1) params.port (정수, 단일 포트 override)
+      2) params.config 의 scalar overlay — 모듈별 키에서 추출
+         - csc/console: Server.Port / Port / ServerPort (+ console은 nginx PORT)
+         - csp: Setup.Sip.UdpPort
+         - cmp: ServerPort / Setup.Listen.ControlPort
+      3) 기본값 (하드코딩)
+    """
     svc = (params.get("process_name") or params.get("service_kind") or "").lower()
-    probes = {
+    cfg = params.get("config") or {}
+    # flat dot-path overlay 지원: {"Server.Port": 4430} 도 해석
+    def _flat(key: str):
+        if key in cfg: return cfg[key]
+        cur = cfg
+        for p in key.split("."):
+            if not isinstance(cur, dict) or p not in cur: return None
+            cur = cur[p]
+        return cur
+    override = params.get("port")
+    if override is None:
+        if svc in ("csc", "tb-csc"):
+            override = _flat("Server.Port") or _flat("Port")
+        elif svc == "console":
+            override = _flat("Port") or _flat("ConsolePort")
+        elif svc == "csp":
+            override = _flat("Setup.Sip.UdpPort")
+        elif svc == "cmp":
+            override = _flat("ServerPort") or _flat("Setup.Listen.ControlPort")
+        elif svc == "cwrtc":
+            override = _flat("Port")
+        elif svc == "phone":
+            override = _flat("Port")
+    probes_default = {
         "csp":     [("udp", 5060)],
         "cmp":     [("udp", 9000)],
         "csc":     [("tcp", 4420)],
@@ -398,6 +430,11 @@ def job_health_check(params: dict) -> tuple:
         "console": [("tcp", 3001)],
         "phone":   [("tcp", 3000)],
     }.get(svc, [])
+    if override and probes_default:
+        proto = probes_default[0][0]
+        probes = [(proto, int(override))]
+    else:
+        probes = probes_default
     results = []
     for proto, port in probes:
         s = socket.socket(socket.AF_INET,

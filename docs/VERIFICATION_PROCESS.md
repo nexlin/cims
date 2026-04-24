@@ -269,6 +269,31 @@ Phase 2 의 배포 대상 디렉토리는 `build/dist/csc-server/` (0.10 참조)
 - 모듈 기동 성공 (프로세스 리슨, health 체크)
 - TB-CSC → 검증 대상 CSC HEARTBEAT 정상
 
+### 2.4.1 `cims.sh verify phase2` 자동화 범위 (v2, 2026-04-24)
+
+`cims.sh verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]` 는 위 2.4 항목 중 csc 배포본에 대해 end-to-end 를 자동 수행한다. v2 에서 install-only 를 넘어 **start/health/stop 까지** 커버한다. Phase 1 csc(4420) 와 병립하도록 Phase 2 csc 는 **Server.Port=4445** 로 overlay 되어 기동된다.
+
+1. Cleanup (csc-server/ 초기화, Test-agent / DB 잔재 정리)
+2. Build (`--skip-build` 가능)
+3. Configure (ens160)
+4. Pkg tarball (`--skip-pkg` 가능)
+5. Admin login (admin/1234) → JWT
+6. Agent 등록 (name=csc-server-local) + approve
+7. Test-agent 기동 (sync 9903, `--heartbeat-sec 3`)
+8. csc+console tarball 업로드
+9. Deployment 생성 (csc 에 `{"Server.Port":4445}` overlay 포함)
+10. Install job queue + 폴링
+11. 설치 파일 검증 (meta.json + config/)
+12. `install_path/config.json` overlay 반영 확인
+13. **Start job** (csc) + 포트 4445 LISTEN 대기 (최대 25s)
+14. **Health check job** + `tcp:4445=open` 확인 (최대 15s)
+15. **Stop job** (cleanup) + 포트 해제 확인
+16. Test-agent 종료 (`--keep-agent` 로 유지 가능)
+
+**PASS 조건**: Install/overlay/start/health 모두 OK (stop 은 WARN 허용).
+
+**console 은 install-only** 유지. start/health 는 운영 배포 설계 (nginx vs vite preview) 확정 후 추가 예정.
+
 ### 2.5 결과 리포팅
 - `verify_reports/<ts>_phase2.md`
 - **배포 체크리스트** (위 2.4 항목) PASS/FAIL

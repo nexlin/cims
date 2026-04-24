@@ -133,16 +133,33 @@ start_cwrtc() {
 }
 
 start_csc() {
-    local csc_port; csc_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csc/config/csc.json')); print(d['Server']['Port'])" 2>/dev/null || echo 4420)
     if is_running csc; then warn "CSC 이미 실행 중 (pid=$(read_pid csc))"; return 0; fi
     [[ ! -f "$DIST_DIR/csc/src/csc_app.py" ]] && err "CSC 소스 없음 (make dist 실행 필요)" && return 1
-    kill_stray "csc/src/csc_app.py" "$csc_port" tcp
+    # overlay-aware port: install_path/config.json (deployment overlay) 를 먼저 확인
+    local csc_port
+    csc_port=$(python3 -c "
+import json, os
+base='$DIST_DIR/csc/config/csc.json'
+ov='$DIST_DIR/config.json'
+p=None
+if os.path.isfile(ov):
+    try:
+        f=json.load(open(ov))
+        if isinstance(f,dict):
+            p=f.get('Server.Port') or (f.get('Server',{}) or {}).get('Port')
+    except: pass
+if not p:
+    try: p=json.load(open(base))['Server']['Port']
+    except: p=4420
+print(p)" 2>/dev/null || echo 4420)
+    # DIST_DIR 포함 절대경로 pattern — Phase 1/2 csc 공존 시 상호 kill 방지
+    kill_stray "$DIST_DIR/csc/src/csc_app.py" "$csc_port" tcp
     info "CSC (REST API 서버) 시작... (port=$csc_port)"
     cd "$DIST_DIR/csc/src"
-    python3 csc_app.py >> "$LOG_DIR/csc.log" 2>&1 &
+    python3 -u "$DIST_DIR/csc/src/csc_app.py" >> "$LOG_DIR/csc.log" 2>&1 &
     save_pid csc $!
     sleep 1.5
-    is_running csc && ok "CSC 시작 완료 (pid=$(read_pid csc))" || { err "CSC 시작 실패"; tail -3 "$LOG_DIR/csc.log" | sed 's/^/  /'; }
+    is_running csc && ok "CSC 시작 완료 (pid=$(read_pid csc), port=$csc_port)" || { err "CSC 시작 실패"; tail -3 "$LOG_DIR/csc.log" | sed 's/^/  /'; }
 }
 
 start_console() {
@@ -379,10 +396,25 @@ stop_one() {
 }
 
 stop_csc() {
-    local csc_port; csc_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csc/config/csc.json')); print(d['Server']['Port'])" 2>/dev/null || echo 4420)
+    local csc_port
+    csc_port=$(python3 -c "
+import json, os
+base='$DIST_DIR/csc/config/csc.json'
+ov='$DIST_DIR/config.json'
+p=None
+if os.path.isfile(ov):
+    try:
+        f=json.load(open(ov))
+        if isinstance(f,dict):
+            p=f.get('Server.Port') or (f.get('Server',{}) or {}).get('Port')
+    except: pass
+if not p:
+    try: p=json.load(open(base))['Server']['Port']
+    except: p=4420
+print(p)" 2>/dev/null || echo 4420)
     stop_one csc
-    # PID 파일 없이 남아있는 스트레이 프로세스도 정리
-    kill_stray "csc/src/csc_app.py" "$csc_port" tcp
+    # PID 파일 없이 남아있는 스트레이 프로세스도 정리 (DIST_DIR 범위로 한정)
+    kill_stray "$DIST_DIR/csc/src/csc_app.py" "$csc_port" tcp
 }
 
 # ── 상태 출력 ──────────────────────────────────────────────────
@@ -1343,6 +1375,7 @@ for r in items:
         --name "$aname" \
         --state-dir "$ta_dir/state" \
         --enrollment-token "$enroll_tok" \
+        --heartbeat-sec 3 \
         > "$ta_log" 2>&1 &
     local ta_pid=$!
     echo "## 7. Test-agent 기동" >> "$report"
@@ -1392,18 +1425,23 @@ except: pass' 2>/dev/null)
     done
     echo "" >> "$report"
 
-    # 9) Deployment 생성
-    echo "## 9. Deployment 생성" >> "$report"
+    # 9) Deployment 생성 (+ config overlay — csc 는 Phase 1 과 포트 충돌 회피 위해 4445)
+    echo "## 9. Deployment 생성 (config overlay 포함)" >> "$report"
     declare -A dep_id_map
-    local did pname install_path
+    local did pname install_path cfg_json
     for name in csc console; do
         pid=${pkg_id_map[$name]:-}
         [[ -z $pid ]] && continue
         install_path="$DIST_DIR/csc-server/$name"
         pname="${name^^}"
+        if [[ $name == "csc" ]]; then
+            cfg_json='{"Server.Port":4445}'
+        else
+            cfg_json='{}'
+        fi
         resp=$(curl -sk -X POST "$base/api/v1/deployments" \
             -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
-            -d "{\"agent_id\":$aid,\"package_id\":$pid,\"install_path\":\"$install_path\",\"process_name\":\"$pname\"}")
+            -d "{\"agent_id\":$aid,\"package_id\":$pid,\"install_path\":\"$install_path\",\"process_name\":\"$pname\",\"config\":$cfg_json}")
         did=$(echo "$resp" | python3 -c 'import sys,json
 try: print(json.load(sys.stdin).get("id",""))
 except: pass' 2>/dev/null)
@@ -1414,7 +1452,7 @@ except: pass' 2>/dev/null)
             return 1
         fi
         dep_id_map[$name]=$did
-        echo "- $name: deployment_id=$did → $install_path" >> "$report"
+        echo "- $name: deployment_id=$did → $install_path, overlay=$cfg_json" >> "$report"
     done
     echo "" >> "$report"
 
@@ -1472,19 +1510,116 @@ except: pass' 2>/dev/null)
     done
     echo "" >> "$report"
 
-    # 12) Test-agent 종료 (옵션)
-    if [[ $keep_agent -eq 0 ]]; then
-        kill $ta_pid 2>/dev/null || true
-        sleep 1
-        echo "## 12. Test-agent 종료 (pid=$ta_pid)" >> "$report"
+    # 12) config overlay 반영 검증 (install_path/config.json)
+    echo "## 12. config overlay 검증 (install_path/config.json)" >> "$report"
+    local overlay_ok=1
+    local csc_overlay_port
+    csc_overlay_port=$(python3 -c "
+import json, os
+p='$DIST_DIR/csc-server/csc/config.json'
+try:
+    d=json.load(open(p))
+    print(d.get('Server.Port') or (d.get('Server',{}) or {}).get('Port') or '')
+except: print('')" 2>/dev/null)
+    if [[ "$csc_overlay_port" == "4445" ]]; then
+        echo "- [OK] csc/config.json: Server.Port=4445 반영" >> "$report"
     else
-        echo "## 12. Test-agent 유지 (pid=$ta_pid, --keep-agent)" >> "$report"
+        echo "- [FAIL] csc/config.json: overlay 미반영 (실제=$csc_overlay_port)" >> "$report"
+        overlay_ok=0
     fi
     echo "" >> "$report"
 
-    # 판정
+    # 13) Start job (csc) + 기동 확인
+    echo "## 13. Start job (csc) + 포트 4445 LISTEN 대기" >> "$report"
+    local csc_did=${dep_id_map[csc]:-}
+    local start_ok=0 start_elapsed=0
+    if [[ -n $csc_did ]]; then
+        curl -sk -X POST "$base/api/v1/deployments/$csc_did/job" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d '{"job_type":"start"}' >/dev/null 2>&1
+        for i in $(seq 1 25); do
+            sleep 1; start_elapsed=$((start_elapsed+1))
+            if ss -tln 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)4445$'; then
+                start_ok=1; break
+            fi
+        done
+    fi
+    if [[ $start_ok -eq 1 ]]; then
+        echo "- [OK] csc port 4445 LISTEN 확인 (${start_elapsed}s)" >> "$report"
+    else
+        echo "- [FAIL] csc port 4445 LISTEN 실패 (25s timeout)" >> "$report"
+        echo '```' >> "$report"
+        mysql -u cims -pcims1234 -e "SELECT id, job_type, status, result_code, SUBSTRING(result_stderr,1,300) AS err FROM agent_job WHERE agent_id=$aid AND job_type='start' ORDER BY id DESC LIMIT 1" cims >> "$report" 2>&1 || true
+        echo '```' >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 14) Health check job
+    echo "## 14. Health check job" >> "$report"
+    local health_ok=0 health_result="(not-run)"
+    if [[ -n $csc_did && $start_ok -eq 1 ]]; then
+        local hresp hjid
+        hresp=$(curl -sk -X POST "$base/api/v1/deployments/$csc_did/job" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d '{"job_type":"health_check"}')
+        hjid=$(echo "$hresp" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("job_id",""))
+except: pass' 2>/dev/null)
+        for i in $(seq 1 15); do
+            sleep 1
+            local row hstatus hrc hout
+            row=$(mysql -u cims -pcims1234 -Nse \
+                "SELECT status, result_code, COALESCE(result_stdout,'') FROM agent_job WHERE id=$hjid" cims 2>/dev/null)
+            hstatus=$(echo "$row" | awk -F'\t' '{print $1}')
+            hrc=$(echo "$row" | awk -F'\t' '{print $2}')
+            hout=$(echo "$row" | awk -F'\t' '{print $3}')
+            if [[ $hstatus == "succeeded" || $hstatus == "failed" ]]; then
+                health_result="status=$hstatus rc=$hrc out=$hout"
+                if [[ $hstatus == "succeeded" && $hrc == "0" && "$hout" == *"tcp:4445=open"* ]]; then
+                    health_ok=1
+                fi
+                break
+            fi
+        done
+    fi
+    echo "- 결과: $health_result" >> "$report"
+    echo "- 판정: $([[ $health_ok -eq 1 ]] && echo OK || echo FAIL)" >> "$report"
+    echo "" >> "$report"
+
+    # 15) Stop job (cleanup) — Phase 2 csc 프로세스 정리
+    echo "## 15. Stop job (cleanup)" >> "$report"
+    local stop_ok=0
+    if [[ -n $csc_did ]]; then
+        curl -sk -X POST "$base/api/v1/deployments/$csc_did/job" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d '{"job_type":"stop"}' >/dev/null 2>&1
+        for i in $(seq 1 10); do
+            sleep 1
+            if ! ss -tln 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)4445$'; then
+                stop_ok=1; break
+            fi
+        done
+        if [[ $stop_ok -eq 1 ]]; then
+            echo "- [OK] csc port 4445 해제" >> "$report"
+        else
+            echo "- [WARN] csc port 4445 여전히 LISTEN (10s timeout)" >> "$report"
+        fi
+    fi
+    echo "" >> "$report"
+
+    # 16) Test-agent 종료 (옵션)
+    if [[ $keep_agent -eq 0 ]]; then
+        kill $ta_pid 2>/dev/null || true
+        sleep 1
+        echo "## 16. Test-agent 종료 (pid=$ta_pid)" >> "$report"
+    else
+        echo "## 16. Test-agent 유지 (pid=$ta_pid, --keep-agent)" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 판정 (v2: install + overlay + start + health 모두 OK 여야 PASS)
     local verdict="PASS"
-    [[ $all_done -ne 1 || $verified_ok -ne 1 ]] && verdict="FAIL"
+    [[ $all_done -ne 1 || $verified_ok -ne 1 || $overlay_ok -ne 1 || $start_ok -ne 1 || $health_ok -ne 1 ]] && verdict="FAIL"
     {
         echo "## 판정: $verdict"
         echo ""
@@ -1492,7 +1627,12 @@ except: pass' 2>/dev/null)
         echo "- Package upload: OK (csc, console)"
         echo "- Install 완료: $([[ $all_done -eq 1 ]] && echo OK || echo TIMEOUT)"
         echo "- 설치 파일 검증: $([[ $verified_ok -eq 1 ]] && echo OK || echo FAIL)"
-        echo "- (start/health 는 차기 버전 — 현 v1 은 install-only)"
+        echo "- Config overlay: $([[ $overlay_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo "- CSC Start (4445 LISTEN): $([[ $start_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo "- Health check: $([[ $health_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo "- Stop cleanup: $([[ $stop_ok -eq 1 ]] && echo OK || echo WARN)"
+        echo ""
+        echo "- (console 은 install-only — start/health 는 운영 배포 설계 확정 후 추가)"
     } >> "$report"
 
     header "=== Phase 2 검증 종료 ==="

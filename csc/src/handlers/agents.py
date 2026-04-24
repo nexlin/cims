@@ -1034,6 +1034,8 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     process_name = (body.get("process_name") or body.get("service_kind") or "").strip()
     functions    = _join_csv(body.get("service_functions"))
     install_path = (body.get("install_path") or "").strip() or None
+    cfg_overlay  = body.get("config")
+    config_json  = json.dumps(cfg_overlay) if isinstance(cfg_overlay, dict) and cfg_overlay else None
     if not agent_id or not package_id:
         return HandlerResult(status=400, body={"error": "agent_id and package_id required"},
                              media_type="application/json")
@@ -1043,10 +1045,10 @@ async def _create_deployment(handler_args: HandlerArgs, config):
             cur.execute(
                 "INSERT INTO agent_deployment (agent_id, package_id, instance_id, "
                 "                              process_name, service_functions, "
-                "                              install_path, note) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                "                              install_path, config_json, note) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                 (agent_id, package_id, instance_id, process_name, functions,
-                 install_path, body.get("note"))
+                 install_path, config_json, body.get("note"))
             )
             new_id = cur.lastrowid
             cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (new_id,))
