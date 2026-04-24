@@ -116,20 +116,24 @@ Phase 2/3 에서는 agent 와 각 모듈을 **대상 호스트별 디렉토리**
 
 ```
 build/dist/
-├── csc/           # Phase 1 직접 기동            (Test-CSC, 4420) — 유지
-├── csp/           # Phase 1 직접 기동            (Test-CSP, 4421) — 유지
-├── cmp/           # Phase 1 직접 기동            (Test-CMP, 4422) — 유지
-├── console/       # Phase 1 직접 기동            (Test-Console, 3001) — 유지
+├── csc/           # Phase 1 직접 기동            (Test-CSC, 4421) — 유지
+├── csp/           # Phase 1 직접 기동            (Test-CSP) — 유지
+├── cmp/           # Phase 1 직접 기동            (Test-CMP) — 유지
+├── console/       # Phase 1 직접 기동            (Test-Console, 8080) — 유지
 ├── phone/         # Phase 1 직접 기동            (Test-Phone, 5060) — 유지 
 ├── cwrtc/         # Phase 1 직접 기동            (Test-CWRTC, 5061) — 유지
 ├── cspsim/        # Phase 1 직접 기동            (Test-CSPSIM, 9000) — 시험후 종료
-├── csc-server/    # Phase 2: Test-agent & Test-csc를 가 csc, console 모듈 배포 (4420 기동)
+├── csc-server/    # Phase 2: Test-agent & Test-csc를 가 csc(4420), console(80) 모듈 배포
 ├── csp-server/    # Phase 3: csc 가 agent + csp 모듈 배포
 ├── cmp-server/    # Phase 3: csc 가 agent + cmp 모듈 배포
 └── sim-server/    # Phase 3: csc 가 agent + sim(cspsim) 모듈 배포
 ```
 
-> ※ 위 Phase 1 직접 기동 포트(4421/4422/5060/5061/9000 등)는 **tentative** — 실제 서비스 포트(CSP SIP 5060·TCP 25061·TLS 5061 / CMP UDP 9000 / Phone 웹 3002 등)와 관리·admin 포트의 구분이 필요하며 구현·실측 시 조정될 수 있다.
+> ※ 포트 체계 (설계):
+> - **Phase 1 (Test-\*, dev/debug 포트)**: Test-CSC 4421 / Test-Console 8080 — 운영 포트와 분리되어 Phase 2 배포본(csc 4420 / console 80)과 동일 호스트에서 공존 가능.
+> - **Phase 2 (csc-server 배포본, 운영 포트)**: csc 4420 / console 80.
+> - **공용/서비스 포트**: Test-CSP SIP UDP 5060·TCP 25061·TLS 5061, Test-CMP UDP 9000, Test-Phone SIP 5060 (UE client), Test-CWRTC 5061 (TLS/WS), Test-CSPSIM 9000 (시험 종료 후 소켓 해제).
+> - 현행 코드는 Phase 1 csc=4420 / console=3001 기준. **신규 설계(4421 / 8080 및 4420 / 80)로의 전환은 Phase 2 실측 구현 시점에 configure.sh + csc.json/.env 갱신 + §0.1 TB 표 반영을 한꺼번에 진행한다.**
 
 **각 `<x>-server/` 내부 규약**
 
@@ -143,8 +147,8 @@ build/dist/
 
 **명명 규칙 (문서 내 용어 통일)**
 
-- **csc** — Phase 2 에서 `csc-server/csc/` 로 배포된 CSC 인스턴스 (4420). Phase 3 배포의 주체. 기존 "검증 대상 CSC" / "New-CSC" 표기와 동의.
-- **console** — Phase 2 에서 `csc-server/console/` 로 배포된 Console 인스턴스 (3001). Phase 3 UI 진입점.
+- **csc** — Phase 2 에서 `csc-server/csc/` 로 배포된 CSC 인스턴스 (포트 4420, 운영). Phase 3 배포의 주체. 기존 "검증 대상 CSC" / "New-CSC" 표기와 동의.
+- **console** — Phase 2 에서 `csc-server/console/` 로 배포된 Console 인스턴스 (포트 80, 운영). Phase 3 UI 진입점.
 - **csp / cmp / sim** — Phase 3 에서 csc 로부터 각각 `csp-server/csp/`, `cmp-server/cmp/`, `sim-server/sim/` 로 배포된 인스턴스.
 - **Test-\<X\>** — Phase 1 에서 `build/dist/<모듈>/` 로 직접 기동한 인스턴스의 별칭 (Test-CSC / Test-CSP / Test-CMP / Test-Console / Test-Phone / Test-CWRTC / Test-CSPSIM).
 - **Test-agent** — Phase 2 에서 `csc-server/agent/` 로 TB-CSC 가 설치한 **per-host agent**. TB-agent(TB-CSC 자체에 상주하는 검증 환경 제어용 상시 agent, sync 9902)와는 별개 개체.
@@ -253,9 +257,9 @@ Phase 2 의 배포 대상 디렉토리는 `build/dist/csc-server/` (0.10 참조)
 2. **배포 > 패키지** 업로드: `cims-csc-<ver>.tar.gz` (필요 시 `cims-console-<ver>.tar.gz` 도)
 3. **배포 > 서버** 에서 **csc-server** 호스트 등록 → Test-agent enroll
    - install_path: `build/dist/csc-server/agent/`
-4. **csc** 모듈 배포 → `build/dist/csc-server/csc/` 에 설치 · 기동 (4420)
-5. **console** 모듈 배포 (Phase 3 UI 진입점) → `build/dist/csc-server/console/` 에 설치 · 기동 (3001)
-6. 기동 확인: csc(4420) / console(3001) 리슨, TB-CSC → csc HEARTBEAT 정상
+4. **csc** 모듈 배포 → `build/dist/csc-server/csc/` 에 설치 · 기동 (포트 4420)
+5. **console** 모듈 배포 (Phase 3 UI 진입점) → `build/dist/csc-server/console/` 에 설치 · 기동 (포트 80)
+6. 기동 확인: csc(4420) / console(80) 리슨, TB-CSC → csc HEARTBEAT 정상
 
 ### 2.4 검증 항목 (배포 기능 한정)
 - agent enroll 성공 (인증서 발급, mTLS 모드면 cert 유효성)
@@ -283,7 +287,7 @@ Phase 2 에서 배포된 New-CSC(4420) 가 다시 CSP/CMP/Sim 을 배포할 때�
 
 Phase 2 에서 `csc-server/` 로 배포된 **csc** 가 Phase 3 의 배포 주체가 된다. 대상 디렉토리 구조는 0.10 참조 (`csp-server/`, `cmp-server/`, `sim-server/`).
 
-Console(`https://<ens160_ip>:3001/`) 에서 아래 순서로 실행:
+Console(`http://<ens160_ip>/` — 포트 80) 에서 아래 순서로 실행:
 
 #### (1) agent 설치
 각 대상 호스트에 agent 를 먼저 배포. 동일 호스트에 여러 agent 공존 시 `CIMS_AGENT_SYNC_PORT` env 로 sync 포트 분리.
@@ -362,7 +366,7 @@ cims.sh configure --local-ip <ens160_ip>   # [2/3] 환경 변경 없으면 생�
 cims.sh pkg --no-bump         # [3/3] tarball 생성 (버전 고정)
 # TB-Console → 배포 > 패키지 업로드 → 대상 호스트에 배포
 
-# Phase 3: New-CSC 경유 배포 체인 (New-Console 3001 에서 UI 진행)
+# Phase 3: New-CSC 경유 배포 체인 (Phase 2 에서 배포된 console 80 에서 UI 진행)
 ```
 
 ## 부록 C. 문서 관리
