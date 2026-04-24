@@ -164,33 +164,39 @@ print(p)" 2>/dev/null || echo 4420)
 
 start_console() {
     if is_running console; then warn "console 이미 실행 중 (pid=$(read_pid console))"; return 0; fi
-    # Test-Console (Phase 1): port 3011 — 운영 배포(Phase 2)의 console:80 과 분리.
-    # (docs §0.10 footnote 의 8080 은 cwrtc(8080) 와 충돌하여 3011 로 변경)
-    kill_stray "serve dist -l 3011" 3011 tcp
+    # Console 3분화 (2026-04-24 plan):
+    #   Dev-Console     : 소스 (cims-console/) Vite dev, port 3001, proxy → Test-CSC 4421
+    #   Test-Console    : build/dist/console/dist 정적 서빙, port 8080 (HTTPS)
+    #   배포본 console  : Phase 2/3 csc-server/console/, port 80 (운영, 별도 흐름)
+    # 기동 모드는 SRC_CONSOLE 존재 여부로 결정 (개발 트리면 Dev, 배포 트리면 Test).
+    # ※ Test-Console 8080 은 cwrtc(8080) 이전 (블록 A, 별도 세션) 전엔 충돌 가능.
     if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then
-        # 소스 모드: Vite 개발 서버 (API proxy 포함)
-        kill_stray "vite.*cims-console" "" tcp
-        info "Test-Console (Admin Web UI) 개발 서버 시작... (port 3011)"
+        kill_stray "vite.*cims-console" 3001 tcp
+        info "Dev-Console (Admin Web UI, 소스 Vite dev) 시작... (port 3001 → Test-CSC 4421 proxy)"
         cd "$SRC_CONSOLE"
-        npm run dev -- --port 3011 --host >> "$LOG_DIR/console.log" 2>&1 &
+        npm run dev -- --port 3001 --host >> "$LOG_DIR/console.log" 2>&1 &
         save_pid console $!
+        sleep 2
+        is_running console && ok "Dev-Console 시작 완료 (pid=$(read_pid console), port=3001)" \
+            || { err "Dev-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
     elif [[ -d "$DIST_DIR/console/dist" ]]; then
-        # dist 전용 모드: 정적 서빙 (proxy 없음 — nginx 필요)
-        info "Test-Console (Admin Web UI) 정적 서빙 시작... (port 3011, HTTPS)"
+        kill_stray "serve dist -l 8080" 8080 tcp
+        info "Test-Console (Admin Web UI, dist 정적 서빙) 시작... (port 8080, HTTPS)"
         cd "$DIST_DIR/console"
         _SSL_KEY="$DIST_DIR/csc/cert/server.key"
         _SSL_CERT="$DIST_DIR/csc/cert/server.crt"
         if [[ -f "$_SSL_KEY" && -f "$_SSL_CERT" ]]; then
-            npx --yes serve dist -l 3011 --ssl-cert "$_SSL_CERT" --ssl-key "$_SSL_KEY" >> "$LOG_DIR/console.log" 2>&1 &
+            npx --yes serve dist -l 8080 --ssl-cert "$_SSL_CERT" --ssl-key "$_SSL_KEY" >> "$LOG_DIR/console.log" 2>&1 &
         else
-            npx --yes serve dist -l 3011 >> "$LOG_DIR/console.log" 2>&1 &
+            npx --yes serve dist -l 8080 >> "$LOG_DIR/console.log" 2>&1 &
         fi
         save_pid console $!
+        sleep 2
+        is_running console && ok "Test-Console 시작 완료 (pid=$(read_pid console), port=8080)" \
+            || { err "Test-Console 시작 실패 (cwrtc(8080) 충돌 가능 — 블록 A 후 재시도)"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
     else
         err "console 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1
     fi
-    sleep 2
-    is_running console && ok "Test-Console 시작 완료 (pid=$(read_pid console), port=3011)" || { err "Test-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
 }
 
 start_phone() {
@@ -425,8 +431,11 @@ _svc_port_proto() {
         cmp)        echo "9000:udp" ;;
         csp)        echo "5060:udp" ;;
         cwrtc)      echo "8080:tcp" ;;
-        csc)        echo "4420:tcp" ;;
-        console)    echo "3011:tcp" ;;
+        csc)        echo "4421:tcp" ;;
+        # console 은 모드별 포트 분기 — Dev(소스 트리) 3001 / Test(dist 전용) 8080.
+        console)
+            if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then echo "3001:tcp"
+            else echo "8080:tcp"; fi ;;
         phone)      echo "3002:tcp" ;;
         tb-csc)     echo "4419:tcp" ;;
         tb-console) echo "3000:tcp" ;;
@@ -589,12 +598,14 @@ cmd_clean() {
 cmd_reset() {
     local target="all"
     local extra_paths=()
+    local keep_processes=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --files) target="files"; shift ;;
             --db)    target="db";    shift ;;
             --all|all) target="all"; shift ;;
             --path)  extra_paths+=("$2"); shift 2 ;;
+            --keep-processes) keep_processes=1; shift ;;
             -*) err "알 수 없는 reset 옵션: $1"; return 1 ;;
             *)  shift ;;
         esac
@@ -602,40 +613,44 @@ cmd_reset() {
 
     header "=== 검증 환경 초기화 (가입자 보존, TB 3종 유지) ==="
     info "TB 3종(TB-CSC 4419 / TB-Console 3000 / TB-agent 9902) 은 건드리지 않음."
+    [[ $keep_processes -eq 1 ]] && info "--keep-processes: Test-* 프로세스 유지 (서비스 정지/포트 kill 건너뜀)"
     # cims_agent 는 TRUNCATE 하지 않고 name='tb-agent-local' 레코드만 보존 (I1 fix).
     # → reset 후에도 TB-agent 의 session_token 이 유효해 heartbeat 가 401 없이 동작한다.
 
-    # 1) 서비스 정지 — DB 연결 정리 + 파일 잠금 해제
-    info "서비스 정지 (검증 대상만)..."
-    cmd_stop all >/dev/null 2>&1 || true
+    if [[ $keep_processes -eq 0 ]]; then
+        # 1) 서비스 정지 — DB 연결 정리 + 파일 잠금 해제
+        info "서비스 정지 (검증 대상만)..."
+        cmd_stop all >/dev/null 2>&1 || true
 
-    # 1-b) 외부 기동 / PID 파일 없는 프로세스도 포트 기반으로 강제 종료
-    #      (console npm serve, 다른 경로의 cmp/csp 바이너리 등)
-    info "잔존 프로세스 포트 기반 정리..."
-    local _rp _port _proto _pids _round
-    for _round in 1 2; do
-        local _killed=0
-        # reset 은 검증 대상만 정리 — TB 포트(4419/3000/9902) 는 제외해 상시 동작 보장
-        for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3011:tcp" "3002:tcp" "8080:tcp"; do
-            _port="${_rp%%:*}"; _proto="${_rp##*:}"
-            if [[ $_proto == "tcp" ]]; then
-                _pids=$(ss -Htlnp 2>/dev/null | awk -v pt=":$_port" '$4 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
-            else
-                _pids=$(ss -Hulnp 2>/dev/null | awk -v pt=":$_port" '$5 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
-            fi
-            if [[ -n $_pids ]]; then
-                warn "port $_port/$_proto 점유자 강제 종료: $_pids"
-                if [[ $_round -eq 1 ]]; then
-                    kill $_pids 2>/dev/null || true
+        # 1-b) 외부 기동 / PID 파일 없는 프로세스도 포트 기반으로 강제 종료
+        #      (console npm serve, 다른 경로의 cmp/csp 바이너리 등)
+        info "잔존 프로세스 포트 기반 정리..."
+        local _rp _port _proto _pids _round
+        for _round in 1 2; do
+            local _killed=0
+            # reset 은 검증 대상만 정리 — TB 포트(4419/3000/9902) 는 제외해 상시 동작 보장
+            # console: Dev(3001) + Test(8080, cwrtc 와 동일 포트 — 충돌 회피는 블록 A 에서 분리)
+            for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp"; do
+                _port="${_rp%%:*}"; _proto="${_rp##*:}"
+                if [[ $_proto == "tcp" ]]; then
+                    _pids=$(ss -Htlnp 2>/dev/null | awk -v pt=":$_port" '$4 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
                 else
-                    kill -9 $_pids 2>/dev/null || true
+                    _pids=$(ss -Hulnp 2>/dev/null | awk -v pt=":$_port" '$5 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
                 fi
-                _killed=1
-            fi
+                if [[ -n $_pids ]]; then
+                    warn "port $_port/$_proto 점유자 강제 종료: $_pids"
+                    if [[ $_round -eq 1 ]]; then
+                        kill $_pids 2>/dev/null || true
+                    else
+                        kill -9 $_pids 2>/dev/null || true
+                    fi
+                    _killed=1
+                fi
+            done
+            [[ $_killed -eq 0 ]] && break
+            sleep 0.5
         done
-        [[ $_killed -eq 0 ]] && break
-        sleep 0.5
-    done
+    fi  # ── /keep_processes==0 (서비스 정지 + 포트 kill) ──
 
     # 2) 파일 초기화
     if [[ $target == "all" || $target == "files" ]]; then
@@ -805,7 +820,7 @@ cmd_preflight() {
     # 3) 포트 점유 확인
     # 검증 대상 포트 — 기동 전엔 "가용" 이어야 정상.
     # TB 포트(4419/3000/9902) 는 반대로 "점유" 되어 있어야 정상 (TB 3종 상시 동작 전제).
-    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3011:tcp" "3002:tcp" "8080:tcp")
+    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp")
     local tb_ports=("4419:tcp:TB-CSC" "3000:tcp:TB-Console" "9902:tcp:TB-agent")
     local pp port proto line pid label
     info "[검증 대상] 기동 전엔 가용해야 함"
@@ -1265,21 +1280,17 @@ _verify_phase2() {
         return 1
     fi
 
-    # 1) Cleanup (csc-server/ + 잔존 Test-agent + stale DB rows)
+    # 1) Cleanup — Phase 1 Test-* 는 살려두고 로그/DB/csc-server 만 초기화
+    #    cmd_reset --keep-processes 가 다음을 수행:
+    #      · LOG_DIR/*.log, service_log/, msg_log/ wipe
+    #      · /tmp/cims-agent-* + build/dist/{csc,csp,cmp,sim}-server/ rm -rf
+    #      · cims_agent (TB 보존 외 DELETE) + agent_deployment/job/metric TRUNCATE
+    #      · 발급 cert (cert/agent_mtls/issued) 정리
+    #    verify_reports/ 는 절대 건드리지 않음 (이번 verify 의 report 보존)
     echo "## 1. Cleanup" >> "$report"
-    pkill -f "cims_agent.py.*--name csc-server-local" 2>/dev/null || true
-    sleep 1
-    rm -rf "$DIST_DIR/csc-server"
+    cmd_reset --all --keep-processes >/dev/null 2>&1 || true
     mkdir -p "$DIST_DIR/csc-server/agent/state"
-    # 잔존 csc-server-local agent 레코드 + 관련 deployment/job 정리 (중복 누적 방지)
-    mysql -u cims -pcims1234 cims >/dev/null 2>&1 <<'SQL' || true
-SET FOREIGN_KEY_CHECKS=0;
-DELETE FROM agent_job        WHERE agent_id IN (SELECT id FROM cims_agent WHERE name='csc-server-local');
-DELETE FROM agent_deployment WHERE agent_id IN (SELECT id FROM cims_agent WHERE name='csc-server-local');
-DELETE FROM cims_agent       WHERE name='csc-server-local';
-SET FOREIGN_KEY_CHECKS=1;
-SQL
-    echo "- csc-server/ 초기화 + stale Test-agent 프로세스 + DB 레코드 정리" >> "$report"
+    echo "- cmd_reset --keep-processes 실행 (Phase 1 Test-* 유지, 로그/DB/csc-server 초기화)" >> "$report"
     echo "" >> "$report"
 
     # 2) Build (옵션)
