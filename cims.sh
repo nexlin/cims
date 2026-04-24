@@ -121,7 +121,7 @@ start_csp() {
 start_cwrtc() {
     if is_running cwrtc; then warn "cwrtc 이미 실행 중 (pid=$(read_pid cwrtc))"; return 0; fi
     [[ ! -f "$DIST_DIR/cwrtc/bin/cwrtc" ]] && err "cwrtc 바이너리 없음 (make dist 실행 필요)" && return 1
-    local ws_port; ws_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/cwrtc/config/cwrtc.json')); print(d['Setup']['WsPort'])" 2>/dev/null || echo 8080)
+    local ws_port; ws_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/cwrtc/config/cwrtc.json')); print(d['Setup']['WsPort'])" 2>/dev/null || echo 8443)
     kill_stray "cwrtc/bin/cwrtc" "$ws_port"
     info "cwrtc (WebRTC 게이트웨이) 시작... (WsPort=$ws_port)"
     cd "$DIST_DIR/cwrtc"
@@ -169,7 +169,7 @@ start_console() {
     #   Test-Console    : build/dist/console/dist 정적 서빙, port 8080 (HTTPS)
     #   배포본 console  : Phase 2/3 csc-server/console/, port 80 (운영, 별도 흐름)
     # 기동 모드는 SRC_CONSOLE 존재 여부로 결정 (개발 트리면 Dev, 배포 트리면 Test).
-    # ※ Test-Console 8080 은 cwrtc(8080) 이전 (블록 A, 별도 세션) 전엔 충돌 가능.
+    # 8080 단독 사용 가능 (블록 A 에서 cwrtc 8080 → 8443 이전 완료).
     if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then
         kill_stray "vite.*cims-console" 3001 tcp
         info "Dev-Console (Admin Web UI, 소스 Vite dev) 시작... (port 3001 → Test-CSC 4421 proxy)"
@@ -193,7 +193,7 @@ start_console() {
         save_pid console $!
         sleep 2
         is_running console && ok "Test-Console 시작 완료 (pid=$(read_pid console), port=8080)" \
-            || { err "Test-Console 시작 실패 (cwrtc(8080) 충돌 가능 — 블록 A 후 재시도)"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
+            || { err "Test-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
     else
         err "console 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1
     fi
@@ -430,7 +430,7 @@ _svc_port_proto() {
     case "$1" in
         cmp)        echo "9000:udp" ;;
         csp)        echo "5060:udp" ;;
-        cwrtc)      echo "8080:tcp" ;;
+        cwrtc)      echo "8443:tcp" ;;
         csc)        echo "4421:tcp" ;;
         # console 은 모드별 포트 분기 — Dev(소스 트리) 3001 / Test(dist 전용) 8080.
         console)
@@ -629,8 +629,8 @@ cmd_reset() {
         for _round in 1 2; do
             local _killed=0
             # reset 은 검증 대상만 정리 — TB 포트(4419/3000/9902) 는 제외해 상시 동작 보장
-            # console: Dev(3001) + Test(8080, cwrtc 와 동일 포트 — 충돌 회피는 블록 A 에서 분리)
-            for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp"; do
+            # console: Dev(3001) + Test(8080) / cwrtc: 8443 (블록 A 이전, 구 8080)
+            for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp"; do
                 _port="${_rp%%:*}"; _proto="${_rp##*:}"
                 if [[ $_proto == "tcp" ]]; then
                     _pids=$(ss -Htlnp 2>/dev/null | awk -v pt=":$_port" '$4 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
@@ -820,7 +820,7 @@ cmd_preflight() {
     # 3) 포트 점유 확인
     # 검증 대상 포트 — 기동 전엔 "가용" 이어야 정상.
     # TB 포트(4419/3000/9902) 는 반대로 "점유" 되어 있어야 정상 (TB 3종 상시 동작 전제).
-    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp")
+    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp")
     local tb_ports=("4419:tcp:TB-CSC" "3000:tcp:TB-Console" "9902:tcp:TB-agent")
     local pp port proto line pid label
     info "[검증 대상] 기동 전엔 가용해야 함"

@@ -305,11 +305,11 @@ EOF
         CWRTC_WS_SCHEME="wss"
     fi
 
-    # cims-phone/.env.local  (Test-CSC 4421 admin + Test-MCPTT 4430)
+    # cims-phone/.env.local  (Test-CSC 4421 admin + Test-MCPTT 4430 + Test-CWRTC 8443)
     cat > "$SRC_DIR/cims-phone/.env.local" <<EOF
 VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
 VITE_MCPTT_TARGET=${CSC_SCHEME}://${CSC_HOST}:4430
-VITE_CWRTC_TARGET=${CWRTC_WS_SCHEME}://${CWRTC_IP}:8080
+VITE_CWRTC_TARGET=${CWRTC_WS_SCHEME}://${CWRTC_IP}:8443
 EOF
     ok "생성: $SRC_DIR/cims-phone/.env.local"
 fi

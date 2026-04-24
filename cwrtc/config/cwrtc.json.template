@@ -1,7 +1,7 @@
 {
     "Setup": {
         "LocalIp": "@CWRTC_IP@",
-        "WsPort": 8080,
+        "WsPort": 8443,
         "Wss": 1,
         "CertFile": "cert/csp.pem",
         "DocRoot": "html",

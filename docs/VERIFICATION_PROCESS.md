@@ -18,8 +18,8 @@
 | TB-agent | sync 9902 | TB-CSC 에 enroll, 자기 호스트에 검증 대상 모듈을 설치/기동/재설정. install_path: `/tmp/cims-tb-agent/` |
 | Test-CSC | 4421 | Phase 1 기능 검증용 직접 기동본 (build/dist/csc/) |
 | Dev-Console | 3001 | Phase 1 개발용 — `cims-console/` 소스 트리 Vite dev. Test-CSC 4421 로 `/api` proxy. |
-| Test-Console | 8080 | Phase 1 dist 검증용 — `build/dist/console/dist` 정적 서빙 (HTTPS). Test-CWRTC 8443 이전 후 동시 기동. |
-| Test-CWRTC | 8443 | Phase 1 WebRTC (구 8080 → 8443 HTTPS alt 이전 — 블록 A 별도 세션). |
+| Test-Console | 8080 | Phase 1 dist 검증용 — `build/dist/console/dist` 정적 서빙 (HTTPS). |
+| Test-CWRTC | 8443 | Phase 1 WebRTC WSS (2026-04-24 8080 → 8443 HTTPS alt 이전 완료). |
 | 배포 대상 CSC | 4420 | Phase 2~3 에서 TB-agent 로 배포되는 운영 포트 (별도 디렉토리) |
 | 배포 대상 console | 80 | Phase 2~3 운영 포트 (Test-Console 과 분리) |
 | Phone | 3002 | MCPTT UE Web (3000 에서 이전) |
@@ -69,7 +69,7 @@
 - [ ] `git status` clean, 브랜치/커밋 해시 기록
 - [ ] pending DB migration 적용 완료
 - [ ] `ens160` IP 확인
-- [ ] 포트 충돌 없음 (4419 TB-CSC, 4420 배포 csc, 4421 Test-CSC, 3000 TB-Console, 3001 Dev-Console, 3002 phone, 8080 cwrtc/Test-Console (블록 A 후 8443/8080 분리), 5060, 5061, 9000, 9001, **9902** TB-agent sync, 9903 Test-agent sync)
+- [ ] 포트 충돌 없음 (4419 TB-CSC, 4420 배포 csc, 4421 Test-CSC, 3000 TB-Console, 3001 Dev-Console, 3002 phone, 8080 Test-Console, 8443 Test-CWRTC, 5060, 5061, 9000, 9001, **9902** TB-agent sync, 9903 Test-agent sync)
 - [ ] TB 3종 동작 확인 (`cims.sh status` 에서 tb-csc / tb-console / tb-agent running)
 - [ ] TB-agent 가 TB-CSC 에 `approved` 상태로 enrolled (`cims_agent` 테이블)
 - [ ] mTLS 모드 검증이면 TB-CSC 의 `Agent.MtlsEnabled: true` 확인
@@ -127,7 +127,7 @@ build/dist/
 ├── cmp/           # Phase 1 직접 기동            (Test-CMP) — 유지
 ├── console/       # Phase 1 직접 기동            (Test-Console, 8080) — 유지
 ├── phone/         # Phase 1 직접 기동            (Test-Phone, 5060) — 유지 
-├── cwrtc/         # Phase 1 직접 기동            (Test-CWRTC, 5061) — 유지
+├── cwrtc/         # Phase 1 직접 기동            (Test-CWRTC, WSS 8443) — 유지
 ├── cspsim/        # Phase 1 직접 기동            (Test-CSPSIM, 9000) — 시험후 종료
 ├── csc-server/    # Phase 2: Test-agent & Test-csc를 가 csc(4420), console(80) 모듈 배포
 ├── csp-server/    # Phase 3: csc 가 agent + csp 모듈 배포
@@ -136,11 +136,11 @@ build/dist/
 ```
 
 > ※ 포트 체계 (설계):
-> - **Phase 1 (Test-\*, dev/debug 포트)**: Test-CSC **4421** / Dev-Console **3001** (소스 vite dev) / Test-Console **8080** (dist 정적 서빙) / Test-CWRTC **8443** (구 8080 → HTTPS alt 이전, 블록 A) — 모두 운영 포트와 분리되어 Phase 2 배포본(csc 4420 / console 80)과 동일 호스트에서 공존 가능.
+> - **Phase 1 (Test-\*, dev/debug 포트)**: Test-CSC **4421** / Dev-Console **3001** (소스 vite dev) / Test-Console **8080** (dist 정적 서빙) / Test-CWRTC **8443** (구 8080 → HTTPS alt 이전 완료) — 모두 운영 포트와 분리되어 Phase 2 배포본(csc 4420 / console 80)과 동일 호스트에서 공존 가능.
 > - **Phase 2 (csc-server 배포본, 운영 포트)**: csc 4420 / console 80.
 > - **공용/서비스 포트**: Test-CSP SIP UDP 5060·TCP 25061·TLS 5061, Test-CMP UDP 9000, Test-Phone SIP 5060 (UE client), Test-CSPSIM 9000 (시험 종료 후 소켓 해제).
 > - **Console 3분화 확정 (2026-04-24)**: Dev-Console 3001 / Test-Console 8080 / 배포본 console 80. `cims.sh start console` 이 SRC_CONSOLE 존재 여부로 자동 분기.
-> - **Test-CWRTC 8443 (블록 A, 후속 세션)**: cwrtc 가 현재 8080 을 점유 중 → Test-Console(8080) 실기동 전 HTTPS alt 8443 으로 이전 필요. 본 세션에서는 docs/명명만 반영, 실기동은 블록 A 완료 후.
+> - **Test-CWRTC 8443 이전 완료 (2026-04-24)**: 이전 8080 → 8443 (HTTPS alt). cwrtc.json.template `Setup.WsPort=8443`, configure.sh `VITE_CWRTC_TARGET=...:8443`, cims.sh `_svc_port_proto cwrtc 8443:tcp`, cims-phone vite proxy + nginx.conf 8443 갱신. 8080 은 Test-Console 단독 사용.
 
 **각 `<x>-server/` 내부 규약**
 
@@ -208,7 +208,7 @@ cims.sh start          # 인자 생략 = 전체 모듈
 개별 모듈만 재기동할 때는 `cims.sh start <name>` / `cims.sh restart <name>` 사용 (name ∈ cmp/csp/cwrtc/csc/console/phone).
 
 ### 1.5 Health Check
-- 리슨 포트: 4419 (TB-CSC), 4421 (Test-CSC), 3000 (TB-Console), 3001 (Dev-Console) 또는 8080 (Test-Console — cwrtc 8443 이전 후), 9000 (cmp), 5060 (csp UDP), 5061 (csp TCP)
+- 리슨 포트: 4419 (TB-CSC), 4421 (Test-CSC), 3000 (TB-Console), 3001 (Dev-Console) 또는 8080 (Test-Console), 8443 (Test-CWRTC), 9000 (cmp), 5060 (csp UDP), 5061 (csp TCP)
 - 로그 `ERROR`/`FATAL` 없음
 - TB-CSC → 검증 대상 CSC HEARTBEAT 정상
 

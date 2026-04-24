@@ -5,7 +5,7 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   const mcpttTarget = env.VITE_MCPTT_TARGET || 'https://127.0.0.1:4430'
-  const cwrtcTarget = env.VITE_CWRTC_TARGET || 'wss://127.0.0.1:8080'
+  const cwrtcTarget = env.VITE_CWRTC_TARGET || 'wss://127.0.0.1:8443'
   return {
     plugins: [react(), basicSsl()],
     server: {
