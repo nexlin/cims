@@ -598,7 +598,7 @@ cmd_clean() {
 cmd_reset() {
     local target="all"
     local extra_paths=()
-    local keep_processes=0
+    local keep_processes=0 keep_deployed=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --files) target="files"; shift ;;
@@ -606,6 +606,7 @@ cmd_reset() {
             --all|all) target="all"; shift ;;
             --path)  extra_paths+=("$2"); shift 2 ;;
             --keep-processes) keep_processes=1; shift ;;
+            --keep-deployed)  keep_deployed=1; shift ;;   # csc-server/ 등 배포본 보존
             -*) err "알 수 없는 reset 옵션: $1"; return 1 ;;
             *)  shift ;;
         esac
@@ -664,17 +665,21 @@ cmd_reset() {
         info "Agent 설치 경로 정리 (/tmp/cims-agent-*)..."
         rm -rf /tmp/cims-agent-* 2>/dev/null || true
 
-        info "Phase 2/3 배포 대상 정리 (build/dist/{csc,csp,cmp,sim}-server/, §0.10)..."
-        # Test-agent 프로세스부터 종료 (파일 잠금 회피)
-        pkill -f "cims_agent.py.*--name csc-server-local" 2>/dev/null || true
-        pkill -f "cims_agent.py.*--name csp-server-local" 2>/dev/null || true
-        pkill -f "cims_agent.py.*--name cmp-server-local" 2>/dev/null || true
-        pkill -f "cims_agent.py.*--name sim-server-local" 2>/dev/null || true
-        sleep 1
-        local _s
-        for _s in csc-server csp-server cmp-server sim-server; do
-            [[ -d "$DIST_DIR/$_s" ]] && rm -rf "$DIST_DIR/$_s"
-        done
+        if [[ $keep_deployed -eq 1 ]]; then
+            info "Phase 2/3 배포 대상 정리 — SKIP (--keep-deployed, csc/csp/cmp/sim-server 보존)"
+        else
+            info "Phase 2/3 배포 대상 정리 (build/dist/{csc,csp,cmp,sim}-server/, §0.10)..."
+            # Test-agent 프로세스부터 종료 (파일 잠금 회피)
+            pkill -f "cims_agent.py.*--name csc-server-local" 2>/dev/null || true
+            pkill -f "cims_agent.py.*--name csp-server-local" 2>/dev/null || true
+            pkill -f "cims_agent.py.*--name cmp-server-local" 2>/dev/null || true
+            pkill -f "cims_agent.py.*--name sim-server-local" 2>/dev/null || true
+            sleep 1
+            local _s
+            for _s in csc-server csp-server cmp-server sim-server; do
+                [[ -d "$DIST_DIR/$_s" ]] && rm -rf "$DIST_DIR/$_s"
+            done
+        fi
 
         info "발급 인증서 정리 (cert/agent_mtls/issued)..."
         rm -rf "$DIST_DIR/csc/cert/agent_mtls/issued" 2>/dev/null || true
@@ -1238,12 +1243,16 @@ PY
 _verify_phase2() {
     [[ -z "$SRC_CONSOLE" ]] && { err "verify phase2 는 소스 트리에서만 실행 가능"; return 1; }
 
-    local skip_build=0 skip_pkg=0 keep_agent=0
+    # 기본 동작 (2026-04-25): Phase 2 종료 시 배포본 csc (4445 overlay) 와 Test-agent 를 유지.
+    # 사용자가 Phase 3 진입 전에 UI 로 배포 상태를 직접 확인 가능. --stop-after 지정 시 기존처럼
+    # Stop job + Test-agent 종료 수행 (배포 메커니즘 cleanup 검증 전용).
+    local skip_build=0 skip_pkg=0 keep_agent=1 stop_after=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --skip-build) skip_build=1; shift ;;
-            --skip-pkg)   skip_pkg=1;   shift ;;
-            --keep-agent) keep_agent=1; shift ;;
+            --skip-build)  skip_build=1; shift ;;
+            --skip-pkg)    skip_pkg=1;   shift ;;
+            --keep-agent)  keep_agent=1; shift ;;   # 기본 true. 명시해도 동일 효과.
+            --stop-after)  stop_after=1; keep_agent=0; shift ;;  # 검증 후 전부 정리 (구 기본 동작)
             *) err "알 수 없는 옵션: $1"; return 1 ;;
         esac
     done
@@ -1599,38 +1608,46 @@ except: pass' 2>/dev/null)
     echo "- 판정: $([[ $health_ok -eq 1 ]] && echo OK || echo FAIL)" >> "$report"
     echo "" >> "$report"
 
-    # 15) Stop job (cleanup) — Phase 2 csc 프로세스 정리
-    echo "## 15. Stop job (cleanup)" >> "$report"
-    local stop_ok=0
-    if [[ -n $csc_did ]]; then
-        curl -sk -X POST "$base/api/v1/deployments/$csc_did/job" \
-            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
-            -d '{"job_type":"stop"}' >/dev/null 2>&1
-        for i in $(seq 1 10); do
-            sleep 1
-            if ! ss -tln 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)4445$'; then
-                stop_ok=1; break
+    # 15) Stop job + Test-agent 종료 — --stop-after 지정 시에만 수행
+    # 기본 (2026-04-25): 배포본 csc (4445) + Test-agent 를 유지한 채 Phase 2 종료.
+    #   → 사용자가 UI 로 배포 상태 확인 가능 + Phase 3 진입 조건 (csc 기동 상태) 충족.
+    # --stop-after: 검증 후 전부 정리 (구 기본 동작, 배포 메커니즘 cleanup 검증 전용)
+    local stop_ok=-1   # -1 = 수행 안 함 (skip), 0 = WARN, 1 = OK
+    if [[ $stop_after -eq 1 ]]; then
+        echo "## 15. Stop job (cleanup) — --stop-after" >> "$report"
+        stop_ok=0
+        if [[ -n $csc_did ]]; then
+            curl -sk -X POST "$base/api/v1/deployments/$csc_did/job" \
+                -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+                -d '{"job_type":"stop"}' >/dev/null 2>&1
+            for i in $(seq 1 10); do
+                sleep 1
+                if ! ss -tln 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)4445$'; then
+                    stop_ok=1; break
+                fi
+            done
+            if [[ $stop_ok -eq 1 ]]; then
+                echo "- [OK] csc port 4445 해제" >> "$report"
+            else
+                echo "- [WARN] csc port 4445 여전히 LISTEN (10s timeout)" >> "$report"
             fi
-        done
-        if [[ $stop_ok -eq 1 ]]; then
-            echo "- [OK] csc port 4445 해제" >> "$report"
-        else
-            echo "- [WARN] csc port 4445 여전히 LISTEN (10s timeout)" >> "$report"
         fi
-    fi
-    echo "" >> "$report"
+        echo "" >> "$report"
 
-    # 16) Test-agent 종료 (옵션)
-    if [[ $keep_agent -eq 0 ]]; then
+        # Test-agent 종료
         kill $ta_pid 2>/dev/null || true
         sleep 1
         echo "## 16. Test-agent 종료 (pid=$ta_pid)" >> "$report"
     else
-        echo "## 16. Test-agent 유지 (pid=$ta_pid, --keep-agent)" >> "$report"
+        echo "## 15. Stop — SKIPPED (기본: 배포본 기동 유지)" >> "$report"
+        echo "- csc 4445 overlay 기동 상태 유지 (cims.sh stop 으로 수동 정리 가능)" >> "$report"
+        echo "" >> "$report"
+        echo "## 16. Test-agent 유지 (pid=$ta_pid)" >> "$report"
+        echo "- sync 9903 상시 동작 — TB-CSC heartbeat 유지" >> "$report"
     fi
     echo "" >> "$report"
 
-    # 판정 (v2: install + overlay + start + health 모두 OK 여야 PASS)
+    # 판정 (v2: install + overlay + start + health 모두 OK 면 PASS. stop 은 --stop-after 일 때만 평가)
     local verdict="PASS"
     [[ $all_done -ne 1 || $verified_ok -ne 1 || $overlay_ok -ne 1 || $start_ok -ne 1 || $health_ok -ne 1 ]] && verdict="FAIL"
     {
@@ -1643,7 +1660,11 @@ except: pass' 2>/dev/null)
         echo "- Config overlay: $([[ $overlay_ok -eq 1 ]] && echo OK || echo FAIL)"
         echo "- CSC Start (4445 LISTEN): $([[ $start_ok -eq 1 ]] && echo OK || echo FAIL)"
         echo "- Health check: $([[ $health_ok -eq 1 ]] && echo OK || echo FAIL)"
-        echo "- Stop cleanup: $([[ $stop_ok -eq 1 ]] && echo OK || echo WARN)"
+        if [[ $stop_after -eq 1 ]]; then
+            echo "- Stop cleanup: $([[ $stop_ok -eq 1 ]] && echo OK || echo WARN)"
+        else
+            echo "- **배포본 기동 유지**: csc 4445 + Test-agent (--stop-after 시 정리)"
+        fi
         echo ""
         echo "- (console 은 install-only — start/health 는 운영 배포 설계 확정 후 추가)"
     } >> "$report"
@@ -1662,12 +1683,15 @@ except: pass' 2>/dev/null)
 _verify_phase3() {
     [[ -z "$SRC_CONSOLE" ]] && { err "verify phase3 은 소스 트리에서만 실행 가능"; return 1; }
 
-    local skip_build=0 skip_pkg=0 keep_agent=0
+    # 기본 동작 (2026-04-25): Phase 3 종료 시 배포본 csp/cmp + Test-agent 유지.
+    # 사용자가 UI/수동으로 추가 검증 가능. --stop-after 지정 시 Stop + agent 종료.
+    local skip_build=0 skip_pkg=0 keep_agent=1 stop_after=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --skip-build) skip_build=1; shift ;;
-            --skip-pkg)   skip_pkg=1;   shift ;;
-            --keep-agent) keep_agent=1; shift ;;
+            --skip-build)  skip_build=1; shift ;;
+            --skip-pkg)    skip_pkg=1;   shift ;;
+            --keep-agent)  keep_agent=1; shift ;;   # 기본 true
+            --stop-after)  stop_after=1; keep_agent=0; shift ;;
             *) err "알 수 없는 옵션: $1"; return 1 ;;
         esac
     done
@@ -1705,21 +1729,29 @@ _verify_phase3() {
         return 1
     fi
 
-    # 1) Phase 1 서버 모듈 중지 + 로그/DB/배포본 wipe (Console/TB 유지)
+    # 1) Phase 1 서버 모듈 중지 + 로그/DB wipe (Console/TB + Phase 2 csc-server 유지)
     echo "## 1. Phase 1 서버 모듈 중지 + Cleanup" >> "$report"
     local _m
     for _m in cmp csp cwrtc phone cspsim; do
         _stop_one "$_m" >/dev/null 2>&1 || true
     done
-    # --keep-processes: Console (Dev 3001 or Test 8080) + TB 3종 유지, 로그/DB/배포본 wipe
-    cmd_reset --all --keep-processes >/dev/null 2>&1 || true
+    # --keep-processes: Phase 1 Test-* (Console) + TB 3종 유지.
+    # --keep-deployed: csc-server/ (Phase 2 결과물) 보존. Phase 3 의 csp/cmp/sim-server 만 별도 wipe.
+    cmd_reset --all --keep-processes --keep-deployed >/dev/null 2>&1 || true
+
+    # Phase 3 전용 배포본만 재생성: csp/cmp/sim-server
     local _sdir
     for _sdir in csp-server cmp-server sim-server; do
+        pkill -f "cims_agent.py.*--name ${_sdir}-local" 2>/dev/null || true
+    done
+    sleep 1
+    for _sdir in csp-server cmp-server sim-server; do
+        [[ -d "$DIST_DIR/$_sdir" ]] && rm -rf "$DIST_DIR/$_sdir"
         mkdir -p "$DIST_DIR/$_sdir/agent/state"
     done
     echo "- Phase 1 cmp/csp/cwrtc/phone/cspsim 중지 완료" >> "$report"
-    echo "- cmd_reset --keep-processes 수행 (Console/TB 유지)" >> "$report"
-    echo "- 디렉토리 준비: csp-server/ cmp-server/ sim-server/" >> "$report"
+    echo "- cmd_reset --keep-processes --keep-deployed 수행" >> "$report"
+    echo "- csc-server (Phase 2 결과물) 보존 · csp/cmp/sim-server 재생성" >> "$report"
     echo "" >> "$report"
 
     # 2) Build (옵션)
@@ -2220,46 +2252,50 @@ PY
     } >> "$report"
     echo "" >> "$report"
 
-    # 16) Stop jobs
-    echo "## 16. Stop jobs (csp / cmp)" >> "$report"
-    for m in csp cmp; do
-        did=${dep_id_map[$m]:-}
-        [[ -z $did ]] && continue
-        curl -sk -X POST "$base/api/v1/deployments/$did/job" \
-            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
-            -d '{"job_type":"stop"}' >/dev/null 2>&1
-    done
-    local stop_ok=1
-    local gone
-    for m in csp cmp; do
-        port=${port_map[$m]}; proto=${proto_map[$m]}
-        gone=0
-        for i in $(seq 1 10); do
-            sleep 1
-            if [[ $proto == udp ]]; then
-                if ! ss -uln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then gone=1; break; fi
+    # 16) Stop jobs + Test-agent 종료 — --stop-after 지정 시에만 수행
+    local stop_ok=-1  # -1: skip, 0: WARN, 1: OK
+    if [[ $stop_after -eq 1 ]]; then
+        echo "## 16. Stop jobs (csp / cmp) — --stop-after" >> "$report"
+        for m in csp cmp; do
+            did=${dep_id_map[$m]:-}
+            [[ -z $did ]] && continue
+            curl -sk -X POST "$base/api/v1/deployments/$did/job" \
+                -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+                -d '{"job_type":"stop"}' >/dev/null 2>&1
+        done
+        stop_ok=1
+        local gone
+        for m in csp cmp; do
+            port=${port_map[$m]}; proto=${proto_map[$m]}
+            gone=0
+            for i in $(seq 1 10); do
+                sleep 1
+                if [[ $proto == udp ]]; then
+                    if ! ss -uln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then gone=1; break; fi
+                else
+                    if ! ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then gone=1; break; fi
+                fi
+            done
+            if [[ $gone -eq 1 ]]; then
+                echo "- [OK] $m: port $port/$proto 해제" >> "$report"
             else
-                if ! ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then gone=1; break; fi
+                echo "- [WARN] $m: port $port/$proto 여전히 LISTEN (10s)" >> "$report"
+                stop_ok=0
             fi
         done
-        if [[ $gone -eq 1 ]]; then
-            echo "- [OK] $m: port $port/$proto 해제" >> "$report"
-        else
-            echo "- [WARN] $m: port $port/$proto 여전히 LISTEN (10s)" >> "$report"
-            stop_ok=0
-        fi
-    done
-    echo "" >> "$report"
+        echo "" >> "$report"
 
-    # 17) Test-agent 종료 (옵션)
-    if [[ $keep_agent -eq 0 ]]; then
+        # Test-agent 종료
         for m in csp cmp sim; do
             [[ -n "${pid_map[$m]:-}" ]] && kill ${pid_map[$m]} 2>/dev/null || true
         done
         sleep 1
         echo "## 17. Test-agent 종료 (pids=${pid_map[csp]:-?},${pid_map[cmp]:-?},${pid_map[sim]:-?})" >> "$report"
     else
-        echo "## 17. Test-agent 유지 (--keep-agent)" >> "$report"
+        echo "## 16. Stop — SKIPPED (기본: 배포본 기동 유지)" >> "$report"
+        echo "- csp 5060/udp + cmp 9000/udp 기동 유지 (cims.sh stop 으로 수동 정리 가능)" >> "$report"
+        echo "" >> "$report"
+        echo "## 17. Test-agent 유지" >> "$report"
         echo "- pids: csp=${pid_map[csp]:-?} cmp=${pid_map[cmp]:-?} sim=${pid_map[sim]:-?}" >> "$report"
     fi
     echo "" >> "$report"
@@ -2279,7 +2315,11 @@ PY
         echo "- Start (csp 5060/udp, cmp 9000/udp): $([[ $start_ok -eq 1 ]] && echo OK || echo FAIL)"
         echo "- Health check: $([[ $health_ok -eq 1 ]] && echo OK || echo FAIL)"
         echo "- **4시나리오 PASS**: $scen_pass / $scen_total"
-        echo "- Stop cleanup: $([[ $stop_ok -eq 1 ]] && echo OK || echo WARN)"
+        if [[ $stop_after -eq 1 ]]; then
+            echo "- Stop cleanup: $([[ $stop_ok -eq 1 ]] && echo OK || echo WARN)"
+        else
+            echo "- **배포본 기동 유지**: csp 5060/udp + cmp 9000/udp + Test-agent (--stop-after 시 정리)"
+        fi
         echo ""
         echo "- sim 은 install-only 유지 (cspsim 은 cmd_sim 경유 단발 실행)"
         echo "- 시나리오 판정 기준: 각 시나리오 실행 후 녹취 파일(seg_*.rtp) 생성 수"
