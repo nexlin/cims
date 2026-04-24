@@ -266,10 +266,23 @@ Console 모듈관리에서 각 모듈 scalar overlay + collection 편집. agent 
 ### 3.3 자동 명령
 
 ```bash
-cims.sh verify phase3   # 예정 — 현재 (2026-04-24) 미구현
+cims.sh verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
 ```
 
-**2026-04-24 현재**: `_verify_phase3` 함수, Console Phase 3 UI, `build/dist/{csp,cmp,sim}-server/{agent,<모듈>,config}/` 트리 모두 미구현. 본 절차는 Console + 수동으로 수행. Phase 2 v2 안정화 후 자동화 착수.
+**현재 범위 (v2, 2026-04-24)**:
+- Phase 1 서버 모듈 중지 (cmp/csp/cwrtc/phone/cspsim) — Console·TB 유지
+- `cmd_reset --keep-processes` 로 로그/DB/배포본 wipe
+- 3개 Test-agent (csp/cmp/sim-server-local, sync 9904·9905·9906) enroll
+- csp/cmp/cspsim tarball 업로드 + deployment 생성
+- Install job 폴링 + 설치 파일 검증 (meta.json + config/)
+- **csp·cmp**: Start job (포트 LISTEN 대기) → Health check → Stop job
+- sim: install-only (cspsim 은 단발 실행이라 `_start_one` case 없음 — 4시나리오 실행 시 `cmd_sim` 별도 호출)
+
+**v3 예정**: 4시나리오 (§0.9) 자동 실행 — cspsim 으로 REGISTER + VoLTE/PTT 통화 트리거 + 녹취/Flow 검증.
+
+**Console Phase 3 UI**: 별도 작업. 사용자가 배포본 기동 후 Console 에서 모듈관리 + 4시나리오 실행하는 워크플로우 지원.
+
+**주의 (함정)**: `--skip-pkg` 사용 시 tarball 속 config (csp.json LocalIp 등) 가 stale 하면 start 실패 (UdpListen error). ens160 IP 변경 후에는 configure + pkg 재실행 필수.
 
 ### 3.4 이슈 처리
 
@@ -314,12 +327,11 @@ cims.sh configure --local-ip <ens160_ip>
 cims.sh pkg --no-bump
 cims.sh verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
 
-# Phase 3 — 배포 이후 검증 (현재 수동)
-# (1) 서버 모듈 중지: cims.sh stop cmp csp cwrtc phone
-# (2) Console 에서 csp/cmp/sim 배포 체인 + 설정
-# (3) cims.sh reset
-# (4) Console 에서 배포본 기동
-# (5) Console 80 에서 §0.9 4시나리오 + 보완 사항 실행
+# Phase 3 — 배포 이후 검증
+cims.sh verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
+                                 # v2 (2026-04-24): install + csp/cmp start/health/stop 자동
+                                 # v3 예정: 4시나리오 (VoLTE/PTT 음성·영상) 자동 실행
+# 수동 보강: Console 에서 4시나리오 실행 + 보완 사항 직접 확인
 ```
 
 ## 부록 C. 문서 관리
