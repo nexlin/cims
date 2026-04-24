@@ -269,18 +269,24 @@ Console 모듈관리에서 각 모듈 scalar overlay + collection 편집. agent 
 cims.sh verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
 ```
 
-**현재 범위 (v2, 2026-04-24)**:
+**현재 범위 (v3, 2026-04-24)**:
 - Phase 1 서버 모듈 중지 (cmp/csp/cwrtc/phone/cspsim) — Console·TB 유지
 - `cmd_reset --keep-processes` 로 로그/DB/배포본 wipe
 - 3개 Test-agent (csp/cmp/sim-server-local, sync 9904·9905·9906) enroll
 - csp/cmp/cspsim tarball 업로드 + deployment 생성
 - Install job 폴링 + 설치 파일 검증 (meta.json + config/)
-- **csp·cmp**: Start job (포트 LISTEN 대기) → Health check → Stop job
-- sim: install-only (cspsim 은 단발 실행이라 `_start_one` case 없음 — 4시나리오 실행 시 `cmd_sim` 별도 호출)
+- **csp·cmp**: Start job (포트 LISTEN 대기) → Health check
+- **배포본 csp jsonlDir 에 access_services.jsonl 시드 + SIGUSR1 reload**
+- **4시나리오 실행 (cspsim → 배포본 csp, §0.9)**:
+  - 14.1 VoLTE 음성 2자 통화 (-no_video)
+  - 14.2 VoLTE 영상 2자 통화 (기본 video 포함)
+  - 14.3 PTT 그룹 음성 통화 5인 (-no_video)
+  - 14.4 PTT 그룹 영상 통화 5인
+  - 판정: 각 시나리오 실행 후 `seg_*.rtp` 녹취 파일 +1 이상 생성 → PASS
+- 시나리오 후 csp·cmp Stop + Test-agent 종료
+- sim: install-only (cspsim 은 4시나리오에서 cmd_sim 경유 단발 실행)
 
-**v3 예정**: 4시나리오 (§0.9) 자동 실행 — cspsim 으로 REGISTER + VoLTE/PTT 통화 트리거 + 녹취/Flow 검증.
-
-**Console Phase 3 UI**: 별도 작업. 사용자가 배포본 기동 후 Console 에서 모듈관리 + 4시나리오 실행하는 워크플로우 지원.
+**Console Phase 3 UI**: 별도 작업. 사용자가 배포본 기동 후 Console 에서 모듈관리 + 4시나리오 실행하는 워크플로우 지원 (현재는 `verify phase3` CLI 자동화로 대체).
 
 **주의 (함정)**: `--skip-pkg` 사용 시 tarball 속 config (csp.json LocalIp 등) 가 stale 하면 start 실패 (UdpListen error). ens160 IP 변경 후에는 configure + pkg 재실행 필수.
 
@@ -329,9 +335,9 @@ cims.sh verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
 
 # Phase 3 — 배포 이후 검증
 cims.sh verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
-                                 # v2 (2026-04-24): install + csp/cmp start/health/stop 자동
-                                 # v3 예정: 4시나리오 (VoLTE/PTT 음성·영상) 자동 실행
-# 수동 보강: Console 에서 4시나리오 실행 + 보완 사항 직접 확인
+                                 # v3 (2026-04-24): install + csp/cmp start/health/stop +
+                                 # 4시나리오 자동 실행 (VoLTE 음성/영상 + PTT 그룹 음성/영상)
+                                 # 판정: 각 시나리오 seg_*.rtp 녹취 +1 이상 생성 → PASS
 ```
 
 ## 부록 C. 문서 관리
