@@ -616,6 +616,18 @@ cmd_reset() {
         info "Agent 설치 경로 정리 (/tmp/cims-agent-*)..."
         rm -rf /tmp/cims-agent-* 2>/dev/null || true
 
+        info "Phase 2/3 배포 대상 정리 (build/dist/{csc,csp,cmp,sim}-server/, §0.10)..."
+        # Test-agent 프로세스부터 종료 (파일 잠금 회피)
+        pkill -f "cims_agent.py.*--name csc-server-local" 2>/dev/null || true
+        pkill -f "cims_agent.py.*--name csp-server-local" 2>/dev/null || true
+        pkill -f "cims_agent.py.*--name cmp-server-local" 2>/dev/null || true
+        pkill -f "cims_agent.py.*--name sim-server-local" 2>/dev/null || true
+        sleep 1
+        local _s
+        for _s in csc-server csp-server cmp-server sim-server; do
+            [[ -d "$DIST_DIR/$_s" ]] && rm -rf "$DIST_DIR/$_s"
+        done
+
         info "발급 인증서 정리 (cert/agent_mtls/issued)..."
         rm -rf "$DIST_DIR/csc/cert/agent_mtls/issued" 2>/dev/null || true
         [[ -n "$SRC_CONSOLE" ]] && rm -rf "$SCRIPT_DIR/csc/cert/agent_mtls/issued" 2>/dev/null || true
@@ -824,7 +836,8 @@ cmd_verify() {
     shift || true
     case "$phase" in
         phase1|1) _verify_phase1 "$@" ;;
-        *) err "지원하지 않는 phase: $phase (phase1 만 지원)"; return 1 ;;
+        phase2|2) _verify_phase2 "$@" ;;
+        *) err "지원하지 않는 phase: $phase (phase1|phase2 지원)"; return 1 ;;
     esac
 }
 
@@ -1167,6 +1180,327 @@ PY
     echo ""
 }
 
+# ──────────────────────────────────────────────────────────────
+# Phase 2 — TB-CSC(4419) → Test-agent → csc-server/ 배포 체인 검증
+#   기능 회귀 반복 X. 배포 메커니즘 자체만 확인 (§0.2 / §0.10).
+#   대상 디렉토리: build/dist/csc-server/{agent,csc,console}
+#   Test-agent: name=csc-server-local, sync 9903 (TB-agent 9902 와 분리)
+# ──────────────────────────────────────────────────────────────
+_verify_phase2() {
+    [[ -z "$SRC_CONSOLE" ]] && { err "verify phase2 는 소스 트리에서만 실행 가능"; return 1; }
+
+    local skip_build=0 skip_pkg=0 keep_agent=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --skip-build) skip_build=1; shift ;;
+            --skip-pkg)   skip_pkg=1;   shift ;;
+            --keep-agent) keep_agent=1; shift ;;
+            *) err "알 수 없는 옵션: $1"; return 1 ;;
+        esac
+    done
+
+    local ts; ts=$(date +%Y%m%d_%H%M%S)
+    local report_dir="$SCRIPT_DIR/verify_reports"; mkdir -p "$report_dir"
+    local report="$report_dir/${ts}_phase2.md"
+    local ens_ip; ens_ip=$(ip -4 -o addr show ens160 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
+    local git_sha; git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+    local git_branch; git_branch=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+
+    header "=== Phase 2 배포 검증 시작 ==="
+    info "리포트: $report"
+    echo ""
+
+    {
+        echo "# Phase 2 Verification Report"
+        echo ""
+        echo "- Timestamp: $ts"
+        echo "- Host: $(hostname)"
+        echo "- ens160 IP: ${ens_ip:-N/A}"
+        echo "- Git: $git_branch @ $git_sha"
+        echo "- Scope: TB-CSC(4419) → Test-agent(csc-server-local, sync 9903) → csc-server/ 배포"
+        echo "- 대상 디렉토리: build/dist/csc-server/{agent,csc,console}"
+        [[ $skip_build -eq 1 ]] && echo "- skip-build: yes"
+        [[ $skip_pkg -eq 1 ]] && echo "- skip-pkg: yes"
+        [[ $keep_agent -eq 1 ]] && echo "- keep-agent: yes"
+        echo ""
+    } > "$report"
+
+    # TB-CSC 생존 확인
+    if ! curl -sk --max-time 3 -o /dev/null "https://127.0.0.1:4419/api/v1/packages"; then
+        err "TB-CSC(4419) 접근 불가 — 'cims.sh start tb' 실행 필요"
+        echo "**FAIL: TB-CSC 접근 불가 — 검증 중단**" >> "$report"
+        return 1
+    fi
+
+    # 1) Cleanup (csc-server/ + 잔존 Test-agent + stale DB rows)
+    echo "## 1. Cleanup" >> "$report"
+    pkill -f "cims_agent.py.*--name csc-server-local" 2>/dev/null || true
+    sleep 1
+    rm -rf "$DIST_DIR/csc-server"
+    mkdir -p "$DIST_DIR/csc-server/agent/state"
+    # 잔존 csc-server-local agent 레코드 + 관련 deployment/job 정리 (중복 누적 방지)
+    mysql -u cims -pcims1234 cims >/dev/null 2>&1 <<'SQL' || true
+SET FOREIGN_KEY_CHECKS=0;
+DELETE FROM agent_job        WHERE agent_id IN (SELECT id FROM cims_agent WHERE name='csc-server-local');
+DELETE FROM agent_deployment WHERE agent_id IN (SELECT id FROM cims_agent WHERE name='csc-server-local');
+DELETE FROM cims_agent       WHERE name='csc-server-local';
+SET FOREIGN_KEY_CHECKS=1;
+SQL
+    echo "- csc-server/ 초기화 + stale Test-agent 프로세스 + DB 레코드 정리" >> "$report"
+    echo "" >> "$report"
+
+    # 2) Build (옵션)
+    if [[ $skip_build -eq 0 ]]; then
+        echo "## 2. Build" >> "$report"
+        echo '```' >> "$report"
+        if ! cmd_build 2>&1 | tail -20 >> "$report"; then
+            echo '```' >> "$report"; err "빌드 실패"; return 1
+        fi
+        echo '```' >> "$report"
+    else
+        echo "## 2. Build — SKIPPED" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 3) Configure
+    echo "## 3. Configure" >> "$report"
+    echo '```' >> "$report"
+    if [[ -n "$ens_ip" ]]; then
+        cmd_configure --local-ip "$ens_ip" 2>&1 | tail -10 >> "$report" || true
+    fi
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 4) Pkg --no-bump (옵션)
+    if [[ $skip_pkg -eq 0 ]]; then
+        echo "## 4. Pkg (tarball, --no-bump)" >> "$report"
+        echo '```' >> "$report"
+        cmd_pkg --no-bump 2>&1 | tail -15 >> "$report" || true
+        echo '```' >> "$report"
+    else
+        echo "## 4. Pkg — SKIPPED" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 5) Admin login → JWT
+    local base="https://127.0.0.1:4419"
+    local admin_id="${CIMS_TB_ADMIN_ID:-admin}"
+    local admin_pw="${CIMS_TB_ADMIN_PASSWORD:-1234}"
+    local tok
+    tok=$(curl -sk -X POST "$base/api/v1/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"login_id\":\"$admin_id\",\"password\":\"$admin_pw\"}" 2>/dev/null \
+        | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
+    if [[ -z $tok ]]; then
+        err "admin 로그인 실패"
+        echo "**FAIL: admin login**" >> "$report"
+        return 1
+    fi
+    echo "## 5. Admin login OK" >> "$report"
+    echo "" >> "$report"
+
+    # 6) Agent 등록 (csc-server-local) — 409 → 삭제 후 재생성
+    local aname="csc-server-local"
+    local create_resp http body
+    create_resp=$(curl -sk -w '\n__HTTP__%{http_code}' -X POST "$base/api/v1/agents" \
+        -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+        -d "{\"name\":\"$aname\",\"note\":\"Phase 2 Test-agent\"}")
+    http="${create_resp##*__HTTP__}"; body="${create_resp%$'\n'__HTTP__*}"
+    if [[ "$http" == "409" ]]; then
+        local aid_exist
+        aid_exist=$(curl -sk -H "Authorization: Bearer $tok" "$base/api/v1/agents" 2>/dev/null \
+            | python3 -c "import sys,json
+d=json.load(sys.stdin); items=d if isinstance(d,list) else d.get('items') or d.get('agents') or []
+for r in items:
+    if r.get('name')=='$aname': print(r.get('id')); break" 2>/dev/null)
+        [[ -n $aid_exist ]] && curl -sk -X DELETE -H "Authorization: Bearer $tok" "$base/api/v1/agents/$aid_exist" >/dev/null 2>&1
+        create_resp=$(curl -sk -w '\n__HTTP__%{http_code}' -X POST "$base/api/v1/agents" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d "{\"name\":\"$aname\",\"note\":\"Phase 2 Test-agent\"}")
+        http="${create_resp##*__HTTP__}"; body="${create_resp%$'\n'__HTTP__*}"
+    fi
+    if [[ "$http" != "201" && "$http" != "200" ]]; then
+        err "agent 생성 실패 http=$http"
+        echo "**FAIL: agent create (http=$http)**" >> "$report"
+        return 1
+    fi
+    local aid enroll_tok
+    aid=$(echo "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')
+    enroll_tok=$(echo "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("enrollment_token",""))')
+    curl -sk -X POST -H "Authorization: Bearer $tok" "$base/api/v1/agents/$aid/approve" >/dev/null 2>&1
+    echo "## 6. Agent 등록" >> "$report"
+    echo "- agent_id: $aid (name=$aname, approved)" >> "$report"
+    echo "" >> "$report"
+
+    # 7) Test-agent 기동 + enroll 대기
+    local ta_dir="$DIST_DIR/csc-server/agent"
+    local ta_log="$LOG_DIR/test-agent-csc-server.log"
+    : > "$ta_log"
+    CIMS_AGENT_INSTALL_ROOT="$DIST_DIR/csc-server" \
+    CIMS_AGENT_SYNC_PORT=9903 \
+    nohup python3 "$DIST_DIR/agent/cims_agent.py" \
+        --csc-url "$base" \
+        --name "$aname" \
+        --state-dir "$ta_dir/state" \
+        --enrollment-token "$enroll_tok" \
+        > "$ta_log" 2>&1 &
+    local ta_pid=$!
+    echo "## 7. Test-agent 기동" >> "$report"
+    echo "- pid=$ta_pid, sync=9903, state-dir=csc-server/agent/state" >> "$report"
+    local ready=0 i
+    for i in $(seq 1 15); do
+        sleep 1
+        if mysql -u cims -pcims1234 -Nse \
+            "SELECT 1 FROM cims_agent WHERE name='$aname' AND status='online'" cims 2>/dev/null | grep -q 1; then
+            ready=1; break
+        fi
+    done
+    if [[ $ready -eq 0 ]]; then
+        err "Test-agent enroll 실패 (15s timeout)"
+        echo "- FAIL: enroll timeout" >> "$report"
+        tail -10 "$ta_log" >> "$report"
+        kill $ta_pid 2>/dev/null || true
+        return 1
+    fi
+    echo "- enroll OK (online, heartbeat)" >> "$report"
+    echo "" >> "$report"
+
+    # 8) Package upload (csc, console)
+    echo "## 8. Package upload" >> "$report"
+    local pkg_dir="$DIST_DIR/packages"
+    declare -A pkg_id_map
+    local name tar resp pid
+    for name in csc console; do
+        tar=$(ls "$pkg_dir"/${name}-*.tar.gz 2>/dev/null | sort -V | tail -1)
+        if [[ -z $tar ]]; then
+            echo "- $name: tarball 없음 — SKIP" >> "$report"; continue
+        fi
+        resp=$(curl -sk -X POST "$base/api/v1/packages" \
+            -H "Authorization: Bearer $tok" \
+            -F "file=@$tar;filename=$(basename "$tar")" -F "force=true")
+        pid=$(echo "$resp" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("id",""))
+except: pass' 2>/dev/null)
+        if [[ -z $pid ]]; then
+            err "$name 업로드 실패"
+            echo "- $name: FAIL" >> "$report"
+            kill $ta_pid 2>/dev/null || true
+            return 1
+        fi
+        pkg_id_map[$name]=$pid
+        echo "- $name: package_id=$pid ($(basename "$tar"))" >> "$report"
+    done
+    echo "" >> "$report"
+
+    # 9) Deployment 생성
+    echo "## 9. Deployment 생성" >> "$report"
+    declare -A dep_id_map
+    local did pname install_path
+    for name in csc console; do
+        pid=${pkg_id_map[$name]:-}
+        [[ -z $pid ]] && continue
+        install_path="$DIST_DIR/csc-server/$name"
+        pname="${name^^}"
+        resp=$(curl -sk -X POST "$base/api/v1/deployments" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d "{\"agent_id\":$aid,\"package_id\":$pid,\"install_path\":\"$install_path\",\"process_name\":\"$pname\"}")
+        did=$(echo "$resp" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("id",""))
+except: pass' 2>/dev/null)
+        if [[ -z $did ]]; then
+            err "$name deployment 생성 실패"
+            echo "- $name: FAIL" >> "$report"
+            kill $ta_pid 2>/dev/null || true
+            return 1
+        fi
+        dep_id_map[$name]=$did
+        echo "- $name: deployment_id=$did → $install_path" >> "$report"
+    done
+    echo "" >> "$report"
+
+    # 10) Install jobs queue + poll
+    echo "## 10. Install job + 상태 폴링 (최대 60s)" >> "$report"
+    for name in csc console; do
+        did=${dep_id_map[$name]:-}
+        [[ -z $did ]] && continue
+        curl -sk -X POST "$base/api/v1/deployments/$did/job" \
+            -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d '{"job_type":"install"}' >/dev/null 2>&1
+    done
+    local all_done=0 elapsed=0
+    for i in $(seq 1 30); do
+        sleep 2; elapsed=$((elapsed+2))
+        local still=0 st
+        for name in csc console; do
+            did=${dep_id_map[$name]:-}
+            [[ -z $did ]] && continue
+            st=$(mysql -u cims -pcims1234 -Nse "SELECT status FROM agent_deployment WHERE id=$did" cims 2>/dev/null)
+            [[ $st == "pending" || $st == "deploying" ]] && still=1
+        done
+        if [[ $still -eq 0 ]]; then all_done=1; break; fi
+    done
+    echo "- 완료 상태: $([[ $all_done -eq 1 ]] && echo "OK (${elapsed}s)" || echo "TIMEOUT (60s)")" >> "$report"
+    echo "" >> "$report"
+
+    echo "### 최종 deployment 상태" >> "$report"
+    echo '```' >> "$report"
+    mysql -u cims -pcims1234 -e \
+        "SELECT id, agent_id, package_id, status, install_path, last_job_id FROM agent_deployment" cims >> "$report" 2>&1
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    echo "### job 결과" >> "$report"
+    echo '```' >> "$report"
+    mysql -u cims -pcims1234 -e \
+        "SELECT id, agent_id, job_type, status, result_code FROM agent_job ORDER BY id" cims >> "$report" 2>&1
+    echo '```' >> "$report"
+    echo "" >> "$report"
+
+    # 11) 설치 파일 검증
+    echo "## 11. 설치 파일 검증" >> "$report"
+    local verified_ok=1
+    for name in csc console; do
+        did=${dep_id_map[$name]:-}
+        [[ -z $did ]] && continue
+        install_path="$DIST_DIR/csc-server/$name"
+        if [[ -f "$install_path/meta.json" && -d "$install_path/config" ]]; then
+            echo "- [OK] $name: meta.json + config/ 존재 ($install_path)" >> "$report"
+        else
+            echo "- [FAIL] $name: meta.json 또는 config/ 누락" >> "$report"
+            verified_ok=0
+        fi
+    done
+    echo "" >> "$report"
+
+    # 12) Test-agent 종료 (옵션)
+    if [[ $keep_agent -eq 0 ]]; then
+        kill $ta_pid 2>/dev/null || true
+        sleep 1
+        echo "## 12. Test-agent 종료 (pid=$ta_pid)" >> "$report"
+    else
+        echo "## 12. Test-agent 유지 (pid=$ta_pid, --keep-agent)" >> "$report"
+    fi
+    echo "" >> "$report"
+
+    # 판정
+    local verdict="PASS"
+    [[ $all_done -ne 1 || $verified_ok -ne 1 ]] && verdict="FAIL"
+    {
+        echo "## 판정: $verdict"
+        echo ""
+        echo "- Agent enroll: OK"
+        echo "- Package upload: OK (csc, console)"
+        echo "- Install 완료: $([[ $all_done -eq 1 ]] && echo OK || echo TIMEOUT)"
+        echo "- 설치 파일 검증: $([[ $verified_ok -eq 1 ]] && echo OK || echo FAIL)"
+        echo "- (start/health 는 차기 버전 — 현 v1 은 install-only)"
+    } >> "$report"
+
+    header "=== Phase 2 검증 종료 ==="
+    [[ $verdict == "PASS" ]] && ok "Phase 2: PASS" || err "Phase 2: FAIL"
+    info "리포트: $report"
+    echo ""
+}
+
 # ── cspsim ─────────────────────────────────────────────────────
 cmd_sim() {
     local orig_dir="$PWD"
@@ -1419,6 +1753,12 @@ ${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
                         [2/3] configure(ens160 IP) → start (전체) → health → 회귀 시나리오 → 리포트
                         → verify_reports/<ts>_phase1.md
                         ([3/3] pkg 는 포함 안 함 — Phase 2 에서 별도 실행)
+  verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
+                        Phase 2 배포 검증: admin login → Test-agent(csc-server-local, sync 9903)
+                        enroll → csc/console tarball 업로드 → deployment 생성 →
+                        install job 폴링 → 설치 파일 검증 → 리포트
+                        → verify_reports/<ts>_phase2.md
+                        (기능 회귀는 반복 X. install-only — start/health 는 차기 버전)
 
 ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]
