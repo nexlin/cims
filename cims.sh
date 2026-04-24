@@ -164,32 +164,33 @@ print(p)" 2>/dev/null || echo 4420)
 
 start_console() {
     if is_running console; then warn "console 이미 실행 중 (pid=$(read_pid console))"; return 0; fi
-    # 포트 3001 점유 프로세스(serve 좀비 포함) 먼저 정리
-    kill_stray "serve dist -l 3001" 3001 tcp
+    # Test-Console (Phase 1): port 3011 — 운영 배포(Phase 2)의 console:80 과 분리.
+    # (docs §0.10 footnote 의 8080 은 cwrtc(8080) 와 충돌하여 3011 로 변경)
+    kill_stray "serve dist -l 3011" 3011 tcp
     if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then
         # 소스 모드: Vite 개발 서버 (API proxy 포함)
-        kill_stray "vite.*cims-console"
-        info "console (Admin Web UI) 개발 서버 시작... (port 3001)"
+        kill_stray "vite.*cims-console" "" tcp
+        info "Test-Console (Admin Web UI) 개발 서버 시작... (port 3011)"
         cd "$SRC_CONSOLE"
-        npm run dev >> "$LOG_DIR/console.log" 2>&1 &
+        npm run dev -- --port 3011 --host >> "$LOG_DIR/console.log" 2>&1 &
         save_pid console $!
     elif [[ -d "$DIST_DIR/console/dist" ]]; then
         # dist 전용 모드: 정적 서빙 (proxy 없음 — nginx 필요)
-        info "console (Admin Web UI) 정적 서빙 시작... (port 3001, HTTPS)"
+        info "Test-Console (Admin Web UI) 정적 서빙 시작... (port 3011, HTTPS)"
         cd "$DIST_DIR/console"
         _SSL_KEY="$DIST_DIR/csc/cert/server.key"
         _SSL_CERT="$DIST_DIR/csc/cert/server.crt"
         if [[ -f "$_SSL_KEY" && -f "$_SSL_CERT" ]]; then
-            npx --yes serve dist -l 3001 --ssl-cert "$_SSL_CERT" --ssl-key "$_SSL_KEY" >> "$LOG_DIR/console.log" 2>&1 &
+            npx --yes serve dist -l 3011 --ssl-cert "$_SSL_CERT" --ssl-key "$_SSL_KEY" >> "$LOG_DIR/console.log" 2>&1 &
         else
-            npx --yes serve dist -l 3001 >> "$LOG_DIR/console.log" 2>&1 &
+            npx --yes serve dist -l 3011 >> "$LOG_DIR/console.log" 2>&1 &
         fi
         save_pid console $!
     else
         err "console 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1
     fi
     sleep 2
-    is_running console && ok "console 시작 완료 (pid=$(read_pid console))" || { err "console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
+    is_running console && ok "Test-Console 시작 완료 (pid=$(read_pid console), port=3011)" || { err "Test-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
 }
 
 start_phone() {
@@ -425,7 +426,7 @@ _svc_port_proto() {
         csp)        echo "5060:udp" ;;
         cwrtc)      echo "8080:tcp" ;;
         csc)        echo "4420:tcp" ;;
-        console)    echo "3001:tcp" ;;
+        console)    echo "3011:tcp" ;;
         phone)      echo "3002:tcp" ;;
         tb-csc)     echo "4419:tcp" ;;
         tb-console) echo "3000:tcp" ;;
@@ -615,7 +616,7 @@ cmd_reset() {
     for _round in 1 2; do
         local _killed=0
         # reset 은 검증 대상만 정리 — TB 포트(4419/3000/9902) 는 제외해 상시 동작 보장
-        for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "3001:tcp" "3002:tcp" "8080:tcp"; do
+        for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3011:tcp" "3002:tcp" "8080:tcp"; do
             _port="${_rp%%:*}"; _proto="${_rp##*:}"
             if [[ $_proto == "tcp" ]]; then
                 _pids=$(ss -Htlnp 2>/dev/null | awk -v pt=":$_port" '$4 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
@@ -804,7 +805,7 @@ cmd_preflight() {
     # 3) 포트 점유 확인
     # 검증 대상 포트 — 기동 전엔 "가용" 이어야 정상.
     # TB 포트(4419/3000/9902) 는 반대로 "점유" 되어 있어야 정상 (TB 3종 상시 동작 전제).
-    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "3001:tcp" "3002:tcp" "8080:tcp")
+    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3011:tcp" "3002:tcp" "8080:tcp")
     local tb_ports=("4419:tcp:TB-CSC" "3000:tcp:TB-Console" "9902:tcp:TB-agent")
     local pp port proto line pid label
     info "[검증 대상] 기동 전엔 가용해야 함"
@@ -2034,7 +2035,13 @@ cmd_sync() {
         else
             cp -r "$SCRIPT_DIR/csc/src/." "$DIST_DIR/csc/src/"
         fi
-        ok "csc/src ← $SCRIPT_DIR/csc/src"
+        # config_template.json 도 동기화 (apply_config_template 가 읽는 파일)
+        if [[ -f "$SCRIPT_DIR/csc/config/config_template.json" ]]; then
+            mkdir -p "$DIST_DIR/csc/config"
+            cp -f "$SCRIPT_DIR/csc/config/config_template.json" \
+                  "$DIST_DIR/csc/config/config_template.json"
+        fi
+        ok "csc/src (+ config_template.json) ← $SCRIPT_DIR/csc"
         n_changed=$((n_changed+1))
     fi
 

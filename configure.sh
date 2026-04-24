@@ -240,7 +240,8 @@ apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIS
 
 # ── TB-CSC (4419) overlay: csc.json 을 기반으로 포트/경로만 치환 ─
 #   TB 는 검증 Phase 진행 중 UI 세션 유지용 임시 기동 모듈.
-#   DB/시크릿/도메인은 검증 대상 CSC(4420)와 공유. 포트와 파일 경로만 분리한다.
+#   DB/시크릿/도메인은 Test-CSC(4421, Phase 1 직접 기동본) 와 공유.
+#   포트와 파일 경로만 분리한다.
 apply_csc_tb_overlay() {
     local base="$1"    # csc.json
     local dst="$2"     # csc-tb.json
@@ -256,10 +257,13 @@ c.setdefault('Log', {})['File'] = 'log/csc_tb.log'
 c.setdefault('Packages', {})['Dir'] = 'packages_tb'
 c['Packages']['BackupDir'] = 'packages_tb_trash'
 c['ConfigCacheDir'] = 'cache_tb'
-# IdMs.KmsClientReqUrl 의 4420 → 4419 일관성 유지
+# IdMs.KmsClientReqUrl 을 TB-CSC(4419) 로. base csc.json 의 deploy_value
+# 는 운영 포트(4420) 를 유지하므로 여기서 4420/4421 둘 다 4419 로 치환.
 idms = c.setdefault('IdMs', {})
 if isinstance(idms.get('KmsClientReqUrl'), str):
-    idms['KmsClientReqUrl'] = idms['KmsClientReqUrl'].replace(':4420/', ':4419/')
+    idms['KmsClientReqUrl'] = (idms['KmsClientReqUrl']
+                               .replace(':4420/', ':4419/')
+                               .replace(':4421/', ':4419/'))
 with open(DST, 'w') as f:
     json.dump(c, f, indent=4, ensure_ascii=False)
 PY
@@ -283,9 +287,9 @@ if [[ -n "$SRC_DIR" ]]; then
         CSC_SCHEME="http"
     fi
 
-    # cims-console/.env.local  (Vite dev proxy 대상 — 검증 대상 CSC 4420)
+    # cims-console/.env.local  (Vite dev proxy 대상 — Test-CSC 4421, Phase 1)
     cat > "$SRC_DIR/cims-console/.env.local" <<EOF
-VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4420
+VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
 EOF
     ok "생성: $SRC_DIR/cims-console/.env.local"
 
@@ -301,9 +305,9 @@ EOF
         CWRTC_WS_SCHEME="wss"
     fi
 
-    # cims-phone/.env.local
+    # cims-phone/.env.local  (Test-CSC 4421 admin + Test-MCPTT 4430)
     cat > "$SRC_DIR/cims-phone/.env.local" <<EOF
-VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4420
+VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
 VITE_MCPTT_TARGET=${CSC_SCHEME}://${CSC_HOST}:4430
 VITE_CWRTC_TARGET=${CWRTC_WS_SCHEME}://${CWRTC_IP}:8080
 EOF

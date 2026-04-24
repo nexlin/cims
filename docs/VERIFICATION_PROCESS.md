@@ -16,8 +16,10 @@
 | TB-CSC | 4419 | 패키지/에이전트/배포/설정 템플릿/검증 실행 관리. 상시 동작 |
 | TB-Console | 3000 | TB-CSC UI. 모듈관리 + 배포 + 검증 실행/리포트 뷰 |
 | TB-agent | sync 9902 | TB-CSC 에 enroll, 자기 호스트에 검증 대상 모듈을 설치/기동/재설정. install_path: `/tmp/cims-tb-agent/` |
-| 검증 대상 CSC | 4420 | Phase 2~3 에서 TB-agent 로 배포되는 대상 |
-| 검증 대상 Console | 3001 | Phase 2~3 중 검증용으로 기동 |
+| Test-CSC | 4421 | Phase 1 기능 검증용 직접 기동본 (build/dist/csc/) |
+| Test-Console | 3011 | Phase 1 기능 검증용 직접 기동본 (build/dist/console/ or 소스 dev) |
+| 배포 대상 CSC | 4420 | Phase 2~3 에서 TB-agent 로 배포되는 운영 포트 (별도 디렉토리) |
+| 배포 대상 Console | 80 | Phase 2~3 운영 포트 (Test-Console 과 분리) |
 | Phone | 3002 | MCPTT UE Web (3000 에서 이전) |
 
 **재기동 규칙**: TB 3종은 Phase 진행 중 내리지 않는다. **소스 변경 후 빌드되어 번들/바이너리 해시가 갱신된 경우에만** 자동 재기동한다. DB 는 공유 (`cims`). TB-agent state(enroll/cert) 는 `/tmp/cims-tb-agent/state/` 에 유지되어 재기동 시 재사용.
@@ -48,7 +50,7 @@
 | 초기화 (배포 등록) | `cims_instance`, `cims_package`, `agent_deployment`, `agent_job`, `agent_metric` (`cims_agent` 은 `name<>'tb-agent-local'` 만 DELETE) | TRUNCATE / 조건부 DELETE |
 | 초기화 (세션/로그) | `auth_codes`, `refresh_tokens`, `voip_call_logs`, `ptt_call_logs`, `*_participants`, `recordings`, `recording_segments`, `stats_*` | TRUNCATE |
 | 초기화 (파일) | `build/dist/<모듈>/modules/**` (Phase 1 직접 기동본), `build/dist/{csc,csp,cmp,sim}-server/` (Phase 2/3 배포 대상, 0.10 참조), `service_log/`, `msg_log/`, `cert/agent_mtls/issued` 발급 cert | rm -rf |
-| 초기화 (프로세스) | 검증 대상 csc(4420)/csp/cmp/cspsim/agent/console(3001) | `cims.sh reset` |
+| 초기화 (프로세스) | Test-CSC(4421)/Test-Console(3011)/csp/cmp/cspsim/agent + 배포 대상 csc(4420) | `cims.sh reset` |
 
 `cims.sh reset` 은 위 범위를 자동 처리하며 TB 는 제외한다.
 
@@ -63,7 +65,7 @@
 - [ ] `git status` clean, 브랜치/커밋 해시 기록
 - [ ] pending DB migration 적용 완료
 - [ ] `ens160` IP 확인
-- [ ] 포트 충돌 없음 (4419, 4420, 3000, 3001, 3002, 5060, 5061, 9000, 9001, **9902**(TB-agent sync))
+- [ ] 포트 충돌 없음 (4419 TB-CSC, 4420 배포 csc, 4421 Test-CSC, 3000 TB-Console, 3002 phone, 3011 Test-Console, 5060, 5061, 8080 cwrtc, 9000, 9001, **9902** TB-agent sync)
 - [ ] TB 3종 동작 확인 (`cims.sh status` 에서 tb-csc / tb-console / tb-agent running)
 - [ ] TB-agent 가 TB-CSC 에 `approved` 상태로 enrolled (`cims_agent` 테이블)
 - [ ] mTLS 모드 검증이면 TB-CSC 의 `Agent.MtlsEnabled: true` 확인
@@ -130,10 +132,10 @@ build/dist/
 ```
 
 > ※ 포트 체계 (설계):
-> - **Phase 1 (Test-\*, dev/debug 포트)**: Test-CSC 4421 / Test-Console 8080 — 운영 포트와 분리되어 Phase 2 배포본(csc 4420 / console 80)과 동일 호스트에서 공존 가능.
+> - **Phase 1 (Test-\*, dev/debug 포트)**: Test-CSC **4421** / Test-Console **3011** — 운영 포트와 분리되어 Phase 2 배포본(csc 4420 / console 80)과 동일 호스트에서 공존 가능. (초안의 Test-Console 8080 은 cwrtc 가 8080 을 점유하여 3011 로 재지정, 2026-04-24)
 > - **Phase 2 (csc-server 배포본, 운영 포트)**: csc 4420 / console 80.
 > - **공용/서비스 포트**: Test-CSP SIP UDP 5060·TCP 25061·TLS 5061, Test-CMP UDP 9000, Test-Phone SIP 5060 (UE client), Test-CWRTC 5061 (TLS/WS), Test-CSPSIM 9000 (시험 종료 후 소켓 해제).
-> - 현행 코드는 Phase 1 csc=4420 / console=3001 기준. **신규 설계(4421 / 8080 및 4420 / 80)로의 전환은 Phase 2 실측 구현 시점에 configure.sh + csc.json/.env 갱신 + §0.1 TB 표 반영을 한꺼번에 진행한다.**
+> - **2026-04-24 전환 완료**: configure.sh / config_template.json / cims.sh / docs §0.1·0.3·0.5 에 Test-CSC 4421 / Test-Console 3011 반영. Phase 2 배포본 (csc 4420 / console 80) 은 별도 디렉토리(`csc-server/`)에서 공존.
 
 **각 `<x>-server/` 내부 규약**
 
@@ -185,7 +187,7 @@ build/dist/
 
 ### 1.3 Configure [2/3]
 - `cims.sh configure --local-ip <ens160_ip>`
-- 시험환경 설정. `csp.json`, `cmp.json`, `csc.json` (4420 용), `csc-tb.json` (4419 용) 재생성
+- 시험환경 설정. `csp.json`, `cmp.json`, `csc.json` (Test-CSC 4421), `csc-tb.json` (TB-CSC 4419) 재생성
 - CSP 는 `csp/config/config_template.json` 의 `deploy_value` 를 통해 환경변수 치환 후 `csp.json` 생성
 - TB-Console `.env` 분기 적용
 
@@ -199,7 +201,7 @@ cims.sh start          # 인자 생략 = 전체 모듈
 개별 모듈만 재기동할 때는 `cims.sh start <name>` / `cims.sh restart <name>` 사용 (name ∈ cmp/csp/cwrtc/csc/console/phone).
 
 ### 1.5 Health Check
-- 리슨 포트: 4419 / 4420 / 3000 / 9000 / 5060 / 5061
+- 리슨 포트: 4419 (TB-CSC), 4421 (Test-CSC), 3000 (TB-Console), 3011 (Test-Console), 9000 (cmp), 5060 (csp UDP), 5061 (csp TCP)
 - 로그 `ERROR`/`FATAL` 없음
 - TB-CSC → 검증 대상 CSC HEARTBEAT 정상
 
