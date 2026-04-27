@@ -37,25 +37,32 @@
 | | Test-CWRTC | 8443 (WSS) | WebRTC 게이트웨이 |
 | | Test-Phone | 3002 | MCPTT UE Web |
 | | Test-CSPSIM | 9000 | cspsim (시험 중에만) |
-| **Phase 2/3 배포본** | csc | 4420 | Phase 2 배포, Phase 3 배포 주체 |
-| | console | 80 | Phase 3 UI 진입점 (cap_net_bind 또는 reverse proxy) |
-| | csp / cmp / sim | 5060·5061 / 9000 / sync | Phase 3 배포 체인 |
-| | Test-agent | sync 9903 | per-host agent (csc-server-local 등) |
+| **Phase 2/3 배포본 (verify 환경)** | csc | **4445** | `verify phase2` overlay 기동 — Phase 1 Test-CSC 4421 / 운영 4420 과 분리 |
+| | console | **8081** | `verify phase2` overlay 기동 — Test-Console 8080 / 운영 80 과 분리 |
+| | csp / cmp / sim | 5060·5061 / 9000 / sync | Phase 3 시나리오 대상 |
+| | Test-agent | sync 9903~9906 | per-host agent (csc/csp/cmp/sim-server-local) |
+| **(참고) 운영 배포본** | csc | 4420 | 실제 운영 환경 |
+| | console | 80 | 운영 UI (cap_net_bind 또는 reverse proxy) |
 
 > **명명 규칙**
 > - **TB-\*** — 상시 테스트베드 (환경 제어용). Phase 진행 중 내리지 않는다.
 > - **Test-\*** — Phase 1 의 `build/dist/<모듈>/` 직접 기동 인스턴스 별칭.
 > - **배포본** (무접두) — Phase 2/3 에서 agent 경유로 설치된 운영 인스턴스. `<x>-server/<모듈>/` 경로.
 > - **Test-agent** ≠ **TB-agent** — Test-agent 는 per-host (csc-server-local 등), TB-agent 는 sync 9902 로 상시 동작하는 환경 제어용.
-> - **Console 3분화**: 같은 `cims-console/` 코드베이스가 Dev-Console (소스 vite, 3001) / Test-Console (dist HTTPS, 8080) / 배포본 console (80) 으로 분기. `cims.sh start console` 이 SRC_CONSOLE 존재 여부로 자동 분기.
+> - **Console 4분화**: 같은 `cims-console/` 코드베이스가 모드/포트별로 분기.
+>   - **TB-Console** (3000, `--mode tb`) — TB-CSC(4419) backed, **검증 실행 표준 진입점**
+>   - **Dev-Console** (3001, vite dev) — Test-CSC(4421) backed, Phase 1 가입자 화면
+>   - **Test-Console** (8080, dist HTTPS) — Test-CSC(4421) backed, Phase 1 dist 검증
+>   - **배포본 console** — verify 환경(8081, Phase 2 overlay) / 운영(80) 분기
+>   - `cims.sh start console` 이 SRC_CONSOLE 존재 여부로 Dev/Test 자동 분기.
 
 ### 0.3 포트 공존 설계
 
 포트 번호 전체는 §0.2 표 참조. 핵심 원칙:
 
-- **Phase 1 Test-\*** (dev/debug 포트) 와 **Phase 2·3 배포본** (운영 포트) 은 번호가 달라 동일 호스트에서 공존 가능 — Test-CSC 4421 vs 배포본 csc 4420, Dev-Console 3001 vs 배포본 console 80 등.
+- **Phase 1 Test-\*** (dev/debug 포트) 와 **Phase 2·3 배포본** (운영 포트) 은 번호가 달라 동일 호스트에서 공존 가능 — Test-CSC 4421 vs 배포본 csc 4420(운영) / 4445(verify), Dev-Console 3001 vs Test-Console 8080 vs 배포본 console 80(운영) / 8081(verify).
 - **TCP 4421 ↔ UDP 4421** 은 완전히 다른 서비스 (Test-CSC admin TCP / CSP CscInterface UDP, `csp/CspServer.cpp:259`). proto 다름이라 무충돌.
-- **`verify phase2` 자동화** 는 csc Start job 을 `Server.Port=4445` overlay 로 기동 → Phase 1 Test-CSC 4421 / 배포본 4420 과 모두 분리.
+- **`verify phase2` 자동화** 는 overlay 로 csc(4445) + console(8081) 기동 → Phase 1 (4421/3001/8080) / 운영 (4420/80) 과 모두 분리.
 - **Phase 3 에서 포트 충돌 발생 지점**: csp (5060 · 5061), cmp (9000), cwrtc (8443), phone (3002), cspsim (9000) — Phase 1 과 배포본이 같은 운영 포트. 그러므로 Phase 3 진입 시 Phase 1 서버 모듈 중지 (§3.1).
 
 ### 0.4 디렉토리 레이아웃
@@ -107,7 +114,7 @@ build/dist/
 
 ### 0.9 기본 검증 4시나리오 (Phase 1/3 공통)
 
-가입자 정보 기반, Console 에서 실행. Phase 1 은 Dev/Test-Console (3001/8080), Phase 3 은 배포본 console (80) 에서 수행.
+자동 실행은 `cims.sh verify phaseN` (CLI) 또는 TB-Console(3000) `/testbed/verify` 에서 trigger. 가입자 직접 조작 시나리오는 Phase 1 → Dev/Test-Console (3001/8080, Test-CSC 4421 backed), Phase 3 → 배포본 console (8081, 배포본 csc 4445 backed).
 
 | # | 시나리오 | 확인 포인트 |
 |---|---|---|
@@ -121,7 +128,7 @@ build/dist/
 Phase 1 에서만 수행 (Phase 3 는 §0.9 4시나리오만):
 
 - **CSC 가입자/그룹 변경 → NOTIFY** — admin API CRUD → `notify_csp` → `CspUserMap`/`CGroupMap` 캐시 갱신 → GMS/CMS NOTIFY 발송
-- **SUBSCRIBE/NOTIFY 전체 흐름** (IdMS / GMS / CMS) — TB-Console Flow 페이지 nodes 순서 정상
+- **SUBSCRIBE/NOTIFY 전체 흐름** (IdMS / GMS / CMS) — Console 통화이력(CallLogs/VolteHistory/PttHistory)에서 호 선택 → Flow 모달의 nodes 순서 정상
 - **(mTLS 모드) Cert rotation e2e** — `cert_rotate_pending=1` → heartbeat `cert_rotate:true` → agent rotate → `exit(0)` → 재기동 후 새 cert 적용
 
 ---
@@ -155,9 +162,10 @@ Phase 1 에서만 수행 (Phase 3 는 §0.9 4시나리오만):
 **(5) 실행** — `cims.sh start` → 순서 CMP → CSP → CWRTC → CSC → Console → Phone. 개별 재기동은 `cims.sh start <name>` / `restart <name>`.
 
 **(6) 검증**:
-- Dev-Console (3001) 또는 Test-Console (8080) 에서 TB-Console `/testbed/phase1` → ▶ 실행 — §0.9 4시나리오 + §0.10 Phase 1 추가 3시나리오 순차 수행
+- **TB-Console** (`http://<ens160>:3000/testbed/verify`) → [Phase 1] 탭 → ▶ 실행 — §0.9 4시나리오 + §0.10 Phase 1 추가 3시나리오 순차 수행. 검증 자동화 백엔드(`/api/v1/verification/phases/N`)는 TB-CSC(4419) 측이라 TB-Console 에서만 동작.
+- Dev-Console (3001) / Test-Console (8080) 은 가입자 화면·시나리오 직접 조작·녹취 확인 용도 (Test-CSC 4421 backed)
 - 개발/보완 사항 직접 조작 (§1.1 에서 식별된 기능)
-- Console > 테스트베드 > 모듈관리 — 버전/설정 템플릿/overlay 반영 확인
+- TB-Console `/testbed/modules` — 버전/설정 템플릿/overlay 반영 확인
 
 **(7) 리포팅** — `verify_reports/<ts>_phase1.md` 자동 생성. §0.8 양식.
 
@@ -303,13 +311,17 @@ cims.sh verify phase3
 - 시나리오 실패 — 원인 판별:
   - Phase 1 에서 같은 증상 재현 → 코드 이슈, Phase 1 부터 재수행
   - Phase 1 재현 안 됨 → 배포 경로·설정·환경 의존 버그, Phase 2 배포 설계 재검토
-- 개발/보완 사항 실패 → Console (8081) 에서 직접 재현 확인 + 이슈 리포트
+- 개발/보완 사항 실패 → 배포본 console (`https://<ens160>:8081/`) 또는 TB-Console (3000) 에서 직접 재현 확인 + 이슈 리포트
 
 ### 3.6 Console 진입점
 
-배포본 console (`https://<ens160>:8081/`) 에 접속하여:
-- 모듈관리: 배포된 csc/csp/cmp/sim 설정 확인·편집
-- 검증 페이지 (`/testbed/verify`): Phase 1/2/3 실행 버튼 + 리포트 조회
+| Console | URL | 백엔드 | 용도 |
+|---|---|---|---|
+| **TB-Console** | `http://<ens160>:3000/testbed/verify` | TB-CSC 4419 | **검증 실행 + 리포트 조회 (표준)** |
+| 배포본 console | `https://<ens160>:8081/testbed/modules` | 배포본 csc 4445 | 배포된 csc/csp/cmp/sim 설정 확인·편집 |
+| 배포본 console | `https://<ens160>:8081/testbed/verify` | 배포본 csc 4445 | 같은 화면이지만 backend 가 배포본 csc — verification.py subprocess 가 호스트 위 `cims.sh` 를 호출하므로 동일 호스트 환경에서만 동작 |
+
+검증 실행은 **TB-Console (3000)** 에서 수행하는 것이 표준. 배포본 console (8081) 은 운영 환경 모듈관리 진입점.
 
 ---
 
@@ -323,6 +335,8 @@ cims.sh verify phase3
 - 같은 호스트 다중 agent: `CIMS_AGENT_SYNC_PORT` env 주입 (CLI 미지원).
 - Agent cert rotate 는 `exit(0)` 만 수행. 재기동은 systemd/supervisor 책임.
 - TB-Console 은 vite dev 모드 전용. dist 정적 서빙은 `/api` proxy 없음 → 별도 nginx conf 필요.
+- **Test-Console (8080) 로그인 불가**: `npx serve dist` 정적 서빙이라 `/api` 요청에 404. dist SPA 자체 검증 외에 로그인/조작이 필요하면 **TB-Console (3000)** 또는 **Dev-Console (3001)** 사용. Phase 2 배포본 console (8081) 도 동일 한계 — 모듈관리·검증 UI 진입은 TB-Console 권장.
+- **TB-Console 모듈관리에서 csc/console 시작 시 환경 격리** (`service_control.py`): TB-CSC 자체가 `CIMS_CSC_CONFIG=csc-tb.json` 으로 떠있어서, 단순 subprocess 호출로 `cims.sh start csc` 하면 자식 csc_app.py 가 csc-tb.json 을 상속받아 4419/4431 bind 충돌. `_invoke_cims_sh` 가 `CIMS_CSC_CONFIG` / `CIMS_AGENT_SYNC_PORT` 등 TB 전용 env 를 차단(`_sanitized_env`)한 뒤 subprocess 실행. **소스 수정 후 `cims.sh sync csc && restart tb-csc` 필수**.
 - **verify phase2 `--skip-pkg` 함정**: 소스 수정 후 `sync all` + `pkg --no-bump` 하지 않으면 tarball 속 `cims.sh` / `cims_agent.py` 가 stale → start/health 가 옛 로직 사용.
 - **cwrtc.json LocalIp stale 함정**: `ens160` IP 변경 시 configure 재실행 없으면 cwrtc SIP UA UDP bind 실패 (`UdpListen(5062) error`).
 
@@ -353,8 +367,11 @@ cims.sh verify phase2 [--skip-build] [--skip-pkg] [--stop-after]
 cims.sh verify phase3             # 4시나리오 (VoLTE 음성/영상 + PTT 그룹 음성/영상)
                                   # 판정: 각 시나리오 seg_*.rtp 녹취 +1 이상 → PASS
 
-# Console 진입점 (Phase 2 이후)
-# https://<ens160>:8081/  — 배포본 console UI (모듈관리 + 검증 실행)
+# Console 진입점
+# http://<ens160>:3000/testbed/verify    — TB-Console (검증 실행 표준, 항상 사용 가능)
+# https://<ens160>:8081/testbed/modules  — 배포본 console (Phase 2 이후, 모듈관리)
+# http://<ens160>:3001/                  — Dev-Console (Phase 1, 가입자 화면, 소스 vite)
+# https://<ens160>:8080/                 — Test-Console (Phase 1, dist HTTPS)
 ```
 
 ## 부록 C. 문서 관리

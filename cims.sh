@@ -209,6 +209,9 @@ print(p if p else '')" 2>/dev/null)
         fi
         save_pid console $!
         sleep 2
+        # npx wrapper 가 종료되며 자식 node serve 가 reparent 되는 경우 — 실제 listener PID 로 갱신
+        local _real_pid; _real_pid=$(_pid_by_port "$port:tcp")
+        [[ -n $_real_pid ]] && save_pid console "$_real_pid"
         is_running console && ok "Test-Console 시작 완료 (pid=$(read_pid console), port=$port)" \
             || { err "Test-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
     else
@@ -243,6 +246,9 @@ start_phone() {
         err "phone 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1
     fi
     sleep 2
+    # npx wrapper 가 종료되며 자식 node serve 가 reparent 되는 경우 — 실제 listener PID 로 갱신
+    local _real_pid; _real_pid=$(_pid_by_port "3002:tcp")
+    [[ -n $_real_pid ]] && save_pid phone "$_real_pid"
     is_running phone && ok "phone 시작 완료 (pid=$(read_pid phone))" || { err "phone 시작 실패"; tail -3 "$LOG_DIR/phone.log" | sed 's/^/  /'; }
 }
 
@@ -419,6 +425,20 @@ stop_one() {
     rm -f "$(pidfile "$name")"
 }
 
+stop_console() {
+    stop_one console
+    # PID 파일 없이 남은 stray 정리 (npx wrapper 종료 후 reparent 된 node serve 등)
+    # Dev(3001) / Test(8080) 양쪽 모두 점검 — 모드 무관하게 점유 해제
+    kill_stray "vite.*cims-console" 3001 tcp
+    kill_stray "serve dist -l 8080" 8080 tcp
+}
+
+stop_phone() {
+    stop_one phone
+    kill_stray "vite.*cims-phone" 3002 tcp
+    kill_stray "serve dist -l 3002" 3002 tcp
+}
+
 stop_csc() {
     local csc_port
     csc_port=$(python3 -c "
@@ -497,6 +517,16 @@ status_one() {
         local ext_pid; ext_pid="$(_pid_by_port "$pp")"
         if [[ -n $ext_pid ]]; then
             echo -e "  ${YELLOW}●${NC} $(printf '%-12s' "$name")  실행 중(외부)  (pid=$ext_pid, port=${pp%:*})"
+            return
+        fi
+    fi
+    # console 의 경우 모드별 보조 포트도 확인 (Dev 3001 ↔ Test 8080) — orphan stray 검출용
+    if [[ "$name" == "console" ]]; then
+        local alt_port
+        if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then alt_port=8080; else alt_port=3001; fi
+        local ext_pid; ext_pid="$(_pid_by_port "$alt_port:tcp")"
+        if [[ -n $ext_pid ]]; then
+            echo -e "  ${YELLOW}●${NC} $(printf '%-12s' "$name")  실행 중(stray)  (pid=$ext_pid, port=$alt_port)"
             return
         fi
     fi
@@ -1006,7 +1036,9 @@ _verify_phase1() {
 
     # 5.5) Package auto-upload — reset 로 cims_package 비워진 상태를 tarball 로 채움.
     #      Console 테스트베드 > 모듈관리 에서 버전/템플릿/설정 데이터가 정상 표시되도록.
+    # 주의: 이 블록은 set -e/pipefail 하에서도 안전해야 함 (curl SIGPIPE 등으로 phase1 중단 방지).
     echo "## 5.5 Package auto-upload" >> "$report"
+    set +e
     {
         local pkg_dir="$DIST_DIR/packages"
         if [[ ! -d "$pkg_dir" ]]; then
@@ -1014,39 +1046,45 @@ _verify_phase1() {
             echo "(packages 디렉토리 없음)" >> "$report"
         else
             local login_host="${ens_ip:-127.0.0.1}"
-            # CSC 로그인 → JWT 획득
-            local token
-            token=$(curl -sk -X POST "https://${login_host}:4420/api/v1/auth/login" \
-                         -H 'Content-Type: application/json' \
-                         -d '{"login_id":"admin","password":"1234"}' 2>/dev/null \
-                    | python3 -c 'import json,sys
+            # Test-CSC 4421 (Phase 1) 또는 운영 4420 — 두 포트 순차 시도
+            local token=""
+            for csc_port in 4421 4420; do
+                local resp
+                resp=$(curl -sk --max-time 3 -X POST "https://${login_host}:${csc_port}/api/v1/auth/login" \
+                             -H 'Content-Type: application/json' \
+                             -d '{"login_id":"admin","password":"1234"}' 2>/dev/null)
+                token=$(echo "$resp" | python3 -c 'import json,sys
 try:
     d=json.load(sys.stdin); print(d.get("token",""))
 except Exception: print("")' 2>/dev/null)
+                [[ -n "$token" ]] && { echo "(CSC port=${csc_port} 로그인 OK)" >> "$report"; break; }
+            done
             if [[ -z "$token" ]]; then
                 warn "CSC admin 로그인 실패 — pkg upload 스킵"
-                echo "- admin 로그인 실패" >> "$report"
+                echo "- admin 로그인 실패 (4421/4420 모두)" >> "$report"
             else
+                local pkg_csc_port="${csc_port:-4421}"
                 echo '```' >> "$report"
                 local uploaded=0
                 for t in "$pkg_dir"/*.tar.gz; do
                     [[ -f "$t" ]] || continue
                     local fname; fname=$(basename "$t")
-                    local code; code=$(curl -sk -o /dev/null -w "%{http_code}" \
-                        -X POST "https://${login_host}:4420/api/v1/packages" \
+                    local code; code=$(curl -sk --max-time 30 -o /dev/null -w "%{http_code}" \
+                        -X POST "https://${login_host}:${pkg_csc_port}/api/v1/packages" \
                         -H "Authorization: Bearer $token" \
                         -F "file=@$t;filename=$fname" -F "force=true" 2>/dev/null)
                     if [[ "$code" == "200" || "$code" == "201" ]]; then
-                        echo "  [OK]  $fname"; uploaded=$((uploaded+1))
+                        echo "  [OK]  $fname" >> "$report"; uploaded=$((uploaded+1))
                     else
-                        echo "  [FAIL $code] $fname"
+                        echo "  [FAIL $code] $fname" >> "$report"
                     fi
-                done | tee -a "$report"
+                done
                 echo '```' >> "$report"
                 ok "packages 업로드: ${uploaded}건"
             fi
         fi
     }
+    set -e
     echo "" >> "$report"
 
     # 6) Health check
@@ -1247,9 +1285,19 @@ PY
         echo "- [ ] (mTLS 모드) cert rotation e2e"
     } >> "$report"
 
-    header "=== Phase 1 검증 종료 ==="
+    # 9) 판정 — 자동 합격 기준: ERROR/FATAL=0 + 녹취 size>0 가 1개 이상
+    local verdict="PASS"
+    if (( err_cnt > 0 )); then verdict="FAIL"; fi
+    if (( ${rec_ok:-0} == 0 )); then verdict="FAIL"; fi
+    {
+        echo ""
+        echo "## 판정: $verdict"
+    } >> "$report"
+
+    header "=== Phase 1 검증 종료 — 판정: $verdict ==="
     info "리포트: $report"
     echo ""
+    [[ "$verdict" == "PASS" ]] && return 0 || return 1
 }
 
 # ──────────────────────────────────────────────────────────────
@@ -2512,7 +2560,12 @@ _stop_one() {
         all)
             header "=== 전체 중지 (검증 대상만, TB 유지) ==="
             for c in "${COMPONENTS[@]}"; do
-                if [[ $c == "csc" ]]; then stop_csc; else stop_one "$c"; fi
+                case "$c" in
+                    csc)     stop_csc ;;
+                    console) stop_console ;;
+                    phone)   stop_phone ;;
+                    *)       stop_one "$c" ;;
+                esac
             done
             ;;
         tb)
@@ -2521,8 +2574,10 @@ _stop_one() {
             stop_one tb-console
             stop_one tb-csc
             ;;
-        csc) stop_csc ;;
-        *) stop_one "$1" ;;
+        csc)     stop_csc ;;
+        console) stop_console ;;
+        phone)   stop_phone ;;
+        *)       stop_one "$1" ;;
     esac
 }
 

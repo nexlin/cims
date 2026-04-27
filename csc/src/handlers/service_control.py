@@ -60,13 +60,25 @@ def _driver() -> str:
     return os.environ.get("CIMS_SERVICE_DRIVER", "cims_sh").lower()
 
 
-async def _run_cmd(argv: list, cwd: Optional[str] = None, timeout: int = 30) -> tuple:
+# TB-CSC 가 자기 config (csc-tb.json, port 4419) 로 띄워진 상태에서 subprocess 가
+# 환경을 그대로 상속하면 자식 csc_app.py 도 csc-tb.json 을 읽어 4419/4431 bind 시도 → 충돌.
+# Test-CSC / 배포본 csc 는 base csc.json (4421/4445/4420) 을 써야 하므로 TB 전용 env 차단.
+_BLOCKED_ENV_KEYS = {"CIMS_CSC_CONFIG", "CIMS_AGENT_SYNC_PORT"}
+
+
+def _sanitized_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in _BLOCKED_ENV_KEYS}
+
+
+async def _run_cmd(argv: list, cwd: Optional[str] = None, timeout: int = 30,
+                   env: Optional[dict] = None) -> tuple:
     """subprocess 를 async 로 실행. (returncode, stdout, stderr) 반환."""
     proc = await asyncio.create_subprocess_exec(
         *argv,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
+        env=env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -84,7 +96,7 @@ async def _invoke_cims_sh(action: str, service: str) -> HandlerResult:
             media_type="application/json")
     cwd = str(Path(script).parent)
     argv = ["/bin/bash", script, action, service]
-    rc, out, err = await _run_cmd(argv, cwd=cwd, timeout=45)
+    rc, out, err = await _run_cmd(argv, cwd=cwd, timeout=45, env=_sanitized_env())
     return HandlerResult(
         status=200 if rc == 0 else 500,
         body={
@@ -148,7 +160,7 @@ async def handle_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
         script = _find_cims_sh()
         if not script:
             return HandlerResult(status=500, body={"error": "cims_sh_not_found"}, media_type="application/json")
-        rc, out, err = await _run_cmd(["/bin/bash", script, "status"], cwd=str(Path(script).parent), timeout=10)
+        rc, out, err = await _run_cmd(["/bin/bash", script, "status"], cwd=str(Path(script).parent), timeout=10, env=_sanitized_env())
         return HandlerResult(status=200, body={
             "driver": _driver(),
             "output": out.decode(errors="replace"),

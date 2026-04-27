@@ -5,13 +5,18 @@
   /report                                 — 기존 verification_report.md
 
   /phases/<N> (POST)                      — cims.sh verify phase<N> 실행 (N=1/2/3)
+                                            body 의 async=true 지정 시 job_id 즉시 반환 (비동기)
+                                            기본은 sync — subprocess 종료까지 블록 (CLI/curl 호환)
   /phases/<N>/latest-report (GET)         — verify_reports/*_phase<N>.md 최신 내용
   /phases/<N>/reports (GET)               — verify_reports/*_phase<N>.md 목록
+  /jobs/<job_id> (GET)                    — 비동기 job 상태 + stdout tail (폴링용)
 """
 import os
 import re
 import json
 import glob
+import time
+import uuid
 import asyncio
 import subprocess
 from urllib.parse import urlparse, parse_qs
@@ -75,6 +80,11 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     m = re.fullmatch(r'phases/(\d+)/reports', after)
     if m and method == 'GET':
         return await _list_phase_reports(int(m.group(1)))
+
+    # /jobs/<job_id> — 비동기 job 상태 폴링
+    m = re.fullmatch(r'jobs/([0-9a-f]+)', after)
+    if m and method == 'GET':
+        return await _get_job_status(m.group(1))
 
     return HandlerResult(status=404, body={'error': 'Not Found'})
 
@@ -189,6 +199,143 @@ def _find_latest_phase_report(phase: int):
     return files[-1]
 
 
+# ─────────────────────────────────────────────────────────────
+# 비동기 job 관리 — 진행 중 stdout tail 폴링 + 완료 시 결과 조회용
+# ─────────────────────────────────────────────────────────────
+_JOBS: dict = {}              # job_id → job dict
+_JOBS_TTL_SEC = 3600          # 완료된 job 의 보관 기간 (1시간)
+_JOB_LOG_DIR = '/tmp/cims_verify_jobs'
+
+
+def _resolve_verdict(phase: int) -> tuple:
+    """최신 리포트에서 verdict 파싱. (verdict, report_path, report_ts) 반환."""
+    rp = _find_latest_phase_report(phase)
+    if not rp:
+        return ('UNKNOWN', None, '')
+    ts = os.path.basename(rp).split('_phase')[0]
+    verdict = 'UNKNOWN'
+    try:
+        with open(rp) as fp:
+            content = fp.read()
+        m = re.search(r'^##\s*판정[:：]\s*(\w+)', content, re.MULTILINE)
+        if m: verdict = m.group(1).upper()
+    except Exception:
+        pass
+    return (verdict, rp, ts)
+
+
+def _gc_jobs():
+    """오래된 완료 job 메모리 회수."""
+    now = time.time()
+    stale = [jid for jid, j in _JOBS.items()
+             if j.get('done') and (now - (j.get('ended_at') or now)) > _JOBS_TTL_SEC]
+    for jid in stale:
+        j = _JOBS.pop(jid, None)
+        if j and j.get('log_path'):
+            try: os.remove(j['log_path'])
+            except Exception: pass
+
+
+async def _start_phase_job(phase: int, argv: list, timeout: int) -> str:
+    """Spawn subprocess in background. Returns job_id immediately."""
+    _gc_jobs()
+    os.makedirs(_JOB_LOG_DIR, exist_ok=True)
+    job_id = uuid.uuid4().hex[:12]
+    log_path = os.path.join(_JOB_LOG_DIR, f'phase{phase}_{job_id}.log')
+    log_file = open(log_path, 'wb')
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=log_file,
+        stderr=asyncio.subprocess.STDOUT,
+        cwd=_SCRIPT_DIR,
+    )
+    job = {
+        'job_id': job_id,
+        'phase': phase,
+        'argv': argv,
+        'started_at': time.time(),
+        'ended_at': None,
+        'log_path': log_path,
+        'returncode': None,
+        'done': False,
+        'verdict': None,
+        'report_path': None,
+        'report_ts': '',
+        '_proc': proc,
+        '_log_file': log_file,
+        '_timeout': timeout,
+    }
+    _JOBS[job_id] = job
+    asyncio.create_task(_watch_phase_job(job_id))
+    return job_id
+
+
+async def _watch_phase_job(job_id: str):
+    job = _JOBS.get(job_id)
+    if not job: return
+    proc = job['_proc']
+    try:
+        rc = await asyncio.wait_for(proc.wait(), timeout=job['_timeout'])
+    except asyncio.TimeoutError:
+        try: proc.kill()
+        except Exception: pass
+        rc = -1
+    finally:
+        try: job['_log_file'].close()
+        except Exception: pass
+    job['returncode'] = rc
+    job['ended_at'] = time.time()
+    verdict, rp, ts = _resolve_verdict(job['phase'])
+    job['verdict'] = verdict
+    job['report_path'] = rp
+    job['report_ts'] = ts
+    job['done'] = True
+
+
+async def _get_job_status(job_id: str) -> HandlerResult:
+    job = _JOBS.get(job_id)
+    if not job:
+        return HandlerResult(status=404, body={'error': f'job not found: {job_id}'})
+    tail = ''
+    try:
+        with open(job['log_path'], 'rb') as f:
+            data = f.read().decode('utf-8', errors='replace')
+            tail = '\n'.join(data.splitlines()[-50:])
+    except Exception:
+        pass
+    now = time.time()
+    return HandlerResult(status=200, body={
+        'job_id': job_id,
+        'phase': job['phase'],
+        'argv': job['argv'],
+        'started_at': job['started_at'],
+        'ended_at': job['ended_at'],
+        'elapsed': (job['ended_at'] or now) - job['started_at'],
+        'done': job['done'],
+        'returncode': job['returncode'],
+        'verdict': job['verdict'] if job['done'] else None,
+        'report_path': job['report_path'] if job['done'] else None,
+        'report_ts': job['report_ts'] if job['done'] else '',
+        'stdout_tail': tail,
+    })
+
+
+def _build_phase_argv(phase: int, opts: dict) -> list:
+    """opts → cims.sh argv. Phase 별 옵션 호환성 적용."""
+    skip_build = bool(opts.get('skip_build', True))
+    skip_pkg   = bool(opts.get('skip_pkg', True))
+    skip_reset = bool(opts.get('skip_reset', False))
+    keep_agent = bool(opts.get('keep_agent', False))
+    argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'verify', f'phase{phase}']
+    if skip_build: argv.append('--skip-build')
+    if phase == 1:
+        if skip_reset: argv.append('--skip-reset')
+    else:
+        if skip_pkg:   argv.append('--skip-pkg')
+        if keep_agent: argv.append('--keep-agent')
+    return argv
+
+
 async def _run_phase(phase: int, handler_args: HandlerArgs) -> HandlerResult:
     if phase not in (1, 2, 3):
         return HandlerResult(status=400, body={'error': 'phase must be 1, 2, or 3'})
@@ -197,18 +344,23 @@ async def _run_phase(phase: int, handler_args: HandlerArgs) -> HandlerResult:
 
     body = handler_args.body or {}
     opts = body if isinstance(body, dict) else {}
-    skip_build  = bool(opts.get('skip_build', True))
-    skip_pkg    = bool(opts.get('skip_pkg', True))
-    keep_agent  = bool(opts.get('keep_agent', False))
-
-    argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'verify', f'phase{phase}']
-    if skip_build: argv.append('--skip-build')
-    if skip_pkg:   argv.append('--skip-pkg')
-    if keep_agent: argv.append('--keep-agent')
-
+    is_async = bool(opts.get('async', False))
+    argv = _build_phase_argv(phase, opts)
     timeout = _PHASE_TIMEOUT.get(phase, 600)
-    # async handler 에서 blocking subprocess.run 은 uvicorn 이벤트 루프를 block 하여
-    # 자기 자신 (TB-CSC) 에 대한 self-call (curl) 이 실패. to_thread 로 worker 분리.
+
+    # 비동기 모드 — job 즉시 시작 + job_id 반환 (frontend 가 GET /jobs/<id> 폴링)
+    if is_async:
+        job_id = await _start_phase_job(phase, argv, timeout)
+        return HandlerResult(status=202, body={
+            'job_id': job_id,
+            'phase': phase,
+            'argv': argv,
+            'started_at': _JOBS[job_id]['started_at'],
+            'message': 'started',
+        })
+
+    # 동기 모드 (legacy) — CLI / curl 호환. async handler 에서 blocking subprocess.run 은
+    # uvicorn 이벤트 루프를 block 하여 self-call 이 실패하므로 to_thread 사용.
     def _run_sync():
         return subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout,
@@ -225,21 +377,7 @@ async def _run_phase(phase: int, handler_args: HandlerArgs) -> HandlerResult:
     except Exception as e:
         return HandlerResult(status=500, body={'phase': phase, 'error': str(e)})
 
-    # 판정: 최신 리포트 파일의 "## 판정: PASS|FAIL" 라인 파싱
-    report_path = _find_latest_phase_report(phase)
-    verdict = 'UNKNOWN'
-    report_ts = ''
-    if report_path:
-        report_ts = os.path.basename(report_path).split('_phase')[0]
-        try:
-            with open(report_path) as f:
-                content = f.read()
-            m = re.search(r'^##\s*판정[:：]\s*(\w+)', content, re.MULTILINE)
-            if m:
-                verdict = m.group(1).upper()
-        except Exception:
-            pass
-
+    verdict, report_path, report_ts = _resolve_verdict(phase)
     return HandlerResult(status=200, body={
         'phase': phase,
         'verdict': verdict,
