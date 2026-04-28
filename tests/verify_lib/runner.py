@@ -43,17 +43,32 @@ def _topo_sort(item_ids: list) -> list:
     return order
 
 
+def _emit(line: str) -> None:
+    """stdout 마커 출력 (backend 가 polling 으로 파싱).
+
+    형식:
+      [VERIFY] item-start: <id> idx=<i>/<N> name=<...>
+      [VERIFY] item-end:   <id> status=<PASS|FAIL|SKIP> elapsed_ms=<n>
+      [VERIFY] child-result: <parent_id>.<child_id> status=<...> elapsed_ms=<n> name=<...>
+    """
+    print(line, flush=True)
+
+
 def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
     """선택 항목 실행. ItemResult 리스트 반환 (실행 순서)."""
     ids = list(item_ids)
     if not ids:
         return []
     ordered = _topo_sort(ids)
+    n_total = len(ordered)
+    _emit(f"[VERIFY] run-start: total={n_total} ids={','.join(ordered)}")
     results: list = []
     failed: set = set()
-    for iid in ordered:
+    for idx, iid in enumerate(ordered, start=1):
         rec = get_item(iid)
         if rec is None:
+            _emit(f"[VERIFY] item-start: {iid} idx={idx}/{n_total} name=unknown")
+            _emit(f"[VERIFY] item-end: {iid} status=FAIL elapsed_ms=0")
             results.append(ItemResult(id=iid, name=iid, status=ItemStatus.FAIL,
                                       detail="unknown item", phase=0))
             continue
@@ -61,6 +76,8 @@ def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
         # 의존 항목 중 FAIL 있으면 SKIP
         skip = [d for d in meta.depends_on if d in failed]
         if skip:
+            _emit(f"[VERIFY] item-start: {iid} idx={idx}/{n_total} name={meta.name}")
+            _emit(f"[VERIFY] item-end: {iid} status=SKIP elapsed_ms=0")
             results.append(ItemResult(
                 id=iid, name=meta.name, status=ItemStatus.SKIP,
                 detail=f"의존 항목 실패: {','.join(skip)}", phase=meta.phase,
@@ -68,6 +85,7 @@ def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
             failed.add(iid)
             continue
         # 실행
+        _emit(f"[VERIFY] item-start: {iid} idx={idx}/{n_total} name={meta.name}")
         t0 = time.time()
         try:
             r = fn(ctx)
@@ -105,7 +123,15 @@ def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
             )
         if r.status == ItemStatus.FAIL:
             failed.add(iid)
+        # 자식 결과 stream — 부모 ItemResult 의 children 을 부모 종료 직전에 일괄 emit
+        for c in (r.children or []):
+            _emit(
+                f"[VERIFY] child-result: {iid}.{c.id} "
+                f"status={c.status} elapsed_ms={c.elapsed_ms} name={c.name}"
+            )
+        _emit(f"[VERIFY] item-end: {iid} status={r.status} elapsed_ms={r.elapsed_ms}")
         results.append(r)
+    _emit(f"[VERIFY] run-end: total={n_total} pass={sum(1 for r in results if r.status == 'PASS')} fail={sum(1 for r in results if r.status == 'FAIL')} skip={sum(1 for r in results if r.status == 'SKIP')}")
     return results
 
 

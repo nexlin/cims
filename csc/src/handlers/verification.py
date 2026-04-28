@@ -314,6 +314,148 @@ async def _watch_phase_job(job_id: str):
     job['done'] = True
 
 
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+_RE_RUN_START   = re.compile(r'^\[VERIFY\] run-start: total=(\d+) ids=(.+)$')
+_RE_ITEM_START  = re.compile(r'^\[VERIFY\] item-start: (\S+) idx=(\d+)/(\d+) name=(.+)$')
+_RE_ITEM_END    = re.compile(r'^\[VERIFY\] item-end: (\S+) status=(\S+) elapsed_ms=(\d+)$')
+_RE_CHILD       = re.compile(r'^\[VERIFY\] child-result: (\S+)\.(\S+) status=(\S+) elapsed_ms=(\d+) name=(.+)$')
+_RE_STEP_START  = re.compile(r'^\[VERIFY\] step-start: (\S+) (.+)$')
+_RE_STEP_END    = re.compile(r'^\[VERIFY\] step-end: (\S+) status=(\S+) elapsed_ms=(\d+)$')
+
+
+def _parse_items_progress(log_path: str) -> dict:
+    """log 의 누적 stdout 에서 [VERIFY] 마커를 파싱하여 진행 dict 반환.
+
+    반환 형식:
+      {
+        "selected": [id, ...],
+        "total": int, "completed": int, "current": str|None,
+        "items": [
+          {"id", "name", "status": "RUNNING|PASS|FAIL|SKIP",
+           "elapsed_ms", "started_at": <relative>,
+           "children": [{"id", "name", "status", "elapsed_ms"}]
+          }, ...
+        ]
+      }
+    Phase 2 의 step-start/step-end 는 P2-RUN-ALL 의 children 으로 흡수.
+    """
+    selected: list = []
+    total: int = 0
+    items: list = []
+    by_id: dict = {}
+    current: str | None = None
+    completed: int = 0
+
+    if not log_path or not os.path.isfile(log_path):
+        return {"selected": selected, "total": 0, "completed": 0,
+                "current": None, "items": items}
+    try:
+        with open(log_path, 'rb') as f:
+            data = f.read().decode('utf-8', errors='replace')
+    except Exception:
+        return {"selected": selected, "total": 0, "completed": 0,
+                "current": None, "items": items}
+
+    for raw in data.splitlines():
+        line = _ANSI_RE.sub('', raw).rstrip()
+        if not line.startswith('[VERIFY] '):
+            continue
+        m = _RE_RUN_START.match(line)
+        if m:
+            total = int(m.group(1))
+            selected = m.group(2).split(',') if m.group(2) else []
+            continue
+        m = _RE_ITEM_START.match(line)
+        if m:
+            iid, idx, n, name = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
+            if total < n:
+                total = n
+            entry = by_id.get(iid)
+            if entry is None:
+                entry = {"id": iid, "name": name, "status": "RUNNING",
+                         "elapsed_ms": 0, "idx": idx, "children": []}
+                items.append(entry); by_id[iid] = entry
+                if iid not in selected:
+                    selected.append(iid)
+            else:
+                entry["status"] = "RUNNING"
+                entry["name"] = name
+                entry["idx"] = idx
+            current = iid
+            continue
+        m = _RE_ITEM_END.match(line)
+        if m:
+            iid, status, elapsed = m.group(1), m.group(2), int(m.group(3))
+            entry = by_id.get(iid)
+            if entry is None:
+                entry = {"id": iid, "name": iid, "status": status,
+                         "elapsed_ms": elapsed, "idx": len(items) + 1, "children": []}
+                items.append(entry); by_id[iid] = entry
+            else:
+                entry["status"] = status
+                entry["elapsed_ms"] = elapsed
+            if status in ("PASS", "FAIL", "SKIP"):
+                completed += 1
+            if current == iid:
+                current = None
+            continue
+        m = _RE_CHILD.match(line)
+        if m:
+            parent_id, child_id, status, elapsed, name = (
+                m.group(1), m.group(2), m.group(3), int(m.group(4)), m.group(5))
+            parent = by_id.get(parent_id)
+            if parent is None:
+                parent = {"id": parent_id, "name": parent_id, "status": "RUNNING",
+                          "elapsed_ms": 0, "idx": len(items) + 1, "children": []}
+                items.append(parent); by_id[parent_id] = parent
+            parent["children"].append({
+                "id": child_id, "name": name, "status": status, "elapsed_ms": elapsed,
+            })
+            continue
+        m = _RE_STEP_START.match(line)
+        if m:
+            step_no, step_name = m.group(1), m.group(2)
+            # Phase 2 의 22단계 → P2-RUN-ALL 의 children 으로 흡수
+            parent = by_id.get('P2-RUN-ALL')
+            if parent is None:
+                parent = {"id": "P2-RUN-ALL", "name": "Phase 2 22단계",
+                          "status": "RUNNING", "elapsed_ms": 0,
+                          "idx": len(items) + 1, "children": []}
+                items.append(parent); by_id['P2-RUN-ALL'] = parent
+                if 'P2-RUN-ALL' not in selected:
+                    selected.append('P2-RUN-ALL')
+            cid = f"P2-{step_no}"
+            existing = next((c for c in parent["children"] if c["id"] == cid), None)
+            if existing:
+                existing["status"] = "RUNNING"; existing["name"] = step_name
+            else:
+                parent["children"].append({
+                    "id": cid, "name": step_name, "status": "RUNNING", "elapsed_ms": 0,
+                })
+            continue
+        m = _RE_STEP_END.match(line)
+        if m:
+            step_no, status, elapsed = m.group(1), m.group(2), int(m.group(3))
+            parent = by_id.get('P2-RUN-ALL')
+            if parent is None:
+                continue
+            cid = f"P2-{step_no}"
+            existing = next((c for c in parent["children"] if c["id"] == cid), None)
+            if existing:
+                existing["status"] = status; existing["elapsed_ms"] = elapsed
+            continue
+
+    if not total:
+        total = len(items)
+    return {
+        "selected": selected,
+        "total": total,
+        "completed": completed,
+        "current": current,
+        "items": items,
+    }
+
+
 async def _get_job_status(job_id: str) -> HandlerResult:
     job = _JOBS.get(job_id)
     if not job:
@@ -325,6 +467,7 @@ async def _get_job_status(job_id: str) -> HandlerResult:
             tail = '\n'.join(data.splitlines()[-50:])
     except Exception:
         pass
+    progress = _parse_items_progress(job.get('log_path', ''))
     now = time.time()
     return HandlerResult(status=200, body={
         'job_id': job_id,
@@ -339,6 +482,7 @@ async def _get_job_status(job_id: str) -> HandlerResult:
         'report_path': job['report_path'] if job['done'] else None,
         'report_ts': job['report_ts'] if job['done'] else '',
         'stdout_tail': tail,
+        'items_progress': progress,
     })
 
 

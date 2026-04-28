@@ -10,7 +10,7 @@ from ... import shell
     id="P1-BUILD",
     phase=1, category="환경",
     name="build (dist only — tarball 미생성)",
-    depends_on=["P1-PREFLIGHT"],
+    depends_on=["P1-RESET"],
     presets=["phase1-full"],
     side_effects=["fs-write"], timeout_s=900,
 )

@@ -260,6 +260,116 @@ class TestExistingRegistry(unittest.TestCase):
             self.assertIn(required, names, f"missing preset: {required}")
 
 
+class TestRunnerMarkers(unittest.TestCase):
+    """[VERIFY] item-start / item-end / child-result 마커 stdout 출력.
+
+    backend (verification.py _parse_items_progress) 가 파싱하므로 형식 회귀 안전망.
+    """
+
+    def setUp(self) -> None:
+        from verify_lib import registry, runner, context
+        self.registry = registry
+        self.runner = runner
+        self.context = context
+        self._snapshot = dict(registry._REGISTRY)
+
+    def tearDown(self) -> None:
+        added = [k for k in self.registry._REGISTRY if k not in self._snapshot]
+        for k in added:
+            del self.registry._REGISTRY[k]
+
+    def _make_ctx(self, tmpdir):
+        return self.context.VerifyContext.create(
+            repo_root=os.path.dirname(_THIS_DIR), phase=99,
+            report_dir=tmpdir,
+        )
+
+    def test_runner_emits_item_markers(self) -> None:
+        """선택 항목 N개 실행 시 item-start N + item-end N 마커 출력."""
+        from verify_lib.registry import ItemResult, ItemStatus
+        @self.registry.verify_item(id="MARKER-A", phase=99, category="유닛", name="alpha")
+        def _a(ctx) -> ItemResult:
+            return ItemResult(id="MARKER-A", name="alpha", status=ItemStatus.PASS)
+        @self.registry.verify_item(id="MARKER-B", phase=99, category="유닛", name="beta")
+        def _b(ctx) -> ItemResult:
+            return ItemResult(id="MARKER-B", name="beta", status=ItemStatus.PASS)
+
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._make_ctx(td)
+            try:
+                with redirect_stdout(buf):
+                    self.runner.run_items(ctx, ["MARKER-A", "MARKER-B"])
+            finally:
+                ctx.report_close()
+        out = buf.getvalue()
+        self.assertIn("[VERIFY] run-start: total=2", out)
+        self.assertIn("[VERIFY] item-start: MARKER-A idx=1/2 name=alpha", out)
+        self.assertIn("[VERIFY] item-end: MARKER-A status=PASS", out)
+        self.assertIn("[VERIFY] item-start: MARKER-B idx=2/2 name=beta", out)
+        self.assertIn("[VERIFY] item-end: MARKER-B status=PASS", out)
+        self.assertIn("[VERIFY] run-end: total=2 pass=2", out)
+
+    def test_runner_emits_child_markers(self) -> None:
+        """ItemResult.children 이 있으면 부모 종료 전 child-result 마커 emit."""
+        from verify_lib.registry import ItemResult, ItemStatus
+        @self.registry.verify_item(id="MARKER-PARENT", phase=99, category="유닛", name="parent")
+        def _p(ctx) -> ItemResult:
+            return ItemResult(
+                id="MARKER-PARENT", name="parent", status=ItemStatus.PASS,
+                children=[
+                    ItemResult(id="C-01", name="child1", status=ItemStatus.PASS, elapsed_ms=10),
+                    ItemResult(id="C-02", name="child2", status=ItemStatus.FAIL, elapsed_ms=20),
+                ],
+            )
+
+        import io, tempfile
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._make_ctx(td)
+            try:
+                with redirect_stdout(buf):
+                    self.runner.run_items(ctx, ["MARKER-PARENT"])
+            finally:
+                ctx.report_close()
+        out = buf.getvalue()
+        self.assertIn("[VERIFY] child-result: MARKER-PARENT.C-01 status=PASS elapsed_ms=10 name=child1", out)
+        self.assertIn("[VERIFY] child-result: MARKER-PARENT.C-02 status=FAIL elapsed_ms=20 name=child2", out)
+        # 부모 종료 마커는 자식들 다음에 와야 함
+        idx_child2 = out.index("child-result: MARKER-PARENT.C-02")
+        idx_end = out.index("item-end: MARKER-PARENT")
+        self.assertLess(idx_child2, idx_end, "child-result 가 item-end 보다 먼저 emit 되어야 함")
+
+    def test_runner_emits_skip_markers_for_dep_fail(self) -> None:
+        """의존 항목 FAIL 시 후속 항목 SKIP 도 마커 emit."""
+        from verify_lib.registry import ItemResult, ItemStatus
+        @self.registry.verify_item(id="MARKER-DEP", phase=99, category="유닛", name="dep")
+        def _d(ctx) -> ItemResult:
+            return ItemResult(id="MARKER-DEP", name="dep", status=ItemStatus.FAIL)
+        @self.registry.verify_item(id="MARKER-USER", phase=99, category="유닛", name="user",
+                                    depends_on=["MARKER-DEP"])
+        def _u(ctx) -> ItemResult:
+            return ItemResult(id="MARKER-USER", name="user", status=ItemStatus.PASS)
+
+        import io, tempfile
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._make_ctx(td)
+            try:
+                with redirect_stdout(buf):
+                    self.runner.run_items(ctx, ["MARKER-DEP", "MARKER-USER"])
+            finally:
+                ctx.report_close()
+        out = buf.getvalue()
+        self.assertIn("[VERIFY] item-end: MARKER-DEP status=FAIL", out)
+        self.assertIn("[VERIFY] item-end: MARKER-USER status=SKIP", out)
+
+
 class TestOnlyChildren(unittest.TestCase):
     """모듈 자식 항목 부분 실행 인프라 — TestRunner.only_ids,
     VerifyContext.only_children_for, cims_verify._parse_only_children."""
@@ -327,6 +437,129 @@ class TestOnlyChildren(unittest.TestCase):
         s = runner.summary()
         self.assertEqual(s["pass"], 2)
         self.assertEqual(s["skip"], 0)
+
+
+class TestParseItemsProgress(unittest.TestCase):
+    """csc/src/handlers/verification.py _parse_items_progress 의 stdout 파싱.
+
+    runner.py 의 [VERIFY] item-start/item-end/child-result 마커 +
+    cims.sh _verify_phase2 의 [VERIFY] step-start/step-end 마커 정규식 검증.
+    """
+
+    def setUp(self) -> None:
+        # csc handler 모듈 import — sys.path 추가 필요
+        repo_root = os.path.dirname(_THIS_DIR)
+        csc_src = os.path.join(repo_root, "csc", "src")
+        if csc_src not in sys.path:
+            sys.path.insert(0, csc_src)
+        # httpsrv handler 인터페이스 (없으면 stub) — _parse_items_progress 만 사용하니
+        # ImportError 시 직접 모듈 한정 import
+        import importlib
+        try:
+            self.verification = importlib.import_module("handlers.verification")
+        except Exception as e:
+            self.skipTest(f"handlers.verification import 실패: {e}")
+        self._tmpfiles: list = []
+
+    def tearDown(self) -> None:
+        for p in self._tmpfiles:
+            try: os.remove(p)
+            except OSError: pass
+
+    def _write_log(self, lines: list) -> str:
+        import tempfile
+        fd, path = tempfile.mkstemp(prefix="verify_log_", suffix=".log")
+        os.close(fd)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        self._tmpfiles.append(path)
+        return path
+
+    def test_parse_basic_two_items(self) -> None:
+        log = self._write_log([
+            "[VERIFY] run-start: total=2 ids=A,B",
+            "[VERIFY] item-start: A idx=1/2 name=alpha",
+            "[VERIFY] item-end: A status=PASS elapsed_ms=320",
+            "[VERIFY] item-start: B idx=2/2 name=beta",
+            "[VERIFY] item-end: B status=FAIL elapsed_ms=100",
+        ])
+        p = self.verification._parse_items_progress(log)
+        self.assertEqual(p["total"], 2)
+        self.assertEqual(p["completed"], 2)
+        self.assertEqual(p["selected"], ["A", "B"])
+        self.assertEqual(len(p["items"]), 2)
+        self.assertEqual(p["items"][0]["status"], "PASS")
+        self.assertEqual(p["items"][0]["elapsed_ms"], 320)
+        self.assertEqual(p["items"][1]["status"], "FAIL")
+        self.assertIsNone(p["current"])
+
+    def test_parse_running_state(self) -> None:
+        """item-end 가 아직 안 온 항목은 status=RUNNING + current 로 표시."""
+        log = self._write_log([
+            "[VERIFY] run-start: total=2 ids=A,B",
+            "[VERIFY] item-start: A idx=1/2 name=alpha",
+            "[VERIFY] item-end: A status=PASS elapsed_ms=10",
+            "[VERIFY] item-start: B idx=2/2 name=beta",
+        ])
+        p = self.verification._parse_items_progress(log)
+        self.assertEqual(p["completed"], 1)
+        self.assertEqual(p["current"], "B")
+        self.assertEqual(p["items"][1]["status"], "RUNNING")
+
+    def test_parse_children(self) -> None:
+        log = self._write_log([
+            "[VERIFY] run-start: total=1 ids=MODULE-CSC",
+            "[VERIFY] item-start: MODULE-CSC idx=1/1 name=CSC 단위 테스트",
+            "[VERIFY] child-result: MODULE-CSC.CSC-AUTH-01 status=PASS elapsed_ms=320 name=로그인 성공",
+            "[VERIFY] child-result: MODULE-CSC.CSC-AUTH-02 status=FAIL elapsed_ms=10 name=로그인 실패",
+            "[VERIFY] item-end: MODULE-CSC status=FAIL elapsed_ms=12345",
+        ])
+        p = self.verification._parse_items_progress(log)
+        parent = p["items"][0]
+        self.assertEqual(parent["id"], "MODULE-CSC")
+        self.assertEqual(parent["status"], "FAIL")
+        self.assertEqual(len(parent["children"]), 2)
+        self.assertEqual(parent["children"][0]["id"], "CSC-AUTH-01")
+        self.assertEqual(parent["children"][0]["status"], "PASS")
+        self.assertEqual(parent["children"][1]["status"], "FAIL")
+
+    def test_parse_phase2_steps_to_children(self) -> None:
+        """Phase 2 의 step-start/step-end 가 P2-RUN-ALL 의 children 으로 흡수."""
+        log = self._write_log([
+            "[VERIFY] item-start: P2-RUN-ALL idx=1/1 name=Phase2 22단계",
+            "[VERIFY] step-start: 01 Cleanup",
+            "[VERIFY] step-end: 01 status=PASS elapsed_ms=500",
+            "[VERIFY] step-start: 02 Build",
+            "[VERIFY] step-end: 02 status=PASS elapsed_ms=15000",
+            "[VERIFY] step-start: 03 Configure",
+            "[VERIFY] item-end: P2-RUN-ALL status=FAIL elapsed_ms=20000",
+        ])
+        p = self.verification._parse_items_progress(log)
+        parent = p["items"][0]
+        self.assertEqual(parent["id"], "P2-RUN-ALL")
+        self.assertEqual(parent["status"], "FAIL")
+        # 자식: 01 PASS, 02 PASS, 03 RUNNING (step-end 없음)
+        ids = [c["id"] for c in parent["children"]]
+        self.assertEqual(ids, ["P2-01", "P2-02", "P2-03"])
+        self.assertEqual(parent["children"][0]["status"], "PASS")
+        self.assertEqual(parent["children"][1]["elapsed_ms"], 15000)
+        self.assertEqual(parent["children"][2]["status"], "RUNNING")
+
+    def test_parse_strips_ansi(self) -> None:
+        """ANSI 컬러 코드가 섞여 있어도 파싱 가능."""
+        log = self._write_log([
+            "\x1b[32m[VERIFY] run-start: total=1 ids=A\x1b[0m",
+            "\x1b[36m[VERIFY] item-start: A idx=1/1 name=test\x1b[0m",
+            "[VERIFY] item-end: A status=PASS elapsed_ms=5",
+        ])
+        p = self.verification._parse_items_progress(log)
+        self.assertEqual(p["total"], 1)
+        self.assertEqual(p["items"][0]["status"], "PASS")
+
+    def test_parse_empty_log(self) -> None:
+        p = self.verification._parse_items_progress("/nonexistent/path")
+        self.assertEqual(p["total"], 0)
+        self.assertEqual(p["items"], [])
 
 
 if __name__ == "__main__":

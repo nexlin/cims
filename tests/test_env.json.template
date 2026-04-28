@@ -12,7 +12,7 @@
     },
     "csc": {
         "host": "@CSC_HOST@",
-        "admin_port": 4420,
+        "admin_port": 4421,
         "mcptt_port": 4430
     },
     "domains": {

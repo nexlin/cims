@@ -721,8 +721,13 @@ cmd_reset() {
             pkill -f "cims_agent.py.*--name csp-server-local" 2>/dev/null || true
             pkill -f "cims_agent.py.*--name cmp-server-local" 2>/dev/null || true
             pkill -f "cims_agent.py.*--name sim-server-local" 2>/dev/null || true
-            sleep 1
+            # 배포본 서비스 프로세스 (csc_app.py, console serve, csp/cmp 바이너리) 도 종료
+            # — 4445/4430/8081/5060/9000 등 포트 잠금 해제 (Phase 1 검증 시 mcptt 4430 충돌 방지)
             local _s
+            for _s in csc-server csp-server cmp-server sim-server; do
+                pkill -f "$DIST_DIR/$_s/" 2>/dev/null || true
+            done
+            sleep 1
             for _s in csc-server csp-server cmp-server sim-server; do
                 [[ -d "$DIST_DIR/$_s" ]] && rm -rf "$DIST_DIR/$_s"
             done
@@ -903,6 +908,20 @@ cmd_preflight() {
         fi
     done
 
+    # Phase 2 배포본 잔존 감지 — Phase 1 의 mcptt(4430) 와 충돌 가능
+    info "[Phase 2 배포본 잔존] csc 4445 / console 8081 — 살아있으면 Phase 1 검증 시 충돌"
+    local p2_residual=0
+    for pp in "4445:tcp:배포본 csc" "8081:tcp:배포본 console"; do
+        port="${pp%%:*}"; label="${pp##*:}"; proto="$(echo "$pp" | cut -d: -f2)"
+        line=$(ss -Htlnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print; exit}' || true)
+        if [[ -n $line ]]; then
+            pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+            warn "$label (port $port/tcp) 잔존 (pid=${pid:-?}) — './cims.sh reset' 또는 'verify phase2 --stop-after' 권장"
+            p2_residual=1
+        fi
+    done
+    [[ $p2_residual -eq 0 ]] && ok "Phase 2 배포본 미동작 (clean)"
+
     # 4) DB 연결 확인
     local cfg="$DIST_DIR/csp/config/csp.json"
     [[ ! -f $cfg && -n "$SRC_CONSOLE" ]] && cfg="$SCRIPT_DIR/csp/csp.json"
@@ -967,6 +986,30 @@ cmd_verify() {
 }
 
 
+# Phase 2 22단계 step marker — backend (verification.py _parse_items_progress) 가 stdout 파싱.
+# `_P2_STEP_*` 는 _verify_phase2 안에서만 set 되도록 local 선언됨.
+_p2_step() {  # $1=NN $2=단계명
+    local now ms
+    now=$(date +%s%3N 2>/dev/null) || now=$(($(date +%s) * 1000))
+    if [[ -n "${_P2_STEP_LAST:-}" && -n "${_P2_STEP_T0:-}" ]]; then
+        ms=$((now - _P2_STEP_T0))
+        echo "[VERIFY] step-end: $_P2_STEP_LAST status=PASS elapsed_ms=$ms"
+    fi
+    _P2_STEP_LAST="$1"
+    _P2_STEP_T0="$now"
+    echo "[VERIFY] step-start: $1 $2"
+}
+_p2_step_done() {  # $1=PASS|FAIL|SKIP (default PASS)
+    local now ms status="${1:-PASS}"
+    now=$(date +%s%3N 2>/dev/null) || now=$(($(date +%s) * 1000))
+    if [[ -n "${_P2_STEP_LAST:-}" && -n "${_P2_STEP_T0:-}" ]]; then
+        ms=$((now - _P2_STEP_T0))
+        echo "[VERIFY] step-end: $_P2_STEP_LAST status=$status elapsed_ms=$ms"
+        _P2_STEP_LAST=""
+        _P2_STEP_T0=""
+    fi
+}
+
 # ──────────────────────────────────────────────────────────────
 # Phase 2 — TB-CSC(4419) → Test-agent → csc-server/ 배포 체인 검증
 #   기능 회귀 반복 X. 배포 메커니즘 자체만 확인 (§0.2 / §0.10).
@@ -975,6 +1018,10 @@ cmd_verify() {
 # ──────────────────────────────────────────────────────────────
 _verify_phase2() {
     [[ -z "$SRC_CONSOLE" ]] && { err "verify phase2 는 소스 트리에서만 실행 가능"; return 1; }
+
+    # 22 단계 step marker 상태 (helper 가 참조)
+    local _P2_STEP_LAST="" _P2_STEP_T0=""
+    echo "[VERIFY] item-start: P2-RUN-ALL idx=1/1 name=Phase2 22단계"
 
     # 기본 동작 (2026-04-25): Phase 2 종료 시 배포본 csc (4445 overlay) 와 Test-agent 를 유지.
     # 사용자가 Phase 3 진입 전에 UI 로 배포 상태를 직접 확인 가능. --stop-after 지정 시 기존처럼
@@ -1030,6 +1077,7 @@ _verify_phase2() {
     #      · cims_agent (TB 보존 외 DELETE) + agent_deployment/job/metric TRUNCATE
     #      · 발급 cert (cert/agent_mtls/issued) 정리
     #    verify_reports/ 는 절대 건드리지 않음 (이번 verify 의 report 보존)
+    _p2_step "01" "Cleanup"
     echo "## 1. Cleanup" >> "$report"
     cmd_reset --all --keep-processes >/dev/null 2>&1 || true
     mkdir -p "$DIST_DIR/csc-server/agent/state"
@@ -1038,6 +1086,7 @@ _verify_phase2() {
 
     # 2) Build (옵션)
     if [[ $skip_build -eq 0 ]]; then
+        _p2_step "02" "Build"
         echo "## 2. Build" >> "$report"
         echo '```' >> "$report"
         if ! cmd_build 2>&1 | tail -20 >> "$report"; then
@@ -1045,11 +1094,13 @@ _verify_phase2() {
         fi
         echo '```' >> "$report"
     else
+        _p2_step "02" "Build — SKIPPED"
         echo "## 2. Build — SKIPPED" >> "$report"
     fi
     echo "" >> "$report"
 
     # 3) Configure
+    _p2_step "03" "Configure"
     echo "## 3. Configure" >> "$report"
     echo '```' >> "$report"
     if [[ -n "$ens_ip" ]]; then
@@ -1060,11 +1111,13 @@ _verify_phase2() {
 
     # 4) Pkg --no-bump (옵션)
     if [[ $skip_pkg -eq 0 ]]; then
+        _p2_step "04" "Pkg (tarball, --no-bump)"
         echo "## 4. Pkg (tarball, --no-bump)" >> "$report"
         echo '```' >> "$report"
         cmd_pkg --no-bump 2>&1 | tail -15 >> "$report" || true
         echo '```' >> "$report"
     else
+        _p2_step "04" "Pkg — SKIPPED"
         echo "## 4. Pkg — SKIPPED" >> "$report"
     fi
     echo "" >> "$report"
@@ -1083,6 +1136,7 @@ _verify_phase2() {
         echo "**FAIL: admin login**" >> "$report"
         return 1
     fi
+    _p2_step "05" "Admin login (TB-CSC)"
     echo "## 5. Admin login OK" >> "$report"
     echo "" >> "$report"
 
@@ -1115,6 +1169,7 @@ for r in items:
     aid=$(echo "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')
     enroll_tok=$(echo "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("enrollment_token",""))')
     curl -sk -X POST -H "Authorization: Bearer $tok" "$base/api/v1/agents/$aid/approve" >/dev/null 2>&1
+    _p2_step "06" "Agent 등록"
     echo "## 6. Agent 등록" >> "$report"
     echo "- agent_id: $aid (name=$aname, approved)" >> "$report"
     echo "" >> "$report"
@@ -1133,6 +1188,7 @@ for r in items:
         --heartbeat-sec 3 \
         > "$ta_log" 2>&1 &
     local ta_pid=$!
+    _p2_step "07" "Test-agent 기동 + enroll 대기"
     echo "## 7. Test-agent 기동" >> "$report"
     echo "- pid=$ta_pid, sync=9903, state-dir=csc-server/agent/state" >> "$report"
     local ready=0 i
@@ -1154,6 +1210,7 @@ for r in items:
     echo "" >> "$report"
 
     # 8) Package upload (csc, console)
+    _p2_step "08" "Package upload (csc + console)"
     echo "## 8. Package upload" >> "$report"
     local pkg_dir="$DIST_DIR/packages"
     declare -A pkg_id_map
@@ -1181,6 +1238,7 @@ except: pass' 2>/dev/null)
     echo "" >> "$report"
 
     # 9) Deployment 생성 (+ config overlay — csc 는 Phase 1 과 포트 충돌 회피 위해 4445)
+    _p2_step "09" "Deployment 생성 (config overlay)"
     echo "## 9. Deployment 생성 (config overlay 포함)" >> "$report"
     declare -A dep_id_map
     local did pname install_path cfg_json
@@ -1214,6 +1272,7 @@ except: pass' 2>/dev/null)
     echo "" >> "$report"
 
     # 10) Install jobs queue + poll
+    _p2_step "10" "Install job + 상태 폴링"
     echo "## 10. Install job + 상태 폴링 (최대 60s)" >> "$report"
     for name in csc console; do
         did=${dep_id_map[$name]:-}
@@ -1252,6 +1311,7 @@ except: pass' 2>/dev/null)
     echo "" >> "$report"
 
     # 11) 설치 파일 검증
+    _p2_step "11" "설치 파일 검증"
     echo "## 11. 설치 파일 검증" >> "$report"
     local verified_ok=1
     for name in csc console; do
@@ -1268,6 +1328,7 @@ except: pass' 2>/dev/null)
     echo "" >> "$report"
 
     # 12) config overlay 반영 검증 (install_path/config.json)
+    _p2_step "12" "config overlay 검증"
     echo "## 12. config overlay 검증 (install_path/config.json)" >> "$report"
     local overlay_ok=1
     local csc_overlay_port
@@ -1287,6 +1348,7 @@ except: print('')" 2>/dev/null)
     echo "" >> "$report"
 
     # 13) Start job (csc) + 기동 확인
+    _p2_step "13" "Start job (csc) + 포트 4445 LISTEN"
     echo "## 13. Start job (csc) + 포트 4445 LISTEN 대기" >> "$report"
     local csc_did=${dep_id_map[csc]:-}
     local start_ok=0 start_elapsed=0
@@ -1312,6 +1374,7 @@ except: print('')" 2>/dev/null)
     echo "" >> "$report"
 
     # 14) Health check job
+    _p2_step "14" "csc Health check"
     echo "## 14. Health check job" >> "$report"
     local health_ok=0 health_result="(not-run)"
     if [[ -n $csc_did && $start_ok -eq 1 ]]; then
@@ -1345,6 +1408,7 @@ except: pass' 2>/dev/null)
 
     # ── v4 (2026-04-25): Phase 2 에서 csp/cmp/cspsim 까지 배포+기동. Phase 3 는 서비스 검증만. ──
     # 15) console start + 8081 LISTEN
+    _p2_step "15" "Start job (console) + 포트 8081 LISTEN"
     echo "## 15. Start job (console) + 포트 8081 LISTEN 대기" >> "$report"
     local console_did=${dep_id_map[console]:-}
     local console_start_ok=0 console_elapsed=0
@@ -1376,6 +1440,7 @@ except: pass' 2>/dev/null)
             -d "{\"login_id\":\"$admin_id\",\"password\":\"$admin_pw\"}" 2>/dev/null \
             | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
     fi
+    _p2_step "16" "배포본 csc admin login"
     echo "## 16. 배포본 csc($base2) admin login" >> "$report"
     if [[ -n $tok2 ]]; then
         echo "- OK — Phase 3 배포 주체 준비 완료" >> "$report"
@@ -1385,6 +1450,7 @@ except: pass' 2>/dev/null)
     echo "" >> "$report"
 
     # 17) csp/cmp/cspsim tarball 을 배포본 csc 에 업로드
+    _p2_step "17" "Package upload (csp/cmp/cspsim)"
     echo "## 17. Package upload → 배포본 csc($base2): csp / cmp / cspsim" >> "$report"
     declare -A pkg2_id_map pkg2_name_map dir_name_map
     pkg2_name_map[csp]=csp
@@ -1419,6 +1485,7 @@ except: pass' 2>/dev/null)
     echo "" >> "$report"
 
     # 18) 3개 agent 등록 + Test-agent 기동 (배포본 csc 4445 대상)
+    _p2_step "18" "Agent 등록 + Test-agent 기동 (sync 9904-9906)"
     echo "## 18. Agent 등록 + Test-agent 기동 (sync 9904/9905/9906)" >> "$report"
     declare -A aid2_map pid2_map sync2_map
     sync2_map[csp]=9904
@@ -1488,6 +1555,7 @@ for r in items:
     echo "" >> "$report"
 
     # 19) Deployment 생성 (csp/cmp/cspsim)
+    _p2_step "19" "Deployment 생성 (csp/cmp/cspsim)"
     echo "## 19. Deployment 생성 (csp / cmp / cspsim)" >> "$report"
     declare -A dep2_id_map
     local did2 pname2 install_path2 modname
@@ -1515,6 +1583,7 @@ except: pass' 2>/dev/null)
     echo "" >> "$report"
 
     # 20) Install jobs + poll
+    _p2_step "20" "Install job + 폴링"
     echo "## 20. Install job + 폴링 (최대 60s)" >> "$report"
     local all_done2=0 elapsed2=0
     if [[ -n $tok2 ]]; then
@@ -1541,6 +1610,7 @@ except: pass' 2>/dev/null)
     echo "" >> "$report"
 
     # 21) csp/cmp Start + LISTEN (sim 은 install-only — 단발 실행)
+    _p2_step "21" "Start (csp/cmp) — sim install-only"
     echo "## 21. Start (csp 5060/udp, cmp 9000/udp) — sim install-only" >> "$report"
     declare -A port2_map proto2_map
     port2_map[csp]=5060; proto2_map[csp]=udp
@@ -1581,6 +1651,7 @@ except: pass' 2>/dev/null)
     # 22) Stop 및 Test-agent 종료 — --stop-after 에만 수행
     local stop_ok=-1
     if [[ $stop_after -eq 1 ]]; then
+        _p2_step "22" "Stop job (all) — --stop-after"
         echo "## 22. Stop job (all) — --stop-after" >> "$report"
         # csc/console stop
         for did in "${csc_did}" "${console_did}"; do
@@ -1606,6 +1677,7 @@ except: pass' 2>/dev/null)
         sleep 1
         echo "- Test-agent 4개 전부 종료" >> "$report"
     else
+        _p2_step "22" "전체 기동 유지 (기본)"
         echo "## 22. 전체 기동 유지 (기본 동작)" >> "$report"
         echo "- csc(4445) · console(8081) · csp(5060/udp) · cmp(9000/udp) 기동" >> "$report"
         echo "- Test-agent 4개 sync 9903/9904/9905/9906 heartbeat 유지" >> "$report"
@@ -1643,6 +1715,9 @@ except: pass' 2>/dev/null)
             echo "- **전체 기동 유지** (Phase 3 진입 조건 충족)"
         fi
     } >> "$report"
+
+    _p2_step_done "$verdict"
+    echo "[VERIFY] item-end: P2-RUN-ALL status=$verdict elapsed_ms=0"
 
     header "=== Phase 2 검증 종료 ==="
     [[ $verdict == "PASS" ]] && ok "Phase 2: PASS" || err "Phase 2: FAIL"

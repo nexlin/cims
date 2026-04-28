@@ -10,7 +10,7 @@ from ... import shell
     id="P1-CONFIGURE",
     phase=1, category="환경",
     name="configure --local-ip <ens160> (csp/cmp/csc/cwrtc/console 설정 재생성)",
-    depends_on=["P1-PREFLIGHT"],
+    depends_on=["P1-BUILD"],
     presets=["phase1-full"],
     side_effects=["fs-write"], timeout_s=60,
 )
