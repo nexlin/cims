@@ -47,8 +47,8 @@ def _parse_stats(output):
     return stats
 
 
-def run_ptt_tests():
-    runner = TestRunner("PTT-서비스")
+def run_ptt_tests(only=None):
+    runner = TestRunner("PTT-서비스", only_ids=only)
     c = CscClient()
     c.login()
 

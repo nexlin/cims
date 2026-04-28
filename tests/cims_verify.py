@@ -111,6 +111,41 @@ def cmd_describe(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_only_children(raw) -> dict:
+    """--only-children 인자(list[str] 또는 None) → {parent_id: [child_id]} 매핑.
+
+    각 항목이 JSON 객체면 그대로 merge, "PARENT=A,B,C" 형식이면 split.
+    빈 입력은 {} 반환.
+    """
+    if not raw:
+        return {}
+    out: dict = {}
+    for spec in raw:
+        s = (spec or "").strip()
+        if not s:
+            continue
+        if s.startswith("{"):
+            try:
+                obj = json.loads(s)
+            except Exception as e:
+                print(f"--only-children JSON 파싱 실패: {e}", file=sys.stderr); sys.exit(2)
+            if not isinstance(obj, dict):
+                print(f"--only-children JSON 은 object 여야 함: {s}", file=sys.stderr); sys.exit(2)
+            for k, v in obj.items():
+                ids = v if isinstance(v, list) else [v]
+                out.setdefault(k, []).extend(str(x) for x in ids if x)
+        elif "=" in s:
+            parent, _, rest = s.partition("=")
+            parent = parent.strip()
+            ids = [x.strip() for x in rest.split(",") if x.strip()]
+            if parent and ids:
+                out.setdefault(parent, []).extend(ids)
+        else:
+            print(f"--only-children 형식 오류 (PARENT=CHILD1,CHILD2 또는 JSON): {s}",
+                  file=sys.stderr); sys.exit(2)
+    return out
+
+
 def _resolve_run_selection(args: argparse.Namespace) -> tuple:
     """args → (item_ids, phase). phase 는 리포트 파일명용 (선택 항목들의 다수결)."""
     items = []
@@ -146,6 +181,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         "keep_agent": bool(args.keep_agent),
         "stop_after": bool(args.stop_after),
     }
+    only_children = _parse_only_children(args.only_children)
+    if only_children:
+        opts["only_children"] = only_children
     ctx = VerifyContext.create(repo_root=repo_root, phase=phase, opts=opts,
                                report_dir=args.report_dir)
 
@@ -226,6 +264,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--skip-reset", action="store_true")
     p_run.add_argument("--keep-agent", action="store_true")
     p_run.add_argument("--stop-after", action="store_true")
+    p_run.add_argument(
+        "--only-children",
+        action="append", default=None,
+        help=(
+            "부모 항목 자식 ID 필터. 형식: PARENT=CHILD1,CHILD2 "
+            "(예: --only-children MODULE-CSC=CSC-AUTH-01,CSC-USER-01). "
+            "JSON 도 가능: --only-children '{\"MODULE-CSC\":[\"CSC-AUTH-01\"]}'. "
+            "여러 번 지정 가능."
+        ),
+    )
     p_run.set_defaults(_func=cmd_run)
 
     return p

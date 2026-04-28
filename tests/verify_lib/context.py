@@ -120,3 +120,13 @@ class VerifyContext:
     def stop_after(self) -> bool: return bool(self.opts.get("stop_after", False))
     @property
     def sim_ip(self) -> str: return self.ens_ip or "127.0.0.1"
+
+    def only_children_for(self, item_id: str) -> Optional[set]:
+        """주어진 부모 항목(MODULE-CSC 등) 하위 자식 ID 필터.
+
+        opts["only_children"] 형식: {"MODULE-CSC": ["CSC-AUTH-01", "CSC-USER-01"]}
+        값이 없거나 빈 리스트면 None (전체 실행).
+        """
+        m = self.opts.get("only_children") or {}
+        ids = m.get(item_id) if isinstance(m, dict) else None
+        return set(ids) if ids else None

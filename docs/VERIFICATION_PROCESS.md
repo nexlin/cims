@@ -179,6 +179,51 @@ cims.sh verify phase1   # (1)~(7) 자동. (8) 유지는 기본 동작.
 
 내부 흐름: preflight → reset → build → configure → start → §0.9/§0.10 시나리오 → 리포트.
 
+#### 1.3.1 verify_lib — 항목/프리셋 단위 부분 실행
+
+cims.sh 의 Phase 1/3 verify 본체는 **`tests/verify_lib/` (Python)** 으로 분리됨 (커밋 `a710177`). 모든 검증 항목은 metadata + 의존성을 가지고 registry 에 등록되어 있고, 항목·프리셋·phase 단위 부분 실행을 지원한다. cims.sh 의 `verify` subcommand 는 thin wrapper.
+
+```bash
+# 메타 조회
+cims.sh verify list                              # 모든 항목 (phase 그룹화)
+cims.sh verify list --phase 1                    # Phase 1 항목만
+cims.sh verify list-presets                      # 8 프리셋
+cims.sh verify describe P1-PREFLIGHT             # 항목 상세 (deps, side_effects, timeout)
+
+# 부분 실행 (items > preset > phase 우선순위)
+cims.sh verify phase1 --items P1-PREFLIGHT,P1-START,P1-HEALTH
+cims.sh verify phase1 --preset phase1-quick      # preflight + health 만 (가벼운 sanity)
+cims.sh verify phase3 --preset phase3-volte      # VoLTE 시나리오만 (5 항목)
+
+# JSON 출력 (스크립트/CI 연동)
+cims.sh verify phase1 --json
+```
+
+총 27 항목 / 카테고리별: 환경 9, 시나리오 6, 모듈 9, 검증 2, 배포 1.
+
+| Phase | 프리셋 | 항목 수 | 구성 |
+|---|---|---|---|
+| 1 | `phase1-main` | 10 | preflight/reset/build/configure/start/pkg-upload/health/seed/regress-voip/regress-ptt — **TB-Console 기본** |
+| 1 | `phase1-full` | 19 | phase1-main + run_all.py 모듈 9 — 전 항목 |
+| 1 | `phase1-quick` | 2 | preflight + health |
+| 1 | `phase1-modules` | 9 | run_all.py 모듈 9 (CSC/CSP/CMP/E2E/PTT/MEDIA/VOLTE/SIP-RUNTIME/AGENT-DEPLOY) — 디버깅 드릴다운 |
+| 2 | `phase2-full` | 1 | `P2-RUN-ALL` (cims.sh `_verify_phase2` 22단계 wrapping) |
+| 3 | `phase3-full` | 7 | entry-check + seed + VoLTE/PTT 4시나리오 + summary |
+| 3 | `phase3-volte` | 5 | entry-check + seed + VoLTE 음성/영상 + summary |
+| 3 | `phase3-ptt` | 5 | entry-check + seed + PTT 음성/영상 + summary |
+
+**신규 항목 추가**: `tests/verify_lib/items/phase{N}/` 에 `@verify_item` 데코레이터로 함수 등록 → `__init__.py` 에 import 한 줄 → 다음 console mount 시 체크박스 자동 노출.
+
+**자동 테스트**: `python3 -m unittest tests.test_verify_lib` — 17 테스트 (registry/runner/presets), 외부 의존성 0.
+
+**Backend API** (TB-CSC 4419):
+- `GET /api/v1/verification/items?phase=N` — 항목 트리 (60s 캐시)
+- `GET /api/v1/verification/presets` — 프리셋 목록
+- `POST /api/v1/verification/phases/<N>` (body `items: string[]`) — 부분 실행 (`async=true` 시 job_id 즉시 반환)
+- `GET /api/v1/verification/jobs/<id>` — async job 폴링
+
+**TB-Console UI**: phase 탭별 카테고리 그룹화 / 프리셋 버튼 / 진행 폴링 + sessionStorage 영속화 (페이지 이동/새로고침 후 자동 복원).
+
 ### 1.4 이슈 처리
 
 - Blocker / Major → 코드 보완 후 Phase 1 의 (1) 부터 재수행
@@ -354,6 +399,10 @@ cims.sh start tb
 
 # Phase 1 — 배포 전 검증
 cims.sh verify phase1
+cims.sh verify list --phase 1                   # 항목 메타 조회 (verify_lib)
+cims.sh verify list-presets                     # 8 프리셋
+cims.sh verify phase1 --preset phase1-quick     # preflight + health 만 (sanity)
+cims.sh verify phase1 --items MODULE-CSC,MODULE-PTT  # 특정 모듈만 부분 실행
 
 # Phase 2 — 배포 과정 + 환경 구축 (csc/console/csp/cmp/cspsim install + start)
 cims.sh build

@@ -8,8 +8,8 @@ from conftest import (CscClient, csp_request, cmp_request, TestRunner,
                        TEST_PREFIX, TEST_VOIP_MSISDN, TEST_PTT_MSISDN, TEST_GROUP_ID)
 
 
-def run_e2e_tests():
-    runner = TestRunner("E2E")
+def run_e2e_tests(only=None):
+    runner = TestRunner("E2E", only_ids=only)
     c = CscClient()
     try:
         c.login()

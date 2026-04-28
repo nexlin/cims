@@ -40,6 +40,9 @@ ext/ffmpeg-*/
 # Test run logs
 test_run/log/
 
+# Verify reports (cims.sh verify / tests/cims_verify.py 결과)
+verify_reports/
+
 # Lock files
 **/*.lock
 

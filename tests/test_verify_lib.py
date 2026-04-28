@@ -260,5 +260,74 @@ class TestExistingRegistry(unittest.TestCase):
             self.assertIn(required, names, f"missing preset: {required}")
 
 
+class TestOnlyChildren(unittest.TestCase):
+    """모듈 자식 항목 부분 실행 인프라 — TestRunner.only_ids,
+    VerifyContext.only_children_for, cims_verify._parse_only_children."""
+
+    def test_parse_only_children_kv_form(self) -> None:
+        from cims_verify import _parse_only_children
+        out = _parse_only_children(["MODULE-CSC=CSC-AUTH-01,CSC-USER-01"])
+        self.assertEqual(out, {"MODULE-CSC": ["CSC-AUTH-01", "CSC-USER-01"]})
+
+    def test_parse_only_children_json_form(self) -> None:
+        from cims_verify import _parse_only_children
+        out = _parse_only_children(['{"MODULE-CSC":["CSC-AUTH-01"],"MODULE-CMP":["CMP-CMD-01"]}'])
+        self.assertEqual(out, {"MODULE-CSC": ["CSC-AUTH-01"], "MODULE-CMP": ["CMP-CMD-01"]})
+
+    def test_parse_only_children_multiple_specs(self) -> None:
+        from cims_verify import _parse_only_children
+        out = _parse_only_children([
+            "MODULE-CSC=CSC-AUTH-01",
+            "MODULE-CSC=CSC-USER-01,CSC-USER-02",
+            "MODULE-CMP=CMP-CMD-01",
+        ])
+        self.assertEqual(set(out.keys()), {"MODULE-CSC", "MODULE-CMP"})
+        self.assertEqual(set(out["MODULE-CSC"]), {"CSC-AUTH-01", "CSC-USER-01", "CSC-USER-02"})
+        self.assertEqual(out["MODULE-CMP"], ["CMP-CMD-01"])
+
+    def test_parse_only_children_empty(self) -> None:
+        from cims_verify import _parse_only_children
+        self.assertEqual(_parse_only_children(None), {})
+        self.assertEqual(_parse_only_children([]), {})
+
+    def test_context_only_children_for(self) -> None:
+        from verify_lib.context import VerifyContext
+        ctx = VerifyContext.create(
+            repo_root=os.path.dirname(_THIS_DIR), phase=1,
+            opts={"only_children": {"MODULE-CSC": ["CSC-AUTH-01", "CSC-AUTH-02"]}},
+        )
+        try:
+            self.assertEqual(ctx.only_children_for("MODULE-CSC"),
+                             {"CSC-AUTH-01", "CSC-AUTH-02"})
+            self.assertIsNone(ctx.only_children_for("MODULE-CMP"))  # 미지정
+            self.assertIsNone(ctx.only_children_for("UNKNOWN"))
+        finally:
+            ctx.report_close()
+            try: os.remove(ctx.report_path)
+            except OSError: pass
+
+    def test_test_runner_only_ids_skips_others(self) -> None:
+        """tests/conftest.py 의 TestRunner — only_ids 지정 시 미포함 ID 는 SKIP."""
+        from conftest import TestRunner
+        runner = TestRunner("UNIT", only_ids={"X-01", "X-03"})
+        runner.run("X-01", "선택", lambda: (True, "ok"))
+        runner.run("X-02", "미선택", lambda: (True, "should be skipped"))
+        runner.run("X-03", "선택2", lambda: (False, "fail"))
+        s = runner.summary()
+        by_id = {r["id"]: r for r in s["results"]}
+        self.assertEqual(by_id["X-01"]["status"], "PASS")
+        self.assertEqual(by_id["X-02"]["status"], "SKIP")
+        self.assertEqual(by_id["X-03"]["status"], "FAIL")
+
+    def test_test_runner_only_ids_none_runs_all(self) -> None:
+        from conftest import TestRunner
+        runner = TestRunner("UNIT", only_ids=None)
+        runner.run("X-01", "all-1", lambda: (True, ""))
+        runner.run("X-02", "all-2", lambda: (True, ""))
+        s = runner.summary()
+        self.assertEqual(s["pass"], 2)
+        self.assertEqual(s["skip"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

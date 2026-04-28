@@ -54,8 +54,8 @@ def _cleanup(c: CscClient):
             c.delete(f"/api/v1/packages/{p['id']}")
 
 
-def run_agent_deployment_tests():
-    run = TestRunner("test_agent_deployment")
+def run_agent_deployment_tests(only=None):
+    run = TestRunner("test_agent_deployment", only_ids=only)
     c = CscClient()
     r = c.login()
     if not c.token:

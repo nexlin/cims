@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from conftest import cmp_request, TestRunner
 
 
-def run_cmp_tests():
-    runner = TestRunner("CMP")
+def run_cmp_tests(only=None):
+    runner = TestRunner("CMP", only_ids=only)
 
     # ================================================================
     # CMP-CMD: 제어 명령

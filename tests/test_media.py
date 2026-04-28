@@ -104,8 +104,8 @@ def _find_recording_files(rec_dir):
     return files
 
 
-def run_media_tests():
-    runner = TestRunner("미디어-녹취")
+def run_media_tests(only=None):
+    runner = TestRunner("미디어-녹취", only_ids=only)
     c = CscClient()
     c.login()
 

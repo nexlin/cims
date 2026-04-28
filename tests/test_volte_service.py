@@ -47,8 +47,8 @@ def _parse_stats(output):
     return stats
 
 
-def run_volte_tests():
-    runner = TestRunner("VoLTE-서비스")
+def run_volte_tests(only=None):
+    runner = TestRunner("VoLTE-서비스", only_ids=only)
     c = CscClient()
     c.login()
 

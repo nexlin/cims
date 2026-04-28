@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from conftest import CscClient, TestRunner, TEST_PREFIX, TEST_VOIP_MSISDN, TEST_PTT_MSISDN, TEST_GROUP_ID
 
 
-def run_csc_tests():
-    runner = TestRunner("CSC")
+def run_csc_tests(only=None):
+    runner = TestRunner("CSC", only_ids=only)
     c = CscClient()
 
     # 테스트용 상태 보관

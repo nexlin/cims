@@ -61,8 +61,8 @@ def _parse_stats(output):
     return stats
 
 
-def run_csp_tests():
-    runner = TestRunner("CSP")
+def run_csp_tests(only=None):
+    runner = TestRunner("CSP", only_ids=only)
 
     # ================================================================
     # CSP-IF: CscInterface UDP 명령

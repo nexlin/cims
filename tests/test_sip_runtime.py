@@ -107,8 +107,8 @@ def _cleanup_runtime(c: CscClient):
 #  메인
 # ──────────────────────────────────────────────────────────────
 
-def run_sip_runtime_tests():
-    runner = TestRunner("SIP-RUNTIME")
+def run_sip_runtime_tests(only=None):
+    runner = TestRunner("SIP-RUNTIME", only_ids=only)
     c = CscClient()
     login = c.login()
     if not c.token:

@@ -354,6 +354,7 @@ def _build_phase_argv(phase: int, opts: dict) -> list:
     skip_reset = bool(opts.get('skip_reset', False))
     keep_agent = bool(opts.get('keep_agent', False))
     items      = opts.get('items') or []
+    only_children = opts.get('only_children') or {}
 
     argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'verify', f'phase{phase}']
     if skip_build: argv.append('--skip-build')
@@ -366,6 +367,9 @@ def _build_phase_argv(phase: int, opts: dict) -> list:
     # Step 1: Phase 3, Step 2: Phase 1, Step 3: Phase 2 (단일 P2-RUN-ALL 항목).
     if phase in (1, 2, 3) and items:
         argv += ['--items', ','.join(items)]
+    # 모듈 자식 항목 부분 실행 — JSON 인코딩으로 단일 인자 전달
+    if isinstance(only_children, dict) and only_children:
+        argv += ['--only-children', json.dumps(only_children, ensure_ascii=False)]
     return argv
 
 

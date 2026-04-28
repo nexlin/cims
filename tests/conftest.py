@@ -213,13 +213,20 @@ class TestResult:
 
 
 class TestRunner:
-    def __init__(self, module_name):
+    def __init__(self, module_name, only_ids=None):
+        """only_ids: 지정 시 해당 ID 만 실행, 나머지는 SKIP (부분 실행 지원)."""
         self.module = module_name
         self.results = []
+        self.only_ids = set(only_ids) if only_ids else None
 
     def run(self, test_id, name, func):
         """테스트 함수 실행 및 결과 수집"""
         r = TestResult(test_id, name)
+        if self.only_ids is not None and test_id not in self.only_ids:
+            r.status = "SKIP"
+            r.detail = "only_ids 필터 외"
+            self.results.append(r)
+            return
         t0 = time.time()
         try:
             ok, detail = func()

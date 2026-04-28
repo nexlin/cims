@@ -48,8 +48,10 @@ def _run_module(module_name: str, fn: Callable, ctx: VerifyContext) -> ItemResul
     item_id = f"MODULE-{module_name}"
     title = f"{module_name} 모듈 단위 테스트"
     t0 = time.time()
+    only = ctx.only_children_for(item_id)
     try:
-        d = fn() or {}
+        d = fn(only=only) if only else fn()
+        d = d or {}
     except Exception as e:
         ctx.w(f"### {item_id} — {title}")
         ctx.w(f"- [FAIL] {type(e).__name__}: {e}")
