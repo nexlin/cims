@@ -57,6 +57,28 @@ interface PhaseJobStatus {
   stdout_tail: string
 }
 
+interface VerifyItemMeta {
+  id: string
+  phase: number
+  category: string
+  name: string
+  depends_on: string[]
+  presets: string[]
+  side_effects?: string[]
+  timeout_s?: number
+  description?: string
+}
+
+interface VerifyPreset {
+  name: string
+  items: string[]
+}
+
+interface VerifyItemsResponse {
+  phases: Array<{ phase: number; items: VerifyItemMeta[] }>
+  presets: VerifyPreset[]
+}
+
 interface PhaseReport {
   phase: number
   path: string
@@ -90,6 +112,13 @@ function _ssSet<T>(key: string, v: T | null) {
 }
 const _resultKey = (p: Phase) => `verify.phase${p}.result`
 const _reportKey = (p: Phase) => `verify.phase${p}.report`
+const _activeJobKey = 'verify.activeJob'
+
+interface ActiveJob {
+  phase: Phase
+  jobId: string
+  startedAt: number
+}
 
 const PHASE_DESC: Record<Phase, string> = {
   1: '개발·보완 + 회귀 6항목. `build/dist/<모듈>/` 직접 기동.',
@@ -113,8 +142,26 @@ export default function VerificationPage() {
     // 탭 전환 시 해당 phase 의 저장된 결과/리포트 로드 (없으면 null)
     setPhaseResultRaw(_ssGet<PhaseRunResult>(_resultKey(p)))
     setPhaseReportRaw(_ssGet<PhaseReport>(_reportKey(p)))
+    // 탭 전환 시 default 프리셋 (phase{N}-main > full) 자동 선택
+    // 동일 phase 재선택은 prev 보존, 다른 phase 로 이동 시만 갱신.
+    setSelectedItems(prev => {
+      if (p === phase) return prev
+      const candidates = [`phase${p}-main`, `phase${p}-full`]
+      for (const name of candidates) {
+        const found = (verifyMeta?.presets || []).find(pp => pp.name === name)
+        if (found) return new Set(found.items)
+      }
+      return new Set()
+    })
   }
-  const [running, setRunning] = useState(false)
+  // 진행 중 job — sessionStorage 영속화. mount 시 복원하여 폴링 자동 재개.
+  // re-mount / 페이지 이동 / 새로고침 후에도 진행 중인 검증 그대로 추적.
+  const [activeJob, setActiveJobRaw] = useState<ActiveJob | null>(() => _ssGet<ActiveJob>(_activeJobKey))
+  const setActiveJob = (j: ActiveJob | null) => {
+    setActiveJobRaw(j)
+    _ssSet(_activeJobKey, j)
+  }
+  const running = activeJob !== null
   const [skipBuild, setSkipBuild] = useState(true)
   const [skipPkg, setSkipPkg]     = useState(true)
   const [skipReset, setSkipReset] = useState(false)
@@ -132,17 +179,49 @@ export default function VerificationPage() {
     const p = (saved === '1' || saved === '2' || saved === '3') ? (Number(saved) as Phase) : 1
     return _ssGet<PhaseReport>(_reportKey(p))
   })
-  // 영속화 wrapper — setter 호출 시 sessionStorage 자동 동기화
-  const setPhaseResult = (r: PhaseRunResult | null) => {
-    setPhaseResultRaw(r)
-    if (r) _ssSet(_resultKey(r.phase as Phase), r)
-  }
+  // setPhaseReport 영속화 wrapper — "📄 최신 리포트" 수동 로드 시에도 sessionStorage 동기화.
+  // (phaseResult 는 폴링 effect 가 직접 setPhaseResultRaw + _ssSet 사용)
   const setPhaseReport = (rep: PhaseReport | null) => {
     setPhaseReportRaw(rep)
     if (rep) _ssSet(_reportKey(rep.phase as Phase), rep)
   }
   // 실행 진행 상태 (job 폴링)
   const [progress, setProgress] = useState<PhaseJobStatus | null>(null)
+  // verify_lib 메타 (phase 별 항목 + 프리셋) — Step 1 에서 phase 3 만 활성
+  const [verifyMeta, setVerifyMeta] = useState<VerifyItemsResponse | null>(null)
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
+  // mount 시 한 번만 fetch — 현재 phase 의 default 프리셋 자동 선택
+  // 우선순위: phase{N}-main > phase{N}-full (Phase 1 의 main 은 모듈 제외 — 무겁지 않게)
+  useEffect(() => {
+    api.get<VerifyItemsResponse>('/verification/items')
+      .then(r => {
+        setVerifyMeta(r)
+        const candidates = [`phase${phase}-main`, `phase${phase}-full`]
+        for (const name of candidates) {
+          const found = (r.presets || []).find(p => p.name === name)
+          if (found) { setSelectedItems(new Set(found.items)); break }
+        }
+      })
+      .catch(() => { /* 메타 fetch 실패 시 동적 UI 비활성, 기존 동작 유지 */ })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // 현재 phase 의 verify_lib 항목 (있는 경우만 동적 체크박스 노출)
+  const currentPhaseItems: VerifyItemMeta[] = (verifyMeta?.phases || [])
+    .find(p => p.phase === phase)?.items || []
+  const currentPhasePresets: VerifyPreset[] = (verifyMeta?.presets || [])
+    .filter(p => p.name.startsWith(`phase${phase}-`))
+  const hasDynamicItems = currentPhaseItems.length > 0
+  // 항목별 토글 / 프리셋 적용
+  function toggleItem(id: string) {
+    setSelectedItems(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+  function applyPreset(p: VerifyPreset) {
+    setSelectedItems(new Set(p.items))
+  }
   // 결과 영역 ref — 완료 시 자동 스크롤
   const resultRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -156,50 +235,92 @@ export default function VerificationPage() {
   const [legacyReportMd, setLegacyReportMd] = useState('')
 
   async function runPhase(targetPhase: Phase) {
-    // 클릭 시점의 phase 를 명시적으로 캡처 — runPhase 내부에서 phase state 가
-    // 다른 사이드 이펙트로 변경되더라도 실행 흐름 / 결과 표시는 targetPhase 기준 유지.
-    setRunning(true)
-    setPhaseResult(null)
-    setPhaseReport(null)
+    if (activeJob) {
+      show('이미 검증이 진행 중입니다. 완료 후 재시도하세요.', 'err')
+      return
+    }
+    // verify_lib 항목이 있는 phase 에서 선택 항목 0개 → 실행 거부
+    const targetItems: VerifyItemMeta[] = (verifyMeta?.phases || [])
+      .find(p => p.phase === targetPhase)?.items || []
+    const useDynamic = targetItems.length > 0
+    if (useDynamic && selectedItems.size === 0) {
+      show('선택된 항목이 없습니다. 프리셋을 누르거나 항목을 체크하세요.', 'err')
+      return
+    }
     setProgress(null)
     try {
-      const body = targetPhase === 1
-        ? { skip_build: skipBuild, skip_reset: skipReset, async: true }
-        : { skip_build: skipBuild, skip_pkg: skipPkg, keep_agent: keepAgent, async: true }
-      // 1) job 시작 — 즉시 job_id 반환
-      const start = await api.post<PhaseJobStart>(`/verification/phases/${targetPhase}`, body)
-      // 2) 1.5초 간격 폴링 — 진행 중 stdout tail 실시간 갱신
-      const pollMs = 1500
-      let final: PhaseJobStatus | null = null
-      while (true) {
-        await new Promise(res => setTimeout(res, pollMs))
-        const s = await api.get<PhaseJobStatus>(`/verification/jobs/${start.job_id}`)
-        setProgress(s)
-        if (s.done) { final = s; break }
+      const baseOpts = targetPhase === 1
+        ? { skip_build: skipBuild, skip_reset: skipReset }
+        : { skip_build: skipBuild, skip_pkg: skipPkg, keep_agent: keepAgent }
+      const body: Record<string, unknown> = { ...baseOpts, async: true }
+      if (useDynamic) {
+        // verify_lib 활성 phase — 선택 항목 전송. phase 3 의 의존성 정합성은 backend 가 정렬.
+        body.items = Array.from(selectedItems)
       }
-      // 3) 완료 — 결과 + 리포트 즉시 표시
-      const verdict = final.verdict || 'UNKNOWN'
-      setPhaseResult({
-        phase: final.phase,
-        verdict,
-        returncode: final.returncode ?? -1,
-        report_path: final.report_path,
-        report_ts: final.report_ts,
-        stdout_tail: final.stdout_tail,
-        argv: final.argv,
-      })
-      show(`Phase ${targetPhase}: ${verdict}`, verdict === 'PASS' ? 'ok' : 'err')
-      try {
-        const rep = await api.get<PhaseReport>(`/verification/phases/${targetPhase}/latest-report`)
-        setPhaseReport(rep)
-      } catch { /* ignore */ }
+      const start = await api.post<PhaseJobStart>(`/verification/phases/${targetPhase}`, body)
+      setActiveJob({ phase: targetPhase, jobId: start.job_id, startedAt: start.started_at })
     } catch (e: unknown) {
       show(String(e), 'err')
-    } finally {
-      setRunning(false)
-      setProgress(null)
+      setActiveJob(null)
     }
   }
+
+  // 폴링 effect — activeJob 이 set 될 때마다 (직접 시작 OR sessionStorage 에서 복원)
+  // 자동으로 1.5초 간격 폴링. cleanup 으로 cancel 처리.
+  useEffect(() => {
+    if (!activeJob) return
+    let cancelled = false
+    const job = activeJob
+    ;(async () => {
+      while (!cancelled) {
+        try {
+          const s = await api.get<PhaseJobStatus>(`/verification/jobs/${job.jobId}`)
+          if (cancelled) return
+          setProgress(s)
+          if (s.done) {
+            const verdict = s.verdict || 'UNKNOWN'
+            const result: PhaseRunResult = {
+              phase: s.phase,
+              verdict,
+              returncode: s.returncode ?? -1,
+              report_path: s.report_path,
+              report_ts: s.report_ts,
+              stdout_tail: s.stdout_tail,
+              argv: s.argv,
+            }
+            // 결과는 phase 별 sessionStorage 에 저장 — 다른 phase 탭 보고 있어도 보존.
+            _ssSet(_resultKey(s.phase as Phase), result)
+            // 현재 보고 있는 탭이 이 phase 면 즉시 화면 갱신
+            if (s.phase === phase) {
+              setPhaseResultRaw(result)
+            }
+            // 리포트도 같이 로드
+            try {
+              const rep = await api.get<PhaseReport>(`/verification/phases/${s.phase}/latest-report`)
+              _ssSet(_reportKey(s.phase as Phase), rep)
+              if (s.phase === phase) setPhaseReportRaw(rep)
+            } catch { /* ignore */ }
+            show(`Phase ${s.phase}: ${verdict}`, verdict === 'PASS' ? 'ok' : 'err')
+            setActiveJob(null)
+            setProgress(null)
+            return
+          }
+        } catch (e: unknown) {
+          // 서버 재시작 / job GC 로 추적 불가 — activeJob 정리 후 종료
+          if (!cancelled) {
+            show(`job ${job.jobId} 추적 실패 — 진행 상태 모니터링 종료`, 'err')
+            setActiveJob(null)
+            setProgress(null)
+          }
+          return
+        }
+        await new Promise(res => setTimeout(res, 1500))
+      }
+    })()
+    return () => { cancelled = true }
+    // phase 변경 시에는 폴링 자체는 계속하되, "현재 phase 화면 갱신" 분기만 영향받음.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeJob?.jobId])
 
   function formatElapsed(sec: number): string {
     const m = Math.floor(sec / 60)
@@ -256,15 +377,75 @@ export default function VerificationPage() {
               key={p}
               className={`btn ${phase === p ? 'btn--primary' : 'btn--outline'}`}
               onClick={() => setPhase(p)}    /* setPhase 가 해당 phase 의 저장된 결과 자동 복원 */
-              disabled={running}
+              /* 탭 전환은 진행 중에도 허용 — 다른 phase 결과 조회 가능. 실행 버튼만 비활성화. */
             >
               {PHASE_LABEL[p]}
+              {activeJob?.phase === p && <span style={{ marginLeft: 6, fontSize: 11 }}>⏳</span>}
             </button>
           ))}
         </div>
 
         <div style={{ padding: '12px 16px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: 'var(--muted, #666)', marginBottom: 8 }}>{PHASE_DESC[phase]}</div>
+
+          {/* 동적 항목 선택 영역 — verify_lib registry 가 채워진 phase 만 표시 (현재 Phase 3 만) */}
+          {hasDynamicItems && (
+            <div style={{ marginBottom: 14, paddingBottom: 12, borderBottom: '1px dashed var(--border)' }}>
+              {currentPhasePresets.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted, #888)' }}>프리셋:</span>
+                  {currentPhasePresets.map(p => (
+                    <button
+                      key={p.name}
+                      className="btn btn--sm btn--outline"
+                      onClick={() => applyPreset(p)}
+                      disabled={running}
+                      title={`${p.items.length}개 항목 선택`}
+                    >
+                      {p.name} ({p.items.length})
+                    </button>
+                  ))}
+                  <button
+                    className="btn btn--sm btn--outline"
+                    onClick={() => setSelectedItems(new Set())}
+                    disabled={running}
+                  >
+                    전체 해제
+                  </button>
+                  <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted, #888)' }}>
+                    선택: <b>{selectedItems.size}</b> / {currentPhaseItems.length}
+                  </span>
+                </div>
+              )}
+              {/* 카테고리별 그룹 — 환경/시나리오/검증 등 */}
+              {(() => {
+                const byCategory: Record<string, VerifyItemMeta[]> = {}
+                for (const it of currentPhaseItems) {
+                  ;(byCategory[it.category || '기타'] ||= []).push(it)
+                }
+                const cats = Object.keys(byCategory).sort()
+                return cats.map(cat => (
+                  <div key={cat} style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted, #888)', marginBottom: 4 }}>{cat}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                      {byCategory[cat].map(it => (
+                        <label key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '2px 6px', background: 'var(--bg-muted, #f5f5f5)', borderRadius: 4 }} title={it.description || ''}>
+                          <input
+                            type="checkbox"
+                            checked={selectedItems.has(it.id)}
+                            onChange={() => toggleItem(it.id)}
+                            disabled={running}
+                          />
+                          <span style={{ fontFamily: 'monospace' }}>{it.id}</span>
+                          <span style={{ color: 'var(--muted, #666)' }}>· {it.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              })()}
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
@@ -291,7 +472,11 @@ export default function VerificationPage() {
 
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
               <button className="btn btn--primary" onClick={() => runPhase(phase)} disabled={running}>
-                {running ? `Phase ${phase} 실행 중...` : `▶ Phase ${phase} 실행`}
+                {running
+                  ? activeJob?.phase === phase
+                    ? `Phase ${phase} 실행 중...`
+                    : `Phase ${activeJob?.phase} 실행 중 (대기)`
+                  : `▶ Phase ${phase} 실행`}
               </button>
               <button className="btn btn--outline" onClick={loadLatestReport} disabled={running}>
                 📄 최신 리포트
@@ -300,36 +485,36 @@ export default function VerificationPage() {
           </div>
         </div>
 
-        {running && (
+        {/* 현재 보고 있는 phase 가 진행 중인 경우만 progress 패널 표시 */}
+        {activeJob && activeJob.phase === phase && (
           <div style={{ padding: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, marginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
               <span className="loader" style={{ width: 14, height: 14, border: '2px solid var(--border)', borderTopColor: 'var(--accent, #3b82f6)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
               <span style={{ fontWeight: 600, fontSize: 14 }}>
-                Phase {progress?.phase ?? phase} 실행 중
-                {progress?.elapsed != null && (
-                  <span className="ts" style={{ marginLeft: 8 }}>
-                    경과 {formatElapsed(progress.elapsed)}
-                  </span>
-                )}
+                Phase {activeJob.phase} 실행 중
+                <span className="ts" style={{ marginLeft: 8 }}>
+                  경과 {formatElapsed(progress?.elapsed ?? ((Date.now() / 1000) - activeJob.startedAt))}
+                </span>
               </span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted, #888)', marginBottom: 8 }}>
-              {(progress?.phase ?? phase) === 1 && 'Phase 1: 빌드 + 설정 + 시나리오 (수 분 소요)'}
-              {(progress?.phase ?? phase) === 2 && 'Phase 2: 배포 메커니즘 검증 (약 1~2분)'}
-              {(progress?.phase ?? phase) === 3 && 'Phase 3: 배포 + 4시나리오 (약 3~4분)'}
+              {activeJob.phase === 1 && 'Phase 1: 빌드 + 설정 + 시나리오 (수 분 소요)'}
+              {activeJob.phase === 2 && 'Phase 2: 배포 메커니즘 검증 (약 1~2분)'}
+              {activeJob.phase === 3 && 'Phase 3: 배포 + 4시나리오 (약 3~4분)'}
             </div>
             <pre style={{
               margin: 0, padding: 12, background: 'var(--bg-muted, #1a1a1a)', color: 'var(--text-muted, #ccc)',
               borderRadius: 4, fontSize: 11, lineHeight: 1.4,
               maxHeight: 280, overflowY: 'auto', whiteSpace: 'pre-wrap',
             }}>
-              {progress?.stdout_tail || '(시작 대기 중...)'}
+              {progress?.stdout_tail || '(폴링 시작 중...)'}
             </pre>
             <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
 
-        {phaseResult && !running && (
+        {/* 결과 패널 — 진행 중이 아닐 때 (또는 진행 중이지만 다른 phase 보고 있을 때) 항상 표시 */}
+        {phaseResult && !(activeJob && activeJob.phase === phase) && (
           <div ref={resultRef} style={{ padding: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, marginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
               <span style={{ fontSize: 16, fontWeight: 700, color: verdictColor(phaseResult.verdict) }}>

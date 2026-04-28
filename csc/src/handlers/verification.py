@@ -19,6 +19,7 @@ import time
 import uuid
 import asyncio
 import subprocess
+from typing import Optional
 from urllib.parse import urlparse, parse_qs
 from httpsrv.handler import HandlerArgs, HandlerResult
 
@@ -85,6 +86,17 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     m = re.fullmatch(r'jobs/([0-9a-f]+)', after)
     if m and method == 'GET':
         return await _get_job_status(m.group(1))
+
+    # /items — verify_lib registry 항목 트리 (Console UI 동적 체크박스용)
+    if after == 'items' and method == 'GET':
+        # query_params 는 HandlerArgs 에 dict 로 별도 노출됨
+        phase_str = (handler_args.query_params or {}).get('phase')
+        phase = int(phase_str) if phase_str and str(phase_str).isdigit() else None
+        return await _get_verify_items(phase)
+
+    # /presets — verify_lib 프리셋 목록
+    if after == 'presets' and method == 'GET':
+        return await _get_verify_presets()
 
     return HandlerResult(status=404, body={'error': 'Not Found'})
 
@@ -206,6 +218,15 @@ _JOBS: dict = {}              # job_id → job dict
 _JOBS_TTL_SEC = 3600          # 완료된 job 의 보관 기간 (1시간)
 _JOB_LOG_DIR = '/tmp/cims_verify_jobs'
 
+# TB-CSC 가 csc-tb.json (4419/4431) 으로 떠있는 상태에서 subprocess 가 환경을 그대로 상속하면
+# 자식 cims.sh → csc_app.py 가 csc-tb.json 을 읽어 TB-CSC 와 같은 포트 bind 시도 → 충돌.
+# Test-CSC / 배포본 csc 는 base csc.json (4421/4445/4420) 을 써야 하므로 TB 전용 env 차단.
+_BLOCKED_ENV_KEYS = {"CIMS_CSC_CONFIG", "CIMS_AGENT_SYNC_PORT"}
+
+
+def _sanitized_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in _BLOCKED_ENV_KEYS}
+
 
 def _resolve_verdict(phase: int) -> tuple:
     """최신 리포트에서 verdict 파싱. (verdict, report_path, report_ts) 반환."""
@@ -248,6 +269,7 @@ async def _start_phase_job(phase: int, argv: list, timeout: int) -> str:
         stdout=log_file,
         stderr=asyncio.subprocess.STDOUT,
         cwd=_SCRIPT_DIR,
+        env=_sanitized_env(),
     )
     job = {
         'job_id': job_id,
@@ -321,11 +343,18 @@ async def _get_job_status(job_id: str) -> HandlerResult:
 
 
 def _build_phase_argv(phase: int, opts: dict) -> list:
-    """opts → cims.sh argv. Phase 별 옵션 호환성 적용."""
+    """opts → cims.sh argv. Phase 별 옵션 호환성 적용.
+
+    items 가 있으면 cims.sh wrapper 가 cims_verify CLI 로 passthrough — 단,
+    Phase 3 만 verify_lib 마이그레이션 완료된 상태이므로 그 외 phase 는
+    items 옵션을 무시한다 (legacy 본체 호출).
+    """
     skip_build = bool(opts.get('skip_build', True))
     skip_pkg   = bool(opts.get('skip_pkg', True))
     skip_reset = bool(opts.get('skip_reset', False))
     keep_agent = bool(opts.get('keep_agent', False))
+    items      = opts.get('items') or []
+
     argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'verify', f'phase{phase}']
     if skip_build: argv.append('--skip-build')
     if phase == 1:
@@ -333,6 +362,10 @@ def _build_phase_argv(phase: int, opts: dict) -> list:
     else:
         if skip_pkg:   argv.append('--skip-pkg')
         if keep_agent: argv.append('--keep-agent')
+    # verify_lib 마이그레이션 완료된 phase 의 items 옵션 passthrough.
+    # Step 1: Phase 3, Step 2: Phase 1, Step 3: Phase 2 (단일 P2-RUN-ALL 항목).
+    if phase in (1, 2, 3) and items:
+        argv += ['--items', ','.join(items)]
     return argv
 
 
@@ -364,7 +397,7 @@ async def _run_phase(phase: int, handler_args: HandlerArgs) -> HandlerResult:
     def _run_sync():
         return subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout,
-            cwd=_SCRIPT_DIR,
+            cwd=_SCRIPT_DIR, env=_sanitized_env(),
         )
     try:
         result = await asyncio.to_thread(_run_sync)
@@ -419,6 +452,79 @@ async def _list_phase_reports(phase: int) -> HandlerResult:
         size = os.path.getsize(p)
         items.append({'ts': ts, 'name': name, 'size': size})
     return HandlerResult(status=200, body={'phase': phase, 'reports': items})
+
+
+# ─────────────────────────────────────────────────────────────
+# verify_lib 메타 API (UI 동적 체크박스용)
+# ─────────────────────────────────────────────────────────────
+_ITEMS_CACHE: dict = {'data': None, 'expires_at': 0}
+_ITEMS_TTL_SEC = 60
+
+
+def _run_verify_cli(args: list, timeout: int = 20) -> tuple:
+    """python3 -m tests.cims_verify <args> 실행. (rc, stdout, stderr) 반환."""
+    cmd = ['python3', '-m', 'tests.cims_verify'] + args
+    try:
+        proc = subprocess.run(
+            cmd, cwd=_SCRIPT_DIR, env={k: v for k, v in os.environ.items()
+                                       if k not in ('CIMS_CSC_CONFIG', 'CIMS_AGENT_SYNC_PORT')},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=timeout, text=True,
+        )
+        return (proc.returncode, proc.stdout, proc.stderr)
+    except Exception as e:
+        return (-1, '', str(e))
+
+
+async def _get_verify_items(phase: Optional[int]) -> HandlerResult:
+    """verify_lib 의 등록 항목 트리 + 프리셋. 60s 캐시.
+
+    Phase 별 마이그레이션 진행도가 다르므로, registry 가 비어있는 phase 도 반환 (items: []).
+    """
+    now = time.time()
+    cached = _ITEMS_CACHE
+    if cached['data'] is not None and now < cached['expires_at']:
+        data = cached['data']
+    else:
+        argv = ['list', '--json']
+        rc, out, err = await asyncio.to_thread(_run_verify_cli, argv)
+        if rc != 0:
+            return HandlerResult(status=500, body={
+                'error': 'cims_verify list failed', 'rc': rc, 'stderr': err[-2000:],
+            })
+        try:
+            data = json.loads(out)
+        except Exception as e:
+            return HandlerResult(status=500, body={
+                'error': f'invalid JSON from cims_verify: {e}', 'stdout': out[-1000:],
+            })
+        _ITEMS_CACHE['data'] = data
+        _ITEMS_CACHE['expires_at'] = now + _ITEMS_TTL_SEC
+
+    # phase 필터 (캐시는 전체. 응답에서만 필터링)
+    if phase is not None:
+        filtered = [p for p in data.get('phases', []) if p.get('phase') == phase]
+        return HandlerResult(status=200, body={
+            'phase': phase, 'phases': filtered, 'presets': data.get('presets', []),
+        })
+    return HandlerResult(status=200, body=data)
+
+
+async def _get_verify_presets() -> HandlerResult:
+    """프리셋 목록만."""
+    argv = ['list-presets', '--json']
+    rc, out, err = await asyncio.to_thread(_run_verify_cli, argv)
+    if rc != 0:
+        return HandlerResult(status=500, body={
+            'error': 'cims_verify list-presets failed', 'rc': rc, 'stderr': err[-2000:],
+        })
+    try:
+        data = json.loads(out)
+    except Exception as e:
+        return HandlerResult(status=500, body={
+            'error': f'invalid JSON: {e}', 'stdout': out[-1000:],
+        })
+    return HandlerResult(status=200, body={'presets': data})
 
 
 CIMS_VERIFICATION_HANDLER_LIST = [
