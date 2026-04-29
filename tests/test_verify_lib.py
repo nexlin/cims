@@ -1,4 +1,4 @@
-"""verify_lib 단위 테스트 — registry / runner / presets / context.
+"""verify.lib 단위 테스트 — registry / runner / presets / context.
 
 외부 의존성 없이 동작 (cims.sh 호출 안 함). standalone 으로 실행:
   python3 -m tests.test_verify_lib
@@ -22,7 +22,7 @@ class TestRegistry(unittest.TestCase):
     """@verify_item 데코레이터 + get_items 필터 동작."""
 
     def setUp(self) -> None:
-        from verify_lib import registry
+        from verify.lib import registry
         self.registry = registry
         # 글로벌 registry 보존을 위해 snapshot
         self._snapshot = dict(registry._REGISTRY)
@@ -94,8 +94,8 @@ class TestRunner(unittest.TestCase):
     """runner.run_items — 의존성/SKIP/ItemResult 변환."""
 
     def setUp(self) -> None:
-        from verify_lib import registry, runner
-        from verify_lib.context import VerifyContext
+        from verify.lib import registry, runner
+        from verify.lib.context import VerifyContext
         self.registry = registry
         self.runner = runner
         self.VerifyContext = VerifyContext
@@ -185,7 +185,7 @@ class TestPresets(unittest.TestCase):
     """presets — list / resolve / dynamic."""
 
     def setUp(self) -> None:
-        from verify_lib import presets, registry
+        from verify.lib import presets, registry
         self.presets = presets
         self.registry = registry
         self._snapshot = dict(registry._REGISTRY)
@@ -221,12 +221,12 @@ class TestPresets(unittest.TestCase):
 
 
 class TestExistingRegistry(unittest.TestCase):
-    """기본 verify_lib import 후 등록된 항목들이 정상 메타를 가지는지."""
+    """기본 verify.lib import 후 등록된 항목들이 정상 메타를 가지는지."""
 
     def test_phase3_items_registered(self) -> None:
-        from verify_lib import registry
+        from verify.lib import registry
         # __init__.py 가 phase3/phase1/phase2/modules 모두 import
-        from verify_lib import items                            # noqa: F401
+        from verify.lib import items                            # noqa: F401
         ids = {m.id for m in registry.get_items(phase=3)}
         self.assertIn("P3-ENTRY-CHECK", ids)
         self.assertIn("P3-SEED", ids)
@@ -234,8 +234,8 @@ class TestExistingRegistry(unittest.TestCase):
         self.assertIn("P3-SUMMARY", ids)
 
     def test_phase1_items_registered(self) -> None:
-        from verify_lib import registry
-        from verify_lib import items                            # noqa: F401
+        from verify.lib import registry
+        from verify.lib import items                            # noqa: F401
         ids = {m.id for m in registry.get_items(phase=1)}
         self.assertIn("P1-PREFLIGHT", ids)
         self.assertIn("P1-START", ids)
@@ -245,14 +245,14 @@ class TestExistingRegistry(unittest.TestCase):
         self.assertIn("P1-REGRESS-PTT", ids)
 
     def test_phase2_run_all_registered(self) -> None:
-        from verify_lib import registry
-        from verify_lib import items                            # noqa: F401
+        from verify.lib import registry
+        from verify.lib import items                            # noqa: F401
         rec = registry.get_item("P2-RUN-ALL")
         self.assertIsNotNone(rec)
         self.assertEqual(rec[0].phase, 2)
 
     def test_presets_loaded(self) -> None:
-        from verify_lib import presets
+        from verify.lib import presets
         names = {p["name"] for p in presets.list_presets()}
         # Step 4 까지 정의된 주요 프리셋 모두 존재
         for required in ("phase1-full", "phase1-quick",
@@ -268,7 +268,7 @@ class TestRunnerMarkers(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        from verify_lib import registry, runner, context
+        from verify.lib import registry, runner, context
         self.registry = registry
         self.runner = runner
         self.context = context
@@ -287,7 +287,7 @@ class TestRunnerMarkers(unittest.TestCase):
 
     def test_runner_emits_item_markers(self) -> None:
         """선택 항목 N개 실행 시 item-start N + item-end N 마커 출력."""
-        from verify_lib.registry import ItemResult, ItemStatus
+        from verify.lib.registry import ItemResult, ItemStatus
         @self.registry.verify_item(id="MARKER-A", phase=99, category="유닛", name="alpha")
         def _a(ctx) -> ItemResult:
             return ItemResult(id="MARKER-A", name="alpha", status=ItemStatus.PASS)
@@ -316,7 +316,7 @@ class TestRunnerMarkers(unittest.TestCase):
 
     def test_runner_emits_child_markers(self) -> None:
         """ItemResult.children 이 있으면 부모 종료 전 child-result 마커 emit."""
-        from verify_lib.registry import ItemResult, ItemStatus
+        from verify.lib.registry import ItemResult, ItemStatus
         @self.registry.verify_item(id="MARKER-PARENT", phase=99, category="유닛", name="parent")
         def _p(ctx) -> ItemResult:
             return ItemResult(
@@ -347,7 +347,7 @@ class TestRunnerMarkers(unittest.TestCase):
 
     def test_runner_emits_skip_markers_for_dep_fail(self) -> None:
         """의존 항목 FAIL 시 후속 항목 SKIP 도 마커 emit."""
-        from verify_lib.registry import ItemResult, ItemStatus
+        from verify.lib.registry import ItemResult, ItemStatus
         @self.registry.verify_item(id="MARKER-DEP", phase=99, category="유닛", name="dep")
         def _d(ctx) -> ItemResult:
             return ItemResult(id="MARKER-DEP", name="dep", status=ItemStatus.FAIL)
@@ -402,7 +402,7 @@ class TestOnlyChildren(unittest.TestCase):
         self.assertEqual(_parse_only_children([]), {})
 
     def test_context_only_children_for(self) -> None:
-        from verify_lib.context import VerifyContext
+        from verify.lib.context import VerifyContext
         ctx = VerifyContext.create(
             repo_root=os.path.dirname(_THIS_DIR), phase=1,
             opts={"only_children": {"MODULE-CSC": ["CSC-AUTH-01", "CSC-AUTH-02"]}},

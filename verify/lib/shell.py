@@ -1,6 +1,6 @@
 """cims.sh sub-function 호출 helper.
 
-점진 마이그레이션 단계에서 verify_lib 항목 함수가 cims.sh 의 cmd_xxx 함수를
+점진 마이그레이션 단계에서 verify.lib 항목 함수가 cims.sh 의 cmd_xxx 함수를
 직접 호출할 수 있도록 subprocess wrapper 제공. sanitized env 적용.
 """
 from __future__ import annotations

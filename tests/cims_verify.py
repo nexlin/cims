@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CIMS 검증 도구 CLI — verify_lib 의 진입점.
+"""CIMS 검증 도구 CLI — verify.lib 의 진입점.
 
 명령:
   list [--phase N] [--json]                 — 등록 항목 트리 출력
@@ -30,11 +30,11 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
 
-from verify_lib import (                                        # noqa: E402
+from verify.lib import (                                        # noqa: E402
     registry, runner, reporting, presets as preset_mod,
 )
-from verify_lib.context import VerifyContext                    # noqa: E402
-from verify_lib import items as _items_pkg                      # noqa: F401, E402  (auto-import 트리거)
+from verify.lib.context import VerifyContext                    # noqa: E402
+from verify.lib import items as _items_pkg                      # noqa: F401, E402  (auto-import 트리거)
 
 
 def _repo_root_from_here() -> str:

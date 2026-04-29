@@ -1,4 +1,4 @@
-"""검증 실행 및 리포트 API — verify_lib (tests/verify_lib/) 기반.
+"""검증 실행 및 리포트 API — verify.lib (tests/verify.lib/) 기반.
 
 엔드포인트:
   /phases/<N> (POST)                      — cims.sh verify phase<N> 실행 (N=1/2/3)
@@ -8,8 +8,8 @@
   /phases/<N>/latest-report (GET)         — verify_reports/*_phase<N>.md 최신 내용
   /phases/<N>/reports (GET)               — verify_reports/*_phase<N>.md 목록
   /jobs/<job_id> (GET)                    — 비동기 job 상태 + stdout tail + items_progress (폴링용)
-  /items?phase=N (GET)                    — verify_lib registry 등록 항목 트리 (UI 동적 체크박스)
-  /presets (GET)                          — verify_lib 프리셋 목록
+  /items?phase=N (GET)                    — verify.lib registry 등록 항목 트리 (UI 동적 체크박스)
+  /presets (GET)                          — verify.lib 프리셋 목록
 """
 import os
 import re
@@ -82,14 +82,14 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     if m and method == 'GET':
         return await _get_job_status(m.group(1))
 
-    # /items — verify_lib registry 항목 트리 (Console UI 동적 체크박스용)
+    # /items — verify.lib registry 항목 트리 (Console UI 동적 체크박스용)
     if after == 'items' and method == 'GET':
         # query_params 는 HandlerArgs 에 dict 로 별도 노출됨
         phase_str = (handler_args.query_params or {}).get('phase')
         phase = int(phase_str) if phase_str and str(phase_str).isdigit() else None
         return await _get_verify_items(phase)
 
-    # /presets — verify_lib 프리셋 목록
+    # /presets — verify.lib 프리셋 목록
     if after == 'presets' and method == 'GET':
         return await _get_verify_presets()
 
@@ -391,7 +391,7 @@ def _build_phase_argv(phase: int, opts: dict) -> list:
     """opts → cims.sh argv. Phase 별 옵션 호환성 적용.
 
     items 가 있으면 cims.sh wrapper 가 cims_verify CLI 로 passthrough — 단,
-    Phase 3 만 verify_lib 마이그레이션 완료된 상태이므로 그 외 phase 는
+    Phase 3 만 verify.lib 마이그레이션 완료된 상태이므로 그 외 phase 는
     items 옵션을 무시한다 (legacy 본체 호출).
     """
     skip_build = bool(opts.get('skip_build', True))
@@ -408,7 +408,7 @@ def _build_phase_argv(phase: int, opts: dict) -> list:
     else:
         if skip_pkg:   argv.append('--skip-pkg')
         if keep_agent: argv.append('--keep-agent')
-    # verify_lib 마이그레이션 완료된 phase 의 items 옵션 passthrough.
+    # verify.lib 마이그레이션 완료된 phase 의 items 옵션 passthrough.
     # Step 1: Phase 3, Step 2: Phase 1, Step 3: Phase 2 (단일 P2-RUN-ALL 항목).
     if phase in (1, 2, 3) and items:
         argv += ['--items', ','.join(items)]
@@ -504,7 +504,7 @@ async def _list_phase_reports(phase: int) -> HandlerResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# verify_lib 메타 API (UI 동적 체크박스용)
+# verify.lib 메타 API (UI 동적 체크박스용)
 # ─────────────────────────────────────────────────────────────
 _ITEMS_CACHE: dict = {'data': None, 'expires_at': 0}
 _ITEMS_TTL_SEC = 60
@@ -526,7 +526,7 @@ def _run_verify_cli(args: list, timeout: int = 20) -> tuple:
 
 
 async def _get_verify_items(phase: Optional[int]) -> HandlerResult:
-    """verify_lib 의 등록 항목 트리 + 프리셋. 60s 캐시.
+    """verify.lib 의 등록 항목 트리 + 프리셋. 60s 캐시.
 
     Phase 별 마이그레이션 진행도가 다르므로, registry 가 비어있는 phase 도 반환 (items: []).
     """

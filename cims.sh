@@ -955,7 +955,7 @@ PY
 }
 
 # ── 검증 (verify) — 단계/항목 단위 실행 ─────────────────────────
-# Phase 1, 3: tests/verify_lib (cims_verify CLI) 가 단독 책임
+# Phase 1, 3: verify/lib (cims_verify CLI) 가 단독 책임
 # Phase 2: 22단계 본체는 _verify_phase2 가 보존 — verify_lib P2-RUN-ALL 가 호출
 # 메타 명령 (list / describe / list-presets / run) 은 verify_lib 로 위임
 cmd_verify() {

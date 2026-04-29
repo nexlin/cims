@@ -14,7 +14,7 @@ from .subscribers import VOLTE_DOMAIN, MCPTT_DOMAIN
 
 def seed_access_services(cfg_dir: str, voip_ref: str, ptt_ref: str,
                           tag: str = "verify-seed",
-                          note: str = "auto-seeded by verify_lib") -> int:
+                          note: str = "auto-seeded by verify.lib") -> int:
     """{cfg_dir}/access_services.jsonl 작성. 작성 건수 반환."""
     seeded = []
 

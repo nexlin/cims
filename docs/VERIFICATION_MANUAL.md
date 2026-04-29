@@ -59,16 +59,22 @@ TB-CSC(4419) / TB-Console(3000) / TB-agent(9902) 는 **Phase 진행 중 절대 �
 ### 1.1 자동 실행 (권장)
 
 ```bash
-./cims.sh verify phase1
+./cims.sh verify phase1                          # phase1-full preset (10 항목)
+./cims.sh verify phase1 --preset phase1-quick    # preflight + health 만 (sanity)
+./cims.sh verify phase1 --items P1-PREFLIGHT,P1-START,P1-HEALTH   # 특정 항목만
+./cims.sh verify list --phase 1                  # 항목 메타 조회
+./cims.sh verify list-presets                    # 프리셋 목록
 ```
 
-내부 흐름: preflight → reset → build → configure → start → 시나리오 → 리포트.
+내부 흐름: preflight → reset → build → configure → start → seed → regress(VoIP/PTT) → health → 리포트.
 완료 후 모듈 그대로 유지 (사용자 추가 시험 가능).
 
 **기대 결과**:
 - 종료 코드 0
 - 리포트: `verify_reports/<YYYYMMDD_HHMMSS>_phase1.md` 생성
-- 4+3 시나리오 모두 PASS
+- 항목별 PASS / FAIL / SKIP 표시 + 진행률 실시간 노출 (TB-Console)
+
+**검증 도구**: 검증 인프라는 `verify/lib/` (Python 패키지) 에 있으며, 항목 1개 = 파일 1개 원칙. 항목 추가/삭제/보완은 `verify/lib/items/phase{N}/{env|scenario|verification}/<name>.py` 파일 단위로 수행. 자세한 구조와 신규 항목 추가 방법은 `docs/VERIFICATION_PROCESS.md` §1.3.1 참고.
 
 ### 1.2 수동 단계별 (자동이 실패할 때)
 
