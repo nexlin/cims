@@ -5,28 +5,6 @@ import { useToast } from '../components/Toast'
 // ─────────────────────────────────────────────────────────────
 // 타입 정의
 // ─────────────────────────────────────────────────────────────
-interface VerResult {
-  total: number
-  pass: number
-  fail: number
-  skip: number
-  elapsed: number
-  modules: Array<{
-    module: string
-    total: number
-    pass: number
-    fail: number
-    skip: number
-    results: Array<{
-      id: string
-      name: string
-      status: string
-      detail: string
-      elapsed_ms: number
-    }>
-  }>
-}
-
 interface PhaseRunResult {
   phase: number
   verdict: string            // PASS | FAIL | UNKNOWN
@@ -115,7 +93,7 @@ interface PhaseReport {
 }
 
 type Phase = 1 | 2 | 3
-type VerifyMode = 'full' | 'main' | 'modules' | 'quick' | 'volte' | 'ptt'
+type VerifyMode = 'full' | 'quick' | 'volte' | 'ptt'
 
 const PHASE_LABEL: Record<Phase, string> = {
   1: 'Phase 1 · 배포 전',
@@ -149,8 +127,6 @@ const PHASE_DETAIL: Record<Phase, { title: string; desc: string; entry: string; 
 const PHASE_MODES: Record<Phase, Array<{ value: VerifyMode; label: string; preset: string }>> = {
   1: [
     { value: 'full',    label: '전체 (full)',    preset: 'phase1-full' },
-    { value: 'main',    label: '메인 (main)',    preset: 'phase1-main' },
-    { value: 'modules', label: '모듈 (modules)', preset: 'phase1-modules' },
     { value: 'quick',   label: '신속 (quick)',   preset: 'phase1-quick' },
   ],
   2: [
@@ -162,7 +138,7 @@ const PHASE_MODES: Record<Phase, Array<{ value: VerifyMode; label: string; prese
     { value: 'ptt',     label: 'PTT (ptt)',      preset: 'phase3-ptt' },
   ],
 }
-const DEFAULT_MODE: Record<Phase, VerifyMode> = { 1: 'main', 2: 'full', 3: 'full' }
+const DEFAULT_MODE: Record<Phase, VerifyMode> = { 1: 'full', 2: 'full', 3: 'full' }
 
 // ─────────────────────────────────────────────────────────────
 // sessionStorage 영속화 헬퍼
@@ -499,12 +475,6 @@ export default function VerificationPage() {
     if (phaseResult) resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [phaseResult])
 
-  // 기존 run_all.py 세밀 검증 (Phase 1 상세) — 호환 유지
-  const [detailRunning, setDetailRunning] = useState(false)
-  const [detailResult, setDetailResult]   = useState<VerResult | null>(null)
-  const [expandedModule, setExpandedModule] = useState<string | null>(null)
-  const [legacyReportMd, setLegacyReportMd] = useState('')
-
   async function runPhase(targetPhase: Phase) {
     if (activeJob) {
       show('이미 검증이 진행 중입니다. 완료 후 재시도하세요.', 'err')
@@ -592,31 +562,6 @@ export default function VerificationPage() {
     try {
       const rep = await api.get<PhaseReport>(`/verification/phases/${phase}/latest-report`)
       setPhaseReport(rep)
-    } catch (e: unknown) {
-      show(String(e), 'err')
-    }
-  }
-
-  async function runDetail() {
-    setDetailRunning(true)
-    setDetailResult(null)
-    setLegacyReportMd('')
-    try {
-      const r = await api.post<VerResult>('/verification/run', {})
-      setDetailResult(r)
-      const rate = r.total > 0 ? ((r.pass / r.total) * 100).toFixed(1) : '0'
-      show(`상세 검증 완료: ${r.pass}/${r.total} PASS (${rate}%)`, r.fail === 0 ? 'ok' : 'err')
-    } catch (e: unknown) {
-      show(String(e), 'err')
-    } finally {
-      setDetailRunning(false)
-    }
-  }
-
-  async function loadLegacyReport() {
-    try {
-      const r = await api.get<{ content: string }>('/verification/report')
-      setLegacyReportMd(r.content)
     } catch (e: unknown) {
       show(String(e), 'err')
     }
@@ -877,79 +822,6 @@ export default function VerificationPage() {
         </details>
       )}
 
-      {/* ── 기존 run_all.py 세밀 검증 (Phase 1 상세 호환 유지) ── */}
-      <div className="no-print" style={{ borderTop: '1px solid var(--border)', paddingTop: 18, marginTop: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13 }}>Phase 1 상세 검증 (run_all.py)</div>
-            <div style={{ fontSize: 11, color: 'var(--muted, #888)' }}>tests/run_all.py 기반 모듈별 개별 테스트 (호환 유지)</div>
-          </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button className="btn btn--outline" onClick={runDetail} disabled={detailRunning}>
-              {detailRunning ? '상세 검증 중...' : '상세 검증 실행'}
-            </button>
-            <button className="btn btn--outline" onClick={loadLegacyReport} disabled={detailRunning}>리포트</button>
-          </div>
-        </div>
-        {detailRunning && <div className="empty" style={{ padding: 24, fontSize: 13 }}>상세 검증 실행 중... (약 3~4분)</div>}
-        {detailResult && !detailRunning && (
-          <>
-            <div className="table-wrap" style={{ marginBottom: 14 }}>
-              <table className="data-table">
-                <thead><tr><th>모듈</th><th style={{ width: 60 }}>전체</th><th style={{ width: 60 }}>PASS</th><th style={{ width: 60 }}>FAIL</th><th style={{ width: 80 }}>합격률</th></tr></thead>
-                <tbody>
-                  {detailResult.modules.map(m => (
-                    <tr key={m.module} style={{ cursor: 'pointer' }} onClick={() => setExpandedModule(expandedModule === m.module ? null : m.module)}>
-                      <td style={{ fontWeight: 600 }}>
-                        <span style={{ marginRight: 6 }}>{expandedModule === m.module ? '▼' : '▶'}</span>
-                        {m.module}
-                      </td>
-                      <td>{m.total}</td>
-                      <td style={{ color: 'var(--success, #22c55e)' }}>{m.pass}</td>
-                      <td style={{ color: m.fail > 0 ? 'var(--danger)' : undefined }}>{m.fail}</td>
-                      <td><span className={`badge ${m.fail === 0 ? 'badge--green' : 'badge--red'}`}>
-                        {m.total > 0 ? ((m.pass / m.total) * 100).toFixed(0) : 0}%
-                      </span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {expandedModule && (() => {
-              const mod = detailResult.modules.find(m => m.module === expandedModule)
-              if (!mod) return null
-              return (
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead><tr><th>ID</th><th>항목</th><th style={{ width: 60 }}>결과</th><th style={{ width: 60 }}>시간</th><th>상세</th></tr></thead>
-                    <tbody>
-                      {mod.results.map(r => (
-                        <tr key={r.id}>
-                          <td className="ts">{r.id}</td>
-                          <td style={{ fontSize: 12 }}>{r.name}</td>
-                          <td><span className={`badge ${r.status === 'PASS' ? 'badge--green' : r.status === 'FAIL' ? 'badge--red' : 'badge--gray'}`}>{r.status}</span></td>
-                          <td className="ts">{r.elapsed_ms}ms</td>
-                          <td style={{ fontSize: 11, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                            title={r.detail}>{r.detail || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            })()}
-          </>
-        )}
-        {legacyReportMd && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 12 }}>tests/verification_report.md</div>
-            <pre style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
-              padding: 14, fontSize: 11, lineHeight: 1.5, maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
-              {legacyReportMd}
-            </pre>
-          </div>
-        )}
-      </div>
     </div>
   )
 }

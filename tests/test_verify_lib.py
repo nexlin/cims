@@ -240,8 +240,9 @@ class TestExistingRegistry(unittest.TestCase):
         self.assertIn("P1-PREFLIGHT", ids)
         self.assertIn("P1-START", ids)
         self.assertIn("P1-HEALTH", ids)
-        self.assertIn("MODULE-CMP", ids)
-        self.assertIn("MODULE-CSC", ids)
+        self.assertIn("P1-SEED", ids)
+        self.assertIn("P1-REGRESS-VOIP", ids)
+        self.assertIn("P1-REGRESS-PTT", ids)
 
     def test_phase2_run_all_registered(self) -> None:
         from verify_lib import registry
@@ -254,8 +255,8 @@ class TestExistingRegistry(unittest.TestCase):
         from verify_lib import presets
         names = {p["name"] for p in presets.list_presets()}
         # Step 4 까지 정의된 주요 프리셋 모두 존재
-        for required in ("phase1-full", "phase1-main", "phase1-modules",
-                         "phase1-quick", "phase2-full", "phase3-full",
+        for required in ("phase1-full", "phase1-quick",
+                         "phase2-full", "phase3-full",
                          "phase3-volte", "phase3-ptt"):
             self.assertIn(required, names, f"missing preset: {required}")
 
@@ -416,27 +417,9 @@ class TestOnlyChildren(unittest.TestCase):
             try: os.remove(ctx.report_path)
             except OSError: pass
 
-    def test_test_runner_only_ids_skips_others(self) -> None:
-        """tests/conftest.py 의 TestRunner — only_ids 지정 시 미포함 ID 는 SKIP."""
-        from conftest import TestRunner
-        runner = TestRunner("UNIT", only_ids={"X-01", "X-03"})
-        runner.run("X-01", "선택", lambda: (True, "ok"))
-        runner.run("X-02", "미선택", lambda: (True, "should be skipped"))
-        runner.run("X-03", "선택2", lambda: (False, "fail"))
-        s = runner.summary()
-        by_id = {r["id"]: r for r in s["results"]}
-        self.assertEqual(by_id["X-01"]["status"], "PASS")
-        self.assertEqual(by_id["X-02"]["status"], "SKIP")
-        self.assertEqual(by_id["X-03"]["status"], "FAIL")
-
-    def test_test_runner_only_ids_none_runs_all(self) -> None:
-        from conftest import TestRunner
-        runner = TestRunner("UNIT", only_ids=None)
-        runner.run("X-01", "all-1", lambda: (True, ""))
-        runner.run("X-02", "all-2", lambda: (True, ""))
-        s = runner.summary()
-        self.assertEqual(s["pass"], 2)
-        self.assertEqual(s["skip"], 0)
+    # NOTE: 옛 tests/conftest.py 의 TestRunner.only_ids 테스트는 c-마이그레이션
+    #       (모듈 자식 bridge 제거) 와 함께 제거됨. 자식 항목 부분 실행 인프라는
+    #       VerifyContext.only_children_for 가 유일한 진입점.
 
 
 class TestParseItemsProgress(unittest.TestCase):

@@ -831,6 +831,12 @@ if 'cims_agent' in existing:
 for t in sorted(existing):
     if t.endswith('_deprecated'):
         cur.execute(f"TRUNCATE TABLE `{t}`"); done.append(t)
+# 가입자 테이블: 등록/로그아웃 잔류 상태 초기화 (TRUNCATE 안 함, 가입자 정보 보존)
+for t in ('volte_subscriptions', 'ptt_subscriptions'):
+    if t in existing:
+        cur.execute(f"UPDATE `{t}` SET register_time=NULL, logout_time=NULL")
+        if cur.rowcount > 0:
+            done.append(f"{t} (register/logout NULL, {cur.rowcount}건)")
 cur.execute("SET FOREIGN_KEY_CHECKS=1")
 conn.commit()
 conn.close()

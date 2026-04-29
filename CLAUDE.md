@@ -48,8 +48,6 @@ Start CMP (media server) before CSP (call server):
 
 Interactive cspsim commands: `s` (stats), `c` (call), `g` (group call), `t`/`r` (PTT push/release), `sub` (subscribe), `q` (quit).
 
-**Test environment** is pre-configured in `test_run/` with 4 users (1001–1004) and group 1000.
-
 ## Architecture
 
 CIMS is a 3-tier PTT/VoIP server: **CSP** handles SIP signaling, **CMP** manages RTP media, **cspsim** simulates endpoints.
