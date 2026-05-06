@@ -955,22 +955,23 @@ PY
 }
 
 # ── 검증 (verify) — 단계/항목 단위 실행 ─────────────────────────
-# Phase 1, 3: verify/lib (cims_verify CLI) 가 단독 책임
-# Phase 2: 22단계 본체는 _verify_phase2 가 보존 — verify_lib P2-RUN-ALL 가 호출
-# 메타 명령 (list / describe / list-presets / run) 은 verify_lib 로 위임
+# 6단계 (S1~S6) 파이프라인:
+#   S1=정적검사, S2=빌드, S3=스모크, S4=패키지화, S5=로컬배포, S6=통합검증
+# 모든 stage 의 본체는 verify/lib (cims_verify CLI) 가 책임.
+# stage5 만 _verify_phase2 의 22단계 bash 본체를 _legacy.py 어댑터로 감싸 호출 —
+# 향후 Python 으로 자식 함수 단위로 점진 포팅 예정.
+# 메타 명령 (list / describe / list-presets / run) 은 verify_lib 로 위임.
 cmd_verify() {
-    local phase="${1:-phase1}"
+    local stage="${1:-stage1}"
     shift || true
 
     # 신규 메타 명령 — verify_lib 직접 호출
-    case "$phase" in
+    case "$stage" in
         list|describe|run|list-presets)
-            python3 -m tests.cims_verify "$phase" "$@"; return $? ;;
+            python3 -m tests.cims_verify "$stage" "$@"; return $? ;;
     esac
 
-    # Phase 1, 3: verify_lib (cims_verify CLI) 단독 책임. legacy 본체 제거됨 (Step 5).
-    # Phase 2: 22단계가 verify_lib 안에서 자체 구현되기 전까지 _verify_phase2 본체 유지.
-    #          P2-RUN-ALL 항목이 --legacy 로 _verify_phase2 호출 (재귀 방지용 1차 wrapping).
+    # --legacy: stage5 안의 _legacy 어댑터가 _verify_phase2 본체 호출 시 사용
     local use_legacy=0
     local args=()
     for arg in "$@"; do
@@ -978,16 +979,19 @@ cmd_verify() {
         else args+=("$arg"); fi
     done
 
-    case "$phase" in
-        phase1|1) python3 -m tests.cims_verify run --phase 1 "${args[@]}" ;;
-        phase2|2)
+    case "$stage" in
+        stage1|1) python3 -m tests.cims_verify run --stage 1 "${args[@]}" ;;
+        stage2|2) python3 -m tests.cims_verify run --stage 2 "${args[@]}" ;;
+        stage3|3) python3 -m tests.cims_verify run --stage 3 "${args[@]}" ;;
+        stage4|4) python3 -m tests.cims_verify run --stage 4 "${args[@]}" ;;
+        stage5|5)
             if (( use_legacy )); then
                 _verify_phase2 "${args[@]}"
             else
-                python3 -m tests.cims_verify run --phase 2 "${args[@]}"
+                python3 -m tests.cims_verify run --stage 5 "${args[@]}"
             fi ;;
-        phase3|3) python3 -m tests.cims_verify run --phase 3 "${args[@]}" ;;
-        *) err "지원하지 않는 phase: $phase (phase1|phase2|phase3 지원)"; return 1 ;;
+        stage6|6) python3 -m tests.cims_verify run --stage 6 "${args[@]}" ;;
+        *) err "지원하지 않는 stage: $stage (stage1~stage6 지원)"; return 1 ;;
     esac
 }
 

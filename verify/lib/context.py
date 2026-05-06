@@ -61,8 +61,8 @@ def sanitized_env() -> dict:
 class VerifyContext:
     repo_root: str                       # /home/nex/work/cims
     dist_dir: str                        # build/dist 절대 경로
-    report_path: str                     # verify_reports/<ts>_phaseN.md
-    phase: int
+    report_path: str                     # verify_reports/<ts>_stageN.md (또는 multi)
+    stage: int                           # 1~6 (S1~S6) — 0=multi-stage 실행
     ts: str                              # YYYYMMDD_HHMMSS
     opts: dict = field(default_factory=dict)
     ens_ip: str = ""
@@ -74,19 +74,21 @@ class VerifyContext:
     _report_fp: Optional[IO] = None
 
     @classmethod
-    def create(cls, repo_root: str, phase: int, opts: Optional[dict] = None,
+    def create(cls, repo_root: str, stage: int, opts: Optional[dict] = None,
                report_dir: Optional[str] = None) -> "VerifyContext":
         repo_root = os.path.abspath(repo_root)
         dist_dir = os.path.join(repo_root, "build", "dist")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         rdir = report_dir or os.path.join(repo_root, "verify_reports")
         os.makedirs(rdir, exist_ok=True)
-        report_path = os.path.join(rdir, f"{ts}_phase{phase}.md")
+        # stage=0 (multi-stage) 의 경우 stageMulti 사용
+        suffix = f"stage{stage}" if stage else "multi"
+        report_path = os.path.join(rdir, f"{ts}_{suffix}.md")
         ens_ip = _detect_ens160_ip()
         branch, sha = _detect_git(repo_root)
         return cls(
             repo_root=repo_root, dist_dir=dist_dir, report_path=report_path,
-            phase=phase, ts=ts, opts=opts or {},
+            stage=stage, ts=ts, opts=opts or {},
             ens_ip=ens_ip, git_branch=branch, git_sha=sha,
         )
 

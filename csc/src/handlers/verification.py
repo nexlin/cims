@@ -1,15 +1,18 @@
-"""검증 실행 및 리포트 API — verify.lib (tests/verify.lib/) 기반.
+"""검증 실행 및 리포트 API — verify.lib (verify/lib/) 기반.
 
 엔드포인트:
-  /phases/<N> (POST)                      — cims.sh verify phase<N> 실행 (N=1/2/3)
-                                            body 의 async=true 지정 시 job_id 즉시 반환 (비동기)
-                                            기본은 sync — subprocess 종료까지 블록 (CLI/curl 호환)
-                                            body 의 items/preset/only_children 으로 부분 실행 지원
-  /phases/<N>/latest-report (GET)         — verify_reports/*_phase<N>.md 최신 내용
-  /phases/<N>/reports (GET)               — verify_reports/*_phase<N>.md 목록
-  /jobs/<job_id> (GET)                    — 비동기 job 상태 + stdout tail + items_progress (폴링용)
-  /items?phase=N (GET)                    — verify.lib registry 등록 항목 트리 (UI 동적 체크박스)
-  /presets (GET)                          — verify.lib 프리셋 목록
+  /stages (GET)                            — 6 stage 메타 + 각 stage 의 항목 트리
+  /stages/<N> (POST)                       — cims.sh verify stage<N> 실행 (N=1~6)
+                                              body:
+                                                - async=true 지정 시 job_id 즉시 반환
+                                                - items/preset/only_children 으로 부분 실행
+                                                - skip_build/skip_pkg/skip_reset/keep_agent 옵션
+  /stages/<N>/latest-report (GET)          — verify_reports/*_stage<N>.md 최신
+  /stages/<N>/reports (GET)                — verify_reports/*_stage<N>.md 목록
+  /run (POST)                              — items / preset 으로 임의 실행 (multi-stage 가능)
+  /jobs/<job_id> (GET)                     — 비동기 job 상태 + stdout tail + items_progress
+  /items?stage=N (GET)                     — verify.lib registry 항목 트리 (UI 동적 체크박스)
+  /presets (GET)                           — verify.lib 프리셋 목록
 """
 import os
 import re
@@ -28,18 +31,22 @@ _TESTS_DIR = ''
 _SCRIPT_DIR = ''          # cims.sh 가 있는 디렉토리 (소스 루트)
 _REPORT_DIR = ''          # verify_reports/ 경로
 
-# cims.sh verify phase<N> 의 합리적 timeout (초)
-_PHASE_TIMEOUT = {
-    1: 900,   # reset + build + configure + start + 회귀 시나리오
-    2: 360,   # install + start/health/stop
-    3: 600,   # install + start/health/stop + 4시나리오
+# cims.sh verify stage<N> 의 합리적 timeout (초)
+_STAGE_TIMEOUT = {
+    1:  300,   # 정적 검사 (lint/typecheck/syntax/unit)
+    2:  900,   # 빌드
+    3:  900,   # 스모크 (configure → start → 1콜)
+    4:  300,   # 패키지화 (tarball + manifest)
+    5: 1200,   # 로컬 배포 (TB-CSC → 배포본 csp/cmp 체인)
+    6:  600,   # 통합 검증 (4시나리오)
 }
+
+_VALID_STAGES = (1, 2, 3, 4, 5, 6)
+
 
 def init(tests_dir: str):
     global _TESTS_DIR, _SCRIPT_DIR, _REPORT_DIR
     _TESTS_DIR = tests_dir
-    # repo root 탐색: tests_dir 의 상위를 올라가며 cims.sh + CMakeLists.txt 가 있는 곳.
-    # tests_dir 자체가 존재하지 않더라도 경로 문자열 기반으로 상위 탐색.
     cur = os.path.dirname(os.path.abspath(tests_dir))
     _SCRIPT_DIR = ''
     for _ in range(6):
@@ -52,7 +59,6 @@ def init(tests_dir: str):
             break
         cur = nxt
     if not _SCRIPT_DIR:
-        # fallback: env 또는 tests_dir 의 바로 위
         _SCRIPT_DIR = os.environ.get('CIMS_REPO_ROOT') or os.path.normpath(os.path.join(tests_dir, '..'))
     _REPORT_DIR = os.path.join(_SCRIPT_DIR, 'verify_reports')
 
@@ -62,32 +68,39 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     after = path[len(_VER_BASE):].lstrip('/')
     method = handler_args.method.upper()
 
-    # /phases/<N> — cims.sh verify phase<N> 실행
-    m = re.fullmatch(r'phases/(\d+)', after)
+    # /stages — 6 stage 메타 + 각 stage 항목 트리
+    if after == 'stages' and method == 'GET':
+        return await _get_stages_overview()
+
+    # /stages/<N> — cims.sh verify stage<N> 실행
+    m = re.fullmatch(r'stages/(\d+)', after)
     if m and method == 'POST':
-        return await _run_phase(int(m.group(1)), handler_args)
+        return await _run_stage(int(m.group(1)), handler_args)
 
-    # /phases/<N>/latest-report
-    m = re.fullmatch(r'phases/(\d+)/latest-report', after)
+    # /stages/<N>/latest-report
+    m = re.fullmatch(r'stages/(\d+)/latest-report', after)
     if m and method == 'GET':
-        return await _get_latest_phase_report(int(m.group(1)))
+        return await _get_latest_stage_report(int(m.group(1)))
 
-    # /phases/<N>/reports
-    m = re.fullmatch(r'phases/(\d+)/reports', after)
+    # /stages/<N>/reports
+    m = re.fullmatch(r'stages/(\d+)/reports', after)
     if m and method == 'GET':
-        return await _list_phase_reports(int(m.group(1)))
+        return await _list_stage_reports(int(m.group(1)))
+
+    # /run — 임의 항목/프리셋 실행 (multi-stage 가능)
+    if after == 'run' and method == 'POST':
+        return await _run_arbitrary(handler_args)
 
     # /jobs/<job_id> — 비동기 job 상태 폴링
     m = re.fullmatch(r'jobs/([0-9a-f]+)', after)
     if m and method == 'GET':
         return await _get_job_status(m.group(1))
 
-    # /items — verify.lib registry 항목 트리 (Console UI 동적 체크박스용)
+    # /items — verify.lib registry 항목 트리
     if after == 'items' and method == 'GET':
-        # query_params 는 HandlerArgs 에 dict 로 별도 노출됨
-        phase_str = (handler_args.query_params or {}).get('phase')
-        phase = int(phase_str) if phase_str and str(phase_str).isdigit() else None
-        return await _get_verify_items(phase)
+        stage_str = (handler_args.query_params or {}).get('stage')
+        stage = int(stage_str) if stage_str and str(stage_str).isdigit() else None
+        return await _get_verify_items(stage)
 
     # /presets — verify.lib 프리셋 목록
     if after == 'presets' and method == 'GET':
@@ -97,31 +110,12 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
 
 
 # ─────────────────────────────────────────────────────────────
-# Phase 1/2/3 — cims.sh verify phase<N> 래퍼
+# 보조: 리포트 / sanitized env
 # ─────────────────────────────────────────────────────────────
 
-def _find_latest_phase_report(phase: int):
-    """verify_reports/ 에서 *_phase<N>.md 중 가장 최근 파일 경로 반환."""
-    if not os.path.isdir(_REPORT_DIR):
-        return None
-    pat = os.path.join(_REPORT_DIR, f'*_phase{phase}.md')
-    files = glob.glob(pat)
-    if not files:
-        return None
-    files.sort()
-    return files[-1]
-
-
-# ─────────────────────────────────────────────────────────────
-# 비동기 job 관리 — 진행 중 stdout tail 폴링 + 완료 시 결과 조회용
-# ─────────────────────────────────────────────────────────────
-_JOBS: dict = {}              # job_id → job dict
-_JOBS_TTL_SEC = 3600          # 완료된 job 의 보관 기간 (1시간)
-_JOB_LOG_DIR = '/tmp/cims_verify_jobs'
-
-# TB-CSC 가 csc-tb.json (4419/4431) 으로 떠있는 상태에서 subprocess 가 환경을 그대로 상속하면
+# TB-CSC 가 csc-tb.json 으로 떠있는 상태에서 subprocess 가 환경을 그대로 상속하면
 # 자식 cims.sh → csc_app.py 가 csc-tb.json 을 읽어 TB-CSC 와 같은 포트 bind 시도 → 충돌.
-# Test-CSC / 배포본 csc 는 base csc.json (4421/4445/4420) 을 써야 하므로 TB 전용 env 차단.
+# Test-CSC / 배포본 csc 는 base csc.json 을 써야 하므로 TB 전용 env 차단.
 _BLOCKED_ENV_KEYS = {"CIMS_CSC_CONFIG", "CIMS_AGENT_SYNC_PORT"}
 
 
@@ -129,12 +123,24 @@ def _sanitized_env() -> dict:
     return {k: v for k, v in os.environ.items() if k not in _BLOCKED_ENV_KEYS}
 
 
-def _resolve_verdict(phase: int) -> tuple:
-    """최신 리포트에서 verdict 파싱. (verdict, report_path, report_ts) 반환."""
-    rp = _find_latest_phase_report(phase)
+def _find_latest_stage_report(stage: int):
+    """verify_reports/ 에서 *_stage<N>.md 중 가장 최근 파일 경로 반환."""
+    if not os.path.isdir(_REPORT_DIR):
+        return None
+    pat = os.path.join(_REPORT_DIR, f'*_stage{stage}.md')
+    files = glob.glob(pat)
+    if not files:
+        return None
+    files.sort()
+    return files[-1]
+
+
+def _resolve_verdict(stage: int) -> tuple:
+    """최신 리포트에서 verdict 파싱. (verdict, report_path, report_ts)."""
+    rp = _find_latest_stage_report(stage)
     if not rp:
         return ('UNKNOWN', None, '')
-    ts = os.path.basename(rp).split('_phase')[0]
+    ts = os.path.basename(rp).split('_stage')[0]
     verdict = 'UNKNOWN'
     try:
         with open(rp) as fp:
@@ -146,8 +152,15 @@ def _resolve_verdict(phase: int) -> tuple:
     return (verdict, rp, ts)
 
 
+# ─────────────────────────────────────────────────────────────
+# 비동기 job 관리
+# ─────────────────────────────────────────────────────────────
+_JOBS: dict = {}              # job_id → job dict
+_JOBS_TTL_SEC = 3600
+_JOB_LOG_DIR = '/tmp/cims_verify_jobs'
+
+
 def _gc_jobs():
-    """오래된 완료 job 메모리 회수."""
     now = time.time()
     stale = [jid for jid, j in _JOBS.items()
              if j.get('done') and (now - (j.get('ended_at') or now)) > _JOBS_TTL_SEC]
@@ -158,12 +171,13 @@ def _gc_jobs():
             except Exception: pass
 
 
-async def _start_phase_job(phase: int, argv: list, timeout: int) -> str:
+async def _start_job(stage: int, argv: list, timeout: int,
+                     label: str = '') -> str:
     """Spawn subprocess in background. Returns job_id immediately."""
     _gc_jobs()
     os.makedirs(_JOB_LOG_DIR, exist_ok=True)
     job_id = uuid.uuid4().hex[:12]
-    log_path = os.path.join(_JOB_LOG_DIR, f'phase{phase}_{job_id}.log')
+    log_path = os.path.join(_JOB_LOG_DIR, f'stage{stage}_{job_id}.log')
     log_file = open(log_path, 'wb')
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -174,7 +188,8 @@ async def _start_phase_job(phase: int, argv: list, timeout: int) -> str:
     )
     job = {
         'job_id': job_id,
-        'phase': phase,
+        'stage': stage,
+        'label': label,
         'argv': argv,
         'started_at': time.time(),
         'ended_at': None,
@@ -189,11 +204,11 @@ async def _start_phase_job(phase: int, argv: list, timeout: int) -> str:
         '_timeout': timeout,
     }
     _JOBS[job_id] = job
-    asyncio.create_task(_watch_phase_job(job_id))
+    asyncio.create_task(_watch_job(job_id))
     return job_id
 
 
-async def _watch_phase_job(job_id: str):
+async def _watch_job(job_id: str):
     job = _JOBS.get(job_id)
     if not job: return
     proc = job['_proc']
@@ -208,59 +223,64 @@ async def _watch_phase_job(job_id: str):
         except Exception: pass
     job['returncode'] = rc
     job['ended_at'] = time.time()
-    verdict, rp, ts = _resolve_verdict(job['phase'])
-    job['verdict'] = verdict
-    job['report_path'] = rp
-    job['report_ts'] = ts
+    if job['stage'] in _VALID_STAGES:
+        verdict, rp, ts = _resolve_verdict(job['stage'])
+        job['verdict'] = verdict
+        job['report_path'] = rp
+        job['report_ts'] = ts
     job['done'] = True
 
 
-_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
-_RE_RUN_START   = re.compile(r'^\[VERIFY\] run-start: total=(\d+) ids=(.+)$')
-_RE_ITEM_START  = re.compile(r'^\[VERIFY\] item-start: (\S+) idx=(\d+)/(\d+) name=(.+)$')
-_RE_ITEM_END    = re.compile(r'^\[VERIFY\] item-end: (\S+) status=(\S+) elapsed_ms=(\d+)$')
-_RE_CHILD       = re.compile(r'^\[VERIFY\] child-result: (\S+)\.(\S+) status=(\S+) elapsed_ms=(\d+) name=(.+)$')
-_RE_STEP_START  = re.compile(r'^\[VERIFY\] step-start: (\S+) (.+)$')
-_RE_STEP_END    = re.compile(r'^\[VERIFY\] step-end: (\S+) status=(\S+) elapsed_ms=(\d+)$')
+# ─────────────────────────────────────────────────────────────
+# stdout 마커 파서 — UI 진행 폴링용
+# ─────────────────────────────────────────────────────────────
+_ANSI_RE         = re.compile(r'\x1b\[[0-9;]*m')
+_RE_RUN_START    = re.compile(r'^\[VERIFY\] run-start: total=(\d+) ids=(.+)$')
+_RE_ITEM_START   = re.compile(r'^\[VERIFY\] item-start: (\S+) stage=(\d+) idx=(\d+)/(\d+) name=(.+)$')
+_RE_ITEM_END     = re.compile(r'^\[VERIFY\] item-end: (\S+) status=(\S+) elapsed_ms=(\d+)$')
+_RE_CHILD        = re.compile(r'^\[VERIFY\] child-result: (\S+)\.(\S+) status=(\S+) elapsed_ms=(\d+) name=(.+)$')
+_RE_GROUP_END    = re.compile(r'^\[VERIFY\] group-end: (\S+) status=(\S+) child_count=(\d+)$')
+_RE_RUN_END      = re.compile(r'^\[VERIFY\] run-end: total=(\d+) pass=(\d+) fail=(\d+) skip=(\d+)(?: blocked=(\d+))?$')
 
 
 def _parse_items_progress(log_path: str) -> dict:
-    """log 의 누적 stdout 에서 [VERIFY] 마커를 파싱하여 진행 dict 반환.
+    """log 의 누적 stdout 에서 [VERIFY] 마커를 파싱 → 진행 dict.
 
     반환 형식:
       {
         "selected": [id, ...],
         "total": int, "completed": int, "current": str|None,
         "items": [
-          {"id", "name", "status": "RUNNING|PASS|FAIL|SKIP",
-           "elapsed_ms", "started_at": <relative>,
-           "children": [{"id", "name", "status", "elapsed_ms"}]
+          {"id", "name", "stage", "status": "RUNNING|PASS|FAIL|SKIP|BLOCKED",
+           "elapsed_ms", "idx", "children": [{"id", "name", "status", "elapsed_ms"}]
           }, ...
-        ]
+        ],
+        "summary": {"pass":..., "fail":..., "skip":..., "blocked":...}|None,
       }
-    Phase 2 의 step-start/step-end 는 P2-RUN-ALL 의 children 으로 흡수.
     """
     selected: list = []
     total: int = 0
     items: list = []
     by_id: dict = {}
-    current: str | None = None
+    current: Optional[str] = None
     completed: int = 0
+    summary: Optional[dict] = None
 
     if not log_path or not os.path.isfile(log_path):
         return {"selected": selected, "total": 0, "completed": 0,
-                "current": None, "items": items}
+                "current": None, "items": items, "summary": None}
     try:
         with open(log_path, 'rb') as f:
             data = f.read().decode('utf-8', errors='replace')
     except Exception:
         return {"selected": selected, "total": 0, "completed": 0,
-                "current": None, "items": items}
+                "current": None, "items": items, "summary": None}
 
     for raw in data.splitlines():
         line = _ANSI_RE.sub('', raw).rstrip()
         if not line.startswith('[VERIFY] '):
             continue
+
         m = _RE_RUN_START.match(line)
         if m:
             total = int(m.group(1))
@@ -268,19 +288,24 @@ def _parse_items_progress(log_path: str) -> dict:
             continue
         m = _RE_ITEM_START.match(line)
         if m:
-            iid, idx, n, name = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
+            iid, stage, idx, n, name = (
+                m.group(1), int(m.group(2)),
+                int(m.group(3)), int(m.group(4)), m.group(5),
+            )
             if total < n:
                 total = n
             entry = by_id.get(iid)
             if entry is None:
-                entry = {"id": iid, "name": name, "status": "RUNNING",
-                         "elapsed_ms": 0, "idx": idx, "children": []}
+                entry = {"id": iid, "name": name, "stage": stage,
+                         "status": "RUNNING", "elapsed_ms": 0, "idx": idx,
+                         "children": []}
                 items.append(entry); by_id[iid] = entry
                 if iid not in selected:
                     selected.append(iid)
             else:
                 entry["status"] = "RUNNING"
                 entry["name"] = name
+                entry["stage"] = stage
                 entry["idx"] = idx
             current = iid
             continue
@@ -289,13 +314,14 @@ def _parse_items_progress(log_path: str) -> dict:
             iid, status, elapsed = m.group(1), m.group(2), int(m.group(3))
             entry = by_id.get(iid)
             if entry is None:
-                entry = {"id": iid, "name": iid, "status": status,
-                         "elapsed_ms": elapsed, "idx": len(items) + 1, "children": []}
+                entry = {"id": iid, "name": iid, "stage": 0,
+                         "status": status, "elapsed_ms": elapsed,
+                         "idx": len(items) + 1, "children": []}
                 items.append(entry); by_id[iid] = entry
             else:
                 entry["status"] = status
                 entry["elapsed_ms"] = elapsed
-            if status in ("PASS", "FAIL", "SKIP"):
+            if status in ("PASS", "FAIL", "SKIP", "BLOCKED"):
                 completed += 1
             if current == iid:
                 current = None
@@ -306,44 +332,36 @@ def _parse_items_progress(log_path: str) -> dict:
                 m.group(1), m.group(2), m.group(3), int(m.group(4)), m.group(5))
             parent = by_id.get(parent_id)
             if parent is None:
-                parent = {"id": parent_id, "name": parent_id, "status": "RUNNING",
-                          "elapsed_ms": 0, "idx": len(items) + 1, "children": []}
-                items.append(parent); by_id[parent_id] = parent
-            parent["children"].append({
-                "id": child_id, "name": name, "status": status, "elapsed_ms": elapsed,
-            })
-            continue
-        m = _RE_STEP_START.match(line)
-        if m:
-            step_no, step_name = m.group(1), m.group(2)
-            # Phase 2 의 22단계 → P2-RUN-ALL 의 children 으로 흡수
-            parent = by_id.get('P2-RUN-ALL')
-            if parent is None:
-                parent = {"id": "P2-RUN-ALL", "name": "Phase 2 22단계",
+                parent = {"id": parent_id, "name": parent_id, "stage": 0,
                           "status": "RUNNING", "elapsed_ms": 0,
                           "idx": len(items) + 1, "children": []}
-                items.append(parent); by_id['P2-RUN-ALL'] = parent
-                if 'P2-RUN-ALL' not in selected:
-                    selected.append('P2-RUN-ALL')
-            cid = f"P2-{step_no}"
-            existing = next((c for c in parent["children"] if c["id"] == cid), None)
+                items.append(parent); by_id[parent_id] = parent
+            existing = next((c for c in parent["children"] if c["id"] == child_id), None)
             if existing:
-                existing["status"] = "RUNNING"; existing["name"] = step_name
+                existing["status"] = status
+                existing["elapsed_ms"] = elapsed
+                existing["name"] = name
             else:
                 parent["children"].append({
-                    "id": cid, "name": step_name, "status": "RUNNING", "elapsed_ms": 0,
+                    "id": child_id, "name": name,
+                    "status": status, "elapsed_ms": elapsed,
                 })
             continue
-        m = _RE_STEP_END.match(line)
+        m = _RE_GROUP_END.match(line)
         if m:
-            step_no, status, elapsed = m.group(1), m.group(2), int(m.group(3))
-            parent = by_id.get('P2-RUN-ALL')
-            if parent is None:
-                continue
-            cid = f"P2-{step_no}"
-            existing = next((c for c in parent["children"] if c["id"] == cid), None)
-            if existing:
-                existing["status"] = status; existing["elapsed_ms"] = elapsed
+            parent_id, status, _ = m.group(1), m.group(2), int(m.group(3))
+            entry = by_id.get(parent_id)
+            if entry is not None:
+                entry["status"] = status
+            continue
+        m = _RE_RUN_END.match(line)
+        if m:
+            summary = {
+                "pass":    int(m.group(2)),
+                "fail":    int(m.group(3)),
+                "skip":    int(m.group(4)),
+                "blocked": int(m.group(5) or 0),
+            }
             continue
 
     if not total:
@@ -354,6 +372,7 @@ def _parse_items_progress(log_path: str) -> dict:
         "completed": completed,
         "current": current,
         "items": items,
+        "summary": summary,
     }
 
 
@@ -372,7 +391,8 @@ async def _get_job_status(job_id: str) -> HandlerResult:
     now = time.time()
     return HandlerResult(status=200, body={
         'job_id': job_id,
-        'phase': job['phase'],
+        'stage': job['stage'],
+        'label': job.get('label', ''),
         'argv': job['argv'],
         'started_at': job['started_at'],
         'ended_at': job['ended_at'],
@@ -387,13 +407,12 @@ async def _get_job_status(job_id: str) -> HandlerResult:
     })
 
 
-def _build_phase_argv(phase: int, opts: dict) -> list:
-    """opts → cims.sh argv. Phase 별 옵션 호환성 적용.
+# ─────────────────────────────────────────────────────────────
+# Stage 실행 (cims.sh verify stage<N>)
+# ─────────────────────────────────────────────────────────────
 
-    items 가 있으면 cims.sh wrapper 가 cims_verify CLI 로 passthrough — 단,
-    Phase 3 만 verify.lib 마이그레이션 완료된 상태이므로 그 외 phase 는
-    items 옵션을 무시한다 (legacy 본체 호출).
-    """
+def _build_stage_argv(stage: int, opts: dict) -> list:
+    """opts → cims.sh argv. stage 별 옵션 호환성 적용."""
     skip_build = bool(opts.get('skip_build', True))
     skip_pkg   = bool(opts.get('skip_pkg', True))
     skip_reset = bool(opts.get('skip_reset', False))
@@ -401,48 +420,43 @@ def _build_phase_argv(phase: int, opts: dict) -> list:
     items      = opts.get('items') or []
     only_children = opts.get('only_children') or {}
 
-    argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'verify', f'phase{phase}']
+    argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'verify', f'stage{stage}']
+    # 옵션 — 모든 stage 가 cims_verify CLI 위임이므로 동일하게 통과
     if skip_build: argv.append('--skip-build')
-    if phase == 1:
-        if skip_reset: argv.append('--skip-reset')
-    else:
-        if skip_pkg:   argv.append('--skip-pkg')
-        if keep_agent: argv.append('--keep-agent')
-    # verify.lib 마이그레이션 완료된 phase 의 items 옵션 passthrough.
-    # Step 1: Phase 3, Step 2: Phase 1, Step 3: Phase 2 (단일 P2-RUN-ALL 항목).
-    if phase in (1, 2, 3) and items:
+    if skip_pkg:   argv.append('--skip-pkg')
+    if skip_reset: argv.append('--skip-reset')
+    if keep_agent: argv.append('--keep-agent')
+    if items:
         argv += ['--items', ','.join(items)]
-    # 모듈 자식 항목 부분 실행 — JSON 인코딩으로 단일 인자 전달
     if isinstance(only_children, dict) and only_children:
         argv += ['--only-children', json.dumps(only_children, ensure_ascii=False)]
     return argv
 
 
-async def _run_phase(phase: int, handler_args: HandlerArgs) -> HandlerResult:
-    if phase not in (1, 2, 3):
-        return HandlerResult(status=400, body={'error': 'phase must be 1, 2, or 3'})
+async def _run_stage(stage: int, handler_args: HandlerArgs) -> HandlerResult:
+    if stage not in _VALID_STAGES:
+        return HandlerResult(status=400, body={'error': f'stage must be 1~6 (got {stage})'})
     if not _SCRIPT_DIR or not os.path.isfile(os.path.join(_SCRIPT_DIR, 'cims.sh')):
         return HandlerResult(status=500, body={'error': f'cims.sh not found at {_SCRIPT_DIR}'})
 
     body = handler_args.body or {}
     opts = body if isinstance(body, dict) else {}
     is_async = bool(opts.get('async', False))
-    argv = _build_phase_argv(phase, opts)
-    timeout = _PHASE_TIMEOUT.get(phase, 600)
+    argv = _build_stage_argv(stage, opts)
+    timeout = _STAGE_TIMEOUT.get(stage, 600)
+    label = f'stage{stage}'
 
-    # 비동기 모드 — job 즉시 시작 + job_id 반환 (frontend 가 GET /jobs/<id> 폴링)
     if is_async:
-        job_id = await _start_phase_job(phase, argv, timeout)
+        job_id = await _start_job(stage, argv, timeout, label=label)
         return HandlerResult(status=202, body={
             'job_id': job_id,
-            'phase': phase,
+            'stage': stage,
             'argv': argv,
             'started_at': _JOBS[job_id]['started_at'],
             'message': 'started',
         })
 
-    # 동기 모드 (legacy) — CLI / curl 호환. async handler 에서 blocking subprocess.run 은
-    # uvicorn 이벤트 루프를 block 하여 self-call 이 실패하므로 to_thread 사용.
+    # 동기 모드 — to_thread 로 blocking subprocess
     def _run_sync():
         return subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout,
@@ -453,15 +467,14 @@ async def _run_phase(phase: int, handler_args: HandlerArgs) -> HandlerResult:
         stdout_tail = '\n'.join((result.stdout + result.stderr).splitlines()[-40:])
     except subprocess.TimeoutExpired:
         return HandlerResult(status=500, body={
-            'phase': phase,
-            'error': f'verify phase{phase} timeout ({timeout}s)',
+            'stage': stage, 'error': f'verify stage{stage} timeout ({timeout}s)',
         })
     except Exception as e:
-        return HandlerResult(status=500, body={'phase': phase, 'error': str(e)})
+        return HandlerResult(status=500, body={'stage': stage, 'error': str(e)})
 
-    verdict, report_path, report_ts = _resolve_verdict(phase)
+    verdict, report_path, report_ts = _resolve_verdict(stage)
     return HandlerResult(status=200, body={
-        'phase': phase,
+        'stage': stage,
         'verdict': verdict,
         'returncode': result.returncode,
         'report_path': report_path,
@@ -471,52 +484,90 @@ async def _run_phase(phase: int, handler_args: HandlerArgs) -> HandlerResult:
     })
 
 
-async def _get_latest_phase_report(phase: int) -> HandlerResult:
-    if phase not in (1, 2, 3):
-        return HandlerResult(status=400, body={'error': 'phase must be 1, 2, or 3'})
-    path = _find_latest_phase_report(phase)
+async def _run_arbitrary(handler_args: HandlerArgs) -> HandlerResult:
+    """POST /run — body 의 items/preset 으로 임의 항목 실행 (async 만)."""
+    if not _SCRIPT_DIR or not os.path.isfile(os.path.join(_SCRIPT_DIR, 'cims.sh')):
+        return HandlerResult(status=500, body={'error': f'cims.sh not found at {_SCRIPT_DIR}'})
+
+    body = handler_args.body or {}
+    opts = body if isinstance(body, dict) else {}
+    items = opts.get('items') or []
+    preset = opts.get('preset') or ''
+    if not items and not preset:
+        return HandlerResult(status=400, body={
+            'error': 'items / preset 중 하나 지정 필요',
+        })
+
+    # cims_verify CLI 직접 호출 — multi-stage 가능
+    argv = ['python3', '-m', 'tests.cims_verify', 'run']
+    if items:  argv += ['--items', ','.join(items)]
+    if preset: argv += ['--preset', preset]
+    if opts.get('skip_build'): argv.append('--skip-build')
+    if opts.get('skip_pkg'):   argv.append('--skip-pkg')
+    if opts.get('skip_reset'): argv.append('--skip-reset')
+    if opts.get('keep_agent'): argv.append('--keep-agent')
+    only_children = opts.get('only_children') or {}
+    if isinstance(only_children, dict) and only_children:
+        argv += ['--only-children', json.dumps(only_children, ensure_ascii=False)]
+
+    timeout = int(opts.get('timeout') or 1800)
+    job_id = await _start_job(stage=0, argv=argv, timeout=timeout,
+                              label=f"items={len(items)} preset={preset or '-'}")
+    return HandlerResult(status=202, body={
+        'job_id': job_id,
+        'stage': 0,
+        'argv': argv,
+        'started_at': _JOBS[job_id]['started_at'],
+        'message': 'started',
+    })
+
+
+async def _get_latest_stage_report(stage: int) -> HandlerResult:
+    if stage not in _VALID_STAGES:
+        return HandlerResult(status=400, body={'error': f'stage must be 1~6 (got {stage})'})
+    path = _find_latest_stage_report(stage)
     if not path:
-        return HandlerResult(status=404, body={'error': f'No phase{phase} report found'})
+        return HandlerResult(status=404, body={'error': f'No stage{stage} report found'})
     with open(path) as f:
         content = f.read()
     return HandlerResult(status=200, body={
-        'phase': phase,
+        'stage': stage,
         'path': path,
-        'ts': os.path.basename(path).split('_phase')[0],
+        'ts': os.path.basename(path).split('_stage')[0],
         'content': content,
     })
 
 
-async def _list_phase_reports(phase: int) -> HandlerResult:
-    if phase not in (1, 2, 3):
-        return HandlerResult(status=400, body={'error': 'phase must be 1, 2, or 3'})
+async def _list_stage_reports(stage: int) -> HandlerResult:
+    if stage not in _VALID_STAGES:
+        return HandlerResult(status=400, body={'error': f'stage must be 1~6 (got {stage})'})
     if not os.path.isdir(_REPORT_DIR):
-        return HandlerResult(status=200, body={'phase': phase, 'reports': []})
-    pat = os.path.join(_REPORT_DIR, f'*_phase{phase}.md')
+        return HandlerResult(status=200, body={'stage': stage, 'reports': []})
+    pat = os.path.join(_REPORT_DIR, f'*_stage{stage}.md')
     files = sorted(glob.glob(pat), reverse=True)
     items = []
     for p in files[:50]:
         name = os.path.basename(p)
-        ts = name.split('_phase')[0]
+        ts = name.split('_stage')[0]
         size = os.path.getsize(p)
         items.append({'ts': ts, 'name': name, 'size': size})
-    return HandlerResult(status=200, body={'phase': phase, 'reports': items})
+    return HandlerResult(status=200, body={'stage': stage, 'reports': items})
 
 
 # ─────────────────────────────────────────────────────────────
-# verify.lib 메타 API (UI 동적 체크박스용)
+# verify.lib 메타 API
 # ─────────────────────────────────────────────────────────────
 _ITEMS_CACHE: dict = {'data': None, 'expires_at': 0}
 _ITEMS_TTL_SEC = 60
 
 
 def _run_verify_cli(args: list, timeout: int = 20) -> tuple:
-    """python3 -m tests.cims_verify <args> 실행. (rc, stdout, stderr) 반환."""
+    """python3 -m tests.cims_verify <args> 실행. (rc, stdout, stderr)."""
     cmd = ['python3', '-m', 'tests.cims_verify'] + args
     try:
         proc = subprocess.run(
             cmd, cwd=_SCRIPT_DIR, env={k: v for k, v in os.environ.items()
-                                       if k not in ('CIMS_CSC_CONFIG', 'CIMS_AGENT_SYNC_PORT')},
+                                       if k not in _BLOCKED_ENV_KEYS},
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=timeout, text=True,
         )
@@ -525,11 +576,8 @@ def _run_verify_cli(args: list, timeout: int = 20) -> tuple:
         return (-1, '', str(e))
 
 
-async def _get_verify_items(phase: Optional[int]) -> HandlerResult:
-    """verify.lib 의 등록 항목 트리 + 프리셋. 60s 캐시.
-
-    Phase 별 마이그레이션 진행도가 다르므로, registry 가 비어있는 phase 도 반환 (items: []).
-    """
+async def _get_verify_items(stage: Optional[int]) -> HandlerResult:
+    """verify.lib 의 등록 항목 트리 + 프리셋. 60s 캐시."""
     now = time.time()
     cached = _ITEMS_CACHE
     if cached['data'] is not None and now < cached['expires_at']:
@@ -550,17 +598,15 @@ async def _get_verify_items(phase: Optional[int]) -> HandlerResult:
         _ITEMS_CACHE['data'] = data
         _ITEMS_CACHE['expires_at'] = now + _ITEMS_TTL_SEC
 
-    # phase 필터 (캐시는 전체. 응답에서만 필터링)
-    if phase is not None:
-        filtered = [p for p in data.get('phases', []) if p.get('phase') == phase]
+    if stage is not None:
+        filtered = [s for s in data.get('stages', []) if s.get('stage') == stage]
         return HandlerResult(status=200, body={
-            'phase': phase, 'phases': filtered, 'presets': data.get('presets', []),
+            'stage': stage, 'stages': filtered, 'presets': data.get('presets', []),
         })
     return HandlerResult(status=200, body=data)
 
 
 async def _get_verify_presets() -> HandlerResult:
-    """프리셋 목록만."""
     argv = ['list-presets', '--json']
     rc, out, err = await asyncio.to_thread(_run_verify_cli, argv)
     if rc != 0:
@@ -574,6 +620,42 @@ async def _get_verify_presets() -> HandlerResult:
             'error': f'invalid JSON: {e}', 'stdout': out[-1000:],
         })
     return HandlerResult(status=200, body={'presets': data})
+
+
+# ─────────────────────────────────────────────────────────────
+# /stages — 6 stage 메타 + 항목 트리 (UI 초기 로드)
+# ─────────────────────────────────────────────────────────────
+_STAGE_TITLES = {
+    1: ("정적 검사",   "lint / format / unit test"),
+    2: ("빌드",        "preflight + cmake build"),
+    3: ("스모크",      "configure → start dev → 1콜 VoIP/PTT"),
+    4: ("패키지화",    "tarball + manifest hash"),
+    5: ("로컬 배포",   "TB-CSC → Test-agent → csc-server → csp/cmp 체인"),
+    6: ("통합 검증",   "VoLTE/PTT 음성·영상 (배포본 대상)"),
+}
+
+
+async def _get_stages_overview() -> HandlerResult:
+    """6 stage 메타 + 각 stage 항목 트리 + 프리셋."""
+    items_resp = await _get_verify_items(None)
+    if items_resp.status != 200:
+        return items_resp
+    data = items_resp.body
+    by_stage = {s['stage']: s.get('items', []) for s in data.get('stages', [])}
+    stages = []
+    for n in _VALID_STAGES:
+        title, desc = _STAGE_TITLES[n]
+        stages.append({
+            'stage':       n,
+            'title':       title,
+            'description': desc,
+            'timeout_s':   _STAGE_TIMEOUT.get(n, 600),
+            'items':       by_stage.get(n, []),
+        })
+    return HandlerResult(status=200, body={
+        'stages':  stages,
+        'presets': data.get('presets', []),
+    })
 
 
 CIMS_VERIFICATION_HANDLER_LIST = [

@@ -2,18 +2,19 @@
 """CIMS 검증 도구 CLI — verify.lib 의 진입점.
 
 명령:
-  list [--phase N] [--json]                 — 등록 항목 트리 출력
+  list [--stage N] [--json]                 — 등록 항목 트리 출력
   list-presets [--json]                     — 프리셋 목록
   describe ITEM_ID [--json]                 — 항목 메타 상세
-  run [--phase N] [--items ID,...] [--preset NAME]
+  run [--stage N] [--items ID,...] [--preset NAME]
        [--json] [--report-dir PATH]
        [--skip-build] [--skip-pkg] [--skip-reset] [--keep-agent]
                                             — 선택 항목 실행
 
 사용 예:
-  python3 -m tests.cims_verify list --phase 3 --json
-  python3 -m tests.cims_verify run --phase 3
-  python3 -m tests.cims_verify run --items P3-ENTRY-CHECK,P3-SEED --json
+  python3 -m tests.cims_verify list --stage 6 --json
+  python3 -m tests.cims_verify run --stage 3
+  python3 -m tests.cims_verify run --items S6-ENTRY-CHECK,S6-SEED --json
+  python3 -m tests.cims_verify run --preset pipeline-full
 """
 from __future__ import annotations
 
@@ -29,6 +30,9 @@ from pathlib import Path
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
+_REPO_ROOT = os.path.dirname(_THIS_DIR)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from verify.lib import (                                        # noqa: E402
     registry, runner, reporting, presets as preset_mod,
@@ -37,40 +41,46 @@ from verify.lib.context import VerifyContext                    # noqa: E402
 from verify.lib import items as _items_pkg                      # noqa: F401, E402  (auto-import 트리거)
 
 
+_VALID_STAGES = (1, 2, 3, 4, 5, 6)
+
+
 def _repo_root_from_here() -> str:
     """tests/cims_verify.py → repo root."""
-    return os.path.dirname(_THIS_DIR)
+    return _REPO_ROOT
 
 
 # ─────────────────────────────────────────────────────────────
 # 명령 핸들러
 # ─────────────────────────────────────────────────────────────
 def cmd_list(args: argparse.Namespace) -> int:
-    metas = registry.get_items(phase=args.phase) if args.phase \
-            else registry.get_all_metas()
-    metas = sorted(metas, key=lambda m: (m.phase, m.id))
+    if args.stage:
+        # stage 단독 — include_children=True 로 부모/자식 모두 표시
+        metas = registry.get_items(stage=args.stage, include_children=True)
+    else:
+        metas = registry.get_all_metas()
+    metas = sorted(metas, key=lambda m: (m.stage, m.id))
     if args.json:
         out = {
-            "phases": [],
+            "stages": [],
             "presets": preset_mod.list_presets(),
         }
-        # phase 별 그룹화
-        by_phase: dict = {}
+        by_stage: dict = {}
         for m in metas:
-            by_phase.setdefault(m.phase, []).append(m.to_dict())
-        for p in sorted(by_phase):
-            out["phases"].append({"phase": p, "items": by_phase[p]})
+            by_stage.setdefault(m.stage, []).append(m.to_dict())
+        for s in sorted(by_stage):
+            out["stages"].append({"stage": s, "items": by_stage[s]})
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         if not metas:
             print("(등록된 항목 없음)"); return 0
-        cur_phase = None
+        cur = None
         for m in metas:
-            if m.phase != cur_phase:
-                cur_phase = m.phase
-                print(f"\n[Phase {cur_phase}]")
+            if m.stage != cur:
+                cur = m.stage
+                print(f"\n[Stage {cur}]")
             cats = f"[{m.category}]" if m.category else ""
-            print(f"  {m.id:24} {cats:8} {m.name}")
+            mark = "▼" if m.is_group else (" └" if m.parent else "  ")
+            print(f"  {mark} {m.id:36} {cats:8} {m.name}")
         print(f"\n프리셋:")
         for p in preset_mod.list_presets():
             print(f"  {p['name']:20} ({len(p['items'])} items)")
@@ -99,14 +109,15 @@ def cmd_describe(args: argparse.Namespace) -> int:
         print(json.dumps(meta.to_dict(), ensure_ascii=False, indent=2))
     else:
         print(f"ID:           {meta.id}")
-        print(f"Phase:        {meta.phase}")
+        print(f"Stage:        {meta.stage}")
         print(f"Category:     {meta.category}")
         print(f"Name:         {meta.name}")
+        if meta.is_group: print(f"Group:        yes")
+        if meta.parent:   print(f"Parent:       {meta.parent}")
         print(f"Depends on:   {', '.join(meta.depends_on) or '-'}")
         print(f"Presets:      {', '.join(meta.presets) or '-'}")
         print(f"Side effects: {', '.join(meta.side_effects) or '-'}")
         print(f"Timeout:      {meta.timeout_s}s")
-        if meta.parent: print(f"Parent:       {meta.parent}")
         if meta.description: print(f"Description:  {meta.description}")
     return 0
 
@@ -147,31 +158,33 @@ def _parse_only_children(raw) -> dict:
 
 
 def _resolve_run_selection(args: argparse.Namespace) -> tuple:
-    """args → (item_ids, phase). phase 는 리포트 파일명용 (선택 항목들의 다수결)."""
+    """args → (item_ids, stage). stage 는 리포트 파일명용.
+
+    여러 stage 의 항목이 섞이면 stage=0 ('multi-stage' 리포트).
+    """
     items = []
     if args.items:
         items = [s.strip() for s in args.items.split(",") if s.strip()]
-        # phase 추정 — 항목들의 phase 중 가장 작은 값 (보통 동일 phase)
-        phases = {registry.get_item(i)[0].phase for i in items if registry.get_item(i)}
-        phase = min(phases) if phases else (args.phase or 0)
+        stages = {registry.get_item(i)[0].stage for i in items if registry.get_item(i)}
+        stage = stages.pop() if len(stages) == 1 else 0
     elif args.preset:
         items = preset_mod.resolve_preset(args.preset)
         if not items:
             print(f"프리셋 없음: {args.preset}", file=sys.stderr); sys.exit(2)
-        phases = {registry.get_item(i)[0].phase for i in items if registry.get_item(i)}
-        phase = min(phases) if phases else (args.phase or 0)
-    elif args.phase:
-        phase = args.phase
-        items = [m.id for m in registry.get_items(phase=phase)]
+        stages = {registry.get_item(i)[0].stage for i in items if registry.get_item(i)}
+        stage = stages.pop() if len(stages) == 1 else 0
+    elif args.stage:
+        stage = args.stage
+        items = [m.id for m in registry.get_items(stage=stage, include_children=False)]
         if not items:
-            print(f"Phase {phase} 에 등록된 항목 없음", file=sys.stderr); sys.exit(2)
+            print(f"Stage {stage} 에 등록된 항목 없음", file=sys.stderr); sys.exit(2)
     else:
-        print("--phase / --items / --preset 중 하나 지정 필요", file=sys.stderr); sys.exit(2)
-    return (items, phase)
+        print("--stage / --items / --preset 중 하나 지정 필요", file=sys.stderr); sys.exit(2)
+    return (items, stage)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    item_ids, phase = _resolve_run_selection(args)
+    item_ids, stage = _resolve_run_selection(args)
 
     repo_root = args.repo_root or _repo_root_from_here()
     opts = {
@@ -184,24 +197,21 @@ def cmd_run(args: argparse.Namespace) -> int:
     only_children = _parse_only_children(args.only_children)
     if only_children:
         opts["only_children"] = only_children
-    ctx = VerifyContext.create(repo_root=repo_root, phase=phase, opts=opts,
+    ctx = VerifyContext.create(repo_root=repo_root, stage=stage, opts=opts,
                                report_dir=args.report_dir)
 
-    # 헤더
-    reporting.write_header(
-        ctx, scope=f"선택 {len(item_ids)} 항목 실행 (phase={phase})",
-    )
+    scope = (f"Stage {stage} 전체" if stage and not args.items else
+             f"선택 {len(item_ids)} 항목 (stage={stage or 'multi'})")
+    reporting.write_header(ctx, scope=scope)
 
     t0 = time.time()
     results = runner.run_items(ctx, item_ids)
     elapsed = time.time() - t0
 
-    # 항목별 섹션은 각 항목 내부에서 ctx.w() 로 직접 작성하도록 위임 — 여기는 요약만
     verdict = reporting.determine_verdict(results)
     totals = reporting.write_summary(ctx, results, verdict)
     ctx.report_close()
 
-    # JSON 결과 출력
     payload = {
         "started_at": ctx.ts,
         "elapsed_s": round(elapsed, 2),
@@ -210,17 +220,23 @@ def cmd_run(args: argparse.Namespace) -> int:
         "totals": totals,
         "report_path": ctx.report_path,
         "verdict": verdict,
-        "phase": phase,
+        "stage": stage,
     }
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(f"\n=== Phase {phase} 검증 종료 — 판정: {verdict} ===")
+        label = f"Stage {stage}" if stage else "multi-stage"
+        print(f"\n=== {label} 검증 종료 — 판정: {verdict} ===")
         print(f"리포트: {ctx.report_path}")
         for r in results:
-            mark = {"PASS": "✓", "FAIL": "✗", "SKIP": "·"}.get(r.status, "?")
-            print(f"  {mark} {r.id:24} {r.status:5}  {r.name}")
-        print(f"\n총 {totals['total']} / PASS {totals['pass']} / FAIL {totals['fail']} / SKIP {totals['skip']}")
+            mark = {"PASS": "✓", "FAIL": "✗", "SKIP": "·",
+                    "BLOCKED": "◇"}.get(r.status, "?")
+            print(f"  {mark} {r.id:32} {r.status:7}  {r.name}")
+        line = (f"\n총 {totals['total']} / PASS {totals['pass']} / "
+                f"FAIL {totals['fail']} / SKIP {totals['skip']}")
+        if totals.get("blocked"):
+            line += f" / BLOCKED {totals['blocked']}"
+        print(line)
         print(f"소요: {elapsed:.1f}s")
 
     return 0 if verdict == "PASS" else 1
@@ -232,12 +248,12 @@ def cmd_run(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="cims_verify",
-        description="CIMS 검증 도구 — 항목 단위 메타/실행",
+        description="CIMS 검증 도구 — 항목 단위 메타/실행 (S1~S6 6단계 파이프라인)",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p_list = sub.add_parser("list", help="등록 항목 트리 출력")
-    p_list.add_argument("--phase", type=int, choices=[1, 2, 3])
+    p_list.add_argument("--stage", type=int, choices=_VALID_STAGES)
     p_list.add_argument("--json", action="store_true")
     p_list.set_defaults(_func=cmd_list)
 
@@ -251,9 +267,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_desc.set_defaults(_func=cmd_describe)
 
     p_run = sub.add_parser("run", help="선택 항목 실행")
-    # --phase / --items / --preset 우선순위: items > preset > phase
-    # (UI 가 --phase 3 + --items 로 보낼 수 있도록 mutually_exclusive 해제)
-    p_run.add_argument("--phase", type=int, choices=[1, 2, 3])
+    p_run.add_argument("--stage", type=int, choices=_VALID_STAGES)
     p_run.add_argument("--items", help="comma-separated 항목 ID 리스트")
     p_run.add_argument("--preset", help="프리셋 이름")
     p_run.add_argument("--json", action="store_true")
@@ -269,8 +283,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append", default=None,
         help=(
             "부모 항목 자식 ID 필터. 형식: PARENT=CHILD1,CHILD2 "
-            "(예: --only-children MODULE-CSC=CSC-AUTH-01,CSC-USER-01). "
-            "JSON 도 가능: --only-children '{\"MODULE-CSC\":[\"CSC-AUTH-01\"]}'. "
+            "(예: --only-children S5-CSC-DEPLOY=S5-CSC-DEPLOY-INSTALL). "
+            "JSON 도 가능: --only-children '{\"S5-CSC-DEPLOY\":[\"...\"]}'. "
             "여러 번 지정 가능."
         ),
     )
