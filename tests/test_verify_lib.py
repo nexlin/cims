@@ -710,6 +710,45 @@ class TestParseItemsProgress(unittest.TestCase):
         self.assertEqual(p["total"], 0)
         self.assertEqual(p["items"], [])
 
+    def test_pkg_manifest_immutability_check(self) -> None:
+        """common.pkg_manifest — write_marker / immutability_check 라운드트립."""
+        import tempfile
+        import json as _json
+        from verify.lib.common import pkg_manifest as pm
+
+        with tempfile.TemporaryDirectory() as td:
+            # manifest 부재 → FAIL
+            ok, cur, dep, msg = pm.immutability_check(td)
+            self.assertFalse(ok)
+            self.assertIsNone(cur)
+            self.assertIn("manifest.json 없음", msg)
+
+            # manifest 만 있고 marker 없으면 FAIL
+            os.makedirs(os.path.join(td, "packages"), exist_ok=True)
+            mp = pm.manifest_path(td)
+            with open(mp, "w") as f:
+                _json.dump({"packages": [{"name": "a.tar.gz", "sha256": "x"}]}, f)
+            ok, cur, dep, msg = pm.immutability_check(td)
+            self.assertFalse(ok)
+            self.assertIsNotNone(cur)
+            self.assertIsNone(dep)
+            self.assertIn("marker", msg.lower())
+
+            # marker 작성 후 → PASS
+            sha1 = pm.write_marker(td)
+            self.assertEqual(len(sha1), 64)
+            ok, cur, dep, msg = pm.immutability_check(td)
+            self.assertTrue(ok)
+            self.assertEqual(cur, dep)
+
+            # manifest 변경 → FAIL (deploy 후 재패키지화 시뮬레이션)
+            with open(mp, "w") as f:
+                _json.dump({"packages": [{"name": "a.tar.gz", "sha256": "y-changed"}]}, f)
+            ok, cur, dep, msg = pm.immutability_check(td)
+            self.assertFalse(ok)
+            self.assertNotEqual(cur, dep)
+            self.assertIn("불일치", msg)
+
     def test_parse_stage_blocked_marker(self) -> None:
         """[VERIFY] stage-blocked 마커 파싱 → progress.stage_gate."""
         log = self._write_log([

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
+from ...common import pkg_manifest as _pkgm
 from ._legacy import get_legacy_results, step_result
 
 
@@ -29,5 +30,14 @@ def modules_run_group(ctx: VerifyContext) -> ItemResult:
 )
 def modules_start(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
-    return step_result(by, [21], "S5-MODULES-RUN-START",
-                       "csp/cmp Start (sim install-only)")
+    result = step_result(by, [21], "S5-MODULES-RUN-START",
+                         "csp/cmp Start (sim install-only)")
+    # Immutability marker — Start 가 PASS 일 때만 현재 manifest sha 를
+    # .deployed-manifest.json 에 기록해 S6-ENTRY-CHECK 가 매칭 검증.
+    if result.status == ItemStatus.PASS:
+        sha = _pkgm.write_marker(ctx.dist_dir)
+        if sha:
+            ctx.w(f"- [marker] .deployed-manifest.json 기록 (manifest_sha={sha[:12]}…)")
+        else:
+            ctx.w("- [marker] manifest 부재로 marker 미작성")
+    return result
