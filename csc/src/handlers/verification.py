@@ -141,6 +141,10 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     if after == 'runs' and method == 'GET':
         return await _list_runs(handler_args)
 
+    # /runs/stats — 통계 요약 (성공률 / 평균 소요 / 시간 추세)
+    if after == 'runs/stats' and method == 'GET':
+        return await _runs_stats(handler_args)
+
     # /runs/<id>
     m = re.fullmatch(r'runs/(\d+)', after)
     if m and method == 'GET':
@@ -666,6 +670,119 @@ async def _list_runs(handler_args: HandlerArgs) -> HandlerResult:
     return HandlerResult(status=200, body={
         'total':  total, 'limit': limit, 'offset': offset,
         'runs':   out_rows,
+    })
+
+
+async def _runs_stats(handler_args: HandlerArgs) -> HandlerResult:
+    """회차 이력 요약 통계.
+
+    Query 옵션:
+      days=N         (기본 30) — 최근 N 일 회차만
+      limit=N        (기본 200) — 시계열 timeline 최대 점수
+
+    응답 schema:
+      {
+        window: { days, since_iso },
+        overall: { runs, pass, fail, unknown, success_rate, avg_elapsed_ms,
+                   median_elapsed_ms, p95_elapsed_ms },
+        by_scope: [ { scope, runs, pass, fail, success_rate, avg_elapsed_ms } ],
+        timeline: [ { id, started_at, scope, verdict, elapsed_ms,
+                      pass, fail, skip, blocked, total } ]
+      }
+    """
+    conn = _get_db()
+    if conn is None:
+        return HandlerResult(status=503, body={'error': 'DB 연결 불가'})
+    qp = handler_args.query_params or {}
+    days = max(1, min(int(qp.get('days', 30) or 30), 365))
+    limit = max(10, min(int(qp.get('limit', 200) or 200), 1000))
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, started_at, scope, verdict, elapsed_ms, totals
+                   FROM verification_run
+                   WHERE started_at >= (NOW() - INTERVAL %s DAY)
+                   ORDER BY id DESC LIMIT %s""",
+                (days, limit),
+            )
+            rows = list(cur.fetchall())
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+    # 통계 계산 — Python 측 (DB 보다 코드 단순 + 단위 테스트 용이)
+    total_runs = len(rows)
+    elapsed_list = [int(r['elapsed_ms'] or 0) for r in rows]
+    n_pass = sum(1 for r in rows if r['verdict'] == 'PASS')
+    n_fail = sum(1 for r in rows if r['verdict'] == 'FAIL')
+    n_unknown = sum(1 for r in rows if r['verdict'] not in ('PASS', 'FAIL'))
+
+    def _pct(n: int, d: int) -> float:
+        return round(100.0 * n / d, 1) if d else 0.0
+
+    def _quantile(vals: list, q: float) -> int:
+        if not vals: return 0
+        s = sorted(vals)
+        idx = max(0, min(len(s) - 1, int(round((len(s) - 1) * q))))
+        return int(s[idx])
+
+    overall = {
+        'runs':              total_runs,
+        'pass':              n_pass,
+        'fail':              n_fail,
+        'unknown':           n_unknown,
+        'success_rate':      _pct(n_pass, n_pass + n_fail),  # UNKNOWN 제외
+        'avg_elapsed_ms':    int(sum(elapsed_list) / total_runs) if total_runs else 0,
+        'median_elapsed_ms': _quantile(elapsed_list, 0.5),
+        'p95_elapsed_ms':    _quantile(elapsed_list, 0.95),
+    }
+
+    # scope 별 집계 (stage1 / stage2 ... / multi 등)
+    by_scope_map: dict = {}
+    for r in rows:
+        sc = r['scope'] or 'unknown'
+        d = by_scope_map.setdefault(sc, {
+            'scope': sc, 'runs': 0, 'pass': 0, 'fail': 0,
+            '_elapsed': []
+        })
+        d['runs'] += 1
+        if r['verdict'] == 'PASS':   d['pass'] += 1
+        elif r['verdict'] == 'FAIL': d['fail'] += 1
+        d['_elapsed'].append(int(r['elapsed_ms'] or 0))
+    by_scope = []
+    for sc, d in sorted(by_scope_map.items()):
+        e = d.pop('_elapsed')
+        d['success_rate']   = _pct(d['pass'], d['pass'] + d['fail'])
+        d['avg_elapsed_ms'] = int(sum(e) / len(e)) if e else 0
+        by_scope.append(d)
+
+    # 시계열 — 시간 순 (오래된 것 → 최신) 으로 정렬
+    timeline = []
+    for r in reversed(rows):  # ASC
+        try: totals = json.loads(r.get('totals') or '{}') or {}
+        except Exception: totals = {}
+        timeline.append({
+            'id':         r['id'],
+            'started_at': r['started_at'].isoformat() if r['started_at'] else None,
+            'scope':      r['scope'] or '',
+            'verdict':    r['verdict'] or 'UNKNOWN',
+            'elapsed_ms': int(r['elapsed_ms'] or 0),
+            'pass':       int(totals.get('pass', 0) or 0),
+            'fail':       int(totals.get('fail', 0) or 0),
+            'skip':       int(totals.get('skip', 0) or 0),
+            'blocked':    int(totals.get('blocked', 0) or 0),
+            'total':      int(totals.get('total', 0) or 0),
+        })
+
+    from datetime import datetime, timedelta, timezone
+    since_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    return HandlerResult(status=200, body={
+        'window':  {'days': days, 'since_iso': since_iso, 'limit': limit},
+        'overall': overall,
+        'by_scope': by_scope,
+        'timeline': timeline,
     })
 
 

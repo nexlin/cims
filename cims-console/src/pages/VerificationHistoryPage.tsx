@@ -4,6 +4,7 @@ import {
   verifyApi,
   type RunHistoryItem, type RunDetail, type RunDetailItem,
   type VerifyStatus,
+  type RunsStatsResponse,
 } from '../api/verification'
 
 // ─────────────────────────────────────────────────────────────
@@ -242,6 +243,163 @@ function Total({ label, value, color = '#374151' }: { label: string; value: numb
 // ─────────────────────────────────────────────────────────────
 // 메인 페이지
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// 통계 패널 — overall summary + scope 별 + 시계열 sparkline
+// ─────────────────────────────────────────────────────────────
+function StatsPanel({
+  stats, days, setDays, err,
+}: {
+  stats: RunsStatsResponse | null
+  days: number
+  setDays: (n: number) => void
+  err: string | null
+}) {
+  const card = useMemo<React.CSSProperties>(() => ({
+    background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6,
+    padding: 12, fontSize: 12,
+  }), [])
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>통계 (최근 {days}일)</span>
+        <select
+          value={days}
+          onChange={e => setDays(Number(e.target.value))}
+          style={selectStyle}
+        >
+          {[7, 14, 30, 60, 90].map(d => (
+            <option key={d} value={d}>{d}일</option>
+          ))}
+        </select>
+        {err && <span style={{ color: '#dc2626', fontSize: 11 }}>⚠ {err}</span>}
+      </div>
+      {stats === null ? (
+        <div style={{ ...card, color: '#6b7280' }}>로딩 중…</div>
+      ) : stats.overall.runs === 0 ? (
+        <div style={{ ...card, color: '#6b7280' }}>해당 기간 회차 없음</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          {/* overall */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>종합</div>
+            <KpiGrid items={[
+              { label: '전체 회차', value: `${stats.overall.runs}회` },
+              { label: '성공률', value: `${stats.overall.success_rate}%`,
+                color: stats.overall.success_rate >= 80 ? '#16a34a'
+                       : stats.overall.success_rate >= 50 ? '#ca8a04' : '#dc2626' },
+              { label: 'PASS', value: `${stats.overall.pass}회`, color: '#16a34a' },
+              { label: 'FAIL', value: `${stats.overall.fail}회`, color: '#dc2626' },
+              { label: '평균 소요', value: fmtMsShort(stats.overall.avg_elapsed_ms) },
+              { label: 'p95 소요', value: fmtMsShort(stats.overall.p95_elapsed_ms) },
+            ]} />
+          </div>
+          {/* by scope */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>scope 별 성공률</div>
+            <ScopeTable rows={stats.by_scope} />
+          </div>
+          {/* timeline sparkline */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>회차 추세 ({stats.timeline.length}건)</div>
+            <Sparkline timeline={stats.timeline} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function KpiGrid({ items }: { items: { label: string; value: string; color?: string }[] }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+      {items.map(it => (
+        <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+          <span style={{ color: '#6b7280' }}>{it.label}</span>
+          <span style={{ fontWeight: 600, color: it.color || '#111' }}>{it.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
+  if (rows.length === 0) return <div style={{ color: '#6b7280' }}>없음</div>
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+      <thead>
+        <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+          <th style={{ textAlign: 'left',  padding: '4px 6px' }}>scope</th>
+          <th style={{ textAlign: 'right', padding: '4px 6px' }}>회차</th>
+          <th style={{ textAlign: 'right', padding: '4px 6px' }}>성공률</th>
+          <th style={{ textAlign: 'right', padding: '4px 6px' }}>평균</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(r => (
+          <tr key={r.scope} style={{ borderBottom: '1px dashed #f3f4f6' }}>
+            <td style={{ padding: '3px 6px' }}>{r.scope}</td>
+            <td style={{ padding: '3px 6px', textAlign: 'right' }}>{r.runs}</td>
+            <td style={{
+              padding: '3px 6px', textAlign: 'right', fontWeight: 600,
+              color: r.success_rate >= 80 ? '#16a34a'
+                     : r.success_rate >= 50 ? '#ca8a04' : '#dc2626',
+            }}>{r.success_rate}%</td>
+            <td style={{ padding: '3px 6px', textAlign: 'right' }}>{fmtMsShort(r.avg_elapsed_ms)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/** 회차별 verdict + elapsed 시계열 — inline SVG sparkline (라이브러리 의존 X). */
+function Sparkline({ timeline }: { timeline: RunsStatsResponse['timeline'] }) {
+  if (timeline.length === 0) return <div style={{ color: '#6b7280' }}>데이터 없음</div>
+  const W = 380
+  const H = 70
+  const PAD_X = 4
+  const PAD_Y = 6
+  const maxElapsed = Math.max(1, ...timeline.map(t => t.elapsed_ms))
+  const stepX = (W - PAD_X * 2) / Math.max(1, timeline.length - 1)
+  return (
+    <svg width={W} height={H + 18} style={{ display: 'block' }}>
+      {/* 좌표축: 하단선 */}
+      <line x1={PAD_X} y1={H - PAD_Y} x2={W - PAD_X} y2={H - PAD_Y}
+            stroke="#e5e7eb" strokeWidth={1} />
+      {timeline.map((t, i) => {
+        const x = PAD_X + stepX * i
+        const y = H - PAD_Y - ((t.elapsed_ms / maxElapsed) * (H - PAD_Y * 2))
+        const color = VERDICT_COLOR[t.verdict] || '#6b7280'
+        return (
+          <g key={t.id}>
+            <line x1={x} y1={H - PAD_Y} x2={x} y2={y}
+                  stroke={color} strokeWidth={2} opacity={0.5} />
+            <circle cx={x} cy={y} r={2.5} fill={color}>
+              <title>{`#${t.id} ${t.scope} ${t.verdict} — ${fmtMsShort(t.elapsed_ms)}`}</title>
+            </circle>
+          </g>
+        )
+      })}
+      {/* 범례 */}
+      <text x={PAD_X} y={H + 12} fontSize={9} fill="#6b7280">
+        {timeline[0]?.started_at?.slice(0, 10) ?? ''}
+      </text>
+      <text x={W - PAD_X} y={H + 12} fontSize={9} fill="#6b7280" textAnchor="end">
+        {timeline[timeline.length - 1]?.started_at?.slice(0, 10) ?? ''}
+      </text>
+    </svg>
+  )
+}
+
+function fmtMsShort(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const mins = Math.floor(ms / 60_000)
+  const secs = Math.floor((ms % 60_000) / 1000)
+  return `${mins}m${secs.toString().padStart(2, '0')}s`
+}
+
+
 export default function VerificationHistoryPage() {
   const [runs, setRuns] = useState<RunHistoryItem[]>([])
   const [total, setTotal] = useState(0)
@@ -252,6 +410,21 @@ export default function VerificationHistoryPage() {
   const [limit] = useState(50)
   const [offset, setOffset] = useState(0)
   const [detail, setDetail] = useState<RunDetail | null>(null)
+  const [stats, setStats] = useState<RunsStatsResponse | null>(null)
+  const [statsDays, setStatsDays] = useState(30)
+  const [statsErr, setStatsErr] = useState<string | null>(null)
+
+  const loadStats = useCallback(async () => {
+    setStatsErr(null)
+    try {
+      const s = await verifyApi.getRunsStats({ days: statsDays, limit: 200 })
+      setStats(s)
+    } catch (e: unknown) {
+      setStatsErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [statsDays])
+
+  useEffect(() => { loadStats() }, [loadStats])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -302,8 +475,11 @@ export default function VerificationHistoryPage() {
         <span style={{ fontSize: 12, color: '#6b7280' }}>
           총 {total} 회차
         </span>
-        <button onClick={load} style={{ ...btnSecondary, marginLeft: 'auto' }}>↻ 새로고침</button>
+        <button onClick={() => { load(); loadStats() }} style={{ ...btnSecondary, marginLeft: 'auto' }}>↻ 새로고침</button>
       </header>
+
+      {/* 통계 패널 */}
+      <StatsPanel stats={stats} days={statsDays} setDays={setStatsDays} err={statsErr} />
 
       {/* 필터 */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>

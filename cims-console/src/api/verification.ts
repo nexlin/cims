@@ -145,6 +145,46 @@ export interface RunsListResponse {
   runs: RunHistoryItem[]
 }
 
+export interface RunsStatsOverall {
+  runs: number
+  pass: number
+  fail: number
+  unknown: number
+  success_rate: number
+  avg_elapsed_ms: number
+  median_elapsed_ms: number
+  p95_elapsed_ms: number
+}
+
+export interface RunsStatsByScope {
+  scope: string
+  runs: number
+  pass: number
+  fail: number
+  success_rate: number
+  avg_elapsed_ms: number
+}
+
+export interface RunsTimelineItem {
+  id: number
+  started_at: string | null
+  scope: string
+  verdict: 'PASS' | 'FAIL' | 'UNKNOWN'
+  elapsed_ms: number
+  pass: number
+  fail: number
+  skip: number
+  blocked: number
+  total: number
+}
+
+export interface RunsStatsResponse {
+  window:   { days: number; since_iso: string; limit: number }
+  overall:  RunsStatsOverall
+  by_scope: RunsStatsByScope[]
+  timeline: RunsTimelineItem[]
+}
+
 const BASE = '/verification'
 
 export const verifyApi = {
@@ -179,4 +219,13 @@ export const verifyApi = {
   },
   getRun:    (id: number) => api.get<RunDetail>(`${BASE}/runs/${id}`),
   deleteRun: (id: number) => api.delete<{ id: number; deleted: boolean }>(`${BASE}/runs/${id}`),
+
+  // 이력 통계 (이력 페이지 chart)
+  getRunsStats: (opts: { days?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (opts.days)  qs.set('days', String(opts.days))
+    if (opts.limit) qs.set('limit', String(opts.limit))
+    const q = qs.toString()
+    return api.get<RunsStatsResponse>(`${BASE}/runs/stats${q ? '?' + q : ''}`)
+  },
 }
