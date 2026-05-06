@@ -110,7 +110,7 @@ if __name__ == '__main__':
         tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'tests'))
         if not os.path.isdir(tests_dir):
             tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))
-        ver_init(tests_dir)
+        ver_init(tests_dir, config)
 
         csc_logger.init(
             service_log_dir=_service_log_dir,

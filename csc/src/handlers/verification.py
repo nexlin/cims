@@ -13,6 +13,12 @@
   /jobs/<job_id> (GET)                     — 비동기 job 상태 + stdout tail + items_progress
   /items?stage=N (GET)                     — verify.lib registry 항목 트리 (UI 동적 체크박스)
   /presets (GET)                           — verify.lib 프리셋 목록
+
+  /runs (GET)                              — 검증 회차 이력 list (필터: stage/verdict/limit)
+  /runs/<id> (GET)                         — 회차 상세 + 항목별 결과
+  /runs/<id> (DELETE)                      — 회차 삭제 (cascade)
+
+job 종료 시 verification_run + verification_run_item 자동 INSERT.
 """
 import os
 import re
@@ -24,12 +30,17 @@ import asyncio
 import subprocess
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
+
+import pymysql
+import pymysql.cursors
+
 from httpsrv.handler import HandlerArgs, HandlerResult
 
 _VER_BASE = '/api/v1/verification'
 _TESTS_DIR = ''
 _SCRIPT_DIR = ''          # cims.sh 가 있는 디렉토리 (소스 루트)
 _REPORT_DIR = ''          # verify_reports/ 경로
+_DB_CFG: dict = {}        # CimsDatabase 설정 (init() 에서 저장)
 
 # cims.sh verify stage<N> 의 합리적 timeout (초)
 _STAGE_TIMEOUT = {
@@ -44,8 +55,8 @@ _STAGE_TIMEOUT = {
 _VALID_STAGES = (1, 2, 3, 4, 5, 6)
 
 
-def init(tests_dir: str):
-    global _TESTS_DIR, _SCRIPT_DIR, _REPORT_DIR
+def init(tests_dir: str, config: Optional[dict] = None):
+    global _TESTS_DIR, _SCRIPT_DIR, _REPORT_DIR, _DB_CFG
     _TESTS_DIR = tests_dir
     cur = os.path.dirname(os.path.abspath(tests_dir))
     _SCRIPT_DIR = ''
@@ -61,6 +72,26 @@ def init(tests_dir: str):
     if not _SCRIPT_DIR:
         _SCRIPT_DIR = os.environ.get('CIMS_REPO_ROOT') or os.path.normpath(os.path.join(tests_dir, '..'))
     _REPORT_DIR = os.path.join(_SCRIPT_DIR, 'verify_reports')
+    _DB_CFG = (config or {}).get('CimsDatabase', {}) if config else {}
+
+
+def _get_db():
+    """verification_run 테이블 연결 (init 시 저장된 _DB_CFG 사용)."""
+    if not _DB_CFG:
+        return None
+    try:
+        return pymysql.connect(
+            host=_DB_CFG.get("Host", "127.0.0.1"),
+            port=int(_DB_CFG.get("Port", 3306)),
+            user=_DB_CFG.get("User", "cims"),
+            password=_DB_CFG.get("Password", ""),
+            database=_DB_CFG.get("Db", "cims"),
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=True,
+        )
+    except Exception:
+        return None
 
 
 async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
@@ -105,6 +136,17 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     # /presets — verify.lib 프리셋 목록
     if after == 'presets' and method == 'GET':
         return await _get_verify_presets()
+
+    # /runs — 회차 이력 list
+    if after == 'runs' and method == 'GET':
+        return await _list_runs(handler_args)
+
+    # /runs/<id>
+    m = re.fullmatch(r'runs/(\d+)', after)
+    if m and method == 'GET':
+        return await _get_run(int(m.group(1)))
+    if m and method == 'DELETE':
+        return await _delete_run(int(m.group(1)))
 
     return HandlerResult(status=404, body={'error': 'Not Found'})
 
@@ -172,7 +214,9 @@ def _gc_jobs():
 
 
 async def _start_job(stage: int, argv: list, timeout: int,
-                     label: str = '') -> str:
+                     label: str = '', scope: str = '',
+                     selected_ids: Optional[list] = None,
+                     trigger_type: str = 'user') -> str:
     """Spawn subprocess in background. Returns job_id immediately."""
     _gc_jobs()
     os.makedirs(_JOB_LOG_DIR, exist_ok=True)
@@ -190,6 +234,9 @@ async def _start_job(stage: int, argv: list, timeout: int,
         'job_id': job_id,
         'stage': stage,
         'label': label,
+        'scope': scope or (f'stage{stage}' if stage else 'items'),
+        'selected_ids': list(selected_ids or []),
+        'trigger_type': trigger_type,
         'argv': argv,
         'started_at': time.time(),
         'ended_at': None,
@@ -199,6 +246,7 @@ async def _start_job(stage: int, argv: list, timeout: int,
         'verdict': None,
         'report_path': None,
         'report_ts': '',
+        'run_id': None,                # _record_run 후 채워짐
         '_proc': proc,
         '_log_file': log_file,
         '_timeout': timeout,
@@ -228,7 +276,21 @@ async def _watch_job(job_id: str):
         job['verdict'] = verdict
         job['report_path'] = rp
         job['report_ts'] = ts
+    else:
+        # multi-stage / arbitrary 실행 — verdict 는 진행 파서에서 추정
+        progress = _parse_items_progress(job.get('log_path', ''))
+        summary = progress.get('summary') or {}
+        if summary.get('fail', 0) > 0:
+            job['verdict'] = 'FAIL'
+        elif summary.get('total') is not None or progress.get('items'):
+            job['verdict'] = 'PASS'
     job['done'] = True
+
+    # 회차 이력 자동 기록 (실패해도 job 자체는 영향 X)
+    try:
+        await asyncio.to_thread(_record_run, job)
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────
@@ -376,6 +438,302 @@ def _parse_items_progress(log_path: str) -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────
+# 회차 이력 기록 — _watch_job 종료 시 호출 (별도 thread)
+# ─────────────────────────────────────────────────────────────
+
+def _resolve_pkg_manifest_hash() -> str:
+    """build/dist/packages/manifest.json 의 sha256 sum (S4-PKG-MANIFEST 산출)."""
+    if not _SCRIPT_DIR:
+        return ''
+    p = os.path.join(_SCRIPT_DIR, 'build', 'dist', 'packages', 'manifest.json')
+    if not os.path.isfile(p):
+        return ''
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(p, 'rb') as f:
+            for chunk in iter(lambda: f.read(64 * 1024), b''):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return ''
+
+
+def _detect_git_meta() -> tuple:
+    if not _SCRIPT_DIR:
+        return ('', '', '')
+    try:
+        sha = subprocess.check_output(
+            ['git', '-C', _SCRIPT_DIR, 'rev-parse', '--short', 'HEAD'],
+            stderr=subprocess.DEVNULL, timeout=2,
+        ).decode().strip()
+    except Exception:
+        sha = ''
+    try:
+        branch = subprocess.check_output(
+            ['git', '-C', _SCRIPT_DIR, 'rev-parse', '--abbrev-ref', 'HEAD'],
+            stderr=subprocess.DEVNULL, timeout=2,
+        ).decode().strip()
+    except Exception:
+        branch = ''
+    try:
+        import socket
+        host = socket.gethostname()
+    except Exception:
+        host = ''
+    return (branch, sha, host)
+
+
+def _record_run(job: dict) -> None:
+    """job 종료 후 verification_run + _run_item 자동 기록.
+
+    실패해도 raise 하지 않음 (호출자에서 try/except 로 감쌈).
+    """
+    conn = _get_db()
+    if conn is None:
+        return
+    progress = _parse_items_progress(job.get('log_path', ''))
+    summary  = progress.get('summary') or {}
+    items    = progress.get('items') or []
+    started_at_dt  = _ts_to_datetime_str(job.get('started_at'))
+    finished_at_dt = _ts_to_datetime_str(job.get('ended_at'))
+    elapsed_ms = 0
+    if job.get('started_at') and job.get('ended_at'):
+        elapsed_ms = int((job['ended_at'] - job['started_at']) * 1000)
+
+    verdict = job.get('verdict') or 'UNKNOWN'
+    if verdict not in ('PASS', 'FAIL'):
+        verdict = 'UNKNOWN'
+
+    totals = {
+        'total':   progress.get('total') or len(items),
+        'pass':    summary.get('pass', 0),
+        'fail':    summary.get('fail', 0),
+        'skip':    summary.get('skip', 0),
+        'blocked': summary.get('blocked', 0),
+    }
+
+    branch, sha, host = _detect_git_meta()
+    pkg_hash = _resolve_pkg_manifest_hash()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO verification_run
+                   (started_at, finished_at, elapsed_ms, trigger_type, scope,
+                    selected_ids, verdict, totals, pkg_manifest_hash,
+                    git_branch, git_sha, host, report_path, job_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    started_at_dt, finished_at_dt, elapsed_ms,
+                    job.get('trigger_type', 'user'),
+                    job.get('scope', '')[:64],
+                    json.dumps(job.get('selected_ids') or [], ensure_ascii=False),
+                    verdict,
+                    json.dumps(totals, ensure_ascii=False),
+                    pkg_hash[:128],
+                    (branch or '')[:255], (sha or '')[:40], (host or '')[:64],
+                    (job.get('report_path') or '')[:1000],
+                    (job.get('job_id') or '')[:32],
+                ),
+            )
+            run_id = cur.lastrowid
+            job['run_id'] = run_id
+
+            # 항목별 결과 — 부모 1행 + 자식 N행
+            row_idx = 0
+            for it in items:
+                row_idx += 1
+                cur.execute(
+                    """INSERT INTO verification_run_item
+                       (run_id, item_id, stage, parent_id, is_group, name,
+                        status, elapsed_ms, detail, idx)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (run_id, it['id'][:64], int(it.get('stage', 0)),
+                     None, 1 if it.get('children') else 0,
+                     (it.get('name') or '')[:255],
+                     it.get('status', 'UNKNOWN')[:16],
+                     int(it.get('elapsed_ms', 0)),
+                     '', row_idx),
+                )
+                for c in (it.get('children') or []):
+                    row_idx += 1
+                    cur.execute(
+                        """INSERT INTO verification_run_item
+                           (run_id, item_id, stage, parent_id, is_group, name,
+                            status, elapsed_ms, detail, idx)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        (run_id, c['id'][:64], int(it.get('stage', 0)),
+                         it['id'][:64], 0,
+                         (c.get('name') or '')[:255],
+                         c.get('status', 'UNKNOWN')[:16],
+                         int(c.get('elapsed_ms', 0)),
+                         '', row_idx),
+                    )
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+def _ts_to_datetime_str(ts: Optional[float]) -> Optional[str]:
+    if ts is None: return None
+    from datetime import datetime
+    return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S.') + \
+           f"{int((ts % 1) * 1000):03d}"
+
+
+# ─────────────────────────────────────────────────────────────
+# /runs — 회차 이력 list / detail
+# ─────────────────────────────────────────────────────────────
+
+async def _list_runs(handler_args: HandlerArgs) -> HandlerResult:
+    conn = _get_db()
+    if conn is None:
+        return HandlerResult(status=503, body={'error': 'DB 연결 불가'})
+    qp = handler_args.query_params or {}
+    limit  = max(1, min(int(qp.get('limit', 50) or 50), 200))
+    offset = max(0, int(qp.get('offset', 0) or 0))
+    stage  = qp.get('stage')
+    verdict = qp.get('verdict')
+    scope = qp.get('scope')
+
+    where = []
+    args: list = []
+    if stage and str(stage).isdigit():
+        where.append("scope=%s")
+        args.append(f'stage{int(stage)}')
+    if verdict in ('PASS', 'FAIL', 'UNKNOWN'):
+        where.append("verdict=%s")
+        args.append(verdict)
+    if scope:
+        where.append("scope=%s")
+        args.append(str(scope)[:64])
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) AS cnt FROM verification_run{where_sql}", args)
+            total = int(cur.fetchone()['cnt'])
+            cur.execute(
+                f"""SELECT id, started_at, finished_at, elapsed_ms, trigger_type,
+                           scope, verdict, totals, pkg_manifest_hash,
+                           git_branch, git_sha, host, report_path, job_id
+                    FROM verification_run{where_sql}
+                    ORDER BY id DESC
+                    LIMIT %s OFFSET %s""",
+                args + [limit, offset],
+            )
+            rows = list(cur.fetchall())
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+    out_rows = []
+    for r in rows:
+        try: totals = json.loads(r.get('totals') or '{}') or {}
+        except Exception: totals = {}
+        out_rows.append({
+            'id':                r['id'],
+            'started_at':        r['started_at'].isoformat() if r['started_at'] else None,
+            'finished_at':       r['finished_at'].isoformat() if r['finished_at'] else None,
+            'elapsed_ms':        r['elapsed_ms'],
+            'trigger':           r['trigger_type'],
+            'scope':             r['scope'],
+            'verdict':           r['verdict'],
+            'totals':            totals,
+            'pkg_manifest_hash': r['pkg_manifest_hash'] or '',
+            'git_branch':        r['git_branch'] or '',
+            'git_sha':           r['git_sha'] or '',
+            'host':              r['host'] or '',
+            'report_path':       r['report_path'] or '',
+            'job_id':            r['job_id'] or '',
+        })
+    return HandlerResult(status=200, body={
+        'total':  total, 'limit': limit, 'offset': offset,
+        'runs':   out_rows,
+    })
+
+
+async def _get_run(run_id: int) -> HandlerResult:
+    conn = _get_db()
+    if conn is None:
+        return HandlerResult(status=503, body={'error': 'DB 연결 불가'})
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, started_at, finished_at, elapsed_ms, trigger_type,
+                          scope, selected_ids, verdict, totals, pkg_manifest_hash,
+                          git_branch, git_sha, host, ens_ip, report_path, job_id, note
+                   FROM verification_run WHERE id=%s""", (run_id,),
+            )
+            run = cur.fetchone()
+            if not run:
+                return HandlerResult(status=404, body={'error': f'run {run_id} 없음'})
+            cur.execute(
+                """SELECT item_id, stage, parent_id, is_group, name, status,
+                          elapsed_ms, detail, idx
+                   FROM verification_run_item
+                   WHERE run_id=%s ORDER BY idx ASC""", (run_id,),
+            )
+            items = list(cur.fetchall())
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+    try: totals = json.loads(run.get('totals') or '{}') or {}
+    except Exception: totals = {}
+    try: selected_ids = json.loads(run.get('selected_ids') or '[]') or []
+    except Exception: selected_ids = []
+
+    return HandlerResult(status=200, body={
+        'id':                run['id'],
+        'started_at':        run['started_at'].isoformat() if run['started_at'] else None,
+        'finished_at':       run['finished_at'].isoformat() if run['finished_at'] else None,
+        'elapsed_ms':        run['elapsed_ms'],
+        'trigger':           run['trigger_type'],
+        'scope':             run['scope'],
+        'selected_ids':      selected_ids,
+        'verdict':           run['verdict'],
+        'totals':            totals,
+        'pkg_manifest_hash': run['pkg_manifest_hash'] or '',
+        'git_branch':        run['git_branch'] or '',
+        'git_sha':           run['git_sha'] or '',
+        'host':              run['host'] or '',
+        'ens_ip':            run['ens_ip'] or '',
+        'report_path':       run['report_path'] or '',
+        'job_id':            run['job_id'] or '',
+        'note':              run['note'] or '',
+        'items':             [{
+            'id':         it['item_id'],
+            'stage':      it['stage'],
+            'parent_id':  it['parent_id'],
+            'is_group':   bool(it['is_group']),
+            'name':       it['name'],
+            'status':     it['status'],
+            'elapsed_ms': it['elapsed_ms'],
+            'detail':     it['detail'] or '',
+            'idx':        it['idx'],
+        } for it in items],
+    })
+
+
+async def _delete_run(run_id: int) -> HandlerResult:
+    conn = _get_db()
+    if conn is None:
+        return HandlerResult(status=503, body={'error': 'DB 연결 불가'})
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM verification_run WHERE id=%s", (run_id,))
+            n = cur.rowcount
+    finally:
+        try: conn.close()
+        except Exception: pass
+    if n == 0:
+        return HandlerResult(status=404, body={'error': f'run {run_id} 없음'})
+    return HandlerResult(status=200, body={'id': run_id, 'deleted': True})
+
+
 async def _get_job_status(job_id: str) -> HandlerResult:
     job = _JOBS.get(job_id)
     if not job:
@@ -393,6 +751,8 @@ async def _get_job_status(job_id: str) -> HandlerResult:
         'job_id': job_id,
         'stage': job['stage'],
         'label': job.get('label', ''),
+        'scope': job.get('scope', ''),
+        'selected_ids': job.get('selected_ids') or [],
         'argv': job['argv'],
         'started_at': job['started_at'],
         'ended_at': job['ended_at'],
@@ -402,6 +762,7 @@ async def _get_job_status(job_id: str) -> HandlerResult:
         'verdict': job['verdict'] if job['done'] else None,
         'report_path': job['report_path'] if job['done'] else None,
         'report_ts': job['report_ts'] if job['done'] else '',
+        'run_id': job.get('run_id'),
         'stdout_tail': tail,
         'items_progress': progress,
     })
@@ -447,7 +808,13 @@ async def _run_stage(stage: int, handler_args: HandlerArgs) -> HandlerResult:
     label = f'stage{stage}'
 
     if is_async:
-        job_id = await _start_job(stage, argv, timeout, label=label)
+        selected = list(opts.get('items') or [])
+        scope = f'stage{stage}'
+        job_id = await _start_job(
+            stage, argv, timeout, label=label,
+            scope=scope, selected_ids=selected,
+            trigger_type=str(opts.get('trigger') or 'user'),
+        )
         return HandlerResult(status=202, body={
             'job_id': job_id,
             'stage': stage,
@@ -511,8 +878,13 @@ async def _run_arbitrary(handler_args: HandlerArgs) -> HandlerResult:
         argv += ['--only-children', json.dumps(only_children, ensure_ascii=False)]
 
     timeout = int(opts.get('timeout') or 1800)
-    job_id = await _start_job(stage=0, argv=argv, timeout=timeout,
-                              label=f"items={len(items)} preset={preset or '-'}")
+    scope = f'preset:{preset}' if preset else 'items'
+    job_id = await _start_job(
+        stage=0, argv=argv, timeout=timeout,
+        label=f"items={len(items)} preset={preset or '-'}",
+        scope=scope, selected_ids=list(items),
+        trigger_type=str(opts.get('trigger') or 'user'),
+    )
     return HandlerResult(status=202, body={
         'job_id': job_id,
         'stage': 0,
