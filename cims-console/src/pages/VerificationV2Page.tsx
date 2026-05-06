@@ -1,8 +1,14 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment, useCallback } from 'react'
+
+import { verifyApi, type VerifyStagesOverview, type ItemsProgress } from '../api/verification'
 
 // ─────────────────────────────────────────────────────────────
-// 검증 v2 프로토타입 — 6단계 (S1~S6) + 그룹핑 인프라
-// 백엔드 미연결 / mock 데이터 / 시각 검토용
+// 검증 v2 — 6단계 (S1~S6) + 그룹핑
+// 백엔드 (csc/src/handlers/verification.py) 와 연결.
+//   - 초기 로드: GET /api/v1/verification/stages
+//   - 실행:    POST /api/v1/verification/stages/<N> 또는 /run
+//   - 폴링:    GET /api/v1/verification/jobs/<id>     (1.5s)
+//   - 종료 시: run_id 표시 + 이력 페이지 (/testbed/verify-history) 안내
 // ─────────────────────────────────────────────────────────────
 
 type ItemStatus = 'PENDING' | 'RUNNING' | 'PASS' | 'FAIL' | 'SKIP' | 'BLOCKED'
@@ -26,95 +32,74 @@ interface Stage {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Mock 데이터 — 30 항목 (5+2+7+2+7+7) + S5 자식 14
+// API 응답 → Stage[] 변환
 // ─────────────────────────────────────────────────────────────
-const STAGES_INIT: Stage[] = [
-  {
-    num: 1, id: 'S1', title: '정적 검사',
-    desc: 'lint / format / unit test — 코드 위생 gate',
-    items: [
-      { id: 'S1-PY-SYNTAX',          name: 'Python syntax', desc: 'py_compile verify/, tests/, csc/src/', status: 'PASS', elapsedMs: 1200 },
-      { id: 'S1-FRONTEND-LINT',      name: 'Console ESLint', desc: 'npm run lint (cims-console)', status: 'PASS', elapsedMs: 3400 },
-      { id: 'S1-FRONTEND-TYPECHECK', name: 'Console TypeCheck', desc: 'tsc -b --noEmit', status: 'PASS', elapsedMs: 4100 },
-      { id: 'S1-CPP-FORMAT',         name: 'CPP clang-format', desc: 'csp/.clang-format dry-run', status: 'PASS', elapsedMs: 800 },
-      { id: 'S1-UNIT-VERIFY-LIB',    name: 'verify_lib unit test', desc: 'python3 -m unittest tests.test_verify_lib (31 tests)', status: 'PASS', elapsedMs: 280 },
-    ],
-  },
-  {
-    num: 2, id: 'S2', title: '빌드',
-    desc: 'preflight + cmake build — 컴파일 통과 gate',
-    items: [
-      { id: 'S2-PREFLIGHT', name: 'Preflight', desc: 'ens160 IP / git / 포트 / DB 점검', status: 'PASS', elapsedMs: 5000 },
-      { id: 'S2-BUILD',     name: 'Build (dist)', desc: 'cmake + make -j (산출물 검증 포함)', status: 'PASS', elapsedMs: 83000 },
-    ],
-  },
-  {
-    num: 3, id: 'S3', title: '스모크 검증',
-    desc: 'dev 환경 1콜 회귀 (~1분) — 빠른 sanity gate',
-    items: [
-      { id: 'S3-RESET',          name: 'Dev reset', desc: 'cmd_reset --all (가입자 보존)', status: 'PASS', elapsedMs: 3500 },
-      { id: 'S3-CONFIGURE',      name: 'Configure', desc: 'cmd_configure --local-ip <ens160>', status: 'PASS', elapsedMs: 1200 },
-      { id: 'S3-START',          name: 'Start (dev)', desc: 'cmp → csp → cwrtc → csc → console → phone', status: 'PASS', elapsedMs: 8000 },
-      { id: 'S3-HEALTH',         name: 'Health check', desc: 'csp/cmp/csc 로그 ERROR/FATAL 스캔', status: 'PASS', elapsedMs: 600 },
-      { id: 'S3-SEED',           name: 'Seed', desc: '가입자/그룹 + access_services + csp reload', status: 'FAIL', elapsedMs: 4000 },
-      { id: 'S3-SCN-VOIP-SMOKE', name: 'VoIP smoke', desc: '2자 통화 1콜 (B2BUA)', status: 'BLOCKED', elapsedMs: 0 },
-      { id: 'S3-SCN-PTT-SMOKE',  name: 'PTT smoke', desc: '5인 그룹콜 1회', status: 'BLOCKED', elapsedMs: 0 },
-    ],
-  },
-  {
-    num: 4, id: 'S4', title: '패키지화',
-    desc: 'tarball 5개 + manifest hash — immutability gate (S6 매칭용)',
-    items: [
-      { id: 'S4-PKG-BUILD',    name: 'Pkg build', desc: 'cmd_pkg --no-bump (csc/console/csp/cmp/sim)', status: 'PENDING', elapsedMs: 0 },
-      { id: 'S4-PKG-MANIFEST', name: 'Manifest hash', desc: '5 tarball SHA-256 + timestamp 기록', status: 'PENDING', elapsedMs: 0 },
-    ],
-  },
-  {
-    num: 5, id: 'S5', title: '로컬배포',
-    desc: 'reset → install → start → health (S4 산출물) — 배포 절차 회귀',
-    items: [
-      { id: 'S5-RESET',                       name: 'Cleanup', desc: 'cmd_reset --keep-processes', status: 'PENDING', elapsedMs: 0 },
+function apiToStages(res: VerifyStagesOverview): Stage[] {
+  return res.stages.map(s => ({
+    num:   s.stage,
+    id:    `S${s.stage}`,
+    title: s.title,
+    desc:  s.description || '',
+    items: s.items.map(i => ({
+      id:        i.id,
+      name:      i.name,
+      desc:      i.description || '',
+      status:    'PENDING' as ItemStatus,
+      elapsedMs: 0,
+      isGroup:   i.is_group || false,
+      parent:    i.parent || undefined,
+    })),
+  }))
+}
 
-      { id: 'S5-CSC-DEPLOY',                  name: 'csc/console 배포', desc: 'TB-CSC(4419) → agent + install', status: 'PENDING', elapsedMs: 0, isGroup: true },
-      { id: 'S5-CSC-DEPLOY.AGENT-ENROLL',     name: 'Agent enroll', desc: 'admin login + Test-agent 9903', status: 'PENDING', elapsedMs: 0, parent: 'S5-CSC-DEPLOY' },
-      { id: 'S5-CSC-DEPLOY.PKG-UPLOAD',       name: 'Pkg upload', desc: 'csc + console tarball → 4419', status: 'PENDING', elapsedMs: 0, parent: 'S5-CSC-DEPLOY' },
-      { id: 'S5-CSC-DEPLOY.INSTALL',          name: 'Install', desc: 'deployment 생성 + install poll', status: 'PENDING', elapsedMs: 0, parent: 'S5-CSC-DEPLOY' },
+// progress 결과를 stages 의 항목 status/elapsedMs 에 머지 (부모/자식 모두)
+function mergeProgress(stages: Stage[], progress: ItemsProgress): Stage[] {
+  const byId = new Map<string, { status: string; elapsed_ms: number }>()
+  for (const it of progress.items) {
+    byId.set(it.id, { status: it.status, elapsed_ms: it.elapsed_ms })
+    for (const c of it.children) {
+      byId.set(c.id, { status: c.status, elapsed_ms: c.elapsed_ms })
+    }
+  }
+  return stages.map(st => ({
+    ...st,
+    items: st.items.map(item => {
+      const p = byId.get(item.id)
+      if (!p) return item
+      return { ...item, status: p.status as ItemStatus, elapsedMs: p.elapsed_ms }
+    }),
+  }))
+}
 
-      { id: 'S5-CSC-VERIFY',                  name: 'csc 설치 검증', desc: '파일 + overlay', status: 'PENDING', elapsedMs: 0, isGroup: true },
-      { id: 'S5-CSC-VERIFY.FILES',            name: 'Files', desc: 'meta.json + config/ 존재', status: 'PENDING', elapsedMs: 0, parent: 'S5-CSC-VERIFY' },
-      { id: 'S5-CSC-VERIFY.OVERLAY',          name: 'Overlay', desc: 'csc/config.json Server.Port=4445', status: 'PENDING', elapsedMs: 0, parent: 'S5-CSC-VERIFY' },
+// 그룹 부모는 자식 worst-status 로 합산하여 표시 (UI 가시성)
+function recomputeGroupStatus(stages: Stage[]): Stage[] {
+  const RANK: Record<string, number> = { PASS: 0, PENDING: 0, RUNNING: 1, SKIP: 2, BLOCKED: 3, FAIL: 4 }
+  return stages.map(st => {
+    const items = [...st.items]
+    for (let i = 0; i < items.length; i++) {
+      const p = items[i]
+      if (!p.isGroup) continue
+      const kids = items.filter(c => c.parent === p.id)
+      if (!kids.length) continue
+      let worst: ItemStatus = 'PENDING'
+      let total = 0
+      let anyRunning = false
+      for (const k of kids) {
+        if (k.status === 'RUNNING') anyRunning = true
+        if ((RANK[k.status] ?? 0) > (RANK[worst] ?? 0)) worst = k.status
+        total += k.elapsedMs || 0
+      }
+      // PENDING 인 자식이 있고 다른 자식이 RUNNING/완료 면 RUNNING 으로
+      const allDone = kids.every(k => k.status === 'PASS' || k.status === 'FAIL' || k.status === 'SKIP' || k.status === 'BLOCKED')
+      if (!allDone && (anyRunning || kids.some(k => k.status !== 'PENDING'))) worst = 'RUNNING'
+      items[i] = { ...p, status: worst, elapsedMs: total }
+    }
+    return { ...st, items }
+  })
+}
 
-      { id: 'S5-CSC-RUN',                     name: 'csc/console 기동', desc: 'start + health + listen', status: 'PENDING', elapsedMs: 0, isGroup: true },
-      { id: 'S5-CSC-RUN.CSC-START',           name: 'csc start', desc: 'port 4445 LISTEN', status: 'PENDING', elapsedMs: 0, parent: 'S5-CSC-RUN' },
-      { id: 'S5-CSC-RUN.CSC-HEALTH',          name: 'csc health', desc: 'health_check job', status: 'PENDING', elapsedMs: 0, parent: 'S5-CSC-RUN' },
-      { id: 'S5-CSC-RUN.CONSOLE-START',       name: 'console start', desc: 'port 8081 LISTEN', status: 'PENDING', elapsedMs: 0, parent: 'S5-CSC-RUN' },
-
-      { id: 'S5-MODULES-DEPLOY',              name: 'csp/cmp/sim 배포', desc: '배포본 csc(4445) → 3 agent', status: 'PENDING', elapsedMs: 0, isGroup: true },
-      { id: 'S5-MODULES-DEPLOY.AUTH',         name: 'Auth', desc: '배포본 csc 4445 admin login', status: 'PENDING', elapsedMs: 0, parent: 'S5-MODULES-DEPLOY' },
-      { id: 'S5-MODULES-DEPLOY.PKG-UPLOAD',   name: 'Pkg upload', desc: 'csp + cmp + sim → 4445', status: 'PENDING', elapsedMs: 0, parent: 'S5-MODULES-DEPLOY' },
-      { id: 'S5-MODULES-DEPLOY.AGENT-ENROLL', name: 'Agent enroll', desc: '3 agent + Test-agent 9904/5/6', status: 'PENDING', elapsedMs: 0, parent: 'S5-MODULES-DEPLOY' },
-      { id: 'S5-MODULES-DEPLOY.INSTALL',      name: 'Install', desc: 'deployment + install poll', status: 'PENDING', elapsedMs: 0, parent: 'S5-MODULES-DEPLOY' },
-
-      { id: 'S5-MODULES-RUN',                 name: 'csp/cmp 기동', desc: 'start + LISTEN', status: 'PENDING', elapsedMs: 0, isGroup: true },
-      { id: 'S5-MODULES-RUN.START',           name: 'Module start', desc: 'csp 5060/udp + cmp 9000/udp', status: 'PENDING', elapsedMs: 0, parent: 'S5-MODULES-RUN' },
-
-      { id: 'S5-FINALIZE',                    name: 'Finalize (옵션)', desc: '--stop-after 시 전체 stop', status: 'PENDING', elapsedMs: 0 },
-    ],
-  },
-  {
-    num: 6, id: 'S6', title: '통합 검증',
-    desc: 'VoLTE/PTT 음성·영상 + 회귀 (~10분) — 상용 진입 gate',
-    items: [
-      { id: 'S6-ENTRY-CHECK',     name: 'Entry check', desc: 'csc/console/csp/cmp 4포트 LISTEN', status: 'PENDING', elapsedMs: 0 },
-      { id: 'S6-SEED',            name: 'Seed', desc: '가입자/그룹 + access_services + csp reload', status: 'PENDING', elapsedMs: 0 },
-      { id: 'S6-SCN-VOLTE-VOICE', name: 'VoLTE 음성', desc: '2자 음성 통화', status: 'PENDING', elapsedMs: 0 },
-      { id: 'S6-SCN-VOLTE-VIDEO', name: 'VoLTE 영상', desc: '2자 영상 통화', status: 'PENDING', elapsedMs: 0 },
-      { id: 'S6-SCN-PTT-VOICE',   name: 'PTT 음성', desc: '5인 그룹 음성', status: 'PENDING', elapsedMs: 0 },
-      { id: 'S6-SCN-PTT-VIDEO',   name: 'PTT 영상', desc: '5인 그룹 영상', status: 'PENDING', elapsedMs: 0 },
-      { id: 'S6-SUMMARY',         name: '결과 요약', desc: '녹취/SIP/ERROR 카운트', status: 'PENDING', elapsedMs: 0 },
-    ],
-  },
-]
+// 빈 fallback (API 로드 전)
+const STAGES_FALLBACK: Stage[] = []
 
 // ─────────────────────────────────────────────────────────────
 // 헬퍼
@@ -950,14 +935,35 @@ function StageRow({
 // ─────────────────────────────────────────────────────────────
 
 export default function VerificationV2Page() {
-  const [stages, setStages] = useState<Stage[]>(STAGES_INIT)
-  const [expandedStages, setExpandedStages] = useState<Set<number>>(new Set([3]))   // S3 fail 상태라 펼쳐두기
+  const [stages, setStages] = useState<Stage[]>(STAGES_FALLBACK)
+  const [loading, setLoading] = useState(true)
+  const [expandedStages, setExpandedStages] = useState<Set<number>>(new Set())
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['S5-CSC-DEPLOY']))
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
   const [pipelineRunning, setPipelineRunning] = useState(false)
   const [soloStage, setSoloStage] = useState<number | null>(null)
   const [resumeStage, setResumeStage] = useState(1)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [lastRunId, setLastRunId] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const anyRunning = pipelineRunning || soloStage !== null
+
+  // 초기 로드 — GET /verification/stages
+  useEffect(() => {
+    let cancelled = false
+    verifyApi.getStages()
+      .then(res => {
+        if (cancelled) return
+        setStages(apiToStages(res))
+        setLoading(false)
+      })
+      .catch(e => {
+        if (cancelled) return
+        setError(e instanceof Error ? e.message : String(e))
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
 
   const toggleStage = (n: number) => {
     setExpandedStages(prev => {
@@ -1013,13 +1019,19 @@ export default function VerificationV2Page() {
   }
 
   // 전체검증 시작/중단 toggle
-  const togglePipeline = () => {
+  const togglePipeline = useCallback(async () => {
     if (pipelineRunning) {
       setPipelineRunning(false)
+      // 현재 backend 는 job kill API 없음 — 사용자에게 알림만
       return
     }
-    if (soloStage !== null) return   // 다른 실행 중이면 무시
-    // resume stage 이후 reset
+    if (soloStage !== null) return
+    setError(null)
+    // resumeStage 부터의 모든 부모/평면 항목 ID 모음 (그룹은 자식으로 자동 펼쳐짐)
+    const items: string[] = stages
+      .filter(st => st.num >= resumeStage)
+      .flatMap(st => st.items.filter(it => !it.parent).map(it => it.id))
+    // resumeStage 이후 reset
     setStages(prev => prev.map(st => {
       if (st.num < resumeStage) return st
       return {
@@ -1027,16 +1039,25 @@ export default function VerificationV2Page() {
         items: st.items.map(it => ({ ...it, status: 'PENDING' as ItemStatus, elapsedMs: 0 })),
       }
     }))
-    setPipelineRunning(true)
-  }
+    try {
+      const res = resumeStage <= 1
+        ? await verifyApi.runArbitrary({ preset: 'pipeline-full', async: true })
+        : await verifyApi.runArbitrary({ items, async: true })
+      setJobId(res.job_id)
+      setPipelineRunning(true)
+    } catch (e: unknown) {
+      setError('파이프라인 시작 실패: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }, [pipelineRunning, soloStage, resumeStage, stages])
 
   // 개별 stage 단독 실행/중단 toggle
-  const toggleStageRun = (stageNum: number) => {
+  const toggleStageRun = useCallback(async (stageNum: number) => {
     if (soloStage === stageNum) {
       setSoloStage(null)
       return
     }
     if (pipelineRunning || soloStage !== null) return
+    setError(null)
     // 해당 stage reset
     setStages(prev => prev.map(st => {
       if (st.num !== stageNum) return st
@@ -1045,8 +1066,14 @@ export default function VerificationV2Page() {
         items: st.items.map(it => ({ ...it, status: 'PENDING' as ItemStatus, elapsedMs: 0 })),
       }
     }))
-    setSoloStage(stageNum)
-  }
+    try {
+      const res = await verifyApi.runStage(stageNum, { async: true })
+      setJobId(res.job_id)
+      setSoloStage(stageNum)
+    } catch (e: unknown) {
+      setError(`Stage ${stageNum} 시작 실패: ` + (e instanceof Error ? e.message : String(e)))
+    }
+  }, [pipelineRunning, soloStage])
 
   // PDF 보고서 출력 — 모든 stage 펼침 + 모든 그룹 펼침 → window.print
   const handlePrintReport = () => {
@@ -1059,47 +1086,43 @@ export default function VerificationV2Page() {
     setTimeout(() => window.print(), 250)
   }
 
-  // mock 진행 — anyRunning=true 일 때 700ms 간격으로 첫 PENDING 항목 → RUNNING → PASS
+  // 폴링 — jobId 가 set 되면 1.5s 간격으로 GET /jobs/<id>
   useEffect(() => {
-    if (!anyRunning) return
-    const timer = setInterval(() => {
-      setStages(prev => {
-        let changed = false
-        const next = prev.map(st => {
-          if (changed) return st
-          // soloStage 모드: 해당 stage 만 처리
-          if (soloStage !== null && st.num !== soloStage) return st
-          // pipeline 모드: resumeStage 미만 skip
-          if (pipelineRunning && st.num < resumeStage) return st
-          // running → pass
-          const runIdx = st.items.findIndex(it => it.status === 'RUNNING' && !it.isGroup)
-          if (runIdx >= 0) {
-            const items = [...st.items]
-            items[runIdx] = { ...items[runIdx], status: 'PASS', elapsedMs: 1500 + Math.floor(Math.random() * 3000) }
-            changed = true
-            return { ...st, items }
+    if (!jobId) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const tick = async () => {
+      try {
+        const job = await verifyApi.getJob(jobId)
+        if (cancelled) return
+        // 진행 결과를 stages 에 머지 + 그룹 부모 status 재계산
+        setStages(prev => recomputeGroupStatus(mergeProgress(prev, job.items_progress)))
+        if (job.done) {
+          setPipelineRunning(false)
+          setSoloStage(null)
+          if (job.run_id) setLastRunId(job.run_id)
+          if (job.verdict === 'FAIL') {
+            setError(`검증 FAIL — 회차 #${job.run_id ?? '?'} (이력 페이지 참조)`)
           }
-          // first pending → running
-          const pendIdx = st.items.findIndex(it => it.status === 'PENDING' && !it.isGroup)
-          if (pendIdx >= 0) {
-            const items = [...st.items]
-            items[pendIdx] = { ...items[pendIdx], status: 'RUNNING' }
-            changed = true
-            return { ...st, items }
-          }
-          return st
-        })
-        if (!changed) {
-          setTimeout(() => {
-            setPipelineRunning(false)
-            setSoloStage(null)
-          }, 300)
+          setJobId(null)
+          return
         }
-        return next
-      })
-    }, 700)
-    return () => clearInterval(timer)
-  }, [anyRunning, soloStage, pipelineRunning, resumeStage])
+      } catch (e: unknown) {
+        if (!cancelled) {
+          // 일시 네트워크 에러는 무시하고 계속 폴링
+          // eslint-disable-next-line no-console
+          console.warn('jobs polling 일시 실패', e)
+        }
+      }
+      if (!cancelled) timer = setTimeout(tick, 1500)
+    }
+    tick()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [jobId])
 
   return (
     <div className="verify-v2-page" style={{ padding: 16, maxWidth: 1400, margin: '0 auto' }}>
@@ -1153,16 +1176,30 @@ export default function VerificationV2Page() {
       `}</style>
 
       <div className="v2-no-print" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>검증 v2 (β) — 6단계 파이프라인</h2>
+        <h2 style={{ margin: 0, fontSize: 18 }}>검증 v2 — 6단계 파이프라인</h2>
         <span style={{
           fontSize: 10, padding: '2px 8px',
-          background: '#fef3c7', color: '#92400e',
+          background: '#dcfce7', color: '#15803d',
           borderRadius: 4, fontWeight: 600,
         }}>
-          PROTOTYPE · mock 데이터
+          LIVE
         </span>
+        {loading && (
+          <span style={{ fontSize: 12, color: '#6b7280' }}>로딩 중…</span>
+        )}
+        {error && (
+          <span style={{ fontSize: 12, color: '#dc2626', maxWidth: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            ⚠ {error}
+          </span>
+        )}
+        {lastRunId !== null && (
+          <span style={{ fontSize: 12, color: '#6b7280' }}>
+            마지막 회차: <a href="/testbed/verify-history">#{lastRunId}</a>
+          </span>
+        )}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted, #6b7280)' }}>
-          기존 검증 페이지: <a href="/testbed/verify">/testbed/verify</a>
+          이력: <a href="/testbed/verify-history">/testbed/verify-history</a>
+          {' · '}구버전: <a href="/testbed/verify">/testbed/verify</a>
         </span>
       </div>
 
@@ -1210,13 +1247,13 @@ export default function VerificationV2Page() {
         borderRadius: 6,
         fontSize: 11, color: 'var(--muted, #6b7280)',
       }}>
-        <b>📝 프로토타입 안내</b>
+        <b>ℹ 안내</b>
         <ul style={{ margin: '6px 0', paddingLeft: 20 }}>
-          <li>현재 mock 데이터 — 백엔드 미연결. 실제 검증은 <a href="/testbed/verify">/testbed/verify</a> 사용</li>
-          <li>"Run Full Pipeline" 클릭 시 mock 시뮬레이션 (700ms 간격으로 PENDING → RUNNING → PASS)</li>
-          <li>S3 는 Seed 항목에서 FAIL 상태로 초기화 — 후속 항목은 BLOCKED 표시 demo</li>
-          <li>S5 는 그룹화 demo — S5-CSC-DEPLOY 가 펼쳐짐 (자식 3개), 나머지 그룹은 클릭으로 펼침</li>
-          <li>Stepper / Header / Accordion / 그룹핑 UX 확인 후 피드백 부탁</li>
+          <li>전체검증 ▶ — Stepper 의 재개 지점부터 시작 (S1=처음이면 <code>pipeline-full</code> preset)</li>
+          <li>Stage 단독 ▶ — 해당 stage 의 부모/평면 항목만 (그룹은 자식 자동 포함)</li>
+          <li>1.5초 폴링으로 진행 상태 갱신. 완료 시 회차 #ID 가 위에 표시되고 <a href="/testbed/verify-history">이력 페이지</a>에 자동 기록됨</li>
+          <li>S5 는 _verify_phase2 본체 1회 호출 후 22단계 결과를 그룹/자식에 분배 (자식 단독 실행 X — 향후 Python 포팅 시 자식 직접 실행 가능)</li>
+          <li>패키지 hash 매칭(immutability)은 S6 강화 작업 — 현재는 manifest 기록만</li>
         </ul>
       </div>
     </div>
