@@ -2,8 +2,10 @@
 
 run_items(ctx, item_ids):
 - 그룹 ID 는 자식으로 펼친 후 leaf 만 실행
-- 의존성 토폴로지 정렬 후 순차 실행
-- 의존 항목이 FAIL 이면 후속 항목 SKIP
+- 의존성 토폴로지 정렬 후 순차 실행 (stage 우선 안정 정렬)
+- 의존 항목이 FAIL 이면 후속 항목 SKIP (개별 의존)
+- **Stage gate**: stage N 에 FAIL 1개라도 발생 시 stage > N 의 모든 leaf 자동 BLOCKED
+  (`stage_gate=False` 로 비활성 가능 — 단일 stage 실행 시에는 무의미)
 - 그룹은 자식 결과의 worst-status 로 합산하여 ItemResult 반환
 
 stdout 마커 형식 (backend 가 polling 으로 파싱):
@@ -12,6 +14,7 @@ stdout 마커 형식 (backend 가 polling 으로 파싱):
   [VERIFY] item-end:   <id> status=<PASS|FAIL|SKIP|BLOCKED> elapsed_ms=<n>
   [VERIFY] child-result: <parent_id>.<child_id> status=<...> elapsed_ms=<n> name=<...>
   [VERIFY] group-end:  <parent_id> status=<...> child_count=<n>
+  [VERIFY] stage-blocked: stage=<M> reason=stage<N>-FAIL count=<n>
   [VERIFY] run-end: total=<N> pass=<n> fail=<n> skip=<n> blocked=<n>
 """
 from __future__ import annotations
@@ -37,7 +40,11 @@ _STATUS_RANK = {
 
 
 def _topo_sort(item_ids: list) -> list:
-    """선택된 항목들을 depends_on 기반으로 위상 정렬. 평면 leaf 만 대상."""
+    """선택된 항목들을 depends_on 기반으로 위상 정렬. 평면 leaf 만 대상.
+
+    동일 우선순위(의존성 무관) 항목은 (stage, id) 안정 순서로 진입 → stage 단위
+    실행이 stage 번호 오름차순으로 인접 배치되어 stage gate 가 일관되게 동작.
+    """
     selected = set(item_ids)
     metas = {}
     for iid in item_ids:
@@ -46,17 +53,23 @@ def _topo_sort(item_ids: list) -> list:
             raise ValueError(f"unknown item id: {iid}")
         metas[iid] = rec[0]
 
+    # stage·id 기준 1차 정렬 → DFS 순서를 결정적으로
+    stable_ids = sorted(item_ids, key=lambda x: (metas[x].stage, x))
+
     visited, order = set(), []
     def dfs(iid: str, stack: tuple = ()):
         if iid in visited: return
         if iid in stack:
             raise ValueError(f"cycle detected: {' -> '.join(stack + (iid,))}")
-        for dep in metas[iid].depends_on:
+        for dep in sorted(
+            metas[iid].depends_on,
+            key=lambda d: (metas[d].stage if d in metas else 0, d),
+        ):
             if dep in selected:
                 dfs(dep, stack + (iid,))
         visited.add(iid)
         order.append(iid)
-    for iid in item_ids:
+    for iid in stable_ids:
         dfs(iid)
     return order
 
@@ -130,11 +143,15 @@ def _summarize_group(parent_meta: ItemMeta, child_results: list) -> ItemResult:
     )
 
 
-def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
+def run_items(ctx: VerifyContext, item_ids: Iterable[str], stage_gate: bool = True) -> list:
     """선택 항목 실행. ItemResult 리스트 반환 (실행 순서, 그룹은 자식 합산 후 1건).
 
     그룹 ID 가 입력에 포함되면 자식으로 펼친 leaf 만 실행되고, 그룹 자체는
     자식 결과 모음으로 종합되어 결과 list 에 1번 등장한다.
+
+    Args:
+      stage_gate: True (기본) — stage N 에 FAIL 1개라도 발생 시 stage>N 의
+        leaf 는 실행 없이 BLOCKED 처리. False — 의존성 SKIP 만.
     """
     raw_ids = list(item_ids)
     if not raw_ids:
@@ -149,6 +166,8 @@ def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
 
     leaf_results: dict = {}                            # iid → ItemResult
     failed: set = set()
+    failed_stages: set = set()                         # stage gate — FAIL 발생 stage
+    blocked_stage_counts: dict = {}                    # stage gate 통계 emit 용
     for idx, iid in enumerate(ordered, start=1):
         rec = get_item(iid)
         if rec is None:
@@ -161,6 +180,24 @@ def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
             failed.add(iid)
             continue
         meta, fn = rec
+        # Stage gate — 옛 stage 가 FAIL 이면 후속 stage 자동 BLOCKED
+        if stage_gate and failed_stages and meta.stage > min(failed_stages):
+            blocker = min(s for s in failed_stages if s < meta.stage)
+            _emit(f"[VERIFY] item-start: {iid} stage={meta.stage} idx={idx}/{n_total} name={meta.name}")
+            _emit(f"[VERIFY] item-end: {iid} status=BLOCKED elapsed_ms=0")
+            leaf_results[iid] = ItemResult(
+                id=iid, name=meta.name, status=ItemStatus.BLOCKED,
+                detail=f"선행 Stage {blocker} 실패로 차단",
+                stage=meta.stage,
+            )
+            blocked_stage_counts[meta.stage] = blocked_stage_counts.get(meta.stage, 0) + 1
+            # 부모 그룹에도 child-result 마커 발행
+            if meta.parent and meta.parent in groups:
+                _emit(
+                    f"[VERIFY] child-result: {meta.parent}.{meta.id} "
+                    f"status=BLOCKED elapsed_ms=0 name={meta.name}"
+                )
+            continue
         # 의존 항목 중 FAIL 이 있으면 SKIP
         skip = [d for d in meta.depends_on if d in failed]
         if skip:
@@ -191,6 +228,7 @@ def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
         _emit(f"[VERIFY] item-end: {iid} status={result.status} elapsed_ms={result.elapsed_ms}")
         if result.status == ItemStatus.FAIL:
             failed.add(iid)
+            failed_stages.add(meta.stage)
         leaf_results[iid] = result
 
     # 결과 list 구성: 입력 순서를 따르되, 그룹은 자식 결과 합산
@@ -219,6 +257,15 @@ def run_items(ctx: VerifyContext, item_ids: Iterable[str]) -> list:
             r = leaf_results.get(iid)
             if r is not None:
                 results.append(r)
+
+    # stage gate 차단 통계 — 사용자가 한눈에 확인
+    if blocked_stage_counts and failed_stages:
+        first_failed = min(failed_stages)
+        for s in sorted(blocked_stage_counts.keys()):
+            _emit(
+                f"[VERIFY] stage-blocked: stage={s} "
+                f"reason=stage{first_failed}-FAIL count={blocked_stage_counts[s]}"
+            )
 
     n_pass = sum(1 for r in results if r.status == ItemStatus.PASS)
     n_fail = sum(1 for r in results if r.status == ItemStatus.FAIL)

@@ -266,6 +266,100 @@ class TestRunner(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.runner.run_items(self._ctx(), ["NOT-REGISTERED-XYZ"])
 
+    def test_stage_gate_blocks_later_stages(self) -> None:
+        """stage N FAIL → stage>N 의 leaf 자동 BLOCKED."""
+        ran: list = []
+        @self.registry.verify_item(
+            id="GATE-S2-FAIL", stage=2, category="유닛", name="s2 fail",
+        )
+        def _s2(ctx: Any) -> bool:
+            ran.append("S2"); return False
+        @self.registry.verify_item(
+            id="GATE-S3-A", stage=3, category="유닛", name="s3 a",
+        )
+        def _s3a(ctx: Any) -> bool:
+            ran.append("S3-A"); return True
+        @self.registry.verify_item(
+            id="GATE-S5-A", stage=5, category="유닛", name="s5 a",
+        )
+        def _s5a(ctx: Any) -> bool:
+            ran.append("S5-A"); return True
+        results = self.runner.run_items(
+            self._ctx(),
+            ["GATE-S2-FAIL", "GATE-S3-A", "GATE-S5-A"],
+        )
+        statuses = {r.id: r.status for r in results}
+        # S2 FAIL → S3, S5 모두 BLOCKED, 실행 자체 스킵
+        self.assertEqual(statuses["GATE-S2-FAIL"], "FAIL")
+        self.assertEqual(statuses["GATE-S3-A"], "BLOCKED")
+        self.assertEqual(statuses["GATE-S5-A"], "BLOCKED")
+        self.assertEqual(ran, ["S2"])    # S3/S5 함수 호출 자체가 안 됨
+
+    def test_stage_gate_does_not_block_same_stage(self) -> None:
+        """동일 stage 내 FAIL 은 후속 sibling 을 BLOCK 하지 않음 (계속 실행)."""
+        ran: list = []
+        @self.registry.verify_item(
+            id="GATE-SAME-A", stage=2, category="유닛", name="a fails",
+        )
+        def _a(ctx: Any) -> bool:
+            ran.append("A"); return False
+        @self.registry.verify_item(
+            id="GATE-SAME-B", stage=2, category="유닛", name="b succeeds",
+        )
+        def _b(ctx: Any) -> bool:
+            ran.append("B"); return True
+        results = self.runner.run_items(
+            self._ctx(),
+            ["GATE-SAME-A", "GATE-SAME-B"],
+        )
+        statuses = {r.id: r.status for r in results}
+        self.assertEqual(statuses["GATE-SAME-A"], "FAIL")
+        self.assertEqual(statuses["GATE-SAME-B"], "PASS")
+        self.assertEqual(ran, ["A", "B"])
+
+    def test_stage_gate_disabled(self) -> None:
+        """stage_gate=False 면 후속 stage 도 그대로 실행."""
+        ran: list = []
+        @self.registry.verify_item(
+            id="GATE-OFF-S2", stage=2, category="유닛", name="s2 fail",
+        )
+        def _s2(ctx: Any) -> bool:
+            ran.append("S2"); return False
+        @self.registry.verify_item(
+            id="GATE-OFF-S3", stage=3, category="유닛", name="s3 ok",
+        )
+        def _s3(ctx: Any) -> bool:
+            ran.append("S3"); return True
+        results = self.runner.run_items(
+            self._ctx(),
+            ["GATE-OFF-S2", "GATE-OFF-S3"],
+            stage_gate=False,
+        )
+        statuses = {r.id: r.status for r in results}
+        self.assertEqual(statuses["GATE-OFF-S2"], "FAIL")
+        self.assertEqual(statuses["GATE-OFF-S3"], "PASS")
+        self.assertEqual(ran, ["S2", "S3"])
+
+    def test_stage_gate_emits_marker(self) -> None:
+        """stage gate 차단 발생 시 [VERIFY] stage-blocked 마커 emit."""
+        @self.registry.verify_item(
+            id="GATE-MK-S2", stage=2, category="유닛", name="s2 fail",
+        )
+        def _s2(ctx: Any) -> bool: return False
+        @self.registry.verify_item(
+            id="GATE-MK-S3", stage=3, category="유닛", name="s3",
+        )
+        def _s3(ctx: Any) -> bool: return True
+
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.runner.run_items(self._ctx(), ["GATE-MK-S2", "GATE-MK-S3"])
+        out = buf.getvalue()
+        self.assertIn("[VERIFY] item-end: GATE-MK-S3 status=BLOCKED", out)
+        self.assertIn("[VERIFY] stage-blocked: stage=3 reason=stage2-FAIL count=1", out)
+
     def test_group_worst_status_aggregation(self) -> None:
         """그룹 입력 시 자식 worst-status 로 합산된 ItemResult 1건 반환."""
         @self.registry.verify_item(id="TG-WST", stage=5, category="u",
@@ -615,6 +709,26 @@ class TestParseItemsProgress(unittest.TestCase):
         p = self.verification._parse_items_progress("/nonexistent/path")
         self.assertEqual(p["total"], 0)
         self.assertEqual(p["items"], [])
+
+    def test_parse_stage_blocked_marker(self) -> None:
+        """[VERIFY] stage-blocked 마커 파싱 → progress.stage_gate."""
+        log = self._write_log([
+            "[VERIFY] run-start: total=3 ids=A,B,C",
+            "[VERIFY] item-start: A stage=2 idx=1/3 name=a",
+            "[VERIFY] item-end: A status=FAIL elapsed_ms=5",
+            "[VERIFY] item-start: B stage=3 idx=2/3 name=b",
+            "[VERIFY] item-end: B status=BLOCKED elapsed_ms=0",
+            "[VERIFY] item-start: C stage=5 idx=3/3 name=c",
+            "[VERIFY] item-end: C status=BLOCKED elapsed_ms=0",
+            "[VERIFY] stage-blocked: stage=3 reason=stage2-FAIL count=1",
+            "[VERIFY] stage-blocked: stage=5 reason=stage2-FAIL count=1",
+            "[VERIFY] run-end: total=3 pass=0 fail=1 skip=0 blocked=2",
+        ])
+        p = self.verification._parse_items_progress(log)
+        sg = p.get("stage_gate")
+        self.assertIsNotNone(sg)
+        self.assertEqual(sg["first_failed"], 2)
+        self.assertEqual(sg["blocked_stages"], {3: 1, 5: 1})
 
 
 if __name__ == "__main__":

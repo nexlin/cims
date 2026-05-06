@@ -303,6 +303,7 @@ _RE_ITEM_END     = re.compile(r'^\[VERIFY\] item-end: (\S+) status=(\S+) elapsed
 _RE_CHILD        = re.compile(r'^\[VERIFY\] child-result: (\S+)\.(\S+) status=(\S+) elapsed_ms=(\d+) name=(.+)$')
 _RE_GROUP_END    = re.compile(r'^\[VERIFY\] group-end: (\S+) status=(\S+) child_count=(\d+)$')
 _RE_RUN_END      = re.compile(r'^\[VERIFY\] run-end: total=(\d+) pass=(\d+) fail=(\d+) skip=(\d+)(?: blocked=(\d+))?$')
+_RE_STAGE_BLOCKED = re.compile(r'^\[VERIFY\] stage-blocked: stage=(\d+) reason=stage(\d+)-FAIL count=(\d+)$')
 
 
 def _parse_items_progress(log_path: str) -> dict:
@@ -327,16 +328,19 @@ def _parse_items_progress(log_path: str) -> dict:
     current: Optional[str] = None
     completed: int = 0
     summary: Optional[dict] = None
+    stage_gate: Optional[dict] = None     # 차단 발생 시 dict {first_failed, blocked_stages: {N: count}}
 
     if not log_path or not os.path.isfile(log_path):
         return {"selected": selected, "total": 0, "completed": 0,
-                "current": None, "items": items, "summary": None}
+                "current": None, "items": items, "summary": None,
+                "stage_gate": None}
     try:
         with open(log_path, 'rb') as f:
             data = f.read().decode('utf-8', errors='replace')
     except Exception:
         return {"selected": selected, "total": 0, "completed": 0,
-                "current": None, "items": items, "summary": None}
+                "current": None, "items": items, "summary": None,
+                "stage_gate": None}
 
     for raw in data.splitlines():
         line = _ANSI_RE.sub('', raw).rstrip()
@@ -425,6 +429,15 @@ def _parse_items_progress(log_path: str) -> dict:
                 "blocked": int(m.group(5) or 0),
             }
             continue
+        m = _RE_STAGE_BLOCKED.match(line)
+        if m:
+            stage_n, first_failed, count = (
+                int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            if stage_gate is None:
+                stage_gate = {"first_failed": first_failed,
+                              "blocked_stages": {}}
+            stage_gate["blocked_stages"][stage_n] = count
+            continue
 
     if not total:
         total = len(items)
@@ -435,6 +448,7 @@ def _parse_items_progress(log_path: str) -> dict:
         "current": current,
         "items": items,
         "summary": summary,
+        "stage_gate": stage_gate,
     }
 
 

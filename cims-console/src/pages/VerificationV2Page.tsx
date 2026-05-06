@@ -946,6 +946,7 @@ export default function VerificationV2Page() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [lastRunId, setLastRunId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [stageGate, setStageGate] = useState<{ first_failed: number; blocked_stages: Record<number, number> } | null>(null)
   const anyRunning = pipelineRunning || soloStage !== null
 
   // 초기 로드 — GET /verification/stages
@@ -1098,6 +1099,7 @@ export default function VerificationV2Page() {
         if (cancelled) return
         // 진행 결과를 stages 에 머지 + 그룹 부모 status 재계산
         setStages(prev => recomputeGroupStatus(mergeProgress(prev, job.items_progress)))
+        setStageGate(job.items_progress?.stage_gate ?? null)
         if (job.done) {
           setPipelineRunning(false)
           setSoloStage(null)
@@ -1202,6 +1204,31 @@ export default function VerificationV2Page() {
           {' · '}구버전: <a href="/testbed/verify">/testbed/verify</a>
         </span>
       </div>
+
+      {stageGate && (
+        <div
+          className="v2-no-print"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 12px', marginBottom: 10,
+            background: '#fef3c7', border: '1px solid #f59e0b',
+            borderRadius: 6, fontSize: 12, color: '#92400e',
+          }}
+        >
+          <span style={{ fontSize: 16 }}>🚫</span>
+          <span>
+            <b>Stage Gate 발동</b> — Stage <b>S{stageGate.first_failed}</b> 의 FAIL 로
+            후속 단계{' '}
+            <b>
+              {Object.keys(stageGate.blocked_stages)
+                .map(n => `S${n}`).join(', ')}
+            </b>
+            {' '}의{' '}
+            {Object.values(stageGate.blocked_stages).reduce((a, b) => a + b, 0)}건이
+            자동 BLOCKED 처리되었습니다. 해당 stage 부터 재검증 필요.
+          </span>
+        </div>
+      )}
 
       <div className="v2-no-print">
         <Stepper

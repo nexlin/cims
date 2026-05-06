@@ -55,6 +55,11 @@ export interface ProgressSummary {
   blocked: number
 }
 
+export interface StageGate {
+  first_failed: number
+  blocked_stages: Record<number, number>
+}
+
 export interface ItemsProgress {
   selected: string[]
   total: number
@@ -62,6 +67,7 @@ export interface ItemsProgress {
   current: string | null
   items: ProgressItem[]
   summary: ProgressSummary | null
+  stage_gate: StageGate | null
 }
 
 export interface JobStatus {
