@@ -1,5 +1,25 @@
 # CIMS 검증 절차
 
+> ⚠ **2026-05-06 갱신** — 옛 3단계 (Phase 1/2/3) → **6단계 (S1~S6) 파이프라인** 으로 전면 재설계.
+> 본문은 점진 갱신 중이며, 새 체계의 실용 정보는 `CLAUDE.md` 의 *Verification (S1~S6 pipeline)* 섹션을 우선 참조.
+>
+> | 옛 Phase | 신 Stage | 비고 |
+> |---|---|---|
+> | (없음) | **S1** 정적 검사 | 신설 — lint/format/unit test |
+> | Phase 1 (preflight/build) | **S2** 빌드 | |
+> | Phase 1 (reset~scenario) | **S3** 스모크 | configure/start/seed/health/1콜 |
+> | (없음) | **S4** 패키지화 | tarball + manifest.json (SHA-256) |
+> | Phase 2 (22단계) | **S5** 로컬 배포 | 7 부모 + 13 자식. _verify_phase2 본체는 stage5 의 `_legacy.py` 어댑터가 호출 |
+> | Phase 3 | **S6** 통합 검증 | VoLTE/PTT 음성·영상 + summary |
+>
+> **신규 인프라**: `verify/lib/` (Python), `cims.sh verify stage<N>`, `/testbed/verify-v2` (LIVE), `/testbed/verify-history` (DB 이력).
+
+---
+
+## (옛 체계 — 참고용)
+
+> 이하는 옛 3단계 본문. 새 체계와 매핑은 위 표 참조.
+
 > **목적**: CIMS 패키지를 개발/보완한 뒤 배포 전 / 배포 과정 / 배포 이후 3단계로 검증한다.
 > **적용 범위**: agent · csc · csp · cmp · cwrtc · console · phone · simulator 중 한 모듈이라도 변경되면 본 절차를 따른다.
 > **원본 SSOT**: 이 문서. 진행 중 보완은 검증 리포트에 기록 후 본 문서에 반영.

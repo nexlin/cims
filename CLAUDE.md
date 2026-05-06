@@ -167,6 +167,40 @@ Automated SIP/RTP client for load and functional testing.
 2. Each line includes Call-ID, method, from/to, direction, full message text
 3. Flow API searches `sip.jsonl` by Call-ID to reconstruct B2BUA message flow (both legs via Session-ID)
 
+## Verification (S1~S6 pipeline)
+
+상용 배포 전 검증 절차는 6단계 파이프라인 — `verify/lib/` Python 인프라가 본체이고, `cims.sh verify stage<N>` 또는 Console UI (`/testbed/verify-v2`) 가 진입점.
+
+| Stage | 이름 | scope | gate |
+|---|---|---|---|
+| S1 | 정적 검사 | py_compile / eslint / tsc / clang-format / unit test | 코드 위생 |
+| S2 | 빌드 | preflight + cmake build | 컴파일 통과 |
+| S3 | 스모크 | configure → start dev → 1콜 VoIP/PTT | 빠른 sanity |
+| S4 | 패키지화 | tarball 5개 + manifest.json (SHA-256) | immutability gate |
+| S5 | 로컬 배포 | TB-CSC → Test-agent → csc-server → csp/cmp 체인 | 배포 절차 회귀 |
+| S6 | 통합 검증 | VoLTE/PTT 음성·영상 + summary | 상용 진입 |
+
+**주요 명령**:
+```bash
+./cims.sh verify list                    # 등록 항목 트리
+./cims.sh verify list-presets            # stage1-full~stage6-full + pipeline-full
+./cims.sh verify stage1                  # 특정 stage 실행
+./cims.sh verify run --preset pipeline-full
+python3 -m unittest tests.test_verify_lib   # 35 unit tests
+```
+
+**핵심 파일**:
+- `verify/lib/registry.py` — `@verify_item(stage, is_group, parent)` 데코레이터, `validate_registry()` 무결성 검증
+- `verify/lib/runner.py` — group/leaf 펼침, BLOCKED status, stdout 마커 (item-start/end, child-result, group-end, run-end)
+- `verify/lib/items/stage{1..6}/` — 항목 정의 파일 (자동 import). 30 부모 + 13 자식
+- `verify/lib/items/stage5/_legacy.py` — `_verify_phase2` 22단계 1회 호출 + step marker 파싱하여 자식별 결과 분배 어댑터 (향후 Python 포팅 시 자식 함수 본체만 교체)
+- `tests/cims_verify.py` — CLI (`--stage` / `--items` / `--preset`)
+- `csc/src/handlers/verification.py` — Backend API (`/stages`, `/stages/<N>`, `/run`, `/jobs/<id>`, `/runs`, `/runs/<id>`)
+- `cims-console/src/pages/VerificationV2Page.tsx` — Stepper + Accordion + 그룹 cascade + PDF 보고서 (LIVE polling)
+- `cims-console/src/pages/VerificationHistoryPage.tsx` — 회차 이력 list + detail modal
+
+**DB**: `verification_run` + `verification_run_item` (`sql/migrate_verification_runs.sql`). job 종료 시 `_record_run()` 자동 INSERT.
+
 ## Configuration Files
 
 | File | Purpose |
