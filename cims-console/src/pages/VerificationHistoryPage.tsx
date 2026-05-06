@@ -6,6 +6,48 @@ import {
   type VerifyStatus,
   type RunsStatsResponse,
 } from '../api/verification'
+import {
+  VerificationPrintReport,
+  type ReportStage, type ReportItem, type ItemStatus as ReportItemStatus,
+} from '../components/VerificationPrintReport'
+
+const STAGE_DESC: Record<number, string> = {
+  1: 'lint / format / unit test',
+  2: 'preflight + cmake build',
+  3: 'configure → start dev → 1콜 VoIP/PTT',
+  4: 'tarball + manifest hash',
+  5: 'TB-CSC → Test-agent → csc-server → csp/cmp 체인',
+  6: 'VoLTE/PTT 음성·영상 (배포본 대상)',
+}
+
+/** RunDetail.items → PrintReport 가 받는 ReportStage[] 로 변환. */
+function runDetailToReportStages(detail: RunDetail): ReportStage[] {
+  const byStage = new Map<number, ReportItem[]>()
+  for (const it of detail.items) {
+    const s = it.stage || 0
+    if (!byStage.has(s)) byStage.set(s, [])
+    byStage.get(s)!.push({
+      id:        it.id,
+      name:      it.name,
+      desc:      it.detail || '',
+      status:    (it.status as ReportItemStatus) || 'PENDING',
+      elapsedMs: it.elapsed_ms || 0,
+      isGroup:   it.is_group,
+      parent:    it.parent_id || undefined,
+    })
+  }
+  // 모든 stage 1~6 표시 (없는 stage 도 빈 항목)
+  const stages: ReportStage[] = []
+  for (let n = 1; n <= 6; n++) {
+    stages.push({
+      num: n, id: `S${n}`,
+      title: STAGE_LABEL[n] || `Stage ${n}`,
+      desc:  STAGE_DESC[n] || '',
+      items: byStage.get(n) || [],
+    })
+  }
+  return stages
+}
 
 // ─────────────────────────────────────────────────────────────
 // 검증 이력 페이지 — /testbed/verify-history
@@ -112,8 +154,8 @@ function DetailModal({ run, onClose, onDelete }: {
   }, [run.items])
 
   return (
-    <div style={modalBackdrop} onClick={onClose}>
-      <div style={modal} onClick={e => e.stopPropagation()}>
+    <div className="verify-history-modal-backdrop" style={modalBackdrop} onClick={onClose}>
+      <div className="verify-history-modal" style={modal} onClick={e => e.stopPropagation()}>
         <header style={modalHeader}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>회차 #{run.id}</div>
@@ -122,7 +164,10 @@ function DetailModal({ run, onClose, onDelete }: {
             </div>
           </div>
           <div>
-            <button style={btnDanger} onClick={() => {
+            <button style={btnSecondary} onClick={() => window.print()} title="이 회차를 PDF 보고서로 인쇄">
+              📄 PDF 인쇄
+            </button>
+            <button style={{ ...btnDanger, marginLeft: 8 }} onClick={() => {
               if (confirm(`회차 #${run.id} 를 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) {
                 onDelete(run.id)
               }
@@ -130,6 +175,20 @@ function DetailModal({ run, onClose, onDelete }: {
             <button style={{ ...btnPrimary, marginLeft: 8 }} onClick={onClose}>닫기</button>
           </div>
         </header>
+
+        {/* 인쇄 시에만 노출되는 보고서 */}
+        <VerificationPrintReport
+          stages={runDetailToReportStages(run)}
+          resumeStage={1}
+          meta={{
+            issuedAt:    fmtDate(run.started_at),
+            host:        run.host,
+            gitBranch:   run.git_branch,
+            gitSha:      run.git_sha,
+            pkgManifest: run.pkg_manifest_hash || '-',
+            runId:       run.id,
+          }}
+        />
 
         <div style={{ padding: '12px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Scope" value={scopeLabel(run.scope)} />
@@ -469,7 +528,44 @@ export default function VerificationHistoryPage() {
   const curPage = Math.floor(offset / limit) + 1
 
   return (
-    <div style={{ padding: 20 }}>
+    <div className="verify-history-page" style={{ padding: 20 }}>
+      <style>{`
+        @media print {
+          @page { margin: 3mm 15mm 2mm 15mm; size: A4; }
+          html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+          .app-layout, .app-layout--collapsed,
+          .app-content, .app-content-body,
+          .verify-history-page {
+            display: block !important;
+            margin: 0 !important; padding: 0 !important;
+            grid-template-columns: 1fr !important;
+            max-width: none !important; width: 100% !important;
+          }
+          .sidebar, .sidebar--collapsed, .app-header, .sub-tabs { display: none !important; }
+          /* 모달의 버튼/list 영역 모두 숨김 */
+          .verify-history-page > * { display: none !important; }
+          /* 모달 자체 배경/포지션 해제 */
+          .verify-history-page .verify-history-modal-backdrop {
+            position: static !important; background: none !important; display: block !important;
+          }
+          .verify-history-page .verify-history-modal {
+            position: static !important; box-shadow: none !important;
+            max-width: none !important; max-height: none !important;
+            margin: 0 !important; padding: 0 !important; border-radius: 0 !important;
+          }
+          .verify-history-page .verify-history-modal > *:not(.v2-report) { display: none !important; }
+          .v2-report {
+            display: block !important; position: static !important;
+            margin: 0 !important; padding: 0 !important; width: 100% !important;
+          }
+          .v2-report table { page-break-inside: auto; }
+          .v2-report tr    { page-break-inside: avoid; }
+          .v2-report * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+        }
+      `}</style>
       <header style={{ marginBottom: 16, display: 'flex', alignItems: 'baseline', gap: 16 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>검증 이력</h1>
         <span style={{ fontSize: 12, color: '#6b7280' }}>
