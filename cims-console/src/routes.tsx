@@ -25,6 +25,7 @@ import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
 import VerificationPage from './pages/VerificationPage'
 import VerificationV2Page from './pages/VerificationV2Page'
+import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
 
 export type RouteDef = {
@@ -108,9 +109,10 @@ export const SECTIONS: RouteSection[] = [
     basePath: '/testbed',
     defaultPath: '/testbed/modules',
     routes: [
-      { path: '/testbed/modules',    title: '모듈관리',     component: ServicesPage, adminOnly: true },
-      { path: '/testbed/verify',     title: '검증 실행',     component: VerificationPage, adminOnly: true },
-      { path: '/testbed/verify-v2',  title: '검증 v2 (β)',  component: VerificationV2Page, adminOnly: true },
+      { path: '/testbed/modules',          title: '모듈관리',     component: ServicesPage, adminOnly: true },
+      { path: '/testbed/verify',           title: '검증 실행',     component: VerificationPage, adminOnly: true },
+      { path: '/testbed/verify-v2',        title: '검증 v2 (β)',  component: VerificationV2Page, adminOnly: true },
+      { path: '/testbed/verify-history',   title: '검증 이력',     component: VerificationHistoryPage, adminOnly: true },
     ],
   },
   {
