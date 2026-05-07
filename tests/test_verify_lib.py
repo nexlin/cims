@@ -126,6 +126,50 @@ class TestRegistry(unittest.TestCase):
         ids = [m.id for m in self.registry.get_items(stage=5, include_children=True)]
         self.assertIn("TEST-G2-C", ids)
 
+    def test_execution_order_sort(self) -> None:
+        """execution_order — 명시 항목이 ID alphabetical 보다 우선."""
+        @self.registry.verify_item(
+            id="TEST-EO-Z", stage=5, category="유닛", name="z (order=10)",
+            execution_order=10,
+        )
+        def _z(ctx: Any) -> bool: return True
+        @self.registry.verify_item(
+            id="TEST-EO-A", stage=5, category="유닛", name="a (no order)",
+        )
+        def _a(ctx: Any) -> bool: return True
+        @self.registry.verify_item(
+            id="TEST-EO-M", stage=5, category="유닛", name="m (order=20)",
+            execution_order=20,
+        )
+        def _m(ctx: Any) -> bool: return True
+        ids = [m.id for m in self.registry.get_items(stage=5)]
+        # Z(order=10), M(order=20) 가 명시 → 먼저, A 는 alphabetical fallback
+        z_idx = ids.index("TEST-EO-Z")
+        m_idx = ids.index("TEST-EO-M")
+        a_idx = ids.index("TEST-EO-A")
+        self.assertLess(z_idx, m_idx)
+        self.assertLess(m_idx, a_idx)
+
+    def test_execution_order_in_get_children(self) -> None:
+        """execution_order — 그룹 자식 정렬에도 반영."""
+        @self.registry.verify_item(
+            id="TEST-EOG", stage=5, category="유닛", name="grp", is_group=True,
+        )
+        def _g(ctx: Any) -> Any: return None
+        @self.registry.verify_item(
+            id="TEST-EOG-Z", stage=5, category="유닛", name="z child",
+            parent="TEST-EOG", execution_order=1,
+        )
+        def _z(ctx: Any) -> bool: return True
+        @self.registry.verify_item(
+            id="TEST-EOG-A", stage=5, category="유닛", name="a child",
+            parent="TEST-EOG", execution_order=2,
+        )
+        def _a(ctx: Any) -> bool: return True
+        kids = self.registry.get_children("TEST-EOG")
+        # alphabetical 이면 A 먼저지만 execution_order=1 인 Z 가 먼저
+        self.assertEqual([k.id for k in kids], ["TEST-EOG-Z", "TEST-EOG-A"])
+
     def test_filter_by_preset(self) -> None:
         @self.registry.verify_item(
             id="TEST-PRESET-A", stage=1, category="유닛", name="A",
@@ -234,6 +278,25 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(statuses["TEST-DEP-A"], "FAIL")
         self.assertEqual(statuses["TEST-DEP-B"], "SKIP")
 
+    def test_execution_order_runner(self) -> None:
+        """runner — 의존성 없을 때 stage 안에서 execution_order 순서로 실행."""
+        order: list = []
+        @self.registry.verify_item(
+            id="TEST-ORD-LATE", stage=5, category="유닛", name="late",
+            execution_order=20,
+        )
+        def _late(ctx: Any) -> bool:
+            order.append("LATE"); return True
+        @self.registry.verify_item(
+            id="TEST-ORD-EARLY", stage=5, category="유닛", name="early",
+            execution_order=10,
+        )
+        def _early(ctx: Any) -> bool:
+            order.append("EARLY"); return True
+        # 입력이 alphabetical 역순이어도 execution_order 로 정렬됨
+        self.runner.run_items(self._ctx(), ["TEST-ORD-LATE", "TEST-ORD-EARLY"])
+        self.assertEqual(order, ["EARLY", "LATE"])
+
     def test_dependency_topo_sort(self) -> None:
         order: list = []
         @self.registry.verify_item(
@@ -339,6 +402,37 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(statuses["GATE-OFF-S2"], "FAIL")
         self.assertEqual(statuses["GATE-OFF-S3"], "PASS")
         self.assertEqual(ran, ["S2", "S3"])
+
+    def test_inject_fail_forces_fail(self) -> None:
+        """ctx.opts['inject_fail'] 에 포함된 ID 는 함수 호출 없이 FAIL 반환."""
+        called: list = []
+        @self.registry.verify_item(
+            id="TEST-INJECT-A", stage=1, category="유닛", name="injected",
+        )
+        def _a(ctx: Any) -> bool:
+            called.append("A"); return True
+        @self.registry.verify_item(
+            id="TEST-INJECT-B", stage=1, category="유닛", name="real",
+        )
+        def _b(ctx: Any) -> bool:
+            called.append("B"); return True
+
+        ctx = self.VerifyContext(
+            repo_root="/tmp", dist_dir="/tmp",
+            report_path="/tmp/_test_report.md", stage=1, ts="20990101_000000",
+            opts={"inject_fail": {"TEST-INJECT-A"}},
+        )
+        results = self.runner.run_items(
+            ctx, ["TEST-INJECT-A", "TEST-INJECT-B"], stage_gate=False,
+        )
+        statuses = {r.id: r.status for r in results}
+        self.assertEqual(statuses["TEST-INJECT-A"], "FAIL")
+        self.assertEqual(statuses["TEST-INJECT-B"], "PASS")
+        # 강제 FAIL 항목 함수는 호출 안 됨
+        self.assertEqual(called, ["B"])
+        # detail 에 주입 표시
+        a_detail = next(r.detail for r in results if r.id == "TEST-INJECT-A")
+        self.assertIn("--inject-fail", a_detail)
 
     def test_stage_gate_emits_marker(self) -> None:
         """stage gate 차단 발생 시 [VERIFY] stage-blocked 마커 emit."""
@@ -457,6 +551,28 @@ class TestExistingRegistry(unittest.TestCase):
         for g in groups:
             kids.extend(registry.get_children(g.id))
         self.assertEqual(len(kids), 13)
+
+    def test_stage5_execution_order(self) -> None:
+        """S5 항목 실행 순서: RESET → CSC-DEPLOY(*) → CSC-VERIFY(*) →
+        CSC-RUN(*) → MODULES-DEPLOY(*) → MODULES-RUN(*) → FINALIZE.
+        """
+        from verify.lib import registry
+        from verify.lib import items                            # noqa: F401
+        ids = [m.id for m in registry.get_items(stage=5, include_children=True)]
+        # 핵심 mile-stone 의 인덱스 — 부분 순서 검증
+        idx = lambda x: ids.index(x)
+        self.assertLess(idx("S5-RESET"), idx("S5-CSC-DEPLOY"))
+        self.assertLess(idx("S5-CSC-DEPLOY"), idx("S5-CSC-DEPLOY-AGENT-ENROLL"))
+        self.assertLess(idx("S5-CSC-DEPLOY-AGENT-ENROLL"), idx("S5-CSC-DEPLOY-PKG-UPLOAD"))
+        self.assertLess(idx("S5-CSC-DEPLOY-PKG-UPLOAD"), idx("S5-CSC-DEPLOY-INSTALL"))
+        self.assertLess(idx("S5-CSC-DEPLOY-INSTALL"), idx("S5-CSC-VERIFY"))
+        self.assertLess(idx("S5-CSC-VERIFY"), idx("S5-CSC-RUN"))
+        self.assertLess(idx("S5-CSC-RUN"), idx("S5-MODULES-DEPLOY"))
+        self.assertLess(idx("S5-MODULES-DEPLOY-AUTH"), idx("S5-MODULES-DEPLOY-PKG-UPLOAD"))
+        self.assertLess(idx("S5-MODULES-DEPLOY-PKG-UPLOAD"), idx("S5-MODULES-DEPLOY-AGENT-ENROLL"))
+        self.assertLess(idx("S5-MODULES-DEPLOY-AGENT-ENROLL"), idx("S5-MODULES-DEPLOY-INSTALL"))
+        self.assertLess(idx("S5-MODULES-DEPLOY"), idx("S5-MODULES-RUN"))
+        self.assertLess(idx("S5-MODULES-RUN"), idx("S5-FINALIZE"))
 
     def test_stage1_items_registered(self) -> None:
         from verify.lib import registry

@@ -46,6 +46,10 @@ class ItemMeta:
     side_effects: list = field(default_factory=list)
     timeout_s: int = 600
     description: str = ""
+    # stage 안에서의 실행 순서 힌트. None=알파벳 ID 기본 (대부분 stage 는 depends_on
+    # 으로 충분). S5 처럼 deploy 체인이 alphabetical 보다 다른 순서를 요구할 때만
+    # 명시. 작은 값일수록 먼저 실행. depends_on 이 있으면 depends_on 이 우선.
+    execution_order: Optional[int] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -84,12 +88,16 @@ def verify_item(
     side_effects: Optional[list] = None,
     timeout_s: int = 600,
     description: str = "",
+    execution_order: Optional[int] = None,
 ) -> Callable:
     """검증 항목 등록 데코레이터.
 
     함수 시그니처: `def fn(ctx: VerifyContext) -> ItemResult` 또는 `bool` 반환.
     is_group=True 인 항목은 runner 가 자식 실행을 자동 처리하므로 본체 함수는
     선택. 데코레이터를 placeholder 함수에 적용해도 무관.
+
+    execution_order: stage 안에서의 실행 순서 힌트 (작은 값이 먼저). None=알파벳
+    ID 기본. S5 deploy 체인처럼 alphabetical 이 회귀를 일으키는 경우 명시.
     """
     if stage not in _STAGE_ORDER:
         raise ValueError(f"verify_item invalid stage={stage}; must be 1..6")
@@ -106,6 +114,7 @@ def verify_item(
             side_effects=list(side_effects or []),
             timeout_s=timeout_s,
             description=description or (fn.__doc__ or "").strip().split("\n")[0],
+            execution_order=execution_order,
         )
         if id in _REGISTRY:
             raise ValueError(f"verify_item duplicate id: {id}")
@@ -147,14 +156,21 @@ def get_items(
         if not include_groups and meta.is_group:
             continue
         items.append(meta)
-    items.sort(key=lambda m: (m.stage, m.id))
+    items.sort(key=_sort_key)
     return items
 
 
+def _sort_key(m: ItemMeta) -> tuple:
+    """stage 우선, 같은 stage 안에서 execution_order 우선 (None 은 큰 값으로
+    fallback → 명시 항목이 미명시 항목보다 먼저), 마지막으로 ID alphabetical.
+    """
+    return (m.stage, m.execution_order if m.execution_order is not None else 10**6, m.id)
+
+
 def get_children(parent_id: str) -> list:
-    """주어진 부모의 자식 메타를 ID 순으로 반환."""
+    """주어진 부모의 자식 메타를 execution_order/ID 순으로 반환."""
     out = [m for m, _f in _REGISTRY.values() if m.parent == parent_id]
-    out.sort(key=lambda m: m.id)
+    out.sort(key=_sort_key)
     return out
 
 

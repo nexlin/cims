@@ -13,6 +13,7 @@ from ._legacy import get_legacy_results, step_result
     is_group=True,
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["service-start", "network"], timeout_s=180,
+    execution_order=60,
 )
 def modules_run_group(ctx: VerifyContext) -> ItemResult:
     return ItemResult(
@@ -27,6 +28,7 @@ def modules_run_group(ctx: VerifyContext) -> ItemResult:
     parent="S5-MODULES-RUN",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["service-start", "network"], timeout_s=120,
+    execution_order=61,
 )
 def modules_start(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)

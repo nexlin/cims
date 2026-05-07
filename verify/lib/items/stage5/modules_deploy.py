@@ -13,6 +13,7 @@ from ._legacy import get_legacy_results, step_result
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["fs-write", "service-state", "network"],
     timeout_s=600,
+    execution_order=50,
 )
 def modules_deploy_group(ctx: VerifyContext) -> ItemResult:
     return ItemResult(
@@ -27,6 +28,7 @@ def modules_deploy_group(ctx: VerifyContext) -> ItemResult:
     parent="S5-MODULES-DEPLOY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["network"], timeout_s=30,
+    execution_order=51,
 )
 def modules_auth(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
@@ -40,6 +42,7 @@ def modules_auth(ctx: VerifyContext) -> ItemResult:
     parent="S5-MODULES-DEPLOY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["network"], timeout_s=120,
+    execution_order=52,
 )
 def modules_pkg_upload(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
@@ -53,6 +56,7 @@ def modules_pkg_upload(ctx: VerifyContext) -> ItemResult:
     parent="S5-MODULES-DEPLOY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["network", "process-start"], timeout_s=120,
+    execution_order=53,
 )
 def modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
@@ -66,6 +70,7 @@ def modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
     parent="S5-MODULES-DEPLOY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["fs-write", "network"], timeout_s=300,
+    execution_order=54,
 )
 def modules_install(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)

@@ -58,7 +58,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         metas = registry.get_items(stage=args.stage, include_children=True)
     else:
         metas = registry.get_all_metas()
-    metas = sorted(metas, key=lambda m: (m.stage, m.id))
+        # get_all_metas 는 미정렬 — registry _sort_key 와 동일하게 정렬
+        metas = sorted(metas, key=registry._sort_key)
     if args.json:
         out = {
             "stages": [],
@@ -197,6 +198,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     only_children = _parse_only_children(args.only_children)
     if only_children:
         opts["only_children"] = only_children
+    # --inject-fail — 디버그용 강제 FAIL ID set
+    inject = set()
+    for spec in (args.inject_fail or []):
+        for tok in (spec or "").split(","):
+            tok = tok.strip()
+            if tok:
+                inject.add(tok)
+    if inject:
+        opts["inject_fail"] = inject
     ctx = VerifyContext.create(repo_root=repo_root, stage=stage, opts=opts,
                                report_dir=args.report_dir)
 
@@ -286,6 +296,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "(예: --only-children S5-CSC-DEPLOY=S5-CSC-DEPLOY-INSTALL). "
             "JSON 도 가능: --only-children '{\"S5-CSC-DEPLOY\":[\"...\"]}'. "
             "여러 번 지정 가능."
+        ),
+    )
+    p_run.add_argument(
+        "--inject-fail",
+        action="append", default=None,
+        metavar="ITEM_ID",
+        help=(
+            "디버그용 강제 FAIL 주입. 지정한 ID 항목은 함수 호출 없이 FAIL 반환. "
+            "stage gate / immutability gate 회귀 점검 시 사용. "
+            "comma-separated 다중 지정 또는 옵션 반복 가능 "
+            "(예: --inject-fail S1-CPP-FORMAT,S2-PREFLIGHT)."
         ),
     )
     p_run.set_defaults(_func=cmd_run)

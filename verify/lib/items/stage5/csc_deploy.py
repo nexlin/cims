@@ -14,6 +14,7 @@ from ._legacy import get_legacy_results, step_result
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["fs-write", "service-state", "network"],
     timeout_s=600,
+    execution_order=20,
 )
 def csc_deploy_group(ctx: VerifyContext) -> ItemResult:
     """그룹 placeholder — runner 가 자식 worst-status 로 합산."""
@@ -30,6 +31,7 @@ def csc_deploy_group(ctx: VerifyContext) -> ItemResult:
     parent="S5-CSC-DEPLOY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["network", "process-start"], timeout_s=120,
+    execution_order=21,
 )
 def deploy_agent_enroll(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
@@ -44,6 +46,7 @@ def deploy_agent_enroll(ctx: VerifyContext) -> ItemResult:
     parent="S5-CSC-DEPLOY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["network"], timeout_s=120,
+    execution_order=22,
 )
 def deploy_pkg_upload(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
@@ -58,6 +61,7 @@ def deploy_pkg_upload(ctx: VerifyContext) -> ItemResult:
     parent="S5-CSC-DEPLOY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["fs-write", "network"], timeout_s=300,
+    execution_order=23,
 )
 def deploy_install(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)

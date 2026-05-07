@@ -42,8 +42,10 @@ _STATUS_RANK = {
 def _topo_sort(item_ids: list) -> list:
     """선택된 항목들을 depends_on 기반으로 위상 정렬. 평면 leaf 만 대상.
 
-    동일 우선순위(의존성 무관) 항목은 (stage, id) 안정 순서로 진입 → stage 단위
-    실행이 stage 번호 오름차순으로 인접 배치되어 stage gate 가 일관되게 동작.
+    동일 우선순위(의존성 무관) 항목은 (stage, execution_order, id) 안정 순서로
+    진입 → stage 단위 실행이 stage 번호 오름차순으로 인접 배치되어 stage gate
+    가 일관되게 동작. execution_order 가 명시된 항목 (예: S5 deploy 체인) 은
+    같은 stage 의 미명시 항목보다 먼저.
     """
     selected = set(item_ids)
     metas = {}
@@ -53,8 +55,11 @@ def _topo_sort(item_ids: list) -> list:
             raise ValueError(f"unknown item id: {iid}")
         metas[iid] = rec[0]
 
-    # stage·id 기준 1차 정렬 → DFS 순서를 결정적으로
-    stable_ids = sorted(item_ids, key=lambda x: (metas[x].stage, x))
+    def _ok(m):
+        return m.execution_order if m.execution_order is not None else 10**6
+
+    # stage·execution_order·id 기준 1차 정렬 → DFS 순서를 결정적으로
+    stable_ids = sorted(item_ids, key=lambda x: (metas[x].stage, _ok(metas[x]), x))
 
     visited, order = set(), []
     def dfs(iid: str, stack: tuple = ()):
@@ -63,7 +68,11 @@ def _topo_sort(item_ids: list) -> list:
             raise ValueError(f"cycle detected: {' -> '.join(stack + (iid,))}")
         for dep in sorted(
             metas[iid].depends_on,
-            key=lambda d: (metas[d].stage if d in metas else 0, d),
+            key=lambda d: (
+                metas[d].stage if d in metas else 0,
+                _ok(metas[d]) if d in metas else 10**6,
+                d,
+            ),
         ):
             if dep in selected:
                 dfs(dep, stack + (iid,))
@@ -211,8 +220,16 @@ def run_items(ctx: VerifyContext, item_ids: Iterable[str], stage_gate: bool = Tr
             continue
 
         _emit(f"[VERIFY] item-start: {iid} stage={meta.stage} idx={idx}/{n_total} name={meta.name}")
-        # 자식 항목인 경우 — 부모(group)에게 child-result 마커도 발행
-        result = _run_one(ctx, meta, fn)
+        # --inject-fail — 디버그 옵션. ctx.opts["inject_fail"] 에 포함된 ID 면 강제 FAIL.
+        # stage gate / immutability gate 회귀 점검 시 marker 파일 만들 필요 없게.
+        injected = (ctx.opts or {}).get("inject_fail") or set()
+        if iid in injected:
+            result = ItemResult(
+                id=iid, name=meta.name, status=ItemStatus.FAIL,
+                detail="강제 FAIL 주입 (--inject-fail)", stage=meta.stage,
+            )
+        else:
+            result = _run_one(ctx, meta, fn)
         # ItemResult 안의 children 도 streaming (e.g. legacy P5 group 안에서 step 22개 추출)
         for c in (result.children or []):
             _emit(

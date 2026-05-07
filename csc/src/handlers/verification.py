@@ -926,6 +926,11 @@ def _build_stage_argv(stage: int, opts: dict) -> list:
         argv += ['--items', ','.join(items)]
     if isinstance(only_children, dict) and only_children:
         argv += ['--only-children', json.dumps(only_children, ensure_ascii=False)]
+    inject_fail = opts.get('inject_fail') or []
+    if isinstance(inject_fail, str):
+        inject_fail = [inject_fail]
+    for iid in inject_fail:
+        argv += ['--inject-fail', str(iid)]
     return argv
 
 
@@ -1011,6 +1016,11 @@ async def _run_arbitrary(handler_args: HandlerArgs) -> HandlerResult:
     only_children = opts.get('only_children') or {}
     if isinstance(only_children, dict) and only_children:
         argv += ['--only-children', json.dumps(only_children, ensure_ascii=False)]
+    inject_fail = opts.get('inject_fail') or []
+    if isinstance(inject_fail, str):
+        inject_fail = [inject_fail]
+    for iid in inject_fail:
+        argv += ['--inject-fail', str(iid)]
 
     timeout = int(opts.get('timeout') or 1800)
     scope = f'preset:{preset}' if preset else 'items'

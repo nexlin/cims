@@ -12,6 +12,7 @@ from ._legacy import get_legacy_results, step_result
     is_group=True,
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["read-only"], timeout_s=60,
+    execution_order=30,
 )
 def csc_verify_group(ctx: VerifyContext) -> ItemResult:
     return ItemResult(
@@ -26,6 +27,7 @@ def csc_verify_group(ctx: VerifyContext) -> ItemResult:
     parent="S5-CSC-VERIFY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["read-only"], timeout_s=30,
+    execution_order=31,
 )
 def verify_files(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
@@ -38,6 +40,7 @@ def verify_files(ctx: VerifyContext) -> ItemResult:
     parent="S5-CSC-VERIFY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["read-only"], timeout_s=30,
+    execution_order=32,
 )
 def verify_overlay(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)

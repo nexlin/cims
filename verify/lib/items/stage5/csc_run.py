@@ -12,6 +12,7 @@ from ._legacy import get_legacy_results, step_result
     is_group=True,
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["service-start", "network"], timeout_s=180,
+    execution_order=40,
 )
 def csc_run_group(ctx: VerifyContext) -> ItemResult:
     return ItemResult(
@@ -26,6 +27,7 @@ def csc_run_group(ctx: VerifyContext) -> ItemResult:
     parent="S5-CSC-RUN",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["service-start", "network"], timeout_s=60,
+    execution_order=41,
 )
 def csc_start(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
@@ -38,6 +40,7 @@ def csc_start(ctx: VerifyContext) -> ItemResult:
     parent="S5-CSC-RUN",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["network"], timeout_s=30,
+    execution_order=42,
 )
 def csc_health(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
@@ -50,6 +53,7 @@ def csc_health(ctx: VerifyContext) -> ItemResult:
     parent="S5-CSC-RUN",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["service-start", "network"], timeout_s=60,
+    execution_order=43,
 )
 def console_start(ctx: VerifyContext) -> ItemResult:
     by = get_legacy_results(ctx)
