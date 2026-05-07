@@ -538,10 +538,22 @@ def _record_run(job: dict) -> None:
     branch, sha, host = _detect_git_meta()
     pkg_hash = _resolve_pkg_manifest_hash()
 
-    # items — 부모/자식 평탄화 (idx 부여)
+    # items — 부모/자식 평탄화 (idx 부여).
+    # 주의: 파서 output 의 items 는 standalone item-start/item-end 와 group(자식
+    # 포함) 양쪽을 모두 포함한다. group 자식 ID 가 standalone 으로도 나오면
+    # 중복 기록되므로 standalone 쪽은 skip (group children iteration 에서만 기록).
+    grouped_child_ids: set = set()
+    for it in items:
+        for c in (it.get('children') or []):
+            cid = c.get('id')
+            if cid:
+                grouped_child_ids.add(cid)
+
     flat_items: list = []
     row_idx = 0
     for it in items:
+        if it.get('id') in grouped_child_ids:
+            continue    # 어떤 group 의 자식 — standalone 중복 skip
         row_idx += 1
         flat_items.append({
             'id':         (it.get('id') or '')[:64],
@@ -592,8 +604,16 @@ def _record_run(job: dict) -> None:
     try:
         rid = _run_store.write_run(_SCRIPT_DIR, record)
         job['run_id'] = rid
+        record['id'] = rid
     except Exception:
         # 기록 실패해도 job 자체는 성공 — silently ignore (CIMS 정책: 검증 우선)
+        return
+
+    # webhook 발송 (env CIMS_VERIFY_WEBHOOK_URL 설정 시) — fire-and-forget.
+    try:
+        from verify.lib import webhook as _wh
+        _wh.publish(record)
+    except Exception:
         pass
 
 

@@ -439,13 +439,86 @@ verify_runs/
 - **Backend 비동기**: `POST /stages/<N>` 또는 `/run` body `{"async":true}`.
   job 종료 시 `_watch_job` 가 `_record_run` 호출.
 
-### C.3 수동 정리
-
-회차 폭증 시 직접 삭제 (자동 cron 미구현):
+### C.3 회차 정리 (retention)
 
 ```bash
-# 90일 이전 회차 삭제 (예시)
+# CLI: 90일 초과 회차 삭제, 최근 10개는 무조건 보존
+./cims.sh verify purge-runs --days 90 --keep-min 10
+
+# JSON 출력 (CI 연동)
+./cims.sh verify purge-runs --days 30 --json
+
+# 모두 삭제 (위험 — --force 필요)
+./cims.sh verify purge-runs --days 0 --force --keep-min 0
+```
+
+또는 수동 find:
+
+```bash
 find verify_runs -name "*.json" -mtime +90 -delete
-# 빈 디렉토리 정리
 find verify_runs -type d -empty -delete
 ```
+
+---
+
+## 부록. webhook 발행 (외부 통지)
+
+job 종료 시 verdict + 회차 메타를 외부 URL 로 자동 POST. Slack incoming
+webhook / 사내 Hook 서비스 / CI gate 알림 등 연동.
+
+### D.1 환경 설정
+
+```bash
+# 필수: POST 대상 URL
+export CIMS_VERIFY_WEBHOOK_URL="https://hooks.slack.com/services/..."
+
+# 옵션: verdict 필터 (FAIL 만 알림)
+export CIMS_VERIFY_WEBHOOK_FILTER="FAIL"
+# 또는 여러개: "FAIL,UNKNOWN"
+
+# 옵션: HTTP timeout 초 (기본 5)
+export CIMS_VERIFY_WEBHOOK_TIMEOUT="3"
+```
+
+설정 후 backend 재기동:
+
+```bash
+./cims.sh restart tb-csc
+```
+
+### D.2 발송 시점
+
+CLI / backend 비동기 job 모두 `_record_run` 직후 동일하게 발송:
+
+| 트리거 | 흐름 |
+|---|---|
+| `python3 -m tests.cims_verify run ...` | CLI 종료 시 fire-and-forget |
+| `POST /api/v1/verification/stages/<N> {async:true}` | `_watch_job` 종료 시 fire-and-forget |
+
+실패 (network/HTTP error) 는 stderr 한 줄 + 검증 verdict 에 영향 X.
+
+### D.3 Payload schema
+
+```json
+{
+  "run_id": 1778125658339,
+  "verdict": "FAIL",
+  "scope": "stage5",
+  "totals": {"total": 7, "pass": 6, "fail": 1, "skip": 0, "blocked": 0},
+  "elapsed_ms": 23456,
+  "started_at": "2026-05-07T12:00:00.000",
+  "finished_at": "2026-05-07T12:00:23.456",
+  "git_branch": "main",
+  "git_sha": "abc1234",
+  "host": "nex-ubuntu",
+  "trigger": "cli",
+  "report_path": "/home/.../verify_reports/...",
+  "pkg_manifest_hash": "deadbeef..."
+}
+```
+
+### D.4 Slack 연동 예시
+
+Slack incoming webhook 은 위 payload 를 그대로 받아 `text` 필드 가공이
+필요. 중간에 transform 서버를 두거나, 본 webhook 을 받아 Slack format 으로
+변환하는 작은 receiver 작성 (예: AWS Lambda).

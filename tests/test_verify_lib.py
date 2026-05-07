@@ -886,6 +886,382 @@ class TestParseItemsProgress(unittest.TestCase):
         self.assertEqual(sg["blocked_stages"], {3: 1, 5: 1})
 
 
+class TestWebhook(unittest.TestCase):
+    """verify.lib.webhook — env 설정 + payload 빌드 + filter."""
+
+    def setUp(self) -> None:
+        from verify.lib import webhook
+        self._wh = webhook
+        # env 보존 (다른 테스트 영향 X)
+        self._orig_env = {
+            k: os.environ.get(k) for k in (
+                "CIMS_VERIFY_WEBHOOK_URL",
+                "CIMS_VERIFY_WEBHOOK_FILTER",
+                "CIMS_VERIFY_WEBHOOK_TIMEOUT",
+            )
+        }
+
+    def tearDown(self) -> None:
+        for k, v in self._orig_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _record(self, verdict="PASS"):
+        return {
+            "id": 1234567890,
+            "verdict": verdict,
+            "scope": "stage5",
+            "totals": {"total": 7, "pass": 6, "fail": 1, "skip": 0, "blocked": 0},
+            "elapsed_ms": 23456,
+            "started_at": "2026-05-07T12:00:00.000",
+            "finished_at": "2026-05-07T12:00:23.456",
+            "git_branch": "feature/x",
+            "git_sha": "abc1234",
+            "host": "test-host",
+            "trigger": "cli",
+            "report_path": "/tmp/x",
+            "pkg_manifest_hash": "deadbeef",
+        }
+
+    def test_publish_no_url_returns_none(self) -> None:
+        os.environ.pop("CIMS_VERIFY_WEBHOOK_URL", None)
+        self.assertIsNone(self._wh.publish(self._record()))
+
+    def test_publish_dry_run_returns_payload(self) -> None:
+        os.environ["CIMS_VERIFY_WEBHOOK_URL"] = "https://example.invalid/hook"
+        os.environ.pop("CIMS_VERIFY_WEBHOOK_FILTER", None)
+        payload = self._wh.publish(self._record("FAIL"), dry_run=True)
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["run_id"], 1234567890)
+        self.assertEqual(payload["verdict"], "FAIL")
+        self.assertEqual(payload["scope"], "stage5")
+        self.assertEqual(payload["totals"]["fail"], 1)
+        self.assertEqual(payload["host"], "test-host")
+        # write_run 후 record 의 모든 키가 payload 에 포함
+        self.assertIn("pkg_manifest_hash", payload)
+        self.assertEqual(payload["trigger"], "cli")
+
+    def test_publish_filter_blocks_unmatched_verdict(self) -> None:
+        os.environ["CIMS_VERIFY_WEBHOOK_URL"] = "https://example.invalid/hook"
+        os.environ["CIMS_VERIFY_WEBHOOK_FILTER"] = "FAIL"
+        # PASS 는 filter 에서 제외 → None
+        self.assertIsNone(self._wh.publish(self._record("PASS"), dry_run=True))
+        # FAIL 은 통과
+        self.assertIsNotNone(self._wh.publish(self._record("FAIL"), dry_run=True))
+
+    def test_publish_filter_allows_multiple_verdicts(self) -> None:
+        os.environ["CIMS_VERIFY_WEBHOOK_URL"] = "https://example.invalid/hook"
+        os.environ["CIMS_VERIFY_WEBHOOK_FILTER"] = "FAIL,UNKNOWN"
+        self.assertIsNone(self._wh.publish(self._record("PASS"), dry_run=True))
+        self.assertIsNotNone(self._wh.publish(self._record("FAIL"), dry_run=True))
+        self.assertIsNotNone(self._wh.publish(self._record("UNKNOWN"), dry_run=True))
+
+    def test_publish_real_http_failure_returns_none_no_raise(self) -> None:
+        # 존재하지 않는 host — 예외는 잡히고 None 반환 (raise 하지 않음).
+        os.environ["CIMS_VERIFY_WEBHOOK_URL"] = "http://127.0.0.1:1/no-such-port"
+        os.environ["CIMS_VERIFY_WEBHOOK_TIMEOUT"] = "1"
+        result = self._wh.publish(self._record(), dry_run=False)
+        self.assertIsNone(result)
+
+
+class TestVerificationHandlers(unittest.TestCase):
+    """csc/src/handlers/verification.py 의 회차/통계 handler 단위 테스트.
+
+    handle_verification 라우팅 + _record_run / _list_runs / _runs_stats /
+    _get_run / _delete_run 모두 cover. run_store 는 실제 사용 (tempdir),
+    pkg_manifest_hash / git_meta 는 monkey patch.
+    """
+
+    def setUp(self) -> None:
+        # httpsrv stub (TestParseItemsProgress 의 패턴 그대로)
+        repo_root = _REPO_ROOT
+        csc_src = os.path.join(repo_root, "csc", "src")
+        if csc_src not in sys.path:
+            sys.path.insert(0, csc_src)
+        if "httpsrv" not in sys.modules:
+            import types
+            ha = types.ModuleType("httpsrv")
+            hh = types.ModuleType("httpsrv.handler")
+            class _HA: pass
+            class _HR:
+                def __init__(self, status=200, body=None):
+                    self.status, self.body = status, body
+            hh.HandlerArgs = _HA
+            hh.HandlerResult = _HR
+            sys.modules["httpsrv"] = ha
+            sys.modules["httpsrv.handler"] = hh
+        import importlib
+        try:
+            self.v = importlib.import_module("handlers.verification")
+        except Exception as e:
+            self.skipTest(f"handlers.verification import 실패: {e}")
+        # 격리 tempdir 을 _SCRIPT_DIR 로 가짜 — verify_runs/ 그 안에 떨어지게.
+        import tempfile
+        self._td = tempfile.mkdtemp(prefix="verify_handler_test_")
+        self._orig_script_dir = self.v._SCRIPT_DIR
+        self.v._SCRIPT_DIR = self._td
+        # _run_store — init() 가 import 했어야 하지만 unit test 에선 직접 주입.
+        self._orig_rs = self.v._run_store
+        from verify.lib import run_store as _rs
+        self.v._run_store = _rs
+        # _detect_git_meta / _resolve_pkg_manifest_hash 는 실 환경 의존이라 stub.
+        self._orig_git = self.v._detect_git_meta
+        self._orig_pkg = self.v._resolve_pkg_manifest_hash
+        self.v._detect_git_meta = lambda: ("test-branch", "abc1234", "test-host")
+        self.v._resolve_pkg_manifest_hash = lambda: "deadbeef" * 8
+        self._tmpfiles: list = []
+
+    def tearDown(self) -> None:
+        import shutil
+        self.v._SCRIPT_DIR = self._orig_script_dir
+        self.v._run_store = self._orig_rs
+        self.v._detect_git_meta = self._orig_git
+        self.v._resolve_pkg_manifest_hash = self._orig_pkg
+        shutil.rmtree(self._td, ignore_errors=True)
+        for p in self._tmpfiles:
+            try: os.remove(p)
+            except OSError: pass
+
+    def _make_log(self, lines: list) -> str:
+        import tempfile
+        fd, path = tempfile.mkstemp(prefix="job_log_", suffix=".log")
+        os.close(fd)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        self._tmpfiles.append(path)
+        return path
+
+    def _make_handler_args(self, query_params=None):
+        ha = self.v.HandlerArgs()
+        ha.query_params = query_params or {}
+        ha.method = "GET"
+        ha.full_path = "/api/v1/verification/runs"
+        ha.body = {}
+        return ha
+
+    def _async_run(self, coro):
+        """비동기 핸들러 실행 — 격리된 loop, 자동 close."""
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    # ── _record_run ──
+    def test_record_run_writes_file(self) -> None:
+        log = self._make_log([
+            "[VERIFY] run-start: total=2 ids=A,B",
+            "[VERIFY] item-start: A stage=1 idx=1/2 name=alpha",
+            "[VERIFY] item-end: A status=PASS elapsed_ms=100",
+            "[VERIFY] item-start: B stage=1 idx=2/2 name=beta",
+            "[VERIFY] item-end: B status=PASS elapsed_ms=50",
+            "[VERIFY] run-end: total=2 pass=2 fail=0 skip=0 blocked=0",
+        ])
+        job = {
+            "log_path": log, "started_at": 1000.0, "ended_at": 1001.5,
+            "verdict": "PASS", "scope": "stage1", "selected_ids": ["A", "B"],
+            "trigger_type": "user", "report_path": "/tmp/x", "job_id": "job-uuid-1",
+        }
+        self.v._record_run(job)
+        self.assertGreater(job.get("run_id", 0), 0)
+        # 실제 파일 작성 확인
+        from verify.lib import run_store
+        rec = run_store.get_run(self._td, job["run_id"])
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["verdict"], "PASS")
+        self.assertEqual(rec["scope"], "stage1")
+        self.assertEqual(rec["totals"]["pass"], 2)
+        self.assertEqual(rec["git_branch"], "test-branch")
+        self.assertEqual(rec["git_sha"], "abc1234")
+        self.assertEqual(rec["host"], "test-host")
+        self.assertEqual(len(rec["pkg_manifest_hash"]), 64)
+        # 항목 평탄화 확인
+        self.assertEqual(len(rec["items"]), 2)
+        self.assertEqual(rec["items"][0]["id"], "A")
+        self.assertEqual(rec["items"][0]["status"], "PASS")
+        self.assertEqual(rec["items"][1]["idx"], 2)
+        # elapsed_ms = (ended - started) * 1000 = 1500
+        self.assertEqual(rec["elapsed_ms"], 1500)
+
+    def test_record_run_with_children_flattens_with_parent_id(self) -> None:
+        log = self._make_log([
+            "[VERIFY] run-start: total=1 ids=PG",
+            "[VERIFY] item-start: PG-CHILD-A stage=5 idx=1/2 name=child-a",
+            "[VERIFY] child-result: PG.PG-CHILD-A status=PASS elapsed_ms=100 name=child-a",
+            "[VERIFY] item-end: PG-CHILD-A status=PASS elapsed_ms=100",
+            "[VERIFY] item-start: PG-CHILD-B stage=5 idx=2/2 name=child-b",
+            "[VERIFY] child-result: PG.PG-CHILD-B status=FAIL elapsed_ms=200 name=child-b",
+            "[VERIFY] item-end: PG-CHILD-B status=FAIL elapsed_ms=200",
+            "[VERIFY] group-end: PG status=FAIL child_count=2",
+            "[VERIFY] run-end: total=1 pass=0 fail=1 skip=0 blocked=0",
+        ])
+        job = {
+            "log_path": log, "started_at": 1000.0, "ended_at": 1001.0,
+            "verdict": "FAIL", "scope": "stage5",
+            "selected_ids": ["PG"], "trigger_type": "user",
+        }
+        self.v._record_run(job)
+        from verify.lib import run_store
+        rec = run_store.get_run(self._td, job["run_id"])
+        self.assertEqual(rec["verdict"], "FAIL")
+        # 부모 PG + 자식 2개 = 3 entries (평탄화)
+        self.assertEqual(len(rec["items"]), 3)
+        parent = rec["items"][0]
+        self.assertEqual(parent["id"], "PG")
+        self.assertTrue(parent["is_group"])
+        self.assertIsNone(parent["parent_id"])
+        # 자식
+        children = [it for it in rec["items"] if it["parent_id"] == "PG"]
+        self.assertEqual(len(children), 2)
+        self.assertEqual({c["id"] for c in children}, {"PG-CHILD-A", "PG-CHILD-B"})
+
+    def test_record_run_silently_no_op_without_run_store(self) -> None:
+        # _run_store None 이면 raise 안 하고 무시 (CIMS 정책)
+        orig = self.v._run_store
+        try:
+            self.v._run_store = None
+            job = {"log_path": "/dev/null", "verdict": "PASS"}
+            self.v._record_run(job)
+            self.assertNotIn("run_id", job)
+        finally:
+            self.v._run_store = orig
+
+    # ── _list_runs ──
+    def test_list_runs_empty(self) -> None:
+        ha = self._make_handler_args()
+        r = self._async_run(self.v._list_runs(ha))
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.body["total"], 0)
+        self.assertEqual(r.body["runs"], [])
+
+    def test_list_runs_returns_recorded(self) -> None:
+        # 2 회차 기록 후 list
+        for verdict in ("PASS", "FAIL"):
+            log = self._make_log([
+                "[VERIFY] run-start: total=1 ids=X",
+                "[VERIFY] item-start: X stage=1 idx=1/1 name=x",
+                f"[VERIFY] item-end: X status={verdict} elapsed_ms=10",
+                f"[VERIFY] run-end: total=1 pass={1 if verdict=='PASS' else 0} "
+                f"fail={1 if verdict=='FAIL' else 0} skip=0 blocked=0",
+            ])
+            self.v._record_run({
+                "log_path": log, "started_at": 1000.0, "ended_at": 1001.0,
+                "verdict": verdict, "scope": f"stage{1 if verdict=='PASS' else 2}",
+                "selected_ids": ["X"], "trigger_type": "cli",
+            })
+        # 전체 list
+        r = self._async_run(self.v._list_runs(self._make_handler_args()))
+        self.assertEqual(r.body["total"], 2)
+        # verdict 필터
+        r = self._async_run(
+            self.v._list_runs(self._make_handler_args({"verdict": "PASS"})),
+        )
+        self.assertEqual(r.body["total"], 1)
+        self.assertEqual(r.body["runs"][0]["verdict"], "PASS")
+        # stage 필터 (scope=stage1)
+        r = self._async_run(
+            self.v._list_runs(self._make_handler_args({"stage": "1"})),
+        )
+        self.assertEqual(r.body["total"], 1)
+
+    # ── _runs_stats ──
+    def test_runs_stats_aggregates(self) -> None:
+        # 3 회차 (2 PASS + 1 FAIL), 모두 stage1 scope
+        for verdict, ms in (("PASS", 100), ("PASS", 200), ("FAIL", 500)):
+            log = self._make_log([
+                "[VERIFY] run-start: total=1 ids=X",
+                "[VERIFY] item-start: X stage=1 idx=1/1 name=x",
+                f"[VERIFY] item-end: X status={verdict} elapsed_ms={ms}",
+                f"[VERIFY] run-end: total=1 pass={1 if verdict=='PASS' else 0} "
+                f"fail={1 if verdict=='FAIL' else 0} skip=0 blocked=0",
+            ])
+            self.v._record_run({
+                "log_path": log,
+                "started_at": 1000.0, "ended_at": 1000.0 + ms / 1000.0,
+                "verdict": verdict, "scope": "stage1",
+                "selected_ids": ["X"], "trigger_type": "user",
+            })
+        r = self._async_run(
+            self.v._runs_stats(self._make_handler_args({"days": "30"})),
+        )
+        self.assertEqual(r.status, 200)
+        ov = r.body["overall"]
+        self.assertEqual(ov["runs"], 3)
+        self.assertEqual(ov["pass"], 2)
+        self.assertEqual(ov["fail"], 1)
+        self.assertEqual(ov["success_rate"], round(100.0 * 2 / 3, 1))
+        # by_scope
+        self.assertEqual(len(r.body["by_scope"]), 1)
+        self.assertEqual(r.body["by_scope"][0]["scope"], "stage1")
+        # timeline ASC (오래된 → 최신)
+        tl = r.body["timeline"]
+        self.assertEqual(len(tl), 3)
+        for i in range(len(tl) - 1):
+            self.assertLessEqual(tl[i]["id"], tl[i + 1]["id"])
+
+    # ── _get_run / _delete_run ──
+    def test_record_run_fires_webhook_when_configured(self) -> None:
+        """CIMS_VERIFY_WEBHOOK_URL 설정 시 _record_run 후 webhook.publish 호출."""
+        log = self._make_log([
+            "[VERIFY] run-start: total=1 ids=X",
+            "[VERIFY] item-start: X stage=1 idx=1/1 name=x",
+            "[VERIFY] item-end: X status=PASS elapsed_ms=10",
+            "[VERIFY] run-end: total=1 pass=1 fail=0 skip=0 blocked=0",
+        ])
+        # webhook.publish monkey patch — payload 캡처
+        from verify.lib import webhook as _wh
+        captured: list = []
+        orig = _wh.publish
+        try:
+            _wh.publish = lambda rec, **kw: captured.append(rec) or rec
+            self.v._record_run({
+                "log_path": log, "started_at": 1000.0, "ended_at": 1001.0,
+                "verdict": "PASS", "scope": "stage1",
+                "selected_ids": ["X"], "trigger_type": "user",
+            })
+        finally:
+            _wh.publish = orig
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0]["verdict"], "PASS")
+        self.assertGreater(captured[0]["id"], 0)
+        # record 의 id 가 write_run 후 갱신됐는지
+        self.assertEqual(captured[0]["scope"], "stage1")
+
+    def test_get_and_delete_run(self) -> None:
+        log = self._make_log([
+            "[VERIFY] run-start: total=1 ids=X",
+            "[VERIFY] item-start: X stage=1 idx=1/1 name=x",
+            "[VERIFY] item-end: X status=PASS elapsed_ms=10",
+            "[VERIFY] run-end: total=1 pass=1 fail=0 skip=0 blocked=0",
+        ])
+        job = {
+            "log_path": log, "started_at": 1000.0, "ended_at": 1001.0,
+            "verdict": "PASS", "scope": "stage1",
+            "selected_ids": ["X"], "trigger_type": "user",
+        }
+        self.v._record_run(job)
+        rid = job["run_id"]
+
+        # get
+        r = self._async_run(self.v._get_run(rid))
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.body["id"], rid)
+        self.assertEqual(r.body["verdict"], "PASS")
+        # 없는 id → 404
+        r = self._async_run(self.v._get_run(999999999))
+        self.assertEqual(r.status, 404)
+        # delete
+        r = self._async_run(self.v._delete_run(rid))
+        self.assertEqual(r.status, 200)
+        self.assertTrue(r.body["deleted"])
+        # 다시 get → 404
+        r = self._async_run(self.v._get_run(rid))
+        self.assertEqual(r.status, 404)
+
+
 class TestStage5NativeSteps(unittest.TestCase):
     """S5 native Python step 구현 — _native_steps.step_01_cleanup."""
 

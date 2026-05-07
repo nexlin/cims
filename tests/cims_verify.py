@@ -36,6 +36,7 @@ if _REPO_ROOT not in sys.path:
 
 from verify.lib import (                                        # noqa: E402
     registry, runner, reporting, presets as preset_mod, run_store,
+    webhook as _webhook,
 )
 from verify.lib.context import VerifyContext                    # noqa: E402
 from verify.lib import items as _items_pkg                      # noqa: F401, E402  (auto-import 트리거)
@@ -136,7 +137,14 @@ def _record_cli_run(args, ctx, item_ids: list, results: list,
         "note":              "",
         "items":             _flatten_items_for_record(results),
     }
-    return run_store.write_run(ctx.repo_root, record)
+    rid = run_store.write_run(ctx.repo_root, record)
+    record["id"] = rid
+    # webhook 발송 — env CIMS_VERIFY_WEBHOOK_URL 설정 시. 실패 silently.
+    try:
+        _webhook.publish(record)
+    except Exception:
+        pass
+    return rid
 
 
 _VALID_STAGES = (1, 2, 3, 4, 5, 6)
