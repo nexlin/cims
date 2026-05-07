@@ -441,22 +441,39 @@ verify_runs/
 
 ### C.3 회차 정리 (retention)
 
+검증 이력은 **휘발성 데이터** — 7일 이내 보관 가정. 기본 retention 7일.
+
 ```bash
-# CLI: 90일 초과 회차 삭제, 최근 10개는 무조건 보존
-./cims.sh verify purge-runs --days 90 --keep-min 10
+# 기본: 7일 초과 회차 삭제, 최근 10개는 무조건 보존
+./cims.sh verify purge-runs
+
+# 다른 보존 기간
+./cims.sh verify purge-runs --days 30
+
+# 모두 즉시 삭제 (--all shortcut: --days 0 --force --keep-min 0)
+./cims.sh verify purge-runs --all
+
+# 단건 삭제 (잘못된 회차 1건만)
+./cims.sh verify delete-run 1778125658339
 
 # JSON 출력 (CI 연동)
-./cims.sh verify purge-runs --days 30 --json
-
-# 모두 삭제 (위험 — --force 필요)
-./cims.sh verify purge-runs --days 0 --force --keep-min 0
+./cims.sh verify purge-runs --json
+./cims.sh verify delete-run 1778125658339 --json
 ```
 
 또는 수동 find:
 
 ```bash
-find verify_runs -name "*.json" -mtime +90 -delete
+find verify_runs -name "*.json" -mtime +7 -delete
 find verify_runs -type d -empty -delete
+```
+
+**자동 정리 (cron 권장)**:
+
+```bash
+crontab -e
+# 매일 새벽 3시에 7일 초과 회차 정리
+0 3 * * * cd /home/nex/work/cims && ./cims.sh verify purge-runs --json >> /tmp/cims-verify-purge.log 2>&1
 ```
 
 ---

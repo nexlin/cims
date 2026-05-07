@@ -209,12 +209,19 @@ def cmd_list_presets(args: argparse.Namespace) -> int:
 def cmd_purge_runs(args: argparse.Namespace) -> int:
     """오래된 회차 파일 정리 — verify_runs/YYYY/MM/<id>.json 중 days 일 초과
     삭제. keep_min 으로 최근 N 개는 무조건 보존 (사고 방지).
+
+    --all 은 모든 회차 일괄 삭제 shortcut (`--days 0 --force --keep-min 0` 등가).
     """
     repo_root = args.repo_root or _repo_root_from_here()
-    days = max(0, int(args.days))
-    keep_min = max(0, int(args.keep_min))
-    if not args.force and days < 1:
-        print(f"--days={days} 는 모든 회차 삭제 — --force 필요", file=sys.stderr)
+    if args.all:
+        days, keep_min, force = 0, 0, True
+    else:
+        days = max(0, int(args.days))
+        keep_min = max(0, int(args.keep_min))
+        force = bool(args.force)
+    if not force and days < 1:
+        print(f"--days={days} 는 모든 회차 삭제 — --force 또는 --all 필요",
+              file=sys.stderr)
         return 2
     summary = run_store.purge_older_than(repo_root, days, keep_min=keep_min)
     if args.json:
@@ -231,6 +238,27 @@ def cmd_purge_runs(args: argparse.Namespace) -> int:
         if summary["removed_dirs"]:
             print(f"빈 디렉토리 정리: {len(summary['removed_dirs'])}")
     return 0
+
+
+def cmd_delete_run(args: argparse.Namespace) -> int:
+    """단건 회차 삭제 — `verify_runs/YYYY/MM/<id>.json` 한 개 제거.
+
+    backend `DELETE /runs/<id>` 의 CLI 진입점. 잘못된 회차 1건만 즉시 폐기할 때.
+    """
+    repo_root = args.repo_root or _repo_root_from_here()
+    try:
+        run_id = int(args.run_id)
+    except (TypeError, ValueError):
+        print(f"잘못된 run_id: {args.run_id}", file=sys.stderr)
+        return 2
+    deleted = run_store.delete_run(repo_root, run_id)
+    if args.json:
+        print(json.dumps({"id": run_id, "deleted": deleted}, ensure_ascii=False))
+    elif deleted:
+        print(f"삭제: 회차 {run_id}")
+    else:
+        print(f"회차 {run_id} 없음", file=sys.stderr)
+    return 0 if deleted else 1
 
 
 def cmd_describe(args: argparse.Namespace) -> int:
@@ -421,8 +449,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="verify_runs/ 의 오래된 회차 파일 정리 (retention)",
     )
     p_purge.add_argument(
-        "--days", type=int, default=90,
-        help="이 일수보다 오래된 회차 삭제 (default: 90)",
+        "--days", type=int, default=7,
+        help="이 일수보다 오래된 회차 삭제 (default: 7 — 검증 이력은 휘발성)",
     )
     p_purge.add_argument(
         "--keep-min", type=int, default=10,
@@ -432,9 +460,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true",
         help="--days 0 (모두 삭제) 허용",
     )
+    p_purge.add_argument(
+        "--all", action="store_true",
+        help="모든 회차 즉시 삭제 (--days 0 --force --keep-min 0 등가)",
+    )
     p_purge.add_argument("--json", action="store_true")
     p_purge.add_argument("--repo-root", help="cims repo root")
     p_purge.set_defaults(_func=cmd_purge_runs)
+
+    p_del = sub.add_parser(
+        "delete-run",
+        help="단건 회차 삭제 (verify_runs/.../<id>.json)",
+    )
+    p_del.add_argument("run_id", help="삭제할 회차 id (ms timestamp 정수)")
+    p_del.add_argument("--json", action="store_true")
+    p_del.add_argument("--repo-root", help="cims repo root")
+    p_del.set_defaults(_func=cmd_delete_run)
 
     p_desc = sub.add_parser("describe", help="항목 메타 상세")
     p_desc.add_argument("item_id")

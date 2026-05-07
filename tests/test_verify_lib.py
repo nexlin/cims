@@ -2381,6 +2381,17 @@ class TestRunStore(unittest.TestCase):
         # 빈 디렉토리도 정리됐는지
         self.assertGreater(len(summary["removed_dirs"]), 0)
 
+    def test_delete_run_single(self) -> None:
+        """delete_run — 단건 삭제 동작 + 없는 id 처리."""
+        rid = self._rs.write_run(self._td, self._make_record())
+        # 단건 삭제
+        self.assertTrue(self._rs.delete_run(self._td, rid))
+        # 다시 삭제 시도 → False
+        self.assertFalse(self._rs.delete_run(self._td, rid))
+        # 다른 회차는 영향 X
+        rid2 = self._rs.write_run(self._td, self._make_record())
+        self.assertIsNotNone(self._rs.get_run(self._td, rid2))
+
     def test_stats_shape(self) -> None:
         for v, e in (("PASS", 1000), ("PASS", 2000), ("FAIL", 5000)):
             self._rs.write_run(self._td, self._make_record(scope="stage5",
