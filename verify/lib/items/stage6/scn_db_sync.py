@@ -55,9 +55,10 @@ def scn_db_sync(ctx: VerifyContext) -> ItemResult:
     notes.append(f"- login: {base} OK")
 
     # 2) 임시 그룹 추가 — verify-test-<ms>
+    # admin API 가 'id' 필드를 요구 (id is required) — name 은 옵션 (default = id).
     gid = f"verify-test-{int(time.time() * 1000)}"
     create_payload = {
-        "group_id": gid,
+        "id":       gid,
         "name":     f"verify-test-{gid[-6:]}",
         "members":  [],
     }

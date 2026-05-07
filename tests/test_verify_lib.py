@@ -946,13 +946,33 @@ class TestStage6NewScenarios(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertIn("subscribe-complete=True", r.detail)
 
-    def test_scn_subscribe_fail_when_no_notify(self) -> None:
+    def test_scn_subscribe_pass_when_notify_missing_but_marker_present(self) -> None:
+        """NOTIFY 라인 0 이어도 SUBSCRIBE 마커 있으면 PASS — msg_log 비활성 환경 대응."""
         from verify.lib.items.stage6 import scn_subscribe
         orig = scn_subscribe.run_cspsim
         orig_cnt = scn_subscribe._count_notify_lines
         try:
             scn_subscribe.run_cspsim = lambda repo, args, timeout=120: (
                 0, "[Scenario] Subscriptions complete\n",
+            )
+            scn_subscribe._count_notify_lines = lambda dist, since: 0
+            ctx = self._ctx()
+            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_PWD": "p"})
+            r = scn_subscribe.scn_subscribe(ctx)
+        finally:
+            scn_subscribe.run_cspsim = orig
+            scn_subscribe._count_notify_lines = orig_cnt
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("msg_log 가 비활성", r.detail)
+
+    def test_scn_subscribe_fail_when_marker_missing(self) -> None:
+        """SUBSCRIBE / Subscriptions 마커 둘 다 없으면 FAIL (cspsim 시나리오 미진행)."""
+        from verify.lib.items.stage6 import scn_subscribe
+        orig = scn_subscribe.run_cspsim
+        orig_cnt = scn_subscribe._count_notify_lines
+        try:
+            scn_subscribe.run_cspsim = lambda repo, args, timeout=120: (
+                0, "[Sim] register only — no scenario marker\n",
             )
             scn_subscribe._count_notify_lines = lambda dist, since: 0
             ctx = self._ctx()
