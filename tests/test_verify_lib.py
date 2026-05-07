@@ -951,5 +951,162 @@ class TestStage5NativeSteps(unittest.TestCase):
         self.assertTrue(self._native.already_ran(ctx, 1))
 
 
+class TestStage5AgentEnrollSteps(unittest.TestCase):
+    """S5 native — step 05/06/07 (agent enroll chain)."""
+
+    def setUp(self) -> None:
+        from verify.lib.items.stage5 import _native_steps
+        from verify.lib.context import VerifyContext
+        from verify.lib.common import csc_http
+        from verify.lib.registry import ItemStatus
+        self._native = _native_steps
+        self._VerifyContext = VerifyContext
+        self._csc_http = csc_http
+        self._ItemStatus = ItemStatus
+        # 원본 함수 보관
+        self._orig = {
+            "admin_login":  csc_http.admin_login,
+            "post_json":    csc_http.post_json,
+            "delete":       csc_http.delete,
+            "find_by_name": csc_http.find_agent_id_by_name,
+        }
+
+    def tearDown(self) -> None:
+        for k, v in self._orig.items():
+            if k == "admin_login":  self._csc_http.admin_login = v
+            elif k == "post_json":  self._csc_http.post_json = v
+            elif k == "delete":     self._csc_http.delete = v
+            elif k == "find_by_name": self._csc_http.find_agent_id_by_name = v
+
+    def _ctx(self):
+        return self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+
+    # ── step 05 ──
+    def test_step_05_login_pass(self) -> None:
+        called = []
+        def fake_login(base, lid, pw, timeout=5):
+            called.append((base, lid, pw))
+            return "JWT-ABC123"
+        self._csc_http.admin_login = fake_login
+        ctx = self._ctx()
+        r = self._native.step_05_admin_login(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "tok"), "JWT-ABC123")
+        # 두 번째 호출은 cache (admin_login 추가 호출 X)
+        self._native.step_05_admin_login(ctx)
+        self.assertEqual(len(called), 1)
+
+    def test_step_05_login_fail(self) -> None:
+        def fake_login(base, lid, pw, timeout=5):
+            return ""
+        self._csc_http.admin_login = fake_login
+        ctx = self._ctx()
+        r = self._native.step_05_admin_login(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("admin login 실패", r.detail)
+        self.assertIsNone(self._native._get(ctx, "tok"))
+
+    # ── step 06 ──
+    def test_step_06_skips_without_tok(self) -> None:
+        ctx = self._ctx()
+        r = self._native.step_06_agent_register(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("step 05", r.detail)
+
+    def test_step_06_register_pass(self) -> None:
+        calls = []
+        def fake_post(url, payload, token=None, timeout=10):
+            calls.append((url, payload))
+            if url.endswith("/agents"):
+                return (201, {"id": 42, "enrollment_token": "ENR-XYZ"})
+            if url.endswith("/approve"):
+                return (200, {"ok": True})
+            return (500, {})
+        self._csc_http.post_json = fake_post
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        r = self._native.step_06_agent_register(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "aid_csc"), 42)
+        self.assertEqual(self._native._get(ctx, "enroll_tok_csc"), "ENR-XYZ")
+        # POST /agents 1회 + approve 1회
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[1][0].endswith("/agents/42/approve"))
+
+    def test_step_06_register_409_recreate(self) -> None:
+        attempts = {"post": 0, "delete": 0}
+        def fake_post(url, payload, token=None, timeout=10):
+            if url.endswith("/agents"):
+                attempts["post"] += 1
+                if attempts["post"] == 1:
+                    return (409, {"error": "exists"})
+                return (201, {"id": 99, "enrollment_token": "RE-ENR"})
+            if url.endswith("/approve"):
+                return (200, {"ok": True})
+            return (500, {})
+        def fake_find(base, tok, name):
+            return 99
+        def fake_delete(url, token=None, timeout=10):
+            attempts["delete"] += 1
+            return 204
+        self._csc_http.post_json = fake_post
+        self._csc_http.find_agent_id_by_name = fake_find
+        self._csc_http.delete = fake_delete
+
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        r = self._native.step_06_agent_register(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(attempts["post"], 2)        # 첫 409 + 재생성
+        self.assertEqual(attempts["delete"], 1)
+        self.assertEqual(self._native._get(ctx, "aid_csc"), 99)
+
+    def test_step_06_register_http_error_after_409(self) -> None:
+        def fake_post(url, payload, token=None, timeout=10):
+            return (500, {"error": "internal"})
+        self._csc_http.post_json = fake_post
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        r = self._native.step_06_agent_register(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("status=500", r.detail)
+
+    # ── step 07 ──
+    def test_step_07_skips_without_aid(self) -> None:
+        ctx = self._ctx()
+        r = self._native.step_07_testagent_spawn(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_step_07_fails_when_agent_py_missing(self) -> None:
+        ctx = self._ctx()
+        self._native._set(ctx, "aid_csc", 1)
+        self._native._set(ctx, "enroll_tok_csc", "TOK")
+        # ctx.dist_dir 의 build/dist/agent/cims_agent.py 가 없으면 FAIL
+        # (실제 환경에 있을 수도 있으므로 임시 dist 로 override)
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            ctx.dist_dir = td
+            r = self._native.step_07_testagent_spawn(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("cims_agent.py 없음", r.detail)
+
+    # ── 합성 함수 ──
+    def test_steps_05_06_07_composite_skip_chain(self) -> None:
+        """step 05 FAIL → 06/07 모두 SKIP, worst=FAIL."""
+        def fake_login(base, lid, pw, timeout=5):
+            return ""    # login 실패
+        self._csc_http.admin_login = fake_login
+        ctx = self._ctx()
+        result = self._native.steps_05_06_07_agent_enroll(ctx)
+        self.assertEqual(result.id, "S5-CSC-DEPLOY-AGENT-ENROLL")
+        self.assertEqual(result.status, self._ItemStatus.FAIL)
+        # 자식 3개 — 1 FAIL + 2 SKIP
+        self.assertEqual(len(result.children), 3)
+        statuses = [c.status for c in result.children]
+        self.assertEqual(statuses[0], self._ItemStatus.FAIL)
+        self.assertEqual(statuses[1], self._ItemStatus.SKIP)
+        self.assertEqual(statuses[2], self._ItemStatus.SKIP)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

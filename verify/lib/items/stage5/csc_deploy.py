@@ -4,6 +4,7 @@ from __future__ import annotations
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ._legacy import get_legacy_results, step_result
+from . import _native_steps
 
 
 # ── 그룹 (placeholder) ───────────────────────────────────────────
@@ -34,10 +35,12 @@ def csc_deploy_group(ctx: VerifyContext) -> ItemResult:
     execution_order=21,
 )
 def deploy_agent_enroll(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [5, 6, 7],
-                       "S5-CSC-DEPLOY-AGENT-ENROLL",
-                       "TB-CSC admin login + agent enroll")
+    """Step 5+6+7 native 합성. _legacy.get_legacy_results 호출 안 함 — 다른
+    자식 (PKG-UPLOAD, INSTALL) 이 처음 _legacy 를 호출하면 _verify_phase2 본체가
+    step 5~7 도 재실행하지만 모두 idempotent (admin login 재발급, agent 409 →
+    DELETE+재생성). functional 영향 없음.
+    """
+    return _native_steps.steps_05_06_07_agent_enroll(ctx)
 
 
 @verify_item(
