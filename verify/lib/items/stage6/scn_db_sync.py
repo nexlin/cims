@@ -23,7 +23,13 @@ from ...context import VerifyContext
 from ...common import csc_http
 
 
-_DEPLOYED_CSC_BASE = "https://127.0.0.1:4445"
+_TARGET_CSC_PORTS = {"verify": 4445, "prod": 4420}
+
+
+def _deployed_csc_base(ctx: VerifyContext) -> str:
+    target = (ctx.opts or {}).get("target") or "verify"
+    port = _TARGET_CSC_PORTS.get(target, 4445)
+    return f"https://127.0.0.1:{port}"
 
 
 @verify_item(
@@ -36,8 +42,8 @@ _DEPLOYED_CSC_BASE = "https://127.0.0.1:4445"
 def scn_db_sync(ctx: VerifyContext) -> ItemResult:
     notes: list = []
 
-    # 1) 배포본 csc admin login
-    base = _DEPLOYED_CSC_BASE
+    # 1) 배포본 csc admin login (target 의 csc 포트)
+    base = _deployed_csc_base(ctx)
     login_id = os.environ.get("CIMS_TB_ADMIN_ID", "admin")
     pw = os.environ.get("CIMS_TB_ADMIN_PASSWORD", "1234")
     try:

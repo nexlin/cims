@@ -746,6 +746,9 @@ def _build_stage_argv(stage: int, opts: dict) -> list:
     if skip_pkg:   argv.append('--skip-pkg')
     if skip_reset: argv.append('--skip-reset')
     if keep_agent: argv.append('--keep-agent')
+    target = opts.get('target')
+    if target in ('verify', 'prod'):
+        argv += ['--target', target]
     if items:
         argv += ['--items', ','.join(items)]
     if isinstance(only_children, dict) and only_children:
@@ -845,6 +848,9 @@ async def _run_arbitrary(handler_args: HandlerArgs) -> HandlerResult:
         inject_fail = [inject_fail]
     for iid in inject_fail:
         argv += ['--inject-fail', str(iid)]
+    target = opts.get('target')
+    if target in ('verify', 'prod'):
+        argv += ['--target', target]
 
     timeout = int(opts.get('timeout') or 1800)
     scope = f'preset:{preset}' if preset else 'items'

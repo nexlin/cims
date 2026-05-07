@@ -355,6 +355,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "skip_reset": bool(args.skip_reset),
         "keep_agent": bool(args.keep_agent),
         "stop_after": bool(args.stop_after),
+        "target":     args.target or "verify",
     }
     only_children = _parse_only_children(args.only_children)
     if only_children:
@@ -494,6 +495,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--skip-reset", action="store_true")
     p_run.add_argument("--keep-agent", action="store_true")
     p_run.add_argument("--stop-after", action="store_true")
+    p_run.add_argument(
+        "--target", choices=["verify", "prod"], default="verify",
+        help="배포 환경 — verify(default, csc=4445/console=8081) 또는 "
+             "prod(csc=4420/console=80). csp/cmp 포트는 두 환경 동일.",
+    )
     p_run.add_argument(
         "--only-children",
         action="append", default=None,

@@ -330,8 +330,35 @@ echo $?    # 0=PASS, 1=FAIL
 ### A.3 unit test (인프라 회귀)
 
 ```bash
-python3 -m unittest tests.test_verify_lib -v    # 109 OK
+python3 -m unittest tests.test_verify_lib -v    # 139 OK
 ```
+
+### A.4 운영 환경 verify (target prod)
+
+기본은 `--target verify` (csc=4445, console=8081). 운영 배포본 (csc=4420,
+console=80) 도 동일 native step 으로 검증 가능:
+
+```bash
+# 운영 환경 stage5/6
+./cims.sh verify stage5 --target prod
+./cims.sh verify stage6 --target prod
+./cims.sh verify run --preset post-deploy --target prod
+```
+
+영향:
+- step_09 deployment 생성 시 config overlay 가 csc:Server.Port=4420,
+  console:Port=80.
+- step_12 overlay 검증 → 4420 매칭.
+- step_13 csc Start LISTEN check → 4420 폴링.
+- step_15 console Start LISTEN check → 80 폴링 (cap_net_bind 또는 reverse
+  proxy 필요).
+- step_14 health_check 의 'tcp:4420=open' 매칭.
+- step_16 ~ 22 의 배포본 csc API 호출 → https://127.0.0.1:4420.
+- S6-ENTRY-CHECK 4 ports LISTEN → 4420/80/5060/9000.
+- S6-SCN-DB-SYNC 의 admin login → 4420.
+
+csp/cmp 포트 (5060/udp + 9000/udp) 는 두 환경 동일이라 변경 없음. backend
+`POST /stages/<N>` 도 body `{"target": "prod"}` 로 동등 지원.
 
 ---
 

@@ -2011,6 +2011,39 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         self.assertIs(r1, r2)
 
     # ── step 12 ──
+    def test_step_12_target_prod_uses_4420(self) -> None:
+        """target=prod 시 _csc_overlay 가 csc=4420 기대값으로."""
+        from verify.lib.items.stage5 import _native_steps
+        import tempfile, json as _json
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "csc-server", "csc")
+            os.makedirs(base)
+            # 4420 으로 overlay 된 config 가 있다 가정
+            with open(os.path.join(base, "config.json"), "w") as f:
+                _json.dump({"Server.Port": 4420}, f)
+            ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5,
+                                              opts={"target": "prod"})
+            ctx.dist_dir = td
+            r = _native_steps.step_12_verify_overlay(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("Server.Port=4420", r.detail)
+
+    def test_step_12_target_prod_fail_when_4445(self) -> None:
+        """target=prod 인데 config 가 verify 값(4445) 면 FAIL."""
+        from verify.lib.items.stage5 import _native_steps
+        import tempfile, json as _json
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "csc-server", "csc")
+            os.makedirs(base)
+            with open(os.path.join(base, "config.json"), "w") as f:
+                _json.dump({"Server.Port": 4445}, f)
+            ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5,
+                                              opts={"target": "prod"})
+            ctx.dist_dir = td
+            r = _native_steps.step_12_verify_overlay(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("기대=4420", r.detail)
+
     def test_step_12_pass_with_flat_key(self) -> None:
         import tempfile
         import json as _json
@@ -2214,6 +2247,23 @@ class TestStage5CscRunSteps(unittest.TestCase):
         r = self._native.step_15_console_start(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertTrue(self._native._get(ctx, "console_start_ok"))
+
+    def test_step_15_target_prod_uses_port_80(self) -> None:
+        """target=prod 시 step_15 가 console port 80 LISTEN 검증."""
+        captured_ports: list = []
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
+        def fake_listen(port, proto="tcp"):
+            captured_ports.append(port)
+            return port == 80
+        self._shell.port_listening = fake_listen
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5,
+                                          opts={"target": "prod"})
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_console", 22)
+        r = self._native.step_15_console_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(captured_ports[0], 80)
+        self.assertIn("port 80", r.detail)
 
     def test_step_15_fail_on_listen_timeout(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})

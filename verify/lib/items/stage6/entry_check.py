@@ -4,6 +4,10 @@
 1. Stage 5 결과물 4포트 LISTEN (csc/console/csp/cmp)
 2. Immutability gate — packages/manifest.json sha == .deployed-manifest.json sha
    (S5 배포 이후 패키지 재빌드 시 mismatch → FAIL, S5 부터 재배포 필요)
+
+target=verify (default) → csc=4445, console=8081
+target=prod             → csc=4420, console=80
+csp/cmp 포트 (5060/9000) 는 두 환경 동일.
 """
 from __future__ import annotations
 
@@ -13,12 +17,22 @@ from ... import shell
 from ...common import pkg_manifest as _pkgm
 
 
-_REQUIRED_PORTS = [
-    (4445, "tcp", "배포본 csc"),
-    (8081, "tcp", "배포본 console"),
-    (5060, "udp", "배포본 csp"),
-    (9000, "udp", "배포본 cmp"),
-]
+_TARGET_PORTS = {
+    "verify": {"csc": 4445, "console": 8081},
+    "prod":   {"csc": 4420, "console": 80},
+}
+
+
+def _required_ports(ctx: VerifyContext) -> list:
+    """target 별 4포트 체크 spec."""
+    target = (ctx.opts or {}).get("target") or "verify"
+    p = _TARGET_PORTS.get(target, _TARGET_PORTS["verify"])
+    return [
+        (p["csc"],     "tcp", "배포본 csc"),
+        (p["console"], "tcp", "배포본 console"),
+        (5060,         "udp", "배포본 csp"),
+        (9000,         "udp", "배포본 cmp"),
+    ]
 
 
 @verify_item(
@@ -41,9 +55,10 @@ def entry_check(ctx: VerifyContext) -> ItemResult:
     ok = True
     lines: list = []
 
-    # (1) 포트 LISTEN
-    lines.append("### (1) Stage 5 결과물 4포트 LISTEN")
-    for port, proto, label in _REQUIRED_PORTS:
+    # (1) 포트 LISTEN — target 의 csc/console 포트 + 공통 csp/cmp
+    target = (ctx.opts or {}).get("target") or "verify"
+    lines.append(f"### (1) Stage 5 결과물 4포트 LISTEN (target={target})")
+    for port, proto, label in _required_ports(ctx):
         listening = shell.port_listening(port, proto)
         mark = "[OK]" if listening else "[FAIL]"
         lines.append(f"- {mark} {label} (port {port}/{proto}) {'LISTEN' if listening else '미기동'}")

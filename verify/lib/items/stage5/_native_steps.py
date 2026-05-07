@@ -76,14 +76,37 @@ _TB_CSC_BASE = "https://127.0.0.1:4419"
 _AGENT_NAME_CSC = "csc-server-local"
 _AGENT_SYNC_PORT_CSC = 9903
 
-# 배포본 csc — Phase 2 가 csc 를 4445 로 띄운 뒤 csp/cmp/sim 배포 주체로 사용
-_DEPLOYED_CSC_BASE = "https://127.0.0.1:4445"
+# 배포본 csc — verify 환경 기본 포트 (4445/8081). 운영 환경 (4420/80) 도
+# ctx.opts["target"]="prod" 로 분기 가능. csp/cmp 는 두 환경 동일 (5060/9000).
+_TARGET_PORTS = {
+    "verify": {"csc": 4445, "console": 8081},
+    "prod":   {"csc": 4420, "console": 80},
+}
+
 _MODULES = ("csp", "cmp", "sim")
 _TARBALL_PREFIX = {"csp": "csp", "cmp": "cmp", "sim": "cspsim"}
 _DIR_NAME       = {"csp": "csp", "cmp": "cmp", "sim": "sim"}
 _AGENT_SYNC_PORT_MOD = {"csp": 9904, "cmp": 9905, "sim": 9906}
 # step 21 — sim 은 install-only (Start 안 함). proto = udp.
 _LISTEN_PORTS = {"csp": (5060, "udp"), "cmp": (9000, "udp")}
+
+
+def _target(ctx: VerifyContext) -> str:
+    return ((ctx.opts or {}).get("target") or "verify")
+
+
+def _ports(ctx: VerifyContext) -> dict:
+    """target → {csc:int, console:int}. 알 수 없는 target 은 verify default."""
+    return _TARGET_PORTS.get(_target(ctx), _TARGET_PORTS["verify"])
+
+
+def _deployed_csc_base(ctx: VerifyContext) -> str:
+    """배포본 csc API URL — target 의 csc 포트로."""
+    return f"https://127.0.0.1:{_ports(ctx)['csc']}"
+
+
+# 옛 상수 (backward-compat) — 직접 참조하던 외부 코드 대비 (현재는 없음).
+_DEPLOYED_CSC_BASE = "https://127.0.0.1:4445"
 
 
 def _store(ctx: VerifyContext) -> dict:
@@ -522,10 +545,10 @@ def step_08_package_upload(ctx: VerifyContext) -> ItemResult:
 # ─────────────────────────────────────────────────────────────
 # Step 09 — Deployment 생성 (config overlay)
 # ─────────────────────────────────────────────────────────────
-def _csc_overlay(name: str) -> dict:
-    """csc-server 자식 config overlay — Phase 1 충돌 회피용 포트 매핑."""
-    if name == "csc":     return {"Server.Port": 4445}
-    if name == "console": return {"Port": 8081}
+def _csc_overlay(name: str, ports: dict) -> dict:
+    """csc-server 자식 config overlay — target 의 포트 매핑."""
+    if name == "csc":     return {"Server.Port": ports["csc"]}
+    if name == "console": return {"Port": ports["console"]}
     return {}
 
 
@@ -553,6 +576,7 @@ def step_09_deployment_create(ctx: VerifyContext) -> ItemResult:
         return result
 
     base = _TB_CSC_BASE
+    ports = _ports(ctx)
     notes: list = []
     fail = False
     for name in _CSC_PACKAGES:
@@ -567,7 +591,7 @@ def step_09_deployment_create(ctx: VerifyContext) -> ItemResult:
             "package_id":    int(pkg_id),
             "install_path":  install_path,
             "process_name":  name.upper(),
-            "config":        _csc_overlay(name),
+            "config":        _csc_overlay(name, ports),
         }
         try:
             status, body = csc_http.post_json(
@@ -782,24 +806,25 @@ def _read_csc_port(install_path: str) -> Optional[int]:
 
 
 def step_12_verify_overlay(ctx: VerifyContext) -> ItemResult:
-    """Step 12 — csc/config.json overlay 반영 (Server.Port == 4445)."""
+    """Step 12 — csc/config.json overlay 반영 (target 의 csc 포트 매칭)."""
     if already_ran(ctx, 12):
         return get_native_result(ctx, 12)
 
     install_path = os.path.join(ctx.dist_dir, "csc-server", "csc")
     port = _read_csc_port(install_path)
-    if port == 4445:
+    expected = _ports(ctx)["csc"]
+    if port == expected:
         result = ItemResult(
             id="S5-CSC-VERIFY-OVERLAY", name="config overlay 반영",
             status=ItemStatus.PASS,
-            detail=f"- [OK] csc/config.json: Server.Port=4445 반영 ({install_path})",
+            detail=f"- [OK] csc/config.json: Server.Port={expected} 반영 ({install_path})",
             stage=5,
         )
     else:
         result = ItemResult(
             id="S5-CSC-VERIFY-OVERLAY", name="config overlay 반영",
             status=ItemStatus.FAIL,
-            detail=f"- [FAIL] csc/config.json Server.Port 이상 (실제={port}, 기대=4445, "
+            detail=f"- [FAIL] csc/config.json Server.Port 이상 (실제={port}, 기대={expected}, "
                    f"path={install_path}/config.json)",
             stage=5,
         )
@@ -835,15 +860,17 @@ def _wait_listen(port: int, proto: str, timeout_s: int) -> int:
 
 
 def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
-    """Step 13 — csc Start job 발행 + 4445 LISTEN 대기 (25s)."""
+    """Step 13 — csc Start job 발행 + LISTEN 대기 (25s, target 의 csc 포트)."""
     if already_ran(ctx, 13):
         return get_native_result(ctx, 13)
 
     tok = _get(ctx, "tok", "")
     csc_did = _get(ctx, "dep_id_csc")
+    csc_port = _ports(ctx)["csc"]
+    name = f"csc Start ({csc_port} LISTEN)"
     if not tok or csc_did is None:
         result = ItemResult(
-            id="S5-CSC-RUN-CSC-START", name="csc Start (4445 LISTEN)",
+            id="S5-CSC-RUN-CSC-START", name=name,
             status=ItemStatus.SKIP,
             detail="step 05/09 미실행 — tok/dep_id 없음",
             stage=5,
@@ -854,7 +881,7 @@ def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
     status, _ = _post_job(ctx, int(csc_did), "start", timeout=10)
     if status not in (200, 201, 202):
         result = ItemResult(
-            id="S5-CSC-RUN-CSC-START", name="csc Start (4445 LISTEN)",
+            id="S5-CSC-RUN-CSC-START", name=name,
             status=ItemStatus.FAIL,
             detail=f"start job 발행 실패 status={status}",
             stage=5,
@@ -862,21 +889,21 @@ def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 13, result)
         return result
 
-    waited = _wait_listen(4445, "tcp", 25)
+    waited = _wait_listen(csc_port, "tcp", 25)
     if waited >= 0:
         _set(ctx, "csc_start_ok", True)
         result = ItemResult(
-            id="S5-CSC-RUN-CSC-START", name="csc Start (4445 LISTEN)",
+            id="S5-CSC-RUN-CSC-START", name=name,
             status=ItemStatus.PASS,
-            detail=f"- [OK] csc port 4445 LISTEN ({waited}s)",
+            detail=f"- [OK] csc port {csc_port} LISTEN ({waited}s)",
             stage=5,
         )
     else:
         _set(ctx, "csc_start_ok", False)
         result = ItemResult(
-            id="S5-CSC-RUN-CSC-START", name="csc Start (4445 LISTEN)",
+            id="S5-CSC-RUN-CSC-START", name=name,
             status=ItemStatus.FAIL,
-            detail="- [FAIL] csc port 4445 LISTEN 실패 (25s timeout)",
+            detail=f"- [FAIL] csc port {csc_port} LISTEN 실패 (25s timeout)",
             stage=5,
         )
     _save(ctx, 13, result)
@@ -971,8 +998,9 @@ def step_14_csc_health(ctx: VerifyContext) -> ItemResult:
         return result
 
     jstatus, rc, stdout = final_row
+    csc_port = _ports(ctx)["csc"]
     ok = (jstatus == "succeeded" and (rc == 0 or rc == "0")
-          and "tcp:4445=open" in stdout)
+          and f"tcp:{csc_port}=open" in stdout)
     _set(ctx, "csc_health_ok", bool(ok))
     detail = (
         f"- 결과: status={jstatus} rc={rc} out={stdout[:160]}\n"
@@ -991,20 +1019,20 @@ def step_14_csc_health(ctx: VerifyContext) -> ItemResult:
 # Step 15 — console Start + 포트 8081 LISTEN
 # ─────────────────────────────────────────────────────────────
 def step_15_console_start(ctx: VerifyContext) -> ItemResult:
-    """Step 15 — console Start job 발행 + 8081 LISTEN 대기 (25s).
+    """Step 15 — console Start job 발행 + LISTEN 대기 (25s, target 의 console 포트).
 
-    bash 본체는 console 기동 실패 시 [WARN] 로 표기 (FAIL 이 아닌)지만, 판정에선
-    console_start_ok=0 이면 verdict=FAIL 로 처리됨. native 도 동일하게 FAIL 로
-    분류 (UI 명확성 위해).
+    target=prod 시 80 (운영 — cap_net_bind 또는 reverse proxy 필요).
     """
     if already_ran(ctx, 15):
         return get_native_result(ctx, 15)
 
     tok = _get(ctx, "tok", "")
     console_did = _get(ctx, "dep_id_console")
+    cport = _ports(ctx)["console"]
+    name = f"console Start ({cport} LISTEN)"
     if not tok or console_did is None:
         result = ItemResult(
-            id="S5-CSC-RUN-CONSOLE-START", name="console Start (8081 LISTEN)",
+            id="S5-CSC-RUN-CONSOLE-START", name=name,
             status=ItemStatus.SKIP,
             detail="step 05/09 미실행 — tok/dep_id_console 없음",
             stage=5,
@@ -1015,7 +1043,7 @@ def step_15_console_start(ctx: VerifyContext) -> ItemResult:
     status, _ = _post_job(ctx, int(console_did), "start", timeout=10)
     if status not in (200, 201, 202):
         result = ItemResult(
-            id="S5-CSC-RUN-CONSOLE-START", name="console Start (8081 LISTEN)",
+            id="S5-CSC-RUN-CONSOLE-START", name=name,
             status=ItemStatus.FAIL,
             detail=f"start job 발행 실패 status={status}",
             stage=5,
@@ -1023,21 +1051,21 @@ def step_15_console_start(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 15, result)
         return result
 
-    waited = _wait_listen(8081, "tcp", 25)
+    waited = _wait_listen(cport, "tcp", 25)
     if waited >= 0:
         _set(ctx, "console_start_ok", True)
         result = ItemResult(
-            id="S5-CSC-RUN-CONSOLE-START", name="console Start (8081 LISTEN)",
+            id="S5-CSC-RUN-CONSOLE-START", name=name,
             status=ItemStatus.PASS,
-            detail=f"- [OK] console port 8081 LISTEN ({waited}s)",
+            detail=f"- [OK] console port {cport} LISTEN ({waited}s)",
             stage=5,
         )
     else:
         _set(ctx, "console_start_ok", False)
         result = ItemResult(
-            id="S5-CSC-RUN-CONSOLE-START", name="console Start (8081 LISTEN)",
+            id="S5-CSC-RUN-CONSOLE-START", name=name,
             status=ItemStatus.FAIL,
-            detail="- [FAIL] console port 8081 LISTEN 실패 (25s timeout)",
+            detail=f"- [FAIL] console port {cport} LISTEN 실패 (25s timeout)",
             stage=5,
         )
     _save(ctx, 15, result)
@@ -1066,7 +1094,7 @@ def step_16_modules_auth(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 16, result)
         return result
 
-    base = _DEPLOYED_CSC_BASE
+    base = _deployed_csc_base(ctx)
     login_id = os.environ.get("CIMS_TB_ADMIN_ID", "admin")
     pw = os.environ.get("CIMS_TB_ADMIN_PASSWORD", "1234")
     tok2 = csc_http.admin_login(base, login_id, pw, timeout=5)
@@ -1114,7 +1142,7 @@ def step_17_modules_pkg_upload(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 17, result)
         return result
 
-    base = _DEPLOYED_CSC_BASE
+    base = _deployed_csc_base(ctx)
     pkg_dir = os.path.join(ctx.dist_dir, "packages")
     notes: list = []
     fail = False
@@ -1255,7 +1283,7 @@ def step_18_modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 18, result)
         return result
 
-    base = _DEPLOYED_CSC_BASE
+    base = _deployed_csc_base(ctx)
     notes: list = []
     register_fail = False
     for m in _MODULES:
@@ -1326,7 +1354,7 @@ def step_19_modules_deployment_create(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 19, result)
         return result
 
-    base = _DEPLOYED_CSC_BASE
+    base = _deployed_csc_base(ctx)
     notes: list = []
     fail = False
     for m in _MODULES:
@@ -1402,7 +1430,7 @@ def step_20_modules_install_poll(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 20, result)
         return result
 
-    base = _DEPLOYED_CSC_BASE
+    base = _deployed_csc_base(ctx)
     notes: list = []
     for m, did in deployments:
         try:
@@ -1468,7 +1496,7 @@ def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 21, result)
         return result
 
-    base = _DEPLOYED_CSC_BASE
+    base = _deployed_csc_base(ctx)
     notes: list = []
     started: list = []
     fail = False
@@ -1568,7 +1596,7 @@ def step_22_finalize(ctx: VerifyContext) -> ItemResult:
             if did is None: continue
             try:
                 st, _ = csc_http.post_json(
-                    f"{_DEPLOYED_CSC_BASE}/api/v1/deployments/{did}/job",
+                    f"{_deployed_csc_base(ctx)}/api/v1/deployments/{did}/job",
                     {"job_type": "stop"}, token=tok2, timeout=10,
                 )
                 notes.append(f"- {m}: stop 발행 status={st}")
