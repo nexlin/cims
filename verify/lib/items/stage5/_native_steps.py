@@ -793,6 +793,243 @@ def step_12_verify_overlay(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
+# Step 13 — csc Start + 포트 4445 LISTEN
+# ─────────────────────────────────────────────────────────────
+def _post_job(ctx: VerifyContext, did: int, job_type: str,
+              base: str = _TB_CSC_BASE, timeout: int = 10) -> tuple:
+    """POST /deployments/<did>/job {job_type:...}. (status, body) 반환.
+    network 예외는 (0, str(e))."""
+    tok = _get(ctx, "tok", "")
+    try:
+        return csc_http.post_json(
+            f"{base}/api/v1/deployments/{did}/job",
+            {"job_type": job_type}, token=tok, timeout=timeout,
+        )
+    except Exception as e:
+        return (0, f"{type(e).__name__}: {e}")
+
+
+def _wait_listen(port: int, proto: str, timeout_s: int) -> int:
+    """`shell.port_listening` 폴링 (1초 단위). 도달하면 경과초, 실패면 -1."""
+    waited = 0
+    while waited < timeout_s:
+        if shell.port_listening(port, proto):
+            return waited
+        time.sleep(1); waited += 1
+    return -1
+
+
+def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
+    """Step 13 — csc Start job 발행 + 4445 LISTEN 대기 (25s)."""
+    if already_ran(ctx, 13):
+        return get_native_result(ctx, 13)
+
+    tok = _get(ctx, "tok", "")
+    csc_did = _get(ctx, "dep_id_csc")
+    if not tok or csc_did is None:
+        result = ItemResult(
+            id="S5-CSC-RUN-CSC-START", name="csc Start (4445 LISTEN)",
+            status=ItemStatus.SKIP,
+            detail="step 05/09 미실행 — tok/dep_id 없음",
+            stage=5,
+        )
+        _save(ctx, 13, result)
+        return result
+
+    status, _ = _post_job(ctx, int(csc_did), "start", timeout=10)
+    if status not in (200, 201, 202):
+        result = ItemResult(
+            id="S5-CSC-RUN-CSC-START", name="csc Start (4445 LISTEN)",
+            status=ItemStatus.FAIL,
+            detail=f"start job 발행 실패 status={status}",
+            stage=5,
+        )
+        _save(ctx, 13, result)
+        return result
+
+    waited = _wait_listen(4445, "tcp", 25)
+    if waited >= 0:
+        _set(ctx, "csc_start_ok", True)
+        result = ItemResult(
+            id="S5-CSC-RUN-CSC-START", name="csc Start (4445 LISTEN)",
+            status=ItemStatus.PASS,
+            detail=f"- [OK] csc port 4445 LISTEN ({waited}s)",
+            stage=5,
+        )
+    else:
+        _set(ctx, "csc_start_ok", False)
+        result = ItemResult(
+            id="S5-CSC-RUN-CSC-START", name="csc Start (4445 LISTEN)",
+            status=ItemStatus.FAIL,
+            detail="- [FAIL] csc port 4445 LISTEN 실패 (25s timeout)",
+            stage=5,
+        )
+    _save(ctx, 13, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 14 — csc Health check job
+# ─────────────────────────────────────────────────────────────
+def _agent_job_status(job_id: int, dist_dir: str) -> Optional[tuple]:
+    """agent_job (status, result_code, result_stdout) 행 반환. 없거나 오류 시 None."""
+    cfg = _db.csp_db_config(dist_dir)
+    if not cfg: return None
+    try:
+        conn = _db.connect(cfg)
+    except Exception:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status, result_code, COALESCE(result_stdout,'') "
+            "FROM agent_job WHERE id=%s", (job_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return (str(row[0] or ""), row[1], str(row[2] or ""))
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+def step_14_csc_health(ctx: VerifyContext) -> ItemResult:
+    """Step 14 — csc Health check job 발행 + agent_job 폴링 (15s).
+
+    PASS 조건: status=succeeded, result_code=0, result_stdout 안 'tcp:4445=open'.
+    """
+    if already_ran(ctx, 14):
+        return get_native_result(ctx, 14)
+
+    tok = _get(ctx, "tok", "")
+    csc_did = _get(ctx, "dep_id_csc")
+    if not tok or csc_did is None or not _get(ctx, "csc_start_ok"):
+        result = ItemResult(
+            id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+            status=ItemStatus.SKIP,
+            detail="step 13 (csc Start) 미실행 / 실패 — health 발행 의미 없음",
+            stage=5,
+        )
+        _save(ctx, 14, result)
+        return result
+
+    status, body = _post_job(ctx, int(csc_did), "health_check", timeout=10)
+    if status not in (200, 201, 202) or not isinstance(body, dict):
+        result = ItemResult(
+            id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+            status=ItemStatus.FAIL,
+            detail=f"health_check 발행 실패 status={status}",
+            stage=5,
+        )
+        _save(ctx, 14, result)
+        return result
+
+    job_id = body.get("job_id")
+    if job_id is None:
+        result = ItemResult(
+            id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+            status=ItemStatus.FAIL,
+            detail=f"응답에 job_id 누락: {str(body)[:200]}",
+            stage=5,
+        )
+        _save(ctx, 14, result)
+        return result
+
+    job_id = int(job_id)
+    final_row = None
+    for _ in range(15):
+        time.sleep(1)
+        row = _agent_job_status(job_id, ctx.dist_dir)
+        if row and row[0] in ("succeeded", "failed"):
+            final_row = row
+            break
+
+    if not final_row:
+        result = ItemResult(
+            id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+            status=ItemStatus.FAIL,
+            detail=f"agent_job(id={job_id}) 폴링 타임아웃 (15s)",
+            stage=5,
+        )
+        _save(ctx, 14, result)
+        return result
+
+    jstatus, rc, stdout = final_row
+    ok = (jstatus == "succeeded" and (rc == 0 or rc == "0")
+          and "tcp:4445=open" in stdout)
+    _set(ctx, "csc_health_ok", bool(ok))
+    detail = (
+        f"- 결과: status={jstatus} rc={rc} out={stdout[:160]}\n"
+        f"- 판정: {'OK' if ok else 'FAIL'}"
+    )
+    result = ItemResult(
+        id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+        status=ItemStatus.PASS if ok else ItemStatus.FAIL,
+        detail=detail, stage=5,
+    )
+    _save(ctx, 14, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 15 — console Start + 포트 8081 LISTEN
+# ─────────────────────────────────────────────────────────────
+def step_15_console_start(ctx: VerifyContext) -> ItemResult:
+    """Step 15 — console Start job 발행 + 8081 LISTEN 대기 (25s).
+
+    bash 본체는 console 기동 실패 시 [WARN] 로 표기 (FAIL 이 아닌)지만, 판정에선
+    console_start_ok=0 이면 verdict=FAIL 로 처리됨. native 도 동일하게 FAIL 로
+    분류 (UI 명확성 위해).
+    """
+    if already_ran(ctx, 15):
+        return get_native_result(ctx, 15)
+
+    tok = _get(ctx, "tok", "")
+    console_did = _get(ctx, "dep_id_console")
+    if not tok or console_did is None:
+        result = ItemResult(
+            id="S5-CSC-RUN-CONSOLE-START", name="console Start (8081 LISTEN)",
+            status=ItemStatus.SKIP,
+            detail="step 05/09 미실행 — tok/dep_id_console 없음",
+            stage=5,
+        )
+        _save(ctx, 15, result)
+        return result
+
+    status, _ = _post_job(ctx, int(console_did), "start", timeout=10)
+    if status not in (200, 201, 202):
+        result = ItemResult(
+            id="S5-CSC-RUN-CONSOLE-START", name="console Start (8081 LISTEN)",
+            status=ItemStatus.FAIL,
+            detail=f"start job 발행 실패 status={status}",
+            stage=5,
+        )
+        _save(ctx, 15, result)
+        return result
+
+    waited = _wait_listen(8081, "tcp", 25)
+    if waited >= 0:
+        _set(ctx, "console_start_ok", True)
+        result = ItemResult(
+            id="S5-CSC-RUN-CONSOLE-START", name="console Start (8081 LISTEN)",
+            status=ItemStatus.PASS,
+            detail=f"- [OK] console port 8081 LISTEN ({waited}s)",
+            stage=5,
+        )
+    else:
+        _set(ctx, "console_start_ok", False)
+        result = ItemResult(
+            id="S5-CSC-RUN-CONSOLE-START", name="console Start (8081 LISTEN)",
+            status=ItemStatus.FAIL,
+            detail="- [FAIL] console port 8081 LISTEN 실패 (25s timeout)",
+            stage=5,
+        )
+    _save(ctx, 15, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
 # Composite helpers — verify_item 자식 1개에 여러 step 합산
 # ─────────────────────────────────────────────────────────────
 _RANK = {ItemStatus.PASS: 0, ItemStatus.SKIP: 1,

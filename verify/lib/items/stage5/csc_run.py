@@ -1,9 +1,15 @@
-"""S5-CSC-RUN (그룹) — 배포된 csc/console 기동 + health."""
+"""S5-CSC-RUN (그룹) — 배포된 csc/console 기동 + health.
+
+자식 모두 native 화 완료 (_legacy 미참조). step 13/14/15 native:
+- 13: csc Start + 4445 LISTEN
+- 14: csc Health check (agent_job 폴링)
+- 15: console Start + 8081 LISTEN
+"""
 from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
-from ._legacy import get_legacy_results, step_result
+from . import _native_steps
 
 
 @verify_item(
@@ -30,8 +36,8 @@ def csc_run_group(ctx: VerifyContext) -> ItemResult:
     execution_order=41,
 )
 def csc_start(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [13], "S5-CSC-RUN-CSC-START", "csc Start (4445 LISTEN)")
+    """Step 13 native — csc Start job + 4445 LISTEN polling 25s."""
+    return _native_steps.step_13_csc_start(ctx)
 
 
 @verify_item(
@@ -43,8 +49,8 @@ def csc_start(ctx: VerifyContext) -> ItemResult:
     execution_order=42,
 )
 def csc_health(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [14], "S5-CSC-RUN-CSC-HEALTH", "csc health_check")
+    """Step 14 native — health_check job + agent_job DB 폴링 15s."""
+    return _native_steps.step_14_csc_health(ctx)
 
 
 @verify_item(
@@ -56,6 +62,5 @@ def csc_health(ctx: VerifyContext) -> ItemResult:
     execution_order=43,
 )
 def console_start(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [15], "S5-CSC-RUN-CONSOLE-START",
-                       "console Start (8081 LISTEN)")
+    """Step 15 native — console Start job + 8081 LISTEN polling 25s."""
+    return _native_steps.step_15_console_start(ctx)

@@ -1483,5 +1483,161 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.FAIL)
 
 
+class TestStage5CscRunSteps(unittest.TestCase):
+    """S5 native — step 13 (csc start), 14 (csc health), 15 (console start)."""
+
+    def setUp(self) -> None:
+        from verify.lib.items.stage5 import _native_steps
+        from verify.lib.context import VerifyContext
+        from verify.lib.common import csc_http
+        from verify.lib.common import db as _db
+        from verify.lib import shell as _shell
+        from verify.lib.registry import ItemStatus
+        self._native = _native_steps
+        self._VerifyContext = VerifyContext
+        self._csc_http = csc_http
+        self._db = _db
+        self._shell = _shell
+        self._ItemStatus = ItemStatus
+        self._orig = {
+            "post_json":     csc_http.post_json,
+            "csp_db_config": _db.csp_db_config,
+            "connect":       _db.connect,
+            "port_listening": _shell.port_listening,
+        }
+        # time.sleep 빠르게
+        import time as _t
+        self._orig_sleep = _t.sleep
+        _t.sleep = lambda s: None
+
+    def tearDown(self) -> None:
+        self._csc_http.post_json   = self._orig["post_json"]
+        self._db.csp_db_config     = self._orig["csp_db_config"]
+        self._db.connect           = self._orig["connect"]
+        self._shell.port_listening = self._orig["port_listening"]
+        import time as _t
+        _t.sleep = self._orig_sleep
+
+    def _ctx(self):
+        return self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+
+    # ── step 13 ──
+    def test_step_13_skips_without_tok_or_did(self) -> None:
+        ctx = self._ctx()
+        r = self._native.step_13_csc_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_step_13_pass_when_listening(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
+        # 첫 polling 시도에서 즉시 LISTEN
+        self._shell.port_listening = lambda port, proto="tcp": port == 4445
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_csc", 11)
+        r = self._native.step_13_csc_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertTrue(self._native._get(ctx, "csc_start_ok"))
+
+    def test_step_13_fail_on_listen_timeout(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
+        self._shell.port_listening = lambda port, proto="tcp": False
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_csc", 11)
+        r = self._native.step_13_csc_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertFalse(self._native._get(ctx, "csc_start_ok"))
+
+    def test_step_13_fail_on_post_status_error(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (500, {})
+        self._shell.port_listening = lambda port, proto="tcp": True
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_csc", 11)
+        r = self._native.step_13_csc_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("status=500", r.detail)
+
+    # ── step 14 ──
+    def test_step_14_skips_when_csc_not_started(self) -> None:
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_csc", 11)
+        # csc_start_ok 미설정 (False)
+        r = self._native.step_14_csc_health(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_step_14_pass_when_health_succeeds(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {"job_id": 99})
+        self._db.csp_db_config = lambda d: {"Host":"x","User":"x","Password":"x","DbName":"x"}
+        class FakeCursor:
+            def execute(self, sql, params=None): pass
+            def fetchone(self):
+                # status=succeeded, rc=0, stdout 안 'tcp:4445=open'
+                return ("succeeded", 0, "tcp:4445=open\n")
+        class FakeConn:
+            def cursor(self): return FakeCursor()
+            def close(self): pass
+        self._db.connect = lambda cfg: FakeConn()
+
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_csc", 11)
+        self._native._set(ctx, "csc_start_ok", True)
+        r = self._native.step_14_csc_health(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertTrue(self._native._get(ctx, "csc_health_ok"))
+
+    def test_step_14_fail_when_stdout_missing_tcp_open(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {"job_id": 99})
+        self._db.csp_db_config = lambda d: {"Host":"x","User":"x","Password":"x","DbName":"x"}
+        class FakeCursor:
+            def execute(self, sql, params=None): pass
+            def fetchone(self):
+                return ("succeeded", 0, "")    # stdout 비어있음
+        class FakeConn:
+            def cursor(self): return FakeCursor()
+            def close(self): pass
+        self._db.connect = lambda cfg: FakeConn()
+
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_csc", 11)
+        self._native._set(ctx, "csc_start_ok", True)
+        r = self._native.step_14_csc_health(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertFalse(self._native._get(ctx, "csc_health_ok"))
+
+    def test_step_14_fail_when_post_missing_job_id(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (200, {})
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_csc", 11)
+        self._native._set(ctx, "csc_start_ok", True)
+        r = self._native.step_14_csc_health(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("job_id 누락", r.detail)
+
+    # ── step 15 ──
+    def test_step_15_pass_when_listening(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
+        self._shell.port_listening = lambda port, proto="tcp": port == 8081
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_console", 22)
+        r = self._native.step_15_console_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertTrue(self._native._get(ctx, "console_start_ok"))
+
+    def test_step_15_fail_on_listen_timeout(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
+        self._shell.port_listening = lambda port, proto="tcp": False
+        ctx = self._ctx()
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "dep_id_console", 22)
+        r = self._native.step_15_console_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
