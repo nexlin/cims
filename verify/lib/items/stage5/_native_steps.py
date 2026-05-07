@@ -1552,16 +1552,18 @@ def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
 
     _set(ctx, "modules_start_ok", not fail)
 
-    # csp ↔ cmp control connection 안정화 대기 (max 150s).
+    # csp ↔ cmp control connection 안정화 대기 (default max 150s).
     # csp 시작 직후 cmp 와의 첫 heartbeat 응답까지 ~120s 소요. 이 wait 가
     # 없으면 후속 S6 PTT 시나리오의 InviteMember 가 'Failed to get/alloc
     # Shared Port' 로 실패 (csp 가 cmp 에 ADD_PTT_GROUP 보낼 수 없음).
-    if not fail:
+    # `CIMS_VERIFY_CMP_WAIT_S=0` 환경변수로 wait 자체 비활성 (unit test 용).
+    cmp_wait_s = int(os.environ.get("CIMS_VERIFY_CMP_WAIT_S", "150"))
+    if not fail and cmp_wait_s > 0:
         import time as _t
         from glob import glob as _glob
         log_glob = os.path.join(ctx.dist_dir, "csp-server", "csp", "csp", "log",
                                 "csp_*.log")
-        deadline = _t.time() + 150
+        deadline = _t.time() + cmp_wait_s
         csp_cmp_connected = False
         while _t.time() < deadline:
             for p in _glob(log_glob):

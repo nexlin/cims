@@ -2894,8 +2894,16 @@ class TestStage5ModulesSteps(unittest.TestCase):
         import time as _t
         self._orig_sleep = _t.sleep
         _t.sleep = lambda s: None
+        # step_21 의 csp↔cmp wait 를 unit test 에서 비활성 — sleep 이 0 으로
+        # mock 됐는데 wait deadline 까지 busy loop 도는 것 방지 (150s).
+        self._orig_cmp_wait = os.environ.get("CIMS_VERIFY_CMP_WAIT_S")
+        os.environ["CIMS_VERIFY_CMP_WAIT_S"] = "0"
 
     def tearDown(self) -> None:
+        if self._orig_cmp_wait is None:
+            os.environ.pop("CIMS_VERIFY_CMP_WAIT_S", None)
+        else:
+            os.environ["CIMS_VERIFY_CMP_WAIT_S"] = self._orig_cmp_wait
         self._csc_http.admin_login           = self._orig["admin_login"]
         self._csc_http.post_json             = self._orig["post_json"]
         self._csc_http.post_multipart        = self._orig["post_multipart"]
