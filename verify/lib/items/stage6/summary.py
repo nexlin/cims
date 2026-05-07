@@ -14,6 +14,8 @@ from ...context import VerifyContext
     depends_on=[
         "S6-SCN-VOLTE-VOICE", "S6-SCN-VOLTE-VIDEO",
         "S6-SCN-PTT-VOICE",   "S6-SCN-PTT-VIDEO",
+        # 신규 시나리오 (cert-rotate 는 agent 종료 가능 → 마지막에 실행)
+        "S6-SCN-SUBSCRIBE",   "S6-SCN-DB-SYNC", "S6-SCN-CERT-ROTATE",
     ],
     presets=["stage6-full", "pipeline-full", "post-deploy"],
     side_effects=["read-only"], timeout_s=10,

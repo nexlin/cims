@@ -552,6 +552,21 @@ class TestExistingRegistry(unittest.TestCase):
             kids.extend(registry.get_children(g.id))
         self.assertEqual(len(kids), 13)
 
+    def test_stage6_new_scenarios_registered(self) -> None:
+        """S6-SCN-SUBSCRIBE / -CERT-ROTATE / -DB-SYNC 신규 시나리오 등록 확인."""
+        from verify.lib import registry
+        from verify.lib import items                            # noqa: F401
+        ids = {m.id for m in registry.get_items(stage=6)}
+        for new_id in ("S6-SCN-SUBSCRIBE", "S6-SCN-CERT-ROTATE", "S6-SCN-DB-SYNC"):
+            self.assertIn(new_id, ids)
+        # SUMMARY 가 새 시나리오에 의존
+        rec = registry.get_item("S6-SUMMARY")
+        self.assertIsNotNone(rec)
+        deps = set(rec[0].depends_on)
+        self.assertIn("S6-SCN-SUBSCRIBE", deps)
+        self.assertIn("S6-SCN-CERT-ROTATE", deps)
+        self.assertIn("S6-SCN-DB-SYNC", deps)
+
     def test_stage5_execution_order(self) -> None:
         """S5 항목 실행 순서: RESET → CSC-DEPLOY(*) → CSC-VERIFY(*) →
         CSC-RUN(*) → MODULES-DEPLOY(*) → MODULES-RUN(*) → FINALIZE.
@@ -884,6 +899,202 @@ class TestParseItemsProgress(unittest.TestCase):
         self.assertIsNotNone(sg)
         self.assertEqual(sg["first_failed"], 2)
         self.assertEqual(sg["blocked_stages"], {3: 1, 5: 1})
+
+
+class TestStage6NewScenarios(unittest.TestCase):
+    """S6-SCN-SUBSCRIBE / -CERT-ROTATE / -DB-SYNC unit tests (mock 기반)."""
+
+    def setUp(self) -> None:
+        from verify.lib.context import VerifyContext
+        from verify.lib.registry import ItemStatus
+        self._VerifyContext = VerifyContext
+        self._ItemStatus = ItemStatus
+
+    def _ctx(self, dist_dir=None):
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=6)
+        if dist_dir:
+            ctx.dist_dir = dist_dir
+        return ctx
+
+    # ── S6-SCN-SUBSCRIBE ──
+    def test_scn_subscribe_skip_without_ptt_state(self) -> None:
+        from verify.lib.items.stage6 import scn_subscribe
+        ctx = self._ctx()
+        # PTT_USER 등 미설정 (S6-SEED 안 돌렸을 때)
+        r = scn_subscribe.scn_subscribe(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("PTT 가입자", r.detail)
+
+    def test_scn_subscribe_pass_when_complete(self) -> None:
+        from verify.lib.items.stage6 import scn_subscribe
+        # scn_subscribe 모듈이 `from ...common.cspsim import run_cspsim` 했으므로
+        # 모듈 자체의 reference 를 patch 해야 효과 있음.
+        orig = scn_subscribe.run_cspsim
+        orig_cnt = scn_subscribe._count_notify_lines
+        try:
+            scn_subscribe.run_cspsim = lambda repo, args, timeout=120: (
+                0, "[Scenario] Sending GMS/CMS SUBSCRIBE...\n"
+                   "[Scenario] Subscriptions complete\n",
+            )
+            scn_subscribe._count_notify_lines = lambda dist, since: 2
+            ctx = self._ctx()
+            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_PWD": "p"})
+            r = scn_subscribe.scn_subscribe(ctx)
+        finally:
+            scn_subscribe.run_cspsim = orig
+            scn_subscribe._count_notify_lines = orig_cnt
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("subscribe-complete=True", r.detail)
+
+    def test_scn_subscribe_fail_when_no_notify(self) -> None:
+        from verify.lib.items.stage6 import scn_subscribe
+        orig = scn_subscribe.run_cspsim
+        orig_cnt = scn_subscribe._count_notify_lines
+        try:
+            scn_subscribe.run_cspsim = lambda repo, args, timeout=120: (
+                0, "[Scenario] Subscriptions complete\n",
+            )
+            scn_subscribe._count_notify_lines = lambda dist, since: 0
+            ctx = self._ctx()
+            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_PWD": "p"})
+            r = scn_subscribe.scn_subscribe(ctx)
+        finally:
+            scn_subscribe.run_cspsim = orig
+            scn_subscribe._count_notify_lines = orig_cnt
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+
+    # ── S6-SCN-CERT-ROTATE ──
+    def test_scn_cert_rotate_skip_when_mtls_off(self) -> None:
+        from verify.lib.items.stage6 import scn_cert_rotate
+        import tempfile, json as _json
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "csc", "config")
+            os.makedirs(cfg)
+            with open(os.path.join(cfg, "csc-tb.json"), "w") as f:
+                _json.dump({"Agent": {"MtlsEnabled": False}}, f)
+            ctx = self._ctx(dist_dir=td)
+            r = scn_cert_rotate.scn_cert_rotate(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("MtlsEnabled=false", r.detail)
+
+    def test_scn_cert_rotate_skip_when_csc_tb_missing(self) -> None:
+        from verify.lib.items.stage6 import scn_cert_rotate
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._ctx(dist_dir=td)
+            r = scn_cert_rotate.scn_cert_rotate(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("csc-tb.json", r.detail)
+
+    def test_scn_cert_rotate_skip_when_db_unavailable(self) -> None:
+        from verify.lib.items.stage6 import scn_cert_rotate
+        from verify.lib.common import db as _db
+        import tempfile, json as _json
+        # mTLS=true 인데 DB 접속 실패 → SKIP
+        orig_cfg = _db.csp_db_config
+        try:
+            _db.csp_db_config = lambda d: {}    # 빈 config
+            with tempfile.TemporaryDirectory() as td:
+                cfg = os.path.join(td, "csc", "config")
+                os.makedirs(cfg)
+                with open(os.path.join(cfg, "csc-tb.json"), "w") as f:
+                    _json.dump({"Agent": {"MtlsEnabled": True}}, f)
+                ctx = self._ctx(dist_dir=td)
+                r = scn_cert_rotate.scn_cert_rotate(ctx)
+        finally:
+            _db.csp_db_config = orig_cfg
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("DB", r.detail)
+
+    # ── S6-SCN-DB-SYNC ──
+    def test_scn_db_sync_skip_when_csc_login_fails(self) -> None:
+        from verify.lib.items.stage6 import scn_db_sync
+        from verify.lib.common import csc_http
+        orig = csc_http.admin_login
+        try:
+            csc_http.admin_login = lambda *a, **k: ""    # login 실패
+            ctx = self._ctx()
+            r = scn_db_sync.scn_db_sync(ctx)
+        finally:
+            csc_http.admin_login = orig
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("login", r.detail.lower())
+
+    def test_scn_db_sync_pass_when_csp_log_has_notify(self) -> None:
+        """admin login OK + 그룹 추가 + csp 로그에 GROUP_CHANGED 라인 → PASS."""
+        from verify.lib.items.stage6 import scn_db_sync
+        from verify.lib.common import csc_http
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            log_dir = os.path.join(td, "csp-server", "csp", "csp", "log")
+            os.makedirs(log_dir)
+            log_path = os.path.join(log_dir, "csp_2026-05.log")
+            # 사전: 빈 로그 (offset=0)
+            with open(log_path, "w") as f:
+                f.write("")
+
+            orig_login = csc_http.admin_login
+            orig_post = csc_http.post_json
+            orig_delete = csc_http.delete
+            try:
+                csc_http.admin_login = lambda *a, **k: "JWT"
+                # POST /ptt/groups → 201 + 잠시 후 csp 로그에 GROUP_CHANGED 라인 추가
+                def fake_post(url, payload, **kw):
+                    # 그룹 생성 시 csp 가 로그 라인 작성하는 것 시뮬
+                    with open(log_path, "a") as f:
+                        f.write("[INFO] GROUP_CHANGED uri=tel:test\n")
+                    return (201, {"id": payload.get("group_id")})
+                csc_http.post_json = fake_post
+                csc_http.delete = lambda *a, **k: 204
+
+                # time.sleep 빠르게
+                import time as _t
+                orig_sleep = _t.sleep
+                _t.sleep = lambda s: None
+                try:
+                    ctx = self._ctx(dist_dir=td)
+                    r = scn_db_sync.scn_db_sync(ctx)
+                finally:
+                    _t.sleep = orig_sleep
+            finally:
+                csc_http.admin_login = orig_login
+                csc_http.post_json = orig_post
+                csc_http.delete = orig_delete
+
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("notify 라인: 1", r.detail)
+
+    def test_scn_db_sync_fail_when_csp_log_silent(self) -> None:
+        """admin login OK + 그룹 추가 + csp 로그에 새 라인 없음 → FAIL."""
+        from verify.lib.items.stage6 import scn_db_sync
+        from verify.lib.common import csc_http
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            log_dir = os.path.join(td, "csp-server", "csp", "csp", "log")
+            os.makedirs(log_dir)
+            with open(os.path.join(log_dir, "csp_2026-05.log"), "w") as f:
+                f.write("")
+            orig_login = csc_http.admin_login
+            orig_post = csc_http.post_json
+            orig_delete = csc_http.delete
+            try:
+                csc_http.admin_login = lambda *a, **k: "JWT"
+                csc_http.post_json = lambda *a, **k: (201, {"id": "x"})
+                csc_http.delete = lambda *a, **k: 204
+                import time as _t
+                orig_sleep = _t.sleep
+                _t.sleep = lambda s: None
+                try:
+                    ctx = self._ctx(dist_dir=td)
+                    r = scn_db_sync.scn_db_sync(ctx)
+                finally:
+                    _t.sleep = orig_sleep
+            finally:
+                csc_http.admin_login = orig_login
+                csc_http.post_json = orig_post
+                csc_http.delete = orig_delete
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
 
 
 class TestWebhook(unittest.TestCase):
