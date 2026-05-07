@@ -17,9 +17,14 @@ from .registry import get_items
 
 
 def _all_stage(stage: int) -> Callable:
-    """주어진 stage 의 부모/평면 항목 ID list (자식은 부모 통해 자동 펼쳐짐)."""
+    """주어진 stage 의 부모/평면 항목 ID list (자식은 부모 통해 자동 펼쳐짐).
+
+    RESET 항목 (S3-RESET / S5-RESET) 은 검증 회차에서 제외 — 사용자가 명시
+    적으로 `prep-reset` preset 을 호출하여 환경 wipe 후 회차 진입.
+    """
     def _fn() -> list:
-        return [m.id for m in get_items(stage=stage, include_children=False)]
+        return [m.id for m in get_items(stage=stage, include_children=False)
+                if not m.id.endswith("-RESET")]
     return _fn
 
 
@@ -27,7 +32,8 @@ def _stages(stage_list: list) -> Callable:
     def _fn() -> list:
         out: list = []
         for s in stage_list:
-            out += [m.id for m in get_items(stage=s, include_children=False)]
+            out += [m.id for m in get_items(stage=s, include_children=False)
+                    if not m.id.endswith("-RESET")]
         return out
     return _fn
 
@@ -52,6 +58,12 @@ _PRESETS: dict = {
     "pipeline-full":  _stages([1, 2, 3, 4, 5, 6]),
     "pre-package":    _stages([1, 2, 3, 4]),
     "post-deploy":    _stages([5, 6]),
+
+    # ── 사전 환경 초기화 (검증 회차 분리) ──
+    # 검증 회차 (stage3/5/pipeline-full) 에는 RESET 이 포함되지 않으므로
+    # 회차 진입 전에 명시적으로 prep-reset 을 실행하여 dev/배포 환경 wipe.
+    # console UI 의 "데이터 초기화" 버튼이 이 preset 을 호출.
+    "prep-reset":     ["S3-RESET", "S5-RESET"],
 }
 
 

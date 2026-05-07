@@ -10,7 +10,9 @@ from ... import shell
     id="S3-RESET",
     stage=3, category="환경",
     name="reset --all (가입자 보존, 로그/DB/녹취/배포본 wipe)",
-    presets=["stage3-full", "pipeline-full", "pre-package"],
+    # 검증 회차에서는 제외 — `prep-reset` preset 으로 사용자가 명시 실행 (분리).
+    # stage3/5/pipeline-full preset 에는 미포함.
+    presets=["prep-reset"],
     side_effects=["fs-write", "db-truncate", "process-kill"], timeout_s=120,
 )
 def reset(ctx: VerifyContext) -> ItemResult:

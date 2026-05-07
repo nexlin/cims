@@ -320,6 +320,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
 
 function GlobalHeader({
   stages, onPipelineToggle, running, resumeStage, setResumeStage, onPrintReport,
+  onPrepReset, prepResetRunning, anyOtherRunning,
 }: {
   stages: Stage[]
   onPipelineToggle: () => void
@@ -327,6 +328,9 @@ function GlobalHeader({
   resumeStage: number
   setResumeStage: (n: number) => void
   onPrintReport: () => void
+  onPrepReset: () => void
+  prepResetRunning: boolean
+  anyOtherRunning: boolean
 }) {
   const overallStatus = (() => {
     const sts = stages.map(s => stageStatus(s.items))
@@ -345,16 +349,38 @@ function GlobalHeader({
       {/* 시작/중단 toggle 버튼 — 크기 고정 */}
       <button
         onClick={onPipelineToggle}
+        disabled={prepResetRunning}
         style={{
           minWidth: 160, height: 36,
           padding: '0 16px',
           background: running ? '#dc2626' : '#3b82f6',
           color: '#fff', border: 'none', borderRadius: 6,
-          fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          fontSize: 13, fontWeight: 700,
+          cursor: prepResetRunning ? 'not-allowed' : 'pointer',
+          opacity: prepResetRunning ? 0.5 : 1,
           transition: 'background 0.2s',
         }}
       >
         {running ? '⏹ 전체검증 중단' : '▶ 전체검증'}
+      </button>
+
+      {/* 데이터 초기화 (prep-reset) — 검증 회차에서 분리된 사전 cleanup */}
+      <button
+        onClick={onPrepReset}
+        disabled={anyOtherRunning}
+        title="dev/배포본 dist/, 로그, DB 일부 wipe (가입자/그룹은 보존). 회차 진입 전 1회 실행 권장."
+        style={{
+          minWidth: 140, height: 36,
+          padding: '0 14px',
+          background: prepResetRunning ? '#dc2626' : '#f59e0b',
+          color: '#fff', border: 'none', borderRadius: 6,
+          fontSize: 12, fontWeight: 600,
+          cursor: anyOtherRunning ? 'not-allowed' : 'pointer',
+          opacity: anyOtherRunning ? 0.5 : 1,
+          transition: 'background 0.2s',
+        }}
+      >
+        {prepResetRunning ? '⏹ 초기화 중단' : '🧹 데이터 초기화'}
       </button>
 
       {/* 재개 지점 dropdown — Run 옆 */}
@@ -708,7 +734,8 @@ export default function VerificationV2Page() {
   const [error, setError] = useState<string | null>(null)
   const [stageGate, setStageGate] = useState<{ first_failed: number; blocked_stages: Record<number, number> } | null>(null)
   const [env, setEnv] = useState<VerifyEnvResponse | null>(null)
-  const anyRunning = pipelineRunning || soloStage !== null
+  const [prepResetRunning, setPrepResetRunning] = useState(false)
+  const anyRunning = pipelineRunning || soloStage !== null || prepResetRunning
 
   // 초기 로드 — GET /verification/stages + /verification/env
   useEffect(() => {
@@ -815,6 +842,28 @@ export default function VerificationV2Page() {
     }
   }, [pipelineRunning, soloStage, resumeStage, stages])
 
+  // 데이터 초기화 — prep-reset preset (S3-RESET + S5-RESET 묶음).
+  // 검증 회차에서 분리된 사전 정리 단계. dist/ + DB 일부 wipe.
+  const togglePrepReset = useCallback(async () => {
+    if (prepResetRunning) return  // 진행 중에는 무시
+    if (pipelineRunning || soloStage !== null) {
+      setError('검증 진행 중에는 데이터 초기화 불가')
+      return
+    }
+    if (!window.confirm('데이터 초기화 — dev/배포본 dist/, 로그, DB 일부 wipe '
+                        + '(가입자/그룹은 보존). 진행하시겠습니까?')) return
+    setError(null)
+    try {
+      const res = await verifyApi.runArbitrary({
+        preset: 'prep-reset', async: true, trigger: 'user',
+      })
+      setJobId(res.job_id)
+      setPrepResetRunning(true)
+    } catch (e: unknown) {
+      setError('데이터 초기화 시작 실패: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }, [prepResetRunning, pipelineRunning, soloStage])
+
   // 개별 stage 단독 실행/중단 toggle
   const toggleStageRun = useCallback(async (stageNum: number) => {
     if (soloStage === stageNum) {
@@ -867,6 +916,7 @@ export default function VerificationV2Page() {
         if (job.done) {
           setPipelineRunning(false)
           setSoloStage(null)
+          setPrepResetRunning(false)
           if (job.run_id) setLastRunId(job.run_id)
           if (job.verdict === 'FAIL') {
             setError(`검증 FAIL — 회차 #${job.run_id ?? '?'} (이력 페이지 참조)`)
@@ -1009,6 +1059,9 @@ export default function VerificationV2Page() {
           resumeStage={resumeStage}
           setResumeStage={setResumeStage}
           onPrintReport={handlePrintReport}
+          onPrepReset={togglePrepReset}
+          prepResetRunning={prepResetRunning}
+          anyOtherRunning={pipelineRunning || soloStage !== null}
         />
       </div>
 
