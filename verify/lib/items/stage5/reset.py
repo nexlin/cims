@@ -1,9 +1,9 @@
-"""S5-RESET — 배포본 reset (Phase 2 step 1: cleanup)."""
+"""S5-RESET — Phase 2 step 01 (Cleanup) — native Python 구현 사용."""
 from __future__ import annotations
 
-from ...registry import verify_item, ItemResult, ItemStatus
+from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
-from ._legacy import get_legacy_results, step_result
+from . import _native_steps as _native
 
 
 @verify_item(
@@ -11,8 +11,7 @@ from ._legacy import get_legacy_results, step_result
     stage=5, category="배포",
     name="배포본 reset (로그/DB/csc-server wipe — 가입자 보존)",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
-    side_effects=["fs-write", "db-truncate"], timeout_s=60,
+    side_effects=["fs-write", "db-truncate"], timeout_s=120,
 )
 def reset(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [1], "S5-RESET", "배포본 reset (cleanup)")
+    return _native.step_01_cleanup(ctx)

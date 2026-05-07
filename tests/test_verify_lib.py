@@ -770,5 +770,70 @@ class TestParseItemsProgress(unittest.TestCase):
         self.assertEqual(sg["blocked_stages"], {3: 1, 5: 1})
 
 
+class TestStage5NativeSteps(unittest.TestCase):
+    """S5 native Python step 구현 — _native_steps.step_01_cleanup."""
+
+    def setUp(self) -> None:
+        from verify.lib.items.stage5 import _native_steps
+        from verify.lib.context import VerifyContext
+        from verify.lib import shell as _shell
+        from verify.lib.registry import ItemStatus
+        self._native = _native_steps
+        self._VerifyContext = VerifyContext
+        self._shell = _shell
+        self._ItemStatus = ItemStatus
+        self._orig_run_cims_sh = _shell.run_cims_sh
+
+    def tearDown(self) -> None:
+        self._shell.run_cims_sh = self._orig_run_cims_sh
+
+    def _make_ctx(self):
+        return self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+
+    def test_step_01_pass(self) -> None:
+        captured = []
+        def fake_run(repo_root, *args, **kw):
+            captured.append((repo_root, args, kw))
+            return (0, "[INFO] cleanup ok\n", "")
+        self._shell.run_cims_sh = fake_run
+
+        ctx = self._make_ctx()
+        result = self._native.step_01_cleanup(ctx)
+
+        self.assertEqual(result.id, "S5-RESET")
+        self.assertEqual(result.status, self._ItemStatus.PASS)
+        self.assertIn("rc=0", result.detail)
+        # cmd_reset --all --keep-processes 호출 확인
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][1][:3], ("reset", "--all", "--keep-processes"))
+
+    def test_step_01_fail(self) -> None:
+        def fake_run(repo_root, *args, **kw):
+            return (1, "", "[ERR] cleanup failed: db connection refused")
+        self._shell.run_cims_sh = fake_run
+
+        ctx = self._make_ctx()
+        result = self._native.step_01_cleanup(ctx)
+
+        self.assertEqual(result.status, self._ItemStatus.FAIL)
+        self.assertIn("rc=1", result.detail)
+        self.assertIn("db connection refused", result.detail)
+
+    def test_step_01_cached_no_double_run(self) -> None:
+        call_count = [0]
+        def fake_run(repo_root, *args, **kw):
+            call_count[0] += 1
+            return (0, "", "")
+        self._shell.run_cims_sh = fake_run
+
+        ctx = self._make_ctx()
+        r1 = self._native.step_01_cleanup(ctx)
+        r2 = self._native.step_01_cleanup(ctx)
+        # 두 번째 호출은 cache 사용 — fake_run 1회만 호출
+        self.assertEqual(call_count[0], 1)
+        self.assertIs(r1, r2)
+        self.assertTrue(self._native.already_ran(ctx, 1))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
