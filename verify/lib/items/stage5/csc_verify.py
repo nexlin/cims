@@ -1,9 +1,13 @@
-"""S5-CSC-VERIFY (그룹) — 배포된 csc 파일/overlay 검증."""
+"""S5-CSC-VERIFY (그룹) — 배포된 csc 파일/overlay 검증.
+
+자식 모두 native 화 완료 (_legacy 미참조). 파일 시스템 검증만이라 외부 의존
+없음 — install job 후 산출물 정합성만 본다.
+"""
 from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
-from ._legacy import get_legacy_results, step_result
+from . import _native_steps
 
 
 @verify_item(
@@ -30,8 +34,8 @@ def csc_verify_group(ctx: VerifyContext) -> ItemResult:
     execution_order=31,
 )
 def verify_files(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [11], "S5-CSC-VERIFY-FILES", "설치 파일 검증")
+    """Step 11 native — meta.json + config/ 존재 검증."""
+    return _native_steps.step_11_verify_files(ctx)
 
 
 @verify_item(
@@ -43,5 +47,5 @@ def verify_files(ctx: VerifyContext) -> ItemResult:
     execution_order=32,
 )
 def verify_overlay(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [12], "S5-CSC-VERIFY-OVERLAY", "config overlay 반영")
+    """Step 12 native — csc/config.json Server.Port=4445 반영 검증."""
+    return _native_steps.step_12_verify_overlay(ctx)

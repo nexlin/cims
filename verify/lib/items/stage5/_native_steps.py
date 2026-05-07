@@ -40,6 +40,7 @@ ctx.state["_s5_native"] 에 결과 + 공유 변수 (JWT, agent_id, Test-agent pi
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 import time
@@ -693,6 +694,101 @@ def step_10_install_poll(ctx: VerifyContext) -> ItemResult:
         status=overall, detail=summary, stage=5,
     )
     _save(ctx, 10, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 11 — 설치 파일 검증 (meta.json + config/)
+# ─────────────────────────────────────────────────────────────
+def step_11_verify_files(ctx: VerifyContext) -> ItemResult:
+    """Step 11 — `$DIST_DIR/csc-server/{csc,console}/` 안에 meta.json + config/
+    디렉토리가 존재하는지 확인. install job 후 파일 배포 검증.
+
+    이전 step 들 (08/09/10) 의 결과에 의존하지 않음 — install_path 만 기준으로
+    파일 시스템 검증. 단독 실행 가능 (재실행 시에도 동일 결과).
+    """
+    if already_ran(ctx, 11):
+        return get_native_result(ctx, 11)
+
+    notes: list = []
+    ok_all = True
+    for name in _CSC_PACKAGES:
+        install_path = os.path.join(ctx.dist_dir, "csc-server", name)
+        meta_p = os.path.join(install_path, "meta.json")
+        cfg_d = os.path.join(install_path, "config")
+        meta_ok = os.path.isfile(meta_p)
+        cfg_ok = os.path.isdir(cfg_d)
+        if meta_ok and cfg_ok:
+            notes.append(f"- [OK] {name}: meta.json + config/ 존재 ({install_path})")
+        else:
+            miss: list = []
+            if not meta_ok: miss.append("meta.json")
+            if not cfg_ok:  miss.append("config/")
+            notes.append(f"- [FAIL] {name}: 누락 {','.join(miss)} ({install_path})")
+            ok_all = False
+
+    result = ItemResult(
+        id="S5-CSC-VERIFY-FILES", name="설치 파일 검증",
+        status=ItemStatus.PASS if ok_all else ItemStatus.FAIL,
+        detail="\n".join(notes), stage=5,
+    )
+    _save(ctx, 11, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 12 — config overlay 반영 검증 (csc/config.json Server.Port=4445)
+# ─────────────────────────────────────────────────────────────
+def _read_csc_port(install_path: str) -> Optional[int]:
+    """`<install_path>/config.json` 에서 `Server.Port` (flat 또는 nested
+    Server.Port) 추출. 파일/JSON 오류 시 None.
+    """
+    p = os.path.join(install_path, "config.json")
+    try:
+        with open(p) as f:
+            d = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(d, dict):
+        return None
+    # 1) flat key "Server.Port"
+    val = d.get("Server.Port")
+    if val is None:
+        # 2) nested {"Server": {"Port": ...}}
+        srv = d.get("Server")
+        if isinstance(srv, dict):
+            val = srv.get("Port")
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def step_12_verify_overlay(ctx: VerifyContext) -> ItemResult:
+    """Step 12 — csc/config.json overlay 반영 (Server.Port == 4445)."""
+    if already_ran(ctx, 12):
+        return get_native_result(ctx, 12)
+
+    install_path = os.path.join(ctx.dist_dir, "csc-server", "csc")
+    port = _read_csc_port(install_path)
+    if port == 4445:
+        result = ItemResult(
+            id="S5-CSC-VERIFY-OVERLAY", name="config overlay 반영",
+            status=ItemStatus.PASS,
+            detail=f"- [OK] csc/config.json: Server.Port=4445 반영 ({install_path})",
+            stage=5,
+        )
+    else:
+        result = ItemResult(
+            id="S5-CSC-VERIFY-OVERLAY", name="config overlay 반영",
+            status=ItemStatus.FAIL,
+            detail=f"- [FAIL] csc/config.json Server.Port 이상 (실제={port}, 기대=4445, "
+                   f"path={install_path}/config.json)",
+            stage=5,
+        )
+    _save(ctx, 12, result)
     return result
 
 

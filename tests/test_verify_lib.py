@@ -1357,5 +1357,131 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         self.assertEqual(len(result.children), 2)
 
 
+class TestStage5CscVerifySteps(unittest.TestCase):
+    """S5 native — step 11 (file verify), 12 (overlay verify)."""
+
+    def setUp(self) -> None:
+        from verify.lib.items.stage5 import _native_steps
+        from verify.lib.context import VerifyContext
+        from verify.lib.registry import ItemStatus
+        self._native = _native_steps
+        self._VerifyContext = VerifyContext
+        self._ItemStatus = ItemStatus
+
+    def _ctx_with_dist(self, dist_dir):
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        ctx.dist_dir = dist_dir
+        return ctx
+
+    # ── step 11 ──
+    def test_step_11_pass_when_all_files_exist(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            for name in ("csc", "console"):
+                base = os.path.join(td, "csc-server", name)
+                os.makedirs(os.path.join(base, "config"))
+                with open(os.path.join(base, "meta.json"), "w") as f:
+                    f.write('{"name": "' + name + '"}')
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_11_verify_files(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("csc: meta.json + config/ 존재", r.detail)
+        self.assertIn("console: meta.json + config/ 존재", r.detail)
+
+    def test_step_11_fail_when_meta_missing(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            # csc 만 정상, console 의 meta.json 누락
+            os.makedirs(os.path.join(td, "csc-server", "csc", "config"))
+            with open(os.path.join(td, "csc-server", "csc", "meta.json"), "w") as f:
+                f.write("{}")
+            os.makedirs(os.path.join(td, "csc-server", "console", "config"))
+            # console/meta.json 만들지 않음
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_11_verify_files(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("console: 누락 meta.json", r.detail)
+
+    def test_step_11_fail_when_config_dir_missing(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            for name in ("csc", "console"):
+                base = os.path.join(td, "csc-server", name)
+                os.makedirs(base)
+                with open(os.path.join(base, "meta.json"), "w") as f:
+                    f.write("{}")
+                # config/ 디렉토리 만들지 않음
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_11_verify_files(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("누락 config/", r.detail)
+
+    def test_step_11_cached(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._ctx_with_dist(td)
+            r1 = self._native.step_11_verify_files(ctx)
+            r2 = self._native.step_11_verify_files(ctx)
+        self.assertIs(r1, r2)
+
+    # ── step 12 ──
+    def test_step_12_pass_with_flat_key(self) -> None:
+        import tempfile
+        import json as _json
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "csc-server", "csc")
+            os.makedirs(base)
+            with open(os.path.join(base, "config.json"), "w") as f:
+                _json.dump({"Server.Port": 4445, "other": 1}, f)
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_12_verify_overlay(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("Server.Port=4445", r.detail)
+
+    def test_step_12_pass_with_nested_key(self) -> None:
+        import tempfile
+        import json as _json
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "csc-server", "csc")
+            os.makedirs(base)
+            with open(os.path.join(base, "config.json"), "w") as f:
+                _json.dump({"Server": {"Port": 4445}}, f)
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_12_verify_overlay(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+
+    def test_step_12_fail_wrong_port(self) -> None:
+        import tempfile
+        import json as _json
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "csc-server", "csc")
+            os.makedirs(base)
+            with open(os.path.join(base, "config.json"), "w") as f:
+                _json.dump({"Server.Port": 4444}, f)
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_12_verify_overlay(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("실제=4444", r.detail)
+
+    def test_step_12_fail_missing_config(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_12_verify_overlay(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("실제=None", r.detail)
+
+    def test_step_12_fail_malformed_json(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "csc-server", "csc")
+            os.makedirs(base)
+            with open(os.path.join(base, "config.json"), "w") as f:
+                f.write("not-json{")
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_12_verify_overlay(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
