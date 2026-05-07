@@ -97,6 +97,79 @@ def delete_run(repo_root: str, run_id: int) -> bool:
     return True
 
 
+def purge_older_than(repo_root: str, days: int, *,
+                     keep_min: int = 0) -> dict:
+    """`days` 일 보다 오래된 회차 파일 삭제 + 빈 YYYY/MM 디렉토리 정리.
+
+    Args:
+      days: 보존 기간 (일). days 이내 회차는 보존. 0 이면 모두 삭제.
+      keep_min: 최소 보존 회차 수 — 오래된 회차도 최근 N 개는 무조건 보존
+        (회차가 적을 때 통째로 삭제되는 사고 방지).
+
+    반환: {"deleted": [id,...], "kept": int, "freed_bytes": int,
+           "removed_dirs": [path,...]}.
+    """
+    days = max(0, int(days))
+    keep_min = max(0, int(keep_min))
+    # days=0 은 "모두 삭제" 시멘틱 — sub-ms 충돌 방지 위해 cutoff 무시.
+    cutoff_ts = None if days == 0 else (time.time() - days * 86400.0) * 1000.0
+    files_with_id: list = []
+    for path in _iter_run_files(repo_root):
+        m = _ID_RE.match(os.path.basename(path))
+        if not m:
+            continue
+        files_with_id.append((int(m.group(1)), path))
+    files_with_id.sort(key=lambda x: x[0], reverse=True)
+
+    # keep_min 보장: 최근 N 개는 무조건 보존
+    keep_set = {rid for rid, _ in files_with_id[:keep_min]}
+
+    deleted: list = []
+    freed = 0
+    for rid, path in files_with_id:
+        if rid in keep_set:
+            continue
+        if cutoff_ts is not None and rid >= cutoff_ts:
+            continue
+        try:
+            sz = os.path.getsize(path)
+            os.remove(path)
+            deleted.append(rid)
+            freed += sz
+        except Exception:
+            pass
+
+    # 빈 YYYY/MM 디렉토리 정리
+    removed_dirs: list = []
+    root = runs_root(repo_root)
+    if os.path.isdir(root):
+        for ye in list(os.listdir(root)):
+            ye_dir = os.path.join(root, ye)
+            if not os.path.isdir(ye_dir):
+                continue
+            for mo in list(os.listdir(ye_dir)):
+                mo_dir = os.path.join(ye_dir, mo)
+                if os.path.isdir(mo_dir) and not os.listdir(mo_dir):
+                    try:
+                        os.rmdir(mo_dir)
+                        removed_dirs.append(mo_dir)
+                    except OSError:
+                        pass
+            if os.path.isdir(ye_dir) and not os.listdir(ye_dir):
+                try:
+                    os.rmdir(ye_dir)
+                    removed_dirs.append(ye_dir)
+                except OSError:
+                    pass
+
+    return {
+        "deleted":      deleted,
+        "kept":         len(files_with_id) - len(deleted),
+        "freed_bytes":  freed,
+        "removed_dirs": removed_dirs,
+    }
+
+
 # ─────────────────────────────────────────────────────────────
 # 읽기
 # ─────────────────────────────────────────────────────────────

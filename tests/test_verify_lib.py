@@ -1735,6 +1735,65 @@ class TestRunStore(unittest.TestCase):
         # 없는 id
         self.assertFalse(self._rs.delete_run(self._td, 999999999))
 
+    def test_purge_older_than_basic(self) -> None:
+        """오래된 회차 삭제 + keep_min 보장 + 빈 디렉토리 정리."""
+        import time as _t
+        # 5 회차: 3 개는 100일 전, 2 개는 최근 (방금)
+        old_ms = int((_t.time() - 100 * 86400) * 1000)
+        for offset in range(3):
+            rec = self._make_record()
+            rec["id"] = 0    # write_run 가 새 id 할당하지만, 명시적 path 작성
+            # write_run 은 _next_id 사용 → 항상 현재 시간 기반.
+            # 오래된 회차를 시뮬하려면 직접 파일 생성.
+            old_id = old_ms + offset
+            path = self._rs._path_for_id(self._td, old_id)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            rec["id"] = old_id
+            with open(path, "w") as f:
+                import json as _json
+                _json.dump(rec, f)
+        # 최근 2 개
+        recent_ids = [self._rs.write_run(self._td, self._make_record())
+                      for _ in range(2)]
+
+        # 90일 retention, keep_min=0
+        summary = self._rs.purge_older_than(self._td, days=90, keep_min=0)
+        self.assertEqual(len(summary["deleted"]), 3)
+        self.assertEqual(summary["kept"], 2)
+        self.assertGreater(summary["freed_bytes"], 0)
+
+        # 최근 2개는 살아남음
+        for rid in recent_ids:
+            self.assertIsNotNone(self._rs.get_run(self._td, rid))
+
+    def test_purge_keep_min_protects_recent(self) -> None:
+        """keep_min 으로 오래된 회차도 최근 N 개는 보존."""
+        import time as _t
+        old_ms = int((_t.time() - 100 * 86400) * 1000)
+        # 5 회차 모두 100일 전 (기본은 모두 삭제 대상)
+        for offset in range(5):
+            rec = self._make_record()
+            rid = old_ms + offset
+            rec["id"] = rid
+            path = self._rs._path_for_id(self._td, rid)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                import json as _json
+                _json.dump(rec, f)
+
+        # keep_min=2 → 최근 2개 (높은 id) 는 무조건 보존
+        summary = self._rs.purge_older_than(self._td, days=90, keep_min=2)
+        self.assertEqual(len(summary["deleted"]), 3)
+        self.assertEqual(summary["kept"], 2)
+
+    def test_purge_zero_days_deletes_all(self) -> None:
+        """days=0 이면 모든 회차 삭제 (단 keep_min 적용)."""
+        ids = [self._rs.write_run(self._td, self._make_record()) for _ in range(3)]
+        summary = self._rs.purge_older_than(self._td, days=0, keep_min=0)
+        self.assertEqual(len(summary["deleted"]), 3)
+        # 빈 디렉토리도 정리됐는지
+        self.assertGreater(len(summary["removed_dirs"]), 0)
+
     def test_stats_shape(self) -> None:
         for v, e in (("PASS", 1000), ("PASS", 2000), ("FAIL", 5000)):
             self._rs.write_run(self._td, self._make_record(scope="stage5",

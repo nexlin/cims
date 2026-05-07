@@ -35,10 +35,108 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from verify.lib import (                                        # noqa: E402
-    registry, runner, reporting, presets as preset_mod,
+    registry, runner, reporting, presets as preset_mod, run_store,
 )
 from verify.lib.context import VerifyContext                    # noqa: E402
 from verify.lib import items as _items_pkg                      # noqa: F401, E402  (auto-import 트리거)
+
+
+def _flatten_items_for_record(results: list) -> list:
+    """ItemResult list (children 포함) → run_store record items[] (idx 부여)."""
+    flat: list = []
+    idx = 0
+    for r in results:
+        idx += 1
+        flat.append({
+            "id":         (r.id or "")[:64],
+            "stage":      int(r.stage or 0),
+            "parent_id":  None,
+            "is_group":   bool(r.children),
+            "name":       (r.name or "")[:255],
+            "status":     (r.status or "UNKNOWN")[:16],
+            "elapsed_ms": int(r.elapsed_ms or 0),
+            "detail":     (r.detail or "")[:2000],
+            "idx":        idx,
+        })
+        for c in (r.children or []):
+            idx += 1
+            flat.append({
+                "id":         (c.id or "")[:64],
+                "stage":      int(r.stage or 0),
+                "parent_id":  (r.id or "")[:64],
+                "is_group":   False,
+                "name":       (c.name or "")[:255],
+                "status":     (c.status or "UNKNOWN")[:16],
+                "elapsed_ms": int(c.elapsed_ms or 0),
+                "detail":     (c.detail or "")[:2000],
+                "idx":        idx,
+            })
+    return flat
+
+
+def _resolve_pkg_manifest_hash(repo_root: str) -> str:
+    """build/dist/packages/manifest.json 의 sha256 (S6 immutability gate SoT)."""
+    p = os.path.join(repo_root, "build", "dist", "packages", "manifest.json")
+    if not os.path.isfile(p):
+        return ""
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(64 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return ""
+
+
+def _record_cli_run(args, ctx, item_ids: list, results: list,
+                    verdict: str, totals: dict, elapsed: float, stage: int) -> int:
+    """CLI 실행 결과를 verify_runs/ 에 기록. backend `_record_run` 와 동등 schema.
+
+    트리거 type 은 'cli' — backend 의 비동기 job 'user'/'ci' 와 구분. 반환 = 회차 id.
+    """
+    import socket
+    from datetime import datetime
+    started_iso  = datetime.fromtimestamp(time.time() - elapsed).isoformat(timespec="milliseconds")
+    finished_iso = datetime.fromtimestamp(time.time()).isoformat(timespec="milliseconds")
+
+    if stage:
+        scope = f"stage{stage}"
+    elif args.preset:
+        scope = f"preset:{args.preset}"
+    elif args.items:
+        scope = "items"
+    else:
+        scope = "multi"
+
+    record = {
+        "id":                0,
+        "started_at":        started_iso,
+        "finished_at":       finished_iso,
+        "elapsed_ms":        int(elapsed * 1000),
+        "trigger":           "cli",
+        "scope":             scope[:64],
+        "selected_ids":      list(item_ids),
+        "verdict":           verdict if verdict in ("PASS", "FAIL") else "UNKNOWN",
+        "totals":            {
+            "total":   int(totals.get("total", 0)),
+            "pass":    int(totals.get("pass", 0)),
+            "fail":    int(totals.get("fail", 0)),
+            "skip":    int(totals.get("skip", 0)),
+            "blocked": int(totals.get("blocked", 0)),
+        },
+        "pkg_manifest_hash": _resolve_pkg_manifest_hash(ctx.repo_root)[:128],
+        "git_branch":        (ctx.git_branch or "")[:255],
+        "git_sha":           (ctx.git_sha or "")[:40],
+        "host":              socket.gethostname()[:64],
+        "ens_ip":            ctx.ens_ip or "",
+        "report_path":       (ctx.report_path or "")[:1000],
+        "job_id":            "",
+        "note":              "",
+        "items":             _flatten_items_for_record(results),
+    }
+    return run_store.write_run(ctx.repo_root, record)
 
 
 _VALID_STAGES = (1, 2, 3, 4, 5, 6)
@@ -97,6 +195,33 @@ def cmd_list_presets(args: argparse.Namespace) -> int:
             print(f"{p['name']:20} ({len(p['items'])} items)")
             for iid in p["items"]:
                 print(f"  - {iid}")
+    return 0
+
+
+def cmd_purge_runs(args: argparse.Namespace) -> int:
+    """오래된 회차 파일 정리 — verify_runs/YYYY/MM/<id>.json 중 days 일 초과
+    삭제. keep_min 으로 최근 N 개는 무조건 보존 (사고 방지).
+    """
+    repo_root = args.repo_root or _repo_root_from_here()
+    days = max(0, int(args.days))
+    keep_min = max(0, int(args.keep_min))
+    if not args.force and days < 1:
+        print(f"--days={days} 는 모든 회차 삭제 — --force 필요", file=sys.stderr)
+        return 2
+    summary = run_store.purge_older_than(repo_root, days, keep_min=keep_min)
+    if args.json:
+        print(json.dumps({
+            "deleted":      len(summary["deleted"]),
+            "kept":         summary["kept"],
+            "freed_bytes":  summary["freed_bytes"],
+            "removed_dirs": summary["removed_dirs"],
+        }, ensure_ascii=False, indent=2))
+    else:
+        kb = summary["freed_bytes"] / 1024.0
+        print(f"삭제: {len(summary['deleted'])} 회차 ({kb:.1f} KB)")
+        print(f"보존: {summary['kept']} 회차 (days<{days} or keep_min={keep_min})")
+        if summary["removed_dirs"]:
+            print(f"빈 디렉토리 정리: {len(summary['removed_dirs'])}")
     return 0
 
 
@@ -222,6 +347,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     totals = reporting.write_summary(ctx, results, verdict)
     ctx.report_close()
 
+    # 회차 이력 자동 기록 (verify_runs/YYYY/MM/<id>.json) — --no-record 로 비활성.
+    run_id = 0
+    if not args.no_record:
+        try:
+            run_id = _record_cli_run(args, ctx, item_ids, results, verdict,
+                                     totals, elapsed, stage)
+        except Exception as e:
+            # 기록 실패는 검증 결과에 영향 X — stderr 경고만.
+            print(f"[WARN] verify_runs 기록 실패: {type(e).__name__}: {e}",
+                  file=sys.stderr)
+
     payload = {
         "started_at": ctx.ts,
         "elapsed_s": round(elapsed, 2),
@@ -231,6 +367,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "report_path": ctx.report_path,
         "verdict": verdict,
         "stage": stage,
+        "run_id": run_id,
     }
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -271,6 +408,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p_lp.add_argument("--json", action="store_true")
     p_lp.set_defaults(_func=cmd_list_presets)
 
+    p_purge = sub.add_parser(
+        "purge-runs",
+        help="verify_runs/ 의 오래된 회차 파일 정리 (retention)",
+    )
+    p_purge.add_argument(
+        "--days", type=int, default=90,
+        help="이 일수보다 오래된 회차 삭제 (default: 90)",
+    )
+    p_purge.add_argument(
+        "--keep-min", type=int, default=10,
+        help="오래되어도 최근 N 회차는 무조건 보존 (default: 10)",
+    )
+    p_purge.add_argument(
+        "--force", action="store_true",
+        help="--days 0 (모두 삭제) 허용",
+    )
+    p_purge.add_argument("--json", action="store_true")
+    p_purge.add_argument("--repo-root", help="cims repo root")
+    p_purge.set_defaults(_func=cmd_purge_runs)
+
     p_desc = sub.add_parser("describe", help="항목 메타 상세")
     p_desc.add_argument("item_id")
     p_desc.add_argument("--json", action="store_true")
@@ -308,6 +465,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "comma-separated 다중 지정 또는 옵션 반복 가능 "
             "(예: --inject-fail S1-CPP-FORMAT,S2-PREFLIGHT)."
         ),
+    )
+    p_run.add_argument(
+        "--no-record",
+        action="store_true",
+        help="회차 결과를 verify_runs/ 에 기록하지 않음 (default: 기록함).",
     )
     p_run.set_defaults(_func=cmd_run)
 

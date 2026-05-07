@@ -330,5 +330,122 @@ echo $?    # 0=PASS, 1=FAIL
 ### A.3 unit test (인프라 회귀)
 
 ```bash
-python3 -m unittest tests.test_verify_lib -v    # 103 OK
+python3 -m unittest tests.test_verify_lib -v    # 109 OK
+```
+
+---
+
+## 부록. --inject-fail 시연 시나리오 (gate 회귀 점검)
+
+`--inject-fail ITEM_ID` 는 함수 호출 없이 ItemStatus.FAIL 을 반환하는 디버그
+옵션. 실제 환경 파괴 없이 stage gate / immutability gate 동작을 확인하는 데
+사용. backend `/stages/<N>` + `/run` 도 body `{"inject_fail": [...]}` 로 동등
+지원.
+
+### B.1 Stage gate 자동 차단 시연
+
+S1 의 한 항목을 강제 FAIL 시켜 S2~S6 가 모두 BLOCKED 처리되는지 확인:
+
+```bash
+./cims.sh verify run --preset pipeline-full --inject-fail S1-CPP-FORMAT
+# 기대:
+# - S1-CPP-FORMAT 만 FAIL, S1 의 나머지는 정상 실행 (PASS)
+# - S2~S6 의 모든 leaf 가 BLOCKED (함수 호출 없이 즉시)
+# - stdout: [VERIFY] stage-blocked: stage=2 reason=stage1-FAIL count=2 등
+# - V2Page: 노란 배너 + Stepper S2~S6 회색 + 🚫 amber 배지
+# - 종료 코드 1
+```
+
+stage 단독에서도 동일:
+
+```bash
+./cims.sh verify stage1 --inject-fail S1-PY-SYNTAX
+# 단일 stage 라 gate 효과는 없지만 FAIL 1건 + verdict=FAIL 확인
+```
+
+### B.2 Immutability gate 시연 (S6-ENTRY-CHECK 차단)
+
+배포 후 manifest 변경을 가정한 회귀 테스트. `S5-MODULES-RUN-START` 를 강제
+FAIL 시켜 `.deployed-manifest.json` marker 가 작성되지 않게 한 다음 S6 진입
+시도:
+
+```bash
+# 정상 흐름이라면 S5 종료 시 marker 작성됨 → S6 immutability 매칭
+./cims.sh verify run --preset post-deploy
+
+# 회귀: S5-MODULES-RUN-START 강제 FAIL → marker 미작성
+rm -f build/dist/.deployed-manifest.json
+./cims.sh verify run --preset post-deploy \
+  --inject-fail S5-MODULES-RUN-START
+# 기대:
+# - S5-MODULES-RUN FAIL → S6 의 모든 leaf BLOCKED (stage gate)
+# - 또는 marker 만 누락된 경우: S6-ENTRY-CHECK FAIL (immutability check)
+
+# 정상 복구
+./cims.sh verify stage4    # manifest 재생성
+./cims.sh verify stage5    # 재배포 + marker 갱신
+./cims.sh verify stage6    # 재진입
+```
+
+### B.3 backend API 로 inject
+
+비동기 job 도 동등:
+
+```bash
+TOK=$(curl -sk -X POST https://127.0.0.1:4419/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"login_id":"admin","password":"1234"}' | jq -r .token)
+
+curl -sk -X POST https://127.0.0.1:4419/api/v1/verification/stages/1 \
+  -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
+  -d '{"async": true, "inject_fail": ["S1-CPP-FORMAT"]}'
+# → job_id 즉시 반환. /jobs/<id> 폴링 시 stage_gate 필드 + items_progress
+#    의 BLOCKED count 확인.
+```
+
+### B.4 회차 기록 검증
+
+`--inject-fail` 회차도 verify_runs/ 에 자동 기록 (기록 자체는 정상 동작):
+
+```bash
+ls verify_runs/$(date +%Y/%m)/ | tail -3
+# 새 회차 파일 확인. trigger="cli" (CLI) 또는 "user"/"ci" (API).
+curl -sk https://127.0.0.1:4419/api/v1/verification/runs?limit=3 | jq
+# verdict=FAIL + totals.fail >= 1 확인.
+```
+
+---
+
+## 부록. 회차 이력 / 정리
+
+### C.1 verify_runs/ 레이아웃
+
+각 회차 = JSON 파일 1개:
+
+```
+verify_runs/
+├── 2026/05/
+│   ├── 1778125235732.json    # id = ms timestamp
+│   ├── 1778125658339.json
+│   └── ...
+└── 2026/06/
+    └── ...
+```
+
+### C.2 자동 기록 트리거
+
+- **CLI**: `python3 -m tests.cims_verify run ...` (default 기록, `--no-record`
+  로 비활성).
+- **Backend 비동기**: `POST /stages/<N>` 또는 `/run` body `{"async":true}`.
+  job 종료 시 `_watch_job` 가 `_record_run` 호출.
+
+### C.3 수동 정리
+
+회차 폭증 시 직접 삭제 (자동 cron 미구현):
+
+```bash
+# 90일 이전 회차 삭제 (예시)
+find verify_runs -name "*.json" -mtime +90 -delete
+# 빈 디렉토리 정리
+find verify_runs -type d -empty -delete
 ```

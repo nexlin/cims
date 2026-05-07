@@ -38,6 +38,17 @@ export interface ReportMeta {
   runId?: number
 }
 
+// id (ms timestamp) → 가독성 short. file-based run_store 의 id 가 큰 정수라
+// 표지에 그대로 노출하면 가독성 떨어져 YYMMDD-HHMMSS 로 표시.
+function fmtRunIdShort(id: number): string {
+  if (!id) return '-'
+  const d = new Date(id)
+  if (isNaN(d.getTime())) return String(id)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const yy = String(d.getFullYear()).slice(2)
+  return `${yy}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+}
+
 // 표시 helper
 export function statusIcon(s: ItemStatus): string {
   if (s === 'PASS')    return '✅'
@@ -143,7 +154,7 @@ export function VerificationPrintReport({
       {/* 표지 */}
       <div style={{ borderBottom: '3px double #111', paddingBottom: 16, marginBottom: 20 }}>
         <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
-          CIMS Verification Report{meta.runId !== undefined ? ` — 회차 #${meta.runId}` : ''}
+          CIMS Verification Report{meta.runId !== undefined ? ` — 회차 ${fmtRunIdShort(meta.runId)}` : ''}
         </div>
         <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: -0.5 }}>
           CIMS 검증 보고서

@@ -963,7 +963,7 @@ cmd_verify() {
     shift || true
 
     case "$stage" in
-        list|describe|run|list-presets)
+        list|describe|run|list-presets|purge-runs)
             python3 -m tests.cims_verify "$stage" "$@"; return $? ;;
         stage1|1) python3 -m tests.cims_verify run --stage 1 "$@" ;;
         stage2|2) python3 -m tests.cims_verify run --stage 2 "$@" ;;

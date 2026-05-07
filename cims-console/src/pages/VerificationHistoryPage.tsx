@@ -92,6 +92,17 @@ function fmtDuration(ms: number): string {
   return `${m}m ${s % 60}s`
 }
 
+// id = ms timestamp (e.g., 1778125658339). 가독성 위해 YYMMDD-HHMMSS 로 표시.
+// id 자체는 backend API 호출용 그대로 보존.
+function fmtRunIdShort(id: number): string {
+  if (!id) return '-'
+  const d = new Date(id)
+  if (isNaN(d.getTime())) return String(id)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const yy = String(d.getFullYear()).slice(2)
+  return `${yy}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+}
+
 function scopeLabel(scope: string): string {
   if (!scope) return '-'
   const m = /^stage(\d+)$/.exec(scope)
@@ -107,7 +118,9 @@ function RunListRow({ run, onClick }: { run: RunHistoryItem; onClick: () => void
   const t = run.totals || {}
   return (
     <tr onClick={onClick} style={{ cursor: 'pointer' }}>
-      <td style={td}>{run.id}</td>
+      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }} title={`run_id=${run.id}`}>
+        {fmtRunIdShort(run.id)}
+      </td>
       <td style={td}>{fmtDate(run.started_at)}</td>
       <td style={td}>{scopeLabel(run.scope)}</td>
       <td style={{ ...td, color: VERDICT_COLOR[run.verdict] || '#374151', fontWeight: 600 }}>
@@ -158,7 +171,9 @@ function DetailModal({ run, onClose, onDelete }: {
       <div className="verify-history-modal" style={modal} onClick={e => e.stopPropagation()}>
         <header style={modalHeader}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>회차 #{run.id}</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }} title={`run_id=${run.id}`}>
+              회차 {fmtRunIdShort(run.id)}
+            </div>
             <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
               {fmtDate(run.started_at)} ~ {fmtDate(run.finished_at)} ({fmtDuration(run.elapsed_ms)})
             </div>
@@ -168,7 +183,7 @@ function DetailModal({ run, onClose, onDelete }: {
               📄 PDF 인쇄
             </button>
             <button style={{ ...btnDanger, marginLeft: 8 }} onClick={() => {
-              if (confirm(`회차 #${run.id} 를 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) {
+              if (confirm(`회차 ${fmtRunIdShort(run.id)} 를 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) {
                 onDelete(run.id)
               }
             }}>삭제</button>
@@ -434,7 +449,7 @@ function Sparkline({ timeline }: { timeline: RunsStatsResponse['timeline'] }) {
             <line x1={x} y1={H - PAD_Y} x2={x} y2={y}
                   stroke={color} strokeWidth={2} opacity={0.5} />
             <circle cx={x} cy={y} r={2.5} fill={color}>
-              <title>{`#${t.id} ${t.scope} ${t.verdict} — ${fmtMsShort(t.elapsed_ms)}`}</title>
+              <title>{`${fmtRunIdShort(t.id)} ${t.scope} ${t.verdict} — ${fmtMsShort(t.elapsed_ms)}`}</title>
             </circle>
           </g>
         )
