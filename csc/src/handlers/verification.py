@@ -12,8 +12,6 @@
   /stages/<N>/reports (GET)                — verify_reports/*_stage<N>.md 목록
   /run (POST)                              — items / preset 으로 임의 실행 (multi-stage 가능)
   /jobs/<job_id> (GET)                     — 비동기 job 상태 + stdout tail + items_progress
-  /items?stage=N (GET)                     — verify.lib registry 항목 트리 (UI 동적 체크박스)
-  /presets (GET)                           — verify.lib 프리셋 목록
   /env (GET)                               — host / git_branch / git_sha / pkg_manifest_hash
 
   /runs (GET)                              — 검증 회차 이력 list (필터: stage/verdict/limit)
@@ -121,16 +119,6 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     m = re.fullmatch(r'jobs/([0-9a-f]+)', after)
     if m and method == 'GET':
         return await _get_job_status(m.group(1))
-
-    # /items — verify.lib registry 항목 트리
-    if after == 'items' and method == 'GET':
-        stage_str = (handler_args.query_params or {}).get('stage')
-        stage = int(stage_str) if stage_str and str(stage_str).isdigit() else None
-        return await _get_verify_items(stage)
-
-    # /presets — verify.lib 프리셋 목록
-    if after == 'presets' and method == 'GET':
-        return await _get_verify_presets()
 
     # /env — 현재 검증 환경 메타 (LIVE PrintReport meta 주입용)
     if after == 'env' and method == 'GET':

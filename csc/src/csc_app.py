@@ -79,6 +79,7 @@ if __name__ == '__main__':
     from handlers.stats          import CIMS_STATS_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
+    from handlers.build          import CIMS_BUILD_HANDLER_LIST, init as build_init
     from handlers.csp_runtime    import CIMS_CSP_RUNTIME_HANDLER_LIST
     from handlers.service_control import CIMS_SERVICE_CONTROL_HANDLER_LIST
     from handlers.agents         import CIMS_AGENT_ADMIN_HANDLER_LIST, CIMS_AGENT_PUBLIC_HANDLER_LIST
@@ -111,6 +112,7 @@ if __name__ == '__main__':
         if not os.path.isdir(tests_dir):
             tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))
         ver_init(tests_dir, config)
+        build_init(os.path.dirname(tests_dir))
 
         csc_logger.init(
             service_log_dir=_service_log_dir,
@@ -252,6 +254,11 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_STATS_HANDLER_LIST + CIMS_ORG_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST
+        ])
+        # 빌드 / 패키지화 / 패키지 다운로드 (admin JWT)
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_BUILD_HANDLER_LIST
         ])
         # CSP 런타임 설정 관리 API (listener/trunk/route/access)
         admin_server.add_dynamic_rules([

@@ -21,7 +21,7 @@ interface Props {
 }
 
 /**
- * 모듈 설정 모달 — deployment 모드 (배포 > 서버) / module 모드 (테스트베드 > 모듈관리) 공용.
+ * 모듈 설정 모달 — deployment 모드 (배포 > 서버) / module 모드 (빌드 · 검증 > 모듈관리) 공용.
  *
  *  - deployment 모드: agent_deployment 레코드 대상. PUT → DB + update_config job.
  *  - module 모드:     Phase 1 로컬. PUT → build/dist/config.json (scalar) /
