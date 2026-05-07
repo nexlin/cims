@@ -1275,12 +1275,12 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         self.assertIn("step 09", r.detail)
 
     def test_step_10_pass_when_all_succeed(self) -> None:
-        # POST install jobs 통과 + DB poll 1회만에 succeeded
+        # agent_deployment.status enum: pending|deploying|running|stopped|failed|removed
+        # PASS 조건: 폴링 종료 시 모든 deployment 가 running 또는 stopped.
         def fake_post_json(url, payload, token=None, timeout=10):
             return (202, {"job_id": 1})
         self._csc_http.post_json = fake_post_json
 
-        # csp_db_config / connect 모킹 → 곧장 succeeded 반환
         self._db.csp_db_config = lambda dist: {"Host": "x", "User": "x",
                                                 "Password": "x", "DbName": "x"}
 
@@ -1289,8 +1289,7 @@ class TestStage5CscDeploySteps(unittest.TestCase):
             def execute(self, sql, params=None):
                 self._params = params
             def fetchone(self):
-                # always succeeded
-                return ("succeeded",)
+                return ("running",)    # install 후 정상 done 상태
 
         class FakeConn:
             def cursor(self): return FakeCursor([])
@@ -1313,7 +1312,7 @@ class TestStage5CscDeploySteps(unittest.TestCase):
 
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertTrue(self._native._get(ctx, "all_install_done_csc"))
-        self.assertIn("succeeded", r.detail)
+        self.assertIn("running", r.detail)
 
     def test_step_10_fail_on_timeout(self) -> None:
         def fake_post_json(url, payload, token=None, timeout=10):
@@ -1974,12 +1973,14 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
     # ── step 20 ──
     def test_step_20_pass_when_all_succeed(self) -> None:
+        # PASS 조건: 폴링 종료 시 모든 deployment status ∈ {running, stopped}.
+        # sim 은 install-only 라 stopped, csp/cmp 는 install 후 stopped 또는 running.
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
         self._db.csp_db_config = lambda d: {"Host": "x", "User": "x",
                                              "Password": "x", "DbName": "x"}
         class FakeCursor:
             def execute(self, sql, params=None): pass
-            def fetchone(self): return ("succeeded",)
+            def fetchone(self): return ("stopped",)
         class FakeConn:
             def cursor(self): return FakeCursor()
             def close(self): pass

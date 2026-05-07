@@ -670,6 +670,8 @@ def step_10_install_poll(ctx: VerifyContext) -> ItemResult:
             notes.append(f"- [FAIL] {name}: install 발행 status={status}")
 
     # 폴링 (sleep 2s × 30 = 60s)
+    # agent_deployment.status enum: pending|deploying|running|stopped|failed|removed
+    # 폴링 종료 조건: pending/deploying 가 사라질 때 (install 완료 또는 실패)
     elapsed = 0
     all_done = False
     final_status: dict = {}
@@ -686,15 +688,17 @@ def step_10_install_poll(ctx: VerifyContext) -> ItemResult:
             break
 
     _set(ctx, "all_install_done_csc", bool(all_done))
+    # 정상 완료 상태: running/stopped (install 후 자동 start 여부에 따라 분기)
+    # 실패 상태: failed/removed
     for name, did in deployments:
         st = final_status.get(name, "(unknown)")
-        ok = st in ("succeeded", "installed")
+        ok = st in ("running", "stopped")
         notes.append(
             f"- [{'OK' if ok else 'WARN'}] {name}: did={did} status={st}"
         )
 
     overall = ItemStatus.PASS if all_done and all(
-        final_status.get(n) in ("succeeded", "installed") for n, _ in deployments
+        final_status.get(n) in ("running", "stopped") for n, _ in deployments
     ) else ItemStatus.FAIL
     summary = (
         f"all_done={all_done} elapsed={elapsed}s\n"
@@ -1427,13 +1431,15 @@ def step_20_modules_install_poll(ctx: VerifyContext) -> ItemResult:
             all_done = True; break
 
     _set(ctx, "all_install_done_modules", bool(all_done))
+    # agent_deployment enum: pending|deploying|running|stopped|failed|removed
+    # 정상 완료: running/stopped. 실패: failed/removed.
     for m, did in deployments:
         st = final_status.get(m, "(unknown)")
-        ok = st in ("succeeded", "installed")
+        ok = st in ("running", "stopped")
         notes.append(f"- [{'OK' if ok else 'WARN'}] {m}: did={did} status={st}")
 
     overall = ItemStatus.PASS if all_done and all(
-        final_status.get(m) in ("succeeded", "installed") for m, _ in deployments
+        final_status.get(m) in ("running", "stopped") for m, _ in deployments
     ) else ItemStatus.FAIL
     summary = f"all_done={all_done} elapsed={elapsed}s\n" + "\n".join(notes)
     result = ItemResult(
