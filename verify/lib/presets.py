@@ -44,7 +44,9 @@ _PRESETS: dict = {
     "stage6-volte":   ["S6-ENTRY-CHECK", "S6-SEED",
                        "S6-SCN-VOLTE-VOICE", "S6-SCN-VOLTE-VIDEO", "S6-SUMMARY"],
     "stage6-ptt":     ["S6-ENTRY-CHECK", "S6-SEED",
-                       "S6-SCN-PTT-VOICE",   "S6-SCN-PTT-VIDEO",   "S6-SUMMARY"],
+                       "S6-SCN-PTT-VOICE",   "S6-SCN-PTT-VIDEO",
+                       "S6-SCN-SUBSCRIBE",   "S6-L7-SUBSCRIBE-NOTIFY",
+                       "S6-MCPTT-FLOOR-GRANT", "S6-SUMMARY"],
 
     # ── 묶음 ──
     "pipeline-full":  _stages([1, 2, 3, 4, 5, 6]),

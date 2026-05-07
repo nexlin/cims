@@ -553,19 +553,24 @@ class TestExistingRegistry(unittest.TestCase):
         self.assertEqual(len(kids), 13)
 
     def test_stage6_new_scenarios_registered(self) -> None:
-        """S6-SCN-SUBSCRIBE / -CERT-ROTATE / -DB-SYNC 신규 시나리오 등록 확인."""
+        """S6 신규 + depth 시나리오 6개 등록 + SUMMARY depends_on 매칭."""
         from verify.lib import registry
         from verify.lib import items                            # noqa: F401
         ids = {m.id for m in registry.get_items(stage=6)}
-        for new_id in ("S6-SCN-SUBSCRIBE", "S6-SCN-CERT-ROTATE", "S6-SCN-DB-SYNC"):
+        for new_id in (
+            "S6-SCN-SUBSCRIBE", "S6-SCN-CERT-ROTATE", "S6-SCN-DB-SYNC",
+            "S6-L7-SUBSCRIBE-NOTIFY", "S6-CMP-GROUP-SYNC", "S6-MCPTT-FLOOR-GRANT",
+        ):
             self.assertIn(new_id, ids)
-        # SUMMARY 가 새 시나리오에 의존
+        # SUMMARY 가 새 시나리오 + depth 항목들에도 의존
         rec = registry.get_item("S6-SUMMARY")
         self.assertIsNotNone(rec)
         deps = set(rec[0].depends_on)
-        self.assertIn("S6-SCN-SUBSCRIBE", deps)
-        self.assertIn("S6-SCN-CERT-ROTATE", deps)
-        self.assertIn("S6-SCN-DB-SYNC", deps)
+        for dep_id in (
+            "S6-SCN-SUBSCRIBE", "S6-SCN-CERT-ROTATE", "S6-SCN-DB-SYNC",
+            "S6-L7-SUBSCRIBE-NOTIFY", "S6-CMP-GROUP-SYNC", "S6-MCPTT-FLOOR-GRANT",
+        ):
+            self.assertIn(dep_id, deps)
 
     def test_stage5_execution_order(self) -> None:
         """S5 항목 실행 순서: RESET → CSC-DEPLOY(*) → CSC-VERIFY(*) →
@@ -1145,6 +1150,213 @@ class TestStage6NewScenarios(unittest.TestCase):
                 csc_http.post_json = orig_post
                 csc_http.delete = orig_delete
         self.assertEqual(r.status, self._ItemStatus.FAIL)
+
+    # ── S6-L7-SUBSCRIBE-NOTIFY ──
+    def test_scn_l7_pass_when_xcap_diff_present(self) -> None:
+        """NOTIFY body 에 <xcap-diff> 포함 → PASS."""
+        from verify.lib.items.stage6 import scn_l7_subscribe_notify as mod
+        notify_msg = (
+            "NOTIFY sip:user@host SIP/2.0\r\n"
+            "Event: presence\r\n"
+            "Content-Type: application/xcap-diff+xml\r\n"
+            "Content-Length: 80\r\n\r\n"
+            "<?xml version=\"1.0\"?><xcap-diff>...</xcap-diff>"
+        )
+        orig = mod.iter_sip_msgs
+        try:
+            mod.iter_sip_msgs = (
+                lambda dist_dir, *, since=0.0, method=None: iter([{"msg": notify_msg}])
+            )
+            ctx = self._ctx()
+            r = mod.scn_l7_subscribe_notify(ctx)
+        finally:
+            mod.iter_sip_msgs = orig
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("xcap-diff", r.detail)
+
+    def test_scn_l7_skip_when_no_notify(self) -> None:
+        """iter_sip_msgs 빈 list → SKIP (msg_log 비활성)."""
+        from verify.lib.items.stage6 import scn_l7_subscribe_notify as mod
+        orig = mod.iter_sip_msgs
+        try:
+            mod.iter_sip_msgs = (
+                lambda dist_dir, *, since=0.0, method=None: iter([])
+            )
+            ctx = self._ctx()
+            r = mod.scn_l7_subscribe_notify(ctx)
+        finally:
+            mod.iter_sip_msgs = orig
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_scn_l7_fail_when_body_malformed(self) -> None:
+        """NOTIFY body 가 unknown namespace + 비-XML → FAIL."""
+        from verify.lib.items.stage6 import scn_l7_subscribe_notify as mod
+        notify_msg = (
+            "NOTIFY sip:u@h SIP/2.0\r\n"
+            "Event: presence\r\n"
+            "Content-Type: text/plain\r\n\r\n"
+            "this is not xml at all"
+        )
+        orig = mod.iter_sip_msgs
+        try:
+            mod.iter_sip_msgs = (
+                lambda dist_dir, *, since=0.0, method=None: iter([{"msg": notify_msg}])
+            )
+            ctx = self._ctx()
+            r = mod.scn_l7_subscribe_notify(ctx)
+        finally:
+            mod.iter_sip_msgs = orig
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("malformed", r.detail)
+
+    # ── S6-CMP-GROUP-SYNC ──
+    def test_scn_cmp_group_sync_pass_when_stats_has_gid(self) -> None:
+        """admin OK + CMP STATS 응답 group_details 에 gid 포함 → PASS + cleanup."""
+        from verify.lib.items.stage6 import scn_cmp_group_sync as mod
+        from verify.lib.common import csc_http
+        captured_gid: list = []
+        delete_called: list = []
+
+        def fake_post(url, payload, **kw):
+            captured_gid.append(payload.get("id"))
+            return (201, {"id": payload.get("id")})
+
+        def fake_delete(url, **kw):
+            delete_called.append(url)
+            return 204
+
+        def fake_cmp_request(payload, ip="127.0.0.1", port=9000, timeout=1.0):
+            sesid = payload.get("sesid", "")
+            if "precheck" in sesid:
+                return {"response": {"groups": 0, "group_details": []}}
+            gid = captured_gid[0] if captured_gid else "x"
+            return {"response": {"groups": 1,
+                                 "group_details": [{"group_id": gid, "members": 0}]}}
+
+        orig_login = csc_http.admin_login
+        orig_post = csc_http.post_json
+        orig_delete = csc_http.delete
+        orig_cmp = mod.cmp_request
+        import time as _t
+        orig_sleep = _t.sleep
+        try:
+            csc_http.admin_login = lambda *a, **k: "JWT"
+            csc_http.post_json = fake_post
+            csc_http.delete = fake_delete
+            mod.cmp_request = fake_cmp_request
+            _t.sleep = lambda s: None
+            ctx = self._ctx()
+            r = mod.scn_cmp_group_sync(ctx)
+        finally:
+            csc_http.admin_login = orig_login
+            csc_http.post_json = orig_post
+            csc_http.delete = orig_delete
+            mod.cmp_request = orig_cmp
+            _t.sleep = orig_sleep
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(len(delete_called), 1, "cleanup DELETE 호출 1회")
+
+    def test_scn_cmp_group_sync_fail_when_stats_silent(self) -> None:
+        """admin OK + CMP STATS 가 항상 빈 group_details → FAIL (5s 폴링 미발견)."""
+        from verify.lib.items.stage6 import scn_cmp_group_sync as mod
+        from verify.lib.common import csc_http
+        orig_login = csc_http.admin_login
+        orig_post = csc_http.post_json
+        orig_delete = csc_http.delete
+        orig_cmp = mod.cmp_request
+        import time as _t
+        orig_sleep = _t.sleep
+        try:
+            csc_http.admin_login = lambda *a, **k: "JWT"
+            csc_http.post_json = lambda *a, **k: (201, {"id": "x"})
+            csc_http.delete = lambda *a, **k: 204
+            mod.cmp_request = lambda *a, **k: {
+                "response": {"groups": 0, "group_details": []}
+            }
+            _t.sleep = lambda s: None
+            ctx = self._ctx()
+            r = mod.scn_cmp_group_sync(ctx)
+        finally:
+            csc_http.admin_login = orig_login
+            csc_http.post_json = orig_post
+            csc_http.delete = orig_delete
+            mod.cmp_request = orig_cmp
+            _t.sleep = orig_sleep
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+
+    def test_scn_cmp_group_sync_skip_when_cmp_unreachable(self) -> None:
+        """CMP precheck timeout (None) → SKIP."""
+        from verify.lib.items.stage6 import scn_cmp_group_sync as mod
+        from verify.lib.common import csc_http
+        orig_login = csc_http.admin_login
+        orig_cmp = mod.cmp_request
+        try:
+            csc_http.admin_login = lambda *a, **k: "JWT"
+            mod.cmp_request = lambda *a, **k: None
+            ctx = self._ctx()
+            r = mod.scn_cmp_group_sync(ctx)
+        finally:
+            csc_http.admin_login = orig_login
+            mod.cmp_request = orig_cmp
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("STATS", r.detail)
+
+    # ── S6-MCPTT-FLOOR-GRANT ──
+    def test_scn_floor_pass_via_flow_jsonl(self) -> None:
+        """flow.jsonl 에 GRANT/TAKEN/IDLE 모두 등장 → PASS."""
+        from verify.lib.items.stage6 import scn_mcptt_floor_grant as mod
+        flow = [
+            {"method": "FLOOR_REQUEST", "proto": "MCPTT"},
+            {"method": "FLOOR_GRANT",   "proto": "MCPTT"},
+            {"method": "FLOOR_TAKEN",   "proto": "MCPTT"},
+            {"method": "FLOOR_IDLE",    "proto": "MCPTT"},
+            {"method": "FLOOR_GRANT",   "proto": "MCPTT"},
+            {"method": "FLOOR_TAKEN",   "proto": "MCPTT"},
+            {"method": "FLOOR_IDLE",    "proto": "MCPTT"},
+        ]
+        orig = mod.iter_flow_lines
+        try:
+            mod.iter_flow_lines = (
+                lambda dist_dir, *, node=None, proto=None, since=0.0: iter(flow)
+            )
+            ctx = self._ctx()
+            r = mod.scn_mcptt_floor_grant(ctx)
+        finally:
+            mod.iter_flow_lines = orig
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("GRANT=2", r.detail)
+
+    def test_scn_floor_pass_via_cspsim_fallback(self) -> None:
+        """flow 0건이지만 cspsim TAIL 마커 → PASS (fallback)."""
+        from verify.lib.items.stage6 import scn_mcptt_floor_grant as mod
+        orig = mod.iter_flow_lines
+        try:
+            mod.iter_flow_lines = (
+                lambda dist_dir, *, node=None, proto=None, since=0.0: iter([])
+            )
+            ctx = self._ctx()
+            ctx.state["S6_PTT_VOICE_TAIL"] = (
+                "[Scenario] Member 1: PTT Request (floor)\n"
+                "[Scenario] Floor rotation complete\n"
+            )
+            r = mod.scn_mcptt_floor_grant(ctx)
+        finally:
+            mod.iter_flow_lines = orig
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+
+    def test_scn_floor_skip_when_no_signal(self) -> None:
+        """flow 0건 + cspsim 마커 없음 → SKIP."""
+        from verify.lib.items.stage6 import scn_mcptt_floor_grant as mod
+        orig = mod.iter_flow_lines
+        try:
+            mod.iter_flow_lines = (
+                lambda dist_dir, *, node=None, proto=None, since=0.0: iter([])
+            )
+            ctx = self._ctx()
+            r = mod.scn_mcptt_floor_grant(ctx)
+        finally:
+            mod.iter_flow_lines = orig
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
 
 
 class TestWebhook(unittest.TestCase):

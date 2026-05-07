@@ -6,13 +6,17 @@ import time
 from ...registry import ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
-from ...common.recordings import count_recordings
+from ...common.recordings import count_recordings, count_ptt_events
 
 
 def run_scenario(ctx: VerifyContext, item_id: str, title: str,
                  sim_args: list, prereq_keys: list,
                  timeout: int = 120) -> ItemResult:
-    """cspsim 호출 → 시작 mtime 이후 녹취 +N 측정 → PASS/FAIL.
+    """cspsim 호출 → 시작 mtime 이후 녹취 + PTT events delta 합산 → PASS/FAIL.
+
+    PASS 조건: `seg_*.rtp` 신규 ≥1 **또는** PTT `events.jsonl` 신규 ≥1.
+    PTT events 는 cmp 의 RTP 녹취가 비활성인 환경 (MediaTypes 에 audio
+    누락) 에서 시나리오 정상 진행을 검증하는 fallback.
 
     prereq_keys: ctx.state 의 필수 키 (예: ["VOIP_USER"]) — 미존재 시 SKIP.
     """
@@ -28,16 +32,19 @@ def run_scenario(ctx: VerifyContext, item_id: str, title: str,
     t0 = time.time()
     rc, tail = run_cspsim(ctx.repo_root, sim_args, timeout=timeout)
     delta = count_recordings(ctx.dist_dir, since=t0)
-    ok = delta >= 1
+    ev_delta = count_ptt_events(ctx.dist_dir, since=t0)
+    ok = (delta + ev_delta) >= 1
     ctx.w(f"### {item_id} — {title}")
     ctx.w("```")
     for line in tail.splitlines():
         ctx.w(line)
     ctx.w("```")
-    ctx.w(f"- {'[PASS]' if ok else '[FAIL]'} 녹취 +{delta} (rc={rc})")
+    mark = "[PASS]" if ok else "[FAIL]"
+    ctx.w(f"- {mark} 녹취 +{delta} / PTT events +{ev_delta} (rc={rc})")
     ctx.w()
     return ItemResult(
         id=item_id, name=title,
         status=ItemStatus.PASS if ok else ItemStatus.FAIL,
-        detail=f"녹취 +{delta} (rc={rc})\n{tail[-500:]}", stage=3,
+        detail=f"녹취 +{delta} / PTT events +{ev_delta} (rc={rc})\n{tail[-500:]}",
+        stage=3,
     )

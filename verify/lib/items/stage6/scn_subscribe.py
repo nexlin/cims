@@ -42,6 +42,7 @@ def scn_subscribe(ctx: VerifyContext) -> ItemResult:
         args += ["-auth_id", s["PTT_AUTH"]]
 
     t0 = time.time()
+    ctx.state["S6_SUBSCRIBE_T0"] = t0
     rc, tail = run_cspsim(ctx.repo_root, args, timeout=45)
     sub_complete = "Subscriptions complete" in tail
     sub_sent = "Sending GMS/CMS SUBSCRIBE" in tail

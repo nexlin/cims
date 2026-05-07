@@ -22,4 +22,5 @@ def scn_ptt_voice(ctx: VerifyContext) -> ItemResult:
     ]
     return run_scenario(ctx, "S6-SCN-PTT-VOICE",
                         "PTT 그룹 음성 통화 (5인)", args,
-                        ["PTT_USER", "PTT_GROUP"])
+                        ["PTT_USER", "PTT_GROUP"],
+                        state_prefix="S6_PTT_VOICE")
