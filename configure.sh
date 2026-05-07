@@ -279,6 +279,20 @@ if [[ -n "$SRC_DIR" && -f "$SRC_DIR/tests/test_env.json.template" ]]; then
 fi
 
 # ── 개발용 Vite env 파일 생성 (소스 트리에서만) ─────────────────
+# write_env_if_changed: 기존 파일과 내용이 같으면 mtime 변경 안 함.
+# 이유: vite dev server (TB-Console 3000) 가 .env.* 파일을 watch 하여 mtime
+# 변경 시 hot reload → React state 모두 reset. configure 가 매 검증 회차에서
+# 호출되므로 idempotent 보장 필수.
+write_env_if_changed() {
+    local path="$1"
+    local content="$2"
+    if [[ -f "$path" ]] && [[ "$(cat "$path")" == "$content" ]]; then
+        return 0  # 변경 없음 — skip (mtime 보존)
+    fi
+    printf '%s' "$content" > "$path"
+    ok "갱신: $path"
+}
+
 if [[ -n "$SRC_DIR" ]]; then
     # CSC SSL 여부 자동 감지
     if [[ -f "$DIST_DIR/csc/cert/server.key" && -f "$DIST_DIR/csc/cert/server.crt" ]]; then
@@ -288,16 +302,12 @@ if [[ -n "$SRC_DIR" ]]; then
     fi
 
     # cims-console/.env.local  (Vite dev proxy 대상 — Test-CSC 4421, Phase 1)
-    cat > "$SRC_DIR/cims-console/.env.local" <<EOF
-VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
-EOF
-    ok "생성: $SRC_DIR/cims-console/.env.local"
+    write_env_if_changed "$SRC_DIR/cims-console/.env.local" "VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
+"
 
     # cims-console/.env.tb.local  (TB-Console 전용, TB-CSC 4419 로 proxy)
-    cat > "$SRC_DIR/cims-console/.env.tb.local" <<EOF
-VITE_ADMIN_TARGET=${CSC_SCHEME}://127.0.0.1:4419
-EOF
-    ok "생성: $SRC_DIR/cims-console/.env.tb.local"
+    write_env_if_changed "$SRC_DIR/cims-console/.env.tb.local" "VITE_ADMIN_TARGET=${CSC_SCHEME}://127.0.0.1:4419
+"
 
     # cwrtc WSS 여부 자동 감지
     CWRTC_WS_SCHEME="ws"
@@ -306,12 +316,10 @@ EOF
     fi
 
     # cims-phone/.env.local  (Test-CSC 4421 admin + Test-MCPTT 4430 + Test-CWRTC 8443)
-    cat > "$SRC_DIR/cims-phone/.env.local" <<EOF
-VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
+    write_env_if_changed "$SRC_DIR/cims-phone/.env.local" "VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
 VITE_MCPTT_TARGET=${CSC_SCHEME}://${CSC_HOST}:4430
 VITE_CWRTC_TARGET=${CWRTC_WS_SCHEME}://${CWRTC_IP}:8443
-EOF
-    ok "생성: $SRC_DIR/cims-phone/.env.local"
+"
 fi
 
 # ── DB 접속 권한 SQL 생성 ───────────────────────────────────────
