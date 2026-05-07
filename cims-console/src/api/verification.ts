@@ -228,4 +228,14 @@ export const verifyApi = {
     const q = qs.toString()
     return api.get<RunsStatsResponse>(`${BASE}/runs/stats${q ? '?' + q : ''}`)
   },
+
+  // 현재 검증 환경 메타 (V2 LIVE PrintReport meta 주입용)
+  getEnv: () => api.get<VerifyEnvResponse>(`${BASE}/env`),
+}
+
+export interface VerifyEnvResponse {
+  host: string
+  git_branch: string
+  git_sha: string
+  pkg_manifest_hash: string
 }

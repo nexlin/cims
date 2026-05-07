@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, Fragment, useCallback } from 'react'
 
-import { verifyApi, type VerifyStagesOverview, type ItemsProgress } from '../api/verification'
+import { verifyApi, type VerifyStagesOverview, type ItemsProgress, type VerifyEnvResponse } from '../api/verification'
 import { VerificationPrintReport } from '../components/VerificationPrintReport'
 
 // ─────────────────────────────────────────────────────────────
@@ -659,9 +659,10 @@ export default function VerificationV2Page() {
   const [lastRunId, setLastRunId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [stageGate, setStageGate] = useState<{ first_failed: number; blocked_stages: Record<number, number> } | null>(null)
+  const [env, setEnv] = useState<VerifyEnvResponse | null>(null)
   const anyRunning = pipelineRunning || soloStage !== null
 
-  // 초기 로드 — GET /verification/stages
+  // 초기 로드 — GET /verification/stages + /verification/env
   useEffect(() => {
     let cancelled = false
     verifyApi.getStages()
@@ -675,6 +676,9 @@ export default function VerificationV2Page() {
         setError(e instanceof Error ? e.message : String(e))
         setLoading(false)
       })
+    verifyApi.getEnv()
+      .then(res => { if (!cancelled) setEnv(res) })
+      .catch(() => { /* PrintReport 에서 "-" 로 표시 */ })
     return () => { cancelled = true }
   }, [])
 
@@ -960,7 +964,16 @@ export default function VerificationV2Page() {
         />
       </div>
 
-      <VerificationPrintReport stages={stages} resumeStage={resumeStage} />
+      <VerificationPrintReport
+        stages={stages}
+        resumeStage={resumeStage}
+        meta={env ? {
+          host:        env.host,
+          gitBranch:   env.git_branch,
+          gitSha:      env.git_sha,
+          pkgManifest: env.pkg_manifest_hash || '-',
+        } : {}}
+      />
 
       {stages.map(st => (
         <StageRow

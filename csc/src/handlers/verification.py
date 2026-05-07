@@ -137,6 +137,10 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     if after == 'presets' and method == 'GET':
         return await _get_verify_presets()
 
+    # /env — 현재 검증 환경 메타 (LIVE PrintReport meta 주입용)
+    if after == 'env' and method == 'GET':
+        return await _get_env()
+
     # /runs — 회차 이력 list
     if after == 'runs' and method == 'GET':
         return await _list_runs(handler_args)
@@ -1123,6 +1127,18 @@ async def _get_verify_presets() -> HandlerResult:
             'error': f'invalid JSON: {e}', 'stdout': out[-1000:],
         })
     return HandlerResult(status=200, body={'presets': data})
+
+
+async def _get_env() -> HandlerResult:
+    """V2 LIVE PrintReport meta 주입용 — host / git / 패키지 manifest sha."""
+    branch, sha, host = _detect_git_meta()
+    pkg_hash = _resolve_pkg_manifest_hash()
+    return HandlerResult(status=200, body={
+        'host':              host,
+        'git_branch':        branch,
+        'git_sha':           sha,
+        'pkg_manifest_hash': pkg_hash,
+    })
 
 
 # ─────────────────────────────────────────────────────────────
