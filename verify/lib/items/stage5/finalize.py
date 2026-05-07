@@ -1,7 +1,7 @@
-"""S5-FINALIZE — Phase 2 step 22 (Stop / 전체 기동 유지).
+"""S5-FINALIZE — step 22 (Stop / 전체 기동 유지) native.
 
-native 화 완료 (_legacy 미참조). `--stop-after` 옵션 시 모든 deployment stop +
-Test-agent 4개 kill. 기본은 정보성 detail (Phase 3 진입 위해 4 ports 기동 유지).
+`--stop-after` 옵션 시 모든 deployment stop + Test-agent 4개 kill. 기본은
+정보성 detail (Phase 3 진입 위해 4 ports 기동 유지).
 """
 from __future__ import annotations
 

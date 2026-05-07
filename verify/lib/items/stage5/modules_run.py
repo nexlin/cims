@@ -1,8 +1,7 @@
-"""S5-MODULES-RUN (그룹) — 배포된 csp/cmp 기동.
+"""S5-MODULES-RUN (그룹) — 배포된 csp/cmp 기동 (native step 21).
 
-자식 모두 native 화 완료 (_legacy 미참조). step 21 native — Start 가 PASS 일 때
-.deployed-manifest.json marker 도 step 21 안에서 자동 기록 (S6-ENTRY-CHECK
-immutability gate).
+Start 가 PASS 일 때 .deployed-manifest.json marker 도 step 21 안에서 자동 기록
+(S6-ENTRY-CHECK immutability gate).
 """
 from __future__ import annotations
 

@@ -1,6 +1,7 @@
-"""S5-MODULES-DEPLOY (그룹) — 배포본 csc(4445) → csp/cmp/cspsim 배포 체인.
+"""S5-MODULES-DEPLOY (그룹) — 배포본 csc(4445) → csp/cmp/cspsim 배포 체인 (native).
 
-자식 모두 native 화 완료 (_legacy 미참조). step 16~20 native 사용.
+step 16 (admin login) / 17 (3 tarball 업로드) / 18 (3 agent + 3 Test-agent
+spawn) / 19+20 (3 deployment + install poll).
 """
 from __future__ import annotations
 

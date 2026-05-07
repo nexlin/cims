@@ -16,7 +16,7 @@ from ..registry import validate_registry as _validate_registry
 def _autoimport_recursive(pkg_name: str, pkg_path: str) -> None:
     """{pkg_name} 아래 모든 .py 모듈을 재귀적으로 import.
     `__` 로 시작하는 파일은 제외 (`__init__.py`).
-    `_` 로 시작하는 파일은 helper 로 import (예: `_helpers.py`, `_legacy.py`).
+    `_` 로 시작하는 파일은 helper 로 import (예: `_helpers.py`, `_native_steps.py`).
     """
     for _finder, name, ispkg in pkgutil.iter_modules([pkg_path]):
         if name.startswith("__"):

@@ -704,8 +704,8 @@ class TestRunnerMarkers(unittest.TestCase):
 class TestParseItemsProgress(unittest.TestCase):
     """csc/src/handlers/verification.py _parse_items_progress 의 stdout 파싱.
 
-    runner.py 의 [VERIFY] item-start/item-end/child-result/group-end 마커 +
-    cims.sh _verify_phase2 의 [VERIFY] step-start/step-end 마커 정규식 검증.
+    runner.py 의 [VERIFY] item-start/item-end/child-result/group-end/
+    stage-blocked 마커 정규식 검증.
     """
 
     def setUp(self) -> None:

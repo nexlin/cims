@@ -1,9 +1,7 @@
-"""S5-CSC-RUN (그룹) — 배포된 csc/console 기동 + health.
+"""S5-CSC-RUN (그룹) — 배포된 csc/console 기동 + health (native).
 
-자식 모두 native 화 완료 (_legacy 미참조). step 13/14/15 native:
-- 13: csc Start + 4445 LISTEN
-- 14: csc Health check (agent_job 폴링)
-- 15: console Start + 8081 LISTEN
+13: csc Start + 4445 LISTEN, 14: csc Health check (agent_job 폴링),
+15: console Start + 8081 LISTEN.
 """
 from __future__ import annotations
 

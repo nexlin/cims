@@ -1,8 +1,4 @@
-"""S5-CSC-DEPLOY (그룹) — TB-CSC(4419) → csc-server 배포 체인 3단계.
-
-자식 모두 native 화 완료 (_legacy 미사용). _verify_phase2 의 step 5~10 은 다음
-세션에서 다른 자식이 _legacy 를 호출하지 않는 한 재실행 안 됨.
-"""
+"""S5-CSC-DEPLOY (그룹) — TB-CSC(4419) → csc-server 배포 체인 3단계 (native)."""
 from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus

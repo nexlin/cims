@@ -1,40 +1,42 @@
-"""Stage 5 native step 구현 — _verify_phase2 의 점진 Python 포팅.
-
-_legacy.py 가 cims.sh _verify_phase2 본체 1회 호출로 22단계를 한꺼번에 처리하는
-어댑터 패턴을 대체하기 위한 native Python step 구현 모듈.
+"""Stage 5 native step 구현 — 옛 `_verify_phase2` (bash) 22단계의 Python 포팅.
 
 각 step 은 self-contained 함수: ctx 에서 필요한 상태를 읽고, ItemResult 반환.
 ctx.state["_s5_native"] 에 결과 + 공유 변수 (JWT, agent_id, Test-agent pid 등)
 캐시. 동일 step 의 재호출은 cache 로 방지 (idempotent).
 
-마이그레이션 절차 (점진):
-  1. 가장 단순/독립적인 step 부터 native 함수로 구현
-  2. 해당 step 의 verify_item 자식 함수가 _legacy.step_result() 대신 native 호출
-  3. 22 step 모두 포팅되면 _legacy.py 와 cims.sh _verify_phase2 제거
-
-현재 native 구현:
-  - step 01 (Cleanup)        — cmd_reset --all --keep-processes
-  - step 05 (Admin login)    — TB-CSC(4419) JWT 발급
-  - step 06 (Agent register) — csc-server-local agent 생성/재생성 + approve
-  - step 07 (Test-agent)     — sync 9903 spawn + cims_agent 테이블 online 대기
-
-미포팅 step 은 _legacy.get_legacy_results 로 위임.
-
-** 알려진 한계 **
-  네이티브로 포팅된 step 은 _legacy 가 호출하는 _verify_phase2 안에서도 함께
-  실행되므로 (bash 본체는 step 1~22 monolithic) 중복 실행이 발생한다.
-  cmd_reset / admin login / agent re-register 모두 idempotent 라 functional
-  영향 X. 추후 cims.sh _verify_phase2 에 --skip-step=N,... 플래그 추가 또는
-  step 22 모두 포팅 시 cims.sh 본체 제거.
+** Step 매핑 ** (S5 verify_item ↔ step_NN):
+  S5-RESET                          → step_01_cleanup
+  S5-CSC-DEPLOY-AGENT-ENROLL        → step_05/06/07 합성
+  S5-CSC-DEPLOY-PKG-UPLOAD          → step_08
+  S5-CSC-DEPLOY-INSTALL             → step_09/10 합성
+  S5-CSC-VERIFY-FILES               → step_11
+  S5-CSC-VERIFY-OVERLAY             → step_12
+  S5-CSC-RUN-CSC-START              → step_13
+  S5-CSC-RUN-CSC-HEALTH             → step_14
+  S5-CSC-RUN-CONSOLE-START          → step_15
+  S5-MODULES-DEPLOY-AUTH            → step_16
+  S5-MODULES-DEPLOY-PKG-UPLOAD      → step_17
+  S5-MODULES-DEPLOY-AGENT-ENROLL    → step_18
+  S5-MODULES-DEPLOY-INSTALL         → step_19/20 합성
+  S5-MODULES-RUN-START              → step_21
+  S5-FINALIZE                       → step_22
+  (step 02/03/04 — Build/Configure/Pkg — 는 S2/S3/S4 가 이미 흡수)
 
 ** 공유 상태 구조 **
   ctx.state["_s5_native"] = {
-    "results": {step_no: ItemResult},      # step 결과 cache (idempotent)
-    "tok":           str,                   # TB-CSC JWT (step 05)
-    "aid_csc":       int,                   # csc-server-local agent_id (step 06)
-    "enroll_tok_csc": str,                  # enrollment token (step 06)
-    "ta_pid_csc":    int,                   # Test-agent pid (step 07)
-    ...                                     # 후속 step 추가 시 확장
+    "results": {step_no: ItemResult},   # step 결과 cache (idempotent)
+    # csc 체인 (TB-CSC 4419)
+    "tok", "aid_csc", "enroll_tok_csc", "ta_pid_csc",       # 05~07
+    "pkg_id_csc", "pkg_id_console",                          # 08
+    "dep_id_csc", "dep_id_console",                          # 09
+    "all_install_done_csc",                                  # 10
+    "csc_start_ok", "csc_health_ok", "console_start_ok",     # 13~15
+    # modules 체인 (배포본 csc 4445)
+    "tok2", "aid_csp/cmp/sim", "enroll_tok_csp/cmp/sim",     # 16, 18
+    "ta_pid_csp/cmp/sim",                                    # 18
+    "pkg2_id_csp/cmp/sim",                                   # 17
+    "dep2_id_csp/cmp/sim",                                   # 19
+    "all_install_done_modules", "modules_start_ok",          # 20, 21
   }
 """
 from __future__ import annotations

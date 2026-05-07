@@ -1,7 +1,6 @@
-"""S5-CSC-VERIFY (그룹) — 배포된 csc 파일/overlay 검증.
+"""S5-CSC-VERIFY (그룹) — 배포된 csc 파일/overlay 검증 (native).
 
-자식 모두 native 화 완료 (_legacy 미참조). 파일 시스템 검증만이라 외부 의존
-없음 — install job 후 산출물 정합성만 본다.
+파일 시스템 검증만 — install job 후 산출물 정합성. 외부 의존 없음.
 """
 from __future__ import annotations
 
