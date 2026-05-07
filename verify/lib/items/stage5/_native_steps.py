@@ -171,9 +171,22 @@ def step_05_admin_login(ctx: VerifyContext) -> ItemResult:
 
     환경 변수: CIMS_TB_ADMIN_ID (default admin), CIMS_TB_ADMIN_PASSWORD (1234).
     성공 시 ctx.state["_s5_native"]["tok"] 에 JWT 저장.
+
+    `opts.enable_mtls` true 시 admin login 직전에 csc-tb.json 토글 +
+    cims.sh restart tb-csc 자동 실행. step_01 의 cims.sh reset 이 csc-tb.json
+    을 config_template (false) 로 재설치하므로 reset 이후 + agent enroll
+    이전 시점에 토글 + tb-csc 재시작이 효과를 가짐.
     """
     if already_ran(ctx, 5):
         return get_native_result(ctx, 5)
+
+    if (ctx.opts or {}).get("enable_mtls"):
+        from ...common.csc_config import set_mtls_enabled
+        toggled = set_mtls_enabled(ctx.dist_dir, True)
+        if toggled:
+            shell.run_cims_sh(ctx.repo_root, "restart", "tb-csc", timeout=20)
+            import time as _t
+            _t.sleep(2)  # tb-csc LISTEN 안정화
 
     base = _TB_CSC_BASE
     login_id = os.environ.get("CIMS_TB_ADMIN_ID", "admin")

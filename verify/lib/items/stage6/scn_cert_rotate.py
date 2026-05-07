@@ -59,10 +59,12 @@ def scn_cert_rotate(ctx: VerifyContext) -> ItemResult:
     except Exception as e:
         return _skip("S6-SCN-CERT-ROTATE", ctx,
                      f"DB 접속 실패: {type(e).__name__}: {e}")
+    cert_renewed = False
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, status, cert_rotate_pending FROM cims_agent WHERE name=%s",
+            "SELECT id, status, cert_rotate_pending, cert_issued_at "
+            "FROM cims_agent WHERE name=%s",
             (_AGENT_NAME,),
         )
         row = cur.fetchone()
@@ -70,20 +72,15 @@ def scn_cert_rotate(ctx: VerifyContext) -> ItemResult:
             conn.close()
             return _skip("S6-SCN-CERT-ROTATE", ctx,
                          f"agent {_AGENT_NAME} 없음 — S5 미실행?")
-        aid, status, prev_pending = row
+        aid, status, prev_pending, prev_issued_at = row
         if status != "online":
             conn.close()
             return _skip("S6-SCN-CERT-ROTATE", ctx,
                          f"agent {_AGENT_NAME} status={status} (online 아님)")
-        notes.append(f"- agent: id={aid} status=online prev_pending={prev_pending}")
-
-        # 3) issued cert 파일 list + mtime 캡처
-        cert_dir = os.path.join(ctx.repo_root, "cert", "agent_mtls",
-                                "issued", _AGENT_NAME)
-        prev_files = _list_cert_files(cert_dir)
-        prev_count = len(prev_files)
-        prev_max_mtime = max((m for _, m in prev_files), default=0.0)
-        notes.append(f"- 기존 cert: {prev_count}개 (max_mtime={prev_max_mtime:.1f})")
+        notes.append(
+            f"- agent: id={aid} status=online prev_pending={prev_pending} "
+            f"prev_cert_issued_at={prev_issued_at}"
+        )
 
         # 4) cert_rotate_pending=1 토글
         cur.execute(
@@ -91,30 +88,43 @@ def scn_cert_rotate(ctx: VerifyContext) -> ItemResult:
         )
         notes.append("- pending=1 토글")
 
-        # 5) 최대 15초 폴링 — pending=0 으로 reset 됐는지
+        # 5) 최대 15초 폴링 — pending=0 reset + cert_issued_at 갱신 확인
         rotated = False
         waited = 0
         for _ in range(15):
             time.sleep(1); waited += 1
             cur.execute(
-                "SELECT cert_rotate_pending FROM cims_agent WHERE id=%s", (aid,),
+                "SELECT cert_rotate_pending, cert_issued_at FROM cims_agent "
+                "WHERE id=%s", (aid,),
             )
             r = cur.fetchone()
             if r and r[0] == 0:
                 rotated = True
+                # cert_issued_at 가 prev 보다 newer 면 실제 발급 완료
+                if r[1] and (prev_issued_at is None or r[1] > prev_issued_at):
+                    cert_renewed = True
+                    notes.append(
+                        f"- cert_issued_at 갱신: {prev_issued_at} → {r[1]}"
+                    )
                 break
         notes.append(f"- pending reset: {'YES' if rotated else 'TIMEOUT'} ({waited}s)")
     finally:
         try: conn.close()
         except Exception: pass
 
-    # 6) 새 cert 파일 생성 확인
-    new_files = _list_cert_files(cert_dir)
-    new_max_mtime = max((m for _, m in new_files), default=0.0)
-    cert_added = (len(new_files) > prev_count) or (new_max_mtime > prev_max_mtime)
-    notes.append(f"- 새 cert: {len(new_files)}개 added={cert_added}")
+    # 6) agent state_dir 의 agent_mtls.crt 가 갱신됐는지 추가 확인 (best-effort).
+    state_crt = os.path.join(ctx.dist_dir, "csc-server", "agent", "state",
+                             "agent_mtls.crt")
+    crt_recent = False
+    if os.path.isfile(state_crt):
+        try:
+            crt_recent = (time.time() - os.path.getmtime(state_crt)) < 60
+        except OSError:
+            pass
+    notes.append(f"- agent_mtls.crt mtime within 60s: {crt_recent}")
 
-    ok = rotated and cert_added
+    # PASS: pending reset YES + cert_issued_at 갱신 OR agent state crt 최근 갱신
+    ok = rotated and (cert_renewed or crt_recent)
     ctx.w("### S6-SCN-CERT-ROTATE — mTLS cert rotation e2e")
     for n in notes: ctx.w(n)
     ctx.w()

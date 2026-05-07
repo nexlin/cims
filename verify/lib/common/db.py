@@ -19,10 +19,16 @@ def csp_db_config(dist_dir: str) -> dict:
         return {}
 
 
-def connect(db: dict):
-    """pymysql 커넥션 — 호출자가 close 책임."""
+def connect(db: dict, *, autocommit: bool = True):
+    """pymysql 커넥션 — 호출자가 close 책임.
+
+    `autocommit` default True — verify 코드가 짧은 tx 단위로 UPDATE 직후
+    SELECT 폴링하는 패턴이 많아 autocommit 가 안전. (기본 False 시 UPDATE
+    후 commit 누락하면 close 시 rollback 되어 변경 사라짐.)
+    """
     import pymysql                                              # type: ignore
     return pymysql.connect(
         host=db["Host"], port=int(db.get("Port", 3306)),
         user=db["User"], password=db["Password"], database=db["DbName"],
+        autocommit=autocommit,
     )
