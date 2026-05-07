@@ -1639,6 +1639,127 @@ class TestStage5CscRunSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.FAIL)
 
 
+class TestRunStore(unittest.TestCase):
+    """verify.lib.run_store — 파일 기반 회차 이력 store.
+
+    write_run / get_run / list_runs / delete_run / stats. tempdir 만 사용,
+    DB 의존 X.
+    """
+
+    def setUp(self) -> None:
+        from verify.lib import run_store
+        import tempfile
+        self._rs = run_store
+        self._td = tempfile.mkdtemp(prefix="run_store_test_")
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._td, ignore_errors=True)
+
+    def _make_record(self, scope="stage5", verdict="PASS", elapsed_ms=1000):
+        return {
+            "id": 0,
+            "started_at": "2026-05-07T12:00:00.000",
+            "finished_at": "2026-05-07T12:00:01.000",
+            "elapsed_ms": elapsed_ms,
+            "trigger": "user",
+            "scope": scope,
+            "selected_ids": ["S5-RESET"],
+            "verdict": verdict,
+            "totals": {"total": 14, "pass": 12, "fail": 0, "skip": 2, "blocked": 0},
+            "pkg_manifest_hash": "abc123",
+            "git_branch": "main", "git_sha": "abc1234", "host": "test-host",
+            "ens_ip": "", "report_path": "/tmp/x", "job_id": "uuid-1", "note": "",
+            "items": [
+                {"id": "S5-RESET", "stage": 5, "parent_id": None, "is_group": False,
+                 "name": "reset", "status": "PASS", "elapsed_ms": 100, "detail": "", "idx": 1},
+            ],
+        }
+
+    def test_write_and_get_roundtrip(self) -> None:
+        rec = self._make_record()
+        rid = self._rs.write_run(self._td, rec)
+        self.assertGreater(rid, 0)
+        # 파일 존재
+        path = self._rs._path_for_id(self._td, rid)
+        self.assertTrue(os.path.isfile(path))
+        # get_run 으로 조회
+        loaded = self._rs.get_run(self._td, rid)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["id"], rid)
+        self.assertEqual(loaded["scope"], "stage5")
+        self.assertEqual(loaded["verdict"], "PASS")
+        self.assertEqual(len(loaded["items"]), 1)
+
+    def test_unique_ids_on_collision(self) -> None:
+        # 동일 ms 에 두 번 write — id 가 +1 증가
+        rid1 = self._rs.write_run(self._td, self._make_record())
+        rid2 = self._rs.write_run(self._td, self._make_record())
+        self.assertNotEqual(rid1, rid2)
+
+    def test_list_runs_filters(self) -> None:
+        # 5 회차: 3 stage5 (2 PASS + 1 FAIL) + 2 stage1 (PASS)
+        for verdict in ("PASS", "PASS", "FAIL"):
+            self._rs.write_run(self._td, self._make_record(scope="stage5", verdict=verdict))
+        for _ in range(2):
+            self._rs.write_run(self._td, self._make_record(scope="stage1"))
+        # 전체
+        total, rows = self._rs.list_runs(self._td)
+        self.assertEqual(total, 5)
+        self.assertEqual(len(rows), 5)
+        # items 는 list 응답에 없어야 함
+        self.assertNotIn("items", rows[0])
+        # stage 필터
+        total, rows = self._rs.list_runs(self._td, stage=5)
+        self.assertEqual(total, 3)
+        # verdict 필터
+        total, rows = self._rs.list_runs(self._td, verdict="FAIL")
+        self.assertEqual(total, 1)
+        # scope + verdict 동시
+        total, rows = self._rs.list_runs(self._td, stage=5, verdict="PASS")
+        self.assertEqual(total, 2)
+
+    def test_list_runs_paging_and_order(self) -> None:
+        ids = [self._rs.write_run(self._td, self._make_record()) for _ in range(7)]
+        # limit=3 → 최신 3개 (DESC)
+        total, rows = self._rs.list_runs(self._td, limit=3)
+        self.assertEqual(total, 7)
+        self.assertEqual([r["id"] for r in rows], sorted(ids, reverse=True)[:3])
+        # offset=3, limit=2 → 4번째~5번째 (DESC)
+        total, rows = self._rs.list_runs(self._td, limit=2, offset=3)
+        self.assertEqual([r["id"] for r in rows], sorted(ids, reverse=True)[3:5])
+
+    def test_delete_run(self) -> None:
+        rid = self._rs.write_run(self._td, self._make_record())
+        self.assertTrue(self._rs.delete_run(self._td, rid))
+        self.assertIsNone(self._rs.get_run(self._td, rid))
+        # 없는 id
+        self.assertFalse(self._rs.delete_run(self._td, 999999999))
+
+    def test_stats_shape(self) -> None:
+        for v, e in (("PASS", 1000), ("PASS", 2000), ("FAIL", 5000)):
+            self._rs.write_run(self._td, self._make_record(scope="stage5",
+                                                            verdict=v, elapsed_ms=e))
+        for v, e in (("PASS", 500), ("PASS", 600)):
+            self._rs.write_run(self._td, self._make_record(scope="stage1",
+                                                            verdict=v, elapsed_ms=e))
+        st = self._rs.stats(self._td, days=30)
+        self.assertEqual(st["overall"]["runs"], 5)
+        self.assertEqual(st["overall"]["pass"], 4)
+        self.assertEqual(st["overall"]["fail"], 1)
+        self.assertEqual(st["overall"]["success_rate"], 80.0)
+        # by_scope — 정렬 (alphabetical)
+        scopes = [s["scope"] for s in st["by_scope"]]
+        self.assertEqual(scopes, ["stage1", "stage5"])
+        s5 = next(s for s in st["by_scope"] if s["scope"] == "stage5")
+        self.assertEqual(s5["runs"], 3)
+        self.assertEqual(s5["pass"], 2)
+        # timeline — ASC (오래된 → 최신)
+        self.assertEqual(len(st["timeline"]), 5)
+        ts = [t["id"] for t in st["timeline"]]
+        self.assertEqual(ts, sorted(ts))    # ASC
+
+
 class TestStage5ModulesSteps(unittest.TestCase):
     """S5 native — step 16~22 (modules + finalize)."""
 
