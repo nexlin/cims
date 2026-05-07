@@ -771,14 +771,55 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
     return ""
 
 
-def _search_sip_messages(call_ids: list, date_str: str, hour: str = None, service: str = "volte") -> list:
-    """서비스별 flow.jsonl에서 call_ids에 해당하는 SIP 메시지 검색 (compact, body 없음).
-    flow.jsonl은 Call-ID를 `subid` 필드에 기록하므로 `subid` 우선, 레거시 `call_id` fallback."""
-    if not _sip_log_dir or not call_ids:
+def _extract_sesids_from_msg_jsonl(call_ids: list, date_str: str, hour: str = None) -> set:
+    """sip msg.jsonl 의 raw SIP 메시지에서 Call-ID 가 매칭되는 라인의 sesid 추출.
+
+    flow.jsonl 의 SIP 라인에는 call_id/subid 가 없으므로 (caller/callee/sesid/method 만),
+    raw SIP body 가 들어있는 msg.jsonl 에서 Call-ID 매칭 후 sesid 모음. 이후 sesid 기반
+    으로 flow.jsonl 필터링 → VoLTE 호의 다른 PTT 메시지 섞임 방지.
+    """
+    if not _calls_dir or not call_ids:
+        return set()
+    sesids: set = set()
+    yyyy, mm, dd = _date_parts(date_str)
+    hours = [hour.zfill(2)] if hour else [f"{h:02d}" for h in range(24)]
+    for hh in hours:
+        base = os.path.join(_calls_dir, yyyy, mm, dd, hh)
+        if not os.path.isdir(base):
+            continue
+        # csp_*_sip.msg.jsonl 우선, fallback msg.jsonl
+        for pat in ("*_sip.msg.jsonl", "*_sip.jsonl"):
+            for path in _glob.glob(os.path.join(base, pat)):
+                try:
+                    with open(path, 'r') as f:
+                        for line in f:
+                            if not any(cid in line for cid in call_ids):
+                                continue
+                            try:
+                                obj = json.loads(line)
+                            except Exception:
+                                continue
+                            s = obj.get("sesid", "")
+                            if s:
+                                sesids.add(s)
+                except Exception:
+                    pass
+    return sesids
+
+
+def _search_sip_messages(call_ids: list, date_str: str, hour: str = None,
+                         service: str = "volte",
+                         sesid_set: set = None) -> list:
+    """서비스별 flow.jsonl 에서 SIP 메시지 검색 (compact, body 없음).
+
+    flow.jsonl 의 SIP 라인에는 Call-ID 필드가 없고 sesid/caller/callee/method 만 있음.
+    `sesid_set` 가 주어지면 그것으로 매칭 (정확). 그렇지 않으면 substring fallback.
+    """
+    if not _sip_log_dir:
         return []
 
     results = []
-    call_id_set = set(call_ids)
+    call_id_set = set(call_ids or [])
     flow_paths = _resolve_flow_paths(date_str, hour, service)
 
     for jsonl_path in flow_paths:
@@ -788,16 +829,21 @@ def _search_sip_messages(call_ids: list, date_str: str, hour: str = None, servic
                     line = line.strip()
                     if not line:
                         continue
-                    # 빠른 사전 필터: call_id 문자열이 라인에 포함되는지 확인
-                    matched = any(cid in line for cid in call_id_set)
-                    if not matched:
-                        continue
                     try:
                         obj = json.loads(line)
                     except Exception:
                         continue
-                    # flow.jsonl의 SIP 메시지만 (proto 없거나 SIP)
                     if obj.get("proto", "SIP") != "SIP":
+                        continue
+                    # 1차: sesid 정확 매칭 (flow.jsonl 의 sesid 필드)
+                    if sesid_set:
+                        if obj.get("sesid", "") in sesid_set:
+                            results.append(obj)
+                            continue
+                        # sesid 매칭 안 되면 skip (혼합 방지)
+                        continue
+                    # 2차 fallback: legacy substring 매칭 (call_id 가 라인에 포함)
+                    if not any(cid in line for cid in call_id_set):
                         continue
                     msg_cid = obj.get("subid") or obj.get("call_id", "")
                     if msg_cid in call_id_set:
@@ -845,8 +891,13 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                     mu = method.upper()
                     if mu in ("HEARTBEAT",):
                         continue
-                    if call_type.startswith("volte") and mu in ("ADD_GROUP", "REMOVE_GROUP", "JOIN_GROUP",
-                                                       "LEAVE_GROUP", "MODIFY_GROUP"):
+                    if call_type.startswith("volte") and mu in (
+                        "ADD_GROUP", "REMOVE_GROUP", "JOIN_GROUP",
+                        "LEAVE_GROUP", "MODIFY_GROUP",
+                        # PTT 접두사 변형 — VoLTE flow 에 PTT 그룹 메시지 섞임 방지
+                        "ADD_PTT_GROUP", "REMOVE_PTT_GROUP", "JOIN_PTT_GROUP",
+                        "LEAVE_PTT_GROUP", "MODIFY_PTT_GROUP",
+                    ):
                         continue
                     if call_type == "ptt" and mu in ("ADD_SESSION", "REMOVE_SESSION", "MODIFY_SESSION"):
                         continue
@@ -940,11 +991,16 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
         # SIP log 없이 기존 방식 fallback
         return _load_messages(d_dir)
 
-    # SIP 메시지 검색 (VoIP → phone)
-    sip_msgs = _search_sip_messages(call_ids, date_str, hour, service="volte")
+    # 호의 sesid set 추출 — flow.jsonl 의 SIP 라인에는 Call-ID 없으므로 raw SIP
+    # 메시지가 들어있는 msg.jsonl 에서 Call-ID 매칭 라인의 sesid 모음.
+    # B2BUA 호는 양 leg 의 sesid 가 달라 둘 다 포함됨 (call_ids 가 2개라).
+    sesid_set = _extract_sesids_from_msg_jsonl(call_ids, date_str, hour)
 
-    # 해당 호의 sesid 모음 (CMP 메시지 필터링 기준 — 가장 정확한 방법)
-    sesid_set = set()
+    # SIP 메시지 검색 (sesid 매칭 우선, fallback substring)
+    sip_msgs = _search_sip_messages(call_ids, date_str, hour,
+                                     service="volte", sesid_set=sesid_set)
+
+    # sesid_set 보강 — flow.jsonl SIP 라인의 sesid 도 추가 (msg.jsonl 누락 대비)
     for m in sip_msgs:
         s = m.get("sesid", "")
         if s: sesid_set.add(s)
