@@ -9,12 +9,13 @@ Ensure the following tools are installed on your build server:
 - **GCC/G++** (support for C++11)
 - **Git** (for fetching external dependencies)
 - **Make**
+- **clang-format** (for `S1-CPP-FORMAT` static check; SKIP if missing)
 
 ## Build Instructions
 0. **Install Prerequisites**
    ```bash
    sudo apt-get update
-   sudo apt-get install -y cmake build-essential libssl-dev
+   sudo apt-get install -y cmake build-essential libssl-dev clang-format
    ```
 
 1. **Clone the repository**

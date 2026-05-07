@@ -856,9 +856,20 @@ def _wait_listen(port: int, proto: str, timeout_s: int) -> int:
 
 
 def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
-    """Step 13 — csc Start job 발행 + LISTEN 대기 (25s, target 의 csc 포트)."""
+    """Step 13 — csc Start job 발행 + LISTEN 대기 (25s, target 의 csc 포트).
+
+    `opts.enable_mtls` true 시 csc 시작 직전 csc-tb.json `Agent.MtlsEnabled`
+    를 true 로 토글. 후속 신규 enroll agent (csp/cmp/sim) 가 mTLS cert 발급
+    받아 S6-SCN-CERT-ROTATE 가 PASS 가능. csc 메모리에는 enroll 시점에
+    반영되므로 이후 재시작 불필요.
+    """
     if already_ran(ctx, 13):
         return get_native_result(ctx, 13)
+
+    if (ctx.opts or {}).get("enable_mtls"):
+        from ...common.csc_config import set_mtls_enabled
+        toggled = set_mtls_enabled(ctx.dist_dir, True)
+        _set(ctx, "mtls_toggled", bool(toggled))
 
     tok = _get(ctx, "tok", "")
     csc_did = _get(ctx, "dep_id_csc")
@@ -1523,6 +1534,35 @@ def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
             fail = True
 
     _set(ctx, "modules_start_ok", not fail)
+
+    # csp ↔ cmp control connection 안정화 대기 (max 150s).
+    # csp 시작 직후 cmp 와의 첫 heartbeat 응답까지 ~120s 소요. 이 wait 가
+    # 없으면 후속 S6 PTT 시나리오의 InviteMember 가 'Failed to get/alloc
+    # Shared Port' 로 실패 (csp 가 cmp 에 ADD_PTT_GROUP 보낼 수 없음).
+    if not fail:
+        import time as _t
+        from glob import glob as _glob
+        log_glob = os.path.join(ctx.dist_dir, "csp-server", "csp", "csp", "log",
+                                "csp_*.log")
+        deadline = _t.time() + 150
+        csp_cmp_connected = False
+        while _t.time() < deadline:
+            for p in _glob(log_glob):
+                try:
+                    with open(p, "rb") as f:
+                        if b"OnCmpStatusChanged: Connected" in f.read():
+                            csp_cmp_connected = True
+                            break
+                except OSError:
+                    pass
+            if csp_cmp_connected:
+                break
+            _t.sleep(3)
+        notes.append(
+            f"- csp ↔ cmp control connection: "
+            f"{'CONNECTED' if csp_cmp_connected else 'TIMEOUT'}"
+        )
+
     # Immutability marker — Start PASS 시 manifest sha 기록 (S6-ENTRY-CHECK 가 매칭).
     if not fail:
         try:

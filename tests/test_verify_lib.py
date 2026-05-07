@@ -1359,6 +1359,101 @@ class TestStage6NewScenarios(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.SKIP)
 
 
+class TestCscConfig(unittest.TestCase):
+    """verify.lib.common.csc_config — Agent.MtlsEnabled 토글 helper."""
+
+    def test_set_mtls_returns_false_when_csc_tb_missing(self) -> None:
+        from verify.lib.common import csc_config
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            ok = csc_config.set_mtls_enabled(td, True)
+        self.assertFalse(ok, "csc-tb.json 없으면 False")
+
+    def test_set_mtls_toggles_false_to_true(self) -> None:
+        from verify.lib.common import csc_config
+        import tempfile, json as _json
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "csc-server", "csc", "csc", "config")
+            os.makedirs(cfg)
+            path = os.path.join(cfg, "csc-tb.json")
+            with open(path, "w") as f:
+                _json.dump({"Agent": {"MtlsEnabled": False}}, f)
+            ok = csc_config.set_mtls_enabled(td, True)
+            self.assertTrue(ok)
+            self.assertTrue(csc_config.get_mtls_enabled(td))
+
+    def test_set_mtls_creates_agent_section_if_missing(self) -> None:
+        from verify.lib.common import csc_config
+        import tempfile, json as _json
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "csc-server", "csc", "csc", "config")
+            os.makedirs(cfg)
+            path = os.path.join(cfg, "csc-tb.json")
+            with open(path, "w") as f:
+                _json.dump({"OtherSection": {}}, f)
+            ok = csc_config.set_mtls_enabled(td, True)
+            self.assertTrue(ok)
+            with open(path) as f:
+                data = _json.load(f)
+            self.assertEqual(data["Agent"]["MtlsEnabled"], True)
+            self.assertIn("OtherSection", data, "기존 섹션 보존")
+
+
+class TestCspNotify(unittest.TestCase):
+    """verify.lib.common.csp_notify — CSP UDP 4421 notify helper."""
+
+    def test_notify_csp_event_sends_json(self) -> None:
+        from verify.lib.common import csp_notify
+        captured: list = []
+
+        class _FakeSock:
+            def __init__(self, *a, **k): pass
+            def settimeout(self, t): pass
+            def sendto(self, data, addr):
+                captured.append((data, addr))
+            def close(self): pass
+
+        import socket as _socket
+        orig = _socket.socket
+        try:
+            _socket.socket = lambda *a, **k: _FakeSock()
+            ok = csp_notify.notify_csp_event(
+                "GROUP_CHANGED", "tel:test-grp", "PUT",
+                ip="127.0.0.1", port=4421,
+            )
+        finally:
+            _socket.socket = orig
+
+        self.assertTrue(ok)
+        self.assertEqual(len(captured), 1)
+        data, addr = captured[0]
+        self.assertEqual(addr, ("127.0.0.1", 4421))
+        import json as _json
+        payload = _json.loads(data.decode())
+        self.assertEqual(payload["event"], "GROUP_CHANGED")
+        self.assertEqual(payload["uri"], "tel:test-grp")
+        self.assertEqual(payload["action"], "PUT")
+        self.assertEqual(payload["service"], "console")
+
+    def test_notify_csp_event_returns_false_on_socket_error(self) -> None:
+        from verify.lib.common import csp_notify
+
+        class _BrokenSock:
+            def __init__(self, *a, **k): pass
+            def settimeout(self, t): pass
+            def sendto(self, data, addr): raise OSError("network unreachable")
+            def close(self): pass
+
+        import socket as _socket
+        orig = _socket.socket
+        try:
+            _socket.socket = lambda *a, **k: _BrokenSock()
+            ok = csp_notify.notify_csp_event("GROUP_CHANGED")
+        finally:
+            _socket.socket = orig
+        self.assertFalse(ok)
+
+
 class TestWebhook(unittest.TestCase):
     """verify.lib.webhook — env 설정 + payload 빌드 + filter."""
 

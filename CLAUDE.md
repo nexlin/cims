@@ -4,11 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-**Prerequisites**: `cmake`, `build-essential`, `libssl-dev`, `git`
+**Prerequisites**: `cmake`, `build-essential`, `libssl-dev`, `git`, `clang-format`
 
 ```bash
-sudo apt-get install -y cmake build-essential libssl-dev
+sudo apt-get install -y cmake build-essential libssl-dev clang-format
 ```
+
+`clang-format` 은 검증 stage 1 (`S1-CPP-FORMAT`) 의 정적 검사용. 미설치 시 SKIP.
 
 **Build** (out-of-source, from repo root):
 ```bash

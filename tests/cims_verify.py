@@ -356,6 +356,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         "keep_agent": bool(args.keep_agent),
         "stop_after": bool(args.stop_after),
         "target":     args.target or "verify",
+        "enable_mtls":         bool(getattr(args, "enable_mtls", False)),
+        "require_cpp_format":  bool(getattr(args, "require_cpp_format", False)),
     }
     only_children = _parse_only_children(args.only_children)
     if only_children:
@@ -525,6 +527,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-record",
         action="store_true",
         help="회차 결과를 verify_runs/ 에 기록하지 않음 (default: 기록함).",
+    )
+    p_run.add_argument(
+        "--enable-mtls",
+        action="store_true",
+        help="S5 csc 시작 직전 배포본 csc-tb.json `Agent.MtlsEnabled=true` "
+             "토글. 후속 신규 enroll agent 가 mTLS cert 발급 → "
+             "S6-SCN-CERT-ROTATE 가 PASS 가능.",
+    )
+    p_run.add_argument(
+        "--require-cpp-format",
+        action="store_true",
+        help="S1-CPP-FORMAT 미설치 시 SKIP 대신 FAIL 로 강제 (strict). "
+             "CI 등에서 prerequisite 누락 회귀를 차단할 때 사용.",
     )
     p_run.set_defaults(_func=cmd_run)
 

@@ -39,9 +39,15 @@ def _collect_files(repo_root: str) -> list:
 )
 def cpp_format(ctx: VerifyContext) -> ItemResult:
     if not shutil.which("clang-format"):
+        msg = ("clang-format 미설치 — `sudo apt install clang-format` 후 "
+               "재실행 (CLAUDE.md prerequisite). `--require-cpp-format` "
+               "옵션 사용 시 SKIP → FAIL 로 강제 가능.")
+        # opts.require_cpp_format true 면 strict 모드로 FAIL.
+        require = bool((ctx.opts or {}).get("require_cpp_format"))
         return ItemResult(
             id="S1-CPP-FORMAT", name="C++ clang-format",
-            status=ItemStatus.SKIP, detail="clang-format 미설치", stage=1,
+            status=ItemStatus.FAIL if require else ItemStatus.SKIP,
+            detail=msg, stage=1,
         )
     files = _collect_files(ctx.repo_root)
     if not files:
