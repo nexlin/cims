@@ -203,6 +203,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
         const { done, total } = stageProgress(st.items)
         const color = statusColor(status)
         const isResume = resumeStage === st.num
+        const isBlocked = status === 'BLOCKED'
 
         // 진행률 (테두리 호로 표시)
         const pct = total > 0 ? (done / total) * 100 : 0
@@ -218,7 +219,11 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
             <button
               onClick={() => onSelect(st.num)}
               disabled={disabled}
-              title={disabled ? '실행 중에는 변경 불가' : '클릭하여 재개 지점 설정'}
+              title={
+                disabled ? '실행 중에는 변경 불가'
+                : isBlocked ? '선행 stage FAIL 로 차단됨 — 원인 stage 재실행 필요'
+                : '클릭하여 재개 지점 설정'
+              }
               style={{
                 flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
                 padding: '4px', cursor: disabled ? 'not-allowed' : 'pointer',
@@ -226,7 +231,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                 border: '2px solid transparent',
                 borderRadius: 8,
                 textAlign: 'center', position: 'relative',
-                opacity: disabled ? 0.7 : 1,
+                opacity: disabled ? 0.7 : (isBlocked ? 0.6 : 1),
               }}
             >
               {isResume && (
@@ -241,23 +246,40 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                   🚩 재개 지점
                 </div>
               )}
-              {/* 외곽 ring (진행률 / 상태 색) */}
+              {/* 외곽 ring (진행률 / 상태 색) — BLOCKED 면 점선 경계 + 회색 톤 */}
               <div style={{
                 width: 120, height: 120, borderRadius: 60,
-                background: ringBg,
+                background: isBlocked ? '#9ca3af' : ringBg,
                 padding: 6,
                 boxShadow: isResume ? `0 0 0 4px #3b82f633` : 'none',
                 transition: 'all 0.2s',
+                position: 'relative',
               }}>
-                {/* 내부 흰 원 */}
+                {isBlocked && (
+                  <div style={{
+                    position: 'absolute', top: 4, right: 4,
+                    width: 28, height: 28, borderRadius: 14,
+                    background: '#a16207', color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, fontWeight: 700,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                    zIndex: 2,
+                  }} title="선행 stage FAIL 로 차단됨">
+                    🚫
+                  </div>
+                )}
+                {/* 내부 흰 원 — BLOCKED 면 회색 배경 */}
                 <div style={{
                   width: '100%', height: '100%', borderRadius: '50%',
-                  background: '#fff',
+                  background: isBlocked ? '#f3f4f6' : '#fff',
                   display: 'flex', flexDirection: 'column',
                   alignItems: 'center', justifyContent: 'center',
                   fontWeight: 700, lineHeight: 1.2,
                 }}>
-                  <div style={{ fontSize: 26, color: color, letterSpacing: 0.5 }}>{st.id}</div>
+                  <div style={{
+                    fontSize: 26, color: isBlocked ? '#6b7280' : color, letterSpacing: 0.5,
+                    textDecoration: isBlocked ? 'line-through' : 'none',
+                  }}>{st.id}</div>
                   <div style={{
                     fontSize: 12, color: 'var(--muted, #374151)',
                     marginTop: 4, padding: '0 6px',
@@ -270,7 +292,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                     fontSize: 11, color: 'var(--muted, #9ca3af)',
                     marginTop: 3, fontWeight: 500,
                   }}>
-                    {done}/{total}
+                    {isBlocked ? '차단됨' : `${done}/${total}`}
                   </div>
                 </div>
               </div>
@@ -418,15 +440,21 @@ function StageRow({
   const status = stageStatus(stage.items)
   const { done, total, elapsed } = stageProgress(stage.items)
   const color = statusColor(status)
+  const isBlocked = status === 'BLOCKED'
 
   // top-level items (groups + singletons, no children)
   const topItems = stage.items.filter(it => !it.parent)
 
   return (
     <div className="stage-card" style={{
-      border: isResume ? '2px solid #3b82f6' : '1px solid var(--border, #e5e7eb)',
+      border: isResume
+        ? '2px solid #3b82f6'
+        : isBlocked
+          ? '1px dashed #a16207'
+          : '1px solid var(--border, #e5e7eb)',
       borderRadius: 8, marginBottom: 8,
-      background: 'var(--bg-elevated, #fff)',
+      // BLOCKED 면 옅은 amber tint 배경 (차단된 stage 가 한눈에)
+      background: isBlocked ? '#fffbeb' : 'var(--bg-elevated, #fff)',
       boxShadow: isResume ? '0 0 0 3px #3b82f622' : 'none',
       transition: 'all 0.2s',
     }}>
@@ -448,7 +476,7 @@ function StageRow({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 13, fontWeight: 700,
         }}>
-          {stage.num}
+          {isBlocked ? '🚫' : stage.num}
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 600 }}>
@@ -456,6 +484,15 @@ function StageRow({
             <span style={{ marginLeft: 8, fontSize: 12, color: statusColor(status), fontWeight: 500 }}>
               {statusIcon(status)} {statusLabel(status)}
             </span>
+            {isBlocked && (
+              <span style={{
+                marginLeft: 8, fontSize: 10, fontWeight: 700,
+                padding: '1px 6px', borderRadius: 3,
+                background: '#a16207', color: '#fff', letterSpacing: 0.3,
+              }}>
+                선행 FAIL 로 자동 차단
+              </span>
+            )}
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted, #6b7280)' }}>{stage.desc}</div>
         </div>
@@ -514,13 +551,19 @@ function StageRow({
                 const itStatus = isGroup && groupInfo ? groupInfo.status : it.status
                 const itDone = itStatus === 'PASS' || itStatus === 'FAIL' || itStatus === 'SKIP'
                 const itPct = itDone ? 100 : (itStatus === 'RUNNING' ? 50 : 0)
+                const itBlocked = itStatus === 'BLOCKED'
                 const checked = selectedItems.has(it.id)
                 const childList = isGroup ? stage.items.filter(c => c.parent === it.id) : []
                 const childSelectedCount = childList.filter(c => selectedItems.has(c.id)).length
                 const groupIndeterminate = isGroup && childSelectedCount > 0 && childSelectedCount < childList.length
                 return (
                   <Fragment key={it.id}>
-                    <tr style={{ borderTop: '1px solid var(--border, #f3f4f6)' }}>
+                    <tr style={{
+                      borderTop: '1px solid var(--border, #f3f4f6)',
+                      background: itBlocked ? '#fef3c7' : undefined,
+                      opacity: itBlocked ? 0.7 : 1,
+                    }}
+                    title={itBlocked ? '선행 stage FAIL 로 차단됨 — 함수 호출 없이 BLOCKED' : undefined}>
                       <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                         {isGroup ? (
                           <GroupCheckbox
@@ -587,8 +630,13 @@ function StageRow({
                       const cDone = c.status === 'PASS' || c.status === 'FAIL' || c.status === 'SKIP'
                       const cPct = cDone ? 100 : (c.status === 'RUNNING' ? 50 : 0)
                       const cChecked = selectedItems.has(c.id)
+                      const cBlocked = c.status === 'BLOCKED'
                       return (
-                        <tr key={c.id} style={{ background: 'var(--bg-muted, #fafafa)' }}>
+                        <tr key={c.id} style={{
+                          background: cBlocked ? '#fef3c7' : 'var(--bg-muted, #fafafa)',
+                          opacity: cBlocked ? 0.7 : 1,
+                        }}
+                        title={cBlocked ? '선행 stage FAIL 로 차단됨' : undefined}>
                           <td style={{ padding: '4px 8px', textAlign: 'center' }}>
                             <input
                               type="checkbox"
@@ -1004,8 +1052,9 @@ export default function VerificationV2Page() {
           <li>전체검증 ▶ — Stepper 의 재개 지점부터 시작 (S1=처음이면 <code>pipeline-full</code> preset)</li>
           <li>Stage 단독 ▶ — 해당 stage 의 부모/평면 항목만 (그룹은 자식 자동 포함)</li>
           <li>1.5초 폴링으로 진행 상태 갱신. 완료 시 회차 #ID 가 위에 표시되고 <a href="/testbed/verify-history">이력 페이지</a>에 자동 기록됨</li>
-          <li>S5 는 _verify_phase2 본체 1회 호출 후 22단계 결과를 그룹/자식에 분배 (자식 단독 실행 X — 향후 Python 포팅 시 자식 직접 실행 가능)</li>
-          <li>패키지 hash 매칭(immutability)은 S6 강화 작업 — 현재는 manifest 기록만</li>
+          <li>S5 22 step 모두 native Python 포팅 완료 — 자식 단독 실행 가능 (예: <code>S5-CSC-DEPLOY-INSTALL</code> 만 선택)</li>
+          <li>S6-ENTRY-CHECK 가 immutability gate 검사 — S5-MODULES-RUN-START 가 기록한 <code>.deployed-manifest.json</code> ↔ <code>packages/manifest.json</code> SHA-256 매칭</li>
+          <li>이력은 파일 기반 — <code>verify_runs/YYYY/MM/&lt;id&gt;.json</code> (DB 의존 X)</li>
         </ul>
       </div>
     </div>
