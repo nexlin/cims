@@ -1,9 +1,12 @@
-"""S5-CSC-DEPLOY (그룹) — TB-CSC(4419) → csc-server 배포 체인 3단계."""
+"""S5-CSC-DEPLOY (그룹) — TB-CSC(4419) → csc-server 배포 체인 3단계.
+
+자식 모두 native 화 완료 (_legacy 미사용). _verify_phase2 의 step 5~10 은 다음
+세션에서 다른 자식이 _legacy 를 호출하지 않는 한 재실행 안 됨.
+"""
 from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
-from ._legacy import get_legacy_results, step_result
 from . import _native_steps
 
 
@@ -35,11 +38,7 @@ def csc_deploy_group(ctx: VerifyContext) -> ItemResult:
     execution_order=21,
 )
 def deploy_agent_enroll(ctx: VerifyContext) -> ItemResult:
-    """Step 5+6+7 native 합성. _legacy.get_legacy_results 호출 안 함 — 다른
-    자식 (PKG-UPLOAD, INSTALL) 이 처음 _legacy 를 호출하면 _verify_phase2 본체가
-    step 5~7 도 재실행하지만 모두 idempotent (admin login 재발급, agent 409 →
-    DELETE+재생성). functional 영향 없음.
-    """
+    """Step 05+06+07 native 합성 (admin login + agent register + Test-agent)."""
     return _native_steps.steps_05_06_07_agent_enroll(ctx)
 
 
@@ -52,10 +51,8 @@ def deploy_agent_enroll(ctx: VerifyContext) -> ItemResult:
     execution_order=22,
 )
 def deploy_pkg_upload(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [8],
-                       "S5-CSC-DEPLOY-PKG-UPLOAD",
-                       "csc/console 패키지 업로드")
+    """Step 08 native — csc/console tarball 업로드."""
+    return _native_steps.step_08_package_upload(ctx)
 
 
 @verify_item(
@@ -67,7 +64,5 @@ def deploy_pkg_upload(ctx: VerifyContext) -> ItemResult:
     execution_order=23,
 )
 def deploy_install(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [9, 10],
-                       "S5-CSC-DEPLOY-INSTALL",
-                       "Deployment + Install job + poll")
+    """Step 09+10 native — deployment 생성 + install job + DB 폴링."""
+    return _native_steps.steps_09_10_install(ctx)

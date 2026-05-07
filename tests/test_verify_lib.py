@@ -1108,5 +1108,254 @@ class TestStage5AgentEnrollSteps(unittest.TestCase):
         self.assertEqual(statuses[2], self._ItemStatus.SKIP)
 
 
+class TestStage5CscDeploySteps(unittest.TestCase):
+    """S5 native — step 08 (package upload), 09 (deployment), 10 (install poll)."""
+
+    def setUp(self) -> None:
+        from verify.lib.items.stage5 import _native_steps
+        from verify.lib.context import VerifyContext
+        from verify.lib.common import csc_http
+        from verify.lib.common import db as _db
+        from verify.lib.registry import ItemStatus
+        self._native = _native_steps
+        self._VerifyContext = VerifyContext
+        self._csc_http = csc_http
+        self._db = _db
+        self._ItemStatus = ItemStatus
+        self._orig = {
+            "post_multipart": csc_http.post_multipart,
+            "post_json":      csc_http.post_json,
+            "csp_db_config":  _db.csp_db_config,
+            "connect":        _db.connect,
+        }
+
+    def tearDown(self) -> None:
+        self._csc_http.post_multipart = self._orig["post_multipart"]
+        self._csc_http.post_json      = self._orig["post_json"]
+        self._db.csp_db_config        = self._orig["csp_db_config"]
+        self._db.connect              = self._orig["connect"]
+
+    def _ctx_with_dist(self, dist_dir):
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        ctx.dist_dir = dist_dir
+        return ctx
+
+    # ── step 08 ──
+    def test_step_08_skips_without_tok(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_08_package_upload(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("admin login", r.detail)
+
+    def test_step_08_fail_when_tarball_missing(self) -> None:
+        import tempfile
+        # tok 은 있지만 packages/ 가 비어있음
+        captured = []
+        def fake_post_multipart(url, **kw):
+            captured.append(url)
+            return (200, {"id": 1})
+        self._csc_http.post_multipart = fake_post_multipart
+        with tempfile.TemporaryDirectory() as td:
+            os.makedirs(os.path.join(td, "packages"), exist_ok=True)
+            ctx = self._ctx_with_dist(td)
+            self._native._set(ctx, "tok", "JWT")
+            r = self._native.step_08_package_upload(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("tarball 없음", r.detail)
+        # 업로드는 호출 안 됨
+        self.assertEqual(captured, [])
+
+    def test_step_08_pass_with_tarballs(self) -> None:
+        import tempfile
+        captured: list = []
+        def fake_post_multipart(url, *, file_path, file_field="file",
+                                filename=None, form_fields=None,
+                                token=None, timeout=60):
+            captured.append((url, file_path, form_fields, token))
+            # csc 가 먼저 / console 다음 — 파일명으로 구분해 다른 id 반환
+            base = os.path.basename(file_path)
+            pid = 1 if base.startswith("csc-") else 2
+            return (201, {"id": pid})
+        self._csc_http.post_multipart = fake_post_multipart
+
+        with tempfile.TemporaryDirectory() as td:
+            pkg_dir = os.path.join(td, "packages")
+            os.makedirs(pkg_dir)
+            # csc-1.0.0.tar.gz, csc-1.10.0.tar.gz (natural sort: 1.10 > 1.0)
+            for fn in ("csc-1.0.0.tar.gz", "csc-1.10.0.tar.gz",
+                       "console-2.5.0.tar.gz"):
+                with open(os.path.join(pkg_dir, fn), "w") as f:
+                    f.write("dummy")
+            ctx = self._ctx_with_dist(td)
+            self._native._set(ctx, "tok", "JWT")
+            r = self._native.step_08_package_upload(ctx)
+
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "pkg_id_csc"), 1)
+        self.assertEqual(self._native._get(ctx, "pkg_id_console"), 2)
+        # csc 는 1.10.0 (natural sort) 이 선택됐는지 검증
+        csc_call = next(c for c in captured if "csc-" in c[1])
+        self.assertIn("csc-1.10.0.tar.gz", csc_call[1])
+        # form_fields 에 force=true
+        self.assertEqual(csc_call[2], {"force": "true"})
+        self.assertEqual(csc_call[3], "JWT")
+
+    def test_step_08_fail_on_http_error(self) -> None:
+        import tempfile
+        def fake_post_multipart(url, **kw):
+            return (500, {"error": "internal"})
+        self._csc_http.post_multipart = fake_post_multipart
+        with tempfile.TemporaryDirectory() as td:
+            pkg_dir = os.path.join(td, "packages")
+            os.makedirs(pkg_dir)
+            with open(os.path.join(pkg_dir, "csc-1.0.0.tar.gz"), "w") as f:
+                f.write("d")
+            with open(os.path.join(pkg_dir, "console-1.0.0.tar.gz"), "w") as f:
+                f.write("d")
+            ctx = self._ctx_with_dist(td)
+            self._native._set(ctx, "tok", "JWT")
+            r = self._native.step_08_package_upload(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("status=500", r.detail)
+
+    # ── step 09 ──
+    def test_step_09_skips_without_tok_or_aid(self) -> None:
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        # tok 있지만 aid 없음
+        self._native._set(ctx, "tok", "JWT")
+        r = self._native.step_09_deployment_create(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_step_09_fail_without_pkg_ids(self) -> None:
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "aid_csc", 7)
+        # pkg_id_csc / pkg_id_console 미설정 → SKIP 노트 + FAIL
+        r = self._native.step_09_deployment_create(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("step 08", r.detail)
+
+    def test_step_09_pass_with_overlay(self) -> None:
+        captured: list = []
+        def fake_post_json(url, payload, token=None, timeout=15):
+            captured.append((url, payload))
+            # csc → did=11, console → did=22
+            did = 11 if payload["process_name"] == "CSC" else 22
+            return (201, {"id": did})
+        self._csc_http.post_json = fake_post_json
+
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok", "JWT")
+        self._native._set(ctx, "aid_csc", 7)
+        self._native._set(ctx, "pkg_id_csc", 1)
+        self._native._set(ctx, "pkg_id_console", 2)
+        r = self._native.step_09_deployment_create(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "dep_id_csc"), 11)
+        self.assertEqual(self._native._get(ctx, "dep_id_console"), 22)
+        # config overlay 검증 — csc:Server.Port=4445, console:Port=8081
+        csc_payload = next(p for u, p in captured if p["process_name"] == "CSC")
+        self.assertEqual(csc_payload["config"], {"Server.Port": 4445})
+        cons_payload = next(p for u, p in captured if p["process_name"] == "CONSOLE")
+        self.assertEqual(cons_payload["config"], {"Port": 8081})
+
+    # ── step 10 ──
+    def test_step_10_skips_without_tok(self) -> None:
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        r = self._native.step_10_install_poll(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_step_10_fail_without_dep_ids(self) -> None:
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok", "JWT")
+        r = self._native.step_10_install_poll(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("step 09", r.detail)
+
+    def test_step_10_pass_when_all_succeed(self) -> None:
+        # POST install jobs 통과 + DB poll 1회만에 succeeded
+        def fake_post_json(url, payload, token=None, timeout=10):
+            return (202, {"job_id": 1})
+        self._csc_http.post_json = fake_post_json
+
+        # csp_db_config / connect 모킹 → 곧장 succeeded 반환
+        self._db.csp_db_config = lambda dist: {"Host": "x", "User": "x",
+                                                "Password": "x", "DbName": "x"}
+
+        class FakeCursor:
+            def __init__(self, results): self._r = results
+            def execute(self, sql, params=None):
+                self._params = params
+            def fetchone(self):
+                # always succeeded
+                return ("succeeded",)
+
+        class FakeConn:
+            def cursor(self): return FakeCursor([])
+            def close(self): pass
+
+        self._db.connect = lambda cfg: FakeConn()
+
+        # time.sleep 을 빠르게 만들기
+        import time as _t
+        orig_sleep = _t.sleep
+        _t.sleep = lambda s: None
+        try:
+            ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+            self._native._set(ctx, "tok", "JWT")
+            self._native._set(ctx, "dep_id_csc", 11)
+            self._native._set(ctx, "dep_id_console", 22)
+            r = self._native.step_10_install_poll(ctx)
+        finally:
+            _t.sleep = orig_sleep
+
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertTrue(self._native._get(ctx, "all_install_done_csc"))
+        self.assertIn("succeeded", r.detail)
+
+    def test_step_10_fail_on_timeout(self) -> None:
+        def fake_post_json(url, payload, token=None, timeout=10):
+            return (202, {})
+        self._csc_http.post_json = fake_post_json
+        self._db.csp_db_config = lambda dist: {"Host": "x", "User": "x",
+                                                "Password": "x", "DbName": "x"}
+
+        class FakeCursor:
+            def execute(self, sql, params=None): pass
+            def fetchone(self): return ("deploying",)    # 영원히 deploying
+        class FakeConn:
+            def cursor(self): return FakeCursor()
+            def close(self): pass
+        self._db.connect = lambda cfg: FakeConn()
+
+        import time as _t
+        orig_sleep = _t.sleep
+        _t.sleep = lambda s: None
+        try:
+            ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+            self._native._set(ctx, "tok", "JWT")
+            self._native._set(ctx, "dep_id_csc", 11)
+            r = self._native.step_10_install_poll(ctx)
+        finally:
+            _t.sleep = orig_sleep
+
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("all_done=False", r.detail)
+        self.assertFalse(self._native._get(ctx, "all_install_done_csc"))
+
+    # ── 합성 함수 (steps_09_10) ──
+    def test_steps_09_10_composite(self) -> None:
+        """step 09 SKIP (no aid) → step 10 도 dep 없어 FAIL → composite=FAIL."""
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok", "JWT")
+        # aid_csc 미설정 → step 09 SKIP, step 10 도 dep 없어 FAIL
+        result = self._native.steps_09_10_install(ctx)
+        self.assertEqual(result.id, "S5-CSC-DEPLOY-INSTALL")
+        self.assertEqual(result.status, self._ItemStatus.FAIL)
+        self.assertEqual(len(result.children), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

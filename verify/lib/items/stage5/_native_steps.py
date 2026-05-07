@@ -39,7 +39,9 @@ ctx.state["_s5_native"] 에 결과 + 공유 변수 (JWT, agent_id, Test-agent pi
 """
 from __future__ import annotations
 
+import glob
 import os
+import re
 import time
 from typing import Optional
 
@@ -48,6 +50,19 @@ from ...context import VerifyContext
 from ... import shell
 from ...common import csc_http
 from ...common import db as _db
+
+
+def _natural_key(s: str) -> list:
+    """Natural sort key — '1.10' > '1.9' (숫자 청크는 int 비교)."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
+
+
+def _latest_tarball(pkg_dir: str, prefix: str) -> Optional[str]:
+    """$pkg_dir/<prefix>-*.tar.gz 중 natural sort 최고값 (sort -V tail -1 동등)."""
+    cands = glob.glob(os.path.join(pkg_dir, f"{prefix}-*.tar.gz"))
+    if not cands:
+        return None
+    return sorted(cands, key=_natural_key)[-1]
 
 
 _STATE_KEY = "_s5_native"
@@ -423,8 +438,293 @@ def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Composite — S5-CSC-DEPLOY-AGENT-ENROLL (steps 5+6+7)
+# Step 08 — Package upload (csc + console)
 # ─────────────────────────────────────────────────────────────
+_CSC_PACKAGES = ("csc", "console")
+"""S5-CSC-DEPLOY 단계가 다루는 패키지 모듈 (탐색 prefix 와 동일)."""
+
+
+def step_08_package_upload(ctx: VerifyContext) -> ItemResult:
+    """Step 08 — TB-CSC(4419) 에 csc + console tarball 업로드.
+
+    $DIST_DIR/packages/{csc,console}-*.tar.gz 중 natural-sort 최고값 1개씩.
+    POST /api/v1/packages (multipart, force=true) → package_id 추출.
+    성공 시 ctx.state["pkg_id_csc"] / ["pkg_id_console"] 저장.
+    한 모듈이라도 tarball 없거나 업로드 실패면 FAIL.
+    """
+    if already_ran(ctx, 8):
+        return get_native_result(ctx, 8)
+
+    tok = _get(ctx, "tok", "")
+    if not tok:
+        result = ItemResult(
+            id="S5-CSC-DEPLOY-PKG-UPLOAD", name="패키지 업로드 (csc + console)",
+            status=ItemStatus.SKIP,
+            detail="step 05 (admin login) 미실행 / 실패 — JWT 없음",
+            stage=5,
+        )
+        _save(ctx, 8, result)
+        return result
+
+    base = _TB_CSC_BASE
+    pkg_dir = os.path.join(ctx.dist_dir, "packages")
+    notes: list = []
+    fail = False
+    for name in _CSC_PACKAGES:
+        tar = _latest_tarball(pkg_dir, name)
+        if not tar:
+            notes.append(f"- [FAIL] {name}: tarball 없음 ({pkg_dir}/{name}-*.tar.gz)")
+            fail = True
+            continue
+        try:
+            status, body = csc_http.post_multipart(
+                f"{base}/api/v1/packages",
+                file_path=tar,
+                form_fields={"force": "true"},
+                token=tok, timeout=120,
+            )
+        except Exception as e:
+            notes.append(f"- [FAIL] {name}: 업로드 예외 {type(e).__name__}: {e}")
+            fail = True
+            continue
+        if status not in (200, 201) or not isinstance(body, dict) or not body.get("id"):
+            notes.append(
+                f"- [FAIL] {name}: status={status} body={str(body)[:120]}"
+            )
+            fail = True
+            continue
+        pkg_id = int(body["id"])
+        _set(ctx, f"pkg_id_{name}", pkg_id)
+        notes.append(f"- [OK] {name}: package_id={pkg_id} ({os.path.basename(tar)})")
+
+    result = ItemResult(
+        id="S5-CSC-DEPLOY-PKG-UPLOAD", name="패키지 업로드 (csc + console)",
+        status=ItemStatus.FAIL if fail else ItemStatus.PASS,
+        detail="\n".join(notes) if notes else "no packages",
+        stage=5,
+    )
+    _save(ctx, 8, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 09 — Deployment 생성 (config overlay)
+# ─────────────────────────────────────────────────────────────
+def _csc_overlay(name: str) -> dict:
+    """csc-server 자식 config overlay — Phase 1 충돌 회피용 포트 매핑."""
+    if name == "csc":     return {"Server.Port": 4445}
+    if name == "console": return {"Port": 8081}
+    return {}
+
+
+def step_09_deployment_create(ctx: VerifyContext) -> ItemResult:
+    """Step 09 — csc + console deployment 생성 (config overlay 포함).
+
+    install_path = $DIST_DIR/csc-server/{csc,console}.
+    process_name = upper-case (CSC / CONSOLE).
+    config overlay 로 csc:Server.Port=4445, console:Port=8081 적용.
+    성공 시 ctx.state["dep_id_csc"] / ["dep_id_console"] 저장.
+    """
+    if already_ran(ctx, 9):
+        return get_native_result(ctx, 9)
+
+    tok = _get(ctx, "tok", "")
+    aid = _get(ctx, "aid_csc")
+    if not tok or aid is None:
+        result = ItemResult(
+            id="S5-CSC-DEPLOY-INSTALL-CREATE", name="deployment 생성",
+            status=ItemStatus.SKIP,
+            detail="step 05/06 미실행 / 실패 — tok/agent_id 없음",
+            stage=5,
+        )
+        _save(ctx, 9, result)
+        return result
+
+    base = _TB_CSC_BASE
+    notes: list = []
+    fail = False
+    for name in _CSC_PACKAGES:
+        pkg_id = _get(ctx, f"pkg_id_{name}")
+        if pkg_id is None:
+            notes.append(f"- [SKIP] {name}: step 08 에서 package_id 미확보")
+            fail = True
+            continue
+        install_path = os.path.join(ctx.dist_dir, "csc-server", name)
+        payload = {
+            "agent_id":      int(aid),
+            "package_id":    int(pkg_id),
+            "install_path":  install_path,
+            "process_name":  name.upper(),
+            "config":        _csc_overlay(name),
+        }
+        try:
+            status, body = csc_http.post_json(
+                f"{base}/api/v1/deployments", payload, token=tok, timeout=15,
+            )
+        except Exception as e:
+            notes.append(f"- [FAIL] {name}: 호출 예외 {type(e).__name__}: {e}")
+            fail = True
+            continue
+        if status not in (200, 201) or not isinstance(body, dict) or not body.get("id"):
+            notes.append(f"- [FAIL] {name}: status={status} body={str(body)[:120]}")
+            fail = True
+            continue
+        did = int(body["id"])
+        _set(ctx, f"dep_id_{name}", did)
+        notes.append(
+            f"- [OK] {name}: deployment_id={did} → {install_path} "
+            f"overlay={payload['config']}"
+        )
+
+    result = ItemResult(
+        id="S5-CSC-DEPLOY-INSTALL-CREATE", name="deployment 생성",
+        status=ItemStatus.FAIL if fail else ItemStatus.PASS,
+        detail="\n".join(notes) if notes else "no deployments",
+        stage=5,
+    )
+    _save(ctx, 9, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 10 — Install job + DB 폴링
+# ─────────────────────────────────────────────────────────────
+def _deployment_status(name: str, did: int, dist_dir: str) -> Optional[str]:
+    """agent_deployment.status 조회. 실패 시 None."""
+    cfg = _db.csp_db_config(dist_dir)
+    if not cfg: return None
+    try:
+        conn = _db.connect(cfg)
+    except Exception:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT status FROM agent_deployment WHERE id=%s", (did,))
+        row = cur.fetchone()
+        return str(row[0]) if row and row[0] is not None else None
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+def step_10_install_poll(ctx: VerifyContext) -> ItemResult:
+    """Step 10 — install job 발행 + agent_deployment 상태 폴링 (최대 60s).
+
+    pending/deploying 이 모두 사라질 때까지 대기. 각 deployment 의 최종 상태를
+    detail 에 기록. all_done 여부를 ctx.state["all_install_done_csc"] 에 저장.
+    """
+    if already_ran(ctx, 10):
+        return get_native_result(ctx, 10)
+
+    tok = _get(ctx, "tok", "")
+    if not tok:
+        result = ItemResult(
+            id="S5-CSC-DEPLOY-INSTALL-POLL", name="install job + 폴링",
+            status=ItemStatus.SKIP,
+            detail="step 05 (admin login) 미실행 — tok 없음",
+            stage=5,
+        )
+        _save(ctx, 10, result)
+        return result
+
+    base = _TB_CSC_BASE
+    deployments: list = []
+    for name in _CSC_PACKAGES:
+        did = _get(ctx, f"dep_id_{name}")
+        if did is not None:
+            deployments.append((name, int(did)))
+    if not deployments:
+        result = ItemResult(
+            id="S5-CSC-DEPLOY-INSTALL-POLL", name="install job + 폴링",
+            status=ItemStatus.FAIL,
+            detail="step 09 에서 deployment 미확보",
+            stage=5,
+        )
+        _save(ctx, 10, result)
+        return result
+
+    # install job 발행
+    notes: list = []
+    for name, did in deployments:
+        try:
+            status, _ = csc_http.post_json(
+                f"{base}/api/v1/deployments/{did}/job",
+                {"job_type": "install"}, token=tok, timeout=10,
+            )
+        except Exception as e:
+            notes.append(f"- [FAIL] {name}: install 발행 예외 {e}")
+            continue
+        if status not in (200, 201, 202):
+            notes.append(f"- [FAIL] {name}: install 발행 status={status}")
+
+    # 폴링 (sleep 2s × 30 = 60s)
+    elapsed = 0
+    all_done = False
+    final_status: dict = {}
+    for _ in range(30):
+        time.sleep(2); elapsed += 2
+        still = False
+        for name, did in deployments:
+            st = _deployment_status(name, did, ctx.dist_dir)
+            final_status[name] = st or "(unknown)"
+            if st in ("pending", "deploying"):
+                still = True
+        if not still:
+            all_done = True
+            break
+
+    _set(ctx, "all_install_done_csc", bool(all_done))
+    for name, did in deployments:
+        st = final_status.get(name, "(unknown)")
+        ok = st in ("succeeded", "installed")
+        notes.append(
+            f"- [{'OK' if ok else 'WARN'}] {name}: did={did} status={st}"
+        )
+
+    overall = ItemStatus.PASS if all_done and all(
+        final_status.get(n) in ("succeeded", "installed") for n, _ in deployments
+    ) else ItemStatus.FAIL
+    summary = (
+        f"all_done={all_done} elapsed={elapsed}s\n"
+        + "\n".join(notes)
+    )
+    result = ItemResult(
+        id="S5-CSC-DEPLOY-INSTALL-POLL", name="install job + 폴링",
+        status=overall, detail=summary, stage=5,
+    )
+    _save(ctx, 10, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Composite helpers — verify_item 자식 1개에 여러 step 합산
+# ─────────────────────────────────────────────────────────────
+_RANK = {ItemStatus.PASS: 0, ItemStatus.SKIP: 1,
+         ItemStatus.BLOCKED: 2, ItemStatus.FAIL: 3}
+
+
+def _summarize(parent_id: str, name: str, results: list) -> ItemResult:
+    """worst-status + 합산 elapsed 로 묶어 ItemResult 반환."""
+    worst = ItemStatus.PASS
+    total_ms = 0
+    for r in results:
+        if _RANK.get(r.status, 0) > _RANK.get(worst, 0):
+            worst = r.status
+        total_ms += r.elapsed_ms or 0
+    n_pass = sum(1 for r in results if r.status == ItemStatus.PASS)
+    n_fail = sum(1 for r in results if r.status == ItemStatus.FAIL)
+    n_skip = sum(1 for r in results if r.status == ItemStatus.SKIP)
+    parts: list = []
+    if n_pass: parts.append(f"PASS {n_pass}")
+    if n_fail: parts.append(f"FAIL {n_fail}")
+    if n_skip: parts.append(f"SKIP {n_skip}")
+    return ItemResult(
+        id=parent_id, name=name,
+        status=worst, detail=", ".join(parts) or "no children",
+        elapsed_ms=total_ms, stage=5, children=list(results),
+    )
+
+
 def steps_05_06_07_agent_enroll(ctx: VerifyContext) -> ItemResult:
     """S5-CSC-DEPLOY-AGENT-ENROLL 본체 — step 05/06/07 순차 실행 후 worst-status
     합성. 자식 ItemResult 는 result.children 에 첨부 → runner 가 child-result
@@ -435,25 +735,17 @@ def steps_05_06_07_agent_enroll(ctx: VerifyContext) -> ItemResult:
         step_06_agent_register(ctx),
         step_07_testagent_spawn(ctx),
     ]
-    rank = {ItemStatus.PASS: 0, ItemStatus.SKIP: 1,
-            ItemStatus.BLOCKED: 2, ItemStatus.FAIL: 3}
-    worst = ItemStatus.PASS
-    total_ms = 0
-    for r in rs:
-        if rank.get(r.status, 0) > rank.get(worst, 0):
-            worst = r.status
-        total_ms += r.elapsed_ms or 0
-    n_pass = sum(1 for r in rs if r.status == ItemStatus.PASS)
-    n_fail = sum(1 for r in rs if r.status == ItemStatus.FAIL)
-    n_skip = sum(1 for r in rs if r.status == ItemStatus.SKIP)
-    parts = []
-    if n_pass: parts.append(f"PASS {n_pass}")
-    if n_fail: parts.append(f"FAIL {n_fail}")
-    if n_skip: parts.append(f"SKIP {n_skip}")
-    return ItemResult(
-        id="S5-CSC-DEPLOY-AGENT-ENROLL",
-        name="TB-CSC admin login + agent enroll",
-        status=worst, detail=", ".join(parts) or "no children",
-        elapsed_ms=total_ms, stage=5,
-        children=rs,
-    )
+    return _summarize("S5-CSC-DEPLOY-AGENT-ENROLL",
+                      "TB-CSC admin login + agent enroll", rs)
+
+
+def steps_09_10_install(ctx: VerifyContext) -> ItemResult:
+    """S5-CSC-DEPLOY-INSTALL 본체 — step 09 (deployment 생성) + step 10 (install
+    job + DB 폴링) 순차.
+    """
+    rs = [
+        step_09_deployment_create(ctx),
+        step_10_install_poll(ctx),
+    ]
+    return _summarize("S5-CSC-DEPLOY-INSTALL",
+                      "Deployment + Install job + poll", rs)
