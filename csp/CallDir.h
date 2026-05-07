@@ -439,7 +439,15 @@ private:
         return k.empty() ? "permanent" : k;
     }
 
-    /** 세션 종료 (lock 이미 획득된 상태에서 호출) */
+    /** 세션 종료 (lock 이미 획득된 상태에서 호출).
+     *
+     *  session.json state="ended" + end_time 업데이트만 수행.
+     *  m_mapPttSession / m_mapPttSessionId 의 entry 는 의도적으로 유지하여
+     *  바로 뒤따르는 멤버 leave/join 의 PttLogEvent 가 같은 디렉토리에
+     *  events.jsonl 을 누적할 수 있게 한다. 새 _sessionStart 로 호 재시작
+     *  시에는 GetPttSessionDir 의 sessKey 비교(line 234)에서 _endSessionLocked
+     *  가 다시 호출된 직후 line 253 에서 entry 가 overwrite 되므로 누수 없음.
+     */
     void _endSessionLocked( const std::string& strGroupId ) {
         auto it = m_mapPttSession.find( strGroupId );
         if ( it == m_mapPttSession.end() ) return;
@@ -458,8 +466,8 @@ private:
                 fclose( f );
             }
         }
-        m_mapPttSession.erase( strGroupId );
-        m_mapPttSessionId.erase( strGroupId );
+        // NOTE: m_mapPttSession / m_mapPttSessionId 는 erase 하지 않음.
+        // GetPttSessionDir 가 새 sessKey 진입 시 자동 overwrite.
     }
 
     void _writeJsonl( const std::string& dir, const char* from, const char* to, const char* proto, const char* label,
