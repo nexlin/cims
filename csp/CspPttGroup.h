@@ -5,10 +5,11 @@
 #ifndef _XML_GROUP_H_
 #define _XML_GROUP_H_
 
-#include <string>
-#include <vector>
 #include <map>
 #include <memory>
+#include <string>
+#include <vector>
+
 #include "SipMutex.h"
 
 /**
@@ -18,7 +19,8 @@
 
 class CspPttUser {
 public:
-    CspPttUser(std::string id, unsigned int prio) : _id(id), _priority(prio) {}
+    CspPttUser( std::string id, unsigned int prio ) : _id( id ), _priority( prio ) {
+    }
     ~CspPttUser();
 
     std::string _id;
@@ -26,7 +28,6 @@ public:
 
     std::vector<std::string> _groups;
 };
-
 
 class CspPttGroup {
 public:
@@ -68,6 +69,5 @@ public:
     bool load( std::string groupId );
     void Clear();
 };
-
 
 #endif

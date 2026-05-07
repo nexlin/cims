@@ -18,22 +18,22 @@
 
 #include "CspUser.h"
 
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+
 #include "CspServer.h"
 #include "DbManager.h"
 #include "Directory.h"
-#include "MemoryDebug.h"
 #include "Log.h"
+#include "MemoryDebug.h"
+#include "SimpleJson.h"
 #include "SipParserDefine.h"
 #include "SipServerSetup.h"
 #include "TimeUtility.h"
 #include "XmlElement.h"
-#include "SimpleJson.h"
-#include <fstream>
-#include <sstream>
-#include <iomanip>
 
 CspUserMap gclsCspUserMap;
-
 
 /**
  * @ingroup CspServer
@@ -54,77 +54,74 @@ void CspUser::clear() {
     m_iLogoutTime = 0;
 }
 
-
-
-//std::string strFileName = gclsSetup.m_strUserDataFolder; 
-/**/    
-bool CspUserMap::_loadUserFromFile(std::string strUserId, CspUser &clsUser) {
+// std::string strFileName = gclsSetup.m_strUserDataFolder;
+/**/
+bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     std::string strFileName = strUserId + ".json";
-    
+
     // Assuming m_strUserDataFolder is "cims/csp/User" as requested
     std::string strFolderName = gclsSetup.m_strUserDataFolder;
     std::string strFilePath = strFolderName + "/" + strFileName;
 
-    std::ifstream t(strFilePath);
-    if (!t.is_open()) {
+    std::ifstream t( strFilePath );
+    if ( !t.is_open() ) {
         // CLog::Print(LOG_DEBUG, "User File not found: %s", strFilePath.c_str());
         return false;
     }
-    
+
     std::stringstream buffer;
     buffer << t.rdbuf();
 
-    SimpleJson::JsonNode jsonUser = SimpleJson::JsonNode::Parse(buffer.str());
+    SimpleJson::JsonNode jsonUser = SimpleJson::JsonNode::Parse( buffer.str() );
 
-    if(jsonUser.type != SimpleJson::JSON_OBJECT) { // ID check might be redundant if we trust filename map
-        CLog::Print(LOG_ERROR, "[CspUserMap] Invalid JSON format for user %s", strUserId.c_str());
+    if ( jsonUser.type != SimpleJson::JSON_OBJECT ) {  // ID check might be redundant if we trust filename map
+        CLog::Print( LOG_ERROR, "[CspUserMap] Invalid JSON format for user %s", strUserId.c_str() );
         return false;
     }
     // Handle simplified JSON structure where ID might not be in file or is implied.
     // User sample: ID in file? "0000001000.json"
-    
+
     clsUser.m_strId = strUserId;
-    if (jsonUser.Has("auth_id")) {
-        clsUser.m_strAuthId = jsonUser.GetString("auth_id");
+    if ( jsonUser.Has( "auth_id" ) ) {
+        clsUser.m_strAuthId = jsonUser.GetString( "auth_id" );
     } else {
         clsUser.m_strAuthId = strUserId;
     }
-    
-    if (jsonUser.Has("passwd")) clsUser.m_strPassWord = jsonUser.GetString("passwd");
-    if (jsonUser.Has("org_id")) clsUser.m_strOrganizationId = jsonUser.GetString("org_id");
-    if (jsonUser.Has("service_type")) clsUser.m_strServiceType = jsonUser.GetString("service_type");
-    
-    std::string dnd = jsonUser.GetString("dnd");
-    clsUser.m_bDnd = (dnd == "true");
-    
-    if (jsonUser.Has("forward_id")) clsUser.m_strForward = jsonUser.GetString("forward_id");
-    
-    if (jsonUser.Has("reject_id")) {
-        SimpleJson::JsonNode rejectNode = jsonUser.Get("reject_id");
-        if (rejectNode.type == SimpleJson::JSON_ARRAY) {
-            for(size_t i=0; i<rejectNode.Size(); i++) {
-                clsUser.m_vecReject.push_back(rejectNode.At(i).AsString());
+
+    if ( jsonUser.Has( "passwd" ) ) clsUser.m_strPassWord = jsonUser.GetString( "passwd" );
+    if ( jsonUser.Has( "org_id" ) ) clsUser.m_strOrganizationId = jsonUser.GetString( "org_id" );
+    if ( jsonUser.Has( "service_type" ) ) clsUser.m_strServiceType = jsonUser.GetString( "service_type" );
+
+    std::string dnd = jsonUser.GetString( "dnd" );
+    clsUser.m_bDnd = ( dnd == "true" );
+
+    if ( jsonUser.Has( "forward_id" ) ) clsUser.m_strForward = jsonUser.GetString( "forward_id" );
+
+    if ( jsonUser.Has( "reject_id" ) ) {
+        SimpleJson::JsonNode rejectNode = jsonUser.Get( "reject_id" );
+        if ( rejectNode.type == SimpleJson::JSON_ARRAY ) {
+            for ( size_t i = 0; i < rejectNode.Size(); i++ ) {
+                clsUser.m_vecReject.push_back( rejectNode.At( i ).AsString() );
             }
         }
     }
-    
+
     // Time parsing (assuming string format "YYYY-MM-DD HH:MM:SS" or similar)
     // SimpleJson returns string for "create_time"
-    std::string sTime = jsonUser.GetString("create_time");
+    std::string sTime = jsonUser.GetString( "create_time" );
     // TODO: Use TimeUtility::GetTime or similar if available, else 0
     // clsUser.m_iCreateTime = ...
-    
-    sTime = jsonUser.GetString("update_time");
+
+    sTime = jsonUser.GetString( "update_time" );
     // clsUser.m_iUpdateTime = ...
-    
+
     // Register/Logout time might not be in static JSON config usually?
     // If they are state fields, they might be in a separate DB or dynamic file.
     // For now, let's just leave them as 0 if not present.
-    
-    clsUser._loadTime = time(NULL);
+
+    clsUser._loadTime = time( NULL );
     return true;
 }
-
 
 void CspUserMap::Insert( CspUser &clsXmlUser ) {
     CSP_USER_MAP::iterator itMap;
@@ -139,9 +136,7 @@ void CspUserMap::Insert( CspUser &clsXmlUser ) {
     m_clsMutex.release();
 }
 
-
-
-bool CspUserMap::isAlive(std::string strToId, CspUser & clsUser) {
+bool CspUserMap::isAlive( std::string strToId, CspUser &clsUser ) {
     CSP_USER_MAP::iterator itMap;
     bool bRes = false;
 
@@ -154,17 +149,17 @@ bool CspUserMap::isAlive(std::string strToId, CspUser & clsUser) {
     m_clsMutex.release();
 
     if ( bRes ) {
-         time_t registerTime = clsUser.m_iRegisterTime;
-         time_t curTime = time(NULL);
-         
-         // Timeout Check
-         if ( curTime - registerTime >= gclsSetup.m_iUserTimeout ) {
-             return false;
-         }
-         return true;
+        time_t registerTime = clsUser.m_iRegisterTime;
+        time_t curTime = time( NULL );
+
+        // Timeout Check
+        if ( curTime - registerTime >= gclsSetup.m_iUserTimeout ) {
+            return false;
+        }
+        return true;
     }
-    
-    return false; // Not found
+
+    return false;  // Not found
 }
 
 bool CspUserMap::Select( const char *pszUserId, CspUser &clsXmlUser ) {
@@ -179,20 +174,20 @@ bool CspUserMap::Select( const char *pszUserId, CspUser &clsXmlUser ) {
     }
     m_clsMutex.release();
 
-    if (!bRes) {
+    if ( !bRes ) {
         // DB first (if connected), file as fallback
-        if (gclsDbManager.IsConnected()) {
-            bRes = gclsDbManager.SelectUser(pszUserId, clsXmlUser);
+        if ( gclsDbManager.IsConnected() ) {
+            bRes = gclsDbManager.SelectUser( pszUserId, clsXmlUser );
         }
-        if (!bRes && !gclsSetup.m_strUserDataFolder.empty()) {
-            bRes = _loadUserFromFile(pszUserId, clsXmlUser);
+        if ( !bRes && !gclsSetup.m_strUserDataFolder.empty() ) {
+            bRes = _loadUserFromFile( pszUserId, clsXmlUser );
         }
-        if (bRes) Insert(clsXmlUser);
+        if ( bRes ) Insert( clsXmlUser );
     }
     return bRes;
 }
 
-bool CspUserMap::registerUser(std::string strUserId, std::string strPassWord ) {
+bool CspUserMap::registerUser( std::string strUserId, std::string strPassWord ) {
     CSP_USER_MAP::iterator itMap;
     bool bRes = false;
     CspUser user;
@@ -205,32 +200,32 @@ bool CspUserMap::registerUser(std::string strUserId, std::string strPassWord ) {
     }
     m_clsMutex.release();
 
-    if (!bRes) {
+    if ( !bRes ) {
         // DB first (if connected), file as fallback
-        if (gclsDbManager.IsConnected()) {
-            bRes = gclsDbManager.SelectUser(strUserId, user);
+        if ( gclsDbManager.IsConnected() ) {
+            bRes = gclsDbManager.SelectUser( strUserId, user );
         }
-        if (!bRes && !gclsSetup.m_strUserDataFolder.empty()) {
-            bRes = _loadUserFromFile(strUserId, user);
+        if ( !bRes && !gclsSetup.m_strUserDataFolder.empty() ) {
+            bRes = _loadUserFromFile( strUserId, user );
         }
-        if (bRes) Insert(user);
+        if ( bRes ) Insert( user );
     }
 
-    if (!bRes) return false;
+    if ( !bRes ) return false;
 
-    if (!strPassWord.empty() && user.m_strPassWord != strPassWord) return false;
+    if ( !strPassWord.empty() && user.m_strPassWord != strPassWord ) return false;
 
-    user.m_iRegisterTime = time(NULL);
-    _update(user);
+    user.m_iRegisterTime = time( NULL );
+    _update( user );
 
     // register_time 동기화 (DB 연결된 경우 항상)
-    if (gclsDbManager.IsConnected()) {
-        gclsDbManager.UpdateRegisterTime(strUserId);
+    if ( gclsDbManager.IsConnected() ) {
+        gclsDbManager.UpdateRegisterTime( strUserId );
     }
     return true;
 }
 
-bool CspUserMap::unregisterUser(std::string strUserId ) {
+bool CspUserMap::unregisterUser( std::string strUserId ) {
     CspUser user;
     bool bRes = false;
 
@@ -242,44 +237,44 @@ bool CspUserMap::unregisterUser(std::string strUserId ) {
     }
     m_clsMutex.release();
 
-    if (!bRes) return false;
+    if ( !bRes ) return false;
 
-    user.m_iLogoutTime = time(NULL);
-    _update(user);
+    user.m_iLogoutTime = time( NULL );
+    _update( user );
 
     // logout_time 동기화 (DB 연결된 경우 항상)
-    if (gclsDbManager.IsConnected()) {
-        gclsDbManager.UpdateLogoutTime(strUserId);
+    if ( gclsDbManager.IsConnected() ) {
+        gclsDbManager.UpdateLogoutTime( strUserId );
     }
     return true;
 }
 
-bool CspUserMap::_update(CspUser &clsUser) {
+bool CspUserMap::_update( CspUser &clsUser ) {
     m_clsMutex.acquire();
     m_clsMap[clsUser.m_strId] = clsUser;
     m_clsMutex.release();
     return true;
 }
 
-bool CspUserMap::_remove(std::string strUserId) {
+bool CspUserMap::_remove( std::string strUserId ) {
     m_clsMutex.acquire();
-    m_clsMap.erase(strUserId);
+    m_clsMap.erase( strUserId );
     m_clsMutex.release();
     return true;
 }
 
-bool CspUserMap::Remove(std::string strUserId) {
-    return _remove(strUserId);
+bool CspUserMap::Remove( std::string strUserId ) {
+    return _remove( strUserId );
 }
 
-bool CspUserMap::ReloadFromDb(std::string strUserId) {
+bool CspUserMap::ReloadFromDb( std::string strUserId ) {
     CspUser clsUser;
     bool bLoaded = false;
-    if (gclsDbManager.IsConnected()) {
-        bLoaded = gclsDbManager.SelectUser(strUserId, clsUser);
+    if ( gclsDbManager.IsConnected() ) {
+        bLoaded = gclsDbManager.SelectUser( strUserId, clsUser );
     }
-    if (bLoaded) {
-        Insert(clsUser);
+    if ( bLoaded ) {
+        Insert( clsUser );
         return true;
     }
     return false;
@@ -308,7 +303,7 @@ static bool ScanUserFiles( const char *pszDirName, std::list<std::string> &clsUs
 }
 
 bool CspUserMap::LoadFromDb() {
-    return gclsDbManager.LoadAllUsers(*this);
+    return gclsDbManager.LoadAllUsers( *this );
 }
 
 bool CspUserMap::Load( const char *pszDirName ) {

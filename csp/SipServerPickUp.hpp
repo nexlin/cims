@@ -5,7 +5,8 @@ void CSipServer::PickUp( const char *pszCallId, const char *pszFrom, const char 
 
     CLog::Print( LOG_DEBUG, "EventIncomingCall(%s,%s,%s)  CallPickup", pszCallId, pszFrom, pszTo );
 
-    if ( gclsCspUserMap.Select( pszFrom, xmlFrom ) && gclsUserMap.SelectGroup( xmlFrom.m_strOrganizationId.c_str(), clsUserIdList ) ) {
+    if ( gclsCspUserMap.Select( pszFrom, xmlFrom ) &&
+         gclsUserMap.SelectGroup( xmlFrom.m_strOrganizationId.c_str(), clsUserIdList ) ) {
         USER_ID_LIST::iterator itUIL;
         std::string strOldCallId;
 

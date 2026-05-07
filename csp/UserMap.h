@@ -21,10 +21,10 @@
 
 #include <map>
 
+#include "CspUser.h"
 #include "SipMessage.h"
 #include "SipMutex.h"
 #include "SipUserAgent.h"
-#include "CspUser.h"
 
 typedef std::list<std::string> USER_ID_LIST;
 

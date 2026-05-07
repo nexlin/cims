@@ -18,24 +18,25 @@
 
 #include "SipServerSetup.h"
 
-#include <string.h>
+#include <arpa/inet.h>
 #include <limits.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+#include <fstream>
+#include <sstream>
 
 #include "CspServer.h"
 #include "Log.h"
 #include "MemoryDebug.h"
-#include "SipStackDefine.h"
 #include "SimpleJson.h"
-#include <fstream>
-#include <sstream>
+#include "SipStackDefine.h"
 
 CSipServerSetup gclsSetup;
 
@@ -120,43 +121,43 @@ CSipServerSetup::~CSipServerSetup() {
  */
 // config.json overlay: flat 키 ("Setup.Sip.AuthRealm": "csp") 를 root 의 중첩 경로에 set.
 // 같은 경로가 이미 있으면 덮어씀. 템플릿 렌더링 결과가 이 형태.
-static void _setByDotPath(SimpleJson::JsonNode& parent, const std::string& dotPath,
-                          const SimpleJson::JsonNode& value) {
-    size_t pos = dotPath.find('.');
-    if (pos == std::string::npos) {
-        parent.Set(dotPath, value);
+static void _setByDotPath( SimpleJson::JsonNode &parent, const std::string &dotPath,
+                           const SimpleJson::JsonNode &value ) {
+    size_t pos = dotPath.find( '.' );
+    if ( pos == std::string::npos ) {
+        parent.Set( dotPath, value );
         return;
     }
-    std::string head = dotPath.substr(0, pos);
-    std::string rest = dotPath.substr(pos + 1);
-    SimpleJson::JsonNode sub = parent.Has(head) ? parent.Get(head) : SimpleJson::JsonNode();
-    if (sub.type != SimpleJson::JSON_OBJECT) {
+    std::string head = dotPath.substr( 0, pos );
+    std::string rest = dotPath.substr( pos + 1 );
+    SimpleJson::JsonNode sub = parent.Has( head ) ? parent.Get( head ) : SimpleJson::JsonNode();
+    if ( sub.type != SimpleJson::JSON_OBJECT ) {
         sub = SimpleJson::JsonNode();
         sub.type = SimpleJson::JSON_OBJECT;
     }
-    _setByDotPath(sub, rest, value);
-    parent.Set(head, sub);
+    _setByDotPath( sub, rest, value );
+    parent.Set( head, sub );
 }
 
 // install_path 기준으로 overlay 파일 경로 탐색. 시도 순서:
 //   1) CIMS_DEPLOYMENT_CONFIG 환경변수
 //   2) <csp.json 디렉토리>/../../config.json     (install_path/config.json, 배포 배치)
 //   3) (없음) — overlay 생략
-static std::string _findDeploymentConfig(const std::string& cspJsonPath) {
-    if (const char* env = getenv("CIMS_DEPLOYMENT_CONFIG")) {
-        if (*env) {
-            std::ifstream f(env);
-            if (f) return env;
+static std::string _findDeploymentConfig( const std::string &cspJsonPath ) {
+    if ( const char *env = getenv( "CIMS_DEPLOYMENT_CONFIG" ) ) {
+        if ( *env ) {
+            std::ifstream f( env );
+            if ( f ) return env;
         }
     }
     // csp.json 경로에서 ../../config.json 유도
     std::string dir = cspJsonPath;
-    size_t s = dir.find_last_of('/');
-    if (s != std::string::npos) dir = dir.substr(0, s);
+    size_t s = dir.find_last_of( '/' );
+    if ( s != std::string::npos ) dir = dir.substr( 0, s );
     // dir = install_path/csp/config  →  ../.. = install_path
     std::string cand = dir + "/../../config.json";
-    std::ifstream f(cand);
-    if (f) {
+    std::ifstream f( cand );
+    if ( f ) {
         // 정규화는 하지 않음 (원본 상대 경로 보존)
         return cand;
     }
@@ -165,95 +166,98 @@ static std::string _findDeploymentConfig(const std::string& cspJsonPath) {
 
 bool CSipServerSetup::Read( const char *pszFileName ) {
     std::string strFileName = pszFileName;
-    if (strFileName.substr(strFileName.find_last_of(".") + 1) == "json") {
-        std::ifstream t(pszFileName);
-        if (!t.is_open()) return false;
+    if ( strFileName.substr( strFileName.find_last_of( "." ) + 1 ) == "json" ) {
+        std::ifstream t( pszFileName );
+        if ( !t.is_open() ) return false;
         std::stringstream buffer;
         buffer << t.rdbuf();
 
-        SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(buffer.str());
-        if (root.type != SimpleJson::JSON_OBJECT) return false;
+        SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse( buffer.str() );
+        if ( root.type != SimpleJson::JSON_OBJECT ) return false;
 
         // Deployment overlay: install_path/config.json 을 flat key → nested 로 merge.
         // 주의: Read() 는 CLog 초기화 전에 호출되므로 여기선 로그 없이 적용만 하고,
         //       결과는 m_strOverlayPath / m_iOverlayKeys 에 기록해 CspServer 가 나중에 출력.
-        std::string overlayPath = _findDeploymentConfig(pszFileName);
-        if (!overlayPath.empty()) {
-            std::ifstream of(overlayPath);
-            std::stringstream ob; ob << of.rdbuf();
-            SimpleJson::JsonNode over = SimpleJson::JsonNode::Parse(ob.str());
-            if (over.type == SimpleJson::JSON_OBJECT) {
+        std::string overlayPath = _findDeploymentConfig( pszFileName );
+        if ( !overlayPath.empty() ) {
+            std::ifstream of( overlayPath );
+            std::stringstream ob;
+            ob << of.rdbuf();
+            SimpleJson::JsonNode over = SimpleJson::JsonNode::Parse( ob.str() );
+            if ( over.type == SimpleJson::JSON_OBJECT ) {
                 int applied = 0;
-                for (const auto& kv : over.objects) {
-                    _setByDotPath(root, kv.first, kv.second);
+                for ( const auto &kv : over.objects ) {
+                    _setByDotPath( root, kv.first, kv.second );
                     ++applied;
                 }
                 m_strOverlayPath = overlayPath;
-                m_iOverlayKeys   = applied;
+                m_iOverlayKeys = applied;
             }
         }
 
-        if (root.Has("Setup")) {
-            SimpleJson::JsonNode setup = root.Get("Setup");
-            
-            if (setup.Has("Sip")) {
-                SimpleJson::JsonNode sip = setup.Get("Sip");
-                if (sip.Has("LocalIp")) m_strLocalIp = sip.GetString("LocalIp");
-                if (sip.Has("UdpPort")) m_iUdpPort = (int)sip.GetInt("UdpPort");
-                if (sip.Has("UdpThreadCount")) m_iUdpThreadCount = (int)sip.GetInt("UdpThreadCount");
+        if ( root.Has( "Setup" ) ) {
+            SimpleJson::JsonNode setup = root.Get( "Setup" );
+
+            if ( setup.Has( "Sip" ) ) {
+                SimpleJson::JsonNode sip = setup.Get( "Sip" );
+                if ( sip.Has( "LocalIp" ) ) m_strLocalIp = sip.GetString( "LocalIp" );
+                if ( sip.Has( "UdpPort" ) ) m_iUdpPort = (int)sip.GetInt( "UdpPort" );
+                if ( sip.Has( "UdpThreadCount" ) ) m_iUdpThreadCount = (int)sip.GetInt( "UdpThreadCount" );
                 // v3: Setup.Sip.AuthRealm 제거 — access_services.auth_realm 이 SOT
-                if (sip.Has("TcpPort")) m_iTcpPort = (int)sip.GetInt("TcpPort");
-                if (sip.Has("TcpThreadCount")) m_iTcpThreadCount = (int)sip.GetInt("TcpThreadCount");
-                if (sip.Has("TcpRecvTimeout")) m_iTcpRecvTimeout = (int)sip.GetInt("TcpRecvTimeout");
-                if (sip.Has("TlsPort")) m_iTlsPort = (int)sip.GetInt("TlsPort");
-                if (sip.Has("CertFile")) m_strCertFile = sip.GetString("CertFile");
-                if (sip.Has("MinRegisterTimeout")) m_iMinRegisterTimeout = (int)sip.GetInt("MinRegisterTimeout");
-                if (sip.Has("CallPickupId")) m_strCallPickupId = sip.GetString("CallPickupId");
-                if (sip.Has("StackExecutePeriod")) m_iStackExecutePeriod = (int)sip.GetInt("StackExecutePeriod");
-                if (sip.Has("UserTimeout")) m_iUserTimeout = (int)sip.GetInt("UserTimeout");
-                if (sip.Has("StaleCallTimeout")) m_iStaleCallTimeout = (int)sip.GetInt("StaleCallTimeout");
-                if (sip.Has("SendOptionsPeriod")) m_iSendOptionsPeriod = (int)sip.GetInt("SendOptionsPeriod");
+                if ( sip.Has( "TcpPort" ) ) m_iTcpPort = (int)sip.GetInt( "TcpPort" );
+                if ( sip.Has( "TcpThreadCount" ) ) m_iTcpThreadCount = (int)sip.GetInt( "TcpThreadCount" );
+                if ( sip.Has( "TcpRecvTimeout" ) ) m_iTcpRecvTimeout = (int)sip.GetInt( "TcpRecvTimeout" );
+                if ( sip.Has( "TlsPort" ) ) m_iTlsPort = (int)sip.GetInt( "TlsPort" );
+                if ( sip.Has( "CertFile" ) ) m_strCertFile = sip.GetString( "CertFile" );
+                if ( sip.Has( "MinRegisterTimeout" ) ) m_iMinRegisterTimeout = (int)sip.GetInt( "MinRegisterTimeout" );
+                if ( sip.Has( "CallPickupId" ) ) m_strCallPickupId = sip.GetString( "CallPickupId" );
+                if ( sip.Has( "StackExecutePeriod" ) ) m_iStackExecutePeriod = (int)sip.GetInt( "StackExecutePeriod" );
+                if ( sip.Has( "UserTimeout" ) ) m_iUserTimeout = (int)sip.GetInt( "UserTimeout" );
+                if ( sip.Has( "StaleCallTimeout" ) ) m_iStaleCallTimeout = (int)sip.GetInt( "StaleCallTimeout" );
+                if ( sip.Has( "SendOptionsPeriod" ) ) m_iSendOptionsPeriod = (int)sip.GetInt( "SendOptionsPeriod" );
             }
 
             // 미디어서버 연동 설정 (2026-04-23 rename: RtpRelay → MediaServer).
             //   신규 key 를 우선 파싱, 기존 RtpRelay 는 배포된 csp.json 호환을 위해 fallback.
-            if (setup.Has("MediaServer")) {
-                SimpleJson::JsonNode ms = setup.Get("MediaServer");
-                if (ms.Has("Enable"))       m_bUseRtpRelay  = (ms.Get("Enable").AsString() == "true");
-                if (ms.Has("Host"))         m_strCmpIp      = ms.GetString("Host");
-                if (ms.Has("ControlPort"))  m_iCmpPort      = (int)ms.GetInt("ControlPort");
-                if (ms.Has("LocalPort"))    m_iLocalCmpPort = (int)ms.GetInt("LocalPort");
+            if ( setup.Has( "MediaServer" ) ) {
+                SimpleJson::JsonNode ms = setup.Get( "MediaServer" );
+                if ( ms.Has( "Enable" ) ) m_bUseRtpRelay = ( ms.Get( "Enable" ).AsString() == "true" );
+                if ( ms.Has( "Host" ) ) m_strCmpIp = ms.GetString( "Host" );
+                if ( ms.Has( "ControlPort" ) ) m_iCmpPort = (int)ms.GetInt( "ControlPort" );
+                if ( ms.Has( "LocalPort" ) ) m_iLocalCmpPort = (int)ms.GetInt( "LocalPort" );
                 // LocalIp 는 현재 C++ 바인딩 없음 (렌더링 용도). 추후 CmpClient bind 확장 시 연결.
-            } else if (setup.Has("RtpRelay")) {
-                SimpleJson::JsonNode rtp = setup.Get("RtpRelay");
-                if (rtp.Has("UseRtpRelay"))  m_bUseRtpRelay  = (rtp.Get("UseRtpRelay").AsString() == "true");
-                if (rtp.Has("CmpIp"))        m_strCmpIp      = rtp.GetString("CmpIp");
-                if (rtp.Has("CmpPort"))      m_iCmpPort      = (int)rtp.GetInt("CmpPort");
-                if (rtp.Has("LocalCmpPort")) m_iLocalCmpPort = (int)rtp.GetInt("LocalCmpPort");
+            } else if ( setup.Has( "RtpRelay" ) ) {
+                SimpleJson::JsonNode rtp = setup.Get( "RtpRelay" );
+                if ( rtp.Has( "UseRtpRelay" ) ) m_bUseRtpRelay = ( rtp.Get( "UseRtpRelay" ).AsString() == "true" );
+                if ( rtp.Has( "CmpIp" ) ) m_strCmpIp = rtp.GetString( "CmpIp" );
+                if ( rtp.Has( "CmpPort" ) ) m_iCmpPort = (int)rtp.GetInt( "CmpPort" );
+                if ( rtp.Has( "LocalCmpPort" ) ) m_iLocalCmpPort = (int)rtp.GetInt( "LocalCmpPort" );
             }
 
-            if (setup.Has("ConfigJsonlDir")) m_strConfigJsonlDir = setup.GetString("ConfigJsonlDir");
+            if ( setup.Has( "ConfigJsonlDir" ) ) m_strConfigJsonlDir = setup.GetString( "ConfigJsonlDir" );
 
             // ConfigJsonlDir fallback: 설정값이 비어있거나 존재하지 않는 경로면
             // install_path/config 로 자동 추정. install_path 는 csp.json 의 부모×3.
             // (cspJsonPath = install_path/csp/config/csp.json, 상대/절대 모두 지원)
             {
                 struct stat st;
-                bool exists = !m_strConfigJsonlDir.empty()
-                              && stat(m_strConfigJsonlDir.c_str(), &st) == 0
-                              && S_ISDIR(st.st_mode);
-                if (!exists) {
-                    char abs[PATH_MAX] = {0};
-                    if (realpath(pszFileName, abs) != nullptr) {
+                bool exists = !m_strConfigJsonlDir.empty() && stat( m_strConfigJsonlDir.c_str(), &st ) == 0 &&
+                              S_ISDIR( st.st_mode );
+                if ( !exists ) {
+                    char abs[PATH_MAX] = { 0 };
+                    if ( realpath( pszFileName, abs ) != nullptr ) {
                         std::string p = abs;
-                        for (int i = 0; i < 3; ++i) {
-                            size_t s = p.find_last_of('/');
-                            if (s == std::string::npos) { p.clear(); break; }
-                            p.erase(s);
+                        for ( int i = 0; i < 3; ++i ) {
+                            size_t s = p.find_last_of( '/' );
+                            if ( s == std::string::npos ) {
+                                p.clear();
+                                break;
+                            }
+                            p.erase( s );
                         }
-                        if (!p.empty()) {
+                        if ( !p.empty() ) {
                             std::string cand = p + "/config";
-                            if (stat(cand.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                            if ( stat( cand.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) ) {
                                 m_strConfigJsonlDir = cand;
                             }
                         }
@@ -261,104 +265,104 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 }
             }
 
-             if (setup.Has("Log")) {
-                SimpleJson::JsonNode log = setup.Get("Log");
-                if (log.Has("Folder")) m_strLogFolder = log.GetString("Folder");
-                if (log.Has("MaxSize")) m_iLogMaxSize = (int)log.GetInt("MaxSize");
-                if (log.Has("Level")) {
-                    SimpleJson::JsonNode level = log.Get("Level");
+            if ( setup.Has( "Log" ) ) {
+                SimpleJson::JsonNode log = setup.Get( "Log" );
+                if ( log.Has( "Folder" ) ) m_strLogFolder = log.GetString( "Folder" );
+                if ( log.Has( "MaxSize" ) ) m_iLogMaxSize = (int)log.GetInt( "MaxSize" );
+                if ( log.Has( "Level" ) ) {
+                    SimpleJson::JsonNode level = log.Get( "Level" );
                     m_iLogLevel = 0;
-                    if (level.Has("Debug") && level.Get("Debug").AsString() == "true") m_iLogLevel |= LOG_DEBUG;
-                    if (level.Has("Info") && level.Get("Info").AsString() == "true") m_iLogLevel |= LOG_INFO;
-                    if (level.Has("Network") && level.Get("Network").AsString() == "true") m_iLogLevel |= LOG_NETWORK;
+                    if ( level.Has( "Debug" ) && level.Get( "Debug" ).AsString() == "true" ) m_iLogLevel |= LOG_DEBUG;
+                    if ( level.Has( "Info" ) && level.Get( "Info" ).AsString() == "true" ) m_iLogLevel |= LOG_INFO;
+                    if ( level.Has( "Network" ) && level.Get( "Network" ).AsString() == "true" )
+                        m_iLogLevel |= LOG_NETWORK;
                 }
-                CLog::SetLevel(m_iLogLevel);
-                CLog::SetMaxLogSize(m_iLogMaxSize);
+                CLog::SetLevel( m_iLogLevel );
+                CLog::SetMaxLogSize( m_iLogMaxSize );
             }
 
-            if (setup.Has("DataFolder")) {
-                SimpleJson::JsonNode dataDir = setup.Get("DataFolder");
-                if (dataDir.Has("User")) m_strUserDataFolder = dataDir.GetString("User");
-                if (dataDir.Has("Group")) m_strGroupDataFolder = dataDir.GetString("Group");
+            if ( setup.Has( "DataFolder" ) ) {
+                SimpleJson::JsonNode dataDir = setup.Get( "DataFolder" );
+                if ( dataDir.Has( "User" ) ) m_strUserDataFolder = dataDir.GetString( "User" );
+                if ( dataDir.Has( "Group" ) ) m_strGroupDataFolder = dataDir.GetString( "Group" );
                 // G10 (2026-04-23): DataFolder.SipServer 제거 — SipServerMap legacy 제거와 동반.
             }
 
-            if (setup.Has("Database")) {
-                SimpleJson::JsonNode db = setup.Get("Database");
-                if (db.Has("Host"))     m_strDbHost   = db.GetString("Host");
-                if (db.Has("Port"))     m_iDbPort     = (int)db.GetInt("Port");
-                if (db.Has("User"))     m_strDbUser   = db.GetString("User");
-                if (db.Has("Password")) m_strDbPasswd = db.GetString("Password");
-                if (db.Has("DbName"))   m_strDbName   = db.GetString("DbName");
+            if ( setup.Has( "Database" ) ) {
+                SimpleJson::JsonNode db = setup.Get( "Database" );
+                if ( db.Has( "Host" ) ) m_strDbHost = db.GetString( "Host" );
+                if ( db.Has( "Port" ) ) m_iDbPort = (int)db.GetInt( "Port" );
+                if ( db.Has( "User" ) ) m_strDbUser = db.GetString( "User" );
+                if ( db.Has( "Password" ) ) m_strDbPasswd = db.GetString( "Password" );
+                if ( db.Has( "DbName" ) ) m_strDbName = db.GetString( "DbName" );
             }
 
-            if (setup.Has("ServiceMode")) {
-                m_strServiceMode = setup.GetString("ServiceMode");
+            if ( setup.Has( "ServiceMode" ) ) {
+                m_strServiceMode = setup.GetString( "ServiceMode" );
             }
 
             // IMS 역할 설정 (미지정 시 모두 활성화)
-            if (setup.Has("Roles")) {
-                SimpleJson::JsonNode roles = setup.Get("Roles");
-                if (roles.Has("CSCF"))   m_bRoleCscf   = (roles.GetString("CSCF")   == "true");
-                if (roles.Has("TAS"))    m_bRoleTas    = (roles.GetString("TAS")    == "true");
-                if (roles.Has("PTT_AS")) m_bRolePttAs  = (roles.GetString("PTT_AS") == "true");
-                if (roles.Has("IBCF"))   m_bRoleIbcf   = (roles.GetString("IBCF")   == "true");
+            if ( setup.Has( "Roles" ) ) {
+                SimpleJson::JsonNode roles = setup.Get( "Roles" );
+                if ( roles.Has( "CSCF" ) ) m_bRoleCscf = ( roles.GetString( "CSCF" ) == "true" );
+                if ( roles.Has( "TAS" ) ) m_bRoleTas = ( roles.GetString( "TAS" ) == "true" );
+                if ( roles.Has( "PTT_AS" ) ) m_bRolePttAs = ( roles.GetString( "PTT_AS" ) == "true" );
+                if ( roles.Has( "IBCF" ) ) m_bRoleIbcf = ( roles.GetString( "IBCF" ) == "true" );
             }
-            
+
             // 녹취 설정
-            if (setup.Has("Recording")) {
-                SimpleJson::JsonNode rec = setup.Get("Recording");
-                if (rec.Has("Enable")) m_bRecordEnable = (rec.GetString("Enable") == "true");
-                if (rec.Has("Dir"))    m_strRecordDir  = rec.GetString("Dir");
+            if ( setup.Has( "Recording" ) ) {
+                SimpleJson::JsonNode rec = setup.Get( "Recording" );
+                if ( rec.Has( "Enable" ) ) m_bRecordEnable = ( rec.GetString( "Enable" ) == "true" );
+                if ( rec.Has( "Dir" ) ) m_strRecordDir = rec.GetString( "Dir" );
             }
 
             // G10+ (2026-04-23): Setup.Cdr.Folder 제거. service_log 의 call.json / participants.jsonl
             //   + DB call_logs 테이블이 CDR 역할을 대체.
 
             // ServiceLogging 설정 (신규 — Dir 통합)
-            if (setup.Has("ServiceLogging")) {
-                SimpleJson::JsonNode sl = setup.Get("ServiceLogging");
-                if (sl.Has("Dir")) {
-                    m_strServiceLogDir = sl.GetString("Dir");
-                    m_strMsgLogDir = m_strServiceLogDir; // 통합 디렉토리
+            if ( setup.Has( "ServiceLogging" ) ) {
+                SimpleJson::JsonNode sl = setup.Get( "ServiceLogging" );
+                if ( sl.Has( "Dir" ) ) {
+                    m_strServiceLogDir = sl.GetString( "Dir" );
+                    m_strMsgLogDir = m_strServiceLogDir;  // 통합 디렉토리
                 }
-                if (sl.Has("Recording")) {
-                    std::string rv = sl.GetString("Recording");
-                    m_bRecordEnable = (rv == "true" || rv == "1");
+                if ( sl.Has( "Recording" ) ) {
+                    std::string rv = sl.GetString( "Recording" );
+                    m_bRecordEnable = ( rv == "true" || rv == "1" );
                     // record_dir = ServiceLogDir (통합)
-                    if (m_bRecordEnable && m_strRecordDir.empty())
-                        m_strRecordDir = m_strServiceLogDir;
+                    if ( m_bRecordEnable && m_strRecordDir.empty() ) m_strRecordDir = m_strServiceLogDir;
                 }
             }
             // 레거시 호환
-            if (m_strServiceLogDir.empty() && setup.Has("ServiceLog")) {
-                SimpleJson::JsonNode svclog = setup.Get("ServiceLog");
-                if (svclog.Has("Dir")) m_strServiceLogDir = svclog.GetString("Dir");
+            if ( m_strServiceLogDir.empty() && setup.Has( "ServiceLog" ) ) {
+                SimpleJson::JsonNode svclog = setup.Get( "ServiceLog" );
+                if ( svclog.Has( "Dir" ) ) m_strServiceLogDir = svclog.GetString( "Dir" );
             }
-            if (m_strMsgLogDir.empty() && setup.Has("MsgLog")) {
-                SimpleJson::JsonNode msglog = setup.Get("MsgLog");
-                if (msglog.Has("Dir")) m_strMsgLogDir = msglog.GetString("Dir");
+            if ( m_strMsgLogDir.empty() && setup.Has( "MsgLog" ) ) {
+                SimpleJson::JsonNode msglog = setup.Get( "MsgLog" );
+                if ( msglog.Has( "Dir" ) ) m_strMsgLogDir = msglog.GetString( "Dir" );
             }
-            if (m_strMsgLogDir.empty()) m_strMsgLogDir = m_strServiceLogDir;
+            if ( m_strMsgLogDir.empty() ) m_strMsgLogDir = m_strServiceLogDir;
 
-            if (setup.Has("SystemId")) {
-                m_strSystemId = setup.GetString("SystemId");
+            if ( setup.Has( "SystemId" ) ) {
+                m_strSystemId = setup.GetString( "SystemId" );
             }
-            if (m_strSystemId.empty()) {
+            if ( m_strSystemId.empty() ) {
                 m_strSystemId = "csp_01";
             }
 
             // Monitor
             m_clsMonitorIpMap.DeleteAll();
-            if (setup.Has("Monitor")) {
-                SimpleJson::JsonNode mon = setup.Get("Monitor");
-                if (mon.Has("Port")) m_iMonitorPort = (int)mon.GetInt("Port");
-                if (mon.Has("ClientIpList")) {
-                    SimpleJson::JsonNode list = mon.Get("ClientIpList");
-                    if (list.type == SimpleJson::JSON_ARRAY) {
-                         for(size_t i=0; i<list.Size(); ++i) {
-                              m_clsMonitorIpMap.Insert(list.At(i).AsString().c_str(), "");
-                         }
+            if ( setup.Has( "Monitor" ) ) {
+                SimpleJson::JsonNode mon = setup.Get( "Monitor" );
+                if ( mon.Has( "Port" ) ) m_iMonitorPort = (int)mon.GetInt( "Port" );
+                if ( mon.Has( "ClientIpList" ) ) {
+                    SimpleJson::JsonNode list = mon.Get( "ClientIpList" );
+                    if ( list.type == SimpleJson::JSON_ARRAY ) {
+                        for ( size_t i = 0; i < list.Size(); ++i ) {
+                            m_clsMonitorIpMap.Insert( list.At( i ).AsString().c_str(), "" );
+                        }
                     }
                 }
             }
@@ -368,34 +372,34 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
             m_clsAllowSipUserAgentMap.DeleteAll();
             m_clsAllowClientIpMap.DeleteAll();
 
-            if (setup.Has("Security")) {
-                SimpleJson::JsonNode sec = setup.Get("Security");
-                
-                if (sec.Has("DenySipUserAgentList")) {
-                     SimpleJson::JsonNode list = sec.Get("DenySipUserAgentList");
-                     if (list.type == SimpleJson::JSON_ARRAY) {
-                         for(size_t i=0; i<list.Size(); ++i) {
-                              m_clsDenySipUserAgentMap.Insert(list.At(i).AsString().c_str(), "");
-                         }
-                     }
-                }
-                
-                if (sec.Has("AllowSipUserAgentList")) {
-                     SimpleJson::JsonNode list = sec.Get("AllowSipUserAgentList");
-                     if (list.type == SimpleJson::JSON_ARRAY) {
-                         for(size_t i=0; i<list.Size(); ++i) {
-                              m_clsAllowSipUserAgentMap.Insert(list.At(i).AsString().c_str(), "");
-                         }
-                     }
+            if ( setup.Has( "Security" ) ) {
+                SimpleJson::JsonNode sec = setup.Get( "Security" );
+
+                if ( sec.Has( "DenySipUserAgentList" ) ) {
+                    SimpleJson::JsonNode list = sec.Get( "DenySipUserAgentList" );
+                    if ( list.type == SimpleJson::JSON_ARRAY ) {
+                        for ( size_t i = 0; i < list.Size(); ++i ) {
+                            m_clsDenySipUserAgentMap.Insert( list.At( i ).AsString().c_str(), "" );
+                        }
+                    }
                 }
 
-                if (sec.Has("AllowClientIpList")) {
-                     SimpleJson::JsonNode list = sec.Get("AllowClientIpList");
-                     if (list.type == SimpleJson::JSON_ARRAY) {
-                         for(size_t i=0; i<list.Size(); ++i) {
-                              m_clsAllowClientIpMap.Insert(list.At(i).AsString().c_str(), "");
-                         }
-                     }
+                if ( sec.Has( "AllowSipUserAgentList" ) ) {
+                    SimpleJson::JsonNode list = sec.Get( "AllowSipUserAgentList" );
+                    if ( list.type == SimpleJson::JSON_ARRAY ) {
+                        for ( size_t i = 0; i < list.Size(); ++i ) {
+                            m_clsAllowSipUserAgentMap.Insert( list.At( i ).AsString().c_str(), "" );
+                        }
+                    }
+                }
+
+                if ( sec.Has( "AllowClientIpList" ) ) {
+                    SimpleJson::JsonNode list = sec.Get( "AllowClientIpList" );
+                    if ( list.type == SimpleJson::JSON_ARRAY ) {
+                        for ( size_t i = 0; i < list.Size(); ++i ) {
+                            m_clsAllowClientIpMap.Insert( list.At( i ).AsString().c_str(), "" );
+                        }
+                    }
                 }
             }
 
@@ -406,30 +410,30 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
         SetFileSizeTime();
 
         // Auto-detect IP logic same as below... duplicating for now or refactor.
-        if (m_strLocalIp == "0.0.0.0") {
-             int fd = socket(AF_INET, SOCK_DGRAM, 0);
-             if (fd >= 0) {
-                 struct ifconf ifc;
-                 char buf[1024];
-                 ifc.ifc_len = sizeof(buf);
-                 ifc.ifc_buf = buf;
-                 if (ioctl(fd, SIOCGIFCONF, &ifc) == 0) {
-                     struct ifreq* it = ifc.ifc_req;
-                     const struct ifreq* const end = it + (ifc.ifc_len / sizeof(struct ifreq));
-                     for (; it != end; ++it) {
-                         struct sockaddr_in* addr = (struct sockaddr_in*)&it->ifr_addr;
-                         if (addr->sin_family == AF_INET) {
-                             std::string ip = inet_ntoa(addr->sin_addr);
-                             if (ip != "127.0.0.1" && ip != "0.0.0.0") {
-                                 m_strLocalIp = ip;
-                                 break;
-                             }
-                         }
-                     }
-                 }
-                 close(fd);
-             }
-             CLog::Print(LOG_INFO, "Auto-detected LocalIp: %s", m_strLocalIp.c_str());
+        if ( m_strLocalIp == "0.0.0.0" ) {
+            int fd = socket( AF_INET, SOCK_DGRAM, 0 );
+            if ( fd >= 0 ) {
+                struct ifconf ifc;
+                char buf[1024];
+                ifc.ifc_len = sizeof( buf );
+                ifc.ifc_buf = buf;
+                if ( ioctl( fd, SIOCGIFCONF, &ifc ) == 0 ) {
+                    struct ifreq *it = ifc.ifc_req;
+                    const struct ifreq *const end = it + ( ifc.ifc_len / sizeof( struct ifreq ) );
+                    for ( ; it != end; ++it ) {
+                        struct sockaddr_in *addr = (struct sockaddr_in *)&it->ifr_addr;
+                        if ( addr->sin_family == AF_INET ) {
+                            std::string ip = inet_ntoa( addr->sin_addr );
+                            if ( ip != "127.0.0.1" && ip != "0.0.0.0" ) {
+                                m_strLocalIp = ip;
+                                break;
+                            }
+                        }
+                    }
+                }
+                close( fd );
+            }
+            CLog::Print( LOG_INFO, "Auto-detected LocalIp: %s", m_strLocalIp.c_str() );
         }
 
         return true;

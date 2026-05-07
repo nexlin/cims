@@ -296,16 +296,14 @@ void CUserMap::SendOptions() {
         //   volte 서비스 default. helper 가 URI 문자열 ("sip:cspserver@domain") 반환 →
         //   CSipUri::Parse 로 user/host 분리. 파싱 실패 시 primary LocalIp fallback.
         // R5.b: Call-ID host 는 outbound access edge local addr 유지.
-        const std::string strIdentity = CspAddressing::GetServerIdentityForService("volte");
+        const std::string strIdentity = CspAddressing::GetServerIdentityForService( "volte" );
         CSipUri clsId;
-        if (clsId.Parse(strIdentity.c_str(), (int)strIdentity.size()) > 0 && !clsId.m_strHost.empty()) {
-            pclsMessage->m_clsFrom.m_clsUri.Set(
-                SIP_PROTOCOL,
-                clsId.m_strUser.empty() ? "cspserver" : clsId.m_strUser.c_str(),
-                clsId.m_strHost.c_str() );
+        if ( clsId.Parse( strIdentity.c_str(), (int)strIdentity.size() ) > 0 && !clsId.m_strHost.empty() ) {
+            pclsMessage->m_clsFrom.m_clsUri.Set( SIP_PROTOCOL,
+                                                 clsId.m_strUser.empty() ? "cspserver" : clsId.m_strUser.c_str(),
+                                                 clsId.m_strHost.c_str() );
         } else {
-            const std::string strSipAddr =
-                CspAddressing::GetLocalSipAddressForOutbound("UDP", "access");
+            const std::string strSipAddr = CspAddressing::GetLocalSipAddressForOutbound( "UDP", "access" );
             pclsMessage->m_clsFrom.m_clsUri.Set( SIP_PROTOCOL, "cspserver", strSipAddr.c_str() );
         }
         pclsMessage->m_clsFrom.InsertTag();
@@ -313,8 +311,7 @@ void CUserMap::SendOptions() {
         pclsMessage->m_clsTo.m_clsUri.Set( SIP_PROTOCOL, itList->c_str(), clsUserInfo.m_strIp.c_str(),
                                            clsUserInfo.m_iPort );
 
-        const std::string strCallIdHost =
-            CspAddressing::GetLocalSipAddressForOutbound("UDP", "access");
+        const std::string strCallIdHost = CspAddressing::GetLocalSipAddressForOutbound( "UDP", "access" );
         pclsMessage->m_clsCallId.Make( strCallIdHost.c_str() );
 
         pclsMessage->m_clsCSeq.Set( clsUserInfo.m_iOptionsSeq, SIP_METHOD_OPTIONS );
@@ -339,8 +336,6 @@ void CUserMap::GetRegisteredUsers( USER_ID_LIST &clsList ) {
     }
     m_clsMutex.release();
 }
-
-
 
 void CUserMap::GetString( CMonitorString &strBuf ) {
     USER_MAP::iterator itMap;

@@ -22,8 +22,8 @@
  */
 struct PendingRouteEntry {
     std::string remote_ip;
-    int         remote_port = 0;
-    std::string protocol;      // "UDP" / "TCP" / "TLS"
+    int remote_port = 0;
+    std::string protocol;  // "UDP" / "TCP" / "TLS"
     std::string route_name;
     std::string route_set;
     std::string policy_name;
@@ -35,24 +35,24 @@ public:
     CCspPendingRouteMap() = default;
 
     /** Call-ID 로 routing decision 저장. 동일 Call-ID 가 이미 있으면 덮어씀. */
-    void Insert(const std::string& callId, const PendingRouteEntry& entry);
+    void Insert( const std::string& callId, const PendingRouteEntry& entry );
 
     /** Call-ID 로 조회하며 꺼내기 (있으면 outEntry 에 복사하고 맵에서 제거 후 true). */
-    bool Take(const std::string& callId, PendingRouteEntry& outEntry);
+    bool Take( const std::string& callId, PendingRouteEntry& outEntry );
 
     /** 지정 Call-ID 만 제거 (호 거절 등에서 명시적 정리 필요 시). */
-    void Erase(const std::string& callId);
+    void Erase( const std::string& callId );
 
     /** 지정 age 보다 오래된 항목 제거. 반환값 = 제거 건수. */
-    size_t CleanupExpired(std::chrono::milliseconds maxAge);
+    size_t CleanupExpired( std::chrono::milliseconds maxAge );
 
     size_t Size() const;
 
 private:
-    mutable std::mutex                       m_mutex;
+    mutable std::mutex m_mutex;
     std::map<std::string, PendingRouteEntry> m_map;
 };
 
 extern CCspPendingRouteMap gclsPendingRouteMap;
 
-#endif // __CSP_PENDING_ROUTE_MAP_H__
+#endif  // __CSP_PENDING_ROUTE_MAP_H__

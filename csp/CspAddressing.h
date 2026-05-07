@@ -25,35 +25,35 @@
 
 namespace CspAddressing {
 
-/** SIP Contact / From / Call-ID host 생성에 사용할 로컬 주소.
- *  @param inbound_listener_id psip 수신 listener 의 extId (GetCurrentInboundListenerId()
- *         반환값). 0 이면 bootstrap 또는 컨텍스트 불명 → primary fallback.
- *         >0 이면 해당 local_node 의 bind_ip 반환. bind_ip=0.0.0.0 이면 gclsSetup.m_strLocalIp. */
-std::string GetLocalSipAddress(int inbound_listener_id = 0);
+    /** SIP Contact / From / Call-ID host 생성에 사용할 로컬 주소.
+     *  @param inbound_listener_id psip 수신 listener 의 extId (GetCurrentInboundListenerId()
+     *         반환값). 0 이면 bootstrap 또는 컨텍스트 불명 → primary fallback.
+     *         >0 이면 해당 local_node 의 bind_ip 반환. bind_ip=0.0.0.0 이면 gclsSetup.m_strLocalIp. */
+    std::string GetLocalSipAddress( int inbound_listener_id = 0 );
 
-/** outbound forwarding 시 목적지 protocol/edge 에 맞는 local_node 선택.
- *  1차: enabled && protocol == proto && edge == edge_preference
- *  2차: enabled && protocol == proto (edge 무관)
- *  3차: primary LocalIp fallback (R5.a 동작).
- *  @param proto "UDP" / "TCP" / "TLS". 빈 문자열이면 protocol 체크 skip.
- *  @param edge_preference "access" / "peering" / "mgmt" 또는 빈 문자열. */
-std::string GetLocalSipAddressForOutbound(const std::string& proto = "UDP",
-                                          const std::string& edge_preference = "peering");
+    /** outbound forwarding 시 목적지 protocol/edge 에 맞는 local_node 선택.
+     *  1차: enabled && protocol == proto && edge == edge_preference
+     *  2차: enabled && protocol == proto (edge 무관)
+     *  3차: primary LocalIp fallback (R5.a 동작).
+     *  @param proto "UDP" / "TCP" / "TLS". 빈 문자열이면 protocol 체크 skip.
+     *  @param edge_preference "access" / "peering" / "mgmt" 또는 빈 문자열. */
+    std::string GetLocalSipAddressForOutbound( const std::string& proto = "UDP",
+                                               const std::string& edge_preference = "peering" );
 
-/** SDP media (RTP relay) 에 advertise 할 로컬 주소.
- *  R5.c 이후 CMP interface 와 CSP interface 가 다를 때 분리 예정. */
-std::string GetLocalRtpAddress();
+    /** SDP media (RTP relay) 에 advertise 할 로컬 주소.
+     *  R5.c 이후 CMP interface 와 CSP interface 가 다를 때 분리 예정. */
+    std::string GetLocalRtpAddress();
 
-/** XCAP / MCPTT 서비스 URL host.
- *  R6 이후 access_services 의 server_identity_uri 로 확장 예정. */
-std::string GetLocalXcapAddress();
+    /** XCAP / MCPTT 서비스 URL host.
+     *  R6 이후 access_services 의 server_identity_uri 로 확장 예정. */
+    std::string GetLocalXcapAddress();
 
-/** R6: 해당 서비스(kind="volte"|"ptt")에 대한 CSP server identity URI.
- *  access_services.server_identity_uri 가 명시되면 그것 반환.
- *  비면 sip:cspserver@{domain} 자동 조립.
- *  서비스 매칭 실패 시 sip:cspserver@{LocalIp} primary fallback. */
-std::string GetServerIdentityForService(const std::string& kind);
+    /** R6: 해당 서비스(kind="volte"|"ptt")에 대한 CSP server identity URI.
+     *  access_services.server_identity_uri 가 명시되면 그것 반환.
+     *  비면 sip:cspserver@{domain} 자동 조립.
+     *  서비스 매칭 실패 시 sip:cspserver@{LocalIp} primary fallback. */
+    std::string GetServerIdentityForService( const std::string& kind );
 
-} // namespace CspAddressing
+}  // namespace CspAddressing
 
-#endif // __CSP_ADDRESSING_H__
+#endif  // __CSP_ADDRESSING_H__

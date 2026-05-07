@@ -3,12 +3,14 @@
  */
 
 #include "GroupMap.h"
+
+#include <set>
+
+#include "CmpClient.h"
 #include "DbManager.h"
 #include "Directory.h"
 #include "Log.h"
-#include "CmpClient.h"
 #include "UserMap.h"
-#include <set>
 
 CGroupMap gclsGroupMap;
 
@@ -30,7 +32,7 @@ bool CGroupMap::Load( const char *pszDirName ) {
  * @brief DB에서 전체 그룹을 로드한다
  */
 bool CGroupMap::LoadFromDb() {
-    return gclsDbManager.LoadAllGroups(*this);
+    return gclsDbManager.LoadAllGroups( *this );
 }
 
 /**
@@ -55,10 +57,10 @@ bool CGroupMap::ReadDir( const char *pszDirName ) {
 
         if ( clsGroup.load( strFileName.c_str() ) ) {
             Insert( clsGroup );
-            setFoundIds.insert(clsGroup._id);
+            setFoundIds.insert( clsGroup._id );
 
             std::string strMembers, strRegMembers;
-            for ( const auto& pUser : clsGroup._pusers ) {
+            for ( const auto &pUser : clsGroup._pusers ) {
                 if ( !strMembers.empty() ) strMembers += ", ";
                 strMembers += pUser->_id;
 
@@ -71,13 +73,13 @@ bool CGroupMap::ReadDir( const char *pszDirName ) {
                          clsGroup._name.c_str(), strMembers.c_str(), strRegMembers.c_str() );
         }
     }
-    
+
     // Sync Logic: Remove groups not found in current directory scan
     m_clsMutex.lock();
-    for (auto it = m_clsMap.begin(); it != m_clsMap.end(); ) {
-        if (setFoundIds.find(it->first) == setFoundIds.end()) {
-            CLog::Print(LOG_INFO, "GroupMap Removed Group(%s)", it->first.c_str());
-            m_clsMap.erase(it++);
+    for ( auto it = m_clsMap.begin(); it != m_clsMap.end(); ) {
+        if ( setFoundIds.find( it->first ) == setFoundIds.end() ) {
+            CLog::Print( LOG_INFO, "GroupMap Removed Group(%s)", it->first.c_str() );
+            m_clsMap.erase( it++ );
         } else {
             ++it;
         }
@@ -91,22 +93,20 @@ bool CGroupMap::ReadDir( const char *pszDirName ) {
 /**
  * @brief Insert group into map
  */
-void CGroupMap::Insert(CspPttGroup& clsGroup) {
+void CGroupMap::Insert( CspPttGroup &clsGroup ) {
     GROUP_MAP::iterator itMap;
 
     m_clsMutex.lock();
-    itMap = m_clsMap.find(clsGroup._id);
-    if (itMap == m_clsMap.end()) {
-        m_clsMap.insert(GROUP_MAP::value_type(clsGroup._id, clsGroup));
-    }
-    else {
+    itMap = m_clsMap.find( clsGroup._id );
+    if ( itMap == m_clsMap.end() ) {
+        m_clsMap.insert( GROUP_MAP::value_type( clsGroup._id, clsGroup ) );
+    } else {
         itMap->second = clsGroup;
     }
     m_clsMutex.unlock();
 }
 
-
-bool CGroupMap::Select(const char *pszGroupId, CspPttGroup &clsGroup ) {
+bool CGroupMap::Select( const char *pszGroupId, CspPttGroup &clsGroup ) {
     bool bRes = false;
     GROUP_MAP::iterator it;
 
@@ -122,7 +122,7 @@ bool CGroupMap::Select(const char *pszGroupId, CspPttGroup &clsGroup ) {
 }
 
 bool CGroupMap::Contains( const char *pszGroupId ) {
-    std::lock_guard<std::recursive_mutex> lock(m_clsMutex);
+    std::lock_guard<std::recursive_mutex> lock( m_clsMutex );
     return m_clsMap.find( pszGroupId ) != m_clsMap.end();
 }
 
@@ -135,25 +135,25 @@ void CGroupMap::Clear() {
     m_clsMutex.unlock();
 }
 
-void CGroupMap::IterateInternal(std::function<void(const CspPttGroup&)> fn) {
+void CGroupMap::IterateInternal( std::function<void( const CspPttGroup & )> fn ) {
     m_clsMutex.lock();
-    for ( auto const& [key, group] : m_clsMap ) {
-        fn(group);
+    for ( auto const &[key, group] : m_clsMap ) {
+        fn( group );
     }
     m_clsMutex.unlock();
 }
 
-bool CGroupMap::FindGroupsByUser(std::string strUserId) {
+bool CGroupMap::FindGroupsByUser( std::string strUserId ) {
     bool bRet = false;
     m_clsMutex.lock();
-    for (auto const& [key, group] : m_clsMap) {
-        for (auto const& user : group._pusers) {
-            if (user->_id == strUserId) {
+    for ( auto const &[key, group] : m_clsMap ) {
+        for ( auto const &user : group._pusers ) {
+            if ( user->_id == strUserId ) {
                 bRet = true;
                 break;
             }
         }
-        if (bRet) break;
+        if ( bRet ) break;
     }
     m_clsMutex.unlock();
 

@@ -19,10 +19,10 @@
 #ifndef _CSP_USER_H_
 #define _CSP_USER_H_
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
-#include <algorithm>
 
 #include "CspServerDefine.h"
 #include "SipMutex.h"
@@ -33,13 +33,13 @@
  */
 class CspUser {
 public:
-    CspUser() : m_bDnd(false) {
+    CspUser() : m_bDnd( false ) {
         m_iCreateTime = 0;
         m_iUpdateTime = 0;
         m_iRegisterTime = 0;
         m_iLogoutTime = 0;
     };
-    ~CspUser() {};
+    ~CspUser(){};
 
     std::string m_strId;
 
@@ -56,16 +56,16 @@ public:
     //   - m_strServiceRef = access_services.name (빈 문자열이면 REGISTER 거부)
     //   - service.domain 과 결합하여 Digest username (full IMPI) 구성
     //   - m_strImsi 가 비면 m_strAuthId 를 fallback 으로 사용
-    std::string m_strServiceRef;   // access_services.name 참조
+    std::string m_strServiceRef;  // access_services.name 참조
     std::string m_strImsi;
 
-    // 착신거부 ( Do Not Disturb ) 
+    // 착신거부 ( Do Not Disturb )
     bool m_bDnd;
 
     // 개별 착신 거부
     std::vector<std::string> m_vecReject;
 
-    // 착신전환 ( Call Forward ) 
+    // 착신전환 ( Call Forward )
     std::string m_strForward;
 
     // 서비스 타입: "volte" | "ptt" | "both"
@@ -75,23 +75,26 @@ public:
     std::string m_strOrganizationId;
 
     // 가입자가 생성된 시간
-    time_t m_iCreateTime; 
+    time_t m_iCreateTime;
     // 가입자 정보가 마지막으로 수정된 시간
-    time_t m_iUpdateTime; 
+    time_t m_iUpdateTime;
 
     // 마지막 Register 시간
-    time_t m_iRegisterTime; 
+    time_t m_iRegisterTime;
     // 마지막 Logout 시간
-    time_t m_iLogoutTime;   
+    time_t m_iLogoutTime;
 
-    bool isDnd() { return m_bDnd; };
-    bool isCallForward() { return m_strForward.empty() == false; };
-    bool isReject(std::string strFromId) { 
-        return std::find(m_vecReject.begin(), m_vecReject.end(), strFromId) != m_vecReject.end(); 
+    bool isDnd() {
+        return m_bDnd;
+    };
+    bool isCallForward() {
+        return m_strForward.empty() == false;
+    };
+    bool isReject( std::string strFromId ) {
+        return std::find( m_vecReject.begin(), m_vecReject.end(), strFromId ) != m_vecReject.end();
     }
- 
 
-    //bool Parse( const char *pszFileName );
+    // bool Parse( const char *pszFileName );
     void clear();
 
     friend class CspUserMap;
@@ -99,10 +102,9 @@ public:
 
 private:
     time_t _loadTime;
-    //bool IsDnd();
-    //bool IsCallForward();
+    // bool IsDnd();
+    // bool IsCallForward();
 };
-
 
 // 가입자 정보를 관리하는 클래스
 // Caching User Data
@@ -111,30 +113,27 @@ typedef std::map<std::string, CspUser> CSP_USER_MAP;
 class CspUserMap {
 public:
     // isUser : alive user
-    bool isAlive(std::string strToId, CspUser & clsUser);
-    bool select(std::string strToId, CspUser & clsUser);
+    bool isAlive( std::string strToId, CspUser &clsUser );
+    bool select( std::string strToId, CspUser &clsUser );
 
-    bool registerUser(std::string strUserId, std::string strPassWord);
-    bool unregisterUser(std::string strUserId);
+    bool registerUser( std::string strUserId, std::string strPassWord );
+    bool unregisterUser( std::string strUserId );
     bool Select( const char *pszUserId, CspUser &clsXmlUser );
     void Insert( CspUser &clsXmlUser );
     bool Load( const char *pszDirName );
     bool LoadFromDb();
-    bool Remove(std::string strUserId);
-    bool ReloadFromDb(std::string strUserId);
+    bool Remove( std::string strUserId );
+    bool ReloadFromDb( std::string strUserId );
 
 private:
     CSP_USER_MAP m_clsMap;
     CSipMutex m_clsMutex;
-    bool _loadUserFromFile(std::string strUserId, CspUser &clsUser);
+    bool _loadUserFromFile( std::string strUserId, CspUser &clsUser );
 
-    bool _remove(std::string strUserId);
-    bool _update(CspUser &clsUser);
-
+    bool _remove( std::string strUserId );
+    bool _update( CspUser &clsUser );
 };
 
-
 extern CspUserMap gclsCspUserMap;
-
 
 #endif

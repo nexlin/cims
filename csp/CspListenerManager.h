@@ -1,10 +1,10 @@
 #ifndef __CSP_LISTENER_MANAGER_H__
 #define __CSP_LISTENER_MANAGER_H__
 
+#include <mutex>
+#include <set>
 #include <string>
 #include <vector>
-#include <set>
-#include <mutex>
 
 /**
  * CspListenerManager — CspConfigCache(local_nodes) ↔ psip CSipStack 의 UDP/TCP/TLS 리스너 동기화 계층.
@@ -28,15 +28,15 @@ public:
     bool Sync();
 
     /** 디버그용: 현재 관리 중인 리스너 ID 목록 (hashed int). */
-    void GetManagedIds(std::vector<int>& out);
+    void GetManagedIds( std::vector<int>& out );
 
 private:
     struct ManagedInfo {
-        int         id;           // record.id 의 UUID 를 hash 한 안정적 int
+        int id;  // record.id 의 UUID 를 hash 한 안정적 int
         std::string bindIp;
-        int         port;
+        int port;
         std::string protocol;     // "UDP" | "TCP" | "TLS"
-        int         threadCount;  // R2: UDP 수신 스레드 수. TCP/TLS 는 무시.
+        int threadCount;          // R2: UDP 수신 스레드 수. TCP/TLS 는 무시.
         std::string tlsCertPath;  // R5.c: TLS 전용. 비어있으면 stack-global cert 사용.
         std::string tlsKeyPath;
         std::string tlsCaPath;
@@ -46,16 +46,16 @@ private:
     std::vector<ManagedInfo> m_vecManaged;
 
     /** protocol 을 대문자로 정규화. 미지원 프로토콜(WS/WSS 등) 이면 빈 문자열. */
-    std::string _normalizeProtocol(const std::string& protocol) const;
-    bool _shouldManage(const std::string& protocol) const;
+    std::string _normalizeProtocol( const std::string& protocol ) const;
+    bool _shouldManage( const std::string& protocol ) const;
     /** protocol-별 "이미 바인딩된 포트" 체크. bootstrap 리스너와의 중복 스킵. */
-    bool _isAlreadyBound(const std::string& protocol, const std::string& ip, int port) const;
+    bool _isAlreadyBound( const std::string& protocol, const std::string& ip, int port ) const;
     /** protocol 에 맞는 psip AddXxxListener 호출. */
-    bool _addListenerToStack(const ManagedInfo& m, int& outId);
+    bool _addListenerToStack( const ManagedInfo& m, int& outId );
     /** protocol 에 맞는 psip RemoveXxxListener 호출. */
-    bool _removeListenerFromStack(const ManagedInfo& m);
+    bool _removeListenerFromStack( const ManagedInfo& m );
 };
 
 extern CCspListenerManager gclsListenerManager;
 
-#endif // __CSP_LISTENER_MANAGER_H__
+#endif  // __CSP_LISTENER_MANAGER_H__

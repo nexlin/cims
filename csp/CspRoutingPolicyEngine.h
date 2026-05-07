@@ -1,11 +1,11 @@
 #ifndef __CSP_ROUTING_POLICY_ENGINE_H__
 #define __CSP_ROUTING_POLICY_ENGINE_H__
 
+#include <mutex>
 #include <string>
 #include <vector>
-#include <mutex>
 
-#include "CspRuleEvaluator.h"   // MessageCtx
+#include "CspRuleEvaluator.h"  // MessageCtx
 
 /**
  * CspRoutingPolicyEngine — routing_policies.jsonl 평가 (v3, 2026-04-22).
@@ -30,10 +30,10 @@ enum RoutingDecisionType {
 
 struct RoutingDecision {
     RoutingDecisionType type = ROUTING_NO_MATCH;
-    std::string matched_policy;   // match 된 policy name (디버그)
-    std::string target_name;      // route_set 또는 access_service name
-    std::string picked_route;     // RouteSet 인 경우 SelectRoute 결과
-    std::string reason;           // 거절/실패 이유
+    std::string matched_policy;  // match 된 policy name (디버그)
+    std::string target_name;     // route_set 또는 access_service name
+    std::string picked_route;    // RouteSet 인 경우 SelectRoute 결과
+    std::string reason;          // 거절/실패 이유
 };
 
 class CspRoutingPolicyEngine {
@@ -47,7 +47,7 @@ public:
      *  @param ctx      SIP 메시지에서 추출한 필드
      *  @param hashKey  RouteSet.hash_by_caller 에 사용할 key (발신자 식별 문자열)
      *  @return 결정 (type + target + picked_route) */
-    RoutingDecision Decide(const MessageCtx& ctx, const std::string& hashKey);
+    RoutingDecision Decide( const MessageCtx& ctx, const std::string& hashKey );
 
     /** 정책 수. */
     size_t Size() const;
@@ -55,19 +55,19 @@ public:
 private:
     struct Policy {
         std::string name;
-        int         priority = 100;
-        std::string match_rule_set_ref;     // 빈 문자열 → catch-all
-        std::string target_type;            // route_set | access_service | reject
+        int priority = 100;
+        std::string match_rule_set_ref;  // 빈 문자열 → catch-all
+        std::string target_type;         // route_set | access_service | reject
         std::string target_ref;
         std::vector<std::string> transform_rule_set_refs;  // 예약 필드
-        std::string fail_action;            // reject | next_policy
-        bool        enabled = true;
+        std::string fail_action;                           // reject | next_policy
+        bool enabled = true;
     };
 
     mutable std::mutex m_mutex;
-    std::vector<Policy> m_policies;   // priority 오름차순 정렬
+    std::vector<Policy> m_policies;  // priority 오름차순 정렬
 };
 
 extern CspRoutingPolicyEngine gclsRoutingPolicyEngine;
 
-#endif // __CSP_ROUTING_POLICY_ENGINE_H__
+#endif  // __CSP_ROUTING_POLICY_ENGINE_H__

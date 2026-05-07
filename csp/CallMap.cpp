@@ -18,10 +18,10 @@
  */
 #include "CallMap.h"
 
+#include "Log.h"
 #include "MemoryDebug.h"
 #include "RtpMap.h"
 #include "SipServer.h"
-#include "Log.h"
 
 CCallMap gclsCallMap;
 CCallMap gclsTransCallMap;
@@ -233,8 +233,10 @@ bool CCallMap::Delete( const char *pszCallId, bool bStopPort ) {
         // printf("[DEBUG] CallMap::Delete(%s) -> RtpMap::Delete(%d)\n", pszCallId, iPort);
         CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) -> RtpMap::Delete(%d)", pszCallId, iPort );
     } else {
-        // printf("[DEBUG] CallMap::Delete(%s) SKIPPED RtpMap::Delete (iPort=%d, bStopPort=%d)\n", pszCallId, iPort, bStopPort);
-        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) SKIPPED RtpMap::Delete (iPort=%d, bStopPort=%d)", pszCallId, iPort, bStopPort );
+        // printf("[DEBUG] CallMap::Delete(%s) SKIPPED RtpMap::Delete (iPort=%d, bStopPort=%d)\n", pszCallId, iPort,
+        // bStopPort);
+        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) SKIPPED RtpMap::Delete (iPort=%d, bStopPort=%d)", pszCallId, iPort,
+                     bStopPort );
     }
     return bRes;
 }
@@ -266,8 +268,7 @@ void CCallMap::DeleteTimeout( int iTimeoutSec ) {
 
     m_clsMutex.acquire();
     for ( auto itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
-        if ( itMap->second.m_iLastActivityTime > 0 &&
-             ( iNow - itMap->second.m_iLastActivityTime ) >= iTimeoutSec ) {
+        if ( itMap->second.m_iLastActivityTime > 0 && ( iNow - itMap->second.m_iLastActivityTime ) >= iTimeoutSec ) {
             clsStaleList.push_back( itMap->first );
         }
     }

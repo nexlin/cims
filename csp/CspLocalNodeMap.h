@@ -1,10 +1,10 @@
 #ifndef __CSP_LOCAL_NODE_MAP_H__
 #define __CSP_LOCAL_NODE_MAP_H__
 
-#include <string>
-#include <vector>
 #include <map>
 #include <mutex>
+#include <string>
+#include <vector>
 
 /**
  * CspLocalNodeMap — local_nodes.jsonl 캐시 (v3, 2026-04-22).
@@ -15,24 +15,26 @@
  */
 
 struct LocalNodeInfo {
-    std::string id;                 // uuid
+    std::string id;  // uuid
     std::string name;
-    std::string edge;               // access | peering | mgmt
+    std::string edge;  // access | peering | mgmt
     std::string bind_ip;
-    int         bind_port = 0;
-    std::string protocol;           // UDP | TCP | TLS | WS | WSS
-    int         thread_count = 0;   // R2: per-listener UDP 수신 스레드 수. 0=fallback → Setup.Sip.UdpThreadCount.
-    bool        enabled = true;
-    bool        is_primary = false; // CSP 인스턴스 identity (Setup.Sip.LocalIp/UdpPort) 의 근원
+    int bind_port = 0;
+    std::string protocol;  // UDP | TCP | TLS | WS | WSS
+    int thread_count = 0;  // R2: per-listener UDP 수신 스레드 수. 0=fallback → Setup.Sip.UdpThreadCount.
+    bool enabled = true;
+    bool is_primary = false;  // CSP 인스턴스 identity (Setup.Sip.LocalIp/UdpPort) 의 근원
     std::string tls_cert_path;
     std::string tls_key_path;
     std::string tls_ca_path;
-    bool        tls_verify_peer = false;
-    int         max_connections = 0;
+    bool tls_verify_peer = false;
+    int max_connections = 0;
     std::vector<std::string> tags;
     std::string note;
 
-    bool IsValid() const { return !name.empty(); }
+    bool IsValid() const {
+        return !name.empty();
+    }
 };
 
 class CCspLocalNodeMap {
@@ -43,14 +45,14 @@ public:
     bool Sync();
 
     /** name 으로 조회. 미매칭 시 IsValid()==false 반환. */
-    LocalNodeInfo GetByName(const std::string& name) const;
+    LocalNodeInfo GetByName( const std::string& name ) const;
 
     /** id (uuid string) 로 조회. */
-    LocalNodeInfo GetById(const std::string& id) const;
+    LocalNodeInfo GetById( const std::string& id ) const;
 
     /** psip 용 int listener id (= CspUuidToIntId(uuid)) 로 역조회.
      *  AclPolicyEngine/AccessServiceMap 에서 수신 메시지의 m_iListenerId → LocalNode 매핑. */
-    LocalNodeInfo GetByIntId(int listenerIntId) const;
+    LocalNodeInfo GetByIntId( int listenerIntId ) const;
 
     /** 전체 스냅샷. */
     std::vector<LocalNodeInfo> GetAll() const;
@@ -67,10 +69,10 @@ public:
      *  2) enabled=true && edge=access && protocol==<인자>     (Rule 2)
      *  3) 없음 → IsValid()==false. 호출자가 _infra fallback 사용.
      *  CspServer 의 TCP/TLS primary 주입에 사용. UDP 는 GetPrimary() 와 일관. */
-    LocalNodeInfo GetPrimaryByProtocol(const std::string& protocol) const;
+    LocalNodeInfo GetPrimaryByProtocol( const std::string& protocol ) const;
 
     size_t Size() const;
-    bool   HasName(const std::string& name) const;
+    bool HasName( const std::string& name ) const;
 
 private:
     mutable std::mutex m_mutex;
@@ -79,4 +81,4 @@ private:
 
 extern CCspLocalNodeMap gclsLocalNodeMap;
 
-#endif // __CSP_LOCAL_NODE_MAP_H__
+#endif  // __CSP_LOCAL_NODE_MAP_H__

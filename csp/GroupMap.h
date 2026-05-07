@@ -5,10 +5,11 @@
 #ifndef _GROUP_MAP_H_
 #define _GROUP_MAP_H_
 
-#include "CspPttGroup.h"
-#include <map>
 #include <functional>
+#include <map>
 #include <mutex>
+
+#include "CspPttGroup.h"
 
 typedef std::map<std::string, CspPttGroup> GROUP_MAP;
 
@@ -37,9 +38,9 @@ public:
     bool Contains( const char *pszGroupId );
 
     // find group list by user-ID
-    void IterateInternal( std::function<void(const CspPttGroup&)> fnCallback );
+    void IterateInternal( std::function<void( const CspPttGroup & )> fnCallback );
 
-    bool FindGroupsByUser(std::string strUserId);
+    bool FindGroupsByUser( std::string strUserId );
 
     /** Clear all groups */
     void Clear();

@@ -1,10 +1,10 @@
 #ifndef __CSP_REMOTE_NODE_MAP_H__
 #define __CSP_REMOTE_NODE_MAP_H__
 
-#include <string>
-#include <vector>
 #include <map>
 #include <mutex>
+#include <string>
+#include <vector>
 
 /**
  * CspRemoteNodeMap — remote_nodes.jsonl 캐시 (v3, 2026-04-22).
@@ -14,20 +14,22 @@
  */
 
 struct RemoteNodeInfo {
-    std::string id;                 // uuid
+    std::string id;  // uuid
     std::string name;
-    std::string ip;                 // IP 또는 hostname
-    int         port = 0;
-    std::string protocol;           // UDP | TCP | TLS
-    std::string remote_domain;      // 피어의 SIP URI host
-    bool        srv_lookup = false;
-    bool        dns_fallback = true;
-    bool        tls_verify = false;
-    bool        enabled = true;
+    std::string ip;  // IP 또는 hostname
+    int port = 0;
+    std::string protocol;       // UDP | TCP | TLS
+    std::string remote_domain;  // 피어의 SIP URI host
+    bool srv_lookup = false;
+    bool dns_fallback = true;
+    bool tls_verify = false;
+    bool enabled = true;
     std::vector<std::string> tags;
     std::string note;
 
-    bool IsValid() const { return !name.empty(); }
+    bool IsValid() const {
+        return !name.empty();
+    }
 };
 
 class CCspRemoteNodeMap {
@@ -36,11 +38,11 @@ public:
 
     bool Sync();
 
-    RemoteNodeInfo GetByName(const std::string& name) const;
-    RemoteNodeInfo GetById(const std::string& id) const;
+    RemoteNodeInfo GetByName( const std::string& name ) const;
+    RemoteNodeInfo GetById( const std::string& id ) const;
     std::vector<RemoteNodeInfo> GetAll() const;
     size_t Size() const;
-    bool   HasName(const std::string& name) const;
+    bool HasName( const std::string& name ) const;
 
 private:
     mutable std::mutex m_mutex;
@@ -49,4 +51,4 @@ private:
 
 extern CCspRemoteNodeMap gclsRemoteNodeMap;
 
-#endif // __CSP_REMOTE_NODE_MAP_H__
+#endif  // __CSP_REMOTE_NODE_MAP_H__

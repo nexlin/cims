@@ -6,10 +6,11 @@
 #ifndef _DB_MANAGER_H_
 #define _DB_MANAGER_H_
 
+#include <mariadb/mysql.h>
+
+#include <mutex>
 #include <string>
 #include <vector>
-#include <mutex>
-#include <mariadb/mysql.h>
 
 class CspUser;
 class CspUserMap;
@@ -29,8 +30,8 @@ public:
      * @brief MariaDB 에 연결한다
      * @return 성공하면 true
      */
-    bool Connect( const std::string& strHost, const std::string& strUser,
-                  const std::string& strPasswd, const std::string& strDb, int iPort = 3306 );
+    bool Connect( const std::string& strHost, const std::string& strUser, const std::string& strPasswd,
+                  const std::string& strDb, int iPort = 3306 );
     void Disconnect();
     bool IsConnected() const;
 
@@ -68,10 +69,8 @@ public:
     // ─────────────────────────────────────────────
 
     /** 통화 세션을 DB에 기록한다 (INVITE 시점, state=ringing) */
-    bool InsertCallLog( const std::string& strCallId, bool bPtt,
-                        const std::string& strGroupId,
-                        const std::string& strInitiator,
-                        const std::string& strCallee );
+    bool InsertCallLog( const std::string& strCallId, bool bPtt, const std::string& strGroupId,
+                        const std::string& strInitiator, const std::string& strCallee );
 
     /** 현재 활성 VoIP 통화 수 (state IN ('ringing','active')) */
     int GetActiveVoipCallCount();
@@ -80,8 +79,7 @@ public:
     bool UpdateCallLogActive( const std::string& strCallId );
 
     /** VoIP 통화 종료 시 CDR 정보로 업데이트 */
-    bool UpdateCallLogEnded( const std::string& strCallId,
-                              time_t tAnswer, time_t tEnd, int iSipStatus );
+    bool UpdateCallLogEnded( const std::string& strCallId, time_t tAnswer, time_t tEnd, int iSipStatus );
 
     /** PTT: session_seq 증가 후 새 값 반환 (그룹 세션 시작 시) */
     int IncrementSessionSeq( const std::string& strGroupId );
@@ -96,31 +94,25 @@ public:
     bool EndGroupCallLog( const std::string& strGroupId );
 
     /** 녹취 레코드를 recordings 테이블에 삽입한다 */
-    bool InsertRecording( const std::string& strCallId, const std::string& strCallType,
-                          const std::string& strGroupId,
-                          const std::string& strCaller, const std::string& strCallee,
-                          const std::string& strRecordDir, bool bHasVideo );
+    bool InsertRecording( const std::string& strCallId, const std::string& strCallType, const std::string& strGroupId,
+                          const std::string& strCaller, const std::string& strCallee, const std::string& strRecordDir,
+                          bool bHasVideo );
 
     /** 통화 참여자를 추가한다 */
-    bool InsertParticipant( const std::string& strCallId,
-                             const std::string& strMsisdn,
-                             const std::string& strRole,
-                             bool bJoinNow );
+    bool InsertParticipant( const std::string& strCallId, const std::string& strMsisdn, const std::string& strRole,
+                            bool bJoinNow );
 
     /** PTT: group_id 기준 활성 세션에 참여자를 추가한다 (invited, join_time=NULL) */
-    bool InsertGroupParticipant( const std::string& strGroupId,
-                                  const std::string& strMsisdn );
+    bool InsertGroupParticipant( const std::string& strGroupId, const std::string& strMsisdn );
 
     /** PTT: 참여자 연결 완료 (OnCallStarted) */
-    bool UpdateParticipantJoined( const std::string& strGroupId,
-                                   const std::string& strMsisdn );
+    bool UpdateParticipantJoined( const std::string& strGroupId, const std::string& strMsisdn );
 
     /** PTT: 참여자 이탈 (OnCallTerminated) */
-    bool UpdateParticipantLeft( const std::string& strGroupId,
-                                 const std::string& strMsisdn );
+    bool UpdateParticipantLeft( const std::string& strGroupId, const std::string& strMsisdn );
 
 private:
-    MYSQL*  m_pMysql;
+    MYSQL* m_pMysql;
     mutable std::recursive_mutex m_mutex;
 
     // 접속 정보 (재접속용)
@@ -128,10 +120,10 @@ private:
     std::string m_strUser;
     std::string m_strPasswd;
     std::string m_strDb;
-    int         m_iPort;
+    int m_iPort;
 
-    bool      Reconnect();
-    bool      ExecuteQuery( const std::string& strSql );
+    bool Reconnect();
+    bool ExecuteQuery( const std::string& strSql );
     MYSQL_RES* ExecuteSelect( const std::string& strSql );
 
     /** SQL 인젝션 방지 이스케이프 */

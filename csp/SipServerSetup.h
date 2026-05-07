@@ -96,8 +96,6 @@ public:
     /** RTP relay 기능 사용 여부 */
     bool m_bUseRtpRelay;
 
-
-
     /** 로그인된 사용자에게 OPTIONS 메시지를 전송하는 주기 (초단위) */
     int m_iSendOptionsPeriod;
 
@@ -106,7 +104,6 @@ public:
 
     /** 그룹 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strGroupDataFolder;
-
 
     /** SIP REGISTER 를 전송한 후, 수신한 401 응답의 Authenticate 를 저장하여서 다음 주기의 SIP REGISTER 메시지를 생성할
      * 때에 사용하는 경우 true 로 설정한다. */
@@ -184,20 +181,20 @@ public:
     // CMP 연동 설정
     std::string m_strCmpIp;
     int m_iCmpPort;
-    int m_iLocalCmpPort; // Local port to receive CMP messages
+    int m_iLocalCmpPort;  // Local port to receive CMP messages
 
     // ================================================================
     // 런타임 설정 jsonl 디렉토리 (agent 관리)
-    std::string m_strConfigJsonlDir;   // agent 관리 config/ 디렉토리
+    std::string m_strConfigJsonlDir;  // agent 관리 config/ 디렉토리
 
     // Deployment config overlay 추적 (Read() 는 CLog 초기화 전 호출되므로 로그는 SIPServerStart 에서 출력)
-    std::string m_strOverlayPath;      // 적용된 overlay 파일 경로 (빈 문자열 = 없음)
-    int         m_iOverlayKeys = 0;    // 적용된 키 개수
+    std::string m_strOverlayPath;  // 적용된 overlay 파일 경로 (빈 문자열 = 없음)
+    int m_iOverlayKeys = 0;        // 적용된 키 개수
 
     // ================================================================
     // 녹취 설정
     bool m_bRecordEnable;
-    std::string m_strRecordDir;       // NAS 마운트 경로 (raw + converted 공유)
+    std::string m_strRecordDir;  // NAS 마운트 경로 (raw + converted 공유)
 
     // ================================================================
     // 보안 기능

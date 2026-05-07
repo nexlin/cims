@@ -1,10 +1,10 @@
 #ifndef __CSP_ROUTE_MAP_H__
 #define __CSP_ROUTE_MAP_H__
 
-#include <string>
-#include <vector>
 #include <map>
 #include <mutex>
+#include <string>
+#include <vector>
 
 /**
  * CspRouteMap — routes.jsonl 캐시 (v3, 2026-04-22).
@@ -24,47 +24,50 @@ struct RouteConfig {
     std::string local_node_ref;
     std::string remote_node_ref;
     std::string outbound_proxy_ip;
-    int         outbound_proxy_port = 0;
-    bool        register_to_remote = false;
-    int         register_expires = 3600;
+    int outbound_proxy_port = 0;
+    bool register_to_remote = false;
+    int register_expires = 3600;
     std::string auth_user;
     std::string auth_password;
     std::string auth_realm;
-    int         max_concurrent_calls = 0;
-    int         cps_limit = 0;
-    bool        enabled = true;
+    int max_concurrent_calls = 0;
+    int cps_limit = 0;
+    bool enabled = true;
     std::vector<std::string> tags;
     std::string note;
 
-    bool IsValid() const { return !name.empty() && !local_node_ref.empty() && !remote_node_ref.empty(); }
+    bool IsValid() const {
+        return !name.empty() && !local_node_ref.empty() && !remote_node_ref.empty();
+    }
 };
 
 struct RouteRuntime {
-    std::atomic<bool>    alive{true};
-    std::atomic<int>     consecutive_failures{0};
-    std::atomic<int>     last_rtt_ms{-1};
-    std::atomic<long>    last_ping_at{0};
-    std::atomic<long>    last_reply_at{0};
+    std::atomic<bool> alive{ true };
+    std::atomic<int> consecutive_failures{ 0 };
+    std::atomic<int> last_rtt_ms{ -1 };
+    std::atomic<long> last_ping_at{ 0 };
+    std::atomic<long> last_reply_at{ 0 };
 
     RouteRuntime() = default;
-    RouteRuntime(const RouteRuntime& o)
-        : alive(o.alive.load()),
-          consecutive_failures(o.consecutive_failures.load()),
-          last_rtt_ms(o.last_rtt_ms.load()),
-          last_ping_at(o.last_ping_at.load()),
-          last_reply_at(o.last_reply_at.load()) {}
-    RouteRuntime& operator=(const RouteRuntime& o) {
-        alive                = o.alive.load();
+    RouteRuntime( const RouteRuntime& o )
+        : alive( o.alive.load() ),
+          consecutive_failures( o.consecutive_failures.load() ),
+          last_rtt_ms( o.last_rtt_ms.load() ),
+          last_ping_at( o.last_ping_at.load() ),
+          last_reply_at( o.last_reply_at.load() ) {
+    }
+    RouteRuntime& operator=( const RouteRuntime& o ) {
+        alive = o.alive.load();
         consecutive_failures = o.consecutive_failures.load();
-        last_rtt_ms          = o.last_rtt_ms.load();
-        last_ping_at         = o.last_ping_at.load();
-        last_reply_at        = o.last_reply_at.load();
+        last_rtt_ms = o.last_rtt_ms.load();
+        last_ping_at = o.last_ping_at.load();
+        last_reply_at = o.last_reply_at.load();
         return *this;
     }
 };
 
 struct RouteEntry {
-    RouteConfig  cfg;
+    RouteConfig cfg;
     RouteRuntime rt;
 };
 
@@ -81,10 +84,10 @@ public:
     void ValidateRefs();
 
     /** name 조회. */
-    RouteConfig GetByName(const std::string& name) const;
+    RouteConfig GetByName( const std::string& name ) const;
 
     /** (local, remote) pair 조회. */
-    RouteConfig GetByPair(const std::string& localName, const std::string& remoteName) const;
+    RouteConfig GetByPair( const std::string& localName, const std::string& remoteName ) const;
 
     /** 전체 스냅샷 (config 부분만). */
     std::vector<RouteConfig> GetAll() const;
@@ -92,9 +95,9 @@ public:
     size_t Size() const;
 
     // ─ 런타임 상태 조작 (헬스체크 모듈이 호출) ─
-    bool MarkAlive(const std::string& routeName, int rtt_ms);
-    bool MarkFail(const std::string& routeName);
-    bool IsAlive(const std::string& routeName) const;
+    bool MarkAlive( const std::string& routeName, int rtt_ms );
+    bool MarkFail( const std::string& routeName );
+    bool IsAlive( const std::string& routeName ) const;
 
 private:
     mutable std::mutex m_mutex;
@@ -105,4 +108,4 @@ private:
 
 extern CCspRouteMap gclsRouteMap;
 
-#endif // __CSP_ROUTE_MAP_H__
+#endif  // __CSP_ROUTE_MAP_H__
