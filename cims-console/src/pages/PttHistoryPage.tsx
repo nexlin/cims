@@ -412,6 +412,7 @@ export default function PttHistoryPage() {
         <FlowPage
           callId={flow.groupId}
           date={flow.date}
+          callType="ptt"
           onClose={() => setFlow(null)}
           prefetchedNodes={flow.nodes}
           prefetchedMessages={flow.messages}

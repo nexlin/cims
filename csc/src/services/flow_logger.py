@@ -999,17 +999,23 @@ async def _handle_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
     qs = parse_qs(urlparse(full_path).query)
     date_str = qs.get("date", [datetime.now().strftime("%Y-%m-%d")])[0]
     hour = qs.get("hour", [None])[0]
+    # call_type=volte|ptt — VoLTE 와 PTT 의 .d 디렉토리가 같은 prefix 부분 매칭
+    # 으로 충돌하는 경우 방지. VolteHistoryPage/PttHistoryPage 는 명시 전달.
+    call_type = qs.get("call_type", [None])[0]
+    if call_type and call_type not in ("volte", "ptt"):
+        call_type = None
 
     if after == "" or after == "list":
-        dirs = _find_all_d_dirs(date_str, hour)
+        dirs = _find_all_d_dirs(date_str, hour, call_type)
         call_ids = [os.path.basename(d).replace(".d", "") for d in dirs]
         return HandlerResult(status=200, body=json.dumps({
-            "date": date_str, "hour": hour, "call_ids": call_ids, "count": len(call_ids)
+            "date": date_str, "hour": hour, "call_type": call_type,
+            "call_ids": call_ids, "count": len(call_ids),
         }), media_type="application/json")
 
     # call_id lookup
     call_id = unquote(after)
-    d_dir = _find_d_dir_by_callid(date_str, hour, call_id)
+    d_dir = _find_d_dir_by_callid(date_str, hour, call_id, call_type)
     if not d_dir:
         return HandlerResult(status=404, body=f"'{call_id}' not found for date {date_str}")
 

@@ -371,12 +371,13 @@ const tdStyle: React.CSSProperties = {
 interface FlowPageProps {
   callId: string
   date?: string
+  callType?: 'volte' | 'ptt'
   onClose: () => void
   prefetchedNodes?: Record<string, FlowMessage[]>
   prefetchedMessages?: FlowMessage[]
 }
 
-export default function FlowPage({ callId, date, onClose, prefetchedNodes, prefetchedMessages }: FlowPageProps) {
+export default function FlowPage({ callId, date, callType, onClose, prefetchedNodes, prefetchedMessages }: FlowPageProps) {
   const [allNodes, setAllNodes] = useState<Record<string, FlowMessage[]>>({})
   const [enabledNodes, setEnabledNodes] = useState<Set<string>>(new Set())
   const [loading,  setLoading]  = useState(!prefetchedMessages)
@@ -415,11 +416,11 @@ export default function FlowPage({ callId, date, onClose, prefetchedNodes, prefe
     }
     setLoading(true)
     setError(null)
-    flowApi.get(callId, date)
+    flowApi.get(callId, date, callType)
       .then(r => applyResponse(r))
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [callId, date, prefetchedNodes, prefetchedMessages, applyResponse])
+  }, [callId, date, callType, prefetchedNodes, prefetchedMessages, applyResponse])
 
   // 선택된 노드의 메시지를 합쳐서 시간순 정렬
   const messages = Object.entries(allNodes)

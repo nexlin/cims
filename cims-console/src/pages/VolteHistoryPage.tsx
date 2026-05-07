@@ -21,8 +21,8 @@ export default function VolteHistoryPage() {
   const [fReason,setFR]=useState('')
   const [autoRefresh,setAR]=useState(false)
   const [detail,setDetail]=useState<CallLog|null>(null)
-  const [flow,setFlow]=useState<{callId:string,date:string}|null>(null)
-  const [recPlayer,setRecPlayer]=useState<{id:string,segments:RecordingSegment[],callType:'volte'|'ptt'|'voip_video',caller:string,callee:string}|null>(null)
+  const [flow,setFlow]=useState<{callId:string,date:string,callType?:'volte'|'ptt'}|null>(null)
+  const [recPlayer,setRecPlayer]=useState<{id:string,segments:RecordingSegment[],callType:'volte'|'ptt'|'volte_video',caller:string,callee:string}|null>(null)
 
   const load=useCallback(async(p:number)=>{
     setLoading(true)
@@ -41,7 +41,7 @@ export default function VolteHistoryPage() {
     try {
       const rec = await recordingsApi.get(l.dir_name)
       if (rec.segments && rec.segments.length > 0) {
-        setRecPlayer({ id: l.dir_name, segments: rec.segments, callType: rec.call_type as 'volte'|'voip_video', caller: l.initiator, callee: l.callee })
+        setRecPlayer({ id: l.dir_name, segments: rec.segments, callType: rec.call_type as 'volte'|'volte_video', caller: l.initiator, callee: l.callee })
       } else {
         show('세그먼트 없음', 'err')
       }
@@ -81,7 +81,7 @@ export default function VolteHistoryPage() {
                   : l.duration
                 return (
                 <tr key={l.id} style={{cursor:'pointer'}} onClick={()=>setDetail(l)}>
-                  <td><span className={`badge ${l.call_type==='voip_video'?'badge--blue':'badge--gray'}`} style={{fontSize:10}}>{l.call_type==='voip_video'?'영상':'음성'}</span></td>
+                  <td><span className={`badge ${l.call_type==='volte_video'?'badge--blue':'badge--gray'}`} style={{fontSize:10}}>{l.call_type==='volte_video'?'영상':'음성'}</span></td>
                   <td>{l.initiator}</td>
                   <td>{l.callee||'—'}</td>
                   <td><span className={`badge ${l.state==='ended'?'badge--gray':l.state==='active'?'badge--green':l.state==='ringing'?'badge--blue':'badge--gray'}`}>{l.state==='ended'?'종료':l.state==='active'?'통화중':l.state==='ringing'?'호출중':l.state||'—'}</span></td>
@@ -91,7 +91,7 @@ export default function VolteHistoryPage() {
                   <td className="ts">{fmtDur(dur)}</td>
                   <td className="ts">{l.end_reason_ko||l.end_reason||'—'}</td>
                   <td style={{display:'flex',gap:4,alignItems:'center'}}>
-                    <button className="btn btn--sm btn--outline" onClick={e=>{e.stopPropagation();setFlow({callId:l.call_id,date:l.invite_time?.substring(0,10)||''})}}>플로우</button>
+                    <button className="btn btn--sm btn--outline" onClick={e=>{e.stopPropagation();setFlow({callId:l.call_id,date:l.invite_time?.substring(0,10)||'',callType:'volte'})}}>플로우</button>
                     {l.has_recording && (
                       <button className="btn btn--sm btn--outline" style={{fontSize:10,padding:'1px 6px'}}
                         onClick={e=>{e.stopPropagation();openRecording(l)}}
@@ -126,7 +126,7 @@ export default function VolteHistoryPage() {
         </div>
       )}
 
-      {flow&&<FlowPage callId={flow.callId} date={flow.date} onClose={()=>setFlow(null)}/>}
+      {flow&&<FlowPage callId={flow.callId} date={flow.date} callType={flow.callType} onClose={()=>setFlow(null)}/>}
 
       {detail&&(
         <Modal title={`VoLTE 통화 상세`} onClose={()=>setDetail(null)}>
@@ -161,7 +161,7 @@ export default function VolteHistoryPage() {
           )}
           <div className="modal-footer" style={{justifyContent:'space-between'}}>
             <div style={{display:'flex',gap:8}}>
-              <button className="btn btn--sm btn--outline" onClick={()=>{setFlow({callId:detail.call_id,date:detail.invite_time?.substring(0,10)||''})}}>플로우 보기</button>
+              <button className="btn btn--sm btn--outline" onClick={()=>{setFlow({callId:detail.call_id,date:detail.invite_time?.substring(0,10)||'',callType:'volte'})}}>플로우 보기</button>
             </div>
             <button className="btn btn--ghost" onClick={()=>setDetail(null)}>닫기</button>
           </div>

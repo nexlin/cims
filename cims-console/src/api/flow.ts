@@ -37,8 +37,11 @@ export const flowApi = {
     const q = date ? `?date=${date}` : ''
     return api.get(`/flow/list${q}`)
   },
-  get(callId: string, date?: string): Promise<FlowResponse> {
-    const q = date ? `?date=${date}` : ''
+  get(callId: string, date?: string, callType?: string): Promise<FlowResponse> {
+    const params = new URLSearchParams()
+    if (date) params.set('date', date)
+    if (callType) params.set('call_type', callType)
+    const q = params.toString() ? `?${params.toString()}` : ''
     return api.get(`/flow/${encodeURIComponent(callId)}${q}`)
   },
   /** 메시지 body 조회 (interface jsonl seq 기반, fallback: ts+dir)

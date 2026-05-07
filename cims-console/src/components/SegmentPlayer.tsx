@@ -4,7 +4,7 @@ import { recordingsApi, type RecordingSegment } from '../api/recordings'
 interface SegmentPlayerProps {
   segments: RecordingSegment[]
   recordingId: string
-  callType: 'volte' | 'ptt' | 'voip_video'
+  callType: 'volte' | 'ptt' | 'volte_video'
   caller?: string
   callee?: string
   onClose?: () => void
