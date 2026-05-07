@@ -74,6 +74,15 @@ _TB_CSC_BASE = "https://127.0.0.1:4419"
 _AGENT_NAME_CSC = "csc-server-local"
 _AGENT_SYNC_PORT_CSC = 9903
 
+# 배포본 csc — Phase 2 가 csc 를 4445 로 띄운 뒤 csp/cmp/sim 배포 주체로 사용
+_DEPLOYED_CSC_BASE = "https://127.0.0.1:4445"
+_MODULES = ("csp", "cmp", "sim")
+_TARBALL_PREFIX = {"csp": "csp", "cmp": "cmp", "sim": "cspsim"}
+_DIR_NAME       = {"csp": "csp", "cmp": "cmp", "sim": "sim"}
+_AGENT_SYNC_PORT_MOD = {"csp": 9904, "cmp": 9905, "sim": 9906}
+# step 21 — sim 은 install-only (Start 안 함). proto = udp.
+_LISTEN_PORTS = {"csp": (5060, "udp"), "cmp": (9000, "udp")}
+
 
 def _store(ctx: VerifyContext) -> dict:
     """공유 dict — 없으면 생성."""
@@ -1030,6 +1039,559 @@ def step_15_console_start(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
+# Step 16 — 배포본 csc(4445) admin login
+# ─────────────────────────────────────────────────────────────
+def step_16_modules_auth(ctx: VerifyContext) -> ItemResult:
+    """Step 16 — 배포본 csc(4445) admin login → tok2.
+
+    csc 가 step 13 에서 4445 로 LISTEN 중이어야 함. csc_start_ok 가 False 면 SKIP.
+    DB 는 TB-CSC 와 공유 — admin/1234 동일.
+    """
+    if already_ran(ctx, 16):
+        return get_native_result(ctx, 16)
+
+    if not _get(ctx, "csc_start_ok"):
+        result = ItemResult(
+            id="S5-MODULES-DEPLOY-AUTH", name="배포본 csc admin login",
+            status=ItemStatus.SKIP,
+            detail="step 13 (csc Start 4445) 미실행 / 실패",
+            stage=5,
+        )
+        _save(ctx, 16, result)
+        return result
+
+    base = _DEPLOYED_CSC_BASE
+    login_id = os.environ.get("CIMS_TB_ADMIN_ID", "admin")
+    pw = os.environ.get("CIMS_TB_ADMIN_PASSWORD", "1234")
+    tok2 = csc_http.admin_login(base, login_id, pw, timeout=5)
+    if not tok2:
+        result = ItemResult(
+            id="S5-MODULES-DEPLOY-AUTH", name="배포본 csc admin login",
+            status=ItemStatus.FAIL,
+            detail=f"admin login 실패 (base={base} id={login_id})",
+            stage=5,
+        )
+        _save(ctx, 16, result)
+        return result
+
+    _set(ctx, "tok2", tok2)
+    result = ItemResult(
+        id="S5-MODULES-DEPLOY-AUTH", name="배포본 csc admin login",
+        status=ItemStatus.PASS,
+        detail=f"base={base} id={login_id} → JWT (len={len(tok2)})",
+        stage=5,
+    )
+    _save(ctx, 16, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 17 — csp/cmp/cspsim 패키지 업로드 (배포본 csc 4445)
+# ─────────────────────────────────────────────────────────────
+def step_17_modules_pkg_upload(ctx: VerifyContext) -> ItemResult:
+    """Step 17 — 3 모듈 (csp/cmp/sim) tarball 을 배포본 csc(4445) 에 업로드.
+
+    sim 의 tarball prefix 는 'cspsim' (TARBALL_PREFIX 매핑). pkg2_id_{m} 캐시.
+    """
+    if already_ran(ctx, 17):
+        return get_native_result(ctx, 17)
+
+    tok2 = _get(ctx, "tok2", "")
+    if not tok2:
+        result = ItemResult(
+            id="S5-MODULES-DEPLOY-PKG-UPLOAD",
+            name="csp/cmp/cspsim 패키지 업로드",
+            status=ItemStatus.SKIP,
+            detail="step 16 (배포본 csc admin login) 미실행 / 실패",
+            stage=5,
+        )
+        _save(ctx, 17, result)
+        return result
+
+    base = _DEPLOYED_CSC_BASE
+    pkg_dir = os.path.join(ctx.dist_dir, "packages")
+    notes: list = []
+    fail = False
+    for m in _MODULES:
+        prefix = _TARBALL_PREFIX[m]
+        tar = _latest_tarball(pkg_dir, prefix)
+        if not tar:
+            notes.append(f"- [FAIL] {m}: tarball 없음 ({prefix}-*.tar.gz)")
+            fail = True
+            continue
+        try:
+            status, body = csc_http.post_multipart(
+                f"{base}/api/v1/packages",
+                file_path=tar, form_fields={"force": "true"},
+                token=tok2, timeout=120,
+            )
+        except Exception as e:
+            notes.append(f"- [FAIL] {m}: 업로드 예외 {type(e).__name__}: {e}")
+            fail = True
+            continue
+        if status not in (200, 201) or not isinstance(body, dict) or not body.get("id"):
+            notes.append(f"- [FAIL] {m}: status={status} body={str(body)[:120]}")
+            fail = True
+            continue
+        pkg_id = int(body["id"])
+        _set(ctx, f"pkg2_id_{m}", pkg_id)
+        notes.append(f"- [OK] {m}: package_id={pkg_id} ({os.path.basename(tar)})")
+
+    result = ItemResult(
+        id="S5-MODULES-DEPLOY-PKG-UPLOAD",
+        name="csp/cmp/cspsim 패키지 업로드",
+        status=ItemStatus.FAIL if fail else ItemStatus.PASS,
+        detail="\n".join(notes), stage=5,
+    )
+    _save(ctx, 17, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 18 — 3 agent 등록 + 3 Test-agent spawn + 전 agent enroll 폴링
+# ─────────────────────────────────────────────────────────────
+def _register_one_module_agent(base: str, tok: str, aname: str) -> tuple:
+    """단일 module agent 재생성 + approve. (aid, enroll_tok, error_msg) 반환.
+
+    error_msg 가 비어있으면 성공. 기존 동명 agent 는 DELETE 후 POST.
+    """
+    prev = csc_http.find_agent_id_by_name(base, tok, aname)
+    if prev:
+        csc_http.delete(f"{base}/api/v1/agents/{prev}", token=tok)
+    try:
+        st, body = csc_http.post_json(
+            f"{base}/api/v1/agents",
+            {"name": aname, "note": "S5 modules native"},
+            token=tok, timeout=10,
+        )
+    except Exception as e:
+        return (None, "", f"POST /agents 예외 {type(e).__name__}: {e}")
+    if st not in (200, 201) or not isinstance(body, dict) or body.get("id") is None:
+        return (None, "", f"POST /agents status={st} body={str(body)[:120]}")
+    aid = int(body["id"])
+    enroll_tok = str(body.get("enrollment_token") or "")
+    if not enroll_tok:
+        return (None, "", "응답에 enrollment_token 누락")
+    try:
+        ap_st, _ = csc_http.post_json(
+            f"{base}/api/v1/agents/{aid}/approve", {}, token=tok, timeout=5,
+        )
+    except Exception as e:
+        return (None, "", f"approve 예외 {type(e).__name__}: {e}")
+    if ap_st not in (200, 204):
+        return (None, "", f"approve status={ap_st}")
+    return (aid, enroll_tok, "")
+
+
+def _spawn_one_module_agent(ctx: VerifyContext, m: str, base: str,
+                             aname: str, enroll_tok: str) -> tuple:
+    """단일 module Test-agent spawn. (pid, error_msg). cims_agent.py 부재 시
+    error 반환. log 는 LOG_DIR/test-agent-<m>-server.log."""
+    dist = ctx.dist_dir
+    sync_port = _AGENT_SYNC_PORT_MOD[m]
+    ta_dir = os.path.join(dist, f"{m}-server", "agent")
+    state_dir = os.path.join(ta_dir, "state")
+    ta_log = os.path.join(ctx.repo_root, "logs", f"test-agent-{m}-server.log")
+    os.makedirs(state_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(ta_log), exist_ok=True)
+
+    agent_py = os.path.join(dist, "agent", "cims_agent.py")
+    if not os.path.isfile(agent_py):
+        return (None, f"cims_agent.py 없음: {agent_py}")
+
+    import subprocess
+    env = dict(os.environ)
+    env["CIMS_AGENT_INSTALL_ROOT"] = os.path.join(dist, f"{m}-server")
+    env["CIMS_AGENT_SYNC_PORT"] = str(sync_port)
+    log_fp = open(ta_log, "w")
+    try:
+        proc = subprocess.Popen(
+            ["python3", agent_py,
+             "--csc-url", base, "--name", aname,
+             "--state-dir", state_dir,
+             "--enrollment-token", enroll_tok,
+             "--heartbeat-sec", "3"],
+            env=env, stdout=log_fp, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        return (proc.pid, "")
+    except Exception as e:
+        try: log_fp.close()
+        except Exception: pass
+        return (None, f"Popen 실패: {type(e).__name__}: {e}")
+
+
+def _all_modules_online(dist_dir: str) -> bool:
+    """3 module agent 모두 cims_agent.status='online' 인지."""
+    for m in _MODULES:
+        if not _agent_online_in_db(f"{m}-server-local", dist_dir):
+            return False
+    return True
+
+
+def step_18_modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
+    """Step 18 — 3 module agent register + 3 Test-agent spawn + enroll 폴링 20s.
+
+    개별 모듈 등록/spawn 이 실패해도 다른 모듈은 진행. 마지막에 3 모두 online
+    이어야 PASS.
+    """
+    if already_ran(ctx, 18):
+        return get_native_result(ctx, 18)
+
+    tok2 = _get(ctx, "tok2", "")
+    if not tok2:
+        result = ItemResult(
+            id="S5-MODULES-DEPLOY-AGENT-ENROLL",
+            name="3 모듈 agent + Test-agent",
+            status=ItemStatus.SKIP,
+            detail="step 16 미실행 — tok2 없음", stage=5,
+        )
+        _save(ctx, 18, result)
+        return result
+
+    base = _DEPLOYED_CSC_BASE
+    notes: list = []
+    register_fail = False
+    for m in _MODULES:
+        aname = f"{m}-server-local"
+        aid, enroll_tok, err = _register_one_module_agent(base, tok2, aname)
+        if err:
+            notes.append(f"- [FAIL] {m}: {err}")
+            register_fail = True
+            continue
+        _set(ctx, f"aid_{m}", aid)
+        _set(ctx, f"enroll_tok_{m}", enroll_tok)
+        pid, perr = _spawn_one_module_agent(ctx, m, base, aname, enroll_tok)
+        if perr:
+            notes.append(f"- [FAIL] {m}: spawn {perr}")
+            register_fail = True
+            continue
+        _set(ctx, f"ta_pid_{m}", pid)
+        notes.append(
+            f"- [OK] {m}: aid={aid} pid={pid} sync={_AGENT_SYNC_PORT_MOD[m]}"
+        )
+
+    # enroll polling — 모두 online 까지 20s
+    online = False
+    waited = 0
+    if not register_fail:
+        for _ in range(20):
+            time.sleep(1); waited += 1
+            if _all_modules_online(ctx.dist_dir):
+                online = True; break
+
+    if not register_fail and online:
+        notes.append(f"- 전 agent enroll: OK ({waited}s)")
+        status = ItemStatus.PASS
+    elif not register_fail and not online:
+        notes.append(f"- 전 agent enroll: TIMEOUT (20s)")
+        status = ItemStatus.FAIL
+    else:
+        notes.append("- 일부 모듈 register/spawn 실패 — enroll polling 미실행")
+        status = ItemStatus.FAIL
+
+    result = ItemResult(
+        id="S5-MODULES-DEPLOY-AGENT-ENROLL",
+        name="3 모듈 agent + Test-agent",
+        status=status, detail="\n".join(notes), stage=5,
+    )
+    _save(ctx, 18, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 19 — 3 deployment 생성 (csp/cmp/sim, overlay 없음)
+# ─────────────────────────────────────────────────────────────
+def step_19_modules_deployment_create(ctx: VerifyContext) -> ItemResult:
+    """Step 19 — csp/cmp/sim 3 deployment 생성. overlay 없음. dep2_id_{m} 캐시.
+
+    install_path = $DIST_DIR/{m}-server/{dir_name[m]}, process_name = upper.
+    """
+    if already_ran(ctx, 19):
+        return get_native_result(ctx, 19)
+
+    tok2 = _get(ctx, "tok2", "")
+    if not tok2:
+        result = ItemResult(
+            id="S5-MODULES-DEPLOY-INSTALL-CREATE", name="3 모듈 deployment 생성",
+            status=ItemStatus.SKIP,
+            detail="step 16 미실행 — tok2 없음", stage=5,
+        )
+        _save(ctx, 19, result)
+        return result
+
+    base = _DEPLOYED_CSC_BASE
+    notes: list = []
+    fail = False
+    for m in _MODULES:
+        aid = _get(ctx, f"aid_{m}")
+        pkg_id = _get(ctx, f"pkg2_id_{m}")
+        if aid is None or pkg_id is None:
+            notes.append(f"- [SKIP] {m}: aid/pkg_id 미확보 (step 17/18 실패)")
+            fail = True
+            continue
+        modname = _DIR_NAME[m]
+        install_path = os.path.join(ctx.dist_dir, f"{m}-server", modname)
+        pname = _TARBALL_PREFIX[m].upper()    # CSP/CMP/CSPSIM
+        payload = {
+            "agent_id":     int(aid),
+            "package_id":   int(pkg_id),
+            "install_path": install_path,
+            "process_name": pname,
+        }
+        try:
+            st, body = csc_http.post_json(
+                f"{base}/api/v1/deployments", payload, token=tok2, timeout=15,
+            )
+        except Exception as e:
+            notes.append(f"- [FAIL] {m}: 호출 예외 {type(e).__name__}: {e}")
+            fail = True
+            continue
+        if st not in (200, 201) or not isinstance(body, dict) or not body.get("id"):
+            notes.append(f"- [FAIL] {m}: status={st} body={str(body)[:120]}")
+            fail = True
+            continue
+        did = int(body["id"])
+        _set(ctx, f"dep2_id_{m}", did)
+        notes.append(f"- [OK] {m}: deployment_id={did} → {install_path} (process={pname})")
+
+    result = ItemResult(
+        id="S5-MODULES-DEPLOY-INSTALL-CREATE", name="3 모듈 deployment 생성",
+        status=ItemStatus.FAIL if fail else ItemStatus.PASS,
+        detail="\n".join(notes), stage=5,
+    )
+    _save(ctx, 19, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 20 — 3 install jobs + DB 폴링
+# ─────────────────────────────────────────────────────────────
+def step_20_modules_install_poll(ctx: VerifyContext) -> ItemResult:
+    """Step 20 — csp/cmp/sim install jobs 발행 + agent_deployment 상태 폴링 60s."""
+    if already_ran(ctx, 20):
+        return get_native_result(ctx, 20)
+
+    tok2 = _get(ctx, "tok2", "")
+    if not tok2:
+        result = ItemResult(
+            id="S5-MODULES-DEPLOY-INSTALL-POLL", name="3 모듈 install + 폴링",
+            status=ItemStatus.SKIP,
+            detail="step 16 미실행 — tok2 없음", stage=5,
+        )
+        _save(ctx, 20, result)
+        return result
+
+    deployments: list = []
+    for m in _MODULES:
+        did = _get(ctx, f"dep2_id_{m}")
+        if did is not None:
+            deployments.append((m, int(did)))
+    if not deployments:
+        result = ItemResult(
+            id="S5-MODULES-DEPLOY-INSTALL-POLL", name="3 모듈 install + 폴링",
+            status=ItemStatus.FAIL,
+            detail="step 19 에서 deployment 미확보", stage=5,
+        )
+        _save(ctx, 20, result)
+        return result
+
+    base = _DEPLOYED_CSC_BASE
+    notes: list = []
+    for m, did in deployments:
+        try:
+            st, _ = csc_http.post_json(
+                f"{base}/api/v1/deployments/{did}/job",
+                {"job_type": "install"}, token=tok2, timeout=10,
+            )
+        except Exception as e:
+            notes.append(f"- [FAIL] {m}: install 발행 예외 {e}")
+            continue
+        if st not in (200, 201, 202):
+            notes.append(f"- [FAIL] {m}: install 발행 status={st}")
+
+    elapsed = 0
+    all_done = False
+    final_status: dict = {}
+    for _ in range(30):
+        time.sleep(2); elapsed += 2
+        still = False
+        for m, did in deployments:
+            st = _deployment_status(m, did, ctx.dist_dir)
+            final_status[m] = st or "(unknown)"
+            if st in ("pending", "deploying"):
+                still = True
+        if not still:
+            all_done = True; break
+
+    _set(ctx, "all_install_done_modules", bool(all_done))
+    for m, did in deployments:
+        st = final_status.get(m, "(unknown)")
+        ok = st in ("succeeded", "installed")
+        notes.append(f"- [{'OK' if ok else 'WARN'}] {m}: did={did} status={st}")
+
+    overall = ItemStatus.PASS if all_done and all(
+        final_status.get(m) in ("succeeded", "installed") for m, _ in deployments
+    ) else ItemStatus.FAIL
+    summary = f"all_done={all_done} elapsed={elapsed}s\n" + "\n".join(notes)
+    result = ItemResult(
+        id="S5-MODULES-DEPLOY-INSTALL-POLL", name="3 모듈 install + 폴링",
+        status=overall, detail=summary, stage=5,
+    )
+    _save(ctx, 20, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 21 — csp/cmp Start + LISTEN (sim install-only)
+# ─────────────────────────────────────────────────────────────
+def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
+    """Step 21 — csp 5060/udp + cmp 9000/udp Start. sim 은 install-only."""
+    if already_ran(ctx, 21):
+        return get_native_result(ctx, 21)
+
+    tok2 = _get(ctx, "tok2", "")
+    if not tok2:
+        result = ItemResult(
+            id="S5-MODULES-RUN-START", name="csp/cmp Start (sim install-only)",
+            status=ItemStatus.SKIP,
+            detail="step 16 미실행 — tok2 없음", stage=5,
+        )
+        _save(ctx, 21, result)
+        return result
+
+    base = _DEPLOYED_CSC_BASE
+    notes: list = []
+    started: list = []
+    fail = False
+    for m, (port, proto) in _LISTEN_PORTS.items():
+        did = _get(ctx, f"dep2_id_{m}")
+        if did is None:
+            notes.append(f"- [FAIL] {m}: dep2_id 없음 (step 19 실패)")
+            fail = True; continue
+        try:
+            st, _ = csc_http.post_json(
+                f"{base}/api/v1/deployments/{did}/job",
+                {"job_type": "start"}, token=tok2, timeout=10,
+            )
+        except Exception as e:
+            notes.append(f"- [FAIL] {m}: start 발행 예외 {e}")
+            fail = True; continue
+        if st not in (200, 201, 202):
+            notes.append(f"- [FAIL] {m}: start 발행 status={st}")
+            fail = True; continue
+        started.append((m, port, proto))
+
+    for m, port, proto in started:
+        waited = _wait_listen(port, proto, 20)
+        if waited >= 0:
+            notes.append(f"- [OK] {m}: port {port}/{proto} LISTEN ({waited}s)")
+        else:
+            notes.append(f"- [FAIL] {m}: port {port}/{proto} LISTEN 실패 (20s)")
+            fail = True
+
+    _set(ctx, "modules_start_ok", not fail)
+    # Immutability marker — Start PASS 시 manifest sha 기록 (S6-ENTRY-CHECK 가 매칭).
+    if not fail:
+        try:
+            from ...common import pkg_manifest as _pkgm
+            sha = _pkgm.write_marker(ctx.dist_dir)
+            if sha:
+                notes.append(
+                    f"- [marker] .deployed-manifest.json 기록 (manifest_sha={sha[:12]}…)"
+                )
+        except Exception as e:
+            notes.append(f"- [marker] 기록 실패: {e}")
+
+    result = ItemResult(
+        id="S5-MODULES-RUN-START", name="csp/cmp Start (sim install-only)",
+        status=ItemStatus.FAIL if fail else ItemStatus.PASS,
+        detail="\n".join(notes), stage=5,
+    )
+    _save(ctx, 21, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 22 — Stop / 기동 유지 (--stop-after)
+# ─────────────────────────────────────────────────────────────
+def step_22_finalize(ctx: VerifyContext) -> ItemResult:
+    """Step 22 — `stop_after=True` 면 모든 deployment stop + Test-agent 4개 kill.
+    기본 (False) 은 정보성 — 4 ports 기동 유지 (Phase 3 진입 가능).
+    """
+    if already_ran(ctx, 22):
+        return get_native_result(ctx, 22)
+
+    if not ctx.stop_after:
+        notes = [
+            "- 전체 기동 유지 (기본)",
+            "- csc(4445) · console(8081) · csp(5060/udp) · cmp(9000/udp)",
+            "- Test-agent 4개 (sync 9903~9906) heartbeat 유지",
+            "- sim 은 install-only (cspsim 단발 실행 — Phase 3 cmd_sim 경유)",
+        ]
+        result = ItemResult(
+            id="S5-FINALIZE", name="배포 마무리 (기동 유지)",
+            status=ItemStatus.PASS, detail="\n".join(notes), stage=5,
+        )
+        _save(ctx, 22, result)
+        return result
+
+    # --stop-after: 모든 deployment stop + Test-agent kill
+    notes: list = []
+    # csc/console stop (TB-CSC 4419 경유)
+    tok = _get(ctx, "tok", "")
+    if tok:
+        for k in ("csc", "console"):
+            did = _get(ctx, f"dep_id_{k}")
+            if did is None: continue
+            try:
+                st, _ = csc_http.post_json(
+                    f"{_TB_CSC_BASE}/api/v1/deployments/{did}/job",
+                    {"job_type": "stop"}, token=tok, timeout=10,
+                )
+                notes.append(f"- {k}: stop 발행 status={st}")
+            except Exception as e:
+                notes.append(f"- {k}: stop 발행 예외 {e}")
+    # csp/cmp stop (배포본 csc 4445 경유) — sim 은 install-only 이므로 stop 무의미
+    tok2 = _get(ctx, "tok2", "")
+    if tok2:
+        for m in ("csp", "cmp"):
+            did = _get(ctx, f"dep2_id_{m}")
+            if did is None: continue
+            try:
+                st, _ = csc_http.post_json(
+                    f"{_DEPLOYED_CSC_BASE}/api/v1/deployments/{did}/job",
+                    {"job_type": "stop"}, token=tok2, timeout=10,
+                )
+                notes.append(f"- {m}: stop 발행 status={st}")
+            except Exception as e:
+                notes.append(f"- {m}: stop 발행 예외 {e}")
+    time.sleep(5)
+
+    # Test-agent kill
+    import signal
+    killed = 0
+    pid_keys = [("ta_pid_csc", "csc-server-local")]
+    pid_keys += [(f"ta_pid_{m}", f"{m}-server-local") for m in _MODULES]
+    for k, _aname in pid_keys:
+        pid = _get(ctx, k)
+        if not pid: continue
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+            killed += 1
+        except Exception:
+            pass
+    notes.append(f"- Test-agent kill: {killed}/4")
+
+    result = ItemResult(
+        id="S5-FINALIZE", name="배포 마무리 (--stop-after)",
+        status=ItemStatus.PASS, detail="\n".join(notes), stage=5,
+    )
+    _save(ctx, 22, result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
 # Composite helpers — verify_item 자식 1개에 여러 step 합산
 # ─────────────────────────────────────────────────────────────
 _RANK = {ItemStatus.PASS: 0, ItemStatus.SKIP: 1,
@@ -1082,3 +1644,13 @@ def steps_09_10_install(ctx: VerifyContext) -> ItemResult:
     ]
     return _summarize("S5-CSC-DEPLOY-INSTALL",
                       "Deployment + Install job + poll", rs)
+
+
+def steps_19_20_modules_install(ctx: VerifyContext) -> ItemResult:
+    """S5-MODULES-DEPLOY-INSTALL 본체 — step 19 + 20 합성."""
+    rs = [
+        step_19_modules_deployment_create(ctx),
+        step_20_modules_install_poll(ctx),
+    ]
+    return _summarize("S5-MODULES-DEPLOY-INSTALL",
+                      "3 모듈 deployment + install + poll", rs)

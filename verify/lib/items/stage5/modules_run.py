@@ -1,10 +1,14 @@
-"""S5-MODULES-RUN (그룹) — 배포된 csp/cmp 기동."""
+"""S5-MODULES-RUN (그룹) — 배포된 csp/cmp 기동.
+
+자식 모두 native 화 완료 (_legacy 미참조). step 21 native — Start 가 PASS 일 때
+.deployed-manifest.json marker 도 step 21 안에서 자동 기록 (S6-ENTRY-CHECK
+immutability gate).
+"""
 from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
-from ...common import pkg_manifest as _pkgm
-from ._legacy import get_legacy_results, step_result
+from . import _native_steps
 
 
 @verify_item(
@@ -31,15 +35,5 @@ def modules_run_group(ctx: VerifyContext) -> ItemResult:
     execution_order=61,
 )
 def modules_start(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    result = step_result(by, [21], "S5-MODULES-RUN-START",
-                         "csp/cmp Start (sim install-only)")
-    # Immutability marker — Start 가 PASS 일 때만 현재 manifest sha 를
-    # .deployed-manifest.json 에 기록해 S6-ENTRY-CHECK 가 매칭 검증.
-    if result.status == ItemStatus.PASS:
-        sha = _pkgm.write_marker(ctx.dist_dir)
-        if sha:
-            ctx.w(f"- [marker] .deployed-manifest.json 기록 (manifest_sha={sha[:12]}…)")
-        else:
-            ctx.w("- [marker] manifest 부재로 marker 미작성")
-    return result
+    """Step 21 native — csp/cmp Start + LISTEN 확인 + immutability marker."""
+    return _native_steps.step_21_modules_start(ctx)

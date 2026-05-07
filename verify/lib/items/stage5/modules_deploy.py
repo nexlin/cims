@@ -1,9 +1,12 @@
-"""S5-MODULES-DEPLOY (그룹) — 배포본 csc(4445) → csp/cmp/cspsim 배포 체인."""
+"""S5-MODULES-DEPLOY (그룹) — 배포본 csc(4445) → csp/cmp/cspsim 배포 체인.
+
+자식 모두 native 화 완료 (_legacy 미참조). step 16~20 native 사용.
+"""
 from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
-from ._legacy import get_legacy_results, step_result
+from . import _native_steps
 
 
 @verify_item(
@@ -31,9 +34,8 @@ def modules_deploy_group(ctx: VerifyContext) -> ItemResult:
     execution_order=51,
 )
 def modules_auth(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [16], "S5-MODULES-DEPLOY-AUTH",
-                       "배포본 csc admin login")
+    """Step 16 native — 배포본 csc(4445) admin login → tok2."""
+    return _native_steps.step_16_modules_auth(ctx)
 
 
 @verify_item(
@@ -45,9 +47,8 @@ def modules_auth(ctx: VerifyContext) -> ItemResult:
     execution_order=52,
 )
 def modules_pkg_upload(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [17], "S5-MODULES-DEPLOY-PKG-UPLOAD",
-                       "csp/cmp/sim 패키지 업로드")
+    """Step 17 native — 3 모듈 tarball 업로드."""
+    return _native_steps.step_17_modules_pkg_upload(ctx)
 
 
 @verify_item(
@@ -59,9 +60,8 @@ def modules_pkg_upload(ctx: VerifyContext) -> ItemResult:
     execution_order=53,
 )
 def modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [18], "S5-MODULES-DEPLOY-AGENT-ENROLL",
-                       "agent 등록 + Test-agent 기동")
+    """Step 18 native — 3 agent 등록 + 3 Test-agent spawn + enroll 폴링."""
+    return _native_steps.step_18_modules_agent_enroll(ctx)
 
 
 @verify_item(
@@ -73,6 +73,5 @@ def modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
     execution_order=54,
 )
 def modules_install(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [19, 20], "S5-MODULES-DEPLOY-INSTALL",
-                       "Deployment + Install (csp/cmp/sim)")
+    """Step 19+20 native — 3 deployment 생성 + install job + DB 폴링."""
+    return _native_steps.steps_19_20_modules_install(ctx)

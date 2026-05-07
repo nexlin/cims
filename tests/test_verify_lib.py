@@ -1639,5 +1639,322 @@ class TestStage5CscRunSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.FAIL)
 
 
+class TestStage5ModulesSteps(unittest.TestCase):
+    """S5 native — step 16~22 (modules + finalize)."""
+
+    def setUp(self) -> None:
+        from verify.lib.items.stage5 import _native_steps
+        from verify.lib.context import VerifyContext
+        from verify.lib.common import csc_http
+        from verify.lib.common import db as _db
+        from verify.lib.common import pkg_manifest as _pkgm
+        from verify.lib import shell as _shell
+        from verify.lib.registry import ItemStatus
+        self._native = _native_steps
+        self._VerifyContext = VerifyContext
+        self._csc_http = csc_http
+        self._db = _db
+        self._pkgm = _pkgm
+        self._shell = _shell
+        self._ItemStatus = ItemStatus
+        self._orig = {
+            "admin_login":     csc_http.admin_login,
+            "post_json":       csc_http.post_json,
+            "post_multipart":  csc_http.post_multipart,
+            "delete":          csc_http.delete,
+            "find_by_name":    csc_http.find_agent_id_by_name,
+            "csp_db_config":   _db.csp_db_config,
+            "connect":         _db.connect,
+            "port_listening":  _shell.port_listening,
+            "write_marker":    _pkgm.write_marker,
+        }
+        import time as _t
+        self._orig_sleep = _t.sleep
+        _t.sleep = lambda s: None
+
+    def tearDown(self) -> None:
+        self._csc_http.admin_login           = self._orig["admin_login"]
+        self._csc_http.post_json             = self._orig["post_json"]
+        self._csc_http.post_multipart        = self._orig["post_multipart"]
+        self._csc_http.delete                = self._orig["delete"]
+        self._csc_http.find_agent_id_by_name = self._orig["find_by_name"]
+        self._db.csp_db_config               = self._orig["csp_db_config"]
+        self._db.connect                     = self._orig["connect"]
+        self._shell.port_listening           = self._orig["port_listening"]
+        self._pkgm.write_marker              = self._orig["write_marker"]
+        import time as _t
+        _t.sleep = self._orig_sleep
+
+    def _ctx_with_dist(self, dist):
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        ctx.dist_dir = dist
+        return ctx
+
+    # ── step 16 ──
+    def test_step_16_skips_when_csc_not_started(self) -> None:
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        r = self._native.step_16_modules_auth(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_step_16_pass(self) -> None:
+        called = []
+        def fake_login(base, lid, pw, timeout=5):
+            called.append(base)
+            return "JWT2-XYZ"
+        self._csc_http.admin_login = fake_login
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "csc_start_ok", True)
+        r = self._native.step_16_modules_auth(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        # 배포본 csc(4445) 로 호출됐는지
+        self.assertIn("4445", called[0])
+        self.assertEqual(self._native._get(ctx, "tok2"), "JWT2-XYZ")
+
+    def test_step_16_fail_login(self) -> None:
+        self._csc_http.admin_login = lambda *a, **k: ""
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "csc_start_ok", True)
+        r = self._native.step_16_modules_auth(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+
+    # ── step 17 ──
+    def test_step_17_pass_with_3_modules(self) -> None:
+        import tempfile
+        captured: list = []
+        def fake_post_multipart(url, *, file_path, file_field="file",
+                                filename=None, form_fields=None,
+                                token=None, timeout=60):
+            captured.append(file_path)
+            base = os.path.basename(file_path)
+            if base.startswith("csp-"): pid = 11
+            elif base.startswith("cmp-"): pid = 12
+            elif base.startswith("cspsim-"): pid = 13
+            else: pid = 99
+            return (201, {"id": pid})
+        self._csc_http.post_multipart = fake_post_multipart
+
+        with tempfile.TemporaryDirectory() as td:
+            pkg_dir = os.path.join(td, "packages")
+            os.makedirs(pkg_dir)
+            for fn in ("csp-1.0.0.tar.gz", "cmp-1.0.0.tar.gz", "cspsim-1.0.0.tar.gz"):
+                with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
+            ctx = self._ctx_with_dist(td)
+            self._native._set(ctx, "tok2", "JWT2")
+            r = self._native.step_17_modules_pkg_upload(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "pkg2_id_csp"), 11)
+        self.assertEqual(self._native._get(ctx, "pkg2_id_cmp"), 12)
+        # sim 의 tarball prefix 는 cspsim
+        self.assertEqual(self._native._get(ctx, "pkg2_id_sim"), 13)
+
+    def test_step_17_fail_sim_tarball_missing(self) -> None:
+        import tempfile
+        self._csc_http.post_multipart = lambda u, **k: (201, {"id": 1})
+        with tempfile.TemporaryDirectory() as td:
+            pkg_dir = os.path.join(td, "packages")
+            os.makedirs(pkg_dir)
+            # cspsim tarball 만 누락
+            for fn in ("csp-1.0.0.tar.gz", "cmp-1.0.0.tar.gz"):
+                with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
+            ctx = self._ctx_with_dist(td)
+            self._native._set(ctx, "tok2", "JWT2")
+            r = self._native.step_17_modules_pkg_upload(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("sim: tarball 없음", r.detail)
+        self.assertIn("cspsim-*.tar.gz", r.detail)
+
+    # ── step 18 ──
+    def test_step_18_skips_without_tok2(self) -> None:
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        r = self._native.step_18_modules_agent_enroll(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_step_18_pass(self) -> None:
+        # 3 모듈 모두 register + spawn + online 성공 시뮬
+        post_called: list = []
+        def fake_post_json(url, payload, token=None, timeout=10):
+            post_called.append(url)
+            if url.endswith("/agents"):
+                # name 별 다른 id
+                name = payload["name"]
+                aid = 100 if "csp" in name else 200 if "cmp" in name else 300
+                return (201, {"id": aid, "enrollment_token": f"ENR-{aid}"})
+            if url.endswith("/approve"):
+                return (200, {})
+            return (404, {})
+        self._csc_http.post_json = fake_post_json
+        self._csc_http.find_agent_id_by_name = lambda *a, **k: None
+        self._csc_http.delete = lambda *a, **k: 204
+
+        # spawn 모킹 — 실제 Popen 안 함
+        spawned: list = []
+        def fake_spawn(ctx, m, base, aname, enroll_tok):
+            spawned.append((m, aname))
+            return (1000 + (1 if m == "csp" else 2 if m == "cmp" else 3), "")
+        self._native._spawn_one_module_agent = fake_spawn
+
+        # _all_modules_online 즉시 True
+        orig_all = self._native._all_modules_online
+        self._native._all_modules_online = lambda dist: True
+
+        try:
+            ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+            self._native._set(ctx, "tok2", "JWT2")
+            r = self._native.step_18_modules_agent_enroll(ctx)
+        finally:
+            self._native._all_modules_online = orig_all
+            # spawn 복구는 monkey patch 였으므로 module attr 제거
+            try: delattr(self._native, "_spawn_one_module_agent")
+            except AttributeError: pass
+
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "aid_csp"), 100)
+        self.assertEqual(self._native._get(ctx, "aid_cmp"), 200)
+        self.assertEqual(self._native._get(ctx, "aid_sim"), 300)
+        self.assertEqual(self._native._get(ctx, "ta_pid_csp"), 1001)
+        self.assertEqual(len(spawned), 3)
+
+    # ── step 19 ──
+    def test_step_19_pass(self) -> None:
+        captured: list = []
+        def fake_post_json(url, payload, token=None, timeout=15):
+            captured.append(payload)
+            mod = payload["process_name"]
+            did = 11 if mod == "CSP" else 12 if mod == "CMP" else 13
+            return (201, {"id": did})
+        self._csc_http.post_json = fake_post_json
+
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok2", "JWT2")
+        for m, aid, pid in [("csp", 100, 11), ("cmp", 200, 12), ("sim", 300, 13)]:
+            self._native._set(ctx, f"aid_{m}", aid)
+            self._native._set(ctx, f"pkg2_id_{m}", pid)
+        r = self._native.step_19_modules_deployment_create(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "dep2_id_csp"), 11)
+        self.assertEqual(self._native._get(ctx, "dep2_id_sim"), 13)
+        # sim 의 process_name 은 CSPSIM
+        sim_payload = next(p for p in captured if p["process_name"] == "CSPSIM")
+        self.assertIsNotNone(sim_payload)
+
+    def test_step_19_fail_missing_pkg_for_one_module(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=15: (201, {"id": 1})
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok2", "JWT2")
+        # csp/cmp 만 ready, sim 의 pkg_id 누락
+        for m in ("csp", "cmp"):
+            self._native._set(ctx, f"aid_{m}", 100)
+            self._native._set(ctx, f"pkg2_id_{m}", 1)
+        self._native._set(ctx, "aid_sim", 300)
+        # pkg2_id_sim 미설정
+        r = self._native.step_19_modules_deployment_create(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertIn("sim:", r.detail)
+
+    # ── step 20 ──
+    def test_step_20_pass_when_all_succeed(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
+        self._db.csp_db_config = lambda d: {"Host": "x", "User": "x",
+                                             "Password": "x", "DbName": "x"}
+        class FakeCursor:
+            def execute(self, sql, params=None): pass
+            def fetchone(self): return ("succeeded",)
+        class FakeConn:
+            def cursor(self): return FakeCursor()
+            def close(self): pass
+        self._db.connect = lambda cfg: FakeConn()
+
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok2", "JWT2")
+        for m, did in [("csp", 11), ("cmp", 12), ("sim", 13)]:
+            self._native._set(ctx, f"dep2_id_{m}", did)
+        r = self._native.step_20_modules_install_poll(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertTrue(self._native._get(ctx, "all_install_done_modules"))
+
+    # ── step 21 ──
+    def test_step_21_pass(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
+        # 5060/udp + 9000/udp 모두 LISTEN
+        def fake_listen(port, proto="tcp"):
+            return port in (5060, 9000) and proto == "udp"
+        self._shell.port_listening = fake_listen
+        marker_called = [0]
+        def fake_marker(dist):
+            marker_called[0] += 1
+            return "abc123def456abc123def456abc123def456abc123def456abc123def456ab"
+        self._pkgm.write_marker = fake_marker
+
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok2", "JWT2")
+        for m, did in [("csp", 11), ("cmp", 12)]:
+            self._native._set(ctx, f"dep2_id_{m}", did)
+        r = self._native.step_21_modules_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertTrue(self._native._get(ctx, "modules_start_ok"))
+        # immutability marker 기록됐는지
+        self.assertEqual(marker_called[0], 1)
+        self.assertIn(".deployed-manifest.json", r.detail)
+
+    def test_step_21_fail_when_cmp_not_listening(self) -> None:
+        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
+        # csp 는 LISTEN, cmp 는 timeout
+        self._shell.port_listening = lambda port, proto="tcp": port == 5060
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self._native._set(ctx, "tok2", "JWT2")
+        for m, did in [("csp", 11), ("cmp", 12)]:
+            self._native._set(ctx, f"dep2_id_{m}", did)
+        r = self._native.step_21_modules_start(ctx)
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertFalse(self._native._get(ctx, "modules_start_ok"))
+
+    # ── step 22 ──
+    def test_step_22_default_keep_running(self) -> None:
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        # ctx.stop_after = False (default)
+        r = self._native.step_22_finalize(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("기동 유지", r.detail)
+
+    def test_step_22_stop_after_kills_agents(self) -> None:
+        # stop_after=True 시 stop jobs + kill
+        post_calls: list = []
+        def fake_post_json(url, payload, token=None, timeout=10):
+            post_calls.append((url, payload))
+            return (202, {})
+        self._csc_http.post_json = fake_post_json
+
+        # os.kill 모킹
+        import os as _os
+        kill_calls: list = []
+        orig_kill = _os.kill
+        _os.kill = lambda pid, sig: kill_calls.append((pid, sig))
+
+        try:
+            ctx = self._VerifyContext.create(
+                repo_root=_REPO_ROOT, stage=5, opts={"stop_after": True},
+            )
+            # 모든 deployment + Test-agent pid 설정
+            self._native._set(ctx, "tok", "JWT")
+            self._native._set(ctx, "tok2", "JWT2")
+            self._native._set(ctx, "dep_id_csc", 1)
+            self._native._set(ctx, "dep_id_console", 2)
+            self._native._set(ctx, "dep2_id_csp", 11)
+            self._native._set(ctx, "dep2_id_cmp", 12)
+            self._native._set(ctx, "ta_pid_csc", 1000)
+            self._native._set(ctx, "ta_pid_csp", 1001)
+            self._native._set(ctx, "ta_pid_cmp", 1002)
+            self._native._set(ctx, "ta_pid_sim", 1003)
+            r = self._native.step_22_finalize(ctx)
+        finally:
+            _os.kill = orig_kill
+
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        # csc/console (TB-CSC) + csp/cmp (배포본 csc) = 4 stop 발행
+        self.assertEqual(len(post_calls), 4)
+        # 4 Test-agent kill
+        self.assertEqual(len(kill_calls), 4)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

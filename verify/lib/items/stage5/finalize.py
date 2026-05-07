@@ -1,9 +1,13 @@
-"""S5-FINALIZE — Phase 2 step 22 (Stop / 전체 기동 유지)."""
+"""S5-FINALIZE — Phase 2 step 22 (Stop / 전체 기동 유지).
+
+native 화 완료 (_legacy 미참조). `--stop-after` 옵션 시 모든 deployment stop +
+Test-agent 4개 kill. 기본은 정보성 detail (Phase 3 진입 위해 4 ports 기동 유지).
+"""
 from __future__ import annotations
 
-from ...registry import verify_item, ItemResult, ItemStatus
+from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
-from ._legacy import get_legacy_results, step_result
+from . import _native_steps
 
 
 @verify_item(
@@ -15,6 +19,5 @@ from ._legacy import get_legacy_results, step_result
     execution_order=70,
 )
 def finalize(ctx: VerifyContext) -> ItemResult:
-    by = get_legacy_results(ctx)
-    return step_result(by, [22], "S5-FINALIZE",
-                       "전체 기동 유지 / Stop job")
+    """Step 22 native — `--stop-after` 면 stop + kill, 기본은 기동 유지."""
+    return _native_steps.step_22_finalize(ctx)
