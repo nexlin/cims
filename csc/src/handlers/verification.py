@@ -983,12 +983,21 @@ _STAGE_TITLES = {
 
 
 async def _get_stages_overview() -> HandlerResult:
-    """6 stage 메타 + 각 stage 항목 트리 + 프리셋."""
+    """6 stage 메타 + 각 stage 항목 트리 + 프리셋.
+
+    RESET 항목 (S3-RESET / S5-RESET) 은 검증 회차에서 분리되어 `prep-reset`
+    preset 으로만 실행되므로 stage 트리에서 제외한다. 콘솔 UI 의 "🧹 데이터
+    초기화" 버튼이 별도 진입점.
+    """
     items_resp = await _get_verify_items(None)
     if items_resp.status != 200:
         return items_resp
     data = items_resp.body
-    by_stage = {s['stage']: s.get('items', []) for s in data.get('stages', [])}
+    by_stage: dict = {}
+    for s in data.get('stages', []):
+        items = [i for i in s.get('items', [])
+                 if not (i.get('id') or '').endswith('-RESET')]
+        by_stage[s['stage']] = items
     stages = []
     for n in _VALID_STAGES:
         title, desc = _STAGE_TITLES[n]
