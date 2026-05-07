@@ -946,6 +946,36 @@ class TestStage6NewScenarios(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertIn("subscribe-complete=True", r.detail)
 
+    def test_entry_check_required_ports_target_prod(self) -> None:
+        """target=prod → _required_ports csc/console 4420/80."""
+        from verify.lib.items.stage6 import entry_check
+        ctx = self._VerifyContext.create(
+            repo_root=_REPO_ROOT, stage=6, opts={"target": "prod"},
+        )
+        ports = entry_check._required_ports(ctx)
+        port_map = {(p, proto): label for p, proto, label in ports}
+        self.assertIn((4420, "tcp"), port_map)
+        self.assertIn((80, "tcp"), port_map)
+        # csp/cmp 는 두 환경 동일
+        self.assertIn((5060, "udp"), port_map)
+        self.assertIn((9000, "udp"), port_map)
+
+    def test_entry_check_required_ports_target_verify_default(self) -> None:
+        from verify.lib.items.stage6 import entry_check
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=6)
+        ports = entry_check._required_ports(ctx)
+        port_map = {(p, proto): label for p, proto, label in ports}
+        self.assertIn((4445, "tcp"), port_map)
+        self.assertIn((8081, "tcp"), port_map)
+
+    def test_scn_db_sync_deployed_base_target_prod(self) -> None:
+        from verify.lib.items.stage6 import scn_db_sync
+        ctx = self._VerifyContext.create(
+            repo_root=_REPO_ROOT, stage=6, opts={"target": "prod"},
+        )
+        self.assertEqual(scn_db_sync._deployed_csc_base(ctx),
+                         "https://127.0.0.1:4420")
+
     def test_scn_subscribe_pass_when_notify_missing_but_marker_present(self) -> None:
         """NOTIFY 라인 0 이어도 SUBSCRIBE 마커 있으면 PASS — msg_log 비활성 환경 대응."""
         from verify.lib.items.stage6 import scn_subscribe
@@ -2031,6 +2061,45 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         self.assertIs(r1, r2)
 
     # ── step 12 ──
+    def test_target_helpers_verify_default(self) -> None:
+        """opts 비어있으면 verify default — _ports {csc:4445, console:8081}."""
+        from verify.lib.items.stage5 import _native_steps as ns
+        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+        self.assertEqual(ns._target(ctx), "verify")
+        self.assertEqual(ns._ports(ctx), {"csc": 4445, "console": 8081})
+        self.assertEqual(ns._deployed_csc_base(ctx), "https://127.0.0.1:4445")
+
+    def test_target_helpers_prod(self) -> None:
+        """opts.target='prod' — _ports {csc:4420, console:80}."""
+        from verify.lib.items.stage5 import _native_steps as ns
+        ctx = self._VerifyContext.create(
+            repo_root=_REPO_ROOT, stage=5, opts={"target": "prod"},
+        )
+        self.assertEqual(ns._target(ctx), "prod")
+        self.assertEqual(ns._ports(ctx), {"csc": 4420, "console": 80})
+        self.assertEqual(ns._deployed_csc_base(ctx), "https://127.0.0.1:4420")
+
+    def test_target_helpers_unknown_falls_back_to_verify(self) -> None:
+        """알 수 없는 target → verify default."""
+        from verify.lib.items.stage5 import _native_steps as ns
+        ctx = self._VerifyContext.create(
+            repo_root=_REPO_ROOT, stage=5, opts={"target": "staging"},
+        )
+        # _target 자체는 "staging" 반환하지만 _ports 는 verify default fallback
+        self.assertEqual(ns._target(ctx), "staging")
+        self.assertEqual(ns._ports(ctx), {"csc": 4445, "console": 8081})
+
+    def test_csc_overlay_uses_ports(self) -> None:
+        """_csc_overlay 가 명시 ports dict 사용."""
+        from verify.lib.items.stage5 import _native_steps as ns
+        verify_ports = {"csc": 4445, "console": 8081}
+        prod_ports = {"csc": 4420, "console": 80}
+        self.assertEqual(ns._csc_overlay("csc", verify_ports), {"Server.Port": 4445})
+        self.assertEqual(ns._csc_overlay("csc", prod_ports), {"Server.Port": 4420})
+        self.assertEqual(ns._csc_overlay("console", verify_ports), {"Port": 8081})
+        self.assertEqual(ns._csc_overlay("console", prod_ports), {"Port": 80})
+        self.assertEqual(ns._csc_overlay("unknown", verify_ports), {})
+
     def test_step_12_target_prod_uses_4420(self) -> None:
         """target=prod 시 _csc_overlay 가 csc=4420 기대값으로."""
         from verify.lib.items.stage5 import _native_steps

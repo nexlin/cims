@@ -105,10 +105,6 @@ def _deployed_csc_base(ctx: VerifyContext) -> str:
     return f"https://127.0.0.1:{_ports(ctx)['csc']}"
 
 
-# 옛 상수 (backward-compat) — 직접 참조하던 외부 코드 대비 (현재는 없음).
-_DEPLOYED_CSC_BASE = "https://127.0.0.1:4445"
-
-
 def _store(ctx: VerifyContext) -> dict:
     """공유 dict — 없으면 생성."""
     return ctx.state.setdefault(_STATE_KEY, {"results": {}})
