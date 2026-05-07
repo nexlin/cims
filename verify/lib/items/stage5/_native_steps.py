@@ -870,6 +870,10 @@ def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
         from ...common.csc_config import set_mtls_enabled
         toggled = set_mtls_enabled(ctx.dist_dir, True)
         _set(ctx, "mtls_toggled", bool(toggled))
+        # 주의: TB-CSC (4419) 가 이미 LISTEN 중이라면 csc-tb.json 캐시 가능성.
+        # 효과 보장하려면 사용자가 사전에 `cims.sh restart csc` 1회 실행 권장.
+        # (배포본 csc-server 4445 는 step_13 의 start job 으로 신규 시작이라
+        #  토글이 자동 반영.)
 
     tok = _get(ctx, "tok", "")
     csc_did = _get(ctx, "dep_id_csc")
