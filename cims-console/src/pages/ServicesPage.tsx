@@ -9,31 +9,27 @@ import ModuleConfigModal from '../components/module/ModuleConfigModal'
 
 type SvcState = { running: boolean; pid?: number }
 
-// 빌드 단위 카드 정의 — csp/cmp 는 같은 dist 에서 변종 (psp/isp/pmp/imp) 까지
-// 셋이 묶인 패키지 산출물로 묶임. ▣ 한 번 = 셋 동시 재패키징.
-//   key       — 카드 식별자 (소스 트리 매핑 = base dist)
-//   variants  — 패키지/프로세스 단위 module 이름 배열 (psp/isp 도 process_name 로 사용)
-//   hasProcess — 로컬 프로세스 제어 가능 여부 (false 면 패키지화/다운로드만)
-//   critical  — 종료 시 Console 단절 경고
-type BuildCard = {
-  key: string
-  label: string
-  variants: ServiceName[]
-  hasProcess: boolean
-  critical?: boolean
-}
+// 빌드 단위 카드 정의. 두 축이 분리됨:
+//   - 프로세스 (key): 로컬에서 시험 실행할 단일 base 모듈 이름. cims.sh / service API 가 이 이름만 인식.
+//     hasProcess=true 카드는 ServiceName 으로 한정되고, false 카드 (cspsim 등) 는 패키지/다운로드만이라 임의 식별자 허용.
+//   - 패키지 (packageVariants): ▣ 한 번에 산출되는 tarball 변종 이름들. csp 카드는 [csp,psp,isp] 3종.
+//     미지정 시 [key] 단일 산출물.
+//   critical: 종료 시 Console 단절 경고.
+type BuildCard =
+  | { key: ServiceName;     label: string; hasProcess: true;  critical?: boolean; packageVariants?: string[] }
+  | { key: string;          label: string; hasProcess: false; critical?: boolean; packageVariants?: string[] }
 const BUILD_CARDS: BuildCard[] = [
-  { key: 'csp',     label: 'CSP (VoLTE/PTT/IBCF SIP)', variants: ['csp', 'psp', 'isp'] as ServiceName[], hasProcess: true },
-  { key: 'cmp',     label: 'CMP (VoLTE/PTT/IBCF 미디어)', variants: ['cmp', 'pmp', 'imp'] as ServiceName[], hasProcess: true },
-  { key: 'cwrtc',   label: 'cwrtc (WebRTC 브리지)',    variants: ['cwrtc'] as ServiceName[], hasProcess: true },
-  { key: 'csc',     label: 'CSC (Admin API)',          variants: ['csc'] as ServiceName[], hasProcess: true, critical: true },
-  { key: 'console', label: 'Console (웹 UI)',          variants: ['console'] as ServiceName[], hasProcess: true },
-  { key: 'phone',   label: 'Phone (웹 단말)',          variants: ['phone'] as ServiceName[], hasProcess: true },
-  { key: 'cspsim',  label: 'cspsim (시뮬레이터)',      variants: ['cspsim'] as ServiceName[], hasProcess: false },
-  { key: 'agent',   label: 'Agent (원격 관리)',        variants: ['agent'] as ServiceName[], hasProcess: false },
+  { key: 'csp',     label: 'CSP (VoLTE/PTT/IBCF SIP)',    hasProcess: true,  packageVariants: ['csp', 'psp', 'isp'] },
+  { key: 'cmp',     label: 'CMP (VoLTE/PTT/IBCF 미디어)', hasProcess: true,  packageVariants: ['cmp', 'pmp', 'imp'] },
+  { key: 'cwrtc',   label: 'cwrtc (WebRTC 브리지)',       hasProcess: true },
+  { key: 'csc',     label: 'CSC (Admin API)',             hasProcess: true,  critical: true },
+  { key: 'console', label: 'Console (웹 UI)',             hasProcess: true },
+  { key: 'phone',   label: 'Phone (웹 단말)',             hasProcess: true },
+  { key: 'cspsim',  label: 'cspsim (시뮬레이터)',         hasProcess: false },
+  { key: 'agent',   label: 'Agent (원격 관리)',           hasProcess: false },
 ]
-// 프로세스 제어 가능한 변종 평탄화 — 일괄 선택/상태 폴링 등에 사용.
-const PROCESS_VARIANTS: ServiceName[] = BUILD_CARDS.filter(c => c.hasProcess).flatMap(c => c.variants)
+// 카드의 패키지 산출물 이름들 — 다운로드 버튼/▣ 인자 계산용.
+const cardPackages = (c: BuildCard): string[] => c.packageVariants ?? [c.key]
 
 export default function ServicesPage() {
   const { show } = useToast()
@@ -41,7 +37,6 @@ export default function ServicesPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [packages, setPackages] = useState<SipPackage[]>([])
-  const [selectedVersion, setSelectedVersion] = useState<Record<string, string>>({})
   const [templateModal, setTemplateModal] = useState<{ module: string; pkg: SipPackage } | null>(null)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
@@ -49,11 +44,12 @@ export default function ServicesPage() {
   const [saving, setSaving] = useState(false)
   const [configModule, setConfigModule] = useState<string | null>(null)
   const [needsRestart, setNeedsRestart] = useState<Record<string, boolean>>({})
-  const [selected, setSelected] = useState<Set<ServiceName>>(new Set())
+  // 전체 패키징 시 입력 버전 — cims.sh pkg -v 로 전달.
+  const [globalVersion, setGlobalVersion] = useState('')
   // ── 빌드 / 패키지화 ─────────────────────────────────────────
   const [manifest, setManifest] = useState<ManifestResponse | null>(null)
   // activeJob.label 은 "csp" / "csp psp isp" 같이 묶음 표기
-  const [activeJob, setActiveJob] = useState<{ id: string; kind: 'build' | 'pkg'; module?: string; cardKey?: string } | null>(null)
+  const [activeJob, setActiveJob] = useState<{ id: string; kind: 'build' | 'pkg' | 'release'; module?: string; cardKey?: string } | null>(null)
   const [jobStatus, setJobStatus] = useState<BuildJobStatus | null>(null)
   // 우측 터미널이 어느 출처를 표시 중인지 — 마지막으로 갱신된 쪽 우선
   const [terminalSource, setTerminalSource] = useState<'job' | 'module' | null>(null)
@@ -110,11 +106,15 @@ export default function ServicesPage() {
           setTerminalSource('job')
           if (s.done) {
             const ok = s.verdict === 'PASS'
-            const label = job.kind === 'build' ? '빌드' : `패키지화 (${job.cardKey || job.module || ''})`
+            const label =
+              job.kind === 'release' ? '빌드 & 패키징'
+              : job.kind === 'build' ? '빌드'
+              : `패키지화 (${job.cardKey || job.module || ''})`
             show(`${label} ${ok ? '완료' : '실패'} rc=${s.returncode}`, ok ? 'ok' : 'err')
             setActiveJob(null)
             // jobStatus 는 비우지 않음 — 우측 터미널 패널에 마지막 출력 유지
             await loadManifest()
+            await loadPackages()
             return
           }
         } catch {
@@ -132,49 +132,62 @@ export default function ServicesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeJob?.id])
 
-  // 모듈별 manifest tarball 존재 여부 (다운로드 버튼 활성)
+  // 모듈별 manifest tarball 존재 여부 (다운로드 버튼 활성 + 버전 표시)
   const tarballByModule = useMemo(() => {
-    const map: Record<string, { name: string; size: number }> = {}
+    const map: Record<string, { name: string; size: number; version?: string }> = {}
     for (const p of manifest?.packages || []) {
-      const m = /^([a-z]+)-/.exec(p.name)
-      if (m) map[m[1]] = { name: p.name, size: p.size }
+      // <name>-<version>.tar.gz — version 은 영숫자 + 점/대시/플러스/언더스코어 허용.
+      const m = /^([a-z]+)-([0-9][0-9A-Za-z.+\-_]*)\.tar\.gz$/.exec(p.name)
+      if (m) map[m[1]] = { name: p.name, size: p.size, version: m[2] }
+      else {
+        const fallback = /^([a-z]+)-/.exec(p.name)
+        if (fallback) map[fallback[1]] = { name: p.name, size: p.size }
+      }
     }
     return map
   }, [manifest])
 
-  async function startBuild() {
+  // 빌드 + 패키징 통합 — 입력 버전을 cims.sh build -v 로 (모든 pkg.json 갱신) 후
+  // 자동으로 cims.sh pkg --no-bump 까지 한 job 으로 실행. 빈 입력이면 현재 버전 유지.
+  async function startRelease() {
     if (activeJob) {
-      show('이미 진행 중인 빌드/패키지 작업이 있습니다.', 'err')
+      show('이미 진행 중인 작업이 있습니다.', 'err')
       return
     }
-    if (!confirm('전체 빌드를 시작합니다 (cmake + make + npm). 5~15분 소요될 수 있습니다. 계속할까요?')) {
+    const v = globalVersion.trim()
+    if (v && !/^[0-9A-Za-z._+-]{1,64}$/.test(v)) {
+      show(`잘못된 버전 형식: ${v}`, 'err')
+      return
+    }
+    if (!confirm(`빌드 & 패키징을 시작합니다 (cmake + make + npm + tarball 12종).\n5~15분 소요될 수 있습니다.${v ? `\n버전: ${v} — 모든 컴포넌트의 pkg.json 에 반영됩니다.` : ''}\n계속할까요?`)) {
       return
     }
     try {
-      const r = await buildApi.runBuild()
-      setActiveJob({ id: r.job_id, kind: 'build' })
-      show('빌드 시작', 'ok')
+      const r = await buildApi.runRelease(v ? { version: v } : {})
+      setActiveJob({ id: r.job_id, kind: 'release' })
+      show(`빌드 & 패키징 시작${v ? ` (v=${v})` : ''}`, 'ok')
     } catch (e) {
-      const msg = (e as Error).message
-      show(`빌드 시작 실패: ${msg}`, 'err')
+      show(`빌드 & 패키징 시작 실패: ${(e as Error).message}`, 'err')
     }
   }
 
-  // 카드 단위 패키지화 — csp 카드는 [csp,psp,isp] 묶음, cmp 카드는 [cmp,pmp,imp].
-  // 단일 변종 카드 (cwrtc/csc/...) 는 단일 module 호출.
-  async function startPkgForCard(card: BuildCard) {
+  // 정리 — packages/*.tar.gz + manifest.json 삭제. 빌드 산출물 (build/dist/<comp>) 은 유지.
+  async function cleanPackages() {
     if (activeJob) {
-      show('이미 진행 중인 빌드/패키지 작업이 있습니다.', 'err')
+      show('진행 중인 작업이 있습니다. 끝난 후 정리하세요.', 'err')
+      return
+    }
+    if (!confirm('패키지 산출물 (tarball 들 + manifest.json) 을 삭제합니다.\n빌드 결과는 유지됩니다 (다음 패키징 시 재사용).\n계속할까요?')) {
       return
     }
     try {
-      const r = await buildApi.runPkg(card.variants.length > 1 ? card.variants : card.variants[0])
-      setActiveJob({ id: r.job_id, kind: 'pkg', module: card.variants[0], cardKey: card.key })
-      const label = card.variants.length > 1 ? card.variants.join('/') : card.variants[0]
-      show(`${label} 패키지화 시작`, 'ok')
+      const r = await buildApi.cleanPackages()
+      const errStr = r.errors.length > 0 ? ` · 오류 ${r.errors.length}건` : ''
+      show(`정리 완료 — tarball ${r.removed_tarballs}개${r.removed_manifest ? ' + manifest' : ''}${errStr}`,
+           r.errors.length > 0 ? 'err' : 'ok')
+      void loadManifest()    // 정리 후 헤더 manifest 태그 갱신
     } catch (e) {
-      const msg = (e as Error).message
-      show(`${card.key} 패키지화 실패: ${msg}`, 'err')
+      show(`정리 실패: ${(e as Error).message}`, 'err')
     }
   }
 
@@ -203,6 +216,15 @@ export default function ServicesPage() {
     }
     return map
   }, [packages])
+
+  // 모든 모듈에 등록된 버전의 합집합 (datalist 후보용, 내림차순)
+  const allVersions = useMemo(() => {
+    const set = new Set<string>()
+    for (const list of Object.values(packagesByModule)) {
+      for (const p of list) set.add(p.version)
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+  }, [packagesByModule])
 
   async function act(name: ServiceName, action: ServiceAction, critical: boolean, skipConfirm = false) {
     if (!skipConfirm) {
@@ -246,56 +268,6 @@ export default function ServicesPage() {
     }
   }
 
-  // 프로세스 제어 가능한 변종 (hasProcess=true 카드의 variants) — 체크박스/일괄 대상
-  const managedNames = PROCESS_VARIANTS
-  // variant 가 critical 카드에 속하는지
-  const isCriticalVariant = useCallback(
-    (n: ServiceName) => !!BUILD_CARDS.find(c => c.variants.includes(n) && c.critical),
-    [],
-  )
-
-  function toggleSelect(name: ServiceName) {
-    setSelected(prev => {
-      const n = new Set(prev)
-      if (n.has(name)) n.delete(name); else n.add(name)
-      return n
-    })
-  }
-  function toggleSelectAll() {
-    setSelected(prev => prev.size === managedNames.length
-      ? new Set()
-      : new Set(managedNames))
-  }
-
-  // 선택 모듈 중 1개라도 실행 중이면 "stop" 모드, 모두 정지면 "start" 모드
-  const selectedAnyRunning = useMemo(
-    () => managedNames.some(n => selected.has(n) && states[n]?.running),
-    [managedNames, selected, states],
-  )
-
-  async function bulkAct(action: ServiceAction) {
-    const targets = managedNames.filter(n => selected.has(n))
-    if (targets.length === 0) {
-      show('선택된 모듈이 없습니다.', 'err')
-      return
-    }
-    const hasCritical = targets.some(n => isCriticalVariant(n))
-    if ((action === 'stop' || action === 'restart') && hasCritical) {
-      const ok = confirm(
-        `⚠️ 선택 모듈 ${targets.length}개에 critical(CSC) 가 포함됩니다.\n` +
-        `${action === 'stop' ? '정지' : '재시작'} 시 Console UI 가 즉시 단절됩니다.\n계속할까요?`,
-      )
-      if (!ok) return
-    } else if (action === 'stop' || action === 'restart') {
-      const ok = confirm(`선택 모듈 ${targets.length}개를 ${action === 'stop' ? '정지' : '재시작'}할까요?\n${targets.join(', ')}`)
-      if (!ok) return
-    }
-    // 직렬 실행 — 동시에 여러 process 띄우면 cims.sh 가 충돌할 수 있음
-    for (const name of targets) {
-      await act(name, action, false, true /* skipConfirm — 위에서 묶음 처리 */)
-    }
-  }
-
   async function toggleRunning(name: ServiceName, running: boolean, critical: boolean) {
     await act(name, running ? 'stop' : 'start', critical)
   }
@@ -303,8 +275,8 @@ export default function ServicesPage() {
   function openTemplate(moduleName: string, edit = false) {
     const versions = packagesByModule[moduleName]
     if (!versions || versions.length === 0) { show('등록된 패키지 없음', 'err'); return }
-    const v = selectedVersion[moduleName] || versions[0].version
-    const pkg = versions.find(p => p.version === v) || versions[0]
+    // 카드별 버전 선택 input 이 제거된 후 — 항상 가장 최신 등록 버전 사용.
+    const pkg = versions[0]
     setTemplateModal({ module: moduleName, pkg })
     setEditError('')
     if (edit) {
@@ -356,9 +328,9 @@ export default function ServicesPage() {
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <h3 style={{ margin: 0 }}>빌드</h3>
+        <h3 style={{ margin: 0 }}>패키징</h3>
         <span className="text-muted" style={{ fontSize: 13 }}>
-          빌드 / 패키지화 / 다운로드 + 모듈 프로세스 제어. 신규 패키지 등록/편집은{' '}
+          빌드 → 시험 실행 → 패키징 → 다운로드. 신규 패키지 등록/편집은{' '}
           <Link to="/deploy/packages">배포 &gt; 패키지</Link> 에서.
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -371,8 +343,31 @@ export default function ServicesPage() {
           ) : (
             <span className="text-muted" style={{ fontSize: 12 }}>패키지 미생성</span>
           )}
-          <button className="btn btn--primary" disabled={!!activeJob} onClick={() => { void startBuild() }}>
-            {activeJob?.kind === 'build' ? '빌드 중…' : '⚙ 전체 빌드'}
+          {/* 빌드 + 패키징 통합 — 입력 버전을 -v 로 전달 (pkg.json 갱신) + tarball 산출 */}
+          <input
+            type="text"
+            list="all-versions"
+            value={globalVersion}
+            onChange={e => setGlobalVersion(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void startRelease() }}
+            placeholder="v1.2.3"
+            title="빌드 & 패키징할 버전 (cims.sh build -v + pkg --no-bump). 비워두면 현재 pkg.json 버전 유지."
+            style={{ width: 110, fontSize: 13, padding: '4px 8px',
+                     border: '1px solid #d1d5db', borderRadius: 4 }}
+          />
+          <datalist id="all-versions">
+            {allVersions.map(v => <option key={v} value={v} />)}
+          </datalist>
+          <button className="btn btn--primary" disabled={!!activeJob} onClick={() => { void startRelease() }}
+                  title="빌드 + 패키징 한 번에 (cmake + make + npm + tarball 12종). 5~15분.">
+            {activeJob?.kind === 'release' ? '진행 중…'
+              : activeJob?.kind === 'build' ? '빌드 중…'
+              : activeJob?.kind === 'pkg' ? '패키징 중…'
+              : '▶ 빌드 & 패키징'}
+          </button>
+          <button className="btn btn--danger" disabled={!!activeJob} onClick={() => { void cleanPackages() }}
+                  title="패키지 산출물 (tarball 들 + manifest.json) 삭제. 빌드 결과는 유지.">
+            🗑 정리
           </button>
           <button className="btn btn--outline" onClick={() => { void load(); void loadPackages(); void loadManifest() }}>
             ↻ 새로고침
@@ -380,42 +375,9 @@ export default function ServicesPage() {
         </div>
       </div>
 
-      {/* 일괄 액션 — 체크된 변종 대상 (아이콘만, hover 툴팁) */}
-      <div style={{
-        marginBottom: 12, padding: '8px 12px', borderRadius: 4, background: '#f4f6f8',
-        display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
-      }}>
-        <button
-          className="btn btn--sm btn--outline"
-          onClick={toggleSelectAll}
-          title={selected.size === managedNames.length ? '선택 해제' : '모두 선택'}
-        >
-          {selected.size === managedNames.length ? '☐ 해제' : '☑ 모두'}
-        </button>
-        <span style={{ fontSize: 13, color: '#555' }}>
-          선택 {selected.size} / {managedNames.length}
-        </span>
-        <span style={{ marginLeft: 8, color: '#aaa' }}>|</span>
-        <button
-          className={`btn btn--sm${selectedAnyRunning ? ' btn--danger' : ''}`}
-          disabled={selected.size === 0}
-          onClick={() => { void bulkAct(selectedAnyRunning ? 'stop' : 'start') }}
-          title={selectedAnyRunning ? '선택 변종 종료' : '선택 변종 기동'}
-        >
-          {selectedAnyRunning ? '■' : '▶'}
-        </button>
-        <button className="btn btn--sm btn--outline"
-          disabled={selected.size === 0}
-          onClick={() => { void bulkAct('restart') }}
-          title="선택 변종 재기동"
-        >
-          ↻
-        </button>
-      </div>
-
       <div style={{
         display: 'flex', gap: 16, alignItems: 'stretch',
-        height: 'calc(100vh - 240px)', minHeight: 320,
+        height: 'calc(100vh - 180px)', minHeight: 320,
       }}>
         <div style={{ flex: '3 1 0', minWidth: 0, overflow: 'auto' }}>
       {loading ? (
@@ -423,17 +385,16 @@ export default function ServicesPage() {
       ) : (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(560px, 1fr))',
           gap: 12, padding: 4,
         }}>
           {BUILD_CARDS.map(card => {
             const versions = packagesByModule[card.key] || []
-            const curVer = selectedVersion[card.key] || versions[0]?.version || ''
-            const pkgBusy = activeJob?.kind === 'pkg' && activeJob.cardKey === card.key
-            const otherBusy = !!activeJob && !pkgBusy
-            // 카드 안 어떤 변종이든 tarball 있으면 다운로드 가능
-            const variantTars = card.variants.map(v => ({ v, tar: tarballByModule[v] }))
-            const anyTar = variantTars.some(x => !!x.tar)
+            // 카드의 패키지 산출물별 tarball 존재 여부 (³ 다운로드 영역에서 사용)
+            const variantTars = cardPackages(card).map(v => ({ v, tar: tarballByModule[v] }))
+            const s = states[card.key]
+            const running = s?.running ?? false
+            const disabled = busy[card.key]
             return (
               <div key={card.key} className="card" style={{
                 border: '1px solid #e5e7eb', borderRadius: 6,
@@ -452,126 +413,91 @@ export default function ServicesPage() {
                   </span>
                 </div>
 
-                {/* 패키지 영역 */}
+                {/* 본문 — 2 col x 2 row 그리드: ¹³ / ²⁴.
+                    한 행에 두 영역이 좌우로 놓여 컴팩트한 가로 와이드 카드. */}
                 <div style={{
                   borderTop: '1px solid #f0f2f4', paddingTop: 8,
-                  display: 'flex', flexDirection: 'column', gap: 6,
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  columnGap: 16, rowGap: 8,
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                    <span style={{ color: '#555', minWidth: 50 }}>패키지</span>
-                    {versions.length > 0 ? (
-                      <select
-                        className="form-input"
-                        style={{ flex: 1, fontSize: 12, padding: '2px 6px' }}
-                        value={curVer}
-                        onChange={e => setSelectedVersion(v => ({ ...v, [card.key]: e.target.value }))}
-                      >
-                        {versions.map(p => (
-                          <option key={p.id} value={p.version}>{p.version}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="text-muted" style={{ fontSize: 12, flex: 1 }}>
-                        없음 · <Link to="/deploy/packages">등록</Link>
-                      </span>
-                    )}
-                    {versions.length > 0 && (
+                  {/* ¹ 설정 — 템플릿/설정 편집 (버전 선택은 ³ 로 이동) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
+                    <span style={{ color: '#555', fontWeight: 500, minWidth: 50 }}>¹ 설정</span>
+                    <button className="btn btn--sm btn--outline"
+                      disabled={versions.length === 0}
+                      onClick={() => openTemplate(card.key, true)}
+                      title="설정 템플릿 편집">템플릿</button>
+                    {card.hasProcess && (
                       <button className="btn btn--sm btn--outline"
-                        onClick={() => openTemplate(card.key, true)}
-                        title="설정 템플릿 편집">템플릿</button>
+                        disabled={versions.length === 0}
+                        onClick={() => setConfigModule(card.key)}
+                        title="모듈 설정 편집">설정</button>
+                    )}
+                    {needsRestart[card.key] && (
+                      <span className="tag" style={{ background: '#e74c3c', color: '#fff' }}
+                            title="설정 변경 후 재시작 필요">!</span>
+                    )}
+                    {versions.length === 0 && (
+                      <Link to="/deploy/packages" style={{ fontSize: 11, color: '#888', marginLeft: 'auto' }}
+                            title="신규 패키지 등록">등록</Link>
                     )}
                   </div>
-                  {/* 변종별 다운로드 + 묶음 ▣ */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+
+                  {/* ² 실행 — hasProcess 카드만, 빈 셀로 정렬 유지 */}
+                  {card.hasProcess ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
+                      <span style={{ color: '#555', fontWeight: 500, minWidth: 50 }}>² 실행</span>
+                      <span className="tag" style={{
+                        background: running ? '#2ecc71' : '#95a5a6', color: '#fff',
+                        minWidth: 40, textAlign: 'center',
+                      }}>
+                        {running ? 'on' : 'off'}
+                      </span>
+                      <span style={{ color: '#777', fontFamily: 'monospace', fontSize: 11 }}>
+                        {running ? `pid=${s?.pid ?? '?'}` : '—'}
+                      </span>
+                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                        <button
+                          className={`btn btn--sm${running ? ' btn--danger' : ''}`}
+                          disabled={disabled}
+                          onClick={() => toggleRunning(card.key, running, !!card.critical)}
+                          title={running ? '종료' : '기동'}
+                        >
+                          {running ? '■' : '▶'}
+                        </button>
+                        <button className="btn btn--sm btn--outline"
+                          disabled={disabled || !running}
+                          onClick={() => act(card.key, 'restart', !!card.critical)}
+                          title="재기동">
+                          ↻
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: '#aaa', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ minWidth: 50 }}>² 실행</span>
+                      <span>(원격 — 로컬 실행 없음)</span>
+                    </div>
+                  )}
+
+                  {/* ³ 다운로드 — 헤더 ▣ 패키징 산출 tarball. 라벨에 모듈명 + 버전 (실수 방지). */}
+                  <div style={{ gridColumn: '1 / -1',
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                fontSize: 12, flexWrap: 'wrap', minWidth: 0 }}>
+                    <span style={{ color: '#555', fontWeight: 500, minWidth: 50 }}>³ 다운로드</span>
                     {variantTars.map(({ v, tar }) => (
                       <button key={v} className="btn btn--sm btn--outline"
                         disabled={!tar}
-                        title={tar ? `${tar.name} (${fmtSize(tar.size)})` : `${v} tarball 없음 — 먼저 패키지화`}
+                        title={tar ? `${tar.name} (${fmtSize(tar.size)})` : `${v} tarball 없음 — 먼저 ▣ 패키징`}
                         onClick={() => { void downloadTarball(v) }}
-                        style={{ fontSize: 11, padding: '2px 6px' }}>
-                        ⤓ {v}
+                        style={{ fontSize: 11, padding: '2px 6px',
+                                 fontFamily: 'monospace' }}>
+                        ⤓ {v}{tar?.version ? ` v${tar.version}` : ''}
                       </button>
                     ))}
-                    <button className="btn btn--sm btn--outline"
-                      disabled={otherBusy || pkgBusy}
-                      title={pkgBusy ? '패키지화 진행 중…'
-                        : card.variants.length > 1
-                          ? `cims.sh pkg ${card.variants.join(' ')} --no-bump`
-                          : `cims.sh pkg ${card.variants[0]} --no-bump`}
-                      onClick={() => { void startPkgForCard(card) }}
-                      style={{ marginLeft: 'auto' }}>
-                      {pkgBusy ? '…' : `▣ 재패키징${card.variants.length > 1 ? ` (${card.variants.length})` : ''}`}
-                    </button>
                   </div>
-                  {versions.length > 0 && card.hasProcess && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                      <button className="btn btn--sm btn--outline" onClick={() => setConfigModule(card.key)}>
-                        설정
-                      </button>
-                      {card.variants.some(v => needsRestart[v]) && (
-                        <span className="tag" style={{ background: '#e74c3c', color: '#fff' }}
-                              title="설정 변경 후 재시작 필요">!</span>
-                      )}
-                    </div>
-                  )}
-                  {!anyTar && versions.length === 0 && (
-                    <span className="text-muted" style={{ fontSize: 11 }}>패키지 미생성</span>
-                  )}
                 </div>
-
-                {/* 프로세스 영역 — hasProcess 인 카드만 */}
-                {card.hasProcess && (
-                  <div style={{
-                    borderTop: '1px solid #f0f2f4', paddingTop: 8,
-                    display: 'flex', flexDirection: 'column', gap: 4,
-                  }}>
-                    <div style={{ fontSize: 12, color: '#555' }}>프로세스</div>
-                    {card.variants.map(v => {
-                      const s = states[v]
-                      const running = s?.running ?? false
-                      const disabled = busy[v]
-                      return (
-                        <div key={v} style={{
-                          display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
-                        }}>
-                          <input type="checkbox"
-                            checked={selected.has(v)}
-                            onChange={() => toggleSelect(v)}
-                            aria-label={`${v} 선택`}
-                          />
-                          {card.variants.length > 1 && (
-                            <span style={{ fontFamily: 'monospace', minWidth: 32 }}>{v}</span>
-                          )}
-                          <span className="tag" style={{
-                            background: running ? '#2ecc71' : '#95a5a6', color: '#fff',
-                            minWidth: 50, textAlign: 'center',
-                          }}>
-                            {running ? 'on' : 'off'}
-                          </span>
-                          <span style={{ minWidth: 60, color: '#777', fontFamily: 'monospace' }}>
-                            {running ? `pid=${s?.pid ?? '?'}` : '—'}
-                          </span>
-                          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-                            <button
-                              className={`btn btn--sm${running ? ' btn--danger' : ''}`}
-                              disabled={disabled}
-                              onClick={() => toggleRunning(v, running, !!card.critical)}
-                              title={running ? '종료' : '기동'}
-                            >
-                              {running ? '■' : '▶'}
-                            </button>
-                            <button className="btn btn--sm btn--outline"
-                              disabled={disabled || !running}
-                              onClick={() => act(v, 'restart', !!card.critical)}
-                              title="재기동">
-                              ↻
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
               </div>
             )
           })}
@@ -600,7 +526,9 @@ export default function ServicesPage() {
                 : showModule && lastModule?.verdict === 'FAIL' ? '#dc2626'
                 : '#475569'
               const tagText = showJob && jobStatus
-                ? (jobStatus.kind === 'build' ? '빌드' : `패키지화 ${activeJob?.module || jobStatus.label.replace(/^cims\.sh pkg /, '') || ''}`)
+                ? (jobStatus.kind === 'release' ? '빌드 & 패키징'
+                   : jobStatus.kind === 'build' ? '빌드'
+                   : `패키지화 ${activeJob?.module || jobStatus.label.replace(/^cims\.sh pkg /, '') || ''}`)
                   + (activeJob ? ' · 실행 중'
                      : jobStatus.verdict === 'PASS' ? ' · PASS'
                      : jobStatus.verdict === 'FAIL' ? ' · FAIL'
@@ -704,7 +632,7 @@ export default function ServicesPage() {
       {configModule && (
         <ConfigModalWrapper
           moduleName={configModule}
-          version={selectedVersion[configModule] || (packagesByModule[configModule] || [])[0]?.version}
+          version={(packagesByModule[configModule] || [])[0]?.version}
           onClose={() => setConfigModule(null)}
           onDone={() => { setNeedsRestart(s => ({ ...s, [configModule]: true })) }}
         />

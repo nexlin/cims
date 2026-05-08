@@ -50,7 +50,7 @@ function runDetailToReportStages(detail: RunDetail): ReportStage[] {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 검증 이력 페이지 — /testbed/verify-history
+// 검증 이력 페이지 — /release/verify-history
 //   list + detail (modal) + 필터 (stage/verdict/limit)
 // ─────────────────────────────────────────────────────────────
 

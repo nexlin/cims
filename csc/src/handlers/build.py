@@ -211,6 +211,12 @@ async def handle_build(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
     if after == 'pkg' and method == 'POST':
         return await _start_pkg(handler_args)
 
+    if after == 'release' and method == 'POST':
+        return await _start_release(handler_args)
+
+    if after == 'clean' and method == 'POST':
+        return await _clean_packages()
+
     m = re.fullmatch(r'jobs/([0-9a-f]+)', after)
     if m and method == 'GET':
         return await _get_job_status(m.group(1))
@@ -232,6 +238,15 @@ async def _start_build(handler_args: HandlerArgs) -> HandlerResult:
     if not _SCRIPT_DIR or not os.path.isfile(os.path.join(_SCRIPT_DIR, 'cims.sh')):
         return HandlerResult(status=500, body={'error': f'cims.sh not found at {_SCRIPT_DIR}'})
 
+    body = handler_args.body or {}
+    opts = body if isinstance(body, dict) else {}
+    # version 명시 시 cims.sh build -v <ver> 로 전달 — 이후 pkg --no-bump 가 그 버전 사용.
+    raw_version = str(opts.get('version') or '').strip()
+    if raw_version and not re.fullmatch(r'[0-9A-Za-z._+\-]{1,64}', raw_version):
+        return HandlerResult(status=422, body={
+            'error': f'invalid version format: {raw_version!r}',
+        })
+
     async with _LOCK:
         active = _has_active_job()
         if active:
@@ -241,7 +256,10 @@ async def _start_build(handler_args: HandlerArgs) -> HandlerResult:
                 'job_id': active, 'kind': j.get('kind'), 'label': j.get('label'),
             })
         argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'build']
-        job_id = await _start_job('build', argv, _BUILD_TIMEOUT, label='cims.sh build')
+        if raw_version:
+            argv.extend(['-v', raw_version])
+        label = f'cims.sh build{" -v " + raw_version if raw_version else ""}'
+        job_id = await _start_job('build', argv, _BUILD_TIMEOUT, label=label)
 
     return HandlerResult(status=202, body={
         'job_id': job_id,
@@ -272,6 +290,16 @@ async def _start_pkg(handler_args: HandlerArgs) -> HandlerResult:
         no_bump = True
     no_bump = bool(no_bump)
 
+    # version 명시 시 cims.sh pkg -v <ver> 로 전달 — 모든 대상 모듈이 그 버전으로 산출.
+    # 명시 시에는 no_bump 무시 (cims.sh 가 -v 를 우선 적용).
+    raw_version = str(opts.get('version') or '').strip()
+    # 안전: 영숫자 + 점/대시/언더스코어/플러스 만 허용 (shell 인자 주입 방지)
+    if raw_version and not re.fullmatch(r'[0-9A-Za-z._+\-]{1,64}', raw_version):
+        return HandlerResult(status=422, body={
+            'error': f'invalid version format: {raw_version!r}',
+        })
+    version = raw_version
+
     if not modules:
         return HandlerResult(status=422, body={
             'error': 'module or modules required',
@@ -292,12 +320,16 @@ async def _start_pkg(handler_args: HandlerArgs) -> HandlerResult:
                 'error':  '다른 빌드/패키지 작업 진행 중',
                 'job_id': active, 'kind': j.get('kind'), 'label': j.get('label'),
             })
-        argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'pkg', *modules]
-        if no_bump:
+        argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'pkg']
+        if version:
+            argv.extend(['-v', version])
+        elif no_bump:
             argv.append('--no-bump')
+        argv.extend(modules)
         label_module = ' '.join(modules)
+        label_version = f' -v {version}' if version else ''
         job_id = await _start_job('pkg', argv, _PKG_TIMEOUT,
-                                  label=f'cims.sh pkg {label_module}')
+                                  label=f'cims.sh pkg{label_version} {label_module}')
 
     return HandlerResult(status=202, body={
         'job_id': job_id,
@@ -307,6 +339,81 @@ async def _start_pkg(handler_args: HandlerArgs) -> HandlerResult:
         'argv':   argv,
         'started_at': _JOBS[job_id]['started_at'],
         'message': 'started',
+    })
+
+
+# 빌드 + 패키징 통합 — 한 job 으로 cims.sh build [-v X.Y.Z] && cims.sh pkg --no-bump 실행.
+# 시각적으로 한 작업이고, 진행 표시도 하나의 stdout 으로 수렴.
+async def _start_release(handler_args: HandlerArgs) -> HandlerResult:
+    if not _SCRIPT_DIR or not os.path.isfile(os.path.join(_SCRIPT_DIR, 'cims.sh')):
+        return HandlerResult(status=500, body={'error': f'cims.sh not found at {_SCRIPT_DIR}'})
+
+    body = handler_args.body or {}
+    opts = body if isinstance(body, dict) else {}
+    raw_version = str(opts.get('version') or '').strip()
+    if raw_version and not re.fullmatch(r'[0-9A-Za-z._+\-]{1,64}', raw_version):
+        return HandlerResult(status=422, body={
+            'error': f'invalid version format: {raw_version!r}',
+        })
+
+    async with _LOCK:
+        active = _has_active_job()
+        if active:
+            j = _JOBS[active]
+            return HandlerResult(status=409, body={
+                'error':  '다른 빌드/패키지 작업 진행 중',
+                'job_id': active, 'kind': j.get('kind'), 'label': j.get('label'),
+            })
+        cims_sh = os.path.join(_SCRIPT_DIR, 'cims.sh')
+        # version 은 위에서 정규식 검증 통과 — shell 인자 안전.
+        build_cmd = f'{cims_sh} build'
+        if raw_version:
+            build_cmd += f' -v {raw_version}'
+        # build → pkg 순차. && 로 build 실패 시 pkg 안 함.
+        chained = f'{build_cmd} && {cims_sh} pkg --no-bump'
+        argv = ['/bin/bash', '-c', chained]
+        label_version = f' -v {raw_version}' if raw_version else ''
+        # build timeout 이 더 길어서 그 값을 사용 (pkg 는 빠름).
+        job_id = await _start_job('release', argv, _BUILD_TIMEOUT,
+                                  label=f'cims.sh build{label_version} && pkg --no-bump')
+
+    return HandlerResult(status=202, body={
+        'job_id': job_id,
+        'kind':   'release',
+        'argv':   argv,
+        'started_at': _JOBS[job_id]['started_at'],
+        'message': 'started',
+    })
+
+
+# 패키지 산출물 정리 — build/dist/packages/*.tar.gz + packages/manifest.json 삭제.
+# 빌드 결과 (build/dist/<comp>/) 는 건드리지 않음 — 다음 빌드 시 cmake 캐시 활용 위해.
+async def _clean_packages() -> HandlerResult:
+    if not _DIST_PKG_DIR:
+        return HandlerResult(status=500, body={'error': 'DIST_PKG_DIR not set'})
+    pkg_dir = _DIST_PKG_DIR
+    manifest = os.path.join(pkg_dir, 'manifest.json')
+    removed_tarballs = 0
+    removed_manifest = False
+    errors = []
+    if os.path.isdir(pkg_dir):
+        for f in os.listdir(pkg_dir):
+            if f.endswith('.tar.gz'):
+                try:
+                    os.remove(os.path.join(pkg_dir, f))
+                    removed_tarballs += 1
+                except OSError as e:
+                    errors.append(f'{f}: {e}')
+    if os.path.isfile(manifest):
+        try:
+            os.remove(manifest)
+            removed_manifest = True
+        except OSError as e:
+            errors.append(f'manifest.json: {e}')
+    return HandlerResult(status=200, body={
+        'removed_tarballs': removed_tarballs,
+        'removed_manifest': removed_manifest,
+        'errors': errors,
     })
 
 

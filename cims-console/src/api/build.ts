@@ -6,9 +6,11 @@ import { api } from './client'
 
 export type BuildVerdict = 'PASS' | 'FAIL'
 
+export type BuildJobKind = 'build' | 'pkg' | 'release'
+
 export interface BuildJobStart {
   job_id: string
-  kind: 'build' | 'pkg'
+  kind: BuildJobKind
   module?: string
   modules?: string[]
   argv: string[]
@@ -18,7 +20,7 @@ export interface BuildJobStart {
 
 export interface BuildJobStatus {
   job_id: string
-  kind: 'build' | 'pkg'
+  kind: BuildJobKind
   label: string
   argv: string[]
   started_at: number
@@ -28,6 +30,12 @@ export interface BuildJobStatus {
   returncode: number | null
   verdict: BuildVerdict | null
   stdout_tail: string
+}
+
+export interface CleanResult {
+  removed_tarballs: number
+  removed_manifest: boolean
+  errors: string[]
 }
 
 export interface ManifestPackage {
@@ -87,15 +95,32 @@ async function downloadBlob(path: string, fallbackName: string): Promise<void> {
 }
 
 export const buildApi = {
-  runBuild: () =>
-    api.post<BuildJobStart>(`${BASE}/run`, {}),
+  runBuild: (opts: { version?: string } = {}) => {
+    const body: Record<string, unknown> = {}
+    // version 명시 시 cims.sh build -v <ver> — 모든 컴포넌트의 pkg.json 갱신.
+    if (opts.version && opts.version.trim()) body.version = opts.version.trim()
+    return api.post<BuildJobStart>(`${BASE}/run`, body)
+  },
 
-  runPkg: (modules: string | string[], opts: { no_bump?: boolean } = {}) => {
+  runPkg: (modules: string | string[], opts: { no_bump?: boolean; version?: string } = {}) => {
     const body: Record<string, unknown> = { no_bump: opts.no_bump ?? true }
     if (Array.isArray(modules)) body.modules = modules
     else body.module = modules
+    // version 명시 시 cims.sh pkg -v <ver> 로 모든 대상 모듈이 그 버전으로 산출됨.
+    if (opts.version && opts.version.trim()) body.version = opts.version.trim()
     return api.post<BuildJobStart>(`${BASE}/pkg`, body)
   },
+
+  // 빌드 + 패키징 통합 — 한 job 으로 cims.sh build [-v X.Y.Z] && pkg --no-bump
+  runRelease: (opts: { version?: string } = {}) => {
+    const body: Record<string, unknown> = {}
+    if (opts.version && opts.version.trim()) body.version = opts.version.trim()
+    return api.post<BuildJobStart>(`${BASE}/release`, body)
+  },
+
+  // 패키지 산출물 정리 — packages/*.tar.gz + manifest.json 삭제. 빌드 산출물은 유지.
+  cleanPackages: () =>
+    api.post<CleanResult>(`${BASE}/clean`, {}),
 
   getJob: (jobId: string) =>
     api.get<BuildJobStatus>(`${BASE}/jobs/${jobId}`),

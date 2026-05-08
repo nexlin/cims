@@ -698,14 +698,18 @@ cmd_build() {
     header "=== C++ 빌드 ==="
     # 3단계 중 1단계: 실제 빌드 + 배포시 필요한 파일을 build/dist 로 복사.
     # 시험환경 설정은 `cims.sh configure`, 패키지화는 `cims.sh pkg` 로 완전 분리.
-    # 인자: -j N / -jN / N (병렬 작업 수)
+    # 인자:
+    #   -j N / -jN / N — 병렬 작업 수
+    #   -v X.Y.Z       — 모든 컴포넌트의 pkg.json version 을 갱신 (이후 pkg --no-bump 가 그 버전 사용)
     local jobs=""
+    local version=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -j)         shift; jobs="${1:-}"; shift ;;
-            -j*)        jobs="${1#-j}"; shift ;;
-            [0-9]*)     jobs="$1"; shift ;;
-            *)          err "알 수 없는 옵션: $1 (build 단계는 인자 없이 실행)"; return 1 ;;
+            -j)             shift; jobs="${1:-}"; shift ;;
+            -j*)            jobs="${1#-j}"; shift ;;
+            -v|--version)   version="$2"; shift 2 ;;
+            [0-9]*)         jobs="$1"; shift ;;
+            *)              err "알 수 없는 옵션: $1 (build 단계는 -j N / -v X.Y.Z 만)"; return 1 ;;
         esac
     done
     [[ -z "$jobs" ]] && jobs=$(nproc)
@@ -736,13 +740,24 @@ cmd_build() {
     cp -r dist "$DIST_DIR/phone/"
     ok "cims-phone 빌드 완료"
 
+    # -v 명시 시 source 의 pkg.json version 갱신 — 이후 cims.sh pkg --no-bump 가 그 버전 사용.
+    # 변종 (psp/isp/pmp/imp) 은 자기 pkg.json 없음 → base (csp/cmp) 의 pkg.json 만 갱신해도 충분.
+    if [[ -n $version ]]; then
+        local _comp _pkgf
+        for _comp in csp cmp csc cwrtc cspsim agent cims-console cims-phone; do
+            _pkgf="$SCRIPT_DIR/$_comp/pkg.json"
+            [[ -f $_pkgf ]] && _pkg_write_version "$_pkgf" "$version"
+        done
+        ok "pkg.json 버전 갱신 → $version (8개 컴포넌트)"
+    fi
+
     echo ""
-    ok "[1/3] build 완료 → $DIST_DIR"
+    ok "[1/3] build 완료 → $DIST_DIR${version:+ (v=$version)}"
     echo ""
     info "다음 단계:"
     info "  [2/3] ./cims.sh configure --local-ip <서버IP> [--db-password <PW>]   # 시험환경 설정"
     info "        ./cims.sh start                                                # Phase 1 기능 검증"
-    info "  [3/3] ./cims.sh pkg [-v X.Y.Z]                                       # 배포 패키지화"
+    info "  [3/3] ./cims.sh pkg ${version:+[--no-bump 자동]}                              # 배포 패키지화"
 }
 
 # ── configure ──────────────────────────────────────────────────
@@ -1898,6 +1913,45 @@ PYEOF
         local size; size=$(stat -c%s "$tar_file" 2>/dev/null || echo 0)
         ok "$(basename "$tar_file") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo "${size}B"))"
     done
+
+    # manifest.json 생성/갱신 — 현재 packages/*.tar.gz 의 SHA256 + size + mtime 기록.
+    # Console UI 의 다운로드 라벨 (버전 표시) 과 검증 S6 의 immutability gate 가 이 파일 사용.
+    # 검증 S4-PKG-MANIFEST 가 같은 로직으로 만들지만, cmd_pkg 직후에도 항상 fresh 하도록.
+    local manifest_path="$out_dir/manifest.json"
+    local _git_sha="${git_sha:-}" _git_branch="${git_branch:-}"
+    local _host; _host=$(hostname -s 2>/dev/null || echo unknown)
+    python3 - "$out_dir" "$manifest_path" "$_git_sha" "$_git_branch" "$_host" <<'PYEOF' \
+        && ok "manifest.json 갱신 → $manifest_path" \
+        || warn "manifest.json 갱신 실패"
+import sys, os, json, hashlib
+from datetime import datetime, timezone
+out_dir, out_path, git_sha, git_branch, host = sys.argv[1:6]
+def sha256(p):
+    h = hashlib.sha256()
+    with open(p, 'rb') as f:
+        for chunk in iter(lambda: f.read(64*1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
+entries = []
+for fn in sorted(os.listdir(out_dir)):
+    if not fn.endswith('.tar.gz'): continue
+    full = os.path.join(out_dir, fn)
+    entries.append({
+        'name':   fn,
+        'size':   os.path.getsize(full),
+        'sha256': sha256(full),
+        'mtime':  datetime.fromtimestamp(os.path.getmtime(full), tz=timezone.utc).isoformat(),
+    })
+manifest = {
+    'ts': datetime.now(timezone.utc).astimezone().isoformat(),
+    'git': {'branch': git_branch, 'sha': git_sha},
+    'host': host,
+    'ens_ip': '',
+    'packages': entries,
+}
+with open(out_path, 'w', encoding='utf-8') as f:
+    json.dump(manifest, f, ensure_ascii=False, indent=2)
+PYEOF
 
     header "[3/3] 생성된 패키지 (업로드 대상):"
     ls -lh "$out_dir"/*.tar.gz 2>/dev/null | awk '{printf "  %s  %s\n", $5, $9}'

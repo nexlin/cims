@@ -4,12 +4,12 @@ import { verifyApi, type VerifyStagesOverview, type ItemsProgress, type VerifyEn
 import { VerificationPrintReport } from '../components/VerificationPrintReport'
 
 // ─────────────────────────────────────────────────────────────
-// 검증 v2 — 6단계 (S1~S6) + 그룹핑
+// 검증 — 6단계 (S1~S6) + 그룹핑
 // 백엔드 (csc/src/handlers/verification.py) 와 연결.
 //   - 초기 로드: GET /api/v1/verification/stages
 //   - 실행:    POST /api/v1/verification/stages/<N> 또는 /run
 //   - 폴링:    GET /api/v1/verification/jobs/<id>     (1.5s)
-//   - 종료 시: run_id 표시 + 이력 페이지 (/testbed/verify-history) 안내
+//   - 종료 시: run_id 표시 + 이력 페이지 (/release/verify-history) 안내
 // ─────────────────────────────────────────────────────────────
 
 type ItemStatus = 'PENDING' | 'RUNNING' | 'PASS' | 'FAIL' | 'SKIP' | 'BLOCKED'
@@ -955,7 +955,7 @@ export default function VerificationV2Page() {
   }, [jobId])
 
   return (
-    <div className="verify-v2-page" style={{ padding: 16, maxWidth: 1400, margin: '0 auto' }}>
+    <div className="verify-page" style={{ padding: 16, maxWidth: 1400, margin: '0 auto' }}>
       <style>{`
         @media print {
           @page { margin: 3mm 15mm 2mm 15mm; size: A4; }
@@ -967,7 +967,7 @@ export default function VerificationV2Page() {
           /* 부모 chain 의 layout/여백 제거 */
           .app-layout, .app-layout--collapsed,
           .app-content, .app-content-body,
-          .verify-v2-page {
+          .verify-page {
             display: block !important;
             margin: 0 !important;
             padding: 0 !important;
@@ -980,9 +980,9 @@ export default function VerificationV2Page() {
           .sidebar, .sidebar--collapsed,
           .app-header, .sub-tabs { display: none !important; }
 
-          /* verify-v2 페이지 안의 .v2-report 외 모든 직접/간접 영역 layout 에서 제외 */
-          .verify-v2-page > .v2-no-print,
-          .verify-v2-page > .stage-card { display: none !important; }
+          /* verify 페이지 안의 .v2-report 외 모든 직접/간접 영역 layout 에서 제외 */
+          .verify-page > .v2-no-print,
+          .verify-page > .stage-card { display: none !important; }
 
           /* 보고서 보임 (화면에서는 inline style 의 display:none 으로 숨겨짐) */
           .v2-report {
@@ -1006,7 +1006,7 @@ export default function VerificationV2Page() {
       `}</style>
 
       <div className="v2-no-print" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>검증 v2 — 6단계 파이프라인</h2>
+        <h2 style={{ margin: 0, fontSize: 18 }}>검증 — 6단계 파이프라인</h2>
         <span style={{
           fontSize: 10, padding: '2px 8px',
           background: '#dcfce7', color: '#15803d',
@@ -1024,12 +1024,11 @@ export default function VerificationV2Page() {
         )}
         {lastRunId !== null && (
           <span style={{ fontSize: 12, color: '#6b7280' }}>
-            마지막 회차: <a href="/testbed/verify-history">#{lastRunId}</a>
+            마지막 회차: <a href="/release/verify-history">#{lastRunId}</a>
           </span>
         )}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted, #6b7280)' }}>
-          이력: <a href="/testbed/verify-history">/testbed/verify-history</a>
-          {' · '}구버전: <a href="/testbed/verify">/testbed/verify</a>
+          이력: <a href="/release/verify-history">/release/verify-history</a>
         </span>
       </div>
 
@@ -1118,7 +1117,7 @@ export default function VerificationV2Page() {
         <ul style={{ margin: '6px 0', paddingLeft: 20 }}>
           <li>전체검증 ▶ — Stepper 의 재개 지점부터 시작 (S1=처음이면 <code>pipeline-full</code> preset)</li>
           <li>Stage 단독 ▶ — 해당 stage 의 부모/평면 항목만 (그룹은 자식 자동 포함)</li>
-          <li>1.5초 폴링으로 진행 상태 갱신. 완료 시 회차 #ID 가 위에 표시되고 <a href="/testbed/verify-history">이력 페이지</a>에 자동 기록됨</li>
+          <li>1.5초 폴링으로 진행 상태 갱신. 완료 시 회차 #ID 가 위에 표시되고 <a href="/release/verify-history">이력 페이지</a>에 자동 기록됨</li>
           <li>S5 22 step 모두 native Python 포팅 완료 — 자식 단독 실행 가능 (예: <code>S5-CSC-DEPLOY-INSTALL</code> 만 선택)</li>
           <li>S6-ENTRY-CHECK 가 immutability gate 검사 — S5-MODULES-RUN-START 가 기록한 <code>.deployed-manifest.json</code> ↔ <code>packages/manifest.json</code> SHA-256 매칭</li>
           <li>이력은 파일 기반 — <code>verify_runs/YYYY/MM/&lt;id&gt;.json</code> (DB 의존 X)</li>

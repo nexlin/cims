@@ -149,9 +149,11 @@
           "help": "DB 가 SOT. DB 미연결 시 fallback." },
 
         { "key": "Packages.Dir",       "label": "Package 저장소",          "group": "packages",
-          "type": "path", "default": "packages", "hidden": true, "restart": true },
+          "type": "path", "default": "packages", "restart": true,
+          "help": "배포(/deploy/packages)에서 업로드한 tarball 의 저장 위치. 빌드 산출물(build/dist/packages/)과는 별개." },
         { "key": "Packages.BackupDir", "label": "Package 백업/trash",      "group": "packages",
-          "type": "path", "default": "packages_trash", "hidden": true, "restart": true },
+          "type": "path", "default": "packages_trash", "restart": true,
+          "help": "삭제된 배포 패키지의 백업 위치." },
 
         { "key": "ConfigCacheDir",     "label": "설정 캐시 디렉토리",      "group": "config_cache",
           "type": "path", "default": "cache", "hidden": true, "restart": true,

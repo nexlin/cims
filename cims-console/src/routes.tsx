@@ -102,15 +102,15 @@ export const SECTIONS: RouteSection[] = [
     ],
   },
   {
-    key: 'testbed',
-    label: '빌드 · 검증',
+    key: 'release',
+    label: '패키징',
     icon: FlaskConical,
-    basePath: '/testbed',
-    defaultPath: '/testbed/modules',
+    basePath: '/release',
+    defaultPath: '/release/verify',
     routes: [
-      { path: '/testbed/modules',          title: '빌드',         component: ServicesPage, adminOnly: true },
-      { path: '/testbed/verify-v2',        title: '검증 실행',     component: VerificationV2Page, adminOnly: true },
-      { path: '/testbed/verify-history',   title: '검증 이력',     component: VerificationHistoryPage, adminOnly: true },
+      { path: '/release/verify',          title: '검증 실행',     component: VerificationV2Page, adminOnly: true },
+      { path: '/release/verify-history',  title: '검증 이력',     component: VerificationHistoryPage, adminOnly: true },
+      { path: '/release/package',         title: '패키징',       component: ServicesPage, adminOnly: true },
     ],
   },
   {
