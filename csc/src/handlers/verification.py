@@ -44,6 +44,7 @@ _REPORT_DIR = ''          # verify_reports/ 경로
 
 # verify/lib import 를 위해 _SCRIPT_DIR 을 sys.path 에 추가 (init 시점)
 _run_store = None         # 지연 import — _SCRIPT_DIR 결정 후 로드
+_live_store = None        # 지연 import — verify.lib.live_store
 
 # cims.sh verify stage<N> 의 합리적 timeout (초)
 _STAGE_TIMEOUT = {
@@ -85,6 +86,12 @@ def init(tests_dir: str, config: Optional[dict] = None):
         _run_store = _rs
     except Exception:
         _run_store = None
+    global _live_store
+    try:
+        from verify.lib import live_store as _ls
+        _live_store = _ls
+    except Exception:
+        _live_store = None
 
 
 async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
@@ -119,6 +126,10 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     m = re.fullmatch(r'jobs/([0-9a-f]+)', after)
     if m and method == 'GET':
         return await _get_job_status(m.group(1))
+
+    # /active — 진행 중·최근 종료된 LIVE 회차 목록 (CLI + 백엔드 통합 시야)
+    if after == 'active' and method == 'GET':
+        return await _get_active_runs()
 
     # /env — 현재 검증 환경 메타 (LIVE PrintReport meta 주입용)
     if after == 'env' and method == 'GET':
@@ -188,32 +199,46 @@ def _resolve_verdict(stage: int) -> tuple:
 # ─────────────────────────────────────────────────────────────
 # 비동기 job 관리
 # ─────────────────────────────────────────────────────────────
-_JOBS: dict = {}              # job_id → job dict
+_JOBS: dict = {}              # job_id → job dict (in-memory)
 _JOBS_TTL_SEC = 3600
-_JOB_LOG_DIR = '/tmp/cims_verify_jobs'
 
 
 def _gc_jobs():
+    """in-memory _JOBS 만 정리. 파일 쪽 GC 는 live_store.list_active 가 담당."""
     now = time.time()
     stale = [jid for jid, j in _JOBS.items()
              if j.get('done') and (now - (j.get('ended_at') or now)) > _JOBS_TTL_SEC]
     for jid in stale:
-        j = _JOBS.pop(jid, None)
-        if j and j.get('log_path'):
-            try: os.remove(j['log_path'])
-            except Exception: pass
+        _JOBS.pop(jid, None)
 
 
 async def _start_job(stage: int, argv: list, timeout: int,
                      label: str = '', scope: str = '',
                      selected_ids: Optional[list] = None,
                      trigger_type: str = 'user') -> str:
-    """Spawn subprocess in background. Returns job_id immediately."""
+    """Spawn subprocess in background. Returns job_id immediately.
+
+    job_id 는 verify_runs/live/<id>/ 디렉토리명과 동일 — UI 가 live 회차로
+    조회 가능 (CLI 회차와 통합 시야).
+    """
     _gc_jobs()
-    os.makedirs(_JOB_LOG_DIR, exist_ok=True)
-    job_id = uuid.uuid4().hex[:12]
-    log_path = os.path.join(_JOB_LOG_DIR, f'stage{stage}_{job_id}.log')
-    log_file = open(log_path, 'wb')
+    if _live_store is None:
+        raise RuntimeError("live_store unavailable — verify.lib import 실패")
+    job_id = _live_store.new_live_id()
+    scope_v = scope or (f'stage{stage}' if stage else 'items')
+    import socket
+    _, live_dir, log_path = _live_store.start_live(
+        _SCRIPT_DIR,
+        live_id=job_id,
+        source="backend",
+        scope=scope_v,
+        selected_ids=list(selected_ids or []),
+        argv=list(argv),
+        label=label,
+        trigger_type=trigger_type,
+        host=socket.gethostname(),
+    )
+    log_file = open(log_path, 'ab', buffering=0)
     proc = await asyncio.create_subprocess_exec(
         *argv,
         stdout=log_file,
@@ -221,17 +246,23 @@ async def _start_job(stage: int, argv: list, timeout: int,
         cwd=_SCRIPT_DIR,
         env=_sanitized_env(),
     )
+    # subprocess 가 떠야 pid 확정 — meta 갱신
+    try:
+        _live_store.update_live(live_dir, pid=int(proc.pid))
+    except Exception:
+        pass
     job = {
         'job_id': job_id,
         'stage': stage,
         'label': label,
-        'scope': scope or (f'stage{stage}' if stage else 'items'),
+        'scope': scope_v,
         'selected_ids': list(selected_ids or []),
         'trigger_type': trigger_type,
         'argv': argv,
         'started_at': time.time(),
         'ended_at': None,
         'log_path': log_path,
+        'live_dir': live_dir,
         'returncode': None,
         'done': False,
         'verdict': None,
@@ -280,6 +311,18 @@ async def _watch_job(job_id: str):
     # 회차 이력 자동 기록 (실패해도 job 자체는 영향 X)
     try:
         await asyncio.to_thread(_record_run, job)
+    except Exception:
+        pass
+
+    # live_store meta finalize — UI /active 가 done=true 로 인지 + run_id 백레퍼런스
+    try:
+        if _live_store and job.get('live_dir'):
+            _live_store.finalize_live(
+                job['live_dir'],
+                verdict=job.get('verdict'),
+                returncode=rc,
+                run_id=job.get('run_id'),
+            )
     except Exception:
         pass
 
@@ -682,37 +725,132 @@ async def _delete_run(run_id: int) -> HandlerResult:
 
 
 async def _get_job_status(job_id: str) -> HandlerResult:
+    """진행 상태 + stdout tail + items_progress.
+
+    - in-memory `_JOBS` 우선 (백엔드가 시작한 job — 가장 fresh).
+    - 없으면 live_store fallback (CLI 회차 또는 워커 재시작 후 in-memory 손실).
+    """
     job = _JOBS.get(job_id)
-    if not job:
+    if job:
+        log_path = job['log_path']
+        tail = _read_tail(log_path, n=50)
+        progress = _parse_items_progress(log_path)
+        now = time.time()
+        return HandlerResult(status=200, body={
+            'job_id': job_id,
+            'source': 'backend',
+            'stage': job['stage'],
+            'label': job.get('label', ''),
+            'scope': job.get('scope', ''),
+            'selected_ids': job.get('selected_ids') or [],
+            'argv': job['argv'],
+            'started_at': job['started_at'],
+            'ended_at': job['ended_at'],
+            'elapsed': (job['ended_at'] or now) - job['started_at'],
+            'done': job['done'],
+            'returncode': job['returncode'],
+            'verdict': job['verdict'] if job['done'] else None,
+            'report_path': job['report_path'] if job['done'] else None,
+            'report_ts': job['report_ts'] if job['done'] else '',
+            'run_id': job.get('run_id'),
+            'stdout_tail': tail,
+            'items_progress': progress,
+        })
+
+    # in-memory 없음 → live_store 조회 (CLI 회차 또는 backend 워커 재시작 case)
+    if _live_store is None:
         return HandlerResult(status=404, body={'error': f'job not found: {job_id}'})
-    tail = ''
-    try:
-        with open(job['log_path'], 'rb') as f:
-            data = f.read().decode('utf-8', errors='replace')
-            tail = '\n'.join(data.splitlines()[-50:])
-    except Exception:
-        pass
-    progress = _parse_items_progress(job.get('log_path', ''))
+    meta = _live_store.read_live(_SCRIPT_DIR, job_id, tail_lines=50)
+    if not meta:
+        return HandlerResult(status=404, body={'error': f'job not found: {job_id}'})
+    log_path = meta.get('stdout_path') or ''
+    progress = _parse_items_progress(log_path) if log_path else {}
     now = time.time()
+    started = float(meta.get('started_at') or now)
+    ended = meta.get('ended_at')
     return HandlerResult(status=200, body={
         'job_id': job_id,
-        'stage': job['stage'],
-        'label': job.get('label', ''),
-        'scope': job.get('scope', ''),
-        'selected_ids': job.get('selected_ids') or [],
-        'argv': job['argv'],
-        'started_at': job['started_at'],
-        'ended_at': job['ended_at'],
-        'elapsed': (job['ended_at'] or now) - job['started_at'],
-        'done': job['done'],
-        'returncode': job['returncode'],
-        'verdict': job['verdict'] if job['done'] else None,
-        'report_path': job['report_path'] if job['done'] else None,
-        'report_ts': job['report_ts'] if job['done'] else '',
-        'run_id': job.get('run_id'),
-        'stdout_tail': tail,
+        'source': meta.get('source') or 'cli',
+        'stage': _stage_from_scope(meta.get('scope') or ''),
+        'label': meta.get('label') or '',
+        'scope': meta.get('scope') or '',
+        'selected_ids': meta.get('selected_ids') or [],
+        'argv': meta.get('argv') or [],
+        'started_at': started,
+        'ended_at': ended,
+        'elapsed': (float(ended) if ended else now) - started,
+        'done': bool(meta.get('done')),
+        'returncode': meta.get('returncode'),
+        'verdict': meta.get('verdict') if meta.get('done') else None,
+        'report_path': None,
+        'report_ts': '',
+        'run_id': meta.get('run_id'),
+        'stdout_tail': meta.get('stdout_tail') or '',
         'items_progress': progress,
     })
+
+
+def _read_tail(path: str, *, n: int = 50) -> str:
+    try:
+        with open(path, 'rb') as f:
+            data = f.read().decode('utf-8', errors='replace')
+            return '\n'.join(data.splitlines()[-n:])
+    except Exception:
+        return ''
+
+
+def _stage_from_scope(scope: str) -> Optional[int]:
+    m = re.fullmatch(r'stage(\d+)', scope or '')
+    if m:
+        try:
+            n = int(m.group(1))
+            if n in _VALID_STAGES:
+                return n
+        except Exception:
+            pass
+    return None
+
+
+async def _get_active_runs() -> HandlerResult:
+    """진행 중·최근 종료된 LIVE 회차 목록.
+
+    CLI 직접 실행 / 백엔드 비동기 job 둘 다 verify_runs/live/<id>/meta.json
+    에 기록되므로 동일 시야로 반환. 진행 중 회차의 stale pid 자동 감지 +
+    완료 후 TTL 지난 회차 자동 GC 는 live_store.list_active 가 처리.
+    """
+    if _live_store is None:
+        return HandlerResult(status=200, body={'runs': []})
+    metas = _live_store.list_active(_SCRIPT_DIR)
+    out = []
+    for m in metas:
+        log_path = m.get('stdout_path') or ''
+        prog = _parse_items_progress(log_path) if log_path else {}
+        summary = (prog.get('summary') or {})
+        out.append({
+            'job_id':       m.get('id'),
+            'source':       m.get('source'),
+            'scope':        m.get('scope'),
+            'label':        m.get('label') or '',
+            'selected_ids': m.get('selected_ids') or [],
+            'started_at':   m.get('started_at'),
+            'ended_at':     m.get('ended_at'),
+            'done':         bool(m.get('done')),
+            'verdict':      m.get('verdict'),
+            'returncode':   m.get('returncode'),
+            'run_id':       m.get('run_id'),
+            'host':         m.get('host') or '',
+            'pid':          m.get('pid'),
+            'progress':     {
+                'total':     prog.get('total') or 0,
+                'completed': prog.get('completed') or 0,
+                'pass':      summary.get('pass', 0),
+                'fail':      summary.get('fail', 0),
+                'skip':      summary.get('skip', 0),
+                'blocked':   summary.get('blocked', 0),
+                'current':   prog.get('current'),
+            },
+        })
+    return HandlerResult(status=200, body={'runs': out})
 
 
 # ─────────────────────────────────────────────────────────────

@@ -36,10 +36,47 @@ if _REPO_ROOT not in sys.path:
 
 from verify.lib import (                                        # noqa: E402
     registry, runner, reporting, presets as preset_mod, run_store,
-    webhook as _webhook,
+    webhook as _webhook, live_store,
 )
 from verify.lib.context import VerifyContext                    # noqa: E402
 from verify.lib import items as _items_pkg                      # noqa: F401, E402  (auto-import 트리거)
+
+
+# ─────────────────────────────────────────────────────────────
+# stdout tee — CLI 회차 stdout 을 live_store 의 stdout.log 에 동시 기록
+# ─────────────────────────────────────────────────────────────
+class _TeeStream:
+    """sys.stdout/stderr 대체 — write/flush 를 두 스트림에 분기."""
+    def __init__(self, primary, mirror):
+        self._primary = primary
+        self._mirror = mirror
+
+    def write(self, s):
+        try:
+            self._primary.write(s)
+        except Exception:
+            pass
+        try:
+            self._mirror.write(s)
+        except Exception:
+            pass
+        return len(s) if isinstance(s, str) else 0
+
+    def flush(self):
+        for x in (self._primary, self._mirror):
+            try: x.flush()
+            except Exception: pass
+
+    def isatty(self):
+        try: return self._primary.isatty()
+        except Exception: return False
+
+    def fileno(self):
+        return self._primary.fileno()
+
+    def __getattr__(self, name):
+        # 그 외 속성은 primary 에 위임 (encoding 등)
+        return getattr(self._primary, name)
 
 
 def _flatten_items_for_record(results: list) -> list:
@@ -374,28 +411,79 @@ def cmd_run(args: argparse.Namespace) -> int:
     ctx = VerifyContext.create(repo_root=repo_root, stage=stage, opts=opts,
                                report_dir=args.report_dir)
 
+    # scope 계산 — _record_cli_run 와 동일 규칙 (live_store 와 final record 일치)
+    if stage:
+        scope_short = f"stage{stage}"
+    elif args.preset:
+        scope_short = f"preset:{args.preset}"
+    elif args.items:
+        scope_short = "items"
+    else:
+        scope_short = "multi"
+
+    # live_store 시작 — stdout 을 stdout.log 로 미러링. 종료 시 finalize.
+    import socket
+    live_id, live_dir, _live_stdout_path = live_store.start_live(
+        repo_root,
+        source="cli",
+        scope=scope_short,
+        selected_ids=item_ids,
+        argv=list(sys.argv),
+        label=f"stage{stage}" if stage else "multi",
+        trigger_type="cli",
+        pid=os.getpid(),
+        host=socket.gethostname(),
+    )
+    _live_log_fp = open(_live_stdout_path, "a", encoding="utf-8", buffering=1)
+    _orig_stdout = sys.stdout
+    _orig_stderr = sys.stderr
+    sys.stdout = _TeeStream(_orig_stdout, _live_log_fp)
+    sys.stderr = _TeeStream(_orig_stderr, _live_log_fp)
+
     scope = (f"Stage {stage} 전체" if stage and not args.items else
              f"선택 {len(item_ids)} 항목 (stage={stage or 'multi'})")
     reporting.write_header(ctx, scope=scope)
 
-    t0 = time.time()
-    results = runner.run_items(ctx, item_ids)
-    elapsed = time.time() - t0
-
-    verdict = reporting.determine_verdict(results)
-    totals = reporting.write_summary(ctx, results, verdict)
-    ctx.report_close()
-
-    # 회차 이력 자동 기록 (verify_runs/YYYY/MM/<id>.json) — --no-record 로 비활성.
+    verdict = "UNKNOWN"
+    totals = {"total": 0, "pass": 0, "fail": 0, "skip": 0, "blocked": 0}
+    results: list = []
     run_id = 0
-    if not args.no_record:
+    elapsed = 0.0
+    t0 = time.time()
+    try:
+        results = runner.run_items(ctx, item_ids)
+        elapsed = time.time() - t0
+
+        verdict = reporting.determine_verdict(results)
+        totals = reporting.write_summary(ctx, results, verdict)
+        ctx.report_close()
+
+        # 회차 이력 자동 기록 (verify_runs/YYYY/MM/<id>.json) — --no-record 로 비활성.
+        if not args.no_record:
+            try:
+                run_id = _record_cli_run(args, ctx, item_ids, results, verdict,
+                                         totals, elapsed, stage)
+            except Exception as e:
+                # 기록 실패는 검증 결과에 영향 X — stderr 경고만.
+                print(f"[WARN] verify_runs 기록 실패: {type(e).__name__}: {e}",
+                      file=sys.stderr)
+    finally:
+        # 비정상 종료 (예외/중단) 에도 live 메타는 마감해야 stale 안 남음.
         try:
-            run_id = _record_cli_run(args, ctx, item_ids, results, verdict,
-                                     totals, elapsed, stage)
-        except Exception as e:
-            # 기록 실패는 검증 결과에 영향 X — stderr 경고만.
-            print(f"[WARN] verify_runs 기록 실패: {type(e).__name__}: {e}",
-                  file=sys.stderr)
+            live_store.finalize_live(
+                live_dir,
+                verdict=verdict if verdict in ("PASS", "FAIL") else "UNKNOWN",
+                returncode=(0 if verdict == "PASS" else
+                            1 if verdict == "FAIL" else None),
+                run_id=run_id or None,
+            )
+        except Exception:
+            pass
+        # tee 해제 — 원래 stdout/stderr 복원
+        sys.stdout = _orig_stdout
+        sys.stderr = _orig_stderr
+        try: _live_log_fp.close()
+        except Exception: pass
 
     payload = {
         "started_at": ctx.ts,

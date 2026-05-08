@@ -231,6 +231,38 @@ export const verifyApi = {
 
   // 현재 검증 환경 메타 (V2 LIVE PrintReport meta 주입용)
   getEnv: () => api.get<VerifyEnvResponse>(`${BASE}/env`),
+
+  // 진행 중·최근 종료된 LIVE 회차 (CLI + 백엔드 통합 시야)
+  getActive: () => api.get<ActiveRunsResponse>(`${BASE}/active`),
+}
+
+export interface ActiveRunSummary {
+  job_id: string
+  source: 'cli' | 'backend'
+  scope: string
+  label: string
+  selected_ids: string[]
+  started_at: number
+  ended_at: number | null
+  done: boolean
+  verdict: 'PASS' | 'FAIL' | 'UNKNOWN' | 'ABORTED' | null
+  returncode: number | null
+  run_id: number | null
+  host: string
+  pid: number | null
+  progress: {
+    total: number
+    completed: number
+    pass: number
+    fail: number
+    skip: number
+    blocked: number
+    current: string | null
+  }
+}
+
+export interface ActiveRunsResponse {
+  runs: ActiveRunSummary[]
 }
 
 export interface VerifyEnvResponse {

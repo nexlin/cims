@@ -737,14 +737,28 @@ export default function VerificationV2Page() {
   const [prepResetRunning, setPrepResetRunning] = useState(false)
   const anyRunning = pipelineRunning || soloStage !== null || prepResetRunning
 
-  // 초기 로드 — GET /verification/stages + /verification/env
+  // 초기 로드 — GET /verification/stages + /verification/env + /active 자동 부착
   useEffect(() => {
     let cancelled = false
     verifyApi.getStages()
-      .then(res => {
+      .then(async res => {
         if (cancelled) return
         setStages(apiToStages(res))
         setLoading(false)
+        // 진행 중 회차가 있으면 자동 부착 — 다른 페이지 → 돌아왔을 때 이어서 폴링.
+        // CLI 직접 실행 회차도 동일하게 진입점으로 표시 (source='cli').
+        try {
+          const active = await verifyApi.getActive()
+          if (cancelled) return
+          const running = (active.runs || []).find(r => !r.done)
+          if (running) {
+            const m = /^stage(\d+)$/.exec(running.scope || '')
+            if (m) setSoloStage(parseInt(m[1], 10))
+            else if (running.scope === 'preset:prep-reset') setPrepResetRunning(true)
+            else setPipelineRunning(true)
+            setJobId(running.job_id)
+          }
+        } catch { /* /active 미지원·일시 오류 무시 */ }
       })
       .catch(e => {
         if (cancelled) return
