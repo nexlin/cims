@@ -30,11 +30,20 @@ def cmp_request(payload: dict, ip: str = "127.0.0.1", port: int = 9000,
 
 
 def remove_group(group_id: str, ip: str = "127.0.0.1", port: int = 9000) -> None:
-    """그룹 세션 제거 (fire-and-forget, 응답 무시)."""
+    """CMP 의 그룹 세션 제거 (fire-and-forget, 응답 무시).
+
+    ⚠️ CSP 캐시 (m_mapPttSession / CGroupMap) 는 동기화되지 않으므로 호출 후
+    CSP 가 다음 INVITE 처리 시 ADD_PTT_GROUP 을 다시 보내지 않고 곧장
+    JOIN_PTT_GROUP 으로 가서 'Group Not Found' 가 발생할 수 있다. CSP 의
+    cache 도 정리하려면 cims.sh reset --all (prep-reset preset) 로 CSP 재시작
+    경로를 사용할 것.
+
+    cmd 는 CSP↔CMP 프로토콜 규약대로 대문자 'REMOVE_PTT_GROUP'.
+    """
     if not group_id:
         return
     try:
-        cmp_request({"cmd": "removeGroup", "group_id": group_id}, ip, port,
+        cmp_request({"cmd": "REMOVE_PTT_GROUP", "group_id": group_id}, ip, port,
                     timeout=1.0)
     except Exception:
         pass

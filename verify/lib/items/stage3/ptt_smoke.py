@@ -4,7 +4,6 @@ from __future__ import annotations
 from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
 from ...common.subscribers import MCPTT_DOMAIN
-from ...common.cmp_client import remove_group
 from ._helpers import run_scenario
 
 
@@ -15,11 +14,17 @@ from ._helpers import run_scenario
     depends_on=["S3-SEED"],
     presets=["stage3-full", "pipeline-full", "pre-package"],
     side_effects=["sim-call"], timeout_s=180,
+    execution_order=60,
 )
 def ptt_smoke(ctx: VerifyContext) -> ItemResult:
     s = ctx.state
-    # 모듈 검증의 그룹 세션 잔여로 INVITE 가 410 Gone 받는 것 방지.
-    remove_group(s.get("PTT_GROUP", ""))
+    # NOTE: 과거에는 여기서 cmp_client.remove_group 을 호출해 CMP 의 그룹
+    # 세션을 사전 정리했지만, CSP 의 m_mapPttSession 캐시는 그대로라
+    # 다음 INVITE 처리 시 CSP 가 ADD_PTT_GROUP 을 보내지 않고 곧장
+    # JOIN_PTT_GROUP 으로 가서 'Group Not Found' 가 났음. CSP 가 startup 에
+    # 모든 그룹을 ADD_PTT_GROUP 으로 push 하므로 fresh CSP/CMP 에서는
+    # 사전 정리가 불필요. 재실행 케이스의 stale 그룹 세션은 prep-reset
+    # (cims.sh reset --all) 에서 CSP/CMP 동시 재시작으로 정리.
     args = [
         "-mode", "ptt", "-scenario", "group_call",
         "-count", "5", "-duration", "10", "-ip", ctx.sim_ip,
