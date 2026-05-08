@@ -286,7 +286,9 @@ fi
 write_env_if_changed() {
     local path="$1"
     local content="$2"
-    if [[ -f "$path" ]] && [[ "$(cat "$path")" == "$content" ]]; then
+    # NOTE: `$(cat file)` 은 trailing newline 을 strip 하므로 직접 비교하면
+    # `\n` 으로 끝나는 content 와 항상 불일치. cmp 로 바이트 정확 비교.
+    if [[ -f "$path" ]] && printf '%s' "$content" | cmp -s - "$path"; then
         return 0  # 변경 없음 — skip (mtime 보존)
     fi
     printf '%s' "$content" > "$path"
