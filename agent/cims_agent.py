@@ -298,6 +298,21 @@ def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
         except Exception:
             pass
 
+    # 실행 중인 바이너리 위로 tar 풀면 ETXTBSY ('Text file busy') 발생 →
+    # untar 전체 fail. 사전에 install_path 하위 모든 파일을 unlink 하면
+    # OS 가 기존 inode 는 그대로 두고 새 파일을 교체 작성 → 실행 중인
+    # 프로세스에 영향 없이 untar 성공. 디렉터리 구조 자체는 보존하고 파일만
+    # 정리. tar 가 모든 파일을 새로 뽑으므로 자료 손실 없음.
+    # backup 은 install_path 외부 (".prev") 라 wipe 영향 없음.
+    for root, _dirs, files in os.walk(install_path):
+        for fname in files:
+            p = os.path.join(root, fname)
+            try:
+                if os.path.islink(p) or os.path.isfile(p):
+                    os.unlink(p)
+            except Exception:
+                pass
+
     tar_path = os.path.join(install_path, "_pkg.tar.gz")
     with open(tar_path, "wb") as f:
         f.write(data)

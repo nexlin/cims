@@ -45,6 +45,9 @@ import glob
 import json
 import os
 import re
+import shutil
+import signal
+import subprocess
 import time
 from typing import Optional
 
@@ -93,6 +96,99 @@ _LISTEN_PORTS = {"csp": (5060, "udp"), "cmp": (9000, "udp")}
 
 def _target(ctx: VerifyContext) -> str:
     return ((ctx.opts or {}).get("target") or "verify")
+
+
+def _prepare_test_agent_slot(sync_port: int, name: str, state_dir: str) -> list:
+    """spawn 직전 stale 상태를 정리. 반환=정리 노트 (detail 에 포함).
+
+    pipeline-full 은 RESET 을 포함하지 않으므로 직전 회차의 test-agent 가
+    sync_port 에 LISTEN 중일 수 있다. 또한 state_dir 에 이전 agent_id 가
+    남아있으면 cims_agent.py 가 'resumed' 로 옛 ID 로 heartbeat → 새로 발급된
+    deployment 가 다른 agent 에 매칭되어 install-poll 60s 타임아웃.
+
+    1) `--name <name>` 패턴의 cims_agent.py 프로세스 종료 (pkill -f 동등)
+    2) sync_port LISTEN 점유 프로세스 종료
+    3) state_dir wipe — 새로 enroll 하도록 강제
+    """
+    notes: list = []
+
+    # 1) 같은 --name 의 cims_agent 프로세스 정리 (pkill -f 동등)
+    killed_name: list = []
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", f"cims_agent.py.*--name {name}"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        for line in out.split():
+            try:
+                pid = int(line)
+                os.kill(pid, signal.SIGTERM)
+                killed_name.append(pid)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if killed_name:
+        notes.append(f"  · stale agent (--name {name}) killed: pid={killed_name}")
+
+    # 2) sync_port 점유 정리
+    killed_port = _kill_listener_on_port(sync_port)
+    if killed_port:
+        notes.append(f"  · stale listener on :{sync_port} killed: pid={killed_port}")
+
+    # 1)/2) 정리 후 짧은 grace
+    if killed_name or killed_port:
+        time.sleep(0.5)
+
+    # 3) state_dir wipe — 'resumed: id=…' 로 옛 ID 인계 차단
+    try:
+        if os.path.isdir(state_dir):
+            shutil.rmtree(state_dir, ignore_errors=True)
+            notes.append(f"  · state_dir wiped: {state_dir}")
+    except Exception:
+        pass
+    os.makedirs(state_dir, exist_ok=True)
+    return notes
+
+
+def _kill_listener_on_port(port: int) -> Optional[int]:
+    """TCP 0.0.0.0:<port> LISTEN 프로세스 종료. 반환=죽인 pid (없으면 None)."""
+    try:
+        out = subprocess.run(
+            ["ss", "-tlnp"], capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        return None
+    pid_to_kill: Optional[int] = None
+    for line in out.splitlines():
+        # 정확히 :PORT 형태(끝 또는 공백)인지 — :990 패턴이 9903 등 매치 방지
+        if not re.search(rf":{port}\b", line):
+            continue
+        m = re.search(r"pid=(\d+)", line)
+        if not m:
+            continue
+        pid_to_kill = int(m.group(1))
+        break
+    if pid_to_kill is None:
+        return None
+    try:
+        os.kill(pid_to_kill, signal.SIGTERM)
+    except Exception:
+        return pid_to_kill
+    # SIGKILL fallback (2s 안에 안 죽으면)
+    for _ in range(8):
+        time.sleep(0.25)
+        try:
+            os.kill(pid_to_kill, 0)
+        except ProcessLookupError:
+            return pid_to_kill
+        except Exception:
+            return pid_to_kill
+    try:
+        os.kill(pid_to_kill, signal.SIGKILL)
+    except Exception:
+        pass
+    return pid_to_kill
 
 
 def _ports(ctx: VerifyContext) -> dict:
@@ -397,7 +493,6 @@ def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
     ta_dir = os.path.join(dist, "csc-server", "agent")
     state_dir = os.path.join(ta_dir, "state")
     ta_log = os.path.join(ctx.repo_root, "logs", "test-agent-csc-server.log")
-    os.makedirs(state_dir, exist_ok=True)
     os.makedirs(os.path.dirname(ta_log), exist_ok=True)
 
     agent_py = os.path.join(dist, "agent", "cims_agent.py")
@@ -411,8 +506,11 @@ def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 7, result)
         return result
 
+    # 직전 회차 잔존 정리 (stale agent 프로세스 + sync_port + state_dir).
+    # pipeline-full 이 RESET 을 포함하지 않는 케이스를 명시적으로 흡수.
+    cleanup_notes = _prepare_test_agent_slot(sync_port, aname, state_dir)
+
     # spawn
-    import subprocess
     env = dict(os.environ)
     env["CIMS_AGENT_INSTALL_ROOT"] = os.path.join(dist, "csc-server")
     env["CIMS_AGENT_SYNC_PORT"] = str(sync_port)
@@ -470,11 +568,14 @@ def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
         return result
 
     _set(ctx, "ta_pid_csc", int(proc.pid))
+    detail = (f"pid={proc.pid} sync={sync_port} state-dir={state_dir} "
+              f"(enroll {waited}s)")
+    if cleanup_notes:
+        detail += "\n" + "\n".join(cleanup_notes)
     result = ItemResult(
         id="S5-CSC-DEPLOY-AGENT-ENROLL-SPAWN", name="Test-agent 기동",
         status=ItemStatus.PASS,
-        detail=f"pid={proc.pid} sync={sync_port} state-dir={state_dir} "
-               f"(enroll {waited}s)",
+        detail=detail,
         stage=5,
     )
     _save(ctx, 7, result)
@@ -1244,20 +1345,24 @@ def _register_one_module_agent(base: str, tok: str, aname: str) -> tuple:
 def _spawn_one_module_agent(ctx: VerifyContext, m: str, base: str,
                              aname: str, enroll_tok: str) -> tuple:
     """단일 module Test-agent spawn. (pid, error_msg). cims_agent.py 부재 시
-    error 반환. log 는 LOG_DIR/test-agent-<m>-server.log."""
+    error 반환. log 는 LOG_DIR/test-agent-<m>-server.log.
+
+    spawn 직전 stale agent/포트/state_dir 정리 (csc 와 동일 — pipeline-full 이
+    RESET 미포함이라 직전 회차 test-agent 가 sync_port 점유 가능).
+    """
     dist = ctx.dist_dir
     sync_port = _AGENT_SYNC_PORT_MOD[m]
     ta_dir = os.path.join(dist, f"{m}-server", "agent")
     state_dir = os.path.join(ta_dir, "state")
     ta_log = os.path.join(ctx.repo_root, "logs", f"test-agent-{m}-server.log")
-    os.makedirs(state_dir, exist_ok=True)
     os.makedirs(os.path.dirname(ta_log), exist_ok=True)
 
     agent_py = os.path.join(dist, "agent", "cims_agent.py")
     if not os.path.isfile(agent_py):
         return (None, f"cims_agent.py 없음: {agent_py}")
 
-    import subprocess
+    _prepare_test_agent_slot(sync_port, aname, state_dir)
+
     env = dict(os.environ)
     env["CIMS_AGENT_INSTALL_ROOT"] = os.path.join(dist, f"{m}-server")
     env["CIMS_AGENT_SYNC_PORT"] = str(sync_port)
