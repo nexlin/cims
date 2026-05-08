@@ -1,6 +1,11 @@
 # 13. Flow 로깅 및 서비스 상관관계 (sesid) 설계
 
-본 문서는 CIMS 3모듈(CSP/CMP/CSC)의 **Flow 로그 포맷, Realm 설정, sesid 발행/계승 규칙, 서비스별 분류**에 대한 단일 레퍼런스이다. 2026-04 Phase A/B 리팩토링 결과물.
+본 문서는 CIMS 3모듈(CSP/CMP/CSC)의 **Flow 로그 포맷, Realm 설정, sesid 발행/계승 규칙, 서비스별 분류**에 대한 단일 레퍼런스다.
+
+**원칙**: CSC 의 flow_logger 는 **세션 식별 (sesid) 기준 raw-data 액세스 계층**.
+시간 범위 + group_id substring / cross-service method 블랙리스트 같은 표시 레벨
+처리는 console 책임. CSC 는 HEARTBEAT 만 무조건 제외하고 나머지는 sesid_set
+매칭 일치만으로 필터한다 (sesid 누락 로그 회귀를 위한 legacy substring fallback 유지).
 
 ## 1. 목적
 
@@ -194,14 +199,15 @@ CMP는 `payload.service` 로 `_serviceMap[key]` 채움, `payload.sesid` 로 `_se
 
 ### 10.1 VoLTE
 ```
-GET /api/v1/flow/{call_id}?date=YYYY-MM-DD
+GET /api/v1/flow/{call_id}?date=YYYY-MM-DD&call_type=volte
 ```
 반환: `{call_id, date, nodes: {csp: [msgs...], cmp: [msgs...]}}`
 
-내부 동작:
-1. `call_id` → `.d` 디렉터리 조회 → `session.json`에서 `call_ids` (B2BUA 2 legs) 추출
-2. SIP msg 검색: `_search_sip_messages(call_ids)` — `subid` 필드 매칭
-3. 해당 sesid 집합 수집 → CMP msg 검색 시 **sesid 기반 필터** (이전 시간 범위 방식 → 타 호 섞임 방지)
+내부 동작 (2026-05-07 `9db25ff` 정립):
+1. `call_id` + `call_type` → `_find_d_dir_by_callid(volte)` 한 type 안에서만 검색 → `.d` 디렉터리 조회 → `session.json`에서 `call_ids` (B2BUA 2 legs) 추출
+2. SIP msg.jsonl (raw SIP 메시지) 에서 `call_ids` 매칭 라인의 sesid 추출 — `_extract_sesids_from_msg_jsonl`. flow.jsonl 의 SIP 라인은 Call-ID 필드를 가지지 않으므로 (caller/callee/sesid/method/seq/iface 만) flow.jsonl 단독 매칭으로는 0건이 나옴.
+3. SIP/CMP msg 검색을 **sesid 매칭 우선** + legacy substring fallback (sesid 누락 로그 회귀용). HEARTBEAT 만 무조건 제외.
+4. `call_type` 미전달 시 옛 동작은 volte+ptt 모든 .d 디렉토리 검색 후 prefix 매칭 → VoLTE call_id 가 PTT group_id 와 매칭되는 충돌. 이제 console 이 항상 `call_type` 명시 (`flowApi.get(callId, date, callType)`).
 
 ### 10.2 PTT
 ```
@@ -209,10 +215,13 @@ GET /api/v1/ptt/history/{group_id}/{session}/flow?date=YYYY-MM-DD
 ```
 반환: `{call_id: group_id, date, nodes}`
 
-내부 동작:
-1. `events.jsonl` 로부터 session 시작/종료 시각 추출 (±버퍼)
-2. 해당 시간 범위의 mcptt flow 로드
-3. 매칭 조건: `detail` | `sesid` | `subid` 중 하나에 `group_id` 포함 → 그룹 INVITE/ADD/JOIN/LEAVE/REMOVE + Floor control + DTMF/RTCP 모두 포함
+내부 동작 (2026-05-08 `c700744` 정립):
+1. session 시간 범위 내 group_id 매칭 메시지에서 sesid 모음
+2. **sesid 매칭으로 전체 메시지 필터** — startup-time `ADD_PTT_GROUP`, 종료 후 `REMOVE_PTT_GROUP`, member join/leave 등 라이프사이클이 시간 범위와 무관하게 자연 포함됨
+3. sesid 매칭 0 건 시 fallback: legacy substring 매칭 (`detail` | `sesid` | `subid` 중 하나에 `group_id` 포함)
+4. **HEARTBEAT 만 제외**. 옛 cross-service method 블랙리스트 (`VoLTE flow 에서 PTT method, PTT flow 에서 SESSION method`) + `_GROUP_LIFECYCLE` 시간 우회 트릭은 모두 제거 — UX 결정은 console 책임.
+
+> CSP 측 보강 (`e344302`): `_endSessionLocked` 의 `m_mapPttSession.erase` 제거 → 첫 멤버 OnCallTerminated 시점에 session map 이 비어버려 이후 멤버의 join/leave 가 events.jsonl 에 기록 안 되던 버그 해소. 5인 그룹콜에서 5명 모두 member_join + member_leave 정상 기록.
 
 ### 10.3 body 조회
 ```
@@ -245,10 +254,10 @@ GET /api/v1/flow/body?date=&hour=&seq=&iface=&node=
 - `cmp/PMcpttGroup.h/.cpp` — Floor control logFlow (onRtcpPacket + broadcastFloorStatus), DTMF `_dtmfFlowLog`, RTCP SR/RR/SDES/BYE 옵션 로깅
 
 ### CSC
-- `csc/bin/csc_pihttp/src/csc_logger.py` — `issue_sesid`, `get_or_issue_sesid`, `log_flow`, `log_console`
-- `csc/bin/csc_pihttp/src/csc_service.py` — `notify_csp(service, sesid)` 확장
-- `csc/bin/csc_pihttp/src/util/pi_http/http_server_controller.py` — `DynamicRouteProc.set_request_hooks`
-- `csc/bin/csc_pihttp/src/app.py` — `_post_hook` 등록 + base_path→service 매핑
+- `csc/src/services/flow_logger.py` — `issue_sesid`, `get_or_issue_sesid`, `log_flow`, `log_console` + sesid 매칭 검색
+- `csc/src/services/mcptt.py` — `notify_csp(service, sesid)` + `_notify_targets` (CSP/PSP 분기)
+- `csc/src/httpsrv/controller.py` — `DynamicRouteProc.set_request_hooks` (pre/post hook)
+- `csc/src/csc_app.py` — `_post_hook` 등록 + base_path → service 매핑
 
 ### UI
 - `cims-console/src/api/flow.ts` — `flowApi.getBody(date, hour, seq, ts, dir, proto, iface, node)`

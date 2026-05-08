@@ -254,7 +254,7 @@ PTT INVITE 의 Request-URI / From / To / P-Asserted-Identity 도메인이 Digest
 - `CSipUserAgent::CreateCall(... , overrideDomain)` — InviteMember 시 mcptt 도메인 지정
 - `CSipUserAgent::SetCallDomain(callId, domain)` — AcceptCall 이후 leg 에 사후 적용
 
-자세한 설정은 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) § 7 참고.
+자세한 설정은 [../features/flow_logging.md](./../features/flow_logging.md) § 7 참고.
 
 **그룹 데이터 (CspPttGroup):**
 
@@ -507,7 +507,7 @@ psip SIP 스택의 ILogCallBack 구현. 모든 SIP TX/RX와 CMP/CSC JSON 메시�
 }
 ```
 
-전체 규격·사례는 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) 참고.
+전체 규격·사례는 [../features/flow_logging.md](./../features/flow_logging.md) 참고.
 
 ### 3.9 CSubscriptionManager
 
@@ -768,4 +768,4 @@ ServiceMain()
 
 ## 9. 관련 문서
 
-- [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) — Flow 로깅, sesid, Realm 배열, 모듈 간 인터페이스의 공통 필드(`service`/`sesid`/`caller`/`callee`) 규격
+- [../features/flow_logging.md](./../features/flow_logging.md) — Flow 로깅, sesid, Realm 배열, 모듈 간 인터페이스의 공통 필드(`service`/`sesid`/`caller`/`callee`) 규격

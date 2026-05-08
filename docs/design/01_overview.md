@@ -95,12 +95,20 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 }
 ```
 
-**핵심 클래스:**
-- `CSipServer` — SIP 프로토콜 핸들러 (REGISTER, INVITE, BYE, SUBSCRIBE, NOTIFY)
-- `CGroupCallService` — PTT 그룹 통화 관리 (멤버 초대, 공유 RTP 세션)
-- `CCmpClient` — CMP에 RTP 세션 생성/삭제 명령 전송 (동기 요청/응답, 2초 타임아웃)
-- `CSubscriptionManager` — SIP SUBSCRIBE/NOTIFY 상태 관리 (GMS/CMS)
-- `CUserMap` / `CGroupMap` — 가입자/그룹 런타임 캐시 (DB에서 로딩)
+**핵심 클래스 (모듈러 IMS — 단일 프로세스에 CSCF/TAS/PTT-AS/IBCF 역할을 설정 기반으로 활성화):**
+- `CModuleDispatcher` — 중앙 디스패처. 모든 SIP 이벤트를 콜 소유권 기반으로 모듈에 라우팅 (`ModuleDispatcher.h/.cpp`)
+- `CCscfModule` — REGISTER / SUBSCRIBE / 인증 (Digest MD5)
+- `CTasModule` — VoIP B2BUA: DND, 착신전환, 착신거부, 콜픽업
+- `CPttAsModule` — PTT 그룹콜 (`CGroupCallService` 래핑)
+- `CIbcfModule` — IP-PBX 트렁크 라우팅 (옵션)
+- `CGroupCallService` — PTT 그룹 통화 (멤버 초대, 공유 RTP, multipart INVITE: SDP + OMA POC XML)
+- `CCmpClient` — CMP에 RTP 세션 생성/삭제 (UDP JSON, 동기 요청/응답)
+- `CSubscriptionManager` — SUBSCRIBE/NOTIFY 상태 (GMS/CMS)
+- `CspUserMap` / `CGroupMap` — 가입자/그룹 캐시 (DB primary, JSON fallback)
+- `CCallDir` — Session-ID 기반 서비스 로깅 (call.json, participants.jsonl, session.json)
+- `SipMessageLogger` — psip 콜백 구현 (SIP TX/RX + CMP JSON → `sip.jsonl`)
+
+자세한 모듈 구조와 콜백 순서 (B2BUA 라우팅) 는 `modules/csp.md` 참조.
 
 ### 2.2 CMP (Component Media Provider)
 
@@ -187,7 +195,7 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 }
 ```
 
-> **Flow/sesid 메타 필드**: 모든 CSP↔CMP payload 는 `service` (volte/mcptt/system/console), `sesid` (`{caller}::{module}::{ts}::{counter}`), `caller`, `callee` 를 포함합니다. CMP 는 이 값을 저장해 응답 Flow 로그에 상속하여 세션 상관관계를 유지합니다. 전체 규격은 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) 참고.
+> **Flow/sesid 메타 필드**: 모든 CSP↔CMP payload 는 `service` (volte/mcptt/system/console), `sesid` (`{caller}::{module}::{ts}::{counter}`), `caller`, `callee` 를 포함합니다. CMP 는 이 값을 저장해 응답 Flow 로그에 상속하여 세션 상관관계를 유지합니다. 전체 규격은 [../features/flow_logging.md](./../features/flow_logging.md) 참고.
 
 모든 응답:
 ```json
@@ -818,7 +826,7 @@ mysql -u cims -pcims1234 -e "SELECT 1" cims
 # 확인: SIP 포트 바인드 "SIP listening on 0.0.0.0:5060"
 
 # 3. CSC (API 서버)
-cd csc/bin/csc_pihttp/src && python3 app.py
+cd csc/src && python3 csc_app.py
 # 확인: "HTTPS server on port 4420" + "HTTPS server on port 4430"
 
 # 4. cwrtc (WebRTC 브리지)
@@ -920,10 +928,15 @@ curl -k -X PUT "https://192.168.0.2:4420/api/v1/ptt/groups/%2B82571910001" \
 
 | 문서 | 설명 |
 |------|------|
-| [10_CSP_Module_Design.md](./10_CSP_Module_Design.md) | CSP 내부 모듈 설계 |
-| [11_CMP_Module_Design.md](./11_CMP_Module_Design.md) | CMP 내부 모듈 설계 |
-| [12_CSC_Module_Design.md](./12_CSC_Module_Design.md) | CSC 내부 모듈 설계 |
-| [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) | Flow/Msg 로깅, sesid, Realm, 모듈 간 프로토콜 필드 |
+| [02_deployment.md](./02_deployment.md) | 분산 배포 + P1 토폴로지 (5 server) |
+| [modules/csp.md](./modules/csp.md) | CSP 내부 모듈 설계 (CSCF/TAS/PTT-AS/IBCF) |
+| [modules/cmp.md](./modules/cmp.md) | CMP 내부 모듈 설계 (RTP relay + Floor) |
+| [modules/csc.md](./modules/csc.md) | CSC 내부 모듈 설계 (Admin/MCPTT API) |
+| [modules/agent.md](./modules/agent.md) | Agent 데몬 (heartbeat / sync REST) |
+| [features/flow_logging.md](./features/flow_logging.md) | Flow/Msg 로깅, sesid, Realm, 모듈 간 프로토콜 필드 |
+| [features/sip_runtime_config.md](./features/sip_runtime_config.md) | SIP 런타임 설정 (jsonl + SIGUSR1) |
+| [features/build_and_packaging.md](./features/build_and_packaging.md) | 빌드/패키징 워크플로우 (콘솔 `/release/package`) |
+| [../VERIFICATION_PROCESS.md](../VERIFICATION_PROCESS.md) | 6단계 검증 파이프라인 (S1~S6) |
 
 ---
 

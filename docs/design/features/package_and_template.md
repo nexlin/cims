@@ -1,6 +1,6 @@
 # 패키지 포맷 + config_template.json 스키마
 
-> 버전: 1.0 (2026-04-21)
+> 버전: 1.1 (2026-05-08) — base 8 + 변종 4 = **12 tarball**, manifest.json 자동 생성, csc 의 `Packages.Dir` 직접 편집 노출.
 
 모듈 패키지(`cims.sh pkg`) 가 생성하는 tarball 의 구조와 내부 메타데이터 스키마를 정의합니다.
 
@@ -127,31 +127,36 @@
 - `storage.kind` — 현재 `jsonl` 만 지원. 다른 kind (`db_table`, `file_include`) 는 미래 확장
 - `storage.file` — install_path 기준 상대 경로 (e.g. `config/listeners.jsonl`)
 
-## 4. 빌드 & 업로드 흐름
+## 4. 빌드 & 패키징 흐름
 
-```
-1. cims.sh pkg [-v <ver>] [module ...]
-     - 각 모듈 소스 루트의 pkg.json 에서 service 메타 읽음
-     - 소스 루트의 config_template.json 을 tarball 루트에 복사
-     - meta.json 생성 (build_date, git, service 포함)
+CLI / 콘솔 / API 셋 다 동등. 자세한 워크플로우 (4단계 카드, ▶ 빌드 & 패키징
+job, 🗑 정리, ⤓ 다운로드, manifest schema) 는 `build_and_packaging.md` 참고.
+이 문서는 패키지 포맷 자체에 집중.
 
-2. Console 또는 curl 로 POST /api/v1/packages
-     - CSC 가 tarball 루트에서 meta.json, config_template.json 추출
-     - cims_package.meta_json / config_template_json 에 저장
-     - 파일은 <csc-root>/packages/ 에 보관
-```
+업로드 (배포 메뉴 `/deploy/packages`) 시 CSC 는 tarball 루트에서 `meta.json`
++ `config_template.json` 을 추출해 `cims_package.{meta_json,
+config_template_json}` 컬럼에 저장. 파일은 `csc.json` 의 `Packages.Dir`
+(default `<csc-root>/packages/`) 에 보관. 동일 (name, version) 재업로드는
+`force=true` 로 덮어쓰기.
 
 ## 5. 버전 관리 원칙
 
 - `config_template.json` 변경 = 패키지 버전 올리기
-- 기존 배포된 deployment 의 config 는 자동 이관되지만, 새 필드는 default 값 사용
-- 제거된 필드는 무시됨 (config.json 에 남아있어도 CSP 가 읽지 않음)
+- 기존 배포된 deployment 의 config 는 자동 이관, 새 필드는 default, 제거된 필드는 무시 (CSP 가 읽지 않음)
+- **빌드 시점 버전 결정**: 빌드 단계에서 `-v X.Y.Z` 로 모든 base pkg.json 일괄 동기화 후 `pkg --no-bump` 로 그 버전 그대로 산출. 변종 12종이 동일 버전을 받음 (drift 방지)
 
 ## 6. 현재 템플릿이 있는 모듈
 
-| 모듈 | sections | collections |
-|---|---|---|
-| csp | sip, roles, log, db | listeners, trunks, routes, acl |
-| cmp | network, rtp_pool, log | (없음) |
-| csc | network, tls, notify, log, db | (없음) |
-| 그 외 (agent/console/cwrtc/phone/cspsim) | 없음 | 없음 |
+| 모듈 | sections | collections | 변종 |
+|---|---|---|---|
+| csp | sip, roles, log, db | listeners, trunks, routes, acl | + psp / isp |
+| cmp | network, rtp_pool, log | — | + pmp / imp |
+| csc | network, tls, notify (Csp+Psp), log, db, **packages** | — | — |
+| 그 외 (agent/console/cwrtc/phone/cspsim) | 없음 | 없음 | — |
+
+> csc 의 `Packages.Dir` / `Packages.BackupDir` 는 카드의 ¹ 설정 모달
+> "패키지 저장소" 그룹으로 사용자가 직접 편집 가능.
+
+## 7. manifest.json
+
+`cims.sh pkg` 끝에서 `build/dist/packages/manifest.json` 자동 생성 — 12 tarball 의 `{name, size, sha256, mtime}` + git/host/ts. `_self_sha256` 은 S6 immutability gate 의 SoT. 스키마와 사용처는 [`build_and_packaging.md` §5](./build_and_packaging.md) 참고.

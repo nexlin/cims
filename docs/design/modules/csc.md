@@ -27,7 +27,7 @@ CSC는 CIMS 시스템의 관리/MCPTT 서비스 서버로, REST API 기반 가�
 ### 1.3 프로세스 구성
 
 ```
-python3 app.py [--config csc.json]
+python3 csc_app.py [--config csc.json]
 ```
 
 ---
@@ -39,15 +39,22 @@ python3 app.py [--config csc.json]
 ```
 Console UI (React)
      │
-     ▼ HTTPS (4420)
+     ▼ HTTPS (4420 운영 / 4445 검증 / 4419 TB)
 Admin API Server ─────────────────────────────────┐
-  ├─ cims_auth.py     (인증/JWT)                   │
-  ├─ cims_admin.py    (가입자/그룹/구독 CRUD)       │
-  ├─ cims_org.py      (조직 관리)                   │
-  ├─ cims_stats.py    (통계/상태)                   │
-  ├─ cims_recording.py (녹취 관리)                  │
-  ├─ cims_verification.py (검증)                    │
-  └─ csc_flow.py      (통화 이력/Flow)              │
+  ├─ auth.py            (인증/JWT)                  │
+  ├─ admin.py           (가입자 CRUD + Call/PTT 구독 + PTT 그룹) │
+  ├─ users.py           (/me — 본인 프로필/구독)    │
+  ├─ org.py             (조직 관리)                 │
+  ├─ stats.py           (통계/상태)                 │
+  ├─ recording.py       (녹취 관리)                 │
+  ├─ verification.py    (S1~S6 검증 파이프라인)     │
+  ├─ build.py           (빌드/패키지/manifest)      │
+  ├─ agents.py          (Agent/Package/Deployment)  │
+  ├─ agent_api.py       (Agent ↔ CSC 콜백)         │
+  ├─ modules.py         (deployment 의 collection)  │
+  ├─ service_control.py (로컬 서비스 ▶/■/↻ — TB)    │
+  ├─ csp_runtime.py     (csp jsonl 런타임 설정)     │
+  └─ services/flow_logger.py (통화 이력 + Flow)     │
                                                     │
 MCPTT UE (단말)                                     │
      │                                              │
@@ -60,35 +67,41 @@ MCPTT Service Server                                │
                                                     │
                               ┌──────────────────────┘
                               │ notify_csp() (UDP JSON)
-                              ▼
-                         CSP (4421)
+                              ▼ CspNotify + PspNotify (USER/GROUP_CHANGED)
+                         CSP / PSP (4421)
 ```
+
+> 검증/시험 환경의 포트 매핑은 `VERIFICATION_PROCESS.md` 부록 B 참조.
+> Admin API 의 backend handler 코드는 `csc/src/handlers/` 디렉토리.
 
 ### 2.2 핸들러 등록
 
-```python
-# Admin Server (4420)
-HANDLER_LIST = (
-    CIMS_AUTH_HANDLER_LIST +         # /api/v1/auth/*
-    CIMS_ADMIN_HANDLER_LIST +        # /api/v1/users/*, /api/v1/ptt/groups/*
-    FLOW_HANDLER_LIST +              # /api/v1/call/logs/*, /api/v1/flow/*
-    CIMS_STATS_HANDLER_LIST +        # /api/v1/stats/*
-    CIMS_ORG_HANDLER_LIST +          # /api/v1/organizations/*
-    CIMS_RECORDING_HANDLER_LIST +    # /api/v1/recordings/*
-    CIMS_VERIFICATION_HANDLER_LIST   # /api/v1/verification/*
-)
+각 handler 모듈이 `<NAME>_HANDLER_LIST` 를 export, `csc_app.py` 가 모두 합쳐서 Admin Server (4420/4445/4419) 에 등록:
 
-# MCPTT Server (4430)
-CSC_HANDLER_LIST = [
-    # IdMS, GMS, CMS, KMS 엔드포인트
-]
+```python
+HANDLER_LIST = (
+    AUTH_HANDLER_LIST +              # /api/v1/auth/*
+    CIMS_ADMIN_HANDLER_LIST +        # /api/v1/users/<pid>/{call,ptt}/* + /api/v1/ptt/groups/*
+    CIMS_USERS_HANDLER_LIST +        # /api/v1/users/me*
+    ORG_HANDLER_LIST +               # /api/v1/organizations/*
+    STATS_HANDLER_LIST +             # /api/v1/stats/*
+    RECORDING_HANDLER_LIST +         # /api/v1/recordings/*
+    VERIFICATION_HANDLER_LIST +      # /api/v1/verification/* (S1~S6)
+    CIMS_BUILD_HANDLER_LIST +        # /api/v1/build/*  (cims.sh build/pkg/release/clean + manifest)
+    AGENTS_HANDLER_LIST +            # /api/v1/agents,packages,deployments/*
+    AGENT_API_HANDLER_LIST +         # /api/agent/*  (Agent → CSC enroll/heartbeat/report)
+    MODULES_HANDLER_LIST +           # /api/v1/deployments/<id>/collection/*
+    SERVICE_CONTROL_HANDLER_LIST +   # /api/v1/services/<name>/<start|stop|restart> (TB-CSC 만)
+    CSP_RUNTIME_HANDLER_LIST +       # CSP runtime 설정 (legacy 직접 path)
+    FLOW_HANDLER_LIST                # /api/v1/flow/*, /api/v1/ptt/history/*/flow
+)
 ```
 
 ---
 
 ## 3. Admin REST API 상세
 
-### 3.1 인증 (cims_auth.py)
+### 3.1 인증 (handlers/auth.py)
 
 **Base:** `/api/v1/auth`
 
@@ -121,7 +134,7 @@ Content-Type: application/json
 }
 ```
 
-### 3.2 가입자 관리 (cims_admin.py)
+### 3.2 가입자 관리 (handlers/admin.py)
 
 **Base:** `/api/v1/users`
 
@@ -269,7 +282,7 @@ POST /api/v1/ptt/groups
 notify_csp("GROUP_CHANGED", uri=group_id, action="PUT", etag=new_etag)
 ```
 
-### 3.6 조직 관리 (cims_org.py)
+### 3.6 조직 관리 (handlers/org.py)
 
 **Base:** `/api/v1/organizations`
 
@@ -281,7 +294,7 @@ notify_csp("GROUP_CHANGED", uri=group_id, action="PUT", etag=new_etag)
 | PUT | `/organizations/{org_id}` | 조직 수정 |
 | DELETE | `/organizations/{org_id}` | 조직 삭제 |
 
-### 3.7 통화 이력/Flow (csc_flow.py)
+### 3.7 통화 이력/Flow (services/flow_logger.py)
 
 **Base:** `/api/v1`
 
@@ -341,7 +354,7 @@ notify_csp("GROUP_CHANGED", uri=group_id, action="PUT", etag=new_etag)
 }
 ```
 
-### 3.8 통계 (cims_stats.py)
+### 3.8 통계 (handlers/stats.py)
 
 **Base:** `/api/v1/stats`
 
@@ -362,7 +375,7 @@ notify_csp("GROUP_CHANGED", uri=group_id, action="PUT", etag=new_etag)
 }
 ```
 
-### 3.9 녹취 (cims_recording.py)
+### 3.9 녹취 (handlers/recording.py)
 
 **Base:** `/api/v1/recordings`
 
@@ -372,7 +385,7 @@ notify_csp("GROUP_CHANGED", uri=group_id, action="PUT", etag=new_etag)
 | GET | `/recordings/{id}/audio` | 오디오 녹취 파일 |
 | GET | `/recordings/{id}/video` | 비디오 녹취 파일 |
 
-### 3.10 검증 (cims_verification.py)
+### 3.10 검증 (handlers/verification.py)
 
 **Base:** `/api/v1/verification`
 
@@ -515,7 +528,7 @@ def notify_csp(event, uri="", action="", etag="",
     if not service:
         service = _derive_service(event)
     if not sesid:
-        sesid = csc_logger.issue_sesid(caller or uri, module="csc")
+        sesid = flow_logger.issue_sesid(caller or uri, module="csc")
     msg = json.dumps({
         "event": event, "uri": uri, "action": action, "etag": etag,
         "sesid": sesid, "caller": caller, "service": service,
@@ -523,7 +536,7 @@ def notify_csp(event, uri="", action="", etag="",
     sock.sendto(msg.encode(), (CSP_IP, CSP_PORT))  # 4421
 ```
 
-전체 필드 규격은 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) § 7 (CSC → CSP) 참고.
+전체 필드 규격은 [../features/flow_logging.md](./../features/flow_logging.md) § 7 (CSC → CSP) 참고.
 
 ### 5.2 pi_http 미들웨어 (Admin API 로깅)
 
@@ -533,8 +546,8 @@ Admin/MCPTT API 요청을 서비스별 Flow 로그로 자동 기록하기 위해
 DynamicRouteProc.set_request_hooks(pre=_pre_hook, post=_post_hook)
 ```
 
-- `_pre_hook` : 요청 수신 시 JWT Bearer 토큰에서 caller 추출 (`cims_auth.extract_token`), 요청 path prefix 를 service 로 매핑
-- `_post_hook` : 핸들러 반환 후 `csc_logger.log_flow()` 호출 (body 는 `log_msg`)
+- `_pre_hook` : 요청 수신 시 JWT Bearer 토큰에서 caller 추출 (`handlers/auth.py::extract_token`), 요청 path prefix 를 service 로 매핑
+- `_post_hook` : 핸들러 반환 후 `services/flow_logger.py::log_flow()` 호출 (body 는 `log_msg`)
 
 | 경로 prefix | service |
 |-------------|---------|
@@ -788,33 +801,39 @@ CREATE TABLE refresh_tokens (
 
 ```
 csc/
-├── bin/csc_pihttp/
-│   ├── src/
-│   │   ├── app.py                  # 메인 엔트리포인트
-│   │   ├── cims_admin.py           # 가입자/그룹 CRUD
-│   │   ├── cims_auth.py            # JWT 인증
-│   │   ├── cims_org.py             # 조직 관리
-│   │   ├── cims_stats.py           # 통계
-│   │   ├── cims_recording.py       # 녹취
-│   │   ├── cims_verification.py    # 검증
-│   │   ├── csc_service.py          # MCPTT 서비스 + notify_csp(sesid/caller/service)
-│   │   ├── csc_flow.py             # 통화 이력/Flow API
-│   │   ├── csc_logger.py           # sesid 발급/상속, log_flow/log_msg/log_console
-│   │   ├── idms_storage.py         # IdMS 스토리지
-│   │   └── util/
-│   │       ├── pi_http/            # HTTP 서버/핸들러 프레임워크 (pre/post hook)
-│   │       ├── db/                 # ORM (MySQL/Oracle)
-│   │       ├── log_util.py
-│   │       ├── net_util.py
-│   │       └── async_util.py
-│   ├── config/
-│   │   └── csc.json.template
-│   └── cert/                       # TLS 인증서
-└── venv/                           # Python 가상환경
+├── src/
+│   ├── csc_app.py                  # 메인 엔트리포인트 (Admin 4420 + MCPTT 4430)
+│   ├── handlers/                   # HTTP 라우트 핸들러
+│   │   ├── auth.py                 # JWT 인증
+│   │   ├── admin.py                # 가입자/Call/PTT 구독 + PTT 그룹 CRUD
+│   │   ├── users.py                # /me 본인 프로필
+│   │   ├── org.py                  # 조직 관리
+│   │   ├── stats.py                # 통계/상태
+│   │   ├── recording.py            # 녹취 목록/다운로드
+│   │   ├── verification.py         # S1~S6 검증 파이프라인
+│   │   ├── build.py                # cims.sh build/pkg/release/clean + manifest
+│   │   ├── agents.py               # Agent/Package/Deployment CRUD (배포 메뉴)
+│   │   ├── agent_api.py            # Agent → CSC enroll/heartbeat/report
+│   │   ├── modules.py              # deployment 의 jsonl collection 프록시
+│   │   ├── service_control.py      # 로컬 서비스 ▶/■/↻ (TB-CSC 전용)
+│   │   └── csp_runtime.py          # CSP runtime 설정 (legacy 직접 path)
+│   ├── services/                   # 비-HTTP 서비스
+│   │   ├── flow_logger.py          # 통화 이력 + sesid 매칭 검색 + Flow API
+│   │   ├── mcptt.py                # MCPTT IdMS/GMS/CMS/KMS + notify_csp/_psp
+│   │   ├── config_cache.py         # csc.json 부팅 시 1회 로드
+│   │   └── ...
+│   ├── httpsrv/                    # HTTP 서버 프레임워크 (pre/post hook)
+│   └── util/                       # 공통 유틸 (db, async, net, ...)
+├── config/
+│   ├── csc.json                    # 기본 설정
+│   └── config_template.json        # 콘솔 설정 모달 스키마
+└── packages/                       # 업로드된 배포본 tarball (Packages.Dir default)
 ```
 
 ---
 
 ## 10. 관련 문서
 
-- [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) — Flow/Msg 로깅 공통 규격, sesid 발급/상속, CSC→CSP 인터페이스 필드
+- [../features/flow_logging.md](../features/flow_logging.md) — Flow/Msg 로깅 공통 규격, sesid 발급/상속, CSC→CSP 인터페이스 필드
+- [../../api/admin_api.md](../../api/admin_api.md) — REST API 명세 (가입자/검증/빌드/배포)
+- [../../VERIFICATION_PROCESS.md](../../VERIFICATION_PROCESS.md) — 6단계 파이프라인 SSOT

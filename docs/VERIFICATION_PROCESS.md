@@ -16,8 +16,8 @@
 | **S1** | 정적 검사 | py_compile / eslint / tsc / clang-format / unit test | 코드 위생 | <30s |
 | **S2** | 빌드 | preflight + cmake build | 컴파일 통과 | 1~5m |
 | **S3** | 스모크 | configure → start dev → 1콜 VoIP/PTT | 빠른 sanity | 1~2m |
-| **S4** | 패키지화 | tarball 5개 + manifest.json (SHA-256) | immutability gate | <30s |
-| **S5** | 로컬 배포 | TB-CSC → Test-agent → csc-server → csp/cmp 체인 | 배포 절차 회귀 | 3~5m |
+| **S4** | 패키지화 | tarball 12종 + manifest.json (SHA-256) | immutability gate | <30s |
+| **S5** | 로컬 배포 | TB-CSC → Test-agent → mgmt-server → 4 service-server (VoLTE/PTT) | 배포 절차 회귀 | 3~5m |
 | **S6** | 통합 검증 | VoLTE/PTT 음성·영상 + summary | 상용 진입 | 2~3m |
 
 **원칙**:
@@ -33,8 +33,9 @@
 | CLI | `./cims.sh verify stage<N>` (1~6) |
 | CLI 메타 | `./cims.sh verify list [--stage N]` / `list-presets` / `describe <ID>` |
 | CLI 직접 | `python3 -m tests.cims_verify run --stage N \| --items ID,... \| --preset NAME` |
-| Console UI | `http://<ens160>:3000/testbed/verify-v2` (LIVE 1.5s 폴링) |
-| 이력 | `http://<ens160>:3000/testbed/verify-history` (회차 + 통계 + DetailModal PDF) |
+| Console UI | `http://<ens160>:3000/release/verify` (LIVE 1.5s 폴링) |
+| 이력 | `http://<ens160>:3000/release/verify-history` (회차 + 통계 + DetailModal PDF) |
+| 빌드/패키징 | `http://<ens160>:3000/release/package` (카드 그리드 — 빌드 & 패키징 통합) |
 
 ### 0.3 6단계 디렉토리 / 코드 SOT
 
@@ -49,7 +50,7 @@ verify/lib/
     ├── stage1/  (5)  # PY-SYNTAX, FRONTEND-LINT/TYPECHECK, CPP-FORMAT, UNIT-VERIFY-LIB
     ├── stage2/  (2)  # PREFLIGHT, BUILD
     ├── stage3/  (7)  # RESET, CONFIGURE, START, SEED, HEALTH, SCN-VOIP-SMOKE, SCN-PTT-SMOKE
-    ├── stage4/  (2)  # PKG-BUILD, PKG-MANIFEST (sha256 → packages/manifest.json)
+    ├── stage4/  (2)  # PKG-BUILD (12 tarball), PKG-MANIFEST (sha256 → packages/manifest.json)
     ├── stage5/  (7부모+13자식)
     │   ├── reset.py / finalize.py (평면)
     │   ├── csc_deploy.py    (group + AGENT-ENROLL/PKG-UPLOAD/INSTALL)
@@ -116,21 +117,35 @@ S2 FAIL → S3~S6 BLOCKED.
 
 ### S4 — 패키지화 (2 항목)
 
-- **S4-PKG-BUILD**: `cims.sh pkg --no-bump` → `build/dist/packages/{csc,console,csp,cmp,cspsim}-*.tar.gz`
-- **S4-PKG-MANIFEST**: 5 tarball 의 SHA-256 → `packages/manifest.json`. S5/S6 immutability gate 의 SoT.
+- **S4-PKG-BUILD**: `cims.sh pkg --no-bump` → `build/dist/packages/<m>-<ver>.tar.gz` 12종 (base 8 + 변종 4: psp/isp/pmp/imp)
+- **S4-PKG-MANIFEST**: 12 tarball 의 SHA-256 → `packages/manifest.json` (자동 생성). `_self_sha256` 가 S5/S6 immutability gate 의 SoT.
 
-### S5 — 로컬 배포 (7 부모 + 13 자식, 22 native step)
+패키지 포맷·변종 staging·빌드 흐름은 [`design/features/build_and_packaging.md`](design/features/build_and_packaging.md) + [`design/features/package_and_template.md`](design/features/package_and_template.md) 참조.
 
-옛 `_verify_phase2` (bash, 700+ lines) 를 Python 으로 완전 포팅 — `verify/lib/items/stage5/_native_steps.py`. _legacy.py 는 제거됨 (2026-05-07, `56ce9f1`).
+### S5 — 로컬 배포 (7 부모 + 13 자식, 22 native step, 5 server topology)
+
+#### P1 토폴로지 (server 단위 분리) — SSOT
+
+`_INSTANCES` (`verify/lib/items/stage5/_native_steps.py`) 가 5 server 의 SoT:
+
+| display_name | agent_name | dist 디렉토리 | 역할 / 변종 |
+|---|---|---|---|
+| CIMS 관리 서버 | `mgmt-server` | `<dist>/mgmt-server/` | csc + console + cspsim (sim 은 install-only) |
+| VoLTE SIP Server | `volte-sip-server` | `<dist>/volte-sip-server/` | csp (variant=CSP) |
+| VoLTE Media Server | `volte-media-server` | `<dist>/volte-media-server/` | cmp (variant=CMP) |
+| PTT SIP Server | `ptt-sip-server` | `<dist>/ptt-sip-server/` | psp (variant=PSP) |
+| PTT Media Server | `ptt-media-server` | `<dist>/ptt-media-server/` | pmp (variant=PMP) |
+
+각 service-server 는 **base 바이너리 동일 + Roles 토글 + LocalIp/Port overlay** 로 인스턴스화 (deployment overlay = `install_path/config.json` → `csp.json`/`cmp.json` 시작 직전 머지). loopback alias (127.0.0.2 / 127.0.0.3 등) 는 `verify/lib/common/loopback.py` 가 관리. ISP / IMP (IBCF 변종) 는 패키지 산출물에는 포함되지만 P1 에서는 배포/검증 미적용.
 
 #### 항목 트리 (execution_order 순)
 
 ```
 S5-RESET                      (10) — step 01: cleanup
-S5-CSC-DEPLOY                 (20) ─ group
-  ├─ S5-CSC-DEPLOY-AGENT-ENROLL (21) — step 05+06+07: TB-CSC admin login + agent + Test-agent (sync 9903)
-  ├─ S5-CSC-DEPLOY-PKG-UPLOAD   (22) — step 08: csc/console multipart upload
-  └─ S5-CSC-DEPLOY-INSTALL      (23) — step 09+10: deployment 생성 (overlay) + install poll 60s
+S5-CSC-DEPLOY                 (20) ─ group  (mgmt-server: csc + console + sim)
+  ├─ S5-CSC-DEPLOY-AGENT-ENROLL (21) — step 05+06+07: TB-CSC admin login + agent + Test-agent (mgmt-server, sync 9903)
+  ├─ S5-CSC-DEPLOY-PKG-UPLOAD   (22) — step 08: csc/console/cspsim 3 tarball multipart upload
+  └─ S5-CSC-DEPLOY-INSTALL      (23) — step 09+10: 3 deployment 생성 (overlay) + install poll 60s
 S5-CSC-VERIFY                 (30) ─ group
   ├─ S5-CSC-VERIFY-FILES        (31) — step 11: meta.json + config/ 존재
   └─ S5-CSC-VERIFY-OVERLAY      (32) — step 12: csc/config.json Server.Port=4445
@@ -138,15 +153,15 @@ S5-CSC-RUN                    (40) ─ group
   ├─ S5-CSC-RUN-CSC-START       (41) — step 13: csc Start + 4445 LISTEN (25s)
   ├─ S5-CSC-RUN-CSC-HEALTH      (42) — step 14: health_check job + agent_job 폴링 (15s)
   └─ S5-CSC-RUN-CONSOLE-START   (43) — step 15: console Start + 8081 LISTEN
-S5-MODULES-DEPLOY             (50) ─ group  (배포본 csc 4445 경유)
+S5-MODULES-DEPLOY             (50) ─ group  (배포본 csc 4445 경유, 4 service-server)
   ├─ S5-MODULES-DEPLOY-AUTH       (51) — step 16: 배포본 csc admin login → tok2
-  ├─ S5-MODULES-DEPLOY-PKG-UPLOAD (52) — step 17: csp/cmp/cspsim 3 tarball upload
-  ├─ S5-MODULES-DEPLOY-AGENT-ENROLL (53) — step 18: 3 agent + 3 Test-agent (sync 9904/5/6)
-  └─ S5-MODULES-DEPLOY-INSTALL    (54) — step 19+20: 3 deployment + install poll
+  ├─ S5-MODULES-DEPLOY-PKG-UPLOAD (52) — step 17: csp/cmp/psp/pmp 4 tarball upload (_INSTANCES iteration)
+  ├─ S5-MODULES-DEPLOY-AGENT-ENROLL (53) — step 18: 4 agent + 4 Test-agent (sync 9903~9906)
+  └─ S5-MODULES-DEPLOY-INSTALL    (54) — step 19+20: 4 deployment + install poll
 S5-MODULES-RUN                (60) ─ group
-  └─ S5-MODULES-RUN-START         (61) — step 21: csp 5060/udp + cmp 9000/udp Start (sim install-only)
-                                          + .deployed-manifest.json marker 자동 기록
-S5-FINALIZE                   (70) — step 22: 기본 기동 유지 / --stop-after 시 stop+kill
+  └─ S5-MODULES-RUN-START         (61) — step 21: 시그널링↔미디어 두 pair (csp↔cmp + psp↔pmp)
+                                          OnCmpStatusChanged Connected wait + .deployed-manifest.json marker
+S5-FINALIZE                   (70) — step 22: 기본 기동 유지 / --stop-after 시 stop list (3 mgmt + 4 service = 7) + kill 5 agents
 ```
 
 옛 step 02/03/04 (Build/Configure/Pkg) 는 S2/S3/S4 가 이미 흡수.
@@ -239,7 +254,7 @@ backend `_parse_items_progress(log_path)` 가 폴링으로 파싱.
 - `GET /api/v1/verification/runs/<id>` — 회차 + 항목 결과 + manifest hash
 - `GET /api/v1/verification/runs/stats?days=N` — overall + by_scope + timeline
 
-UI: `/testbed/verify-history` — KpiGrid + ScopeTable + inline-SVG Sparkline + DetailModal PDF.
+UI: `/release/verify-history` — KpiGrid + ScopeTable + inline-SVG Sparkline + DetailModal PDF.
 
 ---
 
@@ -279,13 +294,24 @@ python3 -m tests.cims_verify run --items S5-CSC-DEPLOY-PKG-UPLOAD
 ```
 build/dist/
 ├── csc/ csp/ cmp/ cwrtc/ console/ phone/ cspsim/   # S2/S3 직접 기동 대상
-├── csc-server/{agent, csc, console, config/}       # S5 csc 체인 배포 대상
-├── csp-server/{agent, csp, config/}                # S5 modules 체인 배포 대상
-├── cmp-server/{agent, cmp, config/}
-└── sim-server/{agent, sim, config/}
+├── packages/                                       # S4 산출물 (12 tarball + manifest.json)
+├── mgmt-server/                                    # S5 mgmt 체인 (csc + console + sim 모두 흡수)
+│   └── {agent, csc, console, sim, config/}
+├── volte-sip-server/   {agent, csp, config/}      # S5 service 체인 (4)
+├── volte-media-server/ {agent, cmp, config/}
+├── ptt-sip-server/     {agent, psp, config/}
+└── ptt-media-server/   {agent, pmp, config/}
 ```
 
-각 `<x>-server/` 내부: `agent/` (cims_agent + state + 발급 cert) · `<모듈>/` (pkg.json + config.json overlay + modules/**) · `config/` (collection jsonl).
+각 `<server>/` 내부: `agent/` (cims_agent + state + 발급 cert) · `<모듈>/` (pkg.json + config.json overlay + modules/**) · `config/` (collection jsonl).
+
+> 매핑 (옛 → 신, 2026-05-08 `11a58b0`):
+> `csc-server-local` → `mgmt-server` /
+> `csp-server-local` → `volte-sip-server` /
+> `cmp-server-local` → `volte-media-server` /
+> 신규 `psp-server-local` → `ptt-sip-server` /
+> 신규 `pmp-server-local` → `ptt-media-server` /
+> `sim-server-local` → mgmt-server 에 흡수.
 
 ## 부록 B. 포트 매핑
 
@@ -301,39 +327,27 @@ build/dist/
 | | Test-CMP | 9000/udp + RTP 풀 |
 | | Test-CWRTC | 8443 (WSS) |
 | | Test-Phone | 3002 |
-| **S5 배포본 (verify)** | csc | **4445** |
-| | console | **8081** |
-| | csp | 5060/udp |
-| | cmp | 9000/udp |
-| | Test-agent | sync 9903~9906 |
+| **S5 배포본 (verify, 5 server)** | mgmt csc | **4445** |
+| | mgmt console | **8081** |
+| | volte-sip (csp) | 5060/udp · LocalIp 127.0.0.1 |
+| | volte-media (cmp) | 9000/udp · 127.0.0.1 |
+| | ptt-sip (psp) | 5060/udp · LocalIp 127.0.0.2 (loopback alias) |
+| | ptt-media (pmp) | 9000/udp · 127.0.0.3 |
+| | Test-agent | sync 9903~9906 (mgmt 9903, 4 service 9904~9906 + 추가) |
 | **운영 배포본 (참고)** | csc | 4420 |
 | | console | 80 |
 
 ## 부록 C. 알려진 함정
 
-- `cims.sh pkg` 는 patch +1 자동. 버전 고정은 `--no-bump` 필수.
+- 빌드 시점에 `-v X.Y.Z` 로 모든 base `pkg.json` 동기 → `pkg --no-bump` 가 권장 흐름. 옛 `cims.sh pkg` patch +1 auto-bump 는 변종 drift 위험.
 - `make dist` 이후 반드시 `configure.sh` 재실행 (IP 반영).
 - localhost 로는 외부 접근 불가 — 반드시 `ens160` IP.
 - cspsim REGISTER: `-auth_id "IMSI@domain"` 필수 (verify CLI 는 DB 자동 조회).
 - TB-CSC mTLS 모드: `Agent.MtlsEnabled: true` overlay 필수.
 - 같은 호스트 다중 agent: `CIMS_AGENT_SYNC_PORT` env 주입 (CLI 미지원).
 - TB-Console (3000) 만 vite dev 모드. dist 정적 서빙 (8080/8081) 은 `/api` proxy 없음 → 로그인 불가.
-- **S5 verify_phase2 는 제거됨** (2026-05-07). cims.sh 본체에서 `_verify_phase2` / `_p2_step*` / `--legacy` 검색 시 0 hit.
 
-## 부록 D. 옛 Phase 1/2/3 → 신 S1~S6 매핑 (역사적)
-
-| 옛 | 신 | 비고 |
-|---|---|---|
-| (없음) | **S1** 정적 검사 | 신설 |
-| Phase 1 (preflight/build) | **S2** 빌드 | |
-| Phase 1 (reset~scenario) | **S3** 스모크 | configure/start/seed/health/1콜 |
-| (없음) | **S4** 패키지화 | tarball + manifest.json (SHA-256) |
-| Phase 2 (22단계 bash) | **S5** 로컬 배포 | 7 부모 + 13 자식. 22 step 모두 native Python (`_native_steps.py`) |
-| Phase 3 | **S6** 통합 검증 | VoLTE/PTT 음성·영상 + summary |
-
-`_verify_phase2` (bash, 700+ lines) + `_legacy.py` 어댑터는 2026-05-07 (`56ce9f1`) 모두 제거됨. cims.sh 의 `cmd_verify` 는 모든 stage 가 `python3 -m tests.cims_verify run --stage N` 단일 경로.
-
-## 부록 E. 문서 관리
+## 부록 D. 문서 관리
 
 - 본 문서는 검증 절차의 SSOT. 변경 이력은 git 관리.
 - 진행 중 보완은 검증 리포트에 먼저 기록 후 본 문서에 반영.

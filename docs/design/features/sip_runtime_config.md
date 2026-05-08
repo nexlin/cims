@@ -1,8 +1,6 @@
 # SIP 런타임 설정 (jsonl + SIGUSR1)
 
-> **버전 3.0 (2026-04-22)** — 9 collection 재설계 반영.
-> 이전 4 collection (listener/trunk/route/acl + services) 은 이 문서 기준으로 제거됨.
-> 엔티티 의미는 `sip_service_model.md` 를 참조.
+> 9 collection 모델. 엔티티 의미는 `sip_service_model.md` 를 참조.
 
 Console 에서 CSP 의 수신 엔드포인트/피어 연결/라우팅 정책/ACL 을 **재기동 없이 제어**하는 런타임 설정 계층.
 
@@ -20,7 +18,7 @@ Console 에서 CSP 의 수신 엔드포인트/피어 연결/라우팅 정책/ACL
 ```
 
 - **원천(Source of truth)**: 각 Deployment 의 `<install_path>/config/*.jsonl`
-- CSC 는 DB 에 저장하지 않고 Agent 에 프록시만 수행 (Phase C 에서 HTTP pull 경로 제거)
+- CSC 는 DB 에 저장하지 않고 Agent 에 프록시만 수행 (jsonl 단일 경로 — DB/HTTP pull 모드 없음)
 - CSP 는 시작 시 jsonl 읽어 메모리 캐시로 로드, SIGUSR1 수신 시 재로드
 
 ## 2. 데이터 모델

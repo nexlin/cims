@@ -5,11 +5,15 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
 ## 0. 전제
 
 - CSC/Console 이미 구동 중
-- 관리자 계정으로 Console 로그인 (`https://<CSC>:3001`)
+- 관리자 계정으로 Console 로그인 (`https://<CSC>:8081/` 또는 dev `http://<ens160>:3000/`)
 
-## 1. 패키지 업로드
+> 좌측 메뉴는 두 갈래:
+> - **패키징** (`/release/...`) — 검증 / 검증 이력 / 빌드·패키징·다운로드
+> - **배포** (`/deploy/...`) — 패키지 업로드/관리 / 서버 등록·관리
 
-**메뉴**: 좌측 `패키지 관리`
+## 1. 패키지 업로드 (배포 메뉴)
+
+**메뉴**: 좌측 `배포 > 패키지` (`/deploy/packages`)
 
 1. `＋ 패키지 업로드` 클릭
 2. 빌드된 tarball (`<module>-<version>.tar.gz`) 을 선택 (여러 개 동시 가능)
@@ -19,9 +23,13 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
 
 **재업로드**: 동일 (모듈명, 버전) 업로드 시 자동으로 덮어쓰기.
 
+> CIMS 자체에서 빌드한 tarball 은 `패키징 > 패키징` (`/release/package`)
+> 카드의 ⤓ 다운로드 버튼으로 받아서 그대로 위 화면에 업로드한다. 자세한
+> 워크플로우는 `design/features/build_and_packaging.md` 참고.
+
 ## 2. 서버 등록
 
-**메뉴**: 좌측 `서버 관리`
+**메뉴**: 좌측 `배포 > 서버` (`/deploy/servers`)
 
 1. `＋ 서버 등록` 클릭
 2. 서버 이름 입력 → `등록`
@@ -36,13 +44,19 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
    ```
 5. Console 로 돌아오면 서버 상태가 `pending → approved → online` 으로 진행됨
 
+> 검증/시험 환경에서는 `volte-sip-server` / `volte-media-server` /
+> `ptt-sip-server` / `ptt-media-server` / `mgmt-server` 5개 이름을 그대로
+> 따라 등록하면 verify pipeline 의 `_INSTANCES` 매핑과 일치한다.
+
 ## 3. 모듈 추가 (Deployment 생성)
 
 **위치**: 서버 관리 → 서버 선택 → `모듈` 탭 → `＋ 모듈 추가`
 
-1. **Module** 선택 (예: `csp`)
-2. **Version** 선택 (예: `0.0.1` / 최신)
-3. **Process** 선택 — `CSP` (통합), `PSP` (PTT 전용), `ISP` (IBCF 전용) 중
+1. **Module** 선택 (예: `csp`, `psp`, `cmp`, `pmp`, ...)
+   - 같은 base 바이너리의 변종은 별도 패키지로 노출 (csp/psp/isp / cmp/pmp/imp)
+2. **Version** 선택 (예: `0.0.10` / 최신)
+3. **Process** 선택 — `CSP` (통합), `PSP` (PTT 전용), `ISP` (IBCF 전용),
+   `CMP`, `PMP`, `IMP` 중. 보통 모듈명과 일치
 4. **Functions** 선택 — process 별로 체크박스 (`volte`, `ptt`, `ibcf`)
 5. 메모 (선택) → `추가`
 

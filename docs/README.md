@@ -6,6 +6,9 @@ CIMS (CIMS IMS) 는 PTT/VoLTE 통합 서비스 서버입니다. 이 디렉토리
 
 ```
 docs/
+├── README.md                        본 문서
+├── VERIFICATION_PROCESS.md          6단계 (S1~S6) 파이프라인 SSOT
+├── VERIFICATION_MANUAL.md           검증 실행 체크리스트 + CLI/API 사용
 ├── design/               설계 문서 (아키텍처·모듈·기능)
 │   ├── 01_overview.md               전체 시스템 아키텍처
 │   ├── 02_deployment.md             분산 배포 아키텍처 (Agent/Package/Deployment)
@@ -19,12 +22,13 @@ docs/
 │       ├── ptt_flows.md             PTT 그룹콜 Flow
 │       ├── recording.md             녹취
 │       ├── monitoring.md            모니터링·이력·통계
-│       ├── flow_logging.md          Flow 로깅/상관관계(sesid)
+│       ├── flow_logging.md          Flow 로깅/상관관계 (sesid)
 │       ├── sip_runtime_config.md    SIP 런타임 설정 (jsonl + SIGUSR1)
 │       ├── sip_service_model.md     SIP 서비스 모델 (Service/Trunk/Listener)
-│       └── package_and_template.md  패키지 포맷 + config_template.json 스키마
+│       ├── package_and_template.md  패키지 포맷 + config_template.json 스키마
+│       └── build_and_packaging.md   빌드/패키징 워크플로우 (콘솔 /release/package) · manifest.json SSOT
 ├── api/                  REST API 명세
-│   ├── admin_api.md                 관리자 API (가입자/그룹/패키지/서버/배포)
+│   ├── admin_api.md                 관리자 API (가입자/그룹/검증/빌드/패키지/서버/배포)
 │   ├── agent_api.md                 Agent ↔ CSC (enroll/heartbeat/report)
 │   ├── collection_api.md            Collection 프록시 (/deployments/{id}/collection)
 │   └── mcptt_api.md                 3GPP MCPTT (IdMS/GMS/CMS/KMS)
@@ -44,6 +48,8 @@ docs/
 | 서버 배포 진행 | `user-manual/deployment_workflow.md` |
 | 모듈 소스 수정 | `design/modules/<module>.md` |
 | UE 연동 개발 | `user-manual/<volte|ptt>_ue.md` |
+| 빌드/패키징 워크플로우 | `design/features/build_and_packaging.md` |
+| 검증 절차 (S1~S6) | `VERIFICATION_PROCESS.md` (SSOT) → `VERIFICATION_MANUAL.md` |
 
 ## 버전 정책
 
@@ -53,4 +59,9 @@ docs/
 
 - 빌드/실행: 저장소 루트 `README` (CLAUDE.md 의 Build 섹션 참조)
 - SQL 스키마/마이그레이션: `sql/`
-- 런타임 설정 템플릿: `csp/config_template.json`, `cmp/config_template.json`, `csc/config_template.json`
+- 런타임 설정 템플릿: `csp/config/config_template.json`, `cmp/config/config_template.json`, `csc/config/config_template.json`
+- 검증 절차 SoT: `VERIFICATION_PROCESS.md` (실행 가이드는 `VERIFICATION_MANUAL.md`)
+- 콘솔 메뉴 구조 (2026-05-08~):
+  - `대시보드` / `가입자관리` / `서비스` / `통계`
+  - `패키징` (`/release/...`) — 검증 실행 / 검증 이력 / 빌드 & 패키징
+  - `배포` (`/deploy/...`) — 패키지 업로드 / 서버 등록

@@ -1,6 +1,7 @@
 # 분산 배포 아키텍처 (Agent / Package / Deployment)
 
-> 버전: 1.0 (2026-04-21, P10 + Phase B)
+> Agent 배포 데몬, 패키지 12종 (base 8 + 변종 4), Deployment overlay,
+> Collection 프록시 (jsonl + SIGUSR1), mTLS 의 통합 모델.
 
 CIMS 는 여러 물리 서버에 모듈을 개별 배포하고 **Console 에서 중앙 관리**하는 구조를 제공합니다.
 
@@ -24,9 +25,9 @@ CIMS 는 여러 물리 서버에 모듈을 개별 배포하고 **Console 에서 
 ```
 
 - **Agent**: 각 호스트에서 실행되는 배포 데몬 (`agent/cims_agent.py`). CSC 와 주기적 heartbeat + 명령 수행
-- **Package**: CSC 에 업로드된 모듈 tarball. `meta.json` + `config_template.json` 포함
-- **Deployment**: "특정 Agent 에 특정 Package 를 배치한 인스턴스". `process_name` (CSP/PSP/...) + `service_functions` (volte/ptt/...) 필드로 변종 구분
-- **Collection**: 각 Deployment 의 `install_path/config/*.jsonl` — listener, trunk, route, acl 등 행 단위 설정
+- **Package**: CSC 에 업로드된 모듈 tarball. `meta.json` + `config_template.json` 포함. base 8 + 변종 4 = **12종** (csp 의 psp/isp / cmp 의 pmp/imp). 변종은 `cims.sh cmd_pkg` staging 에서 base dist 디렉토리 복사 + 바이너리/`config/<m>.json`/`<m>.sh` rename 후 tar — tarball 내부도 진짜 분리.
+- **Deployment**: "특정 Agent 에 특정 Package 를 배치한 인스턴스". `process_name` (CSP/PSP/ISP/CMP/PMP/IMP) + `service_functions` (volte/ptt/ibcf/...) 필드로 변종 구분. `install_path/config.json` 의 deployment overlay 가 `csp.json`/`cmp.json` 시작 직전 머지 → 같은 base 바이너리에 다른 Roles/LocalIp/Port.
+- **Collection**: 각 Deployment 의 `install_path/config/*.jsonl` — listener, trunk, route, acl 등 행 단위 설정. 즉시 적용 (SIGUSR1).
 
 ## 2. 배포 디렉토리 구조
 
@@ -123,13 +124,26 @@ Agent.status
 - Enrollment 토큰: 1회용, 생성 시점에 전달
 - Session 토큰: enroll 응답으로 교환, 이후 heartbeat/report 인증
 - Agent 의 sync REST: HTTPS (self-signed) + 같은 session 토큰 헤더 검증
-  - **TODO (Phase C)**: 클라이언트 인증서 기반 mTLS 로 강화
+- **mTLS** (opt-in, `csc.json` `Agent.MtlsEnabled: true`): CSC 자체 CA + agent 별 server cert 자동 발급. enroll/rotate 응답에 `mtls.{server_cert,server_key,ca_cert}` 포함. CSC proxy 는 `csc_client` cert 로 mTLS 연결. cert rotate 는 `cims_agent.cert_rotate_pending` DB 컬럼 + heartbeat → 재발급 응답 흐름.
 
-## 7. 관련 문서
+## 7. 다중 인스턴스 패턴
+
+같은 base 바이너리 (csp 또는 cmp) 를 여러 deployment 로 두고 deployment overlay (`install_path/config.json`) 의 Roles 토글 + `LocalIp`/포트 분기로 **VoLTE 와 PTT 인스턴스를 분리**할 수 있다.
+
+CSC notify 라우팅 (`csc/src/services/mcptt.py::_notify_targets`):
+- `GROUP_CHANGED` → PSP (PTT) 만
+- `USER_CHANGED` 등 → CSP + PSP broadcast (dedup)
+- `csc.json` 의 `CspNotify` (VoLTE) 와 `PspNotify` (PTT) 두 endpoint 동시 보유
+
+검증 환경의 P1 5-server 토폴로지 (mgmt-server + volte-sip / volte-media / ptt-sip / ptt-media) 정의는 [VERIFICATION_PROCESS.md §1 S5](../VERIFICATION_PROCESS.md) 가 SSOT.
+
+## 8. 관련 문서
 
 - `api/admin_api.md` — packages/agents/deployments REST
 - `api/agent_api.md` — Agent 프로토콜
 - `api/collection_api.md` — Collection 프록시
 - `design/modules/agent.md` — Agent 상세
-- `design/features/package_and_template.md` — 패키지 포맷
+- `design/features/package_and_template.md` — 패키지 포맷 (12 변종)
+- `design/features/build_and_packaging.md` — 빌드/패키징 워크플로우 (콘솔 `/release/package`)
 - `design/features/sip_runtime_config.md` — jsonl 런타임 설정
+- `VERIFICATION_PROCESS.md` — 6단계 파이프라인 (P1 토폴로지 SoT)

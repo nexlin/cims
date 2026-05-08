@@ -100,7 +100,7 @@ class CmpServer : public PModule {
 - CSP 가 payload 에 동봉한 `service` / `sesid` / `caller` / `callee` 를 key(session_id/group_id) 별로 저장
 - 이후 응답 및 후속 이벤트(RTP/Floor/DTMF/RTCP) 로그에 동일 값을 상속하여 **CSP↔CMP 양측 Flow 가 단일 sesid 로 묶이도록** 보장
 - Flow 로그 필드 순서·생략 규칙은 CSP 측과 동일 (`ts, service, caller, callee, sesid, subid, node, from, to, proto, method, detail, mid, seq, iface`)
-- 전체 규격은 [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) 참고
+- 전체 규격은 [../features/flow_logging.md](./../features/flow_logging.md) 참고
 
 **초기화 순서:**
 
@@ -791,4 +791,4 @@ CmpServer (PModule)
 
 ## 11. 관련 문서
 
-- [13_Flow_Logging_Design.md](./13_Flow_Logging_Design.md) — Flow/Msg 로깅 공통 규격, sesid 상속, CSP↔CMP 인터페이스 필드
+- [../features/flow_logging.md](./../features/flow_logging.md) — Flow/Msg 로깅 공통 규격, sesid 상속, CSP↔CMP 인터페이스 필드

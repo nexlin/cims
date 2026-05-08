@@ -121,7 +121,7 @@ DB 미사용. 세션 디렉토리에서 직접 raw RTP를 트랜스코딩.
 ```
 Console UI: GET /api/v1/ptt/history/{gid}/{session}/audio
   ↓
-CSC (csc_flow.py):
+CSC (services/flow_logger.py):
   1. 세션 디렉토리 탐색 → .d 폴더
   2. recording_mixed.wav 캐시 확인
      ├─ 캐시 존재 → 즉시 스트리밍 (audio/wav)

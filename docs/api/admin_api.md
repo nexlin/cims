@@ -3,7 +3,7 @@
 ## 1. 개요
 
 CIMS 관리 콘솔은 REST API 기반으로 사용자, 구독(Call/PTT 번호), PTT 그룹을 관리합니다.
-API 서버는 CSC(csc_pihttp)가 HTTPS 포트 4420에서 제공합니다.
+API 서버는 CSC (`csc/src/csc_app.py`) 가 HTTPS 포트 4420에서 제공합니다.
 
 **기본 URL:** `https://<서버IP>:4420/api/v1`
 **인증:** JWT Bearer Token (`Authorization: Bearer <token>`)
@@ -1178,42 +1178,65 @@ GET /api/v1/recordings/{id}/video   → video/mp4
 
 ## 13. 검증 API (`/api/v1/verification`)
 
-시스템 구성요소별 기능 검증 엔드포인트.
+6단계 (S1~S6) 파이프라인 실행/이력 엔드포인트. 콘솔 메뉴 `/release/verify` ·
+`/release/verify-history` 가 사용. 자세한 절차는 `VERIFICATION_PROCESS.md`.
 
-```
-GET /api/v1/verification/run
-Authorization: Bearer <token>
-```
+| Method | Path | 용도 |
+|---|---|---|
+| GET | `/verification/stages` | 6단계 트리 (RESET 제외) + 항목 정의 |
+| GET | `/verification/stages/<N>/report` | stage N 의 최근 결과 |
+| GET | `/verification/stages/<N>/reports` | stage N 의 회차 리스트 |
+| POST | `/verification/stages/<N>` | stage N 실행. body `{async, target, inject_fail}` |
+| POST | `/verification/run` | 임의 items / preset 실행. body `{items, preset, async, target, inject_fail, only_children}` |
+| GET | `/verification/jobs/<id>` | 비동기 job 진행 상태 + items_progress + stage_gate |
+| GET | `/verification/runs?days=&scope=&verdict=&limit=` | 회차 이력 |
+| GET | `/verification/runs/<id>` | 회차 + 항목 결과 + manifest hash |
+| GET | `/verification/runs/stats?days=N` | 종합 + scope 별 + 시계열 |
+| GET | `/verification/active` | 현재 실행 중인 CLI/backend job (live_store) |
+| GET | `/verification/env` | host / git_branch / git_sha / pkg_manifest_hash |
+| GET | `/verification/items` | 항목 메타 (id/name/stage/depends_on) |
+| GET | `/verification/presets` | 프리셋 (stage1-full ~ stage6-full / pipeline-full / post-deploy / prep-reset) |
 
-**응답 200:**
-```json
-{
-  "results": [
-    {"test": "db_connection", "status": "pass"},
-    {"test": "csp_alive", "status": "pass"},
-    {"test": "cmp_alive", "status": "pass"},
-    {"test": "sip_register", "status": "pass"},
-    {"test": "rtp_relay", "status": "pass"}
-  ]
-}
-```
+회차 정리 / webhook / target prod 등은 `VERIFICATION_MANUAL.md` 부록 참조.
+
+## 14. 빌드/패키징 API (`/api/v1/build`)
+
+콘솔 메뉴 `/release/package` 의 backend. 자세한 워크플로우는 `design/features/build_and_packaging.md`.
+
+| Method | Path | 용도 |
+|---|---|---|
+| POST | `/build/run` | `cims.sh build [-v X.Y.Z]` 비동기 실행 |
+| POST | `/build/pkg` | `cims.sh pkg [-v X.Y.Z] [--no-bump] <m>...` 비동기 실행 |
+| POST | `/build/release` | 한 job 으로 build && pkg --no-bump |
+| POST | `/build/clean` | `packages/*.tar.gz` + `manifest.json` 삭제 |
+| GET | `/build/jobs/<id>` | 진행 상태 + stdout tail |
+| GET | `/build/manifest` | `packages/manifest.json` + `_self_sha256` (immutability gate) |
+| GET | `/build/packages` | manifest.packages[] (없으면 디렉토리 스캔) |
+| GET | `/build/packages/<m>` | tarball octet-stream 다운로드 |
+
+지원 모듈 (`_VALID_MODULES`): cmp/pmp/imp/csp/psp/isp + cwrtc/csc/console/phone/cspsim/agent (12종).
 
 ---
 
-## N. 배포 관리 API (P10)
+## 15. 배포 관리 API
 
-### N.1 패키지 (`/api/v1/packages`)
+콘솔 메뉴 `/deploy/packages` (패키지) · `/deploy/servers` (서버 + 배포본) 가 사용.
+**N.1 패키지 = 사용자가 업로드한 배포본 tarball** (`csc.json:Packages.Dir` 보관, `agents.py::_create_package`).
+**14. 빌드 API 의 packages = `cims.sh pkg` 산출물** (`build/dist/packages/`). 두 디렉토리는 코드 레벨 분리.
+
+### 15.1 패키지 (`/api/v1/packages`)
 
 | Method | Path | 용도 |
 |---|---|---|
 | GET | `/packages` | 업로드된 패키지 목록 (`meta`, `config_template` 포함) |
 | GET | `/packages/{id}` | 단일 조회 |
 | POST | `/packages?force=true\|false` | 업로드 (raw tarball body, `Content-Type: application/octet-stream`, `X-Filename` 헤더) |
+| PUT | `/packages/{id}` | `{config_template}` 업데이트 (콘솔 [템플릿] 편집) |
 | DELETE | `/packages/{id}` | 삭제 (파일은 `packages_trash/` 로 이동) |
 
 POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name, version) 이면 `force=true` 시 덮어쓰기.
 
-### N.2 서버 (`/api/v1/agents`)
+### 15.2 서버 (`/api/v1/agents`)
 
 | Method | Path | 용도 |
 |---|---|---|
@@ -1227,7 +1250,7 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | POST | `/agents/{id}/upgrade` | agent 바이너리 업그레이드 job 큐잉 |
 | GET | `/agents/{id}/metrics` | 최근 리소스 메트릭 |
 
-### N.3 배포 (`/api/v1/deployments`)
+### 15.3 배포 (`/api/v1/deployments`)
 
 | Method | Path | 용도 |
 |---|---|---|
@@ -1242,4 +1265,4 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | GET | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 읽기 (Agent 프록시) |
 | PUT | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 저장 (`{records, signal?}`) |
 
-Collection API 는 `api/collection_api.md` 에 상세. Agent 프로토콜은 `api/agent_api.md` 참조.
+Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/agent_api.md`.
