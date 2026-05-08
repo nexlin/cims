@@ -8,6 +8,16 @@ from ...registry import ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
 from ...common.recordings import count_recordings, count_ptt_events
+from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
+
+
+def target_ip(role: str, default: str = "127.0.0.1") -> str:
+    """PTT/VoLTE 시나리오가 어느 시그널링 인스턴스로 SIP 보낼지 결정.
+    role 은 _INSTANCES.id (csp/psp/isp). 매칭 없으면 default."""
+    for inst in _NATIVE_INSTANCES:
+        if inst.get("id") == role:
+            return inst.get("local_ip") or default
+    return default
 
 
 def run_scenario(ctx: VerifyContext, item_id: str, title: str,

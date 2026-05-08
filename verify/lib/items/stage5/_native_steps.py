@@ -86,12 +86,95 @@ _TARGET_PORTS = {
     "prod":   {"csc": 4420, "console": 80},
 }
 
-_MODULES = ("csp", "cmp", "sim")
-_TARBALL_PREFIX = {"csp": "csp", "cmp": "cmp", "sim": "cspsim"}
-_DIR_NAME       = {"csp": "csp", "cmp": "cmp", "sim": "sim"}
-_AGENT_SYNC_PORT_MOD = {"csp": 9904, "cmp": 9905, "sim": 9906}
-# step 21 — sim 은 install-only (Start 안 함). proto = udp.
-_LISTEN_PORTS = {"csp": (5060, "udp"), "cmp": (9000, "udp")}
+# Instance descriptor — 한 entry = 한 배포 인스턴스. tarball/install/process/
+# sync_port/local_ip/listen 의 SoT. step 17~21 + finalize 가 이 list 만 보고
+# 동작 — 인스턴스 추가/제거가 자연 일반화. ISP/IMP 는 P2 에서 entry 추가.
+#
+# 필드:
+#   id              — 모듈 식별자 (소문자, dep2_id_<id> 등 캐시 키)
+#   tarball         — packages/<tarball>-*.tar.gz 의 prefix
+#   dir             — install_path 의 leaf (dist/{id}-server/{dir})
+#   process         — CSC API 의 process_name (대문자)
+#   sync_port       — Test-agent sync port (CIMS_AGENT_SYNC_PORT)
+#   local_ip        — 인스턴스의 LocalIp (csp.json/cmp.json overlay)
+#   listen          — (port, proto) 또는 None (sim 은 install-only)
+#   peer_id         — 짝 미디어/시그널링 인스턴스 id (csp↔cmp, psp↔pmp). 없으면 None.
+#   config_overlay  — deployment payload 의 config 필드 (dotted-key dict).
+#                     csp 변종은 Roles + LocalIp + MediaServer 분기, cmp 변종은
+#                     RtpIp + CspIp 분기. cims.sh start_*_variant 가 시작 직전
+#                     install_path/config.json 을 모듈 csp.json/cmp.json 에 머지.
+_INSTANCES = [
+    {"id": "csp", "tarball": "csp",    "dir": "csp", "process": "CSP",
+     "sync_port": 9904, "local_ip": "127.0.0.1", "listen": (5060, "udp"),
+     "peer_id": "cmp",
+     "config_overlay": {
+         "Setup.Roles.CSCF":   True,
+         "Setup.Roles.TAS":    True,
+         "Setup.Roles.PTT_AS": False,    # PTT_AS 는 PSP 가 담당
+         "Setup.Roles.IBCF":   False,    # IBCF 는 ISP (P2) 가 담당
+         "Setup.Sip.LocalIp":         "127.0.0.1",
+         "Setup.MediaServer.Host":    "127.0.0.1",
+         "Setup.MediaServer.LocalIp": "127.0.0.1",
+         # dev csp (9001) 와 충돌 회피 — 배포본 CSP 는 9011 사용.
+         "Setup.MediaServer.LocalPort": 9011,
+     }},
+    {"id": "psp", "tarball": "psp",    "dir": "psp", "process": "PSP",
+     "sync_port": 9907, "local_ip": "127.0.0.3", "listen": (5060, "udp"),
+     "peer_id": "pmp",
+     "config_overlay": {
+         "Setup.Roles.CSCF":   True,     # PTT 가입자 register 처리
+         "Setup.Roles.TAS":    False,    # VoLTE B2BUA 는 CSP 가 담당
+         "Setup.Roles.PTT_AS": True,
+         "Setup.Roles.IBCF":   False,
+         "Setup.Sip.LocalIp":         "127.0.0.3",
+         "Setup.MediaServer.Host":    "127.0.0.3",  # PMP control port
+         "Setup.MediaServer.LocalIp": "127.0.0.3",
+         # 인스턴스별 LocalPort 분리 — dev csp(9001)/CSP(9011) 와 충돌 회피.
+         "Setup.MediaServer.LocalPort": 9012,
+     }},
+    {"id": "cmp", "tarball": "cmp",    "dir": "cmp", "process": "CMP",
+     "sync_port": 9905, "local_ip": "127.0.0.1", "listen": (9000, "udp"),
+     "peer_id": "csp",
+     "config_overlay": {
+         "ServerIp": "127.0.0.1",   # 9000 control port host-specific bind
+         "RtpIp":    "127.0.0.1",
+         "CspIp":    "127.0.0.1",
+     }},
+    {"id": "pmp", "tarball": "pmp",    "dir": "pmp", "process": "PMP",
+     "sync_port": 9908, "local_ip": "127.0.0.3", "listen": (9000, "udp"),
+     "peer_id": "psp",
+     "config_overlay": {
+         "ServerIp": "127.0.0.3",   # PMP 9000 host-specific bind (CMP 와 분리)
+         "RtpIp":    "127.0.0.3",
+         "CspIp":    "127.0.0.3",   # PSP IP
+     }},
+    {"id": "sim", "tarball": "cspsim", "dir": "sim", "process": "CSPSIM",
+     "sync_port": 9906, "local_ip": "127.0.0.1", "listen": None,
+     "peer_id": None,
+     "config_overlay": {}},
+]
+
+
+def _instance(iid: str) -> dict:
+    for inst in _INSTANCES:
+        if inst["id"] == iid:
+            return inst
+    raise KeyError(iid)
+
+
+def _module_ids() -> tuple:
+    return tuple(inst["id"] for inst in _INSTANCES)
+
+
+# 호환 dict — 기존 사용처 (step 17~22) 가 point-lookup 으로 _INSTANCES 의 필드를
+# 가져오는 경로. 추후 helper 로 직접 교체해도 의미 동일.
+_MODULES = _module_ids()
+_TARBALL_PREFIX = {inst["id"]: inst["tarball"] for inst in _INSTANCES}
+_DIR_NAME = {inst["id"]: inst["dir"] for inst in _INSTANCES}
+_AGENT_SYNC_PORT_MOD = {inst["id"]: inst["sync_port"] for inst in _INSTANCES}
+# step 21 — listen=None 인 인스턴스 (sim) 는 Start 단계 스킵. proto = udp.
+_LISTEN_PORTS = {inst["id"]: inst["listen"]
+                 for inst in _INSTANCES if inst.get("listen")}
 
 
 def _target(ctx: VerifyContext) -> str:
@@ -251,6 +334,19 @@ def step_01_cleanup(ctx: VerifyContext) -> ItemResult:
     tail = "\n".join(full.splitlines()[-15:])
     status = ItemStatus.PASS if rc == 0 else ItemStatus.FAIL
     detail = f"rc={rc}\n{tail}" if tail else f"rc={rc}"
+
+    # loopback alias 사전 확인 — _INSTANCES 의 분리 IP (PSP/PMP 등) 가 있으면
+    # `ip addr add` 검증/추가. 모든 인스턴스가 127.0.0.1 인 (legacy) mode 는 no-op.
+    # sudo -n 권한 없어도 cleanup PASS 유지 — step_21 LISTEN 검증 단계에서 명확
+    # 실패하도록.
+    from ...common import loopback as _lb
+    alias_notes: list = []
+    for ip in _lb.required_aliases(_INSTANCES):
+        st_, msg = _lb.ensure_alias(ip)
+        alias_notes.append(f"  · [{st_}] {msg}")
+    if alias_notes:
+        detail = (detail + "\n[loopback alias]\n" + "\n".join(alias_notes))
+
     result = ItemResult(
         id="S5-RESET", name="배포본 reset (cleanup)",
         status=status, detail=detail, stage=5,
@@ -959,11 +1055,12 @@ def _post_job(ctx: VerifyContext, did: int, job_type: str,
         return (0, f"{type(e).__name__}: {e}")
 
 
-def _wait_listen(port: int, proto: str, timeout_s: int) -> int:
-    """`shell.port_listening` 폴링 (1초 단위). 도달하면 경과초, 실패면 -1."""
+def _wait_listen(port: int, proto: str, timeout_s: int, host: str = "") -> int:
+    """`shell.port_listening` 폴링 (1초 단위). 도달하면 경과초, 실패면 -1.
+    host 가 주어지면 host:port 정확 매칭 (0.0.0.0/* 도 허용)."""
     waited = 0
     while waited < timeout_s:
-        if shell.port_listening(port, proto):
+        if shell.port_listening(port, proto, host=host):
             return waited
         time.sleep(1); waited += 1
     return -1
@@ -1493,15 +1590,19 @@ def step_19_modules_deployment_create(ctx: VerifyContext) -> ItemResult:
             notes.append(f"- [SKIP] {m}: aid/pkg_id 미확보 (step 17/18 실패)")
             fail = True
             continue
-        modname = _DIR_NAME[m]
+        inst = _instance(m)
+        modname = inst["dir"]
         install_path = os.path.join(ctx.dist_dir, f"{m}-server", modname)
-        pname = _TARBALL_PREFIX[m].upper()    # CSP/CMP/CSPSIM
+        pname = inst["process"]
         payload = {
             "agent_id":     int(aid),
             "package_id":   int(pkg_id),
             "install_path": install_path,
             "process_name": pname,
         }
+        overlay = inst.get("config_overlay") or {}
+        if overlay:
+            payload["config"] = overlay
         try:
             st, body = csc_http.post_json(
                 f"{base}/api/v1/deployments", payload, token=tok2, timeout=15,
@@ -1627,9 +1728,13 @@ def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
 
     base = _deployed_csc_base(ctx)
     notes: list = []
-    started: list = []
+    started: list = []  # (id, port, proto, host)
     fail = False
-    for m, (port, proto) in _LISTEN_PORTS.items():
+    for inst in _INSTANCES:
+        listen = inst.get("listen")
+        if not listen:
+            continue   # sim — install-only
+        m = inst["id"]; port, proto = listen; host = inst.get("local_ip", "")
         did = _get(ctx, f"dep2_id_{m}")
         if did is None:
             notes.append(f"- [FAIL] {m}: dep2_id 없음 (step 19 실패)")
@@ -1645,47 +1750,56 @@ def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
         if st not in (200, 201, 202):
             notes.append(f"- [FAIL] {m}: start 발행 status={st}")
             fail = True; continue
-        started.append((m, port, proto))
+        started.append((m, port, proto, host))
 
-    for m, port, proto in started:
-        waited = _wait_listen(port, proto, 20)
+    for m, port, proto, host in started:
+        waited = _wait_listen(port, proto, 20, host=host)
+        host_label = f"{host}:" if host else ""
         if waited >= 0:
-            notes.append(f"- [OK] {m}: port {port}/{proto} LISTEN ({waited}s)")
+            notes.append(f"- [OK] {m}: {host_label}{port}/{proto} LISTEN ({waited}s)")
         else:
-            notes.append(f"- [FAIL] {m}: port {port}/{proto} LISTEN 실패 (20s)")
+            notes.append(f"- [FAIL] {m}: {host_label}{port}/{proto} LISTEN 실패 (20s)")
             fail = True
 
     _set(ctx, "modules_start_ok", not fail)
 
-    # csp ↔ cmp control connection 안정화 대기 (default max 150s).
-    # csp 시작 직후 cmp 와의 첫 heartbeat 응답까지 ~120s 소요. 이 wait 가
+    # csp↔cmp + psp↔pmp control connection 안정화 대기 (default max 150s).
+    # 시그널링 시작 직후 미디어와의 첫 heartbeat 응답까지 ~120s 소요. 이 wait 가
     # 없으면 후속 S6 PTT 시나리오의 InviteMember 가 'Failed to get/alloc
-    # Shared Port' 로 실패 (csp 가 cmp 에 ADD_PTT_GROUP 보낼 수 없음).
-    # `CIMS_VERIFY_CMP_WAIT_S=0` 환경변수로 wait 자체 비활성 (unit test 용).
+    # Shared Port' 로 실패. `CIMS_VERIFY_CMP_WAIT_S=0` 으로 wait 자체 비활성 (unit test).
     cmp_wait_s = int(os.environ.get("CIMS_VERIFY_CMP_WAIT_S", "150"))
     if not fail and cmp_wait_s > 0:
         import time as _t
         from glob import glob as _glob
-        log_glob = os.path.join(ctx.dist_dir, "csp-server", "csp", "csp", "log",
-                                "csp_*.log")
+        # csp/psp 시그널링 측 인스턴스 기준 — 자기 install_path 의 csp_*.log 에
+        # OnCmpStatusChanged: Connected 가 찍혀야 짝 미디어 (cmp/pmp) 와 연결 OK.
+        sig_pairs = [(inst["id"], inst.get("peer_id"))
+                     for inst in _INSTANCES
+                     if inst.get("listen") and inst["dir"] in ("csp", "psp")]
         deadline = _t.time() + cmp_wait_s
-        csp_cmp_connected = False
+        connected: dict = {sig: False for sig, _ in sig_pairs}
         while _t.time() < deadline:
-            for p in _glob(log_glob):
-                try:
-                    with open(p, "rb") as f:
-                        if b"OnCmpStatusChanged: Connected" in f.read():
-                            csp_cmp_connected = True
-                            break
-                except OSError:
-                    pass
-            if csp_cmp_connected:
+            for sig, peer in sig_pairs:
+                if connected[sig]:
+                    continue
+                inst_dir = _instance(sig)["dir"]
+                log_glob = os.path.join(
+                    ctx.dist_dir, f"{sig}-server", inst_dir, "csp", "log", "csp_*.log",
+                )
+                for p in _glob(log_glob):
+                    try:
+                        with open(p, "rb") as f:
+                            if b"OnCmpStatusChanged: Connected" in f.read():
+                                connected[sig] = True
+                                break
+                    except OSError:
+                        pass
+            if all(connected.values()):
                 break
             _t.sleep(3)
-        notes.append(
-            f"- csp ↔ cmp control connection: "
-            f"{'CONNECTED' if csp_cmp_connected else 'TIMEOUT'}"
-        )
+        for sig, peer in sig_pairs:
+            tag = "CONNECTED" if connected[sig] else "TIMEOUT"
+            notes.append(f"- {sig} ↔ {peer or '(no peer)'} control connection: {tag}")
 
     # Immutability marker — Start PASS 시 manifest sha 기록 (S6-ENTRY-CHECK 가 매칭).
     if not fail:
@@ -1748,10 +1862,13 @@ def step_22_finalize(ctx: VerifyContext) -> ItemResult:
                 notes.append(f"- {k}: stop 발행 status={st}")
             except Exception as e:
                 notes.append(f"- {k}: stop 발행 예외 {e}")
-    # csp/cmp stop (배포본 csc 4445 경유) — sim 은 install-only 이므로 stop 무의미
+    # 시그널링/미디어 인스턴스 stop (배포본 csc 4445 경유) — sim (install-only) 제외
     tok2 = _get(ctx, "tok2", "")
     if tok2:
-        for m in ("csp", "cmp"):
+        for inst in _INSTANCES:
+            if not inst.get("listen"):
+                continue
+            m = inst["id"]
             did = _get(ctx, f"dep2_id_{m}")
             if did is None: continue
             try:

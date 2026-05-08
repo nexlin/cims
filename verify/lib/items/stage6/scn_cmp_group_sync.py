@@ -21,6 +21,7 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common import csc_http
 from ...common.cmp_client import cmp_request
+from ._helpers import target_ip
 
 
 _TARGET_CSC_PORTS = {"verify": 4445, "prod": 4420}
@@ -60,7 +61,9 @@ def scn_cmp_group_sync(ctx: VerifyContext) -> ItemResult:
     base = _deployed_csc_base(ctx)
     login_id = os.environ.get("CIMS_TB_ADMIN_ID", "admin")
     pw = os.environ.get("CIMS_TB_ADMIN_PASSWORD", "1234")
-    cmp_ip = ctx.state.get("CMP_IP") or "127.0.0.1"
+    # PTT 그룹 동기화는 PMP 미디어를 검증 (CSP 의 PTT_AS 가 PSP 로 분리된 P1 토폴로지).
+    # ctx.state["CMP_IP"]/CMP_PORT 가 명시적 주어지지 않으면 _INSTANCES 의 pmp 사용.
+    cmp_ip = ctx.state.get("CMP_IP") or target_ip("pmp", "127.0.0.1")
     cmp_port = int(ctx.state.get("CMP_PORT") or 9000)
 
     try:
@@ -96,8 +99,11 @@ def scn_cmp_group_sync(ctx: VerifyContext) -> ItemResult:
 
     found = False
     last_resp = None
+    poll_max = 10  # PSP→PMP roster sync 가 1~2s 이내 일반적이지만 인스턴스 분리
+                   # 환경에서는 GROUP_CHANGED notify → PSP 처리 → CmpClient 발송
+                   # 으로 chain 이 길어져 5s 내 못 잡는 회차 발견. 10s 로 안전 마진.
     try:
-        for i in range(5):
+        for i in range(poll_max):
             time.sleep(1)
             last_resp = cmp_request(
                 {"cmd": "STATS_REQUEST", "sesid": f"verify-poll-{i}"},
@@ -110,7 +116,7 @@ def scn_cmp_group_sync(ctx: VerifyContext) -> ItemResult:
         if not found:
             inner = (last_resp or {}).get("response") or {}
             notes.append(
-                f"- CMP STATS 미매칭 (5s) — groups={inner.get('groups')} "
+                f"- CMP STATS 미매칭 ({poll_max}s) — groups={inner.get('groups')} "
                 f"detail_len={len(inner.get('group_details') or [])}"
             )
     finally:

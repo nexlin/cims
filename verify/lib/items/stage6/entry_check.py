@@ -1,13 +1,13 @@
 """S6-ENTRY-CHECK — 통합 검증 진입 조건.
 
 체크 항목:
-1. Stage 5 결과물 4포트 LISTEN (csc/console/csp/cmp)
+1. Stage 5 결과물 LISTEN (csc/console + _INSTANCES 의 시그널링/미디어 인스턴스)
 2. Immutability gate — packages/manifest.json sha == .deployed-manifest.json sha
    (S5 배포 이후 패키지 재빌드 시 mismatch → FAIL, S5 부터 재배포 필요)
 
 target=verify (default) → csc=4445, console=8081
 target=prod             → csc=4420, console=80
-csp/cmp 포트 (5060/9000) 는 두 환경 동일.
+시그널링/미디어 포트 (5060/9000) 는 LocalIp 별로 분리 — _INSTANCES.local_ip 매칭.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ... import shell
 from ...common import pkg_manifest as _pkgm
+from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
 
 
 _TARGET_PORTS = {
@@ -24,15 +25,21 @@ _TARGET_PORTS = {
 
 
 def _required_ports(ctx: VerifyContext) -> list:
-    """target 별 4포트 체크 spec."""
+    """csc/console + _INSTANCES (listen 있는 entry) 의 (port, proto, host, label)."""
     target = (ctx.opts or {}).get("target") or "verify"
     p = _TARGET_PORTS.get(target, _TARGET_PORTS["verify"])
-    return [
-        (p["csc"],     "tcp", "배포본 csc"),
-        (p["console"], "tcp", "배포본 console"),
-        (5060,         "udp", "배포본 csp"),
-        (9000,         "udp", "배포본 cmp"),
+    out = [
+        (p["csc"],     "tcp", "",            "배포본 csc"),
+        (p["console"], "tcp", "",            "배포본 console"),
     ]
+    for inst in _NATIVE_INSTANCES:
+        listen = inst.get("listen")
+        if not listen:
+            continue
+        port, proto = listen
+        host = inst.get("local_ip", "")
+        out.append((port, proto, host, f"배포본 {inst['id']}"))
+    return out
 
 
 @verify_item(
@@ -56,13 +63,15 @@ def entry_check(ctx: VerifyContext) -> ItemResult:
     ok = True
     lines: list = []
 
-    # (1) 포트 LISTEN — target 의 csc/console 포트 + 공통 csp/cmp
+    # (1) 포트 LISTEN — target 의 csc/console 포트 + _INSTANCES 의 시그널링/미디어
     target = (ctx.opts or {}).get("target") or "verify"
-    lines.append(f"### (1) Stage 5 결과물 4포트 LISTEN (target={target})")
-    for port, proto, label in _required_ports(ctx):
-        listening = shell.port_listening(port, proto)
+    ports = _required_ports(ctx)
+    lines.append(f"### (1) Stage 5 결과물 LISTEN (target={target}, n={len(ports)})")
+    for port, proto, host, label in ports:
+        listening = shell.port_listening(port, proto, host=host)
+        host_lab = f"{host}:" if host else ""
         mark = "[OK]" if listening else "[FAIL]"
-        lines.append(f"- {mark} {label} (port {port}/{proto}) {'LISTEN' if listening else '미기동'}")
+        lines.append(f"- {mark} {label} ({host_lab}{port}/{proto}) {'LISTEN' if listening else '미기동'}")
         if not listening: ok = False
 
     # (2) Immutability gate — manifest sha 매칭

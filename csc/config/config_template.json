@@ -30,14 +30,21 @@
     },
     {
       "key": "notify",
-      "title": "CSP Notify",
-      "description": "가입자/그룹 변경 실시간 반영 대상.",
+      "title": "Signaling Notify",
+      "description": "가입자/그룹 변경 실시간 반영 대상. CSP=VoLTE (CSCF/TAS) / PSP=PTT (CSCF/PTT-AS). PSP IP 가 CSP 와 다르면 자동 분리 broadcast — USER_CHANGED 는 양쪽, GROUP_CHANGED 는 PSP 전용.",
       "fields": [
-        { "key": "CspNotify.Ip", "label": "CSP IP",
+        { "key": "CspNotify.Ip", "label": "CSP (VoLTE) IP",
           "type": "string", "default": "127.0.0.1", "deploy_value": "@CSP_IP@",
           "restart": false,
           "reload_hint": "런타임 리로드 가능 (다음 notify 부터 적용)." },
         { "key": "CspNotify.Port", "label": "CSP Notify 포트",
+          "type": "int", "default": 4421, "min": 1, "max": 65535,
+          "restart": false },
+        { "key": "PspNotify.Ip", "label": "PSP (PTT) IP",
+          "type": "string", "default": "127.0.0.1", "deploy_value": "@PSP_IP@",
+          "restart": false,
+          "help": "PTT 가입자/그룹 변경 알림 대상. CSP 와 동일 IP 면 단일 broadcast 됨." },
+        { "key": "PspNotify.Port", "label": "PSP Notify 포트",
           "type": "int", "default": 4421, "min": 1, "max": 65535,
           "restart": false }
       ]

@@ -44,8 +44,9 @@ def cmd_sim(repo_root: str, *sim_args: str, timeout: int = 120) -> tuple:
     return run_cims_sh(repo_root, "sim", *sim_args, capture=True, timeout=timeout)
 
 
-def port_listening(port: int, proto: str = "tcp") -> bool:
-    """ss -tln/-uln 으로 LISTEN 확인."""
+def port_listening(port: int, proto: str = "tcp", host: str = "") -> bool:
+    """ss -tln/-uln 으로 LISTEN 확인. host 가 주어지면 host:port 정확 매칭 +
+    0.0.0.0/[::]:port 도 허용 (모든 IP bind 도 host 매칭으로 인정)."""
     flag = "-uln" if proto == "udp" else "-tln"
     try:
         out = subprocess.check_output(
@@ -58,7 +59,12 @@ def port_listening(port: int, proto: str = "tcp") -> bool:
         cols = line.split()
         if len(cols) < 4: continue
         addr = cols[3]
-        # endswith 으로 :PORT 매칭 (앞이 IP)
-        if addr.endswith(needle):
+        if not addr.endswith(needle):
+            continue
+        if not host:
+            return True
+        # host 매칭: <host>:port  또는  0.0.0.0:port  또는  [::]:port
+        prefix = addr[:-len(needle)]
+        if prefix == host or prefix == "0.0.0.0" or prefix == "*" or prefix == "[::]":
             return True
     return False

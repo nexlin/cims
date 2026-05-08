@@ -28,7 +28,11 @@ warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 # ── 기본값 ─────────────────────────────────────────────────────
 LOCAL_IP="127.0.0.1"
 CSP_IP=""
+PSP_IP=""    # PSP (PTT 시그널링) — 미설정 시 CSP_IP 따름
+ISP_IP=""    # ISP (IBCF 트렁크) — 미설정 시 CSP_IP 따름 (P2)
 CMP_IP=""
+PMP_IP=""    # PMP (PTT 미디어) — 미설정 시 CMP_IP 따름
+IMP_IP=""    # IMP (IBCF 미디어) — 미설정 시 CMP_IP 따름 (P2)
 CWRTC_IP=""
 CSC_HOST=""
 DB_HOST=""
@@ -50,8 +54,12 @@ ${BOLD}CIMS 배포 설정 스크립트${NC}
 
 ${BOLD}서버 IP:${NC}
   --local-ip   IP    모든 컴포넌트 기본 IP (기본: 127.0.0.1)
-  --csp-ip     IP    CSP 서버 IP
-  --cmp-ip     IP    CMP 서버 IP
+  --csp-ip     IP    CSP 서버 IP (VoLTE 시그널링: CSCF+TAS)
+  --psp-ip     IP    PSP 서버 IP (PTT 시그널링: CSCF+PTT-AS, 미설정 시 CSP_IP)
+  --isp-ip     IP    ISP 서버 IP (IBCF 트렁크, 미설정 시 CSP_IP)
+  --cmp-ip     IP    CMP 서버 IP (VoLTE 미디어)
+  --pmp-ip     IP    PMP 서버 IP (PTT 미디어, 미설정 시 CMP_IP)
+  --imp-ip     IP    IMP 서버 IP (IBCF 미디어, 미설정 시 CMP_IP)
   --cwrtc-ip   IP    CWRTC 서버 IP
   --csc-host   HOST  CSC 서버 호스트명/IP
 
@@ -90,7 +98,11 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --local-ip)     LOCAL_IP="$2";      shift 2 ;;
         --csp-ip)       CSP_IP="$2";        shift 2 ;;
+        --psp-ip)       PSP_IP="$2";        shift 2 ;;
+        --isp-ip)       ISP_IP="$2";        shift 2 ;;
         --cmp-ip)       CMP_IP="$2";        shift 2 ;;
+        --pmp-ip)       PMP_IP="$2";        shift 2 ;;
+        --imp-ip)       IMP_IP="$2";        shift 2 ;;
         --cwrtc-ip)     CWRTC_IP="$2";      shift 2 ;;
         --csc-host)     CSC_HOST="$2";      shift 2 ;;
         --db-host)      DB_HOST="$2";       shift 2 ;;
@@ -110,7 +122,11 @@ done
 
 # 미설정 값은 기본값으로
 CSP_IP="${CSP_IP:-$LOCAL_IP}"
+PSP_IP="${PSP_IP:-$CSP_IP}"
+ISP_IP="${ISP_IP:-$CSP_IP}"
 CMP_IP="${CMP_IP:-$LOCAL_IP}"
+PMP_IP="${PMP_IP:-$CMP_IP}"
+IMP_IP="${IMP_IP:-$CMP_IP}"
 CWRTC_IP="${CWRTC_IP:-$LOCAL_IP}"
 CSC_HOST="${CSC_HOST:-$LOCAL_IP}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
@@ -185,7 +201,9 @@ apply_config_template() {
     local dst="$2"
     [[ ! -f "$src" ]] && warn "템플릿 없음: $src" && return
     mkdir -p "$(dirname "$dst")"
-    CSP_IP="$CSP_IP" CMP_IP="$CMP_IP" CWRTC_IP="$CWRTC_IP" CSC_HOST="$CSC_HOST" \
+    CSP_IP="$CSP_IP" PSP_IP="$PSP_IP" ISP_IP="$ISP_IP" \
+    CMP_IP="$CMP_IP" PMP_IP="$PMP_IP" IMP_IP="$IMP_IP" \
+    CWRTC_IP="$CWRTC_IP" CSC_HOST="$CSC_HOST" \
     DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
     VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" \
     IDMS_JWT_SECRET="$IDMS_JWT_SECRET" CIMS_JWT_SECRET="$CIMS_JWT_SECRET" \

@@ -937,7 +937,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         orig = scn_subscribe.run_cspsim
         orig_cnt = scn_subscribe._count_notify_lines
         try:
-            scn_subscribe.run_cspsim = lambda repo, args, timeout=120: (
+            scn_subscribe.run_cspsim = lambda repo, args, timeout=120, tail_lines=100: (
                 0, "[Scenario] Sending GMS/CMS SUBSCRIBE...\n"
                    "[Scenario] Subscriptions complete\n",
             )
@@ -952,26 +952,34 @@ class TestStage6NewScenarios(unittest.TestCase):
         self.assertIn("subscribe-complete=True", r.detail)
 
     def test_entry_check_required_ports_target_prod(self) -> None:
-        """target=prod → _required_ports csc/console 4420/80."""
+        """target=prod → _required_ports csc/console 4420/80 + 시그널링/미디어 인스턴스."""
         from verify.lib.items.stage6 import entry_check
         ctx = self._VerifyContext.create(
             repo_root=_REPO_ROOT, stage=6, opts={"target": "prod"},
         )
         ports = entry_check._required_ports(ctx)
-        port_map = {(p, proto): label for p, proto, label in ports}
-        self.assertIn((4420, "tcp"), port_map)
-        self.assertIn((80, "tcp"), port_map)
-        # csp/cmp 는 두 환경 동일
-        self.assertIn((5060, "udp"), port_map)
-        self.assertIn((9000, "udp"), port_map)
+        # entry: (port, proto, host, label)
+        triples = {(p, proto) for p, proto, _h, _l in ports}
+        self.assertIn((4420, "tcp"), triples)
+        self.assertIn((80,   "tcp"), triples)
+        # csp/cmp + psp/pmp 는 두 환경 동일 (포트는 같고 host 만 다름)
+        self.assertIn((5060, "udp"), triples)
+        self.assertIn((9000, "udp"), triples)
+        # P1 토폴로지 — 시그널링 2 인스턴스 (csp 127.0.0.1, psp 127.0.0.3) 모두 등재
+        sip_hosts = {h for p, proto, h, _l in ports if p == 5060}
+        self.assertIn("127.0.0.1", sip_hosts)
+        self.assertIn("127.0.0.3", sip_hosts)
+        media_hosts = {h for p, proto, h, _l in ports if p == 9000}
+        self.assertIn("127.0.0.1", media_hosts)
+        self.assertIn("127.0.0.3", media_hosts)
 
     def test_entry_check_required_ports_target_verify_default(self) -> None:
         from verify.lib.items.stage6 import entry_check
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=6)
         ports = entry_check._required_ports(ctx)
-        port_map = {(p, proto): label for p, proto, label in ports}
-        self.assertIn((4445, "tcp"), port_map)
-        self.assertIn((8081, "tcp"), port_map)
+        triples = {(p, proto) for p, proto, _h, _l in ports}
+        self.assertIn((4445, "tcp"), triples)
+        self.assertIn((8081, "tcp"), triples)
 
     def test_scn_db_sync_deployed_base_target_prod(self) -> None:
         from verify.lib.items.stage6 import scn_db_sync
@@ -987,7 +995,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         orig = scn_subscribe.run_cspsim
         orig_cnt = scn_subscribe._count_notify_lines
         try:
-            scn_subscribe.run_cspsim = lambda repo, args, timeout=120: (
+            scn_subscribe.run_cspsim = lambda repo, args, timeout=120, tail_lines=100: (
                 0, "[Scenario] Subscriptions complete\n",
             )
             scn_subscribe._count_notify_lines = lambda dist, since: 0
@@ -1006,7 +1014,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         orig = scn_subscribe.run_cspsim
         orig_cnt = scn_subscribe._count_notify_lines
         try:
-            scn_subscribe.run_cspsim = lambda repo, args, timeout=120: (
+            scn_subscribe.run_cspsim = lambda repo, args, timeout=120, tail_lines=100: (
                 0, "[Sim] register only — no scenario marker\n",
             )
             scn_subscribe._count_notify_lines = lambda dist, since: 0
@@ -2545,7 +2553,7 @@ class TestStage5CscRunSteps(unittest.TestCase):
     def test_step_13_pass_when_listening(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
         # 첫 polling 시도에서 즉시 LISTEN
-        self._shell.port_listening = lambda port, proto="tcp": port == 4445
+        self._shell.port_listening = lambda port, proto="tcp", host="": port == 4445
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
         self._native._set(ctx, "dep_id_csc", 11)
@@ -2555,7 +2563,7 @@ class TestStage5CscRunSteps(unittest.TestCase):
 
     def test_step_13_fail_on_listen_timeout(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        self._shell.port_listening = lambda port, proto="tcp": False
+        self._shell.port_listening = lambda port, proto="tcp", host="": False
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
         self._native._set(ctx, "dep_id_csc", 11)
@@ -2565,7 +2573,7 @@ class TestStage5CscRunSteps(unittest.TestCase):
 
     def test_step_13_fail_on_post_status_error(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (500, {})
-        self._shell.port_listening = lambda port, proto="tcp": True
+        self._shell.port_listening = lambda port, proto="tcp", host="": True
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
         self._native._set(ctx, "dep_id_csc", 11)
@@ -2636,7 +2644,7 @@ class TestStage5CscRunSteps(unittest.TestCase):
     # ── step 15 ──
     def test_step_15_pass_when_listening(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        self._shell.port_listening = lambda port, proto="tcp": port == 8081
+        self._shell.port_listening = lambda port, proto="tcp", host="": port == 8081
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
         self._native._set(ctx, "dep_id_console", 22)
@@ -2648,7 +2656,7 @@ class TestStage5CscRunSteps(unittest.TestCase):
         """target=prod 시 step_15 가 console port 80 LISTEN 검증."""
         captured_ports: list = []
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        def fake_listen(port, proto="tcp"):
+        def fake_listen(port, proto="tcp", host=""):
             captured_ports.append(port)
             return port == 80
         self._shell.port_listening = fake_listen
@@ -2663,7 +2671,7 @@ class TestStage5CscRunSteps(unittest.TestCase):
 
     def test_step_15_fail_on_listen_timeout(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        self._shell.port_listening = lambda port, proto="tcp": False
+        self._shell.port_listening = lambda port, proto="tcp", host="": False
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
         self._native._set(ctx, "dep_id_console", 22)
@@ -2949,7 +2957,8 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.FAIL)
 
     # ── step 17 ──
-    def test_step_17_pass_with_3_modules(self) -> None:
+    def test_step_17_pass_with_modules(self) -> None:
+        # P1 토폴로지: csp/psp/cmp/pmp/cspsim 5 tarball 모두 업로드 PASS.
         import tempfile
         captured: list = []
         def fake_post_multipart(url, *, file_path, file_field="file",
@@ -2957,8 +2966,10 @@ class TestStage5ModulesSteps(unittest.TestCase):
                                 token=None, timeout=60):
             captured.append(file_path)
             base = os.path.basename(file_path)
-            if base.startswith("csp-"): pid = 11
-            elif base.startswith("cmp-"): pid = 12
+            if   base.startswith("csp-"):    pid = 11
+            elif base.startswith("psp-"):    pid = 14
+            elif base.startswith("cmp-"):    pid = 12
+            elif base.startswith("pmp-"):    pid = 15
             elif base.startswith("cspsim-"): pid = 13
             else: pid = 99
             return (201, {"id": pid})
@@ -2967,14 +2978,18 @@ class TestStage5ModulesSteps(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
-            for fn in ("csp-1.0.0.tar.gz", "cmp-1.0.0.tar.gz", "cspsim-1.0.0.tar.gz"):
+            for fn in ("csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz",
+                       "cmp-1.0.0.tar.gz", "pmp-1.0.0.tar.gz",
+                       "cspsim-1.0.0.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
             ctx = self._ctx_with_dist(td)
             self._native._set(ctx, "tok2", "JWT2")
             r = self._native.step_17_modules_pkg_upload(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "pkg2_id_csp"), 11)
+        self.assertEqual(self._native._get(ctx, "pkg2_id_psp"), 14)
         self.assertEqual(self._native._get(ctx, "pkg2_id_cmp"), 12)
+        self.assertEqual(self._native._get(ctx, "pkg2_id_pmp"), 15)
         # sim 의 tarball prefix 는 cspsim
         self.assertEqual(self._native._get(ctx, "pkg2_id_sim"), 13)
 
@@ -2984,8 +2999,9 @@ class TestStage5ModulesSteps(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
-            # cspsim tarball 만 누락
-            for fn in ("csp-1.0.0.tar.gz", "cmp-1.0.0.tar.gz"):
+            # cspsim tarball 만 누락 — 나머지 4 모듈은 존재
+            for fn in ("csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz",
+                       "cmp-1.0.0.tar.gz", "pmp-1.0.0.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
             ctx = self._ctx_with_dist(td)
             self._native._set(ctx, "tok2", "JWT2")
@@ -3001,14 +3017,14 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.SKIP)
 
     def test_step_18_pass(self) -> None:
-        # 3 모듈 모두 register + spawn + online 성공 시뮬
+        # P1 토폴로지: 5 모듈 (csp/psp/cmp/pmp/sim) 모두 register + spawn + online.
         post_called: list = []
+        _MID = {"csp": 100, "psp": 110, "cmp": 200, "pmp": 210, "sim": 300}
         def fake_post_json(url, payload, token=None, timeout=10):
             post_called.append(url)
             if url.endswith("/agents"):
-                # name 별 다른 id
                 name = payload["name"]
-                aid = 100 if "csp" in name else 200 if "cmp" in name else 300
+                aid = next((v for k, v in _MID.items() if name.startswith(f"{k}-")), 999)
                 return (201, {"id": aid, "enrollment_token": f"ENR-{aid}"})
             if url.endswith("/approve"):
                 return (200, {})
@@ -3021,7 +3037,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
         spawned: list = []
         def fake_spawn(ctx, m, base, aname, enroll_tok):
             spawned.append((m, aname))
-            return (1000 + (1 if m == "csp" else 2 if m == "cmp" else 3), "")
+            return (1000 + _MID.get(m, 0), "")
         self._native._spawn_one_module_agent = fake_spawn
 
         # _all_modules_online 즉시 True
@@ -3040,33 +3056,46 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "aid_csp"), 100)
+        self.assertEqual(self._native._get(ctx, "aid_psp"), 110)
         self.assertEqual(self._native._get(ctx, "aid_cmp"), 200)
+        self.assertEqual(self._native._get(ctx, "aid_pmp"), 210)
         self.assertEqual(self._native._get(ctx, "aid_sim"), 300)
-        self.assertEqual(self._native._get(ctx, "ta_pid_csp"), 1001)
-        self.assertEqual(len(spawned), 3)
+        self.assertEqual(self._native._get(ctx, "ta_pid_csp"), 1100)
+        self.assertEqual(len(spawned), 5)
 
     # ── step 19 ──
     def test_step_19_pass(self) -> None:
+        # P1 토폴로지: 5 deployment (CSP/PSP/CMP/PMP/CSPSIM) 모두 생성 PASS.
         captured: list = []
+        _PMAP = {"CSP": 11, "PSP": 14, "CMP": 12, "PMP": 15, "CSPSIM": 13}
         def fake_post_json(url, payload, token=None, timeout=15):
             captured.append(payload)
-            mod = payload["process_name"]
-            did = 11 if mod == "CSP" else 12 if mod == "CMP" else 13
-            return (201, {"id": did})
+            return (201, {"id": _PMAP[payload["process_name"]]})
         self._csc_http.post_json = fake_post_json
 
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
-        for m, aid, pid in [("csp", 100, 11), ("cmp", 200, 12), ("sim", 300, 13)]:
+        for m, aid, pid in [("csp", 100, 11), ("psp", 110, 14),
+                             ("cmp", 200, 12), ("pmp", 210, 15),
+                             ("sim", 300, 13)]:
             self._native._set(ctx, f"aid_{m}", aid)
             self._native._set(ctx, f"pkg2_id_{m}", pid)
         r = self._native.step_19_modules_deployment_create(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "dep2_id_csp"), 11)
+        self.assertEqual(self._native._get(ctx, "dep2_id_psp"), 14)
+        self.assertEqual(self._native._get(ctx, "dep2_id_pmp"), 15)
         self.assertEqual(self._native._get(ctx, "dep2_id_sim"), 13)
         # sim 의 process_name 은 CSPSIM
         sim_payload = next(p for p in captured if p["process_name"] == "CSPSIM")
         self.assertIsNotNone(sim_payload)
+        # PSP/PMP 는 config_overlay (Roles/LocalIp) 가 payload 에 포함
+        psp_payload = next(p for p in captured if p["process_name"] == "PSP")
+        self.assertIn("config", psp_payload)
+        self.assertEqual(psp_payload["config"].get("Setup.Roles.PTT_AS"), True)
+        self.assertEqual(psp_payload["config"].get("Setup.Sip.LocalIp"), "127.0.0.3")
+        pmp_payload = next(p for p in captured if p["process_name"] == "PMP")
+        self.assertEqual(pmp_payload["config"].get("RtpIp"), "127.0.0.3")
 
     def test_step_19_fail_missing_pkg_for_one_module(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=15: (201, {"id": 1})
@@ -3099,7 +3128,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
-        for m, did in [("csp", 11), ("cmp", 12), ("sim", 13)]:
+        for m, did in [("csp", 11), ("psp", 14), ("cmp", 12), ("pmp", 15), ("sim", 13)]:
             self._native._set(ctx, f"dep2_id_{m}", did)
         r = self._native.step_20_modules_install_poll(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
@@ -3107,9 +3136,10 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
     # ── step 21 ──
     def test_step_21_pass(self) -> None:
+        # P1: csp/psp/cmp/pmp 4 인스턴스 모두 LISTEN. CMP_WAIT_S=0 으로 시그널링↔미디어
+        # connection wait 자체 비활성 (단위 테스트 — 실제 csp_*.log 없음).
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        # 5060/udp + 9000/udp 모두 LISTEN
-        def fake_listen(port, proto="tcp"):
+        def fake_listen(port, proto="tcp", host=""):
             return port in (5060, 9000) and proto == "udp"
         self._shell.port_listening = fake_listen
         marker_called = [0]
@@ -3118,11 +3148,21 @@ class TestStage5ModulesSteps(unittest.TestCase):
             return "abc123def456abc123def456abc123def456abc123def456abc123def456ab"
         self._pkgm.write_marker = fake_marker
 
-        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
-        self._native._set(ctx, "tok2", "JWT2")
-        for m, did in [("csp", 11), ("cmp", 12)]:
-            self._native._set(ctx, f"dep2_id_{m}", did)
-        r = self._native.step_21_modules_start(ctx)
+        import os as _os
+        prev_wait = _os.environ.get("CIMS_VERIFY_CMP_WAIT_S")
+        _os.environ["CIMS_VERIFY_CMP_WAIT_S"] = "0"
+        try:
+            ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+            self._native._set(ctx, "tok2", "JWT2")
+            for m, did in [("csp", 11), ("psp", 14), ("cmp", 12), ("pmp", 15)]:
+                self._native._set(ctx, f"dep2_id_{m}", did)
+            r = self._native.step_21_modules_start(ctx)
+        finally:
+            if prev_wait is None:
+                _os.environ.pop("CIMS_VERIFY_CMP_WAIT_S", None)
+            else:
+                _os.environ["CIMS_VERIFY_CMP_WAIT_S"] = prev_wait
+
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertTrue(self._native._get(ctx, "modules_start_ok"))
         # immutability marker 기록됐는지
@@ -3131,13 +3171,22 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
     def test_step_21_fail_when_cmp_not_listening(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        # csp 는 LISTEN, cmp 는 timeout
-        self._shell.port_listening = lambda port, proto="tcp": port == 5060
-        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
-        self._native._set(ctx, "tok2", "JWT2")
-        for m, did in [("csp", 11), ("cmp", 12)]:
-            self._native._set(ctx, f"dep2_id_{m}", did)
-        r = self._native.step_21_modules_start(ctx)
+        # 시그널링 (5060) 은 LISTEN, 미디어 (9000) 는 timeout
+        self._shell.port_listening = lambda port, proto="tcp", host="": port == 5060
+        import os as _os
+        prev_wait = _os.environ.get("CIMS_VERIFY_CMP_WAIT_S")
+        _os.environ["CIMS_VERIFY_CMP_WAIT_S"] = "0"
+        try:
+            ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
+            self._native._set(ctx, "tok2", "JWT2")
+            for m, did in [("csp", 11), ("psp", 14), ("cmp", 12), ("pmp", 15)]:
+                self._native._set(ctx, f"dep2_id_{m}", did)
+            r = self._native.step_21_modules_start(ctx)
+        finally:
+            if prev_wait is None:
+                _os.environ.pop("CIMS_VERIFY_CMP_WAIT_S", None)
+            else:
+                _os.environ["CIMS_VERIFY_CMP_WAIT_S"] = prev_wait
         self.assertEqual(r.status, self._ItemStatus.FAIL)
         self.assertFalse(self._native._get(ctx, "modules_start_ok"))
 

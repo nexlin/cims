@@ -90,33 +90,161 @@ kill_stray() {
 
 # ── 개별 시작 함수 ──────────────────────────────────────────────
 
-start_cmp() {
-    if is_running cmp; then warn "CMP 이미 실행 중 (pid=$(read_pid cmp))"; return 0; fi
-    [[ ! -f "$DIST_DIR/cmp/bin/cmp" ]] && err "cmp 바이너리 없음: $DIST_DIR/cmp/bin/cmp (make dist 실행 필요)" && return 1
-    # ControlPort: top-level ServerPort 우선, template 스키마(Setup.Listen.ControlPort) fallback
-    local ctrl_port
-    ctrl_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/cmp/config/cmp.json')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
-    kill_stray "cmp/bin/cmp" "$ctrl_port" udp
-    info "CMP 시작..."
-    cd "$DIST_DIR/cmp"
-    bin/cmp config/cmp.json >> "$LOG_DIR/cmp.log" 2>&1 &
-    save_pid cmp $!
-    sleep 0.8
-    is_running cmp && ok "CMP 시작 완료 (pid=$(read_pid cmp))" || { err "CMP 시작 실패"; tail -3 "$LOG_DIR/cmp.log" | sed 's/^/  /'; }
+# csp/cmp 바이너리는 다용도 — 같은 바이너리에 다른 config (Roles/LocalIp/포트) 로
+# 인스턴스 분기. 변종 (PSP/ISP, PMP/IMP) 은 install_path 만 다르고 cims.sh 는
+# 동일 (각 install 안에서 자기 DIST_DIR 안 config 로 동작). PID name 만 분리.
+
+# 자기 install 경로의 좀비 process 만 정리. kill_stray 는 cmdline pattern 으로
+# pgrep -f 하는데 cwd-relative 명령 (`cd $DIST/csp && bin/csp config/csp.json`)
+# 은 절대경로가 cmdline 에 없어서 매칭 0. fallback 으로 port 점유 pid 의
+# /proc/<pid>/exe 가 자기 install 의 bin 인지 확인 후 kill — 다른 인스턴스
+# (예: PSP 127.0.0.3:5060) 가 같은 port 를 다른 host 로 점유해도 영향 없음.
+_kill_own_install_listener() {
+    local exe_path="$1" port="$2" proto="${3:-udp}"
+    [[ -z "$port" || ! -f "$exe_path" ]] && return 0
+    local exe_real; exe_real=$(readlink -f "$exe_path" 2>/dev/null)
+    [[ -z "$exe_real" ]] && return 0
+    local port_pids
+    if [[ "$proto" == "tcp" ]]; then
+        port_pids=$(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}')
+    else
+        port_pids=$(ss -ulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}')
+    fi
+    [[ -z "$port_pids" ]] && return 0
+    local pid
+    local killed_any=0
+    for pid in $port_pids; do
+        local pid_exe; pid_exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null)
+        # tarball 풀어 새 binary 가 inode 교체된 경우 옛 process 의 exe 가 ' (deleted)'
+        # suffix 를 가짐 — 매칭 시 그 부분 strip.
+        local pid_exe_trim="${pid_exe% (deleted)}"
+        if [[ -n "$pid_exe_trim" && "$pid_exe_trim" == "$exe_real" ]]; then
+            warn "stale own-install listener 정리: pid=$pid (port=$port/$proto exe=$pid_exe)"
+            kill "$pid" 2>/dev/null || true
+            local i=1
+            while kill -0 "$pid" 2>/dev/null && (( i <= 15 )); do sleep 0.2; i=$(( i + 1 )); done
+            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+            killed_any=1
+        fi
+    done
+    # process 죽은 후 socket 이 OS 에서 release 되기까지 짧은 대기 — 새 csp/cmp
+    # 가 같은 host:port bind 시도 시 race condition 회피 (SO_REUSEADDR 안 켜진
+    # SipServer/CmpServer 의 case).
+    if [[ $killed_any -eq 1 ]]; then
+        local k=1
+        while (( k <= 10 )); do
+            local check
+            if [[ "$proto" == "tcp" ]]; then
+                check=$(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print 1; exit}')
+            else
+                check=$(ss -ulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print 1; exit}')
+            fi
+            [[ -z "$check" ]] && break
+            sleep 0.3; k=$(( k + 1 ))
+        done
+    fi
 }
 
-start_csp() {
-    if is_running csp; then warn "CSP 이미 실행 중 (pid=$(read_pid csp))"; return 0; fi
-    [[ ! -f "$DIST_DIR/csp/bin/csp" ]] && err "csp 바이너리 없음 (make dist 실행 필요)" && return 1
-    local sip_port; sip_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csp/config/csp.json')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
-    kill_stray "csp/bin/csp" "$sip_port"
-    info "CSP 시작..."
-    cd "$DIST_DIR/csp"
-    bin/csp config/csp.json -n >> "$LOG_DIR/csp.log" 2>&1 &
-    save_pid csp $!
-    sleep 1.0
-    is_running csp && ok "CSP 시작 완료 (pid=$(read_pid csp))" || { err "CSP 시작 실패"; tail -3 "$LOG_DIR/csp.log" | sed 's/^/  /'; }
+# install_path/config.json (deployment overlay, dotted-key dict) 을 모듈 설정
+# 파일 (csp.json/cmp.json) 에 머지. csp 바이너리는 csp.json 만 읽으므로 overlay
+# 의 Roles/LocalIp 등이 csp.json 에 직접 들어가야 인스턴스 분기 (CSP/PSP/ISP)
+# 가 효과 발생. 매 시작마다 멱등 적용 — overlay 가 비어있으면 no-op.
+_apply_overlay_to_module_config() {
+    local overlay="$1" target="$2"
+    [[ ! -f "$overlay" || ! -f "$target" ]] && return 0
+    python3 - "$overlay" "$target" <<'PY' 2>/dev/null
+import json, sys
+ov_path, tgt_path = sys.argv[1], sys.argv[2]
+try:
+    with open(ov_path, encoding="utf-8") as f: ov = json.load(f)
+    with open(tgt_path, encoding="utf-8") as f: tgt = json.load(f)
+except Exception:
+    sys.exit(0)
+if not isinstance(ov, dict) or not isinstance(tgt, dict):
+    sys.exit(0)
+
+def set_path(root, dotted, value):
+    cur = root
+    keys = dotted.split(".")
+    for k in keys[:-1]:
+        nxt = cur.get(k)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cur[k] = nxt
+        cur = nxt
+    cur[keys[-1]] = value
+
+changed = False
+for k, v in ov.items():
+    if "." in k:
+        set_path(tgt, k, v); changed = True
+    elif isinstance(v, dict):
+        cur = tgt.setdefault(k, {})
+        if not isinstance(cur, dict):
+            tgt[k] = dict(v); changed = True
+        else:
+            for kk, vv in v.items():
+                cur[kk] = vv
+            changed = True
+    else:
+        tgt[k] = v; changed = True
+
+if changed:
+    with open(tgt_path, "w", encoding="utf-8") as f:
+        json.dump(tgt, f, indent=4, ensure_ascii=False)
+PY
 }
+
+_start_cmp_variant() {
+    # $1 = pid name (cmp/pmp/imp). 각 인스턴스는 자기 install_path 안의
+    # cims.sh 로 실행되므로 같은 $DIST_DIR/cmp/bin/cmp 를 가리키되 config 가
+    # 인스턴스마다 다름.
+    local name="$1"
+    local upper; upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
+    if is_running "$name"; then warn "$upper 이미 실행 중 (pid=$(read_pid "$name"))"; return 0; fi
+    [[ ! -f "$DIST_DIR/cmp/bin/cmp" ]] && err "cmp 바이너리 없음: $DIST_DIR/cmp/bin/cmp (make dist 실행 필요)" && return 1
+    # deployment overlay (install_path/config.json) → cmp.json 머지 (PMP/IMP 의 RtpIp/CspIp 분기)
+    _apply_overlay_to_module_config "$DIST_DIR/config.json" "$DIST_DIR/cmp/config/cmp.json"
+    local ctrl_port
+    ctrl_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/cmp/config/cmp.json')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
+    # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PMP 등) 영향 차단
+    kill_stray "$DIST_DIR/cmp/bin/cmp"
+    _kill_own_install_listener "$DIST_DIR/cmp/bin/cmp" "$ctrl_port" udp
+    info "$upper 시작..."
+    cd "$DIST_DIR/cmp"
+    bin/cmp config/cmp.json >> "$LOG_DIR/$name.log" 2>&1 &
+    save_pid "$name" $!
+    sleep 0.8
+    is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; }
+}
+
+start_cmp() { _start_cmp_variant cmp; }
+start_pmp() { _start_cmp_variant pmp; }
+start_imp() { _start_cmp_variant imp; }
+
+_start_csp_variant() {
+    # $1 = pid name (csp/psp/isp). variant 별 Roles/LocalIp 차이는 config 에 담김.
+    local name="$1"
+    local upper; upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
+    if is_running "$name"; then warn "$upper 이미 실행 중 (pid=$(read_pid "$name"))"; return 0; fi
+    [[ ! -f "$DIST_DIR/csp/bin/csp" ]] && err "csp 바이너리 없음 (make dist 실행 필요)" && return 1
+    # deployment overlay (install_path/config.json) → csp.json 머지 (CSP/PSP/ISP 의 Roles/LocalIp 분기)
+    _apply_overlay_to_module_config "$DIST_DIR/config.json" "$DIST_DIR/csp/config/csp.json"
+    local sip_port; sip_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csp/config/csp.json')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
+    # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PSP 127.0.0.3 등) 영향 차단
+    kill_stray "$DIST_DIR/csp/bin/csp"
+    _kill_own_install_listener "$DIST_DIR/csp/bin/csp" "$sip_port" udp
+    info "$upper 시작..."
+    cd "$DIST_DIR/csp"
+    bin/csp config/csp.json -n >> "$LOG_DIR/$name.log" 2>&1 &
+    save_pid "$name" $!
+    sleep 1.0
+    is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; }
+}
+
+start_csp() { _start_csp_variant csp; }
+start_psp() { _start_csp_variant psp; }
+start_isp() { _start_csp_variant isp; }
 
 start_cwrtc() {
     if is_running cwrtc; then warn "cwrtc 이미 실행 중 (pid=$(read_pid cwrtc))"; return 0; fi
@@ -465,8 +593,8 @@ print(p)" 2>/dev/null || echo 4420)
 # 컴포넌트별 리스닝 포트 (외부 기동 감지용)
 _svc_port_proto() {
     case "$1" in
-        cmp)        echo "9000:udp" ;;
-        csp)        echo "5060:udp" ;;
+        cmp|pmp|imp) echo "9000:udp" ;;
+        csp|psp|isp) echo "5060:udp" ;;
         cwrtc)      echo "8443:tcp" ;;
         csc)        echo "4421:tcp" ;;
         # console 은 모드별 포트 분기 — Dev(소스 트리) 3001 / Test(dist 전용) 8080.
@@ -539,7 +667,11 @@ cmd_status() {
     echo ""
     echo -e "  ${BOLD}[검증 대상]${NC}"
     status_one cmp
+    status_one pmp
+    status_one imp
     status_one csp
+    status_one psp
+    status_one isp
     status_one cwrtc
     status_one csc
     status_one console
@@ -1287,7 +1419,11 @@ _start_one() {
         all)        start_cmp; start_csp; sleep 0.5; start_cwrtc; start_csc; start_console; start_phone ;;
         tb)         start_tb_csc; sleep 0.5; start_tb_console; start_tb_agent ;;
         cmp)        start_cmp ;;
+        pmp)        start_pmp ;;
+        imp)        start_imp ;;
         csp)        start_csp ;;
+        psp)        start_psp ;;
+        isp)        start_isp ;;
         cwrtc)      start_cwrtc ;;
         csc)        start_csc ;;
         console)    start_console ;;
@@ -1532,7 +1668,11 @@ cmd_pkg() {
             *)  targets+=("$1"); shift ;;
         esac
     done
-    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp csp cwrtc csc console phone cspsim agent)
+    # default targets — 9 모듈 + 부가 (cwrtc/phone/agent).
+    # csp 바이너리는 다용도 → csp/isp/psp 3 tarball (소스/dist 디렉토리는 동일,
+    # tarball 이름과 meta.json 의 name 만 분리 — Roles/LocalIp 는 deploy overlay 가 결정).
+    # cmp 바이너리도 동일 → cmp/imp/pmp.
+    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp csp psp isp cwrtc csc console phone cspsim agent)
 
     if [[ ! -d $DIST_DIR ]]; then
         err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
@@ -1543,15 +1683,25 @@ cmd_pkg() {
     # (dist/ 밖에서 실행되는 경우만 소스 루트가 있으며, 그 외에는 dist/<comp>/pkg.json 로 fallback)
     _src_root_for() {
         case "$1" in
-            csp)     echo "$SCRIPT_DIR/csp" ;;
-            cmp)     echo "$SCRIPT_DIR/cmp" ;;
-            csc)     echo "$SCRIPT_DIR/csc" ;;
-            cwrtc)   echo "$SCRIPT_DIR/cwrtc" ;;
-            console) echo "$SCRIPT_DIR/cims-console" ;;
-            phone)   echo "$SCRIPT_DIR/cims-phone" ;;
-            cspsim)  echo "$SCRIPT_DIR/cspsim" ;;
-            agent)   echo "$SCRIPT_DIR/agent" ;;
-            *)       echo "" ;;
+            csp|psp|isp) echo "$SCRIPT_DIR/csp" ;;   # 동일 csp 바이너리 + 동일 config_template
+            cmp|pmp|imp) echo "$SCRIPT_DIR/cmp" ;;   # 동일 cmp 바이너리 + 동일 config_template
+            csc)         echo "$SCRIPT_DIR/csc" ;;
+            cwrtc)       echo "$SCRIPT_DIR/cwrtc" ;;
+            console)     echo "$SCRIPT_DIR/cims-console" ;;
+            phone)       echo "$SCRIPT_DIR/cims-phone" ;;
+            cspsim)      echo "$SCRIPT_DIR/cspsim" ;;
+            agent)       echo "$SCRIPT_DIR/agent" ;;
+            *)           echo "" ;;
+        esac
+    }
+
+    # Tarball 안 모듈 디렉토리 이름 — psp/isp 도 dist/csp/ 를 그대로 패키징
+    # (cims.sh 안의 $DIST_DIR/csp/bin/csp 가 그대로 동작). meta.json 의 name 만 분리.
+    _src_sub_for() {
+        case "$1" in
+            psp|isp) echo "csp" ;;
+            pmp|imp) echo "cmp" ;;
+            *)       echo "$1" ;;   # csp/cmp/csc/console/phone/cwrtc/cspsim/agent
         esac
     }
 
@@ -1570,11 +1720,12 @@ cmd_pkg() {
     local t src_sub tar_file build_date
     for t in "${targets[@]}"; do
         case "$t" in
-            cmp|csp|cwrtc|csc|console|phone|cspsim|agent) src_sub="$t" ;;
+            cmp|pmp|imp|csp|psp|isp|cwrtc|csc|console|phone|cspsim|agent)
+                src_sub=$(_src_sub_for "$t") ;;
             *) err "알 수 없는 컴포넌트: $t"; continue ;;
         esac
         if [[ ! -d "$DIST_DIR/$src_sub" ]]; then
-            warn "skip: $DIST_DIR/$src_sub 없음"; continue
+            warn "skip: $DIST_DIR/$src_sub 없음 (target=$t src_sub=$src_sub)"; continue
         fi
 
         # build_date = 컴포넌트 dist 디렉토리 안에서 가장 최근 파일의 mtime
@@ -1590,10 +1741,16 @@ cmd_pkg() {
         done
         [[ -z $comp_meta ]] && warn "$t: pkg.json 없음 — description 공란"
 
-        # 이 모듈의 실제 적용 버전 결정 (explicit > no-bump > auto-bump patch)
-        local comp_ver; comp_ver=$(_resolve_version "$comp_meta" "$version" "$no_bump")
-        # pkg.json 에 반영 (소스 + dist 둘 다)
-        if [[ -n $comp_ver ]]; then
+        # 이 모듈의 실제 적용 버전 결정 (explicit > no-bump > auto-bump patch).
+        # 변종 (psp/isp/pmp/imp) 은 base (csp/cmp) 의 version 을 read-only 로 따라감 —
+        # 9 tarball 이 같은 patch+1 을 3번 누적하지 않도록.
+        local effective_no_bump="$no_bump"
+        case "$t" in
+            psp|isp|pmp|imp) effective_no_bump=1 ;;
+        esac
+        local comp_ver; comp_ver=$(_resolve_version "$comp_meta" "$version" "$effective_no_bump")
+        # pkg.json 에 반영 (base 만 — 변종은 read-only)
+        if [[ -n $comp_ver && "$effective_no_bump" != "1" ]]; then
             [[ -n $comp_meta ]] && _pkg_write_version "$comp_meta" "$comp_ver"
             local dist_meta="$DIST_DIR/$t/pkg.json"
             [[ -f $dist_meta && "$dist_meta" != "$comp_meta" ]] && _pkg_write_version "$dist_meta" "$comp_ver"
@@ -1625,6 +1782,15 @@ if meta_file and os.path.isfile(meta_file):
                     service = entry[name]["service"]
     except Exception:
         pass
+# csp/cmp 변종은 base description 끝에 역할 suffix 추가 (식별용).
+_ROLE_SUFFIX = {
+    "psp": " · PSP role (PTT CSCF + PTT-AS)",
+    "isp": " · ISP role (IBCF / IP-PBX trunk)",
+    "pmp": " · PMP role (PTT RTP/Floor)",
+    "imp": " · IMP role (IBCF media)",
+}
+if name in _ROLE_SUFFIX:
+    desc = (desc or "").rstrip() + _ROLE_SUFFIX[name]
 meta = {
     "name": name,
     "version": version,

@@ -7,9 +7,9 @@
       "description": "CSP ↔ CMP JSON 제어 채널 바인딩. RTP 외부 IP 와 CSP 주소는 _infra 에 배치.",
       "fields": [
         { "key": "ServerIp", "label": "제어 바인딩 IP",
-          "type": "string", "default": "0.0.0.0",
+          "type": "string", "default": "0.0.0.0", "deploy_value": "@CMP_IP@",
           "required": true, "restart": true,
-          "help": "CMP 제어 소켓 bind IP (0.0.0.0 = any interface)." },
+          "help": "CMP 제어 소켓 bind IP. 인스턴스 분리 (CMP/PMP/IMP) 환경에서는 host-specific 명시 (CMP_IP/PMP_IP/IMP_IP) — wildcard 면 같은 host 의 다른 인스턴스와 9000 충돌." },
         { "key": "ServerPort", "label": "제어 포트",
           "type": "int", "default": 9000, "min": 1, "max": 65535,
           "required": true, "restart": true,

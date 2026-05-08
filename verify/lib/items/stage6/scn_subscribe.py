@@ -13,6 +13,7 @@ from glob import glob
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
+from ._helpers import target_ip
 
 
 @verify_item(
@@ -35,7 +36,7 @@ def scn_subscribe(ctx: VerifyContext) -> ItemResult:
 
     args = [
         "-no-db", "-mode", "ptt", "-scenario", "subscribe",
-        "-count", "1", "-duration", "3", "-ip", ctx.sim_ip,
+        "-count", "1", "-duration", "3", "-ip", target_ip("psp", ctx.sim_ip),
         "-user", s["PTT_USER"], "-domain", s["PTT_DOM"],
         "-password", s["PTT_PWD"],
     ]
@@ -44,7 +45,10 @@ def scn_subscribe(ctx: VerifyContext) -> ItemResult:
 
     t0 = time.time()
     ctx.state["S6_SUBSCRIBE_T0"] = t0
-    rc, tail = run_cspsim(ctx.repo_root, args, timeout=45)
+    # tail_lines 를 크게 (500) — cims.sh sim 종료 후 검증 결과 ls 가 100+ 줄
+    # 출력하면 cspsim 본체의 "Subscriptions complete" 마커가 default 100 라인
+    # 윈도우 밖으로 밀려 detection 실패.
+    rc, tail = run_cspsim(ctx.repo_root, args, timeout=45, tail_lines=500)
     sub_complete = "Subscriptions complete" in tail
     sub_sent = "Sending GMS/CMS SUBSCRIBE" in tail
     notify_seen = _count_notify_lines(ctx.dist_dir, since=t0)

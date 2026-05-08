@@ -63,9 +63,12 @@ def scn_cert_rotate(ctx: VerifyContext) -> ItemResult:
     cert_renewed = False
     try:
         cur = conn.cursor()
+        # cims_agent 에 같은 name 의 row 가 회차마다 누적될 수 있음 (이전
+        # enrollment 가 DELETE 안 된 케이스). 가장 최근 (max id) 의 row 가
+        # 활성 agent — 옛 offline row 잡으면 SKIP 으로 빠짐.
         cur.execute(
             "SELECT id, status, cert_rotate_pending, cert_issued_at "
-            "FROM cims_agent WHERE name=%s",
+            "FROM cims_agent WHERE name=%s ORDER BY id DESC LIMIT 1",
             (_AGENT_NAME,),
         )
         row = cur.fetchone()

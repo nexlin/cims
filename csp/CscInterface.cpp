@@ -84,7 +84,16 @@ void CCscInterface::ListenerLoop() {
     setsockopt( m_iServerSock, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof( opt ) );
 
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    // host-specific bind — 같은 host 의 여러 csp 인스턴스 (CSP/PSP/ISP) 가 4421 을
+    // 0.0.0.0 wildcard 로 점유하면 SO_REUSEADDR 로 충돌은 안 나지만 UDP packet
+    // routing 비결정적 (kernel 이 어느 socket 에 deliver 할지 모호). gclsSetup
+    // 의 LocalIp 가 명시 IP (예: PSP=127.0.0.3) 면 그 IP 로 bind 해서 destination
+    // IP 매칭으로 정확한 라우팅 보장. LocalIp 가 0.0.0.0/공백이면 INADDR_ANY 유지.
+    if ( !gclsSetup.m_strLocalIp.empty() && gclsSetup.m_strLocalIp != "0.0.0.0" ) {
+        serverAddr.sin_addr.s_addr = inet_addr( gclsSetup.m_strLocalIp.c_str() );
+    } else {
+        serverAddr.sin_addr.s_addr = INADDR_ANY;
+    }
     serverAddr.sin_port = htons( m_iPort );
 
     if ( bind( m_iServerSock, (struct sockaddr*)&serverAddr, sizeof( serverAddr ) ) < 0 ) {

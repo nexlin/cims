@@ -17,6 +17,7 @@ from ...common.subscribers import (
 from ...common.access_services import seed_access_services, signal_csp_reload
 from ...common.csp_notify import trigger_group_resync
 from ...common.cmp_client import cmp_request
+from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
 
 
 def _wait_cmp_ready(ip: str = "127.0.0.1", port: int = 9000,
@@ -64,16 +65,39 @@ def _wait_group_in_cmp(target_gid: str, ip: str = "127.0.0.1",
     execution_order=20,
 )
 def seed(ctx: VerifyContext) -> ItemResult:
-    cfg_dir  = os.path.join(ctx.dist_dir, "csp-server", "csp", "config")
-    pid_file = os.path.join(ctx.dist_dir, "csp-server", "csp", "run", "csp.pid")
-
     sub = select_subscribers(_db.csp_db_config(ctx.dist_dir))
-    seeded_n = seed_access_services(
-        cfg_dir, sub["voip_ref"], sub["ptt_ref"],
-        tag="verify-stage6-seed",
-        note="auto-seeded by cims_verify S6-SEED",
-    )
-    reloaded = signal_csp_reload(pid_file)
+
+    # _INSTANCES 의 모든 csp variant (CSP/PSP/ISP) 에 access_services.jsonl 시드
+    # + SIGUSR1 reload. 누락 시 해당 인스턴스의 gclsServiceMap 이 빈 채로 유지되어
+    # cspsim REGISTER 가 'data 불완전 — Auth reject' 으로 403 거부.
+    # filter: tarball 이 csp/psp/isp — 모두 csp 바이너리 사용. dir 필드는
+    # install_path leaf (psp 등) 라 매칭에 부적합.
+    csp_variants = [inst for inst in _NATIVE_INSTANCES
+                     if inst.get("tarball") in ("csp", "psp", "isp")]
+    seed_lines: list = []
+    primary_seeded = 0
+    primary_reloaded = False
+    for inst in csp_variants:
+        # install_path = dist_dir/{id}-server/{dir}. cims.sh DIST_DIR=install_path.
+        # csp 의 CspConfigCache jsonlDir = install_path/config (csp.json 의 ConfigJsonlDir
+        # 가 ../config 상대경로 → ProgramDirectory(install_path/csp/bin)/../config).
+        # 즉 access_services.jsonl 시드 위치는 install_path/config 직속.
+        # PID 파일은 cims.sh 의 PID_DIR=$DIST_DIR/run = install_path/run.
+        install_path = os.path.join(ctx.dist_dir, f"{inst['id']}-server", inst["dir"])
+        cfg_dir = os.path.join(install_path, "config")
+        pid_file = os.path.join(install_path, "run", f"{inst['id']}.pid")
+        n = seed_access_services(
+            cfg_dir, sub["voip_ref"], sub["ptt_ref"],
+            tag="verify-stage6-seed",
+            note=f"auto-seeded by cims_verify S6-SEED ({inst['id']})",
+        )
+        reloaded = signal_csp_reload(pid_file)
+        seed_lines.append(f"  · {inst['id']}: seeded {n}건 / reload(SIGUSR1)={'OK' if reloaded else 'FAIL'}")
+        if inst["id"] == "csp":
+            primary_seeded = n
+            primary_reloaded = reloaded
+    seeded_n = primary_seeded
+    reloaded = primary_reloaded
 
     # pipeline 회차에서 csp fresh start 후 cmp 와의 첫 control 통신이 실패하는
     # 케이스 대응 (~90s wait). 다음 두 단계로 우회:
@@ -102,8 +126,8 @@ def seed(ctx: VerifyContext) -> ItemResult:
     lines = [
         f"- VoIP: user={sub['voip_user']!r} domain={VOLTE_DOMAIN} auth_id={voip_auth!r}",
         f"- PTT:  user={sub['ptt_user']!r}  domain={MCPTT_DOMAIN} group={sub['ptt_group']!r}",
-        f"- jsonlDir: {cfg_dir}",
-        f"- seeded: {seeded_n}건  / csp reload(SIGUSR1): {'OK' if reloaded else 'FAIL'}",
+        f"- 시드 대상: {len(csp_variants)} csp variant",
+        *seed_lines,
         f"- cmp STATS ready: {'OK' if cmp_ready else 'TIMEOUT'}"
         f" / group({target_gid!r}) in CMP: {'OK' if group_in_cmp else 'TIMEOUT'}",
     ]

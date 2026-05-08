@@ -134,10 +134,20 @@ def _fail(ctx: VerifyContext, msg: str) -> ItemResult:
 
 
 def _csp_log_paths(dist_dir: str) -> list:
-    """배포본 csp 로그 파일 list."""
-    return sorted(glob(os.path.join(
-        dist_dir, "csp-server", "csp", "csp", "log", "csp_*.log",
-    )))
+    """배포본 csp 변종 (CSP/PSP/ISP) 모든 인스턴스의 log 파일 list.
+    GROUP_CHANGED notify 는 PSP 로, USER_CHANGED 는 CSP+PSP broadcast (mcptt.py
+    의 _notify_targets 라우팅) — 양쪽 로그를 모두 grep 해야 검출 가능."""
+    from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
+    paths: list = []
+    for inst in _NATIVE_INSTANCES:
+        if inst.get("tarball") not in ("csp", "psp", "isp"):
+            continue
+        # install_path/csp/log/csp_*.log
+        log_glob = os.path.join(
+            dist_dir, f"{inst['id']}-server", inst["dir"], "csp", "log", "csp_*.log",
+        )
+        paths.extend(glob(log_glob))
+    return sorted(paths)
 
 
 def _log_offsets(paths: list) -> dict:

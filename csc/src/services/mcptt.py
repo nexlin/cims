@@ -39,6 +39,10 @@ REFRESH_TOKEN_TTL = 7 * 24 * 3600  # 7일
 
 CSP_NOTIFY_IP = "127.0.0.1"
 CSP_NOTIFY_PORT = 4421
+# PSP (PTT 시그널링) — 별도 인스턴스 분리 시 사용. CSP 와 동일하면 broadcast 가
+# 동일 endpoint 1번만 호출 (자동 dedup).
+PSP_NOTIFY_IP = ""           # ""=PSP 미설정 (legacy: CSP 만 사용)
+PSP_NOTIFY_PORT = 4421
 
 def load_shared_data(config):
     # Do not reassign global variables, modify them in place
@@ -125,12 +129,17 @@ def load_shared_data(config):
     if idms_config.get('RefreshTokenTtl'):
         REFRESH_TOKEN_TTL = int(idms_config['RefreshTokenTtl'])
 
-    global CSP_NOTIFY_IP, CSP_NOTIFY_PORT
+    global CSP_NOTIFY_IP, CSP_NOTIFY_PORT, PSP_NOTIFY_IP, PSP_NOTIFY_PORT
     notify_cfg = config.get('CspNotify', {})
     if notify_cfg.get('Ip'):
         CSP_NOTIFY_IP = notify_cfg['Ip']
     if notify_cfg.get('Port'):
         CSP_NOTIFY_PORT = int(notify_cfg['Port'])
+    psp_cfg = config.get('PspNotify', {})
+    if psp_cfg.get('Ip'):
+        PSP_NOTIFY_IP = psp_cfg['Ip']
+    if psp_cfg.get('Port'):
+        PSP_NOTIFY_PORT = int(psp_cfg['Port'])
 
     global GROUP_DIR
     if group_path:
@@ -233,13 +242,44 @@ def load_shared_data(config):
 # [FIX] Notify CSP logic
 _notify_seq = 0
 
+def _notify_targets(event_type):
+    """이벤트 타입별 endpoint 라우팅 — (ip, port, label) tuple list.
+    - GROUP_CHANGED: PSP 단독 (PSP 미설정 시 CSP fallback)
+    - USER_CHANGED + 기타: CSP + PSP 양쪽 broadcast (둘이 같은 IP/port 면 dedup)
+    """
+    targets = []
+    seen = set()
+    def _add(ip, port, label):
+        if not ip:
+            return
+        key = (ip, int(port))
+        if key in seen:
+            return
+        seen.add(key)
+        targets.append((ip, int(port), label))
+
+    if event_type == "GROUP_CHANGED":
+        # PTT 그룹 변경 — PSP 가 PTT-AS 담당. PSP 미설정이면 CSP 로 fallback.
+        if PSP_NOTIFY_IP:
+            _add(PSP_NOTIFY_IP, PSP_NOTIFY_PORT, "PSP")
+        else:
+            _add(CSP_NOTIFY_IP, CSP_NOTIFY_PORT, "CSP")
+    else:
+        # USER_CHANGED / CSC_RESTART / *_CHANGED — 양쪽 broadcast.
+        _add(CSP_NOTIFY_IP, CSP_NOTIFY_PORT, "CSP")
+        _add(PSP_NOTIFY_IP, PSP_NOTIFY_PORT, "PSP")
+    return targets
+
+
 def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""):
-    """CSC → CSP UDP notify.
-    sesid/service 를 payload에 실어 CSP가 flow 로그 상관관계를 유지할 수 있게 함.
+    """CSC → CSP/PSP UDP notify.
+    sesid/service 를 payload에 실어 시그널링 서버가 flow 로그 상관관계를 유지.
     - sesid 미지정 시 자동 발행 (caller 또는 빈값 기반)
     - caller 미지정 시 uri에서 자동 추출
     - service 미지정 시 이벤트 타입으로 추정:
         CSC_RESTART → system, *_CHANGED/* → console (admin 트리거), 그 외 → mcptt
+    - 라우팅: GROUP_CHANGED → PSP 전용, USER_CHANGED/기타 → CSP+PSP broadcast.
+      PSP 미설정 (PSP_NOTIFY_IP=="") 이거나 PSP 가 CSP 와 동일하면 단일 endpoint.
     """
     global _notify_seq
     _notify_seq += 1
@@ -276,12 +316,17 @@ def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""
         }
         msg = json.dumps(data)
 
-        # Connect to CSP (Localhost 4421) - UDP
+        targets = _notify_targets(event_type)
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(msg.encode('utf-8'), (CSP_NOTIFY_IP, CSP_NOTIFY_PORT))
+        for ip, port, label in targets:
+            try:
+                sock.sendto(msg.encode('utf-8'), (ip, port))
+            except Exception as e:
+                logger.log_error(f"Notify {label} failed: {e}")
         sock.close()
 
-        # CSC 자체 flow/msg 로그에도 기록 (iface=csp)
+        # CSC 자체 flow/msg 로그 — peer 는 첫 target (혹은 CSP fallback)
+        peer_ip, peer_port = (targets[0][0], targets[0][1]) if targets else (CSP_NOTIFY_IP, CSP_NOTIFY_PORT)
         _logger.log_flow(
             service=service,
             from_actor="csc", to_actor="csp",
@@ -290,12 +335,13 @@ def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""
             sesid=sesid,
             iface="csp",
             body=msg,
-            peer=f"{CSP_NOTIFY_IP}:{CSP_NOTIFY_PORT}",
+            peer=f"{peer_ip}:{peer_port}",
             mid=str(_notify_seq),
             caller=caller,
         )
 
-        logger.log_info(f"Notify Sent: {msg}")
+        labels = ",".join(t[2] for t in targets) or "(none)"
+        logger.log_info(f"Notify Sent → {labels}: {msg}")
     except Exception as e:
         logger.log_error(f"Notify Failed: {e}")
 
