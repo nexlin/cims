@@ -859,8 +859,14 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                          call_type: str = "volte",
                          sesid_set: set = None) -> list:
     """서비스별 flow.jsonl에서 CMP(proto=JSON)/CSC(proto=CSC) 메시지 검색.
-    sesid_set 이 주어지면 해당 sesid 와 일치하는 메시지만 반환 (타 호 섞임 방지).
-    그렇지 않으면 legacy fallback: 시간 범위 기반 검색.
+
+    필터 정책 — CSC 는 디버깅 데이터 액세스 계층이므로 **세션 식별 (sesid)
+    기준으로만 필터**한다. method 블랙리스트나 HEARTBEAT 숨김 같은 표시
+    레벨 처리는 console 에서 처리. 호출자는 raw 데이터를 받고 필요 시
+    필터링.
+
+    - sesid_set 이 주어지면 그 set 과 매칭되는 메시지만 (가장 정확).
+    - 없으면 시간 범위 [time_start, time_end] 로 fallback.
     """
     if not _sip_log_dir:
         return []
@@ -887,30 +893,15 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                         continue
                     if obj.get("proto") not in ("JSON", "CSC"):
                         continue
-                    method = obj.get("method", "")
-                    mu = method.upper()
-                    if mu in ("HEARTBEAT",):
-                        continue
-                    if call_type.startswith("volte") and mu in (
-                        "ADD_GROUP", "REMOVE_GROUP", "JOIN_GROUP",
-                        "LEAVE_GROUP", "MODIFY_GROUP",
-                        # PTT 접두사 변형 — VoLTE flow 에 PTT 그룹 메시지 섞임 방지
-                        "ADD_PTT_GROUP", "REMOVE_PTT_GROUP", "JOIN_PTT_GROUP",
-                        "LEAVE_PTT_GROUP", "MODIFY_PTT_GROUP",
-                    ):
-                        continue
-                    if call_type == "ptt" and mu in ("ADD_SESSION", "REMOVE_SESSION", "MODIFY_SESSION"):
-                        continue
 
-                    # ── 1차 필터: sesid 일치 (가장 정확) ──
+                    # ── 1차: sesid 매칭 (정확) ──
                     if sesid_set:
-                        msg_sesid = obj.get("sesid", "")
-                        if msg_sesid not in sesid_set:
+                        if obj.get("sesid", "") not in sesid_set:
                             continue
                         results.append(obj)
                         continue
 
-                    # ── fallback: 시간 범위 필터 (sesid 없는 legacy 로그 대응) ──
+                    # ── fallback: 시간 범위 (sesid 미사용 시) ──
                     ts = obj.get("ts", "")
                     if time_start and ts < time_start:
                         continue
@@ -1689,7 +1680,9 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                 ses_t_end = ":".join(parts_e)
             except: pass
 
-        # 세션 시간 범위 내 mcptt 서비스 flow 수집
+        # 1) flow.jsonl 전체를 1회 로드 (mcptt/ptt 서비스). 시간 필터·method
+        #    필터는 적용하지 않는다 — CSC 는 raw 데이터를 반환하고 필터링은
+        #    호출자(console)가 결정.
         all_ptt_msgs = []
         for jsonl_path in flow_paths:
             try:
@@ -1701,39 +1694,55 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                         except: continue
                         svc = obj.get("service", "")
                         if svc not in ("mcptt", "ptt", ""): continue
-                        ts = obj.get("ts", "")
-                        if ses_t_start and ts and ts < ses_t_start: continue
-                        if ses_t_end and ts and ts > ses_t_end: continue
                         all_ptt_msgs.append(obj)
             except Exception as e:
                 logger.error("flow read error: %s", e)
 
-        # 그룹 관련 메시지 매칭:
-        # 1) SIP: detail/subid/sesid 에 group_id 포함
-        # 2) CMP(JSON): detail 에 group_id 포함 또는 ADD/REMOVE_PTT_GROUP 계열
-        matched_subids = set()
+        # 2) 세션 식별 (sesid_set) 추출:
+        #    세션 시간 범위 [ses_t_start, ses_t_end] 내에서 group_id 와 일치하는
+        #    메시지의 sesid 를 모은다. PTT 의 sesid 는 그룹 세션 단위로 발급 →
+        #    JOIN/LEAVE/ADD/REMOVE 모두 같은 sesid 를 공유.
+        sesid_set: set = set()
+        subid_set: set = set()
+        if group_id:
+            for obj in all_ptt_msgs:
+                ts = obj.get("ts", "")
+                if ses_t_start and ts and ts < ses_t_start: continue
+                if ses_t_end and ts and ts > ses_t_end: continue
+                detail = obj.get("detail", "") or ""
+                sesid_val = obj.get("sesid", "") or ""
+                subid_val = obj.get("subid", "") or ""
+                if group_id in detail or group_id in sesid_val or group_id in subid_val:
+                    if sesid_val: sesid_set.add(sesid_val)
+                    if subid_val and obj.get("proto") == "SIP":
+                        subid_set.add(subid_val)
+
+        # 3) sesid 매칭으로 전체 메시지 필터 — 시간 범위 무관.
+        #    같은 그룹 세션의 startup-time ADD_PTT_GROUP, 종료 후 REMOVE 등도
+        #    자연스럽게 포함됨. SIP 응답은 subid (Call-ID) 기준으로 묶음.
         all_matched = []
         for obj in all_ptt_msgs:
-            detail = obj.get("detail", "") or ""
             sesid_val = obj.get("sesid", "") or ""
             subid_val = obj.get("subid", "") or ""
-            hit = False
-            if group_id and (group_id in detail or group_id in sesid_val or group_id in subid_val):
-                hit = True
-            # session_id(JOIN/LEAVE)는 sesid==group_id 이거나 detail에 group_id 검색
-            if hit:
+            if sesid_set and sesid_val in sesid_set:
                 all_matched.append(obj)
-                if obj.get("proto") == "SIP" and subid_val:
-                    matched_subids.add(subid_val)
+                continue
+            if subid_set and subid_val in subid_set and obj.get("proto") == "SIP":
+                all_matched.append(obj)
+                continue
 
-        # 같은 subid(Call-ID)를 가진 SIP 응답도 포함
-        if matched_subids:
+        # 4) sesid 매칭으로 아무것도 안 잡히면 fallback: 기존 substring 매칭
+        #    (legacy 로그 — sesid 누락 케이스 대비).
+        if not all_matched and group_id:
             for obj in all_ptt_msgs:
-                if obj in all_matched: continue
-                if obj.get("proto") == "SIP":
-                    sub = obj.get("subid", "")
-                    if sub and sub in matched_subids:
-                        all_matched.append(obj)
+                ts = obj.get("ts", "")
+                if ses_t_start and ts and ts < ses_t_start: continue
+                if ses_t_end and ts and ts > ses_t_end: continue
+                detail = obj.get("detail", "") or ""
+                sesid_val = obj.get("sesid", "") or ""
+                subid_val = obj.get("subid", "") or ""
+                if group_id in detail or group_id in sesid_val or group_id in subid_val:
+                    all_matched.append(obj)
 
         filtered = all_matched
 
