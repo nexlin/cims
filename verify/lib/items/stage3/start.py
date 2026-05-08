@@ -13,6 +13,7 @@ from ... import shell
     depends_on=["S3-CONFIGURE"],
     presets=["stage3-full", "pipeline-full", "pre-package"],
     side_effects=["service-start"], timeout_s=120,
+    execution_order=30,
 )
 def start(ctx: VerifyContext) -> ItemResult:
     rc, out, err = shell.run_cims_sh(ctx.repo_root, "start", timeout=120)

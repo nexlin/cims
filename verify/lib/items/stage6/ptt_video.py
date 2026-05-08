@@ -12,6 +12,7 @@ from ._helpers import run_scenario
     depends_on=["S6-SEED"],
     presets=["stage6-full", "stage6-ptt", "pipeline-full", "post-deploy"],
     side_effects=["sim-call"], timeout_s=90,
+    execution_order=60,
 )
 def scn_ptt_video(ctx: VerifyContext) -> ItemResult:
     s = ctx.state

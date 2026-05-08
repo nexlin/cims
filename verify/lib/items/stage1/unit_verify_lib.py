@@ -14,6 +14,7 @@ from ...context import VerifyContext
     name="verify.lib unit test (python3 -m unittest tests.test_verify_lib)",
     presets=["stage1-full", "pipeline-full", "pre-package"],
     side_effects=["read-only"], timeout_s=120,
+    execution_order=50,
 )
 def unit_verify_lib(ctx: VerifyContext) -> ItemResult:
     test_module = os.path.join(ctx.repo_root, "tests", "test_verify_lib.py")

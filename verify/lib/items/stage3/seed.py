@@ -19,6 +19,7 @@ from ...common.access_services import seed_access_services, signal_csp_reload
     depends_on=["S3-START"],
     presets=["stage3-full", "pipeline-full", "pre-package"],
     side_effects=["fs-write", "service-signal"], timeout_s=30,
+    execution_order=40,
 )
 def seed(ctx: VerifyContext) -> ItemResult:
     """Stage 3 스모크용 가입자 정보를 ctx.state 에 적재 + access_services.jsonl 시드.

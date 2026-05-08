@@ -61,6 +61,7 @@ def _wait_group_in_cmp(target_gid: str, ip: str = "127.0.0.1",
     presets=["stage6-full", "pipeline-full", "post-deploy"],
     side_effects=["fs-write", "service-signal"],
     timeout_s=30,
+    execution_order=20,
 )
 def seed(ctx: VerifyContext) -> ItemResult:
     cfg_dir  = os.path.join(ctx.dist_dir, "csp-server", "csp", "config")

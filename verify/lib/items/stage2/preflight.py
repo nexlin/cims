@@ -15,6 +15,7 @@ from ... import shell
     name="preflight (ens160 IP / git / 포트 / DB)",
     presets=["stage2-full", "pipeline-full", "pre-package"],
     side_effects=["read-only"], timeout_s=30,
+    execution_order=10,
 )
 def preflight(ctx: VerifyContext) -> ItemResult:
     rc, out, err = shell.run_cims_sh(ctx.repo_root, "preflight", timeout=30)

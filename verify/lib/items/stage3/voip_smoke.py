@@ -14,6 +14,7 @@ from ._helpers import run_scenario
     depends_on=["S3-SEED"],
     presets=["stage3-full", "pipeline-full", "pre-package"],
     side_effects=["sim-call"], timeout_s=120,
+    execution_order=50,
 )
 def voip_smoke(ctx: VerifyContext) -> ItemResult:
     s = ctx.state

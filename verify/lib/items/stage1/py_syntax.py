@@ -24,6 +24,7 @@ _TARGET_DIRS = [
     name="Python 문법 검사 (py_compile, verify/+tests/+csc/+scripts/)",
     presets=["stage1-full", "pipeline-full", "pre-package"],
     side_effects=["read-only"], timeout_s=60,
+    execution_order=10,
 )
 def py_syntax(ctx: VerifyContext) -> ItemResult:
     targets = []

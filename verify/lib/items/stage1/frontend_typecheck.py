@@ -14,6 +14,7 @@ from ... import shell
     name="cims-console TypeScript typecheck (tsc -b --noEmit)",
     presets=["stage1-full", "pipeline-full", "pre-package"],
     side_effects=["read-only"], timeout_s=180,
+    execution_order=30,
 )
 def frontend_typecheck(ctx: VerifyContext) -> ItemResult:
     console_dir = os.path.join(ctx.repo_root, "cims-console")

@@ -53,6 +53,7 @@ def _stats_has_gid(resp: dict, gid: str) -> bool:
     depends_on=["S6-SCN-DB-SYNC"],
     presets=["stage6-full", "pipeline-full", "post-deploy"],
     side_effects=["db-write", "network"], timeout_s=20,
+    execution_order=81,
 )
 def scn_cmp_group_sync(ctx: VerifyContext) -> ItemResult:
     notes: list = []

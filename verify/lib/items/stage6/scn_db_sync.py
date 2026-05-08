@@ -38,6 +38,7 @@ def _deployed_csc_base(ctx: VerifyContext) -> str:
     depends_on=["S6-SEED"],
     presets=["stage6-full", "pipeline-full", "post-deploy"],
     side_effects=["db-write", "network"], timeout_s=30,
+    execution_order=80,
 )
 def scn_db_sync(ctx: VerifyContext) -> ItemResult:
     notes: list = []

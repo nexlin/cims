@@ -13,6 +13,7 @@ from ... import shell
     depends_on=["S2-PREFLIGHT"],
     presets=["stage2-full", "pipeline-full", "pre-package"],
     side_effects=["fs-write"], timeout_s=900,
+    execution_order=20,
 )
 def build(ctx: VerifyContext) -> ItemResult:
     if ctx.skip_build:

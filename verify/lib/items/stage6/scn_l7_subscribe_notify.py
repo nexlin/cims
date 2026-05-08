@@ -31,6 +31,7 @@ _KNOWN_KINDS = (
     depends_on=["S6-SCN-SUBSCRIBE"],
     presets=["stage6-full", "stage6-ptt", "pipeline-full", "post-deploy"],
     side_effects=["read-only"], timeout_s=20,
+    execution_order=71,
 )
 def scn_l7_subscribe_notify(ctx: VerifyContext) -> ItemResult:
     since = ctx.state.get("S6_SUBSCRIBE_T0") or (time.time() - 120)

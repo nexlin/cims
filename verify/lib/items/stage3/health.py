@@ -14,6 +14,7 @@ from ...context import VerifyContext
     depends_on=["S3-START"],
     presets=["stage3-full", "stage3-quick", "pipeline-full", "pre-package"],
     side_effects=["read-only"], timeout_s=10,
+    execution_order=70,
 )
 def health(ctx: VerifyContext) -> ItemResult:
     log_dir = os.path.join(ctx.dist_dir, "log")

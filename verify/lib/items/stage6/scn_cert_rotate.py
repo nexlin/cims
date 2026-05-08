@@ -36,6 +36,7 @@ _TB_CSC_CFG_REL = ("csc", "config", "csc-tb.json")
     depends_on=["S6-SEED"],
     presets=["stage6-full", "pipeline-full", "post-deploy"],
     side_effects=["db-write", "process-state"], timeout_s=60,
+    execution_order=90,
 )
 def scn_cert_rotate(ctx: VerifyContext) -> ItemResult:
     notes: list = []

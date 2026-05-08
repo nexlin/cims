@@ -14,6 +14,7 @@ from ... import shell
     name="cims-console eslint (npm run lint)",
     presets=["stage1-full", "pipeline-full", "pre-package"],
     side_effects=["read-only"], timeout_s=120,
+    execution_order=20,
 )
 def frontend_lint(ctx: VerifyContext) -> ItemResult:
     console_dir = os.path.join(ctx.repo_root, "cims-console")

@@ -21,6 +21,7 @@ from ...context import VerifyContext
     ],
     presets=["stage6-full", "pipeline-full", "post-deploy"],
     side_effects=["read-only"], timeout_s=10,
+    execution_order=100,
 )
 def summary(ctx: VerifyContext) -> ItemResult:
     """녹취 / SIP msg/flow 라인 / 배포본 csp·cmp ERROR/FATAL 카운트."""

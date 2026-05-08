@@ -14,6 +14,7 @@ from ... import shell
     # stage3/5/pipeline-full preset 에는 미포함.
     presets=["prep-reset"],
     side_effects=["fs-write", "db-truncate", "process-kill"], timeout_s=120,
+    execution_order=10,
 )
 def reset(ctx: VerifyContext) -> ItemResult:
     if ctx.skip_reset:

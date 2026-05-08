@@ -15,6 +15,7 @@ from ... import shell
     name="패키지 빌드 (cims.sh pkg --no-bump → build/dist/packages/*.tar.gz)",
     presets=["stage4-full", "pipeline-full", "pre-package"],
     side_effects=["fs-write"], timeout_s=300,
+    execution_order=10,
 )
 def pkg_build(ctx: VerifyContext) -> ItemResult:
     if ctx.skip_pkg:

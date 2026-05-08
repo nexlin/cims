@@ -21,6 +21,7 @@ from ...common.cspsim import run_cspsim
     depends_on=["S6-SEED"],
     presets=["stage6-full", "stage6-ptt", "pipeline-full", "post-deploy"],
     side_effects=["sim-call"], timeout_s=60,
+    execution_order=70,
 )
 def scn_subscribe(ctx: VerifyContext) -> ItemResult:
     s = ctx.state

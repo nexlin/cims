@@ -31,6 +31,7 @@ def _sha256_file(path: str) -> str:
     depends_on=["S4-PKG-BUILD"],
     presets=["stage4-full", "pipeline-full", "pre-package"],
     side_effects=["fs-write"], timeout_s=30,
+    execution_order=20,
 )
 def pkg_manifest(ctx: VerifyContext) -> ItemResult:
     pkg_dir = os.path.join(ctx.dist_dir, "packages")

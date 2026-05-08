@@ -36,6 +36,7 @@ def _collect_files(repo_root: str) -> list:
     name="C++ clang-format 검사 (--dry-run --Werror, csp/.clang-format)",
     presets=["stage1-full", "pipeline-full", "pre-package"],
     side_effects=["read-only"], timeout_s=120,
+    execution_order=40,
 )
 def cpp_format(ctx: VerifyContext) -> ItemResult:
     if not shutil.which("clang-format"):

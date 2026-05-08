@@ -12,6 +12,7 @@ from ._helpers import run_scenario
     depends_on=["S6-SEED"],
     presets=["stage6-full", "stage6-volte", "pipeline-full", "post-deploy"],
     side_effects=["sim-call"], timeout_s=60,
+    execution_order=30,
 )
 def scn_volte_voice(ctx: VerifyContext) -> ItemResult:
     s = ctx.state

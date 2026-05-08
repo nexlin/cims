@@ -13,6 +13,7 @@ from ... import shell
     depends_on=["S3-RESET"],
     presets=["stage3-full", "pipeline-full", "pre-package"],
     side_effects=["fs-write"], timeout_s=60,
+    execution_order=20,
 )
 def configure(ctx: VerifyContext) -> ItemResult:
     target_ip = ctx.ens_ip or "127.0.0.1"

@@ -42,6 +42,7 @@ def _required_ports(ctx: VerifyContext) -> list:
     presets=["stage6-full", "pipeline-full", "post-deploy"],
     side_effects=["read-only"],
     timeout_s=10,
+    execution_order=10,
 )
 def entry_check(ctx: VerifyContext) -> ItemResult:
     """포트 LISTEN + manifest immutability 매칭 검증.

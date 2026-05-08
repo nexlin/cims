@@ -32,6 +32,7 @@ _FLOOR_METHODS = ("FLOOR_GRANT", "FLOOR_TAKEN", "FLOOR_IDLE",
     depends_on=["S6-SCN-PTT-VOICE"],
     presets=["stage6-full", "stage6-ptt", "pipeline-full", "post-deploy"],
     side_effects=["read-only"], timeout_s=15,
+    execution_order=51,
 )
 def scn_mcptt_floor_grant(ctx: VerifyContext) -> ItemResult:
     since = ctx.state.get("S6_PTT_VOICE_T0") or (time.time() - 180)
