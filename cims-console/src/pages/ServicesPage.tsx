@@ -9,15 +9,31 @@ import ModuleConfigModal from '../components/module/ModuleConfigModal'
 
 type SvcState = { running: boolean; pid?: number }
 
-const SERVICE_META: Array<{ name: ServiceName; label: string; critical?: boolean; managed?: boolean }> = [
-  { name: 'cmp',     label: 'CMP (미디어)',            managed: true },
-  { name: 'csp',     label: 'CSP (SIP)',                managed: true },
-  { name: 'cwrtc',   label: 'cwrtc (WebRTC 브리지)',   managed: true },
-  { name: 'csc',     label: 'CSC (Admin API)',          managed: true, critical: true },
-  { name: 'console', label: 'Console (웹 UI)',          managed: true },
-  { name: 'phone',   label: 'Phone (웹 단말)',          managed: true },
-  { name: 'agent',   label: 'Agent (원격 관리 모듈)',   managed: false },
+// 빌드 단위 카드 정의 — csp/cmp 는 같은 dist 에서 변종 (psp/isp/pmp/imp) 까지
+// 셋이 묶인 패키지 산출물로 묶임. ▣ 한 번 = 셋 동시 재패키징.
+//   key       — 카드 식별자 (소스 트리 매핑 = base dist)
+//   variants  — 패키지/프로세스 단위 module 이름 배열 (psp/isp 도 process_name 로 사용)
+//   hasProcess — 로컬 프로세스 제어 가능 여부 (false 면 패키지화/다운로드만)
+//   critical  — 종료 시 Console 단절 경고
+type BuildCard = {
+  key: string
+  label: string
+  variants: ServiceName[]
+  hasProcess: boolean
+  critical?: boolean
+}
+const BUILD_CARDS: BuildCard[] = [
+  { key: 'csp',     label: 'CSP (VoLTE/PTT/IBCF SIP)', variants: ['csp', 'psp', 'isp'] as ServiceName[], hasProcess: true },
+  { key: 'cmp',     label: 'CMP (VoLTE/PTT/IBCF 미디어)', variants: ['cmp', 'pmp', 'imp'] as ServiceName[], hasProcess: true },
+  { key: 'cwrtc',   label: 'cwrtc (WebRTC 브리지)',    variants: ['cwrtc'] as ServiceName[], hasProcess: true },
+  { key: 'csc',     label: 'CSC (Admin API)',          variants: ['csc'] as ServiceName[], hasProcess: true, critical: true },
+  { key: 'console', label: 'Console (웹 UI)',          variants: ['console'] as ServiceName[], hasProcess: true },
+  { key: 'phone',   label: 'Phone (웹 단말)',          variants: ['phone'] as ServiceName[], hasProcess: true },
+  { key: 'cspsim',  label: 'cspsim (시뮬레이터)',      variants: ['cspsim'] as ServiceName[], hasProcess: false },
+  { key: 'agent',   label: 'Agent (원격 관리)',        variants: ['agent'] as ServiceName[], hasProcess: false },
 ]
+// 프로세스 제어 가능한 변종 평탄화 — 일괄 선택/상태 폴링 등에 사용.
+const PROCESS_VARIANTS: ServiceName[] = BUILD_CARDS.filter(c => c.hasProcess).flatMap(c => c.variants)
 
 export default function ServicesPage() {
   const { show } = useToast()
@@ -36,7 +52,8 @@ export default function ServicesPage() {
   const [selected, setSelected] = useState<Set<ServiceName>>(new Set())
   // ── 빌드 / 패키지화 ─────────────────────────────────────────
   const [manifest, setManifest] = useState<ManifestResponse | null>(null)
-  const [activeJob, setActiveJob] = useState<{ id: string; kind: 'build' | 'pkg'; module?: string } | null>(null)
+  // activeJob.label 은 "csp" / "csp psp isp" 같이 묶음 표기
+  const [activeJob, setActiveJob] = useState<{ id: string; kind: 'build' | 'pkg'; module?: string; cardKey?: string } | null>(null)
   const [jobStatus, setJobStatus] = useState<BuildJobStatus | null>(null)
   // 우측 터미널이 어느 출처를 표시 중인지 — 마지막으로 갱신된 쪽 우선
   const [terminalSource, setTerminalSource] = useState<'job' | 'module' | null>(null)
@@ -93,7 +110,7 @@ export default function ServicesPage() {
           setTerminalSource('job')
           if (s.done) {
             const ok = s.verdict === 'PASS'
-            const label = job.kind === 'build' ? '빌드' : `패키지화 (${job.module})`
+            const label = job.kind === 'build' ? '빌드' : `패키지화 (${job.cardKey || job.module || ''})`
             show(`${label} ${ok ? '완료' : '실패'} rc=${s.returncode}`, ok ? 'ok' : 'err')
             setActiveJob(null)
             // jobStatus 는 비우지 않음 — 우측 터미널 패널에 마지막 출력 유지
@@ -143,18 +160,21 @@ export default function ServicesPage() {
     }
   }
 
-  async function startPkg(module: string) {
+  // 카드 단위 패키지화 — csp 카드는 [csp,psp,isp] 묶음, cmp 카드는 [cmp,pmp,imp].
+  // 단일 변종 카드 (cwrtc/csc/...) 는 단일 module 호출.
+  async function startPkgForCard(card: BuildCard) {
     if (activeJob) {
       show('이미 진행 중인 빌드/패키지 작업이 있습니다.', 'err')
       return
     }
     try {
-      const r = await buildApi.runPkg(module)
-      setActiveJob({ id: r.job_id, kind: 'pkg', module })
-      show(`${module} 패키지화 시작`, 'ok')
+      const r = await buildApi.runPkg(card.variants.length > 1 ? card.variants : card.variants[0])
+      setActiveJob({ id: r.job_id, kind: 'pkg', module: card.variants[0], cardKey: card.key })
+      const label = card.variants.length > 1 ? card.variants.join('/') : card.variants[0]
+      show(`${label} 패키지화 시작`, 'ok')
     } catch (e) {
       const msg = (e as Error).message
-      show(`${module} 패키지화 실패: ${msg}`, 'err')
+      show(`${card.key} 패키지화 실패: ${msg}`, 'err')
     }
   }
 
@@ -226,9 +246,11 @@ export default function ServicesPage() {
     }
   }
 
-  // 관리 가능한 (managed=true) 모듈 — 체크박스/일괄 대상
-  const managedNames = useMemo<ServiceName[]>(
-    () => SERVICE_META.filter(s => s.managed !== false).map(s => s.name),
+  // 프로세스 제어 가능한 변종 (hasProcess=true 카드의 variants) — 체크박스/일괄 대상
+  const managedNames = PROCESS_VARIANTS
+  // variant 가 critical 카드에 속하는지
+  const isCriticalVariant = useCallback(
+    (n: ServiceName) => !!BUILD_CARDS.find(c => c.variants.includes(n) && c.critical),
     [],
   )
 
@@ -257,7 +279,7 @@ export default function ServicesPage() {
       show('선택된 모듈이 없습니다.', 'err')
       return
     }
-    const hasCritical = targets.some(n => SERVICE_META.find(s => s.name === n)?.critical)
+    const hasCritical = targets.some(n => isCriticalVariant(n))
     if ((action === 'stop' || action === 'restart') && hasCritical) {
       const ok = confirm(
         `⚠️ 선택 모듈 ${targets.length}개에 critical(CSC) 가 포함됩니다.\n` +
@@ -358,11 +380,18 @@ export default function ServicesPage() {
         </div>
       </div>
 
-      {/* 일괄 액션 — 체크된 모듈 대상 (아이콘만, hover 툴팁) */}
+      {/* 일괄 액션 — 체크된 변종 대상 (아이콘만, hover 툴팁) */}
       <div style={{
         marginBottom: 12, padding: '8px 12px', borderRadius: 4, background: '#f4f6f8',
         display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
       }}>
+        <button
+          className="btn btn--sm btn--outline"
+          onClick={toggleSelectAll}
+          title={selected.size === managedNames.length ? '선택 해제' : '모두 선택'}
+        >
+          {selected.size === managedNames.length ? '☐ 해제' : '☑ 모두'}
+        </button>
         <span style={{ fontSize: 13, color: '#555' }}>
           선택 {selected.size} / {managedNames.length}
         </span>
@@ -371,14 +400,14 @@ export default function ServicesPage() {
           className={`btn btn--sm${selectedAnyRunning ? ' btn--danger' : ''}`}
           disabled={selected.size === 0}
           onClick={() => { void bulkAct(selectedAnyRunning ? 'stop' : 'start') }}
-          title={selectedAnyRunning ? '선택 모듈 종료' : '선택 모듈 기동'}
+          title={selectedAnyRunning ? '선택 변종 종료' : '선택 변종 기동'}
         >
           {selectedAnyRunning ? '■' : '▶'}
         </button>
         <button className="btn btn--sm btn--outline"
           disabled={selected.size === 0}
           onClick={() => { void bulkAct('restart') }}
-          title="선택 모듈 재기동"
+          title="선택 변종 재기동"
         >
           ↻
         </button>
@@ -392,161 +421,161 @@ export default function ServicesPage() {
       {loading ? (
         <div className="empty">로딩 중...</div>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th style={{ width: 32 }}>
-                <input type="checkbox"
-                  checked={selected.size === managedNames.length && managedNames.length > 0}
-                  ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < managedNames.length }}
-                  onChange={toggleSelectAll}
-                  aria-label="모두 선택"
-                />
-              </th>
-              <th style={{ width: 70 }}>모듈</th>
-              <th>설명</th>
-              <th style={{ width: 90 }}>상태</th>
-              <th style={{ width: 70 }}>PID</th>
-              <th style={{ width: 120 }}>버전</th>
-              <th style={{ width: 70 }}>템플릿</th>
-              <th style={{ width: 80 }}>설정</th>
-              <th style={{ width: 90 }}>패키지</th>
-              <th style={{ width: 90 }}>제어</th>
-            </tr>
-          </thead>
-          <tbody>
-            {SERVICE_META.map(svc => {
-              const s = states[svc.name]
-              const running = s?.running ?? false
-              const disabled = busy[svc.name]
-              const versions = packagesByModule[svc.name] || []
-              const curVer = selectedVersion[svc.name] || versions[0]?.version || ''
-              const checkable = svc.managed !== false
-              return (
-                <tr key={svc.name}>
-                  <td>
-                    <input type="checkbox"
-                      checked={selected.has(svc.name)}
-                      disabled={!checkable}
-                      onChange={() => toggleSelect(svc.name)}
-                      aria-label={`${svc.name} 선택`}
-                    />
-                  </td>
-                  <td style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{svc.name}</td>
-                  <td>
-                    {svc.label}
-                    {svc.critical && <span className="tag" style={{ marginLeft: 8, background: '#f39c12', color: '#fff' }}>critical</span>}
-                  </td>
-                  <td>
-                    {svc.managed === false ? (
-                      <span className="tag" style={{ background: '#3498db', color: '#fff' }}>원격</span>
-                    ) : (
-                      <span className="tag" style={{ background: running ? '#2ecc71' : '#95a5a6', color: '#fff' }}>
-                        {running ? '실행 중' : '중지됨'}
-                      </span>
-                    )}
-                  </td>
-                  <td>{svc.managed === false ? '—' : (s?.pid ?? '—')}</td>
-                  <td>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+          gap: 12, padding: 4,
+        }}>
+          {BUILD_CARDS.map(card => {
+            const versions = packagesByModule[card.key] || []
+            const curVer = selectedVersion[card.key] || versions[0]?.version || ''
+            const pkgBusy = activeJob?.kind === 'pkg' && activeJob.cardKey === card.key
+            const otherBusy = !!activeJob && !pkgBusy
+            // 카드 안 어떤 변종이든 tarball 있으면 다운로드 가능
+            const variantTars = card.variants.map(v => ({ v, tar: tarballByModule[v] }))
+            const anyTar = variantTars.some(x => !!x.tar)
+            return (
+              <div key={card.key} className="card" style={{
+                border: '1px solid #e5e7eb', borderRadius: 6,
+                background: '#fff', padding: 12,
+                display: 'flex', flexDirection: 'column', gap: 10,
+              }}>
+                {/* 헤더 — 모듈명 + critical */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 14 }}>
+                    {card.key}
+                  </span>
+                  {card.critical && <span className="tag" style={{ background: '#f39c12', color: '#fff' }}>critical</span>}
+                  {!card.hasProcess && <span className="tag" style={{ background: '#3498db', color: '#fff' }}>원격</span>}
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: '#777' }}>
+                    {card.label}
+                  </span>
+                </div>
+
+                {/* 패키지 영역 */}
+                <div style={{
+                  borderTop: '1px solid #f0f2f4', paddingTop: 8,
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    <span style={{ color: '#555', minWidth: 50 }}>패키지</span>
                     {versions.length > 0 ? (
                       <select
                         className="form-input"
-                        style={{ width: '100%', fontSize: 12, padding: '4px 6px' }}
+                        style={{ flex: 1, fontSize: 12, padding: '2px 6px' }}
                         value={curVer}
-                        onChange={e => setSelectedVersion(v => ({ ...v, [svc.name]: e.target.value }))}
+                        onChange={e => setSelectedVersion(v => ({ ...v, [card.key]: e.target.value }))}
                       >
                         {versions.map(p => (
                           <option key={p.id} value={p.version}>{p.version}</option>
                         ))}
                       </select>
                     ) : (
-                      <span className="text-muted" style={{ fontSize: 12 }}>등록된 패키지 없음</span>
-                    )}
-                  </td>
-                  <td>
-                    {versions.length > 0 ? (
-                      <button className="btn btn--sm btn--outline"
-                        onClick={() => openTemplate(svc.name, true)}
-                        title="설정 템플릿 편집">
-                        편집
-                      </button>
-                    ) : (
-                      <span className="text-muted" style={{ fontSize: 12 }}>
+                      <span className="text-muted" style={{ fontSize: 12, flex: 1 }}>
                         없음 · <Link to="/deploy/packages">등록</Link>
                       </span>
                     )}
-                  </td>
-                  <td>
-                    {versions.length > 0 ? (
-                      svc.managed === false ? (
-                        <span className="text-muted" style={{ fontSize: 12 }} title="원격 모듈 — install-agent.sh 옵션으로 설정">
-                          (원격)
-                        </span>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <button className="btn btn--sm btn--outline" onClick={() => setConfigModule(svc.name)}>
-                            설정
-                          </button>
-                          {needsRestart[svc.name] && (
-                            <span className="tag" style={{ background: '#e74c3c', color: '#fff' }} title="설정 변경 후 재시작 필요">!</span>
-                          )}
-                        </div>
-                      )
-                    ) : (
-                      <span className="text-muted" style={{ fontSize: 12 }}>—</span>
+                    {versions.length > 0 && (
+                      <button className="btn btn--sm btn--outline"
+                        onClick={() => openTemplate(card.key, true)}
+                        title="설정 템플릿 편집">템플릿</button>
                     )}
-                  </td>
-                  <td>
-                    {(() => {
-                      const tar = tarballByModule[svc.name]
-                      const pkgBusy = activeJob?.kind === 'pkg' && activeJob.module === svc.name
-                      const otherBusy = !!activeJob && !pkgBusy
+                  </div>
+                  {/* 변종별 다운로드 + 묶음 ▣ */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {variantTars.map(({ v, tar }) => (
+                      <button key={v} className="btn btn--sm btn--outline"
+                        disabled={!tar}
+                        title={tar ? `${tar.name} (${fmtSize(tar.size)})` : `${v} tarball 없음 — 먼저 패키지화`}
+                        onClick={() => { void downloadTarball(v) }}
+                        style={{ fontSize: 11, padding: '2px 6px' }}>
+                        ⤓ {v}
+                      </button>
+                    ))}
+                    <button className="btn btn--sm btn--outline"
+                      disabled={otherBusy || pkgBusy}
+                      title={pkgBusy ? '패키지화 진행 중…'
+                        : card.variants.length > 1
+                          ? `cims.sh pkg ${card.variants.join(' ')} --no-bump`
+                          : `cims.sh pkg ${card.variants[0]} --no-bump`}
+                      onClick={() => { void startPkgForCard(card) }}
+                      style={{ marginLeft: 'auto' }}>
+                      {pkgBusy ? '…' : `▣ 재패키징${card.variants.length > 1 ? ` (${card.variants.length})` : ''}`}
+                    </button>
+                  </div>
+                  {versions.length > 0 && card.hasProcess && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                      <button className="btn btn--sm btn--outline" onClick={() => setConfigModule(card.key)}>
+                        설정
+                      </button>
+                      {card.variants.some(v => needsRestart[v]) && (
+                        <span className="tag" style={{ background: '#e74c3c', color: '#fff' }}
+                              title="설정 변경 후 재시작 필요">!</span>
+                      )}
+                    </div>
+                  )}
+                  {!anyTar && versions.length === 0 && (
+                    <span className="text-muted" style={{ fontSize: 11 }}>패키지 미생성</span>
+                  )}
+                </div>
+
+                {/* 프로세스 영역 — hasProcess 인 카드만 */}
+                {card.hasProcess && (
+                  <div style={{
+                    borderTop: '1px solid #f0f2f4', paddingTop: 8,
+                    display: 'flex', flexDirection: 'column', gap: 4,
+                  }}>
+                    <div style={{ fontSize: 12, color: '#555' }}>프로세스</div>
+                    {card.variants.map(v => {
+                      const s = states[v]
+                      const running = s?.running ?? false
+                      const disabled = busy[v]
                       return (
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button className="btn btn--sm btn--outline"
-                            disabled={otherBusy || pkgBusy}
-                            title={pkgBusy ? '패키지화 진행 중…' : `${svc.name} 패키지화 (cims.sh pkg ${svc.name} --no-bump)`}
-                            onClick={() => { void startPkg(svc.name) }}>
-                            {pkgBusy ? '…' : '▣'}
-                          </button>
-                          <button className="btn btn--sm btn--outline"
-                            disabled={!tar}
-                            title={tar ? `다운로드 — ${tar.name} (${fmtSize(tar.size)})` : '패키지화 먼저 실행'}
-                            onClick={() => { void downloadTarball(svc.name) }}>
-                            ⤓
-                          </button>
+                        <div key={v} style={{
+                          display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+                        }}>
+                          <input type="checkbox"
+                            checked={selected.has(v)}
+                            onChange={() => toggleSelect(v)}
+                            aria-label={`${v} 선택`}
+                          />
+                          {card.variants.length > 1 && (
+                            <span style={{ fontFamily: 'monospace', minWidth: 32 }}>{v}</span>
+                          )}
+                          <span className="tag" style={{
+                            background: running ? '#2ecc71' : '#95a5a6', color: '#fff',
+                            minWidth: 50, textAlign: 'center',
+                          }}>
+                            {running ? 'on' : 'off'}
+                          </span>
+                          <span style={{ minWidth: 60, color: '#777', fontFamily: 'monospace' }}>
+                            {running ? `pid=${s?.pid ?? '?'}` : '—'}
+                          </span>
+                          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                            <button
+                              className={`btn btn--sm${running ? ' btn--danger' : ''}`}
+                              disabled={disabled}
+                              onClick={() => toggleRunning(v, running, !!card.critical)}
+                              title={running ? '종료' : '기동'}
+                            >
+                              {running ? '■' : '▶'}
+                            </button>
+                            <button className="btn btn--sm btn--outline"
+                              disabled={disabled || !running}
+                              onClick={() => act(v, 'restart', !!card.critical)}
+                              title="재기동">
+                              ↻
+                            </button>
+                          </div>
                         </div>
                       )
-                    })()}
-                  </td>
-                  <td>
-                    {svc.managed === false ? (
-                      <span className="text-muted" style={{ fontSize: 12 }}>원격 모듈 · 로컬 제어 불가</span>
-                    ) : (
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button
-                          className={`btn btn--sm${running ? ' btn--danger' : ''}`}
-                          disabled={disabled}
-                          onClick={() => toggleRunning(svc.name, running, !!svc.critical)}
-                          title={running ? '종료' : '기동'}
-                        >
-                          {running ? '■' : '▶'}
-                        </button>
-                        <button className="btn btn--sm btn--outline"
-                          disabled={disabled || !running}
-                          onClick={() => act(svc.name, 'restart', !!svc.critical)}
-                          title="재기동"
-                        >
-                          ↻
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
         </div>
         <div style={{

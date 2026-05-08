@@ -143,9 +143,11 @@ def _csp_log_paths(dist_dir: str) -> list:
     for inst in _NATIVE_INSTANCES:
         if inst.get("tarball") not in ("csp", "psp", "isp"):
             continue
-        # install_path/csp/log/csp_*.log
+        # install_path/<dir>/log/csp_*.log — 변종 분리 후 tarball 안 디렉토리가
+        # inst["dir"] 그대로 풀려 한 단계 깊이. csp ELF 의 SystemId 기반 prefix 라
+        # 변종 (psp/isp) 도 csp_*.log 그대로.
         log_glob = os.path.join(
-            dist_dir, inst["agent_name"], inst["dir"], "csp", "log", "csp_*.log",
+            dist_dir, inst["agent_name"], inst["dir"], "log", "csp_*.log",
         )
         paths.extend(glob(log_glob))
     return sorted(paths)

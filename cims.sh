@@ -196,23 +196,26 @@ PY
 }
 
 _start_cmp_variant() {
-    # $1 = pid name (cmp/pmp/imp). 각 인스턴스는 자기 install_path 안의
-    # cims.sh 로 실행되므로 같은 $DIST_DIR/cmp/bin/cmp 를 가리키되 config 가
-    # 인스턴스마다 다름.
+    # $1 = pid name (cmp/pmp/imp). 각 변종은 자기 dist/<name>/ 디렉토리에서
+    # bin/<name> config/<name>.json 으로 시작. dev 모드는 dist/cmp 만 있고
+    # _start_cmp_variant cmp 만 호출. install 후 환경은 cims_agent 가 변종 tarball
+    # 풀어 install_path/<name>/ 디렉토리 생성 → cims.sh 가 자기 변종 함수 호출.
     local name="$1"
     local upper; upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
     if is_running "$name"; then warn "$upper 이미 실행 중 (pid=$(read_pid "$name"))"; return 0; fi
-    [[ ! -f "$DIST_DIR/cmp/bin/cmp" ]] && err "cmp 바이너리 없음: $DIST_DIR/cmp/bin/cmp (make dist 실행 필요)" && return 1
-    # deployment overlay (install_path/config.json) → cmp.json 머지 (PMP/IMP 의 RtpIp/CspIp 분기)
-    _apply_overlay_to_module_config "$DIST_DIR/config.json" "$DIST_DIR/cmp/config/cmp.json"
+    local bin="$DIST_DIR/$name/bin/$name"
+    local cfg="$DIST_DIR/$name/config/$name.json"
+    [[ ! -f "$bin" ]] && err "$name 바이너리 없음: $bin (make dist 또는 install 필요)" && return 1
+    # deployment overlay (install_path/config.json) → <name>.json 머지 (PMP/IMP 의 RtpIp/CspIp 분기)
+    _apply_overlay_to_module_config "$DIST_DIR/config.json" "$cfg"
     local ctrl_port
-    ctrl_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/cmp/config/cmp.json')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
-    # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PMP 등) 영향 차단
-    kill_stray "$DIST_DIR/cmp/bin/cmp"
-    _kill_own_install_listener "$DIST_DIR/cmp/bin/cmp" "$ctrl_port" udp
+    ctrl_port=$(python3 -c "import json; d=json.load(open('$cfg')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
+    # 자기 install 의 좀비만 정리 — 다른 인스턴스 영향 차단
+    kill_stray "$bin"
+    _kill_own_install_listener "$bin" "$ctrl_port" udp
     info "$upper 시작..."
-    cd "$DIST_DIR/cmp"
-    bin/cmp config/cmp.json >> "$LOG_DIR/$name.log" 2>&1 &
+    cd "$DIST_DIR/$name"
+    bin/$name config/$name.json >> "$LOG_DIR/$name.log" 2>&1 &
     save_pid "$name" $!
     sleep 0.8
     is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; }
@@ -223,20 +226,25 @@ start_pmp() { _start_cmp_variant pmp; }
 start_imp() { _start_cmp_variant imp; }
 
 _start_csp_variant() {
-    # $1 = pid name (csp/psp/isp). variant 별 Roles/LocalIp 차이는 config 에 담김.
+    # $1 = pid name (csp/psp/isp). 각 변종은 자기 dist/<name>/ 디렉토리에서
+    # bin/<name> config/<name>.json 으로 시작. dev 모드는 dist/csp 만 있고
+    # _start_csp_variant csp 만 호출. install 후 환경은 cims_agent 가 변종 tarball
+    # 풀어 install_path/<name>/ 디렉토리 생성 → cims.sh 가 자기 변종 함수 호출.
     local name="$1"
     local upper; upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
     if is_running "$name"; then warn "$upper 이미 실행 중 (pid=$(read_pid "$name"))"; return 0; fi
-    [[ ! -f "$DIST_DIR/csp/bin/csp" ]] && err "csp 바이너리 없음 (make dist 실행 필요)" && return 1
-    # deployment overlay (install_path/config.json) → csp.json 머지 (CSP/PSP/ISP 의 Roles/LocalIp 분기)
-    _apply_overlay_to_module_config "$DIST_DIR/config.json" "$DIST_DIR/csp/config/csp.json"
-    local sip_port; sip_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/csp/config/csp.json')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
+    local bin="$DIST_DIR/$name/bin/$name"
+    local cfg="$DIST_DIR/$name/config/$name.json"
+    [[ ! -f "$bin" ]] && err "$name 바이너리 없음: $bin (make dist 또는 install 필요)" && return 1
+    # deployment overlay (install_path/config.json) → <name>.json 머지 (CSP/PSP/ISP 의 Roles/LocalIp 분기)
+    _apply_overlay_to_module_config "$DIST_DIR/config.json" "$cfg"
+    local sip_port; sip_port=$(python3 -c "import json; d=json.load(open('$cfg')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PSP 127.0.0.3 등) 영향 차단
-    kill_stray "$DIST_DIR/csp/bin/csp"
-    _kill_own_install_listener "$DIST_DIR/csp/bin/csp" "$sip_port" udp
+    kill_stray "$bin"
+    _kill_own_install_listener "$bin" "$sip_port" udp
     info "$upper 시작..."
-    cd "$DIST_DIR/csp"
-    bin/csp config/csp.json -n >> "$LOG_DIR/$name.log" 2>&1 &
+    cd "$DIST_DIR/$name"
+    bin/$name config/$name.json -n >> "$LOG_DIR/$name.log" 2>&1 &
     save_pid "$name" $!
     sleep 1.0
     is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; }
@@ -1695,13 +1703,22 @@ cmd_pkg() {
         esac
     }
 
-    # Tarball 안 모듈 디렉토리 이름 — psp/isp 도 dist/csp/ 를 그대로 패키징
-    # (cims.sh 안의 $DIST_DIR/csp/bin/csp 가 그대로 동작). meta.json 의 name 만 분리.
+    # Tarball 안 모듈 디렉토리 이름 — 패키지 정체성 분리: psp/isp/pmp/imp 도
+    # 자기 이름의 디렉토리로 들어감. dist 트리는 csp/cmp 한 종 그대로 두고,
+    # 변종은 pkg 단계에서 staging 디렉토리 (dist/csp 복사 + 바이너리/config rename)
+    # 로 새 디렉토리를 만든 후 tar.
     _src_sub_for() {
+        case "$1" in
+            *) echo "$1" ;;   # 모든 컴포넌트 자기 이름
+        esac
+    }
+
+    # 변종 (psp/isp/pmp/imp) 의 base dist 디렉토리 — 같은 ELF 사용
+    _base_dist_for() {
         case "$1" in
             psp|isp) echo "csp" ;;
             pmp|imp) echo "cmp" ;;
-            *)       echo "$1" ;;   # csp/cmp/csc/console/phone/cwrtc/cspsim/agent
+            *)       echo "" ;;
         esac
     }
 
@@ -1717,19 +1734,44 @@ cmd_pkg() {
     local out_dir="$DIST_DIR/packages"
     mkdir -p "$out_dir"
 
-    local t src_sub tar_file build_date
+    local t src_sub tar_file build_date pkg_root base_dist stage
     for t in "${targets[@]}"; do
         case "$t" in
             cmp|pmp|imp|csp|psp|isp|cwrtc|csc|console|phone|cspsim|agent)
                 src_sub=$(_src_sub_for "$t") ;;
             *) err "알 수 없는 컴포넌트: $t"; continue ;;
         esac
-        if [[ ! -d "$DIST_DIR/$src_sub" ]]; then
+
+        # 변종 (psp/isp/pmp/imp): staging 에 base dist (csp/cmp) 복사 + 바이너리/config
+        # 이름을 변종 이름으로 rename → tar root 가 staging 이 됨. dist/csp 자체는 손대지 않음.
+        pkg_root="$DIST_DIR"
+        stage=""
+        base_dist=$(_base_dist_for "$t")
+        if [[ -n "$base_dist" ]]; then
+            if [[ ! -d "$DIST_DIR/$base_dist" ]]; then
+                warn "skip: $DIST_DIR/$base_dist 없음 (variant=$t base=$base_dist)"; continue
+            fi
+            stage="$DIST_DIR/.pkgstage.$$.${t}"
+            rm -rf "$stage"
+            mkdir -p "$stage/$t"
+            # base dist 의 내용 그대로 복사 (cp -a 로 권한/심볼릭 보존).
+            cp -a "$DIST_DIR/$base_dist/." "$stage/$t/"
+            # 바이너리 rename (csp → psp 등).
+            [[ -f "$stage/$t/bin/$base_dist" ]] && mv "$stage/$t/bin/$base_dist" "$stage/$t/bin/$t"
+            # 시작 스크립트 rename (있을 때만 — csp.sh → psp.sh).
+            [[ -f "$stage/$t/bin/$base_dist.sh" ]] && mv "$stage/$t/bin/$base_dist.sh" "$stage/$t/bin/$t.sh"
+            # config 파일 rename (configure 후라면 있고, 빌드 직후라면 없음).
+            [[ -f "$stage/$t/config/$base_dist.json" ]] && mv "$stage/$t/config/$base_dist.json" "$stage/$t/config/$t.json"
+            # cims.sh 도 staging 으로 (tar root 에 포함).
+            [[ -f "$DIST_DIR/cims.sh" ]] && cp "$DIST_DIR/cims.sh" "$stage/"
+            pkg_root="$stage"
+        elif [[ ! -d "$DIST_DIR/$src_sub" ]]; then
             warn "skip: $DIST_DIR/$src_sub 없음 (target=$t src_sub=$src_sub)"; continue
         fi
 
-        # build_date = 컴포넌트 dist 디렉토리 안에서 가장 최근 파일의 mtime
-        build_date=$(find "$DIST_DIR/$src_sub" -type f -printf '%T@\n' 2>/dev/null \
+        # build_date = 컴포넌트 dist 디렉토리 안에서 가장 최근 파일의 mtime (base dist 기준 — staging 은 cp 로 mtime 갱신될 수 있음).
+        local _bd_root="$DIST_DIR/${base_dist:-$src_sub}"
+        build_date=$(find "$_bd_root" -type f -printf '%T@\n' 2>/dev/null \
                         | sort -nr | head -1 \
                         | xargs -I{} date -u -d @{} +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
 
@@ -1756,8 +1798,9 @@ cmd_pkg() {
             [[ -f $dist_meta && "$dist_meta" != "$comp_meta" ]] && _pkg_write_version "$dist_meta" "$comp_ver"
         fi
 
-        # meta.json 생성 (DIST_DIR 안에 임시로 작성 → tar 루트에 추가 후 삭제)
-        local tmp_meta="$DIST_DIR/.pkgmeta.$$.json"
+        # meta.json 생성 (pkg_root 안에 임시로 작성 → tar 루트에 추가 후 삭제;
+        # 변종은 staging, 그 외는 DIST_DIR).
+        local tmp_meta="$pkg_root/.pkgmeta.$$.json"
         python3 - "$comp_meta" "$t" "$comp_ver" "$build_date" "$git_sha" "$git_branch" \
                   "$packaged_at" "$packaged_by" "$changelog" <<'PYEOF' > "$tmp_meta"
 import sys, json, os
@@ -1809,7 +1852,7 @@ PYEOF
 
         # config_template.json: v3 (2026-04-22) 부터 소스의 config/ 아래.
         #   tarball 에는 그대로 최상위(/config_template.json) 로 포함 (agents.py 가 루트에서 파싱).
-        local tmp_tmpl="$DIST_DIR/.pkgtmpl.$$.json"
+        local tmp_tmpl="$pkg_root/.pkgtmpl.$$.json"
         local tmpl_basename=".pkgtmpl.$$.json"
         local has_template=0
         if [[ -n "$src_root" ]]; then
@@ -1834,7 +1877,7 @@ PYEOF
         #  cache/       : CSC 설정 캐시 (고정값이 아닌 현재 상태)
         #  packages/    : CSC 가 수집한 업로드 tarball (신규 배포에 포함되면 중복 팽창)
         #  dist/        : 번들러 산출물 이 아닌 상위 dist 와 혼동 방지 (cwrtc/dist 등 없음)
-        ( cd "$DIST_DIR" && \
+        ( cd "$pkg_root" && \
             tar czf "$tar_file" \
                 --exclude="$src_sub/log" \
                 --exclude="$src_sub/run" \
@@ -1850,6 +1893,8 @@ PYEOF
                 "$src_sub" $( [[ -f cims.sh ]] && echo cims.sh ) )
         rm -f "$tmp_meta"
         [[ $has_template -eq 1 ]] && rm -f "$tmp_tmpl"
+        # 변종 staging cleanup
+        [[ -n "$stage" && -d "$stage" ]] && rm -rf "$stage"
         local size; size=$(stat -c%s "$tar_file" 2>/dev/null || echo 0)
         ok "$(basename "$tar_file") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo "${size}B"))"
     done

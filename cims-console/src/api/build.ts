@@ -10,6 +10,7 @@ export interface BuildJobStart {
   job_id: string
   kind: 'build' | 'pkg'
   module?: string
+  modules?: string[]
   argv: string[]
   started_at: number
   message: string
@@ -89,8 +90,12 @@ export const buildApi = {
   runBuild: () =>
     api.post<BuildJobStart>(`${BASE}/run`, {}),
 
-  runPkg: (module: string, opts: { no_bump?: boolean } = {}) =>
-    api.post<BuildJobStart>(`${BASE}/pkg`, { module, no_bump: opts.no_bump ?? true }),
+  runPkg: (modules: string | string[], opts: { no_bump?: boolean } = {}) => {
+    const body: Record<string, unknown> = { no_bump: opts.no_bump ?? true }
+    if (Array.isArray(modules)) body.modules = modules
+    else body.module = modules
+    return api.post<BuildJobStart>(`${BASE}/pkg`, body)
+  },
 
   getJob: (jobId: string) =>
     api.get<BuildJobStatus>(`${BASE}/jobs/${jobId}`),

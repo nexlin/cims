@@ -1090,7 +1090,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
-            log_dir = os.path.join(td, "volte-sip-server", "csp", "csp", "log")
+            log_dir = os.path.join(td, "volte-sip-server", "csp", "log")
             os.makedirs(log_dir)
             log_path = os.path.join(log_dir, "csp_2026-05.log")
             # 사전: 빈 로그 (offset=0)
@@ -1134,7 +1134,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         from verify.lib.common import csc_http
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            log_dir = os.path.join(td, "volte-sip-server", "csp", "csp", "log")
+            log_dir = os.path.join(td, "volte-sip-server", "csp", "log")
             os.makedirs(log_dir)
             with open(os.path.join(log_dir, "csp_2026-05.log"), "w") as f:
                 f.write("")
@@ -3106,11 +3106,12 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(psp_payload["config"].get("Setup.Sip.LocalIp"), "127.0.0.3")
         pmp_payload = next(p for p in captured if p["process_name"] == "PMP")
         self.assertEqual(pmp_payload["config"].get("RtpIp"), "127.0.0.3")
-        # install_path 가 agent_name 디렉토리 사용
+        # install_path 는 server level (agent_name 까지) — tarball 안 변종
+        # 디렉토리 (csp/psp/) 가 그 안에 풀리며 _install_path 자체는 leaf 미포함.
         csp_payload = next(p for p in captured if p["process_name"] == "CSP")
-        self.assertIn("/volte-sip-server/", csp_payload["install_path"])
+        self.assertTrue(csp_payload["install_path"].endswith("/volte-sip-server"))
         psp_payload2 = next(p for p in captured if p["process_name"] == "PSP")
-        self.assertIn("/ptt-sip-server/", psp_payload2["install_path"])
+        self.assertTrue(psp_payload2["install_path"].endswith("/ptt-sip-server"))
 
     def test_step_19_fail_missing_pkg_for_one_module(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=15: (201, {"id": 1})

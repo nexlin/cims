@@ -78,12 +78,14 @@ def seed(ctx: VerifyContext) -> ItemResult:
     primary_seeded = 0
     primary_reloaded = False
     for inst in csp_variants:
-        # install_path = dist_dir/<agent_name>/<dir>. cims.sh DIST_DIR=install_path.
-        # csp 의 CspConfigCache jsonlDir = install_path/config (csp.json 의 ConfigJsonlDir
-        # 가 ../config 상대경로 → ProgramDirectory(install_path/csp/bin)/../config).
-        # 즉 access_services.jsonl 시드 위치는 install_path/config 직속.
-        # PID 파일은 cims.sh 의 PID_DIR=$DIST_DIR/run = install_path/run.
-        install_path = os.path.join(ctx.dist_dir, inst["agent_name"], inst["dir"])
+        # install_path = dist_dir/<agent_name> (server level — 변종 tarball 안 dir
+        # 디렉토리가 그 안에 풀려 install_path/<dir>/config/<dir>.json 가 됨).
+        # cims.sh DIST_DIR = install_path. PID 파일은 PID_DIR=$DIST_DIR/run.
+        # access_services.jsonl 시드 위치는 csp ELF 의 ConfigJsonlDir fallback
+        # 정합: csp.json 의 부모×3 + "/config" → install_path/config (server
+        # level 의 config/). 한 server 에 한 변종만 install 되는 P1 토폴로지에서
+        # 안전. (csp.json 에 ConfigJsonlDir 명시 안 됨 → fallback 동작.)
+        install_path = os.path.join(ctx.dist_dir, inst["agent_name"])
         cfg_dir = os.path.join(install_path, "config")
         pid_file = os.path.join(install_path, "run", f"{inst['id']}.pid")
         n = seed_access_services(

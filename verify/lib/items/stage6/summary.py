@@ -45,12 +45,13 @@ def summary(ctx: VerifyContext) -> ItemResult:
     sip_lines = msg_lines + flow_lines
 
     err_cnt = 0
-    # service-server log glob — _INSTANCES 의 agent_name + dir 기반 (csp/psp/cmp/pmp)
+    # service-server log glob — install_path/<dir>/log/*.log (csp 변종은 csp_*.log,
+    # cmp 변종은 cmp.log). 변종 분리 후 install_path 가 server level 이고 tarball
+    # 안 디렉토리 = inst["dir"] 그대로 풀려서 한 단계 깊이.
     log_paths: list = []
     for inst in _native_steps._INSTANCES:
         log_paths += glob(os.path.join(
-            ctx.dist_dir, inst["agent_name"], inst["dir"],
-            inst["dir"], "log", f"{inst['dir']}_*.log",
+            ctx.dist_dir, inst["agent_name"], inst["dir"], "log", "*.log",
         ))
     for p in log_paths:
         try:

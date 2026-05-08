@@ -192,8 +192,15 @@ def _install_root(dist_dir: str, inst: dict) -> str:
 
 
 def _install_path(dist_dir: str, inst: dict) -> str:
-    """`<dist_dir>/<agent_name>/<dir>/` — 인스턴스 install_path."""
-    return os.path.join(dist_dir, inst["agent_name"], inst["dir"])
+    """`<dist_dir>/<agent_name>/` — 변종 tarball 의 install 위치.
+
+    cims_agent 가 tarball 풀면 안의 `<variant>/` 디렉토리 (psp/, isp/, pmp/, imp/)
+    가 그대로 풀려서 `<dist>/<agent_name>/<variant>/...` 가 됨. 즉 `inst["dir"]`
+    는 tarball 안 디렉토리 이름 = variant 이름과 동일 (server level + tarball
+    내부 디렉토리 = 자기 이름). 따라서 install_path 는 server level 로 두고,
+    sub-dir 접근은 호출처에서 `inst["dir"]` 와 join.
+    """
+    return os.path.join(dist_dir, inst["agent_name"])
 
 
 # 호환 dict — 기존 사용처 (step 17~22) 가 point-lookup 으로 _INSTANCES 의 필드를
@@ -1824,8 +1831,11 @@ def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
             for inst, peer in sig_pairs:
                 if connected[inst["id"]]:
                     continue
+                # tarball 안 디렉토리 = inst["dir"] (csp/psp/isp 등 변종 이름).
+                # 로그 파일명 prefix 는 csp ELF 가 그대로 csp_*.log 로 기록 (binary
+                # 이름이 변종으로 rename 되어도 PalogLogger 의 prefix 가 코드 상수).
                 log_glob = os.path.join(
-                    _install_path(ctx.dist_dir, inst), "csp", "log", "csp_*.log",
+                    _install_path(ctx.dist_dir, inst), inst["dir"], "log", "csp_*.log",
                 )
                 for p in _glob(log_glob):
                     try:

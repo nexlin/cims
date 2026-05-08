@@ -36,7 +36,13 @@ _BUILD_BASE = '/api/v1/build'
 _SCRIPT_DIR = ''
 _DIST_PKG_DIR = ''
 
-_VALID_MODULES = ('cmp', 'csp', 'cwrtc', 'csc', 'console', 'phone', 'cspsim', 'agent')
+# 12개 — base 8 + csp/cmp 변종 4 (psp/isp/pmp/imp). 변종은 cims.sh pkg 가 staging
+# 으로 dist/csp 또는 dist/cmp 를 복사 + 바이너리/config rename 후 tar.
+_VALID_MODULES = (
+    'cmp', 'pmp', 'imp',
+    'csp', 'psp', 'isp',
+    'cwrtc', 'csc', 'console', 'phone', 'cspsim', 'agent',
+)
 
 _BUILD_TIMEOUT = 1800   # 전체 cmake + make + npm
 _PKG_TIMEOUT = 300
@@ -252,15 +258,29 @@ async def _start_pkg(handler_args: HandlerArgs) -> HandlerResult:
 
     body = handler_args.body or {}
     opts = body if isinstance(body, dict) else {}
-    module = str(opts.get('module') or '').strip()
+    # 단일 module 또는 modules 배열 (csp/psp/isp 같이 같은 dist 에서 나오는 변종을
+    # 한 job 으로 묶어 패키징하기 위함). 둘 다 미지정이면 422.
+    raw_modules = opts.get('modules')
+    if isinstance(raw_modules, list) and raw_modules:
+        modules = [str(m).strip() for m in raw_modules if str(m).strip()]
+    else:
+        single = str(opts.get('module') or '').strip()
+        modules = [single] if single else []
+
     no_bump = opts.get('no_bump')
     if no_bump is None:
         no_bump = True
     no_bump = bool(no_bump)
 
-    if module not in _VALID_MODULES:
+    if not modules:
         return HandlerResult(status=422, body={
-            'error': f'invalid module: {module!r}',
+            'error': 'module or modules required',
+            'allowed': list(_VALID_MODULES),
+        })
+    invalid = [m for m in modules if m not in _VALID_MODULES]
+    if invalid:
+        return HandlerResult(status=422, body={
+            'error': f'invalid module(s): {invalid}',
             'allowed': list(_VALID_MODULES),
         })
 
@@ -272,16 +292,18 @@ async def _start_pkg(handler_args: HandlerArgs) -> HandlerResult:
                 'error':  '다른 빌드/패키지 작업 진행 중',
                 'job_id': active, 'kind': j.get('kind'), 'label': j.get('label'),
             })
-        argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'pkg', module]
+        argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'pkg', *modules]
         if no_bump:
             argv.append('--no-bump')
+        label_module = ' '.join(modules)
         job_id = await _start_job('pkg', argv, _PKG_TIMEOUT,
-                                  label=f'cims.sh pkg {module}')
+                                  label=f'cims.sh pkg {label_module}')
 
     return HandlerResult(status=202, body={
         'job_id': job_id,
         'kind':   'pkg',
-        'module': module,
+        'module': modules[0],          # 후방호환 — 단일 module 의 첫 항목
+        'modules': modules,
         'argv':   argv,
         'started_at': _JOBS[job_id]['started_at'],
         'message': 'started',
