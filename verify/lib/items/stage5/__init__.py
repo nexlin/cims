@@ -1,4 +1,4 @@
-"""Stage 5 — 로컬 배포 (TB-CSC → Test-agent → csc-server → csp/cmp 배포 체인).
+"""Stage 5 — 로컬 배포 (TB-CSC → Test-agent → mgmt-server → service-server 배포 체인).
 
 7 부모 (RESET, CSC-DEPLOY, CSC-VERIFY, CSC-RUN, MODULES-DEPLOY, MODULES-RUN,
 FINALIZE) + 13 자식. 본체는 모두 `_native_steps.step_NN_*` (Python). 옛

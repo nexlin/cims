@@ -2,10 +2,10 @@
 
 흐름:
   1. csc-tb.json `Agent.MtlsEnabled=true` 확인 (false 면 SKIP).
-  2. cims_agent 테이블에서 csc-server-local agent 가 status='online' 확인.
+  2. cims_agent 테이블에서 mgmt-server agent 가 status='online' 확인.
   3. issued cert 디렉토리 (`cert/agent_mtls/issued/<agent>/`) 의 cert 파일 list +
      mtime 캡처.
-  4. UPDATE cims_agent SET cert_rotate_pending=1 WHERE name='csc-server-local'.
+  4. UPDATE cims_agent SET cert_rotate_pending=1 WHERE name='mgmt-server'.
   5. 최대 15초 대기 (heartbeat 주기 3s 가정), 1초마다 `cert_rotate_pending`
      확인 — 0 으로 reset 되면 CSC 가 응답 보냄 ✓.
   6. issued cert 디렉토리에 mtime > 캡처 시각인 새 파일 생성됐는지 확인 ✓.
@@ -26,13 +26,13 @@ from ...context import VerifyContext
 from ...common import db as _db
 
 
-_AGENT_NAME = "csc-server-local"
+_AGENT_NAME = "mgmt-server"
 _TB_CSC_CFG_REL = ("csc", "config", "csc-tb.json")
 
 
 @verify_item(
     id="S6-SCN-CERT-ROTATE", stage=6, category="시나리오",
-    name="mTLS cert rotation e2e (csc-server-local)",
+    name="mTLS cert rotation e2e (mgmt-server)",
     depends_on=["S6-SEED"],
     presets=["stage6-full", "pipeline-full", "post-deploy"],
     side_effects=["db-write", "process-state"], timeout_s=60,
@@ -117,7 +117,7 @@ def scn_cert_rotate(ctx: VerifyContext) -> ItemResult:
         except Exception: pass
 
     # 6) agent state_dir 의 agent_mtls.crt 가 갱신됐는지 추가 확인 (best-effort).
-    state_crt = os.path.join(ctx.dist_dir, "csc-server", "agent", "state",
+    state_crt = os.path.join(ctx.dist_dir, "mgmt-server", "agent", "state",
                              "agent_mtls.crt")
     crt_recent = False
     if os.path.isfile(state_crt):

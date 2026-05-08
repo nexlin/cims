@@ -1,4 +1,4 @@
-"""S5-CSC-DEPLOY (그룹) — TB-CSC(4419) → csc-server 배포 체인 3단계 (native)."""
+"""S5-CSC-DEPLOY (그룹) — TB-CSC(4419) → mgmt-server 배포 체인 3단계 (native)."""
 from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus
@@ -9,7 +9,7 @@ from . import _native_steps
 # ── 그룹 (placeholder) ───────────────────────────────────────────
 @verify_item(
     id="S5-CSC-DEPLOY", stage=5, category="배포",
-    name="csc-server 배포 (TB-CSC 4419 → Test-agent → install)",
+    name="mgmt-server 배포 (TB-CSC 4419 → Test-agent → install)",
     is_group=True,
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["fs-write", "service-state", "network"],
@@ -19,7 +19,7 @@ from . import _native_steps
 def csc_deploy_group(ctx: VerifyContext) -> ItemResult:
     """그룹 placeholder — runner 가 자식 worst-status 로 합산."""
     return ItemResult(
-        id="S5-CSC-DEPLOY", name="csc-server 배포 (그룹)",
+        id="S5-CSC-DEPLOY", name="mgmt-server 배포 (그룹)",
         status=ItemStatus.PASS, stage=5,
     )
 
@@ -40,14 +40,14 @@ def deploy_agent_enroll(ctx: VerifyContext) -> ItemResult:
 
 @verify_item(
     id="S5-CSC-DEPLOY-PKG-UPLOAD", stage=5, category="배포",
-    name="csc/console 패키지 업로드 (→ TB-CSC 4419)",
+    name="csc/console/sim 패키지 업로드 (→ TB-CSC 4419)",
     parent="S5-CSC-DEPLOY",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["network"], timeout_s=120,
     execution_order=22,
 )
 def deploy_pkg_upload(ctx: VerifyContext) -> ItemResult:
-    """Step 08 native — csc/console tarball 업로드."""
+    """Step 08 native — csc/console/sim tarball 업로드."""
     return _native_steps.step_08_package_upload(ctx)
 
 

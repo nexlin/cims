@@ -7,8 +7,8 @@ csc-tb.json 은 두 위치에 존재:
   1. **TB-CSC** (4419 LISTEN): `<dist>/csc/config/csc-tb.json`
      `cims.sh start csc` 로 기동되는 dev/검증환경 컨트롤 csc.
      `S6-SCN-CERT-ROTATE._read_mtls_enabled` 가 보는 정식 위치.
-  2. **배포본 csc-server** (4445 LISTEN):
-     `<dist>/csc-server/csc/csc/config/csc-tb.json`
+  2. **배포본 mgmt-server** (4445 LISTEN):
+     `<dist>/mgmt-server/csc/csc/config/csc-tb.json`
      S5 가 install 한 운영 시뮬레이션용 csc.
 
 per-agent 모델이라 두 위치 모두 토글하는 게 안전 (어떤 csc 가 enroll
@@ -25,8 +25,8 @@ from typing import Optional
 _CSC_TB_PATHS = (
     # TB-CSC — scn_cert_rotate._read_mtls_enabled 가 보는 정식 위치
     ("csc", "config", "csc-tb.json"),
-    # 배포본 csc-server (S5 install)
-    ("csc-server", "csc", "csc", "config", "csc-tb.json"),
+    # 배포본 mgmt-server (S5 install)
+    ("mgmt-server", "csc", "csc", "config", "csc-tb.json"),
 )
 
 

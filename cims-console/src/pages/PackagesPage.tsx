@@ -3,6 +3,7 @@ import { deploymentApi, type SipPackage, type Deployment } from '../api/deployme
 import { useToast } from '../components/Toast'
 import PackageUploadModal from './deploy/PackageUploadModal'
 import { fmtSize, fmtRelTime } from './deploy/deployHelpers'
+import { agentDisplayName } from '../components/agentDisplay'
 
 interface ModuleGroup {
   name: string
@@ -350,7 +351,12 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
               <tbody>
                 {deployments.map(d => (
                   <tr key={d.id}>
-                    <td>{d.agent_name || `#${d.agent_id}`}</td>
+                    <td>
+                      {d.agent_name ? agentDisplayName(d.agent_name) : `#${d.agent_id}`}
+                      {d.agent_name && agentDisplayName(d.agent_name) !== d.agent_name && (
+                        <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({d.agent_name})</span>
+                      )}
+                    </td>
                     <td>{d.process_name || '—'}</td>
                     <td>{d.status}</td>
                     <td style={{ fontSize: 12, color: '#666' }}>{d.deployed_at || '—'}</td>

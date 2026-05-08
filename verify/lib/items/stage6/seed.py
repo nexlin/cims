@@ -1,7 +1,7 @@
 """S6-SEED — 가입자/그룹 선택 + access_services.jsonl 시드 + 배포본 csp reload.
 
-Stage 6 는 배포본 csp (build/dist/csp-server/csp/) 대상. config 경로/PID 파일 위치가
-Stage 3 (build/dist/csp/) 와 다르다.
+Stage 6 는 배포본 csp (build/dist/volte-sip-server/csp/, ptt-sip-server/psp/) 대상.
+config 경로/PID 파일 위치가 Stage 3 (build/dist/csp/) 와 다르다.
 """
 from __future__ import annotations
 
@@ -78,12 +78,12 @@ def seed(ctx: VerifyContext) -> ItemResult:
     primary_seeded = 0
     primary_reloaded = False
     for inst in csp_variants:
-        # install_path = dist_dir/{id}-server/{dir}. cims.sh DIST_DIR=install_path.
+        # install_path = dist_dir/<agent_name>/<dir>. cims.sh DIST_DIR=install_path.
         # csp 의 CspConfigCache jsonlDir = install_path/config (csp.json 의 ConfigJsonlDir
         # 가 ../config 상대경로 → ProgramDirectory(install_path/csp/bin)/../config).
         # 즉 access_services.jsonl 시드 위치는 install_path/config 직속.
         # PID 파일은 cims.sh 의 PID_DIR=$DIST_DIR/run = install_path/run.
-        install_path = os.path.join(ctx.dist_dir, f"{inst['id']}-server", inst["dir"])
+        install_path = os.path.join(ctx.dist_dir, inst["agent_name"], inst["dir"])
         cfg_dir = os.path.join(install_path, "config")
         pid_file = os.path.join(install_path, "run", f"{inst['id']}.pid")
         n = seed_access_services(

@@ -5,8 +5,9 @@
   2. 임시 PTT 그룹 (group_id="verify-test-<ts>") 추가 → POST /api/v1/ptt/groups.
      CSC 가 notify_csp("GROUP_CHANGED", uri, "POST") UDP 발송.
   3. 잠시 대기 (1~2s) — UDP 전파 + CSP 처리.
-  4. 배포본 csp 로그 (`build/dist/csp-server/csp/csp/log/csp_*.log`) 의
-     마지막 N 라인에 GROUP_CHANGED / group_change 라인 grep.
+  4. 배포본 csp 로그 (`build/dist/<agent_name>/<dir>/csp/log/csp_*.log` —
+     volte-sip-server/csp + ptt-sip-server/psp 등) 의 마지막 N 라인에
+     GROUP_CHANGED / group_change 라인 grep.
   5. cleanup: DELETE 임시 그룹.
 
 검증 시 사용자 데이터 영향 X (임시 그룹은 verify 식별자 prefix). 실패해도
@@ -144,7 +145,7 @@ def _csp_log_paths(dist_dir: str) -> list:
             continue
         # install_path/csp/log/csp_*.log
         log_glob = os.path.join(
-            dist_dir, f"{inst['id']}-server", inst["dir"], "csp", "log", "csp_*.log",
+            dist_dir, inst["agent_name"], inst["dir"], "csp", "log", "csp_*.log",
         )
         paths.extend(glob(log_glob))
     return sorted(paths)

@@ -295,7 +295,7 @@ start_console() {
     # Console 3분화:
     #   Dev-Console     : 소스 vite dev, 기본 3001
     #   Test-Console    : build/dist/console/dist serve, 기본 8080 (HTTPS)
-    #   배포본 console  : csc-server/console/, deployment overlay 의 Port 로 기동 (기본 8081)
+    #   배포본 console  : mgmt-server/console/, deployment overlay 의 Port 로 기동 (기본 8081)
     # overlay port: install_path/config.json (deployment POST 의 config 필드가 저장) 우선, 없으면 기본값.
     local port
     port=$(python3 -c "
@@ -327,7 +327,7 @@ print(p if p else '')" 2>/dev/null)
         cd "$DIST_DIR/console"
         _SSL_KEY="$DIST_DIR/csc/cert/server.key"
         _SSL_CERT="$DIST_DIR/csc/cert/server.crt"
-        # 배포본 환경 (csc-server/console) 에서는 csc cert 가 다른 경로 — 그 쪽도 탐색
+        # 배포본 환경 (mgmt-server/console) 에서는 csc cert 가 다른 경로 — 그 쪽도 탐색
         [[ ! -f "$_SSL_KEY" && -f "$DIST_DIR/../csc/csc/cert/server.key" ]] && _SSL_KEY="$DIST_DIR/../csc/csc/cert/server.key"
         [[ ! -f "$_SSL_CERT" && -f "$DIST_DIR/../csc/csc/cert/server.crt" ]] && _SSL_CERT="$DIST_DIR/../csc/csc/cert/server.crt"
         if [[ -f "$_SSL_KEY" && -f "$_SSL_CERT" ]]; then
@@ -785,7 +785,7 @@ cmd_reset() {
             --all|all) target="all"; shift ;;
             --path)  extra_paths+=("$2"); shift 2 ;;
             --keep-processes) keep_processes=1; shift ;;
-            --keep-deployed)  keep_deployed=1; shift ;;   # csc-server/ 등 배포본 보존
+            --keep-deployed)  keep_deployed=1; shift ;;   # mgmt-server/ 등 배포본 보존
             -*) err "알 수 없는 reset 옵션: $1"; return 1 ;;
             *)  shift ;;
         esac
@@ -845,23 +845,23 @@ cmd_reset() {
         rm -rf /tmp/cims-agent-* 2>/dev/null || true
 
         if [[ $keep_deployed -eq 1 ]]; then
-            info "Phase 2/3 배포 대상 정리 — SKIP (--keep-deployed, csc/csp/cmp/sim-server 보존)"
+            info "Phase 2/3 배포 대상 정리 — SKIP (--keep-deployed, mgmt-server + service-server 보존)"
         else
-            info "Phase 2/3 배포 대상 정리 (build/dist/{csc,csp,cmp,sim}-server/, §0.10)..."
+            info "Phase 2/3 배포 대상 정리 (build/dist/{mgmt,volte-sip,volte-media,ptt-sip,ptt-media}-server/, §0.10)..."
             # Test-agent 프로세스부터 종료 (파일 잠금 회피)
-            pkill -f "cims_agent.py.*--name csc-server-local" 2>/dev/null || true
-            pkill -f "cims_agent.py.*--name csp-server-local" 2>/dev/null || true
-            pkill -f "cims_agent.py.*--name cmp-server-local" 2>/dev/null || true
-            pkill -f "cims_agent.py.*--name sim-server-local" 2>/dev/null || true
+            local _agents=(mgmt-server volte-sip-server volte-media-server ptt-sip-server ptt-media-server)
+            local _a
+            for _a in "${_agents[@]}"; do
+                pkill -f "cims_agent.py.*--name $_a" 2>/dev/null || true
+            done
             # 배포본 서비스 프로세스 (csc_app.py, console serve, csp/cmp 바이너리) 도 종료
             # — 4445/4430/8081/5060/9000 등 포트 잠금 해제 (Phase 1 검증 시 mcptt 4430 충돌 방지)
-            local _s
-            for _s in csc-server csp-server cmp-server sim-server; do
-                pkill -f "$DIST_DIR/$_s/" 2>/dev/null || true
+            for _a in "${_agents[@]}"; do
+                pkill -f "$DIST_DIR/$_a/" 2>/dev/null || true
             done
             sleep 1
-            for _s in csc-server csp-server cmp-server sim-server; do
-                [[ -d "$DIST_DIR/$_s" ]] && rm -rf "$DIST_DIR/$_s"
+            for _a in "${_agents[@]}"; do
+                [[ -d "$DIST_DIR/$_a" ]] && rm -rf "$DIST_DIR/$_a"
             done
         fi
 
@@ -1366,8 +1366,8 @@ ${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
                         → verify_reports/<ts>_phase2.md (기능 회귀는 반복 X)
   verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
                         Phase 3 배포 이후 검증 (v1 install-only):
-                        Phase 1 서버 모듈 중지 → csp/cmp/sim Test-agent enroll (sync 9904/9905/9906)
-                        → csp/cmp/cspsim tarball 업로드 → deployment 생성 →
+                        Phase 1 서버 모듈 중지 → 4 service-server Test-agent enroll
+                        → service-server tarball 업로드 → deployment 생성 →
                         install job 폴링 → 설치 파일 검증 → verify_reports/<ts>_phase3.md
                         (v2 예정: start/health/stop. v3 예정: 4시나리오 자동 실행)
 

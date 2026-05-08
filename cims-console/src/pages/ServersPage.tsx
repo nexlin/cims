@@ -7,6 +7,7 @@ import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
+import { agentDisplayName } from '../components/agentDisplay'
 
 export default function ServersPage() {
   const { show } = useToast()
@@ -225,7 +226,12 @@ function ServerRow({ agent: a, active, depCount, onClick }: {
       <td style={{ padding: 0 }}>
         <div style={{ width: 4, background: sc.bar, height: 32 }} />
       </td>
-      <td><b>{a.name}</b></td>
+      <td>
+        <b>{agentDisplayName(a.name)}</b>
+        {agentDisplayName(a.name) !== a.name && (
+          <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({a.name})</span>
+        )}
+      </td>
       <td style={{ fontSize: 12, color: '#555' }}>{a.ip_address || '—'}</td>
       <td>
         <span className="tag" style={{
@@ -289,7 +295,10 @@ function ServerInspector({ agent: a, deployments, packages,
           <span style={{
             width: 10, height: 10, borderRadius: '50%', background: sc.bar, display: 'inline-block',
           }} />
-          <b style={{ fontSize: 16 }}>{a.name}</b>
+          <b style={{ fontSize: 16 }}>{agentDisplayName(a.name)}</b>
+          {agentDisplayName(a.name) !== a.name && (
+            <span style={{ fontSize: 12, color: '#888' }}>{a.name}</span>
+          )}
           <span className="tag" style={{
             background: sc.bar, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
           }}>{a.status}</span>

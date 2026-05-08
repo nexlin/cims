@@ -1090,7 +1090,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
-            log_dir = os.path.join(td, "csp-server", "csp", "csp", "log")
+            log_dir = os.path.join(td, "volte-sip-server", "csp", "csp", "log")
             os.makedirs(log_dir)
             log_path = os.path.join(log_dir, "csp_2026-05.log")
             # 사전: 빈 로그 (offset=0)
@@ -1134,7 +1134,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         from verify.lib.common import csc_http
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            log_dir = os.path.join(td, "csp-server", "csp", "csp", "log")
+            log_dir = os.path.join(td, "volte-sip-server", "csp", "csp", "log")
             os.makedirs(log_dir)
             with open(os.path.join(log_dir, "csp_2026-05.log"), "w") as f:
                 f.write("")
@@ -1381,7 +1381,7 @@ class TestCscConfig(unittest.TestCase):
         from verify.lib.common import csc_config
         import tempfile, json as _json
         with tempfile.TemporaryDirectory() as td:
-            cfg = os.path.join(td, "csc-server", "csc", "csc", "config")
+            cfg = os.path.join(td, "mgmt-server", "csc", "csc", "config")
             os.makedirs(cfg)
             path = os.path.join(cfg, "csc-tb.json")
             with open(path, "w") as f:
@@ -1394,7 +1394,7 @@ class TestCscConfig(unittest.TestCase):
         from verify.lib.common import csc_config
         import tempfile, json as _json
         with tempfile.TemporaryDirectory() as td:
-            cfg = os.path.join(td, "csc-server", "csc", "csc", "config")
+            cfg = os.path.join(td, "mgmt-server", "csc", "csc", "config")
             os.makedirs(cfg)
             path = os.path.join(cfg, "csc-tb.json")
             with open(path, "w") as f:
@@ -2126,9 +2126,11 @@ class TestStage5CscDeploySteps(unittest.TestCase):
                                 filename=None, form_fields=None,
                                 token=None, timeout=60):
             captured.append((url, file_path, form_fields, token))
-            # csc 가 먼저 / console 다음 — 파일명으로 구분해 다른 id 반환
+            # csc / console / cspsim — 파일명으로 구분해 다른 id 반환
             base = os.path.basename(file_path)
-            pid = 1 if base.startswith("csc-") else 2
+            if base.startswith("csc-"):       pid = 1
+            elif base.startswith("console-"): pid = 2
+            else:                              pid = 3   # cspsim
             return (201, {"id": pid})
         self._csc_http.post_multipart = fake_post_multipart
 
@@ -2137,7 +2139,7 @@ class TestStage5CscDeploySteps(unittest.TestCase):
             os.makedirs(pkg_dir)
             # csc-1.0.0.tar.gz, csc-1.10.0.tar.gz (natural sort: 1.10 > 1.0)
             for fn in ("csc-1.0.0.tar.gz", "csc-1.10.0.tar.gz",
-                       "console-2.5.0.tar.gz"):
+                       "console-2.5.0.tar.gz", "cspsim-0.0.1.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f:
                     f.write("dummy")
             ctx = self._ctx_with_dist(td)
@@ -2147,6 +2149,7 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "pkg_id_csc"), 1)
         self.assertEqual(self._native._get(ctx, "pkg_id_console"), 2)
+        self.assertEqual(self._native._get(ctx, "pkg_id_sim"), 3)
         # csc 는 1.10.0 (natural sort) 이 선택됐는지 검증
         csc_call = next(c for c in captured if "csc-" in c[1])
         self.assertIn("csc-1.10.0.tar.gz", csc_call[1])
@@ -2193,8 +2196,9 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         captured: list = []
         def fake_post_json(url, payload, token=None, timeout=15):
             captured.append((url, payload))
-            # csc → did=11, console → did=22
-            did = 11 if payload["process_name"] == "CSC" else 22
+            # csc → did=11, console → did=22, sim → did=33
+            pname = payload["process_name"]
+            did = {"CSC": 11, "CONSOLE": 22, "CSPSIM": 33}[pname]
             return (201, {"id": did})
         self._csc_http.post_json = fake_post_json
 
@@ -2203,15 +2207,19 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         self._native._set(ctx, "aid_csc", 7)
         self._native._set(ctx, "pkg_id_csc", 1)
         self._native._set(ctx, "pkg_id_console", 2)
+        self._native._set(ctx, "pkg_id_sim", 3)
         r = self._native.step_09_deployment_create(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "dep_id_csc"), 11)
         self.assertEqual(self._native._get(ctx, "dep_id_console"), 22)
-        # config overlay 검증 — csc:Server.Port=4445, console:Port=8081
+        self.assertEqual(self._native._get(ctx, "dep_id_sim"), 33)
+        # config overlay 검증 — csc:Server.Port=4445, console:Port=8081, sim: 없음
         csc_payload = next(p for u, p in captured if p["process_name"] == "CSC")
         self.assertEqual(csc_payload["config"], {"Server.Port": 4445})
         cons_payload = next(p for u, p in captured if p["process_name"] == "CONSOLE")
         self.assertEqual(cons_payload["config"], {"Port": 8081})
+        sim_payload = next(p for u, p in captured if p["process_name"] == "CSPSIM")
+        self.assertEqual(sim_payload["config"], {})
 
     # ── step 10 ──
     def test_step_10_skips_without_tok(self) -> None:
@@ -2329,24 +2337,30 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             for name in ("csc", "console"):
-                base = os.path.join(td, "csc-server", name)
+                base = os.path.join(td, "mgmt-server", name)
                 os.makedirs(os.path.join(base, "config"))
                 with open(os.path.join(base, "meta.json"), "w") as f:
                     f.write('{"name": "' + name + '"}')
+            # sim 은 cspsim tarball 구조상 config/ 없음 — meta.json 만
+            sim_base = os.path.join(td, "mgmt-server", "sim")
+            os.makedirs(sim_base)
+            with open(os.path.join(sim_base, "meta.json"), "w") as f:
+                f.write('{"name": "sim"}')
             ctx = self._ctx_with_dist(td)
             r = self._native.step_11_verify_files(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertIn("csc: meta.json + config/ 존재", r.detail)
         self.assertIn("console: meta.json + config/ 존재", r.detail)
+        self.assertIn("sim: meta.json 존재", r.detail)
 
     def test_step_11_fail_when_meta_missing(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             # csc 만 정상, console 의 meta.json 누락
-            os.makedirs(os.path.join(td, "csc-server", "csc", "config"))
-            with open(os.path.join(td, "csc-server", "csc", "meta.json"), "w") as f:
+            os.makedirs(os.path.join(td, "mgmt-server", "csc", "config"))
+            with open(os.path.join(td, "mgmt-server", "csc", "meta.json"), "w") as f:
                 f.write("{}")
-            os.makedirs(os.path.join(td, "csc-server", "console", "config"))
+            os.makedirs(os.path.join(td, "mgmt-server", "console", "config"))
             # console/meta.json 만들지 않음
             ctx = self._ctx_with_dist(td)
             r = self._native.step_11_verify_files(ctx)
@@ -2357,7 +2371,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             for name in ("csc", "console"):
-                base = os.path.join(td, "csc-server", name)
+                base = os.path.join(td, "mgmt-server", name)
                 os.makedirs(base)
                 with open(os.path.join(base, "meta.json"), "w") as f:
                     f.write("{}")
@@ -2420,7 +2434,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         from verify.lib.items.stage5 import _native_steps
         import tempfile, json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "csc-server", "csc")
+            base = os.path.join(td, "mgmt-server", "csc")
             os.makedirs(base)
             # 4420 으로 overlay 된 config 가 있다 가정
             with open(os.path.join(base, "config.json"), "w") as f:
@@ -2437,7 +2451,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         from verify.lib.items.stage5 import _native_steps
         import tempfile, json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "csc-server", "csc")
+            base = os.path.join(td, "mgmt-server", "csc")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 _json.dump({"Server.Port": 4445}, f)
@@ -2452,7 +2466,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         import tempfile
         import json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "csc-server", "csc")
+            base = os.path.join(td, "mgmt-server", "csc")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 _json.dump({"Server.Port": 4445, "other": 1}, f)
@@ -2465,7 +2479,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         import tempfile
         import json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "csc-server", "csc")
+            base = os.path.join(td, "mgmt-server", "csc")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 _json.dump({"Server": {"Port": 4445}}, f)
@@ -2477,7 +2491,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         import tempfile
         import json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "csc-server", "csc")
+            base = os.path.join(td, "mgmt-server", "csc")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 _json.dump({"Server.Port": 4444}, f)
@@ -2497,7 +2511,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
     def test_step_12_fail_malformed_json(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "csc-server", "csc")
+            base = os.path.join(td, "mgmt-server", "csc")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 f.write("not-json{")
@@ -2958,7 +2972,8 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
     # ── step 17 ──
     def test_step_17_pass_with_modules(self) -> None:
-        # P1 토폴로지: csp/psp/cmp/pmp/cspsim 5 tarball 모두 업로드 PASS.
+        # P1 토폴로지: 4 service-server (csp/psp/cmp/pmp) tarball 업로드 PASS.
+        # sim 은 mgmt-server agent 가 step_08 에서 처리 — step_17 대상 아님.
         import tempfile
         captured: list = []
         def fake_post_multipart(url, *, file_path, file_field="file",
@@ -2966,11 +2981,10 @@ class TestStage5ModulesSteps(unittest.TestCase):
                                 token=None, timeout=60):
             captured.append(file_path)
             base = os.path.basename(file_path)
-            if   base.startswith("csp-"):    pid = 11
-            elif base.startswith("psp-"):    pid = 14
-            elif base.startswith("cmp-"):    pid = 12
-            elif base.startswith("pmp-"):    pid = 15
-            elif base.startswith("cspsim-"): pid = 13
+            if   base.startswith("csp-"): pid = 11
+            elif base.startswith("psp-"): pid = 14
+            elif base.startswith("cmp-"): pid = 12
+            elif base.startswith("pmp-"): pid = 15
             else: pid = 99
             return (201, {"id": pid})
         self._csc_http.post_multipart = fake_post_multipart
@@ -2979,8 +2993,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
             for fn in ("csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz",
-                       "cmp-1.0.0.tar.gz", "pmp-1.0.0.tar.gz",
-                       "cspsim-1.0.0.tar.gz"):
+                       "cmp-1.0.0.tar.gz", "pmp-1.0.0.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
             ctx = self._ctx_with_dist(td)
             self._native._set(ctx, "tok2", "JWT2")
@@ -2990,25 +3003,23 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(self._native._get(ctx, "pkg2_id_psp"), 14)
         self.assertEqual(self._native._get(ctx, "pkg2_id_cmp"), 12)
         self.assertEqual(self._native._get(ctx, "pkg2_id_pmp"), 15)
-        # sim 의 tarball prefix 는 cspsim
-        self.assertEqual(self._native._get(ctx, "pkg2_id_sim"), 13)
 
-    def test_step_17_fail_sim_tarball_missing(self) -> None:
+    def test_step_17_fail_when_pmp_tarball_missing(self) -> None:
         import tempfile
         self._csc_http.post_multipart = lambda u, **k: (201, {"id": 1})
         with tempfile.TemporaryDirectory() as td:
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
-            # cspsim tarball 만 누락 — 나머지 4 모듈은 존재
+            # pmp tarball 만 누락 — 나머지 3 모듈은 존재
             for fn in ("csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz",
-                       "cmp-1.0.0.tar.gz", "pmp-1.0.0.tar.gz"):
+                       "cmp-1.0.0.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
             ctx = self._ctx_with_dist(td)
             self._native._set(ctx, "tok2", "JWT2")
             r = self._native.step_17_modules_pkg_upload(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
-        self.assertIn("sim: tarball 없음", r.detail)
-        self.assertIn("cspsim-*.tar.gz", r.detail)
+        self.assertIn("ptt-media-server", r.detail)
+        self.assertIn("pmp-*.tar.gz", r.detail)
 
     # ── step 18 ──
     def test_step_18_skips_without_tok2(self) -> None:
@@ -3017,14 +3028,19 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.SKIP)
 
     def test_step_18_pass(self) -> None:
-        # P1 토폴로지: 5 모듈 (csp/psp/cmp/pmp/sim) 모두 register + spawn + online.
+        # P1 토폴로지: 4 service-server (csp/psp/cmp/pmp) register + spawn + online.
         post_called: list = []
-        _MID = {"csp": 100, "psp": 110, "cmp": 200, "pmp": 210, "sim": 300}
+        _AID_BY_AGENT = {
+            "volte-sip-server":   100,
+            "ptt-sip-server":     110,
+            "volte-media-server": 200,
+            "ptt-media-server":   210,
+        }
         def fake_post_json(url, payload, token=None, timeout=10):
             post_called.append(url)
             if url.endswith("/agents"):
                 name = payload["name"]
-                aid = next((v for k, v in _MID.items() if name.startswith(f"{k}-")), 999)
+                aid = _AID_BY_AGENT.get(name, 999)
                 return (201, {"id": aid, "enrollment_token": f"ENR-{aid}"})
             if url.endswith("/approve"):
                 return (200, {})
@@ -3037,7 +3053,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
         spawned: list = []
         def fake_spawn(ctx, m, base, aname, enroll_tok):
             spawned.append((m, aname))
-            return (1000 + _MID.get(m, 0), "")
+            return (1000 + _AID_BY_AGENT.get(aname, 0), "")
         self._native._spawn_one_module_agent = fake_spawn
 
         # _all_modules_online 즉시 True
@@ -3059,15 +3075,14 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(self._native._get(ctx, "aid_psp"), 110)
         self.assertEqual(self._native._get(ctx, "aid_cmp"), 200)
         self.assertEqual(self._native._get(ctx, "aid_pmp"), 210)
-        self.assertEqual(self._native._get(ctx, "aid_sim"), 300)
         self.assertEqual(self._native._get(ctx, "ta_pid_csp"), 1100)
-        self.assertEqual(len(spawned), 5)
+        self.assertEqual(len(spawned), 4)
 
     # ── step 19 ──
     def test_step_19_pass(self) -> None:
-        # P1 토폴로지: 5 deployment (CSP/PSP/CMP/PMP/CSPSIM) 모두 생성 PASS.
+        # P1 토폴로지: 4 service-server deployment (CSP/PSP/CMP/PMP) 모두 생성 PASS.
         captured: list = []
-        _PMAP = {"CSP": 11, "PSP": 14, "CMP": 12, "PMP": 15, "CSPSIM": 13}
+        _PMAP = {"CSP": 11, "PSP": 14, "CMP": 12, "PMP": 15}
         def fake_post_json(url, payload, token=None, timeout=15):
             captured.append(payload)
             return (201, {"id": _PMAP[payload["process_name"]]})
@@ -3076,8 +3091,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
         for m, aid, pid in [("csp", 100, 11), ("psp", 110, 14),
-                             ("cmp", 200, 12), ("pmp", 210, 15),
-                             ("sim", 300, 13)]:
+                             ("cmp", 200, 12), ("pmp", 210, 15)]:
             self._native._set(ctx, f"aid_{m}", aid)
             self._native._set(ctx, f"pkg2_id_{m}", pid)
         r = self._native.step_19_modules_deployment_create(ctx)
@@ -3085,10 +3099,6 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(self._native._get(ctx, "dep2_id_csp"), 11)
         self.assertEqual(self._native._get(ctx, "dep2_id_psp"), 14)
         self.assertEqual(self._native._get(ctx, "dep2_id_pmp"), 15)
-        self.assertEqual(self._native._get(ctx, "dep2_id_sim"), 13)
-        # sim 의 process_name 은 CSPSIM
-        sim_payload = next(p for p in captured if p["process_name"] == "CSPSIM")
-        self.assertIsNotNone(sim_payload)
         # PSP/PMP 는 config_overlay (Roles/LocalIp) 가 payload 에 포함
         psp_payload = next(p for p in captured if p["process_name"] == "PSP")
         self.assertIn("config", psp_payload)
@@ -3096,25 +3106,29 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(psp_payload["config"].get("Setup.Sip.LocalIp"), "127.0.0.3")
         pmp_payload = next(p for p in captured if p["process_name"] == "PMP")
         self.assertEqual(pmp_payload["config"].get("RtpIp"), "127.0.0.3")
+        # install_path 가 agent_name 디렉토리 사용
+        csp_payload = next(p for p in captured if p["process_name"] == "CSP")
+        self.assertIn("/volte-sip-server/", csp_payload["install_path"])
+        psp_payload2 = next(p for p in captured if p["process_name"] == "PSP")
+        self.assertIn("/ptt-sip-server/", psp_payload2["install_path"])
 
     def test_step_19_fail_missing_pkg_for_one_module(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=15: (201, {"id": 1})
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
-        # csp/cmp 만 ready, sim 의 pkg_id 누락
+        # csp/cmp 만 ready, pmp 의 pkg_id 누락
         for m in ("csp", "cmp"):
             self._native._set(ctx, f"aid_{m}", 100)
             self._native._set(ctx, f"pkg2_id_{m}", 1)
-        self._native._set(ctx, "aid_sim", 300)
-        # pkg2_id_sim 미설정
+        self._native._set(ctx, "aid_pmp", 210)
+        # pkg2_id_pmp 미설정
         r = self._native.step_19_modules_deployment_create(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
-        self.assertIn("sim:", r.detail)
+        self.assertIn("ptt-media-server", r.detail)
 
     # ── step 20 ──
     def test_step_20_pass_when_all_succeed(self) -> None:
-        # PASS 조건: 폴링 종료 시 모든 deployment status ∈ {running, stopped}.
-        # sim 은 install-only 라 stopped, csp/cmp 는 install 후 stopped 또는 running.
+        # PASS 조건: 폴링 종료 시 모든 service-server deployment status ∈ {running, stopped}.
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
         self._db.csp_db_config = lambda d: {"Host": "x", "User": "x",
                                              "Password": "x", "DbName": "x"}
@@ -3128,7 +3142,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
-        for m, did in [("csp", 11), ("psp", 14), ("cmp", 12), ("pmp", 15), ("sim", 13)]:
+        for m, did in [("csp", 11), ("psp", 14), ("cmp", 12), ("pmp", 15)]:
             self._native._set(ctx, f"dep2_id_{m}", did)
         r = self._native.step_20_modules_install_poll(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
@@ -3219,23 +3233,30 @@ class TestStage5ModulesSteps(unittest.TestCase):
             # 모든 deployment + Test-agent pid 설정
             self._native._set(ctx, "tok", "JWT")
             self._native._set(ctx, "tok2", "JWT2")
+            # mgmt-server 배포 3 모듈 (csc/console/sim)
             self._native._set(ctx, "dep_id_csc", 1)
             self._native._set(ctx, "dep_id_console", 2)
+            self._native._set(ctx, "dep_id_sim", 3)
+            # 4 service-server deployment
             self._native._set(ctx, "dep2_id_csp", 11)
+            self._native._set(ctx, "dep2_id_psp", 14)
             self._native._set(ctx, "dep2_id_cmp", 12)
+            self._native._set(ctx, "dep2_id_pmp", 15)
+            # Test-agent pid: mgmt-server 1 + service-server 4 = 5
             self._native._set(ctx, "ta_pid_csc", 1000)
             self._native._set(ctx, "ta_pid_csp", 1001)
+            self._native._set(ctx, "ta_pid_psp", 1011)
             self._native._set(ctx, "ta_pid_cmp", 1002)
-            self._native._set(ctx, "ta_pid_sim", 1003)
+            self._native._set(ctx, "ta_pid_pmp", 1012)
             r = self._native.step_22_finalize(ctx)
         finally:
             _os.kill = orig_kill
 
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        # csc/console (TB-CSC) + csp/cmp (배포본 csc) = 4 stop 발행
-        self.assertEqual(len(post_calls), 4)
-        # 4 Test-agent kill
-        self.assertEqual(len(kill_calls), 4)
+        # mgmt-server: csc/console/sim (3) + service-server: csp/psp/cmp/pmp (4) = 7 stop 발행
+        self.assertEqual(len(post_calls), 7)
+        # 5 Test-agent kill (mgmt-server + 4 service-server)
+        self.assertEqual(len(kill_calls), 5)
 
 
 if __name__ == "__main__":

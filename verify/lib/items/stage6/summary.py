@@ -6,6 +6,7 @@ from glob import glob
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
+from ..stage5 import _native_steps
 
 
 @verify_item(
@@ -44,10 +45,13 @@ def summary(ctx: VerifyContext) -> ItemResult:
     sip_lines = msg_lines + flow_lines
 
     err_cnt = 0
-    log_paths = (
-        glob(os.path.join(ctx.dist_dir, "csp-server", "csp", "csp", "log", "csp_*.log")) +
-        glob(os.path.join(ctx.dist_dir, "cmp-server", "cmp", "cmp", "log", "cmp_*.log"))
-    )
+    # service-server log glob — _INSTANCES 의 agent_name + dir 기반 (csp/psp/cmp/pmp)
+    log_paths: list = []
+    for inst in _native_steps._INSTANCES:
+        log_paths += glob(os.path.join(
+            ctx.dist_dir, inst["agent_name"], inst["dir"],
+            inst["dir"], "log", f"{inst['dir']}_*.log",
+        ))
     for p in log_paths:
         try:
             with open(p, "rb") as f:

@@ -1115,7 +1115,7 @@ _STAGE_TITLES = {
     2: ("빌드",        "preflight + cmake build"),
     3: ("스모크",      "configure → start dev → 1콜 VoIP/PTT"),
     4: ("패키지화",    "tarball + manifest hash"),
-    5: ("로컬 배포",   "TB-CSC → Test-agent → csc-server → csp/cmp 체인"),
+    5: ("로컬 배포",   "TB-CSC → Test-agent → mgmt-server → service-server 체인"),
     6: ("통합 검증",   "VoLTE/PTT 음성·영상 (배포본 대상)"),
 }
 

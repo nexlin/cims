@@ -16,7 +16,7 @@ const STAGE_DESC: Record<number, string> = {
   2: 'preflight + cmake build',
   3: 'configure → start dev → 1콜 VoIP/PTT',
   4: 'tarball + manifest hash',
-  5: 'TB-CSC → Test-agent → csc-server → csp/cmp 체인',
+  5: 'TB-CSC → Test-agent → mgmt-server → service-server 체인',
   6: 'VoLTE/PTT 음성·영상 (배포본 대상)',
 }
 
