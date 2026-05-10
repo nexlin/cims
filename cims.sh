@@ -114,9 +114,11 @@ _kill_own_install_listener() {
     local pid
     local killed_any=0
     for pid in $port_pids; do
-        local pid_exe; pid_exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null)
-        # tarball 풀어 새 binary 가 inode 교체된 경우 옛 process 의 exe 가 ' (deleted)'
-        # suffix 를 가짐 — 매칭 시 그 부분 strip.
+        # readlink -f 가 deleted target 또는 권한 부족 시 non-zero 반환 → set -e
+        # 회피 위해 || true. tarball 풀어 inode 교체된 옛 process 의 exe 는
+        # '/path/to/bin (deleted)' 형태 → readlink -e/-f 모두 비워서 plain readlink
+        # 로 raw target 을 받고 ' (deleted)' suffix 만 trim.
+        local pid_exe; pid_exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
         local pid_exe_trim="${pid_exe% (deleted)}"
         if [[ -n "$pid_exe_trim" && "$pid_exe_trim" == "$exe_real" ]]; then
             warn "stale own-install listener 정리: pid=$pid (port=$port/$proto exe=$pid_exe)"
