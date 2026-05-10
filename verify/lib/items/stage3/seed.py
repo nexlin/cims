@@ -47,6 +47,14 @@ def seed(ctx: VerifyContext) -> ItemResult:
         "PTT_GROUP": sub["ptt_group"],
     })
 
+    # PASS gate — seed 0건 또는 reload 실패는 downstream (S3-SCN-*) 가
+    # stale state 위에서 도는 false PASS 의 원인. 즉시 FAIL 로 차단.
+    fail_reasons: list = []
+    if seeded_n <= 0:
+        fail_reasons.append(f"access_services seed 0건 (cfg_dir={cfg_dir}, voip/ptt 가입자 미존재 가능)")
+    if not reloaded:
+        fail_reasons.append(f"csp reload(SIGUSR1) 실패 (pid_file={pid_file})")
+
     lines = [
         f"- VoIP: user={sub['voip_user']!r} domain={VOLTE_DOMAIN} auth_id={voip_auth!r}",
         f"- PTT:  user={sub['ptt_user']!r}  domain={MCPTT_DOMAIN} group={sub['ptt_group']!r}",
@@ -56,8 +64,14 @@ def seed(ctx: VerifyContext) -> ItemResult:
     ctx.w("## S3-SEED — 시나리오 준비")
     for line in lines:
         ctx.w(line)
+    if fail_reasons:
+        ctx.w("- **FAIL 사유**:")
+        for r in fail_reasons:
+            ctx.w(f"  - {r}")
     ctx.w()
     return ItemResult(
         id="S3-SEED", name="가입자/그룹 선택 + access_services.jsonl 시드",
-        status=ItemStatus.PASS, detail="\n".join(lines), stage=3,
+        status=ItemStatus.FAIL if fail_reasons else ItemStatus.PASS,
+        detail="\n".join(lines + ([f"FAIL: {'; '.join(fail_reasons)}"] if fail_reasons else [])),
+        stage=3,
     )

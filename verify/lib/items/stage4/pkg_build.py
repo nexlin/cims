@@ -33,20 +33,37 @@ def pkg_build(ctx: VerifyContext) -> ItemResult:
     tarballs = sorted(glob(os.path.join(pkg_dir, "*.tar.gz")))
     n = len(tarballs)
 
+    # 기대 컴포넌트 — cims.sh:1826 cmd_pkg 의 default targets 와 동기.
+    # 변경 시 양쪽 모두 갱신 필요.
+    EXPECTED = {
+        "cmp", "pmp", "imp",       # 미디어 (VoLTE/PTT/IBCF)
+        "csp", "psp", "isp",       # 시그널링 (VoLTE/PTT/IBCF)
+        "cwrtc", "csc", "console", "phone", "cspsim", "agent",
+    }
+    # 파일명 `<name>-<ver>.tar.gz` 에서 컴포넌트 이름 추출.
+    present = {os.path.basename(t).rsplit("-", 1)[0] for t in tarballs}
+    missing = sorted(EXPECTED - present)
+
     ctx.w("## S4-PKG-BUILD — pkg --no-bump")
     ctx.w(f"- 산출물: {n}개 tarball ({pkg_dir})")
     for t in tarballs:
         size = os.path.getsize(t)
         ctx.w(f"  - {os.path.basename(t)} ({size:,} bytes)")
+    if missing:
+        ctx.w(f"- **누락 컴포넌트**: {', '.join(missing)}")
     ctx.w("```")
     for line in tail.splitlines(): ctx.w(line)
     ctx.w("```")
     ctx.w()
 
-    # 5개 모듈 (csc/csp/cmp/sim/console) 모두 생성되어야 PASS
-    ok = rc == 0 and n >= 5
+    # 12개 기대 컴포넌트 전부 존재 + rc==0 이어야 PASS.
+    ok = rc == 0 and not missing
     return ItemResult(
         id="S4-PKG-BUILD", name="패키지 빌드",
         status=ItemStatus.PASS if ok else ItemStatus.FAIL,
-        detail=f"rc={rc}, tarballs={n}\n{tail}", stage=4,
+        detail=(
+            f"rc={rc}, tarballs={n}, expected={len(EXPECTED)}, "
+            f"missing={missing}\n{tail}"
+        ),
+        stage=4,
     )
