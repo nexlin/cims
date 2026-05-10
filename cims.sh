@@ -993,21 +993,62 @@ cmd_reset() {
         if [[ $keep_deployed -eq 1 ]]; then
             info "Phase 2/3 배포 대상 정리 — SKIP (--keep-deployed, mgmt-server + service-server 보존)"
         else
-            info "Phase 2/3 배포 대상 정리 (build/dist/{mgmt,volte-sip,volte-media,ptt-sip,ptt-media}-server/, §0.10)..."
+            info "Phase 2/3 배포 대상 정리 (build/dist/{mgmt,volte-sip,volte-media,ptt-sip,ptt-media,ibcf-sip,ibcf-media}-server/, §0.10)..."
             # Test-agent 프로세스부터 종료 (파일 잠금 회피)
-            local _agents=(mgmt-server volte-sip-server volte-media-server ptt-sip-server ptt-media-server)
+            # P2 — ibcf-sip-server / ibcf-media-server 추가 (verify/lib/items/stage5/_native_steps.py
+            # _INSTANCES 의 agent_name 과 동기). _INSTANCES 에 추가/제거 시 양쪽 갱신 필요.
+            local _agents=(mgmt-server
+                           volte-sip-server volte-media-server
+                           ptt-sip-server ptt-media-server
+                           ibcf-sip-server ibcf-media-server)
             local _a
             for _a in "${_agents[@]}"; do
                 pkill -f "cims_agent.py.*--name $_a" 2>/dev/null || true
             done
             # 배포본 서비스 프로세스 (csc_app.py, console serve, csp/cmp 바이너리) 도 종료
             # — 4445/4430/8081/5060/9000 등 포트 잠금 해제 (Phase 1 검증 시 mcptt 4430 충돌 방지)
+            # .prev 디렉토리에서 동작 중인 stale process 도 함께 종료 (race 회피).
+            # 네이티브 바이너리 (csp/cmp 등) 의 cmdline 은 'bin/csp config/csp.json' 같이
+            # 상대경로 — pkill -f 는 cmdline 매칭이라 못 잡음. /proc/PID/exe 와 /proc/PID/cwd
+            # 가 install 경로 하위인 pid 를 직접 enumerate 하여 kill.
+            # exe/cwd 가 '(deleted)' suffix 를 가진 stale process 도 잡아야 하므로
+            # install dir 존재 여부 가드 없이 항상 enumerate. 동일 path prefix 면 kill.
+            _enum_install_pids() {
+                local prefix="$1"   # 예: /home/nex/work/cims/build/dist/volte-sip-server
+                local pid exe cwd
+                for pid in /proc/[0-9]*; do
+                    exe=$(readlink "$pid/exe" 2>/dev/null || true)
+                    cwd=$(readlink "$pid/cwd" 2>/dev/null || true)
+                    # '(deleted)' suffix strip — tarball/rm 후 inode 교체된 케이스
+                    exe="${exe% (deleted)}"
+                    cwd="${cwd% (deleted)}"
+                    if [[ "$exe" == "$prefix/"* || "$cwd" == "$prefix"* ]]; then
+                        basename "$pid"
+                    fi
+                done | sort -u
+            }
+            local _a_path _pids
             for _a in "${_agents[@]}"; do
                 pkill -f "$DIST_DIR/$_a/" 2>/dev/null || true
+                pkill -f "$DIST_DIR/$_a\\.prev/" 2>/dev/null || true
+                for _a_path in "$DIST_DIR/$_a" "$DIST_DIR/$_a.prev"; do
+                    _pids=$(_enum_install_pids "$_a_path")
+                    [[ -n $_pids ]] && kill $_pids 2>/dev/null || true
+                done
             done
             sleep 1
             for _a in "${_agents[@]}"; do
-                [[ -d "$DIST_DIR/$_a" ]] && rm -rf "$DIST_DIR/$_a"
+                for _a_path in "$DIST_DIR/$_a" "$DIST_DIR/$_a.prev"; do
+                    _pids=$(_enum_install_pids "$_a_path")
+                    [[ -n $_pids ]] && kill -9 $_pids 2>/dev/null || true
+                done
+            done
+            sleep 0.3
+            unset -f _enum_install_pids
+            # 디렉토리 + .prev 둘 다 삭제 — 다음 deploy 가 stale .prev 와 race 안 하도록.
+            for _a in "${_agents[@]}"; do
+                [[ -d "$DIST_DIR/$_a" ]]      && rm -rf "$DIST_DIR/$_a"
+                [[ -d "$DIST_DIR/$_a.prev" ]] && rm -rf "$DIST_DIR/$_a.prev"
             done
         fi
 

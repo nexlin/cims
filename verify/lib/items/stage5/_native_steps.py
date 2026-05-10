@@ -172,6 +172,37 @@ _INSTANCES = [
          "RtpIp":    "127.0.0.3",
          "CspIp":    "127.0.0.3",   # PSP IP
      }},
+    # P2 — IBCF 트렁크 분리. ISP 는 IBCF role 단독 (CSCF/TAS/PTT_AS=false).
+    # 별도 loopback 127.0.0.5 사용 — `sudo ip addr add 127.0.0.5/8 dev lo` 1회 필요.
+    # 라우팅 정책 (routing_policies.jsonl / routes.jsonl) seed 는 별도 round (P3).
+    {"id": "isp",
+     "display_name": "IBCF SIP Server",
+     "agent_name":   "ibcf-sip-server",
+     "tarball": "isp", "dir": "isp", "process": "ISP",
+     "sync_port": 9909, "local_ip": "127.0.0.5", "listen": (5060, "udp"),
+     "peer_id": "imp",
+     "config_overlay": {
+         "Setup.Roles.CSCF":   False,   # IBCF 단독 — 가입자 register 미수행
+         "Setup.Roles.TAS":    False,
+         "Setup.Roles.PTT_AS": False,
+         "Setup.Roles.IBCF":   True,
+         "Setup.Sip.LocalIp":         "127.0.0.5",
+         "Setup.MediaServer.Host":    "127.0.0.5",
+         "Setup.MediaServer.LocalIp": "127.0.0.5",
+         # 인스턴스별 LocalPort 분리 — dev csp(9001)/CSP(9011)/PSP(9012) 와 충돌 회피.
+         "Setup.MediaServer.LocalPort": 9013,
+     }},
+    {"id": "imp",
+     "display_name": "IBCF Media Server",
+     "agent_name":   "ibcf-media-server",
+     "tarball": "imp", "dir": "imp", "process": "IMP",
+     "sync_port": 9910, "local_ip": "127.0.0.5", "listen": (9000, "udp"),
+     "peer_id": "isp",
+     "config_overlay": {
+         "ServerIp": "127.0.0.5",   # IMP 9000 host-specific bind (CMP/PMP 와 분리)
+         "RtpIp":    "127.0.0.5",
+         "CspIp":    "127.0.0.5",   # ISP IP
+     }},
 ]
 
 

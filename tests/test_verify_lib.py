@@ -2972,7 +2972,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
     # ── step 17 ──
     def test_step_17_pass_with_modules(self) -> None:
-        # P1 토폴로지: 4 service-server (csp/psp/cmp/pmp) tarball 업로드 PASS.
+        # P2 토폴로지: 6 service-server (csp/psp/isp + cmp/pmp/imp) tarball 업로드 PASS.
         # sim 은 mgmt-server agent 가 step_08 에서 처리 — step_17 대상 아님.
         import tempfile
         captured: list = []
@@ -2983,8 +2983,10 @@ class TestStage5ModulesSteps(unittest.TestCase):
             base = os.path.basename(file_path)
             if   base.startswith("csp-"): pid = 11
             elif base.startswith("psp-"): pid = 14
+            elif base.startswith("isp-"): pid = 16
             elif base.startswith("cmp-"): pid = 12
             elif base.startswith("pmp-"): pid = 15
+            elif base.startswith("imp-"): pid = 17
             else: pid = 99
             return (201, {"id": pid})
         self._csc_http.post_multipart = fake_post_multipart
@@ -2992,8 +2994,8 @@ class TestStage5ModulesSteps(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
-            for fn in ("csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz",
-                       "cmp-1.0.0.tar.gz", "pmp-1.0.0.tar.gz"):
+            for fn in ("csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz", "isp-1.0.0.tar.gz",
+                       "cmp-1.0.0.tar.gz", "pmp-1.0.0.tar.gz", "imp-1.0.0.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
             ctx = self._ctx_with_dist(td)
             self._native._set(ctx, "tok2", "JWT2")
@@ -3001,8 +3003,10 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "pkg2_id_csp"), 11)
         self.assertEqual(self._native._get(ctx, "pkg2_id_psp"), 14)
+        self.assertEqual(self._native._get(ctx, "pkg2_id_isp"), 16)
         self.assertEqual(self._native._get(ctx, "pkg2_id_cmp"), 12)
         self.assertEqual(self._native._get(ctx, "pkg2_id_pmp"), 15)
+        self.assertEqual(self._native._get(ctx, "pkg2_id_imp"), 17)
 
     def test_step_17_fail_when_pmp_tarball_missing(self) -> None:
         import tempfile
@@ -3028,13 +3032,15 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.SKIP)
 
     def test_step_18_pass(self) -> None:
-        # P1 토폴로지: 4 service-server (csp/psp/cmp/pmp) register + spawn + online.
+        # P2 토폴로지: 6 service-server (csp/psp/isp + cmp/pmp/imp) register + spawn + online.
         post_called: list = []
         _AID_BY_AGENT = {
             "volte-sip-server":   100,
             "ptt-sip-server":     110,
+            "ibcf-sip-server":    120,
             "volte-media-server": 200,
             "ptt-media-server":   210,
+            "ibcf-media-server":  220,
         }
         def fake_post_json(url, payload, token=None, timeout=10):
             post_called.append(url)
@@ -3073,16 +3079,19 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "aid_csp"), 100)
         self.assertEqual(self._native._get(ctx, "aid_psp"), 110)
+        self.assertEqual(self._native._get(ctx, "aid_isp"), 120)
         self.assertEqual(self._native._get(ctx, "aid_cmp"), 200)
         self.assertEqual(self._native._get(ctx, "aid_pmp"), 210)
+        self.assertEqual(self._native._get(ctx, "aid_imp"), 220)
         self.assertEqual(self._native._get(ctx, "ta_pid_csp"), 1100)
-        self.assertEqual(len(spawned), 4)
+        self.assertEqual(len(spawned), 6)
 
     # ── step 19 ──
     def test_step_19_pass(self) -> None:
-        # P1 토폴로지: 4 service-server deployment (CSP/PSP/CMP/PMP) 모두 생성 PASS.
+        # P2 토폴로지: 6 service-server deployment (CSP/PSP/ISP/CMP/PMP/IMP) 생성 PASS.
         captured: list = []
-        _PMAP = {"CSP": 11, "PSP": 14, "CMP": 12, "PMP": 15}
+        _PMAP = {"CSP": 11, "PSP": 14, "ISP": 16,
+                 "CMP": 12, "PMP": 15, "IMP": 17}
         def fake_post_json(url, payload, token=None, timeout=15):
             captured.append(payload)
             return (201, {"id": _PMAP[payload["process_name"]]})
@@ -3090,15 +3099,17 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
-        for m, aid, pid in [("csp", 100, 11), ("psp", 110, 14),
-                             ("cmp", 200, 12), ("pmp", 210, 15)]:
+        for m, aid, pid in [("csp", 100, 11), ("psp", 110, 14), ("isp", 120, 16),
+                             ("cmp", 200, 12), ("pmp", 210, 15), ("imp", 220, 17)]:
             self._native._set(ctx, f"aid_{m}", aid)
             self._native._set(ctx, f"pkg2_id_{m}", pid)
         r = self._native.step_19_modules_deployment_create(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "dep2_id_csp"), 11)
         self.assertEqual(self._native._get(ctx, "dep2_id_psp"), 14)
+        self.assertEqual(self._native._get(ctx, "dep2_id_isp"), 16)
         self.assertEqual(self._native._get(ctx, "dep2_id_pmp"), 15)
+        self.assertEqual(self._native._get(ctx, "dep2_id_imp"), 17)
         # PSP/PMP 는 config_overlay (Roles/LocalIp) 가 payload 에 포함
         psp_payload = next(p for p in captured if p["process_name"] == "PSP")
         self.assertIn("config", psp_payload)
@@ -3106,12 +3117,23 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(psp_payload["config"].get("Setup.Sip.LocalIp"), "127.0.0.3")
         pmp_payload = next(p for p in captured if p["process_name"] == "PMP")
         self.assertEqual(pmp_payload["config"].get("RtpIp"), "127.0.0.3")
+        # ISP 는 IBCF role 단독 (CSCF/TAS/PTT_AS=false), local_ip 127.0.0.5
+        isp_payload = next(p for p in captured if p["process_name"] == "ISP")
+        self.assertEqual(isp_payload["config"].get("Setup.Roles.IBCF"), True)
+        self.assertEqual(isp_payload["config"].get("Setup.Roles.CSCF"), False)
+        self.assertEqual(isp_payload["config"].get("Setup.Roles.TAS"), False)
+        self.assertEqual(isp_payload["config"].get("Setup.Roles.PTT_AS"), False)
+        self.assertEqual(isp_payload["config"].get("Setup.Sip.LocalIp"), "127.0.0.5")
+        imp_payload = next(p for p in captured if p["process_name"] == "IMP")
+        self.assertEqual(imp_payload["config"].get("RtpIp"), "127.0.0.5")
         # install_path 는 server level (agent_name 까지) — tarball 안 변종
-        # 디렉토리 (csp/psp/) 가 그 안에 풀리며 _install_path 자체는 leaf 미포함.
+        # 디렉토리 (csp/psp/isp/) 가 그 안에 풀리며 _install_path 자체는 leaf 미포함.
         csp_payload = next(p for p in captured if p["process_name"] == "CSP")
         self.assertTrue(csp_payload["install_path"].endswith("/volte-sip-server"))
         psp_payload2 = next(p for p in captured if p["process_name"] == "PSP")
         self.assertTrue(psp_payload2["install_path"].endswith("/ptt-sip-server"))
+        isp_payload2 = next(p for p in captured if p["process_name"] == "ISP")
+        self.assertTrue(isp_payload2["install_path"].endswith("/ibcf-sip-server"))
 
     def test_step_19_fail_missing_pkg_for_one_module(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=15: (201, {"id": 1})
@@ -3143,7 +3165,8 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
-        for m, did in [("csp", 11), ("psp", 14), ("cmp", 12), ("pmp", 15)]:
+        for m, did in [("csp", 11), ("psp", 14), ("isp", 16),
+                        ("cmp", 12), ("pmp", 15), ("imp", 17)]:
             self._native._set(ctx, f"dep2_id_{m}", did)
         r = self._native.step_20_modules_install_poll(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
@@ -3151,8 +3174,8 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
     # ── step 21 ──
     def test_step_21_pass(self) -> None:
-        # P1: csp/psp/cmp/pmp 4 인스턴스 모두 LISTEN. CMP_WAIT_S=0 으로 시그널링↔미디어
-        # connection wait 자체 비활성 (단위 테스트 — 실제 csp_*.log 없음).
+        # P2: csp/psp/isp + cmp/pmp/imp 6 인스턴스 모두 LISTEN. CMP_WAIT_S=0 으로
+        # 시그널링↔미디어 connection wait 자체 비활성 (단위 테스트 — 실제 csp_*.log 없음).
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
         def fake_listen(port, proto="tcp", host=""):
             return port in (5060, 9000) and proto == "udp"
@@ -3169,7 +3192,8 @@ class TestStage5ModulesSteps(unittest.TestCase):
         try:
             ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
             self._native._set(ctx, "tok2", "JWT2")
-            for m, did in [("csp", 11), ("psp", 14), ("cmp", 12), ("pmp", 15)]:
+            for m, did in [("csp", 11), ("psp", 14), ("isp", 16),
+                            ("cmp", 12), ("pmp", 15), ("imp", 17)]:
                 self._native._set(ctx, f"dep2_id_{m}", did)
             r = self._native.step_21_modules_start(ctx)
         finally:

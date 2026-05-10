@@ -208,6 +208,23 @@ def preflight(ctx: VerifyContext) -> ItemResult:
     if not ok:
         blocks.append("외부 프로세스 포트 점유")
 
+    # loopback alias 정보성 (BLOCK 안 함) — multi-instance topology 전제 IP 안내.
+    # 실 실패는 S5-MODULES-RUN-START 의 LISTEN 검증에서 명시적 surface.
+    try:
+        from ...common import loopback as _lb
+        from ..stage5._native_steps import _INSTANCES as _NI
+        needed = _lb.required_aliases(_NI)
+        if needed:
+            missing = [ip for ip in needed if not _lb.has_alias(ip)]
+            if missing:
+                lines.append(
+                    f"- loopback alias: 누락 {missing} — `sudo ip addr add <ip>/8 dev lo` 1회 필요 (S5 LISTEN 실패 원인)"
+                )
+            else:
+                lines.append(f"- loopback alias: OK ({needed})")
+    except Exception as _e:
+        lines.append(f"- loopback alias: 점검 실패 ({type(_e).__name__})")
+
     ctx.w("## S2-PREFLIGHT — preflight (gate)")
     for line in lines:
         ctx.w(line)
