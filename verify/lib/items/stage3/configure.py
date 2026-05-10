@@ -16,7 +16,24 @@ from ... import shell
     execution_order=20,
 )
 def configure(ctx: VerifyContext) -> ItemResult:
-    target_ip = ctx.ens_ip or "127.0.0.1"
+    # ens_ip 빈 값 시 즉시 FAIL — 127.0.0.1 fallback 은 dev 가 외부 단말 접속 불가
+    # + 배포본 (LocalIp 127.0.0.1) 과 즉각 충돌하므로 무방비 fallback 차단.
+    if not ctx.ens_ip:
+        msg = (
+            "local_ip 미결정 — dev 모듈을 외부 접속 가능한 IP 로 bind 할 수 없음.\n"
+            "다음 중 하나로 결정 필요:\n"
+            "  1) ./cims.sh init   (권장 — .cims/server.local.json 자동 생성)\n"
+            "  2) CIMS_LOCAL_IP=<IP> env 전달\n"
+            "  3) default route 의 src IP 자동 감지 가능한 환경에서 실행"
+        )
+        ctx.w("## S3-CONFIGURE — local_ip 미결정으로 FAIL")
+        for line in msg.splitlines(): ctx.w(f"- {line}")
+        ctx.w()
+        return ItemResult(
+            id="S3-CONFIGURE", name="configure (local_ip 미결정)",
+            status=ItemStatus.FAIL, detail=msg, stage=3,
+        )
+    target_ip = ctx.ens_ip
     # P1 (PSP/PMP 분리) — 인스턴스별 IP 분리 정보를 _INSTANCES 에서 추출.
     # PSP/PMP 가 127.0.0.3 등 별도 loopback 으로 분기되므로 csc.json 의
     # PspNotify.Ip 가 default (CSP_IP) fallback 되지 않도록 명시적 전달.

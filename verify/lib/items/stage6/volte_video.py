@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
-from ._helpers import run_scenario
+from ._helpers import run_scenario, target_ip
 
 
 @verify_item(
@@ -18,7 +18,7 @@ def scn_volte_video(ctx: VerifyContext) -> ItemResult:
     s = ctx.state
     args = [
         "-no-db", "-mode", "volte", "-scenario", "call",
-        "-count", "2", "-duration", "5", "-ip", ctx.sim_ip,
+        "-count", "2", "-duration", "5", "-ip", target_ip("csp", ctx.sim_ip),
         "-user", s["VOIP_USER"], "-domain", s["VOIP_DOM"],
         "-password", s["VOIP_PWD"],
     ]

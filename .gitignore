@@ -57,3 +57,6 @@ node_modules/
 .idea/
 tests/test_env.json
 verify_runs/
+
+# 서버별 초기 설정 (cims.sh init) — secret 포함, host-specific
+.cims/

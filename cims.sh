@@ -694,6 +694,127 @@ cmd_status() {
     echo ""
 }
 
+# ── 초기 설정 (init wizard) ────────────────────────────────────
+# 새 개발서버 첫 진입 시 한 번 실행. local_ip / db_password 등 환경 의존값을
+# .cims/server.local.json 에 저장 → 이후 configure.sh / verify 가 우선 read.
+# CIMS_LOCAL_IP / CIMS_DB_PASSWORD 환경변수로 prompt skip 가능 (CI 친화).
+cmd_init() {
+    local cims_dir="$SCRIPT_DIR/.cims"
+    local cfg_file="$cims_dir/server.local.json"
+    local non_interactive=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --non-interactive|--ni) non_interactive=1; shift ;;
+            -h|--help)
+                cat <<EOF
+$(basename "$0") init [--non-interactive]
+  새 서버 초기 설정 wizard. local_ip + db_password 를 .cims/server.local.json 에 저장.
+  환경변수: CIMS_LOCAL_IP, CIMS_DB_PASSWORD (지정 시 prompt skip)
+  --non-interactive: tty 없는 환경에서 prompt 없이 자동값/기본값 사용
+EOF
+                return 0 ;;
+            *) err "알 수 없는 옵션: $1"; return 1 ;;
+        esac
+    done
+
+    header "=== CIMS 초기 설정 ==="
+
+    # 기존 값 (재실행 시 default 로 표시)
+    local cur_local_ip="" cur_db_password=""
+    if [[ -f $cfg_file ]]; then
+        cur_local_ip=$(CFG="$cfg_file" python3 -c \
+            'import json,os; print(json.load(open(os.environ["CFG"])).get("local_ip",""))' \
+            2>/dev/null || true)
+        cur_db_password=$(CFG="$cfg_file" python3 -c \
+            'import json,os; print(json.load(open(os.environ["CFG"])).get("db_password",""))' \
+            2>/dev/null || true)
+        info "기존 설정 발견: $cfg_file"
+    fi
+
+    # 자동 감지 — default route 의 src IP (인터페이스 이름 무관)
+    local detected_ip=""
+    detected_ip=$(ip route get 8.8.8.8 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}' || true)
+    [[ -z $detected_ip ]] && detected_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+
+    # local_ip 결정 — env > prompt > 기존값 > 자동감지
+    local local_ip="${CIMS_LOCAL_IP:-}"
+    if [[ -z $local_ip ]]; then
+        local default_ip="${cur_local_ip:-${detected_ip:-}}"
+        if (( non_interactive )) || [[ ! -t 0 ]]; then
+            local_ip="$default_ip"
+            if [[ -z $local_ip ]]; then
+                err "local_ip 결정 불가 — 인터랙티브 모드 또는 CIMS_LOCAL_IP env 필요"
+                return 1
+            fi
+            info "비대화 모드 — local_ip=$local_ip 자동 적용"
+        else
+            local prompt_label
+            if [[ -n $default_ip ]]; then prompt_label="local_ip [기본: $default_ip]: ";
+            else                          prompt_label="local_ip (자동 감지 실패, 직접 입력 필요): "; fi
+            read -rp "$prompt_label" local_ip
+            local_ip="${local_ip:-$default_ip}"
+        fi
+        if [[ -z $local_ip ]]; then
+            err "local_ip 빈 값 — abort"
+            return 1
+        fi
+    fi
+
+    # db_password 결정 — env > prompt > 기존값 > "cims1234"
+    local db_password="${CIMS_DB_PASSWORD:-}"
+    if [[ -z $db_password ]]; then
+        local pw_label
+        if [[ -n $cur_db_password && $cur_db_password != "cims1234" ]]; then
+            pw_label="(이전 설정값)"
+        else
+            pw_label="cims1234"
+        fi
+        if (( non_interactive )) || [[ ! -t 0 ]]; then
+            db_password="${cur_db_password:-cims1234}"
+            info "비대화 모드 — db_password 기본값 적용"
+        else
+            read -rp "db_password [기본: $pw_label]: " db_password
+            db_password="${db_password:-${cur_db_password:-cims1234}}"
+        fi
+    fi
+    [[ $db_password == "cims1234" ]] && \
+        warn "기본 비밀번호 'cims1234' 사용 중 — 운영 환경 변경 권장"
+
+    # 저장
+    mkdir -p "$cims_dir"
+    chmod 700 "$cims_dir" 2>/dev/null || true
+    local ts; ts=$(date +%Y-%m-%dT%H:%M:%S%z)
+    CFG_FILE="$cfg_file" LOCAL_IP_VAL="$local_ip" DB_PWD_VAL="$db_password" TS_VAL="$ts" \
+        python3 <<'PY'
+import json, os
+cfg = os.environ["CFG_FILE"]
+data = {
+    "local_ip":      os.environ["LOCAL_IP_VAL"],
+    "db_password":   os.environ["DB_PWD_VAL"],
+    "_generated_by": "cims.sh init",
+    "_generated_at": os.environ["TS_VAL"],
+    "_version":      1,
+}
+with open(cfg, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+os.chmod(cfg, 0o600)
+PY
+
+    ok "초기 설정 저장됨: $cfg_file"
+    info "  local_ip: $local_ip"
+    info "  db_password: $(echo "$db_password" | sed 's/./*/g')"
+    echo ""
+    info "다음 단계:"
+    info "  ./cims.sh build                    # 빌드"
+    info "  ./cims.sh configure                # 시험환경 (server.local.json 자동 read)"
+    info "  ./cims.sh start                    # 기동"
+    echo ""
+    info "환경변수 override (CI):"
+    info "  CIMS_LOCAL_IP=192.168.1.10 CIMS_DB_PASSWORD=mypw \\"
+    info "    ./cims.sh init --non-interactive"
+}
+
 # ── 빌드 ───────────────────────────────────────────────────────
 cmd_build() {
     [[ -z "$SRC_CONSOLE" ]] && err "build 명령은 소스 트리에서만 실행 가능" && exit 1
@@ -1346,6 +1467,11 @@ ${BOLD}서비스 명령:${NC}
   restart [name|all]                              재시작
   status                                          상태 확인
 
+${BOLD}초기 설정 (새 서버 첫 진입 시 한 번):${NC}
+  init [--non-interactive]
+                       local_ip / db_password 를 .cims/server.local.json 에 저장.
+                       env: CIMS_LOCAL_IP, CIMS_DB_PASSWORD
+
 ${BOLD}3단계 분리: 빌드 → 시험환경 설정 → 패키지화${NC}
   [1/3] build  [-j N]
                        C++ + Web UI 빌드 → build/dist 복사만 수행.
@@ -1973,6 +2099,7 @@ case "${1:-}" in
     stop)      shift; cmd_stop "$@"; echo ""; cmd_status ;;
     restart)   shift; header "=== CIMS 재시작 ==="; cmd_restart "$@"; echo ""; cmd_status ;;
     status)    cmd_status ;;
+    init)      shift; cmd_init "$@" ;;
     build)     shift; cmd_build "$@" ;;
     configure) shift; cmd_configure "$@" ;;
     sim)       shift; cmd_sim "$@" ;;

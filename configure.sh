@@ -20,13 +20,31 @@ else
 fi
 
 # ── 색상 ───────────────────────────────────────────────────────
-CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
+CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BOLD='\033[1m'; NC='\033[0m'
 info()   { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()     { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()   { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+err()    { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+# ── .cims/server.local.json 우선 read (cims.sh init 결과) ─────
+# 우선순위: 명시 옵션 > env (CIMS_LOCAL_IP 등) > .cims/server.local.json
+# 본 시점엔 env 와 .cims 만 default 로 채워두고, --local-ip 등 명시 옵션이
+# 들어오면 아래 인수 파싱 단계에서 덮어쓴다.
+_INIT_CFG="${SRC_DIR:-$SCRIPT_DIR}/.cims/server.local.json"
+_init_local_ip=""
+_init_db_password=""
+if [[ -f $_INIT_CFG ]]; then
+    _init_local_ip=$(CFG="$_INIT_CFG" python3 -c \
+        'import json,os; print(json.load(open(os.environ["CFG"])).get("local_ip",""))' \
+        2>/dev/null || true)
+    _init_db_password=$(CFG="$_INIT_CFG" python3 -c \
+        'import json,os; print(json.load(open(os.environ["CFG"])).get("db_password",""))' \
+        2>/dev/null || true)
+fi
 
 # ── 기본값 ─────────────────────────────────────────────────────
-LOCAL_IP="127.0.0.1"
+# LOCAL_IP 의 default 결정 — env > .cims > "" (빈 값이면 인수 파싱 후 abort)
+LOCAL_IP="${CIMS_LOCAL_IP:-${_init_local_ip:-}}"
 CSP_IP=""
 PSP_IP=""    # PSP (PTT 시그널링) — 미설정 시 CSP_IP 따름
 ISP_IP=""    # ISP (IBCF 트렁크) — 미설정 시 CSP_IP 따름 (P2)
@@ -37,7 +55,7 @@ CWRTC_IP=""
 CSC_HOST=""
 DB_HOST=""
 DB_USER="cims"
-DB_PASSWORD="cims1234"
+DB_PASSWORD="${CIMS_DB_PASSWORD:-${_init_db_password:-cims1234}}"
 VOLTE_DOMAIN=""
 PTT_DOMAIN=""
 IDMS_JWT_SECRET=""
@@ -53,7 +71,9 @@ ${BOLD}CIMS 배포 설정 스크립트${NC}
 사용법: $(basename "$0") [options]
 
 ${BOLD}서버 IP:${NC}
-  --local-ip   IP    모든 컴포넌트 기본 IP (기본: 127.0.0.1)
+  --local-ip   IP    모든 컴포넌트 기본 IP
+                     (기본: env CIMS_LOCAL_IP > .cims/server.local.json > 빈 값 → abort.
+                      './cims.sh init' 으로 server.local.json 생성 권장)
   --csp-ip     IP    CSP 서버 IP (VoLTE 시그널링: CSCF+TAS)
   --psp-ip     IP    PSP 서버 IP (PTT 시그널링: CSCF+PTT-AS, 미설정 시 CSP_IP)
   --isp-ip     IP    ISP 서버 IP (IBCF 트렁크, 미설정 시 CSP_IP)
@@ -119,6 +139,17 @@ while [[ $# -gt 0 ]]; do
         *) echo "알 수 없는 옵션: $1"; echo ""; usage; exit 1 ;;
     esac
 done
+
+# LOCAL_IP 결정 — 명시 옵션 / env / .cims 어느쪽도 채워지지 않은 경우 abort.
+# 127.0.0.1 default 를 의도적으로 제거: dev 가 외부 단말 접속 가능 IP 로 bind
+# 하도록 강제 + 배포본 (LocalIp 127.0.0.1) 과의 분리 보장.
+if [[ -z $LOCAL_IP ]]; then
+    err "LOCAL_IP 미지정 — 다음 중 하나로 결정 필요:"
+    err "  1) ./cims.sh init   (권장 — .cims/server.local.json 자동 생성)"
+    err "  2) --local-ip <IP>  명시 전달"
+    err "  3) CIMS_LOCAL_IP=<IP> 환경변수"
+    exit 1
+fi
 
 # 미설정 값은 기본값으로
 CSP_IP="${CSP_IP:-$LOCAL_IP}"
