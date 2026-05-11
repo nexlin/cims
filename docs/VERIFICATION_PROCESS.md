@@ -319,7 +319,6 @@ build/dist/
 |---|---|---|
 | **TB** (상시) | TB-CSC | 4419 |
 | | TB-Console | 3000 |
-| | TB-agent | sync 9902 |
 | **S2/S3 직접 기동 (Test-\*)** | Test-CSC | 4421 |
 | | Dev-Console | 3001 |
 | | Test-Console (dist) | 8080 |

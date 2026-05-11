@@ -394,8 +394,8 @@ def step_01_cleanup(ctx: VerifyContext) -> ItemResult:
       - LOG_DIR/*.log + service_log/ + msg_log/ wipe
       - /tmp/cims-agent-* + build/dist/{csc,csp,cmp,sim}-server/ rm -rf
       - 발급 cert (cert/agent_mtls/issued) 정리
-      - DB: agent_deployment/_job/_metric TRUNCATE (cims_agent 는 TB 외 DELETE)
-    --keep-processes: TB-CSC(4419) / TB-Console(3000) / TB-agent(9902) 보존.
+      - DB: agent_deployment/_job/_metric + cims_agent 모두 TRUNCATE
+    --keep-processes: TB-CSC(4419) / TB-Console(3000) 보존.
     """
     if already_ran(ctx, 1):
         return get_native_result(ctx, 1)

@@ -24,12 +24,12 @@ git rev-parse --short HEAD
 ./cims.sh preflight                                          # ens160 IP, 충돌 포트
 ```
 
-### 0.2 TB 3종 상시 기동
+### 0.2 TB 상시 기동
 
-TB-CSC(4419) / TB-Console(3000) / TB-agent(9902) 는 **검증 진행 중 절대 내리지 않음**.
+TB-CSC(4419) / TB-Console(3000) 은 **검증 진행 중 절대 내리지 않음**.
 
 ```bash
-./cims.sh status                              # 3종 RUNNING 확인
+./cims.sh status                              # TB RUNNING 확인
 ./cims.sh start tb                            # 미기동 시
 ```
 

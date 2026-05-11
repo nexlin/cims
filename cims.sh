@@ -409,10 +409,12 @@ start_phone() {
     is_running phone && ok "phone 시작 완료 (pid=$(read_pid phone))" || { err "phone 시작 실패"; tail -3 "$LOG_DIR/phone.log" | sed 's/^/  /'; }
 }
 
-# ── TB (Test-Bed) 3종: TB-CSC(4419) / TB-Console(3000) / TB-agent(9902) ─
+# ── TB (Test-Bed) 2종: TB-CSC(4419) / TB-Console(3000) ─
 # TB 는 검증 Phase 1~3 진행 중 UI 세션 유지용 임시 기동 모듈.
 # 검증 대상(cmp/csp/cwrtc/csc/console/phone) 과 달리 `start`/`stop all` 에 포함되지 않음.
 # 명시적으로 `cims.sh start tb-csc` / `start tb` 등으로만 조작.
+# 옛 TB-agent (sync 9902) 는 P2 도입으로 mgmt-server / volte-sip-server 등 실제
+# agent 가 별도 spawn 되면서 무용 → 2026-05-11 라운드에서 제거.
 
 start_tb_csc() {
     if is_running tb-csc; then warn "TB-CSC 이미 실행 중 (pid=$(read_pid tb-csc))"; return 0; fi
@@ -445,124 +447,6 @@ start_tb_console() {
     sleep 3
     is_running tb-console && ok "TB-Console 시작 완료 (pid=$(read_pid tb-console), port=3000)" \
         || { err "TB-Console 시작 실패"; tail -5 "$LOG_DIR/tb-console.log" | sed 's/^/  /'; }
-}
-
-start_tb_agent() {
-    if is_running tb-agent; then warn "TB-agent 이미 실행 중 (pid=$(read_pid tb-agent))"; return 0; fi
-    local agent_py="$DIST_DIR/agent/cims_agent.py"
-    [[ ! -f "$agent_py" ]] && err "agent 소스 없음: $agent_py (make dist 실행 필요)" && return 1
-    local state_dir="/tmp/cims-tb-agent/state"
-    local install_root="/tmp/cims-tb-agent/modules"
-    mkdir -p "$state_dir" "$install_root"
-    kill_stray "cims_agent.py --csc-url.*:4419" 9902 tcp
-
-    local csc_url="https://127.0.0.1:4419"
-    local enroll_opt=""
-    # state(session_token) 가 없으면 enrollment token 이 필요.
-    if [[ ! -f "$state_dir/agent.json" ]]; then
-        if [[ -n "${CIMS_TB_ENROLLMENT_TOKEN:-}" ]]; then
-            enroll_opt="--enrollment-token $CIMS_TB_ENROLLMENT_TOKEN"
-        else
-            # TB-CSC 가 기동되어 있으면 자동 발급 시도 (cims.sh tb-enroll 헬퍼).
-            warn "TB-agent state 없음. CIMS_TB_ENROLLMENT_TOKEN 미설정 → 자동 enrollment 시도"
-            local tok
-            tok="$(_tb_issue_enrollment_token 2>/dev/null || true)"
-            if [[ -n "$tok" ]]; then
-                enroll_opt="--enrollment-token $tok"
-                ok "enrollment token 자동 발급 완료"
-            else
-                err "자동 발급 실패. 'CIMS_TB_ENROLLMENT_TOKEN=<TOK> cims.sh start tb-agent' 또는 TB-CSC 먼저 기동"
-                return 1
-            fi
-        fi
-    fi
-    info "TB-agent 시작... (sync 9902, state=$state_dir)"
-    cd "$(dirname "$agent_py")"
-    CIMS_AGENT_INSTALL_ROOT="$install_root" \
-    CIMS_AGENT_SYNC_PORT=9902 \
-    python3 "$agent_py" \
-        --csc-url "$csc_url" \
-        --name tb-agent-local \
-        --state-dir "$state_dir" \
-        $enroll_opt \
-        >> "$LOG_DIR/tb-agent.log" 2>&1 &
-    save_pid tb-agent $!
-    sleep 2
-    is_running tb-agent && ok "TB-agent 시작 완료 (pid=$(read_pid tb-agent))" \
-        || { err "TB-agent 시작 실패"; tail -5 "$LOG_DIR/tb-agent.log" | sed 's/^/  /'; }
-}
-
-# TB-CSC 에 admin 로그인 → 새 agent 레코드 생성 → enrollment_token 반환.
-# 성공 시 token 한 줄을 stdout 에. 실패 시 비어있는 stdout + 비-0 exit.
-#
-# 이미 name="tb-agent-local" agent 가 있으면 재생성 불가 (409) → 409 시 기존 레코드 삭제 후 재시도.
-_tb_issue_enrollment_token() {
-    local base="https://127.0.0.1:4419"
-    local admin_id="${CIMS_TB_ADMIN_ID:-admin}"
-    local admin_pw="${CIMS_TB_ADMIN_PASSWORD:-1234}"
-    local name="tb-agent-local"
-    # 살아있는지 간단 확인 (aut/login endpoint POST)
-    local login_resp; login_resp=$(curl -sk --max-time 3 -X POST "$base/api/v1/auth/login" \
-        -H 'Content-Type: application/json' \
-        -d "{\"login_id\":\"$admin_id\",\"password\":\"$admin_pw\"}" 2>/dev/null)
-    local token; token=$(echo "$login_resp" | python3 -c \
-        'import sys,json
-try: d=json.load(sys.stdin); print(d.get("access_token") or d.get("token") or "")
-except: pass' 2>/dev/null)
-    [[ -z "$token" ]] && { echo "login failed: $login_resp" >&2; return 1; }
-
-    local create_resp; create_resp=$(curl -sk -w '\n__HTTP__%{http_code}' \
-        -X POST "$base/api/v1/agents" \
-        -H "Authorization: Bearer $token" \
-        -H 'Content-Type: application/json' \
-        -d "{\"name\":\"$name\"}" 2>/dev/null)
-    local http="${create_resp##*__HTTP__}"
-    local body="${create_resp%$'\n'__HTTP__*}"
-
-    if [[ "$http" == "409" ]]; then
-        # 같은 이름 레코드 존재 → id 조회 후 삭제, 재생성.
-        local aid; aid=$(curl -sk "$base/api/v1/agents" \
-            -H "Authorization: Bearer $token" 2>/dev/null \
-            | python3 -c 'import sys,json
-d=json.load(sys.stdin); items=d if isinstance(d,list) else d.get("items") or d.get("agents") or []
-for r in items:
-    if r.get("name")=="'"$name"'": print(r.get("id")); break' 2>/dev/null)
-        if [[ -n "$aid" ]]; then
-            curl -sk -X DELETE "$base/api/v1/agents/$aid" \
-                -H "Authorization: Bearer $token" >/dev/null 2>&1 || true
-            create_resp=$(curl -sk -w '\n__HTTP__%{http_code}' \
-                -X POST "$base/api/v1/agents" \
-                -H "Authorization: Bearer $token" \
-                -H 'Content-Type: application/json' \
-                -d "{\"name\":\"$name\"}" 2>/dev/null)
-            http="${create_resp##*__HTTP__}"
-            body="${create_resp%$'\n'__HTTP__*}"
-        fi
-    fi
-
-    if [[ "$http" != "201" && "$http" != "200" ]]; then
-        echo "agent create failed (http=$http): $body" >&2
-        return 1
-    fi
-
-    local tok aid
-    tok=$(echo "$body" | python3 -c \
-        'import sys,json
-try: d=json.load(sys.stdin); print(d.get("enrollment_token") or "")
-except: pass' 2>/dev/null)
-    aid=$(echo "$body" | python3 -c \
-        'import sys,json
-try: d=json.load(sys.stdin); print(d.get("id") or "")
-except: pass' 2>/dev/null)
-    [[ -z "$tok" ]] && { echo "no enrollment_token in response: $body" >&2; return 1; }
-
-    # agent pending → approved 전환 (heartbeat 전에 approve 안 되어 있으면 거절될 수 있음)
-    if [[ -n "$aid" ]]; then
-        curl -sk -X POST "$base/api/v1/agents/$aid/approve" \
-            -H "Authorization: Bearer $token" >/dev/null 2>&1 || true
-    fi
-
-    echo "$tok"
 }
 
 # ── 중지 ───────────────────────────────────────────────────────
@@ -633,7 +517,6 @@ _svc_port_proto() {
         phone)      echo "3002:tcp" ;;
         tb-csc)     echo "4419:tcp" ;;
         tb-console) echo "3000:tcp" ;;
-        tb-agent)   echo "9902:tcp" ;;
         *)          echo "" ;;
     esac
 }
@@ -709,7 +592,6 @@ cmd_status() {
     echo -e "  ${BOLD}[TB (Test-Bed — Phase 2/3 UI 유지용 상시 기동)]${NC}"
     status_one tb-csc
     status_one tb-console
-    status_one tb-agent
     echo ""
 }
 
@@ -956,11 +838,9 @@ cmd_reset() {
         esac
     done
 
-    header "=== 검증 환경 초기화 (가입자 보존, TB 3종 유지) ==="
-    info "TB 3종(TB-CSC 4419 / TB-Console 3000 / TB-agent 9902) 은 건드리지 않음."
+    header "=== 검증 환경 초기화 (가입자 보존, TB 유지) ==="
+    info "TB 2종(TB-CSC 4419 / TB-Console 3000) 은 건드리지 않음."
     [[ $keep_processes -eq 1 ]] && info "--keep-processes: Test-* 프로세스 유지 (서비스 정지/포트 kill 건너뜀)"
-    # cims_agent 는 TRUNCATE 하지 않고 name='tb-agent-local' 레코드만 보존 (I1 fix).
-    # → reset 후에도 TB-agent 의 session_token 이 유효해 heartbeat 가 401 없이 동작한다.
 
     if [[ $keep_processes -eq 0 ]]; then
         # 1) 서비스 정지 — DB 연결 정리 + 파일 잠금 해제
@@ -973,7 +853,7 @@ cmd_reset() {
         local _rp _port _proto _pids _round
         for _round in 1 2; do
             local _killed=0
-            # reset 은 검증 대상만 정리 — TB 포트(4419/3000/9902) 는 제외해 상시 동작 보장
+            # reset 은 검증 대상만 정리 — TB 포트(4419/3000) 는 제외해 상시 동작 보장
             # console: Dev(3001) + Test(8080) / cwrtc: 8443 (블록 A 이전, 구 8080)
             for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp"; do
                 _port="${_rp%%:*}"; _proto="${_rp##*:}"
@@ -1125,10 +1005,7 @@ TRUNCATE = [
     # IdMS 토큰
     'auth_codes', 'refresh_tokens',
 ]
-# cims_agent: TB-agent(name='tb-agent-local') 레코드만 보존, 나머지 삭제.
-# env CIMS_TB_AGENT_NAME 으로 override 가능.
-import os as _os
-TB_AGENT_NAME = _os.environ.get('CIMS_TB_AGENT_NAME', 'tb-agent-local')
+# cims_agent 는 전부 삭제 (옛 TB-agent 보존 로직 제거 — 2026-05-11 라운드).
 
 conn = pymysql.connect(
     host=db['Host'], port=int(db.get('Port', 3306)),
@@ -1150,20 +1027,10 @@ for t in TRUNCATE:
         cur.execute(f"TRUNCATE TABLE `{t}`"); done.append(t)
     else:
         skip.append(t)
-# cims_agent: TB-agent 레코드는 보존, 나머지만 삭제 (I1)
-tb_preserved = 0
+# cims_agent: 전체 TRUNCATE (TB-agent 제거 후 매 reset 마다 fresh enroll).
 if 'cims_agent' in existing:
-    cur.execute(
-        "DELETE FROM cims_agent WHERE name <> %s",
-        (TB_AGENT_NAME,),
-    )
-    deleted = cur.rowcount
-    cur.execute(
-        "SELECT COUNT(*) FROM cims_agent WHERE name = %s",
-        (TB_AGENT_NAME,),
-    )
-    tb_preserved = cur.fetchone()[0]
-    done.append(f"cims_agent (DELETE {deleted}건, TB 보존 {tb_preserved}건)")
+    cur.execute("TRUNCATE TABLE cims_agent")
+    done.append("cims_agent")
 # _deprecated 접미사 테이블도 함께 비움 (migrate_deprecate_* 로 rename 된 것)
 for t in sorted(existing):
     if t.endswith('_deprecated'):
@@ -1184,8 +1051,6 @@ for t in done:
 if skip:
     print(f"  SKIP (테이블 미존재): {len(skip)}건")
 print(f"  보존(가입자): {', '.join(sorted(PRESERVE))}")
-if tb_preserved == 0:
-    print(f"  [WARN] cims_agent 에 name='{TB_AGENT_NAME}' 레코드 없음 — TB-agent 재-enroll 필요")
 PY
             [[ $? -eq 0 ]] && ok "DB 초기화 완료" || err "DB 초기화 실패"
         fi
@@ -1220,9 +1085,9 @@ cmd_preflight() {
 
     # 3) 포트 점유 확인
     # 검증 대상 포트 — 기동 전엔 "가용" 이어야 정상.
-    # TB 포트(4419/3000/9902) 는 반대로 "점유" 되어 있어야 정상 (TB 3종 상시 동작 전제).
+    # TB 포트(4419/3000) 는 반대로 "점유" 되어 있어야 정상 (TB 상시 동작 전제).
     local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp")
-    local tb_ports=("4419:tcp:TB-CSC" "3000:tcp:TB-Console" "9902:tcp:TB-agent")
+    local tb_ports=("4419:tcp:TB-CSC" "3000:tcp:TB-Console")
     local pp port proto line pid label
     info "[검증 대상] 기동 전엔 가용해야 함"
     for pp in "${target_ports[@]}"; do
@@ -1239,7 +1104,7 @@ cmd_preflight() {
             ok "port $port/$proto 가용"
         fi
     done
-    info "[TB 3종] 상시 기동 중이어야 정상"
+    info "[TB] 상시 기동 중이어야 정상"
     for pp in "${tb_ports[@]}"; do
         port="${pp%%:*}"; label="${pp##*:}"; proto="$(echo "$pp" | cut -d: -f2)"
         line=$(ss -Htlnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print; exit}' || true)
@@ -1627,7 +1492,7 @@ COMPONENTS=(cmp csp cwrtc csc console phone)
 _start_one() {
     case "$1" in
         all)        start_cmp; start_csp; sleep 0.5; start_cwrtc; start_csc; start_console; start_phone ;;
-        tb)         start_tb_csc; sleep 0.5; start_tb_console; start_tb_agent ;;
+        tb)         start_tb_csc; sleep 0.5; start_tb_console ;;
         cmp)        start_cmp ;;
         pmp)        start_pmp ;;
         imp)        start_imp ;;
@@ -1640,7 +1505,6 @@ _start_one() {
         phone)      start_phone ;;
         tb-csc)     start_tb_csc ;;
         tb-console) start_tb_console ;;
-        tb-agent)   start_tb_agent ;;
         *) err "알 수 없는 컴포넌트: $1"; return 1 ;;
     esac
 }
@@ -1713,8 +1577,7 @@ _stop_one() {
             fi
             ;;
         tb)
-            header "=== TB 3종 중지 ==="
-            stop_one tb-agent
+            header "=== TB 중지 ==="
             stop_one tb-console
             stop_one tb-csc
             ;;

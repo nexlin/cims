@@ -6,7 +6,7 @@ verify lib 에 격리해서 직접 검사.
 BLOCK 조건:
 1. local_ip 미결정 (env CIMS_LOCAL_IP > .cims/server.local.json > default route)
 2. DB 연결 실패 또는 pymysql 미설치
-3. TB 3종 (4419 TB-CSC / 3000 TB-Console / 9902 TB-agent) 미동작
+3. TB 2종 (4419 TB-CSC / 3000 TB-Console) 미동작
 4. 검증 대상 포트 점유 — 단 cims 외부 프로세스가 점유 시에만 BLOCK.
    cims 자체 (csp/psp/cmp/pmp/cspsim/cwrtc/csc_app.py/cims_agent.py 등) 가
    점유 중이면 dev+배포본 동시 운용 design 정상 상태로 간주.
@@ -26,7 +26,6 @@ from ...context import VerifyContext
 _TB_PORTS = [
     (4419, "tcp", "TB-CSC"),
     (3000, "tcp", "TB-Console"),
-    (9902, "tcp", "TB-agent"),
 ]
 _TARGET_PORTS = [
     (5060, "udp"), (5061, "tcp"), (9000, "udp"), (9001, "udp"),
@@ -177,7 +176,7 @@ def _check_target_ports(repo_root: str) -> Tuple[bool, List[str]]:
 @verify_item(
     id="S2-PREFLIGHT",
     stage=2, category="환경",
-    name="preflight (local_ip / DB / TB 3종 / 검증 포트 gate)",
+    name="preflight (local_ip / DB / TB 2종 / 검증 포트 gate)",
     presets=["stage2-full", "pipeline-full", "pre-package"],
     side_effects=["read-only"], timeout_s=30,
     execution_order=10,
@@ -197,10 +196,10 @@ def preflight(ctx: VerifyContext) -> ItemResult:
         blocks.append("DB 점검 실패")
 
     ok, tb_msgs = _check_tb_ports()
-    lines.append(f"- TB 3종: {'OK' if ok else 'FAIL'}")
+    lines.append(f"- TB 2종: {'OK' if ok else 'FAIL'}")
     lines.extend(tb_msgs)
     if not ok:
-        blocks.append("TB 3종 미동작")
+        blocks.append("TB 2종 미동작")
 
     ok, port_msgs = _check_target_ports(ctx.repo_root)
     lines.append(f"- 검증 포트: {'OK' if ok else 'FAIL'} (cims 외부만 BLOCK)")
