@@ -91,11 +91,14 @@ _TARGET_PORTS = {
 # sync_port/local_ip/listen 의 SoT. step 17~21 + finalize 가 이 list 만 보고
 # 동작 — 인스턴스 추가/제거가 자연 일반화. ISP/IMP 는 P2 에서 entry 추가.
 #
-# 사용자 토폴로지 매핑:
-#   VoLTE SIP Server  = CSP (P2: + ISP)        agent=volte-sip-server
-#   VoLTE Media Server = CMP (P2: + IMP)       agent=volte-media-server
-#   PTT SIP Server    = PSP                    agent=ptt-sip-server
-#   PTT Media Server  = PMP                    agent=ptt-media-server
+# 사용자 토폴로지 매핑 (한 server agent 에 여러 인스턴스 공존):
+#   VoLTE SIP Server   = CSP + ISP   agent=volte-sip-server   sub-dir={csp,isp}
+#   VoLTE Media Server = CMP + IMP   agent=volte-media-server sub-dir={cmp,imp}
+#   PTT SIP Server     = PSP         agent=ptt-sip-server     sub-dir=psp
+#   PTT Media Server   = PMP         agent=ptt-media-server   sub-dir=pmp
+#
+# 동일 agent_name 의 변종은 1개 cims_agent 프로세스 + 1개 enroll + sync_port 공유
+# (step 18 에서 agent_name 기준 dedup). 각 변종은 별도 deployment + start.
 #
 # CIMS 관리 서버 (mgmt-server) 는 별도 — TB-CSC chain 으로 csc + console + sim
 # (+ 향후 cwrtc/phone) 을 모두 install. _CSC_PACKAGES 참조.
@@ -172,14 +175,16 @@ _INSTANCES = [
          "RtpIp":    "127.0.0.3",
          "CspIp":    "127.0.0.3",   # PSP IP
      }},
-    # P2 — IBCF 트렁크 분리. ISP 는 IBCF role 단독 (CSCF/TAS/PTT_AS=false).
-    # 별도 loopback 127.0.0.5 사용 — `sudo ip addr add 127.0.0.5/8 dev lo` 1회 필요.
-    # 라우팅 정책 (routing_policies.jsonl / routes.jsonl) seed 는 별도 round (P3).
+    # P2 — IBCF 트렁크. ISP/IMP 는 VoLTE SIP/Media Server 와 같은 agent 에 공존
+    #   (`volte-sip-server/{csp,isp}/`, `volte-media-server/{cmp,imp}/`).
+    # ISP 는 IBCF role 단독 (CSCF/TAS/PTT_AS=false).
+    # bind IP 는 127.0.0.5 — CSP/CMP(127.0.0.1) 와 port 충돌 회피용 loopback alias
+    # (`sudo ip addr add 127.0.0.5/8 dev lo` 1회 필요).
     {"id": "isp",
-     "display_name": "IBCF SIP Server",
-     "agent_name":   "ibcf-sip-server",
+     "display_name": "VoLTE SIP Server (IBCF)",
+     "agent_name":   "volte-sip-server",
      "tarball": "isp", "dir": "isp", "process": "ISP",
-     "sync_port": 9909, "local_ip": "127.0.0.5", "listen": (5060, "udp"),
+     "sync_port": 9904, "local_ip": "127.0.0.5", "listen": (5060, "udp"),
      "peer_id": "imp",
      "config_overlay": {
          "Setup.Roles.CSCF":   False,   # IBCF 단독 — 가입자 register 미수행
@@ -193,10 +198,10 @@ _INSTANCES = [
          "Setup.MediaServer.LocalPort": 9013,
      }},
     {"id": "imp",
-     "display_name": "IBCF Media Server",
-     "agent_name":   "ibcf-media-server",
+     "display_name": "VoLTE Media Server (IBCF)",
+     "agent_name":   "volte-media-server",
      "tarball": "imp", "dir": "imp", "process": "IMP",
-     "sync_port": 9910, "local_ip": "127.0.0.5", "listen": (9000, "udp"),
+     "sync_port": 9905, "local_ip": "127.0.0.5", "listen": (9000, "udp"),
      "peer_id": "isp",
      "config_overlay": {
          "ServerIp": "127.0.0.5",   # IMP 9000 host-specific bind (CMP/PMP 와 분리)
@@ -1032,14 +1037,22 @@ def step_11_verify_files(ctx: VerifyContext) -> ItemResult:
 
     notes: list = []
     ok_all = True
+    # _CSC_PACKAGES = {"csc", "console", "sim"} — agent_name=mgmt-server.
+    # cims_agent 가 install 시 tarball top-level 디렉토리 (csc/console/cspsim) 안에
+    # config.json/config/ 를 쓰므로 검증 경로도 변종별 위치를 본다. sim 은
+    # cspsim/* 구조 (tarball root="cspsim").
+    _TAR_PKG_NAME = {"csc": "csc", "console": "console", "sim": "cspsim"}
     for name in _CSC_PACKAGES:
         install_path = os.path.join(ctx.dist_dir, _DIST_ROOT_CSC, name)
+        pkg_subdir = _TAR_PKG_NAME[name]
         meta_p = os.path.join(install_path, "meta.json")
-        cfg_d = os.path.join(install_path, "config")
+        # config/ 는 변종 디렉토리 내부 (cfg_target_dir) 에 위치
+        cfg_d_scoped = os.path.join(install_path, pkg_subdir, "config")
+        cfg_d_legacy = os.path.join(install_path, "config")
         meta_ok = os.path.isfile(meta_p)
         # sim (cspsim tarball) 은 config/ 없을 수 있음 — meta.json 만 검사
         cfg_required = name != "sim"
-        cfg_ok = (not cfg_required) or os.path.isdir(cfg_d)
+        cfg_ok = (not cfg_required) or os.path.isdir(cfg_d_scoped) or os.path.isdir(cfg_d_legacy)
         if meta_ok and cfg_ok:
             tag = "meta.json" + (" + config/" if cfg_required else "")
             notes.append(f"- [OK] {name}: {tag} 존재 ({install_path})")
@@ -1063,30 +1076,34 @@ def step_11_verify_files(ctx: VerifyContext) -> ItemResult:
 # Step 12 — config overlay 반영 검증 (csc/config.json Server.Port=4445)
 # ─────────────────────────────────────────────────────────────
 def _read_csc_port(install_path: str) -> Optional[int]:
-    """`<install_path>/config.json` 에서 `Server.Port` (flat 또는 nested
-    Server.Port) 추출. 파일/JSON 오류 시 None.
+    """`<install_path>/config.json` 또는 `<install_path>/csc/config.json` 에서
+    `Server.Port` (flat 또는 nested Server.Port) 추출. cims_agent 가 멀티-변종
+    install 지원으로 config.json 을 변종 디렉토리 안에 쓸 수 있어 두 위치를 확인.
+    파일/JSON 오류 시 None.
     """
-    p = os.path.join(install_path, "config.json")
-    try:
-        with open(p) as f:
-            d = json.load(f)
-    except Exception:
-        return None
-    if not isinstance(d, dict):
-        return None
-    # 1) flat key "Server.Port"
-    val = d.get("Server.Port")
-    if val is None:
-        # 2) nested {"Server": {"Port": ...}}
-        srv = d.get("Server")
-        if isinstance(srv, dict):
-            val = srv.get("Port")
-    if val is None:
-        return None
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        return None
+    for p in (os.path.join(install_path, "csc", "config.json"),
+              os.path.join(install_path, "config.json")):
+        try:
+            with open(p) as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(d, dict):
+            continue
+        # 1) flat key "Server.Port"
+        val = d.get("Server.Port")
+        if val is None:
+            # 2) nested {"Server": {"Port": ...}}
+            srv = d.get("Server")
+            if isinstance(srv, dict):
+                val = srv.get("Port")
+        if val is None:
+            continue
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def step_12_verify_overlay(ctx: VerifyContext) -> ItemResult:
@@ -1592,9 +1609,21 @@ def step_18_modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
     base = _deployed_csc_base(ctx)
     notes: list = []
     register_fail = False
+
+    # agent_name 기준 dedup — 같은 server 의 여러 변종은 1개 cims_agent + sync_port 공유.
+    # 첫 인스턴스가 agent register + Test-agent spawn 을 담당. 후속 형제 인스턴스는
+    # 같은 aid/ta_pid 를 그대로 복사 (step 19 의 deployment 는 인스턴스별 분기).
+    seen_agents: dict = {}   # agent_name → (aid, enroll_tok, ta_pid)
     for inst in _INSTANCES:
         m = inst["id"]
         aname = inst["agent_name"]
+        if aname in seen_agents:
+            aid, enroll_tok, pid = seen_agents[aname]
+            _set(ctx, f"aid_{m}", aid)
+            _set(ctx, f"enroll_tok_{m}", enroll_tok)
+            _set(ctx, f"ta_pid_{m}", pid)
+            notes.append(f"- [OK] {aname}/{m}: 형제 변종 — aid={aid} pid={pid} 공유")
+            continue
         aid, enroll_tok, err = _register_one_module_agent(base, tok2, aname)
         if err:
             notes.append(f"- [FAIL] {aname}: {err}")
@@ -1608,8 +1637,9 @@ def step_18_modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
             register_fail = True
             continue
         _set(ctx, f"ta_pid_{m}", pid)
+        seen_agents[aname] = (aid, enroll_tok, pid)
         notes.append(
-            f"- [OK] {aname}: aid={aid} pid={pid} sync={inst['sync_port']}"
+            f"- [OK] {aname}/{m}: aid={aid} pid={pid} sync={inst['sync_port']}"
         )
 
     # enroll polling — 모두 online 까지 20s
@@ -1968,17 +1998,20 @@ def step_22_finalize(ctx: VerifyContext) -> ItemResult:
                 notes.append(f"- {inst['agent_name']}: stop 발행 예외 {e}")
     time.sleep(5)
 
-    # Test-agent kill — mgmt-server + service-server agents
+    # Test-agent kill — mgmt-server + service-server agents (agent_name dedup).
+    # 같은 agent_name 의 변종은 같은 ta_pid 를 공유하므로 set 으로 중복 제거.
     import signal
     killed = 0
-    total = 1 + len(_INSTANCES)
-    pid_keys = [("ta_pid_csc", _AGENT_NAME_CSC)]
-    pid_keys += [(f"ta_pid_{inst['id']}", inst["agent_name"]) for inst in _INSTANCES]
-    for k, _aname in pid_keys:
-        pid = _get(ctx, k)
-        if not pid: continue
+    pid_set: set = set()
+    csc_pid = _get(ctx, "ta_pid_csc")
+    if csc_pid: pid_set.add(int(csc_pid))
+    for inst in _INSTANCES:
+        p = _get(ctx, f"ta_pid_{inst['id']}")
+        if p: pid_set.add(int(p))
+    total = len(pid_set)
+    for pid in pid_set:
         try:
-            os.kill(int(pid), signal.SIGTERM)
+            os.kill(pid, signal.SIGTERM)
             killed += 1
         except Exception:
             pass

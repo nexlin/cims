@@ -94,15 +94,14 @@ def seed(ctx: VerifyContext) -> ItemResult:
         install_path = os.path.join(ctx.dist_dir, inst["agent_name"])
         cfg_dir = os.path.join(install_path, "config")
         pid_file = os.path.join(install_path, "run", f"{inst['id']}.pid")
-        # ISP 는 IBCF role only — access_services (voip/ptt) 시드 시 inbound
-        # INVITE 가 From-URI domain ("csp") 으로 access_service 매칭 → auth
-        # challenge 흐름이 동작하여 routing_policies 평가 전에 401 반환.
-        # 따라서 ISP 에는 access_services 비우고 routing 6종만 시드.
+        # ISP 는 IBCF role only — access_services (voip/ptt) 시드는 IBCF 흐름과
+        # 무관 (ISP 의 CSCF=false 라 REGISTER 자체를 받지 않음).
+        # P2 토폴로지에서 isp 와 csp 가 같은 install_path/config/ 를 공유하므로
+        # ISP 측에서 access_services 를 건드리면 안 됨 (CSP 의 시드를 보존).
+        # routing 6종만 시드 (rule이 req_uri_host contains "trunk.peer.test" 라
+        # CSP 의 VoLTE 호 흐름은 매칭 안 되므로 sharing 무해).
         if inst["id"] == "isp":
-            n = 0
-            # 빈 access_services.jsonl 로 덮어쓰기 (이전 회차 잔여 제거)
-            with open(os.path.join(cfg_dir, "access_services.jsonl"), "w") as _f:
-                pass
+            n = 0   # ISP 는 access_services 시드 skip (공유 dir 보존)
         else:
             n = seed_access_services(
                 cfg_dir, sub["voip_ref"], sub["ptt_ref"],

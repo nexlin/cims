@@ -55,16 +55,23 @@ if __name__ == '__main__':
         except FileNotFoundError:
             logger.log_error(f"Config file not found at {_CONFIG_PATH}")
             return {}
-        # Deployment overlay: install_path/config.json 이 있으면 flat key 를 nested 로 merge.
-        # _CONFIG_PATH = install_path/csc/config/csc.json → install_path/config.json 이 overlay.
+        # Deployment overlay: cims_agent 가 멀티-변종 install 지원으로 변종 디렉토리
+        # 안에 config.json 을 쓰므로 (install_path/csc/config.json), 거기를 먼저 본다.
+        # 후방 호환으로 legacy 위치 (install_path/config.json) 도 fallback.
+        # _CONFIG_PATH = install_path/csc/config/csc.json → _COMPONENT_ROOT = install_path/csc.
         try:
-            overlay = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'config.json'))
-            if os.path.isfile(overlay):
+            for overlay in (
+                os.path.join(_COMPONENT_ROOT, 'config.json'),                  # scoped
+                os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'config.json')),  # legacy
+            ):
+                if not os.path.isfile(overlay):
+                    continue
                 with open(overlay, 'r') as f:
                     flat = json.load(f)
                 if isinstance(flat, dict) and flat:
                     n = _apply_overlay(c, flat)
                     logger.log_info(f"CSC overlay applied: {overlay} ({n} keys)")
+                    break
         except Exception as e:
             logger.log_error(f"CSC overlay failed: {e}")
         return c

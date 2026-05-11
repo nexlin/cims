@@ -208,8 +208,14 @@ _start_cmp_variant() {
     local bin="$DIST_DIR/$name/bin/$name"
     local cfg="$DIST_DIR/$name/config/$name.json"
     [[ ! -f "$bin" ]] && err "$name 바이너리 없음: $bin (make dist 또는 install 필요)" && return 1
-    # deployment overlay (install_path/config.json) → <name>.json 머지 (PMP/IMP 의 RtpIp/CspIp 분기)
-    _apply_overlay_to_module_config "$DIST_DIR/config.json" "$cfg"
+    # deployment overlay 머지 (PMP/IMP 의 RtpIp/CspIp 분기). 변종별 overlay 는
+    # install_path/<name>/config.json 에 위치 — 한 install_path 에 형제 변종이 공존
+    # 해도 서로 다른 overlay 를 가질 수 있도록 cims_agent.py 가 분리 저장.
+    # 이전 위치 (install_path/config.json) 도 fallback 으로 봐서 단일-변종 install
+    # (dev 모드 등) 와 후방 호환.
+    local _overlay="$DIST_DIR/$name/config.json"
+    [[ ! -f "$_overlay" ]] && _overlay="$DIST_DIR/config.json"
+    _apply_overlay_to_module_config "$_overlay" "$cfg"
     local ctrl_port
     ctrl_port=$(python3 -c "import json; d=json.load(open('$cfg')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 영향 차단
@@ -238,8 +244,14 @@ _start_csp_variant() {
     local bin="$DIST_DIR/$name/bin/$name"
     local cfg="$DIST_DIR/$name/config/$name.json"
     [[ ! -f "$bin" ]] && err "$name 바이너리 없음: $bin (make dist 또는 install 필요)" && return 1
-    # deployment overlay (install_path/config.json) → <name>.json 머지 (CSP/PSP/ISP 의 Roles/LocalIp 분기)
-    _apply_overlay_to_module_config "$DIST_DIR/config.json" "$cfg"
+    # deployment overlay 머지 (CSP/PSP/ISP 의 Roles/LocalIp 분기). 변종별 overlay 는
+    # install_path/<name>/config.json 에 위치 — 한 install_path 에 형제 변종이 공존
+    # 해도 서로 다른 overlay 를 가질 수 있도록 cims_agent.py 가 분리 저장.
+    # 이전 위치 (install_path/config.json) 도 fallback 으로 봐서 단일-변종 install
+    # (dev 모드 등) 와 후방 호환.
+    local _overlay="$DIST_DIR/$name/config.json"
+    [[ ! -f "$_overlay" ]] && _overlay="$DIST_DIR/config.json"
+    _apply_overlay_to_module_config "$_overlay" "$cfg"
     local sip_port; sip_port=$(python3 -c "import json; d=json.load(open('$cfg')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PSP 127.0.0.3 등) 영향 차단
     kill_stray "$bin"
@@ -273,18 +285,22 @@ start_cwrtc() {
 start_csc() {
     if is_running csc; then warn "CSC 이미 실행 중 (pid=$(read_pid csc))"; return 0; fi
     [[ ! -f "$DIST_DIR/csc/src/csc_app.py" ]] && err "CSC 소스 없음 (make dist 실행 필요)" && return 1
-    # overlay-aware port: install_path/config.json (deployment overlay) 를 먼저 확인
+    # overlay-aware port: deployment overlay 를 먼저 확인.
+    # cims_agent 가 변종별로 분리 저장 (install_path/csc/config.json) — fallback 으로
+    # legacy 위치 (install_path/config.json) 도 본다.
     local csc_port
     csc_port=$(python3 -c "
 import json, os
 base='$DIST_DIR/csc/config/csc.json'
-ov='$DIST_DIR/config.json'
+candidates=['$DIST_DIR/csc/config.json', '$DIST_DIR/config.json']
 p=None
-if os.path.isfile(ov):
+for ov in candidates:
+    if not os.path.isfile(ov): continue
     try:
         f=json.load(open(ov))
         if isinstance(f,dict):
             p=f.get('Server.Port') or (f.get('Server',{}) or {}).get('Port')
+            if p: break
     except: pass
 if not p:
     try: p=json.load(open(base))['Server']['Port']
@@ -306,17 +322,20 @@ start_console() {
     #   Dev-Console     : 소스 vite dev, 기본 3001
     #   Test-Console    : build/dist/console/dist serve, 기본 8080 (HTTPS)
     #   배포본 console  : mgmt-server/console/, deployment overlay 의 Port 로 기동 (기본 8081)
-    # overlay port: install_path/config.json (deployment POST 의 config 필드가 저장) 우선, 없으면 기본값.
+    # overlay port: deployment POST 의 config 필드가 저장. cims_agent 가 변종별로
+    # 분리 저장 (install_path/console/config.json) — fallback 으로 legacy 위치도 본다.
     local port
     port=$(python3 -c "
 import json, os
-ov='$DIST_DIR/config.json'
+candidates=['$DIST_DIR/console/config.json', '$DIST_DIR/config.json']
 p=None
-if os.path.isfile(ov):
+for ov in candidates:
+    if not os.path.isfile(ov): continue
     try:
         f=json.load(open(ov))
         if isinstance(f,dict):
             p=f.get('Server.Port') or f.get('Port') or (f.get('Server',{}) or {}).get('Port')
+            if p: break
     except: pass
 print(p if p else '')" 2>/dev/null)
 
@@ -995,12 +1014,11 @@ cmd_reset() {
         else
             info "Phase 2/3 배포 대상 정리 (build/dist/{mgmt,volte-sip,volte-media,ptt-sip,ptt-media,ibcf-sip,ibcf-media}-server/, §0.10)..."
             # Test-agent 프로세스부터 종료 (파일 잠금 회피)
-            # P2 — ibcf-sip-server / ibcf-media-server 추가 (verify/lib/items/stage5/_native_steps.py
-            # _INSTANCES 의 agent_name 과 동기). _INSTANCES 에 추가/제거 시 양쪽 갱신 필요.
+            # _INSTANCES 의 agent_name 과 동기 — _INSTANCES 에 추가/제거 시 양쪽 갱신 필요.
+            # P2 (2026-05-11): ISP/IMP 는 volte-sip-server / volte-media-server 와 한 agent 공유.
             local _agents=(mgmt-server
                            volte-sip-server volte-media-server
-                           ptt-sip-server ptt-media-server
-                           ibcf-sip-server ibcf-media-server)
+                           ptt-sip-server ptt-media-server)
             local _a
             for _a in "${_agents[@]}"; do
                 pkill -f "cims_agent.py.*--name $_a" 2>/dev/null || true
@@ -1652,8 +1670,7 @@ _stop_one() {
             # agent_name 자체 (cims_agent.py) 는 heartbeat 유지를 위해 건드리지 않음.
             # 변종 csp/cmp 도 SIGTERM 에 즉시 종료 안되는 경우 있어 SIGKILL fallback 필수.
             local _stop_agents=(volte-sip-server volte-media-server
-                                ptt-sip-server ptt-media-server
-                                ibcf-sip-server ibcf-media-server)
+                                ptt-sip-server ptt-media-server)
             local _all_pids="" _sa _sa_path _sa_pids _any=0 _p _exe _cwd
             for _sa in "${_stop_agents[@]}"; do
                 [[ ! -d "$DIST_DIR/$_sa" ]] && continue

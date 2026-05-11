@@ -267,11 +267,40 @@ def _find_previous_install(module: str, process: str, current_version: str) -> s
     return candidates[0][1]
 
 
+def _detect_tar_pkg_subdir(tar_path: str) -> str:
+    """tarball 안 top-level 디렉토리 이름을 반환. 단일 디렉토리 아니면 빈 문자열.
+
+    cims.sh pkg 산출 tarball 구조: meta.json + cims.sh + config_template.json + <pkg_name>/.
+    `<pkg_name>` 가 유일한 디렉토리 entry. 이 함수는 단일 변종 install 을 install_path
+    전체가 아닌 install_path/<pkg_name>/ 로 좁히기 위한 정보 제공.
+    """
+    try:
+        with tarfile.open(tar_path, "r:gz") as tf:
+            dirs = set()
+            for m in tf.getmembers():
+                first = m.name.split("/", 1)[0]
+                if first in ("", ".", ".."):
+                    continue
+                if "/" in m.name or m.isdir():
+                    dirs.add(first)
+                if len(dirs) > 3:
+                    return ""
+            if len(dirs) == 1:
+                return next(iter(dirs))
+    except Exception:
+        pass
+    return ""
+
+
 def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
     """PKG 다운로드 + tarball 풀어 install_path 에 설치. config.json 도 함께 기록.
 
     새 버전이고 같은 모듈/프로세스의 이전 버전이 존재하면
     이전 install_path 의 config/ 와 config.json 을 신규 경로로 복사(자동 이관).
+
+    멀티-변종 install (같은 install_path 에 csp/ 와 isp/ 처럼 sibling 디렉토리 공존)
+    지원: tarball 의 단일 top-level 디렉토리만 wipe/backup 범위로 좁힘. 형제 디렉토리
+    (예: csp install 시 isp/) 영향 없음.
     """
     pkg_id = params.get("package_id")
     install_path = _resolve_install_path(params)
@@ -289,33 +318,46 @@ def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
         return 3, "", f"sha256 mismatch expected={sha_expected} got={sha_actual}"
 
     os.makedirs(install_path, exist_ok=True)
-    # 기존 내용 백업
-    backup = install_path + ".prev"
-    if os.path.isdir(install_path) and os.listdir(install_path):
+
+    # tarball 먼저 저장 — top-level dir 검출에 필요.
+    tar_path = os.path.join(install_path, "_pkg.tar.gz")
+    with open(tar_path, "wb") as f:
+        f.write(data)
+
+    pkg_subdir = _detect_tar_pkg_subdir(tar_path)
+    # 단일 변종 tarball (csp/psp/isp/cmp/pmp/imp 등) 이면 sibling 디렉토리 영향 차단.
+    # csc/console/cspsim 등도 단일 root 라 동일 동작 — install_path 가 mgmt-server 같은
+    # multi-pkg agent 면 scoped, single-pkg agent 면 결과적으로 install_path 와 동일.
+    if pkg_subdir:
+        scope = os.path.join(install_path, pkg_subdir)
+        backup = scope + ".prev"
+    else:
+        # 단일-root 감지 실패 — legacy 전체 wipe (안전 fallback).
+        scope = install_path
+        backup = install_path + ".prev"
+
+    # 기존 내용 백업 (scope 만)
+    if os.path.isdir(scope) and os.listdir(scope):
         try:
             if os.path.isdir(backup): shutil.rmtree(backup)
-            shutil.copytree(install_path, backup, symlinks=True, dirs_exist_ok=True)
+            shutil.copytree(scope, backup, symlinks=True, dirs_exist_ok=True)
         except Exception:
             pass
 
     # 실행 중인 바이너리 위로 tar 풀면 ETXTBSY ('Text file busy') 발생 →
-    # untar 전체 fail. 사전에 install_path 하위 모든 파일을 unlink 하면
-    # OS 가 기존 inode 는 그대로 두고 새 파일을 교체 작성 → 실행 중인
-    # 프로세스에 영향 없이 untar 성공. 디렉터리 구조 자체는 보존하고 파일만
-    # 정리. tar 가 모든 파일을 새로 뽑으므로 자료 손실 없음.
-    # backup 은 install_path 외부 (".prev") 라 wipe 영향 없음.
-    for root, _dirs, files in os.walk(install_path):
-        for fname in files:
-            p = os.path.join(root, fname)
-            try:
-                if os.path.islink(p) or os.path.isfile(p):
-                    os.unlink(p)
-            except Exception:
-                pass
-
-    tar_path = os.path.join(install_path, "_pkg.tar.gz")
-    with open(tar_path, "wb") as f:
-        f.write(data)
+    # untar 전체 fail. 사전에 scope 하위 모든 파일을 unlink 하면 OS 가 기존
+    # inode 는 그대로 두고 새 파일을 교체 작성 → 실행 중인 프로세스에 영향 없이
+    # untar 성공. 디렉터리 구조 자체는 보존하고 파일만 정리. tar 가 모든 파일을
+    # 새로 뽑으므로 자료 손실 없음.
+    if os.path.isdir(scope):
+        for root, _dirs, files in os.walk(scope):
+            for fname in files:
+                p = os.path.join(root, fname)
+                try:
+                    if os.path.islink(p) or os.path.isfile(p):
+                        os.unlink(p)
+                except Exception:
+                    pass
 
     try:
         with tarfile.open(tar_path, "r:gz") as tf:
@@ -325,6 +367,13 @@ def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
     finally:
         try: os.unlink(tar_path)
         except Exception: pass
+
+    # 변종별 config.json 스코프. 한 install_path 에 형제 변종 (csp/isp) 공존 시
+    # install_path/config.json 한 파일을 공유하면 last-write-wins 로 첫 변종 overlay
+    # 가 덮어써짐 → cims.sh 가 wrong overlay 로 시작. 따라서 pkg_subdir 가 있으면
+    # config.json 도 변종 디렉토리 내부에 쓴다 (install_path/<pkg>/config.json).
+    # cims.sh start_*_variant 는 같은 경로에서 overlay 를 읽도록 갱신.
+    cfg_target_dir = os.path.join(install_path, pkg_subdir) if pkg_subdir else install_path
 
     # 이전 버전 config 이관 (같은 모듈/프로세스, 다른 버전)
     migrated = ""
@@ -336,12 +385,12 @@ def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
         if prev and prev != install_path:
             try:
                 prev_cfg = os.path.join(prev, "config")
-                new_cfg  = os.path.join(install_path, "config")
+                new_cfg  = os.path.join(cfg_target_dir, "config")
                 if os.path.isdir(prev_cfg) and not os.path.isdir(new_cfg):
                     shutil.copytree(prev_cfg, new_cfg, symlinks=True)
                     migrated = f" (config migrated from {prev})"
                 prev_scalar = os.path.join(prev, "config.json")
-                new_scalar  = os.path.join(install_path, "config.json")
+                new_scalar  = os.path.join(cfg_target_dir, "config.json")
                 if os.path.isfile(prev_scalar) and not os.path.isfile(new_scalar) \
                         and not (params.get("config")):
                     shutil.copy2(prev_scalar, new_scalar)
@@ -351,15 +400,21 @@ def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
     # 설정 파일 기록 (params.config 가 있으면 사용자의 값, 없으면 빈 dict — 이관된 파일 유지)
     cfg_path = ""
     try:
-        new_scalar = os.path.join(install_path, "config.json")
+        new_scalar = os.path.join(cfg_target_dir, "config.json")
         if params.get("config") or not os.path.isfile(new_scalar):
-            cfg_path = _write_config_file(install_path, params.get("config") or {})
+            cfg_path = _write_config_file(cfg_target_dir, params.get("config") or {})
         else:
             cfg_path = new_scalar
     except Exception as e:
         return 5, "", f"write config failed: {e}"
 
-    # config/ 디렉토리 기본 생성 (collection 저장소)
+    # config/ 디렉토리 기본 생성 — 두 위치 모두.
+    #  install_path/<pkg>/config/ : 변종 내부 (collection 저장소 — config_template.json 등)
+    #  install_path/config/       : 서버 레벨 (CSP/CMP ELF 의 jsonlDir fallback 이 시작 시
+    #                               자동 추정하는 위치 — install_path/config/<jsonl> 가 SoT).
+    # 후자 누락 시 CSP 가 jsonlDir=(none) 으로 init → SIGUSR1 reload 도 무력화 (in-memory
+    # jsonlDir 가 빈 채라 재탐색 안 함). 따라서 두 디렉토리 모두 install 시점에 미리 생성.
+    os.makedirs(os.path.join(cfg_target_dir, "config"), exist_ok=True)
     os.makedirs(os.path.join(install_path, "config"), exist_ok=True)
 
     return 0, (f"installed pkg_id={pkg_id} at {install_path} ({len(data)} bytes) "

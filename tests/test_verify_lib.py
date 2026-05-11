@@ -3032,15 +3032,14 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.SKIP)
 
     def test_step_18_pass(self) -> None:
-        # P2 토폴로지: 6 service-server (csp/psp/isp + cmp/pmp/imp) register + spawn + online.
+        # P2 토폴로지 (2026-05-11): 4 unique agent (volte-sip/media, ptt-sip/media) +
+        # 6 instances (csp/psp/isp/cmp/pmp/imp). 같은 agent_name 의 변종은 aid/pid 공유.
         post_called: list = []
         _AID_BY_AGENT = {
-            "volte-sip-server":   100,
-            "ptt-sip-server":     110,
-            "ibcf-sip-server":    120,
-            "volte-media-server": 200,
-            "ptt-media-server":   210,
-            "ibcf-media-server":  220,
+            "volte-sip-server":   100,   # csp + isp 공유
+            "ptt-sip-server":     110,   # psp
+            "volte-media-server": 200,   # cmp + imp 공유
+            "ptt-media-server":   210,   # pmp
         }
         def fake_post_json(url, payload, token=None, timeout=10):
             post_called.append(url)
@@ -3077,14 +3076,17 @@ class TestStage5ModulesSteps(unittest.TestCase):
             except AttributeError: pass
 
         self.assertEqual(r.status, self._ItemStatus.PASS)
+        # 같은 agent 의 변종은 같은 aid 공유 (csp=isp=100, cmp=imp=200)
         self.assertEqual(self._native._get(ctx, "aid_csp"), 100)
+        self.assertEqual(self._native._get(ctx, "aid_isp"), 100)
         self.assertEqual(self._native._get(ctx, "aid_psp"), 110)
-        self.assertEqual(self._native._get(ctx, "aid_isp"), 120)
         self.assertEqual(self._native._get(ctx, "aid_cmp"), 200)
+        self.assertEqual(self._native._get(ctx, "aid_imp"), 200)
         self.assertEqual(self._native._get(ctx, "aid_pmp"), 210)
-        self.assertEqual(self._native._get(ctx, "aid_imp"), 220)
         self.assertEqual(self._native._get(ctx, "ta_pid_csp"), 1100)
-        self.assertEqual(len(spawned), 6)
+        self.assertEqual(self._native._get(ctx, "ta_pid_isp"), 1100)
+        # spawn 은 unique agent 당 1회 — 4번
+        self.assertEqual(len(spawned), 4)
 
     # ── step 19 ──
     def test_step_19_pass(self) -> None:
@@ -3128,12 +3130,15 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(imp_payload["config"].get("RtpIp"), "127.0.0.5")
         # install_path 는 server level (agent_name 까지) — tarball 안 변종
         # 디렉토리 (csp/psp/isp/) 가 그 안에 풀리며 _install_path 자체는 leaf 미포함.
+        # P2 토폴로지: ISP 는 volte-sip-server, IMP 는 volte-media-server 와 공존.
         csp_payload = next(p for p in captured if p["process_name"] == "CSP")
         self.assertTrue(csp_payload["install_path"].endswith("/volte-sip-server"))
         psp_payload2 = next(p for p in captured if p["process_name"] == "PSP")
         self.assertTrue(psp_payload2["install_path"].endswith("/ptt-sip-server"))
         isp_payload2 = next(p for p in captured if p["process_name"] == "ISP")
-        self.assertTrue(isp_payload2["install_path"].endswith("/ibcf-sip-server"))
+        self.assertTrue(isp_payload2["install_path"].endswith("/volte-sip-server"))
+        imp_payload2 = next(p for p in captured if p["process_name"] == "IMP")
+        self.assertTrue(imp_payload2["install_path"].endswith("/volte-media-server"))
 
     def test_step_19_fail_missing_pkg_for_one_module(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=15: (201, {"id": 1})
