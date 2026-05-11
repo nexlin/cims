@@ -57,7 +57,9 @@ SimSession::SimSession(int id,
     m_clsSetup.m_strLocalIp    = m_strLocalIp;
     m_clsSetup.m_strDomain     = m_strDomain;
 
-    m_clsUserAgent.InsertRegisterInfo(m_clsServerInfo);
+    // REGISTER 자동 송신은 Start() 에서 m_bNoRegister 검사 후 결정.
+    // m_bNoRegister=true (외부 SIP peer 모드) 면 InsertRegisterInfo 자체 skip
+    // → psip 의 m_clsRegisterList 가 비어서 자동 REGISTER 안 나감.
 }
 
 SimSession::~SimSession() {
@@ -70,6 +72,10 @@ SimSession::~SimSession() {
 // ─────────────────────────────────────────────
 bool SimSession::Start() {
     m_stats.tRegStart = NowMs();
+
+    if (!m_bNoRegister) {
+        m_clsUserAgent.InsertRegisterInfo(m_clsServerInfo);
+    }
 
     if (!m_clsUserAgent.Start(m_clsSetup, m_pSipClient)) {
         printf("[%d] SIP stack start error (port %d)\n", m_iId, m_iLocalPort);

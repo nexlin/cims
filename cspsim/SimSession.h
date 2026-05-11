@@ -84,6 +84,8 @@ public:
     bool Start();
     void Stop();
 
+    void SetNoRegister(bool b) { m_bNoRegister = b; }
+
     // 액션
     void StartCall(const std::string& strTarget = "");
     void StopCall();
@@ -122,6 +124,7 @@ public:
     std::string  m_strInviteId;
     bool         m_bRegistered;
     bool         m_bInCall;
+    bool         m_bNoRegister{false};  // true 면 REGISTER 자동 송신 skip (외부 SIP peer 모드)
     bool         m_bGmsSubscribed;
     bool         m_bCmsSubscribed;
 

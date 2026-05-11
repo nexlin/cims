@@ -17,6 +17,12 @@ from ...common.subscribers import (
 from ...common.access_services import seed_access_services, signal_csp_reload
 from ...common.csp_notify import trigger_group_resync
 from ...common.cmp_client import cmp_request
+from ...common.ibcf_routing import seed_ibcf_routing, IBCF_PEER_DOMAIN
+
+# Mock 외부 peer (cspsim peer 프로세스) 의 listen endpoint.
+# loopback alias 부담 회피 위해 127.0.0.1 의 unused port 사용.
+IBCF_MOCK_PEER_IP   = "127.0.0.1"
+IBCF_MOCK_PEER_PORT = 6800
 from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
 
 
@@ -88,13 +94,36 @@ def seed(ctx: VerifyContext) -> ItemResult:
         install_path = os.path.join(ctx.dist_dir, inst["agent_name"])
         cfg_dir = os.path.join(install_path, "config")
         pid_file = os.path.join(install_path, "run", f"{inst['id']}.pid")
-        n = seed_access_services(
-            cfg_dir, sub["voip_ref"], sub["ptt_ref"],
-            tag="verify-stage6-seed",
-            note=f"auto-seeded by cims_verify S6-SEED ({inst['id']})",
-        )
+        # ISP 는 IBCF role only — access_services (voip/ptt) 시드 시 inbound
+        # INVITE 가 From-URI domain ("csp") 으로 access_service 매칭 → auth
+        # challenge 흐름이 동작하여 routing_policies 평가 전에 401 반환.
+        # 따라서 ISP 에는 access_services 비우고 routing 6종만 시드.
+        if inst["id"] == "isp":
+            n = 0
+            # 빈 access_services.jsonl 로 덮어쓰기 (이전 회차 잔여 제거)
+            with open(os.path.join(cfg_dir, "access_services.jsonl"), "w") as _f:
+                pass
+        else:
+            n = seed_access_services(
+                cfg_dir, sub["voip_ref"], sub["ptt_ref"],
+                tag="verify-stage6-seed",
+                note=f"auto-seeded by cims_verify S6-SEED ({inst['id']})",
+            )
+        # ISP: IBCF routing 6종 추가 시드. CSP/PSP 는 IBCF role off 라 무의미.
+        ibcf_n = 0
+        if inst["id"] == "isp":
+            ibcf_n = seed_ibcf_routing(
+                cfg_dir,
+                isp_local_ip=inst["local_ip"],
+                isp_local_port=inst["listen"][0],
+                peer_ip=IBCF_MOCK_PEER_IP,
+                peer_port=IBCF_MOCK_PEER_PORT,
+            )
         reloaded = signal_csp_reload(pid_file)
-        seed_lines.append(f"  · {inst['id']}: seeded {n}건 / reload(SIGUSR1)={'OK' if reloaded else 'FAIL'}")
+        ibcf_note = f" / ibcf {ibcf_n}콜렉션" if ibcf_n else ""
+        seed_lines.append(
+            f"  · {inst['id']}: seeded {n}건{ibcf_note} / reload(SIGUSR1)={'OK' if reloaded else 'FAIL'}"
+        )
         if inst["id"] == "csp":
             primary_seeded = n
             primary_reloaded = reloaded

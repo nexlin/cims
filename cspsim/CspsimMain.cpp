@@ -300,6 +300,7 @@ static void PrintUsage(const char* pszBin) {
     printf("  -media_dir   <dir>       미디어 디렉토리 (세션별 라운드로빈 할당)\n");
     printf("  -video_file  <path>      H.264 Annex B 비디오 파일 (PT=96 전송)\n");
     printf("  -no_video                비디오 비활성화 (음성 전용 통화)\n");
+    printf("  -no_register             REGISTER 송신 skip (외부 SIP peer 모드)\n");
     printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
     printf("  -db          <csp.json>  DB에서 가입자 정보 로드 (user/auth_id/password/domain 자동 설정)\n");
     printf("  -verbose                 SIP 메시지 상세 로그\n\n");
@@ -326,18 +327,22 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                         const std::string& strGroupId,
                         const std::string& strCalleeOverride = "")
 {
-    // 1. 모든 단말이 등록될 때까지 대기 (최대 30초)
+    // 1. 모든 단말이 등록될 때까지 대기 (최대 30초). no_register 세션은 즉시 ready.
     printf("[Scenario] Waiting for registration...\n");
     for (int retry = 0; retry < 300; ++retry) {
-        int regCount = 0;
-        for (auto* s : sessions) if (s->m_bRegistered) regCount++;
-        if (regCount == (int)sessions.size()) break;
+        int readyCount = 0;
+        for (auto* s : sessions) if (s->m_bNoRegister || s->m_bRegistered) readyCount++;
+        if (readyCount == (int)sessions.size()) break;
         usleep(100000);
     }
     {
-        int regCount = 0;
-        for (auto* s : sessions) if (s->m_bRegistered) regCount++;
-        printf("[Scenario] %d/%d registered\n", regCount, (int)sessions.size());
+        int regCount = 0, skipCount = 0;
+        for (auto* s : sessions) {
+            if (s->m_bNoRegister) skipCount++;
+            else if (s->m_bRegistered) regCount++;
+        }
+        printf("[Scenario] %d/%d registered (%d no_register skip)\n",
+               regCount, (int)sessions.size() - skipCount, skipCount);
     }
 
     if (eScenario == E_SCENARIO_REGISTER) return;
@@ -494,6 +499,10 @@ int main(int argc, char* argv[])
     std::string strDbConfig   = GetArg(argc, argv, "-db",            "");
     bool bVerbose              = HasFlag(argc, argv, "-verbose");
     bool bPttMode              = (strMode == "ptt");
+    // 외부 SIP peer 모드: REGISTER 송신 skip. INVITE 수신 시 SimSession 기본 핸들러가
+    // 180→200 OK 자동 응답. IBCF trunk 시나리오의 mock 외부 peer 또는 register 가
+    // 거부되는 ISP(IBCF role only)로 직접 INVITE 발신할 때 사용.
+    bool bNoRegister           = HasFlag(argc, argv, "-no_register");
 
     if (strLocalIp.empty()) strLocalIp = GetLocalIp();
 
@@ -617,6 +626,7 @@ int main(int argc, char* argv[])
             bPttMode,
             strGroupId
         );
+        s->SetNoRegister(bNoRegister);
 
         // Per-session media files from directory (round-robin)
         if (!vecAudioFiles.empty()) {

@@ -17,6 +17,8 @@ from ..stage5 import _native_steps
         "S6-SCN-PTT-VOICE",   "S6-SCN-PTT-VIDEO",
         # 신규 시나리오 (cert-rotate 는 agent 종료 가능 → 마지막에 실행)
         "S6-SCN-SUBSCRIBE",   "S6-SCN-DB-SYNC", "S6-SCN-CERT-ROTATE",
+        # IBCF 트렁크 (P2 Layer 3 — 2026-05-11)
+        "S6-SCN-IBCF-TRUNK",
         # 깊이 검증 항목 (depth scenarios)
         "S6-L7-SUBSCRIBE-NOTIFY", "S6-CMP-GROUP-SYNC", "S6-MCPTT-FLOOR-GRANT",
     ],
