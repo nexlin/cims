@@ -1646,6 +1646,54 @@ _stop_one() {
                     *)       stop_one "$c" ;;
                 esac
             done
+            # P1/P2 배포본 인스턴스 — install 후 dev COMPONENTS 와 별개 프로세스로 동작.
+            # _agents 는 cmd_reset 의 목록과 동기 유지. exe/cwd 가 install_path 하위인
+            # 프로세스를 enumerate 하여 SIGTERM → 짧게 wait → 잔존 SIGKILL.
+            # agent_name 자체 (cims_agent.py) 는 heartbeat 유지를 위해 건드리지 않음.
+            # 변종 csp/cmp 도 SIGTERM 에 즉시 종료 안되는 경우 있어 SIGKILL fallback 필수.
+            local _stop_agents=(volte-sip-server volte-media-server
+                                ptt-sip-server ptt-media-server
+                                ibcf-sip-server ibcf-media-server)
+            local _all_pids="" _sa _sa_path _sa_pids _any=0 _p _exe _cwd
+            for _sa in "${_stop_agents[@]}"; do
+                [[ ! -d "$DIST_DIR/$_sa" ]] && continue
+                _sa_path="$DIST_DIR/$_sa"
+                _sa_pids=""
+                for _p in /proc/[0-9]*; do
+                    _exe=$(readlink "$_p/exe" 2>/dev/null || true)
+                    _cwd=$(readlink "$_p/cwd" 2>/dev/null || true)
+                    _exe="${_exe% (deleted)}"
+                    _cwd="${_cwd% (deleted)}"
+                    if [[ "$_exe" == "$_sa_path/"* || "$_cwd" == "$_sa_path"* ]]; then
+                        # agent 프로세스는 heartbeat 유지 — 제외
+                        grep -qa "cims_agent.py" "$_p/cmdline" 2>/dev/null && continue
+                        _sa_pids+=" $(basename "$_p")"
+                    fi
+                done
+                if [[ -n $_sa_pids ]]; then
+                    [[ $_any -eq 0 ]] && header "=== 배포본 인스턴스 중지 (변종 psp/isp/pmp/imp 포함) ===" && _any=1
+                    ok "$_sa: pid$_sa_pids"
+                    kill $_sa_pids 2>/dev/null || true
+                    _all_pids+=" $_sa_pids"
+                fi
+            done
+            # SIGTERM 후 최대 3s wait, 잔존은 SIGKILL
+            if [[ -n $_all_pids ]]; then
+                local _i=0 _alive
+                while (( _i < 15 )); do
+                    _alive=0
+                    for _p in $_all_pids; do kill -0 "$_p" 2>/dev/null && { _alive=1; break; }; done
+                    [[ $_alive -eq 0 ]] && break
+                    sleep 0.2; _i=$((_i+1))
+                done
+                # 남은 것 SIGKILL
+                for _p in $_all_pids; do
+                    if kill -0 "$_p" 2>/dev/null; then
+                        warn "  pid=$_p SIGTERM 무응답 → SIGKILL"
+                        kill -9 "$_p" 2>/dev/null || true
+                    fi
+                done
+            fi
             ;;
         tb)
             header "=== TB 3종 중지 ==="
@@ -2059,14 +2107,21 @@ PYEOF
         #  log/         : 서비스 로그 (csp/csc 등)
         #  run/         : pid 파일
         #  cache/       : CSC 설정 캐시 (고정값이 아닌 현재 상태)
-        #  packages/    : CSC 가 수집한 업로드 tarball (신규 배포에 포함되면 중복 팽창)
+        #  packages/    : 배포본 CSC 가 수집한 업로드 tarball (신규 배포에 포함되면 중복 팽창)
+        #  packages_tb/ : TB-CSC 가 수집한 업로드 tarball — packages 와 별개 store.
+        #                 누락 시 csc tarball 이 GB 단위로 부풀어 S5-CSC-DEPLOY-INSTALL 60s timeout.
+        #  packages_trash/ : TB-CSC 삭제 보관소
+        #  cdr/         : CDR 산출물
         #  dist/        : 번들러 산출물 이 아닌 상위 dist 와 혼동 방지 (cwrtc/dist 등 없음)
         ( cd "$pkg_root" && \
             tar czf "$tar_file" \
                 --exclude="$src_sub/log" \
                 --exclude="$src_sub/run" \
                 --exclude="$src_sub/cache" \
+                --exclude="$src_sub/cache_tb" \
                 --exclude="$src_sub/packages" \
+                --exclude="$src_sub/packages_tb" \
+                --exclude="$src_sub/packages_trash" \
                 --exclude="$src_sub/cdr" \
                 --exclude='*.pid' --exclude='*.pyc' \
                 --exclude='__pycache__' --exclude='.cache' \
@@ -2082,6 +2137,21 @@ PYEOF
         local size; size=$(stat -c%s "$tar_file" 2>/dev/null || echo 0)
         ok "$(basename "$tar_file") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo "${size}B"))"
     done
+
+    # stale 버전 cleanup — 각 component 의 mtime 기준 최신 1개만 보존, 나머지 제거.
+    # 배경: verify/lib/items/stage5/_native_steps.py:_latest_tarball() 의 natural-sort 가
+    #   잔재 0.0.2 같은 stale tarball 을 선택 → deploy 가 OLD binary 사용.
+    # 이 라운드에 패키징한 component 만 정리 (다른 컴포넌트 손대지 않음).
+    local _cleaned=0 _latest _stale
+    for t in "${targets[@]}"; do
+        _latest=$(ls -1t "$out_dir/${t}-"*.tar.gz 2>/dev/null | head -1)
+        [[ -z "$_latest" ]] && continue
+        while IFS= read -r _stale; do
+            [[ "$_stale" == "$_latest" ]] && continue
+            rm -f "$_stale" && _cleaned=$((_cleaned+1)) && info "stale 제거: $(basename "$_stale")"
+        done < <(ls -1 "$out_dir/${t}-"*.tar.gz 2>/dev/null)
+    done
+    [[ $_cleaned -gt 0 ]] && ok "stale tarball $_cleaned 개 정리"
 
     # manifest.json 생성/갱신 — 현재 packages/*.tar.gz 의 SHA256 + size + mtime 기록.
     # Console UI 의 다운로드 라벨 (버전 표시) 과 검증 S6 의 immutability gate 가 이 파일 사용.
