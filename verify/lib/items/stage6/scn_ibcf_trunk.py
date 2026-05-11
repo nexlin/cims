@@ -1,19 +1,6 @@
 """S6-SCN-IBCF-TRUNK — IBCF 트렁크 라우팅 e2e (ISP → mock 외부 peer).
 
-**현재 상태 (2026-05-11)**: 인프라 (seed/cspsim/시나리오) 완성. 다만 CSP 의
-외부 peer inbound auth-skip 흐름 (ModuleDispatcher.cpp L383 G10 주석 — "외부
-peer 인바운드는 AclPolicy (remote_nodes 기반) 에서 평가되어야 함 — 추후 확장")
-이 미구현이라 caller 의 INVITE 가 ISP 의 가입자 맵 매칭 실패 → 무조건 401
-challenge. 따라서 routing_policies 가 정상 시드/sync 되어도 routing path 까지
-도달하지 못함. 본 시나리오는 **SKIP** 으로 둔다.
-
-다음 라운드 작업:
-  1. AclPolicy + remote_nodes 기반의 외부 peer 식별 흐름 구현
-  2. routing_policies 매칭 시 user map 인증 check skip (PendingRouteMap.Has
-     로 분기) — 또는
-  3. cspsim 에 pre-emptive Digest auth 옵션 추가 (덜 깨끗한 우회)
-
-흐름 설계 (참고용):
+흐름 설계:
   caller cspsim ── INVITE 9000@trunk.peer.test ──▶ ISP (127.0.0.5:5060)
                                                    │
                                   routing_policies │ rule: req_uri_user
@@ -23,6 +10,11 @@ challenge. 따라서 routing_policies 가 정상 시드/sync 되어도 routing p
                                                    │
                                                    ▼
                                   mock peer cspsim ── 200 OK ──▶ ISP ──▶ caller
+
+전제 (2026-05-11 G10 구현분):
+  ModuleDispatcher::EventIncomingRequestAuth 진입부에서 PendingRouteMap.Has(callId)
+  true 면 401 challenge 우회. RecvRequest 의 AclPolicy + routing_policies 매칭으로
+  외부 peer trust 가 이미 검증된 콜이라는 가정.
 """
 from __future__ import annotations
 
@@ -86,7 +78,6 @@ def _stop_mock_peer(proc: subprocess.Popen) -> str:
             out = proc.stdout.read() or ""
     except Exception:
         pass
-    # 마지막 20 줄만 남김
     return "\n".join(out.splitlines()[-20:])
 
 
@@ -99,40 +90,11 @@ def _stop_mock_peer(proc: subprocess.Popen) -> str:
     execution_order=50,
 )
 def scn_ibcf_trunk(ctx: VerifyContext) -> ItemResult:
-    """현재 SKIP. CSP G10 (외부 peer inbound auth-skip) 미구현 → 다음 라운드.
+    """LIVE 검증: routing_policies 매칭으로 ISP → mock peer 까지 INVITE 도달.
 
-    routing_policies 시드 자체는 S6-SEED 가 정상 수행. ISP 의
-    RoutingPolicyEngine sync 도 1 policy 로 동작 확인 (csp log).
-    여기서는 cspsim caller 가 401 challenge 를 받기 때문에 시나리오 자체는
-    routing path 도달 불가 → 인증 흐름 fix 까지 SKIP.
+    PASS = caller 가 INVITE 송신 + peer 가 INVITE 수신 (routing 동작 확인).
+    caller 의 200 OK 수신은 부수 검증.
     """
-    item_id = "S6-SCN-IBCF-TRUNK"
-    title = "IBCF 트렁크 라우팅"
-
-    isp_ip = target_ip("isp", "127.0.0.5")
-    # ISP 의 routing_policies seed 가 실제 적용됐는지 정합 확인.
-    isp_cfg = os.path.join(ctx.dist_dir, "ibcf-sip-server", "config", "routing_policies.jsonl")
-    seed_ok = os.path.isfile(isp_cfg) and os.path.getsize(isp_cfg) > 0
-
-    skip_reason = (
-        "CSP G10 (외부 peer inbound auth-skip) 미구현 — ModuleDispatcher.cpp "
-        "L383 주석 참조. routing seed 자체는 적용됨"
-        + (" (jsonl OK)" if seed_ok else " (jsonl 미발견)")
-        + ". 다음 라운드에서 AclPolicy + remote_nodes 기반 inbound 식별 추가 후 PASS 검증."
-    )
-    ctx.w(f"### {item_id} — {title}")
-    ctx.w(f"- ISP: {isp_ip}:5060  /  mock peer: {IBCF_MOCK_PEER_IP}:{IBCF_MOCK_PEER_PORT}")
-    ctx.w(f"- routing seed: {'OK' if seed_ok else 'MISSING'} ({isp_cfg})")
-    ctx.w(f"- [SKIP] {skip_reason}")
-    ctx.w()
-    return ItemResult(
-        id=item_id, name=title, status=ItemStatus.SKIP,
-        detail=skip_reason, stage=6,
-    )
-
-
-def _scn_ibcf_trunk_full(ctx: VerifyContext) -> ItemResult:
-    """본격 LIVE 검증 (G10 구현 후 활성화)."""
     item_id = "S6-SCN-IBCF-TRUNK"
     title = "IBCF 트렁크 라우팅"
 
@@ -180,21 +142,16 @@ def _scn_ibcf_trunk_full(ctx: VerifyContext) -> ItemResult:
     # 3) mock peer 종료
     peer_tail = _stop_mock_peer(peer_proc)
 
-    # 4) 판정 — routing 동작 검증의 핵심은 mock peer 가 INVITE 를 받았느냐.
-    # caller 측 "CALL STARTED" 는 200 OK 수신까지 가야 하는데 1차에서는
-    # routing → peer 도착까지만 검증한다 (peer 가 200 OK 자동응답 → caller
-    # 도 받을 것).
+    # 4) 판정
     caller_invite_sent = "INVITE → " in caller_tail or "INVITE sip:" in caller_tail
     caller_call_started = "CALL STARTED" in caller_tail
     peer_received = "INVITE from=" in peer_tail
 
-    # 본 항목 PASS = routing 정책 매칭으로 peer 까지 INVITE 도달.
-    # caller 의 CALL STARTED 는 부수 검증 (있으면 좋고 없어도 routing 검증은 PASS).
     ok = caller_invite_sent and peer_received
 
     ctx.w(f"### {item_id} — {title}")
     ctx.w(f"- ISP: {isp_ip}:5060  /  mock peer: {IBCF_MOCK_PEER_IP}:{IBCF_MOCK_PEER_PORT}")
-    ctx.w(f"- callee: `{callee_target}` (req_uri_user contains \"{IBCF_PEER_DOMAIN}\" → route_set)")
+    ctx.w(f"- callee: `{callee_target}` (req_uri_host contains \"{IBCF_PEER_DOMAIN}\" → route_set)")
     ctx.w("```")
     ctx.w("[caller tail]")
     for line in caller_tail.splitlines()[-25:]:

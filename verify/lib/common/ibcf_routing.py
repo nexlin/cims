@@ -85,11 +85,13 @@ def seed_ibcf_routing(cfg_dir: str,
 
     rules = [{
         "id": _uid(), "name": rule_name,
-        # cspsim 의 caller 는 m_strDomain="csp" 라 Request-URI host 가 ISP IP
-        # (127.0.0.5) 로 박히고 외부 도메인은 user 부분에 들어간다
-        # (예: "sip:9000@trunk.peer.test@127.0.0.5"). 따라서 host 가 아닌
-        # user contains 로 매칭. cspsim 의 URI 처리 개선은 별도 라운드.
-        "field": "req_uri_user", "op": "contains", "value": peer_domain,
+        # cspsim caller 가 보낸 Request-URI 는 "sip:9000@trunk.peer.test@127.0.0.5".
+        # psip CSipUri::ParseUser 가 첫 '@' 로 분리하므로:
+        #   user = "9000"
+        #   host = "trunk.peer.test@127.0.0.5"  (`@` 가 host 에 그대로 포함됨)
+        # 따라서 host contains 로 외부 도메인을 식별. cspsim 의 URI 정리 (proper
+        # contact/route 송출) 는 별도 라운드.
+        "field": "req_uri_host", "op": "contains", "value": peer_domain,
         "enabled": True, "tags": [tag, "routing", "ibcf"],
     }]
 

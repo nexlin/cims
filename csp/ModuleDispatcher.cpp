@@ -380,8 +380,15 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage* pclsMessage ) {
         return false;
     }
 
-    // G10 (2026-04-23): IBCF XML trunk 기반 incoming auth skip/routing 제거.
-    //   외부 peer 인바운드는 AclPolicy (remote_nodes 기반) 에서 평가되어야 함 (추후 확장).
+    // G10 (2026-05-11): 외부 peer inbound auth-skip.
+    //   RecvRequest 의 AclPolicy 가 inbound trust 를 이미 검증한 뒤
+    //   routing_policies 가 outbound peer 를 결정하여 PendingRouteMap 에 저장한 콜은,
+    //   From-user 가 로컬 user map 에 없는 외부 peer 발신이므로 401 challenge 우회.
+    {
+        std::string strCallId;
+        pclsMessage->GetCallId( strCallId );
+        if ( gclsPendingRouteMap.Has( strCallId ) ) return true;
+    }
 
     CspUser clsCspUser;
     bool bCspUserFound = gclsCspUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsCspUser );

@@ -20,6 +20,12 @@ bool CCspPendingRouteMap::Take( const std::string& callId, PendingRouteEntry& ou
     return true;
 }
 
+bool CCspPendingRouteMap::Has( const std::string& callId ) const {
+    if ( callId.empty() ) return false;
+    std::lock_guard<std::mutex> lk( m_mutex );
+    return m_map.find( callId ) != m_map.end();
+}
+
 void CCspPendingRouteMap::Erase( const std::string& callId ) {
     if ( callId.empty() ) return;
     std::lock_guard<std::mutex> lk( m_mutex );

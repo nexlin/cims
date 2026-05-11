@@ -40,6 +40,9 @@ public:
     /** Call-ID 로 조회하며 꺼내기 (있으면 outEntry 에 복사하고 맵에서 제거 후 true). */
     bool Take( const std::string& callId, PendingRouteEntry& outEntry );
 
+    /** Call-ID 존재 여부만 확인 (peek-only, 맵 변경 없음). */
+    bool Has( const std::string& callId ) const;
+
     /** 지정 Call-ID 만 제거 (호 거절 등에서 명시적 정리 필요 시). */
     void Erase( const std::string& callId );
 
