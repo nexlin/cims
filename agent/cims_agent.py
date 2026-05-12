@@ -861,7 +861,16 @@ def rotate_mtls_cert(csc_url: str, state: AgentState) -> bool:
 
 def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: int,
              sync_port: int = 0):
+    """
+    Heartbeat 루프.
+
+    HA 환경 (csc_url 이 VIP_csc 가리킴) 에서 fail-over 가 진행되는 약 3~7초 동안은
+    connection refused / timeout 이 발생하므로 짧은 exponential backoff 로 복구 시도.
+    정상 회차 sleep 은 heartbeat_sec, 실패 회차는 5s → 10s → 20s → max(heartbeat_sec, 60s).
+    """
     next_metric = 0
+    fail_count = 0
+    max_backoff = max(heartbeat_sec, 60)
     while True:
         try:
             hb_body = {}
@@ -872,6 +881,9 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                 print("[agent] session token revoked; exiting")
                 return 1
             if status == 200:
+                if fail_count > 0:
+                    print(f"[agent] heartbeat recovered after {fail_count} failures", flush=True)
+                fail_count = 0
                 # CSC 가 cert rotation 지시 → 새 cert 받아 저장 후 프로세스 종료 (systemd 재기동)
                 if resp.get("cert_rotate"):
                     print("[agent] cert rotation requested by CSC", flush=True)
@@ -890,6 +902,8 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                     if job["type"] == "upgrade_agent" and result["result_code"] == 0:
                         print("[agent] upgrade done — exiting for systemd restart", flush=True)
                         return 0
+            else:
+                fail_count += 1
 
             if time.time() >= next_metric:
                 metrics = collect_metrics()
@@ -897,8 +911,15 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                           headers={"X-Agent-Token": state.session_token})
                 next_metric = time.time() + metric_sec
         except Exception as e:
-            print(f"[agent] loop error: {e}")
-        time.sleep(heartbeat_sec)
+            fail_count += 1
+            print(f"[agent] loop error (fail_count={fail_count}): {e}")
+
+        if fail_count == 0:
+            sleep_sec = heartbeat_sec
+        else:
+            sleep_sec = min(5 * (2 ** (fail_count - 1)), max_backoff)
+            print(f"[agent] HA backoff sleep {sleep_sec}s (fail_count={fail_count})", flush=True)
+        time.sleep(sleep_sec)
 
 
 def main():
