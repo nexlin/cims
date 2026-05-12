@@ -406,6 +406,41 @@ cims.sh 는 **개발 단계 도구**:
 
 배포본 운영자는 cims.sh 호출 안 함 — agent/bin/cims-* 만 사용.
 
+### 11.6 Console UI 흐름 — HaGroupsPage (운영자가 ha.json 직접 편집 X)
+
+운영자는 `/deploy/ha-groups` (Console) 에서 그룹을 정의 — 각 노드의 ha.json
+은 CSC + cims_agent 가 자동 생성/분배.
+
+데이터 모델 (sql/migrate_ha_groups.sql):
+- `ha_groups`: id / name / mode(active_standby|all_active) / vip / vrid(자동) /
+  vip_mask / auth_pass / note
+- `ha_group_members`: group_id + agent_id (`uk_agent` UNIQUE — 1 agent = 1
+  group) + priority + role(master|backup)
+
+모듈 ha_capability (각 모듈 pkg.json):
+- `csp/psp/isp/csc` → `active_standby`
+- `cmp/pmp/imp` → `all_active`
+- `cwrtc/cspsim/agent/console/phone` → `standalone`
+
+install 정책 (csc/src/handlers/agents.py:_create_deployment):
+- ha_group 정의된 agent → ha_capability 가 group.mode 와 일치해야 install OK
+  (mismatch 시 400)
+- ha_group 미정의 agent → 모든 모듈 install 허용 (워크플로 가이드 — 그룹 정의
+  후 install 권장)
+- `standalone` 모듈은 어느 그룹/그룹 없음 OK
+
+자동 분배 (csc/src/handlers/ha_groups.py + agent/cims_agent.py:job_update_ha):
+1. 운영자 Console 에서 그룹 생성 / 멤버 추가 / 멤버 제거 / 그룹 수정
+2. CSC `_enqueue_update_ha_for_members` 가 멤버별 ha.json render → `agent_job`
+   테이블에 `update_ha` job INSERT (params: install_path + ha_json)
+3. cims_agent heartbeat 시 job 회수 → `job_update_ha`:
+   - `install_path/agent/keepalived/ha.json` 갱신
+   - `agent/bin/cims-ha config + apply` 자동 실행 (sudo 권한 필요)
+   - dev / sudo 미등록 시 ha.json 만 갱신 + apply 실패는 log 만 (graceful)
+
+VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 수동
+입력 (네트워크 대역 의존).
+
 ## 12. 미확정 / 추후 검토
 
 - **Redis sentinel / cluster 도입 시점** — 1.D-1 안정화 후 register
