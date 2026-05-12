@@ -92,6 +92,7 @@ if __name__ == '__main__':
     from handlers.agents         import CIMS_AGENT_ADMIN_HANDLER_LIST, CIMS_AGENT_PUBLIC_HANDLER_LIST
     from handlers.agent_api      import CIMS_AGENT_API_HANDLER_LIST
     from handlers.modules        import CIMS_MODULES_HANDLER_LIST
+    from handlers.ha_groups      import CIMS_HA_GROUPS_HANDLER_LIST
     from services.flow_logger    import FLOW_HANDLER_LIST
 
     admin_server = None
@@ -286,6 +287,11 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_MODULES_HANDLER_LIST
+        ])
+        # HA 그룹 — 노드 묶음 (A/S / All Active) 관리 (admin JWT)
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_HA_GROUPS_HANDLER_LIST
         ])
         # P10: Agent 전용 API (agent token 인증, JWT 우회)
         admin_server.add_dynamic_rules([

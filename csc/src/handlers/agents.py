@@ -1042,6 +1042,38 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     conn = _get_db(config)
     try:
         with conn.cursor() as cur:
+            # HA capability 검증: 패키지 ha_capability 와 agent 가 속한 ha_group.mode mismatch 시 reject.
+            # - active_standby 모듈은 A/S 그룹의 agent 에만
+            # - all_active   모듈은 AA   그룹의 agent 에만
+            # - standalone   모듈은 어느 그룹 (또는 그룹 없음) 에든 OK
+            cur.execute(
+                "SELECT meta_json FROM cims_package WHERE id=%s", (package_id,)
+            )
+            pkg = cur.fetchone()
+            pkg_meta = {}
+            if pkg and pkg.get("meta_json"):
+                try: pkg_meta = json.loads(pkg["meta_json"])
+                except Exception: pkg_meta = {}
+            ha_cap = (pkg_meta.get("ha_capability") or "standalone").lower()
+            cur.execute(
+                "SELECT g.mode FROM ha_group_members m "
+                "JOIN ha_groups g ON g.id=m.group_id WHERE m.agent_id=%s", (agent_id,)
+            )
+            grp = cur.fetchone()
+            grp_mode = grp.get("mode") if grp else None
+            if ha_cap != "standalone":
+                if grp_mode is None:
+                    return HandlerResult(status=400, body={
+                        "error": "ha_mismatch",
+                        "detail": f"패키지는 ha_capability={ha_cap} 인데 agent 가 ha_group 미정의 — "
+                                  f"먼저 HaGroupsPage 에서 그룹에 추가하세요"
+                    }, media_type="application/json")
+                if ha_cap != grp_mode:
+                    return HandlerResult(status=400, body={
+                        "error": "ha_mismatch",
+                        "detail": f"패키지 ha_capability={ha_cap} 가 agent 그룹 mode={grp_mode} 와 불일치"
+                    }, media_type="application/json")
+
             cur.execute(
                 "INSERT INTO agent_deployment (agent_id, package_id, instance_id, "
                 "                              process_name, service_functions, "
