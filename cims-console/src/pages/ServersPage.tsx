@@ -231,6 +231,16 @@ function ServerRow({ agent: a, active, depCount, onClick }: {
         {agentDisplayName(a.name) !== a.name && (
           <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({a.name})</span>
         )}
+        {a.ha_group && (
+          <span title={`HA 그룹: ${a.ha_group.name} (mode=${a.ha_group.mode}, role=${a.ha_group.role})`}
+                style={{
+                  marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 3,
+                  background: a.ha_group.mode === 'active_standby' ? '#3498db' : '#27ae60',
+                  color: '#fff', fontWeight: 'normal',
+                }}>
+            {a.ha_group.mode === 'active_standby' ? 'A/S' : 'AA'}·{a.ha_group.name}·{a.ha_group.role === 'master' ? 'M' : 'B'}
+          </span>
+        )}
       </td>
       <td style={{ fontSize: 12, color: '#555' }}>{a.ip_address || '—'}</td>
       <td>
@@ -598,6 +608,22 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   const processOptions = svcMeta?.processes || []
   const functionOptions = svcMeta?.functions || []
 
+  // HA capability 검증 — backend (csc/handlers/agents.py:_create_deployment) 와
+  // 동일 정책: ha_group 정의 시 strict, 미정의 시 모두 허용.
+  // moduleNames 중 어느 모듈이 mismatch 인지 사전 표시.
+  function moduleMismatch(modName: string): string | null {
+    const grp = agent.ha_group
+    if (!grp) return null  // ha_group 미정의 → 모두 허용
+    const list = pkgsByModule.get(modName) || []
+    const cap = (list[0]?.meta?.ha_capability) || 'standalone'
+    if (cap === 'standalone') return null
+    if (cap !== grp.mode) {
+      return `이 agent 는 HA 그룹 "${grp.name}" (mode=${grp.mode}) — 이 모듈은 ${cap} 만 가능`
+    }
+    return null
+  }
+  const selectedMismatch = selectedPkg ? moduleMismatch(selectedPkg.name) : null
+
   // 모듈 바뀌면 버전/process/functions 리셋
   useEffect(() => {
     if (!moduleName) { setPkgId(0); setProcessName(''); setFunctions(new Set()); return }
@@ -641,14 +667,27 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
 
   return (
     <Modal title={`${agent.name} — 모듈 추가`} onClose={onClose} width={600}>
+      {agent.ha_group && (
+        <div style={{ fontSize: 12, color: '#555', marginBottom: 8,
+                      padding: '6px 10px', background: '#f5f9ff', border: '1px solid #d0e3ff',
+                      borderRadius: 4 }}>
+          이 agent 는 HA 그룹 <b>{agent.ha_group.name}</b> (mode={agent.ha_group.mode}, role={agent.ha_group.role}) 소속 —
+          {' '}<b>{agent.ha_group.mode}</b> 가능 모듈 + standalone 모듈만 install 가능
+        </div>
+      )}
       <div className="form-grid">
         <label>1. 모듈 *</label>
         <select className="form-input" value={moduleName}
           onChange={e => setModuleName(e.target.value)}>
           <option value="">(선택)</option>
-          {moduleNames.map(m => (
-            <option key={m} value={m}>{m} ({pkgsByModule.get(m)!.length}개 버전)</option>
-          ))}
+          {moduleNames.map(m => {
+            const mm = moduleMismatch(m)
+            return (
+              <option key={m} value={m} disabled={!!mm}>
+                {m} ({pkgsByModule.get(m)!.length}개 버전){mm ? ` — ${mm}` : ''}
+              </option>
+            )
+          })}
         </select>
 
         <label>2. 버전 *</label>
@@ -706,9 +745,17 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         ℹ 추가 후 <b>pending</b> 상태로 생성됩니다. 설정을 확인한 뒤
         <b>설치</b> → <b>Start</b> 순으로 진행하세요.
       </div>
+      {selectedMismatch && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#c00',
+                      padding: '6px 10px', background: '#fff5f5', border: '1px solid #ffcaca',
+                      borderRadius: 4 }}>
+          ⚠ {selectedMismatch} — install 시 backend 400 reject
+        </div>
+      )}
       <div className="modal-footer" style={{ marginTop: 16 }}>
         <button className="btn btn--outline" onClick={onClose}>취소</button>
-        <button className="btn btn--primary" onClick={create}>추가</button>
+        <button className="btn btn--primary" onClick={create}
+                disabled={!!selectedMismatch}>추가</button>
       </div>
     </Modal>
   )

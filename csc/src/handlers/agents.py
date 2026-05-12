@@ -122,7 +122,7 @@ def _actor(handler_args: HandlerArgs) -> str:
 #  Agents
 # ════════════════════════════════════════════════════════════
 
-def _agent_to_json(r: dict) -> dict:
+def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
     return {
         "id": r["id"],
         "name": r["name"],
@@ -142,6 +142,8 @@ def _agent_to_json(r: dict) -> dict:
         "create_time": _dt(r["create_time"]),
         # 보안: enrollment_token 은 생성 직후에만 반환. 여기서는 masked
         "has_pending_enrollment": bool(r.get("enrollment_token")),
+        # HA 그룹 정보 — 미정의 시 null
+        "ha_group": ha_group,
     }
 
 
@@ -176,15 +178,32 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
 
+def _ha_group_map_for_agents(cur) -> dict:
+    """모든 agent 의 ha_group {id,name,mode,role} 매핑. dict[agent_id] = {...}"""
+    cur.execute(
+        "SELECT m.agent_id, g.id AS gid, g.name AS gname, g.mode AS gmode, "
+        "       m.role AS grole "
+        "FROM ha_group_members m JOIN ha_groups g ON g.id=m.group_id"
+    )
+    out = {}
+    for r in cur.fetchall():
+        out[r["agent_id"]] = {
+            "id": r["gid"], "name": r["gname"], "mode": r["gmode"], "role": r["grole"],
+        }
+    return out
+
+
 async def _list_agents(config):
     conn = _get_db(config)
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM cims_agent ORDER BY id")
             rows = cur.fetchall()
+            ha_map = _ha_group_map_for_agents(cur)
     finally:
         conn.close()
-    return HandlerResult(status=200, body={"items": [_agent_to_json(r) for r in rows]},
+    return HandlerResult(status=200,
+                         body={"items": [_agent_to_json(r, ha_group=ha_map.get(r["id"])) for r in rows]},
                          media_type="application/json")
 
 
@@ -194,11 +213,14 @@ async def _get_agent(aid: int, config):
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM cims_agent WHERE id=%s", (aid,))
             r = cur.fetchone()
+            ha_map = _ha_group_map_for_agents(cur) if r else {}
     finally:
         conn.close()
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
-    return HandlerResult(status=200, body=_agent_to_json(r), media_type="application/json")
+    return HandlerResult(status=200,
+                         body=_agent_to_json(r, ha_group=ha_map.get(aid)),
+                         media_type="application/json")
 
 
 async def _create_agent(handler_args: HandlerArgs, config):

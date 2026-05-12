@@ -81,6 +81,13 @@ function uploadMultipart<T>(path: string, file: File, force: boolean,
 }
 
 // ──────────────── Agent ────────────────
+export interface AgentHaGroupRef {
+  id: number
+  name: string
+  mode: 'active_standby' | 'all_active'
+  role: 'master' | 'backup'
+}
+
 export interface Agent {
   id: number
   name: string
@@ -99,6 +106,7 @@ export interface Agent {
   note: string | null
   create_time: string | null
   has_pending_enrollment: boolean
+  ha_group: AgentHaGroupRef | null
 }
 
 export interface AgentCreateResult extends Agent {
@@ -123,6 +131,7 @@ export interface PackageMeta {
   build_date?: string
   git_sha?: string
   git_branch?: string
+  ha_capability?: 'active_standby' | 'all_active' | 'standalone'
   service?: {
     functions?: Array<{ name: string; desc?: string }>
     processes?: string[]
