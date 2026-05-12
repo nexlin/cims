@@ -450,7 +450,7 @@ def step_05_admin_login(ctx: VerifyContext) -> ItemResult:
         from ...common.csc_config import set_mtls_enabled
         toggled = set_mtls_enabled(ctx.dist_dir, True)
         if toggled:
-            shell.run_cims_sh(ctx.repo_root, "restart", "tb-csc", timeout=20)
+            shell.run_cims_svc(ctx.repo_root, "restart", "tb-csc", timeout=20)
             import time as _t
             _t.sleep(2)  # tb-csc LISTEN 안정화
 

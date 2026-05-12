@@ -16,7 +16,7 @@ from ... import shell
     execution_order=30,
 )
 def start(ctx: VerifyContext) -> ItemResult:
-    rc, out, err = shell.run_cims_sh(ctx.repo_root, "start", timeout=120)
+    rc, out, err = shell.run_cims_svc(ctx.repo_root, "start", timeout=120)
     tail = "\n".join((out + err).splitlines()[-40:])
     ctx.w("## S3-START — start all")
     ctx.w("```")

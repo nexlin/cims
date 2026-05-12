@@ -33,9 +33,24 @@ def run(cmd: list, cwd: Optional[str] = None, timeout: int = 600,
 
 def run_cims_sh(repo_root: str, *args: str, capture: bool = True,
                 timeout: int = 600) -> tuple:
-    """cims.sh 호출. (rc, stdout, stderr) 반환."""
+    """cims.sh 호출 — 개발 단계 명령 (build/configure/reset/pkg/sync 등) 전용.
+    운영 명령 (start/stop/restart/status/log) 은 run_cims_svc 사용."""
     cims_sh = os.path.join(repo_root, "cims.sh")
     cmd = ["/bin/bash", cims_sh] + list(args)
+    return run(cmd, cwd=repo_root, capture=capture, timeout=timeout)
+
+
+def run_cims_svc(repo_root: str, *args: str, capture: bool = True,
+                 timeout: int = 600) -> tuple:
+    """agent/bin/cims-svc 호출 — 운영 lifecycle 명령 (start/stop/restart/status/log).
+    repo_root 의 build/dist/agent/bin/cims-svc 를 우선 시도, 없으면 소스 트리
+    agent/bin/cims-svc fallback."""
+    candidates = [
+        os.path.join(repo_root, "build", "dist", "agent", "bin", "cims-svc"),
+        os.path.join(repo_root, "agent", "bin", "cims-svc"),
+    ]
+    cims_svc = next((c for c in candidates if os.path.isfile(c)), candidates[0])
+    cmd = ["/bin/bash", cims_svc] + list(args)
     return run(cmd, cwd=repo_root, capture=capture, timeout=timeout)
 
 

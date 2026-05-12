@@ -1653,14 +1653,30 @@ cmd_sync() {
         n_changed=$((n_changed+1))
     fi
 
-    # ── Agent 바이너리 + install 스크립트 ────────────────────────
+    # ── Agent 바이너리 + 운영 도구 (bin/lib/keepalived/systemd) ──
     if [[ $did_agent -eq 1 ]]; then
         mkdir -p "$DIST_DIR/agent"
         cp -f "$SCRIPT_DIR/agent/cims_agent.py"     "$DIST_DIR/agent/"
         cp -f "$SCRIPT_DIR/agent/install-agent.sh"  "$DIST_DIR/agent/"
         chmod +x "$DIST_DIR/agent/install-agent.sh"
         [[ -f "$SCRIPT_DIR/agent/pkg.json" ]] && cp -f "$SCRIPT_DIR/agent/pkg.json" "$DIST_DIR/agent/"
-        ok "agent ← $SCRIPT_DIR/agent"
+        # 운영 도구 (cims-svc / cims-ha / cims-health / cims-notify + lifecycle.sh / ha.sh)
+        if command -v rsync >/dev/null 2>&1; then
+            for sub in bin lib keepalived systemd; do
+                [[ -d "$SCRIPT_DIR/agent/$sub" ]] && \
+                    rsync -a --delete --exclude='out/' --exclude='ha.json' \
+                          "$SCRIPT_DIR/agent/$sub/" "$DIST_DIR/agent/$sub/"
+            done
+        else
+            for sub in bin lib keepalived systemd; do
+                [[ -d "$SCRIPT_DIR/agent/$sub" ]] && \
+                    { rm -rf "$DIST_DIR/agent/$sub"; cp -r "$SCRIPT_DIR/agent/$sub" "$DIST_DIR/agent/$sub"; }
+            done
+        fi
+        chmod +x "$DIST_DIR/agent/bin/"* 2>/dev/null || true
+        chmod +x "$DIST_DIR/agent/lib/"*.sh 2>/dev/null || true
+        chmod +x "$DIST_DIR/agent/keepalived/"*.sh 2>/dev/null || true
+        ok "agent (+ bin/lib/keepalived/systemd) ← $SCRIPT_DIR/agent"
         n_changed=$((n_changed+1))
     fi
 

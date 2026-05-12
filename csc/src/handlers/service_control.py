@@ -7,9 +7,10 @@ CSC Service Control API.
   POST /api/v1/services/{name}/restart — 재기동
 
 드라이버:
-  - cims_sh (기본): /dist 의 cims.sh 를 subprocess 로 실행
-  - systemd: systemctl 호출 (환경변수 CIMS_SERVICE_DRIVER=systemd + sudoers 설정 필요)
-  - 환경변수 CIMS_SERVICE_DRIVER 로 선택, 없으면 cims_sh
+  - cims_svc (기본): /dist/agent/bin/cims-svc 를 subprocess 로 실행 (운영 도구)
+  - systemd: systemctl 호출 (환경변수 CIMS_SERVICE_DRIVER=systemd + sudoers 설정 필요).
+    unit 네이밍은 cims@<svc>.service (instantiated)
+  - 환경변수 CIMS_SERVICE_DRIVER 로 선택, 없으면 cims_svc
 
 안전장치:
   - CSC 자체 stop 은 경고 응답 (UI 에서 추가 확인 필수)
@@ -38,26 +39,26 @@ _SERVICE_BASE = "/api/v1/services"
 _ALLOWED = {"cmp", "csp", "cwrtc", "csc", "console", "phone"}
 _ACTIONS = {"start", "stop", "restart"}
 
-# cims.sh 위치 탐색
-def _find_cims_sh() -> Optional[str]:
-    # 우선순위: 환경변수 → /dist/cims.sh (CSC 상대경로) → /usr/local/bin
-    env_path = os.environ.get("CIMS_SH_PATH")
+# cims-svc 위치 탐색 (agent/bin/cims-svc — 운영 lifecycle 도구)
+def _find_cims_svc() -> Optional[str]:
+    # 우선순위: 환경변수 → /dist/agent/bin/cims-svc (CSC 상대) → 표준 위치
+    env_path = os.environ.get("CIMS_SVC_PATH")
     if env_path and os.path.isfile(env_path):
         return env_path
-    # CSC 소스에서 build/dist 찾기
+    # CSC 소스에서 dist 루트 찾아 agent/bin/cims-svc 검색
     here = Path(__file__).resolve()
     for p in here.parents:
-        cand = p / "cims.sh"
+        cand = p / "agent" / "bin" / "cims-svc"
         if cand.is_file(): return str(cand)
-    # /home/nex/work/cims/build/dist/cims.sh 같은 표준 위치
-    for cand in ("/home/nex/work/cims/build/dist/cims.sh",
-                 "/opt/cims/cims.sh", "/usr/local/bin/cims.sh"):
+    # 표준 운영 / 개발 위치
+    for cand in ("/home/nex/work/cims/build/dist/agent/bin/cims-svc",
+                 "/opt/cims/agent/bin/cims-svc", "/usr/local/bin/cims-svc"):
         if os.path.isfile(cand): return cand
     return None
 
 
 def _driver() -> str:
-    return os.environ.get("CIMS_SERVICE_DRIVER", "cims_sh").lower()
+    return os.environ.get("CIMS_SERVICE_DRIVER", "cims_svc").lower()
 
 
 # TB-CSC 가 자기 config (csc-tb.json, port 4419) 로 띄워진 상태에서 subprocess 가
@@ -88,11 +89,11 @@ async def _run_cmd(argv: list, cwd: Optional[str] = None, timeout: int = 30,
     return (proc.returncode, stdout or b"", stderr or b"")
 
 
-async def _invoke_cims_sh(action: str, service: str) -> HandlerResult:
-    script = _find_cims_sh()
+async def _invoke_cims_svc(action: str, service: str) -> HandlerResult:
+    script = _find_cims_svc()
     if not script:
         return HandlerResult(status=500,
-            body={"error": "cims_sh_not_found", "hint": "Set CIMS_SH_PATH env var"},
+            body={"error": "cims_svc_not_found", "hint": "Set CIMS_SVC_PATH env var"},
             media_type="application/json")
     cwd = str(Path(script).parent)
     argv = ["/bin/bash", script, action, service]
@@ -100,7 +101,7 @@ async def _invoke_cims_sh(action: str, service: str) -> HandlerResult:
     return HandlerResult(
         status=200 if rc == 0 else 500,
         body={
-            "driver": "cims_sh",
+            "driver": "cims_svc",
             "service": service, "action": action,
             "returncode": rc,
             "stdout": out.decode(errors="replace")[-4000:],
@@ -111,8 +112,8 @@ async def _invoke_cims_sh(action: str, service: str) -> HandlerResult:
 
 
 async def _invoke_systemd(action: str, service: str) -> HandlerResult:
-    # systemd unit 네이밍 규약: cims-<name>.service
-    unit = f"cims-{service}.service"
+    # systemd unit 네이밍 규약: cims@<svc>.service (instantiated unit, Phase 1.F+)
+    unit = f"cims@{service}.service"
     argv = ["sudo", "-n", "systemctl", action, unit]
     rc, out, err = await _run_cmd(argv, timeout=30)
     return HandlerResult(
@@ -131,7 +132,7 @@ async def _invoke_systemd(action: str, service: str) -> HandlerResult:
 async def _invoke(action: str, service: str) -> HandlerResult:
     drv = _driver()
     if drv == "systemd": return await _invoke_systemd(action, service)
-    return await _invoke_cims_sh(action, service)
+    return await _invoke_cims_svc(action, service)
 
 
 def _actor_from_headers(headers: dict) -> str:
@@ -156,10 +157,10 @@ async def handle_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     if len(parts) == 0:
         if method != "GET":
             return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
-        # 전체 상태 — cims.sh status 호출
-        script = _find_cims_sh()
+        # 전체 상태 — agent/bin/cims-svc status 호출
+        script = _find_cims_svc()
         if not script:
-            return HandlerResult(status=500, body={"error": "cims_sh_not_found"}, media_type="application/json")
+            return HandlerResult(status=500, body={"error": "cims_svc_not_found"}, media_type="application/json")
         rc, out, err = await _run_cmd(["/bin/bash", script, "status"], cwd=str(Path(script).parent), timeout=10, env=_sanitized_env())
         return HandlerResult(status=200, body={
             "driver": _driver(),
@@ -181,7 +182,7 @@ async def handle_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     if method != "POST":
         return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
-    # CSC 자기 stop 경고 (restart 는 허용 — cims.sh 가 감싸서 처리)
+    # CSC 자기 stop 경고 (restart 는 허용 — cims-svc 가 감싸서 처리)
     if service == "csc" and action == "stop":
         logger.log_warning("ServiceControl: CSC self-stop requested — UI will disconnect immediately")
 

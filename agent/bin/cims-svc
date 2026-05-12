@@ -19,15 +19,26 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # DIST_DIR 결정 (cims.sh 와 동일 동작):
-# - 배포본 (agent/ 부모에 CMakeLists.txt 없음): DIST_DIR = agent 의 부모 (dist 루트)
-# - 개발 (소스 트리; agent/ 부모에 CMakeLists.txt 있음): DIST_DIR = <repo>/build/dist
-_PARENT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-if [[ -f "$_PARENT/CMakeLists.txt" ]]; then
-    DIST_DIR="$_PARENT/build/dist"
-    SRC_CONSOLE="$_PARENT/cims-console"
-    SRC_PHONE="$_PARENT/cims-phone"
+# - 소스 트리에서 직접 (agent/bin/cims-svc, <repo>/CMakeLists.txt 있음):
+#     DIST_DIR=<repo>/build/dist, SRC_CONSOLE/PHONE=<repo>/cims-{console,phone}
+# - 소스 트리의 dist (build/dist/agent/bin/cims-svc, <repo>/CMakeLists.txt 있음):
+#     DIST_DIR=build/dist, SRC_CONSOLE/PHONE=<repo>/cims-{console,phone}  (cims.sh build 한 직후 dev 검증)
+# - 배포본 (어디에도 CMakeLists.txt 없음): DIST_DIR=agent 부모, SRC_CONSOLE=""
+_AGENT_PARENT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+if [[ -f "$_AGENT_PARENT/CMakeLists.txt" ]]; then
+    # case 1 — 소스 트리에서 직접
+    DIST_DIR="$_AGENT_PARENT/build/dist"
+    SRC_CONSOLE="$_AGENT_PARENT/cims-console"
+    SRC_PHONE="$_AGENT_PARENT/cims-phone"
+elif [[ -f "$_AGENT_PARENT/../../CMakeLists.txt" ]]; then
+    # case 2 — 소스 트리의 build/dist 안 (개발 회차)
+    DIST_DIR="$_AGENT_PARENT"
+    _REPO="$(cd "$_AGENT_PARENT/../.." && pwd)"
+    SRC_CONSOLE="$_REPO/cims-console"
+    SRC_PHONE="$_REPO/cims-phone"
 else
-    DIST_DIR="$_PARENT"
+    # case 3 — 배포본
+    DIST_DIR="$_AGENT_PARENT"
     SRC_CONSOLE=""
     SRC_PHONE=""
 fi
