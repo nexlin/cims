@@ -18,29 +18,35 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# DIST_DIR 결정 (cims.sh 와 동일 동작):
-# - 소스 트리에서 직접 (agent/bin/cims-svc, <repo>/CMakeLists.txt 있음):
-#     DIST_DIR=<repo>/build/dist, SRC_CONSOLE/PHONE=<repo>/cims-{console,phone}
-# - 소스 트리의 dist (build/dist/agent/bin/cims-svc, <repo>/CMakeLists.txt 있음):
-#     DIST_DIR=build/dist, SRC_CONSOLE/PHONE=<repo>/cims-{console,phone}  (cims.sh build 한 직후 dev 검증)
-# - 배포본 (어디에도 CMakeLists.txt 없음): DIST_DIR=agent 부모, SRC_CONSOLE=""
-_AGENT_PARENT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-if [[ -f "$_AGENT_PARENT/CMakeLists.txt" ]]; then
-    # case 1 — 소스 트리에서 직접
-    DIST_DIR="$_AGENT_PARENT/build/dist"
-    SRC_CONSOLE="$_AGENT_PARENT/cims-console"
-    SRC_PHONE="$_AGENT_PARENT/cims-phone"
-elif [[ -f "$_AGENT_PARENT/../../CMakeLists.txt" ]]; then
-    # case 2 — 소스 트리의 build/dist 안 (개발 회차)
-    DIST_DIR="$_AGENT_PARENT"
-    _REPO="$(cd "$_AGENT_PARENT/../.." && pwd)"
-    SRC_CONSOLE="$_REPO/cims-console"
-    SRC_PHONE="$_REPO/cims-phone"
+
+# DIST_DIR 결정 우선순위:
+#   1) 환경변수 CIMS_DIST_DIR (cims_agent 등 외부 caller 의 명시적 install_path)
+#   2) 소스 트리 직접 (agent/bin/cims-svc, <repo>/CMakeLists.txt) → build/dist
+#   3) 소스 트리의 build/dist (build/dist/agent/bin/cims-svc, <repo>/CMakeLists.txt) → build/dist
+#   4) 배포본 (어디에도 CMakeLists.txt 없음) → agent 부모
+if [[ -n "${CIMS_DIST_DIR:-}" ]]; then
+    DIST_DIR="$CIMS_DIST_DIR"
+    SRC_CONSOLE="${CIMS_SRC_CONSOLE:-}"
+    SRC_PHONE="${CIMS_SRC_PHONE:-}"
 else
-    # case 3 — 배포본
-    DIST_DIR="$_AGENT_PARENT"
-    SRC_CONSOLE=""
-    SRC_PHONE=""
+    _AGENT_PARENT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+    if [[ -f "$_AGENT_PARENT/CMakeLists.txt" ]]; then
+        # case 1 — 소스 트리에서 직접
+        DIST_DIR="$_AGENT_PARENT/build/dist"
+        SRC_CONSOLE="$_AGENT_PARENT/cims-console"
+        SRC_PHONE="$_AGENT_PARENT/cims-phone"
+    elif [[ -f "$_AGENT_PARENT/../../CMakeLists.txt" ]]; then
+        # case 2 — 소스 트리의 build/dist 안 (개발 회차)
+        DIST_DIR="$_AGENT_PARENT"
+        _REPO="$(cd "$_AGENT_PARENT/../.." && pwd)"
+        SRC_CONSOLE="$_REPO/cims-console"
+        SRC_PHONE="$_REPO/cims-phone"
+    else
+        # case 3 — 배포본
+        DIST_DIR="$_AGENT_PARENT"
+        SRC_CONSOLE=""
+        SRC_PHONE=""
+    fi
 fi
 
 PID_DIR="$DIST_DIR/run"

@@ -434,24 +434,29 @@ def job_update_config(params: dict) -> tuple:
 
 
 def job_process_control(params: dict, job_type: str) -> tuple:
-    """start/stop/restart — install_path/cims.sh 을 이용해 수행."""
+    """start/stop/restart — install_path/agent/bin/cims-svc 를 이용해 수행
+    (Phase 1.B+, cims.sh 운영 명령 제거).
+    cims-svc 에 CIMS_DIST_DIR=install_path 환경변수 전달 → cims-svc 가 install_path
+    기준으로 DIST_DIR 결정 (install_path 의 csc/console 시작).
+    """
     install_path = _resolve_install_path(params)
     svc = (params.get("process_name") or params.get("service_kind") or "").lower()
-    script = os.path.join(install_path, "cims.sh")
-    if not os.path.isfile(script):
-        # 후보: /home/nex/work/cims/build/dist/cims.sh (개발환경)
-        for cand in ("/home/nex/work/cims/build/dist/cims.sh",):
-            if os.path.isfile(cand):
-                script = cand
-                break
-    if not os.path.isfile(script):
-        return 1, "", f"cims.sh not found (install_path={install_path})"
+    candidates = [
+        os.path.join(install_path, "agent", "bin", "cims-svc"),
+        "/home/nex/work/cims/build/dist/agent/bin/cims-svc",
+        "/opt/cims/agent/bin/cims-svc",
+    ]
+    script = next((c for c in candidates if os.path.isfile(c)), None)
+    if not script:
+        return 1, "", f"cims-svc not found (install_path={install_path})"
 
     argv = [script, job_type]
     if svc: argv.append(svc)
+    env = dict(os.environ)
+    env["CIMS_DIST_DIR"] = install_path
     try:
         res = subprocess.run(argv, capture_output=True, text=True, timeout=60,
-                              cwd=os.path.dirname(script))
+                              cwd=install_path, env=env)
         return res.returncode, res.stdout[-4000:], res.stderr[-2000:]
     except Exception as e:
         return 2, "", f"exec failed: {e}"
