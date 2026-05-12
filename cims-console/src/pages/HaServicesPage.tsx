@@ -721,7 +721,7 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
   title: string
   interfaces: NetIface[]
   rows: ServiceIpRow[]
-  slots: IpSlot[]
+  slots: IpSlot[]                 // 참고용 (운영자에게 hint 표시), select 아님
   onChange: (rows: ServiceIpRow[]) => void
 }) {
   // 인터페이스 list 기준으로 row 정렬 — 없는 row 는 default 로 자동 생성
@@ -731,8 +731,7 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
       iface: iface.name, ip: iface.ip, mask: iface.mask, slot: '', status: 'unknown',
     }
   })
-  const slotNames = slots.map(s => s.name)
-  const usedSlots = new Set(ifaceRows.map(r => r.slot).filter(Boolean))
+  const slotHints = slots.map(s => s.name).join(' / ')
 
   const updateRow = (iface: string, patch: Partial<ServiceIpRow>) => {
     const next = ifaceRows.map(r => r.iface === iface ? { ...r, ...patch } : r)
@@ -814,17 +813,11 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
                   </span>
                 </td>
                 <td style={{ padding: '4px 8px' }}>
-                  <select value={r.slot} onChange={e => updateRow(r.iface, { slot: e.target.value })}
-                          style={{ width: '95%', padding: '2px 4px', fontSize: 12,
-                                   color: r.slot ? '#333' : '#888' }}>
-                    <option value="">(용도 없음)</option>
-                    {slotNames.map(name => (
-                      <option key={name} value={name}
-                              disabled={usedSlots.has(name) && r.slot !== name}>
-                        {name}{usedSlots.has(name) && r.slot !== name ? ' (사용중)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <input value={r.slot}
+                         onChange={e => updateRow(r.iface, { slot: e.target.value })}
+                         placeholder="(용도 입력)"
+                         style={{ width: '95%', padding: '2px 6px', fontSize: 12,
+                                  border: '1px solid #ddd', borderRadius: 3 }} />
                 </td>
                 <td style={{ padding: '4px 8px' }}><StatusBadge status={r.status} /></td>
                 <td style={{ padding: '4px 8px' }}>
@@ -843,9 +836,9 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
           })}
         </tbody>
       </table>
-      {slots.length === 0 && (
-        <div style={{ marginTop: 8, color: '#aaa', fontSize: 11 }}>
-          (패키지 미설치 — 용도 select 비어있음)
+      {slots.length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 11, color: '#888' }}>
+          ℹ 참고 — 설치된 패키지의 권장 용도: <code>{slotHints}</code> (자유 입력 가능)
         </div>
       )}
     </div>
