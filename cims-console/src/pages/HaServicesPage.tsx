@@ -566,8 +566,8 @@ function ServiceTreeRows(p: ServiceTreeProps) {
 
       {/* VIP expand panel (서비스 행 다음) */}
       {p.vipExpanded && p.vipSlots.length > 0 && (
-        <tr style={{ background: '#f8f9fb' }}>
-          <td colSpan={7} style={{ padding: '10px 16px 12px 60px' }}>
+        <tr>
+          <td colSpan={7} style={{ padding: '8px 16px 12px 60px' }}>
             <VipPanel
               title="VIP (서비스 단위 — A/S fail-over 공유. 멤버 별 iface 분리 매핑)"
               svc={svc}
@@ -698,8 +698,8 @@ function ServerRows(p: ServerRowsProps) {
       </tr>
 
       {p.svcIpExpanded && enrollDone && p.serviceSlots.length > 0 && (
-        <tr style={{ background: '#f8f9fb' }}>
-          <td colSpan={7} style={{ padding: '10px 16px 12px 76px' }}>
+        <tr>
+          <td colSpan={7} style={{ padding: '8px 16px 12px 60px' }}>
             <ServiceIpPanel
               title={`${srv.name} 의 인터페이스 IP 매핑`}
               interfaces={srv.interfaces}
@@ -762,7 +762,10 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
   }
 
   return (
-    <div style={{ border: '1px solid #d8e0ea', borderRadius: 6, padding: 12, background: '#fff' }}>
+    <div style={{
+      borderLeft: '3px solid #b8d4f5', borderRadius: 4, padding: '10px 12px',
+      background: '#fafcfe',
+    }}>
       <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 8 }}>
         {title}
         <span style={{ marginLeft: 8, fontSize: 11, color: '#888', fontWeight: 'normal' }}>
@@ -906,7 +909,10 @@ function VipPanel({ title, svc, vrid, onChange }: {
   }
 
   return (
-    <div style={{ border: '1px solid #d8e0ea', borderRadius: 6, padding: 12, background: '#fff' }}>
+    <div style={{
+      borderLeft: '3px solid #b8d4f5', borderRadius: 4, padding: '10px 12px',
+      background: '#fafcfe',
+    }}>
       <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 10 }}>
         {title}
         <span style={{ marginLeft: 8, fontSize: 11, color: '#888', fontWeight: 'normal' }}>
