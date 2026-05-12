@@ -24,6 +24,7 @@ import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
 import HaGroupsPage from './pages/HaGroupsPage'
+import HaServerWizardPage from './pages/HaServerWizardPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
@@ -121,6 +122,7 @@ export const SECTIONS: RouteSection[] = [
     basePath: '/deploy',
     defaultPath: '/deploy/packages',
     routes: [
+      { path: '/deploy/wizard',    title: '서버 + HA 설정', component: HaServerWizardPage, adminOnly: true },
       { path: '/deploy/packages',  title: '패키지', component: PackagesPage, adminOnly: true },
       { path: '/deploy/servers',   title: '서버',   component: ServersPage,  adminOnly: true },
       { path: '/deploy/ha-groups', title: 'HA 그룹', component: HaGroupsPage, adminOnly: true },
