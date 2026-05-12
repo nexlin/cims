@@ -27,6 +27,7 @@
 #include "Directory.h"
 #include "Log.h"
 #include "MemoryDebug.h"
+#include "RedisStore.h"
 #include "SimpleJson.h"
 #include "SipParserDefine.h"
 #include "SipServerSetup.h"
@@ -222,6 +223,14 @@ bool CspUserMap::registerUser( std::string strUserId, std::string strPassWord ) 
     if ( gclsDbManager.IsConnected() ) {
         gclsDbManager.UpdateRegisterTime( strUserId );
     }
+
+    // Phase 1.D-1 — Redis register replication (cold-mode 면 no-op)
+    if ( gclsRedisStore.IsConnected() ) {
+        char szJson[256];
+        snprintf( szJson, sizeof( szJson ), "{\"user_id\":\"%s\",\"register_time\":%ld}", strUserId.c_str(),
+                  (long)user.m_iRegisterTime );
+        gclsRedisStore.SetBinding( strUserId, szJson, 3600 );
+    }
     return true;
 }
 
@@ -245,6 +254,11 @@ bool CspUserMap::unregisterUser( std::string strUserId ) {
     // logout_time 동기화 (DB 연결된 경우 항상)
     if ( gclsDbManager.IsConnected() ) {
         gclsDbManager.UpdateLogoutTime( strUserId );
+    }
+
+    // Phase 1.D-1 — Redis 에서 binding 삭제 (cold-mode 면 no-op)
+    if ( gclsRedisStore.IsConnected() ) {
+        gclsRedisStore.DelBinding( strUserId );
     }
     return true;
 }
