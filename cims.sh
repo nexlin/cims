@@ -1446,11 +1446,11 @@ ${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
                         install job 폴링 → 설치 파일 검증 → verify_reports/<ts>_phase3.md
                         (v2 예정: start/health/stop. v3 예정: 4시나리오 자동 실행)
 
-${BOLD}HA 이중화 (keepalived, 노드별 ha.json):${NC}
+${BOLD}HA 이중화 (keepalived + systemd unit, 노드별 ha.json):${NC}
   ha install                  keepalived 패키지 설치 (sudo apt)
-  ha config                   agent/keepalived/ha.json + 템플릿 → out/keepalived.conf 생성 (dry-run)
-  ha check                    생성된 config 의 keepalived -t syntax 검증
-  ha apply                    out/keepalived.conf → /etc/keepalived/ 적용 + systemctl restart
+  ha config                   ha.json + 템플릿 → out/{keepalived.conf, cims-{csc,csp,psp}.service} 생성
+  ha check                    keepalived -t syntax 검증
+  ha apply                    out/* → /etc/keepalived/ + /etc/systemd/system/ + daemon-reload + restart
   ha start|stop|status        systemctl 래퍼
 
 ${BOLD}로그:${NC}
@@ -2092,10 +2092,11 @@ cmd_restart() {
     cmd_start "$@"
 }
 
-# ── HA (keepalived) ────────────────────────────────────────────
+# ── HA (keepalived + systemd units) ─────────────────────────────
 HA_DIR="$SCRIPT_DIR/agent/keepalived"
 HA_OUT="$HA_DIR/out"
 HA_JSON="$HA_DIR/ha.json"
+HA_UNIT_DIR="$SCRIPT_DIR/agent/systemd"
 
 _ha_check_config() {
     if [[ ! -f $HA_JSON ]]; then
@@ -2106,10 +2107,10 @@ _ha_check_config() {
     return 0
 }
 
-_ha_render_service() {
-    # $1 = service slug (csc/csp/psp), $2 = output file
-    local svc="$1" out="$2"
-    local tpl="$HA_DIR/keepalived_${svc}.conf.tpl"
+_ha_render_template() {
+    # $1 = template file (full path), $2 = output file
+    # Substitutes ${VAR} placeholders from ha.json values.
+    local tpl="$1" out="$2"
     [[ ! -f $tpl ]] && { err "템플릿 없음: $tpl"; return 1; }
 
     python3 - "$HA_JSON" "$tpl" "$HA_DIR" > "$out" <<'PY'
@@ -2136,6 +2137,8 @@ mapping = {
     "VIP_MASK":  str(cfg["vip_mask"]),
     "AUTH_PASS": cfg["auth_pass"],
     "HA_DIR":    ha_dir,
+    "CIMS_HOME": cfg.get("cims_home", "/opt/cims"),
+    "CIMS_USER": cfg.get("cims_user", "cims"),
 }
 content = open(tpl_path).read()
 content = re.sub(r'\$\{([A-Z_]+)\}',
@@ -2143,6 +2146,16 @@ content = re.sub(r'\$\{([A-Z_]+)\}',
                  content)
 sys.stdout.write(content)
 PY
+}
+
+_ha_render_service() {
+    # $1 = service slug (csc/csp/psp), $2 = output file (keepalived fragment)
+    _ha_render_template "$HA_DIR/keepalived_${1}.conf.tpl" "$2"
+}
+
+_ha_render_unit() {
+    # $1 = service slug, $2 = output file (systemd unit)
+    _ha_render_template "$HA_UNIT_DIR/cims-${1}.service.tpl" "$2"
 }
 
 _ha_enabled_services() {
@@ -2179,13 +2192,17 @@ cmd_ha() {
             local svc tmp
             tmp=$(mktemp)
             for svc in $svcs; do
-                info "rendering: $svc"
+                info "rendering keepalived: $svc"
                 _ha_render_service "$svc" "$tmp" || { rm -f "$tmp"; return 1; }
                 cat "$tmp" >> "$out"
                 echo "" >> "$out"
+
+                info "rendering systemd unit: cims-${svc}.service"
+                _ha_render_unit "$svc" "$HA_OUT/cims-${svc}.service" \
+                    || { rm -f "$tmp"; return 1; }
             done
             rm -f "$tmp"
-            ok "HA config 생성: $out"
+            ok "HA config 생성: $out + $(ls "$HA_OUT"/cims-*.service 2>/dev/null | wc -l) 개 systemd unit"
             ;;
         check)
             local out="$HA_OUT/keepalived.conf"
@@ -2202,8 +2219,15 @@ cmd_ha() {
             [[ ! -f $out ]] && { err "config 미생성: $out — 먼저 'cims.sh ha config' 실행"; return 1; }
             info "/etc/keepalived/keepalived.conf 적용 — sudo 권한 필요"
             sudo cp "$out" /etc/keepalived/keepalived.conf
+            local unit
+            for unit in "$HA_OUT"/cims-*.service; do
+                [[ -f $unit ]] || continue
+                info "/etc/systemd/system/$(basename "$unit") 적용"
+                sudo cp "$unit" /etc/systemd/system/
+            done
+            sudo systemctl daemon-reload
             sudo systemctl restart keepalived
-            ok "keepalived 재시작 완료"
+            ok "keepalived + systemd unit 적용 완료 (units 는 notify 가 start/stop)"
             ;;
         start)  sudo systemctl start  keepalived ;;
         stop)   sudo systemctl stop   keepalived ;;
@@ -2213,14 +2237,15 @@ cmd_ha() {
 사용법: cims.sh ha <subcommand>
 
   install         keepalived 패키지 설치 (sudo apt)
-  config          ha.json + 템플릿 → out/keepalived.conf 생성 (dry-run, /etc 미접근)
-  check           생성된 config 의 keepalived -t syntax 검증
-  apply           out/keepalived.conf → /etc/keepalived/ 복사 + systemctl restart
+  config          ha.json + 템플릿 → out/{keepalived.conf, cims-{csc,csp,psp}.service} 생성 (dry-run)
+  check           생성된 keepalived.conf 의 keepalived -t syntax 검증
+  apply           out/* → /etc/keepalived/ + /etc/systemd/system/ 적용 + daemon-reload + keepalived 재시작
   start|stop      systemctl start|stop keepalived
   status          systemctl status keepalived
 
 설정 파일: $HA_JSON
   예시:        $HA_DIR/ha.json.example
+  systemd:     $HA_UNIT_DIR/cims-{csc,csp,psp}.service.tpl
 EOF
             ;;
     esac

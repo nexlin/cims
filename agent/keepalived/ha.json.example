@@ -23,6 +23,9 @@
   "psp_bind_ip": "",
   "ha_log_dir":  "/var/log/cims-ha",
 
+  "cims_home": "/opt/cims",
+  "cims_user": "cims",
+
   "services": {
     "csc": { "enabled": true, "port": 4420 },
     "csp": { "enabled": true, "port": 5060 },

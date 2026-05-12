@@ -1,7 +1,7 @@
 #!/bin/bash
-# notify_csp.sh — keepalived state transition hook for CSP.
+# notify_csp.sh — keepalived state transition hook for CSP (Phase 1.F: VIP-only cold-spare).
 # Invoked by keepalived with args: $1=TYPE, $2=NAME, $3=STATE, $4=PRIORITY.
-# Phase 1.B: log only. Phase 1.F will add service start/stop + Redis register restore here.
+# 1.D-1: MASTER 승격 시 Redis register replay 는 cims.sh start csp 가 처리 (기동 시점).
 
 TYPE="$1"
 NAME="$2"
@@ -9,12 +9,25 @@ STATE="$3"
 PRIO="$4"
 
 LOG="${HA_LOG_DIR:-/var/log/cims-ha}/notify_csp.log"
+UNIT="${HA_UNIT_CSP:-cims-csp}"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
 
-echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO})" >> "$LOG"
+log() { echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: $*" >> "$LOG"; }
 
-# Phase 1.F TODO:
-#   MASTER  -> systemctl start  cims-csp + trigger Redis register replay (1.D-1)
-#   BACKUP  -> systemctl stop   cims-csp
-#   FAULT   -> systemctl stop   cims-csp + alert
+case "$STATE" in
+    MASTER)
+        log "MASTER 승격 → systemctl start ${UNIT}"
+        systemctl start "${UNIT}" 2>>"$LOG" || log "FAIL: systemctl start ${UNIT}"
+        ;;
+    BACKUP|FAULT)
+        log "${STATE} 강등 → systemctl stop ${UNIT}"
+        systemctl stop "${UNIT}" 2>>"$LOG" || log "FAIL: systemctl stop ${UNIT}"
+        ;;
+    STOP)
+        log "keepalived 자체 종료 — ${UNIT} 상태 유지"
+        ;;
+    *)
+        log "알 수 없는 상태 — 무시"
+        ;;
+esac
 exit 0
