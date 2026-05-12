@@ -1061,18 +1061,15 @@ async def _create_deployment(handler_args: HandlerArgs, config):
             )
             grp = cur.fetchone()
             grp_mode = grp.get("mode") if grp else None
-            if ha_cap != "standalone":
-                if grp_mode is None:
-                    return HandlerResult(status=400, body={
-                        "error": "ha_mismatch",
-                        "detail": f"패키지는 ha_capability={ha_cap} 인데 agent 가 ha_group 미정의 — "
-                                  f"먼저 HaGroupsPage 에서 그룹에 추가하세요"
-                    }, media_type="application/json")
-                if ha_cap != grp_mode:
-                    return HandlerResult(status=400, body={
-                        "error": "ha_mismatch",
-                        "detail": f"패키지 ha_capability={ha_cap} 가 agent 그룹 mode={grp_mode} 와 불일치"
-                    }, media_type="application/json")
+            # ha_group 정의된 agent 만 strict 검증. ha_group 미정의 시에는 모든 모듈 install
+            # 허용 (운영자 워크플로: agent 등록 직후 그룹 정의 전 임시 install). Console UI
+            # 가 HaGroupsPage 안내 + DeploymentCreateModal 의 hint 로 운영 가이드.
+            if grp_mode is not None and ha_cap != "standalone" and ha_cap != grp_mode:
+                return HandlerResult(status=400, body={
+                    "error": "ha_mismatch",
+                    "detail": f"패키지 ha_capability={ha_cap} 가 agent 그룹 mode={grp_mode} 와 불일치 "
+                              f"(이 그룹에는 {grp_mode} 모듈만 install 가능)"
+                }, media_type="application/json")
 
             cur.execute(
                 "INSERT INTO agent_deployment (agent_id, package_id, instance_id, "
