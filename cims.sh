@@ -1253,7 +1253,8 @@ import sys, json, os
 meta_file, name, version, build_date, git_sha, git_branch, packaged_at, packaged_by, changelog = sys.argv[1:]
 desc = ""
 service = None
-# 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "...", "service": {...} }
+ha_capability = None
+# 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "...", "ha_capability": "...", "service": {...} }
 if meta_file and os.path.isfile(meta_file):
     try:
         with open(meta_file, 'r', encoding='utf-8') as f:
@@ -1264,11 +1265,13 @@ if meta_file and os.path.isfile(meta_file):
                 desc = entry.get("description", "")
                 if isinstance(entry.get("service"), dict):
                     service = entry["service"]
+                ha_capability = entry.get("ha_capability")
             # 구(舊) 레지스트리 스키마 (후방 호환)
             elif name in entry and isinstance(entry[name], dict):
                 desc = entry[name].get("description", "")
                 if isinstance(entry[name].get("service"), dict):
                     service = entry[name]["service"]
+                ha_capability = entry[name].get("ha_capability")
     except Exception:
         pass
 # csp/cmp 변종은 base description 끝에 역할 suffix 추가 (식별용).
@@ -1293,6 +1296,8 @@ meta = {
 }
 if service is not None:
     meta["service"] = service
+if ha_capability is not None:
+    meta["ha_capability"] = ha_capability
 print(json.dumps(meta, indent=2, ensure_ascii=False))
 PYEOF
 
