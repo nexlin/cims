@@ -30,7 +30,8 @@ interface ServerRow {
   id: number
   name: string
   role: Role
-  ip: string | null
+  ip: string | null            // mgmt IP — agent enroll 후 자동 (운영자 편집 X)
+  service_ip: string | null    // 서비스 bind IP — 운영자가 화면에서 입력 (mgmt 와 다를 수 있음)
   status: ServerStatus
   agent_version: string | null
   token: string
@@ -66,8 +67,8 @@ const INITIAL_SERVICES: ServiceRow[] = [
     vip: '10.0.0.101', vrid: 52, vipMask: 24, authPass: 'secret01',
     packageIds: [2],
     servers: [
-      { id: 11, name: 'VoLTE SIP Server-01', role: 'master', ip: '10.0.0.21', status: 'online',  agent_version: '0.0.1', token: 'tok-a1b2c3d4' },
-      { id: 12, name: 'VoLTE SIP Server-02', role: 'backup', ip: null,        status: 'pending', agent_version: null,    token: 'tok-e5f6g7h8' },
+      { id: 11, name: 'VoLTE SIP Server-01', role: 'master', ip: '192.168.10.21', service_ip: '10.0.0.21', status: 'online',  agent_version: '0.0.1', token: 'tok-a1b2c3d4' },
+      { id: 12, name: 'VoLTE SIP Server-02', role: 'backup', ip: null,            service_ip: null,        status: 'pending', agent_version: null,    token: 'tok-e5f6g7h8' },
     ],
   },
   {
@@ -75,8 +76,8 @@ const INITIAL_SERVICES: ServiceRow[] = [
     vip: '10.0.0.102', vrid: 53, vipMask: 24, authPass: 'secret02',
     packageIds: [4],
     servers: [
-      { id: 21, name: 'VoLTE Media-01', role: null, ip: '10.0.0.31', status: 'online', agent_version: '0.0.1', token: 'tok-aa01' },
-      { id: 22, name: 'VoLTE Media-02', role: null, ip: '10.0.0.32', status: 'online', agent_version: '0.0.1', token: 'tok-aa02' },
+      { id: 21, name: 'VoLTE Media-01', role: null, ip: '192.168.10.31', service_ip: '10.0.0.31', status: 'online', agent_version: '0.0.1', token: 'tok-aa01' },
+      { id: 22, name: 'VoLTE Media-02', role: null, ip: '192.168.10.32', service_ip: '10.0.0.32', status: 'online', agent_version: '0.0.1', token: 'tok-aa02' },
     ],
   },
 ]
@@ -169,12 +170,12 @@ export default function HaServicesPage() {
     let servers: ServerRow[] = []
     if (mode === 'active_standby') {
       servers = [
-        { id: sIdSeq,     name: `${baseName}-${pad2(1)}`, role: 'master', ip: null, status: 'pending', agent_version: null, token: genToken() },
-        { id: sIdSeq + 1, name: `${baseName}-${pad2(2)}`, role: 'backup', ip: null, status: 'pending', agent_version: null, token: genToken() },
+        { id: sIdSeq,     name: `${baseName}-${pad2(1)}`, role: 'master', ip: null, service_ip: null, status: 'pending', agent_version: null, token: genToken() },
+        { id: sIdSeq + 1, name: `${baseName}-${pad2(2)}`, role: 'backup', ip: null, service_ip: null, status: 'pending', agent_version: null, token: genToken() },
       ]
     } else {
       servers = [
-        { id: sIdSeq, name: `${baseName}-${pad2(1)}`, role: null, ip: null, status: 'pending', agent_version: null, token: genToken() },
+        { id: sIdSeq, name: `${baseName}-${pad2(1)}`, role: null, ip: null, service_ip: null, status: 'pending', agent_version: null, token: genToken() },
       ]
     }
     setServices([...services, {
@@ -199,6 +200,7 @@ export default function HaServicesPage() {
       name: `${svc.name}-${pad2(idx)}`,
       role: null,
       ip: null,
+      service_ip: null,
       status: 'pending',
       agent_version: null,
       token: genToken(),
@@ -234,7 +236,7 @@ export default function HaServicesPage() {
   }
 
   return (
-    <div style={{ padding: 20, maxWidth: 1300, margin: '0 auto' }}>
+    <div style={{ padding: 16, width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
         <h1 style={{ margin: 0 }}>서버 + HA 관리</h1>
         <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3,
@@ -254,9 +256,11 @@ export default function HaServicesPage() {
             <th style={th(60)}>#</th>
             <th style={thLeft()}>이름</th>
             <th style={th(110)}>유형</th>
-            <th style={thLeft(170)}>VIP / VRID</th>
+            <th style={thLeft(140)}>mgmt IP</th>
+            <th style={thLeft(160)}>서비스 IP</th>
+            <th style={thLeft(180)}>VIP / VRID</th>
             <th style={th(120)}>상태</th>
-            <th style={th(140)}>액션</th>
+            <th style={th(150)}>액션</th>
           </tr>
         </thead>
         <tbody>
@@ -284,7 +288,7 @@ export default function HaServicesPage() {
           {/* 인라인 서비스 추가 행 */}
           {adding && (
             <tr style={{ background: '#f0f8ff' }}>
-              <td style={td(60)} colSpan={1}>{services.length + 1}</td>
+              <td style={td(60)}>{services.length + 1}</td>
               <td style={tdLeft()}>
                 <input value={adding.name} onChange={e => setAdding({ ...adding, name: e.target.value })}
                        placeholder="예: VoLTE SIP Server"
@@ -299,12 +303,12 @@ export default function HaServicesPage() {
                   <option value="standalone">Standalone (자식 N)</option>
                 </select>
               </td>
-              <td style={tdLeft(170)} colSpan={2}>
+              <td colSpan={4} style={tdLeft()}>
                 <span style={{ fontSize: 11, color: '#888' }}>
-                  생성 후 VIP/auth_pass 편집 + 서버 토큰 자동 발급
+                  생성 후 mgmt IP / 서비스 IP / VIP / auth_pass 편집 + 서버 토큰 자동 발급
                 </span>
               </td>
-              <td style={td(140)}>
+              <td style={td(150)}>
                 <button onClick={createService} style={btnPrimary()}>생성</button>
                 <button onClick={() => setAdding(null)} style={btnSecondary()}>취소</button>
               </td>
@@ -382,7 +386,13 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         <td style={td(110)}>
           <ModeBadge mode={svc.mode} />
         </td>
-        <td style={tdLeft(170)}>
+        <td style={tdLeft(140)}>
+          <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
+        </td>
+        <td style={tdLeft(160)}>
+          <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
+        </td>
+        <td style={tdLeft(180)}>
           {isStandalone ? (
             <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
           ) : (
@@ -396,7 +406,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         <td style={td(120)}>
           <StatusSummary servers={svc.servers} mode={svc.mode} />
         </td>
-        <td style={td(140)}>
+        <td style={td(150)}>
           <button onClick={p.onDelete} style={btnDanger()}>삭제</button>
         </td>
       </tr>
@@ -424,10 +434,19 @@ function ServiceTreeRows(p: ServiceTreeProps) {
             )}
           </td>
           <td style={td(110)}></td>
-          <td style={tdLeft(170)}>
+          <td style={tdLeft(140)}>
             <span style={{ fontSize: 12, color: srv.ip ? '#333' : '#aaa' }}>
               {srv.ip ?? '— (enroll 후 자동)'}
             </span>
+          </td>
+          <td style={tdLeft(160)}>
+            <input value={srv.service_ip ?? ''}
+                   onChange={e => p.updateServer(svc.id, srv.id, { service_ip: e.target.value || null })}
+                   placeholder="(미설정)"
+                   style={{ width: '95%', padding: '2px 6px', fontSize: 12, border: '1px solid #ddd', borderRadius: 3 }} />
+          </td>
+          <td style={tdLeft(180)}>
+            <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
           </td>
           <td style={td(120)}>
             <span style={{ color: STATUS_COLOR[srv.status], fontWeight: 'bold' }}>
@@ -435,7 +454,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
             </span>
             {srv.agent_version && <span style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>v{srv.agent_version}</span>}
           </td>
-          <td style={td(140)}>
+          <td style={td(150)}>
             <button onClick={() => p.copyCmd(srv)} style={btnSmall()}>📋 복사</button>
             {srv.status !== 'online' && (
               <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}>↻ 토큰</button>
@@ -448,7 +467,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
       {expanded && canAddServer && (
         <tr style={{ background: '#fcfdfe' }}>
           <td style={td(60)}></td>
-          <td colSpan={5} style={{ padding: '6px 12px' }}>
+          <td colSpan={7} style={{ padding: '6px 12px' }}>
             <button onClick={p.addServer} style={btnAdd(true)}>
               ＋ 서버 추가 ({MODE_LABEL[svc.mode]} — 신규 토큰 발행)
             </button>
@@ -460,7 +479,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
       {expanded && (
         <tr style={{ background: '#fcfdfe' }}>
           <td style={td(60)}></td>
-          <td colSpan={5} style={{ padding: '6px 12px' }}>
+          <td colSpan={7} style={{ padding: '6px 12px' }}>
             <PackagesArea svc={svc}
                           pickerOpen={p.pkgPickerOpen}
                           setPickerOpen={p.setPkgPicker}
