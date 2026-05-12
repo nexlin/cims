@@ -60,3 +60,7 @@ verify_runs/
 
 # 서버별 초기 설정 (cims.sh init) — secret 포함, host-specific
 .cims/
+
+# HA per-node config (auth_pass 등 비밀 포함, host-specific) — example 만 git
+agent/keepalived/ha.json
+agent/keepalived/out/

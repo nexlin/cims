@@ -1,0 +1,31 @@
+{
+  "_comment": "Per-node HA configuration consumed by `cims.sh ha config`. Copy to ha.json on each node, adjust per-node fields (node_name / local_ip / peer_ip / initial_state / priority_*).",
+
+  "node_name": "node-a",
+  "interface": "ens160",
+
+  "local_ip": "10.0.0.11",
+  "peer_ip":  "10.0.0.12",
+
+  "initial_state": "MASTER",
+
+  "priority_csc": 100,
+  "priority_csp": 100,
+  "priority_psp": 100,
+
+  "vip_csc":  "10.0.0.100",
+  "vip_csp":  "10.0.0.101",
+  "vip_psp":  "10.0.0.102",
+  "vip_mask": "24",
+
+  "auth_pass": "REPLACE_ME_8CHAR",
+
+  "psp_bind_ip": "",
+  "ha_log_dir":  "/var/log/cims-ha",
+
+  "services": {
+    "csc": { "enabled": true, "port": 4420 },
+    "csp": { "enabled": true, "port": 5060 },
+    "psp": { "enabled": true, "port": 5060 }
+  }
+}

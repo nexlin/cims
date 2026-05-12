@@ -1446,6 +1446,13 @@ ${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
                         install job 폴링 → 설치 파일 검증 → verify_reports/<ts>_phase3.md
                         (v2 예정: start/health/stop. v3 예정: 4시나리오 자동 실행)
 
+${BOLD}HA 이중화 (keepalived, 노드별 ha.json):${NC}
+  ha install                  keepalived 패키지 설치 (sudo apt)
+  ha config                   agent/keepalived/ha.json + 템플릿 → out/keepalived.conf 생성 (dry-run)
+  ha check                    생성된 config 의 keepalived -t syntax 검증
+  ha apply                    out/keepalived.conf → /etc/keepalived/ 적용 + systemctl restart
+  ha start|stop|status        systemctl 래퍼
+
 ${BOLD}로그:${NC}
   log [cmp|csp|cwrtc|csc|console|phone]
 
@@ -2085,6 +2092,140 @@ cmd_restart() {
     cmd_start "$@"
 }
 
+# ── HA (keepalived) ────────────────────────────────────────────
+HA_DIR="$SCRIPT_DIR/agent/keepalived"
+HA_OUT="$HA_DIR/out"
+HA_JSON="$HA_DIR/ha.json"
+
+_ha_check_config() {
+    if [[ ! -f $HA_JSON ]]; then
+        err "HA config 없음: $HA_JSON"
+        err "  → $HA_DIR/ha.json.example 을 ha.json 으로 복사 후 노드별 값 수정"
+        return 1
+    fi
+    return 0
+}
+
+_ha_render_service() {
+    # $1 = service slug (csc/csp/psp), $2 = output file
+    local svc="$1" out="$2"
+    local tpl="$HA_DIR/keepalived_${svc}.conf.tpl"
+    [[ ! -f $tpl ]] && { err "템플릿 없음: $tpl"; return 1; }
+
+    python3 - "$HA_JSON" "$tpl" "$HA_DIR" > "$out" <<'PY'
+import json, re, sys
+ha_json, tpl_path, ha_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg = json.load(open(ha_json))
+required = ["node_name","interface","local_ip","peer_ip","initial_state",
+            "vip_csc","vip_csp","vip_psp","vip_mask","auth_pass"]
+missing = [k for k in required if k not in cfg]
+if missing:
+    sys.stderr.write(f"ha.json missing keys: {missing}\n"); sys.exit(2)
+mapping = {
+    "NODE_NAME": cfg["node_name"],
+    "INTERFACE": cfg["interface"],
+    "LOCAL_IP":  cfg["local_ip"],
+    "PEER_IP":   cfg["peer_ip"],
+    "INITIAL_STATE": cfg["initial_state"],
+    "PRIORITY_CSC": str(cfg.get("priority_csc", 100)),
+    "PRIORITY_CSP": str(cfg.get("priority_csp", 100)),
+    "PRIORITY_PSP": str(cfg.get("priority_psp", 100)),
+    "VIP_CSC":   cfg["vip_csc"],
+    "VIP_CSP":   cfg["vip_csp"],
+    "VIP_PSP":   cfg["vip_psp"],
+    "VIP_MASK":  str(cfg["vip_mask"]),
+    "AUTH_PASS": cfg["auth_pass"],
+    "HA_DIR":    ha_dir,
+}
+content = open(tpl_path).read()
+content = re.sub(r'\$\{([A-Z_]+)\}',
+                 lambda m: mapping.get(m.group(1), m.group(0)),
+                 content)
+sys.stdout.write(content)
+PY
+}
+
+_ha_enabled_services() {
+    python3 -c "
+import json, sys
+cfg = json.load(open('$HA_JSON'))
+for svc, val in cfg.get('services', {}).items():
+    if val.get('enabled'):
+        print(svc)
+" 2>/dev/null
+}
+
+cmd_ha() {
+    local sub="${1:-help}"
+    shift || true
+
+    case "$sub" in
+        install)
+            info "keepalived 설치 (apt) — sudo 권한 필요"
+            sudo apt-get update
+            sudo apt-get install -y keepalived
+            ok "keepalived 설치 완료: $(keepalived --version 2>&1 | head -1)"
+            ;;
+        config)
+            _ha_check_config || return 1
+            mkdir -p "$HA_OUT"
+            local out="$HA_OUT/keepalived.conf"
+            : > "$out"
+            local svcs; svcs=$(_ha_enabled_services)
+            if [[ -z $svcs ]]; then
+                err "활성화된 서비스 없음 (ha.json services.*.enabled)"
+                return 1
+            fi
+            local svc tmp
+            tmp=$(mktemp)
+            for svc in $svcs; do
+                info "rendering: $svc"
+                _ha_render_service "$svc" "$tmp" || { rm -f "$tmp"; return 1; }
+                cat "$tmp" >> "$out"
+                echo "" >> "$out"
+            done
+            rm -f "$tmp"
+            ok "HA config 생성: $out"
+            ;;
+        check)
+            local out="$HA_OUT/keepalived.conf"
+            [[ ! -f $out ]] && { err "config 미생성: $out — 먼저 'cims.sh ha config' 실행"; return 1; }
+            if ! command -v keepalived &>/dev/null; then
+                warn "keepalived 미설치 — syntax 검증 SKIP. 'cims.sh ha install' 후 재시도"
+                return 0
+            fi
+            info "syntax 검증: keepalived -t -f $out"
+            sudo keepalived -t -f "$out" && ok "syntax OK" || { err "syntax 실패"; return 1; }
+            ;;
+        apply)
+            local out="$HA_OUT/keepalived.conf"
+            [[ ! -f $out ]] && { err "config 미생성: $out — 먼저 'cims.sh ha config' 실행"; return 1; }
+            info "/etc/keepalived/keepalived.conf 적용 — sudo 권한 필요"
+            sudo cp "$out" /etc/keepalived/keepalived.conf
+            sudo systemctl restart keepalived
+            ok "keepalived 재시작 완료"
+            ;;
+        start)  sudo systemctl start  keepalived ;;
+        stop)   sudo systemctl stop   keepalived ;;
+        status) systemctl status keepalived --no-pager || true ;;
+        help|*)
+            cat <<EOF
+사용법: cims.sh ha <subcommand>
+
+  install         keepalived 패키지 설치 (sudo apt)
+  config          ha.json + 템플릿 → out/keepalived.conf 생성 (dry-run, /etc 미접근)
+  check           생성된 config 의 keepalived -t syntax 검증
+  apply           out/keepalived.conf → /etc/keepalived/ 복사 + systemctl restart
+  start|stop      systemctl start|stop keepalived
+  status          systemctl status keepalived
+
+설정 파일: $HA_JSON
+  예시:        $HA_DIR/ha.json.example
+EOF
+            ;;
+    esac
+}
+
 case "${1:-}" in
     start)     shift; header "=== CIMS 시작 ==="; cmd_start "$@"; echo ""; cmd_status ;;
     stop)      shift; cmd_stop "$@"; echo ""; cmd_status ;;
@@ -2101,6 +2242,7 @@ case "${1:-}" in
     log)       shift; cmd_log "${1:-csp}" ;;
     pkg)       shift; cmd_pkg "$@" ;;
     sync)      shift; cmd_sync "$@" ;;
+    ha)        shift; cmd_ha "$@" ;;
     help|--help|-h) usage ;;
     "") usage ;;
     *) err "알 수 없는 명령: $1"; echo ""; usage; exit 1 ;;
