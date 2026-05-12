@@ -18,12 +18,39 @@ type Capability = Mode
 type Role = 'master' | 'backup' | null
 type ServerStatus = 'pending' | 'online' | 'offline'
 
+/** IP slot — 패키지 config 가 요구하는 IP 필드. scope 가 'vip' 면 그룹 단위,
+ *  'service' 면 서버 단위. 실제 backend 에서는 config_template.json 의 attribute
+ *  로 정의됨 (예: {"key": "Setup.Sip.LocalIp", "ip_scope": "service", "ip_slot": "SIP"}).
+ */
+interface IpSlot {
+  scope: 'service' | 'vip'
+  name: string            // 'SIP' / 'Admin' / 'Stats' / 'RTP' 등
+  port?: number
+  proto?: 'tcp' | 'udp'
+}
+
 interface PkgDef {
   id: number
   name: string
   version: string
   description: string
   capability: Capability
+  ipSlots: IpSlot[]       // 이 패키지가 요구하는 IP slot 들
+}
+
+/** 인터페이스 — agent 가 ip -a 로 보고. mock data 로 시뮬레이션. */
+interface NetIface {
+  name: string            // 'eth0' / 'eth1' / 'lo'
+  ip: string              // '192.168.10.21'
+  mask: number            // 24
+  hint?: string           // 'mgmt 사용중' / 'service 권장'
+}
+
+/** IP binding — slot 에 운영자가 선택한 인터페이스 + IP */
+interface IpBinding {
+  slot: string            // IpSlot.name 와 매핑
+  iface?: string          // NetIface.name (선택, 자유 입력 가능)
+  ip: string              // 선택한 IP (인터페이스 의 IP 또는 직접 입력)
 }
 
 interface ServerRow {
@@ -31,53 +58,127 @@ interface ServerRow {
   name: string
   role: Role
   ip: string | null            // mgmt IP — agent enroll 후 자동 (운영자 편집 X)
-  service_ip: string | null    // 서비스 bind IP — 운영자가 화면에서 입력 (mgmt 와 다를 수 있음)
   status: ServerStatus
   agent_version: string | null
   token: string
+  interfaces: NetIface[]       // agent enroll 후 cache (mock)
+  serviceIpBindings: IpBinding[]  // slot 별 운영자 입력
 }
 
 interface ServiceRow {
   id: number
   name: string
   mode: Mode
-  vip: string | null      // standalone 은 null
   vrid: number | null     // standalone 은 null
   vipMask: number
   authPass: string
   servers: ServerRow[]
   packageIds: number[]
+  vipBindings: IpBinding[]  // VIP slot 별 입력
 }
 
 const MOCK_PACKAGES: PkgDef[] = [
-  { id: 1, name: 'csc',     version: '0.1.0', description: '관리 API 서버',     capability: 'active_standby' },
-  { id: 2, name: 'csp',     version: '0.1.0', description: 'VoLTE SIP 서버',   capability: 'active_standby' },
-  { id: 3, name: 'psp',     version: '0.1.0', description: 'PTT SIP 서버',     capability: 'active_standby' },
-  { id: 4, name: 'cmp',     version: '0.1.0', description: 'VoLTE Media',      capability: 'all_active'     },
-  { id: 5, name: 'pmp',     version: '0.1.0', description: 'PTT Media',        capability: 'all_active'     },
-  { id: 6, name: 'cwrtc',   version: '0.1.0', description: 'WebRTC 게이트웨이', capability: 'standalone'     },
-  { id: 7, name: 'console', version: '0.1.0', description: '관리 콘솔',        capability: 'standalone'     },
-  { id: 8, name: 'phone',   version: '0.1.0', description: 'PTT Web UE',       capability: 'standalone'     },
+  { id: 1, name: 'csc',     version: '0.1.0', description: '관리 API 서버',     capability: 'active_standby',
+    ipSlots: [
+      { scope: 'service', name: 'Admin', port: 4420, proto: 'tcp' },
+      { scope: 'service', name: 'McPTT', port: 4430, proto: 'tcp' },
+      { scope: 'vip',     name: 'Admin', port: 4420, proto: 'tcp' },
+    ] },
+  { id: 2, name: 'csp',     version: '0.1.0', description: 'VoLTE SIP 서버',   capability: 'active_standby',
+    ipSlots: [
+      { scope: 'service', name: 'SIP',   port: 5060, proto: 'udp' },
+      { scope: 'service', name: 'Admin', port: 4421, proto: 'tcp' },
+      { scope: 'service', name: 'Stats', port: 9000, proto: 'udp' },
+      { scope: 'vip',     name: 'SIP',   port: 5060, proto: 'udp' },
+    ] },
+  { id: 3, name: 'psp',     version: '0.1.0', description: 'PTT SIP 서버',     capability: 'active_standby',
+    ipSlots: [
+      { scope: 'service', name: 'SIP',   port: 5060, proto: 'udp' },
+      { scope: 'vip',     name: 'SIP',   port: 5060, proto: 'udp' },
+    ] },
+  { id: 4, name: 'cmp',     version: '0.1.0', description: 'VoLTE Media',      capability: 'all_active',
+    ipSlots: [
+      { scope: 'service', name: 'RTP',     port: 50000, proto: 'udp' },
+      { scope: 'service', name: 'Control', port: 9000,  proto: 'udp' },
+    ] },
+  { id: 5, name: 'pmp',     version: '0.1.0', description: 'PTT Media',        capability: 'all_active',
+    ipSlots: [
+      { scope: 'service', name: 'RTP',     port: 52000, proto: 'udp' },
+      { scope: 'service', name: 'Floor',   port: 54000, proto: 'udp' },
+      { scope: 'service', name: 'Control', port: 9001,  proto: 'udp' },
+    ] },
+  { id: 6, name: 'cwrtc',   version: '0.1.0', description: 'WebRTC 게이트웨이', capability: 'standalone',
+    ipSlots: [{ scope: 'service', name: 'WS', port: 8443, proto: 'tcp' }] },
+  { id: 7, name: 'console', version: '0.1.0', description: '관리 콘솔',        capability: 'standalone',
+    ipSlots: [{ scope: 'service', name: 'HTTPS', port: 8081, proto: 'tcp' }] },
+  { id: 8, name: 'phone',   version: '0.1.0', description: 'PTT Web UE',       capability: 'standalone',
+    ipSlots: [{ scope: 'service', name: 'HTTPS', port: 3002, proto: 'tcp' }] },
+]
+
+const DEMO_IFACES: NetIface[] = [
+  { name: 'eth0', ip: '192.168.10.21', mask: 24, hint: 'mgmt 사용중' },
+  { name: 'eth1', ip: '10.0.0.21',     mask: 24, hint: 'service 권장' },
+  { name: 'lo',   ip: '127.0.0.1',     mask: 8  },
+]
+const DEMO_IFACES_22: NetIface[] = [
+  { name: 'eth0', ip: '192.168.10.22', mask: 24, hint: 'mgmt 사용중' },
+  { name: 'eth1', ip: '10.0.0.22',     mask: 24, hint: 'service 권장' },
+  { name: 'lo',   ip: '127.0.0.1',     mask: 8  },
+]
+const DEMO_IFACES_31: NetIface[] = [
+  { name: 'eth0', ip: '192.168.10.31', mask: 24, hint: 'mgmt 사용중' },
+  { name: 'eth1', ip: '10.0.0.31',     mask: 24 },
+  { name: 'lo',   ip: '127.0.0.1',     mask: 8  },
+]
+const DEMO_IFACES_32: NetIface[] = [
+  { name: 'eth0', ip: '192.168.10.32', mask: 24, hint: 'mgmt 사용중' },
+  { name: 'eth1', ip: '10.0.0.32',     mask: 24 },
+  { name: 'lo',   ip: '127.0.0.1',     mask: 8  },
 ]
 
 // 데모용 초기 서비스 1-2개 — 운영자가 추가하는 흐름도 함께
 const INITIAL_SERVICES: ServiceRow[] = [
   {
     id: 1, name: 'VoLTE SIP Server', mode: 'active_standby',
-    vip: '10.0.0.101', vrid: 52, vipMask: 24, authPass: 'secret01',
+    vrid: 52, vipMask: 24, authPass: 'secret01',
     packageIds: [2],
+    vipBindings: [
+      { slot: 'SIP', iface: 'eth1', ip: '10.0.0.100' },
+    ],
     servers: [
-      { id: 11, name: 'VoLTE SIP Server-01', role: 'master', ip: '192.168.10.21', service_ip: '10.0.0.21', status: 'online',  agent_version: '0.0.1', token: 'tok-a1b2c3d4' },
-      { id: 12, name: 'VoLTE SIP Server-02', role: 'backup', ip: null,            service_ip: null,        status: 'pending', agent_version: null,    token: 'tok-e5f6g7h8' },
+      { id: 11, name: 'VoLTE SIP Server-01', role: 'master',
+        ip: '192.168.10.21', status: 'online', agent_version: '0.0.1', token: 'tok-a1b2c3d4',
+        interfaces: DEMO_IFACES,
+        serviceIpBindings: [
+          { slot: 'SIP',   iface: 'eth1', ip: '10.0.0.21' },
+          { slot: 'Admin', iface: 'eth0', ip: '192.168.10.21' },
+          { slot: 'Stats', iface: 'eth1', ip: '10.0.0.21' },
+        ] },
+      { id: 12, name: 'VoLTE SIP Server-02', role: 'backup',
+        ip: null, status: 'pending', agent_version: null, token: 'tok-e5f6g7h8',
+        interfaces: [], serviceIpBindings: [] },
     ],
   },
   {
     id: 2, name: 'VoLTE Media', mode: 'all_active',
-    vip: '10.0.0.102', vrid: 53, vipMask: 24, authPass: 'secret02',
+    vrid: 53, vipMask: 24, authPass: 'secret02',
     packageIds: [4],
+    vipBindings: [],   // AA media — VIP slot 없음 (cmp 는 vip slot 정의 안 함)
     servers: [
-      { id: 21, name: 'VoLTE Media-01', role: null, ip: '192.168.10.31', service_ip: '10.0.0.31', status: 'online', agent_version: '0.0.1', token: 'tok-aa01' },
-      { id: 22, name: 'VoLTE Media-02', role: null, ip: '192.168.10.32', service_ip: '10.0.0.32', status: 'online', agent_version: '0.0.1', token: 'tok-aa02' },
+      { id: 21, name: 'VoLTE Media-01', role: null,
+        ip: '192.168.10.31', status: 'online', agent_version: '0.0.1', token: 'tok-aa01',
+        interfaces: DEMO_IFACES_31,
+        serviceIpBindings: [
+          { slot: 'RTP',     iface: 'eth1', ip: '10.0.0.31' },
+          { slot: 'Control', iface: 'eth1', ip: '10.0.0.31' },
+        ] },
+      { id: 22, name: 'VoLTE Media-02', role: null,
+        ip: '192.168.10.32', status: 'online', agent_version: '0.0.1', token: 'tok-aa02',
+        interfaces: DEMO_IFACES_32,
+        serviceIpBindings: [
+          { slot: 'RTP',     iface: 'eth1', ip: '10.0.0.32' },
+          { slot: 'Control', iface: 'eth1', ip: '10.0.0.32' },
+        ] },
     ],
   },
 ]
@@ -135,8 +236,9 @@ export default function HaServicesPage() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set([1, 2]))
   const [adding, setAdding] = useState<{ name: string; mode: Mode | '' } | null>(null)
   const [editingName, setEditingName] = useState<{ kind: 'service' | 'server'; id: number; value: string } | null>(null)
-  const [editingVip, setEditingVip] = useState<{ id: number; vip: string; mask: number } | null>(null)
   const [pkgPickerFor, setPkgPickerFor] = useState<number | null>(null)  // service id
+  const [vipExpandFor, setVipExpandFor] = useState<number | null>(null)  // service id
+  const [svcIpExpandFor, setSvcIpExpandFor] = useState<number | null>(null) // server id
   const [toast, setToast] = useState<string | null>(null)
 
   // ── helpers ──
@@ -154,6 +256,23 @@ export default function HaServicesPage() {
     for (let v = 51; v <= 255; v++) if (!used.has(v)) return v
     return 51
   }
+
+  // 패키지가 정의한 IP slot 들 (서비스 전체에서 합집합) — 그룹 단위 (vip) / 서버 단위 (service)
+  function slotsForService(svc: ServiceRow, scope: 'service' | 'vip'): IpSlot[] {
+    const slots: IpSlot[] = []
+    const seen = new Set<string>()
+    for (const pkgId of svc.packageIds) {
+      const pkg = MOCK_PACKAGES.find(p => p.id === pkgId)
+      if (!pkg) continue
+      for (const slot of pkg.ipSlots) {
+        if (slot.scope !== scope) continue
+        const key = `${slot.name}:${slot.proto}:${slot.port}`
+        if (seen.has(key)) continue
+        seen.add(key); slots.push(slot)
+      }
+    }
+    return slots
+  }
   const updateService = (sid: number, patch: Partial<ServiceRow>) =>
     setServices(prev => prev.map(s => s.id === sid ? { ...s, ...patch } : s))
   const updateServer = (sid: number, srvId: number, patch: Partial<ServerRow>) =>
@@ -168,23 +287,29 @@ export default function HaServicesPage() {
     const sid = nextServiceId()
     let sIdSeq = nextServerId()
     let servers: ServerRow[] = []
+    const blankSrv = (i: number, role: Role): ServerRow => ({
+      id: sIdSeq + i - 1,
+      name: `${baseName}-${pad2(i)}`,
+      role,
+      ip: null,
+      status: 'pending',
+      agent_version: null,
+      token: genToken(),
+      interfaces: [],
+      serviceIpBindings: [],
+    })
     if (mode === 'active_standby') {
-      servers = [
-        { id: sIdSeq,     name: `${baseName}-${pad2(1)}`, role: 'master', ip: null, service_ip: null, status: 'pending', agent_version: null, token: genToken() },
-        { id: sIdSeq + 1, name: `${baseName}-${pad2(2)}`, role: 'backup', ip: null, service_ip: null, status: 'pending', agent_version: null, token: genToken() },
-      ]
+      servers = [blankSrv(1, 'master'), blankSrv(2, 'backup')]
     } else {
-      servers = [
-        { id: sIdSeq, name: `${baseName}-${pad2(1)}`, role: null, ip: null, service_ip: null, status: 'pending', agent_version: null, token: genToken() },
-      ]
+      servers = [blankSrv(1, null)]
     }
     setServices([...services, {
       id: sid, name: baseName, mode,
-      vip: mode === 'standalone' ? null : '10.0.0.???',
       vrid: mode === 'standalone' ? null : nextVrid(),
       vipMask: 24,
       authPass: '',
       packageIds: [],
+      vipBindings: [],
       servers,
     }])
     setExpanded(prev => new Set([...prev, sid]))
@@ -200,10 +325,11 @@ export default function HaServicesPage() {
       name: `${svc.name}-${pad2(idx)}`,
       role: null,
       ip: null,
-      service_ip: null,
       status: 'pending',
       agent_version: null,
       token: genToken(),
+      interfaces: [],
+      serviceIpBindings: [],
     }
     updateService(svc.id, { servers: [...svc.servers, newSrv] })
     flash(`서버 "${newSrv.name}" 추가 — 신규 토큰 발행`)
@@ -215,7 +341,7 @@ export default function HaServicesPage() {
       if (!confirm(`${srv.name} 은 이미 online — 재발행 시 기존 agent 인증 무효. 진행?`)) return
     }
     const newTok = genToken()
-    updateServer(svc.id, srv.id, { token: newTok, status: 'pending', ip: null, agent_version: null })
+    updateServer(svc.id, srv.id, { token: newTok, status: 'pending', ip: null, agent_version: null, interfaces: [] })
     copyInstallCmd({ ...srv, token: newTok }, svc, true)
     flash(`${srv.name} 토큰 재발행 + clipboard 복사`)
   }
@@ -272,10 +398,14 @@ export default function HaServicesPage() {
               onToggle={() => toggleExpand(svc.id)}
               editingName={editingName}
               setEditingName={setEditingName}
-              editingVip={editingVip}
-              setEditingVip={setEditingVip}
               pkgPickerOpen={pkgPickerFor === svc.id}
               setPkgPicker={(open) => setPkgPickerFor(open ? svc.id : null)}
+              vipExpanded={vipExpandFor === svc.id}
+              setVipExpand={(open) => setVipExpandFor(open ? svc.id : null)}
+              svcIpExpandFor={svcIpExpandFor}
+              setSvcIpExpand={(srvId, open) => setSvcIpExpandFor(open ? srvId : null)}
+              vipSlots={slotsForService(svc, 'vip')}
+              serviceSlots={slotsForService(svc, 'service')}
               updateService={updateService}
               updateServer={updateServer}
               addServer={() => addServer(svc)}
@@ -348,10 +478,14 @@ interface ServiceTreeProps {
   onToggle: () => void
   editingName: { kind: 'service' | 'server'; id: number; value: string } | null
   setEditingName: (v: { kind: 'service' | 'server'; id: number; value: string } | null) => void
-  editingVip: { id: number; vip: string; mask: number } | null
-  setEditingVip: (v: { id: number; vip: string; mask: number } | null) => void
   pkgPickerOpen: boolean
   setPkgPicker: (open: boolean) => void
+  vipExpanded: boolean
+  setVipExpand: (open: boolean) => void
+  svcIpExpandFor: number | null
+  setSvcIpExpand: (srvId: number, open: boolean) => void
+  vipSlots: IpSlot[]
+  serviceSlots: IpSlot[]
   updateService: (sid: number, patch: Partial<ServiceRow>) => void
   updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
   addServer: () => void
@@ -393,14 +527,12 @@ function ServiceTreeRows(p: ServiceTreeProps) {
           <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
         </td>
         <td style={tdLeft(180)}>
-          {isStandalone ? (
+          {isStandalone || p.vipSlots.length === 0 ? (
             <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
           ) : (
-            <InlineVipEdit svc={svc} editing={p.editingVip}
-                           onStart={() => p.setEditingVip({ id: svc.id, vip: svc.vip ?? '', mask: svc.vipMask })}
-                           onChange={(patch) => p.setEditingVip(p.editingVip ? { ...p.editingVip, ...patch } : null)}
-                           onSave={(vip, mask) => { p.updateService(svc.id, { vip, vipMask: mask }); p.setEditingVip(null) }}
-                           onCancel={() => p.setEditingVip(null)} />
+            <button onClick={() => p.setVipExpand(!p.vipExpanded)} style={chipBtn(p.vipExpanded)}>
+              📡 VIP {svc.vipBindings.length}/{p.vipSlots.length} {p.vipExpanded ? '▲' : '▼'}
+            </button>
           )}
         </td>
         <td style={td(120)}>
@@ -411,56 +543,36 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         </td>
       </tr>
 
-      {/* 서버 자식 행들 (펼침 시) */}
-      {expanded && svc.servers.map((srv, srvIdx) => (
-        <tr key={srv.id} style={{ background: '#fff' }}>
-          <td style={td(60)}>
-            <span style={{ color: '#888', fontSize: 12, paddingLeft: 16 }}>
-              {idx}.{srvIdx + 1}
-            </span>
-          </td>
-          <td style={tdLeft()}>
-            <InlineNameEdit kind="server" id={srv.id} value={srv.name}
-                            editing={p.editingName}
-                            onStart={(v) => p.setEditingName({ kind: 'server', id: srv.id, value: v })}
-                            onChange={(v) => p.setEditingName(p.editingName ? { ...p.editingName, value: v } : null)}
-                            onSave={(v) => { p.updateServer(svc.id, srv.id, { name: v }); p.setEditingName(null) }}
-                            onCancel={() => p.setEditingName(null)} />
-            {srv.role && (
-              <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 5px', borderRadius: 3,
-                             background: srv.role === 'master' ? '#e67e22' : '#7f8c8d', color: '#fff' }}>
-                {srv.role}
-              </span>
-            )}
-          </td>
-          <td style={td(110)}></td>
-          <td style={tdLeft(140)}>
-            <span style={{ fontSize: 12, color: srv.ip ? '#333' : '#aaa' }}>
-              {srv.ip ?? '— (enroll 후 자동)'}
-            </span>
-          </td>
-          <td style={tdLeft(160)}>
-            <input value={srv.service_ip ?? ''}
-                   onChange={e => p.updateServer(svc.id, srv.id, { service_ip: e.target.value || null })}
-                   placeholder="(미설정)"
-                   style={{ width: '95%', padding: '2px 6px', fontSize: 12, border: '1px solid #ddd', borderRadius: 3 }} />
-          </td>
-          <td style={tdLeft(180)}>
-            <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
-          </td>
-          <td style={td(120)}>
-            <span style={{ color: STATUS_COLOR[srv.status], fontWeight: 'bold' }}>
-              {STATUS_ICON[srv.status]} {srv.status}
-            </span>
-            {srv.agent_version && <span style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>v{srv.agent_version}</span>}
-          </td>
-          <td style={td(150)}>
-            <button onClick={() => p.copyCmd(srv)} style={btnSmall()}>📋 복사</button>
-            {srv.status !== 'online' && (
-              <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}>↻ 토큰</button>
-            )}
+      {/* VIP expand panel (서비스 행 다음) */}
+      {p.vipExpanded && p.vipSlots.length > 0 && (
+        <tr style={{ background: '#f8f9fb' }}>
+          <td colSpan={8} style={{ padding: '10px 16px 12px 60px' }}>
+            <IpSlotPanel
+              title="VIP slots (서비스 단위 — A/S fail-over 공유, AA 는 사용 안 함)"
+              slots={p.vipSlots}
+              bindings={svc.vipBindings}
+              interfaces={svc.servers[0]?.interfaces ?? []}
+              vrid={svc.vrid}
+              onChange={(bindings) => p.updateService(svc.id, { vipBindings: bindings })}
+            />
           </td>
         </tr>
+      )}
+
+      {/* 서버 자식 행들 (펼침 시) */}
+      {expanded && svc.servers.map((srv, srvIdx) => (
+        <ServerRows
+          key={srv.id}
+          svc={svc} srv={srv} idx={idx} srvIdx={srvIdx}
+          serviceSlots={p.serviceSlots}
+          editingName={p.editingName}
+          setEditingName={p.setEditingName}
+          svcIpExpanded={p.svcIpExpandFor === srv.id}
+          setSvcIpExpand={(open) => p.setSvcIpExpand(srv.id, open)}
+          updateServer={p.updateServer}
+          regenerateToken={p.regenerateToken}
+          copyCmd={p.copyCmd}
+        />
       ))}
 
       {/* [＋ 서버 추가] 행 — AA/Standalone 만 */}
@@ -488,6 +600,203 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         </tr>
       )}
     </>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────
+//  ServerRows — 서버 행 + (선택적) 서비스 IP expand panel
+// ──────────────────────────────────────────────────────────────
+
+interface ServerRowsProps {
+  svc: ServiceRow
+  srv: ServerRow
+  idx: number
+  srvIdx: number
+  serviceSlots: IpSlot[]
+  editingName: { kind: 'service' | 'server'; id: number; value: string } | null
+  setEditingName: (v: { kind: 'service' | 'server'; id: number; value: string } | null) => void
+  svcIpExpanded: boolean
+  setSvcIpExpand: (open: boolean) => void
+  updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
+  regenerateToken: (srv: ServerRow) => void
+  copyCmd: (srv: ServerRow) => void
+}
+
+function ServerRows(p: ServerRowsProps) {
+  const { svc, srv, idx, srvIdx } = p
+  const enrollDone = srv.status !== 'pending'
+  return (
+    <>
+      <tr style={{ background: '#fff' }}>
+        <td style={td(60)}>
+          <span style={{ color: '#888', fontSize: 12, paddingLeft: 16 }}>{idx}.{srvIdx + 1}</span>
+        </td>
+        <td style={tdLeft()}>
+          <InlineNameEdit kind="server" id={srv.id} value={srv.name}
+                          editing={p.editingName}
+                          onStart={(v) => p.setEditingName({ kind: 'server', id: srv.id, value: v })}
+                          onChange={(v) => p.setEditingName(p.editingName ? { ...p.editingName, value: v } : null)}
+                          onSave={(v) => { p.updateServer(svc.id, srv.id, { name: v }); p.setEditingName(null) }}
+                          onCancel={() => p.setEditingName(null)} />
+          {srv.role && (
+            <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 5px', borderRadius: 3,
+                           background: srv.role === 'master' ? '#e67e22' : '#7f8c8d', color: '#fff' }}>
+              {srv.role}
+            </span>
+          )}
+        </td>
+        <td style={td(110)}></td>
+        <td style={tdLeft(140)}>
+          <span style={{ fontSize: 12, color: srv.ip ? '#333' : '#aaa' }}>
+            {srv.ip ?? '— (enroll 후 자동)'}
+          </span>
+        </td>
+        <td style={tdLeft(160)}>
+          {p.serviceSlots.length === 0 ? (
+            <span style={{ color: '#aaa', fontSize: 12 }}>— (패키지 없음)</span>
+          ) : !enrollDone ? (
+            <span style={{ color: '#aaa', fontSize: 12 }} title="enroll 전 — 인터페이스 정보 없음">
+              ⏳ enroll 대기
+            </span>
+          ) : (
+            <button onClick={() => p.setSvcIpExpand(!p.svcIpExpanded)} style={chipBtn(p.svcIpExpanded)}>
+              📡 서비스 IP {srv.serviceIpBindings.length}/{p.serviceSlots.length} {p.svcIpExpanded ? '▲' : '▼'}
+            </button>
+          )}
+        </td>
+        <td style={tdLeft(180)}>
+          <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
+        </td>
+        <td style={td(120)}>
+          <span style={{ color: STATUS_COLOR[srv.status], fontWeight: 'bold' }}>
+            {STATUS_ICON[srv.status]} {srv.status}
+          </span>
+          {srv.agent_version && <span style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>v{srv.agent_version}</span>}
+        </td>
+        <td style={td(150)}>
+          <button onClick={() => p.copyCmd(srv)} style={btnSmall()}>📋 복사</button>
+          {srv.status !== 'online' && (
+            <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}>↻ 토큰</button>
+          )}
+        </td>
+      </tr>
+
+      {p.svcIpExpanded && enrollDone && p.serviceSlots.length > 0 && (
+        <tr style={{ background: '#f8f9fb' }}>
+          <td colSpan={8} style={{ padding: '10px 16px 12px 76px' }}>
+            <IpSlotPanel
+              title={`서비스 IP slots (${srv.name} — 패키지 ${svc.packageIds.length}개에서 요구)`}
+              slots={p.serviceSlots}
+              bindings={srv.serviceIpBindings}
+              interfaces={srv.interfaces}
+              onChange={(bindings) => p.updateServer(svc.id, srv.id, { serviceIpBindings: bindings })}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────
+//  IpSlotPanel — 인터페이스 list + slot 별 매핑 (VIP / 서비스 IP 공용)
+// ──────────────────────────────────────────────────────────────
+
+function IpSlotPanel({ title, slots, bindings, interfaces, vrid, onChange }: {
+  title: string
+  slots: IpSlot[]
+  bindings: IpBinding[]
+  interfaces: NetIface[]
+  vrid?: number | null
+  onChange: (bindings: IpBinding[]) => void
+}) {
+  const bindingFor = (slot: IpSlot): IpBinding | undefined =>
+    bindings.find(b => b.slot === slot.name)
+
+  const update = (slot: IpSlot, patch: Partial<IpBinding>) => {
+    const existing = bindingFor(slot)
+    const next: IpBinding = existing
+      ? { ...existing, ...patch }
+      : { slot: slot.name, iface: undefined, ip: '', ...patch }
+    const others = bindings.filter(b => b.slot !== slot.name)
+    onChange([...others, next])
+  }
+
+  return (
+    <div style={{ border: '1px solid #d8e0ea', borderRadius: 6, padding: 12, background: '#fff' }}>
+      <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 8 }}>
+        {title}
+      </div>
+
+      {interfaces.length > 0 && (
+        <div style={{ marginBottom: 10, fontSize: 11 }}>
+          <span style={{ color: '#666', marginRight: 8 }}>인터페이스 (agent 보고):</span>
+          {interfaces.map(iface => (
+            <span key={iface.name} style={{
+              marginRight: 8, padding: '1px 6px', background: '#eef',
+              borderRadius: 3, fontFamily: 'monospace',
+            }}>
+              <b>{iface.name}</b> {iface.ip}/{iface.mask}
+              {iface.hint && <span style={{ color: '#888', marginLeft: 4 }}>· {iface.hint}</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: '#f5f5f5', color: '#666' }}>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 80 }}>slot</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>port/proto</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 120 }}>인터페이스</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left' }}>IP</th>
+            {vrid != null && <th style={{ padding: '4px 8px', textAlign: 'left', width: 60 }}>VRID</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {slots.map(slot => {
+            const b = bindingFor(slot)
+            return (
+              <tr key={slot.name}>
+                <td style={{ padding: '4px 8px' }}><b>{slot.name}</b></td>
+                <td style={{ padding: '4px 8px', color: '#666' }}>
+                  {slot.port ?? '-'}/{slot.proto ?? '-'}
+                </td>
+                <td style={{ padding: '4px 8px' }}>
+                  <select value={b?.iface ?? ''}
+                          onChange={e => {
+                            const iface = e.target.value || undefined
+                            const ipDefault = interfaces.find(x => x.name === iface)?.ip ?? b?.ip ?? ''
+                            update(slot, { iface, ip: ipDefault })
+                          }}
+                          style={{ width: '95%', padding: '2px 4px', fontSize: 12 }}>
+                    <option value="">(선택)</option>
+                    {interfaces.map(iface => (
+                      <option key={iface.name} value={iface.name}>
+                        {iface.name} ({iface.ip})
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td style={{ padding: '4px 8px' }}>
+                  <input value={b?.ip ?? ''}
+                         onChange={e => update(slot, { ip: e.target.value })}
+                         placeholder="(미설정)"
+                         style={{ width: '95%', padding: '2px 6px', fontSize: 12,
+                                  border: '1px solid #ddd', borderRadius: 3 }} />
+                </td>
+                {vrid != null && (
+                  <td style={{ padding: '4px 8px', color: '#666' }}>{vrid}</td>
+                )}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {slots.length === 0 && (
+        <div style={{ color: '#aaa', fontSize: 12 }}>(패키지가 정의한 slot 없음)</div>
+      )}
+    </div>
   )
 }
 
@@ -545,37 +854,6 @@ function InlineNameEdit({ kind, id, value, editing, onStart, onChange, onSave, o
           style={{ cursor: 'pointer', fontWeight: bold ? 'bold' : 'normal' }}
           title="클릭 시 이름 편집">
       {value}
-    </span>
-  )
-}
-
-function InlineVipEdit({ svc, editing, onStart, onChange, onSave, onCancel }: {
-  svc: ServiceRow
-  editing: { id: number; vip: string; mask: number } | null
-  onStart: () => void
-  onChange: (patch: { vip?: string; mask?: number }) => void
-  onSave: (vip: string, mask: number) => void
-  onCancel: () => void
-}) {
-  const isEditing = editing && editing.id === svc.id
-  if (isEditing) {
-    return (
-      <span style={{ display: 'inline-flex', gap: 4, fontSize: 12 }}>
-        <input value={editing.vip} onChange={e => onChange({ vip: e.target.value })}
-               style={{ width: 110, padding: '2px 6px' }} placeholder="10.0.0.x" autoFocus />
-        /
-        <input type="number" value={editing.mask} onChange={e => onChange({ mask: parseInt(e.target.value) || 24 })}
-               style={{ width: 40, padding: '2px 6px' }} />
-        <button onClick={() => onSave(editing.vip, editing.mask)} style={btnSmall()}>✓</button>
-        <button onClick={onCancel} style={btnSmall()}>✕</button>
-        <span style={{ color: '#888', alignSelf: 'center', marginLeft: 4 }}>VRID {svc.vrid}</span>
-      </span>
-    )
-  }
-  return (
-    <span onClick={onStart} style={{ cursor: 'pointer', fontSize: 12 }} title="클릭 시 VIP 편집">
-      <code>{svc.vip ?? '(미설정)'}</code>/{svc.vipMask}
-      <span style={{ marginLeft: 6, color: '#888' }}>VRID {svc.vrid}</span>
     </span>
   )
 }
@@ -698,4 +976,9 @@ function btnAdd(small = false): React.CSSProperties {
   return { fontSize: small ? 11 : 13, padding: small ? '3px 10px' : '6px 16px',
            cursor: 'pointer', background: '#f5f9ff', border: '1px dashed #3498db',
            color: '#3498db', borderRadius: 3 }
+}
+function chipBtn(open: boolean): React.CSSProperties {
+  return { fontSize: 12, padding: '2px 8px', cursor: 'pointer',
+           background: open ? '#e8f0fe' : '#fff',
+           border: '1px solid #b8d4f5', borderRadius: 12, color: '#1a73e8' }
 }
