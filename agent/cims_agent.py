@@ -433,6 +433,48 @@ def job_update_config(params: dict) -> tuple:
     return 0, f"config updated: {cfg_path}", ""
 
 
+def job_update_ha(params: dict) -> tuple:
+    """install_path/agent/keepalived/ha.json 갱신 + cims-ha config|apply 자동 실행.
+
+    Params:
+      - install_path: install root (예: /opt/cims/mgmt-server)
+      - ha_json: dict — CSC 가 ha_groups + members 로부터 render 한 내용
+
+    cims-ha apply 는 sudo 권한이 필요. 미등록 환경 (dev 등) 에서는 graceful
+    skip — config 까지만 진행하고 apply 실패는 log 만 남기고 성공 반환.
+    """
+    install_path = _resolve_install_path(params)
+    ha_json = params.get("ha_json") or {}
+    if not isinstance(ha_json, dict) or not ha_json:
+        return 1, "", "ha_json missing or empty"
+    ha_path = os.path.join(install_path, "agent", "keepalived", "ha.json")
+    try:
+        os.makedirs(os.path.dirname(ha_path), exist_ok=True)
+        with open(ha_path, "w", encoding="utf-8") as f:
+            json.dump(ha_json, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return 2, "", f"write ha.json failed: {e}"
+
+    # cims-ha config + apply — agent 가 sudo 권한 있을 때만 실제 시스템 적용.
+    msgs = [f"ha.json updated: {ha_path}"]
+    cims_ha = os.path.join(install_path, "agent", "bin", "cims-ha")
+    if os.path.isfile(cims_ha):
+        try:
+            r1 = subprocess.run([cims_ha, "config"], capture_output=True, text=True, timeout=30)
+            msgs.append(f"cims-ha config rc={r1.returncode}")
+        except Exception as e:
+            msgs.append(f"cims-ha config exception: {e}")
+        try:
+            r2 = subprocess.run([cims_ha, "apply"], capture_output=True, text=True, timeout=60)
+            msgs.append(f"cims-ha apply rc={r2.returncode}"
+                       + (f" err={r2.stderr.strip()[-200:]}" if r2.returncode != 0 else ""))
+        except Exception as e:
+            msgs.append(f"cims-ha apply exception (likely no keepalived / no sudo): {e}")
+    else:
+        msgs.append(f"cims-ha not found at {cims_ha} — ha.json only (no apply)")
+    return 0, "\n".join(msgs), ""
+
+
 def job_process_control(params: dict, job_type: str) -> tuple:
     """start/stop/restart — install_path/agent/bin/cims-svc 를 이용해 수행
     (Phase 1.B+, cims.sh 운영 명령 제거).
@@ -765,6 +807,8 @@ def execute_job(job: dict, csc_url: str, session_token: str) -> dict:
             rc, out, err = job_process_control(params, jt)
         elif jt == "update_config":
             rc, out, err = job_update_config(params)
+        elif jt == "update_ha":
+            rc, out, err = job_update_ha(params)
         elif jt == "uninstall":
             install_path = params.get("install_path")
             if install_path and os.path.isdir(install_path):
