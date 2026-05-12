@@ -17,10 +17,11 @@
 CCmpClient::CCmpClient()
     : m_iCmpPort( 0 ),
       m_hSocket( -1 ),
+      m_iNextTransId( 1 ),
       m_bKeepAliveRunning( false ),
       m_bRecvRunning( false ),
-      m_iNextTransId( 1 ),
-      m_bConnected( false ) {
+      m_bConnected( false ),
+      m_ring( 128 ) {
 }
 
 CCmpClient::~CCmpClient() {
@@ -51,6 +52,25 @@ bool CCmpClient::Init( const std::string& strCmpIp, int iCmpPort, int iLocalPort
     m_strCmpIp = strCmpIp;
     m_iCmpPort = iCmpPort;
     m_iLocalCmpPort = iLocalPort;
+
+    // Phase 1.E — primary endpoint 를 endpoints + ring 에 등록 (단일 endpoint backward compat).
+    // 추가 endpoint 는 외부에서 AddEndpoint 호출 (csp.json 의 Cmp.Endpoints, 후속 라운드 활성).
+    {
+        std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+        CmpEndpoint primary( strCmpIp, iCmpPort );
+        bool exists = false;
+        for ( const auto& ep : m_endpoints ) {
+            if ( ep.strKey == primary.strKey ) {
+                exists = true;
+                break;
+            }
+        }
+        if ( !exists ) {
+            m_endpoints.push_back( primary );
+            m_ring.AddNode( primary.strKey );
+            CLog::Print( LOG_INFO, "CmpClient: primary endpoint registered (key=%s)", primary.strKey.c_str() );
+        }
+    }
 
     if ( m_hSocket == -1 ) {
         m_hSocket = socket( AF_INET, SOCK_DGRAM, 0 );
@@ -250,6 +270,48 @@ std::string CCmpClient::GetSesIdByKey( const std::string& strKey ) {
     auto it = m_mapKeyToSesid.find( strKey );
     if ( it != m_mapKeyToSesid.end() ) return it->second;
     return "";
+}
+
+// ── Phase 1.E — multi-endpoint dispatch ────────────────────────────────────
+void CCmpClient::AddEndpoint( const std::string& strIp, int iPort ) {
+    CmpEndpoint ep( strIp, iPort );
+    std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+    for ( const auto& existing : m_endpoints ) {
+        if ( existing.strKey == ep.strKey ) return;  // 중복 무시
+    }
+    m_endpoints.push_back( ep );
+    m_ring.AddNode( ep.strKey );
+    CLog::Print( LOG_INFO, "CmpClient::AddEndpoint registered (key=%s, total=%zu)", ep.strKey.c_str(),
+                 m_endpoints.size() );
+}
+
+CmpEndpoint CCmpClient::SelectEndpointForSession( const std::string& strSessionId ) {
+    std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+
+    // 기존 세션 → 캐시된 endpoint 우선 (Modify/Remove 가 같은 CMP 로 가야)
+    auto it = m_mapSessionToEndpointKey.find( strSessionId );
+    if ( it != m_mapSessionToEndpointKey.end() ) {
+        for ( const auto& ep : m_endpoints ) {
+            if ( ep.strKey == it->second ) return ep;
+        }
+        // 캐시된 endpoint 가 사라진 경우 → 다시 선택 (아래로 fall-through)
+        m_mapSessionToEndpointKey.erase( it );
+    }
+
+    // 신규 세션 → ring 으로 선택
+    std::string selectedKey;
+    if ( !strSessionId.empty() && m_ring.Select( strSessionId, selectedKey ) ) {
+        for ( const auto& ep : m_endpoints ) {
+            if ( ep.strKey == selectedKey ) {
+                m_mapSessionToEndpointKey[strSessionId] = selectedKey;
+                return ep;
+            }
+        }
+    }
+
+    // fallback — primary 반환 (sessionId 비어있거나 ring 빈 경우)
+    if ( !m_endpoints.empty() ) return m_endpoints.front();
+    return CmpEndpoint( m_strCmpIp, m_iCmpPort );
 }
 
 bool CCmpClient::AddSession( const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort,

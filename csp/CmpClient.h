@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "ConsistentHashRing.h"
 #include "CspPttGroup.h"
 #include "SimpleJson.h"
 #include "SipStackDefine.h"
@@ -16,6 +17,19 @@
 struct CmpSocket {
     int iSocket;
     bool bInUse;
+};
+
+// Phase 1.E (HA — CMP All Active) — endpoint descriptor for multi-endpoint dispatch.
+// 단일 endpoint 운영 시에는 m_endpoints 가 1개 element (primary) 만 가짐 → 기존 동작과 동일.
+struct CmpEndpoint {
+    std::string strIp;
+    int iPort;
+    std::string strKey;  // "ip:port" — ring 의 key
+    CmpEndpoint() : iPort( 0 ) {
+    }
+    CmpEndpoint( const std::string& ip, int port )
+        : strIp( ip ), iPort( port ), strKey( ip + ":" + std::to_string( port ) ) {
+    }
 };
 
 class CCmpClient {
@@ -53,6 +67,14 @@ public:
 
     /** 세션/그룹별 기 발행된 sesid 조회 (없으면 빈문자열) */
     std::string GetSesIdByKey( const std::string& strKey );
+
+    // Phase 1.E — multi-endpoint dispatch (HA: CMP All Active).
+    // 단일 endpoint 운영 시에는 호출 불필요 (Init 가 primary 1개를 자동 등록).
+    // 운영 환경에서 csp.json 에 추가 CMP endpoint 가 있으면 main 이 AddEndpoint 호출.
+    void AddEndpoint( const std::string& strIp, int iPort );
+
+    /** Session-ID → 선택된 endpoint (consistent hash). 미등록 endpoint 면 primary 반환. */
+    CmpEndpoint SelectEndpointForSession( const std::string& strSessionId );
 
 private:
     CCmpClient();
@@ -97,6 +119,12 @@ private:
     // session_id/group_id → sesid 캐시 (Modify/Remove 시 재사용)
     std::mutex m_mutexSesid;
     std::map<std::string, std::string> m_mapKeyToSesid;
+
+    // Phase 1.E — multi-endpoint dispatch (단일 endpoint 시 1개 element 만)
+    std::mutex m_mutexEndpoints;
+    std::vector<CmpEndpoint> m_endpoints;
+    CConsistentHashRing<std::string> m_ring;
+    std::map<std::string, std::string> m_mapSessionToEndpointKey;  // sessionId → endpoint key
 
     // Threads
     std::atomic<bool> m_bKeepAliveRunning;
