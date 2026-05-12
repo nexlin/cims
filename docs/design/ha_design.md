@@ -322,69 +322,89 @@ unit 도 함께 다룸.
 
 ## 11. 운영 가이드 — keepalived 인프라 (1.B)
 
-### 11.1 파일 구조
+### 11.1 파일 구조 (B 옵션 통합 + 운영 도구 분리)
+
+운영 시 cims.sh 는 사용 안 함 — agent 패키지가 자체 운영 도구를 들고감.
 
 ```
-agent/keepalived/
-├── ha.json.example             # 노드별 HA config 예시 (commit 됨)
-├── ha.json                     # 실제 노드 config (.gitignore, 노드별 분리)
-├── keepalived_{csc,csp,psp}.conf.tpl   # VRRP 인스턴스 템플릿 (VRID 51/52/53)
-├── check_{csc,csp,psp}.sh      # health probe (listen 확인, rc=0/1)
-├── notify_{csc,csp,psp}.sh     # 상태 전이 hook → systemctl start/stop cims-<svc> (1.F)
-└── out/                        # `cims.sh ha config` 생성 결과 (.gitignore)
-    ├── keepalived.conf
-    └── cims-{csc,csp,psp}.service
-
-agent/systemd/
-└── cims-{csc,csp,psp}.service.tpl     # systemd unit 템플릿 (Type=forking + PIDFile)
+agent/
+├── bin/                                # 운영 진입점 (운영자/cims_agent 가 호출)
+│   ├── cims-svc       start|stop|restart|status|log <svc>
+│   ├── cims-ha        install|config|check|apply|start|stop|status
+│   ├── cims-health    <svc>                      # keepalived vrrp_script 가 호출
+│   └── cims-notify    <svc> <TYPE> <NAME> <STATE> <PRIO>   # keepalived notify
+├── lib/                                # source-only library (caller 가 setup 후 source)
+│   ├── lifecycle.sh                    # service lifecycle 함수 (~400줄)
+│   └── ha.sh                           # cmd_ha 본체 + B 통합 render
+├── keepalived/
+│   ├── ha.json.example                 # 노드별 HA config 예시 (commit 됨)
+│   ├── ha.json                         # 실제 노드 config (.gitignore, 노드별 분리)
+│   ├── keepalived.conf.tpl             # 단일 generic template (services 반복 렌더)
+│   └── out/                            # `cims-ha config` 생성 결과 (.gitignore)
+│       ├── keepalived.conf
+│       └── cims@.service
+├── systemd/
+│   └── cims@.service.tpl               # systemd instantiated unit (%i = svc slug)
+├── cims_agent.py                       # heartbeat daemon
+├── install-agent.sh
+└── pkg.json
 ```
+
+신규 서비스 (예: cwrtc HA) 추가 = `ha.json.services` 에 항목 1개 추가만으로 완료.
 
 ### 11.2 노드 셋업 순서
 
 ```bash
 # 노드별 1회 (Node A / Node B 각자):
-cims.sh ha install                # keepalived 패키지 설치 (sudo)
+agent/bin/cims-ha install         # keepalived 패키지 설치 (sudo)
 cp agent/keepalived/ha.json.example agent/keepalived/ha.json
-# → ha.json 의 node_name / local_ip / peer_ip / initial_state / priority_* 수정
+# → ha.json 의 node_name / local_ip / peer_ip / initial_state 수정
 #   + cims_home (/opt/cims) / cims_user (cims) 노드 환경에 맞춰 수정
-#   (active 노드 priority=100 + initial_state=MASTER, standby priority=90 + BACKUP)
+#   + services.<svc>.{vrid,vip,priority,port} 노드별 분리
 
-cims.sh ha config                 # ha.json + 템플릿 → out/keepalived.conf + cims-*.service
-cims.sh ha check                  # keepalived -t syntax 검증
-cims.sh ha apply                  # /etc/keepalived/ + /etc/systemd/system/ 적용 + daemon-reload
-                                  # + keepalived restart (sudo)
+agent/bin/cims-ha config          # ha.json + 단일 tpl → out/keepalived.conf + cims@.service
+agent/bin/cims-ha check           # keepalived -t syntax 검증
+agent/bin/cims-ha apply           # /etc/keepalived/ + /etc/systemd/system/ 적용 +
+                                  # systemctl enable cims@{csc,csp,psp}.service (start 안 함)
 
-cims.sh ha status                 # 동작 확인
+agent/bin/cims-ha status          # 동작 확인
 ```
 
-운영 시 `cims-{csc,csp,psp}.service` 자체는 enable 하지 **않는다** — keepalived 의
-notify 가 start/stop 을 제어. 부팅 시 standby 가 자기 자신을 띄우는 일이 없게.
+cims@<svc>.service 는 `enable` 만 — `start` 는 keepalived notify 가 제어. 부팅 시
+standby 가 자기 자신을 띄우는 일 없음.
 
 ### 11.3 health probe 정책
 
-- `check_csc.sh` — `ss -lnt sport = :4420` → CSC admin 포트 binding 확인
-- `check_csp.sh` — `ss -lnu sport = :5060` → CSP SIP UDP binding 확인
-- `check_psp.sh` — 동일하나 `PSP_BIND_IP` 환경변수로 IP 별 binding 분리 가능
-  (같은 노드에서 CSP/PSP 가 다른 IP 의 5060 사용 시)
-- keepalived `rise=2, fall=2, interval=2s` → 4초 안에 fault 감지, advert 1s + dead 3s 와 합쳐 ~7초 fail-over
+- `agent/bin/cims-health <svc>` — ha.json `services.<svc>.{port, proto, bind_ip}`
+  lookup 후 `ss -ln{t,u}` 로 binding 확인. rc=0 / rc=1.
+- 신규 서비스 추가 시 `services.<svc>.{port,proto}` 만 추가 — probe script 추가 불필요.
+- keepalived `rise=2, fall=2, interval=2s` → 4초 fault 감지, advert 1s + dead 3s
+  와 합쳐 ~7초 fail-over.
 
-### 11.4 notify 스크립트 동작 (1.F)
+### 11.4 notify 스크립트 동작
 
-상태 전이 매핑:
+상태 전이 매핑 (`cims-notify <svc> <TYPE> <NAME> <STATE> <PRIO>`):
 
 | keepalived state | 동작 |
 |---|---|
-| MASTER  | `systemctl start cims-<svc>` — VIP 인수 후 서비스 기동 |
-| BACKUP  | `systemctl stop cims-<svc>` — 강등 시 서비스 정지 (cold-spare) |
-| FAULT   | `systemctl stop cims-<svc>` — health probe fail 시 자기 정지 |
+| MASTER  | `systemctl start cims@<svc>.service` — VIP 인수 후 서비스 기동 |
+| BACKUP  | `systemctl stop cims@<svc>.service` — 강등 시 서비스 정지 (cold-spare) |
+| FAULT   | `systemctl stop cims@<svc>.service` — health probe fail 시 자기 정지 |
 | STOP    | 변경 없음 — keepalived 자체 종료 시 서비스 그대로 유지 |
 
-모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록 (timestamp, type, name,
-state, priority, action 결과).
+모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록.
 
-1.D-1 도입 시: CSP/PSP 의 MASTER 승격에서 `cims.sh start csp` (cims-csp.service
-의 ExecStart) 가 시작 시 Redis 에서 register state 를 일괄 복원하면 됨 —
-notify 스크립트는 변경 없음.
+1.D-1 도입 시: CSP/PSP 의 MASTER 승격에서 `cims-svc start csp` (cims@csp.service
+의 ExecStart) 가 기동 시 Redis 에서 register state 를 일괄 복원 — notify 스크립트
+변경 없음.
+
+### 11.5 cims.sh 와의 관계
+
+cims.sh 는 **개발 단계 도구**:
+- 빌드 / 패키징 / 검증 / 시뮬레이터: `cims.sh build / pkg / verify / sim / configure`
+- 운영 명령 (`start / stop / restart / status / log / ha`) 은 cims.sh 에서 제거됨
+
+배포본 운영자는 cims.sh 호출 안 함 — agent/bin/cims-* 만 사용.
 
 ## 12. 미확정 / 추후 검토
 
