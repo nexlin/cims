@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# agent/bin/cims-health — generic listen probe (keepalived vrrp_script 가 호출)
+#
+# 사용법:
+#   cims-health <svc>
+#     <svc> = csc | csp | psp | ...   (ha.json services.<svc> 에 등록된 slug)
+#
+# 동작:
+#   ha.json 의 services.<svc>.{port, proto, bind_ip} 를 lookup 후
+#   `ss -ln{t,u}` 로 binding 확인. listen 중이면 rc=0, 미 listen 이면 rc=1.
+#
+# 옛 check_{csc,csp,psp}.sh (각 서비스별 분리) 의 대체.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HA_JSON="$(cd "$SCRIPT_DIR/../keepalived" && pwd)/ha.json"
+
+SVC="${1:-}"
+[[ -z "$SVC" ]] && { echo "usage: cims-health <svc>" >&2; exit 2; }
+
+# ha.json 에서 port / proto / bind_ip lookup. 미존재 시 default 사용.
+read -r PORT PROTO BIND_IP < <(python3 - "$HA_JSON" "$SVC" <<'PY'
+import json, sys, os
+ha_json, svc = sys.argv[1], sys.argv[2]
+defaults = {"csc": (4420, "tcp", ""),
+            "csp": (5060, "udp", ""),
+            "psp": (5060, "udp", "")}
+port, proto, bind_ip = defaults.get(svc, (0, "udp", ""))
+if os.path.isfile(ha_json):
+    try:
+        cfg = json.load(open(ha_json))
+        s = (cfg.get("services") or {}).get(svc) or {}
+        port = s.get("port", port)
+        proto = s.get("proto", proto)
+        bind_ip = s.get("bind_ip", bind_ip)
+    except Exception:
+        pass
+print(f"{port} {proto} {bind_ip}")
+PY
+)
+
+if [[ -z "${PORT:-}" || "$PORT" == "0" ]]; then
+    echo "cims-health: port unknown for svc=$SVC" >&2
+    exit 2
+fi
+
+case "$PROTO" in
+    tcp) FLAG="-lnt" ;;
+    udp|*) FLAG="-lnu" ;;
+esac
+
+if [[ -n "$BIND_IP" ]]; then
+    ss $FLAG "src ${BIND_IP}:${PORT}" 2>/dev/null | awk 'NR>1 {found=1} END {exit found?0:1}'
+else
+    ss $FLAG "sport = :${PORT}" 2>/dev/null | awk 'NR>1 {found=1} END {exit found?0:1}'
+fi

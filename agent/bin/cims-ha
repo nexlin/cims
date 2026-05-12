@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# agent/bin/cims-ha — CIMS HA (keepalived + systemd unit) 운영 도구
+#
+# 사용법:
+#   cims-ha install         keepalived 패키지 설치 (sudo apt)
+#   cims-ha config          ha.json + 템플릿 → out/{keepalived.conf, cims@.service}
+#   cims-ha check           keepalived -t syntax 검증
+#   cims-ha apply           /etc/keepalived/ + /etc/systemd/system/ 배포
+#   cims-ha start|stop|status   systemctl 래퍼
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HA_DIR="$(cd "$SCRIPT_DIR/../keepalived" && pwd)"
+HA_OUT="$HA_DIR/out"
+HA_JSON="$HA_DIR/ha.json"
+HA_UNIT_DIR="$(cd "$SCRIPT_DIR/../systemd" && pwd)"
+
+# 색상 / 로깅 helpers
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
+ok()      { echo -e "${GREEN}[OK]${NC}    $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+err()     { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+header()  { echo -e "\n${BOLD}$*${NC}"; }
+
+source "$SCRIPT_DIR/../lib/ha.sh"
+
+cmd_ha "$@"

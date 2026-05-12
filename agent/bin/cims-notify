@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# agent/bin/cims-notify — generic keepalived state transition hook
+#
+# 사용법: (keepalived 의 vrrp_instance notify 에서 호출)
+#   cims-notify <svc> <TYPE> <NAME> <STATE> <PRIORITY>
+#
+# keepalived 가 인자 4개 (TYPE/NAME/STATE/PRIORITY) 를 자동 전달. <svc> 는
+# keepalived 설정 시 cims-notify 호출 라인에 명시 (`notify
+# "${HA_DIR}/cims-notify csc"`).
+#
+# 동작:
+#   MASTER 승격 → systemctl start cims@<svc>
+#   BACKUP|FAULT → systemctl stop  cims@<svc>
+#   STOP (keepalived 자체 종료) → 무변경
+#
+# 옛 notify_{csc,csp,psp}.sh (각 서비스별 분리) 의 대체.
+
+set -euo pipefail
+
+SVC="${1:-}"
+TYPE="${2:-}"
+NAME="${3:-}"
+STATE="${4:-}"
+PRIO="${5:-}"
+
+if [[ -z "$SVC" || -z "$STATE" ]]; then
+    echo "usage: cims-notify <svc> <TYPE> <NAME> <STATE> <PRIORITY>" >&2
+    exit 2
+fi
+
+LOG="${HA_LOG_DIR:-/var/log/cims-ha}/notify_${SVC}.log"
+UNIT="cims@${SVC}.service"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+
+log() { echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: $*" >> "$LOG"; }
+
+case "$STATE" in
+    MASTER)
+        log "MASTER 승격 → systemctl start ${UNIT}"
+        systemctl start "${UNIT}" 2>>"$LOG" || log "FAIL: systemctl start ${UNIT}"
+        ;;
+    BACKUP|FAULT)
+        log "${STATE} 강등 → systemctl stop ${UNIT}"
+        systemctl stop "${UNIT}" 2>>"$LOG" || log "FAIL: systemctl stop ${UNIT}"
+        ;;
+    STOP)
+        log "keepalived 자체 종료 — ${UNIT} 상태 유지 (운영자가 직접 제어)"
+        ;;
+    *)
+        log "알 수 없는 상태 — 무시"
+        ;;
+esac
+exit 0

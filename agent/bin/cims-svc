@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# agent/bin/cims-svc — CIMS 서비스 lifecycle 운영 도구
+#
+# 사용법:
+#   cims-svc start  <svc>     # 서비스 시작
+#   cims-svc stop   <svc>     # 서비스 중지
+#   cims-svc restart <svc>    # 재시작
+#   cims-svc status           # 전체 상태
+#   cims-svc log    <svc>     # 로그 tail -f
+#
+#   <svc> = all | cmp | csp | cwrtc | csc | console | phone
+#         | pmp | imp | psp | isp                  (변종)
+#         | tb | tb-csc | tb-console               (Test-Bed)
+#
+# 배포본 위치: ${install_path}/agent/bin/cims-svc
+# 개발 환경: ${repo_root}/build/dist/agent/bin/cims-svc (cims.sh sync 로 동기화)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# DIST_DIR 결정 (cims.sh 와 동일 동작):
+# - 배포본 (agent/ 부모에 CMakeLists.txt 없음): DIST_DIR = agent 의 부모 (dist 루트)
+# - 개발 (소스 트리; agent/ 부모에 CMakeLists.txt 있음): DIST_DIR = <repo>/build/dist
+_PARENT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+if [[ -f "$_PARENT/CMakeLists.txt" ]]; then
+    DIST_DIR="$_PARENT/build/dist"
+    SRC_CONSOLE="$_PARENT/cims-console"
+    SRC_PHONE="$_PARENT/cims-phone"
+else
+    DIST_DIR="$_PARENT"
+    SRC_CONSOLE=""
+    SRC_PHONE=""
+fi
+
+PID_DIR="$DIST_DIR/run"
+LOG_DIR="$DIST_DIR/log"
+mkdir -p "$PID_DIR" "$LOG_DIR"
+
+# 색상 / 로깅 helpers — lifecycle.sh 가 사용
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
+ok()      { echo -e "${GREEN}[OK]${NC}    $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+err()     { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+header()  { echo -e "\n${BOLD}$*${NC}"; }
+
+# lifecycle library
+source "$SCRIPT_DIR/../lib/lifecycle.sh"
+
+usage() {
+    cat <<EOF
+사용법: cims-svc <subcommand> [args]
+
+  start    [svc|all]      서비스 시작 (기본: all)
+  stop     [svc|all]      서비스 중지
+  restart  [svc|all]      재시작
+  status                  전체 상태
+  log      <svc>          로그 tail -f
+
+  svc: cmp|pmp|imp|csp|psp|isp|cwrtc|csc|console|phone|tb-csc|tb-console
+       all = cmp csp cwrtc csc console phone
+       tb  = tb-csc tb-console
+
+DIST_DIR=$DIST_DIR
+EOF
+}
+
+case "${1:-help}" in
+    start)    shift; header "=== CIMS 시작 ==="; cmd_start "$@"; echo ""; cmd_status ;;
+    stop)     shift; cmd_stop "$@"; echo ""; cmd_status ;;
+    restart)  shift; header "=== CIMS 재시작 ==="; cmd_restart "$@"; echo ""; cmd_status ;;
+    status)   cmd_status ;;
+    log)      shift; cmd_log "${1:-csp}" ;;
+    help|--help|-h) usage ;;
+    *)        err "알 수 없는 subcommand: $1"; usage; exit 1 ;;
+esac
