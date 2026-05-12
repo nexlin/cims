@@ -46,11 +46,16 @@ interface NetIface {
   hint?: string           // 'mgmt 사용중' / 'service 권장'
 }
 
-/** IP binding — slot 에 운영자가 선택한 인터페이스 + IP */
+/** IP binding — 운영자가 인터페이스 + IP 선택 + 용도(slot) 매핑 */
+type BindingStatus = 'up' | 'down' | 'unknown'
+
 interface IpBinding {
-  slot: string            // IpSlot.name 와 매핑
-  iface?: string          // NetIface.name (선택, 자유 입력 가능)
-  ip: string              // 선택한 IP (인터페이스 의 IP 또는 직접 입력)
+  bid: number               // 행 단위 id (운영자가 row 추가/삭제 — slot 중복 가능)
+  slot: string              // 용도 — 빈 문자열 ('') 도 허용 (운영자가 아직 미선택)
+  iface?: string            // NetIface.name
+  ip: string                // 선택한 IP (iface 의 IP default, 운영자 override)
+  mask?: number             // default 24
+  status?: BindingStatus    // 'up' / 'down' / 'unknown'. [확인] 후 갱신
 }
 
 interface ServerRow {
@@ -143,16 +148,16 @@ const INITIAL_SERVICES: ServiceRow[] = [
     vrid: 52, vipMask: 24, authPass: 'secret01',
     packageIds: [2],
     vipBindings: [
-      { slot: 'SIP', iface: 'eth1', ip: '10.0.0.100' },
+      { bid: 1001, slot: 'SIP', iface: 'eth1', ip: '10.0.0.100', mask: 24, status: 'up' },
     ],
     servers: [
       { id: 11, name: 'VoLTE SIP Server-01', role: 'master',
         ip: '192.168.10.21', status: 'online', agent_version: '0.0.1', token: 'tok-a1b2c3d4',
         interfaces: DEMO_IFACES,
         serviceIpBindings: [
-          { slot: 'SIP',   iface: 'eth1', ip: '10.0.0.21' },
-          { slot: 'Admin', iface: 'eth0', ip: '192.168.10.21' },
-          { slot: 'Stats', iface: 'eth1', ip: '10.0.0.21' },
+          { bid: 101, slot: 'SIP',   iface: 'eth1', ip: '10.0.0.21',     mask: 24, status: 'up'   },
+          { bid: 102, slot: 'Admin', iface: 'eth0', ip: '192.168.10.21', mask: 24, status: 'up'   },
+          { bid: 103, slot: 'Stats', iface: 'eth1', ip: '10.0.0.21',     mask: 24, status: 'unknown' },
         ] },
       { id: 12, name: 'VoLTE SIP Server-02', role: 'backup',
         ip: null, status: 'pending', agent_version: null, token: 'tok-e5f6g7h8',
@@ -163,21 +168,21 @@ const INITIAL_SERVICES: ServiceRow[] = [
     id: 2, name: 'VoLTE Media', mode: 'all_active',
     vrid: 53, vipMask: 24, authPass: 'secret02',
     packageIds: [4],
-    vipBindings: [],   // AA media — VIP slot 없음 (cmp 는 vip slot 정의 안 함)
+    vipBindings: [],   // AA media — cmp 는 vip slot 정의 안 함
     servers: [
       { id: 21, name: 'VoLTE Media-01', role: null,
         ip: '192.168.10.31', status: 'online', agent_version: '0.0.1', token: 'tok-aa01',
         interfaces: DEMO_IFACES_31,
         serviceIpBindings: [
-          { slot: 'RTP',     iface: 'eth1', ip: '10.0.0.31' },
-          { slot: 'Control', iface: 'eth1', ip: '10.0.0.31' },
+          { bid: 201, slot: 'RTP',     iface: 'eth1', ip: '10.0.0.31', mask: 24, status: 'up'   },
+          { bid: 202, slot: 'Control', iface: 'eth1', ip: '10.0.0.31', mask: 24, status: 'down' },
         ] },
       { id: 22, name: 'VoLTE Media-02', role: null,
         ip: '192.168.10.32', status: 'online', agent_version: '0.0.1', token: 'tok-aa02',
         interfaces: DEMO_IFACES_32,
         serviceIpBindings: [
-          { slot: 'RTP',     iface: 'eth1', ip: '10.0.0.32' },
-          { slot: 'Control', iface: 'eth1', ip: '10.0.0.32' },
+          { bid: 203, slot: 'RTP',     iface: 'eth1', ip: '10.0.0.32', mask: 24, status: 'up' },
+          { bid: 204, slot: 'Control', iface: 'eth1', ip: '10.0.0.32', mask: 24, status: 'up' },
         ] },
     ],
   },
@@ -380,11 +385,10 @@ export default function HaServicesPage() {
         <thead>
           <tr style={{ background: '#f7f8fa', fontSize: 12, color: '#666' }}>
             <th style={th(60)}>#</th>
-            <th style={thLeft()}>이름</th>
+            <th style={thLeft(240)}>이름</th>
             <th style={th(110)}>유형</th>
             <th style={thLeft(140)}>mgmt IP</th>
-            <th style={thLeft(160)}>서비스 IP</th>
-            <th style={thLeft(180)}>VIP / VRID</th>
+            <th style={thLeft(220)}>IP (서비스 / VIP·VRID)</th>
             <th style={th(120)}>상태</th>
             <th style={th(150)}>액션</th>
           </tr>
@@ -433,7 +437,7 @@ export default function HaServicesPage() {
                   <option value="standalone">Standalone (자식 N)</option>
                 </select>
               </td>
-              <td colSpan={4} style={tdLeft()}>
+              <td colSpan={3} style={tdLeft()}>
                 <span style={{ fontSize: 11, color: '#888' }}>
                   생성 후 mgmt IP / 서비스 IP / VIP / auth_pass 편집 + 서버 토큰 자동 발급
                 </span>
@@ -523,15 +527,12 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         <td style={tdLeft(140)}>
           <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
         </td>
-        <td style={tdLeft(160)}>
-          <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
-        </td>
-        <td style={tdLeft(180)}>
+        <td style={tdLeft(220)}>
           {isStandalone || p.vipSlots.length === 0 ? (
             <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
           ) : (
             <button onClick={() => p.setVipExpand(!p.vipExpanded)} style={chipBtn(p.vipExpanded)}>
-              📡 VIP {svc.vipBindings.length}/{p.vipSlots.length} {p.vipExpanded ? '▲' : '▼'}
+              📡 VIP {svc.vipBindings.length}/{p.vipSlots.length} (VRID {svc.vrid}) {p.vipExpanded ? '▲' : '▼'}
             </button>
           )}
         </td>
@@ -546,7 +547,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
       {/* VIP expand panel (서비스 행 다음) */}
       {p.vipExpanded && p.vipSlots.length > 0 && (
         <tr style={{ background: '#f8f9fb' }}>
-          <td colSpan={8} style={{ padding: '10px 16px 12px 60px' }}>
+          <td colSpan={7} style={{ padding: '10px 16px 12px 60px' }}>
             <IpSlotPanel
               title="VIP slots (서비스 단위 — A/S fail-over 공유, AA 는 사용 안 함)"
               slots={p.vipSlots}
@@ -579,7 +580,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
       {expanded && canAddServer && (
         <tr style={{ background: '#fcfdfe' }}>
           <td style={td(60)}></td>
-          <td colSpan={7} style={{ padding: '6px 12px' }}>
+          <td colSpan={6} style={{ padding: '6px 12px' }}>
             <button onClick={p.addServer} style={btnAdd(true)}>
               ＋ 서버 추가 ({MODE_LABEL[svc.mode]} — 신규 토큰 발행)
             </button>
@@ -591,7 +592,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
       {expanded && (
         <tr style={{ background: '#fcfdfe' }}>
           <td style={td(60)}></td>
-          <td colSpan={7} style={{ padding: '6px 12px' }}>
+          <td colSpan={6} style={{ padding: '6px 12px' }}>
             <PackagesArea svc={svc}
                           pickerOpen={p.pkgPickerOpen}
                           setPickerOpen={p.setPkgPicker}
@@ -651,7 +652,7 @@ function ServerRows(p: ServerRowsProps) {
             {srv.ip ?? '— (enroll 후 자동)'}
           </span>
         </td>
-        <td style={tdLeft(160)}>
+        <td style={tdLeft(220)}>
           {p.serviceSlots.length === 0 ? (
             <span style={{ color: '#aaa', fontSize: 12 }}>— (패키지 없음)</span>
           ) : !enrollDone ? (
@@ -663,9 +664,6 @@ function ServerRows(p: ServerRowsProps) {
               📡 서비스 IP {srv.serviceIpBindings.length}/{p.serviceSlots.length} {p.svcIpExpanded ? '▲' : '▼'}
             </button>
           )}
-        </td>
-        <td style={tdLeft(180)}>
-          <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
         </td>
         <td style={td(120)}>
           <span style={{ color: STATUS_COLOR[srv.status], fontWeight: 'bold' }}>
@@ -683,7 +681,7 @@ function ServerRows(p: ServerRowsProps) {
 
       {p.svcIpExpanded && enrollDone && p.serviceSlots.length > 0 && (
         <tr style={{ background: '#f8f9fb' }}>
-          <td colSpan={8} style={{ padding: '10px 16px 12px 76px' }}>
+          <td colSpan={7} style={{ padding: '10px 16px 12px 76px' }}>
             <IpSlotPanel
               title={`서비스 IP slots (${srv.name} — 패키지 ${svc.packageIds.length}개에서 요구)`}
               slots={p.serviceSlots}
@@ -704,99 +702,188 @@ function ServerRows(p: ServerRowsProps) {
 
 function IpSlotPanel({ title, slots, bindings, interfaces, vrid, onChange }: {
   title: string
-  slots: IpSlot[]
-  bindings: IpBinding[]
+  slots: IpSlot[]            // 운영자가 "용도" select 에 사용 (slot.name 만 list)
+  bindings: IpBinding[]      // 행 단위 (bid)
   interfaces: NetIface[]
   vrid?: number | null
   onChange: (bindings: IpBinding[]) => void
 }) {
-  const bindingFor = (slot: IpSlot): IpBinding | undefined =>
-    bindings.find(b => b.slot === slot.name)
-
-  const update = (slot: IpSlot, patch: Partial<IpBinding>) => {
-    const existing = bindingFor(slot)
-    const next: IpBinding = existing
-      ? { ...existing, ...patch }
-      : { slot: slot.name, iface: undefined, ip: '', ...patch }
-    const others = bindings.filter(b => b.slot !== slot.name)
-    onChange([...others, next])
+  // 행 추가 — 새 bid 생성, default iface = 첫 인터페이스
+  const addRow = () => {
+    const newId = Math.max(0, ...bindings.map(b => b.bid)) + 1
+    const firstIface = interfaces[0]
+    onChange([...bindings, {
+      bid: newId,
+      slot: '',
+      iface: firstIface?.name,
+      ip: firstIface?.ip ?? '',
+      mask: firstIface?.mask ?? 24,
+      status: 'unknown',
+    }])
   }
+  const updateRow = (bid: number, patch: Partial<IpBinding>) =>
+    onChange(bindings.map(b => b.bid === bid ? { ...b, ...patch } : b))
+  const removeRow = (bid: number) => onChange(bindings.filter(b => b.bid !== bid))
+
+  // mock IP up 확인 — 실제 wiring 시 agent 에 check 명령
+  const checkRow = (bid: number) => {
+    updateRow(bid, { status: 'unknown' })
+    window.setTimeout(() => {
+      // mock: 70% up, 30% down
+      const ok = Math.random() < 0.7
+      updateRow(bid, { status: ok ? 'up' : 'down' })
+    }, 600)
+  }
+
+  const slotNames = slots.map(s => s.name)
+  const usedSlots = new Set(bindings.map(b => b.slot).filter(Boolean))
 
   return (
     <div style={{ border: '1px solid #d8e0ea', borderRadius: 6, padding: 12, background: '#fff' }}>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 10 }}>
         {title}
       </div>
 
-      {interfaces.length > 0 && (
-        <div style={{ marginBottom: 10, fontSize: 11 }}>
-          <span style={{ color: '#666', marginRight: 8 }}>인터페이스 (agent 보고):</span>
-          {interfaces.map(iface => (
-            <span key={iface.name} style={{
-              marginRight: 8, padding: '1px 6px', background: '#eef',
-              borderRadius: 3, fontFamily: 'monospace',
-            }}>
-              <b>{iface.name}</b> {iface.ip}/{iface.mask}
-              {iface.hint && <span style={{ color: '#888', marginLeft: 4 }}>· {iface.hint}</span>}
-            </span>
-          ))}
+      {/* 1. 인터페이스 — 정보 표시 (먼저) */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: '#666', marginBottom: 4,
+                      display: 'flex', alignItems: 'center', gap: 8 }}>
+          <b>인터페이스 (agent 보고):</b>
+          <button style={btnSmall()} disabled>↻ 새로고침</button>
+          <span style={{ color: '#aaa', fontSize: 10 }}>(prototype — 실제 wiring 시 agent metric)</span>
         </div>
-      )}
+        {interfaces.length === 0 ? (
+          <div style={{ color: '#aaa', fontSize: 12 }}>(없음 — enroll 미완료)</div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {interfaces.map(iface => (
+              <span key={iface.name} style={{
+                padding: '3px 8px', background: '#eef4fa',
+                border: '1px solid #c5d8eb', borderRadius: 3,
+                fontFamily: 'monospace', fontSize: 11,
+              }}>
+                <b>{iface.name}</b> {iface.ip}/{iface.mask}
+                {iface.hint && <span style={{ color: '#888', marginLeft: 4 }}>· {iface.hint}</span>}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
 
+      {/* 2. 용도 매핑 — 행 단위 */}
+      <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
+        <b>IP 매핑</b> — 인터페이스/IP 선택 후 "용도" 지정. 같은 인터페이스를 여러 용도에 매핑 가능.
+      </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ background: '#f5f5f5', color: '#666' }}>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 80 }}>slot</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>port/proto</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 120 }}>인터페이스</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left' }}>IP</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 40 }}>#</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>인터페이스</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 180 }}>IP / mask</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>용도</th>
             {vrid != null && <th style={{ padding: '4px 8px', textAlign: 'left', width: 60 }}>VRID</th>}
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 100 }}>상태</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left' }}>액션</th>
           </tr>
         </thead>
         <tbody>
-          {slots.map(slot => {
-            const b = bindingFor(slot)
-            return (
-              <tr key={slot.name}>
-                <td style={{ padding: '4px 8px' }}><b>{slot.name}</b></td>
-                <td style={{ padding: '4px 8px', color: '#666' }}>
-                  {slot.port ?? '-'}/{slot.proto ?? '-'}
-                </td>
-                <td style={{ padding: '4px 8px' }}>
-                  <select value={b?.iface ?? ''}
-                          onChange={e => {
-                            const iface = e.target.value || undefined
-                            const ipDefault = interfaces.find(x => x.name === iface)?.ip ?? b?.ip ?? ''
-                            update(slot, { iface, ip: ipDefault })
-                          }}
-                          style={{ width: '95%', padding: '2px 4px', fontSize: 12 }}>
-                    <option value="">(선택)</option>
-                    {interfaces.map(iface => (
-                      <option key={iface.name} value={iface.name}>
-                        {iface.name} ({iface.ip})
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={{ padding: '4px 8px' }}>
-                  <input value={b?.ip ?? ''}
-                         onChange={e => update(slot, { ip: e.target.value })}
-                         placeholder="(미설정)"
-                         style={{ width: '95%', padding: '2px 6px', fontSize: 12,
+          {bindings.length === 0 && (
+            <tr>
+              <td colSpan={vrid != null ? 7 : 6} style={{ padding: '8px', color: '#aaa' }}>
+                (매핑 없음 — 아래 [＋ 행 추가] 로 시작)
+              </td>
+            </tr>
+          )}
+          {bindings.map((b, i) => (
+            <tr key={b.bid}>
+              <td style={{ padding: '4px 8px', color: '#888' }}>{i + 1}</td>
+              <td style={{ padding: '4px 8px' }}>
+                <select value={b.iface ?? ''}
+                        onChange={e => {
+                          const iface = e.target.value || undefined
+                          const found = interfaces.find(x => x.name === iface)
+                          updateRow(b.bid, {
+                            iface,
+                            ip: found?.ip ?? b.ip,
+                            mask: found?.mask ?? b.mask ?? 24,
+                            status: 'unknown',
+                          })
+                        }}
+                        style={{ width: '95%', padding: '2px 4px', fontSize: 12 }}>
+                  <option value="">(선택)</option>
+                  {interfaces.map(iface => (
+                    <option key={iface.name} value={iface.name}>{iface.name}</option>
+                  ))}
+                </select>
+              </td>
+              <td style={{ padding: '4px 8px' }}>
+                <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                  <input value={b.ip}
+                         onChange={e => updateRow(b.bid, { ip: e.target.value, status: 'unknown' })}
+                         placeholder="(IP)"
+                         style={{ width: 110, padding: '2px 6px', fontSize: 12,
                                   border: '1px solid #ddd', borderRadius: 3 }} />
-                </td>
-                {vrid != null && (
-                  <td style={{ padding: '4px 8px', color: '#666' }}>{vrid}</td>
-                )}
-              </tr>
-            )
-          })}
+                  <span>/</span>
+                  <input type="number" value={b.mask ?? 24}
+                         onChange={e => updateRow(b.bid, { mask: parseInt(e.target.value) || 24 })}
+                         style={{ width: 40, padding: '2px 6px', fontSize: 12,
+                                  border: '1px solid #ddd', borderRadius: 3 }} />
+                </span>
+              </td>
+              <td style={{ padding: '4px 8px' }}>
+                <select value={b.slot} onChange={e => updateRow(b.bid, { slot: e.target.value })}
+                        style={{ width: '95%', padding: '2px 4px', fontSize: 12,
+                                 color: b.slot ? '#333' : '#c00' }}>
+                  <option value="">(용도 선택)</option>
+                  {slotNames.map(name => (
+                    <option key={name} value={name}
+                            disabled={usedSlots.has(name) && b.slot !== name}>
+                      {name}{usedSlots.has(name) && b.slot !== name ? ' (사용중)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              {vrid != null && (
+                <td style={{ padding: '4px 8px', color: '#666' }}>{vrid}</td>
+              )}
+              <td style={{ padding: '4px 8px' }}><StatusBadge status={b.status} /></td>
+              <td style={{ padding: '4px 8px' }}>
+                <button onClick={() => checkRow(b.bid)} style={btnSmall()} title="IP up 확인">확인</button>
+                <button onClick={() => removeRow(b.bid)} style={btnSmall()} title="행 삭제">삭제</button>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
-      {slots.length === 0 && (
-        <div style={{ color: '#aaa', fontSize: 12 }}>(패키지가 정의한 slot 없음)</div>
-      )}
+
+      <div style={{ marginTop: 8 }}>
+        <button onClick={addRow}
+                style={btnAdd(true)}
+                disabled={interfaces.length === 0}>
+          ＋ 행 추가 {interfaces.length === 0 && '(인터페이스 정보 필요)'}
+        </button>
+        {slots.length === 0 && (
+          <span style={{ marginLeft: 12, color: '#aaa', fontSize: 11 }}>
+            (패키지 미설치 — 용도 select 비어있음)
+          </span>
+        )}
+      </div>
     </div>
+  )
+}
+
+function StatusBadge({ status }: { status?: BindingStatus }) {
+  const s = status ?? 'unknown'
+  const map: Record<BindingStatus, { icon: string; color: string; label: string }> = {
+    up:      { icon: '●', color: '#27ae60', label: 'up' },
+    down:    { icon: '◐', color: '#c0392b', label: 'down' },
+    unknown: { icon: '○', color: '#888',    label: '미확인' },
+  }
+  const m = map[s]
+  return (
+    <span style={{ fontSize: 12, color: m.color, fontWeight: 'bold' }}>
+      {m.icon} {m.label}
+    </span>
   )
 }
 
