@@ -131,8 +131,8 @@ void CCmpClient::OnTransactionComplete( unsigned int transId, bool success, cons
 // Example: 1001 CSP_MAIN sess_1 CMP_MAIN 0 add 1.2.3.4 1000 0 0
 // Response: 1001 CSP_MAIN sess_1 CMP_MAIN 0 OK ...
 // Phase 1.E-2 wrapper — session sticky → endpoint 선택 후 _SendOnEndpoint 호출.
-bool CCmpClient::SendRequestAndWait( const std::string& strSessionKey,
-                                      const SimpleJson::JsonNode& payload, std::string& strResponse ) {
+bool CCmpClient::SendRequestAndWait( const std::string& strSessionKey, const SimpleJson::JsonNode& payload,
+                                     std::string& strResponse ) {
     CmpEndpoint ep = _ResolveEndpoint( strSessionKey );
     return _SendOnEndpoint( ep, payload, strResponse );
 }
@@ -178,7 +178,7 @@ CmpEndpoint CCmpClient::_ResolveEndpoint( const std::string& strSessionKey ) {
 }
 
 bool CCmpClient::_SendOnEndpoint( const CmpEndpoint& ep, const SimpleJson::JsonNode& payload,
-                                   std::string& strResponse ) {
+                                  std::string& strResponse ) {
     if ( m_hSocket == -1 ) return false;
 
     unsigned int transId;
@@ -261,8 +261,8 @@ bool CCmpClient::_SendOnEndpoint( const CmpEndpoint& ep, const SimpleJson::JsonN
         }
 
         gclsSipLogger.LogMessage( "csp", "cmp", "JSON", strCmd.c_str(),
-                                  ( ep.strIp + ":" + std::to_string( ep.iPort ) ).c_str(), strPacket.c_str(),
-                                  pszSvc, strTxId.c_str(), strSesId.c_str(), strDetail.c_str(), caller.c_str(),
+                                  ( ep.strIp + ":" + std::to_string( ep.iPort ) ).c_str(), strPacket.c_str(), pszSvc,
+                                  strTxId.c_str(), strSesId.c_str(), strDetail.c_str(), caller.c_str(),
                                   callee.c_str() );
     }
 
