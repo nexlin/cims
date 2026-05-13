@@ -237,18 +237,18 @@ async def _health(config: dict) -> HandlerResult:
             'session_id': st.get('session_id', ''),
             'state': st.get('state'),
             'video': st.get('video', False),
-            'started_at': st.get('started_at'),
+            'invite_time': st.get('started_at'),
             'answered_at': st.get('answered_at'),
         })
         role = st.get('role', '')
         sub = st.get('subscriber_id', '')
         if role == 'caller':
-            entry['caller'] = sub
+            entry['initiator'] = sub
             entry['callee'] = st.get('peer_id', entry.get('callee', ''))
         elif role == 'callee':
             entry['callee'] = sub
-            entry.setdefault('caller', st.get('peer_id', ''))
-    result['active_voip'] = sorted(voip_calls.values(), key=lambda x: x.get('started_at') or '')
+            entry.setdefault('initiator', st.get('peer_id', ''))
+    result['active_voip'] = sorted(voip_calls.values(), key=lambda x: x.get('invite_time') or '')
 
     # PTT: group_id 별 참여자 집계
     ptt_groups = {}
@@ -257,9 +257,11 @@ async def _health(config: dict) -> HandlerResult:
         if not gid:
             continue
         grp = ptt_groups.setdefault(gid, {
+            'call_id': st.get('call_id', ''),
             'group_id': gid,
             'session_id': st.get('session_id', ''),
-            'started_at': st.get('started_at'),
+            'invite_time': st.get('started_at'),
+            'state': st.get('state', 'active'),
             'members': [],
             'initiator': None,
         })
@@ -268,7 +270,7 @@ async def _health(config: dict) -> HandlerResult:
         if role == 'initiator':
             grp['initiator'] = sub
         grp['members'].append({'subscriber_id': sub, 'role': role})
-    result['active_ptt'] = sorted(ptt_groups.values(), key=lambda x: x.get('started_at') or '')
+    result['active_ptt'] = sorted(ptt_groups.values(), key=lambda x: x.get('invite_time') or '')
 
     return HandlerResult(status=200, body=result)
 
