@@ -1,255 +1,151 @@
 """
-IDMS Storage Module (MariaDB Version)
-OAuth 2.0 / OIDC 표준을 위한 데이터베이스 기반 저장 모듈
+IDMS Storage — 파일 기반 (file_store).
 
-기능:
-- auth-code 저장/조회/삭제 (MariaDB table: auth_codes)
-- refresh-token 저장/조회/회수 (MariaDB table: refresh_tokens)
-- DB 트랜잭션을 통한 원자적 연산 보장
-- fcntl 파일락 제거 및 DB Row-level 락 활용
+OAuth 2.0 / OIDC 의 auth-code / refresh-token 저장. 옛 MariaDB 버전을
+파일 기반으로 전환 (2026-05-13, Phase 8 마이그레이션).
+
+도메인 (file_store):
+  auth_codes/<code>.json
+  refresh_tokens/<token>.json
+
+원자성: file_store.save 의 atomic write (tmp + rename) 로 충분.
 """
 
-import pymysql
 import time
-from typing import Dict, Optional, List
+from typing import Optional
+
 from util.log_util import Logger
+from services import file_store
 
 logger = Logger()
 
+
 class IdmsStorage:
     def __init__(self):
-        """초기화 (연결 정보는 별도 init_db 메서드에서 수신)"""
-        self.db_config = None
-        self.connection = None
+        self._config: dict = {}
 
     def init_db(self, config: dict):
-        """
-        DB 연결 정보 설정 및 초기 연결 시도
-        
-        Args:
-            config: {
-                "Host": str,
-                "User": str,
-                "Password": str,
-                "Db": str
-            }
-        """
-        self.db_config = config
-        self._get_connection()
+        """호환을 위한 함수명. 실제로는 file_store runtime root 추출."""
+        # 옛 시그니처는 CimsDatabase dict 만 받았으나, file_store 는 전체 csc config 필요.
+        # 호출자가 db_cfg 만 주면 runtime_root 가 CWD 기준 fallback 로 잡힘.
+        # csc_app.py 호출부에서 전체 config 를 전달하도록 갱신했음.
+        self._config = config if isinstance(config, dict) else {}
 
-    def _get_connection(self):
-        """DB 연결 생성 또는 기존 연결 반환 (재연결 로직 포함)"""
-        if self.connection:
-            try:
-                self.connection.ping(reconnect=True)
-                return self.connection
-            except:
-                logger.log_error("Lost connection to MariaDB, attempting to reconnect...")
+    # ==================== Auth Code ====================
 
-        try:
-            self.connection = pymysql.connect(
-                host=self.db_config.get('Host', 'localhost'),
-                user=self.db_config.get('User', 'agapeoom'),
-                password=self.db_config.get('Password', '!core0908'),
-                database=self.db_config.get('Db', 'csc_idms'),
-                charset='utf8mb4',
-                cursorclass=pymysql.cursors.DictCursor,
-                autocommit=True
-            )
-            logger.log_info(f"Connected to MariaDB: {self.db_config.get('Db')}")
-            return self.connection
-        except Exception as e:
-            logger.log_error(f"Failed to connect to MariaDB: {e}")
-            return None
+    def _auth_dir(self):
+        return file_store.domain_dir(self._config, 'auth_codes')
 
-    # ==================== Auth Code 관리 ====================
-    
     def save_auth_code(self, code: str, data: dict) -> bool:
-        """auth-code 저장"""
-        conn = self._get_connection()
-        if not conn: return False
-        
         try:
-            with conn.cursor() as cursor:
-                sql = """
-                INSERT INTO auth_codes 
-                (code, user_id, client_id, redirect_uri, scope, state, issued_at, expires_at, used, code_challenge, code_challenge_method)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(sql, (
-                    code,
-                    data.get("user_id"),
-                    data.get("client_id"),
-                    data.get("redirect_uri"),
-                    data.get("scope"),
-                    data.get("state"),
-                    data.get("issued_at"),
-                    data.get("expires_at"),
-                    1 if data.get("used", False) else 0,
-                    data.get("code_challenge"),
-                    data.get("code_challenge_method")
-                ))
-            logger.log_info(f"Saved auth-code to DB: {code}")
+            obj = dict(data)
+            obj['code'] = code
+            obj['used'] = bool(obj.get('used', False))
+            file_store.save(self._auth_dir(), code, obj)
             return True
         except Exception as e:
-            logger.log_error(f"Failed to save auth-code to DB: {e}")
+            logger.log_error(f"save_auth_code: {e}")
             return False
 
     def get_auth_code(self, code: str) -> Optional[dict]:
-        """auth-code 조회"""
-        conn = self._get_connection()
-        if not conn: return None
-        
         try:
-            with conn.cursor() as cursor:
-                sql = "SELECT * FROM auth_codes WHERE code = %s"
-                cursor.execute(sql, (code,))
-                result = cursor.fetchone()
-                if result:
-                    # DB 1/0 값을 다시 bool로 변환
-                    result["used"] = bool(result["used"])
-                    return result
-            return None
+            r = file_store.load(self._auth_dir(), code)
+            if r is None:
+                return None
+            r['used'] = bool(r.get('used', False))
+            return r
         except Exception as e:
-            logger.log_error(f"Failed to get auth-code from DB: {e}")
+            logger.log_error(f"get_auth_code: {e}")
             return None
 
     def delete_auth_code(self, code: str) -> bool:
-        """auth-code 삭제"""
-        conn = self._get_connection()
-        if not conn: return False
-        
         try:
-            with conn.cursor() as cursor:
-                sql = "DELETE FROM auth_codes WHERE code = %s"
-                result = cursor.execute(sql, (code,))
-            if result > 0:
-                logger.log_info(f"Deleted auth-code from DB: {code}")
-                return True
-            return False
+            return file_store.delete(self._auth_dir(), code)
         except Exception as e:
-            logger.log_error(f"Failed to delete auth-code from DB: {e}")
+            logger.log_error(f"delete_auth_code: {e}")
             return False
 
     def mark_auth_code_used(self, code: str) -> bool:
-        """auth-code를 사용됨으로 표시"""
-        conn = self._get_connection()
-        if not conn: return False
-        
         try:
-            with conn.cursor() as cursor:
-                sql = "UPDATE auth_codes SET used = 1 WHERE code = %s"
-                result = cursor.execute(sql, (code,))
-            if result > 0:
-                logger.log_info(f"Marked auth-code as used in DB: {code}")
-                return True
-            return False
+            r = file_store.load(self._auth_dir(), code)
+            if not r:
+                return False
+            r['used'] = True
+            file_store.save(self._auth_dir(), code, r)
+            return True
         except Exception as e:
-            logger.log_error(f"Failed to mark auth-code as used in DB: {e}")
+            logger.log_error(f"mark_auth_code_used: {e}")
             return False
 
     def cleanup_expired_codes(self) -> int:
-        """만료된 auth-code 정리"""
-        conn = self._get_connection()
-        if not conn: return 0
-        
         try:
             now = int(time.time())
-            with conn.cursor() as cursor:
-                sql = "DELETE FROM auth_codes WHERE expires_at < %s"
-                result = cursor.execute(sql, (now,))
-            if result > 0:
-                logger.log_info(f"Cleaned up {result} expired auth-codes from DB")
-            return result
+            cnt = 0
+            for r in file_store.load_all(self._auth_dir()):
+                exp = r.get('expires_at')
+                if exp is not None and int(exp) < now:
+                    if file_store.delete(self._auth_dir(), r.get('code')):
+                        cnt += 1
+            if cnt:
+                logger.log_info(f"Cleaned up {cnt} expired auth-codes")
+            return cnt
         except Exception as e:
-            logger.log_error(f"Failed to cleanup auth-codes in DB: {e}")
+            logger.log_error(f"cleanup_expired_codes: {e}")
             return 0
 
-    # ==================== Refresh Token 관리 ====================
-    
+    # ==================== Refresh Token ====================
+
+    def _token_dir(self):
+        return file_store.domain_dir(self._config, 'refresh_tokens')
+
     def save_refresh_token(self, token: str, data: dict) -> bool:
-        """refresh-token 저장"""
-        conn = self._get_connection()
-        if not conn: return False
-        
         try:
-            with conn.cursor() as cursor:
-                sql = """
-                INSERT INTO refresh_tokens 
-                (token_id, user_id, client_id, scope, issued_at, expires_at, revoked, rotated_to)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(sql, (
-                    token,
-                    data.get("user_id"),
-                    data.get("client_id"),
-                    data.get("scope"),
-                    data.get("issued_at"),
-                    data.get("expires_at"),
-                    1 if data.get("revoked", False) else 0,
-                    data.get("rotated_to")
-                ))
-            logger.log_info(f"Saved refresh-token to DB: {token[:8]}...")
+            obj = dict(data)
+            obj['token_id'] = token
+            obj['revoked'] = bool(obj.get('revoked', False))
+            file_store.save(self._token_dir(), token, obj)
             return True
         except Exception as e:
-            logger.log_error(f"Failed to save refresh-token to DB: {e}")
+            logger.log_error(f"save_refresh_token: {e}")
             return False
 
     def get_refresh_token(self, token: str) -> Optional[dict]:
-        """refresh-token 조회"""
-        conn = self._get_connection()
-        if not conn: return None
-        
         try:
-            with conn.cursor() as cursor:
-                sql = "SELECT * FROM refresh_tokens WHERE token_id = %s"
-                cursor.execute(sql, (token,))
-                result = cursor.fetchone()
-                if result:
-                    result["revoked"] = bool(result["revoked"])
-                    return result
-            return None
+            r = file_store.load(self._token_dir(), token)
+            if r is None:
+                return None
+            r['revoked'] = bool(r.get('revoked', False))
+            return r
         except Exception as e:
-            logger.log_error(f"Failed to get refresh-token from DB: {e}")
+            logger.log_error(f"get_refresh_token: {e}")
             return None
 
     def revoke_refresh_token(self, token: str, rotated_to: Optional[str] = None) -> bool:
-        """refresh-token 회수"""
-        conn = self._get_connection()
-        if not conn: return False
-        
         try:
-            with conn.cursor() as cursor:
-                if rotated_to:
-                    sql = "UPDATE refresh_tokens SET revoked = 1, rotated_to = %s WHERE token_id = %s"
-                    result = cursor.execute(sql, (rotated_to, token))
-                else:
-                    sql = "UPDATE refresh_tokens SET revoked = 1 WHERE token_id = %s"
-                    result = cursor.execute(sql, (token,))
-            if result > 0:
-                logger.log_info(f"Revoked refresh-token in DB: {token[:8]}...")
-                return True
-            return False
+            r = file_store.load(self._token_dir(), token)
+            if not r:
+                return False
+            r['revoked'] = True
+            if rotated_to:
+                r['rotated_to'] = rotated_to
+            file_store.save(self._token_dir(), token, r)
+            return True
         except Exception as e:
-            logger.log_error(f"Failed to revoke refresh-token in DB: {e}")
+            logger.log_error(f"revoke_refresh_token: {e}")
             return False
 
     def cleanup_expired_tokens(self) -> int:
-        """만료/폐기된 refresh-token 정리"""
-        conn = self._get_connection()
-        if not conn: return 0
-        
         try:
             now = int(time.time())
-            with conn.cursor() as cursor:
-                # 만료되었거나 이미 폐기(revoked)된 토큰 정리
-                # 단, rotated_to의 FK 제약 조건이 있으므로 순서를 고려하거나 제약조건 설정을 맞춰야 함
-                # 여기서는 단순 삭제 시도 (FK ON DELETE SET NULL 설정 덕분에 가능)
-                sql = "DELETE FROM refresh_tokens WHERE expires_at < %s OR revoked = 1"
-                result = cursor.execute(sql, (now,))
-            if result > 0:
-                logger.log_info(f"Cleaned up {result} expired/revoked refresh-tokens from DB")
-            return result
+            cnt = 0
+            for r in file_store.load_all(self._token_dir()):
+                exp = r.get('expires_at')
+                if (exp is not None and int(exp) < now) or r.get('revoked'):
+                    if file_store.delete(self._token_dir(), r.get('token_id')):
+                        cnt += 1
+            if cnt:
+                logger.log_info(f"Cleaned up {cnt} expired/revoked refresh-tokens")
+            return cnt
         except Exception as e:
-            logger.log_error(f"Failed to cleanup refresh-tokens in DB: {e}")
+            logger.log_error(f"cleanup_expired_tokens: {e}")
             return 0

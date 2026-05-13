@@ -148,7 +148,7 @@ C. 검증:
 | 3. deployments/jobs/metrics | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_deployments_jobs_metrics_db_to_file.py` (21 deploy + 42 job + 427 metric). agent_deployment CRUD + agent_job CRUD + JSONL 시계열 metric. `_job_pick_pending` (heartbeat 큐 pick), `_metric_append`/`_metric_load_recent` (시계열). agent_job INSERT 5건 모두 `_job_create` 호출. report 핸들러: agent_job 갱신 + agent_deployment 상태 hook (install_path 추출 포함). LIVE: deployments/agent_metrics/packages/agents/alerts 회기능 정상. |
 | 4. ha_groups | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_ha_groups_db_to_file.py` (0 row). ha_groups.py 전면 재작성 — members 배열을 그룹 JSON 안에 임베드. CRUD + vrid 자동 할당 (file_store 순회 기반) + agent_name enrich. agents.py 의 `_ha_group_map_for_agents` / `_check_ha_capability` 도 file_store. LIVE smoke: AS 그룹 생성 → vrid=51 자동, 멤버 priority 정렬 OK, delete 성공. |
 | 5. csp runtime config | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_csp_runtime_db_to_file.py`. csp_runtime.py 52 SQL ops 5 entities (listener/trunk/route/access/service) + audit JSONL. config_cache.py 도 file_store 로드로 전환. CSP C++ 는 이미 jsonl 파일 SOT (access_services.jsonl 등) — 본 Phase 는 Console 측 정리. routing_rule 의 match/transform, sip_service 의 listeners 는 그룹 JSON 안에 임베드. mcptt.audit_config_change → JSONL append. LIVE smoke: CRUD + audit JSONL 두 줄(CREATE/DELETE) 정상. |
-| 6. monitoring stats | ⚪ 대기 | 독립 |
-| 7. recordings | ⚪ 대기 | 독립 |
-| 8. auth tokens | ⚪ 대기 | 독립 (보안 검토 필요) |
-| 9. organizations | ⚪ 대기 | 가입자와 FK — 마지막 |
+| 6. monitoring stats | 🟢 **완료** (2026-05-13) | stats_daily/monthly/yearly 는 코드 미사용 unused tables — 마이그 불필요, DROP 대상. |
+| 7. recordings | 🟢 **완료** (2026-05-13) | CSC handlers 이미 파일 기반 (call.json + recordings/). CSP `InsertRecording` no-op 화. |
+| 8. auth tokens | 🟢 **완료** (2026-05-13) | `csc/src/services/idms_storage.py` 전면 재작성. auth_codes/refresh_tokens 도메인. |
+| 9. organizations | ⚪ 대기 | 가입자와 FK — 가입자 도메인 DB 유지와 함께 마지막에 결정 |

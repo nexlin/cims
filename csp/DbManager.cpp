@@ -401,33 +401,11 @@ bool CDbManager::EndGroupCallLog( const std::string& ) {
     return true;
 }
 
-bool CDbManager::InsertRecording( const std::string& strCallId, const std::string& strCallType,
-                                  const std::string& strGroupId, const std::string& strCaller,
-                                  const std::string& strCallee, const std::string& strRecordDir, bool bHasVideo ) {
-    std::lock_guard<std::recursive_mutex> lock( m_mutex );
-    if ( !m_pMysql && !Reconnect() ) return false;
-
-    std::string rawA = strRecordDir + "/raw_a.rtp";
-    std::string rawB = strRecordDir + "/raw_b.rtp";
-    std::string rawVA = bHasVideo ? strRecordDir + "/raw_va.rtp" : "";
-    std::string rawVB = bHasVideo ? strRecordDir + "/raw_vb.rtp" : "";
-
-    std::string strSql =
-        "INSERT IGNORE INTO recordings "
-        "(call_id, call_type, group_id, caller, callee, start_time, "
-        " raw_path_a, raw_path_b, raw_path_va, raw_path_vb, has_video, status) "
-        "VALUES ('" +
-        Escape( strCallId ) + "','" + Escape( strCallType ) + "'," +
-        ( strGroupId.empty() ? "NULL" : "'" + Escape( strGroupId ) + "'" ) +
-        ","
-        "'" +
-        Escape( strCaller ) + "','" + Escape( strCallee ) +
-        "',NOW(),"
-        "'" +
-        Escape( rawA ) + "','" + Escape( rawB ) + "'," + ( rawVA.empty() ? "NULL" : "'" + Escape( rawVA ) + "'" ) +
-        "," + ( rawVB.empty() ? "NULL" : "'" + Escape( rawVB ) + "'" ) + "," + ( bHasVideo ? "1" : "0" ) + ",'raw')";
-
-    return ExecuteQuery( strSql );
+bool CDbManager::InsertRecording( const std::string&, const std::string&, const std::string&, const std::string&,
+                                  const std::string&, const std::string&, bool ) {
+    // v3 후속: recordings 메타데이터는 파일 기반 (CallDir 의 call.json + recordings/ 디렉토리).
+    // CSC `/api/v1/recordings` 가 파일 스캔으로 응답. DB 기록 no-op.
+    return true;
 }
 
 // v3: 참가자 기록은 파일 (participants.jsonl) 기반 SOT.

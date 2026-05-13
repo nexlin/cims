@@ -54,10 +54,9 @@ def load_shared_data(config):
     group_path = config.get('Data', {}).get('Group')
     db_config = config.get('CimsDatabase')
 
-    # Initialize MariaDB Storage
-    if db_config:
-        storage.init_db(db_config)
-        logger.log_info("MariaDB Initialized for IDMS Storage")
+    # IdmsStorage: file_store 기반 (Phase 8). 전체 config 전달 (runtime_root 추출용).
+    storage.init_db(config)
+    logger.log_info("IdmsStorage initialized (file_store)")
     
     # Load users: DB primary, file fallback
     db_users_loaded = False

@@ -30,13 +30,13 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | | `ptt_group_members` | cims_schema.sql | (group_id, user_id) UNIQUE + priority |
 | | `ptt_session_seq` (시퀀스) | migrate_ptt_session_seq.sql | PTT 세션 ID 발급 시퀀스 |
 | **조직** | `organizations` | migrate_organizations.sql | code/name/parent_id 트리 |
-| **인증** | `auth_codes` | migrate_idms_tables.sql | IdMS OAuth2 인증 코드 |
-| | `refresh_tokens` | migrate_idms_tables.sql | JWT refresh token |
-| **녹취** | `recordings` | migrate_recordings.sql | 통화 단위 메타 (raw/transcoding/ready) |
-| | `recording_segments` | migrate_recordings.sql | seg_*.rtp 세그먼트 메타 |
-| **모니터링** | `stats_daily` | migrate_monitoring.sql | 일간 KPI 집계 |
-| | `stats_monthly` | migrate_monitoring.sql | 월간 |
-| | `stats_yearly` | migrate_monitoring.sql | 연간 |
+| **인증** | ~~`auth_codes`~~ | — | **파일 기반 완료** (2026-05-13 Phase 8) — `{CimsRuntimeDir}/auth_codes/<code>.json` |
+| | ~~`refresh_tokens`~~ | — | **파일 기반 완료** (Phase 8) — `refresh_tokens/<token>.json` |
+| **녹취** | ~~`recordings`~~ | — | **파일 기반 완료** (2026-05-13 Phase 7) — call.json + recordings/ 디렉토리. CSP InsertRecording no-op, CSC `/api/v1/recordings` 가 파일 스캔. |
+| | ~~`recording_segments`~~ | — | (call.d 내 segments.jsonl 임베드) |
+| **모니터링** | ~~`stats_daily`~~ | — | (Phase 6 — 코드 미사용 unused tables, DROP 대상) |
+| | ~~`stats_monthly`~~ | — | (미사용) |
+| | ~~`stats_yearly`~~ | — | (미사용) |
 | **CSP 런타임** | ~~`csp_listener`~~ | — | **파일 기반 완료** (2026-05-13 Phase 5) — `{CimsRuntimeDir}/csp_listener/<id>.json` |
 | | ~~`sip_trunk`~~ | — | **파일 기반 완료** (Phase 5) |
 | | ~~`routing_rule (+match/transform)`~~ | — | **파일 기반 완료** (Phase 5) — match/transform 임베드 |
