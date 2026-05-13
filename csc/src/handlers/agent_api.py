@@ -259,6 +259,8 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         "disk_gb":       int(body.get("disk_gb") or 0),
         "agent_version": (body.get("agent_version") or "").strip()[:32],
     }
+    ifaces = body.get("interfaces")
+    interfaces_json = json.dumps(ifaces, ensure_ascii=False) if isinstance(ifaces, list) else None
 
     conn = _get_db(config)
     try:
@@ -278,12 +280,13 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
                 "  agent_token=%s, enrollment_token=NULL, "
                 "  hostname=%s, ip_address=%s, os_info=%s, "
                 "  cpu_cores=%s, memory_mb=%s, disk_gb=%s, agent_version=%s, "
+                "  interfaces_json=COALESCE(%s, interfaces_json), "
                 "  status=IF(status='approved','online',status), "
                 "  enrolled_at=NOW(), last_heartbeat=NOW() "
                 "WHERE id=%s",
                 (session_token, info["hostname"], info["ip_address"], info["os_info"],
                  info["cpu_cores"], info["memory_mb"], info["disk_gb"], info["agent_version"],
-                 row["id"])
+                 interfaces_json, row["id"])
             )
     finally:
         conn.close()
@@ -337,26 +340,30 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
         sync_port = int(sync_port) if sync_port is not None else None
     except (TypeError, ValueError):
         sync_port = None
+    ifaces = body.get("interfaces")
+    interfaces_json = json.dumps(ifaces, ensure_ascii=False) if isinstance(ifaces, list) else None
     conn = _get_db(config)
     cert_rotate = False
     try:
         with conn.cursor() as cur:
-            # 상태 갱신 + sync_port 갱신
+            # 상태 갱신 + sync_port + interfaces 갱신
             if sync_port:
                 cur.execute(
                     "UPDATE cims_agent SET last_heartbeat=NOW(), sync_port=%s, "
+                    "  interfaces_json=COALESCE(%s, interfaces_json), "
                     "  status=CASE "
                     "    WHEN status IN ('offline','approved') THEN 'online' "
                     "    ELSE status END "
-                    "WHERE id=%s", (sync_port, agent["id"])
+                    "WHERE id=%s", (sync_port, interfaces_json, agent["id"])
                 )
             else:
                 cur.execute(
                     "UPDATE cims_agent SET last_heartbeat=NOW(), "
+                    "  interfaces_json=COALESCE(%s, interfaces_json), "
                     "  status=CASE "
                     "    WHEN status IN ('offline','approved') THEN 'online' "
                     "    ELSE status END "
-                    "WHERE id=%s", (agent["id"],)
+                    "WHERE id=%s", (interfaces_json, agent["id"])
                 )
             # cert rotation 플래그 조회
             cur.execute("SELECT cert_rotate_pending FROM cims_agent WHERE id=%s", (agent["id"],))

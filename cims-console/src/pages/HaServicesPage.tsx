@@ -1,16 +1,25 @@
 /**
- * HaServicesPage — "서비스(=HA 그룹/단독) → 서버" 트리 list (mock-up prototype).
+ * HaServicesPage — "서비스(=HA 그룹/단독) → 서버" 트리 list.
  *
  * 한 페이지에서 그룹(서비스) 정의 + 서버 자동 발급 + 패키지 일괄 설치 모두 inline 편집.
  * 팝업 없음 — 모든 추가/편집은 행 안에서 expand.
  *
- * 본 페이지는 **prototype** — mock data, 실제 API 호출 없음. 운영자 UX 검증용.
- * 후속: 실제 wiring + 기존 ServersPage/HaGroupsPage 통합/폐기.
+ * 데이터 모델 매핑:
+ *   ServiceRow ↔ HaGroup (mode=active_standby|all_active) — 또는 standalone agent (id=-agent.id)
+ *   ServerRow  ↔ Agent
+ *   PkgDef     ↔ SipPackage (config_template ip_slots — 현재 패키지 이름 기반 hardcoded 매핑)
+ *   NetIface[] ← Agent.interfaces (heartbeat 보고)
+ *   ServiceIpRow[]  ← Agent.service_ip_rows (운영자 설정, PUT /agents/{id})
+ *   VipBinding[]    ← HaGroup.vip_bindings   (운영자 설정, PUT /ha-groups/{id})
+ *   packageIds      ← deployments.filter(...).map(d => d.package_id) (실배포 = 의도)
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { haGroupsApi, type HaGroup, type VipBinding as ApiVipBinding } from '../api/ha_groups'
+import { deploymentApi, type Agent, type SipPackage, type Deployment,
+         type NetIface as ApiNetIface, type ServiceIpRow as ApiServiceIpRow } from '../api/deployment'
 
 // ──────────────────────────────────────────────────────────────
-//  Types + mock data
+//  Types
 // ──────────────────────────────────────────────────────────────
 
 type Mode = 'active_standby' | 'all_active' | 'standalone'
@@ -18,13 +27,10 @@ type Capability = Mode
 type Role = 'master' | 'backup' | null
 type ServerStatus = 'pending' | 'online' | 'offline'
 
-/** IP slot — 패키지 config 가 요구하는 IP 필드. scope 가 'vip' 면 그룹 단위,
- *  'service' 면 서버 단위. 실제 backend 에서는 config_template.json 의 attribute
- *  로 정의됨 (예: {"key": "Setup.Sip.LocalIp", "ip_scope": "service", "ip_slot": "SIP"}).
- */
+/** IP slot — 패키지가 요구하는 IP 필드. scope='vip' 그룹 단위 / 'service' 서버 단위. */
 interface IpSlot {
   scope: 'service' | 'vip'
-  name: string            // 'SIP' / 'Admin' / 'Stats' / 'RTP' 등
+  name: string
   port?: number
   proto?: 'tcp' | 'udp'
 }
@@ -35,178 +41,81 @@ interface PkgDef {
   version: string
   description: string
   capability: Capability
-  ipSlots: IpSlot[]       // 이 패키지가 요구하는 IP slot 들
+  ipSlots: IpSlot[]
 }
 
-/** 인터페이스 — agent 가 ip -a 로 보고. mock data 로 시뮬레이션. */
-interface NetIface {
-  name: string            // 'eth0' / 'eth1' / 'lo'
-  ip: string              // '192.168.10.21'
-  mask: number            // 24
-  hint?: string           // 'mgmt 사용중' / 'service 권장'
-}
-
-/** IP binding 상태 */
+type NetIface = ApiNetIface
 type BindingStatus = 'up' | 'down' | 'unknown'
-
-/** 서비스 IP — 인터페이스 단위 (iface 가 key, 1:1).
- *  서버의 인터페이스 list 가 그대로 행으로 표시 — 운영자가 추가/제거 X.
- *  운영자는 ip/slot 만 변경. [초기화] = NetIface.ip (initial) 로 reset.
- */
-interface ServiceIpRow {
-  iface: string             // NetIface.name (key, 변경 불가)
-  ip: string                // 운영자 변경 가능 (initial 은 NetIface.ip)
-  mask: number              // 운영자 변경 가능 (initial 은 NetIface.mask)
-  slot: string              // 용도 (빈 가능, 패키지 slot 에서 select)
-  status?: BindingStatus    // [적용] 후 갱신
-}
-
-/** VIP binding — 그룹 단위. 옵션 B: 멤버 별 iface 분리 매핑.
- *  용도(slot) 선택 시 → 각 멤버의 serviceIpRows 에서 slot 매칭되는 iface 자동 매핑.
- *  운영자가 memberIfaces 의 각 iface 를 수동 override 가능.
- */
-interface VipBinding {
-  bid: number               // 행 단위 id
-  slot: string              // 용도 — svc.servers 의 serviceIpRows slot union 에서 선택
-  ip: string                // VIP IP
-  mask?: number             // default 24
-  status?: BindingStatus
-  memberIfaces: { [serverId: number]: string }  // 멤버별 iface (자동 + 수동 override)
-}
+type ServiceIpRow = ApiServiceIpRow & { status?: BindingStatus }
+type VipBinding = ApiVipBinding
 
 interface ServerRow {
-  id: number
+  id: number                    // = Agent.id (음수 = pending placeholder)
   name: string
   role: Role
-  ip: string | null            // mgmt IP — agent enroll 후 자동 (운영자 편집 X)
+  ip: string | null             // = Agent.ip_address (mgmt)
   status: ServerStatus
   agent_version: string | null
-  token: string
-  interfaces: NetIface[]       // agent 보고 (인터페이스 list, 변경 X)
-  serviceIpRows: ServiceIpRow[]  // 각 iface 마다 1 row (운영자가 IP/slot 만 변경)
+  token: string                 // enrollment_token (one-time install command 용)
+  interfaces: NetIface[]
+  serviceIpRows: ServiceIpRow[]
 }
 
 interface ServiceRow {
-  id: number
+  id: number                    // HaGroup.id (양수) 또는 -agent.id (standalone)
   name: string
   mode: Mode
-  vrid: number | null     // standalone 은 null
+  vrid: number | null
+  vip: string                   // primary VIP (legacy field, vipBindings 와 별도)
   vipMask: number
   authPass: string
   servers: ServerRow[]
-  packageIds: number[]
-  vipBindings: VipBinding[]  // VIP slot 별 (운영자가 추가)
+  packageIds: number[]          // derived from deployments
+  vipBindings: VipBinding[]
 }
 
-const MOCK_PACKAGES: PkgDef[] = [
-  { id: 1, name: 'csc',     version: '0.1.0', description: '관리 API 서버',     capability: 'active_standby',
-    ipSlots: [
-      { scope: 'service', name: 'Admin', port: 4420, proto: 'tcp' },
-      { scope: 'service', name: 'McPTT', port: 4430, proto: 'tcp' },
-      { scope: 'vip',     name: 'Admin', port: 4420, proto: 'tcp' },
-    ] },
-  { id: 2, name: 'csp',     version: '0.1.0', description: 'VoLTE SIP 서버',   capability: 'active_standby',
-    ipSlots: [
-      { scope: 'service', name: 'SIP',   port: 5060, proto: 'udp' },
-      { scope: 'service', name: 'Admin', port: 4421, proto: 'tcp' },
-      { scope: 'service', name: 'Stats', port: 9000, proto: 'udp' },
-      { scope: 'vip',     name: 'SIP',   port: 5060, proto: 'udp' },
-    ] },
-  { id: 3, name: 'psp',     version: '0.1.0', description: 'PTT SIP 서버',     capability: 'active_standby',
-    ipSlots: [
-      { scope: 'service', name: 'SIP',   port: 5060, proto: 'udp' },
-      { scope: 'vip',     name: 'SIP',   port: 5060, proto: 'udp' },
-    ] },
-  { id: 4, name: 'cmp',     version: '0.1.0', description: 'VoLTE Media',      capability: 'all_active',
-    ipSlots: [
-      { scope: 'service', name: 'RTP',     port: 50000, proto: 'udp' },
-      { scope: 'service', name: 'Control', port: 9000,  proto: 'udp' },
-    ] },
-  { id: 5, name: 'pmp',     version: '0.1.0', description: 'PTT Media',        capability: 'all_active',
-    ipSlots: [
-      { scope: 'service', name: 'RTP',     port: 52000, proto: 'udp' },
-      { scope: 'service', name: 'Floor',   port: 54000, proto: 'udp' },
-      { scope: 'service', name: 'Control', port: 9001,  proto: 'udp' },
-    ] },
-  { id: 6, name: 'cwrtc',   version: '0.1.0', description: 'WebRTC 게이트웨이', capability: 'standalone',
-    ipSlots: [{ scope: 'service', name: 'WS', port: 8443, proto: 'tcp' }] },
-  { id: 7, name: 'console', version: '0.1.0', description: '관리 콘솔',        capability: 'standalone',
-    ipSlots: [{ scope: 'service', name: 'HTTPS', port: 8081, proto: 'tcp' }] },
-  { id: 8, name: 'phone',   version: '0.1.0', description: 'PTT Web UE',       capability: 'standalone',
-    ipSlots: [{ scope: 'service', name: 'HTTPS', port: 3002, proto: 'tcp' }] },
-]
+// 패키지 이름 → IP slot 매핑 (config_template ip_slot 메타데이터 도입 전 임시 hardcoded).
+// 실제 운영자는 ServiceIpPanel 에서 자유 입력 가능 (이 매핑은 hint 용).
+const SLOT_MAP: Record<string, IpSlot[]> = {
+  csc:     [
+    { scope: 'service', name: 'Admin', port: 4420, proto: 'tcp' },
+    { scope: 'service', name: 'McPTT', port: 4430, proto: 'tcp' },
+    { scope: 'vip',     name: 'Admin', port: 4420, proto: 'tcp' },
+  ],
+  csp:     [
+    { scope: 'service', name: 'SIP',   port: 5060, proto: 'udp' },
+    { scope: 'service', name: 'Admin', port: 4421, proto: 'tcp' },
+    { scope: 'service', name: 'Stats', port: 9000, proto: 'udp' },
+    { scope: 'vip',     name: 'SIP',   port: 5060, proto: 'udp' },
+  ],
+  psp:     [
+    { scope: 'service', name: 'SIP',   port: 5060, proto: 'udp' },
+    { scope: 'vip',     name: 'SIP',   port: 5060, proto: 'udp' },
+  ],
+  cmp:     [
+    { scope: 'service', name: 'RTP',     port: 50000, proto: 'udp' },
+    { scope: 'service', name: 'Control', port: 9000,  proto: 'udp' },
+  ],
+  pmp:     [
+    { scope: 'service', name: 'RTP',     port: 52000, proto: 'udp' },
+    { scope: 'service', name: 'Floor',   port: 54000, proto: 'udp' },
+    { scope: 'service', name: 'Control', port: 9001,  proto: 'udp' },
+  ],
+  cwrtc:   [{ scope: 'service', name: 'WS',    port: 8443, proto: 'tcp' }],
+  console: [{ scope: 'service', name: 'HTTPS', port: 8081, proto: 'tcp' }],
+  phone:   [{ scope: 'service', name: 'HTTPS', port: 3002, proto: 'tcp' }],
+}
 
-const DEMO_IFACES: NetIface[] = [
-  { name: 'eth0', ip: '192.168.10.21', mask: 24, hint: 'mgmt 사용중' },
-  { name: 'eth1', ip: '10.0.0.21',     mask: 24, hint: 'service 권장' },
-  { name: 'lo',   ip: '127.0.0.1',     mask: 8  },
-]
-const DEMO_IFACES_22: NetIface[] = [
-  { name: 'eth0', ip: '192.168.10.22', mask: 24, hint: 'mgmt 사용중' },
-  { name: 'eth1', ip: '10.0.0.22',     mask: 24, hint: 'service 권장' },
-  { name: 'lo',   ip: '127.0.0.1',     mask: 8  },
-]
-const DEMO_IFACES_31: NetIface[] = [
-  { name: 'eth0', ip: '192.168.10.31', mask: 24, hint: 'mgmt 사용중' },
-  { name: 'eth1', ip: '10.0.0.31',     mask: 24 },
-  { name: 'lo',   ip: '127.0.0.1',     mask: 8  },
-]
-const DEMO_IFACES_32: NetIface[] = [
-  { name: 'eth0', ip: '192.168.10.32', mask: 24, hint: 'mgmt 사용중' },
-  { name: 'eth1', ip: '10.0.0.32',     mask: 24 },
-  { name: 'lo',   ip: '127.0.0.1',     mask: 8  },
-]
-
-// 데모용 초기 서비스 1-2개 — 운영자가 추가하는 흐름도 함께
-const INITIAL_SERVICES: ServiceRow[] = [
-  {
-    id: 1, name: 'VoLTE SIP Server', mode: 'active_standby',
-    vrid: 52, vipMask: 24, authPass: 'secret01',
-    packageIds: [2],
-    vipBindings: [
-      // master(id=11) SIP 은 eth1, backup(id=12) 은 pending → 빈 (운영자 수동 입력 필요)
-      { bid: 1001, slot: 'SIP', ip: '10.0.0.100', mask: 24, status: 'up',
-        memberIfaces: { 11: 'eth1' } },
-    ],
-    servers: [
-      { id: 11, name: 'VoLTE SIP Server-01', role: 'master',
-        ip: '192.168.10.21', status: 'online', agent_version: '0.0.1', token: 'tok-a1b2c3d4',
-        interfaces: DEMO_IFACES,
-        serviceIpRows: [
-          { iface: 'eth0', ip: '192.168.10.21', mask: 24, slot: 'Admin', status: 'up' },
-          { iface: 'eth1', ip: '10.0.0.21',     mask: 24, slot: 'SIP',   status: 'up' },
-          { iface: 'lo',   ip: '127.0.0.1',     mask: 8,  slot: '',      status: 'unknown' },
-        ] },
-      { id: 12, name: 'VoLTE SIP Server-02', role: 'backup',
-        ip: null, status: 'pending', agent_version: null, token: 'tok-e5f6g7h8',
-        interfaces: [], serviceIpRows: [] },
-    ],
-  },
-  {
-    id: 2, name: 'VoLTE Media', mode: 'all_active',
-    vrid: 53, vipMask: 24, authPass: 'secret02',
-    packageIds: [4],
-    vipBindings: [],   // AA media — cmp 는 vip slot 정의 안 함
-    servers: [
-      { id: 21, name: 'VoLTE Media-01', role: null,
-        ip: '192.168.10.31', status: 'online', agent_version: '0.0.1', token: 'tok-aa01',
-        interfaces: DEMO_IFACES_31,
-        serviceIpRows: [
-          { iface: 'eth0', ip: '192.168.10.31', mask: 24, slot: 'Control', status: 'down' },
-          { iface: 'eth1', ip: '10.0.0.31',     mask: 24, slot: 'RTP',     status: 'up'   },
-          { iface: 'lo',   ip: '127.0.0.1',     mask: 8,  slot: '',        status: 'unknown' },
-        ] },
-      { id: 22, name: 'VoLTE Media-02', role: null,
-        ip: '192.168.10.32', status: 'online', agent_version: '0.0.1', token: 'tok-aa02',
-        interfaces: DEMO_IFACES_32,
-        serviceIpRows: [
-          { iface: 'eth0', ip: '192.168.10.32', mask: 24, slot: 'Control', status: 'up' },
-          { iface: 'eth1', ip: '10.0.0.32',     mask: 24, slot: 'RTP',     status: 'up' },
-          { iface: 'lo',   ip: '127.0.0.1',     mask: 8,  slot: '',        status: 'unknown' },
-        ] },
-    ],
-  },
-]
+function pkgToDef(p: SipPackage): PkgDef {
+  return {
+    id: p.id,
+    name: p.name,
+    version: p.version,
+    description: p.description ?? '',
+    capability: (p.meta?.ha_capability as Capability) ?? 'standalone',
+    ipSlots: SLOT_MAP[p.name] ?? [],
+  }
+}
 
 // ──────────────────────────────────────────────────────────────
 //  Helpers
@@ -236,20 +145,34 @@ const STATUS_ICON: Record<ServerStatus, string> = {
   offline: '○',
 }
 
-function genToken(): string {
-  return 'tok-' + Math.random().toString(36).slice(2, 10)
-}
-
 function pad2(n: number): string {
   return n.toString().padStart(2, '0')
 }
 
-function buildInstallCommand(srv: ServerRow, svc: ServiceRow): string {
-  const role = srv.role ? ` --role ${srv.role}` : ''
+function agentToServer(a: Agent, role: Role): ServerRow {
+  const status: ServerStatus =
+    a.status === 'online' ? 'online'
+    : a.status === 'offline' || a.status === 'error' ? 'offline'
+    : 'pending'
+  return {
+    id: a.id,
+    name: a.name,
+    role,
+    ip: a.ip_address,
+    status,
+    agent_version: a.agent_version,
+    token: '',                                          // pending 만 set, AgentCreateResult.enrollment_token
+    interfaces: a.interfaces ?? [],
+    serviceIpRows: (a.service_ip_rows ?? []) as ServiceIpRow[],
+  }
+}
+
+function buildInstallCommand(token: string, name: string, role: Role): string {
+  const r = role ? ` --role ${role}` : ''
   return `curl -k https://CSC:4420/install-agent.sh | bash -s -- \\
   --csc-url https://CSC:4420 \\
-  --enrollment-token ${srv.token} \\
-  --name ${srv.name} --service ${svc.name}${role}`
+  --enrollment-token ${token} \\
+  --name ${name}${r}`
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -257,152 +180,341 @@ function buildInstallCommand(srv: ServerRow, svc: ServiceRow): string {
 // ──────────────────────────────────────────────────────────────
 
 export default function HaServicesPage() {
-  const [services, setServices] = useState<ServiceRow[]>(INITIAL_SERVICES)
-  const [expanded, setExpanded] = useState<Set<number>>(new Set([1, 2]))
+  const [haGroups, setHaGroups] = useState<HaGroup[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [packages, setPackages] = useState<SipPackage[]>([])
+  const [deployments, setDeployments] = useState<Deployment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string>('')
+
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [adding, setAdding] = useState<{ name: string; mode: Mode | '' } | null>(null)
   const [editingName, setEditingName] = useState<{ kind: 'service' | 'server'; id: number; value: string } | null>(null)
-  const [pkgPickerFor, setPkgPickerFor] = useState<number | null>(null)  // service id
-  const [vipExpandFor, setVipExpandFor] = useState<number | null>(null)  // service id
-  const [svcIpExpandFor, setSvcIpExpandFor] = useState<number | null>(null) // server id
+  const [pkgPickerFor, setPkgPickerFor] = useState<number | null>(null)
+  const [vipExpandFor, setVipExpandFor] = useState<number | null>(null)
+  const [svcIpExpandFor, setSvcIpExpandFor] = useState<number | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  // pending agent 신규 생성 직후 1회용 enrollment_token + install command
+  const [pendingTokens, setPendingTokens] = useState<Map<number, { token: string; cmd: string }>>(new Map())
 
-  // ── helpers ──
   const flash = (msg: string) => { setToast(msg); window.setTimeout(() => setToast(null), 2000) }
+
+  const load = useCallback(async () => {
+    setErr('')
+    try {
+      const [g, a, p, d] = await Promise.all([
+        haGroupsApi.list(),
+        deploymentApi.listAgents(),
+        deploymentApi.listPackages(),
+        deploymentApi.listDeployments(),
+      ])
+      setHaGroups(g); setAgents(a); setPackages(p); setDeployments(d)
+    } catch (e) {
+      setErr(String((e as Error).message ?? e))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const iv = setInterval(() => void load(), 10_000)
+    return () => clearInterval(iv)
+  }, [load])
+
+  const packageMap = useMemo(() => new Map(packages.map(p => [p.id, pkgToDef(p)])), [packages])
+  const agentMap = useMemo(() => new Map(agents.map(a => [a.id, a])), [agents])
+
+  // 서비스(=HA 그룹 + standalone agents) 빌드
+  const services: ServiceRow[] = useMemo(() => {
+    const out: ServiceRow[] = []
+    // HA 그룹 → service
+    for (const g of haGroups) {
+      const members = g.members.slice().sort((a, b) => b.priority - a.priority)
+      const servers = members.map(m => {
+        const a = agentMap.get(m.agent_id)
+        if (!a) return null
+        return agentToServer(a, g.mode === 'active_standby' ? m.role : null)
+      }).filter((s): s is ServerRow => s !== null)
+      const agentIds = new Set(members.map(m => m.agent_id))
+      const groupDeps = deployments.filter(d => agentIds.has(d.agent_id))
+      const pkgIds = Array.from(new Set(groupDeps.map(d => d.package_id)))
+      out.push({
+        id: g.id,
+        name: g.name,
+        mode: g.mode,
+        vrid: g.vrid,
+        vip: g.vip,
+        vipMask: g.vip_mask,
+        authPass: g.auth_pass,
+        servers,
+        packageIds: pkgIds,
+        vipBindings: g.vip_bindings ?? [],
+      })
+    }
+    // standalone agents (ha_group 미배정)
+    for (const a of agents) {
+      if (a.ha_group) continue
+      const deps = deployments.filter(d => d.agent_id === a.id)
+      const pkgIds = Array.from(new Set(deps.map(d => d.package_id)))
+      out.push({
+        id: -a.id,                          // 음수 = standalone marker
+        name: a.name,
+        mode: 'standalone',
+        vrid: null,
+        vip: '',
+        vipMask: 24,
+        authPass: '',
+        servers: [agentToServer(a, null)],
+        packageIds: pkgIds,
+        vipBindings: [],
+      })
+    }
+    return out
+  }, [haGroups, agents, deployments, agentMap])
+
   const toggleExpand = (id: number) => setExpanded(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
   })
-  const nextServiceId = () => Math.max(0, ...services.map(s => s.id)) + 1
-  const nextServerId = () => {
-    const all = services.flatMap(s => s.servers.map(x => x.id))
-    return Math.max(99, ...all) + 1
-  }
-  const nextVrid = () => {
-    const used = new Set(services.map(s => s.vrid).filter((v): v is number => v !== null))
-    for (let v = 51; v <= 255; v++) if (!used.has(v)) return v
-    return 51
-  }
 
-  // 패키지가 정의한 IP slot 들 (서비스 전체에서 합집합) — 그룹 단위 (vip) / 서버 단위 (service)
+  // 패키지 IP slot 합집합 — service 의 packageIds 에 등록된 패키지 기준
   function slotsForService(svc: ServiceRow, scope: 'service' | 'vip'): IpSlot[] {
     const slots: IpSlot[] = []
     const seen = new Set<string>()
     for (const pkgId of svc.packageIds) {
-      const pkg = MOCK_PACKAGES.find(p => p.id === pkgId)
+      const pkg = packageMap.get(pkgId)
       if (!pkg) continue
       for (const slot of pkg.ipSlots) {
         if (slot.scope !== scope) continue
-        const key = `${slot.name}:${slot.proto}:${slot.port}`
+        const key = `${slot.name}:${slot.proto ?? ''}:${slot.port ?? ''}`
         if (seen.has(key)) continue
         seen.add(key); slots.push(slot)
       }
     }
     return slots
   }
-  const updateService = (sid: number, patch: Partial<ServiceRow>) =>
-    setServices(prev => prev.map(s => s.id === sid ? { ...s, ...patch } : s))
-  const updateServer = (sid: number, srvId: number, patch: Partial<ServerRow>) =>
-    setServices(prev => prev.map(s => s.id !== sid ? s :
-      { ...s, servers: s.servers.map(x => x.id === srvId ? { ...x, ...patch } : x) }))
 
-  // ── 서비스 추가 ──
-  const createService = () => {
+  // ── 서비스 생성 ──
+  const createService = async () => {
     if (!adding || !adding.name.trim() || !adding.mode) { flash('이름 + 유형 필요'); return }
     const baseName = adding.name.trim()
     const mode = adding.mode as Mode
-    const sid = nextServiceId()
-    let sIdSeq = nextServerId()
-    let servers: ServerRow[] = []
-    const blankSrv = (i: number, role: Role): ServerRow => ({
-      id: sIdSeq + i - 1,
-      name: `${baseName}-${pad2(i)}`,
-      role,
-      ip: null,
-      status: 'pending',
-      agent_version: null,
-      token: genToken(),
-      interfaces: [],
-      serviceIpRows: [],
-    })
-    if (mode === 'active_standby') {
-      servers = [blankSrv(1, 'master'), blankSrv(2, 'backup')]
-    } else {
-      servers = [blankSrv(1, null)]
+
+    try {
+      if (mode === 'standalone') {
+        // standalone = agent 1개 생성 (HA group 없음)
+        const r = await deploymentApi.createAgent(baseName, '')
+        setPendingTokens(prev => new Map(prev).set(r.id, { token: r.enrollment_token, cmd: r.install_command }))
+      } else {
+        // A/S = 멤버 2개, AA = 멤버 1개 (운영자가 추가 가능)
+        const memberCount = mode === 'active_standby' ? 2 : 1
+        const memberAgents: Array<{ agent: Agent; token: string; cmd: string }> = []
+        for (let i = 1; i <= memberCount; i++) {
+          const r = await deploymentApi.createAgent(`${baseName}-${pad2(i)}`, '')
+          memberAgents.push({ agent: r, token: r.enrollment_token, cmd: r.install_command })
+        }
+        // ha_group 생성 — vip 는 빈 값 (운영자가 VIP panel 에서 설정)
+        const gres = await haGroupsApi.create({
+          name: baseName,
+          mode,
+          vip: '0.0.0.0',                              // 임시 placeholder — 추후 VipPanel 에서 update
+          vip_mask: 24,
+          auth_pass: '00000000',                       // 임시 placeholder
+          members: memberAgents.map((m, i) => ({
+            agent_id: m.agent.id,
+            role: i === 0 && mode === 'active_standby' ? 'master' : 'backup',
+            priority: i === 0 ? 100 : 90,
+          })),
+        })
+        setPendingTokens(prev => {
+          const next = new Map(prev)
+          for (const m of memberAgents) next.set(m.agent.id, { token: m.token, cmd: m.cmd })
+          return next
+        })
+        setExpanded(prev => new Set([...prev, gres.id]))
+      }
+      flash(`서비스 "${baseName}" 추가 (${MODE_LABEL[mode]})`)
+      setAdding(null)
+      await load()
+    } catch (e) {
+      flash(`서비스 생성 실패: ${(e as Error).message}`)
     }
-    setServices([...services, {
-      id: sid, name: baseName, mode,
-      vrid: mode === 'standalone' ? null : nextVrid(),
-      vipMask: 24,
-      authPass: '',
-      packageIds: [],
-      vipBindings: [],
-      servers,
-    }])
-    setExpanded(prev => new Set([...prev, sid]))
-    setAdding(null)
-    flash(`서비스 "${baseName}" 추가 (${MODE_LABEL[mode]})`)
   }
 
   // ── 서버 추가 (AA/Standalone 만) ──
-  const addServer = (svc: ServiceRow) => {
+  const addServer = async (svc: ServiceRow) => {
+    if (svc.mode === 'active_standby') return
     const idx = svc.servers.length + 1
-    const newSrv: ServerRow = {
-      id: nextServerId(),
-      name: `${svc.name}-${pad2(idx)}`,
-      role: null,
-      ip: null,
-      status: 'pending',
-      agent_version: null,
-      token: genToken(),
-      interfaces: [],
-      serviceIpRows: [],
+    try {
+      const r = await deploymentApi.createAgent(`${svc.name}-${pad2(idx)}`, '')
+      setPendingTokens(prev => new Map(prev).set(r.id, { token: r.enrollment_token, cmd: r.install_command }))
+      if (svc.id > 0) {
+        // AA HA group 멤버로 등록
+        await haGroupsApi.addMember(svc.id, { agent_id: r.id, role: 'backup', priority: 90 })
+      }
+      flash(`서버 "${r.name}" 추가 — install command 생성됨`)
+      await load()
+    } catch (e) {
+      flash(`서버 추가 실패: ${(e as Error).message}`)
     }
-    updateService(svc.id, { servers: [...svc.servers, newSrv] })
-    flash(`서버 "${newSrv.name}" 추가 — 신규 토큰 발행`)
   }
 
-  // ── 토큰 재발행 ──
-  const regenerateToken = (svc: ServiceRow, srv: ServerRow) => {
+  // ── 토큰 재발행 — 현 agent 삭제 + 신규 agent 생성 (같은 이름) ──
+  const regenerateToken = async (svc: ServiceRow, srv: ServerRow) => {
     if (srv.status === 'online') {
       if (!confirm(`${srv.name} 은 이미 online — 재발행 시 기존 agent 인증 무효. 진행?`)) return
     }
-    const newTok = genToken()
-    updateServer(svc.id, srv.id, { token: newTok, status: 'pending', ip: null, agent_version: null, interfaces: [] })
-    copyInstallCmd({ ...srv, token: newTok }, svc, true)
-    flash(`${srv.name} 토큰 재발행 + clipboard 복사`)
+    try {
+      // 기존 agent 삭제 (HA member 도 자동 cascade)
+      await deploymentApi.deleteAgent(srv.id)
+      // 신규 생성
+      const r = await deploymentApi.createAgent(srv.name, '')
+      setPendingTokens(prev => new Map(prev).set(r.id, { token: r.enrollment_token, cmd: r.install_command }))
+      // HA group 이면 멤버로 재등록
+      if (svc.id > 0) {
+        await haGroupsApi.addMember(svc.id, {
+          agent_id: r.id,
+          role: srv.role ?? 'backup',
+          priority: srv.role === 'master' ? 100 : 90,
+        })
+      }
+      try {
+        await navigator.clipboard.writeText(r.install_command)
+        flash(`${srv.name} 토큰 재발행 + clipboard 복사`)
+      } catch {
+        flash(`${srv.name} 토큰 재발행 (clipboard 권한 없음)`)
+      }
+      await load()
+    } catch (e) {
+      flash(`토큰 재발행 실패: ${(e as Error).message}`)
+    }
   }
 
   // ── install command 복사 ──
-  const copyInstallCmd = (srv: ServerRow, svc: ServiceRow, silent = false) => {
-    const cmd = buildInstallCommand(srv, svc)
-    navigator.clipboard?.writeText(cmd).then(() => {
-      if (!silent) flash(`${srv.name} install command 복사됨`)
-    }).catch(() => flash('clipboard 권한 없음'))
+  const copyInstallCmd = async (srv: ServerRow) => {
+    const pt = pendingTokens.get(srv.id)
+    const cmd = pt ? pt.cmd : buildInstallCommand(srv.token || '(토큰 만료)', srv.name, srv.role)
+    try {
+      await navigator.clipboard.writeText(cmd)
+      flash(`${srv.name} install command 복사됨`)
+    } catch {
+      flash('clipboard 권한 없음')
+    }
   }
 
   // ── 삭제 ──
-  const deleteService = (svc: ServiceRow) => {
+  const deleteService = async (svc: ServiceRow) => {
     if (!confirm(`서비스 "${svc.name}" 과 서버 ${svc.servers.length} 개를 모두 삭제하시겠습니까?`)) return
-    setServices(prev => prev.filter(s => s.id !== svc.id))
-    flash(`"${svc.name}" 삭제`)
+    try {
+      if (svc.id > 0) {
+        // HA 그룹 + 멤버 cascade
+        for (const s of svc.servers) {
+          await deploymentApi.deleteAgent(s.id)
+        }
+        await haGroupsApi.delete(svc.id)
+      } else {
+        // standalone — agent 1개만 삭제
+        const agentId = -svc.id
+        await deploymentApi.deleteAgent(agentId)
+      }
+      flash(`"${svc.name}" 삭제`)
+      await load()
+    } catch (e) {
+      flash(`삭제 실패: ${(e as Error).message}`)
+    }
   }
 
+  // ── 서비스 update (이름 등) ──
+  const updateService = async (sid: number, patch: Partial<ServiceRow>) => {
+    if (sid > 0) {
+      // HA group update
+      const body: Record<string, unknown> = {}
+      if (patch.name !== undefined) body.name = patch.name
+      if (patch.vipBindings !== undefined) body.vip_bindings = patch.vipBindings
+      if (patch.vip !== undefined) body.vip = patch.vip
+      if (patch.authPass !== undefined) body.auth_pass = patch.authPass
+      try {
+        await haGroupsApi.update(sid, body)
+        await load()
+      } catch (e) { flash(`업데이트 실패: ${(e as Error).message}`) }
+    } else {
+      // standalone — agent 이름만 의미 있음
+      if (patch.name !== undefined) {
+        try {
+          await deploymentApi.updateAgent(-sid, { name: patch.name })
+          await load()
+        } catch (e) { flash(`업데이트 실패: ${(e as Error).message}`) }
+      }
+    }
+  }
+
+  // ── 서버 update (이름 / service_ip_rows) ──
+  const updateServer = async (_sid: number, srvId: number, patch: Partial<ServerRow>) => {
+    const body: Parameters<typeof deploymentApi.updateAgent>[1] = {}
+    if (patch.name !== undefined) body.name = patch.name
+    if (patch.serviceIpRows !== undefined) {
+      body.service_ip_rows = patch.serviceIpRows as ApiServiceIpRow[]
+    }
+    if (!Object.keys(body).length) return
+    try {
+      await deploymentApi.updateAgent(srvId, body)
+      await load()
+    } catch (e) { flash(`서버 업데이트 실패: ${(e as Error).message}`) }
+  }
+
+  // ── 패키지 추가/제거 → deployments insert/delete per member ──
+  const updatePackageIds = async (svc: ServiceRow, ids: number[]) => {
+    const current = new Set(svc.packageIds)
+    const next = new Set(ids)
+    const added = ids.filter(id => !current.has(id))
+    const removed = svc.packageIds.filter(id => !next.has(id))
+    try {
+      for (const pkgId of added) {
+        const pkg = packageMap.get(pkgId)
+        if (!pkg) continue
+        for (const srv of svc.servers) {
+          await deploymentApi.createDeployment({
+            agent_id: srv.id,
+            package_id: pkgId,
+            process_name: pkg.name.toUpperCase(),
+            service_functions: [],
+          })
+        }
+      }
+      for (const pkgId of removed) {
+        const target = deployments.filter(d =>
+          d.package_id === pkgId && svc.servers.some(s => s.id === d.agent_id)
+        )
+        for (const d of target) await deploymentApi.deleteDeployment(d.id)
+      }
+      flash(`패키지 ${added.length} 추가 / ${removed.length} 제거`)
+      await load()
+    } catch (e) {
+      flash(`패키지 변경 실패: ${(e as Error).message}`)
+    }
+  }
+
+  if (loading) return <div style={{ padding: 24 }}>로딩 중...</div>
+
   return (
-    <div style={{ padding: 16, width: '100%' }}>
+    <div style={{ padding: 16, width: '100%', height: 'calc(100vh - 120px)',
+                  display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
         <h1 style={{ margin: 0 }}>서버 + HA 관리</h1>
-        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3,
-                       background: '#fff8db', border: '1px solid #f0c75e', color: '#876200' }}>
-          prototype (mock data)
-        </span>
+        <button onClick={() => void load()} style={{ fontSize: 12, padding: '4px 12px',
+                                                     background: '#fff', border: '1px solid #ccc',
+                                                     borderRadius: 3, cursor: 'pointer' }}>↻ 새로고침</button>
       </div>
       <div style={{ color: '#666', fontSize: 13, marginBottom: 16 }}>
         서비스(=HA 그룹/단독) 단위로 서버를 묶어 관리. 유형 선택 시 자동으로 서버 발급(A/S=2, AA/Standalone=1).
         모든 추가/편집은 list 행 안 inline (팝업 없음).
       </div>
+      {err && <div style={{ color: '#c00', marginBottom: 12, fontSize: 12 }}>오류: {err}</div>}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff',
-                      border: '1px solid #e0e0e0', borderRadius: 6, overflow: 'hidden' }}>
-        <thead>
+      <div style={{ flex: 1, overflow: 'auto', minHeight: 0,
+                    border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff' }}>
+        <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
           <tr style={{ background: '#f7f8fa', fontSize: 12, color: '#666' }}>
             <th style={th(60)}>#</th>
             <th style={thLeft(240)}>이름</th>
@@ -414,6 +526,13 @@ export default function HaServicesPage() {
           </tr>
         </thead>
         <tbody>
+          {services.length === 0 && (
+            <tr>
+              <td colSpan={7} style={{ padding: 24, color: '#888', textAlign: 'center' }}>
+                등록된 서비스/서버 없음 — 아래 [＋ 시스템 추가] 로 생성
+              </td>
+            </tr>
+          )}
           {services.map((svc, sIdx) => (
             <ServiceTreeRows
               key={svc.id}
@@ -430,16 +549,19 @@ export default function HaServicesPage() {
               setSvcIpExpand={(srvId, open) => setSvcIpExpandFor(open ? srvId : null)}
               vipSlots={slotsForService(svc, 'vip')}
               serviceSlots={slotsForService(svc, 'service')}
+              packageMap={packageMap}
+              pendingTokens={pendingTokens}
               updateService={updateService}
               updateServer={updateServer}
+              updatePackageIds={updatePackageIds}
               addServer={() => addServer(svc)}
               regenerateToken={(srv) => regenerateToken(svc, srv)}
-              copyCmd={(srv) => copyInstallCmd(srv, svc)}
+              copyCmd={(srv) => copyInstallCmd(srv)}
               onDelete={() => deleteService(svc)}
             />
           ))}
 
-          {/* 인라인 서비스 추가 행 */}
+          {/* 인라인 시스템 추가 행 */}
           {adding && (
             <tr style={{ background: '#f0f8ff' }}>
               <td style={td(60)}>{services.length + 1}</td>
@@ -463,18 +585,19 @@ export default function HaServicesPage() {
                 </span>
               </td>
               <td style={td(150)}>
-                <button onClick={createService} style={btnPrimary()}>생성</button>
+                <button onClick={() => void createService()} style={btnPrimary()}>생성</button>
                 <button onClick={() => setAdding(null)} style={btnSecondary()}>취소</button>
               </td>
             </tr>
           )}
         </tbody>
       </table>
+      </div>
 
-      <div style={{ marginTop: 12 }}>
+      <div style={{ marginTop: 12, flexShrink: 0 }}>
         {!adding && (
           <button onClick={() => setAdding({ name: '', mode: '' })} style={btnAdd()}>
-            ＋ 서비스 추가
+            ＋ 시스템 추가
           </button>
         )}
       </div>
@@ -510,8 +633,11 @@ interface ServiceTreeProps {
   setSvcIpExpand: (srvId: number, open: boolean) => void
   vipSlots: IpSlot[]
   serviceSlots: IpSlot[]
+  packageMap: Map<number, PkgDef>
+  pendingTokens: Map<number, { token: string; cmd: string }>
   updateService: (sid: number, patch: Partial<ServiceRow>) => void
   updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
+  updatePackageIds: (svc: ServiceRow, ids: number[]) => void
   addServer: () => void
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
@@ -521,11 +647,10 @@ interface ServiceTreeProps {
 function ServiceTreeRows(p: ServiceTreeProps) {
   const { svc, idx, expanded, onToggle } = p
   const isStandalone = svc.mode === 'standalone'
-  const canAddServer = svc.mode !== 'active_standby'  // A/S 는 2 고정
+  const canAddServer = svc.mode !== 'active_standby'
 
   return (
     <>
-      {/* 서비스 행 */}
       <tr style={{ borderTop: '2px solid #e0e0e0', background: '#fafbfc' }}>
         <td style={td(60)}>
           <button onClick={onToggle} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11 }}>
@@ -564,7 +689,6 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         </td>
       </tr>
 
-      {/* VIP expand panel (서비스 행 다음) */}
       {p.vipExpanded && p.vipSlots.length > 0 && (
         <tr>
           <td colSpan={7} style={{ padding: '8px 16px 12px 60px' }}>
@@ -578,7 +702,6 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         </tr>
       )}
 
-      {/* 서버 자식 행들 (펼침 시) */}
       {expanded && svc.servers.map((srv, srvIdx) => (
         <ServerRows
           key={srv.id}
@@ -588,13 +711,13 @@ function ServiceTreeRows(p: ServiceTreeProps) {
           setEditingName={p.setEditingName}
           svcIpExpanded={p.svcIpExpandFor === srv.id}
           setSvcIpExpand={(open) => p.setSvcIpExpand(srv.id, open)}
+          pendingToken={p.pendingTokens.get(srv.id)}
           updateServer={p.updateServer}
           regenerateToken={p.regenerateToken}
           copyCmd={p.copyCmd}
         />
       ))}
 
-      {/* [＋ 서버 추가] 행 — AA/Standalone 만 */}
       {expanded && canAddServer && (
         <tr style={{ background: '#fcfdfe' }}>
           <td style={td(60)}></td>
@@ -606,15 +729,15 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         </tr>
       )}
 
-      {/* 패키지 행 */}
       {expanded && (
         <tr style={{ background: '#fcfdfe' }}>
           <td style={td(60)}></td>
           <td colSpan={6} style={{ padding: '6px 12px' }}>
             <PackagesArea svc={svc}
+                          packageMap={p.packageMap}
                           pickerOpen={p.pkgPickerOpen}
                           setPickerOpen={p.setPkgPicker}
-                          onChange={(ids) => p.updateService(svc.id, { packageIds: ids })} />
+                          onChange={(ids) => p.updatePackageIds(svc, ids)} />
           </td>
         </tr>
       )}
@@ -623,7 +746,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
 }
 
 // ──────────────────────────────────────────────────────────────
-//  ServerRows — 서버 행 + (선택적) 서비스 IP expand panel
+//  ServerRows
 // ──────────────────────────────────────────────────────────────
 
 interface ServerRowsProps {
@@ -636,6 +759,7 @@ interface ServerRowsProps {
   setEditingName: (v: { kind: 'service' | 'server'; id: number; value: string } | null) => void
   svcIpExpanded: boolean
   setSvcIpExpand: (open: boolean) => void
+  pendingToken?: { token: string; cmd: string }
   updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
@@ -690,7 +814,11 @@ function ServerRows(p: ServerRowsProps) {
           {srv.agent_version && <span style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>v{srv.agent_version}</span>}
         </td>
         <td style={td(150)}>
-          <button onClick={() => p.copyCmd(srv)} style={btnSmall()}>📋 복사</button>
+          <button onClick={() => p.copyCmd(srv)} style={btnSmall()}
+                  disabled={!p.pendingToken && srv.status !== 'pending'}
+                  title={p.pendingToken ? '신규 발급 토큰' : (srv.status === 'pending' ? '대기' : '이미 enroll 완료')}>
+            📋 복사
+          </button>
           {srv.status !== 'online' && (
             <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}>↻ 토큰</button>
           )}
@@ -715,20 +843,16 @@ function ServerRows(p: ServerRowsProps) {
 }
 
 // ──────────────────────────────────────────────────────────────
-//  ServiceIpPanel — 인터페이스 단위 row (서버 단위 서비스 IP)
-//                   행 = 인터페이스, 운영자가 IP/slot 만 편집.
-//                   [적용] = agent 에 IP 설정 적용 + status 확인.
-//                   [초기화] = agent 가 보고한 initial IP 로 reset.
+//  ServiceIpPanel — 인터페이스 단위 row
 // ──────────────────────────────────────────────────────────────
 
 function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
   title: string
   interfaces: NetIface[]
   rows: ServiceIpRow[]
-  slots: IpSlot[]                 // 참고용 (운영자에게 hint 표시), select 아님
+  slots: IpSlot[]
   onChange: (rows: ServiceIpRow[]) => void
 }) {
-  // 인터페이스 list 기준으로 row 정렬 — 없는 row 는 default 로 자동 생성
   const ifaceRows: ServiceIpRow[] = interfaces.map(iface => {
     const existing = rows.find(r => r.iface === iface.name)
     return existing ?? {
@@ -744,10 +868,7 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
 
   const applyRow = (iface: string) => {
     updateRow(iface, { status: 'unknown' })
-    window.setTimeout(() => {
-      // mock — 70% up / 30% down. 실제 wiring 시 agent 에 ip addr 적용 + check
-      updateRow(iface, { status: Math.random() < 0.7 ? 'up' : 'down' })
-    }, 600)
+    // TODO: agent 에 실제 ip 적용 API (별도 endpoint 필요). 현재는 변경값만 저장.
   }
 
   const resetRow = (iface: string) => {
@@ -829,7 +950,7 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
                 <td style={{ padding: '4px 8px' }}><StatusBadge status={r.status} /></td>
                 <td style={{ padding: '4px 8px' }}>
                   <button onClick={() => applyRow(r.iface)} style={btnSmall()}
-                          title="변경된 IP 를 agent 에 적용 + up 확인">
+                          title="변경된 IP 를 저장 (실제 agent 적용 API 추후)">
                     적용
                   </button>
                   <button onClick={() => resetRow(r.iface)} style={btnSmall()}
@@ -853,7 +974,7 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
 }
 
 // ──────────────────────────────────────────────────────────────
-//  IpSlotPanel — VIP 용 (서비스 단위, slot 별 row). 사용자 결정 대기 중.
+//  VipPanel — VIP slot 단위 row
 // ──────────────────────────────────────────────────────────────
 
 function VipPanel({ title, svc, vrid, onChange }: {
@@ -865,9 +986,7 @@ function VipPanel({ title, svc, vrid, onChange }: {
   const bindings = svc.vipBindings
   const servers = svc.servers
 
-  // 용도 options = svc.servers 의 serviceIpRows 의 slot union (빈 제외)
-  // 각 slot 별로 어느 멤버에 있는지 추적
-  const slotMap = new Map<string, Map<number, string>>()  // slot -> (serverId -> iface)
+  const slotMap = new Map<string, Map<number, string>>()
   for (const srv of servers) {
     for (const r of srv.serviceIpRows) {
       if (!r.slot) continue
@@ -877,7 +996,6 @@ function VipPanel({ title, svc, vrid, onChange }: {
   }
   const availableSlots = Array.from(slotMap.keys()).sort()
 
-  // 자동 매핑 — slot 선택 시 멤버별 iface 자동
   const autoMapMemberIfaces = (slot: string): { [id: number]: string } => {
     const result: { [id: number]: string } = {}
     const ifaceMap = slotMap.get(slot)
@@ -905,7 +1023,7 @@ function VipPanel({ title, svc, vrid, onChange }: {
 
   const applyRow = (bid: number) => {
     updateRow(bid, { status: 'unknown' })
-    window.setTimeout(() => updateRow(bid, { status: Math.random() < 0.7 ? 'up' : 'down' }), 600)
+    // TODO: keepalived config render + reload API. 현재는 변경값 저장만.
   }
 
   return (
@@ -986,13 +1104,13 @@ function VipPanel({ title, svc, vrid, onChange }: {
                 </td>
                 {servers.map(s => {
                   const autoIface = slotMap.get(b.slot)?.get(s.id)
-                  const currentIface = b.memberIfaces[s.id] ?? ''
+                  const currentIface = b.memberIfaces?.[s.id] ?? ''
                   const overridden = autoIface && currentIface !== autoIface
                   return (
                     <td key={s.id} style={{ padding: '4px 8px' }}>
                       <select value={currentIface}
                               onChange={e => updateRow(b.bid, {
-                                memberIfaces: { ...b.memberIfaces, [s.id]: e.target.value },
+                                memberIfaces: { ...(b.memberIfaces ?? {}), [s.id]: e.target.value },
                                 status: 'unknown',
                               })}
                               style={{ width: '95%', padding: '2px 4px', fontSize: 12,
@@ -1051,10 +1169,6 @@ function StatusBadge({ status }: { status?: BindingStatus }) {
   )
 }
 
-// ──────────────────────────────────────────────────────────────
-//  Sub-components
-// ──────────────────────────────────────────────────────────────
-
 function ModeBadge({ mode }: { mode: Mode }) {
   return (
     <span style={{
@@ -1068,10 +1182,10 @@ function StatusSummary({ servers, mode }: { servers: ServerRow[]; mode: Mode }) 
   const online = servers.filter(s => s.status === 'online').length
   const total = servers.length
   const cap = mode === 'active_standby' ? 2 : null
-  const color = online === total ? STATUS_COLOR.online : STATUS_COLOR.pending
+  const color = online === total && total > 0 ? STATUS_COLOR.online : STATUS_COLOR.pending
   return (
     <span style={{ fontSize: 12, color }}>
-      {online === total ? '●' : '◐'} {online}/{cap ?? total}
+      {online === total && total > 0 ? '●' : '◐'} {online}/{cap ?? total}
       {cap && online < cap && <span style={{ marginLeft: 4, color: '#888' }}>(pending {cap - online})</span>}
     </span>
   )
@@ -1109,19 +1223,21 @@ function InlineNameEdit({ kind, id, value, editing, onStart, onChange, onSave, o
   )
 }
 
-function PackagesArea({ svc, pickerOpen, setPickerOpen, onChange }: {
+function PackagesArea({ svc, packageMap, pickerOpen, setPickerOpen, onChange }: {
   svc: ServiceRow
+  packageMap: Map<number, PkgDef>
   pickerOpen: boolean
   setPickerOpen: (open: boolean) => void
   onChange: (ids: number[]) => void
 }) {
+  const allPackages = useMemo(() => Array.from(packageMap.values()), [packageMap])
   const installed = useMemo(
-    () => MOCK_PACKAGES.filter(p => svc.packageIds.includes(p.id)),
-    [svc.packageIds]
+    () => allPackages.filter(p => svc.packageIds.includes(p.id)),
+    [allPackages, svc.packageIds]
   )
   const available = useMemo(
-    () => MOCK_PACKAGES.filter(p => !svc.packageIds.includes(p.id)),
-    [svc.packageIds]
+    () => allPackages.filter(p => !svc.packageIds.includes(p.id)),
+    [allPackages, svc.packageIds]
   )
   const targetMode: Capability = svc.mode
 

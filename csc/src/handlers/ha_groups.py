@@ -191,17 +191,27 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         return HandlerResult(status=500, body={'error': str(e)})
 
 
+def _decode_vip_bindings(raw):
+    if not raw: return []
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
 async def _list_groups(config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, name, mode, vip, vrid, vip_mask, auth_pass, note, "
-                "       create_time, update_time FROM ha_groups ORDER BY id"
+                "       vip_bindings_json, create_time, update_time FROM ha_groups ORDER BY id"
             )
             groups = cur.fetchall()
             for g in groups:
                 if g.get('create_time'): g['create_time'] = g['create_time'].isoformat()
                 if g.get('update_time'): g['update_time'] = g['update_time'].isoformat()
+                g['vip_bindings'] = _decode_vip_bindings(g.pop('vip_bindings_json', None))
                 cur.execute(
                     "SELECT m.agent_id, m.priority, m.role, a.name AS agent_name "
                     "FROM ha_group_members m JOIN cims_agent a ON a.id=m.agent_id "
@@ -217,13 +227,14 @@ async def _get_group(gid: int, config):
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, name, mode, vip, vrid, vip_mask, auth_pass, note, "
-                "       create_time, update_time FROM ha_groups WHERE id=%s", (gid,)
+                "       vip_bindings_json, create_time, update_time FROM ha_groups WHERE id=%s", (gid,)
             )
             g = cur.fetchone()
             if not g:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             if g.get('create_time'): g['create_time'] = g['create_time'].isoformat()
             if g.get('update_time'): g['update_time'] = g['update_time'].isoformat()
+            g['vip_bindings'] = _decode_vip_bindings(g.pop('vip_bindings_json', None))
             cur.execute(
                 "SELECT m.agent_id, m.priority, m.role, a.name AS agent_name "
                 "FROM ha_group_members m JOIN cims_agent a ON a.id=m.agent_id "
@@ -255,13 +266,16 @@ async def _create_group(body, config):
     if mode == 'active_standby' and len(members) not in (0, 2):
         return HandlerResult(status=400, body={'error': 'active_standby requires exactly 2 members (or 0 for late add)'})
 
+    vip_bindings = body.get('vip_bindings')
+    vip_bindings_json = json.dumps(vip_bindings, ensure_ascii=False) if isinstance(vip_bindings, list) else None
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             vrid = _alloc_vrid(cur)
             cur.execute(
-                "INSERT INTO ha_groups (name, mode, vip, vrid, vip_mask, auth_pass, note) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (name, mode, vip, vrid, vip_mask, auth_pass, note)
+                "INSERT INTO ha_groups (name, mode, vip, vrid, vip_mask, auth_pass, note, "
+                "                       vip_bindings_json) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (name, mode, vip, vrid, vip_mask, auth_pass, note, vip_bindings_json)
             )
             gid = cur.lastrowid
             # 멤버 추가
@@ -290,6 +304,10 @@ async def _update_group(gid: int, body, config):
                     fields.append(f"{k}=%s"); vals.append(body[k])
             if 'vip_mask' in body:
                 fields.append("vip_mask=%s"); vals.append(int(body['vip_mask']))
+            if 'vip_bindings' in body:
+                v = body.get('vip_bindings')
+                fields.append("vip_bindings_json=%s")
+                vals.append(json.dumps(v, ensure_ascii=False) if v is not None else None)
             if 'mode' in body:
                 return HandlerResult(status=400, body={'error': 'mode 변경 불가 (그룹 재생성 필요)'})
             if fields:

@@ -167,7 +167,37 @@ def collect_host_info() -> dict:
         info["disk_gb"] = total // (1 << 30)
     except Exception:
         info["disk_gb"] = 0
+    info["interfaces"] = collect_interfaces()
     return info
+
+
+def collect_interfaces() -> list:
+    """ip -j -4 addr 로 IPv4 인터페이스 list 수집. (name, ip, mask) 만 추출.
+    HaServicesPage 의 서비스 IP / VIP 설정 시 운영자에게 후보 iface 제공.
+    """
+    try:
+        out = subprocess.run(["ip", "-j", "-4", "addr"],
+                             capture_output=True, text=True, timeout=3)
+        if out.returncode != 0:
+            return []
+        rows = json.loads(out.stdout or "[]")
+    except Exception:
+        return []
+    result = []
+    for r in rows:
+        name = r.get("ifname")
+        if not name:
+            continue
+        addrs = r.get("addr_info") or []
+        ipv4 = next((a for a in addrs if a.get("family") == "inet"), None)
+        if not ipv4:
+            continue
+        result.append({
+            "name": name,
+            "ip":   ipv4.get("local") or "",
+            "mask": int(ipv4.get("prefixlen") or 0),
+        })
+    return result
 
 
 def collect_metrics() -> dict:
@@ -922,7 +952,7 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     max_backoff = max(heartbeat_sec, 60)
     while True:
         try:
-            hb_body = {}
+            hb_body = {"interfaces": collect_interfaces()}
             if sync_port: hb_body["sync_port"] = sync_port
             status, resp = http_post(f"{csc_url}/api/agent/heartbeat", hb_body,
                                      headers={"X-Agent-Token": state.session_token})

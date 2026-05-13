@@ -88,6 +88,23 @@ export interface AgentHaGroupRef {
   role: 'master' | 'backup'
 }
 
+// HaServicesPage 용 — agent heartbeat 보고 인터페이스
+export interface NetIface {
+  name: string                                  // eth0 / eth1 / lo
+  ip: string
+  mask: number
+  hint?: string
+}
+
+// HaServicesPage 용 — 운영자 설정 iface→slot 매핑
+export interface ServiceIpRow {
+  iface: string
+  ip: string
+  mask: number
+  slot: string                                  // 용도 (자유 입력 / 패키지 slot)
+  status?: 'up' | 'down' | 'unknown'
+}
+
 export interface Agent {
   id: number
   name: string
@@ -107,6 +124,8 @@ export interface Agent {
   create_time: string | null
   has_pending_enrollment: boolean
   ha_group: AgentHaGroupRef | null
+  interfaces: NetIface[] | null
+  service_ip_rows: ServiceIpRow[] | null
 }
 
 export interface AgentCreateResult extends Agent {
@@ -277,7 +296,7 @@ export const deploymentApi = {
   getAgent:      (id: number) => api.get<Agent>(`/agents/${id}`),
   createAgent:   (name: string, note?: string) =>
     api.post<AgentCreateResult>('/agents', { name, note }),
-  updateAgent:   (id: number, body: { name?: string; note?: string }) =>
+  updateAgent:   (id: number, body: { name?: string; note?: string; service_ip_rows?: ServiceIpRow[] | null }) =>
     api.put<Agent>(`/agents/${id}`, body),
   deleteAgent:   (id: number) => api.delete<null>(`/agents/${id}`),
   approveAgent:  (id: number) => api.post<{ ok: boolean }>(`/agents/${id}/approve`, {}),

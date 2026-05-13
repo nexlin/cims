@@ -23,7 +23,6 @@ import StatsMessagesPage from './pages/StatsMessagesPage'
 import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
-import HaGroupsPage from './pages/HaGroupsPage'
 import HaServicesPage from './pages/HaServicesPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
@@ -120,12 +119,11 @@ export const SECTIONS: RouteSection[] = [
     label: '배포',
     icon: Rocket,
     basePath: '/deploy',
-    defaultPath: '/deploy/packages',
+    defaultPath: '/deploy/services',
     routes: [
-      { path: '/deploy/services',  title: '서버 + HA',     component: HaServicesPage, adminOnly: true },
-      { path: '/deploy/packages',  title: '패키지', component: PackagesPage, adminOnly: true },
-      { path: '/deploy/servers',   title: '서버 (구)', component: ServersPage,  adminOnly: true },
-      { path: '/deploy/ha-groups', title: 'HA 그룹 (구)', component: HaGroupsPage, adminOnly: true },
+      { path: '/deploy/services',  title: '서버 + HA',         component: HaServicesPage, adminOnly: true },
+      { path: '/deploy/packages',  title: '패키지',            component: PackagesPage,   adminOnly: true },
+      { path: '/deploy/servers',   title: '서버 Inspector',    component: ServersPage,    adminOnly: true },
     ],
   },
   {

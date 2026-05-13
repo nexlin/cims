@@ -123,6 +123,11 @@ def _actor(handler_args: HandlerArgs) -> str:
 # ════════════════════════════════════════════════════════════
 
 def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
+    import json as _json
+    def _safe_load(raw):
+        if not raw: return None
+        try: return _json.loads(raw)
+        except (TypeError, ValueError): return None
     return {
         "id": r["id"],
         "name": r["name"],
@@ -144,6 +149,9 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
         "has_pending_enrollment": bool(r.get("enrollment_token")),
         # HA 그룹 정보 — 미정의 시 null
         "ha_group": ha_group,
+        # HaServicesPage 용 확장 필드 (없으면 null)
+        "interfaces":      _safe_load(r.get("interfaces_json")),
+        "service_ip_rows": _safe_load(r.get("service_ip_rows_json")),
     }
 
 
@@ -288,6 +296,11 @@ async def _update_agent(handler_args: HandlerArgs, aid: int, config):
     for col in ("name", "note"):
         if col in body:
             fields.append(f"{col}=%s"); values.append(body[col])
+    # HaServicesPage 운영자가 설정한 iface→slot 매핑 (서비스 IP rows)
+    if "service_ip_rows" in body:
+        rows = body.get("service_ip_rows")
+        fields.append("service_ip_rows_json=%s")
+        values.append(json.dumps(rows, ensure_ascii=False) if rows is not None else None)
     if not fields:
         return HandlerResult(status=400, body={"error": "no_updatable_fields"}, media_type="application/json")
     values.append(aid)

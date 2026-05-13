@@ -10,6 +10,16 @@ export interface HaMember {
   role: HaRole
 }
 
+// HaServicesPage 의 VIP slot binding — group 단위. 멤버별 iface 자동 매핑 + 수동 override
+export interface VipBinding {
+  bid: number
+  slot: string                                  // 용도 (SIP / Admin / ...)
+  ip: string
+  mask?: number
+  status?: 'up' | 'down' | 'unknown'
+  memberIfaces?: { [serverId: number]: string } // 멤버 agent_id → iface name
+}
+
 export interface HaGroup {
   id: number
   name: string
@@ -19,6 +29,7 @@ export interface HaGroup {
   vip_mask: number
   auth_pass: string
   note?: string
+  vip_bindings?: VipBinding[]
   create_time?: string
   update_time?: string
   members: HaMember[]
@@ -31,6 +42,7 @@ export interface HaGroupInput {
   vip_mask?: number
   auth_pass: string
   note?: string
+  vip_bindings?: VipBinding[]
   members?: { agent_id: number; role?: HaRole; priority?: number }[]
 }
 
