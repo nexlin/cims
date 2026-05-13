@@ -201,7 +201,7 @@ python3 -m unittest tests.test_verify_lib   # 35 unit tests
 - `cims-console/src/pages/VerificationV2Page.tsx` — Stepper + Accordion + 그룹 cascade + PDF 보고서 (LIVE polling)
 - `cims-console/src/pages/VerificationHistoryPage.tsx` — 회차 이력 list + detail modal
 
-**DB**: `verification_run` + `verification_run_item` (`sql/migrate_verification_runs.sql`). job 종료 시 `_record_run()` 자동 INSERT.
+**이력 저장**: 파일 기반 (`verify_runs/YYYY/MM/<id>.json`). `verify.lib.run_store` 가 record/list/get/stats 모두 처리. 옛 `verification_run` / `verification_run_item` DB 테이블 의존은 제거됨.
 
 ## Configuration Files
 
