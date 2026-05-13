@@ -123,10 +123,9 @@ def _actor(handler_args: HandlerArgs) -> str:
 # ════════════════════════════════════════════════════════════
 
 def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
-    import json as _json
     def _safe_load(raw):
         if not raw: return None
-        try: return _json.loads(raw)
+        try: return json.loads(raw)
         except (TypeError, ValueError): return None
     return {
         "id": r["id"],

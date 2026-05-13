@@ -274,7 +274,9 @@ export default function HaServicesPage() {
   }, [haGroups, agents, deployments, agentMap])
 
   const toggleExpand = (id: number) => setExpanded(prev => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+    const n = new Set(prev)
+    if (n.has(id)) n.delete(id); else n.add(id)
+    return n
   })
 
   // 패키지 IP slot 합집합 — service 의 packageIds 에 등록된 패키지 기준
