@@ -30,10 +30,8 @@ import time
 import hashlib
 from typing import Any, Dict, List, Optional
 
-import pymysql
-import pymysql.cursors
-
 from util.log_util import Logger
+from services import file_store
 
 logger = Logger()
 
@@ -76,36 +74,31 @@ def _compute_etag(payload: Any) -> str:
 #  DB DAO
 # ──────────────────────────────────────────────────────────────
 
-def _connect(db_cfg: dict):
-    return pymysql.connect(
-        host=db_cfg.get("Host", "127.0.0.1"),
-        port=int(db_cfg.get("Port", 3306)),
-        user=db_cfg.get("User", "root"),
-        password=db_cfg.get("Password", ""),
-        database=db_cfg.get("Db", "cims"),
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=True,
-        connect_timeout=3,
-    )
+_DOMAIN_BY_ENTITY = {
+    "listener": "csp_listener",
+    "trunk":    "sip_trunk",
+    "route":    "routing_rule",
+    "access":   "routing_access_list",
+    "service":  "sip_service",
+}
 
 
 def _row_listener(r: dict) -> dict:
     return {
-        "id": r["id"],
-        "name": r["name"],
-        "enabled": bool(r["enabled"]),
-        "bind_ip": r["bind_ip"],
-        "bind_port": r["bind_port"],
-        "protocol": r["protocol"],
-        "domain": r["domain"] or "",
-        "service": r["service"],
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "enabled": bool(r.get("enabled")),
+        "bind_ip": r.get("bind_ip"),
+        "bind_port": r.get("bind_port"),
+        "protocol": r.get("protocol"),
+        "domain": r.get("domain") or "",
+        "service": r.get("service"),
         "tls": {
             "cert": r.get("tls_cert_path"),
             "key":  r.get("tls_key_path"),
             "ca":   r.get("tls_ca_path"),
             "verify_peer": bool(r.get("tls_verify_peer")),
-        } if r["protocol"] in ("TLS", "WSS") else None,
+        } if r.get("protocol") in ("TLS", "WSS") else None,
         "max_connections": r.get("max_connections", 0),
         "thread_count": r.get("thread_count", 2),
         "note": r.get("note"),
@@ -115,16 +108,16 @@ def _row_listener(r: dict) -> dict:
 
 def _row_trunk(r: dict) -> dict:
     return {
-        "id": r["id"],
-        "name": r["name"],
-        "enabled": bool(r["enabled"]),
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "enabled": bool(r.get("enabled")),
         "service_id": r.get("service_id"),
         "failover_priority": r.get("failover_priority", 100),
         "remote": {
-            "ip": r["remote_ip"],
-            "port": r["remote_port"],
-            "domain": r["remote_domain"] or "",
-            "protocol": r["protocol"],
+            "ip": r.get("remote_ip"),
+            "port": r.get("remote_port"),
+            "domain": r.get("remote_domain") or "",
+            "protocol": r.get("protocol"),
         },
         "outbound_proxy": (
             {"ip": r["outbound_proxy_ip"], "port": r["outbound_proxy_port"]}
@@ -155,41 +148,45 @@ def _row_trunk(r: dict) -> dict:
 
 
 def _row_rule(r: dict, matches: List[dict], transforms: List[dict]) -> dict:
+    tj = r.get("target_json")
+    if isinstance(tj, str):
+        try: tj = json.loads(tj)
+        except Exception: tj = None
     return {
-        "id": r["id"],
-        "name": r["name"],
-        "enabled": bool(r["enabled"]),
-        "priority": r["priority"],
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "enabled": bool(r.get("enabled")),
+        "priority": r.get("priority"),
         "description": r.get("description"),
         "match": [
             {
-                "field":  m["field"],
-                "op":     m["op"],
-                "value":  m["value"],
+                "field":  m.get("field"),
+                "op":     m.get("op"),
+                "value":  m.get("value"),
                 "invert": bool(m.get("invert")),
                 "seq":    m.get("seq", 0),
             } for m in sorted(matches, key=lambda x: x.get("seq", 0))
         ],
         "transform": [
             {
-                "action": t["action"],
+                "action": t.get("action"),
                 "target": t.get("target"),
                 "value":  t.get("value"),
                 "seq":    t.get("seq", 0),
             } for t in sorted(transforms, key=lambda x: x.get("seq", 0))
         ],
         "target": {
-            "mode":        r["target_mode"],
+            "mode":        r.get("target_mode"),
             "trunk_id":    r.get("target_trunk_id"),
-            "json":        json.loads(r["target_json"]) if r.get("target_json") else None,
+            "json":        tj,
         },
         "fail": {
-            "action":       r["fail_action"],
-            "code":         r["fail_code"],
-            "reason":       r["fail_reason"],
+            "action":       r.get("fail_action"),
+            "code":         r.get("fail_code"),
+            "reason":       r.get("fail_reason"),
             "fallback":     r.get("fallback_trunk_id"),
-            "timeout_ms":   r["timeout_ms"],
-            "retry_count":  r["retry_count"],
+            "timeout_ms":   r.get("timeout_ms"),
+            "retry_count":  r.get("retry_count"),
         },
         "etag": r.get("etag") or "",
     }
@@ -197,14 +194,14 @@ def _row_rule(r: dict, matches: List[dict], transforms: List[dict]) -> dict:
 
 def _row_service(r: dict, listener_ids: list) -> dict:
     return {
-        "id": r["id"],
-        "name": r["name"],
-        "kind": r["kind"],
-        "domain": r["domain"],
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "kind": r.get("kind"),
+        "domain": r.get("domain"),
         "auth_realm": r.get("auth_realm"),
-        "inbound_policy": r["inbound_policy"],
-        "priority": r["priority"],
-        "enabled": bool(r["enabled"]),
+        "inbound_policy": r.get("inbound_policy"),
+        "priority": r.get("priority"),
+        "enabled": bool(r.get("enabled")),
         "note": r.get("note"),
         "listeners": listener_ids,
         "etag": r.get("etag") or "",
@@ -213,14 +210,14 @@ def _row_service(r: dict, listener_ids: list) -> dict:
 
 def _row_access(r: dict) -> dict:
     return {
-        "id": r["id"],
-        "scope": r["scope"],
+        "id": r.get("id"),
+        "scope": r.get("scope"),
         "scope_ref_id": r.get("scope_ref_id"),
-        "kind": r["kind"],
-        "match_type": r["match_type"],
-        "value": r["value"],
-        "enabled": bool(r["enabled"]),
-        "priority": r["priority"],
+        "kind": r.get("kind"),
+        "match_type": r.get("match_type"),
+        "value": r.get("value"),
+        "enabled": bool(r.get("enabled")),
+        "priority": r.get("priority"),
         "note": r.get("note"),
         "etag": r.get("etag") or "",
     }
@@ -233,35 +230,35 @@ def _row_access(r: dict) -> dict:
 class CscConfigCache:
     """CSC 설정 캐시 — 메모리/파일 3층 구조."""
 
-    def __init__(self, db_cfg: dict, cache_dir: str):
+    def __init__(self, db_cfg: dict, cache_dir: str, runtime_config: dict = None):
         self._db_cfg = db_cfg
         self._cache_dir = cache_dir
+        self._runtime_config = runtime_config or {}
         self._lock = threading.RLock()
         self._data: Dict[str, List[dict]] = {e: [] for e in ENTITIES}
         self._meta: Dict[str, dict] = {e: {} for e in ENTITIES}
-        self._read_only = False  # DB 장애 시 True
+        self._read_only = False
         os.makedirs(cache_dir, exist_ok=True)
 
     # ── public API ────────────────────────────────────────────
 
     def startup(self) -> None:
-        """DB 로드 → 파일 스냅샷 갱신. DB 실패 시 파일만 읽고 read-only 모드."""
+        """file_store 에서 로드 → 파일 스냅샷 갱신. file_store 실패 시 파일 캐시 fallback."""
         try:
-            self._load_all_from_db()
+            self._load_all_from_store()
             self._flush_all_to_files()
             self._read_only = False
-            logger.log_info("CscConfigCache: loaded from DB, snapshots refreshed")
+            logger.log_info("CscConfigCache: loaded from file_store, snapshots refreshed")
         except Exception as e:
-            logger.log_warning(f"CscConfigCache: DB load failed ({e}), fallback to file cache (read-only)")
+            logger.log_warning(f"CscConfigCache: file_store load failed ({e}), fallback to cache files")
             try:
                 self._load_all_from_files()
-                self._read_only = True
+                self._read_only = False  # file_store 가 파일 기반이므로 항상 read-write
             except Exception as e2:
                 logger.log_error(f"CscConfigCache: file cache load also failed: {e2}")
-                # 모든게 실패해도 빈 상태로 살아 있게 함
                 self._data = {e: [] for e in ENTITIES}
                 self._meta = {e: {"etag": "", "updated_at": time.time(), "source": "empty"} for e in ENTITIES}
-                self._read_only = True
+                self._read_only = False
 
     def is_read_only(self) -> bool:
         return self._read_only
@@ -282,59 +279,42 @@ class CscConfigCache:
             return dict(self._meta.get(entity, {}))
 
     def refresh_entity(self, entity: str) -> None:
-        """특정 entity 만 DB 에서 재조회 + 파일/메타 갱신. write-through 경로에서 사용."""
+        """특정 entity 만 file_store 에서 재조회 + 파일/메타 갱신. write-through 경로에서 사용."""
         if entity not in ENTITIES:
             raise ValueError(f"unknown entity: {entity}")
-        if self._read_only:
-            raise RuntimeError("read-only mode (DB unavailable)")
         with self._lock:
-            self._data[entity] = self._load_entity_from_db(entity)
+            self._data[entity] = self._load_entity_from_store(entity)
             self._flush_entity_to_file(entity)
 
-    # ── internal DB load ──────────────────────────────────────
+    # ── internal file_store load ──────────────────────────────
 
-    def _load_all_from_db(self) -> None:
+    def _load_all_from_store(self) -> None:
         for e in ENTITIES:
-            self._data[e] = self._load_entity_from_db(e)
+            self._data[e] = self._load_entity_from_store(e)
 
-    def _load_entity_from_db(self, entity: str) -> List[dict]:
-        conn = _connect(self._db_cfg)
-        try:
-            with conn.cursor() as cur:
-                if entity == "listener":
-                    cur.execute("SELECT * FROM csp_listener ORDER BY id")
-                    rows = [_row_listener(r) for r in cur.fetchall()]
-                elif entity == "trunk":
-                    cur.execute("SELECT * FROM sip_trunk ORDER BY id")
-                    rows = [_row_trunk(r) for r in cur.fetchall()]
-                elif entity == "route":
-                    cur.execute("SELECT * FROM routing_rule ORDER BY priority, id")
-                    rule_rows = cur.fetchall()
-                    rows = []
-                    for rr in rule_rows:
-                        cur.execute("SELECT * FROM routing_rule_match WHERE rule_id=%s ORDER BY seq", (rr["id"],))
-                        matches = cur.fetchall()
-                        cur.execute("SELECT * FROM routing_rule_transform WHERE rule_id=%s ORDER BY seq", (rr["id"],))
-                        transforms = cur.fetchall()
-                        rows.append(_row_rule(rr, matches, transforms))
-                elif entity == "access":
-                    cur.execute("SELECT * FROM routing_access_list ORDER BY priority, id")
-                    rows = [_row_access(r) for r in cur.fetchall()]
-                elif entity == "service":
-                    cur.execute("SELECT * FROM sip_service ORDER BY priority, id")
-                    svc_rows = cur.fetchall()
-                    rows = []
-                    for sr in svc_rows:
-                        cur.execute(
-                            "SELECT listener_id FROM sip_service_listener WHERE service_id=%s",
-                            (sr["id"],))
-                        listener_ids = [row["listener_id"] for row in cur.fetchall()]
-                        rows.append(_row_service(sr, listener_ids))
-                else:
-                    rows = []
-            return rows
-        finally:
-            conn.close()
+    def _load_entity_from_store(self, entity: str) -> List[dict]:
+        domain = _DOMAIN_BY_ENTITY.get(entity)
+        if not domain:
+            return []
+        d = file_store.domain_dir(self._runtime_config, domain)
+        rows = file_store.load_all(d)
+        if entity == "listener":
+            rows.sort(key=lambda r: r.get("id", 0))
+            return [_row_listener(r) for r in rows]
+        if entity == "trunk":
+            rows.sort(key=lambda r: r.get("id", 0))
+            return [_row_trunk(r) for r in rows]
+        if entity == "route":
+            rows.sort(key=lambda r: (r.get("priority") or 0, r.get("id") or 0))
+            # match/transform 는 이미 임베드
+            return [_row_rule(r, r.get("match") or [], r.get("transform") or []) for r in rows]
+        if entity == "access":
+            rows.sort(key=lambda r: (r.get("priority") or 0, r.get("id") or 0))
+            return [_row_access(r) for r in rows]
+        if entity == "service":
+            rows.sort(key=lambda r: (r.get("priority") or 0, r.get("id") or 0))
+            return [_row_service(r, r.get("listeners") or []) for r in rows]
+        return []
 
     # ── internal file I/O ─────────────────────────────────────
 
@@ -396,7 +376,7 @@ def init_config_cache(config: dict) -> CscConfigCache:
         os.path.dirname(os.path.abspath(__file__)), "..", "cache"
     )
     cache_dir = os.path.abspath(cache_dir)
-    cc = CscConfigCache(db_cfg, cache_dir)
+    cc = CscConfigCache(db_cfg, cache_dir, runtime_config=config)
     cc.startup()
     CONFIG_CACHE = cc
     return cc

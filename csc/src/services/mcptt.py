@@ -393,34 +393,28 @@ def audit_config_change(db_cfg: dict, actor: str, actor_ip: str,
                         before: dict = None, after: dict = None,
                         etag_before: str = "", etag_after: str = "",
                         reason: str = "") -> None:
-    """csp_config_audit 테이블에 변경 이력 기록. DB 실패는 조용히 삼킴(운영 기능 차단 안 함)."""
+    """csp 설정 변경 이력 JSONL append. {CimsRuntimeDir}/csp_config_audit/YYYY/MM/DD.jsonl.
+
+    db_cfg 인자는 호환을 위해 유지 (구 시그니처). 실제로는 file_store 사용.
+    실패는 조용히 삼킴 (운영 기능 차단 안 함).
+    """
     try:
-        import pymysql
-        import json as _json
-        conn = pymysql.connect(
-            host=db_cfg.get("Host", "127.0.0.1"),
-            port=int(db_cfg.get("Port", 3306)),
-            user=db_cfg.get("User", "root"),
-            password=db_cfg.get("Password", ""),
-            database=db_cfg.get("Db", "cims"),
-            charset="utf8mb4",
-            autocommit=True,
-            connect_timeout=2,
-        )
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO csp_config_audit "
-                    "(actor, actor_ip, entity, entity_id, action, before_json, after_json, "
-                    " etag_before, etag_after, reason) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (actor, actor_ip, entity, str(entity_id), action,
-                     _json.dumps(before) if before else None,
-                     _json.dumps(after)  if after  else None,
-                     etag_before, etag_after, reason[:512] if reason else None),
-                )
-        finally:
-            conn.close()
+        from datetime import datetime as _dt
+        from services import file_store as _fs
+        from services import config_cache as _cc
+        # init_config_cache 가 보관한 runtime config 에서 CimsRuntimeDir 추출
+        runtime_config = getattr(_cc.CONFIG_CACHE, "_runtime_config", {}) if _cc.CONFIG_CACHE else {}
+        domain_path = _fs.domain_dir(runtime_config or {}, "csp_config_audit")
+        record = {
+            "ts": _dt.now().isoformat(timespec='seconds'),
+            "actor": actor, "actor_ip": actor_ip,
+            "entity": entity, "entity_id": str(entity_id),
+            "action": action,
+            "before": before, "after": after,
+            "etag_before": etag_before, "etag_after": etag_after,
+            "reason": (reason or "")[:512] if reason else None,
+        }
+        _fs.jsonl_append(domain_path, "audit", record)
     except Exception as e:
         logger.log_warning(f"audit_config_change: {e}")
 

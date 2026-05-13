@@ -37,15 +37,12 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | **모니터링** | `stats_daily` | migrate_monitoring.sql | 일간 KPI 집계 |
 | | `stats_monthly` | migrate_monitoring.sql | 월간 |
 | | `stats_yearly` | migrate_monitoring.sql | 연간 |
-| **CSP 런타임** | `csp_listener` | migrate_csp_runtime_config.sql | (옛 표 = sip_service 로 마이그레이션 중) |
-| | `sip_trunk` | migrate_csp_runtime_config.sql | IP-PBX trunk |
-| | `routing_rule` | migrate_csp_runtime_config.sql | SIP routing 규칙 헤더 |
-| | `routing_rule_match` | migrate_csp_runtime_config.sql | 조건 |
-| | `routing_rule_transform` | migrate_csp_runtime_config.sql | 변환 |
-| | `routing_access_list` | migrate_csp_runtime_config.sql | ACL |
-| | `csp_config_audit` | migrate_csp_runtime_config.sql | 변경 audit |
-| | `sip_service` | migrate_sip_service.sql | 신규 SIP 서비스 인스턴스 추상 |
-| | `sip_service_listener` | migrate_sip_service.sql | service ↔ listener N:M |
+| **CSP 런타임** | ~~`csp_listener`~~ | — | **파일 기반 완료** (2026-05-13 Phase 5) — `{CimsRuntimeDir}/csp_listener/<id>.json` |
+| | ~~`sip_trunk`~~ | — | **파일 기반 완료** (Phase 5) |
+| | ~~`routing_rule (+match/transform)`~~ | — | **파일 기반 완료** (Phase 5) — match/transform 임베드 |
+| | ~~`routing_access_list`~~ | — | **파일 기반 완료** (Phase 5) |
+| | ~~`csp_config_audit`~~ | — | **파일 기반 완료** (Phase 5) — JSONL 시계열 (`csp_config_audit/audit/YYYY/MM/DD.jsonl`) |
+| | ~~`sip_service (+sip_service_listener)`~~ | — | **파일 기반 완료** (Phase 5) — listeners 배열 임베드 |
 | **구독↔서비스** | `voip_subscriptions.service_id` / `ptt_subscriptions.service_id` | migrate_subscriptions_service_ref.sql | FK → sip_service |
 | **HA** | ~~`ha_groups`~~ | — | **파일 기반 완료** (2026-05-13 Phase 4) — `{CimsRuntimeDir}/ha_groups/<id>.json` (members 배열 임베드) |
 | | ~~`ha_group_members`~~ | — | (그룹 JSON 안에 임베드) |
