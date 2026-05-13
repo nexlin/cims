@@ -186,15 +186,16 @@ cmd_build() {
     make dist 2>&1 | tee -a "$LOG_DIR/make.log" | tail -5
     ok "dist 생성 완료 → $DIST_DIR"
 
-    header "=== Web UI 빌드 (cims-console) ==="
+    header "=== Web UI 빌드 (cims-console, prod target) ==="
     cd "$SRC_CONSOLE"
     npm install --silent
-    npm run build
+    # VITE_CONSOLE_TARGET=prod — 배포본은 packaging 메뉴 숨김 (routes.tsx VISIBLE_SECTIONS)
+    VITE_CONSOLE_TARGET=prod npm run build
     cp -r dist "$DIST_DIR/console/"
-    ok "cims-console 빌드 완료"
+    ok "cims-console 빌드 완료 (prod target — packaging 메뉴 제외)"
     # TB-Console 은 dev 모드 기반 (vite proxy 필요) → 별도 dist 빌드 불필요.
     # configure.sh 가 .env.tb.local 에 VITE_ADMIN_TARGET=https://127.0.0.1:4419 를 기록하고,
-    # cims.sh start tb-console 이 npm run dev -- --mode tb --port 3000 으로 기동한다.
+    # cims.sh start tb-console 이 npm run dev -- --mode tb --port 3000 으로 기동한다 (VITE_CONSOLE_TARGET 미설정=dev).
 
     header "=== Web UI 빌드 (cims-phone) ==="
     cd "$SRC_PHONE"
@@ -1011,8 +1012,9 @@ cmd_sync() {
     fi
 
     # ── Console 정적 빌드 (Vite) ─────────────────────────────────
+    # VITE_CONSOLE_TARGET=prod — sync 도 배포본 dist 기준 (TB-Console 은 dev 서버 별도)
     if [[ $did_console -eq 1 ]]; then
-        ( cd "$SRC_CONSOLE" && npm run build 2>&1 | tail -3 )
+        ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod npm run build 2>&1 | tail -3 )
         if [[ -d "$SRC_CONSOLE/dist" ]]; then
             mkdir -p "$DIST_DIR/console"
             rm -rf "$DIST_DIR/console/dist"

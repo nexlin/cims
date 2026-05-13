@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom'
-import { SECTIONS, findSectionByPath } from '../routes'
+import { VISIBLE_SECTIONS, findSectionByPath } from '../routes'
 
 interface SidebarProps {
   collapsed: boolean
@@ -13,7 +13,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <nav className="sidebar-nav">
-        {SECTIONS.map(section => {
+        {VISIBLE_SECTIONS.map(section => {
           const Icon = section.icon
           const active = currentSection?.key === section.key
           return (

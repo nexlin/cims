@@ -42,7 +42,14 @@ export type RouteSection = {
   basePath: string
   defaultPath: string
   routes: RouteDef[]
+  // VITE_CONSOLE_TARGET=prod 빌드에서 숨김 (배포 콘솔 = 운영자용. 패키징 메뉴 불필요)
+  prodHidden?: boolean
 }
+
+// 콘솔 타겟 — 'dev' (TB-Console / 검증용) | 'prod' (배포본 — 운영자용, 제한된 메뉴)
+// vite build 시 VITE_CONSOLE_TARGET=prod 환경변수 주입으로 결정.
+const CONSOLE_TARGET = ((import.meta as unknown as { env: Record<string, string> }).env?.VITE_CONSOLE_TARGET) || 'dev'
+export const IS_PROD_CONSOLE = CONSOLE_TARGET === 'prod'
 
 const volteStats = () => <StatsPage />
 const pttStats = () => <StatsPage />
@@ -108,6 +115,7 @@ export const SECTIONS: RouteSection[] = [
     icon: FlaskConical,
     basePath: '/release',
     defaultPath: '/release/verify',
+    prodHidden: true,                    // 배포 콘솔에서 숨김 (운영자는 패키징/검증 불필요)
     routes: [
       { path: '/release/verify',          title: '검증 실행',     component: VerificationV2Page, adminOnly: true },
       { path: '/release/verify-history',  title: '검증 이력',     component: VerificationHistoryPage, adminOnly: true },
@@ -138,8 +146,11 @@ export const SECTIONS: RouteSection[] = [
   },
 ]
 
-// 평탄화된 라우트 리스트 — <Routes> 렌더용
-export const FLAT_ROUTES: RouteDef[] = SECTIONS.flatMap(s => s.routes)
+// IS_PROD_CONSOLE 일 때 prodHidden=true 섹션 제거. dev 빌드는 모두 노출.
+export const VISIBLE_SECTIONS: RouteSection[] = SECTIONS.filter(s => !IS_PROD_CONSOLE || !s.prodHidden)
+
+// 평탄화된 라우트 리스트 — <Routes> 렌더용 (prod 에서는 숨김 섹션 라우팅도 제거 → /dashboard 로 redirect)
+export const FLAT_ROUTES: RouteDef[] = VISIBLE_SECTIONS.flatMap(s => s.routes)
 
 // 경로 → section/route 조회
 export function findSectionByPath(pathname: string): RouteSection | undefined {
