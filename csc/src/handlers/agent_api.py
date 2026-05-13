@@ -260,6 +260,16 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
     if not row or row.get('status') not in ('pending', 'approved'):
         return HandlerResult(status=401, body={"error": "invalid_enrollment_token"},
                              media_type="application/json")
+    # TTL 검사 — expires_at 이 설정되어 있고 현재 시각보다 이전이면 만료
+    expires_at_iso = row.get('enrollment_token_expires_at')
+    if expires_at_iso:
+        try:
+            if datetime.fromisoformat(expires_at_iso) < datetime.now():
+                return HandlerResult(status=401, body={"error": "enrollment_token_expired",
+                                     "detail": "토큰 만료 — Console 에서 재발급 필요"},
+                                     media_type="application/json")
+        except Exception:
+            pass
 
     # session token 발급 + 상태 online
     session_token = _new_token()

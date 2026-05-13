@@ -82,7 +82,6 @@ def _migrate_deployments(config, dry_run):
             'id': did,
             'agent_id': r.get('agent_id'),
             'package_id': r.get('package_id'),
-            'instance_id': r.get('instance_id'),
             'process_name': r.get('process_name'),
             'service_functions': sf_list,
             'install_path': r.get('install_path'),

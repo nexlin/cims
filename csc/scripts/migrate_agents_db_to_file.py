@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""DB `cims_instance` + `cims_agent` → file_store('instances', 'agents') 마이그레이션.
+"""DB `cims_agent` → file_store('agents') 마이그레이션.
 
 사용:
   CIMS_CSC_CONFIG=/path/to/csc.json python3 csc/scripts/migrate_agents_db_to_file.py
 
 옵션:
-  --rename-legacy   완료 후 DB 테이블을 `*_legacy` 로 rename
+  --rename-legacy   완료 후 DB 테이블을 `cims_agent_legacy` 로 rename
   --dry-run         읽기만 하고 파일을 쓰지 않음
 
 idempotent. id 보존. .seq 자동 시드.
+
+NOTE: `cims_instance` 테이블/도메인은 사용되지 않아 제거되었음 (2026-05-13).
+      옛 cims_instance 데이터를 보존해야 한다면 DB 에서 직접 dump 필요.
 """
 import argparse
 import json
@@ -55,55 +58,6 @@ def _safe_json(raw):
     if isinstance(raw, (dict, list)): return raw
     try: return json.loads(raw)
     except Exception: return None
-
-
-def _migrate_instances(config, dry_run: bool):
-    domain = file_store.domain_dir(config, 'instances')
-    print(f"[info] instances dir: {domain}")
-    rows = []
-    conn = _connect(config)
-    try:
-        with conn.cursor() as cur:
-            try:
-                cur.execute("SELECT * FROM cims_instance ORDER BY id")
-                rows = cur.fetchall()
-            except pymysql.err.ProgrammingError as e:
-                print(f"[warn] cims_instance 테이블 없음: {e}")
-                return 0
-    finally:
-        conn.close()
-    print(f"[info] cims_instance rows: {len(rows)}")
-    max_id = 0
-    for r in rows:
-        iid = int(r['id'])
-        obj = {
-            'id': iid,
-            'name': r.get('name'),
-            'role': r.get('role'),
-            'description': r.get('description'),
-            'host': r.get('host'),
-            'csp_notify_port': r.get('csp_notify_port'),
-            'cmp_control_port': r.get('cmp_control_port'),
-            'cmp_rtp_port_start': r.get('cmp_rtp_port_start'),
-            'enabled': bool(r.get('enabled', 1)),
-            'last_seen': _to_iso(r.get('last_seen')),
-            'last_health': r.get('last_health'),
-            'note': r.get('note'),
-            'etag': r.get('etag'),
-            'agent_id': r.get('agent_id'),
-            'create_time': _to_iso(r.get('create_time')),
-            'update_time': _to_iso(r.get('update_time')),
-        }
-        if dry_run:
-            print(f"[dry] instance id={iid} name={obj['name']}")
-        else:
-            file_store.save(domain, iid, obj)
-            print(f"[ok]  instance id={iid} name={obj['name']}")
-        max_id = max(max_id, iid)
-    if not dry_run and max_id:
-        file_store.seed_seq(domain, max_id)
-        print(f"[info] instances/.seq seeded to {max_id}")
-    return len(rows)
 
 
 def _migrate_agents(config, dry_run: bool):
@@ -173,23 +127,18 @@ def main():
     args = ap.parse_args()
     config = _load_config()
     print(f"[info] runtime store: {file_store.runtime_root(config)}")
-    n_inst = _migrate_instances(config, args.dry_run)
     n_agent = _migrate_agents(config, args.dry_run)
-    if args.rename_legacy and not args.dry_run and (n_inst or n_agent):
+    if args.rename_legacy and not args.dry_run and n_agent:
         conn = _connect(config)
         try:
             with conn.cursor() as cur:
-                if n_inst:
-                    cur.execute("RENAME TABLE cims_instance TO cims_instance_legacy")
-                    print("[info] cims_instance → cims_instance_legacy")
-                if n_agent:
-                    cur.execute("RENAME TABLE cims_agent TO cims_agent_legacy")
-                    print("[info] cims_agent → cims_agent_legacy")
+                cur.execute("RENAME TABLE cims_agent TO cims_agent_legacy")
+                print("[info] cims_agent → cims_agent_legacy")
         except Exception as e:
             print(f"[error] rename 실패: {e}")
         finally:
             conn.close()
-    print(f"[done] instances={n_inst} agents={n_agent}")
+    print(f"[done] agents={n_agent}")
 
 
 if __name__ == '__main__':

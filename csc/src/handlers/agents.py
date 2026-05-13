@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import secrets
+from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
@@ -44,7 +45,6 @@ logger = Logger()
 # ──────────────────────────────────────────────────────────────
 
 _PKG_DOMAIN = 'packages'
-_INSTANCE_DOMAIN = 'instances'
 _AGENT_DOMAIN = 'agents'
 _DEPLOY_DOMAIN = 'deployments'
 _JOB_DOMAIN = 'jobs'
@@ -82,19 +82,7 @@ def _pkg_load_latest_by_name(config, name: str):
     return rows[-1]
 
 
-# ── cims_instance / cims_agent file_store helpers ──────────────────────
-
-def _instance_dir(config):
-    return file_store.domain_dir(config, _INSTANCE_DOMAIN)
-
-
-def _instance_load(config, iid: int):
-    return file_store.by_id(_instance_dir(config), iid)
-
-
-def _instance_load_all(config) -> list:
-    return file_store.load_all(_instance_dir(config))
-
+# ── cims_agent file_store helpers ──────────────────────────────────────
 
 def _agent_dir(config):
     return file_store.domain_dir(config, _AGENT_DOMAIN)
@@ -151,21 +139,6 @@ def _enrich_with_agent(rows: list, config, key_in='agent_id', key_out_prefix='ag
             cache[aid] = _agent_load(config, aid=aid) or {}
         a = cache[aid]
         r[f'{key_out_prefix}name'] = a.get('name')
-    return rows
-
-
-def _enrich_with_instance(rows: list, config, key_in='instance_id', key_out_prefix='instance_'):
-    if not rows:
-        return rows
-    cache: dict = {}
-    for r in rows:
-        iid = r.get(key_in)
-        if iid is None:
-            continue
-        if iid not in cache:
-            cache[iid] = _instance_load(config, iid) or {}
-        i = cache[iid]
-        r[f'{key_out_prefix}name'] = i.get('name')
     return rows
 
 
@@ -485,6 +458,10 @@ async def _create_agent(handler_args: HandlerArgs, config):
         return HandlerResult(status=409, body={"error": "conflict", "detail": f"agent name '{name}' already exists"},
                              media_type="application/json")
     enroll_token = secrets.token_hex(24)
+    ttl_sec = _enrollment_token_ttl_sec(config)
+    now_dt = datetime.now()
+    issued_at = now_dt.isoformat(timespec='seconds')
+    expires_at = (now_dt + timedelta(seconds=ttl_sec)).isoformat(timespec='seconds')
 
     def _do_create():
         new_id = file_store.next_id(_agent_dir(config))
@@ -492,6 +469,8 @@ async def _create_agent(handler_args: HandlerArgs, config):
             'id': new_id,
             'name': name,
             'enrollment_token': enroll_token,
+            'enrollment_token_issued_at': issued_at,
+            'enrollment_token_expires_at': expires_at,
             'agent_token': secrets.token_hex(32),
             'status': 'pending',
             'note': body.get('note'),
@@ -502,13 +481,35 @@ async def _create_agent(handler_args: HandlerArgs, config):
     result = _agent_to_json(row)
     # enrollment_token 은 최초 생성 시만 반환
     result["enrollment_token"] = enroll_token
+    result["enrollment_token_expires_at"] = expires_at
+    result["enrollment_token_ttl_sec"] = ttl_sec
     csc_url = _csc_public_url(handler_args, config)
+    import shlex
+    # name 에 space/특수문자 포함 가능 → shell-safe quote
+    # dev 환경 (csc.json Server.DevMode=true) 에서는 --no-systemd 자동 부여
+    extra = " --no-systemd" if _is_dev_mode(config) else ""
     result["install_command"]  = (
         f"curl -k {csc_url}/install-agent.sh | "
         f"bash -s -- --csc-url {csc_url} "
-        f"--enrollment-token {enroll_token} --name {name}"
+        f"--enrollment-token {enroll_token} --name {shlex.quote(name)}{extra}"
     )
     return HandlerResult(status=201, body=result, media_type="application/json")
+
+
+def _enrollment_token_ttl_sec(config: dict) -> int:
+    """enrollment_token TTL (default 10분). config.Agent.EnrollmentTokenTtlSec 로 조정."""
+    agent_cfg = (config.get("Agent") or {})
+    try:
+        v = int(agent_cfg.get("EnrollmentTokenTtlSec") or 600)
+        return max(60, v)  # 최소 1분
+    except (TypeError, ValueError):
+        return 600
+
+
+def _is_dev_mode(config: dict) -> bool:
+    """DEV-CSC 여부. csc.json Server.DevMode=true 일 때 install_command 에 --no-systemd 자동 부여."""
+    srv = (config.get("Server") or {})
+    return bool(srv.get("DevMode"))
 
 
 def _csc_public_url(handler_args: HandlerArgs, config: dict) -> str:
@@ -1107,8 +1108,6 @@ def _deployment_to_json(r: dict) -> dict:
         "package_id":   r.get("package_id"),
         "package_name": r.get("package_name"),
         "package_version": r.get("package_version"),
-        "instance_id":  r.get("instance_id"),
-        "instance_name": r.get("instance_name"),
         "process_name": r.get("process_name"),
         "service_functions": sf_list,
         "status":       r.get("status"),
@@ -1213,7 +1212,6 @@ async def _put_deployment_config(handler_args, did: int, config):
             "process_name":  dep.get("process_name"),
             "service_functions": sf or [],
             "install_path":  dep.get("install_path"),
-            "instance_id":   dep.get("instance_id"),
             "config":        values,
         }
         job_id = await asyncio.to_thread(_job_create, config, dep["agent_id"], 'update_config', params)
@@ -1227,15 +1225,14 @@ async def _put_deployment_config(handler_args, did: int, config):
 
 
 def _enrich_deploy(rows, config):
-    """deployment rows 에 package / agent / instance 정보를 file_store 에서 enrich.
+    """deployment rows 에 package / agent 정보를 file_store 에서 enrich.
 
-    추가 필드: package_name / package_version / agent_name / instance_name.
+    추가 필드: package_name / package_version / agent_name.
     """
     if not rows:
         return rows
     pkg_cache: dict = {}
     agent_cache: dict = {}
-    inst_cache: dict = {}
     for r in rows:
         pid = r.get('package_id')
         if pid is not None:
@@ -1248,11 +1245,6 @@ def _enrich_deploy(rows, config):
             if aid not in agent_cache:
                 agent_cache[aid] = _agent_load(config, aid=aid) or {}
             r['agent_name'] = agent_cache[aid].get('name')
-        iid = r.get('instance_id')
-        if iid is not None:
-            if iid not in inst_cache:
-                inst_cache[iid] = _instance_load(config, iid) or {}
-            r['instance_name'] = inst_cache[iid].get('name')
     return rows
 
 
@@ -1299,7 +1291,6 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     body = _parse_body(handler_args)
     agent_id     = body.get("agent_id")
     package_id   = body.get("package_id")
-    instance_id  = body.get("instance_id")
     process_name = (body.get("process_name") or body.get("service_kind") or "").strip()
     functions    = body.get("service_functions") or []
     if isinstance(functions, str):
@@ -1325,7 +1316,6 @@ async def _create_deployment(handler_args: HandlerArgs, config):
             'id': new_id,
             'agent_id': agent_id,
             'package_id': package_id,
-            'instance_id': instance_id,
             'process_name': process_name,
             'service_functions': functions if isinstance(functions, list) else _split_csv(functions),
             'install_path': install_path,
@@ -1348,7 +1338,7 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
     patches: dict = {}
     if "service_kind" in body and "process_name" not in body:
         body["process_name"] = body["service_kind"]
-    for col in ("instance_id", "process_name", "install_path", "note"):
+    for col in ("process_name", "install_path", "note"):
         if col in body:
             patches[col] = body[col]
     if "service_functions" in body:
@@ -1397,7 +1387,6 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
         "process_name":  dep.get("process_name"),
         "service_functions": sf or [],
         "install_path":  dep.get("install_path"),
-        "instance_id":   dep.get("instance_id"),
         "config":        cfg,
         "extra":         body.get("extra") or {},
     }

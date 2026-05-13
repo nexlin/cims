@@ -29,7 +29,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | **PTT 그룹** | `ptt_groups` | cims_schema.sql + migrate_group_media.sql + migrate_ptt_groups_v2.sql | name/priority/encryption/emergency/video_enabled/org_code |
 | | `ptt_group_members` | cims_schema.sql | (group_id, user_id) UNIQUE + priority |
 | | `ptt_session_seq` (시퀀스) | migrate_ptt_session_seq.sql | PTT 세션 ID 발급 시퀀스 |
-| **조직** | `organizations` | migrate_organizations.sql | code/name/parent_id 트리 |
+| **조직** | `organizations` | migrate_organizations.sql | code/name/parent_id 트리 — `users.org_id` FK 대상으로 가입자 도메인과 함께 DB 유지 (2026-05-13 Phase 9 결정) |
 | **인증** | ~~`auth_codes`~~ | — | **파일 기반 완료** (2026-05-13 Phase 8) — `{CimsRuntimeDir}/auth_codes/<code>.json` |
 | | ~~`refresh_tokens`~~ | — | **파일 기반 완료** (Phase 8) — `refresh_tokens/<token>.json` |
 | **녹취** | ~~`recordings`~~ | — | **파일 기반 완료** (2026-05-13 Phase 7) — call.json + recordings/ 디렉토리. CSP InsertRecording no-op, CSC `/api/v1/recordings` 가 파일 스캔. |
@@ -46,7 +46,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | **구독↔서비스** | `voip_subscriptions.service_id` / `ptt_subscriptions.service_id` | migrate_subscriptions_service_ref.sql | FK → sip_service |
 | **HA** | ~~`ha_groups`~~ | — | **파일 기반 완료** (2026-05-13 Phase 4) — `{CimsRuntimeDir}/ha_groups/<id>.json` (members 배열 임베드) |
 | | ~~`ha_group_members`~~ | — | (그룹 JSON 안에 임베드) |
-| **에이전트/배포** | ~~`cims_instance`~~ | — | **파일 기반 완료** (2026-05-13 Phase 2) — `{CimsRuntimeDir}/instances/<id>.json` |
+| **에이전트/배포** | ~~`cims_instance`~~ | — | **제거됨** (2026-05-13) — 옛 데이터 모델 잔재. agent 자체 분리 (volte-sip-server / ptt-sip-server 등) 로 대체. file_store 'instances' 도메인 자체 폐기. |
 | | ~~`cims_agent`~~ | — | **파일 기반 완료** (2026-05-13 Phase 2) — `{CimsRuntimeDir}/agents/<id>.json` |
 | | ~~`cims_package`~~ | — | **파일 기반 완료** (2026-05-13 Phase 1) — `{CimsRuntimeDir}/packages/<name>__<version>.json` |
 | | ~~`agent_deployment`~~ | — | **파일 기반 완료** (2026-05-13 Phase 3) — `{CimsRuntimeDir}/deployments/<id>.json` |

@@ -194,10 +194,39 @@ function agentToServer(a: Agent, role: Role): ServerRow {
 
 function buildInstallCommand(token: string, name: string, role: Role): string {
   const r = role ? ` --role ${role}` : ''
+  // name 에 space/특수문자 포함 가능 → 큰따옴표 quote
+  const quotedName = `"${name.replace(/(["\\$`])/g, '\\$1')}"`
   return `curl -k https://CSC:4420/install-agent.sh | bash -s -- \\
   --csc-url https://CSC:4420 \\
   --enrollment-token ${token} \\
-  --name ${name}${r}`
+  --name ${quotedName}${r}`
+}
+
+// navigator.clipboard 는 secure context (HTTPS / localhost) 에서만 동작.
+// HTTP dev 환경 (예: http://192.168.x.x:3000) 에서는 execCommand fallback 사용.
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -331,6 +360,7 @@ export default function HaServicesPage() {
       if (mode === 'standalone') {
         // standalone = agent 1개 생성 (HA group 없음)
         const r = await deploymentApi.createAgent(baseName, '')
+        await deploymentApi.approveAgent(r.id)
         setPendingTokens(prev => new Map(prev).set(r.id, { token: r.enrollment_token, cmd: r.install_command }))
       } else {
         // A/S = 멤버 2개, AA = 멤버 1개 (운영자가 추가 가능)
@@ -338,6 +368,7 @@ export default function HaServicesPage() {
         const memberAgents: Array<{ agent: Agent; token: string; cmd: string }> = []
         for (let i = 1; i <= memberCount; i++) {
           const r = await deploymentApi.createAgent(`${baseName}-${pad2(i)}`, '')
+          await deploymentApi.approveAgent(r.id)
           memberAgents.push({ agent: r, token: r.enrollment_token, cmd: r.install_command })
         }
         // ha_group 생성 — vip 는 비움 (운영자가 VipPanel 에서 vip_bindings 추가)
@@ -374,6 +405,7 @@ export default function HaServicesPage() {
     const idx = svc.servers.length + 1
     try {
       const r = await deploymentApi.createAgent(`${svc.name}-${pad2(idx)}`, '')
+      await deploymentApi.approveAgent(r.id)
       setPendingTokens(prev => new Map(prev).set(r.id, { token: r.enrollment_token, cmd: r.install_command }))
       if (svc.id > 0) {
         // AA HA group 멤버로 등록
@@ -396,6 +428,7 @@ export default function HaServicesPage() {
       await deploymentApi.deleteAgent(srv.id)
       // 신규 생성
       const r = await deploymentApi.createAgent(srv.name, '')
+      await deploymentApi.approveAgent(r.id)
       setPendingTokens(prev => new Map(prev).set(r.id, { token: r.enrollment_token, cmd: r.install_command }))
       // HA group 이면 멤버로 재등록
       if (svc.id > 0) {
@@ -405,11 +438,14 @@ export default function HaServicesPage() {
           priority: srv.role === 'master' ? 100 : 90,
         })
       }
-      try {
-        await navigator.clipboard.writeText(r.install_command)
-        flash(`${srv.name} 토큰 재발행 + clipboard 복사`)
-      } catch {
-        flash(`${srv.name} 토큰 재발행 (clipboard 권한 없음)`)
+      const ttlMin = r.enrollment_token_ttl_sec
+        ? Math.round(r.enrollment_token_ttl_sec / 60)
+        : null
+      const expireHint = ttlMin ? ` · ${ttlMin}분 내 사용` : ''
+      if (await copyToClipboard(r.install_command)) {
+        flash(`${srv.name} 설치명령 발급 + 복사됨${expireHint}`)
+      } else {
+        flash(`${srv.name} 설치명령 발급 (복사 실패 — 화면에서 마우스 선택)${expireHint}`)
       }
       await load()
     } catch (e) {
@@ -421,11 +457,10 @@ export default function HaServicesPage() {
   const copyInstallCmd = async (srv: ServerRow) => {
     const pt = pendingTokens.get(srv.id)
     const cmd = pt ? pt.cmd : buildInstallCommand(srv.token || '(토큰 만료)', srv.name, srv.role)
-    try {
-      await navigator.clipboard.writeText(cmd)
+    if (await copyToClipboard(cmd)) {
       flash(`${srv.name} install command 복사됨`)
-    } catch {
-      flash('clipboard 권한 없음')
+    } else {
+      flash('clipboard 복사 실패 — 텍스트를 마우스로 선택해 복사하세요')
     }
   }
 
@@ -865,19 +900,17 @@ function ServerRows(p: ServerRowsProps) {
           {srv.agent_version && <span style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>v{srv.agent_version}</span>}
         </td>
         <td style={td(150)}>
-          <button onClick={() => p.copyCmd(srv)} style={btnSmall()}
-                  disabled={!p.pendingToken && srv.status !== 'pending'}
-                  title={p.pendingToken ? '신규 발급 토큰' : (srv.status === 'pending' ? '대기' : '이미 enroll 완료')}>
-            📋 복사
-          </button>
           {srv.status !== 'online' && (
-            <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}>↻ 토큰</button>
+            <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}
+                    title="새 토큰 발급 + install command 자동 복사 (토큰은 발급 후 일정 시간 내 만료)">
+              🔧 설치명령
+            </button>
           )}
           {srv.id > 0 && (
             <Link to={`/deploy/servers?agent=${srv.id}`}
                   title="Server Inspector 진입 (모듈 / metric / lifecycle)"
                   style={{ ...btnSmall(), textDecoration: 'none', display: 'inline-block' }}>
-              🔧
+              🔍
             </Link>
           )}
         </td>

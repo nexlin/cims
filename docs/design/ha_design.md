@@ -469,6 +469,86 @@ install 정책 (csc/src/handlers/agents.py:_create_deployment):
 VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 수동
 입력 (네트워크 대역 의존).
 
+### 11.8 단일 호스트 검증 환경 — NetNS 4-node 시뮬
+
+2-node fail-over 시나리오 (`S6-SCN-FAILOVER-CSP/CMP/CSC`) 를 단일 dev 머신에서
+LIVE 검증하기 위한 Linux Network Namespace 기반 4-node 환경.
+
+**스크립트** (`verify/scripts/`):
+- `ha-netns-up.sh` — 4 ns + 3 bridge + 12 veth pair + IP 할당 (idempotent)
+- `ha-netns-down.sh` — 정리
+- `ha-netns-status.sh` — 상태 + ping 매트릭스 + VRRP multicast reachability
+
+**토폴로지**:
+
+| 노드 | 역할 | HA 모드 | 설치 패키지 |
+|---|---|---|---|
+| `ctrl-a` | Control-Server (active) | A/S | CSC, Console, CSP, ISP, PSP, CWRTC, CSPSIM, Phone |
+| `ctrl-b` | Control-Server (standby) | A/S | (동일) |
+| `media-a` | Media-Server | All-Active | CMP, IMP, PMP |
+| `media-b` | Media-Server | All-Active | (동일) |
+
+**네트워크 대역** (3 linux bridge, 각 노드가 모두 연결):
+
+| 대역 | 용도 | bridge | 호스트 IP |
+|---|---|---|---|
+| 10.0.0.0/24 | 관리 (CSC admin/heartbeat/agent enroll) | `br-cims-mgmt` | 10.0.0.1 |
+| 10.0.1.0/24 | 서비스 (SIP signaling, RTP, 단말/외부 연동) | `br-cims-svc` | 10.0.1.1 |
+| 10.0.2.0/24 | 내부 모듈간 연동 (CSP↔CMP, Redis 등) | `br-cims-int` | 10.0.2.1 |
+
+**노드 IP 할당**:
+
+| 노드 | mgmt | svc | int |
+|---|---|---|---|
+| ctrl-a | 10.0.0.11 | 10.0.1.11 | 10.0.2.11 |
+| ctrl-b | 10.0.0.12 | 10.0.1.12 | 10.0.2.12 |
+| media-a | 10.0.0.21 | 10.0.1.21 | 10.0.2.21 |
+| media-b | 10.0.0.22 | 10.0.1.22 | 10.0.2.22 |
+
+**권장 VIP** (keepalived 가 부여 — 스크립트는 IP 할당 안 함):
+
+| 서비스 | VIP | 대역 |
+|---|---|---|
+| CSC | 10.0.0.100 | mgmt |
+| CSP | 10.0.1.100 | svc |
+| PSP | 10.0.1.101 | svc |
+| ISP | 10.0.1.102 | svc |
+| CWRTC | 10.0.1.103 | svc |
+
+**사용 예**:
+```bash
+# 환경 구축
+sudo ./verify/scripts/ha-netns-up.sh
+
+# 상태 + ping/multicast 매트릭스
+sudo ./verify/scripts/ha-netns-status.sh
+
+# 특정 ns 진입
+sudo ip netns exec ctrl-a bash
+
+# 한 명령만 실행
+sudo ip netns exec ctrl-a /opt/cims/cims_agent enroll --ip 10.0.0.11
+
+# 정리
+sudo ./verify/scripts/ha-netns-down.sh
+```
+
+**NetNS 환경의 한계** (커널 공유 기인 — `agent/lib/ha.sh` / 검증 코드가 우회):
+
+| 한계 | 영향 | 우회 |
+|---|---|---|
+| 커널 패닉 시뮬 ❌ | 낮음 — fail-over 트리거는 process/network 장애 | process kill 로 대체 |
+| physical NIC HW 장애 ❌ | 낮음 | `ip link set <veth> down` 으로 흉내 |
+| 호스트 systemd 가 ns 의 keepalived 도 관리 | 중 | `ip netns exec <ns> keepalived -P -D -f ...` 로 직접 띄움 |
+| 클럭 격리 ❌ | 비목표 (multi-site WAN latency) | `tc netem delay/loss` 로 시뮬 |
+| sudo 권한 필요 | 환경 | 검증 스크립트는 root/sudo 가정 |
+
+**다음 단계 — S6 FAILOVER LIVE 본체 구현 진입점**:
+1. `verify/lib/items/stage6/scn_failover_csp.py` — 현재 stub. NetNS env 감지 +
+   active CSP kill → ≤5s 내 신규 REGISTER 응답 검증
+2. `scn_failover_cmp.py` — All-Active media-a kill → 신규 세션 hash ring 분배 검증
+3. `scn_failover_csc.py` — CSC active kill → Console reconnect 검증
+
 ## 12. 미확정 / 추후 검토
 
 - **Redis sentinel / cluster 도입 시점** — 1.D-1 안정화 후 register

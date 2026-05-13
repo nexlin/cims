@@ -130,6 +130,8 @@ export interface Agent {
 
 export interface AgentCreateResult extends Agent {
   enrollment_token: string
+  enrollment_token_expires_at?: string
+  enrollment_token_ttl_sec?: number
   install_command: string
 }
 
@@ -270,8 +272,6 @@ export interface Deployment {
   package_id: number
   package_name: string | null
   package_version: string | null
-  instance_id: number | null
-  instance_name: string | null
   process_name: string | null
   service_functions: string[]     // machine names
   status: 'pending' | 'deploying' | 'running' | 'stopped' | 'failed' | 'removed'
@@ -287,7 +287,6 @@ export interface Deployment {
 export interface DeploymentCreateInput {
   agent_id: number
   package_id: number
-  instance_id?: number | null
   process_name?: string
   service_functions?: string[]
   install_path?: string
