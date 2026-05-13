@@ -299,7 +299,7 @@ async def _create_group(body, config):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
     name = (body.get('name') or '').strip()
     mode = (body.get('mode') or '').strip()
-    vip  = (body.get('vip')  or '').strip()
+    vip  = (body.get('vip')  or '').strip() or None     # nullable — vip_bindings 가 대체
     auth_pass = (body.get('auth_pass') or '').strip()
     vip_mask = int(body.get('vip_mask', 24))
     note = body.get('note', '')
@@ -309,8 +309,6 @@ async def _create_group(body, config):
         return HandlerResult(status=400, body={'error': 'name required'})
     if mode not in ('active_standby', 'all_active'):
         return HandlerResult(status=400, body={'error': 'mode must be active_standby or all_active'})
-    if not vip:
-        return HandlerResult(status=400, body={'error': 'vip required'})
     if not auth_pass or len(auth_pass) > 8:
         return HandlerResult(status=400, body={'error': 'auth_pass required (max 8 chars)'})
     if mode == 'active_standby' and len(members) not in (0, 2):

@@ -185,6 +185,11 @@ export interface ConfigTemplateField {
   group?: string
   // deploy-time 치환값 (@VAR@ 포함). UI 는 무시.
   deploy_value?: unknown
+  // HaServicesPage Phase 2 — IP slot 메타. 운영자가 어떤 IP 인지 식별.
+  ip_scope?: 'service' | 'vip'   // 서버 단위 IP / 그룹 단위 VIP
+  ip_slot?: string                // 'SIP' / 'Admin' / 'RTP' 등 (자유 명명, 정렬 키)
+  ip_port?: number                // 참고용 포트
+  ip_proto?: 'tcp' | 'udp'
 }
 
 export interface ConfigTemplateSection {

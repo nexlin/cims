@@ -14,6 +14,7 @@
  *   packageIds      ← deployments.filter(...).map(d => d.package_id) (실배포 = 의도)
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { haGroupsApi, type HaGroup, type VipBinding as ApiVipBinding } from '../api/ha_groups'
 import { deploymentApi, type Agent, type SipPackage, type Deployment,
          type NetIface as ApiNetIface, type ServiceIpRow as ApiServiceIpRow } from '../api/deployment'
@@ -106,14 +107,38 @@ const SLOT_MAP: Record<string, IpSlot[]> = {
   phone:   [{ scope: 'service', name: 'HTTPS', port: 3002, proto: 'tcp' }],
 }
 
+// config_template.json 에 ip_scope/ip_slot 메타가 있으면 우선, 없으면 hardcoded SLOT_MAP fallback
+function extractIpSlotsFromTemplate(p: SipPackage): IpSlot[] {
+  const tpl = p.config_template
+  if (!tpl?.sections) return []
+  const slots: IpSlot[] = []
+  const seen = new Set<string>()
+  for (const sec of tpl.sections) {
+    for (const f of sec.fields ?? []) {
+      if (!f.ip_scope || !f.ip_slot) continue
+      const key = `${f.ip_scope}:${f.ip_slot}:${f.ip_proto ?? ''}:${f.ip_port ?? ''}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      slots.push({
+        scope: f.ip_scope,
+        name:  f.ip_slot,
+        port:  f.ip_port,
+        proto: f.ip_proto,
+      })
+    }
+  }
+  return slots
+}
+
 function pkgToDef(p: SipPackage): PkgDef {
+  const fromTemplate = extractIpSlotsFromTemplate(p)
   return {
     id: p.id,
     name: p.name,
     version: p.version,
     description: p.description ?? '',
     capability: (p.meta?.ha_capability as Capability) ?? 'standalone',
-    ipSlots: SLOT_MAP[p.name] ?? [],
+    ipSlots: fromTemplate.length > 0 ? fromTemplate : (SLOT_MAP[p.name] ?? []),
   }
 }
 
@@ -315,13 +340,13 @@ export default function HaServicesPage() {
           const r = await deploymentApi.createAgent(`${baseName}-${pad2(i)}`, '')
           memberAgents.push({ agent: r, token: r.enrollment_token, cmd: r.install_command })
         }
-        // ha_group 생성 — vip 는 빈 값 (운영자가 VIP panel 에서 설정)
+        // ha_group 생성 — vip 는 비움 (운영자가 VipPanel 에서 vip_bindings 추가)
         const gres = await haGroupsApi.create({
           name: baseName,
           mode,
-          vip: '0.0.0.0',                              // 임시 placeholder — 추후 VipPanel 에서 update
+          vip: '',                                     // nullable — vip_bindings 가 대체
           vip_mask: 24,
-          auth_pass: '00000000',                       // 임시 placeholder
+          auth_pass: '00000000',                       // TODO: 운영자가 입력하도록 UI 추가
           members: memberAgents.map((m, i) => ({
             agent_id: m.agent.id,
             role: i === 0 && mode === 'active_standby' ? 'master' : 'backup',
@@ -847,6 +872,13 @@ function ServerRows(p: ServerRowsProps) {
           </button>
           {srv.status !== 'online' && (
             <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}>↻ 토큰</button>
+          )}
+          {srv.id > 0 && (
+            <Link to={`/deploy/servers?agent=${srv.id}`}
+                  title="Server Inspector 진입 (모듈 / metric / lifecycle)"
+                  style={{ ...btnSmall(), textDecoration: 'none', display: 'inline-block' }}>
+              🔧
+            </Link>
           )}
         </td>
       </tr>

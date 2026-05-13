@@ -24,7 +24,7 @@ export interface HaGroup {
   id: number
   name: string
   mode: HaMode
-  vip: string
+  vip: string | null                              // legacy 단일 VIP (Phase 2 부터 nullable, vip_bindings 권장)
   vrid: number
   vip_mask: number
   auth_pass: string
@@ -38,7 +38,7 @@ export interface HaGroup {
 export interface HaGroupInput {
   name: string
   mode: HaMode
-  vip: string
+  vip?: string                                    // optional — vip_bindings 가 권장
   vip_mask?: number
   auth_pass: string
   note?: string

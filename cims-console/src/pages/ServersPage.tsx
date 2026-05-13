@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric,
@@ -11,11 +12,17 @@ import { agentDisplayName } from '../components/agentDisplay'
 
 export default function ServersPage() {
   const { show } = useToast()
+  const [searchParams] = useSearchParams()
+  const initialAgentId = (() => {
+    const q = searchParams.get('agent')
+    const n = q ? Number(q) : NaN
+    return Number.isFinite(n) && n > 0 ? n : null
+  })()
   const [agents, setAgents]           = useState<Agent[]>([])
   const [packages, setPackages]       = useState<SipPackage[]>([])
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [loading, setLoading]         = useState(true)
-  const [selectedId, setSelectedId]   = useState<number | null>(null)
+  const [selectedId, setSelectedId]   = useState<number | null>(initialAgentId)
   const [filter, setFilter]           = useState('')
 
   const [agentModalOpen, setAgentModalOpen] = useState(false)
