@@ -144,7 +144,7 @@ C. 검증:
 | Phase | 상태 | 노트 |
 |---|---|---|
 | 1. packages | 🟢 **완료** (2026-05-13) | file_store 헬퍼 + cims_package 마이그레이션 (`csc/scripts/migrate_packages_db_to_file.py`). agent_deployment.package_id JOIN 4건 client-side enrich (`_enrich_deploy_with_pkg`). 9 패키지 LIVE 마이그레이션 확인. |
-| 2. agents/instances | ⚪ 대기 | FK 의존 — packages 다음 |
+| 2. agents/instances | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_agents_db_to_file.py` (0 instance + 9 agent). agents.py CRUD / agent_api.py 핫패스(enroll/heartbeat/cert/metric) / ha_groups.py 멤버 enrich (3 JOIN 제거) / csc_app.py sweeper(stale offline + cert rotate) 모두 file_store. agent_deployment JOIN 은 `_enrich_deploy` 로 통합 (pkg + agent + instance). LIVE: agents/deployments/ha-groups 정상 응답. |
 | 3. deployments/jobs/metrics | ⚪ 대기 | agents 다음 |
 | 4. ha_groups | ⚪ 대기 | agents 의존 |
 | 5. csp runtime config | ⚪ 대기 | 독립 가능 (병렬) |

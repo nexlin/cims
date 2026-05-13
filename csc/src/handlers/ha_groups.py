@@ -136,7 +136,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     }
 
 
-def _enqueue_update_ha_for_members(cur, group_id: int) -> int:
+def _enqueue_update_ha_for_members(cur, group_id: int, config: dict) -> int:
     """그룹 멤버들에게 update_ha job 큐잉. 큐잉된 job 수 반환."""
     cur.execute(
         "SELECT g.*, GROUP_CONCAT(m.agent_id) AS member_ids "
@@ -155,10 +155,14 @@ def _enqueue_update_ha_for_members(cur, group_id: int) -> int:
     )
     members = list(cur.fetchall())
 
-    cur.execute("SELECT id, name, ip_address FROM cims_agent WHERE id IN ({})".format(
-        ",".join(["%s"] * len(members))
-    ), tuple(m['agent_id'] for m in members))
-    agents = {r['id']: r for r in cur.fetchall()}
+    # cims_agent 는 file_store — name/ip_address 만 필요
+    from handlers.agents import _agent_load
+    agents = {}
+    for m in members:
+        a = _agent_load(config, aid=m['agent_id'])
+        if a:
+            agents[m['agent_id']] = {'id': a.get('id'), 'name': a.get('name'),
+                                     'ip_address': a.get('ip_address')}
 
     enqueued = 0
     for m in members:
@@ -250,6 +254,20 @@ def _decode_vip_bindings(raw):
         return []
 
 
+def _attach_member_names(members: list, config: dict) -> list:
+    """ha_group_members rows 에 agent_name 을 file_store 에서 채워준다."""
+    from handlers.agents import _agent_load
+    cache: dict = {}
+    for m in members:
+        aid = m.get('agent_id')
+        if aid is None:
+            continue
+        if aid not in cache:
+            cache[aid] = _agent_load(config, aid=aid) or {}
+        m['agent_name'] = cache[aid].get('name')
+    return members
+
+
 async def _list_groups(config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -263,12 +281,11 @@ async def _list_groups(config):
                 if g.get('update_time'): g['update_time'] = g['update_time'].isoformat()
                 g['vip_bindings'] = _decode_vip_bindings(g.pop('vip_bindings_json', None))
                 cur.execute(
-                    "SELECT m.agent_id, m.priority, m.role, a.name AS agent_name "
-                    "FROM ha_group_members m JOIN cims_agent a ON a.id=m.agent_id "
-                    "WHERE m.group_id=%s ORDER BY m.priority DESC",
+                    "SELECT agent_id, priority, role FROM ha_group_members "
+                    "WHERE group_id=%s ORDER BY priority DESC",
                     (g['id'],)
                 )
-                g['members'] = cur.fetchall()
+                g['members'] = _attach_member_names(list(cur.fetchall()), config)
     return HandlerResult(status=200, body={'groups': groups})
 
 
@@ -286,11 +303,10 @@ async def _get_group(gid: int, config):
             if g.get('update_time'): g['update_time'] = g['update_time'].isoformat()
             g['vip_bindings'] = _decode_vip_bindings(g.pop('vip_bindings_json', None))
             cur.execute(
-                "SELECT m.agent_id, m.priority, m.role, a.name AS agent_name "
-                "FROM ha_group_members m JOIN cims_agent a ON a.id=m.agent_id "
-                "WHERE m.group_id=%s ORDER BY m.priority DESC", (gid,)
+                "SELECT agent_id, priority, role FROM ha_group_members "
+                "WHERE group_id=%s ORDER BY priority DESC", (gid,)
             )
-            g['members'] = cur.fetchall()
+            g['members'] = _attach_member_names(list(cur.fetchall()), config)
     return HandlerResult(status=200, body=g)
 
 
@@ -337,7 +353,7 @@ async def _create_group(body, config):
                     (gid, aid, priority, role)
                 )
             # update_ha job 큐잉
-            _enqueue_update_ha_for_members(cur, gid)
+            _enqueue_update_ha_for_members(cur, gid, config)
     return HandlerResult(status=201, body={'id': gid, 'vrid': vrid})
 
 
@@ -376,7 +392,7 @@ async def _update_group(gid: int, body, config):
                         "VALUES (%s, %s, %s, %s)",
                         (gid, aid, priority, role)
                     )
-            _enqueue_update_ha_for_members(cur, gid)
+            _enqueue_update_ha_for_members(cur, gid, config)
     return HandlerResult(status=200, body={'id': gid})
 
 
@@ -393,11 +409,10 @@ async def _list_members(gid: int, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT m.agent_id, m.priority, m.role, a.name AS agent_name "
-                "FROM ha_group_members m JOIN cims_agent a ON a.id=m.agent_id "
-                "WHERE m.group_id=%s ORDER BY m.priority DESC", (gid,)
+                "SELECT agent_id, priority, role FROM ha_group_members "
+                "WHERE group_id=%s ORDER BY priority DESC", (gid,)
             )
-            members = cur.fetchall()
+            members = _attach_member_names(list(cur.fetchall()), config)
     return HandlerResult(status=200, body={'members': members})
 
 
@@ -416,7 +431,7 @@ async def _add_member(gid: int, body, config):
                 "VALUES (%s, %s, %s, %s)",
                 (gid, aid, priority, role)
             )
-            _enqueue_update_ha_for_members(cur, gid)
+            _enqueue_update_ha_for_members(cur, gid, config)
     return HandlerResult(status=201, body={'group_id': gid, 'agent_id': aid})
 
 
@@ -428,7 +443,7 @@ async def _apply_group(gid: int, config):
             cur.execute("SELECT id FROM ha_groups WHERE id=%s", (gid,))
             if not cur.fetchone():
                 return HandlerResult(status=404, body={'error': 'Group not found'})
-            count = _enqueue_update_ha_for_members(cur, gid)
+            count = _enqueue_update_ha_for_members(cur, gid, config)
     return HandlerResult(status=202, body={'group_id': gid, 'jobs_queued': count})
 
 
@@ -441,7 +456,7 @@ async def _remove_member(gid: int, aid: int, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Member not found'})
-            _enqueue_update_ha_for_members(cur, gid)
+            _enqueue_update_ha_for_members(cur, gid, config)
     return HandlerResult(status=200, body={'group_id': gid, 'agent_id': aid, 'removed': True})
 
 

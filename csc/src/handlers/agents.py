@@ -44,6 +44,8 @@ logger = Logger()
 # ──────────────────────────────────────────────────────────────
 
 _PKG_DOMAIN = 'packages'
+_INSTANCE_DOMAIN = 'instances'
+_AGENT_DOMAIN = 'agents'
 
 
 def _pkg_dir(config):
@@ -75,6 +77,93 @@ def _pkg_load_latest_by_name(config, name: str):
         return None
     rows.sort(key=lambda x: x.get('id', 0))
     return rows[-1]
+
+
+# ── cims_instance / cims_agent file_store helpers ──────────────────────
+
+def _instance_dir(config):
+    return file_store.domain_dir(config, _INSTANCE_DOMAIN)
+
+
+def _instance_load(config, iid: int):
+    return file_store.by_id(_instance_dir(config), iid)
+
+
+def _instance_load_all(config) -> list:
+    return file_store.load_all(_instance_dir(config))
+
+
+def _agent_dir(config):
+    return file_store.domain_dir(config, _AGENT_DOMAIN)
+
+
+def _agent_load(config, aid: int = None, name: str = None,
+                agent_token: str = None, enrollment_token: str = None):
+    """id / name / agent_token / enrollment_token 중 하나로 1건 조회."""
+    if aid is not None:
+        return file_store.by_id(_agent_dir(config), aid)
+    if name:
+        return file_store.find_by(_agent_dir(config), lambda o: o.get('name') == name)
+    if agent_token:
+        return file_store.find_by(_agent_dir(config),
+                                  lambda o: o.get('agent_token') == agent_token
+                                  and o.get('status') != 'revoked')
+    if enrollment_token:
+        return file_store.find_by(_agent_dir(config),
+                                  lambda o: o.get('enrollment_token') == enrollment_token)
+    return None
+
+
+def _agent_load_all(config) -> list:
+    return file_store.load_all(_agent_dir(config))
+
+
+def _agent_save(config, agent: dict) -> dict:
+    """agent dict (id 필수) atomic 저장. 누락된 create_time 은 file_store 가 채움."""
+    file_store.save(_agent_dir(config), int(agent['id']), agent)
+    return agent
+
+
+def _agent_update(config, aid: int, patches: dict) -> dict | None:
+    """id 로 로드 → patches merge → 저장. 없으면 None."""
+    existing = _agent_load(config, aid=aid)
+    if not existing:
+        return None
+    existing.update(patches)
+    file_store.save(_agent_dir(config), aid, existing)
+    return existing
+
+
+def _enrich_with_agent(rows: list, config, key_in='agent_id', key_out_prefix='agent_'):
+    """rows 의 agent_id 를 agent name/ip_address 로 enrich.
+    enriched 필드: agent_name. (호출자가 필요한 다른 필드는 직접 lookup 가능)"""
+    if not rows:
+        return rows
+    cache: dict = {}
+    for r in rows:
+        aid = r.get(key_in)
+        if aid is None:
+            continue
+        if aid not in cache:
+            cache[aid] = _agent_load(config, aid=aid) or {}
+        a = cache[aid]
+        r[f'{key_out_prefix}name'] = a.get('name')
+    return rows
+
+
+def _enrich_with_instance(rows: list, config, key_in='instance_id', key_out_prefix='instance_'):
+    if not rows:
+        return rows
+    cache: dict = {}
+    for r in rows:
+        iid = r.get(key_in)
+        if iid is None:
+            continue
+        if iid not in cache:
+            cache[iid] = _instance_load(config, iid) or {}
+        i = cache[iid]
+        r[f'{key_out_prefix}name'] = i.get('name')
+    return rows
 
 _AGENT_BASE       = "/api/v1/agents"
 _PACKAGE_BASE     = "/api/v1/packages"
@@ -163,33 +252,41 @@ def _actor(handler_args: HandlerArgs) -> str:
 
 def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
     def _safe_load(raw):
-        if not raw: return None
+        if raw is None: return None
+        if isinstance(raw, (dict, list)): return raw
         try: return json.loads(raw)
         except (TypeError, ValueError): return None
+
+    def _maybe_dt(v):
+        if v is None: return None
+        if hasattr(v, 'isoformat'): return v.isoformat()
+        return v
     return {
-        "id": r["id"],
-        "name": r["name"],
-        "status": r["status"],
-        "hostname": r["hostname"],
-        "ip_address": r["ip_address"],
-        "os_info": r["os_info"],
-        "cpu_cores": r["cpu_cores"],
-        "memory_mb": r["memory_mb"],
-        "disk_gb": r["disk_gb"],
-        "agent_version": r["agent_version"],
-        "last_heartbeat": _dt(r["last_heartbeat"]),
-        "last_metric":    _dt(r["last_metric"]),
-        "enrolled_at":    _dt(r["enrolled_at"]),
-        "approved_at":    _dt(r["approved_at"]),
-        "note": r["note"],
-        "create_time": _dt(r["create_time"]),
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "status": r.get("status"),
+        "hostname": r.get("hostname"),
+        "ip_address": r.get("ip_address"),
+        "os_info": r.get("os_info"),
+        "cpu_cores": r.get("cpu_cores"),
+        "memory_mb": r.get("memory_mb"),
+        "disk_gb": r.get("disk_gb"),
+        "agent_version": r.get("agent_version"),
+        "last_heartbeat": _maybe_dt(r.get("last_heartbeat")),
+        "last_metric":    _maybe_dt(r.get("last_metric")),
+        "enrolled_at":    _maybe_dt(r.get("enrolled_at")),
+        "approved_at":    _maybe_dt(r.get("approved_at")),
+        "note": r.get("note"),
+        "create_time": _maybe_dt(r.get("create_time")),
         # 보안: enrollment_token 은 생성 직후에만 반환. 여기서는 masked
         "has_pending_enrollment": bool(r.get("enrollment_token")),
         # HA 그룹 정보 — 미정의 시 null
         "ha_group": ha_group,
         # HaServicesPage 용 확장 필드 (없으면 null)
-        "interfaces":      _safe_load(r.get("interfaces_json")),
-        "service_ip_rows": _safe_load(r.get("service_ip_rows_json")),
+        "interfaces":      r.get("interfaces") if isinstance(r.get("interfaces"), (dict, list))
+                           else _safe_load(r.get("interfaces_json")),
+        "service_ip_rows": r.get("service_ip_rows") if isinstance(r.get("service_ip_rows"), (dict, list))
+                           else _safe_load(r.get("service_ip_rows_json")),
     }
 
 
@@ -226,15 +323,24 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
 
-def _ha_group_map_for_agents(cur) -> dict:
-    """모든 agent 의 ha_group {id,name,mode,role} 매핑. dict[agent_id] = {...}"""
-    cur.execute(
-        "SELECT m.agent_id, g.id AS gid, g.name AS gname, g.mode AS gmode, "
-        "       m.role AS grole "
-        "FROM ha_group_members m JOIN ha_groups g ON g.id=m.group_id"
-    )
+def _ha_group_map_for_agents(config) -> dict:
+    """모든 agent 의 ha_group {id,name,mode,role} 매핑. dict[agent_id] = {...}
+
+    ha_groups / ha_group_members 는 아직 DB (Phase 4 마이그레이션 예정).
+    """
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT m.agent_id, g.id AS gid, g.name AS gname, g.mode AS gmode, "
+                "       m.role AS grole "
+                "FROM ha_group_members m JOIN ha_groups g ON g.id=m.group_id"
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
     out = {}
-    for r in cur.fetchall():
+    for r in rows:
         out[r["agent_id"]] = {
             "id": r["gid"], "name": r["gname"], "mode": r["gmode"], "role": r["grole"],
         }
@@ -242,30 +348,19 @@ def _ha_group_map_for_agents(cur) -> dict:
 
 
 async def _list_agents(config):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM cims_agent ORDER BY id")
-            rows = cur.fetchall()
-            ha_map = _ha_group_map_for_agents(cur)
-    finally:
-        conn.close()
+    rows = await asyncio.to_thread(_agent_load_all, config)
+    rows.sort(key=lambda x: x.get('id', 0))
+    ha_map = await asyncio.to_thread(_ha_group_map_for_agents, config)
     return HandlerResult(status=200,
-                         body={"items": [_agent_to_json(r, ha_group=ha_map.get(r["id"])) for r in rows]},
+                         body={"items": [_agent_to_json(r, ha_group=ha_map.get(r.get("id"))) for r in rows]},
                          media_type="application/json")
 
 
 async def _get_agent(aid: int, config):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM cims_agent WHERE id=%s", (aid,))
-            r = cur.fetchone()
-            ha_map = _ha_group_map_for_agents(cur) if r else {}
-    finally:
-        conn.close()
+    r = await asyncio.to_thread(_agent_load, config, aid)
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    ha_map = await asyncio.to_thread(_ha_group_map_for_agents, config)
     return HandlerResult(status=200,
                          body=_agent_to_json(r, ha_group=ha_map.get(aid)),
                          media_type="application/json")
@@ -277,23 +372,25 @@ async def _create_agent(handler_args: HandlerArgs, config):
     name = (body.get("name") or "").strip()
     if not name:
         return HandlerResult(status=400, body={"error": "name required"}, media_type="application/json")
-    enroll_token = secrets.token_hex(24)
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO cims_agent (name, enrollment_token, status, agent_token, note) "
-                "VALUES (%s,%s,'pending',%s,%s)",
-                (name, enroll_token, secrets.token_hex(32), body.get("note"))
-            )
-            new_id = cur.lastrowid
-            cur.execute("SELECT * FROM cims_agent WHERE id=%s", (new_id,))
-            row = cur.fetchone()
-    except pymysql.err.IntegrityError as e:
-        return HandlerResult(status=409, body={"error": "conflict", "detail": str(e)},
+    # 중복 name 검사 (옛 DB 의 UNIQUE 제약 대체)
+    if await asyncio.to_thread(_agent_load, config, None, name):
+        return HandlerResult(status=409, body={"error": "conflict", "detail": f"agent name '{name}' already exists"},
                              media_type="application/json")
-    finally:
-        conn.close()
+    enroll_token = secrets.token_hex(24)
+
+    def _do_create():
+        new_id = file_store.next_id(_agent_dir(config))
+        row = {
+            'id': new_id,
+            'name': name,
+            'enrollment_token': enroll_token,
+            'agent_token': secrets.token_hex(32),
+            'status': 'pending',
+            'note': body.get('note'),
+        }
+        return _agent_save(config, row)
+
+    row = await asyncio.to_thread(_do_create)
     result = _agent_to_json(row)
     # enrollment_token 은 최초 생성 시만 반환
     result["enrollment_token"] = enroll_token
@@ -332,117 +429,100 @@ def _csc_public_url(handler_args: HandlerArgs, config: dict) -> str:
 
 async def _update_agent(handler_args: HandlerArgs, aid: int, config):
     body = _parse_body(handler_args)
-    fields = []; values = []
+    patches: dict = {}
     for col in ("name", "note"):
         if col in body:
-            fields.append(f"{col}=%s"); values.append(body[col])
+            patches[col] = body[col]
     # HaServicesPage 운영자가 설정한 iface→slot 매핑 (서비스 IP rows)
     if "service_ip_rows" in body:
-        rows = body.get("service_ip_rows")
-        fields.append("service_ip_rows_json=%s")
-        values.append(json.dumps(rows, ensure_ascii=False) if rows is not None else None)
-    if not fields:
+        patches['service_ip_rows'] = body.get('service_ip_rows')
+    if not patches:
         return HandlerResult(status=400, body={"error": "no_updatable_fields"}, media_type="application/json")
-    values.append(aid)
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(f"UPDATE cims_agent SET {', '.join(fields)} WHERE id=%s", values)
-            cur.execute("SELECT * FROM cims_agent WHERE id=%s", (aid,))
-            row = cur.fetchone()
-    finally:
-        conn.close()
+    row = await asyncio.to_thread(_agent_update, config, aid, patches)
     if not row:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
     return HandlerResult(status=200, body=_agent_to_json(row), media_type="application/json")
 
 
 async def _delete_agent(handler_args: HandlerArgs, aid: int, config):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM cims_agent WHERE id=%s", (aid,))
-    finally:
-        conn.close()
+    await asyncio.to_thread(file_store.delete, _agent_dir(config), aid)
     return HandlerResult(status=204, body=None, media_type="application/json")
 
 
 async def _approve_agent(handler_args: HandlerArgs, aid: int, config):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE cims_agent SET status='approved', approved_at=NOW() "
-                "WHERE id=%s AND status='pending'", (aid,))
-            changed = cur.rowcount
-    finally:
-        conn.close()
+    from datetime import datetime
+    def _do():
+        existing = _agent_load(config, aid=aid)
+        if not existing or existing.get('status') != 'pending':
+            return False
+        existing['status'] = 'approved'
+        existing['approved_at'] = datetime.now().isoformat(timespec='seconds')
+        file_store.save(_agent_dir(config), aid, existing)
+        return True
+    changed = await asyncio.to_thread(_do)
     return HandlerResult(status=200 if changed else 409,
                          body={"ok": bool(changed), "id": aid}, media_type="application/json")
 
 
 async def _revoke_agent(handler_args: HandlerArgs, aid: int, config):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE cims_agent SET status='revoked' WHERE id=%s", (aid,))
-    finally:
-        conn.close()
+    await asyncio.to_thread(_agent_update, config, aid, {'status': 'revoked'})
     return HandlerResult(status=200, body={"ok": True, "id": aid}, media_type="application/json")
 
 
 async def _apply_ip_config(aid: int, config):
-    """ServiceIpPanel [적용] 진입점 — cims_agent.service_ip_rows_json 을 읽어
+    """ServiceIpPanel [적용] 진입점 — file_store agent.service_ip_rows 를 읽어
     apply_ip_config job 큐잉. Agent 가 ip addr add 로 secondary IP 적용."""
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, name, service_ip_rows_json FROM cims_agent WHERE id=%s", (aid,))
-            row = cur.fetchone()
-            if not row:
-                return HandlerResult(status=404, body={"error": "agent_not_found"},
-                                     media_type="application/json")
-            raw = row.get("service_ip_rows_json")
-            try:
-                rows = json.loads(raw) if raw else []
-            except (TypeError, ValueError):
-                rows = []
-            if not rows:
-                return HandlerResult(status=400, body={"error": "no_service_ip_rows"},
-                                     media_type="application/json")
-            cur.execute(
-                "INSERT INTO agent_job (agent_id, job_type, params, status) "
-                "VALUES (%s, 'apply_ip_config', %s, 'queued')",
-                (aid, json.dumps({"service_ip_rows": rows}, ensure_ascii=False))
-            )
-            job_id = cur.lastrowid
-    finally:
-        conn.close()
+    row = await asyncio.to_thread(_agent_load, config, aid)
+    if not row:
+        return HandlerResult(status=404, body={"error": "agent_not_found"}, media_type="application/json")
+    rows_payload = row.get("service_ip_rows")
+    if isinstance(rows_payload, str):
+        try: rows_payload = json.loads(rows_payload)
+        except (TypeError, ValueError): rows_payload = []
+    if not rows_payload:
+        return HandlerResult(status=400, body={"error": "no_service_ip_rows"},
+                             media_type="application/json")
+    # agent_job 은 아직 DB (Phase 3 마이그레이션 예정)
+    def _enqueue():
+        conn = _get_db(config)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO agent_job (agent_id, job_type, params, status) "
+                    "VALUES (%s, 'apply_ip_config', %s, 'queued')",
+                    (aid, json.dumps({"service_ip_rows": rows_payload}, ensure_ascii=False))
+                )
+                return cur.lastrowid
+        finally:
+            conn.close()
+    job_id = await asyncio.to_thread(_enqueue)
     return HandlerResult(status=202,
-                         body={"agent_id": aid, "job_id": job_id, "rows": len(rows)},
+                         body={"agent_id": aid, "job_id": job_id, "rows": len(rows_payload)},
                          media_type="application/json")
 
 
 async def _upgrade_agent_binary(handler_args: HandlerArgs, aid: int, config):
     """Agent 자기 바이너리 업그레이드 job 큐잉.
     Agent 가 heartbeat 로 pickup → /cims_agent.py 다운로드 → 자기 교체 → 종료 → systemd 재기동."""
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, name FROM cims_agent WHERE id=%s", (aid,))
-            row = cur.fetchone()
-            if not row:
-                return HandlerResult(status=404, body={"error": "agent_not_found"},
-                                     media_type="application/json")
-            cur.execute(
-                "INSERT INTO agent_job (agent_id, job_type, params, status) "
-                "VALUES (%s, 'upgrade_agent', %s, 'queued')",
-                (aid, json.dumps({}))
-            )
-            job_id = cur.lastrowid
-    finally:
-        conn.close()
-    logger.log_info(f"[agent-upgrade] queued job_id={job_id} agent_id={aid} name={row['name']}")
+    row = await asyncio.to_thread(_agent_load, config, aid)
+    if not row:
+        return HandlerResult(status=404, body={"error": "agent_not_found"},
+                             media_type="application/json")
+    # agent_job 은 아직 DB (Phase 3)
+    def _enqueue():
+        conn = _get_db(config)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO agent_job (agent_id, job_type, params, status) "
+                    "VALUES (%s, 'upgrade_agent', %s, 'queued')",
+                    (aid, json.dumps({}))
+                )
+                return cur.lastrowid
+        finally:
+            conn.close()
+    job_id = await asyncio.to_thread(_enqueue)
+    logger.log_info(f"[agent-upgrade] queued job_id={job_id} agent_id={aid} name={row.get('name')}")
     return HandlerResult(status=202,
                          body={"ok": True, "agent_id": aid, "job_id": job_id,
                                "hint": "agent 가 다음 heartbeat 에서 pickup 후 재시작됩니다 (수 초 내)"},
@@ -1062,30 +1142,42 @@ async def _put_deployment_config(handler_args, did: int, config):
         media_type="application/json")
 
 
-_SELECT_DEPLOY = ("""
-    SELECT d.*, a.name AS agent_name,
-           i.name AS instance_name
-    FROM agent_deployment d
-    LEFT JOIN cims_agent    a ON d.agent_id    = a.id
-    LEFT JOIN cims_instance i ON d.instance_id = i.id
-""")
+_SELECT_DEPLOY = "SELECT * FROM agent_deployment d"
+
+
+def _enrich_deploy(rows, config):
+    """deployment rows 에 package / agent / instance 정보를 file_store 에서 enrich.
+
+    추가 필드: package_name / package_version / agent_name / instance_name.
+    """
+    if not rows:
+        return rows
+    pkg_cache: dict = {}
+    agent_cache: dict = {}
+    inst_cache: dict = {}
+    for r in rows:
+        pid = r.get('package_id')
+        if pid is not None:
+            if pid not in pkg_cache:
+                pkg_cache[pid] = _pkg_load(config, pid=pid) or {}
+            r['package_name'] = pkg_cache[pid].get('name')
+            r['package_version'] = pkg_cache[pid].get('version')
+        aid = r.get('agent_id')
+        if aid is not None:
+            if aid not in agent_cache:
+                agent_cache[aid] = _agent_load(config, aid=aid) or {}
+            r['agent_name'] = agent_cache[aid].get('name')
+        iid = r.get('instance_id')
+        if iid is not None:
+            if iid not in inst_cache:
+                inst_cache[iid] = _instance_load(config, iid) or {}
+            r['instance_name'] = inst_cache[iid].get('name')
+    return rows
 
 
 def _enrich_deploy_with_pkg(rows, config):
-    """deployment rows 에 package_name / package_version 을 file_store 에서 채워준다."""
-    if not rows:
-        return rows
-    cache: dict = {}
-    for r in rows:
-        pid = r.get('package_id')
-        if pid is None:
-            continue
-        if pid not in cache:
-            cache[pid] = _pkg_load(config, pid=pid) or {}
-        pkg = cache[pid]
-        r['package_name'] = pkg.get('name')
-        r['package_version'] = pkg.get('version')
-    return rows
+    """deprecated 호환 별칭 — _enrich_deploy 와 동일하게 동작."""
+    return _enrich_deploy(rows, config)
 
 
 async def _list_deployments(config):
@@ -1333,16 +1425,18 @@ def _fetch_deployment_for_proxy(did: int, config):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT d.id, d.install_path, d.package_id, "
-                "       a.id AS agent_id, a.name AS agent_name, a.status AS agent_status, "
-                "       a.ip_address, a.sync_port, a.agent_token "
-                "FROM agent_deployment d "
-                "LEFT JOIN cims_agent    a ON d.agent_id   = a.id "
-                "WHERE d.id=%s", (did,))
+                "SELECT id, install_path, package_id, agent_id "
+                "FROM agent_deployment WHERE id=%s", (did,))
             r = cur.fetchone()
     finally:
         conn.close()
     if r:
+        agent = _agent_load(config, aid=r.get('agent_id')) or {}
+        r['agent_name'] = agent.get('name')
+        r['agent_status'] = agent.get('status')
+        r['ip_address'] = agent.get('ip_address')
+        r['sync_port'] = agent.get('sync_port')
+        r['agent_token'] = agent.get('agent_token')
         pkg = _pkg_load(config, pid=r.get('package_id')) or {}
         r['config_template_json'] = pkg.get('config_template')  # 옛 이름 그대로 (downstream _collection_schema)
     return r

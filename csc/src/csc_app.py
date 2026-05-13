@@ -343,22 +343,26 @@ if __name__ == '__main__':
 
         def _sweep_stale_agents():
             try:
-                conn = _agent_db_conn(config)
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "UPDATE cims_agent SET status='offline' "
-                            "WHERE status IN ('online','approved') "
-                            "  AND last_heartbeat IS NOT NULL "
-                            "  AND last_heartbeat < NOW() - INTERVAL %s SECOND",
-                            (STALE_SEC,)
-                        )
-                        n = cur.rowcount
-                        if n > 0:
-                            logger.log_info(f"[agent-sweep] marked {n} stale agent(s) offline "
-                                            f"(threshold={STALE_SEC}s)")
-                finally:
-                    conn.close()
+                from handlers.agents import _agent_load_all, _agent_update
+                from datetime import datetime as _dt
+                threshold = _dt.now().timestamp() - STALE_SEC
+                n = 0
+                for a in _agent_load_all(config):
+                    if a.get('status') not in ('online', 'approved'):
+                        continue
+                    hb = a.get('last_heartbeat')
+                    if not hb:
+                        continue
+                    try:
+                        hb_ts = _dt.fromisoformat(hb).timestamp()
+                    except Exception:
+                        continue
+                    if hb_ts < threshold:
+                        _agent_update(config, a['id'], {'status': 'offline'})
+                        n += 1
+                if n > 0:
+                    logger.log_info(f"[agent-sweep] marked {n} stale agent(s) offline "
+                                    f"(threshold={STALE_SEC}s)")
             except Exception as e:
                 logger.log_error(f"[agent-sweep] error: {e}")
 
@@ -366,23 +370,28 @@ if __name__ == '__main__':
             """mtls_enabled=1 이고 cert 가 THRESHOLD 일 이내 만료 예정인 agent 를 표식.
             다음 heartbeat 응답에서 rotate 지시가 내려간다."""
             try:
-                conn = _agent_db_conn(config)
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "UPDATE cims_agent SET cert_rotate_pending=1 "
-                            "WHERE mtls_enabled=1 "
-                            "  AND cert_expires_at IS NOT NULL "
-                            "  AND cert_rotate_pending=0 "
-                            "  AND cert_expires_at <= NOW() + INTERVAL %s DAY",
-                            (_AGENT_CERT_ROTATE_THRESHOLD_DAYS,)
-                        )
-                        n = cur.rowcount
-                        if n > 0:
-                            logger.log_info(f"[cert-sweep] flagged {n} agent(s) for cert rotation "
-                                            f"(threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d)")
-                finally:
-                    conn.close()
+                from handlers.agents import _agent_load_all, _agent_update
+                from datetime import datetime as _dt, timedelta as _td
+                deadline = _dt.now() + _td(days=_AGENT_CERT_ROTATE_THRESHOLD_DAYS)
+                n = 0
+                for a in _agent_load_all(config):
+                    if not a.get('mtls_enabled'):
+                        continue
+                    if a.get('cert_rotate_pending'):
+                        continue
+                    exp = a.get('cert_expires_at')
+                    if not exp:
+                        continue
+                    try:
+                        exp_dt = _dt.fromisoformat(exp)
+                    except Exception:
+                        continue
+                    if exp_dt <= deadline:
+                        _agent_update(config, a['id'], {'cert_rotate_pending': 1})
+                        n += 1
+                if n > 0:
+                    logger.log_info(f"[cert-sweep] flagged {n} agent(s) for cert rotation "
+                                    f"(threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d)")
             except Exception as e:
                 logger.log_error(f"[cert-sweep] error: {e}")
 

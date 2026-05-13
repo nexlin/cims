@@ -180,18 +180,12 @@ def _new_token() -> str:
 
 def _check_session(handler_args: HandlerArgs, config: dict):
     """X-Agent-Token 헤더 검증. 유효하면 (agent_row) 반환, 아니면 None."""
+    from handlers.agents import _agent_load
     headers_lower = {k.lower(): v for k, v in (handler_args.headers or {}).items()}
     token = headers_lower.get("x-agent-token")
     if not token:
         return None
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM cims_agent WHERE agent_token=%s AND status != 'revoked'",
-                        (token,))
-            return cur.fetchone()
-    finally:
-        conn.close()
+    return _agent_load(config, agent_token=token)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -243,6 +237,7 @@ async def handle_agent(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 # ──────────────────────────────────────────────────────────────
 
 async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
+    from handlers.agents import _agent_load, _agent_update
     body = _parse_body(handler_args)
     enroll_token = (body.get("enrollment_token") or "").strip()
     if not enroll_token:
@@ -260,36 +255,32 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         "agent_version": (body.get("agent_version") or "").strip()[:32],
     }
     ifaces = body.get("interfaces")
-    interfaces_json = json.dumps(ifaces, ensure_ascii=False) if isinstance(ifaces, list) else None
 
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            # enrollment_token 매칭
-            cur.execute("SELECT * FROM cims_agent WHERE enrollment_token=%s "
-                        "AND status IN ('pending','approved')", (enroll_token,))
-            row = cur.fetchone()
-            if not row:
-                return HandlerResult(status=401, body={"error": "invalid_enrollment_token"},
-                                     media_type="application/json")
+    row = await asyncio.to_thread(_agent_load, config, None, None, None, enroll_token)
+    if not row or row.get('status') not in ('pending', 'approved'):
+        return HandlerResult(status=401, body={"error": "invalid_enrollment_token"},
+                             media_type="application/json")
 
-            # session token 발급 + 상태 online
-            session_token = _new_token()
-            cur.execute(
-                "UPDATE cims_agent SET "
-                "  agent_token=%s, enrollment_token=NULL, "
-                "  hostname=%s, ip_address=%s, os_info=%s, "
-                "  cpu_cores=%s, memory_mb=%s, disk_gb=%s, agent_version=%s, "
-                "  interfaces_json=COALESCE(%s, interfaces_json), "
-                "  status=IF(status='approved','online',status), "
-                "  enrolled_at=NOW(), last_heartbeat=NOW() "
-                "WHERE id=%s",
-                (session_token, info["hostname"], info["ip_address"], info["os_info"],
-                 info["cpu_cores"], info["memory_mb"], info["disk_gb"], info["agent_version"],
-                 interfaces_json, row["id"])
-            )
-    finally:
-        conn.close()
+    # session token 발급 + 상태 online
+    session_token = _new_token()
+    now = datetime.now().isoformat(timespec='seconds')
+    patches = {
+        'agent_token': session_token,
+        'enrollment_token': None,
+        'hostname': info['hostname'],
+        'ip_address': info['ip_address'],
+        'os_info': info['os_info'],
+        'cpu_cores': info['cpu_cores'],
+        'memory_mb': info['memory_mb'],
+        'disk_gb': info['disk_gb'],
+        'agent_version': info['agent_version'],
+        'status': 'online' if row.get('status') == 'approved' else row.get('status'),
+        'enrolled_at': now,
+        'last_heartbeat': now,
+    }
+    if isinstance(ifaces, list):
+        patches['interfaces'] = ifaces
+    row = await asyncio.to_thread(_agent_update, config, row['id'], patches)
 
     logger.log_info(f"Agent enrolled: id={row['id']} name={row['name']} from={handler_args.client_ip}")
 
@@ -297,7 +288,7 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         "agent_id": row["id"],
         "name": row["name"],
         "session_token": session_token,
-        "status": "online" if row["status"] == "approved" else row["status"],
+        "status": row.get("status"),
         "heartbeat_interval_sec": 30,
     }
     # mTLS 활성화 시 agent 서버용 cert 발급해 함께 전달 + 레코드에 플래그/만료 기록
@@ -311,16 +302,11 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
                 "server_key":  mtls["key"],
                 "ca_cert":     mtls["ca"],
             }
-            conn2 = _get_db(config)
-            try:
-                with conn2.cursor() as cur2:
-                    cur2.execute(
-                        "UPDATE cims_agent SET mtls_enabled=1, "
-                        "  cert_issued_at=NOW(), cert_expires_at=%s WHERE id=%s",
-                        (expires_at, row["id"])
-                    )
-            finally:
-                conn2.close()
+            await asyncio.to_thread(_agent_update, config, row['id'], {
+                'mtls_enabled': 1,
+                'cert_issued_at': datetime.now().isoformat(timespec='seconds'),
+                'cert_expires_at': expires_at.isoformat(timespec='seconds'),
+            })
             logger.log_info(f"Agent mTLS cert issued: id={row['id']} expires_at={expires_at:%Y-%m-%d}")
         except Exception as e:
             logger.log_info(f"Agent mTLS cert issue failed: {e}")
@@ -333,6 +319,7 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
 # ──────────────────────────────────────────────────────────────
 
 async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> HandlerResult:
+    from handlers.agents import _agent_update
     body = _parse_body(handler_args)
     # agent 가 보고한 sync_port 저장
     sync_port = body.get("sync_port")
@@ -341,50 +328,39 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
     except (TypeError, ValueError):
         sync_port = None
     ifaces = body.get("interfaces")
-    interfaces_json = json.dumps(ifaces, ensure_ascii=False) if isinstance(ifaces, list) else None
-    conn = _get_db(config)
-    cert_rotate = False
-    try:
-        with conn.cursor() as cur:
-            # 상태 갱신 + sync_port + interfaces 갱신
-            if sync_port:
+    now = datetime.now().isoformat(timespec='seconds')
+    patches = {'last_heartbeat': now}
+    if sync_port:
+        patches['sync_port'] = sync_port
+    if isinstance(ifaces, list):
+        patches['interfaces'] = ifaces
+    if agent.get('status') in ('offline', 'approved'):
+        patches['status'] = 'online'
+
+    def _update_and_pick():
+        updated = _agent_update(config, agent['id'], patches) or {}
+        cert_rotate = bool(updated.get('cert_rotate_pending'))
+        # pending job pick — agent_job 은 아직 DB (Phase 3)
+        conn = _get_db(config)
+        try:
+            with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE cims_agent SET last_heartbeat=NOW(), sync_port=%s, "
-                    "  interfaces_json=COALESCE(%s, interfaces_json), "
-                    "  status=CASE "
-                    "    WHEN status IN ('offline','approved') THEN 'online' "
-                    "    ELSE status END "
-                    "WHERE id=%s", (sync_port, interfaces_json, agent["id"])
+                    "SELECT id, job_type, params FROM agent_job "
+                    "WHERE agent_id=%s AND status='queued' "
+                    "ORDER BY id LIMIT 10", (agent["id"],)
                 )
-            else:
-                cur.execute(
-                    "UPDATE cims_agent SET last_heartbeat=NOW(), "
-                    "  interfaces_json=COALESCE(%s, interfaces_json), "
-                    "  status=CASE "
-                    "    WHEN status IN ('offline','approved') THEN 'online' "
-                    "    ELSE status END "
-                    "WHERE id=%s", (interfaces_json, agent["id"])
-                )
-            # cert rotation 플래그 조회
-            cur.execute("SELECT cert_rotate_pending FROM cims_agent WHERE id=%s", (agent["id"],))
-            r = cur.fetchone()
-            cert_rotate = bool(r and r.get("cert_rotate_pending"))
-            # pending job 최대 10개 pick
-            cur.execute(
-                "SELECT id, job_type, params FROM agent_job "
-                "WHERE agent_id=%s AND status='queued' "
-                "ORDER BY id LIMIT 10", (agent["id"],)
-            )
-            jobs = cur.fetchall()
-            # 디스패치 상태 마킹
-            if jobs:
-                ids = [j["id"] for j in jobs]
-                cur.execute(
-                    f"UPDATE agent_job SET status='running', dispatched_at=NOW() "
-                    f"WHERE id IN ({','.join(['%s']*len(ids))})", ids
-                )
-    finally:
-        conn.close()
+                jobs = cur.fetchall()
+                if jobs:
+                    ids = [j["id"] for j in jobs]
+                    cur.execute(
+                        f"UPDATE agent_job SET status='running', dispatched_at=NOW() "
+                        f"WHERE id IN ({','.join(['%s']*len(ids))})", ids
+                    )
+        finally:
+            conn.close()
+        return cert_rotate, jobs
+
+    cert_rotate, jobs = await asyncio.to_thread(_update_and_pick)
 
     resp = {
         "ok": True,
@@ -417,16 +393,12 @@ async def _cert_rotate(handler_args: HandlerArgs, config: dict, agent: dict) -> 
                              media_type="application/json")
 
     expires_at = datetime.now() + timedelta(days=_AGENT_CERT_VALIDITY_DAYS)
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE cims_agent SET cert_issued_at=NOW(), cert_expires_at=%s, "
-                "  cert_rotate_pending=0 WHERE id=%s",
-                (expires_at, agent["id"])
-            )
-    finally:
-        conn.close()
+    from handlers.agents import _agent_update
+    await asyncio.to_thread(_agent_update, config, agent['id'], {
+        'cert_issued_at': datetime.now().isoformat(timespec='seconds'),
+        'cert_expires_at': expires_at.isoformat(timespec='seconds'),
+        'cert_rotate_pending': 0,
+    })
     logger.log_info(f"Agent mTLS cert rotated: id={agent['id']} expires_at={expires_at:%Y-%m-%d}")
     return HandlerResult(status=200, body={
         "ok": True,
@@ -529,9 +501,13 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                  (body.get("load_avg") or "")[:32],
                  json.dumps(body.get("processes") or []))
             )
-            cur.execute("UPDATE cims_agent SET last_metric=NOW() WHERE id=%s", (agent["id"],))
     finally:
         conn.close()
+    # cims_agent.last_metric → file_store
+    from handlers.agents import _agent_update
+    await asyncio.to_thread(_agent_update, config, agent['id'], {
+        'last_metric': datetime.now().isoformat(timespec='seconds'),
+    })
     return HandlerResult(status=200, body={"ok": True}, media_type="application/json")
 
 
