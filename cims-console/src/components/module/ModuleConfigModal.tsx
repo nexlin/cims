@@ -137,8 +137,28 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
     return false
   }, [template, changed])
 
+  // 저장 전 validation — required + range
+  function validate(): string | null {
+    if (!template) return null
+    for (const s of template.sections) {
+      for (const f of s.fields) {
+        const v = values[f.key]
+        if (f.required && (v === '' || v === null || v === undefined)) {
+          return `필수 항목 비어있음: ${f.label} (${f.key})`
+        }
+        if (f.type === 'int' && typeof v === 'number') {
+          if (f.min !== undefined && v < f.min) return `${f.label}: ${v} < min(${f.min})`
+          if (f.max !== undefined && v > f.max) return `${f.label}: ${v} > max(${f.max})`
+        }
+      }
+    }
+    return null
+  }
+
   async function save(opts: { restartAfter?: boolean } = {}) {
     if (changed.size === 0) { show('변경된 항목 없음', 'err'); return }
+    const err = validate()
+    if (err) { show(err, 'err'); return }
     setSaving(true)
     try {
       const r = await saveConfig(values, changed)
