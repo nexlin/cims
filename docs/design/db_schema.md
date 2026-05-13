@@ -91,10 +91,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 ## 5. 알려진 정합성 이슈
 
-| 위치 | 이슈 | 처리 필요 |
-|---|---|---|
-| `docs/design/modules/csc.md` §6 | `voip_*` 옛 이름 + call_logs 표 잔존 | 본 문서 참조하도록 갱신 (별도 작업) |
-| `docs/design/modules/csp.md` / `features/volte_flows.md` / `features/monitoring.md` | `voip_call_logs` / `ptt_call_logs` 표기 잔존 | 파일 기반(call.json) SoT 로 갱신 |
+(현재 미해결 없음 — 2026-05-13 stats.py call_logs 의존 제거 + 관련 docs 4건 정합화 완료)
 
 ## 6. 외부 이중화 DB 인계 체크리스트
 

@@ -358,17 +358,19 @@ INVITE 수신
   └─ 위 모두 아님 ──────────── Proxy 모드 (Call-ID 유지)
 ```
 
-### VoIP 통화 상태 (voip_call_logs)
+### VoLTE 통화 상태 (call.json 파일)
 
-| 상태 | 시점 | DB 필드 |
+옛 `voip_call_logs` DB 테이블은 v3(2026-04-22) DROP. 현재 SoT 는 `service_log/volte/YYYY/MM/DD/HH/.../<call_id>.d/call.json` (CSP `CCallDir` 가 작성).
+
+| 상태 | 시점 | 갱신 필드 |
 |------|------|---------|
 | `ringing` | INVITE 수신 | invite_time |
 | `active` | 200 OK 수신 | answer_time |
-| `ended` | BYE/CANCEL/에러 | end_time, duration, sip_status |
+| `ended` | BYE/CANCEL/에러 | end_time, duration, end_reason |
 
 ### 종료 사유 (end_reason)
 
-| sip_status | end_reason | 설명 |
+| SIP status | end_reason | 설명 |
 |------------|------------|------|
 | 200 | normal | 정상 통화 후 종료 |
 | 603 | declined | DND/수신거부 |

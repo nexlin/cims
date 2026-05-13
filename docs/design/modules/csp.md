@@ -636,13 +636,13 @@ struct CallMapEntry {
 | 테이블 | 용도 |
 |--------|------|
 | users | 가입자 기본 정보 |
-| voip_subscriptions | VoIP 회선 (ID, AuthId, Password, DND, Forward) |
+| volte_subscriptions | VoLTE 회선 (ID, AuthId, Password, DND, Forward) — v3(2026-04-22) `voip_subscriptions` → 개명 |
 | ptt_subscriptions | PTT 회선 (ID, AuthId, Password) |
 | ptt_groups | PTT 그룹 설정 |
 | ptt_group_members | 그룹 멤버십 |
-| voip_call_logs | VoIP 통화 이력 |
-| ptt_call_logs | PTT 그룹콜 이력 |
-| recordings | 녹취 메타데이터 |
+| recordings / recording_segments | 녹취 메타데이터 |
+
+통화 이력은 DB 미적재. 파일 기반 — `service_log/{volte|ptt}/.../<call_id>.d/call.json`. 옛 `voip_call_logs` / `ptt_call_logs` 는 v3(2026-04-22) DROP. 전체 인벤토리는 [docs/design/db_schema.md](../db_schema.md).
 
 ---
 

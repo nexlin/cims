@@ -666,31 +666,14 @@ CREATE TABLE organizations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 통화 이력
-CREATE TABLE voip_call_logs (
-    call_id VARCHAR(200) PRIMARY KEY,
-    caller VARCHAR(100),
-    callee VARCHAR(100),
-    state VARCHAR(20),
-    invite_time TIMESTAMP,
-    answer_time TIMESTAMP,
-    end_time TIMESTAMP,
-    duration INT DEFAULT 0,
-    end_reason VARCHAR(50),
-    has_video BOOLEAN DEFAULT FALSE,
-    record_dir VARCHAR(500)
-);
-
-CREATE TABLE ptt_call_logs (
-    call_id VARCHAR(200) PRIMARY KEY,
-    group_id VARCHAR(50),
-    initiator VARCHAR(100),
-    state VARCHAR(20),
-    start_time TIMESTAMP,
-    end_time TIMESTAMP,
-    member_count INT DEFAULT 0,
-    record_dir VARCHAR(500)
-);
+-- 통화 이력은 DB 미적재. 파일 기반(SOT):
+--   service_log/{volte|ptt}/YYYY/MM/DD/HH/.../<call_id>.d/call.json (VoLTE)
+--   service_log/ptt/YYYY/MM/DD/HH/.../<call_id>.d/call.jsonl       (PTT, 세션 누적)
+--   참여자: participants.jsonl
+--   조회: GET /api/v1/call/logs (csc/src/services/flow_logger.py)
+--   집계: GET /api/v1/stats/service/{volte|ptt|summary} (csc/src/handlers/stats.py)
+-- 옛 voip_call_logs / ptt_call_logs 테이블은 v3(2026-04-22) DROP.
+-- 전체 인벤토리는 docs/design/db_schema.md 참조.
 
 -- 녹취 메타데이터
 CREATE TABLE recordings (

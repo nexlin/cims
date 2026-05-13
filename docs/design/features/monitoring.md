@@ -462,7 +462,7 @@ NAS `msg_log/csp/sip/{YYYY}/{MM}/{DD}/{HH}/sip.jsonl` 파일에서 `method`, `di
 
 | 지표 | 산출 방법 | 5m~1h | 1d~1y |
 |------|----------|:-----:|:-----:|
-| 그룹콜 수 | ptt_call_logs count | ✅ | ✅ |
+| 그룹콜 수 | call.jsonl count (파일 스캔) | ✅ | ✅ |
 | 그룹별 사용 빈도 | count GROUP BY group_id | - | ✅ |
 | 평균 세션 시간 | avg(end_time - invite_time) | - | ✅ |
 | 발언 횟수 | recording_segments count | ✅ | ✅ |
