@@ -34,6 +34,7 @@ static void _cspReloadHandler( int ) {
 CCallDir gclsCallDir;
 #include "CmpClient.h"
 #include "CscInterface.h"
+#include "RedisStore.h"
 #include "CspAclPolicyEngine.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
@@ -209,6 +210,11 @@ int ServiceMain() {
     if ( !gclsCmpClient.Init( gclsSetup.m_strCmpIp, gclsSetup.m_iCmpPort, gclsSetup.m_iLocalCmpPort ) ) {
         CLog::Print( LOG_ERROR, "CmpClient Init failed" );
         CLog::Print( LOG_ERROR, "CmpClient Init failed" );
+    }
+
+    // Phase 1.D-2 — Redis register state replication (optional, cold-mode if not configured)
+    if ( !gclsSetup.m_strRedisHost.empty() && gclsSetup.m_iRedisPort > 0 ) {
+        gclsRedisStore.Init( gclsSetup.m_strRedisHost, gclsSetup.m_iRedisPort, gclsSetup.m_strRedisPassword );
     }
 
     // [FIX] Wire Connection Callback and Start Monitor

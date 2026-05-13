@@ -90,6 +90,7 @@ CSipServerSetup::CSipServerSetup()
       m_iUserTimeout( 3600 ),
       m_iStaleCallTimeout( 300 ),
       m_iDbPort( 3306 ),
+      m_iRedisPort( 0 ),
       m_strServiceMode( "both" ),
       m_iLogLevel( 0 ),
       m_iLogMaxSize( 20000000 ),
@@ -295,6 +296,14 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( db.Has( "User" ) ) m_strDbUser = db.GetString( "User" );
                 if ( db.Has( "Password" ) ) m_strDbPasswd = db.GetString( "Password" );
                 if ( db.Has( "DbName" ) ) m_strDbName = db.GetString( "DbName" );
+            }
+
+            // Phase 1.D-2 — Redis (register state hot replication, optional)
+            if ( setup.Has( "Redis" ) ) {
+                SimpleJson::JsonNode rd = setup.Get( "Redis" );
+                if ( rd.Has( "Host" ) ) m_strRedisHost = rd.GetString( "Host" );
+                if ( rd.Has( "Port" ) ) m_iRedisPort = (int)rd.GetInt( "Port" );
+                if ( rd.Has( "Password" ) ) m_strRedisPassword = rd.GetString( "Password" );
             }
 
             if ( setup.Has( "ServiceMode" ) ) {

@@ -134,6 +134,13 @@ public:
     std::string m_strDbName;
 
     // ================================================================
+    // Redis (Phase 1.D-2 — register state hot replication, optional)
+    //   비어있으면 RedisStore cold-mode (단말 재 REGISTER 로만 fail-over 복원)
+    std::string m_strRedisHost;
+    int m_iRedisPort;
+    std::string m_strRedisPassword;
+
+    // ================================================================
     // 서비스 모드: "volte" | "ptt" | "both" (기본값: "both")
 
     /** 서비스 모드 */

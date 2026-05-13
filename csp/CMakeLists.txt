@@ -23,6 +23,20 @@ if(NOT MARIADB_INCLUDE_DIR)
 endif()
 message(STATUS "MariaDB lib: ${MARIADB_LIB}, include: ${MARIADB_INCLUDE_DIR}")
 
+# hiredis (Phase 1.D-2 — HA register state replication, optional).
+# 미설치 시 RedisStore 가 cold-mode (Init 가 false 반환) — fail-over 시 단말 재 REGISTER 로 복원.
+# 활성: sudo apt-get install -y libhiredis-dev
+find_library(HIREDIS_LIB NAMES hiredis
+    HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib)
+find_path(HIREDIS_INCLUDE_DIR NAMES hiredis/hiredis.h
+    HINTS /usr/include /usr/local/include)
+if(HIREDIS_LIB AND HIREDIS_INCLUDE_DIR)
+    message(STATUS "hiredis: ${HIREDIS_LIB} (include: ${HIREDIS_INCLUDE_DIR})")
+    add_compile_definitions(CIMS_HAS_HIREDIS=1)
+else()
+    message(STATUS "hiredis: 미설치 — RedisStore cold-mode (apt install libhiredis-dev 시 활성)")
+endif()
+
 # Add the dependency libraries from ext/psip
 # We assume this file is in .../csp/ and psip is in .../ext/psip/
 # Adjust path if necessary. Using relative path here.
@@ -72,6 +86,12 @@ target_link_libraries(csp PUBLIC
     ${MARIADB_LIB}
     dl
 )
+
+# hiredis link + include (optional — Phase 1.D-2)
+if(HIREDIS_LIB AND HIREDIS_INCLUDE_DIR)
+    target_include_directories(csp PUBLIC ${HIREDIS_INCLUDE_DIR})
+    target_link_libraries(csp PUBLIC ${HIREDIS_LIB})
+endif()
 
 # --- Deployment / Install Configuration ---
 
