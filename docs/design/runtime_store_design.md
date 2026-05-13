@@ -146,7 +146,7 @@ C. 검증:
 | 1. packages | 🟢 **완료** (2026-05-13) | file_store 헬퍼 + cims_package 마이그레이션 (`csc/scripts/migrate_packages_db_to_file.py`). agent_deployment.package_id JOIN 4건 client-side enrich (`_enrich_deploy_with_pkg`). 9 패키지 LIVE 마이그레이션 확인. |
 | 2. agents/instances | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_agents_db_to_file.py` (0 instance + 9 agent). agents.py CRUD / agent_api.py 핫패스(enroll/heartbeat/cert/metric) / ha_groups.py 멤버 enrich (3 JOIN 제거) / csc_app.py sweeper(stale offline + cert rotate) 모두 file_store. agent_deployment JOIN 은 `_enrich_deploy` 로 통합 (pkg + agent + instance). LIVE: agents/deployments/ha-groups 정상 응답. |
 | 3. deployments/jobs/metrics | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_deployments_jobs_metrics_db_to_file.py` (21 deploy + 42 job + 427 metric). agent_deployment CRUD + agent_job CRUD + JSONL 시계열 metric. `_job_pick_pending` (heartbeat 큐 pick), `_metric_append`/`_metric_load_recent` (시계열). agent_job INSERT 5건 모두 `_job_create` 호출. report 핸들러: agent_job 갱신 + agent_deployment 상태 hook (install_path 추출 포함). LIVE: deployments/agent_metrics/packages/agents/alerts 회기능 정상. |
-| 4. ha_groups | ⚪ 대기 | agents 의존 |
+| 4. ha_groups | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_ha_groups_db_to_file.py` (0 row). ha_groups.py 전면 재작성 — members 배열을 그룹 JSON 안에 임베드. CRUD + vrid 자동 할당 (file_store 순회 기반) + agent_name enrich. agents.py 의 `_ha_group_map_for_agents` / `_check_ha_capability` 도 file_store. LIVE smoke: AS 그룹 생성 → vrid=51 자동, 멤버 priority 정렬 OK, delete 성공. |
 | 5. csp runtime config | ⚪ 대기 | 독립 가능 (병렬) |
 | 6. monitoring stats | ⚪ 대기 | 독립 |
 | 7. recordings | ⚪ 대기 | 독립 |

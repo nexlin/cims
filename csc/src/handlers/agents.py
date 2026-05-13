@@ -440,26 +440,18 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
 
 
 def _ha_group_map_for_agents(config) -> dict:
-    """모든 agent 의 ha_group {id,name,mode,role} 매핑. dict[agent_id] = {...}
-
-    ha_groups / ha_group_members 는 아직 DB (Phase 4 마이그레이션 예정).
-    """
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT m.agent_id, g.id AS gid, g.name AS gname, g.mode AS gmode, "
-                "       m.role AS grole "
-                "FROM ha_group_members m JOIN ha_groups g ON g.id=m.group_id"
-            )
-            rows = cur.fetchall()
-    finally:
-        conn.close()
+    """모든 agent 의 ha_group {id,name,mode,role} 매핑. dict[agent_id] = {...}"""
     out = {}
-    for r in rows:
-        out[r["agent_id"]] = {
-            "id": r["gid"], "name": r["gname"], "mode": r["gmode"], "role": r["grole"],
-        }
+    groups = file_store.load_all(file_store.domain_dir(config, 'ha_groups'))
+    for g in groups:
+        for m in (g.get('members') or []):
+            aid = m.get('agent_id')
+            if aid is None:
+                continue
+            out[aid] = {
+                'id': g.get('id'), 'name': g.get('name'), 'mode': g.get('mode'),
+                'role': m.get('role'),
+            }
     return out
 
 
@@ -1287,20 +1279,18 @@ async def _get_deployment(did: int, config):
 
 def _check_ha_capability(config, agent_id: int, ha_cap: str):
     """ha_group 의 mode 와 패키지 ha_capability 호환 검사. None 이면 OK."""
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT g.mode FROM ha_group_members m "
-                "JOIN ha_groups g ON g.id=m.group_id WHERE m.agent_id=%s", (agent_id,)
-            )
-            grp = cur.fetchone()
-    finally:
-        conn.close()
-    if not grp:
+    groups = file_store.load_all(file_store.domain_dir(config, 'ha_groups'))
+    grp_mode = None
+    for g in groups:
+        for m in (g.get('members') or []):
+            if m.get('agent_id') == agent_id:
+                grp_mode = g.get('mode')
+                break
+        if grp_mode:
+            break
+    if grp_mode is None:
         return None
-    grp_mode = grp.get("mode")
-    if grp_mode is not None and ha_cap != "standalone" and ha_cap != grp_mode:
+    if ha_cap != "standalone" and ha_cap != grp_mode:
         return f"패키지 ha_capability={ha_cap} 가 agent 그룹 mode={grp_mode} 와 불일치 (이 그룹에는 {grp_mode} 모듈만 install 가능)"
     return None
 

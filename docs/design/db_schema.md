@@ -47,8 +47,8 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | | `sip_service` | migrate_sip_service.sql | 신규 SIP 서비스 인스턴스 추상 |
 | | `sip_service_listener` | migrate_sip_service.sql | service ↔ listener N:M |
 | **구독↔서비스** | `voip_subscriptions.service_id` / `ptt_subscriptions.service_id` | migrate_subscriptions_service_ref.sql | FK → sip_service |
-| **HA** | `ha_groups` | migrate_ha_groups.sql + migrate_ha_groups_vip_nullable.sql + migrate_ha_services_wiring.sql | A/S / AA 그룹 + VIP (nullable) |
-| | `ha_group_members` | migrate_ha_groups.sql | 그룹 멤버 (agent_id) |
+| **HA** | ~~`ha_groups`~~ | — | **파일 기반 완료** (2026-05-13 Phase 4) — `{CimsRuntimeDir}/ha_groups/<id>.json` (members 배열 임베드) |
+| | ~~`ha_group_members`~~ | — | (그룹 JSON 안에 임베드) |
 | **에이전트/배포** | ~~`cims_instance`~~ | — | **파일 기반 완료** (2026-05-13 Phase 2) — `{CimsRuntimeDir}/instances/<id>.json` |
 | | ~~`cims_agent`~~ | — | **파일 기반 완료** (2026-05-13 Phase 2) — `{CimsRuntimeDir}/agents/<id>.json` |
 | | ~~`cims_package`~~ | — | **파일 기반 완료** (2026-05-13 Phase 1) — `{CimsRuntimeDir}/packages/<name>__<version>.json` |

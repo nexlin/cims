@@ -20,30 +20,27 @@ from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 import json
 
-import pymysql
-import pymysql.cursors
-
 from httpsrv.handler import HandlerArgs, HandlerResult
+from services import file_store
 
 
 _HA_GROUPS_BASE = '/api/v1/ha-groups'
+_HA_DOMAIN = 'ha_groups'
 
 _VRID_MIN = 51
 _VRID_MAX = 255
 
 
-def _get_db(config: dict):
-    db = config.get('CimsDatabase', {})
-    return pymysql.connect(
-        host=db.get('Host', '127.0.0.1'),
-        port=int(db.get('Port', 3306)),
-        user=db.get('User', 'root'),
-        password=db.get('Password', ''),
-        database=db.get('Db', 'cims'),
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=True,
-    )
+def _ha_dir(config):
+    return file_store.domain_dir(config, _HA_DOMAIN)
+
+
+def _ha_load(config, gid: int):
+    return file_store.by_id(_ha_dir(config), gid)
+
+
+def _ha_load_all(config) -> list:
+    return file_store.load_all(_ha_dir(config))
 
 
 def _path_parts(full_path: str, base: str):
@@ -55,10 +52,9 @@ def _path_parts(full_path: str, base: str):
         return ()
 
 
-def _alloc_vrid(cur) -> int:
+def _alloc_vrid(config) -> int:
     """51-255 range 에서 next available VRID 반환. 없으면 RuntimeError."""
-    cur.execute("SELECT vrid FROM ha_groups ORDER BY vrid")
-    used = {r['vrid'] for r in cur.fetchall()}
+    used = {g.get('vrid') for g in _ha_load_all(config) if g.get('vrid') is not None}
     for v in range(_VRID_MIN, _VRID_MAX + 1):
         if v not in used:
             return v
@@ -136,30 +132,20 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     }
 
 
-def _enqueue_update_ha_for_members(cur, group_id: int, config: dict) -> int:
+def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
     """그룹 멤버들에게 update_ha job 큐잉. 큐잉된 job 수 반환."""
-    cur.execute(
-        "SELECT g.*, GROUP_CONCAT(m.agent_id) AS member_ids "
-        "FROM ha_groups g LEFT JOIN ha_group_members m ON m.group_id=g.id "
-        "WHERE g.id=%s GROUP BY g.id", (group_id,)
-    )
-    group = cur.fetchone()
-    if not group or not group.get('member_ids'):
+    group = _ha_load(config, group_id)
+    if not group:
         return 0
-    vip_bindings = _decode_vip_bindings(group.pop('vip_bindings_json', None)) \
-                   if 'vip_bindings_json' in group else []
+    members = list(group.get('members') or [])
+    if not members:
+        return 0
+    vip_bindings = group.get('vip_bindings') or []
 
-    cur.execute(
-        "SELECT group_id, agent_id, priority, role FROM ha_group_members "
-        "WHERE group_id=%s", (group_id,)
-    )
-    members = list(cur.fetchall())
-
-    # cims_agent 는 file_store — name/ip_address 만 필요
-    from handlers.agents import _agent_load
+    from handlers.agents import _agent_load, _job_create
     agents = {}
     for m in members:
-        a = _agent_load(config, aid=m['agent_id'])
+        a = _agent_load(config, aid=m.get('agent_id'))
         if a:
             agents[m['agent_id']] = {'id': a.get('id'), 'name': a.get('name'),
                                      'ip_address': a.get('ip_address')}
@@ -179,7 +165,6 @@ def _enqueue_update_ha_for_members(cur, group_id: int, config: dict) -> int:
             "install_path": f"/opt/cims/{agent.get('name','agent')}",
             "ha_json": ha_json,
         }
-        from handlers.agents import _job_create
         _job_create(config, m['agent_id'], 'update_ha', params)
         enqueued += 1
     return enqueued
@@ -242,17 +227,8 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         return HandlerResult(status=500, body={'error': str(e)})
 
 
-def _decode_vip_bindings(raw):
-    if not raw: return []
-    try:
-        v = json.loads(raw)
-        return v if isinstance(v, list) else []
-    except (TypeError, ValueError):
-        return []
-
-
 def _attach_member_names(members: list, config: dict) -> list:
-    """ha_group_members rows 에 agent_name 을 file_store 에서 채워준다."""
+    """members rows 에 agent_name 을 file_store 에서 채워준다."""
     from handlers.agents import _agent_load
     cache: dict = {}
     for m in members:
@@ -265,46 +241,35 @@ def _attach_member_names(members: list, config: dict) -> list:
     return members
 
 
+def _serialize_group(g: dict, config: dict) -> dict:
+    """file_store group dict → 응답용 (멤버 정렬 + agent_name enrich)."""
+    out = dict(g)
+    members = list(out.get('members') or [])
+    members.sort(key=lambda m: -int(m.get('priority') or 0))
+    out['members'] = _attach_member_names(members, config)
+    out.setdefault('vip_bindings', [])
+    return out
+
+
 async def _list_groups(config):
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, mode, vip, vrid, vip_mask, auth_pass, note, "
-                "       vip_bindings_json, create_time, update_time FROM ha_groups ORDER BY id"
-            )
-            groups = cur.fetchall()
-            for g in groups:
-                if g.get('create_time'): g['create_time'] = g['create_time'].isoformat()
-                if g.get('update_time'): g['update_time'] = g['update_time'].isoformat()
-                g['vip_bindings'] = _decode_vip_bindings(g.pop('vip_bindings_json', None))
-                cur.execute(
-                    "SELECT agent_id, priority, role FROM ha_group_members "
-                    "WHERE group_id=%s ORDER BY priority DESC",
-                    (g['id'],)
-                )
-                g['members'] = _attach_member_names(list(cur.fetchall()), config)
-    return HandlerResult(status=200, body={'groups': groups})
+    groups = _ha_load_all(config)
+    groups.sort(key=lambda g: g.get('id', 0))
+    return HandlerResult(status=200,
+                         body={'groups': [_serialize_group(g, config) for g in groups]})
 
 
 async def _get_group(gid: int, config):
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, mode, vip, vrid, vip_mask, auth_pass, note, "
-                "       vip_bindings_json, create_time, update_time FROM ha_groups WHERE id=%s", (gid,)
-            )
-            g = cur.fetchone()
-            if not g:
-                return HandlerResult(status=404, body={'error': 'Group not found'})
-            if g.get('create_time'): g['create_time'] = g['create_time'].isoformat()
-            if g.get('update_time'): g['update_time'] = g['update_time'].isoformat()
-            g['vip_bindings'] = _decode_vip_bindings(g.pop('vip_bindings_json', None))
-            cur.execute(
-                "SELECT agent_id, priority, role FROM ha_group_members "
-                "WHERE group_id=%s ORDER BY priority DESC", (gid,)
-            )
-            g['members'] = _attach_member_names(list(cur.fetchall()), config)
-    return HandlerResult(status=200, body=g)
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    return HandlerResult(status=200, body=_serialize_group(g, config))
+
+
+def _normalize_member(m: dict, idx: int) -> dict:
+    aid = int(m.get('agent_id'))
+    role = m.get('role') or ('master' if idx == 0 else 'backup')
+    priority = int(m.get('priority', 100 if role == 'master' else 90))
+    return {'agent_id': aid, 'role': role, 'priority': priority}
 
 
 async def _create_group(body, config):
@@ -312,11 +277,11 @@ async def _create_group(body, config):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
     name = (body.get('name') or '').strip()
     mode = (body.get('mode') or '').strip()
-    vip  = (body.get('vip')  or '').strip() or None     # nullable — vip_bindings 가 대체
+    vip  = (body.get('vip')  or '').strip() or None
     auth_pass = (body.get('auth_pass') or '').strip()
     vip_mask = int(body.get('vip_mask', 24))
     note = body.get('note', '')
-    members = body.get('members', [])
+    members_in = body.get('members', [])
 
     if not name:
         return HandlerResult(status=400, body={'error': 'name required'})
@@ -324,93 +289,72 @@ async def _create_group(body, config):
         return HandlerResult(status=400, body={'error': 'mode must be active_standby or all_active'})
     if not auth_pass or len(auth_pass) > 8:
         return HandlerResult(status=400, body={'error': 'auth_pass required (max 8 chars)'})
-    if mode == 'active_standby' and len(members) not in (0, 2):
-        return HandlerResult(status=400, body={'error': 'active_standby requires exactly 2 members (or 0 for late add)'})
+    if mode == 'active_standby' and len(members_in) not in (0, 2):
+        return HandlerResult(status=400,
+                             body={'error': 'active_standby requires exactly 2 members (or 0 for late add)'})
 
     vip_bindings = body.get('vip_bindings')
-    vip_bindings_json = json.dumps(vip_bindings, ensure_ascii=False) if isinstance(vip_bindings, list) else None
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            vrid = _alloc_vrid(cur)
-            cur.execute(
-                "INSERT INTO ha_groups (name, mode, vip, vrid, vip_mask, auth_pass, note, "
-                "                       vip_bindings_json) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (name, mode, vip, vrid, vip_mask, auth_pass, note, vip_bindings_json)
-            )
-            gid = cur.lastrowid
-            # 멤버 추가
-            for idx, m in enumerate(members):
-                aid = int(m.get('agent_id'))
-                role = m.get('role') or ('master' if idx == 0 else 'backup')
-                priority = int(m.get('priority', 100 if role == 'master' else 90))
-                cur.execute(
-                    "INSERT INTO ha_group_members (group_id, agent_id, priority, role) "
-                    "VALUES (%s, %s, %s, %s)",
-                    (gid, aid, priority, role)
-                )
-            # update_ha job 큐잉
-            _enqueue_update_ha_for_members(cur, gid, config)
+    if vip_bindings is not None and not isinstance(vip_bindings, list):
+        vip_bindings = None
+
+    vrid = _alloc_vrid(config)
+    gid = file_store.next_id(_ha_dir(config))
+    members = [_normalize_member(m, i) for i, m in enumerate(members_in)]
+    group = {
+        'id': gid,
+        'name': name,
+        'mode': mode,
+        'vip': vip,
+        'vrid': vrid,
+        'vip_mask': vip_mask,
+        'auth_pass': auth_pass,
+        'note': note,
+        'vip_bindings': vip_bindings or [],
+        'members': members,
+    }
+    file_store.save(_ha_dir(config), gid, group)
+    _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=201, body={'id': gid, 'vrid': vrid})
 
 
 async def _update_group(gid: int, body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            fields, vals = [], []
-            for k in ('name', 'vip', 'auth_pass', 'note'):
-                if k in body:
-                    fields.append(f"{k}=%s"); vals.append(body[k])
-            if 'vip_mask' in body:
-                fields.append("vip_mask=%s"); vals.append(int(body['vip_mask']))
-            if 'vip_bindings' in body:
-                v = body.get('vip_bindings')
-                fields.append("vip_bindings_json=%s")
-                vals.append(json.dumps(v, ensure_ascii=False) if v is not None else None)
-            if 'mode' in body:
-                return HandlerResult(status=400, body={'error': 'mode 변경 불가 (그룹 재생성 필요)'})
-            if fields:
-                vals.append(gid)
-                cur.execute(
-                    "UPDATE ha_groups SET " + ", ".join(fields) + " WHERE id=%s", vals
-                )
-                if cur.rowcount == 0:
-                    return HandlerResult(status=404, body={'error': 'Group not found'})
-            if 'members' in body:
-                cur.execute("DELETE FROM ha_group_members WHERE group_id=%s", (gid,))
-                for idx, m in enumerate(body['members']):
-                    aid = int(m.get('agent_id'))
-                    role = m.get('role') or ('master' if idx == 0 else 'backup')
-                    priority = int(m.get('priority', 100 if role == 'master' else 90))
-                    cur.execute(
-                        "INSERT INTO ha_group_members (group_id, agent_id, priority, role) "
-                        "VALUES (%s, %s, %s, %s)",
-                        (gid, aid, priority, role)
-                    )
-            _enqueue_update_ha_for_members(cur, gid, config)
+    if 'mode' in body:
+        return HandlerResult(status=400, body={'error': 'mode 변경 불가 (그룹 재생성 필요)'})
+
+    existing = _ha_load(config, gid)
+    if not existing:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+
+    for k in ('name', 'vip', 'auth_pass', 'note'):
+        if k in body:
+            existing[k] = body[k]
+    if 'vip_mask' in body:
+        existing['vip_mask'] = int(body['vip_mask'])
+    if 'vip_bindings' in body:
+        v = body.get('vip_bindings')
+        existing['vip_bindings'] = v if isinstance(v, list) else []
+    if 'members' in body:
+        existing['members'] = [_normalize_member(m, i) for i, m in enumerate(body['members'])]
+
+    file_store.save(_ha_dir(config), gid, existing)
+    _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=200, body={'id': gid})
 
 
 async def _delete_group(gid: int, config):
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM ha_groups WHERE id=%s", (gid,))
-            if cur.rowcount == 0:
-                return HandlerResult(status=404, body={'error': 'Group not found'})
+    if not file_store.delete(_ha_dir(config), gid):
+        return HandlerResult(status=404, body={'error': 'Group not found'})
     return HandlerResult(status=200, body={'id': gid, 'deleted': True})
 
 
 async def _list_members(gid: int, config):
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT agent_id, priority, role FROM ha_group_members "
-                "WHERE group_id=%s ORDER BY priority DESC", (gid,)
-            )
-            members = _attach_member_names(list(cur.fetchall()), config)
-    return HandlerResult(status=200, body={'members': members})
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    members = sorted(g.get('members') or [], key=lambda m: -int(m.get('priority') or 0))
+    return HandlerResult(status=200, body={'members': _attach_member_names(members, config)})
 
 
 async def _add_member(gid: int, body, config):
@@ -421,39 +365,45 @@ async def _add_member(gid: int, body, config):
     priority = int(body.get('priority', 100 if role == 'master' else 90))
     if not aid:
         return HandlerResult(status=400, body={'error': 'agent_id required'})
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO ha_group_members (group_id, agent_id, priority, role) "
-                "VALUES (%s, %s, %s, %s)",
-                (gid, aid, priority, role)
-            )
-            _enqueue_update_ha_for_members(cur, gid, config)
+
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    members = list(g.get('members') or [])
+    # 동일 agent_id 가 이미 있으면 priority/role 갱신
+    found = False
+    for m in members:
+        if m.get('agent_id') == aid:
+            m['role'] = role; m['priority'] = priority
+            found = True
+            break
+    if not found:
+        members.append({'agent_id': aid, 'role': role, 'priority': priority})
+    g['members'] = members
+    file_store.save(_ha_dir(config), gid, g)
+    _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=201, body={'group_id': gid, 'agent_id': aid})
 
 
 async def _apply_group(gid: int, config):
-    """그룹의 모든 멤버에 update_ha job 큐잉 — VipPanel [적용] 진입점.
-    데이터 변경 없이 강제 재 render + keepalived reload."""
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM ha_groups WHERE id=%s", (gid,))
-            if not cur.fetchone():
-                return HandlerResult(status=404, body={'error': 'Group not found'})
-            count = _enqueue_update_ha_for_members(cur, gid, config)
+    """그룹의 모든 멤버에 update_ha job 큐잉 — VipPanel [적용] 진입점."""
+    if not _ha_load(config, gid):
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    count = _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=202, body={'group_id': gid, 'jobs_queued': count})
 
 
 async def _remove_member(gid: int, aid: int, config):
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM ha_group_members WHERE group_id=%s AND agent_id=%s",
-                (gid, aid)
-            )
-            if cur.rowcount == 0:
-                return HandlerResult(status=404, body={'error': 'Member not found'})
-            _enqueue_update_ha_for_members(cur, gid, config)
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    members = list(g.get('members') or [])
+    new_members = [m for m in members if m.get('agent_id') != aid]
+    if len(new_members) == len(members):
+        return HandlerResult(status=404, body={'error': 'Member not found'})
+    g['members'] = new_members
+    file_store.save(_ha_dir(config), gid, g)
+    _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=200, body={'group_id': gid, 'agent_id': aid, 'removed': True})
 
 
