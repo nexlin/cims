@@ -34,7 +34,6 @@ static void _cspReloadHandler( int ) {
 CCallDir gclsCallDir;
 #include "CmpClient.h"
 #include "CscInterface.h"
-#include "RedisStore.h"
 #include "CspAclPolicyEngine.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
@@ -57,6 +56,7 @@ CCallDir gclsCallDir;
 #include "ModuleDispatcher.h"
 #include "Monitor.h"
 #include "NonceMap.h"
+#include "RedisStore.h"
 #include "ServerService.h"
 #include "ServerUtility.h"
 #include "SipServer.h"

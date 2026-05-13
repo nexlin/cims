@@ -9,24 +9,24 @@
 // 단말의 재 REGISTER 로만 복원.
 
 #ifdef CIMS_HAS_HIREDIS
-#  include <hiredis/hiredis.h>
+#include <hiredis/hiredis.h>
 namespace {
-// hiredis context (mutex-protected via outer m_mutex).
-struct RedisCtx {
-    redisContext* ctx = nullptr;
-    ~RedisCtx() {
-        if ( ctx ) redisFree( ctx );
-    }
-};
-RedisCtx g_redis;
+    // hiredis context (mutex-protected via outer m_mutex).
+    struct RedisCtx {
+        redisContext* ctx = nullptr;
+        ~RedisCtx() {
+            if ( ctx ) redisFree( ctx );
+        }
+    };
+    RedisCtx g_redis;
 
-bool _Auth( redisContext* c, const std::string& strPassword ) {
-    if ( strPassword.empty() ) return true;
-    redisReply* reply = (redisReply*)redisCommand( c, "AUTH %s", strPassword.c_str() );
-    bool ok = reply && reply->type != REDIS_REPLY_ERROR;
-    if ( reply ) freeReplyObject( reply );
-    return ok;
-}
+    bool _Auth( redisContext* c, const std::string& strPassword ) {
+        if ( strPassword.empty() ) return true;
+        redisReply* reply = (redisReply*)redisCommand( c, "AUTH %s", strPassword.c_str() );
+        bool ok = reply && reply->type != REDIS_REPLY_ERROR;
+        if ( reply ) freeReplyObject( reply );
+        return ok;
+    }
 }  // namespace
 #endif
 
