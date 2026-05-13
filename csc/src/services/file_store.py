@@ -220,3 +220,49 @@ def find_all_by(dir_path: str, predicate) -> list:
 def by_id(dir_path: str, target_id: int) -> Optional[dict]:
     """id 필드로 검색 (파일명이 자연키일 때 사용)."""
     return find_by(dir_path, lambda o: o.get('id') == target_id)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  시계열 JSONL (jobs / metrics 등 append-mostly)
+# ──────────────────────────────────────────────────────────────────────────
+
+def jsonl_path(domain_path: str, key: str, dt: datetime) -> str:
+    """일별 jsonl 경로 — {domain_path}/<key>/YYYY/MM/DD.jsonl"""
+    return os.path.join(
+        domain_path, str(key),
+        f"{dt.year:04d}", f"{dt.month:02d}", f"{dt.day:02d}.jsonl"
+    )
+
+
+def jsonl_append(domain_path: str, key: str, record: dict, dt: datetime = None) -> str:
+    """JSONL 한 줄 append. dt 미지정 시 now. POSIX append-atomic 한 단일 write 보장."""
+    dt = dt or datetime.now()
+    path = jsonl_path(domain_path, key, dt)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    line = json.dumps(record, ensure_ascii=False) + '\n'
+    with open(path, 'a', encoding='utf-8') as f:
+        f.write(line)
+    return path
+
+
+def jsonl_iter_recent(domain_path: str, key: str, days: int = 7):
+    """최근 N일 jsonl 파일을 시간 역순(최근 일자 우선) 으로 yield. 각 파일 안에서는 순서 그대로."""
+    from datetime import timedelta
+    today = datetime.now().date()
+    for i in range(days):
+        d = today - timedelta(days=i)
+        path = jsonl_path(domain_path, key, datetime(d.year, d.month, d.day))
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except Exception:
+                        continue
+        except Exception:
+            continue

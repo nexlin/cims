@@ -52,9 +52,9 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | **에이전트/배포** | ~~`cims_instance`~~ | — | **파일 기반 완료** (2026-05-13 Phase 2) — `{CimsRuntimeDir}/instances/<id>.json` |
 | | ~~`cims_agent`~~ | — | **파일 기반 완료** (2026-05-13 Phase 2) — `{CimsRuntimeDir}/agents/<id>.json` |
 | | ~~`cims_package`~~ | — | **파일 기반 완료** (2026-05-13 Phase 1) — `{CimsRuntimeDir}/packages/<name>__<version>.json` |
-| | `agent_deployment` | migrate_agent_deployment.sql | 배포 이력 (📦 Phase 3 — agent/package/instance JOIN 은 file_store enrich 로 이미 우회) |
-| | `agent_job` | migrate_agent_deployment.sql + migrate_agent_job_types.sql | 작업 큐 (📦 Phase 3) |
-| | `agent_metric` | migrate_agent_deployment.sql | 에이전트 metric (📦 Phase 3) |
+| | ~~`agent_deployment`~~ | — | **파일 기반 완료** (2026-05-13 Phase 3) — `{CimsRuntimeDir}/deployments/<id>.json` |
+| | ~~`agent_job`~~ | — | **파일 기반 완료** (2026-05-13 Phase 3) — `{CimsRuntimeDir}/jobs/<id>.json` |
+| | ~~`agent_metric`~~ | — | **파일 기반 완료** (2026-05-13 Phase 3) — `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` (시계열) |
 
 ### 주요 FK / 참조
 

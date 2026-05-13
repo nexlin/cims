@@ -179,11 +179,8 @@ def _enqueue_update_ha_for_members(cur, group_id: int, config: dict) -> int:
             "install_path": f"/opt/cims/{agent.get('name','agent')}",
             "ha_json": ha_json,
         }
-        cur.execute(
-            "INSERT INTO agent_job (agent_id, job_type, params, status) "
-            "VALUES (%s, 'update_ha', %s, 'queued')",
-            (m['agent_id'], json.dumps(params, ensure_ascii=False))
-        )
+        from handlers.agents import _job_create
+        _job_create(config, m['agent_id'], 'update_ha', params)
         enqueued += 1
     return enqueued
 

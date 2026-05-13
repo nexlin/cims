@@ -46,6 +46,9 @@ logger = Logger()
 _PKG_DOMAIN = 'packages'
 _INSTANCE_DOMAIN = 'instances'
 _AGENT_DOMAIN = 'agents'
+_DEPLOY_DOMAIN = 'deployments'
+_JOB_DOMAIN = 'jobs'
+_METRIC_DOMAIN = 'metrics'
 
 
 def _pkg_dir(config):
@@ -164,6 +167,119 @@ def _enrich_with_instance(rows: list, config, key_in='instance_id', key_out_pref
         i = cache[iid]
         r[f'{key_out_prefix}name'] = i.get('name')
     return rows
+
+
+# ── agent_deployment / agent_job / agent_metric file_store helpers ─────
+
+def _deploy_dir(config):
+    return file_store.domain_dir(config, _DEPLOY_DOMAIN)
+
+
+def _deploy_load(config, did: int):
+    return file_store.by_id(_deploy_dir(config), did)
+
+
+def _deploy_load_all(config) -> list:
+    return file_store.load_all(_deploy_dir(config))
+
+
+def _deploy_save(config, dep: dict) -> dict:
+    file_store.save(_deploy_dir(config), int(dep['id']), dep)
+    return dep
+
+
+def _deploy_update(config, did: int, patches: dict) -> dict | None:
+    existing = _deploy_load(config, did)
+    if not existing:
+        return None
+    existing.update(patches)
+    file_store.save(_deploy_dir(config), did, existing)
+    return existing
+
+
+def _job_dir(config):
+    return file_store.domain_dir(config, _JOB_DOMAIN)
+
+
+def _job_load(config, jid: int):
+    return file_store.by_id(_job_dir(config), jid)
+
+
+def _job_load_all(config) -> list:
+    return file_store.load_all(_job_dir(config))
+
+
+def _job_create(config, agent_id: int, job_type: str, params: dict,
+                status: str = 'queued') -> int:
+    """agent_job 1건 생성. lastrowid 호환을 위해 id 반환."""
+    from datetime import datetime as _dt
+    d = _job_dir(config)
+    new_id = file_store.next_id(d)
+    now = _dt.now().isoformat(timespec='seconds')
+    obj = {
+        'id': new_id,
+        'agent_id': agent_id,
+        'job_type': job_type,
+        'params': params if isinstance(params, (dict, list)) else {},
+        'status': status,
+        'result_code': None,
+        'result_stdout': None,
+        'result_stderr': None,
+        'dispatched_at': None,
+        'completed_at': None,
+        'create_time': now,
+        'update_time': now,
+    }
+    file_store.save(d, new_id, obj)
+    return new_id
+
+
+def _job_update(config, jid: int, patches: dict) -> dict | None:
+    existing = _job_load(config, jid)
+    if not existing:
+        return None
+    existing.update(patches)
+    file_store.save(_job_dir(config), jid, existing)
+    return existing
+
+
+def _job_pick_pending(config, agent_id: int, limit: int = 10) -> list:
+    """agent_id 의 status='queued' job 최대 limit 개 → status='running' 으로 전이.
+
+    파일 잠금 없이 동시성 호출 가능하지만 단일 CSC 환경 기준 충돌 가능성 낮음.
+    """
+    from datetime import datetime as _dt
+    all_jobs = _job_load_all(config)
+    pending = [j for j in all_jobs if j.get('agent_id') == agent_id and j.get('status') == 'queued']
+    pending.sort(key=lambda j: j.get('id', 0))
+    picked = pending[:limit]
+    if picked:
+        now = _dt.now().isoformat(timespec='seconds')
+        for j in picked:
+            j['status'] = 'running'
+            j['dispatched_at'] = now
+            file_store.save(_job_dir(config), j['id'], j)
+    return picked
+
+
+def _metric_root(config):
+    return file_store.domain_dir(config, _METRIC_DOMAIN)
+
+
+def _metric_append(config, agent_id: int, record: dict):
+    """agent_metric JSONL append — {CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl"""
+    from datetime import datetime as _dt
+    record = dict(record)
+    record.setdefault('ts', _dt.now().isoformat(timespec='seconds'))
+    record['agent_id'] = agent_id
+    file_store.jsonl_append(_metric_root(config), str(agent_id), record)
+
+
+def _metric_load_recent(config, agent_id: int, limit: int = 120, days: int = 7) -> list:
+    """최근 N일치 metric 시계열을 최신순으로 limit 개 반환."""
+    rows = list(file_store.jsonl_iter_recent(_metric_root(config), str(agent_id), days=days))
+    rows.sort(key=lambda r: r.get('ts', ''), reverse=True)
+    return rows[:limit]
 
 _AGENT_BASE       = "/api/v1/agents"
 _PACKAGE_BASE     = "/api/v1/packages"
@@ -482,20 +598,8 @@ async def _apply_ip_config(aid: int, config):
     if not rows_payload:
         return HandlerResult(status=400, body={"error": "no_service_ip_rows"},
                              media_type="application/json")
-    # agent_job 은 아직 DB (Phase 3 마이그레이션 예정)
-    def _enqueue():
-        conn = _get_db(config)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO agent_job (agent_id, job_type, params, status) "
-                    "VALUES (%s, 'apply_ip_config', %s, 'queued')",
-                    (aid, json.dumps({"service_ip_rows": rows_payload}, ensure_ascii=False))
-                )
-                return cur.lastrowid
-        finally:
-            conn.close()
-    job_id = await asyncio.to_thread(_enqueue)
+    job_id = await asyncio.to_thread(_job_create, config, aid, 'apply_ip_config',
+                                     {"service_ip_rows": rows_payload})
     return HandlerResult(status=202,
                          body={"agent_id": aid, "job_id": job_id, "rows": len(rows_payload)},
                          media_type="application/json")
@@ -508,20 +612,7 @@ async def _upgrade_agent_binary(handler_args: HandlerArgs, aid: int, config):
     if not row:
         return HandlerResult(status=404, body={"error": "agent_not_found"},
                              media_type="application/json")
-    # agent_job 은 아직 DB (Phase 3)
-    def _enqueue():
-        conn = _get_db(config)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO agent_job (agent_id, job_type, params, status) "
-                    "VALUES (%s, 'upgrade_agent', %s, 'queued')",
-                    (aid, json.dumps({}))
-                )
-                return cur.lastrowid
-        finally:
-            conn.close()
-    job_id = await asyncio.to_thread(_enqueue)
+    job_id = await asyncio.to_thread(_job_create, config, aid, 'upgrade_agent', {})
     logger.log_info(f"[agent-upgrade] queued job_id={job_id} agent_id={aid} name={row.get('name')}")
     return HandlerResult(status=202,
                          body={"ok": True, "agent_id": aid, "job_id": job_id,
@@ -530,22 +621,21 @@ async def _upgrade_agent_binary(handler_args: HandlerArgs, aid: int, config):
 
 
 async def _agent_metrics(aid: int, config):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT ts, cpu_pct, mem_pct, disk_pct, load_avg, processes_json "
-                "FROM agent_metric WHERE agent_id=%s "
-                "ORDER BY ts DESC LIMIT 120", (aid,))
-            rows = cur.fetchall()
-    finally:
-        conn.close()
+    rows = await asyncio.to_thread(_metric_load_recent, config, aid, 120, 7)
     def _row(r):
+        procs = r.get("processes")
+        if isinstance(procs, str):
+            try: procs = json.loads(procs)
+            except Exception: procs = []
+        elif not isinstance(procs, list):
+            procs = []
         return {
-            "ts": _dt(r["ts"]),
-            "cpu_pct": r["cpu_pct"], "mem_pct": r["mem_pct"], "disk_pct": r["disk_pct"],
-            "load_avg": r["load_avg"],
-            "processes": json.loads(r["processes_json"]) if r["processes_json"] else [],
+            "ts": r.get("ts"),
+            "cpu_pct": r.get("cpu_pct"),
+            "mem_pct": r.get("mem_pct"),
+            "disk_pct": r.get("disk_pct"),
+            "load_avg": r.get("load_avg"),
+            "processes": procs,
         }
     return HandlerResult(status=200, body={"items": [_row(r) for r in rows]},
                          media_type="application/json")
@@ -1004,25 +1094,39 @@ def _pkg_delete_row(config, pid: int):
 # ════════════════════════════════════════════════════════════
 
 def _deployment_to_json(r: dict) -> dict:
+    def _maybe_dt(v):
+        if v is None: return None
+        if hasattr(v, 'isoformat'): return v.isoformat()
+        return v
+    # service_functions: file_store 는 list, 옛 DB 는 CSV 문자열
+    sf = r.get("service_functions")
+    if isinstance(sf, list):
+        sf_list = [x for x in sf if x]
+    else:
+        sf_list = _split_csv(sf)
+    # config: file_store 는 dict, 옛 DB 는 config_json (string)
+    cfg = r.get("config")
+    if not isinstance(cfg, (dict, list)):
+        cfg = _safe_json(r.get("config_json"))
     return {
-        "id": r["id"],
-        "agent_id":     r["agent_id"],
+        "id": r.get("id"),
+        "agent_id":     r.get("agent_id"),
         "agent_name":   r.get("agent_name"),
-        "package_id":   r["package_id"],
+        "package_id":   r.get("package_id"),
         "package_name": r.get("package_name"),
         "package_version": r.get("package_version"),
-        "instance_id":  r["instance_id"],
+        "instance_id":  r.get("instance_id"),
         "instance_name": r.get("instance_name"),
         "process_name": r.get("process_name"),
-        "service_functions": _split_csv(r.get("service_functions")),
-        "status":       r["status"],
-        "install_path": r["install_path"],
-        "deployed_at":  _dt(r["deployed_at"]),
-        "last_job_id":  r["last_job_id"],
-        "note":         r["note"],
-        "config":       _safe_json(r.get("config_json")),
-        "config_applied_at": _dt(r.get("config_applied_at")),
-        "create_time":  _dt(r["create_time"]),
+        "service_functions": sf_list,
+        "status":       r.get("status"),
+        "install_path": r.get("install_path"),
+        "deployed_at":  _maybe_dt(r.get("deployed_at")),
+        "last_job_id":  r.get("last_job_id"),
+        "note":         r.get("note"),
+        "config":       cfg,
+        "config_applied_at": _maybe_dt(r.get("config_applied_at")),
+        "create_time":  _maybe_dt(r.get("create_time")),
     }
 
 
@@ -1067,22 +1171,20 @@ async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> Handler
 
 async def _get_deployment_config(did: int, config):
     """해당 배포의 현재 설정 값 + 참조 템플릿을 함께 반환."""
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT d.config_json, d.config_applied_at, d.package_id "
-                "FROM agent_deployment d WHERE d.id=%s", (did,))
-            r = cur.fetchone()
-    finally:
-        conn.close()
+    r = await asyncio.to_thread(_deploy_load, config, did)
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
     pkg = _pkg_load(config, pid=r.get("package_id")) or {}
+    cfg = r.get("config")
+    if not isinstance(cfg, (dict, list)):
+        cfg = _safe_json(r.get("config_json"))
+    ca = r.get("config_applied_at")
+    if hasattr(ca, "isoformat"):
+        ca = ca.isoformat()
     return HandlerResult(status=200,
         body={
-            "config":             _safe_json(r.get("config_json")) or {},
-            "config_applied_at":  _dt(r.get("config_applied_at")),
+            "config":             cfg or {},
+            "config_applied_at":  ca,
             "template":           pkg.get("config_template"),
             "meta":               pkg.get("meta"),
         },
@@ -1101,48 +1203,35 @@ async def _put_deployment_config(handler_args, did: int, config):
                              media_type="application/json")
     queue_update = body.get("queue_update", True)
 
-    conn = _get_db(config)
+    dep = await asyncio.to_thread(_deploy_update, config, did, {'config': values})
+    if not dep:
+        return HandlerResult(status=404, body={"error": "not_found"},
+                             media_type="application/json")
     job_id = None
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM agent_deployment WHERE id=%s", (did,))
-            dep = cur.fetchone()
-            if not dep:
-                return HandlerResult(status=404, body={"error": "not_found"},
-                                     media_type="application/json")
-            cur.execute(
-                "UPDATE agent_deployment SET config_json=%s WHERE id=%s",
-                (json.dumps(values, ensure_ascii=False), did)
-            )
-            if queue_update:
-                cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (did,))
-                dep_full = cur.fetchone()
-                _enrich_deploy_with_pkg([dep_full], config)
-                params = {
-                    "deployment_id": did,
-                    "package_id":    dep_full["package_id"],
-                    "package_name":  dep_full["package_name"],
-                    "package_version": dep_full["package_version"],
-                    "process_name":  dep_full.get("process_name"),
-                    "service_functions": _split_csv(dep_full.get("service_functions")),
-                    "install_path":  dep_full["install_path"],
-                    "instance_id":   dep_full["instance_id"],
-                    "config":        values,
-                }
-                cur.execute(
-                    "INSERT INTO agent_job (agent_id, job_type, params, status) "
-                    "VALUES (%s, 'update_config', %s, 'queued')",
-                    (dep["agent_id"], json.dumps(params))
-                )
-                job_id = cur.lastrowid
-    finally:
-        conn.close()
+    if queue_update:
+        _enrich_deploy([dep], config)
+        sf = dep.get("service_functions")
+        if isinstance(sf, str):
+            sf = _split_csv(sf)
+        params = {
+            "deployment_id": did,
+            "package_id":    dep.get("package_id"),
+            "package_name":  dep.get("package_name"),
+            "package_version": dep.get("package_version"),
+            "process_name":  dep.get("process_name"),
+            "service_functions": sf or [],
+            "install_path":  dep.get("install_path"),
+            "instance_id":   dep.get("instance_id"),
+            "config":        values,
+        }
+        job_id = await asyncio.to_thread(_job_create, config, dep["agent_id"], 'update_config', params)
     return HandlerResult(status=200,
         body={"ok": True, "job_id": job_id},
         media_type="application/json")
 
 
-_SELECT_DEPLOY = "SELECT * FROM agent_deployment d"
+# _SELECT_DEPLOY 는 더 이상 사용하지 않음 (agent_deployment 가 file_store 로 이전됨).
+# 옛 _fetch_deployment_for_proxy 만 유일하게 deployment 일부 컬럼이 필요해 별도 처리.
 
 
 def _enrich_deploy(rows, config):
@@ -1181,30 +1270,39 @@ def _enrich_deploy_with_pkg(rows, config):
 
 
 async def _list_deployments(config):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(_SELECT_DEPLOY + " ORDER BY d.id")
-            rows = cur.fetchall()
-    finally:
-        conn.close()
-    _enrich_deploy_with_pkg(rows, config)
+    rows = await asyncio.to_thread(_deploy_load_all, config)
+    rows.sort(key=lambda x: x.get('id', 0))
+    _enrich_deploy(rows, config)
     return HandlerResult(status=200, body={"items": [_deployment_to_json(r) for r in rows]},
                          media_type="application/json")
 
 
 async def _get_deployment(did: int, config):
+    r = await asyncio.to_thread(_deploy_load, config, did)
+    if not r:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    _enrich_deploy([r], config)
+    return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
+
+
+def _check_ha_capability(config, agent_id: int, ha_cap: str):
+    """ha_group 의 mode 와 패키지 ha_capability 호환 검사. None 이면 OK."""
     conn = _get_db(config)
     try:
         with conn.cursor() as cur:
-            cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (did,))
-            r = cur.fetchone()
+            cur.execute(
+                "SELECT g.mode FROM ha_group_members m "
+                "JOIN ha_groups g ON g.id=m.group_id WHERE m.agent_id=%s", (agent_id,)
+            )
+            grp = cur.fetchone()
     finally:
         conn.close()
-    if not r:
-        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
-    _enrich_deploy_with_pkg([r], config)
-    return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
+    if not grp:
+        return None
+    grp_mode = grp.get("mode")
+    if grp_mode is not None and ha_cap != "standalone" and ha_cap != grp_mode:
+        return f"패키지 ha_capability={ha_cap} 가 agent 그룹 mode={grp_mode} 와 불일치 (이 그룹에는 {grp_mode} 모듈만 install 가능)"
+    return None
 
 
 async def _create_deployment(handler_args: HandlerArgs, config):
@@ -1213,97 +1311,72 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     package_id   = body.get("package_id")
     instance_id  = body.get("instance_id")
     process_name = (body.get("process_name") or body.get("service_kind") or "").strip()
-    functions    = _join_csv(body.get("service_functions"))
+    functions    = body.get("service_functions") or []
+    if isinstance(functions, str):
+        functions = _split_csv(functions)
     install_path = (body.get("install_path") or "").strip() or None
     cfg_overlay  = body.get("config")
-    config_json  = json.dumps(cfg_overlay) if isinstance(cfg_overlay, dict) and cfg_overlay else None
     if not agent_id or not package_id:
         return HandlerResult(status=400, body={"error": "agent_id and package_id required"},
                              media_type="application/json")
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            # HA capability 검증: 패키지 ha_capability 와 agent 가 속한 ha_group.mode mismatch 시 reject.
-            # - active_standby 모듈은 A/S 그룹의 agent 에만
-            # - all_active   모듈은 AA   그룹의 agent 에만
-            # - standalone   모듈은 어느 그룹 (또는 그룹 없음) 에든 OK
-            pkg_file = _pkg_load(config, pid=package_id) or {}
-            pkg_meta = pkg_file.get("meta") or {}
-            if not isinstance(pkg_meta, dict):
-                pkg_meta = {}
-            ha_cap = (pkg_meta.get("ha_capability") or "standalone").lower()
-            cur.execute(
-                "SELECT g.mode FROM ha_group_members m "
-                "JOIN ha_groups g ON g.id=m.group_id WHERE m.agent_id=%s", (agent_id,)
-            )
-            grp = cur.fetchone()
-            grp_mode = grp.get("mode") if grp else None
-            # ha_group 정의된 agent 만 strict 검증. ha_group 미정의 시에는 모든 모듈 install
-            # 허용 (운영자 워크플로: agent 등록 직후 그룹 정의 전 임시 install). Console UI
-            # 가 HaGroupsPage 안내 + DeploymentCreateModal 의 hint 로 운영 가이드.
-            if grp_mode is not None and ha_cap != "standalone" and ha_cap != grp_mode:
-                return HandlerResult(status=400, body={
-                    "error": "ha_mismatch",
-                    "detail": f"패키지 ha_capability={ha_cap} 가 agent 그룹 mode={grp_mode} 와 불일치 "
-                              f"(이 그룹에는 {grp_mode} 모듈만 install 가능)"
-                }, media_type="application/json")
 
-            cur.execute(
-                "INSERT INTO agent_deployment (agent_id, package_id, instance_id, "
-                "                              process_name, service_functions, "
-                "                              install_path, config_json, note) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (agent_id, package_id, instance_id, process_name, functions,
-                 install_path, config_json, body.get("note"))
-            )
-            new_id = cur.lastrowid
-            cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (new_id,))
-            r = cur.fetchone()
-    except pymysql.err.IntegrityError as e:
-        return HandlerResult(status=409, body={"error": "conflict", "detail": str(e)},
+    pkg_file = await asyncio.to_thread(_pkg_load, config, package_id)
+    pkg_file = pkg_file or {}
+    pkg_meta = pkg_file.get("meta") if isinstance(pkg_file.get("meta"), dict) else {}
+    ha_cap = (pkg_meta.get("ha_capability") or "standalone").lower()
+    mismatch = await asyncio.to_thread(_check_ha_capability, config, agent_id, ha_cap)
+    if mismatch:
+        return HandlerResult(status=400, body={"error": "ha_mismatch", "detail": mismatch},
                              media_type="application/json")
-    finally:
-        conn.close()
-    _enrich_deploy_with_pkg([r], config)
+
+    def _do_create():
+        new_id = file_store.next_id(_deploy_dir(config))
+        dep = {
+            'id': new_id,
+            'agent_id': agent_id,
+            'package_id': package_id,
+            'instance_id': instance_id,
+            'process_name': process_name,
+            'service_functions': functions if isinstance(functions, list) else _split_csv(functions),
+            'install_path': install_path,
+            'status': 'pending',
+            'note': body.get('note'),
+            'config': cfg_overlay if isinstance(cfg_overlay, dict) and cfg_overlay else None,
+            'config_applied_at': None,
+            'deployed_at': None,
+            'last_job_id': None,
+        }
+        return _deploy_save(config, dep)
+
+    r = await asyncio.to_thread(_do_create)
+    _enrich_deploy([r], config)
     return HandlerResult(status=201, body=_deployment_to_json(r), media_type="application/json")
 
 
 async def _update_deployment(handler_args: HandlerArgs, did: int, config):
     body = _parse_body(handler_args)
-    fields = []; values = []
-    # service_kind 는 하위호환 별칭 → process_name 으로 매핑
+    patches: dict = {}
     if "service_kind" in body and "process_name" not in body:
         body["process_name"] = body["service_kind"]
     for col in ("instance_id", "process_name", "install_path", "note"):
         if col in body:
-            fields.append(f"{col}=%s"); values.append(body[col])
+            patches[col] = body[col]
     if "service_functions" in body:
-        fields.append("service_functions=%s")
-        values.append(_join_csv(body["service_functions"]))
-    if not fields:
+        sf = body["service_functions"]
+        if isinstance(sf, str):
+            sf = _split_csv(sf)
+        patches["service_functions"] = sf
+    if not patches:
         return HandlerResult(status=400, body={"error": "no_updatable_fields"}, media_type="application/json")
-    values.append(did)
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(f"UPDATE agent_deployment SET {', '.join(fields)} WHERE id=%s", values)
-            cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (did,))
-            r = cur.fetchone()
-    finally:
-        conn.close()
+    r = await asyncio.to_thread(_deploy_update, config, did, patches)
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
-    _enrich_deploy_with_pkg([r], config)
+    _enrich_deploy([r], config)
     return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
 
 
 async def _delete_deployment(did: int, config):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM agent_deployment WHERE id=%s", (did,))
-    finally:
-        conn.close()
+    await asyncio.to_thread(file_store.delete, _deploy_dir(config), did)
     return HandlerResult(status=204, body=None, media_type="application/json")
 
 
@@ -1316,43 +1389,35 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
         return HandlerResult(status=400, body={"error": "invalid_job_type"},
                              media_type="application/json")
 
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (did,))
-            dep = cur.fetchone()
-            if not dep:
-                return HandlerResult(status=404, body={"error": "deployment_not_found"},
-                                     media_type="application/json")
-            _enrich_deploy_with_pkg([dep], config)
-
-            params = {
-                "deployment_id": did,
-                "package_id":    dep["package_id"],
-                "package_name":  dep["package_name"],
-                "package_version": dep["package_version"],
-                "process_name":  dep.get("process_name"),
-                "service_functions": _split_csv(dep.get("service_functions")),
-                "install_path":  dep["install_path"],
-                "instance_id":   dep["instance_id"],
-                "config":        _safe_json(dep.get("config_json")),
-                "extra":         body.get("extra") or {},
-            }
-            cur.execute(
-                "INSERT INTO agent_job (agent_id, job_type, params, status) "
-                "VALUES (%s,%s,%s,'queued')",
-                (dep["agent_id"], job_type, json.dumps(params))
-            )
-            job_id = cur.lastrowid
-            # deployment 상태 관측
-            transition = {"install": "deploying", "upgrade": "deploying",
-                          "uninstall": "deploying", "start": "deploying",
-                          "stop": "deploying", "restart": "deploying"}
-            if job_type in transition:
-                cur.execute("UPDATE agent_deployment SET status=%s, last_job_id=%s WHERE id=%s",
-                            (transition[job_type], job_id, did))
-    finally:
-        conn.close()
+    dep = await asyncio.to_thread(_deploy_load, config, did)
+    if not dep:
+        return HandlerResult(status=404, body={"error": "deployment_not_found"},
+                             media_type="application/json")
+    _enrich_deploy([dep], config)
+    cfg = dep.get("config") if isinstance(dep.get("config"), (dict, list)) \
+          else _safe_json(dep.get("config_json"))
+    sf = dep.get("service_functions")
+    if isinstance(sf, str):
+        sf = _split_csv(sf)
+    params = {
+        "deployment_id": did,
+        "package_id":    dep.get("package_id"),
+        "package_name":  dep.get("package_name"),
+        "package_version": dep.get("package_version"),
+        "process_name":  dep.get("process_name"),
+        "service_functions": sf or [],
+        "install_path":  dep.get("install_path"),
+        "instance_id":   dep.get("instance_id"),
+        "config":        cfg,
+        "extra":         body.get("extra") or {},
+    }
+    job_id = await asyncio.to_thread(_job_create, config, dep["agent_id"], job_type, params)
+    transition = {"install": "deploying", "upgrade": "deploying",
+                  "uninstall": "deploying", "start": "deploying",
+                  "stop": "deploying", "restart": "deploying"}
+    if job_type in transition:
+        await asyncio.to_thread(_deploy_update, config, did,
+                                {'status': transition[job_type], 'last_job_id': job_id})
     return HandlerResult(status=202, body={"job_id": job_id, "status": "queued"},
                          media_type="application/json")
 
@@ -1421,24 +1486,23 @@ async def _serve_agent_binary(handler_args: HandlerArgs, kwargs: dict) -> Handle
 
 def _fetch_deployment_for_proxy(did: int, config):
     """proxy 에 필요한 deployment + agent 정보 + 패키지 config_template 동시 조회. (sync — asyncio.to_thread 로 호출)"""
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, install_path, package_id, agent_id "
-                "FROM agent_deployment WHERE id=%s", (did,))
-            r = cur.fetchone()
-    finally:
-        conn.close()
-    if r:
-        agent = _agent_load(config, aid=r.get('agent_id')) or {}
-        r['agent_name'] = agent.get('name')
-        r['agent_status'] = agent.get('status')
-        r['ip_address'] = agent.get('ip_address')
-        r['sync_port'] = agent.get('sync_port')
-        r['agent_token'] = agent.get('agent_token')
-        pkg = _pkg_load(config, pid=r.get('package_id')) or {}
-        r['config_template_json'] = pkg.get('config_template')  # 옛 이름 그대로 (downstream _collection_schema)
+    dep = _deploy_load(config, did)
+    if not dep:
+        return None
+    r = {
+        'id': dep.get('id'),
+        'install_path': dep.get('install_path'),
+        'package_id': dep.get('package_id'),
+        'agent_id': dep.get('agent_id'),
+    }
+    agent = _agent_load(config, aid=r.get('agent_id')) or {}
+    r['agent_name'] = agent.get('name')
+    r['agent_status'] = agent.get('status')
+    r['ip_address'] = agent.get('ip_address')
+    r['sync_port'] = agent.get('sync_port')
+    r['agent_token'] = agent.get('agent_token')
+    pkg = _pkg_load(config, pid=r.get('package_id')) or {}
+    r['config_template_json'] = pkg.get('config_template')  # 옛 이름 그대로 (downstream _collection_schema)
     return r
 
 

@@ -337,35 +337,27 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
     if agent.get('status') in ('offline', 'approved'):
         patches['status'] = 'online'
 
+    from handlers.agents import _job_pick_pending
     def _update_and_pick():
         updated = _agent_update(config, agent['id'], patches) or {}
         cert_rotate = bool(updated.get('cert_rotate_pending'))
-        # pending job pick — agent_job 은 아직 DB (Phase 3)
-        conn = _get_db(config)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, job_type, params FROM agent_job "
-                    "WHERE agent_id=%s AND status='queued' "
-                    "ORDER BY id LIMIT 10", (agent["id"],)
-                )
-                jobs = cur.fetchall()
-                if jobs:
-                    ids = [j["id"] for j in jobs]
-                    cur.execute(
-                        f"UPDATE agent_job SET status='running', dispatched_at=NOW() "
-                        f"WHERE id IN ({','.join(['%s']*len(ids))})", ids
-                    )
-        finally:
-            conn.close()
+        # pending job pick — file_store
+        jobs = _job_pick_pending(config, agent['id'], limit=10)
         return cert_rotate, jobs
 
     cert_rotate, jobs = await asyncio.to_thread(_update_and_pick)
 
+    def _job_params(p):
+        if isinstance(p, (dict, list)):
+            return p
+        if isinstance(p, str) and p:
+            try: return json.loads(p)
+            except Exception: return {}
+        return {}
     resp = {
         "ok": True,
         "jobs": [{"id": j["id"], "type": j["job_type"],
-                   "params": json.loads(j["params"]) if j.get("params") else {}}
+                   "params": _job_params(j.get("params"))}
                   for j in jobs],
     }
     if cert_rotate:
@@ -416,6 +408,7 @@ async def _cert_rotate(handler_args: HandlerArgs, config: dict, agent: dict) -> 
 # ──────────────────────────────────────────────────────────────
 
 async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> HandlerResult:
+    from handlers.agents import _job_load, _job_update, _deploy_update
     body = _parse_body(handler_args)
     job_id = body.get("job_id")
     status = (body.get("status") or "succeeded").lower()
@@ -425,59 +418,48 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
     result_stdout = (body.get("stdout") or "")[:65000]
     result_stderr = (body.get("stderr") or "")[:65000]
 
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agent_job SET status=%s, result_code=%s, "
-                "  result_stdout=%s, result_stderr=%s, completed_at=NOW() "
-                "WHERE id=%s AND agent_id=%s",
-                (status, result_code, result_stdout, result_stderr, job_id, agent["id"])
-            )
-            changed = cur.rowcount
-            # 배포 상태 업데이트 훅 (install 성공 시 deployment.status=running 전환)
-            if changed and status == "succeeded":
-                cur.execute("SELECT job_type, params FROM agent_job WHERE id=%s", (job_id,))
-                j = cur.fetchone()
-                if j and j["job_type"] in ("install", "start", "restart"):
-                    try:
-                        params = json.loads(j["params"]) if j.get("params") else {}
-                        dep_id = params.get("deployment_id")
-                        if dep_id:
-                            # install 결과 stdout 에서 "at <path> (" 패턴으로 실제 install_path 추출
-                            new_install_path = None
-                            if j["job_type"] == "install" and result_stdout:
-                                import re as _re
-                                m = _re.search(r"at\s+(\S+?)\s+\(", result_stdout)
-                                if m: new_install_path = m.group(1)
-                            new_status = "running" if j["job_type"] in ("start","restart") else "stopped"
-                            # install 직후는 "실행 전"이므로 stopped 로 보는 게 맞음
-                            if new_install_path:
-                                cur.execute(
-                                    "UPDATE agent_deployment SET status=%s, "
-                                    "  install_path=%s, deployed_at=NOW(), last_job_id=%s "
-                                    "WHERE id=%s",
-                                    (new_status, new_install_path, job_id, dep_id))
-                            else:
-                                cur.execute(
-                                    "UPDATE agent_deployment SET status=%s, "
-                                    "  deployed_at=NOW(), last_job_id=%s WHERE id=%s",
-                                    (new_status, job_id, dep_id))
-                    except Exception:
-                        pass
-                elif j and j["job_type"] in ("stop", "uninstall"):
-                    try:
-                        params = json.loads(j["params"]) if j.get("params") else {}
-                        dep_id = params.get("deployment_id")
-                        if dep_id:
-                            new_status = "removed" if j["job_type"] == "uninstall" else "stopped"
-                            cur.execute(
-                                "UPDATE agent_deployment SET status=%s, last_job_id=%s WHERE id=%s",
-                                (new_status, job_id, dep_id))
-                    except Exception:
-                        pass
-    finally:
-        conn.close()
+    def _do_report():
+        j = _job_load(config, job_id) if job_id else None
+        if not j or j.get('agent_id') != agent['id']:
+            return 0, None
+        from datetime import datetime as _dt
+        now = _dt.now().isoformat(timespec='seconds')
+        _job_update(config, job_id, {
+            'status': status,
+            'result_code': result_code,
+            'result_stdout': result_stdout,
+            'result_stderr': result_stderr,
+            'completed_at': now,
+        })
+        return 1, j
+
+    changed, j = await asyncio.to_thread(_do_report)
+
+    # 배포 상태 업데이트 훅 (install 성공 시 deployment.status=running 전환)
+    if changed and status == "succeeded" and j:
+        jt = j.get("job_type")
+        params = j.get("params") if isinstance(j.get("params"), (dict, list)) else {}
+        if isinstance(params, str):
+            try: params = json.loads(params)
+            except Exception: params = {}
+        dep_id = params.get("deployment_id") if isinstance(params, dict) else None
+        if dep_id and jt in ("install", "start", "restart"):
+            new_install_path = None
+            if jt == "install" and result_stdout:
+                import re as _re
+                m = _re.search(r"at\s+(\S+?)\s+\(", result_stdout)
+                if m: new_install_path = m.group(1)
+            new_status = "running" if jt in ("start","restart") else "stopped"
+            patches = {'status': new_status, 'last_job_id': job_id}
+            from datetime import datetime as _dt
+            patches['deployed_at'] = _dt.now().isoformat(timespec='seconds')
+            if new_install_path:
+                patches['install_path'] = new_install_path
+            await asyncio.to_thread(_deploy_update, config, dep_id, patches)
+        elif dep_id and jt in ("stop", "uninstall"):
+            new_status = "removed" if jt == "uninstall" else "stopped"
+            await asyncio.to_thread(_deploy_update, config, dep_id,
+                                    {'status': new_status, 'last_job_id': job_id})
 
     return HandlerResult(status=200, body={"ok": True, "updated": changed},
                          media_type="application/json")
@@ -489,22 +471,16 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
 
 async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> HandlerResult:
     body = _parse_body(handler_args)
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agent_metric (agent_id, ts, cpu_pct, mem_pct, disk_pct, "
-                "                          load_avg, processes_json) "
-                "VALUES (%s, NOW(), %s, %s, %s, %s, %s)",
-                (agent["id"],
-                 body.get("cpu_pct"), body.get("mem_pct"), body.get("disk_pct"),
-                 (body.get("load_avg") or "")[:32],
-                 json.dumps(body.get("processes") or []))
-            )
-    finally:
-        conn.close()
-    # cims_agent.last_metric → file_store
-    from handlers.agents import _agent_update
+    from handlers.agents import _metric_append, _agent_update
+    procs = body.get("processes") or []
+    record = {
+        'cpu_pct': body.get("cpu_pct"),
+        'mem_pct': body.get("mem_pct"),
+        'disk_pct': body.get("disk_pct"),
+        'load_avg': (body.get("load_avg") or "")[:32],
+        'processes': procs if isinstance(procs, list) else [],
+    }
+    await asyncio.to_thread(_metric_append, config, agent['id'], record)
     await asyncio.to_thread(_agent_update, config, agent['id'], {
         'last_metric': datetime.now().isoformat(timespec='seconds'),
     })
