@@ -505,6 +505,52 @@ def job_update_ha(params: dict) -> tuple:
     return 0, "\n".join(msgs), ""
 
 
+def job_apply_ip_config(params: dict) -> tuple:
+    """service_ip_rows[] → 각 iface 에 secondary IP 추가 (ip addr add).
+
+    Params:
+      - service_ip_rows: [{iface, ip, mask, slot?, status?}, ...] (CSC 가 cims_agent.service_ip_rows_json
+        에서 읽어 전달)
+
+    안전 정책 (v1):
+      - secondary IP 만 add (primary 변경 안 함 — mgmt 연결 끊김 방지)
+      - "RTNETLINK answers: File exists" 는 정상 (이미 존재) — ok 로 처리
+      - delete 미지원 (rollback 은 운영자가 수동)
+
+    반환: (rc, stdout, stderr). rc=0 = 전체 ok 또는 일부 already-exists.
+    """
+    rows = params.get("service_ip_rows") or []
+    if not isinstance(rows, list) or not rows:
+        return 0, "no rows to apply", ""
+
+    msgs = []
+    fail_count = 0
+    for r in rows:
+        iface = r.get("iface")
+        ip    = r.get("ip")
+        mask  = r.get("mask")
+        if not iface or not ip or not mask:
+            msgs.append(f"skip (incomplete): {r}")
+            continue
+        cidr = f"{ip}/{mask}"
+        try:
+            res = subprocess.run(["ip", "addr", "add", cidr, "dev", iface],
+                                 capture_output=True, text=True, timeout=10)
+            if res.returncode == 0:
+                msgs.append(f"[OK]   {iface} += {cidr}")
+            elif "File exists" in (res.stderr or ""):
+                msgs.append(f"[SKIP] {iface}: {cidr} already present")
+            else:
+                fail_count += 1
+                msgs.append(f"[FAIL] {iface} += {cidr}: rc={res.returncode} err={res.stderr.strip()[-200:]}")
+        except Exception as e:
+            fail_count += 1
+            msgs.append(f"[FAIL] {iface} += {cidr}: {e}")
+
+    rc = 0 if fail_count == 0 else 1
+    return rc, "\n".join(msgs), ""
+
+
 def job_process_control(params: dict, job_type: str) -> tuple:
     """start/stop/restart — install_path/agent/bin/cims-svc 를 이용해 수행
     (Phase 1.B+, cims.sh 운영 명령 제거).
@@ -839,6 +885,8 @@ def execute_job(job: dict, csc_url: str, session_token: str) -> dict:
             rc, out, err = job_update_config(params)
         elif jt == "update_ha":
             rc, out, err = job_update_ha(params)
+        elif jt == "apply_ip_config":
+            rc, out, err = job_apply_ip_config(params)
         elif jt == "uninstall":
             install_path = params.get("install_path")
             if install_path and os.path.isdir(install_path):

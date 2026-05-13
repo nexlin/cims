@@ -302,6 +302,8 @@ export const deploymentApi = {
   approveAgent:  (id: number) => api.post<{ ok: boolean }>(`/agents/${id}/approve`, {}),
   revokeAgent:   (id: number) => api.post<{ ok: boolean }>(`/agents/${id}/revoke`, {}),
   upgradeAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/upgrade`, {}),
+  applyIpConfig: (id: number) =>
+    api.post<{ agent_id: number; job_id: number; rows: number }>(`/agents/${id}/apply-ip-config`, {}),
   agentMetrics:  (id: number) => api.get<{ items: AgentMetric[] }>(`/agents/${id}/metrics`),
 
   // packages

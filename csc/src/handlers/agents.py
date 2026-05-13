@@ -182,6 +182,8 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _agent_metrics(aid, config)
         if action == "upgrade" and method == "POST":
             return await _upgrade_agent_binary(handler_args, aid, config)
+        if action == "apply-ip-config" and method == "POST":
+            return await _apply_ip_config(aid, config)
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
 
@@ -348,6 +350,38 @@ async def _revoke_agent(handler_args: HandlerArgs, aid: int, config):
     finally:
         conn.close()
     return HandlerResult(status=200, body={"ok": True, "id": aid}, media_type="application/json")
+
+
+async def _apply_ip_config(aid: int, config):
+    """ServiceIpPanel [적용] 진입점 — cims_agent.service_ip_rows_json 을 읽어
+    apply_ip_config job 큐잉. Agent 가 ip addr add 로 secondary IP 적용."""
+    conn = _get_db(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, service_ip_rows_json FROM cims_agent WHERE id=%s", (aid,))
+            row = cur.fetchone()
+            if not row:
+                return HandlerResult(status=404, body={"error": "agent_not_found"},
+                                     media_type="application/json")
+            raw = row.get("service_ip_rows_json")
+            try:
+                rows = json.loads(raw) if raw else []
+            except (TypeError, ValueError):
+                rows = []
+            if not rows:
+                return HandlerResult(status=400, body={"error": "no_service_ip_rows"},
+                                     media_type="application/json")
+            cur.execute(
+                "INSERT INTO agent_job (agent_id, job_type, params, status) "
+                "VALUES (%s, 'apply_ip_config', %s, 'queued')",
+                (aid, json.dumps({"service_ip_rows": rows}, ensure_ascii=False))
+            )
+            job_id = cur.lastrowid
+    finally:
+        conn.close()
+    return HandlerResult(status=202,
+                         body={"agent_id": aid, "job_id": job_id, "rows": len(rows)},
+                         media_type="application/json")
 
 
 async def _upgrade_agent_binary(handler_args: HandlerArgs, aid: int, config):

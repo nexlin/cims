@@ -473,6 +473,14 @@ export default function HaServicesPage() {
     } catch (e) { flash(`VIP 적용 실패: ${(e as Error).message}`) }
   }
 
+  // ── ServiceIpPanel "[적용]" — agent 에 apply_ip_config job 큐잉 (ip addr add) ──
+  const applyServiceIp = async (srv: ServerRow) => {
+    try {
+      const r = await deploymentApi.applyIpConfig(srv.id)
+      flash(`${srv.name} IP 적용 큐잉 — job #${r.job_id} (${r.rows} rows)`)
+    } catch (e) { flash(`IP 적용 실패: ${(e as Error).message}`) }
+  }
+
   // ── 패키지 추가/제거 → deployments insert/delete per member ──
   const updatePackageIds = async (svc: ServiceRow, ids: number[]) => {
     const current = new Set(svc.packageIds)
@@ -566,6 +574,7 @@ export default function HaServicesPage() {
               updateServer={updateServer}
               updatePackageIds={updatePackageIds}
               applyVip={applyVip}
+              applyServiceIp={applyServiceIp}
               addServer={() => addServer(svc)}
               regenerateToken={(srv) => regenerateToken(svc, srv)}
               copyCmd={(srv) => copyInstallCmd(srv)}
@@ -651,6 +660,7 @@ interface ServiceTreeProps {
   updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
   updatePackageIds: (svc: ServiceRow, ids: number[]) => void
   applyVip: (svc: ServiceRow) => void
+  applyServiceIp: (srv: ServerRow) => void
   addServer: () => void
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
@@ -727,6 +737,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
           setSvcIpExpand={(open) => p.setSvcIpExpand(srv.id, open)}
           pendingToken={p.pendingTokens.get(srv.id)}
           updateServer={p.updateServer}
+          applyServiceIp={p.applyServiceIp}
           regenerateToken={p.regenerateToken}
           copyCmd={p.copyCmd}
         />
@@ -775,6 +786,7 @@ interface ServerRowsProps {
   setSvcIpExpand: (open: boolean) => void
   pendingToken?: { token: string; cmd: string }
   updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
+  applyServiceIp: (srv: ServerRow) => void
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
 }
@@ -848,6 +860,7 @@ function ServerRows(p: ServerRowsProps) {
               rows={srv.serviceIpRows}
               slots={p.serviceSlots}
               onChange={(rows) => p.updateServer(svc.id, srv.id, { serviceIpRows: rows })}
+              onApply={() => p.applyServiceIp(srv)}
             />
           </td>
         </tr>
@@ -860,12 +873,13 @@ function ServerRows(p: ServerRowsProps) {
 //  ServiceIpPanel — 인터페이스 단위 row
 // ──────────────────────────────────────────────────────────────
 
-function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
+function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
   title: string
   interfaces: NetIface[]
   rows: ServiceIpRow[]
   slots: IpSlot[]
   onChange: (rows: ServiceIpRow[]) => void
+  onApply?: () => void
 }) {
   const ifaceRows: ServiceIpRow[] = interfaces.map(iface => {
     const existing = rows.find(r => r.iface === iface.name)
@@ -882,7 +896,7 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
 
   const applyRow = (iface: string) => {
     updateRow(iface, { status: 'unknown' })
-    // TODO: agent 에 실제 ip 적용 API (별도 endpoint 필요). 현재는 변경값만 저장.
+    onApply?.()    // agents/{id}/apply-ip-config 호출 → ip addr add per row
   }
 
   const resetRow = (iface: string) => {
