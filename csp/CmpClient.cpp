@@ -130,7 +130,55 @@ void CCmpClient::OnTransactionComplete( unsigned int transId, bool success, cons
 // Protocol: TRANS_ID CSP_ID CSP_SESS_ID CMP_ID CMP_SESS_ID CMD PAYLOAD...
 // Example: 1001 CSP_MAIN sess_1 CMP_MAIN 0 add 1.2.3.4 1000 0 0
 // Response: 1001 CSP_MAIN sess_1 CMP_MAIN 0 OK ...
+// Phase 1.E-2 wrapper — session sticky → endpoint 선택 후 _SendOnEndpoint 호출.
+bool CCmpClient::SendRequestAndWait( const std::string& strSessionKey,
+                                      const SimpleJson::JsonNode& payload, std::string& strResponse ) {
+    CmpEndpoint ep = _ResolveEndpoint( strSessionKey );
+    return _SendOnEndpoint( ep, payload, strResponse );
+}
+
+// Legacy / heartbeat — primary endpoint
 bool CCmpClient::SendRequestAndWait( const SimpleJson::JsonNode& payload, std::string& strResponse ) {
+    CmpEndpoint ep = _ResolveEndpoint( "" );
+    return _SendOnEndpoint( ep, payload, strResponse );
+}
+
+void CCmpClient::ReleaseEndpointForKey( const std::string& strSessionKey ) {
+    if ( strSessionKey.empty() ) return;
+    std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+    m_mapSessionToEndpointKey.erase( strSessionKey );
+}
+
+CmpEndpoint CCmpClient::_ResolveEndpoint( const std::string& strSessionKey ) {
+    std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+    if ( m_endpoints.empty() ) {
+        return CmpEndpoint( m_strCmpIp, m_iCmpPort );  // bootstrap fallback
+    }
+    if ( !strSessionKey.empty() ) {
+        // 1) 캐시 hit
+        auto it = m_mapSessionToEndpointKey.find( strSessionKey );
+        if ( it != m_mapSessionToEndpointKey.end() ) {
+            for ( const auto& ep : m_endpoints ) {
+                if ( ep.strKey == it->second ) return ep;
+            }
+            // stale cache — fall through to ring
+        }
+        // 2) Ring select
+        std::string selectedKey;
+        if ( m_ring.Select( strSessionKey, selectedKey ) ) {
+            for ( const auto& ep : m_endpoints ) {
+                if ( ep.strKey == selectedKey ) {
+                    m_mapSessionToEndpointKey[strSessionKey] = ep.strKey;
+                    return ep;
+                }
+            }
+        }
+    }
+    return m_endpoints.front();  // primary
+}
+
+bool CCmpClient::_SendOnEndpoint( const CmpEndpoint& ep, const SimpleJson::JsonNode& payload,
+                                   std::string& strResponse ) {
     if ( m_hSocket == -1 ) return false;
 
     unsigned int transId;
@@ -172,7 +220,7 @@ bool CCmpClient::SendRequestAndWait( const SimpleJson::JsonNode& payload, std::s
     packet.Set( "payload", payload );
 
     std::string strPacket = packet.ToString();
-    CLog::Print( LOG_DEBUG, "CmpClient TX → %s:%d : %s", m_strCmpIp.c_str(), m_iCmpPort, strPacket.c_str() );
+    CLog::Print( LOG_DEBUG, "CmpClient TX → %s:%d : %s", ep.strIp.c_str(), ep.iPort, strPacket.c_str() );
     if ( gclsSipLogger.IsEnabled() ) {
         std::string strCmd = payload.GetString( "cmd" );
         // service: Transaction 에 저장된 값 (payload.service 기반)
@@ -213,7 +261,7 @@ bool CCmpClient::SendRequestAndWait( const SimpleJson::JsonNode& payload, std::s
         }
 
         gclsSipLogger.LogMessage( "csp", "cmp", "JSON", strCmd.c_str(),
-                                  ( m_strCmpIp + ":" + std::to_string( m_iCmpPort ) ).c_str(), strPacket.c_str(),
+                                  ( ep.strIp + ":" + std::to_string( ep.iPort ) ).c_str(), strPacket.c_str(),
                                   pszSvc, strTxId.c_str(), strSesId.c_str(), strDetail.c_str(), caller.c_str(),
                                   callee.c_str() );
     }
@@ -221,8 +269,8 @@ bool CCmpClient::SendRequestAndWait( const SimpleJson::JsonNode& payload, std::s
     struct sockaddr_in servaddr;
     memset( &servaddr, 0, sizeof( servaddr ) );
     servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons( m_iCmpPort );
-    servaddr.sin_addr.s_addr = inet_addr( m_strCmpIp.c_str() );
+    servaddr.sin_port = htons( ep.iPort );
+    servaddr.sin_addr.s_addr = inet_addr( ep.strIp.c_str() );
 
     if ( sendto( m_hSocket, strPacket.c_str(), strPacket.length(), 0, (struct sockaddr*)&servaddr,
                  sizeof( servaddr ) ) < 0 ) {
@@ -350,7 +398,7 @@ bool CCmpClient::AddSession( const std::string& strSessionId, std::string& strLo
 
     std::string strReqBody = req.ToString();
 
-    if ( !SendRequestAndWait( req, strResp ) ) return false;
+    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) return false;
 
     // Response Body: CSP_MAIN <sessId> CMP_MAIN <cmpSess> OK <ip> <port> <vport>
     // The response is now expected to be JSON.
@@ -401,7 +449,7 @@ bool CCmpClient::ModifySession( const std::string& strSessionId, const std::stri
     std::string strResp;
     std::string strReqBody = req.ToString();
 
-    if ( !SendRequestAndWait( req, strResp ) ) return false;
+    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) return false;
 
     return true;
 }
@@ -440,7 +488,7 @@ bool CCmpClient::UpdateSession( const std::string& strSessionId, const std::stri
 
     CLog::Print( LOG_DEBUG, "CmpClient::UpdateSession: %s", req.ToString().c_str() );
 
-    if ( !SendRequestAndWait( req, strResp ) ) return false;
+    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) return false;
 
     SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
     if ( respNode.type != SimpleJson::JSON_OBJECT ) {
@@ -486,7 +534,8 @@ bool CCmpClient::RemoveSession( const std::string& strSessionId, const std::stri
     std::string strResp;
     CLog::Print( LOG_DEBUG, "CmpClient::RemoveSession: %s", req.ToString().c_str() );
     std::string strReqBody = req.ToString();
-    bool bRet = SendRequestAndWait( req, strResp );
+    bool bRet = SendRequestAndWait( strSessionId, req, strResp );
+    ReleaseEndpointForKey( strSessionId );  // remove 후 캐시 해제
     return bRet;
 }
 
@@ -531,7 +580,7 @@ bool CCmpClient::AddGroup( const std::string& strGroupId, const std::vector<std:
     std::string strResp;
     std::string strReqBody = req.ToString();
 
-    if ( SendRequestAndWait( req, strResp ) ) {
+    if ( SendRequestAndWait( strGroupId, req, strResp ) ) {
         SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
         if ( respNode.type != SimpleJson::JSON_OBJECT ) {
             CLog::Print( LOG_ERROR, "CmpClient::AddGroup: Failed to parse JSON response: %s", strResp.c_str() );
@@ -579,7 +628,7 @@ bool CCmpClient::ModifyGroup( const std::string& strGroupId, const std::vector<s
     req.Set( "cmp_sess_id", "0" );
 
     std::string strResp;
-    return SendRequestAndWait( req, strResp );
+    return SendRequestAndWait( strGroupId, req, strResp );
 }
 
 bool CCmpClient::JoinGroup( const std::string& strGroupId, const std::string& strSessionId,
@@ -606,7 +655,7 @@ bool CCmpClient::JoinGroup( const std::string& strGroupId, const std::string& st
 
     std::string resp;
     std::string strReqBody = req.ToString();
-    bool bRet = SendRequestAndWait( req, resp );
+    bool bRet = SendRequestAndWait( strGroupId, req, resp );
     return bRet;
 }
 
@@ -629,7 +678,7 @@ bool CCmpClient::LeaveGroup( const std::string& strGroupId, const std::string& s
 
     std::string resp;
     std::string strReqBody = req.ToString();
-    bool bRet = SendRequestAndWait( req, resp );
+    bool bRet = SendRequestAndWait( strGroupId, req, resp );
     return bRet;
 }
 
@@ -653,7 +702,9 @@ bool CCmpClient::RemoveGroup( const std::string& strGroupId, const std::string& 
     req.Set( "cmp_sess_id", "0" );
 
     std::string strResp;
-    return SendRequestAndWait( req, strResp );
+    bool bRet = SendRequestAndWait( strGroupId, req, strResp );
+    ReleaseEndpointForKey( strGroupId );  // remove 후 캐시 해제
+    return bRet;
 }
 
 bool CCmpClient::Alive() {

@@ -96,7 +96,24 @@ private:
         }
     };
 
+    // Phase 1.E-2 — session sticky multi-endpoint dispatch.
+    // strSessionKey 가 비어있으면 primary endpoint (Alive/HEARTBEAT 등). 비어있지 않으면:
+    //   1) m_mapSessionToEndpointKey 캐시 hit → 동일 endpoint 유지 (sticky)
+    //   2) ring select → 캐시에 기록 후 그 endpoint
+    //   3) endpoint 미등록 시 primary fallback
+    bool SendRequestAndWait( const std::string& strSessionKey,
+                             const SimpleJson::JsonNode& payload, std::string& strResponse );
+
+    // 기존 caller 호환 — primary 만 사용
     bool SendRequestAndWait( const SimpleJson::JsonNode& payload, std::string& strResponse );
+
+    // RemoveSession/RemoveGroup 후 캐시 정리
+    void ReleaseEndpointForKey( const std::string& strSessionKey );
+
+    // 내부 — 실제 sendto + recv (endpoint 별)
+    bool _SendOnEndpoint( const CmpEndpoint& ep, const SimpleJson::JsonNode& payload,
+                          std::string& strResponse );
+    CmpEndpoint _ResolveEndpoint( const std::string& strSessionKey );
 
     // Threads
     void KeepAliveLoop();
