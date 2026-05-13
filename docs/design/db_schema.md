@@ -93,8 +93,8 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 | 위치 | 이슈 | 처리 필요 |
 |---|---|---|
-| `csc/src/handlers/stats.py` (10 places) | dropped `volte_call_logs` / `ptt_call_logs` 를 여전히 SELECT — 호출 시 SQL error | 파일 기반 (call.json 스캔) 으로 재구성 또는 stats_daily 집계 사용 |
 | `docs/design/modules/csc.md` §6 | `voip_*` 옛 이름 + call_logs 표 잔존 | 본 문서 참조하도록 갱신 (별도 작업) |
+| `docs/design/modules/csp.md` / `features/volte_flows.md` / `features/monitoring.md` | `voip_call_logs` / `ptt_call_logs` 표기 잔존 | 파일 기반(call.json) SoT 로 갱신 |
 
 ## 6. 외부 이중화 DB 인계 체크리스트
 

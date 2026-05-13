@@ -345,51 +345,80 @@ async def _messages_stats_v2(config, iface, date) -> HandlerResult:
     })
 
 
-async def _messages_stats(config, gran, from_dt, to_dt, proto, date) -> HandlerResult:
-    # 레거시: DB 기반 (하위 호환)
-    # 현재는 DB call_logs 기반 간이 구현 (향후 jsonl 파싱 배치로 확장)
-    if not date:
-        date = datetime.now().strftime('%Y-%m-%d')
+# ──────────────────────────────────────────────────────────────
+#  Service stats (Part 3.2) — 파일 기반 (call.json / call.jsonl 스캔)
+#
+#  v3 (2026-04-22) 이후 call_logs DB 테이블 DROP. service_log/{volte|ptt}/
+#  YYYY/MM/DD/HH/.../*.d/call.json 이 SoT. 옛 _messages_stats / DB 기반
+#  _calc_*_stats 는 모두 제거됨 (msg_log JSONL 기반 _messages_stats_v2 가
+#  /api/v1/stats/messages 를 처리).
+# ──────────────────────────────────────────────────────────────
 
+def _iter_call_jsons(config: dict, call_type: str, from_dt: str, to_dt: str):
+    """[from_dt, to_dt] 범위 내 .d/call.json (volte) 또는 .d/call.jsonl (ptt) 파싱 결과 yield.
+
+    날짜 단위로만 디렉토리 스캔 → from/to 의 분/초는 결과 객체 ts 비교로 필터.
+    """
+    base = _service_log_dir(config)
+    if not base:
+        return
     try:
-        with _get_db(config) as conn:
-            with conn.cursor() as cur:
-                # SIP 메시지 통계 간이 구현: INVITE 수를 시간대별 집계
-                cur.execute(
-                    "SELECT HOUR(invite_time) AS h, COUNT(*) AS cnt "
-                    "FROM volte_call_logs WHERE DATE(invite_time) = %s "
-                    "GROUP BY HOUR(invite_time) ORDER BY h",
-                    (date,)
-                )
-                voip_hourly = {int(r['h']): int(r['cnt']) for r in cur.fetchall()}
+        f_day = datetime.strptime(from_dt[:10], '%Y-%m-%d').date()
+        t_day = datetime.strptime(to_dt[:10], '%Y-%m-%d').date()
+    except Exception:
+        return
+    day = f_day
+    while day <= t_day:
+        yyyy = f"{day.year:04d}"
+        mm = f"{day.month:02d}"
+        dd = f"{day.day:02d}"
+        date_base = os.path.join(base, call_type, yyyy, mm, dd)
+        if os.path.isdir(date_base):
+            for cj_path in glob.glob(os.path.join(date_base, '**', '*.d', 'call.json'), recursive=True):
+                try:
+                    with open(cj_path, 'r', encoding='utf-8') as f:
+                        yield json.load(f)
+                except Exception:
+                    continue
+            # PTT 는 call.jsonl (세션별 누적) — 마지막 세션만 사용
+            for cjl_path in glob.glob(os.path.join(date_base, '**', '*.d', 'call.jsonl'), recursive=True):
+                try:
+                    last = None
+                    with open(cjl_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                last = json.loads(line)
+                            except Exception:
+                                continue
+                    if last:
+                        yield last
+                except Exception:
+                    continue
+        day += timedelta(days=1)
 
-                cur.execute(
-                    "SELECT HOUR(invite_time) AS h, COUNT(*) AS cnt "
-                    "FROM ptt_call_logs WHERE DATE(invite_time) = %s "
-                    "GROUP BY HOUR(invite_time) ORDER BY h",
-                    (date,)
-                )
-                ptt_hourly = {int(r['h']): int(r['cnt']) for r in cur.fetchall()}
 
-        buckets = []
-        for h in range(24):
-            buckets.append({
-                'hour': h,
-                'voip_invite': voip_hourly.get(h, 0),
-                'ptt_invite': ptt_hourly.get(h, 0),
-                'total': voip_hourly.get(h, 0) + ptt_hourly.get(h, 0),
-            })
-
-        return HandlerResult(status=200, body={
-            'date': date, 'granularity': gran, 'buckets': buckets
-        })
-    except Exception as e:
-        return HandlerResult(status=500, body={'error': str(e)})
+def _ts_of(record: dict, call_type: str) -> str:
+    """call_type 별 시작 시각 필드 추출 (volte=invite_time, ptt=start_time)."""
+    if call_type == 'ptt':
+        return record.get('start_time', '') or record.get('invite_time', '')
+    return record.get('invite_time', '')
 
 
-# ──────────────────────────────────────────────────────────────
-#  Service stats (Part 3.2)
-# ──────────────────────────────────────────────────────────────
+def _bucket_key(ts: str, gran: str) -> str:
+    """gran 별 버킷 키 — '시간(0-23)' 또는 'YYYY-MM-DD'."""
+    if not ts:
+        return ''
+    if gran in ('5m', '10m', '1h'):
+        # HH 추출 (ISO ts 의 11..13 또는 'T' 다음 두 자리)
+        try:
+            return str(int(ts[11:13]))
+        except Exception:
+            return ''
+    return ts[:10]
+
 
 async def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResult:
     if not from_dt:
@@ -404,17 +433,8 @@ async def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResu
         to_dt = from_dt
 
     try:
-        with _get_db(config) as conn:
-            with conn.cursor() as cur:
-                if svc in ('volte', 'summary'):
-                    voip = _calc_voip_stats(cur, from_dt, to_dt, gran)
-                else:
-                    voip = None
-
-                if svc in ('ptt', 'summary'):
-                    ptt = _calc_ptt_stats(cur, from_dt, to_dt, gran)
-                else:
-                    ptt = None
+        voip = _calc_voip_stats(config, from_dt, to_dt, gran) if svc in ('volte', 'voip', 'summary') else None
+        ptt = _calc_ptt_stats(config, from_dt, to_dt, gran) if svc in ('ptt', 'summary') else None
 
         result = {'granularity': gran, 'from': from_dt, 'to': to_dt}
         if voip:
@@ -427,60 +447,53 @@ async def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResu
         return HandlerResult(status=500, body={'error': str(e)})
 
 
-def _calc_voip_stats(cur, from_dt, to_dt, gran):
-    # 총 호 시도
-    cur.execute(
-        "SELECT COUNT(*) AS total, "
-        "SUM(CASE WHEN state='ended' AND sip_status=200 THEN 1 ELSE 0 END) AS success, "
-        "AVG(CASE WHEN duration > 0 THEN duration ELSE NULL END) AS avg_duration, "
-        "MAX(duration) AS max_duration "
-        "FROM volte_call_logs WHERE invite_time BETWEEN %s AND %s",
-        (from_dt, to_dt)
-    )
-    row = cur.fetchone()
-    total = int(row['total'] or 0)
-    success = int(row['success'] or 0)
-    avg_dur = round(float(row['avg_duration'] or 0), 1)
+def _calc_voip_stats(config, from_dt, to_dt, gran):
+    total = 0
+    success = 0
+    durations = []
+    end_reasons: dict = {}
+    by_bucket_total: dict = {}  # bucket_key -> count
+    by_bucket_ok: dict = {}     # bucket_key -> count
 
-    # 실패 사유 분포
-    cur.execute(
-        "SELECT end_reason, COUNT(*) AS cnt FROM volte_call_logs "
-        "WHERE invite_time BETWEEN %s AND %s AND state='ended' "
-        "GROUP BY end_reason",
-        (from_dt, to_dt)
-    )
-    end_reasons = {r['end_reason'] or 'unknown': int(r['cnt']) for r in cur.fetchall()}
+    for rec in _iter_call_jsons(config, 'volte', from_dt, to_dt):
+        ts = _ts_of(rec, 'volte')
+        if not ts or ts < from_dt or ts > to_dt:
+            continue
+        total += 1
+        state = rec.get('state', '')
+        reason = rec.get('end_reason') or 'unknown'
+        dur = int(rec.get('duration', 0) or 0)
+        is_success = (state == 'ended' and reason == 'normal')
+        if is_success:
+            success += 1
+        if dur > 0:
+            durations.append(dur)
+        if state == 'ended':
+            end_reasons[reason] = end_reasons.get(reason, 0) + 1
+        bk = _bucket_key(ts, gran)
+        if bk:
+            by_bucket_total[bk] = by_bucket_total.get(bk, 0) + 1
+            if is_success:
+                by_bucket_ok[bk] = by_bucket_ok.get(bk, 0) + 1
 
-    # 시간대별 (gran에 따라)
     if gran in ('5m', '10m', '1h'):
-        cur.execute(
-            "SELECT HOUR(invite_time) AS h, COUNT(*) AS cnt, "
-            "SUM(CASE WHEN sip_status=200 THEN 1 ELSE 0 END) AS ok "
-            "FROM volte_call_logs WHERE invite_time BETWEEN %s AND %s "
-            "GROUP BY HOUR(invite_time) ORDER BY h",
-            (from_dt, to_dt)
-        )
+        keys = sorted(by_bucket_total.keys(), key=lambda k: int(k))
         buckets = []
-        for r in cur.fetchall():
-            cnt = int(r['cnt'] or 0)
-            ok = int(r['ok'] or 0)
-            rate = round(ok / cnt * 100, 1) if cnt > 0 else 0
-            buckets.append({'hour': int(r['h']), 'attempts': cnt, 'success': ok, 'success_rate': rate})
+        for k in keys:
+            cnt = by_bucket_total[k]
+            ok = by_bucket_ok.get(k, 0)
+            buckets.append({'hour': int(k), 'attempts': cnt, 'success': ok,
+                            'success_rate': round(ok / cnt * 100, 1) if cnt > 0 else 0})
     else:
-        cur.execute(
-            "SELECT DATE(invite_time) AS d, COUNT(*) AS cnt, "
-            "SUM(CASE WHEN sip_status=200 THEN 1 ELSE 0 END) AS ok "
-            "FROM volte_call_logs WHERE invite_time BETWEEN %s AND %s "
-            "GROUP BY DATE(invite_time) ORDER BY d",
-            (from_dt, to_dt)
-        )
+        keys = sorted(by_bucket_total.keys())
         buckets = []
-        for r in cur.fetchall():
-            cnt = int(r['cnt'] or 0)
-            ok = int(r['ok'] or 0)
-            rate = round(ok / cnt * 100, 1) if cnt > 0 else 0
-            buckets.append({'date': str(r['d']), 'attempts': cnt, 'success': ok, 'success_rate': rate})
+        for k in keys:
+            cnt = by_bucket_total[k]
+            ok = by_bucket_ok.get(k, 0)
+            buckets.append({'date': k, 'attempts': cnt, 'success': ok,
+                            'success_rate': round(ok / cnt * 100, 1) if cnt > 0 else 0})
 
+    avg_dur = round(sum(durations) / len(durations), 1) if durations else 0
     return {
         'total_attempts': total,
         'total_success': success,
@@ -491,47 +504,38 @@ def _calc_voip_stats(cur, from_dt, to_dt, gran):
     }
 
 
-def _calc_ptt_stats(cur, from_dt, to_dt, gran):
-    cur.execute(
-        "SELECT COUNT(*) AS total, "
-        "AVG(CASE WHEN duration > 0 THEN duration ELSE NULL END) AS avg_duration "
-        "FROM ptt_call_logs WHERE invite_time BETWEEN %s AND %s",
-        (from_dt, to_dt)
-    )
-    row = cur.fetchone()
-    total = int(row['total'] or 0)
-    avg_dur = round(float(row['avg_duration'] or 0), 1)
+def _calc_ptt_stats(config, from_dt, to_dt, gran):
+    total = 0
+    durations = []
+    by_group: dict = {}
+    by_bucket: dict = {}
 
-    # 그룹별
-    cur.execute(
-        "SELECT group_id, COUNT(*) AS cnt FROM ptt_call_logs "
-        "WHERE invite_time BETWEEN %s AND %s GROUP BY group_id ORDER BY cnt DESC",
-        (from_dt, to_dt)
-    )
-    by_group = {r['group_id']: int(r['cnt']) for r in cur.fetchall()}
+    for rec in _iter_call_jsons(config, 'ptt', from_dt, to_dt):
+        ts = _ts_of(rec, 'ptt')
+        if not ts or ts < from_dt or ts > to_dt:
+            continue
+        total += 1
+        gid = rec.get('group_id', '') or 'unknown'
+        by_group[gid] = by_group.get(gid, 0) + 1
+        dur = int(rec.get('duration', 0) or 0)
+        if dur > 0:
+            durations.append(dur)
+        bk = _bucket_key(ts, gran)
+        if bk:
+            by_bucket[bk] = by_bucket.get(bk, 0) + 1
 
-    # 시간대별
     if gran in ('5m', '10m', '1h'):
-        cur.execute(
-            "SELECT HOUR(invite_time) AS h, COUNT(*) AS cnt "
-            "FROM ptt_call_logs WHERE invite_time BETWEEN %s AND %s "
-            "GROUP BY HOUR(invite_time) ORDER BY h",
-            (from_dt, to_dt)
-        )
-        buckets = [{'hour': int(r['h']), 'calls': int(r['cnt'])} for r in cur.fetchall()]
+        buckets = [{'hour': int(k), 'calls': by_bucket[k]}
+                   for k in sorted(by_bucket.keys(), key=lambda k: int(k))]
     else:
-        cur.execute(
-            "SELECT DATE(invite_time) AS d, COUNT(*) AS cnt "
-            "FROM ptt_call_logs WHERE invite_time BETWEEN %s AND %s "
-            "GROUP BY DATE(invite_time) ORDER BY d",
-            (from_dt, to_dt)
-        )
-        buckets = [{'date': str(r['d']), 'calls': int(r['cnt'])} for r in cur.fetchall()]
+        buckets = [{'date': k, 'calls': by_bucket[k]} for k in sorted(by_bucket.keys())]
 
+    by_group_sorted = dict(sorted(by_group.items(), key=lambda x: -x[1]))
+    avg_dur = round(sum(durations) / len(durations), 1) if durations else 0
     return {
         'total_calls': total,
         'avg_duration_sec': avg_dur,
-        'by_group': by_group,
+        'by_group': by_group_sorted,
         'buckets': buckets,
     }
 
