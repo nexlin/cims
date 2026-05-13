@@ -269,7 +269,7 @@ export default function HaServicesPage() {
         name: g.name,
         mode: g.mode,
         vrid: g.vrid,
-        vip: g.vip,
+        vip: g.vip ?? '',
         vipMask: g.vip_mask,
         authPass: g.auth_pass,
         servers,

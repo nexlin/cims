@@ -1249,6 +1249,7 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | POST | `/agents/{id}/approve` | pending → approved |
 | POST | `/agents/{id}/revoke` | 세션 폐기 |
 | POST | `/agents/{id}/upgrade` | agent 바이너리 업그레이드 job 큐잉 |
+| POST | `/agents/{id}/apply-ip-config` | service_ip_rows[] 을 `apply_ip_config` job 으로 큐잉 (ServiceIpPanel [적용]) |
 | GET | `/agents/{id}/metrics` | 최근 리소스 메트릭 |
 
 응답 필드 (HaServicesPage 용):
@@ -1278,17 +1279,21 @@ Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/age
 | Method | Path | 용도 |
 |---|---|---|
 | GET | `/ha-groups` | HA 그룹 목록 (멤버 포함) |
-| POST | `/ha-groups` | 생성 (body `{name, mode, vip, vip_mask?, auth_pass, members?[], vip_bindings?[]}`) |
+| POST | `/ha-groups` | 생성 (body `{name, mode, vip?, vip_mask?, auth_pass, members?[], vip_bindings?[]}`) |
 | GET | `/ha-groups/{id}` | 단일 조회 |
 | PUT | `/ha-groups/{id}` | `{name, vip, vip_mask, auth_pass, vip_bindings, members?}` 업데이트 (mode 변경 불가) |
 | DELETE | `/ha-groups/{id}` | 삭제 (멤버 cascade) |
 | GET | `/ha-groups/{id}/members` | 멤버 목록 |
 | POST | `/ha-groups/{id}/members` | 멤버 추가 `{agent_id, role?, priority?}` (1 agent = 1 group UNIQUE) |
 | DELETE | `/ha-groups/{id}/members/{agent_id}` | 멤버 제거 |
+| POST | `/ha-groups/{id}/apply` | 데이터 변경 없이 멤버에 `update_ha` job 강제 큐잉 (VipPanel [적용]) |
 
 응답 필드:
 - `mode` — `active_standby` | `all_active` (standalone 은 ha_groups 미배정 agent 로 표현)
+- `vip` — legacy 단일 VIP (Phase 2 부터 nullable, `vip_bindings` 가 권장)
 - `vip_bindings` — VIP slot 별 binding `[{bid, slot, ip, mask?, status?, memberIfaces?}]`
   (`memberIfaces` 는 `{agent_id: iface_name}` 매핑)
 
-그룹/멤버 변경 시 `update_ha` job 자동 큐잉 (각 멤버에 ha.json 분배 — keepalived 재기동).
+그룹/멤버/`vip_bindings` 변경 시 `update_ha` job 자동 큐잉 (각 멤버에 ha.json 분배 — keepalived 재기동).
+각 group 은 한 vrrp_instance, `vip_bindings` 의 IP 들은 `virtual_ipaddress` block 의
+복수 entry 로 렌더 (모두 같은 VRID 공유, member 별 interface override 가능).

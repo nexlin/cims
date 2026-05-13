@@ -411,15 +411,39 @@ cims.sh 는 **개발 단계 도구**:
 운영자는 `/deploy/services` (Console "서버 + HA") 에서 서비스(=HA 그룹/standalone)
 단위로 inline 편집 — 각 노드의 ha.json 은 CSC + cims_agent 가 자동 생성/분배.
 
-데이터 모델 (sql/migrate_ha_groups.sql + sql/migrate_ha_services_wiring.sql):
-- `ha_groups`: id / name / mode(active_standby|all_active) / vip / vrid(자동) /
-  vip_mask / auth_pass / note / **vip_bindings_json** (slot 별 VIP + 멤버 iface 매핑)
+데이터 모델 (sql/migrate_ha_groups.sql + sql/migrate_ha_services_wiring.sql +
+sql/migrate_ha_groups_vip_nullable.sql):
+- `ha_groups`: id / name / mode(active_standby|all_active) / **vip (nullable, legacy)** /
+  vrid(자동) / vip_mask / auth_pass / note / **vip_bindings_json** (slot 별 VIP + 멤버 iface 매핑)
 - `ha_group_members`: group_id + agent_id (`uk_agent` UNIQUE — 1 agent = 1
   group) + priority + role(master|backup)
 - `cims_agent`: + **interfaces_json** (heartbeat 보고) + **service_ip_rows_json**
   (운영자 iface→slot 매핑)
 
 > standalone 서비스 = ha_group 미배정 agent (음수 id `-agent.id` 로 frontend 매핑)
+
+### 11.7 Phase 2 적용 흐름 — Apply API + multi-VIP rendering
+
+운영자가 VipPanel / ServiceIpPanel 의 `[적용]` 클릭 시:
+
+| 패널 | 진입점 | 결과 |
+|---|---|---|
+| VipPanel | `POST /api/v1/ha-groups/{id}/apply` | 멤버 전원에 `update_ha` job 큐잉 — 각 agent 가 ha.json 갱신 + `cims-ha config && apply` (keepalived reload) |
+| ServiceIpPanel | `POST /api/v1/agents/{id}/apply-ip-config` | 단일 agent 에 `apply_ip_config` job — `ip addr add <ip>/<mask> dev <iface>` per row (secondary IP, idempotent) |
+
+**multi-VIP rendering** (한 vrrp_instance 에 N VIP):
+- `vip_bindings_json` 의 각 binding 이 `services.<group_name>.vips[]` 한 entry
+- 동일 VRID 공유, 같은 vrrp_instance 의 `virtual_ipaddress` block 에 N 줄
+- agent 별 iface 는 `binding.memberIfaces[agent_id]` 또는 service 의 `interface` field
+- 한 group 내 모든 binding 은 같은 iface 사용 (제약 — 다중 iface 필요 시 그룹 분할)
+
+**config_template ip 메타** (HaServicesPage Phase 2.3):
+패키지 `config_template.json` 의 field 에 다음 attribute 추가하면 SLOT_MAP hardcoded 대체:
+```json
+{ "key": "Setup.Sip.LocalIp", "type": "string",
+  "ip_scope": "service", "ip_slot": "SIP", "ip_port": 5060, "ip_proto": "udp" }
+```
+미설정 시 `cims-console SLOT_MAP` 의 hardcoded fallback 사용 (csp/cmp/psp 등).
 
 모듈 ha_capability (각 모듈 pkg.json):
 - `csp/psp/isp/csc` → `active_standby`
