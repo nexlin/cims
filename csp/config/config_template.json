@@ -465,5 +465,56 @@
       },
       "storage": { "kind": "jsonl", "file": "config/access_services.jsonl" }
     }
+  ],
+  "presets": [
+    {
+      "name": "dev-single-node",
+      "label": "개발 (단일 노드)",
+      "description": "PoC/통합 개발용 — 짧은 timeout, debug 로그, IBCF off, CMP 로컬",
+      "values": {
+        "Setup.Sip.UdpThreadCount": 2,
+        "Setup.Sip.MinRegisterTimeout": 60,
+        "Setup.Sip.UserTimeout": 3600,
+        "Setup.Sip.SendOptionsPeriod": 0,
+        "Setup.Sip.StaleCallTimeout": 300,
+        "Setup.Roles.CSCF": true,
+        "Setup.Roles.TAS": true,
+        "Setup.Roles.PTT_AS": true,
+        "Setup.Roles.IBCF": false,
+        "Setup.MediaServer.Enable": true,
+        "Setup.MediaServer.Host": "127.0.0.1",
+        "Setup.Log.Level.Debug": true,
+        "Setup.Log.Level.Info": true,
+        "Setup.Log.Level.Network": true,
+        "Setup.Log.Level.Sql": false
+      }
+    },
+    {
+      "name": "high-capacity",
+      "label": "고용량 운영",
+      "description": "운영 부하 대응 — 스레드 8, OPTIONS keepalive, debug off",
+      "values": {
+        "Setup.Sip.UdpThreadCount": 8,
+        "Setup.Sip.MinRegisterTimeout": 300,
+        "Setup.Sip.UserTimeout": 1800,
+        "Setup.Sip.SendOptionsPeriod": 120,
+        "Setup.Sip.StaleCallTimeout": 180,
+        "Setup.Log.Level.Debug": false,
+        "Setup.Log.Level.Info": true,
+        "Setup.Log.Level.Network": false,
+        "Setup.Log.Level.Sql": false
+      }
+    },
+    {
+      "name": "ibcf-peering",
+      "label": "IBCF 피어링 활성",
+      "description": "IMS 트렁크/피어링 사용 — IBCF role on (remote_nodes/routes 추가 별도 필요)",
+      "values": {
+        "Setup.Roles.CSCF": true,
+        "Setup.Roles.TAS": true,
+        "Setup.Roles.PTT_AS": false,
+        "Setup.Roles.IBCF": true
+      }
+    }
   ]
 }

@@ -4,6 +4,7 @@ import { useToast } from '../Toast'
 import {
   deploymentApi,
   type Deployment, type ConfigTemplate, type ConfigTemplateField,
+  type ConfigTemplatePreset,
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
 
@@ -155,6 +156,28 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
     return null
   }
 
+  // preset 적용 — 해당 키만 set, 나머지는 현재 값 유지. 사용자 검토 후 저장 버튼.
+  function applyPreset(preset: ConfigTemplatePreset) {
+    if (!template) return
+    // 템플릿 소유 키만 (오타 방지)
+    const ownedKeys = new Set<string>()
+    for (const s of template.sections) for (const f of s.fields) ownedKeys.add(f.key)
+    const next = { ...values }
+    let applied = 0
+    const skipped: string[] = []
+    for (const [k, v] of Object.entries(preset.values)) {
+      if (!ownedKeys.has(k)) { skipped.push(k); continue }
+      next[k] = v as FieldValue
+      applied++
+    }
+    setValues(next)
+    if (skipped.length > 0) {
+      show(`${preset.label}: ${applied}개 적용 / ${skipped.length}개 키 모름 (${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '...' : ''})`, 'err')
+    } else {
+      show(`${preset.label} preset 적용 (${applied}개 필드 — 검토 후 저장)`, 'ok')
+    }
+  }
+
   async function save(opts: { restartAfter?: boolean } = {}) {
     if (changed.size === 0) { show('변경된 항목 없음', 'err'); return }
     const err = validate()
@@ -217,6 +240,9 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
             <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
               {tab === 'scalar' ? (
                 <>
+                  {(template.presets || []).length > 0 && (
+                    <PresetBar presets={template.presets!} onApply={applyPreset} />
+                  )}
                   <div style={{ fontSize: 12, color: '#666', marginBottom: 12,
                                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span>🔁 재기동 필요 · ⚡ 즉시 적용</span>
@@ -284,6 +310,53 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
         </div>
       </div>
     </Modal>
+  )
+}
+
+function PresetBar({ presets, onApply }: {
+  presets: ConfigTemplatePreset[]
+  onApply: (preset: ConfigTemplatePreset) => void
+}) {
+  const [selected, setSelected] = useState<string>('')
+  const cur = presets.find(p => p.name === selected) || null
+
+  return (
+    <div style={{
+      marginBottom: 12, padding: '10px 12px',
+      background: '#f5f7fa', border: '1px solid #d0d7de', borderRadius: 6,
+      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+    }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#444' }}>📋 추천 설정</span>
+      <select
+        value={selected}
+        onChange={e => setSelected(e.target.value)}
+        style={{ fontSize: 12, padding: '4px 8px', minWidth: 200 }}
+      >
+        <option value="">— preset 선택 —</option>
+        {presets.map(p => (
+          <option key={p.name} value={p.name}>{p.label}</option>
+        ))}
+      </select>
+      {cur && (
+        <>
+          <span style={{ fontSize: 11, color: '#666', flex: 1 }}>
+            {cur.description ?? `${Object.keys(cur.values).length}개 필드 변경`}
+          </span>
+          <button
+            onClick={() => onApply(cur)}
+            className="btn btn--sm btn--outline"
+            style={{ fontSize: 12 }}
+            title="해당 키만 일괄 변경합니다. 검토 후 저장하세요.">
+            적용 (검토 후 저장)
+          </button>
+        </>
+      )}
+      {!cur && (
+        <span style={{ fontSize: 11, color: '#888', flex: 1 }}>
+          싱글노드/HA/대용량 등 시나리오별 권장값을 한 번에 채워 넣습니다.
+        </span>
+      )}
+    </div>
   )
 }
 

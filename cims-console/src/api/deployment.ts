@@ -221,10 +221,21 @@ export interface ConfigTemplateCollection {
   storage?: { kind: string; file?: string }
 }
 
+export interface ConfigTemplatePreset {
+  // 사용자에게 노출되는 키 (kebab-case 권장: "single-node", "ha-active-standby")
+  name: string
+  // UI 표시명 (한국어 가능)
+  label: string
+  description?: string
+  // 적용할 키→값 매핑. ConfigTemplateField.key 와 동일 형식.
+  values: Record<string, string | number | boolean | null>
+}
+
 export interface ConfigTemplate {
   version: number
   sections: ConfigTemplateSection[]
   collections?: ConfigTemplateCollection[]
+  presets?: ConfigTemplatePreset[]
 }
 
 export interface SipPackage {
