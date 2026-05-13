@@ -4,6 +4,27 @@ import { orgApi, type Organization } from '../api/organizations'
 import OrgTreePanel from '../components/OrgTreePanel'
 import { useToast } from '../components/Toast'
 
+/** CSV 셀 escape — 쉼표/줄바꿈/큰따옴표 포함 시 큰따옴표로 감싸고 내부 따옴표는 이중화. */
+function csvCell(v: string | number | null | undefined): string {
+  const s = v == null ? '' : String(v)
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
+  return s
+}
+
+function downloadCsv(filename: string, rows: string[][]): void {
+  const csv = rows.map(r => r.map(csvCell).join(',')).join('\r\n')
+  // UTF-8 BOM — Excel 한글 인코딩 자동 인식
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 export default function MembersPage() {
   const { show } = useToast()
   const [users, setUsers] = useState<UserSummary[]>([])
@@ -97,6 +118,22 @@ export default function MembersPage() {
           <span style={{ fontWeight: 600, fontSize: 14 }}>{orgName}</span>
           <input className="search-input" placeholder="이름/ID 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 180 }} />
+          <button className="btn btn--outline btn--sm" onClick={() => {
+            const rows: string[][] = [
+              ['이름', '로그인 ID', '조직 코드', '조직명', '상세', 'Call 번호', 'PTT 번호'],
+              ...filtered.map(u => [
+                u.name,
+                u.login_id || '',
+                u.org_id || '',
+                orgList.find(o => o.code === u.org_id)?.name || '',
+                u.details || '',
+                u.call_subscriptions.map(s => s.id).join('; '),
+                u.ptt_subscriptions.map(s => s.id).join('; '),
+              ]),
+            ]
+            const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '').slice(0, 13)
+            downloadCsv(`cims_members_${ts}.csv`, rows)
+          }}>CSV 내보내기 ({filtered.length})</button>
           {selected.size > 0 && (
             <button className="btn btn--danger btn--sm" onClick={handleBatchDelete}>선택 삭제 ({selected.size})</button>
           )}

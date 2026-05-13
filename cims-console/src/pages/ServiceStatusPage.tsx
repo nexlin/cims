@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { statsApi, type Subscriber } from '../api/stats'
 import { useToast } from '../components/Toast'
 
@@ -18,9 +19,10 @@ function fmtTime(iso: string | null): string {
 
 export default function ServiceStatusPage() {
   const { show } = useToast()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [subs, setSubs] = useState<Subscriber[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(searchParams.get('q') || '')
   const [filter, setFilter] = useState<'all' | 'online' | 'busy'>('all')
 
   const load = useCallback(async () => {
@@ -71,7 +73,14 @@ export default function ServiceStatusPage() {
         <button className={`btn btn--sm ${filter === 'busy' ? 'btn--primary' : 'btn--ghost'}`}
           onClick={() => setFilter('busy')}>통화 중 ({totalBusy})</button>
         <input className="search-input" placeholder="이름/번호 검색"
-          value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
+          value={search}
+          onChange={e => {
+            setSearch(e.target.value)
+            // URL ?q= 동기화 (Dashboard 등에서 deep-link 진입 시 검색어 보존)
+            if (e.target.value) setSearchParams({ q: e.target.value }, { replace: true })
+            else { searchParams.delete('q'); setSearchParams(searchParams, { replace: true }) }
+          }}
+          style={{ maxWidth: 200 }} />
         <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>5초 자동 갱신</span>
       </div>
 
