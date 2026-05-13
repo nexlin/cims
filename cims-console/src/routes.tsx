@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 
 import DashboardPage from './pages/DashboardPage'
+import AlertsPage from './pages/AlertsPage'
 import OrganizationsPage from './pages/OrganizationsPage'
 import MembersPage from './pages/MembersPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
@@ -66,7 +67,8 @@ export const SECTIONS: RouteSection[] = [
     basePath: '/dashboard',
     defaultPath: '/dashboard',
     routes: [
-      { path: '/dashboard', title: '대시보드', component: DashboardPage },
+      { path: '/dashboard',        title: '실시간',     component: DashboardPage },
+      { path: '/dashboard/alerts', title: '알람 이력', component: AlertsPage },
     ],
   },
   {

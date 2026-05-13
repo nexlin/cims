@@ -93,7 +93,9 @@ if __name__ == '__main__':
     from handlers.agent_api      import CIMS_AGENT_API_HANDLER_LIST
     from handlers.modules        import CIMS_MODULES_HANDLER_LIST
     from handlers.ha_groups      import CIMS_HA_GROUPS_HANDLER_LIST
+    from handlers.alerts         import CIMS_ALERTS_HANDLER_LIST
     from services.flow_logger    import FLOW_HANDLER_LIST
+    from services                import alert_log
 
     admin_server = None
     mcptt_server = None
@@ -293,6 +295,11 @@ if __name__ == '__main__':
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_HA_GROUPS_HANDLER_LIST
         ])
+        # Alert 이력 (CSP/CMP/DB down, RTP 사용률 임계값 초과)
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_ALERTS_HANDLER_LIST
+        ])
         # P10: Agent 전용 API (agent token 인증, JWT 우회)
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
@@ -379,11 +386,78 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[cert-sweep] error: {e}")
 
+        # ── Alert sweeper ───────────────────────────────────────────────
+        # CSP/CMP/DB down 전이 + RTP 포트 사용률 임계값 (default 80%) 위반을 감시.
+        # 상태 전이마다 {ServiceLogDir}/alerts/YYYY/MM/DD.jsonl 에 event 1줄 기록.
+        from handlers.stats import _get_csp_stats, _get_cmp_stats, _get_db as _cims_db_conn
+        ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
+        ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
+        _service_log = config.get('ServiceLogging', {}).get('Dir') \
+            or config.get('ServiceLogDir', config.get('MsgLogDir', ''))
+        _alert_open: dict = {}  # type -> open_ts (ISO)
+
+        def _check_db():
+            try:
+                conn = _cims_db_conn(config)
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1")
+                    return True
+                finally:
+                    conn.close()
+            except Exception:
+                return False
+
+        def _emit(typ: str, severity: str, action: str, message: str):
+            from datetime import datetime as _dt
+            alert_log.record_event(_service_log, {
+                'ts': _dt.now().isoformat(timespec='seconds'),
+                'type': typ,
+                'severity': severity,
+                'action': action,
+                'message': message,
+            })
+
+        def _transition(typ: str, is_open: bool, severity: str, msg_open: str, msg_close: str):
+            was_open = typ in _alert_open
+            if is_open and not was_open:
+                _alert_open[typ] = True
+                _emit(typ, severity, 'open', msg_open)
+                logger.log_info(f"[alert] OPEN {typ} — {msg_open}")
+            elif not is_open and was_open:
+                _alert_open.pop(typ, None)
+                _emit(typ, severity, 'close', msg_close)
+                logger.log_info(f"[alert] CLOSE {typ}")
+
+        def _sweep_alerts():
+            try:
+                csp = _get_csp_stats(config)
+                cmp = _get_cmp_stats(config)
+                db_ok = _check_db()
+                _transition('csp_down', not bool(csp), 'critical',
+                            'CSP 프로세스 응답 없음', 'CSP 응답 정상화')
+                _transition('cmp_down', not bool(cmp), 'critical',
+                            'CMP 프로세스 응답 없음', 'CMP 응답 정상화')
+                _transition('db_down', not db_ok, 'critical',
+                            'DB 연결 끊김', 'DB 연결 복구')
+                total = cmp.get('rtp_ports_total', 0) or 0
+                used = cmp.get('rtp_ports_used', 0) or 0
+                pct = int(round(used / total * 100)) if total > 0 else 0
+                _transition('rtp_high', pct >= ALERT_RTP_THRESHOLD, 'warning',
+                            f'RTP 포트 사용률 {pct}% ({ALERT_RTP_THRESHOLD}% 초과)',
+                            f'RTP 포트 사용률 {pct}% (정상)')
+            except Exception as e:
+                logger.log_error(f"[alert-sweep] error: {e}")
+
         logger.log_info(f"[agent-sweep] stale threshold={STALE_SEC}s, interval={SWEEP_INTERVAL}s")
         logger.log_info(f"[cert-sweep] rotate threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d, "
                         f"interval={CERT_SWEEP_INTERVAL}s")
+        logger.log_info(f"[alert-sweep] interval={ALERT_SWEEP_INTERVAL}s, "
+                        f"rtp_threshold={ALERT_RTP_THRESHOLD}%, "
+                        f"dir={_service_log or '(disabled — no ServiceLogDir)'}")
         _last_sweep = 0
         _last_cert_sweep = 0
+        _last_alert_sweep = 0
         while True:
             time.sleep(1)
             _now = time.time()
@@ -393,6 +467,9 @@ if __name__ == '__main__':
             if _now - _last_cert_sweep >= CERT_SWEEP_INTERVAL:
                 _sweep_cert_rotate()
                 _last_cert_sweep = _now
+            if _now - _last_alert_sweep >= ALERT_SWEEP_INTERVAL:
+                _sweep_alerts()
+                _last_alert_sweep = _now
 
     except Exception as e:
         tb_str = traceback.format_exc()

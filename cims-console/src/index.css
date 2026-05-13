@@ -182,6 +182,7 @@ body { background: var(--bg); min-height: 100vh; }
 .badge--gray { background: #f3f4f6; color: #6b7280; }
 .badge--blue  { background: #dbeafe; color: #1d4ed8; }
 .badge--green { background: #dcfce7; color: #15803d; }
+.badge--yellow { background: #fef3c7; color: #b45309; }
 
 /* ── Detail tab bar ────────────────────────────────────────── */
 .tab-bar {
