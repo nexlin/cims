@@ -65,29 +65,74 @@ def _alloc_vrid(cur) -> int:
     raise RuntimeError(f"VRID pool exhausted ({_VRID_MIN}-{_VRID_MAX})")
 
 
+def _pick_default_iface(vip_bindings: list, agent_id: int) -> str:
+    """vip_bindings.memberIfaces 에서 이 agent 의 가장 흔한 iface 추출. 없으면 빈 문자열."""
+    for b in (vip_bindings or []):
+        iface = (b.get('memberIfaces') or {}).get(str(agent_id)) \
+                or (b.get('memberIfaces') or {}).get(agent_id)
+        if iface:
+            return iface
+    return ''
+
+
 def _render_ha_for_agent(group: dict, members: list, agent_id: int,
-                         agent_row: dict, peer_row: dict | None) -> dict:
-    """그룹 + 멤버 → 특정 agent 의 ha.json 내용. services.ha_render 의 단순화 인라인 버전."""
-    is_master_role = next((m['role'] for m in members if m['agent_id'] == agent_id), 'backup')
+                         agent_row: dict, peer_row: dict | None,
+                         vip_bindings: list | None = None) -> dict:
+    """그룹 + 멤버 → 특정 agent 의 ha.json 내용.
+
+    vip_bindings 가 있으면 multi-VIP 한 vrrp_instance (services.<group_name>.vips[]).
+    없으면 legacy 단일 vip path (group.vip).
+    """
+    is_master = next((m.get('role') == 'master' for m in members if m['agent_id'] == agent_id),
+                     False)
+    vip_bindings = vip_bindings or []
+    default_iface = _pick_default_iface(vip_bindings, agent_id) or "eth0"
+
+    services: dict = {}
+    if vip_bindings:
+        vips = []
+        svc_iface = default_iface
+        for b in vip_bindings:
+            slot = (b.get('slot') or '').strip()
+            ip   = (b.get('ip')   or '').strip()
+            if not slot or not ip:
+                continue
+            mask = int(b.get('mask') or group.get('vip_mask') or 24)
+            iface = (b.get('memberIfaces') or {}).get(str(agent_id)) \
+                    or (b.get('memberIfaces') or {}).get(agent_id)
+            if iface:
+                svc_iface = iface
+            vips.append({'slot': slot, 'ip': ip, 'mask': mask})
+        if vips:
+            services[group['name']] = {
+                'enabled':  True,
+                'vrid':     group['vrid'],
+                'interface': svc_iface,
+                'vips':     vips,
+                'priority': 100 if is_master else 90,
+            }
+    elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
+        # legacy 단일 vip
+        services[group['name']] = {
+            'enabled':  True,
+            'vrid':     group['vrid'],
+            'interface': default_iface,
+            'vip':      group['vip'],
+            'priority': 100 if is_master else 90,
+        }
+
     return {
-        "node_name": agent_row.get('name') or f"agent-{agent_id}",
-        "interface": agent_row.get('interface') or "ens160",
-        "local_ip": agent_row.get('host') or agent_row.get('public_ip') or "127.0.0.1",
-        "peer_ip": (peer_row.get('host') if peer_row else "") or "",
-        "initial_state": "MASTER" if is_master_role == 'master' else "BACKUP",
-        "vip_mask": group['vip_mask'],
-        "auth_pass": group['auth_pass'],
-        "ha_log_dir": "/var/log/cims-ha",
-        "cims_home": "/opt/cims",
-        "cims_user": "cims",
-        "services": {
-            # mode 별 동적 services — group 의 모드에 따라 활성 모듈
-            "_group_mode": group['mode'],
-            "_group_id": group['id'],
-            "_group_name": group['name'],
-            "vrid": group['vrid'],
-            "vip": group['vip'],
-        },
+        "node_name":     agent_row.get('name') or f"agent-{agent_id}",
+        "interface":     default_iface,
+        "local_ip":      agent_row.get('ip_address') or "127.0.0.1",
+        "peer_ip":       (peer_row.get('ip_address') if peer_row else "") or "",
+        "initial_state": "MASTER" if is_master else "BACKUP",
+        "vip_mask":      group['vip_mask'],
+        "auth_pass":     group['auth_pass'],
+        "ha_log_dir":    "/var/log/cims-ha",
+        "cims_home":     "/opt/cims",
+        "cims_user":     "cims",
+        "services":      services,
     }
 
 
@@ -101,6 +146,8 @@ def _enqueue_update_ha_for_members(cur, group_id: int) -> int:
     group = cur.fetchone()
     if not group or not group.get('member_ids'):
         return 0
+    vip_bindings = _decode_vip_bindings(group.pop('vip_bindings_json', None)) \
+                   if 'vip_bindings_json' in group else []
 
     cur.execute(
         "SELECT group_id, agent_id, priority, role FROM ha_group_members "
@@ -108,7 +155,7 @@ def _enqueue_update_ha_for_members(cur, group_id: int) -> int:
     )
     members = list(cur.fetchall())
 
-    cur.execute("SELECT id, name FROM cims_agent WHERE id IN ({})".format(
+    cur.execute("SELECT id, name, ip_address FROM cims_agent WHERE id IN ({})".format(
         ",".join(["%s"] * len(members))
     ), tuple(m['agent_id'] for m in members))
     agents = {r['id']: r for r in cur.fetchall()}
@@ -123,9 +170,9 @@ def _enqueue_update_ha_for_members(cur, group_id: int) -> int:
             if other['agent_id'] != m['agent_id']:
                 peer = agents.get(other['agent_id'])
                 break
-        ha_json = _render_ha_for_agent(group, members, m['agent_id'], agent, peer)
+        ha_json = _render_ha_for_agent(group, members, m['agent_id'], agent, peer, vip_bindings)
         params = {
-            "install_path": f"/opt/cims/{agent.get('name','agent')}",  # 운영자가 install 한 base
+            "install_path": f"/opt/cims/{agent.get('name','agent')}",
             "ha_json": ha_json,
         }
         cur.execute(
@@ -182,6 +229,9 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
             if method == 'DELETE':
                 return await _remove_member(gid, aid, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
+        if sub == 'apply' and method == 'POST':
+            return await _apply_group(gid, config)
 
         return HandlerResult(status=404, body={'error': 'Not Found'})
     except pymysql.IntegrityError as e:
@@ -370,6 +420,18 @@ async def _add_member(gid: int, body, config):
             )
             _enqueue_update_ha_for_members(cur, gid)
     return HandlerResult(status=201, body={'group_id': gid, 'agent_id': aid})
+
+
+async def _apply_group(gid: int, config):
+    """그룹의 모든 멤버에 update_ha job 큐잉 — VipPanel [적용] 진입점.
+    데이터 변경 없이 강제 재 render + keepalived reload."""
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM ha_groups WHERE id=%s", (gid,))
+            if not cur.fetchone():
+                return HandlerResult(status=404, body={'error': 'Group not found'})
+            count = _enqueue_update_ha_for_members(cur, gid)
+    return HandlerResult(status=202, body={'group_id': gid, 'jobs_queued': count})
 
 
 async def _remove_member(gid: int, aid: int, config):

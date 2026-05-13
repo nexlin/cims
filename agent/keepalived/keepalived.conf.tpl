@@ -38,7 +38,7 @@ vrrp_instance VI_${SVC_UPPER} {
         auth_pass ${AUTH_PASS}
     }
     virtual_ipaddress {
-        ${VIP}/${VIP_MASK} dev ${INTERFACE}
+${VIP_LIST}
     }
     track_script {
         check_${SVC}

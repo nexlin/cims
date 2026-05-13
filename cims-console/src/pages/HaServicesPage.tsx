@@ -464,6 +464,15 @@ export default function HaServicesPage() {
     } catch (e) { flash(`서버 업데이트 실패: ${(e as Error).message}`) }
   }
 
+  // ── VipPanel "[적용]" — update_ha job 강제 큐잉 (keepalived reload) ──
+  const applyVip = async (svc: ServiceRow) => {
+    if (svc.id <= 0) { flash('standalone 서비스는 VIP 없음'); return }
+    try {
+      const r = await haGroupsApi.apply(svc.id)
+      flash(`VIP 적용 — ${r.jobs_queued} 멤버에 update_ha 큐잉`)
+    } catch (e) { flash(`VIP 적용 실패: ${(e as Error).message}`) }
+  }
+
   // ── 패키지 추가/제거 → deployments insert/delete per member ──
   const updatePackageIds = async (svc: ServiceRow, ids: number[]) => {
     const current = new Set(svc.packageIds)
@@ -556,6 +565,7 @@ export default function HaServicesPage() {
               updateService={updateService}
               updateServer={updateServer}
               updatePackageIds={updatePackageIds}
+              applyVip={applyVip}
               addServer={() => addServer(svc)}
               regenerateToken={(srv) => regenerateToken(svc, srv)}
               copyCmd={(srv) => copyInstallCmd(srv)}
@@ -640,6 +650,7 @@ interface ServiceTreeProps {
   updateService: (sid: number, patch: Partial<ServiceRow>) => void
   updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
   updatePackageIds: (svc: ServiceRow, ids: number[]) => void
+  applyVip: (svc: ServiceRow) => void
   addServer: () => void
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
@@ -699,6 +710,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
               svc={svc}
               vrid={svc.vrid}
               onChange={(bindings) => p.updateService(svc.id, { vipBindings: bindings })}
+              onApply={() => p.applyVip(svc)}
             />
           </td>
         </tr>
@@ -979,11 +991,12 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange }: {
 //  VipPanel — VIP slot 단위 row
 // ──────────────────────────────────────────────────────────────
 
-function VipPanel({ title, svc, vrid, onChange }: {
+function VipPanel({ title, svc, vrid, onChange, onApply }: {
   title: string
   svc: ServiceRow
   vrid?: number | null
   onChange: (bindings: VipBinding[]) => void
+  onApply?: () => void
 }) {
   const bindings = svc.vipBindings
   const servers = svc.servers
@@ -1025,7 +1038,7 @@ function VipPanel({ title, svc, vrid, onChange }: {
 
   const applyRow = (bid: number) => {
     updateRow(bid, { status: 'unknown' })
-    // TODO: keepalived config render + reload API. 현재는 변경값 저장만.
+    onApply?.()    // ha-groups/{id}/apply 호출 → update_ha job 큐잉 → keepalived reload
   }
 
   return (

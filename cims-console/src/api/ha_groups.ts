@@ -60,4 +60,8 @@ export const haGroupsApi = {
     api.post<{ group_id: number; agent_id: number }>(`/ha-groups/${id}/members`, m),
   removeMember: (id: number, agentId: number) =>
     api.delete<{ group_id: number; agent_id: number }>(`/ha-groups/${id}/members/${agentId}`),
+
+  // VipPanel "[적용]" 진입점 — 데이터 변경 없이 멤버들에게 update_ha job 강제 큐잉
+  apply: (id: number) =>
+    api.post<{ group_id: number; jobs_queued: number }>(`/ha-groups/${id}/apply`, {}),
 }

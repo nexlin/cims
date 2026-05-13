@@ -77,16 +77,33 @@ common = {
     "CIMS_USER":     cfg.get("cims_user", "cims"),
 }
 
+def _build_vip_list(val, default_mask, default_iface):
+    """vips[] 배열 (Phase 2) 또는 단일 vip (legacy) → indented multi-line block."""
+    iface = val.get("interface") or default_iface
+    vips = val.get("vips")
+    if isinstance(vips, list) and vips:
+        return "\n".join(
+            f"        {v.get('ip','')}/{v.get('mask', default_mask)} dev {iface}"
+            for v in vips if v.get('ip')
+        )
+    ip = val.get("vip", "")
+    if not ip:
+        return ""
+    return f"        {ip}/{default_mask} dev {iface}"
+
 out = [render(header_part, common)]
 for svc, val in services.items():
     if not val.get("enabled"):
         continue
+    svc_iface = val.get("interface") or common["INTERFACE"]
     svc_map = dict(common)
     svc_map.update({
         "SVC":         svc,
         "SVC_UPPER":   svc.upper(),
         "VRID":        str(val.get("vrid", 0)),
         "VIP":         val.get("vip", ""),
+        "VIP_LIST":    _build_vip_list(val, common["VIP_MASK"], svc_iface),
+        "INTERFACE":   svc_iface,
         "PRIORITY":    str(val.get("priority", 100)),
         "PORT":        str(val.get("port", 0)),
         "PROTO":       val.get("proto", "udp"),
