@@ -34,8 +34,47 @@ import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
+from services import file_store
 
 logger = Logger()
+
+# ──────────────────────────────────────────────────────────────
+#  cims_package — 파일 기반 (file_store), 도메인 'packages'
+#  파일 키 = "<name>__<version>"  (자연키), 'id' 필드도 같이 보관.
+# ──────────────────────────────────────────────────────────────
+
+_PKG_DOMAIN = 'packages'
+
+
+def _pkg_dir(config):
+    return file_store.domain_dir(config, _PKG_DOMAIN)
+
+
+def _pkg_key(name: str, version: str) -> str:
+    return f"{name}__{version}"
+
+
+def _pkg_load(config, pid: int = None, name: str = None, version: str = None):
+    """id 또는 (name, version) 으로 1건 조회."""
+    d = _pkg_dir(config)
+    if name and version:
+        return file_store.load(d, _pkg_key(name, version))
+    if pid is not None:
+        return file_store.by_id(d, pid)
+    return None
+
+
+def _pkg_load_all(config) -> list:
+    return file_store.load_all(_pkg_dir(config))
+
+
+def _pkg_load_latest_by_name(config, name: str):
+    """name 이 같은 모든 버전 중 id 최대 (= 마지막 업로드) 1건."""
+    rows = [p for p in _pkg_load_all(config) if p.get('name') == name]
+    if not rows:
+        return None
+    rows.sort(key=lambda x: x.get('id', 0))
+    return rows[-1]
 
 _AGENT_BASE       = "/api/v1/agents"
 _PACKAGE_BASE     = "/api/v1/packages"
@@ -437,26 +476,33 @@ async def _agent_metrics(aid: int, config):
 # ════════════════════════════════════════════════════════════
 
 def _package_to_json(r: dict, include_full: bool = True) -> dict:
-    """Package row → JSON.
+    """Package row(file_store dict 또는 legacy DB row) → JSON.
 
-    include_full=True (default): meta_json / config_template_json 파싱하여 함께 반환.
+    include_full=True (default): meta / config_template 도 함께 반환.
       - 리스트 조회도 추가 모달에서 바로 써야 하므로 기본 포함.
       - 필요 시 include_full=False 로 최소 필드만 반환.
     """
+    ua = r.get("uploaded_at")
+    if hasattr(ua, "isoformat"):
+        ua = ua.isoformat()
     out = {
-        "id": r["id"],
-        "name": r["name"],
-        "version": r["version"],
-        "file_path": r["file_path"],
-        "file_size": r["file_size"],
-        "sha256": r["sha256"],
-        "description": r["description"],
-        "uploaded_by": r["uploaded_by"],
-        "uploaded_at": _dt(r["uploaded_at"]),
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "version": r.get("version"),
+        "file_path": r.get("file_path"),
+        "file_size": r.get("file_size"),
+        "sha256": r.get("sha256"),
+        "description": r.get("description"),
+        "uploaded_by": r.get("uploaded_by"),
+        "uploaded_at": ua,
     }
     if include_full:
-        out["meta"]            = _safe_json(r.get("meta_json"))
-        out["config_template"] = _safe_json(r.get("config_template_json"))
+        # file_store: 'meta'/'config_template' 가 이미 dict.
+        # legacy DB: 'meta_json'/'config_template_json' 이 JSON 문자열 — _safe_json 으로 정상화.
+        out["meta"] = r.get("meta") if isinstance(r.get("meta"), (dict, list)) \
+                      else _safe_json(r.get("meta_json"))
+        out["config_template"] = r.get("config_template") if isinstance(r.get("config_template"), (dict, list)) \
+                                 else _safe_json(r.get("config_template_json"))
     return out
 
 
@@ -554,25 +600,13 @@ def _scan_dist_virtual_packages() -> list:
 
 
 async def _list_packages(config):
-    """cims_package (DB, tarball 업로드 분) + build/dist 디렉토리 스캔 결과를 합쳐 반환.
-       동일 name 이 dist + DB 에 모두 있으면 둘 다 돌려준다 (frontend 에서 source 로 구분).
+    """file_store (tarball 업로드 분) + build/dist 디렉토리 스캔 결과 합쳐 반환.
+       동일 name 이 dist + 업로드 양쪽에 있으면 둘 다 반환 (frontend 에서 source 로 구분).
     """
-    def _q():
-        conn = _get_db(config)
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM cims_package ORDER BY name, id DESC")
-                return cur.fetchall()
-        finally:
-            conn.close()
-    try:
-        rows = await asyncio.to_thread(_q)
-    except Exception as e:
-        logger.log_error(f"list_packages db fallback failed: {e}")
-        rows = []
+    rows = await asyncio.to_thread(_pkg_load_all, config)
     db_items = [dict(_package_to_json(r), source="db") for r in rows]
+    db_items.sort(key=lambda x: (x.get("name", ""), -int(x.get("id", 0) or 0)))
     dist_items = await asyncio.to_thread(_scan_dist_virtual_packages)
-    # dist 먼저 (같은 name 이면 DB 최신 버전이 그 아래 정렬되어 비교 가능)
     items = dist_items + db_items
     items.sort(key=lambda x: (x.get("name", ""), 0 if x.get("source") == "dist" else 1))
     return HandlerResult(status=200, body={"items": items}, media_type="application/json")
@@ -586,13 +620,7 @@ async def _get_package(pid: int, config):
             if it.get("id") == pid:
                 return HandlerResult(status=200, body=it, media_type="application/json")
         return HandlerResult(status=404, body={"error": "dist_not_found"}, media_type="application/json")
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM cims_package WHERE id=%s", (pid,))
-            r = cur.fetchone()
-    finally:
-        conn.close()
+    r = await asyncio.to_thread(_pkg_load, config, pid)
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
     return HandlerResult(status=200, body=_package_to_json(r), media_type="application/json")
@@ -648,38 +676,33 @@ def _write_and_hash(fpath: str, raw: bytes) -> tuple:
 
 
 def _pkg_existing(config, name: str, version: str):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, sha256, uploaded_at, uploaded_by FROM cims_package "
-                        "WHERE name=%s AND version=%s", (name, version))
-            return cur.fetchone()
-    finally:
-        conn.close()
+    return _pkg_load(config, name=name, version=version)
 
 
 def _pkg_upsert(config, name: str, version: str, fpath: str, fsize: int,
                 fsha: str, full_desc: str, actor: str,
-                meta_json: str | None, template_json: str | None):
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO cims_package (name, version, file_path, file_size, sha256, "
-                "                          description, uploaded_by, "
-                "                          meta_json, config_template_json) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-                "ON DUPLICATE KEY UPDATE file_path=VALUES(file_path), file_size=VALUES(file_size), "
-                "  sha256=VALUES(sha256), description=VALUES(description), "
-                "  uploaded_by=VALUES(uploaded_by), uploaded_at=NOW(), "
-                "  meta_json=VALUES(meta_json), config_template_json=VALUES(config_template_json)",
-                (name, version, fpath, fsize, fsha, full_desc, actor,
-                 meta_json, template_json)
-            )
-            cur.execute("SELECT * FROM cims_package WHERE name=%s AND version=%s", (name, version))
-            return cur.fetchone()
-    finally:
-        conn.close()
+                meta: dict | None, template: dict | None):
+    """파일 기반 upsert. 같은 (name, version) 이 있으면 id 보존, 없으면 next_id 할당."""
+    from datetime import datetime
+    d = _pkg_dir(config)
+    existing = _pkg_load(config, name=name, version=version)
+    pid = existing.get('id') if existing else file_store.next_id(d)
+    now = datetime.now().isoformat(timespec='seconds')
+    row = {
+        'id': pid,
+        'name': name,
+        'version': version,
+        'file_path': fpath,
+        'file_size': fsize,
+        'sha256': fsha,
+        'description': full_desc,
+        'uploaded_by': actor,
+        'uploaded_at': now,
+        'meta': meta,
+        'config_template': template,
+    }
+    file_store.save(d, _pkg_key(name, version), row)
+    return row
 
 
 async def _create_package(handler_args: HandlerArgs, config):
@@ -781,12 +804,10 @@ async def _create_package(handler_args: HandlerArgs, config):
     if changelog:   desc_lines.append(f"changelog: {changelog}")
     full_desc = " | ".join(desc_lines)[:255]
 
-    # 6) DB insert/update (blocking → thread)
-    meta_str     = json.dumps(meta, ensure_ascii=False) if meta else None
-    template_str = json.dumps(template, ensure_ascii=False) if template else None
+    # 6) file_store upsert (blocking → thread)
     row = await asyncio.to_thread(
         _pkg_upsert, config, name, version, fpath, fsize, fsha, full_desc, actor,
-        meta_str, template_str,
+        meta or None, template or None,
     )
 
     result = _package_to_json(row)
@@ -835,43 +856,33 @@ async def _update_package(handler_args: HandlerArgs, pid: int, config):
     except Exception as e:
         return HandlerResult(status=400, body={"error": f"invalid_body: {e}"}, media_type="application/json")
 
-    updates = []
-    params: list = []
+    patches: dict = {}
     if "description" in body:
-        d = body.get("description")
-        if d is not None and not isinstance(d, str):
+        desc = body.get("description")
+        if desc is not None and not isinstance(desc, str):
             return HandlerResult(status=400, body={"error": "description_must_be_string"}, media_type="application/json")
-        updates.append("description=%s")
-        params.append(d)
+        patches['description'] = desc
     if "config_template" in body:
         tmpl = body.get("config_template")
-        if tmpl is None:
-            updates.append("config_template_json=NULL")
-        else:
-            if not isinstance(tmpl, dict):
-                return HandlerResult(status=400, body={"error": "config_template_must_be_object"}, media_type="application/json")
-            updates.append("config_template_json=%s")
-            params.append(json.dumps(tmpl, ensure_ascii=False))
+        if tmpl is not None and not isinstance(tmpl, dict):
+            return HandlerResult(status=400, body={"error": "config_template_must_be_object"}, media_type="application/json")
+        patches['config_template'] = tmpl
 
-    if not updates:
+    if not patches:
         return HandlerResult(status=400, body={"error": "nothing_to_update"}, media_type="application/json")
 
-    params.append(pid)
-    sql = f"UPDATE cims_package SET {', '.join(updates)} WHERE id=%s"
-
     def _run_update():
-        conn = _get_db(config)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(sql, params)
-                affected = cur.rowcount
-            conn.commit()
-            return affected
-        finally:
-            conn.close()
+        existing = _pkg_load(config, pid=pid)
+        if not existing:
+            return False
+        existing.update(patches)
+        file_store.save(_pkg_dir(config),
+                        _pkg_key(existing['name'], existing['version']),
+                        existing)
+        return True
 
-    affected = await asyncio.to_thread(_run_update)
-    if affected == 0:
+    ok = await asyncio.to_thread(_run_update)
+    if not ok:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
     return await _get_package(pid, config)
 
@@ -900,18 +911,12 @@ async def _delete_package(pid: int, config):
 
 
 def _pkg_delete_row(config, pid: int):
-    """DB 에서 패키지 행 조회 + 삭제. 삭제된 row dict 반환 (없으면 None)."""
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM cims_package WHERE id=%s", (pid,))
-            r = cur.fetchone()
-            if not r:
-                return None
-            cur.execute("DELETE FROM cims_package WHERE id=%s", (pid,))
-            return r
-    finally:
-        conn.close()
+    """file_store 에서 패키지 1건 조회 + 삭제. 삭제된 row dict 반환 (없으면 None)."""
+    r = _pkg_load(config, pid=pid)
+    if not r:
+        return None
+    file_store.delete(_pkg_dir(config), _pkg_key(r['name'], r['version']))
+    return r
 
 
 # ════════════════════════════════════════════════════════════
@@ -986,22 +991,20 @@ async def _get_deployment_config(did: int, config):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT d.config_json, d.config_applied_at, "
-                "       p.config_template_json, p.meta_json "
-                "FROM agent_deployment d "
-                "LEFT JOIN cims_package p ON d.package_id = p.id "
-                "WHERE d.id=%s", (did,))
+                "SELECT d.config_json, d.config_applied_at, d.package_id "
+                "FROM agent_deployment d WHERE d.id=%s", (did,))
             r = cur.fetchone()
     finally:
         conn.close()
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    pkg = _pkg_load(config, pid=r.get("package_id")) or {}
     return HandlerResult(status=200,
         body={
             "config":             _safe_json(r.get("config_json")) or {},
             "config_applied_at":  _dt(r.get("config_applied_at")),
-            "template":           _safe_json(r.get("config_template_json")),
-            "meta":               _safe_json(r.get("meta_json")),
+            "template":           pkg.get("config_template"),
+            "meta":               pkg.get("meta"),
         },
         media_type="application/json")
 
@@ -1034,6 +1037,7 @@ async def _put_deployment_config(handler_args, did: int, config):
             if queue_update:
                 cur.execute(_SELECT_DEPLOY + " WHERE d.id=%s", (did,))
                 dep_full = cur.fetchone()
+                _enrich_deploy_with_pkg([dep_full], config)
                 params = {
                     "deployment_id": did,
                     "package_id":    dep_full["package_id"],
@@ -1060,13 +1064,28 @@ async def _put_deployment_config(handler_args, did: int, config):
 
 _SELECT_DEPLOY = ("""
     SELECT d.*, a.name AS agent_name,
-           p.name AS package_name, p.version AS package_version,
            i.name AS instance_name
     FROM agent_deployment d
     LEFT JOIN cims_agent    a ON d.agent_id    = a.id
-    LEFT JOIN cims_package  p ON d.package_id  = p.id
     LEFT JOIN cims_instance i ON d.instance_id = i.id
 """)
+
+
+def _enrich_deploy_with_pkg(rows, config):
+    """deployment rows 에 package_name / package_version 을 file_store 에서 채워준다."""
+    if not rows:
+        return rows
+    cache: dict = {}
+    for r in rows:
+        pid = r.get('package_id')
+        if pid is None:
+            continue
+        if pid not in cache:
+            cache[pid] = _pkg_load(config, pid=pid) or {}
+        pkg = cache[pid]
+        r['package_name'] = pkg.get('name')
+        r['package_version'] = pkg.get('version')
+    return rows
 
 
 async def _list_deployments(config):
@@ -1077,6 +1096,7 @@ async def _list_deployments(config):
             rows = cur.fetchall()
     finally:
         conn.close()
+    _enrich_deploy_with_pkg(rows, config)
     return HandlerResult(status=200, body={"items": [_deployment_to_json(r) for r in rows]},
                          media_type="application/json")
 
@@ -1091,6 +1111,7 @@ async def _get_deployment(did: int, config):
         conn.close()
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    _enrich_deploy_with_pkg([r], config)
     return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
 
 
@@ -1114,14 +1135,10 @@ async def _create_deployment(handler_args: HandlerArgs, config):
             # - active_standby 모듈은 A/S 그룹의 agent 에만
             # - all_active   모듈은 AA   그룹의 agent 에만
             # - standalone   모듈은 어느 그룹 (또는 그룹 없음) 에든 OK
-            cur.execute(
-                "SELECT meta_json FROM cims_package WHERE id=%s", (package_id,)
-            )
-            pkg = cur.fetchone()
-            pkg_meta = {}
-            if pkg and pkg.get("meta_json"):
-                try: pkg_meta = json.loads(pkg["meta_json"])
-                except Exception: pkg_meta = {}
+            pkg_file = _pkg_load(config, pid=package_id) or {}
+            pkg_meta = pkg_file.get("meta") or {}
+            if not isinstance(pkg_meta, dict):
+                pkg_meta = {}
             ha_cap = (pkg_meta.get("ha_capability") or "standalone").lower()
             cur.execute(
                 "SELECT g.mode FROM ha_group_members m "
@@ -1155,6 +1172,7 @@ async def _create_deployment(handler_args: HandlerArgs, config):
                              media_type="application/json")
     finally:
         conn.close()
+    _enrich_deploy_with_pkg([r], config)
     return HandlerResult(status=201, body=_deployment_to_json(r), media_type="application/json")
 
 
@@ -1183,6 +1201,7 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
         conn.close()
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    _enrich_deploy_with_pkg([r], config)
     return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
 
 
@@ -1213,6 +1232,7 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
             if not dep:
                 return HandlerResult(status=404, body={"error": "deployment_not_found"},
                                      media_type="application/json")
+            _enrich_deploy_with_pkg([dep], config)
 
             params = {
                 "deployment_id": did,
@@ -1308,27 +1328,29 @@ async def _serve_agent_binary(handler_args: HandlerArgs, kwargs: dict) -> Handle
 # ════════════════════════════════════════════════════════════
 
 def _fetch_deployment_for_proxy(did: int, config):
-    """proxy 에 필요한 deployment + agent 정보 동시 조회. (sync — asyncio.to_thread 로 호출)"""
+    """proxy 에 필요한 deployment + agent 정보 + 패키지 config_template 동시 조회. (sync — asyncio.to_thread 로 호출)"""
     conn = _get_db(config)
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT d.id, d.install_path, d.package_id, "
                 "       a.id AS agent_id, a.name AS agent_name, a.status AS agent_status, "
-                "       a.ip_address, a.sync_port, a.agent_token, "
-                "       p.config_template_json "
+                "       a.ip_address, a.sync_port, a.agent_token "
                 "FROM agent_deployment d "
                 "LEFT JOIN cims_agent    a ON d.agent_id   = a.id "
-                "LEFT JOIN cims_package  p ON d.package_id = p.id "
                 "WHERE d.id=%s", (did,))
-            return cur.fetchone()
+            r = cur.fetchone()
     finally:
         conn.close()
+    if r:
+        pkg = _pkg_load(config, pid=r.get('package_id')) or {}
+        r['config_template_json'] = pkg.get('config_template')  # 옛 이름 그대로 (downstream _collection_schema)
+    return r
 
 
 def _collection_schema(template_json, name: str):
     """template.collections 에서 key=name 인 항목의 schema 를 찾아 반환. 없으면 None."""
-    tmpl = _safe_json(template_json)
+    tmpl = template_json if isinstance(template_json, dict) else _safe_json(template_json)
     if not isinstance(tmpl, dict): return None, None
     for c in tmpl.get("collections") or []:
         if c.get("key") == name:

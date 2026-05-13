@@ -42,7 +42,7 @@ from util.log_util import Logger
 
 from handlers.agents import (
     _COMPONENT_ROOT, _get_db, _safe_json, _actor,
-    _collection_schema, _validate_record,
+    _collection_schema, _validate_record, _pkg_load_all, _pkg_load_latest_by_name,
 )
 
 logger = Logger()
@@ -122,23 +122,13 @@ def _load_dist_module(name: str) -> Optional[dict]:
 
 
 def _load_db_module(name: str, config: dict) -> Optional[dict]:
-    """cims_package 최신 버전의 version + config_template_json 을 읽어 리턴. 없으면 None."""
-    def _q():
-        conn = _get_db(config)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT version, config_template_json FROM cims_package "
-                    "WHERE name=%s ORDER BY id DESC LIMIT 1",
-                    (name,),
-                )
-                return cur.fetchone()
-        finally:
-            conn.close()
-    row = _q()
+    """file_store 의 cims_package 최신 버전의 version + config_template 을 읽어 리턴. 없으면 None.
+    함수명은 호환성 유지 (옛 DB 기반 명칭)."""
+    row = _pkg_load_latest_by_name(config, name)
     if not row:
         return None
-    tmpl = _safe_json(row.get("config_template_json")) or {}
+    tmpl = row.get("config_template") if isinstance(row.get("config_template"), dict) \
+           else (_safe_json(row.get("config_template_json")) or {})
     return {"version": row.get("version"), "template": tmpl, "source": "db"}
 
 
@@ -283,33 +273,26 @@ def _scan_dist_modules() -> list:
 
 
 async def _list_modules(config: dict) -> HandlerResult:
-    """등록된 모듈 목록. dist (build/dist/<name>/pkg.json) 를 우선, 이후 cims_package (DB) merge.
+    """등록된 모듈 목록. dist (build/dist/<name>/pkg.json) 를 우선, 이후 file_store(cims_package) merge.
        동일 name 은 dist 값을 우선 사용."""
     dist_items = await asyncio.to_thread(_scan_dist_modules)
     seen = {m["name"] for m in dist_items}
 
-    def _q_db():
-        conn = _get_db(config)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT name, MAX(id) AS max_id FROM cims_package GROUP BY name"
-                )
-                by_name = {r["name"]: r["max_id"] for r in cur.fetchall()}
-                if not by_name:
-                    return []
-                ids = tuple(by_name.values())
-                placeholders = ",".join(["%s"] * len(ids))
-                cur.execute(
-                    f"SELECT id, name, version FROM cims_package WHERE id IN ({placeholders})",
-                    ids,
-                )
-                return cur.fetchall()
-        finally:
-            conn.close()
+    def _q_pkgs():
+        # name 별 최신 버전 1건 (id 최대) 만 추림
+        rows = _pkg_load_all(config)
+        by_name: dict = {}
+        for r in rows:
+            n = r.get("name")
+            if not n:
+                continue
+            cur = by_name.get(n)
+            if cur is None or (r.get("id") or 0) > (cur.get("id") or 0):
+                by_name[n] = r
+        return list(by_name.values())
 
     try:
-        db_rows = await asyncio.to_thread(_q_db)
+        db_rows = await asyncio.to_thread(_q_pkgs)
     except Exception as e:
         logger.log_error(f"list_modules db fallback failed: {e}")
         db_rows = []
@@ -520,26 +503,15 @@ def _signal_module(module_name: str) -> list:
 
 
 def _load_latest_package_template(name: str, config: dict) -> Optional[dict]:
-    """최신 config_template_json (dict) 반환. dist/<name> 우선, 이후 cims_package (DB) fallback."""
+    """최신 config_template (dict) 반환. dist/<name> 우선, 이후 file_store(cims_package) fallback."""
     d = _load_dist_module(name)
     if d is not None:
         return d.get("template") or {}
-    def _q():
-        conn = _get_db(config)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT config_template_json FROM cims_package "
-                    "WHERE name=%s ORDER BY id DESC LIMIT 1",
-                    (name,),
-                )
-                return cur.fetchone()
-        finally:
-            conn.close()
-    row = _q()
+    row = _pkg_load_latest_by_name(config, name)
     if not row:
         return None
-    return _safe_json(row.get("config_template_json"))
+    return row.get("config_template") if isinstance(row.get("config_template"), dict) \
+           else _safe_json(row.get("config_template_json"))
 
 
 async def _get_module_collection(name: str, coll_key: str, config: dict) -> HandlerResult:

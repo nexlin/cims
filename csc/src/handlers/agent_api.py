@@ -540,16 +540,11 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
 # ──────────────────────────────────────────────────────────────
 
 async def _package_download(pkg_id: int, config: dict) -> HandlerResult:
-    conn = _get_db(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM cims_package WHERE id=%s", (pkg_id,))
-            pkg = cur.fetchone()
-    finally:
-        conn.close()
+    from handlers.agents import _pkg_load
+    pkg = _pkg_load(config, pid=pkg_id)
     if not pkg:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
-    path = pkg["file_path"]
+    path = pkg.get("file_path") or ""
     if not os.path.isfile(path):
         return HandlerResult(status=500, body={"error": "file_missing", "path": path},
                              media_type="application/json")
@@ -558,9 +553,9 @@ async def _package_download(pkg_id: int, config: dict) -> HandlerResult:
     return HandlerResult(status=200, body=data,
                          headers={
                              "Content-Type": "application/octet-stream",
-                             "X-Package-Name": pkg["name"],
-                             "X-Package-Version": pkg["version"],
-                             "X-Package-Sha256": pkg["sha256"],
+                             "X-Package-Name": pkg.get("name"),
+                             "X-Package-Version": pkg.get("version"),
+                             "X-Package-Sha256": pkg.get("sha256"),
                          },
                          media_type="application/octet-stream")
 

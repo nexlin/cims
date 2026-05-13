@@ -3,6 +3,10 @@
 > 외부 이중화 DB(MariaDB/MySQL 호환) 에 적재할 CIMS 테이블 인벤토리.
 > 코드/마이그레이션 정합성의 단일 출처(SoT).
 > 스키마 생성 = `sql/cims_schema.sql` + `sql/migrate_*.sql` 순차 적용.
+>
+> **2026-05-13 결정**: 가입자 정보/상태 외 모든 데이터는 파일 기반으로 이전 중.
+> 단계별 마이그레이션 plan: [runtime_store_design.md](runtime_store_design.md) §1.
+> 본 인벤토리는 마이그레이션 진행에 따라 활성 → 옛 표로 이동.
 
 ## 1. 적용 순서 (신규 환경)
 
@@ -45,12 +49,12 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | **구독↔서비스** | `voip_subscriptions.service_id` / `ptt_subscriptions.service_id` | migrate_subscriptions_service_ref.sql | FK → sip_service |
 | **HA** | `ha_groups` | migrate_ha_groups.sql + migrate_ha_groups_vip_nullable.sql + migrate_ha_services_wiring.sql | A/S / AA 그룹 + VIP (nullable) |
 | | `ha_group_members` | migrate_ha_groups.sql | 그룹 멤버 (agent_id) |
-| **에이전트/배포** | `cims_instance` | migrate_agent_deployment.sql | 인스턴스 등록 |
-| | `cims_agent` | migrate_agent_deployment.sql + migrate_agent_mtls_columns.sql + migrate_agent_sync_port.sql + migrate_agent_upgrade.sql | 에이전트 등록 (mTLS, sync_port) |
-| | `cims_package` | migrate_agent_deployment.sql + migrate_package_config_template.sql | 패키지 manifest + config template |
-| | `agent_deployment` | migrate_agent_deployment.sql | 배포 이력 |
-| | `agent_job` | migrate_agent_deployment.sql + migrate_agent_job_types.sql | 작업 큐 |
-| | `agent_metric` | migrate_agent_deployment.sql | 에이전트 metric |
+| **에이전트/배포** | `cims_instance` | migrate_agent_deployment.sql | 인스턴스 등록 (📦 Phase 2 마이그레이션 예정) |
+| | `cims_agent` | migrate_agent_deployment.sql + migrate_agent_mtls_columns.sql + migrate_agent_sync_port.sql + migrate_agent_upgrade.sql | 에이전트 등록 (📦 Phase 2 마이그레이션 예정) |
+| | ~~`cims_package`~~ | — | **파일 기반 완료** (2026-05-13) — `{CimsRuntimeDir}/packages/<name>__<version>.json` |
+| | `agent_deployment` | migrate_agent_deployment.sql | 배포 이력 (📦 Phase 3 — package_id JOIN 은 file_store enrich 로 이미 우회) |
+| | `agent_job` | migrate_agent_deployment.sql + migrate_agent_job_types.sql | 작업 큐 (📦 Phase 3) |
+| | `agent_metric` | migrate_agent_deployment.sql | 에이전트 metric (📦 Phase 3) |
 
 ### 주요 FK / 참조
 
