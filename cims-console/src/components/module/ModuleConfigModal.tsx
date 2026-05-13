@@ -137,17 +137,22 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
     return false
   }, [template, changed])
 
-  async function save() {
+  async function save(opts: { restartAfter?: boolean } = {}) {
     if (changed.size === 0) { show('변경된 항목 없음', 'err'); return }
-    if (restartRequired) {
-      if (!confirm('재기동이 필요한 설정이 포함되어 있습니다. 저장 후 수동으로 Restart 해야 적용됩니다.\n계속할까요?')) return
-    }
     setSaving(true)
     try {
       const r = await saveConfig(values, changed)
       show(r.message, 'ok')
+      // 재기동 옵션 (deployment 모드 + restart_required + restartAfter true)
+      if (opts.restartAfter && source.type === 'deployment') {
+        try {
+          const jr = await deploymentApi.queueJob(source.deployment.id, 'restart')
+          show(`재기동 큐 등록 (#${jr.job_id})`, 'ok')
+        } catch (e) {
+          show(`재기동 실패: ${(e as Error).message}`, 'err')
+        }
+      }
       if (onDone) await onDone()
-      // deployment 모드는 저장 후 닫음 (기존 동작), module 모드는 재로드만 (UI 상 작업 계속)
       if (source.type === 'deployment') {
         onClose()
       } else {
@@ -202,12 +207,19 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
                       {' '}고급 설정 (배포/인프라)
                     </label>
                   </div>
+                  {changed.size > 0 && (
+                    <ChangeSummaryPanel template={template} values={values} initial={initial}
+                      changed={changed}
+                      onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
+                      onResetAll={() => setValues({ ...initial })} />
+                  )}
                   {template.sections
                     .filter(sec => showAdvanced || !sec.hidden)
                     .map(sec => (
                       <SectionBlock key={sec.key} section={sec} values={values}
-                        changed={changed} showAdvanced={showAdvanced}
-                        onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))} />
+                        initial={initial} changed={changed} showAdvanced={showAdvanced}
+                        onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))}
+                        onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))} />
                     ))}
                   {restartRequired && (
                     <div style={{
@@ -234,10 +246,20 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
         <div className="modal-footer" style={{ flex: '0 0 auto', marginTop: 0 }}>
           <button className="btn btn--outline" onClick={onClose}>닫기</button>
           {template && tab === 'scalar' && (
-            <button className="btn btn--primary" onClick={save}
-              disabled={saving || changed.size === 0}>
-              {saving ? '저장 중...' : `저장 (${changed.size} 변경)`}
-            </button>
+            <>
+              <button className="btn btn--primary" onClick={() => void save()}
+                disabled={saving || changed.size === 0}>
+                {saving ? '저장 중...' : `저장 (${changed.size} 변경)`}
+              </button>
+              {source.type === 'deployment' && restartRequired && (
+                <button className="btn btn--primary" onClick={() => void save({ restartAfter: true })}
+                  disabled={saving || changed.size === 0}
+                  style={{ background: '#e67e22', borderColor: '#e67e22' }}
+                  title="저장 직후 restart job 자동 큐잉">
+                  저장 + 재기동
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -261,7 +283,105 @@ function TabBtn({ active, children, onClick }: {
   )
 }
 
-function SectionBlock({ section, values, changed, showAdvanced, onChange }: {
+function ChangeSummaryPanel({ template, values, initial, changed, onReset, onResetAll }: {
+  template: ConfigTemplate
+  values: Record<string, FieldValue>
+  initial: Record<string, FieldValue>
+  changed: Set<string>
+  onReset: (key: string) => void
+  onResetAll: () => void
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  // key → field 매핑 (label + restart 추출)
+  const fieldByKey = useMemo(() => {
+    const m = new Map<string, ConfigTemplateField>()
+    for (const s of template.sections) for (const f of s.fields) m.set(f.key, f)
+    return m
+  }, [template])
+
+  const restartKeys = Array.from(changed).filter(k => (fieldByKey.get(k)?.restart !== false))
+  const hotKeys     = Array.from(changed).filter(k => (fieldByKey.get(k)?.restart === false))
+
+  function display(v: FieldValue): string {
+    if (v === null || v === undefined || v === '') return '(빈 값)'
+    if (typeof v === 'boolean') return v ? 'true' : 'false'
+    return String(v)
+  }
+
+  return (
+    <div style={{
+      border: '1px solid #b8d4f5', borderRadius: 6, marginBottom: 12,
+      background: '#fafcfe',
+    }}>
+      <div onClick={() => setCollapsed(c => !c)}
+        style={{
+          padding: '8px 14px', cursor: 'pointer', userSelect: 'none',
+          display: 'flex', alignItems: 'center', gap: 8,
+          background: '#e8f0fe', borderBottom: collapsed ? 'none' : '1px solid #b8d4f5',
+          borderRadius: '6px 6px 0 0',
+        }}>
+        <span style={{ color: '#1a73e8', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
+        <b style={{ color: '#1a73e8' }}>변경 사항 ({changed.size})</b>
+        <span style={{ fontSize: 11, color: '#555' }}>
+          🔁 재기동 {restartKeys.length} · ⚡ 즉시 {hotKeys.length}
+        </span>
+        <button onClick={(e) => { e.stopPropagation(); onResetAll() }}
+                style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px',
+                         background: '#fff', border: '1px solid #ccc', borderRadius: 3, cursor: 'pointer' }}>
+          전체 초기화
+        </button>
+      </div>
+      {!collapsed && (
+        <div style={{ padding: 8, maxHeight: 240, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: '#888' }}>
+                <th style={{ textAlign: 'left', padding: '4px 6px', width: 220 }}>필드</th>
+                <th style={{ textAlign: 'left', padding: '4px 6px' }}>옛 값</th>
+                <th style={{ width: 30, textAlign: 'center' }}>→</th>
+                <th style={{ textAlign: 'left', padding: '4px 6px' }}>새 값</th>
+                <th style={{ width: 60, textAlign: 'center' }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from(changed).map(k => {
+                const f = fieldByKey.get(k)
+                const restart = f?.restart !== false
+                return (
+                  <tr key={k} style={{ borderTop: '1px solid #eee' }}>
+                    <td style={{ padding: '4px 6px' }}>
+                      <span title={k}>{f?.label ?? k}</span>
+                      <span style={{ marginLeft: 4, fontSize: 10, color: restart ? '#c0392b' : '#1e7d34' }}>
+                        {restart ? '🔁' : '⚡'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '4px 6px', color: '#888', fontFamily: 'monospace' }}>
+                      {display(initial[k])}
+                    </td>
+                    <td style={{ textAlign: 'center', color: '#1a73e8' }}>→</td>
+                    <td style={{ padding: '4px 6px', color: '#1a73e8', fontFamily: 'monospace' }}>
+                      {display(values[k])}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <button onClick={() => onReset(k)}
+                              title="이 필드만 초기화"
+                              style={{ fontSize: 11, padding: '1px 6px', background: '#fff',
+                                       border: '1px solid #ccc', borderRadius: 3, cursor: 'pointer' }}>
+                        ↺
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SectionBlock({ section, values, initial, changed, showAdvanced, onChange, onReset }: {
   section: {
     key: string; title: string; description?: string
     fields: ConfigTemplateField[]
@@ -269,9 +389,11 @@ function SectionBlock({ section, values, changed, showAdvanced, onChange }: {
     groups?: { key: string; title: string; description?: string }[]
   }
   values: Record<string, FieldValue>
+  initial: Record<string, FieldValue>
   changed: Set<string>
   showAdvanced: boolean
   onChange: (key: string, v: FieldValue) => void
+  onReset: (key: string) => void
 }) {
   // hidden section 은 기본 접힘 (pull-down 으로만 노출)
   const [collapsed, setCollapsed] = useState(!!section.hidden)
@@ -351,8 +473,10 @@ function SectionBlock({ section, values, changed, showAdvanced, onChange }: {
                 {b.fields.map(f => (
                   <FieldRow key={f.key} field={f}
                     value={values[f.key]}
+                    initialValue={initial[f.key]}
                     isChanged={changed.has(f.key)}
-                    onChange={v => onChange(f.key, v)} />
+                    onChange={v => onChange(f.key, v)}
+                    onReset={() => onReset(f.key)} />
                 ))}
               </div>
             </div>
@@ -363,11 +487,13 @@ function SectionBlock({ section, values, changed, showAdvanced, onChange }: {
   )
 }
 
-function FieldRow({ field, value, isChanged, onChange }: {
+function FieldRow({ field, value, initialValue, isChanged, onChange, onReset }: {
   field: ConfigTemplateField
   value: FieldValue
+  initialValue: FieldValue
   isChanged: boolean
   onChange: (v: FieldValue) => void
+  onReset: () => void
 }) {
   const needsRestart = field.restart !== false
   const badgeStyle: React.CSSProperties = {
@@ -392,7 +518,20 @@ function FieldRow({ field, value, isChanged, onChange }: {
         {isChanged && <span style={{ marginLeft: 6, color: '#2980b9', fontSize: 11 }}>●</span>}
       </label>
       <div>
-        {renderInput(field, value, onChange)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ flex: 1 }}>
+            {renderInput(field, value, onChange)}
+          </div>
+          {isChanged && (
+            <button onClick={onReset}
+                    title={`초기값으로 되돌림: ${initialValue === null || initialValue === '' ? '(빈 값)' : String(initialValue)}`}
+                    style={{ fontSize: 12, padding: '2px 8px', background: '#fff',
+                             border: '1px solid #ccc', borderRadius: 3, cursor: 'pointer',
+                             flexShrink: 0 }}>
+              ↺
+            </button>
+          )}
+        </div>
         {field.help && (
           <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>{field.help}</div>
         )}
