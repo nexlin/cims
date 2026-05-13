@@ -1220,7 +1220,8 @@ GET /api/v1/recordings/{id}/video   → video/mp4
 
 ## 15. 배포 관리 API
 
-콘솔 메뉴 `/deploy/packages` (패키지) · `/deploy/servers` (서버 + 배포본) 가 사용.
+콘솔 메뉴 `/deploy/services` (primary — 서버 + HA inline) · `/deploy/packages` (패키지) ·
+`/deploy/servers` (advanced — 서버 Inspector) 가 사용.
 **N.1 패키지 = 사용자가 업로드한 배포본 tarball** (`csc.json:Packages.Dir` 보관, `agents.py::_create_package`).
 **14. 빌드 API 의 packages = `cims.sh pkg` 산출물** (`build/dist/packages/`). 두 디렉토리는 코드 레벨 분리.
 
@@ -1243,12 +1244,17 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | GET | `/agents` | 서버 목록 |
 | POST | `/agents` | 등록 (body `{name, note?}`) → enrollment_token + install_command 반환 |
 | GET | `/agents/{id}` | 단일 조회 |
-| PUT | `/agents/{id}` | 이름/메모 변경 |
+| PUT | `/agents/{id}` | 이름/메모/service_ip_rows 변경 |
 | DELETE | `/agents/{id}` | 삭제 (관련 deployment 도 cascade) |
 | POST | `/agents/{id}/approve` | pending → approved |
 | POST | `/agents/{id}/revoke` | 세션 폐기 |
 | POST | `/agents/{id}/upgrade` | agent 바이너리 업그레이드 job 큐잉 |
 | GET | `/agents/{id}/metrics` | 최근 리소스 메트릭 |
+
+응답 필드 (HaServicesPage 용):
+- `interfaces` — agent heartbeat 보고 `[{name, ip, mask}]` (None = 아직 보고 전)
+- `service_ip_rows` — 운영자 설정 iface→slot 매핑 `[{iface, ip, mask, slot, status?}]`
+- `ha_group` — HA 그룹 ref `{id, name, mode, role}` (없으면 null = standalone)
 
 ### 15.3 배포 (`/api/v1/deployments`)
 
@@ -1266,3 +1272,23 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | PUT | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 저장 (`{records, signal?}`) |
 
 Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/agent_api.md`.
+
+### 15.4 HA 그룹 (`/api/v1/ha-groups`)
+
+| Method | Path | 용도 |
+|---|---|---|
+| GET | `/ha-groups` | HA 그룹 목록 (멤버 포함) |
+| POST | `/ha-groups` | 생성 (body `{name, mode, vip, vip_mask?, auth_pass, members?[], vip_bindings?[]}`) |
+| GET | `/ha-groups/{id}` | 단일 조회 |
+| PUT | `/ha-groups/{id}` | `{name, vip, vip_mask, auth_pass, vip_bindings, members?}` 업데이트 (mode 변경 불가) |
+| DELETE | `/ha-groups/{id}` | 삭제 (멤버 cascade) |
+| GET | `/ha-groups/{id}/members` | 멤버 목록 |
+| POST | `/ha-groups/{id}/members` | 멤버 추가 `{agent_id, role?, priority?}` (1 agent = 1 group UNIQUE) |
+| DELETE | `/ha-groups/{id}/members/{agent_id}` | 멤버 제거 |
+
+응답 필드:
+- `mode` — `active_standby` | `all_active` (standalone 은 ha_groups 미배정 agent 로 표현)
+- `vip_bindings` — VIP slot 별 binding `[{bid, slot, ip, mask?, status?, memberIfaces?}]`
+  (`memberIfaces` 는 `{agent_id: iface_name}` 매핑)
+
+그룹/멤버 변경 시 `update_ha` job 자동 큐잉 (각 멤버에 ha.json 분배 — keepalived 재기동).

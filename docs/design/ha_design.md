@@ -406,16 +406,20 @@ cims.sh 는 **개발 단계 도구**:
 
 배포본 운영자는 cims.sh 호출 안 함 — agent/bin/cims-* 만 사용.
 
-### 11.6 Console UI 흐름 — HaGroupsPage (운영자가 ha.json 직접 편집 X)
+### 11.6 Console UI 흐름 — HaServicesPage (운영자가 ha.json 직접 편집 X)
 
-운영자는 `/deploy/ha-groups` (Console) 에서 그룹을 정의 — 각 노드의 ha.json
-은 CSC + cims_agent 가 자동 생성/분배.
+운영자는 `/deploy/services` (Console "서버 + HA") 에서 서비스(=HA 그룹/standalone)
+단위로 inline 편집 — 각 노드의 ha.json 은 CSC + cims_agent 가 자동 생성/분배.
 
-데이터 모델 (sql/migrate_ha_groups.sql):
+데이터 모델 (sql/migrate_ha_groups.sql + sql/migrate_ha_services_wiring.sql):
 - `ha_groups`: id / name / mode(active_standby|all_active) / vip / vrid(자동) /
-  vip_mask / auth_pass / note
+  vip_mask / auth_pass / note / **vip_bindings_json** (slot 별 VIP + 멤버 iface 매핑)
 - `ha_group_members`: group_id + agent_id (`uk_agent` UNIQUE — 1 agent = 1
   group) + priority + role(master|backup)
+- `cims_agent`: + **interfaces_json** (heartbeat 보고) + **service_ip_rows_json**
+  (운영자 iface→slot 매핑)
+
+> standalone 서비스 = ha_group 미배정 agent (음수 id `-agent.id` 로 frontend 매핑)
 
 모듈 ha_capability (각 모듈 pkg.json):
 - `csp/psp/isp/csc` → `active_standby`

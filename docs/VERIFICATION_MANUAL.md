@@ -100,7 +100,9 @@ python3 -m tests.cims_verify run --preset pipeline-full
 | `http://<ens160>:3000/release/verify` | 패키징 > 검증 실행 | **6단계 LIVE** (1.5s 폴링, stage gate 노란 배너) |
 | `http://<ens160>:3000/release/verify-history` | 패키징 > 검증 이력 | 회차 이력 + 통계 (KpiGrid + ScopeTable + Sparkline) + DetailModal PDF |
 | `http://<ens160>:3000/release/package` | 패키징 > 패키징 | 빌드 / 패키지화 / tarball 다운로드 (카드 그리드 8장) |
+| `http://<ens160>:3000/deploy/services` | 배포 > 서버 + HA | 서비스(HA 그룹/standalone) 단위 서버 inline 관리 — primary 진입 |
 | `http://<ens160>:3000/deploy/packages` | 배포 > 패키지 | 배포본 패키지 등록·관리 (tarball 업로드) |
+| `http://<ens160>:3000/deploy/servers` | 배포 > 서버 Inspector | 서버별 모듈 lifecycle (advanced) — install/start/stop, 설정, metrics |
 
 검증 실행은 **TB-Console (3000)** 에서 수행 — TB-CSC 4419 backend.
 

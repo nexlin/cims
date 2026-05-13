@@ -9,7 +9,7 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
 
 > 좌측 메뉴는 두 갈래:
 > - **패키징** (`/release/...`) — 검증 / 검증 이력 / 빌드·패키징·다운로드
-> - **배포** (`/deploy/...`) — 패키지 업로드/관리 / 서버 등록·관리
+> - **배포** (`/deploy/...`) — 패키지 / 서버+HA (primary) / 서버 Inspector (advanced)
 
 ## 1. 패키지 업로드 (배포 메뉴)
 
@@ -27,14 +27,19 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
 > 카드의 ⤓ 다운로드 버튼으로 받아서 그대로 위 화면에 업로드한다. 자세한
 > 워크플로우는 `design/features/build_and_packaging.md` 참고.
 
-## 2. 서버 등록
+## 2. 서비스 + 서버 등록 (primary 흐름)
 
-**메뉴**: 좌측 `배포 > 서버` (`/deploy/servers`)
+**메뉴**: 좌측 `배포 > 서버 + HA` (`/deploy/services`)
 
-1. `＋ 서버 등록` 클릭
-2. 서버 이름 입력 → `등록`
-3. 출력되는 `install-agent.sh` 명령어를 복사
-4. 대상 호스트에서 운영 계정으로 실행:
+서비스(=HA 그룹 또는 standalone) 단위로 서버를 묶어 inline 편집. 팝업 없음.
+
+1. `＋ 시스템 추가` 클릭
+2. 이름 입력 + 유형 선택:
+   - **A/S** — master + backup 2개 자동 발급 (예: SIP 서버 이중화)
+   - **AA** — 시작 1개 발급, `＋ 서버 추가` 로 N개 확장 (예: 미디어 서버 분산)
+   - **Standalone** — agent 1개 (예: 단일 노드)
+3. `생성` — agent 자동 발급 + (A/S·AA 만) ha_groups 자동 생성
+4. 각 서버 row 의 `📋 복사` 로 install command 복사 → 대상 호스트에서 실행:
    ```bash
    mkdir /opt/cims-agent && cd /opt/cims-agent
    curl -k https://<CSC>:4420/install-agent.sh | bash -s -- \
@@ -42,15 +47,24 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
      --enrollment-token <TOKEN> \
      --name <이름>
    ```
-5. Console 로 돌아오면 서버 상태가 `pending → approved → online` 으로 진행됨
+5. agent enroll 완료 → `pending → online` 자동 전환 + `interfaces` 자동 보고
+6. 서버 row 의 `📡 인터페이스 N개` 펼침 → IP / 용도 입력 → 자동 저장
+7. (A/S·AA) 서비스 row 의 `📡 VIP` 펼침 → 용도 선택 → VIP IP 입력 → 멤버별 iface 자동 매핑
+
+**패키지 추가**: 서비스 행 펼침 → `＋ 패키지 추가` → 체크박스 → 서비스의 모든 멤버에 일괄 deployment 생성.
 
 > 검증/시험 환경에서는 `volte-sip-server` / `volte-media-server` /
 > `ptt-sip-server` / `ptt-media-server` / `mgmt-server` 5개 이름을 그대로
 > 따라 등록하면 verify pipeline 의 `_INSTANCES` 매핑과 일치한다.
 
-## 3. 모듈 추가 (Deployment 생성)
+## 3. 모듈 세부 설정 (Advanced — Server Inspector)
 
-**위치**: 서버 관리 → 서버 선택 → `모듈` 탭 → `＋ 모듈 추가`
+**메뉴**: 좌측 `배포 > 서버 Inspector` (`/deploy/servers`)
+
+서비스 단위 일괄 배포(2.)로 부족할 때 — process_name 커스터마이즈,
+service_functions 체크박스(volte/ptt/ibcf), per-deployment 메모.
+
+**위치**: 서버 선택 → `모듈` 탭 → `＋ 모듈 추가`
 
 1. **Module** 선택 (예: `csp`, `psp`, `cmp`, `pmp`, ...)
    - 같은 base 바이너리의 변종은 별도 패키지로 노출 (csp/psp/isp / cmp/pmp/imp)
