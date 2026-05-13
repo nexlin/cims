@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { alertsApi, type AlertEvent } from '../api/alerts'
+import { alertsApi, type AlertEvent, type AlertSummaryResponse } from '../api/alerts'
 import { useToast } from '../components/Toast'
 
 const TYPE_LABEL: Record<string, string> = {
@@ -26,6 +26,11 @@ function durationBetween(openTs: string, closeTs: string): string {
   const c = new Date(closeTs).getTime()
   if (isNaN(o) || isNaN(c) || c < o) return '-'
   const sec = Math.round((c - o) / 1000)
+  return formatSec(sec)
+}
+
+function formatSec(sec: number): string {
+  if (sec < 0) return '-'
   if (sec < 60) return `${sec}초`
   if (sec < 3600) return `${Math.floor(sec / 60)}분 ${sec % 60}초`
   return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`
@@ -34,6 +39,35 @@ function durationBetween(openTs: string, closeTs: string): string {
 interface AlertRow extends AlertEvent {
   resolved_at?: string  // close 이벤트가 있으면 그 시각
   duration?: string
+}
+
+function DailyBars({ data }: { data: { date: string; opens: number }[] }) {
+  if (data.length === 0) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</div>
+  const max = Math.max(1, ...data.map(d => d.opens))
+  const H = 36
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: H + 14 }}>
+      {data.map(d => {
+        const h = d.opens > 0 ? Math.max(2, Math.round((d.opens / max) * H)) : 1
+        const mmdd = d.date.slice(5).replace('-', '/')
+        return (
+          <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}
+            title={`${d.date}: ${d.opens}건`}>
+            <div style={{
+              width: '100%',
+              height: h,
+              background: d.opens > 0 ? 'var(--danger)' : 'var(--border)',
+              borderRadius: 2,
+              opacity: d.opens > 0 ? 0.85 : 0.4,
+            }} />
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+              {mmdd}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 /**
@@ -68,6 +102,7 @@ export default function AlertsPage() {
   const { show } = useToast()
   const [events, setEvents] = useState<AlertEvent[]>([])
   const [types, setTypes] = useState<string[]>([])
+  const [summary, setSummary] = useState<AlertSummaryResponse | null>(null)
   const [days, setDays] = useState(7)
   const [filterType, setFilterType] = useState('')
   const [showResolved, setShowResolved] = useState(true)
@@ -76,12 +111,14 @@ export default function AlertsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [list, typeList] = await Promise.all([
+      const [list, typeList, sum] = await Promise.all([
         alertsApi.list({ days, type: filterType || undefined, limit: 2000 }),
         alertsApi.types(),
+        alertsApi.summary(days),
       ])
       setEvents(list.events)
       setTypes(typeList.types)
+      setSummary(sum)
     } catch (e: unknown) {
       show(String(e), 'err')
     } finally {
@@ -129,7 +166,49 @@ export default function AlertsPage() {
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>최근 {days}일 발생</div>
           <div style={{ fontSize: 24, fontWeight: 700 }}>{rows.filter(r => r.action === 'open').length}</div>
         </div>
+        <div style={{ flex: 2, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>일별 발생량</div>
+          <DailyBars data={summary?.daily || []} />
+        </div>
       </div>
+
+      {summary && summary.by_type.length > 0 && (
+        <div className="panel">
+          <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 13, borderBottom: '1px solid var(--border)' }}>
+            유형별 통계 (최근 {summary.days}일)
+          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ width: 160 }}>유형</th>
+                <th style={{ width: 80, textAlign: 'right' }}>발생</th>
+                <th style={{ width: 80, textAlign: 'right' }}>해제</th>
+                <th style={{ width: 100 }}>현재 상태</th>
+                <th style={{ width: 140, textAlign: 'right' }}>평균 지속시간</th>
+                <th>마지막 이벤트</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.by_type.map(s => (
+                <tr key={s.type}>
+                  <td>{typeLabel(s.type)}</td>
+                  <td style={{ textAlign: 'right' }}>{s.opens}</td>
+                  <td style={{ textAlign: 'right' }}>{s.resolved}</td>
+                  <td>
+                    {s.currently_open
+                      ? <span className="badge badge--red">OPEN</span>
+                      : <span style={{ color: 'var(--text-muted)' }}>정상</span>}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {s.avg_duration_sec != null ? formatSec(Math.round(s.avg_duration_sec)) : '-'}
+                  </td>
+                  <td className="ts">{s.last_ts ? fmtTime(s.last_ts) : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="panel">
         <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>

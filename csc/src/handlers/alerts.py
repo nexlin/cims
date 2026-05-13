@@ -4,6 +4,7 @@ CIMS Alert 이력 REST API
 Routes:
   GET /api/v1/alerts?days=7&type=&limit=500    최근 alert 이벤트 목록
   GET /api/v1/alerts/types                     최근 30일 alert type 목록
+  GET /api/v1/alerts/summary?days=7            type별 통계 + 일별 발생량
 """
 
 from urllib.parse import urlparse, parse_qs, unquote
@@ -49,6 +50,10 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
     try:
         if parts and parts[0] == 'types':
             return HandlerResult(status=200, body={'types': alert_log.list_types(base, days=30)})
+
+        if parts and parts[0] == 'summary':
+            sdays = max(1, min(int(qp('days', '7')), 90))
+            return HandlerResult(status=200, body=alert_log.compute_summary(base, days=sdays))
 
         days = max(1, min(int(qp('days', '7')), 90))
         limit = max(1, min(int(qp('limit', '500')), 5000))

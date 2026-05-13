@@ -14,6 +14,26 @@ export interface AlertsResponse {
   events: AlertEvent[]
 }
 
+export interface AlertSummaryByType {
+  type: string
+  opens: number
+  resolved: number
+  currently_open: boolean
+  avg_duration_sec: number | null
+  last_ts: string
+}
+
+export interface AlertSummaryDaily {
+  date: string
+  opens: number
+}
+
+export interface AlertSummaryResponse {
+  days: number
+  by_type: AlertSummaryByType[]
+  daily: AlertSummaryDaily[]
+}
+
 export const alertsApi = {
   list: (params: { days?: number; type?: string; limit?: number } = {}) => {
     const p = new URLSearchParams()
@@ -24,4 +44,8 @@ export const alertsApi = {
     return api.get<AlertsResponse>(`/alerts${s ? '?' + s : ''}`)
   },
   types: () => api.get<{ types: string[] }>('/alerts/types'),
+  summary: (days?: number) => {
+    const q = days ? `?days=${days}` : ''
+    return api.get<AlertSummaryResponse>(`/alerts/summary${q}`)
+  },
 }

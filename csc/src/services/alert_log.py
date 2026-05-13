@@ -106,3 +106,121 @@ def list_types(service_log_dir: str, days: int = 30) -> list:
         except Exception:
             pass
     return sorted(types)
+
+
+def _iter_events_asc(service_log_dir: str, days: int):
+    """최근 N일치 이벤트를 시간순(asc) yield."""
+    if not service_log_dir:
+        return
+    today = datetime.now().date()
+    files = []
+    for i in range(days):
+        d = today - timedelta(days=i)
+        path = _file_for(service_log_dir, datetime(d.year, d.month, d.day))
+        if os.path.exists(path):
+            files.append(path)
+    files.sort()  # 일별 파일은 경로 정렬 = 시간 정렬
+    for path in files:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+
+
+def compute_open_state(service_log_dir: str, days: int = 30) -> dict:
+    """최근 N일 이벤트를 replay 하여 현재 열린 alert 의 {type: open_ts} 반환.
+
+    sweeper 재시작 시 in-memory _alert_open 시드용. close 가 잇따른 open 은
+    덮어쓰고, close 가 없으면 open 유지.
+    """
+    open_state: dict = {}
+    for ev in _iter_events_asc(service_log_dir, days):
+        typ = ev.get('type')
+        if not typ:
+            continue
+        action = ev.get('action')
+        if action == 'open':
+            open_state[typ] = ev.get('ts', '')
+        elif action == 'close':
+            open_state.pop(typ, None)
+    return open_state
+
+
+def compute_summary(service_log_dir: str, days: int = 7) -> dict:
+    """type 별 통계와 일별 발생량 집계.
+
+    반환:
+      {
+        'days': N,
+        'by_type': [
+          {'type': str, 'opens': int, 'resolved': int, 'currently_open': bool,
+           'avg_duration_sec': float|None, 'last_ts': str},
+          ...
+        ],
+        'daily': [{'date': 'YYYY-MM-DD', 'opens': int}, ...]   # 오래된 → 최근
+      }
+    """
+    by_type: dict = {}
+    open_ts: dict = {}  # type -> open_ts (in-flight pair)
+    daily: dict = {}    # 'YYYY-MM-DD' -> open count
+    today = datetime.now().date()
+    for i in range(days):
+        d = today - timedelta(days=i)
+        daily[d.isoformat()] = 0
+
+    for ev in _iter_events_asc(service_log_dir, days):
+        typ = ev.get('type')
+        if not typ:
+            continue
+        ts = ev.get('ts', '')
+        action = ev.get('action')
+        entry = by_type.setdefault(typ, {
+            'type': typ,
+            'opens': 0,
+            'resolved': 0,
+            'currently_open': False,
+            'durations': [],
+            'last_ts': '',
+        })
+        entry['last_ts'] = ts
+        if action == 'open':
+            entry['opens'] += 1
+            entry['currently_open'] = True
+            open_ts[typ] = ts
+            day = ts[:10]
+            if day in daily:
+                daily[day] += 1
+        elif action == 'close':
+            entry['resolved'] += 1
+            entry['currently_open'] = False
+            opened = open_ts.pop(typ, None)
+            if opened:
+                try:
+                    o = datetime.fromisoformat(opened)
+                    c = datetime.fromisoformat(ts)
+                    sec = (c - o).total_seconds()
+                    if sec >= 0:
+                        entry['durations'].append(sec)
+                except Exception:
+                    pass
+
+    out_by_type = []
+    for typ, e in sorted(by_type.items()):
+        durations = e.pop('durations')
+        e['avg_duration_sec'] = round(sum(durations) / len(durations), 1) if durations else None
+        out_by_type.append(e)
+
+    daily_sorted = [{'date': k, 'opens': daily[k]} for k in sorted(daily.keys())]
+    return {
+        'days': days,
+        'by_type': out_by_type,
+        'daily': daily_sorted,
+    }

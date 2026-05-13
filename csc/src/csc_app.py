@@ -394,7 +394,18 @@ if __name__ == '__main__':
         ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
         _service_log = config.get('ServiceLogging', {}).get('Dir') \
             or config.get('ServiceLogDir', config.get('MsgLogDir', ''))
-        _alert_open: dict = {}  # type -> open_ts (ISO)
+        # type -> open_ts (ISO). 시작 시 최근 30일 이벤트를 replay 하여
+        # 직전 인스턴스가 열어두고 끝난 알람 상태를 복원 → 재기동 후 동일
+        # 조건이 계속되면 open 재-emit 하지 않고, 해소되면 close 1건만 기록.
+        _alert_open: dict = {}
+        if _service_log:
+            try:
+                restored = alert_log.compute_open_state(_service_log, days=30)
+                _alert_open.update({k: True for k in restored})
+                if restored:
+                    logger.log_info(f"[alert-sweep] restored open state: {sorted(restored.keys())}")
+            except Exception as e:
+                logger.log_error(f"[alert-sweep] restore failed: {e}")
 
         def _check_db():
             try:
