@@ -777,6 +777,7 @@ interface ServiceTreeProps {
 function ServiceTreeRows(p: ServiceTreeProps) {
   const { svc, idx, expanded, onToggle } = p
   const isStandalone = svc.mode === 'standalone'
+  const needsVip = svc.mode === 'active_standby'
   const canAddServer = svc.mode !== 'active_standby' && !isStandalone
 
   // Standalone — 시스템 == 단일 agent. 그룹 카드 row 없이 server row 한 줄로 표시.
@@ -847,12 +848,12 @@ function ServiceTreeRows(p: ServiceTreeProps) {
           <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
         </td>
         <td style={tdLeft(220)}>
-          {isStandalone ? (
-            <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
-          ) : (
+          {needsVip ? (
             <button onClick={() => p.setVipExpand(!p.vipExpanded)} style={chipBtn(p.vipExpanded)}>
               📡 VIP {svc.vipBindings.length}건 (VRID {svc.vrid}) {p.vipExpanded ? '▲' : '▼'}
             </button>
+          ) : (
+            <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
           )}
         </td>
         <td style={td(120)}>
@@ -863,7 +864,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         </td>
       </tr>
 
-      {p.vipExpanded && (
+      {p.vipExpanded && needsVip && (
         <tr>
           <td colSpan={7} style={{ padding: '8px 16px 12px 60px' }}>
             <VipPanel
