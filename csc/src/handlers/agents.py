@@ -369,6 +369,8 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
         "create_time": _maybe_dt(r.get("create_time")),
         # 보안: enrollment_token 은 생성 직후에만 반환. 여기서는 masked
         "has_pending_enrollment": bool(r.get("enrollment_token")),
+        # 만료 시각은 UI 표시용으로 노출 (토큰 자체는 마스킹 유지)
+        "enrollment_token_expires_at": _maybe_dt(r.get("enrollment_token_expires_at")),
         # HA 그룹 정보 — 미정의 시 null
         "ha_group": ha_group,
         # HaServicesPage 용 확장 필드 (없으면 null)
@@ -403,6 +405,10 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _approve_agent(handler_args, aid, config)
         if action == "revoke" and method == "POST":
             return await _revoke_agent(handler_args, aid, config)
+        if action == "regenerate-token" and method == "POST":
+            return await _regenerate_token(handler_args, aid, config)
+        if action == "install-command" and method == "GET":
+            return await _get_install_command(handler_args, aid, config)
         if action == "metrics" and method == "GET":
             return await _agent_metrics(aid, config)
         if action == "upgrade" and method == "POST":
@@ -554,8 +560,104 @@ async def _update_agent(handler_args: HandlerArgs, aid: int, config):
 
 
 async def _delete_agent(handler_args: HandlerArgs, aid: int, config):
+    def _cascade_remove_from_ha_groups():
+        ha_dir = file_store.domain_dir(config, 'ha_groups')
+        for g in file_store.load_all(ha_dir):
+            members = g.get('members') or []
+            new_members = [m for m in members if m.get('agent_id') != aid]
+            if len(new_members) != len(members):
+                g['members'] = new_members
+                file_store.save(ha_dir, int(g['id']), g)
+    await asyncio.to_thread(_cascade_remove_from_ha_groups)
     await asyncio.to_thread(file_store.delete, _agent_dir(config), aid)
     return HandlerResult(status=204, body=None, media_type="application/json")
+
+
+async def _regenerate_token(handler_args: HandlerArgs, aid: int, config):
+    """enrollment_token 만 재발급 (id / agent_token / status / ha_group membership 보존).
+    기존 토큰이 미만료면 409 conflict — 기존 토큰을 그대로 쓰도록 유도."""
+    def _do():
+        existing = _agent_load(config, aid=aid)
+        if not existing:
+            return ('not_found', None, None)
+        prev_expires_at = existing.get('enrollment_token_expires_at')
+        if prev_expires_at:
+            try:
+                if datetime.fromisoformat(prev_expires_at) > datetime.now():
+                    return ('still_valid', existing, prev_expires_at)
+            except (ValueError, TypeError):
+                pass
+        ttl_sec = _enrollment_token_ttl_sec(config)
+        now_dt = datetime.now()
+        existing['enrollment_token'] = secrets.token_hex(24)
+        existing['enrollment_token_issued_at'] = now_dt.isoformat(timespec='seconds')
+        existing['enrollment_token_expires_at'] = (
+            now_dt + timedelta(seconds=ttl_sec)).isoformat(timespec='seconds')
+        file_store.save(_agent_dir(config), aid, existing)
+        return ('ok', existing, ttl_sec)
+    status, row, extra = await asyncio.to_thread(_do)
+    if status == 'not_found':
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    if status == 'still_valid':
+        return HandlerResult(status=409, body={
+            "error": "still_valid",
+            "enrollment_token_expires_at": extra,
+        }, media_type="application/json")
+    ttl_sec = extra
+    payload = _agent_to_json(row)
+    payload["enrollment_token"] = row['enrollment_token']
+    payload["enrollment_token_expires_at"] = row['enrollment_token_expires_at']
+    payload["enrollment_token_ttl_sec"] = ttl_sec
+    csc_url = _csc_public_url(handler_args, config)
+    import shlex
+    install_extra = " --no-systemd" if _is_dev_mode(config) else ""
+    payload["install_command"] = (
+        f"curl -k {csc_url}/install-agent.sh | "
+        f"bash -s -- --csc-url {csc_url} "
+        f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}{install_extra}"
+    )
+    return HandlerResult(status=200, body=payload, media_type="application/json")
+
+
+async def _get_install_command(handler_args: HandlerArgs, aid: int, config):
+    """현재 record 의 토큰으로 install_command 반환 (재발행 없이). 만료/없음 시 410."""
+    def _do():
+        existing = _agent_load(config, aid=aid)
+        if not existing:
+            return ('not_found', None)
+        token = existing.get('enrollment_token')
+        expires_at = existing.get('enrollment_token_expires_at')
+        if not token:
+            return ('no_token', existing)
+        if expires_at:
+            try:
+                if datetime.fromisoformat(expires_at) < datetime.now():
+                    return ('expired', existing)
+            except (ValueError, TypeError):
+                pass
+        return ('ok', existing)
+    status, row = await asyncio.to_thread(_do)
+    if status == 'not_found':
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    if status == 'no_token':
+        return HandlerResult(status=410, body={"error": "no_token"}, media_type="application/json")
+    if status == 'expired':
+        return HandlerResult(status=410, body={
+            "error": "expired",
+            "enrollment_token_expires_at": row.get('enrollment_token_expires_at'),
+        }, media_type="application/json")
+    csc_url = _csc_public_url(handler_args, config)
+    import shlex
+    extra = " --no-systemd" if _is_dev_mode(config) else ""
+    install_cmd = (
+        f"curl -k {csc_url}/install-agent.sh | "
+        f"bash -s -- --csc-url {csc_url} "
+        f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}{extra}"
+    )
+    return HandlerResult(status=200, body={
+        "install_command": install_cmd,
+        "enrollment_token_expires_at": row.get('enrollment_token_expires_at'),
+    }, media_type="application/json")
 
 
 async def _approve_agent(handler_args: HandlerArgs, aid: int, config):
@@ -685,6 +787,9 @@ async def handle_packages(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
         if method == "GET":  return await _list_packages(config)
         if method == "POST": return await _create_package(handler_args, config)
     else:
+        # 비-숫자 액션 분기 (예: register-from-dist)
+        if tail[0] == 'register-from-dist' and method == 'POST':
+            return await _register_packages_from_dist(handler_args, config)
         try: pid = int(tail[0])
         except (TypeError, ValueError):
             return HandlerResult(status=400, body={"error": "invalid_id"}, media_type="application/json")
@@ -694,95 +799,86 @@ async def handle_packages(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
 
-def _dist_root_for_packages() -> str:
-    env = os.environ.get("CIMS_DIST_DIR")
-    if env:
-        return env
-    return os.path.normpath(os.path.join(_COMPONENT_ROOT, ".."))
+async def _register_packages_from_dist(handler_args: HandlerArgs, config):
+    """DEV 전용 — build/dist/packages/*.tar.gz 를 일괄 file_store 등록.
 
-
-def _scan_dist_virtual_packages() -> list:
-    """build/dist/<name>/pkg.json + config_template.json 을 읽어 synthetic package entry 로 반환.
-       Phase 1 검증용 — 아직 tarball 을 만들지 않은 상태에서도 Console 모듈관리 가 버전/템플릿/설정을 표시하게 함.
-
-       id 는 음수 (`-(offset+1)`) 로 발급 — 실제 cims_package row 와 충돌하지 않음.
-       source='dist' 필드가 tarball upload 건과 구분된다.
+    상용 환경 (Server.DevMode=false) 에서는 403. 정식 흐름은 multipart 업로드 (_create_package).
+    호출 시점: /release/package 의 ▶ 빌드 & 패키징 완료 후 자동.
     """
-    import datetime
-    root = _dist_root_for_packages()
-    out = []
-    try:
-        entries = sorted(os.listdir(root))
-    except FileNotFoundError:
-        return out
-    idx = 0
-    for entry in entries:
-        base = os.path.join(root, entry)
-        pkg = os.path.join(base, "pkg.json")
-        if not os.path.isfile(pkg):
+    if not _is_dev_mode(config):
+        return HandlerResult(status=403, body={
+            "error": "dev_only",
+            "hint": "이 endpoint 는 Server.DevMode=true (개발 환경) 전용입니다. 상용은 ＋ 패키지 업로드 사용.",
+        }, media_type="application/json")
+
+    # build/dist/packages 디렉토리 — _COMPONENT_ROOT 가 .../build/dist/csc/ 이므로 sibling
+    pkg_root = os.environ.get("CIMS_BUILD_PKG_DIR") or \
+        os.path.normpath(os.path.join(_COMPONENT_ROOT, "..", "packages"))
+    if not os.path.isdir(pkg_root):
+        return HandlerResult(status=404, body={
+            "error": "build_pkg_dir_not_found",
+            "path": pkg_root,
+            "hint": "build/dist/packages/ 가 없습니다 — cims.sh pkg 먼저 실행 필요",
+        }, media_type="application/json")
+
+    actor = _actor(handler_args)
+    registered = []
+    errors = []
+
+    for fname in sorted(os.listdir(pkg_root)):
+        if not fname.endswith(".tar.gz"):
             continue
+        src = os.path.join(pkg_root, fname)
         try:
-            with open(pkg, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-        except Exception:
-            continue
-        name = (meta.get("name") or entry).strip()
-        if not name:
-            continue
-        # config_template.json 위치 (컴포넌트별 분기)
-        tmpl = None
-        for rel in ("config/config_template.json", "config_template.json"):
-            tpath = os.path.join(base, rel)
-            if os.path.isfile(tpath):
-                try:
-                    with open(tpath, "r", encoding="utf-8") as f:
-                        tmpl = json.load(f)
-                except Exception:
-                    tmpl = None
-                break
-        try:
-            mtime = datetime.datetime.utcfromtimestamp(os.path.getmtime(pkg)).isoformat(timespec="seconds") + "Z"
-        except OSError:
-            mtime = None
-        idx += 1
-        out.append({
-            "id":            -idx,
-            "name":          name,
-            "version":       meta.get("version") or "",
-            "file_path":     base,
-            "file_size":     0,
-            "sha256":        "",
-            "description":   meta.get("description") or "",
-            "uploaded_by":   "dist",
-            "uploaded_at":   mtime,
-            "source":        "dist",
-            "meta":          meta,
-            "config_template": tmpl,
-        })
-    return out
+            raw = await asyncio.to_thread(_read_file, src)
+            meta = await asyncio.to_thread(_extract_meta_from_tarball, raw) or {}
+            template = await asyncio.to_thread(_extract_config_template_from_tarball, raw)
+            name = (meta.get("name") or "").strip()
+            version = (meta.get("version") or "").strip()
+            if not name or not version:
+                errors.append({"file": fname, "error": "meta.json missing name/version"})
+                continue
+
+            # 영구 저장 경로 — _create_package 와 동일 (Packages.Dir)
+            pkg_dir, _ = _resolve_pkg_paths(config)
+            os.makedirs(pkg_dir, exist_ok=True)
+            dest = os.path.join(pkg_dir, f"{name}-{version}.tar.gz")
+            fsha, fsize = await asyncio.to_thread(_write_and_hash, dest, raw)
+
+            description = (meta.get("description") or "")
+            desc_lines = [description] if description else []
+            if meta.get("build_date"): desc_lines.append(f"build: {meta['build_date']}")
+            if meta.get("git_sha"):
+                gb = meta.get("git_branch")
+                desc_lines.append(f"git: {meta['git_sha']}" + (f" ({gb})" if gb else ""))
+            full_desc = " | ".join(desc_lines)[:255]
+
+            row = await asyncio.to_thread(
+                _pkg_upsert, config, name, version, dest, fsize, fsha, full_desc, actor,
+                meta or None, template or None,
+            )
+            registered.append({"name": name, "version": version, "id": row.get("id")})
+        except Exception as e:
+            errors.append({"file": fname, "error": str(e)})
+
+    logger.log_info(f"[pkg-register-from-dist] registered={len(registered)} errors={len(errors)} src={pkg_root}")
+    return HandlerResult(status=200, body={
+        "count": len(registered),
+        "registered": registered,
+        "errors": errors,
+        "source_dir": pkg_root,
+    }, media_type="application/json")
 
 
 async def _list_packages(config):
-    """file_store (tarball 업로드 분) + build/dist 디렉토리 스캔 결과 합쳐 반환.
-       동일 name 이 dist + 업로드 양쪽에 있으면 둘 다 반환 (frontend 에서 source 로 구분).
-    """
+    """업로드된 tarball 만 반환 (정식 배포 흐름). 개발용 build/dist 자동 스캔은 제거됨."""
     rows = await asyncio.to_thread(_pkg_load_all, config)
-    db_items = [dict(_package_to_json(r), source="db") for r in rows]
-    db_items.sort(key=lambda x: (x.get("name", ""), -int(x.get("id", 0) or 0)))
-    dist_items = await asyncio.to_thread(_scan_dist_virtual_packages)
-    items = dist_items + db_items
-    items.sort(key=lambda x: (x.get("name", ""), 0 if x.get("source") == "dist" else 1))
+    items = [_package_to_json(r) for r in rows]
+    items.sort(key=lambda x: (x.get("name", ""), -int(x.get("id", 0) or 0)))
     return HandlerResult(status=200, body={"items": items}, media_type="application/json")
 
 
 async def _get_package(pid: int, config):
-    # pid < 0 → dist 가상 package. _list_packages 의 index 와 동일하게 스캔해서 찾는다.
-    if pid < 0:
-        items = await asyncio.to_thread(_scan_dist_virtual_packages)
-        for it in items:
-            if it.get("id") == pid:
-                return HandlerResult(status=200, body=it, media_type="application/json")
-        return HandlerResult(status=404, body={"error": "dist_not_found"}, media_type="application/json")
     r = await asyncio.to_thread(_pkg_load, config, pid)
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
