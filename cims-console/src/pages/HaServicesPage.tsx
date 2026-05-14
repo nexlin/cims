@@ -1095,12 +1095,18 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
   onChange: (rows: ServiceIpRow[]) => void
   onApply?: () => void
 }) {
-  const ifaceRows: ServiceIpRow[] = interfaces.map(iface => {
+  // 한 iface 당 한 row — agent 가 같은 iface 의 multi-IP (primary + VIP secondary) 를
+  // 모두 보고하므로 첫 IP (primary) 만 사용. VIP 보유 여부는 VipPanel 에서 표시.
+  const seenIface = new Set<string>()
+  const ifaceRows: ServiceIpRow[] = []
+  for (const iface of interfaces) {
+    if (seenIface.has(iface.name)) continue
+    seenIface.add(iface.name)
     const existing = rows.find(r => r.iface === iface.name)
-    return existing ?? {
+    ifaceRows.push(existing ?? {
       iface: iface.name, ip: iface.ip, mask: iface.mask, slot: '', status: 'unknown',
-    }
-  })
+    })
+  }
   const slotHints = slots.map(s => s.name).join(' / ')
 
   const updateRow = (iface: string, patch: Partial<ServiceIpRow>) => {
@@ -1122,6 +1128,13 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
   const isChanged = (r: ServiceIpRow): boolean => {
     const initial = interfaces.find(x => x.name === r.iface)
     return !!initial && (initial.ip !== r.ip || initial.mask !== r.mask)
+  }
+
+  // agent 가 heartbeat 으로 보고한 interfaces 와 (iface, ip) 매칭 시 'up'.
+  // 매칭 안 되는데 ip 비어있지 않으면 'down', 그 외 'unknown'.
+  const rowStatus = (r: ServiceIpRow): BindingStatus => {
+    if (interfaces.some(x => x.name === r.iface && x.ip === r.ip)) return 'up'
+    return r.ip ? 'down' : 'unknown'
   }
 
   return (
@@ -1189,7 +1202,7 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
                                 style={{ width: '95%', padding: '2px 6px', fontSize: 12,
                                          border: '1px solid #ddd', borderRadius: 3 }} />
                 </td>
-                <td style={{ padding: '4px 8px' }}><StatusBadge status={r.status} /></td>
+                <td style={{ padding: '4px 8px' }}><StatusBadge status={rowStatus(r)} /></td>
                 <td style={{ padding: '4px 8px' }}>
                   <button onClick={() => applyRow(r.iface)} style={btnSmall()}
                           title="변경된 IP 를 저장 (실제 agent 적용 API 추후)">
@@ -1289,6 +1302,20 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
   const applyRow = (bid: number) => {
     updateRow(bid, { status: 'unknown' })
     onApply?.()    // ha-groups/{id}/apply 호출 → update_ha job 큐잉 → keepalived reload
+  }
+
+  // 멤버별 VIP 보유 여부: memberIfaces[serverId] 에 매핑된 iface 에 b.ip 가 실제 존재?
+  const memberHasVip = (b: VipBinding, serverId: number): boolean => {
+    if (!b.ip) return false
+    const memberIface = b.memberIfaces?.[serverId]
+    if (!memberIface) return false
+    const srv = servers.find(s => s.id === serverId)
+    if (!srv) return false
+    return srv.interfaces.some(x => x.name === memberIface && x.ip === b.ip)
+  }
+  const bindingStatus = (b: VipBinding): BindingStatus => {
+    if (!b.ip) return 'unknown'
+    return servers.some(s => memberHasVip(b, s.id)) ? 'up' : 'down'
   }
 
   return (
@@ -1409,12 +1436,15 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
                 </td>
                 {servers.map(s => {
                   const info = slotMap.get(b.slot)?.get(s.id)
+                  const owns = memberHasVip(b, s.id)
                   return (
                     <td key={s.id} style={{ padding: '4px 8px', fontSize: 12 }}>
                       {!b.slot ? (
                         <span style={{ color: '#aaa' }}>—</span>
                       ) : info ? (
                         <span>
+                          {owns && <span title="이 멤버가 VIP 보유 (MASTER)"
+                                          style={{ color: '#27ae60', marginRight: 4 }}>●</span>}
                           <b style={{ fontFamily: 'monospace' }}>{info.iface}</b>
                           <span style={{ marginLeft: 4, color: '#888' }}>({info.ip}/{info.mask})</span>
                         </span>
@@ -1427,7 +1457,7 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
                 {vrid != null && (
                   <td style={{ padding: '4px 8px', color: '#666' }}>{vrid}</td>
                 )}
-                <td style={{ padding: '4px 8px' }}><StatusBadge status={b.status} /></td>
+                <td style={{ padding: '4px 8px' }}><StatusBadge status={bindingStatus(b)} /></td>
                 <td style={{ padding: '4px 8px' }}>
                   <button onClick={() => applyRow(b.bid)} style={btnSmall()} title="VIP 적용 + up 확인">적용</button>
                   <button onClick={() => removeRow(b.bid)} style={btnSmall()} title="row 제거">삭제</button>

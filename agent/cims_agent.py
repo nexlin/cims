@@ -172,8 +172,10 @@ def collect_host_info() -> dict:
 
 
 def collect_interfaces() -> list:
-    """ip -j -4 addr 로 IPv4 인터페이스 list 수집. (name, ip, mask) 만 추출.
-    HaServicesPage 의 서비스 IP / VIP 설정 시 운영자에게 후보 iface 제공.
+    """ip -j -4 addr 로 IPv4 인터페이스 list 수집.
+    한 iface 의 primary + secondary IP 모두 별도 row 로 추출 (VIP 보유 여부 추적용).
+    HaServicesPage 의 서비스 IP / VIP 설정 시 운영자에게 후보 iface 제공 +
+    ServiceIpRow/VipBinding 의 status 매칭에도 사용.
     """
     try:
         out = subprocess.run(["ip", "-j", "-4", "addr"],
@@ -188,15 +190,17 @@ def collect_interfaces() -> list:
         name = r.get("ifname")
         if not name:
             continue
-        addrs = r.get("addr_info") or []
-        ipv4 = next((a for a in addrs if a.get("family") == "inet"), None)
-        if not ipv4:
-            continue
-        result.append({
-            "name": name,
-            "ip":   ipv4.get("local") or "",
-            "mask": int(ipv4.get("prefixlen") or 0),
-        })
+        for a in (r.get("addr_info") or []):
+            if a.get("family") != "inet":
+                continue
+            ip = a.get("local")
+            if not ip:
+                continue
+            result.append({
+                "name": name,
+                "ip":   ip,
+                "mask": int(a.get("prefixlen") or 0),
+            })
     return result
 
 
