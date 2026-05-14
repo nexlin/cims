@@ -71,6 +71,16 @@ def _pick_default_iface(vip_bindings: list, agent_id: int) -> str:
     return ''
 
 
+def _iface_ip(agent_row: dict, iface_name: str) -> str:
+    """agent_row.interfaces[] 에서 iface_name 에 해당하는 IP 반환. 없으면 빈 문자열."""
+    if not iface_name:
+        return ''
+    for it in (agent_row.get('interfaces') or []):
+        if it.get('name') == iface_name and it.get('ip'):
+            return it['ip']
+    return ''
+
+
 def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                          agent_row: dict, peer_row: dict | None,
                          vip_bindings: list | None = None) -> dict:
@@ -117,11 +127,18 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             'priority': 100 if is_master else 90,
         }
 
+    # local_ip / peer_ip 은 VRRP advertise 가 송신되는 interface 의 IP 여야 함.
+    # interface=svc 인데 agent.ip_address=mgmt 망이면 split brain 발생.
+    local_ip = _iface_ip(agent_row, default_iface) or agent_row.get('ip_address') or "127.0.0.1"
+    peer_ip = ''
+    if peer_row:
+        peer_ip = _iface_ip(peer_row, default_iface) or peer_row.get('ip_address') or ''
+
     return {
         "node_name":     agent_row.get('name') or f"agent-{agent_id}",
         "interface":     default_iface,
-        "local_ip":      agent_row.get('ip_address') or "127.0.0.1",
-        "peer_ip":       (peer_row.get('ip_address') if peer_row else "") or "",
+        "local_ip":      local_ip,
+        "peer_ip":       peer_ip,
         "initial_state": "MASTER" if is_master else "BACKUP",
         "vip_mask":      group['vip_mask'],
         "auth_pass":     group['auth_pass'],
@@ -148,7 +165,8 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
         a = _agent_load(config, aid=m.get('agent_id'))
         if a:
             agents[m['agent_id']] = {'id': a.get('id'), 'name': a.get('name'),
-                                     'ip_address': a.get('ip_address')}
+                                     'ip_address': a.get('ip_address'),
+                                     'interfaces': a.get('interfaces') or []}
 
     enqueued = 0
     for m in members:
