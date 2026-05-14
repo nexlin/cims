@@ -112,6 +112,15 @@ export default function ServicesPage() {
               : `패키지화 (${job.cardKey || job.module || ''})`
             show(`${label} ${ok ? '완료' : '실패'} rc=${s.returncode}`, ok ? 'ok' : 'err')
             setActiveJob(null)
+            // release 성공 시 — file_store 자동 등록 (DEV 환경 한정. 상용은 backend 가 403)
+            if (job.kind === 'release' && ok) {
+              try {
+                const r = await deploymentApi.registerPackagesFromDist()
+                show(`패키지 자동 등록: ${r.count}개${r.errors.length ? ` (errors=${r.errors.length})` : ''}`, 'ok')
+              } catch (e) {
+                show(`패키지 자동 등록 실패: ${(e as Error).message} — /deploy/packages 에서 수동 업로드 필요`, 'err')
+              }
+            }
             // jobStatus 는 비우지 않음 — 우측 터미널 패널에 마지막 출력 유지
             await loadManifest()
             await loadPackages()

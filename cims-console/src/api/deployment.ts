@@ -123,6 +123,7 @@ export interface Agent {
   note: string | null
   create_time: string | null
   has_pending_enrollment: boolean
+  enrollment_token_expires_at: string | null
   ha_group: AgentHaGroupRef | null
   interfaces: NetIface[] | null
   service_ip_rows: ServiceIpRow[] | null
@@ -316,6 +317,19 @@ export const deploymentApi = {
   deleteAgent:   (id: number) => api.delete<null>(`/agents/${id}`),
   approveAgent:  (id: number) => api.post<{ ok: boolean }>(`/agents/${id}/approve`, {}),
   revokeAgent:   (id: number) => api.post<{ ok: boolean }>(`/agents/${id}/revoke`, {}),
+  regenerateToken: (id: number) =>
+    api.post<AgentCreateResult>(`/agents/${id}/regenerate-token`, {}),
+  getInstallCommand: (id: number) =>
+    api.get<{ install_command: string; enrollment_token_expires_at: string }>(`/agents/${id}/install-command`),
+  // DEV 전용 — /release/package 빌드 산출물 (build/dist/packages/*.tar.gz) 일괄 file_store 등록.
+  // 상용 환경 (Server.DevMode=false) 에서는 403.
+  registerPackagesFromDist: () =>
+    api.post<{
+      count: number
+      registered: Array<{ name: string; version: string; id: number }>
+      errors: Array<{ file: string; error: string }>
+      source_dir: string
+    }>(`/packages/register-from-dist`, {}),
   upgradeAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/upgrade`, {}),
   applyIpConfig: (id: number) =>
     api.post<{ agent_id: number; job_id: number; rows: number }>(`/agents/${id}/apply-ip-config`, {}),

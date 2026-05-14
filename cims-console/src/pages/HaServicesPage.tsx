@@ -13,7 +13,7 @@
  *   VipBinding[]    ← HaGroup.vip_bindings   (운영자 설정, PUT /ha-groups/{id})
  *   packageIds      ← deployments.filter(...).map(d => d.package_id) (실배포 = 의도)
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type InputHTMLAttributes } from 'react'
 import { Link } from 'react-router-dom'
 import { haGroupsApi, type HaGroup, type VipBinding as ApiVipBinding } from '../api/ha_groups'
 import { deploymentApi, type Agent, type SipPackage, type Deployment,
@@ -58,6 +58,7 @@ interface ServerRow {
   status: ServerStatus
   agent_version: string | null
   token: string                 // enrollment_token (one-time install command 용)
+  expiresAt: string | null      // enrollment_token_expires_at — UI 만료 표시 + 재발행 차단
   interfaces: NetIface[]
   serviceIpRows: ServiceIpRow[]
 }
@@ -149,7 +150,13 @@ function pkgToDef(p: SipPackage): PkgDef {
 const MODE_LABEL: Record<Mode, string> = {
   active_standby: 'A/S',
   all_active:     'AA',
-  standalone:     'Standalone',
+  standalone:     'SA',
+}
+
+const MODE_TOOLTIP: Record<Mode, string> = {
+  active_standby: 'Active/Standby — primary 1명 + standby 1명. VIP fail-over 자동 전환.',
+  all_active:     'All-Active — N개 동등 멤버 동시 처리 (load balancing 분배).',
+  standalone:     'Standalone — 단일 서버 (이중화 없음).',
 }
 
 const MODE_COLOR: Record<Mode, string> = {
@@ -187,9 +194,21 @@ function agentToServer(a: Agent, role: Role): ServerRow {
     status,
     agent_version: a.agent_version,
     token: '',                                          // pending 만 set, AgentCreateResult.enrollment_token
+    expiresAt: a.enrollment_token_expires_at,
     interfaces: a.interfaces ?? [],
     serviceIpRows: (a.service_ip_rows ?? []) as ServiceIpRow[],
   }
+}
+
+// ── 토큰 만료 헬퍼 ──
+function isTokenValid(expiresAt: string | null): boolean {
+  if (!expiresAt) return false
+  return new Date(expiresAt).getTime() > Date.now()
+}
+
+function minutesLeft(expiresAt: string | null): number {
+  if (!expiresAt) return 0
+  return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 60000))
 }
 
 function buildInstallCommand(token: string, name: string, role: Role): string {
@@ -250,6 +269,8 @@ export default function HaServicesPage() {
   const [toast, setToast] = useState<string | null>(null)
   // pending agent 신규 생성 직후 1회용 enrollment_token + install command
   const [pendingTokens, setPendingTokens] = useState<Map<number, { token: string; cmd: string }>>(new Map())
+  // 1분마다 re-render 강제 — 만료시간 카운트다운 갱신용
+  const [, setMinuteTick] = useState(0)
 
   const flash = (msg: string) => { setToast(msg); window.setTimeout(() => setToast(null), 2000) }
 
@@ -275,6 +296,11 @@ export default function HaServicesPage() {
     const iv = setInterval(() => void load(), 10_000)
     return () => clearInterval(iv)
   }, [load])
+  // 토큰 카운트다운 1분 단위 re-render
+  useEffect(() => {
+    const iv = setInterval(() => setMinuteTick(t => t + 1), 60_000)
+    return () => clearInterval(iv)
+  }, [])
 
   const packageMap = useMemo(() => new Map(packages.map(p => [p.id, pkgToDef(p)])), [packages])
   const agentMap = useMemo(() => new Map(agents.map(a => [a.id, a])), [agents])
@@ -399,9 +425,9 @@ export default function HaServicesPage() {
     }
   }
 
-  // ── 서버 추가 (AA/Standalone 만) ──
+  // ── 서버 추가 (AA 만 — Standalone 은 시스템 == 단일 agent, A/S 는 자식 2 고정) ──
   const addServer = async (svc: ServiceRow) => {
-    if (svc.mode === 'active_standby') return
+    if (svc.mode === 'active_standby' || svc.mode === 'standalone') return
     const idx = svc.servers.length + 1
     try {
       const r = await deploymentApi.createAgent(`${svc.name}-${pad2(idx)}`, '')
@@ -418,26 +444,15 @@ export default function HaServicesPage() {
     }
   }
 
-  // ── 토큰 재발행 — 현 agent 삭제 + 신규 agent 생성 (같은 이름) ──
-  const regenerateToken = async (svc: ServiceRow, srv: ServerRow) => {
+  // ── 토큰 재발행 — enrollment_token 만 갱신 (id / agent_token / HA membership 보존) ──
+  // 기존 토큰이 미만료면 backend 가 409 still_valid 반환 → 사용자는 기존 토큰 그대로 복사 가능
+  const regenerateToken = async (_svc: ServiceRow, srv: ServerRow) => {
     if (srv.status === 'online') {
-      if (!confirm(`${srv.name} 은 이미 online — 재발행 시 기존 agent 인증 무효. 진행?`)) return
+      if (!confirm(`${srv.name} 은 이미 online — 새 install 명령은 같은 호스트 재설치 용도. 진행?`)) return
     }
     try {
-      // 기존 agent 삭제 (HA member 도 자동 cascade)
-      await deploymentApi.deleteAgent(srv.id)
-      // 신규 생성
-      const r = await deploymentApi.createAgent(srv.name, '')
-      await deploymentApi.approveAgent(r.id)
-      setPendingTokens(prev => new Map(prev).set(r.id, { token: r.enrollment_token, cmd: r.install_command }))
-      // HA group 이면 멤버로 재등록
-      if (svc.id > 0) {
-        await haGroupsApi.addMember(svc.id, {
-          agent_id: r.id,
-          role: srv.role ?? 'backup',
-          priority: srv.role === 'master' ? 100 : 90,
-        })
-      }
+      const r = await deploymentApi.regenerateToken(srv.id)
+      setPendingTokens(prev => new Map(prev).set(srv.id, { token: r.enrollment_token, cmd: r.install_command }))
       const ttlMin = r.enrollment_token_ttl_sec
         ? Math.round(r.enrollment_token_ttl_sec / 60)
         : null
@@ -449,8 +464,40 @@ export default function HaServicesPage() {
       }
       await load()
     } catch (e) {
-      flash(`토큰 재발행 실패: ${(e as Error).message}`)
+      const msg = (e as Error).message
+      if (msg.includes('still_valid') || msg.includes('409')) {
+        flash(`${srv.name} 기존 토큰 아직 유효 — 📋 복사 버튼 사용`)
+      } else {
+        flash(`토큰 재발행 실패: ${msg}`)
+      }
     }
+  }
+
+  // ── 기존 토큰의 install command 복사 (재발행 없이) ──
+  const copyExistingInstallCmd = async (srv: ServerRow) => {
+    const pt = pendingTokens.get(srv.id)
+    if (pt) {
+      if (await copyToClipboard(pt.cmd)) {
+        flash(`${srv.name} install command 복사됨 (${minutesLeft(srv.expiresAt)}분 남음)`)
+        return
+      }
+    }
+    try {
+      const r = await deploymentApi.getInstallCommand(srv.id)
+      if (await copyToClipboard(r.install_command)) {
+        flash(`${srv.name} install command 복사됨 (${minutesLeft(r.enrollment_token_expires_at)}분 남음)`)
+      } else {
+        flash(`${srv.name} install command 조회 — 복사 실패 (화면 선택)`)
+      }
+    } catch (e) {
+      flash(`install command 조회 실패: ${(e as Error).message}`)
+    }
+  }
+
+  // ── 통합 버튼 핸들러 — 토큰 유효 시 복사, 만료 시 재발행 ──
+  const handleInstallCmdClick = (svc: ServiceRow, srv: ServerRow) => {
+    if (isTokenValid(srv.expiresAt)) return copyExistingInstallCmd(srv)
+    return regenerateToken(svc, srv)
   }
 
   // ── install command 복사 ──
@@ -636,7 +683,7 @@ export default function HaServicesPage() {
               applyVip={applyVip}
               applyServiceIp={applyServiceIp}
               addServer={() => addServer(svc)}
-              regenerateToken={(srv) => regenerateToken(svc, srv)}
+              regenerateToken={(srv) => handleInstallCmdClick(svc, srv)}
               copyCmd={(srv) => copyInstallCmd(srv)}
               onDelete={() => deleteService(svc)}
             />
@@ -730,15 +777,59 @@ interface ServiceTreeProps {
 function ServiceTreeRows(p: ServiceTreeProps) {
   const { svc, idx, expanded, onToggle } = p
   const isStandalone = svc.mode === 'standalone'
-  const canAddServer = svc.mode !== 'active_standby'
+  const canAddServer = svc.mode !== 'active_standby' && !isStandalone
+
+  // Standalone — 시스템 == 단일 agent. 그룹 카드 row 없이 server row 한 줄로 표시.
+  if (isStandalone) {
+    const srv = svc.servers[0]
+    if (!srv) return null
+    return (
+      <>
+        <ServerRows
+          key={srv.id}
+          svc={svc} srv={srv} idx={idx} srvIdx={0}
+          serviceSlots={p.serviceSlots}
+          editingName={p.editingName}
+          setEditingName={p.setEditingName}
+          svcIpExpanded={p.svcIpExpandFor === srv.id}
+          setSvcIpExpand={(open) => p.setSvcIpExpand(srv.id, open)}
+          pendingToken={p.pendingTokens.get(srv.id)}
+          updateServer={p.updateServer}
+          applyServiceIp={p.applyServiceIp}
+          regenerateToken={p.regenerateToken}
+          copyCmd={p.copyCmd}
+          onDelete={p.onDelete}
+        />
+        <tr style={{ background: '#fcfdfe' }}>
+          <td style={td(60)}></td>
+          <td colSpan={6} style={{ padding: '6px 12px' }}>
+            <PackagesArea svc={svc}
+                          packageMap={p.packageMap}
+                          pickerOpen={p.pkgPickerOpen}
+                          setPickerOpen={p.setPkgPicker}
+                          onChange={(ids) => p.updatePackageIds(svc, ids)} />
+          </td>
+        </tr>
+      </>
+    )
+  }
 
   return (
     <>
       <tr style={{ borderTop: '2px solid #e0e0e0', background: '#fafbfc' }}>
         <td style={td(60)}>
-          <button onClick={onToggle} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11 }}>
-            {expanded ? '▼' : '▶'} {idx}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button onClick={onToggle}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11,
+                             width: 14, padding: 0, color: '#666', flexShrink: 0 }}>
+              <span style={{
+                display: 'inline-block',
+                transform: expanded ? 'rotate(90deg)' : 'none',
+                transition: 'transform 0.15s',
+              }}>❯</span>
+            </button>
+            <span style={{ fontWeight: 'bold' }}>{idx}</span>
+          </div>
         </td>
         <td style={tdLeft()}>
           <InlineNameEdit kind="service" id={svc.id} value={svc.name}
@@ -756,11 +847,11 @@ function ServiceTreeRows(p: ServiceTreeProps) {
           <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
         </td>
         <td style={tdLeft(220)}>
-          {isStandalone || p.vipSlots.length === 0 ? (
+          {isStandalone ? (
             <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
           ) : (
             <button onClick={() => p.setVipExpand(!p.vipExpanded)} style={chipBtn(p.vipExpanded)}>
-              📡 VIP {svc.vipBindings.length}/{p.vipSlots.length} (VRID {svc.vrid}) {p.vipExpanded ? '▲' : '▼'}
+              📡 VIP {svc.vipBindings.length}건 (VRID {svc.vrid}) {p.vipExpanded ? '▲' : '▼'}
             </button>
           )}
         </td>
@@ -772,7 +863,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
         </td>
       </tr>
 
-      {p.vipExpanded && p.vipSlots.length > 0 && (
+      {p.vipExpanded && (
         <tr>
           <td colSpan={7} style={{ padding: '8px 16px 12px 60px' }}>
             <VipPanel
@@ -849,6 +940,8 @@ interface ServerRowsProps {
   applyServiceIp: (srv: ServerRow) => void
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
+  // Standalone 전용 — service header row 없으므로 row 안에 삭제/모드 표시
+  onDelete?: () => void
 }
 
 function ServerRows(p: ServerRowsProps) {
@@ -858,7 +951,14 @@ function ServerRows(p: ServerRowsProps) {
     <>
       <tr style={{ background: '#fff' }}>
         <td style={td(60)}>
-          <span style={{ color: '#888', fontSize: 12, paddingLeft: 16 }}>{idx}.{srvIdx + 1}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 14, flexShrink: 0 }}></span>
+            {svc.mode === 'standalone' ? (
+              <span style={{ fontWeight: 'bold' }}>{idx}</span>
+            ) : (
+              <span style={{ color: '#888', fontSize: 12 }}>{idx}.{srvIdx + 1}</span>
+            )}
+          </div>
         </td>
         <td style={tdLeft()}>
           <InlineNameEdit kind="server" id={srv.id} value={srv.name}
@@ -866,7 +966,8 @@ function ServerRows(p: ServerRowsProps) {
                           onStart={(v) => p.setEditingName({ kind: 'server', id: srv.id, value: v })}
                           onChange={(v) => p.setEditingName(p.editingName ? { ...p.editingName, value: v } : null)}
                           onSave={(v) => { p.updateServer(svc.id, srv.id, { name: v }); p.setEditingName(null) }}
-                          onCancel={() => p.setEditingName(null)} />
+                          onCancel={() => p.setEditingName(null)}
+                          bold={svc.mode === 'standalone'} />
           {srv.role && (
             <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 5px', borderRadius: 3,
                            background: srv.role === 'master' ? '#e67e22' : '#7f8c8d', color: '#fff' }}>
@@ -874,22 +975,24 @@ function ServerRows(p: ServerRowsProps) {
             </span>
           )}
         </td>
-        <td style={td(110)}></td>
+        <td style={td(110)}>
+          {svc.mode === 'standalone' && <ModeBadge mode={svc.mode} />}
+        </td>
         <td style={tdLeft(140)}>
           <span style={{ fontSize: 12, color: srv.ip ? '#333' : '#aaa' }}>
             {srv.ip ?? '— (enroll 후 자동)'}
           </span>
         </td>
         <td style={tdLeft(220)}>
-          {p.serviceSlots.length === 0 ? (
-            <span style={{ color: '#aaa', fontSize: 12 }}>— (패키지 없음)</span>
-          ) : !enrollDone ? (
+          {!enrollDone ? (
             <span style={{ color: '#aaa', fontSize: 12 }} title="enroll 전 — 인터페이스 정보 없음">
               ⏳ enroll 대기
             </span>
+          ) : srv.interfaces.length === 0 ? (
+            <span style={{ color: '#aaa', fontSize: 12 }}>— (NIC 정보 대기)</span>
           ) : (
             <button onClick={() => p.setSvcIpExpand(!p.svcIpExpanded)} style={chipBtn(p.svcIpExpanded)}>
-              📡 인터페이스 {srv.interfaces.length}개 / 용도 {srv.serviceIpRows.filter(r => r.slot).length}/{p.serviceSlots.length} {p.svcIpExpanded ? '▲' : '▼'}
+              📡 인터페이스 {srv.interfaces.length}개{srv.serviceIpRows.filter(r => r.slot).length > 0 ? ` (용도 ${srv.serviceIpRows.filter(r => r.slot).length}건)` : ''} {p.svcIpExpanded ? '▲' : '▼'}
             </button>
           )}
         </td>
@@ -901,10 +1004,17 @@ function ServerRows(p: ServerRowsProps) {
         </td>
         <td style={td(150)}>
           {srv.status !== 'online' && (
-            <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}
-                    title="새 토큰 발급 + install command 자동 복사 (토큰은 발급 후 일정 시간 내 만료)">
-              🔧 설치명령
-            </button>
+            isTokenValid(srv.expiresAt) ? (
+              <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}
+                      title={`기존 install command 복사 — 토큰 ${minutesLeft(srv.expiresAt)}분 남음`}>
+                📋 복사 ({minutesLeft(srv.expiresAt)}m)
+              </button>
+            ) : (
+              <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}
+                      title="새 토큰 발급 + install command 자동 복사">
+                🔧 설치명령
+              </button>
+            )
           )}
           {srv.id > 0 && (
             <Link to={`/deploy/servers?agent=${srv.id}`}
@@ -913,10 +1023,15 @@ function ServerRows(p: ServerRowsProps) {
               🔍
             </Link>
           )}
+          {p.onDelete && (
+            <button onClick={p.onDelete} style={btnDanger()} title="이 standalone 시스템 삭제">
+              삭제
+            </button>
+          )}
         </td>
       </tr>
 
-      {p.svcIpExpanded && enrollDone && p.serviceSlots.length > 0 && (
+      {p.svcIpExpanded && enrollDone && srv.interfaces.length > 0 && (
         <tr>
           <td colSpan={7} style={{ padding: '8px 16px 12px 60px' }}>
             <ServiceIpPanel
@@ -937,6 +1052,39 @@ function ServerRows(p: ServerRowsProps) {
 // ──────────────────────────────────────────────────────────────
 //  ServiceIpPanel — 인터페이스 단위 row
 // ──────────────────────────────────────────────────────────────
+
+// 단순 IPv4 prefix/host 분리 — /24, /16, /8 만 지원. 비표준 mask 면 null.
+function splitPrefixHost(ip: string, mask: number): { prefix: string; host: string } | null {
+  const parts = ip.split('.')
+  if (parts.length !== 4 || parts.some(p => p === '')) return null
+  if (mask === 24) return { prefix: parts.slice(0, 3).join('.') + '.', host: parts[3] }
+  if (mask === 16) return { prefix: parts.slice(0, 2).join('.') + '.', host: parts.slice(2).join('.') }
+  if (mask === 8)  return { prefix: parts[0] + '.',                     host: parts.slice(1).join('.') }
+  return null
+}
+
+// IME-safe input — 한글 입력 시 외부 setState 의 input.value 강제 재할당으로
+// composition 이 깨지는 현상 방지. 외부 commit 은 compositionend / blur / Enter 시점만.
+// useEffect 동기화 제거 — 사용자 입력 중 외부 props 변경이 덮어쓰는 일 방지.
+function ImeSafeInput({ value, onCommit, ...rest }: {
+  value: string
+  onCommit: (v: string) => void
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onCompositionStart' | 'onCompositionEnd' | 'onBlur' | 'onKeyDown'>) {
+  const [local, setLocal] = useState(value)
+  return (
+    <input
+      value={local}
+      onChange={e => setLocal(e.target.value)}
+      onCompositionEnd={(e) => {
+        const v = (e.target as HTMLInputElement).value
+        setLocal(v); onCommit(v)
+      }}
+      onBlur={() => onCommit(local)}
+      onKeyDown={(e) => { if (e.key === 'Enter') onCommit(local) }}
+      {...rest}
+    />
+  )
+}
 
 function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
   title: string
@@ -1034,11 +1182,11 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
                   </span>
                 </td>
                 <td style={{ padding: '4px 8px' }}>
-                  <input value={r.slot}
-                         onChange={e => updateRow(r.iface, { slot: e.target.value })}
-                         placeholder="(용도 입력)"
-                         style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                  border: '1px solid #ddd', borderRadius: 3 }} />
+                  <ImeSafeInput value={r.slot}
+                                onCommit={v => updateRow(r.iface, { slot: v })}
+                                placeholder="(용도 입력)"
+                                style={{ width: '95%', padding: '2px 6px', fontSize: 12,
+                                         border: '1px solid #ddd', borderRadius: 3 }} />
                 </td>
                 <td style={{ padding: '4px 8px' }}><StatusBadge status={r.status} /></td>
                 <td style={{ padding: '4px 8px' }}>
@@ -1057,11 +1205,11 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
           })}
         </tbody>
       </table>
-      {slots.length > 0 && (
-        <div style={{ marginTop: 8, fontSize: 11, color: '#888' }}>
-          ℹ 참고 — 설치된 패키지의 권장 용도: <code>{slotHints}</code> (자유 입력 가능)
-        </div>
-      )}
+      <div style={{ marginTop: 8, fontSize: 11, color: '#888' }}>
+        {slots.length > 0
+          ? <>ℹ 참고 — 설치된 패키지의 권장 용도: <code>{slotHints}</code> (자유 입력 가능)</>
+          : <>ℹ 인프라 단계 — NIC 이름이 곧 용도 라벨로 사용됩니다. 모듈 등록 후 추가 매핑 가능.</>}
+      </div>
     </div>
   )
 }
@@ -1080,20 +1228,42 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
   const bindings = svc.vipBindings
   const servers = svc.servers
 
-  const slotMap = new Map<string, Map<number, string>>()
+  // 용도 dropdown 옵션 = 각 서버 ServiceIp 에서 명시 입력한 용도(slot) 만.
+  // 값에 iface + ip + mask 보관 → subnet 정합 검증 + VIP prefix 자동 결정에 사용.
+  const slotMap = new Map<string, Map<number, { iface: string; ip: string; mask: number }>>()
   for (const srv of servers) {
     for (const r of srv.serviceIpRows) {
       if (!r.slot) continue
       if (!slotMap.has(r.slot)) slotMap.set(r.slot, new Map())
-      slotMap.get(r.slot)!.set(srv.id, r.iface)
+      slotMap.get(r.slot)!.set(srv.id, { iface: r.iface, ip: r.ip, mask: r.mask })
     }
   }
   const availableSlots = Array.from(slotMap.keys()).sort()
 
+  // slot 별 subnet 정합 정보: 모든 멤버의 (prefix, mask) 일치 시 prefix 반환, 아니면 conflict.
+  const slotSubnetInfo = (slot: string): {
+    prefix: string | null; mask: number; conflict: boolean; conflictDetail: string
+  } => {
+    const m = slotMap.get(slot)
+    if (!m || m.size === 0) return { prefix: null, mask: 24, conflict: false, conflictDetail: '' }
+    const entries = Array.from(m.values())
+    const first = splitPrefixHost(entries[0].ip, entries[0].mask)
+    if (!first) return { prefix: null, mask: entries[0].mask, conflict: true,
+                          conflictDetail: `비표준 mask=${entries[0].mask}` }
+    for (const e of entries.slice(1)) {
+      const p = splitPrefixHost(e.ip, e.mask)
+      if (!p || p.prefix !== first.prefix || e.mask !== entries[0].mask) {
+        return { prefix: first.prefix, mask: entries[0].mask, conflict: true,
+                 conflictDetail: `${entries[0].ip}/${entries[0].mask} ≠ ${e.ip}/${e.mask}` }
+      }
+    }
+    return { prefix: first.prefix, mask: entries[0].mask, conflict: false, conflictDetail: '' }
+  }
+
   const autoMapMemberIfaces = (slot: string): { [id: number]: string } => {
     const result: { [id: number]: string } = {}
     const ifaceMap = slotMap.get(slot)
-    if (ifaceMap) for (const [sid, iface] of ifaceMap) result[sid] = iface
+    if (ifaceMap) for (const [sid, info] of ifaceMap) result[sid] = info.iface
     return result
   }
 
@@ -1128,15 +1298,15 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
       <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 10 }}>
         {title}
         <span style={{ marginLeft: 8, fontSize: 11, color: '#888', fontWeight: 'normal' }}>
-          (용도 선택 시 멤버별 iface 자동 매핑 — 운영자 수동 override 가능)
+          (용도 선택 시 멤버별 iface 자동 매핑 — 옵션은 각 서버 ServiceIp 의 용도 라벨에서 옴. 수동 override 가능)
         </span>
       </div>
 
       {availableSlots.length === 0 && (
         <div style={{ padding: 10, background: '#fff8db', border: '1px solid #f0c75e',
                       borderRadius: 4, fontSize: 12, color: '#876200', marginBottom: 8 }}>
-          ⚠ 멤버 서버의 ServiceIpRow 에 "용도" 가 설정된 항목이 없습니다. 먼저 각 서버의
-          인터페이스에 용도를 입력해야 VIP 의 용도 select 에 옵션이 표시됩니다.
+          ⚠ 멤버 서버의 ServiceIp 에 "용도" 라벨이 입력된 항목이 없습니다.
+          먼저 각 서버 인터페이스에 용도를 입력해야 VIP 의 용도 select 에 옵션이 표시됩니다.
         </div>
       )}
 
@@ -1174,52 +1344,81 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
                           style={{ width: '95%', padding: '2px 4px', fontSize: 12,
                                    color: b.slot ? '#333' : '#c00' }}>
                     <option value="">(용도 선택)</option>
-                    {availableSlots.map(name => (
-                      <option key={name} value={name}
-                              disabled={usedSlots.has(name) && b.slot !== name}>
-                        {name}{usedSlots.has(name) && b.slot !== name ? ' (사용중)' : ''}
-                      </option>
-                    ))}
+                    {availableSlots.map(name => {
+                      const mappedCount = slotMap.get(name)!.size
+                      const complete = mappedCount === servers.length
+                      const used = usedSlots.has(name) && b.slot !== name
+                      const subnet = complete ? slotSubnetInfo(name) : null
+                      const conflict = !!(subnet && subnet.conflict)
+                      const disabled = !complete || used || conflict
+                      const label = !complete
+                        ? `${name} (${mappedCount}/${servers.length} 입력됨 — 모든 멤버 필요)`
+                        : conflict ? `${name} (IP/mask 불일치: ${subnet!.conflictDetail})`
+                        : used ? `${name} (사용중)`
+                        : name
+                      return (
+                        <option key={name} value={name} disabled={disabled}>
+                          {label}
+                        </option>
+                      )
+                    })}
                   </select>
                 </td>
                 <td style={{ padding: '4px 8px' }}>
-                  <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
-                    <input value={b.ip}
-                           onChange={e => updateRow(b.bid, { ip: e.target.value, status: 'unknown' })}
-                           placeholder="(VIP)"
-                           style={{ width: 110, padding: '2px 6px', fontSize: 12,
-                                    border: '1px solid #ddd', borderRadius: 3 }} />
-                    <span>/</span>
-                    <input type="number" value={b.mask ?? 24}
-                           onChange={e => updateRow(b.bid, { mask: parseInt(e.target.value) || 24 })}
-                           style={{ width: 40, padding: '2px 6px', fontSize: 12,
-                                    border: '1px solid #ddd', borderRadius: 3 }} />
-                  </span>
+                  {(() => {
+                    const subnet = b.slot ? slotSubnetInfo(b.slot) : null
+                    const hasPrefix = !!(subnet && !subnet.conflict && subnet.prefix)
+                    const split = hasPrefix && b.ip ? splitPrefixHost(b.ip, subnet!.mask) : null
+                    if (hasPrefix) {
+                      return (
+                        <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', fontSize: 12 }}>
+                          <span style={{ color: '#888' }}>{subnet!.prefix}</span>
+                          <input value={split?.host ?? ''}
+                                 onChange={e => {
+                                   const host = e.target.value.trim()
+                                   updateRow(b.bid, {
+                                     ip: host ? `${subnet!.prefix}${host}` : '',
+                                     mask: subnet!.mask,
+                                     status: 'unknown',
+                                   })
+                                 }}
+                                 placeholder="host"
+                                 style={{ width: subnet!.mask >= 24 ? 50 : 110, padding: '2px 6px', fontSize: 12,
+                                          border: '1px solid #ddd', borderRadius: 3 }} />
+                          <span style={{ color: '#888' }}>/{subnet!.mask}</span>
+                        </span>
+                      )
+                    }
+                    return (
+                      <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                        <input value={b.ip}
+                               onChange={e => updateRow(b.bid, { ip: e.target.value, status: 'unknown' })}
+                               placeholder="(VIP)" disabled={!b.slot}
+                               style={{ width: 110, padding: '2px 6px', fontSize: 12,
+                                        border: '1px solid #ddd', borderRadius: 3 }} />
+                        <span>/</span>
+                        <input type="number" value={b.mask ?? 24}
+                               onChange={e => updateRow(b.bid, { mask: parseInt(e.target.value) || 24 })}
+                               disabled={!b.slot}
+                               style={{ width: 40, padding: '2px 6px', fontSize: 12,
+                                        border: '1px solid #ddd', borderRadius: 3 }} />
+                      </span>
+                    )
+                  })()}
                 </td>
                 {servers.map(s => {
-                  const autoIface = slotMap.get(b.slot)?.get(s.id)
-                  const currentIface = b.memberIfaces?.[s.id] ?? ''
-                  const overridden = autoIface && currentIface !== autoIface
+                  const info = slotMap.get(b.slot)?.get(s.id)
                   return (
-                    <td key={s.id} style={{ padding: '4px 8px' }}>
-                      <select value={currentIface}
-                              onChange={e => updateRow(b.bid, {
-                                memberIfaces: { ...(b.memberIfaces ?? {}), [s.id]: e.target.value },
-                                status: 'unknown',
-                              })}
-                              style={{ width: '95%', padding: '2px 4px', fontSize: 12,
-                                       color: overridden ? '#e67e22' : (currentIface ? '#333' : '#aaa') }}>
-                        <option value="">{s.interfaces.length === 0 ? '(enroll 대기)' : '(iface)'}</option>
-                        {s.interfaces.map(iface => (
-                          <option key={iface.name} value={iface.name}>
-                            {iface.name} ({iface.ip})
-                          </option>
-                        ))}
-                      </select>
-                      {!currentIface && b.slot && (
-                        <div style={{ fontSize: 10, color: '#c0392b', marginTop: 2 }}>
-                          ⚠ "{b.slot}" 미설정
-                        </div>
+                    <td key={s.id} style={{ padding: '4px 8px', fontSize: 12 }}>
+                      {!b.slot ? (
+                        <span style={{ color: '#aaa' }}>—</span>
+                      ) : info ? (
+                        <span>
+                          <b style={{ fontFamily: 'monospace' }}>{info.iface}</b>
+                          <span style={{ marginLeft: 4, color: '#888' }}>({info.ip}/{info.mask})</span>
+                        </span>
+                      ) : (
+                        <span style={{ color: '#c0392b' }}>⚠ "{b.slot}" 매핑 없음</span>
                       )}
                     </td>
                   )
@@ -1265,9 +1464,9 @@ function StatusBadge({ status }: { status?: BindingStatus }) {
 
 function ModeBadge({ mode }: { mode: Mode }) {
   return (
-    <span style={{
+    <span title={MODE_TOOLTIP[mode]} style={{
       fontSize: 11, padding: '2px 6px', borderRadius: 3,
-      background: MODE_COLOR[mode], color: '#fff',
+      background: MODE_COLOR[mode], color: '#fff', cursor: 'help',
     }}>{MODE_LABEL[mode]}</span>
   )
 }
