@@ -262,10 +262,21 @@ def _default_install_subpath(params: dict) -> str:
 
 
 def _resolve_install_path(params: dict) -> str:
-    """params.install_path 가 명시되면 그대로. 아니면 modules/<m>/<v>/<p>/ 로 조합."""
+    """params.install_path 가 명시되면 그대로 (단 쓰기 불가 시 cwd fallback — dev/netns 환경).
+    명시 안 되면 modules/<m>/<v>/<p>/ 로 조합."""
     explicit = params.get("install_path")
     if explicit:
-        return explicit
+        # 부모 디렉토리 쓰기 가능 여부 체크 — 디렉토리 자체가 없을 수도 있음
+        try:
+            if os.path.isdir(explicit) and os.access(explicit, os.W_OK):
+                return explicit
+            parent = os.path.dirname(explicit) or "/"
+            if os.path.isdir(parent) and os.access(parent, os.W_OK):
+                return explicit
+        except Exception:
+            pass
+        # 쓰기 불가 — cwd fallback (dev/netns 환경: /opt/cims 권한 없음)
+        return os.getcwd()
     return os.path.join(DEFAULT_INSTALL_ROOT, _default_install_subpath(params))
 
 
