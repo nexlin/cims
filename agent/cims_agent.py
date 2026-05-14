@@ -171,9 +171,35 @@ def collect_host_info() -> dict:
     return info
 
 
+# mgmt IP — agent 시작 시 csc_url 의 outgoing local IP 로 결정 후 캐시.
+# collect_interfaces() 가 이 IP 와 매칭되는 row 에 mgmt=True 플래그를 붙임.
+_MGMT_IP: str | None = None
+
+
+def detect_mgmt_ip(csc_url: str) -> str | None:
+    """csc_url 로 가는 outgoing local IP 반환 — 그 IP 의 NIC 이 mgmt (CSC 통신용).
+    UDP socket 의 connect 로 routing table 만 평가 (실제 패킷 송신 없음).
+    """
+    try:
+        parsed = urllib.parse.urlparse(csc_url)
+        host = parsed.hostname
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if not host:
+            return None
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect((host, port))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return None
+
+
 def collect_interfaces() -> list:
     """ip -j -4 addr 로 IPv4 인터페이스 list 수집.
     한 iface 의 primary + secondary IP 모두 별도 row 로 추출 (VIP 보유 여부 추적용).
+    lo (loopback) 는 서비스 후보가 아니므로 제외. CSC 통신 NIC 은 mgmt=True 플래그.
     HaServicesPage 의 서비스 IP / VIP 설정 시 운영자에게 후보 iface 제공 +
     ServiceIpRow/VipBinding 의 status 매칭에도 사용.
     """
@@ -188,7 +214,7 @@ def collect_interfaces() -> list:
     result = []
     for r in rows:
         name = r.get("ifname")
-        if not name:
+        if not name or name == "lo":
             continue
         for a in (r.get("addr_info") or []):
             if a.get("family") != "inet":
@@ -196,11 +222,14 @@ def collect_interfaces() -> list:
             ip = a.get("local")
             if not ip:
                 continue
-            result.append({
+            row = {
                 "name": name,
                 "ip":   ip,
                 "mask": int(a.get("prefixlen") or 0),
-            })
+            }
+            if _MGMT_IP and ip == _MGMT_IP:
+                row["mgmt"] = True
+            result.append(row)
     return result
 
 
@@ -529,6 +558,7 @@ def job_apply_ip_config(params: dict) -> tuple:
 
     안전 정책 (v1):
       - secondary IP 만 add (primary 변경 안 함 — mgmt 연결 끊김 방지)
+      - lo / CSC 통신 NIC 의 row 는 거부 (자기 단절 방지). 마지막 보루.
       - "RTNETLINK answers: File exists" 는 정상 (이미 존재) — ok 로 처리
       - delete 미지원 (rollback 은 운영자가 수동)
 
@@ -538,6 +568,13 @@ def job_apply_ip_config(params: dict) -> tuple:
     if not isinstance(rows, list) or not rows:
         return 0, "no rows to apply", ""
 
+    # mgmt NIC 식별 — _MGMT_IP 가 set 됐을 때만 (test 시 None 일 수도).
+    mgmt_ifaces: set[str] = set()
+    if _MGMT_IP:
+        for iface in collect_interfaces():
+            if iface.get("mgmt"):
+                mgmt_ifaces.add(iface["name"])
+
     msgs = []
     fail_count = 0
     for r in rows:
@@ -546,6 +583,14 @@ def job_apply_ip_config(params: dict) -> tuple:
         mask  = r.get("mask")
         if not iface or not ip or not mask:
             msgs.append(f"skip (incomplete): {r}")
+            continue
+        if iface == "lo":
+            msgs.append(f"[DENY] {iface}: lo 변경 불가")
+            fail_count += 1
+            continue
+        if iface in mgmt_ifaces:
+            msgs.append(f"[DENY] {iface}: mgmt NIC (CSC 통신) 변경 불가 — 자기 단절 방지")
+            fail_count += 1
             continue
         cidr = f"{ip}/{mask}"
         try:
@@ -1010,6 +1055,10 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     connection refused / timeout 이 발생하므로 짧은 exponential backoff 로 복구 시도.
     정상 회차 sleep 은 heartbeat_sec, 실패 회차는 5s → 10s → 20s → max(heartbeat_sec, 60s).
     """
+    # CSC 통신 NIC 식별 — collect_interfaces() 가 mgmt 플래그 부여 시 사용.
+    global _MGMT_IP
+    _MGMT_IP = detect_mgmt_ip(csc_url)
+
     next_metric = 0
     fail_count = 0
     max_backoff = max(heartbeat_sec, 60)

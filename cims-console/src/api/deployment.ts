@@ -90,9 +90,10 @@ export interface AgentHaGroupRef {
 
 // HaServicesPage 용 — agent heartbeat 보고 인터페이스
 export interface NetIface {
-  name: string                                  // eth0 / eth1 / lo
+  name: string
   ip: string
   mask: number
+  mgmt?: boolean                                // CSC ↔ agent 통신 NIC — 변경 차단 (자기 단절 방지)
   hint?: string
 }
 

@@ -1095,8 +1095,13 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
   onChange: (rows: ServiceIpRow[]) => void
   onApply?: () => void
 }) {
-  // 한 iface 당 한 row — agent 가 같은 iface 의 multi-IP (primary + VIP secondary) 를
-  // 모두 보고하므로 첫 IP (primary) 만 사용. VIP 보유 여부는 VipPanel 에서 표시.
+  // agent 가 mgmt 플래그를 NetIface.mgmt 로 보고. 이 row 는 readonly (자기 단절 방지).
+  // lo 제외 + multi-IP dedupe 는 agent 가 처리 — UI 는 그대로 표시.
+  const mgmtIfaces = new Set(interfaces.filter(x => x.mgmt).map(x => x.name))
+  const isMgmtRow = (r: ServiceIpRow) => mgmtIfaces.has(r.iface)
+
+  // 한 iface 당 한 row — agent 가 같은 iface 의 multi-IP 를 별도 row 로 보고할 수도
+  // 있어 첫 IP (primary) 만 dedupe 해서 사용. VIP 보유 여부는 VipPanel 에서 표시.
   const seenIface = new Set<string>()
   const ifaceRows: ServiceIpRow[] = []
   for (const iface of interfaces) {
@@ -1170,26 +1175,37 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
           )}
           {ifaceRows.map((r, i) => {
             const changed = isChanged(r)
+            const mgmt = isMgmtRow(r)
             return (
-              <tr key={r.iface}>
+              <tr key={r.iface} style={mgmt ? { background: '#f8f9fa' } : undefined}>
                 <td style={{ padding: '4px 8px', color: '#888' }}>{i + 1}</td>
                 <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>
                   <b>{r.iface}</b>
+                  {mgmt && (
+                    <span title="agent ↔ CSC 통신 NIC — 변경 시 agent 단절 우려로 잠금"
+                          style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>🔒 mgmt</span>
+                  )}
                 </td>
                 <td style={{ padding: '4px 8px' }}>
                   <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
                     <input value={r.ip}
+                           readOnly={mgmt}
                            onChange={e => updateRow(r.iface, { ip: e.target.value, status: 'unknown' })}
                            style={{ width: 110, padding: '2px 6px', fontSize: 12,
-                                    border: `1px solid ${changed ? '#e67e22' : '#ddd'}`,
+                                    border: `1px solid ${changed && !mgmt ? '#e67e22' : '#ddd'}`,
+                                    background: mgmt ? '#f0f0f0' : undefined,
+                                    color: mgmt ? '#666' : undefined,
                                     borderRadius: 3 }} />
                     <span>/</span>
                     <input type="number" value={r.mask}
+                           readOnly={mgmt}
                            onChange={e => updateRow(r.iface, { mask: parseInt(e.target.value) || 24, status: 'unknown' })}
                            style={{ width: 40, padding: '2px 6px', fontSize: 12,
-                                    border: `1px solid ${changed ? '#e67e22' : '#ddd'}`,
+                                    border: `1px solid ${changed && !mgmt ? '#e67e22' : '#ddd'}`,
+                                    background: mgmt ? '#f0f0f0' : undefined,
+                                    color: mgmt ? '#666' : undefined,
                                     borderRadius: 3 }} />
-                    {changed && (
+                    {changed && !mgmt && (
                       <span style={{ marginLeft: 4, fontSize: 10, color: '#e67e22' }}
                             title="agent 보고 IP 와 다름 — [적용] 또는 [초기화]">변경됨</span>
                     )}
@@ -1205,12 +1221,13 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
                 <td style={{ padding: '4px 8px' }}><StatusBadge status={rowStatus(r)} /></td>
                 <td style={{ padding: '4px 8px' }}>
                   <button onClick={() => applyRow(r.iface)} style={btnSmall()}
-                          title="변경된 IP 를 저장 (실제 agent 적용 API 추후)">
+                          disabled={mgmt}
+                          title={mgmt ? 'mgmt NIC — 변경 불가' : '변경된 IP 를 저장 (실제 agent 적용 API 추후)'}>
                     적용
                   </button>
                   <button onClick={() => resetRow(r.iface)} style={btnSmall()}
-                          disabled={!changed}
-                          title={changed ? 'agent 가 보고한 initial IP 로 되돌림' : '변경 없음'}>
+                          disabled={!changed || mgmt}
+                          title={mgmt ? 'mgmt NIC — 변경 불가' : (changed ? 'agent 가 보고한 initial IP 로 되돌림' : '변경 없음')}>
                     초기화
                   </button>
                 </td>
