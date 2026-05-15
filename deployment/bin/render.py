@@ -345,7 +345,15 @@ def _build_access_services(scn_csp: dict, local_node_names: set[str]) -> list[di
         kind = svc.get("kind", "volte")
         if kind not in ("volte", "ptt"):
             raise RenderError(f"access_service '{svc.get('name')}' kind='{kind}' 미지원 (volte|ptt 만)")
-        # listener_ids 는 옛 호환 — 새 키는 allowed_local_node_refs
+        # listener_ids 는 옛 호환 — 새 키는 allowed_local_node_refs (CspServiceMap.cpp).
+        # 옛 키 사용 시 stderr 에 deprecation warn (한 번 출력 의도지만 svc 마다
+        # 보내고 사용자가 빠르게 발견 가능하게 함 — 마이그레이션 후 사라짐).
+        if "listener_ids" in svc and "allowed_local_node_refs" not in svc:
+            sys.stderr.write(
+                f"[deprecated] access_service '{svc.get('name')}' 의 listener_ids 는 "
+                f"allowed_local_node_refs 로 rename (csp 진짜 schema). "
+                f"render 는 호환 유지하지만 yaml 갱신 권장.\n"
+            )
         refs = svc.get("allowed_local_node_refs") or svc.get("listener_ids") or []
         missing = [r for r in refs if r not in local_node_names]
         if missing:

@@ -121,7 +121,7 @@ def main() -> int:
     p.add_argument("--base", default=DEFAULT_BASE, help=f"netns-agents 기본 경로 (default: {DEFAULT_BASE})")
     p.add_argument("--version", default=DEFAULT_VERSION, help=f"패키지 버전 (default: {DEFAULT_VERSION})")
     p.add_argument("--root", help="deployment/ 부모")
-    p.add_argument("--restart", help="apply 후 CSC API 로 restart job 호출할 deployment_id 리스트 (콤마 구분, 예: 27,28,19,20)")
+    p.add_argument("--restart", help="apply 후 restart 호출: 콤마 구분 deployment_id (예: 27,28) 또는 'auto' (CSC API GET 후 자동 매핑)")
     p.add_argument("--csc-url", help="CSC API base URL (--restart 시 사용, 기본: env.csc.url)")
     args = p.parse_args()
 
@@ -189,11 +189,21 @@ def main() -> int:
     # --restart 옵션: CSC API 로 자동 restart job POST
     if not args.dry_run and args.restart:
         csc_url = args.csc_url or (env.get("csc") or {}).get("url") or "https://127.0.0.1:4419"
-        dep_ids = [int(x.strip()) for x in args.restart.split(",") if x.strip()]
-        print(f"\n[restart] CSC={csc_url} deployments={dep_ids}")
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+
+        if args.restart.strip().lower() == "auto":
+            # 자동 매핑: (node.agent_id, package.name) → deployment_id
+            dep_ids = _resolve_auto_deployment_ids(env, scn, csp_nodes, cmp_nodes, csc_url, ctx)
+            if not dep_ids:
+                print("\n[restart] auto-resolve 결과 매칭된 deployment 없음 — restart skip")
+                return 0
+            print(f"\n[restart] CSC={csc_url} (auto) deployments={dep_ids}")
+        else:
+            dep_ids = [int(x.strip()) for x in args.restart.split(",") if x.strip()]
+            print(f"\n[restart] CSC={csc_url} deployments={dep_ids}")
+
         for dep in dep_ids:
             url = f"{csc_url.rstrip('/')}/api/v1/deployments/{dep}/job"
             req = urllib.request.Request(
@@ -211,9 +221,52 @@ def main() -> int:
             except Exception as e:
                 print(f"  dep={dep} FAIL: {e}")
     elif not args.dry_run:
-        print("  ※ csp/cmp 재시작 필요 시: --restart <dep_id,...> 옵션 또는")
-        print("    curl -X POST .../api/v1/deployments/<n>/job -d '{\"job_type\":\"restart\"}'")
+        print("  ※ csp/cmp 재시작 필요 시: --restart auto 또는 --restart <id,...>")
     return 0
+
+
+def _resolve_auto_deployment_ids(env: dict, scn: dict, csp_nodes: list[str],
+                                  cmp_nodes: list[str], csc_url: str, ctx) -> list[int]:
+    """env+scenario 의 (agent_id, package_name) → deployment.id 로 매핑.
+
+    csp/cmp 만 restart 대상. cspsim 같은 non-daemon 은 제외.
+    """
+    list_url = f"{csc_url.rstrip('/')}/api/v1/deployments"
+    try:
+        with urllib.request.urlopen(list_url, context=ctx, timeout=15) as r:
+            payload = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        sys.stderr.write(f"[error] CSC GET /deployments 실패: {e}\n")
+        return []
+    items = payload.get("items") or []
+
+    # node_id → agent_id
+    aid_by_node = {n["id"]: n.get("agent_id") for n in env.get("nodes", []) or []}
+
+    # 매칭 대상 (agent_id, package_name) 쌍 수집
+    targets: list[tuple[int, str]] = []
+    for nid in csp_nodes:
+        aid = aid_by_node.get(nid)
+        if aid is not None:
+            targets.append((aid, "csp"))
+    for nid in cmp_nodes:
+        aid = aid_by_node.get(nid)
+        if aid is not None:
+            targets.append((aid, "cmp"))
+
+    dep_ids: list[int] = []
+    for aid, pkg in targets:
+        matches = [
+            it["id"] for it in items
+            if it.get("agent_id") == aid and (it.get("package_name") or "").lower() == pkg
+        ]
+        if not matches:
+            sys.stderr.write(f"[warn] agent_id={aid} package={pkg} deployment 미발견 — skip\n")
+            continue
+        if len(matches) > 1:
+            sys.stderr.write(f"[warn] agent_id={aid} package={pkg} 중복 deployment — 첫 번째만 ({matches})\n")
+        dep_ids.append(matches[0])
+    return dep_ids
 
 
 if __name__ == "__main__":

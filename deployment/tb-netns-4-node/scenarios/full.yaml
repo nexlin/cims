@@ -108,12 +108,26 @@ csp_config:
       value:   pbx.example.com
       enabled: true
 
+    # ACL 용: TB 환경의 신뢰 망 (mgmt + svc + int 망 통합)
+    - name:    src-from-tb-nets
+      field:   src_ip
+      op:      in_cidr
+      value:   "10.0.0.0/16"          # 10.0.0.0/24 + 10.0.1.0/24 + 10.0.2.0/24 모두 포함
+      enabled: true
+
   # ── rule_sets — rules 의 묶음 (combinator AND/OR) ──
   rule_sets:
     - name:       match-pbx-outbound
       combinator: AND
       members:
         - { rule_ref: to-host-is-pbx, negate: false }
+      enabled:    true
+
+    # 신뢰 source net 외부에서 온 트래픽 매칭 (negate=true)
+    - name:       match-untrusted-source
+      combinator: AND
+      members:
+        - { rule_ref: src-from-tb-nets, negate: true }
       enabled:    true
 
   # ── routing_policies — match_rule_set_ref + target_ref (CspRoutingPolicyEngine.cpp) ──
@@ -127,8 +141,16 @@ csp_config:
       enabled:             true
 
   # ── acl_policies — match_rule_set_ref + action (CspAclPolicyEngine.cpp) ──
-  # full 시나리오는 ACL 없이 default allow. 운영에선 필요 시 정의.
-  acl_policies: []
+  # 신뢰 source net 외부 트래픽 차단 demo. csp default = allow 이므로
+  # untrusted source 만 deny 로 명시.
+  acl_policies:
+    - name:                block-untrusted-source
+      priority:            100
+      match_rule_set_ref:  match-untrusted-source
+      scope:               global       # global | listener | service
+      scope_ref:           ""
+      action:              deny
+      enabled:             true
 
 cmp_config:
   auto: true
