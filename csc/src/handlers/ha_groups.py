@@ -81,9 +81,55 @@ def _iface_ip(agent_row: dict, iface_name: str) -> str:
     return ''
 
 
+# cims-health 가 ha.json 의 services.<group>.port/proto 를 lookup. 누락 시
+# default 가 csc/csp/psp 만 정의되어 있어 그룹명(예: "Control-Server") 으로는
+# 찾지 못해 health 가 fail → keepalived 가 BACKUP 강제 → VIP 미할당.
+# 해결: ha.json render 시 그룹 멤버 deployment 들의 daemon module 을 보고
+# 대표 module 의 default port/proto 를 services.<group> 에 자동 채워준다.
+_MODULE_HEALTH_DEFAULTS = {
+    'csp':   (5060, 'udp'),
+    'isp':   (5060, 'udp'),
+    'psp':   (5060, 'udp'),
+    'csc':   (4420, 'tcp'),
+    'cmp':   (9000, 'udp'),
+    'imp':   (9000, 'udp'),
+    'pmp':   (9000, 'udp'),
+}
+# 동일 그룹에 여러 daemon module 이 deployed 되어 있을 때의 우선순위.
+# Control: csp 가 핵심 (SIP signaling) — psp/isp/csc 는 부수.
+# Media: cmp 가 핵심 (RTP relay).
+_HEALTH_MODULE_PRIORITY = ['csp', 'cmp', 'csc', 'psp', 'isp', 'pmp', 'imp']
+
+
+def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
+    """agent 의 daemon deployment 들 중 가장 적합한 module 로 (port, proto) 추정.
+
+    찾지 못하면 (None, None) 반환 — 이 경우 services entry 에 port/proto 미기재
+    (cims-health 가 csp default 5060/udp 로 fallback).
+    """
+    try:
+        from handlers.agents import _deploy_load_all
+        deps = [d for d in _deploy_load_all(config)
+                if d.get('agent_id') == agent_id]
+    except Exception:
+        return (None, None)
+    # deployment file 에는 package_name 이 없고 process_name 만 있는 케이스가 있음.
+    # process_name 우선 (CSP/CMP/CSC 등 대문자 → lowercase). cspsim 등 non-daemon 제외.
+    daemon_modules = set()
+    for d in deps:
+        mod = (d.get('process_name') or '').lower().strip()
+        if mod in _MODULE_HEALTH_DEFAULTS:
+            daemon_modules.add(mod)
+    for mod in _HEALTH_MODULE_PRIORITY:
+        if mod in daemon_modules:
+            return _MODULE_HEALTH_DEFAULTS[mod]
+    return (None, None)
+
+
 def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                          agent_row: dict, peer_row: dict | None,
-                         vip_bindings: list | None = None) -> dict:
+                         vip_bindings: list | None = None,
+                         config: dict | None = None) -> dict:
     """그룹 + 멤버 → 특정 agent 의 ha.json 내용.
 
     vip_bindings 가 있으면 multi-VIP 한 vrrp_instance (services.<group_name>.vips[]).
@@ -93,6 +139,9 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                      False)
     vip_bindings = vip_bindings or []
     default_iface = _pick_default_iface(vip_bindings, agent_id) or "eth0"
+
+    # cims-health 가 lookup 하는 port/proto — agent 의 deployment 로 추정.
+    h_port, h_proto = _infer_health_port_proto(agent_id, config) if config else (None, None)
 
     services: dict = {}
     if vip_bindings:
@@ -110,22 +159,28 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                 svc_iface = iface
             vips.append({'slot': slot, 'ip': ip, 'mask': mask})
         if vips:
-            services[group['name']] = {
+            entry = {
                 'enabled':  True,
                 'vrid':     group['vrid'],
                 'interface': svc_iface,
                 'vips':     vips,
                 'priority': 100 if is_master else 90,
             }
+            if h_port:  entry['port']  = h_port
+            if h_proto: entry['proto'] = h_proto
+            services[group['name']] = entry
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
         # legacy 단일 vip
-        services[group['name']] = {
+        entry = {
             'enabled':  True,
             'vrid':     group['vrid'],
             'interface': default_iface,
             'vip':      group['vip'],
             'priority': 100 if is_master else 90,
         }
+        if h_port:  entry['port']  = h_port
+        if h_proto: entry['proto'] = h_proto
+        services[group['name']] = entry
 
     # local_ip / peer_ip 은 VRRP advertise 가 송신되는 interface 의 IP 여야 함.
     # interface=svc 인데 agent.ip_address=mgmt 망이면 split brain 발생.
@@ -178,7 +233,7 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
             if other['agent_id'] != m['agent_id']:
                 peer = agents.get(other['agent_id'])
                 break
-        ha_json = _render_ha_for_agent(group, members, m['agent_id'], agent, peer, vip_bindings)
+        ha_json = _render_ha_for_agent(group, members, m['agent_id'], agent, peer, vip_bindings, config)
         params = {
             "install_path": f"/opt/cims/{agent.get('name','agent')}",
             "ha_json": ha_json,
