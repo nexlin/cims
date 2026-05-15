@@ -34,6 +34,10 @@ deployments:
     packages:
       - { name: cmp, version: 0.0.1, process_name: CMP }
 
+  - ha_group: 3                        # Simulator (standalone) — install 만 (cspsim 은 daemon 아님)
+    packages:
+      - { name: cspsim, version: 0.0.1, process_name: CSPSIM }
+
 # ──────────────────────────────────────────────────────────
 #  csp_config — Layer 별 값
 # ──────────────────────────────────────────────────────────
@@ -254,30 +258,43 @@ verify:
     - { node: media-b, ip: 10.0.1.22, port: 9000, proto: UDP, owner: cmp }
 
   smoke:
-    - { name: register-volte,
-        cmd: cspsim,
-        args: { server_ip: 10.0.1.13, user: "+821357007001",
-                domain: ims.mnc033.mcc450.3gppnetwork.org,
-                password: "123456", mode: volte, scenario: register },
-        expect: "REGISTER 200 OK" }
+    # at: 어느 노드에서 cspsim 실행 (env.nodes[].id, netns 사용)
+    # expect: cspsim stdout 의 regex 매칭
+    - name:    register-ptt
+      at:      sim-a
+      cmd:     cspsim
+      args:    { server_ip: 10.0.1.13, local_ip: 10.0.1.31, count: 1,
+                 user: "+82571900001",
+                 domain: ptt.mnc033.mcc450.3gppnetwork.org,
+                 password: "123456", mode: ptt, scenario: register }
+      expect:  'Registered\s*:\s*1\s*/\s*1'
 
-    - { name: register-ptt,
-        cmd: cspsim,
-        args: { server_ip: 10.0.1.13, user: "+82571900001",
-                domain: ptt.mnc033.mcc450.3gppnetwork.org,
-                password: "123456", mode: ptt, scenario: register },
-        expect: "REGISTER 200 OK" }
+    - name:    register-volte
+      at:      sim-a
+      cmd:     cspsim
+      args:    { server_ip: 10.0.1.13, local_ip: 10.0.1.31, count: 1,
+                 user: "+821357007001",
+                 auth_id: "450033100000001@ims.mnc033.mcc450.3gppnetwork.org",
+                 domain: ims.mnc033.mcc450.3gppnetwork.org,
+                 password: "123456", mode: volte, scenario: register }
+      expect:  'Registered\s*:\s*1\s*/\s*1'
 
-    - { name: call-volte-1on1,
-        cmd: cspsim,
-        args: { server_ip: 10.0.1.13, user: "+821357007001", count: 2,
-                domain: ims.mnc033.mcc450.3gppnetwork.org,
-                password: "123456", mode: volte, scenario: call, call_duration: 5 },
-        expect: "200 OK on INVITE + RTP relay via CMP" }
+    - name:    call-ptt-1on1
+      at:      sim-a
+      cmd:     cspsim
+      args:    { server_ip: 10.0.1.13, local_ip: 10.0.1.31, count: 2,
+                 user: "+82571900001",
+                 domain: ptt.mnc033.mcc450.3gppnetwork.org,
+                 password: "123456", mode: ptt, scenario: call, call_duration: 5 }
+      expect:  'Call OK/End\s*:\s*2'
 
   failover:
-    - { name: ctrl-a-down,
-        action: "ip netns exec ctrl-a kill <ctrl-a keepalived pid>",
-        wait_sec: 5,
-        expect_vip_owner: ctrl-b,
-        followup_smoke: register-volte }
+    # action 은 host (또는 netns 내부) 에서 실행할 shell 명령.
+    # ${VAR} placeholder 사용 가능 — verify.py 가 env 의 노드/VIP 정보로 치환.
+    - name:              ctrl-a-down
+      action:            |
+        ka_pid=$(cat /tmp/ctrl-a-keepalived.pid 2>/dev/null || echo "")
+        [[ -n "$ka_pid" ]] && sudo kill -TERM $ka_pid
+      wait_sec:          6
+      expect_vip_owner:  ctrl-b
+      followup_smoke:    register-ptt

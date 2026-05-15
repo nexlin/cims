@@ -1,0 +1,125 @@
+# smoke 시나리오 (dev-single-host 환경)
+#
+# CSCF + TAS 만 활성 (PTT/IBCF 없음). CMP 동거 (1대1 호 검증).
+# 단일 host 의 127.0.0.1 에 모두 bind. cspsim 도 127.0.0.1 로 직접 호출.
+
+name:        smoke
+description: 로컬 smoke — REGISTER + 1대1 VoLTE 호 (PTT 제외)
+env:         dev-single-host
+
+services:
+  cscf:   true
+  tas:    true
+  ptt_as: false
+  ibcf:   false
+
+deployments:
+  - ha_group: 1                # Standalone (self)
+    packages:
+      - { name: csp,    version: 0.0.1, process_name: CSP }
+      - { name: cmp,    version: 0.0.1, process_name: CMP }
+      - { name: cspsim, version: 0.0.1, process_name: CSPSIM }
+
+csp_config:
+  setup:
+    sip:
+      udp_thread_count:     1
+      stack_execute_period: 20
+      min_register_timeout: 60
+      user_timeout:         3600
+    media_server:
+      auto:                 true   # 같은 host 의 cmp svc IP (= loopback IP) 사용
+      enable:               true
+      control_port:         9000
+      local_port:           9001
+    log:
+      max_size_mb: 10
+      level: { debug: true, info: true, network: true, sql: false }
+    database:
+      use_env: true
+
+  local_nodes:
+    auto: true                 # standalone → 첫 멤버 svc IP = 127.0.0.1
+
+  remote_nodes:
+    auto_cmp: true             # 같은 host 의 cmp endpoint
+
+  access_services:
+    - name:           volte-basic
+      kind:           volte
+      domain:         ims.mnc033.mcc450.3gppnetwork.org
+      auth_realm:     ims.mnc033.mcc450.3gppnetwork.org
+      inbound_policy: default-inbound
+      priority:       100
+      enabled:        true
+      listener_ids:   [csp-main-udp]
+
+  routes:
+    - id:       route-volte
+      match:    { domain: ims.mnc033.mcc450.3gppnetwork.org }
+      target:   csp-main-udp
+      priority: 100
+      enabled:  true
+
+  route_sets:
+    - id:      default
+      routes:  [route-volte]
+      enabled: true
+
+  routing_policies:
+    - id:        default-inbound
+      match:     { direction: inbound }
+      route_set: default
+      priority:  100
+      enabled:   true
+
+  rules:
+    - id:      allow-loopback
+      match:   { source_cidr: 127.0.0.0/8 }
+      action:  allow
+      enabled: true
+
+  rule_sets:
+    - id:      default
+      rules:   [allow-loopback]
+      enabled: true
+
+  acl_policies:
+    - id:         default-acl
+      rule_set:   default
+      applied_to: [csp-main-udp, csp-main-tcp, csp-main-tls]
+      priority:   100
+      enabled:    true
+
+cmp_config:
+  auto: true
+  overrides:
+    server_port:        9000
+    csp_port:           9001
+    rtp_start_port:     50000
+    rtp_pool_size:      10
+    ptt_rtp_pool_size:  0
+    rtp_worker_count:   2
+    session_timeout:    300
+
+subscribers:
+  source: file
+  users:
+    - sip_id:   "+821357007001"
+      auth_id:  "450033100000001"
+      domain:   ims.mnc033.mcc450.3gppnetwork.org
+      passwd:   "123456"
+    - sip_id:   "+821357007002"
+      auth_id:  "450033100000002"
+      domain:   ims.mnc033.mcc450.3gppnetwork.org
+      passwd:   "123456"
+  volte_bindings:
+    - { user: "+821357007001", service: volte-basic }
+    - { user: "+821357007002", service: volte-basic }
+
+verify:
+  expected_listen:
+    - { node: self, ip: 127.0.0.1, port: 5060, proto: UDP, owner: csp }
+    - { node: self, ip: 127.0.0.1, port: 9000, proto: UDP, owner: cmp }
+  # smoke / failover: single-host 라 ip netns exec 없이 직접 실행해야 함.
+  # 현재 verify.py 는 netns 만 지원 — single-host 적용은 별도 트랙.

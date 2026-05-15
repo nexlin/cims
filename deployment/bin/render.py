@@ -152,6 +152,30 @@ class Index:
                 return nic.get("ip")
         return None
 
+    def service_ip(self, node_id: str) -> str | None:
+        """svc net 우선, 없으면 loopback, 그래도 없으면 첫 NIC. single-host/netns/multi-host 공통."""
+        for candidate in ("svc", "loopback"):
+            ip = self.node_ip(node_id, candidate)
+            if ip:
+                return ip
+        node = self.nodes.get(node_id) or {}
+        for nic in node.get("nics") or []:
+            if nic.get("ip"):
+                return nic["ip"]
+        return None
+
+    def service_net(self) -> str:
+        """첫 멤버의 service NIC net 이름. VIP net 매칭 등에 사용."""
+        for candidate in ("svc", "loopback"):
+            if any(candidate == nic.get("net")
+                   for n in self.nodes.values() for nic in (n.get("nics") or [])):
+                return candidate
+        # 첫 노드 첫 NIC
+        for n in self.nodes.values():
+            for nic in n.get("nics") or []:
+                return nic.get("net", "svc")
+        return "svc"
+
     def ha_for_package(self, pkg_name: str) -> int | None:
         for hg_id, pkgs in self.deployments.items():
             if any(p.get("name") == pkg_name for p in pkgs):
@@ -194,10 +218,11 @@ def _build_local_nodes(idx: Index, scn_csp: dict) -> list[dict]:
         hg = idx.ha_groups[hg_id]
         mode = hg.get("mode")
         # AS — VIP bind. AA — 멤버별 svc IP bind (멀티 row).
+        snet = idx.service_net()
         if mode == "active_standby":
-            vip_ip = idx.vip(hg_id, "svc")
+            vip_ip = idx.vip(hg_id, snet)
             if not vip_ip:
-                raise RenderError(f"ha_group '{hg.get('name')}' 의 svc VIP 미정의")
+                raise RenderError(f"ha_group '{hg.get('name')}' 의 {snet} VIP 미정의")
             for _, (lid, port, proto) in CSP_LISTEN_PORTS.items():
                 row = {
                     "id": lid, "name": lid, "edge": "access",
@@ -212,7 +237,7 @@ def _build_local_nodes(idx: Index, scn_csp: dict) -> list[dict]:
         elif mode == "all_active":
             for m in idx.ha_members(hg_id):
                 node_id = m["node"]
-                svc_ip = idx.node_ip(node_id, "svc")
+                svc_ip = idx.service_ip(node_id)
                 if not svc_ip:
                     raise RenderError(f"node '{node_id}' 가 svc net 에 NIC 없음")
                 for _, (lid_base, port, proto) in CSP_LISTEN_PORTS.items():
@@ -228,7 +253,7 @@ def _build_local_nodes(idx: Index, scn_csp: dict) -> list[dict]:
                     rows.append(row)
         elif mode == "standalone":
             m = idx.ha_members(hg_id)[0]
-            svc_ip = idx.node_ip(m["node"], "svc") or idx.node_ip(m["node"], "loopback") or "0.0.0.0"
+            svc_ip = idx.service_ip(m["node"]) or "0.0.0.0"
             for _, (lid, port, proto) in CSP_LISTEN_PORTS.items():
                 row = {
                     "id": lid, "name": lid, "edge": "access",
@@ -276,7 +301,7 @@ def _build_remote_nodes(idx: Index, scn_csp: dict) -> list[dict]:
         else:
             for m in idx.ha_members(hg_id):
                 node_id = m["node"]
-                svc_ip = idx.node_ip(node_id, "svc")
+                svc_ip = idx.service_ip(node_id)
                 if not svc_ip:
                     raise RenderError(f"cmp 멤버 '{node_id}' 의 svc IP 없음")
                 rows.append({
@@ -429,7 +454,7 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
             media_host = idx.node_ip(members[0]["node"], "svc") or ""
 
     # 자기 노드 svc IP (LocalIp)
-    self_svc_ip = idx.node_ip(node_id, "svc") or "0.0.0.0"
+    self_svc_ip = idx.service_ip(node_id) or "0.0.0.0"
 
     # Database — env.database 가 null 이면 placeholder (file fallback 진입)
     db = idx.env.get("database") or {
@@ -522,16 +547,16 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
 def _build_cmp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
     cmp_cfg = scn.get("cmp_config") or {}
     ovr = cmp_cfg.get("overrides") or {}
-    svc_ip = idx.node_ip(node_id, "svc") or "0.0.0.0"
+    svc_ip = idx.service_ip(node_id) or "0.0.0.0"
 
     csp_vip = ""
     csp_hg = idx.ha_for_package("csp")
     if csp_hg is not None:
-        csp_vip = idx.vip(csp_hg, "svc") or ""
+        csp_vip = idx.vip(csp_hg, idx.service_net()) or ""
         if not csp_vip:
             members = idx.ha_members(csp_hg)
             if members:
-                csp_vip = idx.node_ip(members[0]["node"], "svc") or ""
+                csp_vip = idx.service_ip(members[0]["node"]) or ""
 
     out = OrderedDict([
         ("ServerIp",           svc_ip),
@@ -685,6 +710,11 @@ def render(env_dir: Path, scenario_name: str, out_dir: Path, *, check_only: bool
             for u in users:
                 sip_id, body = _build_user(u)
                 _write_json(user_dir / f"{sip_id}.json", body)
+                # IMSI 별칭 — cspsim 가 VoLTE 모드에서 -user 에 IMSI 를 넘기는 경우
+                # csp 는 <from_user>.json 으로 lookup 하므로 별칭 파일이 없으면 매칭 실패.
+                imsi = body.get("imsi", "")
+                if imsi and imsi != sip_id:
+                    _write_json(user_dir / f"{imsi}.json", body)
 
     for node_id in cmp_nodes:
         node_dir = out_dir / node_id

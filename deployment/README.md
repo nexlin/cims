@@ -37,7 +37,9 @@ deployment/
 2. **시나리오 작성** — `deployment/<env-name>/scenarios/<x>.yaml` (역할 + 패키지 + 배포 매핑)
 3. **render** — `./bin/render.py --env <env-name> --scenario <scn> [--out <dir>] [--check-only]`
    → 산출: `<out>/<node>/csp.json` + `<out>/<node>/config/*.jsonl` (9종) + `<out>/<node>/user/<sip_id>.json` (CSP 노드), `<out>/<node>/cmp.json` (CMP 노드), `<out>/manifest.json`
-4. **배포** — render 결과를 module 의 `csp/config/`, `CSP/config/`, `csp/user/`, `cmp/config/` 에 복사 또는 agent install params 로 전달
+4. **배포** — `./bin/apply.py --env <env> --scenario <scn>` 로 bundle 을 install dir 에 복사 (또는 agent install params 로 전달)
+5. **검증** — `./bin/verify.py --env <env> --scenario <scn> [--phase listen|smoke|failover|all]`
+   → expected_listen (포트 LISTEN 확인) / smoke (cspsim REGISTER/call) / failover (VIP 인수 + followup smoke)
 
 ## 현재 등록된 환경
 
