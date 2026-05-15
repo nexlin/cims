@@ -18,9 +18,13 @@ USAGE
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
+import ssl
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 try:
@@ -117,6 +121,8 @@ def main() -> int:
     p.add_argument("--base", default=DEFAULT_BASE, help=f"netns-agents 기본 경로 (default: {DEFAULT_BASE})")
     p.add_argument("--version", default=DEFAULT_VERSION, help=f"패키지 버전 (default: {DEFAULT_VERSION})")
     p.add_argument("--root", help="deployment/ 부모")
+    p.add_argument("--restart", help="apply 후 CSC API 로 restart job 호출할 deployment_id 리스트 (콤마 구분, 예: 27,28,19,20)")
+    p.add_argument("--csc-url", help="CSC API base URL (--restart 시 사용, 기본: env.csc.url)")
     args = p.parse_args()
 
     here = Path(__file__).resolve().parent
@@ -179,8 +185,33 @@ def main() -> int:
         print(f"{prefix} {short_src}  →  {short_dst}")
 
     print(f"\n{mode} {len(all_plans)} 파일 {'(미적용)' if args.dry_run else '적용 완료'}")
-    if not args.dry_run:
-        print("  ※ csp/cmp 재시작 필요 시: TB-CSC console 의 deployment 페이지 또는")
+
+    # --restart 옵션: CSC API 로 자동 restart job POST
+    if not args.dry_run and args.restart:
+        csc_url = args.csc_url or (env.get("csc") or {}).get("url") or "https://127.0.0.1:4419"
+        dep_ids = [int(x.strip()) for x in args.restart.split(",") if x.strip()]
+        print(f"\n[restart] CSC={csc_url} deployments={dep_ids}")
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        for dep in dep_ids:
+            url = f"{csc_url.rstrip('/')}/api/v1/deployments/{dep}/job"
+            req = urllib.request.Request(
+                url,
+                data=json.dumps({"job_type": "restart"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+                    body = r.read().decode("utf-8", errors="replace")[:200]
+                    print(f"  dep={dep} HTTP {r.status} {body}")
+            except urllib.error.HTTPError as e:
+                print(f"  dep={dep} HTTP {e.code} {e.read().decode('utf-8', errors='replace')[:200]}")
+            except Exception as e:
+                print(f"  dep={dep} FAIL: {e}")
+    elif not args.dry_run:
+        print("  ※ csp/cmp 재시작 필요 시: --restart <dep_id,...> 옵션 또는")
         print("    curl -X POST .../api/v1/deployments/<n>/job -d '{\"job_type\":\"restart\"}'")
     return 0
 

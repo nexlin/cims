@@ -86,14 +86,23 @@ def _run(cmd: list[str], *, timeout: int = 60) -> tuple[int | None, str, str]:
         return None, "", "timeout"
 
 
-def _ns_run(netns: str, shell_cmd: str, *, as_user: str | None = None, timeout: int = 60):
-    if not _SUDO_PREFIX:
-        return None, "", "sudo unavailable"
-    if as_user:
-        cmd = [*_SUDO_PREFIX, "ip", "netns", "exec", netns,
-               "sudo", "-u", as_user, "bash", "-c", shell_cmd]
+def _ns_run(netns: str | None, shell_cmd: str, *, as_user: str | None = None, timeout: int = 60):
+    """노드 컨텍스트에서 shell_cmd 실행.
+
+    - netns 가 있으면 `ip netns exec <netns> ...` (sudo 필요)
+    - netns 가 없으면 직접 bash -c (single-host 환경)
+    """
+    if netns:
+        if not _SUDO_PREFIX:
+            return None, "", "sudo unavailable"
+        if as_user:
+            cmd = [*_SUDO_PREFIX, "ip", "netns", "exec", netns,
+                   "sudo", "-u", as_user, "bash", "-c", shell_cmd]
+        else:
+            cmd = [*_SUDO_PREFIX, "ip", "netns", "exec", netns, "bash", "-c", shell_cmd]
     else:
-        cmd = [*_SUDO_PREFIX, "ip", "netns", "exec", netns, "bash", "-c", shell_cmd]
+        # single-host — 직접 실행 (as_user 는 무시, 현재 사용자로 실행)
+        cmd = ["bash", "-c", shell_cmd]
     return _run(cmd, timeout=timeout)
 
 
@@ -103,9 +112,7 @@ def _ns_run(netns: str, shell_cmd: str, *, as_user: str | None = None, timeout: 
 
 def _check_listen_one(env: dict, item: dict) -> tuple[bool, str]:
     node = _node_by_id(env, item["node"])
-    netns = node.get("netns")
-    if not netns:
-        return False, f"node '{node['id']}' 에 netns 없음 (kind=netns 가 아님?)"
+    netns = node.get("netns")     # 없으면 single-host (현재 host 직접 실행)
 
     proto = item["proto"].upper()
     ip = item["ip"]
@@ -161,17 +168,17 @@ def _run_smoke_one(env: dict, item: dict, *, cspsim_dir: str) -> tuple[bool, str
     if not at:
         return False, "", "smoke.at 누락"
     node = _node_by_id(env, at)
-    netns = node.get("netns")
-    if not netns:
-        return False, "", f"node '{at}' netns 없음"
+    netns = node.get("netns")     # 없으면 single-host
 
     cmd = item.get("cmd", "cspsim")
     args = item.get("args") or {}
+    # single-host (netns 없음) 에선 sudo 없이도 cspsim 실행 가능 → as_user 생략
+    user_for_cspsim = "nex" if netns else None
 
     if cmd == "cspsim":
         cli = _build_cspsim_cmd(args)
         shell = f"cd {shlex.quote(cspsim_dir)} && {cli} 2>&1"
-        rc, out, err = _ns_run(netns, shell, as_user="nex", timeout=item.get("timeout", 90))
+        rc, out, err = _ns_run(netns, shell, as_user=user_for_cspsim, timeout=item.get("timeout", 90))
     elif cmd == "ping":
         host = args.get("host") or args.get("target")
         if not host:
@@ -222,9 +229,8 @@ def phase_smoke(env: dict, scn: dict, *, only_name: str | None = None,
 
 def _vip_owner(env: dict, vip_ip: str) -> str | None:
     for node in env.get("nodes", []) or []:
+        # netns 없으면 host 의 IP 만 확인 (single-host)
         netns = node.get("netns")
-        if not netns:
-            continue
         rc, out, _ = _ns_run(netns, f"ip -4 addr show 2>/dev/null | grep -wF {shlex.quote(vip_ip)} || true", timeout=5)
         if rc == 0 and vip_ip in out:
             return node["id"]
@@ -278,9 +284,13 @@ def phase_failover(env: dict, scn: dict, *, cspsim_dir: str) -> tuple[bool, list
 # ─────────────────────────────────────────────────────────────
 
 def _default_cspsim_dir(env: dict) -> str:
+    # netns 환경: install dir 안의 cspsim
     for node in env.get("nodes") or []:
-        if node.get("role_hint", "").startswith("sim"):
+        if node.get("role_hint", "").startswith("sim") and node.get("netns"):
             return f"/home/nex/work/cims/build/dist/netns-agents/{node['id']}/install/modules/cspsim/0.0.1/CSPSIM/cspsim"
+    # single-host: build/dist/cspsim 직접 사용
+    if any(not n.get("netns") for n in env.get("nodes") or []):
+        return "/home/nex/work/cims/build/dist/cspsim"
     return "/home/nex/work/cims/build/dist/netns-agents/sim-a/install/modules/cspsim/0.0.1/CSPSIM/cspsim"
 
 
@@ -303,10 +313,11 @@ def main() -> int:
         sys.stderr.write(f"[error] {e}\n")
         return 2
 
-    # sudo 가용성 점검 (netns exec 필요)
+    # sudo 가용성 점검 — netns 환경에서만 필수. single-host 면 skip.
+    needs_sudo = any((n.get("netns") for n in env.get("nodes") or []))
     global _SUDO_PREFIX
     _SUDO_PREFIX = _detect_sudo()
-    if not _SUDO_PREFIX:
+    if needs_sudo and not _SUDO_PREFIX:
         sys.stderr.write(
             "[error] netns 진입에 sudo 가 필요합니다. 다음 중 하나로 준비하세요:\n"
             "  (1) sudo -v   # 비밀번호 입력 후 timestamp 갱신\n"

@@ -1,0 +1,165 @@
+# volte-only 시나리오 (tb-netns-4-node 환경)
+#
+# VoLTE 만 (PTT/IBCF 비활성). volte-ptt 의 sub-set.
+# 검증 목적: PTT-AS off 일 때 CSCF + TAS 만으로 VoIP B2BUA 동작 확인.
+
+name:        volte-only
+description: VoLTE 만 (PTT/IBCF 제외). VIP 10.0.1.13 로 SIP listen + CMP relay
+env:         tb-netns-4-node
+
+services:
+  cscf:   true
+  tas:    true
+  ptt_as: false      # ← volte-ptt 와 유일한 의도 차이
+  ibcf:   false
+
+deployments:
+  - ha_group: 1
+    packages:
+      - { name: csp, version: 0.0.1, process_name: CSP }
+  - ha_group: 2
+    packages:
+      - { name: cmp, version: 0.0.1, process_name: CMP }
+  - ha_group: 3
+    packages:
+      - { name: cspsim, version: 0.0.1, process_name: CSPSIM }
+
+csp_config:
+  setup:
+    sip:
+      udp_thread_count:     2
+      stack_execute_period: 20
+      min_register_timeout: 60
+      user_timeout:         3600
+      tcp_thread_count:     2
+      tcp_recv_timeout:     600
+      tls_accept_timeout:   10
+      cert_file:            cert/csp.pem
+    media_server:
+      auto:         true
+      enable:       true
+      control_port: 9000
+      local_port:   9001
+    log:
+      max_size_mb: 10
+      level: { debug: true, info: true, network: true, sql: false }
+    database:
+      use_env: true
+    monitor:
+      port: 16000
+      client_ip_list: ["192.168.199.129"]
+    security:
+      deny_sip_user_agents: [friendly-scanner, sundayddr]
+
+  local_nodes: { auto: true }
+  remote_nodes: { auto_cmp: true }
+
+  # PTT 도메인/realm 제거 — VoLTE 만
+  access_services:
+    - name:           volte-basic
+      kind:           volte
+      domain:         ims.mnc033.mcc450.3gppnetwork.org
+      auth_realm:     ims.mnc033.mcc450.3gppnetwork.org
+      inbound_policy: default-inbound
+      priority:       100
+      enabled:        true
+      listener_ids:   [csp-main-udp]
+
+  routes:
+    - id:       route-volte
+      match:    { domain: ims.mnc033.mcc450.3gppnetwork.org }
+      target:   csp-main-udp
+      priority: 100
+      enabled:  true
+
+  route_sets:
+    - { id: default, routes: [route-volte], enabled: true }
+
+  routing_policies:
+    - id:         default-inbound
+      match:      { direction: inbound }
+      route_set:  default
+      priority:   100
+      enabled:    true
+
+  rules:
+    - { id: allow-mgmt-net, match: { source_cidr: 10.0.0.0/24 }, action: allow, enabled: true }
+    - { id: allow-svc-net,  match: { source_cidr: 10.0.1.0/24 }, action: allow, enabled: true }
+
+  rule_sets:
+    - { id: default, rules: [allow-mgmt-net, allow-svc-net], enabled: true }
+
+  acl_policies:
+    - id:         default-acl
+      rule_set:   default
+      applied_to: [csp-main-udp, csp-main-tcp, csp-main-tls]
+      priority:   100
+      enabled:    true
+
+cmp_config:
+  auto: true
+  overrides:
+    server_port:        9000
+    csp_port:           9001
+    rtp_start_port:     50000
+    rtp_pool_size:      20
+    ptt_rtp_pool_size:  0     # PTT 미사용
+    ptt_floor_start_port: 54000
+    rtp_worker_count:   4
+    session_timeout:    600
+
+subscribers:
+  source: file
+  users:
+    - { sip_id: "+821357007001", auth_id: "450033100000001",
+        domain: ims.mnc033.mcc450.3gppnetwork.org, passwd: "123456" }
+    - { sip_id: "+821357007002", auth_id: "450033100000002",
+        domain: ims.mnc033.mcc450.3gppnetwork.org, passwd: "123456" }
+  volte_bindings:
+    - { user: "+821357007001", service: volte-basic }
+    - { user: "+821357007002", service: volte-basic }
+
+prerequisites:
+  sysctl:
+    - { key: net.ipv4.ip_nonlocal_bind, value: 1, scope: host }
+    - { key: net.ipv4.ip_nonlocal_bind, value: 1, scope: "netns:ctrl-a" }
+    - { key: net.ipv4.ip_nonlocal_bind, value: 1, scope: "netns:ctrl-b" }
+  packages_installed: [keepalived]
+
+verify:
+  expected_listen:
+    - { node: ctrl-a, ip: 10.0.1.13, port: 5060,  proto: UDP, owner: csp }
+    - { node: ctrl-a, ip: 10.0.1.13, port: 25061, proto: TCP, owner: csp }
+    - { node: ctrl-a, ip: 10.0.1.13, port: 5061,  proto: TCP, owner: csp }
+    - { node: media-a, ip: 10.0.1.21, port: 9000, proto: UDP, owner: cmp }
+    - { node: media-b, ip: 10.0.1.22, port: 9000, proto: UDP, owner: cmp }
+
+  smoke:
+    - name:   register-volte
+      at:     sim-a
+      cmd:    cspsim
+      args:   { server_ip: 10.0.1.13, local_ip: 10.0.1.31, count: 1,
+                user: "+821357007001",
+                auth_id: "450033100000001@ims.mnc033.mcc450.3gppnetwork.org",
+                domain: ims.mnc033.mcc450.3gppnetwork.org,
+                password: "123456", mode: volte, scenario: register }
+      expect: 'Registered\s*:\s*1\s*/\s*1'
+
+    - name:   call-volte-1on1
+      at:     sim-a
+      cmd:    cspsim
+      args:   { server_ip: 10.0.1.13, local_ip: 10.0.1.31, count: 2,
+                user: "+821357007001",
+                auth_id: "450033100000001@ims.mnc033.mcc450.3gppnetwork.org",
+                domain: ims.mnc033.mcc450.3gppnetwork.org,
+                password: "123456", mode: volte, scenario: call, call_duration: 5 }
+      expect: 'Call OK/End\s*:\s*2'
+
+  failover:
+    - name:              ctrl-a-down
+      action: |
+        ka_pid=$(cat /tmp/ctrl-a-keepalived.pid 2>/dev/null || echo "")
+        [[ -n "$ka_pid" ]] && sudo kill -TERM $ka_pid
+      wait_sec:          6
+      expect_vip_owner:  ctrl-b
+      followup_smoke:    register-volte
