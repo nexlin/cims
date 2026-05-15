@@ -67,7 +67,7 @@ done
 |---|---|---|
 | [`volte-ptt`](scenarios/volte-ptt.yaml) | ✅ 작성 완료 | VoLTE + PTT 동시. VIP 10.0.1.13 으로 SIP listen + CMP relay |
 | [`volte-only`](scenarios/volte-only.yaml) | ✅ 작성 완료 | VoLTE 만 (PTT_AS off). CSCF + TAS 만으로 VoIP B2BUA |
-| `full` | placeholder | VoLTE + PTT + IBCF (외부 trunk seed 필요) |
+| [`full`](scenarios/full.yaml) | ✅ 작성 완료 | VoLTE + PTT + IBCF. routes/route_sets/routing_policies + rules/rule_sets 진짜 schema 데모 |
 
 ## LIVE 검증 cheat sheet
 

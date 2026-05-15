@@ -54,42 +54,13 @@ csp_config:
       enabled:        true
       listener_ids:   [csp-main-udp]
 
-  routes:
-    - id:       route-volte
-      match:    { domain: ims.mnc033.mcc450.3gppnetwork.org }
-      target:   csp-main-udp
-      priority: 100
-      enabled:  true
-
-  route_sets:
-    - id:      default
-      routes:  [route-volte]
-      enabled: true
-
-  routing_policies:
-    - id:        default-inbound
-      match:     { direction: inbound }
-      route_set: default
-      priority:  100
-      enabled:   true
-
-  rules:
-    - id:      allow-loopback
-      match:   { source_cidr: 127.0.0.0/8 }
-      action:  allow
-      enabled: true
-
-  rule_sets:
-    - id:      default
-      rules:   [allow-loopback]
-      enabled: true
-
-  acl_policies:
-    - id:         default-acl
-      rule_set:   default
-      applied_to: [csp-main-udp, csp-main-tcp, csp-main-tls]
-      priority:   100
-      enabled:    true
+  # routes/rules 빈 배열 — 외부 peer 없는 smoke (csp default allow).
+  routes:           []
+  route_sets:       []
+  routing_policies: []
+  rules:            []
+  rule_sets:        []
+  acl_policies:     []
 
 cmp_config:
   auto: true

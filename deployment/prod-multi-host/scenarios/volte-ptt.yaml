@@ -76,47 +76,17 @@ csp_config:
       enabled:        true
       listener_ids:   [csp-main-udp]
 
-  routes:
-    - id:       route-volte
-      match:    { domain: ims.mnc033.mcc450.3gppnetwork.org }
-      target:   csp-main-udp
-      priority: 100
-      enabled:  true
-    - id:       route-ptt
-      match:    { domain: ptt.mnc033.mcc450.3gppnetwork.org }
-      target:   csp-main-udp
-      priority: 100
-      enabled:  true
+  # routes/rules — VoLTE+PTT 내부 호만 처리하는 시나리오는 모두 빈 배열.
+  # 외부 trunk (IBCF) 시나리오는 별도 .yaml 에서 채움.
+  routes:           []
+  route_sets:       []
+  routing_policies: []
 
-  route_sets:
-    - { id: default, routes: [route-volte, route-ptt], enabled: true }
-
-  routing_policies:
-    - id:         default-inbound
-      match:      { direction: inbound }
-      route_set:  default
-      priority:   100
-      enabled:    true
-
-  rules:
-    - id:      allow-svc-net
-      match:   { source_cidr: 10.1.0.0/24 }
-      action:  allow
-      enabled: true
-    - id:      allow-trusted-peers
-      match:   { source_cidr: 10.1.254.0/24 }    # int 망 — 내부 peer 만
-      action:  allow
-      enabled: true
-
-  rule_sets:
-    - { id: default, rules: [allow-svc-net, allow-trusted-peers], enabled: true }
-
-  acl_policies:
-    - id:         default-acl
-      rule_set:   default
-      applied_to: [csp-main-udp, csp-main-tcp, csp-main-tls]
-      priority:   100
-      enabled:    true
+  # rules/rule_sets/acl_policies — 외부 진입 차단이 필요하면 정의.
+  # 예: 자기 망 외 deny 정책 (full.yaml 의 sample 참조).
+  rules:        []
+  rule_sets:    []
+  acl_policies: []
 
 cmp_config:
   auto: true

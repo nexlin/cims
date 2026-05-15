@@ -304,21 +304,30 @@ def _build_remote_nodes(idx: Index, scn_csp: dict) -> list[dict]:
                 svc_ip = idx.service_ip(node_id)
                 if not svc_ip:
                     raise RenderError(f"cmp 멤버 '{node_id}' 의 svc IP 없음")
+                # csp 의 RemoteNodeMap 스키마 (CspRemoteNodeMap.cpp:34-45):
+                # id/name/ip/port/protocol/remote_domain/srv_lookup/dns_fallback/tls_verify/enabled/tags/note
                 rows.append({
                     "id": f"cmp-{node_id}", "name": f"cmp-{node_id}",
-                    "kind": "media", "host": svc_ip, "port": 9000,
-                    "transport": "UDP", "enabled": True,
-                    "tags": [], "note": f"auto cmp member {node_id}",
+                    "ip": svc_ip, "port": 9000, "protocol": "UDP",
+                    "remote_domain": "", "srv_lookup": False,
+                    "dns_fallback": True, "tls_verify": False,
+                    "enabled": True, "tags": [],
+                    "note": f"auto cmp member {node_id}",
                 })
 
     for ex in cfg.get("extra") or []:
         rows.append({
-            "id": ex["id"], "name": ex.get("name", ex["id"]),
-            "kind": ex.get("kind", "peer"),
-            "host": ex["host"], "port": ex["port"],
-            "transport": ex.get("transport", "UDP").upper(),
-            "enabled": ex.get("enabled", True),
-            "tags": ex.get("tags", []),
+            "id": ex.get("id", ex.get("name", "")),
+            "name": ex.get("name", ex["id"]),
+            "ip": ex.get("ip", ex.get("host", "")),
+            "port": ex.get("port", 5060),
+            "protocol": ex.get("protocol", ex.get("transport", "UDP")).upper(),
+            "remote_domain": ex.get("remote_domain", ""),
+            "srv_lookup": bool(ex.get("srv_lookup", False)),
+            "dns_fallback": bool(ex.get("dns_fallback", True)),
+            "tls_verify": bool(ex.get("tls_verify", False)),
+            "enabled": bool(ex.get("enabled", True)),
+            "tags": list(ex.get("tags", [])),
             "note": ex.get("purpose", ex.get("note", "")),
         })
 
@@ -347,89 +356,206 @@ def _build_access_services(scn_csp: dict, local_node_ids: set[str]) -> list[dict
     return rows
 
 
-def _build_routes(scn_csp: dict) -> list[dict]:
-    rows = []
+def _build_routes(scn_csp: dict, local_ids: set[str], remote_ids: set[str]) -> list[dict]:
+    """routes.jsonl — (local_node_ref, remote_node_ref) pair 가 SOT (csp/CspRouteMap.cpp).
+
+    yaml 표현:
+      routes:
+        - name: trunk-pbx
+          local_node_ref: csp-main-udp
+          remote_node_ref: ibcf-trunk
+          [outbound_proxy_ip, outbound_proxy_port, register_to_remote, ...]
+    """
+    rows: list[dict] = []
+    pairs: set[tuple[str, str]] = set()
     for r in scn_csp.get("routes") or []:
+        name = r.get("name") or r.get("id")
+        ln = r.get("local_node_ref") or r.get("local")
+        rn = r.get("remote_node_ref") or r.get("remote")
+        if not name or not ln or not rn:
+            raise RenderError(f"route 에 name/local_node_ref/remote_node_ref 필수: {r}")
+        if ln not in local_ids:
+            raise RenderError(f"route '{name}' local_node_ref='{ln}' 미존재 (local={sorted(local_ids)})")
+        if rn not in remote_ids:
+            raise RenderError(f"route '{name}' remote_node_ref='{rn}' 미존재 (remote={sorted(remote_ids)})")
+        key = (ln, rn)
+        if key in pairs:
+            raise RenderError(f"route 중복 pair (local='{ln}', remote='{rn}')")
+        pairs.add(key)
         rows.append({
-            "id": r["id"],
-            "match": r.get("match", {}),
-            "target": r["target"],
-            "priority": r.get("priority", 100),
-            "enabled": r.get("enabled", True),
+            "id": r.get("id", name),
+            "name": name,
+            "local_node_ref": ln,
+            "remote_node_ref": rn,
+            "outbound_proxy_ip": r.get("outbound_proxy_ip", ""),
+            "outbound_proxy_port": int(r.get("outbound_proxy_port", 0)),
+            "register_to_remote": bool(r.get("register_to_remote", False)),
+            "register_expires": int(r.get("register_expires", 3600)),
+            "auth_user": r.get("auth_user", ""),
+            "auth_password": r.get("auth_password", ""),
+            "auth_realm": r.get("auth_realm", ""),
+            "max_concurrent_calls": int(r.get("max_concurrent_calls", 0)),
+            "cps_limit": int(r.get("cps_limit", 0)),
+            "enabled": bool(r.get("enabled", True)),
+            "tags": list(r.get("tags", [])),
             "note": r.get("note", ""),
         })
     return rows
 
 
-def _build_route_sets(scn_csp: dict, route_ids: set[str]) -> list[dict]:
-    rows = []
+def _build_route_sets(scn_csp: dict, route_names: set[str]) -> list[dict]:
+    """route_sets.jsonl — members[].route_ref 가 routes.name 매칭 (CspRouteSetMap.cpp)."""
+    rows: list[dict] = []
     for rs in scn_csp.get("route_sets") or []:
-        missing = [r for r in rs.get("routes", []) if r not in route_ids]
-        if missing:
-            raise RenderError(f"route_set '{rs.get('id')}' 의 routes 미존재: {missing}")
+        name = rs.get("name") or rs.get("id")
+        if not name:
+            raise RenderError(f"route_set 에 name 필수: {rs}")
+        members = []
+        for m in rs.get("members") or []:
+            if isinstance(m, str):
+                m = {"route_ref": m}
+            ref = m.get("route_ref")
+            if ref not in route_names:
+                raise RenderError(f"route_set '{name}' members.route_ref='{ref}' 미존재")
+            members.append({
+                "route_ref": ref,
+                "priority": int(m.get("priority", 100)),
+                "weight": int(m.get("weight", 1)),
+            })
         rows.append({
-            "id": rs["id"],
-            "routes": rs.get("routes", []),
-            "enabled": rs.get("enabled", True),
+            "id": rs.get("id", name),
+            "name": name,
+            "distribution_policy": rs.get("distribution_policy", "failover"),
+            "health_check_mode": rs.get("health_check_mode", "options_ping"),
+            "health_check_interval_sec": int(rs.get("health_check_interval_sec", 30)),
+            "health_check_dead_threshold": int(rs.get("health_check_dead_threshold", 3)),
+            "health_check_recovery_probes": int(rs.get("health_check_recovery_probes", 1)),
+            "fallback_policy": rs.get("fallback_policy", "reject"),
+            "enabled": bool(rs.get("enabled", True)),
+            "members": members,
+            "tags": list(rs.get("tags", [])),
+            "note": rs.get("note", ""),
         })
     return rows
 
 
-def _build_routing_policies(scn_csp: dict, route_set_ids: set[str]) -> list[dict]:
+def _build_routing_policies(scn_csp: dict, route_set_names: set[str], rule_set_names: set[str]) -> list[dict]:
+    """routing_policies.jsonl — match_rule_set_ref / target_ref (CspRoutingPolicyEngine.cpp)."""
     rows = []
     for p in scn_csp.get("routing_policies") or []:
-        if p.get("route_set") not in route_set_ids:
-            raise RenderError(f"routing_policy '{p.get('id')}' 의 route_set={p.get('route_set')} 미존재")
+        name = p.get("name") or p.get("id")
+        if not name:
+            raise RenderError(f"routing_policy 에 name 필수: {p}")
+        mref = p.get("match_rule_set_ref", "")
+        if mref and mref not in rule_set_names:
+            raise RenderError(f"routing_policy '{name}' match_rule_set_ref='{mref}' 미존재")
+        tref = p.get("target_ref")
+        target_type = p.get("target_type", "route_set")
+        if target_type == "route_set" and tref and tref not in route_set_names:
+            raise RenderError(f"routing_policy '{name}' target_ref='{tref}' (route_set) 미존재")
         rows.append({
-            "id": p["id"],
-            "match": p.get("match", {}),
-            "route_set": p["route_set"],
-            "priority": p.get("priority", 100),
-            "enabled": p.get("enabled", True),
+            "id": p.get("id", name),
+            "name": name,
+            "priority": int(p.get("priority", 100)),
+            "match_rule_set_ref": mref,
+            "target_type": target_type,
+            "target_ref": tref or "",
+            "transform_rule_set_refs": list(p.get("transform_rule_set_refs", [])),
+            "fail_action": p.get("fail_action", "next_policy"),
+            "enabled": bool(p.get("enabled", True)),
         })
     return rows
+
+
+_RULE_FIELDS = {
+    "from_uri_host", "from_uri_user", "to_uri_host", "to_uri_user",
+    "req_uri_host", "req_uri_user", "src_ip", "dst_ip", "user_agent",
+    "method", "p_asserted_identity", "via_host",
+}
+_RULE_OPS = {"exists", "not_exists", "eq", "ne", "prefix", "suffix",
+             "contains", "regex", "in_cidr", "in_list"}
 
 
 def _build_rules(scn_csp: dict) -> list[dict]:
+    """rules.jsonl — name/field/op/value (CspRuleEvaluator.cpp:85-92).
+
+    yaml 표현:
+      rules:
+        - name: allow-mgmt-net
+          field: src_ip
+          op: in_cidr
+          value: "10.0.0.0/24"
+    """
     rows = []
     for r in scn_csp.get("rules") or []:
+        name = r.get("name") or r.get("id")
+        field = r.get("field")
+        op = r.get("op")
+        value = r.get("value", "")
+        if not name or not field or not op:
+            raise RenderError(f"rule 에 name/field/op 필수: {r}")
+        if field not in _RULE_FIELDS:
+            raise RenderError(f"rule '{name}' field='{field}' 미지원 (지원: {sorted(_RULE_FIELDS)})")
+        if op not in _RULE_OPS:
+            raise RenderError(f"rule '{name}' op='{op}' 미지원 (지원: {sorted(_RULE_OPS)})")
         rows.append({
-            "id": r["id"],
-            "match": r.get("match", {}),
-            "action": r.get("action", "allow"),
-            "enabled": r.get("enabled", True),
+            "id": r.get("id", name),
+            "name": name,
+            "field": field,
+            "op": op,
+            "value": str(value),
+            "enabled": bool(r.get("enabled", True)),
         })
     return rows
 
 
-def _build_rule_sets(scn_csp: dict, rule_ids: set[str]) -> list[dict]:
+def _build_rule_sets(scn_csp: dict, rule_names: set[str]) -> list[dict]:
+    """rule_sets.jsonl — members[].rule_ref/negate (CspRuleEvaluator.cpp:103-116)."""
     rows = []
     for rs in scn_csp.get("rule_sets") or []:
-        missing = [r for r in rs.get("rules", []) if r not in rule_ids]
-        if missing:
-            raise RenderError(f"rule_set '{rs.get('id')}' 의 rules 미존재: {missing}")
+        name = rs.get("name") or rs.get("id")
+        if not name:
+            raise RenderError(f"rule_set 에 name 필수: {rs}")
+        members = []
+        for m in rs.get("members") or []:
+            if isinstance(m, str):
+                m = {"rule_ref": m}
+            ref = m.get("rule_ref")
+            if ref not in rule_names:
+                raise RenderError(f"rule_set '{name}' members.rule_ref='{ref}' 미존재")
+            members.append({
+                "rule_ref": ref,
+                "negate": bool(m.get("negate", False)),
+            })
         rows.append({
-            "id": rs["id"],
-            "rules": rs.get("rules", []),
-            "enabled": rs.get("enabled", True),
+            "id": rs.get("id", name),
+            "name": name,
+            "combinator": rs.get("combinator", "AND"),
+            "members": members,
+            "enabled": bool(rs.get("enabled", True)),
         })
     return rows
 
 
-def _build_acl_policies(scn_csp: dict, rule_set_ids: set[str], local_node_ids: set[str]) -> list[dict]:
+def _build_acl_policies(scn_csp: dict, rule_set_names: set[str]) -> list[dict]:
+    """acl_policies.jsonl — match_rule_set_ref/scope/scope_ref/action (CspAclPolicyEngine.cpp)."""
     rows = []
     for p in scn_csp.get("acl_policies") or []:
-        if p.get("rule_set") not in rule_set_ids:
-            raise RenderError(f"acl_policy '{p.get('id')}' 의 rule_set={p.get('rule_set')} 미존재")
-        missing = [a for a in p.get("applied_to", []) if a not in local_node_ids]
-        if missing:
-            raise RenderError(f"acl_policy '{p.get('id')}' 의 applied_to 미존재: {missing}")
+        name = p.get("name") or p.get("id")
+        mref = p.get("match_rule_set_ref")
+        if not name or not mref:
+            raise RenderError(f"acl_policy 에 name/match_rule_set_ref 필수: {p}")
+        if mref not in rule_set_names:
+            raise RenderError(f"acl_policy '{name}' match_rule_set_ref='{mref}' 미존재")
         rows.append({
-            "id": p["id"],
-            "rule_set": p["rule_set"],
-            "applied_to": p.get("applied_to", []),
-            "priority": p.get("priority", 100),
-            "enabled": p.get("enabled", True),
+            "id": p.get("id", name),
+            "name": name,
+            "priority": int(p.get("priority", 100)),
+            "match_rule_set_ref": mref,
+            "scope": p.get("scope", "global"),
+            "scope_ref": p.get("scope_ref", ""),
+            "action": p.get("action", "deny"),
+            "enabled": bool(p.get("enabled", True)),
         })
     return rows
 
@@ -655,25 +781,20 @@ def render(env_dir: Path, scenario_name: str, out_dir: Path, *, check_only: bool
 
     # CSP layer 산출 (검증 동시 수행)
     local_nodes = _build_local_nodes(idx, scn_csp)
-    local_ids = {r["id"] for r in local_nodes}
+    local_names = {r["name"] for r in local_nodes}
     remote_nodes = _build_remote_nodes(idx, scn_csp)
-    access_services = _build_access_services(scn_csp, local_ids)
-    routes = _build_routes(scn_csp)
-    route_ids = {r["id"] for r in routes}
-    route_sets = _build_route_sets(scn_csp, route_ids)
-    rs_ids = {r["id"] for r in route_sets}
-    routing_policies = _build_routing_policies(scn_csp, rs_ids)
+    remote_names = {r["name"] for r in remote_nodes}
+    access_services = _build_access_services(scn_csp, local_names)
+    routes = _build_routes(scn_csp, local_names, remote_names)
+    route_names = {r["name"] for r in routes}
     rules = _build_rules(scn_csp)
-    rule_ids = {r["id"] for r in rules}
-    rule_sets = _build_rule_sets(scn_csp, rule_ids)
-    rset_ids = {r["id"] for r in rule_sets}
-    acl_policies = _build_acl_policies(scn_csp, rset_ids, local_ids)
-
-    # routes.target → local 또는 remote 에 존재해야 함
-    remote_ids = {r["id"] for r in remote_nodes}
-    for r in routes:
-        if r["target"] not in local_ids and r["target"] not in remote_ids:
-            raise RenderError(f"route '{r['id']}' target={r['target']} 가 local/remote_nodes 에 없음")
+    rule_names = {r["name"] for r in rules}
+    rule_sets = _build_rule_sets(scn_csp, rule_names)
+    rule_set_names = {r["name"] for r in rule_sets}
+    route_sets = _build_route_sets(scn_csp, route_names)
+    route_set_names = {r["name"] for r in route_sets}
+    routing_policies = _build_routing_policies(scn_csp, route_set_names, rule_set_names)
+    acl_policies = _build_acl_policies(scn_csp, rule_set_names)
 
     users = _enrich_users_with_bindings(scn)
 

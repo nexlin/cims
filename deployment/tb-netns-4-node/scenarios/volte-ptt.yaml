@@ -115,53 +115,22 @@ csp_config:
       listener_ids:    [csp-main-udp]
 
   # ── Layer 4-6 — routes / route_sets / routing_policies ──
-  routes:
-    - id:        route-volte
-      match:     { domain: ims.mnc033.mcc450.3gppnetwork.org }
-      target:    csp-main-udp           # local_nodes.id (auto)
-      priority:  100
-      enabled:   true
-
-    - id:        route-ptt
-      match:     { domain: ptt.mnc033.mcc450.3gppnetwork.org }
-      target:    csp-main-udp
-      priority:  100
-      enabled:   true
-
-  route_sets:
-    - id:      default
-      routes:  [route-volte, route-ptt]
-      enabled: true
-
-  routing_policies:
-    - id:         default-inbound
-      match:      { direction: inbound }
-      route_set:  default
-      priority:   100
-      enabled:    true
+  # routes 는 (local_node_ref, remote_node_ref) pair — 외부 peer (IBCF trunk
+  # 등) 로의 outbound 라우팅 용. VoLTE/PTT 내부 호 (B2BUA via CMP) 는 routes
+  # 없이 동작 — REGISTER 인증 + access_services + CmpClient 만 사용.
+  # 외부 trunk 가 필요한 시나리오 (full.yaml) 에만 채움.
+  routes:           []
+  route_sets:       []
+  routing_policies: []
 
   # ── Layer 7-9 — rules / rule_sets / acl_policies ──
-  rules:
-    - id:      allow-mgmt-net
-      match:   { source_cidr: 10.0.0.0/24 }    # mgmt 망 — TB 환경
-      action:  allow
-      enabled: true
-    - id:      allow-svc-net
-      match:   { source_cidr: 10.0.1.0/24 }    # svc 망
-      action:  allow
-      enabled: true
-
-  rule_sets:
-    - id:      default
-      rules:   [allow-mgmt-net, allow-svc-net]
-      enabled: true
-
-  acl_policies:
-    - id:         default-acl
-      rule_set:   default
-      applied_to: [csp-main-udp, csp-main-tcp, csp-main-tls]
-      priority:   100
-      enabled:    true
+  # rules: name/field/op/value 트리플 (CspRuleEvaluator.cpp).
+  # field: src_ip|from_uri_host|to_uri_host|req_uri_host|...|user_agent|method
+  # op:    eq|ne|prefix|suffix|contains|regex|in_cidr|in_list|exists|not_exists
+  # ACL 미정의 시 csp default = allow. TB 환경은 ACL 없어도 동작.
+  rules:        []
+  rule_sets:    []
+  acl_policies: []
 
 # ──────────────────────────────────────────────────────────
 #  cmp_config — Media 측

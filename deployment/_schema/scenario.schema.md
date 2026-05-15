@@ -121,35 +121,95 @@ csp_config:
         purpose:  외부 IP-PBX
 ```
 
-#### `routes` / `route_sets`
-도메인/user → node 매핑.
+#### `routes`
+**(local_node_ref, remote_node_ref) pair 가 SOT** (csp/CspRouteMap.cpp). 외부 peer (IBCF trunk 등) 로의 outbound 라우팅을 표현. VoLTE/PTT 내부 호 (B2BUA via CMP) 는 routes 없이도 동작 — REGISTER 인증 + access_services + CmpClient 만 사용. 외부 trunk 필요한 시나리오 (full.yaml) 에만 채움.
 
 ```yaml
 csp_config:
   routes:
-    - id:       default-ims
-      match:    { domain: "ims.mnc033.mcc450.3gppnetwork.org" }
-      target:   csp-main
-    - id:       default-ptt
-      match:    { domain: "ptt.mnc033.mcc450.3gppnetwork.org" }
-      target:   csp-main
+    - name:            csp-to-pbx           # 필수, unique
+      local_node_ref:  csp-main-udp         # 필수, local_nodes.id 매칭
+      remote_node_ref: ibcf-trunk           # 필수, remote_nodes.name 매칭
+      register_to_remote: false             # 외부 trunk 에 REGISTER 보낼지
+      register_expires:   3600
+      auth_user:         ""
+      auth_password:     ""
+      auth_realm:        ""
+      outbound_proxy_ip:   ""
+      outbound_proxy_port: 0
+      max_concurrent_calls: 0               # 0 = 무제한
+      cps_limit:           0
+      enabled:           true
+      note:              "demo trunk"
+```
+(local, remote) pair 중복 금지. routes 가 비어있어도 OK.
+
+#### `route_sets`
+outbound 라우팅 후보 묶음 — failover / weighted 분배 (CspRouteSetMap.cpp).
+
+```yaml
+csp_config:
   route_sets:
-    - id:       default
-      routes:   [default-ims, default-ptt]
+    - name:                  pbx-trunk-set
+      distribution_policy:   failover         # failover | weighted | hash
+      health_check_mode:     options_ping
+      members:
+        - { route_ref: csp-to-pbx, priority: 100, weight: 1 }
+      enabled:               true
+```
+
+#### `routing_policies`
+**routing_policy = (rule_set match, target route_set)** (CspRoutingPolicyEngine.cpp).
+
+```yaml
+csp_config:
+  routing_policies:
+    - name:               pbx-outbound
+      priority:           100
+      match_rule_set_ref: match-pbx-outbound   # rule_sets.name 매칭
+      target_type:        route_set            # 보통 route_set
+      target_ref:         pbx-trunk-set        # route_sets.name 매칭
+      fail_action:        next_policy
+      enabled:            true
 ```
 
 #### `rules` / `rule_sets`
-ACL / normalize / header manipulation.
+csp 의 진짜 schema (CspRuleEvaluator.cpp): name/field/op/value 트리플.
+
+지원 field: `src_ip` / `dst_ip` / `from_uri_host` / `from_uri_user` / `to_uri_host` / `to_uri_user` / `req_uri_host` / `req_uri_user` / `user_agent` / `method` / `p_asserted_identity` / `via_host`
+
+지원 op: `eq` / `ne` / `prefix` / `suffix` / `contains` / `regex` / `in_cidr` / `in_list` / `exists` / `not_exists`
 
 ```yaml
 csp_config:
   rules:
-    - id:       allow-local
-      match:    { source_cidr: "10.0.0.0/8" }
-      action:   allow
+    - name:    allow-mgmt-net
+      field:   src_ip
+      op:      in_cidr
+      value:   "10.0.0.0/24"
+      enabled: true
+
   rule_sets:
-    - id:       default
-      rules:    [allow-local]
+    - name:       trusted-nets
+      combinator: AND                   # AND | OR
+      members:
+        - { rule_ref: allow-mgmt-net, negate: false }
+      enabled:    true
+```
+
+#### `acl_policies`
+ACL — match_rule_set_ref 매칭 시 action 실행 (CspAclPolicyEngine.cpp). 미정의 시 csp default = allow.
+
+```yaml
+csp_config:
+  acl_policies:
+    - name:               block-external
+      priority:           100
+      match_rule_set_ref: trusted-nets        # 매칭되면 action
+      scope:              global              # global | listener | service
+      scope_ref:          ""                  # scope=listener 면 local_node 이름
+      action:             allow               # allow | deny
+      enabled:            true
 ```
 
 ### `cmp_config`
@@ -206,7 +266,16 @@ generator 가 검증하는 invariant:
 | `deployments[].ha_group` 가 env.ha_groups 에 존재 | 매핑 오타 방지 |
 | `csp_config.local_nodes.auto=true` 면 ha_group 의 mode 와 호환 | A/S 면 VIP bind, AA 면 멤버별 svc IP bind |
 | `remote_nodes.auto_cmp=true` 면 환경에 cmp ha_group 존재 | CMP 미배포 시 경고 |
-| `routes[].target` 가 local_nodes 또는 remote_nodes 에 존재 | 라우팅 dangling 방지 |
+| `routes[].local_node_ref` 가 local_nodes 에 존재 | dangling 방지 |
+| `routes[].remote_node_ref` 가 remote_nodes 에 존재 | dangling 방지 |
+| `(local_node_ref, remote_node_ref)` pair 중복 없음 | RouteMap pair unique constraint |
+| `route_sets[].members[].route_ref` 가 routes 에 존재 | dangling |
+| `routing_policies[].match_rule_set_ref` 가 rule_sets 에 존재 | dangling |
+| `routing_policies[].target_ref` 가 route_sets 에 존재 (target_type=route_set) | dangling |
+| `rules[].field` ∈ 지원 set | csp 가 인식 못 하는 field 차단 |
+| `rules[].op` ∈ 지원 set | 동일 |
+| `rule_sets[].members[].rule_ref` 가 rules 에 존재 | dangling |
+| `acl_policies[].match_rule_set_ref` 가 rule_sets 에 존재 | dangling |
 
 ## 예시 — 최소 시나리오 (smoke)
 
