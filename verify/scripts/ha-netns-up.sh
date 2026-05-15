@@ -2,8 +2,9 @@
 # verify/scripts/ha-netns-up.sh — 4-node HA 검증용 NetNS 환경 구성
 #
 # 토폴로지:
-#   ctrl-a, ctrl-b   = A/S Control-Server (CSC/Console/CSP/PSP/ISP/CWRTC/CSPSIM/Phone)
+#   ctrl-a, ctrl-b   = A/S Control-Server (CSC/Console/CSP/PSP/ISP/CWRTC/Phone)
 #   media-a, media-b = All-Active Media-Server (CMP/PMP/IMP)
+#   sim-a            = Standalone Simulator-Server (cspsim)
 #
 # 3개 L2 도메인 (linux bridge):
 #   br-cims-mgmt (10.0.0.0/24)  — 관리 (CSC admin/heartbeat/agent enrollment)
@@ -29,6 +30,7 @@ NODES=(
     "ctrl-b:10.0.0.12:10.0.1.12:10.0.2.12"
     "media-a:10.0.0.21:10.0.1.21:10.0.2.21"
     "media-b:10.0.0.22:10.0.1.22:10.0.2.22"
+    "sim-a:10.0.0.31:10.0.1.31:10.0.2.31"
 )
 
 # bridge:host_ip
