@@ -1123,10 +1123,14 @@ void PCmpServer::timeoutLoop() {
                 std::string svc = _serviceMap.count(gid) ? _serviceMap[gid] : "mcptt";
                 logFlow(gid, "cmp", "cmp", "INT", "GROUP_TIMEOUT", "",
                         "", svc.c_str(), sesid.c_str());
+                // PTT 리소스 free pool 반환 (removeGroup 와 동일 패턴) — 누락 시 누적 leak
+                PRtpMulticast* ptt = it->second->getPttSession();
+                if (ptt) { ptt->reset(); freePttResource(ptt); }
                 delete it->second;
                 _groups.erase(it);
                 _sesidMap.erase(gid);
                 _serviceMap.erase(gid);
+                _groupSubId.erase(gid);
             }
         }
     }
