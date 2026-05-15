@@ -14,7 +14,33 @@
 pidfile() { echo "$PID_DIR/$1.pid"; }
 save_pid() { echo "$2" > "$(pidfile "$1")"; }
 read_pid() { local f; f="$(pidfile "$1")"; [[ -f $f ]] && cat "$f" || echo ""; }
-is_running() { local pid; pid="$(read_pid "$1")"; [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; }
+
+# is_running: pid 파일 + 살아있는 process + (있다면) exe 경로가 자기 install
+# 의 binary 와 일치할 때만 true. stale pid 파일 (kill -0 성공하지만 다른
+# 프로세스를 가리키는 경우) 또는 pid 가 재사용된 경우 거짓 양성 방지.
+# 재사용/혼동 시 pid 파일을 stale 로 간주하고 삭제한 후 false 반환 — 후속
+# _start_*_variant 가 정상 시작 진행하도록.
+is_running() {
+    local name="$1"
+    local pid; pid="$(read_pid "$name")"
+    [[ -z $pid ]] && return 1
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$(pidfile "$name")"
+        return 1
+    fi
+    # exe 검증 (optional). $DIST_DIR/<name>/bin/<name> 가 존재하면 그것과 비교.
+    local expected="$DIST_DIR/$name/bin/$name"
+    if [[ -x "$expected" ]]; then
+        local exe; exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
+        local want; want=$(readlink -f "$expected" 2>/dev/null || true)
+        if [[ -n "$exe" && -n "$want" && "$exe" != "$want" ]]; then
+            # pid 가 다른 binary 를 가리킴 — stale
+            rm -f "$(pidfile "$name")"
+            return 1
+        fi
+    fi
+    return 0
+}
 
 kill_stray() {
     local pattern="$1"
@@ -673,8 +699,34 @@ cmd_stop() {
 }
 
 cmd_restart() {
-    if [[ $# -eq 0 ]]; then cmd_stop all; sleep 1; cmd_start all; return; fi
+    # stop → wait → kill_stray (binary 기준 stale process 강제 정리) → start.
+    # 가설 (C, 세션 2026-05-15): SIGKILL 후 pid 파일이 race 로 살아남거나, pid
+    # 파일은 삭제됐어도 stale process 가 port 점유 중이면 start 가 bind 실패.
+    # is_running 강화로 (b) 해소, 추가 kill_stray + sleep 증가로 (c) 해소.
+    if [[ $# -eq 0 ]]; then
+        cmd_stop all
+        _restart_cleanup_strays all
+        sleep 3
+        cmd_start all
+        return
+    fi
     cmd_stop "$@"
-    sleep 1
+    local t
+    for t in "$@"; do _restart_cleanup_strays "$t"; done
+    sleep 3
     cmd_start "$@"
+}
+
+# restart 시 stop 후 stale process 한 번 더 정리. binary path 가 있으면
+# pgrep -f $bin 으로 stray 정리.
+_restart_cleanup_strays() {
+    local svc="$1"
+    case "$svc" in
+        all|tb) return 0 ;;                  # 묶음 처리 — 자체 stop 에서 처리
+        csp|psp|isp|cmp|pmp|imp)
+            local bin="$DIST_DIR/$svc/bin/$svc"
+            [[ -f "$bin" ]] && kill_stray "$bin" || true
+            ;;
+        *) return 0 ;;
+    esac
 }

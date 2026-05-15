@@ -1,0 +1,160 @@
+# prod-multi-host × volte-ptt 시나리오 (reference)
+#
+# tb-netns-4-node 의 volte-ptt 와 동일 의도. 차이:
+#   - VIP 10.1.0.10 (mgmt 가 아니라 svc 망)
+#   - access_services.priority/inbound_policy 는 사이트 정책 따라 조정 가능
+#   - subscribers 는 외부 DB 사용 (file seed 미사용)
+#   - prerequisites 는 운영 환경 가정 (각 host 의 sysctl/패키지 등)
+
+name:        volte-ptt
+description: 상용 VoLTE + PTT (Control A/S + Media AA). IBCF 제외.
+env:         prod-multi-host
+
+services:
+  cscf:   true
+  tas:    true
+  ptt_as: true
+  ibcf:   false
+
+deployments:
+  - ha_group: 1
+    packages:
+      - { name: csp, version: 0.0.1, process_name: CSP }
+  - ha_group: 2
+    packages:
+      - { name: cmp, version: 0.0.1, process_name: CMP }
+
+csp_config:
+  setup:
+    sip:
+      udp_thread_count:     4
+      stack_execute_period: 20
+      min_register_timeout: 600
+      user_timeout:         3600
+      tcp_thread_count:     4
+      tcp_recv_timeout:     600
+      tls_accept_timeout:   10
+      cert_file:            cert/csp.pem
+    media_server:
+      auto:                 true
+      enable:               true
+      control_port:         9000
+      local_port:           9001
+    log:
+      max_size_mb: 100
+      level: { debug: false, info: true, network: false, sql: false }
+    database:
+      use_env: true        # env.database 그대로
+    monitor:
+      port: 16000
+      client_ip_list: ["10.1.255.0/24"]
+    security:
+      deny_sip_user_agents: [friendly-scanner, sundayddr, sipvicious]
+
+  local_nodes:
+    auto: true             # A/S → VIP 10.1.0.10 의 UDP/TCP/TLS
+
+  remote_nodes:
+    auto_cmp: true         # cmp ha_group 멤버별 endpoint
+
+  access_services:
+    - name:           volte-basic
+      kind:           volte
+      domain:         ims.mnc033.mcc450.3gppnetwork.org
+      auth_realm:     ims.mnc033.mcc450.3gppnetwork.org
+      inbound_policy: default-inbound
+      priority:       100
+      enabled:        true
+      listener_ids:   [csp-main-udp]
+
+    - name:           ptt-basic
+      kind:           ptt
+      domain:         ptt.mnc033.mcc450.3gppnetwork.org
+      auth_realm:     ptt.mnc033.mcc450.3gppnetwork.org
+      inbound_policy: default-inbound
+      priority:       100
+      enabled:        true
+      listener_ids:   [csp-main-udp]
+
+  routes:
+    - id:       route-volte
+      match:    { domain: ims.mnc033.mcc450.3gppnetwork.org }
+      target:   csp-main-udp
+      priority: 100
+      enabled:  true
+    - id:       route-ptt
+      match:    { domain: ptt.mnc033.mcc450.3gppnetwork.org }
+      target:   csp-main-udp
+      priority: 100
+      enabled:  true
+
+  route_sets:
+    - { id: default, routes: [route-volte, route-ptt], enabled: true }
+
+  routing_policies:
+    - id:         default-inbound
+      match:      { direction: inbound }
+      route_set:  default
+      priority:   100
+      enabled:    true
+
+  rules:
+    - id:      allow-svc-net
+      match:   { source_cidr: 10.1.0.0/24 }
+      action:  allow
+      enabled: true
+    - id:      allow-trusted-peers
+      match:   { source_cidr: 10.1.254.0/24 }    # int 망 — 내부 peer 만
+      action:  allow
+      enabled: true
+
+  rule_sets:
+    - { id: default, rules: [allow-svc-net, allow-trusted-peers], enabled: true }
+
+  acl_policies:
+    - id:         default-acl
+      rule_set:   default
+      applied_to: [csp-main-udp, csp-main-tcp, csp-main-tls]
+      priority:   100
+      enabled:    true
+
+cmp_config:
+  auto: true
+  overrides:
+    server_port:           9000
+    csp_port:              9001
+    rtp_start_port:        50000
+    rtp_pool_size:         200
+    ptt_rtp_start_port:    52000
+    ptt_rtp_pool_size:     100
+    ptt_floor_start_port:  54000
+    ptt_video_start_port:  56000
+    rtp_worker_count:      8
+    enable_dtmf_ptt:       true
+    dtmf_push_digit:       "*"
+    dtmf_release_digit:    "#"
+    session_timeout:       1800
+
+# 상용은 외부 DB 사용 — file seed 없음
+subscribers:
+  source: db
+
+prerequisites:
+  sysctl:
+    - { key: net.ipv4.ip_nonlocal_bind, value: 1, scope: "host:ctrl-1" }
+    - { key: net.ipv4.ip_nonlocal_bind, value: 1, scope: "host:ctrl-2" }
+  packages_installed:
+    - keepalived
+  notes: |
+    - 각 host 에 NTP 동기화 필수 (VRRP advert 의 GMT timestamp).
+    - 방화벽: VRRP 멀티캐스트 (224.0.0.18) + SIP UDP/TCP/TLS + CMP UDP 9000 + RTP 50000-58000 허용.
+    - DB HA endpoint 의 read/write split 미사용 — csp 가 단일 endpoint 만 인식.
+
+verify:
+  expected_listen:
+    - { node: ctrl-1, ip: 10.1.0.10, port: 5060,  proto: UDP, owner: csp }
+    - { node: ctrl-1, ip: 10.1.0.10, port: 25061, proto: TCP, owner: csp }
+    - { node: ctrl-1, ip: 10.1.0.10, port: 5061,  proto: TCP, owner: csp }
+    - { node: media-1, ip: 10.1.1.21, port: 9000, proto: UDP, owner: cmp }
+    - { node: media-2, ip: 10.1.1.22, port: 9000, proto: UDP, owner: cmp }
+  # smoke / failover: 상용은 별도 운영 시나리오로 (cspsim 대신 실제 가입자 단말).

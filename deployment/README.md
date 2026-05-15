@@ -45,9 +45,9 @@ deployment/
 
 | 환경 | 상태 | 비고 |
 |---|---|---|
-| [tb-netns-4-node](tb-netns-4-node/) | ✅ 1차 작업 대상 | NetNS 4 ns (ctrl-a/b + media-a/b), VIP 10.0.1.13 |
-| dev-single-host | placeholder | 후속 |
-| prod-multi-host | placeholder | 후속 |
+| [tb-netns-4-node](tb-netns-4-node/) | ✅ LIVE 검증 환경 | NetNS 5 ns (ctrl-a/b + media-a/b + sim-a), VIP 10.0.1.13 |
+| [dev-single-host](dev-single-host/) | ✅ 로컬 smoke 환경 | 단일 host loopback (csc/csp/cmp 동거) |
+| [prod-multi-host](prod-multi-host/) | ✅ 상용 reference | 2-host A/S + AA, 외부 DB. 사이트별 IP/암호 patch 필요 |
 
 ## 관련 문서
 

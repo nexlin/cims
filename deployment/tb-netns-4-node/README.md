@@ -51,25 +51,65 @@ done
 '
 ```
 
-## 한계 / 알려진 이슈
+## 알려진 이슈 (Phase 1~4 에서 모두 해소)
 
-| # | 이슈 | 영향 | 회피 |
-|---|---|---|---|
-| 1 | csp 가 `Setup.Sip.LocalIp=0.0.0.0` 무시하고 mgmt IP 로 bind | VIP 경유 SIP 트래픽 수신 불가 → fail-over LIVE 의미 제한 | scenario.yaml 의 `local_nodes` 명시로 우회 시도 중 (Phase 2~3) |
-| 2 | 모듈 default config IP 가 외부 환경 (`192.168.199.129`) 박힘 | start 시 bind 실패 | generator 가 env.yaml 기준 자동 patch (Phase 4) |
-| 3 | DB 미연결 → service_binding 부재 | 호 시도 시 403 | `subscribers.source=file` 로 시나리오에서 seed |
+| # | 이슈 | 해소 |
+|---|---|---|
+| 1 | csp 가 mgmt IP 로 bind (VIP 경유 SIP 불가) | `local_nodes.jsonl` 의 is_primary row 로 VIP bind 명시 (render.py) |
+| 2 | 모듈 default config IP 가 외부 환경 박힘 | render.py 가 env.yaml 기준 csp.json/cmp.json 자동 생성 |
+| 3 | DB 미연결 → service_binding 부재 (403) | `_loadUserFromFile` 에 service_ref/imsi 읽기 + scenario seed (commit `814fe53`) |
+| 4 | cmp PTT pool leak | `timeoutLoop` cleanup 보강 (commit `9c032d1`) |
+| 5 | ha.json port/proto 누락 | `_render_ha_for_agent` 자동 채우기 (commit `0910c13`) |
 
 ## 시나리오 (`scenarios/`)
 
 | 시나리오 | 상태 | 비고 |
 |---|---|---|
-| [`volte-ptt`](scenarios/volte-ptt.yaml) | ✅ 작성 완료 (Phase 3) | VoLTE + PTT 동시. VIP 10.0.1.13 으로 SIP listen + CMP relay |
+| [`volte-ptt`](scenarios/volte-ptt.yaml) | ✅ 작성 완료 | VoLTE + PTT 동시. VIP 10.0.1.13 으로 SIP listen + CMP relay |
 | `volte-only` | placeholder | VoLTE 만 |
 | `full` | placeholder | VoLTE + PTT + IBCF |
 
-## 검증 흐름 (수동 — 시나리오 없이)
+## LIVE 검증 cheat sheet
 
-자율 검증 결과는 [project_session_2026_05_14_deploy_verify.md](../../../.claude/projects/-home-nex-work-cims/memory/project_session_2026_05_14_deploy_verify.md) 의 §"명령 cheat sheet" 참조.
+```bash
+# 1) sudo timestamp 갱신 (verify.py 가 netns 진입에 sudo 사용)
+sudo -v
+
+# 2) lifecycle.sh 가 최근에 변경됐다면 dist + install 동기화
+cp /home/nex/work/cims/agent/lib/lifecycle.sh /home/nex/work/cims/build/dist/agent/lib/
+for ns in ctrl-a ctrl-b media-a media-b sim-a; do
+  cp /home/nex/work/cims/agent/lib/lifecycle.sh \
+     /home/nex/work/cims/build/dist/netns-agents/$ns/install/agent/lib/lifecycle.sh
+done
+
+# 3) render + apply (bundle → install dir)
+cd /home/nex/work/cims/deployment
+./bin/apply.py --env tb-netns-4-node --scenario volte-ptt --dry-run    # plan 확인
+./bin/apply.py --env tb-netns-4-node --scenario volte-ptt              # 실제 복사
+
+# 4) 모듈 재시작 (csp/cmp 가 새 설정 로드)
+for dep in 27 28 19 20; do
+  curl -sk -X POST -H "Content-Type: application/json" \
+    -d '{"job_type":"restart"}' \
+    https://127.0.0.1:4419/api/v1/deployments/$dep/job
+done
+
+# 5) verify — listen → smoke → failover
+./bin/verify.py --env tb-netns-4-node --scenario volte-ptt --phase listen
+./bin/verify.py --env tb-netns-4-node --scenario volte-ptt --phase smoke
+./bin/verify.py --env tb-netns-4-node --scenario volte-ptt --phase failover
+
+# 또는 한번에
+./bin/verify.py --env tb-netns-4-node --scenario volte-ptt --phase all
+```
+
+LIVE 검증 기준 (`smoke` 의 expect):
+- `register-ptt` : `Registered : 1/1`
+- `register-volte`: `Registered : 1/1` (`-auth_id 450033100000001@ims...` 풀폼 명시 필수 — VoLTE 모드는 auto 유도 안 함)
+- `call-ptt-1on1`: `Call OK/End : 2`
+
+`failover` 의 expect:
+- ctrl-a keepalived SIGTERM → 6s 후 ctrl-b 가 VIP 10.0.1.13 인수 → followup `register-ptt` 동일하게 PASS
 
 ## 관련 문서
 
