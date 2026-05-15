@@ -65,7 +65,7 @@ csp_config:
       inbound_policy: default-inbound
       priority:       100
       enabled:        true
-      listener_ids:   [csp-main-udp]
+      allowed_local_node_refs:   [csp-main-udp]
 
     - name:           ptt-basic
       kind:           ptt
@@ -74,7 +74,7 @@ csp_config:
       inbound_policy: default-inbound
       priority:       100
       enabled:        true
-      listener_ids:   [csp-main-udp]
+      allowed_local_node_refs:   [csp-main-udp]
 
   # routes/rules — VoLTE+PTT 내부 호만 처리하는 시나리오는 모두 빈 배열.
   # 외부 trunk (IBCF) 시나리오는 별도 .yaml 에서 채움.

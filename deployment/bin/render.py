@@ -334,23 +334,36 @@ def _build_remote_nodes(idx: Index, scn_csp: dict) -> list[dict]:
     return rows
 
 
-def _build_access_services(scn_csp: dict, local_node_ids: set[str]) -> list[dict]:
+def _build_access_services(scn_csp: dict, local_node_names: set[str]) -> list[dict]:
+    """access_services.jsonl — csp 의 진짜 schema (CspServiceMap.cpp:24-67).
+
+    필수: id (uuid 또는 int>0) / name / kind (volte|ptt 만) / domain.
+    listeners 결정: allowed_local_node_refs[] (string name 배열).
+    """
     rows: list[dict] = []
     for i, svc in enumerate(scn_csp.get("access_services") or [], start=1):
-        # listener_ids 가 local_nodes 와 매칭되는지 검증
-        missing = [lid for lid in svc.get("listener_ids", []) if lid not in local_node_ids]
+        kind = svc.get("kind", "volte")
+        if kind not in ("volte", "ptt"):
+            raise RenderError(f"access_service '{svc.get('name')}' kind='{kind}' 미지원 (volte|ptt 만)")
+        # listener_ids 는 옛 호환 — 새 키는 allowed_local_node_refs
+        refs = svc.get("allowed_local_node_refs") or svc.get("listener_ids") or []
+        missing = [r for r in refs if r not in local_node_names]
         if missing:
-            raise RenderError(f"access_service '{svc.get('name')}' 의 listener_ids 미존재: {missing} (local_nodes={sorted(local_node_ids)})")
+            raise RenderError(
+                f"access_service '{svc.get('name')}' allowed_local_node_refs 미존재: {missing}"
+                f" (local_nodes={sorted(local_node_names)})"
+            )
         rows.append({
             "id": svc.get("id", i),
             "name": svc["name"],
-            "kind": svc.get("kind", "volte"),
+            "kind": kind,
             "domain": svc["domain"],
             "auth_realm": svc.get("auth_realm", svc["domain"]),
-            "inbound_policy": svc.get("inbound_policy", "open"),
-            "priority": svc.get("priority", 100),
-            "enabled": svc.get("enabled", True),
-            "listener_ids": svc.get("listener_ids", []),
+            "server_identity_uri": svc.get("server_identity_uri", ""),
+            "inbound_policy": svc.get("inbound_policy", "any"),
+            "priority": int(svc.get("priority", 100)),
+            "enabled": bool(svc.get("enabled", True)),
+            "allowed_local_node_refs": list(refs),
             "note": svc.get("note", ""),
         })
     return rows

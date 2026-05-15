@@ -63,7 +63,7 @@ csp_config:
       inbound_policy: default-inbound
       priority:       100
       enabled:        true
-      listener_ids:   [csp-main-udp]
+      allowed_local_node_refs:   [csp-main-udp]
 
   # routes/rules — 외부 trunk 없는 시나리오는 모두 빈 배열 (csp default allow).
   # 진짜 schema 와 의미는 ../README.md 또는 _schema/scenario.schema.md 참조.

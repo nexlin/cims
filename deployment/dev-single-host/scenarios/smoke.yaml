@@ -52,7 +52,7 @@ csp_config:
       inbound_policy: default-inbound
       priority:       100
       enabled:        true
-      listener_ids:   [csp-main-udp]
+      allowed_local_node_refs:   [csp-main-udp]
 
   # routes/rules 빈 배열 — 외부 peer 없는 smoke (csp default allow).
   routes:           []
@@ -92,5 +92,29 @@ verify:
   expected_listen:
     - { node: self, ip: 127.0.0.1, port: 5060, proto: UDP, owner: csp }
     - { node: self, ip: 127.0.0.1, port: 9000, proto: UDP, owner: cmp }
-  # smoke / failover: single-host 라 ip netns exec 없이 직접 실행해야 함.
-  # 현재 verify.py 는 netns 만 지원 — single-host 적용은 별도 트랙.
+
+  # single-host — verify.py 가 netns 없이 bash -c 직접 실행 (c8d9fd9 이후).
+  # cspsim 기본 경로: build/dist/cspsim
+  smoke:
+    - name:   register-volte
+      at:     self
+      cmd:    cspsim
+      args:   { server_ip: 127.0.0.1, local_ip: 127.0.0.1, count: 1,
+                user: "+821357007001",
+                auth_id: "450033100000001@ims.mnc033.mcc450.3gppnetwork.org",
+                domain: ims.mnc033.mcc450.3gppnetwork.org,
+                password: "123456", mode: volte, scenario: register }
+      expect: 'Registered\s*:\s*1\s*/\s*1'
+
+    - name:   call-volte-1on1
+      at:     self
+      cmd:    cspsim
+      args:   { server_ip: 127.0.0.1, local_ip: 127.0.0.1, count: 2,
+                user: "+821357007001",
+                auth_id: "450033100000001@ims.mnc033.mcc450.3gppnetwork.org",
+                domain: ims.mnc033.mcc450.3gppnetwork.org,
+                password: "123456", mode: volte, scenario: call, call_duration: 5 }
+      expect: 'Call OK/End\s*:\s*2'
+
+  # failover: standalone (HA 없음) — 의미 없음. tb-netns-4-node 의 시나리오 참조.
+  failover: []

@@ -103,7 +103,7 @@ csp_config:
       inbound_policy:  default-inbound
       priority:        100
       enabled:         true
-      listener_ids:    [csp-main-udp]   # auto 생성 id 와 매칭 (generator 가 검증)
+      allowed_local_node_refs:    [csp-main-udp]   # auto 생성 id 와 매칭 (generator 가 검증)
 
     - name:            ptt-basic
       kind:            ptt
@@ -112,7 +112,7 @@ csp_config:
       inbound_policy:  default-inbound
       priority:        100
       enabled:         true
-      listener_ids:    [csp-main-udp]
+      allowed_local_node_refs:    [csp-main-udp]
 
   # ── Layer 4-6 — routes / route_sets / routing_policies ──
   # routes 는 (local_node_ref, remote_node_ref) pair — 외부 peer (IBCF trunk

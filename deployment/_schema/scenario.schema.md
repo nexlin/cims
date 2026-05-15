@@ -109,17 +109,24 @@ csp_config:
 #### `remote_nodes`
 peer 정의 (다른 csp / CMP / IBCF / IP-PBX). 환경 안의 ha_group (CMP) 자동 + 외부 IP 명시.
 
+진짜 schema (CspRemoteNodeMap.cpp): id/name/ip/port/protocol/remote_domain/srv_lookup/dns_fallback/tls_verify/enabled/tags/note.
+
 ```yaml
 csp_config:
   remote_nodes:
     auto_cmp: true             # env 의 CMP ha_group 자동 등록
     extra:
-      - id:       ibcf-trunk
-        host:     203.0.113.10
-        port:     5060
-        transport: udp
-        purpose:  외부 IP-PBX
+      - id:            ibcf-trunk
+        name:          ibcf-trunk      # 필수, unique
+        ip:            203.0.113.10
+        port:          5060
+        protocol:      UDP            # UDP | TCP | TLS
+        remote_domain: pbx.example.com
+        enabled:       true
+        note:          외부 IP-PBX
 ```
+
+⚠ **cmp endpoint 활용 한계** (현재 — 1.E-2 stub): csp 의 CmpClient 는 `Setup.MediaServer.Host` (csp.json) 하나만 primary endpoint 로 사용. `remote_nodes.jsonl` 의 cmp row 는 csp 가 현재 안 읽음 (`AddEndpoint` 호출자 없음). multi-cmp endpoint hash 분배는 미래 활성. 단 `auto_cmp` 가 채우는 row 는 향후 SOT 보존 + admin UI 가시화 용.
 
 #### `routes`
 **(local_node_ref, remote_node_ref) pair 가 SOT** (csp/CspRouteMap.cpp). 외부 peer (IBCF trunk 등) 로의 outbound 라우팅을 표현. VoLTE/PTT 내부 호 (B2BUA via CMP) 는 routes 없이도 동작 — REGISTER 인증 + access_services + CmpClient 만 사용. 외부 trunk 필요한 시나리오 (full.yaml) 에만 채움.
