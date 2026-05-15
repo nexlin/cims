@@ -18,12 +18,13 @@ deployment/
 │       ├── <scenario-2>.yaml       예: volte-ptt
 │       └── ...
 └── bin/
-    ├── render.py                   generator — scenario → config bundle
-    ├── apply.py                    bundle → install dir 복사 (+ CSC API restart)
-    ├── verify.py                   verify.expected_listen / smoke / failover 자동 실행
-    ├── check-all.sh                모든 env × scenario render --check-only 회기
-    ├── deploy-modules.sh           모듈 일괄 deploy (수동 TB-CSC API 호출)
-    └── verify-modules.sh           sim-a 에서 cspsim 으로 호출 검증 (수동)
+    ├── render.py                   generator — scenario → config bundle (--diff 미리보기)
+    ├── apply.py                    bundle → install dir (kind 분기, --backup/--restore/--verify/--restart auto)
+    ├── verify.py                   verify.expected_listen / smoke / failover 자동 실행 (single-host/netns 양쪽)
+    ├── check-all.sh                모든 env × scenario render --check-only 회기 (또는 `make verify-scenarios`)
+    ├── sync-agent.sh               lifecycle.sh + csp/cmp 바이너리 atomic 동기화
+    ├── deploy-modules.sh           모듈 일괄 deploy (수동 TB-CSC API 호출, 옛 방식)
+    └── verify-modules.sh           sim-a 에서 cspsim 호출 검증 (수동, 옛 방식)
 ```
 
 ## 컨벤션
@@ -40,11 +41,17 @@ deployment/
 
 1. **환경 등록** — `deployment/<env-name>/env.yaml` 작성 (NIC/IP/VIP/노드/DB)
 2. **시나리오 작성** — `deployment/<env-name>/scenarios/<x>.yaml` (역할 + 패키지 + 배포 매핑)
-3. **render** — `./bin/render.py --env <env-name> --scenario <scn> [--out <dir>] [--check-only]`
-   → 산출: `<out>/<node>/csp.json` + `<out>/<node>/config/*.jsonl` (9종) + `<out>/<node>/user/<sip_id>.json` (CSP 노드), `<out>/<node>/cmp.json` (CMP 노드), `<out>/manifest.json`
-4. **배포** — `./bin/apply.py --env <env> --scenario <scn>` 로 bundle 을 install dir 에 복사 (또는 agent install params 로 전달)
-5. **검증** — `./bin/verify.py --env <env> --scenario <scn> [--phase listen|smoke|failover|all]`
-   → expected_listen (포트 LISTEN 확인) / smoke (cspsim REGISTER/call) / failover (VIP 인수 + followup smoke)
+3. **(코드 변경 후) 동기화** — `./bin/sync-agent.sh` — lifecycle.sh + csp/cmp 바이너리 → 5 install dir atomic install
+4. **미리보기** — `./bin/render.py --env <e> --scenario <s> --diff` — apply 시 어떤 파일이 바뀔지 의미적 diff
+5. **배포 + 검증** (한 명령 end-to-end):
+   ```
+   ./bin/apply.py --env <e> --scenario <s> --backup --restart auto --verify
+   ```
+   - `--backup` 기존 파일 .bak 보호
+   - `--restart auto` CSC API 로 (agent_id, package) 매핑하여 csp/cmp restart job 자동 큐잉
+   - `--verify` restart 후 listen phase 자동 확인 (sudo 필요 — netns 환경)
+6. **회기** — `make verify-scenarios` (또는 `./bin/check-all.sh`) — 5 시나리오 1초 내 회기
+7. **롤백** — `./bin/apply.py --env <e> --scenario <s> --restore` — 마지막 .bak 일괄 복원
 
 ## 현재 등록된 환경 + 시나리오
 

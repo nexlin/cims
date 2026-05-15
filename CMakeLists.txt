@@ -375,6 +375,18 @@ add_custom_target(dist_cspsim
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/csp/csp.pem ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
 )
 
+# ─────────────────────────────────────────────────────────────
+# verify-scenarios — deployment/ 의 모든 env × scenario 회기 검증
+#   render.py --check-only 일괄. csp .cpp 헤더 schema 와 yaml 정합 회기.
+#   CI 또는 코드 변경 후 1초 내 결과 확인.
+# 사용: cmake --build . --target verify-scenarios   (or `make verify-scenarios`)
+# ─────────────────────────────────────────────────────────────
+add_custom_target(verify-scenarios
+    COMMENT "Verifying deployment scenarios (render --check-only)..."
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/deployment/bin/check-all.sh
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/deployment
+)
+
 
 
 #--------------------------------------------------------
