@@ -175,6 +175,7 @@ def main() -> int:
     p.add_argument("--backup", action="store_true", help="기존 파일 .bak 으로 백업 후 복사 (마지막 1회분만)")
     p.add_argument("--restore", action="store_true", help="마지막 백업 (.bak) 을 원본으로 복원. apply 안 함")
     p.add_argument("--restart", help="apply 후 restart 호출: 콤마 구분 deployment_id (예: 27,28) 또는 'auto' (CSC API GET 후 자동 매핑)")
+    p.add_argument("--skip-restart-if-no-change", action="store_true", help="--backup 과 함께. apply 후 .bak 과 비교하여 변경 0 이면 restart skip")
     p.add_argument("--verify", action="store_true", help="apply (+ restart) 후 verify.py --phase listen 자동 실행")
     p.add_argument("--csc-url", help="CSC API base URL (--restart 시 사용, 기본: env.csc.url)")
     args = p.parse_args()
@@ -260,6 +261,28 @@ def main() -> int:
         print(f"{prefix} {short_src}  →  {short_dst}")
 
     print(f"\n{mode} {len(all_plans)} 파일 {'(미적용)' if args.dry_run else '적용 완료'}")
+
+    # --skip-restart-if-no-change: .bak 과 비교하여 변경된 파일 0 이면 restart skip
+    if not args.dry_run and args.skip_restart_if_no_change and args.restart:
+        if not args.backup:
+            sys.stderr.write("[warn] --skip-restart-if-no-change 는 --backup 필요 — 항상 restart 진행\n")
+        else:
+            changed = 0
+            for _, dst_str in all_plans:
+                dst = Path(dst_str)
+                bak = dst.with_suffix(dst.suffix + ".bak")
+                if not bak.exists():
+                    changed += 1   # 신규 파일
+                    continue
+                try:
+                    if bak.read_bytes() != dst.read_bytes():
+                        changed += 1
+                except Exception:
+                    changed += 1   # 비교 실패 시 안전쪽으로 restart
+            print(f"\n[change-detect] 변경 파일 {changed}/{len(all_plans)}")
+            if changed == 0:
+                print("[restart] 변경 없음 — restart skip")
+                args.restart = None
 
     # --restart 옵션: CSC API 로 자동 restart job POST
     if not args.dry_run and args.restart:

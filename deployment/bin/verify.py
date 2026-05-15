@@ -16,6 +16,7 @@ PHASES
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
@@ -132,17 +133,19 @@ def _check_listen_one(env: dict, item: dict) -> tuple[bool, str]:
     return False, f"미발견 ({target_a} {proto})"
 
 
-def phase_listen(env: dict, scn: dict) -> tuple[bool, list]:
+def phase_listen(env: dict, scn: dict, *, quiet: bool = False) -> tuple[bool, list]:
     items = (scn.get("verify") or {}).get("expected_listen") or []
     if not items:
         return True, []
-    print(f"\n=== Phase: expected_listen ({len(items)} 항목) ===")
+    if not quiet:
+        print(f"\n=== Phase: expected_listen ({len(items)} 항목) ===")
     results = []
     for it in items:
         ok, msg = _check_listen_one(env, it)
-        tag = _pass("PASS") if ok else _fail("FAIL")
-        line = f"  [{tag}] {it['node']:8s} {it['ip']:14s}:{it['port']:<6} {it['proto']:4s}"
-        print(f"{line}  {_dim(msg[:100])}")
+        if not quiet:
+            tag = _pass("PASS") if ok else _fail("FAIL")
+            line = f"  [{tag}] {it['node']:8s} {it['ip']:14s}:{it['port']:<6} {it['proto']:4s}"
+            print(f"{line}  {_dim(msg[:100])}")
         results.append((ok, it, msg))
     return all(r[0] for r in results), results
 
@@ -202,23 +205,25 @@ def _run_smoke_one(env: dict, item: dict, *, cspsim_dir: str) -> tuple[bool, str
 
 
 def phase_smoke(env: dict, scn: dict, *, only_name: str | None = None,
-                cspsim_dir: str) -> tuple[bool, list]:
+                cspsim_dir: str, quiet: bool = False) -> tuple[bool, list]:
     items = (scn.get("verify") or {}).get("smoke") or []
     if only_name:
         items = [i for i in items if i.get("name") == only_name]
     if not items:
-        if only_name:
+        if only_name and not quiet:
             print(f"\n[warn] smoke '{only_name}' 항목 없음")
         return True, []
-    print(f"\n=== Phase: smoke ({len(items)} 항목) ===")
+    if not quiet:
+        print(f"\n=== Phase: smoke ({len(items)} 항목) ===")
     results = []
     for it in items:
         ok, out, msg = _run_smoke_one(env, it, cspsim_dir=cspsim_dir)
-        tag = _pass("PASS") if ok else _fail("FAIL")
-        print(f"  [{tag}] {it.get('name', '?'):25s} {_dim(msg[:100])}")
-        if not ok and out:
-            for line in out.splitlines()[-8:]:
-                print(f"        {_dim(line[:110])}")
+        if not quiet:
+            tag = _pass("PASS") if ok else _fail("FAIL")
+            print(f"  [{tag}] {it.get('name', '?'):25s} {_dim(msg[:100])}")
+            if not ok and out:
+                for line in out.splitlines()[-8:]:
+                    print(f"        {_dim(line[:110])}")
         results.append((ok, it, out, msg))
     return all(r[0] for r in results), results
 
@@ -245,12 +250,13 @@ def _scenario_vip(env: dict) -> str | None:
     return None
 
 
-def phase_failover(env: dict, scn: dict, *, cspsim_dir: str) -> tuple[bool, list]:
+def phase_failover(env: dict, scn: dict, *, cspsim_dir: str, quiet: bool = False) -> tuple[bool, list]:
     items = (scn.get("verify") or {}).get("failover") or []
     if not items:
         return True, []
     vip_ip = _scenario_vip(env)
-    print(f"\n=== Phase: failover ({len(items)} 항목) — VIP={vip_ip} ===")
+    if not quiet:
+        print(f"\n=== Phase: failover ({len(items)} 항목) — VIP={vip_ip} ===")
     results = []
     for it in items:
         name = it.get("name", "?")
@@ -259,21 +265,24 @@ def phase_failover(env: dict, scn: dict, *, cspsim_dir: str) -> tuple[bool, list
         if action:
             rc, _, err = _run(["bash", "-c", action], timeout=30)
             if rc != 0:
-                print(f"  [{_fail('FAIL')}] {name:20s} action 실패: {err.strip()[:120]}")
+                if not quiet:
+                    print(f"  [{_fail('FAIL')}] {name:20s} action 실패: {err.strip()[:120]}")
                 results.append((False, it))
                 continue
         time.sleep(it.get("wait_sec", 5))
         after = _vip_owner(env, vip_ip) if vip_ip else None
         expect_owner = it.get("expect_vip_owner")
         owner_ok = (after == expect_owner)
-        tag = _pass("PASS") if owner_ok else _fail("FAIL")
-        print(f"  [{tag}] {name:20s} VIP owner {before} → {after} (expect={expect_owner})")
+        if not quiet:
+            tag = _pass("PASS") if owner_ok else _fail("FAIL")
+            print(f"  [{tag}] {name:20s} VIP owner {before} → {after} (expect={expect_owner})")
 
         followup_ok = True
         fname = it.get("followup_smoke")
         if owner_ok and fname:
-            print(f"        ↳ followup smoke '{fname}'")
-            _, sm = phase_smoke(env, scn, only_name=fname, cspsim_dir=cspsim_dir)
+            if not quiet:
+                print(f"        ↳ followup smoke '{fname}'")
+            _, sm = phase_smoke(env, scn, only_name=fname, cspsim_dir=cspsim_dir, quiet=quiet)
             followup_ok = all(r[0] for r in sm)
         results.append((owner_ok and followup_ok, it))
     return all(r[0] for r in results), results
@@ -302,6 +311,7 @@ def main() -> int:
     p.add_argument("--smoke-name", help="smoke 중 특정 항목만 실행")
     p.add_argument("--cspsim-dir", help="cspsim install dir (기본: sim 노드 자동 추론)")
     p.add_argument("--root", help="deployment/ 부모 (기본 자동)")
+    p.add_argument("--json", action="store_true", help="결과를 JSON 으로 stdout 출력 (CI 통합용)")
     args = p.parse_args()
 
     here = Path(__file__).resolve().parent
@@ -329,22 +339,46 @@ def main() -> int:
     cspsim_dir = args.cspsim_dir or _default_cspsim_dir(env)
 
     overall = True
+    quiet = args.json   # JSON 모드면 사람용 print 억제
+    json_out: dict = {"env": args.env, "scenario": args.scenario, "phases": {}}
     try:
         if args.phase in ("listen", "all"):
-            ok, _ = phase_listen(env, scn); overall = overall and ok
+            ok, results = phase_listen(env, scn, quiet=quiet)
+            overall = overall and ok
+            json_out["phases"]["listen"] = {
+                "pass": ok,
+                "items": [{"pass": r[0], "node": r[1].get("node"),
+                           "ip": r[1].get("ip"), "port": r[1].get("port"),
+                           "proto": r[1].get("proto"), "msg": r[2]} for r in results],
+            }
         if args.phase in ("smoke", "all"):
-            ok, _ = phase_smoke(env, scn, only_name=args.smoke_name, cspsim_dir=cspsim_dir)
+            ok, results = phase_smoke(env, scn, only_name=args.smoke_name,
+                                       cspsim_dir=cspsim_dir, quiet=quiet)
             overall = overall and ok
+            json_out["phases"]["smoke"] = {
+                "pass": ok,
+                "items": [{"pass": r[0], "name": r[1].get("name"), "at": r[1].get("at"),
+                           "msg": r[3]} for r in results],
+            }
         if args.phase in ("failover", "all"):
-            ok, _ = phase_failover(env, scn, cspsim_dir=cspsim_dir)
+            ok, results = phase_failover(env, scn, cspsim_dir=cspsim_dir, quiet=quiet)
             overall = overall and ok
+            json_out["phases"]["failover"] = {
+                "pass": ok,
+                "items": [{"pass": r[0], "name": r[1].get("name")} for r in results],
+            }
     except VerifyError as e:
         sys.stderr.write(f"\n[error] {e}\n")
         return 2
 
-    print()
-    print("=" * 60)
-    print(f"OVERALL: {_pass('PASS') if overall else _fail('FAIL')}")
+    json_out["overall_pass"] = overall
+
+    if args.json:
+        print(json.dumps(json_out, ensure_ascii=False, indent=2))
+    else:
+        print()
+        print("=" * 60)
+        print(f"OVERALL: {_pass('PASS') if overall else _fail('FAIL')}")
     return 0 if overall else 1
 
 
