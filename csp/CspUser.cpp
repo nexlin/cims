@@ -93,6 +93,12 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     if ( jsonUser.Has( "org_id" ) ) clsUser.m_strOrganizationId = jsonUser.GetString( "org_id" );
     if ( jsonUser.Has( "service_type" ) ) clsUser.m_strServiceType = jsonUser.GetString( "service_type" );
 
+    // v3 (2026-04-22): service_ref / imsi — DB 의 volte_subscriptions / ptt_subscriptions 에 적재되는
+    // 가입자 매핑. file fallback 모드 (DB 미연결) 에서도 user JSON 에서 직접 읽어 service_binding 채움.
+    // 두 필드가 비면 CCscfModule::CheckAuthorization 에서 REGISTER 거부.
+    if ( jsonUser.Has( "service_ref" ) ) clsUser.m_strServiceRef = jsonUser.GetString( "service_ref" );
+    if ( jsonUser.Has( "imsi" ) )        clsUser.m_strImsi       = jsonUser.GetString( "imsi" );
+
     std::string dnd = jsonUser.GetString( "dnd" );
     clsUser.m_bDnd = ( dnd == "true" );
 
