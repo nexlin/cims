@@ -311,7 +311,7 @@ def _build_remote_nodes(idx: Index, scn_csp: dict) -> list[dict]:
                     "ip": svc_ip, "port": 9000, "protocol": "UDP",
                     "remote_domain": "", "srv_lookup": False,
                     "dns_fallback": True, "tls_verify": False,
-                    "enabled": True, "tags": [],
+                    "enabled": True, "tags": ["cmp"],
                     "note": f"auto cmp member {node_id}",
                 })
 

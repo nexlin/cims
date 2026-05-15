@@ -288,6 +288,29 @@ int ServiceMain() {
     //   8) AccessService            (LocalNode 참조)
     // R1 (2026-04-23): LocalNodeMap 은 기동 초기 (Setup 결정 시) 이미 Sync 됨 → 여기서는 생략.
     gclsRemoteNodeMap.Sync();
+
+    // 1.E-2 LIVE 활성 (2026-05-15): remote_nodes 의 tags=["cmp"] 인 endpoint 들을
+    // CmpClient.AddEndpoint 에 등록. CmpClient::Init 의 primary 와 함께 consistent
+    // hash ring 으로 session 분배. multi-cmp (AA) 분배 활성화.
+    {
+        std::vector<RemoteNodeInfo> nodes = gclsRemoteNodeMap.GetAll();
+        int added = 0;
+        for ( const auto& n : nodes ) {
+            if ( !n.enabled || n.ip.empty() || n.port <= 0 ) continue;
+            bool isCmp = false;
+            for ( const auto& t : n.tags ) {
+                if ( t == "cmp" ) { isCmp = true; break; }
+            }
+            if ( !isCmp ) continue;
+            // primary 와 동일 endpoint 면 AddEndpoint 가 internal dedup
+            gclsCmpClient.AddEndpoint( n.ip, n.port );
+            ++added;
+        }
+        if ( added > 0 ) {
+            CLog::Print( LOG_INFO, "CmpClient: registered %d additional endpoints from remote_nodes (tags=cmp)", added );
+        }
+    }
+
     gclsRouteMap.Sync();
     gclsRouteMap.ValidateRefs();  // LocalNode/RemoteNode 존재 확인
     gclsRouteSetMap.Sync();
