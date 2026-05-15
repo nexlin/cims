@@ -173,7 +173,9 @@ def main() -> int:
     p.add_argument("--version", default=DEFAULT_VERSION, help=f"패키지 버전 (default: {DEFAULT_VERSION})")
     p.add_argument("--root", help="deployment/ 부모")
     p.add_argument("--backup", action="store_true", help="기존 파일 .bak 으로 백업 후 복사 (마지막 1회분만)")
+    p.add_argument("--restore", action="store_true", help="마지막 백업 (.bak) 을 원본으로 복원. apply 안 함")
     p.add_argument("--restart", help="apply 후 restart 호출: 콤마 구분 deployment_id (예: 27,28) 또는 'auto' (CSC API GET 후 자동 매핑)")
+    p.add_argument("--verify", action="store_true", help="apply (+ restart) 후 verify.py --phase listen 자동 실행")
     p.add_argument("--csc-url", help="CSC API base URL (--restart 시 사용, 기본: env.csc.url)")
     args = p.parse_args()
 
@@ -182,6 +184,16 @@ def main() -> int:
     env_path = root / args.env / "env.yaml"
     scn_path = root / args.env / "scenarios" / f"{args.scenario}.yaml"
     bundle = Path(args.bundle) if args.bundle else (Path.cwd() / "bundle" / f"{args.env}__{args.scenario}")
+
+    # --restore: .bak 파일을 원본으로 복원하고 종료
+    if args.restore:
+        try:
+            env = _load_yaml(env_path)
+            scn = _load_yaml(scn_path)
+        except ApplyError as e:
+            sys.stderr.write(f"[error] {e}\n")
+            return 2
+        return _do_restore(env, scn, args)
 
     # 1) render
     if not args.no_render:
@@ -285,6 +297,67 @@ def main() -> int:
                 print(f"  dep={dep} FAIL: {e}")
     elif not args.dry_run:
         print("  ※ csp/cmp 재시작 필요 시: --restart auto 또는 --restart <id,...>")
+
+    # --verify: apply + restart 후 verify.py --phase listen 자동 실행
+    if not args.dry_run and args.verify:
+        # restart 가 트리거됐으면 csp/cmp 가 새로 뜰 시간 확보
+        if args.restart:
+            print("\n[verify] restart 후 csp/cmp 기동 대기 (6s)...")
+            import time
+            time.sleep(6)
+        verify_bin = here / "verify.py"
+        print(f"[verify] ./bin/verify.py --env {args.env} --scenario {args.scenario} --phase listen")
+        rc = subprocess.call([str(verify_bin), "--env", args.env, "--scenario", args.scenario, "--phase", "listen"])
+        return rc
+    return 0
+
+
+def _do_restore(env: dict, scn: dict, args) -> int:
+    """모든 install dir 의 .bak 파일을 원본으로 복원."""
+    kind = (env.get("kind") or "").lower()
+    if args.base:
+        base = Path(args.base)
+    elif kind == "netns":
+        base = Path(DEFAULT_BASE)
+    else:
+        base = Path("/home/nex/work/cims/build/dist")
+
+    csp_hg = _ha_for_pkg(scn, "csp")
+    cmp_hg = _ha_for_pkg(scn, "cmp")
+    csp_nodes = _members(env, csp_hg) if csp_hg is not None else []
+    cmp_nodes = _members(env, cmp_hg) if cmp_hg is not None else []
+
+    restored: list[str] = []
+    for node in csp_nodes:
+        csp_root = _csp_root(env, base, node, args.version)
+        csp_json_dst, config_dst, user_dst = _csp_paths(csp_root, kind)
+        for target_dir in [config_dst, user_dst]:
+            if not target_dir.exists(): continue
+            for bak in target_dir.glob("*.bak"):
+                orig = bak.with_suffix("")
+                shutil.copy2(bak, orig)
+                restored.append(str(orig))
+        if csp_json_dst.with_suffix(csp_json_dst.suffix + ".bak").exists():
+            shutil.copy2(csp_json_dst.with_suffix(csp_json_dst.suffix + ".bak"), csp_json_dst)
+            restored.append(str(csp_json_dst))
+
+    for node in cmp_nodes:
+        cmp_root = _cmp_root(env, base, node, args.version)
+        dst = _cmp_json_path(cmp_root, kind)
+        bak = dst.with_suffix(dst.suffix + ".bak")
+        if bak.exists():
+            shutil.copy2(bak, dst)
+            restored.append(str(dst))
+
+    print(f"[restore] {len(restored)} 파일 복원 완료")
+    for r in restored:
+        try:
+            short = str(Path(r).relative_to(base.parent))
+        except ValueError:
+            short = r
+        print(f"  ← {short}")
+    if not restored:
+        print("  (백업 파일 없음 — apply --backup 한 적 없거나 이미 복원됨)")
     return 0
 
 
