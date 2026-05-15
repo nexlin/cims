@@ -891,12 +891,124 @@ def render(env_dir: Path, scenario_name: str, out_dir: Path, *, check_only: bool
 # CLI
 # ─────────────────────────────────────────────────────────────
 
+def _install_dst_for(env: dict, node: str, base: Path, version: str,
+                      relpath: Path) -> Path | None:
+    """bundle 의 상대경로 → install dir 의 절대경로 매핑 (apply.py 와 동일 로직)."""
+    kind = (env.get("kind") or "").lower()
+    parts = relpath.parts
+    if not parts:
+        return None
+    if parts[0] == "csp.json":
+        csp = (base / node / "install" / "modules" / "csp" / version / "CSP") if kind == "netns" else (base / "csp")
+        return (csp / "csp" / "config" / "csp.json") if kind == "netns" else (csp / "config" / "csp.json")
+    if parts[0] == "cmp.json":
+        cmp_ = (base / node / "install" / "modules" / "cmp" / version / "CMP") if kind == "netns" else (base / "cmp")
+        return (cmp_ / "cmp" / "config" / "cmp.json") if kind == "netns" else (cmp_ / "config" / "cmp.json")
+    if parts[0] == "config":
+        csp = (base / node / "install" / "modules" / "csp" / version / "CSP") if kind == "netns" else (base / "csp")
+        return csp / "config" / Path(*parts[1:])
+    if parts[0] == "user":
+        csp = (base / node / "install" / "modules" / "csp" / version / "CSP") if kind == "netns" else (base / "csp")
+        return (csp / "csp" / "user" / Path(*parts[1:])) if kind == "netns" else (csp / "user" / Path(*parts[1:]))
+    return None
+
+
+def _semantic_lines(path: Path) -> list[str]:
+    """JSON/JSONL 파일을 의미적 비교 가능한 라인 시퀀스로 변환 (sort_keys)."""
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    name = path.name
+    if name.endswith(".jsonl"):
+        out = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                out.append(json.dumps(obj, ensure_ascii=False, sort_keys=True))
+            except json.JSONDecodeError:
+                out.append(line)
+        return sorted(out)   # jsonl 은 라인 순서 무관
+    if name.endswith(".json"):
+        try:
+            obj = json.loads(text)
+            return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True).splitlines()
+        except json.JSONDecodeError:
+            return text.splitlines()
+    return text.splitlines()
+
+
+def _run_diff(env_dir: Path, scenario_name: str, base: Path | None, version: str) -> int:
+    """render 결과와 install dir 의 현재 파일을 의미적 diff."""
+    import difflib
+    import tempfile
+
+    env = _load_yaml(env_dir / "env.yaml")
+    scn = _load_yaml(env_dir / "scenarios" / f"{scenario_name}.yaml")
+
+    # base 결정
+    kind = (env.get("kind") or "").lower()
+    if base is None:
+        if kind == "netns":
+            base = Path("/home/nex/work/cims/build/dist/netns-agents")
+        else:
+            base = Path("/home/nex/work/cims/build/dist")
+
+    with tempfile.TemporaryDirectory(prefix="render-diff-") as tmp:
+        tmp_out = Path(tmp)
+        render(env_dir, scenario_name, tmp_out)
+
+        changed = 0
+        unchanged = 0
+        new_files = 0
+        for node_dir in sorted(tmp_out.iterdir()):
+            if not node_dir.is_dir():
+                continue
+            node = node_dir.name
+            for bundle_file in sorted(node_dir.rglob("*")):
+                if not bundle_file.is_file():
+                    continue
+                rel = bundle_file.relative_to(node_dir)
+                live = _install_dst_for(env, node, base, version, rel)
+                if live is None:
+                    continue
+                new = _semantic_lines(bundle_file)
+                cur = _semantic_lines(live)
+                if new == cur:
+                    unchanged += 1
+                    continue
+                changed += 1 if cur else 0
+                new_files += 0 if cur else 1
+                short_dst = str(live)
+                try:
+                    short_dst = str(live.relative_to(base.parent))
+                except ValueError:
+                    pass
+                print(f"\n──── {node}/{rel}  →  {short_dst}")
+                if not cur:
+                    print("  (신규 파일 — install dir 에 없음)")
+                    continue
+                diff = list(difflib.unified_diff(cur, new, fromfile="LIVE", tofile="RENDER", lineterm=""))
+                for line in diff[:60]:   # 최대 60 라인
+                    print(f"  {line}")
+                if len(diff) > 60:
+                    print(f"  ... (잘림, 총 {len(diff)} 라인)")
+
+        print(f"\n[diff] changed={changed} new={new_files} unchanged={unchanged}")
+        return 0 if (changed == 0 and new_files == 0) else 1
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--env", required=True, help="환경 디렉토리 이름 (deployment/ 아래)")
     p.add_argument("--scenario", required=True, help="시나리오 이름 (scenarios/<n>.yaml)")
     p.add_argument("--out", help="bundle 출력 디렉토리 (기본 ./bundle/<env>__<scn>/)")
     p.add_argument("--check-only", action="store_true", help="파일 생성 없이 검증만 수행")
+    p.add_argument("--diff", action="store_true", help="install dir 의 현재 파일과 의미적 diff (apply 전 미리보기)")
+    p.add_argument("--base", help="install base 경로 (--diff 시 사용)")
+    p.add_argument("--version", default="0.0.1", help="패키지 버전 (--diff 시 사용)")
     p.add_argument("--root", help="deployment/ 의 부모 (기본 자동 탐지)")
     args = p.parse_args()
 
@@ -906,6 +1018,9 @@ def main() -> int:
     out_dir = Path(args.out) if args.out else (Path.cwd() / "bundle" / f"{args.env}__{args.scenario}")
 
     try:
+        if args.diff:
+            return _run_diff(env_dir, args.scenario,
+                              Path(args.base) if args.base else None, args.version)
         render(env_dir, args.scenario, out_dir, check_only=args.check_only)
     except RenderError as e:
         sys.stderr.write(f"[error] {e}\n")

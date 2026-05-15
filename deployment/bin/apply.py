@@ -63,50 +63,101 @@ def _members(env: dict, hg_id) -> list[str]:
     return []
 
 
-def _copy_dir(src: Path, dst: Path, *, dry_run: bool) -> list[tuple[str, str]]:
+def _backup(dst: Path) -> None:
+    """기존 파일을 .bak 으로 백업. 이미 .bak 가 있어도 덮어씀 (마지막 1회만 보관)."""
+    if dst.exists() and dst.is_file():
+        shutil.copy2(dst, dst.with_suffix(dst.suffix + ".bak"))
+
+
+def _copy_dir(src: Path, dst: Path, *, dry_run: bool, do_backup: bool) -> list[tuple[str, str]]:
     moves = []
     if not src.exists():
         return moves
     for f in sorted(src.iterdir()):
         if f.is_file():
-            moves.append((str(f), str(dst / f.name)))
+            target = dst / f.name
+            moves.append((str(f), str(target)))
             if not dry_run:
                 dst.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(f, dst / f.name)
+                if do_backup: _backup(target)
+                shutil.copy2(f, target)
     return moves
 
 
-def _apply_csp(node: str, bundle_node: Path, base: Path, version: str, *, dry_run: bool) -> list:
-    csp_root = base / node / "install" / "modules" / "csp" / version / "CSP"
+def _csp_root(env: dict, base: Path, node: str, version: str) -> Path:
+    """env.kind 에 따라 csp install 경로 결정.
+
+    - netns: <base>/<node>/install/modules/csp/<v>/CSP
+    - single-host / multi-host: <base>/csp (build/dist 의 dev 위치 또는 직접 install)
+    """
+    kind = (env.get("kind") or "").lower()
+    if kind == "netns":
+        return base / node / "install" / "modules" / "csp" / version / "CSP"
+    return base / "csp"
+
+
+def _cmp_root(env: dict, base: Path, node: str, version: str) -> Path:
+    kind = (env.get("kind") or "").lower()
+    if kind == "netns":
+        return base / node / "install" / "modules" / "cmp" / version / "CMP"
+    return base / "cmp"
+
+
+def _csp_paths(root: Path, kind: str) -> tuple[Path, Path, Path]:
+    """csp install 의 (csp.json, config_dir, user_dir) 위치.
+
+    - netns:        CSP/csp/config/csp.json, CSP/config/, CSP/csp/user/
+    - single-host:  csp/config/csp.json,     csp/config/, csp/user/
+      (dev 모드는 jsonlDir 가 csp/config/ 라고 가정 — config_template.json 의 ConfigJsonlDir 와 일치)
+    """
+    if kind == "netns":
+        return (root / "csp" / "config" / "csp.json",
+                root / "config",
+                root / "csp" / "user")
+    # single-host / multi-host
+    return (root / "config" / "csp.json",
+            root / "config",
+            root / "user")
+
+
+def _cmp_json_path(root: Path, kind: str) -> Path:
+    if kind == "netns":
+        return root / "cmp" / "config" / "cmp.json"
+    return root / "config" / "cmp.json"
+
+
+def _apply_csp(env: dict, node: str, bundle_node: Path, base: Path, version: str,
+                *, dry_run: bool, do_backup: bool) -> list:
+    kind = (env.get("kind") or "").lower()
+    csp_root = _csp_root(env, base, node, version)
+    csp_json_dst, config_dst, user_dst = _csp_paths(csp_root, kind)
     plans: list[tuple[str, str]] = []
 
-    # csp.json → CSP/csp/config/csp.json
     csp_json = bundle_node / "csp.json"
     if csp_json.exists():
-        dst = csp_root / "csp" / "config" / "csp.json"
-        plans.append((str(csp_json), str(dst)))
+        plans.append((str(csp_json), str(csp_json_dst)))
         if not dry_run:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(csp_json, dst)
+            csp_json_dst.parent.mkdir(parents=True, exist_ok=True)
+            if do_backup: _backup(csp_json_dst)
+            shutil.copy2(csp_json, csp_json_dst)
 
-    # config/*.jsonl → CSP/config/*.jsonl
-    plans += _copy_dir(bundle_node / "config", csp_root / "config", dry_run=dry_run)
-
-    # user/*.json → CSP/csp/user/*.json
-    plans += _copy_dir(bundle_node / "user", csp_root / "csp" / "user", dry_run=dry_run)
-
+    plans += _copy_dir(bundle_node / "config", config_dst, dry_run=dry_run, do_backup=do_backup)
+    plans += _copy_dir(bundle_node / "user",   user_dst,   dry_run=dry_run, do_backup=do_backup)
     return plans
 
 
-def _apply_cmp(node: str, bundle_node: Path, base: Path, version: str, *, dry_run: bool) -> list:
-    cmp_root = base / node / "install" / "modules" / "cmp" / version / "CMP"
+def _apply_cmp(env: dict, node: str, bundle_node: Path, base: Path, version: str,
+                *, dry_run: bool, do_backup: bool) -> list:
+    kind = (env.get("kind") or "").lower()
+    cmp_root = _cmp_root(env, base, node, version)
+    dst = _cmp_json_path(cmp_root, kind)
     plans = []
     cmp_json = bundle_node / "cmp.json"
     if cmp_json.exists():
-        dst = cmp_root / "cmp" / "config" / "cmp.json"
         plans.append((str(cmp_json), str(dst)))
         if not dry_run:
             dst.parent.mkdir(parents=True, exist_ok=True)
+            if do_backup: _backup(dst)
             shutil.copy2(cmp_json, dst)
     return plans
 
@@ -118,9 +169,10 @@ def main() -> int:
     p.add_argument("--bundle", help="bundle 디렉토리 (기본 ./bundle/<env>__<scn>/)")
     p.add_argument("--dry-run", action="store_true", help="복사 안 하고 plan 만 출력")
     p.add_argument("--no-render", action="store_true", help="render 단계 skip (기존 bundle 재사용)")
-    p.add_argument("--base", default=DEFAULT_BASE, help=f"netns-agents 기본 경로 (default: {DEFAULT_BASE})")
+    p.add_argument("--base", help=f"install base 경로 — netns: netns-agents 디렉토리 (default {DEFAULT_BASE}), single-host: build/dist 디렉토리")
     p.add_argument("--version", default=DEFAULT_VERSION, help=f"패키지 버전 (default: {DEFAULT_VERSION})")
     p.add_argument("--root", help="deployment/ 부모")
+    p.add_argument("--backup", action="store_true", help="기존 파일 .bak 으로 백업 후 복사 (마지막 1회분만)")
     p.add_argument("--restart", help="apply 후 restart 호출: 콤마 구분 deployment_id (예: 27,28) 또는 'auto' (CSC API GET 후 자동 매핑)")
     p.add_argument("--csc-url", help="CSC API base URL (--restart 시 사용, 기본: env.csc.url)")
     args = p.parse_args()
@@ -130,7 +182,6 @@ def main() -> int:
     env_path = root / args.env / "env.yaml"
     scn_path = root / args.env / "scenarios" / f"{args.scenario}.yaml"
     bundle = Path(args.bundle) if args.bundle else (Path.cwd() / "bundle" / f"{args.env}__{args.scenario}")
-    base = Path(args.base)
 
     # 1) render
     if not args.no_render:
@@ -153,6 +204,16 @@ def main() -> int:
         sys.stderr.write(f"[error] {e}\n")
         return 2
 
+    # base 결정 — kind 에 따라 default 분기
+    kind = (env.get("kind") or "").lower()
+    if args.base:
+        base = Path(args.base)
+    elif kind == "netns":
+        base = Path(DEFAULT_BASE)
+    else:
+        # single-host / multi-host — build/dist 직접 사용
+        base = Path("/home/nex/work/cims/build/dist")
+
     csp_hg = _ha_for_pkg(scn, "csp")
     cmp_hg = _ha_for_pkg(scn, "cmp")
     csp_nodes = _members(env, csp_hg) if csp_hg is not None else []
@@ -160,15 +221,17 @@ def main() -> int:
 
     mode = "[dry-run]" if args.dry_run else "[apply]"
     print(f"{mode} bundle={bundle}")
-    print(f"{mode} base={base}")
+    print(f"{mode} base={base}  kind={kind or 'unknown'}")
     print(f"{mode} csp_nodes={csp_nodes} cmp_nodes={cmp_nodes}")
 
     all_plans: list[tuple[str, str]] = []
     for node in csp_nodes:
-        plans = _apply_csp(node, bundle / node, base, args.version, dry_run=args.dry_run)
+        plans = _apply_csp(env, node, bundle / node, base, args.version,
+                            dry_run=args.dry_run, do_backup=args.backup)
         all_plans += plans
     for node in cmp_nodes:
-        plans = _apply_cmp(node, bundle / node, base, args.version, dry_run=args.dry_run)
+        plans = _apply_cmp(env, node, bundle / node, base, args.version,
+                            dry_run=args.dry_run, do_backup=args.backup)
         all_plans += plans
 
     for src, dst in all_plans:
