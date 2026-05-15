@@ -66,6 +66,11 @@ csp_config:
     database:
       # env.database 가 null 이므로 csp 는 DB 연결 실패 후 file fallback 으로 전환.
       use_env: true
+    monitor:
+      port: 16000
+      client_ip_list: ["192.168.199.129"]    # host 의 dev VM IP (admin/모니터링 접근)
+    security:
+      deny_sip_user_agents: [friendly-scanner, sundayddr]
 
   # ── Layer 1 — local_nodes (CSP 자기 자신 SIP listener) ──
   local_nodes:

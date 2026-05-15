@@ -35,9 +35,9 @@ deployment/
 
 1. **환경 등록** — `deployment/<env-name>/env.yaml` 작성 (NIC/IP/VIP/노드/DB)
 2. **시나리오 작성** — `deployment/<env-name>/scenarios/<x>.yaml` (역할 + 패키지 + 배포 매핑)
-3. **render** — `python3 -m deployment.bin.render <env-name> <scenario> --out <out-dir>`
-   → 산출: csp.json + cmp.json + 각 jsonl (local_nodes, remote_nodes, routes, rules, ...) + 가입자 seed
-4. **배포** — render 결과를 deployment.config 또는 agent install params 로 전달
+3. **render** — `./bin/render.py --env <env-name> --scenario <scn> [--out <dir>] [--check-only]`
+   → 산출: `<out>/<node>/csp.json` + `<out>/<node>/config/*.jsonl` (9종) + `<out>/<node>/user/<sip_id>.json` (CSP 노드), `<out>/<node>/cmp.json` (CMP 노드), `<out>/manifest.json`
+4. **배포** — render 결과를 module 의 `csp/config/`, `CSP/config/`, `csp/user/`, `cmp/config/` 에 복사 또는 agent install params 로 전달
 
 ## 현재 등록된 환경
 

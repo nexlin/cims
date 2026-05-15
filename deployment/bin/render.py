@@ -1,0 +1,745 @@
+#!/usr/bin/env python3
+"""
+deployment/bin/render.py — env.yaml + scenario.yaml → 노드별 설정 bundle 생성.
+
+USAGE
+  ./render.py --env <env_dir> --scenario <scenario_name> [--out <bundle_dir>] [--check-only]
+
+  예) ./render.py --env tb-netns-4-node --scenario volte-ptt
+       → ./bundle/tb-netns-4-node__volte-ptt/{ctrl-a,ctrl-b,media-a,media-b}/
+
+OUTPUT (per CSP node)
+  <node>/csp.json                       csp 모듈의 csp/config/csp.json
+  <node>/config/local_nodes.jsonl       csp 모듈의 CSP/config/*.jsonl 9종
+  <node>/config/remote_nodes.jsonl
+  <node>/config/access_services.jsonl
+  <node>/config/routes.jsonl
+  <node>/config/route_sets.jsonl
+  <node>/config/routing_policies.jsonl
+  <node>/config/rules.jsonl
+  <node>/config/rule_sets.jsonl
+  <node>/config/acl_policies.jsonl
+  <node>/user/<sip_id>.json             csp 모듈의 csp/user/<sip_id>.json
+
+OUTPUT (per CMP node)
+  <node>/cmp.json                       cmp 모듈의 cmp/config/cmp.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import OrderedDict
+from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except ImportError:
+    sys.stderr.write("PyYAML 필요: pip install pyyaml\n")
+    sys.exit(2)
+
+
+# ─────────────────────────────────────────────────────────────
+# 유틸
+# ─────────────────────────────────────────────────────────────
+
+class RenderError(Exception):
+    """env/scenario 검증 실패 또는 자동 유도 불가."""
+
+
+def _load_yaml(path: Path) -> dict:
+    if not path.exists():
+        raise RenderError(f"파일 없음: {path}")
+    with path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _write_json(path: Path, obj: Any, *, sort_keys: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=4, sort_keys=sort_keys)
+        f.write("\n")
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False))
+            f.write("\n")
+
+
+# ─────────────────────────────────────────────────────────────
+# 입력 검증
+# ─────────────────────────────────────────────────────────────
+
+def _validate_env(env: dict) -> None:
+    nets = {n["id"] for n in env.get("networks", [])}
+    node_ids: set[str] = set()
+    agent_seen: dict[int, str] = {}
+
+    for node in env.get("nodes", []):
+        nid = node.get("id")
+        if not nid:
+            raise RenderError("node.id 누락")
+        if nid in node_ids:
+            raise RenderError(f"node.id 중복: {nid}")
+        node_ids.add(nid)
+
+        aid = node.get("agent_id")
+        if aid is not None:
+            if aid in agent_seen:
+                raise RenderError(f"agent_id={aid} 가 노드 '{agent_seen[aid]}' 와 '{nid}' 에 동시 매핑")
+            agent_seen[aid] = nid
+
+        for nic in node.get("nics", []) or []:
+            if nic.get("net") not in nets:
+                raise RenderError(f"node '{nid}' nic '{nic.get('iface')}' 가 알 수 없는 net={nic.get('net')} 참조")
+
+    for hg in env.get("ha_groups", []):
+        for m in hg.get("members", []) or []:
+            if m.get("node") not in node_ids:
+                raise RenderError(f"ha_group '{hg.get('name')}' 멤버 '{m.get('node')}' 미등록")
+        for vip in hg.get("vips", []) or []:
+            if vip.get("net") not in nets:
+                raise RenderError(f"vip slot={vip.get('slot')} net={vip.get('net')} 미등록")
+
+
+def _validate_scenario(scn: dict, env: dict) -> None:
+    env_name = env.get("name")
+    if scn.get("env") not in (None, env_name):
+        raise RenderError(f"scenario.env={scn.get('env')} ≠ env.name={env_name}")
+
+    hg_ids = {hg["id"] for hg in env.get("ha_groups", [])}
+    hg_names = {hg.get("name"): hg["id"] for hg in env.get("ha_groups", [])}
+
+    for dep in scn.get("deployments", []) or []:
+        ref = dep.get("ha_group")
+        if ref in hg_ids:
+            continue
+        if ref in hg_names:
+            dep["ha_group"] = hg_names[ref]  # name → id 정규화
+            continue
+        raise RenderError(f"deployments.ha_group={ref} 가 env 에 없음")
+
+
+# ─────────────────────────────────────────────────────────────
+# 인덱스
+# ─────────────────────────────────────────────────────────────
+
+class Index:
+    """env + scenario 의 조회 인덱스 — 노드 → nic 별 IP, ha_group → 멤버 노드, etc."""
+
+    def __init__(self, env: dict, scn: dict):
+        self.env = env
+        self.scn = scn
+        self.networks = {n["id"]: n for n in env.get("networks", [])}
+        self.nodes = {n["id"]: n for n in env.get("nodes", [])}
+        self.ha_groups = {hg["id"]: hg for hg in env.get("ha_groups", [])}
+
+        self.deployments: dict[int, list[dict]] = {}     # ha_group_id → packages
+        for dep in scn.get("deployments", []) or []:
+            self.deployments.setdefault(dep["ha_group"], []).extend(dep.get("packages", []) or [])
+
+    def node_ip(self, node_id: str, net: str) -> str | None:
+        node = self.nodes.get(node_id)
+        if not node:
+            return None
+        for nic in node.get("nics", []) or []:
+            if nic.get("net") == net:
+                return nic.get("ip")
+        return None
+
+    def ha_for_package(self, pkg_name: str) -> int | None:
+        for hg_id, pkgs in self.deployments.items():
+            if any(p.get("name") == pkg_name for p in pkgs):
+                return hg_id
+        return None
+
+    def ha_members(self, hg_id: int) -> list[dict]:
+        hg = self.ha_groups.get(hg_id)
+        return (hg or {}).get("members", []) or []
+
+    def vip(self, hg_id: int, net: str) -> str | None:
+        hg = self.ha_groups.get(hg_id)
+        if not hg:
+            return None
+        for vip in hg.get("vips", []) or []:
+            if vip.get("net") == net:
+                return vip.get("ip")
+        return None
+
+
+# ─────────────────────────────────────────────────────────────
+# Layer 생성 — CSP
+# ─────────────────────────────────────────────────────────────
+
+CSP_LISTEN_PORTS = {
+    "UDP": ("csp-main-udp", 5060, "UDP"),
+    "TCP": ("csp-main-tcp", 25061, "TCP"),
+    "TLS": ("csp-main-tls", 5061, "TLS"),
+}
+
+
+def _build_local_nodes(idx: Index, scn_csp: dict) -> list[dict]:
+    cfg = scn_csp.get("local_nodes") or {}
+    rows: list[dict] = []
+
+    if cfg.get("auto"):
+        hg_id = idx.ha_for_package("csp")
+        if hg_id is None:
+            raise RenderError("local_nodes.auto=true 인데 csp 패키지가 어느 ha_group 에도 매핑되지 않음")
+        hg = idx.ha_groups[hg_id]
+        mode = hg.get("mode")
+        # AS — VIP bind. AA — 멤버별 svc IP bind (멀티 row).
+        if mode == "active_standby":
+            vip_ip = idx.vip(hg_id, "svc")
+            if not vip_ip:
+                raise RenderError(f"ha_group '{hg.get('name')}' 의 svc VIP 미정의")
+            for _, (lid, port, proto) in CSP_LISTEN_PORTS.items():
+                row = {
+                    "id": lid, "name": lid, "edge": "access",
+                    "bind_ip": vip_ip, "bind_port": port, "protocol": proto,
+                    "thread_count": 2, "enabled": True, "is_primary": True,
+                    "tags": [],
+                    "note": f"{idx.env.get('name')} {idx.scn.get('name')} — VIP {proto}",
+                }
+                if proto == "TLS":
+                    row["tls_cert_path"] = "cert/csp.pem"
+                rows.append(row)
+        elif mode == "all_active":
+            for m in idx.ha_members(hg_id):
+                node_id = m["node"]
+                svc_ip = idx.node_ip(node_id, "svc")
+                if not svc_ip:
+                    raise RenderError(f"node '{node_id}' 가 svc net 에 NIC 없음")
+                for _, (lid_base, port, proto) in CSP_LISTEN_PORTS.items():
+                    lid = f"{lid_base}-{node_id}"
+                    row = {
+                        "id": lid, "name": lid, "edge": "access",
+                        "bind_ip": svc_ip, "bind_port": port, "protocol": proto,
+                        "thread_count": 2, "enabled": True, "is_primary": (node_id == idx.ha_members(hg_id)[0]["node"]),
+                        "tags": [], "note": f"AA member {node_id} {proto}",
+                    }
+                    if proto == "TLS":
+                        row["tls_cert_path"] = "cert/csp.pem"
+                    rows.append(row)
+        elif mode == "standalone":
+            m = idx.ha_members(hg_id)[0]
+            svc_ip = idx.node_ip(m["node"], "svc") or idx.node_ip(m["node"], "loopback") or "0.0.0.0"
+            for _, (lid, port, proto) in CSP_LISTEN_PORTS.items():
+                row = {
+                    "id": lid, "name": lid, "edge": "access",
+                    "bind_ip": svc_ip, "bind_port": port, "protocol": proto,
+                    "thread_count": 2, "enabled": True, "is_primary": True, "tags": [],
+                    "note": f"standalone {proto}",
+                }
+                if proto == "TLS":
+                    row["tls_cert_path"] = "cert/csp.pem"
+                rows.append(row)
+        else:
+            raise RenderError(f"알 수 없는 ha_group mode: {mode}")
+
+    for ovr in cfg.get("overrides") or []:
+        # override 는 그대로 append (id 충돌 시 검증에서 잡힘)
+        rows.append({
+            "id": ovr["id"], "name": ovr.get("name", ovr["id"]),
+            "edge": ovr.get("edge", "access"),
+            "bind_ip": ovr["bind_ip"], "bind_port": ovr["bind_port"],
+            "protocol": ovr.get("transport", ovr.get("protocol", "UDP")).upper(),
+            "thread_count": ovr.get("thread_count", 2),
+            "enabled": ovr.get("enabled", True),
+            "is_primary": ovr.get("is_primary", False),
+            "tags": ovr.get("tags", []),
+            "note": ovr.get("note", "override"),
+        })
+
+    # 중복 id 검사
+    ids: set[str] = set()
+    for r in rows:
+        if r["id"] in ids:
+            raise RenderError(f"local_nodes 에 중복 id={r['id']}")
+        ids.add(r["id"])
+    return rows
+
+
+def _build_remote_nodes(idx: Index, scn_csp: dict) -> list[dict]:
+    cfg = scn_csp.get("remote_nodes") or {}
+    rows: list[dict] = []
+
+    if cfg.get("auto_cmp"):
+        hg_id = idx.ha_for_package("cmp")
+        if hg_id is None:
+            sys.stderr.write("[warn] remote_nodes.auto_cmp=true 인데 cmp 패키지 배포 ha_group 없음 — skip\n")
+        else:
+            for m in idx.ha_members(hg_id):
+                node_id = m["node"]
+                svc_ip = idx.node_ip(node_id, "svc")
+                if not svc_ip:
+                    raise RenderError(f"cmp 멤버 '{node_id}' 의 svc IP 없음")
+                rows.append({
+                    "id": f"cmp-{node_id}", "name": f"cmp-{node_id}",
+                    "kind": "media", "host": svc_ip, "port": 9000,
+                    "transport": "UDP", "enabled": True,
+                    "tags": [], "note": f"auto cmp member {node_id}",
+                })
+
+    for ex in cfg.get("extra") or []:
+        rows.append({
+            "id": ex["id"], "name": ex.get("name", ex["id"]),
+            "kind": ex.get("kind", "peer"),
+            "host": ex["host"], "port": ex["port"],
+            "transport": ex.get("transport", "UDP").upper(),
+            "enabled": ex.get("enabled", True),
+            "tags": ex.get("tags", []),
+            "note": ex.get("purpose", ex.get("note", "")),
+        })
+
+    return rows
+
+
+def _build_access_services(scn_csp: dict, local_node_ids: set[str]) -> list[dict]:
+    rows: list[dict] = []
+    for i, svc in enumerate(scn_csp.get("access_services") or [], start=1):
+        # listener_ids 가 local_nodes 와 매칭되는지 검증
+        missing = [lid for lid in svc.get("listener_ids", []) if lid not in local_node_ids]
+        if missing:
+            raise RenderError(f"access_service '{svc.get('name')}' 의 listener_ids 미존재: {missing} (local_nodes={sorted(local_node_ids)})")
+        rows.append({
+            "id": svc.get("id", i),
+            "name": svc["name"],
+            "kind": svc.get("kind", "volte"),
+            "domain": svc["domain"],
+            "auth_realm": svc.get("auth_realm", svc["domain"]),
+            "inbound_policy": svc.get("inbound_policy", "open"),
+            "priority": svc.get("priority", 100),
+            "enabled": svc.get("enabled", True),
+            "listener_ids": svc.get("listener_ids", []),
+            "note": svc.get("note", ""),
+        })
+    return rows
+
+
+def _build_routes(scn_csp: dict) -> list[dict]:
+    rows = []
+    for r in scn_csp.get("routes") or []:
+        rows.append({
+            "id": r["id"],
+            "match": r.get("match", {}),
+            "target": r["target"],
+            "priority": r.get("priority", 100),
+            "enabled": r.get("enabled", True),
+            "note": r.get("note", ""),
+        })
+    return rows
+
+
+def _build_route_sets(scn_csp: dict, route_ids: set[str]) -> list[dict]:
+    rows = []
+    for rs in scn_csp.get("route_sets") or []:
+        missing = [r for r in rs.get("routes", []) if r not in route_ids]
+        if missing:
+            raise RenderError(f"route_set '{rs.get('id')}' 의 routes 미존재: {missing}")
+        rows.append({
+            "id": rs["id"],
+            "routes": rs.get("routes", []),
+            "enabled": rs.get("enabled", True),
+        })
+    return rows
+
+
+def _build_routing_policies(scn_csp: dict, route_set_ids: set[str]) -> list[dict]:
+    rows = []
+    for p in scn_csp.get("routing_policies") or []:
+        if p.get("route_set") not in route_set_ids:
+            raise RenderError(f"routing_policy '{p.get('id')}' 의 route_set={p.get('route_set')} 미존재")
+        rows.append({
+            "id": p["id"],
+            "match": p.get("match", {}),
+            "route_set": p["route_set"],
+            "priority": p.get("priority", 100),
+            "enabled": p.get("enabled", True),
+        })
+    return rows
+
+
+def _build_rules(scn_csp: dict) -> list[dict]:
+    rows = []
+    for r in scn_csp.get("rules") or []:
+        rows.append({
+            "id": r["id"],
+            "match": r.get("match", {}),
+            "action": r.get("action", "allow"),
+            "enabled": r.get("enabled", True),
+        })
+    return rows
+
+
+def _build_rule_sets(scn_csp: dict, rule_ids: set[str]) -> list[dict]:
+    rows = []
+    for rs in scn_csp.get("rule_sets") or []:
+        missing = [r for r in rs.get("rules", []) if r not in rule_ids]
+        if missing:
+            raise RenderError(f"rule_set '{rs.get('id')}' 의 rules 미존재: {missing}")
+        rows.append({
+            "id": rs["id"],
+            "rules": rs.get("rules", []),
+            "enabled": rs.get("enabled", True),
+        })
+    return rows
+
+
+def _build_acl_policies(scn_csp: dict, rule_set_ids: set[str], local_node_ids: set[str]) -> list[dict]:
+    rows = []
+    for p in scn_csp.get("acl_policies") or []:
+        if p.get("rule_set") not in rule_set_ids:
+            raise RenderError(f"acl_policy '{p.get('id')}' 의 rule_set={p.get('rule_set')} 미존재")
+        missing = [a for a in p.get("applied_to", []) if a not in local_node_ids]
+        if missing:
+            raise RenderError(f"acl_policy '{p.get('id')}' 의 applied_to 미존재: {missing}")
+        rows.append({
+            "id": p["id"],
+            "rule_set": p["rule_set"],
+            "applied_to": p.get("applied_to", []),
+            "priority": p.get("priority", 100),
+            "enabled": p.get("enabled", True),
+        })
+    return rows
+
+
+# ─────────────────────────────────────────────────────────────
+# csp.json (Setup.*) 빌드
+# ─────────────────────────────────────────────────────────────
+
+def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
+    setup_in = (scn.get("csp_config") or {}).get("setup") or {}
+    sip = setup_in.get("sip") or {}
+    media = setup_in.get("media_server") or {}
+    log = setup_in.get("log") or {}
+    svc = scn.get("services") or {}
+
+    # MediaServer.Host = cmp ha_group 의 첫 멤버 svc IP (auto)
+    cmp_hg = idx.ha_for_package("cmp")
+    media_host = ""
+    if cmp_hg is not None and media.get("auto", True):
+        members = idx.ha_members(cmp_hg)
+        if members:
+            media_host = idx.node_ip(members[0]["node"], "svc") or ""
+
+    # 자기 노드 svc IP (LocalIp)
+    self_svc_ip = idx.node_ip(node_id, "svc") or "0.0.0.0"
+
+    # Database — env.database 가 null 이면 placeholder (file fallback 진입)
+    db = idx.env.get("database") or {
+        "host": "127.0.0.1", "port": 3306, "user": "cims", "password": "cims1234", "dbname": "cims",
+    }
+
+    out = OrderedDict()
+    out["Setup"] = OrderedDict([
+        ("Sip", OrderedDict([
+            ("UdpThreadCount",     sip.get("udp_thread_count", 2)),
+            ("StackExecutePeriod", sip.get("stack_execute_period", 20)),
+            ("MinRegisterTimeout", sip.get("min_register_timeout", 60)),
+            ("UserTimeout",        sip.get("user_timeout", 3600)),
+            ("SendOptionsPeriod",  sip.get("send_options_period", 0)),
+            ("CallPickupId",       sip.get("call_pickup_id", "**")),
+            ("StaleCallTimeout",   sip.get("stale_call_timeout", 300)),
+            ("LocalIp",            sip.get("local_ip", "0.0.0.0")),
+            ("UdpPort",            sip.get("udp_port", 5060)),
+            ("TcpPort",            sip.get("tcp_port", 25061)),
+            ("TcpThreadCount",     sip.get("tcp_thread_count", 2)),
+            ("TcpRecvTimeout",     sip.get("tcp_recv_timeout", 600)),
+            ("TlsPort",            sip.get("tls_port", 5061)),
+            ("TlsAcceptTimeout",   sip.get("tls_accept_timeout", 10)),
+            ("CertFile",           sip.get("cert_file", "cert/csp.pem")),
+        ])),
+        ("Roles", OrderedDict([
+            ("CSCF",   bool(svc.get("cscf",   True))),
+            ("TAS",    bool(svc.get("tas",    True))),
+            ("PTT_AS", bool(svc.get("ptt_as", True))),
+            ("IBCF",   bool(svc.get("ibcf",   False))),
+        ])),
+        ("MediaServer", OrderedDict([
+            ("Enable",      bool(media.get("enable", True))),
+            ("Host",        media.get("host", media_host)),
+            ("ControlPort", media.get("control_port", 9000)),
+            ("LocalPort",   media.get("local_port", 9001)),
+            ("LocalIp",     media.get("local_ip", self_svc_ip)),
+        ])),
+        ("Log", OrderedDict([
+            ("Folder",  log.get("folder", "log")),
+            ("MaxSize", log.get("max_size_mb", 10) * 1_000_000),
+            ("Level", OrderedDict([
+                ("Debug",   bool((log.get("level") or {}).get("debug", True))),
+                ("Info",    bool((log.get("level") or {}).get("info", True))),
+                ("Network", bool((log.get("level") or {}).get("network", True))),
+                ("Sql",     bool((log.get("level") or {}).get("sql", False))),
+            ])),
+        ])),
+        ("Database", OrderedDict([
+            ("Host",     db.get("host", "127.0.0.1")),
+            ("Port",     db.get("port", 3306)),
+            ("User",     db.get("user", "cims")),
+            ("Password", db.get("password", "cims1234")),
+            ("DbName",   db.get("dbname", "cims")),
+        ])),
+        ("DataFolder", OrderedDict([("User", "user"), ("Group", "group")])),
+    ])
+
+    # ServiceLogging — env.service_logging 또는 setup.service_logging override
+    sl_env = idx.env.get("service_logging") or {}
+    sl_scn = setup_in.get("service_logging") or {}
+    sl_dir = sl_scn.get("dir") or sl_env.get("dir") or "/var/log/cims/service_log"
+    sl_enable = sl_scn.get("enable") or sl_env.get("enable") or ["sip", "cmp", "csc"]
+    sl_recording = sl_scn.get("recording", sl_env.get("recording", True))
+    out["Setup"]["ServiceLogging"] = OrderedDict([
+        ("Dir", sl_dir),
+        ("Enable", list(sl_enable)),
+        ("Recording", bool(sl_recording)),
+    ])
+
+    # Monitor — host 의 admin/모니터링 endpoint
+    mon = setup_in.get("monitor") or {}
+    out["Setup"]["Monitor"] = OrderedDict([
+        ("Port", mon.get("port", 16000)),
+        ("ClientIpList", mon.get("client_ip_list", [])),
+    ])
+
+    # Security — SIP User-Agent 블랙리스트
+    sec = setup_in.get("security") or {}
+    out["Setup"]["Security"] = OrderedDict([
+        ("DenySipUserAgentList", sec.get("deny_sip_user_agents", ["friendly-scanner", "sundayddr"])),
+    ])
+    return out
+
+
+# ─────────────────────────────────────────────────────────────
+# cmp.json 빌드
+# ─────────────────────────────────────────────────────────────
+
+def _build_cmp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
+    cmp_cfg = scn.get("cmp_config") or {}
+    ovr = cmp_cfg.get("overrides") or {}
+    svc_ip = idx.node_ip(node_id, "svc") or "0.0.0.0"
+
+    csp_vip = ""
+    csp_hg = idx.ha_for_package("csp")
+    if csp_hg is not None:
+        csp_vip = idx.vip(csp_hg, "svc") or ""
+        if not csp_vip:
+            members = idx.ha_members(csp_hg)
+            if members:
+                csp_vip = idx.node_ip(members[0]["node"], "svc") or ""
+
+    out = OrderedDict([
+        ("ServerIp",           svc_ip),
+        ("ServerPort",         ovr.get("server_port", 9000)),
+        ("CspPort",            ovr.get("csp_port", 9001)),
+        ("RtpStartPort",       ovr.get("rtp_start_port", 50000)),
+        ("RtpPoolSize",        ovr.get("rtp_pool_size", 20)),
+        ("PttRtpStartPort",    ovr.get("ptt_rtp_start_port", 52000)),
+        ("PttRtpPoolSize",     ovr.get("ptt_rtp_pool_size", 10)),
+        ("PttFloorStartPort",  ovr.get("ptt_floor_start_port", 54000)),
+        ("PttVideoStartPort",  ovr.get("ptt_video_start_port", 56000)),
+        ("RtpWorkerCount",     ovr.get("rtp_worker_count", 4)),
+        ("EnableDtmfPtt",      bool(ovr.get("enable_dtmf_ptt", True))),
+        ("DtmfPushDigit",      ovr.get("dtmf_push_digit", "*")),
+        ("DtmfReleaseDigit",   ovr.get("dtmf_release_digit", "#")),
+        ("SessionTimeout",     ovr.get("session_timeout", 600)),
+        ("LogLevel",           ovr.get("log_level", "INFO")),
+        ("LogDir",             ovr.get("log_dir", "log")),
+        ("LogMaxSizeMB",       ovr.get("log_max_size_mb", 10)),
+        ("LogMaxFiles",        ovr.get("log_max_files", 5)),
+        ("SystemId",           ovr.get("system_id", f"cmp_{node_id}")),
+        ("RtpIp",              svc_ip),
+        ("CspIp",              csp_vip),
+    ])
+
+    # ServiceLogging — env.service_logging 또는 cmp_config.overrides.service_logging
+    sl_env = idx.env.get("service_logging") or {}
+    sl_ovr = ovr.get("service_logging") or {}
+    out["ServiceLogging"] = OrderedDict([
+        ("Dir",        sl_ovr.get("dir", sl_env.get("dir", "/var/log/cims/service_log"))),
+        ("Enable",     list(sl_ovr.get("enable", sl_env.get("enable_for_cmp", ["csp"])))),
+        ("MediaTypes", list(sl_ovr.get("media_types", ["floor", "dtmf"]))),
+        ("Flow", OrderedDict([
+            ("Floor", bool((sl_ovr.get("flow") or {}).get("floor", True))),
+            ("Dtmf",  bool((sl_ovr.get("flow") or {}).get("dtmf", True))),
+            ("Rtcp",  bool((sl_ovr.get("flow") or {}).get("rtcp", False))),
+        ])),
+    ])
+    return out
+
+
+# ─────────────────────────────────────────────────────────────
+# user seed
+# ─────────────────────────────────────────────────────────────
+
+def _build_user(u: dict) -> tuple[str, dict]:
+    sip_id = u["sip_id"]
+    auth_id = u.get("auth_id", "")
+    domain = u.get("domain", "")
+    # 어제 LIVE 결과: auth_id 는 IMSI@DOMAIN 풀폼으로 저장 (VoLTE 모드에서 cspsim 가 풀폼 명시 필요)
+    full_auth = auth_id if "@" in auth_id else f"{auth_id}@{domain}"
+    body = OrderedDict([
+        ("auth_id",     full_auth),
+        ("passwd",      u.get("passwd", "123456")),
+        ("org_id",      u.get("org_id", "")),
+        ("dnd",         "false"),
+        ("forward_id",  ""),
+        ("reject_id",   []),
+        ("create_time", "2026-03-19 00:00:00.000"),
+        ("update_time", "2026-03-19 00:00:00.000"),
+        ("imsi",        auth_id.split("@")[0] if "@" in auth_id else auth_id),
+        ("service_ref", u.get("service_ref", "")),
+    ])
+    return sip_id, body
+
+
+def _enrich_users_with_bindings(scn: dict) -> list[dict]:
+    users = list((scn.get("subscribers") or {}).get("users") or [])
+    bind: dict[str, str] = {}
+    for b in (scn.get("subscribers") or {}).get("volte_bindings") or []:
+        bind[b["user"]] = b["service"]
+    for b in (scn.get("subscribers") or {}).get("ptt_bindings") or []:
+        bind[b["user"]] = b["service"]
+    out = []
+    for u in users:
+        u = dict(u)
+        if not u.get("service_ref") and u["sip_id"] in bind:
+            u["service_ref"] = bind[u["sip_id"]]
+        out.append(u)
+    return out
+
+
+# ─────────────────────────────────────────────────────────────
+# 렌더링 entry
+# ─────────────────────────────────────────────────────────────
+
+def render(env_dir: Path, scenario_name: str, out_dir: Path, *, check_only: bool = False) -> None:
+    env = _load_yaml(env_dir / "env.yaml")
+    scn = _load_yaml(env_dir / "scenarios" / f"{scenario_name}.yaml")
+
+    _validate_env(env)
+    _validate_scenario(scn, env)
+
+    idx = Index(env, scn)
+    scn_csp = scn.get("csp_config") or {}
+
+    # CSP layer 산출 (검증 동시 수행)
+    local_nodes = _build_local_nodes(idx, scn_csp)
+    local_ids = {r["id"] for r in local_nodes}
+    remote_nodes = _build_remote_nodes(idx, scn_csp)
+    access_services = _build_access_services(scn_csp, local_ids)
+    routes = _build_routes(scn_csp)
+    route_ids = {r["id"] for r in routes}
+    route_sets = _build_route_sets(scn_csp, route_ids)
+    rs_ids = {r["id"] for r in route_sets}
+    routing_policies = _build_routing_policies(scn_csp, rs_ids)
+    rules = _build_rules(scn_csp)
+    rule_ids = {r["id"] for r in rules}
+    rule_sets = _build_rule_sets(scn_csp, rule_ids)
+    rset_ids = {r["id"] for r in rule_sets}
+    acl_policies = _build_acl_policies(scn_csp, rset_ids, local_ids)
+
+    # routes.target → local 또는 remote 에 존재해야 함
+    remote_ids = {r["id"] for r in remote_nodes}
+    for r in routes:
+        if r["target"] not in local_ids and r["target"] not in remote_ids:
+            raise RenderError(f"route '{r['id']}' target={r['target']} 가 local/remote_nodes 에 없음")
+
+    users = _enrich_users_with_bindings(scn)
+
+    if check_only:
+        print(f"[ok] env={env.get('name')} scenario={scn.get('name')} — 검증 통과")
+        print(f"     local_nodes={len(local_nodes)} remote_nodes={len(remote_nodes)} "
+              f"access_services={len(access_services)} routes={len(routes)} rules={len(rules)} "
+              f"users={len(users)}")
+        return
+
+    # 노드별 산출
+    csp_hg = idx.ha_for_package("csp")
+    csp_nodes = [m["node"] for m in idx.ha_members(csp_hg)] if csp_hg is not None else []
+    cmp_hg = idx.ha_for_package("cmp")
+    cmp_nodes = [m["node"] for m in idx.ha_members(cmp_hg)] if cmp_hg is not None else []
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for node_id in csp_nodes:
+        node_dir = out_dir / node_id
+        _write_json(node_dir / "csp.json", _build_csp_json(idx, node_id, scn))
+        cfg_dir = node_dir / "config"
+        _write_jsonl(cfg_dir / "local_nodes.jsonl", local_nodes)
+        _write_jsonl(cfg_dir / "remote_nodes.jsonl", remote_nodes)
+        _write_jsonl(cfg_dir / "access_services.jsonl", access_services)
+        _write_jsonl(cfg_dir / "routes.jsonl", routes)
+        _write_jsonl(cfg_dir / "route_sets.jsonl", route_sets)
+        _write_jsonl(cfg_dir / "routing_policies.jsonl", routing_policies)
+        _write_jsonl(cfg_dir / "rules.jsonl", rules)
+        _write_jsonl(cfg_dir / "rule_sets.jsonl", rule_sets)
+        _write_jsonl(cfg_dir / "acl_policies.jsonl", acl_policies)
+        if users:
+            user_dir = node_dir / "user"
+            for u in users:
+                sip_id, body = _build_user(u)
+                _write_json(user_dir / f"{sip_id}.json", body)
+
+    for node_id in cmp_nodes:
+        node_dir = out_dir / node_id
+        _write_json(node_dir / "cmp.json", _build_cmp_json(idx, node_id, scn))
+
+    # manifest
+    manifest = OrderedDict([
+        ("env", env.get("name")),
+        ("scenario", scn.get("name")),
+        ("csp_nodes", csp_nodes),
+        ("cmp_nodes", cmp_nodes),
+        ("counts", OrderedDict([
+            ("local_nodes",      len(local_nodes)),
+            ("remote_nodes",     len(remote_nodes)),
+            ("access_services",  len(access_services)),
+            ("routes",           len(routes)),
+            ("route_sets",       len(route_sets)),
+            ("routing_policies", len(routing_policies)),
+            ("rules",            len(rules)),
+            ("rule_sets",        len(rule_sets)),
+            ("acl_policies",     len(acl_policies)),
+            ("users",            len(users)),
+        ])),
+    ])
+    _write_json(out_dir / "manifest.json", manifest)
+    print(f"[ok] bundle 생성: {out_dir}")
+    print(f"     csp_nodes={csp_nodes} cmp_nodes={cmp_nodes}")
+    print(f"     {dict(manifest['counts'])}")
+
+
+# ─────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--env", required=True, help="환경 디렉토리 이름 (deployment/ 아래)")
+    p.add_argument("--scenario", required=True, help="시나리오 이름 (scenarios/<n>.yaml)")
+    p.add_argument("--out", help="bundle 출력 디렉토리 (기본 ./bundle/<env>__<scn>/)")
+    p.add_argument("--check-only", action="store_true", help="파일 생성 없이 검증만 수행")
+    p.add_argument("--root", help="deployment/ 의 부모 (기본 자동 탐지)")
+    args = p.parse_args()
+
+    here = Path(__file__).resolve().parent
+    root = Path(args.root) if args.root else here.parent
+    env_dir = root / args.env
+    out_dir = Path(args.out) if args.out else (Path.cwd() / "bundle" / f"{args.env}__{args.scenario}")
+
+    try:
+        render(env_dir, args.scenario, out_dir, check_only=args.check_only)
+    except RenderError as e:
+        sys.stderr.write(f"[error] {e}\n")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

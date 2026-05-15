@@ -40,6 +40,19 @@ database:
 database: null
 ```
 
+### `service_logging` (선택)
+CSP/CMP 의 `ServiceLogging` 섹션을 채울 환경별 값. 환경마다 마운트 위치가 달라 host 측 절대 경로를 한 곳에 둠.
+
+```yaml
+service_logging:
+  dir:            /home/nex/work/cims/build/dist/ext_mnt/service_log
+  enable:         [sip, cmp, csc]      # csp 의 ServiceLogging.Enable
+  enable_for_cmp: [csp]                # cmp 의 ServiceLogging.Enable
+  recording:      true
+```
+
+생략 시 `/var/log/cims/service_log` + 기본 enable 리스트가 사용됨. scenario.yaml 의 `csp_config.setup.service_logging` / `cmp_config.overrides.service_logging` 으로 시나리오별 override 도 가능.
+
 ### `networks`
 망 정의. 각 망은 명명된 식별자 + CIDR + 용도. `kind: netns` 면 bridge 이름 매핑.
 

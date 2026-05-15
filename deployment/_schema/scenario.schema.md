@@ -76,6 +76,16 @@ csp_config:
     database:
       # null 이면 env.database 그대로. override 가능
       use_env: true
+    monitor:
+      port:           16000
+      client_ip_list: ["10.0.0.1"]    # CSP Monitor.ClientIpList
+    security:
+      deny_sip_user_agents: [friendly-scanner, sundayddr]
+    service_logging:
+      # env.service_logging 의 시나리오별 override (보통 생략)
+      dir:       /custom/path
+      enable:    [sip, cmp, csc]
+      recording: true
 ```
 
 #### `local_nodes`
