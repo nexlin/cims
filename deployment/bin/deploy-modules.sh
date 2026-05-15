@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# ⚠ DEPRECATED (2026-05-15) — 이 스크립트는 새 `apply.py` 가 대체합니다.
+# 새 워크플로 (한 명령 end-to-end):
+#   ./bin/apply.py --env tb-netns-4-node --scenario volte-ptt --backup --restart auto --verify
+# 이 스크립트는 옛 수동 deploy 가이드용 — 초기 enroll/install 단계는 유효.
+#
 # deployment/bin/deploy-modules.sh — TB-CSC API 기반 모듈 일괄 배포 + start
 #
 # 전제:

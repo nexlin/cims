@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# ⚠ DEPRECATED (2026-05-15) — 이 스크립트는 새 `verify.py` 가 대체합니다.
+# 새 사용:
+#   ./bin/verify.py --env tb-netns-4-node --scenario volte-ptt --phase smoke
+# 이 스크립트는 옛 수동 검증 가이드 — 첫 사용자 학습용으로 보존.
+#
 # deployment/bin/verify-modules.sh — sim-a 에서 cspsim 으로 PTT/VoLTE 검증
 #
 # 전제: deploy-modules.sh 완료 + ctrl-a 가 VIP 10.0.1.13 보유

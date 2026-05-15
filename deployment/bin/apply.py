@@ -268,29 +268,31 @@ def main() -> int:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
 
+        # (dep_id, job_type) 튜플 리스트. status 'running' → restart, 외 → start
+        jobs: list[tuple[int, str]] = []
         if args.restart.strip().lower() == "auto":
-            # 자동 매핑: (node.agent_id, package.name) → deployment_id
-            dep_ids = _resolve_auto_deployment_ids(env, scn, csp_nodes, cmp_nodes, csc_url, ctx)
-            if not dep_ids:
+            jobs = _resolve_auto_jobs(env, scn, csp_nodes, cmp_nodes, csc_url, ctx)
+            if not jobs:
                 print("\n[restart] auto-resolve 결과 매칭된 deployment 없음 — restart skip")
                 return 0
-            print(f"\n[restart] CSC={csc_url} (auto) deployments={dep_ids}")
+            print(f"\n[restart] CSC={csc_url} (auto, status-aware) jobs={jobs}")
         else:
-            dep_ids = [int(x.strip()) for x in args.restart.split(",") if x.strip()]
-            print(f"\n[restart] CSC={csc_url} deployments={dep_ids}")
+            # 명시 id 리스트 — 모두 restart 로 처리 (옛 호환)
+            jobs = [(int(x.strip()), "restart") for x in args.restart.split(",") if x.strip()]
+            print(f"\n[restart] CSC={csc_url} deployments={[j[0] for j in jobs]}")
 
-        for dep in dep_ids:
+        for dep, job_type in jobs:
             url = f"{csc_url.rstrip('/')}/api/v1/deployments/{dep}/job"
             req = urllib.request.Request(
                 url,
-                data=json.dumps({"job_type": "restart"}).encode(),
+                data=json.dumps({"job_type": job_type}).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
             try:
                 with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
                     body = r.read().decode("utf-8", errors="replace")[:200]
-                    print(f"  dep={dep} HTTP {r.status} {body}")
+                    print(f"  dep={dep} ({job_type}) HTTP {r.status} {body}")
             except urllib.error.HTTPError as e:
                 print(f"  dep={dep} HTTP {e.code} {e.read().decode('utf-8', errors='replace')[:200]}")
             except Exception as e:
@@ -361,11 +363,12 @@ def _do_restore(env: dict, scn: dict, args) -> int:
     return 0
 
 
-def _resolve_auto_deployment_ids(env: dict, scn: dict, csp_nodes: list[str],
-                                  cmp_nodes: list[str], csc_url: str, ctx) -> list[int]:
-    """env+scenario 의 (agent_id, package_name) → deployment.id 로 매핑.
+def _resolve_auto_jobs(env: dict, scn: dict, csp_nodes: list[str],
+                        cmp_nodes: list[str], csc_url: str, ctx) -> list[tuple[int, str]]:
+    """env+scenario 의 (agent_id, package_name) → [(deployment.id, job_type)].
 
-    csp/cmp 만 restart 대상. cspsim 같은 non-daemon 은 제외.
+    job_type: status='running' → 'restart' (re-bind config), 외 → 'start' (깨우기).
+    csp/cmp 만 대상. cspsim 같은 non-daemon 은 제외.
     """
     list_url = f"{csc_url.rstrip('/')}/api/v1/deployments"
     try:
@@ -376,10 +379,8 @@ def _resolve_auto_deployment_ids(env: dict, scn: dict, csp_nodes: list[str],
         return []
     items = payload.get("items") or []
 
-    # node_id → agent_id
     aid_by_node = {n["id"]: n.get("agent_id") for n in env.get("nodes", []) or []}
 
-    # 매칭 대상 (agent_id, package_name) 쌍 수집
     targets: list[tuple[int, str]] = []
     for nid in csp_nodes:
         aid = aid_by_node.get(nid)
@@ -390,19 +391,24 @@ def _resolve_auto_deployment_ids(env: dict, scn: dict, csp_nodes: list[str],
         if aid is not None:
             targets.append((aid, "cmp"))
 
-    dep_ids: list[int] = []
+    jobs: list[tuple[int, str]] = []
     for aid, pkg in targets:
         matches = [
-            it["id"] for it in items
+            it for it in items
             if it.get("agent_id") == aid and (it.get("package_name") or "").lower() == pkg
         ]
         if not matches:
             sys.stderr.write(f"[warn] agent_id={aid} package={pkg} deployment 미발견 — skip\n")
             continue
         if len(matches) > 1:
-            sys.stderr.write(f"[warn] agent_id={aid} package={pkg} 중복 deployment — 첫 번째만 ({matches})\n")
-        dep_ids.append(matches[0])
-    return dep_ids
+            sys.stderr.write(f"[warn] agent_id={aid} package={pkg} 중복 deployment — 첫 번째만\n")
+        d = matches[0]
+        status = (d.get("status") or "").lower()
+        job_type = "restart" if status == "running" else "start"
+        if status not in ("running", "stopped", "installed", "failed"):
+            sys.stderr.write(f"[warn] dep={d['id']} status={status!r} (예상 외) — start 시도\n")
+        jobs.append((d["id"], job_type))
+    return jobs
 
 
 if __name__ == "__main__":
