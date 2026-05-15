@@ -224,10 +224,13 @@ def _build_local_nodes(idx: Index, scn_csp: dict) -> list[dict]:
             if not vip_ip:
                 raise RenderError(f"ha_group '{hg.get('name')}' 의 {snet} VIP 미정의")
             for _, (lid, port, proto) in CSP_LISTEN_PORTS.items():
+                # csp 는 single is_primary 만 허용 (CspLocalNodeMap) — UDP 만 primary.
+                # TCP/TLS 는 같은 VIP 의 보조 transport.
                 row = {
                     "id": lid, "name": lid, "edge": "access",
                     "bind_ip": vip_ip, "bind_port": port, "protocol": proto,
-                    "thread_count": 2, "enabled": True, "is_primary": True,
+                    "thread_count": 2, "enabled": True,
+                    "is_primary": (proto == "UDP"),
                     "tags": [],
                     "note": f"{idx.env.get('name')} {idx.scn.get('name')} — VIP {proto}",
                 }
@@ -235,6 +238,7 @@ def _build_local_nodes(idx: Index, scn_csp: dict) -> list[dict]:
                     row["tls_cert_path"] = "cert/csp.pem"
                 rows.append(row)
         elif mode == "all_active":
+            first_node = idx.ha_members(hg_id)[0]["node"]
             for m in idx.ha_members(hg_id):
                 node_id = m["node"]
                 svc_ip = idx.service_ip(node_id)
@@ -242,10 +246,12 @@ def _build_local_nodes(idx: Index, scn_csp: dict) -> list[dict]:
                     raise RenderError(f"node '{node_id}' 가 svc net 에 NIC 없음")
                 for _, (lid_base, port, proto) in CSP_LISTEN_PORTS.items():
                     lid = f"{lid_base}-{node_id}"
+                    # AA: 첫 멤버의 UDP 만 is_primary (single primary 보장)
+                    is_primary = (node_id == first_node and proto == "UDP")
                     row = {
                         "id": lid, "name": lid, "edge": "access",
                         "bind_ip": svc_ip, "bind_port": port, "protocol": proto,
-                        "thread_count": 2, "enabled": True, "is_primary": (node_id == idx.ha_members(hg_id)[0]["node"]),
+                        "thread_count": 2, "enabled": True, "is_primary": is_primary,
                         "tags": [], "note": f"AA member {node_id} {proto}",
                     }
                     if proto == "TLS":
@@ -258,7 +264,9 @@ def _build_local_nodes(idx: Index, scn_csp: dict) -> list[dict]:
                 row = {
                     "id": lid, "name": lid, "edge": "access",
                     "bind_ip": svc_ip, "bind_port": port, "protocol": proto,
-                    "thread_count": 2, "enabled": True, "is_primary": True, "tags": [],
+                    "thread_count": 2, "enabled": True,
+                    "is_primary": (proto == "UDP"),     # single primary
+                    "tags": [],
                     "note": f"standalone {proto}",
                 }
                 if proto == "TLS":
