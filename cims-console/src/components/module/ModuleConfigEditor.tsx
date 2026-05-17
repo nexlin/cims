@@ -14,6 +14,8 @@ const refOptionsCache: { current: RefOptions } = { current: {} }
 export type ModuleConfigEditorSource =
   | { type: 'deployment'; deploymentId: number }
   | { type: 'module';     moduleName: string }
+  // HA 그룹 단위 — scope=service collection 의 정합 보장. fetch 는 첫 멤버, save 는 모든 멤버에 PUT.
+  | { type: 'group';      deploymentIds: number[] }
 
 interface Props {
   source: ModuleConfigEditorSource
@@ -52,6 +54,8 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
     todo.forEach(c => refOptsLoaded.current.add(c))
     const getter = source.type === 'deployment'
       ? (key: string) => deploymentApi.getDeploymentCollection(source.deploymentId, key)
+      : source.type === 'group'
+      ? (key: string) => deploymentApi.getDeploymentCollection(source.deploymentIds[0], key)
       : (key: string) => deploymentApi.getModuleCollection(source.moduleName, key)
     Promise.all(todo.map(async c => {
       try {
@@ -72,16 +76,34 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
   }, [fields, source])
 
   // source 분기 fetch/save
+  // group 의 경우 fetch 는 첫 멤버 (정합 보장 가정), save 는 모든 멤버에 PUT (양쪽 동기화).
   const fetchCollection = useCallback(() => {
-    return source.type === 'deployment'
-      ? deploymentApi.getDeploymentCollection(source.deploymentId, collection.key)
-      : deploymentApi.getModuleCollection(source.moduleName, collection.key)
+    if (source.type === 'deployment')
+      return deploymentApi.getDeploymentCollection(source.deploymentId, collection.key)
+    if (source.type === 'group')
+      return deploymentApi.getDeploymentCollection(source.deploymentIds[0], collection.key)
+    return deploymentApi.getModuleCollection(source.moduleName, collection.key)
   }, [source, collection.key])
 
-  const saveCollection = useCallback((recs: Record_[]) => {
-    return source.type === 'deployment'
-      ? deploymentApi.putDeploymentCollection(source.deploymentId, collection.key, recs, true)
-      : deploymentApi.putModuleCollection(source.moduleName, collection.key, recs, true)
+  const saveCollection = useCallback(async (recs: Record_[]) => {
+    if (source.type === 'deployment') {
+      return deploymentApi.putDeploymentCollection(source.deploymentId, collection.key, recs, true)
+    }
+    if (source.type === 'group') {
+      // 모든 멤버에 동일 데이터로 PUT — 마지막 응답 반환 (count 는 첫 멤버 기준).
+      const results = await Promise.all(
+        source.deploymentIds.map(did =>
+          deploymentApi.putDeploymentCollection(did, collection.key, recs, true)
+        )
+      )
+      const totalSignaled = results.flatMap(r => r.signaled || [])
+      return {
+        ok: results.every(r => r.ok),
+        count: results[0]?.count ?? recs.length,
+        signaled: Array.from(new Set(totalSignaled)),
+      }
+    }
+    return deploymentApi.putModuleCollection(source.moduleName, collection.key, recs, true)
   }, [source, collection.key])
 
   const load = useCallback(async () => {

@@ -229,11 +229,20 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
               <TabBtn active={tab === 'scalar'} onClick={() => setTab('scalar')}>
                 설정 ({template.sections.reduce((n, s) => n + s.fields.length, 0)})
               </TabBtn>
-              {(template.collections || []).map(c => (
-                <TabBtn key={c.key} active={tab === c.key} onClick={() => setTab(c.key)}>
-                  {c.title}
-                </TabBtn>
-              ))}
+              {(template.collections || []).map(c => {
+                // scope=service 는 그룹 공통 — 본 modal (멤버 단일 deployment) 에서 편집 시
+                // 정합 깨질 위험. 잠금 표시 + 클릭 시 안내 toast.
+                const isGroupOnly = c.scope === 'service' && source.type === 'deployment'
+                return (
+                  <TabBtn key={c.key}
+                          active={tab === c.key}
+                          onClick={() => isGroupOnly
+                            ? show(`${c.title} 는 그룹 공통 설정 — /deploy/services 의 "⚙ 그룹 설정" 에서 편집`, 'err')
+                            : setTab(c.key)}>
+                    {isGroupOnly && '🔒 '}{c.title}
+                  </TabBtn>
+                )
+              })}
             </div>
 
             {/* 스크롤 영역 */}
@@ -259,8 +268,20 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
                       onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
                       onResetAll={() => setValues({ ...initial })} />
                   )}
+                  {/* scope=service section 은 그룹 공통이라 멤버 단일 deployment 에서 편집 시 정합 깨질 위험 — 별도 트랙 안내 */}
+                  {source.type === 'deployment' && template.sections.some(s => s.scope === 'service') && (
+                    <div style={{
+                      padding: 10, background: '#f5f7fa', border: '1px solid #d0d8e0',
+                      borderRadius: 4, fontSize: 12, color: '#566', marginBottom: 12,
+                    }}>
+                      🔒 <b>서비스 설정 (그룹 공통)</b> 은 본 modal 에서 편집 불가 — 별도 트랙 (예정).
+                      여기서는 멤버 specific 시스템 설정만 편집. 숨겨진 section:&nbsp;
+                      {template.sections.filter(s => s.scope === 'service').map(s => s.title).join(', ')}
+                    </div>
+                  )}
                   {template.sections
                     .filter(sec => showAdvanced || !sec.hidden)
+                    .filter(sec => source.type !== 'deployment' || sec.scope !== 'service')
                     .map(sec => (
                       <SectionBlock key={sec.key} section={sec} values={values}
                         initial={initial} changed={changed} showAdvanced={showAdvanced}

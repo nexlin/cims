@@ -17,7 +17,35 @@ import { useCallback, useEffect, useMemo, useState, type InputHTMLAttributes } f
 import { Link } from 'react-router-dom'
 import { haGroupsApi, type HaGroup, type VipBinding as ApiVipBinding } from '../api/ha_groups'
 import { deploymentApi, type Agent, type SipPackage, type Deployment,
-         type NetIface as ApiNetIface, type ServiceIpRow as ApiServiceIpRow } from '../api/deployment'
+         type NetIface as ApiNetIface, type ServiceIpRow as ApiServiceIpRow,
+         type AgentJob } from '../api/deployment'
+// 그룹 서비스 설정은 별도 트랙 — 향후 작업 시 import 부활:
+// import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigModal'
+
+// Helper — agent job 결과 polling (1초 × max 30회 = 30초 timeout).
+// status 가 completed/failed 가 되면 즉시 반환. 그 외 timeout.
+async function pollAgentJob(agentId: number, jobId: number,
+                            opts?: { intervalMs?: number; maxAttempts?: number }): Promise<AgentJob> {
+  const interval = opts?.intervalMs ?? 1000
+  const max      = opts?.maxAttempts ?? 30
+  for (let i = 0; i < max; i++) {
+    const j = await deploymentApi.getAgentJob(agentId, jobId)
+    if (j.status === 'completed' || j.status === 'failed') return j
+    await new Promise(res => setTimeout(res, interval))
+  }
+  throw new Error(`timeout polling job #${jobId}`)
+}
+
+// stdout 의 [OK]/[SKIP]/[DENY]/[FAIL] prefix 갯수로 요약.
+function summarizeApplyResult(stdout: string | null): { ok: number; skip: number; deny: number; fail: number } {
+  const s = stdout ?? ''
+  return {
+    ok:   (s.match(/^\[OK\]/gm) || []).length,
+    skip: (s.match(/^\[SKIP\]/gm) || []).length,
+    deny: (s.match(/^\[DENY\]/gm) || []).length,
+    fail: (s.match(/^\[FAIL\]/gm) || []).length,
+  }
+}
 
 // ──────────────────────────────────────────────────────────────
 //  Types
@@ -48,7 +76,8 @@ interface PkgDef {
 type NetIface = ApiNetIface
 type BindingStatus = 'up' | 'down' | 'unknown'
 type ServiceIpRow = ApiServiceIpRow & { status?: BindingStatus }
-type VipBinding = ApiVipBinding
+// dirty 플래그 추가 — 사용자가 ip/mask 편집 중인 row 는 NIC 매칭과 무관하게 status 'unknown'
+type VipBinding = ApiVipBinding & { dirty?: boolean }
 
 interface ServerRow {
   id: number                    // = Agent.id (음수 = pending placeholder)
@@ -580,12 +609,28 @@ export default function HaServicesPage() {
     } catch (e) { flash(`VIP 적용 실패: ${(e as Error).message}`) }
   }
 
-  // ── ServiceIpPanel "[적용]" — agent 에 apply_ip_config job 큐잉 (ip addr add) ──
+  // ── ServiceIpPanel "[적용]" — agent 에 apply_ip_config job 큐잉 + 결과 polling ──
   const applyServiceIp = async (srv: ServerRow) => {
+    flash(`${srv.name} IP 적용 큐잉 — 처리 중…`)
     try {
       const r = await deploymentApi.applyIpConfig(srv.id)
-      flash(`${srv.name} IP 적용 큐잉 — job #${r.job_id} (${r.rows} rows)`)
-    } catch (e) { flash(`IP 적용 실패: ${(e as Error).message}`) }
+      const j = await pollAgentJob(srv.id, r.job_id)
+      const c = summarizeApplyResult(j.result_stdout)
+      const parts = [
+        c.ok   && `${c.ok} OK`,
+        c.skip && `${c.skip} SKIP`,
+        c.deny && `${c.deny} DENY`,
+        c.fail && `${c.fail} FAIL`,
+      ].filter(Boolean).join(', ')
+      const summary = parts || `${r.rows} rows`
+      if (j.result_code === 0 && c.fail === 0 && c.deny === 0) {
+        flash(`✓ ${srv.name} 적용 완료 — ${summary}`)
+      } else if (c.ok > 0 || c.skip > 0) {
+        flash(`⚠ ${srv.name} 부분 적용 — ${summary}`)
+      } else {
+        flash(`❌ ${srv.name} 적용 실패 — ${summary}`)
+      }
+    } catch (e) { flash(`${srv.name} IP 적용 실패: ${(e as Error).message}`) }
   }
 
   // ── 패키지 추가/제거 → deployments insert/delete per member ──
@@ -738,6 +783,8 @@ export default function HaServicesPage() {
           fontSize: 13, zIndex: 1000,
         }}>{toast}</div>
       )}
+
+      {/* 그룹 서비스 설정 — 별도 트랙 (task #13 의 확장). 현재는 멤버별 시스템 설정만 활성. */}
     </div>
   )
 }
@@ -1136,8 +1183,10 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
   }
 
   // agent 가 heartbeat 으로 보고한 interfaces 와 (iface, ip) 매칭 시 'up'.
+  // 사용자가 입력값을 편집 중이면 (isChanged) 적용 전이므로 'unknown' — NIC 매칭 무의미.
   // 매칭 안 되는데 ip 비어있지 않으면 'down', 그 외 'unknown'.
   const rowStatus = (r: ServiceIpRow): BindingStatus => {
+    if (isChanged(r)) return 'unknown'
     if (interfaces.some(x => x.name === r.iface && x.ip === r.ip)) return 'up'
     return r.ip ? 'down' : 'unknown'
   }
@@ -1313,11 +1362,12 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
       slot: newSlot,
       memberIfaces: newSlot ? autoMapMemberIfaces(newSlot) : {},
       status: 'unknown',
+      dirty: true,
     })
   }
 
   const applyRow = (bid: number) => {
-    updateRow(bid, { status: 'unknown' })
+    updateRow(bid, { status: 'unknown', dirty: false })
     onApply?.()    // ha-groups/{id}/apply 호출 → update_ha job 큐잉 → keepalived reload
   }
 
@@ -1331,6 +1381,8 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
     return srv.interfaces.some(x => x.name === memberIface && x.ip === b.ip)
   }
   const bindingStatus = (b: VipBinding): BindingStatus => {
+    // 사용자가 ip/slot 을 편집한 직후엔 적용 전이므로 NIC 매칭 의미 없음 → 'unknown'
+    if (b.dirty) return 'unknown'
     if (!b.ip) return 'unknown'
     return servers.some(s => memberHasVip(b, s.id)) ? 'up' : 'down'
   }
@@ -1425,6 +1477,7 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
                                      ip: host ? `${subnet!.prefix}${host}` : '',
                                      mask: subnet!.mask,
                                      status: 'unknown',
+                                     dirty: true,
                                    })
                                  }}
                                  placeholder="host"
@@ -1437,13 +1490,13 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
                     return (
                       <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
                         <input value={b.ip}
-                               onChange={e => updateRow(b.bid, { ip: e.target.value, status: 'unknown' })}
+                               onChange={e => updateRow(b.bid, { ip: e.target.value, status: 'unknown', dirty: true })}
                                placeholder="(VIP)" disabled={!b.slot}
                                style={{ width: 110, padding: '2px 6px', fontSize: 12,
                                         border: '1px solid #ddd', borderRadius: 3 }} />
                         <span>/</span>
                         <input type="number" value={b.mask ?? 24}
-                               onChange={e => updateRow(b.bid, { mask: parseInt(e.target.value) || 24 })}
+                               onChange={e => updateRow(b.bid, { mask: parseInt(e.target.value) || 24, dirty: true })}
                                disabled={!b.slot}
                                style={{ width: 40, padding: '2px 6px', fontSize: 12,
                                         border: '1px solid #ddd', borderRadius: 3 }} />

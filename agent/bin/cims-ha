@@ -11,7 +11,23 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HA_DIR="$(cd "$SCRIPT_DIR/../keepalived" && pwd)"
+
+# --ha-dir <path> override — 멤버 노드별로 install_path 의 keepalived/ 를 사용하기 위함.
+# agent 가 sudo -n cims-ha --ha-dir <install_path>/agent/keepalived config 형태로 호출.
+HA_DIR_OVERRIDE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ha-dir) HA_DIR_OVERRIDE="$2"; shift 2 ;;
+        *) break ;;
+    esac
+done
+
+if [[ -n "$HA_DIR_OVERRIDE" ]]; then
+    [[ ! -d "$HA_DIR_OVERRIDE" ]] && { echo "ERROR: --ha-dir 경로 없음: $HA_DIR_OVERRIDE" >&2; exit 2; }
+    HA_DIR="$(cd "$HA_DIR_OVERRIDE" && pwd)"
+else
+    HA_DIR="$(cd "$SCRIPT_DIR/../keepalived" && pwd)"
+fi
 HA_OUT="$HA_DIR/out"
 HA_JSON="$HA_DIR/ha.json"
 HA_UNIT_DIR="$(cd "$SCRIPT_DIR/../systemd" && pwd)"

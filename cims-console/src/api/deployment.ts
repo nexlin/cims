@@ -132,7 +132,7 @@ export interface Agent {
 
 export interface AgentCreateResult extends Agent {
   enrollment_token: string
-  enrollment_token_expires_at?: string
+  enrollment_token_expires_at: string
   enrollment_token_ttl_sec?: number
   install_command: string
 }
@@ -205,6 +205,8 @@ export interface ConfigTemplateSection {
   hidden?: boolean
   // v2: 섹션 내부 sub-header 정의. field.group 으로 필드 정렬.
   groups?: { key: string; title: string; description?: string }[]
+  // v3: HA 그룹 멤버 간 정합 분류. "service" (공통) / "system" (멤버별). default "service".
+  scope?: ConfigScope
 }
 
 export interface CollectionSchema {
@@ -215,6 +217,14 @@ export interface CollectionSchema {
   fields: ConfigTemplateField[]
 }
 
+/**
+ * scope — config 항목이 HA 그룹 멤버 간에 공통인지 멤버별인지 표시.
+ *   "service" — 그룹 공통 (access_services, routes, rules, remote_nodes 등). 그룹 단위 일괄 편집 → 양쪽 멤버에 자동 PUT.
+ *   "system"  — 멤버 specific (local_nodes 의 LocalIp 등). 멤버별로 따로 편집.
+ *   undefined — 기본값 "service" (보수적 — 공통 가정. 명시 권장).
+ */
+export type ConfigScope = 'system' | 'service'
+
 export interface ConfigTemplateCollection {
   key: string
   title: string
@@ -223,6 +233,7 @@ export interface ConfigTemplateCollection {
   reload_hint?: string
   schema: CollectionSchema
   storage?: { kind: string; file?: string }
+  scope?: ConfigScope
 }
 
 export interface ConfigTemplatePreset {
@@ -233,6 +244,7 @@ export interface ConfigTemplatePreset {
   description?: string
   // 적용할 키→값 매핑. ConfigTemplateField.key 와 동일 형식.
   values: Record<string, string | number | boolean | null>
+  scope?: ConfigScope
 }
 
 export interface ConfigTemplate {
@@ -307,6 +319,21 @@ export type JobType =
   | 'start' | 'stop' | 'restart'
   | 'update_config' | 'collect_log' | 'health_check'
 
+export interface AgentJob {
+  id: number
+  agent_id: number
+  job_type: string
+  params?: Record<string, unknown>
+  status: 'queued' | 'running' | 'completed' | 'failed' | string
+  result_code: number | null
+  result_stdout: string | null
+  result_stderr: string | null
+  dispatched_at: string | null
+  completed_at: string | null
+  create_time: string
+  update_time: string
+}
+
 export const deploymentApi = {
   // agents
   listAgents:    () => api.get<{ items: Agent[] }>('/agents').then(r => r.items),
@@ -334,6 +361,8 @@ export const deploymentApi = {
   upgradeAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/upgrade`, {}),
   applyIpConfig: (id: number) =>
     api.post<{ agent_id: number; job_id: number; rows: number }>(`/agents/${id}/apply-ip-config`, {}),
+  getAgentJob:   (agentId: number, jobId: number) =>
+    api.get<AgentJob>(`/agents/${agentId}/jobs/${jobId}`),
   agentMetrics:  (id: number) => api.get<{ items: AgentMetric[] }>(`/agents/${id}/metrics`),
 
   // packages

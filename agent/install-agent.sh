@@ -45,7 +45,7 @@ fi
 
 INSTALL_DIR="$(pwd)"
 STATE_DIR="$INSTALL_DIR/state"
-BIN_FILE="$INSTALL_DIR/cims_agent.py"
+BIN_FILE="$INSTALL_DIR/agent/cims_agent.py"
 LAUNCHER="$INSTALL_DIR/run.sh"
 
 echo "==> Installing CIMS Agent to current directory"
@@ -56,13 +56,26 @@ echo "    name   : $AGENT_NAME"
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 
-# agent 바이너리 (local dev 에서 복사하거나 CSC 에서 다운로드)
-if [[ -f "$(dirname "$0")/cims_agent.py" ]]; then
-    cp "$(dirname "$0")/cims_agent.py" "$BIN_FILE"
-else
-    curl -fsSLk "$CSC_URL/cims_agent.py" -o "$BIN_FILE"
+# agent bundle (tarball) — cims_agent.py + bin/{cims-priv,cims-ha,cims-svc,...} + lib/ + keepalived/ + systemd/
+# tarball 안 layout: agent/cims_agent.py, agent/bin/..., agent/lib/..., agent/keepalived/..., agent/systemd/...
+echo "==> Downloading agent bundle"
+BUNDLE_TMP="$(mktemp /tmp/cims-agent-bundle.XXXXXX.tar.gz)"
+trap 'rm -f "$BUNDLE_TMP"' EXIT
+if ! curl -fsSLk "$CSC_URL/agent-bundle.tar.gz" -o "$BUNDLE_TMP"; then
+    echo "ERROR: failed to download $CSC_URL/agent-bundle.tar.gz"
+    exit 4
+fi
+# extract — agent/ 하위만 INSTALL_DIR 에 풀기 (cims.sh, meta.json 등 최상위 noise 제외)
+if ! tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR" agent/ 2>/dev/null; then
+    # 일부 tarball 은 agent/ filter 미지원 — fallback 전체 extract
+    tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR"
+fi
+if [[ ! -f "$BIN_FILE" ]]; then
+    echo "ERROR: tarball extracted but $BIN_FILE not found"
+    exit 5
 fi
 chmod 755 "$BIN_FILE"
+[[ -d "$INSTALL_DIR/agent/bin" ]] && chmod 755 "$INSTALL_DIR/agent/bin/"*
 
 # 수동 실행용 런처 (systemd 사용 안 해도 nohup/screen 등으로 띄울 수 있음)
 cat > "$LAUNCHER" <<EOF
@@ -70,7 +83,7 @@ cat > "$LAUNCHER" <<EOF
 set -eu
 cd "\$(dirname "\$0")"
 export CIMS_ENROLLMENT_TOKEN="\${CIMS_ENROLLMENT_TOKEN:-$ENROLL_TOKEN}"
-exec /usr/bin/python3 ./cims_agent.py \\
+exec /usr/bin/python3 ./agent/cims_agent.py \\
     --csc-url "$CSC_URL" \\
     --state-dir "./state" \\
     --name "$AGENT_NAME"
@@ -145,10 +158,7 @@ EOF
         echo "     sudo loginctl enable-linger $USER"
     fi
 else
-    echo "==> systemd 미사용 모드 — 수동 기동 필요"
-    echo "    포그라운드:   ./run.sh"
-    echo "    백그라운드:   nohup ./run.sh > agent.log 2>&1 &"
-    # 첫 enroll 만 수행해서 state.json 생성 — 이후 token 은 재사용 불가
+    echo "==> systemd 미사용 모드 (DEV) — enroll + nohup 자동 기동"
     echo ""
     echo "==> Running first-time enroll (3s)"
     (cd "$INSTALL_DIR" && CIMS_ENROLLMENT_TOKEN="$ENROLL_TOKEN" \
@@ -156,10 +166,22 @@ else
             --csc-url "$CSC_URL" \
             --state-dir "$STATE_DIR" \
             --name "$AGENT_NAME" ) || true
-    if [[ -f "$STATE_DIR/state.json" ]]; then
-        echo "    ✓ enroll 완료 (state.json 생성됨)"
-    else
+    if [[ ! -f "$STATE_DIR/state.json" ]]; then
         echo "    ⚠ enroll 실패 — token 확인 후 ./run.sh 로 수동 기동"
+    else
+        echo "    ✓ enroll 완료 (state.json 생성됨)"
+        echo ""
+        echo "==> 자동 기동 (nohup ./run.sh)"
+        (cd "$INSTALL_DIR" && nohup ./run.sh > agent.log 2>&1 < /dev/null &)
+        sleep 1
+        AGENT_PID=$(pgrep -af cims_agent.py 2>/dev/null | grep -F -- "--name $AGENT_NAME" | awk '{print $1}' | head -1)
+        if [[ -n "$AGENT_PID" ]]; then
+            echo "    ✓ agent 기동 (pid=$AGENT_PID, log=$INSTALL_DIR/agent.log)"
+            echo "      종료:  kill $AGENT_PID"
+        else
+            echo "    ⚠ agent 기동 확인 실패 — $INSTALL_DIR/agent.log 확인"
+            echo "      수동 기동: cd $INSTALL_DIR && nohup ./run.sh > agent.log 2>&1 &"
+        fi
     fi
 fi
 

@@ -529,24 +529,64 @@ def job_update_ha(params: dict) -> tuple:
     except Exception as e:
         return 2, "", f"write ha.json failed: {e}"
 
-    # cims-ha config + apply — agent 가 sudo 권한 있을 때만 실제 시스템 적용.
+    # cims-ha config + apply — sudoers 화이트리스트의 dev dist canonical 사용
+    # ha.json 위치는 install_path 별로 다르므로 --ha-dir 인자로 전달.
     msgs = [f"ha.json updated: {ha_path}"]
-    cims_ha = os.path.join(install_path, "agent", "bin", "cims-ha")
-    if os.path.isfile(cims_ha):
+    cims_ha = _resolve_cims_ha()
+    ha_dir = os.path.dirname(ha_path)
+    if cims_ha:
         try:
-            r1 = subprocess.run([cims_ha, "config"], capture_output=True, text=True, timeout=30)
-            msgs.append(f"cims-ha config rc={r1.returncode}")
+            r1 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "config"],
+                                capture_output=True, text=True, timeout=30)
+            msgs.append(f"cims-ha config rc={r1.returncode}"
+                       + (f" err={(r1.stderr or r1.stdout).strip()[-200:]}" if r1.returncode != 0 else ""))
         except Exception as e:
             msgs.append(f"cims-ha config exception: {e}")
         try:
-            r2 = subprocess.run([cims_ha, "apply"], capture_output=True, text=True, timeout=60)
+            r2 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "apply"],
+                                capture_output=True, text=True, timeout=60)
             msgs.append(f"cims-ha apply rc={r2.returncode}"
-                       + (f" err={r2.stderr.strip()[-200:]}" if r2.returncode != 0 else ""))
+                       + (f" err={(r2.stderr or r2.stdout).strip()[-200:]}" if r2.returncode != 0 else ""))
         except Exception as e:
             msgs.append(f"cims-ha apply exception (likely no keepalived / no sudo): {e}")
     else:
-        msgs.append(f"cims-ha not found at {cims_ha} — ha.json only (no apply)")
+        msgs.append("cims-ha not found in candidate paths — ha.json only (no apply)")
     return 0, "\n".join(msgs), ""
+
+
+def _resolve_cims_ha() -> "str | None":
+    """cims-ha wrapper 절대경로 — _resolve_cims_priv 와 같은 우선순위 패턴.
+    sudoers 화이트리스트의 dev dist canonical 이 우선 → install_path 별 ha.json 은 --ha-dir 로 분리.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands = [
+        "/usr/local/bin/cims-ha",                                # prod canonical
+        "/home/nex/work/cims/build/dist/agent/bin/cims-ha",      # dev dist (sudoers 등재)
+        os.path.join(here, "bin", "cims-ha"),                    # install_path 의 local copy
+    ]
+    for p in cands:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+def _resolve_cims_priv() -> "str | None":
+    """cims-priv wrapper 절대경로 — sudoers 화이트리스트와 일치해야 호출 가능.
+
+    우선순위: prod canonical → dev dist canonical (sudoers 등재 경로) → install_path 의 local copy.
+    dev 환경에서는 install_path 의 cims-priv 가 sudoers 에 없으므로 dist canonical 이 우선.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands = [
+        "/usr/local/bin/cims-priv",                              # prod canonical
+        "/home/nex/work/cims/build/dist/agent/bin/cims-priv",    # dev dist (sudoers 등재)
+        os.path.join(here, "bin", "cims-priv"),                  # install_path 의 local copy (prod 의 /opt/...)
+        os.path.join(here, "cims-priv"),                         # legacy 단일 파일 layout
+    ]
+    for p in cands:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
 
 
 def job_apply_ip_config(params: dict) -> tuple:
@@ -593,16 +633,24 @@ def job_apply_ip_config(params: dict) -> tuple:
             fail_count += 1
             continue
         cidr = f"{ip}/{mask}"
+        priv = _resolve_cims_priv()
+        if priv is None:
+            fail_count += 1
+            msgs.append(f"[FAIL] {iface} += {cidr}: cims-priv not found")
+            continue
         try:
-            res = subprocess.run(["ip", "addr", "add", cidr, "dev", iface],
+            res = subprocess.run(["sudo", "-n", priv, "ip-add", iface, cidr],
                                  capture_output=True, text=True, timeout=10)
             if res.returncode == 0:
-                msgs.append(f"[OK]   {iface} += {cidr}")
-            elif "File exists" in (res.stderr or ""):
-                msgs.append(f"[SKIP] {iface}: {cidr} already present")
+                combined = (res.stdout or "") + (res.stderr or "")
+                if "already present" in combined:
+                    msgs.append(f"[SKIP] {iface}: {cidr} already present")
+                else:
+                    msgs.append(f"[OK]   {iface} += {cidr}")
             else:
                 fail_count += 1
-                msgs.append(f"[FAIL] {iface} += {cidr}: rc={res.returncode} err={res.stderr.strip()[-200:]}")
+                err = (res.stderr or res.stdout or "").strip()[-200:]
+                msgs.append(f"[FAIL] {iface} += {cidr}: rc={res.returncode} err={err}")
         except Exception as e:
             fail_count += 1
             msgs.append(f"[FAIL] {iface} += {cidr}: {e}")

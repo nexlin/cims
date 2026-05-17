@@ -415,7 +415,24 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _upgrade_agent_binary(handler_args, aid, config)
         if action == "apply-ip-config" and method == "POST":
             return await _apply_ip_config(aid, config)
+    elif len(tail) == 3:
+        # GET /agents/{aid}/jobs/{jid} — job 단건 조회 (result polling)
+        if tail[1] == "jobs" and method == "GET":
+            try: jid = int(tail[2])
+            except (TypeError, ValueError):
+                return HandlerResult(status=400, body={"error": "invalid_job_id"}, media_type="application/json")
+            return await _get_agent_job(aid, jid, config)
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
+
+
+async def _get_agent_job(aid: int, jid: int, config):
+    """단일 job 조회 — agent_id 매칭 확인 후 result_code/stdout/stderr 포함 반환."""
+    j = await asyncio.to_thread(_job_load, config, jid)
+    if not j:
+        return HandlerResult(status=404, body={"error": "job_not_found"}, media_type="application/json")
+    if j.get("agent_id") != aid:
+        return HandlerResult(status=404, body={"error": "job_not_for_agent"}, media_type="application/json")
+    return HandlerResult(status=200, body=j, media_type="application/json")
 
 
 def _ha_group_map_for_agents(config) -> dict:
@@ -1545,6 +1562,26 @@ async def _serve_install_script(handler_args: HandlerArgs, kwargs: dict) -> Hand
                              media_type="text/x-shellscript")
 
 
+async def _serve_agent_bundle(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """최신 agent tarball (build/dist/packages/agent-*.tar.gz) 반환.
+    install-agent.sh 가 cims_agent.py + bin/ + lib/ + keepalived/ + systemd/ 한 번에 받기 위함."""
+    config = kwargs.get("config", {})
+    pkgs_dir = file_store.domain_dir(config, "packages")
+    items = file_store.load_all(pkgs_dir) if os.path.isdir(pkgs_dir) else []
+    agent_pkgs = [p for p in items if p.get("name") == "agent" and p.get("file_path")]
+    if not agent_pkgs:
+        return HandlerResult(status=404, body="agent package not registered",
+                             media_type="text/plain")
+    agent_pkgs.sort(key=lambda p: p.get("uploaded_at") or "", reverse=True)
+    tarball_path = agent_pkgs[0]["file_path"]
+    if not os.path.isfile(tarball_path):
+        return HandlerResult(status=404, body=f"tarball missing: {tarball_path}",
+                             media_type="text/plain")
+    with open(tarball_path, "rb") as f:
+        return HandlerResult(status=200, body=f.read(),
+                             media_type="application/gzip")
+
+
 async def _serve_agent_binary(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     p = _find_agent_asset("cims_agent.py")
     if not p:
@@ -1765,6 +1802,7 @@ CIMS_AGENT_ADMIN_HANDLER_LIST = (
 
 # 인증 없이 누구나 받을 수 있는 배포용 정적 에셋
 CIMS_AGENT_PUBLIC_HANDLER_LIST = (
-    ("/install-agent.sh", _serve_install_script, {}),
-    ("/cims_agent.py",    _serve_agent_binary,   {}),
+    ("/install-agent.sh",   _serve_install_script, {}),
+    ("/cims_agent.py",      _serve_agent_binary,   {}),
+    ("/agent-bundle.tar.gz", _serve_agent_bundle,  {}),
 )
