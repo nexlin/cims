@@ -29,6 +29,7 @@ static std::string TimeToIso( time_t t ) {
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
+#include "CspLocalNodeMap.h"
 #include "CspPttGroup.h"
 #include "RecordPath.h"
 #include "RtpMap.h"
@@ -336,6 +337,22 @@ bool CGroupCallService::InviteMember( const char* pszUserId, const char* pszGrou
         return false;
     }
     clsUserInfo.GetCallRoute( clsRoute );
+
+    // T2~T4 통합: PTT outbound leg 의 Via/Contact 자기 주소를 access_services(kind=ptt) 의
+    //   첫 allowed_local_node_refs 에 매칭되는 listener 의 bind_ip:bind_port 로 결정.
+    //   ref 없거나 dangling 시 hint 미설정 → SipDialog 가 stack primary fallback.
+    {
+        ServiceInfo pttSvc = gclsServiceMap.GetByKind( "ptt" );
+        if ( pttSvc.id > 0 && !pttSvc.allowed_local_node_refs.empty() ) {
+            LocalNodeInfo ln = gclsLocalNodeMap.GetByName( pttSvc.allowed_local_node_refs[0] );
+            if ( ln.IsValid() ) {
+                clsRoute.m_strOutboundLocalIp = ( ln.bind_ip.empty() || ln.bind_ip == "0.0.0.0" )
+                                                    ? gclsSetup.m_strLocalIp
+                                                    : ln.bind_ip;
+                if ( ln.bind_port > 0 ) clsRoute.m_iOutboundLocalPort = ln.bind_port;
+            }
+        }
+    }
 
     // 2. Get Shared Group Port
     int iSharedVideoPort = 0;
