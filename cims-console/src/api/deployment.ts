@@ -218,10 +218,24 @@ export interface CollectionSchema {
 }
 
 /**
- * scope — config 항목이 HA 그룹 멤버 간에 공통인지 멤버별인지 표시.
- *   "service" — 그룹 공통 (access_services, routes, rules, remote_nodes 등). 그룹 단위 일괄 편집 → 양쪽 멤버에 자동 PUT.
- *   "system"  — 멤버 specific (local_nodes 의 LocalIp 등). 멤버별로 따로 편집.
- *   undefined — 기본값 "service" (보수적 — 공통 가정. 명시 권장).
+ * scope — config 항목이 HA 그룹 멤버 간에 어떻게 분배되는지 표시.
+ *
+ *  "service" — 그룹 공통. 항상 양 멤버에 동일 값. 그룹 단위 일괄 편집.
+ *              예: access_services, routes, rules, remote_nodes.
+ *
+ *  "system"  — 멤버 분리가 *필요할 때만* 분리. HA mode 따라 결정:
+ *                ─ active_standby: 양 멤버 동일 (VIP 1개 + 동일 listener 정의) →
+ *                                  실질적으로 "service" 처럼 fan-out
+ *                ─ all_active:     멤버별 다른 svc IP 정상 → 멤버별 분리
+ *                ─ standalone:     단일 멤버 — 분리 무의미
+ *              예: local_nodes (bind_ip 가 VIP 일 수도 멤버 svc IP 일 수도).
+ *
+ *  undefined — 기본값 "service" (보수적 — 공통 가정. 명시 권장).
+ *
+ * 옛 정의 (~2026-05-18 이전): "system" = 무조건 멤버별 분리. A/S 모드에서도 멤버별
+ *  편집을 강제하여 split-brain config 위험이 있었음. T4 (commit 후속) 에서 mode 인식
+ *  으로 의미 재정의. csc 의 fan-out 결정 함수 (_put_deployment_collection) 가 동일
+ *  룰로 동작.
  */
 export type ConfigScope = 'system' | 'service'
 
@@ -393,16 +407,38 @@ export const deploymentApi = {
     api.put<{ ok: boolean; job_id: number | null }>(`/deployments/${id}/config`,
       { config: values, queue_update }),
 
-  // deployment collections (jsonl-on-target via agent sync REST)
+  // deployment collections (jsonl-on-target via agent sync REST).
+  // T1/T2 (2026-05-18) 이후 csc 가 ha_group 멤버 자동 fan-out + drift 정보.
   getDeploymentCollection: (id: number, name: string) =>
-    api.get<{ records: Record<string, unknown>[]; schema: CollectionSchema }>(
+    api.get<{
+      records: Record<string, unknown>[];
+      schema:  CollectionSchema;
+      peers?:  Array<{ deployment_id: number; agent_id: number; status: number;
+                       ok: boolean; count: number | null; hash: string;
+                       error?: unknown }>;
+      drift_detected?: boolean;
+      ha_group_id?:   number | null;
+      ha_group_mode?: string | null;
+      scope?:         ConfigScope;
+    }>(
       `/deployments/${id}/collection/${name}`
     ),
   putDeploymentCollection: (id: number, name: string,
-                            records: Record<string, unknown>[], signal = true) =>
-    api.put<{ ok: boolean; count: number; signaled: number[] }>(
+                            records: Record<string, unknown>[], signal = true,
+                            propagate_to_ha_peers?: boolean) =>
+    api.put<{
+      ok: boolean; count: number; signaled: number[];
+      peers?: Array<{ deployment_id: number; agent_id: number; status: number;
+                      ok: boolean; count: number | null; signaled: number[];
+                      error?: unknown }>;
+      ha_group_id?:   number | null;
+      ha_group_mode?: string | null;
+      scope?:         ConfigScope;
+      propagated?:    boolean;
+      sync_id?:       number | null;
+    }>(
       `/deployments/${id}/collection/${name}`,
-      { records, signal }
+      { records, signal, ...(propagate_to_ha_peers !== undefined ? { propagate_to_ha_peers } : {}) }
     ),
 
   // Phase 1 로컬 모듈 overlay 설정

@@ -29,12 +29,15 @@ interface Props {
   members: Array<{ id: number; name: string }>
   deployments: Deployment[]
   packages: SipPackage[]
+  // T3 (2026-05-18): HA mode. 'active_standby' 면 scope=system collection 도 양 멤버 동일
+  //   (T4 의 scope 재정의 — VIP 모델). 'all_active' / 'standalone' 이면 scope=service 만.
+  haMode?: 'active_standby' | 'all_active' | 'standalone'
   onApplied?: () => Promise<void> | void
 }
 
 type Tab = { kind: 'preset' } | { kind: 'collection'; key: string }
 
-export function GroupServiceConfigModal({ open, onClose, groupName, members, deployments, packages, onApplied }: Props) {
+export function GroupServiceConfigModal({ open, onClose, groupName, members, deployments, packages, haMode, onApplied }: Props) {
   const [selectedPkg, setSelectedPkg] = useState<number>(0)
   const [selectedPreset, setSelectedPreset] = useState<string>('')
   const [tab, setTab] = useState<Tab>({ kind: 'preset' })
@@ -54,11 +57,18 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
   const template = pkg?.config_template
   const presets = template?.presets || []
 
-  // scope === 'service' 또는 미지정 (default service) collection 만 본 modal 에서 편집
+  // T4 (2026-05-18): scope 의미 재정의 후
+  //  - scope = 'service' / undefined  → 항상 그룹 단위 (본 modal)
+  //  - scope = 'system' + active_standby → VIP 모델 — 그룹 단위 fan-out
+  //  - scope = 'system' + all_active     → 멤버별 (이 modal 미포함)
   const serviceCollections: ConfigTemplateCollection[] = useMemo(() => {
     const all = template?.collections || []
-    return all.filter(c => c.scope === undefined || c.scope === 'service')
-  }, [template])
+    return all.filter(c => {
+      if (c.scope === undefined || c.scope === 'service') return true
+      if (c.scope === 'system' && haMode === 'active_standby') return true
+      return false
+    })
+  }, [template, haMode])
 
   const memberDepsForPkg = useMemo(
     () => deployments.filter(d => memberIds.has(d.agent_id) && d.package_id === effectivePkgId),

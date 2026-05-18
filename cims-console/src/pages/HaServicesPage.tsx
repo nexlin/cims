@@ -794,6 +794,7 @@ export default function HaServicesPage() {
           members={configModalFor.servers.map(s => ({ id: s.id, name: s.name }))}
           deployments={deployments}
           packages={packages}
+          haMode={configModalFor.mode}
           onApplied={async () => { await load() }}
         />
       )}

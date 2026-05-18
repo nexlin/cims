@@ -22,6 +22,15 @@ interface Props {
   collection: ConfigTemplateCollection
 }
 
+// T2 (2026-05-18) drift 정보 응답 구조 — UI 가 ha_group 멤버 정합 표시용.
+interface DriftInfo {
+  detected: boolean
+  peers: Array<{ deployment_id: number; agent_id: number; status: number;
+                 ok: boolean; count: number | null; hash: string }>
+  mode?: string | null
+  scope?: string | null
+}
+
 function ModuleConfigEditorInner({ source, collection }: Props) {
   const { show } = useToast()
   const [records, setRecords]   = useState<Record_[]>([])
@@ -32,6 +41,7 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [tagFilter, setTagFilter] = useState<string>('')
   const [refOpts, setRefOpts]     = useState<RefOptions>(refOptionsCache.current)
+  const [drift, setDrift]       = useState<DriftInfo>({ detected: false, peers: [] })
   const refOptsLoaded = useRef(new Set<string>())
 
   const fields = collection.schema.fields
@@ -76,7 +86,9 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
   }, [fields, source])
 
   // source 분기 fetch/save
-  // group 의 경우 fetch 는 첫 멤버 (정합 보장 가정), save 는 모든 멤버에 PUT (양쪽 동기화).
+  // T1/T2 (2026-05-18): csc 가 _put_deployment_collection 에서 자동 fan-out 함.
+  // group 케이스도 deployment 1개에만 PUT 하면 csc 가 ha_group 멤버 전체에 분배.
+  // GET 응답에 drift_detected / peers 가 포함되어 UI 가 양 멤버 정합 표시 가능.
   const fetchCollection = useCallback(() => {
     if (source.type === 'deployment')
       return deploymentApi.getDeploymentCollection(source.deploymentId, collection.key)
@@ -90,18 +102,8 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
       return deploymentApi.putDeploymentCollection(source.deploymentId, collection.key, recs, true)
     }
     if (source.type === 'group') {
-      // 모든 멤버에 동일 데이터로 PUT — 마지막 응답 반환 (count 는 첫 멤버 기준).
-      const results = await Promise.all(
-        source.deploymentIds.map(did =>
-          deploymentApi.putDeploymentCollection(did, collection.key, recs, true)
-        )
-      )
-      const totalSignaled = results.flatMap(r => r.signaled || [])
-      return {
-        ok: results.every(r => r.ok),
-        count: results[0]?.count ?? recs.length,
-        signaled: Array.from(new Set(totalSignaled)),
-      }
+      // csc 가 자동 fan-out → 첫 멤버만 PUT 해도 양 멤버 동기화됨.
+      return deploymentApi.putDeploymentCollection(source.deploymentIds[0], collection.key, recs, true)
     }
     return deploymentApi.putModuleCollection(source.moduleName, collection.key, recs, true)
   }, [source, collection.key])
@@ -109,9 +111,21 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await fetchCollection()
+      const r = await fetchCollection() as Record_ & {
+        records: Record_[]
+        drift_detected?: boolean
+        peers?: DriftInfo['peers']
+        ha_group_mode?: string | null
+        scope?: string | null
+      }
       setRecords(r.records)
       setOriginal(JSON.parse(JSON.stringify(r.records)))
+      setDrift({
+        detected: !!r.drift_detected,
+        peers:    r.peers || [],
+        mode:     r.ha_group_mode ?? null,
+        scope:    r.scope ?? null,
+      })
     } catch (e) {
       show(`${collection.title} 로드 실패: ${(e as Error).message}`, 'err')
     } finally {
@@ -197,6 +211,30 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
           {collection.reload_hint && (
             <span style={{ marginLeft: 8, color: '#27ae60' }}>⚡ {collection.reload_hint}</span>
           )}
+        </div>
+      )}
+
+      {/* T2 drift 배너 — ha_group 멤버 정합 불일치 */}
+      {drift.detected && (
+        <div style={{
+          background: '#fff8e1', border: '1px solid #f5c046',
+          borderRadius: 4, padding: '8px 12px', marginBottom: 10,
+          fontSize: 12, color: '#7a5a00',
+        }}>
+          ⚠️ HA 그룹 멤버 간 정합 불일치 — 양 멤버의 jsonl 이 다릅니다.
+          {drift.peers.length > 0 && (
+            <span style={{ marginLeft: 8 }}>
+              ({drift.peers.map(p => `dep#${p.deployment_id}: ${p.count ?? 'err'}건 (${p.hash.slice(0, 6) || '–'})`).join(' / ')})
+            </span>
+          )}
+          <span style={{ marginLeft: 8 }}>저장 시 자동으로 양 멤버에 동기화됩니다.</span>
+        </div>
+      )}
+      {!drift.detected && drift.peers.length > 1 && (
+        <div style={{
+          fontSize: 11, color: '#27ae60', marginBottom: 8,
+        }}>
+          ✓ HA 그룹 멤버 정합 (mode={drift.mode || '?'}, {drift.peers.length} 멤버)
         </div>
       )}
 
