@@ -31,6 +31,11 @@ namespace CspAddressing {
      *         >0 이면 해당 local_node 의 bind_ip 반환. bind_ip=0.0.0.0 이면 gclsSetup.m_strLocalIp. */
     std::string GetLocalSipAddress( int inbound_listener_id = 0 );
 
+    /** inbound listener 의 bind_port 반환 (Via/Contact 자기 port 결정에 사용).
+     *  @param inbound_listener_id psip 수신 listener 의 extId. 0 또는 매칭 실패 시 fallback.
+     *  @param fallback_port 매칭 실패 시 반환값 (보통 gclsSetup.m_iUdpPort). */
+    int GetLocalSipPort( int inbound_listener_id, int fallback_port );
+
     /** outbound forwarding 시 목적지 protocol/edge 에 맞는 local_node 선택.
      *  1차: enabled && protocol == proto && edge == edge_preference
      *  2차: enabled && protocol == proto (edge 무관)

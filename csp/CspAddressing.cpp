@@ -21,6 +21,14 @@ namespace CspAddressing {
         return gclsSetup.m_strLocalIp;
     }
 
+    int GetLocalSipPort( int inbound_listener_id, int fallback_port ) {
+        if ( inbound_listener_id > 0 ) {
+            LocalNodeInfo n = gclsLocalNodeMap.GetByIntId( inbound_listener_id );
+            if ( n.IsValid() && n.bind_port > 0 ) return n.bind_port;
+        }
+        return fallback_port;
+    }
+
     std::string GetLocalSipAddressForOutbound( const std::string& proto, const std::string& edge_preference ) {
         std::vector<LocalNodeInfo> all = gclsLocalNodeMap.GetAll();
 

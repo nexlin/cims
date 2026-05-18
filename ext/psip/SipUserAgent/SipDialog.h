@@ -71,6 +71,17 @@ public:
 	 *  예) MCPTT 그룹 콜에서 mcptt 도메인으로 강제 사용. */
 	std::string	m_strOverrideDomain;
 
+	/** Per-dialog outbound Via 자기 IP override.
+	 *  Empty → 전역 CSipStackSetup::m_strLocalIp fallback (현 primary local_node).
+	 *  CSP 가 route 결정 또는 access_service binding 에 따라 listener 의 bind_ip 를 설정.
+	 *  IBCF multi-peer / multi-listener 환경에서 leg 별로 다른 listener 의 IP 가
+	 *  Via/Contact 자기 주소가 되도록 함. */
+	std::string	m_strOutboundLocalIp;
+
+	/** Per-dialog outbound Via 자기 port override.
+	 *  <=0 → 전역 CSipStackSetup::GetLocalPort(transport) fallback. */
+	int			m_iOutboundLocalPort;
+
 	/** local RTP IP �ּ� */
 	std::string	m_strLocalRtpIp;
 

@@ -22,6 +22,7 @@ struct SubscriptionInfo {
     int iExpires;                  // Expires in seconds
     time_t tStartTime;             // Subscription Start Time
     int iNotifySeq;                // CSeq counter for NOTIFY messages
+    int iInboundListenerId = 0;    // SUBSCRIBE 수신 listener (NOTIFY Via/Contact 자기 주소 결정)
 };
 
 /**

@@ -455,8 +455,12 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo& sub, const std::st
  */
 static void SendNotifyToSubscriber( const SubscriptionInfo& sub, const std::string& etag,
                                     const std::string& strChangedId ) {
-    const std::string& strLocalIp = gclsUserAgent.m_clsSipStack.m_clsSetup.m_strLocalIp;
-    int iLocalPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
+    // SUBSCRIBE 수신 listener 의 bind_ip:bind_port 를 Via/From 자기 주소로 사용.
+    // listener id 가 0 (옛 dialog) 이거나 매칭 실패 시 stack primary 로 fallback.
+    const int iListenerId = sub.iInboundListenerId;
+    const int iFallbackPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
+    const std::string strLocalIp = CspAddressing::GetLocalSipAddress( iListenerId );
+    const int iLocalPort = CspAddressing::GetLocalSipPort( iListenerId, iFallbackPort );
 
     // Get NOTIFY CSeq (increment in manager)
     int iSeq = gclsSubscriptionManager.IncrementNotifySeq( sub.strCallId );

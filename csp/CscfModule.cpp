@@ -395,6 +395,8 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage* pclsMessage 
     info.iExpires = ( iExpires > 0 ) ? iExpires : 3600;
     info.tStartTime = time( NULL );
     info.iNotifySeq = 1;
+    // NOTIFY 송신 시 SUBSCRIBE 수신 listener 의 IP/Port 를 Via/Contact 자기 주소로 사용
+    info.iInboundListenerId = GetCurrentInboundListenerId();
 
     gclsSubscriptionManager.AddSubscription( strReqUri, info );
 

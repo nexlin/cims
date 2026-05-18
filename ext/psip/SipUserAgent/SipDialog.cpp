@@ -27,6 +27,7 @@
  * @brief ������
  */
 CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP)
+	, m_iOutboundLocalPort(-1)
 	, m_iLocalRtpPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
 	, m_pclsInvite(NULL), m_pclsSipStack( pclsSipStack )
 	, m_iSessionVersion(0)
@@ -60,7 +61,14 @@ CSipMessage * CSipDialog::CreateInvite( )
 
 	SipMakeBranch( szBranch, sizeof(szBranch) );
 
-	pclsMessage->AddVia( m_pclsSipStack->m_clsSetup.m_strLocalIp.c_str(), m_pclsSipStack->m_clsSetup.GetLocalPort( m_eTransport ), szBranch, m_eTransport );
+	// Per-dialog outbound override (route 결정 / access_service binding) 우선, 없으면 stack primary.
+	const char * pszVia = !m_strOutboundLocalIp.empty()
+		? m_strOutboundLocalIp.c_str()
+		: m_pclsSipStack->m_clsSetup.m_strLocalIp.c_str();
+	int iViaPort = m_iOutboundLocalPort > 0
+		? m_iOutboundLocalPort
+		: m_pclsSipStack->m_clsSetup.GetLocalPort( m_eTransport );
+	pclsMessage->AddVia( pszVia, iViaPort, szBranch, m_eTransport );
 	m_strViaBranch = szBranch;
 
 	if( m_b100rel )
@@ -88,7 +96,13 @@ CSipMessage * CSipDialog::CreateAck( int iStatusCode )
 
 	if( iStatusCode / 100 != 2 )
 	{
-		pclsMessage->AddVia( m_pclsSipStack->m_clsSetup.m_strLocalIp.c_str(), m_pclsSipStack->m_clsSetup.GetLocalPort( m_eTransport ), m_strViaBranch.c_str(), m_eTransport );
+		const char * pszVia = !m_strOutboundLocalIp.empty()
+			? m_strOutboundLocalIp.c_str()
+			: m_pclsSipStack->m_clsSetup.m_strLocalIp.c_str();
+		int iViaPort = m_iOutboundLocalPort > 0
+			? m_iOutboundLocalPort
+			: m_pclsSipStack->m_clsSetup.GetLocalPort( m_eTransport );
+		pclsMessage->AddVia( pszVia, iViaPort, m_strViaBranch.c_str(), m_eTransport );
 	}
 
 	return pclsMessage;
@@ -104,7 +118,13 @@ CSipMessage * CSipDialog::CreateCancel( )
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_CANCEL );
 	if( pclsMessage == NULL ) return NULL;
 
-	pclsMessage->AddVia( m_pclsSipStack->m_clsSetup.m_strLocalIp.c_str(), m_pclsSipStack->m_clsSetup.GetLocalPort( m_eTransport ), m_strViaBranch.c_str(), m_eTransport );
+	const char * pszVia = !m_strOutboundLocalIp.empty()
+		? m_strOutboundLocalIp.c_str()
+		: m_pclsSipStack->m_clsSetup.m_strLocalIp.c_str();
+	int iViaPort = m_iOutboundLocalPort > 0
+		? m_iOutboundLocalPort
+		: m_pclsSipStack->m_clsSetup.GetLocalPort( m_eTransport );
+	pclsMessage->AddVia( pszVia, iViaPort, m_strViaBranch.c_str(), m_eTransport );
 
 	return pclsMessage;
 }
