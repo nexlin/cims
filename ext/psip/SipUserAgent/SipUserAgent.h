@@ -10,7 +10,7 @@
 class CSipCallRoute
 {
 public:
-	CSipCallRoute() : m_iDestPort(0), m_eTransport( E_SIP_UDP ), m_b100rel(false)
+	CSipCallRoute() : m_iDestPort(0), m_eTransport( E_SIP_UDP ), m_b100rel(false), m_iOutboundLocalPort(-1)
 	{}
 
 	std::string	m_strDestIp;
@@ -20,6 +20,14 @@ public:
 	ESipTransport	m_eTransport;
 
 	bool				m_b100rel;
+
+	/** outbound 송신 시 Via/Contact 자기 주소 override.
+	 *  Empty → CSipStackSetup::m_strLocalIp fallback.
+	 *  route 결정으로 local_node 가 결정되면 그 bind_ip 를 set. */
+	std::string m_strOutboundLocalIp;
+
+	/** outbound 송신 시 Via 자기 port override. <=0 → fallback. */
+	int m_iOutboundLocalPort;
 };
 
 typedef MAP< std::string, CSipDialog > SIP_DIALOG_MAP;

@@ -52,6 +52,11 @@ bool CSipUserAgent::StartCall( const char * pszFrom, const char * pszTo, CSipCal
 	clsDialog.m_eTransport = pclsRoute->m_eTransport;
 	clsDialog.m_b100rel = pclsRoute->m_b100rel;
 
+	// route 결정 또는 access_service binding 으로 결정된 outbound local identity 를 dialog 에 전달.
+	// CreateInvite/Ack/Cancel 의 AddVia 가 이 hint 를 우선 사용. 미설정 시 stack primary fallback.
+	clsDialog.m_strOutboundLocalIp = pclsRoute->m_strOutboundLocalIp;
+	clsDialog.m_iOutboundLocalPort = pclsRoute->m_iOutboundLocalPort;
+
 	if( SendInvite( clsDialog ) == false ) return false;
 	strCallId = clsDialog.m_strCallId;
 
@@ -468,6 +473,11 @@ bool CSipUserAgent::CreateCall( const char * pszFrom, const char * pszTo, CSipCa
 	clsDialog.m_iContactPort = pclsRoute->m_iDestPort;
 	clsDialog.m_eTransport = pclsRoute->m_eTransport;
 	clsDialog.m_b100rel = pclsRoute->m_b100rel;
+
+	// route 결정 또는 access_service binding 으로 결정된 outbound local identity 를 dialog 에 전달.
+	// CreateInvite/Ack/Cancel 의 AddVia 가 이 hint 를 우선 사용. 미설정 시 stack primary fallback.
+	clsDialog.m_strOutboundLocalIp = pclsRoute->m_strOutboundLocalIp;
+	clsDialog.m_iOutboundLocalPort = pclsRoute->m_iOutboundLocalPort;
 
 	SIP_DIALOG_MAP::iterator			itMap;
 	char	szTag[SIP_TAG_MAX_SIZE], szBranch[SIP_BRANCH_MAX_SIZE], szCallIdName[SIP_CALL_ID_NAME_MAX_SIZE];

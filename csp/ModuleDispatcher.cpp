@@ -274,6 +274,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage* pclsMessage ) {
                         pe.route_name = rd.picked_route;
                         pe.route_set = rd.target_name;
                         pe.policy_name = rd.matched_policy;
+                        pe.local_node_ref = rc.local_node_ref;  // outbound leg 자기 주소 결정용
                         gclsPendingRouteMap.Insert( strCallId, pe );
                         CLog::Print( LOG_SYSTEM,
                                      "RoutingPolicyEngine: policy='%s' route_set='%s' picked_route='%s' → RemoteNode "
@@ -450,6 +451,10 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
     //   없으면 아래 내부 가입자 경로 (PTT 그룹 / legacy IBCF / TAS) 로 진행.
     //   Route 의 auth_user/password 는 Route map 재조회로 보강 (RemoteNode 에는 auth 정보 없음).
     bool v3Routed = false;
+    // T3: route 결정으로 결정된 outbound leg 의 자기 주소 (Via/Contact 자기 IP/Port) hint.
+    //     EventIncomingCall 이 CreateCall 호출 전에 clsRoute 에 채워서 dialog 까지 전달.
+    std::string strOutboundLocalIp;
+    int iOutboundLocalPort = -1;
     {
         PendingRouteEntry pe;
         std::string strCallIdKey = pszCallId ? pszCallId : "";
@@ -468,11 +473,29 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
             bRoutePrefix = true;
             SetCallOwner( pszCallId, &m_clsIbcf );
             v3Routed = true;
+            // T3: local_node_ref → bind_ip/bind_port 추출. 미정 또는 dangling 시 fallback 으로 진행.
+            if ( !pe.local_node_ref.empty() ) {
+                LocalNodeInfo ln = gclsLocalNodeMap.GetByName( pe.local_node_ref );
+                if ( ln.IsValid() ) {
+                    strOutboundLocalIp = ( ln.bind_ip.empty() || ln.bind_ip == "0.0.0.0" )
+                                             ? gclsSetup.m_strLocalIp
+                                             : ln.bind_ip;
+                    iOutboundLocalPort = ln.bind_port;
+                } else {
+                    CLog::Print( LOG_INFO,
+                                 "RoutingPolicyEngine: local_node_ref='%s' 조회 실패 — primary fallback [callId=%s]",
+                                 pe.local_node_ref.c_str(), pszCallId ? pszCallId : "" );
+                }
+            }
             CLog::Print(
                 LOG_SYSTEM,
-                "RoutingPolicyEngine: outbound via route_set='%s' route='%s' policy='%s' → %s:%d/%s [callId=%s]",
+                "RoutingPolicyEngine: outbound via route_set='%s' route='%s' policy='%s' → %s:%d/%s "
+                "src=%s:%d [callId=%s]",
                 pe.route_set.c_str(), pe.route_name.c_str(), pe.policy_name.c_str(), pe.remote_ip.c_str(),
-                pe.remote_port, pe.protocol.c_str(), pszCallId ? pszCallId : "" );
+                pe.remote_port, pe.protocol.c_str(),
+                strOutboundLocalIp.empty() ? gclsSetup.m_strLocalIp.c_str() : strOutboundLocalIp.c_str(),
+                iOutboundLocalPort > 0 ? iOutboundLocalPort : gclsSetup.m_iUdpPort,
+                pszCallId ? pszCallId : "" );
         }
     }
 
@@ -568,6 +591,10 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
 
     clsUserInfo.GetCallRoute( clsRoute );
     clsRoute.m_b100rel = gclsUserAgent.Is100rel( pszCallId );
+    // T3: route 결정으로 추출한 outbound local identity hint 를 dialog 까지 전달.
+    //     hint 미설정 시 stack primary fallback (NO-OP regression).
+    if ( !strOutboundLocalIp.empty() ) clsRoute.m_strOutboundLocalIp = strOutboundLocalIp;
+    if ( iOutboundLocalPort > 0 ) clsRoute.m_iOutboundLocalPort = iOutboundLocalPort;
 
     CSipMessage* pclsInvite;
     if ( gclsUserAgent.CreateCall( pszFrom, pszTo, pclsRtp, &clsRoute, strCallId, &pclsInvite ) == false )

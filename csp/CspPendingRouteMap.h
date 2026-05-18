@@ -27,6 +27,7 @@ struct PendingRouteEntry {
     std::string route_name;
     std::string route_set;
     std::string policy_name;
+    std::string local_node_ref;  // Route 의 local_node_ref — B2BUA outbound leg Via/Contact 자기 주소 결정
     std::chrono::steady_clock::time_point created;
 };
 
