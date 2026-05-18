@@ -533,9 +533,10 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
                 CSipFrom clsContact;
                 clsContact.m_clsUri.m_strProtocol = SIP_PROTOCOL;
                 clsContact.m_clsUri.m_strUser = clsUser.m_strForward;
-                // R5.b: 302 Moved Temporarily 는 수신 listener 기준으로 Contact 생성
-                clsContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( GetCurrentInboundListenerId() );
-                clsContact.m_clsUri.m_iPort = gclsSetup.m_iUdpPort;
+                // T4: 302 Moved Temporarily 는 수신 listener 의 bind_ip:bind_port 로 Contact 생성.
+                const int iListenerId = GetCurrentInboundListenerId();
+                clsContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
+                clsContact.m_clsUri.m_iPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
                 pclsResponse->m_clsContactList.push_back( clsContact );
                 gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
                 return;

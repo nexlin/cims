@@ -117,9 +117,11 @@ int ServiceMain() {
     }
 
     // primary local_node → gclsSetup.m_strLocalIp/m_iUdpPort.
-    //   local_nodes 가 CSP identity 의 SoT. bind_ip=0.0.0.0 은 GetLocalIp() 자동탐지로 치환.
-    //   primary 부재 시 fail-fast — csp.json 에 옛 Setup.Sip.LocalIp/UdpPort fallback 제거됨
-    //   (local_nodes 의 single source 정착).
+    //   T2~T4 이후 SIP 송신 자기 주소(Via/Contact)는 SipDialog hint (route 결정/access_service binding)
+    //   가 우선이지만, hint 가 없는 경로 (PTT 그룹 InviteMember, RecvOptions, 기타 fallback) 에서는
+    //   여전히 gclsSetup.m_strLocalIp 가 SIP UA identity 의 fallback 자리.
+    //   따라서 primary 부재 시 fail-fast 유지 — render.py 가 항상 primary 1개 보장하는 체계 신뢰.
+    //   (옛 csp.json Setup.Sip.LocalIp/UdpPort fallback 은 c2c8911 에서 제거됨.)
     {
         LocalNodeInfo primary = gclsLocalNodeMap.GetPrimary();
         if ( !primary.IsValid() ) {

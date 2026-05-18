@@ -275,10 +275,13 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage )
 
         {
             char szServiceRoute[512];
-            // R5.b: 응답은 수신 listener 기준으로 Service-Route 생성
-            const std::string strSipAddr = CspAddressing::GetLocalSipAddress( GetCurrentInboundListenerId() );
+            // T4: 응답은 수신 listener 의 bind_ip:bind_port 로 Service-Route 생성.
+            //     단말이 다른 NIC/리스너로 REGISTER 했어도 그 리스너의 주소가 응답 자기 주소가 됨.
+            const int iListenerId = GetCurrentInboundListenerId();
+            const std::string strSipAddr = CspAddressing::GetLocalSipAddress( iListenerId );
+            const int iSipPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
             snprintf( szServiceRoute, sizeof( szServiceRoute ), "<sip:%s@%s:%d;lr>", strRegDomain.c_str(),
-                      strSipAddr.c_str(), gclsSetup.m_iUdpPort );
+                      strSipAddr.c_str(), iSipPort );
             pclsResponse->AddHeader( "Service-Route", szServiceRoute );
         }
 
