@@ -496,11 +496,11 @@ def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
 
 
 def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
-    """install 시 _detect_tar_pkg_subdir 로 정해진 변종 디렉토리를 운영 중에 재추정.
+    """multi-pkg agent 의 변종별 pid 디렉토리 분리에 사용. **config.json 위치 결정자
+    아님** — config.json 의 overlay 위치는 CSP 의 _findDeploymentConfig
+    (SipServerSetup.cpp:147-166) 가 csp.json 부모×2 = install_path/config.json 으로
+    고정. 본 함수는 _signal_process 의 pid 탐색 순서에만 사용.
 
-    multi-pkg agent (예: mgmt-server = csc + console + phone) 는 install_path/<pkg>/
-    구조 → config.json 도 변종별 분리. 단일 변종 agent (csp 전용 등) 는 install_path
-    바로 아래에 config.json. 본 함수가 그 경계를 결정.
     우선순위: params.pkg_subdir 명시 → params.package_name 디렉토리 존재 → 빈 문자열.
     """
     explicit = (params.get("pkg_subdir") or "").strip()
@@ -520,16 +520,19 @@ def job_update_config(params: dict) -> tuple:
     UdpThreadCount 등) 는 이미 bound 된 socket / thread pool 에 반영 안 됨 — UI
     에서 별도 안내 (재기동 필요). pid 파일 없거나 권한 없으면 silently skip
     (stdout 의 signaled=[] 로 보고).
+
+    config.json 은 install_path 의 root 에 직접 쓴다 — SipServerSetup 의 overlay
+    탐색이 csp.json 부모×2 (= install_path) 의 config.json 을 봄. multi-pkg agent
+    의 변종별 분리는 _signal_process 의 pid 탐색에서만 의미 가짐.
     """
     install_path = _resolve_install_path(params)
     if not os.path.isdir(install_path):
         return 1, "", f"install_path not found: {install_path}"
-    pkg_subdir = _resolve_pkg_subdir(install_path, params)
-    cfg_target_dir = os.path.join(install_path, pkg_subdir) if pkg_subdir else install_path
     try:
-        cfg_path = _write_config_file(cfg_target_dir, params.get("config") or {})
+        cfg_path = _write_config_file(install_path, params.get("config") or {})
     except Exception as e:
         return 2, "", f"write config failed: {e}"
+    pkg_subdir = _resolve_pkg_subdir(install_path, params)
     _, signaled = _signal_process(install_path, "usr1", pkg_subdir=pkg_subdir)
     return 0, f"config updated: {cfg_path} signaled={signaled}", ""
 
