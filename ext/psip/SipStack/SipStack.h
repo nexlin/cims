@@ -182,6 +182,12 @@ private:
 	 *  listener 로 응답을 돌려보내기 위해 사용. id <= 0 이거나 매칭 실패 시 primary fallback. */
 	Socket _SelectUdpSocketByListenerId( int iListenerId );
 
+	/** (C): listener id + transport 로 bind_ip/bind_port 추출.
+	 *  CheckSipMessage 의 Via/Contact 자동 추가 자리에서 수신 listener 기반으로
+	 *  자기 주소 결정에 사용. 매칭 실패 시 false 반환 → 호출자가 primary fallback. */
+	bool _GetListenerBind( int iListenerId, ESipTransport eTransport,
+	                       std::string& outIp, int& outPort );
+
 	// TCP 다중 리스너 (R3: hot-reload)
 	std::vector<CSipStackTcpListener*> m_vecTcpListeners;
 	CSipMutex m_clsTcpListenerMutex;

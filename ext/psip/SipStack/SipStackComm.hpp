@@ -518,19 +518,35 @@ void CSipStack::CheckSipMessage( CSipMessage * pclsMessage )
 			clsContact.m_clsUri.m_strUser = pclsMessage->m_clsTo.m_clsUri.m_strUser;
 		}
 
-		clsContact.m_clsUri.m_strHost = m_clsSetup.m_strLocalIp;
-	
-		if( eTransport == E_SIP_UDP )
+		// (C): 응답의 경우 incoming listener id 가 carry-over 되어있다면 그 listener 의
+		//   bind_ip:bind_port 를 자기 주소로 사용 → 단말이 다른 NIC/listener 로 보낸 메시지에
+		//   응답이 그 listener 자기 주소로 박힘. 매칭 실패 또는 listener id 없으면 primary fallback.
+		std::string strBindIp;
+		int iBindPort = 0;
+		if( pclsMessage->m_iListenerId > 0 &&
+		    _GetListenerBind( pclsMessage->m_iListenerId, eTransport, strBindIp, iBindPort ) )
 		{
-			clsContact.m_clsUri.m_iPort = m_clsSetup.m_iLocalUdpPort;
+			clsContact.m_clsUri.m_strHost = ( strBindIp.empty() || strBindIp == "0.0.0.0" )
+			                                    ? m_clsSetup.m_strLocalIp
+			                                    : strBindIp;
+			clsContact.m_clsUri.m_iPort = iBindPort;
 		}
-		else if( eTransport == E_SIP_TCP )
+		else
 		{
-			clsContact.m_clsUri.m_iPort = m_clsSetup.m_iLocalTcpPort;
-		}
-		else if( eTransport == E_SIP_TLS )
-		{
-			clsContact.m_clsUri.m_iPort = m_clsSetup.m_iLocalTlsPort;
+			clsContact.m_clsUri.m_strHost = m_clsSetup.m_strLocalIp;
+
+			if( eTransport == E_SIP_UDP )
+			{
+				clsContact.m_clsUri.m_iPort = m_clsSetup.m_iLocalUdpPort;
+			}
+			else if( eTransport == E_SIP_TCP )
+			{
+				clsContact.m_clsUri.m_iPort = m_clsSetup.m_iLocalTcpPort;
+			}
+			else if( eTransport == E_SIP_TLS )
+			{
+				clsContact.m_clsUri.m_iPort = m_clsSetup.m_iLocalTlsPort;
+			}
 		}
 
 		clsContact.m_clsUri.InsertTransport( eTransport );

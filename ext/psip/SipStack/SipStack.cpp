@@ -662,6 +662,72 @@ Socket CSipStack::_SelectUdpSocketByListenerId( int iListenerId )
 	return result;
 }
 
+// (C): listener id + transport 로 bind_ip/bind_port 추출.
+//   Contact/Via 자동 추가 자리에서 호출 — 매칭 실패 시 false → 호출자가 primary fallback.
+bool CSipStack::_GetListenerBind( int iListenerId, ESipTransport eTransport,
+                                   std::string& outIp, int& outPort )
+{
+	if( iListenerId <= 0 ) return false;
+
+	if( eTransport == E_SIP_UDP )
+	{
+		m_clsUdpListenerMutex.acquire();
+		bool found = false;
+		for( auto * pL : m_vecUdpListeners )
+		{
+			if( !pL ) continue;
+			if( pL->m_iId == iListenerId )
+			{
+				outIp = pL->m_strBindIp;
+				outPort = pL->m_iPort;
+				found = true;
+				break;
+			}
+		}
+		m_clsUdpListenerMutex.release();
+		return found;
+	}
+	if( eTransport == E_SIP_TCP )
+	{
+		m_clsTcpListenerMutex.acquire();
+		bool found = false;
+		for( auto * pL : m_vecTcpListeners )
+		{
+			if( !pL ) continue;
+			if( pL->m_iId == iListenerId )
+			{
+				outIp = pL->m_strBindIp;
+				outPort = pL->m_iPort;
+				found = true;
+				break;
+			}
+		}
+		m_clsTcpListenerMutex.release();
+		return found;
+	}
+#ifdef USE_TLS
+	if( eTransport == E_SIP_TLS )
+	{
+		m_clsTlsListenerMutex.acquire();
+		bool found = false;
+		for( auto * pL : m_vecTlsListeners )
+		{
+			if( !pL ) continue;
+			if( pL->m_iId == iListenerId )
+			{
+				outIp = pL->m_strBindIp;
+				outPort = pL->m_iPort;
+				found = true;
+				break;
+			}
+		}
+		m_clsTlsListenerMutex.release();
+		return found;
+	}
+#endif
+	return false;
+}
+
 bool CSipStack::AddUdpListener( int iExtId, const char* pszBindIp, int iPort,
                                  int iThreadCount, int& outId )
 {
