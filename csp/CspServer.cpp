@@ -116,29 +116,30 @@ int ServiceMain() {
         gclsSipLogger.SetDomainServiceMap( gclsServiceMap.BuildDomainToKindMap() );
     }
 
-    // R1: primary local_node → gclsSetup.m_strLocalIp/m_iUdpPort override.
-    //   local_nodes 가 CSP identity 의 SOT. bind_ip=0.0.0.0 은 GetLocalIp() 자동탐지로 치환.
-    //   primary 가 없으면 _infra 의 Setup.Sip.LocalIp/UdpPort 를 fallback 으로 사용.
+    // primary local_node → gclsSetup.m_strLocalIp/m_iUdpPort.
+    //   local_nodes 가 CSP identity 의 SoT. bind_ip=0.0.0.0 은 GetLocalIp() 자동탐지로 치환.
+    //   primary 부재 시 fail-fast — csp.json 에 옛 Setup.Sip.LocalIp/UdpPort fallback 제거됨
+    //   (local_nodes 의 single source 정착).
     {
         LocalNodeInfo primary = gclsLocalNodeMap.GetPrimary();
-        if ( primary.IsValid() ) {
-            std::string ip = primary.bind_ip;
-            if ( ip.empty() || ip == "0.0.0.0" || ip == "::" ) {
-                std::string auto_ip;
-                GetLocalIp( auto_ip );
-                if ( !auto_ip.empty() ) ip = auto_ip;
-            }
-            if ( !ip.empty() ) gclsSetup.m_strLocalIp = ip;
-            if ( primary.bind_port > 0 ) gclsSetup.m_iUdpPort = primary.bind_port;
-            CLog::Print( LOG_SYSTEM, "primary local_node '%s' → LocalIp=%s UdpPort=%d", primary.name.c_str(),
-                         gclsSetup.m_strLocalIp.c_str(), gclsSetup.m_iUdpPort );
-            if ( !primary.protocol.empty() && primary.protocol != "UDP" ) {
-                CLog::Print( LOG_INFO, "primary local_node protocol=%s (not UDP) — using for identity only",
-                             primary.protocol.c_str() );
-            }
-        } else {
-            CLog::Print( LOG_INFO, "no primary local_node — using _infra Setup.Sip.LocalIp=%s UdpPort=%d",
-                         gclsSetup.m_strLocalIp.c_str(), gclsSetup.m_iUdpPort );
+        if ( !primary.IsValid() ) {
+            CLog::Print( LOG_ERROR, "no primary local_node — start aborted. Set is_primary=true on a "
+                                     "local_nodes.jsonl record (or use UI 'local_nodes' collection)." );
+            return -1;
+        }
+        std::string ip = primary.bind_ip;
+        if ( ip.empty() || ip == "0.0.0.0" || ip == "::" ) {
+            std::string auto_ip;
+            GetLocalIp( auto_ip );
+            if ( !auto_ip.empty() ) ip = auto_ip;
+        }
+        if ( !ip.empty() ) gclsSetup.m_strLocalIp = ip;
+        if ( primary.bind_port > 0 ) gclsSetup.m_iUdpPort = primary.bind_port;
+        CLog::Print( LOG_SYSTEM, "primary local_node '%s' → LocalIp=%s UdpPort=%d", primary.name.c_str(),
+                     gclsSetup.m_strLocalIp.c_str(), gclsSetup.m_iUdpPort );
+        if ( !primary.protocol.empty() && primary.protocol != "UDP" ) {
+            CLog::Print( LOG_INFO, "primary local_node protocol=%s (not UDP) — using for identity only",
+                         primary.protocol.c_str() );
         }
     }
 

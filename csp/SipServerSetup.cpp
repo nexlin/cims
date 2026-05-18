@@ -71,13 +71,13 @@ void InsertStringMap( CXmlElement *pclsElement, const char *pszTagName, const ch
  * @brief 생성자
  */
 CSipServerSetup::CSipServerSetup()
-    : m_iUdpPort( 5060 ),
+    : m_iUdpPort( 0 ),          // local_nodes.jsonl 의 primary UDP record 가 set. 0=fail-fast.
       m_iUdpThreadCount( 10 ),
-      m_iTcpPort( 5060 ),
+      m_iTcpPort( 0 ),          // local_nodes.jsonl 의 primary TCP record 가 set. 0=disabled.
       m_iTcpThreadCount( 10 ),
       m_iTcpCallBackThreadCount( 0 ),
       m_iTcpRecvTimeout( SIP_TCP_RECV_TIMEOUT ),
-      m_iTlsPort( 0 ),
+      m_iTlsPort( 0 ),          // local_nodes.jsonl 의 primary TLS record 가 set. 0=disabled.
       m_iTlsAcceptTimeout( SIP_TLS_ACCEPT_TIMEOUT ),
       m_iStackExecutePeriod( 20 ),
       m_iTimerD( 32000 ),
@@ -201,15 +201,12 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
 
             if ( setup.Has( "Sip" ) ) {
                 SimpleJson::JsonNode sip = setup.Get( "Sip" );
-                if ( sip.Has( "LocalIp" ) ) m_strLocalIp = sip.GetString( "LocalIp" );
-                if ( sip.Has( "UdpPort" ) ) m_iUdpPort = (int)sip.GetInt( "UdpPort" );
+                // SIP bind (LocalIp/UdpPort/TcpPort/TlsPort/CertFile) 는 local_nodes.jsonl 가 SoT.
+                // 옛 csp.json 에 남아있으면 stale entry 로 무시 (Has 미평가).
                 if ( sip.Has( "UdpThreadCount" ) ) m_iUdpThreadCount = (int)sip.GetInt( "UdpThreadCount" );
-                // v3: Setup.Sip.AuthRealm 제거 — access_services.auth_realm 이 SOT
-                if ( sip.Has( "TcpPort" ) ) m_iTcpPort = (int)sip.GetInt( "TcpPort" );
                 if ( sip.Has( "TcpThreadCount" ) ) m_iTcpThreadCount = (int)sip.GetInt( "TcpThreadCount" );
                 if ( sip.Has( "TcpRecvTimeout" ) ) m_iTcpRecvTimeout = (int)sip.GetInt( "TcpRecvTimeout" );
-                if ( sip.Has( "TlsPort" ) ) m_iTlsPort = (int)sip.GetInt( "TlsPort" );
-                if ( sip.Has( "CertFile" ) ) m_strCertFile = sip.GetString( "CertFile" );
+                if ( sip.Has( "TlsAcceptTimeout" ) ) m_iTlsAcceptTimeout = (int)sip.GetInt( "TlsAcceptTimeout" );
                 if ( sip.Has( "MinRegisterTimeout" ) ) m_iMinRegisterTimeout = (int)sip.GetInt( "MinRegisterTimeout" );
                 if ( sip.Has( "CallPickupId" ) ) m_strCallPickupId = sip.GetString( "CallPickupId" );
                 if ( sip.Has( "StackExecutePeriod" ) ) m_iStackExecutePeriod = (int)sip.GetInt( "StackExecutePeriod" );

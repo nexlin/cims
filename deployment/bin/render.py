@@ -618,6 +618,8 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
 
     out = OrderedDict()
     out["Setup"] = OrderedDict([
+        # SIP bind (LocalIp/UdpPort/TcpPort/TlsPort/CertFile) 는 local_nodes.jsonl 가 SoT.
+        # csp.json 의 Setup.Sip 은 scalar tick/timeout 만 유지 — 변경 시 재기동 필요.
         ("Sip", OrderedDict([
             ("UdpThreadCount",     sip.get("udp_thread_count", 2)),
             ("StackExecutePeriod", sip.get("stack_execute_period", 20)),
@@ -626,14 +628,9 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
             ("SendOptionsPeriod",  sip.get("send_options_period", 0)),
             ("CallPickupId",       sip.get("call_pickup_id", "**")),
             ("StaleCallTimeout",   sip.get("stale_call_timeout", 300)),
-            ("LocalIp",            sip.get("local_ip", "0.0.0.0")),
-            ("UdpPort",            sip.get("udp_port", 5060)),
-            ("TcpPort",            sip.get("tcp_port", 25061)),
             ("TcpThreadCount",     sip.get("tcp_thread_count", 2)),
             ("TcpRecvTimeout",     sip.get("tcp_recv_timeout", 600)),
-            ("TlsPort",            sip.get("tls_port", 5061)),
             ("TlsAcceptTimeout",   sip.get("tls_accept_timeout", 10)),
-            ("CertFile",           sip.get("cert_file", "cert/csp.pem")),
         ])),
         ("Roles", OrderedDict([
             ("CSCF",   bool(svc.get("cscf",   True))),
