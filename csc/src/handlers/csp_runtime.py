@@ -1,17 +1,40 @@
 """
-CSP 런타임 설정 Admin API.
+CSP 런타임 설정 Admin API — ⚠️ **DEPRECATED 경로**.
 
 Routes (prefix-matched, admin JWT required):
   /api/v1/csp/listeners                         GET list  / POST create
   /api/v1/csp/listeners/{id}                    GET / PUT / DELETE
+  /api/v1/csp/trunks                            (동일 패턴)
+  /api/v1/csp/routes                            (동일 패턴)
+  /api/v1/csp/access                            (동일 패턴)
+  /api/v1/csp/services                          (동일 패턴)
 
-변경 시 흐름:
-  1. DB CUD
-  2. csc_config_cache.refresh_entity("listener") — 메모리+파일 재조회
-  3. audit_config_change(...) — csp_config_audit 에 변경 기록
-  4. notify_config_change("listener", id, action) — CSP 에 UDP notify → HTTP pull
+상태 (T5 — 2026-05-18 정리):
+  - 현재 cims-console UI 가 부르지 않음 (deployment.ts 에 호출 없음)
+  - 진짜 운영 경로는 /api/v1/deployments/<id>/collection/<name>
+    (agents.py:_put_deployment_collection — install_path 의 jsonl 을 agent proxy
+     로 직접 편집 + HA fan-out)
+  - 본 모듈의 file_store 도메인 (csp_listener / sip_trunk / routing_rule /
+    routing_access_list / sip_service) 은 옛 DB 시대 캐시 잔존.
+    CSP 본체가 읽는 jsonl 과 별개 — write 해도 CSP 가 반영하지 않음.
 
-P2 는 listener 엔티티만. trunk/route/access 는 P3/P4/P5 에서 동일 패턴으로 추가.
+남겨두는 이유:
+  - 단위 테스트 / migration 스크립트 (csc/scripts/migrate_csp_runtime_db_to_file.py)
+    가 도메인 이름을 참조 — 동시 제거는 위험.
+  - sync_dispatch.py 의 fan-out 단위 테스트가 본 모듈의 도메인 매핑을 사용.
+
+차후 정리 (별도 트랙):
+  1. cims-console / docs 에서 이 경로 안 부르는 게 확실해지면 dispatcher 등록 제거.
+  2. file_store 도메인 폐기 마이그레이션 스크립트 — install_path 의 jsonl 이 SoT.
+  3. config_cache.py 도 같이 정리.
+
+변경 시 흐름 (옛 — 참고용):
+  1. file_store CUD
+  2. audit_config_change(...) — csp_config_audit 에 변경 기록
+  3. notify_config_change("listener", id, action) — 단일 host 호환 UDP notify
+  4. _fanout() — HA 멤버에 sync_config job (T1 commit 9b5699b 후속). 운영 경로
+                 는 위 deployments/<id>/collection/<name> 이지만 본 경로도 fan-out
+                 동일하게 동작 (호환).
 """
 
 from __future__ import annotations

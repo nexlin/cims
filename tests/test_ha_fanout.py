@@ -199,5 +199,43 @@ class SyncDispatchTests(_FsCase):
         self.assertIsNone(sid)
 
 
+class ShouldPropagateTests(unittest.TestCase):
+    """T4 의 scope+mode → propagate 결정 헬퍼."""
+
+    def test_explicit_override_wins(self):
+        from services import ha_lookup
+        self.assertTrue (ha_lookup.should_propagate("system", "all_active", override=True))
+        self.assertFalse(ha_lookup.should_propagate("service", "active_standby", override=False))
+
+    def test_service_always_propagates(self):
+        from services import ha_lookup
+        for mode in (None, "active_standby", "all_active", "standalone"):
+            self.assertTrue(ha_lookup.should_propagate("service", mode))
+            self.assertTrue(ha_lookup.should_propagate(None, mode))  # 기본값=service
+
+    def test_system_only_when_active_standby(self):
+        from services import ha_lookup
+        self.assertTrue (ha_lookup.should_propagate("system", "active_standby"))
+        self.assertFalse(ha_lookup.should_propagate("system", "all_active"))
+        self.assertFalse(ha_lookup.should_propagate("system", "standalone"))
+        self.assertFalse(ha_lookup.should_propagate("system", None))
+
+
+def tearDownModule():
+    """test_verify_lib 의 httpsrv stub 등록 로직과 충돌 회피.
+
+    csc/src 의 services / handlers 를 import 하면 httpsrv 가 sys.modules 에
+    real 모듈로 적재됨. test_verify_lib 가 'httpsrv' not in sys.modules 일 때만
+    stub 을 등록하므로, 우리가 남긴 real 모듈이 무인자 HandlerArgs 호출을 깨뜨림.
+    여기서 정리해 두면 다른 테스트가 자기 stub 을 자유롭게 등록 가능.
+    """
+    for k in list(sys.modules):
+        if k == "httpsrv" or k.startswith("httpsrv."):
+            sys.modules.pop(k, None)
+        if k == "services" or k.startswith("services.") \
+                or k == "handlers" or k.startswith("handlers."):
+            sys.modules.pop(k, None)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -57,16 +57,23 @@ CSC 의 `_get/put_deployment_collection` (`csc/src/handlers/agents.py:1708,1737`
 `csp/config/config_template.json` 의 각 section / collection 에
 `"scope": "system" | "service"` 가 명시되어 있다. **이것이 SoT**.
 
-| scope | 의미 | UI 위치 |
-|---|---|---|
-| `system` | 멤버별 설정 (LocalIp, hostname, bind_ip 등) | 서버 카드 (ModuleConfigModal, deployment 단위) |
-| `service` | 그룹 공통 설정 (access_services, routes, rules, role flags) | 그룹 카드 (GroupServiceConfigModal) |
+**T4 (commit `9b5699b` 후속) — 의미 재정의**:
+
+| scope | 의미 | 분배 결정 | UI 위치 |
+|---|---|---|---|
+| `service` | 그룹 공통 — 항상 양 멤버 동일 | 모든 mode 에서 fan-out | 그룹 카드 (GroupServiceConfigModal) |
+| `system` | mode 따라 분배 — *멤버 분리가 필요할 때만* 분리 | active_standby → fan-out (서비스와 동일), all_active → 멤버별, standalone → 단일 | A/S 면 그룹 카드, AA 면 서버 카드 |
+
+옛 정의 (~2026-05-18 이전): `system` = 무조건 멤버별 분리. A/S 모드에서도 멤버별
+편집을 강제하여 split-brain config 위험. csc 의 `_put_deployment_collection`
+(`csc/src/handlers/agents.py`) 가 새 정의로 자동 fan-out 결정.
 
 UI 가 scope 메타로 자동 분류:
 - `cims-console/src/components/group/GroupServiceConfigModal.tsx:60` —
   `scope === undefined || scope === 'service'` 만 표시.
 - `cims-console/src/components/module/ModuleConfigModal.tsx` —
   scope=service collection 은 멤버 단일 모드에서 🔒.
+- A/S 그룹 + scope=system 의 새 분류는 T3 에서 ha_group 단위 보기 토글로 노출.
 
 ## 3. Push 흐름
 
@@ -97,8 +104,8 @@ UI 가 scope 메타로 자동 분류:
 |---|---|---|
 | `GET /api/v1/deployments/{id}/config` | scalar config + template 반환 | Phase C 에서 `collections: {<name>: {records, schema}}` 통합 view 추가 (옵션 — 기존 응답 보존). |
 | `PUT /api/v1/deployments/{id}/config` | scalar 저장 + update_config job 큐잉 | Phase D 이후 job stdout 의 `signaled` 가 채워짐. |
-| `GET /api/v1/deployments/{id}/collections/{name}` | 해당 deployment 의 1개 collection records 반환 | 변경 없음. |
-| `PUT /api/v1/deployments/{id}/collections/{name}` | records 저장 + agent 가 SIGUSR1 발송 | 이미 동작 (`agents.py:1737-1790`). |
+| `GET /api/v1/deployments/{id}/collections/{name}` | 해당 deployment + ha_group 멤버 records 비교. drift_detected / peers[] 포함. | T2 후속 — 옛 응답 (records/schema) 호환 유지. |
+| `PUT /api/v1/deployments/{id}/collections/{name}` | records 저장 + ha_group fan-out (scope+mode 자동 결정). 응답에 sync_id / peers / propagated. body 의 `propagate_to_ha_peers` 로 override 가능. | T1 후속 — `agents.py:_put_deployment_collection`. |
 
 ### 4.2 신규 (Phase C)
 

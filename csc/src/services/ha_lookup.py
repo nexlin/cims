@@ -195,3 +195,27 @@ def _collection_owner_package(collection: str) -> Optional[str]:
 def register_collection_owner(collection: str, package_name: str) -> None:
     """런타임에서 컬렉션→패키지 매핑 추가 (cmp 등 미래 확장)."""
     _COLLECTION_OWNER[collection] = package_name
+
+
+def should_propagate(scope: Optional[str], mode: Optional[str],
+                     override: Optional[bool] = None) -> bool:
+    """ha_group 멤버 fan-out 결정 — T4 scope 의미 재정의 반영.
+
+    Rules:
+      override True/False        → 그대로 (사용자 의도 우선)
+      scope = "service"/None     → True (그룹 공통)
+      scope = "system"
+          mode = "active_standby"  → True  (VIP 모델 — 양 멤버 동일)
+          mode = "all_active"      → False (멤버별 svc IP 정상)
+          mode = "standalone"      → False (단일 멤버 — 의미 없음)
+          mode = None              → False (그룹 없음)
+    """
+    if override is not None:
+        return bool(override)
+    s = (scope or "service").lower()
+    if s == "service":
+        return True
+    if s == "system":
+        return mode == "active_standby"
+    # 알 수 없는 scope → 보수적으로 fan-out
+    return True

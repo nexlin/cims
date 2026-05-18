@@ -1800,6 +1800,22 @@ def _agent_proxy_call(method: str, agent: dict, path: str,
 
 
 async def _get_deployment_collection(did: int, name: str, config):
+    """deployment 의 jsonl 컬렉션 GET.
+
+    HA drift 감지 (T2): query/body 와 무관하게 ha_group 멤버 deployment 들의
+    records 도 비교. 멤버끼리 records hash 가 다르면 drift_detected=true 를
+    응답에 포함 — UI 가 경고/재동기화 유도.
+
+    응답 형태:
+      records:  요청 대상 deployment 의 현재 records (옛 호환)
+      schema:   template 의 schema (옛 호환)
+      peers:    [{deployment_id, agent_id, status, count, hash, records?}, ...] (없으면 빈 리스트)
+      drift_detected: bool
+      ha_group_id / ha_group_mode / scope
+    """
+    from services import ha_lookup
+    import hashlib
+
     dep = await asyncio.to_thread(_fetch_deployment_for_proxy, did, config)
     if not dep:
         return HandlerResult(status=404, body={"error": "deployment_not_found"},
@@ -1808,27 +1824,106 @@ async def _get_deployment_collection(did: int, name: str, config):
         return HandlerResult(status=409, body={"error": "not_installed",
                                                 "hint": "install 먼저 실행"},
                              media_type="application/json")
-    schema, _ = _collection_schema(dep.get("config_template_json"), name)
+    schema, coll = _collection_schema(dep.get("config_template_json"), name)
     if schema is None:
         return HandlerResult(status=404,
             body={"error": "collection_not_in_template", "name": name},
             media_type="application/json")
 
-    status, resp = await asyncio.to_thread(
-        _agent_proxy_call, "GET", dep,
-        "/collection", {"install_path": dep["install_path"], "name": name},
-        None, 15, config,
-    )
-    if status == 200:
-        return HandlerResult(status=200,
-            body={"records": resp.get("records") or [], "schema": schema},
-            media_type="application/json")
-    return HandlerResult(status=status or 502,
-        body={"error": "agent_proxy_failed", "detail": resp},
+    scope = ((coll or {}).get("scope") or "service").lower()
+    pkg_name = dep.get("package_name")
+
+    # ── 멤버 deployment 들 결정 (자기 자신 포함)
+    targets: list[dict] = [dep]
+    ha_group_id = None
+    ha_mode = None
+    if pkg_name:
+        g = await asyncio.to_thread(ha_lookup.ha_group_for_package, config, pkg_name)
+        if g:
+            ha_group_id = g.get("id")
+            ha_mode = g.get("mode")
+            peers = await asyncio.to_thread(
+                ha_lookup.deployments_in_group_for_package, config, ha_group_id, pkg_name)
+            seen = {dep.get("id")}
+            for p in peers:
+                pid = p.get("id")
+                if pid in seen:
+                    continue
+                full = await asyncio.to_thread(_fetch_deployment_for_proxy, pid, config)
+                if full and full.get("install_path"):
+                    targets.append(full)
+                    seen.add(pid)
+
+    # ── 각 target 에 동시 GET
+    async def _get_one(t):
+        return await asyncio.to_thread(
+            _agent_proxy_call, "GET", t,
+            "/collection", {"install_path": t["install_path"], "name": name},
+            None, 15, config,
+        )
+    results = await asyncio.gather(*[_get_one(t) for t in targets])
+
+    # ── 기준 (요청 dep) records + peer 비교
+    def _records_hash(recs):
+        try:
+            payload = json.dumps(recs or [], ensure_ascii=False, sort_keys=True).encode("utf-8")
+            return hashlib.sha256(payload).hexdigest()[:12]
+        except Exception:
+            return ""
+
+    base_records: list = []
+    peers_resp: list[dict] = []
+    base_hash = ""
+    for idx, (t, (status, resp)) in enumerate(zip(targets, results)):
+        ok = (status == 200)
+        recs = (resp or {}).get("records") or [] if ok else []
+        h = _records_hash(recs) if ok else ""
+        if idx == 0:
+            base_records = recs
+            base_hash = h
+        peers_resp.append({
+            "deployment_id": t["id"],
+            "agent_id":      t.get("agent_id"),
+            "status":        status,
+            "ok":            ok,
+            "count":         len(recs) if ok else None,
+            "hash":          h,
+            "error":         None if ok else resp,
+        })
+
+    # ── drift 결정: 양 멤버 모두 ok 인 경우만 hash 비교 (proxy 실패는 drift 아님)
+    drift = False
+    if len(peers_resp) > 1 and base_hash:
+        for p in peers_resp[1:]:
+            if p["ok"] and p["hash"] and p["hash"] != base_hash:
+                drift = True
+                break
+
+    return HandlerResult(status=200,
+        body={
+            "records":        base_records,        # 옛 호환
+            "schema":         schema,              # 옛 호환
+            "peers":          peers_resp,
+            "drift_detected": drift,
+            "ha_group_id":    ha_group_id,
+            "ha_group_mode":  ha_mode,
+            "scope":          scope,
+        },
         media_type="application/json")
 
 
 async def _put_deployment_collection(handler_args, did: int, name: str, config):
+    """deployment 의 jsonl 컬렉션 PUT.
+
+    HA fan-out (T1, commit b/9b5699b 후속):
+      - body.propagate_to_ha_peers (선택). 명시 시 그 값 우선.
+      - 자동 결정: scope=service 또는 (scope=system + mode=active_standby) → True.
+        scope=system + mode=all_active → False (멤버별 다른 svc IP 등 정상 의도).
+      - propagate=True 면 ha_group 의 모든 csp deployment 에 동일 records 동시 PUT.
+      - 멤버 2명 이상이면 sync_txn 1건 생성 (csc 가 proxy 동기호출 결과로 즉시 ack/nack).
+    """
+    from services import ha_lookup, sync_txn
+
     dep = await asyncio.to_thread(_fetch_deployment_for_proxy, did, config)
     if not dep:
         return HandlerResult(status=404, body={"error": "deployment_not_found"},
@@ -1836,7 +1931,7 @@ async def _put_deployment_collection(handler_args, did: int, name: str, config):
     if not dep.get("install_path"):
         return HandlerResult(status=409, body={"error": "not_installed"},
                              media_type="application/json")
-    schema, _ = _collection_schema(dep.get("config_template_json"), name)
+    schema, coll = _collection_schema(dep.get("config_template_json"), name)
     if schema is None:
         return HandlerResult(status=404,
             body={"error": "collection_not_in_template", "name": name},
@@ -1857,7 +1952,6 @@ async def _put_deployment_collection(handler_args, did: int, name: str, config):
         if not isinstance(r, dict):
             all_errors.append({"index": i, "errors": ["not_object"]})
             continue
-        # auto id
         if id_type == "uuid" and not r.get(id_field):
             r[id_field] = _uuid.uuid4().hex[:16]
         errs = _validate_record(schema, r)
@@ -1869,18 +1963,99 @@ async def _put_deployment_collection(handler_args, did: int, name: str, config):
             media_type="application/json")
 
     do_signal = body.get("signal", True)
-    status, resp = await asyncio.to_thread(
-        _agent_proxy_call, "PUT", dep,
-        "/collection", {"install_path": dep["install_path"], "name": name},
-        {"records": records, "signal": do_signal}, 15, config,
-    )
-    if status == 200:
-        return HandlerResult(status=200,
-            body={"ok": True, "count": resp.get("count"),
-                  "signaled": resp.get("signaled") or []},
-            media_type="application/json")
-    return HandlerResult(status=status or 502,
-        body={"error": "agent_proxy_failed", "detail": resp},
+
+    # ── 대상 deployment 들 결정
+    scope = ((coll or {}).get("scope") or "service").lower()
+    pkg_name = dep.get("package_name")
+    propagate_override = body.get("propagate_to_ha_peers")
+    targets: list[dict] = [dep]
+    ha_group_id = None
+    ha_mode = None
+    if propagate_override is not False and pkg_name:
+        g = await asyncio.to_thread(ha_lookup.ha_group_for_package, config, pkg_name)
+        if g:
+            ha_group_id = g.get("id")
+            ha_mode = g.get("mode")
+            should_prop = ha_lookup.should_propagate(scope, ha_mode, propagate_override)
+            if should_prop:
+                peers = await asyncio.to_thread(
+                    ha_lookup.deployments_in_group_for_package, config, ha_group_id, pkg_name)
+                seen = {dep.get("id")}
+                for p in peers:
+                    pid = p.get("id")
+                    if pid in seen:
+                        continue
+                    full = await asyncio.to_thread(_fetch_deployment_for_proxy, pid, config)
+                    if full and full.get("install_path"):
+                        targets.append(full)
+                        seen.add(pid)
+
+    # ── 각 target 에 동시 PUT (병렬)
+    async def _put_one(t):
+        return await asyncio.to_thread(
+            _agent_proxy_call, "PUT", t,
+            "/collection", {"install_path": t["install_path"], "name": name},
+            {"records": records, "signal": do_signal}, 15, config,
+        )
+    results = await asyncio.gather(*[_put_one(t) for t in targets])
+
+    # ── 결과 집계
+    peers_resp: list[dict] = []
+    success_all = True
+    for t, (status, resp) in zip(targets, results):
+        ok = (status == 200)
+        peers_resp.append({
+            "deployment_id": t["id"],
+            "agent_id":      t.get("agent_id"),
+            "status":        status,
+            "ok":            ok,
+            "count":         (resp or {}).get("count")    if ok else None,
+            "signaled":      (resp or {}).get("signaled") if ok else [],
+            "error":         None                          if ok else resp,
+        })
+        if not ok:
+            success_all = False
+
+    # ── sync_txn (멤버 2명 이상 + csc 가 proxy 결과 즉시 알므로 ack 직접)
+    sync_id = None
+    if len(targets) > 1:
+        member_rows = [{"agent_id":      p["agent_id"],
+                        "deployment_id": p["deployment_id"],
+                        "job_id":        None}
+                       for p in peers_resp]
+        txn = await asyncio.to_thread(sync_txn.create, config,
+                                      collection=name,
+                                      op="put_collection",
+                                      members=member_rows,
+                                      actor="console",
+                                      ttl_sec=60,
+                                      note=f"deployment#{did} ha_group#{ha_group_id} scope={scope}")
+        sync_id = txn["id"]
+        for p in peers_resp:
+            err = None
+            if not p["ok"]:
+                try: err = json.dumps(p.get("error"), ensure_ascii=False)
+                except Exception: err = str(p.get("error"))
+            await asyncio.to_thread(sync_txn.ack, config, sync_id, p["agent_id"],
+                                    status="ack" if p["ok"] else "nack",
+                                    error=err)
+
+    # ── 응답 (옛 single-deployment 호출자 호환 위해 count/signaled 도 노출)
+    first = peers_resp[0] if peers_resp else {}
+    return HandlerResult(status=200 if success_all else 502,
+        body={
+            "ok":            success_all,
+            "count":         first.get("count"),
+            "signaled":      first.get("signaled") or [],
+            "peers":         peers_resp,
+            "ha_group_id":   ha_group_id,
+            "ha_group_mode": ha_mode,
+            "scope":         scope,
+            "propagated":    len(targets) > 1,
+            "sync_id":       sync_id,
+            # peer 호출 실패 detail (옛 single 호출자가 'detail' 만 보던 경우 호환)
+            "detail":        None if success_all else [p.get("error") for p in peers_resp if not p["ok"]],
+        },
         media_type="application/json")
 
 

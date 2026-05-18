@@ -634,7 +634,8 @@
         "kind": "jsonl",
         "file": "config/local_nodes.jsonl"
       },
-      "scope": "system"
+      "scope": "system",
+      "scope_note": "system: HA mode 따라 분배. active_standby → 양 멤버 동일 (VIP), all_active → 멤버별 svc IP. csc 의 _put_deployment_collection 이 자동 결정."
     },
     {
       "key": "remote_nodes",
