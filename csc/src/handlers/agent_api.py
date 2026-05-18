@@ -227,8 +227,99 @@ async def handle_agent(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         return await _metric(handler_args, config, agent)
     if endpoint == "cert" and len(parts) >= 2 and parts[1] == "rotate" and method == "POST":
         return await _cert_rotate(handler_args, config, agent)
+    if endpoint == "csp-config" and len(parts) >= 2 and method == "GET":
+        return await _csp_config_pull(parts[1], config, agent)
+    if endpoint == "sync" and len(parts) >= 3 and parts[2] == "ack" and method == "POST":
+        try:
+            sid = int(parts[1])
+        except ValueError:
+            return HandlerResult(status=400, body={"error": "invalid_sync_id"},
+                                 media_type="application/json")
+        return await _sync_ack(handler_args, sid, config, agent)
 
     return HandlerResult(status=404, body={"error": "unknown_endpoint"},
+                         media_type="application/json")
+
+
+# ──────────────────────────────────────────────────────────────
+#  HA fan-out: 컬렉션 pull + sync ack
+# ──────────────────────────────────────────────────────────────
+
+# agent 가 sync_config job 처리 시 pull 할 수 있는 컬렉션 화이트리스트.
+# 키 = URL 의 <collection> 토큰, 값 = file_store 도메인 이름.
+_AGENT_PULL_COLLECTIONS = {
+    "csp_listener":        "csp_listener",
+    "sip_trunk":           "sip_trunk",
+    "routing_rule":        "routing_rule",
+    "routing_access_list": "routing_access_list",
+    "sip_service":         "sip_service",
+}
+
+
+async def _csp_config_pull(collection: str, config: dict, agent: dict) -> HandlerResult:
+    """GET /api/agent/csp-config/<collection>
+
+    응답: { "collection": str, "items": [...], "count": int, "served_at": iso }
+    헤더: ETag = items 의 결합 hash (caller 가 변경 감지에 사용)
+
+    items 는 원본 file_store row 그대로 (CSP 가 jsonl 로 직렬화해 install_path 에 쓸 수 있음).
+    """
+    import hashlib
+    from services import file_store
+
+    dom = _AGENT_PULL_COLLECTIONS.get(collection)
+    if not dom:
+        return HandlerResult(status=404, body={"error": "unknown_collection", "collection": collection},
+                             media_type="application/json")
+    rows = await asyncio.to_thread(file_store.load_all, file_store.domain_dir(config, dom))
+    # id 정렬 (csp 가 동일 순서로 jsonl 을 쓸 수 있도록)
+    rows.sort(key=lambda r: r.get("id") or 0)
+    # 직렬화된 본문 hash → etag
+    payload = json.dumps(rows, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    etag = hashlib.sha256(payload).hexdigest()[:16]
+    body = {
+        "collection": collection,
+        "items":      rows,
+        "count":      len(rows),
+        "etag":       etag,
+        "served_at":  datetime.now().isoformat(timespec="seconds"),
+    }
+    return HandlerResult(status=200, body=body,
+                         headers={"ETag": etag},
+                         media_type="application/json")
+
+
+async def _sync_ack(handler_args: HandlerArgs, sid: int,
+                    config: dict, agent: dict) -> HandlerResult:
+    """POST /api/agent/sync/<sync_id>/ack
+
+    body = { "status": "ack"|"nack", "error"?: str }
+    agent 자신 (X-Agent-Token) 의 slot 만 갱신. 다른 agent 의 slot 은 변경 불가.
+    """
+    from services import sync_txn
+    try:
+        body = json.loads(handler_args.body or b"{}")
+        if not isinstance(body, dict):
+            raise ValueError("body must be object")
+    except Exception as e:
+        return HandlerResult(status=400, body={"error": "invalid_json", "detail": str(e)},
+                             media_type="application/json")
+    status = (body.get("status") or "ack").lower()
+    if status not in ("ack", "nack"):
+        return HandlerResult(status=400, body={"error": "invalid_status",
+                                                "detail": "status must be 'ack' or 'nack'"},
+                             media_type="application/json")
+    error = body.get("error") or None
+    aid = agent.get("id")
+    txn = await asyncio.to_thread(sync_txn.ack, config, sid, aid,
+                                  status=status, error=error)
+    if not txn:
+        return HandlerResult(status=404, body={"error": "sync_not_found", "sync_id": sid},
+                             media_type="application/json")
+    return HandlerResult(status=200,
+                         body={"ok": True, "sync_id": sid,
+                               "status": txn.get("status"),
+                               "members": txn.get("members")},
                          media_type="application/json")
 
 

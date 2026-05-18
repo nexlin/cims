@@ -92,6 +92,22 @@ def http_post(url: str, data: dict, headers: dict = None, timeout: int = 15) -> 
         return 0, {"error": str(e)}
 
 
+def http_get_json(url: str, headers: dict = None, timeout: int = 30) -> tuple:
+    req = urllib.request.Request(url, headers=headers or {}, method="GET")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try: body = json.loads(e.read().decode("utf-8"))
+        except Exception: body = {"error": f"HTTP {e.code}"}
+        return e.code, body
+    except Exception as e:
+        return 0, {"error": str(e)}
+
+
 def http_get_binary(url: str, headers: dict = None, timeout: int = 60) -> tuple:
     req = urllib.request.Request(url, headers=headers or {}, method="GET")
     ctx = ssl.create_default_context()
@@ -512,7 +528,7 @@ def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
     return ""
 
 
-def job_update_config(params: dict) -> tuple:
+def job_update_config(params: dict, csc_url: str = "", session_token: str = "") -> tuple:
     """install_path/config.json 재기록 + 모듈 SIGUSR1 reload 트리거.
 
     CSP 의 reload 로직 (CspServer.cpp:336-354) 이 g_reloadFlag 를 폴링하여 csp.json
@@ -524,17 +540,110 @@ def job_update_config(params: dict) -> tuple:
     config.json 은 install_path 의 root 에 직접 쓴다 — SipServerSetup 의 overlay
     탐색이 csp.json 부모×2 (= install_path) 의 config.json 을 봄. multi-pkg agent
     의 변종별 분리는 _signal_process 의 pid 탐색에서만 의미 가짐.
+
+    HA fan-out: params.sync_id 가 있으면 csc 에 ack/nack 보고.
     """
+    sync_id = params.get("sync_id")
     install_path = _resolve_install_path(params)
     if not os.path.isdir(install_path):
-        return 1, "", f"install_path not found: {install_path}"
+        return _sync_ack_and_return(csc_url, session_token, sync_id,
+                                    rc=1, err=f"install_path not found: {install_path}")
     try:
         cfg_path = _write_config_file(install_path, params.get("config") or {})
     except Exception as e:
-        return 2, "", f"write config failed: {e}"
+        return _sync_ack_and_return(csc_url, session_token, sync_id,
+                                    rc=2, err=f"write config failed: {e}")
     pkg_subdir = _resolve_pkg_subdir(install_path, params)
     _, signaled = _signal_process(install_path, "usr1", pkg_subdir=pkg_subdir)
-    return 0, f"config updated: {cfg_path} signaled={signaled}", ""
+    return _sync_ack_and_return(csc_url, session_token, sync_id,
+                                rc=0, out=f"config updated: {cfg_path} signaled={signaled}")
+
+
+def job_sync_config(params: dict, csc_url: str, session_token: str) -> tuple:
+    """HA fan-out: csc 의 컬렉션 jsonl 을 pull → install_path/config/<col>.jsonl 에
+    atomic write → 로컬 CSP 에 SIGUSR1 → csc 에 ack 보고.
+
+    params: {
+      sync_id:     int,
+      collection:  "csp_listener" | "sip_trunk" | "routing_rule" |
+                   "routing_access_list" | "sip_service",
+      op:          "CREATE" | "UPDATE" | "DELETE",
+      row_id:      int,
+      install_path: str,
+      deployment_id: int,
+      ha_group_id:   int,
+    }
+
+    Returns (rc, stdout, stderr). rc=0 이면 csc 에 status=ack 보고됨.
+    Pull/Write/Signal 어느 단계 실패해도 rc≠0 + csc 에 status=nack 보고.
+    """
+    sync_id    = params.get("sync_id")
+    collection = params.get("collection") or ""
+    op         = params.get("op") or "UPDATE"
+    install_path = _resolve_install_path(params)
+    if not install_path or not os.path.isdir(install_path):
+        return _sync_ack_and_return(csc_url, session_token, sync_id,
+                                    rc=1, err=f"install_path not found: {install_path}")
+    if not collection:
+        return _sync_ack_and_return(csc_url, session_token, sync_id,
+                                    rc=1, err="collection missing")
+
+    # 1) csc 에서 컬렉션 pull
+    pull_url = f"{csc_url}/api/agent/csp-config/{collection}"
+    status, body = http_get_json(pull_url,
+                                 headers={"X-Agent-Token": session_token},
+                                 timeout=30)
+    if status != 200 or not isinstance(body, dict) or "items" not in body:
+        return _sync_ack_and_return(csc_url, session_token, sync_id,
+                                    rc=2, err=f"pull failed: status={status} body={body}")
+    items = body.get("items") or []
+    etag  = body.get("etag") or ""
+
+    # 2) install_path/config/<collection>.jsonl 에 atomic write (+ .bak)
+    cfg_dir  = os.path.join(install_path, "config")
+    jsonl_path = os.path.join(cfg_dir, f"{collection}.jsonl")
+    try:
+        os.makedirs(cfg_dir, exist_ok=True)
+        if os.path.isfile(jsonl_path):
+            bak = jsonl_path + ".bak"
+            try:
+                shutil.copy2(jsonl_path, bak)
+            except Exception:
+                pass
+        n = _write_jsonl_atomic(jsonl_path, items)
+    except Exception as e:
+        return _sync_ack_and_return(csc_url, session_token, sync_id,
+                                    rc=3, err=f"write failed: {e}")
+
+    # 3) SIGUSR1 → 로컬 CSP (PID file 기반 — pkg_subdir 자동 탐색)
+    pkg_subdir = _resolve_pkg_subdir(install_path, params)
+    _, signaled = _signal_process(install_path, "usr1", pkg_subdir=pkg_subdir)
+
+    msg = (f"sync_config ok: collection={collection} op={op} rows={n} "
+           f"etag={etag} signaled={signaled}")
+    return _sync_ack_and_return(csc_url, session_token, sync_id,
+                                rc=0, out=msg)
+
+
+def _sync_ack_and_return(csc_url: str, session_token: str, sync_id,
+                         *, rc: int, out: str = "", err: str = "") -> tuple:
+    """csc 에 ack/nack 보고 후 결과 튜플 반환. csc 호출 실패는 로그만 (rc 유지)."""
+    if sync_id is None:
+        return rc, out, err
+    ack_url = f"{csc_url}/api/agent/sync/{int(sync_id)}/ack"
+    payload = {"status": "ack" if rc == 0 else "nack"}
+    if err:
+        payload["error"] = err
+    try:
+        st, _ = http_post(ack_url, payload,
+                          headers={"X-Agent-Token": session_token},
+                          timeout=10)
+        ack_note = f" ack_status={st}"
+    except Exception as e:
+        ack_note = f" ack_failed={e}"
+    if rc == 0:
+        return rc, out + ack_note, err
+    return rc, out, err + ack_note
 
 
 def job_update_ha(params: dict) -> tuple:
@@ -1025,7 +1134,9 @@ def execute_job(job: dict, csc_url: str, session_token: str) -> dict:
         elif jt in ("start", "stop", "restart"):
             rc, out, err = job_process_control(params, jt)
         elif jt == "update_config":
-            rc, out, err = job_update_config(params)
+            rc, out, err = job_update_config(params, csc_url, session_token)
+        elif jt == "sync_config":
+            rc, out, err = job_sync_config(params, csc_url, session_token)
         elif jt == "update_ha":
             rc, out, err = job_update_ha(params)
         elif jt == "apply_ip_config":

@@ -1298,40 +1298,116 @@ async def _get_deployment_config(did: int, config):
 
 
 async def _put_deployment_config(handler_args, did: int, config):
-    """설정 값 저장. body = { "config": {<key>: <value>, ...}, "queue_update"?: bool }
+    """설정 값 저장. body = {
+         "config":         {<key>: <value>, ...},
+         "queue_update"?:  bool (기본 true),
+         "propagate_to_ha_peers"?: bool (기본 true),
+       }
 
-    queue_update=true (기본) 이면 update_config job 을 자동 큐잉.
+    A/S/AA HA 그룹 멤버 deployment 가 함께 있으면 그들의 config 도 동일하게 갱신
+    (split-brain config 방지). propagate_to_ha_peers=false 면 단일 deployment 만.
+    queue_update=true 이면 멤버별 update_config job 일괄 enqueue + sync 트랜잭션 1건 생성.
     """
+    from services import ha_lookup, sync_txn
+
     body = _parse_body(handler_args)
     values = body.get("config")
     if not isinstance(values, dict):
         return HandlerResult(status=400, body={"error": "config dict required"},
                              media_type="application/json")
     queue_update = body.get("queue_update", True)
+    propagate    = body.get("propagate_to_ha_peers", True)
 
-    dep = await asyncio.to_thread(_deploy_update, config, did, {'config': values})
+    dep = await asyncio.to_thread(_deploy_load, config, did)
     if not dep:
         return HandlerResult(status=404, body={"error": "not_found"},
                              media_type="application/json")
-    job_id = None
-    if queue_update:
-        _enrich_deploy([dep], config)
-        sf = dep.get("service_functions")
-        if isinstance(sf, str):
-            sf = _split_csv(sf)
-        params = {
-            "deployment_id": did,
-            "package_id":    dep.get("package_id"),
-            "package_name":  dep.get("package_name"),
-            "package_version": dep.get("package_version"),
-            "process_name":  dep.get("process_name"),
-            "service_functions": sf or [],
-            "install_path":  dep.get("install_path"),
-            "config":        values,
-        }
-        job_id = await asyncio.to_thread(_job_create, config, dep["agent_id"], 'update_config', params)
+    _enrich_deploy([dep], config)
+    pkg_name = dep.get("package_name")
+
+    # ── 적용 대상 deployment 들 결정
+    targets: list[dict] = [dep]
+    ha_group_id = None
+    if propagate and pkg_name:
+        g = await asyncio.to_thread(ha_lookup.ha_group_for_package, config, pkg_name)
+        if g and g.get("id") is not None:
+            ha_group_id = g.get("id")
+            peers = await asyncio.to_thread(
+                ha_lookup.deployments_in_group_for_package, config, ha_group_id, pkg_name)
+            # 첫 deployment (요청 대상) 기준으로 중복 제거
+            seen = {dep.get("id")}
+            for p in peers:
+                pid = p.get("id")
+                if pid not in seen:
+                    targets.append(p)
+                    seen.add(pid)
+            _enrich_deploy(targets, config)
+
+    # ── 모든 대상 deployment.config 일괄 갱신
+    saved: list[dict] = []
+    for t in targets:
+        updated = await asyncio.to_thread(_deploy_update, config, t["id"], {"config": values})
+        if updated:
+            saved.append(updated)
+
+    # ── update_config job 일괄 enqueue + sync_txn 생성
+    sync_id = None
+    members_resp: list[dict] = []
+    if queue_update and saved:
+        member_rows: list[dict] = []
+        for t in saved:
+            sf = t.get("service_functions")
+            if isinstance(sf, str):
+                sf = _split_csv(sf)
+            params = {
+                "deployment_id":   t["id"],
+                "package_id":      t.get("package_id"),
+                "package_name":    t.get("package_name"),
+                "package_version": t.get("package_version"),
+                "process_name":    t.get("process_name"),
+                "service_functions": sf or [],
+                "install_path":    t.get("install_path"),
+                "config":          values,
+            }
+            jid = await asyncio.to_thread(_job_create, config, t["agent_id"],
+                                          "update_config", params)
+            member_rows.append({
+                "agent_id":      t["agent_id"],
+                "deployment_id": t["id"],
+                "job_id":        jid,
+            })
+            members_resp.append({"deployment_id": t["id"],
+                                 "agent_id": t["agent_id"], "job_id": jid})
+        # 그룹 멤버 2명 이상일 때만 sync_txn 생성 — 단일 deployment 는 옛 동작 유지
+        if len(member_rows) > 1:
+            txn = await asyncio.to_thread(sync_txn.create, config,
+                                          collection="config",
+                                          op="put_config",
+                                          members=member_rows,
+                                          actor="console",
+                                          ttl_sec=120,
+                                          note=f"deployment#{did} ha_group#{ha_group_id}")
+            sync_id = txn["id"]
+            # backfill sync_id into each job's params (agent ack endpoint uses it)
+            for m in member_rows:
+                j = await asyncio.to_thread(_job_load, config, m["job_id"])
+                if not j:
+                    continue
+                p = j.get("params") or {}
+                p["sync_id"] = sync_id
+                await asyncio.to_thread(_job_update, config, m["job_id"], {"params": p})
+
+    # ── 응답: 옛 단일-deployment 호출자 호환 위해 첫 멤버의 job_id 도 그대로 노출
+    first_job = members_resp[0]["job_id"] if members_resp else None
     return HandlerResult(status=200,
-        body={"ok": True, "job_id": job_id},
+        body={
+            "ok":           True,
+            "job_id":       first_job,         # 옛 호환
+            "members":      members_resp,
+            "ha_group_id":  ha_group_id,
+            "sync_id":      sync_id,
+            "propagated":   len(saved) > 1,
+        },
         media_type="application/json")
 
 

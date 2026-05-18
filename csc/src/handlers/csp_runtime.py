@@ -26,7 +26,18 @@ from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
 from services import file_store
 
+import asyncio
+
 from services.mcptt import notify_config_change, audit_config_change
+from services.sync_dispatch import enqueue_collection_sync
+
+
+async def _fanout(config, *, entity: str, op: str, row_id: int, actor: str):
+    """ha_group fan-out — 멤버들에 sync_config job 일괄 enqueue + sync_txn 생성.
+    csc 와 동일 호스트의 CSP 1대만 있는 환경은 (멤버 0건) sync_id=None 반환.
+    """
+    return await asyncio.to_thread(enqueue_collection_sync, config,
+                                   entity=entity, op=op, row_id=row_id, actor=actor)
 
 logger = Logger()
 
@@ -215,6 +226,9 @@ async def _create_listener(handler_args: HandlerArgs, config):
                         "listener", new_id, "CREATE", after=rowJson,
                         etag_after=etag)
     notify_config_change("listener", new_id, "CREATE", actor=actor)
+    sync_id = await _fanout(config, entity="listener", op="CREATE", row_id=new_id, actor=actor)
+    if sync_id is not None:
+        rowJson["_sync_id"] = sync_id
     return HandlerResult(status=201, body=rowJson, media_type="application/json")
 
 
@@ -260,6 +274,9 @@ async def _update_listener(handler_args: HandlerArgs, lid: int, config):
                         before=_row_to_json(before), after=afterJson,
                         etag_before=etag_before, etag_after=etag_after)
     notify_config_change("listener", lid, "UPDATE", actor=actor)
+    sync_id = await _fanout(config, entity="listener", op="UPDATE", row_id=lid, actor=actor)
+    if sync_id is not None:
+        afterJson["_sync_id"] = sync_id
     return HandlerResult(status=200, body=afterJson, media_type="application/json")
 
 
@@ -276,7 +293,9 @@ async def _delete_listener(handler_args: HandlerArgs, lid: int, config):
                         before=_row_to_json(before),
                         etag_before=before.get("etag", ""))
     notify_config_change("listener", lid, "DELETE", actor=actor)
-    return HandlerResult(status=204, body=None, media_type="application/json")
+    sync_id = await _fanout(config, entity="listener", op="DELETE", row_id=lid, actor=actor)
+    hdrs = {"X-CIMS-Sync-Id": str(sync_id)} if sync_id is not None else {}
+    return HandlerResult(status=204, body=None, headers=hdrs, media_type="application/json")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -403,6 +422,9 @@ async def _create_trunk(handler_args: HandlerArgs, config):
     audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
                         "trunk", new_id, "CREATE", after=rowJson, etag_after=etag)
     notify_config_change("trunk", new_id, "CREATE", actor=actor)
+    sync_id = await _fanout(config, entity="trunk", op="CREATE", row_id=new_id, actor=actor)
+    if sync_id is not None:
+        rowJson["_sync_id"] = sync_id
     return HandlerResult(status=201, body=rowJson, media_type="application/json")
 
 
@@ -449,6 +471,9 @@ async def _update_trunk(handler_args: HandlerArgs, tid: int, config):
                         before=_trunk_row_to_json(before), after=afterJson,
                         etag_before=etag_before, etag_after=etag_after)
     notify_config_change("trunk", tid, "UPDATE", actor=actor)
+    sync_id = await _fanout(config, entity="trunk", op="UPDATE", row_id=tid, actor=actor)
+    if sync_id is not None:
+        afterJson["_sync_id"] = sync_id
     return HandlerResult(status=200, body=afterJson, media_type="application/json")
 
 
@@ -465,7 +490,9 @@ async def _delete_trunk(handler_args: HandlerArgs, tid: int, config):
                         before=_trunk_row_to_json(before),
                         etag_before=before.get("etag", ""))
     notify_config_change("trunk", tid, "DELETE", actor=actor)
-    return HandlerResult(status=204, body=None, media_type="application/json")
+    sync_id = await _fanout(config, entity="trunk", op="DELETE", row_id=tid, actor=actor)
+    hdrs = {"X-CIMS-Sync-Id": str(sync_id)} if sync_id is not None else {}
+    return HandlerResult(status=204, body=None, headers=hdrs, media_type="application/json")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -664,6 +691,9 @@ async def _create_route(handler_args: HandlerArgs, config):
     audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
                         "route", new_id, "CREATE", after=full, etag_after=etag)
     notify_config_change("route", new_id, "CREATE", actor=actor)
+    sync_id = await _fanout(config, entity="route", op="CREATE", row_id=new_id, actor=actor)
+    if sync_id is not None:
+        full["_sync_id"] = sync_id
     return HandlerResult(status=201, body=full, media_type="application/json")
 
 
@@ -686,6 +716,9 @@ async def _update_route(handler_args: HandlerArgs, rid: int, config):
                         "route", rid, "UPDATE", before=before, after=after,
                         etag_before=before.get("etag", ""), etag_after=etag)
     notify_config_change("route", rid, "UPDATE", actor=actor)
+    sync_id = await _fanout(config, entity="route", op="UPDATE", row_id=rid, actor=actor)
+    if sync_id is not None:
+        after["_sync_id"] = sync_id
     return HandlerResult(status=200, body=after, media_type="application/json")
 
 
@@ -702,7 +735,9 @@ async def _delete_route(handler_args: HandlerArgs, rid: int, config):
                         "route", rid, "DELETE", before=before,
                         etag_before=before.get("etag", ""))
     notify_config_change("route", rid, "DELETE", actor=actor)
-    return HandlerResult(status=204, body=None, media_type="application/json")
+    sync_id = await _fanout(config, entity="route", op="DELETE", row_id=rid, actor=actor)
+    hdrs = {"X-CIMS-Sync-Id": str(sync_id)} if sync_id is not None else {}
+    return HandlerResult(status=204, body=None, headers=hdrs, media_type="application/json")
 
 
 async def _get_hits(rid: int, config):
@@ -863,6 +898,9 @@ async def _create_access(handler_args: HandlerArgs, config):
     audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
                         "access", new_id, "CREATE", after=rowJson, etag_after=etag)
     notify_config_change("access", new_id, "CREATE", actor=actor)
+    sync_id = await _fanout(config, entity="access", op="CREATE", row_id=new_id, actor=actor)
+    if sync_id is not None:
+        rowJson["_sync_id"] = sync_id
     return HandlerResult(status=201, body=rowJson, media_type="application/json")
 
 
@@ -894,6 +932,9 @@ async def _update_access(handler_args: HandlerArgs, aid: int, config):
                         before=_access_row_to_json(before), after=afterJson,
                         etag_before=etag_before, etag_after=etag_after)
     notify_config_change("access", aid, "UPDATE", actor=actor)
+    sync_id = await _fanout(config, entity="access", op="UPDATE", row_id=aid, actor=actor)
+    if sync_id is not None:
+        afterJson["_sync_id"] = sync_id
     return HandlerResult(status=200, body=afterJson, media_type="application/json")
 
 
@@ -909,7 +950,9 @@ async def _delete_access(handler_args: HandlerArgs, aid: int, config):
                         before=_access_row_to_json(before),
                         etag_before=before.get("etag", ""))
     notify_config_change("access", aid, "DELETE", actor=actor)
-    return HandlerResult(status=204, body=None, media_type="application/json")
+    sync_id = await _fanout(config, entity="access", op="DELETE", row_id=aid, actor=actor)
+    hdrs = {"X-CIMS-Sync-Id": str(sync_id)} if sync_id is not None else {}
+    return HandlerResult(status=204, body=None, headers=hdrs, media_type="application/json")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1031,6 +1074,9 @@ async def _create_service(handler_args: HandlerArgs, config):
     audit_config_change(config.get("CimsDatabase", {}), actor, handler_args.client_ip,
                         "service", new_id, "CREATE", after=full, etag_after=etag)
     notify_config_change("service", new_id, "CREATE", actor=actor)
+    sync_id = await _fanout(config, entity="service", op="CREATE", row_id=new_id, actor=actor)
+    if sync_id is not None:
+        full["_sync_id"] = sync_id
     return HandlerResult(status=201, body=full, media_type="application/json")
 
 
@@ -1071,6 +1117,9 @@ async def _update_service(handler_args: HandlerArgs, sid: int, config):
                         "service", sid, "UPDATE", before=before, after=after,
                         etag_before=etag_before, etag_after=etag_after)
     notify_config_change("service", sid, "UPDATE", actor=actor)
+    sync_id = await _fanout(config, entity="service", op="UPDATE", row_id=sid, actor=actor)
+    if sync_id is not None:
+        after["_sync_id"] = sync_id
     return HandlerResult(status=200, body=after, media_type="application/json")
 
 
@@ -1087,7 +1136,9 @@ async def _delete_service(handler_args: HandlerArgs, sid: int, config):
                         "service", sid, "DELETE", before=before,
                         etag_before=before.get("etag", ""))
     notify_config_change("service", sid, "DELETE", actor=actor)
-    return HandlerResult(status=204, body=None, media_type="application/json")
+    sync_id = await _fanout(config, entity="service", op="DELETE", row_id=sid, actor=actor)
+    hdrs = {"X-CIMS-Sync-Id": str(sync_id)} if sync_id is not None else {}
+    return HandlerResult(status=204, body=None, headers=hdrs, media_type="application/json")
 
 
 # ──────────────────────────────────────────────────────────────
