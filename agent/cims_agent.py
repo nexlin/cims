@@ -495,16 +495,43 @@ def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
                f"config={cfg_path}{migrated}"), ""
 
 
+def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
+    """install 시 _detect_tar_pkg_subdir 로 정해진 변종 디렉토리를 운영 중에 재추정.
+
+    multi-pkg agent (예: mgmt-server = csc + console + phone) 는 install_path/<pkg>/
+    구조 → config.json 도 변종별 분리. 단일 변종 agent (csp 전용 등) 는 install_path
+    바로 아래에 config.json. 본 함수가 그 경계를 결정.
+    우선순위: params.pkg_subdir 명시 → params.package_name 디렉토리 존재 → 빈 문자열.
+    """
+    explicit = (params.get("pkg_subdir") or "").strip()
+    if explicit:
+        return explicit
+    pkg_name = (params.get("package_name") or "").strip()
+    if pkg_name and os.path.isdir(os.path.join(install_path, pkg_name)):
+        return pkg_name
+    return ""
+
+
 def job_update_config(params: dict) -> tuple:
-    """install_path/config.json 만 재기록. 프로세스 재시작은 수동."""
+    """install_path/config.json 재기록 + 모듈 SIGUSR1 reload 트리거.
+
+    CSP 의 reload 로직 (CspServer.cpp:336-354) 이 g_reloadFlag 를 폴링하여 csp.json
+    재파싱 + 9 JSONL Sync 수행. **부트스트랩 필드** (Setup.Sip.LocalIp,
+    UdpThreadCount 등) 는 이미 bound 된 socket / thread pool 에 반영 안 됨 — UI
+    에서 별도 안내 (재기동 필요). pid 파일 없거나 권한 없으면 silently skip
+    (stdout 의 signaled=[] 로 보고).
+    """
     install_path = _resolve_install_path(params)
     if not os.path.isdir(install_path):
         return 1, "", f"install_path not found: {install_path}"
+    pkg_subdir = _resolve_pkg_subdir(install_path, params)
+    cfg_target_dir = os.path.join(install_path, pkg_subdir) if pkg_subdir else install_path
     try:
-        cfg_path = _write_config_file(install_path, params.get("config") or {})
+        cfg_path = _write_config_file(cfg_target_dir, params.get("config") or {})
     except Exception as e:
         return 2, "", f"write config failed: {e}"
-    return 0, f"config updated: {cfg_path}", ""
+    _, signaled = _signal_process(install_path, "usr1", pkg_subdir=pkg_subdir)
+    return 0, f"config updated: {cfg_path} signaled={signaled}", ""
 
 
 def job_update_ha(params: dict) -> tuple:
@@ -828,13 +855,18 @@ def _write_jsonl_atomic(path: str, records: list) -> int:
     return len(records)
 
 
-def _signal_process(install_path: str, sig_name: str) -> tuple:
-    """install_path 안의 run/<*.pid> 파일을 읽어 SIGUSR1(기본)/SIGHUP 전송."""
+def _signal_process(install_path: str, sig_name: str, pkg_subdir: str = "") -> tuple:
+    """install_path 의 *.pid 를 읽어 SIGUSR1(기본)/SIGHUP 전송.
+
+    탐색 순서: pkg_subdir/run/ → install_path/run/ → install_path/ (각각 *.pid 매칭).
+    multi-pkg agent 의 경우 pkg_subdir 가 명시되면 해당 변종의 pid 만 신호 받음.
+    """
     sig = signal.SIGUSR1 if sig_name == "usr1" else signal.SIGHUP
-    pid_dir = os.path.join(install_path, "run")
-    if not os.path.isdir(pid_dir):
-        # fallback: install_path 안에서 *.pid
-        pid_dir = install_path
+    candidates = []
+    if pkg_subdir:
+        candidates.append(os.path.join(install_path, pkg_subdir, "run"))
+    candidates.extend([os.path.join(install_path, "run"), install_path])
+    pid_dir = next((d for d in candidates if os.path.isdir(d)), install_path)
     found = []
     for n in os.listdir(pid_dir):
         if n.endswith(".pid"):

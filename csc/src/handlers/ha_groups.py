@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
+import asyncio
 import json
 
 from httpsrv.handler import HandlerArgs, HandlerResult
@@ -292,6 +293,15 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         if sub == 'apply' and method == 'POST':
             return await _apply_group(gid, config)
 
+        if sub == 'collections':
+            if not member:
+                return HandlerResult(status=400, body={'error': 'collection name required'})
+            if method == 'GET':
+                return await _get_group_collection(gid, member, handler_args, config)
+            if method == 'PUT':
+                return await _put_group_collection(gid, member, handler_args, config)
+            return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
         return HandlerResult(status=404, body={'error': 'Not Found'})
     except pymysql.IntegrityError as e:
         # uk_agent (1 agent = 1 group) / uk_vrid 위반 등
@@ -478,6 +488,137 @@ async def _remove_member(gid: int, aid: int, config):
     file_store.save(_ha_dir(config), gid, g)
     _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=200, body={'group_id': gid, 'agent_id': aid, 'removed': True})
+
+
+def _find_group_member_deployments(gid: int, name: str, package_id, config) -> tuple:
+    """그룹 멤버들의 deployment 중 (선택적 package_id 필터 + collection name 정의됨) 매칭.
+
+    반환: (group, [matched_deployment, ...], schema). 매칭 0개면 schema=None.
+    schema 는 첫 매칭 deployment 의 template 에서 추출 (멤버간 일관 가정).
+    """
+    from handlers.agents import _deploy_load_all, _fetch_deployment_for_proxy, _collection_schema
+    g = _ha_load(config, gid)
+    if not g:
+        return None, [], None
+    member_ids = {int(m.get('agent_id')) for m in (g.get('members') or [])
+                  if m.get('agent_id') is not None}
+    all_deps = _deploy_load_all(config)
+    matched = []
+    schema = None
+    for d in all_deps:
+        if int(d.get('agent_id', 0)) not in member_ids:
+            continue
+        if package_id is not None and int(d.get('package_id', 0)) != int(package_id):
+            continue
+        # template 에 해당 collection 정의 있는지 확인
+        dep = _fetch_deployment_for_proxy(int(d['id']), config)
+        if not dep:
+            continue
+        s, _ = _collection_schema(dep.get('config_template_json'), name)
+        if s is None:
+            continue
+        if schema is None:
+            schema = s
+        matched.append(dep)
+    return g, matched, schema
+
+
+def _parse_package_id(handler_args) -> "int | None":
+    qp = handler_args.query_params or {}
+    raw = qp.get('package_id')
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if raw is None or raw == '':
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _get_group_collection(gid: int, name: str, handler_args, config):
+    """그룹 멤버의 첫 매칭 deployment 에서 collection records fetch."""
+    from handlers.agents import _agent_proxy_call
+    package_id = _parse_package_id(handler_args)
+    g, matched, schema = await asyncio.to_thread(
+        _find_group_member_deployments, gid, name, package_id, config)
+    if g is None:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if not matched:
+        return HandlerResult(status=404,
+            body={'error': 'no_matching_deployment',
+                  'hint': '그룹 멤버에 collection 정의된 패키지 미배포'})
+
+    dep = matched[0]
+    status, resp = await asyncio.to_thread(
+        _agent_proxy_call, 'GET', dep,
+        '/collection', {'install_path': dep['install_path'], 'name': name},
+        None, 15, config)
+    if status == 200:
+        return HandlerResult(status=200,
+            body={'records': resp.get('records') or [], 'schema': schema,
+                  'source_deployment_id': dep['id'], 'member_count': len(matched)})
+    return HandlerResult(status=status or 502,
+        body={'error': 'agent_proxy_failed', 'detail': resp,
+              'source_deployment_id': dep['id']})
+
+
+async def _put_group_collection(gid: int, name: str, handler_args, config):
+    """그룹 멤버 deployment 전체에 fan-out PUT. per-member 결과 array 반환."""
+    from handlers.agents import _agent_proxy_call, _validate_record, _parse_body
+    import uuid as _uuid
+
+    package_id = _parse_package_id(handler_args)
+    g, matched, schema = await asyncio.to_thread(
+        _find_group_member_deployments, gid, name, package_id, config)
+    if g is None:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if not matched:
+        return HandlerResult(status=404,
+            body={'error': 'no_matching_deployment'})
+
+    body = _parse_body(handler_args)
+    records = body.get('records')
+    if not isinstance(records, list):
+        return HandlerResult(status=400, body={'error': 'records array required'})
+
+    # validation + auto id (deployment PUT 와 동일 로직)
+    id_field = schema.get('id_field') or 'id'
+    id_type  = schema.get('id_type') or 'uuid'
+    all_errors = []
+    for i, r in enumerate(records):
+        if not isinstance(r, dict):
+            all_errors.append({'index': i, 'errors': ['not_object']})
+            continue
+        if id_type == 'uuid' and not r.get(id_field):
+            r[id_field] = _uuid.uuid4().hex[:16]
+        errs = _validate_record(schema, r)
+        if errs:
+            all_errors.append({'index': i, 'errors': errs})
+    if all_errors:
+        return HandlerResult(status=400,
+            body={'error': 'validation_failed', 'details': all_errors})
+
+    do_signal = body.get('signal', True)
+    results = []
+    for dep in matched:
+        status, resp = await asyncio.to_thread(
+            _agent_proxy_call, 'PUT', dep,
+            '/collection', {'install_path': dep['install_path'], 'name': name},
+            {'records': records, 'signal': do_signal}, 15, config)
+        if status == 200:
+            results.append({'deployment_id': dep['id'],
+                            'agent_id': dep.get('agent_id'),
+                            'count': resp.get('count'),
+                            'signaled': resp.get('signaled') or []})
+        else:
+            results.append({'deployment_id': dep['id'],
+                            'agent_id': dep.get('agent_id'),
+                            'error': resp, 'status': status})
+
+    overall_ok = all('error' not in r for r in results)
+    return HandlerResult(status=200 if overall_ok else 207,
+        body={'ok': overall_ok, 'members': results})
 
 
 CIMS_HA_GROUPS_HANDLER_LIST = (

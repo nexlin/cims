@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import secrets
+import sys
 from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import urlparse, unquote
@@ -1036,6 +1037,7 @@ async def _create_package(handler_args: HandlerArgs, config):
     meta     = await asyncio.to_thread(_extract_meta_from_tarball, raw) or {}
     template = await asyncio.to_thread(_extract_config_template_from_tarball, raw)
     name        = (meta.get("name")        or body.get("name")        or "").strip()
+    _warn_missing_scope(template, name or "(unknown)")
     version     = (meta.get("version")     or body.get("version")     or "").strip()
     description = (meta.get("description") or body.get("description") or "")
     changelog   = (meta.get("changelog")   or body.get("changelog")   or "")
@@ -1626,6 +1628,22 @@ def _collection_schema(template_json, name: str):
         if c.get("key") == name:
             return c.get("schema") or {}, c
     return None, None
+
+
+def _warn_missing_scope(template, pkg_name: str) -> list:
+    """config_template 의 section/collection 에 scope 누락 entry 목록을 반환.
+    SoT: docs/design/csc_config_server.md §2.3. 1 릴리스 후 fatal 승격 예정."""
+    if not isinstance(template, dict): return []
+    missing = []
+    for s in template.get("sections") or []:
+        if s.get("scope") not in ("system", "service"):
+            missing.append(f"section:{s.get('key')}")
+    for c in template.get("collections") or []:
+        if c.get("scope") not in ("system", "service"):
+            missing.append(f"collection:{c.get('key')}")
+    if missing:
+        sys.stderr.write(f"[WARN] package '{pkg_name}': config_template scope 누락 — {missing}\n")
+    return missing
 
 
 def _validate_record(schema: dict, record: dict) -> list:

@@ -90,10 +90,11 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
       }
     }
     setWorking(false)
-    // section/preset 변경은 config.json 만 쓰고 SIGUSR1 안 보냄 (agent 의 update_config job 가
-    // 그렇게 동작 — 코드 위치: cims_agent.py:job_update_config). 그래서 변경 적용을 위해 재기동 필요.
+    // Phase D 이후: job_update_config 가 SIGUSR1 자동 발송 (cims_agent.py:job_update_config).
+    // 단, **부트스트랩 필드** (Setup.Sip.LocalIp, UdpThreadCount 등) 는 이미 bound 된
+    // socket/thread pool 에 반영 안 됨 — 그 경우만 재기동 필요.
     setStatus(fail === 0
-      ? `✓ preset config.json 갱신 완료 (${ok}/${memberDepsForPkg.length} 멤버). ⚠ section/preset 은 SIGUSR1 reload 미지원 — 우측 하단 "재기동" 클릭 필요.`
+      ? `✓ preset 적용 + SIGUSR1 reload 큐잉 (${ok}/${memberDepsForPkg.length} 멤버). 부트스트랩 필드는 우측 하단 "재기동" 필요.`
       : `⚠ ${ok}/${memberDepsForPkg.length} 성공 — ${errors.slice(0, 2).join('; ')}`)
     if (onApplied) await onApplied()
   }
@@ -180,10 +181,10 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
             )}
             {pkg && tab.kind === 'preset' && (
               <div>
-                <h4 style={{ marginTop: 0 }}>Preset 일괄 적용 <span style={{ fontSize: 11, color: '#e67e22', fontWeight: 'normal' }}>· 재기동 필요</span></h4>
+                <h4 style={{ marginTop: 0 }}>Preset 일괄 적용 <span style={{ fontSize: 11, color: '#27ae60', fontWeight: 'normal' }}>· ⚡ SIGUSR1 reload</span></h4>
                 <p style={{ color: '#666', fontSize: 12 }}>
-                  preset 의 키-값을 양쪽 멤버 config.json 에 merge 후 PUT. section/preset 은
-                  SIGUSR1 reload 미지원이라 변경 적용에 재기동 필요.
+                  preset 의 키-값을 양쪽 멤버 config.json 에 merge → PUT → agent 가 SIGUSR1
+                  자동 발송. 부트스트랩 필드 (LocalIp, ThreadCount 등) 만 재기동 필요.
                 </p>
                 <div style={{ marginBottom: 16 }}>
                   <select value={selectedPreset}

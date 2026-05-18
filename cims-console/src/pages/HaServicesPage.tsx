@@ -19,8 +19,7 @@ import { haGroupsApi, type HaGroup, type VipBinding as ApiVipBinding } from '../
 import { deploymentApi, type Agent, type SipPackage, type Deployment,
          type NetIface as ApiNetIface, type ServiceIpRow as ApiServiceIpRow,
          type AgentJob } from '../api/deployment'
-// 그룹 서비스 설정은 별도 트랙 — 향후 작업 시 import 부활:
-// import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigModal'
+import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigModal'
 
 // Helper — agent job 결과 polling (1초 × max 30회 = 30초 timeout).
 // status 가 completed/failed 가 되면 즉시 반환. 그 외 timeout.
@@ -295,6 +294,7 @@ export default function HaServicesPage() {
   const [pkgPickerFor, setPkgPickerFor] = useState<number | null>(null)
   const [vipExpandFor, setVipExpandFor] = useState<number | null>(null)
   const [svcIpExpandFor, setSvcIpExpandFor] = useState<number | null>(null)
+  const [configModalFor, setConfigModalFor] = useState<ServiceRow | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   // pending agent 신규 생성 직후 1회용 enrollment_token + install command
   const [pendingTokens, setPendingTokens] = useState<Map<number, { token: string; cmd: string }>>(new Map())
@@ -731,6 +731,7 @@ export default function HaServicesPage() {
               regenerateToken={(srv) => handleInstallCmdClick(svc, srv)}
               copyCmd={(srv) => copyInstallCmd(srv)}
               onDelete={() => deleteService(svc)}
+              onOpenConfig={() => setConfigModalFor(svc)}
             />
           ))}
 
@@ -784,7 +785,18 @@ export default function HaServicesPage() {
         }}>{toast}</div>
       )}
 
-      {/* 그룹 서비스 설정 — 별도 트랙 (task #13 의 확장). 현재는 멤버별 시스템 설정만 활성. */}
+      {/* 그룹 서비스 설정 — scope=service collection 일괄 편집 (멤버 전체 동시 PUT). */}
+      {configModalFor && configModalFor.mode !== 'standalone' && (
+        <GroupServiceConfigModal
+          open={true}
+          onClose={() => setConfigModalFor(null)}
+          groupName={configModalFor.name}
+          members={configModalFor.servers.map(s => ({ id: s.id, name: s.name }))}
+          deployments={deployments}
+          packages={packages}
+          onApplied={async () => { await load() }}
+        />
+      )}
     </div>
   )
 }
@@ -819,6 +831,7 @@ interface ServiceTreeProps {
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
   onDelete: () => void
+  onOpenConfig: () => void
 }
 
 function ServiceTreeRows(p: ServiceTreeProps) {
@@ -907,6 +920,8 @@ function ServiceTreeRows(p: ServiceTreeProps) {
           <StatusSummary servers={svc.servers} mode={svc.mode} />
         </td>
         <td style={td(150)}>
+          <button onClick={p.onOpenConfig} style={btnSecondary()}
+                  title="그룹 멤버 공통 서비스 설정 (access_services / routes 등)">⚙ 설정</button>
           <button onClick={p.onDelete} style={btnDanger()}>삭제</button>
         </td>
       </tr>
