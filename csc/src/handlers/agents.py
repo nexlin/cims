@@ -1693,6 +1693,7 @@ def _fetch_deployment_for_proxy(did: int, config):
     r['agent_token'] = agent.get('agent_token')
     pkg = _pkg_load(config, pid=r.get('package_id')) or {}
     r['config_template_json'] = pkg.get('config_template')  # 옛 이름 그대로 (downstream _collection_schema)
+    r['package_name'] = dep.get('package_name') or pkg.get('name')
     return r
 
 
