@@ -258,6 +258,7 @@ def _metric_load_recent(config, agent_id: int, limit: int = 120, days: int = 7) 
 _AGENT_BASE       = "/api/v1/agents"
 _PACKAGE_BASE     = "/api/v1/packages"
 _DEPLOYMENT_BASE  = "/api/v1/deployments"
+_SYNC_TXN_BASE    = "/api/v1/csp/sync"
 
 _DEFAULT_PKG_DIR    = "packages"
 _DEFAULT_BACKUP_DIR = "packages_trash"
@@ -2064,10 +2065,51 @@ async def _put_deployment_collection(handler_args, did: int, name: str, config):
 #  Handler list
 # ════════════════════════════════════════════════════════════
 
+async def handle_sync_txn(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """sync_txn 폴링 endpoint (L2).
+
+    Routes:
+      GET /api/v1/csp/sync                — 최근 N건 (?limit=50, ?status=pending|partial|success|failed)
+      GET /api/v1/csp/sync/<sid>          — 단일 트랜잭션 + 멤버 ack 상태
+    """
+    from services import sync_txn
+
+    config = kwargs.get("config", {})
+    tail = _path_tail(handler_args.full_path, _SYNC_TXN_BASE)
+    method = handler_args.method.upper()
+
+    if method != "GET":
+        return HandlerResult(status=405, body={"error": "method_not_allowed"},
+                             media_type="application/json")
+
+    if not tail:
+        qp = handler_args.query_params or {}
+        try:    limit = max(1, min(500, int(qp.get("limit", "50"))))
+        except: limit = 50
+        status_filter = qp.get("status") or None
+        rows = await asyncio.to_thread(sync_txn.list_recent, config, limit)
+        if status_filter:
+            rows = [r for r in rows if (r.get("status") or "") == status_filter]
+        return HandlerResult(status=200,
+            body={"items": rows, "count": len(rows)},
+            media_type="application/json")
+
+    try: sid = int(tail[0])
+    except (TypeError, ValueError):
+        return HandlerResult(status=400, body={"error": "invalid_id"},
+                             media_type="application/json")
+    txn = await asyncio.to_thread(sync_txn.get, config, sid)
+    if not txn:
+        return HandlerResult(status=404, body={"error": "not_found"},
+                             media_type="application/json")
+    return HandlerResult(status=200, body=txn, media_type="application/json")
+
+
 CIMS_AGENT_ADMIN_HANDLER_LIST = (
     (_AGENT_BASE,      handle_agents,      {}),
     (_PACKAGE_BASE,    handle_packages,    {}),
     (_DEPLOYMENT_BASE, handle_deployments, {}),
+    (_SYNC_TXN_BASE,   handle_sync_txn,    {}),
 )
 
 # 인증 없이 누구나 받을 수 있는 배포용 정적 에셋
