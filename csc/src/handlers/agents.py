@@ -260,6 +260,7 @@ _PACKAGE_BASE     = "/api/v1/packages"
 _DEPLOYMENT_BASE  = "/api/v1/deployments"
 _SYNC_TXN_BASE    = "/api/v1/csp/sync"
 _DRIFT_BASE       = "/api/v1/csp/drift"
+_SIP_SERVICES_BASE = "/api/v1/csp/services"  # L5: csp_runtime/sip_service → deployment.collection/access_services 로 마이그레이션
 
 _DEFAULT_PKG_DIR    = "packages"
 _DEFAULT_BACKUP_DIR = "packages_trash"
@@ -2156,12 +2157,93 @@ async def handle_drift(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                          media_type="application/json")
 
 
+async def handle_sip_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """SipService 목록 조회 (L5).
+
+    옛 csp_runtime/sip_service file_store → 진짜 SoT 인 첫 csp deployment 의
+    access_services 컬렉션 으로 마이그레이션. UI (VolteMsisdnPage/PttMsisdnPage)
+    의 cspRuntimeApi.listServices() 호환을 위해 같은 경로/응답 형태 유지.
+
+    Routes:
+      GET /api/v1/csp/services             — 통합 목록 (volte/ptt 둘 다)
+
+    POST/PUT/DELETE 는 410 Gone — 편집은 deployments collection PUT 으로.
+    """
+    config = kwargs.get("config", {})
+    tail = _path_tail(handler_args.full_path, _SIP_SERVICES_BASE)
+    method = handler_args.method.upper()
+
+    if method != "GET":
+        return HandlerResult(status=410,
+            body={"error": "deprecated",
+                  "hint": "Use PUT /api/v1/deployments/<did>/collection/access_services"},
+            media_type="application/json")
+
+    # ── csp deployment 1건 결정 (HA 그룹이면 첫 멤버 — drift 는 GET /drift 로 별도 확인)
+    deps = await asyncio.to_thread(_agent_load_all_deployments, config)
+    csp_dep = None
+    for d in deps:
+        if d.get('package_name') == 'csp':
+            csp_dep = d; break
+        pkg = _pkg_load(config, pid=d.get('package_id')) or {}
+        if pkg.get('name') == 'csp':
+            d = dict(d); d['package_name'] = 'csp'
+            csp_dep = d; break
+    if not csp_dep:
+        return HandlerResult(status=200, body={"items": []}, media_type="application/json")
+
+    agent = _agent_load(config, aid=csp_dep.get('agent_id')) or {}
+    status, body = await asyncio.to_thread(_agent_proxy_call,
+        "GET", agent, "/collection",
+        {"install_path": csp_dep.get('install_path'), "name": "access_services"},
+        None, 10, config)
+
+    items: list = []
+    if status == 200 and isinstance(body, dict):
+        for r in body.get('records') or []:
+            items.append({
+                "id":             r.get("id"),
+                "name":           r.get("name"),
+                "kind":           r.get("kind"),
+                "domain":         r.get("domain"),
+                "auth_realm":     r.get("auth_realm"),
+                "inbound_policy": r.get("inbound_policy"),
+                "priority":       r.get("priority"),
+                "enabled":        bool(r.get("enabled")),
+                "listeners":      r.get("allowed_local_node_refs") or [],
+                "note":           r.get("note"),
+                "etag":           "",
+                "create_time":    None,
+                "update_time":    None,
+            })
+
+    if single := (tail[0] if tail else None):
+        try: sid = int(single)
+        except (TypeError, ValueError):
+            return HandlerResult(status=400, body={"error": "invalid_id"},
+                                 media_type="application/json")
+        for it in items:
+            if it["id"] == sid:
+                return HandlerResult(status=200, body=it, media_type="application/json")
+        return HandlerResult(status=404, body={"error": "not_found"},
+                             media_type="application/json")
+
+    return HandlerResult(status=200, body={"items": items}, media_type="application/json")
+
+
+def _agent_load_all_deployments(config):
+    """SipService 마이그레이션용 — 모든 deployment row 반환."""
+    from services import file_store as _fs
+    return _fs.load_all(_fs.domain_dir(config, 'deployments'))
+
+
 CIMS_AGENT_ADMIN_HANDLER_LIST = (
-    (_AGENT_BASE,      handle_agents,      {}),
-    (_PACKAGE_BASE,    handle_packages,    {}),
-    (_DEPLOYMENT_BASE, handle_deployments, {}),
-    (_SYNC_TXN_BASE,   handle_sync_txn,    {}),
-    (_DRIFT_BASE,      handle_drift,       {}),
+    (_AGENT_BASE,         handle_agents,       {}),
+    (_PACKAGE_BASE,       handle_packages,     {}),
+    (_DEPLOYMENT_BASE,    handle_deployments,  {}),
+    (_SYNC_TXN_BASE,      handle_sync_txn,     {}),
+    (_DRIFT_BASE,         handle_drift,        {}),
+    (_SIP_SERVICES_BASE,  handle_sip_services, {}),
 )
 
 # 인증 없이 누구나 받을 수 있는 배포용 정적 에셋

@@ -87,7 +87,6 @@ if __name__ == '__main__':
     from handlers.org            import CIMS_ORG_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
     from handlers.build          import CIMS_BUILD_HANDLER_LIST, init as build_init
-    from handlers.csp_runtime    import CIMS_CSP_RUNTIME_HANDLER_LIST
     from handlers.service_control import CIMS_SERVICE_CONTROL_HANDLER_LIST
     from handlers.agents         import CIMS_AGENT_ADMIN_HANDLER_LIST, CIMS_AGENT_PUBLIC_HANDLER_LIST
     from handlers.agent_api      import CIMS_AGENT_API_HANDLER_LIST
@@ -270,11 +269,12 @@ if __name__ == '__main__':
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_BUILD_HANDLER_LIST
         ])
-        # CSP 런타임 설정 관리 API (listener/trunk/route/access)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_CSP_RUNTIME_HANDLER_LIST
-        ])
+        # L5 — csp_runtime.py 폐기 마이그레이션 (2026-05-19):
+        # GET /api/v1/csp/services 는 agents.py 의 handle_sip_services 로 이동
+        # (deployment.collection/access_services 가 진짜 SoT). listener/trunk/
+        # route/access CRUD endpoint 는 라우터 자체에서 제거 — 옛 csp_runtime.py
+        # 파일은 migrate 스크립트 의존성으로 코드만 보존.
+
         # CMP/CSP/CSC 프로세스 제어 API
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
