@@ -483,6 +483,36 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[sync-txn-sweep] error: {e}")
 
+        # ── HA fan-out drift sweeper (L4 / F2) ─────────────────────────
+        # ha_group * (propagate 대상 collection) hash 비교 → drift 시 alert.
+        # AutoResyncDrift=true 면 master 의 records 로 다른 멤버에 자동 PUT.
+        DRIFT_SWEEP_INTERVAL  = int(config.get('DriftSweepSec', 300))
+        DRIFT_AUTO_RESYNC     = bool(config.get('AutoResyncDrift', False))
+        _drift_open: dict = {}
+
+        def _sweep_drift():
+            try:
+                from services import drift_sweeper
+                results = drift_sweeper.scan_all(config)
+                if not _service_log:
+                    return
+                counts = drift_sweeper.emit_drift_alerts(
+                    config, results, _service_log, _drift_open)
+                drift_rows = [r for r in results if r.get('drift')]
+                if drift_rows:
+                    logger.log_info(
+                        f"[drift-sweep] scanned={len(results)} "
+                        f"drift={len(drift_rows)} opened={counts['opened']} "
+                        f"closed={counts['closed']}")
+                if DRIFT_AUTO_RESYNC and drift_rows:
+                    summary = drift_sweeper.auto_resync(config, drift_rows)
+                    if summary['resynced'] or summary['errors']:
+                        logger.log_info(
+                            f"[drift-sweep] auto_resync — resynced="
+                            f"{summary['resynced']} errors={len(summary['errors'])}")
+            except Exception as e:
+                logger.log_error(f"[drift-sweep] error: {e}")
+
         logger.log_info(f"[agent-sweep] stale threshold={STALE_SEC}s, interval={SWEEP_INTERVAL}s")
         logger.log_info(f"[cert-sweep] rotate threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d, "
                         f"interval={CERT_SWEEP_INTERVAL}s")
@@ -490,10 +520,13 @@ if __name__ == '__main__':
                         f"rtp_threshold={ALERT_RTP_THRESHOLD}%, "
                         f"dir={_service_log or '(disabled — no ServiceLogDir)'}")
         logger.log_info(f"[sync-txn-sweep] interval={SYNC_TXN_SWEEP_INTERVAL}s")
+        logger.log_info(f"[drift-sweep] interval={DRIFT_SWEEP_INTERVAL}s "
+                        f"auto_resync={DRIFT_AUTO_RESYNC}")
         _last_sweep = 0
         _last_cert_sweep = 0
         _last_alert_sweep = 0
         _last_sync_txn_sweep = 0
+        _last_drift_sweep = 0
         while True:
             time.sleep(1)
             _now = time.time()
@@ -509,6 +542,9 @@ if __name__ == '__main__':
             if _now - _last_sync_txn_sweep >= SYNC_TXN_SWEEP_INTERVAL:
                 _sweep_sync_txn()
                 _last_sync_txn_sweep = _now
+            if _now - _last_drift_sweep >= DRIFT_SWEEP_INTERVAL:
+                _sweep_drift()
+                _last_drift_sweep = _now
 
     except Exception as e:
         tb_str = traceback.format_exc()

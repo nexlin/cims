@@ -259,6 +259,7 @@ _AGENT_BASE       = "/api/v1/agents"
 _PACKAGE_BASE     = "/api/v1/packages"
 _DEPLOYMENT_BASE  = "/api/v1/deployments"
 _SYNC_TXN_BASE    = "/api/v1/csp/sync"
+_DRIFT_BASE       = "/api/v1/csp/drift"
 
 _DEFAULT_PKG_DIR    = "packages"
 _DEFAULT_BACKUP_DIR = "packages_trash"
@@ -2112,11 +2113,55 @@ async def handle_sync_txn(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     return HandlerResult(status=200, body=txn, media_type="application/json")
 
 
+async def handle_drift(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """drift scan + resync endpoint (L4).
+
+    Routes:
+      GET  /api/v1/csp/drift            — 전체 ha_group * collection drift scan
+      POST /api/v1/csp/drift/resync     — drift 있는 컬렉션 master records 로 자동 PUT
+    """
+    from services import drift_sweeper
+
+    config = kwargs.get("config", {})
+    tail = _path_tail(handler_args.full_path, _DRIFT_BASE)
+    method = handler_args.method.upper()
+
+    if not tail and method == "GET":
+        results = await asyncio.to_thread(drift_sweeper.scan_all, config)
+        drift_only = (handler_args.query_params or {}).get("drift_only") in ("1", "true")
+        items = [r for r in results if r.get('drift')] if drift_only else results
+        # records 본문은 응답에서 제외 (UI 가 별도 GET 으로 가져가게)
+        slim = []
+        for r in items:
+            slim.append({
+                **{k: r[k] for k in r if k != 'members'},
+                'members': [{k2: m.get(k2) for k2 in ('deployment_id','agent_id',
+                            'status','ok','count','hash')} for m in r.get('members') or []],
+            })
+        drift_count = sum(1 for r in results if r.get('drift'))
+        return HandlerResult(status=200,
+            body={"items": slim, "count": len(slim),
+                  "total_scanned": len(results), "drift_count": drift_count},
+            media_type="application/json")
+
+    if len(tail) == 1 and tail[0] == "resync" and method == "POST":
+        results = await asyncio.to_thread(drift_sweeper.scan_all, config)
+        drift_rows = [r for r in results if r.get('drift')]
+        summary = await asyncio.to_thread(drift_sweeper.auto_resync, config, drift_rows)
+        return HandlerResult(status=200,
+            body={"ok": True, "drift_count": len(drift_rows), **summary},
+            media_type="application/json")
+
+    return HandlerResult(status=405, body={"error": "method_not_allowed"},
+                         media_type="application/json")
+
+
 CIMS_AGENT_ADMIN_HANDLER_LIST = (
     (_AGENT_BASE,      handle_agents,      {}),
     (_PACKAGE_BASE,    handle_packages,    {}),
     (_DEPLOYMENT_BASE, handle_deployments, {}),
     (_SYNC_TXN_BASE,   handle_sync_txn,    {}),
+    (_DRIFT_BASE,      handle_drift,       {}),
 )
 
 # 인증 없이 누구나 받을 수 있는 배포용 정적 에셋
