@@ -469,15 +469,31 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[alert-sweep] error: {e}")
 
+        # ── sync_txn timeout sweeper (L3) ───────────────────────────────
+        # HA fan-out 의 sync_txn 가 ttl_sec 초과해도 pending 인 멤버 슬롯을
+        # timeout 으로 마크 → 전체 status = failed (또는 partial 잔존).
+        SYNC_TXN_SWEEP_INTERVAL = int(config.get('SyncTxnSweepSec', 15))
+
+        def _sweep_sync_txn():
+            try:
+                from services import sync_txn
+                n = sync_txn.sweep_timeouts(config)
+                if n > 0:
+                    logger.log_info(f"[sync-txn-sweep] timed out {n} transaction(s)")
+            except Exception as e:
+                logger.log_error(f"[sync-txn-sweep] error: {e}")
+
         logger.log_info(f"[agent-sweep] stale threshold={STALE_SEC}s, interval={SWEEP_INTERVAL}s")
         logger.log_info(f"[cert-sweep] rotate threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d, "
                         f"interval={CERT_SWEEP_INTERVAL}s")
         logger.log_info(f"[alert-sweep] interval={ALERT_SWEEP_INTERVAL}s, "
                         f"rtp_threshold={ALERT_RTP_THRESHOLD}%, "
                         f"dir={_service_log or '(disabled — no ServiceLogDir)'}")
+        logger.log_info(f"[sync-txn-sweep] interval={SYNC_TXN_SWEEP_INTERVAL}s")
         _last_sweep = 0
         _last_cert_sweep = 0
         _last_alert_sweep = 0
+        _last_sync_txn_sweep = 0
         while True:
             time.sleep(1)
             _now = time.time()
@@ -490,6 +506,9 @@ if __name__ == '__main__':
             if _now - _last_alert_sweep >= ALERT_SWEEP_INTERVAL:
                 _sweep_alerts()
                 _last_alert_sweep = _now
+            if _now - _last_sync_txn_sweep >= SYNC_TXN_SWEEP_INTERVAL:
+                _sweep_sync_txn()
+                _last_sync_txn_sweep = _now
 
     except Exception as e:
         tb_str = traceback.format_exc()

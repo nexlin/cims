@@ -2066,17 +2066,24 @@ async def _put_deployment_collection(handler_args, did: int, name: str, config):
 # ════════════════════════════════════════════════════════════
 
 async def handle_sync_txn(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """sync_txn 폴링 endpoint (L2).
+    """sync_txn 폴링 endpoint (L2 + L3).
 
     Routes:
-      GET /api/v1/csp/sync                — 최근 N건 (?limit=50, ?status=pending|partial|success|failed)
-      GET /api/v1/csp/sync/<sid>          — 단일 트랜잭션 + 멤버 ack 상태
+      GET  /api/v1/csp/sync                — 최근 N건 (?limit=50, ?status=pending|partial|success|failed)
+      GET  /api/v1/csp/sync/<sid>          — 단일 트랜잭션 + 멤버 ack 상태
+      POST /api/v1/csp/sync/sweep          — timeout sweeper 수동 트리거 (L3, body 없음)
     """
     from services import sync_txn
 
     config = kwargs.get("config", {})
     tail = _path_tail(handler_args.full_path, _SYNC_TXN_BASE)
     method = handler_args.method.upper()
+
+    if len(tail) == 1 and tail[0] == "sweep" and method == "POST":
+        n = await asyncio.to_thread(sync_txn.sweep_timeouts, config)
+        return HandlerResult(status=200,
+            body={"ok": True, "timed_out": n},
+            media_type="application/json")
 
     if method != "GET":
         return HandlerResult(status=405, body={"error": "method_not_allowed"},
