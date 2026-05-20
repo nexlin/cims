@@ -552,7 +552,7 @@ cmd_preflight() {
             pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
             ok "$label (port $port/tcp) 동작 중 (pid=${pid:-?})"
         else
-            warn "$label (port $port/tcp) 미동작 — 'cims.sh start tb' 필요"
+            warn "$label (port $port/tcp) 미동작 — 'cims.sh tb start' 필요"
         fi
     done
 
@@ -819,6 +819,13 @@ ${BOLD}서비스 명령 (운영 도구는 agent/bin 으로 분리됨):${NC}
   agent/bin/cims-health <svc>   — listen probe (keepalived 가 호출)
   agent/bin/cims-notify <svc> ...  — state hook (keepalived 가 호출)
   cims.sh 는 개발 단계 명령만 (build/configure/pkg/sim/verify/sync 등).
+
+${BOLD}TB 2종 (개발 워크플로 — 4419/3000 상시 동작):${NC}
+  tb start|stop|restart [csc|console|all]   기본: all
+  tb status                                 4419/3000 점유 확인
+  tb help                                   자세한 설명
+                                  TB-CSC     https://127.0.0.1:4419 (csc-tb.json)
+                                  TB-Console http://127.0.0.1:3000 (vite dev, 소스 트리만)
 
 ${BOLD}초기 설정 (새 서버 첫 진입 시 한 번):${NC}
   init [--non-interactive]
@@ -1418,6 +1425,156 @@ PYEOF
     echo ""
     info "Console 에서 업로드: 배포 관리 → 패키지 → ＋ 업로드 (파일만 선택하면 meta 자동 인식)"
 }
+
+# ── TB-CSC / TB-Console 운영 (개발 워크플로용 4419/3000 상시 동작) ──
+# 운영 daemon 은 agent/bin/cims-svc, TB 2종은 여기. dist 트리에서는 csc 만 가능 (console=npm dev 서버).
+cmd_tb() {
+    local action="${1:-status}"
+    [[ $# -ge 1 ]] && shift
+    local target="${1:-all}"
+
+    case "$action" in
+        start|stop|restart|status) ;;
+        help|--help|-h)
+            cat <<EOF
+$(basename "$0") tb <action> [target]
+  action: start | stop | restart | status
+  target: csc | console | all  (기본: all)
+
+  TB-CSC     — https://127.0.0.1:4419 (csc_app.py + csc-tb.json)
+  TB-Console — http://127.0.0.1:3000  (vite dev 서버 — 소스 트리에서만)
+
+  예:
+    cims.sh tb status              # 4419 / 3000 확인
+    cims.sh tb start csc           # TB-CSC 만 기동
+    cims.sh tb restart             # 둘 다 재기동
+    cims.sh tb stop console        # TB-Console 만 정지
+EOF
+            return 0 ;;
+        *) err "알 수 없는 tb 동작: $action (start|stop|restart|status|help)"; return 1 ;;
+    esac
+    case "$target" in
+        csc|console|all) ;;
+        *) err "알 수 없는 tb 대상: $target (csc|console|all)"; return 1 ;;
+    esac
+
+    _tb_port_pid() {
+        local port="$1"
+        ss -Htlnp 2>/dev/null \
+            | awk -v p=":$port" '$4 ~ p {print; exit}' \
+            | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true
+    }
+
+    _tb_csc_start() {
+        local pid; pid=$(_tb_port_pid 4419)
+        if [[ -n $pid ]]; then ok "TB-CSC 이미 동작 (pid=$pid, port 4419)"; return 0; fi
+        local cfg="$DIST_DIR/csc/config/csc-tb.json"
+        local app="$DIST_DIR/csc/src/csc_app.py"
+        [[ ! -f $cfg ]] && { err "csc-tb.json 없음: $cfg ('cims.sh build' 후 시도)"; return 1; }
+        [[ ! -f $app ]] && { err "csc_app.py 없음: $app ('cims.sh build' 후 시도)"; return 1; }
+        info "TB-CSC 기동..."
+        ( cd "$DIST_DIR/csc/src" && \
+          CIMS_CSC_CONFIG="$cfg" nohup python3 csc_app.py \
+              > "$LOG_DIR/tb-csc.log" 2>&1 & echo $! > "$LOG_DIR/tb-csc.pid" )
+        sleep 2
+        pid=$(_tb_port_pid 4419)
+        if [[ -n $pid ]]; then
+            ok "TB-CSC LISTEN https://127.0.0.1:4419 (pid=$pid) — log: $LOG_DIR/tb-csc.log"
+        else
+            err "TB-CSC 기동 실패 — $LOG_DIR/tb-csc.log 확인"; return 1
+        fi
+    }
+
+    _tb_csc_stop() {
+        local pid; pid=$(_tb_port_pid 4419)
+        if [[ -z $pid ]]; then ok "TB-CSC 이미 정지 (port 4419 가용)"; rm -f "$LOG_DIR/tb-csc.pid"; return 0; fi
+        info "TB-CSC 정지 (pid=$pid)..."
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null || true; sleep 1; fi
+        rm -f "$LOG_DIR/tb-csc.pid"
+        ok "TB-CSC 정지"
+    }
+
+    _tb_console_start() {
+        if [[ -z "$SRC_CONSOLE" ]]; then
+            warn "TB-Console 은 소스 트리에서만 기동 가능 (dist 트리에는 npm dev 서버 없음)"
+            return 0
+        fi
+        local pid; pid=$(_tb_port_pid 3000)
+        if [[ -n $pid ]]; then ok "TB-Console 이미 동작 (pid=$pid, port 3000)"; return 0; fi
+        if [[ ! -d "$SRC_CONSOLE/node_modules" ]]; then
+            warn "$SRC_CONSOLE/node_modules 없음 — 'npm install' 먼저 필요"; return 1
+        fi
+        info "TB-Console 기동 (npm run dev --mode tb --port 3000)..."
+        ( cd "$SRC_CONSOLE" && \
+          nohup npm run dev -- --mode tb --port 3000 \
+              > "$LOG_DIR/tb-console.log" 2>&1 & echo $! > "$LOG_DIR/tb-console.pid" )
+        # vite 가 listen 까지 첫 빌드 시 수초 — 최대 15초 polling
+        local pid_n=""; local i
+        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            sleep 1
+            pid_n=$(_tb_port_pid 3000)
+            [[ -n $pid_n ]] && break
+        done
+        if [[ -n $pid_n ]]; then
+            ok "TB-Console LISTEN http://127.0.0.1:3000 (pid=$pid_n) — log: $LOG_DIR/tb-console.log"
+        else
+            err "TB-Console 기동 실패 (15s timeout) — $LOG_DIR/tb-console.log 확인"; return 1
+        fi
+    }
+
+    _tb_console_stop() {
+        local npm_pid=""
+        [[ -f "$LOG_DIR/tb-console.pid" ]] && npm_pid=$(cat "$LOG_DIR/tb-console.pid" 2>/dev/null || true)
+        local vite_pid; vite_pid=$(_tb_port_pid 3000)
+        if [[ -z $npm_pid && -z $vite_pid ]]; then
+            ok "TB-Console 이미 정지 (port 3000 가용)"
+            rm -f "$LOG_DIR/tb-console.pid"; return 0
+        fi
+        info "TB-Console 정지 (npm pid=${npm_pid:-?}, vite pid=${vite_pid:-?})..."
+        [[ -n $npm_pid ]] && pkill -P "$npm_pid" 2>/dev/null || true
+        [[ -n $npm_pid ]] && kill "$npm_pid" 2>/dev/null || true
+        [[ -n $vite_pid ]] && kill "$vite_pid" 2>/dev/null || true
+        sleep 1
+        local still; still=$(_tb_port_pid 3000)
+        if [[ -n $still ]]; then
+            kill -9 "$still" 2>/dev/null || true
+            sleep 1
+        fi
+        rm -f "$LOG_DIR/tb-console.pid"
+        ok "TB-Console 정지"
+    }
+
+    _tb_status() {
+        local pid
+        pid=$(_tb_port_pid 4419)
+        if [[ -n $pid ]]; then ok "TB-CSC     pid=$pid  https://127.0.0.1:4419"
+        else warn "TB-CSC     미동작  — 'cims.sh tb start csc'"; fi
+        pid=$(_tb_port_pid 3000)
+        if [[ -n $pid ]]; then ok "TB-Console pid=$pid  http://127.0.0.1:3000"
+        else warn "TB-Console 미동작  — 'cims.sh tb start console'"; fi
+    }
+
+    case "$action" in
+        start)
+            [[ $target == csc     || $target == all ]] && _tb_csc_start
+            [[ $target == console || $target == all ]] && _tb_console_start
+            ;;
+        stop)
+            [[ $target == csc     || $target == all ]] && _tb_csc_stop
+            [[ $target == console || $target == all ]] && _tb_console_stop
+            ;;
+        restart)
+            [[ $target == csc     || $target == all ]] && { _tb_csc_stop; _tb_csc_start; }
+            [[ $target == console || $target == all ]] && { _tb_console_stop; _tb_console_start; }
+            ;;
+        status)
+            _tb_status
+            ;;
+    esac
+}
+
 case "${1:-}" in
     init)      shift; cmd_init "$@" ;;
     build)     shift; cmd_build "$@" ;;
@@ -1429,10 +1586,12 @@ case "${1:-}" in
     verify)    shift; cmd_verify "$@" ;;
     pkg)       shift; cmd_pkg "$@" ;;
     sync)      shift; cmd_sync "$@" ;;
+    tb)        shift; cmd_tb "$@" ;;
     # 운영 명령 (start/stop/restart/status/log/ha) 은 agent/bin/cims-{svc,ha} 로 이전됨 (Phase 1.B+).
     start|stop|restart|status|log)
         err "운영 명령 '$1' 은 agent/bin/cims-svc 로 이전됨"
-        err "  사용: $(dirname "${BASH_SOURCE[0]}")/agent/bin/cims-svc $1 ${2:-}"; exit 2 ;;
+        err "  사용: $(dirname "${BASH_SOURCE[0]}")/agent/bin/cims-svc $1 ${2:-}"
+        err "  (TB-CSC/TB-Console 은 'cims.sh tb $1' 사용)"; exit 2 ;;
     ha)
         err "ha 명령은 agent/bin/cims-ha 로 이전됨"
         err "  사용: $(dirname "${BASH_SOURCE[0]}")/agent/bin/cims-ha ${2:-help}"; exit 2 ;;
