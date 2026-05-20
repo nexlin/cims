@@ -18,22 +18,8 @@ import { Link } from 'react-router-dom'
 import { haGroupsApi, type HaGroup, type VipBinding as ApiVipBinding } from '../api/ha_groups'
 import { deploymentApi, type Agent, type SipPackage, type Deployment,
          type NetIface as ApiNetIface, type ServiceIpRow as ApiServiceIpRow,
-         type AgentJob } from '../api/deployment'
+       } from '../api/deployment'
 import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigModal'
-
-// Helper — agent job 결과 polling (1초 × max 30회 = 30초 timeout).
-// status 가 completed/failed 가 되면 즉시 반환. 그 외 timeout.
-async function pollAgentJob(agentId: number, jobId: number,
-                            opts?: { intervalMs?: number; maxAttempts?: number }): Promise<AgentJob> {
-  const interval = opts?.intervalMs ?? 1000
-  const max      = opts?.maxAttempts ?? 30
-  for (let i = 0; i < max; i++) {
-    const j = await deploymentApi.getAgentJob(agentId, jobId)
-    if (j.status === 'completed' || j.status === 'failed') return j
-    await new Promise(res => setTimeout(res, interval))
-  }
-  throw new Error(`timeout polling job #${jobId}`)
-}
 
 // stdout 의 [OK]/[SKIP]/[DENY]/[FAIL] prefix 갯수로 요약.
 function summarizeApplyResult(stdout: string | null): { ok: number; skip: number; deny: number; fail: number } {
@@ -73,7 +59,7 @@ interface PkgDef {
 }
 
 type NetIface = ApiNetIface
-type BindingStatus = 'up' | 'down' | 'unknown'
+type BindingStatus = 'up' | 'down' | 'unknown' | 'applying' | 'fail'
 type ServiceIpRow = ApiServiceIpRow & { status?: BindingStatus }
 // dirty 플래그 추가 — 사용자가 ip/mask 편집 중인 row 는 NIC 매칭과 무관하게 status 'unknown'
 type VipBinding = ApiVipBinding & { dirty?: boolean }
@@ -298,6 +284,8 @@ export default function HaServicesPage() {
   const [toast, setToast] = useState<string | null>(null)
   // pending agent 신규 생성 직후 1회용 enrollment_token + install command
   const [pendingTokens, setPendingTokens] = useState<Map<number, { token: string; cmd: string }>>(new Map())
+  // applyServiceIp 진행 중인 agent.id 집합 — ServiceIpPanel row 가 'applying' 표시
+  const [applyingAgents, setApplyingAgents] = useState<Set<number>>(new Set())
   // 1분마다 re-render 강제 — 만료시간 카운트다운 갱신용
   const [, setMinuteTick] = useState(0)
 
@@ -609,13 +597,14 @@ export default function HaServicesPage() {
     } catch (e) { flash(`VIP 적용 실패: ${(e as Error).message}`) }
   }
 
-  // ── ServiceIpPanel "[적용]" — agent 에 apply_ip_config job 큐잉 + 결과 polling ──
+  // ── ServiceIpPanel "[적용]" — agent sync REST 동기 호출 (L2 2026-05-20) ──
+  // 옛 흐름(큐잉 + heartbeat pickup + 30s polling) 제거. agent 가 즉시 ip addr add 후 응답.
+  // 진행 중에는 해당 server 의 모든 row 가 status='applying' 으로 표시 (set 으로 추적).
   const applyServiceIp = async (srv: ServerRow) => {
-    flash(`${srv.name} IP 적용 큐잉 — 처리 중…`)
+    setApplyingAgents(s => new Set(s).add(srv.id))
     try {
       const r = await deploymentApi.applyIpConfig(srv.id)
-      const j = await pollAgentJob(srv.id, r.job_id)
-      const c = summarizeApplyResult(j.result_stdout)
+      const c = summarizeApplyResult(r.stdout)
       const parts = [
         c.ok   && `${c.ok} OK`,
         c.skip && `${c.skip} SKIP`,
@@ -623,14 +612,18 @@ export default function HaServicesPage() {
         c.fail && `${c.fail} FAIL`,
       ].filter(Boolean).join(', ')
       const summary = parts || `${r.rows} rows`
-      if (j.result_code === 0 && c.fail === 0 && c.deny === 0) {
+      if (r.ok && c.fail === 0 && c.deny === 0) {
         flash(`✓ ${srv.name} 적용 완료 — ${summary}`)
       } else if (c.ok > 0 || c.skip > 0) {
         flash(`⚠ ${srv.name} 부분 적용 — ${summary}`)
       } else {
         flash(`❌ ${srv.name} 적용 실패 — ${summary}`)
       }
+      await load()
     } catch (e) { flash(`${srv.name} IP 적용 실패: ${(e as Error).message}`) }
+    finally {
+      setApplyingAgents(s => { const n = new Set(s); n.delete(srv.id); return n })
+    }
   }
 
   // ── 패키지 추가/제거 → deployments insert/delete per member ──
@@ -727,6 +720,7 @@ export default function HaServicesPage() {
               updatePackageIds={updatePackageIds}
               applyVip={applyVip}
               applyServiceIp={applyServiceIp}
+              applyingAgents={applyingAgents}
               addServer={() => addServer(svc)}
               regenerateToken={(srv) => handleInstallCmdClick(svc, srv)}
               copyCmd={(srv) => copyInstallCmd(srv)}
@@ -828,6 +822,7 @@ interface ServiceTreeProps {
   updatePackageIds: (svc: ServiceRow, ids: number[]) => void
   applyVip: (svc: ServiceRow) => void
   applyServiceIp: (srv: ServerRow) => void
+  applyingAgents: Set<number>
   addServer: () => void
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
@@ -858,6 +853,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
           pendingToken={p.pendingTokens.get(srv.id)}
           updateServer={p.updateServer}
           applyServiceIp={p.applyServiceIp}
+          applyingAgents={p.applyingAgents}
           regenerateToken={p.regenerateToken}
           copyCmd={p.copyCmd}
           onDelete={p.onDelete}
@@ -953,6 +949,7 @@ function ServiceTreeRows(p: ServiceTreeProps) {
           pendingToken={p.pendingTokens.get(srv.id)}
           updateServer={p.updateServer}
           applyServiceIp={p.applyServiceIp}
+          applyingAgents={p.applyingAgents}
           regenerateToken={p.regenerateToken}
           copyCmd={p.copyCmd}
         />
@@ -1002,6 +999,7 @@ interface ServerRowsProps {
   pendingToken?: { token: string; cmd: string }
   updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
   applyServiceIp: (srv: ServerRow) => void
+  applyingAgents: Set<number>
   regenerateToken: (srv: ServerRow) => void
   copyCmd: (srv: ServerRow) => void
   // Standalone 전용 — service header row 없으므로 row 안에 삭제/모드 표시
@@ -1103,6 +1101,7 @@ function ServerRows(p: ServerRowsProps) {
               interfaces={srv.interfaces}
               rows={srv.serviceIpRows}
               slots={p.serviceSlots}
+              applying={p.applyingAgents.has(srv.id)}
               onChange={(rows) => p.updateServer(svc.id, srv.id, { serviceIpRows: rows })}
               onApply={() => p.applyServiceIp(srv)}
             />
@@ -1150,11 +1149,12 @@ function ImeSafeInput({ value, onCommit, ...rest }: {
   )
 }
 
-function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
+function ServiceIpPanel({ title, interfaces, rows, slots, applying, onChange, onApply }: {
   title: string
   interfaces: NetIface[]
   rows: ServiceIpRow[]
   slots: IpSlot[]
+  applying?: boolean
   onChange: (rows: ServiceIpRow[]) => void
   onApply?: () => void
 }) {
@@ -1201,7 +1201,9 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
   // agent 가 heartbeat 으로 보고한 interfaces 와 (iface, ip) 매칭 시 'up'.
   // 사용자가 입력값을 편집 중이면 (isChanged) 적용 전이므로 'unknown' — NIC 매칭 무의미.
   // 매칭 안 되는데 ip 비어있지 않으면 'down', 그 외 'unknown'.
+  // applying=true (apply 호출 중) 면 모든 row 가 '적용 중' 표시 — 동기 응답 대기 단서.
   const rowStatus = (r: ServiceIpRow): BindingStatus => {
+    if (applying) return 'applying'
     if (isChanged(r)) return 'unknown'
     if (interfaces.some(x => x.name === r.iface && x.ip === r.ip)) return 'up'
     return r.ip ? 'down' : 'unknown'
@@ -1286,7 +1288,7 @@ function ServiceIpPanel({ title, interfaces, rows, slots, onChange, onApply }: {
                 <td style={{ padding: '4px 8px' }}><StatusBadge status={rowStatus(r)} /></td>
                 <td style={{ padding: '4px 8px' }}>
                   <button onClick={() => applyRow(r.iface)} style={btnSmall()}
-                          disabled={mgmt}
+                          disabled={mgmt || applying}
                           title={mgmt ? 'mgmt NIC — 변경 불가' : '변경된 IP 를 저장 (실제 agent 적용 API 추후)'}>
                     적용
                   </button>
@@ -1567,9 +1569,11 @@ function VipPanel({ title, svc, vrid, onChange, onApply }: {
 function StatusBadge({ status }: { status?: BindingStatus }) {
   const s = status ?? 'unknown'
   const map: Record<BindingStatus, { icon: string; color: string; label: string }> = {
-    up:      { icon: '●', color: '#27ae60', label: 'up' },
-    down:    { icon: '◐', color: '#c0392b', label: 'down' },
-    unknown: { icon: '○', color: '#888',    label: '미확인' },
+    up:       { icon: '●', color: '#27ae60', label: 'up' },
+    down:     { icon: '◐', color: '#c0392b', label: 'down' },
+    unknown:  { icon: '○', color: '#888',    label: '미확인' },
+    applying: { icon: '⏳', color: '#f39c12', label: '적용 중' },
+    fail:     { icon: '✕', color: '#c0392b', label: '실패' },
   }
   const m = map[s]
   return (

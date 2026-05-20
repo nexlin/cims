@@ -1078,6 +1078,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             rc, pids = _signal_process(install_path, sig)
             return self._respond(200 if rc == 0 else 404,
                                   {"ok": rc == 0, "signaled": pids})
+        if path == "/apply-ip-config":
+            body = self._read_body_json()
+            rows = body.get("service_ip_rows") or []
+            if not isinstance(rows, list):
+                return self._respond(400, {"error": "service_ip_rows must be array"})
+            rc, out, err = job_apply_ip_config({"service_ip_rows": rows})
+            return self._respond(200,
+                                  {"ok": rc == 0, "rc": rc,
+                                   "stdout": out, "stderr": err,
+                                   "rows": len(rows)})
         return self._respond(404, {"error": "not_found"})
 
 

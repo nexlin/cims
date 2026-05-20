@@ -374,7 +374,9 @@ export const deploymentApi = {
     }>(`/packages/register-from-dist`, {}),
   upgradeAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/upgrade`, {}),
   applyIpConfig: (id: number) =>
-    api.post<{ agent_id: number; job_id: number; rows: number }>(`/agents/${id}/apply-ip-config`, {}),
+    api.post<{ agent_id: number; rows: number;
+               ok: boolean; rc: number;
+               stdout: string; stderr: string }>(`/agents/${id}/apply-ip-config`, {}),
   getAgentJob:   (agentId: number, jobId: number) =>
     api.get<AgentJob>(`/agents/${agentId}/jobs/${jobId}`),
   agentMetrics:  (id: number) => api.get<{ items: AgentMetric[] }>(`/agents/${id}/metrics`),

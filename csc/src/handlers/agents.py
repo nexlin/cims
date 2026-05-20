@@ -702,8 +702,10 @@ async def _revoke_agent(handler_args: HandlerArgs, aid: int, config):
 
 
 async def _apply_ip_config(aid: int, config):
-    """ServiceIpPanel [적용] 진입점 — file_store agent.service_ip_rows 를 읽어
-    apply_ip_config job 큐잉. Agent 가 ip addr add 로 secondary IP 적용."""
+    """ServiceIpPanel [적용] 진입점 — agent sync REST 로 즉시 호출하여
+    ip addr add 결과를 동기 응답한다 (옛 큐잉 + heartbeat pickup 모델 제거).
+    agent 가 LISTEN 안 되거나 sync_port 미보고면 502 로 명확히 실패.
+    """
     row = await asyncio.to_thread(_agent_load, config, aid)
     if not row:
         return HandlerResult(status=404, body={"error": "agent_not_found"}, media_type="application/json")
@@ -714,10 +716,24 @@ async def _apply_ip_config(aid: int, config):
     if not rows_payload:
         return HandlerResult(status=400, body={"error": "no_service_ip_rows"},
                              media_type="application/json")
-    job_id = await asyncio.to_thread(_job_create, config, aid, 'apply_ip_config',
-                                     {"service_ip_rows": rows_payload})
-    return HandlerResult(status=202,
-                         body={"agent_id": aid, "job_id": job_id, "rows": len(rows_payload)},
+    status, body = await asyncio.to_thread(
+        _agent_proxy_call, "POST", row, "/apply-ip-config",
+        None, {"service_ip_rows": rows_payload}, 15, config)
+    if status == 0:
+        # connect 실패 / sync_port 미보고 등 — agent 도달 불가
+        return HandlerResult(status=502,
+                             body={"error": "agent_unreachable",
+                                   "detail": (body or {}).get("error"),
+                                   "agent_id": aid, "rows": len(rows_payload)},
+                             media_type="application/json")
+    if status != 200:
+        return HandlerResult(status=status,
+                             body={"error": "agent_error", "detail": body,
+                                   "agent_id": aid, "rows": len(rows_payload)},
+                             media_type="application/json")
+    return HandlerResult(status=200,
+                         body={"agent_id": aid, "rows": len(rows_payload),
+                               **(body or {})},
                          media_type="application/json")
 
 
