@@ -883,14 +883,16 @@ ${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
                         (v2 예정: start/health/stop. v3 예정: 4시나리오 자동 실행)
 
 ${BOLD}배포 패키지 (Console 업로드용) — [3/3] 단계:${NC}
-  pkg [-v X.Y.Z] [--no-bump] [-m <changelog>] [name...]
+  pkg [-v X.Y.Z] [--no-bump] [--no-sync] [-m <changelog>] [name...]
                                  configure 완료된 build/dist 를 모듈별 tar.gz 로 패키징.
                                  각 tarball 최상위: meta.json (name/version/설명) +
                                  config_template.json (설정 스키마) + <모듈>/ 파일.
-                                 기본: auto-bump patch.
+                                 기본: auto-bump patch + source→dist auto-sync.
                                  -v 지정 시 해당 버전 강제 + pkg.json 반영
                                  --no-bump 면 현재 pkg.json 버전 그대로 (재패키징)
-                                 예: ./cims.sh pkg               # 0.0.3 → 0.0.4 자동
+                                 --no-sync 면 auto-sync 건너뜀 (옛 dist 그대로 — 디버깅용)
+                                 C++ 바이너리 (csp/cmp/cspsim) 는 mtime 검사 후 warn 만.
+                                 예: ./cims.sh pkg               # 0.0.3 → 0.0.4 자동 + 동기화
                                      ./cims.sh pkg -v 1.0.0 csp  # csp 만 1.0.0 강제
 
 ${BOLD}예시:${NC}
@@ -1121,12 +1123,14 @@ cmd_pkg() {
     local version=""
     local changelog=""
     local no_bump=0
+    local no_sync=0
     local targets=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -v|--version)   version="$2"; shift 2 ;;
             -m|--changelog) changelog="$2"; shift 2 ;;
             --no-bump)      no_bump=1; shift ;;
+            --no-sync)      no_sync=1; shift ;;
             -*) err "알 수 없는 옵션: $1"; return 1 ;;
             *)  targets+=("$1"); shift ;;
         esac
@@ -1141,6 +1145,55 @@ cmd_pkg() {
         err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
         return 1
     fi
+
+    # ── 소스 → dist auto-sync (#15) ───────────────────────────────────────
+    # cmd_pkg 가 dist 를 tar 하므로, source 가 변경됐는데 dist 에 미반영이면 옛 코드가
+    # tarball 에 박힘. 이 함정에 반복적으로 막힌 회기 이력 (agent 0.0.13/16/20, CSC handler)
+    # 으로 인해 자동 sync 를 기본 동작으로. --no-sync 로 끄기 가능.
+    # C++ 바이너리 (csp/cmp/cspsim) 는 cmake build 가 별도 → 여기서는 mtime 비교 후 warn.
+    if [[ $no_sync -ne 1 && -n "$SRC_CONSOLE" ]]; then
+        local -A _sync_set=()
+        # pkg-meta / scripts 는 어느 컴포넌트를 패키징하든 항상 동기화 (cims.sh / pkg.json 박힘 방지)
+        _sync_set[pkg-meta]=1
+        _sync_set[scripts]=1
+        local _t
+        for _t in "${targets[@]}"; do
+            case "$_t" in
+                csc)     _sync_set[csc]=1 ;;
+                agent)   _sync_set[agent]=1 ;;
+                console) _sync_set[console]=1 ;;
+                phone)   _sync_set[phone]=1 ;;
+            esac
+        done
+        local _sync_list=("${!_sync_set[@]}")
+        if [[ ${#_sync_list[@]} -gt 0 ]]; then
+            info "auto-sync (소스 → dist): ${_sync_list[*]}"
+            cmd_sync "${_sync_list[@]}" || warn "auto-sync 일부 실패 — 옛 dist 로 패키징 진행"
+        fi
+    elif [[ $no_sync -eq 1 ]]; then
+        warn "--no-sync 모드: source → dist sync 건너뜀 (옛 dist 로 패키징됨)"
+    fi
+
+    # C++ 바이너리 stale 경고 (dist 바이너리가 src 보다 오래된 경우)
+    local -A _bin_checked=()
+    local _bin_key _bin _src
+    for _t in "${targets[@]}"; do
+        case "$_t" in
+            csp|psp|isp) _bin_key="csp" ;;
+            cmp|pmp|imp) _bin_key="cmp" ;;
+            cspsim)      _bin_key="cspsim" ;;
+            *)           _bin_key="" ;;
+        esac
+        [[ -z "$_bin_key" || -n "${_bin_checked[$_bin_key]:-}" ]] && continue
+        _bin_checked[$_bin_key]=1
+        _bin="$DIST_DIR/$_bin_key/bin/$_bin_key"
+        _src="$SCRIPT_DIR/$_bin_key/src"
+        if [[ -f "$_bin" && -d "$_src" ]]; then
+            if find "$_src" -type f \( -name '*.cpp' -o -name '*.cc' -o -name '*.h' -o -name '*.hpp' \) -newer "$_bin" 2>/dev/null | grep -q .; then
+                warn "$_bin_key: dist 바이너리가 src 보다 오래됨 → 'cims.sh build' 후 다시 pkg 권장"
+            fi
+        fi
+    done
 
     # 컴포넌트별 소스 루트 매핑 — 각 소스 루트의 pkg.json 에서 name/description 를 가져옴
     # (dist/ 밖에서 실행되는 경우만 소스 루트가 있으며, 그 외에는 dist/<comp>/pkg.json 로 fallback)
