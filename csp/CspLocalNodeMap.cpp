@@ -7,7 +7,7 @@
 CCspLocalNodeMap gclsLocalNodeMap;
 
 namespace {
-    bool _boolish( const std::string& v, bool defTrue ) {
+    bool _boolish( const std::string &v, bool defTrue ) {
         if ( v.empty() ) return defTrue;
         if ( v == "false" || v == "0" ) return false;
         return true;
@@ -65,16 +65,16 @@ bool CCspLocalNodeMap::Sync() {
     return true;
 }
 
-LocalNodeInfo CCspLocalNodeMap::GetByName( const std::string& name ) const {
+LocalNodeInfo CCspLocalNodeMap::GetByName( const std::string &name ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( name );
     if ( it == m_byName.end() ) return LocalNodeInfo();
     return it->second;
 }
 
-LocalNodeInfo CCspLocalNodeMap::GetById( const std::string& id ) const {
+LocalNodeInfo CCspLocalNodeMap::GetById( const std::string &id ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
-    for ( const auto& kv : m_byName ) {
+    for ( const auto &kv : m_byName ) {
         if ( kv.second.id == id ) return kv.second;
     }
     return LocalNodeInfo();
@@ -83,7 +83,7 @@ LocalNodeInfo CCspLocalNodeMap::GetById( const std::string& id ) const {
 LocalNodeInfo CCspLocalNodeMap::GetByIntId( int listenerIntId ) const {
     if ( listenerIntId <= 0 ) return LocalNodeInfo();
     std::lock_guard<std::mutex> lk( m_mutex );
-    for ( const auto& kv : m_byName ) {
+    for ( const auto &kv : m_byName ) {
         if ( CspUuidToIntId( kv.second.id ) == listenerIntId ) return kv.second;
     }
     return LocalNodeInfo();
@@ -93,7 +93,7 @@ std::vector<LocalNodeInfo> CCspLocalNodeMap::GetAll() const {
     std::lock_guard<std::mutex> lk( m_mutex );
     std::vector<LocalNodeInfo> out;
     out.reserve( m_byName.size() );
-    for ( const auto& kv : m_byName ) out.push_back( kv.second );
+    for ( const auto &kv : m_byName ) out.push_back( kv.second );
     return out;
 }
 
@@ -105,8 +105,8 @@ LocalNodeInfo CCspLocalNodeMap::GetPrimary() const {
     // Rule 1: enabled=true && is_primary=true
     LocalNodeInfo found;
     int primaryCount = 0;
-    for ( const auto& kv : m_byName ) {
-        const LocalNodeInfo& n = kv.second;
+    for ( const auto &kv : m_byName ) {
+        const LocalNodeInfo &n = kv.second;
         if ( !n.enabled || !n.is_primary ) continue;
         if ( primaryCount == 0 ) found = n;
         ++primaryCount;
@@ -118,8 +118,8 @@ LocalNodeInfo CCspLocalNodeMap::GetPrimary() const {
     if ( primaryCount >= 1 ) return found;
 
     // Rule 2: enabled=true && edge=access && protocol=UDP
-    for ( const auto& kv : m_byName ) {
-        const LocalNodeInfo& n = kv.second;
+    for ( const auto &kv : m_byName ) {
+        const LocalNodeInfo &n = kv.second;
         if ( !n.enabled ) continue;
         if ( n.edge != "access" ) continue;
         if ( n.protocol != "UDP" ) continue;
@@ -130,15 +130,15 @@ LocalNodeInfo CCspLocalNodeMap::GetPrimary() const {
     return LocalNodeInfo();
 }
 
-LocalNodeInfo CCspLocalNodeMap::GetPrimaryByProtocol( const std::string& protocol ) const {
+LocalNodeInfo CCspLocalNodeMap::GetPrimaryByProtocol( const std::string &protocol ) const {
     // G9: protocol 엄격 필터. TCP/TLS primary 주입에 사용.
     std::lock_guard<std::mutex> lk( m_mutex );
 
     // Rule 1: enabled=true && is_primary=true && protocol match
     LocalNodeInfo found;
     int primaryCount = 0;
-    for ( const auto& kv : m_byName ) {
-        const LocalNodeInfo& n = kv.second;
+    for ( const auto &kv : m_byName ) {
+        const LocalNodeInfo &n = kv.second;
         if ( !n.enabled || !n.is_primary ) continue;
         if ( n.protocol != protocol ) continue;
         if ( primaryCount == 0 ) found = n;
@@ -151,8 +151,8 @@ LocalNodeInfo CCspLocalNodeMap::GetPrimaryByProtocol( const std::string& protoco
     if ( primaryCount >= 1 ) return found;
 
     // Rule 2: enabled=true && edge=access && protocol match
-    for ( const auto& kv : m_byName ) {
-        const LocalNodeInfo& n = kv.second;
+    for ( const auto &kv : m_byName ) {
+        const LocalNodeInfo &n = kv.second;
         if ( !n.enabled ) continue;
         if ( n.edge != "access" ) continue;
         if ( n.protocol != protocol ) continue;
@@ -168,7 +168,7 @@ size_t CCspLocalNodeMap::Size() const {
     return m_byName.size();
 }
 
-bool CCspLocalNodeMap::HasName( const std::string& name ) const {
+bool CCspLocalNodeMap::HasName( const std::string &name ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     return m_byName.find( name ) != m_byName.end();
 }

@@ -42,8 +42,8 @@ namespace CspAddressing {
      *  3차: primary LocalIp fallback (R5.a 동작).
      *  @param proto "UDP" / "TCP" / "TLS". 빈 문자열이면 protocol 체크 skip.
      *  @param edge_preference "access" / "peering" / "mgmt" 또는 빈 문자열. */
-    std::string GetLocalSipAddressForOutbound( const std::string& proto = "UDP",
-                                               const std::string& edge_preference = "peering" );
+    std::string GetLocalSipAddressForOutbound( const std::string &proto = "UDP",
+                                               const std::string &edge_preference = "peering" );
 
     /** SDP media (RTP relay) 에 advertise 할 로컬 주소.
      *  R5.c 이후 CMP interface 와 CSP interface 가 다를 때 분리 예정. */
@@ -57,7 +57,7 @@ namespace CspAddressing {
      *  access_services.server_identity_uri 가 명시되면 그것 반환.
      *  비면 sip:cspserver@{domain} 자동 조립.
      *  서비스 매칭 실패 시 sip:cspserver@{LocalIp} primary fallback. */
-    std::string GetServerIdentityForService( const std::string& kind );
+    std::string GetServerIdentityForService( const std::string &kind );
 
 }  // namespace CspAddressing
 

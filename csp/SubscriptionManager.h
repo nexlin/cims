@@ -37,12 +37,12 @@ public:
     /**
      * @brief Add or Update a subscription
      */
-    void AddSubscription( const std::string& strResourceUri, const SubscriptionInfo& info );
+    void AddSubscription( const std::string &strResourceUri, const SubscriptionInfo &info );
 
     /**
      * @brief Remove a subscription (e.g. Expires=0 or Terminated)
      */
-    void RemoveSubscription( const std::string& strCallId );
+    void RemoveSubscription( const std::string &strCallId );
 
     /**
      * @brief Get subscriptions for a specific user and event type
@@ -50,13 +50,13 @@ public:
      * @param strEventType "gms" or "cms"
      * @param outList     Result list (copies of SubscriptionInfo)
      */
-    void GetSubscriptionsByUser( const std::string& strUserId, const std::string& strEventType,
-                                 std::list<SubscriptionInfo>& outList );
+    void GetSubscriptionsByUser( const std::string &strUserId, const std::string &strEventType,
+                                 std::list<SubscriptionInfo> &outList );
 
     /**
      * @brief Increment NOTIFY CSeq for a subscription and return the new value
      */
-    int IncrementNotifySeq( const std::string& strCallId );
+    int IncrementNotifySeq( const std::string &strCallId );
 
     /**
      * @brief Check and remove expired subscriptions

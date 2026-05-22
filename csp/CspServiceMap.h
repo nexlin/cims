@@ -40,20 +40,20 @@ public:
     ServiceInfo GetById( int id ) const;
 
     /** name (access_services.name) 으로 조회. v3 신규 — subscriptions.service_ref 해석용. */
-    ServiceInfo GetByName( const std::string& name ) const;
+    ServiceInfo GetByName( const std::string &name ) const;
 
     /** domain 으로 조회 (가입자 URI/From host 매칭).
      *  priority 낮은 순으로 첫 매칭 반환. */
-    ServiceInfo GetByDomain( const std::string& domain ) const;
+    ServiceInfo GetByDomain( const std::string &domain ) const;
 
     /** 전체 서비스 목록 스냅샷. */
     std::vector<ServiceInfo> GetAll() const;
 
     /** kind (voip|ptt) 로 조회. priority 낮은 첫 enabled 서비스 반환. v3 신규. */
-    ServiceInfo GetByKind( const std::string& kind ) const;
+    ServiceInfo GetByKind( const std::string &kind ) const;
 
     /** kind 의 대표 domain 반환 (기존 gclsSetup.GetDomainForService 대체). v3 신규. */
-    std::string GetDomainByKind( const std::string& kind ) const;
+    std::string GetDomainByKind( const std::string &kind ) const;
 
     /** domain→kind 매핑 구축 (SipLogger 등에서 로깅용으로 사용).
      *  kind 값: voip | ptt. 하나의 domain 이 중복된 kind 에 걸치면 우선순위 낮은 서비스 승리. */
@@ -64,10 +64,10 @@ public:
      *  @param listenerIntId   psip 수신 리스너 int id (CSipMessage.m_iListenerId)
      *  @return true  = 허용 (inbound_policy=any 이거나 listenerIntId 가 svc.listeners[] 에 포함)
      *          false = 거절 (restricted 인데 listener 미일치) */
-    static bool IsInboundAllowed( const ServiceInfo& svc, int listenerIntId );
+    static bool IsInboundAllowed( const ServiceInfo &svc, int listenerIntId );
 
     /** 효과적 realm 계산: service.auth_realm 이 비면 service.domain 을 반환. */
-    static std::string EffectiveRealm( const ServiceInfo& svc );
+    static std::string EffectiveRealm( const ServiceInfo &svc );
 
 private:
     mutable std::mutex m_mutex;

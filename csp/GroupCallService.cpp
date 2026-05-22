@@ -39,7 +39,7 @@ static std::string TimeToIso( time_t t ) {
 #include "UserMap.h"
 
 // Notify subscribers about group changes
-extern void SendSipNotify( const std::string& uri, const std::string& etag, const std::string& action );
+extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
 
 // External global objects
 extern CSipUserAgent gclsUserAgent;
@@ -53,7 +53,7 @@ CGroupCallService::CGroupCallService() : m_bMonitorRunning( false ) {
 // 그룹 세션이 존재하는 동안 발급된 동일한 sesid 를
 // ADD_PTT_GROUP / JOIN_PTT_GROUP / LEAVE_PTT_GROUP / REMOVE_PTT_GROUP
 // + PTT SIP INVITE/ACK/BYE/NOTIFY 모두에 전달.
-std::string CGroupCallService::GetOrIssueGroupSesId( const std::string& strGroupId ) {
+std::string CGroupCallService::GetOrIssueGroupSesId( const std::string &strGroupId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
     auto it = m_mapGroupSesId.find( strGroupId );
     if ( it != m_mapGroupSesId.end() && !it->second.empty() ) return it->second;
@@ -64,7 +64,7 @@ std::string CGroupCallService::GetOrIssueGroupSesId( const std::string& strGroup
     return sid;
 }
 
-void CGroupCallService::RemoveGroupSesId( const std::string& strGroupId ) {
+void CGroupCallService::RemoveGroupSesId( const std::string &strGroupId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
     m_mapGroupSesId.erase( strGroupId );
 }
@@ -76,8 +76,8 @@ CGroupCallService::~CGroupCallService() {
 /**
  * @brief Process Incoming Group Call (A calling Group)
  */
-bool CGroupCallService::ProcessGroupCall( const char* pszGroupId, const char* pszCallerInfo, const char* pszCallId,
-                                          CSipCallRtp* pclsRtp, CSipCallRoute* pclsRoute ) {
+bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *pszCallerInfo, const char *pszCallId,
+                                          CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute ) {
     CspPttGroup clsGroup;
 
     if ( gclsGroupMap.Select( pszGroupId, clsGroup ) == false ) {
@@ -202,7 +202,7 @@ bool CGroupCallService::ProcessGroupCall( const char* pszGroupId, const char* ps
     }
 
     // 3. 나머지 멤버들에게 INVITE
-    for ( const auto& pUser : clsGroup._pusers ) {
+    for ( const auto &pUser : clsGroup._pusers ) {
         if ( !pUser ) continue;
         std::string strMember = pUser->_id;
         if ( strMember == pszCallerInfo ) continue;
@@ -212,14 +212,14 @@ bool CGroupCallService::ProcessGroupCall( const char* pszGroupId, const char* ps
     return true;
 }
 
-std::string CGroupCallService::GetGroupIdByCallId( const std::string& strCallId ) {
+std::string CGroupCallService::GetGroupIdByCallId( const std::string &strCallId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
     auto it = m_mapCallSession.find( strCallId );
     if ( it != m_mapCallSession.end() ) return it->second.strGroupId;
     return "";
 }
 
-void CGroupCallService::ClearUserCall( const std::string& strUserId ) {
+void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
     std::string strGroupId, strSessionId;
     bool bStillActive = false;
     {
@@ -239,7 +239,7 @@ void CGroupCallService::ClearUserCall( const std::string& strUserId ) {
         m_mapUserCall.erase( it );
 
         // 해당 그룹에 아직 다른 멤버가 남아있는지 확인
-        for ( const auto& kv : m_mapCallSession ) {
+        for ( const auto &kv : m_mapCallSession ) {
             if ( kv.second.strGroupId == strGroupId ) {
                 bStillActive = true;
                 break;
@@ -276,7 +276,7 @@ void CGroupCallService::ClearUserCall( const std::string& strUserId ) {
 /**
  * @brief Invite a member to a group call using Shared RTP Session
  */
-bool CGroupCallService::InviteMember( const char* pszUserId, const char* pszGroupId ) {
+bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGroupId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
     // 활성 호가 남아있으면 정리 후 재시도
@@ -313,7 +313,7 @@ bool CGroupCallService::InviteMember( const char* pszUserId, const char* pszGrou
     CspPttGroup clsGroup;
     if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
         bool bIsMember = false;
-        for ( const auto& pUser : clsGroup._pusers ) {
+        for ( const auto &pUser : clsGroup._pusers ) {
             if ( pUser && pUser->_id == pszUserId ) {
                 bIsMember = true;
                 break;
@@ -346,9 +346,8 @@ bool CGroupCallService::InviteMember( const char* pszUserId, const char* pszGrou
         if ( pttSvc.id > 0 && !pttSvc.allowed_local_node_refs.empty() ) {
             LocalNodeInfo ln = gclsLocalNodeMap.GetByName( pttSvc.allowed_local_node_refs[0] );
             if ( ln.IsValid() ) {
-                clsRoute.m_strOutboundLocalIp = ( ln.bind_ip.empty() || ln.bind_ip == "0.0.0.0" )
-                                                    ? gclsSetup.m_strLocalIp
-                                                    : ln.bind_ip;
+                clsRoute.m_strOutboundLocalIp =
+                    ( ln.bind_ip.empty() || ln.bind_ip == "0.0.0.0" ) ? gclsSetup.m_strLocalIp : ln.bind_ip;
                 if ( ln.bind_port > 0 ) clsRoute.m_iOutboundLocalPort = ln.bind_port;
             }
         }
@@ -411,7 +410,7 @@ bool CGroupCallService::InviteMember( const char* pszUserId, const char* pszGrou
 
     // 4. Create Call
     std::string strCallId;
-    CSipMessage* pclsInvite = NULL;
+    CSipMessage *pclsInvite = NULL;
 
     // PTT 멤버 Dialog — mcptt realm 도메인으로 INVITE 생성 (From/To/Request-URI/PAI 모두 mcptt)
     std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
@@ -580,12 +579,12 @@ void CGroupCallService::OnGroupConfigChanged() {
 
 void CGroupCallService::SyncGroupsState() {
     // A. Add New Groups
-    gclsGroupMap.IterateInternal( [this]( const CspPttGroup& group ) {
+    gclsGroupMap.IterateInternal( [this]( const CspPttGroup &group ) {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
         // Calculate Hash
         std::string strHashInput;
-        for ( const auto& pUser : group._pusers ) {
+        for ( const auto &pUser : group._pusers ) {
             if ( !pUser ) continue;
             strHashInput += pUser->_id + ":" + std::to_string( pUser->_priority ) + ";";
         }
@@ -641,7 +640,7 @@ void CGroupCallService::SyncGroupsState() {
         }
     }
 
-    for ( const auto& strGroupId : vecToRemove ) {
+    for ( const auto &strGroupId : vecToRemove ) {
         CLog::Print( LOG_INFO, "SyncGroupsState: Group(%s) removed from config. Cleaning up.", strGroupId.c_str() );
         // Notify GMS subscribers about group deletion before removing
         SendSipNotify( "tel:" + strGroupId, "deleted_" + std::to_string( time( NULL ) ), "DELETE" );
@@ -673,7 +672,7 @@ void CGroupCallService::CheckMemberState() {
                 } else {
                     // Check if member still in group
                     bool bFound = false;
-                    for ( const auto& pUser : group._pusers ) {
+                    for ( const auto &pUser : group._pusers ) {
                         if ( !pUser ) continue;
                         if ( pUser->_id == strUserId ) {
                             bFound = true;
@@ -686,7 +685,7 @@ void CGroupCallService::CheckMemberState() {
         }
     }
 
-    for ( const auto& strCallId : vecToKick ) {
+    for ( const auto &strCallId : vecToKick ) {
         CLog::Print( LOG_INFO, "CheckMemberState: Call(%s) no longer valid (Group/Member removed). Terminating.",
                      strCallId.c_str() );
         gclsUserAgent.StopCall( strCallId.c_str() );
@@ -697,7 +696,7 @@ void CGroupCallService::CheckMemberState() {
 
 void CGroupCallService::CheckGroupIntegrity() {
     // Re-invite missing members
-    gclsGroupMap.IterateInternal( [this]( const CspPttGroup& group ) {
+    gclsGroupMap.IterateInternal( [this]( const CspPttGroup &group ) {
         // First ensure Group Context exists
         {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
@@ -724,7 +723,7 @@ void CGroupCallService::CheckGroupIntegrity() {
 
         // Collect registered members that need inviting
         std::vector<std::string> vecToInvite;
-        for ( const auto& pUser : group._pusers ) {
+        for ( const auto &pUser : group._pusers ) {
             if ( !pUser ) continue;
             std::string strUserId = pUser->_id;
             CUserInfo clsUser;
@@ -753,7 +752,7 @@ void CGroupCallService::CheckGroupIntegrity() {
             }
         }
 
-        for ( const auto& strUserId : vecToInvite ) {
+        for ( const auto &strUserId : vecToInvite ) {
             CLog::Print( LOG_DEBUG, "CheckGroupIntegrity: User(%s) in Group(%s) missing from active calls. Inviting.",
                          strUserId.c_str(), group._id.c_str() );
             InviteMember( strUserId.c_str(), group._id.c_str() );
@@ -775,7 +774,7 @@ void CGroupCallService::OnCmpStatusChanged( bool bConnected ) {
 }
 
 // 200 OK Received -> Join Group Helper
-void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::string& strRemoteIp, int iRemotePort,
+void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::string &strRemoteIp, int iRemotePort,
                                        int iRemoteFloorPort, int iRemoteVideoPort ) {
     std::string strGroupId, strSessionId, strMemberId;
     int iCmpFloorPort = 0;
@@ -820,7 +819,7 @@ void CGroupCallService::OnCallStarted( const std::string& strCallId, const std::
 }
 
 // BYE/Error -> Leave Group
-bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
+bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     std::string strGroupId, strMemberId, strSessionId;
     bool bStillActive = false;
     bool bFound = false;
@@ -846,7 +845,7 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
             }
         }
 
-        for ( const auto& kv : m_mapCallSession ) {
+        for ( const auto &kv : m_mapCallSession ) {
             if ( kv.second.strGroupId == strGroupId ) {
                 bStillActive = true;
                 break;
@@ -891,8 +890,8 @@ bool CGroupCallService::OnCallTerminated( const std::string& strCallId ) {
 // Conference Event Package (RFC 4575) — in-dialog NOTIFY
 // ─────────────────────────────────────────────────────────
 
-void CGroupCallService::SendConferenceNotify( const std::string& strGroupId, const std::string& strChangedUser,
-                                              const std::string& strStatus, const std::string& strJoining ) {
+void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, const std::string &strChangedUser,
+                                              const std::string &strStatus, const std::string &strJoining ) {
     // 1. Collect all active call-IDs for this group + bump version
     std::vector<std::string> vecCallIds;
     int iVersion = 0;
@@ -904,7 +903,7 @@ void CGroupCallService::SendConferenceNotify( const std::string& strGroupId, con
             iVersion = itRtp->second.iConfVersion;
         }
 
-        for ( const auto& kv : m_mapCallSession ) {
+        for ( const auto &kv : m_mapCallSession ) {
             if ( kv.second.strGroupId == strGroupId ) {
                 vecCallIds.push_back( kv.first );
             }
@@ -931,7 +930,7 @@ void CGroupCallService::SendConferenceNotify( const std::string& strGroupId, con
     std::string strBody = oss.str();
 
     // 3. Send in-dialog NOTIFY to each active participant via SipUserAgent
-    for ( const auto& strCallId : vecCallIds ) {
+    for ( const auto &strCallId : vecCallIds ) {
         gclsUserAgent.SendNotifyWithBody( strCallId.c_str(), "conference", "application", "conference-info+xml",
                                           strBody );
     }
@@ -945,8 +944,8 @@ void CGroupCallService::SendConferenceNotify( const std::string& strGroupId, con
  * @brief Build PTT group info XML body per 3GPP TS 24.379 MCPTT spec
  *        Content-Type: application/vnd.3gpp.mcptt-info+xml
  */
-std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup& clsGroup, const std::string& strUserId,
-                                                  const std::string& strCallerId ) {
+std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, const std::string &strUserId,
+                                                  const std::string &strCallerId ) {
     std::ostringstream oss;
 
     oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
@@ -968,8 +967,8 @@ std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup& clsGroup, c
  *        Part 1: application/vnd.3gpp.mcptt-info+xml  (XML first)
  *        Part 2: application/sdp  (SDP with MCPTT floor control m= line)
  */
-void CGroupCallService::WrapMultipartBody( CSipMessage* pclsInvite, const std::string& strGroupXml,
-                                           const std::string& strFloorIp, int iFloorPort ) {
+void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::string &strGroupXml,
+                                           const std::string &strFloorIp, int iFloorPort ) {
     if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
 
     const std::string strBoundary = "mcptt";

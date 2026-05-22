@@ -13,16 +13,16 @@
 namespace {
     // hiredis context (mutex-protected via outer m_mutex).
     struct RedisCtx {
-        redisContext* ctx = nullptr;
+        redisContext *ctx = nullptr;
         ~RedisCtx() {
             if ( ctx ) redisFree( ctx );
         }
     };
     RedisCtx g_redis;
 
-    bool _Auth( redisContext* c, const std::string& strPassword ) {
+    bool _Auth( redisContext *c, const std::string &strPassword ) {
         if ( strPassword.empty() ) return true;
-        redisReply* reply = (redisReply*)redisCommand( c, "AUTH %s", strPassword.c_str() );
+        redisReply *reply = (redisReply *)redisCommand( c, "AUTH %s", strPassword.c_str() );
         bool ok = reply && reply->type != REDIS_REPLY_ERROR;
         if ( reply ) freeReplyObject( reply );
         return ok;
@@ -30,12 +30,12 @@ namespace {
 }  // namespace
 #endif
 
-CRedisStore& CRedisStore::GetInstance() {
+CRedisStore &CRedisStore::GetInstance() {
     static CRedisStore instance;
     return instance;
 }
 
-bool CRedisStore::Init( const std::string& strHost, int iPort, const std::string& strPassword ) {
+bool CRedisStore::Init( const std::string &strHost, int iPort, const std::string &strPassword ) {
     std::lock_guard<std::mutex> lock( m_mutex );
     m_strHost = strHost;
     m_iPort = iPort;
@@ -51,7 +51,7 @@ bool CRedisStore::Init( const std::string& strHost, int iPort, const std::string
     struct timeval tv = { 2, 0 };  // 2s connect timeout
     g_redis.ctx = redisConnectWithTimeout( strHost.c_str(), iPort, tv );
     if ( !g_redis.ctx || g_redis.ctx->err ) {
-        const char* errStr = g_redis.ctx ? g_redis.ctx->errstr : "alloc failed";
+        const char *errStr = g_redis.ctx ? g_redis.ctx->errstr : "alloc failed";
         CLog::Print( LOG_ERROR, "RedisStore: connect %s:%d 실패 — %s", strHost.c_str(), iPort, errStr );
         if ( g_redis.ctx ) {
             redisFree( g_redis.ctx );
@@ -68,7 +68,7 @@ bool CRedisStore::Init( const std::string& strHost, int iPort, const std::string
         return false;
     }
     // PING 확인
-    redisReply* reply = (redisReply*)redisCommand( g_redis.ctx, "PING" );
+    redisReply *reply = (redisReply *)redisCommand( g_redis.ctx, "PING" );
     bool ok = reply && reply->type == REDIS_REPLY_STATUS && strcasecmp( reply->str, "PONG" ) == 0;
     if ( reply ) freeReplyObject( reply );
     if ( !ok ) {
@@ -102,16 +102,16 @@ void CRedisStore::Disconnect() {
     m_bConnected = false;
 }
 
-bool CRedisStore::SetBinding( const std::string& strAor, const std::string& strJson, int iTtlSec ) {
+bool CRedisStore::SetBinding( const std::string &strAor, const std::string &strJson, int iTtlSec ) {
     std::lock_guard<std::mutex> lock( m_mutex );
     if ( !m_bConnected ) return false;
 #ifdef CIMS_HAS_HIREDIS
     std::string strKey = "cims:reg:" + strAor;
-    redisReply* reply;
+    redisReply *reply;
     if ( iTtlSec > 0 ) {
-        reply = (redisReply*)redisCommand( g_redis.ctx, "SET %s %s EX %d", strKey.c_str(), strJson.c_str(), iTtlSec );
+        reply = (redisReply *)redisCommand( g_redis.ctx, "SET %s %s EX %d", strKey.c_str(), strJson.c_str(), iTtlSec );
     } else {
-        reply = (redisReply*)redisCommand( g_redis.ctx, "SET %s %s", strKey.c_str(), strJson.c_str() );
+        reply = (redisReply *)redisCommand( g_redis.ctx, "SET %s %s", strKey.c_str(), strJson.c_str() );
     }
     bool ok = reply && reply->type == REDIS_REPLY_STATUS && strcasecmp( reply->str, "OK" ) == 0;
     if ( reply ) freeReplyObject( reply );
@@ -125,12 +125,12 @@ bool CRedisStore::SetBinding( const std::string& strAor, const std::string& strJ
 #endif
 }
 
-bool CRedisStore::GetBinding( const std::string& strAor, std::string& strJsonOut ) {
+bool CRedisStore::GetBinding( const std::string &strAor, std::string &strJsonOut ) {
     std::lock_guard<std::mutex> lock( m_mutex );
     if ( !m_bConnected ) return false;
 #ifdef CIMS_HAS_HIREDIS
     std::string strKey = "cims:reg:" + strAor;
-    redisReply* reply = (redisReply*)redisCommand( g_redis.ctx, "GET %s", strKey.c_str() );
+    redisReply *reply = (redisReply *)redisCommand( g_redis.ctx, "GET %s", strKey.c_str() );
     bool ok = false;
     if ( reply && reply->type == REDIS_REPLY_STRING ) {
         strJsonOut.assign( reply->str, reply->len );
@@ -145,12 +145,12 @@ bool CRedisStore::GetBinding( const std::string& strAor, std::string& strJsonOut
 #endif
 }
 
-bool CRedisStore::DelBinding( const std::string& strAor ) {
+bool CRedisStore::DelBinding( const std::string &strAor ) {
     std::lock_guard<std::mutex> lock( m_mutex );
     if ( !m_bConnected ) return false;
 #ifdef CIMS_HAS_HIREDIS
     std::string strKey = "cims:reg:" + strAor;
-    redisReply* reply = (redisReply*)redisCommand( g_redis.ctx, "DEL %s", strKey.c_str() );
+    redisReply *reply = (redisReply *)redisCommand( g_redis.ctx, "DEL %s", strKey.c_str() );
     bool ok = reply && reply->type == REDIS_REPLY_INTEGER && reply->integer >= 0;
     if ( reply ) freeReplyObject( reply );
     return ok;
@@ -160,7 +160,7 @@ bool CRedisStore::DelBinding( const std::string& strAor ) {
 #endif
 }
 
-int CRedisStore::LoadAllBindings( std::vector<std::pair<std::string, std::string>>& vecOut ) {
+int CRedisStore::LoadAllBindings( std::vector<std::pair<std::string, std::string>> &vecOut ) {
     std::lock_guard<std::mutex> lock( m_mutex );
     vecOut.clear();
     if ( !m_bConnected ) return 0;
@@ -169,17 +169,17 @@ int CRedisStore::LoadAllBindings( std::vector<std::pair<std::string, std::string
     long long cursor = 0;
     int total = 0;
     do {
-        redisReply* reply = (redisReply*)redisCommand( g_redis.ctx, "SCAN %lld MATCH cims:reg:* COUNT 100", cursor );
+        redisReply *reply = (redisReply *)redisCommand( g_redis.ctx, "SCAN %lld MATCH cims:reg:* COUNT 100", cursor );
         if ( !reply || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ) {
             if ( reply ) freeReplyObject( reply );
             break;
         }
         cursor = strtoll( reply->element[0]->str, nullptr, 10 );
-        redisReply* keys = reply->element[1];
+        redisReply *keys = reply->element[1];
         for ( size_t i = 0; i < keys->elements; ++i ) {
             std::string strKey = keys->element[i]->str;
             // GET each — pipeline 으로 batch 가 더 빠르지만 v1 은 직렬
-            redisReply* g = (redisReply*)redisCommand( g_redis.ctx, "GET %s", strKey.c_str() );
+            redisReply *g = (redisReply *)redisCommand( g_redis.ctx, "GET %s", strKey.c_str() );
             if ( g && g->type == REDIS_REPLY_STRING ) {
                 // strip "cims:reg:" prefix
                 std::string strAor = strKey.substr( 9 );

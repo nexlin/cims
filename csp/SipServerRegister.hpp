@@ -3,7 +3,7 @@
 #include "GroupCallService.h"
 #include "GroupMap.h"
 
-bool AddChallenge( CSipMessage* psttResponse ) {
+bool AddChallenge( CSipMessage *psttResponse ) {
     CSipChallenge clsChallenge;
 
     char szNonce[33];
@@ -31,8 +31,8 @@ bool AddChallenge( CSipMessage* psttResponse ) {
  * @param pclsMessage SIP 요청 메시지
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
-bool SendUnAuthorizedResponse( CSipMessage* pclsMessage ) {
-    CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
+bool SendUnAuthorizedResponse( CSipMessage *pclsMessage ) {
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
     if ( pclsResponse == NULL ) return false;
 
     AddChallenge( pclsResponse );
@@ -54,9 +54,9 @@ bool SendUnAuthorizedResponse( CSipMessage* pclsMessage ) {
  * @param	pszMethod		SIP 메소드
  * @return	response 문자열이 유효하면 true 를 리턴한다. 그렇지 않으면 false 를 리턴한다.
  */
-bool CheckAuthorizationResponse( const char* pszUserName, const char* pszRealm, const char* pszNonce,
-                                 const char* pszUri, const char* pszResponse, const char* pszPassWord,
-                                 const char* pszMethod, const char* pszQop, const char* pszNc, const char* pszCnonce ) {
+bool CheckAuthorizationResponse( const char *pszUserName, const char *pszRealm, const char *pszNonce,
+                                 const char *pszUri, const char *pszResponse, const char *pszPassWord,
+                                 const char *pszMethod, const char *pszQop, const char *pszNc, const char *pszCnonce ) {
     char szA1[301], szA2[201], szMd5[33], szResponse[1024];
 
     snprintf( szA1, sizeof( szA1 ), "%s:%s:%s", pszUserName, pszRealm, pszPassWord );
@@ -104,8 +104,8 @@ enum ECheckAuthResult { E_AUTH_OK = 0, E_AUTH_NONCE_NOT_FOUND, E_AUTH_ERROR };
  *					존재하지 않는 nonce 인 경우 E_AUTH_NONCE_NOT_FOUND 를 리턴한다.
  *					그 외의 오류는 E_AUTH_ERROR 를 리턴한다.
  */
-ECheckAuthResult CheckAuthorization( CSipCredential* pclsCredential, const char* pszFromId, const char* pszMethod,
-                                     CspUser& clsXmlUser ) {
+ECheckAuthResult CheckAuthorization( CSipCredential *pclsCredential, const char *pszFromId, const char *pszMethod,
+                                     CspUser &clsXmlUser ) {
     if ( pclsCredential->m_strUserName.empty() ) return E_AUTH_ERROR;
     if ( gclsNonceMap.Select( pclsCredential->m_strNonce.c_str() ) == false ) return E_AUTH_NONCE_NOT_FOUND;
     // 1. Load user configuration using the From ID instead of the Auth Username
@@ -115,9 +115,9 @@ ECheckAuthResult CheckAuthorization( CSipCredential* pclsCredential, const char*
     if ( clsXmlUser.m_strAuthId != pclsCredential->m_strUserName ) return E_AUTH_ERROR;
 
     // 3. Digest Crypto verification (supports both plain MD5 and qop=auth)
-    const char* pszQop = pclsCredential->m_strQop.empty() ? NULL : pclsCredential->m_strQop.c_str();
-    const char* pszNc = pclsCredential->m_strNonceCount.empty() ? NULL : pclsCredential->m_strNonceCount.c_str();
-    const char* pszCnonce = pclsCredential->m_strCnonce.empty() ? NULL : pclsCredential->m_strCnonce.c_str();
+    const char *pszQop = pclsCredential->m_strQop.empty() ? NULL : pclsCredential->m_strQop.c_str();
+    const char *pszNc = pclsCredential->m_strNonceCount.empty() ? NULL : pclsCredential->m_strNonceCount.c_str();
+    const char *pszCnonce = pclsCredential->m_strCnonce.empty() ? NULL : pclsCredential->m_strCnonce.c_str();
 
     if ( CheckAuthorizationResponse( pclsCredential->m_strUserName.c_str(), pclsCredential->m_strRealm.c_str(),
                                      pclsCredential->m_strNonce.c_str(), pclsCredential->m_strUri.c_str(),
@@ -135,11 +135,11 @@ ECheckAuthResult CheckAuthorization( CSipCredential* pclsCredential, const char*
  * @param pclsMessage SIP 요청 메시지
  * @returns SIP 요청 메시지를 처리하면 true 를 리턴하고 그렇지 않으면 false 를 리턴한다.
  */
-bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage ) {
+bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
     // Min-Expires 체크 (등록 요청에만 적용)
     if ( pclsMessage->m_iExpires > 0 && gclsSetup.m_iMinRegisterTimeout != 0 ) {
         if ( pclsMessage->m_iExpires < gclsSetup.m_iMinRegisterTimeout ) {
-            CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_INTERVAL_TOO_BRIEF );
+            CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_INTERVAL_TOO_BRIEF );
             if ( pclsResponse == NULL ) return false;
 
             pclsResponse->AddHeader( "Min-Expires", gclsSetup.m_iMinRegisterTimeout );
@@ -183,7 +183,7 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage ) 
     CSipFrom clsContact;
 
     if ( gclsUserMap.Insert( pclsMessage, &clsContact, &clsUser ) ) {
-        CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
+        CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
         if ( pclsResponse == NULL ) return false;
 
         pclsResponse->m_clsContactList.push_back( clsContact );
@@ -207,7 +207,7 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage ) 
         // P-Asserted-Identity (3GPP TS 24.229 §5.4.3.2): 인증된 사용자 신원
         {
             char szPAUri[512];
-            const std::string& strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+            const std::string &strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
             snprintf( szPAUri, sizeof( szPAUri ), "<sip:%s@%s>", strUser.c_str(), strRegDomain.c_str() );
             pclsResponse->AddHeader( "P-Associated-URI", szPAUri );
             pclsResponse->AddHeader( "P-Asserted-Identity", szPAUri );
@@ -232,15 +232,15 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage ) 
             if ( gclsDbManager.IsConnected() ) {
                 std::vector<std::string> vecGroupIds;
                 gclsDbManager.SelectGroupsByUser( strUserId, vecGroupIds );
-                for ( const auto& gid : vecGroupIds ) {
+                for ( const auto &gid : vecGroupIds ) {
                     CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s) [DB]",
                                  strUserId.c_str(), gid.c_str() );
                     gclsGroupCallService.InviteMember( strUserId.c_str(), gid.c_str() );
                 }
             } else {
                 // DB 미연결 시 메모리 맵 사용 (파일 폴백)
-                gclsGroupMap.IterateInternal( [&strUserId]( const CspPttGroup& group ) {
-                    for ( const auto& pUser : group._pusers ) {
+                gclsGroupMap.IterateInternal( [&strUserId]( const CspPttGroup &group ) {
+                    for ( const auto &pUser : group._pusers ) {
                         if ( pUser && pUser->_id == strUserId ) {
                             CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s) [map]",
                                          strUserId.c_str(), group._id.c_str() );

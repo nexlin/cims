@@ -15,7 +15,7 @@
  *  동작에 의존하므로 같은 컴파일러 환경에서 일관됨.
  *  빈 문자열이면 0 반환.
  */
-inline int CspUuidToIntId( const std::string& uuid ) {
+inline int CspUuidToIntId( const std::string &uuid ) {
     if ( uuid.empty() ) return 0;
     size_t h = std::hash<std::string>{}( uuid );
     return (int)( h & 0x7FFFFFFF );  // 31-bit 양수
@@ -55,7 +55,7 @@ public:
      *  @param jsonlDir   agent 가 관리하는 jsonl 디렉토리 절대 경로.
      *                    listeners.jsonl / trunks.jsonl / routes.jsonl / acl.jsonl / services.jsonl 을 참조.
      */
-    bool Init( const std::string& jsonlDir );
+    bool Init( const std::string &jsonlDir );
 
     /** jsonl 디렉토리가 설정되어 있으면 true. false 면 CSP 는 동적 설정 없이 동작. */
     bool IsJsonlMode() const {
@@ -71,7 +71,7 @@ public:
     /** 현재 메모리 캐시의 items 배열을 JSON 으로 반환 (읽기 전용 복사). */
     SimpleJson::JsonNode GetItems( CspCacheEntity e );
 
-    static const char* EntityName( CspCacheEntity e );
+    static const char *EntityName( CspCacheEntity e );
 
 private:
     struct EntityState {

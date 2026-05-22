@@ -97,7 +97,7 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     // 가입자 매핑. file fallback 모드 (DB 미연결) 에서도 user JSON 에서 직접 읽어 service_binding 채움.
     // 두 필드가 비면 CCscfModule::CheckAuthorization 에서 REGISTER 거부.
     if ( jsonUser.Has( "service_ref" ) ) clsUser.m_strServiceRef = jsonUser.GetString( "service_ref" );
-    if ( jsonUser.Has( "imsi" ) )        clsUser.m_strImsi       = jsonUser.GetString( "imsi" );
+    if ( jsonUser.Has( "imsi" ) ) clsUser.m_strImsi = jsonUser.GetString( "imsi" );
 
     std::string dnd = jsonUser.GetString( "dnd" );
     clsUser.m_bDnd = ( dnd == "true" );

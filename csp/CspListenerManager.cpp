@@ -10,7 +10,7 @@ extern CSipUserAgent gclsUserAgent;
 
 CCspListenerManager gclsListenerManager;
 
-std::string CCspListenerManager::_normalizeProtocol( const std::string& protocol ) const {
+std::string CCspListenerManager::_normalizeProtocol( const std::string &protocol ) const {
     std::string p;
     p.reserve( protocol.size() );
     for ( char c : protocol ) p.push_back( ( c >= 'a' && c <= 'z' ) ? (char)( c - 'a' + 'A' ) : c );
@@ -18,34 +18,34 @@ std::string CCspListenerManager::_normalizeProtocol( const std::string& protocol
     return std::string();  // WS/WSS 등 psip 미지원
 }
 
-bool CCspListenerManager::_shouldManage( const std::string& protocol ) const {
+bool CCspListenerManager::_shouldManage( const std::string &protocol ) const {
     return !_normalizeProtocol( protocol ).empty();
 }
 
-bool CCspListenerManager::_isAlreadyBound( const std::string& protocol, const std::string& ip, int port ) const {
-    auto ipMatch = [&]( const std::string& existIp ) {
+bool CCspListenerManager::_isAlreadyBound( const std::string &protocol, const std::string &ip, int port ) const {
+    auto ipMatch = [&]( const std::string &existIp ) {
         if ( ip == "0.0.0.0" || ip.empty() ) return true;
         if ( existIp == "0.0.0.0" || existIp.empty() ) return true;
         return existIp == ip;
     };
 
     if ( protocol == "UDP" ) {
-        std::vector<CSipStackUdpListener*> v;
+        std::vector<CSipStackUdpListener *> v;
         gclsUserAgent.m_clsSipStack.GetUdpListenerInfo( v );
-        for ( auto* e : v ) {
+        for ( auto *e : v ) {
             if ( e && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
         }
     } else if ( protocol == "TCP" ) {
-        std::vector<CSipStackTcpListener*> v;
+        std::vector<CSipStackTcpListener *> v;
         gclsUserAgent.m_clsSipStack.GetTcpListenerInfo( v );
-        for ( auto* e : v ) {
+        for ( auto *e : v ) {
             if ( e && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
         }
 #ifdef USE_TLS
     } else if ( protocol == "TLS" ) {
-        std::vector<CSipStackTlsListener*> v;
+        std::vector<CSipStackTlsListener *> v;
         gclsUserAgent.m_clsSipStack.GetTlsListenerInfo( v );
-        for ( auto* e : v ) {
+        for ( auto *e : v ) {
             if ( e && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
         }
 #endif
@@ -53,24 +53,24 @@ bool CCspListenerManager::_isAlreadyBound( const std::string& protocol, const st
     return false;
 }
 
-bool CCspListenerManager::_addListenerToStack( const ManagedInfo& m, int& outId ) {
-    const char* pszIp = m.bindIp.empty() ? NULL : m.bindIp.c_str();
+bool CCspListenerManager::_addListenerToStack( const ManagedInfo &m, int &outId ) {
+    const char *pszIp = m.bindIp.empty() ? NULL : m.bindIp.c_str();
     if ( m.protocol == "UDP" ) {
         return gclsUserAgent.m_clsSipStack.AddUdpListener( m.id, pszIp, m.port, m.threadCount, outId );
     } else if ( m.protocol == "TCP" ) {
         return gclsUserAgent.m_clsSipStack.AddTcpListener( m.id, pszIp, m.port, outId );
 #ifdef USE_TLS
     } else if ( m.protocol == "TLS" ) {
-        const char* pszCert = m.tlsCertPath.empty() ? NULL : m.tlsCertPath.c_str();
-        const char* pszKey = m.tlsKeyPath.empty() ? NULL : m.tlsKeyPath.c_str();
-        const char* pszCa = m.tlsCaPath.empty() ? NULL : m.tlsCaPath.c_str();
+        const char *pszCert = m.tlsCertPath.empty() ? NULL : m.tlsCertPath.c_str();
+        const char *pszKey = m.tlsKeyPath.empty() ? NULL : m.tlsKeyPath.c_str();
+        const char *pszCa = m.tlsCaPath.empty() ? NULL : m.tlsCaPath.c_str();
         return gclsUserAgent.m_clsSipStack.AddTlsListener( m.id, pszIp, m.port, pszCert, pszKey, pszCa, outId );
 #endif
     }
     return false;
 }
 
-bool CCspListenerManager::_removeListenerFromStack( const ManagedInfo& m ) {
+bool CCspListenerManager::_removeListenerFromStack( const ManagedInfo &m ) {
     if ( m.protocol == "UDP" ) {
         return gclsUserAgent.m_clsSipStack.RemoveUdpListener( m.id );
     } else if ( m.protocol == "TCP" ) {
@@ -142,10 +142,10 @@ bool CCspListenerManager::Sync() {
 
     std::lock_guard<std::mutex> lk( m_mutex );
     std::set<int> desiredIds;
-    for ( const auto& d : desired ) desiredIds.insert( d.id );
+    for ( const auto &d : desired ) desiredIds.insert( d.id );
 
     std::vector<ManagedInfo> stillManaged;
-    for ( const auto& m : m_vecManaged ) {
+    for ( const auto &m : m_vecManaged ) {
         if ( desiredIds.find( m.id ) != desiredIds.end() ) {
             stillManaged.push_back( m );
             continue;
@@ -159,9 +159,9 @@ bool CCspListenerManager::Sync() {
     }
 
     std::set<int> managedIds;
-    for ( const auto& m : stillManaged ) managedIds.insert( m.id );
+    for ( const auto &m : stillManaged ) managedIds.insert( m.id );
 
-    for ( const auto& d : desired ) {
+    for ( const auto &d : desired ) {
         if ( managedIds.find( d.id ) != managedIds.end() ) continue;
         int iOutId = 0;
         if ( _addListenerToStack( d, iOutId ) ) {
@@ -183,8 +183,8 @@ bool CCspListenerManager::Sync() {
     return true;
 }
 
-void CCspListenerManager::GetManagedIds( std::vector<int>& out ) {
+void CCspListenerManager::GetManagedIds( std::vector<int> &out ) {
     std::lock_guard<std::mutex> lk( m_mutex );
     out.clear();
-    for ( const auto& m : m_vecManaged ) out.push_back( m.id );
+    for ( const auto &m : m_vecManaged ) out.push_back( m.id );
 }

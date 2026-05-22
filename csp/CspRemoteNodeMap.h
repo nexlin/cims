@@ -38,11 +38,11 @@ public:
 
     bool Sync();
 
-    RemoteNodeInfo GetByName( const std::string& name ) const;
-    RemoteNodeInfo GetById( const std::string& id ) const;
+    RemoteNodeInfo GetByName( const std::string &name ) const;
+    RemoteNodeInfo GetById( const std::string &id ) const;
     std::vector<RemoteNodeInfo> GetAll() const;
     size_t Size() const;
-    bool HasName( const std::string& name ) const;
+    bool HasName( const std::string &name ) const;
 
 private:
     mutable std::mutex m_mutex;

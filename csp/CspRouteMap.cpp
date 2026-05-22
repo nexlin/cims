@@ -11,7 +11,7 @@
 CCspRouteMap gclsRouteMap;
 
 namespace {
-    bool _boolish( const std::string& v, bool defTrue ) {
+    bool _boolish( const std::string &v, bool defTrue ) {
         if ( v.empty() ) return defTrue;
         if ( v == "false" || v == "0" ) return false;
         return true;
@@ -98,8 +98,8 @@ bool CCspRouteMap::Sync() {
 void CCspRouteMap::ValidateRefs() {
     std::lock_guard<std::mutex> lk( m_mutex );
     int invalid = 0;
-    for ( auto& kv : m_byName ) {
-        RouteConfig& c = kv.second.cfg;
+    for ( auto &kv : m_byName ) {
+        RouteConfig &c = kv.second.cfg;
         bool lnOk = gclsLocalNodeMap.HasName( c.local_node_ref );
         bool rnOk = gclsRemoteNodeMap.HasName( c.remote_node_ref );
         if ( !lnOk || !rnOk ) {
@@ -116,14 +116,14 @@ void CCspRouteMap::ValidateRefs() {
     }
 }
 
-RouteConfig CCspRouteMap::GetByName( const std::string& name ) const {
+RouteConfig CCspRouteMap::GetByName( const std::string &name ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( name );
     if ( it == m_byName.end() ) return RouteConfig();
     return it->second.cfg;
 }
 
-RouteConfig CCspRouteMap::GetByPair( const std::string& localName, const std::string& remoteName ) const {
+RouteConfig CCspRouteMap::GetByPair( const std::string &localName, const std::string &remoteName ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byPair.find( std::make_pair( localName, remoteName ) );
     if ( it == m_byPair.end() ) return RouteConfig();
@@ -136,7 +136,7 @@ std::vector<RouteConfig> CCspRouteMap::GetAll() const {
     std::lock_guard<std::mutex> lk( m_mutex );
     std::vector<RouteConfig> out;
     out.reserve( m_byName.size() );
-    for ( const auto& kv : m_byName ) out.push_back( kv.second.cfg );
+    for ( const auto &kv : m_byName ) out.push_back( kv.second.cfg );
     return out;
 }
 
@@ -145,7 +145,7 @@ size_t CCspRouteMap::Size() const {
     return m_byName.size();
 }
 
-bool CCspRouteMap::MarkAlive( const std::string& routeName, int rtt_ms ) {
+bool CCspRouteMap::MarkAlive( const std::string &routeName, int rtt_ms ) {
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( routeName );
     if ( it == m_byName.end() ) return false;
@@ -161,7 +161,7 @@ bool CCspRouteMap::MarkAlive( const std::string& routeName, int rtt_ms ) {
     return true;
 }
 
-bool CCspRouteMap::MarkFail( const std::string& routeName ) {
+bool CCspRouteMap::MarkFail( const std::string &routeName ) {
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( routeName );
     if ( it == m_byName.end() ) return false;
@@ -173,7 +173,7 @@ bool CCspRouteMap::MarkFail( const std::string& routeName ) {
     return true;
 }
 
-bool CCspRouteMap::IsAlive( const std::string& routeName ) const {
+bool CCspRouteMap::IsAlive( const std::string &routeName ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( routeName );
     if ( it == m_byName.end() ) return false;

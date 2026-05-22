@@ -28,8 +28,8 @@ public:
      * @param strCallId    SIP Call-ID (짧은 해시용)
      * @return 전체 디렉터리 경로 (mkdir 전)
      */
-    static std::string BuildVoipDir( const std::string& strBaseDir, const std::string& strCaller,
-                                     const std::string& strCallee, const std::string& strCallId ) {
+    static std::string BuildVoipDir( const std::string &strBaseDir, const std::string &strCaller,
+                                     const std::string &strCallee, const std::string &strCallId ) {
         std::string yyyy, mm, dd, hhmmss;
         GetDateTimeParts( yyyy, mm, dd, hhmmss );
 
@@ -49,8 +49,8 @@ public:
      * @param strGroupId   그룹 ID (디렉터리명 보충용)
      * @return 전체 디렉터리 경로
      */
-    static std::string BuildPttDir( const std::string& strBaseDir, const std::string& strCaller,
-                                    const std::string& strGroupId ) {
+    static std::string BuildPttDir( const std::string &strBaseDir, const std::string &strCaller,
+                                    const std::string &strGroupId ) {
         std::string yyyy, mm, dd, hhmmss;
         GetDateTimeParts( yyyy, mm, dd, hhmmss );
 
@@ -64,8 +64,8 @@ public:
     /**
      * @brief 메시지 로그 디렉터리 경로 생성
      */
-    static std::string BuildMsgLogDir( const std::string& strBaseDir, const std::string& strCaller,
-                                       const std::string& strCallee, const std::string& strCallId ) {
+    static std::string BuildMsgLogDir( const std::string &strBaseDir, const std::string &strCaller,
+                                       const std::string &strCallee, const std::string &strCallId ) {
         std::string yyyy, mm, dd, hhmmss;
         GetDateTimeParts( yyyy, mm, dd, hhmmss );
 
@@ -82,7 +82,7 @@ public:
     }
 
     /** @brief 재귀적 디렉터리 생성 */
-    static bool MkdirRecursive( const std::string& path ) {
+    static bool MkdirRecursive( const std::string &path ) {
         struct stat st;
         if ( stat( path.c_str(), &st ) == 0 ) return true;
         size_t pos = path.rfind( '/' );
@@ -93,7 +93,7 @@ public:
     }
 
 private:
-    static void GetDateTimeParts( std::string& yyyy, std::string& mm, std::string& dd, std::string& hhmmss ) {
+    static void GetDateTimeParts( std::string &yyyy, std::string &mm, std::string &dd, std::string &hhmmss ) {
         time_t now = time( nullptr );
         struct tm t;
         localtime_r( &now, &t );
@@ -108,13 +108,13 @@ private:
         hhmmss = buf;
     }
 
-    static std::string CallerPrefix( const std::string& caller ) {
+    static std::string CallerPrefix( const std::string &caller ) {
         std::string s = Sanitize( caller, 20 );
         if ( s.size() <= 2 ) return s;
         return s.substr( 0, s.size() - 2 );
     }
 
-    static std::string Sanitize( const std::string& s, int maxLen ) {
+    static std::string Sanitize( const std::string &s, int maxLen ) {
         std::string r;
         r.reserve( s.size() );
         for ( char c : s ) {

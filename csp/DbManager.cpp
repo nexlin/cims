@@ -27,8 +27,8 @@ CDbManager::~CDbManager() {
 //  연결 관리
 // ─────────────────────────────────────────────
 
-bool CDbManager::Connect( const std::string& strHost, const std::string& strUser, const std::string& strPasswd,
-                          const std::string& strDb, int iPort ) {
+bool CDbManager::Connect( const std::string &strHost, const std::string &strUser, const std::string &strPasswd,
+                          const std::string &strDb, int iPort ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
 
     m_strHost = strHost;
@@ -89,7 +89,7 @@ bool CDbManager::Reconnect() {
 //  내부 유틸
 // ─────────────────────────────────────────────
 
-bool CDbManager::ExecuteQuery( const std::string& strSql ) {
+bool CDbManager::ExecuteQuery( const std::string &strSql ) {
     if ( !m_pMysql ) return false;
     if ( mysql_query( m_pMysql, strSql.c_str() ) != 0 ) {
         CLog::Print( LOG_ERROR, "[DB] Query error: %s | SQL: %s", mysql_error( m_pMysql ), strSql.c_str() );
@@ -98,7 +98,7 @@ bool CDbManager::ExecuteQuery( const std::string& strSql ) {
     return true;
 }
 
-MYSQL_RES* CDbManager::ExecuteSelect( const std::string& strSql ) {
+MYSQL_RES *CDbManager::ExecuteSelect( const std::string &strSql ) {
     if ( !m_pMysql ) return nullptr;
     if ( mysql_query( m_pMysql, strSql.c_str() ) != 0 ) {
         CLog::Print( LOG_ERROR, "[DB] Select error: %s | SQL: %s", mysql_error( m_pMysql ), strSql.c_str() );
@@ -107,7 +107,7 @@ MYSQL_RES* CDbManager::ExecuteSelect( const std::string& strSql ) {
     return mysql_store_result( m_pMysql );
 }
 
-std::string CDbManager::Escape( const std::string& str ) {
+std::string CDbManager::Escape( const std::string &str ) {
     if ( !m_pMysql ) return str;
     std::string out( str.size() * 2 + 1, '\0' );
     unsigned long len = mysql_real_escape_string( m_pMysql, &out[0], str.c_str(), str.size() );
@@ -119,7 +119,7 @@ std::string CDbManager::Escape( const std::string& str ) {
 //  User operations
 // ─────────────────────────────────────────────
 
-bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser ) {
+bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
@@ -132,7 +132,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser ) {
         "WHERE cu.id='" +
         Escape( strUserId ) + "'";
 
-    MYSQL_RES* pRes = ExecuteSelect( strSql );
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return false;
 
     std::string strServiceType = "volte";
@@ -188,7 +188,7 @@ bool CDbManager::SelectUser( const std::string& strUserId, CspUser& clsUser ) {
     return true;
 }
 
-bool CDbManager::UpdateRegisterTime( const std::string& strUserId ) {
+bool CDbManager::UpdateRegisterTime( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
@@ -197,7 +197,7 @@ bool CDbManager::UpdateRegisterTime( const std::string& strUserId ) {
     return true;
 }
 
-bool CDbManager::UpdateLogoutTime( const std::string& strUserId ) {
+bool CDbManager::UpdateLogoutTime( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
@@ -210,7 +210,7 @@ bool CDbManager::UpdateLogoutTime( const std::string& strUserId ) {
 //  Group operations
 // ─────────────────────────────────────────────
 
-bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGroup ) {
+bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGroup ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
@@ -222,7 +222,7 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
         "FROM ptt_groups WHERE id='" +
         Escape( strGroupId ) + "'";
 
-    MYSQL_RES* pRes = ExecuteSelect( strSql );
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return false;
 
     MYSQL_ROW row = mysql_fetch_row( pRes );
@@ -267,13 +267,13 @@ bool CDbManager::SelectGroup( const std::string& strGroupId, CspPttGroup& clsGro
     return true;
 }
 
-bool CDbManager::LoadAllUsers( CspUserMap& clsMap ) {
+bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
     int count = 0;
-    const char* aTables[] = { "volte_subscriptions", "ptt_subscriptions" };
-    const char* aTypes[] = { "volte", "ptt" };
+    const char *aTables[] = { "volte_subscriptions", "ptt_subscriptions" };
+    const char *aTypes[] = { "volte", "ptt" };
 
     for ( int i = 0; i < 2; ++i ) {
         // v3 (2026-04-22): service_id INT → service_ref VARCHAR (access_services.name 참조)
@@ -283,7 +283,7 @@ bool CDbManager::LoadAllUsers( CspUserMap& clsMap ) {
                                  "FROM " ) +
                              aTables[i] + " s JOIN users u ON s.user_id = u.id";
 
-        MYSQL_RES* pRes = ExecuteSelect( strSql );
+        MYSQL_RES *pRes = ExecuteSelect( strSql );
         if ( !pRes ) continue;
 
         MYSQL_ROW row;
@@ -311,12 +311,12 @@ bool CDbManager::LoadAllUsers( CspUserMap& clsMap ) {
     return count > 0;
 }
 
-bool CDbManager::SelectGroupsByUser( const std::string& strUserId, std::vector<std::string>& vecGroupIds ) {
+bool CDbManager::SelectGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
     std::string strSql = "SELECT group_id FROM ptt_group_members WHERE user_id='" + Escape( strUserId ) + "'";
-    MYSQL_RES* pRes = ExecuteSelect( strSql );
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return false;
 
     MYSQL_ROW row;
@@ -327,12 +327,12 @@ bool CDbManager::SelectGroupsByUser( const std::string& strUserId, std::vector<s
     return true;
 }
 
-bool CDbManager::LoadAllGroups( CGroupMap& clsMap ) {
+bool CDbManager::LoadAllGroups( CGroupMap &clsMap ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
     // 전체 그룹 ID 목록 조회
-    MYSQL_RES* pRes = ExecuteSelect( "SELECT id FROM ptt_groups" );
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT id FROM ptt_groups" );
     if ( !pRes ) return false;
 
     std::vector<std::string> vecGroupIds;
@@ -344,7 +344,7 @@ bool CDbManager::LoadAllGroups( CGroupMap& clsMap ) {
 
     // 그룹별 멤버 로드 및 맵 삽입
     clsMap.Clear();
-    for ( const auto& strId : vecGroupIds ) {
+    for ( const auto &strId : vecGroupIds ) {
         CspPttGroup clsGroup;
         if ( SelectGroup( strId, clsGroup ) ) {
             clsMap.Insert( clsGroup );
@@ -373,7 +373,8 @@ static std::string TimeToSql( time_t t ) {
 //   CspServer 의 CCallDir 가 파일 작성, CSC 의 /api/v1/call/logs 가 파일 스캔.
 //   아래 DbManager 함수들은 레거시 호환 no-op (빌드/링크 유지용).
 
-bool CDbManager::InsertCallLog( const std::string&, bool, const std::string&, const std::string&, const std::string& ) {
+bool CDbManager::InsertCallLog( const std::string &, bool, const std::string &, const std::string &,
+                                const std::string & ) {
     return true;  // no-op, file-based CallDir 가 담당
 }
 
@@ -381,54 +382,54 @@ int CDbManager::GetActiveVoipCallCount() {
     return 0;  // no-op, 파일 기반 조회는 CSC 가 수행
 }
 
-bool CDbManager::UpdateCallLogActive( const std::string& ) {
+bool CDbManager::UpdateCallLogActive( const std::string & ) {
     return true;
 }
 
-bool CDbManager::UpdateCallLogEnded( const std::string&, time_t, time_t, int ) {
+bool CDbManager::UpdateCallLogEnded( const std::string &, time_t, time_t, int ) {
     return true;  // no-op
 }
 
-bool CDbManager::HasActiveGroupCall( const std::string& ) {
+bool CDbManager::HasActiveGroupCall( const std::string & ) {
     return false;  // no-op, 그룹 상태는 GroupCallService 내 메모리/파일 기반
 }
 
-bool CDbManager::UpdateCallLogActivePtt( const std::string& ) {
+bool CDbManager::UpdateCallLogActivePtt( const std::string & ) {
     return true;
 }
 
-bool CDbManager::EndGroupCallLog( const std::string& ) {
+bool CDbManager::EndGroupCallLog( const std::string & ) {
     return true;
 }
 
-bool CDbManager::InsertRecording( const std::string&, const std::string&, const std::string&, const std::string&,
-                                  const std::string&, const std::string&, bool ) {
+bool CDbManager::InsertRecording( const std::string &, const std::string &, const std::string &, const std::string &,
+                                  const std::string &, const std::string &, bool ) {
     // v3 후속: recordings 메타데이터는 파일 기반 (CallDir 의 call.json + recordings/ 디렉토리).
     // CSC `/api/v1/recordings` 가 파일 스캔으로 응답. DB 기록 no-op.
     return true;
 }
 
 // v3: 참가자 기록은 파일 (participants.jsonl) 기반 SOT.
-bool CDbManager::InsertParticipant( const std::string&, const std::string&, const std::string&, bool ) {
+bool CDbManager::InsertParticipant( const std::string &, const std::string &, const std::string &, bool ) {
     return true;
 }
-bool CDbManager::InsertGroupParticipant( const std::string&, const std::string& ) {
+bool CDbManager::InsertGroupParticipant( const std::string &, const std::string & ) {
     return true;
 }
-bool CDbManager::UpdateParticipantJoined( const std::string&, const std::string& ) {
+bool CDbManager::UpdateParticipantJoined( const std::string &, const std::string & ) {
     return true;
 }
-bool CDbManager::UpdateParticipantLeft( const std::string&, const std::string& ) {
+bool CDbManager::UpdateParticipantLeft( const std::string &, const std::string & ) {
     return true;
 }
 
-int CDbManager::IncrementSessionSeq( const std::string& strGroupId ) {
+int CDbManager::IncrementSessionSeq( const std::string &strGroupId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return 1;
 
     ExecuteQuery( "UPDATE ptt_groups SET session_seq = session_seq + 1 WHERE id='" + Escape( strGroupId ) + "'" );
 
-    MYSQL_RES* pRes = ExecuteSelect( "SELECT session_seq FROM ptt_groups WHERE id='" + Escape( strGroupId ) + "'" );
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT session_seq FROM ptt_groups WHERE id='" + Escape( strGroupId ) + "'" );
     if ( !pRes ) return 1;
     MYSQL_ROW row = mysql_fetch_row( pRes );
     int seq = row && row[0] ? atoi( row[0] ) : 1;

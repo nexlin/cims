@@ -9,7 +9,7 @@
 CspAclPolicyEngine gclsAclPolicyEngine;
 
 namespace {
-    bool _boolish( const std::string& v, bool defTrue ) {
+    bool _boolish( const std::string &v, bool defTrue ) {
         if ( v.empty() ) return defTrue;
         if ( v == "false" || v == "0" ) return false;
         return true;
@@ -39,7 +39,7 @@ bool CspAclPolicyEngine::Sync() {
             newList.push_back( p );
         }
     }
-    std::sort( newList.begin(), newList.end(), []( const Policy& a, const Policy& b ) {
+    std::sort( newList.begin(), newList.end(), []( const Policy &a, const Policy &b ) {
         if ( a.priority != b.priority ) return a.priority < b.priority;
         return a.name < b.name;
     } );
@@ -56,15 +56,15 @@ size_t CspAclPolicyEngine::Size() const {
     return m_policies.size();
 }
 
-AclDecision CspAclPolicyEngine::Check( const MessageCtx& ctx, const std::string& local_node_name,
-                                       const std::string& route_name, const std::string& route_set_name ) {
+AclDecision CspAclPolicyEngine::Check( const MessageCtx &ctx, const std::string &local_node_name,
+                                       const std::string &route_name, const std::string &route_set_name ) {
     std::vector<Policy> snapshot;
     {
         std::lock_guard<std::mutex> lk( m_mutex );
         snapshot = m_policies;
     }
 
-    for ( const auto& p : snapshot ) {
+    for ( const auto &p : snapshot ) {
         if ( !p.enabled ) continue;
 
         // scope 필터링

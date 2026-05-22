@@ -10,7 +10,7 @@
 CspRoutingPolicyEngine gclsRoutingPolicyEngine;
 
 namespace {
-    bool _boolish( const std::string& v, bool defTrue ) {
+    bool _boolish( const std::string &v, bool defTrue ) {
         if ( v.empty() ) return defTrue;
         if ( v == "false" || v == "0" ) return false;
         return true;
@@ -46,7 +46,7 @@ bool CspRoutingPolicyEngine::Sync() {
             newList.push_back( p );
         }
     }
-    std::sort( newList.begin(), newList.end(), []( const Policy& a, const Policy& b ) {
+    std::sort( newList.begin(), newList.end(), []( const Policy &a, const Policy &b ) {
         if ( a.priority != b.priority ) return a.priority < b.priority;
         return a.name < b.name;
     } );
@@ -63,14 +63,14 @@ size_t CspRoutingPolicyEngine::Size() const {
     return m_policies.size();
 }
 
-RoutingDecision CspRoutingPolicyEngine::Decide( const MessageCtx& ctx, const std::string& hashKey ) {
+RoutingDecision CspRoutingPolicyEngine::Decide( const MessageCtx &ctx, const std::string &hashKey ) {
     std::vector<Policy> snapshot;
     {
         std::lock_guard<std::mutex> lk( m_mutex );
         snapshot = m_policies;  // priority 순 정렬된 상태
     }
 
-    for ( const auto& p : snapshot ) {
+    for ( const auto &p : snapshot ) {
         if ( !p.enabled ) continue;
 
         // 1) RuleSet match 확인 (빈 ref 면 catch-all = true)

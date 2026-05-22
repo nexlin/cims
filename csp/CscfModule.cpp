@@ -24,7 +24,7 @@
 #include "UserMap.h"
 
 extern CSipUserAgent gclsUserAgent;
-extern void SendInitialNotify( const SubscriptionInfo& sub );
+extern void SendInitialNotify( const SubscriptionInfo &sub );
 
 bool CCscfModule::IsEnabled() const {
     return gclsSetup.m_bRoleCscf;
@@ -34,7 +34,7 @@ bool CCscfModule::IsEnabled() const {
 //  인증 헬퍼 (static)
 // ──────────────────────────────────────────────────────────────
 
-bool CCscfModule::AddChallenge( CSipMessage* psttResponse, const std::string& strRealmOverride ) {
+bool CCscfModule::AddChallenge( CSipMessage *psttResponse, const std::string &strRealmOverride ) {
     CSipChallenge clsChallenge;
     char szNonce[33];
 
@@ -60,8 +60,8 @@ bool CCscfModule::AddChallenge( CSipMessage* psttResponse, const std::string& st
     return true;
 }
 
-bool CCscfModule::SendUnAuthorizedResponse( CSipMessage* pclsMessage, const std::string& strRealmOverride ) {
-    CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
+bool CCscfModule::SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride ) {
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
     if ( pclsResponse == NULL ) return false;
 
     AddChallenge( pclsResponse, strRealmOverride );
@@ -69,10 +69,10 @@ bool CCscfModule::SendUnAuthorizedResponse( CSipMessage* pclsMessage, const std:
     return true;
 }
 
-bool CCscfModule::CheckAuthorizationResponse( const char* pszUserName, const char* pszRealm, const char* pszNonce,
-                                              const char* pszUri, const char* pszResponse, const char* pszPassWord,
-                                              const char* pszMethod, const char* pszQop, const char* pszNc,
-                                              const char* pszCnonce ) {
+bool CCscfModule::CheckAuthorizationResponse( const char *pszUserName, const char *pszRealm, const char *pszNonce,
+                                              const char *pszUri, const char *pszResponse, const char *pszPassWord,
+                                              const char *pszMethod, const char *pszQop, const char *pszNc,
+                                              const char *pszCnonce ) {
     char szA1[301], szA2[201], szMd5[33], szResponse[1024];
 
     snprintf( szA1, sizeof( szA1 ), "%s:%s:%s", pszUserName, pszRealm, pszPassWord );
@@ -100,8 +100,8 @@ bool CCscfModule::CheckAuthorizationResponse( const char* pszUserName, const cha
     return true;
 }
 
-ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential* pclsCredential, const char* pszFromId,
-                                                  const char* pszMethod, CspUser& clsXmlUser ) {
+ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential, const char *pszFromId,
+                                                  const char *pszMethod, CspUser &clsXmlUser ) {
     if ( pclsCredential->m_strUserName.empty() ) return E_AUTH_ERROR;
     if ( gclsNonceMap.Select( pclsCredential->m_strNonce.c_str() ) == false ) return E_AUTH_NONCE_NOT_FOUND;
     if ( gclsCspUserMap.Select( pszFromId, clsXmlUser ) == false ) return E_AUTH_ERROR;
@@ -143,9 +143,9 @@ ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential* pclsCredential
         return E_AUTH_ERROR;
     }
 
-    const char* pszQop = pclsCredential->m_strQop.empty() ? NULL : pclsCredential->m_strQop.c_str();
-    const char* pszNc = pclsCredential->m_strNonceCount.empty() ? NULL : pclsCredential->m_strNonceCount.c_str();
-    const char* pszCnonce = pclsCredential->m_strCnonce.empty() ? NULL : pclsCredential->m_strCnonce.c_str();
+    const char *pszQop = pclsCredential->m_strQop.empty() ? NULL : pclsCredential->m_strQop.c_str();
+    const char *pszNc = pclsCredential->m_strNonceCount.empty() ? NULL : pclsCredential->m_strNonceCount.c_str();
+    const char *pszCnonce = pclsCredential->m_strCnonce.empty() ? NULL : pclsCredential->m_strCnonce.c_str();
 
     if ( CheckAuthorizationResponse( pclsCredential->m_strUserName.c_str(), pclsCredential->m_strRealm.c_str(),
                                      pclsCredential->m_strNonce.c_str(), pclsCredential->m_strUri.c_str(),
@@ -156,7 +156,7 @@ ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential* pclsCredential
     return E_AUTH_OK;
 }
 
-bool CCscfModule::CheckAuthrization( CSipMessage* pclsMessage ) {
+bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
     SIP_CREDENTIAL_LIST::iterator itCL = pclsMessage->m_clsAuthorizationList.begin();
 
     if ( itCL == pclsMessage->m_clsAuthorizationList.end() ) {
@@ -173,7 +173,7 @@ bool CCscfModule::CheckAuthrization( CSipMessage* pclsMessage ) {
             SendUnAuthorizedResponse( pclsMessage );
             return false;
         case E_AUTH_ERROR: {
-            CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+            CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
             if ( pclsResponse ) gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
         }
             return false;
@@ -189,8 +189,8 @@ bool CCscfModule::CheckAuthrization( CSipMessage* pclsMessage ) {
 //  SendResponse 헬퍼
 // ──────────────────────────────────────────────────────────────
 
-bool CCscfModule::SendResponse( CSipMessage* pclsMessage, int iStatusCode ) {
-    CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( iStatusCode );
+bool CCscfModule::SendResponse( CSipMessage *pclsMessage, int iStatusCode ) {
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatusCode );
     if ( pclsResponse == NULL ) return false;
 
     gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
@@ -201,7 +201,7 @@ bool CCscfModule::SendResponse( CSipMessage* pclsMessage, int iStatusCode ) {
 //  OnSipRequest — REGISTER, SUBSCRIBE 처리
 // ──────────────────────────────────────────────────────────────
 
-bool CCscfModule::OnSipRequest( int iThreadId, CSipMessage* pclsMessage ) {
+bool CCscfModule::OnSipRequest( int iThreadId, CSipMessage *pclsMessage ) {
     if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
         return RecvRequestRegister( iThreadId, pclsMessage );
     } else if ( pclsMessage->IsMethod( "SUBSCRIBE" ) ) {
@@ -214,10 +214,10 @@ bool CCscfModule::OnSipRequest( int iThreadId, CSipMessage* pclsMessage ) {
 //  REGISTER 처리
 // ──────────────────────────────────────────────────────────────
 
-bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage ) {
+bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
     if ( pclsMessage->m_iExpires > 0 && gclsSetup.m_iMinRegisterTimeout != 0 ) {
         if ( pclsMessage->m_iExpires < gclsSetup.m_iMinRegisterTimeout ) {
-            CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_INTERVAL_TOO_BRIEF );
+            CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_INTERVAL_TOO_BRIEF );
             if ( pclsResponse == NULL ) return false;
             pclsResponse->AddHeader( "Min-Expires", gclsSetup.m_iMinRegisterTimeout );
             gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
@@ -261,7 +261,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage )
     // REGISTER
     CSipFrom clsContact;
     if ( gclsUserMap.Insert( pclsMessage, &clsContact, &clsUser ) ) {
-        CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
+        CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
         if ( pclsResponse == NULL ) return false;
 
         pclsResponse->m_clsContactList.push_back( clsContact );
@@ -287,7 +287,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage )
 
         {
             char szPAUri[512];
-            const std::string& strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+            const std::string &strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
             snprintf( szPAUri, sizeof( szPAUri ), "<sip:%s@%s>", strUser.c_str(), strRegDomain.c_str() );
             pclsResponse->AddHeader( "P-Associated-URI", szPAUri );
             // P-Asserted-Identity (3GPP TS 24.229 §5.4.3.2) — 인증된 사용자 신원
@@ -309,14 +309,14 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage )
             if ( gclsDbManager.IsConnected() ) {
                 std::vector<std::string> vecGroupIds;
                 gclsDbManager.SelectGroupsByUser( strUserId, vecGroupIds );
-                for ( const auto& gid : vecGroupIds ) {
+                for ( const auto &gid : vecGroupIds ) {
                     CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s) [DB]",
                                  strUserId.c_str(), gid.c_str() );
                     gclsGroupCallService.InviteMember( strUserId.c_str(), gid.c_str() );
                 }
             } else {
-                gclsGroupMap.IterateInternal( [&strUserId]( const CspPttGroup& group ) {
-                    for ( const auto& pUser : group._pusers ) {
+                gclsGroupMap.IterateInternal( [&strUserId]( const CspPttGroup &group ) {
+                    for ( const auto &pUser : group._pusers ) {
                         if ( pUser && pUser->_id == strUserId ) {
                             CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s) [map]",
                                          strUserId.c_str(), group._id.c_str() );
@@ -338,7 +338,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage* pclsMessage )
 //  SUBSCRIBE 처리
 // ──────────────────────────────────────────────────────────────
 
-bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage* pclsMessage ) {
+bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage ) {
     char szFromBuf[256];
     pclsMessage->m_clsFrom.m_clsUri.ToString( szFromBuf, sizeof( szFromBuf ) );
     CLog::Print( LOG_DEBUG, "RecvRequest: SUBSCRIBE From=%s", szFromBuf );
@@ -403,7 +403,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage* pclsMessage 
 
     gclsSubscriptionManager.AddSubscription( strReqUri, info );
 
-    CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
     if ( pclsResponse ) {
         pclsResponse->m_clsTo.InsertParam( SIP_TAG, szToTag );
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );

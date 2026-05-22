@@ -2,7 +2,7 @@
 
 CCspPendingRouteMap gclsPendingRouteMap;
 
-void CCspPendingRouteMap::Insert( const std::string& callId, const PendingRouteEntry& entry ) {
+void CCspPendingRouteMap::Insert( const std::string &callId, const PendingRouteEntry &entry ) {
     if ( callId.empty() ) return;
     PendingRouteEntry e = entry;
     e.created = std::chrono::steady_clock::now();
@@ -10,7 +10,7 @@ void CCspPendingRouteMap::Insert( const std::string& callId, const PendingRouteE
     m_map[callId] = e;
 }
 
-bool CCspPendingRouteMap::Take( const std::string& callId, PendingRouteEntry& outEntry ) {
+bool CCspPendingRouteMap::Take( const std::string &callId, PendingRouteEntry &outEntry ) {
     if ( callId.empty() ) return false;
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_map.find( callId );
@@ -20,13 +20,13 @@ bool CCspPendingRouteMap::Take( const std::string& callId, PendingRouteEntry& ou
     return true;
 }
 
-bool CCspPendingRouteMap::Has( const std::string& callId ) const {
+bool CCspPendingRouteMap::Has( const std::string &callId ) const {
     if ( callId.empty() ) return false;
     std::lock_guard<std::mutex> lk( m_mutex );
     return m_map.find( callId ) != m_map.end();
 }
 
-void CCspPendingRouteMap::Erase( const std::string& callId ) {
+void CCspPendingRouteMap::Erase( const std::string &callId ) {
     if ( callId.empty() ) return;
     std::lock_guard<std::mutex> lk( m_mutex );
     m_map.erase( callId );

@@ -45,8 +45,8 @@
 
 CModuleDispatcher gclsDispatcher;
 
-extern void SendSipNotify( const std::string& uri, const std::string& etag, const std::string& action );
-extern void SendInitialNotify( const SubscriptionInfo& sub );
+extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
+extern void SendInitialNotify( const SubscriptionInfo &sub );
 
 // ──────────────────────────────────────────────────────────────
 //  Constructor / Destructor
@@ -67,7 +67,7 @@ void CModuleDispatcher::InitModules() {
                  m_clsPttAs.IsEnabled() ? "ON" : "OFF", m_clsIbcf.IsEnabled() ? "ON" : "OFF" );
 }
 
-bool CModuleDispatcher::Start( CSipStackSetup& clsSetup ) {
+bool CModuleDispatcher::Start( CSipStackSetup &clsSetup ) {
     // G10 (2026-04-23): SipServerMap (legacy IBCF XML) 제거. routing_policies/routes/
     //   remote_nodes 체계가 SOT. REGISTER_TO_REMOTE 는 별도 워커로 이관 예정.
 
@@ -88,14 +88,14 @@ bool CModuleDispatcher::Start( CSipStackSetup& clsSetup ) {
 //  Call ownership tracking
 // ──────────────────────────────────────────────────────────────
 
-void CModuleDispatcher::SetCallOwner( const char* pszCallId, IModule* pModule ) {
+void CModuleDispatcher::SetCallOwner( const char *pszCallId, IModule *pModule ) {
     m_clsOwnerMutex.acquire();
     m_mapCallOwner[pszCallId] = pModule;
     m_clsOwnerMutex.release();
 }
 
-IModule* CModuleDispatcher::GetCallOwner( const char* pszCallId ) {
-    IModule* pOwner = NULL;
+IModule *CModuleDispatcher::GetCallOwner( const char *pszCallId ) {
+    IModule *pOwner = NULL;
     m_clsOwnerMutex.acquire();
     auto it = m_mapCallOwner.find( pszCallId );
     if ( it != m_mapCallOwner.end() ) pOwner = it->second;
@@ -103,7 +103,7 @@ IModule* CModuleDispatcher::GetCallOwner( const char* pszCallId ) {
     return pOwner;
 }
 
-void CModuleDispatcher::RemoveCallOwner( const char* pszCallId ) {
+void CModuleDispatcher::RemoveCallOwner( const char *pszCallId ) {
     m_clsOwnerMutex.acquire();
     m_mapCallOwner.erase( pszCallId );
     m_clsOwnerMutex.release();
@@ -113,13 +113,13 @@ void CModuleDispatcher::RemoveCallOwner( const char* pszCallId ) {
 //  Proxy call tracking
 // ──────────────────────────────────────────────────────────────
 
-void CModuleDispatcher::SetProxyCall( const std::string& strCallId, const ProxyCallInfo& info ) {
+void CModuleDispatcher::SetProxyCall( const std::string &strCallId, const ProxyCallInfo &info ) {
     m_clsProxyMutex.acquire();
     m_mapProxyCall[strCallId] = info;
     m_clsProxyMutex.release();
 }
 
-bool CModuleDispatcher::GetProxyCall( const std::string& strCallId, ProxyCallInfo& info ) {
+bool CModuleDispatcher::GetProxyCall( const std::string &strCallId, ProxyCallInfo &info ) {
     bool bFound = false;
     m_clsProxyMutex.acquire();
     auto it = m_mapProxyCall.find( strCallId );
@@ -131,7 +131,7 @@ bool CModuleDispatcher::GetProxyCall( const std::string& strCallId, ProxyCallInf
     return bFound;
 }
 
-void CModuleDispatcher::RemoveProxyCall( const std::string& strCallId ) {
+void CModuleDispatcher::RemoveProxyCall( const std::string &strCallId ) {
     m_clsProxyMutex.acquire();
     m_mapProxyCall.erase( strCallId );
     m_clsProxyMutex.release();
@@ -141,21 +141,21 @@ void CModuleDispatcher::RemoveProxyCall( const std::string& strCallId ) {
 //  Shared helpers
 // ──────────────────────────────────────────────────────────────
 
-bool CModuleDispatcher::SendResponse( CSipMessage* pclsMessage, int iStatusCode ) {
-    CSipMessage* pclsResponse = pclsMessage->CreateResponseWithToTag( iStatusCode );
+bool CModuleDispatcher::SendResponse( CSipMessage *pclsMessage, int iStatusCode ) {
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatusCode );
     if ( pclsResponse == NULL ) return false;
 
     gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
     return true;
 }
 
-void CModuleDispatcher::StopCall( const char* pszCallId, int iResponseCode ) {
+void CModuleDispatcher::StopCall( const char *pszCallId, int iResponseCode ) {
     CLog::Print( LOG_DEBUG, "StopCall: CallId=%s Code=%d", pszCallId, iResponseCode );
     OnCallEnded( pszCallId, iResponseCode );
     gclsUserAgent.StopCall( pszCallId, iResponseCode );
 }
 
-void CModuleDispatcher::OnCallEnded( const char* pszCallId, int iSipStatus ) {
+void CModuleDispatcher::OnCallEnded( const char *pszCallId, int iSipStatus ) {
     // 기존 CDR CSV 파일은 제거됨 (service_log 로 대체). DB + service_log 종료 기록만 남김.
     CSipCdr clsCdr;
     if ( !gclsUserAgent.GetCdr( pszCallId, &clsCdr ) ) return;
@@ -178,7 +178,7 @@ void CModuleDispatcher::OnCallEnded( const char* pszCallId, int iSipStatus ) {
 //  순서: ModuleDispatcher (1st) → CSipUserAgent (2nd)
 // ──────────────────────────────────────────────────────────────
 
-bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage* pclsMessage ) {
+bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     std::string strCallId;
     pclsMessage->GetCallId( strCallId );
 
@@ -213,7 +213,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage* pclsMessage ) {
     // OPTIONS → 표준 200 OK 자동 응답 (RFC 3261 §11.2).
     //   트렁크 헬스체크(상대 CSP/Kamailio 등)용. 본 프로세스의 capability 를 간소히 알림.
     if ( pclsMessage->IsMethod( SIP_METHOD_OPTIONS ) ) {
-        CSipMessage* pclsResp = pclsMessage->CreateResponse( SIP_OK );
+        CSipMessage *pclsResp = pclsMessage->CreateResponse( SIP_OK );
         if ( pclsResp ) {
             pclsResp->AddHeader( "Allow",
                                  "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, MESSAGE, REFER" );
@@ -313,7 +313,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage* pclsMessage ) {
             }
 
             // 서비스 모드 체크
-            const std::string& mode = gclsSetup.m_strServiceMode;
+            const std::string &mode = gclsSetup.m_strServiceMode;
             if ( mode == "ptt" ) {
                 SendResponse( pclsMessage, SIP_FORBIDDEN );
                 return true;
@@ -327,7 +327,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage* pclsMessage ) {
     return false;
 }
 
-bool CModuleDispatcher::RecvResponse( int iThreadId, CSipMessage* pclsMessage ) {
+bool CModuleDispatcher::RecvResponse( int iThreadId, CSipMessage *pclsMessage ) {
     // v3 (2026-04-22): OPTIONS 헬스체크는 RouteSet 의 health_check 가 담당하도록 이관 예정.
     //   현 스테이지는 헬스체크 송신/수신 자체를 아직 구현 안함.
     (void)iThreadId;
@@ -335,7 +335,7 @@ bool CModuleDispatcher::RecvResponse( int iThreadId, CSipMessage* pclsMessage ) 
     return false;
 }
 
-bool CModuleDispatcher::SendTimeout( int iThreadId, CSipMessage* pclsMessage ) {
+bool CModuleDispatcher::SendTimeout( int iThreadId, CSipMessage *pclsMessage ) {
     return false;
 }
 
@@ -343,18 +343,18 @@ bool CModuleDispatcher::SendTimeout( int iThreadId, CSipMessage* pclsMessage ) {
 //  ISipStackSecurityCallBack
 // ──────────────────────────────────────────────────────────────
 
-bool CModuleDispatcher::IsAllowUserAgent( const char* pszSipUserAgent ) {
+bool CModuleDispatcher::IsAllowUserAgent( const char *pszSipUserAgent ) {
     return gclsSetup.IsAllowUserAgent( pszSipUserAgent );
 }
 
-bool CModuleDispatcher::IsDenyUserAgent( const char* pszSipUserAgent ) {
+bool CModuleDispatcher::IsDenyUserAgent( const char *pszSipUserAgent ) {
     return gclsSetup.IsDenyUserAgent( pszSipUserAgent );
 }
 
-bool CModuleDispatcher::IsAllowIp( const char* pszIp ) {
+bool CModuleDispatcher::IsAllowIp( const char *pszIp ) {
     return true;
 }
-bool CModuleDispatcher::IsDenyIp( const char* pszIp ) {
+bool CModuleDispatcher::IsDenyIp( const char *pszIp ) {
     return false;
 }
 
@@ -363,14 +363,14 @@ bool CModuleDispatcher::IsDenyIp( const char* pszIp ) {
 //  (CSipUserAgent 가 return false 된 INVITE 를 B2BUA 처리 후 호출)
 // ──────────────────────────────────────────────────────────────
 
-void CModuleDispatcher::EventRegister( CSipServerInfo* pclsInfo, int iStatus ) {
+void CModuleDispatcher::EventRegister( CSipServerInfo *pclsInfo, int iStatus ) {
     // G10 (2026-04-23): IBCF XML 기반 outbound REGISTER 상태 업데이트 제거.
     //   routes.register_to_remote 워커가 이관 예정 (현재 미구현).
     (void)pclsInfo;
     (void)iStatus;
 }
 
-bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage* pclsMessage ) {
+bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
     std::string strIp;
     int iPort;
     CUserInfo clsUserInfo;
@@ -418,8 +418,8 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage* pclsMessage ) {
     return true;
 }
 
-void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* pszFrom, const char* pszTo,
-                                           CSipCallRtp* pclsRtp, CSipMessage* pclsMessage ) {
+void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo,
+                                           CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
     CLog::Print( LOG_DEBUG, "EventIncomingCall: CallId=%s From=%s To=%s", pszCallId, pszFrom, pszTo );
     CspUser clsUser;
     CUserInfo clsUserInfo;
@@ -440,7 +440,7 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
     {
         CspUser clsFromUser;
         bool bFromKnown = gclsCspUserMap.isAlive( pszFrom, clsFromUser );
-        const std::string& mode = gclsSetup.m_strServiceMode;
+        const std::string &mode = gclsSetup.m_strServiceMode;
         if ( mode == "ptt" ) return StopCall( pszCallId, SIP_FORBIDDEN );
         if ( bFromKnown && !clsFromUser.m_strServiceType.empty() && clsFromUser.m_strServiceType == "ptt" )
             return StopCall( pszCallId, SIP_FORBIDDEN );
@@ -477,9 +477,8 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
             if ( !pe.local_node_ref.empty() ) {
                 LocalNodeInfo ln = gclsLocalNodeMap.GetByName( pe.local_node_ref );
                 if ( ln.IsValid() ) {
-                    strOutboundLocalIp = ( ln.bind_ip.empty() || ln.bind_ip == "0.0.0.0" )
-                                             ? gclsSetup.m_strLocalIp
-                                             : ln.bind_ip;
+                    strOutboundLocalIp =
+                        ( ln.bind_ip.empty() || ln.bind_ip == "0.0.0.0" ) ? gclsSetup.m_strLocalIp : ln.bind_ip;
                     iOutboundLocalPort = ln.bind_port;
                 } else {
                     CLog::Print( LOG_INFO,
@@ -487,15 +486,14 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
                                  pe.local_node_ref.c_str(), pszCallId ? pszCallId : "" );
                 }
             }
-            CLog::Print(
-                LOG_SYSTEM,
-                "RoutingPolicyEngine: outbound via route_set='%s' route='%s' policy='%s' → %s:%d/%s "
-                "src=%s:%d [callId=%s]",
-                pe.route_set.c_str(), pe.route_name.c_str(), pe.policy_name.c_str(), pe.remote_ip.c_str(),
-                pe.remote_port, pe.protocol.c_str(),
-                strOutboundLocalIp.empty() ? gclsSetup.m_strLocalIp.c_str() : strOutboundLocalIp.c_str(),
-                iOutboundLocalPort > 0 ? iOutboundLocalPort : gclsSetup.m_iUdpPort,
-                pszCallId ? pszCallId : "" );
+            CLog::Print( LOG_SYSTEM,
+                         "RoutingPolicyEngine: outbound via route_set='%s' route='%s' policy='%s' → %s:%d/%s "
+                         "src=%s:%d [callId=%s]",
+                         pe.route_set.c_str(), pe.route_name.c_str(), pe.policy_name.c_str(), pe.remote_ip.c_str(),
+                         pe.remote_port, pe.protocol.c_str(),
+                         strOutboundLocalIp.empty() ? gclsSetup.m_strLocalIp.c_str() : strOutboundLocalIp.c_str(),
+                         iOutboundLocalPort > 0 ? iOutboundLocalPort : gclsSetup.m_iUdpPort,
+                         pszCallId ? pszCallId : "" );
         }
     }
 
@@ -526,9 +524,9 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
     if ( clsUser.isDnd() || clsUser.isReject( pszFrom ) ) return StopCall( pszCallId, SIP_DECLINE );
 
     if ( clsUser.isCallForward() ) {
-        CSipMessage* pclsInvite = gclsUserAgent.DeleteIncomingCall( pszCallId );
+        CSipMessage *pclsInvite = gclsUserAgent.DeleteIncomingCall( pszCallId );
         if ( pclsInvite ) {
-            CSipMessage* pclsResponse = pclsInvite->CreateResponseWithToTag( SIP_MOVED_TEMPORARILY );
+            CSipMessage *pclsResponse = pclsInvite->CreateResponseWithToTag( SIP_MOVED_TEMPORARILY );
             if ( pclsResponse ) {
                 CSipFrom clsContact;
                 clsContact.m_clsUri.m_strProtocol = SIP_PROTOCOL;
@@ -597,7 +595,7 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
     if ( !strOutboundLocalIp.empty() ) clsRoute.m_strOutboundLocalIp = strOutboundLocalIp;
     if ( iOutboundLocalPort > 0 ) clsRoute.m_iOutboundLocalPort = iOutboundLocalPort;
 
-    CSipMessage* pclsInvite;
+    CSipMessage *pclsInvite;
     if ( gclsUserAgent.CreateCall( pszFrom, pszTo, pclsRtp, &clsRoute, strCallId, &pclsInvite ) == false )
         return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
 
@@ -642,7 +640,7 @@ void CModuleDispatcher::EventIncomingCall( const char* pszCallId, const char* ps
     }
 }
 
-void CModuleDispatcher::EventCallRing( const char* pszCallId, int iSipStatus, CSipCallRtp* pclsRtp ) {
+void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRtp ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallRing(%s,%d)", pszCallId, iSipStatus );
 
@@ -659,7 +657,7 @@ void CModuleDispatcher::EventCallRing( const char* pszCallId, int iSipStatus, CS
     }
 }
 
-void CModuleDispatcher::EventCallStart( const char* pszCallId, CSipCallRtp* pclsRtp ) {
+void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallStart(%s)", pszCallId );
 
@@ -738,7 +736,7 @@ void CModuleDispatcher::EventCallStart( const char* pszCallId, CSipCallRtp* pcls
     }
 }
 
-void CModuleDispatcher::EventCallEnd( const char* pszCallId, int iSipStatus ) {
+void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallEnd(%s:%d)", pszCallId, iSipStatus );
 
@@ -780,7 +778,7 @@ void CModuleDispatcher::EventCallEnd( const char* pszCallId, int iSipStatus ) {
     }
 }
 
-void CModuleDispatcher::EventReInvite( const char* pszCallId, CSipCallRtp* pclsRemoteRtp, CSipCallRtp* pclsLocalRtp ) {
+void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsRemoteRtp, CSipCallRtp *pclsLocalRtp ) {
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         if ( pclsRemoteRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
@@ -791,7 +789,7 @@ void CModuleDispatcher::EventReInvite( const char* pszCallId, CSipCallRtp* pclsR
     }
 }
 
-void CModuleDispatcher::EventPrack( const char* pszCallId, CSipCallRtp* pclsRtp ) {
+void CModuleDispatcher::EventPrack( const char *pszCallId, CSipCallRtp *pclsRtp ) {
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         if ( pclsRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
@@ -802,7 +800,7 @@ void CModuleDispatcher::EventPrack( const char* pszCallId, CSipCallRtp* pclsRtp 
     }
 }
 
-bool CModuleDispatcher::EventTransfer( const char* pszCallId, const char* pszReferToCallId, bool bScreenedTransfer ) {
+bool CModuleDispatcher::EventTransfer( const char *pszCallId, const char *pszReferToCallId, bool bScreenedTransfer ) {
     CCallInfo clsCallInfo, clsReferToCallInfo;
     CSipCallRtp clsRtp;
 
@@ -862,7 +860,7 @@ bool CModuleDispatcher::EventTransfer( const char* pszCallId, const char* pszRef
     return true;
 }
 
-bool CModuleDispatcher::EventBlindTransfer( const char* pszCallId, const char* pszReferToId ) {
+bool CModuleDispatcher::EventBlindTransfer( const char *pszCallId, const char *pszReferToId ) {
     std::string strCallId, strInviteCallId, strToId;
     CSipCallRtp clsRtp;
     CUserInfo clsUserInfo;
@@ -888,7 +886,7 @@ bool CModuleDispatcher::EventBlindTransfer( const char* pszCallId, const char* p
     return true;
 }
 
-bool CModuleDispatcher::EventMessage( const char* pszFrom, const char* pszTo, CSipMessage* pclsMessage ) {
+bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
     CUserInfo clsUserInfo;
     CSipCallRoute clsRoute;
     if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) return false;
@@ -900,7 +898,7 @@ bool CModuleDispatcher::EventMessage( const char* pszFrom, const char* pszTo, CS
 //  PickUp (from SipServerPickUp.hpp)
 // ──────────────────────────────────────────────────────────────
 
-void CModuleDispatcher::PickUp( const char* pszCallId, const char* pszFrom, const char* pszTo, CSipCallRtp* pclsRtp ) {
+void CModuleDispatcher::PickUp( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp ) {
     CspUser xmlFrom;
     USER_ID_LIST clsUserIdList;
     bool bCallPickup = false;

@@ -47,7 +47,7 @@ public:
      *  @param ctx      SIP 메시지에서 추출한 필드
      *  @param hashKey  RouteSet.hash_by_caller 에 사용할 key (발신자 식별 문자열)
      *  @return 결정 (type + target + picked_route) */
-    RoutingDecision Decide( const MessageCtx& ctx, const std::string& hashKey );
+    RoutingDecision Decide( const MessageCtx &ctx, const std::string &hashKey );
 
     /** 정책 수. */
     size_t Size() const;

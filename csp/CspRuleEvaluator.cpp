@@ -18,7 +18,7 @@ CspRuleEvaluator gclsRuleEvaluator;
 namespace {
 
     // 콤마 구분 문자열 → trimmed items
-    std::vector<std::string> _splitList( const std::string& s ) {
+    std::vector<std::string> _splitList( const std::string &s ) {
         std::vector<std::string> out;
         std::string cur;
         for ( char c : s ) {
@@ -38,7 +38,7 @@ namespace {
     }
 
     // CIDR 매칭 (IPv4).  v6 는 향후.
-    bool _cidrMatch( const std::string& ip, const std::string& cidr ) {
+    bool _cidrMatch( const std::string &ip, const std::string &cidr ) {
         auto slash = cidr.find( '/' );
         std::string net = cidr;
         int prefix = 32;
@@ -46,7 +46,7 @@ namespace {
             net = cidr.substr( 0, slash );
             prefix = atoi( cidr.c_str() + slash + 1 );
         }
-        auto toUint = []( const std::string& s ) -> uint32_t {
+        auto toUint = []( const std::string &s ) -> uint32_t {
             uint32_t r = 0;
             int o[4] = { 0, 0, 0, 0 };
             if ( sscanf( s.c_str(), "%d.%d.%d.%d", &o[0], &o[1], &o[2], &o[3] ) != 4 ) return 0;
@@ -61,7 +61,7 @@ namespace {
         return ( ipN & mask ) == ( netN & mask );
     }
 
-    bool _boolish( const std::string& v, bool defTrue = true ) {
+    bool _boolish( const std::string &v, bool defTrue = true ) {
         if ( v.empty() ) return defTrue;
         if ( v == "false" || v == "0" ) return false;
         return true;
@@ -117,7 +117,7 @@ bool CspRuleEvaluator::LoadAll() {
             }
             if ( rs.name.empty() ) continue;
             // dangling ref 경고 (skip 하진 않음 — 런타임 평가 시 누락은 false 로 처리)
-            for ( const auto& mem : rs.members ) {
+            for ( const auto &mem : rs.members ) {
                 if ( newRules.find( mem.rule_ref ) == newRules.end() ) {
                     CLog::Print( LOG_ERROR, "RuleEvaluator: rule_set '%s' references missing rule '%s'",
                                  rs.name.c_str(), mem.rule_ref.c_str() );
@@ -149,12 +149,12 @@ size_t CspRuleEvaluator::RuleSetCount() const {
     return m_ruleSets.size();
 }
 
-bool CspRuleEvaluator::HasRule( const std::string& name ) const {
+bool CspRuleEvaluator::HasRule( const std::string &name ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     return m_rules.find( name ) != m_rules.end();
 }
 
-bool CspRuleEvaluator::HasRuleSet( const std::string& name ) const {
+bool CspRuleEvaluator::HasRuleSet( const std::string &name ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     return m_ruleSets.find( name ) != m_ruleSets.end();
 }
@@ -162,7 +162,7 @@ bool CspRuleEvaluator::HasRuleSet( const std::string& name ) const {
 // ─────────────────────────────────────────────────────────────
 // 필드 매핑
 
-const std::string* CspRuleEvaluator::_getFieldValue( const MessageCtx& ctx, const std::string& field ) const {
+const std::string *CspRuleEvaluator::_getFieldValue( const MessageCtx &ctx, const std::string &field ) const {
     if ( field == "from_uri_host" ) return &ctx.from_uri_host;
     if ( field == "from_uri_user" ) return &ctx.from_uri_user;
     if ( field == "to_uri_host" ) return &ctx.to_uri_host;
@@ -181,7 +181,7 @@ const std::string* CspRuleEvaluator::_getFieldValue( const MessageCtx& ctx, cons
 // ─────────────────────────────────────────────────────────────
 // 연산자
 
-bool CspRuleEvaluator::_applyOp( const std::string& fv, const std::string& op, const std::string& val,
+bool CspRuleEvaluator::_applyOp( const std::string &fv, const std::string &op, const std::string &val,
                                  bool fieldExists ) const {
     if ( op == "exists" ) return fieldExists && !fv.empty();
     if ( op == "not_exists" ) return !fieldExists || fv.empty();
@@ -196,7 +196,7 @@ bool CspRuleEvaluator::_applyOp( const std::string& fv, const std::string& op, c
         try {
             std::regex re( val, std::regex::ECMAScript );
             return std::regex_search( fv, re );
-        } catch ( const std::regex_error& e ) {
+        } catch ( const std::regex_error &e ) {
             CLog::Print( LOG_ERROR, "RuleEvaluator: bad regex '%s': %s", val.c_str(), e.what() );
             return false;
         }
@@ -204,7 +204,7 @@ bool CspRuleEvaluator::_applyOp( const std::string& fv, const std::string& op, c
     if ( op == "in_cidr" ) return _cidrMatch( fv, val );
     if ( op == "in_list" ) {
         auto items = _splitList( val );
-        for ( const auto& it : items )
+        for ( const auto &it : items )
             if ( it == fv ) return true;
         return false;
     }
@@ -213,9 +213,9 @@ bool CspRuleEvaluator::_applyOp( const std::string& fv, const std::string& op, c
     return false;
 }
 
-bool CspRuleEvaluator::_evalRule( const Rule& r, const MessageCtx& ctx ) const {
+bool CspRuleEvaluator::_evalRule( const Rule &r, const MessageCtx &ctx ) const {
     if ( !r.enabled ) return false;
-    const std::string* fv = _getFieldValue( ctx, r.field );
+    const std::string *fv = _getFieldValue( ctx, r.field );
     if ( !fv ) {
         CLog::Print( LOG_ERROR, "RuleEvaluator: rule '%s' unknown field '%s'", r.name.c_str(), r.field.c_str() );
         return false;
@@ -229,14 +229,14 @@ bool CspRuleEvaluator::_evalRule( const Rule& r, const MessageCtx& ctx ) const {
 // ─────────────────────────────────────────────────────────────
 // Match
 
-bool CspRuleEvaluator::MatchRule( const std::string& ruleName, const MessageCtx& ctx ) const {
+bool CspRuleEvaluator::MatchRule( const std::string &ruleName, const MessageCtx &ctx ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_rules.find( ruleName );
     if ( it == m_rules.end() ) return false;
     return _evalRule( it->second, ctx );
 }
 
-bool CspRuleEvaluator::MatchRuleSet( const std::string& ruleSetName, const MessageCtx& ctx ) const {
+bool CspRuleEvaluator::MatchRuleSet( const std::string &ruleSetName, const MessageCtx &ctx ) const {
     if ( ruleSetName.empty() ) return true;  // catch-all 의미
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_ruleSets.find( ruleSetName );
@@ -244,14 +244,14 @@ bool CspRuleEvaluator::MatchRuleSet( const std::string& ruleSetName, const Messa
         CLog::Print( LOG_DEBUG, "RuleEvaluator: unknown rule_set '%s' — treating as no-match", ruleSetName.c_str() );
         return false;
     }
-    const RuleSet& rs = it->second;
+    const RuleSet &rs = it->second;
     if ( !rs.enabled ) return false;
     if ( rs.members.empty() ) return true;  // 빈 set → true (사용자 원칙)
 
     bool isAnd = ( rs.combinator != "OR" );  // default AND
 
     if ( isAnd ) {
-        for ( const auto& m : rs.members ) {
+        for ( const auto &m : rs.members ) {
             auto rIt = m_rules.find( m.rule_ref );
             bool res = ( rIt != m_rules.end() ) && _evalRule( rIt->second, ctx );
             if ( m.negate ) res = !res;
@@ -260,7 +260,7 @@ bool CspRuleEvaluator::MatchRuleSet( const std::string& ruleSetName, const Messa
         return true;
     } else {
         // OR
-        for ( const auto& m : rs.members ) {
+        for ( const auto &m : rs.members ) {
             auto rIt = m_rules.find( m.rule_ref );
             bool res = ( rIt != m_rules.end() ) && _evalRule( rIt->second, ctx );
             if ( m.negate ) res = !res;

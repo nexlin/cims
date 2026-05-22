@@ -19,21 +19,21 @@
 
 class CRedisStore {
 public:
-    static CRedisStore& GetInstance();
+    static CRedisStore &GetInstance();
 
-    bool Init( const std::string& strHost, int iPort, const std::string& strPassword = "" );
+    bool Init( const std::string &strHost, int iPort, const std::string &strPassword = "" );
     bool IsConnected() const {
         return m_bConnected;
     }
     void Disconnect();
 
     // register binding (key: "cims:reg:<aor>", value: JSON)
-    bool SetBinding( const std::string& strAor, const std::string& strJson, int iTtlSec );
-    bool GetBinding( const std::string& strAor, std::string& strJsonOut );
-    bool DelBinding( const std::string& strAor );
+    bool SetBinding( const std::string &strAor, const std::string &strJson, int iTtlSec );
+    bool GetBinding( const std::string &strAor, std::string &strJsonOut );
+    bool DelBinding( const std::string &strAor );
 
     // 일괄 복원 (시작 시 Standby 가 호출) — cold-mode 면 0 반환
-    int LoadAllBindings( std::vector<std::pair<std::string, std::string>>& vecOut );
+    int LoadAllBindings( std::vector<std::pair<std::string, std::string>> &vecOut );
 
 private:
     CRedisStore() : m_bConnected( false ), m_iPort( 0 ) {

@@ -45,10 +45,10 @@ public:
     bool Sync();
 
     /** name 으로 조회. 미매칭 시 IsValid()==false 반환. */
-    LocalNodeInfo GetByName( const std::string& name ) const;
+    LocalNodeInfo GetByName( const std::string &name ) const;
 
     /** id (uuid string) 로 조회. */
-    LocalNodeInfo GetById( const std::string& id ) const;
+    LocalNodeInfo GetById( const std::string &id ) const;
 
     /** psip 용 int listener id (= CspUuidToIntId(uuid)) 로 역조회.
      *  AclPolicyEngine/AccessServiceMap 에서 수신 메시지의 m_iListenerId → LocalNode 매핑. */
@@ -69,10 +69,10 @@ public:
      *  2) enabled=true && edge=access && protocol==<인자>     (Rule 2)
      *  3) 없음 → IsValid()==false. 호출자가 _infra fallback 사용.
      *  CspServer 의 TCP/TLS primary 주입에 사용. UDP 는 GetPrimary() 와 일관. */
-    LocalNodeInfo GetPrimaryByProtocol( const std::string& protocol ) const;
+    LocalNodeInfo GetPrimaryByProtocol( const std::string &protocol ) const;
 
     size_t Size() const;
-    bool HasName( const std::string& name ) const;
+    bool HasName( const std::string &name ) const;
 
 private:
     mutable std::mutex m_mutex;

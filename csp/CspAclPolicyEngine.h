@@ -35,8 +35,8 @@ public:
      *  local_node_name: 수신 Local Node (scope=local_node 에 사용).
      *  route_name     : 해당 호가 탄 Route (outbound 시 scope=route 용, 없으면 빈 문자열).
      *  route_set_name : 해당 호가 속한 RouteSet (scope=route_set 용, 없으면 빈 문자열). */
-    AclDecision Check( const MessageCtx& ctx, const std::string& local_node_name, const std::string& route_name,
-                       const std::string& route_set_name );
+    AclDecision Check( const MessageCtx &ctx, const std::string &local_node_name, const std::string &route_name,
+                       const std::string &route_set_name );
 
     size_t Size() const;
 

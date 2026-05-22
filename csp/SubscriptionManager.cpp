@@ -10,7 +10,7 @@ CSubscriptionManager::CSubscriptionManager() {
 CSubscriptionManager::~CSubscriptionManager() {
 }
 
-void CSubscriptionManager::AddSubscription( const std::string& strResourceUri, const SubscriptionInfo& info ) {
+void CSubscriptionManager::AddSubscription( const std::string &strResourceUri, const SubscriptionInfo &info ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
     auto it = m_mapSubs.find( info.strCallId );
@@ -28,7 +28,7 @@ void CSubscriptionManager::AddSubscription( const std::string& strResourceUri, c
     }
 }
 
-void CSubscriptionManager::RemoveSubscription( const std::string& strCallId ) {
+void CSubscriptionManager::RemoveSubscription( const std::string &strCallId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
     auto it = m_mapSubs.find( strCallId );
@@ -39,18 +39,18 @@ void CSubscriptionManager::RemoveSubscription( const std::string& strCallId ) {
     }
 }
 
-void CSubscriptionManager::GetSubscriptionsByUser( const std::string& strUserId, const std::string& strEventType,
-                                                   std::list<SubscriptionInfo>& outList ) {
+void CSubscriptionManager::GetSubscriptionsByUser( const std::string &strUserId, const std::string &strEventType,
+                                                   std::list<SubscriptionInfo> &outList ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
-    for ( auto& pair : m_mapSubs ) {
+    for ( auto &pair : m_mapSubs ) {
         if ( pair.second.strUserId == strUserId && pair.second.strEventType == strEventType ) {
             outList.push_back( pair.second );
         }
     }
 }
 
-int CSubscriptionManager::IncrementNotifySeq( const std::string& strCallId ) {
+int CSubscriptionManager::IncrementNotifySeq( const std::string &strCallId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
     auto it = m_mapSubs.find( strCallId );

@@ -7,7 +7,7 @@
 CCspRemoteNodeMap gclsRemoteNodeMap;
 
 namespace {
-    bool _boolish( const std::string& v, bool defTrue ) {
+    bool _boolish( const std::string &v, bool defTrue ) {
         if ( v.empty() ) return defTrue;
         if ( v == "false" || v == "0" ) return false;
         return true;
@@ -61,16 +61,16 @@ bool CCspRemoteNodeMap::Sync() {
     return true;
 }
 
-RemoteNodeInfo CCspRemoteNodeMap::GetByName( const std::string& name ) const {
+RemoteNodeInfo CCspRemoteNodeMap::GetByName( const std::string &name ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( name );
     if ( it == m_byName.end() ) return RemoteNodeInfo();
     return it->second;
 }
 
-RemoteNodeInfo CCspRemoteNodeMap::GetById( const std::string& id ) const {
+RemoteNodeInfo CCspRemoteNodeMap::GetById( const std::string &id ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
-    for ( const auto& kv : m_byName ) {
+    for ( const auto &kv : m_byName ) {
         if ( kv.second.id == id ) return kv.second;
     }
     return RemoteNodeInfo();
@@ -80,7 +80,7 @@ std::vector<RemoteNodeInfo> CCspRemoteNodeMap::GetAll() const {
     std::lock_guard<std::mutex> lk( m_mutex );
     std::vector<RemoteNodeInfo> out;
     out.reserve( m_byName.size() );
-    for ( const auto& kv : m_byName ) out.push_back( kv.second );
+    for ( const auto &kv : m_byName ) out.push_back( kv.second );
     return out;
 }
 
@@ -89,7 +89,7 @@ size_t CCspRemoteNodeMap::Size() const {
     return m_byName.size();
 }
 
-bool CCspRemoteNodeMap::HasName( const std::string& name ) const {
+bool CCspRemoteNodeMap::HasName( const std::string &name ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     return m_byName.find( name ) != m_byName.end();
 }

@@ -67,7 +67,7 @@ bool CCspServiceMap::Sync() {
             if ( s.id > 0 && !s.domain.empty() ) newList.push_back( s );
         }
     }
-    std::sort( newList.begin(), newList.end(), []( const ServiceInfo& a, const ServiceInfo& b ) {
+    std::sort( newList.begin(), newList.end(), []( const ServiceInfo &a, const ServiceInfo &b ) {
         if ( a.priority != b.priority ) return a.priority < b.priority;
         return a.id < b.id;
     } );
@@ -81,24 +81,24 @@ ServiceInfo CCspServiceMap::GetById( int id ) const {
     // v3 (2026-04-22): access_services.jsonl 이 SOT.
     //   Setup.Realm 기반 default-compat fallback 제거. 서비스 정의 없으면 빈 값 반환.
     std::lock_guard<std::mutex> lk( m_mutex );
-    for ( const auto& s : m_services ) {
+    for ( const auto &s : m_services ) {
         if ( s.id == id ) return s;
     }
     return ServiceInfo();
 }
 
-ServiceInfo CCspServiceMap::GetByName( const std::string& name ) const {
+ServiceInfo CCspServiceMap::GetByName( const std::string &name ) const {
     if ( name.empty() ) return ServiceInfo();
     std::lock_guard<std::mutex> lk( m_mutex );
-    for ( const auto& s : m_services ) {
+    for ( const auto &s : m_services ) {
         if ( s.name == name ) return s;
     }
     return ServiceInfo();
 }
 
-ServiceInfo CCspServiceMap::GetByDomain( const std::string& domain ) const {
+ServiceInfo CCspServiceMap::GetByDomain( const std::string &domain ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
-    for ( const auto& s : m_services ) {
+    for ( const auto &s : m_services ) {
         if ( s.enabled && s.domain == domain ) return s;
     }
     return ServiceInfo();
@@ -109,27 +109,27 @@ std::vector<ServiceInfo> CCspServiceMap::GetAll() const {
     return m_services;
 }
 
-std::string CCspServiceMap::EffectiveRealm( const ServiceInfo& svc ) {
+std::string CCspServiceMap::EffectiveRealm( const ServiceInfo &svc ) {
     return svc.auth_realm.empty() ? svc.domain : svc.auth_realm;
 }
 
-ServiceInfo CCspServiceMap::GetByKind( const std::string& kind ) const {
+ServiceInfo CCspServiceMap::GetByKind( const std::string &kind ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
-    for ( const auto& s : m_services ) {
+    for ( const auto &s : m_services ) {
         if ( s.enabled && s.kind == kind ) return s;
     }
     return ServiceInfo();
 }
 
-std::string CCspServiceMap::GetDomainByKind( const std::string& kind ) const {
+std::string CCspServiceMap::GetDomainByKind( const std::string &kind ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
-    for ( const auto& s : m_services ) {
+    for ( const auto &s : m_services ) {
         if ( s.enabled && s.kind == kind ) return s.domain;
     }
     return "";
 }
 
-bool CCspServiceMap::IsInboundAllowed( const ServiceInfo& svc, int listenerIntId ) {
+bool CCspServiceMap::IsInboundAllowed( const ServiceInfo &svc, int listenerIntId ) {
     if ( !svc.enabled ) return false;
     if ( svc.inbound_policy != "restricted" ) return true;  // "any" 또는 미지정 → 허용
     if ( listenerIntId <= 0 ) return false;                 // listener 모름 + restricted → 거절
@@ -144,7 +144,7 @@ std::map<std::string, std::string> CCspServiceMap::BuildDomainToKindMap() const 
     std::lock_guard<std::mutex> lk( m_mutex );
     // m_services 는 priority 낮은(=우선도 높은) 순 정렬되어 있음.
     // 첫 우선 항목을 남기고, 이후 중복 domain 은 무시.
-    for ( const auto& s : m_services ) {
+    for ( const auto &s : m_services ) {
         if ( !s.enabled ) continue;
         if ( s.domain.empty() ) continue;
         if ( out.find( s.domain ) != out.end() ) continue;

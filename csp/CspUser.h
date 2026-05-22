@@ -39,7 +39,7 @@ public:
         m_iRegisterTime = 0;
         m_iLogoutTime = 0;
     };
-    ~CspUser(){};
+    ~CspUser() {};
 
     std::string m_strId;
 

@@ -10,7 +10,7 @@
 
 CMsgLogger gclsMsgLogger;
 
-void CMsgLogger::Init( const std::string& msgLogDir, const std::string& component ) {
+void CMsgLogger::Init( const std::string &msgLogDir, const std::string &component ) {
     if ( msgLogDir.empty() ) return;
     m_strBaseDir = msgLogDir + "/" + component;
     EnsureDirRecursive( m_strBaseDir );
@@ -18,7 +18,7 @@ void CMsgLogger::Init( const std::string& msgLogDir, const std::string& componen
 
 // ── 새 API: 통계용 간결 로그 ──────────────────────────────────
 
-void CMsgLogger::Log( const char* iface, const char* dir, const char* proto, const char* method, const char* peer ) {
+void CMsgLogger::Log( const char *iface, const char *dir, const char *proto, const char *method, const char *peer ) {
     if ( m_strBaseDir.empty() ) return;
 
     std::string yyyy, mm, dd, hh;
@@ -35,7 +35,7 @@ void CMsgLogger::Log( const char* iface, const char* dir, const char* proto, con
     EnsureDirRecursive( dirPath );
 
     std::string filePath = dirPath + "/" + ( iface ? iface : "unknown" ) + ".jsonl";
-    FILE* f = fopen( filePath.c_str(), "a" );
+    FILE *f = fopen( filePath.c_str(), "a" );
     if ( f ) {
         fprintf( f, "%s\n", line );
         fclose( f );
@@ -44,15 +44,15 @@ void CMsgLogger::Log( const char* iface, const char* dir, const char* proto, con
 
 // ── 하위 호환: 기존 Log(callId, from, to, proto, label, body) ──
 
-void CMsgLogger::Log( const char* callId, const char* from, const char* to, const char* proto, const char* label,
-                      const char* body ) {
+void CMsgLogger::Log( const char *callId, const char *from, const char *to, const char *proto, const char *label,
+                      const char *body ) {
     (void)callId;
     (void)body;  // 통계 로그에서는 무시
     // from/to로 방향 결정
-    const char* dir = "out";
+    const char *dir = "out";
     if ( from && ( strcmp( from, "ue" ) == 0 || strcmp( from, "cwrtc" ) == 0 ) ) dir = "in";
     // 인터페이스 결정
-    const char* iface = "sip";
+    const char *iface = "sip";
     if ( ( to && strcmp( to, "cmp" ) == 0 ) || ( from && strcmp( from, "cmp" ) == 0 ) )
         iface = "cmp";
     else if ( ( to && strcmp( to, "csc" ) == 0 ) || ( from && strcmp( from, "csc" ) == 0 ) )
@@ -63,7 +63,7 @@ void CMsgLogger::Log( const char* callId, const char* from, const char* to, cons
 
 // ── 유틸리티 ──────────────────────────────────────────────────
 
-bool CMsgLogger::EnsureDirRecursive( const std::string& path ) {
+bool CMsgLogger::EnsureDirRecursive( const std::string &path ) {
     struct stat st;
     if ( stat( path.c_str(), &st ) == 0 ) return true;
     size_t pos = path.rfind( '/' );
@@ -81,7 +81,7 @@ std::string CMsgLogger::GetTimestamp() {
     return buf;
 }
 
-void CMsgLogger::GetDateHourParts( std::string& yyyy, std::string& mm, std::string& dd, std::string& hh ) {
+void CMsgLogger::GetDateHourParts( std::string &yyyy, std::string &mm, std::string &dd, std::string &hh ) {
     time_t now = time( nullptr );
     struct tm t;
     localtime_r( &now, &t );

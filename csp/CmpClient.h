@@ -27,54 +27,54 @@ struct CmpEndpoint {
     std::string strKey;  // "ip:port" — ring 의 key
     CmpEndpoint() : iPort( 0 ) {
     }
-    CmpEndpoint( const std::string& ip, int port )
+    CmpEndpoint( const std::string &ip, int port )
         : strIp( ip ), iPort( port ), strKey( ip + ":" + std::to_string( port ) ) {
     }
 };
 
 class CCmpClient {
 public:
-    static CCmpClient& GetInstance();
+    static CCmpClient &GetInstance();
 
-    bool Init( const std::string& strCmpIp, int iCmpPort, int iLocalPort );
+    bool Init( const std::string &strCmpIp, int iCmpPort, int iLocalPort );
 
     // Returns assigned local IP/Port from CMP
-    bool AddSession( const std::string& strSessionId, std::string& strLocalIp, int& iLocalPort, int& iLocalVideoPort,
-                     const std::string& strRecordDir = "", const std::string& strLogDir = "",
-                     const std::string& strCaller = "", const std::string& strCallee = "",
-                     const std::string& strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
-                     const std::string& strSesId = "" );
-    bool ModifySession( const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort,
-                        int iPeerIdx, const std::string& strCaller = "", const std::string& strCallee = "",
-                        const std::string& strSesId = "" );
-    bool UpdateSession( const std::string& strSessionId, const std::string& strRmtIp, int iRmtPort, int iRmtVideoPort,
-                        int iPeerIdx, const std::string& strCaller, const std::string& strCallee,
-                        std::string& strLocalIp, int& iLocalPort, const std::string& strSesId = "" );
-    bool RemoveSession( const std::string& strSessionId, const std::string& strCaller = "",
-                        const std::string& strCallee = "", const std::string& strSesId = "" );
+    bool AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort, int &iLocalVideoPort,
+                     const std::string &strRecordDir = "", const std::string &strLogDir = "",
+                     const std::string &strCaller = "", const std::string &strCallee = "",
+                     const std::string &strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
+                     const std::string &strSesId = "" );
+    bool ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
+                        int iPeerIdx, const std::string &strCaller = "", const std::string &strCallee = "",
+                        const std::string &strSesId = "" );
+    bool UpdateSession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
+                        int iPeerIdx, const std::string &strCaller, const std::string &strCallee,
+                        std::string &strLocalIp, int &iLocalPort, const std::string &strSesId = "" );
+    bool RemoveSession( const std::string &strSessionId, const std::string &strCaller = "",
+                        const std::string &strCallee = "", const std::string &strSesId = "" );
     bool Alive();
 
-    bool AddGroup( const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers,
-                   std::string& strIp, int& iPort, int& iFloorPort, int& iVideoPort,
-                   const std::string& strRecordDir = "", const std::string& strLogDir = "", bool bVideoEnabled = false,
-                   int iSessionSeq = 0, const std::string& strSesId = "" );
-    bool ModifyGroup( const std::string& strGroupId, const std::vector<std::shared_ptr<CspPttUser>>& vecMembers,
-                      const std::string& strSesId = "" );
-    bool JoinGroup( const std::string& strGroupId, const std::string& strSessionId, const std::string& strIp, int iPort,
-                    int iFloorPort = 0, int iVideoPort = 0, const std::string& strSesId = "" );
-    bool LeaveGroup( const std::string& strGroupId, const std::string& strSessionId, const std::string& strSesId = "" );
-    bool RemoveGroup( const std::string& strGroupId, const std::string& strSesId = "" );
+    bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
+                   std::string &strIp, int &iPort, int &iFloorPort, int &iVideoPort,
+                   const std::string &strRecordDir = "", const std::string &strLogDir = "", bool bVideoEnabled = false,
+                   int iSessionSeq = 0, const std::string &strSesId = "" );
+    bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
+                      const std::string &strSesId = "" );
+    bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
+                    int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "" );
+    bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
+    bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 
     /** 세션/그룹별 기 발행된 sesid 조회 (없으면 빈문자열) */
-    std::string GetSesIdByKey( const std::string& strKey );
+    std::string GetSesIdByKey( const std::string &strKey );
 
     // Phase 1.E — multi-endpoint dispatch (HA: CMP All Active).
     // 단일 endpoint 운영 시에는 호출 불필요 (Init 가 primary 1개를 자동 등록).
     // 운영 환경에서 csp.json 에 추가 CMP endpoint 가 있으면 main 이 AddEndpoint 호출.
-    void AddEndpoint( const std::string& strIp, int iPort );
+    void AddEndpoint( const std::string &strIp, int iPort );
 
     /** Session-ID → 선택된 endpoint (consistent hash). 미등록 endpoint 면 primary 반환. */
-    CmpEndpoint SelectEndpointForSession( const std::string& strSessionId );
+    CmpEndpoint SelectEndpointForSession( const std::string &strSessionId );
 
 private:
     CCmpClient();
@@ -101,23 +101,23 @@ private:
     //   1) m_mapSessionToEndpointKey 캐시 hit → 동일 endpoint 유지 (sticky)
     //   2) ring select → 캐시에 기록 후 그 endpoint
     //   3) endpoint 미등록 시 primary fallback
-    bool SendRequestAndWait( const std::string& strSessionKey, const SimpleJson::JsonNode& payload,
-                             std::string& strResponse );
+    bool SendRequestAndWait( const std::string &strSessionKey, const SimpleJson::JsonNode &payload,
+                             std::string &strResponse );
 
     // 기존 caller 호환 — primary 만 사용
-    bool SendRequestAndWait( const SimpleJson::JsonNode& payload, std::string& strResponse );
+    bool SendRequestAndWait( const SimpleJson::JsonNode &payload, std::string &strResponse );
 
     // RemoveSession/RemoveGroup 후 캐시 정리
-    void ReleaseEndpointForKey( const std::string& strSessionKey );
+    void ReleaseEndpointForKey( const std::string &strSessionKey );
 
     // 내부 — 실제 sendto + recv (endpoint 별)
-    bool _SendOnEndpoint( const CmpEndpoint& ep, const SimpleJson::JsonNode& payload, std::string& strResponse );
-    CmpEndpoint _ResolveEndpoint( const std::string& strSessionKey );
+    bool _SendOnEndpoint( const CmpEndpoint &ep, const SimpleJson::JsonNode &payload, std::string &strResponse );
+    CmpEndpoint _ResolveEndpoint( const std::string &strSessionKey );
 
     // Threads
     void KeepAliveLoop();
     void RecvLoop();
-    void OnTransactionComplete( unsigned int transId, bool success, const std::string& response );
+    void OnTransactionComplete( unsigned int transId, bool success, const std::string &response );
     // void OnPacketReceived(const std::string& strPacket, const std::string& strIp, int iPort); // Deprecated
 
     std::string m_strCmpIp;

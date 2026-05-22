@@ -49,18 +49,18 @@ public:
 
     /** Rule Set 평가. ruleSetName 이 비거나 존재하지 않으면 true (catch-all 의미).
      *  존재하면 members 를 combinator 로 집계, 각 member 의 rule 을 MatchRule 로 평가 후 negate 적용. */
-    bool MatchRuleSet( const std::string& ruleSetName, const MessageCtx& ctx ) const;
+    bool MatchRuleSet( const std::string &ruleSetName, const MessageCtx &ctx ) const;
 
     /** 단일 Rule 평가 (외부에서 직접 쓰는 경우용). */
-    bool MatchRule( const std::string& ruleName, const MessageCtx& ctx ) const;
+    bool MatchRule( const std::string &ruleName, const MessageCtx &ctx ) const;
 
     /** 디버그 — 로드된 개수. */
     size_t RuleCount() const;
     size_t RuleSetCount() const;
 
     /** Rule 존재 여부. 주로 policy 적재 시 dangling ref 경고용. */
-    bool HasRule( const std::string& name ) const;
-    bool HasRuleSet( const std::string& name ) const;
+    bool HasRule( const std::string &name ) const;
+    bool HasRuleSet( const std::string &name ) const;
 
 private:
     struct Rule {
@@ -81,10 +81,10 @@ private:
         bool enabled = true;
     };
 
-    const std::string* _getFieldValue( const MessageCtx& ctx, const std::string& field ) const;
-    bool _applyOp( const std::string& fieldValue, const std::string& op, const std::string& value,
+    const std::string *_getFieldValue( const MessageCtx &ctx, const std::string &field ) const;
+    bool _applyOp( const std::string &fieldValue, const std::string &op, const std::string &value,
                    bool fieldExists ) const;
-    bool _evalRule( const Rule& r, const MessageCtx& ctx ) const;
+    bool _evalRule( const Rule &r, const MessageCtx &ctx ) const;
 
     mutable std::mutex m_mutex;
     std::map<std::string, Rule> m_rules;        // name → Rule

@@ -71,13 +71,13 @@ void InsertStringMap( CXmlElement *pclsElement, const char *pszTagName, const ch
  * @brief 생성자
  */
 CSipServerSetup::CSipServerSetup()
-    : m_iUdpPort( 0 ),          // local_nodes.jsonl 의 primary UDP record 가 set. 0=fail-fast.
+    : m_iUdpPort( 0 ),  // local_nodes.jsonl 의 primary UDP record 가 set. 0=fail-fast.
       m_iUdpThreadCount( 10 ),
-      m_iTcpPort( 0 ),          // local_nodes.jsonl 의 primary TCP record 가 set. 0=disabled.
+      m_iTcpPort( 0 ),  // local_nodes.jsonl 의 primary TCP record 가 set. 0=disabled.
       m_iTcpThreadCount( 10 ),
       m_iTcpCallBackThreadCount( 0 ),
       m_iTcpRecvTimeout( SIP_TCP_RECV_TIMEOUT ),
-      m_iTlsPort( 0 ),          // local_nodes.jsonl 의 primary TLS record 가 set. 0=disabled.
+      m_iTlsPort( 0 ),  // local_nodes.jsonl 의 primary TLS record 가 set. 0=disabled.
       m_iTlsAcceptTimeout( SIP_TLS_ACCEPT_TIMEOUT ),
       m_iStackExecutePeriod( 20 ),
       m_iTimerD( 32000 ),

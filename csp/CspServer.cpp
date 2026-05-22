@@ -67,8 +67,8 @@ CCallDir gclsCallDir;
 #include "UserMap.h"
 
 // Forward Declaration for Notify Helpers
-void SendSipNotify( const std::string& uri, const std::string& etag, const std::string& action );
-void SendInitialNotify( const SubscriptionInfo& sub );
+void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
+void SendInitialNotify( const SubscriptionInfo &sub );
 
 bool gbFork = true;
 /**
@@ -125,8 +125,9 @@ int ServiceMain() {
     {
         LocalNodeInfo primary = gclsLocalNodeMap.GetPrimary();
         if ( !primary.IsValid() ) {
-            CLog::Print( LOG_ERROR, "no primary local_node — start aborted. Set is_primary=true on a "
-                                     "local_nodes.jsonl record (or use UI 'local_nodes' collection)." );
+            CLog::Print( LOG_ERROR,
+                         "no primary local_node — start aborted. Set is_primary=true on a "
+                         "local_nodes.jsonl record (or use UI 'local_nodes' collection)." );
             return -1;
         }
         std::string ip = primary.bind_ip;
@@ -260,7 +261,7 @@ int ServiceMain() {
         USER_ID_LIST clsRegList;
         gclsUserMap.GetRegisteredUsers( clsRegList );
         std::string strRegUsers;
-        for ( auto const& strId : clsRegList ) {
+        for ( auto const &strId : clsRegList ) {
             if ( !strRegUsers.empty() ) strRegUsers += ", ";
             strRegUsers += strId;
         }
@@ -298,11 +299,14 @@ int ServiceMain() {
     {
         std::vector<RemoteNodeInfo> nodes = gclsRemoteNodeMap.GetAll();
         int added = 0;
-        for ( const auto& n : nodes ) {
+        for ( const auto &n : nodes ) {
             if ( !n.enabled || n.ip.empty() || n.port <= 0 ) continue;
             bool isCmp = false;
-            for ( const auto& t : n.tags ) {
-                if ( t == "cmp" ) { isCmp = true; break; }
+            for ( const auto &t : n.tags ) {
+                if ( t == "cmp" ) {
+                    isCmp = true;
+                    break;
+                }
             }
             if ( !isCmp ) continue;
             // primary 와 동일 endpoint 면 AddEndpoint 가 internal dedup
@@ -310,7 +314,8 @@ int ServiceMain() {
             ++added;
         }
         if ( added > 0 ) {
-            CLog::Print( LOG_INFO, "CmpClient: registered %d additional endpoints from remote_nodes (tags=cmp)", added );
+            CLog::Print( LOG_INFO, "CmpClient: registered %d additional endpoints from remote_nodes (tags=cmp)",
+                         added );
         }
     }
 
@@ -362,7 +367,7 @@ int ServiceMain() {
             // 등록 만료 사용자 삭제 → DB logout_time 동기화 + PTT 세션 정리
             USER_ID_LIST clsExpiredUsers;
             gclsUserMap.DeleteTimeout( 1000, clsExpiredUsers );
-            for ( const auto& strUserId : clsExpiredUsers ) {
+            for ( const auto &strUserId : clsExpiredUsers ) {
                 CLog::Print( LOG_INFO, "Registration expired: user(%s) — syncing DB and cleaning resources",
                              strUserId.c_str() );
                 gclsCspUserMap.unregisterUser( strUserId );
@@ -427,8 +432,8 @@ extern CSipUserAgent gclsUserAgent;
  *   - GMS (group_change): sel points to group document for this subscriber
  *   - CMS (user_change):  sel points to user-profile and service-config documents
  */
-static std::string BuildXcapDiffBody( const SubscriptionInfo& sub, const std::string& etag,
-                                      const std::string& strChangedId ) {
+static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::string &etag,
+                                      const std::string &strChangedId ) {
     const std::string strXcapRoot = "http://" + CspAddressing::GetLocalXcapAddress() + ":4420/";
     std::string strBody;
     strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
@@ -455,8 +460,8 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo& sub, const std::st
 /**
  * @brief Send a proper in-dialog NOTIFY to a single subscriber
  */
-static void SendNotifyToSubscriber( const SubscriptionInfo& sub, const std::string& etag,
-                                    const std::string& strChangedId ) {
+static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::string &etag,
+                                    const std::string &strChangedId ) {
     // SUBSCRIBE 수신 listener 의 bind_ip:bind_port 를 Via/From 자기 주소로 사용.
     // listener id 가 0 (옛 dialog) 이거나 매칭 실패 시 stack primary 로 fallback.
     const int iListenerId = sub.iInboundListenerId;
@@ -470,7 +475,7 @@ static void SendNotifyToSubscriber( const SubscriptionInfo& sub, const std::stri
     // Request-URI = subscriber's Contact URI
     std::string strTarget = sub.strContact.empty() ? sub.strSubscriberUri : sub.strContact;
 
-    CSipMessage* pMsg = new CSipMessage();
+    CSipMessage *pMsg = new CSipMessage();
     pMsg->m_strSipMethod = "NOTIFY";
     pMsg->m_clsReqUri.Parse( strTarget.c_str(), (int)strTarget.size() );
 
@@ -526,7 +531,7 @@ static void SendNotifyToSubscriber( const SubscriptionInfo& sub, const std::stri
  * @brief Send initial NOTIFY immediately after 200 OK to SUBSCRIBE
  *        (Active state, no specific document change)
  */
-void SendInitialNotify( const SubscriptionInfo& sub ) {
+void SendInitialNotify( const SubscriptionInfo &sub ) {
     SendNotifyToSubscriber( sub, "init", "" );
 }
 
@@ -535,7 +540,7 @@ void SendInitialNotify( const SubscriptionInfo& sub ) {
  *   - group_change: uri = group ID, notify all GMS subscribers that are group members
  *   - user_change:  uri = user ID, notify that user's CMS subscribers
  */
-void SendSipNotify( const std::string& uri, const std::string& etag, const std::string& action ) {
+void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action ) {
     CLog::Print( LOG_INFO, "SendSipNotify: Uri=%s ETag=%s Action=%s", uri.c_str(), etag.c_str(), action.c_str() );
 
     // Strip uri prefix
@@ -553,11 +558,11 @@ void SendSipNotify( const std::string& uri, const std::string& etag, const std::
         // GMS: find each group member's GMS subscription and notify
         CLog::Print( LOG_INFO, "SendSipNotify: group_change Group=%s Members=%d", strId.c_str(),
                      (int)clsGroup._pusers.size() );
-        for ( const auto& pUser : clsGroup._pusers ) {
+        for ( const auto &pUser : clsGroup._pusers ) {
             if ( !pUser ) continue;
             std::list<SubscriptionInfo> subList;
             gclsSubscriptionManager.GetSubscriptionsByUser( pUser->_id, "gms", subList );
-            for ( auto& sub : subList ) {
+            for ( auto &sub : subList ) {
                 SendNotifyToSubscriber( sub, etag, strId );
             }
         }
@@ -566,7 +571,7 @@ void SendSipNotify( const std::string& uri, const std::string& etag, const std::
         CLog::Print( LOG_INFO, "SendSipNotify: user_change User=%s", strId.c_str() );
         std::list<SubscriptionInfo> subList;
         gclsSubscriptionManager.GetSubscriptionsByUser( strId, "cms", subList );
-        for ( auto& sub : subList ) {
+        for ( auto &sub : subList ) {
             SendNotifyToSubscriber( sub, etag, strId );
         }
     }
@@ -579,7 +584,7 @@ void SendSipNotify( const std::string& uri, const std::string& etag, const std::
  * @param argv
  * @returns 정상 종료하면 0 을 리턴하고 오류가 발생하면 -1 를 리턴한다.
  */
-int main( int argc, char* argv[] ) {
+int main( int argc, char *argv[] ) {
     CServerService clsService;
     clsService.m_strName = SERVICE_NAME;
     clsService.m_strDisplayName = SERVICE_DISPLAY_NAME;
