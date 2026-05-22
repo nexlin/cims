@@ -1328,6 +1328,8 @@ def main():
     ap.add_argument("--sync-port", type=int,
                     default=int(os.environ.get("CIMS_AGENT_SYNC_PORT", DEFAULT_SYNC_PORT)),
                     help="동기 REST 서버 포트 (0 = 비활성)")
+    ap.add_argument("--enroll-only", action="store_true",
+                    help="enrollment 만 수행 후 종료 (heartbeat / sync server 시작 안 함)")
     args = ap.parse_args()
 
     state = AgentState(args.state_dir)
@@ -1339,6 +1341,10 @@ def main():
             return 2
     else:
         print(f"[agent] resumed: id={state.agent_id} name={state.name}")
+
+    if args.enroll_only:
+        print("[agent] enroll-only mode — exiting after enrollment (no heartbeat sent)")
+        return 0
 
     sync_port = 0
     if args.sync_port > 0:
