@@ -926,14 +926,19 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     """
     install_path = _resolve_install_path(params)
     svc = (params.get("process_name") or params.get("service_kind") or "").lower()
+    # 우선순위:
+    #  1) install_path/agent/bin/cims-svc — 모듈 자체에 운영 도구를 ship 하는 경우 (구식)
+    #  2) _AGENT_DIR/bin/cims-svc — 일반 케이스. 에이전트가 자기 옆 bin/cims-svc 사용
+    #     (install-agent.sh 가 /opt/cims-agent/agent/bin/ 에 둠).
+    #  3) /opt/cims-agent/agent/bin/cims-svc — agent 가 다른 곳에서 실행되는 경우 명시 fallback
     candidates = [
         os.path.join(install_path, "agent", "bin", "cims-svc"),
-        "/home/nex/work/cims/build/dist/agent/bin/cims-svc",
-        "/opt/cims/agent/bin/cims-svc",
+        os.path.join(_AGENT_DIR, "bin", "cims-svc"),
+        "/opt/cims-agent/agent/bin/cims-svc",
     ]
     script = next((c for c in candidates if os.path.isfile(c)), None)
     if not script:
-        return 1, "", f"cims-svc not found (install_path={install_path})"
+        return 1, "", f"cims-svc not found (install_path={install_path}, agent_dir={_AGENT_DIR})"
 
     argv = [script, job_type]
     if svc: argv.append(svc)
@@ -1420,10 +1425,16 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                     rep_status, rep_body = http_post(f"{csc_url}/api/agent/report", result,
                                                       headers={"X-Agent-Token": state.session_token})
                     print(f"[agent] report status={rep_status} rc={result['result_code']}", flush=True)
-                    # upgrade_agent 성공 시 자기 자신 종료 → systemd Restart=always 가 새 바이너리로 재기동
+                    # upgrade_agent 성공 시 새 코드로 self-exec.
+                    # systemd 환경: execv 가 모든 fd close + 같은 PID 로 새 image 실행 (Restart=always 보다 빠름)
+                    # nohup 환경 (no-systemd): execv 가 유일한 재기동 경로 — 부모 shell 이 죽었으므로 외부 monitor 없음
                     if job["type"] == "upgrade_agent" and result["result_code"] == 0:
-                        print("[agent] upgrade done — exiting for systemd restart", flush=True)
-                        return 0
+                        print("[agent] upgrade done — execv self for new code", flush=True)
+                        try:
+                            os.execv(sys.executable, [sys.executable] + sys.argv)
+                        except Exception as e:
+                            print(f"[agent] execv 실패 ({e}) — exit (외부 supervisor 필요)", flush=True)
+                            return 0
             else:
                 fail_count += 1
 
