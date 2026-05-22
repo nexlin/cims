@@ -94,16 +94,28 @@ export interface NetIface {
   ip: string
   mask: number
   mgmt?: boolean                                // CSC ↔ agent 통신 NIC — 변경 차단 (자기 단절 방지)
+  managed?: boolean                             // cims-priv ip-add 로 부여 (label '<iface>:cims') — UI 에서 삭제 허용 대상
   hint?: string
 }
 
-// HaServicesPage 용 — 운영자 설정 iface→slot 매핑
+// HaServicesPage 용 — 운영자 설정 (iface, ip) pair 단위. 한 iface 에 여러 row 가능.
 export interface ServiceIpRow {
   iface: string
   ip: string
   mask: number
   slot: string                                  // 용도 (자유 입력 / 패키지 slot)
   status?: 'up' | 'down' | 'unknown'
+}
+
+// specific route — agent heartbeat 보고 + 운영자 desired 동기.
+// kernel_auto / is_default 는 UI 에서 readonly 표시. managed 만 [삭제] 허용.
+export interface AgentRoute {
+  dst: string                                   // CIDR (e.g. 192.168.100.0/24) 또는 'default'
+  via: string                                   // gateway IPv4 (default route 가 아니면 비어있을 수도)
+  dev: string                                   // iface name
+  managed?: boolean                             // cims-priv route-add 로 부여 — [삭제] 허용
+  is_default?: boolean                          // dst='default' 또는 '0.0.0.0/0' — readonly
+  kernel_auto?: boolean                         // protocol=kernel (subnet 자동) — readonly
 }
 
 export interface Agent {
@@ -128,6 +140,7 @@ export interface Agent {
   ha_group: AgentHaGroupRef | null
   interfaces: NetIface[] | null
   service_ip_rows: ServiceIpRow[] | null
+  routes: AgentRoute[] | null
 }
 
 export interface AgentCreateResult extends Agent {
@@ -373,10 +386,12 @@ export const deploymentApi = {
       source_dir: string
     }>(`/packages/register-from-dist`, {}),
   upgradeAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/upgrade`, {}),
-  applyIpConfig: (id: number) =>
-    api.post<{ agent_id: number; rows: number;
+  applyIpConfig: (id: number,
+                  ops?: { service_ip_rows?: Array<{ op: 'add'|'del'; iface: string; ip: string; mask: number; slot?: string }>;
+                          routes?:          Array<{ op: 'add'|'del'; dst: string; via: string; dev: string }> }) =>
+    api.post<{ agent_id: number; rows: number; routes: number;
                ok: boolean; rc: number;
-               stdout: string; stderr: string }>(`/agents/${id}/apply-ip-config`, {}),
+               stdout: string; stderr: string }>(`/agents/${id}/apply-ip-config`, ops ?? {}),
   getAgentJob:   (agentId: number, jobId: number) =>
     api.get<AgentJob>(`/agents/${agentId}/jobs/${jobId}`),
   agentMetrics:  (id: number) => api.get<{ items: AgentMetric[] }>(`/agents/${id}/metrics`),
