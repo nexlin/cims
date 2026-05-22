@@ -382,6 +382,8 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
                            else _safe_load(r.get("interfaces_json")),
         "service_ip_rows": r.get("service_ip_rows") if isinstance(r.get("service_ip_rows"), (dict, list))
                            else _safe_load(r.get("service_ip_rows_json")),
+        # 운영자가 관리하는 specific route (default 제외). agent heartbeat 보고 + apply 갱신.
+        "routes":          r.get("routes") if isinstance(r.get("routes"), (dict, list)) else None,
     }
 
 
@@ -418,7 +420,7 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         if action == "upgrade" and method == "POST":
             return await _upgrade_agent_binary(handler_args, aid, config)
         if action == "apply-ip-config" and method == "POST":
-            return await _apply_ip_config(aid, config)
+            return await _apply_ip_config(handler_args, aid, config)
     elif len(tail) == 3:
         # GET /agents/{aid}/jobs/{jid} — job 단건 조회 (result polling)
         if tail[1] == "jobs" and method == "GET":
@@ -702,40 +704,138 @@ async def _revoke_agent(handler_args: HandlerArgs, aid: int, config):
     return HandlerResult(status=200, body={"ok": True, "id": aid}, media_type="application/json")
 
 
-async def _apply_ip_config(aid: int, config):
-    """ServiceIpPanel [적용] 진입점 — agent sync REST 로 즉시 호출하여
-    ip addr add 결과를 동기 응답한다 (옛 큐잉 + heartbeat pickup 모델 제거).
-    agent 가 LISTEN 안 되거나 sync_port 미보고면 502 로 명확히 실패.
+async def _apply_ip_config(handler_args: HandlerArgs, aid: int, config):
+    """ServiceIp/Route Panel 의 [추가]/[삭제] 진입점 — agent sync REST 로 즉시 호출.
+
+    Request body:
+      {
+        "service_ip_rows": [{"op": "add"|"del", "iface", "ip", "mask", "slot"?}, ...],
+        "routes":          [{"op": "add"|"del", "dst", "via", "dev"}, ...]   (optional)
+      }
+    body 가 없으면 file_store 의 stored agent.service_ip_rows 를 모두 add 시도
+    (backward compat — 옛 [적용] 흐름).
+
+    agent 가 성공 응답 시 file_store 의 service_ip_rows / routes 자동 갱신
+    (op 반영 — add 면 추가, del 면 제거. op 필드 자체는 stored 에 보존 안 함).
     """
     row = await asyncio.to_thread(_agent_load, config, aid)
     if not row:
         return HandlerResult(status=404, body={"error": "agent_not_found"}, media_type="application/json")
-    rows_payload = row.get("service_ip_rows")
-    if isinstance(rows_payload, str):
-        try: rows_payload = json.loads(rows_payload)
-        except (TypeError, ValueError): rows_payload = []
-    if not rows_payload:
-        return HandlerResult(status=400, body={"error": "no_service_ip_rows"},
-                             media_type="application/json")
-    status, body = await asyncio.to_thread(
+
+    body_in = _parse_body(handler_args)                                         # dict / bytes / str 모두 정규화
+
+    rows_in = body_in.get("service_ip_rows")
+    routes_in = body_in.get("routes")
+
+    if not rows_in and not routes_in:
+        # backward compat — file_store 의 desired state 를 통째로 add 시도
+        rows_in = row.get("service_ip_rows")
+        if isinstance(rows_in, str):
+            try: rows_in = json.loads(rows_in)
+            except (TypeError, ValueError): rows_in = []
+        if not rows_in:
+            return HandlerResult(status=400, body={"error": "no_operations"},
+                                 media_type="application/json")
+        rows_in = [{**r, "op": "add"} for r in rows_in if isinstance(r, dict)]
+
+    payload = {}
+    if rows_in:   payload["service_ip_rows"] = rows_in
+    if routes_in: payload["routes"] = routes_in
+
+    status, resp = await asyncio.to_thread(
         _agent_proxy_call, "POST", row, "/apply-ip-config",
-        None, {"service_ip_rows": rows_payload}, 15, config)
+        None, payload, 15, config)
+
     if status == 0:
-        # connect 실패 / sync_port 미보고 등 — agent 도달 불가
         return HandlerResult(status=502,
                              body={"error": "agent_unreachable",
-                                   "detail": (body or {}).get("error"),
-                                   "agent_id": aid, "rows": len(rows_payload)},
+                                   "detail": (resp or {}).get("error"),
+                                   "agent_id": aid},
                              media_type="application/json")
     if status != 200:
         return HandlerResult(status=status,
-                             body={"error": "agent_error", "detail": body,
-                                   "agent_id": aid, "rows": len(rows_payload)},
+                             body={"error": "agent_error", "detail": resp,
+                                   "agent_id": aid},
                              media_type="application/json")
+
+    # file_store 갱신 — op 반영 (성공한 row 만 반영 어렵지만 1차는 일괄 적용).
+    # agent 응답이 부분 실패라도 rc 가 200 인 경우만 여기 도달 (rc 비0 은 status!=200).
+    if rows_in or routes_in:
+        await asyncio.to_thread(_reconcile_stored_net_config, config, aid, rows_in or [], routes_in or [])
+
     return HandlerResult(status=200,
-                         body={"agent_id": aid, "rows": len(rows_payload),
-                               **(body or {})},
+                         body={"agent_id": aid,
+                               "rows": len(rows_in or []),
+                               "routes": len(routes_in or []),
+                               **(resp or {})},
                          media_type="application/json")
+
+
+def _reconcile_stored_net_config(config: dict, aid: int, rows_in: list, routes_in: list) -> None:
+    """apply 성공 후 file_store 의 service_ip_rows / routes 를 op 반영해 갱신.
+    op 필드는 stored 에 보존하지 않음 (transient — 적용 시점 의도).
+    """
+    row = _agent_load(config, aid)
+    if not row:
+        return
+
+    def _norm(s): return (s or "").strip()
+
+    # service_ip_rows
+    stored = row.get("service_ip_rows") or []
+    if isinstance(stored, str):
+        try: stored = json.loads(stored)
+        except (TypeError, ValueError): stored = []
+    # (iface, ip) key 로 dict 화 — op 적용 후 list 복원.
+    by_key = {}
+    for r in stored:
+        if not isinstance(r, dict): continue
+        k = (_norm(r.get("iface")), _norm(r.get("ip")))
+        by_key[k] = {kk: vv for kk, vv in r.items() if kk != "op"}
+    for r in rows_in or []:
+        op = (r.get("op") or "add").lower()
+        k = (_norm(r.get("iface")), _norm(r.get("ip")))
+        if op == "add":
+            base = {kk: vv for kk, vv in r.items() if kk != "op"}
+            by_key[k] = base
+        elif op == "del":
+            by_key.pop(k, None)
+    new_rows = [v for v in by_key.values() if v.get("ip")]
+
+    # routes — (dst, via, dev) key
+    stored_r = row.get("routes") or []
+    if isinstance(stored_r, str):
+        try: stored_r = json.loads(stored_r)
+        except (TypeError, ValueError): stored_r = []
+    by_rkey = {}
+    for r in stored_r:
+        if not isinstance(r, dict): continue
+        k = (_norm(r.get("dst")), _norm(r.get("via")), _norm(r.get("dev")))
+        by_rkey[k] = {kk: vv for kk, vv in r.items() if kk != "op"}
+    for r in routes_in or []:
+        op = (r.get("op") or "add").lower()
+        dst = _norm(r.get("dst"))
+        k = (dst, _norm(r.get("via")), _norm(r.get("dev")))
+        if op == "add":
+            # cims-priv 가 'ip route replace' 사용 → 같은 dst 의 옛 entry 제거 후 새 entry 추가
+            # (default GW 변경 시 옛 via 가 stored 에 남는 buf 방지).
+            for old_k in [kk for kk in by_rkey.keys() if kk[0] == dst]:
+                del by_rkey[old_k]
+            base = {kk: vv for kk, vv in r.items() if kk != "op"}
+            # agent heartbeat 의 routes 와 동일 flag 부여 — UI sort/표시 정합 (다음 hb 까지 일관).
+            if dst in ("default", "0.0.0.0/0"):
+                base["is_default"] = True
+            else:
+                base["managed"] = True   # cims-priv 가 추가한 route → managed
+            by_rkey[k] = base
+        elif op == "del":
+            by_rkey.pop(k, None)
+    new_routes = list(by_rkey.values())
+
+    _agent_update(config, aid, {
+        "service_ip_rows": new_rows,
+        "routes": new_routes,
+    })
 
 
 async def _upgrade_agent_binary(handler_args: HandlerArgs, aid: int, config):

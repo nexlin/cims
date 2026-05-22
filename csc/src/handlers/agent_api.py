@@ -362,7 +362,8 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         except Exception:
             pass
 
-    # session token 발급 + 상태 online
+    # session token 발급. status 는 그대로 유지 — 'online' 으로의 승격은 첫 heartbeat
+    # 도착 시 heartbeat handler 가 수행 (init.sh enroll-only 만 했을 때 false-online 방지).
     session_token = _new_token()
     now = datetime.now().isoformat(timespec='seconds')
     patches = {
@@ -375,10 +376,10 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         'memory_mb': info['memory_mb'],
         'disk_gb': info['disk_gb'],
         'agent_version': info['agent_version'],
-        'status': 'online' if row.get('status') == 'approved' else row.get('status'),
+        # status 는 enroll 시점에 전환하지 않음. 'approved' 그대로 → 첫 hb 시 'online'.
         'enrolled_at': now,
-        # last_heartbeat 는 실제 heartbeat 도착 시에만 update.
-        # enrollment 자체로 채우면 init.sh (enroll-only) 만 했는데도 hb 가 있는 것처럼 보이는 부수효과 → 명시적 분리.
+        # last_heartbeat 는 실제 heartbeat 도착 시에만 update — enrollment 자체로 채우면
+        # init.sh (enroll-only) 만 했는데도 hb 가 있는 것처럼 보이는 부수효과 → 명시적 분리.
     }
     if isinstance(ifaces, list):
         patches['interfaces'] = ifaces
@@ -430,12 +431,19 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
     except (TypeError, ValueError):
         sync_port = None
     ifaces = body.get("interfaces")
+    routes = body.get("routes")
+    ver = (body.get("agent_version") or "").strip()
     now = datetime.now().isoformat(timespec='seconds')
     patches = {'last_heartbeat': now}
     if sync_port:
         patches['sync_port'] = sync_port
     if isinstance(ifaces, list):
         patches['interfaces'] = ifaces
+    if isinstance(routes, list):
+        patches['routes'] = routes
+    # agent_version 도 매 heartbeat 시 갱신 — update.sh 후 새 버전 즉시 반영.
+    if ver:
+        patches['agent_version'] = ver[:32]
     # heartbeat 가 도착했다는 건 enrollment 가 끝났고 token 검증을 통과했다는 의미 →
     # pending 도 즉시 online 으로 자동 전환 (별도 admin approve 절차 불필요).
     if agent.get('status') in ('offline', 'approved', 'pending'):
