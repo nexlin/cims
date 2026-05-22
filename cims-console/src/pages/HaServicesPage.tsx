@@ -399,7 +399,9 @@ export default function HaServicesPage() {
 
   const toggleTree = (svcId: number) =>
     setTreeExpanded(prev => {
-      const n = new Set(prev); n.has(svcId) ? n.delete(svcId) : n.add(svcId); return n
+      const n = new Set(prev)
+      if (n.has(svcId)) n.delete(svcId); else n.add(svcId)
+      return n
     })
 
   // 패키지 IP slot 합집합 — service 의 packageIds 에 등록된 패키지 기준
@@ -789,6 +791,7 @@ export default function HaServicesPage() {
               serviceSlots={slotsForService(selectedSvc, 'service')}
               updateServer={updateServer}
               applyServiceIp={applyServiceIp}
+              updateSlot={updateSlot}
               applyingAgents={applyingAgents}
               regenerateToken={(srv) => handleInstallCmdClick(selectedSvc, srv)}
             />
@@ -808,6 +811,7 @@ export default function HaServicesPage() {
               updatePackageIds={updatePackageIds}
               applyVip={applyVip}
               applyServiceIp={applyServiceIp}
+              updateSlot={updateSlot}
               applyingAgents={applyingAgents}
               addServer={() => addServer(selectedSvc)}
               regenerateToken={(srv) => handleInstallCmdClick(selectedSvc, srv)}
@@ -1002,6 +1006,7 @@ interface SystemDetailProps {
     },
     label?: string,
   ) => void
+  updateSlot: (srv: ServerRow, iface: string, ip: string, mask: number, slot: string) => void
   applyingAgents: Set<number>
   addServer: () => void
   regenerateToken: (srv: ServerRow) => void
@@ -1160,6 +1165,7 @@ function SystemDetail(p: SystemDetailProps) {
                 slots={p.serviceSlots}
                 applying={p.applyingAgents.has(srv.id)}
                 onApply={(ops, label) => p.applyServiceIp(srv, ops, label)}
+                onUpdateSlot={(iface, ip, mask, slot) => p.updateSlot(srv, iface, ip, mask, slot)}
               />
             )
           })()}
@@ -1208,6 +1214,7 @@ interface ServerDetailProps {
     },
     label?: string,
   ) => void
+  updateSlot: (srv: ServerRow, iface: string, ip: string, mask: number, slot: string) => void
   applyingAgents: Set<number>
   regenerateToken: (srv: ServerRow) => void
 }
@@ -1298,6 +1305,7 @@ function ServerDetail(p: ServerDetailProps) {
             slots={p.serviceSlots}
             applying={p.applyingAgents.has(srv.id)}
             onApply={(ops, label) => p.applyServiceIp(srv, ops, label)}
+            onUpdateSlot={(iface, ip, mask, slot) => p.updateSlot(srv, iface, ip, mask, slot)}
           />
         )}
       </AccordionSection>
@@ -1305,337 +1313,6 @@ function ServerDetail(p: ServerDetailProps) {
   )
 }
 
-// ──────────────────────────────────────────────────────────────
-//  ServiceTreeRows — service row + server rows + [＋ 서버 추가] row + packages row
-//  (옛 layout — 새 SystemDetail 이후 제거 예정)
-// ──────────────────────────────────────────────────────────────
-
-interface ServiceTreeProps {
-  svc: ServiceRow
-  idx: number
-  expanded: boolean
-  onToggle: () => void
-  editingName: { kind: 'service' | 'server'; id: number; value: string } | null
-  setEditingName: (v: { kind: 'service' | 'server'; id: number; value: string } | null) => void
-  pkgPickerOpen: boolean
-  setPkgPicker: (open: boolean) => void
-  vipExpanded: boolean
-  setVipExpand: (open: boolean) => void
-  svcIpExpandFor: number | null
-  setSvcIpExpand: (srvId: number, open: boolean) => void
-  vipSlots: IpSlot[]
-  serviceSlots: IpSlot[]
-  packageMap: Map<number, PkgDef>
-  pendingTokens: Map<number, { token: string; cmd: string }>
-  updateService: (sid: number, patch: Partial<ServiceRow>) => void
-  updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
-  updatePackageIds: (svc: ServiceRow, ids: number[]) => void
-  applyVip: (svc: ServiceRow) => void
-  applyServiceIp: (
-    srv: ServerRow,
-    ops?: {
-      service_ip_rows?: Array<{ op: 'add'|'del'; iface: string; ip: string; mask: number; slot?: string }>
-      routes?:          Array<{ op: 'add'|'del'; dst: string; via: string; dev: string }>
-    },
-    label?: string,
-  ) => void
-  applyingAgents: Set<number>
-  addServer: () => void
-  regenerateToken: (srv: ServerRow) => void
-  copyCmd: (srv: ServerRow) => void
-  onDelete: () => void
-  onOpenConfig: () => void
-}
-
-function ServiceTreeRows(p: ServiceTreeProps) {
-  const { svc, idx, expanded, onToggle } = p
-  const isStandalone = svc.mode === 'standalone'
-  const needsVip = svc.mode === 'active_standby'
-  const canAddServer = svc.mode !== 'active_standby' && !isStandalone
-
-  // Standalone — 시스템 == 단일 agent. 그룹 카드 row 없이 server row 한 줄로 표시.
-  if (isStandalone) {
-    const srv = svc.servers[0]
-    if (!srv) return null
-    return (
-      <>
-        <ServerRows
-          key={srv.id}
-          svc={svc} srv={srv} idx={idx} srvIdx={0}
-          serviceSlots={p.serviceSlots}
-          editingName={p.editingName}
-          setEditingName={p.setEditingName}
-          svcIpExpanded={p.svcIpExpandFor === srv.id}
-          setSvcIpExpand={(open) => p.setSvcIpExpand(srv.id, open)}
-          pendingToken={p.pendingTokens.get(srv.id)}
-          updateServer={p.updateServer}
-          applyServiceIp={p.applyServiceIp}
-          applyingAgents={p.applyingAgents}
-          regenerateToken={p.regenerateToken}
-          copyCmd={p.copyCmd}
-          onDelete={p.onDelete}
-        />
-        <tr style={{ background: '#fcfdfe' }}>
-          <td style={td(60)}></td>
-          <td colSpan={6} style={{ padding: '6px 12px' }}>
-            <PackagesArea svc={svc}
-                          packageMap={p.packageMap}
-                          pickerOpen={p.pkgPickerOpen}
-                          setPickerOpen={p.setPkgPicker}
-                          onChange={(ids) => p.updatePackageIds(svc, ids)} />
-          </td>
-        </tr>
-      </>
-    )
-  }
-
-  return (
-    <>
-      <tr style={{ borderTop: '2px solid #e0e0e0', background: '#fafbfc' }}>
-        <td style={td(60)}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <button onClick={onToggle}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11,
-                             width: 14, padding: 0, color: '#666', flexShrink: 0 }}>
-              <span style={{
-                display: 'inline-block',
-                transform: expanded ? 'rotate(90deg)' : 'none',
-                transition: 'transform 0.15s',
-              }}>❯</span>
-            </button>
-            <span style={{ fontWeight: 'bold' }}>{idx}</span>
-          </div>
-        </td>
-        <td style={tdLeft()}>
-          <InlineNameEdit kind="service" id={svc.id} value={svc.name}
-                          editing={p.editingName}
-                          onStart={(v) => p.setEditingName({ kind: 'service', id: svc.id, value: v })}
-                          onChange={(v) => p.setEditingName(p.editingName ? { ...p.editingName, value: v } : null)}
-                          onSave={(v) => { p.updateService(svc.id, { name: v }); p.setEditingName(null) }}
-                          onCancel={() => p.setEditingName(null)}
-                          bold />
-        </td>
-        <td style={td(110)}>
-          <ModeBadge mode={svc.mode} />
-        </td>
-        <td style={tdLeft(140)}>
-          <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
-        </td>
-        <td style={tdLeft(220)}>
-          {needsVip ? (
-            <button onClick={() => p.setVipExpand(!p.vipExpanded)} style={chipBtn(p.vipExpanded)}>
-              📡 VIP {svc.vipBindings.length}건 (VRID {svc.vrid}) {p.vipExpanded ? '▲' : '▼'}
-            </button>
-          ) : (
-            <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
-          )}
-        </td>
-        <td style={td(120)}>
-          <StatusSummary servers={svc.servers} mode={svc.mode} />
-        </td>
-        <td style={td(150)}>
-          <button onClick={p.onOpenConfig} style={btnSecondary()}
-                  title="그룹 멤버 공통 서비스 설정 (access_services / routes 등)">⚙ 설정</button>
-          <button onClick={p.onDelete} style={btnDanger()}>삭제</button>
-        </td>
-      </tr>
-
-      {p.vipExpanded && needsVip && (
-        <tr>
-          <td colSpan={7} style={{ padding: '8px 16px 12px 60px' }}>
-            <VipPanel
-              title="VIP (서비스 단위 — A/S fail-over 공유. 멤버 별 iface 분리 매핑)"
-              svc={svc}
-              vrid={svc.vrid}
-              onChange={(bindings) => p.updateService(svc.id, { vipBindings: bindings })}
-              onApply={() => p.applyVip(svc)}
-            />
-          </td>
-        </tr>
-      )}
-
-      {expanded && svc.servers.map((srv, srvIdx) => (
-        <ServerRows
-          key={srv.id}
-          svc={svc} srv={srv} idx={idx} srvIdx={srvIdx}
-          serviceSlots={p.serviceSlots}
-          editingName={p.editingName}
-          setEditingName={p.setEditingName}
-          svcIpExpanded={p.svcIpExpandFor === srv.id}
-          setSvcIpExpand={(open) => p.setSvcIpExpand(srv.id, open)}
-          pendingToken={p.pendingTokens.get(srv.id)}
-          updateServer={p.updateServer}
-          applyServiceIp={p.applyServiceIp}
-          applyingAgents={p.applyingAgents}
-          regenerateToken={p.regenerateToken}
-          copyCmd={p.copyCmd}
-        />
-      ))}
-
-      {expanded && canAddServer && (
-        <tr style={{ background: '#fcfdfe' }}>
-          <td style={td(60)}></td>
-          <td colSpan={6} style={{ padding: '6px 12px' }}>
-            <button onClick={p.addServer} style={btnAdd(true)}>
-              ＋ 서버 추가 ({MODE_LABEL[svc.mode]} — 신규 토큰 발행)
-            </button>
-          </td>
-        </tr>
-      )}
-
-      {expanded && (
-        <tr style={{ background: '#fcfdfe' }}>
-          <td style={td(60)}></td>
-          <td colSpan={6} style={{ padding: '6px 12px' }}>
-            <PackagesArea svc={svc}
-                          packageMap={p.packageMap}
-                          pickerOpen={p.pkgPickerOpen}
-                          setPickerOpen={p.setPkgPicker}
-                          onChange={(ids) => p.updatePackageIds(svc, ids)} />
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
-
-// ──────────────────────────────────────────────────────────────
-//  ServerRows
-// ──────────────────────────────────────────────────────────────
-
-interface ServerRowsProps {
-  svc: ServiceRow
-  srv: ServerRow
-  idx: number
-  srvIdx: number
-  serviceSlots: IpSlot[]
-  editingName: { kind: 'service' | 'server'; id: number; value: string } | null
-  setEditingName: (v: { kind: 'service' | 'server'; id: number; value: string } | null) => void
-  svcIpExpanded: boolean
-  setSvcIpExpand: (open: boolean) => void
-  pendingToken?: { token: string; cmd: string }
-  updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
-  applyServiceIp: (
-    srv: ServerRow,
-    ops?: {
-      service_ip_rows?: Array<{ op: 'add'|'del'; iface: string; ip: string; mask: number; slot?: string }>
-      routes?:          Array<{ op: 'add'|'del'; dst: string; via: string; dev: string }>
-    },
-    label?: string,
-  ) => void
-  applyingAgents: Set<number>
-  regenerateToken: (srv: ServerRow) => void
-  copyCmd: (srv: ServerRow) => void
-  // Standalone 전용 — service header row 없으므로 row 안에 삭제/모드 표시
-  onDelete?: () => void
-}
-
-function ServerRows(p: ServerRowsProps) {
-  const { svc, srv, idx, srvIdx } = p
-  const enrollDone = srv.status !== 'pending'
-  return (
-    <>
-      <tr style={{ background: '#fff' }}>
-        <td style={td(60)}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 14, flexShrink: 0 }}></span>
-            {svc.mode === 'standalone' ? (
-              <span style={{ fontWeight: 'bold' }}>{idx}</span>
-            ) : (
-              <span style={{ color: '#888', fontSize: 12 }}>{idx}.{srvIdx + 1}</span>
-            )}
-          </div>
-        </td>
-        <td style={tdLeft()}>
-          <InlineNameEdit kind="server" id={srv.id} value={srv.name}
-                          editing={p.editingName}
-                          onStart={(v) => p.setEditingName({ kind: 'server', id: srv.id, value: v })}
-                          onChange={(v) => p.setEditingName(p.editingName ? { ...p.editingName, value: v } : null)}
-                          onSave={(v) => { p.updateServer(svc.id, srv.id, { name: v }); p.setEditingName(null) }}
-                          onCancel={() => p.setEditingName(null)}
-                          bold={svc.mode === 'standalone'} />
-          {srv.role && (
-            <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 5px', borderRadius: 3,
-                           background: srv.role === 'master' ? '#e67e22' : '#7f8c8d', color: '#fff' }}>
-              {srv.role}
-            </span>
-          )}
-        </td>
-        <td style={td(110)}>
-          {svc.mode === 'standalone' && <ModeBadge mode={svc.mode} />}
-        </td>
-        <td style={tdLeft(140)}>
-          <span style={{ fontSize: 12, color: srv.ip ? '#333' : '#aaa' }}>
-            {srv.ip ?? '— (enroll 후 자동)'}
-          </span>
-        </td>
-        <td style={tdLeft(220)}>
-          {!enrollDone ? (
-            <span style={{ color: '#aaa', fontSize: 12 }} title="enroll 전 — 인터페이스 정보 없음">
-              ⏳ enroll 대기
-            </span>
-          ) : srv.interfaces.length === 0 ? (
-            <span style={{ color: '#aaa', fontSize: 12 }}>— (NIC 정보 대기)</span>
-          ) : (
-            <button onClick={() => p.setSvcIpExpand(!p.svcIpExpanded)} style={chipBtn(p.svcIpExpanded)}>
-              📡 인터페이스 {srv.interfaces.length}개{srv.serviceIpRows.filter(r => r.slot).length > 0 ? ` (용도 ${srv.serviceIpRows.filter(r => r.slot).length}건)` : ''} {p.svcIpExpanded ? '▲' : '▼'}
-            </button>
-          )}
-        </td>
-        <td style={td(120)}>
-          <span style={{ color: STATUS_COLOR[srv.status], fontWeight: 'bold' }}>
-            {STATUS_ICON[srv.status]} {srv.status}
-          </span>
-          {srv.agent_version && <span style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>v{srv.agent_version}</span>}
-        </td>
-        <td style={td(150)}>
-          {srv.status !== 'online' && (
-            isTokenValid(srv.expiresAt) ? (
-              <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}
-                      title={`기존 install command 복사 — 토큰 ${minutesLeft(srv.expiresAt)}분 남음`}>
-                📋 복사 ({minutesLeft(srv.expiresAt)}m)
-              </button>
-            ) : (
-              <button onClick={() => p.regenerateToken(srv)} style={btnSmall()}
-                      title="새 토큰 발급 + install command 자동 복사">
-                🔧 설치명령
-              </button>
-            )
-          )}
-          {srv.id > 0 && (
-            <Link to={`/deploy/servers?agent=${srv.id}`}
-                  title="Server Inspector 진입 (모듈 / metric / lifecycle)"
-                  style={{ ...btnSmall(), textDecoration: 'none', display: 'inline-block' }}>
-              🔍
-            </Link>
-          )}
-          {p.onDelete && (
-            <button onClick={p.onDelete} style={btnDanger()} title="이 standalone 시스템 삭제">
-              삭제
-            </button>
-          )}
-        </td>
-      </tr>
-
-      {p.svcIpExpanded && enrollDone && srv.interfaces.length > 0 && (
-        <tr>
-          <td colSpan={7} style={{ padding: '8px 16px 12px 60px' }}>
-            <ServiceIpPanel
-              title={`${srv.name} 의 인터페이스 IP / 라우팅`}
-              interfaces={srv.interfaces}
-              storedRows={srv.serviceIpRows}
-              storedRoutes={srv.routes}
-              slots={p.serviceSlots}
-              applying={p.applyingAgents.has(srv.id)}
-              onApply={(ops, label) => p.applyServiceIp(srv, ops, label)}
-              onUpdateSlot={(iface, ip, mask, slot) => p.updateSlot(srv, iface, ip, mask, slot)}
-            />
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
 
 // ──────────────────────────────────────────────────────────────
 //  ServiceIpPanel — 인터페이스 단위 row
@@ -1698,8 +1375,6 @@ function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, slots, ap
   onUpdateSlot: (iface: string, ip: string, mask: number, slot: string) => void
 }) {
   const mgmtIfaces = new Set(interfaces.filter(x => x.mgmt).map(x => x.name))
-  const managedDevs = new Set(
-    interfaces.filter(x => x.managed && x.name).map(x => x.name))
   // iface 그룹 — 출현 순서대로. 빈 NIC 도 1 row.
   const ifaceOrder: string[] = []
   const ipsByIface = new Map<string, NetIface[]>()
@@ -2489,22 +2164,6 @@ function PackagesArea({ svc, packageMap, pickerOpen, setPickerOpen, onChange }: 
 //  Style helpers
 // ──────────────────────────────────────────────────────────────
 
-function th(width: number): React.CSSProperties {
-  return { padding: '8px 10px', textAlign: 'center', width, fontWeight: 'normal',
-           borderBottom: '1px solid #e0e0e0' }
-}
-function thLeft(width?: number): React.CSSProperties {
-  return { padding: '8px 10px', textAlign: 'left', width, fontWeight: 'normal',
-           borderBottom: '1px solid #e0e0e0' }
-}
-function td(width: number): React.CSSProperties {
-  return { padding: '6px 10px', textAlign: 'center', width, fontSize: 13,
-           borderBottom: '1px solid #f0f0f0' }
-}
-function tdLeft(width?: number): React.CSSProperties {
-  return { padding: '6px 10px', textAlign: 'left', width, fontSize: 13,
-           borderBottom: '1px solid #f0f0f0' }
-}
 function btnSmall(): React.CSSProperties {
   return { fontSize: 11, padding: '2px 8px', marginLeft: 4, cursor: 'pointer',
            background: '#fff', border: '1px solid #ccc', borderRadius: 3 }
@@ -2525,9 +2184,4 @@ function btnAdd(small = false): React.CSSProperties {
   return { fontSize: small ? 11 : 13, padding: small ? '3px 10px' : '6px 16px',
            cursor: 'pointer', background: '#f5f9ff', border: '1px dashed #3498db',
            color: '#3498db', borderRadius: 3 }
-}
-function chipBtn(open: boolean): React.CSSProperties {
-  return { fontSize: 12, padding: '2px 8px', cursor: 'pointer',
-           background: open ? '#e8f0fe' : '#fff',
-           border: '1px solid #b8d4f5', borderRadius: 12, color: '#1a73e8' }
 }
