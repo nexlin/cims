@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.10)
 Project("TGroup MPS Projcet Base" C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -136,7 +136,7 @@ ExternalProject_Add(
    GIT_REPOSITORY  https://github.com/google/googletest.git
    GIT_TAG release-1.10.0
    INSTALL_DIR  ${GTEST_DIR} 
-   CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=${GTEST_DIR}" "-DCMAKE_CXX_FLAGS=-w"
+   CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=${GTEST_DIR}" "-DCMAKE_CXX_FLAGS=-w -include cstdint" "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
    SOURCE_DIR ${GTEST_DIR}/src
    BINARY_DIR ${GTEST_DIR}
 )
