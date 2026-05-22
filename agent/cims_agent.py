@@ -66,7 +66,18 @@ DEFAULT_INSTALL_ROOT = os.environ.get(
 DEFAULT_HEARTBEAT_SEC = 30
 DEFAULT_METRIC_SEC = 60
 DEFAULT_SYNC_PORT = 9900
-AGENT_VERSION = "0.1.0"
+def _read_pkg_version() -> str:
+    """install dir 의 pkg.json 에서 version 읽기 — 패키지 버전과 자동 동기화.
+    실패 시 'unknown' (런타임 자체는 계속 동작)."""
+    try:
+        import os as _os
+        here = _os.path.dirname(_os.path.abspath(__file__))
+        with open(_os.path.join(here, "pkg.json")) as f:
+            return json.load(f).get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+AGENT_VERSION = _read_pkg_version()
 
 
 # ──────────────────────────────────────────────────────────────
@@ -184,6 +195,7 @@ def collect_host_info() -> dict:
     except Exception:
         info["disk_gb"] = 0
     info["interfaces"] = collect_interfaces()
+    info["routes"] = collect_routes()
     return info
 
 
@@ -213,14 +225,20 @@ def detect_mgmt_ip(csc_url: str) -> str | None:
 
 
 def collect_interfaces() -> list:
-    """ip -j -4 addr 로 IPv4 인터페이스 list 수집.
+    """ip -j addr 로 IPv4 인터페이스 list 수집.
     한 iface 의 primary + secondary IP 모두 별도 row 로 추출 (VIP 보유 여부 추적용).
-    lo (loopback) 는 서비스 후보가 아니므로 제외. CSC 통신 NIC 은 mgmt=True 플래그.
-    HaServicesPage 의 서비스 IP / VIP 설정 시 운영자에게 후보 iface 제공 +
-    ServiceIpRow/VipBinding 의 status 매칭에도 사용.
+    IP 가 없는 NIC 도 ip='' mask=0 row 로 1건 추가 — Console 의 ServiceIpPanel
+    에서 빈 NIC 도 후보로 노출 (운영자가 거기에 IP 부여 가능). lo (loopback) 만 제외.
+    CSC 통신 NIC 은 mgmt=True 플래그. HaServicesPage 의 서비스 IP / VIP 설정 시
+    운영자에게 후보 iface 제공 + ServiceIpRow/VipBinding 의 status 매칭에도 사용.
+
+    cims-priv ip-add 가 부여한 label '<iface>:cims' 이 있는 IP 는 managed=True 로
+    표시 — UI 에서 이런 IP 만 [삭제] 허용 (외부 IP 보호).
     """
     try:
-        out = subprocess.run(["ip", "-j", "-4", "addr"],
+        # -4 flag 를 쓰면 IPv4 없는 NIC 이 출력 자체에서 빠지므로, 전체 family 받고
+        # 아래 루프에서 family=='inet' 만 row 로 변환.
+        out = subprocess.run(["ip", "-j", "addr"],
                              capture_output=True, text=True, timeout=3)
         if out.returncode != 0:
             return []
@@ -232,6 +250,7 @@ def collect_interfaces() -> list:
         name = r.get("ifname")
         if not name or name == "lo":
             continue
+        ipv4_rows = []
         for a in (r.get("addr_info") or []):
             if a.get("family") != "inet":
                 continue
@@ -245,7 +264,59 @@ def collect_interfaces() -> list:
             }
             if _MGMT_IP and ip == _MGMT_IP:
                 row["mgmt"] = True
-            result.append(row)
+            label = a.get("label") or ""
+            # cims-priv ip-add 가 부여한 label 패턴. iface 이름이 11자 이상이면 label
+            # 생략됨 (cims-priv 정책) — 그 경우 managed=False 로 식별 불가.
+            if label.endswith(":cims"):
+                row["managed"] = True
+            ipv4_rows.append(row)
+        if ipv4_rows:
+            result.extend(ipv4_rows)
+        else:
+            # IPv4 미할당 NIC — UI 의 ServiceIp 후보로만 노출.
+            result.append({"name": name, "ip": "", "mask": 0})
+    return result
+
+
+def collect_routes() -> list:
+    """ip -j route 로 IPv4 route list 전체 수집.
+
+    플래그:
+      - is_default : default route (dst='default' 또는 '0.0.0.0/0') — readonly
+      - kernel_auto: protocol=kernel (subnet 자동 생성 route) — readonly
+      - managed    : cims-managed iface (label '<iface>:cims' IP 보유 NIC) 위
+                     사용자-추가 specific route — [삭제] 허용
+    위 셋 모두 아닌 외부 specific route 도 표시 (readonly).
+    """
+    try:
+        out = subprocess.run(["ip", "-j", "route"],
+                             capture_output=True, text=True, timeout=3)
+        if out.returncode != 0:
+            return []
+        rows = json.loads(out.stdout or "[]")
+    except Exception:
+        return []
+    managed_devs = set()
+    for i in collect_interfaces():
+        if i.get("managed") and i.get("name"):
+            managed_devs.add(i["name"])
+    result = []
+    for r in rows:
+        dst = r.get("dst") or ""
+        dev_ = r.get("dev") or ""
+        gw   = r.get("gateway") or ""
+        protocol = r.get("protocol") or ""
+        if not dst:
+            continue
+        is_default  = dst in ("default", "0.0.0.0/0")
+        kernel_auto = protocol == "kernel"
+        row = {"dst": dst, "via": gw, "dev": dev_}
+        if is_default: row["is_default"] = True
+        if kernel_auto: row["kernel_auto"] = True
+        # specific user route 만 managed 판정 (kernel/default 는 자동 생성/system).
+        if dev_ in managed_devs and not is_default and not kernel_auto:
+            row["managed"] = True
+        result.append(row)
     return result
 
 
@@ -729,34 +800,50 @@ def _resolve_cims_priv() -> "str | None":
 
 
 def job_apply_ip_config(params: dict) -> tuple:
-    """service_ip_rows[] → 각 iface 에 secondary IP 추가 (ip addr add).
+    """service_ip_rows[] / routes[] → ip-add/ip-del/route-add/route-del 분기 실행.
 
     Params:
-      - service_ip_rows: [{iface, ip, mask, slot?, status?}, ...] (CSC 가 cims_agent.service_ip_rows_json
-        에서 읽어 전달)
+      - service_ip_rows: [{op:'add'|'del', iface, ip, mask, slot?}, ...]
+                        op 미지정 시 'add' (backward compat).
+      - routes:         [{op:'add'|'del', dst, via, dev}, ...] (optional)
 
-    안전 정책 (v1):
-      - secondary IP 만 add (primary 변경 안 함 — mgmt 연결 끊김 방지)
-      - lo / CSC 통신 NIC 의 row 는 거부 (자기 단절 방지). 마지막 보루.
-      - "RTNETLINK answers: File exists" 는 정상 (이미 존재) — ok 로 처리
-      - delete 미지원 (rollback 은 운영자가 수동)
+    안전 정책:
+      - secondary IP 만 add — primary 변경 안 함 (mgmt 끊김 방지)
+      - lo / CSC 통신 NIC 의 row 는 거부 (자기 단절 방지)
+      - del 은 NIC 의 해당 IP 가 cims-label 갖고 있어야 허용 — 외부에서 부여한
+        IP 는 보호 (운영자 명시 의도만 변경 가능)
+      - route 의 dev 는 cims-managed iface (label 가진 IP 보유) 여야 변경 허용
+      - default route 변경 금지 (cims-priv 단에서 거부)
+      - 'already present' / 'not present' 는 정상 (idempotent)
 
-    반환: (rc, stdout, stderr). rc=0 = 전체 ok 또는 일부 already-exists.
+    반환: (rc, stdout, stderr). rc=0 = 모든 row 성공 또는 idempotent skip.
     """
-    rows = params.get("service_ip_rows") or []
-    if not isinstance(rows, list) or not rows:
+    rows  = params.get("service_ip_rows") or []
+    routes = params.get("routes") or []
+    if not isinstance(rows, list): rows = []
+    if not isinstance(routes, list): routes = []
+    if not rows and not routes:
         return 0, "no rows to apply", ""
 
-    # mgmt NIC 식별 — _MGMT_IP 가 set 됐을 때만 (test 시 None 일 수도).
+    # 현재 NIC 상태 — mgmt/lo 식별 + managed IP 식별 (ip del 검증용).
+    cur_ifaces = collect_interfaces()
     mgmt_ifaces: set[str] = set()
-    if _MGMT_IP:
-        for iface in collect_interfaces():
-            if iface.get("mgmt"):
-                mgmt_ifaces.add(iface["name"])
+    managed_ip: set[tuple[str, str]] = set()   # (iface, ip)
+    for i in cur_ifaces:
+        if i.get("mgmt"):
+            mgmt_ifaces.add(i["name"])
+        if i.get("managed") and i.get("ip"):
+            managed_ip.add((i["name"], i["ip"]))
 
     msgs = []
     fail_count = 0
+
+    priv = _resolve_cims_priv()
+    if priv is None and (rows or routes):
+        return 1, "[FAIL] cims-priv not found", ""
+
     for r in rows:
+        op    = (r.get("op") or "add").lower()
         iface = r.get("iface")
         ip    = r.get("ip")
         mask  = r.get("mask")
@@ -764,35 +851,68 @@ def job_apply_ip_config(params: dict) -> tuple:
             msgs.append(f"skip (incomplete): {r}")
             continue
         if iface == "lo":
-            msgs.append(f"[DENY] {iface}: lo 변경 불가")
-            fail_count += 1
-            continue
+            msgs.append(f"[DENY] {iface}: lo 변경 불가"); fail_count += 1; continue
         if iface in mgmt_ifaces:
             msgs.append(f"[DENY] {iface}: mgmt NIC (CSC 통신) 변경 불가 — 자기 단절 방지")
-            fail_count += 1
-            continue
+            fail_count += 1; continue
+        if op not in ("add", "del"):
+            msgs.append(f"[DENY] {iface} {ip}: op '{op}' 미지원"); fail_count += 1; continue
+        if op == "del" and (iface, ip) not in managed_ip:
+            msgs.append(f"[DENY] {iface} -= {ip}: 외부 IP (cims-label 없음) — 보호")
+            fail_count += 1; continue
         cidr = f"{ip}/{mask}"
-        priv = _resolve_cims_priv()
-        if priv is None:
-            fail_count += 1
-            msgs.append(f"[FAIL] {iface} += {cidr}: cims-priv not found")
-            continue
+        verb = "ip-add" if op == "add" else "ip-del"
         try:
-            res = subprocess.run(["sudo", "-n", priv, "ip-add", iface, cidr],
+            res = subprocess.run(["sudo", "-n", priv, verb, iface, cidr],
                                  capture_output=True, text=True, timeout=10)
+            sym = "+=" if op == "add" else "-="
             if res.returncode == 0:
                 combined = (res.stdout or "") + (res.stderr or "")
-                if "already present" in combined:
-                    msgs.append(f"[SKIP] {iface}: {cidr} already present")
+                if "already present" in combined or "not present" in combined:
+                    msgs.append(f"[SKIP] {iface} {sym} {cidr}")
                 else:
-                    msgs.append(f"[OK]   {iface} += {cidr}")
+                    msgs.append(f"[OK]   {iface} {sym} {cidr}")
             else:
                 fail_count += 1
                 err = (res.stderr or res.stdout or "").strip()[-200:]
-                msgs.append(f"[FAIL] {iface} += {cidr}: rc={res.returncode} err={err}")
+                msgs.append(f"[FAIL] {iface} {sym} {cidr}: rc={res.returncode} err={err}")
         except Exception as e:
             fail_count += 1
-            msgs.append(f"[FAIL] {iface} += {cidr}: {e}")
+            msgs.append(f"[FAIL] {iface} {op} {cidr}: {e}")
+
+    for r in routes:
+        op  = (r.get("op") or "add").lower()
+        dst = r.get("dst")
+        via = r.get("via")
+        dev_ = r.get("dev")
+        if not dst or not via or not dev_:
+            msgs.append(f"skip route (incomplete): {r}"); continue
+        if op not in ("add", "del"):
+            msgs.append(f"[DENY] route {dst}: op '{op}' 미지원"); fail_count += 1; continue
+        # mgmt NIC 의 route 는 거부 (CSC 통신 단절 방지). 그 외 모든 NIC 의 모든 dst (default 포함) 허용.
+        if dev_ == "lo":
+            msgs.append(f"[DENY] route {dst} dev {dev_}: lo 변경 불가"); fail_count += 1; continue
+        if dev_ in mgmt_ifaces:
+            msgs.append(f"[DENY] route {dst} dev {dev_}: mgmt NIC — 자기 단절 방지로 거부")
+            fail_count += 1; continue
+        verb = "route-add" if op == "add" else "route-del"
+        try:
+            res = subprocess.run(["sudo", "-n", priv, verb, dst, via, dev_],
+                                 capture_output=True, text=True, timeout=10)
+            sym = "+=" if op == "add" else "-="
+            if res.returncode == 0:
+                combined = (res.stdout or "") + (res.stderr or "")
+                if "already present" in combined or "not present" in combined:
+                    msgs.append(f"[SKIP] route {sym} {dst} via {via} dev {dev_}")
+                else:
+                    msgs.append(f"[OK]   route {sym} {dst} via {via} dev {dev_}")
+            else:
+                fail_count += 1
+                err = (res.stderr or res.stdout or "").strip()[-200:]
+                msgs.append(f"[FAIL] route {sym} {dst}: rc={res.returncode} err={err}")
+        except Exception as e:
+            fail_count += 1
+            msgs.append(f"[FAIL] route {op} {dst}: {e}")
 
     rc = 0 if fail_count == 0 else 1
     return rc, "\n".join(msgs), ""
@@ -1081,13 +1201,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if path == "/apply-ip-config":
             body = self._read_body_json()
             rows = body.get("service_ip_rows") or []
+            routes = body.get("routes") or []
             if not isinstance(rows, list):
                 return self._respond(400, {"error": "service_ip_rows must be array"})
-            rc, out, err = job_apply_ip_config({"service_ip_rows": rows})
+            if not isinstance(routes, list):
+                return self._respond(400, {"error": "routes must be array"})
+            rc, out, err = job_apply_ip_config({"service_ip_rows": rows, "routes": routes})
             return self._respond(200,
                                   {"ok": rc == 0, "rc": rc,
                                    "stdout": out, "stderr": err,
-                                   "rows": len(rows)})
+                                   "rows": len(rows), "routes": len(routes)})
         return self._respond(404, {"error": "not_found"})
 
 
@@ -1268,7 +1391,11 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     max_backoff = max(heartbeat_sec, 60)
     while True:
         try:
-            hb_body = {"interfaces": collect_interfaces()}
+            hb_body = {
+                "interfaces": collect_interfaces(),
+                "routes": collect_routes(),
+                "agent_version": AGENT_VERSION,
+            }
             if sync_port: hb_body["sync_port"] = sync_port
             status, resp = http_post(f"{csc_url}/api/agent/heartbeat", hb_body,
                                      headers={"X-Agent-Token": state.session_token})

@@ -8,7 +8,15 @@
 # 사용법 (agent 내부 호출):
 #   sudo -n cims-priv ip-add <iface> <cidr>
 #   sudo -n cims-priv ip-del <iface> <cidr>
+#   sudo -n cims-priv route-add <dest_cidr> <via> <dev>
+#   sudo -n cims-priv route-del <dest_cidr> <via> <dev>
 #   sudo -n cims-priv version
+#
+# ip-add 는 항상 'label <iface>:cims' 를 부여 — collect_interfaces 가 label 로
+# managed IP 식별. ip-del 은 label 무관하게 동작 (단 agent 가 호출 전 managed
+# 여부 검증한다는 전제).
+# route-add 는 default gateway (0.0.0.0/0 또는 'default') 를 거부 — mgmt 망 단절
+# 위험. specific subnet route 만 허용.
 
 set -euo pipefail
 
@@ -38,8 +46,15 @@ do_ip_add() {
     local iface="$1" cidr="$2"
     valid_iface "$iface" || exit 2
     valid_cidr "$cidr"   || exit 2
-    if "$IP_CMD" addr add "$cidr" dev "$iface" 2>/tmp/cims-priv.err; then
-        ok "$iface += $cidr"
+    # label = "<iface>:cims" — collect_interfaces 가 label 로 cims-managed 식별.
+    # IFNAMSIZ=16 제약상 label 도 16 자 미만이어야. iface 최대 15자 + ':cims' 5자 = 최대 20자 가능 →
+    # iface 이름이 11자 이상이면 label 충돌 위험. 그 경우엔 label 생략 (관리 식별 불가하므로 skip 안 함).
+    local label_arg=()
+    if (( ${#iface} <= 10 )); then
+        label_arg=(label "${iface}:cims")
+    fi
+    if "$IP_CMD" addr add "$cidr" dev "$iface" "${label_arg[@]}" 2>/tmp/cims-priv.err; then
+        ok "$iface += $cidr${label_arg:+ (label=${iface}:cims)}"
     else
         # kernel 이 같은 IP/dev 충돌 시 두 가지 메시지 중 하나 반환 — 둘 다 already-present 로 처리
         if grep -qE "File exists|Address already assigned" /tmp/cims-priv.err 2>/dev/null; then
@@ -50,6 +65,40 @@ do_ip_add() {
         fi
     fi
     rm -f /tmp/cims-priv.err
+}
+
+# 'default' 또는 CIDR 모두 dst 로 허용. default → 'default' literal 그대로 전달.
+valid_dst() {
+    [[ "$1" == "default" || "$1" == "0.0.0.0/0" ]] && return 0
+    valid_cidr "$1"
+}
+
+do_route_add() {
+    local dest="$1" via="$2" dev_="$3"
+    valid_dst "$dest"      || exit 2
+    [[ "$via" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || { err "invalid via: $via"; exit 2; }
+    valid_iface "$dev_"    || exit 2
+    # 'replace' 단일 verb — default / specific 모두 idempotent. 같은 dst 의 옛 entry 덮어쓰기 →
+    # UI 의 [수정] 흐름 (op='add' 1회) 으로 via/dev 변경 가능.
+    if "$IP_CMD" route replace "$dest" via "$via" dev "$dev_" 2>/tmp/cims-priv.err; then
+        ok "route += $dest via $via dev $dev_"
+    else
+        err "ip route replace $dest via $via dev $dev_: $(cat /tmp/cims-priv.err 2>/dev/null)"
+        exit 3
+    fi
+    rm -f /tmp/cims-priv.err
+}
+
+do_route_del() {
+    local dest="$1" via="$2" dev_="$3"
+    valid_dst "$dest"      || exit 2
+    [[ "$via" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || { err "invalid via: $via"; exit 2; }
+    valid_iface "$dev_"    || exit 2
+    if "$IP_CMD" route del "$dest" via "$via" dev "$dev_" 2>/dev/null; then
+        ok "route -= $dest via $via dev $dev_"
+    else
+        info "route $dest via $via dev $dev_ not present (skip)"
+    fi
 }
 
 do_ip_del() {
@@ -73,11 +122,19 @@ case "${1:-}" in
         [[ $# -eq 3 ]] || { err "usage: cims-priv ip-del <iface> <cidr>"; exit 1; }
         do_ip_del "$2" "$3"
         ;;
+    route-add)
+        [[ $# -eq 4 ]] || { err "usage: cims-priv route-add <dest_cidr> <via> <dev>"; exit 1; }
+        do_route_add "$2" "$3" "$4"
+        ;;
+    route-del)
+        [[ $# -eq 4 ]] || { err "usage: cims-priv route-del <dest_cidr> <via> <dev>"; exit 1; }
+        do_route_del "$2" "$3" "$4"
+        ;;
     version)
-        echo "cims-priv 0.1.0"
+        echo "cims-priv 0.2.0"
         ;;
     *)
-        err "usage: cims-priv {ip-add|ip-del|version} ..."
+        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|version} ..."
         exit 1
         ;;
 esac
