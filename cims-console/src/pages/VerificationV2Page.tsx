@@ -941,7 +941,7 @@ export default function VerificationV2Page() {
       } catch (e: unknown) {
         if (!cancelled) {
           // 일시 네트워크 에러는 무시하고 계속 폴링
-          // eslint-disable-next-line no-console
+           
           console.warn('jobs polling 일시 실패', e)
         }
       }

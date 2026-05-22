@@ -10,7 +10,7 @@ const GRAN_LABELS: Record<Granularity, string> = {
   '5m': '5분', '10m': '10분', '1h': '1시간', '1d': '1일', '1M': '1월', '1y': '1년'
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
   data: Array<any>; labelKey: string; valueKey: string; maxH?: number
 }) {

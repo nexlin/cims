@@ -61,6 +61,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
   //  - scope = 'service' / undefined  → 항상 그룹 단위 (본 modal)
   //  - scope = 'system' + active_standby → VIP 모델 — 그룹 단위 fan-out
   //  - scope = 'system' + all_active     → 멤버별 (이 modal 미포함)
+  /* eslint-disable react-hooks/preserve-manual-memoization */
   const serviceCollections: ConfigTemplateCollection[] = useMemo(() => {
     const all = template?.collections || []
     return all.filter(c => {
@@ -69,6 +70,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
       return false
     })
   }, [template, haMode])
+  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   const memberDepsForPkg = useMemo(
     () => deployments.filter(d => memberIds.has(d.agent_id) && d.package_id === effectivePkgId),

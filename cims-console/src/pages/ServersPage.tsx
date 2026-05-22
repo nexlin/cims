@@ -632,6 +632,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   const selectedMismatch = selectedPkg ? moduleMismatch(selectedPkg.name) : null
 
   // 모듈 바뀌면 버전/process/functions 리셋
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!moduleName) { setPkgId(0); setProcessName(''); setFunctions(new Set()); return }
     const latest = (pkgsByModule.get(moduleName) || [])[0]
@@ -647,6 +648,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
     // 기본으로 모든 functions 체크
     setFunctions(new Set(funcs.map(f => f.name)))
   }, [selectedPkg])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function toggleFunc(name: string) {
     setFunctions(prev => {
