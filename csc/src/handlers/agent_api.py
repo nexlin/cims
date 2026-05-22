@@ -377,7 +377,8 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         'agent_version': info['agent_version'],
         'status': 'online' if row.get('status') == 'approved' else row.get('status'),
         'enrolled_at': now,
-        'last_heartbeat': now,
+        # last_heartbeat 는 실제 heartbeat 도착 시에만 update.
+        # enrollment 자체로 채우면 init.sh (enroll-only) 만 했는데도 hb 가 있는 것처럼 보이는 부수효과 → 명시적 분리.
     }
     if isinstance(ifaces, list):
         patches['interfaces'] = ifaces
@@ -435,8 +436,12 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
         patches['sync_port'] = sync_port
     if isinstance(ifaces, list):
         patches['interfaces'] = ifaces
-    if agent.get('status') in ('offline', 'approved'):
+    # heartbeat 가 도착했다는 건 enrollment 가 끝났고 token 검증을 통과했다는 의미 →
+    # pending 도 즉시 online 으로 자동 전환 (별도 admin approve 절차 불필요).
+    if agent.get('status') in ('offline', 'approved', 'pending'):
         patches['status'] = 'online'
+        if not agent.get('approved_at'):
+            patches['approved_at'] = now
 
     from handlers.agents import _job_pick_pending
     def _update_and_pick():

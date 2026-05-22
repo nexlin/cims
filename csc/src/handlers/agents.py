@@ -540,13 +540,14 @@ def _is_dev_mode(config: dict) -> bool:
 
 
 def _csc_public_url(handler_args: HandlerArgs, config: dict) -> str:
-    """install 명령에 쓸 CSC 외부 URL. 우선순위:
-       1) config.Server.PublicUrl (명시적 설정 시)
+    """install 명령에 박을 CSC URL — agent 들이 mgmt 망에서 csc 로 접속할 주소.
+    우선순위:
+       1) config.Server.AgentCscUrl (명시적 설정 — mgmt 망 IP 권장)
        2) HTTP Host 헤더 (admin 이 접속한 주소 그대로)
        3) config.Server.Ip + Port (0.0.0.0 면 placeholder)
     """
     srv = (config.get("Server") or {})
-    pu = (srv.get("PublicUrl") or "").strip()
+    pu = (srv.get("AgentCscUrl") or "").strip()
     if pu:
         return pu.rstrip("/")
     hdr_host = ""
