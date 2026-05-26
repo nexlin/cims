@@ -1685,7 +1685,7 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
     patches: dict = {}
     if "service_kind" in body and "process_name" not in body:
         body["process_name"] = body["service_kind"]
-    for col in ("process_name", "install_path", "note"):
+    for col in ("process_name", "install_path", "note", "package_id"):
         if col in body:
             patches[col] = body[col]
     if "service_functions" in body:
