@@ -148,6 +148,7 @@ export interface AgentCreateResult extends Agent {
   enrollment_token_expires_at: string
   enrollment_token_ttl_sec?: number
   install_command: string
+  setup_systemd_command?: string
 }
 
 export interface AgentMetric {
@@ -375,7 +376,7 @@ export const deploymentApi = {
   regenerateToken: (id: number) =>
     api.post<AgentCreateResult>(`/agents/${id}/regenerate-token`, {}),
   getInstallCommand: (id: number) =>
-    api.get<{ install_command: string; enrollment_token_expires_at: string }>(`/agents/${id}/install-command`),
+    api.get<{ install_command: string; setup_systemd_command?: string; enrollment_token_expires_at: string }>(`/agents/${id}/install-command`),
   // DEV 전용 — /release/package 빌드 산출물 (build/dist/packages/*.tar.gz) 일괄 file_store 등록.
   // 상용 환경 (Server.DevMode=false) 에서는 403.
   registerPackagesFromDist: () =>
