@@ -277,6 +277,7 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/log
 
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/bin
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/lib
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/config
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/cert
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/user
@@ -326,6 +327,12 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/User        ${CMAKE_BINARY_DIR}/dist/csp/user
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/Group       ${CMAKE_BINARY_DIR}/dist/csp/group
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/route
+
+    # ── 4b. CSP 동적 의존 라이브러리 vendoring (RPATH=$ORIGIN/../lib) ───
+    #    libmariadb3 시스템 미설치 호스트에서도 csp 단독 구동 가능.
+    #    MARIADB_LIB_ACTUAL = find_library 결과의 REALPATH (csp/CMakeLists 에서 cache).
+    #    SONAME (libmariadb.so.3) 으로 명시적 rename — csp binary 가 그 이름으로 dlopen.
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MARIADB_LIB_ACTUAL} ${CMAKE_BINARY_DIR}/dist/csp/lib/libmariadb.so.3
 
     # ── 5. 인증서 복사 ─────────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem  ${CMAKE_BINARY_DIR}/dist/csp/cert/
