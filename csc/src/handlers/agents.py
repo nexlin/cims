@@ -1866,9 +1866,44 @@ if [[ ! -f "$STATE_DIR/state.json" ]]; then
     exit 1
 fi
 
-if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
-    echo "✗ systemd --user 사용 불가 환경 — 전환 불가" >&2
+if ! command -v systemctl >/dev/null 2>&1; then
+    echo "✗ systemctl 명령 없음 — systemd 환경 아님" >&2
     exit 1
+fi
+
+# ── systemd --user manager 활성화 (linger + XDG_RUNTIME_DIR) ────────────
+# ssh 세션처럼 PAM systemd 통합 안 된 login 에서는 /run/user/<uid> 가 없거나
+# XDG_RUNTIME_DIR 미설정 → systemctl --user 실패. linger 활성화 + 환경변수
+# 보강하면 즉시 동작.
+UID_NUM=$(id -u)
+if [[ -z "${{XDG_RUNTIME_DIR:-}}" ]]; then
+    export XDG_RUNTIME_DIR="/run/user/$UID_NUM"
+fi
+
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+    if [[ ! -d "$XDG_RUNTIME_DIR" ]]; then
+        echo "⚠ /run/user/$UID_NUM 없음 — systemd linger 활성화 필요"
+        if sudo -n loginctl enable-linger "$USER" 2>/dev/null; then
+            echo "✓ linger 자동 활성화"
+        else
+            echo ""
+            echo "다음 명령을 1회 실행 후 setup-systemd.sh 재실행해 주세요:" >&2
+            echo "    sudo loginctl enable-linger $USER" >&2
+            echo "" >&2
+            exit 1
+        fi
+        # linger 활성화 직후 /run/user 생성 대기
+        for _ in 1 2 3 4 5; do
+            [[ -d "$XDG_RUNTIME_DIR" ]] && break
+            sleep 1
+        done
+    fi
+    # XDG_RUNTIME_DIR 잡혔어도 user manager bus 가 안 떠있으면 재시도
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+        echo "✗ systemd --user 여전히 접근 불가 (XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR)" >&2
+        echo "  → ssh 재접속 또는 'sudo systemctl start user@$UID_NUM' 후 재시도" >&2
+        exit 1
+    fi
 fi
 
 # (1) 옛 nohup agent 정지 — systemd 가 따로 띄울 것
