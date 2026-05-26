@@ -386,6 +386,7 @@ export const deploymentApi = {
       source_dir: string
     }>(`/packages/register-from-dist`, {}),
   upgradeAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/upgrade`, {}),
+  restartAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/restart`, {}),
   applyIpConfig: (id: number,
                   ops?: { service_ip_rows?: Array<{ op: 'add'|'del'; iface: string; ip: string; mask: number; slot?: string }>;
                           routes?:          Array<{ op: 'add'|'del'; dst: string; via: string; dev: string }> }) =>

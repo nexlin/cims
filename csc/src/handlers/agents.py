@@ -419,6 +419,8 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _agent_metrics(aid, config)
         if action == "upgrade" and method == "POST":
             return await _upgrade_agent_binary(handler_args, aid, config)
+        if action == "restart" and method == "POST":
+            return await _restart_agent(handler_args, aid, config)
         if action == "apply-ip-config" and method == "POST":
             return await _apply_ip_config(handler_args, aid, config)
     elif len(tail) == 3:
@@ -850,6 +852,26 @@ async def _upgrade_agent_binary(handler_args: HandlerArgs, aid: int, config):
     return HandlerResult(status=202,
                          body={"ok": True, "agent_id": aid, "job_id": job_id,
                                "hint": "agent 가 다음 heartbeat 에서 pickup 후 재시작됩니다 (수 초 내)"},
+                         media_type="application/json")
+
+
+async def _restart_agent(handler_args: HandlerArgs, aid: int, config):
+    """Agent 자체 self-restart job 큐잉. agent 가 heartbeat 로 pickup → execv 로 self-exec.
+    바이너리 다운로드/교체 없이 현재 image 그대로 재시작. die 한 agent 는 깨울 수 없음 (외부 supervisor 필요)."""
+    row = await asyncio.to_thread(_agent_load, config, aid)
+    if not row:
+        return HandlerResult(status=404, body={"error": "agent_not_found"},
+                             media_type="application/json")
+    if row.get("status") != "online":
+        return HandlerResult(status=409,
+                             body={"error": "agent_not_online",
+                                   "hint": "die 한 agent 는 CSC 에서 깨울 수 없음 — 호스트에서 ./start.sh 또는 systemd unit 의 자동 부활 필요"},
+                             media_type="application/json")
+    job_id = await asyncio.to_thread(_job_create, config, aid, 'agent_restart', {})
+    logger.log_info(f"[agent-restart] queued job_id={job_id} agent_id={aid} name={row.get('name')}")
+    return HandlerResult(status=202,
+                         body={"ok": True, "agent_id": aid, "job_id": job_id,
+                               "hint": "agent 가 다음 heartbeat 에서 pickup 후 self-exec 합니다 (수 초 내)"},
                          media_type="application/json")
 
 

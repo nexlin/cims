@@ -1269,6 +1269,9 @@ def execute_job(job: dict, csc_url: str, session_token: str) -> dict:
             rc, out, err = job_install(params, csc_url, session_token)
         elif jt == "upgrade_agent":
             rc, out, err = job_upgrade_agent(csc_url, session_token)
+        elif jt == "agent_restart":
+            # agent 자체 self-restart. heartbeat loop 가 execv 처리.
+            rc, out, err = 0, "agent restart requested — execv self", ""
         elif jt in ("start", "stop", "restart"):
             rc, out, err = job_process_control(params, jt)
         elif jt == "update_config":
@@ -1425,11 +1428,12 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                     rep_status, rep_body = http_post(f"{csc_url}/api/agent/report", result,
                                                       headers={"X-Agent-Token": state.session_token})
                     print(f"[agent] report status={rep_status} rc={result['result_code']}", flush=True)
-                    # upgrade_agent 성공 시 새 코드로 self-exec.
+                    # upgrade_agent / agent_restart 성공 시 새 코드 image 로 self-exec.
                     # systemd 환경: execv 가 모든 fd close + 같은 PID 로 새 image 실행 (Restart=always 보다 빠름)
                     # nohup 환경 (no-systemd): execv 가 유일한 재기동 경로 — 부모 shell 이 죽었으므로 외부 monitor 없음
-                    if job["type"] == "upgrade_agent" and result["result_code"] == 0:
-                        print("[agent] upgrade done — execv self for new code", flush=True)
+                    if job["type"] in ("upgrade_agent", "agent_restart") and result["result_code"] == 0:
+                        action = "upgrade" if job["type"] == "upgrade_agent" else "restart"
+                        print(f"[agent] {action} done — execv self", flush=True)
                         try:
                             os.execv(sys.executable, [sys.executable] + sys.argv)
                         except Exception as e:

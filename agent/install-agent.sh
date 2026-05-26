@@ -239,6 +239,77 @@ fi
 EOF
     chmod 755 "$START_SH"
 
+    # ────────────────────────────────────────────────────────────────────
+    # setup-systemd.sh — nohup 모드 → systemd --user 전환 (자동 부활 위해)
+    #   사용 시점: agent 가 die 했을 때 (외부 supervisor 없어 부활 못 함) 또는
+    #   처음부터 systemd 로 운영하고 싶을 때. 한 번만 실행하면 됨.
+    # ────────────────────────────────────────────────────────────────────
+    SETUP_SYSTEMD_SH="$INSTALL_DIR/setup-systemd.sh"
+    cat > "$SETUP_SYSTEMD_SH" <<EOF
+#!/usr/bin/env bash
+# nohup 모드 → systemd --user 전환. die 시 자동 부활 가능.
+set -euo pipefail
+cd "\$(dirname "\$0")"
+
+if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo "✗ systemd --user 사용 불가 환경 — 전환 불가" >&2
+    exit 1
+fi
+
+UNIT_SAFE="\$(echo "$AGENT_NAME" | tr -c 'A-Za-z0-9-' '-' | sed 's/-\+/-/g; s/^-//; s/-\$//')"
+[[ -z "\$UNIT_SAFE" ]] && UNIT_SAFE="default"
+UNIT_DIR="\${XDG_CONFIG_HOME:-\$HOME/.config}/systemd/user"
+UNIT_NAME="cims-agent-\${UNIT_SAFE}.service"
+UNIT_FILE="\$UNIT_DIR/\$UNIT_NAME"
+mkdir -p "\$UNIT_DIR"
+
+# 옛 nohup 프로세스 정지 — systemd 가 따로 띄울 것
+if pgrep -f "cims_agent.py.*--name $AGENT_NAME" >/dev/null 2>&1; then
+    echo "==> 옛 nohup agent 정지"
+    PID=\$(pgrep -f "cims_agent.py.*--name $AGENT_NAME" | head -1)
+    kill "\$PID" 2>/dev/null || true
+    sleep 1
+fi
+
+echo "==> Writing user systemd unit: \$UNIT_FILE"
+cat > "\$UNIT_FILE" <<UNIT
+[Unit]
+Description=CIMS Server Agent (dir=$INSTALL_DIR)
+After=network-online.target default.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+Environment=CIMS_ENROLLMENT_TOKEN=$ENROLL_TOKEN
+ExecStart=/usr/bin/python3 $BIN_FILE \\\\
+    --csc-url $CSC_URL \\\\
+    --state-dir $STATE_DIR \\\\
+    --name $AGENT_NAME
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+UNIT
+
+systemctl --user daemon-reload
+systemctl --user enable "\$UNIT_NAME"
+systemctl --user restart "\$UNIT_NAME"
+
+echo "==> Status:"
+systemctl --user --no-pager status "\$UNIT_NAME" || true
+echo ""
+echo "로그:   journalctl --user -u \$UNIT_NAME -f"
+echo "제어:   systemctl --user {status|restart|stop} \$UNIT_NAME"
+if ! loginctl show-user "\$USER" 2>/dev/null | grep -q '^Linger=yes'; then
+    echo ""
+    echo "※ 로그아웃 후에도 자동 기동되려면 (1회):"
+    echo "     sudo loginctl enable-linger \$USER"
+fi
+EOF
+    chmod 755 "$SETUP_SYSTEMD_SH"
+
     UNINSTALL_SH="$INSTALL_DIR/uninstall.sh"
     cat > "$UNINSTALL_SH" <<EOF
 #!/usr/bin/env bash
@@ -261,7 +332,7 @@ done
 
 echo "이 작업은 CIMS agent (name='$AGENT_NAME') 를 완전히 제거합니다:"
 echo "  • 실행 중인 agent process 종료"
-echo "  • state/, agent.log, run.sh, init.sh, start.sh, setup-sudoers.sh, update.sh 삭제"
+echo "  • state/, agent.log, run.sh, init.sh, start.sh, setup-sudoers.sh, setup-systemd.sh, update.sh 삭제"
 echo "  • agent/ 디렉토리 삭제 (cims_agent.py, bin/cims-priv, bin/cims-ha 등)"
 echo "  • /etc/sudoers.d/cims-priv 제거 (sudo 비번 1회 필요)"
 if [[ \$keep_modules -ne 1 ]]; then
@@ -329,7 +400,7 @@ else
 fi
 
 # 4. install dir 안 모든 잔재 삭제 (sub-scripts + agent/)
-rm -rf state agent.log run.sh init.sh start.sh setup-sudoers.sh update.sh agent
+rm -rf state agent.log run.sh init.sh start.sh setup-sudoers.sh setup-systemd.sh update.sh agent
 echo "✓ state + sub-scripts + agent/ 디렉토리 삭제"
 
 echo ""
@@ -463,8 +534,9 @@ if [[ "$USE_SYSTEMD" != "yes" ]]; then
     echo "  2. 실행 (agent 기동 + heartbeat 시작 → 자동 online 전환):"
     echo "       $INSTALL_DIR/start.sh"
     echo ""
-    echo "  (참고) 업데이트 :  $INSTALL_DIR/update.sh        (agent 바이너리만 갱신 + restart)"
-    echo "  (참고) 완전 제거:  $INSTALL_DIR/uninstall.sh    (모듈 정지 + 파일 삭제 + sudoers 제거)"
+    echo "  (참고) 업데이트  : $INSTALL_DIR/update.sh           (agent 바이너리만 갱신 + restart)"
+    echo "  (참고) 자동 부활 : $INSTALL_DIR/setup-systemd.sh    (systemd --user 전환 — die 시 자동 재기동)"
+    echo "  (참고) 완전 제거 : $INSTALL_DIR/uninstall.sh        (모듈 정지 + 파일 삭제 + sudoers 제거)"
 fi
 echo ""
 echo "==> 설치 완료 (Done)."

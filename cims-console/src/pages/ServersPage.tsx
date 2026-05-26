@@ -109,6 +109,14 @@ export default function ServersPage() {
       await load()
     } catch (e) { show((e as Error).message, 'err') }
   }
+  async function restartAgent(a: Agent) {
+    if (!confirm(`${a.name} 의 agent 프로세스를 재시작할까요?\n(현재 binary 그대로 self-exec — 약 수 초 끊김)`)) return
+    try {
+      const r = await deploymentApi.restartAgent(a.id)
+      show(`재시작 job 큐잉 (#${r.job_id})`, 'ok')
+      await load()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
   async function queueJob(d: Deployment, jt: JobType) {
     try {
       const r = await deploymentApi.queueJob(d.id, jt)
@@ -194,6 +202,7 @@ export default function ServersPage() {
             onRevoke={revokeAgent}
             onRemove={removeAgent}
             onUpgrade={upgradeAgent}
+            onRestart={restartAgent}
             onMetrics={setMetricsFor}
             onAddDeploy={() => setDeployModal({ agent: selected })}
             onConfigure={setConfigFor}
@@ -286,7 +295,7 @@ function StatChip({ label, value, sub, color }:
 type InspectorTab = 'modules' | 'info'
 
 function ServerInspector({ agent: a, deployments, packages,
-                          onApprove, onRevoke, onRemove, onUpgrade, onMetrics,
+                          onApprove, onRevoke, onRemove, onUpgrade, onRestart, onMetrics,
                           onAddDeploy, onConfigure, onJob, onRemoveDep }: {
   agent: Agent
   deployments: Deployment[]
@@ -295,6 +304,7 @@ function ServerInspector({ agent: a, deployments, packages,
   onRevoke: (a: Agent) => void
   onRemove: (a: Agent) => void
   onUpgrade: (a: Agent) => void
+  onRestart: (a: Agent) => void
   onMetrics: (a: Agent) => void
   onAddDeploy: () => void
   onConfigure: (d: Deployment) => void
@@ -330,6 +340,10 @@ function ServerInspector({ agent: a, deployments, packages,
             {(a.status === 'online' || a.status === 'offline') && (
               <>
                 <button className="btn btn--sm" onClick={() => onMetrics(a)}>메트릭</button>
+                <button className="btn btn--sm" onClick={() => onRestart(a)}
+                  disabled={a.status !== 'online'} title="agent 프로세스 self-restart (execv)">
+                  ↻ 재시작
+                </button>
                 <button className="btn btn--sm" onClick={() => onUpgrade(a)}
                   disabled={a.status !== 'online'} title="agent 바이너리를 최신 버전으로 교체">
                   ↑ 업그레이드
