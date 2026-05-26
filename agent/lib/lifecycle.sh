@@ -214,7 +214,7 @@ _start_cmp_variant() {
     bin/$name config/$name.json >> "$LOG_DIR/$name.log" 2>&1 &
     save_pid "$name" $!
     sleep 0.8
-    is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; }
+    is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; return 1; }
 }
 
 start_cmp() { _start_cmp_variant cmp; }
@@ -249,7 +249,7 @@ _start_csp_variant() {
     bin/$name config/$name.json -n >> "$LOG_DIR/$name.log" 2>&1 &
     save_pid "$name" $!
     sleep 1.0
-    is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; }
+    is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; return 1; }
 }
 
 start_csp() { _start_csp_variant csp; }
@@ -267,7 +267,7 @@ start_cwrtc() {
     bin/cwrtc config/cwrtc.json >> "$LOG_DIR/cwrtc.log" 2>&1 &
     save_pid cwrtc $!
     sleep 1.0
-    is_running cwrtc && ok "cwrtc 시작 완료 (pid=$(read_pid cwrtc))" || { err "cwrtc 시작 실패"; tail -5 "$LOG_DIR/cwrtc.log" | sed 's/^/  /'; }
+    is_running cwrtc && ok "cwrtc 시작 완료 (pid=$(read_pid cwrtc))" || { err "cwrtc 시작 실패"; tail -5 "$LOG_DIR/cwrtc.log" | sed 's/^/  /'; return 1; }
 }
 
 start_csc() {
@@ -301,7 +301,7 @@ print(p)" 2>/dev/null || echo 4420)
     python3 -u "$DIST_DIR/csc/src/csc_app.py" >> "$LOG_DIR/csc.log" 2>&1 &
     save_pid csc $!
     sleep 1.5
-    is_running csc && ok "CSC 시작 완료 (pid=$(read_pid csc), port=$csc_port)" || { err "CSC 시작 실패"; tail -3 "$LOG_DIR/csc.log" | sed 's/^/  /'; }
+    is_running csc && ok "CSC 시작 완료 (pid=$(read_pid csc), port=$csc_port)" || { err "CSC 시작 실패"; tail -3 "$LOG_DIR/csc.log" | sed 's/^/  /'; return 1; }
 }
 
 start_console() {
@@ -336,7 +336,7 @@ print(p if p else '')" 2>/dev/null)
         save_pid console $!
         sleep 2
         is_running console && ok "Dev-Console 시작 완료 (pid=$(read_pid console), port=$port)" \
-            || { err "Dev-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
+            || { err "Dev-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; return 1; }
     elif [[ -d "$DIST_DIR/console/dist" ]]; then
         [[ -z $port ]] && port=8080
         kill_stray "serve dist -l $port" "$port" tcp
@@ -358,7 +358,7 @@ print(p if p else '')" 2>/dev/null)
         local _real_pid; _real_pid=$(_pid_by_port "$port:tcp")
         [[ -n $_real_pid ]] && save_pid console "$_real_pid"
         is_running console && ok "Test-Console 시작 완료 (pid=$(read_pid console), port=$port)" \
-            || { err "Test-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; }
+            || { err "Test-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; return 1; }
     else
         err "console 디렉터리 없음. 'cims.sh build' 실행 필요"; return 1
     fi
@@ -394,7 +394,7 @@ start_phone() {
     # npx wrapper 가 종료되며 자식 node serve 가 reparent 되는 경우 — 실제 listener PID 로 갱신
     local _real_pid; _real_pid=$(_pid_by_port "3002:tcp")
     [[ -n $_real_pid ]] && save_pid phone "$_real_pid"
-    is_running phone && ok "phone 시작 완료 (pid=$(read_pid phone))" || { err "phone 시작 실패"; tail -3 "$LOG_DIR/phone.log" | sed 's/^/  /'; }
+    is_running phone && ok "phone 시작 완료 (pid=$(read_pid phone))" || { err "phone 시작 실패"; tail -3 "$LOG_DIR/phone.log" | sed 's/^/  /'; return 1; }
 }
 
 # ── TB (Test-Bed) 2종: TB-CSC(4419) / TB-Console(3000) ──
@@ -410,7 +410,7 @@ start_tb_csc() {
     save_pid tb-csc $!
     sleep 1.5
     is_running tb-csc && ok "TB-CSC 시작 완료 (pid=$(read_pid tb-csc), port=4419)" \
-        || { err "TB-CSC 시작 실패"; tail -3 "$LOG_DIR/tb-csc.log" | sed 's/^/  /'; }
+        || { err "TB-CSC 시작 실패"; tail -3 "$LOG_DIR/tb-csc.log" | sed 's/^/  /'; return 1; }
 }
 
 start_tb_console() {
@@ -428,7 +428,7 @@ start_tb_console() {
     save_pid tb-console $!
     sleep 3
     is_running tb-console && ok "TB-Console 시작 완료 (pid=$(read_pid tb-console), port=3000)" \
-        || { err "TB-Console 시작 실패"; tail -5 "$LOG_DIR/tb-console.log" | sed 's/^/  /'; }
+        || { err "TB-Console 시작 실패"; tail -5 "$LOG_DIR/tb-console.log" | sed 's/^/  /'; return 1; }
 }
 
 # ── 중지 함수 ──

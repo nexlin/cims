@@ -282,12 +282,11 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
         SendSipNotify( strUri, strEtag, strAction );
 
-        // 가입자 캐시 즉시 갱신
+        // 가입자 캐시 즉시 갱신.
+        // volte_subscriptions.id / ptt_subscriptions.id 는 E.164 `+` prefix 포함.
+        // tel:+821001 → +821001 (scheme 만 제거, MSISDN 의 `+` 는 유지).
         std::string strUserId = strUri;
-        // tel:+821001 → 821001
-        if ( strUserId.substr( 0, 5 ) == "tel:+" ) {
-            strUserId = strUserId.substr( 5 );
-        } else if ( strUserId.substr( 0, 4 ) == "tel:" ) {
+        if ( strUserId.substr( 0, 4 ) == "tel:" ) {
             strUserId = strUserId.substr( 4 );
         }
 
