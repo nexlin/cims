@@ -367,18 +367,18 @@ def collect_metrics() -> dict:
 # ──────────────────────────────────────────────────────────────
 
 def _default_install_subpath(params: dict) -> str:
-    """설치 경로 결정: modules/<module>/<version>/<process>/
+    """설치 경로 결정: modules/<module>/<version>/
 
     - module:  params["package_name"] (없으면 pkg-<id>)
     - version: params["package_version"] (없으면 "unknown")
-    - process: params["process_name"] > service_kind(legacy) > module 대문자
+
+    예전엔 `<module>/<version>/<process>/` 였지만 tarball top-dir 와 항상 같은
+    이름 (csp 패키지 → tarball top=csp, process=csp) 으로 중복이라 process 단계
+    제거. 결과: tarball 풀면 `modules/csp/0.0.3/csp/` (top dir 가 마지막).
     """
     module = (params.get("package_name") or f"pkg-{params.get('package_id','unknown')}").strip()
     version = (params.get("package_version") or "unknown").strip()
-    process = (params.get("process_name") or params.get("service_kind") or "").strip()
-    if not process:
-        process = module.upper()
-    return os.path.join(module, version, process)
+    return os.path.join(module, version)
 
 
 def _resolve_install_path(params: dict) -> str:
@@ -410,16 +410,19 @@ def _write_config_file(install_path: str, config_values: dict) -> str:
 
 
 def _find_previous_install(module: str, process: str, current_version: str) -> str:
-    """같은 모듈/프로세스의 이전 버전 install_path 찾기 (mtime 최신 1개).
+    """같은 모듈의 이전 버전 install_path 찾기 (mtime 최신 1개).
 
-    새 버전 설치 시 기존 config/ 를 이관하기 위한 조회.
+    새 버전 설치 시 기존 config/ 를 이관하기 위한 조회. install_subpath 가
+    `<module>/<version>` 으로 단축됨 (옛 `<module>/<version>/<process>` 에서).
+    process 파라미터는 signature 호환 위해 유지하지만 미사용.
     """
+    del process  # 호환용; install layout 단축 (modules/<module>/<version>/) 으로 미사용.
     module_root = os.path.join(DEFAULT_INSTALL_ROOT, module)
     if not os.path.isdir(module_root): return ""
     candidates = []
     for v in os.listdir(module_root):
         if v == current_version: continue
-        p = os.path.join(module_root, v, process)
+        p = os.path.join(module_root, v)
         if os.path.isdir(p):
             try: candidates.append((os.path.getmtime(p), p))
             except OSError: pass
