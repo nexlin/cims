@@ -155,10 +155,22 @@ cmd_ha() {
 
     case "$sub" in
         install)
-            info "keepalived 설치 (apt) — sudo 권한 필요"
-            sudo apt-get update
-            sudo apt-get install -y keepalived
-            ok "keepalived 설치 완료: $(keepalived --version 2>&1 | head -1)"
+            # vendor (offline) 우선 — private 환경 (인터넷 차단) 에서도 동작.
+            # SCRIPT_DIR/../vendor/keepalived/*.deb 가 있으면 dpkg -i 로 설치, 없으면 apt fallback.
+            local vendor_dir="$SCRIPT_DIR/../vendor/keepalived"
+            if compgen -G "$vendor_dir"/*.deb >/dev/null 2>&1; then
+                info "keepalived offline 설치 (vendor: $vendor_dir)"
+                sudo dpkg -i "$vendor_dir"/*.deb || {
+                    err "dpkg -i 실패 — 의존 부족 시 apt-get -f install 필요"
+                    return 1
+                }
+                ok "keepalived 설치 완료 (vendor): $(keepalived --version 2>&1 | head -1)"
+            else
+                info "keepalived 설치 (apt fallback) — sudo + 인터넷 필요"
+                sudo apt-get update
+                sudo apt-get install -y keepalived
+                ok "keepalived 설치 완료 (apt): $(keepalived --version 2>&1 | head -1)"
+            fi
             ;;
         config)
             _ha_check_config || return 1

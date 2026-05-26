@@ -981,15 +981,15 @@ cmd_sync() {
         cp -f "$SCRIPT_DIR/agent/install-agent.sh"  "$DIST_DIR/agent/"
         chmod +x "$DIST_DIR/agent/install-agent.sh"
         [[ -f "$SCRIPT_DIR/agent/pkg.json" ]] && cp -f "$SCRIPT_DIR/agent/pkg.json" "$DIST_DIR/agent/"
-        # 운영 도구 (cims-svc / cims-ha / cims-health / cims-notify + lifecycle.sh / ha.sh)
+        # 운영 도구 (cims-svc / cims-ha / cims-health / cims-notify + lifecycle.sh / ha.sh) + vendor deb
         if command -v rsync >/dev/null 2>&1; then
-            for sub in bin lib keepalived systemd; do
+            for sub in bin lib keepalived systemd vendor; do
                 [[ -d "$SCRIPT_DIR/agent/$sub" ]] && \
                     rsync -a --delete --exclude='out/' --exclude='ha.json' \
                           "$SCRIPT_DIR/agent/$sub/" "$DIST_DIR/agent/$sub/"
             done
         else
-            for sub in bin lib keepalived systemd; do
+            for sub in bin lib keepalived systemd vendor; do
                 [[ -d "$SCRIPT_DIR/agent/$sub" ]] && \
                     { rm -rf "$DIST_DIR/agent/$sub"; cp -r "$SCRIPT_DIR/agent/$sub" "$DIST_DIR/agent/$sub"; }
             done
