@@ -37,6 +37,24 @@ ext/alsa-lib-*.tar.bz2
 ext/alsa-lib-build/
 ext/ffmpeg-*/
 
+# ext/ vendored 패키지의 빌드 산출물 (소스는 git 유지)
+ext/**/*.o
+ext/**/*.lo
+ext/**/*.la
+ext/**/*.lai
+ext/**/*.loT
+ext/**/*.pc
+ext/**/.deps/
+ext/**/.libs/
+
+# autotools 가 ./configure 실행 시 생성하는 머신별 파일 (host name / gcc path 박힘)
+ext/opencore-amr/libtool
+ext/opencore-amr/config.status
+ext/opencore-amr/config.log
+ext/vo-amrwbenc-0.1.3/libtool
+ext/vo-amrwbenc-0.1.3/config.status
+ext/vo-amrwbenc-0.1.3/config.log
+
 # Test run logs
 test_run/log/
 
