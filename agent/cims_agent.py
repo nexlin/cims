@@ -742,12 +742,20 @@ def job_update_ha(params: dict) -> tuple:
     except Exception as e:
         return 2, "", f"write ha.json failed: {e}"
 
-    # cims-ha config + apply — sudoers 화이트리스트의 dev dist canonical 사용
+    # cims-ha install + config + apply — sudoers 화이트리스트의 dev dist canonical 사용
     # ha.json 위치는 install_path 별로 다르므로 --ha-dir 인자로 전달.
+    # install 은 keepalived 미설치 시 vendor deb 으로 자동 설치 (idempotent: ha.sh 내부 short-circuit).
     msgs = [f"ha.json updated: {ha_path}"]
     cims_ha = _resolve_cims_ha()
     ha_dir = os.path.dirname(ha_path)
     if cims_ha:
+        try:
+            r0 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "install"],
+                                capture_output=True, text=True, timeout=120)
+            msgs.append(f"cims-ha install rc={r0.returncode}"
+                       + (f" err={(r0.stderr or r0.stdout).strip()[-200:]}" if r0.returncode != 0 else ""))
+        except Exception as e:
+            msgs.append(f"cims-ha install exception: {e}")
         try:
             r1 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "config"],
                                 capture_output=True, text=True, timeout=30)

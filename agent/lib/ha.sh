@@ -155,10 +155,15 @@ cmd_ha() {
 
     case "$sub" in
         install)
+            # idempotent — 이미 설치되어 있으면 short-circuit (agent 가 ha.json 받을 때마다 호출됨).
+            if command -v keepalived >/dev/null 2>&1; then
+                ok "keepalived already installed: $(keepalived --version 2>&1 | head -1)"
+                return 0
+            fi
             # vendor (offline) 우선 — private 환경 (인터넷 차단) 에서도 동작.
             # SCRIPT_DIR/../vendor/keepalived/*.deb 가 있으면 dpkg -i 로 설치, 없으면 apt fallback.
             local vendor_dir="$SCRIPT_DIR/../vendor/keepalived"
-            if compgen -G "$vendor_dir"/*.deb >/dev/null 2>&1; then
+            if ls "$vendor_dir"/*.deb >/dev/null 2>&1; then
                 info "keepalived offline 설치 (vendor: $vendor_dir)"
                 sudo dpkg -i "$vendor_dir"/*.deb || {
                     err "dpkg -i 실패 — 의존 부족 시 apt-get -f install 필요"
