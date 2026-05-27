@@ -218,11 +218,30 @@ cmd_ha() {
         start)  sudo systemctl start  keepalived ;;
         stop)   sudo systemctl stop   keepalived ;;
         status) systemctl status keepalived --no-pager || true ;;
+        uninstall)
+            # agent uninstall 대칭 — install 이 시스템에 깐 것을 모두 제거.
+            # keepalived purge + autoremove deps (시스템 다른 곳에서 안 쓰는 것만) + /etc/keepalived/.
+            if ! command -v keepalived >/dev/null 2>&1; then
+                info "keepalived 미설치 — skip"
+                sudo rm -rf /etc/keepalived 2>/dev/null || true
+                return 0
+            fi
+            info "keepalived 제거 (purge + autoremove)"
+            sudo systemctl stop keepalived 2>/dev/null || true
+            sudo apt-get -y purge keepalived || {
+                err "apt-get purge keepalived 실패"
+                return 1
+            }
+            sudo apt-get -y autoremove --purge || true
+            sudo rm -rf /etc/keepalived 2>/dev/null || true
+            ok "keepalived + autoremoved deps + /etc/keepalived 제거"
+            ;;
         help|*)
             cat <<EOF
 사용법: cims-ha <subcommand>
 
-  install         keepalived 패키지 설치 (sudo apt)
+  install         keepalived 패키지 설치 (vendor deb 우선, apt fallback)
+  uninstall       keepalived + autoremove deps + /etc/keepalived 제거 (install 대칭)
   config          ha.json + 템플릿 → out/{keepalived.conf, cims@.service} 생성 (dry-run)
   check           keepalived -t syntax 검증
   apply           out/* → /etc/keepalived/ + /etc/systemd/system/ + daemon-reload +

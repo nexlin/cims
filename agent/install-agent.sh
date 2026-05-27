@@ -390,7 +390,16 @@ if pgrep -f "cims_agent.py.*--name $AGENT_NAME" >/dev/null 2>&1; then
     fi
 fi
 
-# 3. sudoers 파일 제거 — cims user 는 /etc/sudoers.d 디렉토리 접근 불가 (root 750) 라
+# 3. cims-ha install 이 시스템에 깐 keepalived (+ autoremove deps) 제거 — install 대칭.
+#    NOPASSWD 화이트리스트의 cims-ha * 를 통해 sudo 비번 없이 동작.
+#    sudoers 파일은 다음 step 에서 제거 (cims-ha 호출 후).
+if [[ -x ./agent/bin/cims-ha ]] && command -v keepalived >/dev/null 2>&1; then
+    echo "→ cims-ha uninstall (keepalived + deps purge)"
+    sudo -n ./agent/bin/cims-ha uninstall 2>&1 || \
+        echo "  ⚠ cims-ha uninstall 실패 — 수동 정리: sudo apt-get -y purge keepalived && sudo apt-get -y autoremove --purge"
+fi
+
+# 4. sudoers 파일 제거 — cims user 는 /etc/sudoers.d 디렉토리 접근 불가 (root 750) 라
 #    파일 stat 이 항상 false. 대신 NOPASSWD 동작 여부로 등록 여부 판정 + sudo rm.
 if [[ -x ./agent/bin/cims-priv ]] && sudo -n ./agent/bin/cims-priv version >/dev/null 2>&1; then
     echo "→ /etc/sudoers.d/cims-priv 제거 (sudo 비번 필요)"
@@ -399,7 +408,7 @@ else
     echo "→ sudoers 파일 미등록 (NOPASSWD 동작 안 함) — skip"
 fi
 
-# 4. install dir 안 모든 잔재 삭제 (sub-scripts + agent/)
+# 5. install dir 안 모든 잔재 삭제 (sub-scripts + agent/)
 rm -rf state agent.log run.sh init.sh start.sh setup-sudoers.sh setup-systemd.sh update.sh agent
 echo "✓ state + sub-scripts + agent/ 디렉토리 삭제"
 

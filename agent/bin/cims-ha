@@ -2,7 +2,8 @@
 # agent/bin/cims-ha — CIMS HA (keepalived + systemd unit) 운영 도구
 #
 # 사용법:
-#   cims-ha install         keepalived 패키지 설치 (sudo apt)
+#   cims-ha install         keepalived 패키지 설치 (vendor deb 우선, apt fallback)
+#   cims-ha uninstall       keepalived + autoremove deps + /etc/keepalived 제거
 #   cims-ha config          ha.json + 템플릿 → out/{keepalived.conf, cims@.service}
 #   cims-ha check           keepalived -t syntax 검증
 #   cims-ha apply           /etc/keepalived/ + /etc/systemd/system/ 배포
