@@ -1036,24 +1036,35 @@ def job_health_check(params: dict) -> tuple:
     return 0, " ".join(results), ""
 
 
-def job_upgrade_agent(csc_url: str, session_token: str) -> tuple:
-    """새 agent 바이너리를 CSC 에서 받아 자기 자신 교체. 호출자가 종료 처리."""
-    src_url = f"{csc_url}/cims_agent.py"
+def job_upgrade_agent(csc_url: str, session_token: str, agent_name: str) -> tuple:
+    """install-agent.sh --update-only 호출 — bundle 전체 + sub-script 일괄 교체.
+    INSTALL_DIR 은 cims_agent.py 위치 기반 추론 (<INSTALL_DIR>/agent/cims_agent.py).
+    성공 시 호출자가 self-exec → systemd 재기동."""
+    install_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src_url = f"{csc_url}/install-agent.sh"
     status, data, meta = http_get_binary(src_url, {"X-Agent-Token": session_token})
     if status != 200 or not data or len(data) < 1024:
-        return 1, "", f"download failed status={status} size={len(data) if data else 0}"
-    my_path = os.path.abspath(__file__)
-    new_path = my_path + ".new"
+        return 1, "", f"download install-agent.sh failed status={status} size={len(data) if data else 0}"
+    installer_path = f"/tmp/cims-install-agent-update.{os.getpid()}.sh"
     try:
-        with open(new_path, "wb") as f:
+        with open(installer_path, "wb") as f:
             f.write(data)
-        os.chmod(new_path, 0o755)
-        os.replace(new_path, my_path)   # atomic
+        os.chmod(installer_path, 0o755)
+        cmd = ["bash", installer_path, "--update-only",
+               "--csc-url",     csc_url,
+               "--name",        agent_name,
+               "--install-dir", install_dir]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        out = p.stdout or ""
+        err = p.stderr or ""
+        if p.returncode != 0:
+            return (p.returncode or 1), out, err or f"installer rc={p.returncode}"
+        return 0, out + f"\n[upgrade] install-agent.sh --update-only OK (install_dir={install_dir})", err
     except Exception as e:
-        try: os.unlink(new_path)
+        return 2, "", f"upgrade failed: {e}\n{traceback.format_exc()}"
+    finally:
+        try: os.unlink(installer_path)
         except Exception: pass
-        return 2, "", f"replace failed: {e}"
-    return 0, f"upgraded {my_path} ({len(data)} bytes) — restarting", ""
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1272,7 +1283,7 @@ def start_sync_server(state: AgentState, state_dir: str, port: int) -> int:
     return bound_port
 
 
-def execute_job(job: dict, csc_url: str, session_token: str) -> dict:
+def execute_job(job: dict, csc_url: str, session_token: str, agent_name: str) -> dict:
     jt = job["type"]
     params = job.get("params") or {}
     try:
@@ -1281,7 +1292,7 @@ def execute_job(job: dict, csc_url: str, session_token: str) -> dict:
         elif jt == "upgrade":
             rc, out, err = job_install(params, csc_url, session_token)
         elif jt == "upgrade_agent":
-            rc, out, err = job_upgrade_agent(csc_url, session_token)
+            rc, out, err = job_upgrade_agent(csc_url, session_token, agent_name)
         elif jt == "agent_restart":
             # agent 자체 self-restart. heartbeat loop 가 execv 처리.
             rc, out, err = 0, "agent restart requested — execv self", ""
@@ -1437,7 +1448,7 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                 jobs = resp.get("jobs") or []
                 for job in jobs:
                     print(f"[agent] exec job id={job['id']} type={job['type']}", flush=True)
-                    result = execute_job(job, csc_url, state.session_token)
+                    result = execute_job(job, csc_url, state.session_token, state.name or "")
                     rep_status, rep_body = http_post(f"{csc_url}/api/agent/report", result,
                                                       headers={"X-Agent-Token": state.session_token})
                     print(f"[agent] report status={rep_status} rc={result['result_code']}", flush=True)

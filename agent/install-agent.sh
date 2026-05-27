@@ -3,32 +3,50 @@
 # 정책: systemd --user + linger 단일 운영 — die 시 자동 재기동, host 재기동 시 자동 기동.
 #       1 user = 1 agent. 같은 호스트 다중 agent 필요 시 별도 user 로 install.
 #
-# Usage:
+# Mode 1 — fresh install (default):
 #   cd /path/to/install
 #   curl -k https://<CSC>:4419/install-agent.sh | bash -s -- \
 #        --csc-url https://<CSC>:4419 \
 #        --enrollment-token <token> \
 #        --name <agent-name>
 #   ./init.sh                    # sudoers + enroll + systemd unit + enable --now (sudo 비번 1회)
+#
+# Mode 2 — update (bundle 전체 교체 + sub-script 재생성, enrollment/sudoers/systemd 안 건드림):
+#   bash install-agent.sh --update-only \
+#        --csc-url https://<CSC>:4419 \
+#        --name <agent-name> \
+#        --install-dir /opt/cims-agent
+#   (호출자가 systemctl --user restart cims-agent.service 책임 — agent self-exit + systemd 자동 재기동)
 
 set -euo pipefail
 
 CSC_URL=""
 ENROLL_TOKEN=""
 AGENT_NAME="$(hostname)"
+MODE="fresh"
+INSTALL_DIR_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --csc-url)           CSC_URL="$2"; shift 2 ;;
         --enrollment-token)  ENROLL_TOKEN="$2"; shift 2 ;;
         --name)              AGENT_NAME="$2"; shift 2 ;;
+        --install-dir)       INSTALL_DIR_ARG="$2"; shift 2 ;;
+        --update-only)       MODE="update"; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
-if [[ -z "$CSC_URL" || -z "$ENROLL_TOKEN" ]]; then
-    echo "Usage: $0 --csc-url <URL> --enrollment-token <TOKEN> [--name <NAME>]"
-    exit 1
+if [[ "$MODE" == "fresh" ]]; then
+    if [[ -z "$CSC_URL" || -z "$ENROLL_TOKEN" ]]; then
+        echo "Usage (fresh): $0 --csc-url <URL> --enrollment-token <TOKEN> [--name <NAME>]"
+        exit 1
+    fi
+else
+    if [[ -z "$CSC_URL" ]]; then
+        echo "Usage (update): $0 --update-only --csc-url <URL> --name <NAME> [--install-dir <DIR>]"
+        exit 1
+    fi
 fi
 
 if [[ $EUID -eq 0 ]]; then
@@ -36,12 +54,19 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
+if [[ "$MODE" == "update" && -n "$INSTALL_DIR_ARG" ]]; then
+    cd "$INSTALL_DIR_ARG"
+fi
 INSTALL_DIR="$(pwd)"
 STATE_DIR="$INSTALL_DIR/state"
 BIN_FILE="$INSTALL_DIR/agent/cims_agent.py"
 SUDOERS_FILE="/etc/sudoers.d/cims-priv"
 
-echo "==> Installing CIMS Agent to current directory"
+if [[ "$MODE" == "fresh" ]]; then
+    echo "==> Installing CIMS Agent (fresh)"
+else
+    echo "==> Updating CIMS Agent (bundle + sub-script 재생성)"
+fi
 echo "    dir    : $INSTALL_DIR"
 echo "    user   : $USER"
 echo "    name   : $AGENT_NAME"
@@ -57,8 +82,26 @@ if ! curl -fsSLk "$CSC_URL/agent-bundle.tar.gz" -o "$BUNDLE_TMP"; then
     echo "ERROR: failed to download $CSC_URL/agent-bundle.tar.gz"
     exit 4
 fi
-if ! tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR" agent/ 2>/dev/null; then
-    tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR"
+if [[ "$MODE" == "fresh" ]]; then
+    # fresh: 빈 디렉토리에 직접 풀기.
+    if ! tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR" agent/ 2>/dev/null; then
+        tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR"
+    fi
+else
+    # update: agent.new/ 에 풀고 atomic rename — agent process 동작 중 race 차단.
+    rm -rf "$INSTALL_DIR/agent.new" "$INSTALL_DIR/agent.old"
+    mkdir -p "$INSTALL_DIR/agent.new"
+    if ! tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR/agent.new" --strip-components=1 agent/ 2>/dev/null; then
+        tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR/agent.new" --strip-components=1
+    fi
+    if [[ ! -f "$INSTALL_DIR/agent.new/cims_agent.py" ]]; then
+        echo "ERROR: agent.new/cims_agent.py not found after extract"
+        rm -rf "$INSTALL_DIR/agent.new"
+        exit 5
+    fi
+    [[ -d "$INSTALL_DIR/agent" ]] && mv "$INSTALL_DIR/agent" "$INSTALL_DIR/agent.old"
+    mv "$INSTALL_DIR/agent.new" "$INSTALL_DIR/agent"
+    rm -rf "$INSTALL_DIR/agent.old"
 fi
 if [[ ! -f "$BIN_FILE" ]]; then
     echo "ERROR: tarball extracted but $BIN_FILE not found"
@@ -235,8 +278,8 @@ chmod 755 "$INIT_SH"
 UPDATE_SH="$INSTALL_DIR/update.sh"
 cat > "$UPDATE_SH" <<EOF
 #!/usr/bin/env bash
-# 업데이트: CSC 에서 최신 agent tarball 받아서 풀고 systemctl restart.
-# state.json (enrollment), sudoers, systemd unit 은 유지 — agent 바이너리만 교체.
+# 업데이트: csc 의 install-agent.sh --update-only 호출 + systemctl restart.
+# state.json (enrollment), sudoers, systemd unit 은 유지 — bundle + sub-script 만 갱신.
 # Usage:
 #   ./update.sh                   — 확인 prompt 후 업데이트
 #   ./update.sh --yes             — prompt skip
@@ -259,17 +302,14 @@ if [[ \$force -ne 1 ]]; then
     esac
 fi
 
-BUNDLE_TMP="\$(mktemp /tmp/cims-agent-bundle.XXXXXX.tar.gz)"
-trap 'rm -f "\$BUNDLE_TMP"' EXIT
-echo "→ /agent-bundle.tar.gz 다운로드"
-curl -fsSLk "$CSC_URL/agent-bundle.tar.gz" -o "\$BUNDLE_TMP"
-
-echo "→ agent/ 디렉토리 갱신"
-if ! tar xzf "\$BUNDLE_TMP" agent/ 2>/dev/null; then
-    tar xzf "\$BUNDLE_TMP"
-fi
-chmod 755 agent/cims_agent.py
-[[ -d agent/bin ]] && chmod 755 agent/bin/*
+INSTALLER_TMP="\$(mktemp /tmp/install-agent-update.XXXXXX.sh)"
+trap 'rm -f "\$INSTALLER_TMP"' EXIT
+echo "→ /install-agent.sh 다운로드"
+curl -fsSLk "$CSC_URL/install-agent.sh" -o "\$INSTALLER_TMP"
+bash "\$INSTALLER_TMP" --update-only \\
+    --csc-url "$CSC_URL" \\
+    --name "$AGENT_NAME" \\
+    --install-dir "\$(pwd)"
 
 export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
 if systemctl --user is-active --quiet cims-agent.service; then
@@ -405,16 +445,22 @@ echo "  install dir (\$(pwd)) 자체 삭제 원하면: rmdir \$(pwd)"
 EOF
 chmod 755 "$UNINSTALL_SH"
 
-echo ""
-echo "════════════════════════════════════════════════════════════════════"
-echo "  ※ 다음 단계 — 1줄 실행"
-echo "════════════════════════════════════════════════════════════════════"
-echo "    $INSTALL_DIR/init.sh"
-echo ""
-echo "  (sudoers + linger 등록 → enrollment → systemd unit 작성 → enable --now)"
-echo "  sudo 비번을 1회 prompt 합니다."
-echo ""
-echo "  (참고) 업데이트  : $INSTALL_DIR/update.sh        (agent 바이너리만 갱신 + restart)"
-echo "  (참고) 완전 제거 : $INSTALL_DIR/uninstall.sh     (systemd unit + sudoers + keepalived + 파일 정리)"
-echo ""
-echo "==> 설치 완료."
+if [[ "$MODE" == "fresh" ]]; then
+    echo ""
+    echo "════════════════════════════════════════════════════════════════════"
+    echo "  ※ 다음 단계 — 1줄 실행"
+    echo "════════════════════════════════════════════════════════════════════"
+    echo "    $INSTALL_DIR/init.sh"
+    echo ""
+    echo "  (sudoers + linger 등록 → enrollment → systemd unit 작성 → enable --now)"
+    echo "  sudo 비번을 1회 prompt 합니다."
+    echo ""
+    echo "  (참고) 업데이트  : $INSTALL_DIR/update.sh        (agent 바이너리만 갱신 + restart)"
+    echo "  (참고) 완전 제거 : $INSTALL_DIR/uninstall.sh     (systemd unit + sudoers + keepalived + 파일 정리)"
+    echo ""
+    echo "==> 설치 완료."
+else
+    echo ""
+    echo "==> 업데이트 완료 — bundle + sub-script 재생성."
+    echo "    agent process 재기동은 호출자가 처리 (보통 agent self-exit + systemd 자동 재기동)."
+fi
