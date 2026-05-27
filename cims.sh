@@ -976,6 +976,7 @@ cmd_sync() {
 
     # ── Agent 바이너리 + 운영 도구 (bin/lib/keepalived/systemd) ──
     if [[ $did_agent -eq 1 ]]; then
+        _ensure_agent_vendor_keepalived
         mkdir -p "$DIST_DIR/agent"
         cp -f "$SCRIPT_DIR/agent/cims_agent.py"     "$DIST_DIR/agent/"
         cp -f "$SCRIPT_DIR/agent/install-agent.sh"  "$DIST_DIR/agent/"
@@ -1053,6 +1054,36 @@ cmd_sync() {
 
     echo ""
     info "sync 완료 ($n_changed 개 대상). 서비스 재기동: ./cims.sh restart <name>"
+}
+
+# agent vendor 자동 채움 — keepalived offline 설치용 deb 6종
+# 누락된 패키지만 apt-get download 로 받음 (sudo 불필요). idempotent.
+# CIMS_SKIP_VENDOR_FETCH=1 로 끌 수 있음 (인터넷/apt 없는 환경).
+_KEEPALIVED_DEPS=(keepalived libmnl0 libnftnl11 libnl-3-200 libnl-genl-3-200 libsnmp40t64)
+
+_ensure_agent_vendor_keepalived() {
+    local vendor_dir="$SCRIPT_DIR/agent/vendor/keepalived"
+    mkdir -p "$vendor_dir"
+
+    [[ -n "${CIMS_SKIP_VENDOR_FETCH:-}" ]] && return 0
+
+    local missing=() pkg
+    for pkg in "${_KEEPALIVED_DEPS[@]}"; do
+        compgen -G "$vendor_dir/${pkg}_*.deb" >/dev/null 2>&1 || missing+=("$pkg")
+    done
+    [[ ${#missing[@]} -eq 0 ]] && return 0
+
+    if ! command -v apt-get &>/dev/null; then
+        warn "apt-get 미지원 환경 — agent/vendor/keepalived 누락: ${missing[*]} (수동 채움 필요)"
+        return 0
+    fi
+
+    info "agent/vendor/keepalived: ${#missing[@]}/${#_KEEPALIVED_DEPS[@]} 누락 → apt-get download (${missing[*]})"
+    if ! ( cd "$vendor_dir" && apt-get download "${missing[@]}" >/dev/null 2>&1 ); then
+        warn "apt-get download 실패 — vendor 미완성 가능 (인터넷/apt 캐시 확인). CIMS_SKIP_VENDOR_FETCH=1 로 차단"
+        return 0
+    fi
+    ok "agent/vendor/keepalived: ${missing[*]} 자동 채움"
 }
 
 # 버전 유틸리티 — pkg.json 에 저장된 semver 를 읽고/bump/쓰기
