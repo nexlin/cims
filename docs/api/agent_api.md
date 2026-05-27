@@ -36,7 +36,11 @@ Agent 데몬이 CSC 와 통신하는 프로토콜. **Agent 가 CSC 에 요청하
 }
 ```
 
-**Response 401**: `enrollment_token` 유효하지 않거나 이미 사용됨
+**상태 머신**: `pending`/`approved`/`online`/`offline` 모두 enroll 허용 (re-install / host 복구 시나리오). `revoked` 만 차단 — 명시적으로 폐기된 record 는 token 재발급 받아도 enroll 불가.
+
+**Response 401**:
+- `invalid_enrollment_token` — token 매치되는 record 없음 또는 record status='revoked'
+- `enrollment_token_expired` — TTL (기본 600s) 만료 → Console 에서 재발급 필요
 
 ---
 

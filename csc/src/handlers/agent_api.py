@@ -348,7 +348,9 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
     ifaces = body.get("interfaces")
 
     row = await asyncio.to_thread(_agent_load, config, None, None, None, enroll_token)
-    if not row or row.get('status') not in ('pending', 'approved'):
+    # status: pending/approved/online/offline 모두 허용 (offline = re-install 시나리오).
+    # revoked 만 차단 — 명시적으로 차단된 record 는 token 재발급 받아도 enroll 불가.
+    if not row or row.get('status') == 'revoked':
         return HandlerResult(status=401, body={"error": "invalid_enrollment_token"},
                              media_type="application/json")
     # TTL 검사 — expires_at 이 설정되어 있고 현재 시각보다 이전이면 만료
@@ -386,6 +388,24 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
     row = await asyncio.to_thread(_agent_update, config, row['id'], patches)
 
     logger.log_info(f"Agent enrolled: id={row['id']} name={row['name']} from={handler_args.client_ip}")
+
+    # 신규/재 enroll 시 agent 가 멤버인 ha-group 에 update_ha job 자동 큐잉.
+    # 옛 동작은 그룹/멤버 변경 시점에만 큐잉 → fresh install 후 ha.json sync 안 됐던 버그.
+    try:
+        from services import file_store
+        from handlers.ha_groups import _ha_dir, _enqueue_update_ha_for_members
+        def _sync_ha():
+            groups = file_store.load_all(_ha_dir(config))
+            n = 0
+            for g in groups:
+                if any(m.get('agent_id') == row['id'] for m in (g.get('members') or [])):
+                    n += _enqueue_update_ha_for_members(g['id'], config)
+            return n
+        n_jobs = await asyncio.to_thread(_sync_ha)
+        if n_jobs:
+            logger.log_info(f"[enroll] ha sync: queued {n_jobs} update_ha job(s) for agent {row['id']}")
+    except Exception as e:
+        logger.log_warning(f"[enroll] ha sync trigger failed for agent {row['id']}: {e}")
 
     resp_body = {
         "agent_id": row["id"],

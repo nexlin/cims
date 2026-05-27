@@ -517,17 +517,10 @@ async def _create_agent(handler_args: HandlerArgs, config):
     csc_url = _csc_public_url(handler_args, config)
     import shlex
     # name 에 space/특수문자 포함 가능 → shell-safe quote
-    # dev 환경 (csc.json Server.DevMode=true) 에서는 --no-systemd 자동 부여
-    extra = " --no-systemd" if _is_dev_mode(config) else ""
     result["install_command"]  = (
         f"curl -k {csc_url}/install-agent.sh | "
         f"bash -s -- --csc-url {csc_url} "
-        f"--enrollment-token {enroll_token} --name {shlex.quote(name)}{extra}"
-    )
-    # 이미 enroll 된 host 에 systemd --user 로 전환 (옛 nohup 모드 → 자동 부활).
-    # die 한 agent 부활 + 새 cims_agent.py 도 download 까지 한 번에.
-    result["setup_systemd_command"] = (
-        f'cd /opt/cims-agent && curl -k "{csc_url}/setup-systemd.sh?agent={shlex.quote(name)}" | bash'
+        f"--enrollment-token {enroll_token} --name {shlex.quote(name)}"
     )
     return HandlerResult(status=201, body=result, media_type="application/json")
 
@@ -543,7 +536,7 @@ def _enrollment_token_ttl_sec(config: dict) -> int:
 
 
 def _is_dev_mode(config: dict) -> bool:
-    """DEV-CSC 여부. csc.json Server.DevMode=true 일 때 install_command 에 --no-systemd 자동 부여."""
+    """DEV-CSC 여부. csc.json Server.DevMode=true 일 때 build/dist/packages 자동 등록 (register-from-dist) endpoint 활성."""
     srv = (config.get("Server") or {})
     return bool(srv.get("DevMode"))
 
@@ -641,14 +634,10 @@ async def _regenerate_token(handler_args: HandlerArgs, aid: int, config):
     payload["enrollment_token_ttl_sec"] = ttl_sec
     csc_url = _csc_public_url(handler_args, config)
     import shlex
-    install_extra = " --no-systemd" if _is_dev_mode(config) else ""
     payload["install_command"] = (
         f"curl -k {csc_url}/install-agent.sh | "
         f"bash -s -- --csc-url {csc_url} "
-        f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}{install_extra}"
-    )
-    payload["setup_systemd_command"] = (
-        f'cd /opt/cims-agent && curl -k "{csc_url}/setup-systemd.sh?agent={shlex.quote(row["name"])}" | bash'
+        f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}"
     )
     return HandlerResult(status=200, body=payload, media_type="application/json")
 
@@ -675,27 +664,19 @@ async def _get_install_command(handler_args: HandlerArgs, aid: int, config):
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
     csc_url = _csc_public_url(handler_args, config)
     import shlex
-    # setup_systemd_command — token 없이도 가능 (이미 enroll 된 호스트용 복구 / systemd 전환)
-    setup_systemd_cmd = (
-        f'cd /opt/cims-agent && curl -k "{csc_url}/setup-systemd.sh?agent={shlex.quote(row["name"])}" | bash'
-    )
     if status in ('no_token', 'expired'):
-        # 새 install 명령은 토큰 없어 못 만들지만 setup-systemd 는 줌
         return HandlerResult(status=200, body={
             "install_command": None,
             "install_command_error": status,
-            "setup_systemd_command": setup_systemd_cmd,
             "enrollment_token_expires_at": row.get('enrollment_token_expires_at'),
         }, media_type="application/json")
-    extra = " --no-systemd" if _is_dev_mode(config) else ""
     install_cmd = (
         f"curl -k {csc_url}/install-agent.sh | "
         f"bash -s -- --csc-url {csc_url} "
-        f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}{extra}"
+        f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}"
     )
     return HandlerResult(status=200, body={
         "install_command": install_cmd,
-        "setup_systemd_command": setup_systemd_cmd,
         "enrollment_token_expires_at": row.get('enrollment_token_expires_at'),
     }, media_type="application/json")
 
@@ -1826,161 +1807,6 @@ async def _serve_agent_binary(handler_args: HandlerArgs, kwargs: dict) -> Handle
                              media_type="text/x-python")
 
 
-async def _serve_setup_systemd_script(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """nohup 모드 agent 호스트를 systemd --user 로 한 번에 전환.
-
-    사용: ssh <host> 후 install_dir 에서 (cwd = /opt/cims-agent 등)
-        curl -k "https://csc:4419/setup-systemd.sh?agent=<NAME>" | bash
-
-    수행 작업:
-      (1) 옛 nohup agent 정지
-      (2) 새 cims_agent.py 다운로드 (CSC 의 /cims_agent.py)
-      (3) systemd --user unit 생성 + enable + restart
-    """
-    agent_name = (handler_args.query_params or {}).get("agent", "").strip()
-    if not agent_name:
-        return HandlerResult(status=400, body="missing 'agent' query param\nusage: ?agent=<AGENT_NAME>",
-                             media_type="text/plain")
-    # 자기 자신 CSC URL — 클라이언트가 host 헤더로 도달한 주소 사용 (TLS 가정)
-    host = (handler_args.headers or {}).get("Host") or (handler_args.headers or {}).get("host") or ""
-    if not host:
-        return HandlerResult(status=400, body="cannot determine CSC URL (no Host header)",
-                             media_type="text/plain")
-    csc_url = f"https://{host}"
-
-    body = f"""#!/usr/bin/env bash
-# Auto-generated by CSC /setup-systemd.sh — nohup → systemd --user 전환
-#   agent: {agent_name}
-#   csc:   {csc_url}
-# 사용 위치: agent install_dir 에서 (예: cd /opt/cims-agent && curl ... | bash)
-set -euo pipefail
-
-INSTALL_DIR="$(pwd)"
-AGENT_NAME="{agent_name}"
-CSC_URL="{csc_url}"
-BIN_FILE="$INSTALL_DIR/agent/cims_agent.py"
-STATE_DIR="$INSTALL_DIR/state"
-
-if [[ ! -f "$STATE_DIR/state.json" ]]; then
-    echo "✗ $STATE_DIR/state.json 없음 — install_dir 이 맞나요? (cd /opt/cims-agent 후 실행)" >&2
-    exit 1
-fi
-
-if ! command -v systemctl >/dev/null 2>&1; then
-    echo "✗ systemctl 명령 없음 — systemd 환경 아님" >&2
-    exit 1
-fi
-
-# ── systemd --user manager 활성화 (linger + XDG_RUNTIME_DIR) ────────────
-# ssh 세션처럼 PAM systemd 통합 안 된 login 에서는 /run/user/<uid> 가 없거나
-# XDG_RUNTIME_DIR 미설정 → systemctl --user 실패. linger 활성화 + 환경변수
-# 보강하면 즉시 동작.
-UID_NUM=$(id -u)
-if [[ -z "${{XDG_RUNTIME_DIR:-}}" ]]; then
-    export XDG_RUNTIME_DIR="/run/user/$UID_NUM"
-fi
-
-if ! systemctl --user show-environment >/dev/null 2>&1; then
-    if [[ ! -d "$XDG_RUNTIME_DIR" ]]; then
-        echo "⚠ /run/user/$UID_NUM 없음 — systemd linger 활성화 필요"
-        if sudo -n loginctl enable-linger "$USER" 2>/dev/null; then
-            echo "✓ linger 자동 활성화"
-        else
-            echo ""
-            echo "다음 명령을 1회 실행 후 setup-systemd.sh 재실행해 주세요:" >&2
-            echo "    sudo loginctl enable-linger $USER" >&2
-            echo "" >&2
-            exit 1
-        fi
-        # linger 활성화 직후 /run/user 생성 대기
-        for _ in 1 2 3 4 5; do
-            [[ -d "$XDG_RUNTIME_DIR" ]] && break
-            sleep 1
-        done
-    fi
-    # XDG_RUNTIME_DIR 잡혔어도 user manager bus 가 안 떠있으면 재시도
-    if ! systemctl --user show-environment >/dev/null 2>&1; then
-        echo "✗ systemd --user 여전히 접근 불가 (XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR)" >&2
-        echo "  → ssh 재접속 또는 'sudo systemctl start user@$UID_NUM' 후 재시도" >&2
-        exit 1
-    fi
-fi
-
-# (1) 옛 nohup agent 정지 — systemd 가 따로 띄울 것
-if pgrep -f "cims_agent.py.*--name $AGENT_NAME" >/dev/null 2>&1; then
-    echo "==> 옛 nohup agent 정지"
-    OLD_PID=$(pgrep -f "cims_agent.py.*--name $AGENT_NAME" | head -1)
-    kill "$OLD_PID" 2>/dev/null || true
-    sleep 1
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-        kill -9 "$OLD_PID" 2>/dev/null || true
-    fi
-fi
-
-# (2) 새 cims_agent.py 다운로드 (옛 코드 die 함정 우회 — 시작부터 새 코드)
-echo "==> 새 cims_agent.py 다운로드"
-TMP=$(mktemp)
-if curl -sk -o "$TMP" "$CSC_URL/cims_agent.py" && [[ -s "$TMP" && $(wc -c < "$TMP") -gt 1024 ]]; then
-    chmod 755 "$TMP"
-    mv "$TMP" "$BIN_FILE"
-    echo "✓ 새 코드 install ($(wc -c < "$BIN_FILE") bytes)"
-else
-    echo "✗ cims_agent.py download 실패 (size=$(wc -c < "$TMP" 2>/dev/null || echo 0))" >&2
-    rm -f "$TMP"
-    exit 1
-fi
-
-# (3) systemd --user unit 생성
-UNIT_SAFE=$(echo "$AGENT_NAME" | tr -c 'A-Za-z0-9-' '-' | sed 's/-\\+/-/g; s/^-//; s/-$//')
-[[ -z "$UNIT_SAFE" ]] && UNIT_SAFE="default"
-UNIT_DIR="${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user"
-UNIT_NAME="cims-agent-${{UNIT_SAFE}}.service"
-UNIT_FILE="$UNIT_DIR/$UNIT_NAME"
-mkdir -p "$UNIT_DIR"
-
-echo "==> systemd unit: $UNIT_FILE"
-cat > "$UNIT_FILE" <<UNIT
-[Unit]
-Description=CIMS Server Agent (dir=$INSTALL_DIR)
-After=network-online.target default.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$INSTALL_DIR
-ExecStart=/usr/bin/python3 $BIN_FILE \\
-    --csc-url $CSC_URL \\
-    --state-dir $STATE_DIR \\
-    --name $AGENT_NAME
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=default.target
-UNIT
-
-systemctl --user daemon-reload
-systemctl --user enable "$UNIT_NAME"
-systemctl --user restart "$UNIT_NAME"
-
-sleep 2
-echo "==> Status:"
-systemctl --user --no-pager status "$UNIT_NAME" 2>&1 | head -8 || true
-
-echo ""
-echo "✓ 전환 완료 — die 시 systemd 가 자동 재기동 (RestartSec=10)"
-echo "  로그:   journalctl --user -u $UNIT_NAME -f"
-echo "  제어:   systemctl --user {{status|restart|stop}} $UNIT_NAME"
-
-if ! loginctl show-user "$USER" 2>/dev/null | grep -q '^Linger=yes'; then
-    echo ""
-    echo "※ 로그아웃 후에도 자동 기동되려면 (1회):"
-    echo "     sudo loginctl enable-linger $USER"
-fi
-"""
-    return HandlerResult(status=200, body=body, media_type="text/x-shellscript")
-
-
 # ════════════════════════════════════════════════════════════
 #  Collection proxy (CSC → Agent sync REST)
 # ════════════════════════════════════════════════════════════
@@ -2559,5 +2385,4 @@ CIMS_AGENT_PUBLIC_HANDLER_LIST = (
     ("/install-agent.sh",   _serve_install_script, {}),
     ("/cims_agent.py",      _serve_agent_binary,   {}),
     ("/agent-bundle.tar.gz", _serve_agent_bundle,  {}),
-    ("/setup-systemd.sh",   _serve_setup_systemd_script, {}),
 )

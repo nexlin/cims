@@ -123,7 +123,7 @@ service_functions 체크박스(volte/ptt/ibcf), per-deployment 메모.
 
 | 증상 | 확인 |
 |---|---|
-| Agent status 가 `approved` 에서 `online` 으로 안 바뀜 | 대상 호스트에서 `./run.sh` 실행됐는지, CSC URL 유효한지 |
+| Agent status 가 `approved` 에서 `online` 으로 안 바뀜 | 대상 호스트에서 `systemctl --user status cims-agent` active 인지, `journalctl --user -u cims-agent` 로그, CSC URL 유효한지 |
 | "＋ 모듈 추가" 에서 모듈 목록이 비어있음 | 1. 패키지 업로드 먼저 |
 | 설정 저장 시 `not_installed` | 설치 버튼 먼저 눌러 deployment.install_path 생성 |
 | Collection 탭에서 `agent_proxy_failed` | Agent 가 heartbeat 보내 `sync_port` 가 DB 에 기록됐는지, 방화벽 9900 포트 |
