@@ -537,24 +537,22 @@ function AgentCreateModal({ onClose, onDone }: { onClose: () => void; onDone: ()
   const { show } = useToast()
   const [name, setName] = useState('')
   const [note, setNote] = useState('')
-  const [result, setResult] = useState<{ enrollment_token: string; install_command: string; setup_systemd_command?: string } | null>(null)
-  const [copied, setCopied] = useState<'install'|'systemd'|null>(null)
+  const [result, setResult] = useState<{ enrollment_token: string; install_command: string } | null>(null)
+  const [copied, setCopied] = useState(false)
 
   async function create() {
     if (!name) { show('이름 필수', 'err'); return }
     try {
       const r = await deploymentApi.createAgent(name, note)
-      setResult({ enrollment_token: r.enrollment_token, install_command: r.install_command, setup_systemd_command: r.setup_systemd_command })
+      setResult({ enrollment_token: r.enrollment_token, install_command: r.install_command })
       await onDone()
     } catch (e) { show((e as Error).message, 'err') }
   }
-  async function copyCmd(which: 'install'|'systemd') {
+  async function copyCmd() {
     if (!result) return
-    const txt = which === 'install' ? result.install_command : (result.setup_systemd_command || '')
-    if (!txt) return
     try {
-      await navigator.clipboard.writeText(txt)
-      setCopied(which); setTimeout(() => setCopied(null), 1500)
+      await navigator.clipboard.writeText(result.install_command)
+      setCopied(true); setTimeout(() => setCopied(false), 1500)
     } catch (e) { show((e as Error).message, 'err') }
   }
 
@@ -580,27 +578,11 @@ function AgentCreateModal({ onClose, onDone }: { onClose: () => void; onDone: ()
             }}>{result.install_command}</pre>
             <button className="btn btn--sm btn--outline"
               style={{ position: 'absolute', top: 8, right: 8 }}
-              onClick={() => copyCmd('install')}>{copied === 'install' ? '✓' : '📋'} 복사</button>
+              onClick={copyCmd}>{copied ? '✓' : '📋'} 복사</button>
           </div>
           <div style={{ fontSize: 12, color: '#666', marginTop: 8 }}>
             Enrollment token: <code>{result.enrollment_token}</code> (1회용)
           </div>
-          {result.setup_systemd_command && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
-                ※ 이미 install 된 호스트의 nohup agent 를 systemd 자동 부활로 전환:
-              </div>
-              <div style={{ position: 'relative' }}>
-                <pre style={{
-                  background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
-                  borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
-                }}>{result.setup_systemd_command}</pre>
-                <button className="btn btn--sm btn--outline"
-                  style={{ position: 'absolute', top: 8, right: 8 }}
-                  onClick={() => copyCmd('systemd')}>{copied === 'systemd' ? '✓' : '📋'} 복사</button>
-              </div>
-            </div>
-          )}
         </div>
       )}
       <div className="modal-footer" style={{ marginTop: 16 }}>
@@ -815,9 +797,9 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
 
 function InstallCmdModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const { show } = useToast()
-  const [data, setData] = useState<{ install_command: string; setup_systemd_command?: string; enrollment_token_expires_at?: string } | null>(null)
+  const [data, setData] = useState<{ install_command: string; enrollment_token_expires_at?: string } | null>(null)
   const [err, setErr]   = useState<string>('')
-  const [copied, setCopied] = useState<'install'|'systemd'|null>(null)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     (async () => {
@@ -828,43 +810,22 @@ function InstallCmdModal({ agent, onClose }: { agent: Agent; onClose: () => void
     })()
   }, [agent.id])
 
-  async function copy(which: 'install'|'systemd') {
+  async function copy() {
     if (!data) return
-    const txt = which === 'install' ? data.install_command : (data.setup_systemd_command || '')
-    if (!txt) return
     try {
-      await navigator.clipboard.writeText(txt)
-      setCopied(which); setTimeout(() => setCopied(null), 1500)
+      await navigator.clipboard.writeText(data.install_command)
+      setCopied(true); setTimeout(() => setCopied(false), 1500)
     } catch (e) { show((e as Error).message, 'err') }
   }
 
   return (
-    <Modal title={`${agent.name} — 복구 / 자동부활 명령`} onClose={onClose} width={640}>
+    <Modal title={`${agent.name} — 재설치 명령`} onClose={onClose} width={640}>
       {err && <div style={{ color: '#e74c3c', marginBottom: 8 }}>※ {err}</div>}
       {!data && !err && <div className="empty">불러오는 중...</div>}
       {data && (
         <>
           <div style={{ fontSize: 13, color: '#444', marginBottom: 6 }}>
-            <b>① 자동 부활 (권장)</b> — ssh 1회로 옛 nohup agent 정리 + 새 코드 install + systemd 전환
-          </div>
-          <div style={{ position: 'relative' }}>
-            <pre style={{
-              background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
-              borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
-            }}>{data.setup_systemd_command || '(setup_systemd_command 없음 — install_command 사용)'}</pre>
-            {data.setup_systemd_command && (
-              <button className="btn btn--sm btn--outline"
-                style={{ position: 'absolute', top: 8, right: 8 }}
-                onClick={() => copy('systemd')}>{copied === 'systemd' ? '✓' : '📋'} 복사</button>
-            )}
-          </div>
-          <div style={{ fontSize: 12, color: '#666', marginTop: 6 }}>
-            실행 후 die 시 systemd 가 자동 재기동 (RestartSec=10).
-            로그아웃 후에도 동작하려면 한 번만: <code>sudo loginctl enable-linger $USER</code>
-          </div>
-
-          <div style={{ fontSize: 13, color: '#444', marginTop: 16, marginBottom: 6 }}>
-            <b>② 완전 재설치</b> — agent 가 손상됐거나 새 서버에 install 시
+            ssh 1회로 install — systemd --user + linger 자동 (die 시 자동 재기동 + host 재기동 시 자동 기동)
           </div>
           <div style={{ position: 'relative' }}>
             <pre style={{
@@ -873,10 +834,13 @@ function InstallCmdModal({ agent, onClose }: { agent: Agent; onClose: () => void
             }}>{data.install_command}</pre>
             <button className="btn btn--sm btn--outline"
               style={{ position: 'absolute', top: 8, right: 8 }}
-              onClick={() => copy('install')}>{copied === 'install' ? '✓' : '📋'} 복사</button>
+              onClick={copy}>{copied ? '✓' : '📋'} 복사</button>
+          </div>
+          <div style={{ fontSize: 12, color: '#666', marginTop: 6 }}>
+            실행 후 <code>./init.sh</code> 로 sudoers + enrollment + systemd unit 일괄 설정 (sudo 비번 1회).
           </div>
           {data.enrollment_token_expires_at && (
-            <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
               token expires: {data.enrollment_token_expires_at}
             </div>
           )}
