@@ -423,6 +423,8 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _restart_agent(handler_args, aid, config)
         if action == "apply-ip-config" and method == "POST":
             return await _apply_ip_config(handler_args, aid, config)
+        if action == "health-check" and method == "POST":
+            return await _agent_health_check(handler_args, aid, config)
     elif len(tail) == 3:
         # GET /agents/{aid}/jobs/{jid} — job 단건 조회 (result polling)
         if tail[1] == "jobs" and method == "GET":
@@ -867,6 +869,34 @@ async def _restart_agent(handler_args: HandlerArgs, aid: int, config):
     return HandlerResult(status=202,
                          body={"ok": True, "agent_id": aid, "job_id": job_id,
                                "hint": "agent 가 다음 heartbeat 에서 pickup 후 self-exec 합니다 (수 초 내)"},
+                         media_type="application/json")
+
+
+async def _agent_health_check(handler_args: HandlerArgs, aid: int, config):
+    """admin → agent sync REST /health-check 프록시. body 에 scope=ha|modules|all 지정 가능.
+    agent 가 offline 또는 sync_port 미보고면 502."""
+    body = _parse_body(handler_args) or {}
+    scope = body.get("scope") or "all"
+    if scope not in ("ha", "modules", "all"):
+        return HandlerResult(status=400, body={"error": "invalid_scope",
+                              "hint": "scope must be one of: ha, modules, all"},
+                             media_type="application/json")
+    agent = await asyncio.to_thread(_agent_load, config, aid=aid)
+    if not agent:
+        return HandlerResult(status=404, body={"error": "agent_not_found"},
+                             media_type="application/json")
+    if agent.get("status") != "online":
+        return HandlerResult(status=409,
+                             body={"error": "agent_not_online", "status": agent.get("status"),
+                                   "hint": "agent 가 online 이 아니면 sync REST 호출 불가"},
+                             media_type="application/json")
+    status, b = await asyncio.to_thread(_agent_proxy_call, "GET", agent,
+                                         "/health-check", {"scope": scope},
+                                         None, 10, config)
+    if status == 200:
+        return HandlerResult(status=200, body=b, media_type="application/json")
+    return HandlerResult(status=502 if status == 0 else status,
+                         body={"error": "proxy_failed", "detail": b},
                          media_type="application/json")
 
 

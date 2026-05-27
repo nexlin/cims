@@ -460,6 +460,120 @@ def collect_metrics() -> dict:
 
 
 # ──────────────────────────────────────────────────────────────
+#  On-demand health check (sync REST /health-check)
+# ──────────────────────────────────────────────────────────────
+
+def _health_check_ha() -> dict:
+    """keepalived service 상태 + VIP 부여 여부 + journal tail."""
+    out = {"keepalived_installed": False, "keepalived_active": False, "vips": []}
+    # service status
+    try:
+        rc = subprocess.run(["systemctl", "is-active", "keepalived"],
+                            capture_output=True, text=True, timeout=3)
+        out["keepalived_active"] = (rc.stdout.strip() == "active")
+        out["keepalived_installed"] = True
+    except FileNotFoundError:
+        return out
+    except Exception as e:
+        out["error"] = str(e); return out
+    # ip addr 에서 secondary (VIP) 식별 — keepalived 가 add 한 VIP 는 보통 secondary 플래그.
+    try:
+        r = subprocess.run(["ip", "-j", "addr"], capture_output=True, text=True, timeout=3)
+        ifaces = json.loads(r.stdout or "[]")
+        for f in ifaces:
+            iname = f.get("ifname") or ""
+            if iname == "lo": continue
+            for a in (f.get("addr_info") or []):
+                if a.get("family") != "inet": continue
+                flags = (a.get("flags") or [])
+                # secondary 플래그가 있거나 keepalived label 이 있는 IP
+                if "secondary" in flags or (a.get("label") or "").endswith(":vrrp"):
+                    out["vips"].append({"iface": iname, "ip": a.get("local"),
+                                         "mask": a.get("prefixlen")})
+    except Exception as e:
+        out["ip_addr_error"] = str(e)
+    # journal tail (선택)
+    try:
+        r = subprocess.run(["journalctl", "-u", "keepalived", "-n", "20",
+                             "--no-pager", "--output=cat"],
+                            capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            out["journal_tail"] = [line for line in r.stdout.splitlines() if line.strip()][-10:]
+    except Exception:
+        pass
+    return out
+
+
+def _health_check_modules() -> list:
+    """CIMS 모듈 프로세스 상태 (csp/cmp/csc/cwrtc) + RSS, CPU%."""
+    rows = []
+    for procname in ("csp", "cmp", "csc", "cwrtc"):
+        try:
+            r = subprocess.run(["pgrep", "-a", procname],
+                                capture_output=True, text=True, timeout=2)
+            lines = r.stdout.splitlines()
+            if not lines:
+                rows.append({"name": procname, "running": False})
+                continue
+            parts = lines[0].split(maxsplit=1)
+            pid = int(parts[0])
+            row = {"name": procname, "running": True, "pid": pid,
+                   "cpu_pct": _proc_cpu_pct(pid),
+                   "mem_mb":  _proc_rss_mb(pid)}
+            # uptime — /proc/<pid>/stat 의 starttime 으로 계산
+            try:
+                with open(f"/proc/{pid}/stat") as f:
+                    fields = f.read().split()
+                starttime_j = int(fields[21])  # field 22
+                with open("/proc/uptime") as f:
+                    uptime = float(f.read().split()[0])
+                row["uptime_sec"] = int(uptime - starttime_j / _CLK_TCK)
+            except Exception:
+                pass
+            rows.append(row)
+        except Exception as e:
+            rows.append({"name": procname, "error": str(e)})
+    return rows
+
+
+def run_health_check(scope: str = "all") -> dict:
+    """on-demand health check — keepalived/VIP + 모듈 상태 + 기본 시스템 메트릭.
+    scope: 'ha' | 'modules' | 'all'."""
+    from datetime import datetime as _dt
+    result = {"ts": _dt.now().isoformat(timespec='seconds'),
+              "agent_version": AGENT_VERSION,
+              "hostname": socket.gethostname()}
+    if scope in ("ha", "all"):
+        result["ha"] = _health_check_ha()
+    if scope in ("modules", "all"):
+        result["modules"] = _health_check_modules()
+    if scope == "all":
+        # 기본 metric 도 같이 — 모달에서 spinner 안 띄우고 한 번에 노출.
+        m = collect_metrics()
+        result["metrics"] = {
+            "mem_pct": m.get("mem_pct"),
+            "disk_pct": m.get("disk_pct"),
+            "load_avg": m.get("load_avg"),
+            "per_iface": m.get("per_iface"),
+        }
+    # 종합 verdict — healthy / partial / broken
+    issues = []
+    if scope in ("ha", "all") and result.get("ha"):
+        ha = result["ha"]
+        if ha.get("keepalived_installed") and not ha.get("keepalived_active"):
+            issues.append("keepalived inactive")
+    if scope in ("modules", "all") and result.get("modules"):
+        for m in result["modules"]:
+            if m.get("running") is False:
+                pass  # 모듈 미배포는 정상
+            elif m.get("error"):
+                issues.append(f"{m.get('name')}: {m.get('error')}")
+    result["verdict"] = "healthy" if not issues else ("partial" if len(issues) <= 1 else "broken")
+    result["issues"] = issues
+    return result
+
+
+# ──────────────────────────────────────────────────────────────
 #  Job executors
 # ──────────────────────────────────────────────────────────────
 
@@ -1276,6 +1390,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if path == "/health":
             return self._respond(200, {"ok": True, "agent_id": self._state.agent_id,
                                         "version": AGENT_VERSION})
+        if path == "/health-check":
+            scope = (q.get("scope") or ["all"])[0]
+            return self._respond(200, run_health_check(scope))
         if path == "/collection":
             install_path = (q.get("install_path") or [""])[0]
             name = (q.get("name") or [""])[0]

@@ -159,6 +159,38 @@ export interface AgentMetric {
   processes: Array<{ name: string; pid: number; cmdline?: string }>
 }
 
+export interface AgentHealthCheck {
+  ts: string
+  agent_version: string
+  hostname: string
+  verdict: 'healthy' | 'partial' | 'broken'
+  issues: string[]
+  ha?: {
+    keepalived_installed: boolean
+    keepalived_active: boolean
+    vips: Array<{ iface: string; ip: string; mask: number }>
+    journal_tail?: string[]
+    error?: string
+  }
+  modules?: Array<{
+    name: string
+    running: boolean
+    pid?: number
+    cpu_pct?: number | null
+    mem_mb?: number | null
+    uptime_sec?: number
+    error?: string
+  }>
+  metrics?: {
+    mem_pct?: number | null
+    disk_pct?: number | null
+    load_avg?: string | null
+    per_iface?: Array<{ name: string; rx_bytes: number; tx_bytes: number;
+                       rx_rate?: number; tx_rate?: number;
+                       rx_errors: number; tx_errors: number }>
+  }
+}
+
 // ──────────────── Package ────────────────
 export interface PackageMeta {
   name?: string
@@ -387,6 +419,8 @@ export const deploymentApi = {
     }>(`/packages/register-from-dist`, {}),
   upgradeAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/upgrade`, {}),
   restartAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/restart`, {}),
+  healthCheck:   (id: number, scope: 'ha'|'modules'|'all' = 'all') =>
+    api.post<AgentHealthCheck>(`/agents/${id}/health-check`, { scope }),
   applyIpConfig: (id: number,
                   ops?: { service_ip_rows?: Array<{ op: 'add'|'del'; iface: string; ip: string; mask: number; slot?: string }>;
                           routes?:          Array<{ op: 'add'|'del'; dst: string; via: string; dev: string }> }) =>
