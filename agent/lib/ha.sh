@@ -176,6 +176,18 @@ cmd_ha() {
                 sudo apt-get install -y keepalived
                 ok "keepalived 설치 완료 (apt): $(keepalived --version 2>&1 | head -1)"
             fi
+            # uninstall→re-install 시 dpkg 가 conffile 을 .dpkg-new 로 깔아 keepalived start FAILURE.
+            # 정상 이름이 비어있으면 mv, 이미 있으면 skip (운영자 검토 필요).
+            local newf orig
+            for newf in /etc/keepalived/*.dpkg-new; do
+                [[ -e $newf ]] || continue
+                orig="${newf%.dpkg-new}"
+                if [[ -e $orig ]]; then
+                    info ".dpkg-new 잔재 발견 — 정상 파일 이미 있음, skip: $newf"
+                else
+                    sudo mv "$newf" "$orig" && ok ".dpkg-new 정상 이름으로 이동: $orig"
+                fi
+            done
             ;;
         config)
             _ha_check_config || return 1
@@ -226,6 +238,12 @@ cmd_ha() {
                 info "keepalived 미설치 — skip"
                 sudo rm -rf /etc/keepalived "$HA_DIR/out" 2>/dev/null || true
                 return 0
+            fi
+            # broken deps (예: libsnmp40t64) 가 있으면 후속 purge 가 실패하고 /etc/keepalived rm 도 못함.
+            # --fix-broken install 선행 — 시스템에 broken 없으면 NO-OP.
+            if sudo dpkg --audit 2>/dev/null | grep -q .; then
+                info "broken deps 발견 — apt-get --fix-broken install 자동 선행"
+                sudo apt-get -y --fix-broken install || warn "fix-broken install 실패 — purge 단계 실패 시 수동 정리 필요"
             fi
             info "keepalived 제거 (purge + autoremove)"
             sudo systemctl stop keepalived 2>/dev/null || true
