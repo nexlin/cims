@@ -757,7 +757,9 @@ def job_update_ha(params: dict) -> tuple:
         except Exception as e:
             msgs.append(f"cims-ha install exception: {e}")
         try:
-            r1 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "config"],
+            # config 는 read-only render — sudo 불필요. 이전엔 sudo 로 호출되어 out/ 결과물이
+            # root 소유로 생성 → uninstall.sh 가 그 디렉토리 못 지우는 비대칭 발생. 해소.
+            r1 = subprocess.run([cims_ha, "--ha-dir", ha_dir, "config"],
                                 capture_output=True, text=True, timeout=30)
             msgs.append(f"cims-ha config rc={r1.returncode}"
                        + (f" err={(r1.stderr or r1.stdout).strip()[-200:]}" if r1.returncode != 0 else ""))

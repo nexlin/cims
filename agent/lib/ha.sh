@@ -220,10 +220,11 @@ cmd_ha() {
         status) systemctl status keepalived --no-pager || true ;;
         uninstall)
             # agent uninstall 대칭 — install 이 시스템에 깐 것을 모두 제거.
-            # keepalived purge + autoremove deps (시스템 다른 곳에서 안 쓰는 것만) + /etc/keepalived/.
+            # keepalived purge + autoremove deps (시스템 다른 곳에서 안 쓰는 것만) + /etc/keepalived/
+            # + HA_DIR/out (옛 sudo 호출로 생긴 root 소유 render 잔재).
             if ! command -v keepalived >/dev/null 2>&1; then
                 info "keepalived 미설치 — skip"
-                sudo rm -rf /etc/keepalived 2>/dev/null || true
+                sudo rm -rf /etc/keepalived "$HA_DIR/out" 2>/dev/null || true
                 return 0
             fi
             info "keepalived 제거 (purge + autoremove)"
@@ -233,8 +234,8 @@ cmd_ha() {
                 return 1
             }
             sudo apt-get -y autoremove --purge || true
-            sudo rm -rf /etc/keepalived 2>/dev/null || true
-            ok "keepalived + autoremoved deps + /etc/keepalived 제거"
+            sudo rm -rf /etc/keepalived "$HA_DIR/out" 2>/dev/null || true
+            ok "keepalived + autoremoved deps + /etc/keepalived + out/ 제거"
             ;;
         help|*)
             cat <<EOF
