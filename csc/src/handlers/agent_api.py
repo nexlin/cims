@@ -607,12 +607,16 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
     body = _parse_body(handler_args)
     from handlers.agents import _metric_append, _agent_update
     procs = body.get("processes") or []
+    per_iface = body.get("per_iface") or []
+    modules = body.get("modules") or []
     record = {
         'cpu_pct': body.get("cpu_pct"),
         'mem_pct': body.get("mem_pct"),
         'disk_pct': body.get("disk_pct"),
         'load_avg': (body.get("load_avg") or "")[:32],
         'processes': procs if isinstance(procs, list) else [],
+        'per_iface': per_iface if isinstance(per_iface, list) else [],
+        'modules':   modules if isinstance(modules, list) else [],
     }
     await asyncio.to_thread(_metric_append, config, agent['id'], record)
     await asyncio.to_thread(_agent_update, config, agent['id'], {

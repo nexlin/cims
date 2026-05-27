@@ -334,11 +334,11 @@ if __name__ == '__main__':
 
         # ── Agent stale sweeper ─────────────────────────────────────────
         # heartbeat 이 STALE_SEC 이상 안 오면 online/approved → offline 로 전이.
-        # 기본 90s (agent 의 기본 heartbeat 30s × 3).
+        # 기본 8s (agent 의 기본 heartbeat 2s × 4). sweep_interval 도 2s 로 dense polling.
         from handlers.agents import _get_db as _agent_db_conn
         from handlers.agent_api import _AGENT_CERT_ROTATE_THRESHOLD_DAYS
-        STALE_SEC = int(config.get('AgentStaleSec', 90))
-        SWEEP_INTERVAL = 30
+        STALE_SEC = int(config.get('AgentStaleSec', 8))
+        SWEEP_INTERVAL = int(config.get('AgentSweepIntervalSec', 2))
         CERT_SWEEP_INTERVAL = int(config.get('AgentCertSweepSec', 3600))  # 기본 1시간
 
         def _sweep_stale_agents():

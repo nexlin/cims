@@ -63,8 +63,8 @@ DEFAULT_INSTALL_ROOT = os.environ.get(
     "CIMS_AGENT_INSTALL_ROOT",
     os.path.join(_AGENT_DIR, "modules"),
 )
-DEFAULT_HEARTBEAT_SEC = 30
-DEFAULT_METRIC_SEC = 60
+DEFAULT_HEARTBEAT_SEC = 2
+DEFAULT_METRIC_SEC = 2
 DEFAULT_SYNC_PORT = 9900
 def _read_pkg_version() -> str:
     """install dir 의 pkg.json 에서 version 읽기 — 패키지 버전과 자동 동기화.
@@ -320,8 +320,88 @@ def collect_routes() -> list:
     return result
 
 
+_PROC_CPU_CACHE: dict = {}  # {pid: (utime+stime jiffies, sample_ts)}
+_NET_DEV_CACHE: dict = {}   # {iface: (rx_bytes, tx_bytes, sample_ts)}
+try:
+    _CLK_TCK = os.sysconf("SC_CLK_TCK")
+except Exception:
+    _CLK_TCK = 100
+
+
+def _proc_cpu_pct(pid: int) -> float | None:
+    """/proc/<pid>/stat 의 utime+stime 두 sample 차이로 CPU% 계산.
+    첫 호출 시 sample 만 저장하고 None 반환 — 다음 호출부터 값 산출."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            fields = f.read().split()
+        # field 13 = utime, 14 = stime (man proc(5))
+        cur_j = int(fields[13]) + int(fields[14])
+        cur_ts = time.time()
+    except Exception:
+        _PROC_CPU_CACHE.pop(pid, None)
+        return None
+    prev = _PROC_CPU_CACHE.get(pid)
+    _PROC_CPU_CACHE[pid] = (cur_j, cur_ts)
+    if not prev:
+        return None
+    prev_j, prev_ts = prev
+    elapsed = cur_ts - prev_ts
+    if elapsed <= 0:
+        return None
+    used_sec = (cur_j - prev_j) / _CLK_TCK
+    return round(used_sec / elapsed * 100, 1)
+
+
+def _proc_rss_mb(pid: int) -> int | None:
+    """/proc/<pid>/status 의 VmRSS (kB) → MB."""
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        pass
+    return None
+
+
+def collect_per_iface() -> list:
+    """/proc/net/dev 의 각 NIC RX/TX bytes/errors. lo 제외.
+    rx_rate/tx_rate (Bps) 는 직전 sample 과의 차이로 산출 — 첫 호출 시 None."""
+    rows = []
+    try:
+        with open("/proc/net/dev") as f:
+            lines = f.readlines()
+    except Exception:
+        return rows
+    cur_ts = time.time()
+    for line in lines[2:]:
+        if ":" not in line:
+            continue
+        name, rest = line.split(":", 1)
+        name = name.strip()
+        if name == "lo":
+            continue
+        parts = rest.split()
+        if len(parts) < 16:
+            continue
+        rx_bytes = int(parts[0]); rx_errors = int(parts[2])
+        tx_bytes = int(parts[8]); tx_errors = int(parts[10])
+        row = {"name": name, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes,
+               "rx_errors": rx_errors, "tx_errors": tx_errors}
+        prev = _NET_DEV_CACHE.get(name)
+        _NET_DEV_CACHE[name] = (rx_bytes, tx_bytes, cur_ts)
+        if prev:
+            prev_rx, prev_tx, prev_ts = prev
+            elapsed = cur_ts - prev_ts
+            if elapsed > 0:
+                row["rx_rate"] = int((rx_bytes - prev_rx) / elapsed)
+                row["tx_rate"] = int((tx_bytes - prev_tx) / elapsed)
+        rows.append(row)
+    return rows
+
+
 def collect_metrics() -> dict:
-    """CPU/mem/disk percent + load + CIMS 프로세스 목록."""
+    """CPU/mem/disk percent + load + per-iface RX/TX + CIMS module pid/cpu/mem."""
     m = {}
     try:
         with open("/proc/loadavg") as f:
@@ -343,22 +423,39 @@ def collect_metrics() -> dict:
         total, used, free = shutil.disk_usage("/")
         m["disk_pct"] = round(used / total * 100, 1)
     except Exception: pass
-    # processes — CIMS 바이너리
+    # per-iface RX/TX
+    m["per_iface"] = collect_per_iface()
+    # modules — CIMS 바이너리 (pid/cpu/mem) + 기존 processes 유지 (호환).
     m["processes"] = []
+    m["modules"]   = []
+    seen_pids = set()
     for procname in ("csp", "cmp", "csc", "cwrtc"):
         try:
             out = subprocess.run(["pgrep", "-a", procname], capture_output=True, text=True, timeout=2)
             for line in out.stdout.splitlines():
                 parts = line.split(maxsplit=1)
-                if len(parts) >= 1:
-                    m["processes"].append({
-                        "name": procname,
-                        "pid": int(parts[0]),
-                        "cmdline": parts[1] if len(parts) > 1 else "",
-                    })
-                    break
+                if not parts:
+                    continue
+                pid = int(parts[0])
+                cmd = parts[1] if len(parts) > 1 else ""
+                if pid in seen_pids:
+                    continue
+                seen_pids.add(pid)
+                if not m["processes"]:
+                    m["processes"].append({"name": procname, "pid": pid, "cmdline": cmd})
+                m["modules"].append({
+                    "name": procname, "pid": pid,
+                    "cpu_pct": _proc_cpu_pct(pid),
+                    "mem_mb":  _proc_rss_mb(pid),
+                })
+                break
         except Exception:
             pass
+    # 사라진 pid 캐시 정리 — 메모리 누수 방지.
+    live = {x["pid"] for x in m["modules"]}
+    for stale_pid in list(_PROC_CPU_CACHE.keys()):
+        if stale_pid not in live:
+            _PROC_CPU_CACHE.pop(stale_pid, None)
     return m
 
 
