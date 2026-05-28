@@ -224,6 +224,16 @@ export default function ServersPage() {
       await load()
     } catch (e) { show((e as Error).message, 'err') }
   }
+  async function removeMemberFromGroup(g: HaGroup, a: Agent) {
+    // AA 만 호출 — AS 는 row 에 [×] 없음 (lifecycle 표준: AS 멤버 단독 삭제 차단).
+    if (!confirm(`멤버 [${agentDisplayName(a.name)}] 를 그룹 [${g.name}] 에서 제거할까요?\n\n` +
+                 `agent 자체는 삭제되지 않고 standalone (SA) 으로 트리에 남습니다.`)) return
+    try {
+      await haGroupsApi.removeMember(g.id, a.id)
+      show(`${a.name} 그룹에서 제거됨`, 'ok')
+      await load()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
 
   if (loading) return <div className="empty">로딩 중...</div>
 
@@ -262,7 +272,8 @@ export default function ServersPage() {
             onToggleExpand={toggleGroupExpand}
             selection={selection}
             onSelect={setSelection}
-            onAddMember={addMemberToGroup} />
+            onAddMember={addMemberToGroup}
+            onRemoveMember={removeMemberFromGroup} />
         </div>
         {/* 우측 Inspector */}
         <div style={{
@@ -288,7 +299,6 @@ export default function ServersPage() {
             <GroupInspector group={selectedGroup} agents={agents}
               onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
               onReload={load}
-              onAddMember={addMemberToGroup}
               onDeleteSystem={deleteSystem} />
           ) : (
             <div className="empty" style={{ padding: 40 }}>
@@ -334,7 +344,7 @@ export default function ServersPage() {
 // ──────────────────────────────────────────────────────────────
 
 function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
-                      onToggleExpand, selection, onSelect, onAddMember }: {
+                      onToggleExpand, selection, onSelect, onAddMember, onRemoveMember }: {
   haGroups: HaGroup[]
   groupedAgents: Map<number, Agent[]>
   depsByAgent: Map<number, Deployment[]>
@@ -343,6 +353,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
   selection: Selection
   onSelect: (s: Selection) => void
   onAddMember: (g: HaGroup) => void
+  onRemoveMember: (g: HaGroup, a: Agent) => void   // AA 만 호출됨 (AS 는 row 에 [×] 없음)
 }) {
   const standalone = groupedAgents.get(-1) || []
   return (
@@ -392,7 +403,8 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                 role={g.mode === 'active_standby' ? a.ha_group?.role : undefined}
                 active={selection?.kind === 'agent' && selection.id === a.id}
                 indent
-                onClick={() => onSelect({ kind: 'agent', id: a.id })} />
+                onClick={() => onSelect({ kind: 'agent', id: a.id })}
+                onRemove={g.mode === 'all_active' ? () => onRemoveMember(g, a) : undefined} />
             ))}
           </div>
         )
@@ -428,13 +440,14 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
   )
 }
 
-function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
+function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRemove }: {
   agent: Agent
   depCount: number
   role?: 'master' | 'backup'
   active: boolean
   indent?: boolean
   onClick: () => void
+  onRemove?: () => void   // AA 멤버만 제공 — 그룹에서 멤버 제거 (agent 자체는 standalone 으로 남음)
 }) {
   const sc = agentStatusColor(a.status)
   return (
@@ -448,13 +461,22 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar }} />
       <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{agentDisplayName(a.name)}</span>
       {role && (
-        <span title={role === 'master' ? 'Active' : 'Standby'}
+        <span title={role === 'master' ? 'Master — priority 100 (절체 우선순위)' : 'Backup — priority 90'}
               style={{
                 fontSize: 10, padding: '1px 5px', borderRadius: 3, fontWeight: 600,
-                background: role === 'master' ? '#e74c3c' : '#95a5a6', color: '#fff',
-              }}>{role === 'master' ? 'A' : 'S'}</span>
+                background: role === 'master' ? '#3498db' : '#95a5a6', color: '#fff',
+              }}>{role === 'master' ? 'M' : 'B'}</span>
       )}
       <span style={{ fontSize: 10, color: '#888' }}>{depCount}m</span>
+      {onRemove && (
+        <button onClick={e => { e.stopPropagation(); onRemove() }}
+                title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"
+                style={{
+                  border: '1px solid #f5b8b8', background: '#fff', color: '#e74c3c',
+                  fontSize: 10, padding: '0 5px', borderRadius: 3, cursor: 'pointer',
+                  fontWeight: 600,
+                }}>×</button>
+      )}
     </div>
   )
 }
@@ -463,12 +485,11 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
 //  Group Inspector (HA 그룹 선택 시)
 // ──────────────────────────────────────────────────────────────
 
-function GroupInspector({ group, agents, onSelectMember, onReload, onAddMember, onDeleteSystem }: {
+function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSystem }: {
   group: HaGroup
   agents: Agent[]
   onSelectMember: (aid: number) => void
   onReload: () => Promise<void>
-  onAddMember: (g: HaGroup) => void
   onDeleteSystem: (g: HaGroup) => void
 }) {
   const { show } = useToast()
@@ -558,14 +579,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onAddMember, 
       show('멤버 적용됨', 'ok'); await onReload()
     } catch (e) { show((e as Error).message, 'err') }
   }
-  async function removeMember(aid: number) {
-    if (!confirm(`멤버 agent #${aid} 를 그룹에서 제거할까요?`)) return
-    try {
-      await haGroupsApi.removeMember(group.id, aid)
-      show('멤버 제거됨', 'ok'); await onReload()
-    } catch (e) { show((e as Error).message, 'err') }
-  }
-
   // VIP 행 편집 모드 — bid 또는 'new' (새 binding 추가 중). null = 모두 readonly.
   const [bindingEditMode, setBindingEditMode] = useState<number | 'new' | null>(null)
   function updateBinding(bid: number, patch: Partial<VipBinding>) {
@@ -709,16 +722,14 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onAddMember, 
           </div>
         )}
 
-        {/* 멤버 */}
+        {/* 멤버 — 추가/삭제는 좌측 트리에서 일괄 처리 (트리의 [+] / [×]).
+            여기는 표시 + AS 의 Master 선택만 담당. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>멤버 ({memberAgents.length})</div>
+          <span style={{ fontSize: 11, color: '#888', marginLeft: 8 }}>
+            추가/삭제는 좌측 트리에서
+          </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-            {group.mode === 'all_active' && (
-              <button className="btn btn--sm" onClick={() => onAddMember(group)}
-                      title="새 멤버 자동 생성 (이름 자동, install_command 발급)">
-                + 멤버 추가
-              </button>
-            )}
             {group.mode === 'active_standby' && (
               <button className="btn btn--sm btn--primary" onClick={applyMembers} disabled={!masterChanged}
                       title="Master 변경을 backend 에 적용 (priority swap + keepalived 즉시 반영)">
@@ -737,12 +748,12 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onAddMember, 
                     <th style={{ width: 50 }} title="현재 실제 상태 (Active/Standby). VIP 를 실제로 보유 중인지. 절체 직후엔 설정과 다를 수 있음.">상태</th>
                   </>
                 )}
-                <th>접속</th><th>IP</th><th>v</th><th style={{ width: 40 }}></th></tr>
+                <th>접속</th><th>IP</th><th>v</th></tr>
           </thead>
           <tbody>
             {memberAgents.map(m => {
               const a = m.agent
-              const colCount = group.mode === 'active_standby' ? 8 : 5
+              const colCount = group.mode === 'active_standby' ? 7 : 4
               if (!a) return (
                 <tr key={m.agent_id}><td colSpan={colCount}>(agent #{m.agent_id} not found)</td></tr>
               )
@@ -782,15 +793,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onAddMember, 
                   </td>
                   <td style={{ fontSize: 12, color: '#555' }}>{a.ip_address || '—'}</td>
                   <td style={{ fontSize: 12, color: '#888' }}>{a.agent_version || '—'}</td>
-                  <td>
-                    <button className="btn btn--sm btn--danger"
-                            style={{ fontSize: 10, padding: '1px 5px' }}
-                            disabled={group.mode === 'active_standby'}
-                            title={group.mode === 'active_standby'
-                              ? 'AS 멤버 (master/backup) 는 단독 제거 불가 — 그룹 삭제 사용'
-                              : '그룹에서 멤버 제거 (agent 자체는 standalone 유지)'}
-                            onClick={() => removeMember(a.id)}>×</button>
-                  </td>
                 </tr>
               )
             })}
