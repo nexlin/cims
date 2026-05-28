@@ -4,7 +4,7 @@ import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentHealthCheck,
 } from '../api/deployment'
-import { haGroupsApi, type HaGroup, type HaRole, type VipBinding,
+import { haGroupsApi, type HaGroup, type VipBinding,
          type FailoverOptions, FAILOVER_DEFAULTS } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { splitPrefixHost } from './ha/helpers'
@@ -486,12 +486,14 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     { ...FAILOVER_DEFAULTS, ...(group.failover_options || {}),
       health: { ...FAILOVER_DEFAULTS.health, ...(group.failover_options?.health || {}) } })
   const [failoverOpen, setFailoverOpen] = useState(false)
-  const [editMemberRole, setEditMemberRole] = useState<Map<number, HaRole>>(
-    new Map(group.members.map(m => [m.agent_id, m.role]))
-  )
-  const [editMemberPrio, setEditMemberPrio] = useState<Map<number, number>>(
-    new Map(group.members.map(m => [m.agent_id, m.priority]))
-  )
+  // Master 멤버 1명 선택 — AS 만 의미. 현재 priority 가 가장 큰 멤버를 default 로.
+  const initialMaster = (() => {
+    if (group.members.length === 0) return null
+    return [...group.members].sort(
+      (a, b) => (b.priority - a.priority) || (a.agent_id - b.agent_id)
+    )[0].agent_id
+  })()
+  const [editMasterAid, setEditMasterAid] = useState<number | null>(initialMaster)
   // group prop 이 바뀌면 (다른 group 선택 또는 reload) state 재설정.
   useEffect(() => {
     setEditName(group.name)
@@ -500,23 +502,27 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     setEditBindings(group.vip_bindings || [])
     setEditFailover({ ...FAILOVER_DEFAULTS, ...(group.failover_options || {}),
       health: { ...FAILOVER_DEFAULTS.health, ...(group.failover_options?.health || {}) } })
-    setEditMemberRole(new Map(group.members.map(m => [m.agent_id, m.role])))
-    setEditMemberPrio(new Map(group.members.map(m => [m.agent_id, m.priority])))
+    if (group.members.length > 0) {
+      setEditMasterAid([...group.members].sort(
+        (a, b) => (b.priority - a.priority) || (a.agent_id - b.agent_id)
+      )[0].agent_id)
+    } else {
+      setEditMasterAid(null)
+    }
   }, [group.id, group.update_time])
 
   const memberAgents = group.members.map(m => ({
     ...m, agent: agents.find(a => a.id === m.agent_id)
   }))
 
-  // dirty 검출 — mode 는 변경 불가라 제외.
+  // dirty 검출 — mode 는 변경 불가라 제외. Master agent_id 가 현재 priority 최고 멤버와 다르면 dirty.
+  const masterChanged = editMasterAid !== initialMaster
   const dirty = editName !== group.name
     || editAuthPass !== group.auth_pass
     || editNote !== (group.note || '')
     || JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
     || JSON.stringify(editFailover) !== JSON.stringify(group.failover_options || FAILOVER_DEFAULTS)
-    || group.members.some(m =>
-        editMemberRole.get(m.agent_id) !== m.role ||
-        editMemberPrio.get(m.agent_id) !== m.priority)
+    || masterChanged
 
   async function saveMeta() {
     try {
@@ -528,14 +534,13 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
         vip_bindings: editBindings,
         failover_options: editFailover,
       })
-      // 멤버별 role/priority 패치 — addMember 가 upsert 역할 (옛 멤버 갱신 시 동일 endpoint 사용 가정)
-      for (const m of group.members) {
-        const newRole = editMemberRole.get(m.agent_id)
-        const newPrio = editMemberPrio.get(m.agent_id)
-        if (newRole !== m.role || newPrio !== m.priority) {
-          await haGroupsApi.addMember(group.id, {
-            agent_id: m.agent_id, role: newRole, priority: newPrio,
-          })
+      // Master 선택 변경 → 해당 멤버 priority=100, 나머지=90. AS 에만 의미.
+      if (group.mode === 'active_standby' && masterChanged && editMasterAid !== null) {
+        for (const m of group.members) {
+          const newPrio = m.agent_id === editMasterAid ? 100 : 90
+          if (newPrio !== m.priority) {
+            await haGroupsApi.addMember(group.id, { agent_id: m.agent_id, priority: newPrio })
+          }
         }
       }
       show('저장됨', 'ok')
@@ -709,48 +714,52 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
         <table className="data-table" style={{ margin: 0, fontSize: 13 }}>
           <thead>
             <tr><th>이름</th>
-                {group.mode === 'active_standby' && <th>role</th>}
-                <th style={{ width: 80 }}>priority</th>
-                <th>상태</th><th>IP</th><th>v</th><th style={{ width: 40 }}></th></tr>
+                {group.mode === 'active_standby' && (
+                  <>
+                    <th style={{ width: 60 }} title="Master 선택 — 절체 시 우선순위가 가장 높은 노드. 1명만 선택 가능.">Master</th>
+                    <th style={{ width: 50 }} title="설정상 역할 (Master/Backup). priority 의 결과 — Master 선택 결과.">설정</th>
+                    <th style={{ width: 50 }} title="현재 실제 상태 (Active/Standby). VIP 를 실제로 보유 중인지. 절체 직후엔 설정과 다를 수 있음.">상태</th>
+                  </>
+                )}
+                <th>접속</th><th>IP</th><th>v</th><th style={{ width: 40 }}></th></tr>
           </thead>
           <tbody>
             {memberAgents.map(m => {
               const a = m.agent
-              const colCount = group.mode === 'active_standby' ? 7 : 6
+              const colCount = group.mode === 'active_standby' ? 8 : 5
               if (!a) return (
                 <tr key={m.agent_id}><td colSpan={colCount}>(agent #{m.agent_id} not found)</td></tr>
               )
               const sc = agentStatusColor(a.status)
-              const role = editMemberRole.get(a.id) || m.role
-              const prio = editMemberPrio.get(a.id) ?? m.priority
+              const isMasterSel = editMasterAid === a.id
               return (
                 <tr key={a.id}>
                   <td onClick={() => onSelectMember(a.id)} style={{ cursor: 'pointer' }}>
                     <b>{agentDisplayName(a.name)}</b>
                   </td>
                   {group.mode === 'active_standby' && (
-                    <td>
-                      <select value={role}
-                              onChange={e => {
-                                const next = new Map(editMemberRole)
-                                next.set(a.id, e.target.value as HaRole)
-                                setEditMemberRole(next)
-                              }}
-                              className="form-input" style={{ fontSize: 11, padding: 2 }}>
-                        <option value="master">Active</option>
-                        <option value="backup">Standby</option>
-                      </select>
-                    </td>
+                    <>
+                      <td style={{ textAlign: 'center' }}>
+                        <input type="radio" name={`master-${group.id}`}
+                               checked={isMasterSel}
+                               onChange={() => setEditMasterAid(a.id)}
+                               title="이 멤버를 Master 로 설정 (priority 100, 나머지 90)" />
+                      </td>
+                      <td>
+                        <span title={isMasterSel ? 'Master — 절체 우선순위 100' : 'Backup — 절체 우선순위 90'}
+                              style={{
+                                background: isMasterSel ? '#3498db' : '#95a5a6',
+                                color: '#fff', fontSize: 10, padding: '1px 6px',
+                                borderRadius: 3, fontWeight: 600,
+                              }}>{isMasterSel ? 'M' : 'B'}</span>
+                      </td>
+                      <td>
+                        {/* A/S = 실제 VIP 보유 (관측값). 현재는 데이터 미수집 — placeholder. */}
+                        <span title="현재 실제 상태 (VIP 보유 여부). 차후 health-check 연동 예정."
+                              style={{ fontSize: 10, color: '#bbb' }}>—</span>
+                      </td>
+                    </>
                   )}
-                  <td>
-                    <input type="number" value={prio} min={1} max={254}
-                           onChange={e => {
-                             const next = new Map(editMemberPrio)
-                             next.set(a.id, Number(e.target.value))
-                             setEditMemberPrio(next)
-                           }}
-                           className="form-input" style={{ width: 60, fontSize: 11, padding: 2 }} />
-                  </td>
                   <td>
                     <span style={{ background: sc.bar, color: '#fff', fontSize: 10,
                                     padding: '1px 6px', borderRadius: 3 }}>{a.status}</span>

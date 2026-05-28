@@ -201,6 +201,18 @@ def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
     return (None, None)
 
 
+def _compute_master_aid(members: list) -> int | None:
+    """VRRP 본래 모델 — priority 가 단일 결정자.
+    그룹 내 priority 최대값 멤버가 Master. 동률이면 agent_id 작은 쪽 (안정적 tie-break)."""
+    if not members:
+        return None
+    return min(
+        (m for m in members if m.get('agent_id') is not None),
+        key=lambda m: (-int(m.get('priority') or 0), int(m.get('agent_id'))),
+        default=None,
+    ).get('agent_id') if members else None
+
+
 def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                          agent_row: dict, peer_row: dict | None,
                          vip_bindings: list | None = None,
@@ -209,9 +221,17 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
 
     vip_bindings 가 있으면 multi-VIP 한 vrrp_instance (services.<group_name>.vips[]).
     없으면 legacy 단일 vip path (group.vip).
+
+    priority 는 멤버 record 값 그대로 ha.json 에 박힘. initial_state 는 priority
+    최대 멤버가 MASTER, 나머지 BACKUP (VRRP 본래 모델).
     """
-    is_master = next((m.get('role') == 'master' for m in members if m['agent_id'] == agent_id),
-                     False)
+    master_aid = _compute_master_aid(members)
+    is_master = (master_aid == agent_id)
+    # 이 agent 의 priority — 멤버 record 의 값 그대로. 누락 시 100/90 default (호환성).
+    my_priority = next(
+        (int(m.get('priority') or 0) for m in members if m.get('agent_id') == agent_id),
+        100 if is_master else 90,
+    )
     vip_bindings = vip_bindings or []
     default_iface = _pick_default_iface(vip_bindings, agent_id) or "eth0"
 
@@ -241,7 +261,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                 'vrid':     group['vrid'],
                 'interface': svc_iface,
                 'vips':     vips,
-                'priority': 100 if is_master else 90,
+                'priority': my_priority,
                 'failover_options': failover_options,
             }
             if h_port:  entry['port']  = h_port
@@ -254,7 +274,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             'vrid':     group['vrid'],
             'interface': default_iface,
             'vip':      group['vip'],
-            'priority': 100 if is_master else 90,
+            'priority': my_priority,
             'failover_options': failover_options,
         }
         if h_port:  entry['port']  = h_port
@@ -402,11 +422,24 @@ def _attach_member_names(members: list, config: dict) -> list:
     return members
 
 
+def _attach_derived_role(members: list) -> list:
+    """role 은 derived — priority 최대값 멤버가 'master', 나머지 'backup'.
+    동률 시 agent_id 작은 쪽 (안정적 tie-break, _compute_master_aid 와 동일).
+    옛 record 의 저장된 role 필드는 무시 (응답에서 redundant).
+    """
+    master_aid = _compute_master_aid(members)
+    for m in members:
+        m['role'] = 'master' if m.get('agent_id') == master_aid else 'backup'
+    return members
+
+
 def _serialize_group(g: dict, config: dict) -> dict:
-    """file_store group dict → 응답용 (멤버 정렬 + agent_name enrich)."""
+    """file_store group dict → 응답용 (멤버 정렬 + agent_name enrich + role derive)."""
     out = dict(g)
     members = list(out.get('members') or [])
-    members.sort(key=lambda m: -int(m.get('priority') or 0))
+    # priority 우선 정렬, 동률 시 agent_id 오름 (UI 일관 표시)
+    members.sort(key=lambda m: (-int(m.get('priority') or 0), int(m.get('agent_id') or 0)))
+    members = _attach_derived_role(members)
     out['members'] = _attach_member_names(members, config)
     out.setdefault('vip_bindings', [])
     # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
@@ -429,10 +462,19 @@ async def _get_group(gid: int, config):
 
 
 def _normalize_member(m: dict, idx: int) -> dict:
+    """role 은 derived (priority 의 결과). 입력은 role 또는 priority 중 하나로 의도 표현.
+    저장은 priority 만 — UI 가 'Master' 선택 → role='master' → priority=100, 나머지 90.
+
+    호환성: 옛 client 가 priority 직접 보내면 그대로 사용. 없으면 role 보고 100/90.
+    """
     aid = int(m.get('agent_id'))
-    role = m.get('role') or ('master' if idx == 0 else 'backup')
-    priority = int(m.get('priority', 100 if role == 'master' else 90))
-    return {'agent_id': aid, 'role': role, 'priority': priority}
+    if 'priority' in m and m.get('priority') is not None:
+        priority = int(m['priority'])
+    else:
+        # role 또는 idx 로 default — UI 는 보통 명시 priority 보냄.
+        role = m.get('role') or ('master' if idx == 0 else 'backup')
+        priority = 100 if role == 'master' else 90
+    return {'agent_id': aid, 'priority': priority}
 
 
 async def _create_group(body, config):
@@ -549,24 +591,27 @@ async def _add_member(gid: int, body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
     aid = int(body.get('agent_id', 0))
-    role = body.get('role', 'backup')
-    priority = int(body.get('priority', 100 if role == 'master' else 90))
     if not aid:
         return HandlerResult(status=400, body={'error': 'agent_id required'})
+    # role 또는 priority 둘 중 하나로 의도 표현 — _normalize_member 가 priority 로 통일.
+    norm = _normalize_member({'agent_id': aid,
+                              'role': body.get('role'),
+                              'priority': body.get('priority')}, 0)
 
     g = _ha_load(config, gid)
     if not g:
         return HandlerResult(status=404, body={'error': 'Group not found'})
     members = list(g.get('members') or [])
-    # 동일 agent_id 가 이미 있으면 priority/role 갱신
+    # 동일 agent_id 가 이미 있으면 priority 갱신
     found = False
     for m in members:
         if m.get('agent_id') == aid:
-            m['role'] = role; m['priority'] = priority
+            m['priority'] = norm['priority']
+            m.pop('role', None)  # 옛 'role' 잔재 제거 (derived 가 SoT)
             found = True
             break
     if not found:
-        members.append({'agent_id': aid, 'role': role, 'priority': priority})
+        members.append(norm)
     g['members'] = members
     file_store.save(_ha_dir(config), gid, g)
     _enqueue_update_ha_for_members(gid, config)
