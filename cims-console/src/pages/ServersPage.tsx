@@ -191,6 +191,9 @@ export default function ServersPage() {
         groupName: g.name, serverName: nm,
         enrollment_token: r.enrollment_token, install_command: r.install_command,
       })
+      // 새 멤버 자동 선택 + 트리에서 그룹 펼침 — InstallSection 즉시 노출.
+      setSelection({ kind: 'agent', id: r.id })
+      setExpandedGroups(prev => prev.has(g.id) ? prev : new Set(prev).add(g.id))
       await load()
     } catch (e) { show((e as Error).message, 'err') }
   }
@@ -273,7 +276,20 @@ export default function ServersPage() {
       </div>
 
       {systemModalOpen &&
-        <SystemCreateModal onClose={() => setSystemModalOpen(false)} onDone={load} />}
+        <SystemCreateModal
+          onClose={() => setSystemModalOpen(false)}
+          onDone={load}
+          onCreated={(firstAgentId) => {
+            if (firstAgentId) {
+              setSelection({ kind: 'agent', id: firstAgentId })
+              // standalone 또는 새 그룹 자동 펼침 — 새 멤버 트리에서 노출.
+              setExpandedGroups(prev => {
+                const next = new Set(prev)
+                next.add(-1)  // standalone
+                return next
+              })
+            }
+          }} />}
       {pendingMember &&
         <PendingMemberModal info={pendingMember} onClose={() => setPendingMember(null)} />}
       {deployModal &&
@@ -1136,7 +1152,11 @@ function PendingMemberModal({ info, onClose }: {
 
 type SystemMode = 'active_standby' | 'all_active' | 'standalone'
 
-function SystemCreateModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function SystemCreateModal({ onClose, onDone, onCreated }: {
+  onClose: () => void
+  onDone: () => Promise<void> | void
+  onCreated: (firstAgentId: number | null) => void
+}) {
   const { show } = useToast()
   const [name, setName] = useState('')
   const [mode, setMode] = useState<SystemMode>('active_standby')
@@ -1151,9 +1171,11 @@ function SystemCreateModal({ onClose, onDone }: { onClose: () => void; onDone: (
     if (!base) { show('이름 필수', 'err'); return }
     setCreating(true)
     try {
+      let firstAgentId: number | null = null
       if (mode === 'standalone') {
         const r = await deploymentApi.createAgent(base, '')
         await deploymentApi.approveAgent(r.id)
+        firstAgentId = r.id
         setResults([{ name: base, enrollment_token: r.enrollment_token, install_command: r.install_command }])
       } else {
         const memberCount = mode === 'active_standby' ? 2 : 0
@@ -1164,6 +1186,7 @@ function SystemCreateModal({ onClose, onDone }: { onClose: () => void; onDone: (
           await deploymentApi.approveAgent(r.id)
           memberAgents.push({ id: r.id, name: nm, enrollment_token: r.enrollment_token, install_command: r.install_command })
         }
+        if (memberAgents.length > 0) firstAgentId = memberAgents[0].id
         await haGroupsApi.create({
           name: base,
           mode,
@@ -1182,6 +1205,8 @@ function SystemCreateModal({ onClose, onDone }: { onClose: () => void; onDone: (
       }
       show(`시스템 "${base}" 추가 (${mode === 'active_standby' ? 'A/S' : mode === 'all_active' ? 'AA' : 'Standalone'})`, 'ok')
       await onDone()
+      // 첫 멤버 (있으면) 자동 선택 — 사용자가 modal 닫은 후 ServerInspector 의 InstallSection 으로 진입.
+      onCreated(firstAgentId)
     } catch (e) { show((e as Error).message, 'err') }
     finally { setCreating(false) }
   }
