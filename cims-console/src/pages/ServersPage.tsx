@@ -769,8 +769,10 @@ function ServerInspector({ agent: a, deployments, packages,
   onJob: (d: Deployment, jt: JobType) => void
   onRemoveDep: (d: Deployment) => void
 }) {
-  // pending 또는 enrollment_token 발급된 상태 — 설치 안내 default 펼침.
-  // 그 외 (online/offline) 도 accordion 으로 항상 접근 가능 — 재설치 / 토큰 재발급 시나리오.
+  // online 은 이미 enroll 완료 — token 재발급 의미 없음. InstallSection 자체 hidden.
+  // 재설치 원하면 [폐기] 또는 [삭제] 후 offline / pending 전이로 진입.
+  const showInstall = a.status !== 'online'
+  // pending 또는 enrollment_token 발급된 상태 — default 펼침. 그 외 (offline) default 접힘.
   const hasPendingInstall = a.status === 'pending' || a.has_pending_enrollment
   const [openSections, setOpenSections] = useState<Set<InspectorTab>>(() => {
     const init = new Set<InspectorTab>(['info', 'network', 'modules'])
@@ -830,10 +832,12 @@ function ServerInspector({ agent: a, deployments, packages,
                   disabled={a.status !== 'online'} title="agent 바이너리를 최신 버전으로 교체">
                   ↑ 업그레이드
                 </button>
-                <button className="btn btn--sm" onClick={onClickReinstall}
-                  title="물리 서버 교체 / 신규 install — 새 enrollment_token 발급 + InstallSection 펼침">
-                  🔄 재설치
-                </button>
+                {a.status !== 'online' && (
+                  <button className="btn btn--sm" onClick={onClickReinstall}
+                    title="물리 서버 교체 / 신규 install — 새 enrollment_token 발급 + InstallSection 펼침">
+                    🔄 재설치
+                  </button>
+                )}
                 <button className="btn btn--sm btn--outline" onClick={() => onRevoke(a)}>폐기</button>
               </>
             )}
@@ -850,13 +854,15 @@ function ServerInspector({ agent: a, deployments, packages,
 
       {/* 섹션 stack — accordion (default 모두 펼침, 개별 토글) */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <InspectorSection title={hasPendingInstall
-                                  ? `설치 안내 — ${a.name}`
-                                  : `재설치 / 토큰 재발급 — ${a.name}`}
-                          expanded={openSections.has('install')}
-                          onToggle={() => toggleSection('install')}>
-          <InstallSection agent={a} autoRegenSignal={autoRegenSignal} />
-        </InspectorSection>
+        {showInstall && (
+          <InspectorSection title={hasPendingInstall
+                                    ? `설치 안내 — ${a.name}`
+                                    : `재설치 / 토큰 재발급 — ${a.name}`}
+                            expanded={openSections.has('install')}
+                            onToggle={() => toggleSection('install')}>
+            <InstallSection agent={a} autoRegenSignal={autoRegenSignal} />
+          </InspectorSection>
+        )}
         <InspectorSection title="정보" expanded={openSections.has('info')}
                           onToggle={() => toggleSection('info')}>
           <InfoTab agent={a} />
