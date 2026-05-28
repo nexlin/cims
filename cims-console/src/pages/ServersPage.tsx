@@ -694,7 +694,17 @@ function ServerInspector({ agent: a, deployments, packages,
   onJob: (d: Deployment, jt: JobType) => void
   onRemoveDep: (d: Deployment) => void
 }) {
-  const [tab, setTab] = useState<InspectorTab>('modules')
+  // accordion 의 펼침 상태 — default 모두 펼침. 사용자가 개별 토글.
+  const [openSections, setOpenSections] = useState<Set<InspectorTab>>(
+    new Set(['info', 'network', 'modules'])
+  )
+  const toggleSection = (s: InspectorTab) => {
+    setOpenSections(prev => {
+      const next = new Set(prev)
+      if (next.has(s)) next.delete(s); else next.add(s)
+      return next
+    })
+  }
   const sc = agentStatusColor(a.status)
 
   return (
@@ -749,46 +759,52 @@ function ServerInspector({ agent: a, deployments, packages,
         </div>
       </div>
 
-      {/* 탭 */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #eee', background: '#fafafa' }}>
-        <TabButton active={tab === 'modules'} onClick={() => setTab('modules')}>
-          모듈 ({deployments.length})
-        </TabButton>
-        <TabButton active={tab === 'network'} onClick={() => setTab('network')}>
-          네트워크
-        </TabButton>
-        <TabButton active={tab === 'info'} onClick={() => setTab('info')}>
-          정보
-        </TabButton>
-      </div>
-
-      {/* 탭 컨텐츠 */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        {tab === 'modules' && (
+      {/* 섹션 stack — accordion (default 모두 펼침, 개별 토글) */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <InspectorSection title="정보" expanded={openSections.has('info')}
+                          onToggle={() => toggleSection('info')}>
+          <InfoTab agent={a} />
+        </InspectorSection>
+        <InspectorSection title="네트워크" expanded={openSections.has('network')}
+                          onToggle={() => toggleSection('network')}>
+          <NetworkTab agent={a} />
+        </InspectorSection>
+        <InspectorSection title={`모듈 (${deployments.length})`}
+                          expanded={openSections.has('modules')}
+                          onToggle={() => toggleSection('modules')}>
           <ModulesTab agent={a} deployments={deployments} packagesAvailable={packages.length > 0}
             onAddDeploy={onAddDeploy} onConfigure={onConfigure}
             onJob={onJob} onRemoveDep={onRemoveDep} />
-        )}
-        {tab === 'network' && <NetworkTab agent={a} />}
-        {tab === 'info' && <InfoTab agent={a} />}
+        </InspectorSection>
       </div>
     </>
   )
 }
 
-function TabButton({ active, children, onClick }: {
-  active: boolean; children: React.ReactNode; onClick: () => void
+function InspectorSection({ title, expanded, onToggle, children }: {
+  title: string
+  expanded: boolean
+  onToggle: () => void
+  children: React.ReactNode
 }) {
   return (
-    <button onClick={onClick}
-      style={{
-        padding: '10px 16px', border: 'none',
-        background: active ? '#fff' : 'transparent',
-        borderBottom: `2px solid ${active ? '#3498db' : 'transparent'}`,
-        fontWeight: active ? 600 : 400, cursor: 'pointer',
-      }}>
-      {children}
-    </button>
+    <div style={{ borderBottom: '1px solid #eee' }}>
+      <div onClick={onToggle}
+           style={{
+             display: 'flex', alignItems: 'center', gap: 8,
+             padding: '10px 16px', cursor: 'pointer',
+             background: '#fafafa', userSelect: 'none',
+             borderBottom: expanded ? '1px solid #eee' : 'none',
+           }}>
+        <span style={{ width: 14, color: '#888', fontSize: 12 }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
+      </div>
+      {expanded && (
+        <div style={{ padding: 16 }}>
+          {children}
+        </div>
+      )}
+    </div>
   )
 }
 
