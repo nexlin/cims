@@ -19,19 +19,21 @@ type Selection =
 export default function ServersPage() {
   const { show } = useToast()
   const [searchParams] = useSearchParams()
-  const initialAgentId = (() => {
-    const q = searchParams.get('agent')
-    const n = q ? Number(q) : NaN
-    return Number.isFinite(n) && n > 0 ? n : null
+  const initialSelection = ((): Selection => {
+    const ag = searchParams.get('agent')
+    const gp = searchParams.get('group')
+    const agN = ag ? Number(ag) : NaN
+    const gpN = gp ? Number(gp) : NaN
+    if (Number.isFinite(agN) && agN > 0) return { kind: 'agent', id: agN }
+    if (Number.isFinite(gpN) && gpN > 0) return { kind: 'group', id: gpN }
+    return null
   })()
   const [agents, setAgents]           = useState<Agent[]>([])
   const [packages, setPackages]       = useState<SipPackage[]>([])
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [haGroups, setHaGroups]       = useState<HaGroup[]>([])
   const [loading, setLoading]         = useState(true)
-  const [selection, setSelection]     = useState<Selection>(
-    initialAgentId ? { kind: 'agent', id: initialAgentId } : null
-  )
+  const [selection, setSelection]     = useState<Selection>(initialSelection)
   const [filter, setFilter]           = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())  // -1 = standalone
 
@@ -191,7 +193,9 @@ export default function ServersPage() {
           <button className="btn btn--primary" onClick={() => setAgentModalOpen(true)}>
             ＋ 서버 등록
           </button>
-          <Link to="/deploy/services" className="btn btn--outline">＋ HA 그룹 / 편집</Link>
+          <Link to="/deploy/services" className="btn btn--outline" title="HaServicesPage — 새 HA 그룹 생성 / 멤버별 서비스 IP slot 상세 편집">
+            ＋ HA 그룹
+          </Link>
         </div>
       </div>
 
