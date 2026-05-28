@@ -689,7 +689,7 @@ function StatChip({ label, value, sub, color }:
 //  Inspector (선택된 서버 상세)
 // ──────────────────────────────────────────────────────────────
 
-type InspectorTab = 'modules' | 'network' | 'info'
+type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
 function ServerInspector({ agent: a, deployments, packages,
                           onApprove, onRevoke, onRemove, onUpgrade, onRestart, onInstallCmd, onMetrics, onHealthCheck,
@@ -710,10 +710,14 @@ function ServerInspector({ agent: a, deployments, packages,
   onJob: (d: Deployment, jt: JobType) => void
   onRemoveDep: (d: Deployment) => void
 }) {
-  // accordion 의 펼침 상태 — default 모두 펼침. 사용자가 개별 토글.
-  const [openSections, setOpenSections] = useState<Set<InspectorTab>>(
-    new Set(['info', 'network', 'modules'])
-  )
+  // pending 또는 enrollment_token 발급된 상태 (token 유효 여부 무관) — 설치 안내 노출.
+  const hasPendingInstall = a.status === 'pending' || a.has_pending_enrollment
+  // accordion 의 펼침 상태 — default 모두 펼침. pending 인 경우 설치 안내도 자동 펼침.
+  const [openSections, setOpenSections] = useState<Set<InspectorTab>>(() => {
+    const init = new Set<InspectorTab>(['info', 'network', 'modules'])
+    if (hasPendingInstall) init.add('install')
+    return init
+  })
   const toggleSection = (s: InspectorTab) => {
     setOpenSections(prev => {
       const next = new Set(prev)
@@ -777,6 +781,13 @@ function ServerInspector({ agent: a, deployments, packages,
 
       {/* 섹션 stack — accordion (default 모두 펼침, 개별 토글) */}
       <div style={{ flex: 1, overflow: 'auto' }}>
+        {hasPendingInstall && (
+          <InspectorSection title={`설치 안내 — ${a.name}`}
+                            expanded={openSections.has('install')}
+                            onToggle={() => toggleSection('install')}>
+            <InstallSection agent={a} />
+          </InspectorSection>
+        )}
         <InspectorSection title="정보" expanded={openSections.has('info')}
                           onToggle={() => toggleSection('info')}>
           <InfoTab agent={a} />
@@ -960,6 +971,98 @@ function NetworkTab({ agent: a }: { agent: Agent }) {
       onApply={onApply}
       onUpdateSlot={onUpdateSlot}
     />
+  )
+}
+
+function InstallSection({ agent: a }: { agent: Agent }) {
+  const { show } = useToast()
+  const [data, setData] = useState<{ install_command: string; enrollment_token_expires_at?: string } | null>(null)
+  const [err, setErr] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  // 1분마다 re-render 강제 — 만료 카운트다운 갱신.
+  const [, force] = useState(0)
+  useEffect(() => {
+    const iv = setInterval(() => force(x => x + 1), 60_000)
+    return () => clearInterval(iv)
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr('')
+    try {
+      const r = await deploymentApi.getInstallCommand(a.id)
+      setData(r)
+    } catch (e) { setErr((e as Error).message) }
+    finally { setLoading(false) }
+  }, [a.id])
+  useEffect(() => { void load() }, [load])
+
+  async function copy() {
+    if (!data) return
+    try {
+      await navigator.clipboard.writeText(data.install_command)
+      setCopied(true); setTimeout(() => setCopied(false), 1500)
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  async function regenerate() {
+    setRegenerating(true)
+    try {
+      const r = await deploymentApi.regenerateToken(a.id)
+      setData({
+        install_command: r.install_command,
+        enrollment_token_expires_at: r.enrollment_token_expires_at,
+      })
+      show('token 재발급됨', 'ok')
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setRegenerating(false) }
+  }
+
+  // 만료 시간 카운트다운 — 분 단위. 음수면 expired.
+  const expiresAt = data?.enrollment_token_expires_at
+  const minsLeft = expiresAt
+    ? Math.floor((new Date(expiresAt).getTime() - Date.now()) / 60_000)
+    : null
+  const expired = minsLeft !== null && minsLeft < 0
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: '#444', marginBottom: 8 }}>
+        대상 서버에서 다음 명령 실행 (ssh 1회) — systemd --user + linger 자동 (die 시 자동 재기동).
+      </div>
+      {loading && <div className="empty" style={{ padding: 8 }}>불러오는 중...</div>}
+      {err && <div style={{ color: '#e74c3c', marginBottom: 8 }}>※ {err}</div>}
+      {data && (
+        <>
+          <div style={{ position: 'relative' }}>
+            <pre style={{
+              background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
+              borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
+              opacity: expired ? 0.5 : 1,
+            }}>{data.install_command}</pre>
+            <button className="btn btn--sm btn--outline"
+              style={{ position: 'absolute', top: 8, right: 8 }}
+              onClick={copy} disabled={expired}>{copied ? '✓' : '📋'} 복사</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+            <div style={{ fontSize: 12, color: expired ? '#e74c3c' : '#666' }}>
+              {expiresAt
+                ? expired
+                  ? <>⚠ token 만료됨 ({expiresAt}) — 재발급 필요</>
+                  : <>token 만료까지 약 <b>{minsLeft}분</b> (만료 시각: {expiresAt})</>
+                : <>token 만료 시각 미상</>}
+            </div>
+            <button className="btn btn--sm" onClick={regenerate} disabled={regenerating}
+                    style={{ marginLeft: 'auto' }}>
+              {regenerating ? '재발급 중...' : '↻ 재발급'}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
+            실행 후 <code>./init.sh</code> 로 sudoers + enrollment + systemd unit 일괄 설정 (sudo 비번 1회).
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
