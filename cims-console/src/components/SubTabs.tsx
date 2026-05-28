@@ -4,10 +4,12 @@ import { findSectionByPath } from '../routes'
 export default function SubTabs() {
   const { pathname } = useLocation()
   const section = findSectionByPath(pathname)
-  if (!section || section.routes.length <= 1) return null
+  if (!section) return null
+  const visibleRoutes = section.routes.filter(r => !r.hidden)
+  if (visibleRoutes.length <= 1) return null
   return (
     <nav className="subtabs">
-      {section.routes.map(r => (
+      {visibleRoutes.map(r => (
         <NavLink
           key={r.path}
           to={r.path}

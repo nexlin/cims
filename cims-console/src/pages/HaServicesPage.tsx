@@ -14,7 +14,7 @@
  *   packageIds      ← deployments.filter(...).map(d => d.package_id) (실배포 = 의도)
  */
 import { useCallback, useEffect, useMemo, useState, type InputHTMLAttributes } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { haGroupsApi, type HaGroup, type VipBinding as ApiVipBinding } from '../api/ha_groups'
 import { type AgentRoute } from '../api/deployment'
 import { deploymentApi, type Agent, type SipPackage, type Deployment,
@@ -270,6 +270,14 @@ async function copyToClipboard(text: string): Promise<boolean> {
 // ──────────────────────────────────────────────────────────────
 
 export default function HaServicesPage() {
+  const [searchParams] = useSearchParams()
+  // ServersPage 의 [📋 상세 편집] 진입점 — ?group=<id> 로 자동 시스템 선택.
+  const initialGroupId = (() => {
+    const q = searchParams.get('group')
+    const n = q ? Number(q) : NaN
+    return Number.isFinite(n) && n > 0 ? n : null
+  })()
+
   const [haGroups, setHaGroups] = useState<HaGroup[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
   const [packages, setPackages] = useState<SipPackage[]>([])
@@ -278,7 +286,7 @@ export default function HaServicesPage() {
   const [err, setErr] = useState<string>('')
 
   // 새 Master-Detail layout — 선택된 (시스템, 멤버) id. 멤버 id null = 시스템 view, 값 = 멤버 view.
-  const [selectedSvcId, setSelectedSvcId] = useState<number | null>(null)
+  const [selectedSvcId, setSelectedSvcId] = useState<number | null>(initialGroupId)
   const [selectedSrvId, setSelectedSrvId] = useState<number | null>(null)
   // 좌측 트리에서 펼쳐진 시스템 id set. AS/AA 만 의미 (Standalone 은 멤버 sub-node 없음).
   const [treeExpanded, setTreeExpanded] = useState<Set<number>>(new Set())
@@ -381,13 +389,22 @@ export default function HaServicesPage() {
     return services.find(s => s.id === selectedSvcId) ?? services[0]
   }, [services, selectedSvcId])
 
-  // services 가 처음 로드되면 첫 시스템 자동 선택 + tree expand.
+  // services 가 처음 로드되면 자동 선택 + tree expand.
+  // initialGroupId (URL ?group=<id>) 가 있으면 해당 시스템 선택, 없으면 첫 항목.
   useEffect(() => {
-    if (selectedSvcId === null && services.length > 0) {
-      setSelectedSvcId(services[0].id)
-      if (services[0].mode !== 'standalone') {
-        setTreeExpanded(prev => new Set(prev).add(services[0].id))
+    if (services.length === 0) return
+    // 선택된 id 가 services 에 존재하지 않으면 reset (predicate 별 fallback).
+    const wanted = selectedSvcId
+    const found = wanted != null ? services.find(s => s.id === wanted) : null
+    if (!found) {
+      const target = services[0]
+      setSelectedSvcId(target.id)
+      if (target.mode !== 'standalone') {
+        setTreeExpanded(prev => new Set(prev).add(target.id))
       }
+    } else if (found.mode !== 'standalone') {
+      // 직접 진입한 group 도 펼침.
+      setTreeExpanded(prev => prev.has(found.id) ? prev : new Set(prev).add(found.id))
     }
   }, [services, selectedSvcId])
 

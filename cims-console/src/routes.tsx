@@ -34,6 +34,8 @@ export type RouteDef = {
   title: string
   component: ComponentType
   adminOnly?: boolean
+  // SubTabs 에서 숨김 — 라우트 자체는 활성 (link 으로 진입 가능).
+  hidden?: boolean
 }
 
 export type RouteSection = {
@@ -129,11 +131,11 @@ export const SECTIONS: RouteSection[] = [
     label: '배포',
     icon: Rocket,
     basePath: '/deploy',
-    defaultPath: '/deploy/services',
+    defaultPath: '/deploy/servers',
     routes: [
-      { path: '/deploy/services',  title: '서버 + HA',         component: HaServicesPage, adminOnly: true },
+      { path: '/deploy/servers',   title: '서버 + HA',         component: ServersPage,    adminOnly: true },
       { path: '/deploy/packages',  title: '패키지',            component: PackagesPage,   adminOnly: true },
-      { path: '/deploy/servers',   title: '서버 Inspector',    component: ServersPage,    adminOnly: true },
+      { path: '/deploy/services',  title: 'HA 상세 편집',      component: HaServicesPage, adminOnly: true, hidden: true },
     ],
   },
   {

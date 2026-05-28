@@ -191,7 +191,7 @@ export default function ServersPage() {
           <button className="btn btn--primary" onClick={() => setAgentModalOpen(true)}>
             ＋ 서버 등록
           </button>
-          <Link to="/ha-services" className="btn btn--outline">＋ HA 그룹 / 편집</Link>
+          <Link to="/deploy/services" className="btn btn--outline">＋ HA 그룹 / 편집</Link>
         </div>
       </div>
 
@@ -641,7 +641,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload }: {
         )}
         <div style={{ fontSize: 11, color: '#888', marginTop: 8 }}>
           멤버 iface 자동매핑 / subnet 정합 검증 / 멤버별 서비스 IP slot 편집 →{' '}
-          <Link to={`/ha-services?group=${group.id}`}>📋 상세 편집</Link>
+          <Link to={`/deploy/services?group=${group.id}`}>📋 상세 편집</Link>
         </div>
       </div>
     </>
