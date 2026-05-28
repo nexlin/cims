@@ -167,6 +167,16 @@ export default function ServersPage() {
     } catch (e) { show((e as Error).message, 'err') }
   }
   async function queueJob(d: Deployment, jt: JobType) {
+    // destructive / 서비스 영향 큰 job 은 confirm.
+    const destructiveDesc: Partial<Record<JobType, string>> = {
+      uninstall: '모듈 파일 + 프로세스 제거 (config 도 같이 삭제됨)',
+      stop:      '서비스 프로세스 중단',
+      restart:   '서비스 재기동 (단기 다운타임)',
+    }
+    const desc = destructiveDesc[jt as JobType]
+    if (desc) {
+      if (!confirm(`${d.package_name} 모듈에 [${jt}] 진행할까요?\n  ${desc}`)) return
+    }
     try {
       const r = await deploymentApi.queueJob(d.id, jt)
       show(`${jt} 큐 등록 (#${r.job_id})`, 'ok')
@@ -536,7 +546,11 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     setEditBindings(editBindings.map(b => b.bid === bid ? { ...b, ...patch } : b))
   }
   function removeBinding(bid: number) {
-    setEditBindings(editBindings.filter(b => b.bid !== bid))
+    const b = editBindings.find(x => x.bid === bid)
+    if (!b) return
+    const desc = `${b.slot || '(slot 미지정)'} — ${b.ip || '(IP 미입력)'}${b.mask ? `/${b.mask}` : ''}`
+    if (!confirm(`VIP binding 을 제거할까요?\n  ${desc}\n\n저장하기 전 까지는 적용되지 않습니다.`)) return
+    setEditBindings(editBindings.filter(x => x.bid !== bid))
   }
 
   return (
