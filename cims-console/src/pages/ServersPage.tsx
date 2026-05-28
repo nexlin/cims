@@ -682,6 +682,19 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        {/* 절체 조건 — 메타 (이름/auth_pass/note) 와 같은 그룹-단위 설정.
+            상단 헤더의 [💾 저장] / [▶ 적용] 이 함께 처리. AS 만 노출. */}
+        {group.mode === 'active_standby' && (
+          <div style={{ marginBottom: 20 }}>
+            <FailoverSection
+              value={editFailover}
+              onChange={setEditFailover}
+              open={failoverOpen}
+              onToggle={() => setFailoverOpen(v => !v)}
+            />
+          </div>
+        )}
+
         {/* 멤버 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>멤버 ({memberAgents.length})</div>
@@ -861,15 +874,6 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
           VIP 의 네트워크/마스크 는 멤버의 용도(service IP) 에서 자동 매핑 — host (마지막 옥텟) 만 입력.
           상세 (수동 IP 입력) → <Link to={`/deploy/services?group=${group.id}`}>📋 상세 편집</Link>.
         </div>
-
-        {group.mode === 'active_standby' && (
-          <FailoverSection
-            value={editFailover}
-            onChange={setEditFailover}
-            open={failoverOpen}
-            onToggle={() => setFailoverOpen(v => !v)}
-          />
-        )}
       </div>
     </>
   )
@@ -1011,7 +1015,7 @@ function FailoverSection({ value, onChange, open, onToggle }: {
           )}
 
           <div style={{ fontSize: 11, color: '#888' }}>
-            [💾 저장] 후 [▶ 적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
+            위쪽 [💾 저장] → [▶ 적용] 순으로 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
           </div>
         </div>
       )}
