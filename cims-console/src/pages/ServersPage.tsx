@@ -287,10 +287,6 @@ export default function ServersPage() {
           ) : selectedGroup ? (
             <GroupInspector group={selectedGroup} agents={agents}
               onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
-              onApply={async () => {
-                try { await haGroupsApi.apply(selectedGroup.id); show(`${selectedGroup.name} 적용 큐잉`, 'ok'); await load() }
-                catch (e) { show((e as Error).message, 'err') }
-              }}
               onReload={load}
               onAddMember={addMemberToGroup}
               onDeleteSystem={deleteSystem} />
@@ -467,11 +463,10 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
 //  Group Inspector (HA 그룹 선택 시)
 // ──────────────────────────────────────────────────────────────
 
-function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAddMember, onDeleteSystem }: {
+function GroupInspector({ group, agents, onSelectMember, onReload, onAddMember, onDeleteSystem }: {
   group: HaGroup
   agents: Agent[]
   onSelectMember: (aid: number) => void
-  onApply: () => void
   onReload: () => Promise<void>
   onAddMember: (g: HaGroup) => void
   onDeleteSystem: (g: HaGroup) => void
@@ -515,36 +510,52 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     ...m, agent: agents.find(a => a.id === m.agent_id)
   }))
 
-  // dirty 검출 — mode 는 변경 불가라 제외. Master agent_id 가 현재 priority 최고 멤버와 다르면 dirty.
-  const masterChanged = editMasterAid !== initialMaster
-  const dirty = editName !== group.name
+  // dirty 검출 — 영역별로 분리. 각 영역의 [▶ 적용] 이 자체 dirty 만 보고 활성.
+  const metaDirty = editName !== group.name
     || editAuthPass !== group.auth_pass
     || editNote !== (group.note || '')
-    || JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
-    || JSON.stringify(editFailover) !== JSON.stringify(group.failover_options || FAILOVER_DEFAULTS)
-    || masterChanged
+  const failoverDirty = JSON.stringify(editFailover) !== JSON.stringify(group.failover_options || FAILOVER_DEFAULTS)
+  const vipDirty = JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
+  const masterChanged = editMasterAid !== initialMaster
 
-  async function saveMeta() {
+  // 영역별 적용 — 그 영역의 변경만 backend 로 push. backend 의 _update_group 은 부분 업데이트
+  // 지원 + _enqueue_update_ha_for_members 자동 호출 → 멤버 agent 의 keepalived 즉시 반영.
+  async function applyMeta() {
+    if (!metaDirty) return
     try {
       await haGroupsApi.update(group.id, {
         name: editName,
-        // mode 는 변경 불가 — backend 도 거부. auth_pass 는 group.mode 기준으로 결정.
         auth_pass: group.mode === 'active_standby' ? editAuthPass : '',
         note: editNote,
-        vip_bindings: editBindings,
-        failover_options: editFailover,
       })
-      // Master 선택 변경 → 해당 멤버 priority=100, 나머지=90. AS 에만 의미.
-      if (group.mode === 'active_standby' && masterChanged && editMasterAid !== null) {
-        for (const m of group.members) {
-          const newPrio = m.agent_id === editMasterAid ? 100 : 90
-          if (newPrio !== m.priority) {
-            await haGroupsApi.addMember(group.id, { agent_id: m.agent_id, priority: newPrio })
-          }
+      show('메타 적용됨', 'ok'); await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  async function applyFailover() {
+    if (!failoverDirty) return
+    try {
+      await haGroupsApi.update(group.id, { failover_options: editFailover })
+      show('절체 조건 적용됨', 'ok'); await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  async function applyVipBindings() {
+    if (!vipDirty) return
+    try {
+      await haGroupsApi.update(group.id, { vip_bindings: editBindings })
+      show('VIP 적용됨', 'ok'); await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  async function applyMembers() {
+    // Master 선택 변경 → 해당 멤버 priority=100, 나머지=90. AS 에만 의미.
+    if (!masterChanged || editMasterAid === null) return
+    try {
+      for (const m of group.members) {
+        const newPrio = m.agent_id === editMasterAid ? 100 : 90
+        if (newPrio !== m.priority) {
+          await haGroupsApi.addMember(group.id, { agent_id: m.agent_id, priority: newPrio })
         }
       }
-      show('저장됨', 'ok')
-      await onReload()
+      show('멤버 적용됨', 'ok'); await onReload()
     } catch (e) { show((e as Error).message, 'err') }
   }
   async function removeMember(aid: number) {
@@ -657,13 +668,6 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
                  style={{ flex: 1, minWidth: 180 }} />
           <span style={{ fontSize: 11, color: '#888' }}>#{group.id} · vrid {group.vrid}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-            <button className="btn btn--sm" onClick={saveMeta} disabled={!dirty}>
-              💾 저장
-            </button>
-            <button className="btn btn--sm btn--primary" onClick={onApply}
-                    title="멤버들에게 update_ha job 큐잉 (ha.json + cims-ha apply)">
-              ▶ 적용
-            </button>
             <button className="btn btn--sm btn--danger" onClick={() => onDeleteSystem(group)}
                     title="HA 그룹 + 모든 멤버 일괄 삭제">
               🗑 시스템 삭제
@@ -684,11 +688,14 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
           <label style={{ color: '#666' }}>note:</label>
           <input className="form-input" value={editNote} onChange={e => setEditNote(e.target.value)}
                  style={{ flex: 1 }} />
+          <button className="btn btn--sm btn--primary" onClick={applyMeta} disabled={!metaDirty}
+                  title="이름/auth_pass/note 변경을 backend 에 적용 (즉시 keepalived 반영)">
+            ▶ 적용
+          </button>
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        {/* 절체 조건 — 메타 (이름/auth_pass/note) 와 같은 그룹-단위 설정.
-            상단 헤더의 [💾 저장] / [▶ 적용] 이 함께 처리. AS 만 노출. */}
+        {/* 절체 조건 — 그룹 단위 설정. 자체 [▶ 적용] 으로 그 영역만 backend push. AS 만. */}
         {group.mode === 'active_standby' && (
           <div style={{ marginBottom: 20 }}>
             <FailoverSection
@@ -696,6 +703,8 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
               onChange={setEditFailover}
               open={failoverOpen}
               onToggle={() => setFailoverOpen(v => !v)}
+              dirty={failoverDirty}
+              onApply={applyFailover}
             />
           </div>
         )}
@@ -703,13 +712,20 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
         {/* 멤버 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>멤버 ({memberAgents.length})</div>
-          {group.mode === 'all_active' && (
-            <button className="btn btn--sm" onClick={() => onAddMember(group)}
-                    style={{ marginLeft: 'auto' }}
-                    title="새 멤버 자동 생성 (이름 자동, install_command 발급)">
-              + 멤버 추가
-            </button>
-          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            {group.mode === 'all_active' && (
+              <button className="btn btn--sm" onClick={() => onAddMember(group)}
+                      title="새 멤버 자동 생성 (이름 자동, install_command 발급)">
+                + 멤버 추가
+              </button>
+            )}
+            {group.mode === 'active_standby' && (
+              <button className="btn btn--sm btn--primary" onClick={applyMembers} disabled={!masterChanged}
+                      title="Master 변경을 backend 에 적용 (priority swap + keepalived 즉시 반영)">
+                ▶ 적용
+              </button>
+            )}
+          </div>
         </div>
         <table className="data-table" style={{ margin: 0, fontSize: 13 }}>
           <thead>
@@ -784,14 +800,22 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
         {/* VIP Bindings */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>VIP Bindings ({editBindings.length})</div>
-          <button className="btn btn--sm" onClick={beginAddBinding}
-                  style={{ marginLeft: 'auto' }}
-                  disabled={availableSlots.length === 0 || bindingEditMode !== null}
-                  title={availableSlots.length === 0
-                    ? '먼저 멤버 서버의 [네트워크] 탭에서 IP 의 용도를 입력하세요'
-                    : '새 VIP 행 추가 (편집 모드)'}>
-            + VIP 추가
-          </button>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <button className="btn btn--sm" onClick={beginAddBinding}
+                    disabled={availableSlots.length === 0 || bindingEditMode !== null}
+                    title={availableSlots.length === 0
+                      ? '먼저 멤버 서버의 [네트워크] 탭에서 IP 의 용도를 입력하세요'
+                      : '새 VIP 행 추가 (편집 모드 — 저장 후 [▶ 적용] 로 backend 반영)'}>
+              + VIP 추가
+            </button>
+            <button className="btn btn--sm btn--primary" onClick={applyVipBindings}
+                    disabled={!vipDirty || bindingEditMode !== null}
+                    title={bindingEditMode !== null
+                      ? '편집 중인 행을 먼저 [저장] 또는 [×] 로 닫으세요'
+                      : 'VIP 변경을 backend 에 적용 (즉시 keepalived 반영)'}>
+              ▶ 적용
+            </button>
+          </div>
         </div>
         {editBindings.length === 0 ? (
           <div className="empty" style={{ padding: 12, fontSize: 12, color: '#888' }}>
@@ -892,11 +916,13 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
 // 모든 default = 현재 hardcoded 와 동일 (호환성 보장).
 const TRACKABLE_MODULE_CANDIDATES = ['csp', 'cmp', 'csc', 'psp', 'isp', 'imp', 'pmp']
 
-function FailoverSection({ value, onChange, open, onToggle }: {
+function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
   value: FailoverOptions
   onChange: (v: FailoverOptions) => void
   open: boolean
   onToggle: () => void
+  dirty: boolean
+  onApply: () => void
 }) {
   const set = <K extends keyof FailoverOptions>(k: K, v: FailoverOptions[K]) =>
     onChange({ ...value, [k]: v })
@@ -908,16 +934,22 @@ function FailoverSection({ value, onChange, open, onToggle }: {
     set('tracked_modules', next)
   }
   return (
-    <div style={{ marginTop: 20, border: '1px solid #e0e0e0', borderRadius: 4 }}>
-      <div onClick={onToggle}
-           style={{ padding: '8px 12px', background: '#f7f7f7', cursor: 'pointer',
+    <div style={{ marginTop: 0, border: '1px solid #e0e0e0', borderRadius: 4 }}>
+      <div style={{ padding: '8px 12px', background: '#f7f7f7',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
            title="A/S (active_standby) 시스템에만 적용 — VRRP 절체 동작 세부 조건">
-        <span style={{ fontSize: 11 }}>{open ? '▼' : '▶'}</span>
-        절체 조건 (A/S 전용)
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888', fontWeight: 400 }}>
+        <span onClick={onToggle} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
+        <span onClick={onToggle} style={{ cursor: 'pointer' }}>절체 조건 (A/S 전용)</span>
+        <span style={{ fontSize: 11, color: '#888', fontWeight: 400, cursor: 'pointer' }} onClick={onToggle}>
           감시주기 {value.advert_int}s · 장애판정 {value.health.fall}회 · {value.preempt === 'preempt' ? '자동복귀' : '복귀없음'}
         </span>
+        <button className="btn btn--sm btn--primary"
+                style={{ marginLeft: 'auto' }}
+                onClick={(e) => { e.stopPropagation(); onApply() }}
+                disabled={!dirty}
+                title="절체 조건 변경을 backend 에 적용 (즉시 keepalived 반영)">
+          ▶ 적용
+        </button>
       </div>
       {open && (
         <div style={{ padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1024,7 +1056,7 @@ function FailoverSection({ value, onChange, open, onToggle }: {
           )}
 
           <div style={{ fontSize: 11, color: '#888' }}>
-            위쪽 [💾 저장] → [▶ 적용] 순으로 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
+            오른쪽 위 [▶ 적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
           </div>
         </div>
       )}
