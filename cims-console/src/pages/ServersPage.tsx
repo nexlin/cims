@@ -4,7 +4,7 @@ import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentHealthCheck,
 } from '../api/deployment'
-import { haGroupsApi, type HaGroup } from '../api/ha_groups'
+import { haGroupsApi, type HaGroup, type HaRole, type VipBinding } from '../api/ha_groups'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
@@ -238,7 +238,8 @@ export default function ServersPage() {
               onApply={async () => {
                 try { await haGroupsApi.apply(selectedGroup.id); show(`${selectedGroup.name} 적용 큐잉`, 'ok'); await load() }
                 catch (e) { show((e as Error).message, 'err') }
-              }} />
+              }}
+              onReload={load} />
           ) : (
             <div className="empty" style={{ padding: 40 }}>
               왼쪽 트리에서 서버 또는 HA 그룹을 선택하세요
@@ -384,96 +385,264 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
 //  Group Inspector (HA 그룹 선택 시)
 // ──────────────────────────────────────────────────────────────
 
-function GroupInspector({ group, agents, onSelectMember, onApply }: {
+function GroupInspector({ group, agents, onSelectMember, onApply, onReload }: {
   group: HaGroup
   agents: Agent[]
   onSelectMember: (aid: number) => void
   onApply: () => void
+  onReload: () => Promise<void>
 }) {
+  const { show } = useToast()
+  const [editName, setEditName]         = useState(group.name)
+  const [editMode, setEditMode]         = useState<'active_standby'|'all_active'>(group.mode)
+  const [editAuthPass, setEditAuthPass] = useState(group.auth_pass)
+  const [editNote, setEditNote]         = useState(group.note || '')
+  const [editBindings, setEditBindings] = useState<VipBinding[]>(group.vip_bindings || [])
+  const [editMemberRole, setEditMemberRole] = useState<Map<number, HaRole>>(
+    new Map(group.members.map(m => [m.agent_id, m.role]))
+  )
+  const [editMemberPrio, setEditMemberPrio] = useState<Map<number, number>>(
+    new Map(group.members.map(m => [m.agent_id, m.priority]))
+  )
+  const [newMemberId, setNewMemberId] = useState<number>(0)
+
+  // group prop 이 바뀌면 (다른 group 선택 또는 reload) state 재설정.
+  useEffect(() => {
+    setEditName(group.name)
+    setEditMode(group.mode)
+    setEditAuthPass(group.auth_pass)
+    setEditNote(group.note || '')
+    setEditBindings(group.vip_bindings || [])
+    setEditMemberRole(new Map(group.members.map(m => [m.agent_id, m.role])))
+    setEditMemberPrio(new Map(group.members.map(m => [m.agent_id, m.priority])))
+    setNewMemberId(0)
+  }, [group.id, group.update_time])
+
   const memberAgents = group.members.map(m => ({
     ...m, agent: agents.find(a => a.id === m.agent_id)
   }))
+  const availableForMember = agents.filter(a =>
+    !group.members.find(m => m.agent_id === a.id) && a.status !== 'pending')
+
+  // dirty 검출 — 적용 버튼 활성/비활성용
+  const dirty = editName !== group.name
+    || editMode !== group.mode
+    || editAuthPass !== group.auth_pass
+    || editNote !== (group.note || '')
+    || JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
+    || group.members.some(m =>
+        editMemberRole.get(m.agent_id) !== m.role ||
+        editMemberPrio.get(m.agent_id) !== m.priority)
+
+  async function saveMeta() {
+    try {
+      await haGroupsApi.update(group.id, {
+        name: editName, mode: editMode, auth_pass: editAuthPass, note: editNote,
+        vip_bindings: editBindings,
+      })
+      // 멤버별 role/priority 패치 — addMember 가 upsert 역할 (옛 멤버 갱신 시 동일 endpoint 사용 가정)
+      for (const m of group.members) {
+        const newRole = editMemberRole.get(m.agent_id)
+        const newPrio = editMemberPrio.get(m.agent_id)
+        if (newRole !== m.role || newPrio !== m.priority) {
+          await haGroupsApi.addMember(group.id, {
+            agent_id: m.agent_id, role: newRole, priority: newPrio,
+          })
+        }
+      }
+      show('저장됨', 'ok')
+      await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  async function addMember() {
+    if (!newMemberId) return
+    try {
+      await haGroupsApi.addMember(group.id, { agent_id: newMemberId, role: 'backup', priority: 90 })
+      show('멤버 추가됨', 'ok'); await onReload(); setNewMemberId(0)
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  async function removeMember(aid: number) {
+    if (!confirm(`멤버 agent #${aid} 를 그룹에서 제거할까요?`)) return
+    try {
+      await haGroupsApi.removeMember(group.id, aid)
+      show('멤버 제거됨', 'ok'); await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+
+  function addBinding() {
+    const newBid = Math.max(0, ...editBindings.map(b => b.bid)) + 1
+    setEditBindings([...editBindings, {
+      bid: newBid, slot: '', ip: '', mask: 24, status: 'unknown', memberIfaces: {},
+    }])
+  }
+  function updateBinding(bid: number, patch: Partial<VipBinding>) {
+    setEditBindings(editBindings.map(b => b.bid === bid ? { ...b, ...patch } : b))
+  }
+  function removeBinding(bid: number) {
+    setEditBindings(editBindings.filter(b => b.bid !== bid))
+  }
+
   return (
     <>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{
-            background: group.mode === 'active_standby' ? '#3498db' : '#27ae60',
-            color: '#fff', fontSize: 11, padding: '2px 8px', borderRadius: 3, fontWeight: 600,
-          }}>{group.mode === 'active_standby' ? 'A/S' : 'AA'}</span>
-          <b style={{ fontSize: 16 }}>{group.name}</b>
-          <span style={{ fontSize: 12, color: '#888' }}>#{group.id} · vrid {group.vrid}</span>
-          {group.vip && (
-            <span style={{ fontSize: 12, color: '#444' }}>
-              VIP <code>{group.vip}/{group.vip_mask}</code>
-            </span>
-          )}
+          <select value={editMode} onChange={e => setEditMode(e.target.value as 'active_standby'|'all_active')}
+                  className="form-input" style={{ width: 130 }}>
+            <option value="active_standby">A/S</option>
+            <option value="all_active">AA</option>
+          </select>
+          <input className="form-input" value={editName} onChange={e => setEditName(e.target.value)}
+                 style={{ flex: 1, minWidth: 180 }} />
+          <span style={{ fontSize: 11, color: '#888' }}>#{group.id} · vrid {group.vrid}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <button className="btn btn--sm" onClick={saveMeta} disabled={!dirty}>
+              💾 저장
+            </button>
             <button className="btn btn--sm btn--primary" onClick={onApply}
                     title="멤버들에게 update_ha job 큐잉 (ha.json + cims-ha apply)">
               ▶ 적용
             </button>
-            <Link to="/ha-services" className="btn btn--sm btn--outline">편집</Link>
           </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, fontSize: 12 }}>
+          <label style={{ color: '#666' }}>auth_pass:</label>
+          <input type="password" className="form-input" value={editAuthPass}
+                 onChange={e => setEditAuthPass(e.target.value)}
+                 style={{ width: 140 }} />
+          <label style={{ color: '#666' }}>note:</label>
+          <input className="form-input" value={editNote} onChange={e => setEditNote(e.target.value)}
+                 style={{ flex: 1 }} />
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>멤버 ({memberAgents.length})</div>
+        {/* 멤버 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div style={{ fontWeight: 600 }}>멤버 ({memberAgents.length})</div>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <select value={newMemberId} onChange={e => setNewMemberId(Number(e.target.value))}
+                    className="form-input" style={{ width: 200, fontSize: 12 }}>
+              <option value={0}>(추가할 서버 선택)</option>
+              {availableForMember.map(a =>
+                <option key={a.id} value={a.id}>{a.name} — {a.ip_address}</option>
+              )}
+            </select>
+            <button className="btn btn--sm" onClick={addMember} disabled={!newMemberId}>
+              + 추가
+            </button>
+          </div>
+        </div>
         <table className="data-table" style={{ margin: 0, fontSize: 13 }}>
           <thead>
-            <tr><th>이름</th><th>role</th><th>priority</th><th>상태</th><th>IP</th><th>v</th></tr>
+            <tr><th>이름</th><th>role</th><th style={{ width: 80 }}>priority</th>
+                <th>상태</th><th>IP</th><th>v</th><th style={{ width: 40 }}></th></tr>
           </thead>
           <tbody>
             {memberAgents.map(m => {
               const a = m.agent
               if (!a) return (
-                <tr key={m.agent_id}><td colSpan={6}>(agent #{m.agent_id} not found)</td></tr>
+                <tr key={m.agent_id}><td colSpan={7}>(agent #{m.agent_id} not found)</td></tr>
               )
               const sc = agentStatusColor(a.status)
+              const role = editMemberRole.get(a.id) || m.role
+              const prio = editMemberPrio.get(a.id) ?? m.priority
               return (
-                <tr key={a.id} onClick={() => onSelectMember(a.id)}
-                    style={{ cursor: 'pointer' }}>
-                  <td><b>{agentDisplayName(a.name)}</b></td>
-                  <td>
-                    <span style={{
-                      fontSize: 10, padding: '1px 5px', borderRadius: 3, color: '#fff',
-                      background: m.role === 'master' ? '#e74c3c' : '#95a5a6',
-                    }}>{m.role}</span>
+                <tr key={a.id}>
+                  <td onClick={() => onSelectMember(a.id)} style={{ cursor: 'pointer' }}>
+                    <b>{agentDisplayName(a.name)}</b>
                   </td>
-                  <td>{m.priority}</td>
+                  <td>
+                    <select value={role}
+                            onChange={e => {
+                              const next = new Map(editMemberRole)
+                              next.set(a.id, e.target.value as HaRole)
+                              setEditMemberRole(next)
+                            }}
+                            className="form-input" style={{ fontSize: 11, padding: 2 }}>
+                      <option value="master">master</option>
+                      <option value="backup">backup</option>
+                    </select>
+                  </td>
+                  <td>
+                    <input type="number" value={prio} min={1} max={254}
+                           onChange={e => {
+                             const next = new Map(editMemberPrio)
+                             next.set(a.id, Number(e.target.value))
+                             setEditMemberPrio(next)
+                           }}
+                           className="form-input" style={{ width: 60, fontSize: 11, padding: 2 }} />
+                  </td>
                   <td>
                     <span style={{ background: sc.bar, color: '#fff', fontSize: 10,
                                     padding: '1px 6px', borderRadius: 3 }}>{a.status}</span>
                   </td>
                   <td style={{ fontSize: 12, color: '#555' }}>{a.ip_address || '—'}</td>
                   <td style={{ fontSize: 12, color: '#888' }}>{a.agent_version || '—'}</td>
+                  <td>
+                    <button className="btn btn--sm btn--danger"
+                            style={{ fontSize: 10, padding: '1px 5px' }}
+                            onClick={() => removeMember(a.id)}>×</button>
+                  </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
-        {group.vip_bindings && group.vip_bindings.length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>VIP Bindings</div>
-            <table className="data-table" style={{ margin: 0, fontSize: 12 }}>
-              <thead>
-                <tr><th>slot</th><th>IP</th><th>멤버 iface</th></tr>
-              </thead>
-              <tbody>
-                {group.vip_bindings.map(b => (
-                  <tr key={b.bid}>
-                    <td>{b.slot}</td>
-                    <td><code>{b.ip}/{b.mask}</code></td>
-                    <td style={{ fontSize: 11, color: '#666' }}>
-                      {Object.entries(b.memberIfaces || {})
-                        .map(([sid, iface]) => `#${sid}:${iface}`).join(', ')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+        {/* VIP Bindings */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 8 }}>
+          <div style={{ fontWeight: 600 }}>VIP Bindings ({editBindings.length})</div>
+          <button className="btn btn--sm" onClick={addBinding} style={{ marginLeft: 'auto' }}>
+            + VIP 추가
+          </button>
+        </div>
+        {editBindings.length === 0 ? (
+          <div className="empty" style={{ padding: 12, fontSize: 12, color: '#888' }}>
+            VIP 없음 — all_active 그룹은 비워둬도 됨 (keepalived 안 깔림). active_standby 는 1개 이상 권장.
           </div>
+        ) : (
+          <table className="data-table" style={{ margin: 0, fontSize: 12 }}>
+            <thead>
+              <tr><th>slot</th><th>IP</th><th>mask</th><th>멤버 iface (auto)</th>
+                  <th style={{ width: 40 }}></th></tr>
+            </thead>
+            <tbody>
+              {editBindings.map(b => (
+                <tr key={b.bid}>
+                  <td>
+                    <input className="form-input" value={b.slot}
+                           onChange={e => updateBinding(b.bid, { slot: e.target.value })}
+                           placeholder="서비스"
+                           style={{ width: 100, fontSize: 11, padding: 2 }} />
+                  </td>
+                  <td>
+                    <input className="form-input" value={b.ip}
+                           onChange={e => updateBinding(b.bid, { ip: e.target.value })}
+                           placeholder="121.x.y.z"
+                           style={{ width: 140, fontSize: 11, padding: 2 }} />
+                  </td>
+                  <td>
+                    <input type="number" value={b.mask || 24} min={8} max={32}
+                           onChange={e => updateBinding(b.bid, { mask: Number(e.target.value) })}
+                           className="form-input" style={{ width: 50, fontSize: 11, padding: 2 }} />
+                  </td>
+                  <td style={{ fontSize: 11, color: '#666' }}>
+                    {Object.entries(b.memberIfaces || {})
+                      .map(([sid, iface]) => `#${sid}:${iface}`).join(', ') || '(서비스 IP slot 매핑 후 자동)'}
+                  </td>
+                  <td>
+                    <button className="btn btn--sm btn--danger"
+                            style={{ fontSize: 10, padding: '1px 5px' }}
+                            onClick={() => removeBinding(b.bid)}>×</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
+        <div style={{ fontSize: 11, color: '#888', marginTop: 8 }}>
+          멤버 iface 자동매핑 / subnet 정합 검증 / 멤버별 서비스 IP slot 편집 →{' '}
+          <Link to={`/ha-services?group=${group.id}`}>📋 상세 편집</Link>
+        </div>
       </div>
     </>
   )
