@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentHealthCheck,
 } from '../api/deployment'
+import { haGroupsApi, type HaGroup } from '../api/ha_groups'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
 import { agentDisplayName } from '../components/agentDisplay'
+
+type Selection =
+  | { kind: 'agent'; id: number }
+  | { kind: 'group'; id: number }
+  | null
 
 export default function ServersPage() {
   const { show } = useToast()
@@ -21,9 +27,13 @@ export default function ServersPage() {
   const [agents, setAgents]           = useState<Agent[]>([])
   const [packages, setPackages]       = useState<SipPackage[]>([])
   const [deployments, setDeployments] = useState<Deployment[]>([])
+  const [haGroups, setHaGroups]       = useState<HaGroup[]>([])
   const [loading, setLoading]         = useState(true)
-  const [selectedId, setSelectedId]   = useState<number | null>(initialAgentId)
+  const [selection, setSelection]     = useState<Selection>(
+    initialAgentId ? { kind: 'agent', id: initialAgentId } : null
+  )
   const [filter, setFilter]           = useState('')
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())  // -1 = standalone
 
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [deployModal, setDeployModal]       = useState<{ agent: Agent } | null>(null)
@@ -34,12 +44,13 @@ export default function ServersPage() {
 
   const load = useCallback(async () => {
     try {
-      const [a, p, d] = await Promise.all([
+      const [a, p, d, g] = await Promise.all([
         deploymentApi.listAgents(),
         deploymentApi.listPackages(),
         deploymentApi.listDeployments(),
+        haGroupsApi.list(),
       ])
-      setAgents(a); setPackages(p); setDeployments(d)
+      setAgents(a); setPackages(p); setDeployments(d); setHaGroups(g)
     } catch (e) { show((e as Error).message, 'err') }
     finally { setLoading(false) }
   }, [show])
@@ -59,28 +70,58 @@ export default function ServersPage() {
     return m
   }, [deployments])
 
-  const filteredAgents = useMemo(() => {
+  useEffect(() => {
+    if (loading) return
+    if (agents.length === 0) { setSelection(null); return }
+    if (!selection ||
+        (selection.kind === 'agent' && !agents.find(a => a.id === selection.id)) ||
+        (selection.kind === 'group' && !haGroups.find(g => g.id === selection.id))) {
+      setSelection({ kind: 'agent', id: agents[0].id })
+    }
+  }, [agents, haGroups, selection, loading])
+
+  // 처음 로드 시 모든 group + standalone 펼침
+  useEffect(() => {
+    if (haGroups.length > 0 && expandedGroups.size === 0) {
+      const s = new Set<number>(haGroups.map(g => g.id))
+      s.add(-1)  // standalone
+      setExpandedGroups(s)
+    }
+  }, [haGroups, expandedGroups])
+
+  const selectedAgent = useMemo(
+    () => selection?.kind === 'agent' ? (agents.find(a => a.id === selection.id) || null) : null,
+    [agents, selection]
+  )
+  const selectedGroup = useMemo(
+    () => selection?.kind === 'group' ? (haGroups.find(g => g.id === selection.id) || null) : null,
+    [haGroups, selection]
+  )
+
+  // group 별 멤버 분류 + standalone
+  const groupedAgents = useMemo(() => {
+    const byGroup = new Map<number, Agent[]>()  // -1 = standalone
     const q = filter.trim().toLowerCase()
-    if (!q) return agents
-    return agents.filter(a =>
+    const matches = (a: Agent) => !q ||
       a.name.toLowerCase().includes(q) ||
       (a.hostname || '').toLowerCase().includes(q) ||
       (a.ip_address || '').includes(q)
-    )
+    for (const a of agents) {
+      if (!matches(a)) continue
+      const gid = a.ha_group?.id ?? -1
+      if (!byGroup.has(gid)) byGroup.set(gid, [])
+      byGroup.get(gid)!.push(a)
+    }
+    return byGroup
   }, [agents, filter])
 
-  useEffect(() => {
-    if (loading) return
-    if (agents.length === 0) { setSelectedId(null); return }
-    if (!selectedId || !agents.find(a => a.id === selectedId)) {
-      setSelectedId(agents[0].id)
-    }
-  }, [agents, selectedId, loading])
-
-  const selected = useMemo(
-    () => agents.find(a => a.id === selectedId) || null,
-    [agents, selectedId]
-  )
+  const toggleGroupExpand = (gid: number) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(gid)) next.delete(gid); else next.add(gid)
+      return next
+    })
+  }
 
   const stats = useMemo(() => ({
     total:  agents.length,
@@ -141,6 +182,7 @@ export default function ServersPage() {
         <StatChip label="서버" value={`${stats.online}/${stats.total}`} sub="online" color="#2ecc71" />
         {stats.pending > 0 &&
           <StatChip label="승인대기" value={stats.pending} color="#f39c12" />}
+        <StatChip label="HA 그룹" value={haGroups.length} color="#3498db" />
         <input className="form-input" placeholder="이름/호스트/IP 검색..."
           value={filter} onChange={e => setFilter(e.target.value)}
           style={{ width: 240 }} />
@@ -149,70 +191,60 @@ export default function ServersPage() {
           <button className="btn btn--primary" onClick={() => setAgentModalOpen(true)}>
             ＋ 서버 등록
           </button>
+          <Link to="/ha-services" className="btn btn--outline">＋ HA 그룹 / 편집</Link>
         </div>
       </div>
 
-      {/* 서버 테이블 */}
-      <div style={{
-        flex: '0 0 auto', maxHeight: '40%', overflow: 'auto',
-        border: '1px solid #e5e5e5', borderRadius: 6, background: '#fff',
-      }}>
-        {filteredAgents.length === 0 ? (
-          <div className="empty" style={{ padding: 20 }}>
-            {agents.length === 0 ? '등록된 서버 없음 — "＋ 서버 등록" 으로 추가' : '검색 결과 없음'}
-          </div>
-        ) : (
-          <table className="data-table" style={{ margin: 0 }}>
-            <thead>
-              <tr>
-                <th style={{ width: 14 }}></th>
-                <th>이름</th>
-                <th>IP</th>
-                <th>상태</th>
-                <th>호스트</th>
-                <th style={{ textAlign: 'right' }}>모듈</th>
-                <th>Agent v.</th>
-                <th>Heartbeat</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAgents.map(a => (
-                <ServerRow key={a.id} agent={a}
-                  active={a.id === selectedId}
-                  depCount={(depsByAgent.get(a.id) || []).length}
-                  onClick={() => setSelectedId(a.id)} />
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* 하단 Inspector */}
-      <div style={{
-        flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-        border: '1px solid #e5e5e5', borderRadius: 6, background: '#fff',
-      }}>
-        {!selected ? (
-          <div className="empty" style={{ padding: 40 }}>
-            위에서 서버를 선택하세요
-          </div>
-        ) : (
-          <ServerInspector agent={selected}
-            deployments={depsByAgent.get(selected.id) || []}
-            packages={packages}
-            onApprove={approveAgent}
-            onRevoke={revokeAgent}
-            onRemove={removeAgent}
-            onUpgrade={upgradeAgent}
-            onRestart={restartAgent}
-            onInstallCmd={setInstallCmdFor}
-            onMetrics={setMetricsFor}
-            onHealthCheck={setHealthCheckFor}
-            onAddDeploy={() => setDeployModal({ agent: selected })}
-            onConfigure={setConfigFor}
-            onJob={queueJob}
-            onRemoveDep={removeDeployment} />
-        )}
+      {/* 좌측 트리 + 우측 Inspector */}
+      <div style={{ flex: 1, display: 'flex', gap: 12, overflow: 'hidden' }}>
+        {/* 좌측 트리 */}
+        <div style={{
+          flex: '0 0 320px', overflow: 'auto',
+          border: '1px solid #e5e5e5', borderRadius: 6, background: '#fff',
+        }}>
+          <ServerTree
+            haGroups={haGroups}
+            groupedAgents={groupedAgents}
+            depsByAgent={depsByAgent}
+            expanded={expandedGroups}
+            onToggleExpand={toggleGroupExpand}
+            selection={selection}
+            onSelect={setSelection} />
+        </div>
+        {/* 우측 Inspector */}
+        <div style={{
+          flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+          border: '1px solid #e5e5e5', borderRadius: 6, background: '#fff',
+        }}>
+          {selectedAgent ? (
+            <ServerInspector agent={selectedAgent}
+              deployments={depsByAgent.get(selectedAgent.id) || []}
+              packages={packages}
+              onApprove={approveAgent}
+              onRevoke={revokeAgent}
+              onRemove={removeAgent}
+              onUpgrade={upgradeAgent}
+              onRestart={restartAgent}
+              onInstallCmd={setInstallCmdFor}
+              onMetrics={setMetricsFor}
+              onHealthCheck={setHealthCheckFor}
+              onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
+              onConfigure={setConfigFor}
+              onJob={queueJob}
+              onRemoveDep={removeDeployment} />
+          ) : selectedGroup ? (
+            <GroupInspector group={selectedGroup} agents={agents}
+              onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
+              onApply={async () => {
+                try { await haGroupsApi.apply(selectedGroup.id); show(`${selectedGroup.name} 적용 큐잉`, 'ok'); await load() }
+                catch (e) { show((e as Error).message, 'err') }
+              }} />
+          ) : (
+            <div className="empty" style={{ padding: 40 }}>
+              왼쪽 트리에서 서버 또는 HA 그룹을 선택하세요
+            </div>
+          )}
+        </div>
       </div>
 
       {agentModalOpen &&
@@ -234,49 +266,216 @@ export default function ServersPage() {
 }
 
 // ──────────────────────────────────────────────────────────────
-//  Server table row
+//  Tree (좌측 패널) — HA group + standalone 계층
 // ──────────────────────────────────────────────────────────────
 
-function ServerRow({ agent: a, active, depCount, onClick }: {
-  agent: Agent; active: boolean; depCount: number; onClick: () => void
+function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
+                      onToggleExpand, selection, onSelect }: {
+  haGroups: HaGroup[]
+  groupedAgents: Map<number, Agent[]>
+  depsByAgent: Map<number, Deployment[]>
+  expanded: Set<number>
+  onToggleExpand: (gid: number) => void
+  selection: Selection
+  onSelect: (s: Selection) => void
+}) {
+  const standalone = groupedAgents.get(-1) || []
+  return (
+    <div style={{ fontSize: 13 }}>
+      {/* HA groups */}
+      {haGroups.map(g => {
+        const members = groupedAgents.get(g.id) || []
+        const isOpen = expanded.has(g.id)
+        const isSelected = selection?.kind === 'group' && selection.id === g.id
+        const modeChip = g.mode === 'active_standby' ? 'A/S' : 'AA'
+        const modeColor = g.mode === 'active_standby' ? '#3498db' : '#27ae60'
+        return (
+          <div key={g.id}>
+            <div onClick={() => onSelect({ kind: 'group', id: g.id })}
+                 style={{
+                   display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
+                   borderBottom: '1px solid #eee', cursor: 'pointer',
+                   background: isSelected ? '#eef5ff' : '#fafafa',
+                 }}>
+              <span onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}
+                    style={{ width: 14, color: '#888' }}>{isOpen ? '▼' : '▶'}</span>
+              <span style={{
+                background: modeColor, color: '#fff', fontSize: 10,
+                padding: '1px 5px', borderRadius: 3,
+              }}>{modeChip}</span>
+              <b style={{ flex: 1 }}>{g.name}</b>
+              {g.vip && (
+                <span style={{ fontSize: 10, color: '#666' }} title={`VIP ${g.vip}/${g.vip_mask}`}>
+                  VIP {g.vip}
+                </span>
+              )}
+              <span style={{ fontSize: 11, color: '#888' }}>{members.length}</span>
+            </div>
+            {isOpen && members.map(a => (
+              <ServerTreeRow key={a.id} agent={a}
+                depCount={(depsByAgent.get(a.id) || []).length}
+                role={a.ha_group?.role}
+                active={selection?.kind === 'agent' && selection.id === a.id}
+                indent
+                onClick={() => onSelect({ kind: 'agent', id: a.id })} />
+            ))}
+          </div>
+        )
+      })}
+      {/* Standalone */}
+      <div>
+        <div onClick={() => onToggleExpand(-1)}
+             style={{
+               display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
+               borderBottom: '1px solid #eee', cursor: 'pointer', background: '#fafafa',
+             }}>
+          <span style={{ width: 14, color: '#888' }}>{expanded.has(-1) ? '▼' : '▶'}</span>
+          <b style={{ flex: 1 }}>Standalone</b>
+          <span style={{ fontSize: 11, color: '#888' }}>{standalone.length}</span>
+        </div>
+        {expanded.has(-1) && standalone.map(a => (
+          <ServerTreeRow key={a.id} agent={a}
+            depCount={(depsByAgent.get(a.id) || []).length}
+            active={selection?.kind === 'agent' && selection.id === a.id}
+            indent
+            onClick={() => onSelect({ kind: 'agent', id: a.id })} />
+        ))}
+        {standalone.length === 0 && expanded.has(-1) && (
+          <div style={{ padding: '8px 30px', fontSize: 12, color: '#aaa' }}>
+            (HA 그룹 없는 서버 없음)
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
+  agent: Agent
+  depCount: number
+  role?: 'master' | 'backup'
+  active: boolean
+  indent?: boolean
+  onClick: () => void
 }) {
   const sc = agentStatusColor(a.status)
   return (
-    <tr onClick={onClick}
-      style={{
-        cursor: 'pointer',
-        background: active ? '#eef5ff' : undefined,
-      }}>
-      <td style={{ padding: 0 }}>
-        <div style={{ width: 4, background: sc.bar, height: 32 }} />
-      </td>
-      <td>
-        <b>{agentDisplayName(a.name)}</b>
-        {agentDisplayName(a.name) !== a.name && (
-          <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({a.name})</span>
+    <div onClick={onClick}
+         style={{
+           display: 'flex', alignItems: 'center', gap: 6,
+           padding: '6px 10px', paddingLeft: indent ? 32 : 10,
+           borderBottom: '1px solid #f4f4f4', cursor: 'pointer',
+           background: active ? '#eef5ff' : undefined,
+         }}>
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar }} />
+      <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{agentDisplayName(a.name)}</span>
+      {role && (
+        <span style={{
+          fontSize: 9, padding: '1px 4px', borderRadius: 3, fontWeight: 600,
+          background: role === 'master' ? '#e74c3c' : '#95a5a6', color: '#fff',
+        }}>{role === 'master' ? 'M' : 'B'}</span>
+      )}
+      <span style={{ fontSize: 10, color: '#888' }}>{depCount}m</span>
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────
+//  Group Inspector (HA 그룹 선택 시)
+// ──────────────────────────────────────────────────────────────
+
+function GroupInspector({ group, agents, onSelectMember, onApply }: {
+  group: HaGroup
+  agents: Agent[]
+  onSelectMember: (aid: number) => void
+  onApply: () => void
+}) {
+  const memberAgents = group.members.map(m => ({
+    ...m, agent: agents.find(a => a.id === m.agent_id)
+  }))
+  return (
+    <>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{
+            background: group.mode === 'active_standby' ? '#3498db' : '#27ae60',
+            color: '#fff', fontSize: 11, padding: '2px 8px', borderRadius: 3, fontWeight: 600,
+          }}>{group.mode === 'active_standby' ? 'A/S' : 'AA'}</span>
+          <b style={{ fontSize: 16 }}>{group.name}</b>
+          <span style={{ fontSize: 12, color: '#888' }}>#{group.id} · vrid {group.vrid}</span>
+          {group.vip && (
+            <span style={{ fontSize: 12, color: '#444' }}>
+              VIP <code>{group.vip}/{group.vip_mask}</code>
+            </span>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <button className="btn btn--sm btn--primary" onClick={onApply}
+                    title="멤버들에게 update_ha job 큐잉 (ha.json + cims-ha apply)">
+              ▶ 적용
+            </button>
+            <Link to="/ha-services" className="btn btn--sm btn--outline">편집</Link>
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>멤버 ({memberAgents.length})</div>
+        <table className="data-table" style={{ margin: 0, fontSize: 13 }}>
+          <thead>
+            <tr><th>이름</th><th>role</th><th>priority</th><th>상태</th><th>IP</th><th>v</th></tr>
+          </thead>
+          <tbody>
+            {memberAgents.map(m => {
+              const a = m.agent
+              if (!a) return (
+                <tr key={m.agent_id}><td colSpan={6}>(agent #{m.agent_id} not found)</td></tr>
+              )
+              const sc = agentStatusColor(a.status)
+              return (
+                <tr key={a.id} onClick={() => onSelectMember(a.id)}
+                    style={{ cursor: 'pointer' }}>
+                  <td><b>{agentDisplayName(a.name)}</b></td>
+                  <td>
+                    <span style={{
+                      fontSize: 10, padding: '1px 5px', borderRadius: 3, color: '#fff',
+                      background: m.role === 'master' ? '#e74c3c' : '#95a5a6',
+                    }}>{m.role}</span>
+                  </td>
+                  <td>{m.priority}</td>
+                  <td>
+                    <span style={{ background: sc.bar, color: '#fff', fontSize: 10,
+                                    padding: '1px 6px', borderRadius: 3 }}>{a.status}</span>
+                  </td>
+                  <td style={{ fontSize: 12, color: '#555' }}>{a.ip_address || '—'}</td>
+                  <td style={{ fontSize: 12, color: '#888' }}>{a.agent_version || '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {group.vip_bindings && group.vip_bindings.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>VIP Bindings</div>
+            <table className="data-table" style={{ margin: 0, fontSize: 12 }}>
+              <thead>
+                <tr><th>slot</th><th>IP</th><th>멤버 iface</th></tr>
+              </thead>
+              <tbody>
+                {group.vip_bindings.map(b => (
+                  <tr key={b.bid}>
+                    <td>{b.slot}</td>
+                    <td><code>{b.ip}/{b.mask}</code></td>
+                    <td style={{ fontSize: 11, color: '#666' }}>
+                      {Object.entries(b.memberIfaces || {})
+                        .map(([sid, iface]) => `#${sid}:${iface}`).join(', ')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-        {a.ha_group && (
-          <span title={`HA 그룹: ${a.ha_group.name} (mode=${a.ha_group.mode}, role=${a.ha_group.role})`}
-                style={{
-                  marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 3,
-                  background: a.ha_group.mode === 'active_standby' ? '#3498db' : '#27ae60',
-                  color: '#fff', fontWeight: 'normal',
-                }}>
-            {a.ha_group.mode === 'active_standby' ? 'A/S' : 'AA'}·{a.ha_group.name}·{a.ha_group.role === 'master' ? 'M' : 'B'}
-          </span>
-        )}
-      </td>
-      <td style={{ fontSize: 12, color: '#555' }}>{a.ip_address || '—'}</td>
-      <td>
-        <span className="tag" style={{
-          background: sc.bar, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-        }}>{a.status}</span>
-      </td>
-      <td style={{ fontSize: 12, color: '#666' }}>{a.hostname || '—'}</td>
-      <td style={{ textAlign: 'right', fontSize: 12 }}>{depCount}</td>
-      <td style={{ fontSize: 12, color: '#888' }}>{a.agent_version || '—'}</td>
-      <td style={{ fontSize: 12, color: '#888' }}>{fmtRelTime(a.last_heartbeat)}</td>
-    </tr>
+      </div>
+    </>
   )
 }
 
