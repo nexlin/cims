@@ -5,6 +5,7 @@ import {
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentHealthCheck,
 } from '../api/deployment'
 import { haGroupsApi, type HaGroup, type HaRole, type VipBinding } from '../api/ha_groups'
+import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
@@ -672,7 +673,7 @@ function StatChip({ label, value, sub, color }:
 //  Inspector (선택된 서버 상세)
 // ──────────────────────────────────────────────────────────────
 
-type InspectorTab = 'modules' | 'info'
+type InspectorTab = 'modules' | 'network' | 'info'
 
 function ServerInspector({ agent: a, deployments, packages,
                           onApprove, onRevoke, onRemove, onUpgrade, onRestart, onInstallCmd, onMetrics, onHealthCheck,
@@ -753,6 +754,9 @@ function ServerInspector({ agent: a, deployments, packages,
         <TabButton active={tab === 'modules'} onClick={() => setTab('modules')}>
           모듈 ({deployments.length})
         </TabButton>
+        <TabButton active={tab === 'network'} onClick={() => setTab('network')}>
+          네트워크
+        </TabButton>
         <TabButton active={tab === 'info'} onClick={() => setTab('info')}>
           정보
         </TabButton>
@@ -765,6 +769,7 @@ function ServerInspector({ agent: a, deployments, packages,
             onAddDeploy={onAddDeploy} onConfigure={onConfigure}
             onJob={onJob} onRemoveDep={onRemoveDep} />
         )}
+        {tab === 'network' && <NetworkTab agent={a} />}
         {tab === 'info' && <InfoTab agent={a} />}
       </div>
     </>
@@ -879,6 +884,50 @@ function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRemove }: {
         </div>
       </td>
     </tr>
+  )
+}
+
+function NetworkTab({ agent: a }: { agent: Agent }) {
+  const { show } = useToast()
+  const [applying, setApplying] = useState(false)
+
+  async function onApply(
+    ops: {
+      service_ip_rows?: Array<{ op: 'add'|'del'; iface: string; ip: string; mask: number; slot?: string }>
+      routes?:          Array<{ op: 'add'|'del'; dst: string; via: string; dev: string }>
+    },
+    label: string,
+  ) {
+    setApplying(true)
+    try {
+      const r = await deploymentApi.applyIpConfig(a.id, ops)
+      if (r.ok) show(`${label} — ${r.rows} IP / ${r.routes} route 적용`, 'ok')
+      else      show(`${label} — rc=${r.rc} ${r.stderr || r.stdout}`, 'err')
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setApplying(false) }
+  }
+
+  async function onUpdateSlot(iface: string, ip: string, mask: number, slot: string) {
+    // service_ip_rows file_store 갱신 (ip addr 변경 없음, slot 라벨만).
+    const next = (a.service_ip_rows || []).filter(r => !(r.iface === iface && r.ip === ip))
+    if (slot) next.push({ iface, ip, mask, slot })
+    try {
+      await deploymentApi.updateAgent(a.id, { service_ip_rows: next })
+      show(`${iface}:${ip} → slot=${slot || '(none)'}`, 'ok')
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+
+  return (
+    <ServiceIpPanel
+      title={`${a.name} — IP / Routing`}
+      interfaces={a.interfaces || []}
+      storedRows={(a.service_ip_rows || []).map(r => ({ ...r }))}
+      storedRoutes={a.routes || []}
+      slots={[]}
+      applying={applying}
+      onApply={onApply}
+      onUpdateSlot={onUpdateSlot}
+    />
   )
 }
 
