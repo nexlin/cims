@@ -899,45 +899,50 @@ function FailoverSection({ value, onChange, open, onToggle }: {
       <div onClick={onToggle}
            style={{ padding: '8px 12px', background: '#f7f7f7', cursor: 'pointer',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
-           title="AS (active_standby) 만 적용 — VRRP 절체 동작 세부 조건">
+           title="A/S (active_standby) 시스템에만 적용 — VRRP 절체 동작 세부 조건">
         <span style={{ fontSize: 11 }}>{open ? '▼' : '▶'}</span>
-        절체 조건 (AS 만)
+        절체 조건 (A/S 전용)
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888', fontWeight: 400 }}>
-          advert {value.advert_int}s · fall {value.health.fall} · {value.preempt}
+          감시주기 {value.advert_int}s · 장애판정 {value.health.fall}회 · {value.preempt === 'preempt' ? '자동복귀' : '복귀없음'}
         </span>
       </div>
       {open && (
         <div style={{ padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 130, color: '#555' }} title="VRRP advertisement 주기 (sec). 짧을수록 절체 빠름 but 트래픽 증가.">
-              advert_int (s)
+            <label style={{ width: 150, color: '#555' }}
+                   title="VRRP 광고 주기 (초). Master 가 Backup 에게 살아있음을 알리는 주기. 짧을수록 절체가 빨라지지만 네트워크 트래픽 증가.">
+              감시 주기 (초)
             </label>
             <input type="number" min={0.5} max={5} step={0.5}
                    value={value.advert_int}
                    onChange={e => set('advert_int', Number(e.target.value) || 1)}
                    className="form-input" style={{ width: 80 }} />
-            <span style={{ color: '#888' }}>default 1 · range 0.5~5</span>
+            <span style={{ color: '#888' }}>기본 1초 · 범위 0.5~5초</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 130, color: '#555' }} title="cims-health 호출 주기 (sec)">
-              health.interval
+            <label style={{ width: 150, color: '#555' }}
+                   title="cims-health 가 모듈 상태(포트 listen + 선택적 프로세스)를 점검하는 주기">
+              점검 주기 (초)
             </label>
             <input type="number" min={1} max={60}
                    value={value.health.interval}
                    onChange={e => setHealth('interval', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 70 }} />
-            <label style={{ color: '#555', marginLeft: 12 }} title="연속 실패 횟수 — 이만큼 fail 면 down 판정">fall</label>
+            <label style={{ color: '#555', marginLeft: 12 }}
+                   title="연속 실패 N회 → 장애로 판정. 절체까지의 시간 = 점검주기 × 장애판정.">장애 판정 (회)</label>
             <input type="number" min={1} max={60}
                    value={value.health.fall}
                    onChange={e => setHealth('fall', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 60 }} />
-            <label style={{ color: '#555', marginLeft: 12 }} title="연속 성공 횟수 — 이만큼 OK 면 up 판정">rise</label>
+            <label style={{ color: '#555', marginLeft: 12 }}
+                   title="연속 성공 N회 → 정상 복귀로 판정">복귀 판정 (회)</label>
             <input type="number" min={1} max={60}
                    value={value.health.rise}
                    onChange={e => setHealth('rise', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 60 }} />
-            <label style={{ color: '#555', marginLeft: 12 }} title="단일 health-check 의 최대 실행 시간 (sec)">timeout</label>
+            <label style={{ color: '#555', marginLeft: 12 }}
+                   title="단일 점검 명령의 최대 실행 시간 (초과 시 실패)">제한 시간 (초)</label>
             <input type="number" min={1} max={60}
                    value={value.health.timeout}
                    onChange={e => setHealth('timeout', Number(e.target.value) || 3)}
@@ -945,22 +950,22 @@ function FailoverSection({ value, onChange, open, onToggle }: {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 130, color: '#555' }}>track_interface</label>
+            <label style={{ width: 150, color: '#555' }}>NIC 링크 감시</label>
             <input type="checkbox" checked={value.track_interface}
                    onChange={e => set('track_interface', e.target.checked)} />
             <span style={{ color: '#888' }}>
-              service NIC link down 즉시 감지 (interface 모니터링)
+              서비스 NIC 의 링크 다운을 즉시 감지 (점검 주기 기다리지 않고 바로 절체)
             </span>
           </div>
 
           <div>
-            <label style={{ width: 130, color: '#555', display: 'inline-block' }}>
-              tracked_modules
+            <label style={{ width: 150, color: '#555', display: 'inline-block' }}>
+              프로세스 감시
             </label>
             <span style={{ color: '#888' }}>
-              port 외 process 도 검증 (pgrep -x). 비워두면 port only.
+              포트 listen 외에 해당 프로세스 실행 여부도 점검 (pgrep -x). 비워두면 포트만 점검.
             </span>
-            <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 8, paddingLeft: 130 }}>
+            <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 8, paddingLeft: 150 }}>
               {TRACKABLE_MODULE_CANDIDATES.map(mod => (
                 <label key={mod} style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
                                           padding: '2px 8px', border: '1px solid #ccc', borderRadius: 3,
@@ -975,17 +980,22 @@ function FailoverSection({ value, onChange, open, onToggle }: {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 130, color: '#555' }} title="복구 후 master 자동 인수 여부">preempt</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <label style={{ width: 150, color: '#555' }}
+                   title={
+                     '복귀 없음: 절체 후 옛 Master 가 살아 돌아와도 Backup 으로 머무름 — 추가 절체 없음(운영 안정).\n' +
+                     '자동 복귀: 옛 Master 의 priority 가 더 높으면 자동으로 Master 권한을 되찾음 — priority 의도 유지되나 복구 시점에 한 번 더 절체 발생.'
+                   }>권한 복귀 정책</label>
             <select value={value.preempt}
                     onChange={e => set('preempt', e.target.value as 'preempt' | 'nopreempt')}
-                    className="form-input" style={{ width: 130 }}>
-              <option value="nopreempt">nopreempt (안정)</option>
-              <option value="preempt">preempt (자동복귀)</option>
+                    className="form-input" style={{ width: 200 }}>
+              <option value="nopreempt">복귀 없음 (운영 안정)</option>
+              <option value="preempt">자동 복귀 (priority 우선)</option>
             </select>
             {value.preempt === 'preempt' && (
               <>
-                <label style={{ color: '#555', marginLeft: 8 }}>delay (s)</label>
+                <label style={{ color: '#555', marginLeft: 8 }}
+                       title="옛 Master 가 살아 돌아온 뒤, 권한을 되찾기 전에 N초간 안정화 대기">복귀 지연 (초)</label>
                 <input type="number" min={0} max={300}
                        value={value.preempt_delay}
                        onChange={e => set('preempt_delay', Number(e.target.value) || 0)}
@@ -993,9 +1003,15 @@ function FailoverSection({ value, onChange, open, onToggle }: {
               </>
             )}
           </div>
+          {value.preempt === 'preempt' && (
+            <div style={{ paddingLeft: 150, fontSize: 11, color: '#e67e22' }}>
+              ⚠ 자동 복귀 모드는 옛 Master 가 살아 돌아올 때 한 번 더 절체가 발생합니다 (서비스 추가 단절).
+              priority 가 의미 있는 비대칭 환경 (사양 차이, 주/부 사이트) 에서만 권장.
+            </div>
+          )}
 
           <div style={{ fontSize: 11, color: '#888' }}>
-            저장 후 [▶ 적용] 으로 멤버 agent 에 update_ha 큐잉 → keepalived.conf 재생성 + reload.
+            [💾 저장] 후 [▶ 적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
           </div>
         </div>
       )}
