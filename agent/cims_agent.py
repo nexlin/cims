@@ -466,12 +466,20 @@ def collect_metrics() -> dict:
 def _health_check_ha() -> dict:
     """keepalived service 상태 + VIP 부여 여부 + journal tail."""
     out = {"keepalived_installed": False, "keepalived_active": False, "vips": []}
+    # binary 존재 확인 — purge 후엔 systemctl 만으론 (unit cache) 미설치 판별 불가.
+    try:
+        r = subprocess.run(["which", "keepalived"], capture_output=True, text=True, timeout=2)
+        if r.returncode == 0 and r.stdout.strip():
+            out["keepalived_installed"] = True
+    except Exception as e:
+        out["error"] = str(e); return out
+    if not out["keepalived_installed"]:
+        return out  # 미설치 — 검사 끝 (verdict=healthy)
     # service status
     try:
         rc = subprocess.run(["systemctl", "is-active", "keepalived"],
                             capture_output=True, text=True, timeout=3)
         out["keepalived_active"] = (rc.stdout.strip() == "active")
-        out["keepalived_installed"] = True
     except FileNotFoundError:
         return out
     except Exception as e:
@@ -492,13 +500,14 @@ def _health_check_ha() -> dict:
                                          "mask": a.get("prefixlen")})
     except Exception as e:
         out["ip_addr_error"] = str(e)
-    # journal tail (선택)
+    # systemctl status (sudo 불필요, 마지막 log lines + Active state 포함)
     try:
-        r = subprocess.run(["journalctl", "-u", "keepalived", "-n", "20",
-                             "--no-pager", "--output=cat"],
+        r = subprocess.run(["systemctl", "status", "keepalived", "--no-pager", "-n", "15"],
                             capture_output=True, text=True, timeout=3)
-        if r.returncode == 0:
-            out["journal_tail"] = [line for line in r.stdout.splitlines() if line.strip()][-10:]
+        # status 는 OK 면 0, inactive/failed 면 3 등 — stdout 은 항상 채워짐.
+        if r.stdout:
+            out["journal_tail"] = [line for line in r.stdout.splitlines()
+                                   if line.strip()][-15:]
     except Exception:
         pass
     return out
@@ -952,6 +961,24 @@ def job_update_ha(params: dict) -> tuple:
             json.dump(ha_json, f, ensure_ascii=False, indent=2)
     except Exception as e:
         return 2, "", f"write ha.json failed: {e}"
+
+    # services 비면 keepalived 의도적 미사용 (all_active + VIP null + vip_bindings=[]) —
+    # 기존 설치본 있으면 cims-ha uninstall 으로 정리 (health-check 가 inactive issue 안 잡도록).
+    services = ha_json.get("services") or {}
+    if not services:
+        msgs = [f"ha.json updated: {ha_path}",
+                "ha.json.services empty — keepalived intentionally disabled"]
+        cims_ha = _resolve_cims_ha()
+        ha_dir_local = os.path.dirname(ha_path)
+        if cims_ha:
+            try:
+                r = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir_local, "uninstall"],
+                                    capture_output=True, text=True, timeout=120)
+                msgs.append(f"cims-ha uninstall rc={r.returncode}"
+                           + (f" err={(r.stderr or r.stdout).strip()[-200:]}" if r.returncode != 0 else ""))
+            except Exception as e:
+                msgs.append(f"cims-ha uninstall exception: {e}")
+        return 0, "\n".join(msgs), ""
 
     # cims-ha install + config + apply — sudoers 화이트리스트의 dev dist canonical 사용
     # ha.json 위치는 install_path 별로 다르므로 --ha-dir 인자로 전달.

@@ -155,26 +155,35 @@ cmd_ha() {
 
     case "$sub" in
         install)
-            # idempotent — 이미 설치되어 있으면 short-circuit (agent 가 ha.json 받을 때마다 호출됨).
-            if command -v keepalived >/dev/null 2>&1; then
-                ok "keepalived already installed: $(keepalived --version 2>&1 | head -1)"
-                return 0
-            fi
-            # vendor (offline) 우선 — private 환경 (인터넷 차단) 에서도 동작.
-            # SCRIPT_DIR/../vendor/keepalived/*.deb 가 있으면 dpkg -i 로 설치, 없으면 apt fallback.
+            # idempotent — 이미 설치 + binary 실제 동작 가능하면 short-circuit.
+            # `command -v` 만으론 broken state (vendor deps 깨져 exit 127) 식별 불가 → -v 실행 검증.
             local vendor_dir="$SCRIPT_DIR/../vendor/keepalived"
-            if ls "$vendor_dir"/*.deb >/dev/null 2>&1; then
-                info "keepalived offline 설치 (vendor: $vendor_dir)"
-                sudo dpkg -i "$vendor_dir"/*.deb || {
-                    err "dpkg -i 실패 — 의존 부족 시 apt-get -f install 필요"
-                    return 1
-                }
-                ok "keepalived 설치 완료 (vendor): $(keepalived --version 2>&1 | head -1)"
+            if command -v keepalived >/dev/null 2>&1 && keepalived -v >/dev/null 2>&1; then
+                ok "keepalived already installed: $(keepalived -v 2>&1 | head -1)"
             else
-                info "keepalived 설치 (apt fallback) — sudo + 인터넷 필요"
-                sudo apt-get update
-                sudo apt-get install -y keepalived
-                ok "keepalived 설치 완료 (apt): $(keepalived --version 2>&1 | head -1)"
+                if command -v keepalived >/dev/null 2>&1; then
+                    warn "keepalived binary 존재하지만 실행 실패 (deps 깨짐 가능) — 강제 재설치"
+                fi
+                # vendor (offline) — private 환경 기본 경로. vendor 없으면 apt fallback.
+                if ls "$vendor_dir"/*.deb >/dev/null 2>&1; then
+                    info "keepalived offline 설치 (vendor: $vendor_dir, --force-confnew --force-overwrite)"
+                    # --force-confnew: 옛 conf 보존 안 함 (cims-ha apply 가 어차피 덮어씀)
+                    # --force-overwrite: 다른 package 의 file 과 conflict 시 덮어쓰기 (재설치 안정성)
+                    sudo dpkg -i --force-confnew --force-overwrite "$vendor_dir"/*.deb || {
+                        warn "dpkg -i 실패 — broken deps fix-broken 시도"
+                        sudo apt-get -y --fix-broken install || true
+                        sudo dpkg -i --force-confnew --force-overwrite "$vendor_dir"/*.deb || {
+                            err "dpkg -i 재시도 실패"
+                            return 1
+                        }
+                    }
+                    ok "keepalived 설치 완료 (vendor): $(keepalived -v 2>&1 | head -1)"
+                else
+                    info "keepalived 설치 (apt fallback) — sudo + 인터넷 필요"
+                    sudo apt-get update
+                    sudo apt-get install -y keepalived
+                    ok "keepalived 설치 완료 (apt): $(keepalived -v 2>&1 | head -1)"
+                fi
             fi
             # uninstall→re-install 시 dpkg 가 conffile 을 .dpkg-new 로 깔아 keepalived start FAILURE.
             # 정상 이름이 비어있으면 mv, 이미 있으면 skip (운영자 검토 필요).
@@ -232,28 +241,41 @@ cmd_ha() {
         status) systemctl status keepalived --no-pager || true ;;
         uninstall)
             # agent uninstall 대칭 — install 이 시스템에 깐 것을 모두 제거.
-            # keepalived purge + autoremove deps (시스템 다른 곳에서 안 쓰는 것만) + /etc/keepalived/
-            # + HA_DIR/out (옛 sudo 호출로 생긴 root 소유 render 잔재).
-            if ! command -v keepalived >/dev/null 2>&1; then
+            # 정책: vendor offline 으로 깔린 keepalived + deps 는 apt repo 와 버전 불일치라
+            #       apt-get purge 가 broken deps 만든다 (libsnmp40t64 vendor only 등).
+            #       → vendor *.deb 의 package list 추출 후 dpkg -P 로 직접 제거 (apt 안 거침).
+            local vendor_dir="$SCRIPT_DIR/../vendor/keepalived"
+            local pkgs=()
+            if ls "$vendor_dir"/*.deb >/dev/null 2>&1; then
+                local deb pkg
+                for deb in "$vendor_dir"/*.deb; do
+                    pkg=$(dpkg-deb -f "$deb" Package 2>/dev/null)
+                    [[ -n $pkg ]] && pkgs+=("$pkg")
+                done
+            fi
+            # vendor list 없으면 keepalived 만 — apt 설치 시나리오 fallback.
+            [[ ${#pkgs[@]} -eq 0 ]] && pkgs=(keepalived)
+
+            if ! command -v keepalived >/dev/null 2>&1 && ! dpkg -s "${pkgs[0]}" >/dev/null 2>&1; then
                 info "keepalived 미설치 — skip"
                 sudo rm -rf /etc/keepalived "$HA_DIR/out" 2>/dev/null || true
                 return 0
             fi
-            # broken deps (예: libsnmp40t64) 가 있으면 후속 purge 가 실패하고 /etc/keepalived rm 도 못함.
-            # --fix-broken install 선행 — 시스템에 broken 없으면 NO-OP.
-            if sudo dpkg --audit 2>/dev/null | grep -q .; then
-                info "broken deps 발견 — apt-get --fix-broken install 자동 선행"
-                sudo apt-get -y --fix-broken install || warn "fix-broken install 실패 — purge 단계 실패 시 수동 정리 필요"
-            fi
-            info "keepalived 제거 (purge + autoremove)"
+            info "keepalived service stop"
             sudo systemctl stop keepalived 2>/dev/null || true
-            sudo apt-get -y purge keepalived || {
-                err "apt-get purge keepalived 실패"
-                return 1
-            }
-            sudo apt-get -y autoremove --purge || true
+            sudo systemctl disable keepalived 2>/dev/null || true
+
+            info "dpkg -P (vendor packages: ${pkgs[*]})"
+            # --force-all: deps chain 무시하고 강제 제거. broken state 의 host 도 정리 가능.
+            if sudo dpkg -P --force-all "${pkgs[@]}" 2>&1 | tail -5; then
+                ok "vendor packages purged via dpkg -P"
+            else
+                warn "dpkg -P 일부 실패 — apt-get fallback (마지막 수단)"
+                sudo apt-get -y --fix-broken install 2>/dev/null || true
+                sudo apt-get -y purge "${pkgs[@]}" 2>/dev/null || true
+            fi
             sudo rm -rf /etc/keepalived "$HA_DIR/out" 2>/dev/null || true
-            ok "keepalived + autoremoved deps + /etc/keepalived + out/ 제거"
+            ok "keepalived + vendor deps + /etc/keepalived + out/ 제거"
             ;;
         help|*)
             cat <<EOF
