@@ -4,7 +4,8 @@ import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentHealthCheck,
 } from '../api/deployment'
-import { haGroupsApi, type HaGroup, type HaRole, type VipBinding } from '../api/ha_groups'
+import { haGroupsApi, type HaGroup, type HaRole, type VipBinding,
+         type FailoverOptions, FAILOVER_DEFAULTS } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { splitPrefixHost } from './ha/helpers'
 import { useToast } from '../components/Toast'
@@ -481,6 +482,10 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
   const [editAuthPass, setEditAuthPass] = useState(group.auth_pass)
   const [editNote, setEditNote]         = useState(group.note || '')
   const [editBindings, setEditBindings] = useState<VipBinding[]>(group.vip_bindings || [])
+  const [editFailover, setEditFailover] = useState<FailoverOptions>(
+    { ...FAILOVER_DEFAULTS, ...(group.failover_options || {}),
+      health: { ...FAILOVER_DEFAULTS.health, ...(group.failover_options?.health || {}) } })
+  const [failoverOpen, setFailoverOpen] = useState(false)
   const [editMemberRole, setEditMemberRole] = useState<Map<number, HaRole>>(
     new Map(group.members.map(m => [m.agent_id, m.role]))
   )
@@ -493,6 +498,8 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     setEditAuthPass(group.auth_pass)
     setEditNote(group.note || '')
     setEditBindings(group.vip_bindings || [])
+    setEditFailover({ ...FAILOVER_DEFAULTS, ...(group.failover_options || {}),
+      health: { ...FAILOVER_DEFAULTS.health, ...(group.failover_options?.health || {}) } })
     setEditMemberRole(new Map(group.members.map(m => [m.agent_id, m.role])))
     setEditMemberPrio(new Map(group.members.map(m => [m.agent_id, m.priority])))
   }, [group.id, group.update_time])
@@ -506,6 +513,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     || editAuthPass !== group.auth_pass
     || editNote !== (group.note || '')
     || JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
+    || JSON.stringify(editFailover) !== JSON.stringify(group.failover_options || FAILOVER_DEFAULTS)
     || group.members.some(m =>
         editMemberRole.get(m.agent_id) !== m.role ||
         editMemberPrio.get(m.agent_id) !== m.priority)
@@ -518,6 +526,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
         auth_pass: group.mode === 'active_standby' ? editAuthPass : '',
         note: editNote,
         vip_bindings: editBindings,
+        failover_options: editFailover,
       })
       // 멤버별 role/priority 패치 — addMember 가 upsert 역할 (옛 멤버 갱신 시 동일 endpoint 사용 가정)
       for (const m of group.members) {
@@ -852,8 +861,145 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
           VIP 의 네트워크/마스크 는 멤버의 용도(service IP) 에서 자동 매핑 — host (마지막 옥텟) 만 입력.
           상세 (수동 IP 입력) → <Link to={`/deploy/services?group=${group.id}`}>📋 상세 편집</Link>.
         </div>
+
+        {group.mode === 'active_standby' && (
+          <FailoverSection
+            value={editFailover}
+            onChange={setEditFailover}
+            open={failoverOpen}
+            onToggle={() => setFailoverOpen(v => !v)}
+          />
+        )}
       </div>
     </>
+  )
+}
+
+// AS 절체 조건 — keepalived advert_int / vrrp_script health / preempt / track_interface / tracked_modules.
+// 모든 default = 현재 hardcoded 와 동일 (호환성 보장).
+const TRACKABLE_MODULE_CANDIDATES = ['csp', 'cmp', 'csc', 'psp', 'isp', 'imp', 'pmp']
+
+function FailoverSection({ value, onChange, open, onToggle }: {
+  value: FailoverOptions
+  onChange: (v: FailoverOptions) => void
+  open: boolean
+  onToggle: () => void
+}) {
+  const set = <K extends keyof FailoverOptions>(k: K, v: FailoverOptions[K]) =>
+    onChange({ ...value, [k]: v })
+  const setHealth = (k: keyof FailoverOptions['health'], v: number) =>
+    onChange({ ...value, health: { ...value.health, [k]: v } })
+  const toggleMod = (mod: string) => {
+    const cur = value.tracked_modules || []
+    const next = cur.includes(mod) ? cur.filter(x => x !== mod) : [...cur, mod]
+    set('tracked_modules', next)
+  }
+  return (
+    <div style={{ marginTop: 20, border: '1px solid #e0e0e0', borderRadius: 4 }}>
+      <div onClick={onToggle}
+           style={{ padding: '8px 12px', background: '#f7f7f7', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
+           title="AS (active_standby) 만 적용 — VRRP 절체 동작 세부 조건">
+        <span style={{ fontSize: 11 }}>{open ? '▼' : '▶'}</span>
+        절체 조건 (AS 만)
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888', fontWeight: 400 }}>
+          advert {value.advert_int}s · fall {value.health.fall} · {value.preempt}
+        </span>
+      </div>
+      {open && (
+        <div style={{ padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label style={{ width: 130, color: '#555' }} title="VRRP advertisement 주기 (sec). 짧을수록 절체 빠름 but 트래픽 증가.">
+              advert_int (s)
+            </label>
+            <input type="number" min={0.5} max={5} step={0.5}
+                   value={value.advert_int}
+                   onChange={e => set('advert_int', Number(e.target.value) || 1)}
+                   className="form-input" style={{ width: 80 }} />
+            <span style={{ color: '#888' }}>default 1 · range 0.5~5</span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <label style={{ width: 130, color: '#555' }} title="cims-health 호출 주기 (sec)">
+              health.interval
+            </label>
+            <input type="number" min={1} max={60}
+                   value={value.health.interval}
+                   onChange={e => setHealth('interval', Number(e.target.value) || 2)}
+                   className="form-input" style={{ width: 70 }} />
+            <label style={{ color: '#555', marginLeft: 12 }} title="연속 실패 횟수 — 이만큼 fail 면 down 판정">fall</label>
+            <input type="number" min={1} max={60}
+                   value={value.health.fall}
+                   onChange={e => setHealth('fall', Number(e.target.value) || 2)}
+                   className="form-input" style={{ width: 60 }} />
+            <label style={{ color: '#555', marginLeft: 12 }} title="연속 성공 횟수 — 이만큼 OK 면 up 판정">rise</label>
+            <input type="number" min={1} max={60}
+                   value={value.health.rise}
+                   onChange={e => setHealth('rise', Number(e.target.value) || 2)}
+                   className="form-input" style={{ width: 60 }} />
+            <label style={{ color: '#555', marginLeft: 12 }} title="단일 health-check 의 최대 실행 시간 (sec)">timeout</label>
+            <input type="number" min={1} max={60}
+                   value={value.health.timeout}
+                   onChange={e => setHealth('timeout', Number(e.target.value) || 3)}
+                   className="form-input" style={{ width: 60 }} />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label style={{ width: 130, color: '#555' }}>track_interface</label>
+            <input type="checkbox" checked={value.track_interface}
+                   onChange={e => set('track_interface', e.target.checked)} />
+            <span style={{ color: '#888' }}>
+              service NIC link down 즉시 감지 (interface 모니터링)
+            </span>
+          </div>
+
+          <div>
+            <label style={{ width: 130, color: '#555', display: 'inline-block' }}>
+              tracked_modules
+            </label>
+            <span style={{ color: '#888' }}>
+              port 외 process 도 검증 (pgrep -x). 비워두면 port only.
+            </span>
+            <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 8, paddingLeft: 130 }}>
+              {TRACKABLE_MODULE_CANDIDATES.map(mod => (
+                <label key={mod} style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
+                                          padding: '2px 8px', border: '1px solid #ccc', borderRadius: 3,
+                                          background: (value.tracked_modules || []).includes(mod) ? '#e3f2fd' : '#fff',
+                                          cursor: 'pointer' }}>
+                  <input type="checkbox"
+                         checked={(value.tracked_modules || []).includes(mod)}
+                         onChange={() => toggleMod(mod)} />
+                  {mod}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label style={{ width: 130, color: '#555' }} title="복구 후 master 자동 인수 여부">preempt</label>
+            <select value={value.preempt}
+                    onChange={e => set('preempt', e.target.value as 'preempt' | 'nopreempt')}
+                    className="form-input" style={{ width: 130 }}>
+              <option value="nopreempt">nopreempt (안정)</option>
+              <option value="preempt">preempt (자동복귀)</option>
+            </select>
+            {value.preempt === 'preempt' && (
+              <>
+                <label style={{ color: '#555', marginLeft: 8 }}>delay (s)</label>
+                <input type="number" min={0} max={300}
+                       value={value.preempt_delay}
+                       onChange={e => set('preempt_delay', Number(e.target.value) || 0)}
+                       className="form-input" style={{ width: 70 }} />
+              </>
+            )}
+          </div>
+
+          <div style={{ fontSize: 11, color: '#888' }}>
+            저장 후 [▶ 적용] 으로 멤버 agent 에 update_ha 큐잉 → keepalived.conf 재생성 + reload.
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -16,10 +16,10 @@ global_defs {
 ! ── ${SVC_UPPER} — vrrp_script + vrrp_instance ──────────────
 vrrp_script check_${SVC} {
     script   "${HA_DIR}/../bin/cims-health ${SVC}"
-    interval 2
-    timeout  3
-    rise     2
-    fall     2
+    interval ${HEALTH_INTERVAL}
+    timeout  ${HEALTH_TIMEOUT}
+    rise     ${HEALTH_RISE}
+    fall     ${HEALTH_FALL}
 }
 
 vrrp_instance VI_${SVC_UPPER} {
@@ -27,8 +27,8 @@ vrrp_instance VI_${SVC_UPPER} {
     interface           ${INTERFACE}
     virtual_router_id   ${VRID}
     priority            ${PRIORITY}
-    advert_int          1
-    nopreempt
+    advert_int          ${ADVERT_INT}
+    ${PREEMPT_LINE}
     unicast_src_ip      ${LOCAL_IP}
     unicast_peer {
         ${PEER_IP}
@@ -40,6 +40,7 @@ vrrp_instance VI_${SVC_UPPER} {
     virtual_ipaddress {
 ${VIP_LIST}
     }
+${TRACK_INTERFACE_BLOCK}
     track_script {
         check_${SVC}
     }

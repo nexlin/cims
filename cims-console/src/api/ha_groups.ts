@@ -20,6 +20,31 @@ export interface VipBinding {
   memberIfaces?: { [serverId: number]: string } // 멤버 agent_id → iface name
 }
 
+// AS 절체 조건 — keepalived vrrp_instance / vrrp_script 가 사용. AS 만 의미.
+// default = 현재 hardcoded 동작과 동일 (호환성).
+export interface FailoverOptions {
+  advert_int: number                            // VRRP 주기 (sec, 0.5~5, default 1)
+  health: {
+    interval: number                            // default 2 (sec)
+    fall: number                                // default 2 (회)
+    rise: number                                // default 2 (회)
+    timeout: number                             // default 3 (sec)
+  }
+  track_interface: boolean                      // service NIC link down 즉시 감지 (default false)
+  tracked_modules: string[]                     // pgrep 검사 모듈 (default [] = port only)
+  preempt: 'preempt' | 'nopreempt'              // default nopreempt
+  preempt_delay: number                         // preempt 모드만 적용 (sec, default 0)
+}
+
+export const FAILOVER_DEFAULTS: FailoverOptions = {
+  advert_int: 1,
+  health: { interval: 2, fall: 2, rise: 2, timeout: 3 },
+  track_interface: false,
+  tracked_modules: [],
+  preempt: 'nopreempt',
+  preempt_delay: 0,
+}
+
 export interface HaGroup {
   id: number
   name: string
@@ -30,6 +55,7 @@ export interface HaGroup {
   auth_pass: string
   note?: string
   vip_bindings?: VipBinding[]
+  failover_options?: FailoverOptions
   create_time?: string
   update_time?: string
   members: HaMember[]
@@ -43,6 +69,7 @@ export interface HaGroupInput {
   auth_pass: string
   note?: string
   vip_bindings?: VipBinding[]
+  failover_options?: FailoverOptions
   members?: { agent_id: number; role?: HaRole; priority?: number }[]
 }
 

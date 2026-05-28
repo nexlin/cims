@@ -32,6 +32,80 @@ _VRID_MIN = 51
 _VRID_MAX = 255
 
 
+# failover_options 의 default — 현재 hardcoded 동작과 동일.
+# 옛 record (failover_options 미존재) 도 _normalize_failover_options 가 이 default 로 채워
+# 동작 변경 없음 (호환성 보장).
+_FAILOVER_DEFAULTS = {
+    'advert_int':      1.0,
+    'health': {
+        'interval':    2,
+        'fall':        2,
+        'rise':        2,
+        'timeout':     3,
+    },
+    'track_interface': False,
+    'tracked_modules': [],
+    'preempt':         'nopreempt',
+    'preempt_delay':   0,
+}
+
+
+def _normalize_failover_options(raw) -> dict:
+    """입력 dict → 검증된 failover_options. 잘못된 값은 default 로 대체.
+
+    AS 만 의미 있으나, 다른 mode 도 같은 dict 형태로 저장 — UI 가 mode 로 분기.
+    range:
+      advert_int: 0.5~5 (float, sec)
+      health.interval / fall / rise / timeout: 1~60 (int)
+      preempt: 'preempt' | 'nopreempt'
+      preempt_delay: 0~300 (int, sec)
+    """
+    if not isinstance(raw, dict):
+        raw = {}
+    out = {}
+
+    try:
+        ai = float(raw.get('advert_int', _FAILOVER_DEFAULTS['advert_int']))
+        if 0.5 <= ai <= 5:
+            out['advert_int'] = ai
+        else:
+            out['advert_int'] = _FAILOVER_DEFAULTS['advert_int']
+    except (TypeError, ValueError):
+        out['advert_int'] = _FAILOVER_DEFAULTS['advert_int']
+
+    health_in = raw.get('health') if isinstance(raw.get('health'), dict) else {}
+    health = {}
+    for k in ('interval', 'fall', 'rise', 'timeout'):
+        try:
+            v = int(health_in.get(k, _FAILOVER_DEFAULTS['health'][k]))
+            if 1 <= v <= 60:
+                health[k] = v
+            else:
+                health[k] = _FAILOVER_DEFAULTS['health'][k]
+        except (TypeError, ValueError):
+            health[k] = _FAILOVER_DEFAULTS['health'][k]
+    out['health'] = health
+
+    out['track_interface'] = bool(raw.get('track_interface', False))
+
+    tm = raw.get('tracked_modules') or []
+    if isinstance(tm, list):
+        out['tracked_modules'] = [str(x).strip().lower() for x in tm if str(x).strip()]
+    else:
+        out['tracked_modules'] = []
+
+    pe = raw.get('preempt') or _FAILOVER_DEFAULTS['preempt']
+    out['preempt'] = pe if pe in ('preempt', 'nopreempt') else _FAILOVER_DEFAULTS['preempt']
+
+    try:
+        pd = int(raw.get('preempt_delay', 0))
+        out['preempt_delay'] = pd if 0 <= pd <= 300 else 0
+    except (TypeError, ValueError):
+        out['preempt_delay'] = 0
+
+    return out
+
+
 def _ha_dir(config):
     return file_store.domain_dir(config, _HA_DOMAIN)
 
@@ -144,6 +218,8 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     # cims-health 가 lookup 하는 port/proto — agent 의 deployment 로 추정.
     h_port, h_proto = _infer_health_port_proto(agent_id, config) if config else (None, None)
 
+    failover_options = _normalize_failover_options(group.get('failover_options'))
+
     services: dict = {}
     if vip_bindings:
         vips = []
@@ -166,6 +242,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                 'interface': svc_iface,
                 'vips':     vips,
                 'priority': 100 if is_master else 90,
+                'failover_options': failover_options,
             }
             if h_port:  entry['port']  = h_port
             if h_proto: entry['proto'] = h_proto
@@ -178,6 +255,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             'interface': default_iface,
             'vip':      group['vip'],
             'priority': 100 if is_master else 90,
+            'failover_options': failover_options,
         }
         if h_port:  entry['port']  = h_port
         if h_proto: entry['proto'] = h_proto
@@ -331,6 +409,8 @@ def _serialize_group(g: dict, config: dict) -> dict:
     members.sort(key=lambda m: -int(m.get('priority') or 0))
     out['members'] = _attach_member_names(members, config)
     out.setdefault('vip_bindings', [])
+    # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
+    out['failover_options'] = _normalize_failover_options(out.get('failover_options'))
     return out
 
 
@@ -389,6 +469,7 @@ async def _create_group(body, config):
     vrid = _alloc_vrid(config)
     gid = file_store.next_id(_ha_dir(config))
     members = [_normalize_member(m, i) for i, m in enumerate(members_in)]
+    failover_options = _normalize_failover_options(body.get('failover_options'))
     group = {
         'id': gid,
         'name': name,
@@ -399,6 +480,7 @@ async def _create_group(body, config):
         'auth_pass': auth_pass,
         'note': note,
         'vip_bindings': vip_bindings or [],
+        'failover_options': failover_options,
         'members': members,
     }
     file_store.save(_ha_dir(config), gid, group)
@@ -439,6 +521,8 @@ async def _update_group(gid: int, body, config):
     if 'vip_bindings' in body:
         v = body.get('vip_bindings')
         existing['vip_bindings'] = v if isinstance(v, list) else []
+    if 'failover_options' in body:
+        existing['failover_options'] = _normalize_failover_options(body.get('failover_options'))
     if 'members' in body:
         existing['members'] = [_normalize_member(m, i) for i, m in enumerate(body['members'])]
 

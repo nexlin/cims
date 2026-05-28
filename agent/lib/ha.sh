@@ -91,6 +91,40 @@ def _build_vip_list(val, default_mask, default_iface):
         return ""
     return f"        {ip}/{default_mask} dev {iface}"
 
+def _failover_opts(val, iface):
+    """val.failover_options → keepalived placeholder dict.
+
+    csc 가 미전송 (옛 record) 시 defaults 와 동일하게 채움 — 호환성.
+    """
+    fo = val.get("failover_options") or {}
+    health = fo.get("health") or {}
+    # keepalived advert_int 는 float OK (예: 0.5). 정수면 "1", 소수면 "0.5" 형태.
+    try:
+        ai = float(fo.get("advert_int", 1))
+        if not (0.5 <= ai <= 5):
+            ai = 1.0
+    except (TypeError, ValueError):
+        ai = 1.0
+    advert_int = str(int(ai)) if ai == int(ai) else f"{ai:g}"
+    preempt = fo.get("preempt", "nopreempt")
+    preempt_delay = int(fo.get("preempt_delay", 0) or 0)
+    if preempt == "preempt":
+        preempt_line = f"preempt_delay         {preempt_delay}" if preempt_delay > 0 else "preempt"
+    else:
+        preempt_line = "nopreempt"
+    track_iface_block = ""
+    if fo.get("track_interface"):
+        track_iface_block = f"    track_interface {{\n        {iface}\n    }}"
+    return {
+        "ADVERT_INT":            advert_int,
+        "HEALTH_INTERVAL":       str(int(health.get("interval", 2) or 2)),
+        "HEALTH_FALL":           str(int(health.get("fall", 2) or 2)),
+        "HEALTH_RISE":           str(int(health.get("rise", 2) or 2)),
+        "HEALTH_TIMEOUT":        str(int(health.get("timeout", 3) or 3)),
+        "PREEMPT_LINE":          preempt_line,
+        "TRACK_INTERFACE_BLOCK": track_iface_block,
+    }
+
 out = [render(header_part, common)]
 for svc, val in services.items():
     if not val.get("enabled"):
@@ -110,6 +144,7 @@ for svc, val in services.items():
         "BIND_IP":     val.get("bind_ip", ""),
         "UNIT":        val.get("unit", f"cims@{svc}.service"),
     })
+    svc_map.update(_failover_opts(val, svc_iface))
     out.append(render(body_part, svc_map))
 
 content = "".join(out)
