@@ -39,6 +39,10 @@ export default function ServersPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())  // -1 = standalone
 
   const [systemModalOpen, setSystemModalOpen] = useState(false)
+  const [pendingMember, setPendingMember] = useState<{
+    groupName: string; serverName: string;
+    enrollment_token: string; install_command: string;
+  } | null>(null)
   const [deployModal, setDeployModal]       = useState<{ agent: Agent } | null>(null)
   const [metricsFor, setMetricsFor]         = useState<Agent | null>(null)
   const [healthCheckFor, setHealthCheckFor] = useState<Agent | null>(null)
@@ -175,6 +179,21 @@ export default function ServersPage() {
     try { await deploymentApi.deleteDeployment(d.id); show('삭제됨', 'ok'); await load() }
     catch (e) { show((e as Error).message, 'err') }
   }
+  async function addMemberToGroup(g: HaGroup) {
+    // HaServicesPage 의 addServer 와 동일한 동선 — 새 agent 자동 생성 + 그룹 가입.
+    const existing = (g.members || []).length
+    const nm = `${g.name}-${String(existing + 1).padStart(2, '0')}`
+    try {
+      const r = await deploymentApi.createAgent(nm, '')
+      await deploymentApi.approveAgent(r.id)
+      await haGroupsApi.addMember(g.id, { agent_id: r.id, role: 'backup', priority: 90 })
+      setPendingMember({
+        groupName: g.name, serverName: nm,
+        enrollment_token: r.enrollment_token, install_command: r.install_command,
+      })
+      await load()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
 
   if (loading) return <div className="empty">로딩 중...</div>
 
@@ -212,7 +231,8 @@ export default function ServersPage() {
             expanded={expandedGroups}
             onToggleExpand={toggleGroupExpand}
             selection={selection}
-            onSelect={setSelection} />
+            onSelect={setSelection}
+            onAddMember={addMemberToGroup} />
         </div>
         {/* 우측 Inspector */}
         <div style={{
@@ -242,7 +262,8 @@ export default function ServersPage() {
                 try { await haGroupsApi.apply(selectedGroup.id); show(`${selectedGroup.name} 적용 큐잉`, 'ok'); await load() }
                 catch (e) { show((e as Error).message, 'err') }
               }}
-              onReload={load} />
+              onReload={load}
+              onAddMember={addMemberToGroup} />
           ) : (
             <div className="empty" style={{ padding: 40 }}>
               왼쪽 트리에서 서버 또는 HA 그룹을 선택하세요
@@ -253,6 +274,8 @@ export default function ServersPage() {
 
       {systemModalOpen &&
         <SystemCreateModal onClose={() => setSystemModalOpen(false)} onDone={load} />}
+      {pendingMember &&
+        <PendingMemberModal info={pendingMember} onClose={() => setPendingMember(null)} />}
       {deployModal &&
         <DeploymentCreateModal agent={deployModal.agent} packages={packages}
           onClose={() => setDeployModal(null)} onDone={load} />}
@@ -274,7 +297,7 @@ export default function ServersPage() {
 // ──────────────────────────────────────────────────────────────
 
 function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
-                      onToggleExpand, selection, onSelect }: {
+                      onToggleExpand, selection, onSelect, onAddMember }: {
   haGroups: HaGroup[]
   groupedAgents: Map<number, Agent[]>
   depsByAgent: Map<number, Deployment[]>
@@ -282,6 +305,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
   onToggleExpand: (gid: number) => void
   selection: Selection
   onSelect: (s: Selection) => void
+  onAddMember: (g: HaGroup) => void
 }) {
   const standalone = groupedAgents.get(-1) || []
   return (
@@ -293,6 +317,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
         const isSelected = selection?.kind === 'group' && selection.id === g.id
         const modeChip = g.mode === 'active_standby' ? 'A/S' : 'AA'
         const modeColor = g.mode === 'active_standby' ? '#3498db' : '#27ae60'
+        const canAddMember = g.mode === 'all_active'  // AS 는 master/backup 2 fixed
         return (
           <div key={g.id}>
             <div onClick={() => onSelect({ kind: 'group', id: g.id })}
@@ -314,6 +339,15 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                 </span>
               )}
               <span style={{ fontSize: 11, color: '#888' }}>{members.length}</span>
+              {canAddMember && (
+                <button onClick={e => { e.stopPropagation(); onAddMember(g) }}
+                        title="새 멤버 자동 생성 (이름 자동, install_command 발급)"
+                        style={{
+                          border: '1px solid #b8d4f5', background: '#fff', color: '#3498db',
+                          fontSize: 11, padding: '0 6px', borderRadius: 3, cursor: 'pointer',
+                          fontWeight: 600,
+                        }}>+</button>
+              )}
             </div>
             {isOpen && members.map(a => (
               <ServerTreeRow key={a.id} agent={a}
@@ -388,12 +422,13 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
 //  Group Inspector (HA 그룹 선택 시)
 // ──────────────────────────────────────────────────────────────
 
-function GroupInspector({ group, agents, onSelectMember, onApply, onReload }: {
+function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAddMember }: {
   group: HaGroup
   agents: Agent[]
   onSelectMember: (aid: number) => void
   onApply: () => void
   onReload: () => Promise<void>
+  onAddMember: (g: HaGroup) => void
 }) {
   const { show } = useToast()
   const [editName, setEditName]         = useState(group.name)
@@ -407,8 +442,6 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload }: {
   const [editMemberPrio, setEditMemberPrio] = useState<Map<number, number>>(
     new Map(group.members.map(m => [m.agent_id, m.priority]))
   )
-  const [newMemberId, setNewMemberId] = useState<number>(0)
-
   // group prop 이 바뀌면 (다른 group 선택 또는 reload) state 재설정.
   useEffect(() => {
     setEditName(group.name)
@@ -418,14 +451,11 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload }: {
     setEditBindings(group.vip_bindings || [])
     setEditMemberRole(new Map(group.members.map(m => [m.agent_id, m.role])))
     setEditMemberPrio(new Map(group.members.map(m => [m.agent_id, m.priority])))
-    setNewMemberId(0)
   }, [group.id, group.update_time])
 
   const memberAgents = group.members.map(m => ({
     ...m, agent: agents.find(a => a.id === m.agent_id)
   }))
-  const availableForMember = agents.filter(a =>
-    !group.members.find(m => m.agent_id === a.id) && a.status !== 'pending')
 
   // dirty 검출 — 적용 버튼 활성/비활성용
   const dirty = editName !== group.name
@@ -455,13 +485,6 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload }: {
       }
       show('저장됨', 'ok')
       await onReload()
-    } catch (e) { show((e as Error).message, 'err') }
-  }
-  async function addMember() {
-    if (!newMemberId) return
-    try {
-      await haGroupsApi.addMember(group.id, { agent_id: newMemberId, role: 'backup', priority: 90 })
-      show('멤버 추가됨', 'ok'); await onReload(); setNewMemberId(0)
     } catch (e) { show((e as Error).message, 'err') }
   }
   async function removeMember(aid: number) {
@@ -521,18 +544,13 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload }: {
         {/* 멤버 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>멤버 ({memberAgents.length})</div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-            <select value={newMemberId} onChange={e => setNewMemberId(Number(e.target.value))}
-                    className="form-input" style={{ width: 200, fontSize: 12 }}>
-              <option value={0}>(추가할 서버 선택)</option>
-              {availableForMember.map(a =>
-                <option key={a.id} value={a.id}>{a.name} — {a.ip_address}</option>
-              )}
-            </select>
-            <button className="btn btn--sm" onClick={addMember} disabled={!newMemberId}>
-              + 추가
+          {group.mode === 'all_active' && (
+            <button className="btn btn--sm" onClick={() => onAddMember(group)}
+                    style={{ marginLeft: 'auto' }}
+                    title="새 멤버 자동 생성 (이름 자동, install_command 발급)">
+              + 멤버 추가
             </button>
-          </div>
+          )}
         </div>
         <table className="data-table" style={{ margin: 0, fontSize: 13 }}>
           <thead>
@@ -976,6 +994,42 @@ function Field({ label, value }: { label: string; value: string }) {
 // ──────────────────────────────────────────────────────────────
 //  Modals
 // ──────────────────────────────────────────────────────────────
+
+function PendingMemberModal({ info, onClose }: {
+  info: { groupName: string; serverName: string; enrollment_token: string; install_command: string }
+  onClose: () => void
+}) {
+  const { show } = useToast()
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(info.install_command)
+      setCopied(true); setTimeout(() => setCopied(false), 1500)
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  return (
+    <Modal title={`${info.groupName} — 새 멤버 추가됨`} onClose={onClose} width={640}>
+      <div style={{ color: '#2ecc71', marginBottom: 10 }}>
+        ✓ <b>{info.serverName}</b> 그룹 멤버로 등록됨. 다음 명령을 대상 서버에서 실행:
+      </div>
+      <div style={{ position: 'relative' }}>
+        <pre style={{
+          background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
+          borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
+        }}>{info.install_command}</pre>
+        <button className="btn btn--sm btn--outline"
+          style={{ position: 'absolute', top: 8, right: 8 }}
+          onClick={copy}>{copied ? '✓' : '📋'} 복사</button>
+      </div>
+      <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
+        token: <code>{info.enrollment_token}</code>
+      </div>
+      <div className="modal-footer" style={{ marginTop: 16 }}>
+        <button className="btn btn--primary" onClick={onClose}>닫기</button>
+      </div>
+    </Modal>
+  )
+}
 
 type SystemMode = 'active_standby' | 'all_active' | 'standalone'
 
