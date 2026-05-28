@@ -392,7 +392,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
             {isOpen && members.map(a => (
               <ServerTreeRow key={a.id} agent={a}
                 depCount={(depsByAgent.get(a.id) || []).length}
-                role={a.ha_group?.role}
+                role={g.mode === 'active_standby' ? a.ha_group?.role : undefined}
                 active={selection?.kind === 'agent' && selection.id === a.id}
                 indent
                 onClick={() => onSelect({ kind: 'agent', id: a.id })} />
@@ -454,7 +454,7 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
         <span style={{
           fontSize: 9, padding: '1px 4px', borderRadius: 3, fontWeight: 600,
           background: role === 'master' ? '#e74c3c' : '#95a5a6', color: '#fff',
-        }}>{role === 'master' ? 'M' : 'B'}</span>
+        }}>{role === 'master' ? 'Active' : 'Standby'}</span>
       )}
       <span style={{ fontSize: 10, color: '#888' }}>{depCount}m</span>
     </div>
@@ -685,14 +685,17 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
         </div>
         <table className="data-table" style={{ margin: 0, fontSize: 13 }}>
           <thead>
-            <tr><th>이름</th><th>role</th><th style={{ width: 80 }}>priority</th>
+            <tr><th>이름</th>
+                {group.mode === 'active_standby' && <th>role</th>}
+                <th style={{ width: 80 }}>priority</th>
                 <th>상태</th><th>IP</th><th>v</th><th style={{ width: 40 }}></th></tr>
           </thead>
           <tbody>
             {memberAgents.map(m => {
               const a = m.agent
+              const colCount = group.mode === 'active_standby' ? 7 : 6
               if (!a) return (
-                <tr key={m.agent_id}><td colSpan={7}>(agent #{m.agent_id} not found)</td></tr>
+                <tr key={m.agent_id}><td colSpan={colCount}>(agent #{m.agent_id} not found)</td></tr>
               )
               const sc = agentStatusColor(a.status)
               const role = editMemberRole.get(a.id) || m.role
@@ -702,18 +705,20 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
                   <td onClick={() => onSelectMember(a.id)} style={{ cursor: 'pointer' }}>
                     <b>{agentDisplayName(a.name)}</b>
                   </td>
-                  <td>
-                    <select value={role}
-                            onChange={e => {
-                              const next = new Map(editMemberRole)
-                              next.set(a.id, e.target.value as HaRole)
-                              setEditMemberRole(next)
-                            }}
-                            className="form-input" style={{ fontSize: 11, padding: 2 }}>
-                      <option value="master">master</option>
-                      <option value="backup">backup</option>
-                    </select>
-                  </td>
+                  {group.mode === 'active_standby' && (
+                    <td>
+                      <select value={role}
+                              onChange={e => {
+                                const next = new Map(editMemberRole)
+                                next.set(a.id, e.target.value as HaRole)
+                                setEditMemberRole(next)
+                              }}
+                              className="form-input" style={{ fontSize: 11, padding: 2 }}>
+                        <option value="master">Active</option>
+                        <option value="backup">Standby</option>
+                      </select>
+                    </td>
+                  )}
                   <td>
                     <input type="number" value={prio} min={1} max={254}
                            onChange={e => {
