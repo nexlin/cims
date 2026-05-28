@@ -47,7 +47,6 @@ export default function ServersPage() {
   const [metricsFor, setMetricsFor]         = useState<Agent | null>(null)
   const [healthCheckFor, setHealthCheckFor] = useState<Agent | null>(null)
   const [configFor, setConfigFor]           = useState<Deployment | null>(null)
-  const [installCmdFor, setInstallCmdFor]   = useState<Agent | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -251,7 +250,6 @@ export default function ServersPage() {
               onRemove={removeAgent}
               onUpgrade={upgradeAgent}
               onRestart={restartAgent}
-              onInstallCmd={setInstallCmdFor}
               onMetrics={setMetricsFor}
               onHealthCheck={setHealthCheckFor}
               onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
@@ -299,8 +297,6 @@ export default function ServersPage() {
         <MetricsModal agent={metricsFor} onClose={() => setMetricsFor(null)} />}
       {healthCheckFor &&
         <HealthCheckModal agent={healthCheckFor} onClose={() => setHealthCheckFor(null)} />}
-      {installCmdFor &&
-        <InstallCmdModal agent={installCmdFor} onClose={() => setInstallCmdFor(null)} />}
       {configFor &&
         <ModuleConfigModal source={{ type: 'deployment', deployment: configFor }}
           onClose={() => setConfigFor(null)} onDone={load} />}
@@ -708,7 +704,7 @@ function StatChip({ label, value, sub, color }:
 type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
 function ServerInspector({ agent: a, deployments, packages,
-                          onApprove, onRevoke, onRemove, onUpgrade, onRestart, onInstallCmd, onMetrics, onHealthCheck,
+                          onApprove, onRevoke, onRemove, onUpgrade, onRestart, onMetrics, onHealthCheck,
                           onAddDeploy, onConfigure, onJob, onRemoveDep }: {
   agent: Agent
   deployments: Deployment[]
@@ -718,7 +714,6 @@ function ServerInspector({ agent: a, deployments, packages,
   onRemove: (a: Agent) => void
   onUpgrade: (a: Agent) => void
   onRestart: (a: Agent) => void
-  onInstallCmd: (a: Agent) => void
   onMetrics: (a: Agent) => void
   onHealthCheck: (a: Agent) => void
   onAddDeploy: () => void
@@ -726,14 +721,20 @@ function ServerInspector({ agent: a, deployments, packages,
   onJob: (d: Deployment, jt: JobType) => void
   onRemoveDep: (d: Deployment) => void
 }) {
-  // pending 또는 enrollment_token 발급된 상태 (token 유효 여부 무관) — 설치 안내 노출.
+  // pending 또는 enrollment_token 발급된 상태 — 설치 안내 default 펼침.
+  // 그 외 (online/offline) 도 accordion 으로 항상 접근 가능 — 재설치 / 토큰 재발급 시나리오.
   const hasPendingInstall = a.status === 'pending' || a.has_pending_enrollment
-  // accordion 의 펼침 상태 — default 모두 펼침. pending 인 경우 설치 안내도 자동 펼침.
   const [openSections, setOpenSections] = useState<Set<InspectorTab>>(() => {
     const init = new Set<InspectorTab>(['info', 'network', 'modules'])
     if (hasPendingInstall) init.add('install')
     return init
   })
+  // 헤더 [🔄 재설치] 클릭 시 InstallSection 자동 펼침 + 즉시 token 재발급.
+  const [autoRegenSignal, setAutoRegenSignal] = useState(0)
+  function onClickReinstall() {
+    setOpenSections(prev => new Set(prev).add('install'))
+    setAutoRegenSignal(s => s + 1)
+  }
   const toggleSection = (s: InspectorTab) => {
     setOpenSections(prev => {
       const next = new Set(prev)
@@ -781,12 +782,10 @@ function ServerInspector({ agent: a, deployments, packages,
                   disabled={a.status !== 'online'} title="agent 바이너리를 최신 버전으로 교체">
                   ↑ 업그레이드
                 </button>
-                {a.status === 'offline' && (
-                  <button className="btn btn--sm btn--primary" onClick={() => onInstallCmd(a)}
-                    title="ssh 1회로 부활 + systemd 자동 부활 설정">
-                    📋 복구 명령
-                  </button>
-                )}
+                <button className="btn btn--sm" onClick={onClickReinstall}
+                  title="물리 서버 교체 / 신규 install — 새 enrollment_token 발급 + InstallSection 펼침">
+                  🔄 재설치
+                </button>
                 <button className="btn btn--sm btn--outline" onClick={() => onRevoke(a)}>폐기</button>
               </>
             )}
@@ -797,13 +796,13 @@ function ServerInspector({ agent: a, deployments, packages,
 
       {/* 섹션 stack — accordion (default 모두 펼침, 개별 토글) */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {hasPendingInstall && (
-          <InspectorSection title={`설치 안내 — ${a.name}`}
-                            expanded={openSections.has('install')}
-                            onToggle={() => toggleSection('install')}>
-            <InstallSection agent={a} />
-          </InspectorSection>
-        )}
+        <InspectorSection title={hasPendingInstall
+                                  ? `설치 안내 — ${a.name}`
+                                  : `재설치 / 토큰 재발급 — ${a.name}`}
+                          expanded={openSections.has('install')}
+                          onToggle={() => toggleSection('install')}>
+          <InstallSection agent={a} autoRegenSignal={autoRegenSignal} />
+        </InspectorSection>
         <InspectorSection title="정보" expanded={openSections.has('info')}
                           onToggle={() => toggleSection('info')}>
           <InfoTab agent={a} />
@@ -990,7 +989,10 @@ function NetworkTab({ agent: a }: { agent: Agent }) {
   )
 }
 
-function InstallSection({ agent: a }: { agent: Agent }) {
+function InstallSection({ agent: a, autoRegenSignal }: {
+  agent: Agent
+  autoRegenSignal?: number  // 부모가 increment 시 재발급 자동 호출 (헤더 [🔄 재설치] 트리거)
+}) {
   const { show } = useToast()
   const [data, setData] = useState<{ install_command: string; enrollment_token_expires_at?: string } | null>(null)
   const [err, setErr] = useState('')
@@ -1021,7 +1023,7 @@ function InstallSection({ agent: a }: { agent: Agent }) {
       setCopied(true); setTimeout(() => setCopied(false), 1500)
     } catch (e) { show((e as Error).message, 'err') }
   }
-  async function regenerate() {
+  const regenerate = useCallback(async () => {
     setRegenerating(true)
     try {
       const r = await deploymentApi.regenerateToken(a.id)
@@ -1032,7 +1034,12 @@ function InstallSection({ agent: a }: { agent: Agent }) {
       show('token 재발급됨', 'ok')
     } catch (e) { show((e as Error).message, 'err') }
     finally { setRegenerating(false) }
-  }
+  }, [a.id, show])
+  // 부모 (헤더 [🔄 재설치]) 가 autoRegenSignal 증가시키면 자동 재발급.
+  useEffect(() => {
+    if (autoRegenSignal && autoRegenSignal > 0) void regenerate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRegenSignal])
 
   // 만료 시간 카운트다운 — 분 단위. 음수면 expired.
   const expiresAt = data?.enrollment_token_expires_at
@@ -1490,65 +1497,6 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
     </Modal>
   )
 }
-
-function InstallCmdModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
-  const { show } = useToast()
-  const [data, setData] = useState<{ install_command: string; enrollment_token_expires_at?: string } | null>(null)
-  const [err, setErr]   = useState<string>('')
-  const [copied, setCopied] = useState(false)
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await deploymentApi.getInstallCommand(agent.id)
-        setData(r)
-      } catch (e) { setErr((e as Error).message) }
-    })()
-  }, [agent.id])
-
-  async function copy() {
-    if (!data) return
-    try {
-      await navigator.clipboard.writeText(data.install_command)
-      setCopied(true); setTimeout(() => setCopied(false), 1500)
-    } catch (e) { show((e as Error).message, 'err') }
-  }
-
-  return (
-    <Modal title={`${agent.name} — 재설치 명령`} onClose={onClose} width={640}>
-      {err && <div style={{ color: '#e74c3c', marginBottom: 8 }}>※ {err}</div>}
-      {!data && !err && <div className="empty">불러오는 중...</div>}
-      {data && (
-        <>
-          <div style={{ fontSize: 13, color: '#444', marginBottom: 6 }}>
-            ssh 1회로 install — systemd --user + linger 자동 (die 시 자동 재기동 + host 재기동 시 자동 기동)
-          </div>
-          <div style={{ position: 'relative' }}>
-            <pre style={{
-              background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
-              borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
-            }}>{data.install_command}</pre>
-            <button className="btn btn--sm btn--outline"
-              style={{ position: 'absolute', top: 8, right: 8 }}
-              onClick={copy}>{copied ? '✓' : '📋'} 복사</button>
-          </div>
-          <div style={{ fontSize: 12, color: '#666', marginTop: 6 }}>
-            실행 후 <code>./init.sh</code> 로 sudoers + enrollment + systemd unit 일괄 설정 (sudo 비번 1회).
-          </div>
-          {data.enrollment_token_expires_at && (
-            <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
-              token expires: {data.enrollment_token_expires_at}
-            </div>
-          )}
-        </>
-      )}
-      <div className="modal-footer" style={{ marginTop: 16 }}>
-        <button className="btn btn--primary" onClick={onClose}>닫기</button>
-      </div>
-    </Modal>
-  )
-}
-
 
 function MetricsModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const { show } = useToast()
