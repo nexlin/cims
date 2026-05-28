@@ -178,6 +178,22 @@ export default function ServersPage() {
     try { await deploymentApi.deleteDeployment(d.id); show('삭제됨', 'ok'); await load() }
     catch (e) { show((e as Error).message, 'err') }
   }
+  async function deleteSystem(g: HaGroup) {
+    const memberNames = g.members.map(m => m.agent_name || `#${m.agent_id}`).join(', ')
+    if (!confirm(`시스템 "${g.name}" 을 삭제합니다.\n\n  · HA 그룹 (mode=${g.mode}, vrid=${g.vrid}) 제거\n  · 멤버 ${g.members.length} 개 삭제: ${memberNames || '(없음)'}\n\n계속할까요?`)) return
+    try {
+      // 1) 모든 멤버 agent 삭제 (관련 deployment 도 cascade)
+      for (const m of g.members) {
+        try { await deploymentApi.deleteAgent(m.agent_id) }
+        catch (e) { console.warn(`agent ${m.agent_id} 삭제 실패:`, e) }
+      }
+      // 2) HA 그룹 자체 삭제
+      await haGroupsApi.delete(g.id)
+      show(`시스템 "${g.name}" 삭제됨`, 'ok')
+      setSelection(null)
+      await load()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
   async function addMemberToGroup(g: HaGroup) {
     // HaServicesPage 의 addServer 와 동일한 동선 — 새 agent 자동 생성 + 그룹 가입.
     const existing = (g.members || []).length
@@ -264,7 +280,8 @@ export default function ServersPage() {
                 catch (e) { show((e as Error).message, 'err') }
               }}
               onReload={load}
-              onAddMember={addMemberToGroup} />
+              onAddMember={addMemberToGroup}
+              onDeleteSystem={deleteSystem} />
           ) : (
             <div className="empty" style={{ padding: 40 }}>
               왼쪽 트리에서 서버 또는 HA 그룹을 선택하세요
@@ -434,13 +451,14 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
 //  Group Inspector (HA 그룹 선택 시)
 // ──────────────────────────────────────────────────────────────
 
-function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAddMember }: {
+function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAddMember, onDeleteSystem }: {
   group: HaGroup
   agents: Agent[]
   onSelectMember: (aid: number) => void
   onApply: () => void
   onReload: () => Promise<void>
   onAddMember: (g: HaGroup) => void
+  onDeleteSystem: (g: HaGroup) => void
 }) {
   const { show } = useToast()
   const [editName, setEditName]         = useState(group.name)
@@ -540,6 +558,10 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
                     title="멤버들에게 update_ha job 큐잉 (ha.json + cims-ha apply)">
               ▶ 적용
             </button>
+            <button className="btn btn--sm btn--danger" onClick={() => onDeleteSystem(group)}
+                    title="HA 그룹 + 모든 멤버 일괄 삭제">
+              🗑 시스템 삭제
+            </button>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, fontSize: 12 }}>
@@ -613,6 +635,10 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
                   <td>
                     <button className="btn btn--sm btn--danger"
                             style={{ fontSize: 10, padding: '1px 5px' }}
+                            disabled={group.mode === 'active_standby'}
+                            title={group.mode === 'active_standby'
+                              ? 'A/S 멤버 (master/backup) 는 단독 제거 불가 — 그룹 삭제 사용'
+                              : '그룹에서 멤버 제거 (agent 자체는 standalone 유지)'}
                             onClick={() => removeMember(a.id)}>×</button>
                   </td>
                 </tr>
@@ -789,7 +815,13 @@ function ServerInspector({ agent: a, deployments, packages,
                 <button className="btn btn--sm btn--outline" onClick={() => onRevoke(a)}>폐기</button>
               </>
             )}
-            <button className="btn btn--sm btn--danger" onClick={() => onRemove(a)}>삭제</button>
+            <button className="btn btn--sm btn--danger" onClick={() => onRemove(a)}
+                    disabled={a.ha_group?.mode === 'active_standby'}
+                    title={a.ha_group?.mode === 'active_standby'
+                      ? 'A/S 그룹의 멤버는 단독 삭제 불가 — 그룹 삭제 또는 [폐기]+[🔄 재설치] 사용'
+                      : '서버 삭제 (관련 deployment 도 같이 제거)'}>
+              삭제
+            </button>
           </div>
         </div>
       </div>
