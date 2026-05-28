@@ -500,7 +500,10 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
   async function saveMeta() {
     try {
       await haGroupsApi.update(group.id, {
-        name: editName, mode: editMode, auth_pass: editAuthPass, note: editNote,
+        name: editName, mode: editMode,
+        // auth_pass — active_standby 만 VRRP 인증에 사용. AA 는 빈값 (record 에 garbage 안 남김).
+        auth_pass: editMode === 'active_standby' ? editAuthPass : '',
+        note: editNote,
         vip_bindings: editBindings,
       })
       // 멤버별 role/priority 패치 — addMember 가 upsert 역할 (옛 멤버 갱신 시 동일 endpoint 사용 가정)
@@ -565,10 +568,16 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, fontSize: 12 }}>
-          <label style={{ color: '#666' }}>auth_pass:</label>
-          <input type="password" className="form-input" value={editAuthPass}
-                 onChange={e => setEditAuthPass(e.target.value)}
-                 style={{ width: 140 }} />
+          {editMode === 'active_standby' && (
+            <>
+              <label style={{ color: '#666' }}>auth_pass:</label>
+              <input type="password" className="form-input" value={editAuthPass}
+                     onChange={e => setEditAuthPass(e.target.value)}
+                     maxLength={8}
+                     style={{ width: 140 }}
+                     title="VRRP 인증 (active_standby 만 사용, 최대 8글자)" />
+            </>
+          )}
           <label style={{ color: '#666' }}>note:</label>
           <input className="form-input" value={editNote} onChange={e => setEditNote(e.target.value)}
                  style={{ flex: 1 }} />
@@ -1199,7 +1208,7 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
   const { show } = useToast()
   const [name, setName] = useState('')
   const [mode, setMode] = useState<SystemMode>('active_standby')
-  const [authPass, setAuthPass] = useState('00000000')
+  const [authPass, setAuthPass] = useState('00000000')  // active_standby 만 사용 (VRRP)
   const [creating, setCreating] = useState(false)
   // 생성 결과 — Standalone 1건, AS 2건, AA 0건 (이후 그룹에서 추가)
   const [results, setResults] = useState<Array<{ name: string; enrollment_token: string; install_command: string }> | null>(null)
@@ -1231,7 +1240,8 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
           mode,
           vip: '',
           vip_mask: 24,
-          auth_pass: authPass,
+          // auth_pass — active_standby 만 의미 (VRRP 인증). all_active 는 keepalived 미사용이라 빈값.
+          auth_pass: mode === 'active_standby' ? authPass : '',
           members: memberAgents.map((m, i) => ({
             agent_id: m.id,
             role: (i === 0 && mode === 'active_standby' ? 'master' : 'backup'),
@@ -1276,11 +1286,12 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
             <option value="all_active">AA — All Active (다중화, 그룹만 생성 + 이후 멤버 추가)</option>
             <option value="standalone">Standalone — 단일 서버 (HA 그룹 없음)</option>
           </select>
-          {mode !== 'standalone' && (
+          {mode === 'active_standby' && (
             <>
-              <label>auth_pass</label>
+              <label>auth_pass *</label>
               <input className="form-input" value={authPass} type="password"
-                onChange={e => setAuthPass(e.target.value)} disabled={creating} />
+                onChange={e => setAuthPass(e.target.value)} disabled={creating}
+                placeholder="최대 8글자 — VRRP 인증" maxLength={8} />
             </>
           )}
           <label style={{ gridColumn: '1 / -1', fontSize: 12, color: '#888', marginTop: 4 }}>

@@ -370,8 +370,14 @@ async def _create_group(body, config):
         return HandlerResult(status=400, body={'error': 'name required'})
     if mode not in ('active_standby', 'all_active'):
         return HandlerResult(status=400, body={'error': 'mode must be active_standby or all_active'})
-    if not auth_pass or len(auth_pass) > 8:
-        return HandlerResult(status=400, body={'error': 'auth_pass required (max 8 chars)'})
+    # auth_pass — VRRP 인증. active_standby (단일 VIP master/backup) 에서만 필수.
+    # all_active 는 VIP 없는 multi-active 시나리오 가정 → 빈 값 허용 (vip_bindings 추가 시점에 갱신).
+    if mode == 'active_standby':
+        if not auth_pass or len(auth_pass) > 8:
+            return HandlerResult(status=400, body={'error': 'auth_pass required for active_standby (max 8 chars)'})
+    else:
+        if len(auth_pass) > 8:
+            return HandlerResult(status=400, body={'error': 'auth_pass max 8 chars'})
     if mode == 'active_standby' and len(members_in) not in (0, 2):
         return HandlerResult(status=400,
                              body={'error': 'active_standby requires exactly 2 members (or 0 for late add)'})
@@ -410,11 +416,20 @@ async def _update_group(gid: int, body, config):
     if not existing:
         return HandlerResult(status=404, body={'error': 'Group not found'})
 
-    for k in ('name', 'vip', 'auth_pass', 'note'):
+    for k in ('name', 'vip', 'auth_pass', 'note', 'mode'):
         if k in body:
             existing[k] = body[k]
     if 'vip_mask' in body:
         existing['vip_mask'] = int(body['vip_mask'])
+    # auth_pass — active_standby 만 1~8자 required, 그 외 mode 는 (빈값 포함) 8자 이하 OK.
+    mode_eff = existing.get('mode')
+    auth_eff = existing.get('auth_pass') or ''
+    if mode_eff == 'active_standby':
+        if not auth_eff or len(auth_eff) > 8:
+            return HandlerResult(status=400, body={'error': 'auth_pass required for active_standby (max 8 chars)'})
+    else:
+        if len(auth_eff) > 8:
+            return HandlerResult(status=400, body={'error': 'auth_pass max 8 chars'})
     if 'vip_bindings' in body:
         v = body.get('vip_bindings')
         existing['vip_bindings'] = v if isinstance(v, list) else []
