@@ -451,10 +451,11 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick }: {
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar }} />
       <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{agentDisplayName(a.name)}</span>
       {role && (
-        <span style={{
-          fontSize: 9, padding: '1px 4px', borderRadius: 3, fontWeight: 600,
-          background: role === 'master' ? '#e74c3c' : '#95a5a6', color: '#fff',
-        }}>{role === 'master' ? 'Active' : 'Standby'}</span>
+        <span title={role === 'master' ? 'Active' : 'Standby'}
+              style={{
+                fontSize: 10, padding: '1px 5px', borderRadius: 3, fontWeight: 600,
+                background: role === 'master' ? '#e74c3c' : '#95a5a6', color: '#fff',
+              }}>{role === 'master' ? 'A' : 'S'}</span>
       )}
       <span style={{ fontSize: 10, color: '#888' }}>{depCount}m</span>
     </div>
