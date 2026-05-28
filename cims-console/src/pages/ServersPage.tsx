@@ -6,6 +6,7 @@ import {
 } from '../api/deployment'
 import { haGroupsApi, type HaGroup, type HaRole, type VipBinding } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
+import { splitPrefixHost } from './ha/helpers'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
@@ -536,12 +537,8 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     } catch (e) { show((e as Error).message, 'err') }
   }
 
-  function addBinding() {
-    const newBid = Math.max(0, ...editBindings.map(b => b.bid)) + 1
-    setEditBindings([...editBindings, {
-      bid: newBid, slot: '', ip: '', mask: 24, status: 'unknown', memberIfaces: {},
-    }])
-  }
+  // VIP 행 편집 모드 — bid 또는 'new' (새 binding 추가 중). null = 모두 readonly.
+  const [bindingEditMode, setBindingEditMode] = useState<number | 'new' | null>(null)
   function updateBinding(bid: number, patch: Partial<VipBinding>) {
     setEditBindings(editBindings.map(b => b.bid === bid ? { ...b, ...patch } : b))
   }
@@ -551,6 +548,81 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     const desc = `${b.slot || '(slot 미지정)'} — ${b.ip || '(IP 미입력)'}${b.mask ? `/${b.mask}` : ''}`
     if (!confirm(`VIP binding 을 제거할까요?\n  ${desc}\n\n저장하기 전 까지는 적용되지 않습니다.`)) return
     setEditBindings(editBindings.filter(x => x.bid !== bid))
+    if (bindingEditMode === bid) setBindingEditMode(null)
+  }
+  // 멤버들의 service_ip_rows 에서 slot 매핑 추출. slot → (agentId → {iface, ip, mask}).
+  const slotMap = (() => {
+    const m = new Map<string, Map<number, { iface: string; ip: string; mask: number }>>()
+    for (const memberAg of memberAgents) {
+      const ag = memberAg.agent
+      if (!ag) continue
+      for (const r of (ag.service_ip_rows || [])) {
+        if (!r.slot) continue
+        if (!m.has(r.slot)) m.set(r.slot, new Map())
+        m.get(r.slot)!.set(ag.id, { iface: r.iface, ip: r.ip, mask: r.mask })
+      }
+    }
+    return m
+  })()
+  const availableSlots = Array.from(slotMap.keys()).sort()
+  // slot 의 subnet 정합 — 모든 멤버 IP 의 prefix/mask 동일하면 prefix 반환.
+  function slotSubnetInfo(slot: string): { prefix: string | null; mask: number; conflict: boolean; conflictDetail: string } {
+    const m = slotMap.get(slot)
+    if (!m || m.size === 0) return { prefix: null, mask: 24, conflict: false, conflictDetail: '' }
+    const entries = Array.from(m.values())
+    const first = splitPrefixHost(entries[0].ip, entries[0].mask)
+    if (!first) return { prefix: null, mask: entries[0].mask, conflict: true,
+                         conflictDetail: `비표준 mask=${entries[0].mask}` }
+    for (const e of entries.slice(1)) {
+      const p = splitPrefixHost(e.ip, e.mask)
+      if (!p || p.prefix !== first.prefix || e.mask !== entries[0].mask) {
+        return { prefix: first.prefix, mask: entries[0].mask, conflict: true,
+                 conflictDetail: `${entries[0].ip}/${entries[0].mask} ≠ ${e.ip}/${e.mask}` }
+      }
+    }
+    return { prefix: first.prefix, mask: entries[0].mask, conflict: false, conflictDetail: '' }
+  }
+  function autoMemberIfaces(slot: string): { [id: number]: string } {
+    const result: { [id: number]: string } = {}
+    const m = slotMap.get(slot)
+    if (m) for (const [aid, info] of m) result[aid] = info.iface
+    return result
+  }
+  function beginAddBinding() {
+    const newBid = Math.max(0, ...editBindings.map(b => b.bid)) + 1
+    const defaultSlot = availableSlots[0] || ''
+    const info = defaultSlot ? slotSubnetInfo(defaultSlot) : { prefix: null, mask: 24, conflict: false }
+    setEditBindings([...editBindings, {
+      bid: newBid, slot: defaultSlot,
+      ip: info.prefix || '',
+      mask: info.mask,
+      status: 'unknown',
+      memberIfaces: defaultSlot ? autoMemberIfaces(defaultSlot) : {},
+    }])
+    setBindingEditMode(newBid)
+  }
+  // slot 변경 시 prefix/mask/memberIfaces 자동 갱신, host 보존 시도.
+  function changeBindingSlot(bid: number, newSlot: string) {
+    const info = slotSubnetInfo(newSlot)
+    const b = editBindings.find(x => x.bid === bid)
+    if (!b) return
+    const oldHost = splitPrefixHost(b.ip, b.mask)?.host || ''
+    updateBinding(bid, {
+      slot: newSlot,
+      ip:   info.prefix ? info.prefix + oldHost : '',
+      mask: info.mask,
+      memberIfaces: autoMemberIfaces(newSlot),
+    })
+  }
+  function changeBindingHost(bid: number, newHost: string) {
+    const b = editBindings.find(x => x.bid === bid)
+    if (!b) return
+    const info = b.slot ? slotSubnetInfo(b.slot) : { prefix: null, mask: b.mask }
+    if (!info.prefix) {
+      updateBinding(bid, { ip: newHost })  // fallback — slot 없으면 raw 그대로
+      return
+    }
+    updateBinding(bid, { ip: info.prefix + newHost })
   }
 
   return (
@@ -672,57 +744,104 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
         {/* VIP Bindings */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>VIP Bindings ({editBindings.length})</div>
-          <button className="btn btn--sm" onClick={addBinding} style={{ marginLeft: 'auto' }}>
+          <button className="btn btn--sm" onClick={beginAddBinding}
+                  style={{ marginLeft: 'auto' }}
+                  disabled={availableSlots.length === 0 || bindingEditMode !== null}
+                  title={availableSlots.length === 0
+                    ? '먼저 멤버 서버의 [네트워크] 탭에서 IP 의 용도를 입력하세요'
+                    : '새 VIP 행 추가 (편집 모드)'}>
             + VIP 추가
           </button>
         </div>
         {editBindings.length === 0 ? (
           <div className="empty" style={{ padding: 12, fontSize: 12, color: '#888' }}>
             VIP 없음 — all_active 그룹은 비워둬도 됨 (keepalived 안 깔림). active_standby 는 1개 이상 권장.
+            {availableSlots.length === 0 && (
+              <div style={{ marginTop: 6, color: '#e67e22' }}>
+                ⚠ 멤버 서버에 용도(service IP) 가 없습니다 — 멤버의 [네트워크] 탭에서 IP 별 용도 입력 필요.
+              </div>
+            )}
           </div>
         ) : (
           <table className="data-table" style={{ margin: 0, fontSize: 12 }}>
             <thead>
-              <tr><th>slot</th><th>IP</th><th>mask</th><th>멤버 iface (auto)</th>
-                  <th style={{ width: 40 }}></th></tr>
+              <tr><th>용도</th><th>VIP (네트워크 + host)</th><th>mask</th>
+                  <th>멤버 iface</th><th style={{ width: 100 }}>액션</th></tr>
             </thead>
             <tbody>
-              {editBindings.map(b => (
-                <tr key={b.bid}>
-                  <td>
-                    <input className="form-input" value={b.slot}
-                           onChange={e => updateBinding(b.bid, { slot: e.target.value })}
-                           placeholder="서비스"
-                           style={{ width: 100, fontSize: 11, padding: 2 }} />
-                  </td>
-                  <td>
-                    <input className="form-input" value={b.ip}
-                           onChange={e => updateBinding(b.bid, { ip: e.target.value })}
-                           placeholder="121.x.y.z"
-                           style={{ width: 140, fontSize: 11, padding: 2 }} />
-                  </td>
-                  <td>
-                    <input type="number" value={b.mask || 24} min={8} max={32}
-                           onChange={e => updateBinding(b.bid, { mask: Number(e.target.value) })}
-                           className="form-input" style={{ width: 50, fontSize: 11, padding: 2 }} />
-                  </td>
-                  <td style={{ fontSize: 11, color: '#666' }}>
-                    {Object.entries(b.memberIfaces || {})
-                      .map(([sid, iface]) => `#${sid}:${iface}`).join(', ') || '(서비스 IP slot 매핑 후 자동)'}
-                  </td>
-                  <td>
-                    <button className="btn btn--sm btn--danger"
-                            style={{ fontSize: 10, padding: '1px 5px' }}
-                            onClick={() => removeBinding(b.bid)}>×</button>
-                  </td>
-                </tr>
-              ))}
+              {editBindings.map(b => {
+                const isEditing = bindingEditMode === b.bid
+                const info = b.slot ? slotSubnetInfo(b.slot) : null
+                const host = splitPrefixHost(b.ip, b.mask)?.host ?? ''
+                const ifaceStr = Object.entries(b.memberIfaces || {})
+                  .map(([sid, iface]) => `#${sid}:${iface}`).join(', ') || '—'
+                if (!isEditing) {
+                  return (
+                    <tr key={b.bid}>
+                      <td><b>{b.slot || '(미지정)'}</b></td>
+                      <td style={{ fontFamily: 'monospace' }}>{b.ip || '—'}</td>
+                      <td>/{b.mask || 24}</td>
+                      <td style={{ fontSize: 11, color: '#666' }}>{ifaceStr}</td>
+                      <td>
+                        <button className="btn btn--sm" style={{ fontSize: 10, padding: '1px 5px' }}
+                                disabled={bindingEditMode !== null}
+                                onClick={() => setBindingEditMode(b.bid)}>✎ 수정</button>
+                        <button className="btn btn--sm btn--danger"
+                                style={{ fontSize: 10, padding: '1px 5px', marginLeft: 4 }}
+                                disabled={bindingEditMode !== null}
+                                onClick={() => removeBinding(b.bid)}>×</button>
+                      </td>
+                    </tr>
+                  )
+                }
+                // edit mode
+                return (
+                  <tr key={b.bid} style={{ background: '#fff8e1' }}>
+                    <td>
+                      <select className="form-input" value={b.slot}
+                              onChange={e => changeBindingSlot(b.bid, e.target.value)}
+                              style={{ width: 110, fontSize: 11, padding: 2 }}>
+                        <option value="">(용도 선택)</option>
+                        {availableSlots.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      {info?.prefix ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ fontFamily: 'monospace', color: '#666' }}>{info.prefix}</span>
+                          <input className="form-input" value={host}
+                                 onChange={e => changeBindingHost(b.bid, e.target.value)}
+                                 placeholder="host"
+                                 style={{ width: 60, fontSize: 11, padding: 2,
+                                          fontFamily: 'monospace' }} />
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: '#e67e22' }}>
+                          {b.slot ? (info?.conflictDetail || '용도의 멤버 IP 가 같은 네트워크 아님')
+                                  : '(용도 선택 필요)'}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ fontFamily: 'monospace' }}>/{b.mask || 24}</td>
+                    <td style={{ fontSize: 11, color: '#666' }}>{ifaceStr}</td>
+                    <td>
+                      <button className="btn btn--sm btn--primary"
+                              style={{ fontSize: 10, padding: '1px 5px' }}
+                              disabled={!b.slot || !host || !info?.prefix}
+                              onClick={() => setBindingEditMode(null)}>저장</button>
+                      <button className="btn btn--sm btn--danger"
+                              style={{ fontSize: 10, padding: '1px 5px', marginLeft: 4 }}
+                              onClick={() => removeBinding(b.bid)}>×</button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
         <div style={{ fontSize: 11, color: '#888', marginTop: 8 }}>
-          멤버 iface 자동매핑 / subnet 정합 검증 / 멤버별 서비스 IP slot 편집 →{' '}
-          <Link to={`/deploy/services?group=${group.id}`}>📋 상세 편집</Link>
+          VIP 의 네트워크/마스크 는 멤버의 용도(service IP) 에서 자동 매핑 — host (마지막 옥텟) 만 입력.
+          상세 (수동 IP 입력) → <Link to={`/deploy/services?group=${group.id}`}>📋 상세 편집</Link>.
         </div>
       </div>
     </>
