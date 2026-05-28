@@ -780,7 +780,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
                     <tr key={b.bid}>
                       <td><b>{b.slot || '(미지정)'}</b></td>
                       <td style={{ fontFamily: 'monospace' }}>{b.ip || '—'}</td>
-                      <td>/{b.mask || 24}</td>
+                      <td>{b.mask || 24}</td>
                       <td style={{ fontSize: 11, color: '#666' }}>{ifaceStr}</td>
                       <td>
                         <button className="btn btn--sm" style={{ fontSize: 10, padding: '1px 5px' }}
@@ -822,7 +822,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
                         </span>
                       )}
                     </td>
-                    <td style={{ fontFamily: 'monospace' }}>/{b.mask || 24}</td>
+                    <td style={{ fontFamily: 'monospace' }}>{b.mask || 24}</td>
                     <td style={{ fontSize: 11, color: '#666' }}>{ifaceStr}</td>
                     <td>
                       <button className="btn btn--sm btn--primary"
