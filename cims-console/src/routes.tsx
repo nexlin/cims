@@ -133,7 +133,7 @@ export const SECTIONS: RouteSection[] = [
     basePath: '/deploy',
     defaultPath: '/deploy/servers',
     routes: [
-      { path: '/deploy/servers',   title: '서버 + HA',         component: ServersPage,    adminOnly: true },
+      { path: '/deploy/servers',   title: '시스템/인프라',      component: ServersPage,    adminOnly: true },
       { path: '/deploy/packages',  title: '패키지',            component: PackagesPage,   adminOnly: true },
       { path: '/deploy/services',  title: 'HA 상세 편집',      component: HaServicesPage, adminOnly: true, hidden: true },
     ],

@@ -240,7 +240,7 @@ export default function ServersPage() {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn--outline" onClick={() => void load()}>↻</button>
           <button className="btn btn--primary" onClick={() => setSystemModalOpen(true)}
-                  title="A/S 이중화 (서버 2 자동) / AA 다중화 / Standalone (단일 서버)">
+                  title="AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버">
             ＋ 시스템 추가
           </button>
         </div>
@@ -355,7 +355,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
         const members = groupedAgents.get(g.id) || []
         const isOpen = expanded.has(g.id)
         const isSelected = selection?.kind === 'group' && selection.id === g.id
-        const modeChip = g.mode === 'active_standby' ? 'A/S' : 'AA'
+        const modeChip = g.mode === 'active_standby' ? 'AS' : 'AA'
         const modeColor = g.mode === 'active_standby' ? '#3498db' : '#27ae60'
         const canAddMember = g.mode === 'all_active'  // AS 는 master/backup 2 fixed
         return (
@@ -400,30 +400,33 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
           </div>
         )
       })}
-      {/* Standalone */}
-      <div>
-        <div onClick={() => onToggleExpand(-1)}
-             style={{
-               display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
-               borderBottom: '1px solid #eee', cursor: 'pointer', background: '#fafafa',
-             }}>
-          <span style={{ width: 14, color: '#888' }}>{expanded.has(-1) ? '▼' : '▶'}</span>
-          <b style={{ flex: 1 }}>Standalone</b>
-          <span style={{ fontSize: 11, color: '#888' }}>{standalone.length}</span>
-        </div>
-        {expanded.has(-1) && standalone.map(a => (
-          <ServerTreeRow key={a.id} agent={a}
-            depCount={(depsByAgent.get(a.id) || []).length}
-            active={selection?.kind === 'agent' && selection.id === a.id}
-            indent
-            onClick={() => onSelect({ kind: 'agent', id: a.id })} />
-        ))}
-        {standalone.length === 0 && expanded.has(-1) && (
-          <div style={{ padding: '8px 30px', fontSize: 12, color: '#aaa' }}>
-            (HA 그룹 없는 서버 없음)
+      {/* Standalone — 그룹화 없이 각자 시스템 row */}
+      {standalone.map(a => {
+        const isSelected = selection?.kind === 'agent' && selection.id === a.id
+        const sc = agentStatusColor(a.status)
+        return (
+          <div key={`sa-${a.id}`}
+               onClick={() => onSelect({ kind: 'agent', id: a.id })}
+               style={{
+                 display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
+                 borderBottom: '1px solid #eee', cursor: 'pointer',
+                 background: isSelected ? '#eef5ff' : '#fafafa',
+               }}>
+            <span style={{ width: 14 }} />  {/* expand 자리 비움 — group 정렬 맞춤 */}
+            <span style={{
+              background: '#95a5a6', color: '#fff', fontSize: 10,
+              padding: '1px 5px', borderRadius: 3,
+            }}>SA</span>
+            <b style={{ flex: 1 }}>{agentDisplayName(a.name)}</b>
+            <span style={{ fontSize: 10, color: '#555' }}>{a.ip_address || '—'}</span>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar,
+                            display: 'inline-block', marginLeft: 4 }} />
+            <span style={{ fontSize: 10, color: '#888' }}>
+              {(depsByAgent.get(a.id) || []).length}m
+            </span>
           </div>
-        )}
-      </div>
+        )
+      })}
     </div>
   )
 }
@@ -634,7 +637,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
                 style={{
                   background: group.mode === 'active_standby' ? '#3498db' : '#27ae60',
                   color: '#fff', fontSize: 11, padding: '4px 10px', borderRadius: 3, fontWeight: 600,
-                }}>{group.mode === 'active_standby' ? 'A/S' : 'AA'}</span>
+                }}>{group.mode === 'active_standby' ? 'AS' : 'AA'}</span>
           <input className="form-input" value={editName} onChange={e => setEditName(e.target.value)}
                  style={{ flex: 1, minWidth: 180 }} />
           <span style={{ fontSize: 11, color: '#888' }}>#{group.id} · vrid {group.vrid}</span>
@@ -731,7 +734,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
                             style={{ fontSize: 10, padding: '1px 5px' }}
                             disabled={group.mode === 'active_standby'}
                             title={group.mode === 'active_standby'
-                              ? 'A/S 멤버 (master/backup) 는 단독 제거 불가 — 그룹 삭제 사용'
+                              ? 'AS 멤버 (master/backup) 는 단독 제거 불가 — 그룹 삭제 사용'
                               : '그룹에서 멤버 제거 (agent 자체는 standalone 유지)'}
                             onClick={() => removeMember(a.id)}>×</button>
                   </td>
@@ -963,7 +966,7 @@ function ServerInspector({ agent: a, deployments, packages,
             <button className="btn btn--sm btn--danger" onClick={() => onRemove(a)}
                     disabled={a.ha_group?.mode === 'active_standby'}
                     title={a.ha_group?.mode === 'active_standby'
-                      ? 'A/S 그룹의 멤버는 단독 삭제 불가 — 그룹 삭제 또는 [폐기]+[🔄 재설치] 사용'
+                      ? 'AS 그룹의 멤버는 단독 삭제 불가 — 그룹 삭제 또는 [폐기]+[🔄 재설치] 사용'
                       : '서버 삭제 (관련 deployment 도 같이 제거)'}>
               삭제
             </button>
@@ -1390,7 +1393,7 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
           name: m.name, enrollment_token: m.enrollment_token, install_command: m.install_command,
         })))
       }
-      show(`시스템 "${base}" 추가 (${mode === 'active_standby' ? 'A/S' : mode === 'all_active' ? 'AA' : 'Standalone'})`, 'ok')
+      show(`시스템 "${base}" 추가 (${mode === 'active_standby' ? 'AS' : mode === 'all_active' ? 'AA' : 'Standalone'})`, 'ok')
       await onDone()
       // 첫 멤버 (있으면) 자동 선택 — 사용자가 modal 닫은 후 ServerInspector 의 InstallSection 으로 진입.
       onCreated(firstAgentId)
@@ -1406,7 +1409,7 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
     } catch (e) { show((e as Error).message, 'err') }
   }
 
-  const modeLabel = mode === 'active_standby' ? 'A/S (서버 2 자동)'
+  const modeLabel = mode === 'active_standby' ? 'AS (서버 2 자동)'
                   : mode === 'all_active'     ? 'AA (서버 0 — 이후 추가)'
                   :                             'Standalone (서버 1)'
 
@@ -1420,7 +1423,7 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
           <label>유형 *</label>
           <select className="form-input" value={mode} onChange={e => setMode(e.target.value as SystemMode)}
                   disabled={creating}>
-            <option value="active_standby">A/S — Active/Standby (master + backup 2서버 자동)</option>
+            <option value="active_standby">AS — Active/Standby (master + backup 2서버 자동)</option>
             <option value="all_active">AA — All Active (다중화, 그룹만 생성 + 이후 멤버 추가)</option>
             <option value="standalone">Standalone — 단일 서버 (HA 그룹 없음)</option>
           </select>
