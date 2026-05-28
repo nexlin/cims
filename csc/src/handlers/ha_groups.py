@@ -416,7 +416,13 @@ async def _update_group(gid: int, body, config):
     if not existing:
         return HandlerResult(status=404, body={'error': 'Group not found'})
 
-    for k in ('name', 'vip', 'auth_pass', 'note', 'mode'):
+    # mode 변경 차단 — 시스템 유형은 생성 후 변경 불가. 변경 원하면 삭제 후 재생성.
+    if 'mode' in body and body['mode'] != existing.get('mode'):
+        return HandlerResult(status=400, body={
+            'error': 'mode_change_not_allowed',
+            'hint': '시스템 유형 (mode) 은 생성 후 변경 불가. 삭제 후 재생성으로 변경하세요.',
+        })
+    for k in ('name', 'vip', 'auth_pass', 'note'):
         if k in body:
             existing[k] = body[k]
     if 'vip_mask' in body:

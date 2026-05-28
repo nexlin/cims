@@ -462,7 +462,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
 }) {
   const { show } = useToast()
   const [editName, setEditName]         = useState(group.name)
-  const [editMode, setEditMode]         = useState<'active_standby'|'all_active'>(group.mode)
+  // mode 는 readonly — 생성 후 변경 불가 (변경 원하면 시스템 삭제 후 재생성).
   const [editAuthPass, setEditAuthPass] = useState(group.auth_pass)
   const [editNote, setEditNote]         = useState(group.note || '')
   const [editBindings, setEditBindings] = useState<VipBinding[]>(group.vip_bindings || [])
@@ -475,7 +475,6 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
   // group prop 이 바뀌면 (다른 group 선택 또는 reload) state 재설정.
   useEffect(() => {
     setEditName(group.name)
-    setEditMode(group.mode)
     setEditAuthPass(group.auth_pass)
     setEditNote(group.note || '')
     setEditBindings(group.vip_bindings || [])
@@ -487,9 +486,8 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     ...m, agent: agents.find(a => a.id === m.agent_id)
   }))
 
-  // dirty 검출 — 적용 버튼 활성/비활성용
+  // dirty 검출 — mode 는 변경 불가라 제외.
   const dirty = editName !== group.name
-    || editMode !== group.mode
     || editAuthPass !== group.auth_pass
     || editNote !== (group.note || '')
     || JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
@@ -500,9 +498,9 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
   async function saveMeta() {
     try {
       await haGroupsApi.update(group.id, {
-        name: editName, mode: editMode,
-        // auth_pass — active_standby 만 VRRP 인증에 사용. AA 는 빈값 (record 에 garbage 안 남김).
-        auth_pass: editMode === 'active_standby' ? editAuthPass : '',
+        name: editName,
+        // mode 는 변경 불가 — backend 도 거부. auth_pass 는 group.mode 기준으로 결정.
+        auth_pass: group.mode === 'active_standby' ? editAuthPass : '',
         note: editNote,
         vip_bindings: editBindings,
       })
@@ -545,11 +543,12 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
     <>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <select value={editMode} onChange={e => setEditMode(e.target.value as 'active_standby'|'all_active')}
-                  className="form-input" style={{ width: 130 }}>
-            <option value="active_standby">A/S</option>
-            <option value="all_active">AA</option>
-          </select>
+          {/* 유형 변경 불가 — 변경 원하면 [🗑 시스템 삭제] 후 [+ 시스템 추가] 재생성. */}
+          <span title={`mode=${group.mode} (생성 후 변경 불가)`}
+                style={{
+                  background: group.mode === 'active_standby' ? '#3498db' : '#27ae60',
+                  color: '#fff', fontSize: 11, padding: '4px 10px', borderRadius: 3, fontWeight: 600,
+                }}>{group.mode === 'active_standby' ? 'A/S' : 'AA'}</span>
           <input className="form-input" value={editName} onChange={e => setEditName(e.target.value)}
                  style={{ flex: 1, minWidth: 180 }} />
           <span style={{ fontSize: 11, color: '#888' }}>#{group.id} · vrid {group.vrid}</span>
@@ -568,7 +567,7 @@ function GroupInspector({ group, agents, onSelectMember, onApply, onReload, onAd
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, fontSize: 12 }}>
-          {editMode === 'active_standby' && (
+          {group.mode === 'active_standby' && (
             <>
               <label style={{ color: '#666' }}>auth_pass:</label>
               <input type="password" className="form-input" value={editAuthPass}
