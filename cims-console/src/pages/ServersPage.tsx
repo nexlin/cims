@@ -38,7 +38,7 @@ export default function ServersPage() {
   const [filter, setFilter]           = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())  // -1 = standalone
 
-  const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [systemModalOpen, setSystemModalOpen] = useState(false)
   const [deployModal, setDeployModal]       = useState<{ agent: Agent } | null>(null)
   const [metricsFor, setMetricsFor]         = useState<Agent | null>(null)
   const [healthCheckFor, setHealthCheckFor] = useState<Agent | null>(null)
@@ -191,12 +191,10 @@ export default function ServersPage() {
           style={{ width: 240 }} />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn--outline" onClick={() => void load()}>↻</button>
-          <button className="btn btn--primary" onClick={() => setAgentModalOpen(true)}>
-            ＋ 서버 등록
+          <button className="btn btn--primary" onClick={() => setSystemModalOpen(true)}
+                  title="A/S 이중화 (서버 2 자동) / AA 다중화 / Standalone (단일 서버)">
+            ＋ 시스템 추가
           </button>
-          <Link to="/deploy/services" className="btn btn--outline" title="HaServicesPage — 새 HA 그룹 생성 / 멤버별 서비스 IP slot 상세 편집">
-            ＋ HA 그룹
-          </Link>
         </div>
       </div>
 
@@ -253,8 +251,8 @@ export default function ServersPage() {
         </div>
       </div>
 
-      {agentModalOpen &&
-        <AgentCreateModal onClose={() => setAgentModalOpen(false)} onDone={load} />}
+      {systemModalOpen &&
+        <SystemCreateModal onClose={() => setSystemModalOpen(false)} onDone={load} />}
       {deployModal &&
         <DeploymentCreateModal agent={deployModal.agent} packages={packages}
           onClose={() => setDeployModal(null)} onDone={load} />}
@@ -979,63 +977,133 @@ function Field({ label, value }: { label: string; value: string }) {
 //  Modals
 // ──────────────────────────────────────────────────────────────
 
-function AgentCreateModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+type SystemMode = 'active_standby' | 'all_active' | 'standalone'
+
+function SystemCreateModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { show } = useToast()
   const [name, setName] = useState('')
-  const [note, setNote] = useState('')
-  const [result, setResult] = useState<{ enrollment_token: string; install_command: string } | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [mode, setMode] = useState<SystemMode>('active_standby')
+  const [authPass, setAuthPass] = useState('00000000')
+  const [creating, setCreating] = useState(false)
+  // 생성 결과 — Standalone 1건, AS 2건, AA 0건 (이후 그룹에서 추가)
+  const [results, setResults] = useState<Array<{ name: string; enrollment_token: string; install_command: string }> | null>(null)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
   async function create() {
-    if (!name) { show('이름 필수', 'err'); return }
+    const base = name.trim()
+    if (!base) { show('이름 필수', 'err'); return }
+    setCreating(true)
     try {
-      const r = await deploymentApi.createAgent(name, note)
-      setResult({ enrollment_token: r.enrollment_token, install_command: r.install_command })
+      if (mode === 'standalone') {
+        const r = await deploymentApi.createAgent(base, '')
+        await deploymentApi.approveAgent(r.id)
+        setResults([{ name: base, enrollment_token: r.enrollment_token, install_command: r.install_command }])
+      } else {
+        const memberCount = mode === 'active_standby' ? 2 : 0
+        const memberAgents: Array<{ id: number; name: string; enrollment_token: string; install_command: string }> = []
+        for (let i = 1; i <= memberCount; i++) {
+          const nm = `${base}-${String(i).padStart(2, '0')}`
+          const r = await deploymentApi.createAgent(nm, '')
+          await deploymentApi.approveAgent(r.id)
+          memberAgents.push({ id: r.id, name: nm, enrollment_token: r.enrollment_token, install_command: r.install_command })
+        }
+        await haGroupsApi.create({
+          name: base,
+          mode,
+          vip: '',
+          vip_mask: 24,
+          auth_pass: authPass,
+          members: memberAgents.map((m, i) => ({
+            agent_id: m.id,
+            role: (i === 0 && mode === 'active_standby' ? 'master' : 'backup'),
+            priority: i === 0 ? 100 : 90,
+          })),
+        })
+        setResults(memberAgents.map(m => ({
+          name: m.name, enrollment_token: m.enrollment_token, install_command: m.install_command,
+        })))
+      }
+      show(`시스템 "${base}" 추가 (${mode === 'active_standby' ? 'A/S' : mode === 'all_active' ? 'AA' : 'Standalone'})`, 'ok')
       await onDone()
     } catch (e) { show((e as Error).message, 'err') }
+    finally { setCreating(false) }
   }
-  async function copyCmd() {
-    if (!result) return
+
+  async function copyCmd(idx: number) {
+    if (!results) return
     try {
-      await navigator.clipboard.writeText(result.install_command)
-      setCopied(true); setTimeout(() => setCopied(false), 1500)
+      await navigator.clipboard.writeText(results[idx].install_command)
+      setCopiedIdx(idx); setTimeout(() => setCopiedIdx(null), 1500)
     } catch (e) { show((e as Error).message, 'err') }
   }
 
+  const modeLabel = mode === 'active_standby' ? 'A/S (서버 2 자동)'
+                  : mode === 'all_active'     ? 'AA (서버 0 — 이후 추가)'
+                  :                             'Standalone (서버 1)'
+
   return (
-    <Modal title="서버 등록" onClose={onClose} width={580}>
-      {!result ? (
+    <Modal title="시스템 추가" onClose={onClose} width={640}>
+      {!results ? (
         <div className="form-grid">
           <label>이름 *</label>
-          <input className="form-input" value={name} placeholder="예: vlt-sig-pri"
-            onChange={e => setName(e.target.value)} />
-          <label>메모</label>
-          <input className="form-input" value={note} onChange={e => setNote(e.target.value)} />
+          <input className="form-input" value={name} placeholder="예: Control-Server"
+            onChange={e => setName(e.target.value)} disabled={creating} />
+          <label>유형 *</label>
+          <select className="form-input" value={mode} onChange={e => setMode(e.target.value as SystemMode)}
+                  disabled={creating}>
+            <option value="active_standby">A/S — Active/Standby (master + backup 2서버 자동)</option>
+            <option value="all_active">AA — All Active (다중화, 그룹만 생성 + 이후 멤버 추가)</option>
+            <option value="standalone">Standalone — 단일 서버 (HA 그룹 없음)</option>
+          </select>
+          {mode !== 'standalone' && (
+            <>
+              <label>auth_pass</label>
+              <input className="form-input" value={authPass} type="password"
+                onChange={e => setAuthPass(e.target.value)} disabled={creating} />
+            </>
+          )}
+          <label style={{ gridColumn: '1 / -1', fontSize: 12, color: '#888', marginTop: 4 }}>
+            선택: <b>{modeLabel}</b>
+            {mode === 'active_standby' && <> · 멤버 이름: <code>{name || '<이름>'}-01</code> (master), <code>{name || '<이름>'}-02</code> (backup)</>}
+          </label>
+        </div>
+      ) : results.length === 0 ? (
+        <div style={{ color: '#2ecc71' }}>
+          ✓ AA 그룹 생성됨. 좌측 트리에서 그룹 선택 후 [+ 멤버 추가] 로 서버를 추가하세요.
         </div>
       ) : (
         <div>
           <div style={{ color: '#2ecc71', marginBottom: 10 }}>
-            ✓ 서버 등록됨. 아래 명령을 대상 서버의 운영 계정에서 실행:
+            ✓ {results.length} 서버 등록됨. 각 서버에서 다음 명령 실행:
           </div>
-          <div style={{ position: 'relative' }}>
-            <pre style={{
-              background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
-              borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
-            }}>{result.install_command}</pre>
-            <button className="btn btn--sm btn--outline"
-              style={{ position: 'absolute', top: 8, right: 8 }}
-              onClick={copyCmd}>{copied ? '✓' : '📋'} 복사</button>
-          </div>
-          <div style={{ fontSize: 12, color: '#666', marginTop: 8 }}>
-            Enrollment token: <code>{result.enrollment_token}</code> (1회용)
-          </div>
+          {results.map((r, i) => (
+            <div key={i} style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                ⓘ {r.name}
+              </div>
+              <div style={{ position: 'relative' }}>
+                <pre style={{
+                  background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
+                  borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
+                }}>{r.install_command}</pre>
+                <button className="btn btn--sm btn--outline"
+                  style={{ position: 'absolute', top: 8, right: 8 }}
+                  onClick={() => copyCmd(i)}>{copiedIdx === i ? '✓' : '📋'} 복사</button>
+              </div>
+              <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+                token: <code>{r.enrollment_token}</code>
+              </div>
+            </div>
+          ))}
         </div>
       )}
       <div className="modal-footer" style={{ marginTop: 16 }}>
-        {!result ? (
+        {!results ? (
           <>
-            <button className="btn btn--outline" onClick={onClose}>취소</button>
-            <button className="btn btn--primary" onClick={create}>등록</button>
+            <button className="btn btn--outline" onClick={onClose} disabled={creating}>취소</button>
+            <button className="btn btn--primary" onClick={create} disabled={creating || !name.trim()}>
+              {creating ? '생성 중...' : '생성'}
+            </button>
           </>
         ) : (
           <button className="btn btn--primary" onClick={onClose}>닫기</button>
