@@ -16,9 +16,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { haGroupsApi, type HaGroup } from '../api/ha_groups'
-import { deploymentApi, type Agent, type SipPackage, type Deployment,
+import { deploymentApi, type Agent, type SipPackage, type Deployment, type AgentMetric,
          type ServiceIpRow as ApiServiceIpRow } from '../api/deployment'
 import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigModal'
+import HealthCheckModal from '../components/HealthCheckModal'
+import MetricTrend from '../components/MetricTrend'
 import { summarizeApplyResult } from './ha/helpers'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { VipPanel } from './ha/VipPanel'
@@ -244,6 +246,7 @@ export default function HaServicesPage() {
   const [editingName, setEditingName] = useState<{ kind: 'service' | 'server'; id: number; value: string } | null>(null)
   const [pkgPickerFor, setPkgPickerFor] = useState<number | null>(null)
   const [configModalFor, setConfigModalFor] = useState<ServiceRow | null>(null)
+  const [healthCheckGroup, setHealthCheckGroup] = useState<ServiceRow | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   // pending agent 신규 생성 직후 1회용 enrollment_token + install command
   const [pendingTokens, setPendingTokens] = useState<Map<number, { token: string; cmd: string }>>(new Map())
@@ -785,6 +788,8 @@ export default function HaServicesPage() {
               copyCmd={(srv) => copyInstallCmd(srv)}
               onDelete={() => deleteService(selectedSvc)}
               onOpenConfig={() => setConfigModalFor(selectedSvc)}
+              onHealthCheck={() => setHealthCheckGroup(selectedSvc)}
+              canHealthCheck={selectedSvc.servers.some(s => s.status === 'online')}
             />
           ) : (
             <div style={{ color: '#888', fontSize: 13, padding: 32, textAlign: 'center' }}>
@@ -816,6 +821,16 @@ export default function HaServicesPage() {
           onApplied={async () => { await load() }}
         />
       )}
+
+      {/* 그룹 단위 실시간 점검 — 온라인 멤버를 한 모달에 동시 점검 */}
+      {healthCheckGroup && (() => {
+        const members = healthCheckGroup.servers
+          .filter(s => s.status === 'online')
+          .map(s => agentMap.get(s.id))
+          .filter((a): a is Agent => a != null)
+        if (members.length === 0) return null
+        return <HealthCheckModal agents={members} onClose={() => setHealthCheckGroup(null)} />
+      })()}
     </div>
   )
 }
@@ -981,6 +996,8 @@ interface SystemDetailProps {
   copyCmd: (srv: ServerRow) => void
   onDelete: () => void
   onOpenConfig: () => void
+  onHealthCheck: () => void
+  canHealthCheck: boolean
 }
 
 function SystemDetail(p: SystemDetailProps) {
@@ -1010,6 +1027,8 @@ function SystemDetail(p: SystemDetailProps) {
         <ModeBadge mode={svc.mode} />
         <StatusSummary servers={svc.servers} mode={svc.mode} />
         <span style={{ flex: 1 }} />
+        <button onClick={p.onHealthCheck} style={btnSecondary()} disabled={!p.canHealthCheck}
+                title={p.canHealthCheck ? '온라인 멤버 동시 실시간 점검' : '온라인 멤버 없음'}>🩺 점검</button>
         {!isStandalone && (
           <button onClick={p.onOpenConfig} style={btnSecondary()}
                   title="그룹 멤버 공통 서비스 설정">⚙ 설정</button>
@@ -1187,6 +1206,29 @@ interface ServerDetailProps {
   regenerateToken: (srv: ServerRow) => void
 }
 
+// 멤버별 리소스 mini-chart — heartbeat metric JSONL(2s) 시계열을 cpu/mem/disk sparkline 으로.
+function MemberMetricTrends({ agentId }: { agentId: number }) {
+  const [metrics, setMetrics] = useState<AgentMetric[]>([])
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let alive = true
+    deploymentApi.agentMetrics(agentId)
+      .then(r => { if (alive) setMetrics(r.items) })
+      .catch(e => { if (alive) setErr((e as Error).message) })
+    return () => { alive = false }
+  }, [agentId])
+  if (err) return <div style={{ fontSize: 12, color: '#e74c3c' }}>※ {err}</div>
+  const chrono = [...metrics].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
+  if (chrono.length < 2) return <div style={{ fontSize: 12, color: '#aaa' }}>데이터 부족 (metric 수집 대기)</div>
+  return (
+    <div style={{ display: 'flex', gap: 10 }}>
+      <MetricTrend label="CPU"  values={chrono.map(m => m.cpu_pct)}  color="#3498db" warn={85} width={150} />
+      <MetricTrend label="MEM"  values={chrono.map(m => m.mem_pct)}  color="#27ae60" warn={90} width={150} />
+      <MetricTrend label="Disk" values={chrono.map(m => m.disk_pct)} color="#9b59b6" warn={90} width={150} />
+    </div>
+  )
+}
+
 function ServerDetail(p: ServerDetailProps) {
   const { svc, srv } = p
   const enrollDone = srv.status !== 'pending'
@@ -1258,6 +1300,12 @@ function ServerDetail(p: ServerDetailProps) {
           </tbody>
         </table>
       </AccordionSection>
+
+      {srv.status === 'online' && srv.id > 0 && (
+        <AccordionSection title="리소스 추세" defaultOpen>
+          <MemberMetricTrends agentId={srv.id} />
+        </AccordionSection>
+      )}
 
       <AccordionSection title="서비스 IP / 라우팅" defaultOpen>
         {!enrollDone ? (

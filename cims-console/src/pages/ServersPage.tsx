@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   deploymentApi,
-  type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentHealthCheck,
+  type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric,
 } from '../api/deployment'
 import { haGroupsApi, type HaGroup, type VipBinding,
          type FailoverOptions, FAILOVER_DEFAULTS } from '../api/ha_groups'
@@ -12,6 +12,8 @@ import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
+import HealthCheckModal from '../components/HealthCheckModal'
+import MetricTrend from '../components/MetricTrend'
 import { agentDisplayName } from '../components/agentDisplay'
 
 type Selection =
@@ -331,7 +333,7 @@ export default function ServersPage() {
       {metricsFor &&
         <MetricsModal agent={metricsFor} onClose={() => setMetricsFor(null)} />}
       {healthCheckFor &&
-        <HealthCheckModal agent={healthCheckFor} onClose={() => setHealthCheckFor(null)} />}
+        <HealthCheckModal agents={[healthCheckFor]} onClose={() => setHealthCheckFor(null)} />}
       {configFor &&
         <ModuleConfigModal source={{ type: 'deployment', deployment: configFor }}
           onClose={() => setConfigFor(null)} onDone={load} />}
@@ -1952,53 +1954,6 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   )
 }
 
-// 메트릭 시계열 sparkline — 값(null 허용) 배열을 받아 추세선 + 현재/peak 표시.
-// B 트랙 Phase 3: heartbeat 가 1~2s 주기로 쌓는 cpu/mem/disk raw metric 을 시각화.
-function MetricTrend({ label, values, unit = '%', color, warn }: {
-  label: string; values: (number | null)[]; unit?: string; color: string; warn?: number
-}) {
-  const nums = values.filter((v): v is number => v != null)
-  const w = 200, h = 40, pad = 3
-  const cur = nums.length ? nums[nums.length - 1] : null
-  const peak = nums.length ? Math.max(...nums) : null
-  const overWarn = warn != null && cur != null && cur >= warn
-  let body: React.ReactNode = <div style={{ height: h, color: '#bbb', fontSize: 11, display: 'flex', alignItems: 'center' }}>데이터 부족</div>
-  if (nums.length >= 2) {
-    const max = Math.max(...nums, warn ?? 0, 1)
-    const min = Math.min(...nums, 0)
-    const range = max - min || 1
-    const step = (w - pad * 2) / Math.max(nums.length - 1, 1)
-    const pts = nums.map((v, i) => {
-      const x = pad + i * step
-      const y = pad + (h - pad * 2) * (1 - (v - min) / range)
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    }).join(' ')
-    const warnY = warn != null ? pad + (h - pad * 2) * (1 - (warn - min) / range) : null
-    body = (
-      <svg width={w} height={h} style={{ display: 'block' }}>
-        {warnY != null && (
-          <line x1={pad} y1={warnY} x2={w - pad} y2={warnY} stroke="#e74c3c"
-                strokeWidth={0.8} strokeDasharray="3 2" opacity={0.6} />
-        )}
-        <polyline points={pts} fill="none" stroke={overWarn ? '#e74c3c' : color}
-                  strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    )
-  }
-  return (
-    <div style={{ flex: 1, background: 'var(--surface, #fff)', border: '1px solid var(--border, #e5e5e5)',
-                  borderRadius: 4, padding: '8px 10px', minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
-        <span style={{ fontSize: 12, color: '#666' }}>{label}</span>
-        <span style={{ fontSize: 16, fontWeight: 700, color: overWarn ? '#e74c3c' : 'inherit' }}>
-          {cur != null ? `${cur}${unit}` : '—'}
-        </span>
-        {peak != null && <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>peak {peak}{unit}</span>}
-      </div>
-      {body}
-    </div>
-  )
-}
 
 function MetricsModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const { show } = useToast()
@@ -2047,149 +2002,3 @@ function MetricsModal({ agent, onClose }: { agent: Agent; onClose: () => void })
   )
 }
 
-function HealthCheckModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
-  const [data, setData] = useState<AgentHealthCheck | null>(null)
-  const [err,  setErr]  = useState<string>('')
-  const [loading, setLoading] = useState(true)
-
-  const refresh = useCallback(async () => {
-    setLoading(true); setErr(''); setData(null)
-    try {
-      const r = await deploymentApi.healthCheck(agent.id, 'all')
-      setData(r)
-    } catch (e) { setErr((e as Error).message) }
-    finally { setLoading(false) }
-  }, [agent.id])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  const verdictColor = data?.verdict === 'healthy' ? '#27ae60'
-                    : data?.verdict === 'partial' ? '#f39c12'
-                    : data?.verdict === 'broken'  ? '#e74c3c'
-                    : '#888'
-  const verdictLabel = data?.verdict === 'healthy' ? '🟢 healthy'
-                    : data?.verdict === 'partial' ? '🟡 partial'
-                    : data?.verdict === 'broken'  ? '🔴 broken'
-                    : ''
-
-  return (
-    <Modal title={`${agent.name} — 실시간 점검 (sync REST)`} onClose={onClose} width={720}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        {data && (
-          <span style={{ background: verdictColor, color: '#fff', padding: '4px 10px',
-                         borderRadius: 4, fontWeight: 600 }}>{verdictLabel}</span>
-        )}
-        {data?.ts && <span style={{ fontSize: 12, color: '#666' }}>ts: {data.ts}</span>}
-        <button className="btn btn--sm btn--outline" onClick={() => void refresh()}
-                style={{ marginLeft: 'auto' }}>↻ 새로고침</button>
-      </div>
-      {loading && <div className="empty">점검 중...</div>}
-      {err && <div style={{ color: '#e74c3c' }}>※ {err}</div>}
-      {data && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* issues */}
-          {data.issues.length > 0 && (
-            <div style={{ background: 'var(--warn-soft)', border: '1px solid #ffeaa7',
-                          padding: 10, borderRadius: 4, fontSize: 13 }}>
-              <b>⚠ 발견된 이슈:</b>
-              <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>
-                {data.issues.map((it, i) => <li key={i}>{it}</li>)}
-              </ul>
-            </div>
-          )}
-          {/* HA */}
-          {data.ha && (
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>HA (keepalived)</div>
-              <div style={{ fontSize: 13, color: '#444' }}>
-                {data.ha.keepalived_installed
-                  ? (data.ha.keepalived_active
-                      ? <>✓ <code>keepalived</code> active</>
-                      : <span style={{ color: '#e74c3c' }}>✗ keepalived installed but inactive</span>)
-                  : <span style={{ color: '#888' }}>(keepalived 미설치)</span>}
-              </div>
-              {data.ha.vips.length > 0 && (
-                <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                  VIP: {data.ha.vips.map(v => `${v.iface}:${v.ip}/${v.mask}`).join(', ')}
-                </div>
-              )}
-              {data.ha.journal_tail && data.ha.journal_tail.length > 0 && (
-                <details style={{ marginTop: 6 }}>
-                  <summary style={{ cursor: 'pointer', fontSize: 12, color: '#888' }}>
-                    journal tail ({data.ha.journal_tail.length} lines)
-                  </summary>
-                  <pre style={{ background: '#0d1117', color: '#c9d1d9', padding: 8,
-                                fontSize: 11, marginTop: 4, maxHeight: 200, overflow: 'auto' }}>
-                    {data.ha.journal_tail.join('\n')}
-                  </pre>
-                </details>
-              )}
-            </div>
-          )}
-          {/* Modules */}
-          {data.modules && (
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>모듈</div>
-              <table className="data-table" style={{ fontSize: 12 }}>
-                <thead>
-                  <tr><th>이름</th><th>실행</th><th>pid</th><th>CPU%</th><th>RSS(MB)</th><th>uptime</th></tr>
-                </thead>
-                <tbody>
-                  {data.modules.map(m => (
-                    <tr key={m.name}>
-                      <td><b>{m.name}</b></td>
-                      <td>{m.running
-                        ? <span style={{ color: '#27ae60' }}>✓</span>
-                        : <span style={{ color: '#888' }}>—</span>}</td>
-                      <td>{m.pid ?? '—'}</td>
-                      <td>{m.cpu_pct ?? '—'}</td>
-                      <td>{m.mem_mb ?? '—'}</td>
-                      <td>{m.uptime_sec != null ? `${Math.floor(m.uptime_sec/60)}m` : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {/* Metrics */}
-          {data.metrics && (
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>시스템 메트릭</div>
-              <div style={{ fontSize: 13, color: '#444' }}>
-                MEM: {data.metrics.mem_pct ?? '—'}% &nbsp;·&nbsp;
-                Disk: {data.metrics.disk_pct ?? '—'}% &nbsp;·&nbsp;
-                Load: {data.metrics.load_avg ?? '—'}
-              </div>
-              {data.metrics.per_iface && data.metrics.per_iface.length > 0 && (
-                <table className="data-table" style={{ fontSize: 12, marginTop: 6 }}>
-                  <thead>
-                    <tr><th>iface</th><th>RX rate</th><th>TX rate</th><th>RX errors</th><th>TX errors</th></tr>
-                  </thead>
-                  <tbody>
-                    {data.metrics.per_iface.map(i => (
-                      <tr key={i.name}>
-                        <td><b>{i.name}</b></td>
-                        <td>{i.rx_rate != null ? `${(i.rx_rate/1024).toFixed(1)} KB/s` : '—'}</td>
-                        <td>{i.tx_rate != null ? `${(i.tx_rate/1024).toFixed(1)} KB/s` : '—'}</td>
-                        <td>{i.rx_errors}</td>
-                        <td>{i.tx_errors}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
-          {data.agent_version && (
-            <div style={{ fontSize: 11, color: '#888' }}>
-              agent v{data.agent_version} · {data.hostname}
-            </div>
-          )}
-        </div>
-      )}
-      <div className="modal-footer" style={{ marginTop: 16 }}>
-        <button className="btn btn--primary" onClick={onClose}>닫기</button>
-      </div>
-    </Modal>
-  )
-}
