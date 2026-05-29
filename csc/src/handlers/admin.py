@@ -133,6 +133,9 @@ def _has_email_column(cur) -> bool:
 
 
 async def _list_users(config):
+    """Phase 4d2 N+1 fix — 옛 패턴: 5020 users × 3 sub query = 15,061 SQL calls.
+    cross-host DB (ctrl02 → ctrl01) 에서 ~16s 응답. 4 bulk query 로 단축.
+    """
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             has_email = _has_email_column(cur)
@@ -144,41 +147,50 @@ async def _list_users(config):
                 "ORDER BY u.id"
             )
             rows = cur.fetchall()
+            if not rows:
+                return HandlerResult(status=200, body={'users': []})
+
+            # 1 query for all rejects (user_id grouping)
+            cur.execute("SELECT user_id, reject_id FROM user_rejects")
+            rejects_by_user: dict = {}
+            for r in cur.fetchall():
+                rejects_by_user.setdefault(r['user_id'], []).append(r['reject_id'])
+
+            # 1 query for all volte_subscriptions
+            cur.execute(
+                "SELECT id, user_id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
+                "FROM volte_subscriptions ORDER BY user_id, id"
+            )
+            call_subs_by_user: dict = {}
+            for s in cur.fetchall():
+                s['dnd'] = bool(s['dnd'])
+                s['register_time'] = _dt(s['register_time'])
+                s['logout_time']   = _dt(s['logout_time'])
+                uid = s.pop('user_id')
+                call_subs_by_user.setdefault(uid, []).append(s)
+
+            # 1 query for all ptt_subscriptions
+            cur.execute(
+                "SELECT id, user_id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
+                "FROM ptt_subscriptions ORDER BY user_id, id"
+            )
+            ptt_subs_by_user: dict = {}
+            for s in cur.fetchall():
+                s['dnd'] = bool(s['dnd'])
+                s['register_time'] = _dt(s['register_time'])
+                s['logout_time']   = _dt(s['logout_time'])
+                uid = s.pop('user_id')
+                ptt_subs_by_user.setdefault(uid, []).append(s)
+
+            # group-by 적용
             for row in rows:
                 if not has_email:
                     row['email'] = ''
                 row['create_time'] = _dt(row['create_time'])
                 row['update_time'] = _dt(row['update_time'])
-                # attach reject list
-                cur.execute(
-                    "SELECT reject_id FROM user_rejects WHERE user_id=%s",
-                    (row['id'],)
-                )
-                row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
-                # attach subscriptions
-                cur.execute(
-                    "SELECT id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
-                    "FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
-                    (row['id'],)
-                )
-                call_subs = cur.fetchall()
-                for s in call_subs:
-                    s['dnd'] = bool(s['dnd'])
-                    s['register_time'] = _dt(s['register_time'])
-                    s['logout_time']   = _dt(s['logout_time'])
-                row['call_subscriptions'] = call_subs
-
-                cur.execute(
-                    "SELECT id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
-                    "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
-                    (row['id'],)
-                )
-                ptt_subs = cur.fetchall()
-                for s in ptt_subs:
-                    s['dnd'] = bool(s['dnd'])
-                    s['register_time'] = _dt(s['register_time'])
-                    s['logout_time']   = _dt(s['logout_time'])
-                row['ptt_subscriptions'] = ptt_subs
+                row['reject_id']          = rejects_by_user.get(row['id'], [])
+                row['call_subscriptions'] = call_subs_by_user.get(row['id'], [])
+                row['ptt_subscriptions']  = ptt_subs_by_user.get(row['id'], [])
     return HandlerResult(status=200, body={'users': rows})
 
 
