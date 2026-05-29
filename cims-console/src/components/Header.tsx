@@ -1,4 +1,6 @@
-import { Menu, KeyRound, LogOut, Radio } from 'lucide-react'
+import { useState } from 'react'
+import { Menu, KeyRound, LogOut, Radio, Sun, Moon } from 'lucide-react'
+import { getInitialTheme, applyTheme, type Theme } from '../theme'
 
 interface HeaderProps {
   userName: string
@@ -9,6 +11,11 @@ interface HeaderProps {
 }
 
 export default function Header({ userName, userRole, onToggleSidebar, onLogout, onChangePw }: HeaderProps) {
+  const [theme, setTheme] = useState<Theme>(getInitialTheme)
+  const toggleTheme = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    applyTheme(next); setTheme(next)
+  }
   return (
     <header className="app-header">
       <div className="app-header-left">
@@ -25,6 +32,10 @@ export default function Header({ userName, userRole, onToggleSidebar, onLogout, 
         <span className={`badge ${userRole === 'admin' ? 'badge--blue' : 'badge--gray'}`}>
           {userRole === 'admin' ? '관리자' : '사용자'}
         </span>
+        <button className="btn btn--ghost btn--sm" onClick={toggleTheme}
+                title={theme === 'dark' ? '라이트 모드로' : '다크 모드로'}>
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
         <button className="btn btn--ghost btn--sm" onClick={onChangePw} title="비밀번호 변경">
           <KeyRound size={16} />
         </button>

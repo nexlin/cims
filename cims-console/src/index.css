@@ -2,23 +2,84 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:        #f5f6fa;
-  --surface:   #ffffff;
-  --border:    #e0e2ea;
-  --text:      #1a1d2e;
-  --text-muted:#6b7280;
-  --primary:   #2563eb;
-  --primary-h: #1d4ed8;
-  --danger:    #dc2626;
-  --danger-h:  #b91c1c;
-  --radius:    6px;
-  --shadow:    0 1px 4px rgba(0,0,0,.08);
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* ── Design tokens — light ── */
+  --bg:          #f4f6fb;
+  --bg-soft:     #f8fafc;
+  --surface:     #ffffff;
+  --surface-2:   #eef1f7;
+  --hover:       #f2f6fe;
+  --border:      #e5e8f1;
+  --text:        #161a2b;
+  --text-muted:  #64748b;
+  --primary:     #4f46e5;
+  --primary-h:   #4338ca;
+  --primary-soft:#eef2ff;
+  --danger:      #dc2626;
+  --danger-h:    #b91c1c;
+  --success:     #16a34a;
+  --radius:      8px;
+  --radius-lg:   14px;
+  --shadow:      0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.07);
+  --shadow-lg:   0 10px 30px rgba(16,24,40,.13);
+  --sidebar-bg:  #0f172a;
+
+  color-scheme: light;
+  font-family: 'Pretendard', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 14px;
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
 }
 
-body { background: var(--bg); min-height: 100vh; }
+:root[data-theme="dark"] {
+  --bg:          #0b0f17;
+  --bg-soft:     #111827;
+  --surface:     #151c2b;
+  --surface-2:   #1d2636;
+  --hover:       #1b2435;
+  --border:      #2a3346;
+  --text:        #e6e9f1;
+  --text-muted:  #93a1b8;
+  --primary:     #6366f1;
+  --primary-h:   #818cf8;
+  --primary-soft:rgba(99,102,241,.16);
+  --danger:      #f04848;
+  --danger-h:    #f87171;
+  --success:     #22c55e;
+  --shadow:      0 1px 2px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.4);
+  --shadow-lg:   0 10px 30px rgba(0,0,0,.55);
+  --sidebar-bg:  #0a0e16;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  min-height: 100vh;
+  transition: background-color .2s ease, color .2s ease;
+}
+
+/* 부드러운 테마 전환 */
+.panel, .data-table th, .modal-box, .btn, .form-input, .search-input,
+.sidebar, .app-header, .auth-card, .badge {
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease;
+}
+
+/* 모던 스크롤바 */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 999px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: padding-box; }
+
+/* 포커스 링 */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* dark 모드 잔여 보정 (하드코딩 light 패치) */
+:root[data-theme="dark"] .form-input:disabled { background: var(--surface-2); }
+:root[data-theme="dark"] .badge--gray { background: var(--surface-2); color: var(--text-muted); }
+:root[data-theme="dark"] .docs-content code,
+:root[data-theme="dark"] .docs-content tr:first-child td { background: var(--surface-2); }
 
 /* ── App shell ─────────────────────────────────────────────── */
 .app { display: flex; flex-direction: column; min-height: 100vh; }
@@ -54,7 +115,7 @@ body { background: var(--bg); min-height: 100vh; }
   transition: background .15s, color .15s;
 }
 .tab-btn:hover { background: var(--bg); color: var(--text); }
-.tab-btn--active { background: #eff6ff; color: var(--primary); font-weight: 600; }
+.tab-btn--active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
 
 .app-main { flex: 1; padding: 24px; }
 
@@ -72,6 +133,7 @@ body { background: var(--bg); min-height: 100vh; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -84,7 +146,7 @@ body { background: var(--bg); min-height: 100vh; }
 .panel-header {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: #f9fafb;
+  background: var(--bg-soft);
 }
 .panel-title { font-weight: 600; }
 .panel-title small { font-weight: 400; color: var(--text-muted); font-size: 12px; }
@@ -96,7 +158,7 @@ body { background: var(--bg); min-height: 100vh; }
   align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: #f9fafb;
+  background: var(--bg-soft);
 }
 
 .search-input {
@@ -156,15 +218,15 @@ body { background: var(--bg); min-height: 100vh; }
   font-size: 13px;
 }
 .data-table th {
-  background: #f9fafb;
+  background: var(--bg-soft);
   font-weight: 600;
   color: var(--text-muted);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .3px;
 }
-.data-table tbody tr:hover { background: #fafbff; }
-.data-table tbody tr.row--selected { background: #eff6ff; }
+.data-table tbody tr:hover { background: var(--hover); }
+.data-table tbody tr.row--selected { background: var(--primary-soft); }
 .empty-cell { text-align: center; color: var(--text-muted); padding: 32px !important; }
 .ts { color: var(--text-muted); font-size: 12px; }
 
@@ -215,7 +277,7 @@ body { background: var(--bg); min-height: 100vh; }
   gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: #f9fafb;
+  background: var(--bg-soft);
 }
 
 /* ── Forms ─────────────────────────────────────────────────── */
@@ -414,7 +476,7 @@ body { background: var(--bg); min-height: 100vh; }
   padding: 0;
   flex-shrink: 0;
 }
-.sub-chip-add:hover { border-color: var(--primary); color: var(--primary); background: #eff6ff; }
+.sub-chip-add:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
 
 /* ── Toast ─────────────────────────────────────────────────── */
 .toast-stack {
@@ -512,7 +574,7 @@ body { background: var(--bg); min-height: 100vh; }
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: #f9fafb;
+  background: var(--bg-soft);
   border-bottom: 1px solid var(--border);
   min-height: 44px;
 }
@@ -570,7 +632,7 @@ body { background: var(--bg); min-height: 100vh; }
   letter-spacing: .4px;
   color: var(--text-muted);
   padding: 8px 14px 4px;
-  background: #f9fafb;
+  background: var(--bg-soft);
   border-top: 1px solid var(--border);
 }
 
@@ -588,7 +650,7 @@ body { background: var(--bg); min-height: 100vh; }
   border-bottom: 1px solid var(--border);
   transition: background .1s;
 }
-.sp-contact:hover { background: #f9fafb; }
+.sp-contact:hover { background: var(--bg-soft); }
 .sp-contact-name { font-size: 13px; font-weight: 500; flex: 1; }
 .sp-contact-num  { font-size: 11px; color: var(--text-muted); }
 .sp-contact-btn  {
@@ -676,7 +738,7 @@ body { background: var(--bg); min-height: 100vh; }
   border-bottom: 1px solid var(--border);
   transition: background .1s;
 }
-.sp-group:hover { background: #f9fafb; }
+.sp-group:hover { background: var(--bg-soft); }
 .sp-group--active { background: #f0fdf4; }
 .sp-group--active:hover { background: #dcfce7; }
 .sp-group-dot {
@@ -702,7 +764,7 @@ body { background: var(--bg); min-height: 100vh; }
 
 /* Member list (active group, expanded below group row) */
 .sp-members {
-  background: #f9fafb;
+  background: var(--bg-soft);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -799,7 +861,7 @@ body { background: var(--bg); min-height: 100vh; }
   user-select: none;
   transition: background .1s, border-color .1s, transform .05s;
 }
-.sp-push-btn:hover { border-color: var(--primary); background: #eff6ff; }
+.sp-push-btn:hover { border-color: var(--primary); background: var(--primary-soft); }
 .sp-push-btn--on {
   background: #fee2e2;
   border-color: var(--danger);
@@ -873,7 +935,7 @@ body { background: var(--bg); min-height: 100vh; }
   grid-area: header;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px;
-  background: #0e1520; color: #e2e8f0;
+  background: var(--sidebar-bg); color: #e2e8f0;
   border-bottom: 1px solid var(--border);
   /* 이전 .app-header 정의(height:54px / position:sticky)를 명시적으로 덮음.
      grid row 가 --header-h 를 강제. */
@@ -900,7 +962,7 @@ body { background: var(--bg); min-height: 100vh; }
 /* ── Sidebar ────────────────────────────────────── */
 .sidebar {
   grid-area: sidebar;
-  background: #0e1520; border-right: 1px solid var(--border);
+  background: var(--sidebar-bg); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden;
 }
 .sidebar-nav { flex: 1; padding: 8px 0; }
