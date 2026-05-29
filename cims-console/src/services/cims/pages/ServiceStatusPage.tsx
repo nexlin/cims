@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { statsApi, type Subscriber } from '../api/stats'
-import { useToast } from '../components/Toast'
+import { statsApi, type Subscriber } from '../../../api/stats'
+import { useToast } from '../../../components/Toast'
 
 function OnlineDot({ online }: { online: boolean }) {
   return (

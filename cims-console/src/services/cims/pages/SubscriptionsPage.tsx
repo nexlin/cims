@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { usersApi, type UserSummary, type Subscription } from '../api/users'
-import { orgApi, type Organization } from '../api/organizations'
-import { useToast } from '../components/Toast'
+import { usersApi, type UserSummary, type Subscription } from '../../../api/users'
+import { orgApi, type Organization } from '../../../api/organizations'
+import { useToast } from '../../../components/Toast'
 
 // ── 조직+구성원 통합 트리 ─────────────────────────
 

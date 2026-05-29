@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { callsApi, type CallLog } from '../api/calls'
-import { recordingsApi, type RecordingSegment } from '../api/recordings'
-import Modal from '../components/Modal'
-import FlowPage from './FlowPage'
-import SegmentPlayer from '../components/SegmentPlayer'
-import { useToast } from '../components/Toast'
+import { callsApi, type CallLog } from '../../../api/calls'
+import { recordingsApi, type RecordingSegment } from '../../../api/recordings'
+import Modal from '../../../components/Modal'
+import FlowPage from '../../../pages/FlowPage'
+import SegmentPlayer from '../../../components/SegmentPlayer'
+import { useToast } from '../../../components/Toast'
 
 function fmtDur(s: number|null) { if(!s||s<=0)return '—'; const m=Math.floor(s/60); return m>0?`${m}분${s%60}초`:`${s}초` }
 function fmtTime(iso:string|null) { return iso?iso.replace('T',' ').substring(0,19):'—' }

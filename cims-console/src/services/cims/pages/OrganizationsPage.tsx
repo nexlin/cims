@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { orgApi, type Organization, type OrgInput } from '../api/organizations'
-import { useToast } from '../components/Toast'
+import { orgApi, type Organization, type OrgInput } from '../../../api/organizations'
+import { useToast } from '../../../components/Toast'
 
 // ── 트리 빌더 ───────────────────────────────────────────────
 interface TreeNode extends Organization {

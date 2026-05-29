@@ -7,15 +7,15 @@
 import { Users, Radio, BarChart3 } from 'lucide-react'
 import type { ServiceManifest } from '../../nav-types'
 
-import OrganizationsPage from '../../pages/OrganizationsPage'
-import MembersPage from '../../pages/MembersPage'
-import SubscriptionsPage from '../../pages/SubscriptionsPage'
-import PttGroupsPage from '../../pages/PttGroupsPage'
-import ServiceStatusPage from '../../pages/ServiceStatusPage'
-import VolteHistoryPage from '../../pages/VolteHistoryPage'
-import PttHistoryPage from '../../pages/PttHistoryPage'
-import StatsPage from '../../pages/StatsPage'
-import StatsMessagesPage from '../../pages/StatsMessagesPage'
+import OrganizationsPage from './pages/OrganizationsPage'
+import MembersPage from './pages/MembersPage'
+import SubscriptionsPage from './pages/SubscriptionsPage'
+import PttGroupsPage from './pages/PttGroupsPage'
+import ServiceStatusPage from './pages/ServiceStatusPage'
+import VolteHistoryPage from './pages/VolteHistoryPage'
+import PttHistoryPage from './pages/PttHistoryPage'
+import StatsPage from './pages/StatsPage'
+import StatsMessagesPage from './pages/StatsMessagesPage'
 
 const volteStats = () => <StatsPage />
 const pttStats = () => <StatsPage />

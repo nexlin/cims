@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { groupsApi, type Group } from '../api/groups'
-import { useToast } from '../components/Toast'
+import { groupsApi, type Group } from '../../../api/groups'
+import { useToast } from '../../../components/Toast'
 
 interface GroupExt extends Group {
   priority?: number

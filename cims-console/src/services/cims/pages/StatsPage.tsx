@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { statsApi, type MessagesResponse, type ServiceStatsResponse } from '../api/stats'
-import { useToast } from '../components/Toast'
+import { statsApi, type MessagesResponse, type ServiceStatsResponse } from '../../../api/stats'
+import { useToast } from '../../../components/Toast'
 
 type SubTab = 'messages' | 'service'
 type Granularity = '5m' | '10m' | '1h' | '1d' | '1M' | '1y'
