@@ -516,12 +516,12 @@ async def _create_agent(handler_args: HandlerArgs, config):
     result["enrollment_token"] = enroll_token
     result["enrollment_token_expires_at"] = expires_at
     result["enrollment_token_ttl_sec"] = ttl_sec
-    csc_url = _csc_public_url(handler_args, config)
+    oam_url = _oam_public_url(handler_args, config)
     import shlex
     # name 에 space/특수문자 포함 가능 → shell-safe quote
     result["install_command"]  = (
-        f"curl -k {csc_url}/install-agent.sh | "
-        f"bash -s -- --csc-url {csc_url} "
+        f"curl -k {oam_url}/install-agent.sh | "
+        f"bash -s -- --oam-url {oam_url} "
         f"--enrollment-token {enroll_token} --name {shlex.quote(name)}"
     )
     return HandlerResult(status=201, body=result, media_type="application/json")
@@ -543,15 +543,17 @@ def _is_dev_mode(config: dict) -> bool:
     return bool(srv.get("DevMode"))
 
 
-def _csc_public_url(handler_args: HandlerArgs, config: dict) -> str:
-    """install 명령에 박을 CSC URL — agent 들이 mgmt 망에서 csc 로 접속할 주소.
+def _oam_public_url(handler_args: HandlerArgs, config: dict) -> str:
+    """install 명령에 박을 OAM URL — agent 들이 mgmt 망에서 OAM 으로 접속할 주소.
+    Phase 3b 부터 agent 는 OAM (4419) 과 통신.
     우선순위:
-       1) config.Server.AgentCscUrl (명시적 설정 — mgmt 망 IP 권장)
-       2) HTTP Host 헤더 (admin 이 접속한 주소 그대로)
-       3) config.Server.Ip + Port (0.0.0.0 면 placeholder)
+       1) config.Server.AgentOamUrl (명시적 설정 — mgmt 망 IP 권장)
+       2) config.Server.AgentCscUrl (옛 키 — deprecated, 호환성)
+       3) HTTP Host 헤더 (admin 이 접속한 주소 그대로)
+       4) config.Server.Ip + Port (0.0.0.0 면 placeholder)
     """
     srv = (config.get("Server") or {})
-    pu = (srv.get("AgentCscUrl") or "").strip()
+    pu = (srv.get("AgentOamUrl") or srv.get("AgentCscUrl") or "").strip()
     if pu:
         return pu.rstrip("/")
     hdr_host = ""
@@ -562,10 +564,14 @@ def _csc_public_url(handler_args: HandlerArgs, config: dict) -> str:
     if hdr_host:
         return f"{scheme}://{hdr_host}"
     ip = srv.get("Ip") or "0.0.0.0"
-    port = srv.get("Port") or 4420
+    port = srv.get("Port") or 4419
     if ip == "0.0.0.0" or not ip:
-        return f"https://<CSC_HOST>:{port}"
+        return f"https://<OAM_HOST>:{port}"
     return f"https://{ip}:{port}"
+
+
+# 옛 함수명 호환 (외부 호출자 — 일단 alias 유지, Phase 3b 후속에서 정리).
+_csc_public_url = _oam_public_url
 
 
 async def _update_agent(handler_args: HandlerArgs, aid: int, config):
@@ -634,11 +640,11 @@ async def _regenerate_token(handler_args: HandlerArgs, aid: int, config):
     payload["enrollment_token"] = row['enrollment_token']
     payload["enrollment_token_expires_at"] = row['enrollment_token_expires_at']
     payload["enrollment_token_ttl_sec"] = ttl_sec
-    csc_url = _csc_public_url(handler_args, config)
+    oam_url = _oam_public_url(handler_args, config)
     import shlex
     payload["install_command"] = (
-        f"curl -k {csc_url}/install-agent.sh | "
-        f"bash -s -- --csc-url {csc_url} "
+        f"curl -k {oam_url}/install-agent.sh | "
+        f"bash -s -- --oam-url {oam_url} "
         f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}"
     )
     return HandlerResult(status=200, body=payload, media_type="application/json")
@@ -664,7 +670,7 @@ async def _get_install_command(handler_args: HandlerArgs, aid: int, config):
     status, row = await asyncio.to_thread(_do)
     if status == 'not_found':
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
-    csc_url = _csc_public_url(handler_args, config)
+    oam_url = _oam_public_url(handler_args, config)
     import shlex
     if status in ('no_token', 'expired'):
         return HandlerResult(status=200, body={
@@ -673,8 +679,8 @@ async def _get_install_command(handler_args: HandlerArgs, aid: int, config):
             "enrollment_token_expires_at": row.get('enrollment_token_expires_at'),
         }, media_type="application/json")
     install_cmd = (
-        f"curl -k {csc_url}/install-agent.sh | "
-        f"bash -s -- --csc-url {csc_url} "
+        f"curl -k {oam_url}/install-agent.sh | "
+        f"bash -s -- --oam-url {oam_url} "
         f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}"
     )
     return HandlerResult(status=200, body={

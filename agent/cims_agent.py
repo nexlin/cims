@@ -199,17 +199,17 @@ def collect_host_info() -> dict:
     return info
 
 
-# mgmt IP — agent 시작 시 csc_url 의 outgoing local IP 로 결정 후 캐시.
+# mgmt IP — agent 시작 시 oam_url 의 outgoing local IP 로 결정 후 캐시.
 # collect_interfaces() 가 이 IP 와 매칭되는 row 에 mgmt=True 플래그를 붙임.
 _MGMT_IP: str | None = None
 
 
-def detect_mgmt_ip(csc_url: str) -> str | None:
-    """csc_url 로 가는 outgoing local IP 반환 — 그 IP 의 NIC 이 mgmt (CSC 통신용).
+def detect_mgmt_ip(oam_url: str) -> str | None:
+    """oam_url 로 가는 outgoing local IP 반환 — 그 IP 의 NIC 이 mgmt (CSC 통신용).
     UDP socket 의 connect 로 routing table 만 평가 (실제 패킷 송신 없음).
     """
     try:
-        parsed = urllib.parse.urlparse(csc_url)
+        parsed = urllib.parse.urlparse(oam_url)
         host = parsed.hostname
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
         if not host:
@@ -676,7 +676,7 @@ def _detect_tar_pkg_subdir(tar_path: str) -> str:
     return ""
 
 
-def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
+def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
     """PKG 다운로드 + tarball 풀어 install_path 에 설치. config.json 도 함께 기록.
 
     새 버전이고 같은 모듈/프로세스의 이전 버전이 존재하면
@@ -691,7 +691,7 @@ def job_install(params: dict, csc_url: str, session_token: str) -> tuple:
     if not pkg_id:
         return 1, "", "package_id missing"
 
-    url = f"{csc_url}/api/agent/package/{pkg_id}"
+    url = f"{oam_url}/api/agent/package/{pkg_id}"
     status, data, meta = http_get_binary(url, {"X-Agent-Token": session_token})
     if status != 200 or not data:
         return 2, "", f"download failed status={status} meta={meta.get('error','')}"
@@ -822,7 +822,7 @@ def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
     return ""
 
 
-def job_update_config(params: dict, csc_url: str = "", session_token: str = "") -> tuple:
+def job_update_config(params: dict, oam_url: str = "", session_token: str = "") -> tuple:
     """install_path/config.json 재기록 + 모듈 SIGUSR1 reload 트리거.
 
     CSP 의 reload 로직 (CspServer.cpp:336-354) 이 g_reloadFlag 를 폴링하여 csp.json
@@ -840,20 +840,20 @@ def job_update_config(params: dict, csc_url: str = "", session_token: str = "") 
     sync_id = params.get("sync_id")
     install_path = _resolve_install_path(params)
     if not os.path.isdir(install_path):
-        return _sync_ack_and_return(csc_url, session_token, sync_id,
+        return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=1, err=f"install_path not found: {install_path}")
     try:
         cfg_path = _write_config_file(install_path, params.get("config") or {})
     except Exception as e:
-        return _sync_ack_and_return(csc_url, session_token, sync_id,
+        return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=2, err=f"write config failed: {e}")
     pkg_subdir = _resolve_pkg_subdir(install_path, params)
     _, signaled = _signal_process(install_path, "usr1", pkg_subdir=pkg_subdir)
-    return _sync_ack_and_return(csc_url, session_token, sync_id,
+    return _sync_ack_and_return(oam_url, session_token, sync_id,
                                 rc=0, out=f"config updated: {cfg_path} signaled={signaled}")
 
 
-def job_sync_config(params: dict, csc_url: str, session_token: str) -> tuple:
+def job_sync_config(params: dict, oam_url: str, session_token: str) -> tuple:
     """HA fan-out: csc 의 컬렉션 jsonl 을 pull → install_path/config/<col>.jsonl 에
     atomic write → 로컬 CSP 에 SIGUSR1 → csc 에 ack 보고.
 
@@ -876,19 +876,19 @@ def job_sync_config(params: dict, csc_url: str, session_token: str) -> tuple:
     op         = params.get("op") or "UPDATE"
     install_path = _resolve_install_path(params)
     if not install_path or not os.path.isdir(install_path):
-        return _sync_ack_and_return(csc_url, session_token, sync_id,
+        return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=1, err=f"install_path not found: {install_path}")
     if not collection:
-        return _sync_ack_and_return(csc_url, session_token, sync_id,
+        return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=1, err="collection missing")
 
     # 1) csc 에서 컬렉션 pull
-    pull_url = f"{csc_url}/api/agent/csp-config/{collection}"
+    pull_url = f"{oam_url}/api/agent/csp-config/{collection}"
     status, body = http_get_json(pull_url,
                                  headers={"X-Agent-Token": session_token},
                                  timeout=30)
     if status != 200 or not isinstance(body, dict) or "items" not in body:
-        return _sync_ack_and_return(csc_url, session_token, sync_id,
+        return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=2, err=f"pull failed: status={status} body={body}")
     items = body.get("items") or []
     etag  = body.get("etag") or ""
@@ -906,7 +906,7 @@ def job_sync_config(params: dict, csc_url: str, session_token: str) -> tuple:
                 pass
         n = _write_jsonl_atomic(jsonl_path, items)
     except Exception as e:
-        return _sync_ack_and_return(csc_url, session_token, sync_id,
+        return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=3, err=f"write failed: {e}")
 
     # 3) SIGUSR1 → 로컬 CSP (PID file 기반 — pkg_subdir 자동 탐색)
@@ -915,16 +915,16 @@ def job_sync_config(params: dict, csc_url: str, session_token: str) -> tuple:
 
     msg = (f"sync_config ok: collection={collection} op={op} rows={n} "
            f"etag={etag} signaled={signaled}")
-    return _sync_ack_and_return(csc_url, session_token, sync_id,
+    return _sync_ack_and_return(oam_url, session_token, sync_id,
                                 rc=0, out=msg)
 
 
-def _sync_ack_and_return(csc_url: str, session_token: str, sync_id,
+def _sync_ack_and_return(oam_url: str, session_token: str, sync_id,
                          *, rc: int, out: str = "", err: str = "") -> tuple:
     """csc 에 ack/nack 보고 후 결과 튜플 반환. csc 호출 실패는 로그만 (rc 유지)."""
     if sync_id is None:
         return rc, out, err
-    ack_url = f"{csc_url}/api/agent/sync/{int(sync_id)}/ack"
+    ack_url = f"{oam_url}/api/agent/sync/{int(sync_id)}/ack"
     payload = {"status": "ack" if rc == 0 else "nack"}
     if err:
         payload["error"] = err
@@ -1274,12 +1274,12 @@ def job_health_check(params: dict) -> tuple:
     return 0, " ".join(results), ""
 
 
-def job_upgrade_agent(csc_url: str, session_token: str, agent_name: str) -> tuple:
+def job_upgrade_agent(oam_url: str, session_token: str, agent_name: str) -> tuple:
     """install-agent.sh --update-only 호출 — bundle 전체 + sub-script 일괄 교체.
     INSTALL_DIR 은 cims_agent.py 위치 기반 추론 (<INSTALL_DIR>/agent/cims_agent.py).
     성공 시 호출자가 self-exec → systemd 재기동."""
     install_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    src_url = f"{csc_url}/install-agent.sh"
+    src_url = f"{oam_url}/install-agent.sh"
     status, data, meta = http_get_binary(src_url, {"X-Agent-Token": session_token})
     if status != 200 or not data or len(data) < 1024:
         return 1, "", f"download install-agent.sh failed status={status} size={len(data) if data else 0}"
@@ -1289,7 +1289,7 @@ def job_upgrade_agent(csc_url: str, session_token: str, agent_name: str) -> tupl
             f.write(data)
         os.chmod(installer_path, 0o755)
         cmd = ["bash", installer_path, "--update-only",
-               "--csc-url",     csc_url,
+               "--csc-url",     oam_url,
                "--name",        agent_name,
                "--install-dir", install_dir]
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
@@ -1524,25 +1524,25 @@ def start_sync_server(state: AgentState, state_dir: str, port: int) -> int:
     return bound_port
 
 
-def execute_job(job: dict, csc_url: str, session_token: str, agent_name: str) -> dict:
+def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) -> dict:
     jt = job["type"]
     params = job.get("params") or {}
     try:
         if jt == "install":
-            rc, out, err = job_install(params, csc_url, session_token)
+            rc, out, err = job_install(params, oam_url, session_token)
         elif jt == "upgrade":
-            rc, out, err = job_install(params, csc_url, session_token)
+            rc, out, err = job_install(params, oam_url, session_token)
         elif jt == "upgrade_agent":
-            rc, out, err = job_upgrade_agent(csc_url, session_token, agent_name)
+            rc, out, err = job_upgrade_agent(oam_url, session_token, agent_name)
         elif jt == "agent_restart":
             # agent 자체 self-restart. heartbeat loop 가 execv 처리.
             rc, out, err = 0, "agent restart requested — execv self", ""
         elif jt in ("start", "stop", "restart"):
             rc, out, err = job_process_control(params, jt)
         elif jt == "update_config":
-            rc, out, err = job_update_config(params, csc_url, session_token)
+            rc, out, err = job_update_config(params, oam_url, session_token)
         elif jt == "sync_config":
-            rc, out, err = job_sync_config(params, csc_url, session_token)
+            rc, out, err = job_sync_config(params, oam_url, session_token)
         elif jt == "update_ha":
             rc, out, err = job_update_ha(params)
         elif jt == "apply_ip_config":
@@ -1583,10 +1583,10 @@ def execute_job(job: dict, csc_url: str, session_token: str, agent_name: str) ->
 #  Main loop
 # ──────────────────────────────────────────────────────────────
 
-def enroll(csc_url: str, enrollment_token: str, state: AgentState, name: str) -> bool:
+def enroll(oam_url: str, enrollment_token: str, state: AgentState, name: str) -> bool:
     info = collect_host_info()
     payload = {"enrollment_token": enrollment_token, **info}
-    status, resp = http_post(f"{csc_url}/api/agent/enroll", payload)
+    status, resp = http_post(f"{oam_url}/api/agent/enroll", payload)
     if status != 200 or not resp.get("session_token"):
         print(f"[agent] enroll failed: status={status} body={resp}")
         return False
@@ -1615,13 +1615,13 @@ def enroll(csc_url: str, enrollment_token: str, state: AgentState, name: str) ->
     return True
 
 
-def rotate_mtls_cert(csc_url: str, state: AgentState) -> bool:
+def rotate_mtls_cert(oam_url: str, state: AgentState) -> bool:
     """CSC 에 새 mTLS cert 발급 요청 → state_dir 에 저장. 성공 시 True.
 
     발급 성공 후에도 현재 실행 중인 sync REST 서버는 옛 cert 를 메모리에 쥐고 있음.
     호출자(run_loop) 가 프로세스 종료하면 systemd 가 재기동하면서 새 cert 를 읽음.
     """
-    status, resp = http_post(f"{csc_url}/api/agent/cert/rotate", {},
+    status, resp = http_post(f"{oam_url}/api/agent/cert/rotate", {},
                              headers={"X-Agent-Token": state.session_token})
     if status != 200 or not isinstance(resp, dict):
         print(f"[agent] cert rotate failed: status={status} body={resp}", flush=True)
@@ -1646,18 +1646,18 @@ def rotate_mtls_cert(csc_url: str, state: AgentState) -> bool:
         return False
 
 
-def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: int,
+def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: int,
              sync_port: int = 0):
     """
     Heartbeat 루프.
 
-    HA 환경 (csc_url 이 VIP_csc 가리킴) 에서 fail-over 가 진행되는 약 3~7초 동안은
+    HA 환경 (oam_url 이 VIP_csc 가리킴) 에서 fail-over 가 진행되는 약 3~7초 동안은
     connection refused / timeout 이 발생하므로 짧은 exponential backoff 로 복구 시도.
     정상 회차 sleep 은 heartbeat_sec, 실패 회차는 5s → 10s → 20s → max(heartbeat_sec, 60s).
     """
     # CSC 통신 NIC 식별 — collect_interfaces() 가 mgmt 플래그 부여 시 사용.
     global _MGMT_IP
-    _MGMT_IP = detect_mgmt_ip(csc_url)
+    _MGMT_IP = detect_mgmt_ip(oam_url)
 
     next_metric = 0
     fail_count = 0
@@ -1670,7 +1670,7 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                 "agent_version": AGENT_VERSION,
             }
             if sync_port: hb_body["sync_port"] = sync_port
-            status, resp = http_post(f"{csc_url}/api/agent/heartbeat", hb_body,
+            status, resp = http_post(f"{oam_url}/api/agent/heartbeat", hb_body,
                                      headers={"X-Agent-Token": state.session_token})
             if status == 401:
                 print("[agent] session token revoked; exiting")
@@ -1682,15 +1682,15 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                 # CSC 가 cert rotation 지시 → 새 cert 받아 저장 후 프로세스 종료 (systemd 재기동)
                 if resp.get("cert_rotate"):
                     print("[agent] cert rotation requested by CSC", flush=True)
-                    if rotate_mtls_cert(csc_url, state):
+                    if rotate_mtls_cert(oam_url, state):
                         print("[agent] exiting for systemd restart with new cert", flush=True)
                         return 0
 
                 jobs = resp.get("jobs") or []
                 for job in jobs:
                     print(f"[agent] exec job id={job['id']} type={job['type']}", flush=True)
-                    result = execute_job(job, csc_url, state.session_token, state.name or "")
-                    rep_status, rep_body = http_post(f"{csc_url}/api/agent/report", result,
+                    result = execute_job(job, oam_url, state.session_token, state.name or "")
+                    rep_status, rep_body = http_post(f"{oam_url}/api/agent/report", result,
                                                       headers={"X-Agent-Token": state.session_token})
                     print(f"[agent] report status={rep_status} rc={result['result_code']}", flush=True)
                     # upgrade_agent / agent_restart 성공 시 새 코드 image 로 self-exec.
@@ -1709,7 +1709,7 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
 
             if time.time() >= next_metric:
                 metrics = collect_metrics()
-                http_post(f"{csc_url}/api/agent/metric", metrics,
+                http_post(f"{oam_url}/api/agent/metric", metrics,
                           headers={"X-Agent-Token": state.session_token})
                 next_metric = time.time() + metric_sec
         except Exception as e:
@@ -1726,7 +1726,9 @@ def run_loop(csc_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csc-url", required=True)
+    # Phase 3b: --oam-url 신규. --csc-url 도 deprecated alias 로 받음 (옛 agent 호환).
+    ap.add_argument("--oam-url", dest="oam_url")
+    ap.add_argument("--csc-url", dest="oam_url")  # deprecated alias
     ap.add_argument("--enrollment-token", default=os.environ.get("CIMS_ENROLLMENT_TOKEN"))
     ap.add_argument("--name", default=socket.gethostname())
     ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
@@ -1738,13 +1740,16 @@ def main():
     ap.add_argument("--enroll-only", action="store_true",
                     help="enrollment 만 수행 후 종료 (heartbeat / sync server 시작 안 함)")
     args = ap.parse_args()
+    if not args.oam_url:
+        print("[agent] --oam-url (또는 --csc-url) 필수")
+        return 1
 
     state = AgentState(args.state_dir)
     if not state.session_token:
         if not args.enrollment_token:
             print("[agent] first run requires --enrollment-token")
             return 1
-        if not enroll(args.csc_url, args.enrollment_token, state, args.name):
+        if not enroll(args.oam_url, args.enrollment_token, state, args.name):
             return 2
     else:
         print(f"[agent] resumed: id={state.agent_id} name={state.name}")
@@ -1760,7 +1765,7 @@ def main():
         except Exception as e:
             print(f"[agent] sync server start failed: {e}", flush=True)
 
-    return run_loop(args.csc_url, state, args.heartbeat_sec, args.metric_sec, sync_port)
+    return run_loop(args.oam_url, state, args.heartbeat_sec, args.metric_sec, sync_port)
 
 
 if __name__ == "__main__":

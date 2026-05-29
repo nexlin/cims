@@ -5,22 +5,24 @@
 #
 # Mode 1 — fresh install (default):
 #   cd /path/to/install
-#   curl -k https://<CSC>:4419/install-agent.sh | bash -s -- \
-#        --csc-url https://<CSC>:4419 \
+#   curl -k https://<OAM>:4419/install-agent.sh | bash -s -- \
+#        --oam-url https://<OAM>:4419 \
 #        --enrollment-token <token> \
 #        --name <agent-name>
 #   ./init.sh                    # sudoers + enroll + systemd unit + enable --now (sudo 비번 1회)
 #
 # Mode 2 — update (bundle 전체 교체 + sub-script 재생성, enrollment/sudoers/systemd 안 건드림):
 #   bash install-agent.sh --update-only \
-#        --csc-url https://<CSC>:4419 \
+#        --oam-url https://<OAM>:4419 \
 #        --name <agent-name> \
 #        --install-dir /opt/cims-agent
 #   (호출자가 systemctl --user restart cims-agent.service 책임 — agent self-exit + systemd 자동 재기동)
+#
+# 호환성: --csc-url 도 동작 (deprecated alias). Phase 3b 이후 OAM 분리 — agent 는 OAM(4419) 과 통신.
 
 set -euo pipefail
 
-CSC_URL=""
+OAM_URL=""
 ENROLL_TOKEN=""
 AGENT_NAME="$(hostname)"
 MODE="fresh"
@@ -28,7 +30,8 @@ INSTALL_DIR_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --csc-url)           CSC_URL="$2"; shift 2 ;;
+        --oam-url)           OAM_URL="$2"; shift 2 ;;
+        --csc-url)           OAM_URL="$2"; shift 2 ;;   # deprecated alias (호환성)
         --enrollment-token)  ENROLL_TOKEN="$2"; shift 2 ;;
         --name)              AGENT_NAME="$2"; shift 2 ;;
         --install-dir)       INSTALL_DIR_ARG="$2"; shift 2 ;;
@@ -38,13 +41,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$MODE" == "fresh" ]]; then
-    if [[ -z "$CSC_URL" || -z "$ENROLL_TOKEN" ]]; then
-        echo "Usage (fresh): $0 --csc-url <URL> --enrollment-token <TOKEN> [--name <NAME>]"
+    if [[ -z "$OAM_URL" || -z "$ENROLL_TOKEN" ]]; then
+        echo "Usage (fresh): $0 --oam-url <URL> --enrollment-token <TOKEN> [--name <NAME>]"
         exit 1
     fi
 else
-    if [[ -z "$CSC_URL" ]]; then
-        echo "Usage (update): $0 --update-only --csc-url <URL> --name <NAME> [--install-dir <DIR>]"
+    if [[ -z "$OAM_URL" ]]; then
+        echo "Usage (update): $0 --update-only --oam-url <URL> --name <NAME> [--install-dir <DIR>]"
         exit 1
     fi
 fi
@@ -78,8 +81,8 @@ chmod 700 "$STATE_DIR"
 echo "==> Downloading agent bundle"
 BUNDLE_TMP="$(mktemp /tmp/cims-agent-bundle.XXXXXX.tar.gz)"
 trap 'rm -f "$BUNDLE_TMP"' EXIT
-if ! curl -fsSLk "$CSC_URL/agent-bundle.tar.gz" -o "$BUNDLE_TMP"; then
-    echo "ERROR: failed to download $CSC_URL/agent-bundle.tar.gz"
+if ! curl -fsSLk "$OAM_URL/agent-bundle.tar.gz" -o "$BUNDLE_TMP"; then
+    echo "ERROR: failed to download $OAM_URL/agent-bundle.tar.gz"
     exit 4
 fi
 if [[ "$MODE" == "fresh" ]]; then
@@ -196,7 +199,7 @@ if [[ -f state/state.json ]]; then
 else
     echo "==> Running first-time enroll"
     CIMS_ENROLLMENT_TOKEN="$ENROLL_TOKEN" /usr/bin/python3 ./agent/cims_agent.py \\
-        --csc-url "$CSC_URL" \\
+        --oam-url "$OAM_URL" \\
         --state-dir "./state" \\
         --name "$AGENT_NAME" \\
         --enroll-only || true
@@ -241,7 +244,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=$INSTALL_DIR
 ExecStart=/usr/bin/python3 $BIN_FILE \\\\
-    --csc-url $CSC_URL \\\\
+    --oam-url $OAM_URL \\\\
     --state-dir $STATE_DIR \\\\
     --name $AGENT_NAME
 Restart=always
@@ -290,7 +293,7 @@ force=0
 [[ "\${1:-}" == "--yes" || "\${1:-}" == "-y" ]] && force=1
 
 echo "==> CIMS agent 업데이트"
-echo "  csc-url     : $CSC_URL"
+echo "  oam-url     : $OAM_URL"
 echo "  install-dir : \$(pwd)"
 echo "  agent name  : $AGENT_NAME"
 echo ""
@@ -305,9 +308,9 @@ fi
 INSTALLER_TMP="\$(mktemp /tmp/install-agent-update.XXXXXX.sh)"
 trap 'rm -f "\$INSTALLER_TMP"' EXIT
 echo "→ /install-agent.sh 다운로드"
-curl -fsSLk "$CSC_URL/install-agent.sh" -o "\$INSTALLER_TMP"
+curl -fsSLk "$OAM_URL/install-agent.sh" -o "\$INSTALLER_TMP"
 bash "\$INSTALLER_TMP" --update-only \\
-    --csc-url "$CSC_URL" \\
+    --oam-url "$OAM_URL" \\
     --name "$AGENT_NAME" \\
     --install-dir "\$(pwd)"
 

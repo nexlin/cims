@@ -8,9 +8,12 @@
 #   cims-svc status           # 전체 상태
 #   cims-svc log    <svc>     # 로그 tail -f
 #
-#   <svc> = all | cmp | csp | cwrtc | csc | console | phone
+#   <svc> = all | cmp | csp | cwrtc | oam | csc | console | phone
 #         | pmp | imp | psp | isp                  (변종)
 #         | tb | tb-csc | tb-console               (Test-Bed)
+#
+# OAM 분리 Phase 3b: oam = OAM REST API 서버 (Agent / HA / 배포 / 검증, port 4419)
+#                    csc = CSC REST API 서버 (가입자 / MCPTT, port 4421 admin + 4430 mcptt)
 #
 # 배포본 위치: ${install_path}/agent/bin/cims-svc
 # 개발 환경: ${repo_root}/build/dist/agent/bin/cims-svc (cims.sh sync 로 동기화)

@@ -86,30 +86,20 @@ if __name__ == '__main__':
             logger.log_error(f"CSC overlay failed: {e}")
         return c
 
+    # OAM 분리 Phase 3b — csc_app.py 는 가입자 CRUD + MCPTT (IdMS/GMS/CMS/KMS) 만.
+    # OAM 책임 handler (agents/ha_groups/build/verification/...) 는 oam_app.py 에서.
     from services.mcptt import load_shared_data, CSC_HANDLER_LIST, notify_csp
-    from services       import flow_logger, logger as csc_logger, config_cache
-    from handlers       import auth, recording
+    from services       import flow_logger, logger as csc_logger
+    from handlers       import auth
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
     from handlers.auth           import CIMS_AUTH_HANDLER_LIST
     from handlers.users          import CIMS_USERS_HANDLER_LIST
-    from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
-    from handlers.stats          import CIMS_STATS_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
-    from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
-    from handlers.build          import CIMS_BUILD_HANDLER_LIST, init as build_init
-    from handlers.service_control import CIMS_SERVICE_CONTROL_HANDLER_LIST
-    from handlers.agents         import CIMS_AGENT_ADMIN_HANDLER_LIST, CIMS_AGENT_PUBLIC_HANDLER_LIST
-    from handlers.agent_api      import CIMS_AGENT_API_HANDLER_LIST
-    from handlers.modules        import CIMS_MODULES_HANDLER_LIST
-    from handlers.ha_groups      import CIMS_HA_GROUPS_HANDLER_LIST
-    from handlers.alerts         import CIMS_ALERTS_HANDLER_LIST
-    from services.flow_logger    import FLOW_HANDLER_LIST
-    from services                import alert_log
 
     admin_server = None
     mcptt_server = None
     try:
-        logger.log_info(f'==================== start ====================')
+        logger.log_info(f'==================== start (CSC) ====================')
 
         config = load_config()
         auth.init(config)
@@ -120,24 +110,16 @@ if __name__ == '__main__':
         # 레거시 호환
         if not _service_log_dir:
             _service_log_dir = config.get("ServiceLogDir", config.get("MsgLogDir", ""))
-        _system_id = config.get("SystemId", "csp_01")
+        _system_id = config.get("SystemId", "csc_01")
 
         flow_logger.init(
             service_log_dir=_service_log_dir,
             system_id=_system_id,
         )
 
-        tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'tests'))
-        if not os.path.isdir(tests_dir):
-            tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))
-        ver_init(tests_dir, config)
-        build_init(os.path.dirname(tests_dir))
-
         csc_logger.init(
             service_log_dir=_service_log_dir,
         )
-
-        recording.init(service_log_dir=_service_log_dir)
 
         # ── pi_http 요청 로깅 훅 등록 (admin/mcptt 자동 로깅) ──
         from httpsrv.controller import DynamicRouteProc
@@ -220,23 +202,6 @@ if __name__ == '__main__':
                     config['Data'][key] = os.path.normpath(os.path.join(_COMPONENT_ROOT, val))
             load_shared_data(config)
 
-        # CSP 런타임 설정 캐시 (DB→mem→file). DB 장애 시 파일 캐시로 read-only 모드 작동.
-        _cache_path = config.get('ConfigCacheDir')
-        if _cache_path and not os.path.isabs(_cache_path):
-            _cache_path = os.path.normpath(os.path.join(_COMPONENT_ROOT, _cache_path))
-        if not _cache_path:
-            _cache_path = os.path.normpath(os.path.join(_COMPONENT_ROOT, 'cache'))
-        config['ConfigCacheDir'] = _cache_path
-        try:
-            _cc = config_cache.init_config_cache(config)
-            logger.log_info(
-                f"ConfigCache ready (read_only={_cc.is_read_only()}) dir={_cache_path} "
-                f"listeners={len(_cc.get_all('listener'))} trunks={len(_cc.get_all('trunk'))} "
-                f"routes={len(_cc.get_all('route'))} access={len(_cc.get_all('access'))}"
-            )
-        except Exception as _e:
-            logger.log_error(f"ConfigCache init failed: {_e}")
-
         # [Test Support] Inject dummy data if empty so tests pass without real JSON files
         from services.mcptt import USERS, GROUPS
         if not USERS:
@@ -255,7 +220,12 @@ if __name__ == '__main__':
         else:
             logger.log_info("SSL Disabled (server.key / server.crt not found)")
 
-        # ── Admin server (CIMS Web API) ──────────────────────────────────────
+        # ── CSC Admin server (가입자 CRUD + auth + 본인정보 + org) ─────────────
+        # OAM 분리 Phase 3b — agents/ha_groups/build/verification/alerts/stats/
+        # recording/service_control/modules 등 OAM handler 는 oam_app.py 에서.
+        # 본 server 는 가입자 (admin.py) + 조직 (org.py) + auth (관리자 로그인) +
+        # users (본인 정보) 만. port 는 csc.json Server.Port (default 4420,
+        # OAM 의 4419 와 충돌 회피).
         admin_conf = config.get('Server', {'Ip': '0.0.0.0', 'Port': 4420})
         cims_kwargs = {'config': config}
         admin_server = HttpServer(
@@ -266,62 +236,11 @@ if __name__ == '__main__':
         )
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_USERS_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
-        admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_STATS_HANDLER_LIST + CIMS_ORG_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST
-        ])
-        # 빌드 / 패키지화 / 패키지 다운로드 (admin JWT)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_BUILD_HANDLER_LIST
-        ])
-        # L5 — csp_runtime.py 폐기 마이그레이션 (2026-05-19):
-        # GET /api/v1/csp/services 는 agents.py 의 handle_sip_services 로 이동
-        # (deployment.collection/access_services 가 진짜 SoT). listener/trunk/
-        # route/access CRUD endpoint 는 라우터 자체에서 제거 — 옛 csp_runtime.py
-        # 파일은 migrate 스크립트 의존성으로 코드만 보존.
-
-        # CMP/CSP/CSC 프로세스 제어 API
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_SERVICE_CONTROL_HANDLER_LIST
-        ])
-        # P10: Agent 레지스트리 + 패키지 + 배포 관리 (admin JWT)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AGENT_ADMIN_HANDLER_LIST
-        ])
-        # Phase 1: 모듈 overlay 설정 API (로컬 dist 대상)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_MODULES_HANDLER_LIST
-        ])
-        # HA 그룹 — 노드 묶음 (A/S / All Active) 관리 (admin JWT)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_HA_GROUPS_HANDLER_LIST
-        ])
-        # Alert 이력 (CSP/CMP/DB down, RTP 사용률 임계값 초과)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_ALERTS_HANDLER_LIST
-        ])
-        # P10: Agent 전용 API (agent token 인증, JWT 우회)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AGENT_API_HANDLER_LIST
-        ])
-        # P10: 공개 정적 에셋 — install 스크립트 / agent 바이너리
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AGENT_PUBLIC_HANDLER_LIST
+            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_USERS_HANDLER_LIST
+                                  + CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
         ])
         admin_server.start()
-        logger.log_info(f"Admin server started on port {admin_conf.get('Port', 4420)}")
+        logger.log_info(f"CSC Admin server started on port {admin_conf.get('Port', 4420)}")
 
         # ── MCPTT server (IdMS / GMS / CMS / KMS) ───────────────────────────
         mcptt_conf = config.get('McpttServer', {'Ip': '0.0.0.0', 'Port': 4430})
@@ -342,219 +261,10 @@ if __name__ == '__main__':
         except Exception as e:
             logger.log_error(f"CSC_RESTART notification failed: {e}")
 
-        # ── Agent stale sweeper ─────────────────────────────────────────
-        # heartbeat 이 STALE_SEC 이상 안 오면 online/approved → offline 로 전이.
-        # 기본 8s (agent 의 기본 heartbeat 2s × 4). sweep_interval 도 2s 로 dense polling.
-        from handlers.agents import _get_db as _agent_db_conn
-        from handlers.agent_api import _AGENT_CERT_ROTATE_THRESHOLD_DAYS
-        STALE_SEC = int(config.get('AgentStaleSec', 8))
-        SWEEP_INTERVAL = int(config.get('AgentSweepIntervalSec', 2))
-        CERT_SWEEP_INTERVAL = int(config.get('AgentCertSweepSec', 3600))  # 기본 1시간
-
-        def _sweep_stale_agents():
-            try:
-                from handlers.agents import _agent_load_all, _agent_update
-                from datetime import datetime as _dt
-                threshold = _dt.now().timestamp() - STALE_SEC
-                n = 0
-                for a in _agent_load_all(config):
-                    if a.get('status') not in ('online', 'approved'):
-                        continue
-                    hb = a.get('last_heartbeat')
-                    if not hb:
-                        continue
-                    try:
-                        hb_ts = _dt.fromisoformat(hb).timestamp()
-                    except Exception:
-                        continue
-                    if hb_ts < threshold:
-                        _agent_update(config, a['id'], {'status': 'offline'})
-                        n += 1
-                if n > 0:
-                    logger.log_info(f"[agent-sweep] marked {n} stale agent(s) offline "
-                                    f"(threshold={STALE_SEC}s)")
-            except Exception as e:
-                logger.log_error(f"[agent-sweep] error: {e}")
-
-        def _sweep_cert_rotate():
-            """mtls_enabled=1 이고 cert 가 THRESHOLD 일 이내 만료 예정인 agent 를 표식.
-            다음 heartbeat 응답에서 rotate 지시가 내려간다."""
-            try:
-                from handlers.agents import _agent_load_all, _agent_update
-                from datetime import datetime as _dt, timedelta as _td
-                deadline = _dt.now() + _td(days=_AGENT_CERT_ROTATE_THRESHOLD_DAYS)
-                n = 0
-                for a in _agent_load_all(config):
-                    if not a.get('mtls_enabled'):
-                        continue
-                    if a.get('cert_rotate_pending'):
-                        continue
-                    exp = a.get('cert_expires_at')
-                    if not exp:
-                        continue
-                    try:
-                        exp_dt = _dt.fromisoformat(exp)
-                    except Exception:
-                        continue
-                    if exp_dt <= deadline:
-                        _agent_update(config, a['id'], {'cert_rotate_pending': 1})
-                        n += 1
-                if n > 0:
-                    logger.log_info(f"[cert-sweep] flagged {n} agent(s) for cert rotation "
-                                    f"(threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d)")
-            except Exception as e:
-                logger.log_error(f"[cert-sweep] error: {e}")
-
-        # ── Alert sweeper ───────────────────────────────────────────────
-        # CSP/CMP/DB down 전이 + RTP 포트 사용률 임계값 (default 80%) 위반을 감시.
-        # 상태 전이마다 {ServiceLogDir}/alerts/YYYY/MM/DD.jsonl 에 event 1줄 기록.
-        from handlers.stats import _get_csp_stats, _get_cmp_stats, _get_db as _cims_db_conn
-        ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
-        ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
-        _service_log = config.get('ServiceLogging', {}).get('Dir') \
-            or config.get('ServiceLogDir', config.get('MsgLogDir', ''))
-        # type -> open_ts (ISO). 시작 시 최근 30일 이벤트를 replay 하여
-        # 직전 인스턴스가 열어두고 끝난 알람 상태를 복원 → 재기동 후 동일
-        # 조건이 계속되면 open 재-emit 하지 않고, 해소되면 close 1건만 기록.
-        _alert_open: dict = {}
-        if _service_log:
-            try:
-                restored = alert_log.compute_open_state(_service_log, days=30)
-                _alert_open.update({k: True for k in restored})
-                if restored:
-                    logger.log_info(f"[alert-sweep] restored open state: {sorted(restored.keys())}")
-            except Exception as e:
-                logger.log_error(f"[alert-sweep] restore failed: {e}")
-
-        def _check_db():
-            try:
-                conn = _cims_db_conn(config)
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT 1")
-                    return True
-                finally:
-                    conn.close()
-            except Exception:
-                return False
-
-        def _emit(typ: str, severity: str, action: str, message: str):
-            from datetime import datetime as _dt
-            alert_log.record_event(_service_log, {
-                'ts': _dt.now().isoformat(timespec='seconds'),
-                'type': typ,
-                'severity': severity,
-                'action': action,
-                'message': message,
-            })
-
-        def _transition(typ: str, is_open: bool, severity: str, msg_open: str, msg_close: str):
-            was_open = typ in _alert_open
-            if is_open and not was_open:
-                _alert_open[typ] = True
-                _emit(typ, severity, 'open', msg_open)
-                logger.log_info(f"[alert] OPEN {typ} — {msg_open}")
-            elif not is_open and was_open:
-                _alert_open.pop(typ, None)
-                _emit(typ, severity, 'close', msg_close)
-                logger.log_info(f"[alert] CLOSE {typ}")
-
-        def _sweep_alerts():
-            try:
-                csp = _get_csp_stats(config)
-                cmp = _get_cmp_stats(config)
-                db_ok = _check_db()
-                _transition('csp_down', not bool(csp), 'critical',
-                            'CSP 프로세스 응답 없음', 'CSP 응답 정상화')
-                _transition('cmp_down', not bool(cmp), 'critical',
-                            'CMP 프로세스 응답 없음', 'CMP 응답 정상화')
-                _transition('db_down', not db_ok, 'critical',
-                            'DB 연결 끊김', 'DB 연결 복구')
-                total = cmp.get('rtp_ports_total', 0) or 0
-                used = cmp.get('rtp_ports_used', 0) or 0
-                pct = int(round(used / total * 100)) if total > 0 else 0
-                _transition('rtp_high', pct >= ALERT_RTP_THRESHOLD, 'warning',
-                            f'RTP 포트 사용률 {pct}% ({ALERT_RTP_THRESHOLD}% 초과)',
-                            f'RTP 포트 사용률 {pct}% (정상)')
-            except Exception as e:
-                logger.log_error(f"[alert-sweep] error: {e}")
-
-        # ── sync_txn timeout sweeper (L3) ───────────────────────────────
-        # HA fan-out 의 sync_txn 가 ttl_sec 초과해도 pending 인 멤버 슬롯을
-        # timeout 으로 마크 → 전체 status = failed (또는 partial 잔존).
-        SYNC_TXN_SWEEP_INTERVAL = int(config.get('SyncTxnSweepSec', 15))
-
-        def _sweep_sync_txn():
-            try:
-                from services import sync_txn
-                n = sync_txn.sweep_timeouts(config)
-                if n > 0:
-                    logger.log_info(f"[sync-txn-sweep] timed out {n} transaction(s)")
-            except Exception as e:
-                logger.log_error(f"[sync-txn-sweep] error: {e}")
-
-        # ── HA fan-out drift sweeper (L4 / F2) ─────────────────────────
-        # ha_group * (propagate 대상 collection) hash 비교 → drift 시 alert.
-        # AutoResyncDrift=true 면 master 의 records 로 다른 멤버에 자동 PUT.
-        DRIFT_SWEEP_INTERVAL  = int(config.get('DriftSweepSec', 300))
-        DRIFT_AUTO_RESYNC     = bool(config.get('AutoResyncDrift', False))
-        _drift_open: dict = {}
-
-        def _sweep_drift():
-            try:
-                from services import drift_sweeper
-                results = drift_sweeper.scan_all(config)
-                if not _service_log:
-                    return
-                counts = drift_sweeper.emit_drift_alerts(
-                    config, results, _service_log, _drift_open)
-                drift_rows = [r for r in results if r.get('drift')]
-                if drift_rows:
-                    logger.log_info(
-                        f"[drift-sweep] scanned={len(results)} "
-                        f"drift={len(drift_rows)} opened={counts['opened']} "
-                        f"closed={counts['closed']}")
-                if DRIFT_AUTO_RESYNC and drift_rows:
-                    summary = drift_sweeper.auto_resync(config, drift_rows)
-                    if summary['resynced'] or summary['errors']:
-                        logger.log_info(
-                            f"[drift-sweep] auto_resync — resynced="
-                            f"{summary['resynced']} errors={len(summary['errors'])}")
-            except Exception as e:
-                logger.log_error(f"[drift-sweep] error: {e}")
-
-        logger.log_info(f"[agent-sweep] stale threshold={STALE_SEC}s, interval={SWEEP_INTERVAL}s")
-        logger.log_info(f"[cert-sweep] rotate threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d, "
-                        f"interval={CERT_SWEEP_INTERVAL}s")
-        logger.log_info(f"[alert-sweep] interval={ALERT_SWEEP_INTERVAL}s, "
-                        f"rtp_threshold={ALERT_RTP_THRESHOLD}%, "
-                        f"dir={_service_log or '(disabled — no ServiceLogDir)'}")
-        logger.log_info(f"[sync-txn-sweep] interval={SYNC_TXN_SWEEP_INTERVAL}s")
-        logger.log_info(f"[drift-sweep] interval={DRIFT_SWEEP_INTERVAL}s "
-                        f"auto_resync={DRIFT_AUTO_RESYNC}")
-        _last_sweep = 0
-        _last_cert_sweep = 0
-        _last_alert_sweep = 0
-        _last_sync_txn_sweep = 0
-        _last_drift_sweep = 0
+        # OAM 분리 Phase 3b — sweeper (agent/cert/alert/sync_txn/drift) 는 oam_app.py
+        # 책임. csc 는 가입자 CRUD + MCPTT signaling 만 — 백그라운드 작업 없음.
         while True:
-            time.sleep(1)
-            _now = time.time()
-            if _now - _last_sweep >= SWEEP_INTERVAL:
-                _sweep_stale_agents()
-                _last_sweep = _now
-            if _now - _last_cert_sweep >= CERT_SWEEP_INTERVAL:
-                _sweep_cert_rotate()
-                _last_cert_sweep = _now
-            if _now - _last_alert_sweep >= ALERT_SWEEP_INTERVAL:
-                _sweep_alerts()
-                _last_alert_sweep = _now
-            if _now - _last_sync_txn_sweep >= SYNC_TXN_SWEEP_INTERVAL:
-                _sweep_sync_txn()
-                _last_sync_txn_sweep = _now
-            if _now - _last_drift_sweep >= DRIFT_SWEEP_INTERVAL:
-                _sweep_drift()
-                _last_drift_sweep = _now
+            time.sleep(60)
 
     except Exception as e:
         tb_str = traceback.format_exc()

@@ -226,15 +226,28 @@ LIVE 검증:
 - OAM 7 endpoint (agents/ha-groups/packages/deployments/alerts/verification/csp/services) 200, CSC 2 endpoint (users/orgs) 404 (의도된 분리).
 - Python traceback 없음.
 
-#### 단계 3b — 그 외 (다음 세션)
+#### 단계 3b — 코드 작업 ✅ **완료 (2026-05-29)**
 
-- **agent URL 전환** — install-agent.sh / cims_agent.py 의 `csc_url` → `oam_url`. install_command URL 도 변경.
-- **systemd / lifecycle.sh** — `cims-oam.service` + `start_oam_module / stop_oam_module`.
-- **4서버 LIVE 적용** — csc + oam 동반 배포 후 cims-oam systemd 절체. 4서버 agent heartbeat 새 URL 로 전환.
-- **CSC 본연 정리** — csc_app.py 의 oam handler 등록 제거 (가입자 / mcptt 만). admin server port 4420 으로 이동 (4419 는 OAM 차지). prod 환경에서만 의미.
-- **공유 비밀키 K** — Phase 1 의 `services/admin_auth.py` 가 이미 wiring 완료. oam/csc config 양쪽 동일 K 유지 (현재 동일값으로 박혀있음).
+진행 결과:
+- **agent URL rename** — `install-agent.sh` / `cims_agent.py` / `oam/src/handlers/agents.py` 의 `csc_url` → `oam_url`. cmdline 인자 `--oam-url` (신규) + `--csc-url` (deprecated alias) 호환. `_oam_public_url` 함수, `Server.AgentOamUrl` config key 우선 + `AgentCscUrl` fallback. install_command 출력은 `--oam-url`.
+- **systemd unit** — 기존 `cims@.service.tpl` 의 instantiate 패턴 활용 (`cims@oam.service` 자동 동작). 별도 unit 파일 불필요.
+- **lifecycle.sh `start_oam / stop_oam`** — oam_app.py 시작/중지. `_svc_port_proto` / `_start_one` / `_stop_one` / `status_one` / `COMPONENTS` 모두 oam 추가. `cims-svc start oam` 으로 호출 가능.
+- **csc_app.py 본연 정리** — OAM handler 등록 12개 제거 (agents/agent_api/ha_groups/modules/build/service_control/verification/alerts/stats/recording/auth/users 중 csc 가 따로 보유 안 하는 것). 5 sweeper 제거 (oam_app.py 책임). csc는 가입자 (admin.py) + 조직 (org.py) + auth (관리자 로그인) + users (본인 정보) + mcptt server (IdMS/GMS/CMS/KMS) 만. admin server port 4420 (4419 는 OAM 차지).
+- **공유 비밀키 K** — Phase 1 의 `services/admin_auth.py` 가 이미 wiring 완료. oam/csc config 양쪽 동일 K.
 
-위험도: 큼 (LIVE 절체 — 4 agent 모두 새 URL 로 전환, 다운타임 관리). 단 3a 까지는 TB 만 영향 — 완료.
+LIVE 검증 (TB):
+- TB-OAM 새 PID 3603983 4419 LISTEN. startup banner + sweeper 5 시작 + alert state 복원.
+- API smoke (agents/ha-groups/packages/deployments) 200 OK.
+- `POST /api/v1/agents` → install_command 가 `--oam-url` 형식으로 발급 확인.
+- 4서버 agent heartbeat 200 OK 연속 (port 같음).
+
+#### 단계 3c — 4서버 LIVE 절체 (다음 세션)
+
+- csc + oam 동반 배포 (Phase 2 의 packages: oam + csc, agent 가 install_path/csc/ + install_path/oam/ 두 디렉토리에 풀음).
+- systemctl start cims@oam.service (각 4서버).
+- 옛 cims-csc (4419) 정지 → 새 cims-csc (4420 admin + 4430 mcptt) + cims-oam (4419) 분리 기동.
+- 4 agent 자동 새 URL 로 heartbeat (port 같지만 endpoint 책임이 OAM).
+- 위험도: 큼. 운영 다운타임 분 단위 (절체 도중 admin API + agent heartbeat 일시 중단).
 
 ### Phase 4: 호스트 분리 (선택)
 - **목표**: oam 호스트 (운영망), csc 호스트 (서비스망).

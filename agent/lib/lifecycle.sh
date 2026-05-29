@@ -304,6 +304,43 @@ print(p)" 2>/dev/null || echo 4420)
     is_running csc && ok "CSC 시작 완료 (pid=$(read_pid csc), port=$csc_port)" || { err "CSC 시작 실패"; tail -3 "$LOG_DIR/csc.log" | sed 's/^/  /'; return 1; }
 }
 
+# OAM 분리 Phase 3b — cims@oam.service / cims-svc start oam 으로 동작.
+# OAM(4419) = Agent / HA / 배포 / 검증 책임. CSC(4420 admin + 4430 mcptt) 와 별개 프로세스.
+start_oam() {
+    if is_running oam; then warn "OAM 이미 실행 중 (pid=$(read_pid oam))"; return 0; fi
+    [[ ! -f "$DIST_DIR/oam/src/oam_app.py" ]] && err "OAM 소스 없음 (make dist 실행 필요)" && return 1
+    local oam_port
+    oam_port=$(python3 -c "
+import json, os
+base='$DIST_DIR/oam/config/oam.json'
+candidates=['$DIST_DIR/oam/config.json', '$DIST_DIR/config.json']
+p=None
+for ov in candidates:
+    if not os.path.isfile(ov): continue
+    try:
+        f=json.load(open(ov))
+        if isinstance(f,dict):
+            p=f.get('Server.Port') or (f.get('Server',{}) or {}).get('Port')
+            if p: break
+    except: pass
+if not p:
+    try: p=json.load(open(base))['Server']['Port']
+    except: p=4419
+print(p)" 2>/dev/null || echo 4419)
+    kill_stray "$DIST_DIR/oam/src/oam_app.py" "$oam_port" tcp
+    info "OAM (Operation & Management REST API) 시작... (port=$oam_port)"
+    cd "$DIST_DIR/oam/src"
+    python3 -u "$DIST_DIR/oam/src/oam_app.py" >> "$LOG_DIR/oam.log" 2>&1 &
+    save_pid oam $!
+    sleep 1.5
+    is_running oam && ok "OAM 시작 완료 (pid=$(read_pid oam), port=$oam_port)" \
+        || { err "OAM 시작 실패"; tail -3 "$LOG_DIR/oam.log" | sed 's/^/  /'; return 1; }
+}
+
+stop_oam() {
+    stop_one oam
+}
+
 start_console() {
     if is_running console; then warn "console 이미 실행 중 (pid=$(read_pid console))"; return 0; fi
     # Console 3분화:
@@ -491,12 +528,14 @@ _svc_port_proto() {
         csp|psp|isp) echo "5060:udp" ;;
         cwrtc)      echo "8443:tcp" ;;
         csc)        echo "4421:tcp" ;;
+        oam)        echo "4419:tcp" ;;   # OAM 분리 Phase 3b
         # console 은 모드별 포트 분기 — Dev(소스 트리) 3001 / Test(dist 전용) 8080.
         console)
             if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then echo "3001:tcp"
             else echo "8080:tcp"; fi ;;
         phone)      echo "3002:tcp" ;;
         tb-csc)     echo "4419:tcp" ;;
+        tb-oam)     echo "4419:tcp" ;;
         tb-console) echo "3000:tcp" ;;
         *)          echo "" ;;
     esac
@@ -566,6 +605,7 @@ cmd_status() {
     status_one psp
     status_one isp
     status_one cwrtc
+    status_one oam
     status_one csc
     status_one console
     status_one phone
@@ -591,11 +631,11 @@ cmd_log() {
 }
 
 # ── 컴포넌트 dispatcher ──
-COMPONENTS=(cmp csp cwrtc csc console phone)
+COMPONENTS=(cmp csp cwrtc oam csc console phone)
 
 _start_one() {
     case "$1" in
-        all)        start_cmp; start_csp; sleep 0.5; start_cwrtc; start_csc; start_console; start_phone ;;
+        all)        start_cmp; start_csp; sleep 0.5; start_cwrtc; start_oam; start_csc; start_console; start_phone ;;
         tb)         start_tb_csc; sleep 0.5; start_tb_console ;;
         cmp)        start_cmp ;;
         pmp)        start_pmp ;;
@@ -604,6 +644,7 @@ _start_one() {
         psp)        start_psp ;;
         isp)        start_isp ;;
         cwrtc)      start_cwrtc ;;
+        oam)        start_oam ;;     # OAM 분리 Phase 3b
         csc)        start_csc ;;
         console)    start_console ;;
         phone)      start_phone ;;
@@ -627,6 +668,7 @@ _stop_one() {
             for c in "${COMPONENTS[@]}"; do
                 case "$c" in
                     csc)     stop_csc ;;
+                    oam)     stop_oam ;;     # OAM 분리 Phase 3b
                     console) stop_console ;;
                     phone)   stop_phone ;;
                     *)       stop_one "$c" ;;
@@ -686,6 +728,7 @@ _stop_one() {
             stop_one tb-csc
             ;;
         csc)     stop_csc ;;
+        oam)     stop_oam ;;        # OAM 분리 Phase 3b
         console) stop_console ;;
         phone)   stop_phone ;;
         *)       stop_one "$1" ;;
