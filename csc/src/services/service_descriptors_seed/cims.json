@@ -1,0 +1,27 @@
+{
+  "id": "cims",
+  "label": "CIMS",
+  "modules": [
+    { "name": "csp",    "port": 5060, "proto": "udp", "controllable": true },
+    { "name": "isp",    "port": 5060, "proto": "udp" },
+    { "name": "psp",    "port": 5060, "proto": "udp" },
+    { "name": "cmp",    "port": 9000, "proto": "udp", "controllable": true },
+    { "name": "imp",    "port": 9000, "proto": "udp" },
+    { "name": "pmp",    "port": 9000, "proto": "udp" },
+    { "name": "csc",    "port": 4420, "proto": "tcp", "controllable": true },
+    { "name": "cwrtc",  "controllable": true },
+    { "name": "phone",  "controllable": true },
+    { "name": "cspsim" }
+  ],
+  "alert_rules": [
+    { "type": "csp_down", "severity": "critical", "check": "process_down", "target": "csp",
+      "metric": "CSP 프로세스", "msg_open": "CSP 프로세스 응답 없음", "msg_close": "CSP 응답 정상화" },
+    { "type": "cmp_down", "severity": "critical", "check": "process_down", "target": "cmp",
+      "metric": "CMP 프로세스", "msg_open": "CMP 프로세스 응답 없음", "msg_close": "CMP 응답 정상화" },
+    { "type": "db_down", "severity": "critical", "check": "db_down",
+      "metric": "DB 연결", "msg_open": "DB 연결 끊김", "msg_close": "DB 연결 복구" },
+    { "type": "rtp_high", "severity": "warning", "check": "rtp_pct_gte", "threshold": 80, "unit": "%",
+      "metric": "RTP 포트 사용률", "msg_open": "RTP 포트 사용률 {pct}% ({threshold}% 초과)",
+      "msg_close": "RTP 포트 사용률 {pct}% (정상)" }
+  ]
+}

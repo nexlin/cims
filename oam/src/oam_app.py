@@ -256,8 +256,9 @@ if __name__ == '__main__':
         # Service Descriptor 레지스트리 — startup config 캐시 + store 비면 CIMS seed 주입.
         # ha_groups/build/service_control 이 descriptor 구동(하드코딩 fallback 보존).
         service_registry.init(config)
-        if service_registry.seed_if_empty(config):
-            logger.log_info('[service-registry] seeded default CIMS descriptor (store was empty)')
+        _seeded = service_registry.seed_if_empty(config)
+        if _seeded:
+            logger.log_info(f'[service-registry] seeded {_seeded} service descriptor(s) from seed dir (store was empty)')
 
         admin_server = HttpServer(
             admin_conf.get('Ip', '0.0.0.0'),

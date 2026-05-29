@@ -18,6 +18,7 @@ import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
 import HaServicesPage from './pages/HaServicesPage'
+import ServiceDescriptorsPage from './pages/ServiceDescriptorsPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
@@ -67,6 +68,7 @@ const CORE_SECTIONS: RouteSection[] = [
     routes: [
       { path: '/deploy/servers',   title: '시스템/인프라',      component: ServersPage,    adminOnly: true },
       { path: '/deploy/packages',  title: '패키지',            component: PackagesPage,   adminOnly: true },
+      { path: '/deploy/service-defs', title: '서비스 정의',     component: ServiceDescriptorsPage, adminOnly: true },
       { path: '/deploy/services',  title: 'HA 상세 편집',      component: HaServicesPage, adminOnly: true, hidden: true },
     ],
   },

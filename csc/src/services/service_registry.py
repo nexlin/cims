@@ -15,6 +15,10 @@ store 가 비어있으면 _CIMS_SEED 를 1회 주입 → 기존 하드코딩과 
 build.py 의 일부 함수는 config 를 인자로 받지 않으므로, init(config) 로 startup config 를
 캐시해 두고 함수 호출 시 config 생략 가능 (소비처가 config 가지면 전달, 아니면 캐시 사용).
 """
+import os
+import glob
+import json
+
 from services import file_store
 
 _DOMAIN = 'services'
@@ -23,38 +27,9 @@ _DOMAIN = 'services'
 _CORE_MODULES = {'agent', 'oam', 'console'}
 _CORE_CONTROLLABLE = {'console'}
 
-# 전환 seed — CIMS 서비스 pack 기본 descriptor. store 비었을 때 1회 주입.
-# 기존 ha_groups._MODULE_HEALTH_DEFAULTS / build._VALID_MODULES / service_control._ALLOWED 와 동일.
-# TODO(5-6): CIMS service pack(csc) 으로 추출.
-_CIMS_SEED = {
-    'id': 'cims',
-    'label': 'CIMS',
-    'modules': [
-        {'name': 'csp',    'port': 5060, 'proto': 'udp', 'controllable': True},
-        {'name': 'isp',    'port': 5060, 'proto': 'udp'},
-        {'name': 'psp',    'port': 5060, 'proto': 'udp'},
-        {'name': 'cmp',    'port': 9000, 'proto': 'udp', 'controllable': True},
-        {'name': 'imp',    'port': 9000, 'proto': 'udp'},
-        {'name': 'pmp',    'port': 9000, 'proto': 'udp'},
-        {'name': 'csc',    'port': 4420, 'proto': 'tcp', 'controllable': True},
-        {'name': 'cwrtc',  'controllable': True},
-        {'name': 'phone',  'controllable': True},
-        {'name': 'cspsim'},
-    ],
-    # 알람 규칙 — 코어 sweeper 가 평가. check 프리미티브: process_down / db_down / rtp_pct_gte.
-    # msg_open/close 의 {pct},{threshold} 는 sweeper 가 포맷. (기존 하드코딩과 동일)
-    'alert_rules': [
-        {'type': 'csp_down', 'severity': 'critical', 'check': 'process_down', 'target': 'csp',
-         'metric': 'CSP 프로세스', 'msg_open': 'CSP 프로세스 응답 없음', 'msg_close': 'CSP 응답 정상화'},
-        {'type': 'cmp_down', 'severity': 'critical', 'check': 'process_down', 'target': 'cmp',
-         'metric': 'CMP 프로세스', 'msg_open': 'CMP 프로세스 응답 없음', 'msg_close': 'CMP 응답 정상화'},
-        {'type': 'db_down', 'severity': 'critical', 'check': 'db_down',
-         'metric': 'DB 연결', 'msg_open': 'DB 연결 끊김', 'msg_close': 'DB 연결 복구'},
-        {'type': 'rtp_high', 'severity': 'warning', 'check': 'rtp_pct_gte', 'threshold': 80, 'unit': '%',
-         'metric': 'RTP 포트 사용률', 'msg_open': 'RTP 포트 사용률 {pct}% ({threshold}% 초과)',
-         'msg_close': 'RTP 포트 사용률 {pct}% (정상)'},
-    ],
-}
+# seed descriptor 디렉토리 — 서비스 pack 이 자기 *.json 을 여기에 둔다 (CIMS = cims.json).
+# 코어 코드엔 CIMS 데이터가 없음 (5-6: 데이터로 추출). store 비면 이 JSON 들을 1회 주입.
+_SEED_DIR = os.path.join(os.path.dirname(__file__), 'service_descriptors_seed')
 
 _CFG = None
 
@@ -69,16 +44,33 @@ def _cfg(config):
     return config if config is not None else _CFG
 
 
-def seed_if_empty(config: dict = None) -> bool:
-    """descriptor store 가 비어있으면 CIMS seed 주입. 주입했으면 True."""
+def _load_seed_files() -> list:
+    """seed 디렉토리의 *.json descriptor 들 로드 (서비스 pack 제공)."""
+    out = []
+    for p in sorted(glob.glob(os.path.join(_SEED_DIR, '*.json'))):
+        try:
+            with open(p, encoding='utf-8') as f:
+                doc = json.load(f)
+            if isinstance(doc, dict) and doc.get('id'):
+                out.append(doc)
+        except Exception:
+            continue
+    return out
+
+
+def seed_if_empty(config: dict = None) -> int:
+    """descriptor store 가 비어있으면 seed JSON 들을 주입. 주입한 개수 반환."""
     c = _cfg(config)
     if c is None:
-        return False
+        return 0
     d = file_store.domain_dir(c, _DOMAIN)
     if file_store.load_all(d):
-        return False
-    file_store.save(d, _CIMS_SEED['id'], dict(_CIMS_SEED))
-    return True
+        return 0
+    n = 0
+    for doc in _load_seed_files():
+        file_store.save(d, doc['id'], doc)
+        n += 1
+    return n
 
 
 def load_descriptors(config: dict = None) -> list:
