@@ -400,6 +400,44 @@ def collect_per_iface() -> list:
     return rows
 
 
+# 전환 안전망(설치 루트 enumerate 실패 시) 기본 데몬 집합.
+_DEFAULT_METRIC_MODULES = ("csp", "cmp", "csc", "cwrtc")
+# 자기 이름/`<name>_app.py` 로 식별 불가한 모듈 — module 보고에서 제외 (오탐 방지).
+#   agent = 자신(liveness 는 heartbeat/online 으로 판정), console = nginx/vite (프로세스명 무관).
+_NON_DAEMON_MODULES = {"agent", "console"}
+
+
+def _metric_module_names() -> list:
+    """metric 의 modules 보고 대상 = 설치된 모듈(modules/<module>/) ∪ 기본 집합.
+    OAM 의 module_down alert 가 이 실행 집합과 deployment(status=running) 를 비교하므로,
+    설치된 모듈을 빠짐없이 보고해야 isp 등 기본 집합 밖 모듈의 오탐(false down)을 막는다."""
+    names = set(_DEFAULT_METRIC_MODULES)
+    try:
+        for nm in os.listdir(DEFAULT_INSTALL_ROOT):
+            if os.path.isdir(os.path.join(DEFAULT_INSTALL_ROOT, nm)):
+                names.add(nm)
+    except Exception:
+        pass
+    return sorted(names - _NON_DAEMON_MODULES)
+
+
+def _pgrep_module(name: str):
+    """모듈 프로세스 (pid, cmdline) 1개 반환, 없으면 None.
+    1) comm 정확 매칭(-x) — C++ 바이너리(csp/cmp/isp/cwrtc). 비앵커 매칭은 'isp' 가
+       'networkd-dispatcher' 에 오매칭되므로 반드시 -x.
+    2) `<name>_app.py` cmdline 매칭(-f) — python 데몬(csc/oam). comm 이 python3 라 1)로 안 잡힘."""
+    for argv in (["pgrep", "-ax", name], ["pgrep", "-af", f"{name}_app.py"]):
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=2)
+        except Exception:
+            continue
+        for line in r.stdout.splitlines():
+            parts = line.split(maxsplit=1)
+            if parts and parts[0].isdigit():
+                return int(parts[0]), (parts[1] if len(parts) > 1 else "")
+    return None
+
+
 def collect_metrics() -> dict:
     """CPU/mem/disk percent + load + per-iface RX/TX + CIMS module pid/cpu/mem."""
     m = {}
@@ -425,32 +463,25 @@ def collect_metrics() -> dict:
     except Exception: pass
     # per-iface RX/TX
     m["per_iface"] = collect_per_iface()
-    # modules — CIMS 바이너리 (pid/cpu/mem) + 기존 processes 유지 (호환).
+    # modules — 실행 중 모듈 (pid/cpu/mem) + 기존 processes 유지 (호환).
     m["processes"] = []
     m["modules"]   = []
     seen_pids = set()
-    for procname in ("csp", "cmp", "csc", "cwrtc"):
-        try:
-            out = subprocess.run(["pgrep", "-a", procname], capture_output=True, text=True, timeout=2)
-            for line in out.stdout.splitlines():
-                parts = line.split(maxsplit=1)
-                if not parts:
-                    continue
-                pid = int(parts[0])
-                cmd = parts[1] if len(parts) > 1 else ""
-                if pid in seen_pids:
-                    continue
-                seen_pids.add(pid)
-                if not m["processes"]:
-                    m["processes"].append({"name": procname, "pid": pid, "cmdline": cmd})
-                m["modules"].append({
-                    "name": procname, "pid": pid,
-                    "cpu_pct": _proc_cpu_pct(pid),
-                    "mem_mb":  _proc_rss_mb(pid),
-                })
-                break
-        except Exception:
-            pass
+    for procname in _metric_module_names():
+        hit = _pgrep_module(procname)
+        if not hit:
+            continue
+        pid, cmd = hit
+        if pid in seen_pids:
+            continue
+        seen_pids.add(pid)
+        if not m["processes"]:
+            m["processes"].append({"name": procname, "pid": pid, "cmdline": cmd})
+        m["modules"].append({
+            "name": procname, "pid": pid,
+            "cpu_pct": _proc_cpu_pct(pid),
+            "mem_mb":  _proc_rss_mb(pid),
+        })
     # 사라진 pid 캐시 정리 — 메모리 누수 방지.
     live = {x["pid"] for x in m["modules"]}
     for stale_pid in list(_PROC_CPU_CACHE.keys()):
@@ -514,18 +545,15 @@ def _health_check_ha() -> dict:
 
 
 def _health_check_modules() -> list:
-    """CIMS 모듈 프로세스 상태 (csp/cmp/csc/cwrtc) + RSS, CPU%."""
+    """모듈 프로세스 상태 (설치된 데몬) + RSS, CPU%, uptime."""
     rows = []
-    for procname in ("csp", "cmp", "csc", "cwrtc"):
+    for procname in _metric_module_names():
         try:
-            r = subprocess.run(["pgrep", "-a", procname],
-                                capture_output=True, text=True, timeout=2)
-            lines = r.stdout.splitlines()
-            if not lines:
+            hit = _pgrep_module(procname)
+            if not hit:
                 rows.append({"name": procname, "running": False})
                 continue
-            parts = lines[0].split(maxsplit=1)
-            pid = int(parts[0])
+            pid, _cmd = hit
             row = {"name": procname, "running": True, "pid": pid,
                    "cpu_pct": _proc_cpu_pct(pid),
                    "mem_mb":  _proc_rss_mb(pid)}
