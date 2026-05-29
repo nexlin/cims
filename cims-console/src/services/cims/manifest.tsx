@@ -7,6 +7,13 @@
 import { Users, Radio, BarChart3 } from 'lucide-react'
 import type { ServiceManifest } from '../../nav-types'
 
+import { healthDotsWidget } from './widgets/HealthDotsWidget'
+import { kpiWidget } from './widgets/KpiWidget'
+import { cspRolesWidget } from './widgets/CspRolesWidget'
+import { alertBannerWidget } from './widgets/AlertBannerWidget'
+import { activeVoipWidget } from './widgets/ActiveVoipWidget'
+import { activePttWidget } from './widgets/ActivePttWidget'
+
 import OrganizationsPage from './pages/OrganizationsPage'
 import MembersPage from './pages/MembersPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
@@ -27,6 +34,10 @@ const httpsStats = () => <StatsMessagesPage iface="https" />
 export const cimsManifest: ServiceManifest = {
   id: 'cims',
   label: 'CIMS',
+  widgets: [
+    healthDotsWidget, kpiWidget, cspRolesWidget,
+    alertBannerWidget, activeVoipWidget, activePttWidget,
+  ],
   sections: [
     {
       key: 'subscribers',

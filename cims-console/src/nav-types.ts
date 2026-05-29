@@ -7,6 +7,7 @@
 
 import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
+import type { WidgetDef } from './widgets/types'
 
 export type RouteDef = {
   path: string
@@ -32,9 +33,10 @@ export type RouteSection = {
   prodHidden?: boolean
 }
 
-// 서비스 pack 이 콘솔에 기여하는 내용. 현재는 nav 섹션 — 향후 대시보드 타일/통계 탭/엔티티 등으로 확장.
+// 서비스 pack 이 콘솔에 기여하는 내용 — nav 섹션 + 위젯(대시보드/페이지 합성용).
 export interface ServiceManifest {
   id: string         // 'cims'
   label: string      // 'CIMS'
   sections: RouteSection[]
+  widgets?: WidgetDef[]   // registry 가 수집해 layout(PageLayout)에서 배치
 }
