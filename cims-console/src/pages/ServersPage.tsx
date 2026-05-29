@@ -1372,6 +1372,14 @@ function NetworkTab({ agent: a }: { agent: Agent }) {
     } catch (e) { show((e as Error).message, 'err') }
   }
 
+  // Phase 4d2 — IP 별 NIC role (망 분류) 명시. mgmt 자동 외 service/internal admin.
+  async function onUpdateRole(ip: string, role: 'mgmt'|'service'|'internal'|'') {
+    try {
+      await deploymentApi.putInterfaceRoles(a.id, { [ip]: role })
+      show(`${ip} → role=${role || '(clear)'}`, 'ok')
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+
   return (
     <ServiceIpPanel
       title={`${a.name} — IP / Routing`}
@@ -1382,6 +1390,7 @@ function NetworkTab({ agent: a }: { agent: Agent }) {
       applying={applying}
       onApply={onApply}
       onUpdateSlot={onUpdateSlot}
+      onUpdateRole={onUpdateRole}
     />
   )
 }

@@ -9,7 +9,7 @@ import { btnSmall, btnDanger } from './styles'
 // [삭제] 허용 (외부 IP 는 readonly). [+IP 추가] / [+라우팅 추가] 로 명시적 op 발사.
 // route 는 kernel 외 default GW + specific subnet 모두 변경 가능.
 export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, slots, applying,
-                                 onApply, onUpdateSlot }: {
+                                 onApply, onUpdateSlot, onUpdateRole }: {
   title: string
   interfaces: NetIface[]
   storedRows: ServiceIpRow[]                                                    // slot 라벨 매칭용 (iface, ip) keyed
@@ -26,6 +26,10 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
   // 외부/cims-managed 모든 IP 의 slot 편집 — file_store service_ip_rows 에 (iface, ip, slot) 저장.
   // VIP / module config 매핑 용. ip addr 변경은 안 함.
   onUpdateSlot: (iface: string, ip: string, mask: number, slot: string) => void
+  // Phase 4d2 — IP 단위 NIC role (망 분류) 편집. PUT /agents/<id>/interface-roles.
+  // mgmt 는 자동 도출 (oam Mgmt.Cidr + agent detect_mgmt_ip) — UI 에선 readonly.
+  // service/internal 만 admin 명시. 빈 string = clear (override 제거).
+  onUpdateRole?: (ip: string, role: 'mgmt'|'service'|'internal'|'') => void
 }) {
   const mgmtIfaces = new Set(interfaces.filter(x => x.mgmt).map(x => x.name))
   // iface 그룹 — 출현 순서대로. 빈 NIC 도 1 row.
@@ -136,15 +140,16 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
         <thead>
           <tr style={{ background: '#f5f5f5', color: '#666' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>인터페이스</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 180 }}>IP / mask</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>용도</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 100 }}>소유</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 170 }}>IP / mask</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 110 }}>망(role)</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 130 }}>용도(slot)</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>소유</th>
             <th style={{ padding: '4px 8px', textAlign: 'left' }}>액션</th>
           </tr>
         </thead>
         <tbody>
           {ifaceOrder.length === 0 && (
-            <tr><td colSpan={5} style={{ padding: '8px', color: '#aaa' }}>(인터페이스 없음 — agent 보고 대기)</td></tr>
+            <tr><td colSpan={6} style={{ padding: '8px', color: '#aaa' }}>(인터페이스 없음 — agent 보고 대기)</td></tr>
           )}
           {ifaceOrder.flatMap((iface) => {
             const isMgmt = mgmtIfaces.has(iface)
@@ -166,6 +171,26 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                       </td>
                       <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>
                         {ni.ip}/{ni.mask}
+                      </td>
+                      <td style={{ padding: '4px 8px' }}>
+                        {/* Phase 4d2: 망(role). mgmt 는 자동 도출 readonly. service/internal 만 admin 명시. */}
+                        {(ni.role === 'mgmt' || ni.mgmt) ? (
+                          <span style={{ fontSize: 11, color: '#666' }}
+                                title="oam.json Mgmt.Cidr + agent detect_mgmt_ip 자동 도출 — 수정 불가">
+                            🔒 mgmt
+                          </span>
+                        ) : onUpdateRole ? (
+                          <select value={ni.role || ''}
+                                  onChange={e => onUpdateRole(ni.ip, e.target.value as any)}
+                                  style={{ width: '95%', padding: '2px 4px', fontSize: 11,
+                                           border: '1px solid #ddd', borderRadius: 3 }}>
+                            <option value="">(없음)</option>
+                            <option value="service">service</option>
+                            <option value="internal">internal</option>
+                          </select>
+                        ) : (
+                          <span style={{ fontSize: 11, color: '#999' }}>{ni.role || '-'}</span>
+                        )}
                       </td>
                       <td style={{ padding: '4px 8px' }}>
                         <ImeSafeInput value={slot}
@@ -195,7 +220,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
               : [(
                   <tr key={`${iface}-empty`}>
                     <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}><b>{iface}</b></td>
-                    <td colSpan={3} style={{ padding: '4px 8px', color: '#aaa', fontSize: 11 }}>
+                    <td colSpan={4} style={{ padding: '4px 8px', color: '#aaa', fontSize: 11 }}>
                       (IP 미할당)
                     </td>
                     <td style={{ padding: '4px 8px' }}></td>

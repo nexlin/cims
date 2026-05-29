@@ -96,6 +96,7 @@ export interface NetIface {
   mgmt?: boolean                                // CSC ↔ agent 통신 NIC — 변경 차단 (자기 단절 방지)
   managed?: boolean                             // cims-priv ip-add 로 부여 (label '<iface>:cims') — UI 에서 삭제 허용 대상
   hint?: string
+  role?: 'mgmt' | 'service' | 'internal' | ''   // Phase 4d2 — IP 별 용도(망 분류). mgmt 자동, 나머지 admin 명시.
 }
 
 // HaServicesPage 용 — 운영자 설정 (iface, ip) pair 단위. 한 iface 에 여러 row 가능.
@@ -421,6 +422,17 @@ export const deploymentApi = {
   restartAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/restart`, {}),
   healthCheck:   (id: number, scope: 'ha'|'modules'|'all' = 'all') =>
     api.post<AgentHealthCheck>(`/agents/${id}/health-check`, { scope }),
+  // Phase 4d2 — IP 별 NIC role 명시 (admin override).
+  // body: {"<ip>": "<role>"} — role 은 mgmt/service/internal/'' (clear).
+  // mgmt 는 agent 가 oam.json Mgmt.Cidr + detect_mgmt_ip 로 자동 도출 (admin 명시도 가능).
+  getInterfaceRoles: (id: number) =>
+    api.get<{
+      agent_id: number
+      overrides: Record<string, string>
+      interfaces: Array<{ ip: string; name: string; role?: string; mgmt?: boolean }>
+    }>(`/agents/${id}/interface-roles`),
+  putInterfaceRoles: (id: number, body: Record<string, string>) =>
+    api.put<{ ok: boolean; interface_role_overrides: Record<string, string> }>(`/agents/${id}/interface-roles`, body),
   applyIpConfig: (id: number,
                   ops?: { service_ip_rows?: Array<{ op: 'add'|'del'; iface: string; ip: string; mask: number; slot?: string }>;
                           routes?:          Array<{ op: 'add'|'del'; dst: string; via: string; dev: string }> }) =>
