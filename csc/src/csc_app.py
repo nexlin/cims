@@ -17,15 +17,16 @@ _CONFIG_PATH = os.environ.get('CIMS_CSC_CONFIG') or os.path.join(_COMPONENT_ROOT
 #
 # 후보 경로 (우선순위):
 #   1) dev env (build/dist 트리): _COMPONENT_ROOT/../oam/src
-#      → build/dist/csc/.. = build/dist → build/dist/oam/src
-#   2) agent install (install_path/csc/<ver>/csc 구조):
-#      _COMPONENT_ROOT/../../oam/*/oam/src 를 glob 검색
-#      → install_path/csc/0.0.3/csc/.. = install_path/csc/0.0.3 →
-#         glob install_path/csc/0.0.3/../../oam/*/oam/src
-#         = install_path/oam/0.0.2/oam/src 등 매칭
+#      → build/dist/csc/.. = build/dist → build/dist/oam/src ✓
+#   2) agent install (install_path/<pkg>/<ver>/<pkg> 구조):
+#      install_path/csc/<ver>/csc/../../../oam/*/oam/src 를 glob 검색
+#      _COMPONENT_ROOT = install_path/csc/<ver>/csc
+#      ..  = install_path/csc/<ver>
+#      ../.. = install_path/csc
+#      ../../.. = install_path  ← 여기서 oam/<ver>/oam/src 매칭
 _OAM_SRC = None
 _candidates = [os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'oam', 'src'))]
-_glob_pattern = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'oam', '*', 'oam', 'src'))
+_glob_pattern = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', '..', 'oam', '*', 'oam', 'src'))
 _candidates += sorted(glob.glob(_glob_pattern), reverse=True)
 for _c in _candidates:
     if os.path.isdir(_c):

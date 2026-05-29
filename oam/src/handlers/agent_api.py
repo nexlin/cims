@@ -577,9 +577,11 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
             try: params = json.loads(params)
             except Exception: params = {}
         dep_id = params.get("deployment_id") if isinstance(params, dict) else None
-        if dep_id and jt in ("install", "start", "restart"):
+        # OAM 분리 Phase 4 fix: 'upgrade' 도 install 처럼 status=stopped 전이.
+        # 누락 시 upgrade 후 status=deploying 으로 stuck → 다음 job 안 만들어짐.
+        if dep_id and jt in ("install", "upgrade", "start", "restart"):
             new_install_path = None
-            if jt == "install" and result_stdout:
+            if jt in ("install", "upgrade") and result_stdout:
                 import re as _re
                 m = _re.search(r"at\s+(\S+?)\s+\(", result_stdout)
                 if m: new_install_path = m.group(1)

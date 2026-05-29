@@ -294,17 +294,30 @@ management host (10.0.2.45):
 - **csc-tb.json 폐기** — dist/csc/config/csc-tb.json 삭제. `cims.sh tb csc` target 도 deprecated 마크 유지.
 - **systemd 가이드** — `oam/SYSTEMD.md` 작성 (사용자 sudo 권한 필요).
 
-미진행 (별도 cycle 권장 — LIVE 위험도):
-- csc-0.0.4 로 upgrade — `PUT deployment.package_id=46` 미적용 확인 (delete + recreate 필요할 수도).
-- csc start LIVE 적용 — 막힘:
-  - (a) nohup csc 와 4421 port 충돌. management host (이 머신) 의 nohup 정지 절차 필요.
-  - (b) `cims-svc start csc` 가 single-module install 미지원 (default 'all' → cmp 찾아 fail). lifecycle.sh 수정 필요.
-  - (c) ctrl02 의 `uvicorn` Python 패키지 누락 — 사용자 sudo or pip --user 설치 필요.
+#### 단계 4b — LIVE 절체 — 부분 완료 (2026-05-29)
 
-현 운영 (management host 가 임시 대안):
-- TB-OAM (4419, nohup): 4서버 agent heartbeat + OAM endpoint 정상.
-- nohup CSC (4421+4430): 가입자 CRUD + mcptt server LISTEN.
-- ctrl01/ctrl02 의 csc deployment 는 install 완료 + start 미진행 — 코드 배포 자체는 LIVE 에 박힘.
+**ctrl01 csc agent-managed 운영 전환 PASS**:
+- agent_api.py `_sync_report` 의 transition list 에 'upgrade' 추가 — upgrade succeeded 후 status=stopped 정상 전이 (이전: deploying stuck bug).
+- csc_app.py sys.path glob `'../..'` → `'../../..'` 한 단계 추가 — agent install (install_path/csc/<ver>/csc) 에서 install_path/oam/<ver>/oam/src 정확히 검색.
+- csc-0.0.5 빌드 + 등록 (id=47).
+- ctrl01 (agent 51, dep 9) — agent-managed csc 시작 성공 (PID 3686055, port 4421+4430). 옛 nohup csc 정리.
+- API 검증: 4421 의 users/organizations 200 OK, OAM endpoint 404 (분리 완료).
+
+**ctrl02 csc 시작 미진행**:
+- `ModuleNotFoundError: No module named 'uvicorn'` — Python 패키지 누락.
+- 사용자 직접 실행: `ssh cims@10.0.2.46 'pip3 install --user uvicorn'` 후 csc start job 재트리거.
+
+**systemd 영구화 안내**:
+- oam/SYSTEMD.md + 인라인 명령 제공 (사용자 sudo 필요).
+- cims-oam.service 등록 시 `pkill -f oam_app.py` + `systemctl enable --now cims-oam.service`.
+- ctrl01 csc 는 agent + cims@.service.tpl 매커니즘으로 host 재기동 후 자동 부활 — systemd 별도 등록 불필요.
+
+현 운영 (4서버 무영향, ctrl01 분리 LIVE):
+- management host = ctrl01 (10.0.2.45):
+  - TB-OAM (4419, PID 3680745, nohup): OAM 책임, 4서버 agent heartbeat.
+  - agent-managed CSC (4421+4430, PID 3686055): 가입자 CRUD + mcptt.
+- ctrl02 (10.0.2.46): csc/oam 코드 install 완료, start 미진행 (uvicorn).
+- 4서버 csp/cmp/isp deployment 전혀 영향 없음.
 
 ### Phase 4: 호스트 분리 (선택)
 - **목표**: oam 호스트 (운영망), csc 호스트 (서비스망).
