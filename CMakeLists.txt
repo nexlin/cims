@@ -296,6 +296,9 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csc/cert
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csc/log
 
+    # OAM 분리 Phase 1 — top-level oam/ (csc 와 같은 binary, sys.path mount)
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/oam/src
+
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/ext_mnt
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/console
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/phone
@@ -345,6 +348,10 @@ add_custom_target(dist
     # copy_directory 는 기존 파일을 덮어쓰지만 삭제된 소스 파일은 반영 안 됨 → 먼저 rm -rf
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/csc/src
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/src ${CMAKE_BINARY_DIR}/dist/csc/src
+
+    # ── 6a. OAM Python 소스 복사 (csc_app.py 가 sys.path mount) ──
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/oam/src
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/src ${CMAKE_BINARY_DIR}/dist/oam/src
 
     # ── 6b. Agent 에셋 복사 (CSC 가 /install-agent.sh 로 서빙) ──
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/agent

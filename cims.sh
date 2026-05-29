@@ -953,24 +953,31 @@ cmd_sync() {
 
     local n_changed=0
 
-    # ── CSC Python 소스 ──────────────────────────────────────────
+    # ── CSC Python 소스 (+ OAM Phase 1: 같은 binary, sys.path mount) ──
     if [[ $did_csc -eq 1 ]]; then
-        mkdir -p "$DIST_DIR/csc/src"
+        mkdir -p "$DIST_DIR/csc/src" "$DIST_DIR/oam/src"
         # rsync 가 있으면 사용, 없으면 cp -r (목적지 깨끗이)
         if command -v rsync >/dev/null 2>&1; then
             rsync -a --delete-excluded \
                 --exclude='__pycache__' --exclude='*.pyc' \
                 "$SCRIPT_DIR/csc/src/" "$DIST_DIR/csc/src/"
+            rsync -a --delete-excluded \
+                --exclude='__pycache__' --exclude='*.pyc' \
+                "$SCRIPT_DIR/oam/src/" "$DIST_DIR/oam/src/"
         else
             cp -r "$SCRIPT_DIR/csc/src/." "$DIST_DIR/csc/src/"
+            cp -r "$SCRIPT_DIR/oam/src/." "$DIST_DIR/oam/src/"
         fi
+        # __pycache__ stale 제거 (PEP 420 namespace 전환에 따른 옛 캐시 잔재)
+        find "$DIST_DIR/csc/src" "$DIST_DIR/oam/src" -type d -name __pycache__ \
+            -exec rm -rf {} + 2>/dev/null || true
         # config_template.json 도 동기화 (apply_config_template 가 읽는 파일)
         if [[ -f "$SCRIPT_DIR/csc/config/config_template.json" ]]; then
             mkdir -p "$DIST_DIR/csc/config"
             cp -f "$SCRIPT_DIR/csc/config/config_template.json" \
                   "$DIST_DIR/csc/config/config_template.json"
         fi
-        ok "csc/src (+ config_template.json) ← $SCRIPT_DIR/csc"
+        ok "csc/src + oam/src (+ config_template.json) ← $SCRIPT_DIR"
         n_changed=$((n_changed+1))
     fi
 

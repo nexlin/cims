@@ -164,14 +164,27 @@ cims/                                    cims/
 
 ## Phase 진행 계획
 
-### Phase 1: 코드 구조 분리 (소프트, 같은 프로세스)
-- **목표**: top-level `oam/` 디렉토리 신설. `csc/src/handlers/` 의 oam 책임 파일들을 `oam/src/handlers/` 로 이동.
-- 같은 binary, 같은 systemd unit (`cims-csc`) — csc 가 oam 의 handler 도 import.
-- 공유 라이브러리 `admin_auth.py` 추출.
-- `services/mcptt.py` 의 잔재 함수 (`notify_csp`, `audit_config_change` 등) 정리.
-- **검증**: csc 정상 시작 + 4서버 verdict=healthy + 가입자 CRUD/Agent 관리 모두 동작.
-- 예상 작업: 1 세션.
-- 위험도: 낮음 (코드 이동만, 동작 변경 없음).
+### Phase 1: 코드 구조 분리 (소프트, 같은 프로세스) — ✅ **완료 (2026-05-29)**
+
+진행 결과:
+- **top-level `oam/`** 디렉토리 신설 (`oam/src/handlers/`, `oam/src/services/`, `oam/docs/`, `oam/README.md`).
+- handler 12개 git mv: `agents / agent_api / ha_groups / modules / build / service_control / verification / alerts / stats / recording / auth / users` → `oam/src/handlers/`. `csc/src/handlers/` 잔존: `admin / org / csp_runtime`.
+- **PEP 420 namespace package** — `csc/src/handlers/__init__.py` 제거. oam/csc 양쪽이 `handlers` 패키지를 merge → 기존 `from handlers.X import Y` 임포트 unchanged.
+- `csc/src/services/admin_auth.py` 신설 — `verify_admin_jwt / extract_admin_jwt` thin wrapper. `oam/src/handlers/auth.py` 가 init 시 동일 비밀키 동기화.
+- `csc_app.py` 가 `../oam/src` 를 `sys.path` 에 prepend (`_OAM_SRC`).
+- `CMakeLists.txt` `make dist` 단계에 `dist/oam/src` 복사 추가.
+- `cims.sh sync csc` 가 `csc/src` + `oam/src` 양쪽을 dist 로 rsync. namespace 전환에 따른 stale `__pycache__` 제거 단계 포함.
+
+검증 결과 (py 측):
+- 21 모듈 (15 handler + 6 service) import 모두 OK.
+- 핸들러 리스트 분포: csc-side 3 (admin/org/mcptt), oam-side 12.
+- 전체 `csc/src` + `oam/src` `py_compile` PASS.
+
+미진행 (Phase 1 보류 항목):
+- `services/mcptt.py` 의 `notify_csp / audit_config_change` 잔재 정리 — 호출 부 분포 (csc admin/csp_runtime ↔ oam service_control) 가 cross-package 이므로, **Phase 3 에서 함께 정리**하는 게 자연스러움. Phase 1 에선 boundary 만 명시.
+- LIVE 검증 (4서버 cims-csc 재기동 + verdict=healthy) — 사용자 영역.
+
+위험도: 낮음 (실제로도 낮았음).
 
 ### Phase 2: 패키지 분리
 - **목표**: `oam/pkg.json` 신설, `cims.sh pkg oam` 으로 `oam-X.Y.tar.gz` 빌드.

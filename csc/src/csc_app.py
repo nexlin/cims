@@ -1,11 +1,21 @@
 import argparse
 import os
+import sys
 import time
 import traceback
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))
 _CONFIG_PATH = os.environ.get('CIMS_CSC_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'csc.json')
+
+# ── OAM 분리 Phase 1: oam/src 를 sys.path 에 mount ──
+# 같은 binary 가 oam/src/handlers/ 의 모듈도 import. csc/src/handlers/ 와
+# oam/src/handlers/ 둘 다 __init__.py 없는 PEP 420 namespace package 라서
+# `from handlers.X import Y` 가 양쪽 디렉토리에서 모두 해석된다.
+# 설계: docs/design/oam_csc_split.md
+_OAM_SRC = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'oam', 'src'))
+if os.path.isdir(_OAM_SRC) and _OAM_SRC not in sys.path:
+    sys.path.insert(0, _OAM_SRC)
 
 from httpsrv.server import HttpServer
 from util.log_util import Logger

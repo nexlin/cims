@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from pathlib import PurePath
 
 from httpsrv.handler import HandlerArgs, HandlerResult
+from services import admin_auth as _shared_auth
 
 # ── 상수 ──────────────────────────────────────────────────────
 _SECRET    = 'cims_jwt_secret_change_me'
@@ -27,11 +28,15 @@ _TTL_SEC   = 86400 * 7   # 7일
 
 
 def init(config: dict) -> None:
-    """Read JWT secret from config. Call once at startup."""
+    """Read JWT secret from config. Call once at startup.
+
+    services.admin_auth 와 동일 비밀키를 공유 (Phase 3 에서 oam/csc 양쪽이 같은
+    K 로 검증 가능하도록 layout 정리)."""
     global _SECRET
     secret = config.get('CimsAuth', {}).get('JwtSecret')
     if secret:
         _SECRET = secret
+    _shared_auth.init(config)
 
 
 # ── 공통 유틸 ──────────────────────────────────────────────────
@@ -51,17 +56,11 @@ def _make_token(user: dict) -> str:
 
 
 def verify_token(token: str) -> dict | None:
-    try:
-        return jwt.decode(token, _SECRET, algorithms=['HS256'])
-    except Exception:
-        return None
+    return _shared_auth.verify_admin_jwt(token)
 
 
 def extract_token(handler_args: HandlerArgs) -> dict | None:
-    auth = handler_args.headers.get('authorization', '')
-    if auth.startswith('Bearer '):
-        return verify_token(auth[7:])
-    return None
+    return _shared_auth.extract_admin_jwt(handler_args.headers)
 
 
 def require_auth(handler_args: HandlerArgs):
