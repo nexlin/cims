@@ -209,12 +209,32 @@ agent install 흐름 (검토만):
 
 위험도: 중간 (실제로는 낮았음 — agent install 매커니즘 재사용).
 
-### Phase 3: 프로세스 분리
-- **목표**: `cims-oam` systemd unit + 새 포트 (4419). `cims-csc` 는 4420 + 4430.
-- agent 가 oam(4419) 으로 heartbeat 전환. install_command URL 변경.
-- 공유 비밀키 K 를 oam/csc config 양쪽에 동기화.
-- 예상 작업: 2~3 세션.
-- 위험도: 큼 (LIVE 절체 — 4 agent 모두 새 URL 로 전환, 다운타임 관리).
+### Phase 3: 프로세스 분리 — 진행 중
+
+#### 단계 3a — TB 분리 기동 ✅ **완료 (2026-05-29)**
+
+진행 결과:
+- `oam/src/oam_app.py` 신설 — admin server (4419) + 12 OAM handler + 5 sweeper + flow_logger / config_cache / alert_log. csc 책임 (admin/org/mcptt server 4431) 제거.
+- `oam/config/oam.json` (prod) + `oam/config/oam-tb.json` (TB) — Server/CimsAuth.JwtSecret/CimsDatabase/Packages/ConfigCacheDir/ServiceLogging.
+- `cims.sh tb` 에 oam target 추가 — default `all = oam + console` (csc 제외). csc target 은 deprecated 표기로 유지 (호환성).
+- `cims.sh sync csc` 가 `oam/pkg.json` + `oam/config/*.json` 도 dist 동기화. `CMakeLists.txt make dist` 도 동일.
+- **TB-CSC 불필요 확정** — 실측 24h 동안 CSC 책임 endpoint 호출 사실상 0 (내 검증 호출만 3건), mcptt server (4431) 연결 0. TB 환경에서 OAM 만으로 충분.
+
+LIVE 검증:
+- `cims.sh tb stop csc && cims.sh tb start oam` → 4419 PID 3592256 (oam_app.py) LISTEN.
+- 4 agent heartbeat 200 OK 연속 (자연 전환 — port 같음).
+- OAM 7 endpoint (agents/ha-groups/packages/deployments/alerts/verification/csp/services) 200, CSC 2 endpoint (users/orgs) 404 (의도된 분리).
+- Python traceback 없음.
+
+#### 단계 3b — 그 외 (다음 세션)
+
+- **agent URL 전환** — install-agent.sh / cims_agent.py 의 `csc_url` → `oam_url`. install_command URL 도 변경.
+- **systemd / lifecycle.sh** — `cims-oam.service` + `start_oam_module / stop_oam_module`.
+- **4서버 LIVE 적용** — csc + oam 동반 배포 후 cims-oam systemd 절체. 4서버 agent heartbeat 새 URL 로 전환.
+- **CSC 본연 정리** — csc_app.py 의 oam handler 등록 제거 (가입자 / mcptt 만). admin server port 4420 으로 이동 (4419 는 OAM 차지). prod 환경에서만 의미.
+- **공유 비밀키 K** — Phase 1 의 `services/admin_auth.py` 가 이미 wiring 완료. oam/csc config 양쪽 동일 K 유지 (현재 동일값으로 박혀있음).
+
+위험도: 큼 (LIVE 절체 — 4 agent 모두 새 URL 로 전환, 다운타임 관리). 단 3a 까지는 TB 만 영향 — 완료.
 
 ### Phase 4: 호스트 분리 (선택)
 - **목표**: oam 호스트 (운영망), csc 호스트 (서비스망).

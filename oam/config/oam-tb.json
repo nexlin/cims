@@ -1,0 +1,37 @@
+{
+    "Server": {
+        "Ip": "0.0.0.0",
+        "Port": 4419,
+        "AgentOamUrl": "https://10.0.2.45:4419",
+        "DevMode": true
+    },
+    "Log": {
+        "Level": "INFO",
+        "File": "log/oam_tb.log"
+    },
+    "CimsDatabase": {
+        "Host": "127.0.0.1",
+        "Port": 3306,
+        "User": "cims",
+        "Password": "!core0908",
+        "Db": "cims"
+    },
+    "Agent": {
+        "MtlsEnabled": false
+    },
+    "CimsAuth": {
+        "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8="
+    },
+    "Packages": {
+        "Dir": "packages_tb",
+        "BackupDir": "packages_tb_trash"
+    },
+    "ConfigCacheDir": "cache_tb",
+    "ServiceLogging": {
+        "Dir": "/home/cims/work/cims/build/dist/ext_mnt/service_log",
+        "Enable": [
+            "csp",
+            "ue"
+        ]
+    }
+}

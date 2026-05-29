@@ -981,7 +981,12 @@ cmd_sync() {
         if [[ -f "$SCRIPT_DIR/oam/pkg.json" ]]; then
             cp -f "$SCRIPT_DIR/oam/pkg.json" "$DIST_DIR/oam/pkg.json"
         fi
-        ok "csc/src + oam/src (+ config_template.json, oam/pkg.json) ← $SCRIPT_DIR"
+        # OAM 분리 Phase 3 — oam/config (oam.json / oam-tb.json) 동기화
+        if [[ -d "$SCRIPT_DIR/oam/config" ]]; then
+            mkdir -p "$DIST_DIR/oam/config"
+            cp -f "$SCRIPT_DIR/oam/config/"*.json "$DIST_DIR/oam/config/" 2>/dev/null || true
+        fi
+        ok "csc/src + oam/src (+ config_template.json, oam/pkg.json, oam/config) ← $SCRIPT_DIR"
         n_changed=$((n_changed+1))
     fi
 
@@ -1535,23 +1540,26 @@ cmd_tb() {
             cat <<EOF
 $(basename "$0") tb <action> [target]
   action: start | stop | restart | status
-  target: csc | console | all  (기본: all)
+  target: oam | csc | console | all  (기본: all = oam + console)
 
-  TB-CSC     — https://127.0.0.1:4419 (csc_app.py + csc-tb.json)
+  TB-OAM     — https://127.0.0.1:4419 (oam_app.py + oam-tb.json)   ← Phase 3 기본
+  TB-CSC     — https://127.0.0.1:4419 (csc_app.py + csc-tb.json)   ← deprecated, OAM 분리 전 호환
   TB-Console — http://127.0.0.1:3000  (vite dev 서버 — 소스 트리에서만)
+
+  TB-OAM 와 TB-CSC 둘 다 4419 port — 동시 기동 불가. 'tb stop csc && tb start oam' 순서.
 
   예:
     cims.sh tb status              # 4419 / 3000 확인
-    cims.sh tb start csc           # TB-CSC 만 기동
-    cims.sh tb restart             # 둘 다 재기동
+    cims.sh tb start oam           # TB-OAM 만 기동
+    cims.sh tb restart             # all 재기동 (oam + console)
     cims.sh tb stop console        # TB-Console 만 정지
 EOF
             return 0 ;;
         *) err "알 수 없는 tb 동작: $action (start|stop|restart|status|help)"; return 1 ;;
     esac
     case "$target" in
-        csc|console|all) ;;
-        *) err "알 수 없는 tb 대상: $target (csc|console|all)"; return 1 ;;
+        oam|csc|console|all) ;;
+        *) err "알 수 없는 tb 대상: $target (oam|csc|console|all)"; return 1 ;;
     esac
 
     _tb_port_pid() {
@@ -1568,6 +1576,7 @@ EOF
         local app="$DIST_DIR/csc/src/csc_app.py"
         [[ ! -f $cfg ]] && { err "csc-tb.json 없음: $cfg ('cims.sh build' 후 시도)"; return 1; }
         [[ ! -f $app ]] && { err "csc_app.py 없음: $app ('cims.sh build' 후 시도)"; return 1; }
+        warn "TB-CSC 는 deprecated — OAM 분리 후에는 TB-OAM 사용 ('cims.sh tb start oam')"
         info "TB-CSC 기동..."
         ( cd "$DIST_DIR/csc/src" && \
           CIMS_CSC_CONFIG="$cfg" nohup python3 csc_app.py \
@@ -1590,6 +1599,51 @@ EOF
         if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null || true; sleep 1; fi
         rm -f "$LOG_DIR/tb-csc.pid"
         ok "TB-CSC 정지"
+    }
+
+    _tb_oam_start() {
+        local pid; pid=$(_tb_port_pid 4419)
+        if [[ -n $pid ]]; then
+            # 4419 점유 중 — TB-CSC 일 수도 있음. exe path 로 분기.
+            local exe; exe=$(readlink -f /proc/$pid/exe 2>/dev/null || true)
+            local cmd; cmd=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null || true)
+            if [[ "$cmd" == *"oam_app.py"* ]]; then
+                ok "TB-OAM 이미 동작 (pid=$pid, port 4419)"; return 0
+            else
+                err "port 4419 이 다른 프로세스에 점유 중 (pid=$pid, cmd='$cmd') — 'cims.sh tb stop csc' 먼저"; return 1
+            fi
+        fi
+        local cfg="$DIST_DIR/oam/config/oam-tb.json"
+        local app="$DIST_DIR/oam/src/oam_app.py"
+        [[ ! -f $cfg ]] && { err "oam-tb.json 없음: $cfg ('cims.sh sync csc' 후 시도)"; return 1; }
+        [[ ! -f $app ]] && { err "oam_app.py 없음: $app ('cims.sh sync csc' 후 시도)"; return 1; }
+        info "TB-OAM 기동..."
+        ( cd "$DIST_DIR/oam/src" && \
+          CIMS_OAM_CONFIG="$cfg" nohup python3 oam_app.py \
+              > "$LOG_DIR/tb-oam.log" 2>&1 & echo $! > "$LOG_DIR/tb-oam.pid" )
+        sleep 2
+        pid=$(_tb_port_pid 4419)
+        if [[ -n $pid ]]; then
+            ok "TB-OAM LISTEN https://127.0.0.1:4419 (pid=$pid) — log: $LOG_DIR/tb-oam.log"
+        else
+            err "TB-OAM 기동 실패 — $LOG_DIR/tb-oam.log 확인"; return 1
+        fi
+    }
+
+    _tb_oam_stop() {
+        local pid; pid=$(_tb_port_pid 4419)
+        if [[ -z $pid ]]; then ok "TB-OAM 이미 정지 (port 4419 가용)"; rm -f "$LOG_DIR/tb-oam.pid"; return 0; fi
+        # cmdline 으로 oam_app.py 인지 확인 — csc 면 stop 거부
+        local cmd; cmd=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null || true)
+        if [[ "$cmd" != *"oam_app.py"* ]]; then
+            warn "port 4419 pid=$pid 는 oam_app.py 가 아님 (cmd='$cmd') — 'cims.sh tb stop csc' 사용"; return 0
+        fi
+        info "TB-OAM 정지 (pid=$pid)..."
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null || true; sleep 1; fi
+        rm -f "$LOG_DIR/tb-oam.pid"
+        ok "TB-OAM 정지"
     }
 
     _tb_console_start() {
@@ -1645,8 +1699,18 @@ EOF
     _tb_status() {
         local pid
         pid=$(_tb_port_pid 4419)
-        if [[ -n $pid ]]; then ok "TB-CSC     pid=$pid  https://127.0.0.1:4419"
-        else warn "TB-CSC     미동작  — 'cims.sh tb start csc'"; fi
+        if [[ -n $pid ]]; then
+            local cmd; cmd=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null || true)
+            if [[ "$cmd" == *"oam_app.py"* ]]; then
+                ok "TB-OAM     pid=$pid  https://127.0.0.1:4419"
+            elif [[ "$cmd" == *"csc_app.py"* ]]; then
+                ok "TB-CSC     pid=$pid  https://127.0.0.1:4419 (deprecated — use TB-OAM)"
+            else
+                ok "TB(4419)   pid=$pid  cmd=$cmd"
+            fi
+        else
+            warn "TB-OAM     미동작  — 'cims.sh tb start oam'"
+        fi
         pid=$(_tb_port_pid 3000)
         if [[ -n $pid ]]; then ok "TB-Console pid=$pid  http://127.0.0.1:3000"
         else warn "TB-Console 미동작  — 'cims.sh tb start console'"; fi
@@ -1654,15 +1718,18 @@ EOF
 
     case "$action" in
         start)
-            [[ $target == csc     || $target == all ]] && _tb_csc_start
+            [[ $target == oam     || $target == all ]] && _tb_oam_start
+            [[ $target == csc                       ]] && _tb_csc_start
             [[ $target == console || $target == all ]] && _tb_console_start
             ;;
         stop)
-            [[ $target == csc     || $target == all ]] && _tb_csc_stop
+            [[ $target == oam     || $target == all ]] && _tb_oam_stop
+            [[ $target == csc                       ]] && _tb_csc_stop
             [[ $target == console || $target == all ]] && _tb_console_stop
             ;;
         restart)
-            [[ $target == csc     || $target == all ]] && { _tb_csc_stop; _tb_csc_start; }
+            [[ $target == oam     || $target == all ]] && { _tb_oam_stop; _tb_oam_start; }
+            [[ $target == csc                       ]] && { _tb_csc_stop; _tb_csc_start; }
             [[ $target == console || $target == all ]] && { _tb_console_stop; _tb_console_start; }
             ;;
         status)
