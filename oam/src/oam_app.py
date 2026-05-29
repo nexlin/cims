@@ -115,6 +115,7 @@ if __name__ == '__main__':
     from handlers.modules        import CIMS_MODULES_HANDLER_LIST
     from handlers.ha_groups      import CIMS_HA_GROUPS_HANDLER_LIST
     from handlers.alerts         import CIMS_ALERTS_HANDLER_LIST
+    from handlers.console        import CIMS_CONSOLE_HANDLER_LIST
     from services.flow_logger    import FLOW_HANDLER_LIST
 
     admin_server = None
@@ -288,6 +289,10 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_ALERTS_HANDLER_LIST
+        ])
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_CONSOLE_HANDLER_LIST
         ])
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
