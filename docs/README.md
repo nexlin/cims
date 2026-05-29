@@ -12,6 +12,7 @@ docs/
 ├── design/               설계 문서 (아키텍처·모듈·기능)
 │   ├── 01_overview.md               전체 시스템 아키텍처
 │   ├── 02_deployment.md             분산 배포 아키텍처 (Agent/Package/Deployment)
+│   ├── console_platform.md          콘솔 플랫폼화 (위젯 합성 · shape 위젯 · 데이터 소스 descriptor 등록)
 │   ├── modules/                     각 모듈별 상세 설계
 │   │   ├── csp.md                   CSP — SIP 시그널링 (CSCF/TAS/PTT-AS/IBCF)
 │   │   ├── cmp.md                   CMP — RTP 릴레이 + PTT 믹싱
