@@ -206,7 +206,7 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
   return (
     <div>
       {collection.description && (
-        <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
           {collection.description}
           {collection.reload_hint && (
             <span style={{ marginLeft: 8, color: '#27ae60' }}>⚡ {collection.reload_hint}</span>
@@ -241,7 +241,7 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
       {/* tag filter chip */}
       {allTags.length > 0 && (
         <div style={{ marginBottom: 8, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: '#666' }}>태그 필터:</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>태그 필터:</span>
           <button
             className={`btn btn--sm ${tagFilter === '' ? 'btn--primary' : 'btn--outline'}`}
             onClick={() => setTagFilter('')}>전체</button>
@@ -263,7 +263,7 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
         </thead>
         <tbody>
           {visibleIdx.length === 0 ? (
-            <tr><td colSpan={summaryFields.length + 1} style={{ textAlign: 'center', color: '#888', padding: 20 }}>
+            <tr><td colSpan={summaryFields.length + 1} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>
               {records.length === 0 ? '행 없음 — "＋ 추가" 로 생성' : '태그 필터 결과 없음'}
             </td></tr>
           ) : (
@@ -385,7 +385,7 @@ function FieldEditor({ field, value, refOpts, onChange }: {
       <div>
         {renderInput(field, value, onChange, refOpts)}
         {field.help && (
-          <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>{field.help}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{field.help}</div>
         )}
       </div>
     </>
@@ -451,7 +451,7 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 120, overflowY: 'auto',
                     border: '1px solid #ddd', borderRadius: 4, padding: 4 }}>
         {options.length === 0 ? (
-          <div style={{ fontSize: 11, color: '#999' }}>(참조할 항목 없음)</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>(참조할 항목 없음)</div>
         ) : options.map(o => (
           <label key={o} style={{ fontSize: 12 }}>
             <input type="checkbox" checked={selected.has(o)}
@@ -499,7 +499,7 @@ function ObjectListEditor({ field, value, onChange, refOpts }: {
   return (
     <div style={{ border: '1px dashed #bbb', borderRadius: 4, padding: 6 }}>
       {items.length === 0 ? (
-        <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>항목 없음</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>항목 없음</div>
       ) : (
         <table style={{ width: '100%', fontSize: 12 }}>
           <thead>

@@ -35,13 +35,13 @@ const EVENT_ICONS: Record<string, { icon: string; label: string; color: string }
   member_join:    { icon: '\u271A', label: '입장',      color: '#2196f3' },
   member_leave:   { icon: '\u2716', label: '퇴장',      color: '#ff9800' },
   'floor-grant':  { icon: '\u25B6', label: '발언 시작',  color: '#4caf50' },
-  'floor-release':{ icon: '\u25A0', label: '발언 종료',  color: '#9e9e9e' },
+  'floor-release':{ icon: '\u25A0', label: '발언 종료',  color: 'var(--text-muted)' },
   config_change:  { icon: '\u2699', label: '설정 변경',  color: '#9c27b0' },
   member_invite:  { icon: '\u2192', label: '초대',      color: '#00bcd4' },
 }
 
 function getEventDisplay(type: string) {
-  return EVENT_ICONS[type] || { icon: '\u2022', label: type, color: '#7a8fa8' }
+  return EVENT_ICONS[type] || { icon: '\u2022', label: type, color: 'var(--text-muted)' }
 }
 
 interface GroupCard {
@@ -253,7 +253,7 @@ export default function PttHistoryPage() {
                     alignItems: 'center',
                     gap: 12,
                     cursor: 'pointer',
-                    background: '#f0f4f8',
+                    background: 'var(--surface-2)',
                     borderBottom: isExpanded ? '1px solid var(--border)' : 'none',
                   }}
                   onClick={() => toggleCard(g.id)}
@@ -299,7 +299,7 @@ export default function PttHistoryPage() {
                               padding: 12,
                               borderRadius: 6,
                               border: '1px solid var(--border)',
-                              background: isLatest ? '#f7f9fc' : 'transparent',
+                              background: isLatest ? 'var(--hover)' : 'transparent',
                             }}
                           >
                             {/* Session header */}

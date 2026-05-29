@@ -176,11 +176,11 @@ function ModuleRow({ mod, active, onClick }: {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
         <b style={{ fontSize: 14 }}>{mod.name}</b>
         <span style={{
-          marginLeft: 'auto', fontSize: 11, color: '#666',
+          marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)',
           background: '#f0f0f0', padding: '1px 6px', borderRadius: 10,
         }}>{mod.versions.length}</span>
       </div>
-      <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
         최신 v{mod.latest.version} · {fmtRelTime(mod.lastUploadedAt)}
       </div>
     </button>
@@ -215,13 +215,13 @@ function ModuleDetail({ mod, depCountByPkgId, deployments, onDelete }: {
       <div style={{ padding: 16, borderBottom: '1px solid #eee' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <h3 style={{ margin: 0 }}>{mod.name}</h3>
-          <span style={{ color: '#888', fontSize: 13 }}>({mod.versions.length}개 버전)</span>
-          <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12 }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>({mod.versions.length}개 버전)</span>
+          <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
             총 {fmtSize(mod.totalSize)}
           </span>
         </div>
         {mod.latest.description && (
-          <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
             {mod.latest.description}
           </div>
         )}
@@ -269,7 +269,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
           display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
           cursor: 'pointer', userSelect: 'none',
         }}>
-        <span style={{ color: '#999', fontSize: 11 }}>{expanded ? '▾' : '▸'}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{expanded ? '▾' : '▸'}</span>
         <b style={{ fontSize: 14 }}>v{p.version}</b>
         {isLatest && (
           <span className="tag" style={{
@@ -277,10 +277,10 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
             padding: '1px 6px', borderRadius: 3,
           }}>최신</span>
         )}
-        <span style={{ color: '#888', fontSize: 12, marginLeft: 8 }}>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>
           {fmtRelTime(p.uploaded_at)}
         </span>
-        <span style={{ color: '#888', fontSize: 12 }}>· {fmtSize(p.file_size)}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>· {fmtSize(p.file_size)}</span>
         {depCount > 0 && (
           <span style={{
             marginLeft: 'auto', fontSize: 11, color: '#2980b9',
@@ -290,19 +290,19 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
       </div>
 
       {expanded && (
-        <div style={{ borderTop: '1px solid #eee', padding: '10px 14px', fontSize: 12, color: '#555' }}>
+        <div style={{ borderTop: '1px solid #eee', padding: '10px 14px', fontSize: 12, color: 'var(--text-muted)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', rowGap: 4, columnGap: 10 }}>
-            <span style={{ color: '#888' }}>파일</span>
+            <span style={{ color: 'var(--text-muted)' }}>파일</span>
             <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{p.file_path}</code>
-            <span style={{ color: '#888' }}>SHA256</span>
+            <span style={{ color: 'var(--text-muted)' }}>SHA256</span>
             <code style={{ fontSize: 11 }}>{p.sha256.substring(0, 32)}…</code>
-            <span style={{ color: '#888' }}>업로드</span>
+            <span style={{ color: 'var(--text-muted)' }}>업로드</span>
             <span>
               {p.uploaded_at || '—'}
-              {p.uploaded_by && <span style={{ color: '#888' }}> · {p.uploaded_by}</span>}
+              {p.uploaded_by && <span style={{ color: 'var(--text-muted)' }}> · {p.uploaded_by}</span>}
             </span>
             {p.description && <>
-              <span style={{ color: '#888' }}>설명</span>
+              <span style={{ color: 'var(--text-muted)' }}>설명</span>
               <span>{p.description}</span>
             </>}
           </div>
@@ -354,12 +354,12 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
                     <td>
                       {d.agent_name ? agentDisplayName(d.agent_name) : `#${d.agent_id}`}
                       {d.agent_name && agentDisplayName(d.agent_name) !== d.agent_name && (
-                        <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({d.agent_name})</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>({d.agent_name})</span>
                       )}
                     </td>
                     <td>{d.process_name || '—'}</td>
                     <td>{d.status}</td>
-                    <td style={{ fontSize: 12, color: '#666' }}>{d.deployed_at || '—'}</td>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{d.deployed_at || '—'}</td>
                   </tr>
                 ))}
               </tbody>

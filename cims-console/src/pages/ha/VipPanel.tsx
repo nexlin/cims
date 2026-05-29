@@ -101,9 +101,9 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
       borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
       background: 'var(--bg-soft)',
     }}>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: 10 }}>
         {title}
-        <span style={{ marginLeft: 8, fontSize: 11, color: '#888', fontWeight: 'normal' }}>
+        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
           (용도 선택 시 멤버별 iface 자동 매핑 — 옵션은 각 서버 ServiceIp 의 용도 라벨에서 옴. 수동 override 가능)
         </span>
       </div>
@@ -118,13 +118,13 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ background: 'var(--surface-2)', color: '#666' }}>
+          <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 40 }}>#</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>용도</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 170 }}>VIP / mask</th>
             {servers.map(s => (
               <th key={s.id} style={{ padding: '4px 8px', textAlign: 'left' }}>
-                {s.name} {s.role && <span style={{ fontSize: 10, color: '#888' }}>({s.role})</span>}
+                {s.name} {s.role && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>({s.role})</span>}
               </th>
             ))}
             {vrid != null && <th style={{ padding: '4px 8px', textAlign: 'left', width: 60 }}>VRID</th>}
@@ -135,7 +135,7 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
         <tbody>
           {bindings.length === 0 && (
             <tr>
-              <td colSpan={4 + servers.length + (vrid != null ? 1 : 0) + 1} style={{ padding: '8px', color: '#aaa' }}>
+              <td colSpan={4 + servers.length + (vrid != null ? 1 : 0) + 1} style={{ padding: '8px', color: 'var(--text-muted)' }}>
                 (VIP 없음 — 아래 [＋ VIP 추가])
               </td>
             </tr>
@@ -144,7 +144,7 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
             const usedSlots = new Set(bindings.map(x => x.slot).filter(Boolean))
             return (
               <tr key={b.bid}>
-                <td style={{ padding: '4px 8px', color: '#888' }}>{i + 1}</td>
+                <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{i + 1}</td>
                 <td style={{ padding: '4px 8px' }}>
                   <select value={b.slot} onChange={e => onSlotChange(b.bid, e.target.value)}
                           style={{ width: '95%', padding: '2px 4px', fontSize: 12,
@@ -178,7 +178,7 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
                     if (hasPrefix) {
                       return (
                         <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', fontSize: 12 }}>
-                          <span style={{ color: '#888' }}>{subnet!.prefix}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>{subnet!.prefix}</span>
                           <input value={split?.host ?? ''}
                                  onChange={e => {
                                    const host = e.target.value.trim()
@@ -192,7 +192,7 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
                                  placeholder="host"
                                  style={{ width: subnet!.mask >= 24 ? 50 : 110, padding: '2px 6px', fontSize: 12,
                                           border: '1px solid var(--border)', borderRadius: 3 }} />
-                          <span style={{ color: '#888' }}>/{subnet!.mask}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>/{subnet!.mask}</span>
                         </span>
                       )
                     }
@@ -219,13 +219,13 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
                   return (
                     <td key={s.id} style={{ padding: '4px 8px', fontSize: 12 }}>
                       {!b.slot ? (
-                        <span style={{ color: '#aaa' }}>—</span>
+                        <span style={{ color: 'var(--text-muted)' }}>—</span>
                       ) : info ? (
                         <span>
                           {owns && <span title="이 멤버가 VIP 보유 (MASTER)"
                                           style={{ color: '#27ae60', marginRight: 4 }}>●</span>}
                           <b style={{ fontFamily: 'monospace' }}>{info.iface}</b>
-                          <span style={{ marginLeft: 4, color: '#888' }}>({info.ip}/{info.mask})</span>
+                          <span style={{ marginLeft: 4, color: 'var(--text-muted)' }}>({info.ip}/{info.mask})</span>
                         </span>
                       ) : (
                         <span style={{ color: '#c0392b' }}>⚠ "{b.slot}" 매핑 없음</span>
@@ -234,7 +234,7 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
                   )
                 })}
                 {vrid != null && (
-                  <td style={{ padding: '4px 8px', color: '#666' }}>{vrid}</td>
+                  <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{vrid}</td>
                 )}
                 <td style={{ padding: '4px 8px' }}><StatusBadge status={bindingStatus(b)} /></td>
                 <td style={{ padding: '4px 8px' }}>
@@ -262,10 +262,10 @@ export function StatusBadge({ status }: { status?: BindingStatus }) {
   const map: Record<BindingStatus, { icon: string; color: string; label: string }> = {
     up:       { icon: '●', color: '#27ae60', label: 'up' },
     down:     { icon: '◐', color: '#c0392b', label: 'down' },
-    unknown:  { icon: '○', color: '#888',    label: '미확인' },
+    unknown:  { icon: '○', color: 'var(--text-muted)',    label: '미확인' },
     applying: { icon: '⏳', color: '#f39c12', label: '적용 중' },
     fail:     { icon: '✕', color: '#c0392b', label: '실패' },
-    idle:     { icon: '—', color: '#aaa',    label: '미할당' },
+    idle:     { icon: '—', color: 'var(--text-muted)',    label: '미할당' },
   }
   const m = map[s]
   return (

@@ -129,16 +129,16 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
       borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
       background: 'var(--bg-soft)',
     }}>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: 8 }}>
         {title}
-        <span style={{ marginLeft: 8, fontSize: 11, color: '#888', fontWeight: 'normal' }}>
+        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
           (cims-managed 만 변경 가능 — 외부 IP / mgmt NIC 은 보호)
         </span>
       </div>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ background: 'var(--surface-2)', color: '#666' }}>
+          <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>인터페이스</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 170 }}>IP / mask</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 110 }}>망(role)</th>
@@ -149,7 +149,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
         </thead>
         <tbody>
           {ifaceOrder.length === 0 && (
-            <tr><td colSpan={6} style={{ padding: '8px', color: '#aaa' }}>(인터페이스 없음 — agent 보고 대기)</td></tr>
+            <tr><td colSpan={6} style={{ padding: '8px', color: 'var(--text-muted)' }}>(인터페이스 없음 — agent 보고 대기)</td></tr>
           )}
           {ifaceOrder.flatMap((iface) => {
             const isMgmt = mgmtIfaces.has(iface)
@@ -166,7 +166,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                         {ipIdx === 0 && <b>{iface}</b>}
                         {ipIdx === 0 && isMgmt && (
                           <span title="agent ↔ CSC 통신 NIC — 변경 시 단절 위험으로 잠금"
-                                style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>🔒 mgmt</span>
+                                style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-muted)' }}>🔒 mgmt</span>
                         )}
                       </td>
                       <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>
@@ -175,7 +175,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                       <td style={{ padding: '4px 8px' }}>
                         {/* Phase 4d2: 망(role). mgmt 는 자동 도출 readonly. service/internal 만 admin 명시. */}
                         {(ni.role === 'mgmt' || ni.mgmt) ? (
-                          <span style={{ fontSize: 11, color: '#666' }}
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}
                                 title="oam.json Mgmt.Cidr + agent detect_mgmt_ip 자동 도출 — 수정 불가">
                             🔒 mgmt
                           </span>
@@ -189,7 +189,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                             <option value="internal">internal</option>
                           </select>
                         ) : (
-                          <span style={{ fontSize: 11, color: '#999' }}>{ni.role || '-'}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ni.role || '-'}</span>
                         )}
                       </td>
                       <td style={{ padding: '4px 8px' }}>
@@ -202,9 +202,9 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                                                border: '1px solid var(--border)', borderRadius: 3 }} />
                       </td>
                       <td style={{ padding: '4px 8px', fontSize: 11 }}>
-                        {isMgmtIp ? <span style={{ color: '#888' }}>mgmt</span>
+                        {isMgmtIp ? <span style={{ color: 'var(--text-muted)' }}>mgmt</span>
                           : managed ? <span style={{ color: '#27ae60' }}>● cims</span>
-                          : <span style={{ color: '#aaa' }}>○ 외부</span>}
+                          : <span style={{ color: 'var(--text-muted)' }}>○ 외부</span>}
                       </td>
                       <td style={{ padding: '4px 8px' }}>
                         {managed && !isMgmtIp && (
@@ -220,7 +220,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
               : [(
                   <tr key={`${iface}-empty`}>
                     <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}><b>{iface}</b></td>
-                    <td colSpan={4} style={{ padding: '4px 8px', color: '#aaa', fontSize: 11 }}>
+                    <td colSpan={4} style={{ padding: '4px 8px', color: 'var(--text-muted)', fontSize: 11 }}>
                       (IP 미할당)
                     </td>
                     <td style={{ padding: '4px 8px' }}></td>
@@ -279,12 +279,12 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
         </tbody>
       </table>
 
-      <div style={{ marginTop: 16, fontSize: 12, fontWeight: 'bold', color: '#555' }}>
+      <div style={{ marginTop: 16, fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)' }}>
         라우팅 (subnet 자동(🔒 kernel) 외 모두 변경 가능 — default gateway 포함)
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 4 }}>
         <thead>
-          <tr style={{ background: 'var(--surface-2)', color: '#666' }}>
+          <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 200 }}>dest CIDR</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>gateway</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>dev</th>
@@ -294,7 +294,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
         </thead>
         <tbody>
           {storedRoutes.length === 0 && !routeAddOpen && (
-            <tr><td colSpan={5} style={{ padding: '8px', color: '#aaa' }}>(라우팅 없음)</td></tr>
+            <tr><td colSpan={5} style={{ padding: '8px', color: 'var(--text-muted)' }}>(라우팅 없음)</td></tr>
           )}
           {[...storedRoutes].sort((a, b) => {
             const ga = a.is_default ? 0 : a.kernel_auto ? 1 : 2
@@ -306,10 +306,10 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
             const isDefault = !!r.is_default
             const kernelAuto = !!r.kernel_auto
             const rowKey = `route-${r.dst}-${r.via}-${r.dev}`
-            const ownerChip = kernelAuto  ? <span style={{ color: '#888' }}>🔒 kernel</span>
+            const ownerChip = kernelAuto  ? <span style={{ color: 'var(--text-muted)' }}>🔒 kernel</span>
                             : isDefault   ? <span style={{ color: '#3498db' }}>★ default</span>
                             : managed     ? <span style={{ color: '#27ae60' }}>● cims</span>
-                            :               <span style={{ color: '#aaa' }}>○ 외부</span>
+                            :               <span style={{ color: 'var(--text-muted)' }}>○ 외부</span>
             const canEdit = !kernelAuto
             const isEditing = routeEditKey === r.dst
             if (isEditing) {
@@ -410,7 +410,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
         </tbody>
       </table>
 
-      <div style={{ marginTop: 8, fontSize: 11, color: '#888' }}>
+      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
         {slots.length > 0
           ? <>ℹ 참고 — 설치된 패키지의 권장 용도: <code>{slotHints}</code> (자유 입력 가능)</>
           : <>ℹ 인프라 단계 — NIC 이름이 곧 용도 라벨로 사용됩니다.</>}

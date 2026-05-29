@@ -377,18 +377,18 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                    background: isSelected ? '#eef5ff' : '#fafafa',
                  }}>
               <span onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}
-                    style={{ width: 14, color: '#888' }}>{isOpen ? '▼' : '▶'}</span>
+                    style={{ width: 14, color: 'var(--text-muted)' }}>{isOpen ? '▼' : '▶'}</span>
               <span style={{
                 background: modeColor, color: '#fff', fontSize: 10,
                 padding: '1px 5px', borderRadius: 3,
               }}>{modeChip}</span>
               <b style={{ flex: 1 }}>{g.name}</b>
               {g.vip && (
-                <span style={{ fontSize: 10, color: '#666' }} title={`VIP ${g.vip}/${g.vip_mask}`}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }} title={`VIP ${g.vip}/${g.vip_mask}`}>
                   VIP {g.vip}
                 </span>
               )}
-              <span style={{ fontSize: 11, color: '#888' }}>{members.length}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{members.length}</span>
               {canAddMember && (
                 <button onClick={e => { e.stopPropagation(); onAddMember(g) }}
                         title="새 멤버 자동 생성 (이름 자동, install_command 발급)"
@@ -429,10 +429,10 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
               padding: '1px 5px', borderRadius: 3,
             }}>SA</span>
             <b style={{ flex: 1 }}>{agentDisplayName(a.name)}</b>
-            <span style={{ fontSize: 10, color: '#555' }}>{a.ip_address || '—'}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{a.ip_address || '—'}</span>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar,
                             display: 'inline-block', marginLeft: 4 }} />
-            <span style={{ fontSize: 10, color: '#888' }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
               {(depsByAgent.get(a.id) || []).length}m
             </span>
           </div>
@@ -469,7 +469,7 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
                 background: role === 'master' ? '#3498db' : '#95a5a6', color: '#fff',
               }}>{role === 'master' ? 'M' : 'B'}</span>
       )}
-      <span style={{ fontSize: 10, color: '#888' }}>{depCount}m</span>
+      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{depCount}m</span>
       {onRemove && (
         <button onClick={e => { e.stopPropagation(); onRemove() }}
                 title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"
@@ -706,7 +706,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                 }}>{group.mode === 'active_standby' ? 'AS' : 'AA'}</span>
           <input className="form-input" value={editName} onChange={e => setEditName(e.target.value)}
                  style={{ flex: 1, minWidth: 180 }} />
-          <span style={{ fontSize: 11, color: '#888' }}>#{group.id} · vrid {group.vrid}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>#{group.id} · vrid {group.vrid}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             <button className="btn btn--sm btn--danger" onClick={() => onDeleteSystem(group)}
                     title="HA 그룹 + 모든 멤버 일괄 삭제">
@@ -717,7 +717,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, fontSize: 12 }}>
           {group.mode === 'active_standby' && (
             <>
-              <label style={{ color: '#666' }}>auth_pass:</label>
+              <label style={{ color: 'var(--text-muted)' }}>auth_pass:</label>
               <input type="password" className="form-input" value={editAuthPass}
                      onChange={e => setEditAuthPass(e.target.value)}
                      maxLength={8}
@@ -725,7 +725,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                      title="VRRP 인증 (active_standby 만 사용, 최대 8글자)" />
             </>
           )}
-          <label style={{ color: '#666' }}>note:</label>
+          <label style={{ color: 'var(--text-muted)' }}>note:</label>
           <input className="form-input" value={editNote} onChange={e => setEditNote(e.target.value)}
                  style={{ flex: 1 }} />
           <button className="btn btn--sm btn--primary" onClick={applyMeta} disabled={!metaDirty}
@@ -753,7 +753,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
             여기는 표시 + AS 의 Master 선택만 담당. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>멤버 ({memberAgents.length})</div>
-          <span style={{ fontSize: 11, color: '#888', marginLeft: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>
             추가/삭제는 좌측 트리에서
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
@@ -822,15 +822,15 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                                   style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● Active</span>)
                           if (o === 'standby') return (
                             <span title="VIP 미보유 — Standby"
-                                  style={{ fontSize: 11, color: '#888' }}>○ Standby</span>)
+                                  style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
                           if (o === 'fail') return (
                             <span title="점검 실패 — offline 또는 health-check 오류"
                                   style={{ fontSize: 11, color: '#c0392b' }}>✕</span>)
                           if (vipChecking) return (
-                            <span style={{ fontSize: 10, color: '#bbb' }}>…</span>)
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>…</span>)
                           return (
                             <span title="미점검 — 상단 [🔄 실측] 버튼으로 확인"
-                                  style={{ fontSize: 10, color: '#bbb' }}>—</span>)
+                                  style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>)
                         })()}
                       </td>
                     </>
@@ -839,8 +839,8 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                     <span style={{ background: sc.bar, color: '#fff', fontSize: 10,
                                     padding: '1px 6px', borderRadius: 3 }}>{a.status}</span>
                   </td>
-                  <td style={{ fontSize: 12, color: '#555' }}>{a.ip_address || '—'}</td>
-                  <td style={{ fontSize: 12, color: '#888' }}>{a.agent_version || '—'}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.ip_address || '—'}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.agent_version || '—'}</td>
                 </tr>
               )
             })}
@@ -868,7 +868,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
           </div>
         </div>
         {editBindings.length === 0 ? (
-          <div className="empty" style={{ padding: 12, fontSize: 12, color: '#888' }}>
+          <div className="empty" style={{ padding: 12, fontSize: 12, color: 'var(--text-muted)' }}>
             VIP 없음 — all_active 그룹은 비워둬도 됨 (keepalived 안 깔림). active_standby 는 1개 이상 권장.
             {availableSlots.length === 0 && (
               <div style={{ marginTop: 6, color: '#e67e22' }}>
@@ -895,7 +895,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                       <td><b>{b.slot || '(미지정)'}</b></td>
                       <td style={{ fontFamily: 'monospace' }}>{b.ip || '—'}</td>
                       <td>{b.mask || 24}</td>
-                      <td style={{ fontSize: 11, color: '#666' }}>{ifaceStr}</td>
+                      <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ifaceStr}</td>
                       <td>
                         <button className="btn btn--sm" style={{ fontSize: 10, padding: '1px 5px' }}
                                 disabled={bindingEditMode !== null}
@@ -922,7 +922,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                     <td>
                       {info?.prefix ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                          <span style={{ fontFamily: 'monospace', color: '#666' }}>{info.prefix}</span>
+                          <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{info.prefix}</span>
                           <input className="form-input" value={host}
                                  onChange={e => changeBindingHost(b.bid, e.target.value)}
                                  placeholder="host"
@@ -937,7 +937,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                       )}
                     </td>
                     <td style={{ fontFamily: 'monospace' }}>{b.mask || 24}</td>
-                    <td style={{ fontSize: 11, color: '#666' }}>{ifaceStr}</td>
+                    <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ifaceStr}</td>
                     <td>
                       <button className="btn btn--sm btn--primary"
                               style={{ fontSize: 10, padding: '1px 5px' }}
@@ -953,7 +953,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
             </tbody>
           </table>
         )}
-        <div style={{ fontSize: 11, color: '#888', marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
           VIP 의 네트워크/마스크 는 멤버의 용도(service IP) 에서 자동 매핑 — host (마지막 옥텟) 만 입력.
           상세 (수동 IP 입력) → <Link to={`/deploy/services?group=${group.id}`}>📋 상세 편집</Link>.
         </div>
@@ -990,7 +990,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
            title="A/S (active_standby) 시스템에만 적용 — VRRP 절체 동작 세부 조건">
         <span onClick={onToggle} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
         <span onClick={onToggle} style={{ cursor: 'pointer' }}>절체 조건 (A/S 전용)</span>
-        <span style={{ fontSize: 11, color: '#888', fontWeight: 400, cursor: 'pointer' }} onClick={onToggle}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, cursor: 'pointer' }} onClick={onToggle}>
           감시주기 {value.advert_int}s · 장애판정 {value.health.fall}회 · {value.preempt === 'preempt' ? '자동복귀' : '복귀없음'}
         </span>
         <button className="btn btn--sm btn--primary"
@@ -1004,7 +1004,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
       {open && (
         <div style={{ padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 150, color: '#555' }}
+            <label style={{ width: 150, color: 'var(--text-muted)' }}
                    title="VRRP 광고 주기 (초). Master 가 Backup 에게 살아있음을 알리는 주기. 짧을수록 절체가 빨라지지만 네트워크 트래픽 증가.">
               감시 주기 (초)
             </label>
@@ -1012,11 +1012,11 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
                    value={value.advert_int}
                    onChange={e => set('advert_int', Number(e.target.value) || 1)}
                    className="form-input" style={{ width: 80 }} />
-            <span style={{ color: '#888' }}>기본 1초 · 범위 0.5~5초</span>
+            <span style={{ color: 'var(--text-muted)' }}>기본 1초 · 범위 0.5~5초</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: '#555' }}
+            <label style={{ width: 150, color: 'var(--text-muted)' }}
                    title="cims-health 가 모듈 상태(포트 listen + 선택적 프로세스)를 점검하는 주기">
               점검 주기 (초)
             </label>
@@ -1024,19 +1024,19 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
                    value={value.health.interval}
                    onChange={e => setHealth('interval', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 70 }} />
-            <label style={{ color: '#555', marginLeft: 12 }}
+            <label style={{ color: 'var(--text-muted)', marginLeft: 12 }}
                    title="연속 실패 N회 → 장애로 판정. 절체까지의 시간 = 점검주기 × 장애판정.">장애 판정 (회)</label>
             <input type="number" min={1} max={60}
                    value={value.health.fall}
                    onChange={e => setHealth('fall', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 60 }} />
-            <label style={{ color: '#555', marginLeft: 12 }}
+            <label style={{ color: 'var(--text-muted)', marginLeft: 12 }}
                    title="연속 성공 N회 → 정상 복귀로 판정">복귀 판정 (회)</label>
             <input type="number" min={1} max={60}
                    value={value.health.rise}
                    onChange={e => setHealth('rise', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 60 }} />
-            <label style={{ color: '#555', marginLeft: 12 }}
+            <label style={{ color: 'var(--text-muted)', marginLeft: 12 }}
                    title="단일 점검 명령의 최대 실행 시간 (초과 시 실패)">제한 시간 (초)</label>
             <input type="number" min={1} max={60}
                    value={value.health.timeout}
@@ -1045,19 +1045,19 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 150, color: '#555' }}>NIC 링크 감시</label>
+            <label style={{ width: 150, color: 'var(--text-muted)' }}>NIC 링크 감시</label>
             <input type="checkbox" checked={value.track_interface}
                    onChange={e => set('track_interface', e.target.checked)} />
-            <span style={{ color: '#888' }}>
+            <span style={{ color: 'var(--text-muted)' }}>
               서비스 NIC 의 링크 다운을 즉시 감지 (점검 주기 기다리지 않고 바로 절체)
             </span>
           </div>
 
           <div>
-            <label style={{ width: 150, color: '#555', display: 'inline-block' }}>
+            <label style={{ width: 150, color: 'var(--text-muted)', display: 'inline-block' }}>
               프로세스 감시
             </label>
-            <span style={{ color: '#888' }}>
+            <span style={{ color: 'var(--text-muted)' }}>
               포트 listen 외에 해당 프로세스 실행 여부도 점검 (pgrep -x). 비워두면 포트만 점검.
             </span>
             <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 8, paddingLeft: 150 }}>
@@ -1076,7 +1076,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: '#555' }}
+            <label style={{ width: 150, color: 'var(--text-muted)' }}
                    title={
                      '복귀 없음: 절체 후 옛 Master 가 살아 돌아와도 Backup 으로 머무름 — 추가 절체 없음(운영 안정).\n' +
                      '자동 복귀: 옛 Master 의 priority 가 더 높으면 자동으로 Master 권한을 되찾음 — priority 의도 유지되나 복구 시점에 한 번 더 절체 발생.'
@@ -1089,7 +1089,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
             </select>
             {value.preempt === 'preempt' && (
               <>
-                <label style={{ color: '#555', marginLeft: 8 }}
+                <label style={{ color: 'var(--text-muted)', marginLeft: 8 }}
                        title="옛 Master 가 살아 돌아온 뒤, 권한을 되찾기 전에 N초간 안정화 대기">복귀 지연 (초)</label>
                 <input type="number" min={0} max={300}
                        value={value.preempt_delay}
@@ -1105,7 +1105,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
             </div>
           )}
 
-          <div style={{ fontSize: 11, color: '#888' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             오른쪽 위 [▶ 적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
           </div>
         </div>
@@ -1121,10 +1121,10 @@ function StatChip({ label, value, sub, color }:
       background: 'var(--surface)', border: '1px solid var(--border)', padding: '8px 14px',
       borderRadius: 6, minWidth: 110, display: 'flex', flexDirection: 'column', gap: 2,
     }}>
-      <span style={{ fontSize: 11, color: '#888' }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
       <span style={{ fontWeight: 600, fontSize: 18 }}>
         <span style={{ color: color || '#333' }}>{value}</span>
-        {sub && <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>{sub}</span>}
+        {sub && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>{sub}</span>}
       </span>
     </div>
   )
@@ -1189,13 +1189,13 @@ function ServerInspector({ agent: a, deployments, packages,
           }} />
           <b style={{ fontSize: 16 }}>{agentDisplayName(a.name)}</b>
           {agentDisplayName(a.name) !== a.name && (
-            <span style={{ fontSize: 12, color: '#888' }}>{a.name}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.name}</span>
           )}
           <span className="tag" style={{
             background: sc.bar, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
           }}>{a.status}</span>
-          <span style={{ color: '#888', fontSize: 12 }}>#{a.id}</span>
-          {a.agent_version && <span style={{ color: '#888', fontSize: 12 }}>· v{a.agent_version}</span>}
+          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>#{a.id}</span>
+          {a.agent_version && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>· v{a.agent_version}</span>}
 
           {/* 서버 전용 액션 */}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1283,7 +1283,7 @@ function InspectorSection({ title, expanded, onToggle, children }: {
              background: 'var(--bg-soft)', userSelect: 'none',
              borderBottom: expanded ? '1px solid #eee' : 'none',
            }}>
-        <span style={{ width: 14, color: '#888', fontSize: 12 }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ width: 14, color: 'var(--text-muted)', fontSize: 12 }}>{expanded ? '▼' : '▶'}</span>
         <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
       </div>
       {expanded && (
@@ -1357,11 +1357,11 @@ function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRemove }: {
         <div style={{ width: 4, background: sc, height: 32 }} />
       </td>
       <td><b>{d.process_name || '—'}</b></td>
-      <td style={{ fontSize: 12, color: '#555' }}>
+      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
         {d.service_functions.length === 0 ? '—' : d.service_functions.join(', ')}
       </td>
       <td style={{ fontSize: 12 }}>
-        {d.package_name} <span style={{ color: '#888' }}>v{d.package_version}</span>
+        {d.package_name} <span style={{ color: 'var(--text-muted)' }}>v{d.package_version}</span>
       </td>
       <td>
         <span className="tag" style={{
@@ -1504,7 +1504,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
 
   return (
     <div>
-      <div style={{ fontSize: 13, color: '#444', marginBottom: 8 }}>
+      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>
         대상 서버에서 다음 명령 실행 (ssh 1회) — systemd --user + linger 자동 (die 시 자동 재기동).
       </div>
       {loading && <div className="empty" style={{ padding: 8 }}>불러오는 중...</div>}
@@ -1534,7 +1534,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
               {regenerating ? '재발급 중...' : '↻ 재발급'}
             </button>
           </div>
-          <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
             실행 후 <code>./init.sh</code> 로 sudoers + enrollment + systemd unit 일괄 설정 (sudo 비번 1회).
           </div>
         </>
@@ -1565,7 +1565,7 @@ function InfoTab({ agent: a }: { agent: Agent }) {
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <>
-      <span style={{ color: '#888' }}>{label}</span>
+      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
       <span>{value}</span>
     </>
   )
@@ -1601,7 +1601,7 @@ function PendingMemberModal({ info, onClose }: {
           style={{ position: 'absolute', top: 8, right: 8 }}
           onClick={copy}>{copied ? '✓' : '📋'} 복사</button>
       </div>
-      <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
         token: <code>{info.enrollment_token}</code>
       </div>
       <div className="modal-footer" style={{ marginTop: 16 }}>
@@ -1707,7 +1707,7 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
                 placeholder="최대 8글자 — VRRP 인증" maxLength={8} />
             </>
           )}
-          <label style={{ gridColumn: '1 / -1', fontSize: 12, color: '#888', marginTop: 4 }}>
+          <label style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             선택: <b>{modeLabel}</b>
             {mode === 'active_standby' && <> · 멤버 이름: <code>{name || '<이름>'}-01</code> (master), <code>{name || '<이름>'}-02</code> (backup)</>}
           </label>
@@ -1735,7 +1735,7 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
                   style={{ position: 'absolute', top: 8, right: 8 }}
                   onClick={() => copyCmd(i)}>{copiedIdx === i ? '✓' : '📋'} 복사</button>
               </div>
-              <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
                 token: <code>{r.enrollment_token}</code>
               </div>
             </div>
@@ -1861,7 +1861,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   return (
     <Modal title={`${agent.name} — 모듈 추가`} onClose={onClose} width={600}>
       {agent.ha_group && (
-        <div style={{ fontSize: 12, color: '#555', marginBottom: 8,
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8,
                       padding: '6px 10px', background: 'var(--primary-soft)', border: '1px solid #d0e3ff',
                       borderRadius: 4 }}>
           이 agent 는 HA 그룹 <b>{agent.ha_group.name}</b> (mode={agent.ha_group.mode}, role={agent.ha_group.role}) 소속 —
@@ -1934,7 +1934,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         <label>메모</label>
         <input className="form-input" value={note} onChange={e => setNote(e.target.value)} />
       </div>
-      <div style={{ marginTop: 12, fontSize: 12, color: '#666' }}>
+      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
         ℹ 추가 후 <b>pending</b> 상태로 생성됩니다. 설정을 확인한 뒤
         <b>설치</b> → <b>Start</b> 순으로 진행하세요.
       </div>

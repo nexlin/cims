@@ -252,7 +252,7 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
                   {(template.presets || []).length > 0 && (
                     <PresetBar presets={template.presets!} onApply={applyPreset} />
                   )}
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 12,
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12,
                                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span>🔁 재기동 필요 · ⚡ 즉시 적용</span>
                     {appliedAt && <span>· 마지막 적용: {appliedAt}</span>}
@@ -347,7 +347,7 @@ function PresetBar({ presets, onApply }: {
       background: '#f5f7fa', border: '1px solid #d0d7de', borderRadius: 6,
       display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
     }}>
-      <span style={{ fontSize: 12, fontWeight: 600, color: '#444' }}>📋 추천 설정</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>📋 추천 설정</span>
       <select
         value={selected}
         onChange={e => setSelected(e.target.value)}
@@ -360,7 +360,7 @@ function PresetBar({ presets, onApply }: {
       </select>
       {cur && (
         <>
-          <span style={{ fontSize: 11, color: '#666', flex: 1 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>
             {cur.description ?? `${Object.keys(cur.values).length}개 필드 변경`}
           </span>
           <button
@@ -373,7 +373,7 @@ function PresetBar({ presets, onApply }: {
         </>
       )}
       {!cur && (
-        <span style={{ fontSize: 11, color: '#888', flex: 1 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>
           싱글노드/HA/대용량 등 시나리오별 권장값을 한 번에 채워 넣습니다.
         </span>
       )}
@@ -436,7 +436,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
         }}>
         <span style={{ color: '#1a73e8', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
         <b style={{ color: '#1a73e8' }}>변경 사항 ({changed.size})</b>
-        <span style={{ fontSize: 11, color: '#555' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           🔁 재기동 {restartKeys.length} · ⚡ 즉시 {hotKeys.length}
         </span>
         <button onClick={(e) => { e.stopPropagation(); onResetAll() }}
@@ -449,7 +449,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
         <div style={{ padding: 8, maxHeight: 240, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ color: '#888' }}>
+              <tr style={{ color: 'var(--text-muted)' }}>
                 <th style={{ textAlign: 'left', padding: '4px 6px', width: 220 }}>필드</th>
                 <th style={{ textAlign: 'left', padding: '4px 6px' }}>옛 값</th>
                 <th style={{ width: 30, textAlign: 'center' }}>→</th>
@@ -469,7 +469,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                         {restart ? '🔁' : '⚡'}
                       </span>
                     </td>
-                    <td style={{ padding: '4px 6px', color: '#888', fontFamily: 'monospace' }}>
+                    <td style={{ padding: '4px 6px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
                       {display(initial[k])}
                     </td>
                     <td style={{ textAlign: 'center', color: '#1a73e8' }}>→</td>
@@ -551,7 +551,7 @@ function SectionBlock({ section, values, initial, changed, showAdvanced, onChang
           borderBottom: collapsed ? 'none' : '1px solid #eee',
           background: section.hidden ? '#f5efe0' : '#fafafa',
         }}>
-        <span style={{ color: '#999', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
         <b>{section.title}</b>
         {section.hidden && (
           <span style={{
@@ -560,7 +560,7 @@ function SectionBlock({ section, values, initial, changed, showAdvanced, onChang
           }}>고급</span>
         )}
         {section.description && (
-          <span style={{ fontSize: 11, color: '#888' }}>— {section.description}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>— {section.description}</span>
         )}
       </div>
       {!collapsed && (
@@ -569,13 +569,13 @@ function SectionBlock({ section, values, initial, changed, showAdvanced, onChang
             <div key={b.key} style={{ marginBottom: idx === nonEmptyBuckets.length - 1 ? 0 : 14 }}>
               {b.title && (
                 <div style={{
-                  fontSize: 12, fontWeight: 600, color: '#555',
+                  fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
                   borderBottom: '1px solid #eee', paddingBottom: 4, marginBottom: 8,
                   display: 'flex', alignItems: 'baseline', gap: 6,
                 }}>
                   <span>{b.title}</span>
                   {b.description && (
-                    <span style={{ fontSize: 10, fontWeight: 400, color: '#888' }}>— {b.description}</span>
+                    <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>— {b.description}</span>
                   )}
                 </div>
               )}
@@ -647,7 +647,7 @@ function FieldRow({ field, value, initialValue, isChanged, onChange, onReset }: 
           )}
         </div>
         {field.help && (
-          <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>{field.help}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{field.help}</div>
         )}
         {!needsRestart && field.reload_hint && (
           <div style={{ fontSize: 11, color: '#27ae60', marginTop: 3 }}>⚡ {field.reload_hint}</div>

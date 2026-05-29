@@ -689,7 +689,7 @@ export default function HaServicesPage() {
                                                      background: 'var(--surface)', border: '1px solid var(--border)',
                                                      borderRadius: 3, cursor: 'pointer' }}>↻ 새로고침</button>
       </div>
-      <div style={{ color: '#666', fontSize: 13, marginBottom: 16 }}>
+      <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
         서비스(=HA 그룹/단독) 단위로 서버를 묶어 관리. 유형 선택 시 자동으로 서버 발급(A/S=2, AA/Standalone=1).
         모든 추가/편집은 list 행 안 inline (팝업 없음).
       </div>
@@ -700,12 +700,12 @@ export default function HaServicesPage() {
         {/* 좌측 SystemList */}
         <div style={{ width: 280, borderRight: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '8px 12px', borderBottom: '1px solid #e0e0e0',
-                        fontSize: 12, fontWeight: 'bold', color: '#666', background: '#f7f8fa' }}>
+                        fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)', background: '#f7f8fa' }}>
             시스템 ({services.length})
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {services.length === 0 && !adding && (
-              <div style={{ padding: 16, color: '#888', fontSize: 12, textAlign: 'center' }}>
+              <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}>
                 (등록된 시스템 없음)<br />아래 [＋ 시스템 추가]
               </div>
             )}
@@ -723,7 +723,7 @@ export default function HaServicesPage() {
           {/* 시스템 추가 폼 — 좌측 list 아래 */}
           {adding ? (
             <div style={{ padding: 10, borderTop: '1px solid #e0e0e0', background: '#f0f8ff' }}>
-              <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>새 시스템</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>새 시스템</div>
               <input value={adding.name} onChange={e => setAdding({ ...adding, name: e.target.value })}
                      placeholder="이름 (예: VoLTE SIP Server)"
                      style={{ width: '100%', padding: '4px 8px', boxSizing: 'border-box', marginBottom: 6 }}
@@ -792,7 +792,7 @@ export default function HaServicesPage() {
               canHealthCheck={selectedSvc.servers.some(s => s.status === 'online')}
             />
           ) : (
-            <div style={{ color: '#888', fontSize: 13, padding: 32, textAlign: 'center' }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 32, textAlign: 'center' }}>
               ← 좌측에서 시스템 선택
             </div>
           )}
@@ -854,7 +854,7 @@ function AccordionSection({ title, defaultOpen, right, children }: {
                     fontWeight: 'bold', fontSize: 13,
                     display: 'flex', alignItems: 'center', gap: 6 }}
            onClick={() => setOpen(!open)}>
-        <span style={{ width: 12, color: '#666' }}>{open ? '▾' : '▸'}</span>
+        <span style={{ width: 12, color: 'var(--text-muted)' }}>{open ? '▾' : '▸'}</span>
         <span style={{ flex: 1 }}>{title}</span>
         {right && <span onClick={e => e.stopPropagation()}>{right}</span>}
       </div>
@@ -899,7 +899,7 @@ function SystemListItem({ svc, selected, expanded, onClickSystem, onToggleExpand
            }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {!isStandalone && (
-            <span style={{ fontSize: 10, color: '#888', width: 10, flexShrink: 0 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 10, flexShrink: 0 }}>
               {expanded ? '▾' : '▸'}
             </span>
           )}
@@ -928,7 +928,7 @@ function SystemListItem({ svc, selected, expanded, onClickSystem, onToggleExpand
       {!isStandalone && expanded && (
         <>
           {svc.servers.length === 0 && (
-            <div style={{ padding: '6px 12px 6px 36px', fontSize: 11, color: '#aaa', fontStyle: 'italic' }}>
+            <div style={{ padding: '6px 12px 6px 36px', fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
               (멤버 없음)
             </div>
           )}
@@ -1040,14 +1040,14 @@ function SystemDetail(p: SystemDetailProps) {
       <AccordionSection title="일반 정보" defaultOpen>
         <table style={{ fontSize: 12 }}>
           <tbody>
-            <tr><td style={{ padding: '4px 12px 4px 0', color: '#666' }}>모드</td>
+            <tr><td style={{ padding: '4px 12px 4px 0', color: 'var(--text-muted)' }}>모드</td>
                 <td style={{ padding: '4px 0' }}>{MODE_LABEL[svc.mode]}</td></tr>
-            <tr><td style={{ padding: '4px 12px 4px 0', color: '#666' }}>멤버 수</td>
+            <tr><td style={{ padding: '4px 12px 4px 0', color: 'var(--text-muted)' }}>멤버 수</td>
                 <td style={{ padding: '4px 0' }}>{svc.servers.length}</td></tr>
-            <tr><td style={{ padding: '4px 12px 4px 0', color: '#666' }}>상태</td>
+            <tr><td style={{ padding: '4px 12px 4px 0', color: 'var(--text-muted)' }}>상태</td>
                 <td style={{ padding: '4px 0' }}>{allOnline ? '전체 online' : '일부 비-online'}</td></tr>
             {needsVip && (
-              <tr><td style={{ padding: '4px 12px 4px 0', color: '#666' }}>VRID</td>
+              <tr><td style={{ padding: '4px 12px 4px 0', color: 'var(--text-muted)' }}>VRID</td>
                   <td style={{ padding: '4px 0' }}>{svc.vrid ?? '—'}</td></tr>
             )}
           </tbody>
@@ -1058,7 +1058,7 @@ function SystemDetail(p: SystemDetailProps) {
       <AccordionSection title={`멤버 서버 (${svc.servers.length})`} defaultOpen>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            <tr style={{ background: 'var(--surface-2)', color: '#666' }}>
+            <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
               <th style={{ padding: '4px 8px', textAlign: 'left' }}>이름</th>
               <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>mgmt IP</th>
               <th style={{ padding: '4px 8px', textAlign: 'left', width: 120 }}>상태</th>
@@ -1089,7 +1089,7 @@ function SystemDetail(p: SystemDetailProps) {
                   <span style={{ color: STATUS_COLOR[srv.status], fontWeight: 'bold' }}>
                     {STATUS_ICON[srv.status]} {srv.status}
                   </span>
-                  {srv.agent_version && <span style={{ marginLeft: 6, fontSize: 10, color: '#888' }}>v{srv.agent_version}</span>}
+                  {srv.agent_version && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-muted)' }}>v{srv.agent_version}</span>}
                 </td>
                 <td style={{ padding: '4px 8px' }}>
                   {srv.status !== 'online' && (
@@ -1141,8 +1141,8 @@ function SystemDetail(p: SystemDetailProps) {
           {(() => {
             const srv = svc.servers[0]
             const enrollDone = srv.status !== 'pending'
-            if (!enrollDone) return <div style={{ fontSize: 12, color: '#aaa' }}>⏳ enroll 대기</div>
-            if (srv.interfaces.length === 0) return <div style={{ fontSize: 12, color: '#aaa' }}>— (NIC 정보 대기)</div>
+            if (!enrollDone) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>⏳ enroll 대기</div>
+            if (srv.interfaces.length === 0) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>— (NIC 정보 대기)</div>
             return (
               <ServiceIpPanel
                 title="인터페이스 IP / 라우팅"
@@ -1160,7 +1160,7 @@ function SystemDetail(p: SystemDetailProps) {
       )}
       {!isStandalone && (
         <AccordionSection title="서비스 IP / 라우팅 — 멤버별" defaultOpen={false}>
-          <div style={{ fontSize: 12, color: '#888' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             좌측 트리에서 멤버 서버를 선택하면 해당 멤버의 서비스 IP / 라우팅 이 우측에 표시됩니다.
           </div>
         </AccordionSection>
@@ -1219,7 +1219,7 @@ function MemberMetricTrends({ agentId }: { agentId: number }) {
   }, [agentId])
   if (err) return <div style={{ fontSize: 12, color: '#e74c3c' }}>※ {err}</div>
   const chrono = [...metrics].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
-  if (chrono.length < 2) return <div style={{ fontSize: 12, color: '#aaa' }}>데이터 부족 (metric 수집 대기)</div>
+  if (chrono.length < 2) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>데이터 부족 (metric 수집 대기)</div>
   return (
     <div style={{ display: 'flex', gap: 10 }}>
       <MetricTrend label="CPU"  values={chrono.map(m => m.cpu_pct)}  color="#3498db" warn={85} width={150} />
@@ -1239,7 +1239,7 @@ function ServerDetail(p: ServerDetailProps) {
         display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0 12px',
         borderBottom: '1px solid #e0e0e0', marginBottom: 12,
       }}>
-        <span style={{ fontSize: 11, color: '#888' }}>{svc.name} /</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{svc.name} /</span>
         <span style={{ fontSize: 18, fontWeight: 'bold' }}>
           <InlineNameEdit kind="server" id={srv.id} value={srv.name}
                           editing={p.editingName}
@@ -1282,20 +1282,20 @@ function ServerDetail(p: ServerDetailProps) {
       <AccordionSection title="일반 정보" defaultOpen>
         <table style={{ fontSize: 12 }}>
           <tbody>
-            <tr><td style={{ padding: '4px 12px 4px 0', color: '#666' }}>mgmt IP</td>
+            <tr><td style={{ padding: '4px 12px 4px 0', color: 'var(--text-muted)' }}>mgmt IP</td>
                 <td style={{ padding: '4px 0', fontFamily: 'monospace' }}>{srv.ip ?? '— (enroll 후 자동)'}</td></tr>
-            <tr><td style={{ padding: '4px 12px 4px 0', color: '#666' }}>상태</td>
+            <tr><td style={{ padding: '4px 12px 4px 0', color: 'var(--text-muted)' }}>상태</td>
                 <td style={{ padding: '4px 0' }}>
                   <span style={{ color: STATUS_COLOR[srv.status], fontWeight: 'bold' }}>
                     {STATUS_ICON[srv.status]} {srv.status}
                   </span>
-                  {srv.agent_version && <span style={{ marginLeft: 8, color: '#888' }}>v{srv.agent_version}</span>}
+                  {srv.agent_version && <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>v{srv.agent_version}</span>}
                 </td></tr>
-            <tr><td style={{ padding: '4px 12px 4px 0', color: '#666' }}>role</td>
+            <tr><td style={{ padding: '4px 12px 4px 0', color: 'var(--text-muted)' }}>role</td>
                 <td style={{ padding: '4px 0' }}>{srv.role || '—'}</td></tr>
             {srv.expiresAt && srv.status === 'pending' && (
-              <tr><td style={{ padding: '4px 12px 4px 0', color: '#666' }}>토큰 만료</td>
-                  <td style={{ padding: '4px 0', color: '#888' }}>{minutesLeft(srv.expiresAt)}분 남음</td></tr>
+              <tr><td style={{ padding: '4px 12px 4px 0', color: 'var(--text-muted)' }}>토큰 만료</td>
+                  <td style={{ padding: '4px 0', color: 'var(--text-muted)' }}>{minutesLeft(srv.expiresAt)}분 남음</td></tr>
             )}
           </tbody>
         </table>
@@ -1309,9 +1309,9 @@ function ServerDetail(p: ServerDetailProps) {
 
       <AccordionSection title="서비스 IP / 라우팅" defaultOpen>
         {!enrollDone ? (
-          <div style={{ fontSize: 12, color: '#aaa' }}>⏳ enroll 대기</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>⏳ enroll 대기</div>
         ) : srv.interfaces.length === 0 ? (
-          <div style={{ fontSize: 12, color: '#aaa' }}>— (NIC 정보 대기)</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>— (NIC 정보 대기)</div>
         ) : (
           <ServiceIpPanel
             title="인터페이스 IP / 라우팅"
@@ -1346,7 +1346,7 @@ function StatusSummary({ servers, mode }: { servers: ServerRow[]; mode: Mode }) 
   return (
     <span style={{ fontSize: 12, color }}>
       {online === total && total > 0 ? '●' : '◐'} {online}/{cap ?? total}
-      {cap && online < cap && <span style={{ marginLeft: 4, color: '#888' }}>(pending {cap - online})</span>}
+      {cap && online < cap && <span style={{ marginLeft: 4, color: 'var(--text-muted)' }}>(pending {cap - online})</span>}
     </span>
   )
 }
@@ -1410,9 +1410,9 @@ function PackagesArea({ svc, packageMap, pickerOpen, setPickerOpen, onChange }: 
 
   return (
     <div>
-      <div style={{ fontSize: 12, color: '#666', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span>▸ 패키지 ({MODE_LABEL[svc.mode]} 가능):</span>
-        {installed.length === 0 && <span style={{ color: '#aaa' }}>(없음)</span>}
+        {installed.length === 0 && <span style={{ color: 'var(--text-muted)' }}>(없음)</span>}
         {installed.map(p => (
           <span key={p.id} style={{
             fontSize: 11, padding: '2px 6px', borderRadius: 3,
@@ -1421,7 +1421,7 @@ function PackagesArea({ svc, packageMap, pickerOpen, setPickerOpen, onChange }: 
           }}>
             {p.name} {p.version}
             <button onClick={() => removePkg(p.id)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#777' }}>×</button>
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
           </span>
         ))}
         <button onClick={() => setPickerOpen(!pickerOpen)} style={btnSmall()}>
@@ -1432,10 +1432,10 @@ function PackagesArea({ svc, packageMap, pickerOpen, setPickerOpen, onChange }: 
       {pickerOpen && (
         <div style={{ marginTop: 8, padding: 10, background: 'var(--surface)',
                       border: '1px dashed #c0c0c0', borderRadius: 4 }}>
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
             ℹ {MODE_LABEL[targetMode]} 가능 또는 standalone 모듈만 선택 가능 — 서비스 모든 서버에 일괄 설치
           </div>
-          {available.length === 0 && <div style={{ color: '#aaa' }}>(추가 가능한 패키지 없음)</div>}
+          {available.length === 0 && <div style={{ color: 'var(--text-muted)' }}>(추가 가능한 패키지 없음)</div>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6 }}>
             {available.map(p => {
               const ok = p.capability === targetMode || p.capability === 'standalone'

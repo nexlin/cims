@@ -417,7 +417,7 @@ export default function ServicesPage() {
                   </span>
                   {card.critical && <span className="tag" style={{ background: '#f39c12', color: '#fff' }}>critical</span>}
                   {!card.hasProcess && <span className="tag" style={{ background: '#3498db', color: '#fff' }}>원격</span>}
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: '#777' }}>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
                     {card.label}
                   </span>
                 </div>
@@ -432,7 +432,7 @@ export default function ServicesPage() {
                 }}>
                   {/* ¹ 설정 — 템플릿/설정 편집 (버전 선택은 ³ 로 이동) */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
-                    <span style={{ color: '#555', fontWeight: 500, minWidth: 50 }}>¹ 설정</span>
+                    <span style={{ color: 'var(--text-muted)', fontWeight: 500, minWidth: 50 }}>¹ 설정</span>
                     <button className="btn btn--sm btn--outline"
                       disabled={versions.length === 0}
                       onClick={() => openTemplate(card.key, true)}
@@ -448,7 +448,7 @@ export default function ServicesPage() {
                             title="설정 변경 후 재시작 필요">!</span>
                     )}
                     {versions.length === 0 && (
-                      <Link to="/deploy/packages" style={{ fontSize: 11, color: '#888', marginLeft: 'auto' }}
+                      <Link to="/deploy/packages" style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}
                             title="신규 패키지 등록">등록</Link>
                     )}
                   </div>
@@ -456,14 +456,14 @@ export default function ServicesPage() {
                   {/* ² 실행 — hasProcess 카드만, 빈 셀로 정렬 유지 */}
                   {card.hasProcess ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
-                      <span style={{ color: '#555', fontWeight: 500, minWidth: 50 }}>² 실행</span>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 500, minWidth: 50 }}>² 실행</span>
                       <span className="tag" style={{
                         background: running ? '#2ecc71' : '#95a5a6', color: '#fff',
                         minWidth: 40, textAlign: 'center',
                       }}>
                         {running ? 'on' : 'off'}
                       </span>
-                      <span style={{ color: '#777', fontFamily: 'monospace', fontSize: 11 }}>
+                      <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: 11 }}>
                         {running ? `pid=${s?.pid ?? '?'}` : '—'}
                       </span>
                       <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
@@ -484,7 +484,7 @@ export default function ServicesPage() {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11, color: '#aaa', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ minWidth: 50 }}>² 실행</span>
                       <span>(원격 — 로컬 실행 없음)</span>
                     </div>
@@ -494,7 +494,7 @@ export default function ServicesPage() {
                   <div style={{ gridColumn: '1 / -1',
                                 display: 'flex', alignItems: 'center', gap: 6,
                                 fontSize: 12, flexWrap: 'wrap', minWidth: 0 }}>
-                    <span style={{ color: '#555', fontWeight: 500, minWidth: 50 }}>³ 다운로드</span>
+                    <span style={{ color: 'var(--text-muted)', fontWeight: 500, minWidth: 50 }}>³ 다운로드</span>
                     {variantTars.map(({ v, tar }) => (
                       <button key={v} className="btn btn--sm btn--outline"
                         disabled={!tar}

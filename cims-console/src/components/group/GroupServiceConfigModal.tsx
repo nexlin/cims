@@ -141,7 +141,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
         {/* 헤더 */}
         <div style={{ padding: '16px 24px', borderBottom: '1px solid #e0e6ed' }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>그룹 서비스 설정 — {groupName}</h3>
-          <p style={{ color: '#666', fontSize: 12, margin: '6px 0 0' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '6px 0 0' }}>
             그룹 멤버 ({members.length}개) 공통 설정. 한 번 편집 시 양쪽 멤버에 자동 sync.
             멤버 specific 값 (LocalIp 등) 은 각 서버의 시스템 설정에서.
           </p>
@@ -153,7 +153,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
           <div style={{ width: 240, borderRight: '1px solid #e0e6ed', padding: 12,
                         overflowY: 'auto', background: '#fafbfc' }}>
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 11, color: '#888', display: 'block', marginBottom: 4 }}>패키지</label>
+              <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>패키지</label>
               <select value={effectivePkgId}
                       onChange={e => { setSelectedPkg(Number(e.target.value)); setSelectedPreset(''); setTab({ kind: 'preset' }) }}
                       disabled={working}
@@ -167,7 +167,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
             <TabButton active={tab.kind === 'preset'} onClick={() => setTab({ kind: 'preset' })}>
               ✨ Preset 일괄 적용
             </TabButton>
-            <div style={{ fontSize: 11, color: '#888', margin: '12px 0 4px' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '12px 0 4px' }}>
               서비스 컬렉션 (그룹 공통)
             </div>
             {serviceCollections.map(c => (
@@ -178,7 +178,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
               </TabButton>
             ))}
             {serviceCollections.length === 0 && (
-              <div style={{ fontSize: 11, color: '#aaa', padding: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 8 }}>
                 (scope=service collection 없음)
               </div>
             )}
@@ -187,14 +187,14 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
           {/* 우측 패널 */}
           <div style={{ flex: 1, padding: 16, overflow: 'auto' }}>
             {!pkg && (
-              <div style={{ padding: 32, color: '#999', textAlign: 'center' }}>
+              <div style={{ padding: 32, color: 'var(--text-muted)', textAlign: 'center' }}>
                 그룹에 패키지 미배포 — `/deploy/services` 에서 패키지 추가 후 진입.
               </div>
             )}
             {pkg && tab.kind === 'preset' && (
               <div>
                 <h4 style={{ marginTop: 0 }}>Preset 일괄 적용 <span style={{ fontSize: 11, color: '#27ae60', fontWeight: 'normal' }}>· ⚡ SIGUSR1 reload</span></h4>
-                <p style={{ color: '#666', fontSize: 12 }}>
+                <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>
                   preset 의 키-값을 양쪽 멤버 config.json 에 merge → PUT → agent 가 SIGUSR1
                   자동 발송. 부트스트랩 필드 (LocalIp, ThreadCount 등) 만 재기동 필요.
                 </p>
@@ -227,7 +227,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
               const c = serviceCollections.find(x => x.key === tab.key)
               if (!c) return <div>collection not found</div>
               if (memberDeploymentIds.length === 0) {
-                return <div style={{ color: '#999' }}>그룹에 배포된 멤버 없음</div>
+                return <div style={{ color: 'var(--text-muted)' }}>그룹에 배포된 멤버 없음</div>
               }
               return (
                 <div>
@@ -240,7 +240,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
                       · {c.restart ? '재기동 필요' : `⚡ live reload (${c.reload_hint || 'SIGUSR1'})`}
                     </span>
                   </h4>
-                  <p style={{ fontSize: 11, color: '#888' }}>
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                     저장 시 그룹 멤버 전체 ({memberDeploymentIds.length}개) 에 동시 PUT — 정합 보장.
                     {!c.restart && ' 별도 재기동 불필요 — agent 가 자동 SIGUSR1 reload.'}
                   </p>
@@ -268,7 +268,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
                   disabled={working || memberDepsForPkg.length === 0}
                   title="section/preset 변경 후에만 필요. collection 저장은 SIGUSR1 reload — 재기동 불필요."
                   style={{ padding: '6px 14px', fontSize: 12, cursor: working ? 'wait' : 'pointer',
-                           color: '#666', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: 3 }}>
+                           color: 'var(--text-muted)', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: 3 }}>
             {working ? '...' : `🔄 선택적 재기동 (${memberDepsForPkg.length})`}
           </button>
           <button onClick={onClose} disabled={working}

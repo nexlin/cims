@@ -161,7 +161,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
                 return (
                   <div key={reason} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <div style={{ width: 80, fontSize: 13 }}>{reason || 'unknown'}</div>
-                    <div style={{ flex: 1, background: '#f3f4f6', borderRadius: 4, height: 18 }}>
+                    <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 4, height: 18 }}>
                       <div style={{ width: `${pct}%`, background: 'var(--primary)', borderRadius: 4, height: 18, minWidth: pct > 0 ? 4 : 0 }} />
                     </div>
                     <div style={{ width: 60, fontSize: 12, textAlign: 'right', color: 'var(--text-muted)' }}>{cnt}건 ({pct}%)</div>
@@ -195,7 +195,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
               {Object.entries(svcData.ptt.by_group).sort((a, b) => b[1] - a[1]).map(([gid, cnt]) => (
                 <div key={gid} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <div style={{ width: 80, fontSize: 13 }}>그룹 {gid}</div>
-                  <div style={{ flex: 1, background: '#f3f4f6', borderRadius: 4, height: 18 }}>
+                  <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 4, height: 18 }}>
                     <div style={{ width: `${Math.round(cnt / svcData.ptt!.total_calls * 100)}%`, background: 'var(--primary)', borderRadius: 4, height: 18, minWidth: 4 }} />
                   </div>
                   <div style={{ width: 50, fontSize: 12, textAlign: 'right', color: 'var(--text-muted)' }}>{cnt}건</div>

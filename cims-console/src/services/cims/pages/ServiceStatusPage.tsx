@@ -7,7 +7,7 @@ function OnlineDot({ online }: { online: boolean }) {
   return (
     <span style={{
       display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-      background: online ? '#22c55e' : '#d1d5db', marginRight: 6
+      background: online ? 'var(--success)' : 'var(--text-muted)', marginRight: 6
     }} />
   )
 }
