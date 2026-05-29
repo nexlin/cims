@@ -32,10 +32,12 @@ from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
 
 from services.mcptt import audit_config_change
+from services import service_registry
 
 logger = Logger()
 
 _SERVICE_BASE = "/api/v1/services"
+# fallback — service descriptor 미존재 시. 평상시엔 registry.controllable_modules() 사용.
 _ALLOWED = {"cmp", "csp", "cwrtc", "csc", "console", "phone"}
 _ACTIONS = {"start", "stop", "restart"}
 
@@ -173,8 +175,9 @@ async def handle_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
                              media_type="application/json")
 
     service, action = parts[0], parts[1]
-    if service not in _ALLOWED:
-        return HandlerResult(status=400, body={"error": "unknown_service", "allowed": sorted(_ALLOWED)},
+    allowed = service_registry.controllable_modules(config) or _ALLOWED
+    if service not in allowed:
+        return HandlerResult(status=400, body={"error": "unknown_service", "allowed": sorted(allowed)},
                              media_type="application/json")
     if action not in _ACTIONS:
         return HandlerResult(status=400, body={"error": "unknown_action", "allowed": sorted(_ACTIONS)},

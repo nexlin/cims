@@ -22,7 +22,7 @@ import asyncio
 import json
 
 from httpsrv.handler import HandlerArgs, HandlerResult
-from services import file_store
+from services import file_store, service_registry
 
 
 _HA_GROUPS_BASE = '/api/v1/ha-groups'
@@ -207,14 +207,18 @@ def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
         return (None, None)
     # deployment file 에는 package_name 이 없고 process_name 만 있는 케이스가 있음.
     # process_name 우선 (CSP/CMP/CSC 등 대문자 → lowercase). cspsim 등 non-daemon 제외.
+    # service descriptor 의 모듈 health 맵 (없으면 하드코딩 fallback — 전환 안전망).
+    defaults = service_registry.module_health_defaults(config) or _MODULE_HEALTH_DEFAULTS
     daemon_modules = set()
     for d in deps:
         mod = (d.get('process_name') or '').lower().strip()
-        if mod in _MODULE_HEALTH_DEFAULTS:
+        if mod in defaults:
             daemon_modules.add(mod)
-    for mod in _HEALTH_MODULE_PRIORITY:
+    # descriptor 모듈 순서 + 기존 우선순위 휴리스틱 병합 (priority 우선, 그 외 descriptor 순).
+    order = _HEALTH_MODULE_PRIORITY + [m for m in defaults if m not in _HEALTH_MODULE_PRIORITY]
+    for mod in order:
         if mod in daemon_modules:
-            return _MODULE_HEALTH_DEFAULTS[mod]
+            return defaults[mod]
     return (None, None)
 
 

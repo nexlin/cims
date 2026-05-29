@@ -116,6 +116,8 @@ if __name__ == '__main__':
     from handlers.ha_groups      import CIMS_HA_GROUPS_HANDLER_LIST
     from handlers.alerts         import CIMS_ALERTS_HANDLER_LIST
     from handlers.console        import CIMS_CONSOLE_HANDLER_LIST
+    from handlers.service_descriptors import CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
+    from services import service_registry
     from services.flow_logger    import FLOW_HANDLER_LIST
 
     admin_server = None
@@ -250,6 +252,13 @@ if __name__ == '__main__':
         # ── OAM Admin server (4419) ──────────────────────────────────────
         admin_conf = config.get('Server', {'Ip': '0.0.0.0', 'Port': 4419})
         cims_kwargs = {'config': config}
+
+        # Service Descriptor 레지스트리 — startup config 캐시 + store 비면 CIMS seed 주입.
+        # ha_groups/build/service_control 이 descriptor 구동(하드코딩 fallback 보존).
+        service_registry.init(config)
+        if service_registry.seed_if_empty(config):
+            logger.log_info('[service-registry] seeded default CIMS descriptor (store was empty)')
+
         admin_server = HttpServer(
             admin_conf.get('Ip', '0.0.0.0'),
             admin_conf.get('Port', 4419),
@@ -293,6 +302,10 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_CONSOLE_HANDLER_LIST
+        ])
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
         ])
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)

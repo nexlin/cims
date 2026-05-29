@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from . import auth as _auth
+from services import service_registry
 
 
 _BUILD_BASE = '/api/v1/build'
@@ -43,6 +44,15 @@ _VALID_MODULES = (
     'csp', 'psp', 'isp',
     'cwrtc', 'csc', 'console', 'phone', 'cspsim', 'agent',
 )
+
+
+def _valid_modules() -> set:
+    """유효 패키지 모듈명 — service descriptor 구동 (startup config 캐시). 비면 하드코딩 fallback."""
+    try:
+        v = service_registry.valid_module_names()
+        return v if v else set(_VALID_MODULES)
+    except Exception:
+        return set(_VALID_MODULES)
 
 _BUILD_TIMEOUT = 1800   # 전체 cmake + make + npm
 _PKG_TIMEOUT = 300
@@ -172,7 +182,7 @@ def _scan_packages_fallback() -> list:
 
 
 def _find_tarball(module: str) -> Optional[str]:
-    if module not in _VALID_MODULES:
+    if module not in _valid_modules():
         return None
     if not os.path.isdir(_DIST_PKG_DIR):
         return None
@@ -303,13 +313,13 @@ async def _start_pkg(handler_args: HandlerArgs) -> HandlerResult:
     if not modules:
         return HandlerResult(status=422, body={
             'error': 'module or modules required',
-            'allowed': list(_VALID_MODULES),
+            'allowed': sorted(_valid_modules()),
         })
-    invalid = [m for m in modules if m not in _VALID_MODULES]
+    invalid = [m for m in modules if m not in _valid_modules()]
     if invalid:
         return HandlerResult(status=422, body={
             'error': f'invalid module(s): {invalid}',
-            'allowed': list(_VALID_MODULES),
+            'allowed': sorted(_valid_modules()),
         })
 
     async with _LOCK:
@@ -480,7 +490,7 @@ async def _list_packages() -> HandlerResult:
 
 
 async def _download_package(module: str) -> HandlerResult:
-    if module not in _VALID_MODULES:
+    if module not in _valid_modules():
         return HandlerResult(status=422, body={'error': f'invalid module: {module!r}'})
     path = _find_tarball(module)
     if not path:
