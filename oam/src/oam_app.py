@@ -426,23 +426,39 @@ if __name__ == '__main__':
                 _emit(typ, severity, 'close', msg_close)
                 logger.log_info(f"[alert] CLOSE {typ}")
 
+        def _eval_alert_rule(rule: dict, ctx: dict) -> bool:
+            chk = rule.get('check')
+            if chk == 'process_down':
+                return not bool(ctx.get(rule.get('target')))
+            if chk == 'db_down':
+                return not ctx.get('db_ok')
+            if chk == 'rtp_pct_gte':
+                return ctx.get('rtp_pct', 0) >= int(rule.get('threshold', ALERT_RTP_THRESHOLD))
+            return False
+
         def _sweep_alerts():
             try:
                 csp = _get_csp_stats(config)
                 cmp = _get_cmp_stats(config)
                 db_ok = _check_db()
-                _transition('csp_down', not bool(csp), 'critical',
-                            'CSP 프로세스 응답 없음', 'CSP 응답 정상화')
-                _transition('cmp_down', not bool(cmp), 'critical',
-                            'CMP 프로세스 응답 없음', 'CMP 응답 정상화')
-                _transition('db_down', not db_ok, 'critical',
-                            'DB 연결 끊김', 'DB 연결 복구')
                 total = cmp.get('rtp_ports_total', 0) or 0
                 used = cmp.get('rtp_ports_used', 0) or 0
                 pct = int(round(used / total * 100)) if total > 0 else 0
-                _transition('rtp_high', pct >= ALERT_RTP_THRESHOLD, 'warning',
-                            f'RTP 포트 사용률 {pct}% ({ALERT_RTP_THRESHOLD}% 초과)',
-                            f'RTP 포트 사용률 {pct}% (정상)')
+                ctx = {'csp': csp, 'cmp': cmp, 'db_ok': db_ok, 'rtp_pct': pct}
+                # alert 규칙 = service descriptor 구동 (없으면 하드코딩 fallback — 전환 안전망).
+                rules = service_registry.alert_rules(config)
+                if rules:
+                    for r in rules:
+                        thr = r.get('threshold', ALERT_RTP_THRESHOLD)
+                        mo = (r.get('msg_open') or r.get('type', '')).format(pct=pct, threshold=thr)
+                        mc = (r.get('msg_close') or '').format(pct=pct, threshold=thr)
+                        _transition(r['type'], _eval_alert_rule(r, ctx), r.get('severity', 'warning'), mo, mc)
+                else:
+                    _transition('csp_down', not bool(csp), 'critical', 'CSP 프로세스 응답 없음', 'CSP 응답 정상화')
+                    _transition('cmp_down', not bool(cmp), 'critical', 'CMP 프로세스 응답 없음', 'CMP 응답 정상화')
+                    _transition('db_down', not db_ok, 'critical', 'DB 연결 끊김', 'DB 연결 복구')
+                    _transition('rtp_high', pct >= ALERT_RTP_THRESHOLD, 'warning',
+                                f'RTP 포트 사용률 {pct}% ({ALERT_RTP_THRESHOLD}% 초과)', f'RTP 포트 사용률 {pct}% (정상)')
             except Exception as e:
                 logger.log_error(f"[alert-sweep] error: {e}")
 

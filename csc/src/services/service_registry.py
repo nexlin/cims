@@ -41,6 +41,19 @@ _CIMS_SEED = {
         {'name': 'phone',  'controllable': True},
         {'name': 'cspsim'},
     ],
+    # 알람 규칙 — 코어 sweeper 가 평가. check 프리미티브: process_down / db_down / rtp_pct_gte.
+    # msg_open/close 의 {pct},{threshold} 는 sweeper 가 포맷. (기존 하드코딩과 동일)
+    'alert_rules': [
+        {'type': 'csp_down', 'severity': 'critical', 'check': 'process_down', 'target': 'csp',
+         'metric': 'CSP 프로세스', 'msg_open': 'CSP 프로세스 응답 없음', 'msg_close': 'CSP 응답 정상화'},
+        {'type': 'cmp_down', 'severity': 'critical', 'check': 'process_down', 'target': 'cmp',
+         'metric': 'CMP 프로세스', 'msg_open': 'CMP 프로세스 응답 없음', 'msg_close': 'CMP 응답 정상화'},
+        {'type': 'db_down', 'severity': 'critical', 'check': 'db_down',
+         'metric': 'DB 연결', 'msg_open': 'DB 연결 끊김', 'msg_close': 'DB 연결 복구'},
+        {'type': 'rtp_high', 'severity': 'warning', 'check': 'rtp_pct_gte', 'threshold': 80, 'unit': '%',
+         'metric': 'RTP 포트 사용률', 'msg_open': 'RTP 포트 사용률 {pct}% ({threshold}% 초과)',
+         'msg_close': 'RTP 포트 사용률 {pct}% (정상)'},
+    ],
 }
 
 _CFG = None
@@ -107,3 +120,11 @@ def controllable_modules(config: dict = None) -> set:
         if m.get('controllable'):
             res.add(nm)
     return res
+
+
+def alert_rules(config: dict = None) -> list:
+    """alert sweeper / /alerts/rules 용 — 전 descriptor 의 alert_rules 병합."""
+    out = []
+    for d in load_descriptors(config):
+        out.extend(d.get('alert_rules') or [])
+    return out

@@ -77,6 +77,8 @@ async def handle_service_descriptors(handler_args: HandlerArgs, kwargs: dict) ->
             if not isinstance(body, dict) or not isinstance(body.get('modules'), list):
                 return HandlerResult(status=400, body={'error': 'invalid_descriptor — modules[] 필요'})
             doc = {'id': sid, 'label': body.get('label') or sid, 'modules': body['modules']}
+            if isinstance(body.get('alert_rules'), list):
+                doc['alert_rules'] = body['alert_rules']
             file_store.save(sdir, sid, doc)
             return HandlerResult(status=200, body=file_store.load(sdir, sid))
         if method == 'DELETE':

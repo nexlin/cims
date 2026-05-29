@@ -27,25 +27,40 @@ def _path_parts(full_path: str):
         return ()
 
 
-# 활성 알림 규칙 — oam_app 의 alert sweeper 가 _transition() 으로 발화하는 조건과 1:1.
-# threshold 는 config 기반 (oam.json). 현재는 read-only — 향후 편집형 rule store 도입 시 확장.
+# 활성 알림 규칙 — service descriptor(service_registry.alert_rules) 구동. sweeper 발화 조건과 1:1.
+# descriptor 비었을 때만 하드코딩 fallback (전환 안전망).
+def _condition_text(rule: dict) -> str:
+    chk = rule.get('check')
+    if chk == 'rtp_pct_gte':
+        return f"≥ {rule.get('threshold')}{rule.get('unit') or ''}"
+    if chk == 'db_down':
+        return '연결 끊김'
+    return '응답 없음'
+
+
 def _alert_rules(config: dict) -> dict:
-    rtp_pct = int(config.get('AlertRtpThresholdPct', 80))
+    from services import service_registry
     sweep = int(config.get('AlertSweepSec', 30))
-    return {
-        'editable': False,
-        'sweep_sec': sweep,
-        'rules': [
-            {'type': 'csp_down', 'severity': 'critical', 'metric': 'CSP 프로세스',
-             'condition': '응답 없음', 'threshold': None, 'unit': None},
-            {'type': 'cmp_down', 'severity': 'critical', 'metric': 'CMP 프로세스',
-             'condition': '응답 없음', 'threshold': None, 'unit': None},
-            {'type': 'db_down', 'severity': 'critical', 'metric': 'DB 연결',
-             'condition': '연결 끊김', 'threshold': None, 'unit': None},
-            {'type': 'rtp_high', 'severity': 'warning', 'metric': 'RTP 포트 사용률',
-             'condition': f'≥ {rtp_pct}%', 'threshold': rtp_pct, 'unit': '%'},
-        ],
-    }
+    rules = service_registry.alert_rules(config)
+    out = []
+    for r in rules:
+        out.append({
+            'type': r.get('type'),
+            'severity': r.get('severity', 'warning'),
+            'metric': r.get('metric') or r.get('type'),
+            'condition': _condition_text(r),
+            'threshold': r.get('threshold'),
+            'unit': r.get('unit'),
+        })
+    if not out:   # descriptor 비었을 때 fallback
+        rtp_pct = int(config.get('AlertRtpThresholdPct', 80))
+        out = [
+            {'type': 'csp_down', 'severity': 'critical', 'metric': 'CSP 프로세스', 'condition': '응답 없음', 'threshold': None, 'unit': None},
+            {'type': 'cmp_down', 'severity': 'critical', 'metric': 'CMP 프로세스', 'condition': '응답 없음', 'threshold': None, 'unit': None},
+            {'type': 'db_down', 'severity': 'critical', 'metric': 'DB 연결', 'condition': '연결 끊김', 'threshold': None, 'unit': None},
+            {'type': 'rtp_high', 'severity': 'warning', 'metric': 'RTP 포트 사용률', 'condition': f'≥ {rtp_pct}%', 'threshold': rtp_pct, 'unit': '%'},
+        ]
+    return {'editable': False, 'sweep_sec': sweep, 'rules': out}
 
 
 def _service_log_dir(config: dict) -> str:
