@@ -1669,6 +1669,11 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     pkg_file = pkg_file or {}
     pkg_meta = pkg_file.get("meta") if isinstance(pkg_file.get("meta"), dict) else {}
     ha_cap = (pkg_meta.get("ha_capability") or "standalone").lower()
+    # Phase 4 fix: process_name 자동 추론 — package_name 그대로 (csc, oam, csp 등).
+    # 비어있으면 agent 의 cims-svc 가 default 'all' fallback → 단일 모듈 install
+    # 환경에서 cmp/csp 바이너리 못 찾아 fail. POST 시점 자동 채움.
+    if not process_name:
+        process_name = (pkg_meta.get("name") or "").strip()
     mismatch = await asyncio.to_thread(_check_ha_capability, config, agent_id, ha_cap)
     if mismatch:
         return HandlerResult(status=400, body={"error": "ha_mismatch", "detail": mismatch},

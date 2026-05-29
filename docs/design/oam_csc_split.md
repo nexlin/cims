@@ -337,6 +337,30 @@ git impact:
 - 사용자 pip 명령 불필요 — vendor 의 fastapi/uvicorn/pymysql 등 자동 로드.
 - ctrl02 외부 접근 (10.0.1.46:4421) 은 firewall 정책 별개.
 
+#### 단계 4d — 운영 마무리 — ✅ **2026-05-29 완료**
+
+**process_name 자동 추론** (`agents.py::_create_deployment`):
+- POST 시 process_name 누락 + package_name 있으면 → `process_name = package_name` 자동 채움.
+- 옛 deployment 가 process_name 비어있으면 agent 의 `cims-svc start` 가 default 'all' fallback → 단일 모듈 install 에서 cmp 못 찾아 fail. 자동 추론으로 차단.
+
+**Agent safety net** (`cims_agent.py::job_process_control`):
+- svc 빈 경우 명시 에러 반환 `process_name 누락 — deployment.process_name 필드 필수`.
+- 옛 silent default 'all' fallback 제거.
+
+**csc HA VIP 10.0.1.47** — HA group 3 (Control-Server, A/S) 에 csc slot 추가:
+- vip_bindings = [
+    {slot: "서비스", ip: "121.161.164.47", ens3 — 외부망},
+    {slot: "csc", ip: "10.0.1.47", ens4 — 내부 서비스망}
+  ]
+- ctrl01 master 가 자동 인수 (ip addr show ens4: 10.0.1.47/24 secondary).
+- `https://10.0.1.47:4421/api/v1/users` → 200 OK (csc PID 3713168 응답).
+- ctrl02 backup 은 VIP 없음 (정상). master 다운 시 자동 인수.
+- 단 ctrl02 firewall 4421 열기 필요 (failover 시 외부 traffic 받기 위해).
+
+**ctrl02 firewall** — 사용자 sudo 안내:
+- `! ssh cims@10.0.2.46 'sudo ufw allow 4421/tcp; sudo ufw allow 4430/tcp; sudo ufw allow 112/any'`
+- VRRP advert (protocol 112) 도 master/backup 통신용 허용 필요.
+
 **ctrl01 csc-0.0.6 upgrade** — ✅ **2026-05-29 완료**:
 - dep 11 oam-0.0.3 + dep 9 csc-0.0.6 upgrade (vendor 포함).
 - restart job → 옛 PID 3686055 → 새 PID 3713168 절체 (port 4421+4430 자동 인계).

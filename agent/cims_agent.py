@@ -1177,6 +1177,15 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     """
     install_path = _resolve_install_path(params)
     svc = (params.get("process_name") or params.get("service_kind") or "").lower()
+    # Phase 4 fix: svc 빈 경우 명시 에러. cims-svc 가 svc 인자 없이 호출되면
+    # default 'all' fallback → 단일 모듈 install 환경에서 cmp/csp 못 찾아 fail.
+    # deployment 의 process_name 필드 누락이 원인 — server 측에서 자동 추론 도입
+    # (agents.py _create_deployment) 했지만, agent 측에서도 safety net.
+    if not svc:
+        return 1, "", (
+            "process_name 누락 — deployment.process_name 필드 필수 "
+            f"(install_path={install_path}, job_type={job_type})"
+        )
     # 우선순위:
     #  1) install_path/agent/bin/cims-svc — 모듈 자체에 운영 도구를 ship 하는 경우 (구식)
     #  2) _AGENT_DIR/bin/cims-svc — 일반 케이스. 에이전트가 자기 옆 bin/cims-svc 사용
@@ -1191,8 +1200,7 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     if not script:
         return 1, "", f"cims-svc not found (install_path={install_path}, agent_dir={_AGENT_DIR})"
 
-    argv = [script, job_type]
-    if svc: argv.append(svc)
+    argv = [script, job_type, svc]
     env = dict(os.environ)
     env["CIMS_DIST_DIR"] = install_path
     try:
