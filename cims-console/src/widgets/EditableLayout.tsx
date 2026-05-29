@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../components/Toast'
 import { consoleApi } from '../api/console'
 import { GridRenderer } from './GridRenderer'
-import { getWidget, allWidgets } from './registry'
+import { getWidget, widgetsByCategory } from './registry'
 import type { PageLayout, WidgetPlacement } from './types'
 
 const WIDTH_OPTS: { v: number; label: string }[] = [
@@ -92,8 +92,12 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
               <select className="form-input" value={addId} onChange={e => setAddId(e.target.value)}
                       style={{ width: 200, fontSize: 12 }}>
                 <option value="">+ 위젯 추가…</option>
-                {allWidgets().map(w => (
-                  <option key={w.id} value={w.id}>{w.title} ({w.serviceId || 'core'})</option>
+                {widgetsByCategory().map(g => (
+                  <optgroup key={g.category} label={g.label}>
+                    {g.widgets.map(w => (
+                      <option key={w.id} value={w.id}>{w.title} ({w.serviceId || 'core'})</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
               <button className="btn btn--sm" onClick={addWidget} disabled={!addId}>추가</button>
@@ -121,7 +125,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
                   <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {def?.title ?? p.widgetId}
                   </b>
-                  <span style={{ color: '#aaa' }}>({p.widgetId})</span>
+                  <span style={{ color: 'var(--text-muted)' }}>({p.widgetId})</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center' }}>
                     <button className="btn btn--sm" onClick={() => move(i, -1)} disabled={i === 0} title="위로">↑</button>
                     <button className="btn btn--sm" onClick={() => move(i, 1)} disabled={i === draft.widgets.length - 1} title="아래로">↓</button>
@@ -140,7 +144,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
             )
           })}
           {draft.widgets.length === 0 && (
-            <div style={{ gridColumn: 'span 12', color: '#999', fontSize: 13, padding: 20, textAlign: 'center' }}>
+            <div style={{ gridColumn: 'span 12', color: 'var(--text-muted)', fontSize: 13, padding: 20, textAlign: 'center' }}>
               위젯이 없습니다 — 상단 [+ 위젯 추가]로 배치하세요.
             </div>
           )}

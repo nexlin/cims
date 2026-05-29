@@ -25,3 +25,22 @@ export function getWidget(id: string): WidgetDef | undefined {
 export function allWidgets(): WidgetDef[] {
   return ALL_WIDGETS
 }
+
+// 위젯 카테고리 — 편집 UI 그룹핑용. 표시 순서 + 한글 라벨.
+export type WidgetCategory = 'infra' | 'service' | 'stats' | 'event' | 'etc'
+export const WIDGET_CATEGORY_ORDER: WidgetCategory[] = ['infra', 'service', 'stats', 'event', 'etc']
+export const WIDGET_CATEGORY_LABELS: Record<WidgetCategory, string> = {
+  infra: '인프라/시스템', service: '서비스', stats: '통계', event: '이벤트/알람', etc: '기타',
+}
+
+// 카테고리 → 위젯 목록 (위젯이 늘어날 때 편집 드롭다운을 성격별로 묶기 위함).
+// 빈 카테고리는 생략, 표시 순서는 WIDGET_CATEGORY_ORDER 를 따른다.
+export function widgetsByCategory(): { category: WidgetCategory; label: string; widgets: WidgetDef[] }[] {
+  return WIDGET_CATEGORY_ORDER
+    .map(cat => ({
+      category: cat,
+      label: WIDGET_CATEGORY_LABELS[cat],
+      widgets: ALL_WIDGETS.filter(w => (w.category ?? 'etc') === cat),
+    }))
+    .filter(g => g.widgets.length > 0)
+}
