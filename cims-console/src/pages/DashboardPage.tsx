@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { statsApi, type HealthResponse } from '../api/stats'
+import { haGroupsApi } from '../api/ha_groups'
+import { deploymentApi } from '../api/deployment'
 import FlowPage from './FlowPage'
 
 const HISTORY_MAX = 60  // 5초 × 60 = 5분
@@ -47,6 +49,57 @@ interface HistorySample {
   rtp_used: number
 }
 
+// 시스템 = HA 그룹 (AS/AA) 또는 standalone agent (SA). [[project_system_infra_standard]] 모드 배지 통일.
+interface SystemCard {
+  key: string
+  name: string
+  mode: 'AS' | 'AA' | 'SA'
+  online: number
+  total: number
+}
+
+const MODE_COLOR: Record<SystemCard['mode'], string> = { AS: '#3498db', AA: '#27ae60', SA: '#95a5a6' }
+const MODE_TIP: Record<SystemCard['mode'], string> = {
+  AS: 'Active/Standby — VRRP 이중화 (1 active + standby)',
+  AA: 'All-Active — 전 멤버 동시 활성',
+  SA: 'Standalone — 단독 노드 (그룹 없음)',
+}
+
+function SystemCardGrid({ systems, onOpen }: { systems: SystemCard[]; onOpen: () => void }) {
+  return (
+    <div className="panel" style={{ padding: 16 }}>
+      <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14, display: 'flex', alignItems: 'center' }}>
+        시스템 ({systems.length})
+        <a onClick={onOpen} style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--primary)', cursor: 'pointer' }}>
+          시스템/인프라 →
+        </a>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+        {systems.map(s => {
+          const healthy = s.total > 0 && s.online === s.total
+          const dot = healthy ? 'var(--success, #22c55e)' : s.online > 0 ? '#f59e0b' : 'var(--danger)'
+          return (
+            <div key={s.key} onClick={onOpen}
+                 style={{ background: 'var(--surface)', border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius)', padding: '12px 14px', cursor: 'pointer' }}
+                 title={`${s.name} — ${MODE_TIP[s.mode]}\n온라인 ${s.online}/${s.total}`}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot }} />
+                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: '#fff',
+                               background: MODE_COLOR[s.mode], padding: '1px 6px', borderRadius: 3 }}>{s.mode}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                온라인 <b style={{ color: healthy ? 'var(--success, #22c55e)' : 'inherit' }}>{s.online}</b>/{s.total}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function fmtTime(iso: string | null): string {
   if (!iso) return '-'
   return new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -59,6 +112,7 @@ export default function DashboardPage() {
   const [flowTarget, setFlowTarget] = useState<{ callId: string; callType: 'volte' | 'ptt' } | null>(null)
   const [history, setHistory] = useState<HistorySample[]>([])
   const historyRef = useRef<HistorySample[]>([])
+  const [systems, setSystems] = useState<SystemCard[]>([])
 
   function gotoSubscriber(e: React.MouseEvent, msisdn: string) {
     e.stopPropagation()  // 행 클릭 (FlowPage 열기) 와 충돌 방지
@@ -90,6 +144,38 @@ export default function DashboardPage() {
     const iv = setInterval(load, 5000)
     return () => clearInterval(iv)
   }, [load])
+
+  // 시스템(HA 그룹 + standalone) 카드 — 자주 안 바뀌므로 15초 주기. 비관리자/오류 시 빈 배열 → 섹션 숨김.
+  const loadSystems = useCallback(async () => {
+    try {
+      const [groups, agents] = await Promise.all([haGroupsApi.list(), deploymentApi.listAgents()])
+      const byId = new Map(agents.map(a => [a.id, a]))
+      const grouped = new Set<number>()
+      const cards: SystemCard[] = []
+      for (const g of groups) {
+        let online = 0
+        for (const m of g.members) {
+          grouped.add(m.agent_id)
+          if (byId.get(m.agent_id)?.status === 'online') online++
+        }
+        cards.push({ key: `g${g.id}`, name: g.name,
+                     mode: g.mode === 'active_standby' ? 'AS' : 'AA',
+                     online, total: g.members.length })
+      }
+      for (const a of agents) {
+        if (grouped.has(a.id) || a.status === 'revoked') continue   // 그룹 멤버/폐기 제외
+        cards.push({ key: `a${a.id}`, name: a.name, mode: 'SA',
+                     online: a.status === 'online' ? 1 : 0, total: 1 })
+      }
+      setSystems(cards)
+    } catch { setSystems([]) }
+  }, [])
+
+  useEffect(() => {
+    loadSystems()
+    const iv = setInterval(loadSystems, 15000)
+    return () => clearInterval(iv)
+  }, [loadSystems])
 
   if (!data && !error) return <div className="empty">로딩 중...</div>
   if (error && !data) return <div className="empty" style={{ color: 'var(--danger)' }}>오류: {error}</div>
@@ -130,6 +216,11 @@ export default function DashboardPage() {
         <KpiCard label="RTP 포트" value={`${data.cmp.rtp_ports.used}/${data.cmp.rtp_ports.total}`} unit={`(${rtpPct}%)`}
           series={history.map(s => s.rtp_used)} />
       </div>
+
+      {/* 시스템 카드 grid — HA 그룹(AS/AA) + standalone(SA). 비관리자/오류 시 숨김. */}
+      {systems.length > 0 && (
+        <SystemCardGrid systems={systems} onOpen={() => navigate('/deploy/servers')} />
+      )}
 
       {/* 역할 + 타이머 설정 */}
       <div className="panel" style={{ padding: 16 }}>

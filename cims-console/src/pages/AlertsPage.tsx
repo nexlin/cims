@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { alertsApi, type AlertEvent, type AlertSummaryResponse } from '../api/alerts'
+import { alertsApi, type AlertEvent, type AlertSummaryResponse, type AlertRulesResponse } from '../api/alerts'
 import { useToast } from '../components/Toast'
 
 const TYPE_LABEL: Record<string, string> = {
@@ -103,6 +103,7 @@ export default function AlertsPage() {
   const [events, setEvents] = useState<AlertEvent[]>([])
   const [types, setTypes] = useState<string[]>([])
   const [summary, setSummary] = useState<AlertSummaryResponse | null>(null)
+  const [rules, setRules] = useState<AlertRulesResponse | null>(null)
   const [days, setDays] = useState(7)
   const [filterType, setFilterType] = useState('')
   const [showResolved, setShowResolved] = useState(true)
@@ -127,6 +128,8 @@ export default function AlertsPage() {
   }, [days, filterType, show])
 
   useEffect(() => { load() }, [load])
+  // 활성 알림 규칙 — days 와 무관, 1회 로드. 실패해도 이력 화면엔 영향 없음.
+  useEffect(() => { alertsApi.rules().then(setRules).catch(() => setRules(null)) }, [])
 
   const rows = pairEvents(events).filter(r => showResolved || !r.resolved_at)
   const openCount = rows.filter(r => r.action === 'open' && !r.resolved_at).length
@@ -171,6 +174,49 @@ export default function AlertsPage() {
           <DailyBars data={summary?.daily || []} />
         </div>
       </div>
+
+      {rules && rules.rules.length > 0 && (
+        <div className="panel">
+          <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 13, borderBottom: '1px solid var(--border)',
+                        display: 'flex', alignItems: 'center', gap: 8 }}>
+            알림 규칙 ({rules.rules.length})
+            <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>
+              점검 주기 {rules.sweep_sec}초 · {rules.editable ? '편집 가능' : '읽기 전용 (oam.json 설정 기반)'}
+            </span>
+          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ width: 80 }}>심각도</th>
+                <th style={{ width: 160 }}>유형</th>
+                <th>대상 지표</th>
+                <th style={{ width: 200 }}>발생 조건</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rules.rules.map(r => {
+                const badgeCls = r.severity === 'critical' ? 'badge--red'
+                  : r.severity === 'warning' ? 'badge--yellow' : 'badge--blue'
+                return (
+                  <tr key={r.type}>
+                    <td><span className={`badge ${badgeCls}`}>{r.severity}</span></td>
+                    <td>{typeLabel(r.type)}</td>
+                    <td>{r.metric}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                      {r.condition}
+                      {r.threshold != null && (
+                        <span style={{ marginLeft: 6, color: 'var(--text-muted)', fontFamily: 'inherit' }}>
+                          (threshold {r.threshold}{r.unit || ''})
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {summary && summary.by_type.length > 0 && (
         <div className="panel">

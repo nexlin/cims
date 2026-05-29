@@ -34,6 +34,21 @@ export interface AlertSummaryResponse {
   daily: AlertSummaryDaily[]
 }
 
+export interface AlertRule {
+  type: string
+  severity: 'critical' | 'warning' | 'info'
+  metric: string
+  condition: string
+  threshold: number | null
+  unit: string | null
+}
+
+export interface AlertRulesResponse {
+  editable: boolean
+  sweep_sec: number
+  rules: AlertRule[]
+}
+
 export const alertsApi = {
   list: (params: { days?: number; type?: string; limit?: number } = {}) => {
     const p = new URLSearchParams()
@@ -48,4 +63,5 @@ export const alertsApi = {
     const q = days ? `?days=${days}` : ''
     return api.get<AlertSummaryResponse>(`/alerts/summary${q}`)
   },
+  rules: () => api.get<AlertRulesResponse>('/alerts/rules'),
 }

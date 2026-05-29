@@ -510,6 +510,9 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
     )[0].agent_id
   })()
   const [editMasterAid, setEditMasterAid] = useState<number | null>(initialMaster)
+  // A/S 실측 결과 — 멤버 agent.id → 관측된 VIP 보유 상태. checkVipHolders() 가 채움.
+  const [vipObs, setVipObs] = useState<Record<number, 'active' | 'standby' | 'fail'>>({})
+  const [vipChecking, setVipChecking] = useState(false)
   // group prop 이 바뀌면 (다른 group 선택 또는 reload) state 재설정.
   useEffect(() => {
     setEditName(group.name)
@@ -525,6 +528,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
     } else {
       setEditMasterAid(null)
     }
+    setVipObs({})   // 다른 group 선택/reload 시 실측 결과 초기화 (stale 표시 방지)
   }, [group.id, group.update_time])
 
   const memberAgents = group.members.map(m => ({
@@ -579,6 +583,27 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
       show('멤버 적용됨', 'ok'); await onReload()
     } catch (e) { show((e as Error).message, 'err') }
   }
+  // ── A/S 실측 — 멤버별 health-check (sync REST) 로 실제 VIP 보유(Active) 여부 관측 ──
+  // 설정상 role(M/B) 과 달리, 절체 직후엔 실제 VIP 보유 멤버가 바뀔 수 있어 on-demand 로 확인.
+  async function checkVipHolders() {
+    const vipIps = new Set(editBindings.map(b => b.ip).filter(Boolean))
+    if (vipIps.size === 0) { show('확인할 VIP 가 없습니다 — VIP binding 을 먼저 설정하세요', 'err'); return }
+    setVipChecking(true)
+    const next: Record<number, 'active' | 'standby' | 'fail'> = {}
+    await Promise.all(memberAgents.map(async (m) => {
+      const ag = m.agent
+      if (!ag || ag.status !== 'online') { next[m.agent_id] = 'fail'; return }
+      try {
+        const hc = await deploymentApi.healthCheck(ag.id, 'ha')
+        next[m.agent_id] = (hc.ha?.vips || []).some(v => vipIps.has(v.ip)) ? 'active' : 'standby'
+      } catch { next[m.agent_id] = 'fail' }
+    }))
+    setVipObs(next)
+    setVipChecking(false)
+    const active = Object.values(next).filter(s => s === 'active').length
+    show(`VIP 실측 완료 — Active ${active}명 / ${memberAgents.length}명`, active === 1 ? 'ok' : 'err')
+  }
+
   // VIP 행 편집 모드 — bid 또는 'new' (새 binding 추가 중). null = 모두 readonly.
   const [bindingEditMode, setBindingEditMode] = useState<number | 'new' | null>(null)
   function updateBinding(bid: number, patch: Partial<VipBinding>) {
@@ -648,7 +673,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
     const info = slotSubnetInfo(newSlot)
     const b = editBindings.find(x => x.bid === bid)
     if (!b) return
-    const oldHost = splitPrefixHost(b.ip, b.mask)?.host || ''
+    const oldHost = splitPrefixHost(b.ip, b.mask ?? 24)?.host || ''
     updateBinding(bid, {
       slot: newSlot,
       ip:   info.prefix ? info.prefix + oldHost : '',
@@ -731,6 +756,12 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {group.mode === 'active_standby' && (
+              <button className="btn btn--sm" onClick={checkVipHolders} disabled={vipChecking}
+                      title="멤버별 health-check 로 실제 VIP 보유(Active) 상태를 관측 (sync REST — 수 초 소요)">
+                {vipChecking ? '점검 중…' : '🔄 실측'}
+              </button>
+            )}
+            {group.mode === 'active_standby' && (
               <button className="btn btn--sm btn--primary" onClick={applyMembers} disabled={!masterChanged}
                       title="Master 변경을 backend 에 적용 (priority swap + keepalived 즉시 반영)">
                 ▶ 적용
@@ -781,9 +812,24 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                               }}>{isMasterSel ? 'M' : 'B'}</span>
                       </td>
                       <td>
-                        {/* A/S = 실제 VIP 보유 (관측값). 현재는 데이터 미수집 — placeholder. */}
-                        <span title="현재 실제 상태 (VIP 보유 여부). 차후 health-check 연동 예정."
-                              style={{ fontSize: 10, color: '#bbb' }}>—</span>
+                        {/* A/S = 실제 VIP 보유 (관측값) — [🔄 실측] 으로 health-check 후 채워짐. */}
+                        {(() => {
+                          const o = vipObs[a.id]
+                          if (o === 'active') return (
+                            <span title="VIP 실제 보유 — Active"
+                                  style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● Active</span>)
+                          if (o === 'standby') return (
+                            <span title="VIP 미보유 — Standby"
+                                  style={{ fontSize: 11, color: '#888' }}>○ Standby</span>)
+                          if (o === 'fail') return (
+                            <span title="점검 실패 — offline 또는 health-check 오류"
+                                  style={{ fontSize: 11, color: '#c0392b' }}>✕</span>)
+                          if (vipChecking) return (
+                            <span style={{ fontSize: 10, color: '#bbb' }}>…</span>)
+                          return (
+                            <span title="미점검 — 상단 [🔄 실측] 버튼으로 확인"
+                                  style={{ fontSize: 10, color: '#bbb' }}>—</span>)
+                        })()}
                       </td>
                     </>
                   )}
@@ -838,7 +884,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
               {editBindings.map(b => {
                 const isEditing = bindingEditMode === b.bid
                 const info = b.slot ? slotSubnetInfo(b.slot) : null
-                const host = splitPrefixHost(b.ip, b.mask)?.host ?? ''
+                const host = splitPrefixHost(b.ip, b.mask ?? 24)?.host ?? ''
                 const ifaceStr = Object.entries(b.memberIfaces || {})
                   .map(([sid, iface]) => `#${sid}:${iface}`).join(', ') || '—'
                 if (!isEditing) {
@@ -1906,6 +1952,54 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   )
 }
 
+// 메트릭 시계열 sparkline — 값(null 허용) 배열을 받아 추세선 + 현재/peak 표시.
+// B 트랙 Phase 3: heartbeat 가 1~2s 주기로 쌓는 cpu/mem/disk raw metric 을 시각화.
+function MetricTrend({ label, values, unit = '%', color, warn }: {
+  label: string; values: (number | null)[]; unit?: string; color: string; warn?: number
+}) {
+  const nums = values.filter((v): v is number => v != null)
+  const w = 200, h = 40, pad = 3
+  const cur = nums.length ? nums[nums.length - 1] : null
+  const peak = nums.length ? Math.max(...nums) : null
+  const overWarn = warn != null && cur != null && cur >= warn
+  let body: React.ReactNode = <div style={{ height: h, color: '#bbb', fontSize: 11, display: 'flex', alignItems: 'center' }}>데이터 부족</div>
+  if (nums.length >= 2) {
+    const max = Math.max(...nums, warn ?? 0, 1)
+    const min = Math.min(...nums, 0)
+    const range = max - min || 1
+    const step = (w - pad * 2) / Math.max(nums.length - 1, 1)
+    const pts = nums.map((v, i) => {
+      const x = pad + i * step
+      const y = pad + (h - pad * 2) * (1 - (v - min) / range)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+    const warnY = warn != null ? pad + (h - pad * 2) * (1 - (warn - min) / range) : null
+    body = (
+      <svg width={w} height={h} style={{ display: 'block' }}>
+        {warnY != null && (
+          <line x1={pad} y1={warnY} x2={w - pad} y2={warnY} stroke="#e74c3c"
+                strokeWidth={0.8} strokeDasharray="3 2" opacity={0.6} />
+        )}
+        <polyline points={pts} fill="none" stroke={overWarn ? '#e74c3c' : color}
+                  strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  return (
+    <div style={{ flex: 1, background: 'var(--surface, #fff)', border: '1px solid var(--border, #e5e5e5)',
+                  borderRadius: 4, padding: '8px 10px', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
+        <span style={{ fontSize: 12, color: '#666' }}>{label}</span>
+        <span style={{ fontSize: 16, fontWeight: 700, color: overWarn ? '#e74c3c' : 'inherit' }}>
+          {cur != null ? `${cur}${unit}` : '—'}
+        </span>
+        {peak != null && <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>peak {peak}{unit}</span>}
+      </div>
+      {body}
+    </div>
+  )
+}
+
 function MetricsModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const { show } = useToast()
   const [metrics, setMetrics] = useState<AgentMetric[]>([])
@@ -1914,9 +2008,18 @@ function MetricsModal({ agent, onClose }: { agent: Agent; onClose: () => void })
       .then(r => setMetrics(r.items))
       .catch(e => show((e as Error).message, 'err'))
   }, [agent.id, show])
+  // sparkline 은 시간순(오래된→최신). API 정렬에 의존하지 않도록 ts 로 재정렬.
+  const chrono = [...metrics].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
   return (
     <Modal title={`${agent.name} — 메트릭 (최근 ${metrics.length}건)`}
            onClose={onClose} width={760}>
+      {chrono.length >= 2 && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          <MetricTrend label="CPU" values={chrono.map(m => m.cpu_pct)} color="#3498db" warn={85} />
+          <MetricTrend label="MEM" values={chrono.map(m => m.mem_pct)} color="#27ae60" warn={90} />
+          <MetricTrend label="Disk" values={chrono.map(m => m.disk_pct)} color="#9b59b6" warn={90} />
+        </div>
+      )}
       <table className="data-table">
         <thead>
           <tr><th>시각</th><th>CPU%</th><th>MEM%</th><th>Disk%</th><th>Load</th><th>CIMS 프로세스</th></tr>
