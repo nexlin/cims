@@ -188,6 +188,27 @@ for svc, val in cfg.get('services', {}).items():
 " 2>/dev/null
 }
 
+# apply 가 'systemctl enable cims@<svc>.service' 로 만든 instance enable 심볼릭링크 중
+# 현재 대상(인자로 전달)에 없는 것 = 옛 slug 잔재 (예: cims@Control-Server.service).
+# 인자 없이 호출하면 모든 cims@ instance 를 disable (uninstall 시 전체 정리).
+# template (/etc/systemd/system/cims@.service) 자체는 건드리지 않음 — uninstall 만 제거.
+_ha_prune_stale_instances() {
+    local keep=" $* "                       # space-padded 현재 svc 목록
+    local link inst seen=" "
+    for link in /etc/systemd/system/cims@*.service \
+                /etc/systemd/system/*.wants/cims@*.service; do
+        [[ -L $link ]] || continue
+        inst=$(basename "$link"); inst="${inst#cims@}"; inst="${inst%.service}"
+        [[ -z $inst ]] && continue
+        [[ $seen == *" $inst "* ]] && continue      # 두 위치 중복 방지
+        seen+="$inst "
+        if [[ $keep != *" $inst "* ]]; then
+            info "stale HA instance 정리: cims@${inst}.service disable"
+            sudo systemctl disable "cims@${inst}.service" 2>/dev/null || true
+        fi
+    done
+}
+
 cmd_ha() {
     local sub="${1:-help}"
     shift || true
@@ -267,11 +288,14 @@ cmd_ha() {
             sudo cp "$unit" /etc/systemd/system/cims@.service
             sudo systemctl daemon-reload
             # enable per-instance — start 는 keepalived notify 가 제어 (cold-spare)
-            local svc
-            for svc in $(_ha_enabled_services); do
+            local svc enabled_svcs
+            enabled_svcs=$(_ha_enabled_services)
+            for svc in $enabled_svcs; do
                 info "systemctl enable cims@${svc}.service"
                 sudo systemctl enable "cims@${svc}.service"
             done
+            # 옛 slug 의 enable 심볼릭링크 잔재 제거 (예: 재구성으로 svc 이름이 바뀐 경우)
+            _ha_prune_stale_instances $enabled_svcs
             sudo systemctl restart keepalived
             ok "keepalived + systemd unit 적용 완료 (services start 는 keepalived notify 가 제어)"
             ;;
@@ -294,6 +318,11 @@ cmd_ha() {
             fi
             # vendor list 없으면 keepalived 만 — apt 설치 시나리오 fallback.
             [[ ${#pkgs[@]} -eq 0 ]] && pkgs=(keepalived)
+
+            # systemd HA instance enable 심볼릭링크 전체 disable + template 제거 (apply 대칭).
+            _ha_prune_stale_instances        # 인자 없음 → 모든 cims@ instance disable
+            sudo rm -f /etc/systemd/system/cims@.service 2>/dev/null || true
+            sudo systemctl daemon-reload 2>/dev/null || true
 
             if ! command -v keepalived >/dev/null 2>&1 && ! dpkg -s "${pkgs[0]}" >/dev/null 2>&1; then
                 info "keepalived 미설치 — skip"
@@ -321,7 +350,7 @@ cmd_ha() {
 사용법: cims-ha <subcommand>
 
   install         keepalived 패키지 설치 (vendor deb 우선, apt fallback)
-  uninstall       keepalived + autoremove deps + /etc/keepalived 제거 (install 대칭)
+  uninstall       keepalived + deps + /etc/keepalived + cims@ instance/template 제거 (install 대칭)
   config          ha.json + 템플릿 → out/{keepalived.conf, cims@.service} 생성 (dry-run)
   check           keepalived -t syntax 검증
   apply           out/* → /etc/keepalived/ + /etc/systemd/system/ + daemon-reload +
