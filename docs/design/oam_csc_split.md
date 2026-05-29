@@ -186,12 +186,28 @@ cims/                                    cims/
 
 위험도: 낮음 (실제로도 낮았음).
 
-### Phase 2: 패키지 분리
-- **목표**: `oam/pkg.json` 신설, `cims.sh pkg oam` 으로 `oam-X.Y.tar.gz` 빌드.
-- 아직 같은 프로세스 (`cims-csc` 가 oam tarball 의 코드를 통합 실행).
-- agent 가 oam 패키지를 별도 배포 단위로 등록 (csc 와 무관하게 업데이트 가능).
-- 예상 작업: 1~2 세션.
-- 위험도: 중간 (의존 그래프 정리).
+### Phase 2: 패키지 분리 — ✅ **완료 (2026-05-29)**
+
+진행 결과:
+- `oam/pkg.json` 신설 (name=oam, version=0.0.1 → 0.0.2 auto-bump, ha_capability=active_standby, 7 function: agents/ha_groups/build/verification/alerts/stats/recording, processes=[] — 별도 systemd 없음). 같은 cims-csc 프로세스 유지.
+- `cims.sh pkg` 4 위치에 oam 추가: default targets / auto-sync set / `_src_root_for` 매핑 / 컴포넌트 case allowlist.
+- `cims.sh sync csc` 가 `oam/pkg.json` 도 `dist/oam/` 으로 복사.
+- `CMakeLists.txt` `make dist` 가 `dist/oam/pkg.json` 복사.
+- `cims.sh pkg oam` 으로 **oam-0.0.2.tar.gz (108KB)** 빌드 성공. manifest.json 등재 (sha256 + size).
+- TB-CSC `POST /api/v1/packages/register-from-dist` 가 oam 자동 인식 → file_store packages 컬렉션에 `id=44 name=oam v=0.0.2` entry 생성.
+- Console "패키지" 메뉴에서 oam 이 별도 항목으로 노출 가능 (자동 register-from-dist 또는 수동 업로드 둘 다).
+
+agent install 흐름 (검토만):
+- tarball top-level `oam/` 검출 → scope=`install_path/oam/` 만 wipe (csc 와 sibling 공존, csp/isp 같은 multi-pkg 패턴 재사용).
+- Phase 1 의 `csc_app.py` 가 `_COMPONENT_ROOT/../oam/src` 를 sys.path mount → install 시 자동 동작.
+- ⚠️ **운영 주의**: 새 csc 코드 (Phase 1 이후) 를 deploy 할 때 **oam 도 같이 deploy** 해야 시작 성공. csc 단독 deploy 시 `from handlers.agents import ...` 실패. 4서버 LIVE 적용은 Phase 3 책임.
+
+미진행 (Phase 3 로 이관):
+- 4서버 LIVE deploy (csc + oam 함께)
+- agent 의 deployment 가 "csc 와 oam 을 동반 배포" 단위로 인식하는 매커니즘.
+- 별도 systemd unit / 포트 분리.
+
+위험도: 중간 (실제로는 낮았음 — agent install 매커니즘 재사용).
 
 ### Phase 3: 프로세스 분리
 - **목표**: `cims-oam` systemd unit + 새 포트 (4419). `cims-csc` 는 4420 + 4430.

@@ -977,7 +977,11 @@ cmd_sync() {
             cp -f "$SCRIPT_DIR/csc/config/config_template.json" \
                   "$DIST_DIR/csc/config/config_template.json"
         fi
-        ok "csc/src + oam/src (+ config_template.json) ← $SCRIPT_DIR"
+        # OAM 분리 Phase 2 — pkg.json 동기화 (별도 tarball 등록에 필요)
+        if [[ -f "$SCRIPT_DIR/oam/pkg.json" ]]; then
+            cp -f "$SCRIPT_DIR/oam/pkg.json" "$DIST_DIR/oam/pkg.json"
+        fi
+        ok "csc/src + oam/src (+ config_template.json, oam/pkg.json) ← $SCRIPT_DIR"
         n_changed=$((n_changed+1))
     fi
 
@@ -1177,7 +1181,7 @@ cmd_pkg() {
     # csp 바이너리는 다용도 → csp/isp/psp 3 tarball (소스/dist 디렉토리는 동일,
     # tarball 이름과 meta.json 의 name 만 분리 — Roles/LocalIp 는 deploy overlay 가 결정).
     # cmp 바이너리도 동일 → cmp/imp/pmp.
-    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp csp psp isp cwrtc csc console phone cspsim agent)
+    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp csp psp isp cwrtc csc oam console phone cspsim agent)
 
     if [[ ! -d $DIST_DIR ]]; then
         err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
@@ -1197,7 +1201,7 @@ cmd_pkg() {
         local _t
         for _t in "${targets[@]}"; do
             case "$_t" in
-                csc)     _sync_set[csc]=1 ;;
+                csc|oam) _sync_set[csc]=1 ;;   # OAM 분리 Phase 2 — sync csc 가 oam/src 도 함께
                 agent)   _sync_set[agent]=1 ;;
                 console) _sync_set[console]=1 ;;
                 phone)   _sync_set[phone]=1 ;;
@@ -1240,6 +1244,7 @@ cmd_pkg() {
             csp|psp|isp) echo "$SCRIPT_DIR/csp" ;;   # 동일 csp 바이너리 + 동일 config_template
             cmp|pmp|imp) echo "$SCRIPT_DIR/cmp" ;;   # 동일 cmp 바이너리 + 동일 config_template
             csc)         echo "$SCRIPT_DIR/csc" ;;
+            oam)         echo "$SCRIPT_DIR/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
             cwrtc)       echo "$SCRIPT_DIR/cwrtc" ;;
             console)     echo "$SCRIPT_DIR/cims-console" ;;
             phone)       echo "$SCRIPT_DIR/cims-phone" ;;
@@ -1283,7 +1288,7 @@ cmd_pkg() {
     local t src_sub tar_file build_date pkg_root base_dist stage
     for t in "${targets[@]}"; do
         case "$t" in
-            cmp|pmp|imp|csp|psp|isp|cwrtc|csc|console|phone|cspsim|agent)
+            cmp|pmp|imp|csp|psp|isp|cwrtc|csc|oam|console|phone|cspsim|agent)
                 src_sub=$(_src_sub_for "$t") ;;
             *) err "알 수 없는 컴포넌트: $t"; continue ;;
         esac

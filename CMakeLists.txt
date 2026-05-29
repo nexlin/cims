@@ -361,6 +361,7 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/pkg.json          ${CMAKE_BINARY_DIR}/dist/csp/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/pkg.json          ${CMAKE_BINARY_DIR}/dist/cmp/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/pkg.json          ${CMAKE_BINARY_DIR}/dist/csc/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/oam/pkg.json          ${CMAKE_BINARY_DIR}/dist/oam/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/pkg.json        ${CMAKE_BINARY_DIR}/dist/cwrtc/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-console/pkg.json ${CMAKE_BINARY_DIR}/dist/console/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-phone/pkg.json   ${CMAKE_BINARY_DIR}/dist/phone/pkg.json
