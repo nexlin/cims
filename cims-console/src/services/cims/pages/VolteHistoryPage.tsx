@@ -51,7 +51,7 @@ export default function VolteHistoryPage() {
   const totalPages=Math.ceil(total/PS)
 
   return (
-    <div className="page">
+    <div>
       <div className="toolbar">
         <input className="search-input" placeholder="발신/착신 번호" value={fMsisdn} onChange={e=>setFM(e.target.value)} onKeyDown={e=>e.key==='Enter'&&(setPage(0),load(0))} style={{maxWidth:180}} />
         <input type="date" className="form-input" value={fDate} onChange={e=>{setFD(e.target.value);setPage(0)}} style={{width:140}} />

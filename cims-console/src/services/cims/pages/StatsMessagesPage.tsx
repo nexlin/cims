@@ -27,7 +27,7 @@ export default function StatsMessagesPage({ iface }: { iface: string }) {
   const max = data ? Math.max(...data.buckets.map(b => b.count), 1) : 1
 
   return (
-    <div className="page">
+    <div>
       <div className="toolbar">
         <input type="date" className="form-input" value={date} onChange={e => setDate(e.target.value)} style={{ width: 150 }} />
         <button className="btn btn--primary btn--sm" onClick={load}>조회</button>

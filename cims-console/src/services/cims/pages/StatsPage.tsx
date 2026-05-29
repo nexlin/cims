@@ -49,12 +49,12 @@ function fmtDuration(sec: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export default function StatsPage() {
+export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType } = {}) {
   const { show } = useToast()
   const [subTab, setSubTab] = useState<SubTab>('service')
   const [gran, setGran] = useState<Granularity>('1h')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [svcType, setSvcType] = useState<SvcType>('volte')
+  const [svcType, setSvcType] = useState<SvcType>(initialSvcType ?? 'volte')
 
   // 메시지 통계
   const [msgData, setMsgData] = useState<MessagesResponse | null>(null)
@@ -86,7 +86,7 @@ export default function StatsPage() {
   }, [subTab, loadMessages, loadService])
 
   return (
-    <div className="page">
+    <div>
 
       {/* 서브탭 + 필터 */}
       <div className="toolbar" style={{ flexWrap: 'wrap' }}>

@@ -13,23 +13,33 @@ import { cspRolesWidget } from './widgets/CspRolesWidget'
 import { alertBannerWidget } from './widgets/AlertBannerWidget'
 import { activeVoipWidget } from './widgets/ActiveVoipWidget'
 import { activePttWidget } from './widgets/ActivePttWidget'
+import { CIMS_OUTPUT_WIDGETS } from './widgets/outputWidgets'
 
 import OrganizationsPage from './pages/OrganizationsPage'
 import MembersPage from './pages/MembersPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import PttGroupsPage from './pages/PttGroupsPage'
-import ServiceStatusPage from './pages/ServiceStatusPage'
-import VolteHistoryPage from './pages/VolteHistoryPage'
-import PttHistoryPage from './pages/PttHistoryPage'
-import StatsPage from './pages/StatsPage'
-import StatsMessagesPage from './pages/StatsMessagesPage'
 
-const volteStats = () => <StatsPage />
-const pttStats = () => <StatsPage />
-const sipStats = () => <StatsMessagesPage iface="sip" />
-const cmpStats = () => <StatsMessagesPage iface="cmp" />
-const cscStats = () => <StatsMessagesPage iface="csc" />
-const httpsStats = () => <StatsMessagesPage iface="https" />
+import LayoutRoute from '../../widgets/LayoutRoute'
+import {
+  SERVICE_STATUS_LAYOUT, SERVICE_HISTORY_VOLTE_LAYOUT, SERVICE_HISTORY_PTT_LAYOUT,
+  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_SIP_LAYOUT,
+  STATS_CMP_LAYOUT, STATS_CSC_LAYOUT, STATS_HTTPS_LAYOUT,
+} from './layouts'
+
+// 출력 섹션 route = 합성 가능한 레이아웃 (고정 페이지 대체). 각 route 는 layout_id 별 영속.
+const lr = (layoutId: string, seed: typeof SERVICE_STATUS_LAYOUT) =>
+  () => <LayoutRoute layoutId={layoutId} seed={seed} />
+
+const serviceStatus = lr('service.status', SERVICE_STATUS_LAYOUT)
+const volteHistory  = lr('service.history-volte', SERVICE_HISTORY_VOLTE_LAYOUT)
+const pttHistory    = lr('service.history-ptt', SERVICE_HISTORY_PTT_LAYOUT)
+const volteStats = lr('stats.volte', STATS_VOLTE_LAYOUT)
+const pttStats   = lr('stats.ptt', STATS_PTT_LAYOUT)
+const sipStats   = lr('stats.sip', STATS_SIP_LAYOUT)
+const cmpStats   = lr('stats.cmp', STATS_CMP_LAYOUT)
+const cscStats   = lr('stats.csc', STATS_CSC_LAYOUT)
+const httpsStats = lr('stats.https', STATS_HTTPS_LAYOUT)
 
 export const cimsManifest: ServiceManifest = {
   id: 'cims',
@@ -37,6 +47,7 @@ export const cimsManifest: ServiceManifest = {
   widgets: [
     healthDotsWidget, kpiWidget, cspRolesWidget,
     alertBannerWidget, activeVoipWidget, activePttWidget,
+    ...CIMS_OUTPUT_WIDGETS,
   ],
   sections: [
     {
@@ -61,9 +72,9 @@ export const cimsManifest: ServiceManifest = {
       defaultPath: '/service/status',
       order: 30,
       routes: [
-        { path: '/service/status',         title: '실시간 상태', component: ServiceStatusPage, adminOnly: true },
-        { path: '/service/history/volte',  title: 'VoLTE 이력', component: VolteHistoryPage, adminOnly: true },
-        { path: '/service/history/ptt',    title: 'PTT 이력',   component: PttHistoryPage, adminOnly: true },
+        { path: '/service/status',         title: '실시간 상태', component: serviceStatus, adminOnly: true },
+        { path: '/service/history/volte',  title: 'VoLTE 이력', component: volteHistory, adminOnly: true },
+        { path: '/service/history/ptt',    title: 'PTT 이력',   component: pttHistory, adminOnly: true },
       ],
     },
     {

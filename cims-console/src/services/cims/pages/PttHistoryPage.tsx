@@ -197,7 +197,7 @@ export default function PttHistoryPage() {
   }
 
   return (
-    <div className="page">
+    <div>
       <div className="toolbar">
         <input
           className="search-input"

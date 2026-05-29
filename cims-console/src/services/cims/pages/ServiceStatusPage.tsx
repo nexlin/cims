@@ -62,7 +62,7 @@ export default function ServiceStatusPage() {
   const totalBusy = subs.filter(s => (s.voip?.calls?.length || 0) > 0 || (s.ptt?.groups?.length || 0) > 0).length
 
   return (
-    <div className="page">
+    <div>
 
       {/* 요약 + 필터 */}
       <div className="toolbar">
