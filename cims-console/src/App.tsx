@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { MenuProvider } from './contexts/MenuContext'
 import { ToastProvider } from './components/Toast'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
@@ -61,6 +62,7 @@ function Shell() {
 
   return (
     <ToastProvider>
+     <MenuProvider>
       <div className={`app-layout ${collapsed ? 'app-layout--collapsed' : ''}`}>
         <Header
           userName={user.name}
@@ -89,6 +91,7 @@ function Shell() {
           </div>
         </main>
       </div>
+     </MenuProvider>
 
       {showChgPw && (
         <div className="modal-overlay" onClick={() => setShowChgPw(false)}>
