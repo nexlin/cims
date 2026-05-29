@@ -331,9 +331,11 @@ git impact:
 - ctrl01 (agent 51, dep 9) — agent-managed csc 시작 성공 (PID 3686055, port 4421+4430). 옛 nohup csc 정리.
 - API 검증: 4421 의 users/organizations 200 OK, OAM endpoint 404 (분리 완료).
 
-**ctrl02 csc 시작 미진행**:
-- `ModuleNotFoundError: No module named 'uvicorn'` — Python 패키지 누락.
-- 사용자 직접 실행: `ssh cims@10.0.2.46 'pip3 install --user uvicorn'` 후 csc start job 재트리거.
+**ctrl02 csc 시작** — ✅ **Phase 4c vendor 화로 자동 해결**:
+- csc-0.0.6 (3.7MB, vendor 포함) + oam-0.0.3 (6.1MB, vendor 포함) upgrade → install.
+- csc start LIVE PASS — PID 625296, port 4421 LISTEN, status=running.
+- 사용자 pip 명령 불필요 — vendor 의 fastapi/uvicorn/pymysql 등 자동 로드.
+- ctrl02 외부 접근 (10.0.1.46:4421) 은 firewall 정책 별개.
 
 **systemd 영구화 안내**:
 - oam/SYSTEMD.md + 인라인 명령 제공 (사용자 sudo 필요).
