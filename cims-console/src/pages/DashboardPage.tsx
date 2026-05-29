@@ -1,14 +1,12 @@
-// 대시보드 = 위젯 합성 page. 저장된 layout(OAM file_store) 로드, 없으면 seed.
-// 개별 화면 구현은 widgets/* 와 services/cims/widgets/* (OAM 플랫폼화 5-3).
-import { GridRenderer } from '../widgets/GridRenderer'
+// 대시보드 = 편집 가능한 위젯 합성 page. 저장된 layout 로드(없으면 seed), admin 은 [✎ 편집].
+// 위젯 구현은 widgets/* 와 services/cims/widgets/* (OAM 플랫폼화 5-3).
+import { EditableLayout } from '../widgets/EditableLayout'
 import { DASHBOARD_LAYOUT } from '../widgets/layouts'
-import { useStoredLayout } from '../widgets/useStoredLayout'
 
 export default function DashboardPage() {
-  const layout = useStoredLayout(DASHBOARD_LAYOUT)
   return (
     <div className="page">
-      <GridRenderer layout={layout} />
+      <EditableLayout layoutId="dashboard" seed={DASHBOARD_LAYOUT} />
     </div>
   )
 }
