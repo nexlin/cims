@@ -2,7 +2,12 @@ import csv, tempfile, gzip, io
 from typing import AsyncIterator, Iterable, Tuple, Dict
 from urllib.parse import urlparse
 from pathlib import PurePath
-from asyncstdlib import anext   # @@@@@@ only python version < 3.10
+# Phase 4d2: Python 3.10+ 의 builtin anext 우선. asyncstdlib 의존 제거 — csc
+# 단독 install 환경 (vendor 에 asyncstdlib 없음) 에서도 동작.
+try:
+    anext  # type: ignore[name-defined]  # Python 3.10+ builtin
+except NameError:
+    from asyncstdlib import anext  # legacy fallback
 
 from httpsrv.handler import CSVLike, CSVRow
 
