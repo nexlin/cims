@@ -425,6 +425,10 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _apply_ip_config(handler_args, aid, config)
         if action == "health-check" and method == "POST":
             return await _agent_health_check(handler_args, aid, config)
+        if action == "interface-roles" and method == "PUT":
+            return await _put_interface_roles(handler_args, aid, config)
+        if action == "interface-roles" and method == "GET":
+            return await _get_interface_roles(aid, config)
     elif len(tail) == 3:
         # GET /agents/{aid}/jobs/{jid} — job 단건 조회 (result polling)
         if tail[1] == "jobs" and method == "GET":
@@ -707,6 +711,77 @@ async def _approve_agent(handler_args: HandlerArgs, aid: int, config):
 async def _revoke_agent(handler_args: HandlerArgs, aid: int, config):
     await asyncio.to_thread(_agent_update, config, aid, {'status': 'revoked'})
     return HandlerResult(status=200, body={"ok": True, "id": aid}, media_type="application/json")
+
+
+# Phase 4d — interface role 명시 API.
+# admin 이 NIC IP 별 용도(role) 를 명시: "service" / "internal" / "mgmt".
+# mgmt 는 자동 (oam.json Mgmt.Cidr + agent detect_mgmt_ip) 이지만 명시도 허용.
+# HA group vip_bindings.slot 이 role 명과 매칭되면 memberIfaces 자동 추론에 활용.
+async def _put_interface_roles(handler_args: HandlerArgs, aid: int, config):
+    """PUT /api/v1/agents/<id>/interface-roles
+    Body: {"<ip>": "<role>", ...} — IP 단위 mapping. 빈 string 으로 role 제거.
+    """
+    body = _parse_body(handler_args)
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={"error": "body_must_be_object"},
+                             media_type="application/json")
+    # role 값 정규화 (소문자, allowed set).
+    _ALLOWED = {'mgmt', 'service', 'internal', ''}
+    normalized = {}
+    for ip, role in body.items():
+        role_l = (role or '').strip().lower()
+        if role_l not in _ALLOWED:
+            return HandlerResult(status=400, body={
+                "error": "invalid_role", "ip": ip, "role": role,
+                "allowed": sorted(_ALLOWED - {''})},
+                media_type="application/json")
+        normalized[str(ip)] = role_l
+    # 기존 record load + override 갱신.
+    def _do():
+        existing = _agent_load(config, aid=aid)
+        if not existing:
+            return None
+        cur = (existing.get('interface_role_overrides') or {}).copy()
+        for ip, role_l in normalized.items():
+            if role_l:
+                cur[ip] = role_l
+            else:
+                cur.pop(ip, None)
+        existing['interface_role_overrides'] = cur
+        # 동시에 interfaces[].role 도 갱신 (다음 heartbeat 전 일관성).
+        for it in (existing.get('interfaces') or []):
+            if not isinstance(it, dict): continue
+            ip = it.get('ip')
+            if ip in cur:
+                it['role'] = cur[ip]
+            elif ip in normalized and not normalized[ip]:
+                it.pop('role', None)
+        file_store.save(_agent_dir(config), aid, existing)
+        return existing
+    r = await asyncio.to_thread(_do)
+    if not r:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    return HandlerResult(status=200, body={
+        "ok": True,
+        "interface_role_overrides": r.get('interface_role_overrides') or {},
+    }, media_type="application/json")
+
+
+async def _get_interface_roles(aid: int, config):
+    """GET /api/v1/agents/<id>/interface-roles — 현재 override + auto 결과 모두."""
+    r = await asyncio.to_thread(_agent_load, config, aid=aid)
+    if not r:
+        return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    body = {
+        "agent_id": aid,
+        "overrides": r.get('interface_role_overrides') or {},
+        "interfaces": [
+            {"ip": it.get('ip'), "name": it.get('name'), "role": it.get('role'),
+             "mgmt": bool(it.get('mgmt'))}
+            for it in (r.get('interfaces') or []) if isinstance(it, dict)
+        ],
+    }
+    return HandlerResult(status=200, body=body, media_type="application/json")
 
 
 async def _apply_ip_config(handler_args: HandlerArgs, aid: int, config):

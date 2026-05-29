@@ -2,8 +2,12 @@
     "Server": {
         "Ip": "0.0.0.0",
         "Port": 4419,
-        "AgentOamUrl": "https://10.0.1.45:4419",
+        "AgentOamUrl": "https://10.0.2.45:4419",
         "DevMode": false
+    },
+    "Mgmt": {
+        "Cidr": "10.0.2.0/24",
+        "_comment": "mgmt 망 대역 — agent enroll 시 interface.role='mgmt' 자동 매핑 근거. AgentOamUrl 의 IP 도 이 대역이어야 함."
     },
     "Log": {
         "Level": "INFO",

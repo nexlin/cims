@@ -337,6 +337,40 @@ git impact:
 - 사용자 pip 명령 불필요 — vendor 의 fastapi/uvicorn/pymysql 등 자동 로드.
 - ctrl02 외부 접근 (10.0.1.46:4421) 은 firewall 정책 별개.
 
+#### 단계 4d2 — NIC role 모델 + VIP slot 자동 매핑 — ✅ **2026-05-29 완료**
+
+사용자 의도: "IP 를 추가하거나 해당 IP 에 대해 용도를 기입하는 방식. mgmt 의 용도는 자동입력, 다른 망은 admin 명시."
+
+**Mgmt.Cidr** (oam.json/oam-tb.json):
+- `"Mgmt": {"Cidr": "10.0.2.0/24"}` 명시 — oam 운영의 mgmt 대역 기준선.
+- oam_app.py 시작 시 로드 + AgentOamUrl 의 host IP 가 그 대역 안인지 검증 로그.
+
+**interface role 모델**:
+- agent.interfaces[].role 자동/수동 hybrid:
+  - **mgmt**: agent 의 `detect_mgmt_ip` (oam_url outgoing IP) + server 측 Mgmt.Cidr 검증 → role='mgmt' 자동.
+  - **service / internal**: admin 명시 API.
+- `PUT /api/v1/agents/<id>/interface-roles` Body `{"<ip>": "<role>"}` — service/internal/mgmt/'' (clear).
+- `GET /api/v1/agents/<id>/interface-roles` — overrides + 현재 interfaces+role.
+- `agent.interface_role_overrides` 에 보존 → heartbeat 마다 정규화 (mgmt 자동 + override 적용).
+
+**HA VIP slot ↔ role 자동 매핑** (`ha_groups.py::_render_ha_for_agent`):
+- vip_bindings.slot 이 `'mgmt'/'service'/'internal'` 이고 memberIfaces 미지정 시 agent.interfaces 의 role 매칭 NIC 자동 추론.
+- `_pick_default_iface` 강화 — vrrp_instance.interface 가 agent.interfaces 의 mgmt NIC 자동 (unicast_src_ip 와 정합).
+- `vips[].dev` 명시 — 다중 망 multi-VIP 한 vrrp_instance 정확히 dev 분리.
+
+LIVE 검증:
+- ctrl01 + ctrl02 의 interfaces:
+  - ens3 (121.x.x.4{5,6}) → role='service' (admin 명시)
+  - ens4 (10.0.1.4{5,6}) → role='internal' (admin 명시)
+  - ens5 (10.0.2.4{5,6}) → role='mgmt' + mgmt=True (자동)
+- HA group 3 PUT — vip_bindings (slot='service', slot='internal', memberIfaces 없음):
+  - ha.json services.Control-Server.interface = 'ens5' (mgmt, vrrp advert)
+  - VIP 121.161.164.47/24 dev ens3 ✓
+  - VIP 10.0.1.47/24 dev ens4 ✓
+- keepalived reload 후 ip addr 정확:
+  - `121.161.164.47/24 secondary proto 0x12 ens3`
+  - `10.0.1.47/24 secondary proto 0x12 ens4`
+
 #### 단계 4d — 운영 마무리 — ✅ **2026-05-29 완료**
 
 **process_name 자동 추론** (`agents.py::_create_deployment`):

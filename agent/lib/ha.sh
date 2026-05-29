@@ -78,12 +78,16 @@ common = {
 }
 
 def _build_vip_list(val, default_mask, default_iface):
-    """vips[] 배열 (Phase 2) 또는 단일 vip (legacy) → indented multi-line block."""
+    """vips[] 배열 (Phase 2) 또는 단일 vip (legacy) → indented multi-line block.
+
+    Phase 4 fix: 각 vip 의 dev (NIC) 가 명시되어 있으면 그것 우선 — 다중 망에
+    걸친 multi-VIP (외부망 121.x VIP + 내부망 10.0.x VIP 등) 지원.
+    """
     iface = val.get("interface") or default_iface
     vips = val.get("vips")
     if isinstance(vips, list) and vips:
         return "\n".join(
-            f"        {v.get('ip','')}/{v.get('mask', default_mask)} dev {iface}"
+            f"        {v.get('ip','')}/{v.get('mask', default_mask)} dev {v.get('dev') or iface}"
             for v in vips if v.get('ip')
         )
     ip = val.get("vip", "")

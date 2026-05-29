@@ -384,7 +384,7 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         # init.sh (enroll-only) 만 했는데도 hb 가 있는 것처럼 보이는 부수효과 → 명시적 분리.
     }
     if isinstance(ifaces, list):
-        patches['interfaces'] = ifaces
+        patches['interfaces'] = _normalize_interface_roles(ifaces, config, row)
     row = await asyncio.to_thread(_agent_update, config, row['id'], patches)
 
     logger.log_info(f"Agent enrolled: id={row['id']} name={row['name']} from={handler_args.client_ip}")
@@ -441,6 +441,49 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
 #  /heartbeat — 주기 상태 보고 + pending job 조회
 # ──────────────────────────────────────────────────────────────
 
+def _normalize_interface_roles(ifaces: list, config: dict, agent: dict | None) -> list:
+    """interfaces 의 role 정규화.
+
+    Phase 4d 정책:
+    - mgmt 자동: agent 가 보낸 mgmt:true (cims_agent.detect_mgmt_ip 결과)
+      또는 IP 가 Mgmt.Cidr 안 → role='mgmt'.
+    - admin override 유지: agent.interface_role_overrides 에 박힌 {ip: role}
+      이 agent 가 보낸 자동 mgmt 보다 우선 (단 mgmt 망에서 mgmt 가 아닌 role
+      박는 건 비정상이므로 mgmt 자동이 최종 winner).
+    - service/internal 등 다른 role 은 override 에서만 결정 (agent 자율 추론 없음).
+    """
+    if not isinstance(ifaces, list):
+        return ifaces
+    import ipaddress as _ipaddress
+    mgmt_net = config.get('_mgmt_net') if isinstance(config, dict) else None
+    overrides = (agent or {}).get('interface_role_overrides') or {}
+    out = []
+    for it in ifaces:
+        if not isinstance(it, dict):
+            out.append(it); continue
+        new_it = dict(it)
+        ip = new_it.get('ip')
+        # admin override 우선
+        ov = overrides.get(ip)
+        # mgmt 자동: agent 의 mgmt:true 또는 IP ∈ Mgmt.Cidr
+        is_mgmt = bool(new_it.get('mgmt'))
+        if not is_mgmt and ip and mgmt_net is not None:
+            try:
+                if _ipaddress.ip_address(ip) in mgmt_net:
+                    is_mgmt = True
+                    new_it['mgmt'] = True  # 정규화 — agent 자율 도출 실패해도 server 강제
+            except (ValueError, TypeError):
+                pass
+        # 최종 role 결정
+        if is_mgmt:
+            new_it['role'] = 'mgmt'
+        elif ov:
+            new_it['role'] = ov
+        # 그 외 role 미지정 (admin 명시 안 한 IP)
+        out.append(new_it)
+    return out
+
+
 async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> HandlerResult:
     from handlers.agents import _agent_update
     body = _parse_body(handler_args)
@@ -458,7 +501,7 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
     if sync_port:
         patches['sync_port'] = sync_port
     if isinstance(ifaces, list):
-        patches['interfaces'] = ifaces
+        patches['interfaces'] = _normalize_interface_roles(ifaces, config, agent)
     if isinstance(routes, list):
         patches['routes'] = routes
     # agent_version 도 매 heartbeat 시 갱신 — update.sh 후 새 버전 즉시 반영.

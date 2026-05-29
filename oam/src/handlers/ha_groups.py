@@ -136,13 +136,30 @@ def _alloc_vrid(config) -> int:
     raise RuntimeError(f"VRID pool exhausted ({_VRID_MIN}-{_VRID_MAX})")
 
 
-def _pick_default_iface(vip_bindings: list, agent_id: int) -> str:
-    """vip_bindings.memberIfaces 에서 이 agent 의 가장 흔한 iface 추출. 없으면 빈 문자열."""
+def _pick_default_iface(vip_bindings: list, agent_id: int, agent_row: dict | None = None) -> str:
+    """vrrp_instance 의 advert NIC 결정.
+
+    우선순위:
+      1) vip_bindings.memberIfaces[agent_id] 첫 명시.
+      2) agent.interfaces 의 role='mgmt' (unicast_src_ip 와 같은 NIC 자연 선택).
+      3) agent.interfaces 의 첫 NIC.
+      4) 빈 문자열 (caller 가 'eth0' fallback).
+    """
     for b in (vip_bindings or []):
         iface = (b.get('memberIfaces') or {}).get(str(agent_id)) \
                 or (b.get('memberIfaces') or {}).get(agent_id)
         if iface:
             return iface
+    if isinstance(agent_row, dict):
+        # mgmt NIC 우선 — unicast_src_ip = mgmt IP 와 정합.
+        for it in (agent_row.get('interfaces') or []):
+            if isinstance(it, dict) and (it.get('role') == 'mgmt' or it.get('mgmt')):
+                if it.get('name'):
+                    return it['name']
+        # fallback — 첫 NIC.
+        for it in (agent_row.get('interfaces') or []):
+            if isinstance(it, dict) and it.get('name'):
+                return it['name']
     return ''
 
 
@@ -233,7 +250,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         100 if is_master else 90,
     )
     vip_bindings = vip_bindings or []
-    default_iface = _pick_default_iface(vip_bindings, agent_id) or "eth0"
+    default_iface = _pick_default_iface(vip_bindings, agent_id, agent_row) or "eth0"
 
     # cims-health 가 lookup 하는 port/proto — agent 의 deployment 로 추정.
     h_port, h_proto = _infer_health_port_proto(agent_id, config) if config else (None, None)
@@ -243,7 +260,13 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     services: dict = {}
     if vip_bindings:
         vips = []
+        # vrrp_instance.interface = unicast_src_ip 와 같은 NIC (vrrp advert
+        # 송수신 채널). top-level ha.json.interface 사용. 각 VIP 의 dev 는
+        # binding 별로 따로 (multi-망 multi-VIP 한 vrrp_instance 패턴).
         svc_iface = default_iface
+        # Phase 4d — slot 이 role 명 (mgmt/service/internal) 이면 agent.interfaces
+        # 의 role 매칭 NIC 자동 추론 (memberIfaces 명시 안 한 경우).
+        _ROLE_SLOTS = {'mgmt', 'service', 'internal'}
         for b in vip_bindings:
             slot = (b.get('slot') or '').strip()
             ip   = (b.get('ip')   or '').strip()
@@ -252,9 +275,15 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             mask = int(b.get('mask') or group.get('vip_mask') or 24)
             iface = (b.get('memberIfaces') or {}).get(str(agent_id)) \
                     or (b.get('memberIfaces') or {}).get(agent_id)
-            if iface:
-                svc_iface = iface
-            vips.append({'slot': slot, 'ip': ip, 'mask': mask})
+            # slot 이 role 명이고 memberIfaces 명시 없으면 agent_row 에서 자동 추론.
+            if not iface and slot.lower() in _ROLE_SLOTS:
+                for it in (agent_row.get('interfaces') or []):
+                    if not isinstance(it, dict): continue
+                    if (it.get('role') or '').lower() == slot.lower():
+                        iface = it.get('name')
+                        break
+            # 각 VIP 가 어느 NIC 에 attach 될지 명시. 누락 시 svc_iface fallback.
+            vips.append({'slot': slot, 'ip': ip, 'mask': mask, 'dev': iface or svc_iface})
         if vips:
             entry = {
                 'enabled':  True,

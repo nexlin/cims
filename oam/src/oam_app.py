@@ -124,6 +124,39 @@ if __name__ == '__main__':
         config = load_config()
         auth.init(config)
 
+        # Phase 4d — Mgmt.Cidr 검증 + 명시 로깅.
+        # mgmt 대역은 oam 운영의 기준선:
+        #  - agent enroll/heartbeat 시 interface.role='mgmt' 자동 매핑 근거.
+        #  - install_command (AgentOamUrl) 의 host IP 가 이 대역 안이어야 정합.
+        import ipaddress as _ipaddress
+        _mgmt = (config.get('Mgmt') or {})
+        _mgmt_cidr_raw = (_mgmt.get('Cidr') or '').strip()
+        _mgmt_net = None
+        if _mgmt_cidr_raw:
+            try:
+                _mgmt_net = _ipaddress.ip_network(_mgmt_cidr_raw, strict=False)
+                logger.log_info(f"Mgmt.Cidr = {_mgmt_cidr_raw} (oam 운영 mgmt 대역)")
+                # AgentOamUrl 의 IP 가 mgmt 대역 안인지 검증.
+                from urllib.parse import urlparse
+                _aou = ((config.get('Server') or {}).get('AgentOamUrl') or '').strip()
+                if _aou:
+                    try:
+                        _aou_ip = _ipaddress.ip_address(urlparse(_aou).hostname or '')
+                        if _aou_ip in _mgmt_net:
+                            logger.log_info(f"AgentOamUrl host {_aou_ip} ∈ {_mgmt_cidr_raw} OK")
+                        else:
+                            logger.log_error(
+                                f"⚠ AgentOamUrl host {_aou_ip} ∉ Mgmt.Cidr {_mgmt_cidr_raw} — "
+                                f"install_command 의 URL 이 mgmt 대역 밖. 정합 점검 필요.")
+                    except (ValueError, TypeError):
+                        pass
+            except ValueError as _e:
+                logger.log_error(f"Mgmt.Cidr 잘못된 형식: {_mgmt_cidr_raw} ({_e})")
+        else:
+            logger.log_info("Mgmt.Cidr 미설정 — agent 자율 mgmt 도출만. 명시 권장.")
+        # config 에 정규화된 mgmt_net 캐시 (handlers 가 사용 가능).
+        config['_mgmt_net'] = _mgmt_net
+
         sl = config.get("ServiceLogging", {})
         _service_log_dir = sl.get("Dir", "")
         if not _service_log_dir:
