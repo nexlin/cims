@@ -1,4 +1,5 @@
 import argparse
+import glob
 import os
 import sys
 import time
@@ -8,13 +9,29 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))
 _CONFIG_PATH = os.environ.get('CIMS_CSC_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'csc.json')
 
-# ── OAM 분리 Phase 1: oam/src 를 sys.path 에 mount ──
+# ── OAM 분리 Phase 1/3b: oam/src 를 sys.path 에 mount ──
 # 같은 binary 가 oam/src/handlers/ 의 모듈도 import. csc/src/handlers/ 와
 # oam/src/handlers/ 둘 다 __init__.py 없는 PEP 420 namespace package 라서
 # `from handlers.X import Y` 가 양쪽 디렉토리에서 모두 해석된다.
 # 설계: docs/design/oam_csc_split.md
-_OAM_SRC = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'oam', 'src'))
-if os.path.isdir(_OAM_SRC) and _OAM_SRC not in sys.path:
+#
+# 후보 경로 (우선순위):
+#   1) dev env (build/dist 트리): _COMPONENT_ROOT/../oam/src
+#      → build/dist/csc/.. = build/dist → build/dist/oam/src
+#   2) agent install (install_path/csc/<ver>/csc 구조):
+#      _COMPONENT_ROOT/../../oam/*/oam/src 를 glob 검색
+#      → install_path/csc/0.0.3/csc/.. = install_path/csc/0.0.3 →
+#         glob install_path/csc/0.0.3/../../oam/*/oam/src
+#         = install_path/oam/0.0.2/oam/src 등 매칭
+_OAM_SRC = None
+_candidates = [os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'oam', 'src'))]
+_glob_pattern = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'oam', '*', 'oam', 'src'))
+_candidates += sorted(glob.glob(_glob_pattern), reverse=True)
+for _c in _candidates:
+    if os.path.isdir(_c):
+        _OAM_SRC = _c
+        break
+if _OAM_SRC and _OAM_SRC not in sys.path:
     sys.path.insert(0, _OAM_SRC)
 
 from httpsrv.server import HttpServer

@@ -283,6 +283,29 @@ management host (10.0.2.45):
 - **csc-tb.json 폐기** — TB-CSC 폐기 결정이지만 dist/csc/config/csc-tb.json 잔재. `cims.sh tb start csc` 호출 시 4419 충돌. 정리 필요.
 - **agent install_command URL** — 현재 `https://10.0.2.45:4419` (TB-OAM). prod 망 분리 시 mgmt 망 IP 로 변경.
 
+#### 단계 4a — csc 배포 (ctrl01 + ctrl02) — 부분 완료 (2026-05-29)
+
+사용자 요구: csc 는 ctrl01, ctrl02 로 배포, oam 은 TB-OAM 유지.
+
+진행 결과:
+- **csc-0.0.4.tar.gz** (124KB) 빌드 — Phase 3b 코드 + `csc_app.py` sys.path mount 개선 (install_path 구조 지원: `_COMPONENT_ROOT/../../oam/*/oam/src` glob 검색).
+- **csc deployment** — agent 51 (ctrl01) dep 9, agent 52 (ctrl02) dep 10 신규. install 완료 (status=stopped, install_path=`/opt/cims-agent/agent/modules/csc/0.0.3`).
+- **oam deployment** — agent 51 dep 11, agent 52 dep 12 신규. install 완료 (사용자 의도: install 만, start 안 함 — TB-OAM 으로 OAM 통신). 단 csc 의 `from handlers import auth` import 위해 oam 코드 install 필수.
+- **csc-tb.json 폐기** — dist/csc/config/csc-tb.json 삭제. `cims.sh tb csc` target 도 deprecated 마크 유지.
+- **systemd 가이드** — `oam/SYSTEMD.md` 작성 (사용자 sudo 권한 필요).
+
+미진행 (별도 cycle 권장 — LIVE 위험도):
+- csc-0.0.4 로 upgrade — `PUT deployment.package_id=46` 미적용 확인 (delete + recreate 필요할 수도).
+- csc start LIVE 적용 — 막힘:
+  - (a) nohup csc 와 4421 port 충돌. management host (이 머신) 의 nohup 정지 절차 필요.
+  - (b) `cims-svc start csc` 가 single-module install 미지원 (default 'all' → cmp 찾아 fail). lifecycle.sh 수정 필요.
+  - (c) ctrl02 의 `uvicorn` Python 패키지 누락 — 사용자 sudo or pip --user 설치 필요.
+
+현 운영 (management host 가 임시 대안):
+- TB-OAM (4419, nohup): 4서버 agent heartbeat + OAM endpoint 정상.
+- nohup CSC (4421+4430): 가입자 CRUD + mcptt server LISTEN.
+- ctrl01/ctrl02 의 csc deployment 는 install 완료 + start 미진행 — 코드 배포 자체는 LIVE 에 박힘.
+
 ### Phase 4: 호스트 분리 (선택)
 - **목표**: oam 호스트 (운영망), csc 호스트 (서비스망).
 - 네트워크 ACL / TLS / 인증 분리.
