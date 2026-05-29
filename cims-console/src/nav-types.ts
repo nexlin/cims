@@ -8,7 +8,6 @@
 import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { WidgetDef } from './widgets/types'
-import type { DataSource } from './widgets/shapes/types'
 
 export type RouteDef = {
   path: string
@@ -40,5 +39,6 @@ export interface ServiceManifest {
   label: string      // 'CIMS'
   sections: RouteSection[]
   widgets?: WidgetDef[]      // registry 가 수집해 layout(PageLayout)에서 배치
-  dataSources?: DataSource[] // 범용 shape 위젯(차트/표/KPI/분포)이 선택지로 쓰는 데이터 소스
+  // 데이터 소스는 manifest 가 아니라 Service Descriptor(data_sources, 백엔드 데이터)로 등록 —
+  // shape 위젯이 /service-descriptors/data-sources 카탈로그를 소비 (완전 데이터 구동).
 }

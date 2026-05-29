@@ -66,6 +66,12 @@ async def handle_service_descriptors(handler_args: HandlerArgs, kwargs: dict) ->
                 'controllable': sorted(service_registry.controllable_modules(config)),
             })
 
+        if parts[0] == 'data-sources':
+            # 전 descriptor 의 data_sources 병합 — 콘솔 shape 위젯이 소스 카탈로그로 소비.
+            if method != 'GET':
+                return HandlerResult(status=405, body={'error': 'method_not_allowed'})
+            return HandlerResult(status=200, body={'data_sources': service_registry.data_sources(config)})
+
         sid = parts[0]
         if method == 'GET':
             doc = file_store.load(sdir, sid)
@@ -79,6 +85,8 @@ async def handle_service_descriptors(handler_args: HandlerArgs, kwargs: dict) ->
             doc = {'id': sid, 'label': body.get('label') or sid, 'modules': body['modules']}
             if isinstance(body.get('alert_rules'), list):
                 doc['alert_rules'] = body['alert_rules']
+            if isinstance(body.get('data_sources'), list):
+                doc['data_sources'] = body['data_sources']
             file_store.save(sdir, sid, doc)
             return HandlerResult(status=200, body=file_store.load(sdir, sid))
         if method == 'DELETE':

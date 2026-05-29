@@ -14,7 +14,6 @@ import { alertBannerWidget } from './widgets/AlertBannerWidget'
 import { activeVoipWidget } from './widgets/ActiveVoipWidget'
 import { activePttWidget } from './widgets/ActivePttWidget'
 import { CIMS_OUTPUT_WIDGETS } from './widgets/outputWidgets'
-import { CIMS_DATA_SOURCES } from './dataSources'
 
 import OrganizationsPage from './pages/OrganizationsPage'
 import MembersPage from './pages/MembersPage'
@@ -50,7 +49,6 @@ export const cimsManifest: ServiceManifest = {
     alertBannerWidget, activeVoipWidget, activePttWidget,
     ...CIMS_OUTPUT_WIDGETS,
   ],
-  dataSources: CIMS_DATA_SOURCES,
   sections: [
     {
       key: 'subscribers',

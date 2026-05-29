@@ -136,3 +136,13 @@ def alert_rules(config: dict = None) -> list:
     for d in load_descriptors(config):
         out.extend(d.get('alert_rules') or [])
     return out
+
+
+def data_sources(config: dict = None) -> list:
+    """콘솔 shape 위젯(차트/표/KPI/분포)용 — 전 descriptor 의 data_sources 병합.
+    각 항목은 선언적 스펙(endpoint + shape별 필드 매핑) — 프론트 범용 로더가 해석."""
+    out = []
+    for d in load_descriptors(config):
+        for s in (d.get('data_sources') or []):
+            out.append({**s, 'service_id': d.get('id')})
+    return out
