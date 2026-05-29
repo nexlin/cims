@@ -241,13 +241,47 @@ LIVE 검증 (TB):
 - `POST /api/v1/agents` → install_command 가 `--oam-url` 형식으로 발급 확인.
 - 4서버 agent heartbeat 200 OK 연속 (port 같음).
 
-#### 단계 3c — 4서버 LIVE 절체 (다음 세션)
+#### 단계 3c — management host LIVE 절체 ✅ **완료 (2026-05-29)**
 
-- csc + oam 동반 배포 (Phase 2 의 packages: oam + csc, agent 가 install_path/csc/ + install_path/oam/ 두 디렉토리에 풀음).
-- systemctl start cims@oam.service (각 4서버).
-- 옛 cims-csc (4419) 정지 → 새 cims-csc (4420 admin + 4430 mcptt) + cims-oam (4419) 분리 기동.
-- 4 agent 자동 새 URL 로 heartbeat (port 같지만 endpoint 책임이 OAM).
-- 위험도: 큼. 운영 다운타임 분 단위 (절체 도중 admin API + agent heartbeat 일시 중단).
+전제 재정의:
+- 4서버 (ctrl01/ctrl02/media01/media02) 는 **csp/cmp/isp 만** 운영. csc/oam deployment 자체가 없음.
+- csc/oam 은 **management host (10.0.2.45 ctrl01)** 에서 통합 운영.
+- 따라서 "4서버 LIVE 절체" 가 아니라 **management host 의 csc 단일 프로세스를 OAM + CSC 두 프로세스로 분리** 가 본질.
+
+진행 결과:
+- 4서버 agent heartbeat 는 Phase 3a 부터 이미 TB-OAM (4419) 으로 자연 전환 → 영향 없음.
+- 옛 prod csc (PID 327897, May 21~ 7d22h 동작, Phase 0 코드) SIGTERM 종료.
+- 새 csc_app.py (Phase 3b 정리 코드) 로 재기동 → port 4421 admin + 4430 mcptt LISTEN. 시작 banner `start (CSC)`.
+- TB-OAM (PID 3603983, port 4419) 그대로 유지 — OAM 책임.
+
+LIVE 검증:
+- TB-OAM (4419) — OAM endpoint 5개 (agents/ha-groups/packages/deployments/verification) 200 OK, CSC endpoint (users/orgs) 404.
+- 새 CSC (4421) — CSC endpoint (users/organizations) 200 OK, OAM endpoint (agents/ha-groups/packages/deployments) 404 — 의도된 분리.
+- mcptt server (4430) LISTEN.
+- 4서버 agent heartbeat 200 OK 연속 — 절체 무영향.
+- Python traceback 없음.
+- 옛 csc → 새 csc 다운타임 ≈ 6초 (SIGTERM ~ startup banner). 4서버 agent 안 봄 + UE 미통신 환경이라 실질 영향 0.
+
+운영 모델 (결과):
+```
+management host (10.0.2.45):
+  ┌─────────────────────────┐    ┌──────────────────────────────┐
+  │ cims-oam (oam_app.py)   │    │ cims-csc (csc_app.py)        │
+  │  port 4419              │    │  port 4421 admin + 4430 mcptt│
+  │  Agent/HA/배포/검증/통계   │    │  가입자/조직/auth/mcptt        │
+  │  PID 3603983            │    │  PID 3611504                 │
+  └─────────────────────────┘    └──────────────────────────────┘
+            ▲                              ▲
+            │ heartbeat (4419)              │ MCPTT (4430) — UE 통신
+            │                              │
+       4서버 agent                       UE 단말 (PTT/VoLTE 가입자)
+       (10.0.2.45~49)
+```
+
+미진행 (후속):
+- **systemd 영구화** — 현재 두 프로세스 모두 nohup 으로 띄워짐 (host 재기동 시 소실). `cims-oam.service` + `cims-csc.service` systemd unit 설치 필요. (Phase 4 호스트 분리 시 또는 별도 운영 cycle)
+- **csc-tb.json 폐기** — TB-CSC 폐기 결정이지만 dist/csc/config/csc-tb.json 잔재. `cims.sh tb start csc` 호출 시 4419 충돌. 정리 필요.
+- **agent install_command URL** — 현재 `https://10.0.2.45:4419` (TB-OAM). prod 망 분리 시 mgmt 망 IP 로 변경.
 
 ### Phase 4: 호스트 분리 (선택)
 - **목표**: oam 호스트 (운영망), csc 호스트 (서비스망).
