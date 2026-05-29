@@ -1,0 +1,35 @@
+# OAM Python 의존성 (Phase 4 vendor 화).
+# Phase 1+3b 분리 결과로 csc 와 sibling.
+#
+# OAM 책임이 csc 의 services / httpsrv 를 그대로 import 하므로
+# csc/vendor 와 같은 베이스 + OAM 전용 추가 (aiohttp/netifaces 등).
+#
+# 빌드 명령 (인터넷 가용 dev host 에서):
+#   cd oam && rm -rf vendor && mkdir -p vendor
+#   pip3 install --target=vendor -r requirements.txt --no-compile
+
+# OAM 도 fastapi server 띄움
+fastapi
+uvicorn
+starlette
+
+# DB
+pymysql
+
+# Admin JWT
+PyJWT
+
+# Logger
+loguru
+
+# HTTP client (agent_api 등)
+requests
+
+# Concurrency
+readerwriterlock
+
+# OAM 전용 — agent 통신, 네트워크 인터페이스 조회 등
+aiohttp
+netifaces
+asyncstdlib
+strenum

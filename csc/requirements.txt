@@ -1,0 +1,28 @@
+# CSC Python 의존성 (Phase 4 vendor 화).
+# 4서버 / 상용 private 환경 (인터넷 없음) 대응 — csc/vendor 에 미리 다운로드.
+#
+# 빌드 명령 (인터넷 가용 dev host 에서):
+#   cd csc && rm -rf vendor && mkdir -p vendor
+#   pip3 install --target=vendor -r requirements.txt --no-compile
+#
+# 런타임: csc_app.py 가 sys.path 에 csc/vendor 자동 mount.
+
+# REST server stack
+fastapi
+uvicorn
+starlette
+
+# DB
+pymysql
+
+# Admin JWT
+PyJWT
+
+# Logger
+loguru
+
+# HTTP client (flow_logger / sync_dispatch 등)
+requests
+
+# Concurrency
+readerwriterlock

@@ -986,7 +986,23 @@ cmd_sync() {
             mkdir -p "$DIST_DIR/oam/config"
             cp -f "$SCRIPT_DIR/oam/config/"*.json "$DIST_DIR/oam/config/" 2>/dev/null || true
         fi
-        ok "csc/src + oam/src (+ config_template.json, oam/pkg.json, oam/config) ← $SCRIPT_DIR"
+        # Phase 4 vendor: private 환경 (인터넷 없음) 대응 — csc/vendor + oam/vendor 동기화.
+        # csc/requirements.txt, oam/requirements.txt 도 함께.
+        for _comp in csc oam; do
+            if [[ -d "$SCRIPT_DIR/$_comp/vendor" ]]; then
+                mkdir -p "$DIST_DIR/$_comp/vendor"
+                if command -v rsync >/dev/null 2>&1; then
+                    rsync -a --delete-excluded --exclude='__pycache__' --exclude='*.pyc' \
+                        "$SCRIPT_DIR/$_comp/vendor/" "$DIST_DIR/$_comp/vendor/"
+                else
+                    cp -r "$SCRIPT_DIR/$_comp/vendor/." "$DIST_DIR/$_comp/vendor/"
+                fi
+            fi
+            if [[ -f "$SCRIPT_DIR/$_comp/requirements.txt" ]]; then
+                cp -f "$SCRIPT_DIR/$_comp/requirements.txt" "$DIST_DIR/$_comp/requirements.txt"
+            fi
+        done
+        ok "csc/src + oam/src (+ config, pkg.json, vendor, requirements.txt) ← $SCRIPT_DIR"
         n_changed=$((n_changed+1))
     fi
 

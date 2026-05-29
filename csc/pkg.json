@@ -1,7 +1,7 @@
 {
   "name": "csc",
   "description": "CIMS Service Controller — 관리/인증/이력 REST API 서버",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "ha_capability": "active_standby",
   "service": {
     "functions": [

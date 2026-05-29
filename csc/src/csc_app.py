@@ -9,6 +9,14 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))
 _CONFIG_PATH = os.environ.get('CIMS_CSC_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'csc.json')
 
+# ── Phase 4 vendor: private 환경 (인터넷 없음) 대응 ──
+# csc/vendor/ 에 사전 다운로드된 fastapi/uvicorn/pymysql/PyJWT/loguru/requests/
+# readerwriterlock 등 site-packages. system pip 없이도 동작.
+# 빌드 시점: 'pip3 install --target=csc/vendor -r csc/requirements.txt --no-compile'
+_VENDOR = os.path.normpath(os.path.join(_COMPONENT_ROOT, 'vendor'))
+if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
+    sys.path.insert(0, _VENDOR)
+
 # ── OAM 분리 Phase 1/3b: oam/src 를 sys.path 에 mount ──
 # 같은 binary 가 oam/src/handlers/ 의 모듈도 import. csc/src/handlers/ 와
 # oam/src/handlers/ 둘 다 __init__.py 없는 PEP 420 namespace package 라서

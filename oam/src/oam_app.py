@@ -28,11 +28,28 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))  # = oam/
 _CONFIG_PATH = os.environ.get('CIMS_OAM_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'oam.json')
 
+# ── Phase 4 vendor: private 환경 (인터넷 없음) 대응 ──
+# oam/vendor/ 에 사전 다운로드된 fastapi/uvicorn/pymysql/PyJWT/loguru/requests/
+# readerwriterlock + OAM 전용 aiohttp/netifaces/strenum/asyncstdlib 등.
+# 빌드 시점: 'pip3 install --target=oam/vendor -r oam/requirements.txt --no-compile'
+_VENDOR = os.path.normpath(os.path.join(_COMPONENT_ROOT, 'vendor'))
+if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
+    sys.path.insert(0, _VENDOR)
+
 # CSC 공유 라이브러리 (services.mcptt / services.admin_auth / services.flow_logger /
 # services.config_cache / services.drift_sweeper / services.sync_txn / services.alert_log /
 # httpsrv / util) 를 import 하기 위해 sys.path 에 csc/src mount.
-_CSC_SRC = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'csc', 'src'))
-if os.path.isdir(_CSC_SRC) and _CSC_SRC not in sys.path:
+# Phase 4 vendor: agent install 환경 (install_path/csc/<ver>/csc/src) 도 glob 검색.
+_CSC_SRC = None
+_csc_candidates = [os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'csc', 'src'))]
+import glob as _glob
+_csc_glob = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'csc', '*', 'csc', 'src'))
+_csc_candidates += sorted(_glob.glob(_csc_glob), reverse=True)
+for _c in _csc_candidates:
+    if os.path.isdir(_c):
+        _CSC_SRC = _c
+        break
+if _CSC_SRC and _CSC_SRC not in sys.path:
     sys.path.insert(0, _CSC_SRC)
 
 from httpsrv.server import HttpServer

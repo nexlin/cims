@@ -294,6 +294,34 @@ management host (10.0.2.45):
 - **csc-tb.json 폐기** — dist/csc/config/csc-tb.json 삭제. `cims.sh tb csc` target 도 deprecated 마크 유지.
 - **systemd 가이드** — `oam/SYSTEMD.md` 작성 (사용자 sudo 권한 필요).
 
+#### 단계 4c — vendor 화 (private 환경 대응) ✅ **완료 (2026-05-29)**
+
+상용 private 환경 (인터넷 없음) 대응. csp 의 libmariadb.so.3 vendor 패턴 따라 Python 의존성을 패키지 내 포함.
+
+진행:
+- **Dead code 제거**:
+  - `csc/src/util/db/` 전체 — sqlalchemy/pandas 사용. 어디서도 import 안 됨. 7 파일 삭제.
+  - `csc/src/httpsrv/controller.py` — numpy/pandas DataFrame body 처리 코드 제거 (JSON only).
+  - `csc/src/httpsrv/handler.py` — pandas BodyData type 제거.
+- **requirements.txt** 작성: csc (8 deps) + oam (12 deps). fastapi/uvicorn/pymysql/PyJWT/loguru/requests/readerwriterlock + OAM (aiohttp/netifaces/strenum/asyncstdlib).
+- **csc/vendor/** (13MB) + **oam/vendor/** (23MB) — `pip3 install --target=vendor` 로 site-packages 형태. 사전 다운로드 in dev host.
+- **sys.path mount** — csc_app.py 가 `_COMPONENT_ROOT/vendor` 자동 등록. oam_app.py 도 oam vendor + csc/src + csc/vendor glob.
+- **CMakeLists.txt** make dist 가 vendor 디렉토리 복사.
+- **cims.sh sync csc** 도 vendor + requirements.txt rsync.
+
+tarball 결과:
+- **csc-0.0.6.tar.gz 3.7MB** (이전 124KB → 30배, vendor 포함).
+- **oam-0.0.3.tar.gz 6.1MB** (이전 108KB → 56배).
+- private 환경 자족 — install 만 하면 즉시 동작.
+
+LIVE 검증:
+- TB-OAM (PID 3703368) startup 정상 + API endpoint 200.
+- register-from-dist 로 csc-0.0.6 (id=48) + oam-0.0.3 (id=49) packages 컬렉션 등록 — Console 자동 노출.
+
+git impact:
+- 1470 파일, +437,388/-603 (대부분 vendor wheel 풀린 site-packages).
+- repo 크기 +36MB.
+
 #### 단계 4b — LIVE 절체 — 부분 완료 (2026-05-29)
 
 **ctrl01 csc agent-managed 운영 전환 PASS**:

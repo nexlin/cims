@@ -1,8 +1,6 @@
 import copy
 import os
 
-import numpy as np
-import pandas as pd
 from readerwriterlock import rwlock
 from typing import Dict, Tuple, Optional
 from fastapi import APIRouter, Request
@@ -20,16 +18,7 @@ def _http_response(accept_format: str, result: HandlerResult) -> Response:
 
     if isinstance(body, dict):
         return JSONResponse(content=body, status_code=status, headers=headers)
-    if isinstance(body, pd.DataFrame):
-        if accept_format == "text/csv":
-            return Response(content=body.to_csv(index=False), status_code=status, headers=headers, media_type=media or "text/csv")
-        else:
-            if hasattr(body, "select_dtypes"):
-                datetime_cols = body.select_dtypes(include=['datetime', 'datetimetz']).columns
-                for col in datetime_cols:
-                    body[col] = body[col].astype(str)
-            clean_data = body.replace({np.nan: None, np.inf: None, -np.inf: None}).values.tolist()
-            return JSONResponse(content=clean_data, status_code=status, headers=headers)
+    # Phase 4 vendor 정리: numpy/pandas DataFrame body 처리 제거 (사용 안 함).
     if isinstance(body, list):
         if accept_format == "text/csv":
             return Response(content=HttpUtil.get_csv_content(body), status_code=status, headers=headers, media_type=media or "text/csv")

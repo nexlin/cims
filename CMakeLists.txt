@@ -351,12 +351,19 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/csc/src
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/src ${CMAKE_BINARY_DIR}/dist/csc/src
 
-    # ── 6a. OAM Python 소스 + config 복사 ───────────────────────
+    # Phase 4 vendor: private 환경 대응 — pip install --target 결과를 그대로 tarball 에.
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/csc/vendor
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csc/vendor ${CMAKE_BINARY_DIR}/dist/csc/vendor
+
+    # ── 6a. OAM Python 소스 + config + vendor 복사 ─────────────
     #    Phase 1: csc_app.py 가 oam/src 를 sys.path mount.
     #    Phase 3: oam_app.py 별도 프로세스 (oam-tb.json / oam.json).
+    #    Phase 4: oam/vendor 에 OAM 전용 + 공통 의존성.
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/oam/src
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/src ${CMAKE_BINARY_DIR}/dist/oam/src
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/config ${CMAKE_BINARY_DIR}/dist/oam/config
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/oam/vendor
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/vendor ${CMAKE_BINARY_DIR}/dist/oam/vendor
 
     # ── 6b. Agent 에셋 복사 (CSC 가 /install-agent.sh 로 서빙) ──
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/agent

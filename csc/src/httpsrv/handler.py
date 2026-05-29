@@ -1,11 +1,11 @@
-import pandas as pd
 from typing import List, Union, Dict, Callable, Awaitable, Optional, Any
 from dataclasses import dataclass, field
 
 
+# Phase 4 vendor 정리: pandas DataFrame 지원 제거 (사용 안 함).
 CSVRow = Dict[str, str]
 CSVLike = List[CSVRow]
-BodyData = Union[None, pd.DataFrame, CSVLike, Dict, bytes, str, Any]
+BodyData = Union[None, CSVLike, Dict, bytes, str, Any]
 
 
 @dataclass
