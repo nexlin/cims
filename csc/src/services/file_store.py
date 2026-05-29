@@ -266,3 +266,31 @@ def jsonl_iter_recent(domain_path: str, key: str, days: int = 7):
                         continue
         except Exception:
             continue
+
+
+def jsonl_purge_old(domain_path: str, retain_days: int) -> int:
+    """domain 의 모든 key 에 대해 retain_days 보다 오래된 일별 jsonl 파일 삭제.
+    레이아웃 {domain_path}/<key>/YYYY/MM/DD.jsonl 의 날짜를 경로에서 파싱.
+    삭제한 파일 수 반환. 빈 디렉토리는 그대로 둠 (다음 append 가 재사용)."""
+    from datetime import timedelta
+    if retain_days < 1 or not os.path.isdir(domain_path):
+        return 0
+    cutoff = datetime.now().date() - timedelta(days=retain_days)
+    removed = 0
+    # {domain}/<key>/YYYY/MM/DD.jsonl — glob 으로 날짜 깊이만 매칭 (다른 파일 보호)
+    pattern = os.path.join(domain_path, '*', '[0-9]' * 4, '[0-9]' * 2, '[0-9]' * 2 + '.jsonl')
+    for path in glob.glob(pattern):
+        try:
+            dd = os.path.basename(path)[:2]
+            mm = os.path.basename(os.path.dirname(path))
+            yyyy = os.path.basename(os.path.dirname(os.path.dirname(path)))
+            fdate = datetime(int(yyyy), int(mm), int(dd)).date()
+        except (ValueError, IndexError):
+            continue
+        if fdate < cutoff:
+            try:
+                os.remove(path)
+                removed += 1
+            except OSError:
+                continue
+    return removed

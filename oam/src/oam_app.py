@@ -468,6 +468,23 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[drift-sweep] error: {e}")
 
+        # ── Metric JSONL retention purge sweeper ────────────────────────
+        # heartbeat 2s × 다수 host → metrics/<id>/YYYY/MM/DD.jsonl 무한 누적.
+        # retain_days 보다 오래된 일별 파일 삭제 (B 트랙 Phase 1 의 24h purge 설계 구현).
+        METRIC_RETAIN_DAYS    = int(config.get('MetricRetentionDays', 3))
+        METRIC_PURGE_INTERVAL = int(config.get('MetricPurgeSweepSec', 3600))
+
+        def _sweep_metric_purge():
+            try:
+                from handlers.agents import _metric_root
+                from services import file_store
+                n = file_store.jsonl_purge_old(_metric_root(config), METRIC_RETAIN_DAYS)
+                if n > 0:
+                    logger.log_info(f"[metric-purge] removed {n} metric jsonl file(s) "
+                                    f"older than {METRIC_RETAIN_DAYS}d")
+            except Exception as e:
+                logger.log_error(f"[metric-purge] error: {e}")
+
         logger.log_info(f"[agent-sweep] stale threshold={STALE_SEC}s, interval={SWEEP_INTERVAL}s")
         logger.log_info(f"[cert-sweep] rotate threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d, "
                         f"interval={CERT_SWEEP_INTERVAL}s")
@@ -477,11 +494,13 @@ if __name__ == '__main__':
         logger.log_info(f"[sync-txn-sweep] interval={SYNC_TXN_SWEEP_INTERVAL}s")
         logger.log_info(f"[drift-sweep] interval={DRIFT_SWEEP_INTERVAL}s "
                         f"auto_resync={DRIFT_AUTO_RESYNC}")
+        logger.log_info(f"[metric-purge] retain={METRIC_RETAIN_DAYS}d, interval={METRIC_PURGE_INTERVAL}s")
         _last_sweep = 0
         _last_cert_sweep = 0
         _last_alert_sweep = 0
         _last_sync_txn_sweep = 0
         _last_drift_sweep = 0
+        _last_metric_purge = 0
         while True:
             time.sleep(1)
             _now = time.time()
@@ -500,6 +519,9 @@ if __name__ == '__main__':
             if _now - _last_drift_sweep >= DRIFT_SWEEP_INTERVAL:
                 _sweep_drift()
                 _last_drift_sweep = _now
+            if _now - _last_metric_purge >= METRIC_PURGE_INTERVAL:
+                _sweep_metric_purge()
+                _last_metric_purge = _now
 
     except Exception as e:
         tb_str = traceback.format_exc()

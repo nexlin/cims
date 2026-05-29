@@ -5,6 +5,7 @@ Routes:
   GET /api/v1/alerts?days=7&type=&limit=500    최근 alert 이벤트 목록
   GET /api/v1/alerts/types                     최근 30일 alert type 목록
   GET /api/v1/alerts/summary?days=7            type별 통계 + 일별 발생량
+  GET /api/v1/alerts/rules                     활성 알림 규칙 + threshold (read-only, config 기반)
 """
 
 from urllib.parse import urlparse, parse_qs, unquote
@@ -24,6 +25,27 @@ def _path_parts(full_path: str):
         return tuple(unquote(p) for p in rel.parts)
     except ValueError:
         return ()
+
+
+# 활성 알림 규칙 — oam_app 의 alert sweeper 가 _transition() 으로 발화하는 조건과 1:1.
+# threshold 는 config 기반 (oam.json). 현재는 read-only — 향후 편집형 rule store 도입 시 확장.
+def _alert_rules(config: dict) -> dict:
+    rtp_pct = int(config.get('AlertRtpThresholdPct', 80))
+    sweep = int(config.get('AlertSweepSec', 30))
+    return {
+        'editable': False,
+        'sweep_sec': sweep,
+        'rules': [
+            {'type': 'csp_down', 'severity': 'critical', 'metric': 'CSP 프로세스',
+             'condition': '응답 없음', 'threshold': None, 'unit': None},
+            {'type': 'cmp_down', 'severity': 'critical', 'metric': 'CMP 프로세스',
+             'condition': '응답 없음', 'threshold': None, 'unit': None},
+            {'type': 'db_down', 'severity': 'critical', 'metric': 'DB 연결',
+             'condition': '연결 끊김', 'threshold': None, 'unit': None},
+            {'type': 'rtp_high', 'severity': 'warning', 'metric': 'RTP 포트 사용률',
+             'condition': f'≥ {rtp_pct}%', 'threshold': rtp_pct, 'unit': '%'},
+        ],
+    }
 
 
 def _service_log_dir(config: dict) -> str:
@@ -48,6 +70,9 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         return unquote(vals[0]) if vals else default
 
     try:
+        if parts and parts[0] == 'rules':
+            return HandlerResult(status=200, body=_alert_rules(config))
+
         if parts and parts[0] == 'types':
             return HandlerResult(status=200, body={'types': alert_log.list_types(base, days=30)})
 
