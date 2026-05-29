@@ -65,11 +65,10 @@ function Shell() {
         <Header
           userName={user.name}
           userRole={user.role}
-          onToggleSidebar={toggleSidebar}
           onLogout={logout}
           onChangePw={() => setShowChgPw(true)}
         />
-        <Sidebar collapsed={collapsed} />
+        <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
         <main className="app-content">
           <SubTabs />
           <div className="app-content-body">

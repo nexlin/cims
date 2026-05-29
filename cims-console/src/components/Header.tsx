@@ -1,16 +1,15 @@
 import { useState } from 'react'
-import { Menu, KeyRound, LogOut, Radio, Sun, Moon } from 'lucide-react'
+import { KeyRound, LogOut, Radio, Sun, Moon } from 'lucide-react'
 import { getInitialTheme, applyTheme, type Theme } from '../theme'
 
 interface HeaderProps {
   userName: string
   userRole: string
-  onToggleSidebar: () => void
   onLogout: () => void
   onChangePw: () => void
 }
 
-export default function Header({ userName, userRole, onToggleSidebar, onLogout, onChangePw }: HeaderProps) {
+export default function Header({ userName, userRole, onLogout, onChangePw }: HeaderProps) {
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const toggleTheme = () => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark'
@@ -19,9 +18,6 @@ export default function Header({ userName, userRole, onToggleSidebar, onLogout, 
   return (
     <header className="app-header">
       <div className="app-header-left">
-        <button className="app-header-toggle" onClick={onToggleSidebar} aria-label="사이드바 토글">
-          <Menu size={20} />
-        </button>
         <div className="app-header-logo">
           <Radio size={20} />
           <span className="app-header-logo-text">CIMS</span>

@@ -1,11 +1,13 @@
 import { useNavigate, useLocation } from 'react-router-dom'
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { VISIBLE_SECTIONS, findSectionByPath } from '../routes'
 
 interface SidebarProps {
   collapsed: boolean
+  onToggle: () => void
 }
 
-export default function Sidebar({ collapsed }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const currentSection = findSectionByPath(pathname)
@@ -29,6 +31,18 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           )
         })}
       </nav>
+      <div className="sidebar-footer">
+        <button
+          className="sidebar-item sidebar-toggle"
+          onClick={onToggle}
+          title={collapsed ? '메뉴 펼치기' : '메뉴 접기'}
+        >
+          {collapsed
+            ? <PanelLeftOpen size={20} className="sidebar-item-icon" />
+            : <PanelLeftClose size={20} className="sidebar-item-icon" />}
+          {!collapsed && <span className="sidebar-item-label">메뉴 접기</span>}
+        </button>
+      </div>
     </aside>
   )
 }

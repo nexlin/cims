@@ -1015,6 +1015,11 @@ body {
 .sidebar--collapsed .sidebar-nav { padding: 8px 6px; }
 .sidebar--collapsed .sidebar-item { justify-content: center; padding: 10px 0; }
 
+/* 사이드바 하단 — 메뉴 접기/펼치기 토글 */
+.sidebar-footer { padding: 8px; border-top: 1px solid var(--shell-border); }
+.sidebar-footer .sidebar-toggle { color: var(--header-muted); }
+.sidebar--collapsed .sidebar-footer { padding: 8px 6px; }
+
 /* ── Content + SubTabs ──────────────────────────── */
 .app-content {
   grid-area: content;
