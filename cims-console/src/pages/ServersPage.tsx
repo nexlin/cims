@@ -262,7 +262,7 @@ export default function ServersPage() {
         {/* 좌측 트리 */}
         <div style={{
           flex: '0 0 320px', overflow: 'auto',
-          border: '1px solid #e5e5e5', borderRadius: 6, background: '#fff',
+          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
         }}>
           <ServerTree
             haGroups={haGroups}
@@ -278,7 +278,7 @@ export default function ServersPage() {
         {/* 우측 Inspector */}
         <div style={{
           flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          border: '1px solid #e5e5e5', borderRadius: 6, background: '#fff',
+          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
         }}>
           {selectedAgent ? (
             <ServerInspector agent={selectedAgent}
@@ -391,7 +391,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                 <button onClick={e => { e.stopPropagation(); onAddMember(g) }}
                         title="새 멤버 자동 생성 (이름 자동, install_command 발급)"
                         style={{
-                          border: '1px solid #b8d4f5', background: '#fff', color: '#3498db',
+                          border: '1px solid #b8d4f5', background: 'var(--surface)', color: '#3498db',
                           fontSize: 11, padding: '0 6px', borderRadius: 3, cursor: 'pointer',
                           fontWeight: 600,
                         }}>+</button>
@@ -472,7 +472,7 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
         <button onClick={e => { e.stopPropagation(); onRemove() }}
                 title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"
                 style={{
-                  border: '1px solid #f5b8b8', background: '#fff', color: '#e74c3c',
+                  border: '1px solid #f5b8b8', background: 'var(--surface)', color: '#e74c3c',
                   fontSize: 10, padding: '0 5px', borderRadius: 3, cursor: 'pointer',
                   fontWeight: 600,
                 }}>×</button>
@@ -908,7 +908,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                 }
                 // edit mode
                 return (
-                  <tr key={b.bid} style={{ background: '#fff8e1' }}>
+                  <tr key={b.bid} style={{ background: 'var(--warn-soft)' }}>
                     <td>
                       <select className="form-input" value={b.slot}
                               onChange={e => changeBindingSlot(b.bid, e.target.value)}
@@ -983,7 +983,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
   }
   return (
     <div style={{ marginTop: 0, border: '1px solid #e0e0e0', borderRadius: 4 }}>
-      <div style={{ padding: '8px 12px', background: '#f7f7f7',
+      <div style={{ padding: '8px 12px', background: 'var(--bg-soft)',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
            title="A/S (active_standby) 시스템에만 적용 — VRRP 절체 동작 세부 조건">
         <span onClick={onToggle} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
@@ -1061,7 +1061,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
             <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 8, paddingLeft: 150 }}>
               {TRACKABLE_MODULE_CANDIDATES.map(mod => (
                 <label key={mod} style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
-                                          padding: '2px 8px', border: '1px solid #ccc', borderRadius: 3,
+                                          padding: '2px 8px', border: '1px solid var(--border)', borderRadius: 3,
                                           background: (value.tracked_modules || []).includes(mod) ? '#e3f2fd' : '#fff',
                                           cursor: 'pointer' }}>
                   <input type="checkbox"
@@ -1116,7 +1116,7 @@ function StatChip({ label, value, sub, color }:
   { label: string; value: string | number; sub?: string; color?: string }) {
   return (
     <div style={{
-      background: '#fff', border: '1px solid #ddd', padding: '8px 14px',
+      background: 'var(--surface)', border: '1px solid var(--border)', padding: '8px 14px',
       borderRadius: 6, minWidth: 110, display: 'flex', flexDirection: 'column', gap: 2,
     }}>
       <span style={{ fontSize: 11, color: '#888' }}>{label}</span>
@@ -1278,7 +1278,7 @@ function InspectorSection({ title, expanded, onToggle, children }: {
            style={{
              display: 'flex', alignItems: 'center', gap: 8,
              padding: '10px 16px', cursor: 'pointer',
-             background: '#fafafa', userSelect: 'none',
+             background: 'var(--bg-soft)', userSelect: 'none',
              borderBottom: expanded ? '1px solid #eee' : 'none',
            }}>
         <span style={{ width: 14, color: '#888', fontSize: 12 }}>{expanded ? '▼' : '▶'}</span>
@@ -1860,7 +1860,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
     <Modal title={`${agent.name} — 모듈 추가`} onClose={onClose} width={600}>
       {agent.ha_group && (
         <div style={{ fontSize: 12, color: '#555', marginBottom: 8,
-                      padding: '6px 10px', background: '#f5f9ff', border: '1px solid #d0e3ff',
+                      padding: '6px 10px', background: 'var(--primary-soft)', border: '1px solid #d0e3ff',
                       borderRadius: 4 }}>
           이 agent 는 HA 그룹 <b>{agent.ha_group.name}</b> (mode={agent.ha_group.mode}, role={agent.ha_group.role}) 소속 —
           {' '}<b>{agent.ha_group.mode}</b> 가능 모듈 + standalone 모듈만 install 가능
@@ -1908,7 +1908,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
 
             <label>4. 기능</label>
             <div style={{
-              border: '1px solid #ddd', borderRadius: 4, padding: 8,
+              border: '1px solid var(--border)', borderRadius: 4, padding: 8,
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
               {functionOptions.length === 0 ? (
@@ -1938,7 +1938,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
       </div>
       {selectedMismatch && (
         <div style={{ marginTop: 8, fontSize: 12, color: '#c00',
-                      padding: '6px 10px', background: '#fff5f5', border: '1px solid #ffcaca',
+                      padding: '6px 10px', background: 'var(--danger-soft)', border: '1px solid #ffcaca',
                       borderRadius: 4 }}>
           ⚠ {selectedMismatch} — install 시 backend 400 reject
         </div>
@@ -2089,7 +2089,7 @@ function HealthCheckModal({ agent, onClose }: { agent: Agent; onClose: () => voi
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* issues */}
           {data.issues.length > 0 && (
-            <div style={{ background: '#fff3cd', border: '1px solid #ffeaa7',
+            <div style={{ background: 'var(--warn-soft)', border: '1px solid #ffeaa7',
                           padding: 10, borderRadius: 4, fontSize: 13 }}>
               <b>⚠ 발견된 이슈:</b>
               <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>

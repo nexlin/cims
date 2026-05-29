@@ -17,17 +17,32 @@
   --danger:      #dc2626;
   --danger-h:    #b91c1c;
   --success:     #16a34a;
+  --warn-soft:   #fff8e1;
+  --danger-soft: #fff1f2;
   --radius:      8px;
   --radius-lg:   14px;
   --shadow:      0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.07);
   --shadow-lg:   0 10px 30px rgba(16,24,40,.13);
-  --sidebar-bg:  #0f172a;
+
+  /* 셸(헤더/사이드바) — 테마 적응형. 라이트 = 깨끗한 화이트 + 인디고 강조 */
+  --header-bg:        #ffffff;
+  --header-fg:        #1e2433;
+  --header-muted:     #64748b;
+  --sidebar-bg:       #ffffff;
+  --sidebar-fg:       #51607a;
+  --sidebar-fg-active: var(--primary);
+  --sidebar-active-bg: var(--primary-soft);
+  --sidebar-hover:    #f1f5fb;
+  --shell-border:     #e9ecf3;
 
   color-scheme: light;
-  font-family: 'Pretendard', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Pretendard Variable', 'Pretendard', 'Inter', -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', system-ui, 'Noto Sans KR', 'Malgun Gothic', sans-serif;
   font-size: 14px;
+  letter-spacing: -0.01em;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 :root[data-theme="dark"] {
@@ -45,9 +60,20 @@
   --danger:      #f04848;
   --danger-h:    #f87171;
   --success:     #22c55e;
+  --warn-soft:   rgba(234,179,8,.13);
+  --danger-soft: rgba(240,68,68,.14);
   --shadow:      0 1px 2px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.4);
   --shadow-lg:   0 10px 30px rgba(0,0,0,.55);
-  --sidebar-bg:  #0a0e16;
+
+  --header-bg:        #0d1422;
+  --header-fg:        #e6e9f1;
+  --header-muted:     #93a1b8;
+  --sidebar-bg:       #0d1422;
+  --sidebar-fg:       #94a3b8;
+  --sidebar-fg-active: #a5b4fc;
+  --sidebar-active-bg: rgba(99,102,241,.18);
+  --sidebar-hover:    rgba(255,255,255,.06);
+  --shell-border:     #222b3b;
   color-scheme: dark;
 }
 
@@ -919,8 +945,8 @@ body {
 
 /* ── Layout (Header + Sidebar + Content) ──────── */
 .app-layout {
-  --header-h: 48px;
-  --sidebar-w: 220px;
+  --header-h: 52px;
+  --sidebar-w: 224px;
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
   grid-template-rows: var(--header-h) 1fr;
@@ -935,48 +961,58 @@ body {
   grid-area: header;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px;
-  background: var(--sidebar-bg); color: #e2e8f0;
-  border-bottom: 1px solid var(--border);
-  /* 이전 .app-header 정의(height:54px / position:sticky)를 명시적으로 덮음.
-     grid row 가 --header-h 를 강제. */
+  background: var(--header-bg); color: var(--header-fg);
+  border-bottom: 1px solid var(--shell-border);
+  /* 이전 .app-header 정의(height:54px / position:sticky)를 명시적으로 덮음. */
   height: auto;
   position: static;
   box-shadow: none;
   gap: 0;
 }
-.app-header-left { display: flex; align-items: center; gap: 12px; }
+.app-header-left { display: flex; align-items: center; gap: 10px; }
 .app-header-toggle {
-  background: none; border: none; color: #a0aec0; cursor: pointer;
-  padding: 6px; display: flex; align-items: center; justify-content: center;
-  border-radius: 4px;
+  background: none; border: none; color: var(--header-muted); cursor: pointer;
+  padding: 7px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius); transition: background .15s, color .15s;
 }
-.app-header-toggle:hover { color: #e2e8f0; background: rgba(255,255,255,0.08); }
+.app-header-toggle:hover { color: var(--header-fg); background: var(--sidebar-hover); }
 .app-header-logo {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 16px; font-weight: 700;
+  display: flex; align-items: center; gap: 9px;
+  font-size: 16px; font-weight: 700; letter-spacing: -0.02em;
 }
-.app-header-logo-text { color: var(--primary); }
-.app-header-right { display: flex; align-items: center; gap: 10px; }
-.app-header-user-name { font-size: 13px; font-weight: 500; color: #cbd5e0; }
+.app-header-logo svg { color: var(--primary); }
+.app-header-logo-text {
+  background: linear-gradient(90deg, var(--primary), var(--primary-h));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.app-header-right { display: flex; align-items: center; gap: 8px; }
+.app-header-user-name { font-size: 13px; font-weight: 600; color: var(--header-fg); }
+.app-header .btn--ghost { color: var(--header-muted); }
+.app-header .btn--ghost:hover { color: var(--header-fg); background: var(--sidebar-hover); }
 
 /* ── Sidebar ────────────────────────────────────── */
 .sidebar {
   grid-area: sidebar;
-  background: var(--sidebar-bg); border-right: 1px solid var(--border);
+  background: var(--sidebar-bg); border-right: 1px solid var(--shell-border);
   display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden;
 }
-.sidebar-nav { flex: 1; padding: 8px 0; }
+.sidebar-nav { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
 .sidebar-item {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; text-align: left; padding: 10px 16px;
-  background: none; border: none; color: #a0aec0; cursor: pointer;
-  font-size: 13px; transition: all 0.15s;
+  display: flex; align-items: center; gap: 11px;
+  width: 100%; text-align: left; padding: 9px 12px;
+  background: none; border: none; color: var(--sidebar-fg); cursor: pointer;
+  font-size: 13px; font-weight: 500; border-radius: var(--radius);
+  transition: background .15s, color .15s;
   white-space: nowrap; overflow: hidden;
 }
-.sidebar-item:hover { color: #e2e8f0; background: rgba(255,255,255,0.08); }
-.sidebar-item--active { color: #63b3ed; background: rgba(74,144,217,0.15); font-weight: 600; }
-.sidebar-item-icon { flex-shrink: 0; }
+.sidebar-item:hover { color: var(--sidebar-fg-active); background: var(--sidebar-hover); }
+.sidebar-item--active {
+  color: var(--sidebar-fg-active); background: var(--sidebar-active-bg); font-weight: 600;
+}
+.sidebar-item-icon { flex-shrink: 0; opacity: .9; }
 .sidebar-item-label { flex: 1; }
+.sidebar--collapsed .sidebar-nav { padding: 8px 6px; }
 .sidebar--collapsed .sidebar-item { justify-content: center; padding: 10px 0; }
 
 /* ── Content + SubTabs ──────────────────────────── */

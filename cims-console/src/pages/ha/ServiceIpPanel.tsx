@@ -126,8 +126,8 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
 
   return (
     <div style={{
-      borderLeft: '3px solid #b8d4f5', borderRadius: 4, padding: '10px 12px',
-      background: '#fafcfe',
+      borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
+      background: 'var(--bg-soft)',
     }}>
       <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 8 }}>
         {title}
@@ -138,7 +138,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ background: '#f5f5f5', color: '#666' }}>
+          <tr style={{ background: 'var(--surface-2)', color: '#666' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>인터페이스</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 170 }}>IP / mask</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 110 }}>망(role)</th>
@@ -161,7 +161,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                   const isMgmtIp = isMgmt && ni.mgmt
                   return (
                     <tr key={`${iface}-${ni.ip}-${ipIdx}`}
-                        style={isMgmtIp ? { background: '#f8f9fa' } : undefined}>
+                        style={isMgmtIp ? { background: 'var(--surface-2)' } : undefined}>
                       <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>
                         {ipIdx === 0 && <b>{iface}</b>}
                         {ipIdx === 0 && isMgmt && (
@@ -183,7 +183,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                           <select value={ni.role || ''}
                                   onChange={e => onUpdateRole(ni.ip, e.target.value as any)}
                                   style={{ width: '95%', padding: '2px 4px', fontSize: 11,
-                                           border: '1px solid #ddd', borderRadius: 3 }}>
+                                           border: '1px solid var(--border)', borderRadius: 3 }}>
                             <option value="">(없음)</option>
                             <option value="service">service</option>
                             <option value="internal">internal</option>
@@ -199,7 +199,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                                       }}
                                       placeholder="(용도)"
                                       style={{ width: '95%', padding: '2px 6px', fontSize: 11,
-                                               border: '1px solid #ddd', borderRadius: 3 }} />
+                                               border: '1px solid var(--border)', borderRadius: 3 }} />
                       </td>
                       <td style={{ padding: '4px 8px', fontSize: 11 }}>
                         {isMgmtIp ? <span style={{ color: '#888' }}>mgmt</span>
@@ -229,7 +229,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
             return ifaceRows
           })}
           {addOpen ? (
-            <tr style={{ background: '#fff8e1' }}>
+            <tr style={{ background: 'var(--warn-soft)' }}>
               <td style={{ padding: '4px 8px' }}>
                 <select value={addIface} onChange={e => setAddIface(e.target.value)}
                         style={{ width: '95%', padding: '2px 4px', fontSize: 12,
@@ -255,7 +255,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                               onCommit={setAddSlot}
                               placeholder="(용도)"
                               style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                       border: '1px solid #ddd', borderRadius: 3 }} />
+                                       border: '1px solid var(--border)', borderRadius: 3 }} />
               </td>
               <td colSpan={2} style={{ padding: '4px 8px' }}>
                 <button onClick={commitAdd} style={btnSmall()}
@@ -284,7 +284,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 4 }}>
         <thead>
-          <tr style={{ background: '#f5f5f5', color: '#666' }}>
+          <tr style={{ background: 'var(--surface-2)', color: '#666' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 200 }}>dest CIDR</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>gateway</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>dev</th>
@@ -314,7 +314,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
             const isEditing = routeEditKey === r.dst
             if (isEditing) {
               return (
-                <tr key={rowKey} style={{ background: '#fff8e1' }}>
+                <tr key={rowKey} style={{ background: 'var(--warn-soft)' }}>
                   <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.dst}</td>
                   <td style={{ padding: '4px 8px' }}>
                     <input value={routeEditVia}
@@ -364,7 +364,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
             )
           })}
           {routeAddOpen && (
-            <tr style={{ background: '#fff8e1' }}>
+            <tr style={{ background: 'var(--warn-soft)' }}>
               <td style={{ padding: '4px 8px' }}>
                 <input value={routeDst}
                        placeholder="192.168.100.0/24"

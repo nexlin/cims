@@ -683,7 +683,7 @@ export default function HaServicesPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
         <h1 style={{ margin: 0 }}>서버 + HA 관리</h1>
         <button onClick={() => void load()} style={{ fontSize: 12, padding: '4px 12px',
-                                                     background: '#fff', border: '1px solid #ccc',
+                                                     background: 'var(--surface)', border: '1px solid var(--border)',
                                                      borderRadius: 3, cursor: 'pointer' }}>↻ 새로고침</button>
       </div>
       <div style={{ color: '#666', fontSize: 13, marginBottom: 16 }}>
@@ -693,7 +693,7 @@ export default function HaServicesPage() {
       {err && <div style={{ color: '#c00', marginBottom: 12, fontSize: 12 }}>오류: {err}</div>}
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0,
-                    border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', overflow: 'hidden' }}>
+                    border: '1px solid #e0e0e0', borderRadius: 6, background: 'var(--surface)', overflow: 'hidden' }}>
         {/* 좌측 SystemList */}
         <div style={{ width: 280, borderRight: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '8px 12px', borderBottom: '1px solid #e0e0e0',
@@ -833,7 +833,7 @@ function AccordionSection({ title, defaultOpen, right, children }: {
 }) {
   const [open, setOpen] = useState(defaultOpen ?? true)
   return (
-    <div style={{ marginBottom: 10, border: '1px solid #e0e0e0', borderRadius: 4, background: '#fff' }}>
+    <div style={{ marginBottom: 10, border: '1px solid #e0e0e0', borderRadius: 4, background: 'var(--surface)' }}>
       <div style={{ padding: '8px 12px', cursor: 'pointer', background: '#f7f8fa',
                     borderBottom: open ? '1px solid #e0e0e0' : 'none',
                     fontWeight: 'bold', fontSize: 13,
@@ -1039,7 +1039,7 @@ function SystemDetail(p: SystemDetailProps) {
       <AccordionSection title={`멤버 서버 (${svc.servers.length})`} defaultOpen>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            <tr style={{ background: '#f5f5f5', color: '#666' }}>
+            <tr style={{ background: 'var(--surface-2)', color: '#666' }}>
               <th style={{ padding: '4px 8px', textAlign: 'left' }}>이름</th>
               <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>mgmt IP</th>
               <th style={{ padding: '4px 8px', textAlign: 'left', width: 120 }}>상태</th>
@@ -1382,7 +1382,7 @@ function PackagesArea({ svc, packageMap, pickerOpen, setPickerOpen, onChange }: 
       </div>
 
       {pickerOpen && (
-        <div style={{ marginTop: 8, padding: 10, background: '#fff',
+        <div style={{ marginTop: 8, padding: 10, background: 'var(--surface)',
                       border: '1px dashed #c0c0c0', borderRadius: 4 }}>
           <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>
             ℹ {MODE_LABEL[targetMode]} 가능 또는 standalone 모듈만 선택 가능 — 서비스 모든 서버에 일괄 설치
@@ -1394,7 +1394,7 @@ function PackagesArea({ svc, packageMap, pickerOpen, setPickerOpen, onChange }: 
               return (
                 <label key={p.id} style={{
                   display: 'flex', alignItems: 'center', gap: 6,
-                  padding: 6, border: '1px solid #e5e5e5', borderRadius: 3,
+                  padding: 6, border: '1px solid var(--border)', borderRadius: 3,
                   background: !ok ? '#f7f7f7' : '#fff',
                   cursor: ok ? 'pointer' : 'not-allowed',
                   opacity: ok ? 1 : 0.5, fontSize: 12,

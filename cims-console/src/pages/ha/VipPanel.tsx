@@ -98,8 +98,8 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
 
   return (
     <div style={{
-      borderLeft: '3px solid #b8d4f5', borderRadius: 4, padding: '10px 12px',
-      background: '#fafcfe',
+      borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
+      background: 'var(--bg-soft)',
     }}>
       <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 10 }}>
         {title}
@@ -109,7 +109,7 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
       </div>
 
       {availableSlots.length === 0 && (
-        <div style={{ padding: 10, background: '#fff8db', border: '1px solid #f0c75e',
+        <div style={{ padding: 10, background: 'var(--warn-soft)', border: '1px solid #f0c75e',
                       borderRadius: 4, fontSize: 12, color: '#876200', marginBottom: 8 }}>
           ⚠ 멤버 서버의 ServiceIp 에 "용도" 라벨이 입력된 항목이 없습니다.
           먼저 각 서버 인터페이스에 용도를 입력해야 VIP 의 용도 select 에 옵션이 표시됩니다.
@@ -118,7 +118,7 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ background: '#f5f5f5', color: '#666' }}>
+          <tr style={{ background: 'var(--surface-2)', color: '#666' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 40 }}>#</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>용도</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 170 }}>VIP / mask</th>
@@ -191,7 +191,7 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
                                  }}
                                  placeholder="host"
                                  style={{ width: subnet!.mask >= 24 ? 50 : 110, padding: '2px 6px', fontSize: 12,
-                                          border: '1px solid #ddd', borderRadius: 3 }} />
+                                          border: '1px solid var(--border)', borderRadius: 3 }} />
                           <span style={{ color: '#888' }}>/{subnet!.mask}</span>
                         </span>
                       )
@@ -202,13 +202,13 @@ export function VipPanel({ title, svc, vrid, onChange, onApply }: {
                                onChange={e => updateRow(b.bid, { ip: e.target.value, status: 'unknown', dirty: true })}
                                placeholder="(VIP)" disabled={!b.slot}
                                style={{ width: 110, padding: '2px 6px', fontSize: 12,
-                                        border: '1px solid #ddd', borderRadius: 3 }} />
+                                        border: '1px solid var(--border)', borderRadius: 3 }} />
                         <span>/</span>
                         <input type="number" value={b.mask ?? 24}
                                onChange={e => updateRow(b.bid, { mask: parseInt(e.target.value) || 24, dirty: true })}
                                disabled={!b.slot}
                                style={{ width: 40, padding: '2px 6px', fontSize: 12,
-                                        border: '1px solid #ddd', borderRadius: 3 }} />
+                                        border: '1px solid var(--border)', borderRadius: 3 }} />
                       </span>
                     )
                   })()}

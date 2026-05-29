@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 
 export function btnSmall(): CSSProperties {
   return { fontSize: 11, padding: '2px 8px', marginLeft: 4, cursor: 'pointer',
-           background: '#fff', border: '1px solid #ccc', borderRadius: 3 }
+           background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3 }
 }
 export function btnPrimary(): CSSProperties {
   return { fontSize: 12, padding: '4px 12px', marginRight: 4, cursor: 'pointer',
@@ -10,14 +10,14 @@ export function btnPrimary(): CSSProperties {
 }
 export function btnSecondary(): CSSProperties {
   return { fontSize: 12, padding: '4px 12px', cursor: 'pointer',
-           background: '#fff', border: '1px solid #ccc', borderRadius: 3 }
+           background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3 }
 }
 export function btnDanger(): CSSProperties {
   return { fontSize: 11, padding: '2px 8px', cursor: 'pointer',
-           background: '#fff', border: '1px solid #c0392b', color: '#c0392b', borderRadius: 3 }
+           background: 'var(--surface)', border: '1px solid #c0392b', color: '#c0392b', borderRadius: 3 }
 }
 export function btnAdd(small = false): CSSProperties {
   return { fontSize: small ? 11 : 13, padding: small ? '3px 10px' : '6px 16px',
-           cursor: 'pointer', background: '#f5f9ff', border: '1px dashed #3498db',
+           cursor: 'pointer', background: 'var(--primary-soft)', border: '1px dashed #3498db',
            color: '#3498db', borderRadius: 3 }
 }

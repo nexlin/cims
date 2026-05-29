@@ -6,7 +6,7 @@ import {
   LayoutDashboard,
   FlaskConical,
   Rocket,
-  FileText,
+  BookOpen,
 } from 'lucide-react'
 
 import type { RouteDef, RouteSection } from './nav-types'
@@ -73,7 +73,7 @@ const CORE_SECTIONS: RouteSection[] = [
   {
     key: 'docs',
     label: '문서',
-    icon: FileText,
+    icon: BookOpen,
     basePath: '/docs',
     defaultPath: '/docs',
     order: 90,
