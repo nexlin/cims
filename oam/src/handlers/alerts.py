@@ -31,10 +31,12 @@ def _path_parts(full_path: str):
 # descriptor 비었을 때만 하드코딩 fallback (전환 안전망).
 def _condition_text(rule: dict) -> str:
     chk = rule.get('check')
-    if chk == 'rtp_pct_gte':
+    if chk in ('rtp_pct_gte', 'disk_high'):
         return f"≥ {rule.get('threshold')}{rule.get('unit') or ''}"
     if chk == 'db_down':
         return '연결 끊김'
+    if chk == 'module_down':
+        return '프로세스 중단'
     return '응답 없음'
 
 
@@ -51,6 +53,7 @@ def _alert_rules(config: dict) -> dict:
             'condition': _condition_text(r),
             'threshold': r.get('threshold'),
             'unit': r.get('unit'),
+            'scope': r.get('scope') or 'service',
         })
     if not out:   # descriptor 비었을 때 fallback
         rtp_pct = int(config.get('AlertRtpThresholdPct', 80))

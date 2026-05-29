@@ -268,6 +268,36 @@ def jsonl_iter_recent(domain_path: str, key: str, days: int = 7):
             continue
 
 
+def jsonl_last(domain_path: str, key: str, days: int = 2):
+    """최근 일자 jsonl 의 마지막(=최신) 유효 레코드 1건 반환, 없으면 None.
+    파일 끝에서 일부만 seek-read(tail) 하므로 2s 케이던스 대용량 파일에도 저렴.
+    파일 내 레코드는 append 순서(시간순)라 마지막 줄이 최신."""
+    from datetime import timedelta
+    today = datetime.now().date()
+    for i in range(max(1, days)):
+        d = today - timedelta(days=i)
+        path = jsonl_path(domain_path, key, datetime(d.year, d.month, d.day))
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, 'rb') as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - 65536))
+                data = f.read().decode('utf-8', 'ignore')
+        except Exception:
+            continue
+        for line in reversed(data.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                return json.loads(line)
+            except Exception:
+                continue
+    return None
+
+
 def jsonl_purge_old(domain_path: str, retain_days: int) -> int:
     """domain 의 모든 key 에 대해 retain_days 보다 오래된 일별 jsonl 파일 삭제.
     레이아웃 {domain_path}/<key>/YYYY/MM/DD.jsonl 의 날짜를 경로에서 파싱.

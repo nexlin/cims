@@ -437,6 +437,64 @@ if __name__ == '__main__':
                 return ctx.get('rtp_pct', 0) >= int(rule.get('threshold', ALERT_RTP_THRESHOLD))
             return False
 
+        def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
+                             deps: list, proc_down_targets: set) -> list:
+            """scope='agent' 규칙을 한 agent 의 최신 metric 으로 평가.
+            반환: (type_key, is_open, msg_open, msg_close) 목록 (규칙당 0~N 개)."""
+            chk = rule.get('check')
+            host = agent.get('name') or str(agent.get('id'))
+            res = []
+            if chk == 'disk_high':
+                disk = metric.get('disk_pct')
+                if disk is None:
+                    return res
+                disk = round(float(disk), 1)
+                thr = int(rule.get('threshold', 90))
+                mo = (rule.get('msg_open') or '').format(host=host, pct=disk, threshold=thr)
+                mc = (rule.get('msg_close') or '').format(host=host, pct=disk, threshold=thr)
+                res.append((f"{rule['type']}:{host}", disk >= thr, mo, mc))
+            elif chk == 'module_down':
+                running = {(m.get('name') or '').lower()
+                           for m in (metric.get('modules') or []) if m.get('name')}
+                for dep in deps:
+                    if dep.get('agent_id') != agent.get('id'):
+                        continue
+                    if dep.get('status') != 'running':
+                        continue
+                    proc = (dep.get('process_name') or dep.get('package_name') or '').lower()
+                    # process_down 규칙으로 이미 평가되는 모듈(csp/cmp 등)은 제외 — 중복 alert 방지.
+                    if not proc or proc in proc_down_targets:
+                        continue
+                    mo = (rule.get('msg_open') or '').format(host=host, module=proc)
+                    mc = (rule.get('msg_close') or '').format(host=host, module=proc)
+                    res.append((f"{rule['type']}:{host}:{proc}", proc not in running, mo, mc))
+            return res
+
+        def _sweep_agent_alerts(agent_rules: list, proc_down_targets: set):
+            """per-agent 규칙(disk_high/module_down)을 online agent 별로 평가.
+            관측 대상에서 사라진(오프라인/metric 없음/배포 제거) 열린 alert 는 자동 close."""
+            from handlers.agents import _agent_load_all, _deploy_load_all, _metric_root
+            from services import file_store
+            agents = _agent_load_all(config)
+            deps = _deploy_load_all(config)
+            mroot = _metric_root(config)
+            active = set()
+            for ag in agents:
+                if ag.get('status') != 'online':
+                    continue
+                metric = file_store.jsonl_last(mroot, str(ag['id']))
+                if not metric:
+                    continue
+                for r in agent_rules:
+                    for typ, is_open, mo, mc in _eval_agent_rule(r, ag, metric, deps, proc_down_targets):
+                        active.add(typ)
+                        _transition(typ, is_open, r.get('severity', 'warning'), mo, mc)
+            # 이번 라운드에 평가되지 않은(=관측 불가) per-agent alert 는 close.
+            prefixes = tuple(r['type'] + ':' for r in agent_rules)
+            for typ in [k for k in list(_alert_open.keys()) if k.startswith(prefixes)]:
+                if typ not in active:
+                    _transition(typ, False, 'warning', '', f'{typ} 관측 종료')
+
         def _sweep_alerts():
             try:
                 csp = _get_csp_stats(config)
@@ -449,11 +507,17 @@ if __name__ == '__main__':
                 # alert 규칙 = service descriptor 구동 (없으면 하드코딩 fallback — 전환 안전망).
                 rules = service_registry.alert_rules(config)
                 if rules:
-                    for r in rules:
+                    svc_rules   = [r for r in rules if r.get('scope') != 'agent']
+                    agent_rules = [r for r in rules if r.get('scope') == 'agent']
+                    for r in svc_rules:
                         thr = r.get('threshold', ALERT_RTP_THRESHOLD)
                         mo = (r.get('msg_open') or r.get('type', '')).format(pct=pct, threshold=thr)
                         mc = (r.get('msg_close') or '').format(pct=pct, threshold=thr)
                         _transition(r['type'], _eval_alert_rule(r, ctx), r.get('severity', 'warning'), mo, mc)
+                    if agent_rules:
+                        proc_down_targets = {(r.get('target') or '').lower()
+                                             for r in svc_rules if r.get('check') == 'process_down'}
+                        _sweep_agent_alerts(agent_rules, proc_down_targets)
                 else:
                     _transition('csp_down', not bool(csp), 'critical', 'CSP 프로세스 응답 없음', 'CSP 응답 정상화')
                     _transition('cmp_down', not bool(cmp), 'critical', 'CMP 프로세스 응답 없음', 'CMP 응답 정상화')

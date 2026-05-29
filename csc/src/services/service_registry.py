@@ -27,6 +27,22 @@ _DOMAIN = 'services'
 _CORE_MODULES = {'agent', 'oam', 'console'}
 _CORE_CONTROLLABLE = {'console'}
 
+# 코어(서비스 무지) host 관측 alert 규칙 — 어떤 서비스 descriptor 와도 무관하게 항상 평가.
+# scope='agent' → sweeper 가 online agent 별로 평가 (서비스 단위 규칙과 분리).
+#   disk_high   : agent metric 의 disk_pct 가 threshold 이상.
+#   module_down : deployment(status=running) 인 모듈이 agent metric 의 실행 집합에 없음.
+#                 (csp/cmp 등 process_down 규칙으로 이미 평가되는 모듈은 sweeper 가 제외 — 중복 방지.)
+_CORE_ALERT_RULES = [
+    {'type': 'disk_high', 'severity': 'warning', 'check': 'disk_high', 'scope': 'agent',
+     'threshold': 90, 'unit': '%', 'metric': '디스크 사용률',
+     'msg_open': '{host} 디스크 사용률 {pct}% ({threshold}% 초과)',
+     'msg_close': '{host} 디스크 사용률 {pct}% (정상)'},
+    {'type': 'module_down', 'severity': 'critical', 'check': 'module_down', 'scope': 'agent',
+     'metric': '모듈 프로세스',
+     'msg_open': '{host} 모듈 {module} 프로세스 응답 없음',
+     'msg_close': '{host} 모듈 {module} 정상화'},
+]
+
 # seed descriptor 디렉토리 — 서비스 pack 이 자기 *.json 을 여기에 둔다 (CIMS = cims.json).
 # 코어 코드엔 CIMS 데이터가 없음 (5-6: 데이터로 추출). store 비면 이 JSON 들을 1회 주입.
 _SEED_DIR = os.path.join(os.path.dirname(__file__), 'service_descriptors_seed')
@@ -115,8 +131,8 @@ def controllable_modules(config: dict = None) -> set:
 
 
 def alert_rules(config: dict = None) -> list:
-    """alert sweeper / /alerts/rules 용 — 전 descriptor 의 alert_rules 병합."""
-    out = []
+    """alert sweeper / /alerts/rules 용 — 코어 host 규칙 + 전 descriptor 의 alert_rules 병합."""
+    out = list(_CORE_ALERT_RULES)
     for d in load_descriptors(config):
         out.extend(d.get('alert_rules') or [])
     return out
