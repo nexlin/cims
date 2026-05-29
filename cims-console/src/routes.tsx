@@ -1,26 +1,19 @@
-import type { ComponentType } from 'react'
-import type { LucideIcon } from 'lucide-react'
+// 콘솔 라우트 = [범용 OAM 코어 섹션] + [서비스 pack 기여 섹션] 합성.
+//   - CORE_SECTIONS: 대시보드 / 패키징 / 배포 / 문서 — 서비스 무지(범용 OAM).
+//   - SERVICE_MANIFESTS: 가입자/서비스/통계 등 — services/registry.ts 의 서비스 pack 이 기여.
+// nav 타입은 ./nav-types, CIMS 기여는 ./services/cims/manifest.
 import {
   LayoutDashboard,
-  Users,
-  Radio,
-  BarChart3,
   FlaskConical,
   Rocket,
   FileText,
 } from 'lucide-react'
 
+import type { RouteDef, RouteSection } from './nav-types'
+import { SERVICE_MANIFESTS } from './services/registry'
+
 import DashboardPage from './pages/DashboardPage'
 import AlertsPage from './pages/AlertsPage'
-import OrganizationsPage from './pages/OrganizationsPage'
-import MembersPage from './pages/MembersPage'
-import SubscriptionsPage from './pages/SubscriptionsPage'
-import PttGroupsPage from './pages/PttGroupsPage'
-import ServiceStatusPage from './pages/ServiceStatusPage'
-import VolteHistoryPage from './pages/VolteHistoryPage'
-import PttHistoryPage from './pages/PttHistoryPage'
-import StatsPage from './pages/StatsPage'
-import StatsMessagesPage from './pages/StatsMessagesPage'
 import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
@@ -29,88 +22,25 @@ import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
 
-export type RouteDef = {
-  path: string
-  title: string
-  component: ComponentType
-  adminOnly?: boolean
-  // SubTabs 에서 숨김 — 라우트 자체는 활성 (link 으로 진입 가능).
-  hidden?: boolean
-}
-
-export type RouteSection = {
-  key: string
-  label: string
-  icon: LucideIcon
-  basePath: string
-  defaultPath: string
-  routes: RouteDef[]
-  // VITE_CONSOLE_TARGET=prod 빌드에서 숨김 (배포 콘솔 = 운영자용. 패키징 메뉴 불필요)
-  prodHidden?: boolean
-}
+export type { RouteDef, RouteSection } from './nav-types'
 
 // 콘솔 타겟 — 'dev' (TB-Console / 검증용) | 'prod' (배포본 — 운영자용, 제한된 메뉴)
 // vite build 시 VITE_CONSOLE_TARGET=prod 환경변수 주입으로 결정.
 const CONSOLE_TARGET = ((import.meta as unknown as { env: Record<string, string> }).env?.VITE_CONSOLE_TARGET) || 'dev'
 export const IS_PROD_CONSOLE = CONSOLE_TARGET === 'prod'
 
-const volteStats = () => <StatsPage />
-const pttStats = () => <StatsPage />
-const sipStats = () => <StatsMessagesPage iface="sip" />
-const cmpStats = () => <StatsMessagesPage iface="cmp" />
-const cscStats = () => <StatsMessagesPage iface="csc" />
-const httpsStats = () => <StatsMessagesPage iface="https" />
-
-export const SECTIONS: RouteSection[] = [
+// ── 범용 OAM 코어 섹션 (서비스 무지) ──────────────────────────────
+const CORE_SECTIONS: RouteSection[] = [
   {
     key: 'dashboard',
     label: '대시보드',
     icon: LayoutDashboard,
     basePath: '/dashboard',
     defaultPath: '/dashboard',
+    order: 10,
     routes: [
       { path: '/dashboard',        title: '실시간',     component: DashboardPage },
       { path: '/dashboard/alerts', title: '알람 이력', component: AlertsPage },
-    ],
-  },
-  {
-    key: 'subscribers',
-    label: '가입자관리',
-    icon: Users,
-    basePath: '/subscribers',
-    defaultPath: '/subscribers/organizations',
-    routes: [
-      { path: '/subscribers/organizations', title: '조직', component: OrganizationsPage, adminOnly: true },
-      { path: '/subscribers/members',       title: '구성원', component: MembersPage, adminOnly: true },
-      { path: '/subscribers/numbers',       title: 'VoLTE/PTT 번호', component: SubscriptionsPage, adminOnly: true },
-      { path: '/subscribers/ptt-groups',    title: 'PTT 그룹', component: PttGroupsPage, adminOnly: true },
-    ],
-  },
-  {
-    key: 'service',
-    label: '서비스',
-    icon: Radio,
-    basePath: '/service',
-    defaultPath: '/service/status',
-    routes: [
-      { path: '/service/status',         title: '실시간 상태', component: ServiceStatusPage, adminOnly: true },
-      { path: '/service/history/volte',  title: 'VoLTE 이력', component: VolteHistoryPage, adminOnly: true },
-      { path: '/service/history/ptt',    title: 'PTT 이력',   component: PttHistoryPage, adminOnly: true },
-    ],
-  },
-  {
-    key: 'stats',
-    label: '통계',
-    icon: BarChart3,
-    basePath: '/stats',
-    defaultPath: '/stats/volte',
-    routes: [
-      { path: '/stats/volte', title: 'VoLTE', component: volteStats, adminOnly: true },
-      { path: '/stats/ptt',   title: 'PTT',   component: pttStats,   adminOnly: true },
-      { path: '/stats/sip',   title: 'SIP',   component: sipStats,   adminOnly: true },
-      { path: '/stats/cmp',   title: 'CMP',   component: cmpStats,   adminOnly: true },
-      { path: '/stats/csc',   title: 'CSC',   component: cscStats,   adminOnly: true },
-      { path: '/stats/https', title: 'HTTPS', component: httpsStats, adminOnly: true },
     ],
   },
   {
@@ -119,6 +49,7 @@ export const SECTIONS: RouteSection[] = [
     icon: FlaskConical,
     basePath: '/release',
     defaultPath: '/release/verify',
+    order: 60,
     prodHidden: true,                    // 배포 콘솔에서 숨김 (운영자는 패키징/검증 불필요)
     routes: [
       { path: '/release/verify',          title: '검증 실행',     component: VerificationV2Page, adminOnly: true },
@@ -132,6 +63,7 @@ export const SECTIONS: RouteSection[] = [
     icon: Rocket,
     basePath: '/deploy',
     defaultPath: '/deploy/servers',
+    order: 70,
     routes: [
       { path: '/deploy/servers',   title: '시스템/인프라',      component: ServersPage,    adminOnly: true },
       { path: '/deploy/packages',  title: '패키지',            component: PackagesPage,   adminOnly: true },
@@ -144,11 +76,20 @@ export const SECTIONS: RouteSection[] = [
     icon: FileText,
     basePath: '/docs',
     defaultPath: '/docs',
+    order: 90,
     routes: [
       { path: '/docs', title: '문서', component: DocsPage },
     ],
   },
 ]
+
+// 코어 + 서비스 pack 섹션 병합 → order 기준 정렬. 서비스 섹션엔 serviceId 태깅.
+const SERVICE_SECTIONS: RouteSection[] = SERVICE_MANIFESTS.flatMap(
+  m => m.sections.map(s => ({ ...s, serviceId: s.serviceId ?? m.id }))
+)
+
+export const SECTIONS: RouteSection[] = [...CORE_SECTIONS, ...SERVICE_SECTIONS]
+  .sort((a, b) => (a.order ?? 50) - (b.order ?? 50))
 
 // IS_PROD_CONSOLE 일 때 prodHidden=true 섹션 제거. dev 빌드는 모두 노출.
 export const VISIBLE_SECTIONS: RouteSection[] = SECTIONS.filter(s => !IS_PROD_CONSOLE || !s.prodHidden)
