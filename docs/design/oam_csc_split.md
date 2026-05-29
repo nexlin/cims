@@ -337,6 +337,18 @@ git impact:
 - 사용자 pip 명령 불필요 — vendor 의 fastapi/uvicorn/pymysql 등 자동 로드.
 - ctrl02 외부 접근 (10.0.1.46:4421) 은 firewall 정책 별개.
 
+**ctrl01 csc-0.0.6 upgrade** — ✅ **2026-05-29 완료**:
+- dep 11 oam-0.0.3 + dep 9 csc-0.0.6 upgrade (vendor 포함).
+- restart job → 옛 PID 3686055 → 새 PID 3713168 절체 (port 4421+4430 자동 인계).
+- API 검증: users 200, organizations 200.
+- TB-OAM (PID 3703368) 유지, 4서버 agent heartbeat 정상.
+
+**최종 운영 모델 (4서버 전체 vendor 화)**:
+- ctrl01 mgmt host: TB-OAM(4419 PID 3703368) + agent-managed CSC(4421+4430 PID 3713168, csc-0.0.6 vendor).
+- ctrl02: agent-managed CSC(4421+4430 PID 625296, csc-0.0.6 vendor).
+- media01/02: csp/cmp/isp deployment 만, 영향 없음.
+- private 환경 자족 — vendor 로 pip 의존 0.
+
 **systemd 영구화 안내**:
 - oam/SYSTEMD.md + 인라인 명령 제공 (사용자 sudo 필요).
 - cims-oam.service 등록 시 `pkill -f oam_app.py` + `systemctl enable --now cims-oam.service`.
