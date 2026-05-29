@@ -562,6 +562,7 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 
 
 async def _list_groups(config):
+    """Phase 4d2 N+1 fix — group 당 sub query 제거. 2 bulk query 로 단축."""
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -569,18 +570,24 @@ async def _list_groups(config):
                 "org_code, session_start, session_end FROM ptt_groups ORDER BY id"
             )
             groups = cur.fetchall()
+            if not groups:
+                return HandlerResult(status=200, body={'groups': []})
+            # 1 query for all members (group_id grouping)
+            cur.execute(
+                "SELECT group_id, user_id, priority FROM ptt_group_members "
+                "ORDER BY group_id, priority"
+            )
+            members_by_group: dict = {}
+            for m in cur.fetchall():
+                gid = m.pop('group_id')
+                members_by_group.setdefault(gid, []).append(m)
             for g in groups:
                 g['video_enabled'] = bool(g.get('video_enabled', 0))
                 g['encryption'] = bool(g.get('encryption', 0))
                 g['emergency_call'] = bool(g.get('emergency_call', 0))
                 if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
                 if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
-                cur.execute(
-                    "SELECT user_id, priority FROM ptt_group_members "
-                    "WHERE group_id=%s ORDER BY priority",
-                    (g['id'],)
-                )
-                g['members'] = cur.fetchall()
+                g['members'] = members_by_group.get(g['id'], [])
     return HandlerResult(status=200, body={'groups': groups})
 
 
