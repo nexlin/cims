@@ -15,6 +15,7 @@ import glob
 import json
 import socket
 import time
+import asyncio
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs, unquote
 from pathlib import PurePath
@@ -56,8 +57,8 @@ def _path_parts(full_path: str, base: str):
 #  UDP 통신 헬퍼 (CSP/CMP stats 수집)
 # ──────────────────────────────────────────────────────────────
 
-def _udp_request(ip: str, port: int, data: dict, timeout: float = 2.0) -> dict:
-    """UDP로 JSON 요청 보내고 응답 수신"""
+def _udp_request(ip: str, port: int, data: dict, timeout: float = 1.0) -> dict:
+    """UDP로 JSON 요청 보내고 응답 수신. timeout 단축(down 서버 fail-fast)."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(timeout)
@@ -70,13 +71,31 @@ def _udp_request(ip: str, port: int, data: dict, timeout: float = 2.0) -> dict:
         return {}
 
 
+# csp/cmp 상태 단기 캐시 — down 서버 probe 가 timeout 까지 블로킹하므로, 다중 위젯/스위퍼의
+# 반복 요청이 매번 probe 하지 않도록 TTL 캐시. (정상 서버는 즉시 응답하므로 영향 미미.)
+_STATS_CACHE: dict = {}
+_STATS_TTL = 3.0
+
+
+def _cached(key: str, producer):
+    now = time.time()
+    e = _STATS_CACHE.get(key)
+    if e and now - e[0] < _STATS_TTL:
+        return e[1]
+    v = producer()
+    _STATS_CACHE[key] = (now, v)
+    return v
+
+
 def _get_csp_stats(config: dict) -> dict:
-    """CSP에 stats 요청"""
-    notify = config.get('CspNotify', {})
-    ip = notify.get('Ip', '127.0.0.1')
-    port = int(notify.get('Port', 4421))
-    resp = _udp_request(ip, port, {"event": "STATS_REQUEST", "uri": "", "action": ""})
-    return resp if resp.get('status') == 'OK' else {}
+    """CSP에 stats 요청 (3s 캐시)."""
+    def probe():
+        notify = config.get('CspNotify', {})
+        ip = notify.get('Ip', '127.0.0.1')
+        port = int(notify.get('Port', 4421))
+        resp = _udp_request(ip, port, {"event": "STATS_REQUEST", "uri": "", "action": ""})
+        return resp if resp.get('status') == 'OK' else {}
+    return _cached('csp', probe)
 
 
 def _service_log_dir(config: dict) -> str:
@@ -111,17 +130,28 @@ def _load_active_states(config: dict, kind: str) -> list:
 
 
 def _get_cmp_stats(config: dict) -> dict:
-    """CMP에 stats 요청"""
-    # CMP 주소는 CSP config의 RtpRelay에서 가져오거나 직접 설정
-    cmp_ip = config.get('CmpIp', '127.0.0.1')
-    cmp_port = int(config.get('CmpPort', 9000))
-    resp = _udp_request(cmp_ip, cmp_port, {
-        "trans_id": int(time.time()) % 100000,
-        "payload": {"cmd": "STATS_REQUEST"}
-    })
-    if isinstance(resp.get('response'), dict):
-        return resp['response']
-    return {}
+    """CMP에 stats 요청 (3s 캐시)."""
+    def probe():
+        cmp_ip = config.get('CmpIp', '127.0.0.1')
+        cmp_port = int(config.get('CmpPort', 9000))
+        resp = _udp_request(cmp_ip, cmp_port, {
+            "trans_id": int(time.time()) % 100000,
+            "payload": {"cmd": "STATS_REQUEST"}
+        })
+        if isinstance(resp.get('response'), dict):
+            return resp['response']
+        return {}
+    return _cached('cmp', probe)
+
+
+def _check_db_health(config: dict) -> bool:
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
 
 
 # ──────────────────────────────────────────────────────────────
@@ -182,18 +212,13 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 # ──────────────────────────────────────────────────────────────
 
 async def _health(config: dict) -> HandlerResult:
-    csp = _get_csp_stats(config)
-    cmp = _get_cmp_stats(config)
-
-    # DB 체크
-    db_ok = False
-    try:
-        with _get_db(config) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                db_ok = True
-    except Exception:
-        pass
+    # csp/cmp UDP probe + DB 체크를 thread 로 병렬 — 이벤트 루프 비블로킹(down 서버 timeout 이
+    # 다른 요청을 막지 않도록). 캐시(_cached)와 함께 /stats/health 지연 대폭 감소.
+    csp, cmp, db_ok = await asyncio.gather(
+        asyncio.to_thread(_get_csp_stats, config),
+        asyncio.to_thread(_get_cmp_stats, config),
+        asyncio.to_thread(_check_db_health, config),
+    )
 
     result = {
         'health': {

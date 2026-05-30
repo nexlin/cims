@@ -22,11 +22,25 @@ function clone(l: PageLayout): PageLayout {
   return JSON.parse(JSON.stringify(l))
 }
 
+// 마지막으로 본 레이아웃을 localStorage 에 캐시 — 다음 진입 시 저장본을 즉시 렌더(seed flash·서버
+// 조회 지연 제거), 백그라운드로 서버에서 갱신. (저장 레이아웃 GET 이 느린 환경에서도 바로 표시.)
+const _cacheKey = (id: string) => `cims_layout_${id}`
+function _readCache(id: string): PageLayout | null {
+  try {
+    const s = localStorage.getItem(_cacheKey(id))
+    if (s) { const o = JSON.parse(s); if (o && Array.isArray(o.widgets)) return o }
+  } catch { /* ignore */ }
+  return null
+}
+function _writeCache(id: string, l: PageLayout) {
+  try { localStorage.setItem(_cacheKey(id), JSON.stringify(l)) } catch { /* ignore */ }
+}
+
 export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: PageLayout }) {
   const { user } = useAuth()
   const { show } = useToast()
   const isAdmin = user?.role === 'admin'
-  const [layout, setLayout] = useState<PageLayout>(seed)
+  const [layout, setLayout] = useState<PageLayout>(() => _readCache(layoutId) || seed)
   const [draft, setDraft] = useState<PageLayout | null>(null)
   const [addId, setAddId] = useState('')
   const [saving, setSaving] = useState(false)
@@ -34,8 +48,8 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
   useEffect(() => {
     let alive = true
     consoleApi.getLayout(layoutId)
-      .then(l => { if (alive && l && Array.isArray(l.widgets)) setLayout(l) })
-      .catch(() => { /* 404/오류 → seed 유지 */ })
+      .then(l => { if (alive && l && Array.isArray(l.widgets)) { setLayout(l); _writeCache(layoutId, l) } })
+      .catch(() => { /* 404/오류 → 캐시/seed 유지 */ })
     return () => { alive = false }
   }, [layoutId])
 
@@ -67,7 +81,8 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
     setSaving(true)
     try {
       const saved = await consoleApi.putLayout(layoutId, draft)
-      setLayout(saved && Array.isArray(saved.widgets) ? saved : draft)
+      const next = saved && Array.isArray(saved.widgets) ? saved : draft
+      setLayout(next); _writeCache(layoutId, next)
       setDraft(null); setAddId('')
       show('레이아웃 저장됨', 'ok')
     } catch (e) { show((e as Error).message, 'err') }
@@ -78,7 +93,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
     setSaving(true)
     try {
       await consoleApi.deleteLayout(layoutId)
-      setLayout(seed); setDraft(null); setAddId('')
+      setLayout(seed); _writeCache(layoutId, seed); setDraft(null); setAddId('')
       show('기본 레이아웃으로 초기화됨', 'ok')
     } catch (e) { show((e as Error).message, 'err') }
     finally { setSaving(false) }

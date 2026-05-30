@@ -13,9 +13,23 @@ function KpiCard({ label, value, unit, series }: { label: string; value: string 
   )
 }
 
+function KpiSkeleton() {
+  return (
+    <div style={{ display: 'flex', gap: 12 }}>
+      {['등록 사용자', 'VoIP 활성 호', 'PTT 그룹 세션', 'RTP 포트'].map(l => (
+        <div key={l} style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius)', padding: '16px 20px', textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{l}</div>
+          <div style={{ height: 28, background: 'var(--surface-2)', borderRadius: 4, opacity: 0.6 }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function KpiWidget() {
   const { data, history } = useSharedHealth()
-  if (!data) return null
+  if (!data) return <KpiSkeleton />   // 로딩 중 스켈레톤(공간 확보, 팝인 방지)
   const rtpPct = data.cmp.rtp_ports.total > 0
     ? Math.round(data.cmp.rtp_ports.used / data.cmp.rtp_ports.total * 100) : 0
   return (
