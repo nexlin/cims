@@ -11,6 +11,7 @@ import { healthDotsWidget } from './widgets/HealthDotsWidget'
 import { kpiWidget } from './widgets/KpiWidget'
 import { cspRolesWidget } from './widgets/CspRolesWidget'
 import { alertBannerWidget } from './widgets/AlertBannerWidget'
+import { activeAlarmsWidget } from './widgets/ActiveAlarmsWidget'
 import { activeVoipWidget } from './widgets/ActiveVoipWidget'
 import { activePttWidget } from './widgets/ActivePttWidget'
 import { CIMS_OUTPUT_WIDGETS } from './widgets/outputWidgets'
@@ -46,7 +47,7 @@ export const cimsManifest: ServiceManifest = {
   label: 'CIMS',
   widgets: [
     healthDotsWidget, kpiWidget, cspRolesWidget,
-    alertBannerWidget, activeVoipWidget, activePttWidget,
+    alertBannerWidget, activeAlarmsWidget, activeVoipWidget, activePttWidget,
     ...CIMS_OUTPUT_WIDGETS,
   ],
   sections: [

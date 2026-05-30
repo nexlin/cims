@@ -8,12 +8,13 @@ export const DASHBOARD_LAYOUT: PageLayout = {
   id: 'dashboard',
   title: '대시보드',
   widgets: [
-    { widgetId: 'cims.health-dots' },                  // 1단: 전체폭 (내부 3카드)
-    { widgetId: 'cims.kpi' },                           // 2단: 전체폭 (내부 4 KPI)
-    { widgetId: 'cims.alert-banner' },                  // (알람 시에만)
-    { widgetId: 'core.system-cards', w: 8 },            // 3단: 시스템(8) + CSP역할(4) 나란히
-    { widgetId: 'cims.csp-roles', w: 4 },
-    { widgetId: 'cims.active-voip', w: 6 },             // 4단: VoIP(6) + PTT(6) 나란히
+    { widgetId: 'cims.active-alarms' },                          // 1단: 활성 알람 (표준 알람 스트림) ★ 최상단
+    { widgetId: 'cims.health-dots' },                            // 2단: CSP/CMP/DB 상태 (전체폭 3카드)
+    { widgetId: 'cims.kpi' },                                    // 3단: 4 KPI (가입자/통화/PTT/RTP)
+    { widgetId: 'core.system-cards' },                           // 4단: 시스템/HA 카드 (전체폭)
+    { widgetId: 'cims.active-voip', w: 6 },                      // 5단: 활성 VoIP(½) + PTT(½)
     { widgetId: 'cims.active-ptt', w: 6 },
+    { widgetId: 'shape.time-bar', config: { source: 'cims.svc.volte' } },  // 6단: 주요 트래픽 추이(VoLTE)
   ],
+  // 과감히 제거: cims.alert-banner(→active-alarms 대체), cims.csp-roles(단순 역할 플래그).
 }
