@@ -135,29 +135,29 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       )}
 
       {/* 서비스 통계 — VoIP */}
-      {subTab === 'service' && svcData?.voip && !loading && (
+      {subTab === 'service' && svcData?.volte && !loading && (
         <>
           <div style={{ display: 'flex', gap: 12 }}>
-            <KpiCard label="호 시도" value={svcData.voip.total_attempts} unit="건" />
-            <KpiCard label="호 성공률" value={svcData.voip.success_rate} unit="%" />
-            <KpiCard label="평균 통화시간" value={fmtDuration(svcData.voip.avg_duration_sec)} />
-            <KpiCard label="성공" value={svcData.voip.total_success} unit="건" />
+            <KpiCard label="호 시도" value={svcData.volte.total_attempts} unit="건" />
+            <KpiCard label="호 성공률" value={svcData.volte.success_rate} unit="%" />
+            <KpiCard label="평균 통화시간" value={fmtDuration(svcData.volte.avg_duration_sec)} />
+            <KpiCard label="성공" value={svcData.volte.total_success} unit="건" />
           </div>
 
           <div className="panel" style={{ padding: 16 }}>
             <div style={{ fontWeight: 600, marginBottom: 12 }}>호 시도 수 추이</div>
             <BarChart
-              data={svcData.voip.buckets}
-              labelKey={svcData.voip.buckets[0]?.hour !== undefined ? 'hour' : 'date'}
+              data={svcData.volte.buckets}
+              labelKey={svcData.volte.buckets[0]?.hour !== undefined ? 'hour' : 'date'}
               valueKey="attempts" />
           </div>
 
-          {Object.keys(svcData.voip.end_reasons).length > 0 && (
+          {Object.keys(svcData.volte.end_reasons).length > 0 && (
             <div className="panel" style={{ padding: 16 }}>
               <div style={{ fontWeight: 600, marginBottom: 12 }}>종료 사유 분포</div>
-              {Object.entries(svcData.voip.end_reasons).sort((a, b) => b[1] - a[1]).map(([reason, cnt]) => {
-                const pct = svcData.voip!.total_attempts > 0
-                  ? Math.round(cnt / svcData.voip!.total_attempts * 100) : 0
+              {Object.entries(svcData.volte.end_reasons).sort((a, b) => b[1] - a[1]).map(([reason, cnt]) => {
+                const pct = svcData.volte!.total_attempts > 0
+                  ? Math.round(cnt / svcData.volte!.total_attempts * 100) : 0
                 return (
                   <div key={reason} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <div style={{ width: 80, fontSize: 13 }}>{reason || 'unknown'}</div>

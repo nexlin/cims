@@ -78,7 +78,7 @@ export interface ServiceStatsResponse {
   granularity: string
   from: string
   to: string
-  voip?: VoipStats
+  volte?: VoipStats   // 백엔드 응답 키는 'volte' (svc=volte/voip 둘 다 volte 키 반환)
   ptt?: PttStats
 }
 

@@ -49,12 +49,12 @@
       "endpoint": "/stats/service/volte", "query": ["date", "granularity"],
       "map": {
         "kpi": { "items": [
-          { "label": "호 시도", "path": "voip.total_attempts", "unit": "건" },
-          { "label": "호 성공률", "path": "voip.success_rate", "unit": "%" },
-          { "label": "평균 통화시간", "path": "voip.avg_duration_sec", "format": "duration" },
-          { "label": "성공", "path": "voip.total_success", "unit": "건" } ] },
-        "time-bar": { "from": "voip.buckets", "label": ["hour", "date"], "value": "attempts" },
-        "distribution": { "fromObject": "voip.end_reasons", "totalPath": "voip.total_attempts" } } },
+          { "label": "호 시도", "path": "volte.total_attempts", "unit": "건" },
+          { "label": "호 성공률", "path": "volte.success_rate", "unit": "%" },
+          { "label": "평균 통화시간", "path": "volte.avg_duration_sec", "format": "duration" },
+          { "label": "성공", "path": "volte.total_success", "unit": "건" } ] },
+        "time-bar": { "from": "volte.buckets", "label": ["hour", "date"], "value": "attempts" },
+        "distribution": { "fromObject": "volte.end_reasons", "totalPath": "volte.total_attempts" } } },
     { "id": "cims.svc.ptt", "label": "PTT 서비스", "shapes": ["kpi", "time-bar", "distribution"],
       "endpoint": "/stats/service/ptt", "query": ["date", "granularity"],
       "map": {
@@ -63,8 +63,8 @@
           { "label": "평균 세션 시간", "path": "ptt.avg_duration_sec", "format": "duration" } ] },
         "time-bar": { "from": "ptt.buckets", "label": ["hour", "date"], "value": "calls" },
         "distribution": { "fromObject": "ptt.by_group", "totalPath": "ptt.total_calls" } } },
-    { "id": "cims.msg-summary", "label": "메시지 합계 (VoIP+PTT)", "shapes": ["time-bar"],
-      "endpoint": "/stats/messages", "query": ["date", "granularity"],
-      "map": { "time-bar": { "from": "buckets", "label": ["hour"], "value": "total" } } }
+    { "id": "cims.msg-summary", "label": "메시지 합계 (전 interface)", "shapes": ["time-bar"],
+      "endpoint": "/stats/messages", "query": ["date"],
+      "map": { "time-bar": { "from": "buckets", "label": ["hour"], "value": "count" } } }
   ]
 }
