@@ -9,12 +9,12 @@ export const DASHBOARD_LAYOUT: PageLayout = {
   title: '대시보드',
   widgets: [
     { widgetId: 'cims.active-alarms' },                          // 1단: 활성 알람 (표준 알람 스트림) ★ 최상단
-    { widgetId: 'cims.health-dots' },                            // 2단: CSP/CMP/DB 상태 (전체폭 3카드)
+    { widgetId: 'core.system-topology' },                        // 2단: 시스템 형상(구성도+상태, 알람등급 반영)
     { widgetId: 'cims.kpi' },                                    // 3단: 4 KPI (가입자/통화/PTT/RTP)
-    { widgetId: 'core.system-cards' },                           // 4단: 시스템/HA 카드 (전체폭)
-    { widgetId: 'cims.active-voip', w: 6 },                      // 5단: 활성 VoIP(½) + PTT(½)
+    { widgetId: 'cims.active-voip', w: 6 },                      // 4단: 활성 VoIP(½) + PTT(½)
     { widgetId: 'cims.active-ptt', w: 6 },
-    { widgetId: 'shape.time-bar', config: { source: 'cims.svc.volte' } },  // 6단: 주요 트래픽 추이(VoLTE)
+    { widgetId: 'shape.time-bar', config: { source: 'cims.svc.volte' } },  // 5단: 주요 트래픽 추이(VoLTE)
   ],
-  // 과감히 제거: cims.alert-banner(→active-alarms 대체), cims.csp-roles(단순 역할 플래그).
+  // 과감히 제거: cims.health-dots(→형상 노드/모듈 상태로 흡수), cims.alert-banner(→active-alarms),
+  //            core.system-cards(→system-topology 로 대체), cims.csp-roles(단순 역할 플래그).
 }

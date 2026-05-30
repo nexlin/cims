@@ -4,11 +4,13 @@
 import type { WidgetDef } from './types'
 import { SERVICE_MANIFESTS } from '../services/registry'
 import { systemCardsWidget } from './core/SystemCardsWidget'
+import { systemTopologyWidget } from './core/SystemTopologyWidget'
 import { SHAPE_WIDGETS } from './shapes/ShapeWidget'
 
 // 코어(서비스 무지) 위젯 — 인프라/시스템 + 범용 shape 위젯(소스 선택형).
 const CORE_WIDGETS: WidgetDef[] = [
   systemCardsWidget,
+  systemTopologyWidget,
   ...SHAPE_WIDGETS,
 ]
 
