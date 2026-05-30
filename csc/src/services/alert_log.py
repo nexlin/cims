@@ -185,11 +185,13 @@ def compute_summary(service_log_dir: str, days: int = 7) -> dict:
         daily[d.isoformat()] = 0
 
     for ev in _iter_events_asc(service_log_dir, days):
+        action = ev.get('action')
+        if action == 'ack':       # 승인 이벤트는 통계 집계 대상 아님 (open/close 만)
+            continue
         ak = _akey(ev)
         if not ak:
             continue
         ts = ev.get('ts', '')
-        action = ev.get('action')
         src = ev.get('source') or {}
         entry = by_type.setdefault(ak, {
             'key': ak,

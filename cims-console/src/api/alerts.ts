@@ -14,7 +14,7 @@ export interface AlertEvent {
   type: string                  // 조건 클래스 (process_down/connection_lost/threshold_crossed)
   severity?: PerceivedSeverity   // 구 호환
   perceived_severity?: PerceivedSeverity
-  action: 'open' | 'close'
+  action: 'open' | 'close' | 'ack'
   message: string
   // 표준 필드 (P0)
   alarm_id?: string
@@ -24,6 +24,10 @@ export interface AlertEvent {
   source?: AlertSource
   effect?: string
   recommended_action?: string
+  // P1 ack 라이프사이클
+  ack_state?: 'acknowledged' | 'unacknowledged'
+  ack_user?: string
+  ack_time?: string
 }
 
 export interface AlertsResponse {
@@ -108,4 +112,5 @@ export const alertsApi = {
   },
   rules: () => api.get<AlertRulesResponse>('/alerts/rules'),
   catalog: () => api.get<{ catalog: AlarmCatalogItem[] }>('/alerts/catalog'),
+  ack: (alarmId: string) => api.post<{ ok: boolean; ack_user: string; ack_time: string }>('/alerts/ack', { alarm_id: alarmId }),
 }

@@ -109,6 +109,13 @@ function pairEvents(events: AlertEvent[]): AlertRow[] {
       const row: AlertRow = { ...ev }
       rows.push(row)
       openByKey[k] = row
+    } else if (ev.action === 'ack') {  // 승인 — 해당 open 행에 ack 상태 주석 (행 추가 X)
+      const open = openByKey[k]
+      if (open) {
+        open.ack_state = 'acknowledged'
+        open.ack_user = ev.ack_user
+        open.ack_time = ev.ts
+      }
     } else {  // close
       const open = openByKey[k]
       if (open) {
@@ -155,6 +162,12 @@ export default function AlertsPage() {
   useEffect(() => { load() }, [load])
   // 활성 알림 규칙 — days 와 무관, 1회 로드. 실패해도 이력 화면엔 영향 없음.
   useEffect(() => { alertsApi.rules().then(setRules).catch(() => setRules(null)) }, [])
+
+  const ackAlarm = useCallback(async (alarmId?: string) => {
+    if (!alarmId) return
+    try { await alertsApi.ack(alarmId); show('알람 승인됨', 'ok'); load() }
+    catch (e) { show((e as Error).message, 'err') }
+  }, [load, show])
 
   const rows = pairEvents(events).filter(r => showResolved || !r.resolved_at)
   const openCount = rows.filter(r => r.action === 'open' && !r.resolved_at).length
@@ -303,6 +316,7 @@ export default function AlertsPage() {
                 <th style={{ width: 150 }}>발생 시각</th>
                 <th style={{ width: 150 }}>해제 시각</th>
                 <th style={{ width: 90 }}>지속 시간</th>
+                <th style={{ width: 120 }}>승인</th>
               </tr>
             </thead>
             <tbody>
@@ -322,6 +336,13 @@ export default function AlertsPage() {
                     <td className="ts">{fmtTime(r.ts)}</td>
                     <td className="ts">{r.resolved_at ? fmtTime(r.resolved_at) : (r.action === 'open' ? '—' : fmtTime(r.ts))}</td>
                     <td>{r.duration || (isOpen ? '진행 중' : '-')}</td>
+                    <td>
+                      {r.ack_state === 'acknowledged'
+                        ? <span style={{ fontSize: 11, color: 'var(--success, #16a34a)' }} title={r.ack_time ? fmtTime(r.ack_time) : ''}>✓ {r.ack_user || '승인'}</span>
+                        : isOpen
+                          ? <button className="btn btn--sm btn--outline" onClick={() => ackAlarm(r.alarm_id)} disabled={!r.alarm_id}>승인</button>
+                          : <span style={{ color: 'var(--text-muted)' }}>-</span>}
+                    </td>
                   </tr>
                 )
               })}

@@ -82,14 +82,55 @@ def _service_log_dir(config: dict) -> str:
     return d
 
 
+def _parse_body(handler_args):
+    import json as _json
+    b = getattr(handler_args, 'body', None)
+    if isinstance(b, dict):
+        return b
+    if isinstance(b, (bytes, bytearray)):
+        try: return _json.loads(b.decode('utf-8'))
+        except Exception: return {}
+    if isinstance(b, str):
+        try: return _json.loads(b)
+        except Exception: return {}
+    return {}
+
+
 async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     config = kwargs.get('config', {})
-    if handler_args.method.upper() != 'GET':
-        return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
-
+    method = handler_args.method.upper()
     base = _service_log_dir(config)
     parts = _path_parts(handler_args.full_path)
     qs = parse_qs(urlparse(handler_args.full_path).query)
+
+    # 알람 승인(ack) — P1 라이프사이클. alarm_id 에 '/'(mo_instance) 있어 body 로 전달.
+    if method == 'POST' and parts and parts[0] == 'ack':
+        try:
+            body = _parse_body(handler_args)
+            aid = (body.get('alarm_id') or '').strip()
+            if not aid:
+                return HandlerResult(status=400, body={'error': 'alarm_id required'})
+            try:
+                from handlers.auth import extract_token
+                user = (extract_token(handler_args) or {}).get('login_id') or 'operator'
+            except Exception:
+                user = 'operator'
+            from datetime import datetime as _dt
+            akey = aid.rsplit('@', 1)[0]            # code@mo_instance
+            code = akey.split('@', 1)[0]
+            mo = akey.split('@', 1)[1] if '@' in akey else ''
+            ts = _dt.now().isoformat(timespec='seconds')
+            alert_log.record_event(base, {
+                'ts': ts, 'alarm_id': aid, 'code': code, 'action': 'ack',
+                'ack_state': 'acknowledged', 'ack_user': user, 'ack_time': ts,
+                'source': {'mo_instance': mo}, 'message': f'{user} 승인',
+            })
+            return HandlerResult(status=200, body={'ok': True, 'alarm_id': aid, 'ack_user': user, 'ack_time': ts})
+        except Exception as e:
+            return HandlerResult(status=500, body={'error': str(e)})
+
+    if method != 'GET':
+        return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
     def qp(name, default=None):
         vals = qs.get(name)
