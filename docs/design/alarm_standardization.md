@@ -54,23 +54,24 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 ```jsonc
 {
-  "type": "csp_down",                  // 알람 식별자 슬러그 (유지, code 와 1:1)
-  "code": "CIMS-PRC-001",              // 알람 정의 코드(카탈로그) — §3.4
+  "type": "process_down",              // 알람 **클래스** 슬러그 (프로세스명 박지 않음 — §3.5)
+  "code": "CIMS-PRC-001",              // 알람 클래스 코드(카탈로그) — §3.4
   "perceived_severity": "critical",    // critical|major|minor|warning|indeterminate  (기존 severity 대체)
   "event_type": "processingError",     // communications|qualityOfService|processingError|equipment|environmental
   "probable_cause": "softwareError",   // X.733 Annex 코드
   "mo_class": "software",              // managedObject class: software|service|equipment|host|network
-  "check": "process_down", "target": "csp",
+  "check": "process_down", "target": "csp",   // 무엇을 점검할지(탐지) — 어느 프로세스는 여기서, 알람 type 엔 안 박음
+  "mo_instance": "cims/csp",           // (선택) 소스 instance 명시 — 없으면 target/host 로 런타임 합성
   "threshold": null, "unit": null,
-  "metric": "CSP 프로세스",
-  "msg_open": "CSP 프로세스 응답 없음",   // → specificProblem
-  "msg_close": "CSP 응답 정상화",
+  "metric": "프로세스 가용성",
+  "msg_open": "{mo} 프로세스 응답 없음",   // → specificProblem ({mo}=mo_instance)
+  "msg_close": "{mo} 정상화",
   "scope": "service"                   // service|agent (유지)
 }
 ```
-- `perceived_severity` 가 기존 `severity` 를 대체. **하위호환**: `severity` 만 있으면 그대로 perceived_severity 로 승격(critical/warning 은 표준 값 그대로 유효), 신규로 major/minor/indeterminate 사용 가능.
-- `code` 미지정 시 정규화 헬퍼가 `type`→코드 매핑(또는 `CIMS-GEN-<seq>`)으로 보강.
-- managedObject **instance** 는 런타임 합성(§3.4): service 규칙 = `cims/<target>` (예 `cims/csp`), agent 규칙 = `<host>/<module|disk|rtp>`.
+- **type/code 는 알람 클래스** (process_down). 어느 프로세스인지는 `source.mo_instance`(§3.4/§3.5). `csp_down`/`cmp_down` 처럼 프로세스명을 type 에 박지 않음.
+- `perceived_severity` 가 기존 `severity` 를 대체. **하위호환**: `severity` 만 있으면 perceived_severity 로 승격(critical/warning 표준 값 유효). 신규 major/minor/indeterminate 가능.
+- managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4): service 규칙 = `cims/<target>`, agent 규칙 = `<host>/<module|disk|rtp>`.
 
 ### 3.2 이벤트 레코드(alert_log) 확장
 
@@ -98,20 +99,21 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 ### 3.3 현재 CIMS 알람 → 표준 매핑 (확정)
 
-| code | type | perceivedSeverity | eventType | probableCause | mo_class | managedObject(instance) |
-|---|---|---|---|---|---|---|
-| `CIMS-PRC-001` | `csp_down` | critical | processingError | softwareError | software | cims/csp |
-| `CIMS-PRC-002` | `cmp_down` | critical | processingError | softwareError | software | cims/cmp |
-| `CIMS-PRC-010` | `module_down` | critical | processingError | softwareError | software | `<host>/<module>` |
-| `CIMS-PRC-020` | `db_down` | critical | processingError | underlyingResourceUnavailable | service | cims/db |
-| `CIMS-QOS-001` | `rtp_high` | warning | qualityOfService | thresholdCrossed (resourceAtOrNearingCapacity) | service | cims/rtp_ports |
-| `CIMS-QOS-010` | `disk_high` | warning | qualityOfService | storageCapacityProblem | host | `<host>/disk` |
+알람 **클래스**(code/type) 6개 → 4개로 정규화. 어느 프로세스/호스트인지는 `source.mo_instance` (type 아님).
 
-> 운영 정책에 따라 rtp_high/disk_high 는 임계 단계별 minor→major 승격 가능(예: 80% warning, 90% minor, 95% major). 규칙을 임계별로 분리하거나 다단 threshold 확장(P1 후속).
+| code | type(클래스) | perceivedSeverity | eventType | probableCause | mo_class | mo_instance 예시 | detected_by |
+|---|---|---|---|---|---|---|---|
+| `CIMS-PRC-001` | `process_down` | critical | processingError | softwareError | software | `cims/csp` · `cims/cmp` · `<host>/<module>` | oam(중앙 stats) / agent:<host>(pgrep) |
+| `CIMS-PRC-020` | `db_down` | critical | processingError | underlyingResourceUnavailable | service | `cims/db` | oam |
+| `CIMS-QOS-001` | `rtp_high` | warning | qualityOfService | thresholdCrossed (resourceAtOrNearingCapacity) | service | `cims/rtp_ports` | oam |
+| `CIMS-QOS-010` | `disk_high` | warning | qualityOfService | storageCapacityProblem | host | `<host>/disk` | agent:<host> |
+
+> `csp_down`/`cmp_down`/`module_down` 3개가 모두 **`process_down`(CIMS-PRC-001) 한 클래스**로 통합 — 인스턴스(csp/cmp/모듈)는 source 로 구분, 탐지 방식(중앙 응답성 vs 호스트 프로세스)은 `detected_by` 로 구분. 중복 발화 방지(agent 의 module 점검에서 중앙 점검 대상 csp/cmp 제외)는 구현에 유지.
+> rtp_high/disk_high 는 임계 단계별 minor→major 승격 가능(예: 80% warning/90% minor/95% major). 다단 threshold 확장(P1 후속).
 
 ### 3.4 알람 코드 체계 · 발생 소스 · occurrence id
 
-**(a) 알람 코드 (정의 카탈로그 식별자)** — `type` 슬러그와 1:1, 안정적·불변. 운영 alarm dictionary / 상위 NMS 연동 키.
+**(a) 알람 코드 (클래스 카탈로그 식별자)** — `type`(클래스) 슬러그와 1:1, 안정적·불변. 운영 alarm dictionary / 상위 NMS 연동 키.
 포맷 `**<SERVICE>-<DOMAIN>-<SEQ>**`:
 - `SERVICE` = 서비스 pack 네임스페이스 (CIMS, 타 서비스는 자기 prefix → 코드 충돌 없음).
 - `DOMAIN` = eventType 약어: **PRC**(processingError) · **COM**(communications) · **QOS**(qualityOfService) · **EQP**(equipment) · **ENV**(environmental).
@@ -128,9 +130,17 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 - `alarm_id` = `f"{code}@{mo_instance}@{open_epoch}"` — open 시 생성, close/ack 가 동일 alarm_id 참조. 재발(clear 후 재open)은 새 alarm_id.
 - 현재 `_alert_open` 의 키(`type` / `type:host:module`)가 이미 `(code, mo_instance)` 와 동형 → 이행 시 키를 `code@mo_instance` 로 정규화하고 open_epoch 만 부가하면 alarm_id 완성.
 
+### 3.5 원칙 — 알람 type 은 "클래스", 인스턴스는 source (★ 핵심)
+
+- ❌ **안티패턴**: `csp_down` / `cmp_down` / `isp_down` … 처럼 프로세스명을 type 에 박기 → 프로세스 수만큼 type/code 폭증, generic `module_down` 과 중복, 카탈로그 비대.
+- ✅ **표준(X.733)**: 알람 `type`/`code` = **클래스**(예: `process_down`), "어느 프로세스/호스트"는 **`source.mo_instance`**. 동일 클래스의 서로 다른 인스턴스는 `(code, mo_instance)` 로 구분되는 별개 활성 알람.
+- 중앙(oam) 점검 대상 프로세스가 여러 개면: 같은 `code`(process_down)의 rule 을 `target` 별로 두거나(권장, mo_instance 명시), 한 rule 에 `targets: ["csp","cmp"]` 다중 지정 → sweeper 가 target 별로 펼쳐 source 부여.
+- 메시지는 `{mo}`(mo_instance) 치환으로 인스턴스 표기(예 "cims/csp 프로세스 응답 없음").
+- **하위호환**: 기존 이벤트의 `type:"csp_down"` 은 read 시 `type=process_down, source.mo_instance=cims/csp` 로 매핑(정규화 헬퍼). 기존 `module_down` per-agent 도 동일 클래스로 흡수.
+
 ## 4. 전파 경로(구현 시 변경 지점)
 
-1. **규칙 데이터**: `cims.json` + `_CORE_ALERT_RULES` 에 `code`/event_type/probable_cause/mo_class 추가, severity→perceived_severity.
+1. **규칙 데이터**: `cims.json` + `_CORE_ALERT_RULES` 에 `code`/event_type/probable_cause/mo_class 추가, severity→perceived_severity. **type 을 클래스로 통합** (csp_down/cmp_down/module_down → `process_down`, target/scope 로 인스턴스 구분, mo_instance 명시).
 2. **sweeper** (`oam_app.py`): `_transition` 키를 `code@mo_instance` 로 정규화 + open 시 `alarm_id` 생성. `_emit` 가 code/표준필드/`source`(mo_class·mo_instance·detected_by) 동반 기록.
 3. **alert_log** (`alert_log.py`): record/read 가 신규 필드 통과(free-form JSONL 호환). open↔close 상관을 `alarm_id` 기반으로(현 type 페어링 대체). summary 에 event_type/severity 분포 추가(선택).
 4. **API** (`alerts.py`): `/alerts` 이벤트에 code/source/alarm_id 노출, `/rules` 에 code/event_type/probable_cause/severity(6), **신규 `GET /alerts/catalog`**(코드 카탈로그).
@@ -148,6 +158,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 - 이벤트 JSONL 은 free-form → 신규 필드는 누적만, 기존 reader 무영향.
 - `severity` 읽는 곳은 `perceived_severity ?? severity` 로 폴백 → 점진 전환.
 - 규칙은 `event_type`/`probable_cause` 누락 시 기본값(processingError/—) 부여하는 정규화 헬퍼로 흡수(데이터 미보강 descriptor 안전).
+- 옛 per-process type(`csp_down`/`cmp_down`/`module_down`)은 read 시 `process_down` 클래스 + `source.mo_instance` 로 매핑하는 alias 표로 흡수 → 기존 이력/배너 무중단.
 
 ## 관련
 - `console_platform.md` (Service Descriptor: modules/alert_rules/data_sources) · `features/monitoring.md`
