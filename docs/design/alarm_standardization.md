@@ -68,8 +68,8 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   "metric": "프로세스 가용성",
   "msg_open": "{mo} 프로세스 응답 없음",   // → specificProblem ({mo}=mo_instance)
   "msg_close": "{mo} 정상화",
-  "effect": "해당 서비스 호처리 중단",      // (선택) 영향 — 운영 runbook (Clearwater 벤치마크 §7.1)
-  "action": "프로세스 재기동 / 로그 확인",  // (선택) 권장 조치
+  "effect": "해당 서비스 호처리 중단",            // (선택) 영향 — 운영 runbook (Clearwater 벤치마크 §7.1)
+  "recommended_action": "프로세스 재기동 / 로그 확인",  // (선택) 권장 조치 (이벤트의 action=open/close 와 구분)
   "scope": "service"                   // service|agent (유지)
 }
 ```
@@ -179,7 +179,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 ## 5. 단계 계획
 
 - **P0 — 분류 체계 + 코드/소스** (본 설계의 §3.1~3.4): `code`(카탈로그) · perceived_severity(6) · event_type(5) · probable_cause · source(mo_class/mo_instance/detected_by) · `alarm_id`(occurrence) · (선택) `effect`/`action`(runbook, §7.1). 규칙/이벤트/API(+/catalog)/UI/폼 전파. 하위호환.
-- **P1 — 라이프사이클**: ackState/ackTime/ackUser + clearTime 명시 + `PATCH /alerts/{alarm_id}/ack` API + UI 승인 버튼. 운영 감사추적.
+- **P1 — 라이프사이클**: ackState/ackTime/ackUser + clearTime 명시 + `POST /alerts/ack {alarm_id}` API + UI 승인 버튼. 운영 감사추적.
 - **P2 — 상관/연동**: correlatedNotifications(연관 알람, alarm_id 참조), **SNMP/NMS northbound**(§7.2, RFC3877 alarmModel ↔ code 매핑 + 32.111 IRP / VES alarmCondition 매핑).
 
 ## 6. 하위호환·이행
