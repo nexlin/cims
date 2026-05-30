@@ -5,6 +5,18 @@ import { useState, useEffect, useCallback } from 'react'
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { serviceDescriptorsApi, type ServiceDescriptor } from '../api/serviceDescriptors'
+import type { DataSourceSpec } from '../widgets/shapes/dataSourceSpec'
+
+const DS_TEMPLATE = `{
+  "id": "cims.svc.example",
+  "label": "예시 소스",
+  "shapes": ["time-bar"],
+  "endpoint": "/stats/messages/sip",
+  "query": ["date"],
+  "map": {
+    "time-bar": { "from": "buckets", "label": ["hour"], "value": "count" }
+  }
+}`
 
 const NEW_TEMPLATE = `{
   "id": "myservice",
@@ -41,10 +53,58 @@ function JsonEditor({ initial, title, onClose, onSaved }: {
   return (
     <Modal title={title} onClose={onClose} width={640}>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-        modules[].name/port/proto/controllable · alert_rules[].type/severity/check(process_down·db_down·rtp_pct_gte)/threshold
+        modules[].name/port/proto/controllable · alert_rules[].type/severity/check/threshold · data_sources[].id/label/shapes/endpoint/map
       </div>
       <textarea value={text} onChange={e => setText(e.target.value)} spellCheck={false}
         style={{ width: '100%', height: 360, fontFamily: 'Consolas, monospace', fontSize: 12,
+                 padding: 10, border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                 background: 'var(--bg-soft)', color: 'var(--text)', resize: 'vertical' }} />
+      <div className="modal-footer">
+        <button className="btn btn--outline" onClick={onClose} disabled={saving}>취소</button>
+        <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>
+      </div>
+    </Modal>
+  )
+}
+
+// 데이터 소스 1건 편집기 — descriptor 의 data_sources[index] 를 JSON 으로 추가/수정.
+// (매핑 스펙이 shape별 중첩이라 단일 소스 JSON 편집이 폼보다 실용적.) 저장 시 descriptor 통째 PUT.
+function DataSourceEditor({ svc, index, onClose, onSaved }: {
+  svc: ServiceDescriptor; index: number | null; onClose: () => void; onSaved: () => void
+}) {
+  const { show } = useToast()
+  const existing = index != null ? (svc.data_sources || [])[index] : null
+  const [text, setText] = useState(existing ? JSON.stringify(existing, null, 2) : DS_TEMPLATE)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    let src: DataSourceSpec
+    try { src = JSON.parse(text) }
+    catch (e) { show(`JSON 파싱 오류: ${(e as Error).message}`, 'err'); return }
+    if (!src.id || !Array.isArray(src.shapes) || !src.shapes.length || !src.endpoint) {
+      show('id · shapes[] · endpoint 가 필요합니다', 'err'); return
+    }
+    const sources = [...(svc.data_sources || [])]
+    // id 중복 체크 (자기 자신 제외).
+    const dupAt = sources.findIndex(s => s.id === src.id)
+    if (dupAt >= 0 && dupAt !== index) { show(`id 중복: ${src.id}`, 'err'); return }
+    if (index != null) sources[index] = src; else sources.push(src)
+    setSaving(true)
+    try {
+      await serviceDescriptorsApi.put(svc.id, { ...svc, data_sources: sources })
+      show('데이터 소스 저장됨', 'ok'); onSaved(); onClose()
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={index != null ? `데이터 소스 편집 — ${existing?.id}` : '데이터 소스 추가'} onClose={onClose} width={640}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
+        <b>shapes</b>: time-bar · kpi · distribution · table (지원 shape) · <b>endpoint</b> + <b>query</b>(date/granularity)<br />
+        <b>map</b>[shape]: <code>from</code>(배열 중첩경로) · <code>label</code>(필드후보 배열) · <code>value</code> · <code>fromObject</code>(dict→행/항목) · <code>totalPath</code> · <code>path</code>(KPI) · <code>format</code>(duration)
+      </div>
+      <textarea value={text} onChange={e => setText(e.target.value)} spellCheck={false}
+        style={{ width: '100%', height: 320, fontFamily: 'Consolas, monospace', fontSize: 12,
                  padding: 10, border: '1px solid var(--border)', borderRadius: 'var(--radius)',
                  background: 'var(--bg-soft)', color: 'var(--text)', resize: 'vertical' }} />
       <div className="modal-footer">
@@ -60,6 +120,7 @@ export default function ServiceDescriptorsPage() {
   const [list, setList] = useState<ServiceDescriptor[]>([])
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<{ title: string; json: string } | null>(null)
+  const [dsEdit, setDsEdit] = useState<{ svc: ServiceDescriptor; index: number | null } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,6 +133,14 @@ export default function ServiceDescriptorsPage() {
   const remove = async (id: string) => {
     if (!confirm(`서비스 정의 '${id}' 를 삭제할까요?\n(코어가 이 서비스의 모듈/알람 규칙을 더 이상 인식하지 않습니다)`)) return
     try { await serviceDescriptorsApi.remove(id); show('삭제됨', 'ok'); load() }
+    catch (e) { show((e as Error).message, 'err') }
+  }
+
+  const removeDataSource = async (svc: ServiceDescriptor, index: number) => {
+    const ds = (svc.data_sources || [])[index]
+    if (!confirm(`데이터 소스 '${ds?.id}' 를 삭제할까요?`)) return
+    const sources = (svc.data_sources || []).filter((_, i) => i !== index)
+    try { await serviceDescriptorsApi.put(svc.id, { ...svc, data_sources: sources }); show('삭제됨', 'ok'); load() }
     catch (e) { show((e as Error).message, 'err') }
   }
 
@@ -150,12 +219,51 @@ export default function ServiceDescriptorsPage() {
               )}
             </div>
           </div>
+
+          {/* 데이터 소스 — shape 위젯(차트/표/KPI/분포)이 선택하는 소스 카탈로그 */}
+          <div style={{ padding: '0 16px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                데이터 소스 ({(svc.data_sources || []).length})
+              </span>
+              <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }}
+                      onClick={() => setDsEdit({ svc, index: null })}>＋ 데이터 소스</button>
+            </div>
+            {(svc.data_sources || []).length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                — (shape 위젯에 노출할 차트/표/KPI/분포 데이터 소스를 등록)
+              </div>
+            ) : (
+              <table className="data-table" style={{ margin: 0 }}>
+                <thead><tr><th>id</th><th>이름</th><th>shapes</th><th>endpoint</th><th style={{ width: 90 }}></th></tr></thead>
+                <tbody>
+                  {(svc.data_sources || []).map((d, i) => (
+                    <tr key={d.id}>
+                      <td><code style={{ fontSize: 11 }}>{d.id}</code></td>
+                      <td>{d.label}</td>
+                      <td style={{ fontSize: 11 }}>{(d.shapes || []).join(', ')}</td>
+                      <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.endpoint}</td>
+                      <td style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn btn--sm btn--outline" onClick={() => setDsEdit({ svc, index: i })}>편집</button>
+                        <button className="btn btn--sm btn--outline" style={{ color: 'var(--danger)' }}
+                                onClick={() => removeDataSource(svc, i)}>✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       ))}
 
       {editing && (
         <JsonEditor title={editing.title} initial={editing.json}
                     onClose={() => setEditing(null)} onSaved={load} />
+      )}
+      {dsEdit && (
+        <DataSourceEditor svc={dsEdit.svc} index={dsEdit.index}
+                          onClose={() => setDsEdit(null)} onSaved={load} />
       )}
     </div>
   )
