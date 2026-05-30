@@ -8,8 +8,9 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 - **3GPP TS 32.111-2** — *Telecommunication management; Fault Management; Part 2: Alarm Integration
   Reference Point (IRP): Information Service (IS).* IMS 포함 3GPP 망요소(NE/EM)가 관리객체의 알람을
   Manager(NMS)로 보고하는 인터페이스. CIMS 가 향후 상위 NMS 와 연동할 때의 정합 기준.
-- **ITU-T X.733** — *Systems Management: Alarm reporting function.* 위 IRP 가 기반하는 알람 속성 모델.
-- (참고) **ITU-T M.3100 / X.736** — 관리객체 모델 / 보안 알람 분류 보강.
+- **ITU-T X.733** — *Systems Management: Alarm reporting function.* 위 IRP 가 기반하는 알람(장애) 속성 모델.
+- **ITU-T X.730 / X.731** — *Object Management / State Management.* 정상 동작 통지(객체 생성·삭제, **stateChangeNotification**) — 알람과 구분되는 **이벤트** 규격(§3.6).
+- (참고) **ITU-T M.3100 / X.736 / X.740** — 관리객체 모델 / 보안 알람 / 보안감사(audit) 통지.
 
 ### 1.1 X.733 핵심 알람 속성
 
@@ -99,17 +100,18 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 ### 3.3 현재 CIMS 알람 → 표준 매핑 (확정)
 
-알람 **클래스**(code/type) 6개 → 4개로 정규화. 어느 프로세스/호스트인지는 `source.mo_instance` (type 아님).
+기존 6개(csp_down/cmp_down/module_down/db_down/rtp_high/disk_high) → **조건 클래스 3개**로 정규화.
+어느 프로세스/리소스/호스트인지는 `source.mo_instance`, 심각도/임계/원인은 **rule 속성**(클래스 정체성 아님).
 
-| code | type(클래스) | perceivedSeverity | eventType | probableCause | mo_class | mo_instance 예시 | detected_by |
+| code | type(클래스) | eventType | probableCause (rule별) | mo_class | mo_instance 예시 | severity(rule별) | detected_by |
 |---|---|---|---|---|---|---|---|
-| `CIMS-PRC-001` | `process_down` | critical | processingError | softwareError | software | `cims/csp` · `cims/cmp` · `<host>/<module>` | oam(중앙 stats) / agent:<host>(pgrep) |
-| `CIMS-PRC-020` | `db_down` | critical | processingError | underlyingResourceUnavailable | service | `cims/db` | oam |
-| `CIMS-QOS-001` | `rtp_high` | warning | qualityOfService | thresholdCrossed (resourceAtOrNearingCapacity) | service | `cims/rtp_ports` | oam |
-| `CIMS-QOS-010` | `disk_high` | warning | qualityOfService | storageCapacityProblem | host | `<host>/disk` | agent:<host> |
+| `CIMS-PRC-001` | `process_down` | processingError | softwareError | software | `cims/csp` · `cims/cmp` · `<host>/<module>` | critical | oam / agent:<host> |
+| `CIMS-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `cims/db` (향후 `cims/trunk/<id>`·peer) | critical | oam |
+| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` (향후 `<host>/cpu`·`mem`·`<iface>`) | warning(minor/major 승격) | oam / agent:<host> |
 
-> `csp_down`/`cmp_down`/`module_down` 3개가 모두 **`process_down`(CIMS-PRC-001) 한 클래스**로 통합 — 인스턴스(csp/cmp/모듈)는 source 로 구분, 탐지 방식(중앙 응답성 vs 호스트 프로세스)은 `detected_by` 로 구분. 중복 발화 방지(agent 의 module 점검에서 중앙 점검 대상 csp/cmp 제외)는 구현에 유지.
-> rtp_high/disk_high 는 임계 단계별 minor→major 승격 가능(예: 80% warning/90% minor/95% major). 다단 threshold 확장(P1 후속).
+> **통합 원리**(§3.5): 같은 *조건*은 한 클래스. `csp_down`+`cmp_down`+`module_down`→`process_down` / `rtp_high`+`disk_high`(+cpu/mem/network)→`threshold_crossed` / `db_down`→`connection_lost`. 어느 리소스인지는 **source**, 임계값·단위·probableCause·severity 는 **rule** 이 보유 → 새 리소스(cpu/mem/network) 추가 시 **type/code 신설 없이 rule 만 추가**.
+> 같은 클래스라도 rule 별로 probableCause/severity 가 다를 수 있음(disk→storageCapacityProblem/warning, rtp→resourceAtOrNearingCapacity/warning, 단계별 minor→major).
+> 중복 발화 방지(agent module 점검에서 중앙 점검 대상 csp/cmp 제외)는 구현에 유지.
 
 ### 3.4 알람 코드 체계 · 발생 소스 · occurrence id
 
@@ -117,8 +119,8 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 포맷 `**<SERVICE>-<DOMAIN>-<SEQ>**`:
 - `SERVICE` = 서비스 pack 네임스페이스 (CIMS, 타 서비스는 자기 prefix → 코드 충돌 없음).
 - `DOMAIN` = eventType 약어: **PRC**(processingError) · **COM**(communications) · **QOS**(qualityOfService) · **EQP**(equipment) · **ENV**(environmental).
-- `SEQ` = 3자리. 001~009 핵심 서비스 프로세스, 010~ 일반/per-instance, 020~ 의존 리소스 등(서비스가 자유 할당, 카탈로그에 고정).
-- 전 알람 정의의 코드 카탈로그 = descriptor 의 alert_rules 집합(코어 + 서비스). `GET /alerts/catalog`(신규, P0)로 노출 가능.
+- `SEQ` = 3자리, **조건 클래스당 1개**(객체 인스턴스마다 부여 ❌ — 인스턴스는 source). 예: PRC-001 process_down, COM-001 connection_lost, QOS-001 threshold_crossed. 같은 도메인 내 새 *조건* 클래스가 생기면 002,003…
+- 코드 카탈로그 = descriptor 의 alert_rules 클래스 집합(코어 + 서비스). `GET /alerts/catalog`(신규, P0)로 노출.
 
 **(b) 발생 소스 (managedObject + detected-by)** — 알람이 "무엇에서/어디서" 났는지 표준화.
 - `mo_class`: software | service | equipment | host | network (managedObjectClass).
@@ -130,13 +132,37 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 - `alarm_id` = `f"{code}@{mo_instance}@{open_epoch}"` — open 시 생성, close/ack 가 동일 alarm_id 참조. 재발(clear 후 재open)은 새 alarm_id.
 - 현재 `_alert_open` 의 키(`type` / `type:host:module`)가 이미 `(code, mo_instance)` 와 동형 → 이행 시 키를 `code@mo_instance` 로 정규화하고 open_epoch 만 부가하면 alarm_id 완성.
 
-### 3.5 원칙 — 알람 type 은 "클래스", 인스턴스는 source (★ 핵심)
+### 3.5 원칙 — 알람 type 은 "조건 클래스", 객체/리소스/임계는 그 밖 (★ 핵심)
 
-- ❌ **안티패턴**: `csp_down` / `cmp_down` / `isp_down` … 처럼 프로세스명을 type 에 박기 → 프로세스 수만큼 type/code 폭증, generic `module_down` 과 중복, 카탈로그 비대.
-- ✅ **표준(X.733)**: 알람 `type`/`code` = **클래스**(예: `process_down`), "어느 프로세스/호스트"는 **`source.mo_instance`**. 동일 클래스의 서로 다른 인스턴스는 `(code, mo_instance)` 로 구분되는 별개 활성 알람.
-- 중앙(oam) 점검 대상 프로세스가 여러 개면: 같은 `code`(process_down)의 rule 을 `target` 별로 두거나(권장, mo_instance 명시), 한 rule 에 `targets: ["csp","cmp"]` 다중 지정 → sweeper 가 target 별로 펼쳐 source 부여.
-- 메시지는 `{mo}`(mo_instance) 치환으로 인스턴스 표기(예 "cims/csp 프로세스 응답 없음").
-- **하위호환**: 기존 이벤트의 `type:"csp_down"` 은 read 시 `type=process_down, source.mo_instance=cims/csp` 로 매핑(정규화 헬퍼). 기존 `module_down` per-agent 도 동일 클래스로 흡수.
+알람 `type`/`code` 는 **조건(condition) 클래스**만 표현한다. 객체·리소스·임계·심각도는 type 에 넣지 않는다.
+
+| type 에 ❌ 넣지 말 것 | 어디로 |
+|---|---|
+| 프로세스명 (csp/cmp/isp) | `source.mo_instance` |
+| 리소스명 (disk/rtp/cpu/mem/network) | `source.mo_instance` (+ `mo_class`) |
+| 임계 조건 값/방향 (high/80%) | rule 의 `threshold`/`unit`/`metric` |
+| 심각도 (critical/warning) | rule 의 `perceived_severity` |
+
+- ❌ 안티패턴: `csp_down`/`cmp_down`(프로세스), `rtp_high`/`disk_high`/`network_high`(리소스+조건) → 객체 수만큼 type/code 폭증.
+- ✅ 표준(X.733): `type`/`code` = 조건 클래스. 동일 클래스의 다른 객체는 `(code, mo_instance)` 로 구분되는 별개 활성 알람. **새 객체/리소스(cpu/mem/trunk…) 추가 = type/code 신설 없이 rule 만 추가.**
+- 다중 객체 점검은 같은 `code` 의 rule 을 객체별로(권장, mo_instance 명시) 또는 `targets:[...]` 다중 지정 → sweeper 가 객체별로 펼쳐 source 부여. 메시지는 `{mo}` 치환.
+- **하위호환**: 옛 type(`csp_down`/`rtp_high`/…)은 read 시 `(class, mo_instance)` alias 표로 매핑.
+
+### 3.6 알람(Alarm) vs 이벤트(Event/Notification) 분리
+
+표준은 **장애 알람**과 **정상 통지**를 명확히 분리한다 — 둘을 같은 스트림에 섞지 않는다.
+
+| | 알람(Alarm) | 이벤트/통지(Event/Notification) |
+|---|---|---|
+| 의미 | **비정상/장애** (조치 필요) | **정상 동작** 알림 (정보/감사) |
+| 표준 | X.733 · 3GPP 32.111 | X.730(object)·**X.731(stateChange)**·X.740(audit) |
+| 속성 | perceivedSeverity 有, 발생→**Cleared** 라이프사이클, ack | severity 無(또는 informational), 활성상태 無 |
+| 활성목록/배너 | 올라감 | 안 올라감(이력/감사 로그만) |
+
+- **정상 기동/실행 중인 프로세스는 알람이 아니다.** "프로세스 start/stop", "config 변경", "배포", "로그인" 등은 **이벤트**(stateChange/audit) → 이벤트 로그에만, 알람 카탈로그/배너엔 미포함.
+- 프로세스 복구는 새 알람이 아니라 기존 `process_down` 의 **Cleared(close)** 통지.
+- 단, **실행 중이어도** 다른 클래스 알람은 발생(threshold_crossed/connection_lost/처리오류 등) — "프로세스 생존 ≠ 정상".
+- CIMS 현황: 알람 스트림은 fault-only(정상 통지를 알람화하지 않음) — 원칙 준수 중. 정상 라이프사이클/감사는 별도 **이벤트 스트림**(예 `mcptt.audit_config_change`)으로 둔다. 알람·이벤트 통합 뷰는 표시단에서 합치되 **모델은 분리**.
 
 ## 4. 전파 경로(구현 시 변경 지점)
 
