@@ -8,18 +8,19 @@
 #   4. csp.log 의 endpoint registered 라인
 #
 # 사용:
-#   ./health.sh                       # 기본 (tb-netns-4-node 가정)
+#   ./health.sh                       # 기본 (build/dist 의 csp/cmp)
 #   ./health.sh --csc <url>           # CSC API URL override
+#   ./health.sh --base <dist-dir>     # csp/cmp install base override
 
 set -eu
 
 CSC_URL="https://127.0.0.1:4419"
-NETNS_BASE="/home/nex/work/cims/build/dist/netns-agents"
+DIST_BASE="/home/nex/work/cims/build/dist"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --csc) CSC_URL="$2"; shift 2 ;;
-        --base) NETNS_BASE="$2"; shift 2 ;;
+        --base) DIST_BASE="$2"; shift 2 ;;
         -h|--help)
             sed -n '1,14p' "$0" | tail -13; exit 0 ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -72,28 +73,26 @@ for pkg in csp cmp; do
     fi
 done
 
-# 4) cmp.log 의 LISTEN (양 노드)
+# 4) cmp.log 의 LISTEN
 hdr "cmp LISTEN"
-for ns in media-a media-b; do
-    LOG="$NETNS_BASE/$ns/install/modules/cmp/0.0.1/CMP/log/cmp.log"
-    if [[ -f "$LOG" ]]; then
-        LINE=$(grep -E "Server listening" "$LOG" | tail -1)
-        [[ -n "$LINE" ]] && ok "$ns : ${LINE##*]}" || warn "$ns : Server listening 라인 없음"
-    else
-        warn "$ns : log 없음 ($LOG)"
-    fi
-done
+LOG="$DIST_BASE/cmp/log/cmp.log"
+if [[ -f "$LOG" ]]; then
+    LINE=$(grep -E "Server listening" "$LOG" | tail -1)
+    [[ -n "$LINE" ]] && ok "cmp : ${LINE##*]}" || warn "cmp : Server listening 라인 없음"
+else
+    warn "cmp : log 없음 ($LOG)"
+fi
 
 # 5) csp.log 의 AddEndpoint
 hdr "csp CmpClient endpoints"
-for ns in ctrl-a ctrl-b; do
-    LOGDIR="$NETNS_BASE/$ns/install/modules/csp/0.0.1/CSP/csp/log"
-    LATEST=$(ls -t "$LOGDIR"/csp_*.log 2>/dev/null | head -1)
-    if [[ -n "$LATEST" ]]; then
-        LINE=$(grep -E "registered.*additional endpoints" "$LATEST" | tail -1)
-        [[ -n "$LINE" ]] && ok "$ns : ${LINE##*]}" || warn "$ns : AddEndpoint 라인 없음 — 옛 binary?"
-    fi
-done
+LOGDIR="$DIST_BASE/csp/log"
+LATEST=$(ls -t "$LOGDIR"/csp_*.log 2>/dev/null | head -1)
+if [[ -n "$LATEST" ]]; then
+    LINE=$(grep -E "registered.*additional endpoints" "$LATEST" | tail -1)
+    [[ -n "$LINE" ]] && ok "csp : ${LINE##*]}" || warn "csp : AddEndpoint 라인 없음 — 옛 binary?"
+else
+    warn "csp : log 없음 ($LOGDIR)"
+fi
 
 echo ""
 if [[ $ANY_FAIL -eq 0 ]]; then

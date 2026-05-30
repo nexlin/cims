@@ -1,6 +1,6 @@
 # prod-multi-host × volte-ptt 시나리오 (reference)
 #
-# tb-netns-4-node 의 volte-ptt 와 동일 의도. 차이:
+# Control A/S (ctrl01/ctrl02) + Media AA (media01/media02). 차이:
 #   - VIP 10.1.0.10 (mgmt 가 아니라 svc 망)
 #   - access_services.priority/inbound_policy 는 사이트 정책 따라 조정 가능
 #   - subscribers 는 외부 DB 사용 (file seed 미사용)

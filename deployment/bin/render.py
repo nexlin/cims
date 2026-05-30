@@ -5,8 +5,8 @@ deployment/bin/render.py — env.yaml + scenario.yaml → 노드별 설정 bundl
 USAGE
   ./render.py --env <env_dir> --scenario <scenario_name> [--out <bundle_dir>] [--check-only]
 
-  예) ./render.py --env tb-netns-4-node --scenario volte-ptt
-       → ./bundle/tb-netns-4-node__volte-ptt/{ctrl-a,ctrl-b,media-a,media-b}/
+  예) ./render.py --env prod-multi-host --scenario volte-ptt
+       → ./bundle/prod-multi-host__volte-ptt/{ctrl-a,ctrl-b,media-a,media-b}/
 
 OUTPUT (per CSP node)
   <node>/csp.json                       csp 모듈의 csp/config/csp.json
@@ -153,7 +153,7 @@ class Index:
         return None
 
     def service_ip(self, node_id: str) -> str | None:
-        """svc net 우선, 없으면 loopback, 그래도 없으면 첫 NIC. single-host/netns/multi-host 공통."""
+        """svc net 우선, 없으면 loopback, 그래도 없으면 첫 NIC. single-host/multi-host 공통."""
         for candidate in ("svc", "loopback"):
             ip = self.node_ip(node_id, candidate)
             if ip:
@@ -898,23 +898,22 @@ def render(env_dir: Path, scenario_name: str, out_dir: Path, *, check_only: bool
 
 def _install_dst_for(env: dict, node: str, base: Path, version: str,
                       relpath: Path) -> Path | None:
-    """bundle 의 상대경로 → install dir 의 절대경로 매핑 (apply.py 와 동일 로직)."""
-    kind = (env.get("kind") or "").lower()
+    """bundle 의 상대경로 → install dir 의 절대경로 매핑 (apply.py 와 동일 로직).
+
+    single-host/multi-host 공통 — base 아래 csp/ cmp/ 모듈 디렉토리 직접 매핑.
+    (env/version 인자는 apply.py 의 동명 함수와 시그니처 정합 목적으로 유지.)
+    """
     parts = relpath.parts
     if not parts:
         return None
     if parts[0] == "csp.json":
-        csp = (base / node / "install" / "modules" / "csp" / version / "CSP") if kind == "netns" else (base / "csp")
-        return (csp / "csp" / "config" / "csp.json") if kind == "netns" else (csp / "config" / "csp.json")
+        return base / "csp" / "config" / "csp.json"
     if parts[0] == "cmp.json":
-        cmp_ = (base / node / "install" / "modules" / "cmp" / version / "CMP") if kind == "netns" else (base / "cmp")
-        return (cmp_ / "cmp" / "config" / "cmp.json") if kind == "netns" else (cmp_ / "config" / "cmp.json")
+        return base / "cmp" / "config" / "cmp.json"
     if parts[0] == "config":
-        csp = (base / node / "install" / "modules" / "csp" / version / "CSP") if kind == "netns" else (base / "csp")
-        return csp / "config" / Path(*parts[1:])
+        return base / "csp" / "config" / Path(*parts[1:])
     if parts[0] == "user":
-        csp = (base / node / "install" / "modules" / "csp" / version / "CSP") if kind == "netns" else (base / "csp")
-        return (csp / "csp" / "user" / Path(*parts[1:])) if kind == "netns" else (csp / "user" / Path(*parts[1:]))
+        return base / "csp" / "user" / Path(*parts[1:])
     return None
 
 
@@ -953,13 +952,9 @@ def _run_diff(env_dir: Path, scenario_name: str, base: Path | None, version: str
     env = _load_yaml(env_dir / "env.yaml")
     scn = _load_yaml(env_dir / "scenarios" / f"{scenario_name}.yaml")
 
-    # base 결정
-    kind = (env.get("kind") or "").lower()
+    # base 결정 (single-host/multi-host 공통)
     if base is None:
-        if kind == "netns":
-            base = Path("/home/nex/work/cims/build/dist/netns-agents")
-        else:
-            base = Path("/home/nex/work/cims/build/dist")
+        base = Path("/home/nex/work/cims/build/dist")
 
     with tempfile.TemporaryDirectory(prefix="render-diff-") as tmp:
         tmp_out = Path(tmp)

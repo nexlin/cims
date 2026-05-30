@@ -10,7 +10,7 @@ deployment/
 ├── _schema/                        YAML schema 명세
 │   ├── env.schema.md               env.yaml 필드 명세
 │   └── scenario.schema.md          scenario.yaml 필드 명세
-├── <env-name>/                     배포 환경 (예: tb-netns-4-node)
+├── <env-name>/                     배포 환경 (예: prod-multi-host)
 │   ├── env.yaml                    인프라 SoT — NIC/IP/VIP/노드/DB
 │   ├── README.md                   이 환경 안내
 │   └── scenarios/                  이 환경에서 돌릴 시나리오
@@ -19,19 +19,17 @@ deployment/
 │       └── ...
 └── bin/
     ├── render.py                   generator — scenario → config bundle (--diff 미리보기)
-    ├── apply.py                    bundle → install dir (kind 분기, --backup/--restore/--verify/--restart auto)
-    ├── verify.py                   verify.expected_listen / smoke / failover 자동 실행 (single-host/netns 양쪽)
+    ├── apply.py                    bundle → install dir (--backup/--restore/--verify/--restart auto)
+    ├── verify.py                   verify.expected_listen / smoke / failover 자동 실행 (host-local)
     ├── check-all.sh                모든 env × scenario render --check-only 회기 (또는 `make verify-scenarios`)
-    ├── sync-agent.sh               lifecycle.sh + csp/cmp 바이너리 atomic 동기화
-    ├── deploy-modules.sh           모듈 일괄 deploy (수동 TB-CSC API 호출, 옛 방식)
-    └── verify-modules.sh           sim-a 에서 cspsim 호출 검증 (수동, 옛 방식)
+    └── health.sh                   빠른 LIVE 진단 (CSC API + csp/cmp 프로세스/로그, sudo 불필요)
 ```
 
 ## 컨벤션
 
 | 항목 | 규칙 |
 |---|---|
-| 환경 디렉토리명 | `<배포-환경-식별자>` (kebab-case). 예: `tb-netns-4-node`, `dev-single-host`, `prod-multi-host` |
+| 환경 디렉토리명 | `<배포-환경-식별자>` (kebab-case). 예: `dev-single-host`, `prod-multi-host` |
 | `env.yaml` | 환경 당 1개. 인프라 SoT (변경 빈도 낮음 — 환경 셋업 1회) |
 | `scenarios/*.yaml` | env 위에서 돌릴 서비스 의도 + 패키지 배포 매핑 (한 환경에서 여러 시나리오 운용 가능) |
 | 시나리오명 | `<서비스-의도>.yaml` (kebab-case). 예: `volte-only`, `volte-ptt`, `full`, `smoke` |
@@ -41,27 +39,27 @@ deployment/
 
 1. **환경 등록** — `deployment/<env-name>/env.yaml` 작성 (NIC/IP/VIP/노드/DB)
 2. **시나리오 작성** — `deployment/<env-name>/scenarios/<x>.yaml` (역할 + 패키지 + 배포 매핑)
-3. **(코드 변경 후) 동기화** — `./bin/sync-agent.sh` — lifecycle.sh + csp/cmp 바이너리 → 5 install dir atomic install
-4. **미리보기** — `./bin/render.py --env <e> --scenario <s> --diff` — apply 시 어떤 파일이 바뀔지 의미적 diff
-5. **배포 + 검증** (한 명령 end-to-end):
+3. **미리보기** — `./bin/render.py --env <e> --scenario <s> --diff` — apply 시 어떤 파일이 바뀔지 의미적 diff
+4. **배포 + 검증** (한 명령 end-to-end):
    ```
    ./bin/apply.py --env <e> --scenario <s> --backup --restart auto --verify
    ```
    - `--backup` 기존 파일 .bak 보호
    - `--restart auto` CSC API 로 (agent_id, package) 매핑하여 csp/cmp restart job 자동 큐잉
-   - `--verify` restart 후 listen phase 자동 확인 (sudo 필요 — netns 환경)
-6. **회기** — `make verify-scenarios` (또는 `./bin/check-all.sh`) — 5 시나리오 1초 내 회기
-7. **롤백** — `./bin/apply.py --env <e> --scenario <s> --restore` — 마지막 .bak 일괄 복원
+   - `--verify` restart 후 listen phase 자동 확인
+5. **회기** — `make verify-scenarios` (또는 `./bin/check-all.sh`) — render --check-only 일괄 회기
+6. **롤백** — `./bin/apply.py --env <e> --scenario <s> --restore` — 마지막 .bak 일괄 복원
+
+> 실 agent (ctrl01/ctrl02/media01/media02) 로의 바이너리/패키지 전달은 **agent install API** (Console → 패키지 등록 → deployment install job) 가 담당. render/apply 는 config bundle 만 생성·갱신.
 
 ## 현재 등록된 환경 + 시나리오
 
 | 환경 | 시나리오 | 비고 |
 |---|---|---|
-| [tb-netns-4-node](tb-netns-4-node/) | `volte-ptt` / `volte-only` / `full` | NetNS 5 ns (ctrl-a/b A/S + media-a/b AA + sim-a). VIP 10.0.1.13. LIVE 검증 환경 |
 | [dev-single-host](dev-single-host/) | `smoke` | 단일 host loopback (csc/csp/cmp 동거). 빠른 로컬 smoke |
-| [prod-multi-host](prod-multi-host/) | `volte-ptt` | 2-host A/S (Control) + 2-host AA (Media) + 외부 DB. 사이트별 IP/암호 patch 필요 |
+| [prod-multi-host](prod-multi-host/) | `volte-ptt` | 2-host A/S (Control: ctrl01/ctrl02) + 2-host AA (Media: media01/media02) + 외부 DB. 사이트별 IP/암호 patch 필요 |
 
-회기 (전체 일괄): `./bin/check-all.sh` — 5/5 PASS
+회기 (전체 일괄): `./bin/check-all.sh`
 
 ## 진짜 csp schema 정합 (commits `312c69a` / `ac4cf95`)
 

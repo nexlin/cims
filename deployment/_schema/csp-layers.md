@@ -27,7 +27,7 @@ CSP 의 설정은 **csp.json (시스템 기본) + 10개 jsonl (동적)** 의 다
 1. local_nodes.jsonl 의 enabled=true && is_primary=true && protocol="UDP" row
    ├─ bind_ip / bind_port → gclsSetup.m_strLocalIp / m_iUdpPort 덮어씀
    └─ bind_ip 가 "0.0.0.0" / "" / "::" 면 GetLocalIp() 로 자동 치환 (host 의 default outgoing IP)
-2. primary 없음 → _infra Setup.Sip.LocalIp / UdpPort 그대로 사용 ← 현재 NetNS 의 상태
+2. primary 없음 → _infra Setup.Sip.LocalIp / UdpPort 그대로 사용 (fallback)
 3. Setup.Sip.LocalIp 도 비어있으면 GetLocalIp() 호출
 ```
 
@@ -246,40 +246,36 @@ local_nodes.jsonl row:
 | `all_active` | 멤버별로 자기 svc IP 를 bind_ip. 각 멤버 install dir 에 자기 IP row 만 |
 | `standalone` | 멤버의 svc IP (또는 mgmt — env 에 명시) |
 
-⚠ **active_standby + VIP bind 시 host 단의 `net.ipv4.ip_nonlocal_bind=1` 설정 필요** (BACKUP 노드도 VIP 로 bind 가능해야 fail-over 즉시 처리). 이 사전 조건은 env.yaml 에서 명시하거나 NetNS up 스크립트가 sysctl 설정.
+⚠ **active_standby + VIP bind 시 host 단의 `net.ipv4.ip_nonlocal_bind=1` 설정 필요** (BACKUP 노드도 VIP 로 bind 가능해야 fail-over 즉시 처리). 이 사전 조건은 각 control host (ctrl01/ctrl02) 에 sysctl 로 설정 (agent 의 HA install 이 처리).
 
 ## 8. 이슈 #1 fix 의 실제 적용 단계
 
-NetNS 환경에서 즉시 적용 가능 (generator 없이도):
+render → apply 로 자동화되지만, 수동 즉시 적용도 가능 (예: 단일 호스트 csp install dir):
 
 ```bash
-# ctrl-a 의 local_nodes.jsonl 작성
-cat > /home/nex/work/cims/build/dist/netns-agents/ctrl-a/install/modules/csp/0.0.1/CSP/csp/config/local_nodes.jsonl <<'EOF'
-{"id":"csp-main-udp","name":"csp-main","edge":"access","bind_ip":"10.0.1.13","bind_port":5060,"protocol":"UDP","thread_count":2,"enabled":true,"is_primary":true,"tags":[],"note":""}
-{"id":"csp-main-tcp","name":"csp-main","edge":"access","bind_ip":"10.0.1.13","bind_port":25061,"protocol":"TCP","thread_count":2,"enabled":true,"is_primary":true,"tags":[],"note":""}
-{"id":"csp-main-tls","name":"csp-main","edge":"access","bind_ip":"10.0.1.13","bind_port":5061,"protocol":"TLS","thread_count":2,"enabled":true,"is_primary":true,"tls_cert_path":"cert/csp.pem","tags":[],"note":""}
+# csp 의 local_nodes.jsonl 작성 (VIP bind, primary=UDP)
+cat > /home/nex/work/cims/build/dist/csp/config/local_nodes.jsonl <<'EOF'
+{"id":"csp-main-udp","name":"csp-main","edge":"access","bind_ip":"121.161.164.47","bind_port":5060,"protocol":"UDP","thread_count":2,"enabled":true,"is_primary":true,"tags":[],"note":""}
+{"id":"csp-main-tcp","name":"csp-main","edge":"access","bind_ip":"121.161.164.47","bind_port":25061,"protocol":"TCP","thread_count":2,"enabled":true,"is_primary":false,"tags":[],"note":""}
+{"id":"csp-main-tls","name":"csp-main","edge":"access","bind_ip":"121.161.164.47","bind_port":5061,"protocol":"TLS","thread_count":2,"enabled":true,"is_primary":false,"tls_cert_path":"cert/csp.pem","tags":[],"note":""}
 EOF
-# ctrl-b 도 동일 (master 가 죽으면 backup 이 VIP 인수 후 bind)
+# A/S 양 control host (ctrl01/ctrl02) 에 동일 배포 (master 가 죽으면 backup 이 VIP 인수 후 bind)
 
-# host: nonlocal bind 허용 (BACKUP 노드가 VIP 없을 때도 bind 가능)
+# 각 control host: nonlocal bind 허용 (BACKUP 노드가 VIP 없을 때도 bind 가능)
 echo 1 | sudo tee /proc/sys/net/ipv4/ip_nonlocal_bind
 
-# 각 ns 도 동일
-sudo ip netns exec ctrl-a sysctl -w net.ipv4.ip_nonlocal_bind=1
-sudo ip netns exec ctrl-b sysctl -w net.ipv4.ip_nonlocal_bind=1
-
-# csp restart (CSC API 통해)
-for dep in 27 28; do
+# csp restart (CSC/OAM API 통해 — deployment id 는 환경마다 다름)
+for dep in <ctrl01_csp_dep> <ctrl02_csp_dep>; do
   curl -sk -X POST -H "Content-Type: application/json" \
     -d '{"job_type":"restart"}' \
     https://127.0.0.1:4419/api/v1/deployments/$dep/job
 done
 
-# LISTEN 검증 — 이번엔 10.0.1.13 으로 보여야
-sudo ip netns exec ctrl-a ss -tulnp | grep csp
+# LISTEN 검증 — VIP(121.161.164.47):5060 으로 보여야
+ss -tulnp | grep csp
 ```
 
-이 적용은 Phase 3 시나리오 작성 + Phase 4 generator 의 자동화 대상.
+이 적용은 render.py (Phase 4 generator) 가 scenario 의 `local_nodes.auto` 에서 자동 산출.
 
 ## 관련
 

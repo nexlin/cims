@@ -93,7 +93,7 @@ verify:
     - { node: self, ip: 127.0.0.1, port: 5060, proto: UDP, owner: csp }
     - { node: self, ip: 127.0.0.1, port: 9000, proto: UDP, owner: cmp }
 
-  # single-host — verify.py 가 netns 없이 bash -c 직접 실행 (c8d9fd9 이후).
+  # single-host — verify.py 가 host-local bash -c 직접 실행.
   # cspsim 기본 경로: build/dist/cspsim
   smoke:
     - name:   register-volte
@@ -116,5 +116,5 @@ verify:
                 password: "123456", mode: volte, scenario: call, call_duration: 5 }
       expect: 'Call OK/End\s*:\s*2'
 
-  # failover: standalone (HA 없음) — 의미 없음. tb-netns-4-node 의 시나리오 참조.
+  # failover: standalone (HA 없음) — 의미 없음. prod-multi-host 의 시나리오 참조.
   failover: []

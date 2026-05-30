@@ -1,6 +1,6 @@
 # dev-single-host — 단일 host 로컬 환경
 
-개발자 워크스테이션에서 csc/csp/cmp 를 loopback (`127.0.0.1`) 위에 동거시키는 최소 환경. NetNS 없이 그냥 build/dist 에서 직접 실행 가능.
+개발자 워크스테이션에서 csc/csp/cmp 를 loopback (`127.0.0.1`) 위에 동거시키는 최소 환경. build/dist 에서 직접 실행.
 
 ## 토폴로지
 
@@ -29,7 +29,7 @@ cp /tmp/dev-smoke/self/user/*.json    /home/nex/work/cims/build/dist/csp/user/
 cp /tmp/dev-smoke/self/cmp.json /home/nex/work/cims/build/dist/cmp/config/cmp.json
 ```
 
-(apply.py 는 NetNS 의 `netns-agents/<node>/install/` 경로를 가정. dev 는 한 디렉토리만 갱신하면 됨.)
+(apply.py 는 `<base>/csp`, `<base>/cmp` install dir 에 직접 복사. dev 는 base=build/dist 한 곳만 갱신.)
 
 ## 시나리오
 

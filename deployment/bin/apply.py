@@ -4,15 +4,15 @@ deployment/bin/apply.py — render 산출 bundle 을 agent install dir 에 배�
 
 USAGE
   ./apply.py --env <env_dir> --scenario <scn> [--bundle <dir>] [--dry-run]
-              [--base <netns-agents-dir>] [--no-render]
+              [--base <install-base>] [--no-render]
 
 흐름:
   1. render.py 호출 → bundle 생성 (default: ./bundle/<env>__<scn>/) — --no-render 면 skip
-  2. bundle/<node>/ 를 install dir 에 복사:
-       <node>/csp.json       → <base>/<node>/install/modules/csp/<v>/CSP/csp/config/csp.json
-       <node>/config/*.jsonl → <base>/<node>/install/modules/csp/<v>/CSP/config/*.jsonl
-       <node>/user/*.json    → <base>/<node>/install/modules/csp/<v>/CSP/csp/user/*.json
-       <node>/cmp.json       → <base>/<node>/install/modules/cmp/<v>/CMP/cmp/config/cmp.json
+  2. bundle/<node>/ 를 install dir 에 복사 (single-host/multi-host 공통, <base> 기본 build/dist):
+       <node>/csp.json       → <base>/csp/config/csp.json
+       <node>/config/*.jsonl → <base>/csp/config/*.jsonl
+       <node>/user/*.json    → <base>/csp/user/*.json
+       <node>/cmp.json       → <base>/cmp/config/cmp.json
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ except ImportError:
     sys.exit(2)
 
 
-DEFAULT_BASE = "/home/nex/work/cims/build/dist/netns-agents"
+DEFAULT_BASE = "/home/nex/work/cims/build/dist"
 DEFAULT_VERSION = "0.0.1"
 
 
@@ -85,52 +85,37 @@ def _copy_dir(src: Path, dst: Path, *, dry_run: bool, do_backup: bool) -> list[t
 
 
 def _csp_root(env: dict, base: Path, node: str, version: str) -> Path:
-    """env.kind 에 따라 csp install 경로 결정.
+    """csp install 경로 — single-host/multi-host 공통 <base>/csp.
 
-    - netns: <base>/<node>/install/modules/csp/<v>/CSP
-    - single-host / multi-host: <base>/csp (build/dist 의 dev 위치 또는 직접 install)
+    (env/node/version 인자는 호출부 시그니처 정합 목적으로 유지.)
     """
-    kind = (env.get("kind") or "").lower()
-    if kind == "netns":
-        return base / node / "install" / "modules" / "csp" / version / "CSP"
     return base / "csp"
 
 
 def _cmp_root(env: dict, base: Path, node: str, version: str) -> Path:
-    kind = (env.get("kind") or "").lower()
-    if kind == "netns":
-        return base / node / "install" / "modules" / "cmp" / version / "CMP"
+    """cmp install 경로 — single-host/multi-host 공통 <base>/cmp."""
     return base / "cmp"
 
 
-def _csp_paths(root: Path, kind: str) -> tuple[Path, Path, Path]:
-    """csp install 의 (csp.json, config_dir, user_dir) 위치.
+def _csp_paths(root: Path) -> tuple[Path, Path, Path]:
+    """csp install 의 (csp.json, config_dir, user_dir) 위치 — single/multi-host 공통.
 
-    - netns:        CSP/csp/config/csp.json, CSP/config/, CSP/csp/user/
-    - single-host:  csp/config/csp.json,     csp/config/, csp/user/
-      (dev 모드는 jsonlDir 가 csp/config/ 라고 가정 — config_template.json 의 ConfigJsonlDir 와 일치)
+    csp/config/csp.json, csp/config/, csp/user/
+    (dev 모드는 jsonlDir 가 csp/config/ 라고 가정 — config_template.json 의 ConfigJsonlDir 와 일치)
     """
-    if kind == "netns":
-        return (root / "csp" / "config" / "csp.json",
-                root / "config",
-                root / "csp" / "user")
-    # single-host / multi-host
     return (root / "config" / "csp.json",
             root / "config",
             root / "user")
 
 
-def _cmp_json_path(root: Path, kind: str) -> Path:
-    if kind == "netns":
-        return root / "cmp" / "config" / "cmp.json"
+def _cmp_json_path(root: Path) -> Path:
     return root / "config" / "cmp.json"
 
 
 def _apply_csp(env: dict, node: str, bundle_node: Path, base: Path, version: str,
                 *, dry_run: bool, do_backup: bool) -> list:
-    kind = (env.get("kind") or "").lower()
     csp_root = _csp_root(env, base, node, version)
-    csp_json_dst, config_dst, user_dst = _csp_paths(csp_root, kind)
+    csp_json_dst, config_dst, user_dst = _csp_paths(csp_root)
     plans: list[tuple[str, str]] = []
 
     csp_json = bundle_node / "csp.json"
@@ -148,9 +133,8 @@ def _apply_csp(env: dict, node: str, bundle_node: Path, base: Path, version: str
 
 def _apply_cmp(env: dict, node: str, bundle_node: Path, base: Path, version: str,
                 *, dry_run: bool, do_backup: bool) -> list:
-    kind = (env.get("kind") or "").lower()
     cmp_root = _cmp_root(env, base, node, version)
-    dst = _cmp_json_path(cmp_root, kind)
+    dst = _cmp_json_path(cmp_root)
     plans = []
     cmp_json = bundle_node / "cmp.json"
     if cmp_json.exists():
@@ -169,7 +153,7 @@ def main() -> int:
     p.add_argument("--bundle", help="bundle 디렉토리 (기본 ./bundle/<env>__<scn>/)")
     p.add_argument("--dry-run", action="store_true", help="복사 안 하고 plan 만 출력")
     p.add_argument("--no-render", action="store_true", help="render 단계 skip (기존 bundle 재사용)")
-    p.add_argument("--base", help=f"install base 경로 — netns: netns-agents 디렉토리 (default {DEFAULT_BASE}), single-host: build/dist 디렉토리")
+    p.add_argument("--base", help=f"install base 경로 (single-host/multi-host 공통, default {DEFAULT_BASE})")
     p.add_argument("--version", default=DEFAULT_VERSION, help=f"패키지 버전 (default: {DEFAULT_VERSION})")
     p.add_argument("--root", help="deployment/ 부모")
     p.add_argument("--backup", action="store_true", help="기존 파일 .bak 으로 백업 후 복사 (마지막 1회분만)")
@@ -217,15 +201,9 @@ def main() -> int:
         sys.stderr.write(f"[error] {e}\n")
         return 2
 
-    # base 결정 — kind 에 따라 default 분기
-    kind = (env.get("kind") or "").lower()
-    if args.base:
-        base = Path(args.base)
-    elif kind == "netns":
-        base = Path(DEFAULT_BASE)
-    else:
-        # single-host / multi-host — build/dist 직접 사용
-        base = Path("/home/nex/work/cims/build/dist")
+    # base 결정 (single-host/multi-host 공통 — build/dist 직접 사용)
+    kind = (env.get("kind") or "").lower()   # 정보 출력용 (single-host|multi-host)
+    base = Path(args.base) if args.base else Path(DEFAULT_BASE)
 
     csp_hg = _ha_for_pkg(scn, "csp")
     cmp_hg = _ha_for_pkg(scn, "cmp")
@@ -339,13 +317,7 @@ def main() -> int:
 
 def _do_restore(env: dict, scn: dict, args) -> int:
     """모든 install dir 의 .bak 파일을 원본으로 복원."""
-    kind = (env.get("kind") or "").lower()
-    if args.base:
-        base = Path(args.base)
-    elif kind == "netns":
-        base = Path(DEFAULT_BASE)
-    else:
-        base = Path("/home/nex/work/cims/build/dist")
+    base = Path(args.base) if args.base else Path(DEFAULT_BASE)
 
     csp_hg = _ha_for_pkg(scn, "csp")
     cmp_hg = _ha_for_pkg(scn, "cmp")
@@ -355,7 +327,7 @@ def _do_restore(env: dict, scn: dict, args) -> int:
     restored: list[str] = []
     for node in csp_nodes:
         csp_root = _csp_root(env, base, node, args.version)
-        csp_json_dst, config_dst, user_dst = _csp_paths(csp_root, kind)
+        csp_json_dst, config_dst, user_dst = _csp_paths(csp_root)
         for target_dir in [config_dst, user_dst]:
             if not target_dir.exists(): continue
             for bak in target_dir.glob("*.bak"):
@@ -368,7 +340,7 @@ def _do_restore(env: dict, scn: dict, args) -> int:
 
     for node in cmp_nodes:
         cmp_root = _cmp_root(env, base, node, args.version)
-        dst = _cmp_json_path(cmp_root, kind)
+        dst = _cmp_json_path(cmp_root)
         bak = dst.with_suffix(dst.suffix + ".bak")
         if bak.exists():
             shutil.copy2(bak, dst)

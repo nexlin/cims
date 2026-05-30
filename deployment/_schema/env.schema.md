@@ -7,7 +7,7 @@
 ```yaml
 name:            <환경 식별자 — 디렉토리명과 일치>
 description:     <한 줄 설명>
-kind:            netns | single-host | multi-host   # 인프라 종류
+kind:            single-host | multi-host   # 인프라 종류
 csc:             <CSC endpoint — agent 가 통신할 곳>
 database:        <외부 DB 연결 정보 — 없으면 null>
 networks:        <망(브릿지/VLAN) 정의>
@@ -23,11 +23,11 @@ agent 가 통신할 CSC endpoint. agent install 시 `--csc-url` 로 전달.
 ```yaml
 csc:
   url:    https://10.0.0.1:4419    # required
-  notes:  TB-CSC (host) — netns bridge gateway 통해 접근
+  notes:  agent 가 enroll/heartbeat/job 수신할 OAM(CSC) endpoint
 ```
 
 ### `database`
-가입자 도메인 (users / volte_subscriptions / ptt_subscriptions / organizations) 의 외부 DB. NetNS / dev 환경처럼 DB 미연결이면 `null`.
+가입자 도메인 (users / volte_subscriptions / ptt_subscriptions / organizations) 의 외부 DB. dev 환경처럼 DB 미연결이면 `null`.
 
 ```yaml
 database:
@@ -54,22 +54,19 @@ service_logging:
 생략 시 `/var/log/cims/service_log` + 기본 enable 리스트가 사용됨. scenario.yaml 의 `csp_config.setup.service_logging` / `cmp_config.overrides.service_logging` 으로 시나리오별 override 도 가능.
 
 ### `networks`
-망 정의. 각 망은 명명된 식별자 + CIDR + 용도. `kind: netns` 면 bridge 이름 매핑.
+망 정의. 각 망은 명명된 식별자 + CIDR + 용도.
 
 ```yaml
 networks:
   - id:     mgmt                    # 망 식별자 (이후 nodes 의 nic 에서 참조)
     cidr:   10.0.0.0/24
     purpose: agent ↔ CSC 통신 (관리)
-    bridge:  br-cims-mgmt           # kind=netns 시 host 의 bridge 이름
   - id:     svc
     cidr:   10.0.1.0/24
     purpose: 서비스 트래픽 (SIP / RTP)
-    bridge:  br-cims-svc
   - id:     int
     cidr:   10.0.2.0/24
     purpose: 노드 간 내부 통신 (sync / DB replication 등)
-    bridge:  br-cims-int
 ```
 
 ### `nodes`
@@ -80,7 +77,6 @@ nodes:
   - id:       ctrl-a               # 노드 식별자 (kebab-case)
     agent_id: 1                    # file_store agents/<n>.json 의 id
     role_hint: control-server      # human-friendly 역할 (HA group 과 무관)
-    netns:    ctrl-a               # kind=netns 시 ns 이름
     nics:
       - iface: mgmt                # 노드 내부 NIC 이름 (= ip 출력의 ifname)
         net:   mgmt                # networks[].id 참조

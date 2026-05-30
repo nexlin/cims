@@ -129,7 +129,7 @@ UI 가 scope 메타로 자동 분류:
 ## 5. 부트스트랩
 
 agent 가 CSC URL 을 아는 경로는 변경 없음 — `install-agent.sh` 가 enrollment
-시 `CSC_URL` 을 inject (현 패턴). dev (NetNS) 와 prod (`/opt/cims`) 모두
+시 `CSC_URL` 을 inject (현 패턴). dev 와 prod (`/opt/cims`) 모두
 이 경로가 동작하는 것은 walkthrough 단계 1~4 에서 검증됨.
 
 ## 6. Fallback

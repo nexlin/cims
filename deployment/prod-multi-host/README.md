@@ -33,7 +33,7 @@ cd /home/nex/work/cims/deployment
 ./bin/render.py --env prod-multi-host --scenario volte-ptt --out /tmp/prod-bundle
 ```
 
-`apply.py` 는 현재 NetNS 환경 (build/dist/netns-agents) 매핑만 가정. 상용은 각 host 의 install dir 에 별도 배포 채널 (Ansible / rsync / agent install API) 사용 권장.
+`apply.py` 는 `<base>/csp`, `<base>/cmp` install dir 에 config 를 복사. 상용은 각 host (ctrl01/ctrl02/media01/media02) 로의 바이너리/패키지 전달을 agent install API (Console → deployment install job) 가 담당.
 
 ## 알려진 한계 (reference 한정)
 
@@ -44,5 +44,5 @@ cd /home/nex/work/cims/deployment
 ## 관련 문서
 
 - [../README.md](../README.md) — deployment/ 전체 안내
-- [../tb-netns-4-node/README.md](../tb-netns-4-node/README.md) — NetNS testbed (개발/검증)
+- [../dev-single-host/README.md](../dev-single-host/README.md) — 단일 host 로컬 smoke
 - [../_schema/env.schema.md](../_schema/env.schema.md) / [scenario.schema.md](../_schema/scenario.schema.md)
