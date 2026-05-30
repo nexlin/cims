@@ -135,22 +135,30 @@ def _iter_events_asc(service_log_dir: str, days: int):
             continue
 
 
-def compute_open_state(service_log_dir: str, days: int = 30) -> dict:
-    """최근 N일 이벤트를 replay 하여 현재 열린 alert 의 {type: open_ts} 반환.
+def _akey(ev: dict) -> str:
+    """활성 알람 식별 키 = code@mo_instance. alarm_id(code@mo@epoch)에서 occurrence epoch 제거.
+    구 레코드(alarm_id 없음)는 type 으로 폴백."""
+    aid = ev.get('alarm_id')
+    if aid:
+        return aid.rsplit('@', 1)[0]
+    return ev.get('type', '')
 
-    sweeper 재시작 시 in-memory _alert_open 시드용. close 가 잇따른 open 은
-    덮어쓰고, close 가 없으면 open 유지.
+
+def compute_open_state(service_log_dir: str, days: int = 30) -> dict:
+    """최근 N일 이벤트 replay → 현재 열린 알람 {akey: alarm_id} 반환 (sweeper 재시작 시드용).
+
+    akey=(code@mo_instance). close 가 잇따른 open 은 덮어쓰고, close 없으면 open 유지.
     """
     open_state: dict = {}
     for ev in _iter_events_asc(service_log_dir, days):
-        typ = ev.get('type')
-        if not typ:
+        ak = _akey(ev)
+        if not ak:
             continue
         action = ev.get('action')
         if action == 'open':
-            open_state[typ] = ev.get('ts', '')
+            open_state[ak] = ev.get('alarm_id') or ak
         elif action == 'close':
-            open_state.pop(typ, None)
+            open_state.pop(ak, None)
     return open_state
 
 
@@ -168,8 +176,8 @@ def compute_summary(service_log_dir: str, days: int = 7) -> dict:
         'daily': [{'date': 'YYYY-MM-DD', 'opens': int}, ...]   # 오래된 → 최근
       }
     """
-    by_type: dict = {}
-    open_ts: dict = {}  # type -> open_ts (in-flight pair)
+    by_type: dict = {}  # akey -> 집계 entry (활성 인스턴스 단위)
+    open_ts: dict = {}  # akey -> open_ts (in-flight pair)
     daily: dict = {}    # 'YYYY-MM-DD' -> open count
     today = datetime.now().date()
     for i in range(days):
@@ -177,13 +185,18 @@ def compute_summary(service_log_dir: str, days: int = 7) -> dict:
         daily[d.isoformat()] = 0
 
     for ev in _iter_events_asc(service_log_dir, days):
-        typ = ev.get('type')
-        if not typ:
+        ak = _akey(ev)
+        if not ak:
             continue
         ts = ev.get('ts', '')
         action = ev.get('action')
-        entry = by_type.setdefault(typ, {
-            'type': typ,
+        src = ev.get('source') or {}
+        entry = by_type.setdefault(ak, {
+            'key': ak,
+            'type': ev.get('type'),
+            'code': ev.get('code'),
+            'mo_instance': src.get('mo_instance') or ak.split('@', 1)[-1],
+            'perceived_severity': ev.get('perceived_severity') or ev.get('severity'),
             'opens': 0,
             'resolved': 0,
             'currently_open': False,
@@ -194,14 +207,15 @@ def compute_summary(service_log_dir: str, days: int = 7) -> dict:
         if action == 'open':
             entry['opens'] += 1
             entry['currently_open'] = True
-            open_ts[typ] = ts
+            entry['perceived_severity'] = ev.get('perceived_severity') or ev.get('severity') or entry['perceived_severity']
+            open_ts[ak] = ts
             day = ts[:10]
             if day in daily:
                 daily[day] += 1
         elif action == 'close':
             entry['resolved'] += 1
             entry['currently_open'] = False
-            opened = open_ts.pop(typ, None)
+            opened = open_ts.pop(ak, None)
             if opened:
                 try:
                     o = datetime.fromisoformat(opened)
@@ -213,7 +227,7 @@ def compute_summary(service_log_dir: str, days: int = 7) -> dict:
                     pass
 
     out_by_type = []
-    for typ, e in sorted(by_type.items()):
+    for ak, e in sorted(by_type.items()):
         durations = e.pop('durations')
         e['avg_duration_sec'] = round(sum(durations) / len(durations), 1) if durations else None
         out_by_type.append(e)

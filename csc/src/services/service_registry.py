@@ -28,20 +28,64 @@ _CORE_MODULES = {'agent', 'oam', 'console'}
 _CORE_CONTROLLABLE = {'console'}
 
 # 코어(서비스 무지) host 관측 alert 규칙 — 어떤 서비스 descriptor 와도 무관하게 항상 평가.
-# scope='agent' → sweeper 가 online agent 별로 평가 (서비스 단위 규칙과 분리).
-#   disk_high   : agent metric 의 disk_pct 가 threshold 이상.
-#   module_down : deployment(status=running) 인 모듈이 agent metric 의 실행 집합에 없음.
-#                 (csp/cmp 등 process_down 규칙으로 이미 평가되는 모듈은 sweeper 가 제외 — 중복 방지.)
+# 알람 표준화(X.733/32.111, docs/design/alarm_standardization.md): type=조건클래스, 객체는 source.
+# scope='agent' → sweeper 가 online agent 별로 평가, mo_instance 는 런타임 합성(<host>/disk, <host>/<module>).
 _CORE_ALERT_RULES = [
-    {'type': 'disk_high', 'severity': 'warning', 'check': 'disk_high', 'scope': 'agent',
-     'threshold': 90, 'unit': '%', 'metric': '디스크 사용률',
-     'msg_open': '{host} 디스크 사용률 {pct}% ({threshold}% 초과)',
-     'msg_close': '{host} 디스크 사용률 {pct}% (정상)'},
-    {'type': 'module_down', 'severity': 'critical', 'check': 'module_down', 'scope': 'agent',
-     'metric': '모듈 프로세스',
-     'msg_open': '{host} 모듈 {module} 프로세스 응답 없음',
-     'msg_close': '{host} 모듈 {module} 정상화'},
+    {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'perceived_severity': 'warning',
+     'event_type': 'qualityOfService', 'probable_cause': 'storageCapacityProblem', 'mo_class': 'host',
+     'check': 'disk_high', 'scope': 'agent', 'threshold': 90, 'unit': '%', 'metric': '디스크 사용률',
+     'msg_open': '{mo} 디스크 사용률 {pct}% ({threshold}% 초과)', 'msg_close': '{mo} 디스크 사용률 {pct}% (정상)',
+     'effect': '디스크 용량 임계 근접 — 로그/녹취 적재 실패 위험',
+     'recommended_action': '사용량 원인 파악, 오래된 파일/로그 정리, 용량 증설'},
+    {'type': 'process_down', 'code': 'CIMS-PRC-001', 'perceived_severity': 'critical',
+     'event_type': 'processingError', 'probable_cause': 'softwareError', 'mo_class': 'software',
+     'check': 'module_down', 'scope': 'agent', 'metric': '프로세스 가용성',
+     'msg_open': '{mo} 프로세스 응답 없음', 'msg_close': '{mo} 정상화',
+     'effect': '해당 호스트의 모듈 기능 중단',
+     'recommended_action': '프로세스 재기동, 로그/코어 확인, HA 절체 점검'},
 ]
+
+# 알람 클래스 기본값 — check → 표준 분류 필드. 규칙에 명시값 있으면 우선(setdefault).
+_ALERT_CLASS_DEFAULTS = {
+    'process_down': {'type': 'process_down', 'code': 'CIMS-PRC-001', 'event_type': 'processingError',
+                     'probable_cause': 'softwareError', 'mo_class': 'software', 'perceived_severity': 'critical'},
+    'module_down':  {'type': 'process_down', 'code': 'CIMS-PRC-001', 'event_type': 'processingError',
+                     'probable_cause': 'softwareError', 'mo_class': 'software', 'perceived_severity': 'critical'},
+    'db_down':      {'type': 'connection_lost', 'code': 'CIMS-COM-001', 'event_type': 'communications',
+                     'probable_cause': 'communicationsSubsystemFailure', 'mo_class': 'service', 'perceived_severity': 'critical'},
+    'rtp_pct_gte':  {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
+                     'probable_cause': 'resourceAtOrNearingCapacity', 'mo_class': 'service', 'perceived_severity': 'warning'},
+    'disk_high':    {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
+                     'probable_cause': 'storageCapacityProblem', 'mo_class': 'host', 'perceived_severity': 'warning'},
+}
+
+# 옛 per-process/리소스 type → (조건클래스, code). 구 이벤트/규칙 read 시 alias.
+_OLD_TYPE_ALIAS = {
+    'csp_down': ('process_down', 'CIMS-PRC-001'), 'cmp_down': ('process_down', 'CIMS-PRC-001'),
+    'module_down': ('process_down', 'CIMS-PRC-001'), 'db_down': ('connection_lost', 'CIMS-COM-001'),
+    'rtp_high': ('threshold_crossed', 'CIMS-QOS-001'), 'disk_high': ('threshold_crossed', 'CIMS-QOS-001'),
+}
+
+
+def normalize_alert_rule(r: dict) -> dict:
+    """규칙에 표준 알람 필드(type 클래스/code/event_type/probable_cause/mo_class/perceived_severity)를 채움.
+    명시값 우선, 없으면 check 기반 기본값. severity→perceived_severity 하위호환."""
+    out = dict(r)
+    for k, v in _ALERT_CLASS_DEFAULTS.get(r.get('check'), {}).items():
+        out.setdefault(k, v)
+    # 옛 type 슬러그(csp_down 등) → 클래스/코드 보정
+    alias = _OLD_TYPE_ALIAS.get(out.get('type'))
+    if alias:
+        out['type'], _code = alias
+        out.setdefault('code', _code)
+    if not out.get('perceived_severity') and out.get('severity'):
+        out['perceived_severity'] = out['severity']
+    out.setdefault('perceived_severity', 'warning')
+    out.setdefault('severity', out['perceived_severity'])  # 구 reader 호환
+    out.setdefault('type', 'event'); out.setdefault('code', 'CIMS-GEN-000')
+    out.setdefault('event_type', 'processingError'); out.setdefault('probable_cause', '')
+    out.setdefault('mo_class', 'service')
+    return out
 
 # seed descriptor 디렉토리 — 서비스 pack 이 자기 *.json 을 여기에 둔다 (CIMS = cims.json).
 # 코어 코드엔 CIMS 데이터가 없음 (5-6: 데이터로 추출). store 비면 이 JSON 들을 1회 주입.
@@ -131,11 +175,29 @@ def controllable_modules(config: dict = None) -> set:
 
 
 def alert_rules(config: dict = None) -> list:
-    """alert sweeper / /alerts/rules 용 — 코어 host 규칙 + 전 descriptor 의 alert_rules 병합."""
+    """alert sweeper / /alerts/rules 용 — 코어 host 규칙 + 전 descriptor 의 alert_rules 병합.
+    표준 알람 필드(type 클래스/code/event_type/probable_cause/perceived_severity)로 정규화."""
     out = list(_CORE_ALERT_RULES)
     for d in load_descriptors(config):
         out.extend(d.get('alert_rules') or [])
-    return out
+    return [normalize_alert_rule(r) for r in out]
+
+
+def alarm_catalog(config: dict = None) -> list:
+    """알람 클래스 카탈로그 — code 별 1개(정의). GET /alerts/catalog 용."""
+    seen = {}
+    for r in alert_rules(config):
+        code = r.get('code')
+        if not code or code in seen:
+            continue
+        seen[code] = {
+            'code': code, 'type': r.get('type'),
+            'perceived_severity': r.get('perceived_severity'),
+            'event_type': r.get('event_type'), 'probable_cause': r.get('probable_cause'),
+            'mo_class': r.get('mo_class'), 'metric': r.get('metric'),
+            'effect': r.get('effect'), 'recommended_action': r.get('recommended_action'),
+        }
+    return list(seen.values())
 
 
 def data_sources(config: dict = None) -> list:

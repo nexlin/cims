@@ -48,11 +48,19 @@ def _alert_rules(config: dict) -> dict:
     for r in rules:
         out.append({
             'type': r.get('type'),
-            'severity': r.get('severity', 'warning'),
+            'code': r.get('code'),
+            'perceived_severity': r.get('perceived_severity') or r.get('severity', 'warning'),
+            'severity': r.get('perceived_severity') or r.get('severity', 'warning'),  # 구 reader 호환
+            'event_type': r.get('event_type'),
+            'probable_cause': r.get('probable_cause'),
+            'mo_class': r.get('mo_class'),
+            'mo_instance': r.get('mo_instance'),
             'metric': r.get('metric') or r.get('type'),
             'condition': _condition_text(r),
             'threshold': r.get('threshold'),
             'unit': r.get('unit'),
+            'effect': r.get('effect'),
+            'recommended_action': r.get('recommended_action'),
             'scope': r.get('scope') or 'service',
         })
     if not out:   # descriptor 비었을 때 fallback
@@ -90,6 +98,11 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
     try:
         if parts and parts[0] == 'rules':
             return HandlerResult(status=200, body=_alert_rules(config))
+
+        if parts and parts[0] == 'catalog':
+            # 알람 클래스 카탈로그 (code 별 정의) — X.733/32.111 표준화.
+            from services import service_registry
+            return HandlerResult(status=200, body={'catalog': service_registry.alarm_catalog(config)})
 
         if parts and parts[0] == 'types':
             return HandlerResult(status=200, body={'types': alert_log.list_types(base, days=30)})

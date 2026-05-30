@@ -384,15 +384,16 @@ if __name__ == '__main__':
         ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
         _service_log = config.get('ServiceLogging', {}).get('Dir') \
             or config.get('ServiceLogDir', config.get('MsgLogDir', ''))
+        # _alert_open: { akey(code@mo_instance) : alarm_id }  — 활성 알람 추적.
         _alert_open: dict = {}
         if _service_log:
             try:
-                restored = alert_log.compute_open_state(_service_log, days=30)
-                _alert_open.update({k: True for k in restored})
+                restored = alert_log.compute_open_state(_service_log, days=30)  # {akey: alarm_id}
+                _alert_open.update(restored)
                 if restored:
-                    logger.log_info(f"[alert-sweep] restored open state: {sorted(restored.keys())}")
+                    logger.log_info(f"[alarm] restored open state: {sorted(restored.keys())}")
             except Exception as e:
-                logger.log_error(f"[alert-sweep] restore failed: {e}")
+                logger.log_error(f"[alarm] restore failed: {e}")
 
         def _check_db():
             try:
@@ -406,26 +407,45 @@ if __name__ == '__main__':
             except Exception:
                 return False
 
-        def _emit(typ: str, severity: str, action: str, message: str):
-            from datetime import datetime as _dt
-            alert_log.record_event(_service_log, {
-                'ts': _dt.now().isoformat(timespec='seconds'),
-                'type': typ,
-                'severity': severity,
-                'action': action,
-                'message': message,
-            })
+        class _Safe(dict):
+            def __missing__(self, k):  # 템플릿에 없는 키는 빈 문자열 (KeyError 방지)
+                return ''
 
-        def _transition(typ: str, is_open: bool, severity: str, msg_open: str, msg_close: str):
-            was_open = typ in _alert_open
-            if is_open and not was_open:
-                _alert_open[typ] = True
-                _emit(typ, severity, 'open', msg_open)
-                logger.log_info(f"[alert] OPEN {typ} — {msg_open}")
-            elif not is_open and was_open:
-                _alert_open.pop(typ, None)
-                _emit(typ, severity, 'close', msg_close)
-                logger.log_info(f"[alert] CLOSE {typ}")
+        def _fmt(tmpl: str, **kw) -> str:
+            return (tmpl or '').format_map(_Safe(kw))
+
+        # 표준 알람 이벤트 기록 (X.733/32.111 — code/severity/event_type/probable_cause/source/alarm_id).
+        def _emit_alarm(action, rule, mo_instance, detected_by, message, alarm_id):
+            from datetime import datetime as _dt
+            sev = 'cleared' if action == 'close' else rule.get('perceived_severity', 'warning')
+            rec = {
+                'ts': _dt.now().isoformat(timespec='seconds'),
+                'alarm_id': alarm_id,
+                'type': rule.get('type'), 'code': rule.get('code'),
+                'perceived_severity': sev, 'severity': sev,   # 'severity' 구 reader 호환
+                'event_type': rule.get('event_type'), 'probable_cause': rule.get('probable_cause'),
+                'source': {'mo_class': rule.get('mo_class'), 'mo_instance': mo_instance, 'detected_by': detected_by},
+                'action': action, 'message': message,
+            }
+            if rule.get('effect'):
+                rec['effect'] = rule['effect']
+            if rule.get('recommended_action'):
+                rec['recommended_action'] = rule['recommended_action']
+            alert_log.record_event(_service_log, rec)
+
+        # 활성식별 akey=(code@mo_instance). open 시 alarm_id 생성, close 가 동일 alarm_id 참조.
+        def _transition(rule, mo_instance, detected_by, is_open, msg_open, msg_close):
+            akey = f"{rule.get('code')}@{mo_instance}"
+            was = akey in _alert_open
+            if is_open and not was:
+                alarm_id = f"{akey}@{int(time.time())}"
+                _alert_open[akey] = alarm_id
+                _emit_alarm('open', rule, mo_instance, detected_by, msg_open, alarm_id)
+                logger.log_info(f"[alarm] OPEN {akey} sev={rule.get('perceived_severity')} — {msg_open}")
+            elif not is_open and was:
+                alarm_id = _alert_open.pop(akey)
+                _emit_alarm('close', rule, mo_instance, detected_by, msg_close, alarm_id)
+                logger.log_info(f"[alarm] CLEAR {akey}")
 
         def _eval_alert_rule(rule: dict, ctx: dict) -> bool:
             chk = rule.get('check')
@@ -439,8 +459,8 @@ if __name__ == '__main__':
 
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
                              deps: list, proc_down_targets: set) -> list:
-            """scope='agent' 규칙을 한 agent 의 최신 metric 으로 평가.
-            반환: (type_key, is_open, msg_open, msg_close) 목록 (규칙당 0~N 개)."""
+            """scope='agent' 규칙을 한 agent 최신 metric 으로 평가.
+            반환: (mo_instance, is_open, msg_open, msg_close) 목록."""
             chk = rule.get('check')
             host = agent.get('name') or str(agent.get('id'))
             res = []
@@ -450,9 +470,9 @@ if __name__ == '__main__':
                     return res
                 disk = round(float(disk), 1)
                 thr = int(rule.get('threshold', 90))
-                mo = (rule.get('msg_open') or '').format(host=host, pct=disk, threshold=thr)
-                mc = (rule.get('msg_close') or '').format(host=host, pct=disk, threshold=thr)
-                res.append((f"{rule['type']}:{host}", disk >= thr, mo, mc))
+                mo = f"{host}/disk"
+                kw = dict(mo=mo, host=host, pct=disk, threshold=thr)
+                res.append((mo, disk >= thr, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
             elif chk == 'module_down':
                 running = {(m.get('name') or '').lower()
                            for m in (metric.get('modules') or []) if m.get('name')}
@@ -462,17 +482,16 @@ if __name__ == '__main__':
                     if dep.get('status') != 'running':
                         continue
                     proc = (dep.get('process_name') or dep.get('package_name') or '').lower()
-                    # process_down 규칙으로 이미 평가되는 모듈(csp/cmp 등)은 제외 — 중복 alert 방지.
+                    # process_down 규칙으로 이미 평가되는 모듈(csp/cmp 등)은 제외 — 중복 alarm 방지.
                     if not proc or proc in proc_down_targets:
                         continue
-                    mo = (rule.get('msg_open') or '').format(host=host, module=proc)
-                    mc = (rule.get('msg_close') or '').format(host=host, module=proc)
-                    res.append((f"{rule['type']}:{host}:{proc}", proc not in running, mo, mc))
+                    mo = f"{host}/{proc}"
+                    kw = dict(mo=mo, host=host, module=proc)
+                    res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
             return res
 
         def _sweep_agent_alerts(agent_rules: list, proc_down_targets: set):
-            """per-agent 규칙(disk_high/module_down)을 online agent 별로 평가.
-            관측 대상에서 사라진(오프라인/metric 없음/배포 제거) 열린 alert 는 자동 close."""
+            """per-agent 규칙(disk/module)을 online agent 별로 평가. 관측 불가 시 자동 close."""
             from handlers.agents import _agent_load_all, _deploy_load_all, _metric_root
             from services import file_store
             agents = _agent_load_all(config)
@@ -482,18 +501,24 @@ if __name__ == '__main__':
             for ag in agents:
                 if ag.get('status') != 'online':
                     continue
+                host = ag.get('name') or str(ag.get('id'))
                 metric = file_store.jsonl_last(mroot, str(ag['id']))
                 if not metric:
                     continue
                 for r in agent_rules:
-                    for typ, is_open, mo, mc in _eval_agent_rule(r, ag, metric, deps, proc_down_targets):
-                        active.add(typ)
-                        _transition(typ, is_open, r.get('severity', 'warning'), mo, mc)
-            # 이번 라운드에 평가되지 않은(=관측 불가) per-agent alert 는 close.
-            prefixes = tuple(r['type'] + ':' for r in agent_rules)
-            for typ in [k for k in list(_alert_open.keys()) if k.startswith(prefixes)]:
-                if typ not in active:
-                    _transition(typ, False, 'warning', '', f'{typ} 관측 종료')
+                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets):
+                        active.add(f"{r.get('code')}@{mo}")
+                        _transition(r, mo, f"agent:{host}", is_open, msg_open, msg_close)
+            # agent 알람(mo_instance 가 cims/ 가 아닌 host/…) 중 이번에 평가 안 된 것 = 관측 불가 → close.
+            agent_rule_by_code = {r.get('code'): r for r in agent_rules}
+            for akey in list(_alert_open.keys()):
+                mo_part = akey.split('@', 1)[1] if '@' in akey else ''
+                if mo_part.startswith('cims/') or akey in active:
+                    continue
+                r = agent_rule_by_code.get(akey.split('@', 1)[0])
+                if r:
+                    _transition(r, mo_part, f"agent:{mo_part.split('/', 1)[0]}", False, '',
+                                _fmt(r.get('msg_close'), mo=mo_part))
 
         def _sweep_alerts():
             try:
@@ -504,28 +529,21 @@ if __name__ == '__main__':
                 used = cmp.get('rtp_ports_used', 0) or 0
                 pct = int(round(used / total * 100)) if total > 0 else 0
                 ctx = {'csp': csp, 'cmp': cmp, 'db_ok': db_ok, 'rtp_pct': pct}
-                # alert 규칙 = service descriptor 구동 (없으면 하드코딩 fallback — 전환 안전망).
-                rules = service_registry.alert_rules(config)
-                if rules:
-                    svc_rules   = [r for r in rules if r.get('scope') != 'agent']
-                    agent_rules = [r for r in rules if r.get('scope') == 'agent']
-                    for r in svc_rules:
-                        thr = r.get('threshold', ALERT_RTP_THRESHOLD)
-                        mo = (r.get('msg_open') or r.get('type', '')).format(pct=pct, threshold=thr)
-                        mc = (r.get('msg_close') or '').format(pct=pct, threshold=thr)
-                        _transition(r['type'], _eval_alert_rule(r, ctx), r.get('severity', 'warning'), mo, mc)
-                    if agent_rules:
-                        proc_down_targets = {(r.get('target') or '').lower()
-                                             for r in svc_rules if r.get('check') == 'process_down'}
-                        _sweep_agent_alerts(agent_rules, proc_down_targets)
-                else:
-                    _transition('csp_down', not bool(csp), 'critical', 'CSP 프로세스 응답 없음', 'CSP 응답 정상화')
-                    _transition('cmp_down', not bool(cmp), 'critical', 'CMP 프로세스 응답 없음', 'CMP 응답 정상화')
-                    _transition('db_down', not db_ok, 'critical', 'DB 연결 끊김', 'DB 연결 복구')
-                    _transition('rtp_high', pct >= ALERT_RTP_THRESHOLD, 'warning',
-                                f'RTP 포트 사용률 {pct}% ({ALERT_RTP_THRESHOLD}% 초과)', f'RTP 포트 사용률 {pct}% (정상)')
+                rules = service_registry.alert_rules(config)   # 표준 정규화됨
+                svc_rules   = [r for r in rules if r.get('scope') != 'agent']
+                agent_rules = [r for r in rules if r.get('scope') == 'agent']
+                for r in svc_rules:
+                    thr = r.get('threshold', ALERT_RTP_THRESHOLD)
+                    mo = r.get('mo_instance') or f"cims/{r.get('target', '')}"
+                    msg_open = _fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr)
+                    msg_close = _fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr)
+                    _transition(r, mo, 'oam', _eval_alert_rule(r, ctx), msg_open, msg_close)
+                if agent_rules:
+                    proc_down_targets = {(r.get('target') or '').lower()
+                                         for r in svc_rules if r.get('check') == 'process_down'}
+                    _sweep_agent_alerts(agent_rules, proc_down_targets)
             except Exception as e:
-                logger.log_error(f"[alert-sweep] error: {e}")
+                logger.log_error(f"[alarm-sweep] error: {e}")
 
         # ── sync_txn timeout sweeper ────────────────────────────────────
         SYNC_TXN_SWEEP_INTERVAL = int(config.get('SyncTxnSweepSec', 15))
