@@ -10,6 +10,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   Manager(NMS)로 보고하는 인터페이스. CIMS 가 향후 상위 NMS 와 연동할 때의 정합 기준.
 - **ITU-T X.733** — *Systems Management: Alarm reporting function.* 위 IRP 가 기반하는 알람(장애) 속성 모델.
 - **ITU-T X.730 / X.731** — *Object Management / State Management.* 정상 동작 통지(객체 생성·삭제, **stateChangeNotification**) — 알람과 구분되는 **이벤트** 규격(§3.6).
+- **IETF RFC 3877** — *Alarm Management Information Base (MIB).* X.733 의 SNMP 표준화 — 알람 정의 카탈로그(`alarmModelTable`) + 활성 알람(`alarmActiveTable`) 분리. 향후 SNMP/NMS northbound 연동 기준(§7.2).
 - (참고) **ITU-T M.3100 / X.736 / X.740** — 관리객체 모델 / 보안 알람 / 보안감사(audit) 통지.
 
 ### 1.1 X.733 핵심 알람 속성
@@ -67,6 +68,8 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   "metric": "프로세스 가용성",
   "msg_open": "{mo} 프로세스 응답 없음",   // → specificProblem ({mo}=mo_instance)
   "msg_close": "{mo} 정상화",
+  "effect": "해당 서비스 호처리 중단",      // (선택) 영향 — 운영 runbook (Clearwater 벤치마크 §7.1)
+  "action": "프로세스 재기동 / 로그 확인",  // (선택) 권장 조치
   "scope": "service"                   // service|agent (유지)
 }
 ```
@@ -170,14 +173,14 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 2. **sweeper** (`oam_app.py`): `_transition` 키를 `code@mo_instance` 로 정규화 + open 시 `alarm_id` 생성. `_emit` 가 code/표준필드/`source`(mo_class·mo_instance·detected_by) 동반 기록.
 3. **alert_log** (`alert_log.py`): record/read 가 신규 필드 통과(free-form JSONL 호환). open↔close 상관을 `alarm_id` 기반으로(현 type 페어링 대체). summary 에 event_type/severity 분포 추가(선택).
 4. **API** (`alerts.py`): `/alerts` 이벤트에 code/source/alarm_id 노출, `/rules` 에 code/event_type/probable_cause/severity(6), **신규 `GET /alerts/catalog`**(코드 카탈로그).
-5. **UI**: AlertsPage 심각도 6색 배지 + code/eventType/cause/source 컬럼 · 필터(심각도/유형/소스). AlertBannerWidget 심각도색. ServiceDescriptors 폼(ServiceForm)의 알람 규칙 입력에 code/severity(6)/event_type(5)/probable_cause/mo_class select 추가.
+5. **UI**: AlertsPage 심각도 6색 배지 + code/eventType/cause/source 컬럼 + 상세에 **effect/action(runbook)** 표시 · 필터(심각도/유형/소스). AlertBannerWidget 심각도색. ServiceDescriptors 폼(ServiceForm)의 알람 규칙 입력에 code/severity(6)/event_type(5)/probable_cause/mo_class + effect/action 추가.
 6. **타입**: `serviceDescriptors.AlertRule` + `alerts.AlertEvent/AlertRule` 확장(code/source/alarm_id).
 
 ## 5. 단계 계획
 
-- **P0 — 분류 체계 + 코드/소스** (본 설계의 §3.1~3.4): `code`(카탈로그) · perceived_severity(6) · event_type(5) · probable_cause · source(mo_class/mo_instance/detected_by) · `alarm_id`(occurrence). 규칙/이벤트/API(+/catalog)/UI/폼 전파. 하위호환.
+- **P0 — 분류 체계 + 코드/소스** (본 설계의 §3.1~3.4): `code`(카탈로그) · perceived_severity(6) · event_type(5) · probable_cause · source(mo_class/mo_instance/detected_by) · `alarm_id`(occurrence) · (선택) `effect`/`action`(runbook, §7.1). 규칙/이벤트/API(+/catalog)/UI/폼 전파. 하위호환.
 - **P1 — 라이프사이클**: ackState/ackTime/ackUser + clearTime 명시 + `PATCH /alerts/{alarm_id}/ack` API + UI 승인 버튼. 운영 감사추적.
-- **P2 — 상관/연동**: correlatedNotifications(연관 알람, alarm_id 참조), 상위 NMS 연동(32.111 IRP Northbound 매핑).
+- **P2 — 상관/연동**: correlatedNotifications(연관 알람, alarm_id 참조), **SNMP/NMS northbound**(§7.2, RFC3877 alarmModel ↔ code 매핑 + 32.111 IRP / VES alarmCondition 매핑).
 
 ## 6. 하위호환·이행
 
@@ -186,6 +189,41 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 - 규칙은 `event_type`/`probable_cause` 누락 시 기본값(processingError/—) 부여하는 정규화 헬퍼로 흡수(데이터 미보강 descriptor 안전).
 - 옛 per-process type(`csp_down`/`cmp_down`/`module_down`)은 read 시 `process_down` 클래스 + `source.mo_instance` 로 매핑하는 alias 표로 흡수 → 기존 이력/배너 무중단.
 
+## 7. 벤치마크 — 다른 통신 서버/규격의 알람 코드 정의
+
+본 설계의 정합성 확인 + 보강점 도출을 위해 실제 통신 서버/규격의 알람 정의 방식을 조사.
+
+| 항목 | RFC 3877 (Alarm MIB) | Project Clearwater (Metaswitch IMS) | 3GPP 32.111-2 | ONAP VES / ETSI NFV | **CIMS(본 설계)** |
+|---|---|---|---|---|---|
+| 코드(카탈로그) | `alarmModelIndex`(int) | numeric OID, 컴포넌트별 범위 | alarmType | `alarmCondition`(str) | `code` `CIMS-PRC-001` |
+| 활성/occurrence | `alarmActiveTable` | active alarm | alarmId | eventId | `alarm_id` |
+| severity | X.733 6 | X.733 6 | X.733 6 | 5(NORMAL 포함) | 6 |
+| 분류 | eventType | 조건명(PROCESS_FAIL) | eventType | eventName | event_type 5 |
+| 원인 | probableCause | cause | probableCause | — | probable_cause |
+| **영향/조치** | — | **effect + action 보유** | — | vfStatus | (선택) effect/action ← §7.1 |
+| 코드↔메시지 분리 | ✅ | ✅ | ✅ | ✅(alarmCondition↔specificProblem) | ✅(code/type↔message) |
+
+관찰:
+- **알람 코드(카탈로그) + 활성 알람(occurrence) 분리**, **severity X.733 6단계**, **조건 기반 명명**(객체는 source) — 4종 모두 공통. 본 설계와 정합.
+- Clearwater 는 각 알람 정의에 **effect(영향) + recommended action(조치)** 까지 포함(운영 runbook). SIP 서버(Kamailio/OpenSIPS)는 SNMP/syslog/HEP 캡처 중심으로, 풍부한 알람 카탈로그는 IMS/NFV(위 4종)가 기준.
+
+### 7.1 보강 — effect / recommended action (운영 runbook)
+
+알람 정의에 `effect`(영향)·`action`(권장 조치)를 선택 필드로(§3.1). NOC 가 알람만 보고 즉시 대응 + AlertsPage/배너에 표시. 예:
+
+| code / type | effect | recommended action |
+|---|---|---|
+| `CIMS-PRC-001` process_down | 해당 인스턴스 호처리/기능 중단 | 프로세스 재기동, 로그/코어 확인, HA 절체 점검 |
+| `CIMS-COM-001` connection_lost | 의존 자원(DB/트렁크) 사용 기능 저하 | 연결성/방화벽/원격 노드 상태 확인 |
+| `CIMS-QOS-001` threshold_crossed | 용량 임계 근접 — 추가 부하 시 실패 위험 | 사용량 원인 파악, 자원 증설/정리 |
+
+### 7.2 보강 — SNMP / NMS northbound 매핑 (P2)
+
+상위 NMS 연동 시 `code` 를 표준 식별자로 매핑:
+- **RFC 3877 alarmModel**: `code` → `alarmModelIndex`(정수, 도메인별 범위 예약) + perceived_severity → `alarmModelState`. 활성 알람 → `alarmActiveTable`(alarm_id).
+- **3GPP 32.111-2 IRP / VES**: code → alarmType/`alarmCondition`, source.mo_instance → managedObjectInstance, message → specificProblem, perceived_severity → eventSeverity.
+- 매핑은 별도 테이블(code↔int OID)로 관리 — CIMS 내부 모델은 문자열 code 유지, northbound 게이트웨이에서 변환.
+
 ## 관련
 - `console_platform.md` (Service Descriptor: modules/alert_rules/data_sources) · `features/monitoring.md`
-- 3GPP TS 32.111-2 (Alarm IRP), ITU-T X.733 (Alarm reporting)
+- 3GPP TS 32.111-2 (Alarm IRP) · ITU-T X.733 (Alarm reporting) · IETF RFC 3877 (Alarm MIB) · ONAP VES (fault) / ETSI NFV · Project Clearwater (IMS 알람 사례)
