@@ -25,6 +25,7 @@ export interface WidgetDef {
 export interface WidgetPlacement {
   widgetId: string
   w?: number                      // 12-col span. 미지정 시 WidgetDef.defaultSize.w → 12.
+  h?: number                      // 높이(px). 지정 시 그 높이로 고정 + 내부 스크롤. 미지정=자동(내용 높이).
   config?: Record<string, unknown>
 }
 

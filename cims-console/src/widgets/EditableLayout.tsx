@@ -13,6 +13,10 @@ import type { PageLayout, WidgetPlacement } from './types'
 const WIDTH_OPTS: { v: number; label: string }[] = [
   { v: 12, label: '전체' }, { v: 6, label: '1/2' }, { v: 4, label: '1/3' }, { v: 3, label: '1/4' },
 ]
+const HEIGHT_OPTS: { v: number; label: string }[] = [
+  { v: 0, label: '높이:자동' }, { v: 240, label: '높이:240' }, { v: 360, label: '높이:360' },
+  { v: 480, label: '높이:480' }, { v: 640, label: '높이:640' },
+]
 
 function clone(l: PageLayout): PageLayout {
   return JSON.parse(JSON.stringify(l))
@@ -50,6 +54,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
   })
   const remove = (i: number) => mutate(ws => ws.filter((_, k) => k !== i))
   const setWidth = (i: number, w: number) => mutate(ws => ws.map((p, k) => k === i ? { ...p, w } : p))
+  const setHeight = (i: number, h: number) => mutate(ws => ws.map((p, k) => k === i ? { ...p, h: h || undefined } : p))
   const addWidget = () => {
     if (!addId) return
     const def = getWidget(addId)
@@ -133,11 +138,15 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
                             style={{ fontSize: 11, padding: '1px 2px' }} title="폭">
                       {WIDTH_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
                     </select>
+                    <select value={p.h ?? 0} onChange={e => setHeight(i, parseInt(e.target.value))}
+                            style={{ fontSize: 11, padding: '1px 2px' }} title="높이">
+                      {HEIGHT_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+                    </select>
                     <button className="btn btn--sm" onClick={() => remove(i)} title="제거"
                             style={{ color: 'var(--danger)' }}>✕</button>
                   </div>
                 </div>
-                <div style={{ pointerEvents: 'none', opacity: 0.85 }}>
+                <div style={{ pointerEvents: 'none', opacity: 0.85, ...(p.h ? { maxHeight: p.h, overflowY: 'auto' as const } : {}) }}>
                   {Comp ? <Comp config={p.config} /> : <div style={{ color: 'var(--danger)', fontSize: 12 }}>알 수 없는 위젯: {p.widgetId}</div>}
                 </div>
               </div>

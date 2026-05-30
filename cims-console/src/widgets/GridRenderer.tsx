@@ -20,8 +20,10 @@ export function GridRenderer({ layout }: { layout: PageLayout }) {
         const def = getWidget(p.widgetId)
         const span = Math.min(Math.max(p.w ?? def?.defaultSize?.w ?? 12, 1), 12)
         const Comp = def?.component
+        // h(px) 지정 시 높이 고정 + 내부 스크롤 (내용 가변으로 커지는 것 방지).
+        const hStyle = p.h ? { maxHeight: p.h, overflowY: 'auto' as const } : {}
         return (
-          <div key={`${p.widgetId}-${i}`} style={{ gridColumn: `span ${span}`, minWidth: 0 }}>
+          <div key={`${p.widgetId}-${i}`} style={{ gridColumn: `span ${span}`, minWidth: 0, ...hStyle }}>
             {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
           </div>
         )
