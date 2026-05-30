@@ -10,15 +10,24 @@ export interface ServiceModule {
 }
 
 export interface AlertRule {
-  type: string
-  severity?: string
-  check?: string
+  type: string                  // 조건 클래스 (process_down/connection_lost/threshold_crossed)
+  code?: string                 // 알람 코드 (CIMS-PRC-001 …)
+  perceived_severity?: string   // critical|major|minor|warning|indeterminate
+  severity?: string             // 구 호환
+  event_type?: string           // communications|qualityOfService|processingError|equipment|environmental
+  probable_cause?: string       // X.733 Annex
+  mo_class?: string             // software|service|equipment|host|network
+  mo_instance?: string          // cims/csp 등 (service 규칙)
+  check?: string                // 평가 방식
   target?: string
   threshold?: number
   unit?: string
   metric?: string
   msg_open?: string
   msg_close?: string
+  effect?: string
+  recommended_action?: string
+  scope?: string
 }
 
 import type { DataSourceSpec } from '../widgets/shapes/dataSourceSpec'

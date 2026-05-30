@@ -30,6 +30,11 @@ function Btn({ onClick, children, danger, disabled }: { onClick: () => void; chi
 const SHAPES = ['time-bar', 'kpi', 'distribution', 'table'] as const
 const SHAPE_LABEL: Record<string, string> = { 'time-bar': '시계열 차트', kpi: 'KPI', distribution: '분포', table: '표' }
 const CHECKS = ['process_down', 'db_down', 'rtp_pct_gte', 'disk_high', 'module_down']
+// 알람 표준화(X.733/32.111)
+const ALARM_CLASSES = ['process_down', 'connection_lost', 'threshold_crossed']
+const SEVERITIES = ['critical', 'major', 'minor', 'warning', 'indeterminate']
+const EVENT_TYPES = ['processingError', 'communications', 'qualityOfService', 'equipment', 'environmental']
+const MO_CLASSES = ['software', 'service', 'host', 'equipment', 'network']
 
 // ════════════════════════════════════════════════════════════════
 //  서비스 정의 폼 (id/label + modules + alert_rules)
@@ -105,34 +110,59 @@ export function ServiceForm({ initial, onClose, onSaved }: {
         <section>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
             <b style={{ fontSize: 13 }}>알람 규칙 ({rules.length})</b>
-            <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setRules(rs => [...rs, { type: '', severity: 'warning', check: 'process_down' }])}>＋ 규칙</Btn></span>
+            <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setRules(rs => [...rs, { type: 'process_down', code: 'CIMS-PRC-001', perceived_severity: 'critical', event_type: 'processingError', mo_class: 'software', check: 'process_down' }])}>＋ 규칙</Btn></span>
           </div>
           {rules.map((r, i) => (
             <div key={i} style={rowCard}>
+              {/* 1행: 클래스 / 코드 / 심각도 / check */}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <Field label="type"><input className="form-input" style={{ ...inp, width: 110 }} value={r.type}
-                  onChange={e => upRule(i, { type: e.target.value })} /></Field>
-                <Field label="심각도"><select className="form-input" style={{ ...inp, width: 90 }} value={r.severity ?? 'warning'}
-                  onChange={e => upRule(i, { severity: e.target.value })}>
-                  <option value="critical">critical</option><option value="warning">warning</option></select></Field>
-                <Field label="check"><select className="form-input" style={{ ...inp, width: 130 }} value={r.check ?? ''}
+                <Field label="클래스(type)"><select className="form-input" style={{ ...inp, width: 130 }} value={r.type}
+                  onChange={e => upRule(i, { type: e.target.value })}>
+                  {ALARM_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}</select></Field>
+                <Field label="code"><input className="form-input" style={{ ...inp, width: 110 }} value={r.code ?? ''}
+                  onChange={e => upRule(i, { code: e.target.value })} placeholder="CIMS-PRC-001" /></Field>
+                <Field label="심각도"><select className="form-input" style={{ ...inp, width: 100 }} value={r.perceived_severity ?? r.severity ?? 'warning'}
+                  onChange={e => upRule(i, { perceived_severity: e.target.value })}>
+                  {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
+                <Field label="check"><select className="form-input" style={{ ...inp, width: 120 }} value={r.check ?? ''}
                   onChange={e => upRule(i, { check: e.target.value })}>
                   {CHECKS.map(c => <option key={c} value={c}>{c}</option>)}</select></Field>
+                <span style={{ marginLeft: 'auto', paddingBottom: 4 }}><Btn danger onClick={() => setRules(rs => rs.filter((_, k) => k !== i))}>✕</Btn></span>
+              </div>
+              {/* 2행: event_type / probable_cause / mo_class / mo_instance / 조건부 target·threshold */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <Field label="event_type"><select className="form-input" style={{ ...inp, width: 140 }} value={r.event_type ?? 'processingError'}
+                  onChange={e => upRule(i, { event_type: e.target.value })}>
+                  {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></Field>
+                <Field label="probable_cause"><input className="form-input" style={{ ...inp, width: 160 }} value={r.probable_cause ?? ''}
+                  onChange={e => upRule(i, { probable_cause: e.target.value })} placeholder="softwareError" /></Field>
+                <Field label="mo_class"><select className="form-input" style={{ ...inp, width: 100 }} value={r.mo_class ?? 'service'}
+                  onChange={e => upRule(i, { mo_class: e.target.value })}>
+                  {MO_CLASSES.map(m => <option key={m} value={m}>{m}</option>)}</select></Field>
+                <Field label="mo_instance" hint="(소스, service)"><input className="form-input" style={{ ...inp, width: 120 }} value={r.mo_instance ?? ''}
+                  onChange={e => upRule(i, { mo_instance: e.target.value })} placeholder="cims/csp" /></Field>
                 {r.check === 'process_down' && (
-                  <Field label="target" hint="(모듈명)"><input className="form-input" style={{ ...inp, width: 90 }} value={r.target ?? ''}
+                  <Field label="target" hint="(모듈명)"><input className="form-input" style={{ ...inp, width: 80 }} value={r.target ?? ''}
                     onChange={e => upRule(i, { target: e.target.value })} /></Field>)}
                 {(r.check === 'rtp_pct_gte' || r.check === 'disk_high') && (
                   <Field label="threshold"><input className="form-input" style={{ ...inp, width: 80 }} type="number" value={r.threshold ?? ''}
                     onChange={e => upRule(i, { threshold: e.target.value ? Number(e.target.value) : undefined })} /></Field>)}
-                <span style={{ marginLeft: 'auto', paddingBottom: 4 }}><Btn danger onClick={() => setRules(rs => rs.filter((_, k) => k !== i))}>✕</Btn></span>
               </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                <Field label="metric(표시명)"><input className="form-input" style={{ ...inp, width: 130 }} value={r.metric ?? ''}
+              {/* 3행: metric / 메시지 */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                <Field label="metric(표시명)"><input className="form-input" style={{ ...inp, width: 120 }} value={r.metric ?? ''}
                   onChange={e => upRule(i, { metric: e.target.value })} /></Field>
-                <Field label="발생 메시지"><input className="form-input" style={{ ...inp, width: 200 }} value={r.msg_open ?? ''}
+                <Field label="발생 메시지" hint="({mo} 치환)"><input className="form-input" style={{ ...inp, width: 200 }} value={r.msg_open ?? ''}
                   onChange={e => upRule(i, { msg_open: e.target.value })} /></Field>
-                <Field label="해제 메시지"><input className="form-input" style={{ ...inp, width: 200 }} value={r.msg_close ?? ''}
+                <Field label="해제 메시지"><input className="form-input" style={{ ...inp, width: 160 }} value={r.msg_close ?? ''}
                   onChange={e => upRule(i, { msg_close: e.target.value })} /></Field>
+              </div>
+              {/* 4행: effect / recommended_action (운영 runbook) */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                <Field label="영향(effect)"><input className="form-input" style={{ ...inp, width: 240 }} value={r.effect ?? ''}
+                  onChange={e => upRule(i, { effect: e.target.value })} /></Field>
+                <Field label="권장 조치(action)"><input className="form-input" style={{ ...inp, width: 240 }} value={r.recommended_action ?? ''}
+                  onChange={e => upRule(i, { recommended_action: e.target.value })} /></Field>
               </div>
             </div>
           ))}

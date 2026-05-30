@@ -3,14 +3,33 @@ import { alertsApi, type AlertEvent, type AlertSummaryResponse, type AlertRulesR
 import { useToast } from '../components/Toast'
 
 const TYPE_LABEL: Record<string, string> = {
-  csp_down: 'CSP 다운',
-  cmp_down: 'CMP 다운',
-  db_down: 'DB 다운',
-  rtp_high: 'RTP 포트 사용률',
+  // 조건 클래스 (표준)
+  process_down: '프로세스 다운',
+  connection_lost: '연결 끊김',
+  threshold_crossed: '임계 초과',
+  // 구 type (하위호환 표시)
+  csp_down: '프로세스 다운', cmp_down: '프로세스 다운', module_down: '프로세스 다운',
+  db_down: '연결 끊김', rtp_high: '임계 초과', disk_high: '임계 초과',
 }
 
 function typeLabel(t: string): string {
   return TYPE_LABEL[t] || t
+}
+
+// X.733 perceived severity → 배지 클래스 (6단계).
+function sevBadge(sev?: string): string {
+  switch (sev) {
+    case 'critical': return 'badge--red'
+    case 'major': return 'badge--red'
+    case 'minor': return 'badge--yellow'
+    case 'warning': return 'badge--yellow'
+    case 'indeterminate': return 'badge--blue'
+    case 'cleared': return 'badge--gray'
+    default: return 'badge--blue'
+  }
+}
+function evSev(e: { perceived_severity?: string; severity?: string }): string {
+  return e.perceived_severity || e.severity || 'warning'
 }
 
 function fmtTime(iso: string): string {
@@ -74,23 +93,29 @@ function DailyBars({ data }: { data: { date: string; opens: number }[] }) {
  * open/close 페어링: 같은 type 의 가장 가까운 후속 close 를 찾아 매칭.
  * 매칭 안 된 open 은 currently open 으로 표시. close 는 standalone 으로도 표시.
  */
+// 활성 식별 키 = alarm_id 의 occurrence epoch 제거(code@mo) / 구 레코드는 type.
+function akey(ev: AlertEvent): string {
+  if (ev.alarm_id) return ev.alarm_id.replace(/@\d+$/, '')
+  return ev.type
+}
+
 function pairEvents(events: AlertEvent[]): AlertRow[] {
   const sortedAsc = [...events].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
   const rows: AlertRow[] = []
-  const openByType: Record<string, AlertRow> = {}
+  const openByKey: Record<string, AlertRow> = {}
   for (const ev of sortedAsc) {
+    const k = akey(ev)
     if (ev.action === 'open') {
       const row: AlertRow = { ...ev }
       rows.push(row)
-      openByType[ev.type] = row
+      openByKey[k] = row
     } else {  // close
-      const open = openByType[ev.type]
+      const open = openByKey[k]
       if (open) {
         open.resolved_at = ev.ts
         open.duration = durationBetween(open.ts, ev.ts)
-        delete openByType[ev.type]
+        delete openByKey[k]
       } else {
-        // standalone close (open 이 보존 기간 이전이라 못 찾음)
         rows.push({ ...ev })
       }
     }
@@ -188,20 +213,22 @@ export default function AlertsPage() {
             <thead>
               <tr>
                 <th style={{ width: 80 }}>심각도</th>
-                <th style={{ width: 160 }}>유형</th>
-                <th>대상 지표</th>
-                <th style={{ width: 200 }}>발생 조건</th>
+                <th style={{ width: 110 }}>코드</th>
+                <th style={{ width: 120 }}>클래스</th>
+                <th style={{ width: 130 }}>event type</th>
+                <th>대상 (지표·소스)</th>
+                <th style={{ width: 180 }}>발생 조건</th>
               </tr>
             </thead>
             <tbody>
-              {rules.rules.map(r => {
-                const badgeCls = r.severity === 'critical' ? 'badge--red'
-                  : r.severity === 'warning' ? 'badge--yellow' : 'badge--blue'
-                return (
-                  <tr key={r.type}>
-                    <td><span className={`badge ${badgeCls}`}>{r.severity}</span></td>
+              {rules.rules.map((r, i) => (
+                  <tr key={`${r.code}-${r.mo_instance || r.scope}-${i}`}
+                      title={[r.effect && `영향: ${r.effect}`, r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')}>
+                    <td><span className={`badge ${sevBadge(evSev(r))}`}>{evSev(r)}</span></td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</td>
                     <td>{typeLabel(r.type)}</td>
-                    <td>{r.metric}</td>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.event_type || '-'}</td>
+                    <td>{r.metric}{r.mo_instance && <code style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>{r.mo_instance}</code>}</td>
                     <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
                       {r.condition}
                       {r.threshold != null && (
@@ -211,8 +238,7 @@ export default function AlertsPage() {
                       )}
                     </td>
                   </tr>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         </div>
@@ -226,7 +252,8 @@ export default function AlertsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th style={{ width: 160 }}>유형</th>
+                <th style={{ width: 120 }}>클래스</th>
+                <th style={{ width: 160 }}>소스</th>
                 <th style={{ width: 80, textAlign: 'right' }}>발생</th>
                 <th style={{ width: 80, textAlign: 'right' }}>해제</th>
                 <th style={{ width: 100 }}>현재 상태</th>
@@ -235,9 +262,10 @@ export default function AlertsPage() {
               </tr>
             </thead>
             <tbody>
-              {summary.by_type.map(s => (
-                <tr key={s.type}>
+              {summary.by_type.map((s, i) => (
+                <tr key={s.key || `${s.type}-${i}`}>
                   <td>{typeLabel(s.type)}</td>
+                  <td><code style={{ fontSize: 11 }}>{s.mo_instance || '-'}</code></td>
                   <td style={{ textAlign: 'right' }}>{s.opens}</td>
                   <td style={{ textAlign: 'right' }}>{s.resolved}</td>
                   <td>
@@ -269,22 +297,27 @@ export default function AlertsPage() {
             <thead>
               <tr>
                 <th style={{ width: 80 }}>심각도</th>
-                <th style={{ width: 140 }}>유형</th>
+                <th style={{ width: 110 }}>클래스</th>
+                <th style={{ width: 150 }}>소스</th>
                 <th>메시지</th>
-                <th style={{ width: 160 }}>발생 시각</th>
-                <th style={{ width: 160 }}>해제 시각</th>
-                <th style={{ width: 100 }}>지속 시간</th>
+                <th style={{ width: 150 }}>발생 시각</th>
+                <th style={{ width: 150 }}>해제 시각</th>
+                <th style={{ width: 90 }}>지속 시간</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r, i) => {
                 const isOpen = r.action === 'open' && !r.resolved_at
-                const sev = r.severity || 'warning'
-                const badgeCls = sev === 'critical' ? 'badge--red' : sev === 'warning' ? 'badge--yellow' : 'badge--blue'
+                const sev = evSev(r)
+                const tip = [r.code && `code: ${r.code}`, r.event_type && `eventType: ${r.event_type}`,
+                             r.probable_cause && `cause: ${r.probable_cause}`, r.effect && `영향: ${r.effect}`,
+                             r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')
                 return (
-                  <tr key={`${r.ts}-${r.type}-${i}`} style={isOpen ? { background: 'rgba(220, 53, 69, 0.08)' } : undefined}>
-                    <td><span className={`badge ${badgeCls}`}>{sev}</span></td>
+                  <tr key={`${r.ts}-${r.alarm_id || r.type}-${i}`} title={tip || undefined}
+                      style={isOpen ? { background: 'rgba(220, 53, 69, 0.08)' } : undefined}>
+                    <td><span className={`badge ${sevBadge(sev)}`}>{sev}</span></td>
                     <td>{typeLabel(r.type)}</td>
+                    <td><code style={{ fontSize: 11 }}>{r.source?.mo_instance || '-'}</code></td>
                     <td>{r.message}{isOpen && <span style={{ marginLeft: 8, color: 'var(--danger)', fontSize: 11, fontWeight: 600 }}>OPEN</span>}</td>
                     <td className="ts">{fmtTime(r.ts)}</td>
                     <td className="ts">{r.resolved_at ? fmtTime(r.resolved_at) : (r.action === 'open' ? '—' : fmtTime(r.ts))}</td>

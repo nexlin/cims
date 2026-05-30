@@ -139,16 +139,20 @@ export default function ServiceDescriptorsPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</div>
               ) : (
                 <table className="data-table" style={{ margin: 0 }}>
-                  <thead><tr><th>유형</th><th>심각도</th><th>check</th><th>threshold</th></tr></thead>
+                  <thead><tr><th>코드</th><th>클래스</th><th>심각도</th><th>소스</th></tr></thead>
                   <tbody>
-                    {(svc.alert_rules || []).map(r => (
-                      <tr key={r.type}>
+                    {(svc.alert_rules || []).map((r, i) => {
+                      const sev = r.perceived_severity || r.severity || 'warning'
+                      return (
+                      <tr key={`${r.code}-${r.mo_instance || r.target || i}`}
+                          title={[r.effect && `영향: ${r.effect}`, r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')}>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '—'}</td>
                         <td>{r.type}</td>
-                        <td><span className={`badge ${r.severity === 'critical' ? 'badge--red' : 'badge--yellow'}`}>{r.severity}</span></td>
-                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.check}</td>
-                        <td>{r.threshold != null ? `${r.threshold}${r.unit || ''}` : '—'}</td>
+                        <td><span className={`badge ${sev === 'critical' || sev === 'major' ? 'badge--red' : sev === 'indeterminate' ? 'badge--blue' : 'badge--yellow'}`}>{sev}</span></td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.mo_instance || (r.target ? `cims/${r.target}` : '—')}</td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               )}
