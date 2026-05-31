@@ -296,8 +296,15 @@ cmd_ha() {
             done
             # 옛 slug 의 enable 심볼릭링크 잔재 제거 (예: 재구성으로 svc 이름이 바뀐 경우)
             _ha_prune_stale_instances $enabled_svcs
+            # VIP 를 보유하지 않은 BACKUP 노드도 VIP 로 bind 가능해야 fail-over 즉시 처리
+            # (Hot Standby — Standby 도 모듈 기동 유지). private 환경: apt/외부 의존 없이
+            # sysctl 로 직접 설정 + /etc/sysctl.d 영구화. agent 가 sudo 로 cims-ha 를 실행하므로
+            # 별도 수동 sudo 불요 — "HA install/update(apply) 시 자동" 충족.
+            info "net.ipv4.ip_nonlocal_bind=1 설정 (VIP backup bind 전제)"
+            echo 'net.ipv4.ip_nonlocal_bind = 1' | sudo tee /etc/sysctl.d/99-cims-ha.conf >/dev/null
+            sudo sysctl -w net.ipv4.ip_nonlocal_bind=1 >/dev/null 2>&1 || true
             sudo systemctl restart keepalived
-            ok "keepalived + systemd unit 적용 완료 (services start 는 keepalived notify 가 제어)"
+            ok "keepalived + systemd unit + ip_nonlocal_bind 적용 완료 (services start 는 keepalived notify 가 제어)"
             ;;
         start)  sudo systemctl start  keepalived ;;
         stop)   sudo systemctl stop   keepalived ;;
