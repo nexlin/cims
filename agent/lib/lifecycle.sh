@@ -215,12 +215,14 @@ _start_cmp_variant() {
     # (dev 모드 등) 와 후방 호환.
     local _overlay="$DIST_DIR/$name/config.json"
     [[ ! -f "$_overlay" ]] && _overlay="$DIST_DIR/config.json"
-    _apply_overlay_to_module_config "$_overlay" "$cfg"
+    # pre-launch 단계(overlay 머지·좀비 정리)는 best-effort — 어떤 이유로든(도구 부재
+    # 등) 실패해도 set -e 하에서 모듈 start 를 abort 시키지 않도록 모두 non-fatal.
+    _apply_overlay_to_module_config "$_overlay" "$cfg" || true
     local ctrl_port
     ctrl_port=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 영향 차단
-    kill_stray "$bin"
-    _kill_own_install_listener "$bin" "$ctrl_port" udp
+    kill_stray "$bin" || true
+    _kill_own_install_listener "$bin" "$ctrl_port" udp || true
     info "$upper 시작..."
     cd "$DIST_DIR/$name"
     bin/$name config/$name.json >> "$LOG_DIR/$name.log" 2>&1 &
@@ -251,11 +253,12 @@ _start_csp_variant() {
     # (dev 모드 등) 와 후방 호환.
     local _overlay="$DIST_DIR/$name/config.json"
     [[ ! -f "$_overlay" ]] && _overlay="$DIST_DIR/config.json"
-    _apply_overlay_to_module_config "$_overlay" "$cfg"
+    # pre-launch 단계는 best-effort — 어떤 이유로든 실패해도 start abort 안 함.
+    _apply_overlay_to_module_config "$_overlay" "$cfg" || true
     local sip_port; sip_port=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PSP 127.0.0.3 등) 영향 차단
-    kill_stray "$bin"
-    _kill_own_install_listener "$bin" "$sip_port" udp
+    kill_stray "$bin" || true
+    _kill_own_install_listener "$bin" "$sip_port" udp || true
     info "$upper 시작..."
     cd "$DIST_DIR/$name"
     bin/$name config/$name.json -n >> "$LOG_DIR/$name.log" 2>&1 &
