@@ -104,7 +104,10 @@ if __name__ == '__main__':
     from services       import flow_logger, logger as csc_logger, config_cache, alert_log
     from handlers       import auth, recording
     from handlers.auth           import CIMS_AUTH_HANDLER_LIST
-    from handlers.users          import CIMS_USERS_HANDLER_LIST
+    # 가입자/PTT그룹 CRUD — admin.handle_users 는 /users/me 를 users.handle_users 로 위임하는
+    # superset 이라, /me(인증) + 가입자 admin(관리) 를 한 핸들러로 커버. (OAM=콘솔 단일 게이트웨이)
+    from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
+    from handlers.org            import CIMS_ORG_HANDLER_LIST
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
     from handlers.stats          import CIMS_STATS_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
@@ -268,7 +271,7 @@ if __name__ == '__main__':
         )
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_USERS_HANDLER_LIST
+            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
         ])
         admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
         admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
