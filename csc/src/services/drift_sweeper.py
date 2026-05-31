@@ -31,7 +31,11 @@ _PKG_DOMAIN = 'packages'
 
 def _records_hash(records) -> str:
     try:
-        payload = json.dumps(records or [], ensure_ascii=False, sort_keys=True).encode('utf-8')
+        # 멤버/스윕 간 jsonl 레코드 ORDER 가 달라도 동일 내용이면 같은 hash 가 되도록
+        # 각 레코드를 정규화(sort_keys) 직렬화 후 정렬 — 순서 차이로 인한 false drift
+        # (config_drift 알람 flapping) 방지. sort_keys 만으로는 dict 키만 정렬돼 부족.
+        norm = sorted(json.dumps(r, ensure_ascii=False, sort_keys=True) for r in (records or []))
+        payload = json.dumps(norm, ensure_ascii=False).encode('utf-8')
         return hashlib.sha256(payload).hexdigest()[:12]
     except Exception:
         return ""
