@@ -1197,6 +1197,145 @@ def job_apply_ip_config(params: dict) -> tuple:
     return rc, "\n".join(msgs), ""
 
 
+# ──────────────────────────────────────────────────────────────
+#  모듈 감독 (watchdog) — 죽은 모듈 auto-restart
+#
+#  desired-state = supervised.json { module: install_path }.
+#    - job start/restart 성공 → 등록, stop/uninstall → 해제 (의도적 stop 존중).
+#    - agent 기동 시 install_path/run/*.pid (= agent-managed start 표식) 에서 seed
+#      (watchdog 도입 이전부터 떠 있던 모듈 편입. build/dist 등 비-agent 인스턴스는
+#       이 run/ 에 pid 파일이 없어 자동 제외).
+#  watchdog tick (heartbeat 루프, OAM 연결 무관 로컬):
+#    supervised 모듈이 pgrep 으로 안 잡히면 cims-svc start 재시작. 지수 backoff
+#    (5→10→…→300s) 로 crash-loop 폭주 방지, 정상 감지 시 backoff 리셋.
+#  CIMS_AGENT_NO_SUPERVISE=1 로 비활성화.
+# ──────────────────────────────────────────────────────────────
+
+_SUPERVISE_FILE = os.path.join(os.path.dirname(_AGENT_DIR), "run", "supervised.json")
+_WATCHDOG_BACKOFF: dict = {}     # module -> {"ts": float, "fails": int}
+SUPERVISE_INTERVAL_SEC = 10
+
+
+def _find_cims_svc(install_path: str):
+    for c in (os.path.join(install_path, "agent", "bin", "cims-svc"),
+              os.path.join(_AGENT_DIR, "bin", "cims-svc"),
+              "/opt/cims-agent/agent/bin/cims-svc"):
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _run_cims_svc(install_path: str, action: str, svc: str, timeout: int = 60) -> tuple:
+    """cims-svc <action> <svc> 실행. CIMS_DIST_DIR + CIMS_PYTHON(에이전트 인터프리터,
+    private 호스트의 python3-PATH 부재 대비) 전달."""
+    script = _find_cims_svc(install_path)
+    if not script:
+        return 1, "", f"cims-svc not found (install_path={install_path}, agent_dir={_AGENT_DIR})"
+    env = dict(os.environ)
+    env["CIMS_DIST_DIR"] = install_path
+    env["CIMS_PYTHON"] = sys.executable
+    try:
+        res = subprocess.run([script, action, svc], capture_output=True, text=True,
+                             timeout=timeout, cwd=install_path, env=env)
+        return res.returncode, res.stdout[-4000:], res.stderr[-2000:]
+    except Exception as e:
+        return 2, "", f"exec failed: {e}"
+
+
+def _load_supervised() -> dict:
+    try:
+        with open(_SUPERVISE_FILE) as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_supervised(d: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(_SUPERVISE_FILE), exist_ok=True)
+        tmp = _SUPERVISE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, _SUPERVISE_FILE)
+    except Exception as e:
+        print(f"[agent][watchdog] supervised 저장 실패: {e}", flush=True)
+
+
+def _mark_supervised(svc: str, install_path: str) -> None:
+    if not svc or svc in _NON_DAEMON_MODULES:
+        return
+    d = _load_supervised()
+    if d.get(svc) != install_path:
+        d[svc] = install_path
+        _save_supervised(d)
+        print(f"[agent][watchdog] 감독 등록: {svc} ({install_path})", flush=True)
+
+
+def _unmark_supervised(svc: str) -> None:
+    if not svc:
+        return
+    d = _load_supervised()
+    if svc in d:
+        d.pop(svc, None)
+        _WATCHDOG_BACKOFF.pop(svc, None)
+        _save_supervised(d)
+        print(f"[agent][watchdog] 감독 해제: {svc}", flush=True)
+
+
+def _seed_supervised_from_pidfiles() -> None:
+    """agent 기동 시 1회 — install_path/run/*.pid 의 모듈을 감독 집합에 편입.
+    pid 파일은 agent 의 cims-svc start 만 만들므로 (build/dist 등 별도 인스턴스는
+    자기 run/ 사용) 정확히 agent-managed 모듈만 잡힌다."""
+    install_path = os.path.dirname(_AGENT_DIR)   # 예: /opt/cims-agent
+    pid_dir = os.path.join(install_path, "run")
+    if not os.path.isdir(pid_dir):
+        return
+    sup = _load_supervised()
+    changed = False
+    try:
+        for fn in os.listdir(pid_dir):
+            if not fn.endswith(".pid"):
+                continue
+            svc = fn[:-4]
+            if svc in _NON_DAEMON_MODULES or svc in sup:
+                continue
+            sup[svc] = install_path
+            changed = True
+    except Exception:
+        return
+    if changed:
+        _save_supervised(sup)
+        print(f"[agent][watchdog] pid 파일에서 감독 seed: {sorted(sup)}", flush=True)
+
+
+def supervise_tick() -> None:
+    """supervised 모듈 중 죽은 것(pgrep 미검출)을 backoff 와 함께 재시작."""
+    if os.environ.get("CIMS_AGENT_NO_SUPERVISE"):
+        return
+    sup = _load_supervised()
+    if not sup:
+        return
+    now = time.time()
+    for svc, install_path in list(sup.items()):
+        if svc in _NON_DAEMON_MODULES:
+            continue
+        if _pgrep_module(svc):
+            _WATCHDOG_BACKOFF.pop(svc, None)     # 정상 — backoff 리셋
+            continue
+        st = _WATCHDOG_BACKOFF.setdefault(svc, {"ts": 0.0, "fails": 0})
+        backoff = min(300, 5 * (2 ** st["fails"]))
+        if now - st["ts"] < backoff:
+            continue
+        st["ts"] = now
+        st["fails"] += 1
+        nxt = min(300, 5 * (2 ** st["fails"]))
+        print(f"[agent][watchdog] '{svc}' 다운 감지 — 재시작 (시도 {st['fails']}, 다음 backoff {nxt}s)", flush=True)
+        rc, out, err = _run_cims_svc(install_path, "start", svc)
+        tail = (err or out or "").strip().replace("\n", " ")[-160:]
+        print(f"[agent][watchdog] '{svc}' start rc={rc} {tail}", flush=True)
+
+
 def job_process_control(params: dict, job_type: str) -> tuple:
     """start/stop/restart — install_path/agent/bin/cims-svc 를 이용해 수행
     (Phase 1.B+, cims.sh 운영 명령 제거).
@@ -1219,28 +1358,15 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     #  2) _AGENT_DIR/bin/cims-svc — 일반 케이스. 에이전트가 자기 옆 bin/cims-svc 사용
     #     (install-agent.sh 가 /opt/cims-agent/agent/bin/ 에 둠).
     #  3) /opt/cims-agent/agent/bin/cims-svc — agent 가 다른 곳에서 실행되는 경우 명시 fallback
-    candidates = [
-        os.path.join(install_path, "agent", "bin", "cims-svc"),
-        os.path.join(_AGENT_DIR, "bin", "cims-svc"),
-        "/opt/cims-agent/agent/bin/cims-svc",
-    ]
-    script = next((c for c in candidates if os.path.isfile(c)), None)
-    if not script:
-        return 1, "", f"cims-svc not found (install_path={install_path}, agent_dir={_AGENT_DIR})"
-
-    argv = [script, job_type, svc]
-    env = dict(os.environ)
-    env["CIMS_DIST_DIR"] = install_path
-    # private/air-gapped 호스트엔 `python3` 가 PATH 에 없을 수 있다 — agent 자신의
-    # 인터프리터(반드시 존재)를 lifecycle.sh 에 전달해 overlay 머지 등의 python 호출이
-    # command-not-found(127)로 start 를 abort 시키지 않도록 한다.
-    env["CIMS_PYTHON"] = sys.executable
-    try:
-        res = subprocess.run(argv, capture_output=True, text=True, timeout=60,
-                              cwd=install_path, env=env)
-        return res.returncode, res.stdout[-4000:], res.stderr[-2000:]
-    except Exception as e:
-        return 2, "", f"exec failed: {e}"
+    rc, out, err = _run_cims_svc(install_path, job_type, svc)
+    # 모듈 감독 desired-state 갱신 — start/restart 성공 → 감독 등록, stop → 해제.
+    # (watchdog 가 supervised 집합의 죽은 모듈을 auto-restart)
+    if rc == 0:
+        if job_type in ("start", "restart"):
+            _mark_supervised(svc, install_path)
+        elif job_type == "stop":
+            _unmark_supervised(svc)
+    return rc, out, err
 
 
 def job_health_check(params: dict) -> tuple:
@@ -1589,6 +1715,8 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             rc, out, err = job_apply_ip_config(params)
         elif jt == "uninstall":
             install_path = params.get("install_path")
+            # 감독 해제 (watchdog 가 재시작하지 않도록)
+            _unmark_supervised((params.get("process_name") or params.get("service_kind") or "").lower())
             if install_path and os.path.isdir(install_path):
                 shutil.rmtree(install_path, ignore_errors=True)
                 rc, out, err = 0, f"removed {install_path}", ""
@@ -1699,7 +1827,10 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     global _MGMT_IP
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
+    _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
+
     next_metric = 0
+    next_supervise = 0
     fail_count = 0
     max_backoff = max(heartbeat_sec, 60)
     while True:
@@ -1755,6 +1886,14 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
         except Exception as e:
             fail_count += 1
             print(f"[agent] loop error (fail_count={fail_count}): {e}")
+
+        # 모듈 감독 — OAM 연결과 무관하게 로컬에서 죽은 supervised 모듈 재시작
+        if time.time() >= next_supervise:
+            try:
+                supervise_tick()
+            except Exception as e:
+                print(f"[agent][watchdog] tick error: {e}", flush=True)
+            next_supervise = time.time() + SUPERVISE_INTERVAL_SEC
 
         if fail_count == 0:
             sleep_sec = heartbeat_sec
