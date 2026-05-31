@@ -14,9 +14,16 @@ export type RouteDef = {
   title: string
   component: ComponentType
   adminOnly?: boolean
-  // SubTabs 에서 숨김 — 라우트 자체는 활성 (link 으로 진입 가능).
+  // 사이드바 하위항목에서 숨김 — 라우트 자체는 활성 (link/직접 URL 진입 가능).
   hidden?: boolean
 }
+
+// OAM 대영역 — EMS(Nokia NetAct 의 Monitor/Administer, TM Forum eTOM 의 Assurance/Fulfillment) 관례.
+//   ops(운용)   = 모니터링/실시간 = 대시보드·장애·성능·기록 (FCAPS 의 F/P + Accounting)
+//   admin(관리) = 프로비저닝/구성/유지보수 = 구성·시스템·릴리스·문서 (FCAPS 의 C + SW Mgmt)
+export type NavArea = 'ops' | 'admin'
+export const NAV_AREA_ORDER: NavArea[] = ['ops', 'admin']
+export const NAV_AREA_LABELS: Record<NavArea, string> = { ops: '운용', admin: '관리' }
 
 export type RouteSection = {
   key: string
@@ -25,6 +32,8 @@ export type RouteSection = {
   basePath: string
   defaultPath: string
   routes: RouteDef[]
+  // OAM 대영역 (운용/관리). 미지정 시 'admin' 취급.
+  area?: NavArea
   // nav 정렬 순서 (작을수록 앞). 미지정 시 50. 코어/서비스 섹션 병합 시 사용.
   order?: number
   // 이 섹션을 기여한 서비스 pack id (코어 섹션은 undefined). 향후 service on/off 토글용.

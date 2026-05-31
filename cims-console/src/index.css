@@ -1015,6 +1015,29 @@ body {
 .sidebar--collapsed .sidebar-nav { padding: 8px 6px; }
 .sidebar--collapsed .sidebar-item { justify-content: center; padding: 10px 0; }
 
+/* ── 2-레벨 펼침형 nav (영역 → 그룹 → 하위항목) ── */
+.sidebar-area { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-area + .sidebar-area { margin-top: 10px; }
+.sidebar-area-label {
+  padding: 6px 12px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--header-muted); opacity: .7;
+}
+.sidebar-group { display: flex; flex-direction: column; }
+.sidebar-group-head .sidebar-chevron { flex-shrink: 0; opacity: .55; }
+.sidebar-sub { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 3px; }
+.sidebar-subitem {
+  display: block; width: 100%; text-align: left;
+  padding: 7px 12px 7px 43px; /* 아이콘 폭만큼 들여쓰기 */
+  background: none; border: none; color: var(--sidebar-fg); cursor: pointer;
+  font-size: 12.5px; font-weight: 500; border-radius: var(--radius);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background .15s, color .15s; opacity: .85;
+}
+.sidebar-subitem:hover { color: var(--sidebar-fg-active); background: var(--sidebar-hover); opacity: 1; }
+.sidebar-subitem--active {
+  color: var(--sidebar-fg-active); background: var(--sidebar-active-bg); font-weight: 600; opacity: 1;
+}
+
 /* 사이드바 하단 — 메뉴 접기/펼치기 토글 */
 .sidebar-footer { padding: 8px; border-top: 1px solid var(--shell-border); }
 .sidebar-footer .sidebar-toggle { color: var(--header-muted); }

@@ -53,7 +53,7 @@ function ActiveAlarmsWidget() {
       <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)',
                     display: 'flex', alignItems: 'center', gap: 8 }}>
         활성 알람 ({active.length})
-        <a href="#" onClick={e => { e.preventDefault(); navigate('/dashboard/alerts') }}
+        <a href="#" onClick={e => { e.preventDefault(); navigate('/alerts/history') }}
            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500 }}>이력 →</a>
       </div>
       {!loaded ? (

@@ -10,11 +10,21 @@ OAM 콘솔을 **CIMS 전용 화면 모음**에서 **범용 O&M 포털**로 전�
 | **코어** | 셸(헤더/사이드바/테마) · 위젯 합성 엔진 · shape 위젯 · 레이아웃/메뉴 영속 · 패키징/배포/문서 | 서비스 무지 |
 | **서비스 pack** (CIMS) | nav 섹션 · 위젯 · **데이터 소스** · 백엔드(CSC) · Service Descriptor 데이터 | `services/<id>/` + descriptor |
 
-## 2. nav 합성
+## 2. nav 합성 — OAM 표준(FCAPS) 2-레벨 펼침형
 
-`routes.tsx` = `CORE_SECTIONS`(대시보드/패키징/배포/문서) + 서비스 매니페스트 섹션(order 병합).
-- `nav-types.ts` — `RouteSection` / `ServiceManifest`.
-- `services/registry.ts` — `SERVICE_MANIFESTS = [cimsManifest]`. 새 서비스는 여기에 매니페스트만 추가.
+메뉴 정보구조(IA)는 통신 OAM 표준 **FCAPS**(ITU-T M.3400) + EMS 관례(Nokia NetAct 의
+Monitor/Administer, Huawei U2000 Topo/Fault/Perf/Config, TM Forum eTOM Assurance/Fulfillment)를
+따른다. 사이드바는 **[영역 → 그룹 → 하위항목]** 2-레벨 펼침형(accordion).
+
+- **2 대영역(`NavArea`)**: `ops`(운용=Assurance) / `admin`(관리=Fulfillment). `nav-types.ts` 의 `NAV_AREA_ORDER`/`NAV_AREA_LABELS`.
+- **그룹(`RouteSection`)** = FCAPS 영역. `area` 필드로 대영역 귀속:
+  - 운용: **대시보드**(`dashboard`) · **장애**(`fault`, Fault — 활성알람/이력) · **성능**(`perf`, Performance — 서비스현황/통계) · **기록**(`records`, Accounting — 호·세션 이력)
+  - 관리: **구성**(`config`, Configuration — 가입자/서비스정의) · **시스템**(`system`, Inventory/Maint — 시스템·인프라/HA/패키지) · **릴리스**(`release`, SW Mgmt — 검증/패키징) · **문서**(`docs`)
+- `routes.tsx` `CORE_SECTIONS`(대시보드/장애/시스템/릴리스/문서) + 서비스 매니페스트 섹션(구성/성능/기록) order 병합.
+- 섹션이 자기 `basePath` 밖 route 도 가질 수 있어(예: 구성↔`/deploy/service-defs`) `findSectionByPath` 는 route 멤버십으로 매칭.
+- `Sidebar.tsx` 가 area 로 버킷 → 그룹 펼침(현재 그룹 자동 펼침), 단일-leaf 그룹은 헤더 클릭 직행. SubTabs(상단 탭)는 폐기.
+- `nav-types.ts` — `RouteSection`(+`area`) / `ServiceManifest`.
+- `services/registry.ts` — `SERVICE_MANIFESTS = [cimsManifest]`. 새 서비스는 매니페스트에 `area` 지정 섹션 추가.
 - 메뉴 override(순서/라벨/표시)는 `console_menu`(OAM 영속), 코드 SECTIONS 가 SoT.
 
 ## 3. 위젯 합성 (page = 레이아웃)

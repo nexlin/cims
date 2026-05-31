@@ -130,15 +130,16 @@ function pairEvents(events: AlertEvent[]): AlertRow[] {
   return rows.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
 }
 
-export default function AlertsPage() {
+// openOnly=true → 활성 알람 뷰(해소된 알람 숨김 기본), false → 알람·이벤트 이력 전체.
+export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } = {}) {
   const { show } = useToast()
   const [events, setEvents] = useState<AlertEvent[]>([])
   const [types, setTypes] = useState<string[]>([])
   const [summary, setSummary] = useState<AlertSummaryResponse | null>(null)
   const [rules, setRules] = useState<AlertRulesResponse | null>(null)
-  const [days, setDays] = useState(7)
+  const [days, setDays] = useState(openOnly ? 90 : 7)
   const [filterType, setFilterType] = useState('')
-  const [showResolved, setShowResolved] = useState(true)
+  const [showResolved, setShowResolved] = useState(!openOnly)
   const [loading, setLoading] = useState(false)
 
   const load = useCallback(async () => {

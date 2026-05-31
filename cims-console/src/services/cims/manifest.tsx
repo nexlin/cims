@@ -4,7 +4,7 @@
 //   가입자관리(조직/구성원/번호/PTT그룹) · 서비스(상태/VoLTE·PTT 이력) · 통계(VoLTE/PTT/SIP/CMP/CSC/HTTPS).
 // 다른 서비스를 붙이려면 같은 형태의 manifest 를 만들어 services/registry.ts 에 등록.
 
-import { Users, Radio, BarChart3 } from 'lucide-react'
+import { Users, TrendingUp, FileText } from 'lucide-react'
 import type { ServiceManifest } from '../../nav-types'
 
 import { healthDotsWidget } from './widgets/HealthDotsWidget'
@@ -20,6 +20,7 @@ import OrganizationsPage from './pages/OrganizationsPage'
 import MembersPage from './pages/MembersPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import PttGroupsPage from './pages/PttGroupsPage'
+import ServiceDescriptorsPage from '../../pages/ServiceDescriptorsPage'  // 코어 페이지 — '구성' 그룹에 배치
 
 import LayoutRoute from '../../widgets/LayoutRoute'
 import {
@@ -51,47 +52,54 @@ export const cimsManifest: ServiceManifest = {
     ...CIMS_OUTPUT_WIDGETS,
   ],
   sections: [
+    // ── 성능 (ops) — 서비스 현황 + 통계(KPI/카운터). FCAPS Performance. ──
     {
-      key: 'subscribers',
-      label: '가입자관리',
-      icon: Users,
-      basePath: '/subscribers',
-      defaultPath: '/subscribers/organizations',
-      order: 20,
-      routes: [
-        { path: '/subscribers/organizations', title: '조직', component: OrganizationsPage, adminOnly: true },
-        { path: '/subscribers/members',       title: '구성원', component: MembersPage, adminOnly: true },
-        { path: '/subscribers/numbers',       title: 'VoLTE/PTT 번호', component: SubscriptionsPage, adminOnly: true },
-        { path: '/subscribers/ptt-groups',    title: 'PTT 그룹', component: PttGroupsPage, adminOnly: true },
-      ],
-    },
-    {
-      key: 'service',
-      label: '서비스',
-      icon: Radio,
+      key: 'perf',
+      label: '성능',
+      icon: TrendingUp,
+      area: 'ops',
       basePath: '/service',
       defaultPath: '/service/status',
       order: 30,
       routes: [
-        { path: '/service/status',         title: '실시간 상태', component: serviceStatus, adminOnly: true },
-        { path: '/service/history/volte',  title: 'VoLTE 이력', component: volteHistory, adminOnly: true },
-        { path: '/service/history/ptt',    title: 'PTT 이력',   component: pttHistory, adminOnly: true },
+        { path: '/service/status', title: '서비스 현황', component: serviceStatus, adminOnly: true },
+        { path: '/stats/volte', title: 'VoLTE 통계', component: volteStats, adminOnly: true },
+        { path: '/stats/ptt',   title: 'PTT 통계',   component: pttStats,   adminOnly: true },
+        { path: '/stats/sip',   title: 'SIP 통계',   component: sipStats,   adminOnly: true },
+        { path: '/stats/cmp',   title: 'CMP 통계',   component: cmpStats,   adminOnly: true },
+        { path: '/stats/csc',   title: 'CSC 통계',   component: cscStats,   adminOnly: true },
+        { path: '/stats/https', title: 'HTTPS 통계', component: httpsStats, adminOnly: true },
       ],
     },
+    // ── 기록 (ops) — 호·세션 이력(CDR 성격). FCAPS Accounting. ──
     {
-      key: 'stats',
-      label: '통계',
-      icon: BarChart3,
-      basePath: '/stats',
-      defaultPath: '/stats/volte',
+      key: 'records',
+      label: '기록',
+      icon: FileText,
+      area: 'ops',
+      basePath: '/service/history',
+      defaultPath: '/service/history/volte',
       order: 40,
       routes: [
-        { path: '/stats/volte', title: 'VoLTE', component: volteStats, adminOnly: true },
-        { path: '/stats/ptt',   title: 'PTT',   component: pttStats,   adminOnly: true },
-        { path: '/stats/sip',   title: 'SIP',   component: sipStats,   adminOnly: true },
-        { path: '/stats/cmp',   title: 'CMP',   component: cmpStats,   adminOnly: true },
-        { path: '/stats/csc',   title: 'CSC',   component: cscStats,   adminOnly: true },
-        { path: '/stats/https', title: 'HTTPS', component: httpsStats, adminOnly: true },
+        { path: '/service/history/volte',  title: 'VoLTE 호 이력',  component: volteHistory, adminOnly: true },
+        { path: '/service/history/ptt',    title: 'PTT 세션 이력',  component: pttHistory, adminOnly: true },
+      ],
+    },
+    // ── 구성 (admin) — 가입자 프로비저닝 + 서비스 정의. FCAPS Configuration. ──
+    {
+      key: 'config',
+      label: '구성',
+      icon: Users,
+      area: 'admin',
+      basePath: '/subscribers',
+      defaultPath: '/subscribers/organizations',
+      order: 50,
+      routes: [
+        { path: '/subscribers/organizations', title: '조직',           component: OrganizationsPage, adminOnly: true },
+        { path: '/subscribers/members',       title: '사용자',         component: MembersPage, adminOnly: true },
+        { path: '/subscribers/numbers',       title: '번호(VoLTE·PTT)', component: SubscriptionsPage, adminOnly: true },
+        { path: '/subscribers/ptt-groups',    title: 'PTT 그룹',       component: PttGroupsPage, adminOnly: true },
+        { path: '/deploy/service-defs',       title: '서비스 정의',     component: ServiceDescriptorsPage, adminOnly: true },
       ],
     },
   ],

@@ -5,7 +5,6 @@ import { MenuProvider } from './contexts/MenuContext'
 import { ToastProvider } from './components/Toast'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
-import SubTabs from './components/SubTabs'
 import LoginPage from './pages/LoginPage'
 import { FLAT_ROUTES } from './routes'
 import { authApi } from './api/auth'
@@ -72,10 +71,11 @@ function Shell() {
         />
         <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
         <main className="app-content">
-          <SubTabs />
           <div className="app-content-body">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              {/* 옛 경로 호환 — 알람 이력은 /alerts/history 로 이전 */}
+              <Route path="/dashboard/alerts" element={<Navigate to="/alerts/history" replace />} />
               {FLAT_ROUTES.map(r => {
                 const Comp = r.component
                 return (

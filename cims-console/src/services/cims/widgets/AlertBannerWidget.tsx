@@ -14,7 +14,7 @@ function AlertBannerWidget() {
     <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius)', padding: 12 }}>
       <div style={{ fontWeight: 600, color: 'var(--danger)', marginBottom: 4, display: 'flex', alignItems: 'center' }}>
         알람
-        <a href="/dashboard/alerts" style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--danger)' }}>이력 보기 →</a>
+        <a href="/alerts/history" style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--danger)' }}>이력 보기 →</a>
       </div>
       {h.csp === 'down' && <div>CSP 프로세스 응답 없음</div>}
       {h.cmp === 'down' && <div>CMP 프로세스 응답 없음</div>}
