@@ -10,6 +10,14 @@
 # cims.sh 의 운영 영역 (line 40~89, 102~198, 200~410, 419~503, 507~596,
 # 1368~1379, 1499~1602, 2088~2093) 에서 1:1 이전. 변경 없이 같은 동작 보장.
 
+# ── python 인터프리터 결정 ───────────────────────────────────
+# private/air-gapped 호스트엔 `python3` 가 PATH 에 없을 수 있다 (agent 는 절대경로
+# 로 구동되므로 무관하지만 lifecycle 의 bare `python3` 호출이 set -e 하에 127 로
+# start 를 abort 시킴 — media01 사례). agent(job_process_control)가 자기
+# sys.executable 을 CIMS_PYTHON 으로 넘겨주면 그것을 사용, 없으면 PATH 탐색.
+PYBIN="${CIMS_PYTHON:-}"
+[[ -z "$PYBIN" ]] && PYBIN="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)"
+
 # ── PID 파일 헬퍼 ──────────────────────────────────────────────
 pidfile() { echo "$PID_DIR/$1.pid"; }
 save_pid() { echo "$2" > "$(pidfile "$1")"; }
@@ -145,7 +153,7 @@ _kill_own_install_listener() {
 _apply_overlay_to_module_config() {
     local overlay="$1" target="$2"
     [[ ! -f "$overlay" || ! -f "$target" ]] && return 0
-    python3 - "$overlay" "$target" <<'PY' 2>/dev/null
+    "$PYBIN" - "$overlay" "$target" <<'PY' 2>/dev/null
 import json, sys
 ov_path, tgt_path = sys.argv[1], sys.argv[2]
 try:
@@ -209,7 +217,7 @@ _start_cmp_variant() {
     [[ ! -f "$_overlay" ]] && _overlay="$DIST_DIR/config.json"
     _apply_overlay_to_module_config "$_overlay" "$cfg"
     local ctrl_port
-    ctrl_port=$(python3 -c "import json; d=json.load(open('$cfg')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
+    ctrl_port=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 영향 차단
     kill_stray "$bin"
     _kill_own_install_listener "$bin" "$ctrl_port" udp
@@ -244,7 +252,7 @@ _start_csp_variant() {
     local _overlay="$DIST_DIR/$name/config.json"
     [[ ! -f "$_overlay" ]] && _overlay="$DIST_DIR/config.json"
     _apply_overlay_to_module_config "$_overlay" "$cfg"
-    local sip_port; sip_port=$(python3 -c "import json; d=json.load(open('$cfg')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
+    local sip_port; sip_port=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PSP 127.0.0.3 등) 영향 차단
     kill_stray "$bin"
     _kill_own_install_listener "$bin" "$sip_port" udp
@@ -263,7 +271,7 @@ start_isp() { _start_csp_variant isp; }
 start_cwrtc() {
     if is_running cwrtc; then warn "cwrtc 이미 실행 중 (pid=$(read_pid cwrtc))"; return 0; fi
     [[ ! -f "$DIST_DIR/cwrtc/bin/cwrtc" ]] && err "cwrtc 바이너리 없음 (make dist 실행 필요)" && return 1
-    local ws_port; ws_port=$(python3 -c "import json; d=json.load(open('$DIST_DIR/cwrtc/config/cwrtc.json')); print(d['Setup']['WsPort'])" 2>/dev/null || echo 8443)
+    local ws_port; ws_port=$("$PYBIN" -c "import json; d=json.load(open('$DIST_DIR/cwrtc/config/cwrtc.json')); print(d['Setup']['WsPort'])" 2>/dev/null || echo 8443)
     kill_stray "cwrtc/bin/cwrtc" "$ws_port"
     info "cwrtc (WebRTC 게이트웨이) 시작... (WsPort=$ws_port)"
     cd "$DIST_DIR/cwrtc"
@@ -281,7 +289,7 @@ start_csc() {
     # cims_agent 가 변종별로 분리 저장 (install_path/csc/config.json) — fallback 으로
     # legacy 위치 (install_path/config.json) 도 본다.
     local csc_port
-    csc_port=$(python3 -c "
+    csc_port=$("$PYBIN" -c "
 import json, os
 base='$DIST_DIR/csc/config/csc.json'
 candidates=['$DIST_DIR/csc/config.json', '$DIST_DIR/config.json']
@@ -302,7 +310,7 @@ print(p)" 2>/dev/null || echo 4420)
     kill_stray "$DIST_DIR/csc/src/csc_app.py" "$csc_port" tcp
     info "CSC (REST API 서버) 시작... (port=$csc_port)"
     cd "$DIST_DIR/csc/src"
-    python3 -u "$DIST_DIR/csc/src/csc_app.py" >> "$LOG_DIR/csc.log" 2>&1 &
+    "$PYBIN" -u "$DIST_DIR/csc/src/csc_app.py" >> "$LOG_DIR/csc.log" 2>&1 &
     save_pid csc $!
     sleep 1.5
     is_running csc && ok "CSC 시작 완료 (pid=$(read_pid csc), port=$csc_port)" || { err "CSC 시작 실패"; tail -3 "$LOG_DIR/csc.log" | sed 's/^/  /'; return 1; }
@@ -314,7 +322,7 @@ start_oam() {
     if is_running oam; then warn "OAM 이미 실행 중 (pid=$(read_pid oam))"; return 0; fi
     [[ ! -f "$DIST_DIR/oam/src/oam_app.py" ]] && err "OAM 소스 없음 (make dist 실행 필요)" && return 1
     local oam_port
-    oam_port=$(python3 -c "
+    oam_port=$("$PYBIN" -c "
 import json, os
 base='$DIST_DIR/oam/config/oam.json'
 candidates=['$DIST_DIR/oam/config.json', '$DIST_DIR/config.json']
@@ -334,7 +342,7 @@ print(p)" 2>/dev/null || echo 4419)
     kill_stray "$DIST_DIR/oam/src/oam_app.py" "$oam_port" tcp
     info "OAM (Operation & Management REST API) 시작... (port=$oam_port)"
     cd "$DIST_DIR/oam/src"
-    python3 -u "$DIST_DIR/oam/src/oam_app.py" >> "$LOG_DIR/oam.log" 2>&1 &
+    "$PYBIN" -u "$DIST_DIR/oam/src/oam_app.py" >> "$LOG_DIR/oam.log" 2>&1 &
     save_pid oam $!
     sleep 1.5
     is_running oam && ok "OAM 시작 완료 (pid=$(read_pid oam), port=$oam_port)" \
@@ -354,7 +362,7 @@ start_console() {
     # overlay port: deployment POST 의 config 필드가 저장. cims_agent 가 변종별로
     # 분리 저장 (install_path/console/config.json) — fallback 으로 legacy 위치도 본다.
     local port
-    port=$(python3 -c "
+    port=$("$PYBIN" -c "
 import json, os
 candidates=['$DIST_DIR/console/config.json', '$DIST_DIR/config.json']
 p=None
@@ -447,7 +455,7 @@ start_tb_csc() {
     kill_stray "CIMS_CSC_CONFIG=.*csc-tb.json" 4419 tcp
     info "TB-CSC (4419) 시작..."
     cd "$DIST_DIR/csc/src"
-    CIMS_CSC_CONFIG="$tb_cfg" python3 csc_app.py >> "$LOG_DIR/tb-csc.log" 2>&1 &
+    CIMS_CSC_CONFIG="$tb_cfg" "$PYBIN" csc_app.py >> "$LOG_DIR/tb-csc.log" 2>&1 &
     save_pid tb-csc $!
     sleep 1.5
     is_running tb-csc && ok "TB-CSC 시작 완료 (pid=$(read_pid tb-csc), port=4419)" \
@@ -505,7 +513,7 @@ stop_phone() {
 
 stop_csc() {
     local csc_port
-    csc_port=$(python3 -c "
+    csc_port=$("$PYBIN" -c "
 import json, os
 base='$DIST_DIR/csc/config/csc.json'
 ov='$DIST_DIR/config.json'

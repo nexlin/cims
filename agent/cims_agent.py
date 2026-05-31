@@ -1231,6 +1231,10 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     argv = [script, job_type, svc]
     env = dict(os.environ)
     env["CIMS_DIST_DIR"] = install_path
+    # private/air-gapped 호스트엔 `python3` 가 PATH 에 없을 수 있다 — agent 자신의
+    # 인터프리터(반드시 존재)를 lifecycle.sh 에 전달해 overlay 머지 등의 python 호출이
+    # command-not-found(127)로 start 를 abort 시키지 않도록 한다.
+    env["CIMS_PYTHON"] = sys.executable
     try:
         res = subprocess.run(argv, capture_output=True, text=True, timeout=60,
                               cwd=install_path, env=env)
