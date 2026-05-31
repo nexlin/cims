@@ -61,7 +61,9 @@ kill_stray() {
     fi
 
     # 2) 포트를 점유 중인 프로세스 종료 (PID 파일 없는 좀비 대비)
-    if [[ -n $port ]]; then
+    #    ss(iproute2) 부재 시 선택적 정리이므로 건너뜀 — private/최소 호스트에서
+    #    set -e 하에 start 가 hard-fail 하지 않도록 (도구는 패키지/베이스 이미지 책임).
+    if [[ -n $port ]] && command -v ss >/dev/null 2>&1; then
         local port_pids
         if [[ $proto == "tcp" ]]; then
             port_pids=$(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
@@ -92,6 +94,8 @@ kill_stray() {
 _kill_own_install_listener() {
     local exe_path="$1" port="$2" proto="${3:-udp}"
     [[ -z "$port" || ! -f "$exe_path" ]] && return 0
+    # ss(iproute2) 부재 시 선택적 정리 — 건너뜀 (private/최소 호스트에서 start hard-fail 방지)
+    command -v ss >/dev/null 2>&1 || return 0
     local exe_real; exe_real=$(readlink -f "$exe_path" 2>/dev/null)
     [[ -z "$exe_real" ]] && return 0
     local port_pids
