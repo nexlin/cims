@@ -42,6 +42,15 @@ def _get_db(config: dict):
     )
 
 
+def _coerce_dnd(val) -> int:
+    """dnd 값을 0/1 로 정규화. bool/int/문자열 모두 처리.
+
+    ⚠ `1 if val else 0` 는 문자열 "false"/"0" 도 truthy 라 1 이 되는 버그가 있어
+    (배치 import 경로와 동일하게) 명시적 참값 집합으로 판정한다.
+    """
+    return 1 if str(val).strip().upper() in ('Y', 'YES', '1', 'TRUE', 'ON') else 0
+
+
 def _path_parts(full_path: str, base: str):
     """Return the path segments that come after *base*, URL-decoded.
 
@@ -436,7 +445,7 @@ async def _add_subscription(person_id: str, svc: str, body, config):
     if not imsi:
         return HandlerResult(status=400, body={'error': 'imsi required'})
     passwd     = body.get('passwd', '')
-    dnd        = 1 if body.get('dnd', False) else 0
+    dnd        = _coerce_dnd(body.get('dnd', False))
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
 
@@ -459,7 +468,7 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
     passwd     = body.get('passwd', '')
-    dnd        = 1 if body.get('dnd', False) else 0
+    dnd        = _coerce_dnd(body.get('dnd', False))
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
 
