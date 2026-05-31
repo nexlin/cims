@@ -50,6 +50,20 @@ is_running() {
     return 0
 }
 
+# 삭제된 바이너리(install_path 마이그레이션·agent 업그레이드 잔재)로 실행 중인 동일 모듈 좀비만
+# 정리. /proc/<pid>/exe 가 "(deleted)" 인 것만 대상 — 건강한 형제 인스턴스는 건드리지 않음.
+kill_deleted_inode_orphans() {
+    local name="$1"
+    local pid exe
+    for pid in $(pgrep -x "$name" 2>/dev/null || true); do
+        exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+        if [[ "$exe" == *"(deleted)" ]]; then
+            warn "삭제된 바이너리로 실행 중인 좀비 $name 정리: pid=$pid ($exe)"
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    done
+}
+
 kill_stray() {
     local pattern="$1"
     local port="${2:-}"
@@ -220,6 +234,8 @@ _start_cmp_variant() {
     _apply_overlay_to_module_config "$_overlay" "$cfg" || true
     local ctrl_port
     ctrl_port=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print(d.get('ServerPort', d.get('Setup',{}).get('Listen',{}).get('ControlPort', 9000)))" 2>/dev/null || echo 9000)
+    # 삭제된 바이너리로 떠있는 동일 모듈 좀비(경로 마이그레이션 잔재) 먼저 정리
+    kill_deleted_inode_orphans "$name" || true
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 영향 차단
     kill_stray "$bin" || true
     _kill_own_install_listener "$bin" "$ctrl_port" udp || true
@@ -256,6 +272,8 @@ _start_csp_variant() {
     # pre-launch 단계는 best-effort — 어떤 이유로든 실패해도 start abort 안 함.
     _apply_overlay_to_module_config "$_overlay" "$cfg" || true
     local sip_port; sip_port=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
+    # 삭제된 바이너리로 떠있는 동일 모듈 좀비(경로 마이그레이션 잔재) 먼저 정리
+    kill_deleted_inode_orphans "$name" || true
     # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PSP 127.0.0.3 등) 영향 차단
     kill_stray "$bin" || true
     _kill_own_install_listener "$bin" "$sip_port" udp || true

@@ -322,6 +322,7 @@ def collect_routes() -> list:
 
 _PROC_CPU_CACHE: dict = {}  # {pid: (utime+stime jiffies, sample_ts)}
 _NET_DEV_CACHE: dict = {}   # {iface: (rx_bytes, tx_bytes, sample_ts)}
+_HOST_CPU_CACHE: dict = {}  # {"prev": (total_jiffies, idle_jiffies)}
 try:
     _CLK_TCK = os.sysconf("SC_CLK_TCK")
 except Exception:
@@ -350,6 +351,34 @@ def _proc_cpu_pct(pid: int) -> float | None:
         return None
     used_sec = (cur_j - prev_j) / _CLK_TCK
     return round(used_sec / elapsed * 100, 1)
+
+
+def _host_cpu_pct() -> float | None:
+    """/proc/stat 의 aggregate cpu 라인 두 sample 차이로 호스트 CPU 사용률(%) 산출.
+    첫 호출 시 sample 만 저장하고 None 반환 — 다음 호출부터 값. (psutil 무의존, private 환경 대비)"""
+    try:
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("cpu "):
+                    parts = [int(x) for x in line.split()[1:]]
+                    break
+            else:
+                return None
+    except Exception:
+        return None
+    # user nice system idle iowait irq softirq steal ...
+    idle = parts[3] + (parts[4] if len(parts) > 4 else 0)   # idle + iowait
+    total = sum(parts)
+    prev = _HOST_CPU_CACHE.get("prev")
+    _HOST_CPU_CACHE["prev"] = (total, idle)
+    if not prev:
+        return None
+    prev_total, prev_idle = prev
+    dt = total - prev_total
+    di = idle - prev_idle
+    if dt <= 0:
+        return None
+    return round((dt - di) / dt * 100, 1)
 
 
 def _proc_rss_mb(pid: int) -> int | None:
@@ -418,6 +447,13 @@ def _metric_module_names() -> list:
                 names.add(nm)
     except Exception:
         pass
+    # supervised.json 의 모듈도 포함 — install_path 가 agent 트리 밖(예: /opt/cims-agent/isp)이라
+    # DEFAULT_INSTALL_ROOT listdir 로 안 잡히는 모듈(isp/psp)의 false module_down 방지 (경로 독립).
+    try:
+        with open(_SUPERVISE_FILE) as f:
+            names.update(json.load(f).keys())
+    except Exception:
+        pass
     return sorted(names - _NON_DAEMON_MODULES)
 
 
@@ -441,6 +477,8 @@ def _pgrep_module(name: str):
 def collect_metrics() -> dict:
     """CPU/mem/disk percent + load + per-iface RX/TX + CIMS module pid/cpu/mem."""
     m = {}
+    # host CPU% (/proc/stat delta) — psutil 무의존.
+    m["cpu_pct"] = _host_cpu_pct()
     try:
         with open("/proc/loadavg") as f:
             m["load_avg"] = f.read().strip().split()[0:3]
@@ -588,6 +626,7 @@ def run_health_check(scope: str = "all") -> dict:
         # 기본 metric 도 같이 — 모달에서 spinner 안 띄우고 한 번에 노출.
         m = collect_metrics()
         result["metrics"] = {
+            "cpu_pct": m.get("cpu_pct"),
             "mem_pct": m.get("mem_pct"),
             "disk_pct": m.get("disk_pct"),
             "load_avg": m.get("load_avg"),

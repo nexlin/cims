@@ -127,6 +127,20 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 | Nonce 풀 크기 | CSP `gclsNonceMap.GetCount()` |
 | Subscription 수 (GMS/CMS) | CSP `gclsSubscriptionManager` |
 
+#### Agent 호스트 메트릭 (`collect_metrics`, 2s 주기 → `POST /api/agent/metric`)
+
+| 항목 | 소스 | 비고 |
+|------|------|------|
+| `cpu_pct` (호스트 CPU%) | `/proc/stat` aggregate cpu 라인 두 sample delta (`_host_cpu_pct`) | psutil 무의존. 첫 sample 은 None, 다음부터 값 (장수 프로세스라 `_HOST_CPU_CACHE` 유지). **이 값이 없으면 대시보드 "시스템 리소스" CPU 가 `—`** |
+| `mem_pct` | `/proc/meminfo` (MemTotal−MemAvailable) | |
+| `disk_pct` | `shutil.disk_usage("/")` | |
+| `load_avg` | `/proc/loadavg` | |
+| `per_iface` rx/tx | `/proc/net/dev` delta | |
+| `modules[]` (pid/cpu/mem) | `_metric_module_names()` 각각 `_pgrep_module` | 아래 참조 |
+
+- **모듈 liveness 탐지 = `_metric_module_names()`**: `_DEFAULT_METRIC_MODULES`(csp/cmp/csc/cwrtc) ∪ `DEFAULT_INSTALL_ROOT` listdir ∪ **`supervised.json` 키**. supervised 를 합치는 이유 — install_path 가 agent 트리 밖(`/opt/cims-agent/isp`)인 모듈은 listdir 로 안 잡혀 OAM 의 `module_down` 알람이 **false 로 뜬다**(deployment=running 인데 agent 미보고). supervised.json(워치독 등록 모듈)을 보면 경로 독립적으로 탐지된다.
+- 대시보드 "시스템 리소스" 위젯(`SystemResourceWidget`)은 데이터 0건이어도 패널을 항상 렌더(placeholder)하고, 서버 목록은 즉시 표시·메트릭은 4s 타임아웃 가드로 보강 — 느린/빈 메트릭에 위젯이 사라지거나 행 걸리지 않는다.
+
 ### 1.6 알람 조건
 
 | 조건 | 심각도 | 설명 |

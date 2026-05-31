@@ -157,6 +157,8 @@ CSC 는 결과에 따라 다음을 자동 처리:
 | `uninstall` | 디렉토리 제거 | `install_path` |
 | `start` / `stop` / `restart` | 프로세스 제어 | `install_path`, `process_name` |
 | `update_config` | config.json 재기록 | `install_path`, `config` |
-| `upgrade_agent` | agent 바이너리 교체 | (없음) |
+| `upgrade_agent` | agent 바이너리 교체 (`install-agent.sh --update-only` → bundle 다운로드 → `agent/` 트리 교체: old→`agent.old`→삭제) | (없음) |
 | `health_check` | 포트 probe | `process_name` |
 | `collect_log` | 로그 일부 반환 | `log_path` |
+
+> ⚠️ `upgrade_agent` 는 `agent/` 트리를 통째로 교체하므로 **모듈 install_path 는 agent/ 트리 밖**(`/opt/cims-agent/<module>`)이어야 한다. 안에 두면 upgrade 시 모듈이 deleted-inode 좀비로 파괴된다 — 상세는 `docs/design/02_deployment.md` §2 install_path durability 제약.

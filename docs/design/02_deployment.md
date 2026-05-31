@@ -53,6 +53,13 @@ CIMS 는 여러 물리 서버에 모듈을 개별 배포하고 **Console 에서 
 - 같은 모듈의 여러 프로세스 변종(CSP/PSP/ISP 등) 공존 가능
 - 롤백: `agent_deployment.install_path` 를 이전 버전 경로로 전환
 
+> ⚠️ **install_path durability 제약** (2026-06-01 확립)
+> 모듈 `install_path` 는 반드시 **`/opt/cims-agent/<module>` (agent/ 트리 밖, `agent/` 와 sibling)** 이어야 한다.
+> - **이유**: agent self-upgrade(`install-agent.sh --update-only`)는 `/opt/cims-agent/agent/` 트리 전체를 교체(old → `agent.old` → 삭제)한다. install_path 가 `…/agent/modules/<m>/<ver>` 처럼 agent/ 안에 있으면 upgrade 마다 모듈 바이너리가 파괴되고, 실행 중 프로세스는 **deleted-inode 좀비**(`/proc/<pid>/exe` → `… (deleted)`)로 남아 재시작 불가가 된다.
+> - **각 모듈은 자기 하위 경로**(`/opt/cims-agent/isp`, `/opt/cims-agent/psp`)를 써야 한다. csp 와 동일한 `/opt/cims-agent` 로 주면 `jsonlDir = install_path/config` 가 겹쳐 **셋 다 5060 바인드 충돌**한다.
+> - 경로 마이그레이션 후 옛 좀비는 `lifecycle.sh` `kill_deleted_inode_orphans <name>`(start 변종이 호출, deleted-inode 동일 이름만 kill)가 정리한다.
+> - install_path 변경은 **PUT** `/api/v1/deployments/<id>` body `{"install_path":…}` (PATCH 무시됨) → install → collection 재푸시 → start.
+
 ## 3. 제어 평면 (Control Plane)
 
 ### 3.1 장기/배치 작업 — CSC → Agent (Pull 모델)
