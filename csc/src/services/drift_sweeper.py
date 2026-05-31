@@ -178,6 +178,10 @@ def scan_all(config) -> list[dict]:
             for d in file_store.load_all(file_store.domain_dir(config, _DEPLOY_DOMAIN)):
                 if d.get('agent_id') != aid:
                     continue
+                # 미배포(pending) 배포는 config 가 없어 drift 비교 시 false drift 를 유발한다
+                # (중복/고아 배포 사례). 실제 배포된 것만 비교.
+                if (d.get('status') or '').lower() == 'pending':
+                    continue
                 pkg_name = d.get('package_name')
                 if not pkg_name:
                     pkg = _load_package(config, d.get('package_id')) or {}
