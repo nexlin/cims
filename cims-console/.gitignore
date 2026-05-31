@@ -3,3 +3,6 @@
 dist/
 node_modules/
 cdp-shot.mjs
+cdp-click-shot.mjs
+cdp-eval.mjs
+cdp-console.mjs

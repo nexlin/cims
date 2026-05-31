@@ -36,32 +36,49 @@ function latest(items: AgentMetric[]): AgentMetric | null {
 function SystemResourceWidget() {
   const navigate = useNavigate()
   const [rows, setRows] = useState<Row[]>([])
+  const [loaded, setLoaded] = useState(false)   // 최초 로드 완료 여부 (loading vs empty 구분)
+  const [stale, setStale] = useState(false)      // 직전 갱신이 일시 오류였는지 (flapping)
 
   const load = useCallback(async () => {
+    let agents: Agent[]
     try {
-      const agents = (await deploymentApi.listAgents()).filter(a => a.status !== 'revoked')
-      const out = await Promise.all(agents.map(async (a: Agent): Promise<Row> => {
-        const base: Row = { id: a.id, host: a.name, online: a.status === 'online', cpu: null, mem: null, disk: null }
-        if (a.status !== 'online') return base
-        try {
-          const m = latest((await deploymentApi.agentMetrics(a.id)).items)
-          return { ...base, cpu: m?.cpu_pct ?? null, mem: m?.mem_pct ?? null, disk: m?.disk_pct ?? null }
-        } catch { return base }
-      }))
-      setRows(out)
-    } catch { setRows([]) }
+      agents = (await deploymentApi.listAgents()).filter(a => a.status !== 'revoked')
+    } catch {
+      // 목록 조회 실패(엔드포인트 flapping) — 기존 데이터 유지, 위젯은 사라지지 않음.
+      setStale(true); setLoaded(true); return
+    }
+    // 1) 서버 목록을 즉시 표시(메트릭 null) — metrics 가 느려도 표가 걸리지 않게.
+    const base = (a: Agent): Row => ({ id: a.id, host: a.name, online: a.status === 'online', cpu: null, mem: null, disk: null })
+    setRows(agents.map(base)); setStale(false); setLoaded(true)
+    // 2) online 에이전트 메트릭을 타임아웃(4s) 가드로 보강 — 느린/빈 응답에 행 걸리지 않게.
+    const withTimeout = <T,>(p: Promise<T>, ms: number) =>
+      Promise.race([p, new Promise<null>(res => setTimeout(() => res(null), ms))])
+    const out = await Promise.all(agents.map(async (a: Agent): Promise<Row> => {
+      if (a.status !== 'online') return base(a)
+      try {
+        const r = await withTimeout(deploymentApi.agentMetrics(a.id), 4000)
+        const m = r ? latest(r.items) : null
+        return { ...base(a), cpu: m?.cpu_pct ?? null, mem: m?.mem_pct ?? null, disk: m?.disk_pct ?? null }
+      } catch { return base(a) }
+    }))
+    setRows(out)
   }, [])
 
   useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv) }, [load])
-  if (rows.length === 0) return null
 
   return (
     <div className="panel" style={{ padding: 16 }}>
       <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14, display: 'flex', alignItems: 'center' }}>
         시스템 리소스 ({rows.length})
+        {stale && <span title="갱신 일시 실패 — 직전 값 표시" style={{ marginLeft: 6, fontSize: 11, color: 'var(--warning, #f59e0b)' }}>⚠ 갱신 지연</span>}
         <a onClick={() => navigate('/deploy/servers')}
            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--primary)', cursor: 'pointer' }}>서버 →</a>
       </div>
+      {rows.length === 0 ? (
+        <div style={{ padding: '20px 4px', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
+          {loaded ? '표시할 서버가 없습니다.' : '불러오는 중…'}
+        </div>
+      ) : (
       <table className="data-table" style={{ fontSize: 12 }}>
         <thead><tr><th>서버</th><th style={{ width: '26%' }}>CPU</th><th style={{ width: '26%' }}>MEM</th><th style={{ width: '26%' }}>DISK</th></tr></thead>
         <tbody>
@@ -76,6 +93,7 @@ function SystemResourceWidget() {
           ))}
         </tbody>
       </table>
+      )}
     </div>
   )
 }
