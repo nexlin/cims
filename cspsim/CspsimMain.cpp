@@ -295,6 +295,7 @@ static void PrintUsage(const char* pszBin) {
     printf("                             group-call   - 등록 + 구독 + 그룹통화 (PTT)\n");
     printf("                             full         - 전체 반복\n");
     printf("  -call_duration <secs>    통화 유지 시간 (default: 10, 버스트 모델 일괄 보유시간)\n");
+    printf("  -floor_hold  <secs>      [ptt] 화자 순환 시 참여자별 발언(floor 보유) 시간 (default: 5)\n");
     printf("  -cps         <N>         [call] 호 도착률(초당 호수). >0 이면 지속 부하 모델\n");
     printf("                             (1/cps 간격 발신 + 각 호 HT 후 개별 종료). 정상상태 동시호≈cps×ht\n");
     printf("  -ht          <secs>      [call] per-call 보유시간 (cps 모델, 미지정 시 call_duration)\n");
@@ -332,7 +333,8 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                         const std::string& strCalleeOverride = "",
                         int iCps = 0,
                         int iHtSec = 0,
-                        int iTotalCalls = 0)
+                        int iTotalCalls = 0,
+                        int iFloorHold = 5)
 {
     // 1. 모든 단말이 등록될 때까지 대기 (최대 30초). no_register 세션은 즉시 ready.
     printf("[Scenario] Waiting for registration...\n");
@@ -481,8 +483,9 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                            i, sessions[i]->m_strUser.c_str());
                     sessions[i]->SendPttRequest();
 
-                    // Speaking time: 5 seconds
-                    for (int t = 0; t < 50; ++t) usleep(100000);
+                    // Speaking time: -floor_hold 초 (참여자별 발언 시간, default 5)
+                    printf("[Scenario]   floor hold %ds...\n", iFloorHold);
+                    for (int t = 0; t < iFloorHold * 10; ++t) usleep(100000);
 
                     printf("[Scenario] Member %d (%s): PTT Release\n",
                            i, sessions[i]->m_strUser.c_str());
@@ -546,6 +549,8 @@ int main(int argc, char* argv[])
     int iCps                   = atoi(GetArg(argc, argv, "-cps",           "0").c_str());
     int iHtSec                 = atoi(GetArg(argc, argv, "-ht",            "0").c_str());
     int iTotalCalls            = atoi(GetArg(argc, argv, "-calls",         "0").c_str());
+    // PTT 그룹콜 화자 순환 시 참여자별 발언(floor 보유) 시간(초). call_duration 과 별개.
+    int iFloorHold             = atoi(GetArg(argc, argv, "-floor_hold",    "5").c_str());
     // G8 (2026-04-23): 외부 peer routing 시험용. 비우면 기존 pair 로직 유지.
     //   값이 있으면 call scenario 의 모든 outbound INVITE target 을 이 user 로 덮음.
     std::string strCalleeOverride = GetArg(argc, argv, "-callee_override", "");
@@ -726,7 +731,8 @@ int main(int argc, char* argv[])
                                      strCalleeOverride,
                                      iCps,
                                      iHtSec,
-                                     iTotalCalls);
+                                     iTotalCalls,
+                                     iFloorHold);
     }
 
     // 시나리오 모드: 완료 대기 → 세션 정리 → 종료 (stdin 루프 진입 안함)
