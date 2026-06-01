@@ -58,6 +58,10 @@ ext/vo-amrwbenc-0.1.3/config.log
 # Test run logs
 test_run/log/
 
+# OAM 녹취 변환툴(ffmpeg/ffprobe) — 빌드 시 다운로드해 패키지에 동봉하는 정적 바이너리.
+# git 에 커밋하지 않음(대용량). cims.sh 의 _ensure_oam_vendor_ffmpeg 가 채움.
+oam/vendor/bin/
+
 # Verify reports (cims.sh verify / tests/cims_verify.py 결과)
 verify_reports/
 

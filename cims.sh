@@ -986,6 +986,9 @@ cmd_sync() {
             mkdir -p "$DIST_DIR/oam/config"
             cp -f "$SCRIPT_DIR/oam/config/"*.json "$DIST_DIR/oam/config/" 2>/dev/null || true
         fi
+        # OAM 녹취 변환툴(ffmpeg/ffprobe) vendor 자동 채움 — 빌드 시 정적 바이너리 다운로드.
+        # 패키지에 동봉되어 air-gapped 런타임에서 별도 설치 없이 녹취 재생(raw RTP→mp4) 가능.
+        _ensure_oam_vendor_ffmpeg
         # Phase 4 vendor: private 환경 (인터넷 없음) 대응 — csc/vendor + oam/vendor 동기화.
         # csc/requirements.txt, oam/requirements.txt 도 함께.
         for _comp in csc oam; do
@@ -1086,6 +1089,60 @@ cmd_sync() {
 
     echo ""
     info "sync 완료 ($n_changed 개 대상). 서비스 재기동: ./cims.sh restart <name>"
+}
+
+# OAM 녹취 변환툴(ffmpeg/ffprobe) vendor 자동 채움 — 빌드 시 정적 바이너리 다운로드.
+# 녹취 재생(raw RTP→mp4 변환)에 필요. air-gapped 런타임 설치 회피 위해 패키지에 동봉.
+# idempotent (ffmpeg+ffprobe 둘 다 있으면 skip). CIMS_SKIP_VENDOR_FETCH=1 로 끔.
+# 소스: 정적 빌드(amd64). CIMS_FFMPEG_URL 로 사내 미러/다른 빌드 지정 가능.
+# 결과: oam/vendor/bin/{ffmpeg,ffprobe} (oam_app 이 자동 탐지, .gitignore 처리됨).
+_FFMPEG_STATIC_URL_DEFAULT="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+
+_ensure_oam_vendor_ffmpeg() {
+    local bin_dir="$SCRIPT_DIR/oam/vendor/bin"
+    mkdir -p "$bin_dir"
+
+    [[ -n "${CIMS_SKIP_VENDOR_FETCH:-}" ]] && return 0
+    # 이미 둘 다 실행 가능하면 skip (idempotent)
+    [[ -x "$bin_dir/ffmpeg" && -x "$bin_dir/ffprobe" ]] && return 0
+
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        warn "curl/wget 없음 — oam/vendor/bin ffmpeg 자동 다운로드 불가 (수동 채움 필요)"
+        return 0
+    fi
+
+    local url="${CIMS_FFMPEG_URL:-$_FFMPEG_STATIC_URL_DEFAULT}"
+    local tmp; tmp="$(mktemp -d)"
+    local tarball="$tmp/ffmpeg-static.tar.xz"
+    info "OAM vendor: ffmpeg 정적 빌드 다운로드 중 ($url) ..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -fL --retry 2 -o "$tarball" "$url" 2>/dev/null \
+            || { warn "ffmpeg 다운로드 실패 ($url) — 패키지에 변환툴 미포함. CIMS_FFMPEG_URL 로 미러 지정 가능."; rm -rf "$tmp"; return 0; }
+    else
+        wget -q -O "$tarball" "$url" \
+            || { warn "ffmpeg 다운로드 실패 ($url) — 패키지에 변환툴 미포함. CIMS_FFMPEG_URL 로 미러 지정 가능."; rm -rf "$tmp"; return 0; }
+    fi
+
+    # 압축 해제 (.tar.xz / .tar.gz 모두 시도) 후 ffmpeg/ffprobe 추출
+    if ! tar -xf "$tarball" -C "$tmp" 2>/dev/null; then
+        warn "ffmpeg tarball 해제 실패 ($tarball)"; rm -rf "$tmp"; return 0
+    fi
+    local f found
+    for f in ffmpeg ffprobe; do
+        found="$(find "$tmp" -type f -name "$f" 2>/dev/null | head -1)"
+        if [[ -n "$found" ]]; then
+            cp -f "$found" "$bin_dir/$f" && chmod +x "$bin_dir/$f"
+        fi
+    done
+    rm -rf "$tmp"
+
+    if [[ -x "$bin_dir/ffmpeg" ]]; then
+        local v; v="$("$bin_dir/ffmpeg" -version 2>/dev/null | head -1)"
+        ok "OAM vendor: ffmpeg 동봉 완료 → $bin_dir (${v:-ffmpeg})"
+        [[ -x "$bin_dir/ffprobe" ]] || warn "ffprobe 추출 실패 — 길이검출 fallback 사용(재생엔 영향 적음)"
+    else
+        warn "ffmpeg 추출 실패 — 패키지에 변환툴 미포함"
+    fi
 }
 
 # agent vendor 자동 채움 — keepalived offline 설치용 deb 6종
