@@ -7,12 +7,18 @@
 
 import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import type { WidgetDef } from './widgets/types'
+import type { WidgetDef, PageLayout } from './widgets/types'
 
 export type RouteDef = {
   path: string
   title: string
-  component: ComponentType
+  // 고정 페이지 컴포넌트. App 이 단일 page 위젯으로 감싸 편집 가능하게 렌더한다.
+  // layout 이 지정된 합성 라우트는 component 생략 가능.
+  component?: ComponentType
+  // 합성 레이아웃 seed (대시보드/출력 페이지). 지정 시 component 대신 이 레이아웃을 EditableLayout 으로 렌더.
+  layout?: PageLayout
+  // 레이아웃 영속 키. 미지정 시 component 페이지는 'page:<path>', 합성 라우트는 layout.id/path.
+  layoutId?: string
   adminOnly?: boolean
   // 사이드바 하위항목에서 숨김 — 라우트 자체는 활성 (link/직접 URL 진입 가능).
   hidden?: boolean

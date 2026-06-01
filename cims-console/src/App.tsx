@@ -7,10 +7,63 @@ import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import LoginPage from './pages/LoginPage'
 import { FLAT_ROUTES } from './routes'
+import type { RouteDef } from './nav-types'
 import { authApi } from './api/auth'
+import { EditableLayout } from './widgets/EditableLayout'
+import { registerWidgets } from './widgets/registry'
+import type { WidgetProps, PageLayout } from './widgets/types'
+import type { ComponentType } from 'react'
 import './index.css'
 
 const SIDEBAR_COLLAPSED_KEY = 'cims_sidebar_collapsed'
+
+// ── 모든 메뉴 페이지를 위젯 합성 surface 로 ──────────────────────────
+// 고정 페이지(component)를 'page:<path>' 위젯으로 등록 → EditableLayout 으로 감싸 렌더하면
+// 기본 모습은 동일하되 admin 이 위젯을 추가/배치할 수 있다. 합성 라우트(layout)는 그 seed 를 그대로.
+const PAGE_WIDGET_PREFIX = 'page:'
+
+// 고정 페이지 → page 위젯 정의. 모듈 로드 시 일괄 등록하고(아래), 렌더 시에도 보장 등록(idempotent)
+// 한다 — 모듈 평가 순서/HMR 에 흔들리지 않도록.
+function pageWidgetDefs() {
+  return FLAT_ROUTES.filter(r => r.component && !r.layout).map(r => ({
+    id: PAGE_WIDGET_PREFIX + r.path,
+    title: r.title,
+    category: 'page' as const,
+    component: r.component as unknown as ComponentType<WidgetProps>,
+    adminOnly: r.adminOnly,
+  }))
+}
+registerWidgets(pageWidgetDefs())
+
+function routeLayoutId(r: RouteDef): string {
+  if (r.layoutId) return r.layoutId
+  if (r.layout) return r.layout.id || r.path
+  return PAGE_WIDGET_PREFIX + r.path
+}
+function routeSeed(r: RouteDef): PageLayout {
+  if (r.layout) return r.layout
+  return { id: routeLayoutId(r), widgets: [{ widgetId: PAGE_WIDGET_PREFIX + r.path, w: 12 }] }
+}
+
+// 모든 라우트를 EditableLayout 으로 렌더 — 합성 라우트는 자기 seed, 고정 페이지는 단일 page 위젯.
+function EditablePageHost({ route }: { route: RouteDef }) {
+  // 이 라우트의 page 위젯을 보장 등록 — 모듈 로드 시 일괄 등록이 어떤 이유로 누락돼도
+  // (HMR/평가 순서) GridRenderer 가 위젯을 찾도록. registerWidgets 는 idempotent(중복 무시).
+  if (route.component && !route.layout) {
+    registerWidgets([{
+      id: PAGE_WIDGET_PREFIX + route.path,
+      title: route.title,
+      category: 'page' as const,
+      component: route.component as unknown as ComponentType<WidgetProps>,
+      adminOnly: route.adminOnly,
+    }])
+  }
+  // key=layoutId — 모든 라우트가 동일한 EditableLayout 타입이라, 메뉴 전환 시 React 가 인스턴스를
+  // 재사용(업데이트)해 EditableLayout 의 useState(seed) 가 이전 페이지 그대로 남는다(전환 안 됨).
+  // layoutId 별 key 로 강제 리마운트 → 새 seed/layout 로 초기화.
+  const layoutId = routeLayoutId(route)
+  return <EditableLayout key={layoutId} layoutId={layoutId} seed={routeSeed(route)} />
+}
 
 function RouteGuard({ children, adminOnly }: { children: React.ReactNode; adminOnly?: boolean }) {
   const { user } = useAuth()
@@ -76,16 +129,13 @@ function Shell() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               {/* 옛 경로 호환 — 알람 이력은 /alerts/history 로 이전 */}
               <Route path="/dashboard/alerts" element={<Navigate to="/alerts/history" replace />} />
-              {FLAT_ROUTES.map(r => {
-                const Comp = r.component
-                return (
-                  <Route
-                    key={r.path}
-                    path={r.path}
-                    element={<RouteGuard adminOnly={r.adminOnly}><Comp /></RouteGuard>}
-                  />
-                )
-              })}
+              {FLAT_ROUTES.map(r => (
+                <Route
+                  key={r.path}
+                  path={r.path}
+                  element={<RouteGuard adminOnly={r.adminOnly}><EditablePageHost route={r} /></RouteGuard>}
+                />
+              ))}
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </div>

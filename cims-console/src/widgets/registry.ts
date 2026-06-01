@@ -16,6 +16,17 @@ const CORE_WIDGETS: WidgetDef[] = [
   ...SHAPE_WIDGETS,
 ]
 
+// 런타임 등록 위젯 — App 이 라우트 컴포넌트를 'page:<path>' 위젯으로 주입(모든 메뉴 페이지를
+// 위젯 합성 surface 로 편집 가능하게). registry 내 정적 import 로 잡기엔 순환이라 외부 주입.
+const _extra: WidgetDef[] = []
+export function registerWidgets(defs: WidgetDef[]) {
+  let changed = false
+  for (const d of defs) {
+    if (!_extra.some(e => e.id === d.id)) { _extra.push(d); changed = true }
+  }
+  if (changed) { _all = null; _byId = null }   // 캐시 무효화 → 다음 ensure() 에서 재집계
+}
+
 // SERVICE_MANIFESTS 는 순환 import(registry↔manifest↔EditableLayout) 상 모듈 eval 시점엔
 // 부분 초기화일 수 있어 lazy 집계 — 첫 호출(렌더 시점)엔 완전 초기화 보장.
 let _all: WidgetDef[] | null = null
@@ -25,7 +36,7 @@ function ensure() {
   const service = SERVICE_MANIFESTS.flatMap(
     m => (m.widgets ?? []).map(w => ({ ...w, serviceId: w.serviceId ?? m.id }))
   )
-  _all = [...CORE_WIDGETS, ...service]
+  _all = [...CORE_WIDGETS, ...service, ..._extra]
   _byId = new Map(_all.map(w => [w.id, w]))
 }
 
@@ -40,11 +51,11 @@ export function allWidgets(): WidgetDef[] {
 }
 
 // 위젯 카테고리 — 편집 UI 그룹핑용. 표시 순서 + 한글 라벨.
-export type WidgetCategory = 'infra' | 'service' | 'stats' | 'view' | 'event' | 'etc'
-export const WIDGET_CATEGORY_ORDER: WidgetCategory[] = ['infra', 'service', 'stats', 'view', 'event', 'etc']
+export type WidgetCategory = 'infra' | 'service' | 'stats' | 'view' | 'event' | 'page' | 'etc'
+export const WIDGET_CATEGORY_ORDER: WidgetCategory[] = ['infra', 'service', 'stats', 'view', 'event', 'page', 'etc']
 export const WIDGET_CATEGORY_LABELS: Record<WidgetCategory, string> = {
   infra: '인프라/시스템', service: '서비스', stats: '통계',
-  view: '데이터 뷰 (소스 선택)', event: '이벤트/알람', etc: '기타',
+  view: '데이터 뷰 (소스 선택)', event: '이벤트/알람', page: '페이지 (전체 화면)', etc: '기타',
 }
 
 // 카테고리 → 위젯 목록 (위젯이 늘어날 때 편집 드롭다운을 성격별로 묶기 위함).

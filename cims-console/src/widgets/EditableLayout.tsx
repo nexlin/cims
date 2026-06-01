@@ -96,17 +96,18 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        {editing && <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>편집 중 — 저장 전까지 반영 안 됨</span>}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          {!editing && isAdmin && (
-            <button className="btn btn--sm" onClick={beginEdit}>✎ 편집</button>
-          )}
-          {editing && (
+    <div className="layout-host">
+      {/* 편집 컨트롤 — 콘텐츠 상단을 차지하지 않도록 우상단 반투명 플로팅 overlay. */}
+      {isAdmin && (
+        <div className={`layout-edit-overlay${editing ? '' : ' layout-edit-overlay--compact'}`}>
+          {!editing ? (
+            <button className="btn btn--sm layout-edit-fab" onClick={beginEdit}
+                    title="이 페이지를 위젯으로 편집">✎ 편집</button>
+          ) : (
             <>
+              <span className="layout-edit-hint">편집 중 — 저장 전까지 반영 안 됨</span>
               <select className="form-input" value={addId} onChange={e => setAddId(e.target.value)}
-                      style={{ width: 200, fontSize: 12 }}>
+                      style={{ width: 180, fontSize: 12 }}>
                 <option value="">+ 위젯 추가…</option>
                 {widgetsByCategory().map(g => (
                   <optgroup key={g.category} label={g.label}>
@@ -124,7 +125,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
             </>
           )}
         </div>
-      </div>
+      )}
 
       {!editing ? (
         <GridRenderer layout={layout} />

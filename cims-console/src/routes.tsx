@@ -14,7 +14,7 @@ import {
 import type { RouteDef, RouteSection } from './nav-types'
 import { SERVICE_MANIFESTS } from './services/registry'
 
-import DashboardPage from './pages/DashboardPage'
+import { DASHBOARD_LAYOUT } from './widgets/layouts'
 import AlertsPage from './pages/AlertsPage'
 import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
@@ -46,7 +46,7 @@ const CORE_SECTIONS: RouteSection[] = [
     defaultPath: '/dashboard',
     order: 10,
     routes: [
-      { path: '/dashboard', title: '종합 현황', component: DashboardPage },
+      { path: '/dashboard', title: '종합 현황', layout: DASHBOARD_LAYOUT, layoutId: 'dashboard' },
     ],
   },
   {

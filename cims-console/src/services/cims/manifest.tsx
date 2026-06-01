@@ -22,26 +22,14 @@ import SubscriptionsPage from './pages/SubscriptionsPage'
 import PttGroupsPage from './pages/PttGroupsPage'
 import ServiceDescriptorsPage from '../../pages/ServiceDescriptorsPage'  // 코어 페이지 — '구성' 그룹에 배치
 
-import LayoutRoute from '../../widgets/LayoutRoute'
 import {
   SERVICE_STATUS_LAYOUT, SERVICE_HISTORY_VOLTE_LAYOUT, SERVICE_HISTORY_PTT_LAYOUT,
   STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_SIP_LAYOUT,
   STATS_CMP_LAYOUT, STATS_CSC_LAYOUT, STATS_HTTPS_LAYOUT,
 } from './layouts'
 
-// 출력 섹션 route = 합성 가능한 레이아웃 (고정 페이지 대체). 각 route 는 layout_id 별 영속.
-const lr = (layoutId: string, seed: typeof SERVICE_STATUS_LAYOUT) =>
-  () => <LayoutRoute layoutId={layoutId} seed={seed} />
-
-const serviceStatus = lr('service.status', SERVICE_STATUS_LAYOUT)
-const volteHistory  = lr('service.history-volte', SERVICE_HISTORY_VOLTE_LAYOUT)
-const pttHistory    = lr('service.history-ptt', SERVICE_HISTORY_PTT_LAYOUT)
-const volteStats = lr('stats.volte', STATS_VOLTE_LAYOUT)
-const pttStats   = lr('stats.ptt', STATS_PTT_LAYOUT)
-const sipStats   = lr('stats.sip', STATS_SIP_LAYOUT)
-const cmpStats   = lr('stats.cmp', STATS_CMP_LAYOUT)
-const cscStats   = lr('stats.csc', STATS_CSC_LAYOUT)
-const httpsStats = lr('stats.https', STATS_HTTPS_LAYOUT)
+// 출력 섹션 route = 합성 가능한 레이아웃 (고정 페이지 대체). 각 route 는 layout(seed) + layoutId 영속.
+// App 의 중앙 EditablePageHost 가 layout 지정 라우트를 EditableLayout 으로 렌더한다.
 
 export const cimsManifest: ServiceManifest = {
   id: 'cims',
@@ -62,13 +50,13 @@ export const cimsManifest: ServiceManifest = {
       defaultPath: '/service/status',
       order: 30,
       routes: [
-        { path: '/service/status', title: '서비스 현황', component: serviceStatus, adminOnly: true },
-        { path: '/stats/volte', title: 'VoLTE 통계', component: volteStats, adminOnly: true },
-        { path: '/stats/ptt',   title: 'PTT 통계',   component: pttStats,   adminOnly: true },
-        { path: '/stats/sip',   title: 'SIP 통계',   component: sipStats,   adminOnly: true },
-        { path: '/stats/cmp',   title: 'CMP 통계',   component: cmpStats,   adminOnly: true },
-        { path: '/stats/csc',   title: 'CSC 통계',   component: cscStats,   adminOnly: true },
-        { path: '/stats/https', title: 'HTTPS 통계', component: httpsStats, adminOnly: true },
+        { path: '/service/status', title: '서비스 현황', layout: SERVICE_STATUS_LAYOUT, layoutId: 'service.status', adminOnly: true },
+        { path: '/stats/volte', title: 'VoLTE 통계', layout: STATS_VOLTE_LAYOUT, layoutId: 'stats.volte', adminOnly: true },
+        { path: '/stats/ptt',   title: 'PTT 통계',   layout: STATS_PTT_LAYOUT,   layoutId: 'stats.ptt',   adminOnly: true },
+        { path: '/stats/sip',   title: 'SIP 통계',   layout: STATS_SIP_LAYOUT,   layoutId: 'stats.sip',   adminOnly: true },
+        { path: '/stats/cmp',   title: 'CMP 통계',   layout: STATS_CMP_LAYOUT,   layoutId: 'stats.cmp',   adminOnly: true },
+        { path: '/stats/csc',   title: 'CSC 통계',   layout: STATS_CSC_LAYOUT,   layoutId: 'stats.csc',   adminOnly: true },
+        { path: '/stats/https', title: 'HTTPS 통계', layout: STATS_HTTPS_LAYOUT, layoutId: 'stats.https', adminOnly: true },
       ],
     },
     // ── 기록 (ops) — 호·세션 이력(CDR 성격). FCAPS Accounting. ──
@@ -81,8 +69,8 @@ export const cimsManifest: ServiceManifest = {
       defaultPath: '/service/history/volte',
       order: 40,
       routes: [
-        { path: '/service/history/volte',  title: 'VoLTE 호 이력',  component: volteHistory, adminOnly: true },
-        { path: '/service/history/ptt',    title: 'PTT 세션 이력',  component: pttHistory, adminOnly: true },
+        { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', adminOnly: true },
+        { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   adminOnly: true },
       ],
     },
     // ── 구성 (admin) — 가입자 프로비저닝 + 서비스 정의. FCAPS Configuration. ──

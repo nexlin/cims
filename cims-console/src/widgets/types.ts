@@ -12,9 +12,9 @@ export interface WidgetProps {
 }
 
 export interface WidgetDef {
-  id: string                      // 'core.system-cards' / 'cims.active-voip'
+  id: string                      // 'core.system-cards' / 'cims.active-voip' / 'page:/deploy/servers'
   title: string                   // 편집 UI/메뉴 표시용 (렌더러는 강제 안 함 — 위젯이 자체 chrome)
-  category?: 'infra' | 'service' | 'stats' | 'event' | 'view'
+  category?: 'infra' | 'service' | 'stats' | 'event' | 'view' | 'page'
   serviceId?: string              // undefined=코어, 'cims'=CIMS 서비스 pack
   component: ComponentType<WidgetProps>
   defaultSize?: { w: number }     // 12-col grid 기준 기본 폭 (1~12). 미지정 시 12.
