@@ -23,6 +23,7 @@ import os
 import json
 import glob
 import struct
+import shutil
 import subprocess
 import threading
 import logging
@@ -40,10 +41,36 @@ _transcoding_mutex = threading.Lock()
 # ServiceLogDir — init()에서 설정
 _service_log_dir = ''
 
+# 변환툴(ffmpeg) 경로 — init()에서 결정.
+# raw RTP → mp4/wav 변환에 필요. air-gapped(private) 환경에서는 시스템 PATH 에
+# 없을 수 있으므로 OAM 패키지에 번들된 vendor 바이너리를 우선 사용한다.
+# (OAM 패키지화 시 oam/vendor/bin/ffmpeg 또는 oam/vendor/ffmpeg 로 동봉할 것.)
+_FFMPEG = 'ffmpeg'
 
-def init(service_log_dir: str = ''):
-    global _service_log_dir
+
+def _resolve_ffmpeg(ffmpeg_bin: str = '') -> str:
+    # 1) 명시 인자 (oam_app 이 번들 경로 주입)
+    if ffmpeg_bin and os.path.exists(ffmpeg_bin):
+        return ffmpeg_bin
+    # 2) 환경변수 (agent/패키지가 번들 바이너리 경로 주입)
+    env = os.environ.get('CIMS_FFMPEG')
+    if env and os.path.exists(env):
+        return env
+    # 3) 시스템 PATH
+    found = shutil.which('ffmpeg')
+    if found:
+        return found
+    # 4) fallback — 호출 시 명확한 에러(없음)로 드러남
+    return 'ffmpeg'
+
+
+def init(service_log_dir: str = '', ffmpeg_bin: str = ''):
+    global _service_log_dir, _FFMPEG
     _service_log_dir = service_log_dir
+    _FFMPEG = _resolve_ffmpeg(ffmpeg_bin)
+    if _FFMPEG == 'ffmpeg' and not shutil.which('ffmpeg'):
+        logger.warning("ffmpeg 변환툴을 찾지 못함 — 녹취 재생(raw RTP→mp4 변환) 불가. "
+                       "OAM 패키지에 vendor ffmpeg 동봉 또는 시스템 설치 필요.")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -492,8 +519,11 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
         aud_ref = amr_a if has_a else (amr_b if has_b else '')
         if aud_ref:
             try:
+                _ffprobe = (_FFMPEG[:-len('ffmpeg')] + 'ffprobe') if _FFMPEG.endswith('ffmpeg') else 'ffprobe'
+                if not (os.path.isabs(_ffprobe) and os.path.exists(_ffprobe)):
+                    _ffprobe = shutil.which('ffprobe') or 'ffprobe'
                 dur_ret = subprocess.run(
-                    ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                    [_ffprobe, '-v', 'error', '-show_entries', 'format=duration',
                      '-of', 'csv=p=0', aud_ref],
                     capture_output=True, timeout=10)
                 d = dur_ret.stdout.decode().strip()
@@ -507,7 +537,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
             # color 소스(검정 1280x640)를 배경으로 깔고 영상을 overlay
             # 영상 없는 구간은 검정, -t로 음성 길이에 맞춤
             cmd = [
-                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                _FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', amr_a, '-i', amr_b,
                 '-f', 'h264', '-i', h264_a,
                 '-f', 'h264', '-i', h264_b,
@@ -533,7 +563,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
             # ── PTT 영상: AMR-WB→AAC + H.264 원본 mux (re-encode 없음) ──
             # H.264 raw에 타임스탬프가 없으므로 -shortest 대신 -t로 오디오 길이에 맞춤
             cmd = [
-                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                _FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
                 '-f', 'h264', '-r', '15', '-i', h264_a,
                 '-i', amr_a,
                 '-t', audio_dur,
@@ -552,7 +582,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
             aud = amr_a if has_a else amr_b
             x_base = '0' if has_va else '640'
             cmd = [
-                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                _FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', aud,
                 '-f', 'h264', '-i', vid,
                 '-f', 'lavfi', '-i', f'color=c=black:s=1280x640:r=25:d={audio_dur}',
@@ -571,7 +601,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
         elif has_a and has_b:
             # ── VoLTE 음성: A+B mixing → MP4 (AAC audio only) ──
             cmd = [
-                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                _FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', amr_a, '-i', amr_b,
                 '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest:normalize=0,dynaudnorm[aout]',
                 '-map', '[aout]',
@@ -585,7 +615,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
             # ── PTT 또는 VoLTE 단측 → MP4 (AAC) ──
             aud = amr_a if has_a else amr_b
             cmd = [
-                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                _FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', aud,
                 '-c:a', 'aac', '-ar', '16000', '-ac', '1',
                 '-movflags', '+faststart',

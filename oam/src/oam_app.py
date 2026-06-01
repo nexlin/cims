@@ -182,7 +182,18 @@ if __name__ == '__main__':
         build_init(os.path.dirname(tests_dir))
 
         csc_logger.init(service_log_dir=_service_log_dir)
-        recording.init(service_log_dir=_service_log_dir)
+
+        # 녹취 변환툴(ffmpeg) — air-gapped(private) 환경 대응으로 OAM 패키지에 번들된
+        # vendor 바이너리를 우선 사용. (패키지화 시 oam/vendor/bin/ffmpeg 또는
+        # oam/vendor/ffmpeg 로 동봉할 것.) 없으면 config.FFmpegBin → 시스템 PATH 순.
+        _ffmpeg_bin = ''
+        for _cand in (os.path.join(_VENDOR, 'bin', 'ffmpeg'),
+                      os.path.join(_VENDOR, 'ffmpeg'),
+                      config.get('FFmpegBin', '')):
+            if _cand and os.path.exists(_cand):
+                _ffmpeg_bin = _cand
+                break
+        recording.init(service_log_dir=_service_log_dir, ffmpeg_bin=_ffmpeg_bin)
 
         # ── pi_http 요청 로깅 훅 등록 (admin/console 자동 로깅) ──
         from httpsrv.controller import DynamicRouteProc
