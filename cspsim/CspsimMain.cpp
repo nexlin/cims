@@ -296,6 +296,7 @@ static void PrintUsage(const char* pszBin) {
     printf("                             full         - 전체 반복\n");
     printf("  -call_duration <secs>    통화 유지 시간 (default: 10, 버스트 모델 일괄 보유시간)\n");
     printf("  -floor_hold  <secs>      [ptt] 화자 순환 시 참여자별 발언(floor 보유) 시간 (default: 5)\n");
+    printf("  -floor_loop              [ptt] 화자 순환을 종료(quit)까지 무한 반복 (장기 안정성 시험)\n");
     printf("  -cps         <N>         [call] 호 도착률(초당 호수). >0 이면 지속 부하 모델\n");
     printf("                             (1/cps 간격 발신 + 각 호 HT 후 개별 종료). 정상상태 동시호≈cps×ht\n");
     printf("  -ht          <secs>      [call] per-call 보유시간 (cps 모델, 미지정 시 call_duration)\n");
@@ -334,7 +335,8 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                         int iCps = 0,
                         int iHtSec = 0,
                         int iTotalCalls = 0,
-                        int iFloorHold = 5)
+                        int iFloorHold = 5,
+                        int iFloorLoop = 0)
 {
     // 1. 모든 단말이 등록될 때까지 대기 (최대 30초). no_register 세션은 즉시 ready.
     printf("[Scenario] Waiting for registration...\n");
@@ -471,30 +473,38 @@ static void RunScenario(std::vector<SimSession*>& sessions,
             }
 
             if (bAllJoined) {
-                // Rotating floor control: each member speaks in order
-                printf("[Scenario] Starting floor control rotation (%d members)...\n", (int)sessions.size());
-                for (int i = 0; i < (int)sessions.size(); ++i) {
-                    if (!sessions[i]->m_bInCall) {
-                        printf("[Scenario] Member %d (%s) not in call, skipping\n",
+                // Rotating floor control: each member speaks in order.
+                // -floor_loop 이면 g_bQuit 까지 무한 반복(상주 멤버 floor 순환 — 장기 안정성 시험).
+                printf("[Scenario] Starting floor control rotation (%d members, loop=%s)...\n",
+                       (int)sessions.size(), iFloorLoop ? "infinite" : "once");
+                int iPass = 0;
+                do {
+                    ++iPass;
+                    if (iFloorLoop) printf("[Scenario] ── rotation pass #%d ──\n", iPass);
+                    for (int i = 0; i < (int)sessions.size(); ++i) {
+                        if (g_bQuit) break;
+                        if (!sessions[i]->m_bInCall) {
+                            printf("[Scenario] Member %d (%s) not in call, skipping\n",
+                                   i, sessions[i]->m_strUser.c_str());
+                            continue;
+                        }
+                        printf("[Scenario] Member %d (%s): PTT Request (floor)\n",
                                i, sessions[i]->m_strUser.c_str());
-                        continue;
+                        sessions[i]->SendPttRequest();
+
+                        // Speaking time: -floor_hold 초 (참여자별 발언 시간, default 5)
+                        printf("[Scenario]   floor hold %ds...\n", iFloorHold);
+                        for (int t = 0; t < iFloorHold * 10 && !g_bQuit; ++t) usleep(100000);
+
+                        printf("[Scenario] Member %d (%s): PTT Release\n",
+                               i, sessions[i]->m_strUser.c_str());
+                        sessions[i]->SendPttRelease();
+
+                        // 1 second gap between speakers
+                        for (int t = 0; t < 10 && !g_bQuit; ++t) usleep(100000);
                     }
-                    printf("[Scenario] Member %d (%s): PTT Request (floor)\n",
-                           i, sessions[i]->m_strUser.c_str());
-                    sessions[i]->SendPttRequest();
-
-                    // Speaking time: -floor_hold 초 (참여자별 발언 시간, default 5)
-                    printf("[Scenario]   floor hold %ds...\n", iFloorHold);
-                    for (int t = 0; t < iFloorHold * 10; ++t) usleep(100000);
-
-                    printf("[Scenario] Member %d (%s): PTT Release\n",
-                           i, sessions[i]->m_strUser.c_str());
-                    sessions[i]->SendPttRelease();
-
-                    // 1 second gap between speakers
-                    usleep(1000000);
-                }
-                printf("[Scenario] Floor rotation complete\n");
+                } while (iFloorLoop && !g_bQuit);
+                printf("[Scenario] Floor rotation complete (passes=%d)\n", iPass);
             } else {
                 // Fallback: wait for call_duration if not all joined
                 printf("[Scenario] Not all members joined, waiting %ds...\n", iCallDuration);
@@ -551,6 +561,7 @@ int main(int argc, char* argv[])
     int iTotalCalls            = atoi(GetArg(argc, argv, "-calls",         "0").c_str());
     // PTT 그룹콜 화자 순환 시 참여자별 발언(floor 보유) 시간(초). call_duration 과 별개.
     int iFloorHold             = atoi(GetArg(argc, argv, "-floor_hold",    "5").c_str());
+    int iFloorLoop             = HasFlag(argc, argv, "-floor_loop") ? 1 : 0;
     // G8 (2026-04-23): 외부 peer routing 시험용. 비우면 기존 pair 로직 유지.
     //   값이 있으면 call scenario 의 모든 outbound INVITE target 을 이 user 로 덮음.
     std::string strCalleeOverride = GetArg(argc, argv, "-callee_override", "");
@@ -732,7 +743,8 @@ int main(int argc, char* argv[])
                                      iCps,
                                      iHtSec,
                                      iTotalCalls,
-                                     iFloorHold);
+                                     iFloorHold,
+                                     iFloorLoop);
     }
 
     // 시나리오 모드: 완료 대기 → 세션 정리 → 종료 (stdin 루프 진입 안함)

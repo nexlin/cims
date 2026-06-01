@@ -354,15 +354,33 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     }
 
     // 2. Get Shared Group Port
+    //   세션 시작 판정: 이 그룹에 이미 활성 호(멤버)가 있으면 CMP 그룹은 유효
+    //   (멤버>0 이라 CMP 의 유휴 timeout 회수 대상이 아님) → 캐시 사용.
+    //   활성 멤버가 없으면(=세션 시작) CMP 가 유휴 그룹을 timeout 제거했을 수 있으므로
+    //   캐시를 믿지 말고 ADD_PTT_GROUP 으로 재확보한다 (멱등: 살아있으면 기존 port,
+    //   회수됐으면 신규 생성). stale 캐시로 JOIN → 'Group Not Found' → 멤버 무더기
+    //   drop 되던 문제(상용 PTT 영구그룹/장기 유휴 후 재통화)를 방지.
     int iSharedVideoPort = 0;
     bool bVideoEnabled = false;
-    if ( m_mapGroupRtp.find( pszGroupId ) != m_mapGroupRtp.end() ) {
+    bool bGroupHasActiveCall = false;
+    for ( const auto &kv : m_mapCallSession ) {
+        if ( kv.second.strGroupId == pszGroupId ) {
+            bGroupHasActiveCall = true;
+            break;
+        }
+    }
+    bool bInCache = ( m_mapGroupRtp.find( pszGroupId ) != m_mapGroupRtp.end() );
+    if ( bInCache && bGroupHasActiveCall ) {
         iSharedPort = m_mapGroupRtp[pszGroupId].iPort;
         iSharedVideoPort = m_mapGroupRtp[pszGroupId].iVideoPort;
         strSharedIp = m_mapGroupRtp[pszGroupId].strIp;
         bVideoEnabled = m_mapGroupRtp[pszGroupId].bVideoEnabled;
     } else {
-        // Try to allocate now
+        if ( bInCache )
+            CLog::Print( LOG_INFO,
+                         "InviteMember(%s): Group(%s) session (re)start — refreshing CMP group (stale-cache guard)",
+                         pszUserId, pszGroupId );
+        // Try to allocate now ((재)확보)
         CspPttGroup clsGroup;
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
             std::string strRecordDir;
