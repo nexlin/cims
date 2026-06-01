@@ -2,14 +2,15 @@
 CIMS Console layout/menu 영속 REST API — OAM 플랫폼화 5-3 step2.
 
 page = 위젯 배치(layout), nav = 메뉴 트리(menu) 를 file_store 에 저장.
-저장본이 없으면 404 → 프론트가 매니페스트 seed 로 fallback (코드 기본값 유지).
+저장본이 없으면 200 + sentinel({found:false}) → 프론트가 매니페스트 seed 로 fallback (코드 기본값 유지).
+(404 로 응답하면 브라우저가 매 페이지마다 콘솔에 에러를 찍으므로 — 미저장은 정상 흐름이라 200.)
 
 Routes (mounted at /api/v1/console):
   GET    /api/v1/console/layouts          저장된 layout id 목록
-  GET    /api/v1/console/layouts/{id}     layout 1건 (없으면 404 → seed fallback)
+  GET    /api/v1/console/layouts/{id}     layout 1건 (없으면 200 {found:false} → seed fallback)
   PUT    /api/v1/console/layouts/{id}     layout 저장
   DELETE /api/v1/console/layouts/{id}     layout 삭제 (seed 로 리셋)
-  GET    /api/v1/console/menu             nav 메뉴 (없으면 404 → manifest seed)
+  GET    /api/v1/console/menu             nav 메뉴 (없으면 200 {found:false} → manifest seed)
   PUT    /api/v1/console/menu             nav 메뉴 저장
 """
 from urllib.parse import urlparse, unquote
@@ -70,7 +71,9 @@ async def handle_console(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
             if method == 'GET':
                 doc = file_store.load(ldir, lid)
                 if doc is None:
-                    return HandlerResult(status=404, body={'error': 'not_found', 'id': lid})
+                    # 미저장 = 정상 흐름(프론트가 seed fallback). 404 면 브라우저가 콘솔에 에러로
+                    # 찍어 모든 페이지마다 빨간 로그가 남으므로, 200 + sentinel(widgets 없음)로 응답.
+                    return HandlerResult(status=200, body={'id': lid, 'found': False})
                 return HandlerResult(status=200, body=doc)
             if method == 'PUT':
                 body = _body_dict(handler_args)
@@ -90,7 +93,8 @@ async def handle_console(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
             if method == 'GET':
                 doc = file_store.load(mdir, _MENU_KEY)
                 if doc is None:
-                    return HandlerResult(status=404, body={'error': 'not_found'})
+                    # 미저장 = 코드 SECTIONS 사용(정상). 404 콘솔 에러 방지 위해 200 + sentinel.
+                    return HandlerResult(status=200, body={'found': False})
                 return HandlerResult(status=200, body=doc)
             if method == 'PUT':
                 body = _body_dict(handler_args)
