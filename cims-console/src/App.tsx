@@ -35,10 +35,12 @@ function pageWidgetDefs() {
 }
 registerWidgets(pageWidgetDefs())
 
+// 레이아웃 영속 id 는 URL path 세그먼트로 쓰이므로 slash-free 여야 한다 — 백엔드가 경로의
+// %2F 를 '/' 로 디코드해 'page:/alerts/active' 를 'page:' 까지만 키로 파싱(전 page 충돌)하기 때문.
 function routeLayoutId(r: RouteDef): string {
   if (r.layoutId) return r.layoutId
-  if (r.layout) return r.layout.id || r.path
-  return PAGE_WIDGET_PREFIX + r.path
+  if (r.layout) return r.layout.id || r.path.replace(/^\/+/, '').replace(/\//g, '.')
+  return PAGE_WIDGET_PREFIX + r.path.replace(/^\/+/, '').replace(/\//g, '.')
 }
 function routeSeed(r: RouteDef): PageLayout {
   if (r.layout) return r.layout
