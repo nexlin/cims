@@ -347,6 +347,12 @@ async def _health(config: dict) -> HandlerResult:
         grp['members'].append({'subscriber_id': sub, 'role': role})
     result['active_ptt'] = sorted(ptt_groups.values(), key=lambda x: x.get('invite_time') or '')
 
+    # active_calls 보정: csp STATS 의 GetActiveVoipCallCount 는 현재 no-op(항상 0,
+    # file-based CallDir 로 전환됨). state 파일 기반 실시간 집계가 SoT 이므로 그 수로 덮음
+    # (VoLTE 통화 수 + PTT 활성 그룹 수). csp 값이 더 크면(미래 복구 대비) 큰 쪽 유지.
+    file_active = len(result['active_voip']) + len(result['active_ptt'])
+    result['csp']['active_calls'] = max(result['csp'].get('active_calls', 0), file_active)
+
     return HandlerResult(status=200, body=result)
 
 
@@ -354,8 +360,44 @@ async def _health(config: dict) -> HandlerResult:
 #  Message stats (Part 3.1)
 # ──────────────────────────────────────────────────────────────
 
+_SIP_REQUEST_METHODS = {
+    'INVITE', 'ACK', 'BYE', 'CANCEL', 'OPTIONS', 'REGISTER', 'PRACK',
+    'SUBSCRIBE', 'NOTIFY', 'PUBLISH', 'INFO', 'REFER', 'MESSAGE', 'UPDATE',
+}
+
+
+def _parse_msg_method(msg: str) -> str:
+    """SIP/CMP 원문(msg)에서 통계용 키 추출.
+    - 요청: 첫 줄 첫 토큰이 메서드 (INVITE/REGISTER/BYE/...).
+    - 응답: 'SIP/2.0 200 OK' → 상태코드('200'/'401'/'180'/...).
+    - CMP JSON: payload.cmd (HEARTBEAT/ADD/REMOVE/...).
+    """
+    if not msg:
+        return 'unknown'
+    first = msg.replace('\r', '\n').split('\n', 1)[0].strip()
+    if not first:
+        return 'unknown'
+    # CMP/CSC JSON-over-UDP
+    if first.startswith('{'):
+        try:
+            j = json.loads(msg)
+            return (j.get('payload', {}) or {}).get('cmd', 'json') or 'json'
+        except Exception:
+            return 'json'
+    tok = first.split()
+    if first.startswith('SIP/2.0'):
+        return tok[1] if len(tok) > 1 else 'response'   # status code
+    method = tok[0].upper()
+    return method if method in _SIP_REQUEST_METHODS else method
+
+
 async def _messages_stats_v2(config, iface, date) -> HandlerResult:
-    """msg_log JSONL 기반 인터페이스별 메시지 통계"""
+    """service_log JSONL 기반 인터페이스별 메시지 통계.
+
+    실제 레이아웃: {ServiceLogDir}/YYYY/MM/DD/HH/csp_01_{sip|cmp|csc}.msg.jsonl
+    각 라인 = {ts,dir,peer,caller,callee,sesid,proto,msg}. method 는 msg 본문에서 파싱.
+    (옛 MsgLogDir/{comp}/.../{iface}.jsonl 레이아웃 + entry['method'] 가정은 폐기됨.)
+    """
     import glob as _glob
 
     if not date:
@@ -363,28 +405,16 @@ async def _messages_stats_v2(config, iface, date) -> HandlerResult:
     d = date.replace('-', '')
     yyyy, mm, dd = d[:4], d[4:6], d[6:8]
 
-    msg_log_dir = config.get('MsgLogDir', '')
-    if not msg_log_dir:
-        return HandlerResult(status=200, body={'date': date, 'interface': iface, 'buckets': [], 'method_counts': {}})
+    base = _service_log_dir(config)
+    if not base:
+        return HandlerResult(status=200, body={'date': date, 'interface': iface,
+                                               'total': 0, 'buckets': [], 'method_counts': {}})
 
-    # 인터페이스 → 파일 매핑
-    iface_map = {
-        'sip': ('csp', 'sip.jsonl'),
-        'cmp': ('csp', 'cmp.jsonl'),
-        'csc': ('csp', 'csc.jsonl'),
-        'https': ('csc', 'mcptt.jsonl'),
-    }
+    ifaces = [iface] if iface in ('sip', 'cmp', 'csc') else ['sip', 'cmp', 'csc']
+    patterns = [os.path.join(base, yyyy, mm, dd, '*', f'csp_01_{ifc}.msg.jsonl') for ifc in ifaces]
 
-    if iface and iface in iface_map:
-        comp, fname = iface_map[iface]
-        patterns = [os.path.join(msg_log_dir, comp, yyyy, mm, dd, '*', fname)]
-    else:
-        # 전체: 모든 인터페이스
-        patterns = [os.path.join(msg_log_dir, comp, yyyy, mm, dd, '*', fn) for comp, fn in iface_map.values()]
-
-    # JSONL 파싱 → 시간대별 + 메서드별 집계
-    hourly = {}  # hour → count
-    method_counts = {}  # method → count
+    hourly = {}         # hour → count
+    method_counts = {}  # method/status → count
 
     for pattern in patterns:
         for fpath in _glob.glob(pattern):
@@ -398,17 +428,15 @@ async def _messages_stats_v2(config, iface, date) -> HandlerResult:
                             entry = json.loads(line)
                             ts = entry.get('ts', '')
                             hour = int(ts.split(':')[0]) if ':' in ts else 0
-                            method = entry.get('method', 'unknown')
-
+                            method = _parse_msg_method(entry.get('msg', ''))
                             hourly[hour] = hourly.get(hour, 0) + 1
                             method_counts[method] = method_counts.get(method, 0) + 1
-                        except:
+                        except Exception:
                             pass
-            except:
+            except Exception:
                 pass
 
     buckets = [{'hour': h, 'count': hourly.get(h, 0)} for h in range(24)]
-    # method_counts를 카운트 내림차순 정렬
     sorted_methods = dict(sorted(method_counts.items(), key=lambda x: -x[1]))
 
     return HandlerResult(status=200, body={
@@ -476,10 +504,17 @@ def _iter_call_jsons(config: dict, call_type: str, from_dt: str, to_dt: str):
 
 
 def _ts_of(record: dict, call_type: str) -> str:
-    """call_type 별 시작 시각 필드 추출 (volte=invite_time, ptt=start_time)."""
+    """call_type 별 시작 시각 필드 추출 (volte=invite_time, ptt=start_time).
+
+    call.json 은 ISO 'T' 구분자("2026-06-01T15:52:37"), from/to 파라미터는 공백
+    구분자("2026-06-01 00:00:00"). 문자열 비교 시 'T'(0x54) > ' '(0x20) 라 전 레코드가
+    to_dt 초과로 배제되는 버그가 있었음 → 여기서 ' ' 로 정규화해 비교/버킷 모두 일치시킴.
+    """
     if call_type == 'ptt':
-        return record.get('start_time', '') or record.get('invite_time', '')
-    return record.get('invite_time', '')
+        ts = record.get('start_time', '') or record.get('invite_time', '')
+    else:
+        ts = record.get('invite_time', '')
+    return ts.replace('T', ' ', 1) if ts else ts
 
 
 def _bucket_key(ts: str, gran: str) -> str:
