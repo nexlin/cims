@@ -23,6 +23,14 @@
     "Agent": {
         "MtlsEnabled": false
     },
+    "CspNotify": {
+        "Ip": "121.161.164.47",
+        "Port": 4421,
+        "_comment": "대시보드 health 위젯의 CSP STATS probe 대상. CSP CscInterface(UDP) 가 bind 한 주소 — A/S HA 에선 VIP 로 두면 항상 active master 를 가리킨다."
+    },
+    "CmpIp": "10.0.1.48",
+    "CmpPort": 9000,
+    "_cmp_comment": "대시보드 health 위젯의 CMP STATS probe 대상(ControlPort). AA 양노드 중 대표 1개 — media01.",
     "CimsAuth": {
         "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8="
     },

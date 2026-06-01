@@ -250,8 +250,11 @@ def _metric_append(config, agent_id: int, record: dict):
 
 
 def _metric_load_recent(config, agent_id: int, limit: int = 120, days: int = 7) -> list:
-    """최근 N일치 metric 시계열을 최신순으로 limit 개 반환."""
-    rows = list(file_store.jsonl_iter_recent(_metric_root(config), str(agent_id), days=days))
+    """최근 metric 시계열을 최신순으로 limit 개 반환.
+    파일 끝에서부터 tail-read 하여 limit 를 채우면 조기 종료 — 2s 케이던스(하루 ~43K줄)
+    에서 7일 전체를 list() 로 파싱하던 옛 구현(요청당 2~3s, 동시 4건 시 위젯 4s 타임아웃
+    초과 → '시스템 리소스' 빈칸)을 해소."""
+    rows = file_store.jsonl_tail_recent(_metric_root(config), str(agent_id), limit=limit, days=days)
     rows.sort(key=lambda r: r.get('ts', ''), reverse=True)
     return rows[:limit]
 
@@ -990,6 +993,12 @@ async def _agent_metrics(aid: int, config):
             except Exception: procs = []
         elif not isinstance(procs, list):
             procs = []
+        per_iface = r.get("per_iface")
+        if not isinstance(per_iface, list):
+            per_iface = []
+        mounts = r.get("mounts")
+        if not isinstance(mounts, list):
+            mounts = []
         return {
             "ts": r.get("ts"),
             "cpu_pct": r.get("cpu_pct"),
@@ -997,6 +1006,8 @@ async def _agent_metrics(aid: int, config):
             "disk_pct": r.get("disk_pct"),
             "load_avg": r.get("load_avg"),
             "processes": procs,
+            "per_iface": per_iface,
+            "mounts": mounts,
         }
     return HandlerResult(status=200, body={"items": [_row(r) for r in rows]},
                          media_type="application/json")

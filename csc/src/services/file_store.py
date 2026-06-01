@@ -298,6 +298,58 @@ def jsonl_last(domain_path: str, key: str, days: int = 2):
     return None
 
 
+def _tail_records(path: str, need: int) -> list:
+    """파일 끝에서부터 최신 레코드를 need 개 모을 때까지 tail-read (필요 시 윈도 확장).
+    반환은 최신 우선(newest-first). 파일 내 레코드는 append 순서(시간순)라 마지막 줄이 최신."""
+    try:
+        with open(path, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            window = 65536
+            while True:
+                start = max(0, size - window)
+                f.seek(start)
+                data = f.read().decode('utf-8', 'ignore')
+                lines = data.splitlines()
+                # 윈도가 파일 중간에서 시작하면 첫 줄이 잘렸을 수 있어 버림
+                if start > 0 and lines:
+                    lines = lines[1:]
+                recs = []
+                for line in reversed(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        recs.append(json.loads(line))
+                    except Exception:
+                        continue
+                    if len(recs) >= need:
+                        break
+                if len(recs) >= need or start == 0:
+                    return recs
+                window *= 4   # 아직 부족 — 더 거슬러 읽기
+    except Exception:
+        return []
+
+
+def jsonl_tail_recent(domain_path: str, key: str, limit: int = 120, days: int = 7):
+    """최근 일자 jsonl 에서 최신 limit 개 레코드를 최신 우선(newest-first) 으로 반환.
+    각 파일을 끝에서부터 tail-read 하고 limit 를 채우면 조기 종료 — 7일 전체를
+    파싱하던 jsonl_iter_recent + list() 대비 훨씬 저렴 (2s 케이던스 대용량 파일 대응)."""
+    from datetime import timedelta
+    out: list = []
+    today = datetime.now().date()
+    for i in range(max(1, days)):
+        if len(out) >= limit:
+            break
+        d = today - timedelta(days=i)
+        path = jsonl_path(domain_path, key, datetime(d.year, d.month, d.day))
+        if not os.path.exists(path):
+            continue
+        out.extend(_tail_records(path, limit - len(out)))
+    return out[:limit]
+
+
 def jsonl_purge_old(domain_path: str, retain_days: int) -> int:
     """domain 의 모든 key 에 대해 retain_days 보다 오래된 일별 jsonl 파일 삭제.
     레이아웃 {domain_path}/<key>/YYYY/MM/DD.jsonl 의 날짜를 경로에서 파싱.

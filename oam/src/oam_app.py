@@ -120,6 +120,7 @@ if __name__ == '__main__':
     from handlers.alerts         import CIMS_ALERTS_HANDLER_LIST
     from handlers.console        import CIMS_CONSOLE_HANDLER_LIST
     from handlers.service_descriptors import CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
+    from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
     from services import service_registry
     from services.flow_logger    import FLOW_HANDLER_LIST
 
@@ -310,6 +311,10 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
+        ])
+        admin_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
         ])
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)

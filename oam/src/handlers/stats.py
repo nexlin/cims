@@ -211,13 +211,49 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 #  Health check (Part 1 대시보드 데이터)
 # ──────────────────────────────────────────────────────────────
 
+def _get_dashboard_counts(config: dict) -> dict:
+    """대시보드 KPI 용 DB 카운트 (3s 캐시). 가입자/번호/등록/그룹.
+    등록 = register_time NOT NULL AND (logout_time NULL OR register_time > logout_time)
+    — csp 가 REGISTER 시 register_time, 로그아웃/만료 시 logout_time 을 갱신함."""
+    def probe():
+        try:
+            with _get_db(config) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT
+                          (SELECT COUNT(*) FROM users)                                   AS subscribers_total,
+                          (SELECT COUNT(*) FROM volte_subscriptions)                      AS volte_numbers,
+                          (SELECT COUNT(*) FROM volte_subscriptions
+                             WHERE register_time IS NOT NULL
+                               AND (logout_time IS NULL OR register_time > logout_time))  AS volte_registered,
+                          (SELECT COUNT(*) FROM ptt_subscriptions)                        AS ptt_numbers,
+                          (SELECT COUNT(*) FROM ptt_subscriptions
+                             WHERE register_time IS NOT NULL
+                               AND (logout_time IS NULL OR register_time > logout_time))  AS ptt_registered,
+                          (SELECT COUNT(*) FROM ptt_groups)                               AS ptt_groups_total
+                    """)
+                    row = cur.fetchone()
+                    if not row:
+                        return {}
+                    # DictCursor / tuple 양쪽 대응
+                    keys = ['subscribers_total', 'volte_numbers', 'volte_registered',
+                            'ptt_numbers', 'ptt_registered', 'ptt_groups_total']
+                    if isinstance(row, dict):
+                        return {k: int(row.get(k) or 0) for k in keys}
+                    return {k: int(row[i] or 0) for i, k in enumerate(keys)}
+        except Exception:
+            return {}
+    return _cached('counts', probe)
+
+
 async def _health(config: dict) -> HandlerResult:
     # csp/cmp UDP probe + DB 체크를 thread 로 병렬 — 이벤트 루프 비블로킹(down 서버 timeout 이
     # 다른 요청을 막지 않도록). 캐시(_cached)와 함께 /stats/health 지연 대폭 감소.
-    csp, cmp, db_ok = await asyncio.gather(
+    csp, cmp, db_ok, counts = await asyncio.gather(
         asyncio.to_thread(_get_csp_stats, config),
         asyncio.to_thread(_get_cmp_stats, config),
         asyncio.to_thread(_check_db_health, config),
+        asyncio.to_thread(_get_dashboard_counts, config),
     )
 
     result = {
@@ -231,14 +267,28 @@ async def _health(config: dict) -> HandlerResult:
             'active_calls': csp.get('active_calls', 0),
             'db_connected': csp.get('db_connected', False),
             'roles': csp.get('roles', {}),
+            # 대시보드 KPI — DB 카운트 (가입자/번호/등록/그룹). probe 실패 시 0.
+            'subscribers_total': counts.get('subscribers_total', 0),
+            'volte_numbers':     counts.get('volte_numbers', 0),
+            'volte_registered':  counts.get('volte_registered', 0),
+            'ptt_numbers':       counts.get('ptt_numbers', 0),
+            'ptt_registered':    counts.get('ptt_registered', 0),
+            'ptt_groups_total':  counts.get('ptt_groups_total', 0),
         },
         'cmp': {
             'sessions': cmp.get('sessions', 0),
             'groups': cmp.get('groups', 0),
+            # VoIP 풀 (하위호환: rtp_ports = VoIP)
             'rtp_ports': {
                 'total': cmp.get('rtp_ports_total', 0),
                 'used': cmp.get('rtp_ports_used', 0),
                 'free': cmp.get('rtp_ports_free', 0),
+            },
+            # PTT(그룹통화) 전용 풀 — cmp STATS ptt_rtp_ports_* (구버전 cmp 면 0).
+            'rtp_ports_ptt': {
+                'total': cmp.get('ptt_rtp_ports_total', 0),
+                'used': cmp.get('ptt_rtp_ports_used', 0),
+                'free': cmp.get('ptt_rtp_ports_free', 0),
             },
         },
         'record_enable': csp.get('record_enable', False),
