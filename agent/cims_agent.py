@@ -429,6 +429,57 @@ def collect_per_iface() -> list:
     return rows
 
 
+# 가상/의사 파일시스템 — mount별 사용률에서 제외 (실제 저장장치만).
+_VIRTUAL_FSTYPES = {
+    "proc", "sysfs", "tmpfs", "devtmpfs", "devpts", "cgroup", "cgroup2",
+    "mqueue", "hugetlbfs", "debugfs", "tracefs", "securityfs", "pstore",
+    "bpf", "configfs", "fusectl", "ramfs", "autofs", "binfmt_misc",
+    "overlay", "squashfs", "nsfs", "fuse.gvfsd-fuse", "fuse.portal",
+}
+
+
+def collect_per_mount() -> list:
+    """/proc/mounts 순회 — 실제 블록 디바이스 마운트별 사용률.
+    가상 fs(tmpfs/proc/sys 등)와 중복 device 는 제외. statvfs 로 total/used/pct 산출."""
+    rows = []
+    seen_dev = set()
+    try:
+        with open("/proc/mounts") as f:
+            lines = f.readlines()
+    except Exception:
+        return rows
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        dev, mount, fstype = parts[0], parts[1], parts[2]
+        if fstype in _VIRTUAL_FSTYPES:
+            continue
+        # 실제 디바이스(/dev/...)만 — bind mount/중복 device 제외.
+        if not dev.startswith("/dev/"):
+            continue
+        if dev in seen_dev:
+            continue
+        seen_dev.add(dev)
+        try:
+            st = os.statvfs(mount)
+            total = st.f_blocks * st.f_frsize
+            free  = st.f_bavail * st.f_frsize
+            used  = total - free
+            if total <= 0:
+                continue
+            rows.append({
+                "mount": mount,
+                "device": dev,
+                "total": total,
+                "used": used,
+                "pct": round(used / total * 100, 1),
+            })
+        except Exception:
+            continue
+    return rows
+
+
 # 전환 안전망(설치 루트 enumerate 실패 시) 기본 데몬 집합.
 _DEFAULT_METRIC_MODULES = ("csp", "cmp", "csc", "cwrtc")
 # 자기 이름/`<name>_app.py` 로 식별 불가한 모듈 — module 보고에서 제외 (오탐 방지).
@@ -501,6 +552,8 @@ def collect_metrics() -> dict:
     except Exception: pass
     # per-iface RX/TX
     m["per_iface"] = collect_per_iface()
+    # mount별 disk 사용률 (실제 블록 디바이스만)
+    m["mounts"] = collect_per_mount()
     # modules — 실행 중 모듈 (pid/cpu/mem) + 기존 processes 유지 (호환).
     m["processes"] = []
     m["modules"]   = []

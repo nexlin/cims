@@ -275,6 +275,10 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     int freeCount = (int)_freeResources.size();
     int totalPorts = _rtpPoolSize;
     int usedPorts = totalPorts - freeCount;
+    // PTT(그룹통화) 전용 풀 — VoIP 풀(_resourcePool)과 분리. 대시보드 RTP 리소스 분리 표시용.
+    int pttFreeCount  = (int)_freePttResources.size();
+    int pttTotalPorts = (int)_pttPool.size();
+    int pttUsedPorts  = pttTotalPorts - pttFreeCount;
 
     // 그룹별 상세 (멤버수, floor 화자)
     std::string groupsJson = "[";
@@ -301,6 +305,9 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         + ",\"rtp_ports_total\":" + std::to_string(totalPorts)
         + ",\"rtp_ports_used\":" + std::to_string(usedPorts)
         + ",\"rtp_ports_free\":" + std::to_string(freeCount)
+        + ",\"ptt_rtp_ports_total\":" + std::to_string(pttTotalPorts)
+        + ",\"ptt_rtp_ports_used\":" + std::to_string(pttUsedPorts)
+        + ",\"ptt_rtp_ports_free\":" + std::to_string(pttFreeCount)
         + ",\"session_timeout\":" + std::to_string(_sessionTimeout)
         + ",\"group_details\":" + groupsJson
         + "}}";
