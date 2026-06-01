@@ -224,6 +224,20 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( ms.Has( "ControlPort" ) ) m_iCmpPort = (int)ms.GetInt( "ControlPort" );
                 if ( ms.Has( "LocalPort" ) ) m_iLocalCmpPort = (int)ms.GetInt( "LocalPort" );
                 // LocalIp 는 현재 C++ 바인딩 없음 (렌더링 용도). 추후 CmpClient bind 확장 시 연결.
+                // 전용 미디어 풀 (AA 다중 CMP): MediaServer.Endpoints = [{"ip":..,"port":..}, ..].
+                //   SIP remote_nodes 와 무관한 미디어 평면 전용. 비우면 Host 단일 운영(하위호환).
+                if ( ms.Has( "Endpoints" ) ) {
+                    SimpleJson::JsonNode eps = ms.Get( "Endpoints" );
+                    if ( eps.type == SimpleJson::JSON_ARRAY ) {
+                        for ( size_t i = 0; i < eps.Size(); ++i ) {
+                            SimpleJson::JsonNode ep = eps.At( i );
+                            std::string ip = ep.GetString( "ip" );
+                            int port = (int)ep.GetInt( "port", m_iCmpPort );
+                            if ( !ip.empty() && port > 0 )
+                                m_vecCmpEndpoints.push_back( std::make_pair( ip, port ) );
+                        }
+                    }
+                }
             } else if ( setup.Has( "RtpRelay" ) ) {
                 SimpleJson::JsonNode rtp = setup.Get( "RtpRelay" );
                 if ( rtp.Has( "UseRtpRelay" ) ) m_bUseRtpRelay = ( rtp.Get( "UseRtpRelay" ).AsString() == "true" );

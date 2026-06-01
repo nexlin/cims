@@ -189,6 +189,10 @@ public:
     std::string m_strCmpIp;
     int m_iCmpPort;
     int m_iLocalCmpPort;  // Local port to receive CMP messages
+    // 전용 미디어(CMP) 풀 — MediaServer.Endpoints. SIP remote_nodes 와 분리된 미디어 평면.
+    //   primary(m_strCmpIp:m_iCmpPort) 와 함께 CmpClient consistent-hash ring 에 등록되어
+    //   Session-ID 기준으로 다중 CMP(AA) 에 relay 세션을 분배한다. 비어있으면 단일 운영.
+    std::vector< std::pair< std::string, int > > m_vecCmpEndpoints;
 
     // ================================================================
     // 런타임 설정 jsonl 디렉토리 (agent 관리)
