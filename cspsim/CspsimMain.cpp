@@ -294,7 +294,11 @@ static void PrintUsage(const char* pszBin) {
     printf("                             call         - 등록 + 짝끼리 통화\n");
     printf("                             group-call   - 등록 + 구독 + 그룹통화 (PTT)\n");
     printf("                             full         - 전체 반복\n");
-    printf("  -call_duration <secs>    통화 유지 시간 (default: 10)\n");
+    printf("  -call_duration <secs>    통화 유지 시간 (default: 10, 버스트 모델 일괄 보유시간)\n");
+    printf("  -cps         <N>         [call] 호 도착률(초당 호수). >0 이면 지속 부하 모델\n");
+    printf("                             (1/cps 간격 발신 + 각 호 HT 후 개별 종료). 정상상태 동시호≈cps×ht\n");
+    printf("  -ht          <secs>      [call] per-call 보유시간 (cps 모델, 미지정 시 call_duration)\n");
+    printf("  -calls       <N>         [call] 총 발신 호수 (cps 모델, 미지정 시 단말쌍 수=count/2)\n");
     printf("  -callee_override <user>  call 시나리오 에서 INVITE target 을 덮음 (외부 peer 라우팅 시험용)\n");
     printf("  -media_file  <path>      AMR-WB 미디어 파일 (PT=99 전송, 생략 시 합성 RTP)\n");
     printf("  -media_dir   <dir>       미디어 디렉토리 (세션별 라운드로빈 할당)\n");
@@ -325,7 +329,10 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                         ESimScenario eScenario,
                         int iCallDuration,
                         const std::string& strGroupId,
-                        const std::string& strCalleeOverride = "")
+                        const std::string& strCalleeOverride = "",
+                        int iCps = 0,
+                        int iHtSec = 0,
+                        int iTotalCalls = 0)
 {
     // 1. 모든 단말이 등록될 때까지 대기 (최대 30초). no_register 세션은 즉시 ready.
     printf("[Scenario] Waiting for registration...\n");
@@ -373,6 +380,52 @@ static void RunScenario(std::vector<SimSession*>& sessions,
 
     // 3. 통화 시나리오
     if (eScenario == E_SCENARIO_CALL) {
+        // 신규 (2026-06-01): 지속 호 부하 모델 — -cps (호 도착률/초) + -ht (per-call 보유시간).
+        //   1/cps 간격으로 호를 발신하고 각 호를 HT 후 개별 종료 → 정상상태 동시호 ≈ cps × HT
+        //   (Little's law). iCps<=0 또는 callee_override 면 기존 버스트 모델로 폴백(하위호환).
+        if (iCps > 0 && strCalleeOverride.empty()) {
+            int htSec = (iHtSec > 0) ? iHtSec : iCallDuration;
+            int nPairs = (int)sessions.size() / 2;
+            int totalCalls = nPairs;
+            if (iTotalCalls > 0 && iTotalCalls < nPairs) totalCalls = iTotalCalls;
+            int launchIntervalMs = (int)(1000.0 / (double)iCps);
+            if (launchIntervalMs < 1) launchIntervalMs = 1;
+            printf("[Scenario] Sustained call test: cps=%d ht=%ds total=%d calls "
+                   "(launch interval=%dms, expected concurrent≈%d)\n",
+                   iCps, htSec, totalCalls, launchIntervalMs, iCps * htSec);
+
+            struct PendingStop { int pairIdx; long stopAtMs; };
+            std::vector<PendingStop> active;
+            long nowMs = 0;
+            int launched = 0, stopped = 0, peak = 0;
+            while (launched < totalCalls || !active.empty()) {
+                // (a) 발신 예정 시각 도달한 호 발신
+                while (launched < totalCalls && (long)launched * launchIntervalMs <= nowMs) {
+                    int p = launched;
+                    sessions[2 * p]->StartCall(sessions[2 * p + 1]->m_strUser);
+                    active.push_back({ p, nowMs + (long)htSec * 1000 });
+                    launched++;
+                }
+                if ((int)active.size() > peak) peak = (int)active.size();
+                // (b) HT 경과한 호 개별 종료 (BYE)
+                for (size_t k = 0; k < active.size(); ) {
+                    if (nowMs >= active[k].stopAtMs) {
+                        sessions[2 * active[k].pairIdx]->StopCall();
+                        stopped++;
+                        active.erase(active.begin() + (long)k);
+                    } else {
+                        ++k;
+                    }
+                }
+                usleep(100000);
+                nowMs += 100;
+            }
+            printf("[Scenario] Sustained call test done (launched=%d stopped=%d peak_concurrent=%d)\n",
+                   launched, stopped, peak);
+            return;
+        }
+
+        // 기존 버스트 모델 (cps 미지정 시 하위호환) — 전체를 200ms 간격 발신 후 일괄 보유/종료.
         if (!strCalleeOverride.empty()) {
             printf("[Scenario] Starting calls (callee_override='%s')...\n", strCalleeOverride.c_str());
             for (auto* s : sessions) {
@@ -488,6 +541,11 @@ int main(int argc, char* argv[])
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
+    // 지속 호 부하 모델 (2026-06-01): -cps 호 도착률(/초), -ht per-call 보유시간(초),
+    //   -calls 총 발신 호수. -cps>0 이면 call 시나리오가 1/cps 간격 발신 + HT 후 개별 종료.
+    int iCps                   = atoi(GetArg(argc, argv, "-cps",           "0").c_str());
+    int iHtSec                 = atoi(GetArg(argc, argv, "-ht",            "0").c_str());
+    int iTotalCalls            = atoi(GetArg(argc, argv, "-calls",         "0").c_str());
     // G8 (2026-04-23): 외부 peer routing 시험용. 비우면 기존 pair 로직 유지.
     //   값이 있으면 call scenario 의 모든 outbound INVITE target 을 이 user 로 덮음.
     std::string strCalleeOverride = GetArg(argc, argv, "-callee_override", "");
@@ -665,7 +723,10 @@ int main(int argc, char* argv[])
                                      eScenario,
                                      iCallDuration,
                                      strGroupId,
-                                     strCalleeOverride);
+                                     strCalleeOverride,
+                                     iCps,
+                                     iHtSec,
+                                     iTotalCalls);
     }
 
     // 시나리오 모드: 완료 대기 → 세션 정리 → 종료 (stdin 루프 진입 안함)
