@@ -9,6 +9,9 @@ export interface HistorySample {
   active_calls: number
   ptt_groups: number
   rtp_used: number
+  rtp_ptt_used: number
+  volte_registered: number
+  ptt_registered: number
 }
 
 const HISTORY_MAX = 60  // 5초 × 60 = 5분
@@ -32,6 +35,9 @@ async function poll() {
       active_calls: res.csp.active_calls,
       ptt_groups: res.cmp.groups,
       rtp_used: res.cmp.rtp_ports.used,
+      rtp_ptt_used: res.cmp.rtp_ports_ptt?.used ?? 0,
+      volte_registered: res.csp.volte_registered ?? 0,
+      ptt_registered: res.csp.ptt_registered ?? 0,
     }
     const history = [...state.history, sample].slice(-HISTORY_MAX)
     state = { data: res, history, error: '' }

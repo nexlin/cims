@@ -5,9 +5,9 @@ export function StatusDot({ status }: { status: string }) {
   return <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: color, marginRight: 6 }} />
 }
 
-export function Sparkline({ data, color = 'var(--primary)' }: { data: number[]; color?: string }) {
-  if (data.length < 2) return <div style={{ height: 24 }} />
-  const w = 140, h = 24, pad = 2
+export function Sparkline({ data, color = 'var(--primary)', height = 24 }: { data: number[]; color?: string; height?: number }) {
+  if (data.length < 2) return <div style={{ height }} />
+  const w = 140, h = height, pad = 2
   const max = Math.max(...data, 1)
   const min = Math.min(...data, 0)
   const range = max - min || 1

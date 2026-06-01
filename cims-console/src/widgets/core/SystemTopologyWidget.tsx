@@ -6,10 +6,20 @@ import { useNavigate } from 'react-router-dom'
 import { haGroupsApi, type HaGroup } from '../../api/ha_groups'
 import { deploymentApi, type Agent, type Deployment } from '../../api/deployment'
 import { alertsApi, type AlertEvent } from '../../api/alerts'
+import { externalSystemsApi, type ExternalSystem, type ProbeResult } from '../../api/external_systems'
 import type { WidgetDef } from '../types'
 
+const EXT_TYPE_LABEL: Record<string, string> = {
+  db: 'DB', monitoring: '모니터링', storage: '스토리지', auth: '인증', other: '기타',
+}
+
 const SEV_RANK: Record<string, number> = { critical: 4, major: 3, minor: 2, warning: 1 }
-const C_RED = '#e74c3c', C_AMBER = '#f59e0b', C_GREEN = '#22c55e', C_GRAY = '#9aa5b4'
+const C_RED = '#e74c3c', C_AMBER = '#f59e0b', C_GREEN = '#22c55e', C_GRAY = '#9aa5b4', C_BLUE = '#3498db'
+// EMS 관례 — 단일문자 상태/설정 배지 (A/S, M/B). hover 시 title 로 풀워드.
+const STATE_BADGE = {
+  fontSize: 9, fontWeight: 700, minWidth: 15, height: 15, lineHeight: '15px',
+  textAlign: 'center' as const, borderRadius: 3, padding: '0 3px', display: 'inline-block',
+} as const
 // 등급 → 색 (worst-of). 0/없음 = 정상색.
 function sevColor(rank: number, up = true): string {
   if (rank >= 3) return C_RED
@@ -39,15 +49,21 @@ function activeSevByMo(events: AlertEvent[]): Map<string, number> {
   return m
 }
 
-interface Node { agentId: number; host: string; online: boolean; role?: string; version?: string; modules: string[] }
+interface Node { agentId: number; host: string; online: boolean; role?: string; active?: boolean; version?: string; modules: string[] }
 interface Sys { key: string; name: string; mode: 'AS' | 'AA' | 'SA'; vip?: string; vipSlot?: string; nodes: Node[] }
+
+function chipTint(rank: number, running: boolean): string {
+  if (rank >= 3) return 'rgba(231,76,60,0.12)'
+  if (rank >= 1) return 'rgba(245,158,11,0.13)'
+  return running ? 'rgba(34,197,94,0.10)' : 'var(--surface-2)'
+}
 
 function ModuleChip({ host, module, running, sevByMo }: { host: string; module: string; running: boolean; sevByMo: Map<string, number> }) {
   const rank = Math.max(sevByMo.get(`${host}/${module}`) ?? 0, sevByMo.get(`cims/${module}`) ?? 0)
   const col = sevColor(rank, running)
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, padding: '1px 6px',
-                   border: `1px solid var(--border)`, borderRadius: 10, marginRight: 4, marginTop: 3 }}
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '2px 8px',
+                   border: `1px solid var(--border)`, borderRadius: 12, background: chipTint(rank, running) }}
           title={`${module} — ${rank >= 3 ? '알람(심각)' : rank >= 1 ? '알람(경고)' : running ? '정상' : '미실행'}`}>
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: col, display: 'inline-block' }} />{module}
     </span>
@@ -64,20 +80,72 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
   const col = sevColor(rank, n.online)
   return (
     <div onClick={onClick} title="클릭: 서버 Inspector"
-         style={{ border: `2px solid ${col}`, borderRadius: 8, padding: '8px 10px', minWidth: 150,
+         style={{ border: '1px solid var(--border)', borderTop: `3px solid ${col}`, borderRadius: 8,
+                  background: 'var(--surface)', cursor: 'pointer', overflow: 'hidden', boxShadow: 'var(--shadow)' }}>
+      {/* 헤더: 상태점 + 호스트 + [A/S 상태]·[M/B 설정] 단축 배지(hover=풀워드) + 버전 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 6px' }}>
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block', flexShrink: 0 }} />
+        <b style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.host}</b>
+        {!n.online
+          ? <span style={{ fontSize: 10, color: C_RED, flexShrink: 0 }}>offline</span>
+          : <span style={{ display: 'inline-flex', gap: 3, flexShrink: 0 }}>
+              {/* 상태 A/S — 채움 배지 */}
+              <span title={n.active ? 'Active (현재 서비스 중)' : 'Standby (대기)'}
+                    style={{ ...STATE_BADGE, background: n.active ? C_GREEN : 'var(--surface-2)',
+                             color: n.active ? '#fff' : 'var(--text-muted)',
+                             border: n.active ? 'none' : '1px solid var(--border)' }}>
+                {n.active ? 'A' : 'S'}</span>
+              {/* 설정 M/B — 외곽 배지 (AS 만) */}
+              {n.role && <span title={`${n.role === 'master' ? 'Master' : 'Backup'} (설정·VRRP 우선순위)`}
+                    style={{ ...STATE_BADGE, color: C_BLUE, border: `1px solid ${C_BLUE}` }}>
+                {n.role === 'master' ? 'M' : 'B'}</span>}
+              {/* 절체 드리프트 — 설정 선호 ≠ 현재 Active */}
+              {n.role && ((n.role === 'master') !== !!n.active) &&
+                <span title="절체됨 — 설정 선호 노드와 현재 Active 가 다름" style={{ color: C_AMBER, fontSize: 11, fontWeight: 700 }}>⚠</span>}
+            </span>}
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{n.version ? `v${n.version}` : ''}</span>
+      </div>
+      {/* 모듈 칩 */}
+      <div style={{ borderTop: '1px solid var(--border)', padding: '6px 10px 8px', display: 'flex', flexWrap: 'wrap', gap: 5,
+                    background: 'var(--bg-soft)' }}>
+        {n.modules.length === 0
+          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(모듈 없음)</span>
+          : n.modules.map(m => <ModuleChip key={m} host={n.host} module={m} running={n.online} sevByMo={sevByMo} />)}
+      </div>
+    </div>
+  )
+}
+
+// 노드 수 기반 균형 배치 열 수 — 2→2, 3·4→2(2x2), 5~9→3 ...
+function gridCols(n: number): number {
+  if (n <= 1) return 1
+  return Math.min(Math.ceil(Math.sqrt(n)), 4)
+}
+
+function ExternalBox({ sys, status, onClick }: { sys: ExternalSystem; status?: ProbeResult; onClick: () => void }) {
+  const hasProbe = (sys.probe?.mode ?? 'none') !== 'none'
+  const st = status?.status
+  const col = !hasProbe ? C_GRAY : st === 'up' ? C_GREEN : st === 'down' ? C_RED : C_GRAY
+  return (
+    <div onClick={onClick} title="클릭: 외부 시스템 관리"
+         style={{ border: `2px dashed ${col}`, borderRadius: 8, padding: '8px 10px', minWidth: 150,
                   background: 'var(--surface)', cursor: 'pointer' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block' }} />
-        <b style={{ fontSize: 13 }}>{n.host}</b>
-        {n.role && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, color: '#fff',
-                                  background: n.role === 'master' ? '#e67e22' : '#7f8c8d' }}>
-          {n.role === 'master' ? '▶MASTER' : 'STANDBY'}</span>}
-        {!n.online && <span style={{ fontSize: 10, color: C_RED }}>offline</span>}
+        <b style={{ fontSize: 13 }}>{sys.name}</b>
+        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, color: '#fff', background: '#8e44ad' }}>외부</span>
+        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+          {EXT_TYPE_LABEL[sys.type] || sys.type}</span>
       </div>
-      {n.version && <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '2px 0' }}>v{n.version}</div>}
-      <div>{n.modules.length === 0
-        ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(모듈 없음)</span>
-        : n.modules.map(m => <ModuleChip key={m} host={n.host} module={m} running={n.online} sevByMo={sevByMo} />)}</div>
+      <div style={{ marginTop: 4 }}>
+        {(sys.endpoints || []).map((e, i) => (
+          <span key={i} style={{ fontSize: 11, padding: '1px 6px', border: '1px solid var(--border)',
+                                 borderRadius: 10, marginRight: 4, marginTop: 3, display: 'inline-block' }}>
+            <code style={{ fontSize: 11 }}>{e.host}:{e.port}</code></span>
+        ))}
+      </div>
+      {hasProbe && st === 'up' && status?.latency_ms != null &&
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{status.latency_ms}ms</div>}
     </div>
   )
 }
@@ -86,35 +154,58 @@ function SystemTopologyWidget() {
   const navigate = useNavigate()
   const [systems, setSystems] = useState<Sys[]>([])
   const [sevByMo, setSevByMo] = useState<Map<string, number>>(new Map())
+  const [ext, setExt] = useState<ExternalSystem[]>([])
+  const [extStatus, setExtStatus] = useState<Map<number, ProbeResult>>(new Map())
 
   const load = useCallback(async () => {
     try {
-      const [groups, agents, deps, alerts] = await Promise.all([
+      const [groups, agents, deps, alerts, extList] = await Promise.all([
         haGroupsApi.list(), deploymentApi.listAgents(), deploymentApi.listDeployments(),
         alertsApi.list({ days: 7, limit: 1000 }).then(r => r.events).catch(() => [] as AlertEvent[]),
+        externalSystemsApi.list().catch(() => [] as ExternalSystem[]),
       ])
+      setExt(extList.filter(s => s.enabled))
+      // probe 상태는 느릴 수 있어 비블로킹 — 도착하면 색 갱신.
+      externalSystemsApi.status()
+        .then(items => setExtStatus(new Map(items.map(i => [i.id, i]))))
+        .catch(() => {})
       const byId = new Map<number, Agent>(agents.map(a => [a.id, a]))
       const modsOf = (aid: number) => deps
         .filter((d: Deployment) => d.agent_id === aid && (d.process_name || '') && d.status === 'running')
         .map((d: Deployment) => (d.process_name || '').toLowerCase())
-      const node = (aid: number, role?: string): Node => {
+      // role = 설정(master/backup), active = 런타임 상태(현재 VIP 보유 = Active).
+      const node = (aid: number, role?: string, active?: boolean): Node => {
         const a = byId.get(aid)
         return { agentId: aid, host: a?.name || String(aid), online: a?.status === 'online',
-                 role, version: a?.agent_version || undefined, modules: [...new Set(modsOf(aid))] }
+                 role, active, version: a?.agent_version || undefined, modules: [...new Set(modsOf(aid))] }
+      }
+      const holdsVip = (aid: number, vipIps: Set<string>): boolean => {
+        const a = byId.get(aid)
+        return !!a?.interfaces?.some(i => i.ip && vipIps.has(i.ip))
       }
       const grouped = new Set<number>()
       const sys: Sys[] = []
       for (const g of groups as HaGroup[]) {
         const vb = (g.vip_bindings || [])[0]
+        // 그룹의 모든 VIP IP — Active 판정(노드 interface 에 VIP 존재)용.
+        const vipIps = new Set<string>()
+        ;(g.vip_bindings || []).forEach(b => b.ip && vipIps.add(b.ip))
+        if (g.vip) vipIps.add(g.vip)
+        const isAS = g.mode === 'active_standby'
         const members = g.members.slice().sort((a, b) => b.priority - a.priority)
         members.forEach(m => grouped.add(m.agent_id))
-        sys.push({ key: `g${g.id}`, name: g.name, mode: g.mode === 'active_standby' ? 'AS' : 'AA',
+        sys.push({ key: `g${g.id}`, name: g.name, mode: isAS ? 'AS' : 'AA',
                    vip: vb?.ip || g.vip || undefined, vipSlot: vb?.slot,
-                   nodes: members.map(m => node(m.agent_id, g.mode === 'active_standby' ? m.role : undefined)) })
+                   nodes: members.map(m => {
+                     const online = byId.get(m.agent_id)?.status === 'online'
+                     // AS: VIP 보유 노드 = Active. AA: 가동 노드 모두 Active.
+                     const active = isAS ? (online && holdsVip(m.agent_id, vipIps)) : online
+                     return node(m.agent_id, isAS ? m.role : undefined, active)
+                   }) })
       }
       for (const a of agents) {
         if (grouped.has(a.id) || a.status === 'revoked') continue
-        sys.push({ key: `a${a.id}`, name: a.name, mode: 'SA', nodes: [node(a.id)] })
+        sys.push({ key: `a${a.id}`, name: a.name, mode: 'SA', nodes: [node(a.id, undefined, a.status === 'online')] })
       }
       setSystems(sys)
       setSevByMo(activeSevByMo(alerts))
@@ -122,7 +213,7 @@ function SystemTopologyWidget() {
   }, [])
 
   useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv) }, [load])
-  if (systems.length === 0) return null
+  if (systems.length === 0 && ext.length === 0) return null
 
   const sysRank = (s: Sys): number => {
     let r = 0
@@ -138,15 +229,17 @@ function SystemTopologyWidget() {
   return (
     <div className="panel" style={{ padding: 16 }}>
       <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14, display: 'flex', alignItems: 'center' }}>
-        시스템 형상 ({systems.length})
+        시스템 형상 ({systems.length}{ext.length > 0 ? ` + 외부 ${ext.length}` : ''})
         <a onClick={() => navigate('/deploy/servers')}
            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--primary)', cursor: 'pointer' }}>시스템/인프라 →</a>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* 시스템 카드들 — 다중일 때 좌우로 흐르도록 auto-fit 그리드 (상하좌우 균등). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 14, alignItems: 'start' }}>
         {systems.map(s => {
           const r = sysRank(s)
           const dot = sevColor(r, true)
           const mb = MODE_BADGE[s.mode]
+          const cols = gridCols(s.nodes.length)
           return (
             <div key={s.key} style={{ border: `1px solid var(--border)`, borderLeft: `4px solid ${dot}`,
                                       borderRadius: 8, padding: '10px 14px', background: 'var(--bg-soft)' }}>
@@ -154,21 +247,45 @@ function SystemTopologyWidget() {
                 <span style={{ width: 10, height: 10, borderRadius: '50%', background: dot, display: 'inline-block' }} />
                 <b style={{ fontSize: 13 }}>{s.name}</b>
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: '#fff', background: mb.c }}>{mb.t}</span>
+                {s.mode === 'AS' && s.nodes.length > 1 &&
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>⇄ VRRP</span>}
                 {s.vip && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
                   ◆ VIP <code style={{ fontSize: 11 }}>{s.vip}</code>{s.vipSlot ? ` /${s.vipSlot}` : ''}</span>}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                {s.nodes.map((n, i) => (
-                  <span key={n.agentId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {i > 0 && s.mode === 'AS' && (
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>╌ vrrp ╌</span>)}
-                    <NodeBox n={n} sevByMo={sevByMo} onClick={() => navigate(`/deploy/servers?agent=${n.agentId}`)} />
-                  </span>
+              {/* 노드 — 수에 따라 균형 그리드 (2→2열, 4→2x2 ...). */}
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(150px, 1fr))`, gap: 10 }}>
+                {s.nodes.map(n => (
+                  <NodeBox key={n.agentId} n={n} sevByMo={sevByMo}
+                           onClick={() => navigate(`/deploy/servers?agent=${n.agentId}`)} />
                 ))}
               </div>
             </div>
           )
         })}
+        {/* 외부 시스템 — 점선 테두리로 내부 노드와 구분. */}
+        {ext.length > 0 && (
+          <div style={{ border: `1px dashed var(--border)`, borderLeft: `4px dashed #8e44ad`,
+                        borderRadius: 8, padding: '10px 14px', background: 'var(--bg-soft)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: '#fff', background: '#8e44ad' }}>외부 시스템</span>
+              <b style={{ fontSize: 13 }}>External</b>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols(ext.length)}, minmax(150px, 1fr))`, gap: 10 }}>
+              {ext.map(s => (
+                <ExternalBox key={s.id} sys={s} status={extStatus.get(s.id)}
+                             onClick={() => navigate('/deploy/external-systems')} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      {/* 상태 범례 */}
+      <div style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+        {[['정상', C_GREEN], ['경고', C_AMBER], ['장애/오프라인', C_RED], ['외부', '#8e44ad']].map(([t, c]) => (
+          <span key={t as string} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: c as string, display: 'inline-block' }} />{t}
+          </span>
+        ))}
       </div>
     </div>
   )

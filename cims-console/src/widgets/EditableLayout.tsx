@@ -6,16 +6,12 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../components/Toast'
 import { consoleApi } from '../api/console'
-import { GridRenderer } from './GridRenderer'
+import { GridRenderer, widgetHeightCss } from './GridRenderer'
 import { getWidget, widgetsByCategory } from './registry'
 import type { PageLayout, WidgetPlacement } from './types'
 
 const WIDTH_OPTS: { v: number; label: string }[] = [
   { v: 12, label: '전체' }, { v: 6, label: '1/2' }, { v: 4, label: '1/3' }, { v: 3, label: '1/4' },
-]
-const HEIGHT_OPTS: { v: number; label: string }[] = [
-  { v: 0, label: '높이:자동' }, { v: 240, label: '높이:240' }, { v: 360, label: '높이:360' },
-  { v: 480, label: '높이:480' }, { v: 640, label: '높이:640' },
 ]
 
 function clone(l: PageLayout): PageLayout {
@@ -153,15 +149,25 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
                             style={{ fontSize: 11, padding: '1px 2px' }} title="폭">
                       {WIDTH_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
                     </select>
-                    <select value={p.h ?? 0} onChange={e => setHeight(i, parseInt(e.target.value))}
-                            style={{ fontSize: 11, padding: '1px 2px' }} title="높이">
-                      {HEIGHT_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-                    </select>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}
+                          title="높이 — 화면 세로 비율(%, 0=자동). 슬라이더로 대략, 숫자칸으로 정확히.">
+                      <span>H</span>
+                      <input type="range" min={0} max={100} step={1}
+                             value={p.h && p.h <= 100 ? p.h : 0}
+                             onChange={e => setHeight(i, parseInt(e.target.value))}
+                             style={{ width: 70 }} />
+                      <input type="number" min={0} max={100} step={1}
+                             value={p.h && p.h <= 100 ? p.h : 0}
+                             onChange={e => setHeight(i, Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                             style={{ width: 42, fontSize: 11, padding: '1px 2px' }} />
+                      <span>{!p.h ? '자동' : p.h <= 100 ? '%' : 'px'}</span>
+                    </span>
                     <button className="btn btn--sm" onClick={() => remove(i)} title="제거"
                             style={{ color: 'var(--danger)' }}>✕</button>
                   </div>
                 </div>
-                <div style={{ pointerEvents: 'none', opacity: 0.85, ...(p.h ? { maxHeight: p.h, overflowY: 'auto' as const } : {}) }}>
+                <div className={p.h ? 'widget-fixed' : undefined}
+                     style={{ pointerEvents: 'none', opacity: 0.85, ...(p.h ? { height: widgetHeightCss(p.h), display: 'flex' as const } : {}) }}>
                   {Comp ? <Comp config={p.config} /> : <div style={{ color: 'var(--danger)', fontSize: 12 }}>알 수 없는 위젯: {p.widgetId}</div>}
                 </div>
               </div>

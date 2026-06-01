@@ -23,6 +23,7 @@ import HaServicesPage from './pages/HaServicesPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
+import ExternalSystemsPage from './pages/ExternalSystemsPage'
 
 export type { RouteDef, RouteSection } from './nav-types'
 
@@ -71,8 +72,9 @@ const CORE_SECTIONS: RouteSection[] = [
     defaultPath: '/deploy/servers',
     order: 60,
     routes: [
-      { path: '/deploy/servers',   title: '시스템/인프라', component: ServersPage,     adminOnly: true },
-      { path: '/deploy/packages',  title: '패키지',        component: PackagesPage,    adminOnly: true },
+      { path: '/deploy/servers',          title: '시스템/인프라', component: ServersPage,         adminOnly: true },
+      { path: '/deploy/external-systems', title: '외부 시스템',   component: ExternalSystemsPage, adminOnly: true },
+      { path: '/deploy/packages',         title: '패키지',        component: PackagesPage,        adminOnly: true },
       // HA 상세 편집 — ServersPage(시스템/인프라) 인스펙터가 HA 를 인라인 편집하므로
       // 사이드바 leaf 에서는 숨김(중복 제거). route 는 ServersPage 의 deep-link(?group=)용 유지.
       { path: '/deploy/services',  title: 'HA 상세 편집',  component: HaServicesPage,  adminOnly: true, hidden: true },

@@ -151,6 +151,20 @@ export interface AgentCreateResult extends Agent {
   install_command: string
 }
 
+export interface NetIfaceMetric {
+  name: string
+  rx_bytes: number; tx_bytes: number
+  rx_errors: number; tx_errors: number
+  rx_rate?: number; tx_rate?: number     // Bps (직전 sample delta)
+}
+
+export interface MountMetric {
+  mount: string
+  device?: string
+  total: number; used: number
+  pct: number
+}
+
 export interface AgentMetric {
   ts: string
   cpu_pct: number | null
@@ -158,6 +172,8 @@ export interface AgentMetric {
   disk_pct: number | null
   load_avg: string | null
   processes: Array<{ name: string; pid: number; cmdline?: string }>
+  per_iface?: NetIfaceMetric[]
+  mounts?: MountMetric[]
 }
 
 export interface AgentHealthCheck {

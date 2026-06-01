@@ -7,6 +7,13 @@ export interface HealthResponse {
     active_calls: number
     db_connected: boolean
     roles: { CSCF: boolean; TAS: boolean; PTT_AS: boolean; IBCF: boolean }
+    // 대시보드 KPI — DB 카운트 (가입자/번호/등록/그룹). 구버전 OAM 이면 undefined.
+    subscribers_total?: number
+    volte_numbers?: number
+    volte_registered?: number
+    ptt_numbers?: number
+    ptt_registered?: number
+    ptt_groups_total?: number
     timeouts?: { user_timeout: number; stale_call_timeout: number; send_options_period: number }
     trunks?: Array<{
       id: number
@@ -23,7 +30,8 @@ export interface HealthResponse {
   cmp: {
     sessions: number
     groups: number
-    rtp_ports: { total: number; used: number; free: number }
+    rtp_ports: { total: number; used: number; free: number }            // VoIP 풀
+    rtp_ports_ptt?: { total: number; used: number; free: number }        // PTT(그룹통화) 풀
     session_timeout?: number
   }
   record_enable: boolean
