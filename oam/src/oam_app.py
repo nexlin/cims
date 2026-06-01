@@ -193,7 +193,13 @@ if __name__ == '__main__':
             if _cand and os.path.exists(_cand):
                 _ffmpeg_bin = _cand
                 break
-        recording.init(service_log_dir=_service_log_dir, ffmpeg_bin=_ffmpeg_bin)
+        # 변환 워커 수 — 동시 ffmpeg 실행 상한(CPU 보호). config 로 조정(기본 2).
+        try:
+            _tx_workers = max(1, int(config.get('RecordingTranscodeWorkers', 2) or 2))
+        except (TypeError, ValueError):
+            _tx_workers = 2
+        recording.init(service_log_dir=_service_log_dir, ffmpeg_bin=_ffmpeg_bin,
+                       transcode_workers=_tx_workers)
 
         # ── pi_http 요청 로깅 훅 등록 (admin/console 자동 로깅) ──
         from httpsrv.controller import DynamicRouteProc

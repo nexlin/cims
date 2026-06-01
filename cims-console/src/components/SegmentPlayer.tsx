@@ -30,6 +30,31 @@ function fmtMs(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+/**
+ * 세그먼트 변환 완료까지 대기.
+ * 서버는 재생 요청(GET audio|video) 시 raw → mp4 변환을 비동기 시작하고
+ * 변환 중에는 202(transcoding), 완료되면 200 을 반환한다. 같은 URL 을 폴링하여
+ * 200 이 될 때까지 기다린 뒤 호출자가 미디어 element 에 src 를 지정한다.
+ * (본문은 받지 않고 상태코드만 확인 — element 가 다시 요청해 재생.)
+ */
+async function waitSegmentReady(url: string, signal: AbortSignal): Promise<void> {
+  const deadline = Date.now() + 120_000
+  let first = true
+  while (Date.now() < deadline) {
+    if (signal.aborted) return
+    const res = await fetch(url, { method: 'GET', signal, credentials: 'same-origin' })
+    try { await res.body?.cancel() } catch { /* noop */ }
+    if (res.status === 200) return
+    if (res.status === 202) {
+      await new Promise(r => setTimeout(r, first ? 700 : 1500))
+      first = false
+      continue
+    }
+    throw new Error(`재생 준비 실패 (HTTP ${res.status})`)
+  }
+  throw new Error('변환 시간 초과')
+}
+
 export default function SegmentPlayer({ segments, recordingId, callType, caller, callee, onClose }: SegmentPlayerProps) {
   // 재생 가능한 세그먼트만 (recording 상태 제외)
   const playable = segments.filter(s => s.status !== 'recording')
@@ -42,8 +67,13 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
   const [isPlaying, setIsPlaying] = useState(false)
   const [wallTime, setWallTime] = useState('')
   const [speakerInfo, setSpeakerInfo] = useState('')
+  const [preparingSeq, setPreparingSeq] = useState<number | null>(null)  // 변환 대기 중인 seq
+  const [prepError, setPrepError] = useState('')
+  const [playToken, setPlayToken] = useState(0)                          // 같은 세그먼트 재요청 트리거
   const audioRef = useRef<HTMLAudioElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const readySeqs = useRef<Set<number>>(new Set(playable.filter(s => s.status === 'ready').map(s => s.seq)))
+  const prepAbort = useRef<AbortController | null>(null)
 
   const current = selectedSegs[currentIdx]
   const isVideo = current?.has_video
@@ -53,14 +83,47 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
     return recordingsApi.segmentAudioUrl(recordingId, seg.seq)
   }, [recordingId])
 
-  // 세그먼트 변경 시 미디어 로드
+  // 세그먼트 로드. 변환 전(raw/transcoding)이면 완료까지 폴링한 뒤 재생 —
+  // 다이얼로그를 닫았다 다시 열 필요 없이 "변환 중" 표시 후 자동 재생.
+  const loadSegment = useCallback(async (seg: RecordingSegment, autoplay: boolean) => {
+    const el = seg.has_video ? videoRef.current : audioRef.current
+    if (!el) return
+    const url = getMediaUrl(seg)
+    if (readySeqs.current.has(seg.seq) || seg.status === 'ready') {
+      setPreparingSeq(null); setPrepError('')
+      if (el.getAttribute('src') !== url) el.src = url
+      if (autoplay) el.play().catch(() => {})
+      return
+    }
+    prepAbort.current?.abort()
+    const ac = new AbortController()
+    prepAbort.current = ac
+    setPrepError(''); setPreparingSeq(seg.seq)
+    try {
+      await waitSegmentReady(url, ac.signal)
+      if (ac.signal.aborted) return
+      readySeqs.current.add(seg.seq)
+      setPreparingSeq(null)
+      el.src = url
+      if (autoplay) el.play().catch(() => {})
+    } catch (e) {
+      if (!ac.signal.aborted) {
+        setPreparingSeq(null)
+        setPrepError(e instanceof Error ? e.message : '변환 실패')
+      }
+    }
+  }, [getMediaUrl])
+
+  // 현재 세그먼트 변경/재생요청 시 로드 (변환 전이면 폴링→자동재생)
   useEffect(() => {
     if (!current) return
-    const el = isVideo ? videoRef.current : audioRef.current
-    if (!el) return
-    el.src = getMediaUrl(current)
-    if (isPlaying) el.play().catch(() => {})
-  }, [currentIdx, current, isVideo, getMediaUrl, isPlaying])
+    loadSegment(current, isPlaying)
+    // isPlaying 은 playToken/currentIdx 변경 시점의 값만 사용 (pause 시 재로드 방지)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIdx, playToken, current?.seq])
+
+  // 언마운트 시 진행 중 폴링 취소
+  useEffect(() => () => { prepAbort.current?.abort() }, [])
 
   const handleTimeUpdate = useCallback(() => {
     if (!current) return
@@ -87,10 +150,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
     if (selectedSegs.length === 0) return
     setCurrentIdx(0)
     setIsPlaying(true)
-    setTimeout(() => {
-      const el = (selectedSegs[0]?.has_video ? videoRef.current : audioRef.current)
-      if (el && selectedSegs[0]) { el.src = getMediaUrl(selectedSegs[0]); el.play().catch(() => {}) }
-    }, 50)
+    setPlayToken(t => t + 1)
   }
 
   function handleSegClick(seg: RecordingSegment) {
@@ -98,6 +158,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
     if (idx < 0) return
     setCurrentIdx(idx)
     setIsPlaying(true)
+    setPlayToken(t => t + 1)
   }
 
   function toggleCheck(seq: number) {
@@ -200,6 +261,28 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
             style={{ width: '100%' }}
           />
         )}
+
+        {/* 변환 진행 / 오류 안내 — 변환 완료 시 자동 재생 (닫았다 다시 열 필요 없음) */}
+        {preparingSeq != null && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            marginTop: 8, padding: '8px 12px', borderRadius: 6,
+            background: 'var(--bg-secondary, #f5f7fa)', fontSize: 13,
+          }}>
+            <span className="badge badge--blue" style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>변환중</span>
+            <span>녹취를 변환하고 있습니다… 완료되면 자동으로 재생됩니다.</span>
+          </div>
+        )}
+        {prepError && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            marginTop: 8, padding: '8px 12px', borderRadius: 6,
+            background: 'rgba(220,38,38,0.08)', color: 'var(--danger, #dc2626)', fontSize: 13,
+          }}>
+            <span>⚠️ 재생 준비 실패: {prepError}</span>
+            <button className="btn btn--sm" onClick={() => { if (current) loadSegment(current, true) }}>다시 시도</button>
+          </div>
+        )}
       </div>
 
       {/* 음성 재생 시 정보 바 */}
@@ -272,7 +355,9 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                   <td className="ts">{fmtTimeRange(seg.start_time, seg.end_time)}</td>
                   <td className="ts">{fmtMs(seg.duration_ms)}</td>
                   <td>
-                    {seg.status === 'ready'
+                    {preparingSeq === seg.seq
+                      ? <span className="badge badge--blue" style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>변환중</span>
+                      : seg.status === 'ready'
                       ? <span className="badge badge--green" style={{ fontSize: 10 }}>완료</span>
                       : seg.status === 'raw'
                       ? <span className="badge badge--gray" style={{ fontSize: 10 }}>미변환</span>

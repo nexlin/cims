@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import threading
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qs, unquote
 from pathlib import PurePath
 
@@ -37,6 +38,12 @@ logger = logging.getLogger(__name__)
 # 변환 중인 작업 추적 (중복 변환 방지)
 _transcoding_locks = {}
 _transcoding_mutex = threading.Lock()
+
+# 변환 워커 풀 (bounded). 재생 요청(_ensure_segment_ready)은 작업만 큐잉하고 즉시 202 반환,
+# 실제 ffmpeg 는 이 풀의 워커에서 실행 — 요청 처리와 분리 + 동시 변환 수 제한(CPU 보호).
+# 요청마다 무제한 스레드를 띄우던 기존 방식의 CPU 폭주를 막는다. init()에서 생성.
+_transcode_executor = None
+_transcode_workers = 2
 
 # ServiceLogDir — init()에서 설정
 _service_log_dir = ''
@@ -64,13 +71,21 @@ def _resolve_ffmpeg(ffmpeg_bin: str = '') -> str:
     return 'ffmpeg'
 
 
-def init(service_log_dir: str = '', ffmpeg_bin: str = ''):
-    global _service_log_dir, _FFMPEG
+def init(service_log_dir: str = '', ffmpeg_bin: str = '', transcode_workers: int = 2):
+    global _service_log_dir, _FFMPEG, _transcode_executor, _transcode_workers
     _service_log_dir = service_log_dir
     _FFMPEG = _resolve_ffmpeg(ffmpeg_bin)
     if _FFMPEG == 'ffmpeg' and not shutil.which('ffmpeg'):
         logger.warning("ffmpeg 변환툴을 찾지 못함 — 녹취 재생(raw RTP→mp4 변환) 불가. "
                        "OAM 패키지에 vendor ffmpeg 동봉 또는 시스템 설치 필요.")
+    try:
+        _transcode_workers = max(1, int(transcode_workers or 2))
+    except (TypeError, ValueError):
+        _transcode_workers = 2
+    if _transcode_executor is None:
+        _transcode_executor = ThreadPoolExecutor(max_workers=_transcode_workers,
+                                                 thread_name_prefix='rec-transcode')
+        logger.info("녹취 변환 워커 풀 시작 (max_workers=%d)", _transcode_workers)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -651,8 +666,13 @@ def _ensure_segment_ready(rec_dir: str, seg: dict) -> str:
             if lock_key in _transcoding_locks:
                 return 'transcoding'
             _transcoding_locks[lock_key] = True
-        t = threading.Thread(target=_transcode_segment_file, args=(rec_dir, seg), daemon=True)
-        t.start()
+        # 워커 풀에 큐잉 — max_workers 만큼만 동시 ffmpeg 실행(초과분은 큐 대기).
+        # 요청 스레드는 즉시 반환(202), 변환은 풀에서 비동기 처리.
+        if _transcode_executor is not None:
+            _transcode_executor.submit(_transcode_segment_file, rec_dir, seg)
+        else:
+            # init 전(이론상 없음) fallback — 단발 스레드
+            threading.Thread(target=_transcode_segment_file, args=(rec_dir, seg), daemon=True).start()
         return 'transcoding'
 
     return status
