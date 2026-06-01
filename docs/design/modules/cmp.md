@@ -235,6 +235,9 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
   "rtp_ports_total": 20,
   "rtp_ports_used": 7,
   "rtp_ports_free": 13,
+  "ptt_rtp_ports_total": 50,
+  "ptt_rtp_ports_used": 2,
+  "ptt_rtp_ports_free": 48,
   "session_timeout": 600,
   "group_details": [
     {
@@ -245,6 +248,8 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
   ]
 }
 ```
+
+- `rtp_ports_*` = VoIP 풀(`_freeResources`/`PRtpTrans`), `ptt_rtp_ports_*` = PTT 전용 풀(`_freePttResources`/`PPttTrans`) — 리소스 풀 분리(0.0.6+). OAM `/stats/health` 가 `cmp.rtp_ports` + `cmp.rtp_ports_ptt` 로 분리 전달.
 
 #### ALIVE / HEARTBEAT — 연결 확인
 

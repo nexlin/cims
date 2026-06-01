@@ -19,7 +19,7 @@ Monitor/Administer, Huawei U2000 Topo/Fault/Perf/Config, TM Forum eTOM Assurance
 - **2 대영역(`NavArea`)**: `ops`(운용=Assurance) / `admin`(관리=Fulfillment). `nav-types.ts` 의 `NAV_AREA_ORDER`/`NAV_AREA_LABELS`.
 - **그룹(`RouteSection`)** = FCAPS 영역. `area` 필드로 대영역 귀속:
   - 운용: **대시보드**(`dashboard`) · **장애**(`fault`, Fault — 활성알람/이력) · **성능**(`perf`, Performance — 서비스현황/통계) · **기록**(`records`, Accounting — 호·세션 이력)
-  - 관리: **구성**(`config`, Configuration — 가입자/서비스정의) · **시스템**(`system`, Inventory/Maint — 시스템·인프라/HA/패키지) · **릴리스**(`release`, SW Mgmt — 검증/패키징) · **문서**(`docs`)
+  - 관리: **구성**(`config`, Configuration — 가입자/서비스정의) · **시스템**(`system`, Inventory/Maint — 시스템·인프라/HA/패키지/**외부 시스템**) · **릴리스**(`release`, SW Mgmt — 검증/패키징) · **문서**(`docs`)
 - `routes.tsx` `CORE_SECTIONS`(대시보드/장애/시스템/릴리스/문서) + 서비스 매니페스트 섹션(구성/성능/기록) order 병합.
 - 섹션이 자기 `basePath` 밖 route 도 가질 수 있어(예: 구성↔`/deploy/service-defs`) `findSectionByPath` 는 route 멤버십으로 매칭.
 - `Sidebar.tsx` 가 area 로 버킷 → 그룹 펼침(현재 그룹 자동 펼침), 단일-leaf 그룹은 헤더 클릭 직행. SubTabs(상단 탭)는 폐기.
@@ -38,6 +38,8 @@ page 는 고정 화면이 아니라 **위젯 배치(PageLayout)**.
 - `widgets/LayoutRoute.tsx` — route 를 EditableLayout 으로 렌더(출력 섹션 page = 합성 레이아웃).
 
 영속: OAM `/api/v1/console` (`console_layouts` / `console_menu` 도메인). 저장본 없으면 404 → 프론트 seed.
+
+위젯 높이는 화면 세로 비율(`vh`, 0~100; >100 은 레거시 px 호환) — `.widget-fixed` 패널 채움/스크롤. 코어 대시보드 위젯(`widgets/core/`): `KpiWidget`(7 KPI 카드) · `SystemTopologyWidget`(EMS 노드 형상 + 외부 시스템 점선 노드) · `SystemResourceWidget`(서버×지표 추이). 데이터 정의는 `features/monitoring.md` §1.7~1.8.
 
 ## 4. shape 위젯 + 데이터 소스 (완전 데이터 구동)
 

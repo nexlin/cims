@@ -120,7 +120,8 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 ### 10.1 Heartbeat / Metric (raw 시계열)
 
 - agent 는 기본 **2초** 주기로 heartbeat + metric 전송 (`DEFAULT_HEARTBEAT_SEC` / `DEFAULT_METRIC_SEC`).
-- metric payload: `cpu_pct / mem_pct / disk_pct / load_avg / per_iface[] (rx/tx + rate + errors) / modules[]`.
+- metric payload: `cpu_pct(/proc/stat) / mem_pct / disk_pct(root) / mounts[] (마운트별 사용률, /proc/mounts+statvfs) / load_avg / per_iface[] (rx/tx + rate + errors) / modules[]`.
+  - ⚠ OAM `agent_api.py _metric()` 가 record 를 필드 화이트리스트로 저장 — **신규 metric 필드는 화이트리스트 추가 필수**(미추가 시 버려짐). 조회는 `jsonl_tail_recent`(tail-read, 2초 시계열 풀파싱 금지).
 - OAM 가 `POST /metric` 수신 → `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` append.
 - retention: `_sweep_metric_purge` 가 `MetricRetentionDays`(기본 3일) 초과 일별 파일 삭제.
 - Console 시각화: ServersPage 메트릭 모달 + HaServicesPage 멤버별 cpu/mem/disk sparkline (공유 `MetricTrend`).

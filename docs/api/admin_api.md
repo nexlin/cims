@@ -1038,13 +1038,26 @@ Authorization: Bearer <token>
 **응답 200:**
 ```json
 {
-  "csp": {"status": "running", "registered_users": 42, "active_calls": 3},
-  "cmp": {"status": "running", "sessions": 3, "groups": 1,
-          "rtp_ports_total": 20, "rtp_ports_used": 5},
-  "db": {"status": "connected"},
-  "csc": {"status": "running", "uptime": 86400}
+  "health": {"csp": "up", "cmp": "up", "db": "up"},
+  "csp": {
+    "registered_users": 42, "active_calls": 3, "db_connected": true,
+    "roles": {"CSCF": true, "TAS": true, "PTT_AS": true, "IBCF": false},
+    "subscribers_total": 5013, "volte_numbers": 5000, "volte_registered": 42,
+    "ptt_numbers": 5000, "ptt_registered": 38, "ptt_groups_total": 12
+  },
+  "cmp": {
+    "sessions": 3, "groups": 1,
+    "rtp_ports":     {"total": 100, "used": 5, "free": 95},
+    "rtp_ports_ptt": {"total": 50,  "used": 2, "free": 48}
+  },
+  "record_enable": false,
+  "voip_calls": [ ... ], "ptt_groups": [ ... ]
 }
 ```
+
+- `csp.{subscribers_total, volte_numbers, volte_registered, ptt_numbers, ptt_registered, ptt_groups_total}` — 대시보드 KPI 용 **DB 카운트**(`_get_dashboard_counts`, 3s 캐시). 등록 = `register_time NOT NULL AND (logout_time NULL OR register_time>logout_time)`.
+- `cmp.rtp_ports` = VoIP 풀(하위호환), `cmp.rtp_ports_ptt` = PTT 전용 풀(구버전 CMP 면 0).
+- csp/cmp probe 는 비블로킹(thread gather) + 3s 캐시. probe 대상 IP 는 `oam.json` 의 CspNotify/CmpIp (미지정 시 127.0.0.1 fallback → VIP/미디어 호스트 down 오탐).
 
 ### 10.2 가입자 통계
 
@@ -1077,6 +1090,33 @@ GET /api/v1/stats/service/summary?date=2026-04-13
   "ptt": {"total_sessions": 20, "total_floor_grants": 85, "avg_members": 4}
 }
 ```
+
+### 10.4 외부 시스템 레지스트리 (`/api/v1/external-systems`)
+
+CIMS agent/HA 밖의 외부 시스템(외부 DB / 모니터링 / 스토리지 / 인증 등)을 등록·감시. file_store 컬렉션(domain `external_systems`) 기반, 신규 DB 테이블 없음.
+
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/external-systems` | 목록 `{systems:[...]}` |
+| POST | `/external-systems` | 생성 → `201 {id}` (name·endpoints 필수) |
+| GET | `/external-systems/status` | enabled 전체 동시 probe `{items:[{id,status,latency_ms}]}` |
+| GET | `/external-systems/{id}` | 1건 |
+| PUT | `/external-systems/{id}` | 수정 |
+| DELETE | `/external-systems/{id}` | 삭제 `{id,deleted}` |
+| POST | `/external-systems/{id}/probe` | 즉시 probe `{id,status,latency_ms,checked_at}` |
+
+**레코드:**
+```json
+{
+  "id": 1, "name": "외부 가입자 DB", "type": "db",
+  "endpoints": [{"host": "10.0.1.200", "port": 3306, "label": "primary"}],
+  "probe": {"mode": "tcp", "host": "10.0.1.200", "port": 3306, "timeout": 2},
+  "tags": [], "enabled": true, "description": ""
+}
+```
+- `type`: `db` | `monitoring` | `storage` | `auth` | `other`
+- `probe.mode`: `tcp`(구현, connect → up/down + latency_ms) | `http`·`icmp`(예약 → unknown) | `none`. host/port 미지정 시 `endpoints[0]` fallback.
+- 대시보드 SystemTopologyWidget 에 **점선 노드**로 표시.
 
 ---
 

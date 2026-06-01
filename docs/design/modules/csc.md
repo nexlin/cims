@@ -361,20 +361,25 @@ notify_csp("GROUP_CHANGED", uri=group_id, action="PUT", etag=new_etag)
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/health` | 시스템 상태 (CSP/CMP/DB) |
+| GET | `/health` | 시스템 상태 (CSP/CMP/DB) + 대시보드 KPI 카운트 + RTP 풀(VoIP/PTT) |
 | GET | `/subscribers` | 가입자 통계 |
 | GET | `/service/summary` | 서비스 통계 요약 |
+| GET | `/external-systems/*` | 외부 시스템 레지스트리 (admin_api.md §10.4) |
 
-**Health 응답:**
+**Health 응답** (전체 스키마는 `docs/api/admin_api.md` §10.1):
 
 ```json
 {
-  "csp": {"status": "running", "registered_users": 42, "active_calls": 3},
-  "cmp": {"status": "running", "sessions": 3, "groups": 1},
-  "db": {"status": "connected"},
-  "csc": {"status": "running", "uptime": 86400}
+  "health": {"csp": "up", "cmp": "up", "db": "up"},
+  "csp": {"registered_users": 42, "active_calls": 3,
+          "subscribers_total": 5013, "volte_registered": 42, "ptt_groups_total": 12, "...": "..."},
+  "cmp": {"sessions": 3, "groups": 1,
+          "rtp_ports": {"total": 100, "used": 5, "free": 95},
+          "rtp_ports_ptt": {"total": 50, "used": 2, "free": 48}}
 }
 ```
+
+- KPI 카운트(`subscribers_total`/`volte_registered`/...)는 DB 단일 쿼리(`_get_dashboard_counts`, 3s 캐시). RTP 풀은 VoIP/PTT 분리.
 
 ### 3.9 녹취 (handlers/recording.py)
 

@@ -1,6 +1,6 @@
 # CIMS 모니터링·이력·통계 설계서
 
-> 버전: 4.0 (2026-04-10)
+> 버전: 4.1 (2026-06-01)
 
 ---
 
@@ -95,11 +95,20 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 
 ### 1.2 가입자 접속 상태
 
-| 항목 | 설명 | 소스 |
+대시보드 KPI 카드는 CSP UserMap probe 가 아니라 **DB 단일 쿼리**(`stats.py _get_dashboard_counts`, 3s 캐시)로 산출한다 — csp 가 REGISTER/로그아웃 시 `register_time`/`logout_time` 을 갱신하므로 DB 가 SoT.
+
+| KPI | 산출 (DB) | 비고 |
 |------|------|------|
-| 등록 사용자 수 | REGISTER 유효 가입자 | CSP `gclsUserMap` |
-| 사용자 목록 | ID, IP:Port, 등록시간, 서비스타입, 만료시간 | CSP `gclsUserMap.GetString()` |
-| 미등록 사용자 수 | 전체 가입자 - 등록 사용자 | DB `subscriptions` vs UserMap |
+| 가입자 수 | `COUNT(*) users` | 사람 단위 |
+| VoLTE 번호 (전체/등록) | `COUNT(*) volte_subscriptions` / 등록조건 | "등록 단말" |
+| PTT 번호 (전체/등록) | `COUNT(*) ptt_subscriptions` / 등록조건 | |
+| PTT 그룹 수 | `COUNT(*) ptt_groups` | |
+
+- **등록 조건**: `register_time IS NOT NULL AND (logout_time IS NULL OR register_time > logout_time)`.
+- 라벨은 "등록 사용자" 가 아니라 **"등록 단말"** (한 가입자가 VoLTE/PTT 번호를 복수 보유).
+- `/stats/health` 응답 `csp.{subscribers_total, volte_numbers, volte_registered, ptt_numbers, ptt_registered, ptt_groups_total}`. probe 실패 시 0.
+
+가입자 목록(`ID, IP:Port, 등록시간, 서비스타입, 만료시간`)은 여전히 CSP `gclsUserMap.GetString()` / state 파일 기반 실시간 조회.
 
 ### 1.3 VoIP 통화 상태
 
@@ -107,7 +116,10 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 |------|------|------|
 | 활성 VoIP 호 수 | B2BUA 진행 중 | CSP `gclsCallMap.GetCount()` |
 | 활성 호 목록 | CallId, 발신, 착신, 시작시간, 상태(ringing/active), 모듈(TAS/IBCF) | CSP `gclsCallMap` + `m_mapCallOwner` |
-| RTP 포트 사용률 | 사용중 / 전체 | CSP `gclsRtpMap` 또는 CMP `_freeResources` |
+| RTP 포트 사용률 (VoIP) | 사용중 / 전체 | CMP `_freeResources` (VoIP `PRtpTrans` 풀, `RtpStartPort`) |
+| RTP 포트 사용률 (PTT) | 사용중 / 전체 | CMP `_freePttResources` (PTT `PPttTrans` 풀, `PttRtpStartPort`) |
+
+VoIP/PTT 리소스 풀이 분리되어 있어 CMP STATS 응답도 분리 노출한다 — `rtp_ports_{total,used,free}`(VoIP) + `ptt_rtp_ports_{total,used,free}`(PTT). `/stats/health` 는 이를 `cmp.rtp_ports`(하위호환=VoIP) + `cmp.rtp_ports_ptt` 두 객체로 전달한다(구버전 CMP 면 PTT 0).
 
 ### 1.4 PTT 그룹통화 상태
 
@@ -133,13 +145,18 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 |------|------|------|
 | `cpu_pct` (호스트 CPU%) | `/proc/stat` aggregate cpu 라인 두 sample delta (`_host_cpu_pct`) | psutil 무의존. 첫 sample 은 None, 다음부터 값 (장수 프로세스라 `_HOST_CPU_CACHE` 유지). **이 값이 없으면 대시보드 "시스템 리소스" CPU 가 `—`** |
 | `mem_pct` | `/proc/meminfo` (MemTotal−MemAvailable) | |
-| `disk_pct` | `shutil.disk_usage("/")` | |
-| `load_avg` | `/proc/loadavg` | |
-| `per_iface` rx/tx | `/proc/net/dev` delta | |
+| `disk_pct` | `shutil.disk_usage("/")` | root(`/`) 단일 |
+| `mounts[]` (mount/device/total/used/pct) | `/proc/mounts` 순회 + `statvfs` (`collect_per_mount`) | 실제 블록 디바이스(`/dev/*`)만, 가상 fs·bind·중복 device 제외. root `disk_pct` 와 별개 |
+| `load_avg` | `/proc/loadavg` (1/5/15분, 쉼표 구분) | |
+| `per_iface` rx/tx + rate | `/proc/net/dev` delta | 누적 bytes + rate(B/s) |
 | `modules[]` (pid/cpu/mem) | `_metric_module_names()` 각각 `_pgrep_module` | 아래 참조 |
 
 - **모듈 liveness 탐지 = `_metric_module_names()`**: `_DEFAULT_METRIC_MODULES`(csp/cmp/csc/cwrtc) ∪ `DEFAULT_INSTALL_ROOT` listdir ∪ **`supervised.json` 키**. supervised 를 합치는 이유 — install_path 가 agent 트리 밖(`/opt/cims-agent/isp`)인 모듈은 listdir 로 안 잡혀 OAM 의 `module_down` 알람이 **false 로 뜬다**(deployment=running 인데 agent 미보고). supervised.json(워치독 등록 모듈)을 보면 경로 독립적으로 탐지된다.
-- 대시보드 "시스템 리소스" 위젯(`SystemResourceWidget`)은 데이터 0건이어도 패널을 항상 렌더(placeholder)하고, 서버 목록은 즉시 표시·메트릭은 4s 타임아웃 가드로 보강 — 느린/빈 메트릭에 위젯이 사라지거나 행 걸리지 않는다.
+- 대시보드 "시스템 리소스" 위젯(`SystemResourceWidget`)은 데이터 0건이어도 패널을 항상 렌더(placeholder)하고, 서버 목록은 즉시 표시·메트릭은 4s 타임아웃 가드로 보강 — 느린/빈 메트릭에 위젯이 사라지거나 행 걸리지 않는다. 위젯은 지표(CPU/메모리/디스크/네트워크) 체크박스 선택 + 서버×지표 area 추이 차트(기준선·현재점·임계색) 형태.
+
+> ⚠️ **OAM 화이트리스트 함정**: agent 가 metric 필드를 보내도, CSC(OAM)의 `agent_api.py _metric()` record 화이트리스트에 없으면 저장 시 버려진다 — 신규 metric 필드(예 `mounts`)는 화이트리스트에 명시 추가 필수. 응답 직렬화(`agents.py _agent_metrics._row`)에서도 `per_iface`/`mounts` 를 노출해야 대시보드에 도달한다.
+
+> ⚠️ **메트릭 조회 성능**: 2초 케이던스 메트릭을 7일 풀파싱(`list(iter_recent(days=N))`)하면 요청당 2~3s, 동시 4건 타임아웃 → 시스템 리소스 위젯 빈칸. `_metric_load_recent` 는 `file_store.jsonl_tail_recent`(파일 끝 seek-tail + 조기종료, newest-first)로 ~0.06s. **2초 시계열을 풀파싱하지 말 것.**
 
 ### 1.6 알람 조건
 
@@ -152,29 +169,29 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 | 등록 사용자 0명 | Major | 전체 서비스 장애 의심 |
 | 인증 실패 급증 (분당 N건) | Warning | 무차별 공격 의심 |
 
-### 1.7 Console UI: 대시보드
+### 1.7 Console UI: 대시보드 (위젯 합성)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  CIMS Dashboard                                              │
-│                                                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │ CSP  🟢  │ │ CMP  🟢  │ │ DB   🟢  │ │ CSC  🟢  │       │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
-│                                                              │
-│  등록: 42명     VoIP: 3건     PTT 그룹: 2건     RTP: 8/20   │
-│                                                              │
-│  ── VoIP 활성 통화 ──────────────────────────────────────    │
-│  발신    착신    시작      상태    모듈                        │
-│  1001   1002   14:30:15  active  TAS(B2BUA)                  │
-│  1003   1004   14:32:00  ringing TAS(B2BUA)                 │
-│                                                              │
-│  ── PTT 그룹 세션 ──────────────────────────────────────    │
-│  그룹     멤버  Floor      발언자                             │
-│  Alpha팀  4명   GRANTED   김철수(1001)                       │
-│  Beta팀   3명   IDLE      -                                  │
-└─────────────────────────────────────────────────────────────┘
-```
+대시보드는 고정 화면이 아니라 **위젯 배치(PageLayout)** — admin `[✎ 편집]` 으로 위젯 추가/제거/순서/폭/높이를 조정하고 `PUT /console/layouts/<id>` 로 영속(상세 `console_platform.md` §3). 위젯 높이는 화면 세로 비율(`vh`, 0~100)로 지정한다(>100 은 레거시 px 호환).
+
+기본 큐레이션 위젯:
+
+| 위젯 | 내용 |
+|------|------|
+| **KpiWidget** | 7 축소 카드(auto-fit): 가입자 · VoLTE 번호(등록/전체) · PTT 번호(등록/전체) · VoIP 활성호 · PTT 그룹(활성/전체) · RTP VoIP(사용/전체) · RTP PTT(사용/전체). 라벨은 "등록 단말". |
+| **SystemTopologyWidget** | EMS 스타일 노드 카드 균형 grid. 상태색 상단바·틴트 모듈칩·범례. HA **상태**(Active/Standby = 런타임 VIP 보유 판정)와 **설정**(Master/Backup)을 분리, A/S·M/B 단축 배지(hover=풀워드) + 절체 드리프트 ⚠. 외부 시스템은 점선 노드. |
+| **SystemResourceWidget** | 서버×지표(CPU/메모리/디스크/네트워크) area 추이 차트. 지표 체크박스(모두/선택) + 임계색 칩 + 임계 셀 배경 틴트. 데이터 0건이어도 패널 항상 렌더(§1.5). |
+| **활성 알람** | 활성 알람 목록 (X.733 표준, `alarm_standardization.md`). |
+| **VoIP 활성호 / PTT 그룹 세션** | 활성 통화·그룹 표 (CSP state 파일 기반 실시간). |
+
+### 1.8 외부 시스템 레지스트리
+
+CIMS agent/HA 모델 밖의 **외부 시스템**(외부 DB / 모니터링 / 스토리지 / 인증 서버 등)을 등록해 대시보드 시스템 형상 위젯에 **점선 노드**로 표시하고 라이브니스를 감시한다.
+
+- 저장: 신규 DB 테이블 없이 file_store 컬렉션(domain `external_systems`), 1레코드=1json.
+- 레코드: `{name, type(db|monitoring|storage|auth|other), endpoints:[{host,port,label?}], probe:{mode,host,port,timeout}, tags[], enabled, description}`.
+- Probe: `tcp`(구현, `socket.create_connection` → up/down + latency_ms) / `http`·`icmp`(예약→unknown) / `none`. host/port 미지정 시 `endpoints[0]` fallback.
+- API: `oam/src/handlers/external_systems.py` — CRUD + `GET /status`(enabled 전체 동시 probe) + `POST /{id}/probe`(즉시). 마운트 `/api/v1/external-systems`.
+- 콘솔: `ExternalSystemsPage`(테이블 + Modal CRUD), 시스템 영역 nav leaf.
 
 ---
 
@@ -716,3 +733,4 @@ GET /api/v1/stats/service/summary?granularity=1d&date=2026-04-03
 | 2026-04-03 | 2.0 | 3파트 재설계 — 실시간 모니터링 / 서비스 이력(Flow+녹취 통합) / 통계 |
 | 2026-04-03 | 2.1 | Part 3 통계 보완 — 다중 시간 단위(5m/10m/1h/1d/1M/1y), 계층적 집계/저장, DB 스키마 |
 | 2026-04-10 | 4.0 | VoLTE B2BUA 전환: Proxy 모드 제거, SipMessageLogger(sip.jsonl) 기반 Flow, session.json 매핑, 녹취 recv_usec 추가, 트랜스코딩(DTX/FU-A/sync) 상세화 |
+| 2026-06-01 | 4.1 | 대시보드 위젯 합성화(KPI 7카드/SystemTopology/SystemResource) + KPI DB카운트(등록 단말, register_time/logout_time) + RTP 풀 VoIP/PTT 분리(`rtp_ports`+`rtp_ports_ptt`) + agent `mounts[]`·`cpu_pct`(2s) + 외부 시스템 레지스트리(§1.8) + 메트릭 조회 tail-read 성능(§1.5) |
