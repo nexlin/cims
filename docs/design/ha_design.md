@@ -373,6 +373,14 @@ agent/bin/cims-ha status          # 동작 확인
 cims@<svc>.service 는 `enable` 만 — `start` 는 keepalived notify 가 제어. 부팅 시
 standby 가 자기 자신을 띄우는 일 없음.
 
+> **VIP 바인딩 / NIC 매핑 (multi-VIP)** — HA 그룹은 `vip_bindings: [{slot, ip, mask}]` 로
+> 망별 다중 VIP 를 한 vrrp_instance 에 둔다. 각 VIP 가 붙을 NIC(`dev`)은
+> **VIP 바인딩의 slot 과 동일 용도(slot) 를 가진 멤버 `service_ip_rows` 의 iface** 로 결정
+> (`oam ha_groups._render_ha_for_agent`; memberIfaces 명시 시 우선). 망(role) 모델은 폐지됨.
+> vrrp advert NIC 은 mgmt NIC 자동 선택. **VIP 는 서비스망(예 121.161.164.x/24)에만 둔다 —
+> 내부/관리망(10.0.x) VIP 는 불필요**(과거 internal VIP 가 부팅마다 NIC 점유해 콘솔 IP 편집을
+> 막던 문제로 제거). cims-priv 관리 IP/마운트 영속성은 `modules/agent.md §11` 참조.
+
 ### 11.3 health probe 정책
 
 - `agent/bin/cims-health <svc>` — ha.json `services.<svc>.{port, proto, bind_ip}`

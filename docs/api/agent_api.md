@@ -46,18 +46,24 @@ Agent 데몬이 CSC 와 통신하는 프로토콜. **Agent 가 CSC 에 요청하
 
 ## POST /api/agent/heartbeat
 
-30초 주기 호출. pending job 반환.
+주기 호출(기본 2초 — Observability Phase1). pending job 반환 + 현재 네트워크/마운트 상태 보고.
 
 **Headers**: `X-Agent-Token: <session_token>`
 
 **Request**
 ```json
 {
-  "sync_port": 9900
+  "sync_port": 9900,
+  "agent_version": "0.0.57",
+  "interfaces": [{"name":"ens4","ip":"10.0.1.45","mask":24,"managed":true}],
+  "routes":     [{"dst":"...","via":"...","dev":"...","managed":true}],
+  "mounts":     [{"source":"121.161.164.105:/home/cbm/NAS/cims","target":"/mnt/cims","fstype":"nfs","options":"defaults,_netdev,nofail","mounted":true}]
 }
 ```
 
 - `sync_port` (선택): Agent 가 노출하는 Sync REST 포트. CSC 는 이 값을 `cims_agent.sync_port` 에 저장하고 collection 프록시 시 사용
+- `interfaces`/`routes`: NIC IP·route 보고. `managed=true` = cims-priv 가 부여한 `<iface>:cims` 라벨 IP 보유 NIC(편집/삭제 허용). agent 레코드에 저장(`_normalize_interface_roles` 로 mgmt 자동 도출).
+- `mounts`: `/etc/fstab` 의 `# cims-managed` 마운트 + 현재 `mounted` 여부(`collect_mounts`). 콘솔 MountPanel 표시용 — agent 레코드에 보존.
 
 **Response 200**
 ```json
@@ -180,5 +186,7 @@ CSC 는 결과에 따라 다음을 자동 처리:
 | `upgrade_agent` | agent 바이너리 교체 (`install-agent.sh --update-only` → bundle 다운로드 → `agent/` 트리 교체: old→`agent.old`→삭제) | (없음) |
 | `health_check` | 포트 probe | `process_name` |
 | `collect_log` | 로그 일부 반환 | `log_path` |
+| `apply_ip_config` | service IP/route 적용 (cims-priv) — sync REST `/apply-ip-config` 와 동일 경로 | `service_ip_rows[]`, `routes[]` |
+| `apply_mounts` | 마운트 적용 (cims-priv mount-add/del → `/etc/fstab` 영속) — sync REST `/apply-mounts` | `mounts[]` (`{op,fstype,source,target,options?}`) |
 
 > ⚠️ `upgrade_agent` 는 `agent/` 트리를 통째로 교체하므로 **모듈 install_path 는 agent/ 트리 밖**(`/opt/cims-agent/<module>`)이어야 한다. 안에 두면 upgrade 시 모듈이 deleted-inode 좀비로 파괴된다 — 상세는 `docs/design/02_deployment.md` §2 install_path durability 제약.

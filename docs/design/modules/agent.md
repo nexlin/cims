@@ -95,6 +95,8 @@ TLS + `X-Agent-Token` 인증. 세부 명세는 `api/collection_api.md` 의 Agent
 | GET | `/collection?install_path=&name=` | jsonl 읽기 |
 | PUT | `/collection?install_path=&name=` | jsonl 원자 쓰기 + 선택적 SIGUSR1 |
 | POST | `/signal?install_path=&sig=usr1\|hup` | 프로세스에 시그널 |
+| POST | `/apply-ip-config` | service IP / route 적용 (cims-priv ip-add/del, route-add/del) — §11 |
+| POST | `/apply-mounts` | 마운트 적용 (cims-priv mount-add/del, fstab 영속) — §11 |
 
 ## 7. 프로세스 시그널 룰
 
@@ -158,3 +160,33 @@ OAM `_sweep_alerts` 가 평가. 규칙은 service descriptor(`service_registry.a
 per-agent(scope=agent) 규칙은 agent 별로 펼쳐 평가하며, 관측 불가(오프라인/metric 없음/배포 제거) 시 열린 alert 를 자동 close.
 - **uninstall 은 반드시 `./uninstall.sh`** — 단순 `pkill` 만 하면 systemd 가 즉시 재기동 (`Restart=always` + linger). `uninstall.sh` 는 unit stop+disable 부터 처리하므로 안전
 - linger 자동 해제 안 함 — 다른 user service 보호. 완전 정리 원하면 `sudo loginctl disable-linger $USER` 별도 실행
+
+## 11. 관리 IP / 라우트 / 마운트 (cims-priv) + 부팅 영속성
+
+운영자가 Console(서버 → 네트워크 탭)에서 추가/삭제하는 호스트 인프라는 모두 `cims-priv`
+(NOPASSWD sudoers, 인자 자체검증) 를 통해 적용된다. agent 본체는 비권한.
+
+| 종류 | cims-priv 서브커맨드 | 영속(재부팅 유지) | UI |
+|---|---|---|---|
+| service IP | `ip-add/ip-del <iface> <cidr>` (label `<iface>:cims` 부여 → managed 식별) | **agent 부팅 재적용** (§11.1) | ServiceIpPanel |
+| route | `route-add/route-del <dst> <via> <dev>` (default GW 포함, `ip route replace`) | agent 부팅 재적용 | ServiceIpPanel |
+| 마운트 | `mount-add <fstype> <source> <target> [opts]` / `mount-del <target>` | **`/etc/fstab`** (§11.2) | MountPanel |
+
+- 망 분류(NIC role) 모델 폐지 — NIC 용도는 **용도(slot) 단일 키**. VIP→NIC 매핑도 VIP 바인딩
+  slot 과 동일 용도(slot) 를 가진 `service_ip_rows` 의 iface 로 결정(`ha_groups._render_ha_for_agent`).
+  mgmt 는 `oam Mgmt.Cidr` 자동 도출(편집 불가, 배지 표시), VIP(=HA vip_bindings IP)는 읽기전용.
+  VIP 는 서비스망(예 121.161.164.x)에만 둔다 — 내부/관리망 VIP 불필요.
+
+### 11.1 service IP 부팅 재적용 (영속성)
+`cims-priv ip-add` 는 런타임 `ip addr add` 라 재부팅에 소실되고, 부팅 직후 OAM 가 unreachable
+일 수 있다(실제 사례: reboot 후 OAM 미기동 → DB 서비스IP 소실 → csp 전체 장애). 이를 막기 위해:
+- `job_apply_ip_config` 적용 성공 시 현재 cims-managed IP/route 를 `run/managed_ips.json` 에 스냅샷(`_snapshot_managed_ips`).
+- agent 기동 시 `run_loop` 가 1회 `reapply_managed_ips()` 실행 — 파일이 있으면 idempotent 재적용,
+  없으면(최초 도입/신규 호스트) 현재 상태를 시드 저장. **OAM 연결과 무관**하게 자력 복원.
+
+### 11.2 마운트 (fstab 영속)
+- `cims-priv mount-add` 는 target `mkdir -p` 후 `/etc/fstab` 에 `# cims-managed` 태그 라인을
+  idempotent 기록(`.cims.bak` 백업) 하고 `mount`. **fstab 기록 = 재부팅 시 OS 자동 마운트**(별도 부팅훅 불필요).
+- 네트워크 FS(nfs/nfs4/cifs)는 `_netdev,nofail` 강제 — 마운트 실패/지연이 부팅을 막지 않음.
+- 시스템 경로(`/etc`,`/usr`,`/var`,`/home` 등) 보호(거부). `mount-del` 은 umount(`-l` fallback)+fstab 라인 제거.
+- agent heartbeat 가 `collect_mounts()`(fstab cims-managed + `mounted` 상태) 보고 → Console MountPanel 표시.
