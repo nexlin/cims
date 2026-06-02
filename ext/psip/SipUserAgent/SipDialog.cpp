@@ -26,7 +26,7 @@
  * @ingroup SipUserAgent
  * @brief ������
  */
-CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP)
+CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iInviteSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP)
 	, m_iOutboundLocalPort(-1)
 	, m_iLocalRtpPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
 	, m_pclsInvite(NULL), m_pclsSipStack( pclsSipStack )
@@ -579,10 +579,15 @@ CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 			++m_iSeq;
 		}
 		iSeq = m_iSeq;
+
+		// INVITE 의 CSeq 를 보관 → ACK/CANCEL 이 재사용 (RFC 3261 §13.2.2.4 / §9.1).
+		// dialog 내 NOTIFY/INFO 등이 m_iSeq 를 올려도 2xx-ACK 가 INVITE 와 같은 CSeq 를 쓰게 함.
+		if( !strcmp( pszSipMethod, SIP_METHOD_INVITE ) ) m_iInviteSeq = m_iSeq;
 	}
 	else
 	{
-		iSeq = m_iSeq;
+		// ACK / CANCEL: 대상 INVITE 와 동일 CSeq 사용. (보관값 없으면 기존 동작 유지)
+		iSeq = ( m_iInviteSeq != 0 ) ? m_iInviteSeq : m_iSeq;
 	}
 
 	pclsMessage->m_clsCSeq.Set( iSeq, pszSipMethod );

@@ -57,6 +57,13 @@ public:
 	/** SIP CSeq ����� ���� ��ȣ ( PRACK ������ ������ �޽����� ���ؼ� ���� ) */
 	int					m_iNextSeq;
 
+	/** 가장 최근 송신한 INVITE 의 CSeq 번호. ACK/CANCEL 은 RFC 3261 상 자신이 ACK/CANCEL
+	 *  하는 INVITE 와 동일 CSeq 를 써야 한다. 다이얼로그 내 NOTIFY/INFO 등이 m_iSeq 를
+	 *  증가시킨 뒤 2xx-ACK 가 m_iSeq 를 그대로 쓰면 INVITE 와 CSeq 가 어긋나(예: PTT 그룹콜의
+	 *  conference NOTIFY → ACK CSeq 불일치) UAS 가 ACK 미매칭으로 Timer H(~32s) teardown 됨.
+	 *  이를 막기 위해 INVITE 송신 시 그 CSeq 를 보관해 ACK/CANCEL 이 재사용한다. */
+	int					m_iInviteSeq;
+
 	/** SIP ��û �޽����� ������ IP �ּ� */
 	std::string	m_strContactIp;
 

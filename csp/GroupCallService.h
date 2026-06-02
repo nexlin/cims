@@ -78,6 +78,12 @@ private:
     void CheckMemberState();
     void CheckGroupIntegrity();
 
+    /** 그룹 멤버 구성(id:priority 순서)의 해시. SyncGroupsState 의 "Config Changed" 판정 기준.
+     *  그룹 컨텍스트(m_mapGroupRtp)를 만드는 모든 경로(SyncGroupsState/InviteMember/CheckGroupIntegrity)
+     *  에서 동일하게 저장해야 한다. 0(미설정)으로 두면 다음 SyncGroupsState 가 실제해시와 불일치로
+     *  착각해 스퓨리어스 ModifyGroup + group_change NOTIFY storm 을 일으켜 멤버 무더기 drop 됨. */
+    static size_t ComputeMemberHash( const class CspPttGroup &group );
+
     /**
      * @brief Build PTT group info XML body (application/vnd.oma.poc.groups+xml)
      * @param clsGroup PTT group info

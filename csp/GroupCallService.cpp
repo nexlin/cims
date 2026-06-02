@@ -139,8 +139,9 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                                      iSharedVideoPort, strRecordDir, strRecordDir, clsGroup._videoEnabled, iSessionSeq,
                                      strGroupSesId ) ) {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
-            m_mapGroupRtp[pszGroupId] = {
-                iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp, 0, "", "", clsGroup._videoEnabled, 0 };
+            // nMemberHash 실제값 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
+            m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp,
+                                          ComputeMemberHash( clsGroup ), "", "", clsGroup._videoEnabled, 0 };
         }
     } else if ( !strRecordDir.empty() ) {
         // 그룹이 이미 CMP에 있지만 log_dir 전달이 필요 → addgroup 재호출 (기존 그룹 유지, log_dir만 갱신)
@@ -404,8 +405,10 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                                          iSharedVideoPort, strRecordDir, strRecordDir, false, 0,
                                          GetOrIssueGroupSesId( pszGroupId ) ) ) {
                 bVideoEnabled = clsGroup._videoEnabled;
-                m_mapGroupRtp[pszGroupId] = {
-                    iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp, 0, "", "", bVideoEnabled, 0 };
+                // nMemberHash 는 반드시 실제 멤버해시로 설정 — 0 으로 두면 다음 SyncGroupsState 가
+                // 변경으로 오인해 스퓨리어스 ModifyGroup+group_change NOTIFY storm → 멤버 drop.
+                m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp,
+                                              ComputeMemberHash( clsGroup ), "", "", bVideoEnabled, 0 };
             } else {
                 CLog::Print( LOG_ERROR, "InviteMember(%s) Failed to get/alloc Shared Port for Group %s", pszUserId,
                              pszGroupId );
@@ -595,18 +598,22 @@ void CGroupCallService::OnGroupConfigChanged() {
     CheckGroupIntegrity();
 }
 
+size_t CGroupCallService::ComputeMemberHash( const CspPttGroup &group ) {
+    std::string strHashInput;
+    for ( const auto &pUser : group._pusers ) {
+        if ( !pUser ) continue;
+        strHashInput += pUser->_id + ":" + std::to_string( pUser->_priority ) + ";";
+    }
+    return std::hash<std::string>{}( strHashInput );
+}
+
 void CGroupCallService::SyncGroupsState() {
     // A. Add New Groups
     gclsGroupMap.IterateInternal( [this]( const CspPttGroup &group ) {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
         // Calculate Hash
-        std::string strHashInput;
-        for ( const auto &pUser : group._pusers ) {
-            if ( !pUser ) continue;
-            strHashInput += pUser->_id + ":" + std::to_string( pUser->_priority ) + ";";
-        }
-        size_t nHash = std::hash<std::string>{}( strHashInput );
+        size_t nHash = ComputeMemberHash( group );
 
         auto itRtp = m_mapGroupRtp.find( group._id );
         if ( itRtp == m_mapGroupRtp.end() ) {
@@ -732,7 +739,9 @@ void CGroupCallService::CheckGroupIntegrity() {
                 if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir,
                                              strLogDir, false, group._sessionSeq, strGroupSesId ) ) {
                     lock.lock();
-                    m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip, 0, "", "", group._videoEnabled, 0 };
+                    // nMemberHash 실제값 저장 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
+                    m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip,
+                                                 ComputeMemberHash( group ), "", "", group._videoEnabled, 0 };
                 } else {
                     return;  // Skip this group if alloc fails
                 }
