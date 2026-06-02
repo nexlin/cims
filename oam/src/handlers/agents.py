@@ -387,6 +387,8 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
                            else _safe_load(r.get("service_ip_rows_json")),
         # 운영자가 관리하는 specific route (default 제외). agent heartbeat 보고 + apply 갱신.
         "routes":          r.get("routes") if isinstance(r.get("routes"), (dict, list)) else None,
+        # cims-managed 마운트 (fstab 영속). agent heartbeat 보고(mounted 상태 포함) + apply 갱신.
+        "mounts":          r.get("mounts") if isinstance(r.get("mounts"), list) else None,
     }
 
 
@@ -426,6 +428,8 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _restart_agent(handler_args, aid, config)
         if action == "apply-ip-config" and method == "POST":
             return await _apply_ip_config(handler_args, aid, config)
+        if action == "apply-mounts" and method == "POST":
+            return await _apply_mounts(handler_args, aid, config)
         if action == "health-check" and method == "POST":
             return await _agent_health_check(handler_args, aid, config)
         if action == "interface-roles" and method == "PUT":
@@ -919,6 +923,66 @@ def _reconcile_stored_net_config(config: dict, aid: int, rows_in: list, routes_i
         "service_ip_rows": new_rows,
         "routes": new_routes,
     })
+
+
+async def _apply_mounts(handler_args: HandlerArgs, aid: int, config):
+    """MountPanel 의 [추가]/[삭제] 진입점 — agent sync REST /apply-mounts 즉시 호출.
+    agent 가 fstab 에 기록(영속 → 재부팅 시 OS 자동 마운트) + 즉시 mount.
+
+    Request body: { "mounts": [{op:'add'|'del', fstype, source, target, options?}, ...] }
+    성공 시 file_store 의 agent.mounts(desired) 를 op 반영해 갱신.
+    """
+    row = await asyncio.to_thread(_agent_load, config, aid)
+    if not row:
+        return HandlerResult(status=404, body={"error": "agent_not_found"}, media_type="application/json")
+
+    body_in = _parse_body(handler_args)
+    mounts_in = body_in.get("mounts")
+    if not mounts_in or not isinstance(mounts_in, list):
+        return HandlerResult(status=400, body={"error": "no_operations"}, media_type="application/json")
+
+    status, resp = await asyncio.to_thread(
+        _agent_proxy_call, "POST", row, "/apply-mounts",
+        None, {"mounts": mounts_in}, 45, config)
+
+    if status == 0:
+        return HandlerResult(status=502,
+                             body={"error": "agent_unreachable", "detail": (resp or {}).get("error"),
+                                   "agent_id": aid}, media_type="application/json")
+    if status != 200:
+        return HandlerResult(status=status,
+                             body={"error": "agent_error", "detail": resp, "agent_id": aid},
+                             media_type="application/json")
+
+    await asyncio.to_thread(_reconcile_stored_mounts, config, aid, mounts_in)
+    return HandlerResult(status=200,
+                         body={"agent_id": aid, "mounts": len(mounts_in), **(resp or {})},
+                         media_type="application/json")
+
+
+def _reconcile_stored_mounts(config: dict, aid: int, mounts_in: list) -> None:
+    """apply 성공 후 file_store 의 agent.mounts(desired) 를 op 반영. key=target."""
+    row = _agent_load(config, aid)
+    if not row:
+        return
+    stored = row.get("mounts") or []
+    if isinstance(stored, str):
+        try: stored = json.loads(stored)
+        except (TypeError, ValueError): stored = []
+    by_target = {}
+    for m in stored:
+        if isinstance(m, dict) and m.get("target"):
+            by_target[m["target"].strip()] = {k: v for k, v in m.items() if k != "op"}
+    for m in mounts_in or []:
+        op = (m.get("op") or "add").lower()
+        tgt = (m.get("target") or "").strip()
+        if not tgt:
+            continue
+        if op == "add":
+            by_target[tgt] = {k: v for k, v in m.items() if k != "op"}
+        elif op == "del":
+            by_target.pop(tgt, None)
+    _agent_update(config, aid, {"mounts": list(by_target.values())})
 
 
 async def _upgrade_agent_binary(handler_args: HandlerArgs, aid: int, config):

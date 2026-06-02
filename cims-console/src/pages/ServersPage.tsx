@@ -7,6 +7,7 @@ import {
 import { haGroupsApi, type HaGroup, type VipBinding,
          type FailoverOptions, FAILOVER_DEFAULTS } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
+import { MountPanel } from './ha/MountPanel'
 import { splitPrefixHost } from './ha/helpers'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
@@ -1429,7 +1430,21 @@ function NetworkTab({ agent: a, vipIps }: { agent: Agent; vipIps?: Set<string> }
     } catch (e) { show((e as Error).message, 'err') }
   }
 
+  async function onApplyMounts(
+    ops: Array<{ op: 'add'|'del'; fstype?: string; source?: string; target: string; options?: string }>,
+    label: string,
+  ) {
+    setApplying(true)
+    try {
+      const r = await deploymentApi.applyMounts(a.id, ops)
+      if (r.ok) show(`${label} — 적용 (fstab 영속)`, 'ok')
+      else      show(`${label} — rc=${r.rc} ${r.stderr || r.stdout}`, 'err')
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setApplying(false) }
+  }
+
   return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
     <ServiceIpPanel
       title={`${a.name} — IP / Routing`}
       interfaces={a.interfaces || []}
@@ -1441,6 +1456,13 @@ function NetworkTab({ agent: a, vipIps }: { agent: Agent; vipIps?: Set<string> }
       onUpdateSlot={onUpdateSlot}
       vipIps={vipIps}
     />
+    <MountPanel
+      title={`${a.name} — 마운트`}
+      mounts={a.mounts || []}
+      applying={applying}
+      onApply={onApplyMounts}
+    />
+    </div>
   )
 }
 

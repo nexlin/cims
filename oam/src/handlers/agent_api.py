@@ -495,6 +495,7 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
         sync_port = None
     ifaces = body.get("interfaces")
     routes = body.get("routes")
+    mounts = body.get("mounts")
     ver = (body.get("agent_version") or "").strip()
     now = datetime.now().isoformat(timespec='seconds')
     patches = {'last_heartbeat': now}
@@ -504,6 +505,8 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
         patches['interfaces'] = _normalize_interface_roles(ifaces, config, agent)
     if isinstance(routes, list):
         patches['routes'] = routes
+    if isinstance(mounts, list):
+        patches['mounts'] = mounts
     # agent_version 도 매 heartbeat 시 갱신 — update.sh 후 새 버전 즉시 반영.
     if ver:
         patches['agent_version'] = ver[:32]

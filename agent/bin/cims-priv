@@ -112,6 +112,77 @@ do_ip_del() {
     fi
 }
 
+# ── mount 검증/액션 ─────────────────────────────────
+#   콘솔에서 agent 로 마운트 추가 — fstab 에 기록(영속 → 부팅 시 OS 자동 마운트)하고
+#   즉시 mount. 네트워크 FS 는 _netdev,nofail 강제(마운트 실패/지연이 부팅을 막지 않도록).
+FSTAB="/etc/fstab"
+CIMS_MNT_TAG="cims-managed"
+
+valid_fstype() {
+    case "$1" in
+        nfs|nfs4|cifs|ext4|ext3|xfs|btrfs) return 0 ;;
+        *) err "unsupported fstype: $1 (nfs|nfs4|cifs|ext4|ext3|xfs|btrfs)"; return 1 ;;
+    esac
+}
+
+valid_target() {
+    [[ "$1" =~ ^/[A-Za-z0-9._/-]+$ ]] || { err "invalid target path: $1"; return 1; }
+    [[ "$1" == *..* ]] && { err "target must not contain '..': $1"; return 1; }
+    case "$1" in
+        /|/etc|/etc/*|/boot|/boot/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*|/lib|/lib/*|/lib64|/lib64/*|/var|/var/*|/root|/root/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*|/home|/home/*)
+            err "target in protected path denied: $1"; return 1 ;;
+    esac
+    return 0
+}
+
+valid_nospace() { [[ -n "$1" && ! "$1" =~ [[:space:]] ]] || { err "invalid (empty/contains space): '$1'"; return 1; }; }
+
+_fstab_drop_target() {   # stdout: 주어진 target 의 cims-managed 라인을 제외한 fstab 내용
+    awk -v tgt="$1" -v tag="$CIMS_MNT_TAG" '!($2==tgt && index($0,tag)>0)' "$FSTAB"
+}
+
+do_mount_add() {
+    local fstype="$1" source="$2" target="$3" options="${4:-defaults}"
+    valid_fstype "$fstype"   || exit 2
+    valid_target "$target"   || exit 2
+    valid_nospace "$source"  || exit 2
+    valid_nospace "$options" || exit 2
+    case "$fstype" in
+        nfs|nfs4|cifs) [[ "$options" == *_netdev* ]] || options="${options},_netdev" ;;
+    esac
+    [[ "$options" == *nofail* ]] || options="${options},nofail"
+    mkdir -p "$target" 2>/tmp/cims-priv.err || { err "mkdir $target: $(cat /tmp/cims-priv.err 2>/dev/null)"; exit 3; }
+    # fstab idempotent update (같은 target 의 cims-managed 라인 교체) + 백업
+    local tmp; tmp="$(mktemp)"
+    _fstab_drop_target "$target" > "$tmp"
+    printf '%s %s %s %s 0 0  # %s\n' "$source" "$target" "$fstype" "$options" "$CIMS_MNT_TAG" >> "$tmp"
+    cp "$FSTAB" "${FSTAB}.cims.bak" 2>/dev/null || true
+    cat "$tmp" > "$FSTAB"; rm -f "$tmp"
+    if mountpoint -q "$target"; then
+        info "$target already mounted (fstab 갱신 완료)"
+    elif mount "$target" 2>/tmp/cims-priv.err; then
+        ok "mounted $source -> $target ($fstype,$options)"
+    else
+        err "mount $target 실패: $(cat /tmp/cims-priv.err 2>/dev/null) — fstab 등록 유지(nofail 이라 부팅 무영향)"
+        exit 3
+    fi
+    rm -f /tmp/cims-priv.err
+}
+
+do_mount_del() {
+    local target="$1"
+    valid_target "$target" || exit 2
+    if mountpoint -q "$target"; then
+        umount "$target" 2>/dev/null || umount -l "$target" 2>/dev/null \
+            || { err "umount $target 실패 (busy)"; exit 3; }
+    fi
+    local tmp; tmp="$(mktemp)"
+    _fstab_drop_target "$target" > "$tmp"
+    cp "$FSTAB" "${FSTAB}.cims.bak" 2>/dev/null || true
+    cat "$tmp" > "$FSTAB"; rm -f "$tmp"
+    ok "unmounted + fstab 제거: $target"
+}
+
 # ── dispatch ────────────────────────────────────────
 case "${1:-}" in
     ip-add)
@@ -130,11 +201,19 @@ case "${1:-}" in
         [[ $# -eq 4 ]] || { err "usage: cims-priv route-del <dest_cidr> <via> <dev>"; exit 1; }
         do_route_del "$2" "$3" "$4"
         ;;
+    mount-add)
+        [[ $# -ge 4 && $# -le 5 ]] || { err "usage: cims-priv mount-add <fstype> <source> <target> [options]"; exit 1; }
+        do_mount_add "$2" "$3" "$4" "${5:-defaults}"
+        ;;
+    mount-del)
+        [[ $# -eq 2 ]] || { err "usage: cims-priv mount-del <target>"; exit 1; }
+        do_mount_del "$2"
+        ;;
     version)
-        echo "cims-priv 0.2.0"
+        echo "cims-priv 0.3.0"
         ;;
     *)
-        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|version} ..."
+        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|version} ..."
         exit 1
         ;;
 esac

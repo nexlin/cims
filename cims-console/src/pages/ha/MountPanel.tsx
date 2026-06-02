@@ -1,0 +1,123 @@
+// ──────────────────────────────────────────────────────────────
+//  MountPanel — agent 가 관리하는 마운트(fstab 영속) 추가/삭제.
+//  콘솔에서 추가하면 agent 가 fstab 에 기록 → 재부팅 시 OS 가 자동 마운트.
+//  네트워크 FS(nfs/cifs)는 agent(cims-priv)가 _netdev,nofail 강제(부팅 hang/실패 차단 방지).
+// ──────────────────────────────────────────────────────────────
+import { useState } from 'react'
+import type { AgentMount } from '../../api/deployment'
+import { ImeSafeInput } from './ImeSafeInput'
+import { btnSmall, btnDanger } from './styles'
+
+const FSTYPES = ['nfs', 'nfs4', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs']
+
+export function MountPanel({ title, mounts, applying, onApply }: {
+  title: string
+  mounts: AgentMount[]
+  applying?: boolean
+  onApply: (
+    ops: Array<{ op: 'add'|'del'; fstype?: string; source?: string; target: string; options?: string }>,
+    label: string,
+  ) => void
+}) {
+  const [addOpen, setAddOpen] = useState(false)
+  const [fstype, setFstype]   = useState('nfs')
+  const [source, setSource]   = useState('')
+  const [target, setTarget]   = useState('')
+  const [options, setOptions] = useState('defaults')
+
+  const beginAdd = () => { setAddOpen(true); setFstype('nfs'); setSource(''); setTarget(''); setOptions('defaults') }
+  const commitAdd = () => {
+    if (!fstype || !source.trim() || !target.trim()) return
+    onApply([{ op: 'add', fstype, source: source.trim(), target: target.trim(), options: options.trim() || 'defaults' }],
+            `mount += ${source.trim()} → ${target.trim()}`)
+    setAddOpen(false)
+  }
+  const deleteMount = (m: AgentMount) => {
+    if (!confirm(`${m.target} 마운트를 제거할까요?\n(agent 가 umount + /etc/fstab 의 cims-managed 항목 삭제)`)) return
+    onApply([{ op: 'del', target: m.target }], `mount -= ${m.target}`)
+  }
+
+  return (
+    <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
+                  background: 'var(--bg-soft)' }}>
+      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: 8 }}>
+        {title}
+        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
+          (콘솔 추가 시 /etc/fstab 에 기록 — 재부팅에도 유지. 네트워크 FS 는 _netdev,nofail 자동)
+        </span>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>마운트 위치(target)</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left' }}>소스(source)</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>유형</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>옵션</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>상태</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>액션</th>
+          </tr>
+        </thead>
+        <tbody>
+          {mounts.length === 0 && !addOpen && (
+            <tr><td colSpan={6} style={{ padding: '8px', color: 'var(--text-muted)' }}>
+              (마운트 없음 — 아래 [＋ 마운트 추가])
+            </td></tr>
+          )}
+          {mounts.map((m) => (
+            <tr key={m.target}>
+              <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{m.target}</td>
+              <td style={{ padding: '4px 8px', fontFamily: 'monospace', wordBreak: 'break-all' }}>{m.source}</td>
+              <td style={{ padding: '4px 8px' }}>{m.fstype}</td>
+              <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>{m.options || '-'}</td>
+              <td style={{ padding: '4px 8px', fontSize: 11 }}>
+                {m.mounted
+                  ? <span style={{ color: '#27ae60', fontWeight: 'bold' }}>● mounted</span>
+                  : <span style={{ color: '#c0392b' }}>○ unmounted</span>}
+              </td>
+              <td style={{ padding: '4px 8px' }}>
+                <button onClick={() => deleteMount(m)} style={btnDanger()} disabled={applying}>삭제</button>
+              </td>
+            </tr>
+          ))}
+          {addOpen ? (
+            <tr style={{ background: 'var(--warn-soft)' }}>
+              <td style={{ padding: '4px 8px' }}>
+                <ImeSafeInput value={target} onCommit={setTarget} placeholder="/mnt/cims"
+                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
+                                       border: '1px solid #e67e22', borderRadius: 3 }} />
+              </td>
+              <td style={{ padding: '4px 8px' }}>
+                <ImeSafeInput value={source} onCommit={setSource} placeholder="121.161.164.105:/home/cbm/NAS/cims"
+                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
+                                       border: '1px solid #e67e22', borderRadius: 3 }} />
+              </td>
+              <td style={{ padding: '4px 8px' }}>
+                <select value={fstype} onChange={e => setFstype(e.target.value)}
+                        style={{ width: '95%', padding: '2px 4px', fontSize: 12,
+                                 border: '1px solid #e67e22', borderRadius: 3 }}>
+                  {FSTYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </td>
+              <td style={{ padding: '4px 8px' }}>
+                <ImeSafeInput value={options} onCommit={setOptions} placeholder="defaults"
+                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
+                                       border: '1px solid var(--border)', borderRadius: 3 }} />
+              </td>
+              <td colSpan={2} style={{ padding: '4px 8px' }}>
+                <button onClick={commitAdd} style={btnSmall()} disabled={!source.trim() || !target.trim() || applying}>추가</button>
+                <button onClick={() => setAddOpen(false)} style={btnSmall()}>취소</button>
+              </td>
+            </tr>
+          ) : (
+            <tr>
+              <td colSpan={6} style={{ padding: '4px 8px' }}>
+                <button onClick={beginAdd} style={btnSmall()} disabled={applying}>＋ 마운트 추가</button>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}

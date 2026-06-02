@@ -196,6 +196,7 @@ def collect_host_info() -> dict:
         info["disk_gb"] = 0
     info["interfaces"] = collect_interfaces()
     info["routes"] = collect_routes()
+    info["mounts"] = collect_mounts()
     return info
 
 
@@ -317,6 +318,36 @@ def collect_routes() -> list:
         if dev_ in managed_devs and not is_default and not kernel_auto:
             row["managed"] = True
         result.append(row)
+    return result
+
+
+def collect_mounts() -> list:
+    """cims-managed 마운트(fstab 의 '# cims-managed' 라인) + 현재 마운트 여부 보고.
+    Console MountPanel 이 desired(여기) + status(mounted) 표시."""
+    result = []
+    try:
+        mounted = set()
+        with open("/proc/mounts") as f:
+            for ln in f:
+                p = ln.split()
+                if len(p) >= 2:
+                    mounted.add(p[1])
+        with open("/etc/fstab") as f:
+            for ln in f:
+                if "cims-managed" not in ln or ln.lstrip().startswith("#"):
+                    continue
+                s = ln.split()
+                if len(s) < 3:
+                    continue
+                result.append({
+                    "source":  s[0],
+                    "target":  s[1],
+                    "fstype":  s[2],
+                    "options": s[3] if len(s) > 3 else "",
+                    "mounted": s[1] in mounted,
+                })
+    except Exception:
+        pass
     return result
 
 
@@ -1291,6 +1322,50 @@ def job_apply_ip_config(params: dict) -> tuple:
     return rc, "\n".join(msgs), ""
 
 
+def job_apply_mounts(params: dict) -> tuple:
+    """mounts[] → cims-priv mount-add/mount-del. fstab 에 기록되어 재부팅에도 유지(OS 자동 마운트).
+
+    Params: mounts: [{op:'add'|'del', fstype, source, target, options?}, ...]
+    네트워크 FS 는 cims-priv 가 _netdev,nofail 강제 — 마운트 실패가 부팅을 막지 않음.
+    """
+    mounts = params.get("mounts") or []
+    if not isinstance(mounts, list) or not mounts:
+        return 0, "no mounts to apply", ""
+    priv = _resolve_cims_priv()
+    if priv is None:
+        return 1, "[FAIL] cims-priv not found", ""
+    msgs = []
+    fail = 0
+    for m in mounts:
+        op     = (m.get("op") or "add").lower()
+        target = (m.get("target") or "").strip()
+        if not target:
+            msgs.append(f"skip (no target): {m}"); continue
+        if op == "add":
+            fstype  = (m.get("fstype") or "").strip()
+            source  = (m.get("source") or "").strip()
+            options = (m.get("options") or "defaults").strip()
+            if not fstype or not source:
+                msgs.append(f"[DENY] {target}: fstype/source 필요"); fail += 1; continue
+            cmd = ["sudo", "-n", priv, "mount-add", fstype, source, target, options]
+        elif op == "del":
+            cmd = ["sudo", "-n", priv, "mount-del", target]
+        else:
+            msgs.append(f"[DENY] {target}: op '{op}' 미지원"); fail += 1; continue
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+            out = ((res.stdout or "") + (res.stderr or "")).strip()
+            if res.returncode == 0:
+                msgs.append(f"[OK]   {op} {target}: {out}")
+            else:
+                fail += 1
+                msgs.append(f"[FAIL] {op} {target}: rc={res.returncode} {out[-200:]}")
+        except Exception as e:
+            fail += 1
+            msgs.append(f"[FAIL] {op} {target}: {e}")
+    return (0 if fail == 0 else 1), "\n".join(msgs), ""
+
+
 # ──────────────────────────────────────────────────────────────
 #  Service IP 영속 — agent-managed (cims-label '<iface>:cims') IP 는 cims-priv
 #  ip-add (런타임 ip addr) 라 재부팅에 소실된다. OAM 가 부팅 직후 unreachable 일 수
@@ -1789,6 +1864,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                                   {"ok": rc == 0, "rc": rc,
                                    "stdout": out, "stderr": err,
                                    "rows": len(rows), "routes": len(routes)})
+        if path == "/apply-mounts":
+            body = self._read_body_json()
+            mounts = body.get("mounts") or []
+            if not isinstance(mounts, list):
+                return self._respond(400, {"error": "mounts must be array"})
+            rc, out, err = job_apply_mounts({"mounts": mounts})
+            return self._respond(200,
+                                  {"ok": rc == 0, "rc": rc,
+                                   "stdout": out, "stderr": err, "mounts": len(mounts)})
         return self._respond(404, {"error": "not_found"})
 
 
@@ -1855,6 +1939,8 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             rc, out, err = job_update_ha(params)
         elif jt == "apply_ip_config":
             rc, out, err = job_apply_ip_config(params)
+        elif jt == "apply_mounts":
+            rc, out, err = job_apply_mounts(params)
         elif jt == "uninstall":
             install_path = params.get("install_path")
             # 감독 해제 (watchdog 가 재시작하지 않도록)
@@ -1981,6 +2067,7 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
             hb_body = {
                 "interfaces": collect_interfaces(),
                 "routes": collect_routes(),
+                "mounts": collect_mounts(),
                 "agent_version": AGENT_VERSION,
             }
             if sync_port: hb_body["sync_port"] = sync_port

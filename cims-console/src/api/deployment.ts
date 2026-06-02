@@ -142,6 +142,16 @@ export interface Agent {
   interfaces: NetIface[] | null
   service_ip_rows: ServiceIpRow[] | null
   routes: AgentRoute[] | null
+  mounts?: AgentMount[] | null
+}
+
+// cims-managed 마운트 — fstab 영속(재부팅 시 OS 자동 마운트). agent heartbeat 보고(mounted 상태 포함).
+export interface AgentMount {
+  source: string                 // 예: 121.161.164.105:/home/cbm/NAS/cims
+  target: string                 // 예: /mnt/cims
+  fstype: string                 // nfs | nfs4 | cifs | ext4 | ...
+  options?: string               // 예: defaults,_netdev,nofail
+  mounted?: boolean              // 현재 마운트 여부 (heartbeat 보고)
 }
 
 export interface AgentCreateResult extends Agent {
@@ -455,6 +465,10 @@ export const deploymentApi = {
     api.post<{ agent_id: number; rows: number; routes: number;
                ok: boolean; rc: number;
                stdout: string; stderr: string }>(`/agents/${id}/apply-ip-config`, ops ?? {}),
+  applyMounts:   (id: number,
+                  mounts: Array<{ op: 'add'|'del'; fstype?: string; source?: string; target: string; options?: string }>) =>
+    api.post<{ agent_id: number; mounts: number; ok: boolean; rc: number;
+               stdout: string; stderr: string }>(`/agents/${id}/apply-mounts`, { mounts }),
   getAgentJob:   (agentId: number, jobId: number) =>
     api.get<AgentJob>(`/agents/${agentId}/jobs/${jobId}`),
   agentMetrics:  (id: number) => api.get<{ items: AgentMetric[] }>(`/agents/${id}/metrics`),
