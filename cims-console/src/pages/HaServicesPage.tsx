@@ -312,7 +312,9 @@ export default function HaServicesPage() {
         authPass: g.auth_pass,
         servers,
         packageIds: pkgIds,
-        vipBindings: g.vip_bindings ?? [],
+        // 백엔드 vip_bindings 에는 bid 가 없음(slot/ip/mask 만) → 로딩 시 안정적 bid 부여.
+        // 누락 시 모든 row 의 bid 가 undefined 가 되어 removeRow(filter by bid) 가 전체를 지움.
+        vipBindings: (g.vip_bindings ?? []).map((b, i) => ({ ...b, bid: b.bid ?? i + 1 })),
       })
     }
     // standalone agents (ha_group 미배정)
@@ -1153,6 +1155,7 @@ function SystemDetail(p: SystemDetailProps) {
                 applying={p.applyingAgents.has(srv.id)}
                 onApply={(ops, label) => p.applyServiceIp(srv, ops, label)}
                 onUpdateSlot={(iface, ip, mask, slot) => p.updateSlot(srv, iface, ip, mask, slot)}
+                vipIps={new Set((svc.vipBindings || []).map(b => b.ip).filter(Boolean))}
               />
             )
           })()}
@@ -1322,6 +1325,7 @@ function ServerDetail(p: ServerDetailProps) {
             applying={p.applyingAgents.has(srv.id)}
             onApply={(ops, label) => p.applyServiceIp(srv, ops, label)}
             onUpdateSlot={(iface, ip, mask, slot) => p.updateSlot(srv, iface, ip, mask, slot)}
+            vipIps={new Set((svc.vipBindings || []).map(b => b.ip).filter(Boolean))}
           />
         )}
       </AccordionSection>

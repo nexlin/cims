@@ -86,3 +86,4 @@ verify_runs/
 # HA per-node config (auth_pass 등 비밀 포함, host-specific) — example 만 git
 agent/keepalived/ha.json
 agent/keepalived/out/
+oam/cache/

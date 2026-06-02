@@ -9,7 +9,7 @@ import { btnSmall, btnDanger } from './styles'
 // [삭제] 허용 (외부 IP 는 readonly). [+IP 추가] / [+라우팅 추가] 로 명시적 op 발사.
 // route 는 kernel 외 default GW + specific subnet 모두 변경 가능.
 export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, slots, applying,
-                                 onApply, onUpdateSlot, onUpdateRole }: {
+                                 onApply, onUpdateSlot, vipIps }: {
   title: string
   interfaces: NetIface[]
   storedRows: ServiceIpRow[]                                                    // slot 라벨 매칭용 (iface, ip) keyed
@@ -26,10 +26,9 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
   // 외부/cims-managed 모든 IP 의 slot 편집 — file_store service_ip_rows 에 (iface, ip, slot) 저장.
   // VIP / module config 매핑 용. ip addr 변경은 안 함.
   onUpdateSlot: (iface: string, ip: string, mask: number, slot: string) => void
-  // Phase 4d2 — IP 단위 NIC role (망 분류) 편집. PUT /agents/<id>/interface-roles.
-  // mgmt 는 자동 도출 (oam Mgmt.Cidr + agent detect_mgmt_ip) — UI 에선 readonly.
-  // service/internal 만 admin 명시. 빈 string = clear (override 제거).
-  onUpdateRole?: (ip: string, role: 'mgmt'|'service'|'internal'|'') => void
+  // HA group vip_bindings 의 VIP IP 집합 — keepalived 가 관리하는 부동 IP.
+  // 이 IP 는 서버 고정 IP 가 아니라 VIP 표시(MASTER 보유)일 뿐 → 망/용도 편집·삭제 불가.
+  vipIps?: Set<string>
 }) {
   const mgmtIfaces = new Set(interfaces.filter(x => x.mgmt).map(x => x.name))
   // iface 그룹 — 출현 순서대로. 빈 NIC 도 1 row.
@@ -141,15 +140,14 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
           <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>인터페이스</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 170 }}>IP / mask</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 110 }}>망(role)</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 130 }}>용도(slot)</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>용도(slot)</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>소유</th>
             <th style={{ padding: '4px 8px', textAlign: 'left' }}>액션</th>
           </tr>
         </thead>
         <tbody>
           {ifaceOrder.length === 0 && (
-            <tr><td colSpan={6} style={{ padding: '8px', color: 'var(--text-muted)' }}>(인터페이스 없음 — agent 보고 대기)</td></tr>
+            <tr><td colSpan={5} style={{ padding: '8px', color: 'var(--text-muted)' }}>(인터페이스 없음 — agent 보고 대기)</td></tr>
           )}
           {ifaceOrder.flatMap((iface) => {
             const isMgmt = mgmtIfaces.has(iface)
@@ -159,6 +157,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                   const managed = !!ni.managed
                   const slot = slotByKey(iface, ni.ip)
                   const isMgmtIp = isMgmt && ni.mgmt
+                  const isVip = !!vipIps?.has(ni.ip)
                   return (
                     <tr key={`${iface}-${ni.ip}-${ipIdx}`}
                         style={isMgmtIp ? { background: 'var(--surface-2)' } : undefined}>
@@ -173,41 +172,30 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                         {ni.ip}/{ni.mask}
                       </td>
                       <td style={{ padding: '4px 8px' }}>
-                        {/* Phase 4d2: 망(role). mgmt 는 자동 도출 readonly. service/internal 만 admin 명시. */}
-                        {(ni.role === 'mgmt' || ni.mgmt) ? (
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}
-                                title="oam.json Mgmt.Cidr + agent detect_mgmt_ip 자동 도출 — 수정 불가">
-                            🔒 mgmt
-                          </span>
-                        ) : onUpdateRole ? (
-                          <select value={ni.role || ''}
-                                  onChange={e => onUpdateRole(ni.ip, e.target.value as any)}
-                                  style={{ width: '95%', padding: '2px 4px', fontSize: 11,
-                                           border: '1px solid var(--border)', borderRadius: 3 }}>
-                            <option value="">(없음)</option>
-                            <option value="service">service</option>
-                            <option value="internal">internal</option>
-                          </select>
+                        {/* 용도(slot) — NIC 의 단일 분류 키. VIP→NIC 매핑도 이 값으로 결정.
+                            mgmt 는 자동 도출(소유 컬럼 배지), VIP 는 HA 그룹 바인딩에서 결정 → 읽기전용. */}
+                        {isVip ? (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{slot || '—'}</span>
+                        ) : isMgmtIp ? (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{slot || '—'}</span>
                         ) : (
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ni.role || '-'}</span>
+                          <ImeSafeInput value={slot}
+                                        onCommit={(v) => {
+                                          if (v !== slot) onUpdateSlot(iface, ni.ip, ni.mask, v)
+                                        }}
+                                        placeholder="(용도)"
+                                        style={{ width: '95%', padding: '2px 6px', fontSize: 11,
+                                                 border: '1px solid var(--border)', borderRadius: 3 }} />
                         )}
-                      </td>
-                      <td style={{ padding: '4px 8px' }}>
-                        <ImeSafeInput value={slot}
-                                      onCommit={(v) => {
-                                        if (v !== slot) onUpdateSlot(iface, ni.ip, ni.mask, v)
-                                      }}
-                                      placeholder="(용도)"
-                                      style={{ width: '95%', padding: '2px 6px', fontSize: 11,
-                                               border: '1px solid var(--border)', borderRadius: 3 }} />
                       </td>
                       <td style={{ padding: '4px 8px', fontSize: 11 }}>
                         {isMgmtIp ? <span style={{ color: 'var(--text-muted)' }}>mgmt</span>
+                          : isVip ? <span style={{ color: '#8e44ad', fontWeight: 'bold' }}>🔗 VIP</span>
                           : managed ? <span style={{ color: '#27ae60' }}>● cims</span>
                           : <span style={{ color: 'var(--text-muted)' }}>○ 외부</span>}
                       </td>
                       <td style={{ padding: '4px 8px' }}>
-                        {managed && !isMgmtIp && (
+                        {managed && !isMgmtIp && !isVip && (
                           <button onClick={() => deleteIp(iface, ni.ip, ni.mask)}
                                   style={btnDanger()} disabled={applying}>
                             삭제
@@ -220,7 +208,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
               : [(
                   <tr key={`${iface}-empty`}>
                     <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}><b>{iface}</b></td>
-                    <td colSpan={4} style={{ padding: '4px 8px', color: 'var(--text-muted)', fontSize: 11 }}>
+                    <td colSpan={3} style={{ padding: '4px 8px', color: 'var(--text-muted)', fontSize: 11 }}>
                       (IP 미할당)
                     </td>
                     <td style={{ padding: '4px 8px' }}></td>

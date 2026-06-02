@@ -268,9 +268,6 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         # 송수신 채널). top-level ha.json.interface 사용. 각 VIP 의 dev 는
         # binding 별로 따로 (multi-망 multi-VIP 한 vrrp_instance 패턴).
         svc_iface = default_iface
-        # Phase 4d — slot 이 role 명 (mgmt/service/internal) 이면 agent.interfaces
-        # 의 role 매칭 NIC 자동 추론 (memberIfaces 명시 안 한 경우).
-        _ROLE_SLOTS = {'mgmt', 'service', 'internal'}
         for b in vip_bindings:
             slot = (b.get('slot') or '').strip()
             ip   = (b.get('ip')   or '').strip()
@@ -279,12 +276,14 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             mask = int(b.get('mask') or group.get('vip_mask') or 24)
             iface = (b.get('memberIfaces') or {}).get(str(agent_id)) \
                     or (b.get('memberIfaces') or {}).get(agent_id)
-            # slot 이 role 명이고 memberIfaces 명시 없으면 agent_row 에서 자동 추론.
-            if not iface and slot.lower() in _ROLE_SLOTS:
-                for it in (agent_row.get('interfaces') or []):
-                    if not isinstance(it, dict): continue
-                    if (it.get('role') or '').lower() == slot.lower():
-                        iface = it.get('name')
+            # VIP→NIC 매핑은 용도(slot) 단일 키로 결정 (망/role 모델 폐지).
+            # memberIfaces 미명시 시: 이 agent 의 service_ip_rows 중 용도(slot) 가
+            # 동일한 항목의 iface 를 사용. (VIP 바인딩 slot == NIC 용도 라벨)
+            if not iface:
+                for r in (agent_row.get('service_ip_rows') or []):
+                    if not isinstance(r, dict): continue
+                    if (r.get('slot') or '').strip() == slot:
+                        iface = r.get('iface')
                         break
             # 각 VIP 가 어느 NIC 에 attach 될지 명시. 누락 시 svc_iface fallback.
             vips.append({'slot': slot, 'ip': ip, 'mask': mask, 'dev': iface or svc_iface})

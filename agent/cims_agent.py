@@ -1286,7 +1286,57 @@ def job_apply_ip_config(params: dict) -> tuple:
             msgs.append(f"[FAIL] route {op} {dst}: {e}")
 
     rc = 0 if fail_count == 0 else 1
+    # 적용 후 현재 cims-managed IP/route 를 로컬 스냅샷 — 부팅 시 reapply_managed_ips 가 복원.
+    _snapshot_managed_ips()
     return rc, "\n".join(msgs), ""
+
+
+# ──────────────────────────────────────────────────────────────
+#  Service IP 영속 — agent-managed (cims-label '<iface>:cims') IP 는 cims-priv
+#  ip-add (런타임 ip addr) 라 재부팅에 소실된다. OAM 가 부팅 직후 unreachable 일 수
+#  있으므로(실제 사례: reboot 후 OAM 미기동 → csp DB IP 10.0.1.45 소실 → 전체 장애),
+#  마지막 적용 상태를 로컬에 스냅샷하고 부팅 시 자력 재적용한다 (OAM 연결 무관).
+# ──────────────────────────────────────────────────────────────
+_MANAGED_IPS_FILE = os.path.join(os.path.dirname(_AGENT_DIR), "run", "managed_ips.json")
+
+def _snapshot_managed_ips() -> None:
+    """현재 cims-managed IP + managed route 를 로컬 저장 (desired-state)."""
+    try:
+        ips = [{"iface": i["name"], "ip": i["ip"], "mask": i.get("mask") or 24}
+               for i in collect_interfaces() if i.get("managed") and i.get("ip")]
+        routes = [{"dst": r["dst"], "via": r.get("via") or "", "dev": r.get("dev") or ""}
+                  for r in collect_routes() if r.get("managed")]
+        os.makedirs(os.path.dirname(_MANAGED_IPS_FILE), exist_ok=True)
+        with open(_MANAGED_IPS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"ips": ips, "routes": routes}, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"[agent][ip] managed_ips snapshot 실패: {e}", flush=True)
+
+def reapply_managed_ips() -> None:
+    """부팅 1회 — 저장된 cims-managed IP/route 재적용 (idempotent, OAM 무관).
+
+    스냅샷 파일이 없으면(이 기능 최초 도입/신규 호스트) 현재 상태를 시드 저장만 하고
+    재적용은 생략 — 현재 IP 는 이미 올라와 있고, 이후 재부팅부터 복원 대상이 된다.
+    """
+    if not os.path.exists(_MANAGED_IPS_FILE):
+        _snapshot_managed_ips()
+        print("[agent][ip] managed_ips seed snapshot 생성 (이후 부팅부터 복원)", flush=True)
+        return
+    try:
+        with open(_MANAGED_IPS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"[agent][ip] managed_ips.json 읽기 실패: {e}", flush=True)
+        return
+    ips    = data.get("ips") or []
+    routes = data.get("routes") or []
+    if not ips and not routes:
+        return
+    rc, _out, _err = job_apply_ip_config({
+        "service_ip_rows": [{**x, "op": "add"} for x in ips],
+        "routes":          [{**r, "op": "add"} for r in routes],
+    })
+    print(f"[agent][ip] boot reapply — {len(ips)} ip / {len(routes)} route, rc={rc}", flush=True)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1920,6 +1970,7 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
+    reapply_managed_ips()              # 재부팅으로 소실된 cims-managed service IP 자력 복원 (1회, OAM 무관)
 
     next_metric = 0
     next_supervise = 0

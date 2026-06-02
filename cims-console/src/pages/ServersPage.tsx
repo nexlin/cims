@@ -107,6 +107,12 @@ export default function ServersPage() {
     () => selection?.kind === 'group' ? (haGroups.find(g => g.id === selection.id) || null) : null,
     [haGroups, selection]
   )
+  // 전역 VIP IP 집합 — 모든 HA group vip_bindings 의 IP. keepalived 가 관리하는 부동 IP 라
+  // ServiceIpPanel 에서 망/용도 편집 불가, 'VIP' 표시만 (서버 고정 IP 아님).
+  const vipIps = useMemo(
+    () => new Set(haGroups.flatMap(g => (g.vip_bindings || []).map(b => b.ip)).filter(Boolean)),
+    [haGroups]
+  )
 
   // group 별 멤버 분류 + standalone
   const groupedAgents = useMemo(() => {
@@ -286,6 +292,7 @@ export default function ServersPage() {
             <ServerInspector agent={selectedAgent}
               deployments={depsByAgent.get(selectedAgent.id) || []}
               packages={packages}
+              vipIps={vipIps}
               onApprove={approveAgent}
               onRevoke={revokeAgent}
               onRemove={removeAgent}
@@ -499,7 +506,8 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
   // mode 는 readonly — 생성 후 변경 불가 (변경 원하면 시스템 삭제 후 재생성).
   const [editAuthPass, setEditAuthPass] = useState(group.auth_pass)
   const [editNote, setEditNote]         = useState(group.note || '')
-  const [editBindings, setEditBindings] = useState<VipBinding[]>(group.vip_bindings || [])
+  // 백엔드 vip_bindings 에는 bid 가 없음 → 안정적 bid 부여(누락 시 removeBinding 이 전체 삭제됨).
+  const [editBindings, setEditBindings] = useState<VipBinding[]>((group.vip_bindings || []).map((b, i) => ({ ...b, bid: b.bid ?? i + 1 })))
   const [editFailover, setEditFailover] = useState<FailoverOptions>(
     { ...FAILOVER_DEFAULTS, ...(group.failover_options || {}),
       health: { ...FAILOVER_DEFAULTS.health, ...(group.failover_options?.health || {}) } })
@@ -520,7 +528,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
     setEditName(group.name)
     setEditAuthPass(group.auth_pass)
     setEditNote(group.note || '')
-    setEditBindings(group.vip_bindings || [])
+    setEditBindings((group.vip_bindings || []).map((b, i) => ({ ...b, bid: b.bid ?? i + 1 })))
     setEditFailover({ ...FAILOVER_DEFAULTS, ...(group.failover_options || {}),
       health: { ...FAILOVER_DEFAULTS.health, ...(group.failover_options?.health || {}) } })
     if (group.members.length > 0) {
@@ -1136,12 +1144,13 @@ function StatChip({ label, value, sub, color }:
 
 type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
-function ServerInspector({ agent: a, deployments, packages,
+function ServerInspector({ agent: a, deployments, packages, vipIps,
                           onApprove, onRevoke, onRemove, onUpgrade, onRestart, onMetrics, onHealthCheck,
                           onAddDeploy, onConfigure, onJob, onRemoveDep }: {
   agent: Agent
   deployments: Deployment[]
   packages: SipPackage[]
+  vipIps?: Set<string>
   onApprove: (a: Agent) => void
   onRevoke: (a: Agent) => void
   onRemove: (a: Agent) => void
@@ -1254,7 +1263,7 @@ function ServerInspector({ agent: a, deployments, packages,
         </InspectorSection>
         <InspectorSection title="네트워크" expanded={openSections.has('network')}
                           onToggle={() => toggleSection('network')}>
-          <NetworkTab agent={a} />
+          <NetworkTab agent={a} vipIps={vipIps} />
         </InspectorSection>
         <InspectorSection title={`모듈 (${deployments.length})`}
                           expanded={openSections.has('modules')}
@@ -1390,7 +1399,7 @@ function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRemove }: {
   )
 }
 
-function NetworkTab({ agent: a }: { agent: Agent }) {
+function NetworkTab({ agent: a, vipIps }: { agent: Agent; vipIps?: Set<string> }) {
   const { show } = useToast()
   const [applying, setApplying] = useState(false)
 
@@ -1420,14 +1429,6 @@ function NetworkTab({ agent: a }: { agent: Agent }) {
     } catch (e) { show((e as Error).message, 'err') }
   }
 
-  // Phase 4d2 — IP 별 NIC role (망 분류) 명시. mgmt 자동 외 service/internal admin.
-  async function onUpdateRole(ip: string, role: 'mgmt'|'service'|'internal'|'') {
-    try {
-      await deploymentApi.putInterfaceRoles(a.id, { [ip]: role })
-      show(`${ip} → role=${role || '(clear)'}`, 'ok')
-    } catch (e) { show((e as Error).message, 'err') }
-  }
-
   return (
     <ServiceIpPanel
       title={`${a.name} — IP / Routing`}
@@ -1438,7 +1439,7 @@ function NetworkTab({ agent: a }: { agent: Agent }) {
       applying={applying}
       onApply={onApply}
       onUpdateSlot={onUpdateSlot}
-      onUpdateRole={onUpdateRole}
+      vipIps={vipIps}
     />
   )
 }
