@@ -31,8 +31,12 @@ public:
     /** 트랙 추가 (prefix: "a", "b", "va", "vb", "audio", "video" 등) */
     void addTrack(const std::string& prefix);
 
-    /** 세그먼트 시작 — 등록된 모든 트랙 파일 열기 */
-    void startSegment(int seq, const std::string& speakerId = "");
+    /** 세그먼트 시작 — 등록된 모든 트랙 파일 열기
+     *  @param priority      화자 floor 우선순위 (-1=미지정)
+     *  @param preempted     이 세그먼트가 선점(preemption)으로 시작됐는지
+     *  @param preemptedFrom 선점 직전 화자(있으면) */
+    void startSegment(int seq, const std::string& speakerId = "",
+                      int priority = -1, bool preempted = false, const std::string& preemptedFrom = "");
 
     /** 세그먼트 종료 — 모든 트랙 파일 닫기 + 메타 기록 */
     void finishSegment();
@@ -76,6 +80,9 @@ private:
     int64_t _segStartUsec = 0;
     int64_t _segEndUsec = 0;
     std::string _speakerId;
+    int _priority = -1;            // 화자 floor 우선순위
+    bool _preempted = false;       // 선점으로 시작된 세그먼트
+    std::string _preemptedFrom;    // 선점 직전 화자
 };
 
 #endif // __PSYNC_RTP_RECORDER_H__

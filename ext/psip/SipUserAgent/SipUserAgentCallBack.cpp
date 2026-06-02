@@ -21,10 +21,10 @@
 
 /**
  * @ingroup SipUserAgent
- * @brief RTP IP/Port ¸¦ ¼öÁ¤ÇÑ´Ù.
- * @param pszIp IP ÁÖ¼Ò
- * @param iPort Port ¹øÈ£
- * @param iSocketCountPerMedia ¹Ìµð¾î¸¶´Ù »ý¼ºÇÏ´Â ¼ÒÄÏ °³¼ö
+ * @brief RTP IP/Port ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param pszIp IP ï¿½Ö¼ï¿½
+ * @param iPort Port ï¿½ï¿½È£
+ * @param iSocketCountPerMedia ï¿½Ìµï¿½î¸¶ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
  */
 void CSipCallRtp::SetIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia )
 {
@@ -47,8 +47,8 @@ void CSipCallRtp::SetIpPort( const char * pszIp, int iPort, int iSocketCountPerM
 
 /**
  * @ingroup SipUserAgent
- * @brief RTP Àü¼Û/¼ö½Å ¹æÇâÀ» ¼³Á¤ÇÑ´Ù.
- * @param eDirection RTP Àü¼Û/¼ö½Å ¹æÇâ
+ * @brief RTP ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param eDirection RTP ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
  */
 void CSipCallRtp::SetDirection( ERtpDirection eDirection )
 {
@@ -67,8 +67,8 @@ void CSipCallRtp::SetDirection( ERtpDirection eDirection )
 
 /**
  * @ingroup SipUserAgent
- * @brief ¹Ìµð¾î °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¹Ìµð¾î °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief ï¿½Ìµï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @returns ï¿½Ìµï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 int CSipCallRtp::GetMediaCount( )
 {
@@ -84,8 +84,8 @@ int CSipCallRtp::GetMediaCount( )
 
 /**
  * @ingroup SipUserAgent
- * @brief ¹Ìµð¾î ¸®½ºÆ®¿¡¼­ audio media ¸¦ °Ë»öÇÑ ÈÄ, audio media ¿¡ ´ëÇÑ Æ÷Æ® ¹øÈ£¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é audio media ¿¡ ´ëÇÑ Æ÷Æ® ¹øÈ£¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief ï¿½Ìµï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ®ï¿½ï¿½ï¿½ï¿½ audio media ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½, audio media ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Æ® ï¿½ï¿½È£ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ audio media ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Æ® ï¿½ï¿½È£ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ -1 ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 int CSipCallRtp::GetAudioPort( )
 {
@@ -109,8 +109,8 @@ int CSipCallRtp::GetAudioPort( )
 
 /**
  * @ingroup SipUserAgent
- * @brief ¹Ìµð¾î ¸®½ºÆ®¿¡¼­ video media ¸¦ °Ë»öÇÑ ÈÄ, video media ¿¡ ´ëÇÑ Æ÷Æ® ¹øÈ£¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é video media ¿¡ ´ëÇÑ Æ÷Æ® ¹øÈ£¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief ï¿½Ìµï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ®ï¿½ï¿½ï¿½ï¿½ video media ï¿½ï¿½ ï¿½Ë»ï¿½ï¿½ï¿½ ï¿½ï¿½, video media ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Æ® ï¿½ï¿½È£ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ video media ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Æ® ï¿½ï¿½È£ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ -1 ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 int CSipCallRtp::GetVideoPort( )
 {
@@ -122,6 +122,31 @@ int CSipCallRtp::GetVideoPort( )
 	for( itList = m_clsMediaList.begin(); itList != m_clsMediaList.end(); ++itList )
 	{
 		if( !strcmp( itList->m_strMedia.c_str(), "video" ) )
+		{
+			iPort = itList->m_iPort;
+			break;
+		}
+	}
+#endif
+
+	return iPort;
+}
+
+/**
+ * @ingroup SipUserAgent
+ * @brief ë¯¸ë””ì–´ ë¦¬ìŠ¤íŠ¸ì—ì„œ application media(MCPTT floor control) ì˜ í¬íŠ¸ ë²ˆí˜¸ë¥¼ ê²€ìƒ‰í•œë‹¤.
+ * @returns ì„±ê³µí•˜ë©´ application media ì˜ í¬íŠ¸ ë²ˆí˜¸, ì‹¤íŒ¨í•˜ë©´ -1.
+ */
+int CSipCallRtp::GetApplicationPort( )
+{
+	int iPort = -1;
+
+#ifdef USE_MEDIA_LIST
+	SDP_MEDIA_LIST::iterator	itList;
+
+	for( itList = m_clsMediaList.begin(); itList != m_clsMediaList.end(); ++itList )
+	{
+		if( !strcmp( itList->m_strMedia.c_str(), "application" ) )
 		{
 			iPort = itList->m_iPort;
 			break;

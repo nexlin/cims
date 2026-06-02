@@ -5,8 +5,34 @@
 #include <cstring>
 #include <arpa/inet.h>
 #include <cstdio>
+#include <sys/time.h>
+#include <time.h>
 
 unsigned int PMcpttGroup::_nextSsrc = 1000;
+
+// 세션 로컬 floor 이벤트 기록 (_recordDir/floor.jsonl). 크래시-세이프 append.
+void PMcpttGroup::_logFloorLocal(const char* op, const std::string& user, unsigned int ssrc, int prio,
+                                 const char* extraJson)
+{
+    if (_recordDir.empty()) return;
+
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    struct tm tmv;
+    localtime_r(&tv.tv_sec, &tmv);
+    char ts[48];
+    int n = (int)strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tmv);
+    snprintf(ts + n, sizeof(ts) - n, ".%06ld", (long)tv.tv_usec);
+
+    std::string path = _recordDir + "/floor.jsonl";
+    FILE* f = fopen(path.c_str(), "a");
+    if (!f) return;
+    fprintf(f, "{\"ts\":\"%s\",\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d%s%s}\n",
+            ts, op, user.c_str(), ssrc, prio,
+            (extraJson && extraJson[0]) ? "," : "",
+            (extraJson && extraJson[0]) ? extraJson : "");
+    fclose(f);
+}
 
 // ── Floor 패킷 빌드/파싱 헬퍼 ─────────────────────────────────────────────────
 
@@ -58,8 +84,9 @@ PMcpttGroup::~PMcpttGroup() {
     _members.clear();
 }
 
-void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort, int videoPort) {
-    LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort);
+void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort, int videoPort,
+                            const std::string& role) {
+    LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str());
     PAutoLock lock(_mutex);
     Peer peer;
     peer.id = sessionId;
@@ -67,6 +94,8 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     peer.port = port;
     peer.floorPort = floorPort;
     peer.videoPort = videoPort;
+    peer.role = role.empty() ? "participant" : role;
+    if (!role.empty()) _roles[sessionId] = role;
     peer.ssrc = _nextSsrc++;
     peer.audioSeqOut = 0;
     peer.videoSeqOut = 0;
@@ -91,6 +120,7 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
 void PMcpttGroup::removeMember(const std::string& sessionId) {
     PAutoLock lock(_mutex);
     _members.erase(sessionId);
+    _roles.erase(sessionId);
     LOG_INFO("PMcpttGroup", "[%s] Member %s left. (remaining=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
     if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "MEMBER_LEAVE", sessionId.c_str());
 
@@ -113,6 +143,17 @@ void PMcpttGroup::updatePriorities(const std::map<std::string, int>& priorities)
     PAutoLock lock(_mutex);
     _priorities = priorities;
     LOG_INFO("PMcpttGroup", "[%s] Priorities updated for %lu members", _groupId.c_str(), _priorities.size());
+}
+
+void PMcpttGroup::updateRoles(const std::map<std::string, std::string>& roles) {
+    PAutoLock lock(_mutex);
+    _roles = roles;
+    LOG_INFO("PMcpttGroup", "[%s] Roles updated for %lu members", _groupId.c_str(), _roles.size());
+}
+
+bool PMcpttGroup::isChair(const std::string& sessionId) const {
+    auto it = _roles.find(sessionId);
+    return ( it != _roles.end() && it->second == "chair" );
 }
 
 void PMcpttGroup::setDtmfConfig(bool enable, const std::string& pushDigit, const std::string& releaseDigit) {
@@ -405,12 +446,13 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
                      sessionId.c_str(), ssrc, requesterPrio);
             _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", detail);
         }
+        _logFloorLocal("GRANT", sessionId, ssrc, requesterPrio);
 
         // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작
         if (_recordEnable && !_recorder) startRecording();
         if (_recordEnable && _recorder) {
             int seq = _recorder->getCurrentSeq() + 1;
-            _recorder->startSegment(seq, sessionId);
+            _recorder->startSegment(seq, sessionId, requesterPrio);
         }
     } else {
         if (_floorOwnerSessionId == sessionId) return;
@@ -418,15 +460,34 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         int ownerPrio = 999;
         if (_priorities.find(_floorOwnerSessionId) != _priorities.end()) ownerPrio = _priorities[_floorOwnerSessionId];
 
-        if (requesterPrio < ownerPrio) {
+        // TS 24.380 chair override: chair 는 participant 를 항상 선점하고,
+        // participant 는 chair 를 선점하지 못한다. 동급(둘 다 chair / 둘 다 participant)
+        // 이면 기존 우선순위 비교(낮을수록 우선).
+        bool requesterChair = isChair(sessionId);
+        bool ownerChair     = isChair(_floorOwnerSessionId);
+        bool bPreempt;
+        if (requesterChair && !ownerChair)      bPreempt = true;
+        else if (!requesterChair && ownerChair) bPreempt = false;
+        else                                    bPreempt = (requesterPrio < ownerPrio);
+
+        if (bPreempt) {
             // PREEMPTION
-            LOG_INFO("PMcpttGroup", "[%s] Floor PREEMPTED by %s (prio=%d) from %s (prio=%d)",
-                   _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
+            LOG_INFO("PMcpttGroup", "[%s] Floor PREEMPTED by %s (prio=%d chair=%d) from %s (prio=%d chair=%d)",
+                   _groupId.c_str(), sessionId.c_str(), requesterPrio, requesterChair,
+                   _floorOwnerSessionId.c_str(), ownerPrio, ownerChair);
+
+            // 선점 직전 화자 보존 (revoke/세그먼트 메타용)
+            std::string prevOwner = _floorOwnerSessionId;
 
             // Revoke Current
             char revBuf[256];
             int revLen = BuildFloorPacket(revBuf, sizeof(revBuf), FLOOR_REVOKE, _floorOwnerSsrc, _floorOwnerSessionId);
             if (revLen > 0) sendToMember(_floorOwnerSessionId, revBuf, revLen);
+            {
+                char ex[160];
+                snprintf(ex, sizeof(ex), "\"preempted_by\":\"%s\"", sessionId.c_str());
+                _logFloorLocal("REVOKE", prevOwner, _floorOwnerSsrc, ownerPrio, ex);
+            }
 
             // 녹취: 이전 화자 세그먼트 종료
             if (_recordEnable && _recorder && _recorder->isActive()) {
@@ -443,11 +504,16 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
 
             // Broadcast Taken (New Owner)
             broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
+            {
+                char ex[160];
+                snprintf(ex, sizeof(ex), "\"preempt\":true,\"preempted_from\":\"%s\"", prevOwner.c_str());
+                _logFloorLocal("GRANT", sessionId, ssrc, requesterPrio, ex);
+            }
 
-            // 녹취: 새 화자 세그먼트 시작
+            // 녹취: 새 화자 세그먼트 시작 (선점 메타 포함)
             if (_recordEnable && _recorder) {
                 int seq = _recorder->getCurrentSeq() + 1;
-                _recorder->startSegment(seq, sessionId);
+                _recorder->startSegment(seq, sessionId, requesterPrio, true, prevOwner);
             }
         } else {
             // REJECT
@@ -462,6 +528,12 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
                          "{\"op\":\"REJECT\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d,\"owner\":\"%s\",\"owner_prio\":%d}",
                          sessionId.c_str(), ssrc, requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
                 _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REJECT", detail);
+            }
+            {
+                char ex[160];
+                snprintf(ex, sizeof(ex), "\"owner\":\"%s\",\"owner_prio\":%d",
+                         _floorOwnerSessionId.c_str(), ownerPrio);
+                _logFloorLocal("REJECT", sessionId, ssrc, requesterPrio, ex);
             }
         }
     }
@@ -478,6 +550,10 @@ void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int 
         _floorTaken = false;
         _floorOwnerSessionId = "";
         _floorOwnerSsrc = 0;
+
+        int ownerPrio = 999;
+        if (_priorities.find(sessionId) != _priorities.end()) ownerPrio = _priorities[sessionId];
+        _logFloorLocal("RELEASE", sessionId, ssrc, ownerPrio);
 
         broadcastFloorStatus(FLOOR_IDLE, 0, "");
         LOG_INFO("PMcpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
@@ -505,6 +581,9 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
         std::string label = std::string("FLOOR_") + opName;
         _logFlow(_groupId, "cmp", "ue", "MCPTT", label.c_str(), detail);
     }
+    // 세션 로컬 floor.jsonl 에는 IDLE 만 추가 기록 (GRANT/REVOKE/TAKEN 은 호출부에서 기록)
+    if (opcode == FLOOR_IDLE)
+        _logFloorLocal("IDLE", speakerId, ssrc, -1);
 }
 
 void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {

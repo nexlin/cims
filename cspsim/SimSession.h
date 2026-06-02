@@ -92,6 +92,7 @@ public:
     void StartGroupCall(const std::string& strGroupId = "");
     void SubscribeGms();
     void SubscribeCms();
+    void AffiliateGroup();   // MCPTT 그룹 affiliation (TS 24.379 §9) — 그룹 URI 로 SUBSCRIBE
     void SendPttRequest();
     void SendPttRelease();
 

@@ -205,6 +205,50 @@ void SimSession::SubscribeCms() {
     SendSubscribe("cms_psi", m_strCmsCallId, m_iCmsSeq, m_strCmsFromTag);
 }
 
+// MCPTT 그룹 affiliation (TS 24.379 §9): Request-URI=그룹 URI 로 SUBSCRIBE 송신.
+// CSP 의 CscfModule 이 Request-URI user 가 알려진 그룹이면 (user,group,client) affiliation 으로 등록.
+void SimSession::AffiliateGroup() {
+    if (!m_bPttMode || m_strGroupId.empty()) return;
+
+    const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
+    int iLocalPort = m_iLocalPort;
+
+    char szCallId[128];
+    snprintf(szCallId, sizeof(szCallId), "aff_%s_%s_%d_%d",
+             m_strGroupId.c_str(), m_strUser.c_str(), m_iId, (int)time(NULL));
+
+    char szTag[64];
+    SipMakeTag(szTag, sizeof(szTag));
+
+    CSipMessage* pMsg = new CSipMessage();
+    pMsg->m_strSipMethod = "SUBSCRIBE";
+    // Request-URI: sip:{group}@domain — group id 로 affiliation 대상 지정
+    pMsg->m_clsReqUri.Set("sip", m_strGroupId.c_str(), m_strDomain.c_str(), m_iServerPort);
+
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+    SipMakeBranch(szBranch, sizeof(szBranch));
+    pMsg->AddVia(strLocalIp.c_str(), iLocalPort, szBranch);
+
+    pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
+    pMsg->m_clsTo.m_clsUri.Set("sip", m_strGroupId.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
+    pMsg->m_clsCSeq.Set(1, "SUBSCRIBE");
+    pMsg->m_iMaxForwards = 70;
+    pMsg->AddHeader("Expires", "3600");
+    pMsg->AddHeader("Event", "presence");  // 그룹 affiliation/conference state
+
+    char szContact[128];
+    snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
+             m_strUser.c_str(), strLocalIp.c_str(), iLocalPort);
+    pMsg->AddHeader("Contact", szContact);
+
+    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+
+    printf("[%d] AFFILIATE group=%s Call-ID=%s\n", m_iId, m_strGroupId.c_str(), szCallId);
+    m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
 // ─────────────────────────────────────────────
 //  일반 VoIP 통화
 // ─────────────────────────────────────────────

@@ -85,7 +85,7 @@ private:
     static size_t ComputeMemberHash( const class CspPttGroup &group );
 
     /**
-     * @brief Build PTT group info XML body (application/vnd.oma.poc.groups+xml)
+     * @brief Build MCPTT call control info XML (application/vnd.3gpp.mcptt-info+xml, TS 24.379)
      * @param clsGroup PTT group info
      * @return XML string
      */
@@ -93,14 +93,23 @@ private:
                                           const std::string &strCallerId );
 
     /**
-     * @brief Wrap SDP and group XML into multipart/mixed body, update INVITE message
+     * @brief Build group member roster (application/resource-lists+xml, RFC 5366 +
+     *        MCPTT group-info 확장으로 멤버별 role/priority 표기)
+     * @param clsGroup PTT group info
+     * @return XML string
+     */
+    static std::string BuildResourceListXml( const class CspPttGroup &clsGroup );
+
+    /**
+     * @brief Wrap SDP + MCPTT info XML + roster into multipart/mixed body, update INVITE message
      * @param pclsInvite   INVITE message to modify
-     * @param strGroupXml  PTT group info XML string
+     * @param strGroupXml  MCPTT call control info XML (mcptt-info)
+     * @param strRosterXml 멤버 로스터 XML (resource-lists); 비면 생략
      * @param strFloorIp   Floor control IP (shared RTP IP)
      * @param iFloorPort   Floor control UDP port
      */
     static void WrapMultipartBody( class CSipMessage *pclsInvite, const std::string &strGroupXml,
-                                   const std::string &strFloorIp, int iFloorPort );
+                                   const std::string &strRosterXml, const std::string &strFloorIp, int iFloorPort );
 
     bool m_bMonitorRunning;
     std::thread m_threadMonitor;

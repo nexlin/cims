@@ -568,7 +568,8 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     for ( size_t i = 0; i < vecMembers.size(); ++i ) {
         if ( !vecMembers[i] ) continue;
         if ( i > 0 ) ssMembers << ",";
-        ssMembers << vecMembers[i]->_id << ":" << vecMembers[i]->_priority;
+        // 형식: id:priority:role (role 은 chair/participant — CMP floor 선점 판정용)
+        ssMembers << vecMembers[i]->_id << ":" << vecMembers[i]->_priority << ":" << vecMembers[i]->_role;
     }
     req.Set( "members", ssMembers.str() );
 
@@ -618,7 +619,7 @@ bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<s
     for ( size_t i = 0; i < vecMembers.size(); ++i ) {
         if ( !vecMembers[i] ) continue;
         if ( i > 0 ) ssMembers << ",";
-        ssMembers << vecMembers[i]->_id << ":" << vecMembers[i]->_priority;
+        ssMembers << vecMembers[i]->_id << ":" << vecMembers[i]->_priority << ":" << vecMembers[i]->_role;
     }
     req.Set( "members", ssMembers.str() );
 
@@ -634,7 +635,7 @@ bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<s
 
 bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &strSessionId,
                             const std::string &strUserIp, int iUserPort, int iFloorPort, int iVideoPort,
-                            const std::string &strSesId ) {
+                            const std::string &strSesId, const std::string &strRole ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "JOIN_PTT_GROUP" );
     req.Set( "group_id", strGroupId );
@@ -648,6 +649,7 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
     req.Set( "user_port", iUserPort );
     if ( iFloorPort > 0 ) req.Set( "user_floor_port", iFloorPort );
     if ( iVideoPort > 0 ) req.Set( "user_video_port", iVideoPort );
+    req.Set( "role", strRole.empty() ? "participant" : strRole );
 
     req.Set( "csp_id", "CSP_MAIN" );
     req.Set( "csp_sess_id", strSessionId );

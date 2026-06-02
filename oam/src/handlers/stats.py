@@ -717,14 +717,17 @@ async def _subscribers_status(config: dict) -> HandlerResult:
                 # ptt_group_members 의 그룹별 총 멤버 수 캐시
                 group_total = {}
                 if group_active_members:
+                    # group_active_members 키 = mcptt_group_id 식별자. members.group_id 는
+                    # surrogate 이므로 ptt_groups JOIN 으로 mcptt_group_id 기준 집계.
                     placeholders = ','.join(['%s'] * len(group_active_members))
                     cur.execute(
-                        f"SELECT group_id, COUNT(*) AS cnt FROM ptt_group_members "
-                        f"WHERE group_id IN ({placeholders}) GROUP BY group_id",
+                        f"SELECT g.mcptt_group_id AS gid, COUNT(*) AS cnt "
+                        f"FROM ptt_group_members m JOIN ptt_groups g ON g.id = m.group_id "
+                        f"WHERE g.mcptt_group_id IN ({placeholders}) GROUP BY g.mcptt_group_id",
                         tuple(group_active_members.keys())
                     )
                     for r in cur.fetchall():
-                        group_total[r['group_id']] = r['cnt']
+                        group_total[r['gid']] = r['cnt']
 
                 # 가입자별 PTT 참여 레코드 구축 (state 파일로부터)
                 ptt_active_by_sub = {}

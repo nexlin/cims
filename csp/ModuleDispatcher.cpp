@@ -699,7 +699,10 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
             if ( iRemoteAudio <= 0 && pclsRtp->m_iPort > 0 ) iRemoteAudio = pclsRtp->m_iPort;
             if ( iRemoteAudio > 0 ) {
                 int iRemoteVideo = pclsRtp->GetVideoPort();
-                gclsGroupCallService.OnCallStarted( pszCallId, pclsRtp->m_strIp, iRemoteAudio, 0, iRemoteVideo );
+                // SDP m=application floor control 포트 파싱 (≤0 이면 OnCallStarted 내부 fallback)
+                int iRemoteFloor = pclsRtp->GetApplicationPort();
+                gclsGroupCallService.OnCallStarted( pszCallId, pclsRtp->m_strIp, iRemoteAudio,
+                                                    iRemoteFloor > 0 ? iRemoteFloor : 0, iRemoteVideo );
             }
 
             std::string strRelayIp = CspAddressing::GetLocalRtpAddress();

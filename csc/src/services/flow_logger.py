@@ -1765,6 +1765,17 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
             "call_id": group_id, "date": date_str, "nodes": nodes,
         }), media_type="application/json")
 
+    elif len(parts) >= 3 and parts[2] == "floor":
+        # ── 세션 로컬 floor 타임라인 (CMP 가 .d/floor.jsonl 에 기록) ──
+        d_dir = _find_ptt_session_dir(group_id, session_dir)
+        if not d_dir:
+            return HandlerResult(status=404, body=json.dumps({"error": "Session not found"}),
+                                 media_type="application/json")
+        floor_path = os.path.join(d_dir, "floor.jsonl")
+        floor = _read_jsonl(floor_path) if os.path.exists(floor_path) else []
+        return HandlerResult(status=200, body=json.dumps({"floor": floor}),
+                             media_type="application/json")
+
     else:
         # ── 세션 이벤트 ──
         date = _qp("date")

@@ -3,10 +3,13 @@ import { api } from './client'
 export interface Member {
   user_id: string
   priority: number
+  role?: 'chair' | 'participant'
+  mcptt_id?: string | null
 }
 
 export interface Group {
-  id: string
+  id: string                  // = mcptt_group_id (식별자)
+  db_id?: number              // surrogate ptt_groups.id
   name: string
   members: Member[]
   priority?: number
@@ -16,6 +19,12 @@ export interface Group {
   org_code?: string
   session_start?: string | null
   session_end?: string | null
+  // 3GPP MCPTT
+  group_type?: 'prearranged' | 'chat' | 'broadcast'
+  on_network?: boolean
+  max_members?: number
+  require_affiliation?: boolean
+  alias?: string
 }
 
 export type GroupInput = Omit<Group, 'members'> & { members?: Member[] }

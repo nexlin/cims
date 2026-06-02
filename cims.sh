@@ -675,7 +675,7 @@ import json, pymysql
 d=json.load(open('$DIST_DIR/csp/config/csp.json'))
 db=d['Setup']['Database']
 c=pymysql.connect(host=db['Host'],port=db['Port'],user=db['User'],password=db['Password'],database=db['DbName'])
-cur=c.cursor(); cur.execute('SELECT id FROM ptt_groups ORDER BY id LIMIT 1')
+cur=c.cursor(); cur.execute('SELECT mcptt_group_id FROM ptt_groups ORDER BY mcptt_group_id LIMIT 1')
 r=cur.fetchone(); print(r[0] if r else ''); c.close()
 " 2>/dev/null || true)
             [[ -n "$group" ]] && info "PTT 그룹 자동 감지: $group"

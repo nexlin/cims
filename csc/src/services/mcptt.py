@@ -44,6 +44,19 @@ CSP_NOTIFY_PORT = 4421
 PSP_NOTIFY_IP = ""           # ""=PSP 미설정 (legacy: CSP 만 사용)
 PSP_NOTIFY_PORT = 4421
 
+
+def _group_uri(gid: str) -> str:
+    """mcptt_group_id 식별자 → GMS 그룹 URI.
+    E.164 숫자면 tel:+{gid}, '+' 로 시작하면 그대로 tel:, 그 외(g001 등)는 tel:{gid}."""
+    if not gid:
+        return "tel:"
+    if gid.startswith('+'):
+        return f"tel:{gid}"
+    if gid.isdigit():
+        return f"tel:+{gid}"
+    return f"tel:{gid}"
+
+
 def load_shared_data(config):
     # Do not reassign global variables, modify them in place
     USERS.clear()
@@ -161,12 +174,13 @@ def load_shared_data(config):
             with conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT id, name, video_enabled, priority, encryption, "
-                        "emergency_call, org_code, session_start, session_end FROM ptt_groups"
+                        "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
+                        "emergency_call, org_code, session_start, session_end, "
+                        "group_type, on_network, max_members, require_affiliation, alias FROM ptt_groups"
                     )
                     for row in cur.fetchall():
-                        gid = row['id']
-                        uri = f"tel:{gid}" if gid.startswith('+') else f"tel:+{gid}"
+                        gid = row['mcptt_group_id']
+                        uri = _group_uri(gid)
                         GROUPS[uri] = {
                             "display_name": row['name'],
                             "video_enabled": bool(row.get('video_enabled', 0)),
@@ -174,31 +188,37 @@ def load_shared_data(config):
                             "encryption": bool(row.get('encryption', 0)),
                             "emergency_call": bool(row.get('emergency_call', 0)),
                             "org_code": row.get('org_code', ''),
+                            "group_type": row.get('group_type', 'prearranged'),
+                            "on_network": bool(row.get('on_network', 1)),
+                            "max_members": row.get('max_members', 0),
+                            "require_affiliation": bool(row.get('require_affiliation', 1)),
+                            "alias": row.get('alias', ''),
                             "session_start": row['session_start'].isoformat() if row.get('session_start') else None,
                             "session_end": row['session_end'].isoformat() if row.get('session_end') else None,
                             "etag": f"etag_{gid}",
                             "created_by": "", "created_at": "",
                             "members": []
                         }
-                    # 멤버 목록 + users 테이블에서 이름 조회
+                    # 멤버 목록 + users 테이블에서 이름 조회 (group_id=surrogate → mcptt_group_id JOIN)
                     cur.execute(
-                        "SELECT gm.group_id, gm.user_id, gm.priority, "
-                        "       ps.auth_id, u.name AS user_name "
+                        "SELECT g.mcptt_group_id AS mcptt_group_id, gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
+                        "       u.name AS user_name "
                         "FROM ptt_group_members gm "
+                        "JOIN ptt_groups g ON g.id = gm.group_id "
                         "LEFT JOIN ptt_subscriptions ps ON ps.id = gm.user_id "
                         "LEFT JOIN users u ON u.id = ps.user_id "
-                        "ORDER BY gm.group_id, gm.priority"
+                        "ORDER BY g.mcptt_group_id, gm.priority"
                     )
                     for row in cur.fetchall():
-                        gid = row['group_id']
-                        g_uri = f"tel:{gid}" if gid.startswith('+') else f"tel:+{gid}"
+                        g_uri = _group_uri(row['mcptt_group_id'])
                         uid = row['user_id']
-                        m_uri = f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}"
+                        m_uri = row.get('mcptt_id') or (f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}")
                         m_name = row.get('user_name') or m_uri
                         if g_uri in GROUPS:
                             GROUPS[g_uri]['members'].append({
                                 "uri": m_uri, "name": m_name,
-                                "role": "participant", "priority": row['priority'], "joined_at": ""
+                                "role": row.get('role') or "participant",
+                                "priority": row['priority'], "joined_at": ""
                             })
                     for uri in GROUPS:
                         logger.log_info(f"Loaded DB Group: {uri} ({len(GROUPS[uri]['members'])} members)")
@@ -567,19 +587,26 @@ def get_group_xml(group_uri):
       <entry uri="{member['uri']}">
         <rl:display-name>{member['name']}</rl:display-name>
         <mcpttgi:on-network-required/>
+        <mcpttgi:participant-type>{member.get('role', 'participant')}</mcpttgi:participant-type>
         <mcpttgi:user-priority>{member.get('priority', 5)}</mcpttgi:user-priority>
       </entry>"""
-      
+
     video_val = 'true' if group.get('video_enabled') else 'false'
     grp_priority = group.get('priority', 5)
     encryption_val = 'true' if group.get('encryption') else 'false'
     emergency_val = 'true' if group.get('emergency_call') else 'false'
     org_code = group.get('org_code', '')
+    group_type = group.get('group_type', 'prearranged')
+    # max_members 0(무제한) 이면 관례값 10 노출
+    max_count = group.get('max_members') or 10
+    affil_required = 'true' if group.get('require_affiliation', True) else 'false'
     xml += f"""
     </list>
+    <mcpttgi:session-type>{group_type}</mcpttgi:session-type>
     <mcpttgi:mcptt-video>{video_val}</mcpttgi:mcptt-video>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
-    <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
+    <mcpttgi:on-network-max-participant-count>{max_count}</mcpttgi:on-network-max-participant-count>
+    <mcpttgi:on-network-require-affiliation>{affil_required}</mcpttgi:on-network-require-affiliation>
     <mcpttgi:on-network-hang-time>3</mcpttgi:on-network-hang-time>
     <mcpttgi:on-network-max-duration>3600</mcpttgi:on-network-max-duration>
     <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>

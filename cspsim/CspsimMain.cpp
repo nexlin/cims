@@ -371,6 +371,8 @@ static void RunScenario(std::vector<SimSession*>& sessions,
             usleep(50000);
             s->SubscribeCms();
             usleep(50000);
+            s->AffiliateGroup();   // MCPTT 그룹 affiliation (그룹콜 수신 조건)
+            usleep(50000);
         }
         // 구독 완료 대기 (최대 10초)
         for (int retry = 0; retry < 100; ++retry) {
@@ -814,8 +816,10 @@ int main(int argc, char* argv[])
                 s->SubscribeGms();
                 usleep(30000);
                 s->SubscribeCms();
+                usleep(30000);
+                s->AffiliateGroup();
             }
-            printf("SUBSCRIBE 전송\n");
+            printf("SUBSCRIBE + AFFILIATE 전송\n");
         } else if (szCommand[0] == 'g') {
             // g [group_id]
             char szGroup[64] = "";

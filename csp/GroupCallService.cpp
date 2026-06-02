@@ -202,11 +202,17 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         return false;
     }
 
-    // 3. 나머지 멤버들에게 INVITE
+    // 3. 나머지 멤버들에게 INVITE (affiliation 요구 그룹은 affiliate 된 멤버만)
     for ( const auto &pUser : clsGroup._pusers ) {
         if ( !pUser ) continue;
         std::string strMember = pUser->_id;
         if ( strMember == pszCallerInfo ) continue;
+        if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
+             !gclsDbManager.IsAffiliated( pszGroupId, strMember ) ) {
+            CLog::Print( LOG_INFO, "ProcessGroupCall: member %s not affiliated to %s — skip invite",
+                         strMember.c_str(), pszGroupId );
+            continue;
+        }
         InviteMember( strMember.c_str(), pszGroupId );
     }
 
@@ -323,6 +329,13 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         if ( !bIsMember ) {
             CLog::Print( LOG_DEBUG, "InviteMember(%s) User NOT in Group(%s) member list. Skipping invitation.",
                          pszUserId, pszGroupId );
+            return false;
+        }
+        // affiliation 요구 그룹은 affiliate 된 멤버만 초대 (TS 24.379 §9)
+        if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
+             !gclsDbManager.IsAffiliated( pszGroupId, pszUserId ) ) {
+            CLog::Print( LOG_INFO, "InviteMember(%s) not affiliated to Group(%s). Skipping invitation.", pszUserId,
+                         pszGroupId );
             return false;
         }
     } else {
@@ -457,6 +470,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             }
 
             std::string strGroupXml = BuildGroupInfoXml( clsGroup, pszUserId, strCallerId );
+            std::string strRosterXml = BuildResourceListXml( clsGroup );
             // CMP floor port 사용 (m_mapGroupRtp에서 조회)
             int iFloorPort = iSharedPort + 1;  // fallback
             {
@@ -464,7 +478,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 if ( itRtp2 != m_mapGroupRtp.end() && itRtp2->second.iFloorPort > 0 )
                     iFloorPort = itRtp2->second.iFloorPort;
             }
-            WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iFloorPort );
+            WrapMultipartBody( pclsInvite, strGroupXml, strRosterXml, strSharedIp, iFloorPort );
 
             // MCPTT capability required (3GPP TS 24.379 §6.3.1)
             pclsInvite->AddHeader(
@@ -825,8 +839,21 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     int iFloorPort = iRemoteFloorPort > 0 ? iRemoteFloorPort : ( iRemotePort + 1 );
     int iVideoPort = iRemoteVideoPort > 0 ? iRemoteVideoPort : ( iRemotePort + 2 );
+    // 멤버 role 조회 (chair/participant) — CMP floor 선점 판정에 사용
+    std::string strRole = "participant";
+    {
+        CspPttGroup clsGroup;
+        if ( gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) {
+            for ( const auto &pUser : clsGroup._pusers ) {
+                if ( pUser && pUser->_id == strMemberId ) {
+                    strRole = pUser->_role;
+                    break;
+                }
+            }
+        }
+    }
     if ( gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort,
-                                  GetOrIssueGroupSesId( strGroupId ) ) ) {
+                                  GetOrIssueGroupSesId( strGroupId ), strRole ) ) {
         CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d floor=%d video=%d)", strGroupId.c_str(),
                      strRemoteIp.c_str(), iRemotePort, iFloorPort, iVideoPort );
         if ( gclsCallDir.IsEnabled() ) {
@@ -975,11 +1002,14 @@ std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, c
                                                   const std::string &strCallerId ) {
     std::ostringstream oss;
 
+    // session-type 은 그룹 유형(prearranged/chat/broadcast)에 따라 구동 (TS 24.379)
+    std::string strSessionType = clsGroup._groupType.empty() ? "prearranged" : clsGroup._groupType;
+
     oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
         << "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\""
         << " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
         << "  <mcptt-Params>\r\n"
-        << "    <session-type>prearranged</session-type>\r\n"
+        << "    <session-type>" << strSessionType << "</session-type>\r\n"
         << "    <mcptt-request-uri>tel:" << strUserId << "</mcptt-request-uri>\r\n"
         << "    <mcptt-calling-user-id>tel:" << strCallerId << "</mcptt-calling-user-id>\r\n"
         << "    <mcptt-calling-group-id>tel:" << clsGroup._id << "</mcptt-calling-group-id>\r\n"
@@ -990,12 +1020,39 @@ std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, c
 }
 
 /**
+ * @brief Build group member roster per RFC 5366 (resource-lists) with MCPTT group-info
+ *        extension for per-member role/priority.
+ *        Content-Type: application/resource-lists+xml
+ */
+std::string CGroupCallService::BuildResourceListXml( const CspPttGroup &clsGroup ) {
+    std::ostringstream oss;
+
+    oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+        << "<resource-lists xmlns=\"urn:ietf:params:xml:ns:resource-lists\"\r\n"
+        << "  xmlns:mcpttgi=\"urn:3gpp:ns:mcpttGroupInfo:1.0\">\r\n"
+        << "  <list>\r\n";
+    for ( const auto &pUser : clsGroup._pusers ) {
+        if ( !pUser ) continue;
+        const std::string &strUri = pUser->_mcpttId.empty() ? ( "tel:" + pUser->_id ) : pUser->_mcpttId;
+        oss << "    <entry uri=\"" << strUri << "\">\r\n"
+            << "      <mcpttgi:participant-type>" << pUser->_role << "</mcpttgi:participant-type>\r\n"
+            << "      <mcpttgi:user-priority>" << pUser->_priority << "</mcpttgi:user-priority>\r\n"
+            << "    </entry>\r\n";
+    }
+    oss << "  </list>\r\n"
+        << "</resource-lists>\r\n";
+
+    return oss.str();
+}
+
+/**
  * @brief Replace INVITE body with multipart/mixed per 3GPP TS 24.379:
  *        Part 1: application/vnd.3gpp.mcptt-info+xml  (XML first)
  *        Part 2: application/sdp  (SDP with MCPTT floor control m= line)
  */
 void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::string &strGroupXml,
-                                           const std::string &strFloorIp, int iFloorPort ) {
+                                           const std::string &strRosterXml, const std::string &strFloorIp,
+                                           int iFloorPort ) {
     if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
 
     const std::string strBoundary = "mcptt";
@@ -1011,13 +1068,21 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
     strSdp += sdpFloor.str();
 
     std::ostringstream oss;
-    // Part 1: mcptt-info XML (3GPP MCPTT format)
+    // Part 1: mcptt-info XML (3GPP MCPTT call control)
     oss << "--" << strBoundary << "\r\n"
         << "Content-Type: application/vnd.3gpp.mcptt-info+xml\r\n"
         << "Content-Length: " << strGroupXml.size() << "\r\n"
         << "\r\n"
         << strGroupXml << "\r\n";
-    // Part 2: SDP with floor control
+    // Part 2: 멤버 로스터 (resource-lists, RFC 5366) — 있을 때만
+    if ( !strRosterXml.empty() ) {
+        oss << "--" << strBoundary << "\r\n"
+            << "Content-Type: application/resource-lists+xml\r\n"
+            << "Content-Length: " << strRosterXml.size() << "\r\n"
+            << "\r\n"
+            << strRosterXml << "\r\n";
+    }
+    // Part 3: SDP with floor control
     oss << "--" << strBoundary << "\r\n"
         << "Content-Type: application/sdp\r\n"
         << "Content-Disposition: render\r\n"

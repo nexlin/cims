@@ -44,6 +44,7 @@ public:
 	int GetMediaCount( );
 	int GetAudioPort( );
 	int GetVideoPort( );
+	int GetApplicationPort( );
 
 	/** IP �ּ� */
 	std::string	m_strIp;

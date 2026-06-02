@@ -11,13 +11,18 @@
 #include "SimpleJson.h"
 
 CspPttGroup::CspPttGroup()
-    : _videoEnabled( false ),
+    : _dbId( 0 ),
+      _videoEnabled( false ),
       _priority( 5 ),
       _encryption( false ),
       _emergencyCall( false ),
       _sessionStart( 0 ),
       _sessionEnd( 0 ),
-      _sessionSeq( 0 ) {
+      _sessionSeq( 0 ),
+      _groupType( "prearranged" ),
+      _onNetwork( true ),
+      _maxMembers( 0 ),
+      _requireAffiliation( true ) {
 }
 
 CspPttGroup::~CspPttGroup() {
@@ -67,6 +72,13 @@ bool CspPttGroup::load( std::string groupId ) {
 
     if ( root.Has( "video_enabled" ) ) _videoEnabled = ( root.GetInt( "video_enabled" ) != 0 );
 
+    // 3GPP MCPTT 그룹 속성 (JSON fallback)
+    if ( root.Has( "group_type" ) ) _groupType = root.GetString( "group_type" );
+    if ( root.Has( "on_network" ) ) _onNetwork = ( root.GetInt( "on_network" ) != 0 );
+    if ( root.Has( "max_members" ) ) _maxMembers = root.GetInt( "max_members" );
+    if ( root.Has( "require_affiliation" ) ) _requireAffiliation = ( root.GetInt( "require_affiliation" ) != 0 );
+    if ( root.Has( "alias" ) ) _alias = root.GetString( "alias" );
+
     if ( root.Has( "users" ) ) {
         SimpleJson::JsonNode users = root.Get( "users" );
         if ( users.type == SimpleJson::JSON_ARRAY ) {
@@ -74,9 +86,11 @@ bool CspPttGroup::load( std::string groupId ) {
                 SimpleJson::JsonNode userNode = users.At( i );
                 std::string uid = userNode.GetString( "id" );
                 int prio = userNode.GetInt( "priority" );
+                std::string role = userNode.Has( "role" ) ? userNode.GetString( "role" ) : "participant";
+                std::string mcpttId = userNode.Has( "mcptt_id" ) ? userNode.GetString( "mcptt_id" ) : "";
 
                 if ( !uid.empty() ) {
-                    auto pUser = std::make_shared<CspPttUser>( uid, prio );
+                    auto pUser = std::make_shared<CspPttUser>( uid, prio, role, mcpttId );
                     pUser->_groups.push_back( _id );  // Add self group
                     _pusers.push_back( pUser );
                 }
@@ -90,7 +104,20 @@ bool CspPttGroup::load( std::string groupId ) {
 
 void CspPttGroup::Clear() {
     _id.clear();
+    _dbId = 0;
     _name.clear();
     _videoEnabled = false;
+    _priority = 5;
+    _encryption = false;
+    _emergencyCall = false;
+    _orgCode.clear();
+    _sessionStart = 0;
+    _sessionEnd = 0;
+    _sessionSeq = 0;
+    _groupType = "prearranged";
+    _onNetwork = true;
+    _maxMembers = 0;
+    _requireAffiliation = true;
+    _alias.clear();
     _pusers.clear();
 }

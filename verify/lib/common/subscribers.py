@@ -38,12 +38,13 @@ def select_subscribers(db_cfg: dict) -> dict:
 
         # PTT: 그룹 멤버 + imsi 숫자 형식 우선
         cur.execute(
-            "SELECT s.id, s.passwd, s.imsi, s.service_ref, m.group_id "
+            "SELECT s.id, s.passwd, s.imsi, s.service_ref, g.mcptt_group_id AS group_id "
             "FROM ptt_subscriptions s "
             "JOIN ptt_group_members m ON m.user_id = s.id "
+            "JOIN ptt_groups g ON g.id = m.group_id "
             "WHERE s.id LIKE '+%' AND s.passwd<>'' AND s.service_ref<>'' "
             "  AND s.imsi REGEXP '^[0-9]+$' "
-            "ORDER BY m.group_id, m.priority, s.id LIMIT 1"
+            "ORDER BY g.mcptt_group_id, m.priority, s.id LIMIT 1"
         )
         r = cur.fetchone()
         if r:
@@ -61,7 +62,7 @@ def select_subscribers(db_cfg: dict) -> dict:
             if r:
                 out.update({"ptt_user": r[0], "ptt_pwd": r[1] or "",
                             "ptt_imsi": r[2] or "", "ptt_ref": r[3] or ""})
-            cur.execute("SELECT id FROM ptt_groups ORDER BY id LIMIT 1")
+            cur.execute("SELECT mcptt_group_id FROM ptt_groups ORDER BY mcptt_group_id LIMIT 1")
             r = cur.fetchone()
             if r:
                 out["ptt_group"] = r[0]

@@ -61,6 +61,27 @@ public:
     /** 특정 사용자가 속한 그룹 ID 목록을 조회한다 */
     bool SelectGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds );
 
+    // ─────────────────────────────────────────────
+    //  Affiliation operations (TS 24.379 §9) — strGroupId = mcptt_group_id 식별자
+    // ─────────────────────────────────────────────
+
+    /** affiliation 등록(또는 갱신). iExpiresSec<=0 이면 만료 NULL */
+    bool InsertAffiliation( const std::string &strGroupId, const std::string &strUserId, const std::string &strClientId,
+                            int iExpiresSec );
+
+    /** affiliation 해제 (clientId 가 비면 해당 user 전체) */
+    bool RemoveAffiliation( const std::string &strGroupId, const std::string &strUserId,
+                            const std::string &strClientId );
+
+    /** 해당 그룹에 user 가 active affiliation(미만료) 을 1개라도 가지는지 */
+    bool IsAffiliated( const std::string &strGroupId, const std::string &strUserId );
+
+    /** 그룹의 affiliate 된 멤버 user_id 목록 */
+    bool SelectAffiliatedMembers( const std::string &strGroupId, std::vector<std::string> &vecUserIds );
+
+    /** 가입자 de-register/logout 시 전 affiliation 제거 */
+    bool RemoveAffiliationsByUser( const std::string &strUserId );
+
     /** 전체 가입자를 DB에서 읽어 맵에 로드한다 */
     bool LoadAllUsers( CspUserMap &clsMap );
 

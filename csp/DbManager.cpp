@@ -203,6 +203,8 @@ bool CDbManager::UpdateLogoutTime( const std::string &strUserId ) {
 
     ExecuteQuery( "UPDATE volte_subscriptions SET logout_time=NOW() WHERE id='" + Escape( strUserId ) + "'" );
     ExecuteQuery( "UPDATE ptt_subscriptions  SET logout_time=NOW() WHERE id='" + Escape( strUserId ) + "'" );
+    // de-register 시 affiliation 해제 (TS 24.379 §9)
+    ExecuteQuery( "DELETE FROM ptt_affiliations WHERE user_id='" + Escape( strUserId ) + "'" );
     return true;
 }
 
@@ -214,12 +216,12 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    // 그룹 기본 정보 (확장 필드 포함)
+    // 그룹 기본 정보 (확장 필드 포함). strGroupId = mcptt_group_id 식별자.
     std::string strSql =
-        "SELECT id, name, video_enabled, priority, encryption, emergency_call, "
+        "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
         "org_code, UNIX_TIMESTAMP(session_start) AS ss, UNIX_TIMESTAMP(session_end) AS se, "
-        "session_seq "
-        "FROM ptt_groups WHERE id='" +
+        "session_seq, group_type, on_network, max_members, require_affiliation, COALESCE(alias,'') "
+        "FROM ptt_groups WHERE mcptt_group_id='" +
         Escape( strGroupId ) + "'";
 
     MYSQL_RES *pRes = ExecuteSelect( strSql );
@@ -232,23 +234,31 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     }
 
     clsGroup.Clear();
-    clsGroup._id = row[0] ? row[0] : "";
-    clsGroup._name = row[1] ? row[1] : "";
-    clsGroup._videoEnabled = row[2] ? ( atoi( row[2] ) != 0 ) : false;
-    clsGroup._priority = row[3] ? atoi( row[3] ) : 5;
-    clsGroup._encryption = row[4] ? ( atoi( row[4] ) != 0 ) : false;
-    clsGroup._emergencyCall = row[5] ? ( atoi( row[5] ) != 0 ) : false;
-    clsGroup._orgCode = row[6] ? row[6] : "";
-    clsGroup._sessionStart = row[7] ? (time_t)atoll( row[7] ) : 0;
-    clsGroup._sessionEnd = row[8] ? (time_t)atoll( row[8] ) : 0;
-    clsGroup._sessionSeq = row[9] ? atoi( row[9] ) : 1;
+    clsGroup._dbId = row[0] ? atoll( row[0] ) : 0;
+    clsGroup._id = row[1] ? row[1] : "";
+    clsGroup._name = row[2] ? row[2] : "";
+    clsGroup._videoEnabled = row[3] ? ( atoi( row[3] ) != 0 ) : false;
+    clsGroup._priority = row[4] ? atoi( row[4] ) : 5;
+    clsGroup._encryption = row[5] ? ( atoi( row[5] ) != 0 ) : false;
+    clsGroup._emergencyCall = row[6] ? ( atoi( row[6] ) != 0 ) : false;
+    clsGroup._orgCode = row[7] ? row[7] : "";
+    clsGroup._sessionStart = row[8] ? (time_t)atoll( row[8] ) : 0;
+    clsGroup._sessionEnd = row[9] ? (time_t)atoll( row[9] ) : 0;
+    clsGroup._sessionSeq = row[10] ? atoi( row[10] ) : 1;
+    clsGroup._groupType = row[11] ? row[11] : "prearranged";
+    clsGroup._onNetwork = row[12] ? ( atoi( row[12] ) != 0 ) : true;
+    clsGroup._maxMembers = row[13] ? atoi( row[13] ) : 0;
+    clsGroup._requireAffiliation = row[14] ? ( atoi( row[14] ) != 0 ) : true;
+    clsGroup._alias = row[15] ? row[15] : "";
     mysql_free_result( pRes );
 
-    // 멤버 목록
+    // 멤버 목록 — group_id 는 surrogate ptt_groups.id 참조
+    char szDbId[32];
+    snprintf( szDbId, sizeof( szDbId ), "%lld", clsGroup._dbId );
     strSql =
-        "SELECT user_id, priority FROM ptt_group_members "
-        "WHERE group_id='" +
-        Escape( strGroupId ) + "' ORDER BY priority";
+        "SELECT user_id, priority, role, COALESCE(mcptt_id,'') FROM ptt_group_members "
+        "WHERE group_id=" +
+        std::string( szDbId ) + " ORDER BY priority";
 
     pRes = ExecuteSelect( strSql );
     if ( pRes ) {
@@ -256,14 +266,17 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
             if ( !row[0] ) continue;
             std::string uid = row[0];
             int prio = row[1] ? atoi( row[1] ) : 0;
-            auto pUser = std::make_shared<CspPttUser>( uid, prio );
+            std::string role = row[2] ? row[2] : "participant";
+            std::string mcpttId = row[3] ? row[3] : "";
+            auto pUser = std::make_shared<CspPttUser>( uid, prio, role, mcpttId );
             pUser->_groups.push_back( clsGroup._id );
             clsGroup._pusers.push_back( pUser );
         }
         mysql_free_result( pRes );
     }
 
-    CLog::Print( LOG_INFO, "[DB] SelectGroup(%s) %d members", strGroupId.c_str(), (int)clsGroup._pusers.size() );
+    CLog::Print( LOG_INFO, "[DB] SelectGroup(%s) dbId=%lld %d members", strGroupId.c_str(), clsGroup._dbId,
+                 (int)clsGroup._pusers.size() );
     return true;
 }
 
@@ -315,7 +328,11 @@ bool CDbManager::SelectGroupsByUser( const std::string &strUserId, std::vector<s
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    std::string strSql = "SELECT group_id FROM ptt_group_members WHERE user_id='" + Escape( strUserId ) + "'";
+    // mcptt_group_id 식별자 반환 (멤버 group_id surrogate → ptt_groups JOIN)
+    std::string strSql =
+        "SELECT g.mcptt_group_id FROM ptt_group_members m "
+        "JOIN ptt_groups g ON m.group_id = g.id WHERE m.user_id='" +
+        Escape( strUserId ) + "'";
     MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return false;
 
@@ -327,12 +344,92 @@ bool CDbManager::SelectGroupsByUser( const std::string &strUserId, std::vector<s
     return true;
 }
 
+// ─────────────────────────────────────────────
+//  Affiliation operations (TS 24.379 §9)
+//  strGroupId = mcptt_group_id 식별자 → 내부에서 surrogate id 서브쿼리로 해석
+// ─────────────────────────────────────────────
+
+bool CDbManager::InsertAffiliation( const std::string &strGroupId, const std::string &strUserId,
+                                    const std::string &strClientId, int iExpiresSec ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    std::string strExpires =
+        ( iExpiresSec > 0 ) ? ( "DATE_ADD(NOW(), INTERVAL " + std::to_string( iExpiresSec ) + " SECOND)" ) : "NULL";
+
+    // mcptt_group_id → surrogate id 서브쿼리. UPSERT (status 재활성).
+    std::string strSql =
+        "INSERT INTO ptt_affiliations (group_id, user_id, client_id, expires_at, status) "
+        "SELECT g.id, '" +
+        Escape( strUserId ) + "', '" + Escape( strClientId ) + "', " + strExpires +
+        ", 'affiliated' FROM ptt_groups g WHERE g.mcptt_group_id='" + Escape( strGroupId ) +
+        "' ON DUPLICATE KEY UPDATE affiliated_at=NOW(), expires_at=" + strExpires + ", status='affiliated'";
+    return ExecuteQuery( strSql );
+}
+
+bool CDbManager::RemoveAffiliation( const std::string &strGroupId, const std::string &strUserId,
+                                    const std::string &strClientId ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    std::string strSql =
+        "DELETE a FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
+        "WHERE g.mcptt_group_id='" +
+        Escape( strGroupId ) + "' AND a.user_id='" + Escape( strUserId ) + "'";
+    if ( !strClientId.empty() ) strSql += " AND a.client_id='" + Escape( strClientId ) + "'";
+    return ExecuteQuery( strSql );
+}
+
+bool CDbManager::IsAffiliated( const std::string &strGroupId, const std::string &strUserId ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    std::string strSql =
+        "SELECT 1 FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
+        "WHERE g.mcptt_group_id='" +
+        Escape( strGroupId ) + "' AND a.user_id='" + Escape( strUserId ) +
+        "' AND a.status='affiliated' "
+        "AND (a.expires_at IS NULL OR a.expires_at > NOW()) LIMIT 1";
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
+    if ( !pRes ) return false;
+    bool bFound = ( mysql_fetch_row( pRes ) != nullptr );
+    mysql_free_result( pRes );
+    return bFound;
+}
+
+bool CDbManager::SelectAffiliatedMembers( const std::string &strGroupId, std::vector<std::string> &vecUserIds ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    std::string strSql =
+        "SELECT DISTINCT a.user_id FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
+        "WHERE g.mcptt_group_id='" +
+        Escape( strGroupId ) +
+        "' AND a.status='affiliated' "
+        "AND (a.expires_at IS NULL OR a.expires_at > NOW())";
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
+    if ( !pRes ) return false;
+    MYSQL_ROW row;
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+        if ( row[0] ) vecUserIds.push_back( row[0] );
+    }
+    mysql_free_result( pRes );
+    return true;
+}
+
+bool CDbManager::RemoveAffiliationsByUser( const std::string &strUserId ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    return ExecuteQuery( "DELETE FROM ptt_affiliations WHERE user_id='" + Escape( strUserId ) + "'" );
+}
+
 bool CDbManager::LoadAllGroups( CGroupMap &clsMap ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    // 전체 그룹 ID 목록 조회
-    MYSQL_RES *pRes = ExecuteSelect( "SELECT id FROM ptt_groups" );
+    // 전체 그룹 식별자(mcptt_group_id) 목록 조회
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT mcptt_group_id FROM ptt_groups" );
     if ( !pRes ) return false;
 
     std::vector<std::string> vecGroupIds;
@@ -427,9 +524,11 @@ int CDbManager::IncrementSessionSeq( const std::string &strGroupId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return 1;
 
-    ExecuteQuery( "UPDATE ptt_groups SET session_seq = session_seq + 1 WHERE id='" + Escape( strGroupId ) + "'" );
+    ExecuteQuery( "UPDATE ptt_groups SET session_seq = session_seq + 1 WHERE mcptt_group_id='" + Escape( strGroupId ) +
+                  "'" );
 
-    MYSQL_RES *pRes = ExecuteSelect( "SELECT session_seq FROM ptt_groups WHERE id='" + Escape( strGroupId ) + "'" );
+    MYSQL_RES *pRes =
+        ExecuteSelect( "SELECT session_seq FROM ptt_groups WHERE mcptt_group_id='" + Escape( strGroupId ) + "'" );
     if ( !pRes ) return 1;
     MYSQL_ROW row = mysql_fetch_row( pRes );
     int seq = row && row[0] ? atoi( row[0] ) : 1;

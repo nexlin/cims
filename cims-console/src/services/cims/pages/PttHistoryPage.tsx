@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { groupsApi, type Group } from '../../../api/groups'
-import { pttApi, type PttSession, type PttEvent } from '../../../api/ptt'
+import { pttApi, type PttSession, type PttEvent, type PttFloorEvent } from '../../../api/ptt'
 import { recordingsApi, type RecordingSegment } from '../../../api/recordings'
 import type { FlowMessage } from '../../../api/flow'
 import FlowPage from '../../../pages/FlowPage'
@@ -9,7 +9,6 @@ import { useToast } from '../../../components/Toast'
 
 export function fmtTime(iso: string | null | undefined) {
   if (!iso) return '--'
-  // Handle both ISO and compact formats
   const s = iso.replace('T', ' ')
   return s.substring(0, 19)
 }
@@ -17,7 +16,6 @@ export function fmtTime(iso: string | null | undefined) {
 function fmtShortTime(iso: string | null | undefined) {
   if (!iso) return '--'
   const s = iso.replace('T', ' ')
-  // Extract HH:MM:SS
   const idx = s.indexOf(' ')
   return idx >= 0 ? s.substring(idx + 1, idx + 9) : s.substring(0, 8)
 }
@@ -30,48 +28,66 @@ function fmtDur(seconds: number | null | undefined) {
 }
 
 const EVENT_ICONS: Record<string, { icon: string; label: string; color: string }> = {
-  session_start:  { icon: '\u25CF', label: '세션 시작',  color: '#4caf50' },
-  session_end:    { icon: '\u25A0', label: '세션 종료',  color: '#f44336' },
-  member_join:    { icon: '\u271A', label: '입장',      color: '#2196f3' },
-  member_leave:   { icon: '\u2716', label: '퇴장',      color: '#ff9800' },
-  'floor-grant':  { icon: '\u25B6', label: '발언 시작',  color: '#4caf50' },
-  'floor-release':{ icon: '\u25A0', label: '발언 종료',  color: 'var(--text-muted)' },
-  config_change:  { icon: '\u2699', label: '설정 변경',  color: '#9c27b0' },
-  member_invite:  { icon: '\u2192', label: '초대',      color: '#00bcd4' },
+  session_start:  { icon: '●', label: '세션 시작',  color: '#4caf50' },
+  session_end:    { icon: '■', label: '세션 종료',  color: '#f44336' },
+  member_join:    { icon: '✚', label: '입장',      color: '#2196f3' },
+  member_leave:   { icon: '✖', label: '퇴장',      color: '#ff9800' },
+  'floor-grant':  { icon: '▶', label: '발언 시작',  color: '#4caf50' },
+  'floor-release':{ icon: '■', label: '발언 종료',  color: 'var(--text-muted)' },
+  config_change:  { icon: '⚙', label: '설정 변경',  color: '#9c27b0' },
+  member_invite:  { icon: '→', label: '초대',      color: '#00bcd4' },
 }
 
 function getEventDisplay(type: string) {
-  return EVENT_ICONS[type] || { icon: '\u2022', label: type, color: 'var(--text-muted)' }
+  return EVENT_ICONS[type] || { icon: '•', label: type, color: 'var(--text-muted)' }
 }
 
-interface GroupCard {
-  group: Group
-  sessions: PttSession[]
-  events: PttEvent[]
-  loading: boolean
-  expanded: boolean
+// floor.jsonl op → 표시 스타일 (TS 24.380)
+const FLOOR_OPS: Record<string, { label: string; color: string }> = {
+  GRANT:   { label: '발언권 부여', color: '#4caf50' },
+  TAKEN:   { label: '발언 시작',  color: '#2196f3' },
+  RELEASE: { label: '발언 종료',  color: 'var(--text-muted)' },
+  IDLE:    { label: '유휴',      color: 'var(--text-muted)' },
+  REVOKE:  { label: '선점 회수',  color: '#ff9800' },
+  REJECT:  { label: '거절',      color: '#f44336' },
 }
+
+interface SessionsState { sessions: PttSession[]; loading: boolean; loaded: boolean }
+interface DetailState {
+  events: PttEvent[]
+  participants: Array<{ msisdn: string; role: string; join_time: string | null; leave_time: string | null }>
+  floor: PttFloorEvent[]
+  loading: boolean
+  loaded: boolean
+}
+
+const detailKey = (gid: string, dir: string) => `${gid}|${dir}`
 
 export default function PttHistoryPage() {
   const { show } = useToast()
   const [groups, setGroups] = useState<Group[]>([])
-  const [cards, setCards] = useState<Map<string, GroupCard>>(new Map())
   const [loading, setLoading] = useState(false)
   const [fGroup, setFG] = useState('')
   const [fDate, setFD] = useState(() => new Date().toISOString().substring(0, 10))
   const [autoRefresh, setAR] = useState(false)
+
+  const [selectedGroupId, setSelGroup] = useState<string | null>(null)
+  const [selectedSessionDir, setSelSession] = useState<string | null>(null)
+
+  const [sessionsByGroup, setSessionsByGroup] = useState<Map<string, SessionsState>>(new Map())
+  const [detailByKey, setDetailByKey] = useState<Map<string, DetailState>>(new Map())
+
   const [flow, setFlow] = useState<{ groupId: string; sessionDir: string; date: string; nodes?: Record<string, FlowMessage[]>; messages?: FlowMessage[] } | null>(null)
   const [flowLoading, setFlowLoading] = useState(false)
+  const [recPlayer, setRecPlayer] = useState<{ id: string; segments: RecordingSegment[]; groupId: string } | null>(null)
 
-  // Recording playback state (SegmentPlayer 팝업)
-  const [recPlayer, setRecPlayer] = useState<{id:string, segments:RecordingSegment[], groupId:string}|null>(null)
-
-  // Load groups
+  // ── 그룹 로드 ──
   const loadGroups = useCallback(async () => {
     setLoading(true)
     try {
       const gs = await groupsApi.list()
       setGroups(gs)
+      setSelGroup(prev => prev ?? (gs.length > 0 ? gs[0].id : null))
     } catch (e: unknown) {
       show(String(e), 'err')
     } finally {
@@ -81,94 +97,111 @@ export default function PttHistoryPage() {
 
   useEffect(() => { loadGroups() }, [loadGroups])
 
-  // Load sessions for visible groups
-  const loadSessions = useCallback(async (targetGroups: Group[]) => {
-    const newCards = new Map(cards)
-
-    for (const g of targetGroups) {
-      const existing = newCards.get(g.id)
-      if (existing && !existing.expanded) continue
-
-      newCards.set(g.id, {
-        group: g,
-        sessions: existing?.sessions ?? [],
-        events: existing?.events ?? [],
-        loading: true,
-        expanded: existing?.expanded ?? true,
-      })
-    }
-    setCards(new Map(newCards))
-
-    for (const g of targetGroups) {
-      try {
-        const resp = await pttApi.sessions(g.id, fDate || undefined)
-        const sessions = resp.sessions || []
-
-        // Load events for the most recent session
-        let events: PttEvent[] = []
-        if (sessions.length > 0) {
-          const latest = sessions[0]
-          try {
-            const evResp = await pttApi.events(g.id, latest.dir, fDate || undefined)
-            events = evResp.events || []
-          } catch { /* ignore */ }
-        }
-
-        newCards.set(g.id, {
-          group: g,
-          sessions,
-          events,
-          loading: false,
-          expanded: newCards.get(g.id)?.expanded ?? true,
-        })
-      } catch {
-        newCards.set(g.id, {
-          group: g,
-          sessions: [],
-          events: [],
-          loading: false,
-          expanded: newCards.get(g.id)?.expanded ?? true,
-        })
-      }
-    }
-    setCards(new Map(newCards))
-  }, [cards, fDate])
-
-  // Filter groups
   const filteredGroups = fGroup
     ? groups.filter(g => g.id.includes(fGroup) || g.name.includes(fGroup))
     : groups
 
-  // Initial load of sessions when groups or date changes
-  useEffect(() => {
-    if (filteredGroups.length > 0) {
-      loadSessions(filteredGroups)
+  // ── 그룹의 세션 목록 lazy 로드 ──
+  const loadSessions = useCallback(async (gid: string, force = false) => {
+    if (!force) {
+      const cur = sessionsByGroup.get(gid)
+      if (cur && cur.loaded) return cur.sessions
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups, fDate, fGroup])
+    setSessionsByGroup(prev => {
+      const m = new Map(prev)
+      m.set(gid, { sessions: prev.get(gid)?.sessions ?? [], loading: true, loaded: false })
+      return m
+    })
+    try {
+      const resp = await pttApi.sessions(gid, fDate || undefined)
+      const sessions = resp.sessions || []
+      setSessionsByGroup(prev => {
+        const m = new Map(prev)
+        m.set(gid, { sessions, loading: false, loaded: true })
+        return m
+      })
+      return sessions
+    } catch {
+      setSessionsByGroup(prev => {
+        const m = new Map(prev)
+        m.set(gid, { sessions: [], loading: false, loaded: true })
+        return m
+      })
+      return []
+    }
+  }, [sessionsByGroup, fDate])
 
-  // Auto-refresh
+  // ── 세션 상세(events + participants + floor) lazy 로드 ──
+  const loadDetail = useCallback(async (gid: string, dir: string, force = false) => {
+    const key = detailKey(gid, dir)
+    if (!force) {
+      const cur = detailByKey.get(key)
+      if (cur && cur.loaded) return
+    }
+    setDetailByKey(prev => {
+      const m = new Map(prev)
+      m.set(key, { events: [], participants: [], floor: [], loading: true, loaded: false })
+      return m
+    })
+    try {
+      const [ev, fl] = await Promise.all([
+        pttApi.events(gid, dir, fDate || undefined),
+        pttApi.floor(gid, dir, fDate || undefined).catch(() => ({ floor: [] })),
+      ])
+      setDetailByKey(prev => {
+        const m = new Map(prev)
+        m.set(key, {
+          events: ev.events || [],
+          participants: ev.participants || [],
+          floor: fl.floor || [],
+          loading: false, loaded: true,
+        })
+        return m
+      })
+    } catch {
+      setDetailByKey(prev => {
+        const m = new Map(prev)
+        m.set(key, { events: [], participants: [], floor: [], loading: false, loaded: true })
+        return m
+      })
+    }
+  }, [detailByKey, fDate])
+
+  // 선택 그룹 변경 → 세션 로드 + 최신 세션 자동 선택
   useEffect(() => {
-    if (!autoRefresh) return
-    const iv = setInterval(() => {
-      if (filteredGroups.length > 0) loadSessions(filteredGroups)
-    }, 15000)
+    if (!selectedGroupId) return
+    let cancelled = false
+    ;(async () => {
+      const sessions = await loadSessions(selectedGroupId)
+      if (cancelled) return
+      setSelSession(sessions.length > 0 ? sessions[0].dir : null)
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupId, fDate])
+
+  // 선택 세션 변경 → 상세 로드
+  useEffect(() => {
+    if (selectedGroupId && selectedSessionDir) loadDetail(selectedGroupId, selectedSessionDir)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupId, selectedSessionDir])
+
+  // 날짜 변경 → 캐시 비우고 선택 그룹 재로드
+  useEffect(() => {
+    setSessionsByGroup(new Map())
+    setDetailByKey(new Map())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fDate])
+
+  // 자동 갱신 (선택 그룹만)
+  useEffect(() => {
+    if (!autoRefresh || !selectedGroupId) return
+    const iv = setInterval(() => { loadSessions(selectedGroupId, true) }, 15000)
     return () => clearInterval(iv)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRefresh, filteredGroups])
+  }, [autoRefresh, selectedGroupId])
 
-  const toggleCard = (gid: string) => {
-    const c = cards.get(gid)
-    if (c) {
-      const updated = new Map(cards)
-      updated.set(gid, { ...c, expanded: !c.expanded })
-      setCards(updated)
-    }
-  }
-
-  // Play PTT session recording (SegmentPlayer 팝업)
   const playRecording = async (groupId: string, sessionDir: string) => {
-    // 녹취 디렉터리: ptt/{groupId}/sessions/{sessionDir}.d
     const dirName = sessionDir.endsWith('.d') ? sessionDir : `${sessionDir}.d`
     const recId = `ptt/${groupId}/sessions/${dirName}`
     try {
@@ -196,8 +229,14 @@ export default function PttHistoryPage() {
     }
   }
 
+  const selGroup = groups.find(g => g.id === selectedGroupId) || null
+  const selSessions = selectedGroupId ? (sessionsByGroup.get(selectedGroupId)?.sessions ?? []) : []
+  const selSessionsLoading = selectedGroupId ? (sessionsByGroup.get(selectedGroupId)?.loading ?? false) : false
+  const selDetail = (selectedGroupId && selectedSessionDir)
+    ? detailByKey.get(detailKey(selectedGroupId, selectedSessionDir)) : undefined
+
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 480 }}>
       <div className="toolbar">
         <input
           className="search-input"
@@ -213,8 +252,8 @@ export default function PttHistoryPage() {
           onChange={e => setFD(e.target.value)}
           style={{ width: 150 }}
         />
-        <button className="btn btn--primary btn--sm" onClick={() => loadSessions(filteredGroups)}>
-          검색
+        <button className="btn btn--primary btn--sm" onClick={() => { if (selectedGroupId) loadSessions(selectedGroupId, true) }}>
+          새로고침
         </button>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
           <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />
@@ -222,176 +261,174 @@ export default function PttHistoryPage() {
         </label>
       </div>
 
-      {loading ? (
-        <div className="empty">그룹 로딩 중...</div>
-      ) : filteredGroups.length === 0 ? (
-        <div className="empty">등록된 그룹이 없습니다</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
-          {filteredGroups.map(g => {
-            const card = cards.get(g.id)
-            const sessions = card?.sessions ?? []
-            const events = card?.events ?? []
-            const isExpanded = card?.expanded ?? true
-            const isCardLoading = card?.loading ?? false
-
-            return (
-              <div
-                key={g.id}
-                style={{
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
-                  background: 'var(--surface, #ffffff)',
-                  overflow: 'hidden',
-                }}
-              >
-                {/* Card Header */}
+      <div style={{ flex: 1, display: 'flex', gap: 12, overflow: 'hidden', minHeight: 0 }}>
+        {/* ── 좌: 그룹 리스트 ── */}
+        <div style={{ flex: '0 0 300px', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface, #fff)' }}>
+          {loading ? (
+            <div className="empty" style={{ padding: 16 }}>그룹 로딩 중...</div>
+          ) : filteredGroups.length === 0 ? (
+            <div className="empty" style={{ padding: 16 }}>등록된 그룹이 없습니다</div>
+          ) : (
+            filteredGroups.map(g => {
+              const isSel = g.id === selectedGroupId
+              return (
                 <div
+                  key={g.id}
+                  onClick={() => { setSelGroup(g.id); setSelSession(null) }}
                   style={{
-                    padding: '10px 16px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
+                    padding: '10px 14px',
                     cursor: 'pointer',
-                    background: 'var(--surface-2)',
-                    borderBottom: isExpanded ? '1px solid var(--border)' : 'none',
+                    borderBottom: '1px solid var(--border)',
+                    background: isSel ? 'var(--hover, #eef5ff)' : 'transparent',
+                    borderLeft: isSel ? '3px solid var(--primary, #2563eb)' : '3px solid transparent',
                   }}
-                  onClick={() => toggleCard(g.id)}
                 >
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0)' }}>
-                    {'\u25B6'}
-                  </span>
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>
-                    {g.name || g.id}
-                  </span>
-                  <span className={`badge ${g.video_enabled ? 'badge--blue' : 'badge--gray'}`}
-                        style={{ fontSize: 10, padding: '1px 6px' }}>
-                    {g.video_enabled ? '영상' : '음성'}
-                  </span>
-                  <span className="ts" style={{ color: 'var(--text-muted)' }}>
-                    ({g.id})
-                  </span>
-                  <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
-                    {sessions.length > 0
-                      ? `${sessions.length}개 세션`
-                      : '세션 없음'}
-                  </span>
-                  {isCardLoading && (
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>로딩...</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {g.name || g.id}
+                    </span>
+                    <span className={`badge ${g.video_enabled ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10, padding: '1px 6px' }}>
+                      {g.video_enabled ? '영상' : '음성'}
+                    </span>
+                  </div>
+                  <div className="ts" style={{ color: 'var(--text-muted)', marginTop: 2 }}>{g.id}</div>
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        {/* ── 우: 그룹 상세 ── */}
+        <div style={{ flex: 1, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface, #fff)', minWidth: 0 }}>
+          {!selGroup ? (
+            <div className="empty" style={{ padding: 24 }}>왼쪽에서 그룹을 선택하세요</div>
+          ) : (
+            <div style={{ padding: 16 }}>
+              {/* 그룹 헤더 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                <span style={{ fontWeight: 700, fontSize: 16 }}>{selGroup.name || selGroup.id}</span>
+                <span className="ts" style={{ color: 'var(--text-muted)' }}>({selGroup.id})</span>
+                <span className={`badge ${selGroup.video_enabled ? 'badge--blue' : 'badge--gray'}`}>{selGroup.video_enabled ? '영상' : '음성'}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+                  {selSessionsLoading ? '세션 로딩...' : `${selSessions.length}개 세션`}
+                </span>
+              </div>
+
+              {/* 세션 리스트 */}
+              {selSessions.length === 0 && !selSessionsLoading ? (
+                <div className="empty" style={{ padding: 16 }}>이 날짜에 세션이 없습니다</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                  {selSessions.map(sess => {
+                    const isSel = sess.dir === selectedSessionDir
+                    return (
+                      <div
+                        key={sess.dir}
+                        onClick={() => setSelSession(sess.dir)}
+                        style={{
+                          padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
+                          border: '1px solid var(--border)',
+                          background: isSel ? 'var(--hover, #eef5ff)' : 'transparent',
+                          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{sess.session_id || sess.dir}</span>
+                        <span className="ts">({fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)})</span>
+                        <span className={`badge ${sess.state === 'active' ? 'badge--green' : 'badge--gray'}`}>{sess.state === 'active' ? '진행중' : '종료'}</span>
+                        {sess.initiator && <span className="ts">발신: {sess.initiator}</span>}
+                        {sess.member_count != null && <span className="ts">멤버: {sess.member_count}명</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* 선택 세션 상세 */}
+              {selectedSessionDir && (
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    <button className="btn btn--sm btn--outline" disabled={flowLoading} onClick={() => openFlow(selGroup.id, selectedSessionDir)}>Flow 보기</button>
+                    <button className="btn btn--sm btn--outline" onClick={() => playRecording(selGroup.id, selectedSessionDir)}>&#9654; 녹취</button>
+                  </div>
+
+                  {selDetail?.loading ? (
+                    <div className="empty" style={{ padding: 12 }}>상세 로딩 중...</div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                      {/* Floor 타임라인 */}
+                      <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>발언권(Floor) 타임라인</div>
+                        {selDetail && selDetail.floor.length > 0 ? (
+                          <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, padding: 8 }}>
+                            {selDetail.floor.map((f, i) => {
+                              const st = FLOOR_OPS[f.op] || { label: f.op, color: 'var(--text-muted)' }
+                              return (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 12 }}>
+                                  <span className="ts" style={{ minWidth: 78 }}>{fmtShortTime(f.ts)}</span>
+                                  <span style={{ color: st.color, fontWeight: 600, minWidth: 72 }}>{st.label}</span>
+                                  <span style={{ color: 'var(--text, #1a1d2e)' }}>
+                                    {f.user || '-'}
+                                    {f.prio != null && f.prio >= 0 && <span className="ts"> (prio {f.prio})</span>}
+                                    {f.preempt && <span className="ts" style={{ color: '#ff9800' }}> ← 선점 {f.preempted_from || ''}</span>}
+                                    {f.op === 'REVOKE' && f.preempted_by && <span className="ts" style={{ color: '#ff9800' }}> → {f.preempted_by}</span>}
+                                    {f.op === 'REJECT' && f.owner && <span className="ts"> (점유: {f.owner})</span>}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="ts" style={{ color: 'var(--text-muted)' }}>floor 기록 없음</div>
+                        )}
+                      </div>
+
+                      {/* 이벤트 + 참여자 */}
+                      <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>세션 이벤트</div>
+                        {selDetail && selDetail.events.length > 0 ? (
+                          <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 12 }}>
+                            {selDetail.events.map((ev, ei) => {
+                              const disp = getEventDisplay(ev.type)
+                              return (
+                                <div key={ei} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 12 }}>
+                                  <span className="ts" style={{ minWidth: 78 }}>{fmtShortTime(ev.ts)}</span>
+                                  <span style={{ color: disp.color, fontSize: 14, width: 18, textAlign: 'center' }}>{disp.icon}</span>
+                                  <span style={{ color: 'var(--text, #1a1d2e)' }}>
+                                    {ev.member && <span style={{ fontWeight: 500 }}>{ev.member} </span>}
+                                    {disp.label}
+                                    {ev.duration != null && <span className="ts"> ({fmtDur(ev.duration)})</span>}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="ts" style={{ color: 'var(--text-muted)', marginBottom: 12 }}>이벤트 없음</div>
+                        )}
+
+                        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>참여자</div>
+                        {selDetail && selDetail.participants.length > 0 ? (
+                          <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, maxHeight: 160, overflowY: 'auto' }}>
+                            {selDetail.participants.map((p, pi) => (
+                              <div key={pi} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', fontSize: 12 }}>
+                                <span style={{ fontWeight: 500 }}>{p.msisdn}</span>
+                                {p.role && <span className="badge badge--gray" style={{ fontSize: 10 }}>{p.role}</span>}
+                                <span className="ts" style={{ marginLeft: 'auto' }}>{fmtShortTime(p.join_time)}{p.leave_time ? ` ~ ${fmtShortTime(p.leave_time)}` : ''}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="ts" style={{ color: 'var(--text-muted)' }}>참여자 없음</div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
-
-                {/* Card Body */}
-                {isExpanded && (
-                  <div style={{ padding: '12px 16px' }}>
-                    {sessions.length === 0 && !isCardLoading ? (
-                      <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 16 }}>
-                        세션 없음
-                      </div>
-                    ) : (
-                      sessions.map((sess, si) => {
-                        const isLatest = si === 0
-                        return (
-                          <div
-                            key={sess.dir}
-                            style={{
-                              marginBottom: si < sessions.length - 1 ? 12 : 0,
-                              padding: 12,
-                              borderRadius: 6,
-                              border: '1px solid var(--border)',
-                              background: isLatest ? 'var(--hover)' : 'transparent',
-                            }}
-                          >
-                            {/* Session header */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                              <span style={{ fontWeight: 600, fontSize: 13 }}>
-                                {sess.session_id || sess.dir}
-                              </span>
-                              <span className="ts">
-                                ({fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)})
-                              </span>
-                              <span className={`badge ${sess.state === 'active' ? 'badge--green' : 'badge--gray'}`}>
-                                {sess.state === 'active' ? '진행중' : '종료'}
-                              </span>
-                              {sess.initiator && (
-                                <span className="ts">발신: {sess.initiator}</span>
-                              )}
-                              {sess.member_count != null && (
-                                <span className="ts">멤버: {sess.member_count}명</span>
-                              )}
-                              {isLatest && events.length > 0 && (
-                                <span className="ts">이벤트: {events.length}건</span>
-                              )}
-                              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                                <button
-                                  className="btn btn--sm btn--outline"
-                                  disabled={flowLoading}
-                                  onClick={e => { e.stopPropagation(); openFlow(g.id, sess.dir) }}
-                                >
-                                  Flow 보기
-                                </button>
-                                <button
-                                  className="btn btn--sm btn--outline"
-                                  onClick={e => { e.stopPropagation(); playRecording(g.id, sess.dir) }}
-                                >
-                                  &#9654; 녹취
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Event timeline (only for latest session) */}
-                            {isLatest && events.length > 0 && (
-                              <div style={{
-                                maxHeight: 280,
-                                overflowY: 'auto',
-                                borderTop: '1px solid var(--border)',
-                                paddingTop: 8,
-                              }}>
-                                {events.map((ev, ei) => {
-                                  const disp = getEventDisplay(ev.type)
-                                  return (
-                                    <div
-                                      key={ei}
-                                      style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 8,
-                                        padding: '3px 0',
-                                        fontSize: 12,
-                                        lineHeight: '18px',
-                                      }}
-                                    >
-                                      <span className="ts" style={{ minWidth: 64 }}>
-                                        {fmtShortTime(ev.ts)}
-                                      </span>
-                                      <span style={{ color: disp.color, fontSize: 14, width: 18, textAlign: 'center' }}>
-                                        {disp.icon}
-                                      </span>
-                                      <span style={{ color: 'var(--text, #1a1d2e)' }}>
-                                        {ev.member && <span style={{ fontWeight: 500 }}>{ev.member} </span>}
-                                        {disp.label}
-                                        {ev.duration != null && (
-                                          <span className="ts"> ({fmtDur(ev.duration)})</span>
-                                        )}
-                                      </span>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            )}
-
-                            {/* Recording section removed - use inline player via 녹취 button */}
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* PTT 녹취 SegmentPlayer 팝업 */}
       {recPlayer && (

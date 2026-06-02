@@ -570,33 +570,47 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
         return HandlerResult(status=500, body={'error': str(e)})
 
 
+# 그룹 조회 컬럼 (id=surrogate, mcptt_group_id=식별자). 응답에서 id 는 mcptt_group_id 로 노출.
+_GROUP_COLS = (
+    "id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
+    "org_code, session_start, session_end, group_type, on_network, max_members, "
+    "require_affiliation, alias"
+)
+
+
+def _shape_group(g: dict, members: list):
+    """DB row → API 형태. id(응답)=mcptt_group_id, db_id=surrogate."""
+    g['db_id'] = g['id']
+    g['id'] = g.get('mcptt_group_id') or str(g['db_id'])
+    g['video_enabled'] = bool(g.get('video_enabled', 0))
+    g['encryption'] = bool(g.get('encryption', 0))
+    g['emergency_call'] = bool(g.get('emergency_call', 0))
+    g['on_network'] = bool(g.get('on_network', 1))
+    g['require_affiliation'] = bool(g.get('require_affiliation', 1))
+    if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
+    if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
+    g['members'] = members
+    return g
+
+
 async def _list_groups(config):
     """Phase 4d2 N+1 fix — group 당 sub query 제거. 2 bulk query 로 단축."""
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, video_enabled, priority, encryption, emergency_call, "
-                "org_code, session_start, session_end FROM ptt_groups ORDER BY id"
-            )
+            cur.execute(f"SELECT {_GROUP_COLS} FROM ptt_groups ORDER BY mcptt_group_id")
             groups = cur.fetchall()
             if not groups:
                 return HandlerResult(status=200, body={'groups': []})
-            # 1 query for all members (group_id grouping)
+            # 1 query for all members (group_id=surrogate grouping)
             cur.execute(
-                "SELECT group_id, user_id, priority FROM ptt_group_members "
+                "SELECT group_id, user_id, priority, role, mcptt_id FROM ptt_group_members "
                 "ORDER BY group_id, priority"
             )
             members_by_group: dict = {}
             for m in cur.fetchall():
                 gid = m.pop('group_id')
                 members_by_group.setdefault(gid, []).append(m)
-            for g in groups:
-                g['video_enabled'] = bool(g.get('video_enabled', 0))
-                g['encryption'] = bool(g.get('encryption', 0))
-                g['emergency_call'] = bool(g.get('emergency_call', 0))
-                if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
-                if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
-                g['members'] = members_by_group.get(g['id'], [])
+            groups = [_shape_group(g, members_by_group.get(g['id'], [])) for g in groups]
     return HandlerResult(status=200, body={'groups': groups})
 
 
@@ -604,33 +618,52 @@ async def _get_group(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name, video_enabled, priority, encryption, emergency_call, "
-                "org_code, session_start, session_end FROM ptt_groups WHERE id=%s",
+                f"SELECT {_GROUP_COLS} FROM ptt_groups WHERE mcptt_group_id=%s",
                 (group_id,)
             )
             group = cur.fetchone()
             if group is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
-            group['video_enabled'] = bool(group.get('video_enabled', 0))
-            group['encryption'] = bool(group.get('encryption', 0))
-            group['emergency_call'] = bool(group.get('emergency_call', 0))
-            if group.get('session_start'): group['session_start'] = group['session_start'].isoformat()
-            if group.get('session_end'): group['session_end'] = group['session_end'].isoformat()
             cur.execute(
-                "SELECT user_id, priority FROM ptt_group_members "
+                "SELECT user_id, priority, role, mcptt_id FROM ptt_group_members "
                 "WHERE group_id=%s ORDER BY priority",
-                (group_id,)
+                (group['id'],)
             )
-            group['members'] = cur.fetchall()
+            members = cur.fetchall()
+            group = _shape_group(group, members)
     return HandlerResult(status=200, body=group)
+
+
+def _resolve_group_pk(cur, group_id: str):
+    """mcptt_group_id 식별자 → surrogate id. 없으면 None."""
+    cur.execute("SELECT id FROM ptt_groups WHERE mcptt_group_id=%s", (group_id,))
+    row = cur.fetchone()
+    return row['id'] if row else None
+
+
+def _insert_member(cur, gpk, m):
+    uid  = m.get('user_id', m.get('id', ''))
+    if not uid:
+        return
+    prio = int(m.get('priority', 0))
+    role = m.get('role', 'participant')
+    if role not in ('chair', 'participant'):
+        role = 'participant'
+    mcptt_id = m.get('mcptt_id') or None
+    cur.execute(
+        "INSERT IGNORE INTO ptt_group_members "
+        "(group_id, user_id, priority, role, mcptt_id) VALUES (%s, %s, %s, %s, %s)",
+        (gpk, uid, prio, role, mcptt_id)
+    )
 
 
 async def _create_group(body, config):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
-    group_id = body.get('id', '').strip()
+    # id = mcptt_group_id 식별자 (surrogate id 는 자동발행)
+    group_id = (body.get('mcptt_group_id') or body.get('id', '')).strip()
     if not group_id:
-        return HandlerResult(status=400, body={'error': 'id is required'})
+        return HandlerResult(status=400, body={'error': 'id (mcptt_group_id) is required'})
     name           = body.get('name', group_id)
     video_enabled  = 1 if body.get('video_enabled', False) else 0
     priority       = int(body.get('priority', 5))
@@ -639,26 +672,29 @@ async def _create_group(body, config):
     org_code       = body.get('org_code', '') or None
     session_start  = body.get('session_start') or None
     session_end    = body.get('session_end') or None
+    group_type     = body.get('group_type', 'prearranged')
+    if group_type not in ('prearranged', 'chat', 'broadcast'):
+        group_type = 'prearranged'
+    on_network     = 1 if body.get('on_network', True) else 0
+    max_members    = int(body.get('max_members', 0))
+    require_affiliation = 1 if body.get('require_affiliation', True) else 0
+    alias          = body.get('alias', '') or None
     members        = body.get('members', [])
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO ptt_groups (id, name, video_enabled, priority, encryption, "
-                "emergency_call, org_code, session_start, session_end) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "INSERT INTO ptt_groups (mcptt_group_id, name, video_enabled, priority, encryption, "
+                "emergency_call, org_code, session_start, session_end, group_type, on_network, "
+                "max_members, require_affiliation, alias) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
-                 emergency_call, org_code, session_start, session_end)
+                 emergency_call, org_code, session_start, session_end, group_type,
+                 on_network, max_members, require_affiliation, alias)
             )
+            gpk = cur.lastrowid
             for m in members:
-                uid  = m.get('user_id', m.get('id', ''))
-                prio = int(m.get('priority', 0))
-                if uid:
-                    cur.execute(
-                        "INSERT IGNORE INTO ptt_group_members "
-                        "(group_id, user_id, priority) VALUES (%s, %s, %s)",
-                        (group_id, uid, prio)
-                    )
+                _insert_member(cur, gpk, m)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "POST")
     return HandlerResult(status=201, body={'id': group_id})
 
@@ -669,6 +705,9 @@ async def _update_group(group_id: str, body, config):
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            gpk = _resolve_group_pk(cur, group_id)
+            if gpk is None:
+                return HandlerResult(status=404, body={'error': 'Group not found'})
             update_fields = []
             update_vals   = []
             if 'name' in body:
@@ -677,15 +716,18 @@ async def _update_group(group_id: str, body, config):
             if 'video_enabled' in body:
                 update_fields.append('video_enabled=%s')
                 update_vals.append(1 if body['video_enabled'] else 0)
-            for fld in ('priority',):
+            for fld in ('priority', 'max_members'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(int(body[fld]))
-            for fld in ('encryption', 'emergency_call'):
+            for fld in ('encryption', 'emergency_call', 'on_network', 'require_affiliation'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(1 if body[fld] else 0)
-            for fld in ('org_code',):
+            if 'group_type' in body and body['group_type'] in ('prearranged', 'chat', 'broadcast'):
+                update_fields.append('group_type=%s')
+                update_vals.append(body['group_type'])
+            for fld in ('org_code', 'alias'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(body[fld] or None)
@@ -694,27 +736,15 @@ async def _update_group(group_id: str, body, config):
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(body[fld] or None)
             if update_fields:
-                update_vals.append(group_id)
+                update_vals.append(gpk)
                 cur.execute(
                     "UPDATE ptt_groups SET " + ", ".join(update_fields) + " WHERE id=%s",
                     update_vals
                 )
-                if cur.rowcount == 0:
-                    return HandlerResult(status=404, body={'error': 'Group not found'})
             if 'members' in body:
-                cur.execute(
-                    "DELETE FROM ptt_group_members WHERE group_id=%s",
-                    (group_id,)
-                )
+                cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
                 for m in body['members']:
-                    uid  = m.get('user_id', m.get('id', ''))
-                    prio = int(m.get('priority', 0))
-                    if uid:
-                        cur.execute(
-                            "INSERT IGNORE INTO ptt_group_members "
-                            "(group_id, user_id, priority) VALUES (%s, %s, %s)",
-                            (group_id, uid, prio)
-                        )
+                    _insert_member(cur, gpk, m)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
 
@@ -722,14 +752,8 @@ async def _update_group(group_id: str, body, config):
 async def _delete_group(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM ptt_group_members WHERE group_id=%s",
-                (group_id,)
-            )
-            cur.execute(
-                "DELETE FROM ptt_groups WHERE id=%s",
-                (group_id,)
-            )
+            # FK ON DELETE CASCADE 가 members/affiliations 정리
+            cur.execute("DELETE FROM ptt_groups WHERE mcptt_group_id=%s", (group_id,))
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "DELETE")
@@ -739,13 +763,13 @@ async def _delete_group(group_id: str, config):
 async def _list_members(group_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM ptt_groups WHERE id=%s", (group_id,))
-            if cur.fetchone() is None:
+            gpk = _resolve_group_pk(cur, group_id)
+            if gpk is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             cur.execute(
-                "SELECT user_id, priority FROM ptt_group_members "
+                "SELECT user_id, priority, role, mcptt_id FROM ptt_group_members "
                 "WHERE group_id=%s ORDER BY priority",
-                (group_id,)
+                (gpk,)
             )
             members = cur.fetchall()
     return HandlerResult(status=200, body={'group_id': group_id, 'members': members})
@@ -758,17 +782,21 @@ async def _add_member(group_id: str, body, config):
     if not user_id:
         return HandlerResult(status=400, body={'error': 'user_id is required'})
     priority = int(body.get('priority', 0))
+    role = body.get('role', 'participant')
+    if role not in ('chair', 'participant'):
+        role = 'participant'
+    mcptt_id = body.get('mcptt_id') or None
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM ptt_groups WHERE id=%s", (group_id,))
-            if cur.fetchone() is None:
+            gpk = _resolve_group_pk(cur, group_id)
+            if gpk is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             cur.execute(
-                "INSERT INTO ptt_group_members (group_id, user_id, priority) "
-                "VALUES (%s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE priority=VALUES(priority)",
-                (group_id, user_id, priority)
+                "INSERT INTO ptt_group_members (group_id, user_id, priority, role, mcptt_id) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE priority=VALUES(priority), role=VALUES(role), mcptt_id=VALUES(mcptt_id)",
+                (gpk, user_id, priority, role, mcptt_id)
             )
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=201, body={'group_id': group_id, 'user_id': user_id})
@@ -777,9 +805,12 @@ async def _add_member(group_id: str, body, config):
 async def _remove_member(group_id: str, user_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            gpk = _resolve_group_pk(cur, group_id)
+            if gpk is None:
+                return HandlerResult(status=404, body={'error': 'Group not found'})
             cur.execute(
                 "DELETE FROM ptt_group_members WHERE group_id=%s AND user_id=%s",
-                (group_id, user_id)
+                (gpk, user_id)
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Member not found'})

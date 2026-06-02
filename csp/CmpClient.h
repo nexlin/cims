@@ -61,7 +61,8 @@ public:
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                       const std::string &strSesId = "" );
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
-                    int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "" );
+                    int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "",
+                    const std::string &strRole = "participant" );
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 

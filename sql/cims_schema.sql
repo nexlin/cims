@@ -72,24 +72,60 @@ CREATE TABLE IF NOT EXISTS user_rejects (
 --  PTT 그룹 (Groups)
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ptt_groups (
-    id            VARCHAR(64)  NOT NULL COMMENT '그룹 번호 (E.164)',
+    id            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '자동발행 surrogate 키 (내부 관리/FK)',
+    mcptt_group_id VARCHAR(255) NOT NULL COMMENT 'MCPTT group ID (그룹 식별자, SIP 주소; 예 g001)',
     name          VARCHAR(128) NOT NULL DEFAULT '' COMMENT '그룹명',
     video_enabled TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'H.264 비디오 릴레이 활성화',
-    PRIMARY KEY (id)
+    session_start DATETIME     DEFAULT NULL COMMENT '그룹 세션 시작시간',
+    session_end   DATETIME     DEFAULT NULL COMMENT '그룹 세션 종료시간 (NULL=무기한)',
+    priority      INT          DEFAULT 5    COMMENT '그룹 우선순위 (1=최고, 10=최저)',
+    encryption    TINYINT(1)   DEFAULT 0    COMMENT '암호화 여부',
+    emergency_call TINYINT(1)  DEFAULT 0    COMMENT '긴급통화 허용',
+    org_code      VARCHAR(32)  DEFAULT NULL COMMENT '소속 조직 코드',
+    session_seq   INT          NOT NULL DEFAULT 1 COMMENT '세션 시퀀스 (재시작마다 증가)',
+    -- 3GPP MCPTT (TS 24.379/24.481)
+    group_type    ENUM('prearranged','chat','broadcast') NOT NULL DEFAULT 'prearranged' COMMENT 'session-type',
+    on_network    TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'on-network 그룹 여부',
+    max_members   INT          NOT NULL DEFAULT 0 COMMENT 'on-network-max-participant-count (0=무제한)',
+    require_affiliation TINYINT(1) NOT NULL DEFAULT 1 COMMENT '그룹콜 수신 전 affiliation 요구',
+    alias         VARCHAR(128) DEFAULT NULL COMMENT '그룹 별칭/단축명',
+    icon_url      VARCHAR(512) DEFAULT NULL COMMENT '그룹 아이콘 URL',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_mcptt_group_id (mcptt_group_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='PTT 그룹 정보';
 
 -- ─────────────────────────────────────────────
---  그룹 멤버 (Group Members)
+--  그룹 멤버 (Group Members) — group_id 는 surrogate ptt_groups.id 참조
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ptt_group_members (
-    group_id VARCHAR(64) NOT NULL COMMENT '그룹 ID',
-    user_id  VARCHAR(64) NOT NULL COMMENT '멤버 가입자 ID',
+    group_id BIGINT      NOT NULL COMMENT 'ptt_groups.id (surrogate)',
+    user_id  VARCHAR(64) NOT NULL COMMENT '멤버 가입자 ID (MSISDN)',
     priority INT         NOT NULL DEFAULT 0 COMMENT '발언권 우선순위 (낮을수록 높음)',
+    role     ENUM('chair','participant') NOT NULL DEFAULT 'participant' COMMENT 'TS 24.380 participant type',
+    mcptt_id VARCHAR(255) DEFAULT NULL COMMENT '멤버 MCPTT ID URI (NULL=user_id 사용)',
     PRIMARY KEY (group_id, user_id),
-    INDEX idx_user (user_id)
+    INDEX idx_user (user_id),
+    CONSTRAINT fk_gm_group FOREIGN KEY (group_id) REFERENCES ptt_groups(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='그룹 멤버 목록';
+
+-- ─────────────────────────────────────────────
+--  PTT affiliation 상태 (TS 24.379 §9) — group_id 는 surrogate ptt_groups.id 참조
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ptt_affiliations (
+    group_id      BIGINT       NOT NULL COMMENT 'ptt_groups.id (surrogate)',
+    user_id       VARCHAR(64)  NOT NULL COMMENT 'ptt_group_members.user_id',
+    client_id     VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP instance (Contact +sip.instance)',
+    affiliated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'affiliation 시각',
+    expires_at    DATETIME     DEFAULT NULL COMMENT 'affiliation 만료 (NULL=dereg 시까지)',
+    status        ENUM('affiliated','deaffiliated') NOT NULL DEFAULT 'affiliated' COMMENT '상태',
+    PRIMARY KEY (group_id, user_id, client_id),
+    INDEX idx_aff_user (user_id),
+    INDEX idx_aff_group_status (group_id, status),
+    CONSTRAINT fk_aff_group FOREIGN KEY (group_id) REFERENCES ptt_groups(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='MCPTT affiliation 상태 (TS 24.379 §9)';
 
 -- ─────────────────────────────────────────────
 --  VoIP 통화 로그

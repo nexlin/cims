@@ -38,6 +38,24 @@ export interface PttFlowResponse {
   messages?: FlowMessage[]
 }
 
+export interface PttFloorEvent {
+  ts: string
+  op: string            // GRANT | REVOKE | REJECT | RELEASE | IDLE | TAKEN
+  user: string
+  ssrc?: number
+  prio?: number
+  preempt?: boolean
+  preempted_from?: string
+  preempted_by?: string
+  owner?: string
+  owner_prio?: number
+  [key: string]: unknown
+}
+
+export interface PttFloorResponse {
+  floor: PttFloorEvent[]
+}
+
 export const pttApi = {
   sessions(groupId: string, date?: string): Promise<PttSessionsResponse> {
     const p = new URLSearchParams()
@@ -54,5 +72,10 @@ export const pttApi = {
   flow(groupId: string, sessionDir: string, date?: string): Promise<PttFlowResponse> {
     const q = date ? `?date=${date}` : ''
     return api.get(`/ptt/history/${encodeURIComponent(groupId)}/${encodeURIComponent(sessionDir)}/flow${q}`)
+  },
+
+  floor(groupId: string, sessionDir: string, date?: string): Promise<PttFloorResponse> {
+    const q = date ? `?date=${date}` : ''
+    return api.get(`/ptt/history/${encodeURIComponent(groupId)}/${encodeURIComponent(sessionDir)}/floor${q}`)
   },
 }

@@ -55,7 +55,8 @@ public:
 
     void setPttSession(PRtpMulticast* session) { _pttSession = session; }
     PRtpMulticast* getPttSession() const { return _pttSession; }
-    void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0);
+    void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0,
+                   const std::string& role = "participant");
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -76,6 +77,7 @@ public:
     void onVideoRtpPacket(const std::string& ip, int port, char* buf, int len);
 
     void updatePriorities(const std::map<std::string, int>& priorities);
+    void updateRoles(const std::map<std::string, std::string>& roles);
     void setDtmfConfig(bool enable, const std::string& pushDigit, const std::string& releaseDigit);
 
     // Floor 이벤트 로그 콜백 (PCmpServer::logFlow 연결용)
@@ -94,6 +96,13 @@ private:
      *  PCmpServer 의 _logFlow 콜백을 통해 proto="DTMF", label="DTMF" 로 기록. */
     void _dtmfFlowLog(const std::string& senderId, char digit, unsigned short duration, unsigned char volume);
 
+    /** 세션 로컬 floor 이벤트 기록 — _recordDir/floor.jsonl 에 1줄 append.
+     *  중앙 cmp_NN.flow.jsonl 과 별개로 세션 .d 에 floor 타임라인을 co-locate 한다
+     *  (40명 세션의 화자교대/선점/거절을 시간별 로그 스캔 없이 재구성).
+     *  op: GRANT|REVOKE|REJECT|RELEASE|IDLE|TAKEN, extraJson: 추가 키(앞에 , 없이) */
+    void _logFloorLocal(const char* op, const std::string& user, unsigned int ssrc, int prio,
+                        const char* extraJson = nullptr);
+
     void sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     void sendAudioRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     // Video functions for future use
@@ -111,6 +120,7 @@ private:
         int floorPort;       // floor control 포트 (m=application)
         unsigned int ssrc;   // 멤버 SSRC (joinGroup 시 할당)
         int videoPort;
+        std::string role;    // "chair" | "participant" (TS 24.380 floor 선점 판정)
         uint16_t audioSeqOut;   // 수신자별 오디오 시퀀스 카운터
         uint16_t videoSeqOut;   // 수신자별 비디오 시퀀스 카운터
         uint32_t audioSsrcOut;  // 수신자에게 보내는 고정 오디오 SSRC
@@ -118,6 +128,8 @@ private:
     };
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority
+    std::map<std::string, std::string> _roles; // SessionID (UserId) -> role (chair/participant)
+    bool isChair(const std::string& sessionId) const; // role==chair 여부
     PRtpMulticast* _pttSession;      // PTT 전용 세션 (audio RTP + floor + video)
     
     // Floor State

@@ -38,11 +38,15 @@ void PSyncRtpRecorder::addTrack(const std::string& prefix) {
 //  세그먼트 시작/종료
 // ═══════════════════════════════════════════════════════════════
 
-void PSyncRtpRecorder::startSegment(int seq, const std::string& speakerId) {
+void PSyncRtpRecorder::startSegment(int seq, const std::string& speakerId,
+                                    int priority, bool preempted, const std::string& preemptedFrom) {
     if (_active) finishSegment();
 
     _currentSeq = seq;
     _speakerId = speakerId;
+    _priority = priority;
+    _preempted = preempted;
+    _preemptedFrom = preemptedFrom;
     _segStartUsec = _nowUsec();
     _segEndUsec = 0;
     _active = true;
@@ -151,6 +155,13 @@ void PSyncRtpRecorder::_writeMeta() {
         if (_type == "ptt") {
             if (!_speakerId.empty())
                 fprintf(f, ",\"speaker_id\":\"%s\"", _jsonEsc(_speakerId).c_str());
+            if (_priority >= 0)
+                fprintf(f, ",\"priority\":%d", _priority);
+            if (_preempted) {
+                fprintf(f, ",\"preempt\":true");
+                if (!_preemptedFrom.empty())
+                    fprintf(f, ",\"preempted_from\":\"%s\"", _jsonEsc(_preemptedFrom).c_str());
+            }
         } else {
             if (!_caller.empty())
                 fprintf(f, ",\"caller\":\"%s\"", _jsonEsc(_caller).c_str());

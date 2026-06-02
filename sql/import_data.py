@@ -175,23 +175,32 @@ def import_groups(conn, group_dir):
 
         name = data.get("name", group_id)
 
+        # group_id(파일명) = mcptt_group_id 식별자. surrogate id 는 자동발행.
         cur.execute(
-            "INSERT INTO ptt_groups (id, name) VALUES (%s, %s) "
+            "INSERT INTO ptt_groups (mcptt_group_id, name) VALUES (%s, %s) "
             "ON DUPLICATE KEY UPDATE name=VALUES(name)",
             (group_id, name)
         )
+        # surrogate id 조회 (멤버 FK 용)
+        cur.execute("SELECT id FROM ptt_groups WHERE mcptt_group_id=%s", (group_id,))
+        row = cur.fetchone()
+        gpk = row[0] if row else None
+        if gpk is None:
+            print(f"[Group] Skip {group_id}: surrogate id 조회 실패")
+            continue
 
         # 멤버 목록 교체
-        cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (group_id,))
+        cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
         for member in data.get("users", []):
             uid   = member.get("id", "")
             prio  = int(member.get("priority", 0))
+            role  = member.get("role", "participant")
             if uid:
                 cur.execute(
-                    "INSERT INTO ptt_group_members (group_id, user_id, priority) VALUES (%s, %s, %s)",
-                    (group_id, uid, prio)
+                    "INSERT INTO ptt_group_members (group_id, user_id, priority, role) VALUES (%s, %s, %s, %s)",
+                    (gpk, uid, prio, role)
                 )
-                print(f"[Group] {group_id} ← member {uid} (priority={prio})")
+                print(f"[Group] {group_id} ← member {uid} (priority={prio}, role={role})")
 
         count += 1
         print(f"[Group] Imported group {group_id} ({name})\n")

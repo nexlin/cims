@@ -589,16 +589,22 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             std::stringstream ss(membersStr);
             std::string segment;
             std::map<std::string, int> priorities;
+            std::map<std::string, std::string> roles;
+            // 형식: id:priority[:role]  (role 미지정 시 participant — 하위호환)
             while(std::getline(ss, segment, ',')) {
-                size_t colon = segment.find(':');
-                if (colon != std::string::npos) {
-                    std::string sid = segment.substr(0, colon);
-                    int prio = 0;
-                    try { prio = std::stoi(segment.substr(colon+1)); } catch(...) {}
-                    priorities[sid] = prio;
-                }
+                size_t c1 = segment.find(':');
+                if (c1 == std::string::npos) continue;
+                std::string sid = segment.substr(0, c1);
+                size_t c2 = segment.find(':', c1+1);
+                int prio = 0;
+                std::string role = "participant";
+                try { prio = std::stoi(segment.substr(c1+1)); } catch(...) {}
+                if (c2 != std::string::npos) role = segment.substr(c2+1);
+                priorities[sid] = prio;
+                roles[sid] = role;
             }
             group->updatePriorities(priorities);
+            group->updateRoles(roles);
         }
         
         SimpleJson::JsonNode resp;
@@ -634,6 +640,8 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     int userPort = (int)payload.GetInt("user_port");
     int userFloorPort = (int)payload.GetInt("user_floor_port");
     int userVideoPort = (int)payload.GetInt("user_video_port");
+    std::string role = payload.GetString("role");
+    if (role.empty()) role = "participant";
 
     // sesid: payload > 캐시 > 신규 발행
     std::string sesid = payload.GetString("sesid");
@@ -660,7 +668,7 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
-        group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort);
+        group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role);
 
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);

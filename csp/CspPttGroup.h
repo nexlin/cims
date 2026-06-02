@@ -19,14 +19,25 @@
 
 class CspPttUser {
 public:
-    CspPttUser( std::string id, unsigned int prio ) : _id( id ), _priority( prio ) {
+    CspPttUser( std::string id, unsigned int prio, std::string role = "participant", std::string mcpttId = "" )
+        : _id( id ), _priority( prio ), _role( role ), _mcpttId( mcpttId ) {
     }
     ~CspPttUser();
 
     std::string _id;
     unsigned int _priority;
 
+    /** TS 24.380 participant type: "chair" | "participant" */
+    std::string _role;
+
+    /** 멤버 MCPTT ID URI (비면 _id 사용) */
+    std::string _mcpttId;
+
     std::vector<std::string> _groups;
+
+    bool IsChair() const {
+        return _role == "chair";
+    }
 };
 
 class CspPttGroup {
@@ -34,8 +45,11 @@ public:
     CspPttGroup();
     ~CspPttGroup();
 
-    /** Group ID */
+    /** MCPTT group ID (그룹 식별자, SIP 주소·CMP·로그·캐시 런타임 키) */
     std::string _id;
+
+    /** surrogate DB 키 (ptt_groups.id) — 멤버/affiliation DB 조회 조인용 */
+    long long _dbId;
 
     /** Group Name */
     std::string _name;
@@ -64,6 +78,22 @@ public:
 
     /** 세션 시퀀스 (그룹 재시작마다 증가, flow subid용) */
     int _sessionSeq;
+
+    // ── 3GPP MCPTT (TS 24.379/24.481) ──
+    /** session-type: "prearranged" | "chat" | "broadcast" */
+    std::string _groupType;
+
+    /** on-network 그룹 여부 */
+    bool _onNetwork;
+
+    /** 최대 참여수 (0=무제한) */
+    int _maxMembers;
+
+    /** 그룹콜 수신 전 affiliation 요구 여부 */
+    bool _requireAffiliation;
+
+    /** 그룹 별칭/단축명 */
+    std::string _alias;
 
     /** Parsing method */
     bool load( std::string groupId );

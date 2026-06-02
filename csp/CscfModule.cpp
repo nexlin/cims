@@ -358,8 +358,27 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     char szReqUriBuf[256];
     pclsMessage->m_clsReqUri.ToString( szReqUriBuf, sizeof( szReqUriBuf ) );
     std::string strReqUri = szReqUriBuf;
+
+    // Contact (client_id 로도 사용)
+    std::string strContactUri;
+    if ( !pclsMessage->m_clsContactList.empty() ) {
+        char szContact[256];
+        pclsMessage->m_clsContactList.front().m_clsUri.ToString( szContact, sizeof( szContact ) );
+        strContactUri = szContact;
+    } else {
+        strContactUri = szFromBuf;
+    }
+
+    // 그룹 affiliation 판별 (TS 24.379 §9): Request-URI user 부분이 알려진 그룹 ID 이면
+    //   해당 SUBSCRIBE 를 (user, group, client) affiliation 으로 처리한다.
+    //   Event 헤더가 presence/conference 면 더 명확하나, 그룹 매칭만으로 충분.
+    std::string strReqUriUser = pclsMessage->m_clsReqUri.m_strUser;
+    bool bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
+
     std::string strEventType;
-    if ( strReqUri.find( "gms" ) != std::string::npos ) {
+    if ( bAffiliation ) {
+        strEventType = "conference";  // 그룹 affiliation/conference 상태 구독
+    } else if ( strReqUri.find( "gms" ) != std::string::npos ) {
         strEventType = "gms";
     } else if ( strReqUri.find( "cms" ) != std::string::npos ) {
         strEventType = "cms";
@@ -371,17 +390,19 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
 
     if ( iExpires == 0 ) {
         gclsSubscriptionManager.RemoveSubscription( strSubCallId );
+        if ( bAffiliation && gclsDbManager.IsConnected() ) {
+            gclsDbManager.RemoveAffiliation( strReqUriUser, strFromId, strContactUri );
+            CLog::Print( LOG_INFO, "[Affiliation] de-affiliate user=%s group=%s", strFromId.c_str(),
+                         strReqUriUser.c_str() );
+        }
         SendResponse( pclsMessage, 200 );
         return true;
     }
 
-    std::string strContactUri;
-    if ( !pclsMessage->m_clsContactList.empty() ) {
-        char szContact[256];
-        pclsMessage->m_clsContactList.front().m_clsUri.ToString( szContact, sizeof( szContact ) );
-        strContactUri = szContact;
-    } else {
-        strContactUri = szFromBuf;
+    if ( bAffiliation && gclsDbManager.IsConnected() ) {
+        gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri, iExpires );
+        CLog::Print( LOG_INFO, "[Affiliation] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
+                     strReqUriUser.c_str(), iExpires );
     }
 
     char szToTag[64];
