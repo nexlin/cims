@@ -108,15 +108,21 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
 5. 세션 종료 → McpttGroup::stopRecording() → 파일 close
 ```
 
-**파일 구조:**
+**파일 구조 (2026-06 시간버킷 재구조화):**
 ```
-{ServiceLogDir}/ptt/{group_id}/sessions/{session_key}.d/
-  ├── raw_audio.rtp          # 세션 전체 음성 (RTP 원본)
-  ├── recording_mixed.wav    # 트랜스코딩 캐시 (최초 재생 시 생성)
-  ├── session.json           # 세션 메타데이터
-  ├── events.jsonl           # Floor/참가 이벤트
-  └── cmp.jsonl              # CMP 내부 이벤트
+{ServiceLogDir}/ptt/{id}/                       # id = ptt_groups.id (surrogate, mcptt_group_id 아님)
+  ├── group.json                                # 그룹 디스크립터 (CSP, base 1개) — session.json 대체
+  └── {YYYY}/{MM}/{DD}/{HH}/                     # 시간버킷 (시간검색) — VoLTE 관례와 통일
+      ├── events.jsonl                           # 멤버 join/leave 등 (CSP)
+      ├── floor.jsonl                            # floor 이벤트 GRANT/REVOKE/REJECT/RELEASE/IDLE (CMP)
+      ├── segments.jsonl                         # 세그먼트 인덱스 (CMP)
+      └── seg/{NNN}/                             # 100 세그먼트 단위 shard (000,001,…) — 디렉터리 엔트리수 상한
+          ├── seg_NNNN_audio.rtp                 # 화자 턴 오디오
+          ├── seg_NNNN_video.rtp                 # 영상그룹 + 실제 영상 있을 때만 (빈 파일 미생성)
+          └── seg_NNNN.json                      # speaker_id/priority/preempt, audio_file=상대경로(seg/NNN/…)
 ```
+> 옛 구조 `ptt/{group}/sessions/{key}.d` (상시그룹 세그먼트 단일 디렉터리 무한 누적) 폐지.
+> `recordings/`·`daily/`·`sessions/`·placeholder(session_id/call_id) 제거. 그룹 키 = surrogate `id`.
 
 ### 3.4 CSC: on-demand 트랜스코딩 (파일시스템 기반)
 
@@ -224,6 +230,10 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
 ---
 
 ## 4. 파일 저장 구조
+
+> ⚠️ 아래는 옛 개념 레이아웃(raw/converted 분리)이다. **실제 on-disk 구조는 §3.3 참조**:
+> VoLTE=`volte/YYYY/MM/DD/HH/.../*.d/`, PTT=`ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/seg/{NNN}/` (시간버킷+shard).
+> 변환 mp4(`seg_NNNN.mp4`)는 원본 옆(.d/window 디렉터리)에 캐시된다.
 
 ```
 /recordings/

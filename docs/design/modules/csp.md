@@ -282,11 +282,13 @@ INVITE to group@domain
   ├─ 매핑: callerId → groupId (m_mapUserCall)
   │
   └─ 각 그룹 멤버에 대해:
+      ├─ (affiliation 게이트: require_affiliation 시 affiliate 된 멤버만)
       ├─ InviteMember() → Multipart INVITE
       │   ├─ Content-Type: multipart/mixed
-      │   ├─ Part 1: SDP (공유 RTP 주소)
-      │   └─ Part 2: application/vnd.oma.poc.groups+xml (멤버 목록)
-      ├─ 멤버 200 OK 수신 → CMP joinGroup
+      │   ├─ Part 1: application/vnd.3gpp.mcptt-info+xml
+      │   ├─ Part 2: application/resource-lists+xml (멤버 로스터 role/priority; INVITE>8192B 시 생략)
+      │   └─ Part 3: SDP (공유 RTP + m=application floor)
+      ├─ 멤버 200 OK 수신 → m=application floor 파싱 → CMP JOIN_PTT_GROUP(role 포함)
       └─ 매핑: memberCallId → {groupId, memberId, sessionId}
 ```
 
@@ -407,19 +409,21 @@ Session-ID 기반 서비스 로깅 디렉토리 관리.
 
 ```
 {ServiceLogDir}/
-  ├─ voip/YYYY/MM/DD/HH/{prefix}/{caller}/*.d/
+  ├─ volte/YYYY/MM/DD/HH/{prefix}/{caller}/*.d/
   │   ├─ call.json           (통화 메타데이터)
   │   ├─ participants.jsonl   (참가자 목록)
   │   ├─ session.json         (Session-ID ↔ Call-ID 매핑)
-  │   ├─ csp.jsonl            (CSP 이벤트)
-  │   └─ cmp.jsonl            (CMP 이벤트)
+  │   └─ seg_NNNN_*.rtp / seg_NNNN.json / segments.jsonl  (CMP 녹취)
   │
-  └─ ptt/{group_id}/sessions/{session_key}.d/
-      ├─ session.json         (세션 메타 + 그룹 스냅샷)
-      ├─ events.jsonl          (멤버 참가/퇴장/Floor 이벤트)
-      ├─ daily/YYYY-MM-DD.jsonl
-      └─ recordings/           (CMP 녹취 파일)
+  └─ ptt/{id}/                         # id = ptt_groups.id (surrogate)  ※2026-06 시간버킷 재구조화
+      ├─ group.json                     (그룹 디스크립터: id/mcptt_group_id/group_type/members[role]…)
+      └─ {YYYY}/{MM}/{DD}/{HH}/         # 시간버킷
+          ├─ events.jsonl               (멤버 참가/퇴장)
+          ├─ floor.jsonl                (floor GRANT/REVOKE/REJECT/RELEASE/IDLE)
+          ├─ segments.jsonl
+          └─ seg/{NNN}/seg_NNNN_*.rtp + seg_NNNN.json   (100세그 shard)
 ```
+> 옛 `ptt/{group}/sessions/{key}.d`(+recordings//daily/) 폐지. 상세 [recording.md](../features/recording.md).
 
 **Session-ID 생성:**
 

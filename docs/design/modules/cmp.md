@@ -449,13 +449,16 @@ handleFloorRequest(sessionId, ssrc)
   │
   └─ Floor TAKEN 상태
       ├─ 동일 화자 → 무시
-      ├─ 요청자 우선순위 > 현재 화자
+      ├─ 선점 판정: chair > participant (chair 항상 선점), 동급이면 우선순위(낮을수록 우선)
+      ├─ 선점 시
       │   ├─ 현재 화자에게 FLOOR_REVOKE
       │   ├─ 새 화자 등록, FLOOR_GRANT
       │   └─ 전체에게 FLOOR_TAKEN 브로드캐스트
-      └─ 요청자 우선순위 <= 현재 화자
-          └─ 요청자에게 FLOOR_REJECT
+      └─ 비선점 → 요청자에게 FLOOR_REJECT
 ```
+> 2026-06: 멤버 `role`(chair/participant)이 JOIN_PTT_GROUP/멤버문자열(`id:prio:role`)로 전달되어 선점 판정에 사용.
+> 모든 floor 이벤트는 세션 시간버킷 `{record_dir}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl` 에 기록(GRANT/REVOKE/REJECT/RELEASE/IDLE + prio/preempt).
+> 세그먼트는 `seg/{NNN}/`(100세그 shard), 빈 트랙(.rtp) 미생성. 상세 [recording.md](../features/recording.md).
 
 #### Floor Control 패킷 (RTCP APP)
 

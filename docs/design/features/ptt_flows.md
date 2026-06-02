@@ -1,7 +1,15 @@
 # PTT 서비스 케이스 및 메시지 Flow
 
 **작성일:** 2026-04-03
-**최종 수정:** 2026-04-13 (CMP VoIP/PTT 핸들러 분리 반영)
+**최종 수정:** 2026-06-02 (3GPP MCPTT 규격 정합 + 로그 디렉터리 시간버킷)
+
+> **2026-06 3GPP MCPTT 보강 요약**
+> - 그룹 식별: `ptt_groups.id`=surrogate(키), `mcptt_group_id`=식별자. 멤버 `role`(chair/participant)·`mcptt_id`.
+> - INVITE: `mcptt-info+xml` + **`resource-lists+xml`(멤버 로스터)** + SDP. (로스터는 INVITE>8192B 우려 시 생략 → GMS 의존)
+> - **chair** = participant floor 항상 선점(TS 24.380). 200 OK 의 `m=application` floor 포트 파싱.
+> - **affiliation**(TS 24.379 §9): 그룹 URI SUBSCRIBE 로 affiliate 한 멤버만 초대(`require_affiliation`), `ptt_affiliations` 기록.
+> - **로그/녹취 디렉터리**: `ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/`(시간버킷) + `seg/{NNN}`(100세그 shard) + `floor.jsonl`/`group.json`. [recording.md](recording.md)
+> - 그룹 권한/소유(authorized user)·콘솔 RBAC 는 [mcptt_authorization.md](mcptt_authorization.md) (구현 대기).
 
 ---
 
@@ -196,23 +204,24 @@ UE(단말)                CSP                          CMP
   │                      │ 소속 그룹에 활성 콜 없음    │
   │                      │                            │
   │ ◄── INVITE ──────── │  multipart/mixed:          │
-  │     (그룹 초대)       │  Part1: mcptt-info+xml    │
-  │                      │   (session-type,           │
+  │     (그룹 초대)       │  Part1: mcptt-info+xml     │
+  │                      │   (session-type=group_type,│
   │                      │    group-id, caller-id)    │
-  │                      │  Part2: SDP                │
+  │                      │  Part2: resource-lists+xml │  ← 멤버 로스터(role/priority)
+  │                      │   (INVITE>8192B 우려 시 생략)│    대형 그룹은 GMS 의존
+  │                      │  Part3: SDP                │
   │                      │   m=audio {CMP RTP 포트}   │
   │                      │   m=application {CMP Floor} │
-  │                      │   (CMP AddGroup 응답의      │
-  │                      │    floor_port 사용)         │
   │                      │                            │
   │ ── 180 Ringing ───► │                            │
-  │ ── 200 OK ────────► │                            │
+  │ ── 200 OK ────────► │   (m=application floor 포트)│
   │                      │                            │
   │                      │ [OnCallStarted]            │
-  │                      │ ── joingroup ────────────► │  RTP 수신 시작
+  │                      │  200 OK SDP m=application  │  ← GetApplicationPort 파싱
+  │                      │ ── JOIN_PTT_GROUP ───────► │  RTP 수신 시작
   │                      │    {group_id, session_id,  │
   │                      │     user_ip, user_port,    │
-  │                      │     user_floor_port}       │
+  │                      │     user_floor_port, role} │  ← chair/participant
   │ ◄── ACK ──────────── │                            │
   │                      │                            │
   │                      │ [SendConferenceNotify]     │

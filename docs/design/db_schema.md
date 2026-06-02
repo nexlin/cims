@@ -26,8 +26,10 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | | `voip_subscriptions` → `volte_subscriptions` | cims_schema.sql + **migrate_voip_to_volte.sql** | VoLTE MSISDN, SIP 인증, dnd/forward (table 명 v3 부터 `volte_*`) |
 | | `user_rejects` | cims_schema.sql | VoLTE 착신거부 목록 |
 | | `ptt_subscriptions` | cims_schema.sql + migrate_auth.sql + migrate_auth_id_dropped.sql | MCPTT ID, IMPI 인증 |
-| **PTT 그룹** | `ptt_groups` | cims_schema.sql + migrate_group_media.sql + migrate_ptt_groups_v2.sql | name/priority/encryption/emergency/video_enabled/org_code |
-| | `ptt_group_members` | cims_schema.sql | (group_id, user_id) UNIQUE + priority |
+| | `users.login_id/password/role` | migrate_auth.sql | 콘솔 인증(가입자와 동일 신원). `role` 은 현재 거친 값 → 계획: `ENUM('admin','manager','operator','monitor','user')` RBAC ([mcptt_authorization.md](features/mcptt_authorization.md)) |
+| **PTT 그룹** | `ptt_groups` | cims_schema.sql + migrate_ptt_groups_v2.sql + **migrate_ptt_groups_v3_3gpp.sql** | **id=surrogate BIGINT AI(PK, 디렉터리/FK 키)**, `mcptt_group_id`(UNIQUE 식별자), name/priority/encryption/emergency/video_enabled/org_code, **group_type(prearranged/chat/broadcast)/on_network/max_members/require_affiliation/alias/icon_url** (3GPP). ※ 계획: `authorized_user_id`(그룹 소유=authorized user)/`created_at` 추가 → [mcptt_authorization.md](features/mcptt_authorization.md) |
+| | `ptt_group_members` | cims_schema.sql + migrate_ptt_groups_v3_3gpp.sql | group_id=**surrogate ptt_groups.id(BIGINT FK)**, user_id, priority, **role(chair/participant), mcptt_id** |
+| | `ptt_affiliations` | migrate_ptt_groups_v3_3gpp.sql | MCPTT affiliation(TS 24.379 §9): (group_id, user_id, client_id) + affiliated_at/expires_at/status |
 | | `ptt_session_seq` (시퀀스) | migrate_ptt_session_seq.sql | PTT 세션 ID 발급 시퀀스 |
 | **조직** | `organizations` | migrate_organizations.sql | code/name/parent_id 트리 — `users.org_id` FK 대상으로 가입자 도메인과 함께 DB 유지 (2026-05-13 Phase 9 결정) |
 | **인증** | ~~`auth_codes`~~ | — | **파일 기반 완료** (2026-05-13 Phase 8) — `{CimsRuntimeDir}/auth_codes/<code>.json` |
@@ -57,7 +59,8 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 - `users(id)` ← `voip_subscriptions.user_id`, `ptt_subscriptions.user_id` (ON DELETE CASCADE)
 - `voip_subscriptions(id)` ← `user_rejects.subscription_id` (CASCADE)
-- `ptt_groups(id)` ← `ptt_group_members.group_id` (CASCADE)
+- `ptt_groups(id)` ← `ptt_group_members.group_id` (CASCADE) — **id=surrogate BIGINT**; `mcptt_group_id` 는 UNIQUE 식별자(키 아님)
+- `ptt_groups(id)` ← `ptt_affiliations.group_id` (CASCADE)
 - `sip_service(id)` ← `voip_subscriptions.service_id`, `ptt_subscriptions.service_id` (NULLABLE)
 - `ha_groups(id)` ← `ha_group_members.group_id` (CASCADE)
 
@@ -82,7 +85,8 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 | 항목 | 경로 | 처리 |
 |---|---|---|
-| 통화 이력 | `{ServiceLogDir}/{volte\|ptt}/YYYY/MM/DD/HH/.../*.d/call.json` | 디렉토리 스캔 (csc/handlers/call.py) |
+| 통화 이력(VoLTE) | `{ServiceLogDir}/volte/YYYY/MM/DD/HH/.../*.d/call.json` | 디렉토리 스캔 (csc/handlers/call.py) |
+| PTT 그룹 이력/녹취 | `{ServiceLogDir}/ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/` (id=ptt_groups.id surrogate, 시간버킷) — `group.json`(base) + `events/floor/segments.jsonl` + `seg/{NNN}/seg_NNNN_*`(100세그 shard) | 시간창 스캔. [recording.md](features/recording.md) |
 | 참여자 | `.d/participants.jsonl` | call.json 와 동봉 |
 | Session ↔ Call-ID 매핑 | `.d/session.json` | flow 재구성 |
 | SIP 메시지 | `{MsgLogDir}/csp/sip/YYYY/MM/DD/HH/sip.jsonl` | call_id 별 grep |

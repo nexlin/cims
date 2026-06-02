@@ -84,7 +84,7 @@ SIP (5060) → CModuleDispatcher (ISipStackCallBack + ISipUserAgentCallBack)
 - **`CModuleDispatcher`** (`ModuleDispatcher.h/.cpp`) — 중앙 디스패처, 콜 소유권 추적, 모든 SIP 이벤트 라우팅
 - **`CCscfModule`** (`CscfModule.h/.cpp`) — REGISTER/SUBSCRIBE 처리, Digest MD5 인증 헬퍼 (static)
 - **`IModule`** (`IModule.h`) — 모듈 추상 인터페이스, `EModuleRouteResult` enum
-- **`CGroupCallService`** — PTT 그룹콜 오케스트레이션 (multipart INVITE: SDP + `application/vnd.oma.poc.groups+xml`)
+- **`CGroupCallService`** — PTT 그룹콜 오케스트레이션 (multipart INVITE: `application/vnd.3gpp.mcptt-info+xml` + `application/resource-lists+xml`(멤버 로스터) + SDP; affiliation 게이트·chair role)
 - **`CSubscriptionManager`** — SIP SUBSCRIBE/NOTIFY 상태 관리 (GMS/CMS)
 - **`CspUserMap`** / **`CGroupMap`** — 가입자/그룹 메모리 캐시 (DB primary, JSON fallback)
 - **`CCmpClient`** — CMP 연동 (JSON-over-UDP, `record_dir` 전달)
@@ -114,7 +114,7 @@ RTP relay and floor control server, controlled entirely via JSON commands over U
 - **`CmpServer`** — Listens on UDP (default port 9000), dispatches commands
 - **`PRtpTrans`** — VoIP RTP 핸들러: 4포트 블록 (Audio RTP/RTCP + Video RTP/RTCP), 포트 50000~ 대역
 - **`PPttTrans`** — PTT 전용 핸들러: Audio RTP(52000~) + Floor Control(54000~) 독립 소켓
-- **`McpttGroup`** — Group RTP mixing and MCPTT floor control via RTCP APP packets on `m=application` 전용 소켓 (op-codes: REQUEST=1, GRANT=2, RELEASE=4, IDLE=5)
+- **`McpttGroup`** — Group RTP mixing and MCPTT floor control via RTCP APP packets on `m=application` 전용 소켓 (op-codes: REQUEST=1, GRANT=2, REJECT=3, RELEASE=4, IDLE=5, TAKEN=6, REVOKE=7; chair/priority 선점; 세션 `.d/floor.jsonl` 기록)
 
 VoIP/PTT 리소스 풀 분리: VoIP(`PRtpTrans`, `RtpStartPort`), PTT(`PPttTrans`, `PttRtpStartPort`+`PttFloorStartPort`)
 
@@ -137,13 +137,15 @@ Automated SIP/RTP client for load and functional testing.
 6. SIP stack sends only 100 Trying; 180 Ringing is forwarded from callee (no auto-180)
 7. RTP always flows through CMP relay
 
-### Key data flow: PTT group call (PTT-AS)
-1. CSP `CheckGroupIntegrity()` detects group change → PTT-AS initiates session
-2. CSP requests shared RTP group from CMP (`addGroup` with `record_dir`)
+### Key data flow: PTT group call (PTT-AS) — 3GPP MCPTT
+1. CSP `CheckGroupIntegrity()` detects registered+affiliated members → PTT-AS initiates session
+2. CSP requests shared RTP group from CMP (`addGroup` with `record_dir`=그룹 base `ptt/{id}`, 멤버 `id:prio:role`)
 3. CMP allocates shared RTP port
-4. CSP sends multipart `INVITE` to each member (SDP + OMA POC XML with member list)
-5. Members respond 200 OK → CSP extracts `m=application` port → CMP `joinGroup` (user_floor_port 포함)
-6. Audio flows through CMP `PPttTrans._rtpSock`; floor controlled via `PPttTrans._floorSock` (m=application 전용)
+4. CSP sends multipart `INVITE` to each member: `mcptt-info+xml`(TS 24.379) + `resource-lists+xml`(멤버 로스터 role/priority; **INVITE>8192B 우려 시 생략**) + SDP(+m=application floor)
+5. Members respond 200 OK → CSP parses `m=application` floor port (GetApplicationPort) → CMP `JOIN_PTT_GROUP` (user_floor_port + role)
+6. Audio: CMP `PPttTrans._rtpSock`; floor: `_floorSock`(m=application). **chair** role 은 participant floor 를 항상 선점(TS 24.380)
+7. **affiliation**(TS 24.379 §9): 멤버가 그룹 URI SUBSCRIBE 로 affiliate 해야 초대됨(`require_affiliation`). `ptt_affiliations` 기록
+8. 멤버 `role`(chair/participant)·affiliation·group 식별(surrogate id + mcptt_group_id)은 DB(`ptt_groups`/`ptt_group_members`/`ptt_affiliations`)
 
 ### Key data flow: CSC subscriptions (CSCF)
 1. Client sends `SUBSCRIBE Event: gms` (or `cms`)
@@ -158,11 +160,11 @@ Automated SIP/RTP client for load and functional testing.
 
 ### Key data flow: Service logging (separated)
 
-**Service Log** (`service_log/{type}/YYYY/MM/DD/HH/.../*.d/`):
-1. CSP creates session directory via `CCallDir`
-2. CSP writes `call.json` (call metadata), `participants.jsonl`, `session.json` (Session-ID + Call-ID mapping)
-3. CSP passes `record_dir` to CMP via `add`/`addgroup` JSON command
-4. CMP writes recording files (`raw_a.rtp`, `raw_b.rtp`, `seg_*.rtp`) to session directory
+**Service Log** (VoLTE: `service_log/volte/YYYY/MM/DD/HH/.../*.d/`, PTT: `service_log/ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/` 시간버킷):
+1. CSP creates dir via `CCallDir` (VoLTE: `.d`; PTT: 그룹 base `ptt/{id}` = ptt_groups.id surrogate)
+2. CSP writes VoLTE `call.json`/`participants.jsonl`/`session.json`; PTT `group.json`(base 디스크립터) + 시간버킷 `events.jsonl`
+3. CSP passes `record_dir` to CMP (VoLTE=`.d`, PTT=`ptt/{id}` base); CMP 가 PTT 는 기록 시점 wall-clock 으로 `{YYYY}/{MM}/{DD}/{HH}/` 시간버킷 자동 회전
+4. CMP writes: VoLTE `seg_*.rtp` in `.d`; PTT `floor.jsonl`/`segments.jsonl` + `seg/{NNN}/seg_NNNN_*`(100세그 shard, 빈 트랙 미생성) in 시간버킷
 
 **SIP Log** (`msg_log/csp/sip/YYYY/MM/DD/HH/sip.jsonl`):
 1. `SipMessageLogger` (ILogCallBack) captures all SIP TX/RX from psip stack + CMP JSON messages
