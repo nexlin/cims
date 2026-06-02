@@ -151,6 +151,9 @@ private:
 
     // Connection State
     bool m_bConnected;
+    // 연속 HEARTBEAT 실패 횟수. 일시적 UDP 타임아웃 1회에 Disconnected 판정 → 활성 PTT
+    // 그룹콜 전체 teardown 되던 과민 동작을 막기 위해, 임계(kMaxAliveFail) 연속 실패에서만 disconnect.
+    int  m_iAliveFailCount;
     std::function<void( bool )> m_fnConnectionCallback;
 
 public:

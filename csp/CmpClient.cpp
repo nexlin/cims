@@ -21,6 +21,7 @@ CCmpClient::CCmpClient()
       m_bKeepAliveRunning( false ),
       m_bRecvRunning( false ),
       m_bConnected( false ),
+      m_iAliveFailCount( 0 ),
       m_ring( 128 ) {
 }
 
@@ -797,7 +798,12 @@ void CCmpClient::KeepAliveLoop() {
         // Use JSON Alive()
         bool bSuccess = Alive();
 
+        // 일시적 UDP 제어 타임아웃 1회에 CMP Disconnected 로 판정하면, OnCmpStatusChanged →
+        // 그룹 재수립 + 활성 멤버 전원 재INVITE/teardown 이 발생해 진행 중 PTT 그룹콜이 끊긴다.
+        // (40명 부하 시 HEARTBEAT 가 간헐 타임아웃) → 연속 kMaxAliveFail 회 실패에서만 disconnect.
+        const int kMaxAliveFail = 3;  // 3회 × 3s ≈ 9s 연속 무응답이어야 진짜 다운으로 간주
         if ( bSuccess ) {
+            m_iAliveFailCount = 0;
             if ( !m_bConnected ) {
                 m_bConnected = true;
                 if ( m_fnConnectionCallback ) {
@@ -807,11 +813,17 @@ void CCmpClient::KeepAliveLoop() {
             }
         } else {
             if ( m_bConnected ) {
-                m_bConnected = false;
-                if ( m_fnConnectionCallback ) {
-                    m_fnConnectionCallback( false );
+                ++m_iAliveFailCount;
+                CLog::Print( LOG_INFO, "CMP HEARTBEAT 실패 %d/%d (연속) — 임계 도달 전까지 연결 유지",
+                             m_iAliveFailCount, kMaxAliveFail );
+                if ( m_iAliveFailCount >= kMaxAliveFail ) {
+                    m_bConnected = false;
+                    m_iAliveFailCount = 0;
+                    if ( m_fnConnectionCallback ) {
+                        m_fnConnectionCallback( false );
+                    }
+                    CLog::Print( LOG_INFO, "CMP Disconnected (연속 %d회 HEARTBEAT 실패)", kMaxAliveFail );
                 }
-                CLog::Print( LOG_INFO, "CMP Disconnected" );
             }
         }
 
