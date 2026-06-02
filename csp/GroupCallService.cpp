@@ -1067,6 +1067,19 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
              << "a=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
     strSdp += sdpFloor.str();
 
+    // INVITE 가 SIP UDP 패킷 한계(psip SIP_PACKET_MAX_SIZE=8192)를 넘으면 수신측에서
+    // truncate/drop 되어 호가 성립하지 않는다. 대형 그룹의 멤버 로스터를 인라인하면
+    // 본문이 한계를 초과하므로, 본문 추정치가 안전 한계(7000B; 헤더 여유 포함)를 넘으면
+    // 로스터 part 를 생략한다. (대형 그룹 멤버 정보는 GMS 그룹문서 + conference NOTIFY 로 제공)
+    const size_t kSafeBodyLimit = 7000;
+    bool bIncludeRoster = !strRosterXml.empty() &&
+                          ( strGroupXml.size() + strRosterXml.size() + strSdp.size() + 400 ) < kSafeBodyLimit;
+    if ( !strRosterXml.empty() && !bIncludeRoster ) {
+        CLog::Print( LOG_INFO,
+                     "WrapMultipartBody: roster(%zuB) 생략 — INVITE 본문이 UDP 한계 초과 우려 (GMS 로 제공)",
+                     strRosterXml.size() );
+    }
+
     std::ostringstream oss;
     // Part 1: mcptt-info XML (3GPP MCPTT call control)
     oss << "--" << strBoundary << "\r\n"
@@ -1074,8 +1087,8 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
         << "Content-Length: " << strGroupXml.size() << "\r\n"
         << "\r\n"
         << strGroupXml << "\r\n";
-    // Part 2: 멤버 로스터 (resource-lists, RFC 5366) — 있을 때만
-    if ( !strRosterXml.empty() ) {
+    // Part 2: 멤버 로스터 (resource-lists, RFC 5366) — 크기 안전할 때만
+    if ( bIncludeRoster ) {
         oss << "--" << strBoundary << "\r\n"
             << "Content-Type: application/resource-lists+xml\r\n"
             << "Content-Length: " << strRosterXml.size() << "\r\n"

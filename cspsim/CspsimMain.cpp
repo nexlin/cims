@@ -102,10 +102,12 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     if (strFilterMode.empty() || strFilterMode == "ptt") {
         std::string sql;
         if (!strGroupId.empty()) {
+            // group_id(멤버) 는 surrogate ptt_groups.id → mcptt_group_id 식별자로 JOIN
             sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd "
                   "FROM ptt_subscriptions pu "
                   "JOIN ptt_group_members gm ON gm.user_id = pu.id "
-                  "WHERE gm.group_id='" + strGroupId + "' "
+                  "JOIN ptt_groups g ON g.id = gm.group_id "
+                  "WHERE g.mcptt_group_id='" + strGroupId + "' "
                   "ORDER BY gm.priority, pu.id";
         } else {
             sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd "
@@ -461,9 +463,9 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         if (!sessions.empty() && sessions[0]->m_bPttMode) {
             printf("[Scenario] PTT mode: waiting for CSP to invite all members...\n");
 
-            // Wait for all members to join (max 15s)
+            // Wait for all members to join (max 45s — 40명 affiliation+자동초대 여유)
             bool bAllJoined = false;
-            for (int retry = 0; retry < 150; ++retry) {
+            for (int retry = 0; retry < 450; ++retry) {
                 int joinCount = 0;
                 for (auto* s : sessions) if (s->m_bInCall) joinCount++;
                 if (joinCount == (int)sessions.size()) { bAllJoined = true; break; }
