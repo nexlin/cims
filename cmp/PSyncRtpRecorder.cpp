@@ -3,6 +3,8 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <ctime>
+#include <unistd.h>
 
 // ═══════════════════════════════════════════════════════════════
 //  Lifecycle
@@ -38,9 +40,40 @@ void PSyncRtpRecorder::addTrack(const std::string& prefix) {
 //  세그먼트 시작/종료
 // ═══════════════════════════════════════════════════════════════
 
+// VoIP/일반: _baseDir 에 직접 기록 (seq 외부 지정)
 void PSyncRtpRecorder::startSegment(int seq, const std::string& speakerId,
                                     int priority, bool preempted, const std::string& preemptedFrom) {
     if (_active) finishSegment();
+    _curSegDir = _baseDir;
+    _curIndexDir = _baseDir;
+    _currentSeq = seq;
+    _speakerId = speakerId;
+    _priority = priority;
+    _preempted = preempted;
+    _preemptedFrom = preemptedFrom;
+    _segStartUsec = _nowUsec();
+    _segEndUsec = 0;
+    _active = true;
+    _openTracks();
+}
+
+// PTT: 시간버킷 + shard, seq 는 시간 단위 자체 관리
+void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
+                                       int priority, bool preempted, const std::string& preemptedFrom) {
+    if (_active) finishSegment();
+
+    std::string hourDir = _hourDirNow();
+    if (hourDir != _curHourDir) {
+        _curHourDir = hourDir;
+        _hourSeq = 0;
+    }
+    int seq = ++_hourSeq;
+    int shard = (seq - 1) / 100;          // 100 세그먼트 단위 shard
+    char shardBuf[8];
+    snprintf(shardBuf, sizeof(shardBuf), "%03d", shard);
+    _curSegDir = _curHourDir + "/seg/" + shardBuf;
+    _curIndexDir = _curHourDir;
+    _mkdirP(_curSegDir);
 
     _currentSeq = seq;
     _speakerId = speakerId;
@@ -50,16 +83,17 @@ void PSyncRtpRecorder::startSegment(int seq, const std::string& speakerId,
     _segStartUsec = _nowUsec();
     _segEndUsec = 0;
     _active = true;
+    _openTracks();
+}
 
+void PSyncRtpRecorder::_openTracks() {
     char seqBuf[16];
-    snprintf(seqBuf, sizeof(seqBuf), "%04d", seq);
-
+    snprintf(seqBuf, sizeof(seqBuf), "%04d", _currentSeq);
     for (auto& [prefix, t] : _tracks) {
         t.fileName = std::string("seg_") + seqBuf + "_" + prefix + ".rtp";
-        t.finalPath = _baseDir + "/" + t.fileName;
+        t.finalPath = _curSegDir + "/" + t.fileName;
         t.tmpPath = t.finalPath + ".recording";
         t.bytesWritten = 0;
-
         t.fp = fopen(t.tmpPath.c_str(), "wb");
         if (!t.fp) {
             LOG_ERROR("PSyncRtpRecorder", "Failed to open %s: %s", t.tmpPath.c_str(), strerror(errno));
@@ -99,8 +133,13 @@ void PSyncRtpRecorder::_closeTrack(Track& t) {
     if (t.fp) {
         fclose(t.fp);
         t.fp = nullptr;
-        rename(t.tmpPath.c_str(), t.finalPath.c_str());
-        LOG_INFO("RtpRecorder", "Recording stopped: %s", t.finalPath.c_str());
+        if (t.bytesWritten > 0) {
+            rename(t.tmpPath.c_str(), t.finalPath.c_str());
+            LOG_INFO("RtpRecorder", "Recording stopped: %s", t.finalPath.c_str());
+        } else {
+            // 데이터 없는 트랙(예: 음성 그룹의 video)은 빈 파일 남기지 않고 제거
+            ::unlink(t.tmpPath.c_str());
+        }
     }
 }
 
@@ -148,6 +187,11 @@ void PSyncRtpRecorder::_writeMeta() {
         }
     }
 
+    // 파일 참조는 인덱스 기준(window/base) 상대경로 — PTT 는 seg/{NNN}/ shard 포함
+    std::string relDir;
+    if (_curSegDir != _curIndexDir && _curSegDir.size() > _curIndexDir.size() + 1)
+        relDir = _curSegDir.substr(_curIndexDir.size() + 1) + "/";
+
     // JSON 생성
     auto writeJson = [&](FILE* f) {
         fprintf(f, "{\"seq\":%d,\"type\":\"%s\"", _currentSeq, _type.c_str());
@@ -193,15 +237,15 @@ void PSyncRtpRecorder::_writeMeta() {
                 else
                     key = prefix + "_file";
             }
-            fprintf(f, ",\"%s\":\"%s\"", key.c_str(), _jsonEsc(t.fileName).c_str());
+            fprintf(f, ",\"%s\":\"%s\"", key.c_str(), _jsonEsc(relDir + t.fileName).c_str());
         }
 
         fprintf(f, ",\"has_video\":%s}\n", hasVideo ? "true" : "false");
     };
 
-    // seg_NNNN.json
-    std::string metaTmp = _baseDir + "/seg_" + seqBuf + ".json.tmp";
-    std::string metaFinal = _baseDir + "/seg_" + seqBuf + ".json";
+    // seg_NNNN.json — shard 디렉터리에
+    std::string metaTmp = _curSegDir + "/seg_" + seqBuf + ".json.tmp";
+    std::string metaFinal = _curSegDir + "/seg_" + seqBuf + ".json";
     FILE* f = fopen(metaTmp.c_str(), "w");
     if (f) {
         writeJson(f);
@@ -209,12 +253,30 @@ void PSyncRtpRecorder::_writeMeta() {
         rename(metaTmp.c_str(), metaFinal.c_str());
     }
 
-    // segments.jsonl (append)
-    f = fopen((_baseDir + "/segments.jsonl").c_str(), "a");
+    // segments.jsonl (append) — VoIP=_baseDir, PTT=시간버킷
+    f = fopen((_curIndexDir + "/segments.jsonl").c_str(), "a");
     if (f) {
         writeJson(f);
         fclose(f);
     }
+}
+
+std::string PSyncRtpRecorder::_hourDirNow() {
+    time_t now = time(nullptr);
+    struct tm t;
+    localtime_r(&now, &t);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "/%04d/%02d/%02d/%02d",
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
+    return _baseDir + buf;
+}
+
+void PSyncRtpRecorder::_mkdirP(const std::string& path) {
+    std::string p = path;
+    for (size_t i = 1; i < p.size(); ++i) {
+        if (p[i] == '/') { p[i] = '\0'; mkdir(p.c_str(), 0755); p[i] = '/'; }
+    }
+    mkdir(p.c_str(), 0755);
 }
 
 // ═══════════════════════════════════════════════════════════════

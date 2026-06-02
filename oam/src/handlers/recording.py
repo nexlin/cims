@@ -328,54 +328,39 @@ def _scan_voip_sessions(base: str, caller: str = '', from_dt: str = '', to_dt: s
 def _scan_ptt_sessions(base: str, group_id: str = '', caller: str = '',
                        from_dt: str = '', to_dt: str = '',
                        limit: int = 200, offset: int = 0):
-    """PTT 세션 디렉터리를 스캔하여 녹취 목록 반환.
-    디렉터리: {base}/ptt/{groupId}/sessions/{key}.d/
+    """PTT 시간창 디렉터리를 스캔하여 녹취 목록 반환.
+    디렉터리: {base}/ptt/{groupKey}/{YYYY}/{MM}/{DD}/{HH}/  (groupKey=ptt_groups.id)
     """
     ptt_root = os.path.join(base, 'ptt')
     if not os.path.isdir(ptt_root):
         return [], 0
 
-    dirs = sorted(glob.glob(os.path.join(ptt_root, '**', 'sessions', '*.d'), recursive=True), reverse=True)
+    # 시간창 = ptt/{groupKey}/{YYYY}/{MM}/{DD}/{HH}  (segments.jsonl 보유)
+    d4, d2 = '[0-9]' * 4, '[0-9]' * 2
+    dirs = sorted(glob.glob(os.path.join(ptt_root, '*', d4, d2, d2, d2)), reverse=True)
 
     results = []
     for d in dirs:
-        sess_json = os.path.join(d, 'session.json')
-        meta = _read_json(sess_json) if os.path.exists(sess_json) else {}
-        if meta is None:
-            meta = {}
-
-        # segments.jsonl 위치: recordings/ 하위 또는 세션 디렉터리 직접
-        rec_dir = os.path.join(d, 'recordings')
-        if not os.path.exists(os.path.join(rec_dir, 'segments.jsonl')):
-            rec_dir = d  # 세그먼트가 세션 디렉터리에 직접 있는 경우
-
-        segs = _read_jsonl(os.path.join(rec_dir, 'segments.jsonl'))
-        # session.json도 segments.jsonl도 없으면 스킵
-        if not meta and not segs:
+        if not os.path.isdir(d):
             continue
+        segs = _read_jsonl(os.path.join(d, 'segments.jsonl'))
+        if not segs:
+            continue
+        rec_dir = d
 
-        # 그룹 ID: session.json에서 또는 디렉터리 경로에서 추출
-        gid = meta.get('group_id', '')
-        if not gid:
-            # 경로에서 추출: .../ptt/{groupId}/sessions/...
-            parts = d.split(os.sep)
-            try:
-                sess_idx = parts.index('sessions')
-                gid = parts[sess_idx - 1] if sess_idx > 0 else ''
-            except ValueError:
-                gid = ''
+        # 그룹 키: 경로 ptt/{groupKey}/{YYYY}/... 에서 추출
+        rel = os.path.relpath(d, ptt_root).split(os.sep)
+        gid = rel[0] if rel else ''
+        yyyy, mm, dd, hh = (rel[1], rel[2], rel[3], rel[4]) if len(rel) >= 5 else ('', '', '', '')
 
         if group_id and gid != group_id:
             continue
-        if caller and caller != meta.get('initiator', ''):
-            continue
-        start = meta.get('start_time', '')
-        # session.json 없을 때 첫 세그먼트 시작 시간 사용
-        if not start and segs:
-            start = segs[0].get('start_time', '')
+        start = f"{yyyy}-{mm}-{dd}T{hh}:00:00" if yyyy else (segs[0].get('start_time', '') if segs else '')
         if from_dt and start and start[:10] < from_dt:
             continue
         if to_dt and start and start[:10] > to_dt:
+            continue
+        if caller and caller != (segs[0].get('speaker_id', '') if segs else ''):
             continue
         seg_count = len(segs)
         total_ms = sum(s.get('duration_ms', 0) for s in segs)
@@ -383,15 +368,16 @@ def _scan_ptt_sessions(base: str, group_id: str = '', caller: str = '',
         status = _session_status(rec_dir, segs)
 
         results.append({
-            'dir': d,
+            'dir': os.path.relpath(d, base),
             'call_type': 'ptt',
-            'caller': meta.get('initiator', ''),
+            'caller': segs[0].get('speaker_id', '') if segs else '',
             'callee': None,
             'group_id': gid,
+            'window': f"{yyyy}{mm}{dd}{hh}",
             'start_time': start,
-            'end_time': meta.get('end_time'),
+            'end_time': f"{yyyy}-{mm}-{dd}T{hh}:59:59" if yyyy else None,
             'duration': 0,
-            'has_video': False,
+            'has_video': any(s.get('has_video') for s in segs),
             'status': status,
             'segment_count': seg_count,
             'total_speech_ms': total_ms,

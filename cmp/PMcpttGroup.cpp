@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <cstdio>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <time.h>
 
 unsigned int PMcpttGroup::_nextSsrc = 1000;
@@ -24,7 +25,18 @@ void PMcpttGroup::_logFloorLocal(const char* op, const std::string& user, unsign
     int n = (int)strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tmv);
     snprintf(ts + n, sizeof(ts) - n, ".%06ld", (long)tv.tv_usec);
 
-    std::string path = _recordDir + "/floor.jsonl";
+    // 시간버킷 {base}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl (mkdir -p)
+    char hb[32];
+    snprintf(hb, sizeof(hb), "/%04d/%02d/%02d/%02d",
+             tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour);
+    std::string hourDir = _recordDir + hb;
+    {
+        std::string p = hourDir;
+        for (size_t i = 1; i < p.size(); ++i)
+            if (p[i] == '/') { p[i] = '\0'; mkdir(p.c_str(), 0755); p[i] = '/'; }
+        mkdir(p.c_str(), 0755);
+    }
+    std::string path = hourDir + "/floor.jsonl";
     FILE* f = fopen(path.c_str(), "a");
     if (!f) return;
     fprintf(f, "{\"ts\":\"%s\",\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d%s%s}\n",
@@ -448,11 +460,10 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         }
         _logFloorLocal("GRANT", sessionId, ssrc, requesterPrio);
 
-        // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작
+        // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작 (recorder 가 시간버킷/shard/seq 관리)
         if (_recordEnable && !_recorder) startRecording();
         if (_recordEnable && _recorder) {
-            int seq = _recorder->getCurrentSeq() + 1;
-            _recorder->startSegment(seq, sessionId, requesterPrio);
+            _recorder->startPttSegment(sessionId, requesterPrio);
         }
     } else {
         if (_floorOwnerSessionId == sessionId) return;
@@ -512,8 +523,7 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
 
             // 녹취: 새 화자 세그먼트 시작 (선점 메타 포함)
             if (_recordEnable && _recorder) {
-                int seq = _recorder->getCurrentSeq() + 1;
-                _recorder->startSegment(seq, sessionId, requesterPrio, true, prevOwner);
+                _recorder->startPttSegment(sessionId, requesterPrio, true, prevOwner);
             }
         } else {
             // REJECT

@@ -101,6 +101,12 @@ export default function PttHistoryPage() {
     ? groups.filter(g => g.id.includes(fGroup) || g.name.includes(fGroup))
     : groups
 
+  // 저장 디렉터리 키 = ptt_groups.id(surrogate). 이력 API 는 이 키로 조회(경로 ptt/{id}/...).
+  const histKey = useCallback((gid: string) => {
+    const g = groups.find(x => x.id === gid)
+    return g && g.db_id != null ? String(g.db_id) : gid
+  }, [groups])
+
   // ── 그룹의 세션 목록 lazy 로드 ──
   const loadSessions = useCallback(async (gid: string, force = false) => {
     if (!force) {
@@ -113,7 +119,7 @@ export default function PttHistoryPage() {
       return m
     })
     try {
-      const resp = await pttApi.sessions(gid, fDate || undefined)
+      const resp = await pttApi.sessions(histKey(gid), fDate || undefined)
       const sessions = resp.sessions || []
       setSessionsByGroup(prev => {
         const m = new Map(prev)
@@ -129,7 +135,7 @@ export default function PttHistoryPage() {
       })
       return []
     }
-  }, [sessionsByGroup, fDate])
+  }, [sessionsByGroup, fDate, histKey])
 
   // ── 세션 상세(events + participants + floor) lazy 로드 ──
   const loadDetail = useCallback(async (gid: string, dir: string, force = false) => {
@@ -145,8 +151,8 @@ export default function PttHistoryPage() {
     })
     try {
       const [ev, fl] = await Promise.all([
-        pttApi.events(gid, dir, fDate || undefined),
-        pttApi.floor(gid, dir, fDate || undefined).catch(() => ({ floor: [] })),
+        pttApi.events(histKey(gid), dir, fDate || undefined),
+        pttApi.floor(histKey(gid), dir, fDate || undefined).catch(() => ({ floor: [] })),
       ])
       setDetailByKey(prev => {
         const m = new Map(prev)
@@ -165,7 +171,7 @@ export default function PttHistoryPage() {
         return m
       })
     }
-  }, [detailByKey, fDate])
+  }, [detailByKey, fDate, histKey])
 
   // 선택 그룹 변경 → 세션 로드 + 최신 세션 자동 선택
   useEffect(() => {
@@ -202,8 +208,10 @@ export default function PttHistoryPage() {
   }, [autoRefresh, selectedGroupId])
 
   const playRecording = async (groupId: string, sessionDir: string) => {
-    const dirName = sessionDir.endsWith('.d') ? sessionDir : `${sessionDir}.d`
-    const recId = `ptt/${groupId}/sessions/${dirName}`
+    // sessionDir = 시간창 'YYYYMMDDHH' → ptt/{id}/{YYYY}/{MM}/{DD}/{HH}
+    const w = (sessionDir || '').replace(/\D/g, '')
+    if (w.length < 10) { show('잘못된 시간창', 'err'); return }
+    const recId = `ptt/${histKey(groupId)}/${w.slice(0,4)}/${w.slice(4,6)}/${w.slice(6,8)}/${w.slice(8,10)}`
     try {
       const rec = await recordingsApi.get(recId)
       if (rec.segments && rec.segments.length > 0) {
@@ -219,7 +227,7 @@ export default function PttHistoryPage() {
   const openFlow = async (groupId: string, sessionDir: string) => {
     setFlowLoading(true)
     try {
-      const resp = await pttApi.flow(groupId, sessionDir, fDate || undefined)
+      const resp = await pttApi.flow(histKey(groupId), sessionDir, fDate || undefined)
       setFlow({ groupId, sessionDir, date: fDate, nodes: resp.nodes, messages: resp.messages })
     } catch (e: unknown) {
       show(String(e), 'err')

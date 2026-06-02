@@ -31,12 +31,15 @@ public:
     /** 트랙 추가 (prefix: "a", "b", "va", "vb", "audio", "video" 등) */
     void addTrack(const std::string& prefix);
 
-    /** 세그먼트 시작 — 등록된 모든 트랙 파일 열기
-     *  @param priority      화자 floor 우선순위 (-1=미지정)
-     *  @param preempted     이 세그먼트가 선점(preemption)으로 시작됐는지
-     *  @param preemptedFrom 선점 직전 화자(있으면) */
+    /** VoIP/일반 세그먼트 시작 — _baseDir 에 직접 기록 (seq 외부 지정). */
     void startSegment(int seq, const std::string& speakerId = "",
                       int priority = -1, bool preempted = false, const std::string& preemptedFrom = "");
+
+    /** PTT 세그먼트 시작 — 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH}/seg/{NNN}/ 에 기록.
+     *  seq 는 recorder 가 시간(HH) 단위로 자체 관리(시간 바뀌면 1부터 리셋),
+     *  shard = (seq-1)/100 → seg/000(1~100), seg/001(101~200) … */
+    void startPttSegment(const std::string& speakerId,
+                         int priority = -1, bool preempted = false, const std::string& preemptedFrom = "");
 
     /** 세그먼트 종료 — 모든 트랙 파일 닫기 + 메타 기록 */
     void finishSegment();
@@ -65,6 +68,10 @@ private:
 
     void _closeTrack(Track& t);
     void _writeMeta();
+    /** _baseDir 하위 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH} 경로 (mkdir 포함) */
+    std::string _hourDirNow();
+    /** mkdir -p (경로 내 모든 상위 디렉터리 생성) */
+    static void _mkdirP(const std::string& path);
     static int64_t _nowUsec();
     static void _isoUsec(int64_t usec, char* buf, int bufLen);
     static std::string _jsonEsc(const std::string& s);
@@ -83,6 +90,15 @@ private:
     int _priority = -1;            // 화자 floor 우선순위
     bool _preempted = false;       // 선점으로 시작된 세그먼트
     std::string _preemptedFrom;    // 선점 직전 화자
+
+    // 현재 세그먼트 출력 경로 (VoIP=_baseDir, PTT=shard 디렉터리)
+    std::string _curSegDir;        // seg_*.rtp / seg_*.json 위치
+    std::string _curIndexDir;      // segments.jsonl 위치 (VoIP=_baseDir, PTT=시간버킷)
+    // PTT 시간버킷 + shard
+    std::string _curHourDir;       // 현재 시간버킷 {base}/{YYYY}/{MM}/{DD}/{HH}
+    int _hourSeq = 0;              // 현재 시간 내 세그먼트 시퀀스 (시간 바뀌면 리셋)
+
+    void _openTracks();            // _curSegDir 에 등록 트랙 파일 열기 (공통)
 };
 
 #endif // __PSYNC_RTP_RECORDER_H__

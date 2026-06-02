@@ -227,11 +227,12 @@ def _has_recording(d_dir: str) -> bool:
         p = os.path.join(d_dir, fn)
         if os.path.exists(p) and os.path.getsize(p) > 0:
             return True
-    # 신 형식 (세그먼트): segments.jsonl 또는 seg_*_*.rtp 파일 존재
+    # 신 형식 (세그먼트): segments.jsonl 또는 seg shard 하위 seg_*_*.rtp 존재
     if os.path.exists(os.path.join(d_dir, 'segments.jsonl')):
         return True
     import glob as _glob
-    if _glob.glob(os.path.join(d_dir, 'seg_*_*.rtp')):
+    if _glob.glob(os.path.join(d_dir, 'seg', '*', 'seg_*_*.rtp')) or \
+       _glob.glob(os.path.join(d_dir, 'seg_*_*.rtp')):
         return True
     return False
 
@@ -1316,85 +1317,80 @@ def _derive_session_meta_from_events(d_dir: str) -> dict:
     }
 
 
-def _find_ptt_sessions(group_id: str) -> list:
-    """PTT 그룹의 세션 디렉터리 목록 반환"""
+def _ptt_group_base(group_id: str) -> str:
+    """PTT 그룹 base 디렉터리 ptt/{gid} (없으면 '+' prefix 보정 시도)"""
     if not _calls_dir:
-        return []
+        return ""
     safe_gid = _sanitize(group_id)
-    sessions_base = os.path.join(_calls_dir, "ptt", safe_gid, "sessions")
-    if not os.path.isdir(sessions_base):
-        # fallback: '+' 가 space로 디코딩된 경우 복원 시도
-        if group_id and not group_id.startswith('+') and group_id[0:1] == ' ':
-            return _find_ptt_sessions('+' + group_id[1:])
-        # fallback: '+' prefix 없이 전달된 경우
-        if group_id and not group_id.startswith('+'):
-            alt_base = os.path.join(_calls_dir, "ptt", "+" + safe_gid, "sessions")
-            if os.path.isdir(alt_base):
-                sessions_base = alt_base
-            else:
-                return []
-        else:
-            return []
+    base = os.path.join(_calls_dir, "ptt", safe_gid)
+    if os.path.isdir(base):
+        return base
+    if group_id and group_id[0:1] == ' ':
+        return _ptt_group_base('+' + group_id[1:])
+    if group_id and not group_id.startswith('+'):
+        alt = os.path.join(_calls_dir, "ptt", "+" + safe_gid)
+        if os.path.isdir(alt):
+            return alt
+    return ""
+
+
+def _find_ptt_sessions(group_id: str) -> list:
+    """PTT 그룹의 시간창(YYYY/MM/DD/HH) 목록 반환. window dir 이름 = 'YYYYMMDDHH'."""
+    base = _ptt_group_base(group_id)
+    if not base:
+        return []
+    import glob as _glob
+    digit4, digit2 = "[0-9][0-9][0-9][0-9]", "[0-9][0-9]"
+    pattern = os.path.join(base, digit4, digit2, digit2, digit2)
     result = []
-    for entry in sorted(os.listdir(sessions_base), reverse=True):
-        d_path = os.path.join(sessions_base, entry)
-        if os.path.isdir(d_path) and entry.endswith(".d"):
-            sj = _load_session_json(d_path)
-            if not sj:
-                # session.json 없으면 디렉터리 이름에서 추론 + events.jsonl fallback
-                sj = {"session_id": entry.replace(".d", "")}
-                sj.update(_derive_session_meta_from_events(d_path))
-            sj["dir"] = entry.replace(".d", "")
-            result.append(sj)
+    for hh_dir in _glob.glob(pattern):
+        if not os.path.isdir(hh_dir):
+            continue
+        rel = os.path.relpath(hh_dir, base).split(os.sep)
+        if len(rel) != 4:
+            continue
+        yyyy, mm, dd, hh = rel
+        window = f"{yyyy}{mm}{dd}{hh}"
+        seg_count = 0
+        segs = os.path.join(hh_dir, "segments.jsonl")
+        if os.path.exists(segs):
+            try:
+                with open(segs, encoding="utf-8", errors="replace") as f:
+                    seg_count = sum(1 for _ in f)
+            except Exception:
+                pass
+        # 화자(speaker) 수 = events 의 member 또는 segments 기반 추정은 상세에서. 목록은 경량.
+        result.append({
+            "dir": window,
+            "session_id": f"{yyyy}-{mm}-{dd} {hh}:00",
+            "start_time": f"{yyyy}-{mm}-{dd}T{hh}:00:00",
+            "end_time": f"{yyyy}-{mm}-{dd}T{hh}:59:59",
+            "state": "ended",
+            "segment_count": seg_count,
+        })
+    result.sort(key=lambda x: x["dir"], reverse=True)
     return result
 
 
 def _find_ptt_session_dir(group_id: str, session_dir: str) -> str:
-    """PTT 세션 디렉터리 경로 반환"""
-    if not _calls_dir:
+    """시간창 식별자 'YYYYMMDDHH' → ptt/{gid}/{YYYY}/{MM}/{DD}/{HH} 경로"""
+    base = _ptt_group_base(group_id)
+    if not base:
         return ""
-    safe_gid = _sanitize(group_id)
-    safe_sid = _sanitize(session_dir)
-    d_path = os.path.join(_calls_dir, "ptt", safe_gid, "sessions", safe_sid + ".d")
-    if os.path.isdir(d_path):
-        return d_path
-    # .d 없이 시도
-    d_path2 = os.path.join(_calls_dir, "ptt", safe_gid, "sessions", safe_sid)
-    if os.path.isdir(d_path2):
-        return d_path2
-    # fallback: '+' prefix 복원 시도
-    if group_id and not group_id.startswith('+'):
-        alt = os.path.join(_calls_dir, "ptt", "+" + safe_gid, "sessions", safe_sid + ".d")
-        if os.path.isdir(alt):
-            return alt
-        alt2 = os.path.join(_calls_dir, "ptt", "+" + safe_gid, "sessions", safe_sid)
-        if os.path.isdir(alt2):
-            return alt2
-    # fallback: space → '+' 복원 시도 (URL decoding artifact)
-    if group_id and group_id[0:1] == ' ':
-        return _find_ptt_session_dir('+' + group_id[1:], session_dir)
+    w = "".join(c for c in (session_dir or "") if c.isdigit())
+    if len(w) >= 10:
+        d = os.path.join(base, w[:4], w[4:6], w[6:8], w[8:10])
+        if os.path.isdir(d):
+            return d
     return ""
 
 
 def _load_ptt_events(d_dir: str, date: str = None) -> list:
-    """PTT 세션 이벤트 로드. date 지정 시 daily/YYYY-MM-DD.jsonl, 아니면 events.jsonl"""
+    """PTT 시간창 이벤트 로드 (events.jsonl — 멤버 join/leave 등). floor 는 별도 endpoint."""
     events = []
-    if date:
-        daily_path = os.path.join(d_dir, "daily", f"{date}.jsonl")
-        if os.path.exists(daily_path):
-            events.extend(_read_jsonl(daily_path))
-    else:
-        events_path = os.path.join(d_dir, "events.jsonl")
-        if os.path.exists(events_path):
-            events.extend(_read_jsonl(events_path))
-
-    # cmp.jsonl 병합 (floor 이벤트)
-    cmp_path = os.path.join(d_dir, "cmp.jsonl")
-    if os.path.exists(cmp_path):
-        cmp_events = _read_jsonl(cmp_path)
-        if date:
-            cmp_events = [e for e in cmp_events if e.get("ts", "").startswith(date)]
-        events.extend(cmp_events)
+    events_path = os.path.join(d_dir, "events.jsonl")
+    if os.path.exists(events_path):
+        events.extend(_read_jsonl(events_path))
 
     events.sort(key=lambda e: e.get("ts", ""))
     return events
@@ -1579,36 +1575,8 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
             return HandlerResult(status=400, body=json.dumps({"error": "group_id required"}),
                                  media_type="application/json")
 
-        # 1) sessions 디렉터리 스캔
+        # 시간창(YYYY/MM/DD/HH) 목록 스캔
         sessions = _find_ptt_sessions(group_id)
-
-        # 2) index.jsonl 빠른 조회 시도
-        if not sessions:
-            safe_gid = _sanitize(group_id)
-            idx_path = os.path.join(_calls_dir, "ptt", safe_gid, "index.jsonl")
-            if os.path.exists(idx_path):
-                sessions = _read_jsonl(idx_path)
-
-        # 3) 날짜 기반 .d 디렉터리 스캔 (fallback)
-        if not sessions:
-            date_str = _qp("date", datetime.now().strftime("%Y-%m-%d"))
-            dirs = _find_all_d_dirs(date_str, call_type="ptt")
-            for d in dirs:
-                cj = _load_call_json(d)
-                if cj and cj.get("group_id") == group_id:
-                    sj = _load_session_json(d)
-                    entry = {
-                        "dir": os.path.basename(d).replace(".d", ""),
-                        "start_time": cj.get("invite_time", ""),
-                        "end_time": cj.get("end_time"),
-                        "state": cj.get("state", ""),
-                        "initiator": cj.get("initiator", ""),
-                        "member_count": len(cj.get("participants", [])) if "participants" in cj else
-                                        len(_load_participants(d)),
-                    }
-                    if sj:
-                        entry.update({k: v for k, v in sj.items() if k not in entry or not entry[k]})
-                    sessions.append(entry)
 
         return HandlerResult(status=200, body=json.dumps({
             "group_id": group_id,
@@ -1777,29 +1745,22 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                              media_type="application/json")
 
     else:
-        # ── 세션 이벤트 ──
+        # ── 시간창 이벤트 ──
         date = _qp("date")
 
         d_dir = _find_ptt_session_dir(group_id, session_dir)
         if not d_dir:
-            # fallback: 날짜 기반 검색
-            fallback_date = date or session_dir[:4] + "-" + session_dir[4:6] + "-" + session_dir[6:8] \
-                if len(session_dir) >= 8 and session_dir[:8].isdigit() else \
-                datetime.now().strftime("%Y-%m-%d")
-            d_dir = _find_d_dir_by_callid(fallback_date, None, session_dir, "ptt")
-
-        if not d_dir:
             return HandlerResult(status=404, body=json.dumps({"error": "Session not found"}),
                                  media_type="application/json")
 
-        session_meta = _load_session_json(d_dir)
-        call_json = _load_call_json(d_dir)
-        if call_json and not session_meta:
-            session_meta = call_json
-        if not session_meta:
-            session_meta = {"session_id": session_dir}
-            session_meta.update(_derive_session_meta_from_events(d_dir))
-
+        # 그룹 스냅샷은 base/group.json 에서
+        session_meta = {"session_id": session_dir}
+        base = _ptt_group_base(group_id)
+        if base:
+            gj = _read_json(os.path.join(base, "group.json"))
+            if gj:
+                session_meta = gj
+                session_meta["session_id"] = session_dir
         group_snapshot = session_meta.get("group_snapshot", {}) if session_meta else {}
         events = _load_ptt_events(d_dir, date)
 
