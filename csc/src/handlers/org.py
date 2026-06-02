@@ -15,6 +15,7 @@ import pymysql
 import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
+from services import admin_auth
 
 _ORG_BASE = '/api/v1/organizations'
 
@@ -46,6 +47,11 @@ async def handle_organizations(handler_args: HandlerArgs, kwargs: dict) -> Handl
     config = kwargs.get('config', {})
     parts = _path_parts(handler_args.full_path, _ORG_BASE)
     method = handler_args.method.upper()
+
+    # RBAC — 조회 monitor+, 변경 manager+ (계획서 §3 가입자/조직).
+    payload, err = admin_auth.require_role(handler_args, 'monitor' if method == 'GET' else 'manager')
+    if err:
+        return err
 
     try:
         if len(parts) == 0:

@@ -8,6 +8,7 @@
 import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { WidgetDef, PageLayout } from './widgets/types'
+import type { Role } from './api/auth'
 
 export type RouteDef = {
   path: string
@@ -19,6 +20,8 @@ export type RouteDef = {
   layout?: PageLayout
   // 레이아웃 영속 키. 미지정 시 component 페이지는 'page:<path>', 합성 라우트는 layout.id/path.
   layoutId?: string
+  // 접근 최소 역할 등급 (RBAC). 미지정 시 adminOnly=true→'admin', 아니면 'monitor'.
+  requiredRole?: Role
   adminOnly?: boolean
   // 사이드바 하위항목에서 숨김 — 라우트 자체는 활성 (link/직접 URL 진입 가능).
   hidden?: boolean

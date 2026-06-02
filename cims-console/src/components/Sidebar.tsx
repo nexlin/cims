@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useMenu } from '../contexts/MenuContext'
 import { MenuEditorModal } from './MenuEditorModal'
 import { NAV_AREA_ORDER, NAV_AREA_LABELS, type NavArea, type RouteSection, type RouteDef } from '../nav-types'
+import { canAccessRoute } from '../utils/permissions'
 
 interface SidebarProps {
   collapsed: boolean
@@ -22,9 +23,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const isAdmin = user?.role === 'admin'
 
-  // leaf 가시성: hidden 아니고, adminOnly 면 admin 에게만.
+  // leaf 가시성: hidden 아니고, 라우트 요구 역할 등급을 만족하는 사용자에게만 (RBAC).
   const visibleRoutes = (s: RouteSection): RouteDef[] =>
-    s.routes.filter(r => !r.hidden && (!r.adminOnly || isAdmin))
+    s.routes.filter(r => !r.hidden && canAccessRoute(user, r))
   const isLeafActive = (r: RouteDef) => pathname === r.path || pathname.startsWith(r.path + '/')
   const isGroupActive = (s: RouteSection) => visibleRoutes(s).some(isLeafActive)
   // 기본 펼침 = 현재 활성 그룹. 사용자가 토글하면 override.

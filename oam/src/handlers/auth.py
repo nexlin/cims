@@ -179,6 +179,10 @@ async def _login(body, config):
             if user is None:
                 return HandlerResult(status=401, body={'error': '아이디 또는 비밀번호가 잘못되었습니다'})
 
+    # RBAC: telephony 전용 사용자(role=user)는 관리 콘솔 로그인 불가.
+    if not _shared_auth.can_login(user.get('role')):
+        return HandlerResult(status=403, body={'error': '관리 콘솔 접근 권한이 없습니다'})
+
     # v3: 로그인 응답은 토큰 + 최소 user 정보만.
     #   가입자 정보는 /users/me/subscriptions 로 분리 (Phone UE 가 별도 호출).
     token = _make_token(user)

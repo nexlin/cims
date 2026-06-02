@@ -8,6 +8,7 @@ import Header from './components/Header'
 import LoginPage from './pages/LoginPage'
 import { FLAT_ROUTES } from './routes'
 import type { RouteDef } from './nav-types'
+import { canAccessRoute } from './utils/permissions'
 import { authApi } from './api/auth'
 import { EditableLayout } from './widgets/EditableLayout'
 import { registerWidgets } from './widgets/registry'
@@ -67,10 +68,10 @@ function EditablePageHost({ route }: { route: RouteDef }) {
   return <EditableLayout key={layoutId} layoutId={layoutId} seed={routeSeed(route)} />
 }
 
-function RouteGuard({ children, adminOnly }: { children: React.ReactNode; adminOnly?: boolean }) {
+function RouteGuard({ children, route }: { children: React.ReactNode; route: RouteDef }) {
   const { user } = useAuth()
-  if (adminOnly && user?.role !== 'admin') {
-    return <div className="empty" style={{ marginTop: 80 }}>관리자 권한이 필요합니다</div>
+  if (!canAccessRoute(user, route)) {
+    return <div className="empty" style={{ marginTop: 80 }}>접근 권한이 없습니다</div>
   }
   return <>{children}</>
 }
@@ -135,7 +136,7 @@ function Shell() {
                 <Route
                   key={r.path}
                   path={r.path}
-                  element={<RouteGuard adminOnly={r.adminOnly}><EditablePageHost route={r} /></RouteGuard>}
+                  element={<RouteGuard route={r}><EditablePageHost route={r} /></RouteGuard>}
                 />
               ))}
               <Route path="*" element={<Navigate to="/dashboard" replace />} />

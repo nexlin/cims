@@ -15,12 +15,17 @@ USE cims;
 CREATE TABLE IF NOT EXISTS users (
     id          INT          NOT NULL AUTO_INCREMENT COMMENT '개인 고유 ID (자동 발행)',
     name        VARCHAR(128) NOT NULL COMMENT '표시 이름',
+    login_id    VARCHAR(255) NOT NULL DEFAULT '' COMMENT '로그인 ID (OAM 콘솔)',
+    password    VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'SHA-256 해시',
+    role        ENUM('admin','manager','operator','monitor','user') NOT NULL DEFAULT 'user'
+                COMMENT '관리 권한 역할 (admin/manager/operator/monitor/user). user=OAM 로그인 불가',
     email       VARCHAR(255) NOT NULL DEFAULT '' COMMENT '이메일',
     org_id      VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '소속 조직 ID',
     details     TEXT                  DEFAULT NULL COMMENT '세부사항',
     create_time DATETIME              DEFAULT NULL,
     update_time DATETIME              DEFAULT NULL,
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_login_id (login_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자 기본 정보';
 
 -- ─────────────────────────────────────────────
@@ -90,8 +95,13 @@ CREATE TABLE IF NOT EXISTS ptt_groups (
     require_affiliation TINYINT(1) NOT NULL DEFAULT 1 COMMENT '그룹콜 수신 전 affiliation 요구',
     alias         VARCHAR(128) DEFAULT NULL COMMENT '그룹 별칭/단축명',
     icon_url      VARCHAR(512) DEFAULT NULL COMMENT '그룹 아이콘 URL',
+    -- 그룹 소유 (3GPP TS 23.280 authorized user = 생성자 = 관리주체)
+    authorized_user_id INT     DEFAULT NULL COMMENT '그룹 소유자(=생성자=authorized user) users.id',
+    created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '그룹 생성 시각',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_mcptt_group_id (mcptt_group_id)
+    UNIQUE KEY uk_mcptt_group_id (mcptt_group_id),
+    INDEX idx_authorized_user (authorized_user_id),
+    CONSTRAINT fk_grp_authorized_user FOREIGN KEY (authorized_user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='PTT 그룹 정보';
 

@@ -218,10 +218,15 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
 
     // 그룹 기본 정보 (확장 필드 포함). strGroupId = mcptt_group_id 식별자.
     std::string strSql =
-        "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
-        "org_code, UNIX_TIMESTAMP(session_start) AS ss, UNIX_TIMESTAMP(session_end) AS se, "
-        "session_seq, group_type, on_network, max_members, require_affiliation, COALESCE(alias,'') "
-        "FROM ptt_groups WHERE mcptt_group_id='" +
+        "SELECT g.id, g.mcptt_group_id, g.name, g.video_enabled, g.priority, g.encryption, g.emergency_call, "
+        "g.org_code, UNIX_TIMESTAMP(g.session_start) AS ss, UNIX_TIMESTAMP(g.session_end) AS se, "
+        "g.session_seq, g.group_type, g.on_network, g.max_members, g.require_affiliation, COALESCE(g.alias,''), "
+        "COALESCE(g.authorized_user_id,0), "
+        "COALESCE(DATE_FORMAT(g.created_at,'%Y-%m-%dT%H:%i:%s'),''), "
+        "COALESCE(ps.id,'') "
+        "FROM ptt_groups g "
+        "LEFT JOIN ptt_subscriptions ps ON ps.user_id = g.authorized_user_id "
+        "WHERE g.mcptt_group_id='" +
         Escape( strGroupId ) + "'";
 
     MYSQL_RES *pRes = ExecuteSelect( strSql );
@@ -250,6 +255,9 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     clsGroup._maxMembers = row[13] ? atoi( row[13] ) : 0;
     clsGroup._requireAffiliation = row[14] ? ( atoi( row[14] ) != 0 ) : true;
     clsGroup._alias = row[15] ? row[15] : "";
+    clsGroup._authorizedUserId = row[16] ? atoi( row[16] ) : 0;
+    clsGroup._createdAt = row[17] ? row[17] : "";
+    clsGroup._authorizedUser = row[18] ? row[18] : "";  // 소유자 PTT MSISDN (파생 MCPTT ID)
     mysql_free_result( pRes );
 
     // 멤버 목록 — group_id 는 surrogate ptt_groups.id 참조

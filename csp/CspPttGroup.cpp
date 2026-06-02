@@ -22,7 +22,8 @@ CspPttGroup::CspPttGroup()
       _groupType( "prearranged" ),
       _onNetwork( true ),
       _maxMembers( 0 ),
-      _requireAffiliation( true ) {
+      _requireAffiliation( true ),
+      _authorizedUserId( 0 ) {
 }
 
 CspPttGroup::~CspPttGroup() {
@@ -119,5 +120,8 @@ void CspPttGroup::Clear() {
     _maxMembers = 0;
     _requireAffiliation = true;
     _alias.clear();
+    _authorizedUserId = 0;
+    _authorizedUser.clear();
+    _createdAt.clear();
     _pusers.clear();
 }

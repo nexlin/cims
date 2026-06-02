@@ -176,7 +176,11 @@ def load_shared_data(config):
                     cur.execute(
                         "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
                         "emergency_call, org_code, session_start, session_end, "
-                        "group_type, on_network, max_members, require_affiliation, alias FROM ptt_groups"
+                        "group_type, on_network, max_members, require_affiliation, alias, "
+                        "authorized_user_id, "
+                        "(SELECT id FROM ptt_subscriptions WHERE user_id=ptt_groups.authorized_user_id "
+                        " ORDER BY id LIMIT 1) AS authorized_user_msisdn "
+                        "FROM ptt_groups"
                     )
                     for row in cur.fetchall():
                         gid = row['mcptt_group_id']
@@ -197,6 +201,9 @@ def load_shared_data(config):
                             "session_end": row['session_end'].isoformat() if row.get('session_end') else None,
                             "etag": f"etag_{gid}",
                             "created_by": "", "created_at": "",
+                            # 그룹 소유 (3GPP authorized user) — 파생 MCPTT ID
+                            "authorized_user": (f"tel:{row['authorized_user_msisdn']}"
+                                                if row.get('authorized_user_msisdn') else ""),
                             "members": []
                         }
                     # 멤버 목록 + users 테이블에서 이름 조회 (group_id=surrogate → mcptt_group_id JOIN)
@@ -631,6 +638,11 @@ def get_group_xml(group_uri):
     if org_code:
         xml += f"""
     <mcpttgi:org-code>{org_code}</mcpttgi:org-code>"""
+    # 그룹 소유 (3GPP TS 23.280 authorized user = 관리주체)
+    authorized_user = group.get('authorized_user', '')
+    if authorized_user:
+        xml += f"""
+    <mcpttgi:authorized-user>{authorized_user}</mcpttgi:authorized-user>"""
     xml += """
   </list-service>
 </group>"""

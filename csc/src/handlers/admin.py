@@ -23,6 +23,7 @@ import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services.mcptt import notify_csp
+from services import admin_auth
 
 # ──────────────────────────────────────────────────────────────
 #  DB helper
@@ -93,12 +94,17 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         from . import users as _users
         return await _users.handle_users(handler_args, kwargs)
 
+    # RBAC 게이팅 — 조회는 monitor+, 변경은 manager+ (계획서 §3 권한 매트릭스).
+    payload, err = admin_auth.require_role(handler_args, 'monitor' if method == 'GET' else 'manager')
+    if err:
+        return err
+
     try:
         if person_id is None:
             if method == 'GET':
                 return await _list_users(config)
             elif method == 'POST':
-                return await _create_user(handler_args.body, config)
+                return await _create_user(handler_args.body, config, payload)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         if person_id == 'batch' and method == 'DELETE':
@@ -108,7 +114,7 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
             if method == 'GET':
                 return await _get_user(person_id, config)
             elif method == 'PUT':
-                return await _update_user(person_id, handler_args.body, config)
+                return await _update_user(person_id, handler_args.body, config, payload)
             elif method == 'DELETE':
                 return await _delete_user(person_id, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
@@ -150,7 +156,7 @@ async def _list_users(config):
             has_email = _has_email_column(cur)
             email_col = ", u.email" if has_email else ""
             cur.execute(
-                f"SELECT u.id, u.name, u.login_id{email_col}, u.org_id, u.details, "
+                f"SELECT u.id, u.name, u.login_id, u.role{email_col}, u.org_id, u.details, "
                 "u.create_time, u.update_time "
                 "FROM users u "
                 "ORDER BY u.id"
@@ -209,7 +215,7 @@ async def _get_user(person_id: str, config):
             has_email = _has_email_column(cur)
             email_col = ", email" if has_email else ""
             cur.execute(
-                f"SELECT id, name{email_col}, org_id, details, create_time, update_time "
+                f"SELECT id, name, login_id, role{email_col}, org_id, details, create_time, update_time "
                 "FROM users WHERE id=%s",
                 (person_id,)
             )
@@ -257,7 +263,7 @@ async def _get_user(person_id: str, config):
     return HandlerResult(status=200, body=row)
 
 
-async def _create_user(body, config):
+async def _create_user(body, config, payload=None):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
     name = body.get('name', '').strip()
@@ -270,6 +276,13 @@ async def _create_user(body, config):
     org_id     = body.get('org_id', '')
     details    = body.get('details') or None
     reject_ids = body.get('reject_id', [])
+
+    # 역할 — 기본 'user'. 비-user(관리권한) 부여는 admin 만 가능 (계획서 §3).
+    role = (body.get('role') or 'user').strip()
+    if role not in admin_auth.ROLES:
+        return HandlerResult(status=400, body={'error': f'invalid role: {role}'})
+    if role != 'user' and payload is not None and payload.get('role') != 'admin':
+        return HandlerResult(status=403, body={'error': '역할 지정은 관리자만 가능합니다'})
 
     # login_id 미지정 시 name 기반 자동 생성
     if not login_id:
@@ -285,16 +298,16 @@ async def _create_user(body, config):
             if has_email:
                 cur.execute(
                     "INSERT INTO users "
-                    "(name, login_id, password, email, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())",
-                    (name, login_id, pw_hash, email, org_id, details)
+                    "(name, login_id, password, role, email, org_id, details, create_time, update_time) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())",
+                    (name, login_id, pw_hash, role, email, org_id, details)
                 )
             else:
                 cur.execute(
                     "INSERT INTO users "
-                    "(name, login_id, password, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
-                    (name, login_id, pw_hash, org_id, details)
+                    "(name, login_id, password, role, org_id, details, create_time, update_time) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())",
+                    (name, login_id, pw_hash, role, org_id, details)
                 )
             person_id = cur.lastrowid
 
@@ -307,7 +320,7 @@ async def _create_user(body, config):
     return HandlerResult(status=201, body={'id': person_id})
 
 
-async def _update_user(person_id: str, body, config):
+async def _update_user(person_id: str, body, config, payload=None):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
@@ -317,6 +330,16 @@ async def _update_user(person_id: str, body, config):
         if col in body:
             fields.append(f'{col}=%s')
             values.append(body[col])
+
+    # 역할 변경은 admin 만 (계획서 §3 계정/권한 관리).
+    if 'role' in body:
+        new_role = (body.get('role') or '').strip()
+        if new_role not in admin_auth.ROLES:
+            return HandlerResult(status=400, body={'error': f'invalid role: {new_role}'})
+        if payload is not None and payload.get('role') != 'admin':
+            return HandlerResult(status=403, body={'error': '역할 변경은 관리자만 가능합니다'})
+        fields.append('role=%s')
+        values.append(new_role)
 
     if fields:
         fields.append('update_time=NOW()')
@@ -536,19 +559,33 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     member_id = parts[2] if len(parts) > 2 else None
     method = handler_args.method.upper()
 
+    # RBAC (계획서 §3 권한 매트릭스) — 조회 monitor+, 그룹 생성 operator+,
+    # 기존 그룹 변경은 operator+(본인 소유 그룹) / manager+(모든 그룹).
+    if method == 'GET':
+        payload, err = admin_auth.require_role(handler_args, 'monitor')
+    else:
+        payload, err = admin_auth.require_role(handler_args, 'operator')
+    if err:
+        return err
+    if method != 'GET' and group_id is not None \
+            and admin_auth.role_rank(payload.get('role')) < admin_auth.role_rank('manager'):
+        owner_err = _ensure_group_owner(group_id, payload, config)
+        if owner_err:
+            return owner_err
+
     try:
         if group_id is None:
             if method == 'GET':
                 return await _list_groups(config)
             elif method == 'POST':
-                return await _create_group(handler_args.body, config)
+                return await _create_group(handler_args.body, config, payload)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         if sub is None:
             if method == 'GET':
                 return await _get_group(group_id, config)
             elif method == 'PUT':
-                return await _update_group(group_id, handler_args.body, config)
+                return await _update_group(group_id, handler_args.body, config, payload)
             elif method == 'DELETE':
                 return await _delete_group(group_id, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
@@ -574,12 +611,15 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 _GROUP_COLS = (
     "id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
-    "require_affiliation, alias"
+    "require_affiliation, alias, authorized_user_id, created_at"
 )
 
 
-def _shape_group(g: dict, members: list):
-    """DB row → API 형태. id(응답)=mcptt_group_id, db_id=surrogate."""
+def _shape_group(g: dict, members: list, owner: dict = None):
+    """DB row → API 형태. id(응답)=mcptt_group_id, db_id=surrogate.
+
+    owner: {authorized_user(MCPTT ID), authorized_user_name} — authorized_user_id 파생값.
+    """
     g['db_id'] = g['id']
     g['id'] = g.get('mcptt_group_id') or str(g['db_id'])
     g['video_enabled'] = bool(g.get('video_enabled', 0))
@@ -589,8 +629,61 @@ def _shape_group(g: dict, members: list):
     g['require_affiliation'] = bool(g.get('require_affiliation', 1))
     if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
     if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
+    if g.get('created_at'): g['created_at'] = g['created_at'].isoformat()
+    # 그룹 소유 (3GPP authorized user) 파생값
+    owner = owner or {}
+    g['authorized_user'] = owner.get('authorized_user')           # 파생 MCPTT ID (tel:URI)
+    g['authorized_user_name'] = owner.get('authorized_user_name')  # 표시명
     g['members'] = members
     return g
+
+
+def _owner_map(cur, auth_ids):
+    """authorized_user_id 집합 → {uid: {authorized_user(tel:MSISDN), authorized_user_name}}.
+
+    파생 MCPTT ID = 그 user 의 PTT 가입 MSISDN (ptt_subscriptions). 표시명 = users.name/login_id.
+    """
+    ids = [i for i in {a for a in auth_ids} if i]
+    if not ids:
+        return {}
+    fmt = ','.join(['%s'] * len(ids))
+    cur.execute(
+        f"SELECT u.id, u.name, u.login_id, "
+        f"  (SELECT id FROM ptt_subscriptions WHERE user_id=u.id ORDER BY id LIMIT 1) AS ptt_id "
+        f"FROM users u WHERE u.id IN ({fmt})",
+        tuple(ids)
+    )
+    out = {}
+    for r in cur.fetchall():
+        ptt = r.get('ptt_id')
+        out[r['id']] = {
+            'authorized_user': (f"tel:{ptt}" if ptt else None),
+            'authorized_user_name': r.get('name') or r.get('login_id'),
+        }
+    return out
+
+
+def _ensure_group_owner(group_id: str, payload: dict, config):
+    """operator 의 본인 소유 그룹 여부 확인. owner 아니면 HandlerResult(err), OK 면 None.
+
+    그룹 부재 시 404. authorized_user_id 미지정(레거시) 그룹은 operator 변경 불가(403).
+    """
+    try:
+        uid = int(payload.get('sub'))
+    except (TypeError, ValueError):
+        return HandlerResult(status=403, body={'error': '권한이 부족합니다'})
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT authorized_user_id FROM ptt_groups WHERE mcptt_group_id=%s",
+                (group_id,)
+            )
+            row = cur.fetchone()
+    if row is None:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if row.get('authorized_user_id') != uid:
+        return HandlerResult(status=403, body={'error': '본인이 소유한 그룹만 변경할 수 있습니다'})
+    return None
 
 
 async def _list_groups(config):
@@ -610,7 +703,12 @@ async def _list_groups(config):
             for m in cur.fetchall():
                 gid = m.pop('group_id')
                 members_by_group.setdefault(gid, []).append(m)
-            groups = [_shape_group(g, members_by_group.get(g['id'], [])) for g in groups]
+            owners = _owner_map(cur, [g.get('authorized_user_id') for g in groups])
+            groups = [
+                _shape_group(g, members_by_group.get(g['id'], []),
+                             owners.get(g.get('authorized_user_id')))
+                for g in groups
+            ]
     return HandlerResult(status=200, body={'groups': groups})
 
 
@@ -630,7 +728,8 @@ async def _get_group(group_id: str, config):
                 (group['id'],)
             )
             members = cur.fetchall()
-            group = _shape_group(group, members)
+            owners = _owner_map(cur, [group.get('authorized_user_id')])
+            group = _shape_group(group, members, owners.get(group.get('authorized_user_id')))
     return HandlerResult(status=200, body=group)
 
 
@@ -657,7 +756,12 @@ def _insert_member(cur, gpk, m):
     )
 
 
-async def _create_group(body, config):
+def _is_ptt_subscriber(cur, user_id) -> bool:
+    cur.execute("SELECT 1 FROM ptt_subscriptions WHERE user_id=%s LIMIT 1", (user_id,))
+    return cur.fetchone() is not None
+
+
+async def _create_group(body, config, payload=None):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
     # id = mcptt_group_id 식별자 (surrogate id 는 자동발행)
@@ -681,16 +785,35 @@ async def _create_group(body, config):
     alias          = body.get('alias', '') or None
     members        = body.get('members', [])
 
+    # 그룹 소유 (authorized user) — 명시 없으면 생성자(payload sub) 기본.
+    authorized_user_id = body.get('authorized_user_id')
+    explicit_owner = authorized_user_id is not None
+    if not explicit_owner and payload is not None:
+        try:
+            authorized_user_id = int(payload.get('sub'))
+        except (TypeError, ValueError):
+            authorized_user_id = None
+    if authorized_user_id is not None:
+        try:
+            authorized_user_id = int(authorized_user_id)
+        except (TypeError, ValueError):
+            return HandlerResult(status=400, body={'error': 'invalid authorized_user_id'})
+
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            # 규격: authorized user 는 PTT 가입자여야 함 (명시 지정 시 강제 검증).
+            if explicit_owner and authorized_user_id is not None \
+                    and not _is_ptt_subscriber(cur, authorized_user_id):
+                return HandlerResult(status=400,
+                                     body={'error': 'authorized user 는 PTT 가입자여야 합니다'})
             cur.execute(
                 "INSERT INTO ptt_groups (mcptt_group_id, name, video_enabled, priority, encryption, "
                 "emergency_call, org_code, session_start, session_end, group_type, on_network, "
-                "max_members, require_affiliation, alias) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "max_members, require_affiliation, alias, authorized_user_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
                  emergency_call, org_code, session_start, session_end, group_type,
-                 on_network, max_members, require_affiliation, alias)
+                 on_network, max_members, require_affiliation, alias, authorized_user_id)
             )
             gpk = cur.lastrowid
             for m in members:
@@ -699,15 +822,30 @@ async def _create_group(body, config):
     return HandlerResult(status=201, body={'id': group_id})
 
 
-async def _update_group(group_id: str, body, config):
+async def _update_group(group_id: str, body, config, payload=None):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
+
+    # 소유자(authorized_user_id) 재지정은 manager+ 만 (operator 는 소유 이전 불가).
+    can_reassign_owner = payload is None or \
+        admin_auth.role_rank(payload.get('role')) >= admin_auth.role_rank('manager')
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             gpk = _resolve_group_pk(cur, group_id)
             if gpk is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
+            if 'authorized_user_id' in body and can_reassign_owner:
+                new_owner = body.get('authorized_user_id')
+                if new_owner is not None:
+                    try:
+                        new_owner = int(new_owner)
+                    except (TypeError, ValueError):
+                        return HandlerResult(status=400, body={'error': 'invalid authorized_user_id'})
+                    if not _is_ptt_subscriber(cur, new_owner):
+                        return HandlerResult(status=400,
+                                             body={'error': 'authorized user 는 PTT 가입자여야 합니다'})
+                cur.execute("UPDATE ptt_groups SET authorized_user_id=%s WHERE id=%s", (new_owner, gpk))
             update_fields = []
             update_vals   = []
             if 'name' in body:

@@ -5,11 +5,15 @@ import type { Subscription } from './users'
 //   /auth/login              → 인증 (token + 기본 user)
 //   /users/me                → 프로파일 (role, org_id 등; Console admin 용)
 //   /users/me/subscriptions  → 본인 VoIP/PTT 가입자 배열 (Phone UE 용)
+// RBAC 역할 (계층적 5종) — docs/design/features/mcptt_authorization.md §3.
+//   admin > manager > operator > monitor > user (user=OAM 로그인 불가, telephony 전용).
+export type Role = 'admin' | 'manager' | 'operator' | 'monitor' | 'user'
+
 export interface AuthUser {
   id: number
   name: string
   login_id: string
-  role: 'admin' | 'user'
+  role: Role
 }
 
 // /users/me 응답 (프로파일 상세)

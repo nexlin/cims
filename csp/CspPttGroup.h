@@ -95,6 +95,16 @@ public:
     /** 그룹 별칭/단축명 */
     std::string _alias;
 
+    // ── 그룹 소유 (3GPP TS 23.280 authorized user = 생성자 = 관리주체) ──
+    /** 소유자 users.id (0=미지정) */
+    int _authorizedUserId;
+
+    /** 소유자 파생 MCPTT ID = 그 user 의 PTT 가입 MSISDN (비면 미지정) */
+    std::string _authorizedUser;
+
+    /** 그룹 생성 시각 (DB created_at, ISO8601; 비면 미지정) */
+    std::string _createdAt;
+
     /** Parsing method */
     bool load( std::string groupId );
     void Clear();

@@ -252,6 +252,10 @@ public:
         return dir;
     }
 
+    /** strGroupJson = CGroupCallService::BuildGroupDescriptor 가 만든 자기완결 디스크립터
+     *  (계획서 §5). group.json 은 디스크립터 그대로 + state/updated_at 만 주입해 기록한다
+     *  (옛 placeholder session_id/call_id/initiator 제거). strCallId/strInitiator 는
+     *  가입자 state 파일 기록용으로만 사용. */
     void PttSessionStart( const std::string &strGroupId, const std::string &strCallId, const std::string &strInitiator,
                           const std::string &strGroupJson = "{}" ) {
         // GetPttSessionDir가 이미 호출된 상태여야 함
@@ -262,7 +266,7 @@ public:
             if ( it == m_mapPttSession.end() ) return;
             dir = it->second;  // 그룹 base
 
-            // group.json (그룹 스냅샷/현재상태) — base 루트에 1개. 없으면 생성.
+            // group.json (자기완결 그룹 디스크립터) — base 루트에 1개. 없으면 생성.
             std::string path = dir + "/group.json";
             struct stat st;
             bool bNew = ( stat( path.c_str(), &st ) != 0 );
@@ -272,15 +276,16 @@ public:
             IsoNow( ts, sizeof( ts ) );
 
             if ( bNew ) {
+                // 디스크립터 객체에 state/updated_at 주입 (말미 '}' 직전에 삽입).
+                std::string desc = strGroupJson;
+                if ( desc.empty() || desc.back() != '}' ) desc = "{}";
+                desc.pop_back();
+                if ( !desc.empty() && desc.back() != '{' ) desc += ",";
+                desc += "\"state\":\"active\",\"updated_at\":\"" + std::string( ts ) + "\"}";
+
                 FILE *f = fopen( path.c_str(), "w" );
                 if ( f ) {
-                    fprintf( f,
-                             "{\"session_id\":\"%s\",\"group_id\":\"%s\","
-                             "\"call_id\":\"%s\",\"initiator\":\"%s\","
-                             "\"state\":\"active\",\"start_time\":\"%s\","
-                             "\"group_snapshot\":%s}\n",
-                             Esc( sessId ).c_str(), Esc( strGroupId ).c_str(), Esc( strCallId ).c_str(),
-                             Esc( strInitiator ).c_str(), ts, strGroupJson.c_str() );
+                    fprintf( f, "%s\n", desc.c_str() );
                     fclose( f );
                 }
             }

@@ -25,6 +25,10 @@ export interface Group {
   max_members?: number
   require_affiliation?: boolean
   alias?: string
+  // 그룹 소유 (3GPP authorized user = 생성자 = 관리주체)
+  authorized_user_id?: number | null      // 소유자 users.id
+  authorized_user?: string | null         // 파생 MCPTT ID (tel:URI), 읽기전용
+  authorized_user_name?: string | null    // 소유자 표시명, 읽기전용
 }
 
 export type GroupInput = Omit<Group, 'members'> & { members?: Member[] }

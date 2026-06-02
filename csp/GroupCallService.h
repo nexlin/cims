@@ -101,6 +101,15 @@ private:
     static std::string BuildResourceListXml( const class CspPttGroup &clsGroup );
 
     /**
+     * @brief 그룹 자기완결 디스크립터 JSON 생성 (group.json 기록용)
+     *        — docs/design/features/mcptt_authorization.md §5.
+     *        state/updated_at 은 CCallDir::PttSessionStart 가 주입한다.
+     * @param clsGroup PTT group info
+     * @return JSON object string
+     */
+    static std::string BuildGroupDescriptor( const class CspPttGroup &clsGroup );
+
+    /**
      * @brief Wrap SDP + MCPTT info XML + roster into multipart/mixed body, update INVITE message
      * @param pclsInvite   INVITE message to modify
      * @param strGroupXml  MCPTT call control info XML (mcptt-info)

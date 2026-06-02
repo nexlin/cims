@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { groupsApi, type Group } from '../../../api/groups'
 import { useToast } from '../../../components/Toast'
+import { useAuth } from '../../../contexts/AuthContext'
+import { canCreateGroup, canManageGroup, hasRole } from '../../../utils/permissions'
 
 interface GroupExt extends Group {
   priority?: number
@@ -19,6 +21,10 @@ function fmtDt(v: string | null | undefined) {
 
 export default function PttGroupsPage() {
   const { show } = useToast()
+  const { user: me } = useAuth()
+  const canCreate = canCreateGroup(me)              // operator+ : 그룹 생성
+  const canReassignOwner = hasRole(me, 'manager')   // manager+ : 소유자 재지정
+  const canManage = (g: GroupExt) => canManageGroup(me, g.authorized_user_id)
   const [groups, setGroups] = useState<GroupExt[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -55,6 +61,7 @@ export default function PttGroupsPage() {
       encryption: g.encryption, emergency_call: g.emergency_call,
       video_enabled: g.video_enabled, org_code: g.org_code || '',
       session_start: g.session_start || '', session_end: g.session_end || '',
+      authorized_user_id: g.authorized_user_id ?? null,
     })
   }
   async function saveEdit() {
@@ -68,7 +75,7 @@ export default function PttGroupsPage() {
 
   function startAdd() {
     setAdding(true); setEditId(null)
-    setAddForm({ id: '', name: '', priority: 5, encryption: false, emergency_call: false, video_enabled: false, org_code: '', session_start: '', session_end: '' })
+    setAddForm({ id: '', name: '', priority: 5, encryption: false, emergency_call: false, video_enabled: false, org_code: '', session_start: '', session_end: '', authorized_user_id: null })
   }
   async function saveAdd() {
     if (!addForm.id || !addForm.name) { show('ID/이름 필수', 'err'); return }
@@ -106,6 +113,8 @@ export default function PttGroupsPage() {
   // ── 카드 렌더링 ──
 
   function renderEditFields(form: Partial<GroupExt>, setForm: (f: Partial<GroupExt>) => void, isNew: boolean) {
+    // 소유자(authorized user) 지정란: manager+ 는 항상, operator 는 생성 시에만(미지정→본인).
+    const allowOwner = canReassignOwner || (isNew && canCreate)
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px', fontSize: 12 }}>
         {isNew && <>
@@ -116,6 +125,12 @@ export default function PttGroupsPage() {
         <input className="form-input" value={form.name || ''} onChange={e => setForm({...form, name: e.target.value})} />
         <label>우선순위</label>
         <input className="form-input" type="number" value={form.priority ?? 5} onChange={e => setForm({...form, priority: Number(e.target.value)})} />
+        {allowOwner && <>
+          <label>소유자 user ID</label>
+          <input className="form-input" type="number" placeholder={isNew && !canReassignOwner ? '비우면 본인' : 'authorized user'}
+            value={form.authorized_user_id ?? ''}
+            onChange={e => setForm({...form, authorized_user_id: e.target.value === '' ? null : Number(e.target.value)})} />
+        </>}
         <label>조직 코드</label>
         <input className="form-input" value={form.org_code || ''} onChange={e => setForm({...form, org_code: e.target.value})} />
         <label>세션 시작</label>
@@ -169,6 +184,7 @@ export default function PttGroupsPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', fontSize: 11, color: 'var(--text-muted)' }}>
               <span>ID</span><span className="ts" style={{ fontWeight: 500 }}>{g.id}</span>
               <span>우선순위</span><span>{g.priority ?? 5}</span>
+              <span>소유자</span><span className="ts">{g.authorized_user_name || g.authorized_user || '—'}</span>
               <span>조직</span><span>{g.org_code || '—'}</span>
               <span>세션 시작</span><span>{fmtDt(g.session_start)}</span>
               <span>세션 종료</span><span>{fmtDt(g.session_end)}</span>
@@ -188,24 +204,28 @@ export default function PttGroupsPage() {
                 {members.map(m => (
                   <div key={m.user_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 0' }}>
                     <span className="ts">{m.user_id} <span style={{ color: 'var(--text-muted)' }}>(P:{m.priority})</span></span>
-                    <button className="btn btn--sm btn--danger" style={{ padding: '0 4px', fontSize: 10 }} onClick={() => handleRemoveMember(m.user_id)}>×</button>
+                    {canManage(g) && <button className="btn btn--sm btn--danger" style={{ padding: '0 4px', fontSize: 10 }} onClick={() => handleRemoveMember(m.user_id)}>×</button>}
                   </div>
                 ))}
-                <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                  <input className="form-input" placeholder="PTT MSISDN" value={addMember.user_id}
-                    onChange={e => setAddMember({...addMember, user_id: e.target.value})} style={{ flex: 1, fontSize: 11 }} />
-                  <input className="form-input" type="number" value={addMember.priority}
-                    onChange={e => setAddMember({...addMember, priority: Number(e.target.value)})} style={{ width: 40, fontSize: 11 }} />
-                  <button className="btn btn--sm btn--primary" style={{ padding: '2px 6px' }} onClick={handleAddMember}>＋</button>
-                </div>
+                {canManage(g) && (
+                  <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                    <input className="form-input" placeholder="PTT MSISDN" value={addMember.user_id}
+                      onChange={e => setAddMember({...addMember, user_id: e.target.value})} style={{ flex: 1, fontSize: 11 }} />
+                    <input className="form-input" type="number" value={addMember.priority}
+                      onChange={e => setAddMember({...addMember, priority: Number(e.target.value)})} style={{ width: 40, fontSize: 11 }} />
+                    <button className="btn btn--sm btn--primary" style={{ padding: '2px 6px' }} onClick={handleAddMember}>＋</button>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* 작업 */}
-            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-              <button className="btn btn--sm btn--outline" onClick={() => startEdit(g)}>편집</button>
-              <button className="btn btn--sm btn--danger" onClick={() => handleDelete(g.id)}>삭제</button>
-            </div>
+            {/* 작업 — manager+ 전체 / operator 본인 소유 그룹만 */}
+            {canManage(g) && (
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button className="btn btn--sm btn--outline" onClick={() => startEdit(g)}>편집</button>
+                <button className="btn btn--sm btn--danger" onClick={() => handleDelete(g.id)}>삭제</button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -217,7 +237,7 @@ export default function PttGroupsPage() {
       <div className="toolbar">
         <input className="search-input" placeholder="그룹 검색" value={search}
           onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
-        <button className="btn btn--primary btn--sm" onClick={startAdd} style={{ marginLeft: 'auto' }}>＋ 그룹 추가</button>
+        {canCreate && <button className="btn btn--primary btn--sm" onClick={startAdd} style={{ marginLeft: 'auto' }}>＋ 그룹 추가</button>}
       </div>
 
       {loading ? <div className="empty">로딩 중...</div> : (

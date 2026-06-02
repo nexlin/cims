@@ -16,7 +16,7 @@ USE cims;
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS login_id VARCHAR(255) NOT NULL DEFAULT '' COMMENT '로그인 ID' AFTER name,
     ADD COLUMN IF NOT EXISTS password VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'SHA-256 해시' AFTER login_id,
-    ADD COLUMN IF NOT EXISTS role     ENUM('admin','user') NOT NULL DEFAULT 'user' COMMENT '권한' AFTER password;
+    ADD COLUMN IF NOT EXISTS role     ENUM('admin','manager','operator','monitor','user') NOT NULL DEFAULT 'user' COMMENT '관리 권한 역할 (admin/manager/operator/monitor/user). user=OAM 로그인 불가' AFTER password;
 
 -- ─────────────────────────────────────────────
 -- 2) 레거시 email 컬럼 정리 (존재 시에만)

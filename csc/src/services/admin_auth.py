@@ -15,8 +15,41 @@ from typing import Optional
 
 import jwt
 
+from httpsrv.handler import HandlerResult
+
 
 _SECRET = 'cims_jwt_secret_change_me'  # config 로 갱신
+
+# ─────────────────────────────────────────────────────────────
+#  RBAC 역할 모델 (계층적 5종) — docs/design/features/mcptt_authorization.md §3
+#    admin > manager > operator > monitor > user
+#    user 는 telephony 전용으로 OAM 콘솔 로그인 불가.
+# ─────────────────────────────────────────────────────────────
+_ROLE_RANK = {'user': 0, 'monitor': 1, 'operator': 2, 'manager': 3, 'admin': 4}
+ROLES = tuple(_ROLE_RANK.keys())
+
+
+def role_rank(role: Optional[str]) -> int:
+    return _ROLE_RANK.get(role or '', 0)
+
+
+def can_login(role: Optional[str]) -> bool:
+    """OAM 콘솔 로그인 가능 여부. user(=telephony 전용)는 로그인 불가."""
+    return role_rank(role) >= _ROLE_RANK['monitor']
+
+
+def require_role(handler_args, min_role: str):
+    """JWT 검증 + 최소 역할 등급 게이팅 → (payload | None, err | None).
+
+    payload 에는 sub/login_id/role 클레임이 담긴다 (handlers/auth.py _make_token).
+    """
+    headers = getattr(handler_args, 'headers', None)
+    payload = extract_admin_jwt(headers)
+    if payload is None:
+        return None, HandlerResult(status=401, body={'error': '로그인이 필요합니다'})
+    if role_rank(payload.get('role')) < role_rank(min_role):
+        return None, HandlerResult(status=403, body={'error': '권한이 부족합니다'})
+    return payload, None
 
 
 def init(config: dict) -> None:

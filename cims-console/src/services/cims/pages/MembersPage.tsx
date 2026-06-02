@@ -3,6 +3,8 @@ import { usersApi, type UserSummary, type UserInput } from '../../../api/users'
 import { orgApi, type Organization } from '../../../api/organizations'
 import OrgTreePanel from '../../../components/OrgTreePanel'
 import { useToast } from '../../../components/Toast'
+import { useAuth } from '../../../contexts/AuthContext'
+import { canWriteConfig, canAssignRole, ROLE_LABELS, ASSIGNABLE_ROLES } from '../../../utils/permissions'
 
 /** CSV 셀 escape — 쉼표/줄바꿈/큰따옴표 포함 시 큰따옴표로 감싸고 내부 따옴표는 이중화. */
 function csvCell(v: string | number | null | undefined): string {
@@ -27,6 +29,9 @@ function downloadCsv(filename: string, rows: string[][]): void {
 
 export default function MembersPage() {
   const { show } = useToast()
+  const { user: me } = useAuth()
+  const canWrite = canWriteConfig(me)   // manager+ : 생성/수정/삭제
+  const canRole = canAssignRole(me)     // admin : 역할(권한) 지정
   const [users, setUsers] = useState<UserSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [orgPathFilter, setOrgPathFilter] = useState<string | null>(null)
@@ -73,7 +78,7 @@ export default function MembersPage() {
 
   function startEdit(u: UserSummary) {
     setEditId(u.id)
-    setEditForm({ name: u.name, login_id: u.login_id, org_id: u.org_id, details: u.details || '' })
+    setEditForm({ name: u.name, login_id: u.login_id, org_id: u.org_id, details: u.details || '', role: u.role || 'user' })
     setAdding(false)
   }
   async function saveEdit() {
@@ -86,7 +91,7 @@ export default function MembersPage() {
     setAdding(true); setEditId(null)
     // 현재 필터의 code_path에서 마지막 code를 org_id로 사용
     const filterCode = orgPathFilter ? orgPathFilter.split('/').pop() || '' : ''
-    setAddForm({ name: '', login_id: '', org_id: filterCode, details: '' })
+    setAddForm({ name: '', login_id: '', org_id: filterCode, details: '', role: 'user' })
   }
   async function saveAdd() {
     if (!addForm.name) { show('이름은 필수입니다', 'err'); return }
@@ -134,7 +139,7 @@ export default function MembersPage() {
             const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '').slice(0, 13)
             downloadCsv(`cims_members_${ts}.csv`, rows)
           }}>CSV 내보내기 ({filtered.length})</button>
-          {selected.size > 0 && (
+          {canWrite && selected.size > 0 && (
             <button className="btn btn--danger btn--sm" onClick={handleBatchDelete}>선택 삭제 ({selected.size})</button>
           )}
         </div>
@@ -151,6 +156,7 @@ export default function MembersPage() {
                   </th>
                   <th>이름</th>
                   <th>로그인 ID</th>
+                  <th style={{ width: 100 }}>권한</th>
                   <th>조직</th>
                   <th>상세</th>
                   <th style={{ width: 120 }}>작업</th>
@@ -170,6 +176,12 @@ export default function MembersPage() {
                         <input className="form-input" value={editForm.login_id || ''} onChange={e => setEditForm({...editForm, login_id: e.target.value})} style={{ width: '100%' }} /> :
                         <span className="ts">{u.login_id || '—'}</span>}
                       </td>
+                      <td>{isEditing && canRole ?
+                        <select className="form-input" value={editForm.role || 'user'} onChange={e => setEditForm({...editForm, role: e.target.value as UserInput['role']})} style={{ width: '100%' }}>
+                          {ASSIGNABLE_ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                        </select> :
+                        <span className="badge">{ROLE_LABELS[u.role || 'user']}</span>}
+                      </td>
                       <td>{isEditing ?
                         <select className="form-input" value={editForm.org_id} onChange={e => setEditForm({...editForm, org_id: e.target.value})} style={{ width: '100%' }}>
                           <option value="">없음</option>
@@ -185,10 +197,10 @@ export default function MembersPage() {
                         {isEditing ? (
                           <><button className="btn btn--sm btn--primary" onClick={saveEdit}>저장</button>
                           <button className="btn btn--sm btn--ghost" onClick={() => setEditId(null)}>취소</button></>
-                        ) : (
+                        ) : canWrite ? (
                           <><button className="btn btn--sm btn--outline" onClick={() => startEdit(u)}>편집</button>
                           <button className="btn btn--sm btn--danger" onClick={() => handleDelete(u.id)}>삭제</button></>
-                        )}
+                        ) : <span className="ts" style={{ color: 'var(--text-muted)' }}>—</span>}
                       </td>
                     </tr>
                   )
@@ -199,6 +211,12 @@ export default function MembersPage() {
                     <td></td>
                     <td><input className="form-input" placeholder="이름 *" value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} style={{ width: '100%' }} autoFocus /></td>
                     <td><input className="form-input" placeholder="로그인 ID" value={addForm.login_id || ''} onChange={e => setAddForm({...addForm, login_id: e.target.value})} style={{ width: '100%' }} /></td>
+                    <td>{canRole ?
+                      <select className="form-input" value={addForm.role || 'user'} onChange={e => setAddForm({...addForm, role: e.target.value as UserInput['role']})} style={{ width: '100%' }}>
+                        {ASSIGNABLE_ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                      </select> :
+                      <span className="badge">{ROLE_LABELS['user']}</span>}
+                    </td>
                     <td><select className="form-input" value={addForm.org_id} onChange={e => setAddForm({...addForm, org_id: e.target.value})} style={{ width: '100%' }}>
                       <option value="">없음</option>
                       {orgList.map(o => <option key={o.id} value={o.code}>{o.name}</option>)}
@@ -209,11 +227,11 @@ export default function MembersPage() {
                       <button className="btn btn--sm btn--ghost" onClick={() => setAdding(false)}>취소</button>
                     </td>
                   </tr>
-                ) : (
-                  <tr><td colSpan={6} style={{ textAlign: 'center' }}>
+                ) : canWrite ? (
+                  <tr><td colSpan={7} style={{ textAlign: 'center' }}>
                     <button className="btn btn--ghost btn--sm" onClick={startAdd} style={{ color: 'var(--primary)', fontSize: 12 }}>＋ 구성원 추가</button>
                   </td></tr>
-                )}
+                ) : null}
               </tbody>
             </table>
           </div>

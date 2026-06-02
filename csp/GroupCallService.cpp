@@ -116,18 +116,9 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         strRecordDir =
             gclsCallDir.GetPttSessionDir( pszGroupId, TimeToIso( clsGroup._sessionStart ),
                                           std::to_string( clsGroup._dbId ) );
-        // Build group snapshot JSON
-        std::string strSnapshot = "{\"name\":\"" + CCallDir::JsonEsc( clsGroup._name ) + "\",\"members\":[";
-        bool bFirst = true;
-        for ( size_t i = 0; i < clsGroup._pusers.size(); ++i ) {
-            if ( !clsGroup._pusers[i] ) continue;
-            if ( !bFirst ) strSnapshot += ",";
-            bFirst = false;
-            strSnapshot += "{\"id\":\"" + clsGroup._pusers[i]->_id +
-                           "\",\"priority\":" + std::to_string( clsGroup._pusers[i]->_priority ) + "}";
-        }
-        strSnapshot += "]}";
-        gclsCallDir.PttSessionStart( pszGroupId, pszCallId, pszCallerInfo, strSnapshot );
+        // 자기완결 그룹 디스크립터 (계획서 §5) — group.json
+        std::string strDescriptor = BuildGroupDescriptor( clsGroup );
+        gclsCallDir.PttSessionStart( pszGroupId, pszCallId, pszCallerInfo, strDescriptor );
     }
 
     if ( iSharedPort <= 0 ) {
@@ -404,18 +395,9 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 strRecordDir =
             gclsCallDir.GetPttSessionDir( pszGroupId, TimeToIso( clsGroup._sessionStart ),
                                           std::to_string( clsGroup._dbId ) );
-                // Build group snapshot JSON for autojoin
-                std::string strSnapshot = "{\"name\":\"" + CCallDir::JsonEsc( clsGroup._name ) + "\",\"members\":[";
-                bool bFirst = true;
-                for ( size_t i = 0; i < clsGroup._pusers.size(); ++i ) {
-                    if ( !clsGroup._pusers[i] ) continue;
-                    if ( !bFirst ) strSnapshot += ",";
-                    bFirst = false;
-                    strSnapshot += "{\"id\":\"" + clsGroup._pusers[i]->_id +
-                                   "\",\"priority\":" + std::to_string( clsGroup._pusers[i]->_priority ) + "}";
-                }
-                strSnapshot += "]}";
-                gclsCallDir.PttSessionStart( pszGroupId, "autojoin", pszUserId, strSnapshot );
+                // 자기완결 그룹 디스크립터 (계획서 §5) — group.json (autojoin 경로)
+                std::string strDescriptor = BuildGroupDescriptor( clsGroup );
+                gclsCallDir.PttSessionStart( pszGroupId, "autojoin", pszUserId, strDescriptor );
             }
             int iSharedFloorPort = 0;
             if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort,
@@ -1048,6 +1030,65 @@ std::string CGroupCallService::BuildResourceListXml( const CspPttGroup &clsGroup
     oss << "  </list>\r\n"
         << "</resource-lists>\r\n";
 
+    return oss.str();
+}
+
+std::string CGroupCallService::BuildGroupDescriptor( const CspPttGroup &clsGroup ) {
+    // 자기완결 디스크립터 (계획서 §5). state/updated_at 은 PttSessionStart 가 주입.
+    auto jbool = []( bool b ) -> const char * { return b ? "true" : "false"; };
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"id\":" << clsGroup._dbId;
+    oss << ",\"mcptt_group_id\":\"" << CCallDir::JsonEsc( clsGroup._id ) << "\"";
+    oss << ",\"name\":\"" << CCallDir::JsonEsc( clsGroup._name ) << "\"";
+    if ( clsGroup._alias.empty() )
+        oss << ",\"alias\":null";
+    else
+        oss << ",\"alias\":\"" << CCallDir::JsonEsc( clsGroup._alias ) << "\"";
+    oss << ",\"group_type\":\"" << CCallDir::JsonEsc( clsGroup._groupType ) << "\"";
+    oss << ",\"priority\":" << clsGroup._priority;
+    oss << ",\"encryption\":" << jbool( clsGroup._encryption );
+    oss << ",\"emergency_call\":" << jbool( clsGroup._emergencyCall );
+    oss << ",\"video_enabled\":" << jbool( clsGroup._videoEnabled );
+    oss << ",\"on_network\":" << jbool( clsGroup._onNetwork );
+    oss << ",\"max_members\":" << clsGroup._maxMembers;
+    oss << ",\"require_affiliation\":" << jbool( clsGroup._requireAffiliation );
+    oss << ",\"org_code\":\"" << CCallDir::JsonEsc( clsGroup._orgCode ) << "\"";
+    if ( clsGroup._authorizedUserId > 0 )
+        oss << ",\"authorized_user_id\":" << clsGroup._authorizedUserId;
+    else
+        oss << ",\"authorized_user_id\":null";
+    if ( clsGroup._authorizedUser.empty() )
+        oss << ",\"authorized_user\":null";
+    else
+        oss << ",\"authorized_user\":\"tel:" << CCallDir::JsonEsc( clsGroup._authorizedUser ) << "\"";
+    if ( clsGroup._createdAt.empty() )
+        oss << ",\"created_at\":null";
+    else
+        oss << ",\"created_at\":\"" << CCallDir::JsonEsc( clsGroup._createdAt ) << "\"";
+    // 멤버 + member_count
+    int iCount = 0;
+    std::ostringstream members;
+    members << "[";
+    bool bFirst = true;
+    for ( const auto &pUser : clsGroup._pusers ) {
+        if ( !pUser ) continue;
+        if ( !bFirst ) members << ",";
+        bFirst = false;
+        ++iCount;
+        members << "{\"user_id\":\"" << CCallDir::JsonEsc( pUser->_id ) << "\"";
+        members << ",\"priority\":" << pUser->_priority;
+        members << ",\"role\":\"" << CCallDir::JsonEsc( pUser->_role ) << "\"";
+        if ( pUser->_mcpttId.empty() )
+            members << ",\"mcptt_id\":null";
+        else
+            members << ",\"mcptt_id\":\"" << CCallDir::JsonEsc( pUser->_mcpttId ) << "\"";
+        members << "}";
+    }
+    members << "]";
+    oss << ",\"member_count\":" << iCount;
+    oss << ",\"members\":" << members.str();
+    oss << "}";
     return oss.str();
 }
 
