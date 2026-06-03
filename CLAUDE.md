@@ -69,7 +69,7 @@ IMS 역할 기반 모듈형 SIP 서버. 단일 프로세스에서 CSCF + TAS + P
 
 ```
 SIP (5060) → CModuleDispatcher (ISipStackCallBack + ISipUserAgentCallBack)
-               ├─ CCscfModule  — REGISTER, SUBSCRIBE, 인증
+               ├─ CCscfModule  — REGISTER, SUBSCRIBE, PUBLISH(affiliation), 인증
                ├─ CTasModule   — VoIP B2BUA 호 처리: DND, 착신전환, 착신거부, 콜픽업
                ├─ CPttAsModule — PTT 그룹콜 (GroupCallService 래핑)
                └─ CIbcfModule  — IP-PBX 트렁크 라우팅
@@ -82,9 +82,9 @@ SIP (5060) → CModuleDispatcher (ISipStackCallBack + ISipUserAgentCallBack)
 
 #### 핵심 클래스
 - **`CModuleDispatcher`** (`ModuleDispatcher.h/.cpp`) — 중앙 디스패처, 콜 소유권 추적, 모든 SIP 이벤트 라우팅
-- **`CCscfModule`** (`CscfModule.h/.cpp`) — REGISTER/SUBSCRIBE 처리, Digest MD5 인증 헬퍼 (static)
+- **`CCscfModule`** (`CscfModule.h/.cpp`) — REGISTER/SUBSCRIBE/**PUBLISH**(affiliation, `RecvRequestPublish`) 처리, Digest MD5 인증 헬퍼 (static)
 - **`IModule`** (`IModule.h`) — 모듈 추상 인터페이스, `EModuleRouteResult` enum
-- **`CGroupCallService`** — PTT 그룹콜 오케스트레이션 (multipart INVITE: `application/vnd.3gpp.mcptt-info+xml` + `application/resource-lists+xml`(멤버 로스터) + SDP; affiliation 게이트·chair role)
+- **`CGroupCallService`** — PTT 그룹콜 오케스트레이션 (on-demand `ProcessGroupCall` 키업 트리거; multipart INVITE: `mcptt-info+xml` + `resource-lists+xml`(멤버 로스터) + SDP; affiliation 게이트·chair role·broadcast initiator·개시자 caller JOIN/200 OK floor 광고)
 - **`CSubscriptionManager`** — SIP SUBSCRIBE/NOTIFY 상태 관리 (GMS/CMS)
 - **`CspUserMap`** / **`CGroupMap`** — 가입자/그룹 메모리 캐시 (DB primary, JSON fallback)
 - **`CCmpClient`** — CMP 연동 (JSON-over-UDP, `record_dir` 전달)
@@ -114,11 +114,11 @@ RTP relay and floor control server, controlled entirely via JSON commands over U
 - **`CmpServer`** — Listens on UDP (default port 9000), dispatches commands
 - **`PRtpTrans`** — VoIP RTP 핸들러: 4포트 블록 (Audio RTP/RTCP + Video RTP/RTCP), 포트 50000~ 대역
 - **`PPttTrans`** — PTT 전용 핸들러: Audio RTP(52000~) + Floor Control(54000~) 독립 소켓
-- **`McpttGroup`** — Group RTP mixing and MCPTT floor control via RTCP APP packets on `m=application` 전용 소켓 (op-codes: REQUEST=1, GRANT=2, REJECT=3, RELEASE=4, IDLE=5, TAKEN=6, REVOKE=7; chair/priority 선점; 세션 `.d/floor.jsonl` 기록)
+- **`McpttGroup`** (`PMcpttGroup`) — Group RTP mixing and MCPTT floor control via RTCP APP packets on `m=application` 전용 소켓 (op-codes: REQUEST=1, GRANT=2, REJECT=3, RELEASE=4, IDLE=5, TAKEN=6, REVOKE=7; chair/priority 선점; **broadcast 그룹=개시자(`_initiatorSessionId`) 외 REQUEST REJECT**; 세션 `floor.jsonl` 기록)
 
 VoIP/PTT 리소스 풀 분리: VoIP(`PRtpTrans`, `RtpStartPort`), PTT(`PPttTrans`, `PttRtpStartPort`+`PttFloorStartPort`)
 
-CMP command verbs: `add`, `modify`, `remove`, `addGroup`(→floor_port 응답), `removeGroup`, `joinGroup`(+user_floor_port), `leaveGroup`.
+CMP command verbs: `add`, `modify`, `remove`, `ADD_PTT_GROUP`(→floor_port 응답; +`group_type`/`initiator_id`=broadcast floor 독점), `REMOVE_PTT_GROUP`, `JOIN_PTT_GROUP`(+user_floor_port+role), `LEAVE_PTT_GROUP`.
 
 Config: `cmp/cmp.json`.
 
@@ -137,21 +137,22 @@ Automated SIP/RTP client for load and functional testing.
 6. SIP stack sends only 100 Trying; 180 Ringing is forwarded from callee (no auto-180)
 7. RTP always flows through CMP relay
 
-### Key data flow: PTT group call (PTT-AS) — 3GPP MCPTT
-1. CSP `CheckGroupIntegrity()` detects registered+affiliated members → PTT-AS initiates session
-2. CSP requests shared RTP group from CMP (`addGroup` with `record_dir`=그룹 base `ptt/{id}`, 멤버 `id:prio:role`)
-3. CMP allocates shared RTP port
-4. CSP sends multipart `INVITE` to each member: `mcptt-info+xml`(TS 24.379) + `resource-lists+xml`(멤버 로스터 role/priority; **INVITE>8192B 우려 시 생략**) + SDP(+m=application floor)
-5. Members respond 200 OK → CSP parses `m=application` floor port (GetApplicationPort) → CMP `JOIN_PTT_GROUP` (user_floor_port + role)
-6. Audio: CMP `PPttTrans._rtpSock`; floor: `_floorSock`(m=application). **chair** role 은 participant floor 를 항상 선점(TS 24.380)
-7. **affiliation**(TS 24.379 §9): 멤버가 그룹 URI SUBSCRIBE 로 affiliate 해야 초대됨(`require_affiliation`). `ptt_affiliations` 기록
-8. 멤버 `role`(chair/participant)·affiliation·group 식별(surrogate id + mcptt_group_id)은 DB(`ptt_groups`/`ptt_group_members`/`ptt_affiliations`)
+### Key data flow: PTT group call (PTT-AS) — 3GPP MCPTT (on-demand 모델, 2026-06-03 규격전환)
+호 수명은 `group_type` 분기: `prearranged`/`broadcast`=on-demand(키업 트리거), `chat`=상시. **REGISTER 는 호 무영향**(구 always-on 자동초대 제거).
+1. **affiliation = SIP PUBLISH**(`mcptt-affiliation-command+xml`, TS 24.379 §9) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. (구 SUBSCRIBE 경로 호환 유지.)
+2. 발신 UE 키업(그룹 `INVITE`) → `EventIncomingCall`(캐시 미스 시 `LoadFromDb()` lazy-load) → `ProcessGroupCall`
+3. CSP → CMP `ADD_PTT_GROUP`(`record_dir`=`ptt/{id}`, 멤버 `id:prio:role`, **+`group_type`/`initiator_id`**) → shared RTP/Floor 할당
+4. **개시자(caller)도 floor/RTP 멤버**: 200 OK 에 `m=application`(SharedFloorPort) 광고(psip `AddSdp` append) + caller `JOIN_PTT_GROUP`(floor=audio+1) → caller 음성 릴레이 + floor 참여
+5. fan-out: affiliate+등록 멤버에게 multipart `INVITE`(`mcptt-info+xml` + `resource-lists+xml` 로스터[>8192B 시 생략] + SDP). 멤버 200 OK → `JOIN_PTT_GROUP`(user_floor_port + role)
+6. Audio: `PPttTrans._rtpSock`; floor: `_floorSock`. **chair**=participant 항상 선점. **broadcast**=개시자 외 floor REQUEST REJECT(`reason=broadcast`)
+7. 마지막 멤버 이탈 시 on-demand(prearranged/broadcast)는 `REMOVE_PTT_GROUP`+세션 종료, chat 은 상시 유지
+8. 멤버 `role`/affiliation/group 식별(surrogate id + mcptt_group_id)은 DB(`ptt_groups`/`ptt_group_members`/`ptt_affiliations`)
 
-### Key data flow: CSC subscriptions (CSCF)
-1. Client sends `SUBSCRIBE Event: gms` (or `cms`)
-2. `CCscfModule` stores dialog in `CSubscriptionManager`, replies 200 OK
-3. CSP immediately sends `NOTIFY` with xcap-diff XML body
-4. Subscription state refreshed via Expires header
+### Key data flow: CSC subscriptions + XCAP (UE↔CSP NOTIFY, UE↔CSC HTTP)
+1. UE `SUBSCRIBE Event: xcap-diff`(gms/cms) → `CCscfModule` → `CSubscriptionManager` → 200 OK + 즉시 `NOTIFY`
+2. NOTIFY xcap-diff body 의 `xcap-root` = **`https://{CSC}:{4430}/`**(`Setup.Xcap.{Host,Port,Scheme}`; 구 `http://{CSP}:4420` 오지정 교정). GMS sel 은 가입자 소속 그룹별 enumerate
+3. UE → **CSC McpttServer(HTTPS :4430)**: CSC-1 토큰(OAuth2 PKCE: `/idms/authreq`→`/idms/tokenreq`) → 문서 GET(`Authorization: Bearer`, `If-None-Match`→304). 무토큰 401
+4. XCAP 문서 빌더는 `csc/src/services/mcptt.py`(group/user-profile/service-config). [docs/api/mcptt_api.md](docs/api/mcptt_api.md)
 
 ### Key data flow: Admin → CSP real-time sync
 1. Console UI → `cims_admin.py` CRUD → DB 수정 → `notify_csp()` UDP 전송
@@ -209,7 +210,7 @@ python3 -m unittest tests.test_verify_lib   # 35 unit tests
 
 | File | Purpose |
 |---|---|
-| `csp/csp.json` | CSP IP/ports, realm, RTP relay, Roles (CSCF/TAS/PTT_AS/IBCF), DB, log config |
+| `csp/csp.json` | CSP IP/ports, realm, RTP relay, Roles (CSCF/TAS/PTT_AS/IBCF), DB, log config, **`Setup.Xcap.{Host,Port,Scheme}`**(xcap-diff NOTIFY 의 xcap-root = CSC XCAP 서버, 기본 https:4430) |
 | `cmp/cmp.json` | CMP IP, control port, VoIP RTP pool (50000~), PTT RTP pool (52000~), PTT Floor pool (54000~), DTMF PTT digits |
 | `csp/User/{id}.json` | User credentials, DND flag, call forward/reject rules (DB fallback) |
 | `csp/Group/{id}.json` | Group name and member list with priorities (DB fallback) |

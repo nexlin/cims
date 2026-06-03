@@ -1,15 +1,29 @@
 # PTT 서비스 케이스 및 메시지 Flow
 
 **작성일:** 2026-04-03
-**최종 수정:** 2026-06-02 (3GPP MCPTT 규격 정합 + 로그 디렉터리 시간버킷)
+**최종 수정:** 2026-06-03 (3GPP MCPTT 규격전환 완료 — on-demand 호모델 / PUBLISH affiliation / XCAP HTTP / broadcast floor / 개시자 floor 정합)
 
-> **2026-06 3GPP MCPTT 보강 요약**
+> **⭐ 2026-06-03 3GPP MCPTT 규격전환 완료 (UE↔CSP / UE↔CSC)** — 호 수명 모델이 `group_type` 으로 분기한다.
+>
+> | group_type | 모드 | 절차 |
+> |---|---|---|
+> | `prearranged` | **on-demand** | 발신 UE 의 키업(그룹 INVITE)→affiliate+등록 멤버 fan-out→무활동 해제 (TS 24.379 §10.1) |
+> | `chat` | **상시(persistent)** | 상시 세션, 멤버는 affiliation 시 합류, de-affiliate/dereg 시 이탈 (§10.2) |
+> | `broadcast` | on-demand + 발신자 floor 독점 | 개시자만 발언, 타 멤버 floor REQUEST 는 CMP 가 REJECT (TS 24.380 §10.3) |
+>
+> - **REGISTER 는 호에 무영향** (구 always-on 자동초대/기동 시 자동생성 제거). 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
+> - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. (구 SUBSCRIBE-presence 경로는 호환 유지.)
+> - **개시자(originator) 도 CMP floor/RTP 멤버**: `ProcessGroupCall` 이 caller 를 `JOIN_PTT_GROUP`(audio/floor=audio+1) → caller RTP 릴레이 + floor 참여. 200 OK 에 `m=application`(SharedFloorPort) 광고(psip `AddSdp` append, audio-only 호엔 무영향) → 개시자가 floor dest 학습.
+> - **broadcast**: `ADD_PTT_GROUP` 에 `group_type`+`initiator_id` 전달 → CMP `handleFloorRequest` 가 개시자 외 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`).
+> - **신규 그룹 즉시 발신**: `EventIncomingCall` 이 그룹 캐시 미스 시 `LoadFromDb()` lazy-reload (notify 도달 무관 안전망). + csc `notify_csp` GROUP_CHANGED 를 CSP+PSP 양쪽 broadcast.
+> - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` = `https://{CSC}:{4430}/`(`Setup.Xcap.{Host,Port,Scheme}`, 구 `http://{CSP}:4420` 오지정 교정). UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
+>
+> **2026-06-02 3GPP 정합 (유지)**
 > - 그룹 식별: `ptt_groups.id`=surrogate(키), `mcptt_group_id`=식별자. 멤버 `role`(chair/participant)·`mcptt_id`.
 > - INVITE: `mcptt-info+xml` + **`resource-lists+xml`(멤버 로스터)** + SDP. (로스터는 INVITE>8192B 우려 시 생략 → GMS 의존)
 > - **chair** = participant floor 항상 선점(TS 24.380). 200 OK 의 `m=application` floor 포트 파싱.
-> - **affiliation**(TS 24.379 §9): 그룹 URI SUBSCRIBE 로 affiliate 한 멤버만 초대(`require_affiliation`), `ptt_affiliations` 기록.
 > - **로그/녹취 디렉터리**: `ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/`(시간버킷) + `seg/{NNN}`(100세그 shard) + `floor.jsonl`/`group.json`. [recording.md](recording.md)
-> - 그룹 권한/소유(authorized user)·콘솔 RBAC 는 [mcptt_authorization.md](mcptt_authorization.md) (구현 대기).
+> - 그룹 권한/소유(authorized user)·콘솔 RBAC 는 [mcptt_authorization.md](mcptt_authorization.md).
 
 ---
 
@@ -30,10 +44,12 @@
 
 | # | 케이스 | 설명 |
 |---|--------|------|
-| B1 | 단말 SIP 등록 | REGISTER → Digest 인증 → 그룹 자동 참여 |
-| B2 | GMS/CMS 구독 | 그룹 관리 / 사용자 설정 변경 구독 |
-| B3 | 그룹 세션 자동 생성 | CSP 기동 시 CMP에 그룹 공유 RTP 세션 생성 |
-| B4 | 단말 등록 해제 | REGISTER Expires=0 또는 네트워크 단절 |
+| B1 | 단말 SIP 등록 | REGISTER → Digest 인증 (호에 무영향 — 자동초대 없음) |
+| B1a | affiliation (PUBLISH) | 그룹 URI PUBLISH 로 affiliate → `ptt_affiliations` |
+| B1b | on-demand 그룹콜 개시 | 발신 UE 키업(그룹 INVITE) → fan-out (prearranged/broadcast) |
+| B2 | GMS/CMS 구독 + XCAP GET | xcap-diff 구독 → NOTIFY → CSC-1 토큰 → 문서 GET |
+| B3 | 그룹 세션 수명 | on-demand(키업 시 생성/해제) vs chat(상시) |
+| B4 | 단말 등록 해제 | REGISTER Expires=0 → ClearUserCall + de-affiliation |
 
 ### Part C. 서비스 중 (통화/플로어)
 
@@ -190,87 +206,100 @@ Console            CSC                 CSP                     CMP
 
 ## Part B. 단말 등록 및 서비스 진입
 
-### B1. 단말 SIP 등록 및 그룹 자동 참여
+### B1. 단말 SIP 등록 (호에 무영향)
 
 ```
-UE(단말)                CSP                          CMP
-  │                      │                            │
-  │ ── REGISTER ──────► │                            │
-  │ ◄── 401 Challenge ─ │  (Digest MD5 인증)         │
-  │ ── REGISTER+Auth ─► │                            │
-  │ ◄── 200 OK ──────── │                            │
-  │                      │                            │
-  │                      │ [CheckGroupIntegrity]      │
-  │                      │ 소속 그룹에 활성 콜 없음    │
-  │                      │                            │
-  │ ◄── INVITE ──────── │  multipart/mixed:          │
-  │     (그룹 초대)       │  Part1: mcptt-info+xml     │
-  │                      │   (session-type=group_type,│
-  │                      │    group-id, caller-id)    │
-  │                      │  Part2: resource-lists+xml │  ← 멤버 로스터(role/priority)
-  │                      │   (INVITE>8192B 우려 시 생략)│    대형 그룹은 GMS 의존
-  │                      │  Part3: SDP                │
-  │                      │   m=audio {CMP RTP 포트}   │
-  │                      │   m=application {CMP Floor} │
-  │                      │                            │
-  │ ── 180 Ringing ───► │                            │
-  │ ── 200 OK ────────► │   (m=application floor 포트)│
-  │                      │                            │
-  │                      │ [OnCallStarted]            │
-  │                      │  200 OK SDP m=application  │  ← GetApplicationPort 파싱
-  │                      │ ── JOIN_PTT_GROUP ───────► │  RTP 수신 시작
-  │                      │    {group_id, session_id,  │
-  │                      │     user_ip, user_port,    │
-  │                      │     user_floor_port, role} │  ← chair/participant
-  │ ◄── ACK ──────────── │                            │
-  │                      │                            │
-  │                      │ [SendConferenceNotify]     │
-  │                      │ ── NOTIFY ──────────────► 기존 참여자 전원
-  │                      │    Event: conference       │
-  │                      │    conference-info+xml     │
-  │                      │    (user: connected)       │
-```
-
-### B2. GMS/CMS 구독
-
-```
-UE                      CSP
+UE(단말)                CSP
   │                      │
-  │ ── SUBSCRIBE ──────► │  Event: xcap-diff
-  │    gms_psi           │  Body: resource-lists (구독할 그룹 문서 목록)
+  │ ── REGISTER ──────► │
+  │ ◄── 401 Challenge ─ │  (Digest MD5 인증)
+  │ ── REGISTER+Auth ─► │
+  │ ◄── 200 OK ──────── │  (Expires 3600 강제)
+  │                      │
+  │  ※ 구 always-on 모델의 "그룹 자동초대" 는 제거됨.
+  │     REGISTER 갱신(refresh)은 진행 중인 호/floor 에 무영향
+  │     (구 버전은 갱신마다 teardown+재초대 → 밤샘 불안정의 원인이었음).
+```
+
+### B1a. affiliation (SIP PUBLISH — TS 24.379 §9)
+
+```
+UE                      CSP (CCscfModule)
+  │                      │
+  │ ── PUBLISH ────────► │  Request-URI: sip:{group}@domain
+  │  (그룹 URI)          │  Event: poc-settings, Expires: 3600(affiliate)/0(de-affiliate)
+  │                      │  Content-Type: application/vnd.3gpp.mcptt-affiliation-command+xml
+  │                      │  Body: <affiliate group="sip:{group}@.."/>
+  │                      │ [RecvRequestPublish]
+  │                      │  → InsertAffiliation / RemoveAffiliation (ptt_affiliations)
+  │ ◄── 200 OK ──────── │  SIP-ETag (RFC 3903)
+  │                      │  (active prearranged/chat 세션이면 late-entry InviteMember)
+```
+> 구 SUBSCRIBE-presence affiliation 경로는 호환을 위해 유지(추가형).
+
+### B1b. on-demand 그룹콜 개시 (prearranged / broadcast — TS 24.379 §10.1/§10.3)
+
+```
+발신 UE(개시자)          CSP                          CMP
+  │                      │                            │
+  │ ── INVITE ─────────► │  Req-URI: sip:{group}@domain (키업)
+  │  (그룹 URI, SDP)     │ [EventIncomingCall]
+  │                      │  그룹 캐시 미스면 LoadFromDb() (lazy-load 안전망)
+  │                      │ [ProcessGroupCall]
+  │                      │  ── ADD_PTT_GROUP ───────► │  공유 RTP/Floor 할당
+  │                      │     {group_id, members,    │  (group_type=broadcast 면
+  │                      │      group_type,           │   initiator_id 동봉)
+  │                      │      initiator_id}         │
+  │                      │  ◄── {ip,port,floor_port} ─ │
+  │ ◄── 200 OK ────────── │  SDP: m=audio {SharedPort} │
+  │                      │       m=application {Floor} │  ← 개시자가 floor dest 학습
+  │ ── ACK ────────────► │                            │
+  │                      │  ── JOIN_PTT_GROUP(caller)► │  개시자도 floor/RTP 멤버
+  │                      │     {audio, floor=audio+1} │     (음성 릴레이 + floor 참여)
+  │                      │                            │
+  │                      │  [fan-out] affiliate+등록 멤버에게 multipart INVITE
+  │                      │  ── INVITE ──────────────► 멤버 UE … (B 흐름: 200→JOIN)
+  │                      │                            │
+  │  ※ 마지막 멤버 이탈 시 prearranged/broadcast 는 REMOVE_PTT_GROUP + 세션 종료.
+  │     chat 은 상시 유지.
+```
+
+### B2. GMS/CMS 구독 + XCAP 문서 취득 (UE↔CSP NOTIFY + UE↔CSC HTTP)
+
+```
+UE                      CSP                          CSC McpttServer(HTTPS :4430)
+  │                      │                            │
+  │ ── SUBSCRIBE ──────► │  Event: xcap-diff (gms_psi/cms_psi)
   │ ◄── 200 OK ──────── │
-  │ ◄── NOTIFY ──────── │  xcap-diff (초기 상태 통지)
-  │ ── 200 OK ────────► │
-  │                      │
-  │ ── SUBSCRIBE ──────► │  Event: xcap-diff
-  │    cms_psi           │  Body: resource-lists (user-profile, service-config)
-  │ ◄── 200 OK ──────── │
-  │ ◄── NOTIFY ──────── │  xcap-diff (초기 상태 통지)
-  │ ── 200 OK ────────► │
-  │                      │
-  │ ... 설정 변경 발생 시 ...
-  │ ◄── NOTIFY ──────── │  xcap-diff (변경 통지)
-  │ ── 200 OK ────────► │
+  │ ◄── NOTIFY ──────── │  xcap-diff:
+  │ ── 200 OK ────────► │   xcap-root="https://{CSC}:4430/"   ← Setup.Xcap.{Host,Port,Scheme}
+  │                      │   <document sel="org.openmobilealliance.groups/users/tel:{u}/tel:{group}"/>  (gms, 가입자 그룹별)
+  │                      │   <document sel="org.3gpp.mcptt.user-profile/.../user-profile"/>  (cms)
+  │                      │   <document sel="org.3gpp.mcptt.service-config/.../service-config"/>
+  │                      │                            │
+  │ ── HTTPS GET /idms/authreq?..code_challenge(PKCE) ───────────────────────► │  (CSC-1 토큰)
+  │ ◄── {code} ──────────────────────────────────────────────────────────────  │
+  │ ── HTTPS POST /idms/tokenreq {code, code_verifier} ──────────────────────► │
+  │ ◄── {access_token} (Bearer) ─────────────────────────────────────────────  │
+  │ ── HTTPS GET {xcap-root}{sel}  Authorization: Bearer .. ─────────────────► │  GMS/CMS 문서
+  │ ◄── 200 + XML (Etag) ─────────────────────────────────────────────────────  │
+  │ ── HTTPS GET .. If-None-Match: {etag} ──────────────────────────────────► │
+  │ ◄── 304 Not Modified ─────────────────────────────────────────────────────  │
+```
+> 무토큰 GET → 401. xcap-root 구 `http://{CSP}:4420`(라우트 없는 Admin 서버 오지정)을 `https://{CSC}:4430`(McpttServer)로 교정. cspsim 은 `RecvResponse`/NOTIFY 에서 floor·문서 경로를 학습해 동일 흐름 수행.
+
+### B3. 그룹 세션 수명 (on-demand vs chat)
+
+```
+prearranged / broadcast (on-demand):
+  세션 없음 ──(개시자 키업 INVITE: B1b)──► ADD_PTT_GROUP + 세션 ──(마지막 멤버 이탈)──► REMOVE_PTT_GROUP
+
+chat (상시):
+  CheckGroupIntegrity 가 active chat 세션 유지 — affiliate 멤버 합류(InviteMember),
+  de-affiliate/dereg 시 이탈. (구 "기동 시 전 그룹 자동 생성(SyncGroupsState proactive)" 은 제거됨.)
 ```
 
-### B3. 그룹 세션 자동 생성 (CSP 기동 시)
-
-```
-CSP                                    CMP
- │  [기동: MonitorLoop → SyncGroupsState]
- │                                      │
- │  ──── addgroup ──────────────────►   │  PPttTrans 풀에서 할당:
- │       {group_id,                     │  Audio RTP (52000~) +
- │        members: "u1:p1,u2:p2,..."}   │  Floor Control (54000~)
- │  ◄─── {ip, port, floor_port} ───    │
- │                                      │
- │  CSP: GroupRtpInfo에 floor_port 저장 │
- │  → INVITE SDP m=application 포트로 사용
- │                                      │
- │  (DB의 모든 그룹에 대해 반복)         │
-```
-
-**주기:** 60초마다 DB 리로드 + 멤버 해시 비교로 변경 감지
+> 신규 그룹은 `EventIncomingCall` 의 캐시 미스 lazy-reload 로 재기동 없이 즉시 발신 가능. CSC `notify_csp(GROUP_CHANGED)` 는 CSP+PSP 양쪽 broadcast.
 
 ### B4. 단말 등록 해제
 
@@ -355,6 +384,25 @@ UE-B (낮은 우선순위, 현재 화자)   CMP              UE-A (높은 우선
   │                                │                │
   │                                │ ── FLOOR_TAKEN ► ALL (각 멤버 floor port)
 ```
+
+### C3b. broadcast 그룹 floor 독점 (TS 24.380 §10.3)
+
+`group_type=broadcast` 그룹은 개시자(initiator)만 발언한다. CMP `handleFloorRequest` 가
+요청자 sessionId(=userId) ≠ `_initiatorSessionId` 이면 floor 점유 여부와 무관하게 REJECT.
+
+```
+개시자(initiator)         CMP (broadcast group)        비개시자 멤버
+  │                      │  (_groupType=broadcast,     │
+  │                      │   _initiatorSessionId=개시자)│
+  │ ── FLOOR_REQUEST ──► │                            │
+  │ ◄── FLOOR_GRANT ──── │  requester==initiator → GRANT
+  │                      │                            │
+  │                      │ ◄── FLOOR_REQUEST ──────── │
+  │                      │  requester!=initiator →    │
+  │                      │ ── FLOOR_REJECT ─────────► │  floor.jsonl reason=broadcast
+  │ ── RTP Audio ──────► │ ── RTP Forward ──────────► │  개시자 음성만 릴레이
+```
+> `initiator_id` 는 `ADD_PTT_GROUP` 으로 CSP→CMP 전달(개시자 = `ProcessGroupCall` 의 caller). 개시자는 JOIN_PTT_GROUP 으로 CMP floor 멤버 등록되어 GRANT 가능.
 
 ### C4. 멤버 퇴장 (정상 BYE)
 
@@ -540,13 +588,14 @@ CSP                                    CMP
 
 | 인터페이스 | 프로토콜 | 포트 | 메시지 |
 |-----------|----------|------|--------|
-| UE ↔ CSP | SIP/UDP | 5060 | REGISTER, INVITE, BYE, SUBSCRIBE, NOTIFY |
-| CSP → CMP | UDP JSON | 9000 | addgroup, modifygroup, removegroup, joingroup, leavegroup |
-| CSC → CSP | UDP JSON | 4421 | group_change, user_change, stats |
+| UE ↔ CSP | SIP/UDP | 5060 | REGISTER, INVITE, BYE, SUBSCRIBE, NOTIFY, **PUBLISH**(affiliation) |
+| UE ↔ CSC (XCAP/IdMS) | **HTTPS** | **4430** | CSC-1 토큰(/idms/*) + GMS/CMS 문서 GET (McpttServer) |
+| CSP → CMP | UDP JSON | 9000 | ADD_PTT_GROUP(+group_type/initiator_id), modify, remove, JOIN_PTT_GROUP, leave |
+| CSC → CSP/PSP | UDP JSON | 4421 | group_change(CSP+PSP broadcast), user_change, stats |
 | UE ↔ CMP (Audio) | RTP/UDP | 52000-52018 | PTT 음성 데이터 (PPttTrans._rtpSock) |
 | UE ↔ CMP (Floor) | RTCP APP/UDP | 54000-54018 | MCPTT Floor Control (PPttTrans._floorSock) |
 | CSP → UE (in-dialog) | SIP NOTIFY | (dialog) | Event: conference, conference-info+xml |
-| CSP → UE (out-dialog) | SIP NOTIFY | (subscription) | Event: xcap-diff |
+| CSP → UE (out-dialog) | SIP NOTIFY | (subscription) | Event: xcap-diff (xcap-root=https://{CSC}:4430/) |
 
 > **참고:** VoIP 1:1 통화는 별도의 PRtpTrans 풀(50000-50079)을 사용한다.
 > PTT와 VoIP 포트 대역이 분리되어 리소스 독립 관리가 가능하다.
@@ -557,7 +606,7 @@ CSP                                    CMP
 |------|------|------|------|
 | 1 | FLOOR_REQUEST | UE → CMP | 발언권 요청 |
 | 2 | FLOOR_GRANT | CMP → UE | 발언권 승인 |
-| 3 | FLOOR_REJECT | CMP → UE | 발언권 거부 (우선순위 낮음) |
+| 3 | FLOOR_REJECT | CMP → UE | 발언권 거부 (우선순위 낮음 / broadcast 비개시자) |
 | 4 | FLOOR_RELEASE | UE → CMP | 발언권 해제 |
 | 5 | FLOOR_IDLE | CMP → ALL | 발언권 없음 (대기) |
 | 6 | FLOOR_TAKEN | CMP → ALL | 화자 변경 알림 |

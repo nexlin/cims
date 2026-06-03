@@ -566,7 +566,7 @@ Content-Length: 350
 
 <?xml version="1.0" encoding="UTF-8"?>
 <xcap-diff xmlns="urn:ietf:params:xml:ns:xcap-diff"
-           xcap-root="https://csp:4430/org.openmobilealliance.groups/">
+           xcap-root="https://csc:4430/org.openmobilealliance.groups/">
   <document doc-selector="users/tel%3A%2B82571900001"
             new-etag="etag_20260331_001"
             previous-etag="">

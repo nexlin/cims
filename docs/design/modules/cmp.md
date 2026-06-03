@@ -180,9 +180,11 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
 | group_id | O | 그룹 식별자 |
-| members | - | "sid1:prio1,sid2:prio2" CSV 형식 |
+| members | - | "sid1:prio1:role,sid2:prio2:role" CSV (role=chair/participant) |
 | record_dir | - | 녹취 디렉토리 |
 | log_dir | - | CMP flow 로그 경로 |
+| group_type | - | `prearranged`/`chat`/`broadcast` (broadcast floor 정책용) |
+| initiator_id | - | broadcast 개시자 sessionId(=userId) — floor 독점 판정 |
 
 **응답:** `ip`, `port` (Audio RTP), `floor_port` (Floor Control), `video_port`
 
@@ -192,7 +194,8 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 3. PPttTrans ↔ McpttGroup 연결 (`setGroup`, `setPttSession`)
 4. DTMF 설정 전달
 5. 녹취/로그 설정
-6. members CSV 파싱 → 우선순위 설정
+6. members CSV 파싱 → 우선순위/role 설정
+7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`) — TS 24.380 §10.3.
 
 #### JOIN_GROUP / JOINGROUP — 멤버 참가
 
