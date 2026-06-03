@@ -39,6 +39,7 @@ public:
 private:
     bool RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage );
     bool RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage );
+    bool RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage );
 
     bool SendResponse( CSipMessage *pclsMessage, int iStatusCode );
 };

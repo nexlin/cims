@@ -205,9 +205,11 @@ void SimSession::SubscribeCms() {
     SendSubscribe("cms_psi", m_strCmsCallId, m_iCmsSeq, m_strCmsFromTag);
 }
 
-// MCPTT 그룹 affiliation (TS 24.379 §9): Request-URI=그룹 URI 로 SUBSCRIBE 송신.
-// CSP 의 CscfModule 이 Request-URI user 가 알려진 그룹이면 (user,group,client) affiliation 으로 등록.
-void SimSession::AffiliateGroup() {
+// MCPTT 그룹 affiliation (TS 24.379 §9): 그룹 URI 로 SIP PUBLISH 송신(RFC 3903).
+//   Content-Type: application/vnd.3gpp.mcptt-affiliation-command+xml.
+//   CSP CscfModule::RecvRequestPublish 가 Request-URI 그룹이면 (user,group,client) affiliation 등록.
+//   Expires>0=affiliate, Expires:0(또는 body de-affiliate)=해제.
+void SimSession::AffiliateGroup(bool bDeaffiliate) {
     if (!m_bPttMode || m_strGroupId.empty()) return;
 
     const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
@@ -221,7 +223,7 @@ void SimSession::AffiliateGroup() {
     SipMakeTag(szTag, sizeof(szTag));
 
     CSipMessage* pMsg = new CSipMessage();
-    pMsg->m_strSipMethod = "SUBSCRIBE";
+    pMsg->m_strSipMethod = "PUBLISH";
     // Request-URI: sip:{group}@domain — group id 로 affiliation 대상 지정
     pMsg->m_clsReqUri.Set("sip", m_strGroupId.c_str(), m_strDomain.c_str(), m_iServerPort);
 
@@ -233,19 +235,31 @@ void SimSession::AffiliateGroup() {
     pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
     pMsg->m_clsTo.m_clsUri.Set("sip", m_strGroupId.c_str(), m_strDomain.c_str(), 0);
     pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
-    pMsg->m_clsCSeq.Set(1, "SUBSCRIBE");
+    pMsg->m_clsCSeq.Set(1, "PUBLISH");
     pMsg->m_iMaxForwards = 70;
-    pMsg->AddHeader("Expires", "3600");
-    pMsg->AddHeader("Event", "presence");  // 그룹 affiliation/conference state
+    pMsg->AddHeader("Expires", bDeaffiliate ? "0" : "3600");
+    pMsg->AddHeader("Event", "poc-settings");  // MCPTT affiliation event
 
     char szContact[128];
     snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
              m_strUser.c_str(), strLocalIp.c_str(), iLocalPort);
     pMsg->AddHeader("Contact", szContact);
 
+    // application/vnd.3gpp.mcptt-affiliation-command+xml 본문
+    std::string strBody;
+    strBody  = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    strBody += "<mcptt-affiliation-command xmlns=\"urn:3gpp:ns:mcpttAffiliation:1.0\">\r\n";
+    strBody += std::string("  <") + (bDeaffiliate ? "de-affiliate" : "affiliate")
+             + " group=\"sip:" + m_strGroupId + "@" + m_strDomain + "\"/>\r\n";
+    strBody += "</mcptt-affiliation-command>\r\n";
+    pMsg->m_clsContentType.Set("application", "vnd.3gpp.mcptt-affiliation-command+xml");
+    pMsg->m_strBody = strBody;
+    pMsg->m_iContentLength = (int)strBody.size();
+
     pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
 
-    printf("[%d] AFFILIATE group=%s Call-ID=%s\n", m_iId, m_strGroupId.c_str(), szCallId);
+    printf("[%d] %s group=%s Call-ID=%s\n", m_iId, bDeaffiliate ? "DE-AFFILIATE" : "AFFILIATE",
+           m_strGroupId.c_str(), szCallId);
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
 }
 

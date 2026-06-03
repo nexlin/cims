@@ -206,6 +206,8 @@ bool CCscfModule::OnSipRequest( int iThreadId, CSipMessage *pclsMessage ) {
         return RecvRequestRegister( iThreadId, pclsMessage );
     } else if ( pclsMessage->IsMethod( "SUBSCRIBE" ) ) {
         return RecvRequestSubscribe( iThreadId, pclsMessage );
+    } else if ( pclsMessage->IsMethod( "PUBLISH" ) ) {
+        return RecvRequestPublish( iThreadId, pclsMessage );
     }
     return false;
 }
@@ -411,5 +413,69 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     }
 
     SendInitialNotify( info );
+    return true;
+}
+
+// ──────────────────────────────────────────────────────────────
+//  PUBLISH 처리 — MCPTT affiliation (TS 24.379 §9, RFC 3903)
+//   UE 가 그룹 URI 로 PUBLISH(application/vnd.3gpp.mcptt-affiliation-command+xml) →
+//   (user, group, client) affiliation 등록/해제. Expires>0=affiliate, Expires:0 또는
+//   body 에 "de-affiliate"=해제. dialog/NOTIFY 없음(상태 publish). 200 OK + SIP-ETag.
+//   late entry(진행 중 prearranged/상시 chat 세션 합류)는 CheckGroupIntegrity 주기 sweep 이
+//   affiliation(DB) 기반으로 수행하므로 여기서 직접 INVITE 하지 않는다.
+// ──────────────────────────────────────────────────────────────
+bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) {
+    (void)iThreadId;
+    char szFromBuf[256];
+    pclsMessage->m_clsFrom.m_clsUri.ToString( szFromBuf, sizeof( szFromBuf ) );
+    std::string strFromId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+    if ( !gclsUserMap.Select( strFromId.c_str() ) ) {
+        CLog::Print( LOG_ERROR, "PUBLISH Rejected: User %s not registered", strFromId.c_str() );
+        SendResponse( pclsMessage, 403 );
+        return true;
+    }
+
+    std::string strReqUriUser = pclsMessage->m_clsReqUri.m_strUser;
+    bool bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
+    if ( !bAffiliation ) {
+        // affiliation 대상(그룹) 아님 — 상태 없이 200 수용
+        SendResponse( pclsMessage, 200 );
+        return true;
+    }
+
+    std::string strContactUri;
+    if ( !pclsMessage->m_clsContactList.empty() ) {
+        char szC[256];
+        pclsMessage->m_clsContactList.front().m_clsUri.ToString( szC, sizeof( szC ) );
+        strContactUri = szC;
+    } else {
+        strContactUri = szFromBuf;
+    }
+
+    int iExpires = pclsMessage->GetExpires();
+    bool bDeaffiliate =
+        ( iExpires == 0 ) || ( pclsMessage->m_strBody.find( "de-affiliate" ) != std::string::npos );
+
+    if ( gclsDbManager.IsConnected() ) {
+        if ( bDeaffiliate ) {
+            gclsDbManager.RemoveAffiliation( strReqUriUser, strFromId, strContactUri );
+            CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] de-affiliate user=%s group=%s", strFromId.c_str(),
+                         strReqUriUser.c_str() );
+        } else {
+            gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri,
+                                             iExpires > 0 ? iExpires : 3600 );
+            CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
+                         strReqUriUser.c_str(), iExpires > 0 ? iExpires : 3600 );
+        }
+    }
+
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
+    if ( pclsResponse ) {
+        char szEtag[80];
+        snprintf( szEtag, sizeof( szEtag ), "aff-%s-%ld", strReqUriUser.c_str(), (long)time( NULL ) );
+        pclsResponse->AddHeader( "SIP-ETag", szEtag );
+        pclsResponse->AddHeader( "Expires", iExpires > 0 ? iExpires : 3600 );
+        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+    }
     return true;
 }
