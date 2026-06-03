@@ -186,6 +186,33 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         CLog::Print( LOG_INFO, "ProcessGroupCall: AcceptCall OK → Caller(%s) SharedPort(%d)", pszCallerInfo,
                      iSharedPort );
 
+        // 개시자(caller)를 CMP floor/RTP 멤버로 등록.
+        //   AcceptCall 만으로는 caller 가 CMP _members 에 없어 onRtpPacket 이 caller RTP 를
+        //   drop(미릴레이)하고 floor REQUEST 도 미매칭(GRANT 안 됨)이었다. caller 의 INVITE SDP
+        //   audio 포트 + 관례(floor=audio+1, video=audio+2; cspsim RtpThread 와 동일)로 JoinGroup.
+        //   (caller INVITE 에 m=application 이 있으면 GetApplicationPort 우선.)
+        if ( pclsRtp ) {
+            int iCallerAudio = pclsRtp->GetAudioPort();
+            if ( iCallerAudio <= 0 ) iCallerAudio = pclsRtp->m_iPort;
+            if ( iCallerAudio > 0 ) {
+                int iCallerFloor = pclsRtp->GetApplicationPort();
+                if ( iCallerFloor <= 0 ) iCallerFloor = iCallerAudio + 1;
+                int iCallerVideo = pclsRtp->GetVideoPort();
+                if ( iCallerVideo <= 0 && clsGroup._videoEnabled ) iCallerVideo = iCallerAudio + 2;
+                std::string strCallerRole = "participant";
+                for ( const auto &pUser : clsGroup._pusers ) {
+                    if ( pUser && pUser->_id == pszCallerInfo ) {
+                        strCallerRole = pUser->_role;
+                        break;
+                    }
+                }
+                gclsCmpClient.JoinGroup( pszGroupId, pszCallerInfo, pclsRtp->m_strIp, iCallerAudio, iCallerFloor,
+                                         iCallerVideo, GetOrIssueGroupSesId( pszGroupId ), strCallerRole );
+                CLog::Print( LOG_INFO, "ProcessGroupCall: Caller(%s) joined CMP group audio=%d floor=%d role=%s",
+                             pszCallerInfo, iCallerAudio, iCallerFloor, strCallerRole.c_str() );
+            }
+        }
+
         // [CALL LOG] PTT 그룹 세션 기록
         if ( gclsDbManager.IsConnected() ) {
             gclsDbManager.InsertCallLog( pszCallId, true, pszGroupId, pszCallerInfo, pszGroupId );

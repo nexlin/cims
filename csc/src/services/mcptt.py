@@ -284,16 +284,12 @@ def _notify_targets(event_type):
         seen.add(key)
         targets.append((ip, int(port), label))
 
-    if event_type == "GROUP_CHANGED":
-        # PTT 그룹 변경 — PSP 가 PTT-AS 담당. PSP 미설정이면 CSP 로 fallback.
-        if PSP_NOTIFY_IP:
-            _add(PSP_NOTIFY_IP, PSP_NOTIFY_PORT, "PSP")
-        else:
-            _add(CSP_NOTIFY_IP, CSP_NOTIFY_PORT, "CSP")
-    else:
-        # USER_CHANGED / CSC_RESTART / *_CHANGED — 양쪽 broadcast.
-        _add(CSP_NOTIFY_IP, CSP_NOTIFY_PORT, "CSP")
-        _add(PSP_NOTIFY_IP, PSP_NOTIFY_PORT, "PSP")
+    # GROUP_CHANGED 포함 모든 이벤트를 CSP + PSP 양쪽 broadcast (dedup).
+    #   PTT-AS 가 통합 csp(Roles.PTT_AS) 인지 분리 psp 인지 토폴로지에 무관하게
+    #   PTT-AS 노드가 반드시 수신하도록. (과거 GROUP_CHANGED→PSP 단독 라우팅은 csp 가
+    #   PTT-AS 인 구성에서 신규 그룹이 csp 의 in-memory map 에 로드되지 않는 버그를 유발.)
+    _add(CSP_NOTIFY_IP, CSP_NOTIFY_PORT, "CSP")
+    _add(PSP_NOTIFY_IP, PSP_NOTIFY_PORT, "PSP")
     return targets
 
 

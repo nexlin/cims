@@ -431,6 +431,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     // 1. PTT-AS: 그룹콜 (MCPTT 규격 on-demand) — UE 발신 그룹 INVITE 를 받아 fan-out.
     //   구 always-on 모델은 여기서 403 거부했으나(발신 안 한다는 전제), 규격 모델에선
     //   발신 UE 의 키업(그룹 INVITE)이 세션 개시 트리거다 → ProcessGroupCall 로 라우팅.
+    if ( m_clsPttAs.IsEnabled() ) {
+        // 신규 그룹(GROUP_CHANGED notify 미수신/지연)으로 in-memory 캐시 미스 시 DB lazy-load 후
+        //   재확인 — 그룹 생성 직후 재기동 없이 즉시 발신 가능. (notify 경로와 독립적 안전망.)
+        if ( !gclsGroupMap.Contains( pszTo ) && gclsDbManager.IsConnected() ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: group(%s) cache miss — DB lazy-reload", pszTo );
+            gclsGroupMap.LoadFromDb();
+        }
+    }
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsGroupRoute;

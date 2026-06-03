@@ -630,6 +630,22 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
 }
 
 bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
+    // 발신자(UAC, PTT) 그룹콜 INVITE 200 OK: SDP m=application(SharedFloorPort) 학습.
+    //   pclsRtp 에는 application 미파싱이라 SIP body 에서 직접 추출 → floor dest 설정.
+    //   (SimSession 콜백이 UserAgent 보다 먼저 등록되어 200 OK 를 먼저 관찰 — return false 로 위임.)
+    if (m_bPttMode && pclsMessage->m_clsCSeq.m_strMethod == "INVITE" &&
+        pclsMessage->m_iStatusCode / 100 == 2 && !pclsMessage->m_strBody.empty()) {
+        size_t pos = pclsMessage->m_strBody.find("m=application ");
+        if (pos != std::string::npos) {
+            int floorPort = atoi(pclsMessage->m_strBody.c_str() + pos + 14);
+            if (floorPort > 0 && m_clsRtpThread.m_iDestFloorPort != floorPort) {
+                m_clsRtpThread.m_iDestFloorPort = floorPort;
+                printf("[%d] [PTT] Caller floor dest from 200 OK: %d\n", m_iId, floorPort);
+            }
+        }
+        return false;
+    }
+
     if (pclsMessage->m_clsCSeq.m_strMethod != "SUBSCRIBE") return false;
 
     std::string strCallId;
@@ -973,6 +989,16 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 
 void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRtp) {
     CSipClient::EventCallStart(pszCallId, pclsRtp);
+    // 발신자(UAC, PTT): 200 OK 의 m=application(SharedFloorPort) 을 floor dest 로 학습.
+    //   (member 는 INVITE 에서 학습; caller 는 여기 200 OK 에서.) 미지정 시 audio+1 fallback.
+    //   이게 없으면 caller floor REQUEST 가 잘못된 포트로 가 CMP 미매칭 → GRANT 안 됨.
+    if (m_pOwner->m_bPttMode && pclsRtp) {
+        int floorPort = pclsRtp->GetApplicationPort();
+        if (floorPort > 0) {
+            m_pOwner->m_clsRtpThread.m_iDestFloorPort = floorPort;
+            printf("[%d] [PTT] Caller floor dest from 200 OK: %d\n", m_pOwner->m_iId, floorPort);
+        }
+    }
     // PTT 착신은 EventIncomingCall에서 이미 카운팅했으므로 중복 방지
     if (!m_pOwner->m_bInCall) {
         m_pOwner->m_bInCall = true;
