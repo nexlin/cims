@@ -329,6 +329,8 @@ static void PrintUsage(const char* pszBin) {
 // ─────────────────────────────────────────────
 static std::atomic<bool> g_bScenarioDone(false);
 static std::atomic<bool> g_bQuit(false);
+static bool g_bPreempt = false;   // -preempt: floor 선점(preemption) 검증 시퀀스
+static int  g_iPreemptBy = 0;     // -preempt_by N: 선점자 세션 인덱스 (default 0; chair 검증 시 chair 인덱스)
 
 static void RunScenario(std::vector<SimSession*>& sessions,
                         ESimScenario eScenario,
@@ -484,7 +486,27 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                        joinCount, (int)sessions.size(), bAllJoined ? "yes" : "no");
             }
 
-            if (bAllJoined) {
+            if (bAllJoined && g_bPreempt) {
+                // Floor 선점(preemption) 검증: holder 점유 중 preemptor 가 요청 → CMP REVOKE+GRANT.
+                //   preemptor=session[g_iPreemptBy](기본0). chair 검증 시 chair 멤버의 세션 인덱스 지정.
+                int pi = g_iPreemptBy;
+                if (pi < 0 || pi >= (int)sessions.size()) pi = 0;
+                int hi = (pi == 1) ? 2 : 1;
+                if (hi >= (int)sessions.size()) hi = 0;
+                printf("[Scenario] === Floor 선점 검증: holder=session[%d](%s) <- preemptor=session[%d](%s) ===\n",
+                       hi, sessions[hi]->m_strUser.c_str(), pi, sessions[pi]->m_strUser.c_str());
+                printf("[Scenario] holder(%s) PTT Request — floor 점유\n", sessions[hi]->m_strUser.c_str());
+                sessions[hi]->SendPttRequest();
+                for (int t = 0; t < 25 && !g_bQuit; ++t) usleep(100000);  // 2.5s 점유
+                printf("[Scenario] preemptor(%s) PTT Request — 선점 시도\n", sessions[pi]->m_strUser.c_str());
+                sessions[pi]->SendPttRequest();
+                for (int t = 0; t < 30 && !g_bQuit; ++t) usleep(100000);  // 3s
+                printf("[Scenario] preemptor(%s) PTT Release\n", sessions[pi]->m_strUser.c_str());
+                sessions[pi]->SendPttRelease();
+                for (int t = 0; t < 10 && !g_bQuit; ++t) usleep(100000);
+                sessions[hi]->SendPttRelease();  // holder 정리 (이미 REVOKE 됐을 수 있음)
+                printf("[Scenario] 선점 검증 시퀀스 완료 — floor.jsonl 의 REVOKE/preempt 확인\n");
+            } else if (bAllJoined) {
                 // Rotating floor control: each member speaks in order.
                 // -floor_loop 이면 g_bQuit 까지 무한 반복(상주 멤버 floor 순환 — 장기 안정성 시험).
                 // -floor_rounds N 이면 정확히 N 회 순환 후 종료(반복 시험). loop 가 우선.
@@ -586,6 +608,10 @@ int main(int argc, char* argv[])
     // PTT 그룹콜 화자 순환 반복 횟수(전체 멤버 1바퀴 = 1 round). default 1(1바퀴).
     //   -floor_loop 가 지정되면 무한 반복이 우선한다.
     int iFloorRounds           = atoi(GetArg(argc, argv, "-floor_rounds",  "1").c_str());
+    // floor 선점(preemption) 검증: holder 점유 중 preemptor 요청 → CMP REVOKE+GRANT 확인.
+    //   -preempt_by N = 선점자 세션 인덱스(default 0). chair 검증 시 chair 멤버 세션 인덱스 지정.
+    g_bPreempt                 = HasFlag(argc, argv, "-preempt");
+    g_iPreemptBy               = atoi(GetArg(argc, argv, "-preempt_by", "0").c_str());
     // G8 (2026-04-23): 외부 peer routing 시험용. 비우면 기존 pair 로직 유지.
     //   값이 있으면 call scenario 의 모든 outbound INVITE target 을 이 user 로 덮음.
     std::string strCalleeOverride = GetArg(argc, argv, "-callee_override", "");
