@@ -436,8 +436,12 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::st
 
     if ( sub.strEventType == "gms" ) {
         // sel = org.openmobilealliance.groups/users/tel:{user}/tel:{group}
-        strBody += "  <document new-etag=\"" + etag + "\" sel=\"org.openmobilealliance.groups/users/" +
-                   "tel:" + sub.strUserId + "/tel:" + strChangedId + "\"/>\r\n";
+        //   strChangedId 비면(특정 그룹 없음) document 생략 — 빈 xcap-diff(구독 active, 변경문서 없음).
+        //   초기 동기화 시 사용자 그룹 enumerate 는 SendInitialNotify 가 그룹별로 호출.
+        if ( !strChangedId.empty() ) {
+            strBody += "  <document new-etag=\"" + etag + "\" sel=\"org.openmobilealliance.groups/users/" +
+                       "tel:" + sub.strUserId + "/tel:" + strChangedId + "\"/>\r\n";
+        }
     } else {
         // cms: user-profile
         strBody += "  <document new-etag=\"" + etag + "\" sel=\"org.3gpp.mcptt.user-profile/users/" +
@@ -526,7 +530,27 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
  *        (Active state, no specific document change)
  */
 void SendInitialNotify( const SubscriptionInfo &sub ) {
-    SendNotifyToSubscriber( sub, "init", "" );
+    if ( sub.strEventType == "gms" ) {
+        // GMS 초기 동기화: 가입자가 속한 그룹별로 group document NOTIFY 발송.
+        //   (기존엔 빈 group sel `tel:` 하나만 보내 UE GET 이 404 였음.)
+        std::vector<std::string> vecGroupIds;
+        gclsGroupMap.IterateInternal( [&]( const CspPttGroup &clsGroup ) {
+            for ( const auto &pUser : clsGroup._pusers ) {
+                if ( pUser && pUser->_id == sub.strUserId ) {
+                    vecGroupIds.push_back( clsGroup._id );
+                    break;
+                }
+            }
+        } );
+        if ( vecGroupIds.empty() ) {
+            SendNotifyToSubscriber( sub, "init", "" );  // 빈 xcap-diff (active, 변경문서 없음)
+        } else {
+            for ( const auto &strGid : vecGroupIds ) SendNotifyToSubscriber( sub, "init", strGid );
+        }
+    } else {
+        // CMS: user-profile + service-config 문서 (BuildXcapDiffBody cms 분기).
+        SendNotifyToSubscriber( sub, "init", "" );
+    }
 }
 
 /**

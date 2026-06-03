@@ -266,6 +266,16 @@ bool SimSession::Start() {
         m_clsUserAgent.InsertRegisterInfo(m_clsServerInfo);
     }
 
+    // SUBSCRIBE/NOTIFY 처리를 위한 stack 콜백 등록 — UserAgent 보다 먼저.
+    //   psip 스택은 콜백을 등록 순서로 호출하고 첫 true 에서 멈춘다(SipStackCallBack.hpp).
+    //   CSipUserAgent::RecvNotifyRequest 는 dialog 미존재(out-of-dialog) NOTIFY 를 404 로
+    //   선소비(return true)하므로, cspsim 의 raw SUBSCRIBE 로 생긴 xcap-diff NOTIFY 가
+    //   SimSession::RecvRequest 에 도달하지 못한다. SimSession 을 먼저 등록하면 NOTIFY 를
+    //   먼저 받아 HandleNotify(→ XCAP GET) 로 처리하고 return true; 그 외(INVITE 등)는
+    //   return false 로 UserAgent(이후 push_back)에 위임된다. (Start 전 등록 → 수신 스레드
+    //   기동 전이라 list 동시변경 race 없음.)
+    m_clsUserAgent.m_clsSipStack.AddCallBack(this);
+
     if (!m_clsUserAgent.Start(m_clsSetup, m_pSipClient)) {
         printf("[%d] SIP stack start error (port %d)\n", m_iId, m_iLocalPort);
         m_stats.iRegFail++;
@@ -277,9 +287,6 @@ bool SimSession::Start() {
         m_iLocalPort = m_clsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
         m_clsSetup.m_iLocalUdpPort = m_iLocalPort;
     }
-
-    // 추가 콜백 등록: SUBSCRIBE/NOTIFY는 여기서 처리
-    m_clsUserAgent.m_clsSipStack.AddCallBack(this);
 
     if (!m_clsRtpThread.Create()) {
         printf("[%d] RTP thread create error\n", m_iId);
