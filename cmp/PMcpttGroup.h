@@ -78,6 +78,11 @@ public:
 
     void updatePriorities(const std::map<std::string, int>& priorities);
     void updateRoles(const std::map<std::string, std::string>& roles);
+    // broadcast 그룹(TS 24.380 §10.3): 개시자(initiator)만 floor 보유, 타 멤버 REQUEST REJECT.
+    void setBroadcast(const std::string& groupType, const std::string& initiator) {
+        _groupType = groupType;
+        _initiatorSessionId = initiator;
+    }
     void setDtmfConfig(bool enable, const std::string& pushDigit, const std::string& releaseDigit);
 
     // Floor 이벤트 로그 콜백 (PCmpServer::logFlow 연결용)
@@ -136,6 +141,10 @@ private:
     bool _floorTaken;
     std::string _floorOwnerSessionId;
     unsigned int _floorOwnerSsrc;
+
+    // Broadcast 그룹 (TS 24.380 §10.3) — 비면 일반(prearranged/chat) floor 정책.
+    std::string _groupType;            // "broadcast" 면 개시자 외 floor REQUEST REJECT
+    std::string _initiatorSessionId;   // 개시자(broadcaster) sessionId(=userId)
     static unsigned int _nextSsrc;  // SSRC 할당 카운터
 
 

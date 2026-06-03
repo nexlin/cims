@@ -543,7 +543,8 @@ bool CCmpClient::RemoveSession( const std::string &strSessionId, const std::stri
 bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                            std::string &strIp, int &iPort, int &iFloorPort, int &iVideoPort,
                            const std::string &strRecordDir, const std::string &strLogDir, bool bVideoEnabled,
-                           int iSessionSeq, const std::string &strSesId ) {
+                           int iSessionSeq, const std::string &strSesId, const std::string &strGroupType,
+                           const std::string &strInitiator ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "ADD_PTT_GROUP" );
     req.Set( "group_id", strGroupId );
@@ -563,6 +564,10 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
     if ( !strLogDir.empty() ) req.Set( "log_dir", strLogDir );
     if ( bVideoEnabled ) req.Set( "video_enabled", 1 );
+    // group_type / initiator — broadcast 그룹 floor 독점(TS 24.380 §10.3) 판정용.
+    //   broadcast: 개시자(initiator)만 floor 보유, 타 멤버 REQUEST 는 CMP 가 REJECT.
+    if ( !strGroupType.empty() ) req.Set( "group_type", strGroupType );
+    if ( !strInitiator.empty() ) req.Set( "initiator_id", strInitiator );
 
     std::stringstream ssMembers;
     for ( size_t i = 0; i < vecMembers.size(); ++i ) {

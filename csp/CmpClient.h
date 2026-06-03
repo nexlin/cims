@@ -57,7 +57,8 @@ public:
     bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                    std::string &strIp, int &iPort, int &iFloorPort, int &iVideoPort,
                    const std::string &strRecordDir = "", const std::string &strLogDir = "", bool bVideoEnabled = false,
-                   int iSessionSeq = 0, const std::string &strSesId = "" );
+                   int iSessionSeq = 0, const std::string &strSesId = "", const std::string &strGroupType = "",
+                   const std::string &strInitiator = "" );
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                       const std::string &strSesId = "" );
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,

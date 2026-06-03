@@ -435,6 +435,29 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
     int requesterPrio = 999;
     if (_priorities.find(sessionId) != _priorities.end()) requesterPrio = _priorities[sessionId];
 
+    // Broadcast 그룹 (TS 24.380 §10.3): 개시자(initiator)만 floor 보유.
+    //   비개시자의 floor REQUEST 는 floor 점유 여부와 무관하게 항상 REJECT.
+    if (_groupType == "broadcast" && !_initiatorSessionId.empty() && sessionId != _initiatorSessionId) {
+        char rejBuf[256];
+        int rejLen = BuildFloorPacket(rejBuf, sizeof(rejBuf), FLOOR_REJECT, ssrc, sessionId);
+        if (rejLen > 0) sendToMember(sessionId, rejBuf, rejLen);
+        LOG_INFO("PMcpttGroup", "[%s] Floor REJECTED (broadcast) session=%s — initiator=%s only",
+                 _groupId.c_str(), sessionId.c_str(), _initiatorSessionId.c_str());
+        if (_logFlow) {
+            char detail[256];
+            snprintf(detail, sizeof(detail),
+                     "{\"op\":\"REJECT\",\"reason\":\"broadcast\",\"user\":\"%s\",\"ssrc\":%u,\"initiator\":\"%s\"}",
+                     sessionId.c_str(), ssrc, _initiatorSessionId.c_str());
+            _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REJECT", detail);
+        }
+        {
+            char ex[160];
+            snprintf(ex, sizeof(ex), "\"reason\":\"broadcast\",\"initiator\":\"%s\"", _initiatorSessionId.c_str());
+            _logFloorLocal("REJECT", sessionId, ssrc, requesterPrio, ex);
+        }
+        return;
+    }
+
     if (!_floorTaken) {
         // Grant Floor
         _floorTaken = true;

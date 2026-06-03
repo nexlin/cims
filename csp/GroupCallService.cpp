@@ -129,7 +129,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
         if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort,
                                      iSharedVideoPort, strRecordDir, strRecordDir, clsGroup._videoEnabled, iSessionSeq,
-                                     strGroupSesId ) ) {
+                                     strGroupSesId, clsGroup._groupType, pszCallerInfo ) ) {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             // nMemberHash 실제값 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
             m_mapGroupRtp[pszGroupId] = { iSharedPort,
@@ -150,7 +150,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         int tmpVPort = 0;
         std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
         gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpPort, tmpFPort, tmpVPort, strRecordDir,
-                                strRecordDir, clsGroup._videoEnabled, 0, strGroupSesId );
+                                strRecordDir, clsGroup._videoEnabled, 0, strGroupSesId, clsGroup._groupType,
+                                pszCallerInfo );
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
@@ -423,9 +424,16 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 gclsCallDir.PttSessionStart( pszGroupId, "autojoin", pszUserId, strDescriptor );
             }
             int iSharedFloorPort = 0;
+            // broadcast 그룹 재생성 시 기존 개시자 유지 (m_mapGroupRtp 캐시)
+            std::string strInitiator;
+            {
+                std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                auto itRtp = m_mapGroupRtp.find( pszGroupId );
+                if ( itRtp != m_mapGroupRtp.end() ) strInitiator = itRtp->second.strCallerId;
+            }
             if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedPort, iSharedFloorPort,
                                          iSharedVideoPort, strRecordDir, strRecordDir, false, 0,
-                                         GetOrIssueGroupSesId( pszGroupId ) ) ) {
+                                         GetOrIssueGroupSesId( pszGroupId ), clsGroup._groupType, strInitiator ) ) {
                 bVideoEnabled = clsGroup._videoEnabled;
                 // nMemberHash 는 반드시 실제 멤버해시로 설정 — 0 으로 두면 다음 SyncGroupsState 가
                 // 변경으로 오인해 스퓨리어스 ModifyGroup+group_change NOTIFY storm → 멤버 drop.
@@ -784,7 +792,8 @@ void CGroupCallService::CheckGroupIntegrity() {
                                                           std::to_string( group._dbId ) );
             std::string strGroupSesId = GetOrIssueGroupSesId( group._id );
             if ( !gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir,
-                                          strLogDir, group._videoEnabled, group._sessionSeq, strGroupSesId ) )
+                                          strLogDir, group._videoEnabled, group._sessionSeq, strGroupSesId,
+                                          group._groupType, "" ) )
                 return;
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             m_mapGroupRtp[group._id] = { port, floorPort, videoPort,           ip, ComputeMemberHash( group ),

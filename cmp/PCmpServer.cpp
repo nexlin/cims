@@ -606,7 +606,17 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             group->updatePriorities(priorities);
             group->updateRoles(roles);
         }
-        
+
+        // broadcast 그룹 floor 독점 (TS 24.380 §10.3): 개시자만 floor.
+        std::string groupType = payload.GetString("group_type");
+        std::string initiator = payload.GetString("initiator_id");
+        if (!groupType.empty() || !initiator.empty()) {
+            group->setBroadcast(groupType, initiator);
+            if (groupType == "broadcast")
+                LOG_INFO("PCmpServer", "ADD_GROUP group=%s type=broadcast initiator=%s (floor 독점)",
+                         groupId.c_str(), initiator.c_str());
+        }
+
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
         resp.Set("sesid", sesid);
