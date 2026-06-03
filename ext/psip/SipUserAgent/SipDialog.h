@@ -95,6 +95,9 @@ public:
 	/** local RTP ��Ʈ ��ȣ */
 	int					m_iLocalRtpPort;
 
+	/** local MCPTT floor control (m=application) port. -1 �̸� SDP �� floor media �̻���. */
+	int					m_iLocalApplicationPort;
+
 	/** local RTP direction ( sendrecv, sendonly, recvonly, inactive ) */
 	ERtpDirection	m_eLocalDirection;
 

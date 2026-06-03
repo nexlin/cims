@@ -36,7 +36,7 @@ typedef std::list< int > CODEC_LIST;
 class CSipCallRtp
 {
 public:
-	CSipCallRtp() : m_iPort(-1), m_iCodec(-1), m_eDirection( E_RTP_SEND_RECV )
+	CSipCallRtp() : m_iPort(-1), m_iCodec(-1), m_eDirection( E_RTP_SEND_RECV ), m_iApplicationPort(-1)
 	{}
 
 	void SetIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia );
@@ -51,6 +51,9 @@ public:
 
 	/** ��Ʈ ��ȣ */
 	int					m_iPort;
+
+	/** MCPTT floor control(m=application) ��Ʈ ��������. >0 �̸� GetApplicationPort ��ȯ��. */
+	int					m_iApplicationPort;
 
 	/** ���õ� �ڵ� ��ȣ */
 	int					m_iCodec;

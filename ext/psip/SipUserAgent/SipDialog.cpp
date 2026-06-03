@@ -28,7 +28,7 @@
  */
 CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iInviteSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP)
 	, m_iOutboundLocalPort(-1)
-	, m_iLocalRtpPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
+	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
 	, m_pclsInvite(NULL), m_pclsSipStack( pclsSipStack )
 	, m_iSessionVersion(0)
 	, m_bSendCall(true)
@@ -332,10 +332,19 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=%s\r\n", GetRtpDirectionString( m_eLocalDirection ) );
 	}
 
+	// MCPTT floor control 미디어 (3GPP TS 24.379/24.380) — local application(floor) 포트가
+	//   설정된 경우에만 m=application 라인 추가. PTT 그룹콜 개시자 200 OK 등에서 floor 포트를
+	//   광고해 UE 가 floor dest 를 학습하게 한다. (미설정(-1)이면 VoLTE/일반 호 SDP 무변경.)
+	if( m_iLocalApplicationPort > 0 )
+	{
+		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen,
+			"m=application %d UDP MCPTT\r\na=floorid:0 mstrm:audio\r\n", m_iLocalApplicationPort );
+	}
+
 	pclsMessage->m_strBody = szSdp;
 	pclsMessage->m_iContentLength = iLen;
 	pclsMessage->m_clsContentType.Set( "application", "sdp" );
-	
+
 	return true;
 }
 
@@ -354,6 +363,7 @@ bool CSipDialog::SetLocalRtp( CSipCallRtp * pclsRtp )
 	m_iCodec = pclsRtp->m_iCodec;
 	m_clsCodecList = pclsRtp->m_clsCodecList;
 	m_eLocalDirection = pclsRtp->m_eDirection;
+	m_iLocalApplicationPort = pclsRtp->GetApplicationPort();  // MCPTT floor 포트 (없으면 -1)
 
 	switch( m_eLocalDirection )
 	{

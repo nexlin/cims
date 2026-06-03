@@ -139,6 +139,9 @@ int CSipCallRtp::GetVideoPort( )
  */
 int CSipCallRtp::GetApplicationPort( )
 {
+	// ���������� ������ floor ��Ʈ�� ������ �켱 (media list �̻�� �۽� ��ο�).
+	if( m_iApplicationPort > 0 ) return m_iApplicationPort;
+
 	int iPort = -1;
 
 #ifdef USE_MEDIA_LIST

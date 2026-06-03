@@ -173,6 +173,14 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         clsCallerRtp.SetIpPort( strSharedIp.c_str(), iSharedPort, SOCKET_COUNT_PER_MEDIA );
         clsCallerRtp.m_iCodec = 99;  // AMR-WB (기본 코덱, 서버 설정으로 추후 변경)
         clsCallerRtp.m_clsCodecList.push_back( 99 );
+        // MCPTT floor (TS 24.379/24.380): 200 OK 에 m=application(SharedFloorPort) 광고 →
+        //   개시자가 floor dest 를 학습해 floor REQUEST 를 올바른 포트로 송신(명시적 GRANT).
+        {
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            auto itRtp = m_mapGroupRtp.find( pszGroupId );
+            if ( itRtp != m_mapGroupRtp.end() && itRtp->second.iFloorPort > 0 )
+                clsCallerRtp.m_iApplicationPort = itRtp->second.iFloorPort;
+        }
         if ( !gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp ) ) {
             CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
             return false;
