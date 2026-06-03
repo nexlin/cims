@@ -7,8 +7,20 @@ export interface PttSession {
   start_time: string
   end_time: string | null
   state: string
-  initiator: string
+  initiator?: string
   member_count?: number
+  segment_count?: number
+  speaker_count?: number
+  total_speech_ms?: number
+}
+
+export interface PttGroupSummary {
+  session_count: number
+  last_window: string   // YYYYMMDDHH
+}
+
+export interface PttSummaryResponse {
+  summaries: Record<string, PttGroupSummary>   // key = groupKey(ptt_groups.id)
 }
 
 export interface PttEvent {
@@ -57,6 +69,10 @@ export interface PttFloorResponse {
 }
 
 export const pttApi = {
+  summary(): Promise<PttSummaryResponse> {
+    return api.get(`/ptt/history?summary=1`)
+  },
+
   sessions(groupId: string, date?: string): Promise<PttSessionsResponse> {
     const p = new URLSearchParams()
     p.set('group_id', groupId)

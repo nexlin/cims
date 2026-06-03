@@ -1,17 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { groupsApi, type Group } from '../../../api/groups'
-import { pttApi, type PttSession, type PttEvent, type PttFloorEvent } from '../../../api/ptt'
+import { pttApi, type PttSession, type PttEvent, type PttFloorEvent, type PttGroupSummary } from '../../../api/ptt'
 import { recordingsApi, type RecordingSegment } from '../../../api/recordings'
 import type { FlowMessage } from '../../../api/flow'
 import FlowPage from '../../../pages/FlowPage'
 import SegmentPlayer from '../../../components/SegmentPlayer'
 import { useToast } from '../../../components/Toast'
-
-export function fmtTime(iso: string | null | undefined) {
-  if (!iso) return '--'
-  const s = iso.replace('T', ' ')
-  return s.substring(0, 19)
-}
 
 function fmtShortTime(iso: string | null | undefined) {
   if (!iso) return '--'
@@ -25,6 +19,20 @@ function fmtDur(seconds: number | null | undefined) {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
   return m > 0 ? `${m}분 ${s}초` : `${s}초`
+}
+
+function fmtSpeechMs(ms: number | null | undefined) {
+  if (!ms || ms <= 0) return '--'
+  const total = Math.round(ms / 1000)
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return m > 0 ? `${m}분 ${s}초` : `${s}초`
+}
+
+// 'YYYYMMDDHH' → 'MM/DD HH시'
+function fmtWindow(w: string | null | undefined) {
+  if (!w || w.length < 10) return '--'
+  return `${w.slice(4, 6)}/${w.slice(6, 8)} ${w.slice(8, 10)}시`
 }
 
 const EVENT_ICONS: Record<string, { icon: string; label: string; color: string }> = {
@@ -52,6 +60,9 @@ const FLOOR_OPS: Record<string, { label: string; color: string }> = {
   REJECT:  { label: '거절',      color: '#f44336' },
 }
 
+const thStyle: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }
+const tdStyle: CSSProperties = { padding: '6px 10px', whiteSpace: 'nowrap' }
+
 interface SessionsState { sessions: PttSession[]; loading: boolean; loaded: boolean }
 interface DetailState {
   events: PttEvent[]
@@ -76,6 +87,10 @@ export default function PttHistoryPage() {
 
   const [sessionsByGroup, setSessionsByGroup] = useState<Map<string, SessionsState>>(new Map())
   const [detailByKey, setDetailByKey] = useState<Map<string, DetailState>>(new Map())
+  // 그룹키(ptt_groups.id) → 요약(세션수/최근 시간창)
+  const [summaries, setSummaries] = useState<Record<string, PttGroupSummary>>({})
+  // 세션 이력 테이블 정렬
+  const [sort, setSort] = useState<{ key: keyof PttSession; dir: 'asc' | 'desc' }>({ key: 'dir', dir: 'desc' })
 
   const [flow, setFlow] = useState<{ groupId: string; sessionDir: string; date: string; nodes?: Record<string, FlowMessage[]>; messages?: FlowMessage[] } | null>(null)
   const [flowLoading, setFlowLoading] = useState(false)
@@ -96,6 +111,16 @@ export default function PttHistoryPage() {
   }, [show])
 
   useEffect(() => { loadGroups() }, [loadGroups])
+
+  // ── 그룹별 요약(세션수/최근활동) 일괄 로드 ──
+  const loadSummaries = useCallback(async () => {
+    try {
+      const resp = await pttApi.summary()
+      setSummaries(resp.summaries || {})
+    } catch { /* 요약 실패는 무시 (좌측 보조정보) */ }
+  }, [])
+
+  useEffect(() => { loadSummaries() }, [loadSummaries])
 
   const filteredGroups = fGroup
     ? groups.filter(g => g.id.includes(fGroup) || g.name.includes(fGroup))
@@ -196,7 +221,6 @@ export default function PttHistoryPage() {
   useEffect(() => {
     setSessionsByGroup(new Map())
     setDetailByKey(new Map())
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fDate])
 
   // 자동 갱신 (선택 그룹만)
@@ -238,7 +262,18 @@ export default function PttHistoryPage() {
   }
 
   const selGroup = groups.find(g => g.id === selectedGroupId) || null
-  const selSessions = selectedGroupId ? (sessionsByGroup.get(selectedGroupId)?.sessions ?? []) : []
+  const selSessionsRaw = selectedGroupId ? (sessionsByGroup.get(selectedGroupId)?.sessions ?? []) : []
+  const selSessions = [...selSessionsRaw].sort((a, b) => {
+    const va = a[sort.key] ?? ''
+    const vb = b[sort.key] ?? ''
+    let cmp: number
+    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb
+    else cmp = String(va).localeCompare(String(vb))
+    return sort.dir === 'asc' ? cmp : -cmp
+  })
+  const toggleSort = (key: keyof PttSession) =>
+    setSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' })
+  const sortArrow = (key: keyof PttSession) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''
   const selSessionsLoading = selectedGroupId ? (sessionsByGroup.get(selectedGroupId)?.loading ?? false) : false
   const selDetail = (selectedGroupId && selectedSessionDir)
     ? detailByKey.get(detailKey(selectedGroupId, selectedSessionDir)) : undefined
@@ -300,6 +335,18 @@ export default function PttHistoryPage() {
                     </span>
                   </div>
                   <div className="ts" style={{ color: 'var(--text-muted)', marginTop: 2 }}>{g.id}</div>
+                  {(() => {
+                    const sm = summaries[histKey(g.id)]
+                    const memberCount = g.members?.length ?? 0
+                    return (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                        <span>멤버 {memberCount}명</span>
+                        <span>· 세션 {sm?.session_count ?? 0}</span>
+                        {sm?.last_window && <span>· 최근 {fmtWindow(sm.last_window)}</span>}
+                        {g.authorized_user_name && <span style={{ flexBasis: '100%' }}>소유 {g.authorized_user_name}</span>}
+                      </div>
+                    )
+                  })()}
                 </div>
               )
             })
@@ -322,32 +369,50 @@ export default function PttHistoryPage() {
                 </span>
               </div>
 
-              {/* 세션 리스트 */}
+              {/* 세션 이력 테이블 */}
               {selSessions.length === 0 && !selSessionsLoading ? (
                 <div className="empty" style={{ padding: 16 }}>이 날짜에 세션이 없습니다</div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
-                  {selSessions.map(sess => {
-                    const isSel = sess.dir === selectedSessionDir
-                    return (
-                      <div
-                        key={sess.dir}
-                        onClick={() => setSelSession(sess.dir)}
-                        style={{
-                          padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
-                          border: '1px solid var(--border)',
-                          background: isSel ? 'var(--hover, #eef5ff)' : 'transparent',
-                          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                        }}
-                      >
-                        <span style={{ fontWeight: 600, fontSize: 13 }}>{sess.session_id || sess.dir}</span>
-                        <span className="ts">({fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)})</span>
-                        <span className={`badge ${sess.state === 'active' ? 'badge--green' : 'badge--gray'}`}>{sess.state === 'active' ? '진행중' : '종료'}</span>
-                        {sess.initiator && <span className="ts">발신: {sess.initiator}</span>}
-                        {sess.member_count != null && <span className="ts">멤버: {sess.member_count}명</span>}
-                      </div>
-                    )
-                  })}
+                <div style={{ marginBottom: 14, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                  <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--surface-alt, #f7f9fc)', textAlign: 'left' }}>
+                        <th onClick={() => toggleSort('dir')} style={thStyle}>시간창{sortArrow('dir')}</th>
+                        <th onClick={() => toggleSort('start_time')} style={thStyle}>시작 ~ 종료{sortArrow('start_time')}</th>
+                        <th onClick={() => toggleSort('state')} style={{ ...thStyle, textAlign: 'center' }}>상태{sortArrow('state')}</th>
+                        <th onClick={() => toggleSort('segment_count')} style={{ ...thStyle, textAlign: 'right' }}>세그먼트{sortArrow('segment_count')}</th>
+                        <th onClick={() => toggleSort('speaker_count')} style={{ ...thStyle, textAlign: 'right' }}>화자{sortArrow('speaker_count')}</th>
+                        <th onClick={() => toggleSort('total_speech_ms')} style={{ ...thStyle, textAlign: 'right' }}>발화시간{sortArrow('total_speech_ms')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selSessions.map(sess => {
+                        const isSel = sess.dir === selectedSessionDir
+                        return (
+                          <tr
+                            key={sess.dir}
+                            onClick={() => setSelSession(sess.dir)}
+                            style={{
+                              cursor: 'pointer',
+                              borderTop: '1px solid var(--border)',
+                              background: isSel ? 'var(--hover, #eef5ff)' : 'transparent',
+                            }}
+                          >
+                            <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtWindow(sess.dir)}</td>
+                            <td style={tdStyle} className="ts">
+                              {fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              <span className={`badge ${sess.state === 'active' ? 'badge--green' : 'badge--gray'}`}>{sess.state === 'active' ? '진행중' : '종료'}</span>
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'right' }}>{sess.segment_count ?? 0}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right' }}>{sess.speaker_count ?? 0}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right' }} className="ts">{fmtSpeechMs(sess.total_speech_ms)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
 

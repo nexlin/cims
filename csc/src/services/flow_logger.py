@@ -237,6 +237,15 @@ def _has_recording(d_dir: str) -> bool:
     return False
 
 
+def _has_active_recording(d_dir: str) -> bool:
+    """녹취가 진행 중인지 — CMP 가 열린 세그먼트를 *.recording 으로 기록 후 close 시 rename."""
+    import glob as _glob
+    return bool(
+        _glob.glob(os.path.join(d_dir, 'seg', '*', '*.recording')) or
+        _glob.glob(os.path.join(d_dir, '*.recording'))
+    )
+
+
 def _has_video_recording(d_dir: str) -> bool:
     for fn in ('raw_va.rtp', 'raw_vb.rtp'):
         p = os.path.join(d_dir, fn)
@@ -1343,6 +1352,7 @@ def _find_ptt_sessions(group_id: str) -> list:
     digit4, digit2 = "[0-9][0-9][0-9][0-9]", "[0-9][0-9]"
     pattern = os.path.join(base, digit4, digit2, digit2, digit2)
     result = []
+    now_window = datetime.now().strftime("%Y%m%d%H")
     for hh_dir in _glob.glob(pattern):
         if not os.path.isdir(hh_dir):
             continue
@@ -1351,25 +1361,66 @@ def _find_ptt_sessions(group_id: str) -> list:
             continue
         yyyy, mm, dd, hh = rel
         window = f"{yyyy}{mm}{dd}{hh}"
+        # 시간창 segments.jsonl 1회 읽어 세그먼트수·화자수·발화시간·실제 시간범위 집계
         seg_count = 0
-        segs = os.path.join(hh_dir, "segments.jsonl")
-        if os.path.exists(segs):
-            try:
-                with open(segs, encoding="utf-8", errors="replace") as f:
-                    seg_count = sum(1 for _ in f)
-            except Exception:
-                pass
-        # 화자(speaker) 수 = events 의 member 또는 segments 기반 추정은 상세에서. 목록은 경량.
+        speakers: set = set()
+        total_ms = 0
+        st_min = ""
+        en_max = ""
+        segs = _read_jsonl(os.path.join(hh_dir, "segments.jsonl"))
+        for s in segs:
+            seg_count += 1
+            sp = s.get("speaker_id", "")
+            if sp:
+                speakers.add(sp)
+            total_ms += int(s.get("duration_ms", 0) or 0)
+            stt = s.get("start_time", "")
+            ent = s.get("end_time", "")
+            if stt and (not st_min or stt < st_min):
+                st_min = stt
+            if ent and (not en_max or ent > en_max):
+                en_max = ent
+        # 진행중 판정: 현재 시각 시간창이고 녹취가 아직 .recording 인 경우
+        is_active = (window == now_window) and _has_active_recording(hh_dir)
         result.append({
             "dir": window,
             "session_id": f"{yyyy}-{mm}-{dd} {hh}:00",
-            "start_time": f"{yyyy}-{mm}-{dd}T{hh}:00:00",
-            "end_time": f"{yyyy}-{mm}-{dd}T{hh}:59:59",
-            "state": "ended",
+            "start_time": st_min or f"{yyyy}-{mm}-{dd}T{hh}:00:00",
+            "end_time": (None if is_active else (en_max or f"{yyyy}-{mm}-{dd}T{hh}:59:59")),
+            "state": "active" if is_active else "ended",
             "segment_count": seg_count,
+            "speaker_count": len(speakers),
+            "total_speech_ms": total_ms,
         })
     result.sort(key=lambda x: x["dir"], reverse=True)
     return result
+
+
+def _ptt_group_summaries() -> dict:
+    """모든 PTT 그룹의 경량 요약(세션수·최근 시간창)을 그룹키별로 반환.
+    디렉터리 글롭만 수행(파일 미독) → 그룹 다수에도 저렴. 키 = ptt/{groupKey}."""
+    if not _calls_dir:
+        return {}
+    import glob as _glob
+    ptt_root = os.path.join(_calls_dir, "ptt")
+    if not os.path.isdir(ptt_root):
+        return {}
+    d4, d2 = "[0-9][0-9][0-9][0-9]", "[0-9][0-9]"
+    summaries: dict = {}
+    for hh_dir in _glob.glob(os.path.join(ptt_root, "*", d4, d2, d2, d2)):
+        rel = os.path.relpath(hh_dir, ptt_root).split(os.sep)
+        if len(rel) != 5:
+            continue
+        gid, yyyy, mm, dd, hh = rel
+        window = f"{yyyy}{mm}{dd}{hh}"
+        s = summaries.get(gid)
+        if s is None:
+            summaries[gid] = {"session_count": 1, "last_window": window}
+        else:
+            s["session_count"] += 1
+            if window > s["last_window"]:
+                s["last_window"] = window
+    return summaries
 
 
 def _find_ptt_session_dir(group_id: str, session_dir: str) -> str:
@@ -1569,6 +1620,12 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
     after = after[len("/api/v1/ptt/history"):].lstrip("/")
 
     if not after:
+        # ── 그룹별 요약(좌측 패널용): 세션수·최근 시간창 ──
+        if _qp("summary"):
+            return HandlerResult(status=200, body=json.dumps({
+                "summaries": _ptt_group_summaries(),
+            }), media_type="application/json")
+
         # ── 세션 목록 ──
         group_id = _qp("group_id")
         if not group_id:
