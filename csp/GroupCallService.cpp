@@ -113,9 +113,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     }
     // 세션 시작 기록 (그룹이 이미 CMP에 있어도 통화 기록은 필요)
     if ( gclsCallDir.IsEnabled() ) {
-        strRecordDir =
-            gclsCallDir.GetPttSessionDir( pszGroupId, TimeToIso( clsGroup._sessionStart ),
-                                          std::to_string( clsGroup._dbId ) );
+        strRecordDir = gclsCallDir.GetPttSessionDir( pszGroupId, TimeToIso( clsGroup._sessionStart ),
+                                                     std::to_string( clsGroup._dbId ) );
         // 자기완결 그룹 디스크립터 (계획서 §5) — group.json
         std::string strDescriptor = BuildGroupDescriptor( clsGroup );
         gclsCallDir.PttSessionStart( pszGroupId, pszCallId, pszCallerInfo, strDescriptor );
@@ -133,8 +132,15 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                                      strGroupSesId ) ) {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             // nMemberHash 실제값 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
-            m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp,
-                                          ComputeMemberHash( clsGroup ), "", "", clsGroup._videoEnabled, 0 };
+            m_mapGroupRtp[pszGroupId] = { iSharedPort,
+                                          iSharedFloorPort,
+                                          iSharedVideoPort,
+                                          strSharedIp,
+                                          ComputeMemberHash( clsGroup ),
+                                          "",
+                                          "",
+                                          clsGroup._videoEnabled,
+                                          0 };
         }
     } else if ( !strRecordDir.empty() ) {
         // 그룹이 이미 CMP에 있지만 log_dir 전달이 필요 → addgroup 재호출 (기존 그룹 유지, log_dir만 갱신)
@@ -202,8 +208,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         if ( strMember == pszCallerInfo ) continue;
         if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
              !gclsDbManager.IsAffiliated( pszGroupId, strMember ) ) {
-            CLog::Print( LOG_INFO, "ProcessGroupCall: member %s not affiliated to %s — skip invite",
-                         strMember.c_str(), pszGroupId );
+            CLog::Print( LOG_INFO, "ProcessGroupCall: member %s not affiliated to %s — skip invite", strMember.c_str(),
+                         pszGroupId );
             continue;
         }
         InviteMember( strMember.c_str(), pszGroupId );
@@ -220,15 +226,15 @@ std::string CGroupCallService::GetGroupIdByCallId( const std::string &strCallId 
 }
 
 void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
-    std::string strGroupId, strSessionId;
+    std::string strGroupId, strSessionId, strCallId;
     bool bStillActive = false;
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
         auto it = m_mapUserCall.find( strUserId );
         if ( it == m_mapUserCall.end() ) return;
 
-        std::string strCallId = it->second;
-        CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing stale callId=%s", strUserId.c_str(), strCallId.c_str() );
+        strCallId = it->second;
+        CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing callId=%s", strUserId.c_str(), strCallId.c_str() );
 
         auto itSess = m_mapCallSession.find( strCallId );
         if ( itSess != m_mapCallSession.end() ) {
@@ -252,6 +258,11 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
             }
         }
     }
+    // 기존 SIP 다이얼로그 정상 종료(BYE) — 고아 다이얼로그 누수 방지 (1E)
+    if ( !strCallId.empty() ) {
+        gclsUserAgent.StopCall( strCallId.c_str() );
+        gclsCallMap.Delete( strCallId.c_str(), false );
+    }
     // lock 해제 후 CMP/DB 호출
     if ( !strGroupId.empty() ) {
         gclsCmpClient.LeaveGroup( strGroupId, strSessionId, GetOrIssueGroupSesId( strGroupId ) );
@@ -268,6 +279,19 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
             gclsDbManager.UpdateParticipantLeft( strGroupId, strUserId );
             if ( !bStillActive ) {
                 gclsDbManager.EndGroupCallLog( strGroupId );
+            }
+        }
+
+        // on-demand 그룹(prearranged/broadcast): 마지막 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
+        //   stale 캐시로 JOIN→'Group Not Found' 되던 문제도 원천 차단.
+        if ( !bStillActive ) {
+            CspPttGroup clsGrp;
+            bool bChat = gclsGroupMap.Select( strGroupId.c_str(), clsGrp ) && clsGrp._groupType == "chat";
+            if ( !bChat ) {
+                gclsCmpClient.RemoveGroup( strGroupId, GetOrIssueGroupSesId( strGroupId ) );
+                std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                m_mapGroupRtp.erase( strGroupId );
+                RemoveGroupSesId( strGroupId );
             }
         }
     }
@@ -392,9 +416,8 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
             std::string strRecordDir;
             if ( gclsCallDir.IsEnabled() ) {
-                strRecordDir =
-            gclsCallDir.GetPttSessionDir( pszGroupId, TimeToIso( clsGroup._sessionStart ),
-                                          std::to_string( clsGroup._dbId ) );
+                strRecordDir = gclsCallDir.GetPttSessionDir( pszGroupId, TimeToIso( clsGroup._sessionStart ),
+                                                             std::to_string( clsGroup._dbId ) );
                 // 자기완결 그룹 디스크립터 (계획서 §5) — group.json (autojoin 경로)
                 std::string strDescriptor = BuildGroupDescriptor( clsGroup );
                 gclsCallDir.PttSessionStart( pszGroupId, "autojoin", pszUserId, strDescriptor );
@@ -406,8 +429,15 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 bVideoEnabled = clsGroup._videoEnabled;
                 // nMemberHash 는 반드시 실제 멤버해시로 설정 — 0 으로 두면 다음 SyncGroupsState 가
                 // 변경으로 오인해 스퓨리어스 ModifyGroup+group_change NOTIFY storm → 멤버 drop.
-                m_mapGroupRtp[pszGroupId] = { iSharedPort, iSharedFloorPort, iSharedVideoPort, strSharedIp,
-                                              ComputeMemberHash( clsGroup ), "", "", bVideoEnabled, 0 };
+                m_mapGroupRtp[pszGroupId] = { iSharedPort,
+                                              iSharedFloorPort,
+                                              iSharedVideoPort,
+                                              strSharedIp,
+                                              ComputeMemberHash( clsGroup ),
+                                              "",
+                                              "",
+                                              bVideoEnabled,
+                                              0 };
             } else {
                 CLog::Print( LOG_ERROR, "InviteMember(%s) Failed to get/alloc Shared Port for Group %s", pszUserId,
                              pszGroupId );
@@ -617,26 +647,10 @@ void CGroupCallService::SyncGroupsState() {
 
         auto itRtp = m_mapGroupRtp.find( group._id );
         if ( itRtp == m_mapGroupRtp.end() ) {
-            // NEW GROUP
-            lock.unlock();  // Release lock for network op
-
-            std::string ip;
-            int port;
-            int floorPort = 0;
-            int videoPort = 0;
-            std::string strLogDir;
-            if ( gclsCallDir.IsEnabled() ) {
-                strLogDir = gclsCallDir.GetPttSessionDir( group._id, TimeToIso( group._sessionStart ),
-                                                          std::to_string( group._dbId ) );
-            }
-            std::string strGroupSesId = GetOrIssueGroupSesId( group._id );
-            if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir, strLogDir,
-                                         false, group._sessionSeq, strGroupSesId ) ) {
-                std::unique_lock<std::recursive_mutex> lock2( m_mutex );
-                m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip, nHash, "", "", group._videoEnabled, 0 };
-                CLog::Print( LOG_INFO, "SyncGroupsState: Added Group(%s) -> %s:%d floor=%d (MemHash:%lu)",
-                             group._id.c_str(), ip.c_str(), port, floorPort, nHash );
-            }
+            // 규격 모델: CMP 그룹 컨텍스트를 proactive 하게 만들지 않는다.
+            //   세션 생성은 발신 INVITE(on-demand: ProcessGroupCall) 또는
+            //   affiliation 기반 합류(chat: CheckGroupIntegrity)가 담당. 여기선 무동작.
+            return;
         } else {
             // EXISTING GROUP - Check for Diff
             if ( itRtp->second.nMemberHash != nHash ) {
@@ -721,52 +735,63 @@ void CGroupCallService::CheckMemberState() {
 }
 
 void CGroupCallService::CheckGroupIntegrity() {
-    // Re-invite missing members
+    // 규격 모델(TS 24.379): 세션을 상시 강제하지 않는다.
+    //  - chat(group_type)            : 상시 세션 — affiliate+등록 멤버를 합류 유지(필요 시 컨텍스트 생성).
+    //  - prearranged/broadcast       : on-demand — 이미 active 한 세션의 누락 멤버만 재초대(late entry/복구).
+    //                                  active 세션이 없으면 무동작(발신 INVITE 가 세션을 만든다).
+    //  멤버 자격 = 등록됨(UserMap) ∧ (require_affiliation 이면 affiliated).
     gclsGroupMap.IterateInternal( [this]( const CspPttGroup &group ) {
-        // First ensure Group Context exists
-        {
-            std::unique_lock<std::recursive_mutex> lock( m_mutex );
-            if ( m_mapGroupRtp.find( group._id ) == m_mapGroupRtp.end() ) {
-                lock.unlock();
-                std::string ip;
-                int port;
-                int floorPort = 0;
-                int videoPort = 0;
-                std::string strLogDir;
-                if ( gclsCallDir.IsEnabled() ) {
-                    strLogDir = gclsCallDir.GetPttSessionDir( group._id, TimeToIso( group._sessionStart ),
-                                                          std::to_string( group._dbId ) );
-                }
-                std::string strGroupSesId = GetOrIssueGroupSesId( group._id );
-                if ( gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir,
-                                             strLogDir, false, group._sessionSeq, strGroupSesId ) ) {
-                    lock.lock();
-                    // nMemberHash 실제값 저장 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
-                    m_mapGroupRtp[group._id] = { port, floorPort, videoPort, ip,
-                                                 ComputeMemberHash( group ), "", "", group._videoEnabled, 0 };
-                } else {
-                    return;  // Skip this group if alloc fails
-                }
-            }
-        }
+        const bool bPersistent = ( group._groupType == "chat" );
 
-        // Collect registered members that need inviting
-        std::vector<std::string> vecToInvite;
+        // 1) eligible 멤버 수집 (등록 ∧ affiliation 게이트)
+        std::vector<std::string> vecEligible;
         for ( const auto &pUser : group._pusers ) {
             if ( !pUser ) continue;
-            std::string strUserId = pUser->_id;
+            const std::string &strUserId = pUser->_id;
             CUserInfo clsUser;
-            if ( gclsUserMap.Select( strUserId.c_str(), clsUser ) ) {
-                std::unique_lock<std::recursive_mutex> lock( m_mutex );
-                if ( m_mapUserCall.find( strUserId ) == m_mapUserCall.end() ) {
-                    vecToInvite.push_back( strUserId );
+            if ( !gclsUserMap.Select( strUserId.c_str(), clsUser ) ) continue;
+            if ( group._requireAffiliation && gclsDbManager.IsConnected() &&
+                 !gclsDbManager.IsAffiliated( group._id.c_str(), strUserId.c_str() ) )
+                continue;
+            vecEligible.push_back( strUserId );
+        }
+
+        // 2) 세션 존재 판정
+        bool bActive = false, bHasContext = false;
+        {
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            bHasContext = ( m_mapGroupRtp.find( group._id ) != m_mapGroupRtp.end() );
+            for ( const auto &kv : m_mapCallSession ) {
+                if ( kv.second.strGroupId == group._id ) {
+                    bActive = true;
+                    break;
                 }
             }
         }
+        if ( bPersistent ) {
+            if ( vecEligible.empty() ) return;  // chat: 자격 멤버 없으면 빈 세션 안 만듦
+        } else {
+            if ( !bActive ) return;  // on-demand: active 세션 아니면 무동작
+        }
 
-        if ( vecToInvite.empty() ) return;
+        // 3) 컨텍스트 보장 (chat 최초 합류 시 생성; active on-demand 는 이미 존재)
+        if ( !bHasContext ) {
+            std::string ip;
+            int port = 0, floorPort = 0, videoPort = 0;
+            std::string strLogDir;
+            if ( gclsCallDir.IsEnabled() )
+                strLogDir = gclsCallDir.GetPttSessionDir( group._id, TimeToIso( group._sessionStart ),
+                                                          std::to_string( group._dbId ) );
+            std::string strGroupSesId = GetOrIssueGroupSesId( group._id );
+            if ( !gclsCmpClient.AddGroup( group._id, group._pusers, ip, port, floorPort, videoPort, strLogDir,
+                                          strLogDir, group._videoEnabled, group._sessionSeq, strGroupSesId ) )
+                return;
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            m_mapGroupRtp[group._id] = { port, floorPort, videoPort,           ip, ComputeMemberHash( group ),
+                                         "",   "",        group._videoEnabled, 0 };
+        }
 
-        // Ensure a call log entry exists for this group session before inviting
+        // 4) call log 보장
         if ( gclsDbManager.IsConnected() ) {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             auto itRtp = m_mapGroupRtp.find( group._id );
@@ -776,15 +801,21 @@ void CGroupCallService::CheckGroupIntegrity() {
                 itRtp->second.strSessionCallId = szCallId;
                 lock.unlock();
                 gclsDbManager.InsertCallLog( szCallId, true, group._id, "CSP", group._id );
-                CLog::Print( LOG_INFO, "CheckGroupIntegrity: Created call log for Group(%s) CallId(%s)",
-                             group._id.c_str(), szCallId );
             }
         }
 
-        for ( const auto &strUserId : vecToInvite ) {
-            CLog::Print( LOG_DEBUG, "CheckGroupIntegrity: User(%s) in Group(%s) missing from active calls. Inviting.",
-                         strUserId.c_str(), group._id.c_str() );
-            InviteMember( strUserId.c_str(), group._id.c_str() );
+        // 5) 누락 멤버 초대 (chat 합류 / on-demand active 세션 late-entry·복구)
+        for ( const auto &strUserId : vecEligible ) {
+            bool bInCall;
+            {
+                std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                bInCall = ( m_mapUserCall.find( strUserId ) != m_mapUserCall.end() );
+            }
+            if ( !bInCall ) {
+                CLog::Print( LOG_DEBUG, "CheckGroupIntegrity: invite %s → %s (type=%s)", strUserId.c_str(),
+                             group._id.c_str(), group._groupType.c_str() );
+                InviteMember( strUserId.c_str(), group._id.c_str() );
+            }
         }
     } );
 }
@@ -923,6 +954,16 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     // RFC 4575: Notify remaining participants about member leaving
     if ( bStillActive ) {
         SendConferenceNotify( strGroupId, strMemberId, "disconnected", "deleted" );
+    } else if ( !strGroupId.empty() ) {
+        // on-demand 그룹(prearranged/broadcast): 마지막 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
+        CspPttGroup clsGrp;
+        bool bChat = gclsGroupMap.Select( strGroupId.c_str(), clsGrp ) && clsGrp._groupType == "chat";
+        if ( !bChat ) {
+            gclsCmpClient.RemoveGroup( strGroupId, GetOrIssueGroupSesId( strGroupId ) );
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            m_mapGroupRtp.erase( strGroupId );
+            RemoveGroupSesId( strGroupId );
+        }
     }
 
     return bFound;
@@ -1119,11 +1160,10 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
     // 본문이 한계를 초과하므로, 본문 추정치가 안전 한계(7000B; 헤더 여유 포함)를 넘으면
     // 로스터 part 를 생략한다. (대형 그룹 멤버 정보는 GMS 그룹문서 + conference NOTIFY 로 제공)
     const size_t kSafeBodyLimit = 7000;
-    bool bIncludeRoster = !strRosterXml.empty() &&
-                          ( strGroupXml.size() + strRosterXml.size() + strSdp.size() + 400 ) < kSafeBodyLimit;
+    bool bIncludeRoster =
+        !strRosterXml.empty() && ( strGroupXml.size() + strRosterXml.size() + strSdp.size() + 400 ) < kSafeBodyLimit;
     if ( !strRosterXml.empty() && !bIncludeRoster ) {
-        CLog::Print( LOG_INFO,
-                     "WrapMultipartBody: roster(%zuB) 생략 — INVITE 본문이 UDP 한계 초과 우려 (GMS 로 제공)",
+        CLog::Print( LOG_INFO, "WrapMultipartBody: roster(%zuB) 생략 — INVITE 본문이 UDP 한계 초과 우려 (GMS 로 제공)",
                      strRosterXml.size() );
     }
 

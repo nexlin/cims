@@ -456,12 +456,18 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         return;
     }
 
-    // 4. PTT 그룹통화 — 플로어 제어 순환 발언
-    // PTT 단말은 발신하지 않음 — CSP가 CheckGroupIntegrity 로 자동 초대
-    // 시뮬레이터는 등록/구독 후 CSP의 INVITE 를 기다려 응답만 함
+    // 4. PTT 그룹통화 — 플로어 제어 순환 발언 (MCPTT 규격: on-demand)
+    //   규격 모델: 발신 UE 1명이 그룹 INVITE(키업)로 세션을 개시(ProcessGroupCall) →
+    //   CSP 가 affiliate+등록된 나머지 멤버에게 fan-out → 멤버는 auto-answer.
+    //   (chat 그룹은 affiliation 만으로도 CheckGroupIntegrity 가 합류시킴.)
     if (eScenario == E_SCENARIO_GROUP_CALL || eScenario == E_SCENARIO_FULL) {
         if (!sessions.empty() && sessions[0]->m_bPttMode) {
-            printf("[Scenario] PTT mode: waiting for CSP to invite all members...\n");
+            // 발신자(session[0]) 가 그룹콜 개시 (on-demand)
+            printf("[Scenario] PTT on-demand: session[0] (%s) originating group INVITE -> %s\n",
+                   sessions[0]->m_strUser.c_str(), strGroupId.c_str());
+            sessions[0]->StartGroupCall(strGroupId);
+            usleep(200000);
+            printf("[Scenario] waiting for members to join (originator fan-out)...\n");
 
             // Wait for all members to join (max 45s — 40명 affiliation+자동초대 여유)
             bool bAllJoined = false;

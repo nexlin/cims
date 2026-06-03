@@ -428,11 +428,18 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
     if ( strlen( pszTo ) == 0 ) return StopCall( pszCallId, SIP_DECLINE );
 
-    // 1. PTT-AS: 그룹콜
+    // 1. PTT-AS: 그룹콜 (MCPTT 규격 on-demand) — UE 발신 그룹 INVITE 를 받아 fan-out.
+    //   구 always-on 모델은 여기서 403 거부했으나(발신 안 한다는 전제), 규격 모델에선
+    //   발신 UE 의 키업(그룹 INVITE)이 세션 개시 트리거다 → ProcessGroupCall 로 라우팅.
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
-        CLog::Print( LOG_INFO, "EventIncomingCall: PTT terminal(%s) INVITE to group(%s) - rejected 403 [PTT-AS]",
-                     pszFrom, pszTo );
         SetCallOwner( pszCallId, &m_clsPttAs );
+        CSipCallRoute clsGroupRoute;
+        clsUserInfo.GetCallRoute( clsGroupRoute );
+        if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsGroupRoute ) ) {
+            return;
+        }
+        CLog::Print( LOG_INFO, "EventIncomingCall: ProcessGroupCall(%s) failed for caller(%s) → 403 [PTT-AS]", pszTo,
+                     pszFrom );
         return StopCall( pszCallId, SIP_FORBIDDEN );
     }
 

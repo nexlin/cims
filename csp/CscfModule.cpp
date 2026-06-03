@@ -253,8 +253,12 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         gclsCspUserMap.unregisterUser( strUserId );
         // PTT 그룹콜 세션 정리 (활성 호 있으면 BYE + DB 갱신)
         gclsGroupCallService.ClearUserCall( strUserId );
+        // 등록 해제 시 암묵적 de-affiliation (TS 24.379 — affiliation 은 등록에 묶임)
+        if ( gclsDbManager.IsConnected() ) {
+            gclsDbManager.RemoveAffiliationsByUser( strUserId );
+        }
         SendResponse( pclsMessage, SIP_OK );
-        CLog::Print( LOG_INFO, "RecvRequestRegister: user(%s) unregistered", strUserId.c_str() );
+        CLog::Print( LOG_INFO, "RecvRequestRegister: user(%s) unregistered (de-affiliated)", strUserId.c_str() );
         return true;
     }
 
@@ -298,35 +302,11 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 
         gclsCspUserMap.registerUser( clsUser.m_strId, "" );
 
-        // PTT auto-invite
-        if ( clsUser.m_strServiceType == "ptt" || clsUser.m_strServiceType == "both" ) {
-            std::string strUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
-            CLog::Print( LOG_INFO, "RecvRequestRegister: PTT user(%s) registered, auto-joining groups",
-                         strUserId.c_str() );
-
-            gclsGroupCallService.ClearUserCall( strUserId );
-
-            if ( gclsDbManager.IsConnected() ) {
-                std::vector<std::string> vecGroupIds;
-                gclsDbManager.SelectGroupsByUser( strUserId, vecGroupIds );
-                for ( const auto &gid : vecGroupIds ) {
-                    CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s) [DB]",
-                                 strUserId.c_str(), gid.c_str() );
-                    gclsGroupCallService.InviteMember( strUserId.c_str(), gid.c_str() );
-                }
-            } else {
-                gclsGroupMap.IterateInternal( [&strUserId]( const CspPttGroup &group ) {
-                    for ( const auto &pUser : group._pusers ) {
-                        if ( pUser && pUser->_id == strUserId ) {
-                            CLog::Print( LOG_INFO, "RecvRequestRegister: Inviting user(%s) to group(%s) [map]",
-                                         strUserId.c_str(), group._id.c_str() );
-                            gclsGroupCallService.InviteMember( strUserId.c_str(), group._id.c_str() );
-                            break;
-                        }
-                    }
-                } );
-            }
-        }
+        // [MCPTT 규격] REGISTER 는 호에 부작용 없음 (TS 24.379).
+        //   그룹콜 조인 트리거 = (a) 발신 UE 의 그룹 INVITE → ProcessGroupCall fan-out,
+        //   또는 (b) affiliation(PUBLISH) → late entry. REGISTER 자동초대/ClearUserCall 안 함.
+        //   (예전엔 등록 갱신마다 ClearUserCall+재초대 → 활성 레그 teardown 버그.)
+        //   진행 중 세션 멤버의 재등록은 DB 의 affiliation 기반으로 CheckGroupIntegrity 가 복구.
     } else {
         SendResponse( pclsMessage, SIP_BAD_REQUEST );
     }
