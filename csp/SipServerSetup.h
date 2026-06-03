@@ -195,6 +195,16 @@ public:
     std::vector< std::pair< std::string, int > > m_vecCmpEndpoints;
 
     // ================================================================
+    // XCAP / CSC 연동 (UE↔CSC, 3GPP TS 24.484 — Phase 3)
+    //   xcap-diff NOTIFY 의 xcap-root URL 로 advertise 할 CSC XCAP(MCPTT) 서버 주소.
+    //   비어있으면 m_strLocalIp 로 fallback (CSP 자기 IP — 단일 노드 호환).
+    //   port 기본값 4430 = CSC McpttServer (GMS/CMS/KMS 라우트가 실제 서빙되는 포트).
+    //   scheme 기본값 https (CSC McpttServer 는 cert 존재 시 TLS — 3GPP CSC-2/3 규격).
+    std::string m_strXcapHost;
+    int m_iXcapPort;
+    std::string m_strXcapScheme;
+
+    // ================================================================
     // 런타임 설정 jsonl 디렉토리 (agent 관리)
     std::string m_strConfigJsonlDir;  // agent 관리 config/ 디렉토리
 

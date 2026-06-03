@@ -181,6 +181,42 @@
       "scope": "service"
     },
     {
+      "key": "xcap",
+      "title": "XCAP / CSC 연동 (UE↔CSC)",
+      "description": "MCPTT 단말이 그룹문서/사용자 프로파일/서비스 설정을 취득하는 CSC XCAP(MCPTT) 서버. CSP 는 xcap-diff NOTIFY 의 xcap-root URL 로 이 주소를 광고한다.",
+      "fields": [
+        {
+          "key": "Setup.Xcap.Host",
+          "label": "XCAP 서버 주소",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@CSC_IP@",
+          "restart": true,
+          "help": "CSC XCAP(MCPTT) 서버의 IP/호스트명. 비우면 CSP 자기 IP 로 fallback (단일 노드). 단말이 라우팅 가능한 CSC 주소(또는 VIP)로 지정."
+        },
+        {
+          "key": "Setup.Xcap.Port",
+          "label": "XCAP 서버 포트",
+          "type": "int",
+          "default": 4430,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "CSC McpttServer 포트 (GMS/CMS/KMS XCAP 라우트 서빙). csc.json McpttServer.Port 와 일치."
+        },
+        {
+          "key": "Setup.Xcap.Scheme",
+          "label": "XCAP 스킴",
+          "type": "enum",
+          "options": ["https", "http"],
+          "default": "https",
+          "restart": true,
+          "help": "CSC McpttServer 가 TLS(cert 존재) 면 https. 3GPP CSC-2/3 규격 기본은 https."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "log",
       "title": "로깅",
       "fields": [

@@ -56,7 +56,17 @@ namespace CspAddressing {
     }
 
     std::string GetLocalXcapAddress() {
+        // Phase 3: xcap-root host 는 CSC XCAP(MCPTT) 서버. 미설정 시 CSP 자기 IP fallback.
+        if ( !gclsSetup.m_strXcapHost.empty() ) return gclsSetup.m_strXcapHost;
         return gclsSetup.m_strLocalIp;
+    }
+
+    int GetXcapPort() {
+        return gclsSetup.m_iXcapPort > 0 ? gclsSetup.m_iXcapPort : 4430;
+    }
+
+    std::string GetXcapScheme() {
+        return gclsSetup.m_strXcapScheme.empty() ? "https" : gclsSetup.m_strXcapScheme;
     }
 
     std::string GetServerIdentityForService( const std::string &kind ) {

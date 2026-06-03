@@ -425,7 +425,10 @@ extern CSipUserAgent gclsUserAgent;
  */
 static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::string &etag,
                                       const std::string &strChangedId ) {
-    const std::string strXcapRoot = "http://" + CspAddressing::GetLocalXcapAddress() + ":4420/";
+    // Phase 3: xcap-root = CSC XCAP(MCPTT) 서버 (Setup.Xcap.Scheme://Host:Port, 기본 https:4430).
+    //   기존 하드코딩 http://{CSP}:4420 은 CSC Admin 서버(라우트 없음)를 가리키던 오류였음.
+    const std::string strXcapRoot = CspAddressing::GetXcapScheme() + "://" + CspAddressing::GetLocalXcapAddress() +
+                                    ":" + std::to_string( CspAddressing::GetXcapPort() ) + "/";
     std::string strBody;
     strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
     strBody += "<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"";

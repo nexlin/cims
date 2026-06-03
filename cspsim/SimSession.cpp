@@ -6,6 +6,195 @@
 #include <sstream>
 #include <chrono>
 #include <cstring>
+#include <cctype>
+#include <vector>
+#include <utility>
+#include <openssl/sha.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+
+// ─────────────────────────────────────────────
+//  XCAP / IdMS HTTP helper (Phase 3 — UE↔CSC)
+//   cspsim 은 테스트 단말이므로 psip HttpStack 의존 없이 최소 raw-socket
+//   HTTP/1.1 클라이언트(Connection: close, read-to-EOF)로 구현한다.
+// ─────────────────────────────────────────────
+namespace {
+
+// RFC 3986 unreserved 외 문자는 %XX 로 percent-encode (query 값용)
+std::string XcapUrlEncode(const std::string& s) {
+    static const char* HEX = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : s) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += (char)c;
+        } else {
+            out += '%';
+            out += HEX[c >> 4];
+            out += HEX[c & 0xF];
+        }
+    }
+    return out;
+}
+
+// base64url (RFC 4648 §5, no padding) — PKCE code_challenge 생성용
+std::string XcapBase64Url(const unsigned char* data, size_t len) {
+    static const char* T =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    std::string out;
+    for (size_t i = 0; i < len; i += 3) {
+        unsigned v = (unsigned)data[i] << 16;
+        if (i + 1 < len) v |= (unsigned)data[i + 1] << 8;
+        if (i + 2 < len) v |= (unsigned)data[i + 2];
+        out += T[(v >> 18) & 0x3F];
+        out += T[(v >> 12) & 0x3F];
+        if (i + 1 < len) out += T[(v >> 6) & 0x3F];
+        if (i + 2 < len) out += T[v & 0x3F];
+    }
+    return out;
+}
+
+// 간이 JSON 문자열 값 추출: "key":"value"
+std::string XcapJsonStr(const std::string& j, const std::string& key) {
+    std::string pat = "\"" + key + "\"";
+    size_t p = j.find(pat);
+    if (p == std::string::npos) return "";
+    p = j.find(':', p + pat.size());
+    if (p == std::string::npos) return "";
+    p++;
+    while (p < j.size() && (j[p] == ' ' || j[p] == '\t')) p++;
+    if (p >= j.size() || j[p] != '"') return "";
+    p++;
+    std::string out;
+    while (p < j.size() && j[p] != '"') {
+        if (j[p] == '\\' && p + 1 < j.size()) { out += j[p + 1]; p += 2; }
+        else out += j[p++];
+    }
+    return out;
+}
+
+// http://host:port/path 파싱
+bool XcapParseUrl(const std::string& url, std::string& host, int& port, std::string& path) {
+    std::string u = url;
+    size_t s = u.find("://");
+    bool https = false;
+    if (s != std::string::npos) { https = (u.substr(0, s) == "https"); u = u.substr(s + 3); }
+    port = https ? 443 : 80;
+    size_t sl = u.find('/');
+    std::string hostport = (sl == std::string::npos) ? u : u.substr(0, sl);
+    path = (sl == std::string::npos) ? "/" : u.substr(sl);
+    size_t c = hostport.find(':');
+    if (c != std::string::npos) { host = hostport.substr(0, c); port = atoi(hostport.c_str() + c + 1); }
+    else host = hostport;
+    return !host.empty() && port > 0;
+}
+
+// raw-socket HTTP/1.1 요청. Connection: close + read-to-EOF (chunked 회피).
+//   bTls=true 면 OpenSSL TLS (CSC McpttServer 는 cert 존재 시 https — peer 검증 생략, 테스트 단말).
+//   반환: 송수신 성공(true) — status code/body/etag 는 out 인자. 연결 실패 시 false.
+bool XcapHttp(const std::string& host, int port, bool bTls, const std::string& method,
+              const std::string& path,
+              const std::vector<std::pair<std::string, std::string> >& headers,
+              const std::string& body, const std::string& contentType,
+              int& outStatus, std::string& outBody, std::string& outEtag) {
+    outStatus = 0; outBody.clear(); outEtag.clear();
+
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return false;
+
+    struct timeval tv; tv.tv_sec = 5; tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    struct sockaddr_in addr; memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) <= 0) {
+        struct hostent* he = gethostbyname(host.c_str());
+        if (!he || !he->h_addr) { close(sock); return false; }
+        memcpy(&addr.sin_addr, he->h_addr, he->h_length);
+    }
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { close(sock); return false; }
+
+    // TLS 핸드셰이크 (https). peer 인증서 검증은 생략 (테스트 단말, self-signed CSC cert).
+    SSL_CTX* ctx = NULL; SSL* ssl = NULL;
+    if (bTls) {
+        ctx = SSL_CTX_new(TLS_client_method());
+        if (!ctx) { close(sock); return false; }
+        ssl = SSL_new(ctx);
+        if (!ssl) { SSL_CTX_free(ctx); close(sock); return false; }
+        SSL_set_fd(ssl, sock);
+        SSL_set_tlsext_host_name(ssl, host.c_str());  // SNI
+        if (SSL_connect(ssl) != 1) {
+            SSL_free(ssl); SSL_CTX_free(ctx); close(sock); return false;
+        }
+    }
+
+    std::string req = method + " " + path + " HTTP/1.1\r\n";
+    req += "Host: " + host + ":" + std::to_string(port) + "\r\n";
+    req += "Connection: close\r\n";
+    for (size_t i = 0; i < headers.size(); ++i)
+        req += headers[i].first + ": " + headers[i].second + "\r\n";
+    if (!body.empty()) {
+        req += "Content-Type: " + contentType + "\r\n";
+        req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+    }
+    req += "\r\n";
+    req += body;
+
+    bool bSendOk = true;
+    size_t sent = 0;
+    while (sent < req.size()) {
+        ssize_t n = bTls ? SSL_write(ssl, req.data() + sent, (int)(req.size() - sent))
+                         : send(sock, req.data() + sent, req.size() - sent, 0);
+        if (n <= 0) { bSendOk = false; break; }
+        sent += (size_t)n;
+    }
+
+    std::string resp;
+    if (bSendOk) {
+        char buf[4096];
+        while (true) {
+            ssize_t n = bTls ? SSL_read(ssl, buf, sizeof(buf))
+                            : recv(sock, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            resp.append(buf, (size_t)n);
+        }
+    }
+
+    if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
+    if (ctx) SSL_CTX_free(ctx);
+    close(sock);
+    if (resp.empty()) return false;
+
+    // status line: "HTTP/1.1 200 OK"
+    size_t sp = resp.find(' ');
+    if (sp != std::string::npos) outStatus = atoi(resp.c_str() + sp + 1);
+
+    size_t hdrEnd = resp.find("\r\n\r\n");
+    std::string head = (hdrEnd != std::string::npos) ? resp.substr(0, hdrEnd) : resp;
+    outBody = (hdrEnd != std::string::npos) ? resp.substr(hdrEnd + 4) : "";
+
+    // ETag 헤더 (case-insensitive) 추출
+    std::string lower = head;
+    for (size_t i = 0; i < lower.size(); ++i) lower[i] = (char)tolower((unsigned char)lower[i]);
+    size_t ep = lower.find("\netag:");
+    if (ep != std::string::npos) {
+        size_t ls = ep + 6;  // past "\netag:"
+        size_t le = head.find("\r\n", ls);
+        std::string v = head.substr(ls, (le == std::string::npos ? head.size() : le) - ls);
+        size_t a = v.find_first_not_of(" \t");
+        size_t b = v.find_last_not_of(" \t\r");
+        if (a != std::string::npos) outEtag = v.substr(a, b - a + 1);
+    }
+    return true;
+}
+
+}  // namespace
 
 // ─────────────────────────────────────────────
 //  유틸
@@ -423,11 +612,12 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
         return true;
     }
 
-    HandleNotify(pclsMessage);
-
-    // 200 OK 응답
+    // 200 OK 를 먼저 응답 — HandleNotify 의 XCAP HTTP GET 이 블로킹이므로
+    // NOTIFY 재전송을 막기 위해 응답을 선행한다.
     CSipMessage* pRes = pclsMessage->CreateResponseWithToTag(200);
     if (pRes) m_clsUserAgent.m_clsSipStack.SendSipMessage(pRes);
+
+    HandleNotify(pclsMessage);
 
     return true;
 }
@@ -476,28 +666,173 @@ void SimSession::HandleNotify(CSipMessage* pclsMessage) {
 
     printf("[%d] NOTIFY Event=%s State=%s\n", m_iId, strEvent.c_str(), strState.c_str());
 
-    // xcap-diff 본문에서 sel(문서 경로) 추출
     const std::string& strBody = pclsMessage->m_strBody;
-    if (!strBody.empty()) {
-        // sel="..." 값 간단히 추출
-        size_t pos = strBody.find("sel=\"");
-        while (pos != std::string::npos) {
-            size_t end = strBody.find("\"", pos + 5);
-            if (end != std::string::npos) {
-                std::string strSel = strBody.substr(pos + 5, end - pos - 5);
-                printf("[%d]   sel: %s\n", m_iId, strSel.c_str());
-            }
-            pos = strBody.find("sel=\"", pos + 1);
+    if (strBody.empty()) return;
+
+    // xcap-root="http://{CSC}:{port}/" 추출 (Phase 3B 교정 결과)
+    std::string strXcapRoot;
+    {
+        size_t p = strBody.find("xcap-root=\"");
+        if (p != std::string::npos) {
+            size_t e = strBody.find('"', p + 11);
+            if (e != std::string::npos) strXcapRoot = strBody.substr(p + 11, e - p - 11);
         }
-        // new-etag 추출
-        pos = strBody.find("new-etag=\"");
-        if (pos != std::string::npos) {
-            size_t end = strBody.find("\"", pos + 10);
-            if (end != std::string::npos) {
-                std::string strEtag = strBody.substr(pos + 10, end - pos - 10);
-                printf("[%d]   etag: %s\n", m_iId, strEtag.c_str());
+    }
+
+    // <document new-etag="..." sel="..."/> 를 문서별로 순회
+    size_t dp = strBody.find("<document");
+    while (dp != std::string::npos) {
+        size_t de = strBody.find('>', dp);
+        std::string doc = strBody.substr(dp, (de == std::string::npos ? strBody.size() : de) - dp);
+        std::string strSel, strEtag;
+        {
+            size_t p = doc.find("sel=\"");
+            if (p != std::string::npos) { size_t e = doc.find('"', p + 5); if (e != std::string::npos) strSel = doc.substr(p + 5, e - p - 5); }
+        }
+        {
+            size_t p = doc.find("new-etag=\"");
+            if (p != std::string::npos) { size_t e = doc.find('"', p + 10); if (e != std::string::npos) strEtag = doc.substr(p + 10, e - p - 10); }
+        }
+        if (!strSel.empty()) {
+            printf("[%d]   sel: %s (etag=%s)\n", m_iId, strSel.c_str(), strEtag.c_str());
+            // xcap-diff NOTIFY 수신 → 실제 XCAP GET 으로 문서 취득 (Phase 3D)
+            if (!m_bNoXcap && !strXcapRoot.empty()) FetchXcapDoc(strXcapRoot, strSel, strEtag);
+        }
+        dp = strBody.find("<document", dp + 1);
+    }
+}
+
+// 능동 XCAP 취득 (검증용) — SUBSCRIBE 후 자신의 문서들을 직접 GET.
+//   sel 형식은 CSP BuildXcapDiffBody 와 동일 (CMS user-profile/service-config + GMS group).
+void SimSession::ProbeXcap(const std::string& strXcapRoot) {
+    if (m_bNoXcap || strXcapRoot.empty()) return;
+    std::string strUserTel = std::string("tel:") + m_strUser;  // m_strUser 는 +825.. 형식
+    printf("[%d] XCAP probe (xcap-root=%s)\n", m_iId, strXcapRoot.c_str());
+    FetchXcapDoc(strXcapRoot, "org.3gpp.mcptt.user-profile/users/" + strUserTel + "/user-profile", "");
+    FetchXcapDoc(strXcapRoot, "org.3gpp.mcptt.service-config/users/" + strUserTel + "/service-config", "");
+    if (!m_strGroupId.empty())
+        FetchXcapDoc(strXcapRoot, "org.openmobilealliance.groups/users/" + strUserTel + "/tel:" + m_strGroupId, "");
+}
+
+// ─────────────────────────────────────────────
+//  CSC-1 토큰 취득 (3GPP TS 33.180 / OAuth2 PKCE) — Phase 3C
+//   IdMS 는 XCAP 와 동일 CSC host:port 에서 /idms/* 로 서빙.
+//   세션당 1회만 취득해 m_strAccessToken 에 캐시.
+// ─────────────────────────────────────────────
+bool SimSession::AcquireXcapToken(const std::string& strHost, int iPort, bool bTls) {
+    if (!m_strAccessToken.empty()) return true;
+
+    // PKCE: 안정적(결정적) code_verifier → SHA256 → base64url = code_challenge.
+    //   서버는 SHA256(verifier)==challenge 만 검증하므로 결정적 생성으로 충분.
+    static const char* AB =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    std::string strVerifier;
+    for (int i = 0; i < 64; ++i) strVerifier += AB[(m_iId * 7 + i * 13 + 5) % 66];
+
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((const unsigned char*)strVerifier.data(), strVerifier.size(), hash);
+    std::string strChallenge = XcapBase64Url(hash, SHA256_DIGEST_LENGTH);
+
+    // user_name = IdMS USERS 키 형식 (tel:+<msisdn>)
+    std::string strUserUri = m_strUser;
+    if (strUserUri.rfind("tel:", 0) != 0)
+        strUserUri = std::string("tel:") + (!strUserUri.empty() && strUserUri[0] == '+' ? strUserUri : "+" + strUserUri);
+
+    const std::string strRedirect = "http://localhost/cb";
+
+    // 1) GET /idms/authreq → auth code
+    std::string strQuery =
+        "/idms/authreq?user_name=" + XcapUrlEncode(strUserUri) +
+        "&user_password=" + XcapUrlEncode(m_strPwd) +
+        "&client_id=MCPTT_UE&redirect_uri=" + XcapUrlEncode(strRedirect) +
+        "&scope=&code_challenge=" + strChallenge + "&code_challenge_method=S256";
+
+    std::vector<std::pair<std::string, std::string> > noHdr;
+    int iStatus = 0; std::string strRespBody, strRespEtag;
+    if (!XcapHttp(strHost, iPort, bTls, "GET", strQuery, noHdr, "", "", iStatus, strRespBody, strRespEtag) || iStatus != 200) {
+        printf("[%d]   XCAP token: authreq failed (status=%d)\n", m_iId, iStatus);
+        m_stats.iXcapTokenFail++;
+        return false;
+    }
+    std::string strCode = XcapJsonStr(strRespBody, "code");
+    if (strCode.empty()) {
+        printf("[%d]   XCAP token: no auth code in authreq response\n", m_iId);
+        m_stats.iXcapTokenFail++;
+        return false;
+    }
+
+    // 2) POST /idms/tokenreq (authorization_code + PKCE verifier) → access_token
+    std::string strTokenBody =
+        std::string("{\"grant_type\":\"authorization_code\",\"code\":\"") + strCode +
+        "\",\"code_verifier\":\"" + strVerifier +
+        "\",\"client_id\":\"MCPTT_UE\",\"redirect_uri\":\"" + strRedirect + "\"}";
+
+    iStatus = 0; strRespBody.clear(); strRespEtag.clear();
+    if (!XcapHttp(strHost, iPort, bTls, "POST", "/idms/tokenreq", noHdr, strTokenBody, "application/json",
+                  iStatus, strRespBody, strRespEtag) || iStatus != 200) {
+        printf("[%d]   XCAP token: tokenreq failed (status=%d)\n", m_iId, iStatus);
+        m_stats.iXcapTokenFail++;
+        return false;
+    }
+    m_strAccessToken = XcapJsonStr(strRespBody, "access_token");
+    if (m_strAccessToken.empty()) {
+        printf("[%d]   XCAP token: no access_token in tokenreq response\n", m_iId);
+        m_stats.iXcapTokenFail++;
+        return false;
+    }
+    m_stats.iXcapTokenOk++;
+    printf("[%d]   XCAP token acquired (len=%zu)\n", m_iId, m_strAccessToken.size());
+    return true;
+}
+
+// ─────────────────────────────────────────────
+//  XCAP 문서 취득 (Phase 3D) — xcap-root + sel 을 GET.
+//   200 수신 + etag 있으면 If-None-Match 재요청으로 304 동작도 검증.
+// ─────────────────────────────────────────────
+void SimSession::FetchXcapDoc(const std::string& strXcapRoot, const std::string& strSel,
+                              const std::string& /*strDocEtag*/) {
+    std::string strHost, strRootPath; int iPort = 0;
+    if (!XcapParseUrl(strXcapRoot, strHost, iPort, strRootPath)) {
+        printf("[%d]   XCAP: bad xcap-root '%s'\n", m_iId, strXcapRoot.c_str());
+        return;
+    }
+    bool bTls = (strXcapRoot.rfind("https://", 0) == 0);
+    if (!AcquireXcapToken(strHost, iPort, bTls)) return;
+
+    std::string strPath = strRootPath;
+    if (strPath.empty() || strPath[strPath.size() - 1] != '/') strPath += '/';
+    strPath += strSel;
+
+    std::vector<std::pair<std::string, std::string> > hdrs;
+    hdrs.push_back(std::make_pair("Authorization", "Bearer " + m_strAccessToken));
+
+    int iStatus = 0; std::string strBody, strEtag;
+    if (!XcapHttp(strHost, iPort, bTls, "GET", strPath, hdrs, "", "", iStatus, strBody, strEtag)) {
+        printf("[%d]   XCAP GET %s — connect/recv failed\n", m_iId, strSel.c_str());
+        m_stats.iXcapFail++;
+        return;
+    }
+
+    if (iStatus == 200) {
+        m_stats.iXcapOk++;
+        printf("[%d]   XCAP GET 200 %s (%zuB, etag=%s)\n", m_iId, strSel.c_str(), strBody.size(), strEtag.c_str());
+        // ETag 조건부 요청 검증: If-None-Match 로 재요청 → 304 기대
+        if (!strEtag.empty()) {
+            std::vector<std::pair<std::string, std::string> > hdrs2;
+            hdrs2.push_back(std::make_pair("Authorization", "Bearer " + m_strAccessToken));
+            hdrs2.push_back(std::make_pair("If-None-Match", strEtag));
+            int iSt2 = 0; std::string b2, e2;
+            if (XcapHttp(strHost, iPort, bTls, "GET", strPath, hdrs2, "", "", iSt2, b2, e2)) {
+                if (iSt2 == 304) { m_stats.iXcap304++; printf("[%d]   XCAP GET 304 (If-None-Match) %s\n", m_iId, strSel.c_str()); }
+                else printf("[%d]   XCAP GET %d (expected 304) %s\n", m_iId, iSt2, strSel.c_str());
             }
         }
+    } else if (iStatus == 304) {
+        m_stats.iXcap304++;
+        printf("[%d]   XCAP GET 304 (not modified) %s\n", m_iId, strSel.c_str());
+    } else {
+        m_stats.iXcapFail++;
+        printf("[%d]   XCAP GET %d %s\n", m_iId, iStatus, strSel.c_str());
     }
 }
 

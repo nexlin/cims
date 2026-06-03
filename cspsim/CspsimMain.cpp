@@ -240,6 +240,7 @@ static std::vector<std::string> ListFilesInDir(const std::string& strDir, const 
 static void PrintStats(const std::vector<SimSession*>& sessions) {
     int totalReg = 0, failReg = 0, gmsOk = 0, cmsOk = 0;
     int notifyRecv = 0, confNotify = 0, callOk = 0, callFail = 0, callEnd = 0;
+    int xcapTokenOk = 0, xcapTokenFail = 0, xcapOk = 0, xcap304 = 0, xcapFail = 0;
     long long totalRegMs = 0, totalCallMs = 0;
     int registered = 0, inCall = 0;
 
@@ -250,6 +251,11 @@ static void PrintStats(const std::vector<SimSession*>& sessions) {
         cmsOk      += s->m_stats.iCmsOk.load();
         notifyRecv += s->m_stats.iNotifyRecv.load();
         confNotify += s->m_stats.iConfNotify.load();
+        xcapTokenOk   += s->m_stats.iXcapTokenOk.load();
+        xcapTokenFail += s->m_stats.iXcapTokenFail.load();
+        xcapOk        += s->m_stats.iXcapOk.load();
+        xcap304       += s->m_stats.iXcap304.load();
+        xcapFail      += s->m_stats.iXcapFail.load();
         callOk     += s->m_stats.iCallOk.load();
         callFail   += s->m_stats.iCallFail.load();
         callEnd    += s->m_stats.iCallEnd.load();
@@ -267,6 +273,10 @@ static void PrintStats(const std::vector<SimSession*>& sessions) {
     printf("  CMS Subscribed: %d\n", cmsOk);
     printf("  NOTIFY Recv   : %d\n", notifyRecv);
     printf("  Conf NOTIFY   : %d\n", confNotify);
+    if (xcapTokenOk || xcapTokenFail || xcapOk || xcap304 || xcapFail) {
+        printf("  XCAP Token    : %d  (fail=%d)\n", xcapTokenOk, xcapTokenFail);
+        printf("  XCAP GET      : 200=%d 304=%d fail=%d\n", xcapOk, xcap304, xcapFail);
+    }
     printf("  Active Calls  : %d\n", inCall);
     printf("  Call OK/End   : %d / %d  (fail=%d)\n", callOk, callEnd, callFail);
     printf("  Avg Call Setup: %lldms\n", callOk ? totalCallMs / callOk : 0LL);
@@ -310,6 +320,8 @@ static void PrintUsage(const char* pszBin) {
     printf("  -video_file  <path>      H.264 Annex B 비디오 파일 (PT=96 전송)\n");
     printf("  -no_video                비디오 비활성화 (음성 전용 통화)\n");
     printf("  -no_register             REGISTER 송신 skip (외부 SIP peer 모드)\n");
+    printf("  -no_xcap                 xcap-diff NOTIFY 수신 시 XCAP HTTP GET skip (기본: 자동 GET)\n");
+    printf("  -xcap_root <url>         [ptt] SUBSCRIBE 후 XCAP 문서 능동 GET (예: https://121.161.164.47:4430/)\n");
     printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
     printf("  -db          <csp.json>  DB에서 가입자 정보 로드 (user/auth_id/password/domain 자동 설정)\n");
     printf("  -verbose                 SIP 메시지 상세 로그\n\n");
@@ -331,6 +343,7 @@ static std::atomic<bool> g_bScenarioDone(false);
 static std::atomic<bool> g_bQuit(false);
 static bool g_bPreempt = false;   // -preempt: floor 선점(preemption) 검증 시퀀스
 static int  g_iPreemptBy = 0;     // -preempt_by N: 선점자 세션 인덱스 (default 0; chair 검증 시 chair 인덱스)
+static std::string g_strXcapRoot; // -xcap_root: SUBSCRIBE 후 XCAP 문서 능동 GET (Phase 3D 검증)
 
 static void RunScenario(std::vector<SimSession*>& sessions,
                         ESimScenario eScenario,
@@ -386,6 +399,15 @@ static void RunScenario(std::vector<SimSession*>& sessions,
             usleep(100000);
         }
         printf("[Scenario] Subscriptions complete\n");
+
+        // Phase 3D 검증: xcap-root 지정 시 SUBSCRIBE 후 XCAP 문서 능동 취득
+        // (token PKCE → TLS GET 200 → If-None-Match 304). 정식 흐름은 NOTIFY 트리거.
+        if (!g_strXcapRoot.empty()) {
+            usleep(300000);
+            for (auto* s : sessions) {
+                if (s->m_bPttMode) s->ProbeXcap(g_strXcapRoot);
+            }
+        }
     }
 
     if (eScenario == E_SCENARIO_SUBSCRIBE) return;
@@ -611,6 +633,7 @@ int main(int argc, char* argv[])
     // floor 선점(preemption) 검증: holder 점유 중 preemptor 요청 → CMP REVOKE+GRANT 확인.
     //   -preempt_by N = 선점자 세션 인덱스(default 0). chair 검증 시 chair 멤버 세션 인덱스 지정.
     g_bPreempt                 = HasFlag(argc, argv, "-preempt");
+    g_strXcapRoot              = GetArg(argc, argv, "-xcap_root", "");
     g_iPreemptBy               = atoi(GetArg(argc, argv, "-preempt_by", "0").c_str());
     // G8 (2026-04-23): 외부 peer routing 시험용. 비우면 기존 pair 로직 유지.
     //   값이 있으면 call scenario 의 모든 outbound INVITE target 을 이 user 로 덮음.
@@ -627,6 +650,8 @@ int main(int argc, char* argv[])
     // 180→200 OK 자동 응답. IBCF trunk 시나리오의 mock 외부 peer 또는 register 가
     // 거부되는 ISP(IBCF role only)로 직접 INVITE 발신할 때 사용.
     bool bNoRegister           = HasFlag(argc, argv, "-no_register");
+    // XCAP HTTP GET 비활성화 (Phase 3D). 기본은 xcap-diff NOTIFY 수신 시 자동 GET.
+    bool bNoXcap               = HasFlag(argc, argv, "-no_xcap");
 
     if (strLocalIp.empty()) strLocalIp = GetLocalIp();
 
@@ -751,6 +776,7 @@ int main(int argc, char* argv[])
             strGroupId
         );
         s->SetNoRegister(bNoRegister);
+        s->SetNoXcap(bNoXcap);
 
         // Per-session media files from directory (round-robin)
         if (!vecAudioFiles.empty()) {

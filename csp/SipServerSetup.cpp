@@ -98,6 +98,9 @@ CSipServerSetup::CSipServerSetup()
       m_strCmpIp( "127.0.0.1" ),
       m_iCmpPort( 9000 ),
       m_iLocalCmpPort( 9001 ),
+      m_strXcapHost( "" ),
+      m_iXcapPort( 4430 ),
+      m_strXcapScheme( "https" ),
       m_bRoleCscf( true ),
       m_bRoleTas( true ),
       m_bRolePttAs( true ),
@@ -244,6 +247,15 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( rtp.Has( "CmpIp" ) ) m_strCmpIp = rtp.GetString( "CmpIp" );
                 if ( rtp.Has( "CmpPort" ) ) m_iCmpPort = (int)rtp.GetInt( "CmpPort" );
                 if ( rtp.Has( "LocalCmpPort" ) ) m_iLocalCmpPort = (int)rtp.GetInt( "LocalCmpPort" );
+            }
+
+            // XCAP / CSC 연동 (Phase 3): xcap-diff NOTIFY 의 xcap-root 로 advertise 할
+            //   CSC XCAP(MCPTT) 서버 주소. Host 미지정 시 m_strLocalIp fallback.
+            if ( setup.Has( "Xcap" ) ) {
+                SimpleJson::JsonNode xcap = setup.Get( "Xcap" );
+                if ( xcap.Has( "Host" ) ) m_strXcapHost = xcap.GetString( "Host" );
+                if ( xcap.Has( "Port" ) ) m_iXcapPort = (int)xcap.GetInt( "Port" );
+                if ( xcap.Has( "Scheme" ) ) m_strXcapScheme = xcap.GetString( "Scheme" );
             }
 
             if ( setup.Has( "ConfigJsonlDir" ) ) m_strConfigJsonlDir = setup.GetString( "ConfigJsonlDir" );
