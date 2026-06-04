@@ -163,8 +163,9 @@ _STATS_BASE = '/api/v1/stats'
 
 async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     config = kwargs.get('config', {})
-    parsed = urlparse(handler_args.full_path)
-    qs = parse_qs(parsed.query)
+    # full_path 는 경로만 담고 query string 은 별도(query_params dict)로 전달된다
+    # (controller 가 Starlette request.query_params 를 그대로 넣음, 이미 URL-decode 됨).
+    qs = handler_args.query_params or {}
     parts = _path_parts(handler_args.full_path, _STATS_BASE)
     method = handler_args.method.upper()
 
@@ -172,8 +173,8 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
     def qp(name, default=None):
-        vals = qs.get(name)
-        return unquote(vals[0]) if vals else default
+        v = qs.get(name)
+        return v if v not in (None, '') else default
 
     try:
         if len(parts) == 0:
