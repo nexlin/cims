@@ -34,7 +34,6 @@ function callState(s: string) {
 }
 
 interface CallFlowState { messages: FlowMessage[]; loading: boolean; loaded: boolean }
-interface CallRecState { segments: RecordingSegment[]; callType: string; loading: boolean; loaded: boolean }
 type RecPlayer = { id: string; segments: RecordingSegment[]; callType: 'volte' | 'ptt' | 'volte_video'; caller: string; callee: string }
 
 export default function VolteHistoryPage() {
@@ -52,7 +51,6 @@ export default function VolteHistoryPage() {
   const [openHours, setOpenHours] = useState<Set<string>>(new Set())
   const [expandedCall, setExpandedCall] = useState<string | null>(null)
   const [flowByCall, setFlowByCall] = useState<Map<string, CallFlowState>>(new Map())
-  const [recByCall, setRecByCall] = useState<Map<string, CallRecState>>(new Map())
 
   const [flow, setFlow] = useState<{ callId: string; date: string; callType?: 'volte' | 'ptt' } | null>(null)
   const [recPlayer, setRecPlayer] = useState<RecPlayer | null>(null)
@@ -103,24 +101,23 @@ export default function VolteHistoryPage() {
     }
   }, [flowByCall])
 
-  const loadCallRec = useCallback(async (l: CallLog) => {
-    const key = callKey(l)
-    if (!l.has_recording || !l.dir_name || recByCall.get(key)?.loaded) return
-    setRecByCall(prev => { const m = new Map(prev); m.set(key, { segments: [], callType: l.call_type, loading: true, loaded: false }); return m })
-    try {
-      const rec = await recordingsApi.get(l.dir_name)
-      setRecByCall(prev => { const m = new Map(prev); m.set(key, { segments: rec.segments || [], callType: rec.call_type || l.call_type, loading: false, loaded: true }); return m })
-    } catch {
-      setRecByCall(prev => { const m = new Map(prev); m.set(key, { segments: [], callType: l.call_type, loading: false, loaded: true }); return m })
-    }
-  }, [recByCall])
-
   const toggleCall = (l: CallLog) => {
     setExpandedCall(prev => {
       if (prev === callKey(l)) return null
-      loadCallFlow(l); loadCallRec(l)
+      loadCallFlow(l)
       return callKey(l)
     })
+  }
+
+  // 녹취 재생 — 별도 dialog(반투명) 로 표시
+  const openRecording = async (l: CallLog) => {
+    if (!l.dir_name) { show('녹취 디렉터리 정보 없음', 'err'); return }
+    try {
+      const rec = await recordingsApi.get(l.dir_name)
+      if (rec.segments && rec.segments.length > 0) {
+        setRecPlayer({ id: l.dir_name, segments: rec.segments, callType: (rec.call_type as RecPlayer['callType']) || 'volte', caller: l.initiator, callee: l.callee })
+      } else { show('녹취 세그먼트 없음', 'err') }
+    } catch (e: unknown) { show(String(e), 'err') }
   }
 
   const totalPages = Math.ceil(total / PS)
@@ -178,10 +175,10 @@ export default function VolteHistoryPage() {
                             return (
                               <CallRow
                                 key={callKey(l)} l={l} isOpen={isOpen} st={st} dur={dur}
-                                flow={flowByCall.get(callKey(l))} rec={recByCall.get(callKey(l))}
+                                flow={flowByCall.get(callKey(l))}
                                 onToggle={() => toggleCall(l)}
                                 onOpenDiagram={() => setFlow({ callId: l.call_id, date: l.invite_time?.substring(0, 10) || '', callType: 'volte' })}
-                                onMaximizeRec={(segs, ct) => setRecPlayer({ id: l.dir_name!, segments: segs, callType: ct as RecPlayer['callType'], caller: l.initiator, callee: l.callee })}
+                                onOpenRec={() => openRecording(l)}
                               />
                             )
                           })}
@@ -201,8 +198,9 @@ export default function VolteHistoryPage() {
       </div>}
 
       {recPlayer && (
-        <div className="modal-overlay" onClick={() => setRecPlayer(null)}>
-          <div className="modal-box" style={{ maxWidth: 1360, width: '95vw' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => setRecPlayer(null)}
+          style={{ background: 'rgba(15,23,42,0.32)', backdropFilter: 'blur(2px)' }}>
+          <div className="modal-box" style={{ maxWidth: 1100, width: '92vw', background: 'var(--surface, rgba(255,255,255,0.97))', boxShadow: '0 12px 48px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
             <SegmentPlayer segments={recPlayer.segments} recordingId={recPlayer.id} callType={recPlayer.callType} caller={recPlayer.caller} callee={recPlayer.callee} onClose={() => setRecPlayer(null)} />
           </div>
         </div>
@@ -218,16 +216,15 @@ export default function VolteHistoryPage() {
 // ════════════════════════════════════════════════════════════════
 const tdS: CSSProperties = { padding: '6px 10px', whiteSpace: 'nowrap' }
 
-function CallRow({ l, isOpen, st, dur, flow, rec, onToggle, onOpenDiagram, onMaximizeRec }: {
+function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec }: {
   l: CallLog
   isOpen: boolean
   st: { label: string; cls: string }
   dur: number | null
   flow: CallFlowState | undefined
-  rec: CallRecState | undefined
   onToggle: () => void
   onOpenDiagram: () => void
-  onMaximizeRec: (segs: RecordingSegment[], callType: string) => void
+  onOpenRec: () => void
 }) {
   return (
     <>
@@ -248,7 +245,7 @@ function CallRow({ l, isOpen, st, dur, flow, rec, onToggle, onOpenDiagram, onMax
         <tr>
           <td colSpan={7} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
             <div style={{ padding: '10px 14px' }}>
-              <CallDetailPanel l={l} flow={flow} rec={rec} onOpenDiagram={onOpenDiagram} onMaximizeRec={onMaximizeRec} />
+              <CallDetailPanel l={l} flow={flow} onOpenDiagram={onOpenDiagram} onOpenRec={onOpenRec} />
             </div>
           </td>
         </tr>
@@ -257,13 +254,12 @@ function CallRow({ l, isOpen, st, dur, flow, rec, onToggle, onOpenDiagram, onMax
   )
 }
 
-// 펼침 패널: ① 녹취(compact, 최대화) ② 좌[다이어그램↑/메시지목록↓] 우[메시지 상세]
-function CallDetailPanel({ l, flow, rec, onOpenDiagram, onMaximizeRec }: {
+// 펼침 패널: 좌[다이어그램↑/메시지목록↓] 우[메시지 상세] (녹취는 별도 dialog)
+function CallDetailPanel({ l, flow, onOpenDiagram, onOpenRec }: {
   l: CallLog
   flow: CallFlowState | undefined
-  rec: CallRecState | undefined
   onOpenDiagram: () => void
-  onMaximizeRec: (segs: RecordingSegment[], callType: string) => void
+  onOpenRec: () => void
 }) {
   const [selIdx, setSelIdx] = useState<number | null>(null)
   const [body, setBody] = useState<string | null>(null)
@@ -288,24 +284,14 @@ function CallDetailPanel({ l, flow, rec, onOpenDiagram, onMaximizeRec }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* ① 녹취 — compact, 최대화 버튼 오버레이 */}
+      {/* 액션 바 — 녹취는 별도 dialog 로 */}
       {l.has_recording && (
-        rec?.loading ? <div className="empty" style={{ padding: 8 }}>녹취 로딩 중...</div>
-          : rec && rec.segments.length > 0 ? (
-            <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--surface, #fff)', maxWidth: 760 }}>
-              <SegmentPlayer
-                compact
-                segments={rec.segments}
-                recordingId={l.dir_name || ''}
-                callType={(rec.callType as 'volte' | 'volte_video') || 'volte'}
-                caller={l.initiator} callee={l.callee}
-                onMaximize={() => onMaximizeRec(rec.segments, rec.callType)}
-              />
-            </div>
-          ) : null
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn--sm btn--primary" onClick={onOpenRec}>&#9654; 녹취 재생</button>
+        </div>
       )}
 
-      {/* ② 좌(다이어그램/메시지) 우(상세) */}
+      {/* 좌(다이어그램/메시지) 우(상세) */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
         {/* 좌 */}
         <div style={{ flex: '1 1 460px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
