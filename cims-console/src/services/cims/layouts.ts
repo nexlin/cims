@@ -8,8 +8,17 @@ const one = (id: string, title: string, widgetId: string,
   id, title, widgets: [{ widgetId, config }],
 })
 
-// 서비스 섹션
-export const SERVICE_STATUS_LAYOUT       = one('service.status', '실시간 상태', 'cims.subscriber-status')
+// 서비스 섹션 — 서비스 현황은 섹션별 개별 위젯을 합성(운영자가 ✎ 편집으로 재배치 가능)
+export const SERVICE_STATUS_LAYOUT: PageLayout = {
+  id: 'service.status', title: '서비스 현황',
+  widgets: [
+    { widgetId: 'cims.svc-volte-kpi', w: 6 }, { widgetId: 'cims.svc-ptt-kpi', w: 6 },
+    { widgetId: 'cims.svc-trend', w: 6 }, { widgetId: 'cims.svc-anomaly', w: 6 },
+    { widgetId: 'cims.svc-volte-calls', w: 6 }, { widgetId: 'cims.svc-ptt-groups', w: 6 },
+    { widgetId: 'cims.svc-events', w: 6 }, { widgetId: 'cims.svc-org', w: 6 },
+    { widgetId: 'cims.subscriber-status', w: 12 },
+  ],
+}
 export const SERVICE_HISTORY_VOLTE_LAYOUT = one('service.history-volte', 'VoLTE 이력', 'cims.volte-history')
 export const SERVICE_HISTORY_PTT_LAYOUT   = one('service.history-ptt', 'PTT 이력', 'cims.ptt-history')
 
