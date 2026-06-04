@@ -163,6 +163,7 @@ export default function VolteHistoryPage() {
                             <th style={thS}>시작</th>
                             <th style={{ ...thS, textAlign: 'right' }}>통화시간</th>
                             <th style={thS}>종료사유</th>
+                            <th style={{ ...thS, textAlign: 'center' }}>녹취</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -239,13 +240,18 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
         <td style={{ ...tdS, textAlign: 'center' }}><span className={`badge ${st.cls}`}>{st.label}</span></td>
         <td style={tdS} className="ts">{fmtClock(l.invite_time)}</td>
         <td style={{ ...tdS, textAlign: 'right' }} className="ts">{fmtDur(dur)}</td>
-        <td style={tdS} className="ts">{l.end_reason_ko || l.end_reason || '—'}{l.has_recording ? ' · 🔴녹취' : ''}</td>
+        <td style={tdS} className="ts">{l.end_reason_ko || l.end_reason || '—'}</td>
+        <td style={{ ...tdS, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+          {l.has_recording
+            ? <button className="btn btn--sm btn--outline" onClick={onOpenRec}>&#9654; 녹취</button>
+            : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+        </td>
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={7} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
+          <td colSpan={8} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
             <div style={{ padding: '10px 14px' }}>
-              <CallDetailPanel l={l} flow={flow} onOpenDiagram={onOpenDiagram} onOpenRec={onOpenRec} />
+              <CallDetailPanel l={l} flow={flow} onOpenDiagram={onOpenDiagram} />
             </div>
           </td>
         </tr>
@@ -254,12 +260,11 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
   )
 }
 
-// 펼침 패널: 좌[다이어그램↑/메시지목록↓] 우[메시지 상세] (녹취는 별도 dialog)
-function CallDetailPanel({ l, flow, onOpenDiagram, onOpenRec }: {
+// 펼침 패널: 좌[다이어그램↑/메시지목록↓] 우[메시지 상세] (녹취는 행의 녹취 컬럼→별도 dialog)
+function CallDetailPanel({ l, flow, onOpenDiagram }: {
   l: CallLog
   flow: CallFlowState | undefined
   onOpenDiagram: () => void
-  onOpenRec: () => void
 }) {
   const [selIdx, setSelIdx] = useState<number | null>(null)
   const [body, setBody] = useState<string | null>(null)
@@ -284,14 +289,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram, onOpenRec }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* 액션 바 — 녹취는 별도 dialog 로 */}
-      {l.has_recording && (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn--sm btn--primary" onClick={onOpenRec}>&#9654; 녹취 재생</button>
-        </div>
-      )}
-
-      {/* 좌(다이어그램/메시지) 우(상세) */}
+      {/* 좌(다이어그램/메시지) 우(상세) — 녹취는 행의 녹취 컬럼 버튼으로 */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
         {/* 좌 */}
         <div style={{ flex: '1 1 460px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
