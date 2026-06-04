@@ -221,6 +221,16 @@ def _read_jsonl(path: str) -> list:
     return result
 
 
+def _read_json(path: str) -> dict:
+    """단일 JSON 파일을 dict 로 읽기 (없거나 파싱 실패 시 {})."""
+    try:
+        with open(path, 'r') as f:
+            obj = json.load(f)
+        return obj if isinstance(obj, dict) else {}
+    except:
+        return {}
+
+
 def _has_recording(d_dir: str) -> bool:
     # 구 형식 (단일 파일)
     for fn in ('recording_mixed.wav', 'recording_mixed.mp4', 'raw_a.rtp', 'raw_audio.rtp'):
@@ -1111,14 +1121,25 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     if handler_args.method != "GET":
         return HandlerResult(status=405, body="Method Not Allowed")
 
-    qs = parse_qs(urlparse(handler_args.full_path).query)
-    date_str = qs.get("date", [datetime.now().strftime("%Y-%m-%d")])[0]
-    hour = qs.get("hour", [None])[0]
-    call_type = qs.get("call_type", [None])[0]
-    msisdn = qs.get("msisdn", [None])[0]
-    group_id = qs.get("group_id", [None])[0]
-    limit = min(int(qs.get("limit", ["200"])[0]), 1000)
-    offset = int(qs.get("offset", ["0"])[0])
+    # 쿼리 파라미터: handler_args.query_params(dict) 우선, 없으면 full_path 파싱.
+    # (이 OAM 라우팅은 query 를 query_params 로 전달 — full_path 만 보면 date 가
+    #  항상 now()로 디폴트되어 날짜필터가 깨졌었음.)
+    qp = getattr(handler_args, 'query_params', {}) or {}
+    qs = parse_qs(urlparse(handler_args.full_path or "").query)
+    def _q(name, default=None):
+        v = qp.get(name)
+        if v:
+            return v[0] if isinstance(v, list) else v
+        vl = qs.get(name)
+        return vl[0] if vl else default
+
+    date_str = _q("date", datetime.now().strftime("%Y-%m-%d"))
+    hour = _q("hour")
+    call_type = _q("call_type")
+    msisdn = _q("msisdn")
+    group_id = _q("group_id")
+    limit = min(int(_q("limit", "200")), 1000)
+    offset = int(_q("offset", "0"))
 
     # index.json 기반 빠른 조회 시도
     index_entries = _load_index(date_str, hour)
@@ -1343,14 +1364,22 @@ def _ptt_group_base(group_id: str) -> str:
     return ""
 
 
-def _find_ptt_sessions(group_id: str) -> list:
-    """PTT 그룹의 시간창(YYYY/MM/DD/HH) 목록 반환. window dir 이름 = 'YYYYMMDDHH'."""
+def _find_ptt_sessions(group_id: str, date: str = None) -> list:
+    """PTT 그룹의 시간창(YYYY/MM/DD/HH) 목록 반환. window dir 이름 = 'YYYYMMDDHH'.
+
+    date('YYYY-MM-DD') 지정 시 해당 일자의 시간창만 글롭(장시간 세션의 전체
+    버킷 폭주 방지 — 365일 세션이면 일자 미지정 시 최대 8760개 반환됨)."""
     base = _ptt_group_base(group_id)
     if not base:
         return []
     import glob as _glob
     digit4, digit2 = "[0-9][0-9][0-9][0-9]", "[0-9][0-9]"
-    pattern = os.path.join(base, digit4, digit2, digit2, digit2)
+    # date 필터: 'YYYY-MM-DD' → base/YYYY/MM/DD/* 만 스캔
+    day_digits = "".join(c for c in (date or "") if c.isdigit())
+    if len(day_digits) >= 8:
+        pattern = os.path.join(base, day_digits[0:4], day_digits[4:6], day_digits[6:8], digit2)
+    else:
+        pattern = os.path.join(base, digit4, digit2, digit2, digit2)
     result = []
     now_window = datetime.now().strftime("%Y%m%d%H")
     for hh_dir in _glob.glob(pattern):
@@ -1632,8 +1661,8 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
             return HandlerResult(status=400, body=json.dumps({"error": "group_id required"}),
                                  media_type="application/json")
 
-        # 시간창(YYYY/MM/DD/HH) 목록 스캔
-        sessions = _find_ptt_sessions(group_id)
+        # 시간창(YYYY/MM/DD/HH) 목록 스캔 (date 지정 시 해당 일자만)
+        sessions = _find_ptt_sessions(group_id, _qp("date"))
 
         return HandlerResult(status=200, body=json.dumps({
             "group_id": group_id,
