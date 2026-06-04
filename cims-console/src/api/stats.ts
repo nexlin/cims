@@ -152,14 +152,24 @@ export interface PttGroup {
   total_members: number; active_members: number
   floor_holder: string | null; initiator: string | null
   invite_time: string | null; duration_sec: number; floor_held_sec?: number
-  members: PttGroupMember[]; anomalies: LiveAnomalyTag[]; org?: string
+  floor_count?: number; last_floor?: string | null
+  members?: PttGroupMember[]; anomalies: LiveAnomalyTag[]; org?: string
+}
+export interface PttTalker { msisdn: string; org: string; group_id: string; group_name: string }
+export interface PttMember { msisdn: string; name: string; role: string; priority: number | null; active: boolean; talking: boolean }
+export interface PttMembersResponse {
+  group: string; total: number; page: number; limit: number
+  active_count: number; floor_holder: string | null; members: PttMember[]
 }
 export interface Anomaly { kind: string; type: string; detail: string; label: string; ref: string }
 export interface MediaNode { host: string; up: boolean; volte_rtp: Pool; ptt_rtp: Pool; groups: number }
 export interface ServiceLive {
   ts: string
   volte: { kpi: { active: number; ringing: number; avg_duration_sec: number; registered: number; numbers: number }; calls: VolteCall[] }
-  ptt: { kpi: { active_groups: number; talking: number; participants: number; registered: number; numbers: number }; groups: PttGroup[] }
+  ptt: {
+    kpi: { talking: number; recent_active: number; active_groups: number; participants: number; total_groups: number; registered: number; numbers: number }
+    groups: PttGroup[]; talkers: PttTalker[]
+  }
   capacity: { volte_rtp: Pool; ptt_rtp: Pool; nodes: MediaNode[] }
   anomalies: Anomaly[]
 }
@@ -167,7 +177,7 @@ export interface ServiceEvent { ts: string; kind: string; type: string; detail: 
 export interface OrgStat {
   org: string; name: string
   volte_num: number; volte_reg: number; ptt_num: number; ptt_reg: number
-  active_volte: number; active_ptt: number
+  active_volte: number; active_ptt: number; ptt_talking: number
 }
 export interface TrendPoint { t: number; volte: number; ringing: number; ptt: number; talking: number }
 export interface ServiceTrend {
@@ -192,6 +202,7 @@ export const statsApi = {
   serviceTrend: (windowMin = 30) => api.get<ServiceTrend>(`/stats/service/trend?window=${windowMin}`),
   serviceEvents: (limit = 60) => api.get<{ events: ServiceEvent[] }>(`/stats/service/events?limit=${limit}`),
   serviceOrg: () => api.get<{ orgs: OrgStat[] }>('/stats/service/org'),
+  pttMembers: (group: string, page = 1, limit = 50) => api.get<PttMembersResponse>(`/stats/service/ptt-members?group=${encodeURIComponent(group)}&page=${page}&limit=${limit}`),
 
   messages: (params: { date?: string; granularity?: string; proto?: string }) => {
     const p = new URLSearchParams()

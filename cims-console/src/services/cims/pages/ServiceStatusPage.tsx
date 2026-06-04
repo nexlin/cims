@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   statsApi, type Subscriber, type SubscribersResponse,
   type ServiceLive, type ServiceTrend, type Pool, type VolteCall, type PttGroup, type Anomaly,
-  type ServiceEvent, type OrgStat,
+  type ServiceEvent, type OrgStat, type PttMembersResponse,
 } from '../../../api/stats'
 import { useToast } from '../../../components/Toast'
 
@@ -129,9 +129,10 @@ export function PttKpiCard() {
     <div className="panel" style={{ padding: 14 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 22, alignItems: 'center' }}>
         <span className="badge badge--green" style={{ alignSelf: 'flex-start' }}>PTT</span>
-        <Kpi label="활성 그룹" value={p?.active_groups ?? '-'} />
-        <Kpi label="발언 중" value={p?.talking ?? '-'} />
-        <Kpi label="참여자" value={p?.participants ?? '-'} />
+        <Kpi label="발언 중" value={p?.talking ?? '-'} sub="그룹" />
+        <Kpi label="최근 5분 발언" value={p?.recent_active ?? '-'} sub="그룹" />
+        <Kpi label="전체 그룹" value={p?.total_groups ?? '-'} />
+        <Kpi label="참여(세션)" value={p?.participants ?? '-'} sub="명" />
         <Kpi label="등록" value={p?.registered ?? '-'} sub={p ? `/ ${p.numbers}` : ''} />
         {live && <Gauge label="PTT 그룹 풀(동시 그룹·floor)" pool={live.capacity.ptt_rtp} />}
       </div>
@@ -228,43 +229,77 @@ export function VolteCallsCard() {
 }
 
 // ── 위젯: PTT 활성 그룹 ───────────────────────────────────
+// 멤버 drill 패널 (그룹당 100~200명 → 페이지네이션)
+const MEMBER_LIMIT = 30
+function MemberDrill({ group }: { group: string }) {
+  const { show } = useToast()
+  const [data, setData] = useState<PttMembersResponse | null>(null)
+  const [page, setPage] = useState(1)
+  useEffect(() => {
+    let live = true
+    statsApi.pttMembers(group, page, MEMBER_LIMIT).then(d => { if (live) setData(d) }).catch(e => show(String(e), 'err'))
+    return () => { live = false }
+  }, [group, page, show])
+  if (!data) return <div className="ts" style={{ padding: 8 }}>멤버 로딩...</div>
+  const pages = Math.max(1, Math.ceil(data.total / MEMBER_LIMIT))
+  return (
+    <div style={{ padding: '6px 4px' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+        멤버 {data.total}명 · 현재 참여 {data.active_count}명 · {page}/{pages} 페이지
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
+        {data.members.map(m => (
+          <span key={m.msisdn} style={{ fontSize: 12, minWidth: 200, color: m.active ? 'var(--text)' : 'var(--text-muted)' }}>
+            {m.talking ? '🎤 ' : m.active ? '🟢 ' : '· '}{m.name || m.msisdn}
+            {m.role !== 'participant' && m.role !== 'member' && <span className="ts"> ({m.role})</span>}
+          </span>
+        ))}
+      </div>
+      {pages > 1 && (
+        <div style={{ marginTop: 6 }}>
+          <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={e => { e.stopPropagation(); setPage(p => p - 1) }}>이전</button>
+          <button className="btn btn--sm btn--ghost" disabled={page >= pages} onClick={e => { e.stopPropagation(); setPage(p => p + 1) }}>다음</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function PttGroupsCard() {
   const live = useServiceLive()
   const navigate = useNavigate()
   const now = useNowTick()
   const { pins, toggle } = usePins('svc.pins.ptt')
-  const [open, setOpen] = useState<Record<string, boolean>>({})
-  const groups = live?.ptt.groups ?? []
+  const [open, setOpen] = useState<string | null>(null)   // 멤버 drill 열린 그룹(1개)
+  const groups = live?.ptt.groups ?? []   // 백엔드가 발언 활동순으로 정렬
   if (!live) return <div className="panel"><Loading /></div>
-  if (groups.length === 0) return <div className="empty">현재 활성 그룹이 없습니다</div>
+  if (groups.length === 0) return <div className="empty">현재 발언 중이거나 최근 활동한 그룹이 없습니다</div>
   const typeLabel = (t: string) => t || '-'
   const sorted = [...groups].sort((a, b) => (pins.has(b.group_id) ? 1 : 0) - (pins.has(a.group_id) ? 1 : 0))
   return (
     <div className="panel">
       <table className="data-table">
-        <thead><tr><th></th><th>그룹</th><th>유형</th><th>참여</th><th>현재 화자</th><th>경과</th><th></th></tr></thead>
+        <thead><tr><th></th><th>그룹</th><th>유형</th><th>참여</th><th>현재 화자</th><th>최근 발언</th><th>발언수(5m)</th><th></th></tr></thead>
         <tbody>
           {sorted.map((g: PttGroup) => {
-            const isOpen = !!open[g.group_id], warn = g.anomalies.length > 0, pinned = pins.has(g.group_id)
+            const isOpen = open === g.group_id, warn = g.anomalies.length > 0, pinned = pins.has(g.group_id)
             return (
               <Fragment key={g.group_id}>
-                <tr style={{ cursor: 'pointer', ...(pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : {}) }} onClick={() => setOpen(o => ({ ...o, [g.group_id]: !isOpen }))}>
+                <tr style={{ cursor: 'pointer', ...(pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : {}) }} onClick={() => setOpen(isOpen ? null : g.group_id)}>
                   <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(g.group_id) }} /></td>
                   <td><span style={{ color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></td>
                   <td><span className="badge">{typeLabel(g.type)}</span></td>
                   <td className="ts">{g.active_members} / {g.total_members}</td>
                   <td>{g.floor_holder ? <span style={{ color: 'var(--primary)', fontWeight: 600 }}>🎤 {g.floor_holder}</span> : <span className="ts">(없음)</span>}{warn && <span title={g.anomalies.map(a => a.detail).join(', ')}> ⚠</span>}</td>
-                  <td className="ts">{fmtDur(elapsedSec(g.invite_time, now, g.duration_sec))}</td>
+                  <td className="ts">{g.last_floor ? new Date(g.last_floor).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
+                  <td className="ts">{g.floor_count ?? 0}</td>
                   <td><button className="btn btn--sm btn--ghost" onClick={e => { e.stopPropagation(); navigate('/service/history/ptt') }}>이력 ▸</button></td>
                 </tr>
                 {isOpen && (
                   <tr>
-                    <td colSpan={7} style={{ background: 'var(--bg-subtle, rgba(0,0,0,.02))', fontSize: 12 }}>
-                      <span style={{ color: 'var(--text-muted)' }}>참여자: </span>
-                      {g.members.map((m, i) => (
-                        <span key={i} style={{ marginRight: 10 }}>{m.subscriber_id}{m.role === 'initiator' && <span className="ts"> (개시자)</span>}{m.subscriber_id === g.floor_holder && ' 🎤'}</span>
-                      ))}
-                      {g.floor_held_sec !== undefined && <span style={{ marginLeft: 8, color: 'var(--danger)' }}>· floor {fmtDur(g.floor_held_sec)} 점유</span>}
+                    <td colSpan={8} style={{ background: 'var(--bg-subtle, rgba(0,0,0,.02))' }}>
+                      <MemberDrill group={g.group_id} />
+                      {g.floor_held_sec !== undefined && <span style={{ margin: '0 8px', color: 'var(--danger)', fontSize: 12 }}>⚠ floor {fmtDur(g.floor_held_sec)} 점유</span>}
                     </td>
                   </tr>
                 )}
@@ -339,13 +374,14 @@ export function OrgStatsCard() {
   if (orgs.length === 0) return <div className="empty">조직 정보가 없습니다</div>
 
   const selOrg = orgs.find(o => o.org === sel) || null
+  // 조직 가입자 활동 기준 (그룹 귀속이 아니라 가입자 활동)
   const calls = (live?.volte.calls ?? []).filter(c => c.org === sel)
-  const groups = (live?.ptt.groups ?? []).filter(g => g.org === sel)
+  const talkers = (live?.ptt.talkers ?? []).filter(t => t.org === sel)
 
   return (
     <div className="panel">
       <table className="data-table">
-        <thead><tr><th>조직</th><th>VoLTE 등록</th><th>PTT 등록</th><th>이용 중(VoLTE)</th><th>이용 중(PTT)</th></tr></thead>
+        <thead><tr><th>조직</th><th>VoLTE 등록</th><th>PTT 등록</th><th>VoLTE 통화</th><th>PTT 발언</th><th>PTT 참여</th></tr></thead>
         <tbody>
           {orgs.map(o => (
             <tr key={o.org} onClick={() => setSel(sel === o.org ? null : o.org)}
@@ -354,7 +390,8 @@ export function OrgStatsCard() {
               <td><RegBar reg={o.volte_reg} num={o.volte_num} /></td>
               <td><RegBar reg={o.ptt_reg} num={o.ptt_num} /></td>
               <td>{o.active_volte > 0 ? <span className="badge badge--blue">{o.active_volte}</span> : <span className="ts">0</span>}</td>
-              <td>{o.active_ptt > 0 ? <span className="badge badge--green">{o.active_ptt}</span> : <span className="ts">0</span>}</td>
+              <td>{o.ptt_talking > 0 ? <span className="badge badge--green">🎤 {o.ptt_talking}</span> : <span className="ts">0</span>}</td>
+              <td className="ts">{o.active_ptt}</td>
             </tr>
           ))}
         </tbody>
@@ -362,8 +399,8 @@ export function OrgStatsCard() {
 
       {selOrg && (
         <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', background: 'var(--bg-subtle, rgba(0,0,0,.02))' }}>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{selOrg.name} · 활성 서비스</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>VoLTE 활성 호 ({calls.length})</div>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{selOrg.name} · 가입자 활동</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>VoLTE 통화 중 ({calls.length})</div>
           {calls.length === 0 ? <div className="ts" style={{ marginBottom: 8 }}>없음</div>
             : <div style={{ marginBottom: 10 }}>{calls.map(c => (
                 <div key={c.call_id} style={{ fontSize: 13, padding: '2px 0' }}>
@@ -371,12 +408,12 @@ export function OrgStatsCard() {
                   {' '}<b>{c.caller}</b> → {c.callee} <span className="ts">· {c.video ? '영상' : '음성'} · {fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))} · {c.media_node || '-'}</span>
                 </div>
               ))}</div>}
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>PTT 활성 그룹 ({groups.length})</div>
-          {groups.length === 0 ? <div className="ts">없음</div>
-            : groups.map(g => (
-                <div key={g.group_id} style={{ fontSize: 13, padding: '2px 0' }}>
-                  <span className="badge badge--green">{g.name}</span>
-                  <span className="ts"> · {g.active_members}/{g.total_members}명 · {g.floor_holder ? `🎤 ${g.floor_holder}` : '발언자 없음'} · {fmtDur(elapsedSec(g.invite_time, now, g.duration_sec))}</span>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>PTT 발언 중 ({talkers.length}) · 참여 {selOrg.active_ptt}명</div>
+          {talkers.length === 0 ? <div className="ts">발언 중인 가입자 없음</div>
+            : talkers.map((t, i) => (
+                <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>
+                  <span style={{ color: 'var(--primary)', fontWeight: 600 }}>🎤 {t.msisdn}</span>
+                  <span className="ts"> → {t.group_name}</span>
                 </div>
               ))}
         </div>

@@ -238,6 +238,8 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                 return await _service_events(config, qp('limit', '60'))
             if svc == 'org':
                 return await _service_org(config)
+            if svc == 'ptt-members':
+                return await _ptt_members(config, qp('group', ''), qp('page', '1'), qp('limit', '50'))
             gran = qp('granularity', '1d')
             from_dt = qp('from')
             to_dt = qp('to')
@@ -991,6 +993,50 @@ _RINGING_ANOMALY_SEC = 30
 _FLOOR_MONOPOLY_SEC = 60
 
 
+def _ptt_floor_activity(config: dict, window_min: int = 5) -> dict:
+    """최근 window_min 분간 그룹별 floor GRANT(발언) 활동 집계.
+       {mcptt_group_id: {'count': N, 'last_ts': iso}}. floor.jsonl 스캔(현재+직전 시간버킷).
+       상시활성·대규모(그룹 다수) 환경에서 '발언 활동' 기준 랭킹/필터용."""
+    base = _service_log_dir(config)
+    if not base:
+        return {}
+    now = datetime.now()
+    cutoff = now - timedelta(minutes=window_min)
+    buckets = _hour_buckets(now - timedelta(hours=1), now)
+    sur2g = {}
+    for gj in glob.glob(os.path.join(base, 'ptt', '*', 'group.json')):
+        try:
+            with open(gj) as f:
+                sur2g[os.path.basename(os.path.dirname(gj))] = json.load(f).get('mcptt_group_id')
+        except Exception:
+            pass
+    act = {}
+    for (Y, M, D, H) in buckets:
+        for fp in glob.glob(os.path.join(base, 'ptt', '*', f'{Y:04d}', f'{M:02d}', f'{D:02d}', f'{H:02d}', 'floor.jsonl')):
+            gid = sur2g.get(fp.split(os.sep)[-6])
+            if not gid:
+                continue
+            try:
+                with open(fp) as f:
+                    for line in f:
+                        try:
+                            ev = json.loads(line)
+                        except Exception:
+                            continue
+                        if ev.get('op') != 'GRANT':
+                            continue
+                        ts = _parse_iso(ev.get('ts'))
+                        if not ts or ts < cutoff:
+                            continue
+                        a = act.setdefault(gid, {'count': 0, 'last_ts': None})
+                        a['count'] += 1
+                        if not a['last_ts'] or (ev.get('ts') or '') > a['last_ts']:
+                            a['last_ts'] = ev.get('ts')
+            except Exception:
+                pass
+    return act
+
+
 async def _service_live(config: dict) -> HandlerResult:
     """VoLTE 호 / PTT 그룹 중심 실시간 모니터링 스냅샷 + KPI/용량/이상징후."""
     now = datetime.now()
@@ -1108,9 +1154,11 @@ async def _service_live(config: dict) -> HandlerResult:
     for c in volte_calls:
         c['org'] = m2o.get(c.get('caller'), '')
 
+    floor_act = _ptt_floor_activity(config, 5)   # 최근 5분 발언 활동
     ptt_groups_out = []
     talking = 0
     participants = 0
+    talkers = []   # 현재 발언 중(floor 점유) 가입자 — 조직 가입자 활동 집계용
     for gid, g in groups.items():
         inv = _parse_iso(g['invite_time'])
         g['duration_sec'] = max(0, int((now - inv).total_seconds())) if inv else 0
@@ -1120,11 +1168,17 @@ async def _service_live(config: dict) -> HandlerResult:
         g['org'] = (meta.get('org_code') or m2o.get(g.get('initiator'), '') or '')
         g['total_members'] = int(meta.get('total') or len(g['members']))
         g['active_members'] = len(g['members'])
+        fa = floor_act.get(gid, {})
+        g['floor_count'] = fa.get('count', 0)   # 최근 5분 발언 횟수
+        g['last_floor'] = fa.get('last_ts')
         g['floor_holder'] = floor_holder.get(gid)
+        g.pop('members', None)   # 멤버 비인라인(그룹당 100~200명) → drill 엔드포인트로 페이지네이션
         participants += g['active_members']
         anomalies = []
         if g['floor_holder']:
             talking += 1
+            talkers.append({'msisdn': g['floor_holder'], 'org': m2o.get(g['floor_holder'], ''),
+                            'group_id': gid, 'group_name': g['name']})
             held = _floor_held_secs(config, meta.get('id'), g['floor_holder'], now)
             if held is not None and held > _FLOOR_MONOPOLY_SEC:
                 anomalies.append({'type': 'floor_monopoly',
@@ -1132,7 +1186,13 @@ async def _service_live(config: dict) -> HandlerResult:
                 g['floor_held_sec'] = held
         g['anomalies'] = anomalies
         ptt_groups_out.append(g)
-    ptt_groups_out.sort(key=lambda x: x.get('invite_time') or '')
+
+    # 활동 순 정렬: 발언 중 우선 → 최근 발언수 → 최근 발언시각
+    def _act_key(x):
+        lf = _parse_iso(x.get('last_floor'))
+        return (0 if x.get('floor_holder') else 1, -int(x.get('floor_count') or 0),
+                -(lf.timestamp() if lf else 0))
+    ptt_groups_out.sort(key=_act_key)
 
     # ── 용량: 전 미디어 노드 RTP 풀 집계 + 노드별 분산 ──
     #   (PTT 그룹 리소스 = rtp+floor+video 묶음 1:1 → ptt_rtp 풀 == 그룹/floor 동시 capacity) ──
@@ -1177,11 +1237,13 @@ async def _service_live(config: dict) -> HandlerResult:
             'calls': volte_calls,
         },
         'ptt': {
-            'kpi': {'active_groups': len(ptt_groups_out), 'talking': talking,
-                    'participants': participants,
+            'kpi': {'talking': talking, 'recent_active': len(floor_act),
+                    'active_groups': len(ptt_groups_out), 'participants': participants,
+                    'total_groups': counts.get('ptt_groups_total', 0),
                     'registered': counts.get('ptt_registered', 0),
                     'numbers': counts.get('ptt_numbers', 0)},
             'groups': ptt_groups_out,
+            'talkers': talkers,
         },
         'capacity': capacity,
         'anomalies': anomalies_all,
@@ -1450,11 +1512,20 @@ async def _service_org(config: dict) -> HandlerResult:
     ptt_states = _load_active_states(config, 'ptt')
     av = {st.get('subscriber_id') for st in volte_states if st.get('subscriber_id')}
     ap = {st.get('subscriber_id') for st in ptt_states if st.get('subscriber_id')}
+    # 발언 중(floor 점유) 가입자 — 조직 가입자 '발언' 활동 집계용
+    talkers = set()
+    for nd in _all_media_stats(config):
+        for gd in (nd['stats'].get('group_details') or []):
+            if gd.get('floor_holder'):
+                talkers.add(gd['floor_holder'])
 
     UNSET = '(미지정)'
     orgs = {}
     name_by_key = {}
     m2o = {}
+    def _org0(o):
+        return {'org': o, 'volte_num': 0, 'volte_reg': 0, 'ptt_num': 0, 'ptt_reg': 0,
+                'active_volte': 0, 'active_ptt': 0, 'ptt_talking': 0}
     try:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
@@ -1469,14 +1540,15 @@ async def _service_org(config: dict) -> HandlerResult:
                     "LEFT JOIN ptt_subscriptions ps ON ps.user_id=u.id "
                     "GROUP BY org", (UNSET,))
                 for r in cur.fetchall():
-                    orgs[r['org']] = {'org': r['org'], 'volte_num': int(r['volte_num'] or 0),
-                                      'volte_reg': int(r['volte_reg'] or 0), 'ptt_num': int(r['ptt_num'] or 0),
-                                      'ptt_reg': int(r['ptt_reg'] or 0), 'active_volte': 0, 'active_ptt': 0}
+                    o = _org0(r['org'])
+                    o.update({'volte_num': int(r['volte_num'] or 0), 'volte_reg': int(r['volte_reg'] or 0),
+                              'ptt_num': int(r['ptt_num'] or 0), 'ptt_reg': int(r['ptt_reg'] or 0)})
+                    orgs[r['org']] = o
                 cur.execute("SELECT id, code, name FROM organizations")
                 for r in cur.fetchall():
                     name_by_key[str(r['id'])] = r['name']
                     name_by_key[r['code']] = r['name']
-                all_active = list(av | ap)
+                all_active = list(av | ap | talkers)
                 if all_active:
                     ph = ','.join(['%s'] * len(all_active))
                     cur.execute(
@@ -1489,13 +1561,11 @@ async def _service_org(config: dict) -> HandlerResult:
         return HandlerResult(status=500, body={'error': str(e)})
 
     for msisdn in av:
-        o = m2o.get(msisdn, UNSET)
-        orgs.setdefault(o, {'org': o, 'volte_num': 0, 'volte_reg': 0, 'ptt_num': 0, 'ptt_reg': 0, 'active_volte': 0, 'active_ptt': 0})
-        orgs[o]['active_volte'] += 1
+        orgs.setdefault((o := m2o.get(msisdn, UNSET)), _org0(o))['active_volte'] += 1
     for msisdn in ap:
-        o = m2o.get(msisdn, UNSET)
-        orgs.setdefault(o, {'org': o, 'volte_num': 0, 'volte_reg': 0, 'ptt_num': 0, 'ptt_reg': 0, 'active_volte': 0, 'active_ptt': 0})
-        orgs[o]['active_ptt'] += 1
+        orgs.setdefault((o := m2o.get(msisdn, UNSET)), _org0(o))['active_ptt'] += 1
+    for msisdn in talkers:
+        orgs.setdefault((o := m2o.get(msisdn, UNSET)), _org0(o))['ptt_talking'] += 1
 
     out = []
     for code, v in orgs.items():
@@ -1503,6 +1573,59 @@ async def _service_org(config: dict) -> HandlerResult:
         out.append(v)
     out.sort(key=lambda x: (-(x['active_volte'] + x['active_ptt']), -(x['volte_reg'] + x['ptt_reg']), x['name']))
     return HandlerResult(status=200, body={'orgs': out})
+
+
+async def _ptt_members(config: dict, group: str, page='1', limit='50') -> HandlerResult:
+    """그룹 멤버 on-demand 페이지네이션 (그룹당 100~200명 → 비인라인 drill)."""
+    group = (group or '').strip()
+    try:
+        page = max(1, int(page))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        limit = min(200, max(1, int(limit)))
+    except (TypeError, ValueError):
+        limit = 50
+    if not group:
+        return HandlerResult(status=400, body={'error': 'group required'})
+    offset = (page - 1) * limit
+    # 현재 발언/참여 표시용
+    ptt_states = _load_active_states(config, 'ptt')
+    active_in_group = {st.get('subscriber_id') for st in ptt_states
+                       if st.get('group_id') == group and st.get('subscriber_id')}
+    floor_holder = None
+    for nd in _all_media_stats(config):
+        for gd in (nd['stats'].get('group_details') or []):
+            if gd.get('group_id') == group and gd.get('floor_holder'):
+                floor_holder = gd['floor_holder']
+    members = []
+    total = 0
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS c FROM ptt_group_members m JOIN ptt_groups g ON g.id=m.group_id "
+                    "WHERE g.mcptt_group_id=%s", (group,))
+                total = cur.fetchone()['c']
+                cur.execute(
+                    "SELECT m.user_id AS msisdn, m.role, m.priority, u.name "
+                    "FROM ptt_group_members m JOIN ptt_groups g ON g.id=m.group_id "
+                    "LEFT JOIN ptt_subscriptions ps ON ps.id=m.user_id "
+                    "LEFT JOIN users u ON u.id=ps.user_id "
+                    "WHERE g.mcptt_group_id=%s ORDER BY m.priority, m.user_id LIMIT %s OFFSET %s",
+                    (group, limit, offset))
+                for r in cur.fetchall():
+                    members.append({'msisdn': r['msisdn'], 'name': r.get('name') or '',
+                                    'role': r.get('role') or 'member', 'priority': r.get('priority'),
+                                    'active': r['msisdn'] in active_in_group,
+                                    'talking': r['msisdn'] == floor_holder})
+    except Exception as e:
+        return HandlerResult(status=500, body={'error': str(e)})
+    return HandlerResult(status=200, body={
+        'group': group, 'total': total, 'page': page, 'limit': limit,
+        'active_count': len(active_in_group), 'floor_holder': floor_holder,
+        'members': members,
+    })
 
 
 CIMS_STATS_HANDLER_LIST = [
