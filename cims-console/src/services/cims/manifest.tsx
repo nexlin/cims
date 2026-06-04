@@ -40,37 +40,37 @@ export const cimsManifest: ServiceManifest = {
     ...CIMS_OUTPUT_WIDGETS,
   ],
   sections: [
-    // ── 성능 (ops) — 서비스 현황 + 통계(KPI/카운터). FCAPS Performance. ──
+    // ── 서비스 (ops) — 서비스 이용 현황(실시간) + 호·세션 이력. 대상(서비스 호/세션) 기준 묶음. ──
     {
-      key: 'perf',
-      label: '성능',
-      icon: TrendingUp,
+      key: 'service',
+      label: '서비스',
+      icon: FileText,
       area: 'ops',
       basePath: '/service',
       defaultPath: '/service/status',
       order: 30,
       routes: [
-        { path: '/service/status', title: '서비스 현황', layout: SERVICE_STATUS_LAYOUT, layoutId: 'service.status', requiredRole: 'monitor' },
+        { path: '/service/status',         title: '서비스 현황',    layout: SERVICE_STATUS_LAYOUT,        layoutId: 'service.status',        requiredRole: 'monitor' },
+        { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', requiredRole: 'monitor' },
+        { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   requiredRole: 'monitor' },
+      ],
+    },
+    // ── 성능 (ops) — 통계(KPI/카운터). FCAPS Performance. ──
+    {
+      key: 'perf',
+      label: '성능',
+      icon: TrendingUp,
+      area: 'ops',
+      basePath: '/stats',
+      defaultPath: '/stats/volte',
+      order: 35,
+      routes: [
         { path: '/stats/volte', title: 'VoLTE 통계', layout: STATS_VOLTE_LAYOUT, layoutId: 'stats.volte', requiredRole: 'monitor' },
         { path: '/stats/ptt',   title: 'PTT 통계',   layout: STATS_PTT_LAYOUT,   layoutId: 'stats.ptt',   requiredRole: 'monitor' },
         { path: '/stats/sip',   title: 'SIP 통계',   layout: STATS_SIP_LAYOUT,   layoutId: 'stats.sip',   requiredRole: 'monitor' },
         { path: '/stats/cmp',   title: 'CMP 통계',   layout: STATS_CMP_LAYOUT,   layoutId: 'stats.cmp',   requiredRole: 'monitor' },
         { path: '/stats/csc',   title: 'CSC 통계',   layout: STATS_CSC_LAYOUT,   layoutId: 'stats.csc',   requiredRole: 'monitor' },
         { path: '/stats/https', title: 'HTTPS 통계', layout: STATS_HTTPS_LAYOUT, layoutId: 'stats.https', requiredRole: 'monitor' },
-      ],
-    },
-    // ── 기록 (ops) — 호·세션 이력(CDR 성격). FCAPS Accounting. ──
-    {
-      key: 'records',
-      label: '기록',
-      icon: FileText,
-      area: 'ops',
-      basePath: '/service/history',
-      defaultPath: '/service/history/volte',
-      order: 40,
-      routes: [
-        { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', requiredRole: 'monitor' },
-        { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   requiredRole: 'monitor' },
       ],
     },
     // ── 구성 (admin) — 가입자 프로비저닝 + 서비스 정의. FCAPS Configuration. ──
