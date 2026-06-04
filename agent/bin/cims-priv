@@ -21,6 +21,8 @@
 set -euo pipefail
 
 IP_CMD="/usr/bin/ip"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENDOR_DIR="$SELF_DIR/../vendor"
 
 err()  { echo "[ERROR] $*" >&2; }
 info() { echo "[INFO]  $*"; }
@@ -141,6 +143,36 @@ _fstab_drop_target() {   # stdout: 주어진 target 의 cims-managed 라인을 �
     awk -v tgt="$1" -v tag="$CIMS_MNT_TAG" '!($2==tgt && index($0,tag)>0)' "$FSTAB"
 }
 
+# 네트워크 FS 클라이언트(mount.nfs/mount.cifs)가 없으면 vendor (offline) deb 로
+# 자동 설치 — private/air-gapped 환경엔 apt repo 가 없으므로. keepalived(cims-ha
+# install)와 동일 패턴. vendor deb 도 없으면 명확한 에러로 실패(부팅 무영향: nofail).
+ensure_fs_client() {
+    local fstype="$1" helper vdir
+    case "$fstype" in
+        nfs|nfs4) helper="mount.nfs";  vdir="$VENDOR_DIR/nfs"  ;;
+        cifs)     helper="mount.cifs"; vdir="$VENDOR_DIR/cifs" ;;
+        *)        return 0 ;;
+    esac
+    if command -v "$helper" >/dev/null 2>&1 || [[ -x "/sbin/$helper" ]]; then
+        return 0
+    fi
+    if ls "$vdir"/*.deb >/dev/null 2>&1; then
+        info "$helper 미설치 — vendor offline 설치 ($vdir)"
+        if ! dpkg -i --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1; then
+            apt-get -y --fix-broken install >/dev/null 2>&1 || true
+            dpkg -i --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1 || {
+                err "$fstype client vendor 설치 실패: $(tail -3 /tmp/cims-priv.err 2>/dev/null)"
+                return 1
+            }
+        fi
+        ok "$fstype client 설치 완료 (vendor): $helper"
+    else
+        err "$helper 미설치 + vendor deb 없음 ($vdir) — '$fstype' mount 불가. agent 패키지에 vendor/nfs/*.deb 동봉 필요"
+        return 1
+    fi
+    return 0
+}
+
 do_mount_add() {
     local fstype="$1" source="$2" target="$3" options="${4:-defaults}"
     valid_fstype "$fstype"   || exit 2
@@ -151,6 +183,8 @@ do_mount_add() {
         nfs|nfs4|cifs) [[ "$options" == *_netdev* ]] || options="${options},_netdev" ;;
     esac
     [[ "$options" == *nofail* ]] || options="${options},nofail"
+    # 네트워크 FS 클라이언트 미설치 시 vendor deb 자동 설치 (air-gapped)
+    ensure_fs_client "$fstype" || exit 3
     mkdir -p "$target" 2>/tmp/cims-priv.err || { err "mkdir $target: $(cat /tmp/cims-priv.err 2>/dev/null)"; exit 3; }
     # fstab idempotent update (같은 target 의 cims-managed 라인 교체) + 백업
     local tmp; tmp="$(mktemp)"
