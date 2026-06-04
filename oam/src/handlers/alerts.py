@@ -8,7 +8,7 @@ Routes:
   GET /api/v1/alerts/rules                     활성 알림 규칙 + threshold (read-only, config 기반)
 """
 
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
 from httpsrv.handler import HandlerArgs, HandlerResult
@@ -101,7 +101,8 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
     method = handler_args.method.upper()
     base = _service_log_dir(config)
     parts = _path_parts(handler_args.full_path)
-    qs = parse_qs(urlparse(handler_args.full_path).query)
+    # query string 은 full_path 가 아니라 query_params dict 로 전달된다 (이미 URL-decode).
+    qs = handler_args.query_params or {}
 
     # 알람 승인(ack) — P1 라이프사이클. alarm_id 에 '/'(mo_instance) 있어 body 로 전달.
     if method == 'POST' and parts and parts[0] == 'ack':
@@ -133,8 +134,8 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
     def qp(name, default=None):
-        vals = qs.get(name)
-        return unquote(vals[0]) if vals else default
+        v = qs.get(name)
+        return v if v not in (None, '') else default
 
     try:
         if parts and parts[0] == 'rules':

@@ -28,7 +28,7 @@ import subprocess
 import threading
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
 from httpsrv.handler import HandlerArgs, HandlerResult
@@ -785,8 +785,8 @@ def _parse_rec_route(parts: tuple):
 async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     config = kwargs.get('config', {})
     base = config.get('ServiceLogDir', _service_log_dir)
-    parsed = urlparse(handler_args.full_path)
-    qs = parse_qs(parsed.query)
+    # query string 은 full_path 가 아니라 query_params dict 로 전달된다 (이미 URL-decode).
+    qs = handler_args.query_params or {}
     parts = _path_parts(handler_args.full_path, _REC_BASE)
     method = handler_args.method.upper()
 
@@ -828,8 +828,8 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 
 async def _list_recordings(base: str, qs: dict) -> HandlerResult:
     def qp(name, default=None):
-        vals = qs.get(name)
-        return unquote(vals[0]) if vals else default
+        v = qs.get(name)
+        return v if v not in (None, '') else default
 
     call_type = qp('call_type', '')
     caller = qp('caller', '')
