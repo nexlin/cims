@@ -1123,24 +1123,147 @@ async def _service_live(config: dict) -> HandlerResult:
     })
 
 
+_BACKFILL_CACHE: dict = {'min': None, 'window': None, 'data': {}}
+_BACKFILL_LOOKBACK_H = 3  # 장시간 세션 포착용 lookback (시간버킷)
+
+
+def _hour_buckets(start: datetime, end: datetime):
+    out = []
+    cur = start.replace(minute=0, second=0, microsecond=0)
+    while cur <= end:
+        out.append((cur.year, cur.month, cur.day, cur.hour))
+        cur += timedelta(hours=1)
+    return out
+
+
+def _add_interval(per_min: dict, key: str, s_ts: float, e_ts: float, from_min: int, to_min: int):
+    m0 = max(from_min, int(s_ts // 60))
+    m1 = min(to_min, int(e_ts // 60))
+    for m in range(m0, m1 + 1):
+        per_min.setdefault(m, {'volte': 0, 'ptt': 0})[key] += 1
+
+
+def _trend_backfill(config: dict, from_min: int, to_min: int) -> dict:
+    """라이브 표본이 없는 분을 서비스 로그에서 동시성 재구성 (분 단위 캐시).
+       VoLTE: call.json [invite_time, end_time] (call_id dedup).
+       PTT: events.jsonl member_join/leave → 활성(멤버>0) 구간."""
+    if _BACKFILL_CACHE['min'] == to_min and _BACKFILL_CACHE['window'] == (to_min - from_min):
+        return _BACKFILL_CACHE['data']
+    base = _service_log_dir(config)
+    per_min: dict = {}
+    if not base:
+        _BACKFILL_CACHE.update({'min': to_min, 'window': to_min - from_min, 'data': per_min})
+        return per_min
+    now = datetime.now()
+    now_ts = now.timestamp()
+    buckets = _hour_buckets(now - timedelta(hours=_BACKFILL_LOOKBACK_H), now)
+    # 비정상 종료(크래시·강제kill)로 end_time 미기록된 레코드가 "현재까지 활성"으로
+    # 오인되지 않도록, 현재 active state 에 있는 호/그룹만 now 까지 연장한다.
+    active_cids = {st.get('call_id') for st in _load_active_states(config, 'volte') if st.get('call_id')}
+    active_gids = {st.get('group_id') for st in _load_active_states(config, 'ptt') if st.get('group_id')}
+
+    # ── VoLTE: call.json 구간 (call_id dedup) ──
+    calls = {}
+    for (Y, M, D, H) in buckets:
+        pat = os.path.join(base, 'volte', f'{Y:04d}', f'{M:02d}', f'{D:02d}', f'{H:02d}',
+                           '*', '*', '*.d', 'call.json')
+        for fp in glob.glob(pat):
+            try:
+                with open(fp) as f:
+                    d = json.load(f)
+            except Exception:
+                continue
+            cid = d.get('call_id')
+            inv = _parse_iso(d.get('invite_time'))
+            if not cid or not inv:
+                continue
+            end = _parse_iso(d.get('end_time'))
+            if end:
+                e_ts = end.timestamp()
+            elif cid in active_cids:
+                e_ts = now_ts                       # 진짜 진행 중
+            else:
+                try:
+                    e_ts = os.path.getmtime(fp)     # 비정상 종료 → 마지막 기록 시각
+                except OSError:
+                    e_ts = inv.timestamp()
+            s_ts = inv.timestamp()
+            if e_ts < s_ts:
+                e_ts = s_ts
+            prev = calls.get(cid)
+            calls[cid] = (min(prev[0], s_ts), max(prev[1], e_ts)) if prev else (s_ts, e_ts)
+    for (s_ts, e_ts) in calls.values():
+        _add_interval(per_min, 'volte', s_ts, e_ts, from_min, to_min)
+
+    # ── PTT: 그룹별 활성(멤버>0) 구간 ──
+    for gd in glob.glob(os.path.join(base, 'ptt', '*') + os.sep):
+        # 그룹 현재 활성 여부 (mcptt_group_id ↔ active state)
+        g_active = False
+        try:
+            with open(os.path.join(gd, 'group.json')) as f:
+                g_active = json.load(f).get('mcptt_group_id') in active_gids
+        except Exception:
+            pass
+        last_event_ts = None
+        events = []
+        for (Y, M, D, H) in buckets:
+            ep = os.path.join(gd, f'{Y:04d}', f'{M:02d}', f'{D:02d}', f'{H:02d}', 'events.jsonl')
+            try:
+                with open(ep) as f:
+                    for line in f:
+                        try:
+                            ev = json.loads(line)
+                        except Exception:
+                            continue
+                        ts = _parse_iso(ev.get('ts'))
+                        t = ev.get('type')
+                        if ts and t in ('member_join', 'member_leave'):
+                            events.append((ts.timestamp(), 1 if t == 'member_join' else -1))
+            except Exception:
+                pass
+        if not events:
+            continue
+        events.sort()
+        last_event_ts = events[-1][0]
+        cnt = 0
+        seg_start = None
+        for ts, delta in events:
+            prev = cnt
+            cnt = max(0, cnt + delta)
+            if prev == 0 and cnt > 0:
+                seg_start = ts
+            elif prev > 0 and cnt == 0 and seg_start is not None:
+                _add_interval(per_min, 'ptt', seg_start, ts, from_min, to_min)
+                seg_start = None
+        if seg_start is not None:
+            # 미닫힌 구간: 현재 활성이면 now, 아니면 마지막 이벤트까지
+            _add_interval(per_min, 'ptt', seg_start, now_ts if g_active else last_event_ts, from_min, to_min)
+
+    _BACKFILL_CACHE.update({'min': to_min, 'window': to_min - from_min, 'data': per_min})
+    return per_min
+
+
 async def _service_trend(config: dict, window='30') -> HandlerResult:
-    """동시 사용량 추세 — 최근 window 분(기본 30)의 분 단위 동시호/활성그룹 표본.
-       표본은 _service_live 폴링 시점마다 누적(롤링). 미관측 분은 0."""
+    """동시 사용량 추세 — 최근 window 분(기본 30)의 분 단위 동시호/활성그룹.
+       라이브 표본(_service_live 폴링 시 누적)이 있는 분은 그 값, 없는 분(재기동/첫진입)은
+       서비스 로그에서 백필 재구성."""
     try:
         window = max(5, min(int(window), _TREND_MAX_MIN))
     except (TypeError, ValueError):
         window = 30
     now_min = int(datetime.now().timestamp()) // 60
+    from_min = now_min - window + 1
+    backfill = _trend_backfill(config, from_min, now_min)
     points = []
-    for m in range(now_min - window + 1, now_min + 1):
+    for m in range(from_min, now_min + 1):
         s = _TREND_SAMPLES.get(m)
-        points.append({
-            't': m * 60,
-            'volte': (s['volte'] if s else 0),
-            'ringing': (s['ringing'] if s else 0),
-            'ptt': (s['ptt'] if s else 0),
-            'talking': (s['talking'] if s else 0),
-        })
+        if s:
+            points.append({'t': m * 60, 'volte': s['volte'], 'ringing': s['ringing'],
+                           'ptt': s['ptt'], 'talking': s['talking'], 'src': 'live'})
+        else:
+            bf = backfill.get(m, {})
+            points.append({'t': m * 60, 'volte': bf.get('volte', 0), 'ringing': 0,
+                           'ptt': bf.get('ptt', 0), 'talking': 0, 'src': 'log'})
     vmax = max((p['volte'] for p in points), default=0)
     pmax = max((p['ptt'] for p in points), default=0)
     return HandlerResult(status=200, body={
