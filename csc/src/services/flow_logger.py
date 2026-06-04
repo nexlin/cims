@@ -981,6 +981,20 @@ def _flow_msg_from_log(obj: dict, call_ids: list = None) -> dict:
     return result
 
 
+def _flow_node_of(m: dict) -> str:
+    """FlowMessage 의 표시 노드 결정.
+    CSP↔CMP 제어 메시지(proto=JSON, iface=cmp)는 CSP 가 자기 자신을 node 로
+    로깅하지만, 의미상 CMP 노드로 묶어 Flow 뷰에서 별도 레인/토글로 노출한다."""
+    iface = m.get('iface', '')
+    proto = m.get('proto', '')
+    if iface == 'cmp' or proto in ('INT', 'RTP', 'MCPTT'):
+        return 'cmp'
+    node = m.get('node', '')
+    if node and node != 'unknown':
+        return node
+    return 'csp'
+
+
 def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> list:
     """sip.jsonl 기반으로 FlowMessage 목록 생성"""
     # call.json에서 initiator/callee 정보 로드
@@ -1096,14 +1110,7 @@ async def _handle_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
     # 노드별 배열로 분류
     nodes: dict[str, list] = {}
     for m in messages:
-        node = m.get('node', 'unknown')
-        if node == 'unknown':
-            if m.get('iface') == 'sip' or m.get('proto') == 'SIP':
-                node = 'csp'
-            elif m.get('proto') in ('INT', 'RTP', 'MCPTT'):
-                node = 'cmp'
-            else:
-                node = 'csp'
+        node = _flow_node_of(m)
         if node not in nodes:
             nodes[node] = []
         nodes[node].append(m)
@@ -1807,7 +1814,7 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         nodes: dict[str, list] = {}
         for obj in filtered:
             msg = _flow_msg_from_log(obj, call_ids)
-            node = msg.get("node", "unknown")
+            node = _flow_node_of(msg)
             if node not in nodes:
                 nodes[node] = []
             nodes[node].append(msg)
