@@ -187,7 +187,13 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
             return await _health(config)
 
         if parts[0] == 'subscribers':
-            return await _subscribers_status(config)
+            return await _subscribers_status(
+                config,
+                status=qp('status', 'active'),
+                q=qp('q', '') or '',
+                page=qp('page', '1'),
+                limit=qp('limit', '50'),
+            )
 
         if parts[0] == 'messages':
             iface = parts[1] if len(parts) > 1 else None  # sip, cmp, csc, https
@@ -654,21 +660,47 @@ def _calc_ptt_stats(config, from_dt, to_dt, gran):
 #  Subscribers real-time status (가입자별 실시간 접속/통화 상태)
 # ──────────────────────────────────────────────────────────────
 
-async def _subscribers_status(config: dict) -> HandlerResult:
-    """모든 가입자의 VoLTE/PTT 접속 상태 + 실시간 통화 상태 반환.
-       v3: call_logs 테이블 DROP 후 state 파일이 SOT — CSP 가
-       {ServiceLogDir}/state/{volte|ptt}/{subscriber}.json 에 원자 쓰기로 관리한다."""
+async def _subscribers_status(config: dict, status: str = 'active',
+                              q: str = '', page='1', limit='50') -> HandlerResult:
+    """가입자 서비스 이용 상태 조회 — 서버사이드 필터/페이지네이션.
 
-    # 1) state 파일에서 active 통화 인덱스 구축
+       대규모(수천~) 가입자에서도 일정한 비용을 유지하기 위해 전건 반환을 폐기하고,
+       status/q/page/limit 로 DB 가 직접 거른 한 페이지만 반환한다. 상단 요약은
+       counts(all/online/active) 로 별도 집계해 행 목록과 분리한다.
+
+       - status='active' (기본): 현재 통화/그룹 참여 중인 가입자만. 동시호 용량에
+         bound 되므로 가입자 수와 무관하게 작고 빠르다 (활성 세션 현황 = A 뷰).
+       - status='online': 등록(접속) 중인 가입자.
+       - status='all': 전체 가입자 (이름/번호 검색·페이지로 조회 = B 뷰).
+
+       v3: call_logs 테이블 DROP 후 state 파일이 SOT — CSP 가
+       {ServiceLogDir}/state/{volte|ptt}/{subscriber}.json 에 원자 쓰기로 관리한다.
+       state 의 subscriber_id 는 canonical id(=MSISDN, volte/ptt_subscriptions.id)."""
+
+    status = (status or 'active').lower()
+    if status not in ('active', 'online', 'all'):
+        status = 'active'
+    q = (q or '').strip()
+    try:
+        page = max(1, int(page))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        limit = min(200, max(1, int(limit)))
+    except (TypeError, ValueError):
+        limit = 50
+    offset = (page - 1) * limit
+
+    # 1) state 파일에서 active 통화/그룹 인덱스 구축
     volte_states = _load_active_states(config, 'volte')
     ptt_states = _load_active_states(config, 'ptt')
 
-    voip_active_by_sub = {}   # subscriber_id → [{call_id, peer, role, state, invite_time}]
+    volte_active_by_sub = {}   # subscriber_id(MSISDN) → [{call_id, peer, role, state, invite_time}]
     for st in volte_states:
         sub = st.get('subscriber_id', '')
         if not sub:
             continue
-        voip_active_by_sub.setdefault(sub, []).append({
+        volte_active_by_sub.setdefault(sub, []).append({
             'call_id': st.get('call_id', ''),
             'peer': st.get('peer_id', ''),
             'role': st.get('role', ''),
@@ -680,10 +712,17 @@ async def _subscribers_status(config: dict) -> HandlerResult:
 
     # PTT: 그룹별 참여자 집계 (active_members = state 파일 기반)
     group_active_members = {}  # group_id → count
+    ptt_states_by_sub = {}     # subscriber_id(MSISDN) → [state...]
     for st in ptt_states:
         gid = st.get('group_id', '')
         if gid:
             group_active_members[gid] = group_active_members.get(gid, 0) + 1
+        sub = st.get('subscriber_id', '')
+        if sub:
+            ptt_states_by_sub.setdefault(sub, []).append(st)
+
+    # 활성 가입자 식별자 집합 (MSISDN). active 필터/카운트의 IN 절에 사용.
+    active_ids = set(volte_active_by_sub) | set(ptt_states_by_sub)
 
     # CMP 에서 floor holder 조회 시도 (실패해도 무관)
     group_floor_holder = {}
@@ -696,70 +735,116 @@ async def _subscribers_status(config: dict) -> HandlerResult:
     except Exception:
         pass
 
-    # 2) DB 에서 가입자 목록 + ptt_group_members total count 조회
+    # online 판정 SQL 조각 (register_time 유효 && 미로그아웃)
+    _VOLTE_ON = ("(vs.id IS NOT NULL AND vs.register_time IS NOT NULL AND "
+                 "(vs.logout_time IS NULL OR vs.register_time > vs.logout_time))")
+    _PTT_ON = ("(ps.id IS NOT NULL AND ps.register_time IS NOT NULL AND "
+               "(ps.logout_time IS NULL OR ps.register_time > ps.logout_time))")
+    _BASE = ("FROM users u "
+             "LEFT JOIN volte_subscriptions vs ON vs.user_id = u.id "
+             "LEFT JOIN ptt_subscriptions ps ON ps.user_id = u.id ")
+
     subscribers = []
+    counts = {'all': 0, 'online': 0, 'active': 0}
+    total = 0
     try:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
+                # ── 상단 요약 카운트 (필터와 무관, 토글 뱃지용) ──
+                cur.execute("SELECT COUNT(*) AS c FROM users")
+                counts['all'] = cur.fetchone()['c']
+                cur.execute(f"SELECT COUNT(*) AS c {_BASE} WHERE ({_VOLTE_ON} OR {_PTT_ON})")
+                counts['online'] = cur.fetchone()['c']
+                if active_ids:
+                    ids = list(active_ids)
+                    ph = ','.join(['%s'] * len(ids))
+                    cur.execute(
+                        f"SELECT COUNT(DISTINCT u.id) AS c {_BASE} "
+                        f"WHERE vs.id IN ({ph}) OR ps.id IN ({ph}) "
+                        f"OR vs.imsi IN ({ph}) OR ps.imsi IN ({ph})",
+                        ids * 4,
+                    )
+                    counts['active'] = cur.fetchone()['c']
+
+                # ── 현재 필터의 WHERE 절 구성 ──
+                where, params = [], []
+                if status == 'online':
+                    where.append(f"({_VOLTE_ON} OR {_PTT_ON})")
+                elif status == 'active':
+                    if not active_ids:
+                        where.append("1=0")  # 활성 없음 → 빈 페이지
+                    else:
+                        ids = list(active_ids)
+                        ph = ','.join(['%s'] * len(ids))
+                        where.append(f"(vs.id IN ({ph}) OR ps.id IN ({ph}) "
+                                     f"OR vs.imsi IN ({ph}) OR ps.imsi IN ({ph}))")
+                        params += ids * 4
+                if q:
+                    where.append("(u.name LIKE %s OR vs.id LIKE %s OR ps.id LIKE %s)")
+                    like = f"%{q}%"
+                    params += [like, like, like]
+                where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+                # ── 현재 필터의 total + 페이지 행 ──
+                cur.execute(f"SELECT COUNT(*) AS c {_BASE} {where_sql}", params)
+                total = cur.fetchone()['c']
+
                 cur.execute(
                     "SELECT u.id AS person_id, u.name, "
-                    "vs.id AS voip_id, vs.imsi AS voip_imsi, vs.service_ref AS voip_service_ref, "
-                    "vs.register_time AS voip_reg_time, vs.logout_time AS voip_logout_time, "
-                    "ps.id AS ptt_id, ps.imsi AS ptt_imsi, ps.service_ref AS ptt_service_ref, "
+                    "vs.id AS volte_id, vs.imsi AS volte_imsi, "
+                    "vs.register_time AS volte_reg_time, vs.logout_time AS volte_logout_time, "
+                    "ps.id AS ptt_id, ps.imsi AS ptt_imsi, "
                     "ps.register_time AS ptt_reg_time, ps.logout_time AS ptt_logout_time "
-                    "FROM users u "
-                    "LEFT JOIN volte_subscriptions vs ON vs.user_id = u.id "
-                    "LEFT JOIN ptt_subscriptions ps ON ps.user_id = u.id "
-                    "ORDER BY u.name"
+                    f"{_BASE} {where_sql} ORDER BY u.name LIMIT %s OFFSET %s",
+                    params + [limit, offset],
                 )
                 rows = cur.fetchall()
 
-                # ptt_group_members 의 그룹별 총 멤버 수 캐시
+                # ── 페이지에 등장한 활성 그룹의 총 멤버 수만 조회 ──
+                page_gids = set()
+                for row in rows:
+                    for key in (row.get('ptt_id'), row.get('ptt_imsi')):
+                        for st in ptt_states_by_sub.get(key, []):
+                            if st.get('group_id'):
+                                page_gids.add(st['group_id'])
                 group_total = {}
-                if group_active_members:
-                    # group_active_members 키 = mcptt_group_id 식별자. members.group_id 는
+                if page_gids:
+                    # state 의 group_id = mcptt_group_id 식별자. members.group_id 는
                     # surrogate 이므로 ptt_groups JOIN 으로 mcptt_group_id 기준 집계.
-                    placeholders = ','.join(['%s'] * len(group_active_members))
+                    ph = ','.join(['%s'] * len(page_gids))
                     cur.execute(
                         f"SELECT g.mcptt_group_id AS gid, COUNT(*) AS cnt "
                         f"FROM ptt_group_members m JOIN ptt_groups g ON g.id = m.group_id "
-                        f"WHERE g.mcptt_group_id IN ({placeholders}) GROUP BY g.mcptt_group_id",
-                        tuple(group_active_members.keys())
+                        f"WHERE g.mcptt_group_id IN ({ph}) GROUP BY g.mcptt_group_id",
+                        tuple(page_gids),
                     )
                     for r in cur.fetchall():
                         group_total[r['gid']] = r['cnt']
 
-                # 가입자별 PTT 참여 레코드 구축 (state 파일로부터)
-                ptt_active_by_sub = {}
-                for st in ptt_states:
-                    sub = st.get('subscriber_id', '')
-                    gid = st.get('group_id', '')
-                    if not sub:
-                        continue
-                    ptt_active_by_sub.setdefault(sub, []).append({
-                        'call_id': st.get('call_id', ''),
-                        'group_id': gid,
-                        'state': st.get('state', 'active'),
-                        'role': st.get('role', 'member'),
-                        'invite_time': st.get('started_at'),
-                        'total_members': group_total.get(gid, 0),
-                        'active_members': group_active_members.get(gid, 0),
-                        'floor_holder': group_floor_holder.get(gid),
-                    })
+                def _ptt_groups_for(key):
+                    out = []
+                    for st in ptt_states_by_sub.get(key, []):
+                        gid = st.get('group_id', '')
+                        out.append({
+                            'call_id': st.get('call_id', ''),
+                            'group_id': gid,
+                            'state': st.get('state', 'active'),
+                            'role': st.get('role', 'member'),
+                            'invite_time': st.get('started_at'),
+                            'total_members': group_total.get(gid, 0),
+                            'active_members': group_active_members.get(gid, 0),
+                            'floor_holder': group_floor_holder.get(gid),
+                        })
+                    return out
 
                 for row in rows:
-                    voip_id = row.get('voip_id')
+                    volte_id = row.get('volte_id')
                     ptt_id = row.get('ptt_id')
 
-                    voip_online = False
-                    if voip_id and row.get('voip_reg_time'):
-                        if not row.get('voip_logout_time') or row['voip_reg_time'] > row['voip_logout_time']:
-                            voip_online = True
-
-                    ptt_online = False
-                    if ptt_id and row.get('ptt_reg_time'):
-                        if not row.get('ptt_logout_time') or row['ptt_reg_time'] > row['ptt_logout_time']:
-                            ptt_online = True
+                    volte_online = bool(volte_id and row.get('volte_reg_time') and (
+                        not row.get('volte_logout_time') or row['volte_reg_time'] > row['volte_logout_time']))
+                    ptt_online = bool(ptt_id and row.get('ptt_reg_time') and (
+                        not row.get('ptt_logout_time') or row['ptt_reg_time'] > row['ptt_logout_time']))
 
                     sub = {
                         'person_id': row['person_id'],
@@ -768,20 +853,24 @@ async def _subscribers_status(config: dict) -> HandlerResult:
                         'ptt': None,
                     }
 
-                    if voip_id:
+                    if volte_id:
+                        calls = (volte_active_by_sub.get(volte_id)
+                                 or volte_active_by_sub.get(row.get('volte_imsi')) or [])
                         sub['volte'] = {
-                            'msisdn': voip_id,
-                            'online': voip_online,
-                            'register_time': _dt(row.get('voip_reg_time')),
-                            'calls': voip_active_by_sub.get(voip_id, []),
+                            'msisdn': volte_id,
+                            'online': volte_online,
+                            'register_time': _dt(row.get('volte_reg_time')),
+                            'calls': calls,
                         }
 
                     if ptt_id:
+                        groups = (_ptt_groups_for(ptt_id)
+                                  or _ptt_groups_for(row.get('ptt_imsi')))
                         sub['ptt'] = {
                             'msisdn': ptt_id,
                             'online': ptt_online,
                             'register_time': _dt(row.get('ptt_reg_time')),
-                            'groups': ptt_active_by_sub.get(ptt_id, []),
+                            'groups': groups,
                         }
 
                     subscribers.append(sub)
@@ -790,7 +879,11 @@ async def _subscribers_status(config: dict) -> HandlerResult:
         return HandlerResult(status=500, body={'error': str(e)})
 
     return HandlerResult(status=200, body={
-        'total': len(subscribers),
+        'total': total,
+        'page': page,
+        'limit': limit,
+        'status': status,
+        'counts': counts,
         'subscribers': subscribers,
     })
 

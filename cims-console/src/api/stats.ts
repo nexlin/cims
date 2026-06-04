@@ -90,7 +90,7 @@ export interface ServiceStatsResponse {
   ptt?: PttStats
 }
 
-export interface SubscriberVoip {
+export interface SubscriberVolte {
   msisdn: string
   online: boolean
   register_time: string | null
@@ -117,19 +117,38 @@ export interface SubscriberPtt {
 export interface Subscriber {
   person_id: number
   name: string
-  voip: SubscriberVoip | null
+  volte: SubscriberVolte | null
   ptt: SubscriberPtt | null
 }
 
 export interface SubscribersResponse {
   total: number
+  page: number
+  limit: number
+  status: 'active' | 'online' | 'all'
+  counts: { all: number; online: number; active: number }
   subscribers: Subscriber[]
+}
+
+export interface SubscribersQuery {
+  status?: 'active' | 'online' | 'all'
+  q?: string
+  page?: number
+  limit?: number
 }
 
 export const statsApi = {
   health: () => api.get<HealthResponse>('/stats/health'),
 
-  subscribers: () => api.get<SubscribersResponse>('/stats/subscribers'),
+  subscribers: (params: SubscribersQuery = {}) => {
+    const sp = new URLSearchParams()
+    if (params.status) sp.set('status', params.status)
+    if (params.q) sp.set('q', params.q)
+    if (params.page) sp.set('page', String(params.page))
+    if (params.limit) sp.set('limit', String(params.limit))
+    const qs = sp.toString()
+    return api.get<SubscribersResponse>('/stats/subscribers' + (qs ? `?${qs}` : ''))
+  },
 
   messages: (params: { date?: string; granularity?: string; proto?: string }) => {
     const p = new URLSearchParams()

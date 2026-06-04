@@ -1,7 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { statsApi, type Subscriber } from '../../../api/stats'
+import { statsApi, type Subscriber, type SubscribersResponse } from '../../../api/stats'
 import { useToast } from '../../../components/Toast'
+
+type StatusFilter = 'active' | 'online' | 'all'
+const LIMIT = 50
 
 function OnlineDot({ online }: { online: boolean }) {
   return (
@@ -20,109 +23,121 @@ function fmtTime(iso: string | null): string {
 export default function ServiceStatusPage() {
   const { show } = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [subs, setSubs] = useState<Subscriber[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState(searchParams.get('q') || '')
-  const [filter, setFilter] = useState<'all' | 'online' | 'busy'>('all')
 
-  const load = useCallback(async () => {
+  // 검색어가 URL ?q= 로 들어오면 자동으로 '전체' 조회로 진입 (deep-link 보존)
+  const initialQ = searchParams.get('q') || ''
+  const [status, setStatus] = useState<StatusFilter>(initialQ ? 'all' : 'active')
+  const [searchInput, setSearchInput] = useState(initialQ)
+  const [q, setQ] = useState(initialQ)
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<SubscribersResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // 검색어 디바운스 → 서버사이드 q
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQ(searchInput.trim())
+      setPage(1)
+      if (searchInput.trim()) setSearchParams({ q: searchInput.trim() }, { replace: true })
+      else { searchParams.delete('q'); setSearchParams(searchParams, { replace: true }) }
+    }, 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput])
+
+  const load = useCallback(async (showSpinner: boolean) => {
+    if (showSpinner) setLoading(true)
     try {
-      const res = await statsApi.subscribers()
-      setSubs(res.subscribers)
+      const res = await statsApi.subscribers({ status, q, page, limit: LIMIT })
+      setData(res)
     } catch (e: unknown) {
       show(String(e), 'err')
     } finally {
       setLoading(false)
     }
-  }, [show])
+  }, [status, q, page, show])
 
+  // 필터/검색/페이지 변경 시 즉시 재조회 + 5초 자동 갱신(스피너 없이)
+  const loadRef = useRef(load)
+  loadRef.current = load
   useEffect(() => {
-    load()
-    const iv = setInterval(load, 5000)
+    load(true)
+    const iv = setInterval(() => loadRef.current(false), 5000)
     return () => clearInterval(iv)
   }, [load])
 
-  // 필터링
-  const filtered = subs.filter(s => {
-    // 검색
-    if (search) {
-      const q = search.toLowerCase()
-      const match = s.name.toLowerCase().includes(q)
-        || (s.voip?.msisdn || '').includes(q)
-        || (s.ptt?.msisdn || '').includes(q)
-      if (!match) return false
-    }
-    // 상태 필터
-    if (filter === 'online') return (s.voip?.online || s.ptt?.online)
-    if (filter === 'busy') return ((s.voip?.calls?.length || 0) > 0 || (s.ptt?.groups?.length || 0) > 0)
-    return true
-  })
+  const counts = data?.counts ?? { all: 0, online: 0, active: 0 }
+  const subs: Subscriber[] = data?.subscribers ?? []
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / LIMIT))
 
-  const totalOnline = subs.filter(s => s.voip?.online || s.ptt?.online).length
-  const totalBusy = subs.filter(s => (s.voip?.calls?.length || 0) > 0 || (s.ptt?.groups?.length || 0) > 0).length
+  function changeStatus(s: StatusFilter) {
+    setStatus(s)
+    setPage(1)
+  }
+
+  const tab = (s: StatusFilter, label: string, n: number) => (
+    <button className={`btn btn--sm ${status === s ? 'btn--primary' : 'btn--ghost'}`}
+      onClick={() => changeStatus(s)}>{label} ({n})</button>
+  )
 
   return (
     <div>
-
-      {/* 요약 + 필터 */}
       <div className="toolbar">
-        <button className={`btn btn--sm ${filter === 'all' ? 'btn--primary' : 'btn--ghost'}`}
-          onClick={() => setFilter('all')}>전체 ({subs.length})</button>
-        <button className={`btn btn--sm ${filter === 'online' ? 'btn--primary' : 'btn--ghost'}`}
-          onClick={() => setFilter('online')}>접속 중 ({totalOnline})</button>
-        <button className={`btn btn--sm ${filter === 'busy' ? 'btn--primary' : 'btn--ghost'}`}
-          onClick={() => setFilter('busy')}>통화 중 ({totalBusy})</button>
+        {tab('active', '이용 중', counts.active)}
+        {tab('online', '접속 중', counts.online)}
+        {tab('all', '전체', counts.all)}
         <input className="search-input" placeholder="이름/번호 검색"
-          value={search}
-          onChange={e => {
-            setSearch(e.target.value)
-            // URL ?q= 동기화 (Dashboard 등에서 deep-link 진입 시 검색어 보존)
-            if (e.target.value) setSearchParams({ q: e.target.value }, { replace: true })
-            else { searchParams.delete('q'); setSearchParams(searchParams, { replace: true }) }
-          }}
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
           style={{ maxWidth: 200 }} />
         <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>5초 자동 갱신</span>
       </div>
 
+      {status === 'active' && (
+        <div style={{ color: 'var(--text-muted)', fontSize: 12, margin: '0 0 8px' }}>
+          현재 통화·그룹 참여 중인 가입자만 표시합니다. 특정 가입자를 찾으려면 ‘전체’ 또는 검색을 사용하세요.
+        </div>
+      )}
+
       {loading ? (
         <div className="empty">로딩 중...</div>
-      ) : filtered.length === 0 ? (
-        <div className="empty">가입자가 없습니다</div>
+      ) : subs.length === 0 ? (
+        <div className="empty">
+          {status === 'active' ? '현재 서비스를 이용 중인 가입자가 없습니다'
+            : q ? '검색 결과가 없습니다' : '가입자가 없습니다'}
+        </div>
       ) : (
         <div className="panel">
           <table className="data-table">
             <thead>
               <tr>
                 <th>이름</th>
-                <th>VoIP 번호</th>
-                <th>VoIP 접속</th>
-                <th>VoIP 통화 상태</th>
+                <th>VoLTE 번호</th>
+                <th>VoLTE 접속</th>
+                <th>VoLTE 통화 상태</th>
                 <th>PTT 번호</th>
                 <th>PTT 접속</th>
                 <th>PTT 서비스 상태</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(s => (
+              {subs.map(s => (
                 <tr key={s.person_id}>
-                  {/* 이름 */}
                   <td style={{ fontWeight: 600 }}>{s.name}</td>
 
-                  {/* VoIP 번호 */}
-                  <td className="ts">{s.voip?.msisdn || '-'}</td>
+                  <td className="ts">{s.volte?.msisdn || '-'}</td>
 
-                  {/* VoIP 접속 */}
                   <td>
-                    {s.voip ? (
-                      <><OnlineDot online={s.voip.online} />{s.voip.online ? '접속' : '미접속'}</>
+                    {s.volte ? (
+                      <><OnlineDot online={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</>
                     ) : <span className="ts">-</span>}
                   </td>
 
-                  {/* VoIP 통화 상태 */}
                   <td>
-                    {s.voip?.calls && s.voip.calls.length > 0 ? (
-                      s.voip.calls.map((c, i) => (
-                        <div key={i} style={{ marginBottom: i < s.voip!.calls.length - 1 ? 4 : 0 }}>
+                    {s.volte?.calls && s.volte.calls.length > 0 ? (
+                      s.volte.calls.map((c, i) => (
+                        <div key={i} style={{ marginBottom: i < s.volte!.calls.length - 1 ? 4 : 0 }}>
                           <span className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`}>
                             {c.state === 'active' ? '통화 중' : '호출 중'}
                           </span>
@@ -133,21 +148,18 @@ export default function ServiceStatusPage() {
                         </div>
                       ))
                     ) : (
-                      <span className="ts">{s.voip?.online ? '대기' : '-'}</span>
+                      <span className="ts">{s.volte?.online ? '대기' : '-'}</span>
                     )}
                   </td>
 
-                  {/* PTT 번호 */}
                   <td className="ts">{s.ptt?.msisdn || '-'}</td>
 
-                  {/* PTT 접속 */}
                   <td>
                     {s.ptt ? (
                       <><OnlineDot online={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</>
                     ) : <span className="ts">-</span>}
                   </td>
 
-                  {/* PTT 서비스 상태 */}
                   <td>
                     {s.ptt?.groups && s.ptt.groups.length > 0 ? (
                       s.ptt.groups.map((g, i) => (
@@ -172,6 +184,18 @@ export default function ServiceStatusPage() {
               ))}
             </tbody>
           </table>
+
+          {totalPages > 1 && (
+            <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)' }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                총 {total.toLocaleString()}건 · {page}/{totalPages} 페이지
+              </span>
+              <button className="btn btn--sm btn--ghost" disabled={page <= 1}
+                onClick={() => setPage(p => Math.max(1, p - 1))}>이전</button>
+              <button className="btn btn--sm btn--ghost" disabled={page >= totalPages}
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</button>
+            </div>
+          )}
         </div>
       )}
     </div>
