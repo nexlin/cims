@@ -154,11 +154,12 @@ export interface PttGroup {
   members: PttGroupMember[]; anomalies: LiveAnomalyTag[]
 }
 export interface Anomaly { kind: string; type: string; detail: string; label: string; ref: string }
+export interface MediaNode { host: string; up: boolean; volte_rtp: Pool; ptt_rtp: Pool; groups: number }
 export interface ServiceLive {
   ts: string
   volte: { kpi: { active: number; ringing: number; avg_duration_sec: number; registered: number; numbers: number }; calls: VolteCall[] }
   ptt: { kpi: { active_groups: number; talking: number; participants: number; registered: number; numbers: number }; groups: PttGroup[] }
-  capacity: { volte_rtp: Pool; ptt_rtp: Pool }
+  capacity: { volte_rtp: Pool; ptt_rtp: Pool; nodes: MediaNode[] }
   anomalies: Anomaly[]
 }
 export interface ServiceEvent { ts: string; kind: string; type: string; detail: string; ref: string }

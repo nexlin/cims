@@ -31,6 +31,13 @@
     "CmpIp": "10.0.1.48",
     "CmpPort": 9000,
     "_cmp_comment": "대시보드 health 위젯의 CMP STATS probe 대상(ControlPort). AA 양노드 중 대표 1개 — media01.",
+    "MediaServer": {
+        "Endpoints": [
+            { "ip": "10.0.1.48", "port": 9000 },
+            { "ip": "10.0.1.49", "port": 9000 }
+        ],
+        "_comment": "서비스현황 노드 분산용 — 전 미디어 노드(media01/02) STATS probe 대상. csp.json MediaServer.Endpoints 와 동일."
+    },
     "CimsAuth": {
         "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8="
     },

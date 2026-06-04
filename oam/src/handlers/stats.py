@@ -144,6 +144,33 @@ def _get_cmp_stats(config: dict) -> dict:
     return _cached('cmp', probe)
 
 
+def _media_endpoints(config: dict):
+    """전 미디어 노드 (ip, port). MediaServer.Endpoints 우선, 없으면 CmpIp 단일."""
+    ms = config.get('MediaServer', {}) or {}
+    eps = ms.get('Endpoints') or []
+    out = [(e.get('ip'), int(e.get('port', 9000))) for e in eps if e.get('ip')]
+    if not out:
+        out = [(config.get('CmpIp', '127.0.0.1'), int(config.get('CmpPort', 9000)))]
+    return out
+
+
+def _probe_cmp(ip: str, port: int) -> dict:
+    """단일 CMP 노드 STATS probe (노드별 3s 캐시)."""
+    def probe():
+        resp = _udp_request(ip, port, {"trans_id": int(time.time()) % 100000,
+                                       "payload": {"cmd": "STATS_REQUEST"}})
+        if isinstance(resp.get('response'), dict):
+            return resp['response']
+        return {}
+    return _cached(f'cmp:{ip}:{port}', probe)
+
+
+def _all_media_stats(config: dict):
+    """전 미디어 노드 STATS — [{host, port, stats}]."""
+    return [{'host': ip, 'port': port, 'stats': _probe_cmp(ip, port)}
+            for ip, port in _media_endpoints(config)]
+
+
 def _check_db_health(config: dict) -> bool:
     try:
         with _get_db(config) as conn:
@@ -969,7 +996,7 @@ async def _service_live(config: dict) -> HandlerResult:
     now = datetime.now()
     volte_states = _load_active_states(config, 'volte')
     ptt_states = _load_active_states(config, 'ptt')
-    cmp_stats = _get_cmp_stats(config) or {}
+    media = _all_media_stats(config)
     counts = _get_dashboard_counts(config)
 
     # ── VoLTE: call_id 기준 dedup (caller+callee 2파일 → 1호) ──
@@ -1033,12 +1060,13 @@ async def _service_live(config: dict) -> HandlerResult:
             g['initiator'] = sub
         g['members'].append({'subscriber_id': sub, 'role': role})
 
-    # CMP floor holder
+    # CMP floor holder (전 노드 group_details 병합)
     floor_holder = {}
-    for gd in (cmp_stats.get('group_details') or []):
-        gg = gd.get('group_id', '')
-        if gg and gd.get('floor_holder'):
-            floor_holder[gg] = gd['floor_holder']
+    for nd in media:
+        for gd in (nd['stats'].get('group_details') or []):
+            gg = gd.get('group_id', '')
+            if gg and gd.get('floor_holder'):
+                floor_holder[gg] = gd['floor_holder']
 
     # DB: 그룹 메타(이름/타입/총멤버/surrogate id)
     gmeta = {}
@@ -1083,15 +1111,25 @@ async def _service_live(config: dict) -> HandlerResult:
         ptt_groups_out.append(g)
     ptt_groups_out.sort(key=lambda x: x.get('invite_time') or '')
 
-    # ── 용량 (CMP RTP 풀; floor 풀은 미제공 → 발언중 count 로 대체) ──
-    capacity = {
-        'volte_rtp': {'total': cmp_stats.get('rtp_ports_total', 0),
-                      'used': cmp_stats.get('rtp_ports_used', 0),
-                      'free': cmp_stats.get('rtp_ports_free', 0)},
-        'ptt_rtp': {'total': cmp_stats.get('ptt_rtp_ports_total', 0),
-                    'used': cmp_stats.get('ptt_rtp_ports_used', 0),
-                    'free': cmp_stats.get('ptt_rtp_ports_free', 0)},
-    }
+    # ── 용량: 전 미디어 노드 RTP 풀 집계 + 노드별 분산 ──
+    #   (PTT 그룹 리소스 = rtp+floor+video 묶음 1:1 → ptt_rtp 풀 == 그룹/floor 동시 capacity) ──
+    def _pool(s, pfx):
+        return {'total': int(s.get(f'{pfx}_total', 0) or 0),
+                'used': int(s.get(f'{pfx}_used', 0) or 0),
+                'free': int(s.get(f'{pfx}_free', 0) or 0)}
+    vt = {'total': 0, 'used': 0, 'free': 0}
+    pt = {'total': 0, 'used': 0, 'free': 0}
+    nodes = []
+    for nd in media:
+        s = nd['stats'] or {}
+        vr, pr = _pool(s, 'rtp_ports'), _pool(s, 'ptt_rtp_ports')
+        for k in ('total', 'used', 'free'):
+            vt[k] += vr[k]
+            pt[k] += pr[k]
+        nodes.append({'host': nd['host'], 'up': bool(s),
+                      'volte_rtp': vr, 'ptt_rtp': pr,
+                      'groups': len(s.get('group_details') or [])})
+    capacity = {'volte_rtp': vt, 'ptt_rtp': pt, 'nodes': nodes}
 
     # ── 이상 징후 집계 ──
     anomalies_all = []

@@ -124,8 +124,19 @@ function LiveHeader({ live, trend, onJump }: { live: ServiceLive | null; trend: 
           <Kpi label="발언 중" value={p?.talking ?? '-'} />
           <Kpi label="참여자" value={p?.participants ?? '-'} />
           <Kpi label="등록" value={p?.registered ?? '-'} sub={p ? `/ ${p.numbers}` : ''} />
-          {live && <Gauge label="PTT RTP 풀" pool={live.capacity.ptt_rtp} />}
+          {live && <Gauge label="PTT 그룹 풀(동시 그룹·floor)" pool={live.capacity.ptt_rtp} />}
         </div>
+        {live && live.capacity.nodes.length > 1 && (
+          <div style={{ borderTop: '1px dashed var(--border)', marginTop: 10, paddingTop: 8, display: 'flex', flexWrap: 'wrap', gap: 18, fontSize: 12, color: 'var(--text-muted)' }}>
+            <span>미디어 노드 분산:</span>
+            {live.capacity.nodes.map(n => (
+              <span key={n.host}>
+                <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: n.up ? 'var(--success)' : 'var(--danger)', marginRight: 4 }} />
+                {n.host} · VoLTE {n.volte_rtp.used}/{n.volte_rtp.total} · PTT {n.ptt_rtp.used}/{n.ptt_rtp.total} · 그룹 {n.groups}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {trend && (
