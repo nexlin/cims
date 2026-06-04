@@ -373,51 +373,53 @@ export function OrgStatsCard() {
   if (loading) return <div className="panel"><Loading /></div>
   if (orgs.length === 0) return <div className="empty">조직 정보가 없습니다</div>
 
-  const selOrg = orgs.find(o => o.org === sel) || null
-  // 조직 가입자 활동 기준 (그룹 귀속이 아니라 가입자 활동)
-  const calls = (live?.volte.calls ?? []).filter(c => c.org === sel)
-  const talkers = (live?.ptt.talkers ?? []).filter(t => t.org === sel)
-
   return (
     <div className="panel">
       <table className="data-table">
         <thead><tr><th>조직</th><th>VoLTE 등록</th><th>PTT 등록</th><th>VoLTE 통화</th><th>PTT 발언</th><th>PTT 참여</th></tr></thead>
         <tbody>
-          {orgs.map(o => (
-            <tr key={o.org} onClick={() => setSel(sel === o.org ? null : o.org)}
-              style={{ cursor: 'pointer', ...(sel === o.org ? { background: 'rgba(80,120,255,.1)' } : {}) }}>
-              <td style={{ fontWeight: 600 }}>{sel === o.org ? '▾ ' : '▸ '}{o.name}</td>
-              <td><RegBar reg={o.volte_reg} num={o.volte_num} /></td>
-              <td><RegBar reg={o.ptt_reg} num={o.ptt_num} /></td>
-              <td>{o.active_volte > 0 ? <span className="badge badge--blue">{o.active_volte}</span> : <span className="ts">0</span>}</td>
-              <td>{o.ptt_talking > 0 ? <span className="badge badge--green">🎤 {o.ptt_talking}</span> : <span className="ts">0</span>}</td>
-              <td className="ts">{o.active_ptt}</td>
-            </tr>
-          ))}
+          {orgs.map(o => {
+            const open = sel === o.org
+            const calls = open ? (live?.volte.calls ?? []).filter(c => c.org === o.org) : []
+            const talkers = open ? (live?.ptt.talkers ?? []).filter(t => t.org === o.org) : []
+            return (
+              <Fragment key={o.org}>
+                <tr onClick={() => setSel(open ? null : o.org)}
+                  style={{ cursor: 'pointer', ...(open ? { background: 'rgba(80,120,255,.1)' } : {}) }}>
+                  <td style={{ fontWeight: 600 }}>{open ? '▾ ' : '▸ '}{o.name}</td>
+                  <td><RegBar reg={o.volte_reg} num={o.volte_num} /></td>
+                  <td><RegBar reg={o.ptt_reg} num={o.ptt_num} /></td>
+                  <td>{o.active_volte > 0 ? <span className="badge badge--blue">{o.active_volte}</span> : <span className="ts">0</span>}</td>
+                  <td>{o.ptt_talking > 0 ? <span className="badge badge--green">🎤 {o.ptt_talking}</span> : <span className="ts">0</span>}</td>
+                  <td className="ts">{o.active_ptt}</td>
+                </tr>
+                {open && (
+                  <tr>
+                    <td colSpan={6} style={{ background: 'var(--bg-subtle, rgba(0,0,0,.02))', padding: '8px 12px' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>VoLTE 통화 중 ({calls.length})</div>
+                      {calls.length === 0 ? <div className="ts" style={{ marginBottom: 8 }}>없음</div>
+                        : <div style={{ marginBottom: 10 }}>{calls.map(c => (
+                            <div key={c.call_id} style={{ fontSize: 13, padding: '2px 0' }}>
+                              <span className={`badge ${c.state === 'ringing' ? 'badge--blue' : 'badge--green'}`}>{c.state === 'ringing' ? '호출' : '통화'}</span>
+                              {' '}<b>{c.caller}</b> → {c.callee} <span className="ts">· {c.video ? '영상' : '음성'} · {fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))} · {c.media_node || '-'}</span>
+                            </div>
+                          ))}</div>}
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>PTT 발언 중 ({talkers.length}) · 참여 {o.active_ptt}명</div>
+                      {talkers.length === 0 ? <div className="ts">발언 중인 가입자 없음</div>
+                        : talkers.map((t, i) => (
+                            <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>
+                              <span style={{ color: 'var(--primary)', fontWeight: 600 }}>🎤 {t.msisdn}</span>
+                              <span className="ts"> → {t.group_name}</span>
+                            </div>
+                          ))}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
         </tbody>
       </table>
-
-      {selOrg && (
-        <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', background: 'var(--bg-subtle, rgba(0,0,0,.02))' }}>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{selOrg.name} · 가입자 활동</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>VoLTE 통화 중 ({calls.length})</div>
-          {calls.length === 0 ? <div className="ts" style={{ marginBottom: 8 }}>없음</div>
-            : <div style={{ marginBottom: 10 }}>{calls.map(c => (
-                <div key={c.call_id} style={{ fontSize: 13, padding: '2px 0' }}>
-                  <span className={`badge ${c.state === 'ringing' ? 'badge--blue' : 'badge--green'}`}>{c.state === 'ringing' ? '호출' : '통화'}</span>
-                  {' '}<b>{c.caller}</b> → {c.callee} <span className="ts">· {c.video ? '영상' : '음성'} · {fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))} · {c.media_node || '-'}</span>
-                </div>
-              ))}</div>}
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>PTT 발언 중 ({talkers.length}) · 참여 {selOrg.active_ptt}명</div>
-          {talkers.length === 0 ? <div className="ts">발언 중인 가입자 없음</div>
-            : talkers.map((t, i) => (
-                <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>
-                  <span style={{ color: 'var(--primary)', fontWeight: 600 }}>🎤 {t.msisdn}</span>
-                  <span className="ts"> → {t.group_name}</span>
-                </div>
-              ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -504,15 +506,37 @@ export function SubscriberLookup() {
   )
 }
 
-// ── 기본 페이지: 위젯을 합성(섹션 헤더 + 카드) ────────────
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+// ── 위젯: 서비스 상세 (탭 통합 — 호·그룹·이벤트·조직·조회) ──
+export function ServiceDetailTabs() {
+  const live = useServiceLive()
+  const [tab, setTab] = useState<'volte' | 'ptt' | 'events' | 'org' | 'subscribers'>('volte')
+  const v = live?.volte.kpi
+  const p = live?.ptt.kpi
+  const tb = (t: typeof tab, label: string, n?: number) => (
+    <button className={`btn btn--sm ${tab === t ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setTab(t)}>
+      {label}{n !== undefined && n !== null ? ` (${n})` : ''}
+    </button>
+  )
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', margin: '0 0 6px 2px' }}>{title}</div>
-      {children}
+    <div>
+      <div className="toolbar" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+        {tb('volte', 'VoLTE 호', v?.active)}
+        {tb('ptt', 'PTT 그룹', p?.recent_active)}
+        {tb('events', '라이브 이벤트')}
+        {tb('org', '조직별')}
+        {tb('subscribers', '가입자 조회')}
+        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>
+      </div>
+      {tab === 'volte' && <VolteCallsCard />}
+      {tab === 'ptt' && <PttGroupsCard />}
+      {tab === 'events' && <EventFeedCard />}
+      {tab === 'org' && <OrgStatsCard />}
+      {tab === 'subscribers' && <SubscriberLookup />}
     </div>
   )
 }
+
+// ── 기본 페이지: 위젯을 합성(섹션 헤더 + 카드) ────────────
 export default function ServiceStatusPage() {
   return (
     <div>
@@ -524,11 +548,7 @@ export default function ServiceStatusPage() {
         <div style={{ flex: '1 1 460px' }}><TrendCard /></div>
         <div style={{ flex: '1 1 460px' }}><AnomalyCard /></div>
       </div>
-      <Section title="VoLTE 활성 호"><VolteCallsCard /></Section>
-      <Section title="PTT 활성 그룹"><PttGroupsCard /></Section>
-      <Section title="라이브 이벤트"><EventFeedCard /></Section>
-      <Section title="조직별 집계"><OrgStatsCard /></Section>
-      <Section title="가입자 조회"><SubscriberLookup /></Section>
+      <ServiceDetailTabs />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import type { WidgetDef, WidgetProps } from '../../../widgets/types'
 import {
   VolteKpiCard, PttKpiCard, TrendCard, AnomalyCard,
   VolteCallsCard, PttGroupsCard, EventFeedCard, OrgStatsCard, SubscriberLookup,
+  ServiceDetailTabs,
 } from '../pages/ServiceStatusPage'
 import StatsPage from '../pages/StatsPage'
 import StatsMessagesPage from '../pages/StatsMessagesPage'
@@ -20,6 +21,8 @@ export const svcVolteCallsWidget: WidgetDef = { id: 'cims.svc-volte-calls', titl
 export const svcPttGroupsWidget: WidgetDef = { id: 'cims.svc-ptt-groups', title: 'PTT 활성 그룹', category: 'service', component: PttGroupsCard, defaultSize: { w: 6 }, adminOnly: true }
 export const svcEventsWidget: WidgetDef = { id: 'cims.svc-events', title: '라이브 이벤트', category: 'event', component: EventFeedCard, defaultSize: { w: 6 }, adminOnly: true }
 export const svcOrgWidget: WidgetDef = { id: 'cims.svc-org', title: '조직별 서비스 이용', category: 'service', component: OrgStatsCard, defaultSize: { w: 12 }, adminOnly: true }
+// 호·그룹·이벤트·조직·조회를 탭 1개 위젯으로 통합 (빈 위젯/헤더 스크롤 완화 + 한 영역 운용)
+export const svcDetailWidget: WidgetDef = { id: 'cims.svc-detail', title: '서비스 상세 (호·그룹·이벤트·조직·조회)', category: 'service', component: ServiceDetailTabs, defaultSize: { w: 12 }, adminOnly: true }
 
 // 가입자 조회 (특정 가입자 현재 상태) — 기존 id 유지(하위호환), 내용은 조회 위젯으로 정정
 export const subscriberStatusWidget: WidgetDef = {
@@ -75,6 +78,7 @@ export const pttHistoryWidget: WidgetDef = {
 
 export const CIMS_OUTPUT_WIDGETS: WidgetDef[] = [
   svcVolteKpiWidget, svcPttKpiWidget, svcTrendWidget, svcAnomalyWidget,
+  svcDetailWidget,
   svcVolteCallsWidget, svcPttGroupsWidget, svcEventsWidget, svcOrgWidget,
   subscriberStatusWidget, serviceStatsWidget, messageStatsWidget,
   volteHistoryWidget, pttHistoryWidget,

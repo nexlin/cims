@@ -12,11 +12,10 @@ const one = (id: string, title: string, widgetId: string,
 export const SERVICE_STATUS_LAYOUT: PageLayout = {
   id: 'service.status', title: '서비스 현황',
   widgets: [
+    // 요약(작은 위젯) + 상세(탭 통합 위젯) — 빈 위젯/헤더 스크롤 완화
     { widgetId: 'cims.svc-volte-kpi', w: 6 }, { widgetId: 'cims.svc-ptt-kpi', w: 6 },
     { widgetId: 'cims.svc-trend', w: 6 }, { widgetId: 'cims.svc-anomaly', w: 6 },
-    { widgetId: 'cims.svc-volte-calls', w: 6 }, { widgetId: 'cims.svc-ptt-groups', w: 6 },
-    { widgetId: 'cims.svc-events', w: 6 }, { widgetId: 'cims.svc-org', w: 6 },
-    { widgetId: 'cims.subscriber-status', w: 12 },
+    { widgetId: 'cims.svc-detail', w: 12, h: 2 },
   ],
 }
 export const SERVICE_HISTORY_VOLTE_LAYOUT = one('service.history-volte', 'VoLTE 이력', 'cims.volte-history')
