@@ -161,6 +161,12 @@ export interface ServiceLive {
   capacity: { volte_rtp: Pool; ptt_rtp: Pool }
   anomalies: Anomaly[]
 }
+export interface ServiceEvent { ts: string; kind: string; type: string; detail: string; ref: string }
+export interface OrgStat {
+  org: string; name: string
+  volte_num: number; volte_reg: number; ptt_num: number; ptt_reg: number
+  active_volte: number; active_ptt: number
+}
 export interface TrendPoint { t: number; volte: number; ringing: number; ptt: number; talking: number }
 export interface ServiceTrend {
   window_min: number; points: TrendPoint[]
@@ -182,6 +188,8 @@ export const statsApi = {
 
   serviceLive: () => api.get<ServiceLive>('/stats/service/live'),
   serviceTrend: (windowMin = 30) => api.get<ServiceTrend>(`/stats/service/trend?window=${windowMin}`),
+  serviceEvents: (limit = 60) => api.get<{ events: ServiceEvent[] }>(`/stats/service/events?limit=${limit}`),
+  serviceOrg: () => api.get<{ orgs: OrgStat[] }>('/stats/service/org'),
 
   messages: (params: { date?: string; granularity?: string; proto?: string }) => {
     const p = new URLSearchParams()

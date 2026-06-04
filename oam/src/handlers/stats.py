@@ -207,6 +207,10 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                 return await _service_live(config)
             if svc == 'trend':
                 return await _service_trend(config, qp('window', '30'))
+            if svc == 'events':
+                return await _service_events(config, qp('limit', '60'))
+            if svc == 'org':
+                return await _service_org(config)
             gran = qp('granularity', '1d')
             from_dt = qp('from')
             to_dt = qp('to')
@@ -1274,6 +1278,170 @@ async def _service_trend(config: dict, window='30') -> HandlerResult:
         'ptt_now': points[-1]['ptt'] if points else 0,
         'ptt_peak': pmax,
     })
+
+
+# ──────────────────────────────────────────────────────────────
+#  ④ 라이브 이벤트 스트림 / ⑥ 조직별 집계
+# ──────────────────────────────────────────────────────────────
+
+def _build_service_events(config: dict) -> list:
+    base = _service_log_dir(config)
+    if not base:
+        return []
+    now = datetime.now()
+    buckets = _hour_buckets(now - timedelta(hours=1), now)  # 현재+직전 시간버킷
+    events = []
+
+    # VoLTE: call.json → call_start / call_end (call_id dedup)
+    seen = set()
+    for (Y, M, D, H) in buckets:
+        for fp in glob.glob(os.path.join(base, 'volte', f'{Y:04d}', f'{M:02d}', f'{D:02d}', f'{H:02d}',
+                                         '*', '*', '*.d', 'call.json')):
+            try:
+                with open(fp) as f:
+                    d = json.load(f)
+            except Exception:
+                continue
+            cid = d.get('call_id')
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            ini, cal = d.get('initiator', ''), d.get('callee', '')
+            vid = d.get('call_type') == 'volte_video'
+            if d.get('invite_time'):
+                events.append({'ts': d['invite_time'], 'kind': 'volte', 'type': 'call_start',
+                               'detail': f"{ini} → {cal} ({'영상' if vid else '음성'})", 'ref': cid})
+            if d.get('end_time'):
+                events.append({'ts': d['end_time'], 'kind': 'volte', 'type': 'call_end',
+                               'detail': f"{ini} → {cal} ({d.get('duration', 0)}s, {d.get('end_reason', '')})", 'ref': cid})
+
+    # PTT surrogate → mcptt_group_id 매핑
+    sur2g = {}
+    for gj in glob.glob(os.path.join(base, 'ptt', '*', 'group.json')):
+        try:
+            with open(gj) as f:
+                sur2g[os.path.basename(os.path.dirname(gj))] = json.load(f).get('mcptt_group_id')
+        except Exception:
+            pass
+
+    for (Y, M, D, H) in buckets:
+        # floor.jsonl: GRANT/RELEASE/REJECT
+        for fp in glob.glob(os.path.join(base, 'ptt', '*', f'{Y:04d}', f'{M:02d}', f'{D:02d}', f'{H:02d}', 'floor.jsonl')):
+            parts = fp.split(os.sep)
+            g = sur2g.get(parts[-6]) or parts[-6]
+            try:
+                with open(fp) as f:
+                    for line in f:
+                        try:
+                            ev = json.loads(line)
+                        except Exception:
+                            continue
+                        op, user, ts = ev.get('op'), ev.get('user', ''), ev.get('ts')
+                        if not ts:
+                            continue
+                        if op == 'GRANT':
+                            events.append({'ts': ts, 'kind': 'ptt', 'type': 'floor_grant', 'detail': f"{g}: {user} 발언 시작", 'ref': g})
+                        elif op == 'RELEASE':
+                            events.append({'ts': ts, 'kind': 'ptt', 'type': 'floor_release', 'detail': f"{g}: 발언 종료", 'ref': g})
+                        elif op == 'REJECT':
+                            events.append({'ts': ts, 'kind': 'ptt', 'type': 'floor_reject', 'detail': f"{g}: {user} 요청 거부 ({ev.get('reason', '')})", 'ref': g})
+            except Exception:
+                pass
+        # events.jsonl: member_join/leave
+        for fp in glob.glob(os.path.join(base, 'ptt', '*', f'{Y:04d}', f'{M:02d}', f'{D:02d}', f'{H:02d}', 'events.jsonl')):
+            parts = fp.split(os.sep)
+            g = sur2g.get(parts[-6]) or parts[-6]
+            try:
+                with open(fp) as f:
+                    for line in f:
+                        try:
+                            ev = json.loads(line)
+                        except Exception:
+                            continue
+                        t, ts = ev.get('type'), ev.get('ts')
+                        if not ts:
+                            continue
+                        if t == 'member_join':
+                            events.append({'ts': ts, 'kind': 'ptt', 'type': 'member_join', 'detail': f"{g}: {ev.get('member', '')} 입장", 'ref': g})
+                        elif t == 'member_leave':
+                            events.append({'ts': ts, 'kind': 'ptt', 'type': 'member_leave', 'detail': f"{g}: {ev.get('member', '')} 퇴장", 'ref': g})
+            except Exception:
+                pass
+
+    events.sort(key=lambda e: e['ts'], reverse=True)
+    return events[:200]
+
+
+async def _service_events(config: dict, limit='60') -> HandlerResult:
+    """최근 서비스 이벤트 피드 — VoLTE 호 시작/종료, PTT floor GRANT/RELEASE/REJECT,
+       멤버 입장/퇴장을 로그에서 모아 시각 역순. 3초 캐시."""
+    try:
+        limit = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        limit = 60
+    events = _cached('svc_events', lambda: _build_service_events(config))
+    return HandlerResult(status=200, body={'events': events[:limit]})
+
+
+async def _service_org(config: dict) -> HandlerResult:
+    """조직별 서비스 이용 집계 — 등록(VoLTE/PTT) + 현재 이용 중 단말 수."""
+    volte_states = _load_active_states(config, 'volte')
+    ptt_states = _load_active_states(config, 'ptt')
+    av = {st.get('subscriber_id') for st in volte_states if st.get('subscriber_id')}
+    ap = {st.get('subscriber_id') for st in ptt_states if st.get('subscriber_id')}
+
+    UNSET = '(미지정)'
+    orgs = {}
+    name_by_key = {}
+    m2o = {}
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COALESCE(NULLIF(u.org_id,''),%s) AS org, "
+                    "COUNT(DISTINCT vs.id) AS volte_num, "
+                    "COUNT(DISTINCT CASE WHEN vs.register_time IS NOT NULL AND (vs.logout_time IS NULL OR vs.register_time>vs.logout_time) THEN vs.id END) AS volte_reg, "
+                    "COUNT(DISTINCT ps.id) AS ptt_num, "
+                    "COUNT(DISTINCT CASE WHEN ps.register_time IS NOT NULL AND (ps.logout_time IS NULL OR ps.register_time>ps.logout_time) THEN ps.id END) AS ptt_reg "
+                    "FROM users u "
+                    "LEFT JOIN volte_subscriptions vs ON vs.user_id=u.id "
+                    "LEFT JOIN ptt_subscriptions ps ON ps.user_id=u.id "
+                    "GROUP BY org", (UNSET,))
+                for r in cur.fetchall():
+                    orgs[r['org']] = {'org': r['org'], 'volte_num': int(r['volte_num'] or 0),
+                                      'volte_reg': int(r['volte_reg'] or 0), 'ptt_num': int(r['ptt_num'] or 0),
+                                      'ptt_reg': int(r['ptt_reg'] or 0), 'active_volte': 0, 'active_ptt': 0}
+                cur.execute("SELECT id, code, name FROM organizations")
+                for r in cur.fetchall():
+                    name_by_key[str(r['id'])] = r['name']
+                    name_by_key[r['code']] = r['name']
+                all_active = list(av | ap)
+                if all_active:
+                    ph = ','.join(['%s'] * len(all_active))
+                    cur.execute(
+                        f"SELECT vs.id AS m, COALESCE(NULLIF(u.org_id,''),%s) AS o FROM volte_subscriptions vs JOIN users u ON u.id=vs.user_id WHERE vs.id IN ({ph}) "
+                        f"UNION SELECT ps.id, COALESCE(NULLIF(u.org_id,''),%s) FROM ptt_subscriptions ps JOIN users u ON u.id=ps.user_id WHERE ps.id IN ({ph})",
+                        tuple([UNSET] + all_active + [UNSET] + all_active))
+                    for r in cur.fetchall():
+                        m2o[r['m']] = r['o']
+    except Exception as e:
+        return HandlerResult(status=500, body={'error': str(e)})
+
+    for msisdn in av:
+        o = m2o.get(msisdn, UNSET)
+        orgs.setdefault(o, {'org': o, 'volte_num': 0, 'volte_reg': 0, 'ptt_num': 0, 'ptt_reg': 0, 'active_volte': 0, 'active_ptt': 0})
+        orgs[o]['active_volte'] += 1
+    for msisdn in ap:
+        o = m2o.get(msisdn, UNSET)
+        orgs.setdefault(o, {'org': o, 'volte_num': 0, 'volte_reg': 0, 'ptt_num': 0, 'ptt_reg': 0, 'active_volte': 0, 'active_ptt': 0})
+        orgs[o]['active_ptt'] += 1
+
+    out = []
+    for code, v in orgs.items():
+        v['name'] = name_by_key.get(code, code if code != UNSET else UNSET)
+        out.append(v)
+    out.sort(key=lambda x: (-(x['active_volte'] + x['active_ptt']), -(x['volte_reg'] + x['ptt_reg']), x['name']))
+    return HandlerResult(status=200, body={'orgs': out})
 
 
 CIMS_STATS_HANDLER_LIST = [

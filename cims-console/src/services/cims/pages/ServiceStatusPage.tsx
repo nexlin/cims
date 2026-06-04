@@ -4,10 +4,30 @@ import { useNavigate } from 'react-router-dom'
 import {
   statsApi, type Subscriber, type SubscribersResponse,
   type ServiceLive, type ServiceTrend, type Pool, type VolteCall, type PttGroup, type Anomaly,
+  type ServiceEvent, type OrgStat,
 } from '../../../api/stats'
 import { useToast } from '../../../components/Toast'
 
-type Tab = 'volte' | 'ptt' | 'subscribers'
+type Tab = 'volte' | 'ptt' | 'events' | 'org' | 'subscribers'
+
+// 고정(watch) — localStorage 영속
+function usePins(key: string): { pins: Set<string>; toggle: (id: string) => void } {
+  const [pins, setPins] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')) } catch { return new Set() }
+  })
+  const toggle = (id: string) => setPins(prev => {
+    const n = new Set(prev)
+    if (n.has(id)) n.delete(id); else n.add(id)
+    localStorage.setItem(key, JSON.stringify([...n]))
+    return n
+  })
+  return { pins, toggle }
+}
+
+function PinBtn({ on, onClick }: { on: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return <button className="btn btn--sm btn--ghost" title={on ? '고정 해제' : '고정'} onClick={onClick}
+    style={{ padding: '0 6px', opacity: on ? 1 : 0.35 }}>📌</button>
+}
 
 // ── 공통 유틸 ─────────────────────────────────────────────
 function fmtDur(sec: number): string {
@@ -142,18 +162,21 @@ function LiveHeader({ live, trend, onJump }: { live: ServiceLive | null; trend: 
 }
 
 // ── VoLTE 활성 호 ─────────────────────────────────────────
-function VolteCalls({ calls, now, onHistory }: { calls: VolteCall[]; now: number; onHistory: () => void }) {
+function VolteCalls({ calls, now, onHistory, pins, togglePin }: { calls: VolteCall[]; now: number; onHistory: () => void; pins: Set<string>; togglePin: (id: string) => void }) {
   if (calls.length === 0) return <div className="empty">현재 통화 중인 호가 없습니다</div>
+  const sorted = [...calls].sort((a, b) => (pins.has(b.call_id) ? 1 : 0) - (pins.has(a.call_id) ? 1 : 0))
   return (
     <div className="panel">
       <table className="data-table">
-        <thead><tr><th>상태</th><th>발신 → 착신</th><th>유형</th><th>경과</th><th>호 ID</th><th></th></tr></thead>
+        <thead><tr><th></th><th>상태</th><th>발신 → 착신</th><th>유형</th><th>경과</th><th>호 ID</th><th></th></tr></thead>
         <tbody>
-          {calls.map(c => {
+          {sorted.map(c => {
             const ring = c.state === 'ringing'
             const warn = c.anomalies.length > 0
+            const pinned = pins.has(c.call_id)
             return (
-              <tr key={c.call_id} style={warn ? { background: 'rgba(220,50,50,.06)' } : undefined}>
+              <tr key={c.call_id} style={pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : undefined}>
+                <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); togglePin(c.call_id) }} /></td>
                 <td><span className={`badge ${ring ? 'badge--blue' : 'badge--green'}`}>{ring ? '호출 중' : '통화 중'}</span>{warn && <span title={c.anomalies.map(a => a.detail).join(', ')}> ⚠</span>}</td>
                 <td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--text-muted)' }}>→</span> {c.callee || '-'}</td>
                 <td>{c.video ? '영상' : '음성'}</td>
@@ -170,21 +193,24 @@ function VolteCalls({ calls, now, onHistory }: { calls: VolteCall[]; now: number
 }
 
 // ── PTT 활성 그룹 (펼침: 멤버 + floor) ────────────────────
-function PttGroups({ groups, now, onHistory }: { groups: PttGroup[]; now: number; onHistory: () => void }) {
+function PttGroups({ groups, now, onHistory, pins, togglePin }: { groups: PttGroup[]; now: number; onHistory: () => void; pins: Set<string>; togglePin: (id: string) => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   if (groups.length === 0) return <div className="empty">현재 활성 그룹이 없습니다</div>
   const typeLabel = (t: string) => t === 'broadcast' ? 'broadcast' : t === 'chat' ? 'chat' : t === 'prearranged' ? 'prearranged' : (t || '-')
+  const sorted = [...groups].sort((a, b) => (pins.has(b.group_id) ? 1 : 0) - (pins.has(a.group_id) ? 1 : 0))
   return (
     <div className="panel">
       <table className="data-table">
-        <thead><tr><th>그룹</th><th>유형</th><th>참여</th><th>현재 화자</th><th>경과</th><th></th></tr></thead>
+        <thead><tr><th></th><th>그룹</th><th>유형</th><th>참여</th><th>현재 화자</th><th>경과</th><th></th></tr></thead>
         <tbody>
-          {groups.map(g => {
+          {sorted.map(g => {
             const isOpen = !!open[g.group_id]
             const warn = g.anomalies.length > 0
+            const pinned = pins.has(g.group_id)
             return (
               <Fragment key={g.group_id}>
-                <tr style={{ cursor: 'pointer', ...(warn ? { background: 'rgba(220,50,50,.06)' } : {}) }} onClick={() => setOpen(o => ({ ...o, [g.group_id]: !isOpen }))}>
+                <tr style={{ cursor: 'pointer', ...(pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : {}) }} onClick={() => setOpen(o => ({ ...o, [g.group_id]: !isOpen }))}>
+                  <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); togglePin(g.group_id) }} /></td>
                   <td><span style={{ color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></td>
                   <td><span className="badge">{typeLabel(g.type)}</span></td>
                   <td className="ts">{g.active_members} / {g.total_members}</td>
@@ -194,7 +220,7 @@ function PttGroups({ groups, now, onHistory }: { groups: PttGroup[]; now: number
                 </tr>
                 {isOpen && (
                   <tr>
-                    <td colSpan={6} style={{ background: 'var(--bg-subtle, rgba(0,0,0,.02))', fontSize: 12 }}>
+                    <td colSpan={7} style={{ background: 'var(--bg-subtle, rgba(0,0,0,.02))', fontSize: 12 }}>
                       <span style={{ color: 'var(--text-muted)' }}>참여자: </span>
                       {g.members.map((m, i) => (
                         <span key={i} style={{ marginRight: 10 }}>
@@ -302,6 +328,83 @@ function SubscriberLookup() {
   )
 }
 
+// ── ④ 라이브 이벤트 피드 ──────────────────────────────────
+const EV_ICON: Record<string, string> = {
+  call_start: '📞', call_end: '📵', floor_grant: '🎤', floor_release: '🔇',
+  floor_reject: '⛔', member_join: '➕', member_leave: '➖',
+}
+function EventFeed() {
+  const { show } = useToast()
+  const [events, setEvents] = useState<ServiceEvent[]>([])
+  const [loading, setLoading] = useState(true)
+  const load = useCallback(async () => {
+    try { setEvents((await statsApi.serviceEvents(80)).events) }
+    catch (e: unknown) { show(String(e), 'err') } finally { setLoading(false) }
+  }, [show])
+  useEffect(() => { load(); const iv = setInterval(load, 5000); return () => clearInterval(iv) }, [load])
+  if (loading) return <div className="empty">로딩 중...</div>
+  if (events.length === 0) return <div className="empty">최근 이벤트가 없습니다</div>
+  return (
+    <div className="panel">
+      <table className="data-table">
+        <thead><tr><th style={{ width: 96 }}>시각</th><th style={{ width: 70 }}>구분</th><th>이벤트</th></tr></thead>
+        <tbody>
+          {events.map((e, i) => (
+            <tr key={i}>
+              <td className="ts">{new Date(e.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
+              <td><span className={`badge ${e.kind === 'volte' ? 'badge--blue' : 'badge--green'}`}>{e.kind === 'volte' ? 'VoLTE' : 'PTT'}</span></td>
+              <td>{EV_ICON[e.type] || '•'} {e.detail}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ── ⑥ 조직별 집계 ─────────────────────────────────────────
+function RegBar({ reg, num }: { reg: number; num: number }) {
+  const pct = num > 0 ? Math.round((reg / num) * 100) : 0
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ width: 70, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: 'var(--success)' }} />
+      </div>
+      <span className="ts">{reg}/{num}</span>
+    </div>
+  )
+}
+function OrgStats() {
+  const { show } = useToast()
+  const [orgs, setOrgs] = useState<OrgStat[]>([])
+  const [loading, setLoading] = useState(true)
+  const load = useCallback(async () => {
+    try { setOrgs((await statsApi.serviceOrg()).orgs) }
+    catch (e: unknown) { show(String(e), 'err') } finally { setLoading(false) }
+  }, [show])
+  useEffect(() => { load(); const iv = setInterval(load, 5000); return () => clearInterval(iv) }, [load])
+  if (loading) return <div className="empty">로딩 중...</div>
+  if (orgs.length === 0) return <div className="empty">조직 정보가 없습니다</div>
+  return (
+    <div className="panel">
+      <table className="data-table">
+        <thead><tr><th>조직</th><th>VoLTE 등록</th><th>PTT 등록</th><th>이용 중(VoLTE)</th><th>이용 중(PTT)</th></tr></thead>
+        <tbody>
+          {orgs.map(o => (
+            <tr key={o.org}>
+              <td style={{ fontWeight: 600 }}>{o.name}</td>
+              <td><RegBar reg={o.volte_reg} num={o.volte_num} /></td>
+              <td><RegBar reg={o.ptt_reg} num={o.ptt_num} /></td>
+              <td>{o.active_volte > 0 ? <span className="badge badge--blue">{o.active_volte}</span> : <span className="ts">0</span>}</td>
+              <td>{o.active_ptt > 0 ? <span className="badge badge--green">{o.active_ptt}</span> : <span className="ts">0</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ── 메인 ──────────────────────────────────────────────────
 export default function ServiceStatusPage() {
   const { show } = useToast()
@@ -310,6 +413,8 @@ export default function ServiceStatusPage() {
   const [live, setLive] = useState<ServiceLive | null>(null)
   const [trend, setTrend] = useState<ServiceTrend | null>(null)
   const now = useNowTick()
+  const voltePins = usePins('svc.pins.volte')
+  const pttPins = usePins('svc.pins.ptt')
 
   const loadLive = useCallback(async () => {
     try {
@@ -334,12 +439,16 @@ export default function ServiceStatusPage() {
       <div className="toolbar" style={{ marginTop: 4 }}>
         {tabBtn('volte', 'VoLTE 호', live?.volte.kpi.active)}
         {tabBtn('ptt', 'PTT 그룹', live?.ptt.kpi.active_groups)}
+        {tabBtn('events', '라이브 이벤트')}
+        {tabBtn('org', '조직별')}
         {tabBtn('subscribers', '가입자 조회')}
         <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>
       </div>
 
-      {tab === 'volte' && <VolteCalls calls={live?.volte.calls ?? []} now={now} onHistory={() => gotoHistory('volte')} />}
-      {tab === 'ptt' && <PttGroups groups={live?.ptt.groups ?? []} now={now} onHistory={() => gotoHistory('ptt')} />}
+      {tab === 'volte' && <VolteCalls calls={live?.volte.calls ?? []} now={now} onHistory={() => gotoHistory('volte')} pins={voltePins.pins} togglePin={voltePins.toggle} />}
+      {tab === 'ptt' && <PttGroups groups={live?.ptt.groups ?? []} now={now} onHistory={() => gotoHistory('ptt')} pins={pttPins.pins} togglePin={pttPins.toggle} />}
+      {tab === 'events' && <EventFeed />}
+      {tab === 'org' && <OrgStats />}
       {tab === 'subscribers' && <SubscriberLookup />}
     </div>
   )
