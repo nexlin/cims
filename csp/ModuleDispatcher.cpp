@@ -564,6 +564,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
 
     int iStartPort = -1;
+    std::string strMediaNode;   // 이 호를 처리하는 미디어(CMP) 노드 relay IP — state 기록용
     std::string strCallId;
     CSipCallRoute clsRoute;
 
@@ -598,8 +599,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
         std::string strRelayIp = CspAddressing::GetLocalRtpAddress();
         std::string strAllocatedIp;
-        if ( gclsRtpMap.GetLocalIp( iStartPort, strAllocatedIp ) && !strAllocatedIp.empty() )
+        if ( gclsRtpMap.GetLocalIp( iStartPort, strAllocatedIp ) && !strAllocatedIp.empty() ) {
             strRelayIp = strAllocatedIp;
+            strMediaNode = strAllocatedIp;   // CMP 노드 relay IP = 처리 미디어 노드
+        }
         pclsRtp->SetIpPort( strRelayIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA );
     }
 
@@ -649,7 +652,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
     if ( gclsCallDir.IsEnabled() ) {
         bool bVideo = ( pclsRtp->GetMediaCount() >= 2 && pclsRtp->GetVideoPort() > 0 );
-        gclsCallDir.VoipCallStart( pszCallId, pszFrom, pszTo, bVideo );
+        gclsCallDir.VoipCallStart( pszCallId, pszFrom, pszTo, bVideo, strMediaNode );
         gclsCallDir.VoipAddParticipant( pszCallId, pszFrom, "caller" );
         gclsCallDir.VoipAddParticipant( pszCallId, pszTo, "callee" );
     }

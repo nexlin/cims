@@ -204,7 +204,7 @@ export function VolteCallsCard() {
   return (
     <div className="panel">
       <table className="data-table">
-        <thead><tr><th></th><th>상태</th><th>발신 → 착신</th><th>유형</th><th>경과</th><th>호 ID</th><th></th></tr></thead>
+        <thead><tr><th></th><th>상태</th><th>발신 → 착신</th><th>유형</th><th>경과</th><th>미디어 노드</th><th>호 ID</th><th></th></tr></thead>
         <tbody>
           {sorted.map((c: VolteCall) => {
             const ring = c.state === 'ringing', warn = c.anomalies.length > 0, pinned = pins.has(c.call_id)
@@ -215,6 +215,7 @@ export function VolteCallsCard() {
                 <td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--text-muted)' }}>→</span> {c.callee || '-'}</td>
                 <td>{c.video ? '영상' : '음성'}</td>
                 <td className="ts">{fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))}</td>
+                <td className="ts">{c.media_node || '-'}</td>
                 <td className="ts" title={c.call_id} style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.call_id}</td>
                 <td><button className="btn btn--sm btn--ghost" onClick={() => navigate('/service/history/volte')}>이력 ▸</button></td>
               </tr>
@@ -324,8 +325,11 @@ function RegBar({ reg, num }: { reg: number; num: number }) {
 }
 export function OrgStatsCard() {
   const { show } = useToast()
+  const live = useServiceLive()
+  const now = useNowTick()
   const [orgs, setOrgs] = useState<OrgStat[]>([])
   const [loading, setLoading] = useState(true)
+  const [sel, setSel] = useState<string | null>(null)
   const load = useCallback(async () => {
     try { setOrgs((await statsApi.serviceOrg()).orgs) }
     catch (e: unknown) { show(String(e), 'err') } finally { setLoading(false) }
@@ -333,14 +337,20 @@ export function OrgStatsCard() {
   useEffect(() => { load(); const iv = setInterval(load, 5000); return () => clearInterval(iv) }, [load])
   if (loading) return <div className="panel"><Loading /></div>
   if (orgs.length === 0) return <div className="empty">조직 정보가 없습니다</div>
+
+  const selOrg = orgs.find(o => o.org === sel) || null
+  const calls = (live?.volte.calls ?? []).filter(c => c.org === sel)
+  const groups = (live?.ptt.groups ?? []).filter(g => g.org === sel)
+
   return (
     <div className="panel">
       <table className="data-table">
         <thead><tr><th>조직</th><th>VoLTE 등록</th><th>PTT 등록</th><th>이용 중(VoLTE)</th><th>이용 중(PTT)</th></tr></thead>
         <tbody>
           {orgs.map(o => (
-            <tr key={o.org}>
-              <td style={{ fontWeight: 600 }}>{o.name}</td>
+            <tr key={o.org} onClick={() => setSel(sel === o.org ? null : o.org)}
+              style={{ cursor: 'pointer', ...(sel === o.org ? { background: 'rgba(80,120,255,.1)' } : {}) }}>
+              <td style={{ fontWeight: 600 }}>{sel === o.org ? '▾ ' : '▸ '}{o.name}</td>
               <td><RegBar reg={o.volte_reg} num={o.volte_num} /></td>
               <td><RegBar reg={o.ptt_reg} num={o.ptt_num} /></td>
               <td>{o.active_volte > 0 ? <span className="badge badge--blue">{o.active_volte}</span> : <span className="ts">0</span>}</td>
@@ -349,6 +359,28 @@ export function OrgStatsCard() {
           ))}
         </tbody>
       </table>
+
+      {selOrg && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', background: 'var(--bg-subtle, rgba(0,0,0,.02))' }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{selOrg.name} · 활성 서비스</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>VoLTE 활성 호 ({calls.length})</div>
+          {calls.length === 0 ? <div className="ts" style={{ marginBottom: 8 }}>없음</div>
+            : <div style={{ marginBottom: 10 }}>{calls.map(c => (
+                <div key={c.call_id} style={{ fontSize: 13, padding: '2px 0' }}>
+                  <span className={`badge ${c.state === 'ringing' ? 'badge--blue' : 'badge--green'}`}>{c.state === 'ringing' ? '호출' : '통화'}</span>
+                  {' '}<b>{c.caller}</b> → {c.callee} <span className="ts">· {c.video ? '영상' : '음성'} · {fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))} · {c.media_node || '-'}</span>
+                </div>
+              ))}</div>}
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>PTT 활성 그룹 ({groups.length})</div>
+          {groups.length === 0 ? <div className="ts">없음</div>
+            : groups.map(g => (
+                <div key={g.group_id} style={{ fontSize: 13, padding: '2px 0' }}>
+                  <span className="badge badge--green">{g.name}</span>
+                  <span className="ts"> · {g.active_members}/{g.total_members}명 · {g.floor_holder ? `🎤 ${g.floor_holder}` : '발언자 없음'} · {fmtDur(elapsedSec(g.invite_time, now, g.duration_sec))}</span>
+                </div>
+              ))}
+        </div>
+      )}
     </div>
   )
 }

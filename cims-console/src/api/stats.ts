@@ -144,6 +144,7 @@ export interface VolteCall {
   call_id: string; session_id: string; caller: string; callee: string
   state: string; video: boolean; invite_time: string | null; answered_at: string | null
   duration_sec: number; anomalies: LiveAnomalyTag[]
+  media_node?: string; org?: string
 }
 export interface PttGroupMember { subscriber_id: string; role: string }
 export interface PttGroup {
@@ -151,7 +152,7 @@ export interface PttGroup {
   total_members: number; active_members: number
   floor_holder: string | null; initiator: string | null
   invite_time: string | null; duration_sec: number; floor_held_sec?: number
-  members: PttGroupMember[]; anomalies: LiveAnomalyTag[]
+  members: PttGroupMember[]; anomalies: LiveAnomalyTag[]; org?: string
 }
 export interface Anomaly { kind: string; type: string; detail: string; label: string; ref: string }
 export interface MediaNode { host: string; up: boolean; volte_rtp: Pool; ptt_rtp: Pool; groups: number }

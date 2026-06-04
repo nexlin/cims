@@ -1009,8 +1009,11 @@ async def _service_live(config: dict) -> HandlerResult:
             'call_id': cid, 'session_id': st.get('session_id', ''),
             'state': st.get('state'), 'video': bool(st.get('video', False)),
             'invite_time': st.get('started_at'), 'answered_at': st.get('answered_at'),
+            'media_node': st.get('media_node', ''), 'org': '',
             'caller': '', 'callee': '',
         })
+        if st.get('media_node') and not e.get('media_node'):
+            e['media_node'] = st['media_node']
         role = st.get('role', '')
         sub = st.get('subscriber_id', '')
         if role == 'caller':
@@ -1068,23 +1071,42 @@ async def _service_live(config: dict) -> HandlerResult:
             if gg and gd.get('floor_holder'):
                 floor_holder[gg] = gd['floor_holder']
 
-    # DB: 그룹 메타(이름/타입/총멤버/surrogate id)
+    # DB: 그룹 메타(이름/타입/총멤버/surrogate id/org) + 활성 가입자 org 매핑(조직별 필터용)
     gmeta = {}
-    if groups:
+    m2o = {}   # msisdn → org_id (활성 가입자만)
+    active_msisdns = ({st.get('subscriber_id') for st in volte_states if st.get('subscriber_id')}
+                      | {st.get('subscriber_id') for st in ptt_states if st.get('subscriber_id')})
+    if groups or active_msisdns:
         try:
             with _get_db(config) as conn:
                 with conn.cursor() as cur:
-                    ph = ','.join(['%s'] * len(groups))
-                    cur.execute(
-                        f"SELECT g.id, g.mcptt_group_id AS gid, g.name, g.group_type, "
-                        f"(SELECT COUNT(*) FROM ptt_group_members m WHERE m.group_id = g.id) AS total "
-                        f"FROM ptt_groups g WHERE g.mcptt_group_id IN ({ph})",
-                        tuple(groups.keys()),
-                    )
-                    for r in cur.fetchall():
-                        gmeta[r['gid']] = r
+                    if groups:
+                        ph = ','.join(['%s'] * len(groups))
+                        cur.execute(
+                            f"SELECT g.id, g.mcptt_group_id AS gid, g.name, g.group_type, g.org_code, "
+                            f"(SELECT COUNT(*) FROM ptt_group_members m WHERE m.group_id = g.id) AS total "
+                            f"FROM ptt_groups g WHERE g.mcptt_group_id IN ({ph})",
+                            tuple(groups.keys()),
+                        )
+                        for r in cur.fetchall():
+                            gmeta[r['gid']] = r
+                    if active_msisdns:
+                        ids = list(active_msisdns)
+                        ph = ','.join(['%s'] * len(ids))
+                        cur.execute(
+                            f"SELECT vs.id AS m, COALESCE(NULLIF(u.org_id,''),'') AS o FROM volte_subscriptions vs JOIN users u ON u.id=vs.user_id WHERE vs.id IN ({ph}) "
+                            f"UNION SELECT ps.id, COALESCE(NULLIF(u.org_id,''),'') FROM ptt_subscriptions ps JOIN users u ON u.id=ps.user_id WHERE ps.id IN ({ph})",
+                            tuple(ids + ids),
+                        )
+                        for r in cur.fetchall():
+                            if r['o']:
+                                m2o[r['m']] = r['o']
         except Exception:
             pass
+
+    # 활성 호 org 태깅(발신자 기준)
+    for c in volte_calls:
+        c['org'] = m2o.get(c.get('caller'), '')
 
     ptt_groups_out = []
     talking = 0
@@ -1095,6 +1117,7 @@ async def _service_live(config: dict) -> HandlerResult:
         meta = gmeta.get(gid, {})
         g['name'] = meta.get('name') or gid
         g['type'] = meta.get('group_type') or ''
+        g['org'] = (meta.get('org_code') or m2o.get(g.get('initiator'), '') or '')
         g['total_members'] = int(meta.get('total') or len(g['members']))
         g['active_members'] = len(g['members'])
         g['floor_holder'] = floor_holder.get(gid)

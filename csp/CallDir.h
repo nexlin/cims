@@ -143,7 +143,7 @@ public:
     }
 
     void VoipCallStart( const std::string &strCallId, const std::string &strCaller, const std::string &strCallee,
-                        bool bVideo = false ) {
+                        bool bVideo = false, const std::string &strMediaNode = "" ) {
         std::lock_guard<std::mutex> lock( m_mtx );
         std::string dir = _dir( strCallId );
         if ( dir.empty() ) return;
@@ -166,8 +166,8 @@ public:
 
         // 가입자별 실시간 상태 파일 — 발/착신 각각
         std::string sessId = _sessionIdByCallId( strCallId );
-        _writeVoipState( strCaller, strCallId, sessId, strCallee, "caller", "ringing", ts, dir, bVideo );
-        _writeVoipState( strCallee, strCallId, sessId, strCaller, "callee", "ringing", ts, dir, bVideo );
+        _writeVoipState( strCaller, strCallId, sessId, strCallee, "caller", "ringing", ts, dir, bVideo, strMediaNode );
+        _writeVoipState( strCallee, strCallId, sessId, strCaller, "callee", "ringing", ts, dir, bVideo, strMediaNode );
     }
 
     void VoipCallAnswer( const std::string &strCallId ) {
@@ -631,12 +631,13 @@ private:
 
     void _writeVoipState( const std::string &subId, const std::string &callId, const std::string &sessionId,
                           const std::string &peerId, const std::string &role, const std::string &state, const char *ts,
-                          const std::string &recordDir, bool bVideo ) {
+                          const std::string &recordDir, bool bVideo, const std::string &mediaNode = "" ) {
         if ( m_strCallsDir.empty() || subId.empty() ) return;
         std::string body = std::string( "{\"kind\":\"volte\"" ) + ",\"subscriber_id\":\"" + Esc( subId ) + "\"" +
                            ",\"session_id\":\"" + Esc( sessionId ) + "\"" + ",\"call_id\":\"" + Esc( callId ) + "\"" +
                            ",\"peer_id\":\"" + Esc( peerId ) + "\"" + ",\"role\":\"" + Esc( role ) + "\"" +
                            ",\"state\":\"" + Esc( state ) + "\"" + ",\"video\":" + ( bVideo ? "true" : "false" ) +
+                           ",\"media_node\":\"" + Esc( mediaNode ) + "\"" +
                            ",\"started_at\":\"" + ts + "\"" + ",\"answered_at\":null" + ",\"record_dir\":\"" +
                            Esc( recordDir ) + "\"}\n";
         _atomicWrite( _stateFilePath( "volte", subId ), body );
