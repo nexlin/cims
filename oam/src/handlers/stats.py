@@ -203,6 +203,10 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
         if parts[0] == 'service':
             svc = parts[1] if len(parts) > 1 else 'summary'
+            if svc == 'live':
+                return await _service_live(config)
+            if svc == 'trend':
+                return await _service_trend(config, qp('window', '30'))
             gran = qp('granularity', '1d')
             from_dt = qp('from')
             to_dt = qp('to')
@@ -886,6 +890,266 @@ async def _subscribers_status(config: dict, status: str = 'active',
         'status': status,
         'counts': counts,
         'subscribers': subscribers,
+    })
+
+
+# ──────────────────────────────────────────────────────────────
+#  서비스 라이브 모니터링 (VoLTE 호 / PTT 그룹 중심 + KPI/용량/이상)
+# ──────────────────────────────────────────────────────────────
+
+def _parse_iso(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace('Z', '').split('+')[0])
+    except Exception:
+        return None
+
+
+# 동시 사용량 추세 — live 폴링 시점마다 현재값을 분 단위 버킷에 기록(롤링).
+#   {minute_epoch: {'volte':n,'ringing':n,'ptt':n,'talking':n}}  (최근 ~12시간 유지)
+_TREND_SAMPLES: dict = {}
+_TREND_MAX_MIN = 720
+
+
+def _trend_record(now: datetime, volte: int, ringing: int, ptt: int, talking: int):
+    minute = int(now.timestamp()) // 60
+    cur = _TREND_SAMPLES.get(minute)
+    if cur is None:
+        _TREND_SAMPLES[minute] = {'volte': volte, 'ringing': ringing, 'ptt': ptt, 'talking': talking}
+    else:
+        # 같은 분 내 여러 폴링 → 피크 유지
+        cur['volte'] = max(cur['volte'], volte)
+        cur['ringing'] = max(cur['ringing'], ringing)
+        cur['ptt'] = max(cur['ptt'], ptt)
+        cur['talking'] = max(cur['talking'], talking)
+    if len(_TREND_SAMPLES) > _TREND_MAX_MIN + 60:
+        cutoff = minute - _TREND_MAX_MIN
+        for k in [k for k in _TREND_SAMPLES if k < cutoff]:
+            _TREND_SAMPLES.pop(k, None)
+
+
+def _floor_held_secs(config: dict, surrogate_id, holder: str, now: datetime):
+    """그룹의 현재 시간버킷 floor.jsonl 에서 holder 에게 마지막 GRANT 된 시각 → 점유 경과(초).
+       경로: {ServiceLogDir}/ptt/{surrogate_id}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl"""
+    base = _service_log_dir(config)
+    if not base or surrogate_id is None or not holder:
+        return None
+    fpath = os.path.join(base, 'ptt', str(surrogate_id),
+                         f'{now.year:04d}', f'{now.month:02d}', f'{now.day:02d}',
+                         f'{now.hour:02d}', 'floor.jsonl')
+    last_grant = None
+    try:
+        with open(fpath, 'r') as f:
+            for line in f:
+                try:
+                    ev = json.loads(line)
+                except Exception:
+                    continue
+                if ev.get('op') in ('GRANT', 'TAKEN') and ev.get('user') == holder:
+                    last_grant = ev.get('ts')
+    except Exception:
+        return None
+    g = _parse_iso(last_grant)
+    if not g:
+        return None
+    return max(0, int((now - g).total_seconds()))
+
+
+_RINGING_ANOMALY_SEC = 30
+_FLOOR_MONOPOLY_SEC = 60
+
+
+async def _service_live(config: dict) -> HandlerResult:
+    """VoLTE 호 / PTT 그룹 중심 실시간 모니터링 스냅샷 + KPI/용량/이상징후."""
+    now = datetime.now()
+    volte_states = _load_active_states(config, 'volte')
+    ptt_states = _load_active_states(config, 'ptt')
+    cmp_stats = _get_cmp_stats(config) or {}
+    counts = _get_dashboard_counts(config)
+
+    # ── VoLTE: call_id 기준 dedup (caller+callee 2파일 → 1호) ──
+    calls = {}
+    for st in volte_states:
+        cid = st.get('call_id', '')
+        if not cid:
+            continue
+        e = calls.setdefault(cid, {
+            'call_id': cid, 'session_id': st.get('session_id', ''),
+            'state': st.get('state'), 'video': bool(st.get('video', False)),
+            'invite_time': st.get('started_at'), 'answered_at': st.get('answered_at'),
+            'caller': '', 'callee': '',
+        })
+        role = st.get('role', '')
+        sub = st.get('subscriber_id', '')
+        if role == 'caller':
+            e['caller'] = sub
+            if not e['callee']:
+                e['callee'] = st.get('peer_id', '')
+        elif role == 'callee':
+            e['callee'] = sub
+            if not e['caller']:
+                e['caller'] = st.get('peer_id', '')
+        if st.get('answered_at') and not e.get('answered_at'):
+            e['answered_at'] = st.get('answered_at')
+
+    volte_calls = []
+    ringing = 0
+    durations = []
+    for e in calls.values():
+        inv = _parse_iso(e['invite_time'])
+        e['duration_sec'] = max(0, int((now - inv).total_seconds())) if inv else 0
+        anomalies = []
+        if e['state'] == 'ringing':
+            ringing += 1
+            if e['duration_sec'] > _RINGING_ANOMALY_SEC:
+                anomalies.append({'type': 'long_ringing',
+                                  'detail': f"호출 {e['duration_sec']}초 무응답"})
+        else:
+            durations.append(e['duration_sec'])
+        e['anomalies'] = anomalies
+        volte_calls.append(e)
+    volte_calls.sort(key=lambda x: x.get('invite_time') or '')
+    active_volte = sum(1 for c in volte_calls if c['state'] != 'ringing')
+    avg_dur = int(sum(durations) / len(durations)) if durations else 0
+
+    # ── PTT: group_id 별 집계 ──
+    groups = {}
+    for st in ptt_states:
+        gid = st.get('group_id', '')
+        if not gid:
+            continue
+        g = groups.setdefault(gid, {
+            'group_id': gid, 'session_id': st.get('session_id', ''),
+            'invite_time': st.get('started_at'), 'members': [], 'initiator': None,
+        })
+        sub = st.get('subscriber_id', '')
+        role = st.get('role', 'member')
+        if role == 'initiator':
+            g['initiator'] = sub
+        g['members'].append({'subscriber_id': sub, 'role': role})
+
+    # CMP floor holder
+    floor_holder = {}
+    for gd in (cmp_stats.get('group_details') or []):
+        gg = gd.get('group_id', '')
+        if gg and gd.get('floor_holder'):
+            floor_holder[gg] = gd['floor_holder']
+
+    # DB: 그룹 메타(이름/타입/총멤버/surrogate id)
+    gmeta = {}
+    if groups:
+        try:
+            with _get_db(config) as conn:
+                with conn.cursor() as cur:
+                    ph = ','.join(['%s'] * len(groups))
+                    cur.execute(
+                        f"SELECT g.id, g.mcptt_group_id AS gid, g.name, g.group_type, "
+                        f"(SELECT COUNT(*) FROM ptt_group_members m WHERE m.group_id = g.id) AS total "
+                        f"FROM ptt_groups g WHERE g.mcptt_group_id IN ({ph})",
+                        tuple(groups.keys()),
+                    )
+                    for r in cur.fetchall():
+                        gmeta[r['gid']] = r
+        except Exception:
+            pass
+
+    ptt_groups_out = []
+    talking = 0
+    participants = 0
+    for gid, g in groups.items():
+        inv = _parse_iso(g['invite_time'])
+        g['duration_sec'] = max(0, int((now - inv).total_seconds())) if inv else 0
+        meta = gmeta.get(gid, {})
+        g['name'] = meta.get('name') or gid
+        g['type'] = meta.get('group_type') or ''
+        g['total_members'] = int(meta.get('total') or len(g['members']))
+        g['active_members'] = len(g['members'])
+        g['floor_holder'] = floor_holder.get(gid)
+        participants += g['active_members']
+        anomalies = []
+        if g['floor_holder']:
+            talking += 1
+            held = _floor_held_secs(config, meta.get('id'), g['floor_holder'], now)
+            if held is not None and held > _FLOOR_MONOPOLY_SEC:
+                anomalies.append({'type': 'floor_monopoly',
+                                  'detail': f"Floor {held}초 점유"})
+                g['floor_held_sec'] = held
+        g['anomalies'] = anomalies
+        ptt_groups_out.append(g)
+    ptt_groups_out.sort(key=lambda x: x.get('invite_time') or '')
+
+    # ── 용량 (CMP RTP 풀; floor 풀은 미제공 → 발언중 count 로 대체) ──
+    capacity = {
+        'volte_rtp': {'total': cmp_stats.get('rtp_ports_total', 0),
+                      'used': cmp_stats.get('rtp_ports_used', 0),
+                      'free': cmp_stats.get('rtp_ports_free', 0)},
+        'ptt_rtp': {'total': cmp_stats.get('ptt_rtp_ports_total', 0),
+                    'used': cmp_stats.get('ptt_rtp_ports_used', 0),
+                    'free': cmp_stats.get('ptt_rtp_ports_free', 0)},
+    }
+
+    # ── 이상 징후 집계 ──
+    anomalies_all = []
+    for c in volte_calls:
+        for a in c['anomalies']:
+            anomalies_all.append({'kind': 'volte', 'type': a['type'], 'detail': a['detail'],
+                                  'label': f"{c['caller']} → {c['callee']}", 'ref': c['call_id']})
+    for g in ptt_groups_out:
+        for a in g['anomalies']:
+            anomalies_all.append({'kind': 'ptt', 'type': a['type'], 'detail': a['detail'],
+                                  'label': f"{g['name']} / {g['floor_holder']}", 'ref': g['group_id']})
+
+    # 추세 표본 기록
+    _trend_record(now, active_volte, ringing, len(ptt_groups_out), talking)
+
+    return HandlerResult(status=200, body={
+        'ts': now.isoformat(timespec='seconds'),
+        'volte': {
+            'kpi': {'active': active_volte, 'ringing': ringing, 'avg_duration_sec': avg_dur,
+                    'registered': counts.get('volte_registered', 0),
+                    'numbers': counts.get('volte_numbers', 0)},
+            'calls': volte_calls,
+        },
+        'ptt': {
+            'kpi': {'active_groups': len(ptt_groups_out), 'talking': talking,
+                    'participants': participants,
+                    'registered': counts.get('ptt_registered', 0),
+                    'numbers': counts.get('ptt_numbers', 0)},
+            'groups': ptt_groups_out,
+        },
+        'capacity': capacity,
+        'anomalies': anomalies_all,
+    })
+
+
+async def _service_trend(config: dict, window='30') -> HandlerResult:
+    """동시 사용량 추세 — 최근 window 분(기본 30)의 분 단위 동시호/활성그룹 표본.
+       표본은 _service_live 폴링 시점마다 누적(롤링). 미관측 분은 0."""
+    try:
+        window = max(5, min(int(window), _TREND_MAX_MIN))
+    except (TypeError, ValueError):
+        window = 30
+    now_min = int(datetime.now().timestamp()) // 60
+    points = []
+    for m in range(now_min - window + 1, now_min + 1):
+        s = _TREND_SAMPLES.get(m)
+        points.append({
+            't': m * 60,
+            'volte': (s['volte'] if s else 0),
+            'ringing': (s['ringing'] if s else 0),
+            'ptt': (s['ptt'] if s else 0),
+            'talking': (s['talking'] if s else 0),
+        })
+    vmax = max((p['volte'] for p in points), default=0)
+    pmax = max((p['ptt'] for p in points), default=0)
+    return HandlerResult(status=200, body={
+        'window_min': window,
+        'points': points,
+        'volte_now': points[-1]['volte'] if points else 0,
+        'volte_peak': vmax,
+        'ptt_now': points[-1]['ptt'] if points else 0,
+        'ptt_peak': pmax,
     })
 
 

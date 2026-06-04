@@ -137,6 +137,36 @@ export interface SubscribersQuery {
   limit?: number
 }
 
+// ── 서비스 라이브 모니터링 ──
+export interface Pool { total: number; used: number; free: number }
+export interface LiveAnomalyTag { type: string; detail: string }
+export interface VolteCall {
+  call_id: string; session_id: string; caller: string; callee: string
+  state: string; video: boolean; invite_time: string | null; answered_at: string | null
+  duration_sec: number; anomalies: LiveAnomalyTag[]
+}
+export interface PttGroupMember { subscriber_id: string; role: string }
+export interface PttGroup {
+  group_id: string; session_id: string; name: string; type: string
+  total_members: number; active_members: number
+  floor_holder: string | null; initiator: string | null
+  invite_time: string | null; duration_sec: number; floor_held_sec?: number
+  members: PttGroupMember[]; anomalies: LiveAnomalyTag[]
+}
+export interface Anomaly { kind: string; type: string; detail: string; label: string; ref: string }
+export interface ServiceLive {
+  ts: string
+  volte: { kpi: { active: number; ringing: number; avg_duration_sec: number; registered: number; numbers: number }; calls: VolteCall[] }
+  ptt: { kpi: { active_groups: number; talking: number; participants: number; registered: number; numbers: number }; groups: PttGroup[] }
+  capacity: { volte_rtp: Pool; ptt_rtp: Pool }
+  anomalies: Anomaly[]
+}
+export interface TrendPoint { t: number; volte: number; ringing: number; ptt: number; talking: number }
+export interface ServiceTrend {
+  window_min: number; points: TrendPoint[]
+  volte_now: number; volte_peak: number; ptt_now: number; ptt_peak: number
+}
+
 export const statsApi = {
   health: () => api.get<HealthResponse>('/stats/health'),
 
@@ -149,6 +179,9 @@ export const statsApi = {
     const qs = sp.toString()
     return api.get<SubscribersResponse>('/stats/subscribers' + (qs ? `?${qs}` : ''))
   },
+
+  serviceLive: () => api.get<ServiceLive>('/stats/service/live'),
+  serviceTrend: (windowMin = 30) => api.get<ServiceTrend>(`/stats/service/trend?window=${windowMin}`),
 
   messages: (params: { date?: string; granularity?: string; proto?: string }) => {
     const p = new URLSearchParams()
