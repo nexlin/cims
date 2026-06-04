@@ -1,30 +1,30 @@
 import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react'
 import { callsApi, type CallLog } from '../../../api/calls'
 import { recordingsApi, type RecordingSegment } from '../../../api/recordings'
+import { flowApi, type FlowMessage } from '../../../api/flow'
 import FlowPage from '../../../pages/FlowPage'
 import SegmentPlayer from '../../../components/SegmentPlayer'
-import { useInlineAudio, type InlineAudio } from '../../../components/useInlineAudio'
 import { useToast } from '../../../components/Toast'
 
 function fmtDur(s: number | null) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); return m > 0 ? `${m}분 ${s % 60}초` : `${s}초` }
-function fmtMs(ms: number | null | undefined) {
-  if (!ms || ms <= 0) return '—'
-  const total = Math.round(ms / 1000); const m = Math.floor(total / 60); const s = total % 60
-  return m > 0 ? `${m}분 ${s}초` : `${s}초`
-}
-// ISO → HH:MM:SS
+// ISO/HH:MM:SS → HH:MM:SS(.ms)
 function fmtClock(iso: string | null | undefined) {
   if (!iso) return '—'
   const s = iso.replace('T', ' '); const i = s.indexOf(' ')
-  return i >= 0 ? s.substring(i + 1, i + 9) : s.substring(0, 8)
+  return i >= 0 ? s.substring(i + 1, i + 12) : s.substring(0, 12)
 }
 function tms(iso: string | null | undefined): number { const n = Date.parse(iso || ''); return Number.isFinite(n) ? n : 0 }
 // 파일기반 로그는 id 가 null 일 수 있음 → 고유키
 const callKey = (l: CallLog) => l.call_id || l.dir_name || String(l.id)
 
-// 발신/착신 2색
 const CALLER_C = '#2563eb', CALLEE_C = '#16a34a'
-const partyColor = (l: CallLog, msisdn: string) => (msisdn === l.callee ? CALLEE_C : CALLER_C)
+
+// 노드/proto 표시
+const ACTOR_LABEL: Record<string, string> = { ue: 'UE', ue_o: 'UEᴼ', ue_t: 'UEᵀ', cwrtc: 'CWRTC', csc: 'CSC', csp: 'CSP', cmp: 'CMP' }
+const actorLbl = (a: string) => ACTOR_LABEL[a] || (a ? a.toUpperCase() : '—')
+const PROTO_COLOR: Record<string, string> = { SIP: '#2563eb', JSON: '#d97706', CSC: '#9333ea', RTP: '#16a34a', INT: '#0891b2', MCPTT: '#db2777' }
+const protoColor = (p: string) => PROTO_COLOR[p] || 'var(--text-muted)'
+const nodeOf = (m: FlowMessage) => (m.node || m.iface || '').replace(/_\d+$/, '')
 
 function callState(s: string) {
   return s === 'ended' ? { label: '종료', cls: 'badge--gray' }
@@ -33,11 +33,10 @@ function callState(s: string) {
     : { label: s || '—', cls: 'badge--gray' }
 }
 
-interface CallDetailState { segments: RecordingSegment[]; loading: boolean; loaded: boolean }
+interface CallFlowState { messages: FlowMessage[]; loading: boolean; loaded: boolean }
 
 export default function VolteHistoryPage() {
   const { show } = useToast()
-  const audio = useInlineAudio(useCallback((m: string) => show(m, 'err'), [show]))
 
   const [logs, setLogs] = useState<CallLog[]>([])
   const [total, setTotal] = useState(0)
@@ -49,9 +48,9 @@ export default function VolteHistoryPage() {
   const [autoRefresh, setAR] = useState(false)
 
   const [openHours, setOpenHours] = useState<Set<string>>(new Set())
-  // 파일기반 call 로그는 id 가 null 일 수 있어 고유키로 call_id(폴백 dir_name) 사용
   const [expandedCall, setExpandedCall] = useState<string | null>(null)
-  const [callDetail, setCallDetail] = useState<Map<string, CallDetailState>>(new Map())
+  // call_id(고유키) → 메시지 이력(flow)
+  const [flowByCall, setFlowByCall] = useState<Map<string, CallFlowState>>(new Map())
 
   const [flow, setFlow] = useState<{ callId: string; date: string; callType?: 'volte' | 'ptt' } | null>(null)
   const [recPlayer, setRecPlayer] = useState<{ id: string; segments: RecordingSegment[]; callType: 'volte' | 'ptt' | 'volte_video'; caller: string; callee: string } | null>(null)
@@ -78,7 +77,6 @@ export default function VolteHistoryPage() {
     return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]))   // 최신 시간대 먼저
   }, [logs])
 
-  // 로드/페이지 변경 시 최신 시간대 자동 펼침
   useEffect(() => {
     if (hourGroups.length > 0) setOpenHours(new Set([hourGroups[0][0]]))
     setExpandedCall(null)
@@ -88,24 +86,29 @@ export default function VolteHistoryPage() {
     const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n
   })
 
-  const loadCallDetail = useCallback(async (dirName: string) => {
-    if (callDetail.get(dirName)?.loaded) return
-    setCallDetail(prev => { const m = new Map(prev); m.set(dirName, { segments: [], loading: true, loaded: false }); return m })
+  // ── 호의 메시지 이력(flow) lazy 로드 ──
+  const loadCallFlow = useCallback(async (l: CallLog) => {
+    const key = callKey(l)
+    if (flowByCall.get(key)?.loaded) return
+    setFlowByCall(prev => { const m = new Map(prev); m.set(key, { messages: [], loading: true, loaded: false }); return m })
     try {
-      const rec = await recordingsApi.get(dirName)
-      setCallDetail(prev => { const m = new Map(prev); m.set(dirName, { segments: rec.segments || [], loading: false, loaded: true }); return m })
+      const date = l.invite_time?.substring(0, 10) || undefined
+      const r = await flowApi.get(l.call_id, date, 'volte')
+      const msgs: FlowMessage[] = r.nodes
+        ? Object.values(r.nodes).flat()
+        : (r.messages || [])
+      msgs.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
+      setFlowByCall(prev => { const m = new Map(prev); m.set(key, { messages: msgs, loading: false, loaded: true }); return m })
     } catch {
-      setCallDetail(prev => { const m = new Map(prev); m.set(dirName, { segments: [], loading: false, loaded: true }); return m })
+      setFlowByCall(prev => { const m = new Map(prev); m.set(key, { messages: [], loading: false, loaded: true }); return m })
     }
-  }, [callDetail])
+  }, [flowByCall])
 
   const toggleCall = (l: CallLog) => {
-    audio.stop()
-    const key = callKey(l)
     setExpandedCall(prev => {
-      if (prev === key) return null
-      if (l.dir_name) loadCallDetail(l.dir_name)
-      return key
+      if (prev === callKey(l)) return null
+      loadCallFlow(l)
+      return callKey(l)
     })
   }
 
@@ -145,7 +148,6 @@ export default function VolteHistoryPage() {
                 const recCnt = calls.filter(c => c.has_recording).length
                 return (
                   <div key={hourKey} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-                    {/* ── 시간대 그룹 헤더 ── */}
                     <div onClick={() => toggleHour(hourKey)}
                       style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer', background: 'var(--surface-alt, #f7f9fc)', fontWeight: 600 }}>
                       <span style={{ color: 'var(--text-muted)' }}>{open ? '▾' : '▸'}</span>
@@ -154,7 +156,6 @@ export default function VolteHistoryPage() {
                       {recCnt > 0 && <span className="ts" style={{ color: 'var(--text-muted)' }}>녹취 {recCnt}</span>}
                     </div>
 
-                    {/* ── 시간대 내 호 목록 ── */}
                     {open && (
                       <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                         <thead>
@@ -176,10 +177,10 @@ export default function VolteHistoryPage() {
                             const dur = l.answer_time && l.end_time
                               ? Math.max(0, Math.floor((tms(l.end_time) - tms(l.answer_time)) / 1000))
                               : l.duration
-                            const detail = l.dir_name ? callDetail.get(l.dir_name) : undefined
+                            const cf = flowByCall.get(callKey(l))
                             return (
                               <CallRow
-                                key={callKey(l)} l={l} isOpen={isOpen} st={st} dur={dur} detail={detail} audio={audio}
+                                key={callKey(l)} l={l} isOpen={isOpen} st={st} dur={dur} flow={cf}
                                 onToggle={() => toggleCall(l)} onFlow={() => openFlow(l)} onPlayAll={() => openRecording(l)}
                               />
                             )
@@ -199,8 +200,6 @@ export default function VolteHistoryPage() {
         <button className="btn btn--sm btn--outline" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음 →</button>
       </div>}
 
-      {audio.node}
-
       {recPlayer && (
         <div className="modal-overlay" onClick={() => setRecPlayer(null)}>
           <div className="modal-box" style={{ maxWidth: 1360, width: '95vw' }} onClick={e => e.stopPropagation()}>
@@ -215,17 +214,16 @@ export default function VolteHistoryPage() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 호 단위 accordion 행 (헤더 + 펼침 타임라인)
+// 호 단위 accordion 행 (헤더 + 펼침: 메시지 이력)
 // ════════════════════════════════════════════════════════════════
 const tdS: CSSProperties = { padding: '6px 10px', whiteSpace: 'nowrap' }
 
-function CallRow({ l, isOpen, st, dur, detail, audio, onToggle, onFlow, onPlayAll }: {
+function CallRow({ l, isOpen, st, dur, flow, onToggle, onFlow, onPlayAll }: {
   l: CallLog
   isOpen: boolean
   st: { label: string; cls: string }
   dur: number | null
-  detail: CallDetailState | undefined
-  audio: InlineAudio
+  flow: CallFlowState | undefined
   onToggle: () => void
   onFlow: () => void
   onPlayAll: () => void
@@ -252,8 +250,8 @@ function CallRow({ l, isOpen, st, dur, detail, audio, onToggle, onFlow, onPlayAl
       {isOpen && (
         <tr>
           <td colSpan={8} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
-            <div style={{ padding: '12px 16px' }}>
-              <CallTimeline l={l} detail={detail} audio={audio} />
+            <div style={{ padding: '10px 16px' }}>
+              <CallMessages flow={flow} onOpenFlow={onFlow} />
             </div>
           </td>
         </tr>
@@ -262,95 +260,49 @@ function CallRow({ l, isOpen, st, dur, detail, audio, onToggle, onFlow, onPlayAl
   )
 }
 
-// 호 단위 통합 타임라인: 발신→호출/응답→종료 시그널링 + 발화 세그먼트(인라인 재생)
-type CTItem =
-  | { t: number; kind: 'sig'; iso: string; label: string; color: string; sub?: string }
-  | { t: number; kind: 'seg'; seg: RecordingSegment }
+// 호 펼침 = 메시지 이력 리스트 (Flow 의 메시지 목록과 동일 데이터)
+function CallMessages({ flow, onOpenFlow }: { flow: CallFlowState | undefined; onOpenFlow: () => void }) {
+  if (!flow || flow.loading) return <div className="empty" style={{ padding: 10 }}>메시지 이력 로딩 중...</div>
+  if (flow.messages.length === 0) return <div className="ts" style={{ color: 'var(--text-muted)', padding: 6 }}>메시지 이력 없음</div>
 
-function CallTimeline({ l, detail, audio }: { l: CallLog; detail: CallDetailState | undefined; audio: InlineAudio }) {
-  const recId = l.dir_name || null
-
-  const items = useMemo<CTItem[]>(() => {
-    const out: CTItem[] = []
-    if (l.invite_time) out.push({ t: tms(l.invite_time), kind: 'sig', iso: l.invite_time, label: '발신 (INVITE)', color: CALLER_C, sub: `${l.initiator} → ${l.callee || '—'}` })
-    if (l.answer_time) out.push({ t: tms(l.answer_time), kind: 'sig', iso: l.answer_time, label: '응답 (200 OK)', color: '#16a34a' })
-    for (const seg of (detail?.segments || [])) out.push({ t: tms(seg.start_time), kind: 'seg', seg })
-    if (l.end_time) {
-      const reason = l.end_reason_ko || l.end_reason || ''
-      out.push({ t: tms(l.end_time), kind: 'sig', iso: l.end_time, label: '종료 (BYE)', color: '#9333ea', sub: [reason, l.sip_status ? `SIP ${l.sip_status}` : ''].filter(Boolean).join(' · ') })
-    }
-    out.sort((a, b) => a.t - b.t)
-    return out
-  }, [l, detail?.segments])
-
+  const hS: CSSProperties = { padding: '4px 8px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'left', whiteSpace: 'nowrap', fontSize: 11 }
+  const dS: CSSProperties = { padding: '3px 8px', whiteSpace: 'nowrap', fontSize: 12 }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* 요약 줄 */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)' }}>
-        <span>발신 <b style={{ color: CALLER_C }}>{l.initiator}</b></span>
-        <span>착신 <b style={{ color: CALLEE_C }}>{l.callee || '—'}</b></span>
-        <span>시작 {fmtClock(l.invite_time)}</span>
-        {l.answer_time && <span>응답 {fmtClock(l.answer_time)}</span>}
-        {l.end_time && <span>종료 {fmtClock(l.end_time)}</span>}
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>메시지 이력</span>
+        <span className="ts" style={{ color: 'var(--text-muted)' }}>{flow.messages.length}건</span>
+        <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={onOpenFlow}>시퀀스 다이어그램</button>
       </div>
-
-      {/* 통합 타임라인 */}
-      {detail?.loading ? (
-        <div className="empty" style={{ padding: 10 }}>상세 로딩 중...</div>
-      ) : (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)', maxHeight: 360, overflowY: 'auto' }}>
-          {items.map((it, i) => {
-            const border = i > 0 ? '1px solid var(--border)' : undefined
-            if (it.kind === 'sig') {
+      <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)' }}>
+        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: 'var(--surface-alt, #f7f9fc)', position: 'sticky', top: 0 }}>
+              <th style={{ ...hS, width: 32, textAlign: 'right' }}>#</th>
+              <th style={hS}>시각</th>
+              <th style={hS}>모듈</th>
+              <th style={hS}>From → To</th>
+              <th style={hS}>Proto</th>
+              <th style={hS}>Method</th>
+            </tr>
+          </thead>
+          <tbody>
+            {flow.messages.map((m, i) => {
+              const proto = m.proto || 'SIP'
               return (
-                <div key={`g${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 10px', fontSize: 12, borderTop: border, borderLeft: '4px solid transparent' }}>
-                  <span className="ts" style={{ minWidth: 70, color: 'var(--text-muted)' }}>{fmtClock(it.iso)}</span>
-                  <span style={{ minWidth: 30, textAlign: 'center', color: it.color }}>◆</span>
-                  <span style={{ color: it.color, fontWeight: 600 }}>{it.label}</span>
-                  {it.sub && <span className="ts" style={{ color: 'var(--text-muted)' }}>{it.sub}</span>}
-                </div>
+                <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ ...dS, textAlign: 'right', color: 'var(--text-muted)' }}>{i + 1}</td>
+                  <td style={dS} className="ts">{fmtClock(m.ts)}</td>
+                  <td style={dS}><span className="badge badge--gray" style={{ fontSize: 9 }}>{actorLbl(nodeOf(m))}</span></td>
+                  <td style={dS}>{actorLbl(m.from)} <span style={{ color: 'var(--text-muted)' }}>→</span> {actorLbl(m.to)}</td>
+                  <td style={dS}><span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: protoColor(proto), borderRadius: 3, padding: '1px 5px' }}>{proto}</span></td>
+                  <td style={{ ...dS, fontWeight: 600, color: protoColor(proto) }}>{m.label || ''}{m.detail ? <span className="ts" style={{ color: 'var(--text-muted)', fontWeight: 400 }}> ({m.detail})</span> : null}</td>
+                </tr>
               )
-            }
-            const seg = it.seg
-            const color = partyColor(l, seg.speaker_id)
-            const isPlaying = audio.playing?.recId === recId && audio.playing?.seq === seg.seq
-            const isPrep = audio.preparing?.recId === recId && audio.preparing?.seq === seg.seq
-            const playable = seg.status !== 'recording' && !seg.has_video
-            return (
-              <div key={`s${seg.seq}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', fontSize: 12, borderTop: border, borderLeft: `4px solid ${color}`, background: isPlaying ? 'var(--hover, #eef5ff)' : undefined }}>
-                <span className="ts" style={{ minWidth: 70, color: 'var(--text-muted)' }}>{fmtClock(seg.start_time)}</span>
-                <button
-                  className={`btn btn--sm ${isPlaying ? 'btn--primary' : 'btn--outline'}`}
-                  disabled={!recId || !playable}
-                  style={{ minWidth: 30, padding: '2px 6px' }}
-                  onClick={() => recId && playable && audio.play(recId, seg.seq)}
-                  title={seg.has_video ? '영상은 전체재생으로' : playable ? '재생/정지' : '재생 불가'}
-                >
-                  {isPrep ? '…' : isPlaying ? '❚❚' : '▶'}
-                </button>
-                <span style={{ fontWeight: 600, color }}>{seg.speaker_id}</span>
-                <span style={{ color: 'var(--text-muted)' }}>발화</span>
-                {seg.has_video && <span className="badge badge--blue" style={{ fontSize: 9 }}>영상</span>}
-                {seg.status === 'recording' && <span className="badge badge--blue" style={{ fontSize: 9 }}>녹취중</span>}
-                <span className="ts" style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}>{fmtMs(seg.duration_ms)}</span>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* 참여자 */}
-      {l.participants?.length > 0 && (
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
-          {l.participants.map(p => (
-            <span key={p.msisdn} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 9, height: 9, borderRadius: 2, background: p.role === 'callee' ? CALLEE_C : CALLER_C }} />
-              {p.msisdn} ({p.role === 'caller' ? '발신' : p.role === 'callee' ? '수신' : '멤버'})
-              <span className="ts">{fmtClock(p.join_time)}{p.leave_time ? `~${fmtClock(p.leave_time)}` : ''}</span>
-            </span>
-          ))}
-        </div>
-      )}
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
