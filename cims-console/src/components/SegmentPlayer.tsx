@@ -8,6 +8,8 @@ interface SegmentPlayerProps {
   caller?: string
   callee?: string
   onClose?: () => void
+  compact?: boolean          // 인라인(accordion) 축소 배치
+  onMaximize?: () => void    // 최대화(모달) 버튼 — compact 에서 오버레이 표시
 }
 
 function fmtWallTime(iso: string | null, offsetMs: number): string {
@@ -55,7 +57,7 @@ async function waitSegmentReady(url: string, signal: AbortSignal): Promise<void>
   throw new Error('변환 시간 초과')
 }
 
-export default function SegmentPlayer({ segments, recordingId, callType, caller, callee, onClose }: SegmentPlayerProps) {
+export default function SegmentPlayer({ segments, recordingId, callType, caller, callee, onClose, compact, onMaximize }: SegmentPlayerProps) {
   // 재생 가능한 세그먼트만 (recording 상태 제외)
   const playable = segments.filter(s => s.status !== 'recording')
 
@@ -189,35 +191,43 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
       {/* ── 헤더 ── */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '12px 20px', borderBottom: '1px solid var(--border)',
+        padding: compact ? '6px 12px' : '12px 20px', borderBottom: '1px solid var(--border)',
       }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>
-            {callType === 'ptt' ? 'PTT 녹취 재생' : '통화 녹취 재생'}
+          <div style={{ fontWeight: 700, fontSize: compact ? 13 : 16 }}>
+            {callType === 'ptt' ? 'PTT 녹취' : '통화 녹취'}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, display: compact ? 'none' : 'block' }}>
             {callType === 'ptt'
               ? `그룹: ${caller || ''}`
               : `${caller || ''} \u2192 ${callee || ''}`}
           </div>
         </div>
-        {onClose && (
-          <button onClick={onClose}
-            style={{
-              background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
-              color: 'var(--text-muted)', padding: '4px 8px', lineHeight: 1,
-            }}
-            title="닫기">X</button>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {onMaximize && (
+            <button onClick={onMaximize}
+              style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer',
+                color: 'var(--text-muted)', padding: '2px 6px', lineHeight: 1 }}
+              title="최대화">⛶</button>
+          )}
+          {onClose && (
+            <button onClick={onClose}
+              style={{
+                background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
+                color: 'var(--text-muted)', padding: '4px 8px', lineHeight: 1,
+              }}
+              title="닫기">X</button>
+          )}
+        </div>
       </div>
 
       {/* ── 미디어 플레이어 ── */}
-      <div style={{ padding: '12px 20px' }}>
+      <div style={{ padding: compact ? '8px 12px' : '12px 20px' }}>
         {isVideo ? (
           <div style={{
             position: 'relative',
-            width: callType === 'ptt' ? 640 : 1280,
-            height: 640,
+            width: compact ? 360 : (callType === 'ptt' ? 640 : 1280),
+            height: compact ? 220 : 640,
             maxWidth: '100%',
             overflow: 'hidden', borderRadius: 6,
             background: '#000',
@@ -317,7 +327,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
       </div>
 
       {/* ── 세그먼트 목록 ── */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 12px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: compact ? '0 12px 8px' : '0 20px 12px', maxHeight: compact ? 150 : undefined }}>
         <table className="data-table" style={{ fontSize: 13 }}>
           <thead>
             <tr>
