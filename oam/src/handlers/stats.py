@@ -154,13 +154,28 @@ def _media_endpoints(config: dict):
     return out
 
 
+_CMP_LAST_GOOD: dict = {}
+_CMP_LAST_GOOD_TTL = 30.0   # 마지막 정상값 보존 한도 — 이 이상 연속 실패면 진짜 down 으로 인정
+
+
 def _probe_cmp(ip: str, port: int) -> dict:
-    """단일 CMP 노드 STATS probe (노드별 3s 캐시)."""
+    """단일 CMP 노드 STATS probe (노드별 3s 캐시).
+       부하 중 CMP STATS 응답이 1s 를 넘겨 일시 타임아웃되면 노드가 used=0/down 으로
+       튀어 대시보드 RTP 합계가 요동친다 → (1) timeout 을 2.5s 로 늘리고
+       (2) miss 시 30s 이내 최근 정상값을 유지해 한 번의 타임아웃으로 0 이 되지 않게 한다."""
+    key = f'{ip}:{port}'
+
     def probe():
         resp = _udp_request(ip, port, {"trans_id": int(time.time()) % 100000,
-                                       "payload": {"cmd": "STATS_REQUEST"}})
-        if isinstance(resp.get('response'), dict):
-            return resp['response']
+                                       "payload": {"cmd": "STATS_REQUEST"}}, timeout=2.5)
+        r = resp.get('response') if isinstance(resp.get('response'), dict) else None
+        now = time.time()
+        if r:
+            _CMP_LAST_GOOD[key] = (now, r)
+            return r
+        lg = _CMP_LAST_GOOD.get(key)   # probe miss → 최근 정상값 유지(연속 실패 30s 까지)
+        if lg and now - lg[0] < _CMP_LAST_GOOD_TTL:
+            return lg[1]
         return {}
     return _cached(f'cmp:{ip}:{port}', probe)
 
@@ -234,7 +249,7 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
             if svc == 'live':
                 return await _service_live(config)
             if svc == 'trend':
-                return await _service_trend(config, qp('window', '6h'))
+                return await _service_trend(config, qp('window', '8h'))
             if svc == 'events':
                 return await _service_events(config, qp('limit', '60'))
             if svc == 'org':
@@ -1380,30 +1395,48 @@ def _trend_backfill(config: dict, from_min: int, to_min: int) -> dict:
     return per_min
 
 
-_TREND_WINDOWS = {'1h': 60, '6h': 360, '12h': 720, '1d': 1440}
+_TREND_WINDOWS = {'2h': 120, '4h': 240, '8h': 480, '16h': 960, '24h': 1440}
+# 윈도우 → (버킷 길이[초], 버킷 수). 모든 윈도우를 24등분(NB=24).
+_TREND_BUCKETS = {
+    '2h':  (300, 24),    # 5분 × 24
+    '4h':  (600, 24),    # 10분 × 24
+    '8h':  (1200, 24),   # 20분 × 24
+    '16h': (2400, 24),   # 40분 × 24
+    '24h': (3600, 24),   # 1시간 × 24
+}
 _TREND_METRICS = ('volte_active', 'volte_calls', 'ptt_grants', 'ptt_speakers', 'ptt_groups')
 _TREND2_CACHE: dict = {'key': None, 'data': None}
 
 
-async def _service_trend(config: dict, window='6h') -> HandlerResult:
-    """사용량 추세 — 윈도우(1h/6h/12h/1d)를 24등분, 버킷별 지표를 서비스 로그에서 재구성.
+async def _service_trend(config: dict, window='8h') -> HandlerResult:
+    """사용량 추세 — 윈도우를 24등분한 버킷으로 지표를 서비스 로그에서 재구성.
+       간격: 2h=5분, 4h=10분, 8h=20분, 16h=40분, 24h=1시간 (모두 24버킷). 버킷 경계는 정시(clock) 정렬,
+       마지막 칸은 현재 시각이 속한 버킷.
        지표: VoLTE 동시통화(구간 겹침)·발생호(구간 시작), PTT 발언수(floor GRANT)·발언자(distinct)·활성그룹."""
-    wmin = _TREND_WINDOWS.get(str(window))
-    if wmin is None:
-        try:
-            wmin = max(60, min(int(window), 1440))
-        except (TypeError, ValueError):
-            wmin = 360
-        window = next((k for k, v in _TREND_WINDOWS.items() if v == wmin), f'{wmin}m')
-    NB = 24
-    bucket_sec = max(60, wmin * 60 // NB)
+    spec = _TREND_BUCKETS.get(str(window))
+    if spec is None:
+        wmin = _TREND_WINDOWS.get(str(window))
+        if wmin is None:
+            try:
+                wmin = max(60, min(int(window), 1440))
+            except (TypeError, ValueError):
+                wmin = 360
+            window = next((k for k, v in _TREND_WINDOWS.items() if v == wmin), f'{wmin}m')
+        # 미정의 윈도우 → 24등분 fallback
+        bucket_sec = max(60, wmin * 60 // 24)
+        NB = 24
+    else:
+        bucket_sec, NB = spec
+    wmin = bucket_sec * NB // 60
     now = datetime.now()
     now_min = int(now.timestamp()) // 60
     ck = (window, now_min)
     if _TREND2_CACHE['key'] == ck:
         return HandlerResult(status=200, body=_TREND2_CACHE['data'])
 
-    start_ts = now.timestamp() - NB * bucket_sec
+    # 현재 시각이 속한 버킷을 마지막 칸으로 두고, 버킷 경계를 정시(clock)에 정렬
+    cur_bucket = int(now.timestamp()) // bucket_sec * bucket_sec
+    start_ts = float(cur_bucket - (NB - 1) * bucket_sec)
 
     def bidx(ts):
         i = int((ts - start_ts) // bucket_sec)

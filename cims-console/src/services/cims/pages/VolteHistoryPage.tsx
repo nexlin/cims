@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react'
 import { callsApi, type CallLog } from '../../../api/calls'
+import { statsApi, type OrgStat } from '../../../api/stats'
 import { recordingsApi, type RecordingSegment } from '../../../api/recordings'
 import { flowApi, type FlowMessage } from '../../../api/flow'
 import FlowPage, { SequenceDiagram } from '../../../pages/FlowPage'
@@ -36,54 +37,89 @@ function callState(s: string) {
 interface CallFlowState { messages: FlowMessage[]; loading: boolean; loaded: boolean }
 type RecPlayer = { id: string; segments: RecordingSegment[]; callType: 'volte' | 'ptt' | 'volte_video'; caller: string; callee: string }
 
+const PAGE_SIZES = [10, 20, 50, 100]
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+
+// 시간대 히트맵 — 선택 날짜의 24시간 호 건수(색 농도+숫자), 클릭 시 해당 시간 필터
+function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>; selHour: string | null; onPick: (h: string | null) => void }) {
+  const cells = Array.from({ length: 24 }, (_, h) => ({ h: String(h).padStart(2, '0'), v: hours[String(h).padStart(2, '0')] || 0 }))
+  const max = Math.max(1, ...cells.map(c => c.v))
+  return (
+    <div style={{ display: 'flex', gap: 2, marginBottom: 10 }}>
+      {cells.map(c => {
+        const ratio = c.v > 0 ? 0.18 + 0.82 * (c.v / max) : 0
+        const on = selHour === c.h
+        return (
+          <div key={c.h} onClick={() => c.v > 0 && onPick(on ? null : c.h)}
+            title={`${c.h}시 · ${c.v}건`}
+            style={{
+              flex: 1, cursor: c.v > 0 ? 'pointer' : 'default', textAlign: 'center',
+              borderRadius: 4, padding: '3px 0',
+              border: on ? '2px solid var(--primary)' : '1px solid var(--border)',
+              background: c.v > 0 ? `rgba(37,99,235,${ratio.toFixed(3)})` : 'var(--surface-alt, #f7f9fc)',
+              color: ratio > 0.55 ? '#fff' : 'var(--text)',
+            }}>
+            <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, height: 16 }}>{c.v > 0 ? c.v : ' '}</div>
+            <div style={{ fontSize: 9, lineHeight: 1.3, height: 12, color: ratio > 0.55 ? 'rgba(255,255,255,.8)' : 'var(--text-muted)' }}>{c.h}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function VolteHistoryPage() {
   const { show } = useToast()
 
   const [logs, setLogs] = useState<CallLog[]>([])
+  const [hours, setHours] = useState<Record<string, number>>({})
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(0)
-  const PS = 50
-  const [fMsisdn, setFM] = useState('')
-  const [fDate, setFD] = useState('')
+  const [ps, setPs] = useState(20)
+  const [fDate, setFD] = useState(todayStr())
+  const [searchInput, setSearchInput] = useState('')
+  const [q, setQ] = useState('')
+  const [selOrg, setSelOrg] = useState('')      // 선택 부서 코드 ('' = 전체)
+  const [selHour, setSelHour] = useState<string | null>(null)
   const [autoRefresh, setAR] = useState(false)
 
-  const [openHours, setOpenHours] = useState<Set<string>>(new Set())
+  const [orgs, setOrgs] = useState<OrgStat[]>([])
+
   const [expandedCall, setExpandedCall] = useState<string | null>(null)
   const [flowByCall, setFlowByCall] = useState<Map<string, CallFlowState>>(new Map())
 
   const [flow, setFlow] = useState<{ callId: string; date: string; callType?: 'volte' | 'ptt' } | null>(null)
   const [recPlayer, setRecPlayer] = useState<RecPlayer | null>(null)
 
+  // 부서 트리 (한 번 로드)
+  useEffect(() => {
+    statsApi.serviceOrg().then(r => setOrgs(r.orgs)).catch(e => show(String(e), 'err'))
+  }, [show])
+
+  // 검색 디바운스
+  useEffect(() => { const t = setTimeout(() => { setQ(searchInput.trim()); setPage(0) }, 350); return () => clearTimeout(t) }, [searchInput])
+
   const load = useCallback(async (p: number) => {
     setLoading(true)
     try {
-      const r = await callsApi.list({ call_type: 'volte', msisdn: fMsisdn || undefined, date: fDate || undefined, limit: PS, offset: p * PS })
-      setLogs(r.logs); setTotal(r.total)
+      const r = await callsApi.list({
+        call_type: 'volte', date: fDate || undefined,
+        org: selOrg || undefined, q: q || undefined,
+        hour: selHour || undefined,
+        limit: ps, offset: p * ps,
+      })
+      setLogs(r.logs); setTotal(r.total); setHours(r.hours || {})
     } catch (e: unknown) { show(String(e), 'err') }
     finally { setLoading(false) }
-  }, [show, fMsisdn, fDate])
+  }, [show, fDate, selOrg, q, selHour, ps])
 
-  useEffect(() => { setPage(0); load(0) }, [load])
+  // 필터 변경 → 1페이지부터 재조회
+  useEffect(() => { setPage(0); setExpandedCall(null); load(0) }, [load])
   useEffect(() => { if (!autoRefresh) return; const iv = setInterval(() => load(page), 10000); return () => clearInterval(iv) }, [autoRefresh, load, page])
 
-  const hourGroups = useMemo(() => {
-    const m = new Map<string, CallLog[]>()
-    for (const l of logs) {
-      const key = (l.invite_time || '').substring(0, 13) || '기타'
-      const arr = m.get(key); if (arr) arr.push(l); else m.set(key, [l])
-    }
-    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]))
-  }, [logs])
-
-  useEffect(() => {
-    if (hourGroups.length > 0) setOpenHours(new Set([hourGroups[0][0]]))
-    setExpandedCall(null)
-  }, [hourGroups])
-
-  const toggleHour = (k: string) => setOpenHours(prev => {
-    const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n
-  })
+  // 날짜/부서/검색 변경 시 시간 선택 해제 (히트맵 재구성)
+  useEffect(() => { setSelHour(null) }, [fDate, selOrg, q])
 
   // ── 호 펼침 시: 메시지 이력(flow) + 녹취(있으면) lazy 로드 ──
   const loadCallFlow = useCallback(async (l: CallLog) => {
@@ -120,83 +156,114 @@ export default function VolteHistoryPage() {
     } catch (e: unknown) { show(String(e), 'err') }
   }
 
-  const totalPages = Math.ceil(total / PS)
-  const thS: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'left', whiteSpace: 'nowrap' }
+  const totalPages = Math.max(1, Math.ceil(total / ps))
+  const dayTotal = useMemo(() => Object.values(hours).reduce((a, b) => a + b, 0), [hours])
+  const selNode = orgs.find(o => o.code === selOrg)
+  const thS: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'left', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--surface, #fff)', zIndex: 1 }
 
   return (
-    <div>
-      <div className="toolbar">
-        <input className="search-input" placeholder="발신/착신 번호" value={fMsisdn} onChange={e => setFM(e.target.value)} onKeyDown={e => e.key === 'Enter' && (setPage(0), load(0))} style={{ maxWidth: 180 }} />
-        <input type="date" className="form-input" value={fDate} onChange={e => { setFD(e.target.value); setPage(0) }} style={{ width: 140 }} />
-        <button className="btn btn--primary btn--sm" onClick={() => { setPage(0); load(0) }}>검색</button>
+    <div className="panel" style={{ padding: 10 }}>
+      {/* 상단 검색/날짜/표시수 */}
+      <div className="toolbar" style={{ marginBottom: 8 }}>
+        <input type="date" className="form-input" value={fDate} onChange={e => setFD(e.target.value)} style={{ width: 150 }} />
+        <input className="search-input" placeholder="가입자 이름/번호 검색" value={searchInput}
+          onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 240 }} />
+        {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+          {selNode ? `부서: ${selNode.name}` : '전체'}{q ? `  &  검색: "${q}"` : ''}{selHour ? `  &  ${selHour}시` : ''}
+        </span>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
           <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />자동갱신
         </label>
+        <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          표시{' '}
+          <select className="form-input" value={ps} onChange={e => { setPs(Number(e.target.value)); setPage(0) }}
+            style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}>
+            {PAGE_SIZES.map(n => <option key={n} value={n}>{n}건</option>)}
+          </select>
+        </label>
       </div>
 
-      {loading ? <div className="empty">로딩 중...</div>
-        : hourGroups.length === 0 ? <div className="empty">이력 없음</div>
-          : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {hourGroups.map(([hourKey, calls]) => {
-                const open = openHours.has(hourKey)
-                const label = hourKey.length >= 13 ? `${hourKey.slice(5, 7)}/${hourKey.slice(8, 10)} ${hourKey.slice(11, 13)}시` : hourKey
-                const recCnt = calls.filter(c => c.has_recording).length
-                return (
-                  <div key={hourKey} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-                    <div onClick={() => toggleHour(hourKey)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer', background: 'var(--surface-alt, #f7f9fc)', fontWeight: 600 }}>
-                      <span style={{ color: 'var(--text-muted)' }}>{open ? '▾' : '▸'}</span>
-                      <span>{label}</span>
-                      <span className="badge badge--gray" style={{ fontSize: 11 }}>{calls.length}건</span>
-                      {recCnt > 0 && <span className="ts" style={{ color: 'var(--text-muted)' }}>녹취 {recCnt}</span>}
-                    </div>
-
-                    {open && (
-                      <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                        <thead>
-                          <tr style={{ borderTop: '1px solid var(--border)' }}>
-                            <th style={{ ...thS, width: 24 }}></th>
-                            <th style={thS}>유형</th>
-                            <th style={thS}>발신 → 착신</th>
-                            <th style={{ ...thS, textAlign: 'center' }}>상태</th>
-                            <th style={thS}>시작</th>
-                            <th style={{ ...thS, textAlign: 'right' }}>통화시간</th>
-                            <th style={thS}>종료사유</th>
-                            <th style={{ ...thS, textAlign: 'center' }}>녹취</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {calls.map(l => {
-                            const isOpen = expandedCall === callKey(l)
-                            const st = callState(l.state)
-                            const dur = l.answer_time && l.end_time
-                              ? Math.max(0, Math.floor((tms(l.end_time) - tms(l.answer_time)) / 1000))
-                              : l.duration
-                            return (
-                              <CallRow
-                                key={callKey(l)} l={l} isOpen={isOpen} st={st} dur={dur}
-                                flow={flowByCall.get(callKey(l))}
-                                onToggle={() => toggleCall(l)}
-                                onOpenDiagram={() => setFlow({ callId: l.call_id, date: l.invite_time?.substring(0, 10) || '', callType: 'volte' })}
-                                onOpenRec={() => openRecording(l)}
-                              />
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                )
-              })}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        {/* 좌: 부서 트리 */}
+        <div style={{ flex: '0 0 220px', height: 'calc(100vh - 230px)', minHeight: 420, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
+          <div onClick={() => setSelOrg('')}
+            style={{ cursor: 'pointer', padding: '4px 6px', borderRadius: 4, fontSize: 13, fontWeight: 700,
+              background: selOrg === '' ? 'rgba(80,120,255,.12)' : undefined }}>
+            전체 호이력
+          </div>
+          {orgs.map(o => (
+            <div key={o.code} onClick={() => setSelOrg(o.code)}
+              style={{ cursor: 'pointer', padding: '4px 6px', paddingLeft: 6 + o.depth * 16, borderRadius: 4, fontSize: 13,
+                background: selOrg === o.code ? 'rgba(80,120,255,.12)' : undefined,
+                fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
+              {o.name} <span className="ts">({o.members})</span>
             </div>
-          )}
+          ))}
+        </div>
 
-      {totalPages > 1 && <div className="toolbar" style={{ justifyContent: 'center', gap: 8, marginTop: 8 }}>
-        <button className="btn btn--sm btn--outline" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1) }}>← 이전</button>
-        <span className="ts">{page + 1}/{totalPages} (총 {total}건)</span>
-        <button className="btn btn--sm btn--outline" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음 →</button>
-      </div>}
+        {/* 우: 히트맵 + 호 목록 */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 230px)', minHeight: 420 }}>
+          {/* 시간대 히트맵 */}
+          <div style={{ flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>시간대별 호 분포</span>
+              <span className="ts" style={{ color: 'var(--text-muted)' }}>{fDate} · 총 {dayTotal}건</span>
+              {selHour && <button className="btn btn--sm btn--ghost" onClick={() => setSelHour(null)} style={{ marginLeft: 'auto' }}>{selHour}시 해제</button>}
+            </div>
+            <HourHeatmap hours={hours} selHour={selHour} onPick={h => { setSelHour(h); setPage(0) }} />
+          </div>
+
+          {/* 호 목록 — 헤더(고정)·본문(스크롤, 항목없어도 영역 유지)·테일(고정) 항상 표시 */}
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
+            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thS, width: 24 }}></th>
+                  <th style={thS}>유형</th>
+                  <th style={thS}>발신 → 착신</th>
+                  <th style={{ ...thS, textAlign: 'center' }}>상태</th>
+                  <th style={thS}>시작시간</th>
+                  <th style={thS}>응답시간</th>
+                  <th style={thS}>종료시간</th>
+                  <th style={{ ...thS, textAlign: 'right' }}>통화시간</th>
+                  <th style={thS}>종료사유</th>
+                  <th style={{ ...thS, textAlign: 'center' }}>녹취</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading
+                  ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>로딩 중...</td></tr>
+                  : logs.length === 0
+                    ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>이력 없음</td></tr>
+                    : logs.map(l => {
+                      const isOpen = expandedCall === callKey(l)
+                      const st = callState(l.state)
+                      const dur = l.answer_time && l.end_time
+                        ? Math.max(0, Math.floor((tms(l.end_time) - tms(l.answer_time)) / 1000))
+                        : l.duration
+                      return (
+                        <CallRow
+                          key={callKey(l)} l={l} isOpen={isOpen} st={st} dur={dur}
+                          flow={flowByCall.get(callKey(l))}
+                          onToggle={() => toggleCall(l)}
+                          onOpenDiagram={() => setFlow({ callId: l.call_id, date: l.invite_time?.substring(0, 10) || '', callType: 'volte' })}
+                          onOpenRec={() => openRecording(l)}
+                        />
+                      )
+                    })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 페이지네이션 (항상 표시) */}
+          <div className="toolbar" style={{ justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', flexShrink: 0, paddingTop: 6 }}>
+            <span className="ts" style={{ color: 'var(--text-muted)' }}>총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
+            <button className="btn btn--sm btn--ghost" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1) }}>이전</button>
+            <button className="btn btn--sm btn--ghost" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음</button>
+          </div>
+        </div>
+      </div>
 
       {recPlayer && (
         <div className="modal-overlay" onClick={() => setRecPlayer(null)}
@@ -239,6 +306,8 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
         </td>
         <td style={{ ...tdS, textAlign: 'center' }}><span className={`badge ${st.cls}`}>{st.label}</span></td>
         <td style={tdS} className="ts">{fmtClock(l.invite_time)}</td>
+        <td style={tdS} className="ts">{fmtClock(l.answer_time)}</td>
+        <td style={tdS} className="ts">{fmtClock(l.end_time)}</td>
         <td style={{ ...tdS, textAlign: 'right' }} className="ts">{fmtDur(dur)}</td>
         <td style={tdS} className="ts">{l.end_reason_ko || l.end_reason || '—'}</td>
         <td style={{ ...tdS, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
@@ -249,7 +318,7 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={8} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
+          <td colSpan={10} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
             <div style={{ padding: '10px 14px' }}>
               <CallDetailPanel l={l} flow={flow} onOpenDiagram={onOpenDiagram} />
             </div>

@@ -21,7 +21,7 @@ import subprocess
 import struct
 import glob as _glob
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from urllib.parse import urlparse, parse_qs, unquote
 
 from httpsrv.handler import HandlerArgs, HandlerResult
@@ -32,16 +32,102 @@ _calls_dir: str = ""
 _sip_log_dir: str = ""
 _msg_log_dir: str = ""
 _system_id: str = "csp_01"
+_db_config: dict = None   # 호이력 부서/검색 필터(가입자→부서 매핑)용. OAM 컨텍스트에서만 주입.
 
 
 def init(service_log_dir: str, sip_log_dir: str = "",
-         msg_log_dir: str = "", system_id: str = "csp_01") -> None:
-    """ServiceLogging Dir 설정 (통합 디렉토리)"""
-    global _calls_dir, _sip_log_dir, _msg_log_dir, _system_id
+         msg_log_dir: str = "", system_id: str = "csp_01", db_config: dict = None) -> None:
+    """ServiceLogging Dir 설정 (통합 디렉토리). db_config 주입 시 호이력 부서/이름 필터 활성화."""
+    global _calls_dir, _sip_log_dir, _msg_log_dir, _system_id, _db_config
     _calls_dir = service_log_dir if service_log_dir else ""
     _sip_log_dir = sip_log_dir if sip_log_dir else _calls_dir
     _msg_log_dir = msg_log_dir if msg_log_dir else _calls_dir
     _system_id = system_id if system_id else "csp_01"
+    _db_config = db_config
+
+
+def _db_conn():
+    """호이력 필터용 DB 연결 (없으면 None → 부서/이름 필터 비활성, 번호 substring 만)."""
+    if not _db_config:
+        return None
+    try:
+        import pymysql
+        import pymysql.cursors
+        return pymysql.connect(
+            host=_db_config.get('Host', '127.0.0.1'),
+            port=int(_db_config.get('Port', 3306)),
+            user=_db_config.get('User', 'root'),
+            password=_db_config.get('Password', ''),
+            database=_db_config.get('Db', 'cims'),
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=True,
+        )
+    except Exception:
+        return None
+
+
+def _resolve_volte_msisdns(org: str = None, q: str = None):
+    """부서(org, 하위 전체 포함) 또는 검색어(q=이름/번호)에 매칭되는 VoLTE 가입자 msisdn 집합.
+       org/q 둘 다 없으면 None(필터 없음). DB 미연결 시 None."""
+    org = (org or '').strip()
+    q = (q or '').strip()
+    if not org and not q:
+        return None
+    conn = _db_conn()
+    if conn is None:
+        return None
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                where, params = [], []
+                if org:
+                    # users.org_id 는 leaf 팀코드 → 선택 부서의 모든 하위 코드로 확장
+                    cur.execute("SELECT id, code, parent_id FROM organizations")
+                    rows = cur.fetchall()
+                    id2code = {r['id']: r['code'] for r in rows}
+                    children = {}
+                    for r in rows:
+                        children.setdefault(id2code.get(r['parent_id']), []).append(r['code'])
+                    desc, stack = [], [org]
+                    while stack:
+                        x = stack.pop()
+                        desc.append(x)
+                        stack.extend(children.get(x, []))
+                    ph = ','.join(['%s'] * len(desc))
+                    where.append(f"u.org_id IN ({ph})")
+                    params.extend(desc)
+                if q:
+                    where.append("(u.name LIKE %s OR vs.id LIKE %s)")
+                    params.extend([f"%{q}%", f"%{q}%"])
+                sql = ("SELECT vs.id AS msisdn FROM users u "
+                       "JOIN volte_subscriptions vs ON vs.user_id=u.id")
+                if where:
+                    sql += " WHERE " + " AND ".join(where)
+                cur.execute(sql, params)
+                return {r['msisdn'] for r in cur.fetchall() if r.get('msisdn')}
+    except Exception:
+        return None
+
+
+def _live_call_ids() -> set:
+    """현재 라이브 활성 호 call_id 집합. CSP 가 {ServiceLogDir}/state/{volte,ptt}/*.json 에
+       원자 쓰기로 관리하고 호 종료 시 제거한다. 여기 없으면 '활성 아님'(stale)으로 판정."""
+    out = set()
+    if not _calls_dir:
+        return out
+    for kind in ("volte", "ptt"):
+        for fp in _glob.glob(os.path.join(_calls_dir, "state", kind, "*.json")):
+            if fp.endswith(".tmp"):
+                continue
+            try:
+                with open(fp) as f:
+                    cid = json.load(f).get("call_id")
+                    if cid:
+                        out.add(cid)
+            except Exception:
+                pass
+    return out
 
 
 def _parse_date(s: str) -> str:
@@ -1145,15 +1231,19 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     call_type = _q("call_type")
     msisdn = _q("msisdn")
     group_id = _q("group_id")
+    org = _q("org")
+    q_search = _q("q")
     limit = min(int(_q("limit", "200")), 1000)
     offset = int(_q("offset", "0"))
 
-    # index.json 기반 빠른 조회 시도
-    index_entries = _load_index(date_str, hour)
+    # 시간대 히트맵(hours)은 hour 필터와 무관하게 하루 전체를 집계해야 하므로,
+    # 스캔은 항상 하루 전체로 하고 hour 필터는 집계 이후 paged 목록에만 적용한다.
+    # index.json 기반 빠른 조회 시도 (하루 전체)
+    index_entries = _load_index(date_str, None)
 
-    # index가 비어있으면 .d 디렉터리 직접 스캔
+    # index가 비어있으면 .d 디렉터리 직접 스캔 (하루 전체)
     if not index_entries:
-        dirs = _find_all_d_dirs(date_str, hour, call_type)
+        dirs = _find_all_d_dirs(date_str, None, call_type)
         logs = []
         for d in dirs:
             cj = _load_call_json(d)
@@ -1170,7 +1260,7 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
             dir_name = entry.get('dir')
             if not dir_name:
                 continue
-            d_dir = _find_d_dir_by_callid(date_str, hour, dir_name.replace('.d', ''))
+            d_dir = _find_d_dir_by_callid(date_str, None, dir_name.replace('.d', ''))
             if d_dir:
                 cj = _load_call_json(d_dir)
                 if cj:
@@ -1191,6 +1281,60 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     if group_id:
         logs = [l for l in logs if l.get('group_id') == group_id]
 
+    # 부서(org) 필터 — 선택 부서(하위 포함) 가입자가 발/착신/참여한 호만
+    if org:
+        org_set = _resolve_volte_msisdns(org=org, q=None)
+        if org_set is not None:
+            logs = [l for l in logs if l.get('initiator') in org_set or l.get('callee') in org_set or
+                    any(p.get('msisdn') in org_set for p in l.get('participants', []))]
+    # 검색어(q) 필터 — 번호 substring(외부번호 포함) OR 이름/번호 DB 매칭(가입자)
+    if q_search:
+        q_set = _resolve_volte_msisdns(org=None, q=q_search)
+
+        def _match_q(l):
+            if q_search in (l.get('initiator') or '') or q_search in (l.get('callee') or ''):
+                return True
+            if q_set and (l.get('initiator') in q_set or l.get('callee') in q_set or
+                          any(p.get('msisdn') in q_set for p in l.get('participants', []))):
+                return True
+            return False
+        logs = [l for l in logs if _match_q(l)]
+
+    # 미종료(stale) 호 보정 — 종료로그가 남지 않아 state=active/ringing 으로 남은 호를,
+    # 현재 라이브 활성 집합(state/*.json)에 없으면 '비정상 종료(기록 없음)'로 표시.
+    # (디스크 원본은 변경하지 않는 read-time 보정 → 자기치유적, 안전.)
+    # ★ 시간 임계값을 쓰지 않으므로 통화시간이 긴(장시간) 호도 오판하지 않는다:
+    #    라이브 상태파일이 존재하는 한(=CSP 가 BYE 전까지 유지) 'active' 그대로 유지된다.
+    #    B2BUA 는 caller/callee leg 의 call_id 가 다르므로(동일 session_id),
+    #    call.json.call_id 뿐 아니라 session.json 의 양 leg call_id 까지 대조해 누락을 막는다.
+    live_ids = _live_call_ids()
+    for l in logs:
+        if l.get('state') in ('active', 'ringing') and not l.get('end_time'):
+            cand = {l.get('call_id')}
+            dn = l.get('dir_name')
+            if dn and _calls_dir:
+                try:
+                    with open(os.path.join(_calls_dir, dn, 'session.json')) as f:
+                        cand.update(json.load(f).get('call_ids') or [])
+                except Exception:
+                    pass
+            if not (cand & live_ids):
+                l['state'] = 'ended'
+                if not l.get('end_reason'):
+                    l['end_reason'] = 'incomplete'
+
+    # 시간대 히트맵(hour 필터 적용 전, 하루 전체 집계)
+    hours_hist = {}
+    for l in logs:
+        h = (l.get('invite_time') or '')[11:13]
+        if h:
+            hours_hist[h] = hours_hist.get(h, 0) + 1
+
+    # hour 필터 (집계 이후 — 목록에만 적용)
+    if hour:
+        hh = str(hour).zfill(2)
+        logs = [l for l in logs if (l.get('invite_time') or '')[11:13] == hh]
+
     # 정렬 (최신 순)
     logs.sort(key=lambda l: l.get('invite_time', ''), reverse=True)
 
@@ -1199,12 +1343,14 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 
     # end_reason_ko 추가
     reason_map = {'normal': '정상종료', 'no_answer': '무응답', 'busy': '통화중',
-                  'rejected': '거절', 'error': '오류', 'timeout': '시간초과'}
+                  'rejected': '거절', 'error': '오류', 'timeout': '시간초과',
+                  'incomplete': '비정상 종료(기록 없음)'}
     for l in paged:
         l['end_reason_ko'] = reason_map.get(l.get('end_reason', ''), l.get('end_reason', ''))
 
     return HandlerResult(status=200, body=json.dumps({
         "total": total, "limit": limit, "offset": offset, "logs": paged,
+        "hours": hours_hist,
     }), media_type="application/json")
 
 
@@ -1430,33 +1576,6 @@ def _find_ptt_sessions(group_id: str, date: str = None) -> list:
         })
     result.sort(key=lambda x: x["dir"], reverse=True)
     return result
-
-
-def _ptt_heatmap(group_id: str, days: int = 7) -> list:
-    """그룹의 최근 days 일 × 24시간 활동 히트맵 — 시간버킷별 발언수/화자수/발화시간.
-       셀 = {date, hour, window(YYYYMMDDHH), segment_count, speaker_count, total_speech_ms}."""
-    base = _ptt_group_base(group_id)
-    if not base:
-        return []
-    cells = []
-    today = datetime.now().date()
-    for di in range(days):
-        d = today - timedelta(days=di)
-        ymd = d.strftime("%Y%m%d")
-        for hh in range(24):
-            hh_dir = os.path.join(base, ymd[0:4], ymd[4:6], ymd[6:8], f"{hh:02d}")
-            if not os.path.isdir(hh_dir):
-                continue
-            segs = _read_jsonl(os.path.join(hh_dir, "segments.jsonl"))
-            speakers = {s.get("speaker_id") for s in segs if s.get("speaker_id")}
-            total_ms = sum(int(s.get("duration_ms", 0) or 0) for s in segs)
-            cells.append({
-                "date": d.strftime("%Y-%m-%d"), "hour": hh,
-                "window": f"{ymd}{hh:02d}",
-                "segment_count": len(segs), "speaker_count": len(speakers),
-                "total_speech_ms": total_ms,
-            })
-    return cells
 
 
 def _ptt_group_summaries() -> dict:
@@ -1714,16 +1833,6 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         }), media_type="application/json")
 
     session_dir = unquote(parts[1])
-
-    if session_dir == "heatmap":
-        # ── 그룹 시간대 히트맵 (최근 days 일 × 24h) ──
-        try:
-            days = max(1, min(int(_qp("days", "7") or 7), 31))
-        except (TypeError, ValueError):
-            days = 7
-        return HandlerResult(status=200, body=json.dumps({
-            "group_id": group_id, "days": days, "cells": _ptt_heatmap(group_id, days),
-        }), media_type="application/json")
 
     if len(parts) >= 3 and parts[2] == "audio":
         # ── PTT 세션 녹취 오디오 ──

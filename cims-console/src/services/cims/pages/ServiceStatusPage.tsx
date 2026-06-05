@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useReducer, Fragment } from 'react'
+import { useState, useEffect, useCallback, useReducer, Fragment, type CSSProperties } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   statsApi, type Subscriber, type SubscribersResponse,
@@ -145,35 +145,85 @@ export function PttKpiCard() {
 
 // ── 위젯: 사용량 추세 (윈도우 선택 + 24구간 + 다지표) ─────
 const TREND_WINS: { k: string; label: string }[] = [
-  { k: '1h', label: '1시간' }, { k: '6h', label: '6시간' }, { k: '12h', label: '12시간' }, { k: '1d', label: '1일' },
+  { k: '2h', label: '2시간' }, { k: '4h', label: '4시간' }, { k: '8h', label: '8시간' },
+  { k: '16h', label: '16시간' }, { k: '24h', label: '24시간' },
 ]
-const TREND_SERIES: { key: TrendMetric; label: string; color: string }[] = [
-  { key: 'volte_active', label: 'VoLTE 동시통화', color: 'var(--primary)' },
-  { key: 'volte_calls', label: 'VoLTE 발생 호', color: '#3b82f6' },
-  { key: 'ptt_grants', label: 'PTT 발언 수', color: 'var(--success)' },
-  { key: 'ptt_speakers', label: 'PTT 발언자', color: '#16a34a' },
-  { key: 'ptt_groups', label: 'PTT 활성그룹', color: 'var(--warning, #d98e00)' },
+const TREND_SERIES: { key: TrendMetric; label: string; rgb: string }[] = [
+  { key: 'volte_active', label: 'VoLTE 동시통화', rgb: '37,99,235' },
+  { key: 'volte_calls', label: 'VoLTE 발생 호', rgb: '59,130,246' },
+  { key: 'ptt_grants', label: 'PTT 발언 수', rgb: '22,163,74' },
+  { key: 'ptt_speakers', label: 'PTT 발언자', rgb: '5,150,105' },
+  { key: 'ptt_groups', label: 'PTT 활성그룹', rgb: '217,142,0' },
 ]
 function clockOf(t: number) { return new Date(t * 1000).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
-function BarRow({ label, points, metric, peak, color }: { label: string; points: TrendPoint[]; metric: TrendMetric; peak: number; color: string }) {
+function bucketLabel(sec: number) { return sec >= 3600 ? `${Math.round(sec / 3600)}시간 간격` : `${Math.round(sec / 60)}분 간격` }
+const AXIS_W = 92   // 좌측 지표 라벨 폭 — 히트맵 셀 영역과 시간축 정렬용
+function HeatRow({ label, points, metric, rgb }: { label: string; points: TrendPoint[]; metric: TrendMetric; rgb: string }) {
   const max = Math.max(1, ...points.map(p => p[metric]))
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-      <span style={{ width: 92, fontSize: 12, color: 'var(--text-muted)', textAlign: 'right', flexShrink: 0 }}>{label}</span>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 26, flex: 1 }}>
+      <span style={{ width: AXIS_W, fontSize: 12, color: 'var(--text-muted)', textAlign: 'right', flexShrink: 0 }}>{label}</span>
+      <div style={{ display: 'flex', gap: 1, flex: 1 }}>
         {points.map((p, i) => {
           const v = p[metric]
-          return <div key={i} title={`${clockOf(p.t)} · ${v}`}
-            style={{ flex: 1, height: `${v > 0 ? Math.max(8, Math.round(v / max * 100)) : 2}%`, minHeight: 1, background: v > 0 ? color : 'var(--border)', borderRadius: '1px 1px 0 0' }} />
+          const ratio = v > 0 ? 0.18 + 0.82 * (v / max) : 0
+          return (
+            <div key={i} title={`${clockOf(p.t)} · ${v}`}
+              style={{
+                flex: 1, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 10, lineHeight: 1, borderRadius: 2,
+                background: v > 0 ? `rgba(${rgb},${ratio.toFixed(3)})` : 'var(--border)',
+                color: ratio > 0.55 ? '#fff' : 'var(--text)',
+              }}>
+              {v > 0 ? v : ''}
+            </div>
+          )
         })}
       </div>
-      <span style={{ width: 52, fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>peak {peak}</span>
+    </div>
+  )
+}
+// 히트맵 하단 시간축 — 셀 경계마다 시각 눈금. 첫 눈금 또는 날짜가 바뀌는 눈금엔 날짜도 표시.
+function TrendAxis({ points }: { points: TrendPoint[] }) {
+  const n = points.length
+  if (n === 0) return null
+  const dayKey = (t: number) => { const d = new Date(t * 1000); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` }
+  const md = (t: number) => { const d = new Date(t * 1000); return `${d.getMonth() + 1}/${d.getDate()}` }
+  const hm = (t: number) => new Date(t * 1000).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const step = n <= 12 ? 2 : 4   // 약 6~7눈금
+  const ticks: number[] = []
+  for (let i = 0; i < n; i += step) ticks.push(i)
+  if (ticks[ticks.length - 1] !== n - 1) ticks.push(n - 1)
+  return (
+    <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+      <span style={{ width: AXIS_W, flexShrink: 0 }} />
+      <div style={{ position: 'relative', flex: 1, height: 14 }}>
+        {ticks.map((i, idx) => {
+          const t = points[i].t
+          const prevT = idx > 0 ? points[ticks[idx - 1]].t : null
+          const showDate = prevT === null || dayKey(prevT) !== dayKey(t)   // 첫 눈금 또는 날짜 변경
+          const pct = (i + 0.5) / n * 100
+          const isFirst = i === 0, isLast = i === n - 1
+          const style: CSSProperties = {
+            position: 'absolute', top: 0, fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap',
+          }
+          if (isFirst) style.left = 0
+          else if (isLast) style.right = 0
+          else { style.left = `${pct}%`; style.transform = 'translateX(-50%)' }
+          return (
+            <span key={i} style={style}>
+              {showDate && <span style={{ color: 'var(--text)', fontWeight: 600, marginRight: 3 }}>{md(t)}</span>}
+              {hm(t)}
+            </span>
+          )
+        })}
+      </div>
     </div>
   )
 }
 export function TrendCard() {
   const { show } = useToast()
-  const [win, setWin] = useState('6h')
+  const [win, setWin] = useState('8h')
   const [data, setData] = useState<ServiceTrend | null>(null)
   useEffect(() => {
     let alive = true
@@ -185,16 +235,20 @@ export function TrendCard() {
     <div className="panel" style={{ padding: '10px 14px' }}>
       <div className="toolbar" style={{ marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>사용량 추세</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>최근</span>
         {TREND_WINS.map(w => (
           <button key={w.k} className={`btn btn--sm ${win === w.k ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setWin(w.k)}>{w.label}</button>
         ))}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
-          {points.length ? `${clockOf(points[0].t)} ~ ${clockOf(points[points.length - 1].t)} · 24구간` : ''}
+          {points.length ? `${clockOf(points[0].t)} ~ ${clockOf(points[points.length - 1].t)} · ${points.length}구간 (${bucketLabel(data?.bucket_sec ?? 0)})` : ''}
         </span>
       </div>
-      {!data ? <Loading /> : TREND_SERIES.map(s => (
-        <BarRow key={s.key} label={s.label} points={points} metric={s.key} peak={data.peaks[s.key]} color={s.color} />
-      ))}
+      {!data ? <Loading /> : <>
+        {TREND_SERIES.map(s => (
+          <HeatRow key={s.key} label={s.label} points={points} metric={s.key} rgb={s.rgb} />
+        ))}
+        <TrendAxis points={points} />
+      </>}
     </div>
   )
 }

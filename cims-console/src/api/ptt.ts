@@ -68,12 +68,6 @@ export interface PttFloorResponse {
   floor: PttFloorEvent[]
 }
 
-export interface PttHeatCell {
-  date: string; hour: number; window: string
-  segment_count: number; speaker_count: number; total_speech_ms: number
-}
-export interface PttHeatmapResponse { group_id: string; days: number; cells: PttHeatCell[] }
-
 export const pttApi = {
   summary(): Promise<PttSummaryResponse> {
     return api.get(`/ptt/history?summary=1`)
@@ -99,9 +93,5 @@ export const pttApi = {
   floor(groupId: string, sessionDir: string, date?: string): Promise<PttFloorResponse> {
     const q = date ? `?date=${date}` : ''
     return api.get(`/ptt/history/${encodeURIComponent(groupId)}/${encodeURIComponent(sessionDir)}/floor${q}`)
-  },
-
-  heatmap(groupId: string, days = 7): Promise<PttHeatmapResponse> {
-    return api.get(`/ptt/history/${encodeURIComponent(groupId)}/heatmap?days=${days}`)
   },
 }

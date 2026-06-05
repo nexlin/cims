@@ -173,6 +173,7 @@ if __name__ == '__main__':
         flow_logger.init(
             service_log_dir=_service_log_dir,
             system_id=_system_id,
+            db_config=config.get('CimsDatabase'),
         )
 
         tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))

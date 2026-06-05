@@ -32,6 +32,7 @@ export interface CallLogsResponse {
   limit: number
   offset: number
   logs: CallLog[]
+  hours?: Record<string, number>   // 시간대(HH)별 호 건수 — hour 필터 무관, 하루 전체 집계
 }
 
 export interface CallLogsQuery {
@@ -39,6 +40,8 @@ export interface CallLogsQuery {
   caller?: string
   callee?: string
   msisdn?: string
+  org?: string          // 부서 코드 (하위 전체 포함)
+  q?: string            // 검색어 (이름/번호)
   group_id?: string
   call_type?: string
   date?: string
@@ -55,6 +58,8 @@ function buildQs(q: CallLogsQuery): string {
   if (q.caller)    p.set('caller', q.caller)
   if (q.callee)    p.set('callee', q.callee)
   if (q.msisdn)    p.set('msisdn', q.msisdn)
+  if (q.org)       p.set('org', q.org)
+  if (q.q)         p.set('q', q.q)
   if (q.group_id)  p.set('group_id', q.group_id)
   if (q.call_type) p.set('call_type', q.call_type)
   if (q.date)      p.set('date', q.date)
