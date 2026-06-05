@@ -432,7 +432,7 @@ export function OrgStatsCard() {
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         {/* 부서 트리 */}
-        <div style={{ flex: '0 0 230px', maxHeight: 460, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
+        <div style={{ flex: '0 0 230px', maxHeight: 520, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
           {orgs.length === 0 ? <Loading /> : orgs.map(o => (
             <div key={o.code} onClick={() => { setSel(o.code); setPage(1) }}
               style={{ cursor: 'pointer', padding: '4px 6px', paddingLeft: 6 + o.depth * 16, borderRadius: 4, fontSize: 13,
@@ -444,20 +444,20 @@ export function OrgStatsCard() {
             </div>
           ))}
         </div>
-        {/* 구성원 로스터 */}
-        <div style={{ flex: 1, minWidth: 0, maxHeight: 460, overflow: 'auto' }}>
-          {!roster ? <Loading />
-            : roster.subscribers.length === 0 ? <div className="empty">{q ? '검색 결과 없음' : '구성원 없음'}</div>
-            : <>
-                <SubscriberRows subs={roster.subscribers} />
-                {totalPages > 1 && (
-                  <div className="toolbar" style={{ justifyContent: 'flex-end' }}>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
-                    <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</button>
-                    <button className="btn btn--sm btn--ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</button>
-                  </div>
-                )}
-              </>}
+        {/* 구성원 로스터 — 헤더(고정)·본문(스크롤)·페이지(고정) */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', maxHeight: 520 }}>
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            {!roster ? <Loading />
+              : roster.subscribers.length === 0 ? <div className="empty">{q ? '검색 결과 없음' : '구성원 없음'}</div>
+              : <SubscriberRows subs={roster.subscribers} />}
+          </div>
+          {roster && roster.subscribers.length > 0 && (
+            <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
+              <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</button>
+              <button className="btn btn--sm btn--ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</button>
+            </div>
+          )}
         </div>
       </div>
     </div>
