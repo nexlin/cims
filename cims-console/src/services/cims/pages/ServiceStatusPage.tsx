@@ -374,7 +374,7 @@ function SubscriberRows({ subs }: { subs: Subscriber[] }) {
 }
 
 // 조직별(부서) — 상단 검색 + 좌측 부서 트리 + 우측 구성원 로스터
-const ORG_LIMIT = 50
+const PAGE_SIZES = [5, 10, 20, 50, 100]
 export function OrgStatsCard() {
   const { show } = useToast()
   const [orgs, setOrgs] = useState<OrgStat[]>([])
@@ -382,6 +382,7 @@ export function OrgStatsCard() {
   const [searchInput, setSearchInput] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(20)   // 기본 20명, 5/10/20/50/100 선택
   const [roster, setRoster] = useState<SubscribersResponse | null>(null)
 
   // 부서 트리 (10초)
@@ -402,14 +403,14 @@ export function OrgStatsCard() {
   useEffect(() => {
     if (!q && !sel) return
     let alive = true
-    const load = () => statsApi.subscribers(q ? { q, status: 'all', page, limit: ORG_LIMIT } : { org: sel, status: 'all', page, limit: ORG_LIMIT })
+    const load = () => statsApi.subscribers(q ? { q, status: 'all', page, limit } : { org: sel, status: 'all', page, limit })
       .then(r => { if (alive) setRoster(r) }).catch(e => show(String(e), 'err'))
     load(); const iv = setInterval(load, 5000); return () => { alive = false; clearInterval(iv) }
-  }, [q, sel, page, show])
+  }, [q, sel, page, limit, show])
 
   const selNode = orgs.find(o => o.code === sel)
   const total = roster?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / ORG_LIMIT))
+  const totalPages = Math.max(1, Math.ceil(total / limit))
 
   return (
     <div className="panel" style={{ padding: 10 }}>
@@ -418,6 +419,13 @@ export function OrgStatsCard() {
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 280 }} />
         {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{q ? `검색: "${q}"` : selNode ? `부서: ${selNode.name} (${selNode.members}명)` : ''}</span>
+        <label style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+          표시{' '}
+          <select className="form-input" value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}
+            style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}>
+            {PAGE_SIZES.map(n => <option key={n} value={n}>{n}명</option>)}
+          </select>
+        </label>
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         {/* 부서 트리 */}
@@ -550,7 +558,7 @@ export function ServiceDetailTabs() {
     <div>
       <div className="toolbar" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
         {tb('events', '라이브 이벤트')}
-        {tb('org', '조직별')}
+        {tb('org', '부서별')}
         {tb('volte', 'VoLTE 호', v?.active)}
         {tb('ptt', 'PTT 그룹', p?.recent_active)}
         <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>

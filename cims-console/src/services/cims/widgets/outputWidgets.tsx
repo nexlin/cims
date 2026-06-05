@@ -20,9 +20,9 @@ export const svcAnomalyWidget: WidgetDef = { id: 'cims.svc-anomaly', title: '서
 export const svcVolteCallsWidget: WidgetDef = { id: 'cims.svc-volte-calls', title: 'VoLTE 활성 호', category: 'service', component: VolteCallsCard, defaultSize: { w: 6 }, adminOnly: true }
 export const svcPttGroupsWidget: WidgetDef = { id: 'cims.svc-ptt-groups', title: 'PTT 활성 그룹', category: 'service', component: PttGroupsCard, defaultSize: { w: 6 }, adminOnly: true }
 export const svcEventsWidget: WidgetDef = { id: 'cims.svc-events', title: '라이브 이벤트', category: 'event', component: EventFeedCard, defaultSize: { w: 6 }, adminOnly: true }
-export const svcOrgWidget: WidgetDef = { id: 'cims.svc-org', title: '조직별 서비스 이용', category: 'service', component: OrgStatsCard, defaultSize: { w: 12 }, adminOnly: true }
+export const svcOrgWidget: WidgetDef = { id: 'cims.svc-org', title: '부서별 서비스 이용', category: 'service', component: OrgStatsCard, defaultSize: { w: 12 }, adminOnly: true }
 // 호·그룹·이벤트·조직·조회를 탭 1개 위젯으로 통합 (빈 위젯/헤더 스크롤 완화 + 한 영역 운용)
-export const svcDetailWidget: WidgetDef = { id: 'cims.svc-detail', title: '서비스 상세 (호·그룹·이벤트·조직·조회)', category: 'service', component: ServiceDetailTabs, defaultSize: { w: 12 }, adminOnly: true }
+export const svcDetailWidget: WidgetDef = { id: 'cims.svc-detail', title: '서비스 상세 (호·그룹·이벤트·부서·조회)', category: 'service', component: ServiceDetailTabs, defaultSize: { w: 12 }, adminOnly: true }
 
 // 가입자 조회 (특정 가입자 현재 상태) — 기존 id 유지(하위호환), 내용은 조회 위젯으로 정정
 export const subscriberStatusWidget: WidgetDef = {
