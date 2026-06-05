@@ -1,9 +1,9 @@
 """
 csc_logger.py — CSC 서비스 로그 + 메시지 로그 유틸리티 (통합 포맷)
 
-신 포맷:
-  Flow: {ServiceLogDir}/YYYY/MM/DD/HH/csc_01.flow.jsonl
-  Msg : {ServiceLogDir}/YYYY/MM/DD/HH/csc_01_{iface}.msg.jsonl
+신 포맷 (5분 버킷·open-per-write — CSP/CMP 와 동일; mm5=00/05/.../55):
+  Flow: {ServiceLogDir}/YYYY/MM/DD/HH/csc_01.flow.{mm5}.jsonl
+  Msg : {ServiceLogDir}/YYYY/MM/DD/HH/csc_01_{iface}.msg.{mm5}.jsonl
 
 공통 키: ts, node, service, from, to, proto, method, detail, mid, sesid, subid, seq, iface
 
@@ -103,6 +103,12 @@ def _hour_dir() -> str:
     return d
 
 
+def _bucket() -> str:
+    """5분 버킷 suffix "00".."55" (CSP/CMP 와 동일). open-per-write 이므로 핸들 미유지 —
+    버킷 전환 시 _next_seq 가 새 파일 줄 수로 자동 리셋(파일경로가 seq_map 키)."""
+    return "%02d" % ((datetime.now().minute // 5) * 5)
+
+
 def _next_seq(iface: str, msg_path: str) -> int:
     key = f"{iface}:{msg_path}"
     cur = _seq_map.get(key)
@@ -146,8 +152,9 @@ def log_flow(service: str,
         return
 
     ts = _ts_hms()
-    flow_path = os.path.join(hour_dir, f"{_system_id}.flow.jsonl")
-    msg_path  = os.path.join(hour_dir, f"{_system_id}_{iface}.msg.jsonl")
+    mm5 = _bucket()
+    flow_path = os.path.join(hour_dir, f"{_system_id}.flow.{mm5}.jsonl")
+    msg_path  = os.path.join(hour_dir, f"{_system_id}_{iface}.msg.{mm5}.jsonl")
 
     # sesid 미지정 시 자동 발행
     if not sesid:

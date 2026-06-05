@@ -129,7 +129,11 @@ export default function VolteHistoryPage() {
     try {
       const date = l.invite_time?.substring(0, 10) || undefined
       const r = await flowApi.get(l.call_id, date, 'volte')
-      const msgs: FlowMessage[] = r.nodes ? Object.values(r.nodes).flat() : (r.messages || [])
+      // 노드 그룹 키(_node)를 각 메시지에 부여 — 백엔드의 노드 분류(csp/cmp/csc)를 보존해
+      //   헤더 뱃지로 노드별 필터링 가능하게 한다. (CSP↔CMP 메시지는 CSP·CMP 양 관점이 각각 들어옴.)
+      const msgs: FlowMessage[] = r.nodes
+        ? Object.entries(r.nodes).flatMap(([node, arr]) => (arr || []).map(m => ({ ...m, _node: node })))
+        : (r.messages || [])
       msgs.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
       setFlowByCall(prev => { const m = new Map(prev); m.set(key, { messages: msgs, loading: false, loaded: true }); return m })
     } catch {
@@ -338,8 +342,17 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
   const [selIdx, setSelIdx] = useState<number | null>(null)
   const [body, setBody] = useState<string | null>(null)
   const [bodyLoading, setBodyLoading] = useState(false)
-  const msgs = useMemo(() => flow?.messages || [], [flow])
+  const allMsgs = useMemo(() => flow?.messages || [], [flow])
   const date = l.invite_time?.substring(0, 10) || ''
+
+  // 노드별 뱃지 토글 — 메시지에 부여된 _node(없으면 node/iface 유도)로 그룹. 기본 전체 표시.
+  const nodeKey = (m: FlowMessage) => m._node || (m.node || m.iface || '').replace(/_\d+$/, '') || 'csp'
+  const availNodes = useMemo(() => Array.from(new Set(allMsgs.map(nodeKey))).sort(), [allMsgs])
+  const [offNodes, setOffNodes] = useState<Set<string>>(new Set())
+  const msgs = useMemo(() => allMsgs.filter(m => !offNodes.has(nodeKey(m))), [allMsgs, offNodes])
+  const toggleNode = (n: string) => { setSelIdx(null); setBody(null); setOffNodes(prev => { const s = new Set(prev); s.has(n) ? s.delete(n) : s.add(n); return s }) }
+  const NODE_LABEL: Record<string, string> = { csp: 'CSP', cmp: 'CMP', csc: 'CSC' }
+  const NODE_COLOR: Record<string, string> = { csp: '#2563eb', cmp: '#0891b2', csc: '#7c3aed' }
 
   const select = (idx: number) => {
     if (selIdx === idx) { setSelIdx(null); setBody(null); return }
@@ -366,6 +379,22 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
           <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderBottom: '1px solid var(--border)' }}>
               <span style={{ fontWeight: 600, fontSize: 12 }}>시퀀스 다이어그램</span>
+              {/* 노드별 표시 토글(뱃지) — CSP/CMP(/CSC). 끄면 해당 노드 메시지 숨김. */}
+              {availNodes.length > 1 && (
+                <span style={{ display: 'inline-flex', gap: 4, marginLeft: 4 }}>
+                  {availNodes.map(n => {
+                    const on = !offNodes.has(n)
+                    const color = NODE_COLOR[n] || 'var(--text-muted)'
+                    return (
+                      <button key={n} onClick={() => toggleNode(n)} title={`${NODE_LABEL[n] || n.toUpperCase()} 메시지 표시/숨김`}
+                        style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10, cursor: 'pointer',
+                          border: `1px solid ${color}`, color: on ? '#fff' : color, background: on ? color : 'transparent', opacity: on ? 1 : 0.55 }}>
+                        {NODE_LABEL[n] || n.toUpperCase()}
+                      </button>
+                    )
+                  })}
+                </span>
+              )}
               <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto', padding: '1px 8px', fontSize: 11 }} onClick={onOpenDiagram}>⛶ 최대화</button>
             </div>
             <div style={{ maxHeight: 230, overflow: 'auto', padding: 6 }}>

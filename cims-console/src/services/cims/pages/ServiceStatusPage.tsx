@@ -349,7 +349,7 @@ function MemberDrill({ group }: { group: string }) {
 export function PttGroupsCard() {
   const live = useServiceLive()
   const navigate = useNavigate()
-  const now = useNowTick()
+  useNowTick()   // 주기적 리렌더 구독(반환값 미사용)
   const { pins, toggle } = usePins('svc.pins.ptt')
   const [open, setOpen] = useState<string | null>(null)   // 멤버 drill 열린 그룹(1개)
   const groups = live?.ptt.groups ?? []   // 백엔드가 발언 활동순으로 정렬

@@ -21,6 +21,7 @@ import subprocess
 import struct
 import glob as _glob
 import logging
+import time as _time
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -156,12 +157,14 @@ def _find_all_d_dirs(date_str: str, hour: str = None, call_type: str = None) -> 
         else:
             base = os.path.join(_calls_dir, ct, yyyy, mm, dd)
         if ct == 'volte':
-            # voip: HH/{prefix}/{caller}/{call_id}.d
-            pat = os.path.join(base, "**", "*.d") if hour else os.path.join(base, "*", "**", "*.d")
+            # voip 고정 깊이: {HH}/{prefix}/{caller}/{call_id}.d — 재귀 `**` 대신 고정 `*` 글롭으로
+            #   전체 트리 walk 회피(수백 호에서 수초→수십ms). hour 지정 시 {prefix}/{caller}/*.d.
+            pat = os.path.join(base, "*", "*", "*.d") if hour else os.path.join(base, "*", "*", "*", "*.d")
+            result.extend(_glob.glob(pat))
         else:
-            # ptt: HH/{prefix}/{group_id}.d
+            # ptt: 레이아웃 가변 → 재귀 glob 유지 (호환).
             pat = os.path.join(base, "**", "*.d") if hour else os.path.join(base, "*", "**", "*.d")
-        result.extend(_glob.glob(pat, recursive=True))
+            result.extend(_glob.glob(pat, recursive=True))
     return sorted(set(d for d in result if os.path.isdir(d)))
 
 
@@ -1221,6 +1224,65 @@ async def _handle_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
 # ── Call Logs API (DB 대체) ──
 
+# ── 호이력 경량 목록 캐시 ────────────────────────────────────────────
+# call/logs 가 하루 전체를 스캔(필터·정렬·히트맵)하므로, 매 페이지 이동/필터마다 재스캔하면
+# 수백 호 × 파일I/O 로 수초씩 걸린다. (1) .d 디렉터리 glob 을 1회만 수행해 basename→path 맵으로
+# O(1) 해소(구: index 항목마다 전체 트리 재-glob → O(N²)), (2) participants/has_recording 는
+# 목록 단계에서 생략하고 paged 슬라이스에만 부착, (3) 경량 목록(call.json 코어 필드)을 짧은 TTL 로
+# 캐시 → 페이지/필터 재요청을 즉시 응답. 프론트 store 캐시와 함께 백엔드 연산 최소화.
+_calllog_cache: dict = {}     # (date_str, call_type) → (mono_ts, [lightweight call.json + dir_name])
+_CALLLOG_TTL = 4.0            # 초 — 라이브 갱신성과 재스캔 비용의 절충(과거 날짜도 동일; 충분히 신선)
+
+
+def _calllog_list(date_str: str, call_type: str) -> list:
+    """하루치 경량 호이력 목록(call.json 코어 + dir_name). participants/has_recording 미포함.
+    .d 디렉터리 glob 1회 + 캐시. 호출자는 반환 리스트를 변형하지 말 것(캐시 공유) — 슬라이스 후 copy."""
+    key = (date_str, call_type or "")
+    now = _time.monotonic()
+    hit = _calllog_cache.get(key)
+    if hit and (now - hit[0]) < _CALLLOG_TTL:
+        return hit[1]
+
+    index_entries = _load_index(date_str, None)
+    # glob 1회 → basename → fullpath 맵 (index 항목 O(1) 해소, 구 per-call 전체-트리 glob 제거)
+    all_dirs = _find_all_d_dirs(date_str, None, call_type)
+    by_base = {os.path.basename(d): d for d in all_dirs}
+
+    # 로드할 .d 경로 확정
+    if index_entries:
+        d_dirs = []
+        for entry in index_entries:
+            dir_name = entry.get('dir')
+            if not dir_name:
+                continue
+            d = by_base.get(dir_name) or by_base.get(dir_name if dir_name.endswith('.d') else dir_name + '.d')
+            if d:
+                d_dirs.append(d)
+    else:
+        d_dirs = all_dirs
+
+    # call.json 병렬 로드 — NFS 수백~수천 호의 직렬 read 가 cold 지연의 주원인.
+    #   스레드풀로 동시 read(파일I/O 는 GIL 영향 적음) → 직렬 대비 10~수십배.
+    def _one(d):
+        cj = _load_call_json(d)
+        if not cj:
+            return None
+        cj['dir_name'] = os.path.relpath(d, _calls_dir) if _calls_dir else os.path.basename(d).replace('.d', '')
+        return cj
+
+    logs = []
+    if d_dirs:
+        from concurrent.futures import ThreadPoolExecutor
+        workers = min(32, max(4, len(d_dirs)))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for cj in ex.map(_one, d_dirs):
+                if cj:
+                    logs.append(cj)
+
+    _calllog_cache[key] = (now, logs)
+    return logs
+
+
 async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     if handler_args.method != "GET":
         return HandlerResult(status=405, body="Method Not Allowed")
@@ -1249,36 +1311,17 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 
     # 시간대 히트맵(hours)은 hour 필터와 무관하게 하루 전체를 집계해야 하므로,
     # 스캔은 항상 하루 전체로 하고 hour 필터는 집계 이후 paged 목록에만 적용한다.
-    # index.json 기반 빠른 조회 시도 (하루 전체)
-    index_entries = _load_index(date_str, None)
+    # 경량 목록(캐시·glob 1회) — participants/has_recording 는 무겁고 표시(paged)에만 필요하므로
+    #   목록 단계에서 생략하고 paged 슬라이스에서만 부착(수백 호 × 파일I/O 회피).
+    #   (캐시 dict 는 공유되므로 항목별 dict copy 후 변형.)
+    logs = [dict(l) for l in _calllog_list(date_str, call_type)]
 
-    # index가 비어있으면 .d 디렉터리 직접 스캔 (하루 전체)
-    if not index_entries:
-        dirs = _find_all_d_dirs(date_str, None, call_type)
-        logs = []
-        for d in dirs:
-            cj = _load_call_json(d)
-            if not cj:
-                continue
-            cj['participants'] = _load_participants(d)
-            cj['has_recording'] = _has_recording(d)
-            cj['dir_name'] = os.path.relpath(d, _calls_dir) if _calls_dir else os.path.basename(d).replace('.d', '')
-            logs.append(cj)
-    else:
-        # index에서 dir 경로로 call.json 로드
-        logs = []
-        for entry in index_entries:
-            dir_name = entry.get('dir')
-            if not dir_name:
-                continue
-            d_dir = _find_d_dir_by_callid(date_str, None, dir_name.replace('.d', ''))
-            if d_dir:
-                cj = _load_call_json(d_dir)
-                if cj:
-                    cj['participants'] = _load_participants(d_dir)
-                    cj['has_recording'] = _has_recording(d_dir)
-                    cj['dir_name'] = os.path.relpath(d_dir, _calls_dir) if _calls_dir else os.path.basename(d_dir).replace('.d', '')
-                    logs.append(cj)
+    # msisdn/org/q 필터는 participants 매칭이 필요 → 해당 필터가 있을 때만 일괄 로드.
+    need_participants = bool(msisdn or org or q_search)
+    if need_participants:
+        for l in logs:
+            dn = l.get('dir_name')
+            l['participants'] = _load_participants(os.path.join(_calls_dir, dn)) if (dn and _calls_dir) else []
 
     # 필터
     if call_type:
@@ -1352,12 +1395,22 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     total = len(logs)
     paged = logs[offset:offset + limit]
 
-    # end_reason_ko 추가
+    # paged 슬라이스에만 participants/has_recording 부착(목록 전체가 아니라 표시분만 — 파일I/O 최소화)
+    # + end_reason_ko 추가
     reason_map = {'normal': '정상종료', 'no_answer': '무응답', 'busy': '통화중',
                   'rejected': '거절', 'error': '오류', 'timeout': '시간초과',
                   'incomplete': '비정상 종료(기록 없음)'}
-    for l in paged:
+    def _enrich(l):
+        dn = l.get('dir_name')
+        d_dir = os.path.join(_calls_dir, dn) if (dn and _calls_dir) else None
+        if 'participants' not in l:
+            l['participants'] = _load_participants(d_dir) if d_dir else []
+        l['has_recording'] = _has_recording(d_dir) if d_dir else False
         l['end_reason_ko'] = reason_map.get(l.get('end_reason', ''), l.get('end_reason', ''))
+    if paged:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(32, max(4, len(paged)))) as ex:
+            list(ex.map(_enrich, paged))
 
     return HandlerResult(status=200, body=json.dumps({
         "total": total, "limit": limit, "offset": offset, "logs": paged,

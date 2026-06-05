@@ -182,7 +182,9 @@ if __name__ == '__main__':
         ver_init(tests_dir, config)
         build_init(os.path.dirname(tests_dir))
 
-        csc_logger.init(service_log_dir=_service_log_dir)
+        # system_id 명시 — OAM 콘솔/admin flow 는 oam_01 로 기록(같은 호스트의 CSC xcap flow=csc_01 와 파일 분리).
+        #   (미지정 시 둘 다 csc_01.flow 로 써서 seq·라인 충돌)
+        csc_logger.init(service_log_dir=_service_log_dir, system_id=_system_id)
 
         # 녹취 변환툴(ffmpeg) — air-gapped(private) 환경 대응으로 OAM 패키지에 번들된
         # vendor 바이너리를 우선 사용. (패키지화 시 oam/vendor/bin/ffmpeg 또는

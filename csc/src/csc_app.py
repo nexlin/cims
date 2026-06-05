@@ -145,6 +145,7 @@ if __name__ == '__main__':
 
         csc_logger.init(
             service_log_dir=_service_log_dir,
+            system_id=_system_id,
         )
 
         # ── pi_http 요청 로깅 훅 등록 (admin/mcptt 자동 로깅) ──

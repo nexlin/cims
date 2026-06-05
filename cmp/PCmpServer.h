@@ -69,10 +69,11 @@ private:
     std::string _serviceLogDir;
     std::string _systemId;      // 파일명용 (cmp_01)
     std::string _nodeName;      // flow node 필드용 (cmp)
+    // 5분 버킷 + open-per-write (구 시간당 persistent handle → .nfs 고아·데이터유실·대용량검색 해소; CSP SipMessageLogger 와 동일)
+    std::string _currentBucketKey;   // {hourDir}/{mm5} — 버킷 회전 감지
     std::string _currentFlowHourDir;
-    FILE* _flowFile;
-    FILE* _msgFile;       // cmp_01_csp.jsonl (CSP↔CMP JSON 원문)
-    int _msgSeq;
+    std::string _currentMsgHourDir;
+    int _msgSeq;          // 현재 버킷 _csp.msg 줄 수 (버킷 전환 시 -1 → 다음 write 가 lazy 계수)
     int _lastRxSeq;       // 현재 요청의 원문 seq (logFlow에서 사용)
 
     void logFlow(const std::string& key, const char* from, const char* to,
@@ -84,7 +85,12 @@ private:
     int writeMsgLine(const char* ts, const char* dir, const char* peer, const char* proto, const char* msg,
                      const char* caller = "", const char* callee = "");
     void logBody(const char* dir, const char* peer, const char* proto, const char* msg);
-    void ensureFlowHourDir();
+    void ensureBucket();             // 디렉터리 보장 + 버킷 전환 시 seq 리셋 (핸들 미유지)
+    std::string bucketSuffix();      // (tm_min/5)*5 → "00".."55"
+    std::string flowFilePath();      // {hourDir}/{systemId}.flow.{mm5}.jsonl
+    std::string msgFilePath();       // {hourDir}/{systemId}_csp.msg.{mm5}.jsonl
+    std::string bodyFilePath();      // {hourDir}/{systemId}_csp.{mm5}.jsonl
+    static int countFileLines(const std::string& path);
     std::string getFlowHourDir();
     std::string getMsgHourDir();
     static std::string getTimestamp();
@@ -92,8 +98,6 @@ private:
 
     // msg_log body
     std::string _msgLogDir;
-    std::string _currentMsgHourDir;
-    FILE* _bodyFile;
 
     // VoIP Resource Pool
     int _rtpStartPort;

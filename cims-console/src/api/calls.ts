@@ -73,8 +73,9 @@ function buildQs(q: CallLogsQuery): string {
 }
 
 export const callsApi = {
+  // 호이력 목록: 페이지 이동·필터 토글 시 재요청이 잦으므로 짧은 TTL 캐시(같은 조건 재조회를 즉시 응답).
   list:   (q: CallLogsQuery = {}) =>
-    api.get<CallLogsResponse>(`/call/logs${buildQs(q)}`),
+    api.getCached<CallLogsResponse>(`/call/logs${buildQs(q)}`, 4000),
 
   active: () =>
     api.get<CallLogsResponse>('/call/logs/active'),

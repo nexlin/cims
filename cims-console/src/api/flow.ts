@@ -14,6 +14,7 @@ export interface FlowMessage {
   body?: string   // 원문 (lazy loading — 선택 시 별도 조회)
   seq?: number    // interface jsonl line number (for body lookup)
   iface?: string  // interface name: "sip" | "cmp" | "csc" (for body lookup)
+  _node?: string  // 백엔드 응답의 노드 그룹 키(csp/cmp/csc) — 노드별 필터/뱃지용(프론트 부여)
 }
 
 export interface FlowResponse {
@@ -35,14 +36,15 @@ export interface FlowBodyResponse {
 export const flowApi = {
   list(date?: string): Promise<FlowListResponse> {
     const q = date ? `?date=${date}` : ''
-    return api.get(`/flow/list${q}`)
+    return api.getCached(`/flow/list${q}`, 4000)
   },
   get(callId: string, date?: string, callType?: string): Promise<FlowResponse> {
     const params = new URLSearchParams()
     if (date) params.set('date', date)
     if (callType) params.set('call_type', callType)
     const q = params.toString() ? `?${params.toString()}` : ''
-    return api.get(`/flow/${encodeURIComponent(callId)}${q}`)
+    // 호별 메시지 흐름은 종료된 호면 불변 → 재오픈/리렌더 시 재요청 회피(10s 캐시 + in-flight 중복제거).
+    return api.getCached(`/flow/${encodeURIComponent(callId)}${q}`, 10000)
   },
   /** 메시지 body 조회 (interface jsonl seq 기반, fallback: ts+dir)
    *  node: 'csp' | 'cmp' | 'csc' — 여러 노드가 같은 iface에 msg 파일을 쓸 때 정확한 파일 선택에 사용

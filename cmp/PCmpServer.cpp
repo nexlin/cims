@@ -21,7 +21,7 @@
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120), _rtpWorkerCount(4),
       _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _segmentIntervalSec(60),
-      _flowFile(nullptr), _msgFile(nullptr), _msgSeq(0), _lastRxSeq(0), _bodyFile(nullptr),
+      _msgSeq(-1), _lastRxSeq(0),
       _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false),
       _leakReclaimTotal(0), _leakReclaimOrphan(0), _leakReclaimHold(0)
 {
@@ -1213,27 +1213,52 @@ bool PCmpServer::mkdirP(const std::string& p) {
     return mkdir(p.c_str(), 0755) == 0 || errno == EEXIST;
 }
 
-void PCmpServer::ensureFlowHourDir() {
+std::string PCmpServer::bucketSuffix() {
+    time_t now = time(nullptr);
+    struct tm t;
+    localtime_r(&now, &t);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d", (t.tm_min / 5) * 5);  // 00,05,10,...,55
+    return buf;
+}
+
+std::string PCmpServer::flowFilePath() {
+    if (_currentFlowHourDir.empty()) return "";
+    return _currentFlowHourDir + "/" + _systemId + ".flow." + bucketSuffix() + ".jsonl";
+}
+
+std::string PCmpServer::msgFilePath() {
+    if (_currentMsgHourDir.empty()) return "";
+    return _currentMsgHourDir + "/" + _systemId + "_csp.msg." + bucketSuffix() + ".jsonl";
+}
+
+std::string PCmpServer::bodyFilePath() {
+    if (_currentMsgHourDir.empty()) return "";
+    return _currentMsgHourDir + "/" + _systemId + "_csp." + bucketSuffix() + ".jsonl";
+}
+
+int PCmpServer::countFileLines(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return 0;
+    int n = 0;
+    char buf[4096];
+    while (fgets(buf, sizeof(buf), f)) n++;
+    fclose(f);
+    return n;
+}
+
+// 5분 버킷 회전 — 파일 핸들을 유지하지 않고(open-per-write) 디렉터리만 보장하고,
+//   버킷이 바뀌면 _msgSeq 를 '미계수(-1)' 로 리셋(다음 write 가 기존 줄 수를 lazy 계수해 이어붙임).
+//   (구버전: 시간당 파일을 내내 열어둠 → 운영 중 로그삭제 시 .nfs 고아·데이터유실 + 대용량검색. CSP SipMessageLogger 와 동일 전환.)
+void PCmpServer::ensureBucket() {
     std::string hourDir = getFlowHourDir();
-    if (hourDir == _currentFlowHourDir) return;
-
-    if (_flowFile) { fclose(_flowFile); _flowFile = nullptr; }
-    if (_msgFile) { fclose(_msgFile); _msgFile = nullptr; }
-
+    std::string bucketKey = hourDir + "/" + bucketSuffix();
+    if (bucketKey == _currentBucketKey) return;
+    _currentBucketKey = bucketKey;
     mkdirP(hourDir);
     _currentFlowHourDir = hourDir;
-
-    _flowFile = fopen((hourDir + "/" + _systemId + ".flow.jsonl").c_str(), "a");
-    // "a+" 로 열어야 fgets 로 기존 라인 수 카운트 가능 ("a" 단독은 읽기 불가 → _msgSeq 부정확)
-    _msgFile = fopen((hourDir + "/" + _systemId + "_csp.msg.jsonl").c_str(), "a+");
-    _msgSeq = 0;
-    // 기존 라인 수 카운트 (seq 연속성)
-    if (_msgFile) {
-        fseek(_msgFile, 0, SEEK_SET);
-        char buf[4096];
-        while (fgets(buf, sizeof(buf), _msgFile)) _msgSeq++;
-        fseek(_msgFile, 0, SEEK_END);
-    }
+    _currentMsgHourDir  = hourDir;   // flow/msg 통합 디렉터리
+    _msgSeq = -1;                    // 새 버킷 → 다음 write 가 lazy 계수
 }
 
 static std::string _jsonEsc(const char* s) {
@@ -1254,19 +1279,23 @@ static std::string _jsonEsc(const char* s) {
 int PCmpServer::writeMsgLine(const char* ts, const char* dir, const char* peer, const char* proto, const char* msg,
                               const char* caller, const char* callee) {
     if (!msg || !msg[0]) return 0;
-    ensureFlowHourDir();
-    if (!_msgFile) return 0;
+    ensureBucket();
+    std::string path = msgFilePath();
+    if (path.empty()) return 0;
+    if (_msgSeq < 0) _msgSeq = countFileLines(path);  // 버킷 첫 write: 기존 줄 수 계수(재기동 연속성)
+    FILE* f = fopen(path.c_str(), "a");               // open-per-write (5분 버킷)
+    if (!f) return 0;
     _msgSeq++;
     // 순서: ts, dir, peer, caller, callee, proto, msg (빈값 key 생략)
-    fprintf(_msgFile, "{\"ts\":\"%s\",\"dir\":\"%s\",\"peer\":\"%s\"",
+    fprintf(f, "{\"ts\":\"%s\",\"dir\":\"%s\",\"peer\":\"%s\"",
             ts ? ts : "", dir ? dir : "", peer ? peer : "");
     if (caller && caller[0])
-        fprintf(_msgFile, ",\"caller\":\"%s\"", _jsonEsc(caller).c_str());
+        fprintf(f, ",\"caller\":\"%s\"", _jsonEsc(caller).c_str());
     if (callee && callee[0])
-        fprintf(_msgFile, ",\"callee\":\"%s\"", _jsonEsc(callee).c_str());
-    fprintf(_msgFile, ",\"proto\":\"%s\",\"msg\":\"%s\"}\n",
+        fprintf(f, ",\"callee\":\"%s\"", _jsonEsc(callee).c_str());
+    fprintf(f, ",\"proto\":\"%s\",\"msg\":\"%s\"}\n",
             proto ? proto : "", _jsonEsc(msg).c_str());
-    fflush(_msgFile);
+    fclose(f);
     return _msgSeq;
 }
 
@@ -1278,9 +1307,10 @@ void PCmpServer::logFlow(const std::string& key, const char* from, const char* t
                          const char* caller, const char* callee) {
     if (_serviceLogDir.empty()) return;
 
-    ensureFlowHourDir();
-
-    FILE* f = _flowFile;
+    ensureBucket();
+    std::string flowPath = flowFilePath();
+    if (flowPath.empty()) return;
+    FILE* f = fopen(flowPath.c_str(), "a");   // open-per-write (5분 버킷)
     if (!f) return;
 
     // service: 파라미터 > _serviceMap 저장값 (추론 코드 제거)
@@ -1333,7 +1363,7 @@ void PCmpServer::logFlow(const std::string& key, const char* from, const char* t
     if (seq > 0) emit("seq", "", true, seq);
     emit("iface",   iface ? std::string(iface) : "");
     fprintf(f, "}\n");
-    fflush(f);
+    fclose(f);
 }
 
 // 누수 회수 세션 상세를 {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 한 줄 기록(open-append-close).
@@ -1374,15 +1404,11 @@ std::string PCmpServer::getMsgHourDir() {
 void PCmpServer::logBody(const char* dir, const char* peer, const char* proto, const char* msg) {
     if (_msgLogDir.empty()) return;
 
-    std::string hourDir = getMsgHourDir();
-    if (hourDir != _currentMsgHourDir) {
-        if (_bodyFile) { fclose(_bodyFile); _bodyFile = nullptr; }
-        mkdirP(hourDir);
-        _currentMsgHourDir = hourDir;
-        std::string path = hourDir + "/" + _systemId + "_csp.jsonl";
-        _bodyFile = fopen(path.c_str(), "a");
-    }
-    if (!_bodyFile) return;
+    ensureBucket();
+    std::string path = bodyFilePath();   // {systemId}_csp.{mm5}.jsonl
+    if (path.empty()) return;
+    FILE* f = fopen(path.c_str(), "a");  // open-per-write (5분 버킷)
+    if (!f) return;
 
     std::string ts = getTimestamp();
 
@@ -1400,9 +1426,9 @@ void PCmpServer::logBody(const char* dir, const char* peer, const char* proto, c
         }
     }
 
-    fprintf(_bodyFile,
+    fprintf(f,
         "{\"ts\":\"%s\",\"dir\":\"%s\",\"peer\":\"%s\",\"proto\":\"%s\",\"msg\":\"%s\"}\n",
         ts.c_str(), dir ? dir : "", peer ? peer : "",
         proto ? proto : "", escaped.c_str());
-    fflush(_bodyFile);
+    fclose(f);
 }
