@@ -87,3 +87,6 @@ verify_runs/
 agent/keepalived/ha.json
 agent/keepalived/out/
 oam/cache/
+
+# OAM file_store 패키지 (cims.sh pkg / POST /packages 산출 tarball — 빌드 아티팩트, 재생성 가능)
+oam/packages/
