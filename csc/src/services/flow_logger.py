@@ -21,7 +21,7 @@ import subprocess
 import struct
 import glob as _glob
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs, unquote
 
 from httpsrv.handler import HandlerArgs, HandlerResult
@@ -1432,6 +1432,33 @@ def _find_ptt_sessions(group_id: str, date: str = None) -> list:
     return result
 
 
+def _ptt_heatmap(group_id: str, days: int = 7) -> list:
+    """그룹의 최근 days 일 × 24시간 활동 히트맵 — 시간버킷별 발언수/화자수/발화시간.
+       셀 = {date, hour, window(YYYYMMDDHH), segment_count, speaker_count, total_speech_ms}."""
+    base = _ptt_group_base(group_id)
+    if not base:
+        return []
+    cells = []
+    today = datetime.now().date()
+    for di in range(days):
+        d = today - timedelta(days=di)
+        ymd = d.strftime("%Y%m%d")
+        for hh in range(24):
+            hh_dir = os.path.join(base, ymd[0:4], ymd[4:6], ymd[6:8], f"{hh:02d}")
+            if not os.path.isdir(hh_dir):
+                continue
+            segs = _read_jsonl(os.path.join(hh_dir, "segments.jsonl"))
+            speakers = {s.get("speaker_id") for s in segs if s.get("speaker_id")}
+            total_ms = sum(int(s.get("duration_ms", 0) or 0) for s in segs)
+            cells.append({
+                "date": d.strftime("%Y-%m-%d"), "hour": hh,
+                "window": f"{ymd}{hh:02d}",
+                "segment_count": len(segs), "speaker_count": len(speakers),
+                "total_speech_ms": total_ms,
+            })
+    return cells
+
+
 def _ptt_group_summaries() -> dict:
     """모든 PTT 그룹의 경량 요약(세션수·최근 시간창)을 그룹키별로 반환.
     디렉터리 글롭만 수행(파일 미독) → 그룹 다수에도 저렴. 키 = ptt/{groupKey}."""
@@ -1687,6 +1714,16 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         }), media_type="application/json")
 
     session_dir = unquote(parts[1])
+
+    if session_dir == "heatmap":
+        # ── 그룹 시간대 히트맵 (최근 days 일 × 24h) ──
+        try:
+            days = max(1, min(int(_qp("days", "7") or 7), 31))
+        except (TypeError, ValueError):
+            days = 7
+        return HandlerResult(status=200, body=json.dumps({
+            "group_id": group_id, "days": days, "cells": _ptt_heatmap(group_id, days),
+        }), media_type="application/json")
 
     if len(parts) >= 3 and parts[2] == "audio":
         # ── PTT 세션 녹취 오디오 ──

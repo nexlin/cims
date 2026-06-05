@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type CSSProperties } from 'react'
 import { groupsApi, type Group } from '../../../api/groups'
-import { pttApi, type PttSession, type PttEvent, type PttFloorEvent, type PttGroupSummary } from '../../../api/ptt'
+import { pttApi, type PttSession, type PttEvent, type PttFloorEvent, type PttGroupSummary, type PttHeatCell } from '../../../api/ptt'
 import { recordingsApi, type RecordingSegment } from '../../../api/recordings'
 import type { FlowMessage } from '../../../api/flow'
 import FlowPage from '../../../pages/FlowPage'
@@ -211,7 +211,18 @@ export default function PttHistoryPage() {
     }
   }, [detailByKey, fDate, histKey])
 
-  // 선택 그룹/날짜 변경 → 세션 로드 + 해당 날짜의 최신 버킷 자동 펼침
+  // 히트맵 셀 클릭 → 그 날짜로 이동 + 해당 시간버킷 펼침(pending)
+  const pendingDirRef = useRef<string | null>(null)
+  const onPickCell = useCallback((date: string, window: string) => {
+    if (date === fDate) {
+      setSelSession(prev => prev === window ? null : window)
+    } else {
+      pendingDirRef.current = window
+      setFD(date)
+    }
+  }, [fDate])
+
+  // 선택 그룹/날짜 변경 → 세션 로드 + (pending 버킷 또는 최신 버킷) 자동 펼침
   useEffect(() => {
     if (!selectedGroupId) return
     let cancelled = false
@@ -220,7 +231,10 @@ export default function PttHistoryPage() {
       if (cancelled) return
       const dd = (fDate || '').replace(/-/g, '')
       const day = sessions.filter(s => s.dir.startsWith(dd)).sort((a, b) => b.dir.localeCompare(a.dir))
-      setSelSession(day.length > 0 ? day[0].dir : null)
+      const want = pendingDirRef.current
+      pendingDirRef.current = null
+      const target = want && day.some(s => s.dir === want) ? want : (day.length > 0 ? day[0].dir : null)
+      setSelSession(target)
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -382,11 +396,11 @@ export default function PttHistoryPage() {
                 </span>
               </div>
 
-              {/* ── ③ 24h 활동 히트맵 ── */}
-              <ActivityHeatmap
-                sessions={daySessions}
+              {/* ── ③ 7일 × 24시간 활동 히트맵 ── */}
+              <WeekHeatmap
+                groupKey={histKey(selectedGroupId!)}
                 selectedDir={selectedSessionDir}
-                onPick={toggleExpand}
+                onPick={onPickCell}
               />
 
               {/* ── ② 시간버킷 accordion 리스트 ── */}
@@ -470,58 +484,69 @@ export default function PttHistoryPage() {
 // ════════════════════════════════════════════════════════════════
 // ③ 활동 히트맵 — 선택 날짜의 24시간 발화량 색농도
 // ════════════════════════════════════════════════════════════════
-function ActivityHeatmap({ sessions, selectedDir, onPick }: {
-  sessions: PttSession[]
+// 7일 × 24시간 활동 히트맵 (색농도 + 숫자). 셀 클릭 → 해당 날짜·시간대 버킷 선택.
+function WeekHeatmap({ groupKey, selectedDir, onPick }: {
+  groupKey: string
   selectedDir: string | null
-  onPick: (dir: string) => void
+  onPick: (date: string, window: string) => void
 }) {
-  const byHour = new Map<number, PttSession>()
-  let maxMs = 0
-  for (const s of sessions) {
-    const hh = Number(s.dir.slice(8, 10))
-    byHour.set(hh, s)
-    if ((s.total_speech_ms ?? 0) > maxMs) maxMs = s.total_speech_ms ?? 0
-  }
+  const DAYS = 7
+  const [cells, setCells] = useState<PttHeatCell[]>([])
+  const [metric, setMetric] = useState<'segment_count' | 'speaker_count'>('segment_count')
+  useEffect(() => {
+    let alive = true
+    pttApi.heatmap(groupKey, DAYS).then(r => { if (alive) setCells(r.cells || []) }).catch(() => { if (alive) setCells([]) })
+    return () => { alive = false }
+  }, [groupKey])
+
+  const dates: string[] = []
+  const t0 = new Date()
+  for (let i = 0; i < DAYS; i++) { const d = new Date(t0); d.setDate(d.getDate() - i); dates.push(d.toISOString().slice(0, 10)) }
+  const cellMap = new Map<string, PttHeatCell>()
+  cells.forEach(c => cellMap.set(`${c.date}|${c.hour}`, c))
+  const max = Math.max(1, ...cells.map(c => c[metric]))
+  const hours = Array.from({ length: 24 }, (_, h) => h)
+
   return (
     <div style={{ marginBottom: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>시간대별 활동</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>색이 진할수록 발화량 많음 · 클릭하여 펼치기</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>시간대별 활동 (최근 7일)</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>색 진할수록 많음 · 숫자=값 · 클릭→해당 시간대</span>
+        <span style={{ marginLeft: 'auto' }}>
+          <button className={`btn btn--sm ${metric === 'segment_count' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('segment_count')}>발언수</button>
+          <button className={`btn btn--sm ${metric === 'speaker_count' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('speaker_count')}>화자수</button>
+        </span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(24, 1fr)', gap: 3 }}>
-        {Array.from({ length: 24 }, (_, h) => {
-          const sess = byHour.get(h)
-          const ms = sess?.total_speech_ms ?? 0
-          const ratio = maxMs > 0 && ms > 0 ? 0.2 + 0.8 * (ms / maxMs) : 0
-          const active = sess?.state === 'active'
-          const isSel = sess && sess.dir === selectedDir
-          const bg = sess
-            ? (active ? `rgba(76,175,80,${Math.max(0.4, ratio)})` : `rgba(37,99,235,${ratio || 0.12})`)
-            : 'var(--surface-alt, #f3f5f9)'
-          return (
-            <div
-              key={h}
-              onClick={() => sess && onPick(sess.dir)}
-              title={sess
-                ? `${String(h).padStart(2, '0')}시 · 발언 ${sess.segment_count ?? 0} · 화자 ${sess.speaker_count ?? 0} · ${fmtSpeechMs(ms)}${active ? ' · 진행중' : ''}`
-                : `${String(h).padStart(2, '0')}시 · 활동 없음`}
-              style={{
-                height: 30,
-                borderRadius: 4,
-                background: bg,
-                border: isSel ? '2px solid var(--primary, #2563eb)' : '1px solid var(--border)',
-                cursor: sess ? 'pointer' : 'default',
-                opacity: sess ? 1 : 0.5,
-                display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-                fontSize: 9, color: ratio > 0.55 ? '#fff' : 'var(--text-muted)',
-                paddingBottom: 1, position: 'relative',
-              }}
-            >
-              {h % 3 === 0 ? String(h).padStart(2, '0') : ''}
-              {active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: '#fff' }} />}
-            </div>
-          )
-        })}
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `54px repeat(24, minmax(20px, 1fr))`, gap: 2, minWidth: 600 }}>
+          <div />
+          {hours.map(h => <div key={`h${h}`} style={{ fontSize: 9, color: 'var(--text-muted)', textAlign: 'center' }}>{h % 3 === 0 ? String(h).padStart(2, '0') : ''}</div>)}
+          {dates.map(date => (
+            <Fragment key={date}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>{date.slice(5)}</div>
+              {hours.map(h => {
+                const c = cellMap.get(`${date}|${h}`)
+                const v = c ? c[metric] : 0
+                const ratio = v > 0 ? 0.2 + 0.8 * (v / max) : 0
+                const isSel = !!c && c.window === selectedDir
+                return (
+                  <div key={`${date}-${h}`} onClick={() => c && onPick(date, c.window)}
+                    title={c ? `${date} ${String(h).padStart(2, '0')}시 · 발언 ${c.segment_count} · 화자 ${c.speaker_count} · ${fmtSpeechMs(c.total_speech_ms)}` : `${date} ${String(h).padStart(2, '0')}시 · 활동 없음`}
+                    style={{
+                      height: 22, borderRadius: 3,
+                      background: v > 0 ? `rgba(37,99,235,${ratio})` : 'var(--surface-alt, #f3f5f9)',
+                      border: isSel ? '2px solid var(--primary, #2563eb)' : '1px solid var(--border)',
+                      cursor: c ? 'pointer' : 'default',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 9, color: ratio > 0.55 ? '#fff' : 'var(--text-muted)',
+                    }}>
+                    {v > 0 ? v : ''}
+                  </div>
+                )
+              })}
+            </Fragment>
+          ))}
+        </div>
       </div>
     </div>
   )
