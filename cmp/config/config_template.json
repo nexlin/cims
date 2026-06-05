@@ -80,12 +80,17 @@
     },
     {
       "key": "session",
-      "title": "세션",
+      "title": "세션 / 누수 회수 (sweeper)",
+      "description": "CMP sweeper 는 RTP 무수신(inactivity) 시간 기준으로 고아 relay 를 회수한다. owner(CSP)가 비정상 종료(crash/kill)되면 CSP 가 만든 relay 가 REMOVE 를 못 받고 고아가 되는데, 이 sweeper 가 유일한 안전망이다.",
       "fields": [
         { "key": "SessionTimeout", "label": "세션 타임아웃 (초)",
           "type": "int", "default": 600, "min": 30, "max": 86400,
           "restart": true,
-          "help": "마지막 RTP 수신 이후 해당 초 동안 활동 없으면 세션 자동 제거." }
+          "help": "RTP 를 받은 적 있는(활성/홀드) 세션을 마지막 RTP 수신 이후 이 초만큼 무수신이면 회수. hold/DTX 로 RTP 가 잠시 멈출 수 있어 보수적으로 길게 둔다. 회수 시 reason=hold_timeout." },
+        { "key": "OrphanReclaimSec", "label": "고아 relay 회수 시간 (초)",
+          "type": "int", "default": 120, "min": 10, "max": 3600,
+          "restart": true,
+          "help": "RTP 를 한 번도 못 받은(setup 실패/세션 시작됐으나 무RTP) relay 를 이 초 후 회수. SessionTimeout 보다 짧게(빠른 누수 차단). 회수 시 reason=orphan_no_rtp." }
       ]
     },
     {

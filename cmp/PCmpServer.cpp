@@ -16,12 +16,14 @@
 #include <cctype>
 #include "PMcpttGroup.h"
 #include <fstream>
+#include <tuple>
 
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120), _rtpWorkerCount(4),
       _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _segmentIntervalSec(60),
       _flowFile(nullptr), _msgFile(nullptr), _msgSeq(0), _lastRxSeq(0), _bodyFile(nullptr),
-      _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false)
+      _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false),
+      _leakReclaimTotal(0), _leakReclaimOrphan(0), _leakReclaimHold(0)
 {
     loadConfig();
 
@@ -309,6 +311,10 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         + ",\"ptt_rtp_ports_used\":" + std::to_string(pttUsedPorts)
         + ",\"ptt_rtp_ports_free\":" + std::to_string(pttFreeCount)
         + ",\"session_timeout\":" + std::to_string(_sessionTimeout)
+        + ",\"orphan_reclaim_sec\":" + std::to_string(_orphanReclaimSec)
+        + ",\"leak_reclaim_total\":" + std::to_string(_leakReclaimTotal)
+        + ",\"leak_reclaim_orphan\":" + std::to_string(_leakReclaimOrphan)
+        + ",\"leak_reclaim_hold\":" + std::to_string(_leakReclaimHold)
         + ",\"group_details\":" + groupsJson
         + "}}";
 
@@ -1100,30 +1106,39 @@ void PCmpServer::timeoutLoop() {
         time_t now;
         time(&now);
 
-        // Stale 개별 세션 정리
-        std::vector<std::string> staleSessionIds;
+        // Stale 개별 세션 정리. (sid, bGotRtp, heldSec) — bGotRtp=RTP 받은 적 있음(hold_timeout) vs 무RTP(orphan).
+        std::vector<std::tuple<std::string, bool, int>> staleSessions;
         {
             PAutoLock lock(_mutex);
             for (auto const& [sid, rtp] : _sessions) {
                 if (!rtp) continue;
                 // 고아(RTP 무수신 = setup 실패/실패호) relay 는 짧게(_orphanReclaimSec) 회수,
                 // RTP 받은 적 있는 호(활성/홀드)는 기존 _sessionTimeout 유지 → 홀드 오회수 방지.
-                int to = rtp->everReceivedRtp() ? _sessionTimeout : _orphanReclaimSec;
-                if ((now - rtp->getLastActivityTime()) >= to) {
-                    staleSessionIds.push_back(sid);
+                // touchActivity 가 RTP 수신 시에만 호출되므로 (now - lastActivity) = RTP 무수신 경과.
+                bool bGotRtp = rtp->everReceivedRtp();
+                int to = bGotRtp ? _sessionTimeout : _orphanReclaimSec;
+                int idle = (int)(now - rtp->getLastActivityTime());
+                if (idle >= to) {
+                    staleSessions.emplace_back(sid, bGotRtp, idle);
                 }
             }
         }
-        for (const auto& sid : staleSessionIds) {
-            LOG_INFO("PCmpServer", "Session timeout: session=%s — auto cleanup", sid.c_str());
+        for (const auto& [sid, bGotRtp, heldSec] : staleSessions) {
+            // 누수 회수: owner(CSP)가 REMOVE 를 안 보낸 relay 를 sweeper 가 회수. RtpMap fix 후 이 경로 발동은
+            //   비정상 신호(CSP crash/BYE 누락=hold_timeout, setup 실패=orphan_no_rtp). 카운터+상세기록으로 관측.
+            const char* reason = bGotRtp ? "hold_timeout" : "orphan_no_rtp";
+            LOG_INFO("PCmpServer", "Leak reclaim: session=%s reason=%s held=%ds — sweeper auto cleanup", sid.c_str(),
+                     reason, heldSec);
             PAutoLock lock(_mutex);
             auto it = _sessions.find(sid);
             if (it != _sessions.end()) {
                 PRtpRelay* rtp = it->second;
                 std::string sesid = _sesidMap.count(sid) ? _sesidMap[sid] : issueSesid("");
                 std::string svc = _serviceMap.count(sid) ? _serviceMap[sid] : "volte";
-                logFlow(sid, "cmp", "cmp", "INT", "SESSION_TIMEOUT", "",
-                        "", svc.c_str(), sesid.c_str());
+                logFlow(sid, "cmp", "cmp", "INT", "SESSION_TIMEOUT", reason, "", svc.c_str(), sesid.c_str());
+                _leakReclaimTotal++;
+                if (bGotRtp) _leakReclaimHold++; else _leakReclaimOrphan++;
+                writeLeakReclaim(sid, sesid, svc, reason, heldSec);
                 rtp->reset();
                 freeResource(rtp);
                 _sessions.erase(it);
@@ -1319,6 +1334,29 @@ void PCmpServer::logFlow(const std::string& key, const char* from, const char* t
     emit("iface",   iface ? std::string(iface) : "");
     fprintf(f, "}\n");
     fflush(f);
+}
+
+// 누수 회수 세션 상세를 {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 한 줄 기록(open-append-close).
+//   발동 빈도가 낮아(정상 환경 0) 매 회수마다 open/close 비용은 무시 가능. 콘솔/OAM 이 이 파일을 조회.
+void PCmpServer::writeLeakReclaim(const std::string& sessionId, const std::string& sesid, const std::string& service,
+                                  const char* reason, int heldSec) {
+    if (_serviceLogDir.empty()) return;
+    time_t now = time(nullptr);
+    struct tm t;
+    localtime_r(&now, &t);
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/leak_reclaim/%04d/%02d/%02d", _serviceLogDir.c_str(), t.tm_year + 1900,
+             t.tm_mon + 1, t.tm_mday);
+    mkdirP(dir);
+    std::string path = std::string(dir) + "/reclaim.jsonl";
+    FILE* f = fopen(path.c_str(), "a");
+    if (!f) return;
+    fprintf(f,
+            "{\"ts\":\"%s\",\"node\":\"%s\",\"session_id\":\"%s\",\"sesid\":\"%s\",\"service\":\"%s\","
+            "\"reason\":\"%s\",\"held_sec\":%d}\n",
+            getTimestamp().c_str(), _nodeName.c_str(), _jsonEsc(sessionId.c_str()).c_str(),
+            _jsonEsc(sesid.c_str()).c_str(), _jsonEsc(service.c_str()).c_str(), reason, heldSec);
+    fclose(f);
 }
 
 std::string PCmpServer::getMsgHourDir() {

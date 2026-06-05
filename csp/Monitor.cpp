@@ -5,7 +5,6 @@
 #include "Log.h"
 #include "MemoryDebug.h"
 #include "MonitorDefine.h"
-#include "RtpMap.h"
 #include "ServerService.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"
@@ -35,7 +34,8 @@ bool CMonitor::RecvRequest( const char *pszRequest, CMonitorString &strResponse 
     } else if ( !strcmp( pszRequest, MC_USER_MAP_LIST ) ) {
         gclsUserMap.GetString( strResponse );
     } else if ( !strcmp( pszRequest, MC_RTP_MAP_LIST ) ) {
-        gclsRtpMap.GetString( strResponse );
+        // RTP relay bookkeeping 은 CallMap(relay descriptor)로 통합됨 — CallMap 목록으로 대체.
+        gclsCallMap.GetString( strResponse );
     } else if ( !strcmp( pszRequest, MC_DIALOG_MAP_LIST ) ) {
         gclsUserAgent.GetDialogString( strResponse );
     } else if ( !strcmp( pszRequest, MC_SIP_SERVER_LIST ) ) {

@@ -54,6 +54,10 @@ public:
                         const std::string &strCallee = "", const std::string &strSesId = "" );
     bool Alive();
 
+    // VoIP relay 세션 식별자(cmp_sess_N) 발행 — 전역 유일(프로세스 내 증가). 구 CRtpMap::CreatePort 의
+    // iSeq 발행을 이관. teardown/MODIFY 가 포트가 아닌 이 유일 키로 CMP 세션을 지목한다.
+    static std::string IssueSessionId();
+
     bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                    std::string &strIp, int &iPort, int &iFloorPort, int &iVideoPort,
                    const std::string &strRecordDir = "", const std::string &strLogDir = "", bool bVideoEnabled = false,
@@ -155,7 +159,7 @@ private:
     bool m_bConnected;
     // 연속 HEARTBEAT 실패 횟수. 일시적 UDP 타임아웃 1회에 Disconnected 판정 → 활성 PTT
     // 그룹콜 전체 teardown 되던 과민 동작을 막기 위해, 임계(kMaxAliveFail) 연속 실패에서만 disconnect.
-    int  m_iAliveFailCount;
+    int m_iAliveFailCount;
     std::function<void( bool )> m_fnConnectionCallback;
 
 public:

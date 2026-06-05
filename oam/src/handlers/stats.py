@@ -222,6 +222,7 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         if len(parts) == 0:
             return HandlerResult(status=200, body={'endpoints': [
                 '/api/v1/stats/health', '/api/v1/stats/messages',
+                '/api/v1/stats/leak-reclaims',
                 '/api/v1/stats/service/voip', '/api/v1/stats/service/ptt',
                 '/api/v1/stats/service/summary'
             ]})
@@ -243,6 +244,9 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
             iface = parts[1] if len(parts) > 1 else None  # sip, cmp, csc, https
             date = qp('date')
             return await _messages_stats_v2(config, iface, date)
+
+        if parts[0] == 'leak-reclaims':
+            return await _leak_reclaims(config, qp('date'))
 
         if parts[0] == 'service':
             svc = parts[1] if len(parts) > 1 else 'summary'
@@ -350,6 +354,15 @@ async def _health(config: dict) -> HandlerResult:
                 'used': cmp.get('ptt_rtp_ports_used', 0),
                 'free': cmp.get('ptt_rtp_ports_free', 0),
             },
+            # 누수 회수(sweeper) 관측 — CSP crash/teardown 누락 등으로 고아가 된 relay 를 CMP sweeper 가
+            #   회수한 누적 카운터. RtpMap fix 후 정상 환경에서는 0 이 기대값 — 증가 시 새 누수 신호.
+            'sweeper': {
+                'session_timeout': cmp.get('session_timeout', 0),
+                'orphan_reclaim_sec': cmp.get('orphan_reclaim_sec', 0),
+                'leak_reclaim_total': cmp.get('leak_reclaim_total', 0),
+                'leak_reclaim_orphan': cmp.get('leak_reclaim_orphan', 0),
+                'leak_reclaim_hold': cmp.get('leak_reclaim_hold', 0),
+            },
         },
         'record_enable': csp.get('record_enable', False),
     }
@@ -451,6 +464,45 @@ def _parse_msg_method(msg: str) -> str:
     return method if method in _SIP_REQUEST_METHODS else method
 
 
+async def _leak_reclaims(config, date=None) -> HandlerResult:
+    """CMP sweeper 가 회수한 누수 세션 상세.
+       {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 을 읽어 목록 + reason/node 별 집계 반환.
+       RtpMap fix 후 정상 환경에서는 빈 목록이 기대값 — 항목이 있으면 CSP crash/teardown 누락 등 누수 신호."""
+    if not date:
+        date = datetime.now().strftime('%Y-%m-%d')
+    d = date.replace('-', '')
+    yyyy, mm, dd = d[:4], d[4:6], d[6:8]
+    base = _service_log_dir(config)
+    items = []
+    counts = {'total': 0, 'orphan_no_rtp': 0, 'hold_timeout': 0}
+    by_node: dict = {}
+    if base:
+        path = os.path.join(base, 'leak_reclaim', yyyy, mm, dd, 'reclaim.jsonl')
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            o = json.loads(line)
+                        except Exception:
+                            continue
+                        items.append(o)
+                        counts['total'] += 1
+                        r = o.get('reason', '')
+                        if r in counts:
+                            counts[r] += 1
+                        n = o.get('node', '') or '?'
+                        by_node[n] = by_node.get(n, 0) + 1
+            except Exception:
+                pass
+    items.sort(key=lambda x: x.get('ts', ''), reverse=True)
+    return HandlerResult(status=200, body={'date': date, 'counts': counts, 'by_node': by_node,
+                                           'items': items[:500]})
+
+
 async def _messages_stats_v2(config, iface, date) -> HandlerResult:
     """service_log JSONL 기반 인터페이스별 메시지 통계.
 
@@ -471,7 +523,11 @@ async def _messages_stats_v2(config, iface, date) -> HandlerResult:
                                                'total': 0, 'buckets': [], 'method_counts': {}})
 
     ifaces = [iface] if iface in ('sip', 'cmp', 'csc') else ['sip', 'cmp', 'csc']
-    patterns = [os.path.join(base, yyyy, mm, dd, '*', f'csp_01_{ifc}.msg.jsonl') for ifc in ifaces]
+    # 시간당 단일 파일(*.msg.jsonl) + 5분 버킷 파일(*.msg.{mm5}.jsonl, open-per-write 전환) 모두 포함.
+    patterns = []
+    for ifc in ifaces:
+        patterns.append(os.path.join(base, yyyy, mm, dd, '*', f'csp_01_{ifc}.msg.jsonl'))
+        patterns.append(os.path.join(base, yyyy, mm, dd, '*', f'csp_01_{ifc}.msg.[0-9][0-9].jsonl'))
 
     hourly = {}         # hour → count
     method_counts = {}  # method/status → count

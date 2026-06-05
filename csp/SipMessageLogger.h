@@ -91,11 +91,21 @@ private:
                             const char *pszProto, const char *pszMsg, const char *pszCaller = "",
                             const char *pszCallee = "", const char *pszSesId = "" );
 
-    /** Ensure hourly directories and rotate files if needed */
+    /** 5분 버킷 회전: 디렉터리 보장 + 버킷 변경 시 iface seq 리셋(미계수=-1). 파일 핸들은 유지하지 않음
+     *  (open-per-write). 함수명은 호환을 위해 유지. */
     void EnsureHourlyFiles( const std::string &strFlowHourDir, const std::string &strMsgHourDir );
 
-    /** Close all open files */
+    /** Close all open files (open-per-write 전환 후 no-op 안전망) */
     void CloseAllFiles();
+
+    /** 현재 5분 버킷 접미사 "00".."55" (분/5*5). 파일명에 부여하여 1시간 1파일→5분 1파일. */
+    std::string BucketSuffix();
+    /** flow 파일 경로: {flowHourDir}/{systemId}.flow.{mm5}.jsonl */
+    std::string FlowFilePath();
+    /** iface msg 파일 경로: {msgHourDir}/{systemId}_{iface}.msg.{mm5}.jsonl */
+    std::string MsgFilePath( const char *pszIface );
+    /** 파일의 현재 줄 수 — 버킷 첫 write 시 seq 연속성(재기동 대비) 계수용. 없으면 0. */
+    static int CountFileLines( const std::string &path );
 
     /** Ensure directory exists (recursive) */
     static bool MkdirP( const std::string &path );
@@ -150,6 +160,7 @@ private:
     // Current open file state (hourly rotation)
     std::string m_strCurrentFlowHourDir;
     std::string m_strCurrentMsgHourDir;
+    std::string m_strCurrentBucketKey;  // 5분 버킷 회전 감지 키 ({msgHourDir}/{mm5})
 
     // Flow file (통합, 노드당 1파일)
     FILE *m_pFlowFile;

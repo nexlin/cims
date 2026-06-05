@@ -26,8 +26,4 @@
 
 #define CONFIG_FILENAME "SipServer.xml"
 
-// RtpThread.cpp
-bool StartRtpThread( int iPort );
-bool IsRtpThreadRun();
-
 #endif

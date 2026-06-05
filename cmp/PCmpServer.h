@@ -138,6 +138,16 @@ private:
     // 고아(RTP 무수신) relay 회수 시간(초) — setup 실패/실패호 누수 방지. 활성/홀드 호는 _sessionTimeout 적용.
     int _orphanReclaimSec;
 
+    // 누수 회수(leak reclaim) 관측 — sweeper 가 고아 relay 를 회수한 누적 카운터(STATS 노출) +
+    //   회수 세션 상세를 {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 기록(콘솔 조회용).
+    //   reason=orphan_no_rtp(setup 실패/무RTP, _orphanReclaimSec 회수) | hold_timeout(RTP 받았으나 owner 가
+    //   REMOVE 미발행 = CSP crash/BYE 누락, _sessionTimeout 회수). RtpMap fix 후 이 카운터 증가=새 버그 신호.
+    long _leakReclaimTotal;
+    long _leakReclaimOrphan;
+    long _leakReclaimHold;
+    void writeLeakReclaim( const std::string& sessionId, const std::string& sesid, const std::string& service,
+                           const char* reason, int heldSec );
+
     // Flow 로깅 enable flags (cmp.json: Logging.Flow.{floor,dtmf,rtcp})
     bool _logFlowFloor;   // MCPTT floor control RTCP APP 메시지 기록 여부
     bool _logFlowDtmf;    // RFC 2833/4733 DTMF 이벤트 기록 여부

@@ -13,7 +13,6 @@
 #include "GroupCallService.h"
 #include "Log.h"
 #include "ModuleDispatcher.h"
-#include "RtpMap.h"
 #include "SipMessageLogger.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"

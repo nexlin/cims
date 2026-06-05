@@ -731,9 +731,10 @@ def _resolve_flow_paths(date_str: str, hour: str, service: str) -> list:
 
         if base_dir:
             # 1) New 통합: {node_id}.flow.jsonl (와일드카드로 모든 노드)
+            #    + 5분 버킷 파일 {node_id}.flow.{mm5}.jsonl (open-per-write 전환) 도 함께 수집.
             import glob
-            pattern_new = os.path.join(base_dir, "*.flow.jsonl")
-            found_new = sorted(glob.glob(pattern_new))
+            found_new = sorted(glob.glob(os.path.join(base_dir, "*.flow.jsonl")) +
+                               glob.glob(os.path.join(base_dir, "*.flow.[0-9][0-9].jsonl")))
             if found_new:
                 paths.extend(found_new)
                 continue
@@ -807,7 +808,7 @@ def _resolve_detail_path(date_str: str, hh: str, service: str, proto: str) -> st
 
 
 def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
-                         node: str = "") -> str:
+                         node: str = "", minute=None) -> str:
     """인터페이스별 jsonl의 seq번째 줄에서 msg 필드 반환
 
     node가 지정되면 {node}_*_{iface}.msg.jsonl 로 명확히 선택.
@@ -831,8 +832,18 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
         import glob
         base = os.path.join(_msg_log_dir, yyyy, mm, dd, hh)
         patterns = []
+        # 5분 버킷(open-per-write) 파일: seq 가 버킷별로 리셋되므로 해당 메시지의 minute 으로 정확한 파일 선택.
+        if minute is not None:
+            try:
+                mm5 = "%02d" % ((int(minute) // 5) * 5)
+                if node:
+                    patterns.append(f"{node}_*_{iface}.msg.{mm5}.jsonl")
+                    patterns.append(f"{node}_{iface}.msg.{mm5}.jsonl")
+                patterns.append(f"*_{iface}.msg.{mm5}.jsonl")
+            except (TypeError, ValueError):
+                pass
         if node:
-            # node 기준 정확한 매칭 (csp/cmp/csc 중 하나)
+            # node 기준 정확한 매칭 (csp/cmp/csc 중 하나) — legacy(비버킷) 파일
             patterns.append(f"{node}_*_{iface}.msg.jsonl")
             patterns.append(f"{node}_{iface}.msg.jsonl")
         patterns.extend([f"*_{iface}.msg.jsonl",
@@ -893,8 +904,8 @@ def _extract_sesids_from_msg_jsonl(call_ids: list, date_str: str, hour: str = No
         base = os.path.join(_calls_dir, yyyy, mm, dd, hh)
         if not os.path.isdir(base):
             continue
-        # csp_*_sip.msg.jsonl 우선, fallback msg.jsonl
-        for pat in ("*_sip.msg.jsonl", "*_sip.jsonl"):
+        # csp_*_sip.msg.jsonl + 5분 버킷 *_sip.msg.{mm5}.jsonl(open-per-write), fallback msg.jsonl
+        for pat in ("*_sip.msg.jsonl", "*_sip.msg.[0-9][0-9].jsonl", "*_sip.jsonl"):
             for path in _glob.glob(os.path.join(base, pat)):
                 try:
                     with open(path, 'r') as f:
@@ -2100,6 +2111,18 @@ async def _handle_flow_body(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     iface = _qval("iface", "sip")
     node = _qval("node", "")  # 여러 노드 msg 파일 존재 시 정확한 선택
 
+    # 5분 버킷(open-per-write) 파일 선택용 minute — 프론트가 메시지의 min 또는 ts(HH:MM:SS)를 전달.
+    minute = None
+    min_str = _qval("min", "")
+    if min_str.isdigit():
+        minute = int(min_str)
+    else:
+        ts_q = _qval("ts", "")
+        if ts_q and ":" in ts_q:
+            parts = ts_q.split(":")
+            if len(parts) >= 2 and parts[1].isdigit():
+                minute = int(parts[1])
+
     # New: seq-based lookup ({node}_*_{iface}.msg.jsonl)
     if seq_str and hour:
         try:
@@ -2107,7 +2130,7 @@ async def _handle_flow_body(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
         except ValueError:
             seq = 0
         if seq > 0:
-            body = _lookup_body_by_seq(date_str, hour, seq, iface=iface, node=node)
+            body = _lookup_body_by_seq(date_str, hour, seq, iface=iface, node=node, minute=minute)
             return HandlerResult(status=200, body=json.dumps({"body": body}),
                                  media_type="application/json")
 

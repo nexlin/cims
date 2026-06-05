@@ -20,6 +20,7 @@ import OrganizationsPage from './pages/OrganizationsPage'
 import MembersPage from './pages/MembersPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import PttGroupsPage from './pages/PttGroupsPage'
+import LeakReclaimsPage from './pages/LeakReclaimsPage'
 import ServiceDescriptorsPage from '../../pages/ServiceDescriptorsPage'  // 코어 페이지 — '구성' 그룹에 배치
 
 import {
@@ -71,6 +72,7 @@ export const cimsManifest: ServiceManifest = {
         { path: '/stats/cmp',   title: 'CMP 통계',   layout: STATS_CMP_LAYOUT,   layoutId: 'stats.cmp',   requiredRole: 'monitor' },
         { path: '/stats/csc',   title: 'CSC 통계',   layout: STATS_CSC_LAYOUT,   layoutId: 'stats.csc',   requiredRole: 'monitor' },
         { path: '/stats/https', title: 'HTTPS 통계', layout: STATS_HTTPS_LAYOUT, layoutId: 'stats.https', requiredRole: 'monitor' },
+        { path: '/stats/leak-reclaims', title: '누수 회수(sweeper)', component: LeakReclaimsPage, requiredRole: 'monitor' },
       ],
     },
     // ── 구성 (admin) — 가입자 프로비저닝 + 서비스 정의. FCAPS Configuration. ──

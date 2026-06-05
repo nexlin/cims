@@ -18,9 +18,9 @@
  */
 #include "CallMap.h"
 
+#include "CmpClient.h"
 #include "Log.h"
 #include "MemoryDebug.h"
-#include "RtpMap.h"
 #include "SipServer.h"
 
 CCallMap gclsCallMap;
@@ -207,35 +207,63 @@ bool CCallMap::Delete( const char *pszCallId, bool bStopPort ) {
     CALL_MAP::iterator itMap;
     bool bRes = false;
     std::string strCallId;
-    int iPort = -1;
+    // teardown 대상 CMP relay 세션을 포트가 아닌 session_id(전역 유일)로 지목 → 노드간 포트충돌 오지목/누수 차단.
+    std::string strRelaySid, strRelaySesId, strRelayCaller, strRelayCallee;
+    auto captureRelay = [&]( const CCallInfo &ci ) {
+        if ( strRelaySid.empty() && !ci.m_strRelaySessionId.empty() ) {
+            strRelaySid = ci.m_strRelaySessionId;
+            strRelaySesId = ci.m_strRelaySesId;
+            strRelayCaller = ci.m_strRelayCaller;
+            strRelayCallee = ci.m_strRelayCallee;
+        }
+    };
     m_clsMutex.acquire();
     itMap = m_clsMap.find( pszCallId );
     if ( itMap != m_clsMap.end() ) {
         strCallId = itMap->second.m_strPeerCallId;
-        if ( itMap->second.m_iPeerRtpPort > 0 ) {
-            iPort = itMap->second.m_iPeerRtpPort;
-        }
+        captureRelay( itMap->second );
         m_clsMap.erase( itMap );
         bRes = true;
     }
     if ( bRes ) {
         itMap = m_clsMap.find( strCallId );
         if ( itMap != m_clsMap.end() ) {
-            if ( itMap->second.m_iPeerRtpPort > 0 ) {
-                iPort = itMap->second.m_iPeerRtpPort;
-            }
+            captureRelay( itMap->second );
             m_clsMap.erase( itMap );
         }
     }
     m_clsMutex.release();
-    if ( bStopPort && iPort > 0 ) {
-        gclsRtpMap.Delete( iPort );
-        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) -> RtpMap::Delete(port=%d)", pszCallId, iPort );
+    // CMP 호출은 lock 해제 후(네트워크 I/O). PTT 그룹 호는 relay session 이 없어(LeaveGroup 경로) skip.
+    if ( bStopPort && !strRelaySid.empty() ) {
+        gclsCmpClient.RemoveSession( strRelaySid, strRelayCaller, strRelayCallee, strRelaySesId );
+        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) -> RemoveSession session=%s", pszCallId, strRelaySid.c_str() );
     } else {
-        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) SKIPPED RtpMap::Delete (iPort=%d, bStopPort=%d)",
-                     pszCallId, iPort, bStopPort );
+        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) SKIPPED RemoveSession (relaySid='%s', bStopPort=%d)", pszCallId,
+                     strRelaySid.c_str(), bStopPort );
     }
     return bRes;
+}
+
+void CCallMap::SetRelayInfo( const char *pszCallId, const std::string &strSessionId, const std::string &strSesId,
+                             const std::string &strLocalIp, const std::string &strCaller,
+                             const std::string &strCallee ) {
+    m_clsMutex.acquire();
+    auto apply = [&]( CALL_MAP::iterator it ) {
+        if ( it == m_clsMap.end() ) return;
+        it->second.m_strRelaySessionId = strSessionId;
+        it->second.m_strRelaySesId = strSesId;
+        it->second.m_strRelayLocalIp = strLocalIp;
+        it->second.m_strRelayCaller = strCaller;
+        it->second.m_strRelayCallee = strCallee;
+    };
+    auto it = m_clsMap.find( pszCallId );
+    std::string strPeer;
+    if ( it != m_clsMap.end() ) {
+        strPeer = it->second.m_strPeerCallId;
+        apply( it );
+    }
+    if ( !strPeer.empty() ) apply( m_clsMap.find( strPeer ) );  // B2BUA 양 leg 동일 relay 공유
+    m_clsMutex.release();
 }
 
 bool CCallMap::DeleteOne( const char *pszCallId ) {
@@ -301,7 +329,7 @@ void CCallMap::DeleteTimeout( int iTimeoutSec ) {
         CLog::Print( LOG_INFO, "Stale call reclaim: CallId(%s) — StopCall + relay free (teardown 누락 신호)",
                      strCallId.c_str() );
         gclsUserAgent.StopCall( strCallId.c_str() );
-        Delete( strCallId.c_str() );   // bStopPort=true → RtpMap::Delete → RemoveSession (relay 회수)
+        Delete( strCallId.c_str() );  // bStopPort=true → session_id 로 CmpClient::RemoveSession (relay 회수)
     }
 }
 

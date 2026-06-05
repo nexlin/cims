@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <sstream>
@@ -13,6 +14,12 @@
 #include "Log.h"
 #include "SimpleJson.h"
 #include "SipMessageLogger.h"
+
+// VoIP relay 세션 식별자 발행 (전역 유일). 구 CRtpMap::CreatePort 의 static iSeq 이관.
+std::string CCmpClient::IssueSessionId() {
+    static std::atomic<unsigned long> s_seq{ 0 };
+    return "cmp_sess_" + std::to_string( ++s_seq );
+}
 
 CCmpClient::CCmpClient()
     : m_iCmpPort( 0 ),

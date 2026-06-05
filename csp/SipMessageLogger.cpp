@@ -429,45 +429,57 @@ void CSipMessageLogger::LogMessage( const char *pszFrom, const char *pszTo, cons
 }
 
 void CSipMessageLogger::EnsureHourlyFiles( const std::string &strFlowHourDir, const std::string &strMsgHourDir ) {
-    // Called under m_mtx lock
-    bool bFlowChanged = ( strFlowHourDir != m_strCurrentFlowHourDir );
-    bool bMsgChanged = ( strMsgHourDir != m_strCurrentMsgHourDir );
+    // Called under m_mtx lock. 5분 버킷 회전 — 파일 핸들을 유지하지 않고(open-per-write) 디렉터리만 보장하고,
+    //   버킷이 바뀌면 iface seq 를 '미계수(-1)' 로 리셋한다(다음 write 가 기존 줄 수를 계수해 이어붙임).
+    //   (구버전은 시간당 파일을 1시간 내내 열어두었다 → 운영 중 로그 삭제 시 .nfs 고아·데이터 유실 +
+    //    대용량 파일 검색 부담. 매 줄 open/append/close + 5분 파일로 전환.)
+    std::string strBucketKey = strMsgHourDir + "/" + BucketSuffix();
+    if ( strBucketKey == m_strCurrentBucketKey ) return;
+    m_strCurrentBucketKey = strBucketKey;
 
-    if ( !bFlowChanged && !bMsgChanged ) return;
-
-    // Close all existing files on any change
-    CloseAllFiles();
-
-    // Update flow dir
-    if ( bFlowChanged && !strFlowHourDir.empty() ) {
+    if ( !strFlowHourDir.empty() ) {
         MkdirP( strFlowHourDir );
         m_strCurrentFlowHourDir = strFlowHourDir;
     }
-
-    // Update msg dir and open interface files
-    if ( bMsgChanged && !strMsgHourDir.empty() ) {
+    if ( !strMsgHourDir.empty() ) {
         MkdirP( strMsgHourDir );
         m_strCurrentMsgHourDir = strMsgHourDir;
-
-        // Open per-interface files and count existing lines for seq continuity
-        const char *ifaces[] = { "sip", "cmp", "csc" };
-        FILE **files[] = { &m_pSipFile, &m_pCmpFile, &m_pCscFile };
-        int *seqs[] = { &m_iSipSeq, &m_iCmpSeq, &m_iCscSeq };
-
-        for ( int i = 0; i < 3; i++ ) {
-            std::string path = strMsgHourDir + "/" + m_strSystemId + "_" + ifaces[i] + ".msg.jsonl";
-            *files[i] = fopen( path.c_str(), "a+" );
-            *seqs[i] = 0;
-            if ( *files[i] ) {
-                fseek( *files[i], 0, SEEK_SET );
-                char buf[4096];
-                while ( fgets( buf, sizeof( buf ), *files[i] ) ) ( *seqs[i] )++;
-                fseek( *files[i], 0, SEEK_END );
-            }
-        }
     }
+    // 새 버킷 → 다음 write 가 해당 파일의 기존 줄 수를 lazy 계수(재기동 시 seq 연속성).
+    m_iSipSeq = -1;
+    m_iCmpSeq = -1;
+    m_iCscSeq = -1;
+}
 
-    // Flow files are opened on first write (lazy) via GetFlowFile()
+std::string CSipMessageLogger::BucketSuffix() {
+    time_t now = time( NULL );
+    struct tm t;
+    localtime_r( &now, &t );
+    char buf[8];
+    snprintf( buf, sizeof( buf ), "%02d", ( t.tm_min / 5 ) * 5 );  // 00,05,10,...,55
+    return buf;
+}
+
+std::string CSipMessageLogger::FlowFilePath() {
+    std::string dir = GetFlowHourDir();
+    if ( dir.empty() ) return "";
+    return dir + "/" + m_strSystemId + ".flow." + BucketSuffix() + ".jsonl";
+}
+
+std::string CSipMessageLogger::MsgFilePath( const char *pszIface ) {
+    std::string dir = GetMsgHourDir();
+    if ( dir.empty() ) return "";
+    return dir + "/" + m_strSystemId + "_" + ( pszIface ? pszIface : "sip" ) + ".msg." + BucketSuffix() + ".jsonl";
+}
+
+int CSipMessageLogger::CountFileLines( const std::string &path ) {
+    FILE *f = fopen( path.c_str(), "r" );
+    if ( !f ) return 0;
+    int n = 0;
+    char buf[4096];
+    while ( fgets( buf, sizeof( buf ), f ) ) n++;
+    fclose( f );
+    return n;
 }
 
 FILE *CSipMessageLogger::GetFlowFile() {
@@ -498,7 +510,9 @@ void CSipMessageLogger::WriteFlowLine( const char *pszService, const char *pszTs
                                        const char *pszDetail, const char *pszTxId, const char *pszSesId,
                                        const char *pszSubId, int iSeq, const char *pszIface, const char *pszCaller,
                                        const char *pszCallee ) {
-    FILE *pFile = GetFlowFile();
+    std::string strPath = FlowFilePath();
+    if ( strPath.empty() ) return;
+    FILE *pFile = fopen( strPath.c_str(), "a" );  // open-per-write (5분 버킷 파일)
     if ( !pFile ) return;
 
     // 순서: ts, service, caller, callee, sesid, subid, node, from, to,
@@ -533,19 +547,23 @@ void CSipMessageLogger::WriteFlowLine( const char *pszService, const char *pszTs
     if ( iSeq > 0 ) emit( "seq", "", true, iSeq );
     emit( "iface", pszIface ? pszIface : "" );
     fprintf( pFile, "}\n" );
-    fflush( pFile );
+    fclose( pFile );
 }
 
 int CSipMessageLogger::WriteInterfaceLine( const char *pszIface, const char *pszTs, const char *pszDir,
                                            const char *pszPeer, const char *pszProto, const char *pszMsg,
                                            const char *pszCaller, const char *pszCallee, const char *pszSesId ) {
     // Called under m_mtx lock
-    FILE *pFile = GetInterfaceFile( pszIface );
+    std::string strPath = MsgFilePath( pszIface );
+    if ( strPath.empty() ) return 0;
+
+    int &iSeq = GetIfaceSeq( pszIface );
+    if ( iSeq < 0 ) iSeq = CountFileLines( strPath );  // 버킷 첫 write: 기존 줄 수 계수(재기동 연속성)
+
+    FILE *pFile = fopen( strPath.c_str(), "a" );  // open-per-write (5분 버킷 파일)
     if ( !pFile ) return 0;
 
     std::string strEscMsg = JsonEsc( pszMsg );
-
-    int &iSeq = GetIfaceSeq( pszIface );
     iSeq++;
 
     // 순서: ts, dir, peer, caller, callee, sesid, proto, msg
@@ -555,7 +573,7 @@ int CSipMessageLogger::WriteInterfaceLine( const char *pszIface, const char *psz
     if ( pszCallee && pszCallee[0] ) fprintf( pFile, ",\"callee\":\"%s\"", JsonEsc( pszCallee ).c_str() );
     if ( pszSesId && pszSesId[0] ) fprintf( pFile, ",\"sesid\":\"%s\"", JsonEsc( pszSesId ).c_str() );
     fprintf( pFile, ",\"proto\":\"%s\",\"msg\":\"%s\"}\n", pszProto ? pszProto : "", strEscMsg.c_str() );
-    fflush( pFile );
+    fclose( pFile );
 
     return iSeq;
 }

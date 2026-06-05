@@ -54,6 +54,9 @@ export const flowApi = {
       params.set('seq', String(seq))
       if (iface) params.set('iface', iface)
       if (node) params.set('node', node)
+      // 5분 버킷(open-per-write) 파일에서 seq 는 버킷별로 리셋되므로, 메시지 ts(HH:MM:SS)를 함께 전달해
+      // 서버가 정확한 5분 파일을 선택하게 한다. (구 단일 시간당 파일은 ts 무시 → 호환)
+      if (ts) params.set('ts', ts)
     } else {
       if (ts) params.set('ts', ts)
       if (dir) params.set('dir', dir)

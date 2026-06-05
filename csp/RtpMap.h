@@ -1,78 +1,10 @@
 #ifndef _RTP_MAP_H_
 #define _RTP_MAP_H_
 
-#include <map>
-#include <string>
-
-#include "SipMutex.h"
-#include "SipParserDefine.h"
-#include "SipUdp.h"
-#include "SipUserAgentCallBack.h"
-
+// RTP 미디어당 소켓 개수 상수.
+// (구 CRtpMap/CRtpInfo/CRtpThread 는 CSP 가 RTP 를 직접 relay 하던 미디어서버 분리 전 코드로,
+//  멀티 미디어노드 도입 후 포트단독키 충돌 누수 버그의 원인이 되어 제거됨. relay 세션 bookkeeping 은
+//  CallMap(CCallInfo) 의 relay descriptor + CmpClient 직접 호출로 대체. 이 상수만 공용으로 유지.)
 #define SOCKET_COUNT_PER_MEDIA 4
-
-class CRtpInfo {
-public:
-    CRtpInfo( uint8_t iSocketCount = SOCKET_COUNT_PER_MEDIA );
-
-    std::string m_strSessionId;
-    std::string m_strCaller;  // peer_index=0 MSISDN
-    std::string m_strCallee;  // peer_index=1 MSISDN
-    std::string m_strSesId;   // Flow 상관용 sesid
-
-    Socket *m_phSocket;
-    uint32_t *m_piIp;
-    IN6_ADDR *m_psttIp;
-    uint16_t *m_piPort;
-
-    int m_iStartPort;
-    std::string m_strLocalIp;
-    bool m_bStop;
-    uint8_t m_iSocketCount;
-
-    bool Create();
-    void Close();
-
-    void CloseSocket();
-    void SetIpPort( int iIndex, uint32_t iIp, uint16_t sPort, int iPeerIdx = 0 );
-    void SetIpPort( int iIndex, IN6_ADDR *psttAddr, uint16_t sPort );
-    void ReSetIPPort();
-    bool Send( int iIndex, char *pszPacket, int iPacketLen );
-};
-
-typedef std::map<int, CRtpInfo> RTP_MAP;
-
-/**
- * @ingroup CspServer
- * @brief RTP relay 를 위한 RTP 맵 자료구조 저장 클래스
- */
-class CRtpMap {
-public:
-    CRtpMap();
-    ~CRtpMap();
-
-    int CreatePort( int iSocketCount, const std::string &strRecordDir = "", const std::string &strLogDir = "",
-                    const std::string &strCaller = "", const std::string &strCallee = "",
-                    const std::string &strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
-                    const std::string &strSesId = "" );
-
-    bool Select( int iPort, CRtpInfo **ppclsRtpInfo );
-    bool SetStop( int iPort );
-    bool Delete( int iPort );
-    bool ReSetIpPort( int iPort );
-
-    void GetString( CMonitorString &strBuf );
-
-    // [FIX] Thread-safe wrappers
-    bool SetIpPort( int iPort, int iIndex, uint32_t iIp, uint16_t sPort, int iPeerIdx = 0 );
-    bool GetLocalIp( int iPort, std::string &strLocalIp );
-    bool GetSessionId( int iPort, std::string &strSessionId );
-
-private:
-    RTP_MAP m_clsMap;
-    CSipMutex m_clsMutex;
-};
-
-extern CRtpMap gclsRtpMap;
 
 #endif
