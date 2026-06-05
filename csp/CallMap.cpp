@@ -26,7 +26,7 @@
 CCallMap gclsCallMap;
 CCallMap gclsTransCallMap;
 
-CCallInfo::CCallInfo() : m_bRecv( false ), m_iPeerRtpPort( -1 ), m_iLastActivityTime( 0 ) {
+CCallInfo::CCallInfo() : m_bRecv( false ), m_iPeerRtpPort( -1 ), m_iLastActivityTime( 0 ), m_bEstablished( false ) {
     time( &m_iLastActivityTime );
 }
 
@@ -230,13 +230,10 @@ bool CCallMap::Delete( const char *pszCallId, bool bStopPort ) {
     m_clsMutex.release();
     if ( bStopPort && iPort > 0 ) {
         gclsRtpMap.Delete( iPort );
-        // printf("[DEBUG] CallMap::Delete(%s) -> RtpMap::Delete(%d)\n", pszCallId, iPort);
-        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) -> RtpMap::Delete(%d)", pszCallId, iPort );
+        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) -> RtpMap::Delete(port=%d)", pszCallId, iPort );
     } else {
-        // printf("[DEBUG] CallMap::Delete(%s) SKIPPED RtpMap::Delete (iPort=%d, bStopPort=%d)\n", pszCallId, iPort,
-        // bStopPort);
-        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) SKIPPED RtpMap::Delete (iPort=%d, bStopPort=%d)", pszCallId, iPort,
-                     bStopPort );
+        CLog::Print( LOG_DEBUG, "CallMap::Delete(%s) SKIPPED RtpMap::Delete (iPort=%d, bStopPort=%d)",
+                     pszCallId, iPort, bStopPort );
     }
     return bRes;
 }
@@ -259,8 +256,32 @@ bool CCallMap::DeleteOne( const char *pszCallId ) {
  * @brief 마지막 activity 이후 iTimeoutSec 초가 지난 stale 통화를 종료한다.
  * @param iTimeoutSec 타임아웃 시간 (초)
  */
+void CCallMap::SetEstablished( const char *pszCallId ) {
+    time_t iNow;
+    time( &iNow );
+    m_clsMutex.acquire();
+    auto itMap = m_clsMap.find( pszCallId );
+    if ( itMap != m_clsMap.end() ) {
+        itMap->second.m_bEstablished = true;
+        itMap->second.m_iLastActivityTime = iNow;
+        // peer leg 도 동일 표시
+        auto itPeer = m_clsMap.find( itMap->second.m_strPeerCallId );
+        if ( itPeer != m_clsMap.end() ) {
+            itPeer->second.m_bEstablished = true;
+            itPeer->second.m_iLastActivityTime = iNow;
+        }
+    }
+    m_clsMutex.release();
+}
+
 void CCallMap::DeleteTimeout( int iTimeoutSec ) {
-    if ( iTimeoutSec <= 0 ) return;
+    // 미확립(pending) 호: INVITE 트랜잭션 사망(~32s) 후 확실히 정리 → relay 누수 방지.
+    //   (호 실패(4xx-6xx) 시 psip 가 EventCallEnd 통보를 놓치는 경우의 안전망.)
+    // 확립(established) 호: BYE(EventCallEnd)로만 종료. 장시간 호를 강제종료하지 않도록
+    //   매우 긴 안전 상한(기본 6h)에서만 회수. (구버전은 단일 timeout 으로 5분 호도 끊던 잠재버그)
+    if ( iTimeoutSec <= 0 ) iTimeoutSec = 300;
+    int iPendingTimeout = ( iTimeoutSec < 60 ) ? iTimeoutSec : 60;
+    int iEstablishedCap = 21600;  // 6h 안전 상한
 
     std::list<std::string> clsStaleList;
     time_t iNow;
@@ -268,16 +289,19 @@ void CCallMap::DeleteTimeout( int iTimeoutSec ) {
 
     m_clsMutex.acquire();
     for ( auto itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
-        if ( itMap->second.m_iLastActivityTime > 0 && ( iNow - itMap->second.m_iLastActivityTime ) >= iTimeoutSec ) {
-            clsStaleList.push_back( itMap->first );
-        }
+        if ( itMap->second.m_iLastActivityTime <= 0 ) continue;
+        time_t age = iNow - itMap->second.m_iLastActivityTime;
+        bool bStale = itMap->second.m_bEstablished ? ( age >= iEstablishedCap ) : ( age >= iPendingTimeout );
+        if ( bStale ) clsStaleList.push_back( itMap->first );
     }
     m_clsMutex.release();
 
     for ( const auto &strCallId : clsStaleList ) {
-        CLog::Print( LOG_INFO, "Stale call timeout: CallId(%s) — sending BYE", strCallId.c_str() );
+        // 정상 환경에선 여기 도달 자체가 비정상(고아 teardown 미완) — WARN 성격으로 남긴다.
+        CLog::Print( LOG_INFO, "Stale call reclaim: CallId(%s) — StopCall + relay free (teardown 누락 신호)",
+                     strCallId.c_str() );
         gclsUserAgent.StopCall( strCallId.c_str() );
-        Delete( strCallId.c_str() );
+        Delete( strCallId.c_str() );   // bStopPort=true → RtpMap::Delete → RemoveSession (relay 회수)
     }
 }
 

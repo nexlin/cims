@@ -135,6 +135,8 @@ private:
 
     // Session timeout (seconds, 0=disabled)
     int _sessionTimeout;
+    // 고아(RTP 무수신) relay 회수 시간(초) — setup 실패/실패호 누수 방지. 활성/홀드 호는 _sessionTimeout 적용.
+    int _orphanReclaimSec;
 
     // Flow 로깅 enable flags (cmp.json: Logging.Flow.{floor,dtmf,rtcp})
     bool _logFlowFloor;   // MCPTT floor control RTCP APP 메시지 기록 여부

@@ -297,10 +297,14 @@ bool CRtpMap::Delete( int iPort ) {
         // [FIX] Ensure resources are freed
         itMap->second.Close();
 
+        CLog::Print( LOG_DEBUG, "RtpMap::Delete(port=%d) -> RemoveSession sesid=%s", iPort, itMap->second.m_strSesId.c_str() );
         gclsCmpClient.RemoveSession( itMap->second.m_strSessionId, itMap->second.m_strCaller, itMap->second.m_strCallee,
                                      itMap->second.m_strSesId );
         m_clsMap.erase( itMap );
         bRes = true;
+    } else {
+        // port 가 이미 erase 됨(중복 Delete) — 첫 Delete 가 RemoveSession 송신했으므로 정상.
+        CLog::Print( LOG_DEBUG, "RtpMap::Delete(port=%d) NOT_FOUND (already removed)", iPort );
     }
     m_clsMutex.release();
 

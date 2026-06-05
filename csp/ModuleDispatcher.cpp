@@ -614,8 +614,16 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     if ( iOutboundLocalPort > 0 ) clsRoute.m_iOutboundLocalPort = iOutboundLocalPort;
 
     CSipMessage *pclsInvite;
-    if ( gclsUserAgent.CreateCall( pszFrom, pszTo, pclsRtp, &clsRoute, strCallId, &pclsInvite ) == false )
+    if ( gclsUserAgent.CreateCall( pszFrom, pszTo, pclsRtp, &clsRoute, strCallId, &pclsInvite ) == false ) {
+        // [LEAK-FIX] B-leg INVITE 생성 실패 — 직전 CreatePort 로 만든 CMP relay 가 CallMap.Insert
+        //   전이라 추적 불가(고아) 상태로 누수된다. 여기서 즉시 RemoveSession 으로 회수한다.
+        //   (호 실패 ~14% 의 주요 RTP 누수 원인 — 호이력/RTP점유율 이상 징후의 근본.)
+        if ( iStartPort > 0 ) {
+            CLog::Print( LOG_INFO, "CreateCall failed — freeing orphan RTP relay port=%d callid=%s", iStartPort, pszCallId );
+            gclsRtpMap.Delete( iStartPort );
+        }
         return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
+    }
 
     // P-Asserted-Identity: B2BUA 발신 leg에 인증된 발신자 신원 전달 (3GPP TS 24.229)
     if ( pclsInvite ) {
@@ -678,6 +686,9 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
 void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallStart(%s)", pszCallId );
+
+    // 확립(answer) 표시 — sweeper 가 미확립(pending) 호만 빠르게 회수하도록.
+    gclsCallMap.SetEstablished( pszCallId );
 
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         // Service log: VoipCallAnswer
@@ -761,7 +772,13 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallEnd(%s:%d)", pszCallId, iSipStatus );
 
-    if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
+    bool bSelHit = gclsCallMap.Select( pszCallId, clsCallInfo );
+    CLog::Print( LOG_DEBUG, "EventCallEnd callid=%s sip=%d selHit=%d peer=%s peerRtpPort=%d",
+                 pszCallId, iSipStatus, bSelHit ? 1 : 0,
+                 bSelHit ? clsCallInfo.m_strPeerCallId.c_str() : "-",
+                 bSelHit ? clsCallInfo.m_iPeerRtpPort : -1 );
+
+    if ( bSelHit ) {
         // Service log: VoipCallEnd
         if ( gclsCallDir.IsEnabled() ) {
             std::string strOrigCallId = pszCallId;

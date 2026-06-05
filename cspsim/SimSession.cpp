@@ -511,9 +511,14 @@ void SimSession::StartCall(const std::string& strTarget) {
 
 void SimSession::StopCall() {
     if (!m_strInviteId.empty()) {
+        // [TEARDOWN-DIAG] establish(200 OK 수신=m_bInCall) 여부 기록.
+        //   inCall=0 이면 psip StopCall 이 BYE 대신 CANCEL/no-op → CSP no-BYE 누수 원인 후보.
+        printf("[%d] [TD] StopCall callid=%s inCall=%d\n", m_iId, m_strInviteId.c_str(), m_bInCall ? 1 : 0);
         m_clsUserAgent.StopCall(m_strInviteId.c_str());
         m_clsRtpThread.Stop();
         m_strInviteId.clear();
+    } else {
+        printf("[%d] [TD] StopCall NOOP (no inviteId) inCall=%d\n", m_iId, m_bInCall ? 1 : 0);
     }
 }
 

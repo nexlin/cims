@@ -45,6 +45,10 @@ public:
 
     /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
     time_t m_iLastActivityTime;
+
+    /** 200 OK 로 확립(answer)되었는가? — sweeper 가 미확립(pending) 호를 빠르게 회수하고
+     *  확립 호는 BYE 로만 종료(장시간 호 강제종료 방지)하기 위함. */
+    bool m_bEstablished;
 };
 
 /**
@@ -71,6 +75,9 @@ public:
     bool SelectToRing( const char *pszTo, std::string &strCallId );
     bool Delete( const char *pszCallId, bool bStopPort = true );
     bool DeleteOne( const char *pszCallId );
+
+    /** 호를 확립(answer) 상태로 표시 (해당 callId + peer). EventCallStart 에서 호출. */
+    void SetEstablished( const char *pszCallId );
 
     void DeleteTimeout( int iTimeoutSec );
     void StopCallAll();

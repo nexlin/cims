@@ -36,8 +36,10 @@ public:
     std::string getSessionId() const { return _sessionId; }
     void setWorkerName(const std::string& n) { _workerName = n; }
     std::string getWorkerName() const { return _workerName; }
-    void touchActivity() { time(&_lastActivityTime); }
+    void touchActivity() { time(&_lastActivityTime); _everReceivedRtp = true; }
     time_t getLastActivityTime() const { return _lastActivityTime; }
+    // RTP 를 한 번이라도 받았는가 — 고아(setup 실패) relay 빠른 회수 vs 활성/홀드 호 보존 구분용.
+    bool everReceivedRtp() const { return _everReceivedRtp; }
 
     void sendVideoTo(const std::string& ip, int port, char* data, int len);
 
@@ -76,6 +78,7 @@ private:
     std::string _sessionId;
     std::string _workerName;
     time_t      _lastActivityTime = 0;
+    bool        _everReceivedRtp = false;
     unsigned int _localPort = 0;
     unsigned int _localVideoPort = 0;
     PeerInfo    _peers[2];

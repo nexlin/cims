@@ -18,7 +18,7 @@
 #include <fstream>
 
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
-    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _rtpWorkerCount(4),
+    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120), _rtpWorkerCount(4),
       _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _segmentIntervalSec(60),
       _flowFile(nullptr), _msgFile(nullptr), _msgSeq(0), _lastRxSeq(0), _bodyFile(nullptr),
       _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false)
@@ -894,6 +894,7 @@ void PCmpServer::loadConfig() {
         if (root.Has("DtmfPushDigit")) _dtmfPushDigit = root.GetString("DtmfPushDigit");
         if (root.Has("DtmfReleaseDigit")) _dtmfReleaseDigit = root.GetString("DtmfReleaseDigit");
         if (root.Has("SessionTimeout")) _sessionTimeout = (int)root.GetInt("SessionTimeout");
+        if (root.Has("OrphanReclaimSec")) _orphanReclaimSec = (int)root.GetInt("OrphanReclaimSec");
         if (root.Has("RtpWorkerCount")) {
             int w = (int)root.GetInt("RtpWorkerCount");
             if (w >= 1 && w <= 32) _rtpWorkerCount = w;
@@ -1104,7 +1105,11 @@ void PCmpServer::timeoutLoop() {
         {
             PAutoLock lock(_mutex);
             for (auto const& [sid, rtp] : _sessions) {
-                if (rtp && (now - rtp->getLastActivityTime()) >= _sessionTimeout) {
+                if (!rtp) continue;
+                // 고아(RTP 무수신 = setup 실패/실패호) relay 는 짧게(_orphanReclaimSec) 회수,
+                // RTP 받은 적 있는 호(활성/홀드)는 기존 _sessionTimeout 유지 → 홀드 오회수 방지.
+                int to = rtp->everReceivedRtp() ? _sessionTimeout : _orphanReclaimSec;
+                if ((now - rtp->getLastActivityTime()) >= to) {
                     staleSessionIds.push_back(sid);
                 }
             }

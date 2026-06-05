@@ -324,6 +324,7 @@ static void PrintUsage(const char* pszBin) {
     printf("  -xcap_root <url>         [ptt] SUBSCRIBE 후 XCAP 문서 능동 GET (예: https://121.161.164.47:4430/)\n");
     printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
     printf("  -db          <csp.json>  DB에서 가입자 정보 로드 (user/auth_id/password/domain 자동 설정)\n");
+    printf("  -db_offset   <N>         [db] 로드된 가입자 앞쪽 N명 건너뜀 (인스턴스별 disjoint 풀 할당)\n");
     printf("  -verbose                 SIP 메시지 상세 로그\n\n");
     printf("Commands (실행 중):\n");
     printf("  s           - 통계 출력\n");
@@ -420,31 +421,41 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         if (iCps > 0 && strCalleeOverride.empty()) {
             int htSec = (iHtSec > 0) ? iHtSec : iCallDuration;
             int nPairs = (int)sessions.size() / 2;
-            int totalCalls = nPairs;
-            if (iTotalCalls > 0 && iTotalCalls < nPairs) totalCalls = iTotalCalls;
+            // 총 발신 호수: -calls 지정 시 그 값(pair 수 무관 — pair 재사용으로 장시간 지속).
+            //   미지정 시 pair 수(각 pair 1회). 동시호 ≈ cps×ht 이므로 nPairs > cps×ht 필요.
+            int totalCalls = (iTotalCalls > 0) ? iTotalCalls : nPairs;
             int launchIntervalMs = (int)(1000.0 / (double)iCps);
             if (launchIntervalMs < 1) launchIntervalMs = 1;
-            printf("[Scenario] Sustained call test: cps=%d ht=%ds total=%d calls "
+            printf("[Scenario] Sustained call test: cps=%d ht=%ds total=%d calls pairs=%d "
                    "(launch interval=%dms, expected concurrent≈%d)\n",
-                   iCps, htSec, totalCalls, launchIntervalMs, iCps * htSec);
+                   iCps, htSec, totalCalls, nPairs, launchIntervalMs, iCps * htSec);
 
             struct PendingStop { int pairIdx; long stopAtMs; };
             std::vector<PendingStop> active;
-            long nowMs = 0;
-            int launched = 0, stopped = 0, peak = 0;
+            // 가용 pair 풀 — 호 종료(HT 경과) 시 반환하여 재사용 → 적은 단말로 장시간 지속.
+            std::vector<int> freePairs;
+            for (int i = 0; i < nPairs; i++) freePairs.push_back(i);
+            long nowMs = 0, nextLaunchMs = 0;
+            int launched = 0, stopped = 0, peak = 0, skipped = 0;
             while (launched < totalCalls || !active.empty()) {
-                // (a) 발신 예정 시각 도달한 호 발신
-                while (launched < totalCalls && (long)launched * launchIntervalMs <= nowMs) {
-                    int p = launched;
-                    sessions[2 * p]->StartCall(sessions[2 * p + 1]->m_strUser);
-                    active.push_back({ p, nowMs + (long)htSec * 1000 });
-                    launched++;
+                // (a) 발신 예정 시각 도달 — 가용 pair 있으면 발신, 없으면(과부하) skip
+                while (launched < totalCalls && nextLaunchMs <= nowMs) {
+                    if (!freePairs.empty()) {
+                        int p = freePairs.back(); freePairs.pop_back();
+                        sessions[2 * p]->StartCall(sessions[2 * p + 1]->m_strUser);
+                        active.push_back({ p, nowMs + (long)htSec * 1000 });
+                        launched++;
+                    } else {
+                        skipped++;   // 가용 단말 없음 — 슬롯 건너뜀(무음 누락 방지 위해 카운트/로그)
+                    }
+                    nextLaunchMs += launchIntervalMs;
                 }
                 if ((int)active.size() > peak) peak = (int)active.size();
-                // (b) HT 경과한 호 개별 종료 (BYE)
+                // (b) HT 경과한 호 개별 종료(BYE) → pair 반환
                 for (size_t k = 0; k < active.size(); ) {
                     if (nowMs >= active[k].stopAtMs) {
                         sessions[2 * active[k].pairIdx]->StopCall();
+                        freePairs.push_back(active[k].pairIdx);
                         stopped++;
                         active.erase(active.begin() + (long)k);
                     } else {
@@ -454,8 +465,8 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                 usleep(100000);
                 nowMs += 100;
             }
-            printf("[Scenario] Sustained call test done (launched=%d stopped=%d peak_concurrent=%d)\n",
-                   launched, stopped, peak);
+            printf("[Scenario] Sustained call test done (launched=%d stopped=%d peak_concurrent=%d skipped=%d)\n",
+                   launched, stopped, peak, skipped);
             return;
         }
 
@@ -644,6 +655,7 @@ int main(int argc, char* argv[])
     bool bNoVideo              = HasFlag(argc, argv, "-no_video");
     int iIntervalMs            = atoi(GetArg(argc, argv, "-interval",    "100").c_str());
     std::string strDbConfig   = GetArg(argc, argv, "-db",            "");
+    int iDbOffset             = atoi(GetArg(argc, argv, "-db_offset",    "0").c_str());
     bool bVerbose              = HasFlag(argc, argv, "-verbose");
     bool bPttMode              = (strMode == "ptt");
     // 외부 SIP peer 모드: REGISTER 송신 skip. INVITE 수신 시 SimSession 기본 핸들러가
@@ -664,6 +676,11 @@ int main(int argc, char* argv[])
             bDbMode = true;
             if (!strDbRealm.empty() && strDomain == "csp") {
                 strDomain = strDbRealm;  // -domain 미지정 시 DB realm 사용
+            }
+            // -db_offset: 로드된 가입자 앞쪽 N명 건너뜀 (여러 인스턴스에 disjoint 풀 할당 — 중복 등록 회피)
+            if (iDbOffset > 0 && iDbOffset < (int)vecDbSubs.size()) {
+                vecDbSubs.erase(vecDbSubs.begin(), vecDbSubs.begin() + iDbOffset);
+                printf("[DB] db_offset=%d 적용 → %d명 사용\n", iDbOffset, (int)vecDbSubs.size());
             }
             if (iCount <= 1 && !HasFlag(argc, argv, "-count")) {
                 iCount = (int)vecDbSubs.size();
