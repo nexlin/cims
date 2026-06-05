@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   statsApi, type Subscriber, type SubscribersResponse,
   type ServiceLive, type ServiceTrend, type Pool, type VolteCall, type PttGroup, type Anomaly,
-  type ServiceEvent, type OrgStat, type PttMembersResponse,
+  type ServiceEvent, type OrgStat, type PttMembersResponse, type TrendPoint, type TrendMetric,
 } from '../../../api/stats'
 import { useToast } from '../../../components/Toast'
 
@@ -52,7 +52,6 @@ function makeSharedPoll<T>(fetcher: () => Promise<T>, periodMs = 5000) {
   }
 }
 const useServiceLive = makeSharedPoll<ServiceLive>(() => statsApi.serviceLive())
-const useServiceTrend = makeSharedPoll<ServiceTrend>(() => statsApi.serviceTrend(30))
 
 export function usePins(key: string): { pins: Set<string>; toggle: (id: string) => void } {
   const [pins, setPins] = useState<Set<string>>(() => {
@@ -94,13 +93,6 @@ function Kpi({ label, value, sub }: { label: string; value: React.ReactNode; sub
     </div>
   )
 }
-const BARS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
-function Sparkline({ values, color }: { values: number[]; color?: string }) {
-  const max = Math.max(1, ...values)
-  const txt = values.map(v => v <= 0 ? '▁' : BARS[Math.min(BARS.length - 1, Math.max(0, Math.round((v / max) * (BARS.length - 1))))]).join('')
-  return <span style={{ fontFamily: 'monospace', fontSize: 15, letterSpacing: '-1px', color: color || 'var(--primary)' }}>{txt}</span>
-}
-
 function Loading() { return <div className="empty">로딩 중...</div> }
 
 // ── 위젯: VoLTE 요약 ──────────────────────────────────────
@@ -151,23 +143,58 @@ export function PttKpiCard() {
   )
 }
 
-// ── 위젯: 동시 사용량 추세 ────────────────────────────────
+// ── 위젯: 사용량 추세 (윈도우 선택 + 24구간 + 다지표) ─────
+const TREND_WINS: { k: string; label: string }[] = [
+  { k: '1h', label: '1시간' }, { k: '6h', label: '6시간' }, { k: '12h', label: '12시간' }, { k: '1d', label: '1일' },
+]
+const TREND_SERIES: { key: TrendMetric; label: string; color: string }[] = [
+  { key: 'volte_active', label: 'VoLTE 동시통화', color: 'var(--primary)' },
+  { key: 'volte_calls', label: 'VoLTE 발생 호', color: '#3b82f6' },
+  { key: 'ptt_grants', label: 'PTT 발언 수', color: 'var(--success)' },
+  { key: 'ptt_speakers', label: 'PTT 발언자', color: '#16a34a' },
+  { key: 'ptt_groups', label: 'PTT 활성그룹', color: 'var(--warning, #d98e00)' },
+]
+function clockOf(t: number) { return new Date(t * 1000).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
+function BarRow({ label, points, metric, peak, color }: { label: string; points: TrendPoint[]; metric: TrendMetric; peak: number; color: string }) {
+  const max = Math.max(1, ...points.map(p => p[metric]))
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+      <span style={{ width: 92, fontSize: 12, color: 'var(--text-muted)', textAlign: 'right', flexShrink: 0 }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 26, flex: 1 }}>
+        {points.map((p, i) => {
+          const v = p[metric]
+          return <div key={i} title={`${clockOf(p.t)} · ${v}`}
+            style={{ flex: 1, height: `${v > 0 ? Math.max(8, Math.round(v / max * 100)) : 2}%`, minHeight: 1, background: v > 0 ? color : 'var(--border)', borderRadius: '1px 1px 0 0' }} />
+        })}
+      </div>
+      <span style={{ width: 52, fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>peak {peak}</span>
+    </div>
+  )
+}
 export function TrendCard() {
-  const trend = useServiceTrend()
-  if (!trend) return <div className="panel" style={{ padding: 14 }}><Loading /></div>
+  const { show } = useToast()
+  const [win, setWin] = useState('6h')
+  const [data, setData] = useState<ServiceTrend | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = () => statsApi.serviceTrend(win).then(d => { if (alive) setData(d) }).catch(e => show(String(e), 'err'))
+    load(); const iv = setInterval(load, 15000); return () => { alive = false; clearInterval(iv) }
+  }, [win, show])
+  const points = data?.points ?? []
   return (
     <div className="panel" style={{ padding: '10px 14px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 64 }}>통화 수</span>
-        <Sparkline values={trend.points.map(pt => pt.volte)} />
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>now {trend.volte_now} · peak {trend.volte_peak}</span>
+      <div className="toolbar" style={{ marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>사용량 추세</span>
+        {TREND_WINS.map(w => (
+          <button key={w.k} className={`btn btn--sm ${win === w.k ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setWin(w.k)}>{w.label}</button>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
+          {points.length ? `${clockOf(points[0].t)} ~ ${clockOf(points[points.length - 1].t)} · 24구간` : ''}
+        </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 64 }}>그룹 수</span>
-        <Sparkline values={trend.points.map(pt => pt.ptt)} color="var(--success)" />
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>now {trend.ptt_now} · peak {trend.ptt_peak}</span>
-      </div>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>최근 {trend.window_min}분</span>
+      {!data ? <Loading /> : TREND_SERIES.map(s => (
+        <BarRow key={s.key} label={s.label} points={points} metric={s.key} peak={data.peaks[s.key]} color={s.color} />
+      ))}
     </div>
   )
 }

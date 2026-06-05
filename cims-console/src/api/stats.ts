@@ -182,10 +182,14 @@ export interface OrgStat {
   members: number; volte_reg: number; ptt_reg: number
   active_volte: number; active_ptt: number; ptt_talking: number
 }
-export interface TrendPoint { t: number; volte: number; ringing: number; ptt: number; talking: number }
+export interface TrendPoint {
+  t: number; volte_active: number; volte_calls: number
+  ptt_grants: number; ptt_speakers: number; ptt_groups: number
+}
+export type TrendMetric = 'volte_active' | 'volte_calls' | 'ptt_grants' | 'ptt_speakers' | 'ptt_groups'
 export interface ServiceTrend {
-  window_min: number; points: TrendPoint[]
-  volte_now: number; volte_peak: number; ptt_now: number; ptt_peak: number
+  window: string; window_min: number; bucket_sec: number
+  points: TrendPoint[]; peaks: Record<TrendMetric, number>
 }
 
 export const statsApi = {
@@ -203,7 +207,7 @@ export const statsApi = {
   },
 
   serviceLive: () => api.get<ServiceLive>('/stats/service/live'),
-  serviceTrend: (windowMin = 30) => api.get<ServiceTrend>(`/stats/service/trend?window=${windowMin}`),
+  serviceTrend: (window: string = '6h') => api.get<ServiceTrend>(`/stats/service/trend?window=${window}`),
   serviceEvents: (limit = 60) => api.get<{ events: ServiceEvent[] }>(`/stats/service/events?limit=${limit}`),
   serviceOrg: () => api.get<{ orgs: OrgStat[] }>('/stats/service/org'),
   pttMembers: (group: string, page = 1, limit = 50) => api.get<PttMembersResponse>(`/stats/service/ptt-members?group=${encodeURIComponent(group)}&page=${page}&limit=${limit}`),

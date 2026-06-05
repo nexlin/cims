@@ -234,7 +234,7 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
             if svc == 'live':
                 return await _service_live(config)
             if svc == 'trend':
-                return await _service_trend(config, qp('window', '30'))
+                return await _service_trend(config, qp('window', '6h'))
             if svc == 'events':
                 return await _service_events(config, qp('limit', '60'))
             if svc == 'org':
@@ -1380,37 +1380,117 @@ def _trend_backfill(config: dict, from_min: int, to_min: int) -> dict:
     return per_min
 
 
-async def _service_trend(config: dict, window='30') -> HandlerResult:
-    """동시 사용량 추세 — 최근 window 분(기본 30)의 분 단위 동시호/활성그룹.
-       라이브 표본(_service_live 폴링 시 누적)이 있는 분은 그 값, 없는 분(재기동/첫진입)은
-       서비스 로그에서 백필 재구성."""
-    try:
-        window = max(5, min(int(window), _TREND_MAX_MIN))
-    except (TypeError, ValueError):
-        window = 30
-    now_min = int(datetime.now().timestamp()) // 60
-    from_min = now_min - window + 1
-    backfill = _trend_backfill(config, from_min, now_min)
+_TREND_WINDOWS = {'1h': 60, '6h': 360, '12h': 720, '1d': 1440}
+_TREND_METRICS = ('volte_active', 'volte_calls', 'ptt_grants', 'ptt_speakers', 'ptt_groups')
+_TREND2_CACHE: dict = {'key': None, 'data': None}
+
+
+async def _service_trend(config: dict, window='6h') -> HandlerResult:
+    """사용량 추세 — 윈도우(1h/6h/12h/1d)를 24등분, 버킷별 지표를 서비스 로그에서 재구성.
+       지표: VoLTE 동시통화(구간 겹침)·발생호(구간 시작), PTT 발언수(floor GRANT)·발언자(distinct)·활성그룹."""
+    wmin = _TREND_WINDOWS.get(str(window))
+    if wmin is None:
+        try:
+            wmin = max(60, min(int(window), 1440))
+        except (TypeError, ValueError):
+            wmin = 360
+        window = next((k for k, v in _TREND_WINDOWS.items() if v == wmin), f'{wmin}m')
+    NB = 24
+    bucket_sec = max(60, wmin * 60 // NB)
+    now = datetime.now()
+    now_min = int(now.timestamp()) // 60
+    ck = (window, now_min)
+    if _TREND2_CACHE['key'] == ck:
+        return HandlerResult(status=200, body=_TREND2_CACHE['data'])
+
+    start_ts = now.timestamp() - NB * bucket_sec
+
+    def bidx(ts):
+        i = int((ts - start_ts) // bucket_sec)
+        return i if 0 <= i < NB else -1
+
+    buckets = [{'volte_active': 0, 'volte_calls': 0, 'ptt_grants': 0,
+                'ptt_speakers': set(), 'ptt_groups': set()} for _ in range(NB)]
+    base = _service_log_dir(config)
+    if base:
+        now_ts = now.timestamp()
+        hbs = _hour_buckets(now - timedelta(minutes=wmin) - timedelta(hours=2), now)
+        # VoLTE: call.json (call_id dedup)
+        seen = set()
+        for (Y, M, D, H) in hbs:
+            for fp in glob.glob(os.path.join(base, 'volte', f'{Y:04d}', f'{M:02d}', f'{D:02d}', f'{H:02d}',
+                                             '*', '*', '*.d', 'call.json')):
+                try:
+                    with open(fp) as f:
+                        d = json.load(f)
+                except Exception:
+                    continue
+                cid = d.get('call_id')
+                inv = _parse_iso(d.get('invite_time'))
+                if not cid or cid in seen or not inv:
+                    continue
+                seen.add(cid)
+                end = _parse_iso(d.get('end_time'))
+                inv_ts = inv.timestamp()
+                if end:
+                    end_ts = end.timestamp()
+                else:
+                    try:
+                        end_ts = os.path.getmtime(fp)   # end_time 미기록(크래시) → 마지막 기록 시각
+                    except OSError:
+                        end_ts = inv_ts
+                if end_ts < inv_ts:
+                    end_ts = inv_ts
+                bi = bidx(inv_ts)
+                if bi >= 0:
+                    buckets[bi]['volte_calls'] += 1
+                for i in range(NB):
+                    bs = start_ts + i * bucket_sec
+                    if inv_ts < bs + bucket_sec and end_ts > bs:
+                        buckets[i]['volte_active'] += 1
+        # PTT: floor.jsonl GRANT
+        sur2g = {}
+        for gj in glob.glob(os.path.join(base, 'ptt', '*', 'group.json')):
+            try:
+                with open(gj) as f:
+                    sur2g[os.path.basename(os.path.dirname(gj))] = json.load(f).get('mcptt_group_id')
+            except Exception:
+                pass
+        for (Y, M, D, H) in hbs:
+            for fp in glob.glob(os.path.join(base, 'ptt', '*', f'{Y:04d}', f'{M:02d}', f'{D:02d}', f'{H:02d}', 'floor.jsonl')):
+                gid = sur2g.get(fp.split(os.sep)[-6]) or fp.split(os.sep)[-6]
+                try:
+                    with open(fp) as f:
+                        for line in f:
+                            try:
+                                ev = json.loads(line)
+                            except Exception:
+                                continue
+                            if ev.get('op') != 'GRANT':
+                                continue
+                            ts = _parse_iso(ev.get('ts'))
+                            if not ts:
+                                continue
+                            bi = bidx(ts.timestamp())
+                            if bi < 0:
+                                continue
+                            buckets[bi]['ptt_grants'] += 1
+                            if ev.get('user'):
+                                buckets[bi]['ptt_speakers'].add(ev['user'])
+                            buckets[bi]['ptt_groups'].add(gid)
+                except Exception:
+                    pass
+
     points = []
-    for m in range(from_min, now_min + 1):
-        s = _TREND_SAMPLES.get(m)
-        if s:
-            points.append({'t': m * 60, 'volte': s['volte'], 'ringing': s['ringing'],
-                           'ptt': s['ptt'], 'talking': s['talking'], 'src': 'live'})
-        else:
-            bf = backfill.get(m, {})
-            points.append({'t': m * 60, 'volte': bf.get('volte', 0), 'ringing': 0,
-                           'ptt': bf.get('ptt', 0), 'talking': 0, 'src': 'log'})
-    vmax = max((p['volte'] for p in points), default=0)
-    pmax = max((p['ptt'] for p in points), default=0)
-    return HandlerResult(status=200, body={
-        'window_min': window,
-        'points': points,
-        'volte_now': points[-1]['volte'] if points else 0,
-        'volte_peak': vmax,
-        'ptt_now': points[-1]['ptt'] if points else 0,
-        'ptt_peak': pmax,
-    })
+    for i, b in enumerate(buckets):
+        points.append({'t': int(start_ts + i * bucket_sec),
+                       'volte_active': b['volte_active'], 'volte_calls': b['volte_calls'],
+                       'ptt_grants': b['ptt_grants'], 'ptt_speakers': len(b['ptt_speakers']),
+                       'ptt_groups': len(b['ptt_groups'])})
+    body = {'window': window, 'window_min': wmin, 'bucket_sec': bucket_sec, 'points': points,
+            'peaks': {k: max((p[k] for p in points), default=0) for k in _TREND_METRICS}}
+    _TREND2_CACHE['key'], _TREND2_CACHE['data'] = ck, body
+    return HandlerResult(status=200, body=body)
 
 
 # ──────────────────────────────────────────────────────────────
