@@ -347,79 +347,108 @@ export function EventFeedCard() {
 }
 
 // ── 위젯: 조직별 집계 ─────────────────────────────────────
-function RegBar({ reg, num }: { reg: number; num: number }) {
-  const pct = num > 0 ? Math.round((reg / num) * 100) : 0
+// 구성원 로스터 표 (가입자 상태) — 부서 선택/검색 결과 공용
+function SubscriberRows({ subs }: { subs: Subscriber[] }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div style={{ width: 70, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: 'var(--success)' }} />
-      </div>
-      <span className="ts">{reg}/{num}</span>
-    </div>
+    <table className="data-table">
+      <thead><tr><th>이름</th><th>VoLTE 번호</th><th>VoLTE</th><th>VoLTE 통화</th><th>PTT 번호</th><th>PTT</th><th>PTT 서비스</th></tr></thead>
+      <tbody>
+        {subs.map(s => (
+          <tr key={s.person_id}>
+            <td style={{ fontWeight: 600 }}>{s.name}</td>
+            <td className="ts">{s.volte?.msisdn || '-'}</td>
+            <td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</td>
+            <td>{s.volte?.calls && s.volte.calls.length > 0
+              ? s.volte.calls.map((c, i) => <span key={i} className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화' : '호출'} {c.role === 'caller' ? '→' : '←'} {c.peer}</span>)
+              : <span className="ts">{s.volte?.online ? '대기' : '-'}</span>}</td>
+            <td className="ts">{s.ptt?.msisdn || '-'}</td>
+            <td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</td>
+            <td>{s.ptt?.groups && s.ptt.groups.length > 0
+              ? s.ptt.groups.map((g, i) => <span key={i} className="badge badge--green" style={{ marginRight: 4 }}>🎤 {g.group_id}</span>)
+              : <span className="ts">{s.ptt?.online ? '대기' : '-'}</span>}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
+
+// 조직별(부서) — 상단 검색 + 좌측 부서 트리 + 우측 구성원 로스터
+const ORG_LIMIT = 50
 export function OrgStatsCard() {
   const { show } = useToast()
-  const live = useServiceLive()
-  const now = useNowTick()
   const [orgs, setOrgs] = useState<OrgStat[]>([])
-  const [loading, setLoading] = useState(true)
-  const [sel, setSel] = useState<string | null>(null)
-  const load = useCallback(async () => {
-    try { setOrgs((await statsApi.serviceOrg()).orgs) }
-    catch (e: unknown) { show(String(e), 'err') } finally { setLoading(false) }
+  const [sel, setSel] = useState<string>('')          // 선택 부서 코드
+  const [searchInput, setSearchInput] = useState('')
+  const [q, setQ] = useState('')
+  const [page, setPage] = useState(1)
+  const [roster, setRoster] = useState<SubscribersResponse | null>(null)
+
+  // 부서 트리 (10초)
+  useEffect(() => {
+    let alive = true
+    const load = () => statsApi.serviceOrg().then(r => {
+      if (!alive) return
+      setOrgs(r.orgs)
+      setSel(s => s || r.orgs[0]?.code || '')   // 기본=최상위
+    }).catch(e => show(String(e), 'err'))
+    load(); const iv = setInterval(load, 10000); return () => { alive = false; clearInterval(iv) }
   }, [show])
-  useEffect(() => { load(); const iv = setInterval(load, 5000); return () => clearInterval(iv) }, [load])
-  if (loading) return <div className="panel"><Loading /></div>
-  if (orgs.length === 0) return <div className="empty">조직 정보가 없습니다</div>
+
+  // 검색 디바운스
+  useEffect(() => { const t = setTimeout(() => { setQ(searchInput.trim()); setPage(1) }, 350); return () => clearTimeout(t) }, [searchInput])
+
+  // 로스터: 검색어 있으면 전체 검색, 없으면 선택 부서 구성원 전체(status=all)
+  useEffect(() => {
+    if (!q && !sel) return
+    let alive = true
+    const load = () => statsApi.subscribers(q ? { q, status: 'all', page, limit: ORG_LIMIT } : { org: sel, status: 'all', page, limit: ORG_LIMIT })
+      .then(r => { if (alive) setRoster(r) }).catch(e => show(String(e), 'err'))
+    load(); const iv = setInterval(load, 5000); return () => { alive = false; clearInterval(iv) }
+  }, [q, sel, page, show])
+
+  const selNode = orgs.find(o => o.code === sel)
+  const total = roster?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / ORG_LIMIT))
 
   return (
-    <div className="panel">
-      <table className="data-table">
-        <thead><tr><th>조직</th><th>VoLTE 등록</th><th>PTT 등록</th><th>VoLTE 통화</th><th>PTT 발언</th><th>PTT 참여</th></tr></thead>
-        <tbody>
-          {orgs.map(o => {
-            const open = sel === o.org
-            const calls = open ? (live?.volte.calls ?? []).filter(c => c.org === o.org) : []
-            const talkers = open ? (live?.ptt.talkers ?? []).filter(t => t.org === o.org) : []
-            return (
-              <Fragment key={o.org}>
-                <tr onClick={() => setSel(open ? null : o.org)}
-                  style={{ cursor: 'pointer', ...(open ? { background: 'rgba(80,120,255,.1)' } : {}) }}>
-                  <td style={{ fontWeight: 600 }}>{open ? '▾ ' : '▸ '}{o.name}</td>
-                  <td><RegBar reg={o.volte_reg} num={o.volte_num} /></td>
-                  <td><RegBar reg={o.ptt_reg} num={o.ptt_num} /></td>
-                  <td>{o.active_volte > 0 ? <span className="badge badge--blue">{o.active_volte}</span> : <span className="ts">0</span>}</td>
-                  <td>{o.ptt_talking > 0 ? <span className="badge badge--green">🎤 {o.ptt_talking}</span> : <span className="ts">0</span>}</td>
-                  <td className="ts">{o.active_ptt}</td>
-                </tr>
-                {open && (
-                  <tr>
-                    <td colSpan={6} style={{ background: 'var(--bg-subtle, rgba(0,0,0,.02))', padding: '8px 12px' }}>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>VoLTE 통화 중 ({calls.length})</div>
-                      {calls.length === 0 ? <div className="ts" style={{ marginBottom: 8 }}>없음</div>
-                        : <div style={{ marginBottom: 10 }}>{calls.map(c => (
-                            <div key={c.call_id} style={{ fontSize: 13, padding: '2px 0' }}>
-                              <span className={`badge ${c.state === 'ringing' ? 'badge--blue' : 'badge--green'}`}>{c.state === 'ringing' ? '호출' : '통화'}</span>
-                              {' '}<b>{c.caller}</b> → {c.callee} <span className="ts">· {c.video ? '영상' : '음성'} · {fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))} · {c.media_node || '-'}</span>
-                            </div>
-                          ))}</div>}
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>PTT 발언 중 ({talkers.length}) · 참여 {o.active_ptt}명</div>
-                      {talkers.length === 0 ? <div className="ts">발언 중인 가입자 없음</div>
-                        : talkers.map((t, i) => (
-                            <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>
-                              <span style={{ color: 'var(--primary)', fontWeight: 600 }}>🎤 {t.msisdn}</span>
-                              <span className="ts"> → {t.group_name}</span>
-                            </div>
-                          ))}
-                    </td>
-                  </tr>
+    <div className="panel" style={{ padding: 10 }}>
+      <div className="toolbar" style={{ marginBottom: 8 }}>
+        <input className="search-input" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
+          onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 280 }} />
+        {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{q ? `검색: "${q}"` : selNode ? `부서: ${selNode.name} (${selNode.members}명)` : ''}</span>
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        {/* 부서 트리 */}
+        <div style={{ flex: '0 0 230px', maxHeight: 460, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
+          {orgs.length === 0 ? <Loading /> : orgs.map(o => (
+            <div key={o.code} onClick={() => { setSel(o.code); setSearchInput('') }}
+              style={{ cursor: 'pointer', padding: '4px 6px', paddingLeft: 6 + o.depth * 16, borderRadius: 4, fontSize: 13,
+                background: !q && sel === o.code ? 'rgba(80,120,255,.12)' : undefined,
+                fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
+              {o.name} <span className="ts">({o.members})</span>
+              {o.active_volte > 0 && <span className="badge badge--blue" style={{ marginLeft: 4 }}>📞{o.active_volte}</span>}
+              {o.ptt_talking > 0 && <span className="badge badge--green" style={{ marginLeft: 4 }}>🎤{o.ptt_talking}</span>}
+            </div>
+          ))}
+        </div>
+        {/* 구성원 로스터 */}
+        <div style={{ flex: 1, minWidth: 0, maxHeight: 460, overflow: 'auto' }}>
+          {!roster ? <Loading />
+            : roster.subscribers.length === 0 ? <div className="empty">{q ? '검색 결과 없음' : '구성원 없음'}</div>
+            : <>
+                <SubscriberRows subs={roster.subscribers} />
+                {totalPages > 1 && (
+                  <div className="toolbar" style={{ justifyContent: 'flex-end' }}>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
+                    <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</button>
+                    <button className="btn btn--sm btn--ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</button>
+                  </div>
                 )}
-              </Fragment>
-            )
-          })}
-        </tbody>
-      </table>
+              </>}
+        </div>
+      </div>
     </div>
   )
 }
@@ -509,7 +538,7 @@ export function SubscriberLookup() {
 // ── 위젯: 서비스 상세 (탭 통합 — 호·그룹·이벤트·조직·조회) ──
 export function ServiceDetailTabs() {
   const live = useServiceLive()
-  const [tab, setTab] = useState<'volte' | 'ptt' | 'events' | 'org' | 'subscribers'>('volte')
+  const [tab, setTab] = useState<'events' | 'org' | 'volte' | 'ptt'>('org')
   const v = live?.volte.kpi
   const p = live?.ptt.kpi
   const tb = (t: typeof tab, label: string, n?: number) => (
@@ -520,18 +549,16 @@ export function ServiceDetailTabs() {
   return (
     <div>
       <div className="toolbar" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
-        {tb('volte', 'VoLTE 호', v?.active)}
-        {tb('ptt', 'PTT 그룹', p?.recent_active)}
         {tb('events', '라이브 이벤트')}
         {tb('org', '조직별')}
-        {tb('subscribers', '가입자 조회')}
+        {tb('volte', 'VoLTE 호', v?.active)}
+        {tb('ptt', 'PTT 그룹', p?.recent_active)}
         <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>
       </div>
-      {tab === 'volte' && <VolteCallsCard />}
-      {tab === 'ptt' && <PttGroupsCard />}
       {tab === 'events' && <EventFeedCard />}
       {tab === 'org' && <OrgStatsCard />}
-      {tab === 'subscribers' && <SubscriberLookup />}
+      {tab === 'volte' && <VolteCallsCard />}
+      {tab === 'ptt' && <PttGroupsCard />}
     </div>
   )
 }

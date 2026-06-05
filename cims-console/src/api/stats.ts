@@ -135,6 +135,7 @@ export interface SubscribersQuery {
   q?: string
   page?: number
   limit?: number
+  org?: string
 }
 
 // ── 서비스 라이브 모니터링 ──
@@ -175,8 +176,8 @@ export interface ServiceLive {
 }
 export interface ServiceEvent { ts: string; kind: string; type: string; detail: string; ref: string }
 export interface OrgStat {
-  org: string; name: string
-  volte_num: number; volte_reg: number; ptt_num: number; ptt_reg: number
+  code: string; name: string; parent: string | null; depth: number
+  members: number; volte_reg: number; ptt_reg: number
   active_volte: number; active_ptt: number; ptt_talking: number
 }
 export interface TrendPoint { t: number; volte: number; ringing: number; ptt: number; talking: number }
@@ -194,6 +195,7 @@ export const statsApi = {
     if (params.q) sp.set('q', params.q)
     if (params.page) sp.set('page', String(params.page))
     if (params.limit) sp.set('limit', String(params.limit))
+    if (params.org) sp.set('org', params.org)
     const qs = sp.toString()
     return api.get<SubscribersResponse>('/stats/subscribers' + (qs ? `?${qs}` : ''))
   },

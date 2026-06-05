@@ -221,6 +221,7 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                 q=qp('q', '') or '',
                 page=qp('page', '1'),
                 limit=qp('limit', '50'),
+                org=qp('org', '') or '',
             )
 
         if parts[0] == 'messages':
@@ -699,7 +700,7 @@ def _calc_ptt_stats(config, from_dt, to_dt, gran):
 # ──────────────────────────────────────────────────────────────
 
 async def _subscribers_status(config: dict, status: str = 'active',
-                              q: str = '', page='1', limit='50') -> HandlerResult:
+                              q: str = '', page='1', limit='50', org: str = '') -> HandlerResult:
     """가입자 서비스 이용 상태 조회 — 서버사이드 필터/페이지네이션.
 
        대규모(수천~) 가입자에서도 일정한 비용을 유지하기 위해 전건 반환을 폐기하고,
@@ -821,6 +822,11 @@ async def _subscribers_status(config: dict, status: str = 'active',
                     where.append("(u.name LIKE %s OR vs.id LIKE %s OR ps.id LIKE %s)")
                     like = f"%{q}%"
                     params += [like, like, like]
+                if org:
+                    codes = _org_descendants(config, org)   # 부서(회사/본부/팀) → 하위 전체
+                    ph = ','.join(['%s'] * len(codes))
+                    where.append(f"u.org_id IN ({ph})")
+                    params += codes
                 where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
                 # ── 현재 필터의 total + 페이지 행 ──
@@ -1506,13 +1512,53 @@ async def _service_events(config: dict, limit='60') -> HandlerResult:
     return HandlerResult(status=200, body={'events': events[:limit]})
 
 
+_ORG_TREE_CACHE: dict = {'ts': 0, 'data': None}
+
+
+def _org_tree(config: dict) -> dict:
+    """조직 트리 (10s 캐시) → {'nodes': {code:{code,name,parent,sort}}, 'children': {parent_code:[codes]}}."""
+    now = time.time()
+    c = _ORG_TREE_CACHE
+    if c.get('data') and now - c.get('ts', 0) < 10:
+        return c['data']
+    rows = []
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, code, name, parent_id, sort_order FROM organizations")
+                rows = cur.fetchall()
+    except Exception:
+        rows = []
+    id2code = {r['id']: r['code'] for r in rows}
+    nodes, children = {}, {}
+    for r in rows:
+        pc = id2code.get(r['parent_id'])
+        nodes[r['code']] = {'code': r['code'], 'name': r['name'], 'parent': pc, 'sort': r['sort_order'] or 0}
+        children.setdefault(pc, []).append(r['code'])
+    for k in children:
+        children[k].sort(key=lambda cc: (nodes.get(cc, {}).get('sort', 0), cc))
+    data = {'nodes': nodes, 'children': children}
+    c['ts'], c['data'] = now, data
+    return data
+
+
+def _org_descendants(config: dict, code: str):
+    """code 와 그 모든 하위 조직 코드 (subscribers org 필터용 — users.org_id 는 leaf 팀코드)."""
+    ch = _org_tree(config)['children']
+    out, stack = [], [code]
+    while stack:
+        x = stack.pop()
+        out.append(x)
+        stack.extend(ch.get(x, []))
+    return out
+
+
 async def _service_org(config: dict) -> HandlerResult:
-    """조직별 서비스 이용 집계 — 등록(VoLTE/PTT) + 현재 이용 중 단말 수."""
+    """조직 트리별 이용 — 회사>본부>팀 트리 + 구성원/등록/활성 롤업(상위=하위 합)."""
     volte_states = _load_active_states(config, 'volte')
     ptt_states = _load_active_states(config, 'ptt')
     av = {st.get('subscriber_id') for st in volte_states if st.get('subscriber_id')}
     ap = {st.get('subscriber_id') for st in ptt_states if st.get('subscriber_id')}
-    # 발언 중(floor 점유) 가입자 — 조직 가입자 '발언' 활동 집계용
     talkers = set()
     for nd in _all_media_stats(config):
         for gd in (nd['stats'].get('group_details') or []):
@@ -1520,58 +1566,79 @@ async def _service_org(config: dict) -> HandlerResult:
                 talkers.add(gd['floor_holder'])
 
     UNSET = '(미지정)'
-    orgs = {}
-    name_by_key = {}
+    KEYS = ('members', 'volte_reg', 'ptt_reg', 'active_volte', 'active_ptt', 'ptt_talking')
+    leaf = {}   # org_id(leaf 팀코드) → stats
+
+    def L(code):
+        return leaf.setdefault(code, {k: 0 for k in KEYS})
+
     m2o = {}
-    def _org0(o):
-        return {'org': o, 'volte_num': 0, 'volte_reg': 0, 'ptt_num': 0, 'ptt_reg': 0,
-                'active_volte': 0, 'active_ptt': 0, 'ptt_talking': 0}
     try:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COALESCE(NULLIF(u.org_id,''),%s) AS org, "
-                    "COUNT(DISTINCT vs.id) AS volte_num, "
+                    "SELECT COALESCE(NULLIF(u.org_id,''),%s) AS code, COUNT(DISTINCT u.id) AS members, "
                     "COUNT(DISTINCT CASE WHEN vs.register_time IS NOT NULL AND (vs.logout_time IS NULL OR vs.register_time>vs.logout_time) THEN vs.id END) AS volte_reg, "
-                    "COUNT(DISTINCT ps.id) AS ptt_num, "
                     "COUNT(DISTINCT CASE WHEN ps.register_time IS NOT NULL AND (ps.logout_time IS NULL OR ps.register_time>ps.logout_time) THEN ps.id END) AS ptt_reg "
-                    "FROM users u "
-                    "LEFT JOIN volte_subscriptions vs ON vs.user_id=u.id "
-                    "LEFT JOIN ptt_subscriptions ps ON ps.user_id=u.id "
-                    "GROUP BY org", (UNSET,))
+                    "FROM users u LEFT JOIN volte_subscriptions vs ON vs.user_id=u.id "
+                    "LEFT JOIN ptt_subscriptions ps ON ps.user_id=u.id GROUP BY code", (UNSET,))
                 for r in cur.fetchall():
-                    o = _org0(r['org'])
-                    o.update({'volte_num': int(r['volte_num'] or 0), 'volte_reg': int(r['volte_reg'] or 0),
-                              'ptt_num': int(r['ptt_num'] or 0), 'ptt_reg': int(r['ptt_reg'] or 0)})
-                    orgs[r['org']] = o
-                cur.execute("SELECT id, code, name FROM organizations")
-                for r in cur.fetchall():
-                    name_by_key[str(r['id'])] = r['name']
-                    name_by_key[r['code']] = r['name']
-                all_active = list(av | ap | talkers)
-                if all_active:
-                    ph = ','.join(['%s'] * len(all_active))
+                    d = L(r['code'])
+                    d['members'] = int(r['members'] or 0)
+                    d['volte_reg'] = int(r['volte_reg'] or 0)
+                    d['ptt_reg'] = int(r['ptt_reg'] or 0)
+                allact = list(av | ap | talkers)
+                if allact:
+                    ph = ','.join(['%s'] * len(allact))
                     cur.execute(
                         f"SELECT vs.id AS m, COALESCE(NULLIF(u.org_id,''),%s) AS o FROM volte_subscriptions vs JOIN users u ON u.id=vs.user_id WHERE vs.id IN ({ph}) "
                         f"UNION SELECT ps.id, COALESCE(NULLIF(u.org_id,''),%s) FROM ptt_subscriptions ps JOIN users u ON u.id=ps.user_id WHERE ps.id IN ({ph})",
-                        tuple([UNSET] + all_active + [UNSET] + all_active))
+                        tuple([UNSET] + allact + [UNSET] + allact))
                     for r in cur.fetchall():
                         m2o[r['m']] = r['o']
     except Exception as e:
         return HandlerResult(status=500, body={'error': str(e)})
 
-    for msisdn in av:
-        orgs.setdefault((o := m2o.get(msisdn, UNSET)), _org0(o))['active_volte'] += 1
-    for msisdn in ap:
-        orgs.setdefault((o := m2o.get(msisdn, UNSET)), _org0(o))['active_ptt'] += 1
-    for msisdn in talkers:
-        orgs.setdefault((o := m2o.get(msisdn, UNSET)), _org0(o))['ptt_talking'] += 1
+    for ms in av:
+        L(m2o.get(ms, UNSET))['active_volte'] += 1
+    for ms in ap:
+        L(m2o.get(ms, UNSET))['active_ptt'] += 1
+    for ms in talkers:
+        L(m2o.get(ms, UNSET))['ptt_talking'] += 1
+
+    tree = _org_tree(config)
+    nodes, children = tree['nodes'], tree['children']
+    rollup = {}
+
+    def _roll(code):
+        agg = {k: leaf.get(code, {}).get(k, 0) for k in KEYS}
+        for ch in children.get(code, []):
+            sub = _roll(ch)
+            for k in KEYS:
+                agg[k] += sub[k]
+        rollup[code] = agg
+        return agg
+
+    roots = children.get(None, [])
+    for rc in roots:
+        _roll(rc)
 
     out = []
-    for code, v in orgs.items():
-        v['name'] = name_by_key.get(code, code if code != UNSET else UNSET)
-        out.append(v)
-    out.sort(key=lambda x: (-(x['active_volte'] + x['active_ptt']), -(x['volte_reg'] + x['ptt_reg']), x['name']))
+
+    def _dfs(code, depth):
+        n = nodes[code]
+        out.append({'code': code, 'name': n['name'], 'parent': n['parent'], 'depth': depth,
+                    **rollup.get(code, {k: 0 for k in KEYS})})
+        for ch in children.get(code, []):
+            _dfs(ch, depth + 1)
+
+    for rc in roots:
+        _dfs(rc, 0)
+    # 트리에 없는 leaf(미지정 등)
+    for code in leaf:
+        if code not in nodes:
+            out.append({'code': code, 'name': code, 'parent': None, 'depth': 0,
+                        **{k: leaf[code][k] for k in KEYS}})
     return HandlerResult(status=200, body={'orgs': out})
 
 
