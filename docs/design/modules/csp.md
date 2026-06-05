@@ -479,13 +479,18 @@ psip SIP 스택의 ILogCallBack 구현. 모든 SIP TX/RX와 CMP/CSC JSON 메시�
 | `GetSesIdByCallId(callId)` | Call-ID → sesid 조회 (없으면 "") |
 | `SetCallSesId(callId, sesid)` | B2BUA leg 간 sesid 명시적 상속 |
 
-**출력 파일:**
+**출력 파일** (open-per-write · 5분 버킷):
 
 ```
-{MsgLogDir}/csp/{service}/YYYY/MM/DD/HH/
-  ├─ {systemId}.flow.jsonl          (서비스별 Flow 요약)
-  └─ {systemId}_{node}.msg.jsonl    (원문 저장; node = sip/cmp/csc)
+{ServiceLogDir}/YYYY/MM/DD/HH/
+  ├─ {systemId}.flow.{mm5}.jsonl         (통합 Flow 요약; mm5=5분 버킷 00/05/.../55)
+  └─ {systemId}_{iface}.msg.{mm5}.jsonl  (원문 저장; iface = sip/cmp/csc)
 ```
+
+- **open-per-write**: 매 줄 `fopen(append)`→write→`fclose`. 시간당 핸들 유지 폐기 → 운영 중 로그삭제 시
+  `.nfs` 고아·dead-inode 데이터유실 방지, 대용량 파일 검색 부담 완화.
+- **5분 버킷**: `mm5 = (분/5)*5`. 버킷 전환 시 iface `seq`(줄번호) 리셋, 첫 write 가 기존 줄 수를 계수해 이어붙임(재기동 연속성).
+- reader(`flow_logger.py`)는 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신) 모두 glob. 원문 역조회는 flow 엔트리 `ts`→버킷 도출.
 
 > `service` 는 volte/mcptt/system/console. `node` 는 원문 소스(sip/cmp/csc).
 
@@ -621,17 +626,28 @@ CSC(관리 서버)로부터 설정 변경 이벤트를 UDP로 수신.
 
 60초 주기 자동 reload. CSC GROUP_CHANGED 이벤트 시 즉시 reload.
 
-### 4.3 호 관리 (CCallMap)
+### 4.3 호 관리 (CCallMap) + RTP relay bookkeeping
+
+`CCallMap`(Call-ID 키)이 B2BUA 양 leg 매핑 + **CMP relay descriptor** 를 함께 보유한다(`SetRelayInfo`로 양 leg 에 동일 기록).
 
 ```cpp
-// B2BUA 양 leg 연결
-struct CallMapEntry {
-    std::string incomingCallId;   // 착신 leg Call-ID
-    std::string outgoingCallId;   // 발신 leg Call-ID
-    int rtpPort;                  // CMP relay 포트
-    std::string sessionId;        // Session-ID
+class CCallInfo {                  // CallMap value (key = Call-ID)
+    std::string m_strPeerCallId;   // 상대 leg Call-ID (B2BUA)
+    int  m_iPeerRtpPort;           // CMP relay local 포트 (SDP 광고용)
+    // ── relay descriptor: teardown/MODIFY 가 session_id 로 CMP 세션 직접 지목 ──
+    std::string m_strRelaySessionId;  // cmp_sess_N (전역 유일) ← CmpClient::IssueSessionId
+    std::string m_strRelaySesId;      // flow 상관 sesid
+    std::string m_strRelayLocalIp;    // CMP relay IP (answer MODIFY/SDP)
+    std::string m_strRelayCaller, m_strRelayCallee;
+    bool m_bEstablished; time_t m_iLastActivityTime;
 };
 ```
+
+- **teardown**: `CCallMap::Delete(callId)` 가 entry 의 `m_strRelaySessionId` 로 `gclsCmpClient.RemoveSession(session_id)` 직접 호출.
+- **answer(200 OK)**: callee 주소를 `gclsCmpClient.ModifySession(session_id, …, peerIdx=1)` 로 CMP 에 MODIFY.
+- **stale 호 정리**: `DeleteTimeout` → `Delete`(bStopPort) → 동일 session_id RemoveSession.
+
+> **구 `CRtpMap`(포트단독키, `RtpThread`/`CRtpInfo` 소켓 relay) 제거됨** — 미디어서버 분리 전 CSP 직접 relay 시절 코드. 멀티 미디어노드(`MediaServer.Endpoints`) 도입 후 같은 포트가 노드별 비유일이라 포트키 충돌로 teardown 이 엉뚱한 세션을 회수 → relay 누수했다. session_id(전역 유일) 키로 전환해 근본 해소(`RtpMap.cpp`/`RtpThread.cpp` 삭제, `RtpMap.h` 는 `SOCKET_COUNT_PER_MEDIA` 상수만 잔존). CSP 비정상 종료 시의 고아 relay 는 CMP sweeper 가 회수(cmp.md §5).
 
 ### 4.4 DB 스키마 (CDbManager)
 

@@ -87,9 +87,10 @@ SIP (5060) → CModuleDispatcher (ISipStackCallBack + ISipUserAgentCallBack)
 - **`CGroupCallService`** — PTT 그룹콜 오케스트레이션 (on-demand `ProcessGroupCall` 키업 트리거; multipart INVITE: `mcptt-info+xml` + `resource-lists+xml`(멤버 로스터) + SDP; affiliation 게이트·chair role·broadcast initiator·개시자 caller JOIN/200 OK floor 광고)
 - **`CSubscriptionManager`** — SIP SUBSCRIBE/NOTIFY 상태 관리 (GMS/CMS)
 - **`CspUserMap`** / **`CGroupMap`** — 가입자/그룹 메모리 캐시 (DB primary, JSON fallback)
-- **`CCmpClient`** — CMP 연동 (JSON-over-UDP, `record_dir` 전달)
+- **`CCmpClient`** — CMP 연동 (JSON-over-UDP, `record_dir` 전달, **`IssueSessionId()`=relay 세션식별자 cmp_sess_N 발행**, consistent-hash ring 으로 session_id→미디어노드 라우팅)
 - **`CCallDir`** (`CallDir.h`) — Session-ID 기반 서비스 로깅 (call.json, participants.jsonl, session.json)
-- **`SipMessageLogger`** (`SipMessageLogger.h/.cpp`) — ILogCallBack 구현, psip SIP TX/RX + CMP JSON 메시지를 `{MsgLogDir}/csp/sip/YYYY/MM/DD/HH/sip.jsonl`에 기록
+- **`CCallMap`** (`CallMap.h/.cpp`) — Call-ID↔peer 매핑 + **relay descriptor**(`m_strRelaySessionId`/`SesId`/`LocalIp`/`Caller`/`Callee`, B2BUA 양 leg 공유). teardown(`Delete`)이 **session_id 로 `CmpClient::RemoveSession` 직접 호출** — 구 `CRtpMap`(포트단독키)은 멀티 미디어노드에서 포트가 노드별 비유일이라 충돌·누수 → **제거**(`RtpMap.cpp`/`RtpThread.cpp` 삭제, 미디어분리 전 CSP 직접 relay 잔재). answer=`ModifySession(session_id)`, CreateCall 실패 회수=session_id.
+- **`SipMessageLogger`** (`SipMessageLogger.h/.cpp`) — ILogCallBack 구현, psip SIP TX/RX + CMP JSON 메시지를 `{ServiceLogDir}/YYYY/MM/DD/HH/{systemId}_{iface}.msg.{mm5}.jsonl`(iface=sip/cmp/csc) + flow `{systemId}.flow.{mm5}.jsonl` 에 기록. **open-per-write(매 줄 open/append/close) + 5분 버킷**(`mm5`=00/05/.../55) — 구 "1시간 핸들 유지" 방식의 `.nfs` 고아·로그삭제 데이터유실·대용량검색 문제 해소. sesid 규칙·계승은 [docs/design/features/flow_logging.md](docs/design/features/flow_logging.md)
 
 #### 역할 설정 (`csp.json`)
 ```json
@@ -118,9 +119,11 @@ RTP relay and floor control server, controlled entirely via JSON commands over U
 
 VoIP/PTT 리소스 풀 분리: VoIP(`PRtpTrans`, `RtpStartPort`), PTT(`PPttTrans`, `PttRtpStartPort`+`PttFloorStartPort`)
 
-CMP command verbs: `add`, `modify`, `remove`, `ADD_PTT_GROUP`(→floor_port 응답; +`group_type`/`initiator_id`=broadcast floor 독점), `REMOVE_PTT_GROUP`, `JOIN_PTT_GROUP`(+user_floor_port+role), `LEAVE_PTT_GROUP`.
+CMP command verbs: `add`, `modify`, `remove`, `ADD_PTT_GROUP`(→floor_port 응답; +`group_type`/`initiator_id`=broadcast floor 독점), `REMOVE_PTT_GROUP`, `JOIN_PTT_GROUP`(+user_floor_port+role), `LEAVE_PTT_GROUP`, `STATS_REQUEST`(→세션/포트풀/sweeper 카운터).
 
-Config: `cmp/cmp.json`.
+**sweeper(`timeoutLoop`, 60초 주기) = 고아 relay 안전망.** owner(CSP)가 비정상 종료(crash/kill)하면 CSP in-memory CallMap 소실 → relay 가 REMOVE 미수신 고아화 → 이 sweeper 가 유일 회수 수단. RTP **무수신(inactivity)** 시간 기준: 무RTP=`OrphanReclaimSec`(기본120s), RTP수신후=`SessionTimeout`(기본600s, hold/DTX 대비 보수적). 회수 시 `reason`(orphan_no_rtp|hold_timeout) 판정 + 누적 카운터(STATS `leak_reclaim_*`) + `{ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl` 기록(콘솔 '누수 회수(sweeper)' 페이지·OAM `/api/v1/stats/leak-reclaims`). RtpMap fix(CSP) 후 정상 환경은 이 카운터 0 이 기대값 — 증가 시 새 누수 신호.
+
+Config: `cmp/cmp.json` (스키마 `cmp/config/config_template.json`; sweeper 키 `OrphanReclaimSec`/`SessionTimeout`).
 
 ### cspsim (`cspsim/`) — Endpoint Simulator
 Automated SIP/RTP client for load and functional testing.
@@ -167,10 +170,11 @@ Automated SIP/RTP client for load and functional testing.
 3. CSP passes `record_dir` to CMP (VoLTE=`.d`, PTT=`ptt/{id}` base); CMP 가 PTT 는 기록 시점 wall-clock 으로 `{YYYY}/{MM}/{DD}/{HH}/` 시간버킷 자동 회전
 4. CMP writes: VoLTE `seg_*.rtp` in `.d`; PTT `floor.jsonl`/`segments.jsonl` + `seg/{NNN}/seg_NNNN_*`(100세그 shard, 빈 트랙 미생성) in 시간버킷
 
-**SIP Log** (`msg_log/csp/sip/YYYY/MM/DD/HH/sip.jsonl`):
+**SIP/Flow Log** (`{ServiceLogDir}/YYYY/MM/DD/HH/` 하위, **5분 버킷·open-per-write**):
 1. `SipMessageLogger` (ILogCallBack) captures all SIP TX/RX from psip stack + CMP JSON messages
-2. Each line includes Call-ID, method, from/to, direction, full message text
-3. Flow API searches `sip.jsonl` by Call-ID to reconstruct B2BUA message flow (both legs via Session-ID)
+2. 파일: 원문 `{systemId}_{iface}.msg.{mm5}.jsonl`(iface=sip/cmp/csc) + 통합 flow `{systemId}.flow.{mm5}.jsonl` (`mm5`=5분 버킷 00~55). 매 줄 open/append/close (핸들 미유지 → 운영 중 로그삭제 시 `.nfs` 고아·데이터유실 방지).
+3. flow 엔트리의 `seq`=원문 msg 파일의 줄번호(버킷별 리셋) → 원문 역조회 시 `ts`(HH:MM:SS)로 5분 버킷 도출
+4. Flow API(`csc/src/services/flow_logger.py`)가 Call-ID→sesid→동일 sesid 전 엔트리 수집으로 B2BUA 메시지 흐름 재구성(양 leg via Session-ID). reader glob 은 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신 5분) 모두 매칭
 
 ## Verification (S1~S6 pipeline)
 
@@ -211,7 +215,7 @@ python3 -m unittest tests.test_verify_lib   # 35 unit tests
 | File | Purpose |
 |---|---|
 | `csp/csp.json` | CSP IP/ports, realm, RTP relay, Roles (CSCF/TAS/PTT_AS/IBCF), DB, log config, **`Setup.Xcap.{Host,Port,Scheme}`**(xcap-diff NOTIFY 의 xcap-root = CSC XCAP 서버, 기본 https:4430) |
-| `cmp/cmp.json` | CMP IP, control port, VoIP RTP pool (50000~), PTT RTP pool (52000~), PTT Floor pool (54000~), DTMF PTT digits |
+| `cmp/cmp.json` | CMP IP, control port, VoIP RTP pool (50000~), PTT RTP pool (52000~), PTT Floor pool (54000~), DTMF PTT digits, **sweeper `SessionTimeout`(600s, got-RTP idle)·`OrphanReclaimSec`(120s, 무RTP idle)** |
 | `csp/User/{id}.json` | User credentials, DND flag, call forward/reject rules (DB fallback) |
 | `csp/Group/{id}.json` | Group name and member list with priorities (DB fallback) |
 | `csp/SipServerXml/*.xml` | SIP routing rules (IP-PBX trunk, IBCF) |

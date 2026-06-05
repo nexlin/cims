@@ -15,10 +15,12 @@
 
 ```
 {ServiceLogDir}/{YYYY}/{MM}/{DD}/{HH}/
-    csp_01.flow.jsonl           ← CSP flow 이벤트 (SIP/JSON/CSC, compact, body 없음)
-    csp_01_sip.msg.jsonl        ← CSP-UE SIP 원문
-    csp_01_cmp.msg.jsonl        ← CSP→CMP JSON 원문
-    csp_01_csc.msg.jsonl        ← CSP←CSC notify 원문
+    # CSP: open-per-write + 5분 버킷 (mm5 = (분/5)*5 = 00/05/.../55)
+    csp_01.flow.{mm5}.jsonl         ← CSP flow 이벤트 (SIP/JSON/CSC, compact, body 없음)
+    csp_01_sip.msg.{mm5}.jsonl      ← CSP-UE SIP 원문
+    csp_01_cmp.msg.{mm5}.jsonl      ← CSP→CMP JSON 원문
+    csp_01_csc.msg.{mm5}.jsonl      ← CSP←CSC notify 원문
+    # CMP/CSC: 시간당 단일 파일 (핸들 유지)
     cmp_01.flow.jsonl           ← CMP flow (JSON/INT/MCPTT/DTMF/RTCP)
     cmp_01_csp.msg.jsonl        ← CMP↔CSP JSON 원문
     csc_01.flow.jsonl           ← CSC flow (MCPTT/console/system)
@@ -26,7 +28,14 @@
     csc_01_ue.msg.jsonl         ← UE↔CSC HTTPS(IdMS/GMS/CMS) 원문
 ```
 
-`{node_id}.flow.jsonl` — 경량 flow 이벤트 인덱스. `{node_id}_{iface}.msg.jsonl` — 원문 메시지. Flow 엔트리의 `seq`+`iface`로 원문을 역조회한다.
+`{node}.flow[.{mm5}].jsonl` — 경량 flow 이벤트 인덱스. `{node}_{iface}.msg[.{mm5}].jsonl` — 원문 메시지.
+Flow 엔트리의 `seq`+`iface`로 원문을 역조회한다(`seq`=msg 파일 줄번호).
+
+**CSP 5분 버킷·open-per-write** (`SipMessageLogger`): 매 줄 `fopen(append)`→write→`fclose`, 파일명에 5분 접미사.
+시간당 핸들을 1시간 유지하던 구방식의 `.nfs` 고아·운영중 로그삭제 데이터유실·대용량 검색 부담을 해소.
+`seq` 는 5분 버킷별로 리셋되므로 **원문 역조회 시 flow 엔트리 `ts`(HH:MM:SS)로 버킷(mm5)을 도출**해 해당 파일을 연다.
+리더(`flow_logger.py`)는 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신 5분) glob 을 모두 매칭(하위호환).
+(CMP/CSC 는 빈도가 낮아 시간당 단일 파일 유지.)
 
 ## 3. Realm 설정
 

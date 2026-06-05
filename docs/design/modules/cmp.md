@@ -617,21 +617,39 @@ void freePttResource(PPttTrans* ptt);                     // _freePttResources.p
 
 ---
 
-## 5. 세션 타임아웃
+## 5. 세션 타임아웃 / 누수 회수 (sweeper)
+
+sweeper 는 **고아 relay 의 유일한 안전망**이다. owner(CSP)가 비정상 종료(crash/kill)하면 CSP in-memory
+CallMap(relay descriptor)이 소실되어 relay 가 REMOVE 를 영영 못 받고 고아가 되는데, 이를 회수한다.
+판정은 **RTP 무수신(inactivity)** 시간 기준 — `touchActivity()`가 RTP 수신 시에만 호출되므로
+`now - getLastActivityTime()` = RTP 무수신 경과(또는 생성 후 무RTP 경과)다.
 
 **timeoutLoop() — 60초 주기 검사:**
 
 ```
 1. 개별 세션 (VoIP):
-   now - rtp->getLastActivityTime() >= _sessionTimeout
-   → SESSION_TIMEOUT 로그 → reset() → freeResource() → 삭제
+   idle = now - rtp->getLastActivityTime()
+   to   = rtp->everReceivedRtp() ? _sessionTimeout(600s) : _orphanReclaimSec(120s)
+          # 무RTP(setup 실패/세션 시작됐으나 RTP 0) = 짧게 회수, RTP수신후(활성/홀드) = 길게(hold/DTX 보호)
+   if idle >= to:
+     reason = everReceivedRtp ? "hold_timeout" : "orphan_no_rtp"
+     → SESSION_TIMEOUT 로그(detail=reason) → 카운터(_leakReclaim{Total,Orphan,Hold})++
+     → writeLeakReclaim()  ({ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 한 줄)
+     → reset() → freeResource() → 삭제
 
 2. 그룹 세션 (PTT):
    getMemberCount() == 0 && now - lastActivity >= _sessionTimeout
    → GROUP_TIMEOUT 로그 → delete group → 삭제
 ```
 
-**Activity 갱신:** RTP 패킷 수신 시 `touchActivity()` 호출 → `time(&_lastActivityTime)`
+**Activity 갱신:** RTP 패킷 수신 시에만 `touchActivity()` 호출 → `time(&_lastActivityTime); _everReceivedRtp=true`
+(제어 메시지 ADD/MODIFY/HEARTBEAT 은 갱신 안 함 → 순수 RTP-inactivity 타이머).
+
+**설정** (`cmp.json` / `config_template.json`): `SessionTimeout`(기본 600, got-RTP idle), `OrphanReclaimSec`(기본 120, 무RTP idle).
+
+**관측**: STATS 응답에 `leak_reclaim_total`/`leak_reclaim_orphan`/`leak_reclaim_hold` + `orphan_reclaim_sec`/`session_timeout`.
+OAM `GET /api/v1/stats/leak-reclaims?date=` → reclaim.jsonl 목록 + reason/node 집계. 콘솔 '성능 > 누수 회수(sweeper)' 페이지.
+> RtpMap 포트단독키 버그(CSP) 수정 후 정상 환경에서는 이 카운터가 **0** 이 기대값 — 증가 시 CSP crash/teardown 누락 등 새 누수 신호.
 
 ---
 
@@ -777,7 +795,8 @@ CmpServer (PModule)
       "Rtcp":  false             // SR/RR/SDES/BYE (빈도↑)
     }
   },
-  "SessionTimeout": 600,         // 세션 타임아웃 (초, 0=비활성)
+  "SessionTimeout": 600,         // got-RTP relay RTP-idle 회수 (초, 0=비활성)
+  "OrphanReclaimSec": 120,       // 무RTP(setup 실패) relay 회수 (초) — SessionTimeout 보다 짧게
   "LogDir": "log",               // 로그 디렉토리
   "LogMaxSizeMB": 10,            // 로그 파일 최대 크기
   "LogMaxFiles": 5,              // 로그 파일 보관 수
