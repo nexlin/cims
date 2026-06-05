@@ -834,7 +834,7 @@ async def _subscribers_status(config: dict, status: str = 'active',
                 total = cur.fetchone()['c']
 
                 cur.execute(
-                    "SELECT u.id AS person_id, u.name, "
+                    "SELECT u.id AS person_id, u.name, u.org_id AS org_id, "
                     "vs.id AS volte_id, vs.imsi AS volte_imsi, "
                     "vs.register_time AS volte_reg_time, vs.logout_time AS volte_logout_time, "
                     "ps.id AS ptt_id, ps.imsi AS ptt_imsi, "
@@ -843,6 +843,7 @@ async def _subscribers_status(config: dict, status: str = 'active',
                     params + [limit, offset],
                 )
                 rows = cur.fetchall()
+                org_paths = _org_paths(config)
 
                 # ── 페이지에 등장한 활성 그룹의 총 멤버 수만 조회 ──
                 page_gids = set()
@@ -890,9 +891,12 @@ async def _subscribers_status(config: dict, status: str = 'active',
                     ptt_online = bool(ptt_id and row.get('ptt_reg_time') and (
                         not row.get('ptt_logout_time') or row['ptt_reg_time'] > row['ptt_logout_time']))
 
+                    org_code = row.get('org_id') or ''
                     sub = {
                         'person_id': row['person_id'],
                         'name': row['name'],
+                        'org': org_code,
+                        'org_path': org_paths.get(org_code, org_code),
                         'volte': None,
                         'ptt': None,
                     }
@@ -1540,6 +1544,20 @@ def _org_tree(config: dict) -> dict:
     data = {'nodes': nodes, 'children': children}
     c['ts'], c['data'] = now, data
     return data
+
+
+def _org_paths(config: dict) -> dict:
+    """{code: 'CIMS > 제1본부 > 팀02'} — 가입자 부서 경로 표시용."""
+    nodes = _org_tree(config)['nodes']
+    out = {}
+    for code in nodes:
+        names, cur, seen = [], code, set()
+        while cur and cur in nodes and cur not in seen:
+            seen.add(cur)
+            names.append(nodes[cur]['name'])
+            cur = nodes[cur]['parent']
+        out[code] = ' > '.join(reversed(names))
+    return out
 
 
 def _org_descendants(config: dict, code: str):

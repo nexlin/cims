@@ -5,7 +5,7 @@
 
 -- 1) 회사(최상위)
 INSERT INTO organizations (code, name, parent_id, sort_order)
-  VALUES ('CORP', '씨아이엠에스(주)', NULL, 0)
+  VALUES ('CORP', 'CIMS', NULL, 0)
   ON DUPLICATE KEY UPDATE name=VALUES(name), parent_id=NULL, sort_order=0;
 
 -- 2) 본부 2개 (parent = 회사)

@@ -117,6 +117,8 @@ export interface SubscriberPtt {
 export interface Subscriber {
   person_id: number
   name: string
+  org?: string
+  org_path?: string
   volte: SubscriberVolte | null
   ptt: SubscriberPtt | null
 }

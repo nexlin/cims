@@ -351,11 +351,12 @@ export function EventFeedCard() {
 function SubscriberRows({ subs }: { subs: Subscriber[] }) {
   return (
     <table className="data-table">
-      <thead><tr><th>이름</th><th>VoLTE 번호</th><th>VoLTE</th><th>VoLTE 통화</th><th>PTT 번호</th><th>PTT</th><th>PTT 서비스</th></tr></thead>
+      <thead><tr><th>이름</th><th>부서</th><th>VoLTE 번호</th><th>VoLTE</th><th>VoLTE 통화</th><th>PTT 번호</th><th>PTT</th><th>PTT 서비스</th></tr></thead>
       <tbody>
         {subs.map(s => (
           <tr key={s.person_id}>
             <td style={{ fontWeight: 600 }}>{s.name}</td>
+            <td className="ts" style={{ whiteSpace: 'nowrap' }}>{s.org_path || '-'}</td>
             <td className="ts">{s.volte?.msisdn || '-'}</td>
             <td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</td>
             <td>{s.volte?.calls && s.volte.calls.length > 0
@@ -399,11 +400,11 @@ export function OrgStatsCard() {
   // 검색 디바운스
   useEffect(() => { const t = setTimeout(() => { setQ(searchInput.trim()); setPage(1) }, 350); return () => clearTimeout(t) }, [searchInput])
 
-  // 로스터: 검색어 있으면 전체 검색, 없으면 선택 부서 구성원 전체(status=all)
+  // 로스터: 선택 부서(org) AND 검색어(q) 조합. 둘 다 비면 skip.
   useEffect(() => {
     if (!q && !sel) return
     let alive = true
-    const load = () => statsApi.subscribers(q ? { q, status: 'all', page, limit } : { org: sel, status: 'all', page, limit })
+    const load = () => statsApi.subscribers({ org: sel || undefined, q: q || undefined, status: 'all', page, limit })
       .then(r => { if (alive) setRoster(r) }).catch(e => show(String(e), 'err'))
     load(); const iv = setInterval(load, 5000); return () => { alive = false; clearInterval(iv) }
   }, [q, sel, page, limit, show])
@@ -418,7 +419,9 @@ export function OrgStatsCard() {
         <input className="search-input" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 280 }} />
         {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
-        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{q ? `검색: "${q}"` : selNode ? `부서: ${selNode.name} (${selNode.members}명)` : ''}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+          {selNode ? `부서: ${selNode.name} (${selNode.members}명)` : ''}{selNode && q ? '  &  ' : ''}{q ? `검색: "${q}"` : ''}
+        </span>
         <label style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
           표시{' '}
           <select className="form-input" value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}
@@ -431,9 +434,9 @@ export function OrgStatsCard() {
         {/* 부서 트리 */}
         <div style={{ flex: '0 0 230px', maxHeight: 460, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
           {orgs.length === 0 ? <Loading /> : orgs.map(o => (
-            <div key={o.code} onClick={() => { setSel(o.code); setSearchInput('') }}
+            <div key={o.code} onClick={() => { setSel(o.code); setPage(1) }}
               style={{ cursor: 'pointer', padding: '4px 6px', paddingLeft: 6 + o.depth * 16, borderRadius: 4, fontSize: 13,
-                background: !q && sel === o.code ? 'rgba(80,120,255,.12)' : undefined,
+                background: sel === o.code ? 'rgba(80,120,255,.12)' : undefined,
                 fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
               {o.name} <span className="ts">({o.members})</span>
               {o.active_volte > 0 && <span className="badge badge--blue" style={{ marginLeft: 4 }}>📞{o.active_volte}</span>}
