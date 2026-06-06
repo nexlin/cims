@@ -1,10 +1,14 @@
 #ifndef _SIP_MESSAGE_LOGGER_H_
 #define _SIP_MESSAGE_LOGGER_H_
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdio>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <string>
+#include <thread>
 
 #include "Log.h"
 
@@ -72,6 +76,12 @@ public:
     std::string GetSesIdByCallId( const std::string &strCallId );
 
 private:
+    /** 비동기 writer 큐 항목: 목적 파일 경로 + 포맷 완료된 한 줄(개행 포함) */
+    struct LogItem {
+        std::string path;
+        std::string line;
+    };
+
     /** Determine service from SIP message domain */
     std::string ClassifyService( const char *pszMsg, const std::string &strCallId, const std::string &strMethod );
 
@@ -140,6 +150,18 @@ private:
     /** Get flow FILE*, open lazily */
     FILE *GetFlowFile();
 
+    // ── 비동기 배치 로그 writer ──────────────────────────────────────────
+    /** 포맷 완료된 한 줄을 파일경로와 함께 큐에 적재 — NFS I/O 없이 즉시 반환.
+     *  생산자(Print/LogMessage)가 m_mtx 를 보유한 채 호출하므로 enqueue 순서=seq 순서. */
+    void EnqueueLine( const std::string &strPath, std::string &&strLine );
+    /** writer 스레드 본체: flush 주기(kFlushIntervalMs) 또는 큐 임계 도달 시 큐를 비워
+     *  파일경로별로 라인을 합쳐 경로당 1회 open→append→close (open-per-write → open-per-batch). */
+    void WriterLoop();
+    /** 한 배치를 파일경로별로 합쳐 기록. 호출 후 batch 는 비워진다. */
+    void FlushBatch( std::deque<LogItem> &batch );
+    void StartWriter();
+    void StopWriter();
+
     std::string m_strFlowBaseDir;  // service_log base
     std::string m_strMsgBaseDir;   // msg_log base
     std::string m_strSystemId;     // e.g. "csp_01" (파일명용)
@@ -172,6 +194,14 @@ private:
     int m_iSipSeq;  // current line number (1-based)
     int m_iCmpSeq;
     int m_iCscSeq;
+
+    // 비동기 writer 상태 — 생산자는 m_qMtx 만 잡고 enqueue, writer 만 파일 I/O 수행
+    std::deque<LogItem> m_logQueue;  // 기록 대기 (파일경로 + 한 줄)
+    std::mutex m_qMtx;               // m_logQueue 보호 (m_mtx 와 독립; 항상 m_mtx→m_qMtx 순서)
+    std::condition_variable m_qCv;
+    std::thread m_writerThread;
+    std::atomic<bool> m_bWriterRunning;
+    std::atomic<unsigned long> m_ulDroppedLogs;  // 큐 상한 초과로 버려진 줄 수
 };
 
 extern CSipMessageLogger gclsSipLogger;

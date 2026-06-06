@@ -87,6 +87,21 @@ bool CCmpClient::Init( const std::string &strCmpIp, int iCmpPort, int iLocalPort
             return false;
         }
 
+        // 단일 control 소켓의 송수신 버퍼 상향 — 4cps+ 버스트에서 CMP 응답/요청 datagram 이
+        //   기본 버퍼(~212KB) overflow 로 드롭되어 SendRequestAndWait 가 거짓 타임아웃나던 문제 완화.
+        //   값은 net.core.{r,w}mem_max(여기 4MB) 로 캡됨. 재전송과 함께 UDP 유실 견고화.
+        {
+            int iBuf = 4 * 1024 * 1024;
+            if ( setsockopt( m_hSocket, SOL_SOCKET, SO_RCVBUF, &iBuf, sizeof( iBuf ) ) < 0 )
+                CLog::Print( LOG_ERROR, "CmpClient: SO_RCVBUF set failed" );
+            if ( setsockopt( m_hSocket, SOL_SOCKET, SO_SNDBUF, &iBuf, sizeof( iBuf ) ) < 0 )
+                CLog::Print( LOG_ERROR, "CmpClient: SO_SNDBUF set failed" );
+            int iActual = 0;
+            socklen_t optlen = sizeof( iActual );
+            if ( getsockopt( m_hSocket, SOL_SOCKET, SO_RCVBUF, &iActual, &optlen ) == 0 )
+                CLog::Print( LOG_INFO, "CmpClient: SO_RCVBUF=%d (req=%d)", iActual, iBuf );
+        }
+
         struct sockaddr_in localAddr;
         memset( &localAddr, 0, sizeof( localAddr ) );
         localAddr.sin_family = AF_INET;
@@ -100,7 +115,7 @@ bool CCmpClient::Init( const std::string &strCmpIp, int iCmpPort, int iLocalPort
             return false;
         }
 
-        // Start Recv Thread
+        // Start Recv Thread — 단일 수신 스레드(trans_id demux). 비동기 로깅 후 µs 급 처리라 충분.
         m_bRecvRunning = true;
         m_threadRecv = std::thread( &CCmpClient::RecvLoop, this );
     }
@@ -280,30 +295,40 @@ bool CCmpClient::_SendOnEndpoint( const CmpEndpoint &ep, const SimpleJson::JsonN
     servaddr.sin_port = htons( ep.iPort );
     servaddr.sin_addr.s_addr = inet_addr( ep.strIp.c_str() );
 
-    if ( sendto( m_hSocket, strPacket.c_str(), strPacket.length(), 0, (struct sockaddr *)&servaddr,
-                 sizeof( servaddr ) ) < 0 ) {
-        CLog::Print( LOG_ERROR, "SendRequestAndWait sendto error" );
-        // Remove from map
-        {
-            std::lock_guard<std::mutex> mapLock( m_mutexTrans );
-            m_mapTransactions.erase( transId );
-        }
-        return false;
-    }
-
-    // Wait
+    // UDP control plane 견고화 — 재전송. CMP 요청/응답 datagram 이 부하 시 드롭되면(단일 소켓)
+    //   재전송 없이는 단발 유실이 곧 2초 타임아웃→호 실패였다. CMP 명령은 session_id 기준 멱등
+    //   (processAdd: 기존 세션이면 재할당 없이 동일 포트 반환; MODIFY/REMOVE 동일) 이므로 같은
+    //   trans_id+payload 재전송이 안전(중복 relay/누수 없음). 총 대기 ceiling(2s)은 기존과 동일.
+    // CMP 정상 응답은 5~25ms 관측 → 100ms 는 4~20배 마진(정상 응답엔 헛발동 없음).
+    //   유실 시 100ms 내 재시도, 3회=총 300ms ceiling 로 빠르게 복구 or 실패 판정.
+    const int kMaxAttempts = 3;
+    const int kAttemptMs = 100;
     bool bResult = false;
-    // Scope for unique_lock
-    {
+    bool bSendFail = false;
+    for ( int attempt = 0; attempt < kMaxAttempts && !bResult; ++attempt ) {
+        if ( sendto( m_hSocket, strPacket.c_str(), strPacket.length(), 0, (struct sockaddr *)&servaddr,
+                     sizeof( servaddr ) ) < 0 ) {
+            CLog::Print( LOG_ERROR, "SendRequestAndWait sendto error (TransId=%d attempt=%d)", transId, attempt );
+            bSendFail = true;
+            break;
+        }
+        if ( attempt > 0 )
+            CLog::Print( LOG_INFO, "CmpClient retransmit (TransId=%d attempt=%d)", transId, attempt );
+
         std::unique_lock<std::mutex> lock( pTrans->mutex );
-        if ( pTrans->cv.wait_for( lock, std::chrono::milliseconds( 2000 ) ) == std::cv_status::timeout ) {
-            CLog::Print( LOG_ERROR, "SendRequestAndWait Timeout (TransId=%d)", transId );
-            bResult = false;
-        } else {
+        // ★ 술어(predicate) 있는 wait_for 필수 — CMP 응답(~25ms)이 sendto 직후 sender 가
+        //   wait_for 에 진입하기 '전에' 도착하면 RecvLoop 의 notify_one 이 대기자 없이 유실되어,
+        //   술어 없는 wait 는 이미 완료된 트랜잭션을 끝까지 기다린다(lost-wakeup → 거짓 타임아웃).
+        //   bCompleted 를 술어로 검사하면 notify 선행/spurious wakeup 모두 안전.
+        if ( pTrans->cv.wait_for( lock, std::chrono::milliseconds( kAttemptMs ),
+                                  [&pTrans] { return pTrans->bCompleted; } ) ) {
             strResponse = pTrans->strResponse;
             bResult = pTrans->bSuccess;
             CLog::Print( LOG_DEBUG, "CmpClient RX ← %s", strResponse.c_str() );
         }
+    }
+    if ( !bResult && !bSendFail ) {
+        CLog::Print( LOG_ERROR, "SendRequestAndWait Timeout (TransId=%d, %d attempts)", transId, kMaxAttempts );
     }
 
     // Safe Cleanup: Remove from map.

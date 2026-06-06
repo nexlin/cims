@@ -36,6 +36,21 @@ bool CGroupMap::LoadFromDb() {
 }
 
 /**
+ * @brief DB에서 특정 그룹 id 하나만 조회하여 로드한다 (전체 LoadAllGroups 재로드 없음).
+ *        그룹이면 맵에 삽입하고 true, 해당 id 가 그룹으로 존재하지 않으면 false.
+ *        (cache miss 시 VoLTE 1:1 착신이 매 호 전체 그룹 재로드를 유발하던 문제 해소 — 단건 조회.)
+ */
+bool CGroupMap::LoadOneFromDb( const char *pszGroupId ) {
+    if ( !pszGroupId || !pszGroupId[0] ) return false;
+    CspPttGroup clsGroup;
+    if ( gclsDbManager.SelectGroup( pszGroupId, clsGroup ) ) {
+        Insert( clsGroup );
+        return true;
+    }
+    return false;
+}
+
+/**
  * @brief Read directory and parse JSON files
  */
 bool CGroupMap::ReadDir( const char *pszDirName ) {

@@ -4,14 +4,22 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
+#include <chrono>
 #include <cstdarg>
 #include <cstring>
 #include <ctime>
+#include <unordered_map>
+#include <utility>
 
 CSipMessageLogger gclsSipLogger;
 
 // Maximum Call-ID cache entries before eviction
 static const size_t MAX_CALLID_CACHE = 10000;
+
+// 비동기 writer 튜닝값
+static const size_t kNotifyThreshold = 128;  // 큐가 이만큼 쌓이면 즉시 flush 깨움
+static const size_t kMaxQueue = 200000;      // 큐 상한 (NFS 장애 등 backlog 시 메모리 폭주 방지)
+static const int kFlushIntervalMs = 100;     // 주기 flush (버퍼 잔여분 보장)
 
 CSipMessageLogger::CSipMessageLogger()
     : m_bEnabled( false ),
@@ -22,10 +30,13 @@ CSipMessageLogger::CSipMessageLogger()
       m_pCscFile( NULL ),
       m_iSipSeq( 0 ),
       m_iCmpSeq( 0 ),
-      m_iCscSeq( 0 ) {
+      m_iCscSeq( 0 ),
+      m_bWriterRunning( false ),
+      m_ulDroppedLogs( 0 ) {
 }
 
 CSipMessageLogger::~CSipMessageLogger() {
+    StopWriter();  // 잔여 큐 전량 flush 후 writer 조인
     std::lock_guard<std::mutex> lock( m_mtx );
     CloseAllFiles();
 }
@@ -64,6 +75,7 @@ void CSipMessageLogger::Init( const std::string &strFlowBaseDir, const std::stri
     if ( !m_strFlowBaseDir.empty() ) MkdirP( m_strFlowBaseDir );
     if ( !m_strMsgBaseDir.empty() ) MkdirP( m_strMsgBaseDir );
     m_bEnabled = true;
+    StartWriter();  // 비동기 배치 writer 기동 (활성화 시 1회)
 }
 
 void CSipMessageLogger::SetCallSesId( const std::string &strCallId, const std::string &strSesId,
@@ -512,25 +524,30 @@ void CSipMessageLogger::WriteFlowLine( const char *pszService, const char *pszTs
                                        const char *pszCallee ) {
     std::string strPath = FlowFilePath();
     if ( strPath.empty() ) return;
-    FILE *pFile = fopen( strPath.c_str(), "a" );  // open-per-write (5분 버킷 파일)
-    if ( !pFile ) return;
 
+    // 파일 I/O 없이 한 줄을 메모리에 포맷한 뒤 비동기 writer 큐로 적재 (open-per-write 제거).
     // 순서: ts, service, caller, callee, sesid, subid, node, from, to,
-    //       proto, method, detail, mid, seq, iface
-    // 빈 값은 key 생략.
+    //       proto, method, detail, mid, seq, iface — 빈 값은 key 생략.
+    std::string line;
+    line.reserve( 256 );
+    line += '{';
     bool bFirst = true;
     auto emit = [&]( const char *key, const std::string &val, bool isNumeric = false, int iNum = 0 ) {
         if ( !isNumeric && val.empty() ) return;
-        if ( !bFirst ) fprintf( pFile, "," );
+        if ( !bFirst ) line += ',';
         bFirst = false;
+        line += '"';
+        line += key;
+        line += "\":";
         if ( isNumeric ) {
-            fprintf( pFile, "\"%s\":%d", key, iNum );
+            line += std::to_string( iNum );
         } else {
-            fprintf( pFile, "\"%s\":\"%s\"", key, val.c_str() );
+            line += '"';
+            line += val;
+            line += '"';
         }
     };
 
-    fprintf( pFile, "{" );
     emit( "ts", pszTs ? pszTs : "" );
     emit( "service", pszService ? pszService : "" );
     emit( "caller", pszCaller ? JsonEsc( pszCaller ) : "" );
@@ -546,8 +563,8 @@ void CSipMessageLogger::WriteFlowLine( const char *pszService, const char *pszTs
     emit( "mid", pszTxId ? JsonEsc( pszTxId ) : "" );
     if ( iSeq > 0 ) emit( "seq", "", true, iSeq );
     emit( "iface", pszIface ? pszIface : "" );
-    fprintf( pFile, "}\n" );
-    fclose( pFile );
+    line += "}\n";
+    EnqueueLine( strPath, std::move( line ) );
 }
 
 int CSipMessageLogger::WriteInterfaceLine( const char *pszIface, const char *pszTs, const char *pszDir,
@@ -559,23 +576,127 @@ int CSipMessageLogger::WriteInterfaceLine( const char *pszIface, const char *psz
 
     int &iSeq = GetIfaceSeq( pszIface );
     if ( iSeq < 0 ) iSeq = CountFileLines( strPath );  // 버킷 첫 write: 기존 줄 수 계수(재기동 연속성)
-
-    FILE *pFile = fopen( strPath.c_str(), "a" );  // open-per-write (5분 버킷 파일)
-    if ( !pFile ) return 0;
+    //   주의: 버킷 첫 줄에서만 호출되며 그 시점엔 해당 버킷 파일로 적재된 줄이 아직 없으므로,
+    //   디스크 줄 수(=writer 가 이미 flush 한 분)로 seq 를 seed 해도 정합. 이후는 in-memory 증가.
 
     std::string strEscMsg = JsonEsc( pszMsg );
     iSeq++;
 
+    // 파일 I/O 없이 한 줄을 메모리에 포맷한 뒤 비동기 writer 큐로 적재.
     // 순서: ts, dir, peer, caller, callee, sesid, proto, msg
-    fprintf( pFile, "{\"ts\":\"%s\",\"dir\":\"%s\",\"peer\":\"%s\"", pszTs ? pszTs : "", pszDir ? pszDir : "",
-             pszPeer ? pszPeer : "" );
-    if ( pszCaller && pszCaller[0] ) fprintf( pFile, ",\"caller\":\"%s\"", JsonEsc( pszCaller ).c_str() );
-    if ( pszCallee && pszCallee[0] ) fprintf( pFile, ",\"callee\":\"%s\"", JsonEsc( pszCallee ).c_str() );
-    if ( pszSesId && pszSesId[0] ) fprintf( pFile, ",\"sesid\":\"%s\"", JsonEsc( pszSesId ).c_str() );
-    fprintf( pFile, ",\"proto\":\"%s\",\"msg\":\"%s\"}\n", pszProto ? pszProto : "", strEscMsg.c_str() );
-    fclose( pFile );
+    std::string line;
+    line.reserve( strEscMsg.size() + 128 );
+    line += "{\"ts\":\"";
+    line += ( pszTs ? pszTs : "" );
+    line += "\",\"dir\":\"";
+    line += ( pszDir ? pszDir : "" );
+    line += "\",\"peer\":\"";
+    line += ( pszPeer ? pszPeer : "" );
+    line += '"';
+    if ( pszCaller && pszCaller[0] ) {
+        line += ",\"caller\":\"";
+        line += JsonEsc( pszCaller );
+        line += '"';
+    }
+    if ( pszCallee && pszCallee[0] ) {
+        line += ",\"callee\":\"";
+        line += JsonEsc( pszCallee );
+        line += '"';
+    }
+    if ( pszSesId && pszSesId[0] ) {
+        line += ",\"sesid\":\"";
+        line += JsonEsc( pszSesId );
+        line += '"';
+    }
+    line += ",\"proto\":\"";
+    line += ( pszProto ? pszProto : "" );
+    line += "\",\"msg\":\"";
+    line += strEscMsg;
+    line += "\"}\n";
+    EnqueueLine( strPath, std::move( line ) );
 
     return iSeq;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 비동기 배치 writer
+//   생산자(Print/LogMessage)는 m_mtx 보유 중 포맷한 한 줄을 EnqueueLine 으로 적재만 하고
+//   즉시 반환한다(NFS I/O 없음). 단일 writer 스레드가 주기/임계마다 큐를 비워 파일경로별로
+//   라인을 합쳐 경로당 1회 open→append→close 한다. 단일 writer + FIFO 라 파일 내 줄 순서가
+//   enqueue(=seq) 순서와 일치하여 flow.seq → msg 줄번호 cross-reference 정합이 유지된다.
+// ─────────────────────────────────────────────────────────────────────────────
+void CSipMessageLogger::EnqueueLine( const std::string &strPath, std::string &&strLine ) {
+    if ( strPath.empty() || strLine.empty() ) return;
+    bool bNotify = false;
+    {
+        std::lock_guard<std::mutex> lk( m_qMtx );
+        if ( m_logQueue.size() >= kMaxQueue ) {
+            // backlog 상한 초과(예: NFS 무응답) — 가장 오래된 줄을 버려 메모리 폭주 방지.
+            m_logQueue.pop_front();
+            m_ulDroppedLogs.fetch_add( 1 );
+        }
+        m_logQueue.push_back( LogItem{ strPath, std::move( strLine ) } );
+        if ( m_logQueue.size() >= kNotifyThreshold ) bNotify = true;
+    }
+    if ( bNotify ) m_qCv.notify_one();
+}
+
+void CSipMessageLogger::FlushBatch( std::deque<LogItem> &batch ) {
+    if ( batch.empty() ) return;
+    // 파일경로별로 라인을 이어붙인다. 같은 경로의 줄은 batch 순서(=enqueue/seq 순서)대로 누적.
+    std::unordered_map<std::string, std::string> groups;
+    for ( auto &item : batch ) {
+        auto it = groups.find( item.path );
+        if ( it == groups.end() )
+            groups.emplace( std::move( item.path ), std::move( item.line ) );
+        else
+            it->second += item.line;
+    }
+    batch.clear();
+    // 경로당 1회 open→append→close (서로 다른 파일끼리는 순서 무관).
+    for ( auto &kv : groups ) {
+        FILE *pFile = fopen( kv.first.c_str(), "a" );
+        if ( !pFile ) continue;
+        fwrite( kv.second.data(), 1, kv.second.size(), pFile );
+        fclose( pFile );
+    }
+}
+
+void CSipMessageLogger::WriterLoop() {
+    const auto interval = std::chrono::milliseconds( kFlushIntervalMs );
+    while ( m_bWriterRunning.load() ) {
+        std::deque<LogItem> batch;
+        {
+            std::unique_lock<std::mutex> lk( m_qMtx );
+            m_qCv.wait_for( lk, interval, [this] { return !m_logQueue.empty() || !m_bWriterRunning.load(); } );
+            batch.swap( m_logQueue );
+        }
+        FlushBatch( batch );  // 락 밖에서 NFS I/O
+    }
+    // 종료 — 잔여 큐 전량 flush
+    for ( ;; ) {
+        std::deque<LogItem> batch;
+        {
+            std::lock_guard<std::mutex> lk( m_qMtx );
+            batch.swap( m_logQueue );
+        }
+        if ( batch.empty() ) break;
+        FlushBatch( batch );
+    }
+}
+
+void CSipMessageLogger::StartWriter() {
+    bool bExpected = false;
+    if ( m_bWriterRunning.compare_exchange_strong( bExpected, true ) ) {
+        m_writerThread = std::thread( &CSipMessageLogger::WriterLoop, this );
+    }
+}
+
+void CSipMessageLogger::StopWriter() {
+    if ( m_bWriterRunning.exchange( false ) ) {
+        m_qCv.notify_all();
+        if ( m_writerThread.joinable() ) m_writerThread.join();
+    }
 }
 
 std::string CSipMessageLogger::GetFlowHourDir() {

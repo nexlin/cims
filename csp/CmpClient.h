@@ -153,6 +153,9 @@ private:
     std::thread m_threadKeepAlive;
 
     std::atomic<bool> m_bRecvRunning;
+    // 단일 수신 스레드 — 공유 소켓(m_hSocket)에서 양 CMP 응답을 trans_id 로 demux 하여 dispatch.
+    //   비동기 로깅(SipMessageLogger) 적용 후 수신 처리는 recvfrom→parse→enqueue→notify 의 µs 급이라
+    //   단일 스레드로 충분(다중 스레드는 단일 소켓 수신큐를 공유해 실질 병렬 이득 없음).
     std::thread m_threadRecv;
 
     // Connection State

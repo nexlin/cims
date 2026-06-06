@@ -28,6 +28,9 @@ public:
     /** Load all groups from DB */
     bool LoadFromDb();
 
+    /** DB에서 특정 그룹 id 하나만 조회·로드 (전체 재로드 없음). 그룹이면 맵 삽입 후 true. */
+    bool LoadOneFromDb( const char *pszGroupId );
+
     /** Insert a group */
     void Insert( CspPttGroup &clsGroup );
 

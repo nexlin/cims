@@ -434,9 +434,20 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     if ( m_clsPttAs.IsEnabled() ) {
         // 신규 그룹(GROUP_CHANGED notify 미수신/지연)으로 in-memory 캐시 미스 시 DB lazy-load 후
         //   재확인 — 그룹 생성 직후 재기동 없이 즉시 발신 가능. (notify 경로와 독립적 안전망.)
+        //
+        // ⚠️ 부하시험(2026-06-06)서 발견: VoLTE 1:1 호의 착신(일반 가입자 MSISDN)은 그룹이 아니라
+        //   항상 cache miss → 그대로 두면 매 INVITE 마다 LoadAllGroups(전체 그룹 DB 재로드, SelectGroup×N
+        //   + 맵 Clear/재구축)가 일어나 SIP 수신스레드를 블록 → 소켓 버퍼 overflow·호 실패(408). 그래서:
+        //   (1) 착신이 '등록된 가입자' 면 1:1 호이므로 DB 조회 자체를 생략(그룹 아님 — 폭풍 원천 차단).
+        //   (2) 미등록 타겟(신규 그룹일 수 있음)만 전체가 아니라 '해당 id 단건' 만 DB 조회·로드.
         if ( !gclsGroupMap.Contains( pszTo ) && gclsDbManager.IsConnected() ) {
-            CLog::Print( LOG_INFO, "EventIncomingCall: group(%s) cache miss — DB lazy-reload", pszTo );
-            gclsGroupMap.LoadFromDb();
+            CspUser clsToUser;
+            bool bToIsRegisteredUser = gclsCspUserMap.isAlive( pszTo, clsToUser );
+            if ( !bToIsRegisteredUser ) {
+                if ( gclsGroupMap.LoadOneFromDb( pszTo ) ) {
+                    CLog::Print( LOG_INFO, "EventIncomingCall: group(%s) lazy-loaded from DB (single)", pszTo );
+                }
+            }
         }
     }
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
