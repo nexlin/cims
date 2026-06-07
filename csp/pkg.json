@@ -1,7 +1,7 @@
 {
   "name": "csp",
   "description": "CIMS Signaling Processor — SIP signaling (CSCF/TAS/PTT-AS/IBCF) 통합 서버",
-  "version": "0.0.28",
+  "version": "0.0.30",
   "ha_capability": "active_standby",
   "service": {
     "functions": [

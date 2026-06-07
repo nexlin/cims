@@ -246,3 +246,61 @@ UDP 버퍼 → SIP 소켓 버퍼 → 라우팅 LoadAllGroups). 매번 "고쳤는
   `CGroupMap::LoadOneFromDb`(전체 재로드 대신 단건 조회·로드)
 - `csp/pkg.json` — 0.0.21 → 0.0.28
 - OS(4서버): `net.core.rmem_default=4MB, rmem_max=8MB` (sysctl; `/etc/sysctl.d` 영속화 권장)
+
+---
+
+# 부록 (2026-06-07) — PTT 소크 후속: csc/cmp 비동기 로깅 + csp DB 데드락
+
+> PTT 그룹콜(g001 40명, floor 10s 순환) 오버나잇 소크 중 발견·수정. 관련 메모리:
+> `project_session_2026_06_07_async_logging_overnight`.
+
+## 버그 6 — csp DbManager: 단일 DB 연결을 락으로 직렬화 + 쿼리 타임아웃 부재 → 데드락
+
+### 근본원인
+`csp/DbManager` 는 **단일 `MYSQL*` 연결**을 `recursive_mutex m_mutex` 로 직렬화하고,
+`Connect()` 가 `MYSQL_OPT_RECONNECT` 만 설정할 뿐 **read/write/connect 타임아웃을 전혀 설정하지 않았다**.
+모든 DB 접근(REGISTER 인증·그룹/세션 조회·CDR 등)이 이 락 하에서 `mysql_query` 를 호출한다.
+
+연결이 half-open(상대 무응답·네트워크 hiccup)으로 멈추면 `mysql_query` 가 **무한 블록**(스레드가
+`poll_schedule_timeout` 에 정지) → **락을 영구 보유** → REGISTER/group 을 처리하는 SIP 스레드가 전부
+`m_mutex` 에서 wedge → SIP UDP 5060 소켓이 드레인되지 않아 가득 참 → **csp 전체가 데드락**(재기동 외 복구 불가).
+`MYSQL_OPT_RECONNECT` 는 쿼리가 에러를 *반환*할 때만 동작하므로 무한 블록은 막지 못한다.
+
+### 증상 / 증거
+- PTT 통화 정상 ~20분 후 **40명 동시 REGISTER 갱신 버스트** → 전원 `REGISTER FAILED 408`. floor 정체.
+- `ss -uanm` 5060 소켓: `r` 가 수신버퍼(4MB)까지 차고 드롭(`d`) 증가, **부하(cspsim) 제거 후에도 안 빠짐** = wedge.
+- `ps -L -o wchan`: csp 스레드 **5개가 `futex_do_wait`**(뮤텍스 락 대기), 락보유 후보가 `poll_schedule_timeout`(=DB 쿼리 네트워크 대기). **CmpClient(별도 스레드)만 정상**(heartbeat OK).
+- 트리거 = 40 동시 REGISTER 버스트(DB 경합 급증). sysctl rmem 은 이미 4MB(버퍼가 아니라 **드레인** 문제).
+
+### 수정 (csp 0.0.30)
+`DbManager::Connect()` 에 `mysql_options` 로 타임아웃 추가:
+`MYSQL_OPT_CONNECT_TIMEOUT/READ_TIMEOUT/WRITE_TIMEOUT = 5초`.
+멈춘 쿼리가 **무한 대신 유한 시간 후 실패** → 락 해제 → 회복(다음 쿼리에서 RECONNECT). 영구 wedge 제거.
+(근본 아키텍처 개선=DB 연결 풀이나 lock 밖 쿼리이나, 단일연결+락 구조상 타임아웃이 최소·고위험낮은 핵심 fix.)
+
+### 검증
+- csp 0.0.30 배포 후 **무패치 csp 가 데드락 났던 ~3.5h 시점을 넘겨 3h41m+ 무재발**, REGISTER FAILED 동결, SIP `r0`.
+- gdb(ptrace_scope=0) 백트레이스로 락 확정 예정이었으나 fix 후 미재발(=좋은 결과). 감시기
+  `scripts/csp_deadlock_watch.sh` 가 SIP 5060 wedge 감지 시 ps wchan + gdb 백트레이스 자동 캡처 + csp restart.
+
+## csc/cmp 비동기 배치 로깅 (버그 1 패턴 이식)
+csp `SipMessageLogger` 의 비동기 배치 writer(생산자=포맷+enqueue만, 단일 writer 스레드가 경로별 open-per-batch)를
+- **cmp** `PCmpServer`(0.0.12): writeMsgLine/logFlow/logBody/writeLeakReclaim → `enqueueLine`+`logWriterLoop`.
+  단일 control 스레드가 매 패킷 NFS open-per-write(특히 `sendResponse` 가 `sendto` **전에** 기록)로 막히던 HOL 제거.
+- **csc** `logger.py`(0.0.14): `log_flow` open-per-write → deque + writer 스레드 + `_flush_batch`.
+양쪽 4서버 배포, 10h+ 안정. (OAM 은 관리플레인이라 미적용.)
+
+## 테스트 인프라 교훈 (소크 운영)
+- ⚠️ **부하생성기 로그를 tmpfs(/tmp)+usrquota 에 두지 마라**: cspsim RTP STATS 폭증이 /tmp(RAM) 를 채워
+  EDQUOT → 셸 전체 마비. 로그는 **디스크**에, RTP STATS 등 고빈도 노이즈는 grep 필터, 크기 cap 안전장치.
+- ⚠️ **cspsim `-floor_loop` busy-spin**: 멤버 BYE 후 떠난 멤버에 floor 무한 시도("not in call" 스팸). 도구 결함 →
+  `-floor_rounds N`(정상 종료·재수립 반복) + CPU watchdog 으로 우회.
+- ⚠️ **co-location 의 또 다른 형태 = OOM**: ctrl01(7.4GB)에 IDE(antigravity node, RES1.5GB+swap1.8GB)+claude+소크+mariadbd
+  동거 → 스왑 thrashing(`ksoftirqd` 100% = BLOCK softirq=스왑 페이징 I/O 완료) + **OOM killer 가 csp 주기 kill**(watchdog 복구).
+  진단: `vmstat`(si/wa/st), `/proc/softirqs`(BLOCK vs NET_RX), `journalctl ... 'OOM killer killed'`. csp 재기동 ≠ 데드락일 수 있음.
+
+## 변경 파일 (2026-06-07, 커밋 대상)
+- `csp/DbManager.cpp` — 버그6(DB connect/read/write 타임아웃 5s). `csp/pkg.json` 0.0.28→0.0.30.
+- `cmp/PCmpServer.{h,cpp}` + `cmp/pkg.json`(0.0.10→0.0.12) — 비동기 배치 로깅.
+- `csc/src/services/logger.py` + `csc/pkg.json`(0.0.12→0.0.14) — 비동기 배치 로깅.
+- `scripts/overnight_ptt_0608.sh`·`scripts/csp_deadlock_watch.sh` — 소크 러너·데드락 감시기(신규).

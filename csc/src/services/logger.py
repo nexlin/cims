@@ -12,7 +12,9 @@ sesid 포맷: {caller}::{module}::{yyyymmddHHMMSSuuuuuu}::{counter}
 
 import os
 import json
+import atexit
 import threading
+import collections
 from datetime import datetime
 
 _service_log_dir: str = ""
@@ -21,6 +23,90 @@ _lock = threading.Lock()
 
 # iface → 누적 seq 카운터 (프로세스 재시작 시 파일 라인 수로 복원)
 _seq_map: dict = {}
+
+# ── 비동기 배치 로그 writer (CSP/CMP 와 동일 패턴) ────────────────────────────
+#   생산자(log_flow)는 _lock 보유 중 seq 부여 + JSON 라인 포맷까지만 하고 _enqueue 로 큐에
+#   적재 후 즉시 반환(파일 I/O 없음). 단일 writer 스레드가 flush 주기/큐 임계마다 큐를 비워
+#   파일경로별로 라인을 합쳐 경로당 1회 open→append→close (open-per-write → open-per-batch).
+#   단일 writer + FIFO 라 파일 줄순서 = enqueue(=seq) 순서 정합 유지.
+_LOG_FLUSH_INTERVAL = 0.1     # 100ms 주기 flush
+_LOG_NOTIFY_THRESHOLD = 128   # 큐가 이만큼 쌓이면 즉시 flush 깨움
+_LOG_MAX_QUEUE = 200000       # 큐 상한 (NFS 장애 backlog 시 메모리 폭주 방지)
+
+_write_queue: "collections.deque" = collections.deque()
+_q_cond = threading.Condition()
+_writer_thread = None
+_writer_running = False
+_dropped_logs = 0
+
+
+def _enqueue(path: str, line: str):
+    """포맷 완료된 한 줄을 파일경로와 함께 큐에 적재 — 파일 I/O 없이 즉시 반환."""
+    if not path or not line:
+        return
+    global _dropped_logs
+    with _q_cond:
+        if len(_write_queue) >= _LOG_MAX_QUEUE:
+            _write_queue.popleft()
+            _dropped_logs += 1
+        _write_queue.append((path, line))
+        if len(_write_queue) >= _LOG_NOTIFY_THRESHOLD:
+            _q_cond.notify()
+
+
+def _flush_batch(batch):
+    if not batch:
+        return
+    groups: dict = {}
+    for path, line in batch:
+        groups.setdefault(path, []).append(line)
+    for path, lines in groups.items():
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("".join(lines))
+        except Exception:
+            pass
+
+
+def _writer_loop():
+    global _write_queue
+    while _writer_running:
+        batch = None
+        with _q_cond:
+            if not _write_queue:
+                _q_cond.wait(_LOG_FLUSH_INTERVAL)
+            if _write_queue:
+                batch = _write_queue
+                _write_queue = collections.deque()
+        if batch:
+            _flush_batch(batch)
+    # 종료 — 잔여 큐 전량 flush
+    with _q_cond:
+        batch = _write_queue
+        _write_queue = collections.deque()
+    _flush_batch(batch)
+
+
+def _start_writer():
+    global _writer_thread, _writer_running
+    if _writer_thread is not None:
+        return
+    _writer_running = True
+    _writer_thread = threading.Thread(target=_writer_loop, daemon=True, name="csc-log-writer")
+    _writer_thread.start()
+    atexit.register(_stop_writer)
+
+
+def _stop_writer():
+    global _writer_running
+    if not _writer_running:
+        return
+    _writer_running = False
+    with _q_cond:
+        _q_cond.notify_all()
+    t = _writer_thread
+    if t is not None:
+        t.join(timeout=2.0)
 
 # sesid 카운터: 동일 us_ts가 연속될 때 1씩 증가
 _sesid_lock = threading.Lock()
@@ -36,6 +122,7 @@ def init(service_log_dir: str = "", system_id: str = "csc_01"):
     _service_log_dir = service_log_dir or ""
     _system_id = system_id or "csc_01"
     _seq_map = {}
+    _start_writer()  # 비동기 배치 writer 기동 (1회)
 
 
 def issue_sesid(caller: str = "", module: str = "csc") -> str:
@@ -191,13 +278,10 @@ def log_flow(service: str,
         if seq > 0:    flow_entry["seq"] = seq
         if iface:      flow_entry["iface"] = iface
 
-        try:
-            with open(msg_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(msg_entry, ensure_ascii=False) + "\n")
-            with open(flow_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(flow_entry, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
+        # 비동기 배치 writer 로 적재 (NFS open-per-write 동기 I/O 제거).
+        # _lock 보유 중 enqueue 하여 seq 순서 = 파일 줄 순서 정합 유지.
+        _enqueue(msg_path, json.dumps(msg_entry, ensure_ascii=False) + "\n")
+        _enqueue(flow_path, json.dumps(flow_entry, ensure_ascii=False) + "\n")
 
 
 # ── 레거시 호환 API ────────────────────────────────────────

@@ -35,7 +35,14 @@ Flow 엔트리의 `seq`+`iface`로 원문을 역조회한다(`seq`=msg 파일 �
 시간당 핸들을 1시간 유지하던 구방식의 `.nfs` 고아·운영중 로그삭제 데이터유실·대용량 검색 부담을 해소.
 `seq` 는 5분 버킷별로 리셋되므로 **원문 역조회 시 flow 엔트리 `ts`(HH:MM:SS)로 버킷(mm5)을 도출**해 해당 파일을 연다.
 리더(`flow_logger.py`)는 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신 5분) glob 을 모두 매칭(하위호환).
-(CMP/CSC 는 빈도가 낮아 시간당 단일 파일 유지.)
+
+**CMP/CSC 도 동일하게 5분 버킷**으로 전환됨(`cmp_0N`/`csc_01`/`oam_01` SystemId 분리). 더불어 **CSP·CMP·CSC 모두
+비동기 배치 writer** 사용(2026-06): 생산자(로깅 호출부)는 한 줄을 포맷·seq 부여 후 큐에 적재만 하고 즉시 반환(파일 I/O 없음),
+단일 writer 스레드가 flush 주기(100ms)·큐 임계마다 큐를 비워 **파일경로별로 라인을 합쳐 경로당 1회 open→append→close**
+(open-per-write → open-per-batch). 단일 writer FIFO 라 파일 줄순서=enqueue(=seq) 순서가 유지되어 `seq↔원문 줄번호` 정합 보존.
+목적: NFS 동기 I/O 가 **단일 수신/디스패치 스레드**(csp CmpClient RecvLoop, cmp control loop)를 막던 HOL 블로킹 제거
+(상세: [csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md)). 구현: csp `CSipMessageLogger`,
+cmp `PCmpServer`(enqueueLine/logWriterLoop), csc `logger.py`(deque+writer 스레드).
 
 ## 3. Realm 설정
 

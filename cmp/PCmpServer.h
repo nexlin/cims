@@ -5,6 +5,10 @@
 #include <map>
 #include <iostream>
 #include <thread>
+#include <deque>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 //#include "pbase.h"
 #include "pmodule.h"
 #include "PRtpRelay.h"
@@ -95,6 +99,30 @@ private:
     std::string getMsgHourDir();
     static std::string getTimestamp();
     static bool mkdirP(const std::string& path);
+
+    // ── 비동기 배치 로그 writer (CSP SipMessageLogger 와 동일 패턴) ──────────────
+    //   생산자(writeMsgLine/logFlow/logBody/writeLeakReclaim)는 _logMtx 보유 중 한 줄을
+    //   포맷·seq 부여까지만 하고 enqueueLine 으로 큐에 적재 후 즉시 반환(NFS I/O 없음).
+    //   단일 control 스레드가 NFS open-per-write 동기 I/O 로 막히던 HOL 블로킹 제거.
+    //   단일 writer 스레드가 flush 주기/큐 임계마다 큐를 비워 파일경로별로 라인을 합쳐
+    //   경로당 1회 open→append→close(open-per-write → open-per-batch). 단일 writer FIFO 라
+    //   파일 줄순서 = enqueue(=seq) 순서 정합 유지.
+    struct LogItem {
+        std::string path;
+        std::string line;
+    };
+    std::mutex _logMtx;                       // producer 상태(_msgSeq/bucket/dir) + 포맷+enqueue 직렬화
+    std::deque<LogItem> _logQueue;            // 기록 대기 (파일경로 + 한 줄)
+    std::mutex _logQMtx;                       // _logQueue 보호 (항상 _logMtx → _logQMtx 순서)
+    std::condition_variable _logQCv;
+    std::thread _logWriterThread;
+    std::atomic<bool> _logWriterRunning{false};
+    std::atomic<unsigned long> _logDropped{0};  // 큐 상한 초과로 버려진 줄 수
+    void enqueueLine(const std::string& path, std::string&& line);
+    void logWriterLoop();
+    void flushLogBatch(std::deque<LogItem>& batch);
+    void startLogWriter();
+    void stopLogWriter();
 
     // msg_log body
     std::string _msgLogDir;

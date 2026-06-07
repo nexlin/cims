@@ -52,6 +52,19 @@ bool CDbManager::Connect( const std::string &strHost, const std::string &strUser
     my_bool bReconnect = 1;
     mysql_options( m_pMysql, MYSQL_OPT_RECONNECT, &bReconnect );
 
+    // ⚠️데드락 방지 핵심: connect/read/write 타임아웃 설정.
+    //   단일 연결을 recursive_mutex 로 직렬화하므로, 연결이 half-open 으로 멈추면
+    //   mysql_query 가 무한 블록 → 락 영구 보유 → 모든 SIP 처리 스레드(REGISTER/group)가
+    //   m_mutex 에서 wedge → SIP UDP 소켓 미드레인 → csp 전체 데드락(재기동 외 복구불가).
+    //   타임아웃을 두면 stall 쿼리가 (무한 대신) 유한 시간 후 실패 → 락 해제 → 회복 가능
+    //   (MYSQL_OPT_RECONNECT 가 다음 쿼리에서 재접속). PTT 40 동시 REGISTER 버스트서 노출됨.
+    unsigned int uConnTimeout = 5;   // 초
+    unsigned int uReadTimeout = 5;   // 초 (쿼리 응답 대기 상한)
+    unsigned int uWriteTimeout = 5;  // 초
+    mysql_options( m_pMysql, MYSQL_OPT_CONNECT_TIMEOUT, &uConnTimeout );
+    mysql_options( m_pMysql, MYSQL_OPT_READ_TIMEOUT, &uReadTimeout );
+    mysql_options( m_pMysql, MYSQL_OPT_WRITE_TIMEOUT, &uWriteTimeout );
+
     // utf8mb4 설정
     mysql_options( m_pMysql, MYSQL_SET_CHARSET_NAME, "utf8mb4" );
 
