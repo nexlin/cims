@@ -170,10 +170,31 @@ if __name__ == '__main__':
             _service_log_dir = config.get("ServiceLogDir", config.get("MsgLogDir", ""))
         _system_id = config.get("SystemId", "oam_01")
 
+        # 신뢰망(trusted_nets): 비정상 세션 탐지에서 '외부' 제외 대상.
+        #   mgmt CIDR + config 에 등장하는 우리 공인 IP(VIP 등)의 /24 + Security.TrustedNets override.
+        #   (우리 노드/VIP 의 공인 IP 가 자기 트래픽으로 오탐되는 것을 방지)
+        _trusted = []
+        try:
+            import re as _re2, ipaddress as _ip2
+            _mc = (config.get('Mgmt') or {}).get('Cidr')
+            if _mc:
+                _trusted.append(_mc)
+            _blob = json.dumps(config, default=str)
+            for _ipstr in set(_re2.findall(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', _blob)):
+                try:
+                    _a = _ip2.ip_address(_ipstr)
+                    if not (_a.is_private or _a.is_loopback or _a.is_unspecified):
+                        _trusted.append(str(_ip2.ip_network(_ipstr + '/24', strict=False)))
+                except Exception:
+                    pass
+            _trusted += list((config.get('Security') or {}).get('TrustedNets') or [])
+        except Exception:
+            pass
         flow_logger.init(
             service_log_dir=_service_log_dir,
             system_id=_system_id,
             db_config=config.get('CimsDatabase'),
+            trusted_nets=_trusted,
         )
 
         tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))

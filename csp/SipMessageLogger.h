@@ -62,6 +62,12 @@ public:
                      const char *pszTxId = "", const char *pszSesId = "", const char *pszDetail = "",
                      const char *pszCaller = "", const char *pszCallee = "" );
 
+    /** 비정상(스캔/사기) 세션 기록 — 수신 시점에 ModuleDispatcher 가 분류해 호출.
+     *  전용 {systemId}.security.{mm5}.jsonl 에 1줄 append (open-per-write 비동기).
+     *  reasons = 콤마구분 사유("external_ip,scanner_ua,fraud_number,..."). */
+    void LogSecurity( const char *pszPeer, const char *pszMethod, const char *pszCaller, const char *pszCallee,
+                      const char *pszUa, const char *pszCallId, const char *pszReasons, bool bRegisteredCaller );
+
     /** Call-ID에 sesid/subid 매핑 등록 (INVITE 전에 호출) */
     void SetCallSesId( const std::string &strCallId, const std::string &strSesId, const std::string &strSubId = "" );
 

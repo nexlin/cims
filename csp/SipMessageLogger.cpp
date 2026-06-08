@@ -78,6 +78,30 @@ void CSipMessageLogger::Init( const std::string &strFlowBaseDir, const std::stri
     StartWriter();  // 비동기 배치 writer 기동 (활성화 시 1회)
 }
 
+void CSipMessageLogger::LogSecurity( const char *pszPeer, const char *pszMethod, const char *pszCaller,
+                                     const char *pszCallee, const char *pszUa, const char *pszCallId,
+                                     const char *pszReasons, bool bRegisteredCaller ) {
+    if ( !m_bEnabled ) return;
+    std::string strTs = GetTimestamp();
+    std::string strFlowHourDir = GetFlowHourDir();
+    std::string strMsgHourDir = GetMsgHourDir();
+    std::lock_guard<std::mutex> lock( m_mtx );
+    EnsureHourlyFiles( strFlowHourDir, strMsgHourDir );
+    std::string strPath = strMsgHourDir + "/" + m_strSystemId + ".security." + BucketSuffix() + ".jsonl";
+    std::string strLine = "{\"ts\":\"" + strTs + "\"";
+    strLine += ",\"peer\":\"" + JsonEsc( pszPeer ) + "\"";
+    strLine += ",\"method\":\"" + JsonEsc( pszMethod ) + "\"";
+    strLine += ",\"caller\":\"" + JsonEsc( pszCaller ) + "\"";
+    strLine += ",\"callee\":\"" + JsonEsc( pszCallee ) + "\"";
+    strLine += ",\"ua\":\"" + JsonEsc( pszUa ) + "\"";
+    strLine += ",\"call_id\":\"" + JsonEsc( pszCallId ) + "\"";
+    strLine += ",\"reasons\":\"" + JsonEsc( pszReasons ) + "\"";
+    strLine += ",\"registered_caller\":";
+    strLine += ( bRegisteredCaller ? "true" : "false" );
+    strLine += "}\n";
+    EnqueueLine( strPath, std::move( strLine ) );
+}
+
 void CSipMessageLogger::SetCallSesId( const std::string &strCallId, const std::string &strSesId,
                                       const std::string &strSubId ) {
     std::lock_guard<std::mutex> lock( m_mtx );

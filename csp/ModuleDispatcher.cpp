@@ -11,6 +11,9 @@
 
 #include "ModuleDispatcher.h"
 
+#include <cctype>
+#include <cstdio>
+
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
@@ -47,6 +50,49 @@ CModuleDispatcher gclsDispatcher;
 
 extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
 extern void SendInitialNotify( const SubscriptionInfo &sub );
+
+// ── 비정상(스캔/사기) 수신 분류 헬퍼 ───────────────────────────────
+// 공개 SIP 포트로 유입되는 인터넷발 스캔/사기 INVITE 를 수신 시점에 탐지·기록하기 위함.
+namespace {
+// 공인(글로벌) IPv4 여부 — 사설/루프백/링크로컬은 내부로 간주(false).
+bool SecIsPublicIp( const std::string &ip ) {
+    unsigned int a = 0, b = 0, c = 0, d = 0;
+    if ( sscanf( ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d ) != 4 ) return false;
+    if ( a == 10 ) return false;
+    if ( a == 172 && b >= 16 && b <= 31 ) return false;
+    if ( a == 192 && b == 168 ) return false;
+    if ( a == 127 || a == 0 || a >= 224 ) return false;
+    if ( a == 169 && b == 254 ) return false;
+    return true;
+}
+// 알려진 SIP 스캐너/공격툴 UA (부분일치, 소문자). pplsip(psip 기본 UA)은 미등록 발신일 때만 의미.
+bool SecIsScannerUa( const std::string &ua ) {
+    std::string l;
+    l.reserve( ua.size() );
+    for ( char ch : ua ) l += (char)tolower( (unsigned char)ch );
+    static const char *kUa[] = { "pplsip", "friendly-scanner", "sipvicious", "sipcli", "sundayddr",
+                                 "vaxsipuseragent", "sip-scan", "sipsak", "sippts", "sundayddr", 0 };
+    for ( int i = 0; kUa[i]; ++i )
+        if ( l.find( kUa[i] ) != std::string::npos ) return true;
+    return false;
+}
+// 사기성 번호: E.164 최대(15) 초과, 또는 0/9 의 9자리+ 비정상 반복(스캐너 enumeration).
+bool SecIsFraudNumber( const std::string &num ) {
+    std::string digits;
+    for ( char ch : num )
+        if ( isdigit( (unsigned char)ch ) ) digits += ch;
+    if ( digits.size() > 15 ) return true;
+    int run = 1;
+    for ( size_t i = 1; i < digits.size(); ++i ) {
+        if ( digits[i] == digits[i - 1] && ( digits[i] == '0' || digits[i] == '9' ) ) {
+            if ( ++run >= 9 ) return true;
+        } else {
+            run = 1;
+        }
+    }
+    return false;
+}
+}  // namespace
 
 // ──────────────────────────────────────────────────────────────
 //  Constructor / Destructor
@@ -231,6 +277,35 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     if ( pclsMessage->IsMethod( SIP_METHOD_INVITE ) ) {
         std::string strTo = pclsMessage->m_clsTo.m_clsUri.m_strUser;
         std::string strFrom = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+
+        // 비정상(스캔/사기) INVITE 탐지·기록 — 미등록 발신 + (공인IP|사기번호|스캐너UA).
+        //   정상 가입자(REGISTER 인증완료) 발신은 등록캐시에 있어 제외 → 오탐 없음.
+        //   기록만 수행(차단/응답은 기존 ACL/Routing/CSCF 로직에 위임).
+        {
+            CspUser clsSecUser;
+            if ( !gclsCspUserMap.isAlive( strFrom, clsSecUser ) ) {
+                bool bPub = SecIsPublicIp( pclsMessage->m_strClientIp );
+                bool bFraud = SecIsFraudNumber( strFrom ) || SecIsFraudNumber( strTo );
+                bool bScan = SecIsScannerUa( pclsMessage->m_strUserAgent );
+                if ( bPub || bFraud || bScan ) {
+                    std::string strReasons;
+                    if ( bPub ) strReasons += "external_ip,";
+                    if ( bScan ) strReasons += "scanner_ua,";
+                    if ( bFraud ) strReasons += "fraud_number,";
+                    if ( !strReasons.empty() ) strReasons.pop_back();
+                    char szPeer[80];
+                    snprintf( szPeer, sizeof( szPeer ), "%s:%d",
+                              pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort );
+                    gclsSipLogger.LogSecurity( szPeer, "INVITE", strFrom.c_str(), strTo.c_str(),
+                                               pclsMessage->m_strUserAgent.c_str(), strCallId.c_str(),
+                                               strReasons.c_str(), false );
+                    CLog::Print( LOG_INFO,
+                                 "SECURITY abnormal INVITE src=%s from=%s to=%s ua=%s reasons=%s",
+                                 pclsMessage->m_strClientIp.c_str(), strFrom.c_str(), strTo.c_str(),
+                                 pclsMessage->m_strUserAgent.c_str(), strReasons.c_str() );
+                }
+            }
+        }
 
         // PTT 그룹 → B2BUA (return false → UserAgent 처리)
         if ( gclsGroupMap.Contains( strTo.c_str() ) ) {

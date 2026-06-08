@@ -21,6 +21,7 @@ import MembersPage from './pages/MembersPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import PttGroupsPage from './pages/PttGroupsPage'
 import LeakReclaimsPage from './pages/LeakReclaimsPage'
+import AbnormalSessionsPage from './pages/AbnormalSessionsPage'
 import ServiceDescriptorsPage from '../../pages/ServiceDescriptorsPage'  // 코어 페이지 — '구성' 그룹에 배치
 
 import {
@@ -54,6 +55,7 @@ export const cimsManifest: ServiceManifest = {
         { path: '/service/status',         title: '서비스 현황',    layout: SERVICE_STATUS_LAYOUT,        layoutId: 'service.status',        requiredRole: 'monitor' },
         { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', requiredRole: 'monitor' },
         { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   requiredRole: 'monitor' },
+        { path: '/service/abnormal-sessions', title: '비정상 세션 이력', component: AbnormalSessionsPage, requiredRole: 'monitor' },
       ],
     },
     // ── 성능 (ops) — 통계(KPI/카운터). FCAPS Performance. ──

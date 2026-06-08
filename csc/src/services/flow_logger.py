@@ -34,17 +34,28 @@ _sip_log_dir: str = ""
 _msg_log_dir: str = ""
 _system_id: str = "csp_01"
 _db_config: dict = None   # 호이력 부서/검색 필터(가입자→부서 매핑)용. OAM 컨텍스트에서만 주입.
+_trusted_nets: list = []  # 우리 서비스/관리 망 CIDR(ip_network) — 비정상 세션 '외부' 판정 제외.
 
 
 def init(service_log_dir: str, sip_log_dir: str = "",
-         msg_log_dir: str = "", system_id: str = "csp_01", db_config: dict = None) -> None:
-    """ServiceLogging Dir 설정 (통합 디렉토리). db_config 주입 시 호이력 부서/이름 필터 활성화."""
-    global _calls_dir, _sip_log_dir, _msg_log_dir, _system_id, _db_config
+         msg_log_dir: str = "", system_id: str = "csp_01", db_config: dict = None,
+         trusted_nets: list = None) -> None:
+    """ServiceLogging Dir 설정 (통합 디렉토리). db_config 주입 시 호이력 부서/이름 필터 활성화.
+    trusted_nets: 우리 서비스/관리 망 CIDR 목록 — 비정상 세션 탐지에서 '외부' 제외(오탐 방지)."""
+    global _calls_dir, _sip_log_dir, _msg_log_dir, _system_id, _db_config, _trusted_nets
     _calls_dir = service_log_dir if service_log_dir else ""
     _sip_log_dir = sip_log_dir if sip_log_dir else _calls_dir
     _msg_log_dir = msg_log_dir if msg_log_dir else _calls_dir
     _system_id = system_id if system_id else "csp_01"
     _db_config = db_config
+    nets = []
+    import ipaddress as _ip
+    for c in (trusted_nets or []):
+        try:
+            nets.append(_ip.ip_network(c, strict=False))
+        except Exception:
+            pass
+    _trusted_nets = nets
 
 
 def _db_conn():
@@ -1581,11 +1592,14 @@ def _ptt_group_base(group_id: str) -> str:
     return ""
 
 
-def _find_ptt_sessions(group_id: str, date: str = None) -> list:
+def _find_ptt_sessions(group_id: str, date: str = None, days: int = None) -> list:
     """PTT 그룹의 시간창(YYYY/MM/DD/HH) 목록 반환. window dir 이름 = 'YYYYMMDDHH'.
 
-    date('YYYY-MM-DD') 지정 시 해당 일자의 시간창만 글롭(장시간 세션의 전체
-    버킷 폭주 방지 — 365일 세션이면 일자 미지정 시 최대 8760개 반환됨)."""
+    스캔 범위(우선순위):
+      - date('YYYY-MM-DD') 지정 → 해당 일자 시간창만.
+      - days(N) 지정 → 최근 N개 캘린더 일자(오늘 포함) 시간창만 (콘솔 일별 히트맵용).
+      - 둘 다 미지정 → 전체(주의: 장시간 세션이면 최대 8760개).
+    일자별로 디렉터리를 직접 순회해 glob 폭을 N일로 제한한다."""
     base = _ptt_group_base(group_id)
     if not base:
         return []
@@ -1593,13 +1607,24 @@ def _find_ptt_sessions(group_id: str, date: str = None) -> list:
     digit4, digit2 = "[0-9][0-9][0-9][0-9]", "[0-9][0-9]"
     # date 필터: 'YYYY-MM-DD' → base/YYYY/MM/DD/* 만 스캔
     day_digits = "".join(c for c in (date or "") if c.isdigit())
+    patterns = []
     if len(day_digits) >= 8:
-        pattern = os.path.join(base, day_digits[0:4], day_digits[4:6], day_digits[6:8], digit2)
+        patterns.append(os.path.join(base, day_digits[0:4], day_digits[4:6], day_digits[6:8], digit2))
+    elif days and days > 0:
+        # 최근 N일(오늘 포함) 각 일자 디렉터리만 glob → 범위 밖 미스캔
+        from datetime import timedelta as _td
+        today = datetime.now()
+        for i in range(days):
+            d = today - _td(days=i)
+            patterns.append(os.path.join(base, d.strftime("%Y"), d.strftime("%m"), d.strftime("%d"), digit2))
     else:
-        pattern = os.path.join(base, digit4, digit2, digit2, digit2)
+        patterns.append(os.path.join(base, digit4, digit2, digit2, digit2))
     result = []
     now_window = datetime.now().strftime("%Y%m%d%H")
-    for hh_dir in _glob.glob(pattern):
+    hh_dirs = []
+    for pat in patterns:
+        hh_dirs.extend(_glob.glob(pat))
+    for hh_dir in hh_dirs:
         if not os.path.isdir(hh_dir):
             continue
         rel = os.path.relpath(hh_dir, base).split(os.sep)
@@ -1878,8 +1903,15 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
             return HandlerResult(status=400, body=json.dumps({"error": "group_id required"}),
                                  media_type="application/json")
 
-        # 시간창(YYYY/MM/DD/HH) 목록 스캔 (date 지정 시 해당 일자만)
-        sessions = _find_ptt_sessions(group_id, _qp("date"))
+        # 시간창(YYYY/MM/DD/HH) 목록 스캔 (date 지정 시 해당 일자만, days 지정 시 최근 N일)
+        _days = None
+        try:
+            _dv = _qp("days")
+            if _dv:
+                _days = max(1, min(90, int(_dv)))
+        except (TypeError, ValueError):
+            _days = None
+        sessions = _find_ptt_sessions(group_id, _qp("date"), _days)
 
         return HandlerResult(status=200, body=json.dumps({
             "group_id": group_id,
@@ -1914,9 +1946,13 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         return HandlerResult(status=404, body=json.dumps({"error": "No recording available"}))
 
     if len(parts) >= 3 and parts[2] == "flow":
-        # ── Flow: 모든 노드의 flow.jsonl 읽기 → 필터 → 노드별 배열 ──
+        # ── Flow: 해당 세션 시간버킷의 flow.jsonl 읽기 → 필터 → 노드별 배열 ──
         date_str = _qp("date", datetime.now().strftime("%Y-%m-%d"))
-        flow_paths = _resolve_flow_paths(date_str, None, "ptt")
+        # 세션 식별자 = 'YYYYMMDDHH' (시간버킷). 그 시(HH)만 스캔 — 하루 24시간×5분버킷×전노드
+        #   (수백 파일) 전체를 읽던 것을 해당 시간으로 한정해 Flow 조회를 대폭 가속한다.
+        _sd = "".join(c for c in session_dir if c.isdigit())
+        _hour = _sd[8:10] if len(_sd) >= 10 else None
+        flow_paths = _resolve_flow_paths(date_str, _hour, "ptt")
 
         # 세션의 시간 범위: events.jsonl에서 추출 (ISO 형식 → HH:MM:SS.ffffff)
         def _iso_to_hms(iso: str) -> str:
@@ -1926,6 +1962,21 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
             return iso[:15]
 
         d_dir = _find_ptt_session_dir(group_id, session_dir)
+        # 매칭 토큰: URL 의 group_id 는 surrogate("1") 라 sesid 부분문자열 매칭 시
+        #   스캔/사기 sesid(예: 0000…/9999…, 숫자 '1' 포함)에 오매칭되어 flow 가 오염된다.
+        #   group.json 의 mcptt_group_id("g001", 영문 포함→숫자 sesid 와 충돌 없음)로 매칭.
+        match_token = group_id
+        try:
+            _base = _ptt_group_base(group_id)
+            if _base:
+                _gj = os.path.join(_base, "group.json")
+                if os.path.exists(_gj):
+                    with open(_gj) as _f:
+                        _mg = (json.load(_f) or {}).get("mcptt_group_id")
+                        if _mg:
+                            match_token = str(_mg)
+        except Exception:
+            pass
         session_meta = _load_session_json(d_dir) if d_dir else {}
         events = _load_ptt_events(d_dir) if d_dir else []
         ev_times = [e.get("ts", "") for e in events if e.get("ts")]
@@ -1983,7 +2034,7 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                 detail = obj.get("detail", "") or ""
                 sesid_val = obj.get("sesid", "") or ""
                 subid_val = obj.get("subid", "") or ""
-                if group_id in detail or group_id in sesid_val or group_id in subid_val:
+                if match_token in detail or match_token in sesid_val or match_token in subid_val:
                     if sesid_val: sesid_set.add(sesid_val)
                     if subid_val and obj.get("proto") == "SIP":
                         subid_set.add(subid_val)
@@ -2012,7 +2063,7 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                 detail = obj.get("detail", "") or ""
                 sesid_val = obj.get("sesid", "") or ""
                 subid_val = obj.get("subid", "") or ""
-                if group_id in detail or group_id in sesid_val or group_id in subid_val:
+                if match_token in detail or match_token in sesid_val or match_token in subid_val:
                     all_matched.append(obj)
 
         filtered = all_matched
@@ -2203,10 +2254,187 @@ async def _handle_flow_body(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                          media_type="application/json")
 
 
+# ══════════════════════════════════════════════════════════════
+#  비정상(이상) 세션 탐지 — 외부 SIP 스캐닝/사기 호 시도
+# ══════════════════════════════════════════════════════════════
+# 공개 SIP 포트(VIP)로 들어오는 인터넷발 스캔/사기 INVITE/REGISTER 를 탐지한다.
+# 신호: 외부(공인) 발신 IP · 알려진 스캐너 UA · 사기성 번호 패턴 · 인증 반복실패.
+# 정상 동작(CSP 가 401 로 거부)이지만 로그를 오염시키고 자원을 소모 → 가시화/대응.
+
+import ipaddress as _ipaddr
+
+# 알려진 SIP 스캐너/공격툴 User-Agent (소문자 부분일치)
+_SCANNER_UAS = (
+    'pplsip', 'friendly-scanner', 'sipvicious', 'sipcli', 'sundayddr',
+    'vaxsipuseragent', 'sip-scan', 'sipsak', 'smap', 'iwar', 'sippts',
+    'suetv', 'gulp', 'cseq', 'nmap',
+)
+
+
+def _ip_is_public(ip: str) -> bool:
+    """공인(글로벌) IP 여부. 사설(10/172.16/192.168)·루프백·링크로컬은 False."""
+    try:
+        a = _ipaddr.ip_address(ip)
+        return not (a.is_private or a.is_loopback or a.is_link_local
+                    or a.is_multicast or a.is_unspecified or a.is_reserved)
+    except Exception:
+        return False
+
+
+def _ip_external(ip: str) -> bool:
+    """외부(공격면) IP = 공인 IP 이면서 우리 신뢰망(_trusted_nets, 예 서비스 VIP /24)에
+    속하지 않음. 우리 노드의 공인 IP(VIP·노드)는 신뢰망에 넣어 오탐(자기 트래픽)을 막는다."""
+    if not _ip_is_public(ip):
+        return False
+    try:
+        a = _ipaddr.ip_address(ip)
+        for net in _trusted_nets:
+            if a in net:
+                return False
+    except Exception:
+        return False
+    return True
+
+
+def _first_line(raw: str) -> str:
+    return (raw or '').split('\r\n', 1)[0].split('\n', 1)[0].strip()
+
+
+def _extract_ua(raw: str) -> str:
+    for ln in (raw or '').replace('\r\n', '\n').split('\n'):
+        l = ln.strip()
+        if l[:11].lower() == 'user-agent:':
+            return l[11:].strip()
+    return ''
+
+
+def _is_fraud_number(num: str) -> bool:
+    """사기성 번호 패턴: E.164 최대(15자리) 초과 숫자, 또는 0/9 의 비정상 긴 반복(9자리+).
+    (정상 테스트번호 +82500000001 의 0 7연속 같은 패턴은 오탐하지 않도록 임계 상향.)"""
+    if not num:
+        return False
+    digits = ''.join(c for c in num if c.isdigit())
+    if len(digits) > 15:
+        return True
+    import re as _re
+    if _re.search(r'(0{9,}|9{9,})', digits):
+        return True
+    return False
+
+
+def _abnormal_sessions(date_str: str, days: int = 1) -> list:
+    """CSP 가 수신 시점에 기록한 비정상 세션 로그({systemId}.security.{mm5}.jsonl)를 읽어
+    Call-ID 단위로 집계. (탐지/분류는 CSP 가 수행 — OAM 은 권위 판정을 읽기만 한다.)
+    security 라인: {ts,peer,method,caller,callee,ua,call_id,reasons,registered_caller}"""
+    if not _calls_dir:
+        return []
+    import glob as _glob
+    from datetime import timedelta as _td
+    base_day = _parse_date(date_str)
+    try:
+        d0 = datetime.strptime(base_day, "%Y-%m-%d")
+    except Exception:
+        d0 = datetime.now()
+    day_list = [(d0 - _td(days=i)).strftime("%Y-%m-%d") for i in range(max(1, days))]
+
+    sessions = {}
+    for ds in day_list:
+        yyyy, mm, dd = _date_parts(ds)
+        for hh in (f"{h:02d}" for h in range(24)):
+            base_dir = os.path.join(_calls_dir, yyyy, mm, dd, hh)
+            if not os.path.isdir(base_dir):
+                continue
+            files = (_glob.glob(os.path.join(base_dir, "*.security.[0-9][0-9].jsonl")) +
+                     _glob.glob(os.path.join(base_dir, "*.security.jsonl")))
+            for fp in files:
+                for o in _read_jsonl(fp):
+                    peer = o.get('peer', '') or ''
+                    peer_ip = peer.rsplit(':', 1)[0] if ':' in peer else peer
+                    cid = o.get('call_id', '') or ''
+                    key = cid or f"{peer_ip}|{o.get('caller','')}|{o.get('callee','')}"
+                    s = sessions.get(key)
+                    ts = o.get('ts', '')
+                    reasons = [r for r in (o.get('reasons', '') or '').split(',') if r]
+                    if s is None:
+                        s = {
+                            'sesid': cid, 'peer_ip': peer_ip, 'date': ds,
+                            'caller': o.get('caller', ''), 'callee': o.get('callee', ''),
+                            'ua': o.get('ua', ''), 'methods': set(), 'statuses': set(),
+                            'attempts': 0, 'first_ts': ts, 'last_ts': ts,
+                            'got_2xx': False, 'reasons': set(),
+                        }
+                        sessions[key] = s
+                    s['attempts'] += 1
+                    if o.get('method'):
+                        s['methods'].add(o.get('method'))
+                    for r in reasons:
+                        s['reasons'].add(r)
+                    if ts:
+                        if not s['first_ts'] or ts < s['first_ts']:
+                            s['first_ts'] = ts
+                        if ts > s['last_ts']:
+                            s['last_ts'] = ts
+                    if peer_ip and not s['peer_ip']:
+                        s['peer_ip'] = peer_ip
+
+    out = []
+    for s in sessions.values():
+        reasons = sorted(s['reasons'])
+        # 심각도: 스캐너 도구/사기번호 = 높음, 그 외(외부 탐침) = 낮음.
+        if 'scanner_ua' in reasons or 'fraud_number' in reasons:
+            sev = 'major'
+        else:
+            sev = 'minor'
+        out.append({
+            'sesid': s['sesid'], 'peer_ip': s['peer_ip'], 'date': s['date'],
+            'caller': s['caller'], 'callee': s['callee'], 'ua': s['ua'],
+            'methods': sorted(s['methods']), 'statuses': sorted(s['statuses']),
+            'attempts': s['attempts'], 'first_ts': s['first_ts'], 'last_ts': s['last_ts'],
+            'got_2xx': s['got_2xx'], 'reasons': reasons, 'severity': sev,
+        })
+    out.sort(key=lambda x: (x['date'], x['last_ts']), reverse=True)
+    return out
+
+
+async def _handle_abnormal_sessions(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """비정상 세션 이력 — 외부 SIP 스캔/사기 호 시도 탐지.
+    GET /api/v1/security/abnormal-sessions?date=YYYY-MM-DD[&days=N]
+    """
+    if handler_args.method != "GET":
+        return HandlerResult(status=405, body="Method Not Allowed")
+    qp = getattr(handler_args, 'query_params', {}) or {}
+    qs = parse_qs(urlparse(handler_args.full_path or "").query)
+    def _qp(name, default=None):
+        v = qp.get(name)
+        if v: return v
+        vl = qs.get(name)
+        return vl[0] if vl else default
+    date_str = _qp("date", datetime.now().strftime("%Y-%m-%d"))
+    try:
+        days = max(1, min(31, int(_qp("days", "1"))))
+    except (TypeError, ValueError):
+        days = 1
+    sessions = _abnormal_sessions(date_str, days)
+    # 요약 집계
+    by_ip = {}
+    by_reason = {}
+    for s in sessions:
+        by_ip[s['peer_ip']] = by_ip.get(s['peer_ip'], 0) + 1
+        for r in s['reasons']:
+            by_reason[r] = by_reason.get(r, 0) + 1
+    return HandlerResult(status=200, body=json.dumps({
+        "date": date_str, "days": days,
+        "total": len(sessions),
+        "by_ip": by_ip, "by_reason": by_reason,
+        "sessions": sessions,
+    }), media_type="application/json")
+
+
 FLOW_HANDLER_LIST = [
     ("/api/v1/flow/body", _handle_flow_body, {}),
     ("/api/v1/flow", _handle_flow, {}),
     ("/api/v1/call/logs", _handle_call_logs, {}),
     ("/api/v1/recordings", _handle_recordings, {}),
     ("/api/v1/ptt/history", _handle_ptt_history, {}),
+    ("/api/v1/security/abnormal-sessions", _handle_abnormal_sessions, {}),
 ]

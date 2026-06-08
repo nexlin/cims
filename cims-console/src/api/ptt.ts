@@ -73,10 +73,11 @@ export const pttApi = {
     return api.get(`/ptt/history?summary=1`)
   },
 
-  sessions(groupId: string, date?: string): Promise<PttSessionsResponse> {
+  sessions(groupId: string, opts?: { date?: string; days?: number }): Promise<PttSessionsResponse> {
     const p = new URLSearchParams()
     p.set('group_id', groupId)
-    if (date) p.set('date', date)
+    if (opts?.date) p.set('date', opts.date)
+    if (opts?.days) p.set('days', String(opts.days))
     return api.get(`/ptt/history?${p.toString()}`)
   },
 
