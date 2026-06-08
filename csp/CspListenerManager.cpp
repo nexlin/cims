@@ -119,11 +119,11 @@ bool CCspListenerManager::Sync() {
 
         if ( m.port <= 0 || m.id == 0 ) continue;
 
-        if ( _isAlreadyBound( m.protocol, m.bindIp, m.port ) ) {
-            CLog::Print( LOG_INFO, "ListenerManager: id=%d %s %s:%d already bound by bootstrap — skip", m.id,
-                         m.protocol.c_str(), m.bindIp.c_str(), m.port );
-            continue;
-        }
+        // R6 (2026-06-08): 옛 "_isAlreadyBound → skip" 블록 제거.
+        //   부트스트랩 UDP 바인딩을 없앤 뒤로는 ListenerManager 가 primary 포함 모든 SIP 리스너를
+        //   소유한다. 이 스킵을 남겨두면 자기가 올린 리스너를 desired 에서 제외 → 아래 diff 가
+        //   "삭제 대상"으로 오판해 매 reload 마다 리스너를 내려버리는 치명적 flapping 발생.
+        //   중복 바인딩은 아래 diff(id+bind 파라미터 비교)가 막는다.
 
         // R5.c: TLS per-listener cert 경로 수집. 빈 값이면 stack-global cert 사용.
         if ( m.protocol == "TLS" ) {
@@ -141,18 +141,32 @@ bool CCspListenerManager::Sync() {
     }
 
     std::lock_guard<std::mutex> lk( m_mutex );
-    std::set<int> desiredIds;
-    for ( const auto &d : desired ) desiredIds.insert( d.id );
 
+    // R6 (2026-06-08): id 만으로 비교하던 옛 diff 는 같은 레코드의 포트/IP 만 바뀌면(=id 동일)
+    //   "변화 없음"으로 보고 재바인딩하지 않았다 → 무중단 포트 변경 불가의 원인.
+    //   이제 bind 파라미터(port/ip/protocol/threads/cert)까지 비교해, 바뀐 리스너는 remove+add.
+    auto findDesired = [&]( int id ) -> const ManagedInfo * {
+        for ( const auto &d : desired )
+            if ( d.id == id ) return &d;
+        return nullptr;
+    };
+    auto sameBind = []( const ManagedInfo &a, const ManagedInfo &b ) {
+        return a.port == b.port && a.bindIp == b.bindIp && a.protocol == b.protocol &&
+               a.threadCount == b.threadCount && a.tlsCertPath == b.tlsCertPath &&
+               a.tlsKeyPath == b.tlsKeyPath && a.tlsCaPath == b.tlsCaPath;
+    };
+
+    // 1) 기존 managed 중: desired 에 없거나(삭제) bind 파라미터가 바뀐(rebind) 것을 stack 에서 제거.
     std::vector<ManagedInfo> stillManaged;
     for ( const auto &m : m_vecManaged ) {
-        if ( desiredIds.find( m.id ) != desiredIds.end() ) {
-            stillManaged.push_back( m );
+        const ManagedInfo *d = findDesired( m.id );
+        if ( d && sameBind( *d, m ) ) {
+            stillManaged.push_back( m );  // 변화 없음 — 유지 (재바인딩하지 않음)
             continue;
         }
         if ( _removeListenerFromStack( m ) ) {
-            CLog::Print( LOG_SYSTEM, "ListenerManager: removed id=%d %s %s:%d", m.id, m.protocol.c_str(),
-                         m.bindIp.c_str(), m.port );
+            CLog::Print( LOG_SYSTEM, "ListenerManager: removed id=%d %s %s:%d%s", m.id, m.protocol.c_str(),
+                         m.bindIp.c_str(), m.port, d ? " (rebind)" : "" );
         } else {
             CLog::Print( LOG_ERROR, "ListenerManager: remove failed id=%d %s", m.id, m.protocol.c_str() );
         }

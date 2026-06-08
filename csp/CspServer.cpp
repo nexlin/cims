@@ -154,8 +154,16 @@ int ServiceMain() {
     } else {
         clsSetup.m_strLocalIp = gclsSetup.m_strLocalIp;
     }
-    clsSetup.m_iLocalUdpPort = gclsSetup.m_iUdpPort;
-    clsSetup.m_iUdpThreadCount = gclsSetup.m_iUdpThreadCount;
+    // R6 (2026-06-08): 부트스트랩 UDP 리스너를 만들지 않는다.
+    //   기존엔 primary local_node 포트를 여기서 stack 부트스트랩 소켓(id=0)으로 바인딩했는데,
+    //   그 소켓은 ListenerManager 가 소유하지 않아 SIGUSR1 reload 로 포트 변경/제거가 불가능했다
+    //   (= 포트 바꾸려면 프로세스 재기동 필수). 모든 SIP 리스너를 local_nodes.jsonl 로부터
+    //   ListenerManager 가 동적 add/remove 관리하도록 일원화하여 무중단 포트 변경을 가능케 한다.
+    //   m_iLocalUdpPort==0 && m_iUdpThreadCount==0 → CSipStack::_Start 가 UDP 리스너 생성을 건너뜀
+    //   (CSipStackSetup::Check 가 LocalIp 만 있으면 통과). identity(Via/Contact) 송신 fallback 포트는
+    //   gclsSetup.m_iUdpPort 로 유지하고 Start 직후 스택 식별값에 보정한다(아래 ListenerManager.Sync 뒤).
+    clsSetup.m_iLocalUdpPort = 0;
+    clsSetup.m_iUdpThreadCount = 0;
 
     // G9 (2026-04-23): TCP/TLS primary 도 local_nodes 에서 protocol 별 자동 주입.
     //   UDP primary 와 대칭. 조회 실패 시 _infra Setup.Sip.TcpPort/TlsPort/CertFile 값 유지.
@@ -320,7 +328,27 @@ int ServiceMain() {
     gclsAccessServiceMap_Sync_compat();  // (임시) 기존 gclsServiceMap.Sync() 호출
 
     // psip 실제 UDP 리스너 bind (동일 local_nodes.jsonl 을 다른 용도로 소비)
+    //   R6 (2026-06-08): 부트스트랩 UDP 바인딩을 제거했으므로 이 Sync 가 primary 포함 모든
+    //   SIP 리스너를 올린다. 이후 SIGUSR1 reload 시 Sync 가 포트 변경분을 remove+add 로 재바인딩.
     gclsListenerManager.Sync();
+    // identity(Via/Contact) 송신 fallback 포트를 primary 포트로 보정 (스택 m_clsSetup 은 복사본이라
+    //   bind 와 무관하게 식별값만 갱신). + UDP 리스너 미바인딩 시 fail-fast.
+    {
+        LocalNodeInfo pri = gclsLocalNodeMap.GetPrimary();
+        if ( pri.IsValid() && pri.bind_port > 0 ) {
+            gclsSetup.m_iUdpPort = pri.bind_port;
+            gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort = pri.bind_port;
+        }
+        std::vector<CSipStackUdpListener *> vUdp;
+        gclsUserAgent.m_clsSipStack.GetUdpListenerInfo( vUdp );
+        if ( vUdp.empty() ) {
+            CLog::Print( LOG_ERROR, "no UDP SIP listener bound after ListenerManager.Sync() — "
+                                    "check local_nodes.jsonl primary record / port availability. aborting." );
+            return -1;
+        }
+        CLog::Print( LOG_SYSTEM, "ListenerManager: %zu UDP SIP listener(s) active (identity port=%d)",
+                     vUdp.size(), gclsSetup.m_iUdpPort );
+    }
     if ( gclsSetup.m_iMonitorPort > 0 ) {
         gclsMonitor.m_iMonitorPort = gclsSetup.m_iMonitorPort;
         StartMonitorServerThread( &gclsMonitor );
@@ -350,6 +378,14 @@ int ServiceMain() {
             gclsAclPolicyEngine.Sync();
             gclsAccessServiceMap_Sync_compat();
             gclsListenerManager.Sync();
+            // R6 (2026-06-08): 무중단 포트 변경 — primary 포트가 바뀌었으면 identity fallback 도 추종.
+            {
+                LocalNodeInfo pri = gclsLocalNodeMap.GetPrimary();
+                if ( pri.IsValid() && pri.bind_port > 0 ) {
+                    gclsSetup.m_iUdpPort = pri.bind_port;
+                    gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort = pri.bind_port;
+                }
+            }
         }
 
         if ( iSecond % 10 == 0 ) {
