@@ -39,9 +39,11 @@ interface OrgTreePanelProps {
   selectedPath: string | null
   onSelect: (codePath: string | null, name: string) => void
   style?: React.CSSProperties
+  /** true = 부모 flex 높이를 가득 채움(워크벤치). false(기본) = maxHeight 500 박스. */
+  fill?: boolean
 }
 
-export default function OrgTreePanel({ selectedPath, onSelect, style }: OrgTreePanelProps) {
+export default function OrgTreePanel({ selectedPath, onSelect, style, fill }: OrgTreePanelProps) {
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
@@ -63,13 +65,13 @@ export default function OrgTreePanel({ selectedPath, onSelect, style }: OrgTreeP
   }
 
   return (
-    <div className="panel" style={{ minWidth: 150, maxWidth: 180, width: 150, ...style }}>
-      <div style={{ padding: '10px 12px', fontWeight: 600, fontSize: 13, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>조직</span>
+    <div className="panel" style={{ minWidth: 150, maxWidth: 180, width: 150, ...(fill ? { height: '100%' } : {}), ...style }}>
+      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="panel-title">조직</span>
         <button className="btn btn--ghost btn--sm" style={{ fontSize: 11 }}
           onClick={() => { onSelect(null, '전체'); }}>전체</button>
       </div>
-      <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+      <div style={{ overflowY: 'auto', ...(fill ? { flex: 1, minHeight: 0 } : { maxHeight: 500 }) }}>
         {flat.map(n => {
           const hasChildren = n.children.length > 0
           const isExpanded = expanded.has(n.id)

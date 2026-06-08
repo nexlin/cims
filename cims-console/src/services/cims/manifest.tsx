@@ -16,6 +16,7 @@ import { activeVoipWidget } from './widgets/ActiveVoipWidget'
 import { activePttWidget } from './widgets/ActivePttWidget'
 import { CIMS_OUTPUT_WIDGETS } from './widgets/outputWidgets'
 
+import ProvisioningWorkbenchPage from './pages/ProvisioningWorkbenchPage'
 import OrganizationsPage from './pages/OrganizationsPage'
 import MembersPage from './pages/MembersPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
@@ -84,9 +85,10 @@ export const cimsManifest: ServiceManifest = {
       icon: Users,
       area: 'admin',
       basePath: '/subscribers',
-      defaultPath: '/subscribers/organizations',
+      defaultPath: '/subscribers/workbench',
       order: 50,
       routes: [
+        { path: '/subscribers/workbench',     title: '통합 관리',       component: ProvisioningWorkbenchPage, requiredRole: 'monitor' },
         { path: '/subscribers/organizations', title: '조직',           component: OrganizationsPage, requiredRole: 'monitor' },
         { path: '/subscribers/members',       title: '사용자',         component: MembersPage, requiredRole: 'monitor' },
         { path: '/subscribers/numbers',       title: '번호(VoLTE·PTT)', component: SubscriptionsPage, requiredRole: 'monitor' },

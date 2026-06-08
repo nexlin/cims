@@ -3,12 +3,13 @@ import type { Role } from './auth'
 
 export interface Subscription {
   id: string          // MSISDN of this line
-  auth_id: string     // legacy fallback (IMSI 정규화 후 P8 에서 제거 예정)
+  auth_id?: string    // legacy — P8 에서 제거됨(백엔드 미반환). imsi 로 대체.
   passwd?: string
   dnd: boolean
   forward_id: string
-  service_id?: number | null    // P7: 소속 서비스 (NULL 이면 REGISTER 거부)
-  imsi?: string | null          // P7: IMSI 등 user 파트 (service.domain 과 결합)
+  service_ref?: string | null   // 소속 서비스(access_services.name, 예: volte/mcptt) — 도메인 결정
+  service_id?: number | null    // (구) 숫자 service_id 호환
+  imsi?: string | null          // SIM IMSI — 인증 username 의 user 파트. 번호 add 시 필수.
   register_time?: string | null
   logout_time?: string | null
 }
