@@ -53,6 +53,7 @@ void PSyncRtpRecorder::startSegment(int seq, const std::string& speakerId,
     _preemptedFrom = preemptedFrom;
     _segStartUsec = _nowUsec();
     _segEndUsec = 0;
+    _lastPktUsec = 0;
     _active = true;
     _openTracks();
 }
@@ -82,6 +83,7 @@ void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
     _preemptedFrom = preemptedFrom;
     _segStartUsec = _nowUsec();
     _segEndUsec = 0;
+    _lastPktUsec = 0;
     _active = true;
     _openTracks();
 }
@@ -106,7 +108,10 @@ void PSyncRtpRecorder::_openTracks() {
 void PSyncRtpRecorder::finishSegment() {
     if (!_active) return;
 
-    _segEndUsec = _nowUsec();
+    // 발언시간 = 실제 미디어 구간. 마지막 패킷 시각이 있으면 그것을 종료로 삼아,
+    // RELEASE 유실/지연(예: 검증 마지막 발언자가 RELEASE 없이 호 종료)으로 세그먼트가
+    // 뒤늦게 닫혀도 floor 점유 시간이 발언시간으로 부풀지 않게 한다.
+    _segEndUsec = (_lastPktUsec > _segStartUsec) ? _lastPktUsec : _nowUsec();
     _active = false;
 
     // 모든 트랙 파일 닫기 + rename
@@ -163,6 +168,7 @@ void PSyncRtpRecorder::writePacket(const std::string& prefix, const char* pkt, i
     fwrite(&recvUsec, sizeof(recvUsec), 1, t.fp);
     fwrite(pkt, 1, len, t.fp);
     t.bytesWritten += sizeof(pktLen) + sizeof(recvUsec) + len;
+    _lastPktUsec = recvUsec;
 }
 
 // ═══════════════════════════════════════════════════════════════

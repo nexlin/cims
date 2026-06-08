@@ -26,7 +26,7 @@ static const size_t kCmpLogMaxQueue = 200000;         // 큐 상한 (NFS 장애 
 static const int kCmpLogFlushIntervalMs = 100;        // 주기 flush (버퍼 잔여분 보장)
 
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
-    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120), _rtpWorkerCount(4),
+    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120), _floorIdleSec(10), _rtpWorkerCount(4),
       _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _segmentIntervalSec(60),
       _msgSeq(-1), _lastRxSeq(0),
       _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false),
@@ -910,6 +910,7 @@ void PCmpServer::loadConfig() {
         if (root.Has("DtmfReleaseDigit")) _dtmfReleaseDigit = root.GetString("DtmfReleaseDigit");
         if (root.Has("SessionTimeout")) _sessionTimeout = (int)root.GetInt("SessionTimeout");
         if (root.Has("OrphanReclaimSec")) _orphanReclaimSec = (int)root.GetInt("OrphanReclaimSec");
+        if (root.Has("FloorIdleSec")) _floorIdleSec = (int)root.GetInt("FloorIdleSec");
         if (root.Has("RtpWorkerCount")) {
             int w = (int)root.GetInt("RtpWorkerCount");
             if (w >= 1 && w <= 32) _rtpWorkerCount = w;
@@ -1004,10 +1005,10 @@ void PCmpServer::loadConfig() {
         system(mkdirCmd.c_str());
     }
 
-    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d) PTT(rtp=%d floor=%d video=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d",
+    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d) PTT(rtp=%d floor=%d video=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d FloorIdleSec=%d",
            _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttFloorStartPort, _pttVideoStartPort, _pttRtpPoolSize,
            _rtpWorkerCount, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
-           _dtmfPttEnable, _sessionTimeout);
+           _dtmfPttEnable, _sessionTimeout, _floorIdleSec);
 }
 
 void PCmpServer::initResourcePool() {
@@ -1105,12 +1106,24 @@ void PCmpServer::freePttResource(PRtpMulticast* ptt) {
 }
 
 void PCmpServer::timeoutLoop() {
+    int tick = 0;
     while (_running) {
-        // 60초마다 체크
-        for (int i = 0; i < 60 && _running; ++i) {
-            msleep(1000);
-        }
+        msleep(1000);
         if (!_running) break;
+        ++tick;
+
+        // PTT floor 무활동 회수 — 매 초 점검(idleSec 해상도). owner 가 RELEASE 없이 RTP 를
+        //   멈추면(검증 마지막 발언자 등) floor 강제 해제. _mutex 보유 중 호출 → 그룹 삭제 방지.
+        //   checkFloorInactivity 는 그룹 자체 mutex 만 잡고 서버 _mutex 를 역으로 잡지 않으므로 안전.
+        if (_floorIdleSec > 0) {
+            PAutoLock lock(_mutex);
+            for (auto const& [gid, group] : _groups) {
+                if (group) group->checkFloorInactivity(_floorIdleSec);
+            }
+        }
+
+        // 무거운 세션/그룹 sweep 은 60초마다
+        if (tick % 60 != 0) continue;
 
         time_t now;
         time(&now);

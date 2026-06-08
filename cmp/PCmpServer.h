@@ -169,6 +169,10 @@ private:
     int _sessionTimeout;
     // 고아(RTP 무수신) relay 회수 시간(초) — setup 실패/실패호 누수 방지. 활성/홀드 호는 _sessionTimeout 적용.
     int _orphanReclaimSec;
+    // PTT floor 무활동 자동 회수 시간(초, 0=비활성) — owner 가 RELEASE 없이 RTP 송출을 멈추면
+    //   (예: 검증 마지막 발언자가 RELEASE 없이 호 종료) 마지막 RTP 후 이 시간이 지나면 floor 강제 해제.
+    //   무수신 시에만 발동(실발언 중엔 RTP 가 갱신하므로 끊기지 않음). 기본 10초.
+    int _floorIdleSec;
 
     // 누수 회수(leak reclaim) 관측 — sweeper 가 고아 relay 를 회수한 누적 카운터(STATS 노출) +
     //   회수 세션 상세를 {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 기록(콘솔 조회용).

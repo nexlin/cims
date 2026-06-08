@@ -86,6 +86,8 @@ private:
     int _currentSeq = 0;
     int64_t _segStartUsec = 0;
     int64_t _segEndUsec = 0;
+    int64_t _lastPktUsec = 0;      // 마지막으로 패킷을 쓴 시각 — 세그먼트 종료가 늦어도(RELEASE 유실)
+                                   // 발언시간을 실제 미디어 구간으로 한정하기 위함
     std::string _speakerId;
     int _priority = -1;            // 화자 floor 우선순위
     bool _preempted = false;       // 선점으로 시작된 세그먼트

@@ -95,6 +95,12 @@ public:
     int getMemberCount() const { return (int)_members.size(); }
     std::string getFloorHolder() const { return _floorTaken ? _floorOwnerSessionId : ""; }
 
+    // Floor 무활동(inactivity) 자동 회수 — owner 가 RELEASE 없이 RTP 송출을 멈춘 경우
+    // (예: 검증 마지막 발언자가 RELEASE 없이 호 종료). 마지막 RTP 수신 후 idleSec 초가
+    // 지나면 세그먼트 종료 + REVOKE/IDLE 송출 + floor 해제. PCmpServer::timeoutLoop 가 주기 호출.
+    // 회수했으면 true. idleSec<=0 이면 비활성.
+    bool checkFloorInactivity(int idleSec);
+
 private:
     /** DTMF(RFC2833/4733) 이벤트 Flow 기록 헬퍼.
      *  detail JSON: {"digit":"X","duration":ms,"volume":V,"user":"..."}
@@ -141,6 +147,10 @@ private:
     bool _floorTaken;
     std::string _floorOwnerSessionId;
     unsigned int _floorOwnerSsrc;
+    int64_t _floorGrantUsec = 0;   // floor GRANT 시각 (무활동 판정 기준점 — RTP 무수신 grant 대비)
+    int64_t _lastRtpUsec = 0;      // owner 의 마지막 RTP(audio/video) 수신 시각
+
+    static int64_t _nowUsec();
 
     // Broadcast 그룹 (TS 24.380 §10.3) — 비면 일반(prearranged/chat) floor 정책.
     std::string _groupType;            // "broadcast" 면 개시자 외 floor REQUEST REJECT

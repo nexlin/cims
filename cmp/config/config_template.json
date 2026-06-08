@@ -90,7 +90,11 @@
         { "key": "OrphanReclaimSec", "label": "고아 relay 회수 시간 (초)",
           "type": "int", "default": 120, "min": 10, "max": 3600,
           "restart": true,
-          "help": "RTP 를 한 번도 못 받은(setup 실패/세션 시작됐으나 무RTP) relay 를 이 초 후 회수. SessionTimeout 보다 짧게(빠른 누수 차단). 회수 시 reason=orphan_no_rtp." }
+          "help": "RTP 를 한 번도 못 받은(setup 실패/세션 시작됐으나 무RTP) relay 를 이 초 후 회수. SessionTimeout 보다 짧게(빠른 누수 차단). 회수 시 reason=orphan_no_rtp." },
+        { "key": "FloorIdleSec", "label": "PTT floor 무활동 회수 (초)",
+          "type": "int", "default": 10, "min": 0, "max": 600,
+          "restart": true,
+          "help": "PTT 발언자(floor owner)가 RELEASE 없이 RTP 송출을 멈추면 마지막 RTP 후 이 초만큼 무수신 시 floor 를 강제 해제(REVOKE+IDLE). 실발언 중에는 RTP 가 갱신하므로 끊기지 않는다. 검증 마지막 발언자처럼 RELEASE 누락 시 floor 가 영구 점유되어 발언시간이 부풀던 문제 방지. 0=비활성." }
       ]
     },
     {

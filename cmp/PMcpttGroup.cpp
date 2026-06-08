@@ -390,6 +390,7 @@ void PMcpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int le
             }
 
             if (_floorTaken && _floorOwnerSessionId == senderId) {
+                _lastRtpUsec = _nowUsec();
                 sendAudioToAll(buf, len, ip, port);
                 // 녹취: 세그먼트 파일에 기록
                 if (_recordEnable && _recorder && _recorder->isActive()) {
@@ -422,6 +423,7 @@ void PMcpttGroup::onVideoRtpPacket(const std::string& ip, int port, char* buf, i
 
     if (senderId.empty() || _floorOwnerSessionId != senderId) return;
 
+    _lastRtpUsec = _nowUsec();
     sendVideoToAll(buf, len, ip, port);
 
     // 녹취: 비디오 세그먼트 파일에 기록
@@ -463,6 +465,8 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         _floorTaken = true;
         _floorOwnerSessionId = sessionId;
         _floorOwnerSsrc = ssrc;
+        _floorGrantUsec = _nowUsec();
+        _lastRtpUsec = 0;
 
         // Send Grant to Requestor (speakerId = 자기 자신)
         char grantBuf[256];
@@ -531,6 +535,8 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
             // Grant New
             _floorOwnerSessionId = sessionId;
             _floorOwnerSsrc = ssrc;
+            _floorGrantUsec = _nowUsec();
+            _lastRtpUsec = 0;
 
             char grantBuf[256];
             int grantLen = BuildFloorPacket(grantBuf, sizeof(grantBuf), FLOOR_GRANT, ssrc, sessionId);
@@ -592,6 +598,63 @@ void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int 
         LOG_INFO("PMcpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
         // RX FLOOR_RELEASE 는 onRtcpPacket 에서 이미 기록됨 (중복 방지)
     }
+}
+
+int64_t PMcpttGroup::_nowUsec() {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return (int64_t)tv.tv_sec * 1000000LL + tv.tv_usec;
+}
+
+bool PMcpttGroup::checkFloorInactivity(int idleSec) {
+    if (idleSec <= 0) return false;
+    PAutoLock lock(_mutex);
+    if (!_floorTaken) return false;
+
+    // 판정 기준: 마지막 RTP 수신 시각(있으면) 또는 grant 시각(RTP 한 번도 안 온 경우).
+    int64_t ref = (_lastRtpUsec > 0) ? _lastRtpUsec : _floorGrantUsec;
+    if (ref == 0) return false;
+    int64_t now = _nowUsec();
+    if ((now - ref) < (int64_t)idleSec * 1000000LL) return false;
+
+    std::string owner = _floorOwnerSessionId;
+    unsigned int ssrc = _floorOwnerSsrc;
+    int ownerPrio = 999;
+    if (_priorities.find(owner) != _priorities.end()) ownerPrio = _priorities[owner];
+    int idleMs = (int)((now - ref) / 1000);
+
+    // 녹취 세그먼트 종료 (발언시간은 last-RTP 기준으로 이미 한정됨)
+    if (_recordEnable && _recorder && _recorder->isActive()) {
+        _recorder->finishSegment();
+    }
+
+    // 응답 없는 owner 에게 REVOKE 송출
+    char revBuf[256];
+    int revLen = BuildFloorPacket(revBuf, sizeof(revBuf), FLOOR_REVOKE, ssrc, owner);
+    if (revLen > 0) sendToMember(owner, revBuf, revLen);
+    {
+        char ex[96];
+        snprintf(ex, sizeof(ex), "\"reason\":\"inactivity\",\"idle_ms\":%d", idleMs);
+        _logFloorLocal("REVOKE", owner, ssrc, ownerPrio, ex);
+    }
+
+    _floorTaken = false;
+    _floorOwnerSessionId = "";
+    _floorOwnerSsrc = 0;
+    _floorGrantUsec = 0;
+    _lastRtpUsec = 0;
+
+    broadcastFloorStatus(FLOOR_IDLE, 0, "");
+    LOG_INFO("PMcpttGroup", "[%s] Floor auto-REVOKED (inactivity %dms, no RELEASE) owner=%s",
+             _groupId.c_str(), idleMs, owner.c_str());
+    if (_logFlow) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"REVOKE\",\"reason\":\"inactivity\",\"user\":\"%s\",\"ssrc\":%u,\"idle_ms\":%d}",
+                 owner.c_str(), ssrc, idleMs);
+        _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REVOKE", detail);
+    }
+    return true;
 }
 
 void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId) {
