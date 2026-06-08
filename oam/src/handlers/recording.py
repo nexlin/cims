@@ -465,6 +465,10 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
     seg_type = seg.get('type', seg.get('_type', 'ptt'))
     seq = seg.get('seq', 0)
     out_path = _converted_path_mp4(rec_dir, seq)
+    # ffmpeg 는 출력 파일을 변환 시작 시점에 생성하므로(부분 파일), 최종 경로(seg_NNNN.mp4)에
+    # 바로 쓰면 변환 도중 _segment_status 가 부분 mp4 를 'ready' 로 오판 → 첫 재생이 깨진다.
+    # → 임시 파일(.partial.mp4)에 쓰고 완료 시에만 원자적 rename 하여 "mp4 존재 ⟺ 완성" 을 보장.
+    tmp_out = (out_path[:-4] if out_path.endswith('.mp4') else out_path) + '.partial.mp4'
 
     # raw 파일 경로 결정
     if seg_type == 'ptt':
@@ -554,7 +558,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
                 '-c:a', 'aac', '-ar', '16000', '-ac', '1',
                 '-movflags', '+faststart',
-                out_path,
+                tmp_out,
             ]
             ret = subprocess.run(cmd, capture_output=True, timeout=300)
             if ret.returncode != 0:
@@ -571,7 +575,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
                 '-c:v', 'copy',
                 '-c:a', 'aac', '-ar', '16000', '-ac', '1',
                 '-movflags', '+faststart',
-                out_path,
+                tmp_out,
             ]
             ret = subprocess.run(cmd, capture_output=True, timeout=300)
             if ret.returncode != 0:
@@ -595,7 +599,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
                 '-c:a', 'aac', '-ar', '16000', '-ac', '1',
                 '-movflags', '+faststart',
-                out_path,
+                tmp_out,
             ]
             subprocess.run(cmd, capture_output=True, timeout=300)
 
@@ -608,7 +612,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
                 '-map', '[aout]',
                 '-c:a', 'aac', '-ar', '16000', '-ac', '1',
                 '-movflags', '+faststart',
-                out_path,
+                tmp_out,
             ]
             subprocess.run(cmd, capture_output=True, timeout=120)
 
@@ -620,9 +624,16 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
                 '-i', aud,
                 '-c:a', 'aac', '-ar', '16000', '-ac', '1',
                 '-movflags', '+faststart',
-                out_path,
+                tmp_out,
             ]
             subprocess.run(cmd, capture_output=True, timeout=120)
+
+        # 변환 완료분만 원자적으로 노출 — 정상 출력(.partial.mp4)이 생성됐을 때만 최종 경로로 rename.
+        # 이로써 _segment_status 가 mp4 존재만으로 'ready' 판정해도 항상 "완성된" 파일을 가리킨다.
+        if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 256:
+            os.replace(tmp_out, out_path)
+        else:
+            logger.warning("transcode seg %d produced no/empty output", seq)
 
     except Exception as e:
         logger.error("transcode seg %d error: %s", seq, e)
@@ -630,6 +641,10 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
         for tmp in tmp_files:
             try: os.remove(tmp)
             except: pass
+        # 실패/중단으로 남은 부분 파일 정리 (성공 시엔 rename 되어 이미 없음)
+        try:
+            if os.path.exists(tmp_out): os.remove(tmp_out)
+        except: pass
         try: os.remove(marker)
         except: pass
 
