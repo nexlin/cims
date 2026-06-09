@@ -29,6 +29,16 @@ enum FloorOpCode {
     FLOOR_REVOKE  = 7
 };
 
+// Floor 우선순위 tier (TS 24.380) — emergency > imminent peril > normal.
+// chair override·수치 priority 비교보다 상위. condition 은 group_type 와 직교(런타임 상태).
+enum FloorTier {
+    TIER_NORMAL    = 0,
+    TIER_IMMINENT  = 1,
+    TIER_EMERGENCY = 2
+};
+// tier 문자열("emergency"/"imminent"/"normal" 또는 숫자) → FloorTier
+int ParseFloorTier(const std::string& s);
+
 // 고정 헤더 (12 bytes RTCP APP + 8 bytes app-data)
 struct FloorControlPacket {
     unsigned char version_subtype; // V=2, P=0, Subtype=...
@@ -78,6 +88,10 @@ public:
 
     void updatePriorities(const std::map<std::string, int>& priorities);
     void updateRoles(const std::map<std::string, std::string>& roles);
+    // condition tier(emergency/imminent/normal) 갱신. 일괄(updateTiers) 또는 단건(setTier).
+    void updateTiers(const std::map<std::string, int>& tiers);
+    void setTier(const std::string& sessionId, int tier);
+    int  tierOf(const std::string& sessionId) const;
     // broadcast 그룹(TS 24.380 §10.3): 개시자(initiator)만 floor 보유, 타 멤버 REQUEST REJECT.
     void setBroadcast(const std::string& groupType, const std::string& initiator) {
         _groupType = groupType;
@@ -140,6 +154,7 @@ private:
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority
     std::map<std::string, std::string> _roles; // SessionID (UserId) -> role (chair/participant)
+    std::map<std::string, int> _tier;       // SessionID -> FloorTier (없으면 TIER_NORMAL)
     bool isChair(const std::string& sessionId) const; // role==chair 여부
     PRtpMulticast* _pttSession;      // PTT 전용 세션 (audio RTP + floor + video)
     

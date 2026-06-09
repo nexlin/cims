@@ -163,6 +163,31 @@ void PMcpttGroup::updateRoles(const std::map<std::string, std::string>& roles) {
     LOG_INFO("PMcpttGroup", "[%s] Roles updated for %lu members", _groupId.c_str(), _roles.size());
 }
 
+// ── Floor condition tier (TS 24.380): emergency > imminent > normal ──
+int ParseFloorTier(const std::string& s) {
+    if (s == "emergency" || s == "2") return TIER_EMERGENCY;
+    if (s == "imminent" || s == "imminent_peril" || s == "1") return TIER_IMMINENT;
+    return TIER_NORMAL;
+}
+static const char* _tierName(int t) {
+    return t >= TIER_EMERGENCY ? "emergency" : t == TIER_IMMINENT ? "imminent" : "normal";
+}
+void PMcpttGroup::updateTiers(const std::map<std::string, int>& tiers) {
+    PAutoLock lock(_mutex);
+    _tier = tiers;
+    LOG_INFO("PMcpttGroup", "[%s] Tiers updated for %lu members", _groupId.c_str(), _tier.size());
+}
+void PMcpttGroup::setTier(const std::string& sessionId, int tier) {
+    PAutoLock lock(_mutex);
+    if (tier <= TIER_NORMAL) _tier.erase(sessionId);
+    else _tier[sessionId] = tier;
+    LOG_INFO("PMcpttGroup", "[%s] Tier set session=%s tier=%s", _groupId.c_str(), sessionId.c_str(), _tierName(tier));
+}
+int PMcpttGroup::tierOf(const std::string& sessionId) const {
+    auto it = _tier.find(sessionId);
+    return it != _tier.end() ? it->second : TIER_NORMAL;
+}
+
 bool PMcpttGroup::isChair(const std::string& sessionId) const {
     auto it = _roles.find(sessionId);
     return ( it != _roles.end() && it->second == "chair" );
@@ -498,15 +523,22 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         int ownerPrio = 999;
         if (_priorities.find(_floorOwnerSessionId) != _priorities.end()) ownerPrio = _priorities[_floorOwnerSessionId];
 
-        // TS 24.380 chair override: chair 는 participant 를 항상 선점하고,
-        // participant 는 chair 를 선점하지 못한다. 동급(둘 다 chair / 둘 다 participant)
-        // 이면 기존 우선순위 비교(낮을수록 우선).
+        // TS 24.380 선점 서열: condition tier(emergency>imminent>normal) > chair > 수치 priority.
+        //   1) emergency/imminent 발언자는 하위 tier 점유자를 선점(반대는 불가).
+        //   2) 동tier 면 chair override(chair 가 participant 선점, 역은 불가).
+        //   3) 동tier·동role 이면 수치 priority(낮을수록 우선).
+        int  reqTier   = tierOf(sessionId);
+        int  ownTier   = tierOf(_floorOwnerSessionId);
         bool requesterChair = isChair(sessionId);
         bool ownerChair     = isChair(_floorOwnerSessionId);
         bool bPreempt;
-        if (requesterChair && !ownerChair)      bPreempt = true;
+        if (reqTier != ownTier)                 bPreempt = (reqTier > ownTier);
+        else if (requesterChair && !ownerChair) bPreempt = true;
         else if (!requesterChair && ownerChair) bPreempt = false;
         else                                    bPreempt = (requesterPrio < ownerPrio);
+        const char* preemptReason = (reqTier > ownTier && reqTier == TIER_EMERGENCY) ? "emergency_preempt"
+                                   : (reqTier > ownTier && reqTier == TIER_IMMINENT) ? "imminent_preempt"
+                                   : "priority_preempt";
 
         if (bPreempt) {
             // PREEMPTION
@@ -545,8 +577,9 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
             // Broadcast Taken (New Owner)
             broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
             {
-                char ex[160];
-                snprintf(ex, sizeof(ex), "\"preempt\":true,\"preempted_from\":\"%s\"", prevOwner.c_str());
+                char ex[224];
+                snprintf(ex, sizeof(ex), "\"preempt\":true,\"preempted_from\":\"%s\",\"reason\":\"%s\",\"tier\":\"%s\"",
+                         prevOwner.c_str(), preemptReason, _tierName(reqTier));
                 _logFloorLocal("GRANT", sessionId, ssrc, requesterPrio, ex);
             }
 
@@ -569,9 +602,9 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
                 _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REJECT", detail);
             }
             {
-                char ex[160];
-                snprintf(ex, sizeof(ex), "\"owner\":\"%s\",\"owner_prio\":%d",
-                         _floorOwnerSessionId.c_str(), ownerPrio);
+                char ex[224];
+                snprintf(ex, sizeof(ex), "\"owner\":\"%s\",\"owner_prio\":%d,\"tier\":\"%s\",\"owner_tier\":\"%s\"",
+                         _floorOwnerSessionId.c_str(), ownerPrio, _tierName(reqTier), _tierName(ownTier));
                 _logFloorLocal("REJECT", sessionId, ssrc, requesterPrio, ex);
             }
         }
@@ -610,6 +643,8 @@ bool PMcpttGroup::checkFloorInactivity(int idleSec) {
     if (idleSec <= 0) return false;
     PAutoLock lock(_mutex);
     if (!_floorTaken) return false;
+    // 긴급(emergency) 발언자는 무활동 자동 회수 제외 — 권한자 RELEASE/취소로만 해제(TS 24.380).
+    if (tierOf(_floorOwnerSessionId) >= TIER_EMERGENCY) return false;
 
     // 판정 기준: 마지막 RTP 수신 시각(있으면) 또는 grant 시각(RTP 한 번도 안 온 경우).
     int64_t ref = (_lastRtpUsec > 0) ? _lastRtpUsec : _floorGrantUsec;

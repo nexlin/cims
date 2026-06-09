@@ -42,6 +42,8 @@ protected:
     void processRemoveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processJoinGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processLeaveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    // SET_FLOOR_TIER {group_id, session_id, tier} — 긴급/임박 floor tier 런타임 갱신(업그레이드/취소)
+    void processSetFloorTier(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
 
     int sendResponse(const std::string& ip, int port, const std::string& msg,

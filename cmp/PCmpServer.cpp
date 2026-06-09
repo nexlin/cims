@@ -191,6 +191,7 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     else if (cmdUpper == "LEAVE_PTT_GROUP" || cmdUpper == "LEAVE_GROUP" || cmdUpper == "LEAVEGROUP") processLeaveGroup(payload, ip, port, transId);
     else if (cmdUpper == "REMOVE_PTT_GROUP" || cmdUpper == "REMOVE_GROUP" || cmdUpper == "REMOVEGROUP") processRemoveGroup(payload, ip, port, transId);
     else if (cmdUpper == "MODIFY_PTT_GROUP" || cmdUpper == "MODIFY_GROUP") processModifyGroup(payload, ip, port, transId);
+    else if (cmdUpper == "SET_FLOOR_TIER") processSetFloorTier(payload, ip, port, transId);
     else if (cmdUpper == "MODIFY_SESSION" || cmdUpper == "MODIFY") processModify(payload, ip, port, transId);
     else if (cmdUpper == "STATS_REQUEST" || cmdUpper == "STATS") processStats(payload, ip, port, transId);
     else {
@@ -626,7 +627,8 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             std::string segment;
             std::map<std::string, int> priorities;
             std::map<std::string, std::string> roles;
-            // 형식: id:priority[:role]  (role 미지정 시 participant — 하위호환)
+            std::map<std::string, int> tiers;
+            // 형식: id:priority[:role[:tier]]  (role/tier 미지정 시 participant/normal — 하위호환)
             while(std::getline(ss, segment, ',')) {
                 size_t c1 = segment.find(':');
                 if (c1 == std::string::npos) continue;
@@ -635,12 +637,20 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
                 int prio = 0;
                 std::string role = "participant";
                 try { prio = std::stoi(segment.substr(c1+1)); } catch(...) {}
-                if (c2 != std::string::npos) role = segment.substr(c2+1);
+                if (c2 != std::string::npos) {
+                    size_t c3 = segment.find(':', c2+1);
+                    role = segment.substr(c2+1, (c3 == std::string::npos) ? std::string::npos : c3 - (c2+1));
+                    if (c3 != std::string::npos) {
+                        int t = ParseFloorTier(segment.substr(c3+1));
+                        if (t > TIER_NORMAL) tiers[sid] = t;
+                    }
+                }
                 priorities[sid] = prio;
                 roles[sid] = role;
             }
             group->updatePriorities(priorities);
             group->updateRoles(roles);
+            group->updateTiers(tiers);
         }
 
         // broadcast 그룹 floor 독점 (TS 24.380 §10.3): 개시자만 floor.
@@ -715,6 +725,9 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role);
+        // condition tier(emergency/imminent) 동반 시 반영 (Phase 2 CSP 가 긴급 멤버 join 시 전달)
+        std::string tierStr = payload.GetString("tier");
+        if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));
 
         SimpleJson::JsonNode resp;
         resp.Set("trans_id", transId);
@@ -845,6 +858,34 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
 void PCmpServer::processModifyGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
      LOG_DEBUG("PCmpServer", "MODIFY_GROUP -> delegating to processAddGroup");
      processAddGroup(payload, ip, port, transId);
+}
+
+// SET_FLOOR_TIER {group_id, session_id, tier} — 멤버의 condition tier(emergency/imminent/normal)
+// 런타임 갱신. Phase 2 CSP 가 긴급 개시/업그레이드/취소 시 호출. 미디어 재협상 불필요(floor 만).
+void PCmpServer::processSetFloorTier(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    std::string groupId   = payload.GetString("group_id");
+    std::string sessionId = payload.GetString("session_id");
+    std::string tierStr   = payload.GetString("tier");
+    std::string txIdStr   = std::to_string(transId);
+    std::string peerStr   = ip + ":" + std::to_string(port);
+    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
+
+    PAutoLock lock(_mutex);
+    SimpleJson::JsonNode resp;
+    resp.Set("trans_id", transId);
+    auto it = _groups.find(groupId);
+    if (it != _groups.end() && !sessionId.empty()) {
+        it->second->setTier(sessionId, ParseFloorTier(tierStr));
+        resp.Set("response", "OK");
+        int txSeq = sendResponse(ip, port, resp.ToString());
+        logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), "mcptt", "", "", txSeq, "csp");
+        LOG_INFO("PCmpServer", "SET_FLOOR_TIER group=%s session=%s tier=%s", groupId.c_str(), sessionId.c_str(), tierStr.c_str());
+    } else {
+        resp.Set("response", "ERROR Group Not Found");
+        int txSeq = sendResponse(ip, port, resp.ToString());
+        logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), "mcptt", "", "", txSeq, "csp");
+        LOG_WARN("PCmpServer", "SET_FLOOR_TIER group=%s not found", groupId.c_str());
+    }
 }
 
 // flat dot-path key → root 중첩 경로에 set (CSP 와 동일 overlay 규칙).
