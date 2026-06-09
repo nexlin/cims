@@ -194,8 +194,8 @@ function GroupDrawer(p: GroupDrawerProps) {
   const [editing, setEditing] = useState(isNew)
 
   const [form, setForm] = useState<Partial<GroupExt>>(() => existing
-    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type }
-    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null })
+    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, imminent_peril_call: existing.imminent_peril_call ?? true, emergency_alert: existing.emergency_alert ?? true, adhoc_enabled: existing.adhoc_enabled ?? false, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type }
+    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, imminent_peril_call: true, emergency_alert: true, adhoc_enabled: false, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null })
   // 소유자 표시명 (피커 선택 결과 보존)
   const [ownerName, setOwnerName] = useState<string>(existing?.authorized_user_name || '')
 
@@ -276,10 +276,13 @@ function GroupDrawer(p: GroupDrawerProps) {
               {p.orgs.map(o => <option key={o.id} value={o.code}>{o.name} ({o.code})</option>)}
             </select>
           </Field>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', alignSelf: 'center' }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', alignSelf: 'center', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.encryption || false} onChange={e => setForm({ ...form, encryption: e.target.checked })} />암호</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.emergency_call || false} onChange={e => setForm({ ...form, emergency_call: e.target.checked })} />긴급</label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.video_enabled || false} onChange={e => setForm({ ...form, video_enabled: e.target.checked })} />영상</label>
+            <label title="allow-MCPTT-emergency-call" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.emergency_call || false} onChange={e => setForm({ ...form, emergency_call: e.target.checked })} />긴급콜</label>
+            <label title="allow-imminent-peril-call" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.imminent_peril_call ?? true} onChange={e => setForm({ ...form, imminent_peril_call: e.target.checked })} />임박위험</label>
+            <label title="allow-MCPTT-emergency-alert" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.emergency_alert ?? true} onChange={e => setForm({ ...form, emergency_alert: e.target.checked })} />긴급경보</label>
+            <label title="ad hoc 그룹콜 허용 (Rel-18)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.adhoc_enabled || false} onChange={e => setForm({ ...form, adhoc_enabled: e.target.checked })} />애드혹</label>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button className="btn btn--sm btn--primary" onClick={save}>저장</button>

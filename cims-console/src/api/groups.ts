@@ -15,6 +15,9 @@ export interface Group {
   priority?: number
   encryption?: boolean
   emergency_call?: boolean
+  imminent_peril_call?: boolean   // allow-imminent-peril-call (TS 24.481)
+  emergency_alert?: boolean        // allow-MCPTT-emergency-alert
+  adhoc_enabled?: boolean          // ad hoc 그룹콜 허용 (Rel-18)
   video_enabled?: boolean
   org_code?: string
   session_start?: string | null

@@ -175,7 +175,8 @@ def load_shared_data(config):
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
-                        "emergency_call, org_code, session_start, session_end, "
+                        "emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled, "
+                        "org_code, session_start, session_end, "
                         "group_type, on_network, max_members, require_affiliation, alias, "
                         "authorized_user_id, "
                         "(SELECT id FROM ptt_subscriptions WHERE user_id=ptt_groups.authorized_user_id "
@@ -191,6 +192,9 @@ def load_shared_data(config):
                             "priority": row.get('priority', 5),
                             "encryption": bool(row.get('encryption', 0)),
                             "emergency_call": bool(row.get('emergency_call', 0)),
+                            "imminent_peril_call": bool(row.get('imminent_peril_call', 1)),
+                            "emergency_alert": bool(row.get('emergency_alert', 1)),
+                            "adhoc_enabled": bool(row.get('adhoc_enabled', 0)),
                             "org_code": row.get('org_code', ''),
                             "group_type": row.get('group_type', 'prearranged'),
                             "on_network": bool(row.get('on_network', 1)),
@@ -598,6 +602,8 @@ def get_group_xml(group_uri):
     grp_priority = group.get('priority', 5)
     encryption_val = 'true' if group.get('encryption') else 'false'
     emergency_val = 'true' if group.get('emergency_call') else 'false'
+    imminent_val = 'true' if group.get('imminent_peril_call', True) else 'false'
+    alert_val = 'true' if group.get('emergency_alert', True) else 'false'
     org_code = group.get('org_code', '')
     group_type = group.get('group_type', 'prearranged')
     # max_members 0(무제한) 이면 관례값 10 노출
@@ -619,8 +625,8 @@ def get_group_xml(group_uri):
       <cp:rule id="a7c">
          <cp:actions>
           <mcpttgi:allow-MCPTT-emergency-call>{emergency_val}</mcpttgi:allow-MCPTT-emergency-call>
-          <mcpttgi:allow-imminent-peril-call>true</mcpttgi:allow-imminent-peril-call>
-          <mcpttgi:allow-MCPTT-emergency-alert>true</mcpttgi:allow-MCPTT-emergency-alert>
+          <mcpttgi:allow-imminent-peril-call>{imminent_val}</mcpttgi:allow-imminent-peril-call>
+          <mcpttgi:allow-MCPTT-emergency-alert>{alert_val}</mcpttgi:allow-MCPTT-emergency-alert>
         </cp:actions>
       </cp:rule>
     </cp:ruleset>
