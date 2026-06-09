@@ -1063,22 +1063,42 @@ bool CModuleDispatcher::EventBlindTransfer( const char *pszCallId, const char *p
 
 bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
     // MCPTT emergency alert (TS 24.379): mcptt-info alert-ind 판별 → SMS 와 분기.
-    //   Phase 3a = 탐지 + 능력 게이트 + 로깅 + 200 OK ack. (멤버 fan-out 은 Phase 3b 후속.)
+    //   Phase 3a 탐지/로깅/ack + Phase 3b 그룹 멤버 fan-out(같은 alert MESSAGE 전파, 취소도 동일).
     if ( pclsMessage && pclsMessage->m_strBody.find( "alert-ind" ) != std::string::npos ) {
         CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
         bool bActivate = clsMi.bAlert;  // true=경보 발신, false=경보 취소
         bool bGroupTarget = gclsGroupMap.Contains( pszTo );
         // 능력 게이트: emergency_alert capability 는 CSP 미로딩(Phase 0 DB 컬럼만) → 기본 허용.
-        //   per-group alert 불허 강제는 컬럼 로딩 후(imminent 게이팅과 동일 후속).
         bool bAllowed = true;
         const char *pszEvt = bActivate ? "alert_sent" : "alert_cancelled";
-        if ( bAllowed && bGroupTarget && gclsCallDir.IsEnabled() ) {
-            gclsCallDir.PttLogEvent( pszTo, pszEvt,
-                                     std::string( "{\"actor\":\"" ) + pszFrom + "\",\"target\":\"" + pszTo + "\"}" );
+        int iFanout = 0;
+        if ( bAllowed && bGroupTarget ) {
+            if ( gclsCallDir.IsEnabled() )
+                gclsCallDir.PttLogEvent( pszTo, pszEvt,
+                                         std::string( "{\"actor\":\"" ) + pszFrom + "\",\"target\":\"" + pszTo + "\"}" );
+            // Phase 3b — 그룹 등록 멤버에게 alert MESSAGE fan-out (발신자 제외). affiliation 요구 그룹은
+            //   affiliate 된 멤버만. 취소(alert-ind=false)도 동일 본문 전파로 멤버에 반영.
+            CspPttGroup clsGroup;
+            if ( gclsGroupMap.Select( pszTo, clsGroup ) ) {
+                for ( const auto &pUser : clsGroup._pusers ) {
+                    if ( !pUser || pUser->_id == pszFrom ) continue;
+                    if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
+                         !gclsDbManager.IsAffiliated( pszTo, pUser->_id ) )
+                        continue;
+                    CUserInfo clsMemInfo;
+                    if ( gclsUserMap.Select( pUser->_id.c_str(), clsMemInfo ) ) {
+                        CSipCallRoute clsMemRoute;
+                        clsMemInfo.GetCallRoute( clsMemRoute );
+                        if ( gclsUserAgent.SendSms( pszFrom, pUser->_id.c_str(), pclsMessage->m_strBody.c_str(),
+                                                    &clsMemRoute ) )
+                            iFanout++;
+                    }
+                }
+            }
         }
-        CLog::Print( LOG_INFO, "EventMessage: MCPTT emergency %s from(%s) to(%s) group=%d allowed=%d", pszEvt, pszFrom,
-                     pszTo, bGroupTarget, bAllowed );
-        // 200 OK ack (경보 수신 확인). 미허용이어도 규격상 거부는 별도 — 우선 ack(기록만).
+        CLog::Print( LOG_INFO, "EventMessage: MCPTT emergency %s from(%s) to(%s) group=%d fanout=%d", pszEvt, pszFrom,
+                     pszTo, bGroupTarget, iFanout );
+        // 200 OK ack (경보 수신 확인).
         SendResponse( pclsMessage, SIP_OK );
         return true;
     }
