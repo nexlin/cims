@@ -77,11 +77,24 @@ CGroupCallService::~CGroupCallService() {
  * @brief Process Incoming Group Call (A calling Group)
  */
 bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *pszCallerInfo, const char *pszCallId,
-                                          CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute ) {
+                                          CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute, int iCondition ) {
     CspPttGroup clsGroup;
 
     if ( gclsGroupMap.Select( pszGroupId, clsGroup ) == false ) {
         return false;
+    }
+
+    // condition(emergency/imminent) 능력 게이트 (TS 24.481). 그룹이 긴급 불허면 normal 로 강등.
+    //   (imminent capability 의 per-condition 강제는 CSP DB 로드 보강 후 — 현재 기본 허용.)
+    int iCond = iCondition;
+    if ( iCond >= 2 && !clsGroup._emergencyCall ) {
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) emergency not allowed → downgrade to normal", pszGroupId );
+        iCond = 0;
+    }
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        if ( iCond > 0 ) m_mapGroupCondition[pszGroupId] = iCond;
+        else m_mapGroupCondition.erase( pszGroupId );
     }
 
     CLog::Print( LOG_INFO, "Processing Group Call GroupId(%s) Name(%s) Caller(%s) Priority(%d)", pszGroupId,
@@ -218,6 +231,16 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                                          iCallerVideo, GetOrIssueGroupSesId( pszGroupId ), strCallerRole );
                 CLog::Print( LOG_INFO, "ProcessGroupCall: Caller(%s) joined CMP group audio=%d floor=%d role=%s",
                              pszCallerInfo, iCallerAudio, iCallerFloor, strCallerRole.c_str() );
+                // 긴급/임박 개시: 개시자에 floor tier 부여 → 하위 tier 발언자 선점 (TS 24.380, Phase 1 엔진).
+                if ( iCond > 0 ) {
+                    gclsCmpClient.SetFloorTier( pszGroupId, pszCallerInfo, iCond, GetOrIssueGroupSesId( pszGroupId ) );
+                    const char *pszEvt = ( iCond >= 2 ) ? "emergency_activated" : "imminent_activated";
+                    if ( gclsCallDir.IsEnabled() )
+                        gclsCallDir.PttLogEvent( pszGroupId, pszEvt,
+                                                 std::string( "{\"actor\":\"" ) + pszCallerInfo + "\",\"by\":\"initiator\"}" );
+                    CLog::Print( LOG_INFO, "ProcessGroupCall: %s on group(%s) initiator(%s) tier=%d",
+                                 pszEvt, pszGroupId, pszCallerInfo, iCond );
+                }
             }
         }
 
@@ -528,7 +551,12 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                     strCallerId = pszGroupId;  // fallback
             }
 
-            std::string strGroupXml = BuildGroupInfoXml( clsGroup, pszUserId, strCallerId );
+            int iGroupCond = 0;
+            {
+                auto itCond = m_mapGroupCondition.find( pszGroupId );
+                if ( itCond != m_mapGroupCondition.end() ) iGroupCond = itCond->second;
+            }
+            std::string strGroupXml = BuildGroupInfoXml( clsGroup, pszUserId, strCallerId, iGroupCond );
             std::string strRosterXml = BuildResourceListXml( clsGroup );
             // CMP floor port 사용 (m_mapGroupRtp에서 조회)
             int iFloorPort = iSharedPort + 1;  // fallback
@@ -1072,7 +1100,7 @@ void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, con
  *        Content-Type: application/vnd.3gpp.mcptt-info+xml
  */
 std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, const std::string &strUserId,
-                                                  const std::string &strCallerId ) {
+                                                  const std::string &strCallerId, int iCondition ) {
     std::ostringstream oss;
 
     // session-type 은 그룹 유형(prearranged/chat/broadcast)에 따라 구동 (TS 24.379)
@@ -1082,8 +1110,13 @@ std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, c
         << "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\""
         << " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
         << "  <mcptt-Params>\r\n"
-        << "    <session-type>" << strSessionType << "</session-type>\r\n"
-        << "    <mcptt-request-uri>tel:" << strUserId << "</mcptt-request-uri>\r\n"
+        << "    <session-type>" << strSessionType << "</session-type>\r\n";
+    // condition 지시자 (TS 24.379) — session-type 과 직교. fan-out 으로 멤버 UE 에 긴급/임박 광고.
+    if ( iCondition >= 2 )
+        oss << "    <emergency-ind>true</emergency-ind>\r\n";
+    else if ( iCondition == 1 )
+        oss << "    <imminentperil-ind>true</imminentperil-ind>\r\n";
+    oss << "    <mcptt-request-uri>tel:" << strUserId << "</mcptt-request-uri>\r\n"
         << "    <mcptt-calling-user-id>tel:" << strCallerId << "</mcptt-calling-user-id>\r\n"
         << "    <mcptt-calling-group-id>tel:" << clsGroup._id << "</mcptt-calling-group-id>\r\n"
         << "  </mcptt-Params>\r\n"

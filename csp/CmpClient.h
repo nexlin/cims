@@ -71,6 +71,11 @@ public:
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 
+    // 멤버 floor condition tier(2=emergency/1=imminent/0=normal) 런타임 갱신 (TS 24.380).
+    //   긴급 개시·업그레이드·취소 시 호출 — 미디어 재협상 없이 floor 우선순위만 변경.
+    bool SetFloorTier( const std::string &strGroupId, const std::string &strSessionId, int iTier,
+                       const std::string &strSesId = "" );
+
     /** 세션/그룹별 기 발행된 sesid 조회 (없으면 빈문자열) */
     std::string GetSesIdByKey( const std::string &strKey );
 

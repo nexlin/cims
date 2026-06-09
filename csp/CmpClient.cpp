@@ -670,6 +670,19 @@ bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<s
     return SendRequestAndWait( strGroupId, req, strResp );
 }
 
+bool CCmpClient::SetFloorTier( const std::string &strGroupId, const std::string &strSessionId, int iTier,
+                               const std::string &strSesId ) {
+    SimpleJson::JsonNode req;
+    req.Set( "cmd", "SET_FLOOR_TIER" );
+    req.Set( "group_id", strGroupId );
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey( strGroupId ) : strSesId;
+    if ( !strFinalSesId.empty() ) req.Set( "sesid", strFinalSesId );
+    req.Set( "session_id", strSessionId );
+    req.Set( "tier", iTier >= 2 ? "emergency" : ( iTier == 1 ? "imminent" : "normal" ) );
+    std::string resp;
+    return SendRequestAndWait( strGroupId, req, resp );
+}
+
 bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &strSessionId,
                             const std::string &strUserIp, int iUserPort, int iFloorPort, int iVideoPort,
                             const std::string &strSesId, const std::string &strRole ) {

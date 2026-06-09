@@ -32,7 +32,7 @@ public:
      * @return true if group call initiated, false if group not found or error
      */
     bool ProcessGroupCall( const char *pszGroupId, const char *pszCallerInfo, const char *pszCallId,
-                           CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute );
+                           CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute, int iCondition = 0 );
 
     /**
      * @brief Invite a member to a group call
@@ -90,7 +90,7 @@ private:
      * @return XML string
      */
     static std::string BuildGroupInfoXml( const class CspPttGroup &clsGroup, const std::string &strUserId,
-                                          const std::string &strCallerId );
+                                          const std::string &strCallerId, int iCondition = 0 );
 
     /**
      * @brief Build group member roster (application/resource-lists+xml, RFC 5366 +
@@ -135,6 +135,10 @@ private:
         int iConfVersion;  // RFC 4575 conference-info version counter
     };
     std::map<std::string, GroupRtpInfo> m_mapGroupRtp;
+
+    /** 그룹 세션의 현재 condition(0=normal/1=imminent/2=emergency). 진행 중 emergency/imminent 상태.
+     *  ProcessGroupCall(개시) 시 설정, fan-out INVITE(mcptt-info emergency-ind 광고)·업그레이드에서 참조. */
+    std::map<std::string, int> m_mapGroupCondition;
 
     /** 그룹 세션 단위 통일 sesid: ADD_PTT_GROUP ~ JOIN/LEAVE ~ INVITE ~ REMOVE_PTT_GROUP 모두 동일 sesid 사용.
      *  key = group_id, value = sesid (형식: `{group_id}::csp::{us_ts}::{counter}`).

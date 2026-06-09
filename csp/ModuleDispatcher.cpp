@@ -32,6 +32,7 @@
 #include "Directory.h"
 #include "GroupCallService.h"
 #include "GroupMap.h"
+#include "McpttInfo.h"
 #include "Log.h"
 #include "MemoryDebug.h"
 #include "NonceMap.h"
@@ -503,6 +504,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
     if ( strlen( pszTo ) == 0 ) return StopCall( pszCallId, SIP_DECLINE );
 
+    // MCPTT condition(emergency/imminent) 파싱 — INVITE 의 mcptt-info+xml 지시자 (TS 24.379).
+    //   session-type(그룹유형)과 직교. ProcessGroupCall 로 전달해 floor tier·fan-out 광고에 반영.
+    int iMcpttCond = 0;
+    if ( pclsMessage ) {
+        CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
+        iMcpttCond = clsMi.Condition();
+    }
+
     // 1. PTT-AS: 그룹콜 (MCPTT 규격 on-demand) — UE 발신 그룹 INVITE 를 받아 fan-out.
     //   구 always-on 모델은 여기서 403 거부했으나(발신 안 한다는 전제), 규격 모델에선
     //   발신 UE 의 키업(그룹 INVITE)이 세션 개시 트리거다 → ProcessGroupCall 로 라우팅.
@@ -529,7 +538,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsGroupRoute;
         clsUserInfo.GetCallRoute( clsGroupRoute );
-        if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsGroupRoute ) ) {
+        if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsGroupRoute, iMcpttCond ) ) {
             return;
         }
         CLog::Print( LOG_INFO, "EventIncomingCall: ProcessGroupCall(%s) failed for caller(%s) → 403 [PTT-AS]", pszTo,
@@ -603,7 +612,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Select( pszTo, clsGroup ) ) {
             CSipCallRoute clsRouteTemp;
             clsUserInfo.GetCallRoute( clsRouteTemp );
-            if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsRouteTemp ) ) {
+            if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsRouteTemp, iMcpttCond ) ) {
                 SetCallOwner( pszCallId, &m_clsPttAs );
                 return;
             }
