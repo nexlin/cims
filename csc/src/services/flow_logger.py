@@ -1290,12 +1290,22 @@ async def _handle_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
     full_path = handler_args.full_path or ""
     after = full_path[len("/api/v1/flow"):].lstrip("/")
+    # 쿼리: handler_args.query_params(dict) 우선, 없으면 full_path 파싱.
+    #   OAM 라우팅은 query 를 query_params 로 전달하고 full_path 는 경로만 담는다 →
+    #   full_path 만 파싱하면 date 가 항상 now() 로 디폴트되어 날짜필터가 깨짐(과거날짜 조회 불가).
+    qp = getattr(handler_args, 'query_params', {}) or {}
     qs = parse_qs(urlparse(full_path).query)
-    date_str = qs.get("date", [datetime.now().strftime("%Y-%m-%d")])[0]
-    hour = qs.get("hour", [None])[0]
+    def _q(name, default=None):
+        v = qp.get(name)
+        if v:
+            return v[0] if isinstance(v, list) else v
+        vl = qs.get(name)
+        return vl[0] if vl else default
+    date_str = _q("date", datetime.now().strftime("%Y-%m-%d"))
+    hour = _q("hour")
     # call_type=volte|ptt — VoLTE 와 PTT 의 .d 디렉토리가 같은 prefix 부분 매칭
     # 으로 충돌하는 경우 방지. VolteHistoryPage/PttHistoryPage 는 명시 전달.
-    call_type = qs.get("call_type", [None])[0]
+    call_type = _q("call_type")
     if call_type and call_type not in ("volte", "ptt"):
         call_type = None
 
@@ -1539,15 +1549,22 @@ async def _handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> Handler
 
     full_path = handler_args.full_path or ""
     qs = parse_qs(urlparse(full_path).query)
+    qp = getattr(handler_args, 'query_params', {}) or {}
+    def _q(name, default=None):
+        v = qp.get(name)
+        if v:
+            return v[0] if isinstance(v, list) else v
+        vl = qs.get(name)
+        return vl[0] if vl else default
     after = full_path[len("/api/v1/recordings"):].lstrip("/")
 
     if not after:
         # 목록 조회
-        date_str = qs.get("date", [datetime.now().strftime("%Y-%m-%d")])[0]
-        hour = qs.get("hour", [None])[0]
-        call_type = qs.get("call_type", [None])[0]
-        limit = min(int(qs.get("limit", ["200"])[0]), 1000)
-        offset = int(qs.get("offset", ["0"])[0])
+        date_str = _q("date", datetime.now().strftime("%Y-%m-%d"))
+        hour = _q("hour")
+        call_type = _q("call_type")
+        limit = min(int(_q("limit", "200")), 1000)
+        offset = int(_q("offset", "0"))
 
         dirs = _find_all_d_dirs(date_str, hour)
         recordings = []
@@ -1572,8 +1589,8 @@ async def _handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> Handler
     parts = after.split("/")
     call_id = unquote(parts[0])
     sub = parts[1] if len(parts) > 1 else None
-    date_str = qs.get("date", [datetime.now().strftime("%Y-%m-%d")])[0]
-    hour = qs.get("hour", [None])[0]
+    date_str = _q("date", datetime.now().strftime("%Y-%m-%d"))
+    hour = _q("hour")
 
     d_dir = _find_d_dir_by_callid(date_str, hour, call_id)
     if not d_dir:
