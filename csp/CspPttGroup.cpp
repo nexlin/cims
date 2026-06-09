@@ -16,6 +16,8 @@ CspPttGroup::CspPttGroup()
       _priority( 5 ),
       _encryption( false ),
       _emergencyCall( false ),
+      _imminentPerilCall( true ),
+      _emergencyAlert( true ),
       _sessionStart( 0 ),
       _sessionEnd( 0 ),
       _sessionSeq( 0 ),
@@ -111,6 +113,8 @@ void CspPttGroup::Clear() {
     _priority = 5;
     _encryption = false;
     _emergencyCall = false;
+    _imminentPerilCall = true;
+    _emergencyAlert = true;
     _orgCode.clear();
     _sessionStart = 0;
     _sessionEnd = 0;

@@ -90,6 +90,10 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     if ( iCond >= 2 && !clsGroup._emergencyCall ) {
         CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) emergency not allowed → downgrade to normal", pszGroupId );
         iCond = 0;
+    } else if ( iCond == 1 && !clsGroup._imminentPerilCall ) {
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) imminent-peril not allowed → downgrade to normal",
+                     pszGroupId );
+        iCond = 0;
     }
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );

@@ -1068,18 +1068,19 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
         CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
         bool bActivate = clsMi.bAlert;  // true=경보 발신, false=경보 취소
         bool bGroupTarget = gclsGroupMap.Contains( pszTo );
-        // 능력 게이트: emergency_alert capability 는 CSP 미로딩(Phase 0 DB 컬럼만) → 기본 허용.
-        bool bAllowed = true;
+        // 능력 게이트 (TS 24.481): 그룹의 allow-MCPTT-emergency-alert 허용 시에만 전파.
+        CspPttGroup clsGroup;
+        bool bHaveGroup = bGroupTarget && gclsGroupMap.Select( pszTo, clsGroup );
+        bool bAllowed = bHaveGroup ? clsGroup._emergencyAlert : true;
         const char *pszEvt = bActivate ? "alert_sent" : "alert_cancelled";
         int iFanout = 0;
-        if ( bAllowed && bGroupTarget ) {
+        if ( bAllowed && bHaveGroup ) {
             if ( gclsCallDir.IsEnabled() )
                 gclsCallDir.PttLogEvent( pszTo, pszEvt,
                                          std::string( "{\"actor\":\"" ) + pszFrom + "\",\"target\":\"" + pszTo + "\"}" );
             // Phase 3b — 그룹 등록 멤버에게 alert MESSAGE fan-out (발신자 제외). affiliation 요구 그룹은
             //   affiliate 된 멤버만. 취소(alert-ind=false)도 동일 본문 전파로 멤버에 반영.
-            CspPttGroup clsGroup;
-            if ( gclsGroupMap.Select( pszTo, clsGroup ) ) {
+            {
                 for ( const auto &pUser : clsGroup._pusers ) {
                     if ( !pUser || pUser->_id == pszFrom ) continue;
                     if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&

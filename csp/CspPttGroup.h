@@ -66,8 +66,11 @@ public:
     /** 암호화 여부 (SRTP) */
     bool _encryption;
 
-    /** 긴급통화 허용 여부 */
+    /** 긴급통화 허용 여부 (allow-MCPTT-emergency-call) */
     bool _emergencyCall;
+    /** 임박위험 통화 허용 여부 (allow-imminent-peril-call), 긴급경보 허용 (allow-MCPTT-emergency-alert) */
+    bool _imminentPerilCall;
+    bool _emergencyAlert;
 
     /** 소속 조직 코드 */
     std::string _orgCode;

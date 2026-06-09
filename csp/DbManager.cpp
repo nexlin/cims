@@ -236,7 +236,8 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
         "g.session_seq, g.group_type, g.on_network, g.max_members, g.require_affiliation, COALESCE(g.alias,''), "
         "COALESCE(g.authorized_user_id,0), "
         "COALESCE(DATE_FORMAT(g.created_at,'%Y-%m-%dT%H:%i:%s'),''), "
-        "COALESCE(ps.id,'') "
+        "COALESCE(ps.id,''), "
+        "g.imminent_peril_call, g.emergency_alert "
         "FROM ptt_groups g "
         "LEFT JOIN ptt_subscriptions ps ON ps.user_id = g.authorized_user_id "
         "WHERE g.mcptt_group_id='" +
@@ -271,6 +272,8 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     clsGroup._authorizedUserId = row[16] ? atoi( row[16] ) : 0;
     clsGroup._createdAt = row[17] ? row[17] : "";
     clsGroup._authorizedUser = row[18] ? row[18] : "";  // 소유자 PTT MSISDN (파생 MCPTT ID)
+    clsGroup._imminentPerilCall = row[19] ? ( atoi( row[19] ) != 0 ) : true;
+    clsGroup._emergencyAlert = row[20] ? ( atoi( row[20] ) != 0 ) : true;
     mysql_free_result( pRes );
 
     // 멤버 목록 — group_id 는 surrogate ptt_groups.id 참조
