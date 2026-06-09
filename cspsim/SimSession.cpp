@@ -507,26 +507,39 @@ void SimSession::StartCall(const std::string& strTarget) {
     // MCPTT 긴급/임박 개시 (TS 24.379): mcptt-info 에 emergency-ind/imminentperil-ind 를 실어야 하므로
     //   UA 일괄 StartCall(바디 주입 불가) 대신 CreateCall→multipart 래핑→StartCall(callId,msg) 경로 사용.
     //   (UA 가 다이얼로그 관리 유지 → 200/ACK/미디어 정상.)
-    if (m_iEmergencyCond > 0) {
+    if (m_iEmergencyCond > 0 || !m_vecAdhoc.empty()) {
         CSipMessage* pInvite = NULL;
         if (m_clsUserAgent.CreateCall(m_strUser.c_str(), strDst.c_str(), &clsRtp, &clsRoute,
                                        m_strInviteId, &pInvite, NULL) && pInvite) {
-            const char* ind = (m_iEmergencyCond >= 2) ? "emergency-ind" : "imminentperil-ind";
+            // mcptt-info (condition 지시자 포함)
             std::string xml =
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
                 "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
                 "  <mcptt-Params>\r\n"
-                "    <session-type>prearranged</session-type>\r\n"
-                "    <" + std::string(ind) + ">true</" + std::string(ind) + ">\r\n"
-                "    <mcptt-request-uri>tel:" + strDst + "</mcptt-request-uri>\r\n"
-                "    <mcptt-calling-user-id>tel:" + m_strUser + "</mcptt-calling-user-id>\r\n"
-                "  </mcptt-Params>\r\n"
-                "</mcpttinfo>\r\n";
+                "    <session-type>prearranged</session-type>\r\n";
+            if (m_iEmergencyCond >= 2) xml += "    <emergency-ind>true</emergency-ind>\r\n";
+            else if (m_iEmergencyCond == 1) xml += "    <imminentperil-ind>true</imminentperil-ind>\r\n";
+            xml += "    <mcptt-request-uri>tel:" + strDst + "</mcptt-request-uri>\r\n"
+                   "    <mcptt-calling-user-id>tel:" + m_strUser + "</mcptt-calling-user-id>\r\n"
+                   "  </mcptt-Params>\r\n"
+                   "</mcpttinfo>\r\n";
+            // ad hoc: resource-lists (동적 멤버)
+            std::string rl;
+            if (!m_vecAdhoc.empty()) {
+                rl = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+                     "<resource-lists xmlns=\"urn:ietf:params:xml:ns:resource-lists\">\r\n  <list>\r\n";
+                for (const auto& m : m_vecAdhoc) rl += "    <entry uri=\"tel:" + m + "\"/>\r\n";
+                rl += "  </list>\r\n</resource-lists>\r\n";
+            }
             std::string sdp = pInvite->m_strBody;  // CreateCall 이 만든 SDP
             const std::string b = "mcptt";
             std::string body;
             body  = "--" + b + "\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n";
             body += "Content-Length: " + std::to_string(xml.size()) + "\r\n\r\n" + xml + "\r\n";
+            if (!rl.empty()) {
+                body += "--" + b + "\r\nContent-Type: application/resource-lists+xml\r\n";
+                body += "Content-Length: " + std::to_string(rl.size()) + "\r\n\r\n" + rl + "\r\n";
+            }
             body += "--" + b + "\r\nContent-Type: application/sdp\r\n";
             body += "Content-Length: " + std::to_string(sdp.size()) + "\r\n\r\n" + sdp + "\r\n";
             body += "--" + b + "--\r\n";
@@ -534,8 +547,9 @@ void SimSession::StartCall(const std::string& strTarget) {
             pInvite->m_iContentLength = (int)body.size();
             pInvite->m_clsContentType.Set("multipart", "mixed");
             pInvite->m_clsContentType.InsertParam("boundary", b.c_str());
-            printf("[%d] INVITE(%s) → %s  [mcptt %s]\n", m_iId,
-                   (m_iEmergencyCond >= 2 ? "EMERGENCY" : "IMMINENT"), strDst.c_str(), ind);
+            const char* tag = (m_iEmergencyCond >= 2) ? "EMERGENCY" : (m_iEmergencyCond == 1) ? "IMMINENT" : "";
+            printf("[%d] INVITE → %s  [%s%s%zu adhoc]\n", m_iId, strDst.c_str(), tag,
+                   m_vecAdhoc.empty() ? "" : " adhoc:", m_vecAdhoc.size());
             m_clsUserAgent.StartCall(m_strInviteId.c_str(), pInvite);
             return;
         }

@@ -8,6 +8,7 @@
 #include "SipMessage.h"
 #include <atomic>
 #include <string>
+#include <vector>
 #include <mutex>
 
 // Forward declaration
@@ -97,6 +98,7 @@ public:
     void StopCall();
     void StartGroupCall(const std::string& strGroupId = "");
     void SetEmergency(int iCond) { m_iEmergencyCond = iCond; }  // 0/1/2 (normal/imminent/emergency)
+    void SetAdhocMembers(const std::vector<std::string>& v) { m_vecAdhoc = v; }  // ad hoc 멤버 MSISDN
     void SubscribeGms();
     void SubscribeCms();
     void AffiliateGroup(bool bDeaffiliate = false);   // MCPTT 그룹 affiliation (TS 24.379 §9) — 그룹 URI 로 PUBLISH
@@ -123,6 +125,8 @@ public:
     // MCPTT condition (TS 24.379): 0=normal/1=imminent/2=emergency. >0 이면 그룹 INVITE 의
     // mcptt-info 에 emergency-ind/imminentperil-ind 를 실어 긴급 개시(키업)를 시뮬레이트.
     int          m_iEmergencyCond = 0;
+    // ad hoc 그룹콜 (Rel-18): 비면 일반. 비어있지 않으면 그룹 INVITE 에 resource-lists(멤버) 주입.
+    std::vector<std::string> m_vecAdhoc;
 
     // SIP
     CSipUserAgent       m_clsUserAgent;

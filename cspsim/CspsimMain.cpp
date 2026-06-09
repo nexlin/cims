@@ -833,6 +833,13 @@ int main(int argc, char* argv[])
             sessions[0]->SetEmergency(iEmergCond);
             printf("[MCPTT] session[0] 긴급개시 모드: %s\n", iEmergCond >= 2 ? "emergency" : "imminent");
         }
+        // ad hoc (Rel-18): -adhoc → session[0] 이 나머지 세션 사용자를 동적 멤버로 그룹 개시
+        if (HasFlag(argc, argv, "-adhoc") && sessions.size() > 1) {
+            std::vector<std::string> mem;
+            for (size_t j = 1; j < sessions.size(); ++j) mem.push_back(sessions[j]->m_strUser);
+            sessions[0]->SetAdhocMembers(mem);
+            printf("[MCPTT] session[0] ad-hoc 개시: %zu 동적 멤버\n", mem.size());
+        }
     }
 
     // 자동 시나리오 실행 (별도 스레드)

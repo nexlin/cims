@@ -545,6 +545,31 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             }
         }
     }
+    // MCPTT ad hoc 그룹콜 (TS 22.179 Rel-18): 미프로비저닝 타겟 + INVITE resource-lists 멤버 →
+    //   임시 그룹을 동적 생성(in-memory, 비영속 ephemeral). 이후 기존 ProcessGroupCall(on-demand)
+    //   경로가 fan-out·teardown 까지 처리. requireAffiliation=false(사전 가입 없음).
+    if ( m_clsPttAs.IsEnabled() && !gclsGroupMap.Contains( pszTo ) && pclsMessage ) {
+        std::vector<std::string> vecAdhoc = ParseResourceListUsers( pclsMessage->m_strBody );
+        if ( !vecAdhoc.empty() ) {
+            CspPttGroup clsAdhoc;
+            clsAdhoc.Clear();
+            clsAdhoc._id = pszTo;
+            clsAdhoc._name = std::string( "adhoc:" ) + pszTo;
+            clsAdhoc._groupType = "prearranged";  // on-demand 수명(마지막 이탈 시 teardown)
+            clsAdhoc._requireAffiliation = false;
+            bool bHasInit = false;
+            for ( const auto &m : vecAdhoc ) {
+                clsAdhoc._pusers.push_back( std::make_shared<CspPttUser>( m, 5, "participant", "" ) );
+                if ( m == pszFrom ) bHasInit = true;
+            }
+            if ( !bHasInit )
+                clsAdhoc._pusers.push_back( std::make_shared<CspPttUser>( pszFrom, 5, "participant", "" ) );
+            gclsGroupMap.Insert( clsAdhoc );
+            CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc group(%s) created %zu members init(%s) [PTT-AS]", pszTo,
+                         clsAdhoc._pusers.size(), pszFrom );
+        }
+    }
+
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsGroupRoute;

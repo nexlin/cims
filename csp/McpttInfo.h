@@ -2,7 +2,9 @@
 #define _MCPTT_INFO_H_
 
 #include <algorithm>
+#include <cctype>
 #include <string>
+#include <vector>
 
 // ── MCPTT call-control info 경량 파서 (application/vnd.3gpp.mcptt-info+xml, TS 24.379) ──
 //  수신 INVITE/MESSAGE 의 multipart 바디에서 condition 지시자만 추출한다.
@@ -48,6 +50,29 @@ inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
             info.strSessionType = body.substr( gt + 1, lt - gt - 1 );
     }
     return info;
+}
+
+// 멀티파트 바디의 resource-lists+xml part 에서 멤버 식별자(tel: 뒤 숫자/+) 추출.
+//  ad hoc 그룹콜(TS 22.179 Rel-18): 개시자가 INVITE 에 동적 멤버 목록을 실어 보냄.
+//  mcptt-info part 의 tel: 는 제외(resource-lists 구간만 스캔).
+inline std::vector<std::string> ParseResourceListUsers( const std::string &body ) {
+    std::vector<std::string> out;
+    size_t rl = body.find( "resource-lists" );
+    if ( rl == std::string::npos ) return out;
+    size_t end = body.find( "\r\n--", rl );  // resource-lists part 끝(다음 boundary)
+    std::string seg = body.substr( rl, ( end == std::string::npos ? body.size() : end ) - rl );
+    size_t p = 0;
+    while ( ( p = seg.find( "tel:", p ) ) != std::string::npos ) {
+        p += 4;
+        size_t e = p;
+        while ( e < seg.size() && ( std::isdigit( (unsigned char)seg[e] ) || seg[e] == '+' ) ) e++;
+        if ( e > p ) {
+            std::string id = seg.substr( p, e - p );
+            if ( std::find( out.begin(), out.end(), id ) == out.end() ) out.push_back( id );
+        }
+        p = e;
+    }
+    return out;
 }
 
 #endif  // _MCPTT_INFO_H_
