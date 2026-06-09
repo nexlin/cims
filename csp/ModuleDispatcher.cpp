@@ -1062,6 +1062,27 @@ bool CModuleDispatcher::EventBlindTransfer( const char *pszCallId, const char *p
 }
 
 bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
+    // MCPTT emergency alert (TS 24.379): mcptt-info alert-ind 판별 → SMS 와 분기.
+    //   Phase 3a = 탐지 + 능력 게이트 + 로깅 + 200 OK ack. (멤버 fan-out 은 Phase 3b 후속.)
+    if ( pclsMessage && pclsMessage->m_strBody.find( "alert-ind" ) != std::string::npos ) {
+        CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
+        bool bActivate = clsMi.bAlert;  // true=경보 발신, false=경보 취소
+        bool bGroupTarget = gclsGroupMap.Contains( pszTo );
+        // 능력 게이트: emergency_alert capability 는 CSP 미로딩(Phase 0 DB 컬럼만) → 기본 허용.
+        //   per-group alert 불허 강제는 컬럼 로딩 후(imminent 게이팅과 동일 후속).
+        bool bAllowed = true;
+        const char *pszEvt = bActivate ? "alert_sent" : "alert_cancelled";
+        if ( bAllowed && bGroupTarget && gclsCallDir.IsEnabled() ) {
+            gclsCallDir.PttLogEvent( pszTo, pszEvt,
+                                     std::string( "{\"actor\":\"" ) + pszFrom + "\",\"target\":\"" + pszTo + "\"}" );
+        }
+        CLog::Print( LOG_INFO, "EventMessage: MCPTT emergency %s from(%s) to(%s) group=%d allowed=%d", pszEvt, pszFrom,
+                     pszTo, bGroupTarget, bAllowed );
+        // 200 OK ack (경보 수신 확인). 미허용이어도 규격상 거부는 별도 — 우선 ack(기록만).
+        SendResponse( pclsMessage, SIP_OK );
+        return true;
+    }
+
     CUserInfo clsUserInfo;
     CSipCallRoute clsRoute;
     if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) return false;
