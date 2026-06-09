@@ -1,0 +1,12 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+**/build/
+/captures
+.externalNativeBuild
+.cxx/
+local.properties
+# PJSIP 빌드 산출물(.so/SWIG Java)은 별도 관리 — 빌드 가이드 참조
