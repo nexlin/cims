@@ -2,6 +2,7 @@
 #define __PRTP_RELAY_H__
 
 #include <string>
+#include <vector>
 #include "pbase.h"
 #include "pmodule.h"
 #include "PMPBase.h"
@@ -53,6 +54,10 @@ public:
 
     bool proc();
     bool proc(int, const std::string&, PEvent::Ptr) { return false; }
+
+    // epoll 리액터 등록용: 이 relay 의 유효 소켓 fd 를 수집(audio RTP/RTCP + video RTP/RTCP).
+    //   소켓은 init 때 열려 프로세스 내내 유지되므로 등록은 1회면 충분.
+    void collectFds(std::vector<int>& out) const;
 
 private:
     struct PeerInfo {

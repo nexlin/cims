@@ -34,10 +34,13 @@ PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
 {
     loadConfig();
 
-    // Worker 스레드를 먼저 생성해야 initResourcePool()의 addHandler()가 동작함
-    for(int i=0; i<_rtpWorkerCount; ++i) {
-        std::string wname = formatStr("RtpWorker_%d", i);
-        addWorker(wname, 1, 2048, true);
+    // RTP epoll 리액터: 풀 소켓 fd 를 등록하기 전에 epoll 인스턴스를 먼저 만든다.
+    //   (구: addWorker 1ms period busy-poll → 이벤트 구동 epoll 로 교체. idle CPU 0.)
+    _reactors.resize(_rtpWorkerCount);
+    for (int i = 0; i < _rtpWorkerCount; ++i) {
+        _reactors[i].epfd = epoll_create1(0);
+        if (_reactors[i].epfd < 0)
+            LOG_ERROR("PCmpServer", "epoll_create1 failed for reactor %d: %s", i, strerror(errno));
     }
 
     initResourcePool();
@@ -62,6 +65,11 @@ PCmpServer::~PCmpServer() {
     }
     _pttPool.clear();
     _freePttResources.clear();
+
+    // epoll fd 정리 (스레드는 stopServer 에서 이미 join 됨)
+    for (auto& r : _reactors) {
+        if (r.epfd >= 0) { ::close(r.epfd); r.epfd = -1; }
+    }
 }
 
 bool PCmpServer::startServer() {
@@ -95,12 +103,25 @@ bool PCmpServer::startServer() {
         LOG_INFO("PCmpServer", "Session timeout thread started (timeout=%ds)", _sessionTimeout);
     }
 
+    // RTP epoll 리액터 스레드 기동 (epoll fd 는 생성자에서 만들고 풀 fd 는 init 때 등록 완료)
+    _reactorRunning = true;
+    for (int i = 0; i < (int)_reactors.size(); ++i) {
+        int w = i;
+        _reactors[i].thread = std::thread([this, w]() { this->reactorLoop(w); });
+    }
+    LOG_INFO("PCmpServer", "RTP epoll reactors started (%d workers, event-driven)", (int)_reactors.size());
+
     LOG_INFO("PCmpServer", "Server listening on %s:%d", _serverIp.c_str(), _serverPort);
     return true;
 }
 
 void PCmpServer::stopServer() {
     _running = false;
+    // 리액터 스레드 정지 (epoll_wait 1s timeout 내 종료)
+    _reactorRunning = false;
+    for (auto& r : _reactors) {
+        if (r.thread.joinable()) r.thread.join();
+    }
     if (_timeoutThread.joinable()) _timeoutThread.join();
     stopLogWriter();  // timeout 스레드 정지 후 잔여 로그 전량 flush
     if (_udpFd >= 0) {
@@ -1011,6 +1032,49 @@ void PCmpServer::loadConfig() {
            _dtmfPttEnable, _sessionTimeout, _floorIdleSec);
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  RTP epoll 리액터
+// ═══════════════════════════════════════════════════════════════
+
+// relay 의 소켓 fd 들을 워커 widx 의 epoll 에 등록. data.ptr=handler 로 역참조.
+void PCmpServer::epollAddHandler(int widx, PHandler* h, const std::vector<int>& fds) {
+    if (widx < 0 || widx >= (int)_reactors.size()) return;
+    int epfd = _reactors[widx].epfd;
+    if (epfd < 0) return;
+    for (int fd : fds) {
+        if (fd < 0) continue;
+        struct epoll_event ev{};
+        ev.events = EPOLLIN;           // level-triggered: proc() 가 미처리분 남겨도 다음 wait 가 재통지
+        ev.data.ptr = h;
+        if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev) < 0)
+            LOG_ERROR("PCmpServer", "epoll_ctl ADD fd=%d (reactor %d) failed: %s", fd, widx, strerror(errno));
+    }
+}
+
+// 워커 스레드 본체: 트래픽 없으면 epoll_wait 블록(idle CPU 0). 패킷 도착 시 해당 relay 의 proc() 호출.
+void PCmpServer::reactorLoop(int widx) {
+    int epfd = _reactors[widx].epfd;
+    if (epfd < 0) return;
+    const int MAXEV = 256;
+    struct epoll_event evs[MAXEV];
+    while (_reactorRunning.load()) {
+        int n = epoll_wait(epfd, evs, MAXEV, 1000);   // 1s timeout → 종료 플래그 재확인(클린 join)
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            LOG_ERROR("PCmpServer", "epoll_wait reactor %d failed: %s", widx, strerror(errno));
+            break;
+        }
+        if (n == 0) continue;
+        // 한 relay 가 여러 fd 로 깨어날 수 있음 → proc() 가 relay 의 모든 소켓을 drain 하므로
+        //   relay 당 1회만 호출(중복 제거). relay→워커 매핑이 고정이라 동일 relay 가 다른 스레드와 경합 없음.
+        std::unordered_set<PHandler*> handled;
+        for (int i = 0; i < n; ++i) {
+            PHandler* h = static_cast<PHandler*>(evs[i].data.ptr);
+            if (h && handled.insert(h).second) h->proc();
+        }
+    }
+}
+
 void PCmpServer::initResourcePool() {
     int currentPort = _rtpStartPort;
     for (int i = 0; i < _rtpPoolSize; ++i) {
@@ -1018,10 +1082,11 @@ void PCmpServer::initResourcePool() {
         PRtpRelay* rtp = new PRtpRelay(name);
         
         if (rtp->init(_rtpIp, currentPort, currentPort + 2)) {
-             // Worker thread 영구 등록 (프로세스 종료까지 proc() 상시 동작)
-             std::string wname = formatStr("RtpWorker_%d", i % _rtpWorkerCount);
-             rtp->setWorkerName(wname);
-             addHandler(wname, rtp);
+             // epoll 리액터에 소켓 fd 영구 등록 (소켓은 프로세스 종료까지 유지 → 1회 등록).
+             int widx = i % _rtpWorkerCount;
+             rtp->setWorkerName(formatStr("RtpWorker_%d", widx));
+             std::vector<int> fds; rtp->collectFds(fds);
+             epollAddHandler(widx, rtp, fds);
              _resourcePool.push_back(rtp);
              _freeResources.push_back(rtp);
         } else {
@@ -1042,9 +1107,10 @@ void PCmpServer::initPttResourcePool() {
         PRtpMulticast* ptt = new PRtpMulticast(name);
 
         if (ptt->init(_rtpIp, rtpPort, floorPort, videoPort)) {
-            std::string wname = formatStr("RtpWorker_%d", i % _rtpWorkerCount);
-            ptt->setWorkerName(wname);
-            addHandler(wname, ptt);
+            int widx = i % _rtpWorkerCount;
+            ptt->setWorkerName(formatStr("RtpWorker_%d", widx));
+            std::vector<int> fds; ptt->collectFds(fds);
+            epollAddHandler(widx, ptt, fds);
             _pttPool.push_back(ptt);
             _freePttResources.push_back(ptt);
         } else {

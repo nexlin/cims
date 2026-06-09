@@ -3,12 +3,15 @@
 
 #include <string>
 #include <map>
+#include <vector>
 #include <iostream>
 #include <thread>
 #include <deque>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
+#include <unordered_set>
+#include <sys/epoll.h>
 //#include "pbase.h"
 #include "pmodule.h"
 #include "PRtpRelay.h"
@@ -159,6 +162,20 @@ private:
 
     // Worker config
     int _rtpWorkerCount;
+
+    // ── RTP epoll 리액터 ──────────────────────────────────────────────
+    // 구: RtpWorker 4개가 1ms period 로 풀 전체(논블로킹 소켓 ~550개)를 1000Hz busy-poll
+    //     → 진행 호 0 에도 코어 1개 상시 점유. 이를 이벤트 구동(epoll)으로 교체.
+    // 풀 소켓 fd 는 init 때 워커별 epoll 에 1회 등록(소켓은 프로세스 내내 유지, alloc/free 무관).
+    // 트래픽 없으면 epoll_wait 블록 → idle CPU ≈ 0. 패킷 도착 시에만 해당 relay 의 proc() 호출.
+    struct RtpReactor {
+        int epfd = -1;
+        std::thread thread;
+    };
+    std::vector<RtpReactor> _reactors;
+    std::atomic<bool> _reactorRunning{false};
+    void reactorLoop(int widx);
+    void epollAddHandler(int widx, PHandler* h, const std::vector<int>& fds);
 
     // Recording config
     bool _recordEnable;

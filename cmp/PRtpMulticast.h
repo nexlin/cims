@@ -2,6 +2,7 @@
 #define __PRTP_MULTICAST_H__
 
 #include <string>
+#include <vector>
 #include "pbase.h"
 #include "pmodule.h"
 #include "PMPBase.h"
@@ -54,6 +55,9 @@ public:
     // ── Worker 메인 루프 ──
     bool proc();
     bool proc(int, const std::string&, PEvent::Ptr) { return false; }
+
+    // epoll 리액터 등록용: 유효 소켓 fd 수집(audio RTP + floor + video RTP). 소켓은 프로세스 내내 유지.
+    void collectFds(std::vector<int>& out) const;
 
 private:
     // 소켓별 수신 → 콜백 헬퍼

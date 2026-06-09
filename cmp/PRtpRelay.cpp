@@ -269,6 +269,13 @@ bool PRtpRelay::proc() {
     return false;
 }
 
+void PRtpRelay::collectFds(std::vector<int>& out) const {
+    const int fds[] = { _rtpSock.getFd(), _rtcpSock.getFd(),
+                        _videoRtpSock.getFd(), _videoRtcpSock.getFd() };
+    for (int fd : fds)
+        if (fd != INVALID_SOCKET) out.push_back(fd);
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  녹취
 // ═══════════════════════════════════════════════════════════════

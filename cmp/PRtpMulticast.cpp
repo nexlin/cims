@@ -123,3 +123,9 @@ bool PRtpMulticast::proc() {
 
     return false;
 }
+
+void PRtpMulticast::collectFds(std::vector<int>& out) const {
+    const int fds[] = { _rtpSock.getFd(), _floorSock.getFd(), _videoRtpSock.getFd() };
+    for (int fd : fds)
+        if (fd != INVALID_SOCKET) out.push_back(fd);
+}
