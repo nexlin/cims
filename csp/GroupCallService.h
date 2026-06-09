@@ -51,6 +51,14 @@ public:
     /** callId가 PTT 그룹콜에 속하는지 확인. 속하면 groupId 반환, 아니면 빈 문자열 */
     std::string GetGroupIdByCallId( const std::string &strCallId );
 
+    /** callId → (groupId, memberId) 조회. 활성 PTT 그룹콜 세션이면 true. (re-INVITE 식별용) */
+    bool GetGroupCallSession( const std::string &strCallId, std::string &strGroupId, std::string &strMemberId );
+
+    /** 진행 중 호의 condition(emergency/imminent) 변경 적용 (re-INVITE 업그레이드/취소, TS 24.379).
+     *  iNewCond: 2=emergency/1=imminent/0=normal. 상향=멤버가 개시(누구나), 하향=개시자만(권한).
+     *  floor tier(CMP)·m_mapGroupCondition 갱신 + 이벤트 로깅. 미디어 재협상은 기존 UA 경로가 처리. */
+    void ApplyInCallCondition( const std::string &strGroupId, const std::string &strMemberId, int iNewCond );
+
     // Recovery & Monitor
     void StartMonitor();
     void StopMonitor();
@@ -139,6 +147,8 @@ private:
     /** 그룹 세션의 현재 condition(0=normal/1=imminent/2=emergency). 진행 중 emergency/imminent 상태.
      *  ProcessGroupCall(개시) 시 설정, fan-out INVITE(mcptt-info emergency-ind 광고)·업그레이드에서 참조. */
     std::map<std::string, int> m_mapGroupCondition;
+    /** condition 을 마지막으로 올린 멤버(actor) — 취소(하향) 권한 판정용(개시자만 취소). */
+    std::map<std::string, std::string> m_mapGroupCondActor;
 
     /** 그룹 세션 단위 통일 sesid: ADD_PTT_GROUP ~ JOIN/LEAVE ~ INVITE ~ REMOVE_PTT_GROUP 모두 동일 sesid 사용.
      *  key = group_id, value = sesid (형식: `{group_id}::csp::{us_ts}::{counter}`).

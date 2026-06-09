@@ -93,8 +93,13 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     }
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
-        if ( iCond > 0 ) m_mapGroupCondition[pszGroupId] = iCond;
-        else m_mapGroupCondition.erase( pszGroupId );
+        if ( iCond > 0 ) {
+            m_mapGroupCondition[pszGroupId] = iCond;
+            m_mapGroupCondActor[pszGroupId] = pszCallerInfo;
+        } else {
+            m_mapGroupCondition.erase( pszGroupId );
+            m_mapGroupCondActor.erase( pszGroupId );
+        }
     }
 
     CLog::Print( LOG_INFO, "Processing Group Call GroupId(%s) Name(%s) Caller(%s) Priority(%d)", pszGroupId,
@@ -282,6 +287,65 @@ std::string CGroupCallService::GetGroupIdByCallId( const std::string &strCallId 
     auto it = m_mapCallSession.find( strCallId );
     if ( it != m_mapCallSession.end() ) return it->second.strGroupId;
     return "";
+}
+
+bool CGroupCallService::GetGroupCallSession( const std::string &strCallId, std::string &strGroupId,
+                                             std::string &strMemberId ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+    auto it = m_mapCallSession.find( strCallId );
+    if ( it == m_mapCallSession.end() ) return false;
+    strGroupId = it->second.strGroupId;
+    strMemberId = it->second.strMemberId;
+    return true;
+}
+
+void CGroupCallService::ApplyInCallCondition( const std::string &strGroupId, const std::string &strMemberId,
+                                              int iNewCond ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+    int iCur = 0;
+    {
+        auto it = m_mapGroupCondition.find( strGroupId );
+        if ( it != m_mapGroupCondition.end() ) iCur = it->second;
+    }
+    if ( iNewCond == iCur ) return;  // 변화 없음
+
+    std::string strSesId = GetOrIssueGroupSesId( strGroupId );
+    if ( iNewCond > iCur ) {
+        // 상향(업그레이드): 누구나 emergency/imminent 개시 가능 (TS 24.379). 개시 멤버에 floor tier 부여.
+        m_mapGroupCondition[strGroupId] = iNewCond;
+        m_mapGroupCondActor[strGroupId] = strMemberId;
+        gclsCmpClient.SetFloorTier( strGroupId, strMemberId, iNewCond, strSesId );
+        const char *pszEvt = ( iNewCond >= 2 ) ? "emergency_activated" : "imminent_activated";
+        if ( gclsCallDir.IsEnabled() )
+            gclsCallDir.PttLogEvent( strGroupId, pszEvt,
+                                     std::string( "{\"actor\":\"" ) + strMemberId + "\",\"by\":\"reinvite\"}" );
+        CLog::Print( LOG_INFO, "ApplyInCallCondition: %s group(%s) by(%s) tier=%d", pszEvt, strGroupId.c_str(),
+                     strMemberId.c_str(), iNewCond );
+    } else {
+        // 하향(취소): 개시자(actor)만 가능. 그 외 멤버의 취소 요청은 무시 (TS 24.379 authorized only).
+        std::string strActor;
+        auto ita = m_mapGroupCondActor.find( strGroupId );
+        if ( ita != m_mapGroupCondActor.end() ) strActor = ita->second;
+        if ( !strActor.empty() && strActor != strMemberId ) {
+            CLog::Print( LOG_INFO, "ApplyInCallCondition: cancel by non-actor(%s) ignored (actor=%s) group(%s)",
+                         strMemberId.c_str(), strActor.c_str(), strGroupId.c_str() );
+            return;
+        }
+        const std::string &strTgt = strActor.empty() ? strMemberId : strActor;
+        gclsCmpClient.SetFloorTier( strGroupId, strTgt, iNewCond, strSesId );
+        const char *pszEvt = ( iCur >= 2 ) ? "emergency_cancelled" : "imminent_cancelled";
+        if ( gclsCallDir.IsEnabled() )
+            gclsCallDir.PttLogEvent( strGroupId, pszEvt,
+                                     std::string( "{\"actor\":\"" ) + strTgt + "\",\"by\":\"reinvite\"}" );
+        if ( iNewCond <= 0 ) {
+            m_mapGroupCondition.erase( strGroupId );
+            m_mapGroupCondActor.erase( strGroupId );
+        } else {
+            m_mapGroupCondition[strGroupId] = iNewCond;
+        }
+        CLog::Print( LOG_INFO, "ApplyInCallCondition: %s group(%s) by(%s) tier=%d", pszEvt, strGroupId.c_str(),
+                     strTgt.c_str(), iNewCond );
+    }
 }
 
 void CGroupCallService::ClearUserCall( const std::string &strUserId ) {

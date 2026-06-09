@@ -279,6 +279,17 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
         std::string strTo = pclsMessage->m_clsTo.m_clsUri.m_strUser;
         std::string strFrom = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
 
+        // MCPTT 진행 중 호의 condition 변경(re-INVITE 업그레이드/취소, TS 24.379) 엿보기 — 순수 side-effect.
+        //   초기 INVITE 는 아직 세션맵 미등록 → 미발동(초기 긴급은 EventIncomingCall 경로가 처리).
+        //   재-INVITE(in-dialog, 동일 Call-ID)만 활성 그룹콜로 매칭되어 floor tier 갱신. 흐름은 그대로 진행.
+        {
+            std::string strGid, strMid;
+            if ( gclsGroupCallService.GetGroupCallSession( strCallId, strGid, strMid ) ) {
+                CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
+                gclsGroupCallService.ApplyInCallCondition( strGid, strMid, clsMi.Condition() );
+            }
+        }
+
         // 비정상(스캔/사기) INVITE 탐지·기록 — 미등록 발신 + (공인IP|사기번호|스캐너UA).
         //   정상 가입자(REGISTER 인증완료) 발신은 등록캐시에 있어 제외 → 오탐 없음.
         //   기록만 수행(차단/응답은 기존 ACL/Routing/CSCF 로직에 위임).
