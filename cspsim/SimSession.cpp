@@ -504,6 +504,44 @@ void SimSession::StartCall(const std::string& strTarget) {
     std::string strDst = strTarget.empty() ? m_strServerIp : strTarget;
     m_stats.tCallStart = NowMs();
 
+    // MCPTT 긴급/임박 개시 (TS 24.379): mcptt-info 에 emergency-ind/imminentperil-ind 를 실어야 하므로
+    //   UA 일괄 StartCall(바디 주입 불가) 대신 CreateCall→multipart 래핑→StartCall(callId,msg) 경로 사용.
+    //   (UA 가 다이얼로그 관리 유지 → 200/ACK/미디어 정상.)
+    if (m_iEmergencyCond > 0) {
+        CSipMessage* pInvite = NULL;
+        if (m_clsUserAgent.CreateCall(m_strUser.c_str(), strDst.c_str(), &clsRtp, &clsRoute,
+                                       m_strInviteId, &pInvite, NULL) && pInvite) {
+            const char* ind = (m_iEmergencyCond >= 2) ? "emergency-ind" : "imminentperil-ind";
+            std::string xml =
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+                "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
+                "  <mcptt-Params>\r\n"
+                "    <session-type>prearranged</session-type>\r\n"
+                "    <" + std::string(ind) + ">true</" + std::string(ind) + ">\r\n"
+                "    <mcptt-request-uri>tel:" + strDst + "</mcptt-request-uri>\r\n"
+                "    <mcptt-calling-user-id>tel:" + m_strUser + "</mcptt-calling-user-id>\r\n"
+                "  </mcptt-Params>\r\n"
+                "</mcpttinfo>\r\n";
+            std::string sdp = pInvite->m_strBody;  // CreateCall 이 만든 SDP
+            const std::string b = "mcptt";
+            std::string body;
+            body  = "--" + b + "\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n";
+            body += "Content-Length: " + std::to_string(xml.size()) + "\r\n\r\n" + xml + "\r\n";
+            body += "--" + b + "\r\nContent-Type: application/sdp\r\n";
+            body += "Content-Length: " + std::to_string(sdp.size()) + "\r\n\r\n" + sdp + "\r\n";
+            body += "--" + b + "--\r\n";
+            pInvite->m_strBody = body;
+            pInvite->m_iContentLength = (int)body.size();
+            pInvite->m_clsContentType.Set("multipart", "mixed");
+            pInvite->m_clsContentType.InsertParam("boundary", b.c_str());
+            printf("[%d] INVITE(%s) → %s  [mcptt %s]\n", m_iId,
+                   (m_iEmergencyCond >= 2 ? "EMERGENCY" : "IMMINENT"), strDst.c_str(), ind);
+            m_clsUserAgent.StartCall(m_strInviteId.c_str(), pInvite);
+            return;
+        }
+        printf("[%d] CreateCall 실패 — 일반 INVITE 폴백\n", m_iId);
+    }
+
     printf("[%d] INVITE → %s\n", m_iId, strDst.c_str());
     m_clsUserAgent.StartCall(m_strUser.c_str(), strDst.c_str(),
                               &clsRtp, &clsRoute, m_strInviteId);

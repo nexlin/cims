@@ -824,6 +824,17 @@ int main(int argc, char* argv[])
 
     printf("\n%d개 세션 시작 완료. 명령어는 -help 참조\n\n", (int)sessions.size());
 
+    // MCPTT 긴급/임박 개시 (TS 24.379): 발신자(session[0]) 의 그룹 INVITE 에 emergency-ind 주입.
+    //   -emergency → emergency, -imminent → imminent peril. (둘 다 없으면 일반.)
+    {
+        int iEmergCond = HasFlag(argc, argv, "-emergency") ? 2
+                       : (HasFlag(argc, argv, "-imminent") ? 1 : 0);
+        if (iEmergCond > 0 && !sessions.empty()) {
+            sessions[0]->SetEmergency(iEmergCond);
+            printf("[MCPTT] session[0] 긴급개시 모드: %s\n", iEmergCond >= 2 ? "emergency" : "imminent");
+        }
+    }
+
     // 자동 시나리오 실행 (별도 스레드)
     std::thread scenarioThread;
     if (eScenario != E_SCENARIO_NONE && !sessions.empty()) {

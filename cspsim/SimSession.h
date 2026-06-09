@@ -96,6 +96,7 @@ public:
     void StartCall(const std::string& strTarget = "");
     void StopCall();
     void StartGroupCall(const std::string& strGroupId = "");
+    void SetEmergency(int iCond) { m_iEmergencyCond = iCond; }  // 0/1/2 (normal/imminent/emergency)
     void SubscribeGms();
     void SubscribeCms();
     void AffiliateGroup(bool bDeaffiliate = false);   // MCPTT 그룹 affiliation (TS 24.379 §9) — 그룹 URI 로 PUBLISH
@@ -119,6 +120,9 @@ public:
     int          m_iLocalPort;
     bool         m_bPttMode;
     std::string  m_strGroupId;
+    // MCPTT condition (TS 24.379): 0=normal/1=imminent/2=emergency. >0 이면 그룹 INVITE 의
+    // mcptt-info 에 emergency-ind/imminentperil-ind 를 실어 긴급 개시(키업)를 시뮬레이트.
+    int          m_iEmergencyCond = 0;
 
     // SIP
     CSipUserAgent       m_clsUserAgent;
