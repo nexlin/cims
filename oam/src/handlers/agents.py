@@ -389,6 +389,8 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
         "routes":          r.get("routes") if isinstance(r.get("routes"), (dict, list)) else None,
         # cims-managed 마운트 (fstab 영속). agent heartbeat 보고(mounted 상태 포함) + apply 갱신.
         "mounts":          r.get("mounts") if isinstance(r.get("mounts"), list) else None,
+        # 서버별 네트워크 튜닝 desired-state ({sysctl:{...}, rps:[...]}). apply 시 저장.
+        "net_tuning":      r.get("net_tuning") if isinstance(r.get("net_tuning"), dict) else None,
     }
 
 
@@ -430,6 +432,8 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _apply_ip_config(handler_args, aid, config)
         if action == "apply-mounts" and method == "POST":
             return await _apply_mounts(handler_args, aid, config)
+        if action == "apply-net-tuning" and method == "POST":
+            return await _apply_net_tuning(handler_args, aid, config)
         if action == "health-check" and method == "POST":
             return await _agent_health_check(handler_args, aid, config)
         if action == "interface-roles" and method == "PUT":
@@ -957,6 +961,58 @@ async def _apply_mounts(handler_args: HandlerArgs, aid: int, config):
     await asyncio.to_thread(_reconcile_stored_mounts, config, aid, mounts_in)
     return HandlerResult(status=200,
                          body={"agent_id": aid, "mounts": len(mounts_in), **(resp or {})},
+                         media_type="application/json")
+
+
+# net.core.* 성능 sysctl allowlist (agent cims-priv 와 동일 — UI/검증 일관성).
+_NET_TUNING_SYSCTL_KEYS = (
+    "net.core.netdev_max_backlog", "net.core.netdev_budget", "net.core.netdev_budget_usecs",
+    "net.core.rmem_max", "net.core.wmem_max", "net.core.rmem_default", "net.core.wmem_default",
+    "net.core.optmem_max", "net.core.somaxconn",
+)
+
+async def _apply_net_tuning(handler_args: HandlerArgs, aid: int, config):
+    """NetTuningPanel 진입점 — 서버별 네트워크 튜닝(RPS + sysctl) 저장 + agent job 큐잉.
+
+    Request body: { "sysctl": {key: value, ...}, "rps": [{iface, cpus}, ...] }
+    agent 가 sysctl 은 /etc/sysctl.d 로 영속, RPS 는 sysfs 적용 + 부팅 재적용.
+    저장(agent.net_tuning, desired-state) 후 'apply_net_tuning' job 큐잉(heartbeat pickup).
+    """
+    row = await asyncio.to_thread(_agent_load, config, aid)
+    if not row:
+        return HandlerResult(status=404, body={"error": "agent_not_found"}, media_type="application/json")
+
+    body_in = _parse_body(handler_args)
+    sysctl_in = body_in.get("sysctl") or {}
+    rps_in    = body_in.get("rps") or []
+    if not isinstance(sysctl_in, dict) or not isinstance(rps_in, list):
+        return HandlerResult(status=400, body={"error": "invalid_body"}, media_type="application/json")
+
+    # sysctl 키 allowlist + 정수값 검증 (백엔드 게이트)
+    clean_sysctl = {}
+    for k, v in sysctl_in.items():
+        if k not in _NET_TUNING_SYSCTL_KEYS:
+            return HandlerResult(status=400, body={"error": "sysctl_key_not_allowed", "key": k},
+                                 media_type="application/json")
+        try:
+            clean_sysctl[k] = int(v)
+        except (TypeError, ValueError):
+            return HandlerResult(status=400, body={"error": "sysctl_value_not_int", "key": k},
+                                 media_type="application/json")
+    clean_rps = []
+    for r in rps_in:
+        iface = (r.get("iface") or "").strip(); cpus = str(r.get("cpus") or "").strip()
+        if not iface or not cpus:
+            return HandlerResult(status=400, body={"error": "rps_iface_cpus_required"},
+                                 media_type="application/json")
+        clean_rps.append({"iface": iface, "cpus": cpus})
+
+    tuning = {"sysctl": clean_sysctl, "rps": clean_rps}
+    await asyncio.to_thread(_agent_update, config, aid, {"net_tuning": tuning})
+    job_id = await asyncio.to_thread(_job_create, config, aid, "apply_net_tuning", tuning)
+    return HandlerResult(status=202,
+                         body={"agent_id": aid, "job_id": job_id, "status": "queued",
+                               "sysctl": len(clean_sysctl), "rps": len(clean_rps)},
                          media_type="application/json")
 
 

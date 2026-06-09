@@ -1415,6 +1415,101 @@ def reapply_managed_ips() -> None:
 
 
 # ──────────────────────────────────────────────────────────────
+#  네트워크 튜닝 — 서버별 RPS(rps_cpus) + sysctl(net.core.*) 적용.
+#  sysctl 은 /etc/sysctl.d/99-cims-net-tuning.conf 로 영속(부팅 시 systemd 적용)이지만
+#  RPS(rps_cpus)는 sysfs 라 재부팅에 소실 → managed_ips 와 동일하게 스냅샷 후 부팅 재적용.
+#  근거: 단일 NIC 큐 + RPS off 시 RX softirq 가 IRQ 코어 1개에 집중 → 고RTP 시 ksoftirqd
+#  포화 → 네트워크 stall. RPS 로 softirq 를 여러 코어로 분산.
+# ──────────────────────────────────────────────────────────────
+_NET_TUNING_FILE = os.path.join(os.path.dirname(_AGENT_DIR), "run", "net_tuning.json")
+
+def job_apply_net_tuning(params: dict) -> tuple:
+    """서버별 네트워크 튜닝 적용. sysctl 은 영속(sysctl.d), RPS 는 스냅샷+부팅 재적용.
+
+    Params: {
+      "sysctl": {"net.core.netdev_max_backlog": 5000, "net.core.netdev_budget": 600, ...},
+      "rps":    [{"iface": "ens4", "cpus": "ff"}, ...]   # cpus = 16진 비트마스크, "0"=비활성
+    }
+    """
+    sysctl = params.get("sysctl") or {}
+    rps    = params.get("rps") or []
+    priv = _resolve_cims_priv()
+    if priv is None:
+        return 1, "[FAIL] cims-priv not found", ""
+    msgs = []; fail = 0
+    for key, val in (sysctl.items() if isinstance(sysctl, dict) else []):
+        cmd = ["sudo", "-n", priv, "net-sysctl", str(key), str(val)]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            out = ((res.stdout or "") + (res.stderr or "")).strip()
+            if res.returncode == 0: msgs.append(f"[OK]   sysctl {key}={val}: {out}")
+            else: fail += 1; msgs.append(f"[FAIL] sysctl {key}={val}: rc={res.returncode} {out[-200:]}")
+        except Exception as e:
+            fail += 1; msgs.append(f"[FAIL] sysctl {key}: {e}")
+    for r in (rps if isinstance(rps, list) else []):
+        iface = (r.get("iface") or "").strip(); cpus = str(r.get("cpus") or "").strip()
+        if not iface or not cpus:
+            msgs.append(f"[DENY] rps {r}: iface/cpus 필요"); fail += 1; continue
+        cmd = ["sudo", "-n", priv, "net-rps", iface, cpus]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            out = ((res.stdout or "") + (res.stderr or "")).strip()
+            if res.returncode == 0: msgs.append(f"[OK]   rps {iface}={cpus}: {out}")
+            else: fail += 1; msgs.append(f"[FAIL] rps {iface}={cpus}: rc={res.returncode} {out[-200:]}")
+        except Exception as e:
+            fail += 1; msgs.append(f"[FAIL] rps {iface}: {e}")
+    # 성공 시 desired-state 스냅샷 (부팅 RPS 재적용용)
+    if fail == 0:
+        _snapshot_net_tuning(params)
+    return (0 if fail == 0 else 1), "\n".join(msgs) or "no net tuning to apply", ""
+
+def _snapshot_net_tuning(params: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(_NET_TUNING_FILE), exist_ok=True)
+        with open(_NET_TUNING_FILE, "w", encoding="utf-8") as f:
+            json.dump({"sysctl": params.get("sysctl") or {}, "rps": params.get("rps") or []},
+                      f, ensure_ascii=False)
+    except Exception as e:
+        print(f"[agent][net] net_tuning snapshot 실패: {e}", flush=True)
+
+def ensure_base_deps() -> None:
+    """vendor 동봉 deb(keepalived·nfs·lib류)를 전 노드에 균일 설치(air-gapped).
+    원칙: 설치는 모든 노드 동일, 실행(서비스 기동)만 config(역할)가 제어 — 기능 미사용
+    노드의 의존성 누락(예: media 서버 libmnl.so.0 없어 ip 깨짐) 류 버그 원천 차단.
+    cims-priv 가 idempotent(이미 정상이면 skip)하므로 부팅 시 1회 호출(정상 노드 no-op).
+    collect_interfaces/route + ip-add 의 전제라 IP 복원보다 먼저 수행."""
+    priv = _resolve_cims_priv()
+    if priv is None:
+        return
+    try:
+        res = subprocess.run(["sudo", "-n", priv, "ensure-base-deps"],
+                             capture_output=True, text=True, timeout=120)
+        out = ((res.stdout or "") + (res.stderr or "")).strip()
+        print(f"[agent][deps] ensure-base-deps rc={res.returncode} {out[:200]}", flush=True)
+    except Exception as e:
+        print(f"[agent][deps] ensure-base-deps 실패: {e}", flush=True)
+
+def reapply_net_tuning() -> None:
+    """부팅 1회 — 저장된 RPS 재적용 (sysctl 은 sysctl.d 가 이미 부팅 시 적용).
+
+    스냅샷 없으면(최초 도입) skip. RPS 만 재적용(rps_cpus 는 sysfs 라 휘발).
+    """
+    if not os.path.exists(_NET_TUNING_FILE):
+        return
+    try:
+        with open(_NET_TUNING_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"[agent][net] net_tuning.json 읽기 실패: {e}", flush=True)
+        return
+    rps = data.get("rps") or []
+    if not rps:
+        return
+    rc, _out, _err = job_apply_net_tuning({"rps": rps})   # sysctl 은 sysctl.d 가 처리 → RPS 만
+    print(f"[agent][net] boot reapply RPS — {len(rps)} iface, rc={rc}", flush=True)
+
+
+# ──────────────────────────────────────────────────────────────
 #  모듈 감독 (watchdog) — 죽은 모듈 auto-restart
 #
 #  desired-state = supervised.json { module: install_path }.
@@ -1941,6 +2036,8 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             rc, out, err = job_apply_ip_config(params)
         elif jt == "apply_mounts":
             rc, out, err = job_apply_mounts(params)
+        elif jt == "apply_net_tuning":
+            rc, out, err = job_apply_net_tuning(params)
         elif jt == "uninstall":
             install_path = params.get("install_path")
             # 감독 해제 (watchdog 가 재시작하지 않도록)
@@ -2056,7 +2153,9 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
+    ensure_base_deps()                 # vendor deb 균일 설치(keepalived/nfs/lib) — 실행은 config 제어. ip/네트워크 수집 전제, idempotent
     reapply_managed_ips()              # 재부팅으로 소실된 cims-managed service IP 자력 복원 (1회, OAM 무관)
+    reapply_net_tuning()               # 재부팅으로 소실된 RPS(rps_cpus) 자력 복원 (1회, sysctl 은 sysctl.d 가 처리)
 
     next_metric = 0
     next_supervise = 0

@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   deploymentApi,
-  type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric,
+  type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentNetTuning,
 } from '../api/deployment'
 import { haGroupsApi, type HaGroup, type VipBinding,
          type FailoverOptions, FAILOVER_DEFAULTS } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { MountPanel } from './ha/MountPanel'
+import { NetTuningPanel } from './ha/NetTuningPanel'
 import { splitPrefixHost } from './ha/helpers'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
@@ -1443,6 +1444,15 @@ function NetworkTab({ agent: a, vipIps }: { agent: Agent; vipIps?: Set<string> }
     finally { setApplying(false) }
   }
 
+  async function onApplyNetTuning(tuning: AgentNetTuning, label: string) {
+    setApplying(true)
+    try {
+      const r = await deploymentApi.applyNetTuning(a.id, tuning)
+      show(`${label} — job #${r.job_id} 큐잉 (sysctl ${r.sysctl}/rps ${r.rps}, agent 적용 대기)`, 'ok')
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setApplying(false) }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
     <ServiceIpPanel
@@ -1461,6 +1471,12 @@ function NetworkTab({ agent: a, vipIps }: { agent: Agent; vipIps?: Set<string> }
       mounts={a.mounts || []}
       applying={applying}
       onApply={onApplyMounts}
+    />
+    <NetTuningPanel
+      title={`${a.name} — 네트워크 튜닝 (RPS / sysctl)`}
+      agent={a}
+      applying={applying}
+      onApply={onApplyNetTuning}
     />
     </div>
   )

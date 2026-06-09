@@ -43,6 +43,27 @@ valid_cidr() {
     return 0
 }
 
+# 네트워크 튜닝 sysctl 키 allowlist — net.core.* / net.ipv4.* 중 안전한 성능 키만 허용.
+# (임의 sysctl 쓰기 차단 — wildcard sudoers 에서도 주입 위험 없도록.)
+NET_SYSCTL_FILE="/etc/sysctl.d/99-cims-net-tuning.conf"
+valid_sysctl_key() {
+    case "$1" in
+        net.core.netdev_max_backlog|net.core.netdev_budget|net.core.netdev_budget_usecs|\
+        net.core.rmem_max|net.core.wmem_max|net.core.rmem_default|net.core.wmem_default|\
+        net.core.optmem_max|net.core.somaxconn|net.core.busy_poll|net.core.busy_read) return 0 ;;
+        *) err "sysctl key not in allowlist: $1"; return 1 ;;
+    esac
+}
+valid_uint() {
+    [[ "$1" =~ ^[0-9]{1,12}$ ]] || { err "invalid uint: $1"; return 1; }
+    return 0
+}
+# rps_cpus 마스크 — 16진 비트마스크(콤마 그룹 허용), 예 "ff", "fff,ffffffff". "0"=비활성.
+valid_rps_mask() {
+    [[ "$1" =~ ^[0-9a-fA-F]+(,[0-9a-fA-F]+)*$ ]] || { err "invalid rps mask: $1"; return 1; }
+    return 0
+}
+
 # ── 액션 ────────────────────────────────────────────
 do_ip_add() {
     local iface="$1" cidr="$2"
@@ -217,6 +238,86 @@ do_mount_del() {
     ok "unmounted + fstab 제거: $target"
 }
 
+do_net_sysctl() {
+    local key="$1" val="$2"
+    valid_sysctl_key "$key" || exit 2
+    valid_uint "$val"       || exit 2
+    # 영속: 관리 conf 에 key 라인 교체(append) — 부팅 시 systemd 가 /etc/sysctl.d 적용.
+    # 기존 conf 에서 이 key 라인과 헤더(#)를 제거 후 재구성. grep 무매칭(빈결과) 시
+    # exit 1 → set -e 중단 방지로 '|| true'. (구버전 버그: 빈 grep 으로 sysctl 미적용)
+    local tmp; tmp="$(mktemp)"
+    {
+        echo "# cims-managed network tuning (auto)"
+        if [[ -f "$NET_SYSCTL_FILE" ]]; then
+            grep -vE "^[[:space:]]*${key//./\\.}[[:space:]]*=|^[[:space:]]*#" "$NET_SYSCTL_FILE" || true
+        fi
+        printf '%s = %s\n' "$key" "$val"
+    } > "$tmp"
+    mv "$tmp" "$NET_SYSCTL_FILE"
+    # 런타임 즉시 적용
+    if sysctl -w "$key=$val" >/dev/null 2>/tmp/cims-priv.err; then
+        ok "sysctl $key=$val (persisted $NET_SYSCTL_FILE)"
+    else
+        err "sysctl -w $key=$val: $(cat /tmp/cims-priv.err 2>/dev/null)"; exit 3
+    fi
+    rm -f /tmp/cims-priv.err
+}
+
+# 모든 vendor offline deb(keepalived·nfs·lib류)를 전 노드에 균일 설치 (air-gapped).
+# 원칙: "설치는 모든 노드 동일, 실행(서비스 기동)만 config(역할)가 제어" — 기능을
+# 안 써서 의존성이 빠진 노드(예: media01 가 HA 미사용이라 libmnl 누락→ip 깨짐) 류
+# 버그 원천 차단. idempotent: 이미 정상(ip+keepalived+mount.nfs 존재)이면 skip 하여
+# 매 부팅 dpkg 재실행/서비스 교란(특히 HA 노드 keepalived flap)을 피한다.
+do_ensure_base_deps() {
+    local need=0
+    "$IP_CMD" -j addr >/dev/null 2>&1                                   || need=1
+    command -v keepalived >/dev/null 2>&1                              || need=1
+    { command -v mount.nfs >/dev/null 2>&1 || [[ -x /sbin/mount.nfs ]]; } || need=1
+    if [[ $need -eq 0 ]]; then
+        ok "base deps 정상 (ip/keepalived/mount.nfs 존재 — 설치 불필요)"
+        return 0
+    fi
+    local debs=()
+    local d
+    for d in "$VENDOR_DIR"/*/*.deb; do [[ -e "$d" ]] && debs+=("$d"); done
+    if [[ ${#debs[@]} -eq 0 ]]; then
+        err "vendor deb 없음 ($VENDOR_DIR) — agent 패키지 vendor/ 확인"; exit 3
+    fi
+    info "base deps 미완비 — vendor offline 균일 설치 (${#debs[@]} deb)"
+    if ! dpkg -i --force-confnew --force-overwrite "${debs[@]}" >/tmp/cims-priv.err 2>&1; then
+        apt-get -y --fix-broken install >/dev/null 2>&1 || true
+        dpkg -i --force-confnew --force-overwrite "${debs[@]}" >/tmp/cims-priv.err 2>&1 || {
+            err "base deps 설치 실패: $(tail -3 /tmp/cims-priv.err 2>/dev/null)"; exit 3
+        }
+    fi
+    # keepalived 는 '설치'만 균일하게. '실행'은 cims-ha(config)가 제어 — config 없는
+    # 노드(비-HA)서 dpkg postinst 자동기동 잔재를 비활성화. config 있으면(HA 노드)
+    # cims-ha 가 관리하므로 건드리지 않음(VIP flap 방지).
+    if [[ ! -f /etc/keepalived/keepalived.conf ]]; then
+        systemctl disable --now keepalived >/dev/null 2>&1 || true
+    fi
+    ok "base deps 설치 완료 (${#debs[@]} deb; keepalived 실행은 config 활성 시 cims-ha 가 기동)"
+    rm -f /tmp/cims-priv.err
+}
+
+do_net_rps() {
+    local iface="$1" mask="$2"
+    valid_iface "$iface"   || exit 2
+    valid_rps_mask "$mask" || exit 2
+    local applied=0 q
+    for q in /sys/class/net/"$iface"/queues/rx-*/rps_cpus; do
+        [[ -e "$q" ]] || continue
+        if echo "$mask" > "$q" 2>/tmp/cims-priv.err; then
+            applied=$((applied+1))
+        else
+            err "rps write $q: $(cat /tmp/cims-priv.err 2>/dev/null)"; exit 3
+        fi
+    done
+    [[ $applied -gt 0 ]] || { err "no rx queues for $iface"; exit 3; }
+    ok "rps_cpus=$mask -> $iface ($applied queue)"
+    rm -f /tmp/cims-priv.err
+}
+
 # ── dispatch ────────────────────────────────────────
 case "${1:-}" in
     ip-add)
@@ -243,11 +344,22 @@ case "${1:-}" in
         [[ $# -eq 2 ]] || { err "usage: cims-priv mount-del <target>"; exit 1; }
         do_mount_del "$2"
         ;;
+    net-sysctl)
+        [[ $# -eq 3 ]] || { err "usage: cims-priv net-sysctl <key> <value>"; exit 1; }
+        do_net_sysctl "$2" "$3"
+        ;;
+    net-rps)
+        [[ $# -eq 3 ]] || { err "usage: cims-priv net-rps <iface> <mask>"; exit 1; }
+        do_net_rps "$2" "$3"
+        ;;
+    ensure-base-deps)
+        do_ensure_base_deps
+        ;;
     version)
-        echo "cims-priv 0.3.0"
+        echo "cims-priv 0.6.0"
         ;;
     *)
-        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|version} ..."
+        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|net-sysctl|net-rps|ensure-base-deps|version} ..."
         exit 1
         ;;
 esac

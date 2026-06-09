@@ -143,6 +143,13 @@ export interface Agent {
   service_ip_rows: ServiceIpRow[] | null
   routes: AgentRoute[] | null
   mounts?: AgentMount[] | null
+  net_tuning?: AgentNetTuning | null
+}
+
+// 서버별 네트워크 튜닝 desired-state. sysctl=/etc/sysctl.d 영속, rps=sysfs+부팅 재적용.
+export interface AgentNetTuning {
+  sysctl: Record<string, number>          // net.core.* allowlist
+  rps: Array<{ iface: string; cpus: string }>   // cpus = 16진 비트마스크 ("ff"), "0"=off
 }
 
 // cims-managed 마운트 — fstab 영속(재부팅 시 OS 자동 마운트). agent heartbeat 보고(mounted 상태 포함).
@@ -469,6 +476,9 @@ export const deploymentApi = {
                   mounts: Array<{ op: 'add'|'del'; fstype?: string; source?: string; target: string; options?: string }>) =>
     api.post<{ agent_id: number; mounts: number; ok: boolean; rc: number;
                stdout: string; stderr: string }>(`/agents/${id}/apply-mounts`, { mounts }),
+  applyNetTuning: (id: number, tuning: { sysctl: Record<string, number>; rps: Array<{ iface: string; cpus: string }> }) =>
+    api.post<{ agent_id: number; job_id: number; status: string; sysctl: number; rps: number }>(
+      `/agents/${id}/apply-net-tuning`, tuning),
   getAgentJob:   (agentId: number, jobId: number) =>
     api.get<AgentJob>(`/agents/${agentId}/jobs/${jobId}`),
   agentMetrics:  (id: number) => api.get<{ items: AgentMetric[] }>(`/agents/${id}/metrics`),
