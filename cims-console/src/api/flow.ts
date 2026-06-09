@@ -38,10 +38,13 @@ export const flowApi = {
     const q = date ? `?date=${date}` : ''
     return api.getCached(`/flow/list${q}`, 4000)
   },
-  get(callId: string, date?: string, callType?: string): Promise<FlowResponse> {
+  get(callId: string, date?: string, callType?: string, hour?: string): Promise<FlowResponse> {
     const params = new URLSearchParams()
     if (date) params.set('date', date)
     if (callType) params.set('call_type', callType)
+    // hour: 선택 호의 invite_time 에서 도출 — .d 디렉터리 탐색을 해당 시간으로 좁혀 빠르게.
+    //   (서버는 추가로 call.json 시간창으로 메시지 읽기를 5분 버킷까지 좁힌다.)
+    if (hour) params.set('hour', hour)
     const q = params.toString() ? `?${params.toString()}` : ''
     // 호별 메시지 흐름은 종료된 호면 불변 → 재오픈/리렌더 시 재요청 회피(10s 캐시 + in-flight 중복제거).
     return api.getCached(`/flow/${encodeURIComponent(callId)}${q}`, 10000)

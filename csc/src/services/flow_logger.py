@@ -22,7 +22,7 @@ import struct
 import glob as _glob
 import logging
 import time as _time
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs, unquote
 
 from httpsrv.handler import HandlerArgs, HandlerResult
@@ -153,6 +153,60 @@ def _parse_date(s: str) -> str:
 def _date_parts(date_str: str):
     d = _parse_date(date_str)
     return d[:4], d[5:7], d[8:10]
+
+
+# ── 선택 호 시간창 → 5분 버킷 스코프 ──────────────────────────────
+#  선택된 호는 자기 위치를 안다: .d 경로가 YYYY/MM/DD/HH 를, call.json 이
+#  invite_time/end_time 을 가짐 → 읽을 5분 버킷(mm5)을 정확히 도출.
+#  이를 readers 에 넘겨 하루 24시간(수백 파일) 스캔 대신 해당 1~수개 버킷만 읽는다.
+#  (사용자 요청: "호 시각 → 5분 버킷 직접 타겟". hour 파라미터 불필요화.)
+def _parse_log_dt(s: str):
+    """ISO(2026-06-06T23:34:26[.us]) 또는 공백 구분 → datetime. 실패 시 None."""
+    if not s or not isinstance(s, str):
+        return None
+    s = s.strip().replace("T", " ")
+    s = s.split("+")[0].split("Z")[0].strip()  # tz 제거
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(s[:26], fmt)
+        except Exception:
+            continue
+    return None
+
+def _window_scope(call_json: dict):
+    """call.json 의 invite_time~end_time(+여유) 가 걸치는 (date,hour,buckets) 스코프.
+
+    반환: [{"date":"YYYY-MM-DD","hour":"HH","buckets":{"30","35",...}}, ...]
+    실패/과도(>6h, 비정상 호 방어) 시 None → 호출측이 legacy(hour/24h) 로 폴백.
+    """
+    if not isinstance(call_json, dict):
+        return None
+    start = _parse_log_dt(call_json.get("invite_time") or call_json.get("start_time"))
+    if not start:
+        return None                      # 시작 시각 없으면 스코프 불가 → legacy
+    end = _parse_log_dt(call_json.get("end_time"))
+    if not end:
+        # 종료시각 없음(진행 중·미완 호): duration 있으면 사용, 없으면 1h bounded 폴백.
+        #   (start-only 면 장기 호 메시지 누락, 24h 면 느림 → 1h 가 절충: 정상 호 전부 포함 + 12× 축소)
+        dur = call_json.get("duration")
+        if isinstance(dur, (int, float)) and dur > 0:
+            end = start + timedelta(seconds=min(dur, 6 * 3600))
+        else:
+            end = start + timedelta(hours=1)
+    if end < start:
+        end = start
+    end = end + timedelta(seconds=90)   # BYE/200 OK 지연 + 다음 버킷 경계 여유
+    if (end - start).total_seconds() > 6 * 3600:
+        return None                      # 비정상적으로 긴 창 → legacy(안전)
+    scope: dict = {}
+    cur = start.replace(minute=(start.minute // 5) * 5, second=0, microsecond=0)
+    step = timedelta(minutes=5)
+    guard = 0
+    while cur <= end and guard < 200:
+        key = (cur.strftime("%Y-%m-%d"), cur.strftime("%H"))
+        scope.setdefault(key, set()).add(cur.strftime("%M"))
+        cur += step; guard += 1
+    return [{"date": d, "hour": h, "buckets": b} for (d, h), b in scope.items()]
 
 
 def _find_all_d_dirs(date_str: str, hour: str = None, call_type: str = None) -> list:
@@ -729,26 +783,43 @@ def _load_session_json(d_dir: str) -> dict:
     return {}
 
 
-def _resolve_flow_paths(date_str: str, hour: str, service: str) -> list:
+def _resolve_flow_paths(date_str: str, hour: str, service: str, scope: list = None) -> list:
     """통합 flow.jsonl 경로 목록 반환 (모든 노드)
 
     New: {ServiceLogDir}/YYYY/MM/DD/HH/{node_id}.flow.jsonl (csp_01.flow.jsonl, cmp_01.flow.jsonl)
     Legacy: {ServiceLogDir}/YYYY/MM/DD/HH/{system_id}_{service}.flow.jsonl
+    scope 주어지면 [{date,hour,buckets}] 의 해당 5분 버킷 flow 파일만 (선택 호 정밀 조회).
     """
     if not _sip_log_dir and not _calls_dir:
         return []
-    yyyy, mm, dd = _date_parts(date_str)
-    hours = [hour.zfill(2)] if hour else [f"{h:02d}" for h in range(24)]
+    # 읽을 (yyyy,mm,dd,hh, buckets) 목록
+    slots = []
+    if scope:
+        for ent in scope:
+            y, m, d = _date_parts(ent["date"])
+            slots.append((y, m, d, ent["hour"].zfill(2), ent.get("buckets")))
+    else:
+        yyyy, mm, dd = _date_parts(date_str)
+        hours = [hour.zfill(2)] if hour else [f"{h:02d}" for h in range(24)]
+        for hh in hours:
+            slots.append((yyyy, mm, dd, hh, None))
     paths = []
-    for hh in hours:
+    for yyyy, mm, dd, hh, buckets in slots:
         base_dir = os.path.join(_calls_dir, yyyy, mm, dd, hh) if _calls_dir else ""
 
         if base_dir:
             # 1) New 통합: {node_id}.flow.jsonl (와일드카드로 모든 노드)
             #    + 5분 버킷 파일 {node_id}.flow.{mm5}.jsonl (open-per-write 전환) 도 함께 수집.
             import glob
-            found_new = sorted(glob.glob(os.path.join(base_dir, "*.flow.jsonl")) +
-                               glob.glob(os.path.join(base_dir, "*.flow.[0-9][0-9].jsonl")))
+            if buckets:
+                bucket_files = []
+                for b in sorted(buckets):
+                    bucket_files += glob.glob(os.path.join(base_dir, f"*.flow.{b}.jsonl"))
+                found_new = sorted(set(bucket_files +
+                                       glob.glob(os.path.join(base_dir, "*.flow.jsonl"))))
+            else:
+                found_new = sorted(glob.glob(os.path.join(base_dir, "*.flow.jsonl")) +
+                                   glob.glob(os.path.join(base_dir, "*.flow.[0-9][0-9].jsonl")))
             if found_new:
                 paths.extend(found_new)
                 continue
@@ -902,56 +973,83 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
     return ""
 
 
-def _extract_sesids_from_msg_jsonl(call_ids: list, date_str: str, hour: str = None) -> set:
+def _msg_globs_for(base: str, buckets=None) -> list:
+    """base 디렉터리에서 읽을 sip msg 파일 목록.
+    buckets(mm5 set) 주어지면 해당 5분 버킷 파일만(+legacy 무버킷), 아니면 시간 전체.
+    """
+    pats = []
+    if buckets:
+        for b in sorted(buckets):
+            pats.append(f"*_sip.msg.{b}.jsonl")
+        pats += ["*_sip.msg.jsonl", "*_sip.jsonl"]   # 구 무버킷(시간당) 파일도 포함
+    else:
+        pats = ["*_sip.msg.jsonl", "*_sip.msg.[0-9][0-9].jsonl", "*_sip.jsonl"]
+    out = []
+    for pat in pats:
+        out.extend(_glob.glob(os.path.join(base, pat)))
+    return sorted(set(out))
+
+def _extract_sesids_from_msg_jsonl(call_ids: list, date_str: str, hour: str = None,
+                                   scope: list = None) -> set:
     """sip msg.jsonl 의 raw SIP 메시지에서 Call-ID 가 매칭되는 라인의 sesid 추출.
 
     flow.jsonl 의 SIP 라인에는 call_id/subid 가 없으므로 (caller/callee/sesid/method 만),
     raw SIP body 가 들어있는 msg.jsonl 에서 Call-ID 매칭 후 sesid 모음. 이후 sesid 기반
     으로 flow.jsonl 필터링 → VoLTE 호의 다른 PTT 메시지 섞임 방지.
+
+    scope 주어지면 [{date,hour,buckets}] 의 해당 5분 버킷 파일만 읽음 (선택 호 정밀 조회).
     """
     if not _calls_dir or not call_ids:
         return set()
     sesids: set = set()
-    yyyy, mm, dd = _date_parts(date_str)
-    hours = [hour.zfill(2)] if hour else [f"{h:02d}" for h in range(24)]
-    for hh in hours:
-        base = os.path.join(_calls_dir, yyyy, mm, dd, hh)
+    # 읽을 (base_dir, buckets) 목록 구성
+    targets = []
+    if scope:
+        for ent in scope:
+            yyyy, mm, dd = _date_parts(ent["date"])
+            base = os.path.join(_calls_dir, yyyy, mm, dd, ent["hour"].zfill(2))
+            targets.append((base, ent.get("buckets")))
+    else:
+        yyyy, mm, dd = _date_parts(date_str)
+        hours = [hour.zfill(2)] if hour else [f"{h:02d}" for h in range(24)]
+        for hh in hours:
+            targets.append((os.path.join(_calls_dir, yyyy, mm, dd, hh), None))
+    for base, buckets in targets:
         if not os.path.isdir(base):
             continue
-        # csp_*_sip.msg.jsonl + 5분 버킷 *_sip.msg.{mm5}.jsonl(open-per-write), fallback msg.jsonl
-        for pat in ("*_sip.msg.jsonl", "*_sip.msg.[0-9][0-9].jsonl", "*_sip.jsonl"):
-            for path in _glob.glob(os.path.join(base, pat)):
-                try:
-                    with open(path, 'r') as f:
-                        for line in f:
-                            if not any(cid in line for cid in call_ids):
-                                continue
-                            try:
-                                obj = json.loads(line)
-                            except Exception:
-                                continue
-                            s = obj.get("sesid", "")
-                            if s:
-                                sesids.add(s)
-                except Exception:
-                    pass
+        for path in _msg_globs_for(base, buckets):
+            try:
+                with open(path, 'r') as f:
+                    for line in f:
+                        if not any(cid in line for cid in call_ids):
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except Exception:
+                            continue
+                        s = obj.get("sesid", "")
+                        if s:
+                            sesids.add(s)
+            except Exception:
+                pass
     return sesids
 
 
 def _search_sip_messages(call_ids: list, date_str: str, hour: str = None,
                          service: str = "volte",
-                         sesid_set: set = None) -> list:
+                         sesid_set: set = None, scope: list = None) -> list:
     """서비스별 flow.jsonl 에서 SIP 메시지 검색 (compact, body 없음).
 
     flow.jsonl 의 SIP 라인에는 Call-ID 필드가 없고 sesid/caller/callee/method 만 있음.
     `sesid_set` 가 주어지면 그것으로 매칭 (정확). 그렇지 않으면 substring fallback.
+    scope: 선택 호 5분 버킷 정밀 조회용.
     """
     if not _sip_log_dir:
         return []
 
     results = []
     call_id_set = set(call_ids or [])
-    flow_paths = _resolve_flow_paths(date_str, hour, service)
+    flow_paths = _resolve_flow_paths(date_str, hour, service, scope=scope)
 
     for jsonl_path in flow_paths:
         try:
@@ -988,7 +1086,7 @@ def _search_sip_messages(call_ids: list, date_str: str, hour: str = None,
 def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                          time_start: str = "", time_end: str = "",
                          call_type: str = "volte",
-                         sesid_set: set = None) -> list:
+                         sesid_set: set = None, scope: list = None) -> list:
     """서비스별 flow.jsonl에서 CMP(proto=JSON)/CSC(proto=CSC) 메시지 검색.
 
     필터 정책 — CSC 는 디버깅 데이터 액세스 계층이므로 **세션 식별 (sesid)
@@ -1005,7 +1103,7 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
     # Map call_type to service for flow file selection
     service = "volte" if call_type.startswith("volte") else "ptt"
     results = []
-    flow_paths = _resolve_flow_paths(date_str, hour, service)
+    flow_paths = _resolve_flow_paths(date_str, hour, service, scope=scope)
 
     for jsonl_path in flow_paths:
         try:
@@ -1113,6 +1211,10 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
     initiator = call_json.get("initiator", "") if call_json else ""
     callee = call_json.get("callee", "") if call_json else ""
 
+    # 선택 호 정밀 조회: call.json 시간창(invite_time~end_time)으로 읽을 5분 버킷 스코프 도출.
+    #   → hour 파라미터/24h 스캔 불필요(호 자체가 위치를 결정). 도출 실패 시 None(legacy 폴백).
+    scope = _window_scope(call_json) if call_json else None
+
     # session.json에서 Call-ID 목록 로드 (B2BUA: 2개, Proxy: 1개)
     session = _load_session_json(d_dir)
     call_ids = session.get("call_ids", [])
@@ -1130,11 +1232,11 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
     # 호의 sesid set 추출 — flow.jsonl 의 SIP 라인에는 Call-ID 없으므로 raw SIP
     # 메시지가 들어있는 msg.jsonl 에서 Call-ID 매칭 라인의 sesid 모음.
     # B2BUA 호는 양 leg 의 sesid 가 달라 둘 다 포함됨 (call_ids 가 2개라).
-    sesid_set = _extract_sesids_from_msg_jsonl(call_ids, date_str, hour)
+    sesid_set = _extract_sesids_from_msg_jsonl(call_ids, date_str, hour, scope=scope)
 
     # SIP 메시지 검색 (sesid 매칭 우선, fallback substring)
     sip_msgs = _search_sip_messages(call_ids, date_str, hour,
-                                     service="volte", sesid_set=sesid_set)
+                                     service="volte", sesid_set=sesid_set, scope=scope)
 
     # sesid_set 보강 — flow.jsonl SIP 라인의 sesid 도 추가 (msg.jsonl 누락 대비)
     for m in sip_msgs:
@@ -1162,7 +1264,7 @@ def _build_flow_from_sip_log(d_dir: str, date_str: str, hour: str = None) -> lis
     # CMP 메시지 검색: sesid 우선, 없으면 시간 범위 fallback
     ct = call_json.get("call_type", "volte") if call_json else "volte"
     cmp_msgs = _search_cmp_messages(call_ids, date_str, hour, time_start, time_end, ct,
-                                     sesid_set=sesid_set if sesid_set else None)
+                                     sesid_set=sesid_set if sesid_set else None, scope=scope)
 
     # FlowMessage 형식으로 변환
     messages = []

@@ -128,7 +128,9 @@ export default function VolteHistoryPage() {
     setFlowByCall(prev => { const m = new Map(prev); m.set(key, { messages: [], loading: true, loaded: false }); return m })
     try {
       const date = l.invite_time?.substring(0, 10) || undefined
-      const r = await flowApi.get(l.call_id, date, 'volte')
+      // invite_time(2026-06-06T23:34:..) → hour "23": .d 탐색을 해당 시간으로 좁힘.
+      const hour = l.invite_time && l.invite_time.length >= 13 ? l.invite_time.substring(11, 13) : undefined
+      const r = await flowApi.get(l.call_id, date, 'volte', hour)
       // 노드 그룹 키(_node)를 각 메시지에 부여 — 백엔드의 노드 분류(csp/cmp/csc)를 보존해
       //   헤더 뱃지로 노드별 필터링 가능하게 한다. (CSP↔CMP 메시지는 CSP·CMP 양 관점이 각각 들어옴.)
       const msgs: FlowMessage[] = r.nodes
