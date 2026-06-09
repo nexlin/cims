@@ -2,32 +2,26 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Pencil, Trash2, Check, X } from 'lucide-react'
 import { usersApi, type UserSummary, type Subscription, type UserInput } from '../../../api/users'
 import { orgApi, type Organization } from '../../../api/organizations'
-import { groupsApi, type Group, type Member } from '../../../api/groups'
 import OrgTreePanel from '../../../components/OrgTreePanel'
 import { DataTable, type Column } from '../../../components/DataTable'
-import SubscriberPicker, { buildPickIndex, type PickItem } from '../../../components/SubscriberPicker'
 import { useToast } from '../../../components/Toast'
 import { useAuth } from '../../../contexts/AuthContext'
 import {
-  canWriteConfig, canAssignRole, canCreateGroup, canManageGroup, hasRole,
-  ROLE_LABELS, ASSIGNABLE_ROLES,
+  canWriteConfig, canAssignRole, ROLE_LABELS, ASSIGNABLE_ROLES,
 } from '../../../utils/permissions'
 
-// ── 통합 프로비저닝 워크벤치 ──────────────────────────────────
-//  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/번호/PTT그룹 | 우: 상세·편집 드로어.
-//  조직 1회 선택 → 세 탭 모두 그 스코프로 필터. 페이지 횡단 이동 제거.
+// ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
+//  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호 | 행 확장: 번호 상세.
+//  번호는 사용자 종속(child) — 별도 메뉴 없이 사용자 하위로 관리. PTT 그룹은 별도 메뉴.
 
-type Tab = 'users' | 'volte' | 'ptt' | 'groups'
-
-interface GroupExt extends Group { priority?: number; encryption?: boolean; emergency_call?: boolean; video_enabled?: boolean; org_code?: string; session_start?: string | null; session_end?: string | null }
+type Tab = 'users' | 'volte' | 'ptt'
 
 // 번호 탭의 평탄화 행
 interface NumberRow { msisdn: string; svc: 'call' | 'ptt'; user: UserSummary; sub: Subscription }
 
-// 우측 드로어 상태
+// 우측(인라인 확장) 드로어 상태 — 사용자 상세/편집 전용
 type Drawer =
   | { kind: 'user'; mode: 'view' | 'edit' | 'add'; id?: number; rowKey?: string | number }
-  | { kind: 'group'; mode: 'view' | 'edit' | 'add'; id?: string; rowKey?: string | number }
   | null
 
 // 작은 아이콘 액션 버튼 (편집/삭제/저장/취소 공용)
@@ -83,7 +77,6 @@ export default function ProvisioningWorkbenchPage() {
   const { user: me } = useAuth()
   const canWrite = canWriteConfig(me)
   const canRole = canAssignRole(me)
-  const canGroupCreate = canCreateGroup(me)
 
   const [tab, setTab] = useState<Tab>('users')
   const [orgScope, setOrgScope] = useState<string | null>(null)
@@ -92,7 +85,6 @@ export default function ProvisioningWorkbenchPage() {
 
   const [users, setUsers] = useState<UserSummary[]>([])
   const [orgs, setOrgs] = useState<Organization[]>([])
-  const [groups, setGroups] = useState<GroupExt[]>([])
   const [loading, setLoading] = useState(true)
 
   const [selected, setSelected] = useState<Set<string | number>>(new Set())
@@ -133,8 +125,8 @@ export default function ProvisioningWorkbenchPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [u, o, g] = await Promise.all([usersApi.list(), orgApi.list(), groupsApi.list()])
-      setUsers(u); setOrgs(o); setGroups(g as GroupExt[])
+      const [u, o] = await Promise.all([usersApi.list(), orgApi.list()])
+      setUsers(u); setOrgs(o)
     } catch (e: unknown) { show(String(e), 'err') }
     finally { setLoading(false) }
   }, [show])
@@ -147,42 +139,36 @@ export default function ProvisioningWorkbenchPage() {
     return (orgPathOf(orgCode) || '').startsWith(orgScope)
   }, [orgScope, orgPathOf])
 
-  // 가입자 피커 인덱스 (워크벤치 1회 구성 → 공유)
-  const pttIndex = useMemo(() => buildPickIndex(users, 'ptt'), [users])
-  const userIndex = useMemo(() => buildPickIndex(users, 'user'), [users])
-
   // 탭 전환·검색 시 선택 초기화
   useEffect(() => { setSelected(new Set()) }, [tab])
 
   function clearSearch() { setSearch('') }
 
-  // ── 사용자 탭 데이터 ──
+  // 사용자가 가진 번호 중 검색어 매칭 여부 (번호로 사용자 찾기)
+  const userHasNumber = useCallback((u: UserSummary, q: string) =>
+    u.call_subscriptions.some(s => s.id.toLowerCase().includes(q)) ||
+    u.ptt_subscriptions.some(s => s.id.toLowerCase().includes(q)), [])
+
+  // ── 사용자 탭 데이터 (이름·로그인ID·번호로 검색) ──
   const userRows = useMemo(() => {
-    const s = search.trim().toLowerCase()
+    const q = search.trim().toLowerCase()
     return users.filter(u => inScope(u.org_id || '') &&
-      (!s || u.name.toLowerCase().includes(s) || (u.login_id || '').toLowerCase().includes(s)))
-  }, [users, inScope, search])
+      (!q || u.name.toLowerCase().includes(q) || (u.login_id || '').toLowerCase().includes(q) || userHasNumber(u, q)))
+  }, [users, inScope, search, userHasNumber])
 
   // ── 번호 탭 데이터 (VoLTE / PTT 분리) ──
   const buildNumberRows = useCallback((svc: 'call' | 'ptt'): NumberRow[] => {
-    const s = search.trim().toLowerCase()
+    const q = search.trim().toLowerCase()
     const out: NumberRow[] = []
     for (const u of users) {
       if (!inScope(u.org_id || '')) continue
       const subs = svc === 'call' ? u.call_subscriptions : u.ptt_subscriptions
       for (const sub of subs) out.push({ msisdn: sub.id, svc, user: u, sub })
     }
-    return out.filter(r => !s || r.msisdn.toLowerCase().includes(s) || r.user.name.toLowerCase().includes(s))
+    return out.filter(r => !q || r.msisdn.toLowerCase().includes(q) || r.user.name.toLowerCase().includes(q))
   }, [users, inScope, search])
   const volteRows = useMemo(() => buildNumberRows('call'), [buildNumberRows])
   const pttRows = useMemo(() => buildNumberRows('ptt'), [buildNumberRows])
-
-  // ── 그룹 탭 데이터 ──
-  const groupRows = useMemo(() => {
-    const s = search.trim().toLowerCase()
-    return groups.filter(g => (!orgScope || inScope(g.org_code || '')) &&
-      (!s || g.id.toLowerCase().includes(s) || g.name.toLowerCase().includes(s)))
-  }, [groups, orgScope, inScope, search])
 
   // ── 삭제 ──
   async function batchDeleteUsers() {
@@ -194,11 +180,6 @@ export default function ProvisioningWorkbenchPage() {
   async function deleteNumber(r: NumberRow) {
     if (!confirm(`${r.msisdn} 삭제?`)) return
     try { await usersApi.deleteSub(r.user.id, r.svc, r.msisdn); show('삭제', 'ok'); load() }
-    catch (e: unknown) { show(String(e), 'err') }
-  }
-  async function deleteGroup(id: string) {
-    if (!confirm(`그룹 ${id} 삭제?`)) return
-    try { await groupsApi.delete(id); show('삭제', 'ok'); load(); if (drawer?.kind === 'group' && drawer.id === id) setDrawer(null) }
     catch (e: unknown) { show(String(e), 'err') }
   }
 
@@ -275,32 +256,10 @@ export default function ProvisioningWorkbenchPage() {
   ]
   const pttCols: Column<NumberRow>[] = [...numberBaseCols, numberActCol]
 
-  const groupCols: Column<GroupExt>[] = [
-    { key: 'name', header: '그룹명', sortable: true, render: g => (
-      <span><span style={{ fontWeight: 600 }}>{g.name}</span>
-        {g.encryption && <span className="badge badge--green" style={{ fontSize: 9, marginLeft: 4 }}>암호</span>}
-        {g.emergency_call && <span className="badge badge--red" style={{ fontSize: 9, marginLeft: 2 }}>긴급</span>}
-        {g.video_enabled && <span className="badge badge--blue" style={{ fontSize: 9, marginLeft: 2 }}>영상</span>}
-      </span>
-    ) },
-    { key: 'id', header: 'ID', width: 130, sortable: true, render: g => <span className="ts">{g.id}</span> },
-    { key: 'type', header: '타입', width: 90, render: g => <span className="ts">{g.group_type || 'prearranged'}</span> },
-    { key: 'priority', header: '우선', width: 56, align: 'center', sortable: true, sortValue: g => g.priority ?? 5, render: g => g.priority ?? 5 },
-    { key: 'owner', header: '소유자', width: 110, render: g => <span className="ts">{g.authorized_user_name || g.authorized_user || '—'}</span> },
-    { key: 'members', header: '멤버', width: 64, align: 'center', render: g => <span className="ts">{g.members?.length ?? 0}명</span> },
-    { key: 'act', header: '', width: 84, align: 'right', render: g => canManageGroup(me, g.authorized_user_id) ? (
-      <span className="actions" onClick={e => e.stopPropagation()}>
-        <IconBtn title="편집" onClick={() => setDrawer({ kind: 'group', mode: 'edit', id: g.id, rowKey: g.id })}><Pencil size={ICON} /></IconBtn>
-        <IconBtn title="삭제" tone="danger" onClick={() => deleteGroup(g.id)}><Trash2 size={ICON} /></IconBtn>
-      </span>
-    ) : <span className="ts">—</span> },
-  ]
-
   const TABS: Array<{ k: Tab; label: string; count: number }> = [
     { k: 'users', label: '사용자', count: userRows.length },
     { k: 'volte', label: 'VoLTE 번호', count: volteRows.length },
     { k: 'ptt', label: 'PTT 번호', count: pttRows.length },
-    { k: 'groups', label: 'PTT 그룹', count: groupRows.length },
   ]
 
   // 사용자 인라인 추가 행 (DataTable footer 로 렌더, 체크박스 컬럼 포함 8셀)
@@ -330,12 +289,9 @@ export default function ProvisioningWorkbenchPage() {
     </tr>
   ) : undefined
 
-  // 상세/편집 블록 공용 props (drawer 가 있을 때만 — 행 확장/추가 블록에서 사용)
-  const detailProps: DrawerProps | null = drawer ? {
-    drawer, onClose: () => setDrawer(null), onSaved: () => { setDrawer(null); load() }, reload: load,
-    users, orgs, groups, me, canWrite, canRole, canGroupCreate,
-    pttIndex, userIndex, orgPathOf, orgScope,
-  } : null
+  // 사용자 상세(번호 테이블) 인라인 확장 props
+  const detailUser = drawer?.kind === 'user' && drawer.mode !== 'add' && drawer.id != null
+    ? users.find(u => u.id === drawer.id) : undefined
 
   return (
     <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', height: 'calc(100vh - 92px)' }}>
@@ -372,51 +328,34 @@ export default function ProvisioningWorkbenchPage() {
               <button className="btn btn--primary btn--sm" onClick={startAddUser}>＋ 사용자</button>
             </>}
             {(tab === 'volte' || tab === 'ptt') && canWrite && (
-              <button className="btn btn--primary btn--sm" onClick={() => setDrawer({ kind: 'user', mode: 'add' })}>＋ 사용자(번호)</button>
-            )}
-            {tab === 'groups' && canGroupCreate && (
-              <button className="btn btn--primary btn--sm" onClick={() => setDrawer({ kind: 'group', mode: 'add' })}>＋ 그룹</button>
+              <button className="btn btn--outline btn--sm" onClick={() => setTab('users')}>번호는 사용자 탭에서 등록</button>
             )}
           </span>
         </div>
 
-        {/* 추가(add)는 펼칠 행이 없으므로 테이블 위 블록으로 */}
-        {detailProps && detailProps.drawer.mode === 'add' && (
-          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
-            <DetailBlock {...detailProps} />
-          </div>
-        )}
-
-        {/* 테이블 (패널 잔여 높이 채움 + 자체 스크롤). 선택 행 바로 아래 상세/편집 인라인 확장 */}
+        {/* 테이블 (패널 잔여 높이 채움 + 자체 스크롤). 선택 행 바로 아래 번호 상세 인라인 확장 */}
         {tab === 'users' && (
           <DataTable<UserSummary> columns={userCols} rows={userRows} rowKey={u => u.id} loading={loading}
             selectable={canWrite} selected={selected} onSelectChange={setSelected}
             onRowClick={u => { if (editUserId !== u.id) toggleDrawer({ kind: 'user', mode: 'view', id: u.id, rowKey: u.id }) }}
-            expandedKey={drawer?.kind === 'user' && drawer.mode !== 'add' ? (drawer.rowKey ?? drawer.id ?? null) : null}
-            renderExpanded={detailProps ? () => <DetailBlock {...detailProps} /> : undefined}
+            expandedKey={detailUser ? (drawer!.rowKey ?? drawer!.id ?? null) : null}
+            renderExpanded={detailUser ? () => <UserNumbers user={detailUser} users={users} onReload={load} /> : undefined}
             footer={userAddRow}
             pageSize={50} emptyText="사용자 없음" />
         )}
         {tab === 'volte' && (
           <DataTable<NumberRow> columns={volteCols} rows={volteRows} rowKey={r => r.msisdn} loading={loading}
             onRowClick={r => toggleDrawer({ kind: 'user', mode: 'view', id: r.user.id, rowKey: r.msisdn })}
-            expandedKey={drawer?.kind === 'user' && drawer.mode !== 'add' ? (drawer.rowKey ?? null) : null}
-            renderExpanded={detailProps ? () => <DetailBlock {...detailProps} /> : undefined}
+            expandedKey={detailUser ? (drawer!.rowKey ?? null) : null}
+            renderExpanded={detailUser ? () => <UserNumbers user={detailUser} users={users} onReload={load} /> : undefined}
             pageSize={50} emptyText="VoLTE 번호 없음" />
         )}
         {tab === 'ptt' && (
           <DataTable<NumberRow> columns={pttCols} rows={pttRows} rowKey={r => r.msisdn} loading={loading}
             onRowClick={r => toggleDrawer({ kind: 'user', mode: 'view', id: r.user.id, rowKey: r.msisdn })}
-            expandedKey={drawer?.kind === 'user' && drawer.mode !== 'add' ? (drawer.rowKey ?? null) : null}
-            renderExpanded={detailProps ? () => <DetailBlock {...detailProps} /> : undefined}
+            expandedKey={detailUser ? (drawer!.rowKey ?? null) : null}
+            renderExpanded={detailUser ? () => <UserNumbers user={detailUser} users={users} onReload={load} /> : undefined}
             pageSize={50} emptyText="PTT 번호 없음" />
-        )}
-        {tab === 'groups' && (
-          <DataTable<GroupExt> columns={groupCols} rows={groupRows} rowKey={g => g.id} loading={loading}
-            onRowClick={g => toggleDrawer({ kind: 'group', mode: 'view', id: g.id, rowKey: g.id })}
-            expandedKey={drawer?.kind === 'group' && drawer.mode !== 'add' ? (drawer.rowKey ?? drawer.id ?? null) : null}
-            renderExpanded={detailProps ? () => <DetailBlock {...detailProps} /> : undefined}
-            pageSize={50} emptyText="그룹 없음" />
         )}
       </div>
 
@@ -427,36 +366,8 @@ export default function ProvisioningWorkbenchPage() {
 }
 
 // ════════════════════════════════════════════════════════════
-//  우측 드로어 — 사용자 / 그룹 편집·추가
+//  사용자 번호 상세 (행 확장) — 단일 번호 테이블 (VoLTE+PTT 통합)
 // ════════════════════════════════════════════════════════════
-interface DrawerProps {
-  drawer: NonNullable<Drawer>
-  onClose: () => void
-  onSaved: () => void
-  reload: () => void
-  users: UserSummary[]
-  orgs: Organization[]
-  groups: GroupExt[]
-  me: ReturnType<typeof useAuth>['user']
-  canWrite: boolean
-  canRole: boolean
-  canGroupCreate: boolean
-  pttIndex: PickItem[]
-  userIndex: PickItem[]
-  orgPathOf: (code: string) => string
-  orgScope: string | null
-}
-
-// 선택 행 바로 아래(또는 추가 시 테이블 위)에 인라인 렌더되는 상세/편집 블록 (헤더·닫기 없음 — 행 재클릭으로 토글)
-function DetailBlock(p: DrawerProps) {
-  return (
-    <div style={{ padding: '10px 16px' }}>
-      {p.drawer.kind === 'user'
-        ? <UserDrawer key={`u${p.drawer.id ?? 'new'}`} {...p} />
-        : <GroupDrawer key={`g${p.drawer.id ?? 'new'}`} {...p} />}
-    </div>
-  )
-}
 
 // 서비스 카탈로그 항목 — ref(access_services 이름) + 그 서비스의 svc(call=VoLTE / ptt=PTT)
 interface ServiceCat { svc: 'call' | 'ptt'; ref: string }
@@ -473,13 +384,14 @@ function buildServiceCatalog(users: UserSummary[]): ServiceCat[] {
   return cat
 }
 
-// ── 사용자 확장 영역 = 단일 번호 테이블 (서비스 선택이 VoLTE/PTT 유형을 결정) ──
-function UserDrawer(p: DrawerProps) {
-  const existing = p.drawer.kind === 'user' && p.drawer.id != null
-    ? p.users.find(u => u.id === p.drawer.id) : undefined
-  const catalog = useMemo(() => buildServiceCatalog(p.users), [p.users])
-  if (!existing) return null
-  return <NumbersTable user={existing} catalog={catalog} onReload={p.reload} />
+// 행 확장 영역 = 단일 번호 테이블 (서비스 선택이 VoLTE/PTT 유형을 결정)
+function UserNumbers({ user, users, onReload }: { user: UserSummary; users: UserSummary[]; onReload: () => void }) {
+  const catalog = useMemo(() => buildServiceCatalog(users), [users])
+  return (
+    <div style={{ padding: '10px 16px' }}>
+      <NumbersTable user={user} catalog={catalog} onReload={onReload} />
+    </div>
+  )
 }
 
 // VoLTE/PTT 유형 배지 (모듈 레벨 — 렌더 중 컴포넌트 생성 회피)
@@ -601,121 +513,6 @@ function NumbersTable({ user, catalog, onReload }: { user: UserSummary; catalog:
       )}
     </div>
   )
-}
-
-// ── 그룹 드로어 (속성 + 멤버 피커) ──
-function GroupDrawer(p: DrawerProps) {
-  const { show } = useToast()
-  const existing = p.drawer.kind === 'group' && p.drawer.id != null
-    ? p.groups.find(g => g.id === p.drawer.id) : undefined
-  const canManage = canManageGroup(p.me, existing?.authorized_user_id)
-  const isNew = p.drawer.mode === 'add'
-  const allowOwner = hasRole(p.me, 'manager') || (isNew && p.canGroupCreate)
-  const [editing, setEditing] = useState(p.drawer.mode !== 'view')
-
-  const [form, setForm] = useState<Partial<GroupExt>>(() => existing
-    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, video_enabled: existing.video_enabled, org_code: existing.org_code || '', session_start: existing.session_start || '', session_end: existing.session_end || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type }
-    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null })
-
-  const [members, setMembers] = useState<Member[]>([])
-  const existingId = existing?.id
-  useEffect(() => {
-    if (existingId) groupsApi.listMembers(existingId).then(setMembers).catch(() => setMembers([]))
-  }, [existingId])
-
-  async function save() {
-    if (!form.name || (isNew && !form.id)) { show('ID/이름 필수', 'err'); return }
-    const body = { ...form }
-    if (body.session_start === '') body.session_start = null
-    if (body.session_end === '') body.session_end = null
-    try {
-      if (existing) { await groupsApi.update(existing.id, body as Partial<Group>); show('저장', 'ok'); setEditing(false); p.reload() }
-      else { await groupsApi.create(body as Group); show('저장', 'ok'); p.onSaved() }
-    } catch (e: unknown) { show(String(e), 'err') }
-  }
-  async function addMember(it: PickItem) {
-    if (!existing) return
-    try { await groupsApi.addMember(existing.id, { user_id: it.value, priority: 5 }); show('멤버 추가', 'ok'); groupsApi.listMembers(existing.id).then(setMembers); p.reload() }
-    catch (e: unknown) { show(String(e), 'err') }
-  }
-  async function removeMember(uid: string) {
-    if (!existing) return
-    try { await groupsApi.removeMember(existing.id, uid); show('삭제', 'ok'); groupsApi.listMembers(existing.id).then(setMembers); p.reload() }
-    catch (e: unknown) { show(String(e), 'err') }
-  }
-
-  const memberIds = useMemo(() => new Set(members.map(m => m.user_id)), [members])
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
-      {/* 그룹 속성은 테이블 컬럼에 이미 표시 — 보기 땐 [편집] 버튼만, 편집 땐 컴팩트 필드 노출 */}
-      {editing ? (
-        <FieldRow>
-          {isNew && <Field label="그룹 ID *" w={130}><input className="form-input" autoFocus value={form.id || ''} onChange={e => setForm({ ...form, id: e.target.value })} /></Field>}
-          <Field label="그룹명 *" w={150}><input className="form-input" value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-          <Field label="타입" w={120}>
-            <select className="form-input" value={form.group_type || 'prearranged'} onChange={e => setForm({ ...form, group_type: e.target.value as GroupExt['group_type'] })}>
-              <option value="prearranged">prearranged</option>
-              <option value="chat">chat</option>
-              <option value="broadcast">broadcast</option>
-            </select>
-          </Field>
-          <Field label="우선순위" w={80}><input className="form-input" type="number" value={form.priority ?? 5} onChange={e => setForm({ ...form, priority: Number(e.target.value) })} /></Field>
-          {allowOwner && <Field label="소유자 ID" w={110}><input className="form-input" type="number" placeholder={isNew && !hasRole(p.me, 'manager') ? '본인' : ''} value={form.authorized_user_id ?? ''} onChange={e => setForm({ ...form, authorized_user_id: e.target.value === '' ? null : Number(e.target.value) })} /></Field>}
-          <Field label="조직 코드" w={150}>
-            <select className="form-input" value={form.org_code || ''} onChange={e => setForm({ ...form, org_code: e.target.value })}>
-              <option value="">없음</option>
-              {p.orgs.map(o => <option key={o.id} value={o.code}>{o.name} ({o.code})</option>)}
-            </select>
-          </Field>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', alignSelf: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.encryption || false} onChange={e => setForm({ ...form, encryption: e.target.checked })} />암호</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.emergency_call || false} onChange={e => setForm({ ...form, emergency_call: e.target.checked })} />긴급</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.video_enabled || false} onChange={e => setForm({ ...form, video_enabled: e.target.checked })} />영상</label>
-          </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <button className="btn btn--sm btn--primary" onClick={save}>저장</button>
-            <button className="btn btn--sm btn--ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</button>
-          </div>
-        </FieldRow>
-      ) : canManage && existing && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="btn btn--sm btn--outline" onClick={() => setEditing(true)}>그룹 속성 편집</button>
-        </div>
-      )}
-
-      {/* 멤버 — 가입자 피커 (항상 그 자리에서 관리) */}
-      {existing && <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-        <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>멤버 ({members.length})</div>
-        {members.map(m => (
-          <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0', fontSize: 12 }}>
-            <span className="ts">{m.user_id} <span style={{ color: 'var(--text-muted)' }}>(P:{m.priority}{m.role === 'chair' ? ', chair' : ''})</span></span>
-            {canManage && <button className="btn btn--sm btn--danger" style={{ padding: '0 6px', fontSize: 10 }} onClick={() => removeMember(m.user_id)}>×</button>}
-          </div>
-        ))}
-        {canManage && (
-          <div style={{ marginTop: 6 }}>
-            <SubscriberPicker kind="ptt" index={p.pttIndex} orgScope={p.orgScope} orgPathOf={p.orgPathOf}
-              exclude={memberIds} onPick={addMember} placeholder="멤버 가입자 검색·선택" />
-          </div>
-        )}
-      </div>}
-    </div>
-  )
-}
-
-// 가로 wrap 레이아웃용 컴팩트 필드. w 지정 없으면 flex-grow.
-function Field({ label, children, w }: { label: string; children: React.ReactNode; w?: number | string }) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 2, width: w, flex: w ? undefined : '1 1 150px', minWidth: 110 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
-      {children}
-    </label>
-  )
-}
-// 필드들을 한 줄(넘치면 다음 줄)로 흐르게 하는 컨테이너
-function FieldRow({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px', alignItems: 'flex-end' }}>{children}</div>
 }
 
 // ── 통합 Excel import 모달 (사용자+VoLTE+PTT) ──

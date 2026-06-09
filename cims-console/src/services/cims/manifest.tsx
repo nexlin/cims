@@ -18,9 +18,7 @@ import { CIMS_OUTPUT_WIDGETS } from './widgets/outputWidgets'
 
 import ProvisioningWorkbenchPage from './pages/ProvisioningWorkbenchPage'
 import OrganizationsPage from './pages/OrganizationsPage'
-import MembersPage from './pages/MembersPage'
-import SubscriptionsPage from './pages/SubscriptionsPage'
-import PttGroupsPage from './pages/PttGroupsPage'
+import PttGroupsWorkbenchPage from './pages/PttGroupsWorkbenchPage'
 import LeakReclaimsPage from './pages/LeakReclaimsPage'
 import AbnormalSessionsPage from './pages/AbnormalSessionsPage'
 import ServiceDescriptorsPage from '../../pages/ServiceDescriptorsPage'  // 코어 페이지 — '구성' 그룹에 배치
@@ -88,11 +86,9 @@ export const cimsManifest: ServiceManifest = {
       defaultPath: '/subscribers/workbench',
       order: 50,
       routes: [
-        { path: '/subscribers/workbench',     title: '통합 관리',       component: ProvisioningWorkbenchPage, requiredRole: 'monitor' },
         { path: '/subscribers/organizations', title: '조직',           component: OrganizationsPage, requiredRole: 'monitor' },
-        { path: '/subscribers/members',       title: '사용자',         component: MembersPage, requiredRole: 'monitor' },
-        { path: '/subscribers/numbers',       title: '번호(VoLTE·PTT)', component: SubscriptionsPage, requiredRole: 'monitor' },
-        { path: '/subscribers/ptt-groups',    title: 'PTT 그룹',       component: PttGroupsPage, requiredRole: 'monitor' },
+        { path: '/subscribers/workbench',     title: '사용자',         component: ProvisioningWorkbenchPage, requiredRole: 'monitor' },
+        { path: '/subscribers/ptt-groups',    title: 'PTT 그룹',       component: PttGroupsWorkbenchPage, requiredRole: 'monitor' },
         { path: '/deploy/service-defs',       title: '서비스 정의',     component: ServiceDescriptorsPage, adminOnly: true },
       ],
     },
