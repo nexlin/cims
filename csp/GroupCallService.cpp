@@ -639,6 +639,12 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             pclsInvite->AddHeader( "P-Preferred-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" );
             // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
             pclsInvite->AddHeader( "Answer-Mode", "Auto" );
+            // Resource-Priority (RFC 4412, TS 24.379) — 긴급/임박 호의 베어러/시그널 우선순위.
+            //   namespace(mcpttp)·level 은 배포 RP 프로비저닝에 맞춰 조정(기본: emergency>imminent).
+            if ( iGroupCond >= 2 )
+                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.4" );
+            else if ( iGroupCond == 1 )
+                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.2" );
             // Callee identity (MCPTT 도메인 사용)
             std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
             char szPCalledParty[256];
