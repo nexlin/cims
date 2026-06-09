@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Pencil, Trash2, Check, X } from 'lucide-react'
+import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown } from 'lucide-react'
 import { usersApi, type UserSummary, type Subscription, type UserInput } from '../../../api/users'
 import { orgApi, type Organization } from '../../../api/organizations'
 import OrgTreePanel from '../../../components/OrgTreePanel'
 import { DataTable, type Column } from '../../../components/DataTable'
+import SubscriberPicker, { buildPickIndex, type PickItem } from '../../../components/SubscriberPicker'
 import { useToast } from '../../../components/Toast'
 import { useAuth } from '../../../contexts/AuthContext'
 import {
@@ -11,7 +12,8 @@ import {
 } from '../../../utils/permissions'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
-//  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호 | 행 확장: 번호 상세.
+//  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
+//  편집은 '행 펼침 상세' 단일 패러다임으로 통일 — 행 클릭 → 상세(기본정보 편집 + 번호 서브테이블).
 //  번호는 사용자 종속(child) — 별도 메뉴 없이 사용자 하위로 관리. PTT 그룹은 별도 메뉴.
 
 type Tab = 'users' | 'volte' | 'ptt'
@@ -19,12 +21,12 @@ type Tab = 'users' | 'volte' | 'ptt'
 // 번호 탭의 평탄화 행
 interface NumberRow { msisdn: string; svc: 'call' | 'ptt'; user: UserSummary; sub: Subscription }
 
-// 우측(인라인 확장) 드로어 상태 — 사용자 상세/편집 전용
-type Drawer =
-  | { kind: 'user'; mode: 'view' | 'edit' | 'add'; id?: number; rowKey?: string | number }
-  | null
+// 펼침 상태 — 어느 행이 펼쳐졌는지(key) + 그 사용자(userId) + 초기 편집모드 + 강조할 번호
+type Expand = { key: string | number; userId: number; edit: boolean; hi?: string } | null
 
-// 작은 아이콘 액션 버튼 (편집/삭제/저장/취소 공용)
+const ICON = 14
+
+// 작은 아이콘 액션 버튼
 function IconBtn({ title, onClick, tone, children }: { title: string; onClick: () => void; tone?: 'primary' | 'danger' | 'default'; children: React.ReactNode }) {
   const cls = tone === 'danger' ? 'btn--danger' : tone === 'primary' ? 'btn--primary' : 'btn--ghost'
   return (
@@ -35,7 +37,13 @@ function IconBtn({ title, onClick, tone, children }: { title: string; onClick: (
     </button>
   )
 }
-const ICON = 14
+
+// 펼침 표시 caret (열림/닫힘)
+function Caret({ open }: { open: boolean }) {
+  return <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
+    {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+  </span>
+}
 
 // 조직 code → 전체 경로 (예: "CIMS > 제1본부 > 팀01")
 function buildOrgPath(orgs: Organization[], code?: string): string {
@@ -72,6 +80,8 @@ function orgIndentedOptions(orgs: Organization[]): Array<{ code: string; label: 
   return out
 }
 
+type OrgOpt = { code: string; label: string }
+
 export default function ProvisioningWorkbenchPage() {
   const { show } = useToast()
   const { user: me } = useAuth()
@@ -88,39 +98,16 @@ export default function ProvisioningWorkbenchPage() {
   const [loading, setLoading] = useState(true)
 
   const [selected, setSelected] = useState<Set<string | number>>(new Set())
-  const [drawer, setDrawer] = useState<Drawer>(null)
   const [importOpen, setImportOpen] = useState(false)
 
-  // 사용자 인라인 셀 편집
-  const [editUserId, setEditUserId] = useState<number | null>(null)
-  const [editUser, setEditUser] = useState<UserInput>({ name: '', login_id: '', org_id: '', details: '', role: 'user' })
+  // 단일 편집 패러다임: 행 펼침 상세
+  const [exp, setExp] = useState<Expand>(null)
+  // 추가 폼 (테이블 위 블록)
+  const [addUserOpen, setAddUserOpen] = useState(false)
+  const [addNumSvc, setAddNumSvc] = useState<'call' | 'ptt' | null>(null)
+
   const orgOpts = useMemo(() => orgIndentedOptions(orgs), [orgs])
-  function startEditUser(u: UserSummary) {
-    setEditUserId(u.id)
-    setEditUser({ name: u.name, login_id: u.login_id, org_id: u.org_id, details: u.details || '', role: u.role || 'user' })
-  }
-  async function saveEditUser() {
-    if (!editUserId) return
-    if (!editUser.name) { show('이름 필수', 'err'); return }
-    try { await usersApi.update(editUserId, editUser); show('저장', 'ok'); setEditUserId(null); load() }
-    catch (e: unknown) { show(String(e), 'err') }
-  }
-  // 사용자 인라인 추가
-  const [addingUser, setAddingUser] = useState(false)
-  const [addUserForm, setAddUserForm] = useState<UserInput>({ name: '', login_id: '', org_id: '', details: '', role: 'user', password: '123456' })
-  function startAddUser() {
-    setEditUserId(null); setAddingUser(true)
-    setAddUserForm({ name: '', login_id: '', org_id: orgScope ? (orgScope.split('/').pop() || '') : '', details: '', role: 'user', password: '123456' })
-  }
-  async function saveAddUser() {
-    if (!addUserForm.name) { show('이름 필수', 'err'); return }
-    try { await usersApi.create(addUserForm); show('생성', 'ok'); setAddingUser(false); load() }
-    catch (e: unknown) { show(String(e), 'err') }
-  }
-  // 행 클릭 토글 — 같은 행 재클릭/다른 행 클릭 시 닫힘
-  function toggleDrawer(next: NonNullable<Drawer>) {
-    setDrawer(cur => (cur && cur.kind === next.kind && (cur.rowKey ?? cur.id) === (next.rowKey ?? next.id)) ? null : next)
-  }
+  const userIndex = useMemo(() => buildPickIndex(users, 'user'), [users])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -132,31 +119,34 @@ export default function ProvisioningWorkbenchPage() {
   }, [show])
   useEffect(() => { load() }, [load])
 
-  // 조직 code → code_path (스코프 startsWith 비교용)
   const orgPathOf = useCallback((code: string) => orgs.find(o => o.code === code)?.code_path || code, [orgs])
   const inScope = useCallback((orgCode: string) => {
     if (!orgScope) return true
     return (orgPathOf(orgCode) || '').startsWith(orgScope)
   }, [orgScope, orgPathOf])
 
-  // 탭 전환·검색 시 선택 초기화
-  useEffect(() => { setSelected(new Set()) }, [tab])
+  // 탭 전환 시 임시상태 초기화
+  useEffect(() => { setSelected(new Set()); setExp(null); setAddUserOpen(false); setAddNumSvc(null) }, [tab])
 
-  function clearSearch() { setSearch('') }
+  // 행 펼침 토글 (같은 행 재클릭 → 닫힘)
+  const toggleExpand = useCallback((key: string | number, userId: number, hi?: string) => {
+    setExp(cur => (cur && cur.key === key) ? null : { key, userId, edit: false, hi })
+  }, [])
+  const openEdit = useCallback((key: string | number, userId: number) => {
+    setExp({ key, userId, edit: true })
+  }, [])
 
-  // 사용자가 가진 번호 중 검색어 매칭 여부 (번호로 사용자 찾기)
   const userHasNumber = useCallback((u: UserSummary, q: string) =>
     u.call_subscriptions.some(s => s.id.toLowerCase().includes(q)) ||
     u.ptt_subscriptions.some(s => s.id.toLowerCase().includes(q)), [])
 
-  // ── 사용자 탭 데이터 (이름·로그인ID·번호로 검색) ──
+  // ── 탭 데이터 ──
   const userRows = useMemo(() => {
     const q = search.trim().toLowerCase()
     return users.filter(u => inScope(u.org_id || '') &&
       (!q || u.name.toLowerCase().includes(q) || (u.login_id || '').toLowerCase().includes(q) || userHasNumber(u, q)))
   }, [users, inScope, search, userHasNumber])
 
-  // ── 번호 탭 데이터 (VoLTE / PTT 분리) ──
   const buildNumberRows = useCallback((svc: 'call' | 'ptt'): NumberRow[] => {
     const q = search.trim().toLowerCase()
     const out: NumberRow[] = []
@@ -177,6 +167,11 @@ export default function ProvisioningWorkbenchPage() {
     try { await usersApi.batchDelete(ids); show('삭제 완료', 'ok'); setSelected(new Set()); load() }
     catch (e: unknown) { show(String(e), 'err') }
   }
+  async function deleteUser(u: UserSummary) {
+    if (!confirm(`${u.name} 삭제? 연결된 번호도 삭제됩니다.`)) return
+    try { await usersApi.delete(u.id); show('삭제', 'ok'); if (exp?.userId === u.id) setExp(null); load() }
+    catch (e: unknown) { show(String(e), 'err') }
+  }
   async function deleteNumber(r: NumberRow) {
     if (!confirm(`${r.msisdn} 삭제?`)) return
     try { await usersApi.deleteSub(r.user.id, r.svc, r.msisdn); show('삭제', 'ok'); load() }
@@ -184,34 +179,13 @@ export default function ProvisioningWorkbenchPage() {
   }
 
   // ── 컬럼 정의 ──
-  const stop = (e: React.MouseEvent) => e.stopPropagation()
-  const ie = (u: UserSummary) => editUserId === u.id   // inline editing this row?
   const userCols: Column<UserSummary>[] = [
-    { key: 'name', header: '이름', sortable: true, width: 120, render: u => ie(u)
-      ? <input className="form-input" autoFocus value={editUser.name} onClick={stop} onChange={e => setEditUser({ ...editUser, name: e.target.value })} />
-      : <span style={{ fontWeight: 500 }}>{u.name}</span> },
-    { key: 'login_id', header: '로그인ID / 암호', sortable: true, width: 210, render: u => ie(u)
-      ? <span style={{ display: 'flex', gap: 4 }} onClick={stop}>
-          <input className="form-input" style={{ flex: 1, minWidth: 0 }} placeholder="로그인ID" value={editUser.login_id || ''} onChange={e => setEditUser({ ...editUser, login_id: e.target.value })} />
-          <input className="form-input" style={{ width: 84 }} type="text" placeholder="새 암호" value={editUser.password || ''} onChange={e => setEditUser({ ...editUser, password: e.target.value })} />
-        </span>
-      : <span className="ts">{u.login_id || '—'}</span> },
-    { key: 'role', header: '권한', width: 110, render: u => ie(u)
-      ? (canRole
-          ? <select className="form-input" onClick={stop} value={editUser.role || 'user'} onChange={e => setEditUser({ ...editUser, role: e.target.value as UserInput['role'] })}>
-              {ASSIGNABLE_ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-            </select>
-          : <span className="badge">{ROLE_LABELS[editUser.role || 'user']}</span>)
-      : <span className="badge">{ROLE_LABELS[u.role || 'user']}</span> },
-    { key: 'org', header: '조직', width: 220, sortValue: u => buildOrgPath(orgs, u.org_id), render: u => ie(u)
-      ? <select className="form-input" onClick={stop} value={editUser.org_id} onChange={e => setEditUser({ ...editUser, org_id: e.target.value })}>
-          <option value="">없음</option>
-          {orgOpts.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
-        </select>
-      : <span className="ts" title={buildOrgPath(orgs, u.org_id)}>{buildOrgPath(orgs, u.org_id)}</span> },
-    { key: 'details', header: '설명', render: u => ie(u)
-      ? <input className="form-input" onClick={stop} value={editUser.details || ''} onChange={e => setEditUser({ ...editUser, details: e.target.value })} />
-      : <span className="ts">{u.details || '—'}</span> },
+    { key: 'exp', header: '', width: 26, render: u => <Caret open={exp?.key === u.id} /> },
+    { key: 'name', header: '이름', sortable: true, width: 130, render: u => <span style={{ fontWeight: 500 }}>{u.name}</span> },
+    { key: 'login_id', header: '로그인ID', sortable: true, width: 150, render: u => <span className="ts">{u.login_id || '—'}</span> },
+    { key: 'role', header: '권한', width: 90, render: u => <span className="badge">{ROLE_LABELS[u.role || 'user']}</span> },
+    { key: 'org', header: '조직', width: 220, sortValue: u => buildOrgPath(orgs, u.org_id), render: u => <span className="ts" title={buildOrgPath(orgs, u.org_id)}>{buildOrgPath(orgs, u.org_id)}</span> },
+    { key: 'details', header: '설명', render: u => <span className="ts">{u.details || '—'}</span> },
     { key: 'nums', header: '번호', width: 220, render: u => {
       const all = [
         ...u.call_subscriptions.map(s => ({ svc: 'call' as const, id: s.id })),
@@ -222,26 +196,21 @@ export default function ProvisioningWorkbenchPage() {
         {all.map(n => <span key={`${n.svc}:${n.id}`} className={`badge ${n.svc === 'call' ? 'badge--blue' : 'badge--green'}`} style={{ fontSize: 10 }} title={n.svc === 'call' ? 'VoLTE' : 'McPTT'}>{n.id}</span>)}
       </span>
     } },
-    { key: 'act', header: '', width: 84, align: 'right', render: u => ie(u)
-      ? <span className="actions" onClick={stop}>
-          <IconBtn title="저장" tone="primary" onClick={saveEditUser}><Check size={ICON} /></IconBtn>
-          <IconBtn title="취소" onClick={() => setEditUserId(null)}><X size={ICON} /></IconBtn>
-        </span>
-      : canWrite ? (
-        <span className="actions" onClick={stop}>
-          <IconBtn title="편집" onClick={() => startEditUser(u)}><Pencil size={ICON} /></IconBtn>
-          <IconBtn title="삭제" tone="danger" onClick={() => { if (confirm(`${u.name} 삭제?`)) usersApi.delete(u.id).then(() => { show('삭제', 'ok'); load() }).catch(e => show(String(e), 'err')) }}><Trash2 size={ICON} /></IconBtn>
-        </span>
-      ) : <span className="ts">—</span> },
+    { key: 'act', header: '', width: 84, align: 'right', render: u => canWrite ? (
+      <span className="actions" onClick={e => e.stopPropagation()}>
+        <IconBtn title="편집" onClick={() => openEdit(u.id, u.id)}><Pencil size={ICON} /></IconBtn>
+        <IconBtn title="삭제" tone="danger" onClick={() => deleteUser(u)}><Trash2 size={ICON} /></IconBtn>
+      </span>
+    ) : <span className="ts">—</span> },
   ]
 
-  const numberActCol: Column<NumberRow> = { key: 'act', header: '', width: 120, align: 'right', render: r => canWrite ? (
+  const numberActCol: Column<NumberRow> = { key: 'act', header: '', width: 64, align: 'right', render: r => canWrite ? (
     <span className="actions" onClick={e => e.stopPropagation()}>
-      <button className="btn btn--sm btn--outline" onClick={() => setDrawer({ kind: 'user', mode: 'edit', id: r.user.id })}>가입자</button>
-      <button className="btn btn--sm btn--danger" onClick={() => deleteNumber(r)}>삭제</button>
+      <IconBtn title="삭제" tone="danger" onClick={() => deleteNumber(r)}><Trash2 size={ICON} /></IconBtn>
     </span>
   ) : <span className="ts">—</span> }
   const numberBaseCols: Column<NumberRow>[] = [
+    { key: 'exp', header: '', width: 26, render: r => <Caret open={exp?.key === r.msisdn} /> },
     { key: 'msisdn', header: 'MSISDN', sortable: true, render: r => <span style={{ fontWeight: 600 }}>{r.msisdn}</span> },
     { key: 'imsi', header: 'IMSI', width: 150, sortable: true, sortValue: r => r.sub.imsi || '', render: r => <span className="ts">{r.sub.imsi || '—'}</span> },
     { key: 'svc_ref', header: '서비스', width: 90, render: r => <span className="ts">{r.sub.service_ref || '—'}</span> },
@@ -262,40 +231,19 @@ export default function ProvisioningWorkbenchPage() {
     { k: 'ptt', label: 'PTT 번호', count: pttRows.length },
   ]
 
-  // 사용자 인라인 추가 행 (DataTable footer 로 렌더, 체크박스 컬럼 포함 8셀)
-  const userAddRow = addingUser ? (
-    <tr style={{ background: 'rgba(74,144,217,0.06)' }}>
-      <td></td>
-      <td><input className="form-input" placeholder="이름 *" autoFocus value={addUserForm.name} onChange={e => setAddUserForm({ ...addUserForm, name: e.target.value })} /></td>
-      <td><span style={{ display: 'flex', gap: 4 }}>
-        <input className="form-input" style={{ flex: 1, minWidth: 0 }} placeholder="로그인ID" value={addUserForm.login_id || ''} onChange={e => setAddUserForm({ ...addUserForm, login_id: e.target.value })} />
-        <input className="form-input" style={{ width: 84 }} type="text" placeholder="암호" value={addUserForm.password || ''} onChange={e => setAddUserForm({ ...addUserForm, password: e.target.value })} />
-      </span></td>
-      <td>{canRole
-        ? <select className="form-input" value={addUserForm.role || 'user'} onChange={e => setAddUserForm({ ...addUserForm, role: e.target.value as UserInput['role'] })}>
-            {ASSIGNABLE_ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-          </select>
-        : <span className="badge">{ROLE_LABELS['user']}</span>}</td>
-      <td><select className="form-input" value={addUserForm.org_id} onChange={e => setAddUserForm({ ...addUserForm, org_id: e.target.value })}>
-        <option value="">없음</option>
-        {orgOpts.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
-      </select></td>
-      <td><input className="form-input" placeholder="설명" value={addUserForm.details || ''} onChange={e => setAddUserForm({ ...addUserForm, details: e.target.value })} /></td>
-      <td></td>
-      <td className="actions">
-        <button className="btn btn--sm btn--primary" onClick={saveAddUser}>저장</button>
-        <button className="btn btn--sm btn--ghost" onClick={() => setAddingUser(false)}>취소</button>
-      </td>
-    </tr>
-  ) : undefined
+  const expUser = exp ? users.find(u => u.id === exp.userId) : undefined
+  const catalog = useMemo(() => buildServiceCatalog(users), [users])
 
-  // 사용자 상세(번호 테이블) 인라인 확장 props
-  const detailUser = drawer?.kind === 'user' && drawer.mode !== 'add' && drawer.id != null
-    ? users.find(u => u.id === drawer.id) : undefined
+  // 행 확장 렌더 (사용자 상세 = 기본정보 편집 + 번호 서브테이블) — 모드 전환 시 remount
+  const renderDetail = () => exp && expUser
+    ? <UserDetail key={`${expUser.id}:${exp.edit}`} user={expUser} catalog={catalog}
+        orgOpts={orgOpts} canRole={canRole} canWrite={canWrite} initialEdit={exp.edit}
+        highlight={exp.hi} onReload={load} />
+    : null
 
   return (
     <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', height: 'calc(100vh - 92px)' }}>
-      {/* 좌: 조직 트리 (full-height 패널, 공유 스코프) */}
+      {/* 좌: 조직 트리 (공유 스코프) */}
       <OrgTreePanel fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}
         style={{ flex: '0 0 200px', width: 200, maxWidth: 200 }} />
 
@@ -320,41 +268,60 @@ export default function ProvisioningWorkbenchPage() {
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
           <input className="search-input" placeholder="이름·번호·ID 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
-          {search && <button className="btn btn--ghost btn--sm" onClick={clearSearch}>✕</button>}
+          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}>✕</button>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {tab === 'users' && canWrite && <>
               <button className="btn btn--outline btn--sm" onClick={() => setImportOpen(true)}>Excel 가져오기</button>
               {selected.size > 0 && <button className="btn btn--danger btn--sm" onClick={batchDeleteUsers}>선택 삭제 ({selected.size})</button>}
-              <button className="btn btn--primary btn--sm" onClick={startAddUser}>＋ 사용자</button>
+              <button className="btn btn--primary btn--sm" onClick={() => { setAddUserOpen(v => !v); setExp(null) }}>＋ 사용자</button>
             </>}
             {(tab === 'volte' || tab === 'ptt') && canWrite && (
-              <button className="btn btn--outline btn--sm" onClick={() => setTab('users')}>번호는 사용자 탭에서 등록</button>
+              <button className="btn btn--primary btn--sm" onClick={() => { setAddNumSvc(tab === 'volte' ? 'call' : 'ptt'); setExp(null) }}>
+                ＋ {tab === 'volte' ? 'VoLTE' : 'PTT'} 번호
+              </button>
             )}
           </span>
         </div>
 
-        {/* 테이블 (패널 잔여 높이 채움 + 자체 스크롤). 선택 행 바로 아래 번호 상세 인라인 확장 */}
+        {/* 추가 폼 블록 (테이블 위) */}
+        {tab === 'users' && addUserOpen && (
+          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', padding: '10px 16px' }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 8 }}>새 사용자</div>
+            <UserBasicForm mode="add" orgOpts={orgOpts} canRole={canRole}
+              defaultOrg={orgScope ? (orgScope.split('/').pop() || '') : ''}
+              onSubmit={async (input) => { await usersApi.create(input); show('생성', 'ok'); setAddUserOpen(false); load() }}
+              onCancel={() => setAddUserOpen(false)} />
+          </div>
+        )}
+        {(tab === 'volte' || tab === 'ptt') && addNumSvc && (
+          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', padding: '10px 16px' }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 8 }}>새 {addNumSvc === 'call' ? 'VoLTE' : 'PTT'} 번호</div>
+            <NumberAddForm svc={addNumSvc} catalog={catalog} userIndex={userIndex} orgScope={orgScope} orgPathOf={orgPathOf}
+              onAdded={() => { setAddNumSvc(null); load() }} onCancel={() => setAddNumSvc(null)} />
+          </div>
+        )}
+
+        {/* 테이블 — 행 클릭 시 바로 아래 사용자 상세(기본정보 편집 + 번호) 인라인 확장 */}
         {tab === 'users' && (
           <DataTable<UserSummary> columns={userCols} rows={userRows} rowKey={u => u.id} loading={loading}
             selectable={canWrite} selected={selected} onSelectChange={setSelected}
-            onRowClick={u => { if (editUserId !== u.id) toggleDrawer({ kind: 'user', mode: 'view', id: u.id, rowKey: u.id }) }}
-            expandedKey={detailUser ? (drawer!.rowKey ?? drawer!.id ?? null) : null}
-            renderExpanded={detailUser ? () => <UserNumbers user={detailUser} users={users} onReload={load} /> : undefined}
-            footer={userAddRow}
+            onRowClick={u => toggleExpand(u.id, u.id)}
+            expandedKey={exp?.key ?? null}
+            renderExpanded={exp && expUser ? renderDetail : undefined}
             pageSize={50} emptyText="사용자 없음" />
         )}
         {tab === 'volte' && (
           <DataTable<NumberRow> columns={volteCols} rows={volteRows} rowKey={r => r.msisdn} loading={loading}
-            onRowClick={r => toggleDrawer({ kind: 'user', mode: 'view', id: r.user.id, rowKey: r.msisdn })}
-            expandedKey={detailUser ? (drawer!.rowKey ?? null) : null}
-            renderExpanded={detailUser ? () => <UserNumbers user={detailUser} users={users} onReload={load} /> : undefined}
+            onRowClick={r => toggleExpand(r.msisdn, r.user.id, r.msisdn)}
+            expandedKey={exp?.key ?? null}
+            renderExpanded={exp && expUser ? renderDetail : undefined}
             pageSize={50} emptyText="VoLTE 번호 없음" />
         )}
         {tab === 'ptt' && (
           <DataTable<NumberRow> columns={pttCols} rows={pttRows} rowKey={r => r.msisdn} loading={loading}
-            onRowClick={r => toggleDrawer({ kind: 'user', mode: 'view', id: r.user.id, rowKey: r.msisdn })}
-            expandedKey={detailUser ? (drawer!.rowKey ?? null) : null}
-            renderExpanded={detailUser ? () => <UserNumbers user={detailUser} users={users} onReload={load} /> : undefined}
+            onRowClick={r => toggleExpand(r.msisdn, r.user.id, r.msisdn)}
+            expandedKey={exp?.key ?? null}
+            renderExpanded={exp && expUser ? renderDetail : undefined}
             pageSize={50} emptyText="PTT 번호 없음" />
         )}
       </div>
@@ -366,8 +333,112 @@ export default function ProvisioningWorkbenchPage() {
 }
 
 // ════════════════════════════════════════════════════════════
-//  사용자 번호 상세 (행 확장) — 단일 번호 테이블 (VoLTE+PTT 통합)
+//  공용 컴팩트 폼 위젯
 // ════════════════════════════════════════════════════════════
+function Field({ label, children, w }: { label: string; children: React.ReactNode; w?: number | string }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 2, width: w, flex: w ? undefined : '1 1 160px', minWidth: 120 }}>
+      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
+      {children}
+    </label>
+  )
+}
+function FieldRow({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px', alignItems: 'flex-end' }}>{children}</div>
+}
+
+// ── 사용자 기본정보 폼 (추가 + 편집 공용) ──
+function UserBasicForm({ mode, initial, orgOpts, canRole, defaultOrg, onSubmit, onCancel }: {
+  mode: 'add' | 'edit'
+  initial?: UserSummary
+  orgOpts: OrgOpt[]
+  canRole: boolean
+  defaultOrg?: string
+  onSubmit: (input: UserInput) => Promise<void> | void
+  onCancel: () => void
+}) {
+  const { show } = useToast()
+  const [form, setForm] = useState<UserInput>(() => initial
+    ? { name: initial.name, login_id: initial.login_id, org_id: initial.org_id, details: initial.details || '', role: initial.role || 'user', password: '' }
+    : { name: '', login_id: '', org_id: defaultOrg || '', details: '', role: 'user', password: '' })
+  const [busy, setBusy] = useState(false)
+
+  async function submit() {
+    if (!form.name) { show('이름 필수', 'err'); return }
+    const body: UserInput = { ...form }
+    if (mode === 'edit' && !body.password) delete body.password   // 빈 암호 = 유지
+    setBusy(true)
+    try { await onSubmit(body) } catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
+  }
+
+  return (
+    <FieldRow>
+      <Field label="이름 *" w={150}><input className="form-input" autoFocus value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+      <Field label="로그인ID" w={150}><input className="form-input" placeholder="콘솔 로그인" value={form.login_id || ''} onChange={e => setForm({ ...form, login_id: e.target.value })} /></Field>
+      <Field label={mode === 'edit' ? '암호 (변경 시)' : '암호'} w={130}>
+        <input className="form-input" type="password" placeholder={mode === 'edit' ? '변경 시 입력' : '초기 암호'} value={form.password || ''} onChange={e => setForm({ ...form, password: e.target.value })} />
+      </Field>
+      {canRole && <Field label="권한" w={120}>
+        <select className="form-input" value={form.role || 'user'} onChange={e => setForm({ ...form, role: e.target.value as UserInput['role'] })}>
+          {ASSIGNABLE_ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+        </select>
+      </Field>}
+      <Field label="조직" w={200}>
+        <select className="form-input" value={form.org_id} onChange={e => setForm({ ...form, org_id: e.target.value })}>
+          <option value="">없음</option>
+          {orgOpts.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
+        </select>
+      </Field>
+      <Field label="설명"><input className="form-input" value={form.details || ''} onChange={e => setForm({ ...form, details: e.target.value })} /></Field>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button className="btn btn--sm btn--primary" disabled={busy} onClick={submit}>{mode === 'add' ? '생성' : '저장'}</button>
+        <button className="btn btn--sm btn--ghost" onClick={onCancel}>취소</button>
+      </div>
+    </FieldRow>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+//  사용자 상세 (행 확장) — 기본정보(보기↔편집) + 번호 서브테이블
+// ════════════════════════════════════════════════════════════
+function UserDetail({ user, catalog, orgOpts, canRole, canWrite, initialEdit, highlight, onReload }: {
+  user: UserSummary; catalog: ServiceCat[]; orgOpts: OrgOpt[]; canRole: boolean; canWrite: boolean
+  initialEdit: boolean; highlight?: string; onReload: () => void
+}) {
+  const { show } = useToast()
+  const [editing, setEditing] = useState(initialEdit)
+  const orgPath = useMemo(() => {
+    // 조직 표시는 코드만 보유 → orgOpts 라벨(들여쓰기 제거) 매칭
+    const o = orgOpts.find(o => o.code === user.org_id)
+    return o ? o.label.replace(/^[\u3000]+/, '') : (user.org_id || '—')
+  }, [orgOpts, user.org_id])
+
+  return (
+    <div style={{ padding: '12px 16px' }}>
+      {/* 기본정보 */}
+      {editing ? (
+        <UserBasicForm mode="edit" initial={user} orgOpts={orgOpts} canRole={canRole}
+          onSubmit={async (input) => { await usersApi.update(user.id, input); show('저장', 'ok'); setEditing(false); onReload() }}
+          onCancel={() => setEditing(false)} />
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
+          <span><b style={{ fontSize: 13 }}>{user.name}</b></span>
+          <span className="ts">로그인 {user.login_id || '—'}</span>
+          <span className="badge">{ROLE_LABELS[user.role || 'user']}</span>
+          <span className="ts">조직 {orgPath}</span>
+          {user.details && <span className="ts">{user.details}</span>}
+          {canWrite && <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>기본정보 편집</button>}
+        </div>
+      )}
+
+      {/* 번호 */}
+      <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+        <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>번호</div>
+        <NumbersTable user={user} catalog={catalog} canWrite={canWrite} highlight={highlight} onReload={onReload} />
+      </div>
+    </div>
+  )
+}
 
 // 서비스 카탈로그 항목 — ref(access_services 이름) + 그 서비스의 svc(call=VoLTE / ptt=PTT)
 interface ServiceCat { svc: 'call' | 'ptt'; ref: string }
@@ -384,27 +455,15 @@ function buildServiceCatalog(users: UserSummary[]): ServiceCat[] {
   return cat
 }
 
-// 행 확장 영역 = 단일 번호 테이블 (서비스 선택이 VoLTE/PTT 유형을 결정)
-function UserNumbers({ user, users, onReload }: { user: UserSummary; users: UserSummary[]; onReload: () => void }) {
-  const catalog = useMemo(() => buildServiceCatalog(users), [users])
-  return (
-    <div style={{ padding: '10px 16px' }}>
-      <NumbersTable user={user} catalog={catalog} onReload={onReload} />
-    </div>
-  )
-}
-
-// VoLTE/PTT 유형 배지 (모듈 레벨 — 렌더 중 컴포넌트 생성 회피)
+// VoLTE/PTT 유형 배지
 function SvcBadge({ svc }: { svc: 'call' | 'ptt' }) {
   return <span className={`badge ${svc === 'call' ? 'badge--blue' : 'badge--green'}`} style={{ fontSize: 9 }}>{svc === 'call' ? 'VoLTE' : 'McPTT'}</span>
 }
 
 interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; dnd: boolean; forward_id: string }
 
-// ── 단일 번호 테이블 (VoLTE+PTT 통합) ──
-//  유형은 '서비스' 선택으로 결정(서비스 ref → svc=call/ptt 매핑). 백엔드는 volte/ptt 테이블 분리.
-//  SIM 정보 = IMSI(인증 username, 필수) + 서비스(도메인) + 비밀번호, VoLTE 는 DND·착신전환.
-function NumbersTable({ user, catalog, onReload }: { user: UserSummary; catalog: ServiceCat[]; onReload: () => void }) {
+// ── 단일 번호 테이블 (사용자 상세 내부, VoLTE+PTT 통합) ──
+function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: UserSummary; catalog: ServiceCat[]; canWrite: boolean; highlight?: string; onReload: () => void }) {
   const { show } = useToast()
   const rows: Array<{ svc: 'call' | 'ptt'; sub: Subscription }> = [
     ...user.call_subscriptions.map(s => ({ svc: 'call' as const, sub: s })),
@@ -446,7 +505,7 @@ function NumbersTable({ user, catalog, onReload }: { user: UserSummary; catalog:
   const addIsCall = addSvc === 'call'
 
   return (
-    <div style={{ marginTop: 4 }}>
+    <div>
       <div className="table-wrap">
       <table className="data-table" style={{ fontSize: 12 }}>
         <thead>
@@ -457,28 +516,29 @@ function NumbersTable({ user, catalog, onReload }: { user: UserSummary; catalog:
             <th>IMSI</th>
             <th style={{ width: 56, textAlign: 'center' }}>DND</th>
             <th style={{ width: 110 }}>착신전환</th>
-            <th style={{ width: 130 }}></th>
+            <th style={{ width: 110 }}></th>
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && !adding && <tr><td colSpan={7} className="empty-cell" style={{ padding: 12 }}>번호 없음</td></tr>}
+          {rows.length === 0 && !adding && <tr><td colSpan={7} className="empty-cell" style={{ padding: 12 }}>번호 없음 — 아래 ＋ 번호 추가</td></tr>}
           {rows.map(r => {
             const ed = editKey === rk(r.svc, r.sub.id)
             const isCall = r.svc === 'call'
+            const hi = highlight && r.sub.id === highlight
             return (
-              <tr key={rk(r.svc, r.sub.id)}>
+              <tr key={rk(r.svc, r.sub.id)} style={{ background: hi && !ed ? 'rgba(74,144,217,0.10)' : undefined }}>
                 <td>{ed
                   ? <select className="form-input" value={editForm.service_ref || ''} onChange={e => setEditForm({ ...editForm, service_ref: e.target.value })}>
                       {catalog.filter(c => c.svc === r.svc).map(c => <option key={c.ref} value={c.ref}>{c.ref}</option>)}
                     </select>
                   : <SvcBadge svc={r.svc} />}</td>
                 <td><strong>{r.sub.id}</strong></td>
-                <td>{ed ? <input className="form-input" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</td>
+                <td>{ed ? <input className="form-input" type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</td>
                 <td>{ed ? <input className="form-input" placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="ts">{r.sub.imsi || '—'}</span>}</td>
                 <td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <span className="badge badge--red" style={{ fontSize: 9 }}>ON</span> : <span className="ts">—</span>)}</td>
                 <td>{!isCall ? <span className="ts">—</span> : ed ? <input className="form-input" placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="ts">{r.sub.forward_id || '—'}</span>}</td>
                 <td className="actions">
-                  {ed ? <>
+                  {!canWrite ? <span className="ts">—</span> : ed ? <>
                     <IconBtn title="저장" tone="primary" onClick={() => saveEdit(r)}><Check size={ICON} /></IconBtn>
                     <IconBtn title="취소" onClick={() => setEditKey(null)}><X size={ICON} /></IconBtn>
                   </> : <>
@@ -495,7 +555,7 @@ function NumbersTable({ user, catalog, onReload }: { user: UserSummary; catalog:
                 {catalog.map(c => <option key={svcVal(c)} value={svcVal(c)}>{c.ref} ({c.svc === 'call' ? 'VoLTE' : 'McPTT'})</option>)}
               </select></td>
               <td><input className="form-input" placeholder={addIsCall ? '+8213…' : '+825…'} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} /></td>
-              <td><input className="form-input" placeholder="암호" value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
+              <td><input className="form-input" type="password" placeholder="암호" value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
               <td><input className="form-input" placeholder="SIM IMSI *" value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></td>
               <td style={{ textAlign: 'center' }}>{addIsCall ? <input type="checkbox" checked={addForm.dnd} onChange={e => setAddForm({ ...addForm, dnd: e.target.checked })} /> : <span className="ts">—</span>}</td>
               <td>{addIsCall ? <input className="form-input" placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="ts">—</span>}</td>
@@ -508,9 +568,76 @@ function NumbersTable({ user, catalog, onReload }: { user: UserSummary; catalog:
         </tbody>
       </table>
       </div>
-      {!adding && (
+      {canWrite && !adding && (
         <button className="btn btn--ghost btn--sm" style={{ color: 'var(--primary)', fontSize: 12, marginTop: 4 }} onClick={() => { setAdding(true); setEditKey(null) }}>＋ 번호 추가</button>
       )}
+    </div>
+  )
+}
+
+// ── 번호 탭 직접 추가 폼 (가입자 피커 + 번호 입력) ──
+function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, onCancel }: {
+  svc: 'call' | 'ptt'
+  catalog: ServiceCat[]
+  userIndex: PickItem[]
+  orgScope: string | null
+  orgPathOf: (code: string) => string
+  onAdded: () => void
+  onCancel: () => void
+}) {
+  const { show } = useToast()
+  const svcCatalog = catalog.filter(c => c.svc === svc)
+  const [pick, setPick] = useState<PickItem | null>(null)
+  const [serviceRef, setServiceRef] = useState(svcCatalog[0]?.ref || (svc === 'call' ? 'volte' : 'mcptt'))
+  const [msisdn, setMsisdn] = useState('')
+  const [imsi, setImsi] = useState('')
+  const [passwd, setPasswd] = useState('123456')
+  const [dnd, setDnd] = useState(false)
+  const [forwardId, setForwardId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const isCall = svc === 'call'
+
+  async function add() {
+    if (!pick) { show('가입자 선택 필수', 'err'); return }
+    if (!msisdn) { show('MSISDN 필수', 'err'); return }
+    if (!imsi) { show('IMSI 필수', 'err'); return }
+    const body: Partial<Subscription> = { id: msisdn, imsi, service_ref: serviceRef, passwd, dnd, forward_id: forwardId }
+    setBusy(true)
+    try { await usersApi.addSub(Number(pick.value), svc, body); show('번호 추가', 'ok'); onAdded() }
+    catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* 가입자 선택 */}
+      <FieldRow>
+        <Field label="가입자 *" w={280}>
+          {pick
+            ? <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="badge badge--blue" style={{ fontSize: 11 }}>{pick.label}</span>
+                <button className="btn btn--ghost btn--sm" onClick={() => setPick(null)}>변경</button>
+              </div>
+            : <SubscriberPicker kind="user" index={userIndex} orgScope={orgScope} orgPathOf={orgPathOf}
+                onPick={setPick} placeholder="가입자 이름·로그인ID 검색·선택" autoFocus />}
+        </Field>
+      </FieldRow>
+      {/* 번호 정보 */}
+      <FieldRow>
+        <Field label="서비스" w={150}>
+          <select className="form-input" value={serviceRef} onChange={e => setServiceRef(e.target.value)}>
+            {(svcCatalog.length ? svcCatalog : [{ svc, ref: serviceRef }]).map(c => <option key={c.ref} value={c.ref}>{c.ref}</option>)}
+          </select>
+        </Field>
+        <Field label="MSISDN *" w={150}><input className="form-input" placeholder={isCall ? '+8213…' : '+825…'} value={msisdn} onChange={e => setMsisdn(e.target.value)} /></Field>
+        <Field label="IMSI *" w={170}><input className="form-input" placeholder="SIM IMSI" value={imsi} onChange={e => setImsi(e.target.value)} /></Field>
+        <Field label="암호" w={120}><input className="form-input" type="password" value={passwd} onChange={e => setPasswd(e.target.value)} /></Field>
+        {isCall && <Field label="DND" w={56}><input type="checkbox" checked={dnd} onChange={e => setDnd(e.target.checked)} style={{ marginTop: 6 }} /></Field>}
+        {isCall && <Field label="착신전환" w={130}><input className="form-input" placeholder="대상" value={forwardId} onChange={e => setForwardId(e.target.value)} /></Field>}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button className="btn btn--sm btn--primary" disabled={busy} onClick={add}>추가</button>
+          <button className="btn btn--sm btn--ghost" onClick={onCancel}>취소</button>
+        </div>
+      </FieldRow>
     </div>
   )
 }
