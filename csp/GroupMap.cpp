@@ -121,6 +121,13 @@ void CGroupMap::Insert( CspPttGroup &clsGroup ) {
     m_clsMutex.unlock();
 }
 
+void CGroupMap::Remove( const char *pszGroupId ) {
+    if ( pszGroupId == NULL ) return;
+    m_clsMutex.lock();
+    m_clsMap.erase( pszGroupId );
+    m_clsMutex.unlock();
+}
+
 bool CGroupMap::Select( const char *pszGroupId, CspPttGroup &clsGroup ) {
     bool bRes = false;
     GROUP_MAP::iterator it;

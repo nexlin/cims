@@ -18,6 +18,7 @@ CspPttGroup::CspPttGroup()
       _emergencyCall( false ),
       _imminentPerilCall( true ),
       _emergencyAlert( true ),
+      _isAdhoc( false ),
       _sessionStart( 0 ),
       _sessionEnd( 0 ),
       _sessionSeq( 0 ),
@@ -115,6 +116,7 @@ void CspPttGroup::Clear() {
     _emergencyCall = false;
     _imminentPerilCall = true;
     _emergencyAlert = true;
+    _isAdhoc = false;
     _orgCode.clear();
     _sessionStart = 0;
     _sessionEnd = 0;

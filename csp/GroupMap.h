@@ -34,6 +34,9 @@ public:
     /** Insert a group */
     void Insert( CspPttGroup &clsGroup );
 
+    /** Remove a group by ID (ad hoc 임시 그룹 정리용) */
+    void Remove( const char *pszGroupId );
+
     /** Select a group by ID */
     bool Select( const char *pszGroupId, CspPttGroup &clsGroup );
 

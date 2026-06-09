@@ -413,12 +413,19 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
         //   stale 캐시로 JOIN→'Group Not Found' 되던 문제도 원천 차단.
         if ( !bStillActive ) {
             CspPttGroup clsGrp;
-            bool bChat = gclsGroupMap.Select( strGroupId.c_str(), clsGrp ) && clsGrp._groupType == "chat";
+            bool bSelected = gclsGroupMap.Select( strGroupId.c_str(), clsGrp );
+            bool bChat = bSelected && clsGrp._groupType == "chat";
             if ( !bChat ) {
                 gclsCmpClient.RemoveGroup( strGroupId, GetOrIssueGroupSesId( strGroupId ) );
                 std::unique_lock<std::recursive_mutex> lock( m_mutex );
                 m_mapGroupRtp.erase( strGroupId );
                 RemoveGroupSesId( strGroupId );
+                // ad hoc 임시 그룹: 통화 종료 시 GroupMap 에서도 제거(ephemeral — 다음 개시 시 새 멤버로 재생성)
+                if ( bSelected && clsGrp._isAdhoc ) {
+                    gclsGroupMap.Remove( strGroupId.c_str() );
+                    CLog::Print( LOG_INFO, "GroupCall: ad-hoc group(%s) removed from map (session ended)",
+                                 strGroupId.c_str() );
+                }
             }
         }
     }

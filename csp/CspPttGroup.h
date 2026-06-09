@@ -71,6 +71,8 @@ public:
     /** 임박위험 통화 허용 여부 (allow-imminent-peril-call), 긴급경보 허용 (allow-MCPTT-emergency-alert) */
     bool _imminentPerilCall;
     bool _emergencyAlert;
+    /** ad hoc 동적 그룹(Rel-18) — 비영속 in-memory, 통화 종료 시 GroupMap 에서 제거 */
+    bool _isAdhoc;
 
     /** 소속 조직 코드 */
     std::string _orgCode;

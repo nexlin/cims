@@ -557,6 +557,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             clsAdhoc._name = std::string( "adhoc:" ) + pszTo;
             clsAdhoc._groupType = "prearranged";  // on-demand 수명(마지막 이탈 시 teardown)
             clsAdhoc._requireAffiliation = false;
+            clsAdhoc._isAdhoc = true;  // 통화 종료 시 GroupMap 에서 제거(ephemeral)
             bool bHasInit = false;
             for ( const auto &m : vecAdhoc ) {
                 clsAdhoc._pusers.push_back( std::make_shared<CspPttUser>( m, 5, "participant", "" ) );
