@@ -115,7 +115,7 @@ function SystemResourceWidget() {
           {loaded ? '표시할 서버가 없습니다.' : '불러오는 중…'}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: `minmax(100px, 0.7fr) repeat(${cols.length}, 1fr)`,
+        <div style={{ display: 'grid', gridTemplateColumns: `minmax(150px, 1fr) repeat(${cols.length}, 1fr)`,
                       gap: 0, alignItems: 'stretch' }}>
           {/* 헤더 */}
           <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, padding: '0 4px 6px' }}>서버</div>
@@ -136,7 +136,7 @@ function SystemResourceWidget() {
                               padding: '8px 4px', overflow: 'hidden', ...rowBd }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                                  background: s.online ? C_GREEN : C_RED }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.host}</span>
+                  <span title={s.host} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.host}</span>
                   {!s.online && <span style={{ fontSize: 10, color: C_RED, flexShrink: 0 }}>offline</span>}
                 </div>
                 {cols.map(c => {
