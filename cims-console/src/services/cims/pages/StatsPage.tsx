@@ -14,8 +14,24 @@ const GRAN_LABELS: Record<Granularity, string> = {
 function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
   data: Array<any>; labelKey: string; valueKey: string; maxH?: number
 }) {
+  // 시간(hour) 축은 0~23 연속으로 채움 — API 가 데이터 있는 버킷만 주면
+  // 막대 2~3개가 축 맥락 없이 떠 보이는 문제 방지.
+  if (labelKey === 'hour' && data.length > 0 && data.length < 24) {
+    const byHour = new Map(data.map(d => [Number(d.hour), d]))
+    data = Array.from({ length: 24 }, (_, h) => byHour.get(h) ?? { hour: h, [valueKey]: 0 })
+  }
   const vals = data.map(d => Number(d[valueKey]) || 0)
   const max = Math.max(...vals, 1)
+
+  if (data.length === 0 || vals.every(v => v === 0)) {
+    return (
+      <div style={{ height: maxH, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--text-muted)', fontSize: 13, background: 'var(--surface-2)',
+                    borderRadius: 6 }}>
+        해당 기간 데이터 없음
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: maxH, padding: '0 4px' }}>
