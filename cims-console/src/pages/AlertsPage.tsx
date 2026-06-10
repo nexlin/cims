@@ -66,9 +66,12 @@ function DailyBars({ data }: { data: { date: string; opens: number }[] }) {
   const H = 36
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: H + 14 }}>
-      {data.map(d => {
+      {data.map((d, i) => {
         const h = d.opens > 0 ? Math.max(2, Math.round((d.opens / max) * H)) : 1
         const mmdd = d.date.slice(5).replace('-', '/')
+        // 30/90일 범위에서 모든 날짜 라벨을 찍으면 겹쳐 읽을 수 없음 — 적정 간격만 표기
+        const labelEvery = data.length > 60 ? 7 : data.length > 21 ? 3 : 1
+        const showLabel = i % labelEvery === 0 || i === data.length - 1
         return (
           <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}
             title={`${d.date}: ${d.opens}건`}>
@@ -79,7 +82,8 @@ function DailyBars({ data }: { data: { date: string; opens: number }[] }) {
               borderRadius: 2,
               opacity: d.opens > 0 ? 0.85 : 0.4,
             }} />
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap',
+                          overflow: 'visible', visibility: showLabel ? 'visible' : 'hidden' }}>
               {mmdd}
             </div>
           </div>
