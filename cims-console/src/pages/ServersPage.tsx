@@ -195,6 +195,20 @@ export default function ServersPage() {
       await load()
     } catch (e) { show((e as Error).message, 'err') }
   }
+  async function rollbackDeployment(d: Deployment) {
+    const target = d.prev_install_path
+    const targetVer = d.prev_package_version
+    if (!target) { show('롤백 대상 없음 (이전 버전 설치 이력 없음)', 'err'); return }
+    if (!confirm(`${d.package_name} 모듈을 이전 버전으로 롤백할까요?\n\n` +
+                 `  현재: v${d.package_version} (${d.install_path})\n` +
+                 `  대상: v${targetVer || '?'} (${target})\n\n` +
+                 `collection 재동기 후 재기동됩니다 (단기 다운타임)`)) return
+    try {
+      const r = await deploymentApi.rollbackDeployment(d.id)
+      show(`롤백 큐 등록 (restart #${r.restart_job_id} → ${r.install_path})`, 'ok')
+      await load()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
   async function removeDeployment(d: Deployment) {
     if (!confirm(`Deployment #${d.id} (${d.package_name}) 을 제거할까요?`)) return
     try { await deploymentApi.deleteDeployment(d.id); show('삭제됨', 'ok'); await load() }
@@ -305,6 +319,7 @@ export default function ServersPage() {
               onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
               onConfigure={setConfigFor}
               onJob={queueJob}
+              onRollback={rollbackDeployment}
               onRemoveDep={removeDeployment} />
           ) : selectedGroup ? (
             <GroupInspector group={selectedGroup} agents={agents}
@@ -1148,7 +1163,7 @@ type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
 function ServerInspector({ agent: a, deployments, packages, vipIps,
                           onApprove, onRevoke, onRemove, onUpgrade, onRestart, onMetrics, onHealthCheck,
-                          onAddDeploy, onConfigure, onJob, onRemoveDep }: {
+                          onAddDeploy, onConfigure, onJob, onRollback, onRemoveDep }: {
   agent: Agent
   deployments: Deployment[]
   packages: SipPackage[]
@@ -1163,6 +1178,7 @@ function ServerInspector({ agent: a, deployments, packages, vipIps,
   onAddDeploy: () => void
   onConfigure: (d: Deployment) => void
   onJob: (d: Deployment, jt: JobType) => void
+  onRollback: (d: Deployment) => void
   onRemoveDep: (d: Deployment) => void
 }) {
   // online 은 이미 enroll 완료 — token 재발급 의미 없음. InstallSection 자체 hidden.
@@ -1272,7 +1288,7 @@ function ServerInspector({ agent: a, deployments, packages, vipIps,
                           onToggle={() => toggleSection('modules')}>
           <ModulesTab agent={a} deployments={deployments} packagesAvailable={packages.length > 0}
             onAddDeploy={onAddDeploy} onConfigure={onConfigure}
-            onJob={onJob} onRemoveDep={onRemoveDep} />
+            onJob={onJob} onRollback={onRollback} onRemoveDep={onRemoveDep} />
         </InspectorSection>
       </div>
     </>
@@ -1307,13 +1323,14 @@ function InspectorSection({ title, expanded, onToggle, children }: {
 }
 
 function ModulesTab({ agent: a, deployments, packagesAvailable,
-                     onAddDeploy, onConfigure, onJob, onRemoveDep }: {
+                     onAddDeploy, onConfigure, onJob, onRollback, onRemoveDep }: {
   agent: Agent
   deployments: Deployment[]
   packagesAvailable: boolean
   onAddDeploy: () => void
   onConfigure: (d: Deployment) => void
   onJob: (d: Deployment, jt: JobType) => void
+  onRollback: (d: Deployment) => void
   onRemoveDep: (d: Deployment) => void
 }) {
   return (
@@ -1335,7 +1352,8 @@ function ModulesTab({ agent: a, deployments, packagesAvailable,
           <tbody>
             {deployments.map(d => (
               <DeploymentRow key={d.id} dep={d} agent={a}
-                onConfigure={onConfigure} onJob={onJob} onRemove={onRemoveDep} />
+                onConfigure={onConfigure} onJob={onJob} onRollback={onRollback}
+                onRemove={onRemoveDep} />
             ))}
           </tbody>
         </table>
@@ -1350,10 +1368,11 @@ function ModulesTab({ agent: a, deployments, packagesAvailable,
   )
 }
 
-function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRemove }: {
+function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRollback, onRemove }: {
   dep: Deployment; agent: Agent
   onConfigure: (d: Deployment) => void
   onJob: (d: Deployment, jt: JobType) => void
+  onRollback: (d: Deployment) => void
   onRemove: (d: Deployment) => void
 }) {
   const sc = depStatusColor(d.status)
@@ -1362,6 +1381,10 @@ function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRemove }: {
   const notInstalled = d.status === 'pending'
   const canStart = online && (d.status === 'stopped' || d.status === 'running')
   const canOps   = online && (d.status === 'running' || d.status === 'stopped')
+  // 버전 단위 설치: 이전 버전 경로가 보존돼 있을 때만 롤백 가능
+  const canRollback = canOps && !!d.prev_install_path
+  const histTip = (d.install_history || [])
+    .map(h => `v${h.version || '?'} ${h.at} ${h.install_path}`).join('\n')
   return (
     <tr>
       <td style={{ padding: 0 }}>
@@ -1371,7 +1394,8 @@ function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRemove }: {
       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
         {d.service_functions.length === 0 ? '—' : d.service_functions.join(', ')}
       </td>
-      <td style={{ fontSize: 12 }}>
+      <td style={{ fontSize: 12 }}
+          title={`설치 경로: ${d.install_path || '—'}${histTip ? `\n\n설치 이력:\n${histTip}` : ''}`}>
         {d.package_name} <span style={{ color: 'var(--text-muted)' }}>v{d.package_version}</span>
       </td>
       <td>
@@ -1393,6 +1417,11 @@ function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRemove }: {
             onClick={() => onJob(d, 'restart')}>↻</button>
           <button className="btn btn--sm" disabled={!canOps} title="stop"
             onClick={() => onJob(d, 'stop')}>■</button>
+          <button className="btn btn--sm" disabled={!canRollback}
+            title={canRollback
+              ? `이전 버전으로 롤백 (v${d.prev_package_version || '?'} · ${d.prev_install_path})`
+              : '롤백 대상 없음 (이전 버전 설치 이력 없음)'}
+            onClick={() => onRollback(d)}>⤺ 롤백</button>
           <button className="btn btn--sm btn--danger" title="delete"
             onClick={() => onRemove(d)}>✕</button>
         </div>

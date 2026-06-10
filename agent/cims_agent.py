@@ -36,6 +36,7 @@ import http.server
 import json
 import os
 import platform
+import re
 import shutil
 import signal
 import socket
@@ -757,18 +758,97 @@ def _resolve_install_path(params: dict) -> str:
     명시 안 되면 modules/<m>/<v>/<p>/ 로 조합."""
     explicit = params.get("install_path")
     if explicit:
-        # 부모 디렉토리 쓰기 가능 여부 체크 — 디렉토리 자체가 없을 수도 있음
+        # 가장 가까운 존재하는 조상 디렉토리의 쓰기 가능 여부 체크 — 버전 디렉토리
+        # (<module>/<version>) 는 2 depth 까지 미존재일 수 있음.
         try:
-            if os.path.isdir(explicit) and os.access(explicit, os.W_OK):
-                return explicit
-            parent = os.path.dirname(explicit) or "/"
-            if os.path.isdir(parent) and os.access(parent, os.W_OK):
+            probe = explicit
+            while probe and probe != "/" and not os.path.isdir(probe):
+                probe = os.path.dirname(probe) or "/"
+            if probe and os.path.isdir(probe) and os.access(probe, os.W_OK):
                 return explicit
         except Exception:
             pass
         # 쓰기 불가 — cwd fallback (dev 환경: /opt/cims 권한 없음)
         return os.getcwd()
     return os.path.join(DEFAULT_INSTALL_ROOT, _default_install_subpath(params))
+
+
+# 버전 디렉토리 판별 — "0.0.35", "1.2", "1.2.3-rc1" 등. 모듈 잔재 디렉토리
+# (bin/config/lib 등) 와 절대 겹치지 않도록 선행 숫자+점 형태만 인정.
+_VERSION_DIR_RE = re.compile(r"^\d+(\.\d+){1,3}([.\-+][0-9A-Za-z.\-+]+)?$")
+
+
+def _module_root_of(install_path: str, module: str) -> str:
+    """install_path 로부터 모듈 루트(/…/<module>) 를 정규화.
+
+    - …/<module>/<version> → …/<module>      (이미 버전 경로)
+    - …/<module>           → 그대로           (durability 표준 경로)
+    - 그 외 (legacy 공유 루트 /opt/cims-agent 등) → <install_path>/<module>
+    """
+    base = (install_path or "").rstrip("/")
+    bn = os.path.basename(base)
+    if _VERSION_DIR_RE.match(bn) and os.path.basename(os.path.dirname(base)) == module:
+        return os.path.dirname(base)
+    if bn == module:
+        return base
+    return os.path.join(base, module)
+
+
+def _versioned_install_path(params: dict) -> tuple:
+    """버전 단위 설치 경로 결정 → (target_path, module_root, legacy_path).
+
+    target  = <module_root>/<version>  — 버전별 병렬 설치 (롤백 단위)
+    legacy  = params.install_path 해석 결과 (이전 라이브 경로; config 이관 원천)
+    module/version 미상이면 버전화 불가 → target=legacy (구 동작 유지).
+    """
+    legacy = _resolve_install_path(params)
+    module = (params.get("package_name") or "").strip()
+    version = (params.get("package_version") or "").strip()
+    if not module or not version or not _VERSION_DIR_RE.match(version):
+        return legacy, "", legacy
+    root = _module_root_of(legacy, module)
+    return os.path.join(root, version), root, legacy
+
+
+def _runtime_install_path(params: dict) -> str:
+    """start/restart/update_config 등 런타임 작업의 실효 install_path.
+
+    deployment 레코드가 아직 구 경로(비버전)를 가리켜도, 같은 모듈/버전의
+    버전 디렉토리가 이미 설치돼 있으면 그쪽을 우선 — upgrade(설치)와 restart 가
+    한 배치로 큐잉돼 record 갱신 전에 도착하는 stale-params 레이스 방어."""
+    target, _root, legacy = _versioned_install_path(params)
+    if target != legacy and os.path.isdir(target):
+        return target
+    return legacy
+
+
+def _prune_old_versions(module_root: str, keep: int = 3) -> list:
+    """모듈 루트의 버전 디렉토리를 mtime 최신 keep 개만 남기고 제거.
+
+    버전 패턴(_VERSION_DIR_RE) 디렉토리만 대상 — legacy 평탄 설치 잔재(bin/,
+    config/ 등)는 절대 건드리지 않음. 제거 목록 반환 (로그용)."""
+    removed = []
+    try:
+        if not os.path.isdir(module_root):
+            return removed
+        vers = []
+        for nm in os.listdir(module_root):
+            p = os.path.join(module_root, nm)
+            if os.path.isdir(p) and _VERSION_DIR_RE.match(nm):
+                try:
+                    vers.append((os.path.getmtime(p), p))
+                except OSError:
+                    pass
+        vers.sort(reverse=True)
+        for _mt, p in vers[keep:]:
+            try:
+                shutil.rmtree(p)
+                removed.append(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return removed
 
 
 def _write_config_file(install_path: str, config_values: dict) -> str:
@@ -780,19 +860,15 @@ def _write_config_file(install_path: str, config_values: dict) -> str:
     return cfg_path
 
 
-def _find_previous_install(module: str, process: str, current_version: str) -> str:
-    """같은 모듈의 이전 버전 install_path 찾기 (mtime 최신 1개).
+def _find_previous_install(module_root: str, current_version: str) -> str:
+    """같은 모듈 루트의 이전 버전 install_path 찾기 (mtime 최신 1개).
 
-    새 버전 설치 시 기존 config/ 를 이관하기 위한 조회. install_subpath 가
-    `<module>/<version>` 으로 단축됨 (옛 `<module>/<version>/<process>` 에서).
-    process 파라미터는 signature 호환 위해 유지하지만 미사용.
-    """
-    del process  # 호환용; install layout 단축 (modules/<module>/<version>/) 으로 미사용.
-    module_root = os.path.join(DEFAULT_INSTALL_ROOT, module)
-    if not os.path.isdir(module_root): return ""
+    새 버전 설치 시 기존 config/ 를 이관하기 위한 조회. 버전 패턴 디렉토리만
+    후보 (legacy 평탄 잔재 배제)."""
+    if not module_root or not os.path.isdir(module_root): return ""
     candidates = []
     for v in os.listdir(module_root):
-        if v == current_version: continue
+        if v == current_version or not _VERSION_DIR_RE.match(v): continue
         p = os.path.join(module_root, v)
         if os.path.isdir(p):
             try: candidates.append((os.path.getmtime(p), p))
@@ -828,17 +904,22 @@ def _detect_tar_pkg_subdir(tar_path: str) -> str:
 
 
 def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
-    """PKG 다운로드 + tarball 풀어 install_path 에 설치. config.json 도 함께 기록.
+    """PKG 다운로드 + tarball 풀어 **버전 단위 경로** 에 설치. config.json 도 함께 기록.
 
-    새 버전이고 같은 모듈/프로세스의 이전 버전이 존재하면
-    이전 install_path 의 config/ 와 config.json 을 신규 경로로 복사(자동 이관).
+    설치 경로 = <module_root>/<package_version>/ (예: /opt/cims-agent/csp/0.0.36).
+    버전별 병렬 설치 → 롤백 = deployment.install_path 를 이전 버전 디렉토리로 전환.
+    stdout 의 `at <path> (` 를 OAM report 훅이 파싱해 deployment.install_path 갱신.
 
-    멀티-변종 install (같은 install_path 에 csp/ 와 isp/ 처럼 sibling 디렉토리 공존)
-    지원: tarball 의 단일 top-level 디렉토리만 wipe/backup 범위로 좁힘. 형제 디렉토리
-    (예: csp install 시 isp/) 영향 없음.
+    config 이관: 이전 라이브 경로(params.install_path; legacy 평탄 설치 포함) 또는
+    최신 sibling 버전 디렉토리에서 config/(HA 동기 collection jsonl) + <pkg>/config.json
+    (deployment overlay) 을 신규 버전 디렉토리로 복사 — collection 은 항상
+    해당 모듈/해당 버전의 config 에 귀속된다.
+
+    설치 후 오래된 버전 디렉토리는 최신 3개만 유지(prune); legacy 평탄 잔재
+    (bin/, config/ 등 비버전 엔트리)는 건드리지 않는다.
     """
     pkg_id = params.get("package_id")
-    install_path = _resolve_install_path(params)
+    install_path, module_root, legacy_path = _versioned_install_path(params)
     if not pkg_id:
         return 1, "", "package_id missing"
 
@@ -910,25 +991,50 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
     # cims.sh start_*_variant 는 같은 경로에서 overlay 를 읽도록 갱신.
     cfg_target_dir = os.path.join(install_path, pkg_subdir) if pkg_subdir else install_path
 
-    # 이전 버전 config 이관 (같은 모듈/프로세스, 다른 버전)
+    # 이전 설치본 config 이관 — 원천 우선순위:
+    #   1) params.migrate_from (OAM 이 명시한 구 경로)
+    #   2) legacy_path (deployment 레코드의 이전 install_path — 평탄 설치 포함)
+    #   3) 최신 sibling 버전 디렉토리
     migrated = ""
-    module  = (params.get("package_name") or "").strip()
     version = (params.get("package_version") or "").strip()
-    process = (params.get("process_name") or "").strip().upper() or (module.upper() if module else "")
-    if module and process and version:
-        prev = _find_previous_install(module, process, version)
-        if prev and prev != install_path:
+    if install_path != legacy_path:
+        src = ""
+        for cand in ((params.get("migrate_from") or "").strip(), legacy_path,
+                     _find_previous_install(module_root, version)):
+            if cand and cand != install_path and os.path.isdir(cand):
+                src = cand
+                break
+        if src:
             try:
-                prev_cfg = os.path.join(prev, "config")
-                new_cfg  = os.path.join(cfg_target_dir, "config")
-                if os.path.isdir(prev_cfg) and not os.path.isdir(new_cfg):
-                    shutil.copytree(prev_cfg, new_cfg, symlinks=True)
-                    migrated = f" (config migrated from {prev})"
-                prev_scalar = os.path.join(prev, "config.json")
-                new_scalar  = os.path.join(cfg_target_dir, "config.json")
-                if os.path.isfile(prev_scalar) and not os.path.isfile(new_scalar) \
-                        and not (params.get("config")):
-                    shutil.copy2(prev_scalar, new_scalar)
+                # ① HA 동기 collection jsonl → 신규 버전의 install_path/config/
+                #    (CSP jsonlDir = csp.json 부모×3 = 버전 디렉토리/config — 버전 귀속)
+                src_col = os.path.join(src, "config")
+                dst_col = os.path.join(install_path, "config")
+                if os.path.isdir(src_col):
+                    os.makedirs(dst_col, exist_ok=True)
+                    for fn in os.listdir(src_col):
+                        if not fn.endswith(".jsonl"):
+                            continue
+                        s = os.path.join(src_col, fn)
+                        d = os.path.join(dst_col, fn)
+                        if os.path.isfile(s) and not os.path.exists(d):
+                            shutil.copy2(s, d)
+                            migrated += f" +{fn}"
+                # ② deployment overlay (<pkg>/config.json; legacy 는 root config.json)
+                #    params.config 가 오면 그 값이 SoT — 이관 생략.
+                if not params.get("config"):
+                    for rel in ((os.path.join(pkg_subdir, "config.json") if pkg_subdir else ""),
+                                "config.json"):
+                        if not rel:
+                            continue
+                        s = os.path.join(src, rel)
+                        d = os.path.join(cfg_target_dir, "config.json")
+                        if os.path.isfile(s) and not os.path.isfile(d):
+                            shutil.copy2(s, d)
+                            migrated += " +overlay"
+                            break
+                if migrated:
+                    migrated = f" (migrated from {src}:{migrated})"
             except Exception as e:
                 return 6, "", f"config migration failed: {e}"
 
@@ -952,8 +1058,16 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
     os.makedirs(os.path.join(cfg_target_dir, "config"), exist_ok=True)
     os.makedirs(os.path.join(install_path, "config"), exist_ok=True)
 
+    # 오래된 버전 디렉토리 prune (최신 3개 유지; 방금 설치본이 mtime 최신이므로
+    # 직전 버전 2개까지 롤백 가능). legacy 평탄 잔재는 비대상.
+    pruned = ""
+    if module_root and install_path != legacy_path:
+        removed = _prune_old_versions(module_root, keep=3)
+        if removed:
+            pruned = f" pruned={','.join(os.path.basename(p) for p in removed)}"
+
     return 0, (f"installed pkg_id={pkg_id} at {install_path} ({len(data)} bytes) "
-               f"config={cfg_path}{migrated}"), ""
+               f"config={cfg_path}{migrated}{pruned}"), ""
 
 
 def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
@@ -989,16 +1103,19 @@ def job_update_config(params: dict, oam_url: str = "", session_token: str = "") 
     HA fan-out: params.sync_id 가 있으면 csc 에 ack/nack 보고.
     """
     sync_id = params.get("sync_id")
-    install_path = _resolve_install_path(params)
+    install_path = _runtime_install_path(params)
     if not os.path.isdir(install_path):
         return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=1, err=f"install_path not found: {install_path}")
+    pkg_subdir = _resolve_pkg_subdir(install_path, params)
+    # overlay 는 모듈 바이너리가 읽는 위치(<pkg>/config.json = csp.json 부모×2) 에
+    # 기록 — pkg_subdir 없는 단일-루트 설치는 install_path 직하 (구 동작과 동일).
+    cfg_dir = os.path.join(install_path, pkg_subdir) if pkg_subdir else install_path
     try:
-        cfg_path = _write_config_file(install_path, params.get("config") or {})
+        cfg_path = _write_config_file(cfg_dir, params.get("config") or {})
     except Exception as e:
         return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=2, err=f"write config failed: {e}")
-    pkg_subdir = _resolve_pkg_subdir(install_path, params)
     _, signaled = _signal_process(install_path, "usr1", pkg_subdir=pkg_subdir)
     return _sync_ack_and_return(oam_url, session_token, sync_id,
                                 rc=0, out=f"config updated: {cfg_path} signaled={signaled}")
@@ -1025,7 +1142,9 @@ def job_sync_config(params: dict, oam_url: str, session_token: str) -> tuple:
     sync_id    = params.get("sync_id")
     collection = params.get("collection") or ""
     op         = params.get("op") or "UPDATE"
-    install_path = _resolve_install_path(params)
+    # 버전 단위 설치: install_path 는 활성 버전 디렉토리 — collection jsonl 은
+    # 항상 해당 모듈/해당 버전의 config/ 에 귀속 (버전별 config 분리 요구).
+    install_path = _runtime_install_path(params)
     if not install_path or not os.path.isdir(install_path):
         return _sync_ack_and_return(oam_url, session_token, sync_id,
                                     rc=1, err=f"install_path not found: {install_path}")
@@ -1654,7 +1773,9 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     cims-svc 에 CIMS_DIST_DIR=install_path 환경변수 전달 → cims-svc 가 install_path
     기준으로 DIST_DIR 결정 (install_path 의 csc/console 시작).
     """
-    install_path = _resolve_install_path(params)
+    # 버전 전환 레이스 방어: deployment 레코드가 stale 이어도 설치 완료된
+    # 버전 디렉토리가 있으면 그쪽을 실효 경로로 사용.
+    install_path = _runtime_install_path(params)
     svc = (params.get("process_name") or params.get("service_kind") or "").lower()
     # Phase 4 fix: svc 빈 경우 명시 에러. cims-svc 가 svc 인자 없이 호출되면
     # default 'all' fallback → 단일 모듈 install 환경에서 cmp/csp 못 찾아 fail.
@@ -1665,12 +1786,25 @@ def job_process_control(params: dict, job_type: str) -> tuple:
             "process_name 누락 — deployment.process_name 필드 필수 "
             f"(install_path={install_path}, job_type={job_type})"
         )
+    # 버전 단위 설치 전환: 현재 감독(supervised) 중인 인스턴스가 다른 경로
+    # (구 버전 디렉토리 / legacy 평탄 설치) 에서 떠 있으면 먼저 그 경로에서 stop.
+    # 미수행 시 신 버전 start 가 포트 바인드 충돌로 fail-fast (구 프로세스는
+    # exe 경로가 달라 lifecycle 의 kill_stray/own-listener 정리에 안 잡힘).
+    prev_note = ""
+    prev_path = _load_supervised().get(svc)
+    if prev_path and prev_path != install_path and os.path.isdir(prev_path):
+        prc, _pout, perr = _run_cims_svc(prev_path, "stop", svc)
+        prev_note = f" (prev-stop {prev_path} rc={prc}{' ' + perr.strip()[:120] if prc else ''})"
+        if job_type == "stop":
+            _unmark_supervised(svc)
     # 우선순위:
     #  1) install_path/agent/bin/cims-svc — 모듈 자체에 운영 도구를 ship 하는 경우 (구식)
     #  2) _AGENT_DIR/bin/cims-svc — 일반 케이스. 에이전트가 자기 옆 bin/cims-svc 사용
     #     (install-agent.sh 가 /opt/cims-agent/agent/bin/ 에 둠).
     #  3) /opt/cims-agent/agent/bin/cims-svc — agent 가 다른 곳에서 실행되는 경우 명시 fallback
     rc, out, err = _run_cims_svc(install_path, job_type, svc)
+    if prev_note:
+        out = (out or "") + prev_note
     # 모듈 감독 desired-state 갱신 — start/restart 성공 → 감독 등록, stop → 해제.
     # (watchdog 가 supervised 집합의 죽은 모듈을 auto-restart)
     if rc == 0:
@@ -2042,7 +2176,28 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             install_path = params.get("install_path")
             # 감독 해제 (watchdog 가 재시작하지 않도록)
             _unmark_supervised((params.get("process_name") or params.get("service_kind") or "").lower())
-            if install_path and os.path.isdir(install_path):
+            # 버전 디렉토리(…/<module>/<version>) 면 모듈 루트 전체 제거 —
+            # uninstall 은 모듈 deployment 자체의 철거이므로 병렬 버전도 함께.
+            module = (params.get("package_name") or "").strip()
+            if install_path and module:
+                base = install_path.rstrip("/")
+                if _VERSION_DIR_RE.match(os.path.basename(base)) and \
+                        os.path.basename(os.path.dirname(base)) == module:
+                    install_path = os.path.dirname(base)
+            # 안전 가드: agent 자신을 포함하는 경로(공유 루트 /opt/cims-agent 등)는
+            # rmtree 금지 — legacy 공유 install_path deployment 의 uninstall 이
+            # agent/형제 모듈까지 파괴하는 사고 방지. pkg 디렉토리만 제거.
+            agent_root = os.path.dirname(_AGENT_DIR)
+            if install_path and os.path.isdir(install_path) and \
+                    os.path.realpath(install_path) in (os.path.realpath(agent_root),
+                                                       os.path.realpath(_AGENT_DIR)):
+                sub = os.path.join(install_path, module) if module else ""
+                if sub and os.path.isdir(sub):
+                    shutil.rmtree(sub, ignore_errors=True)
+                    rc, out, err = 0, f"removed {sub} (shared-root guard)", ""
+                else:
+                    rc, out, err = 1, "", f"refuse rmtree shared root: {install_path}"
+            elif install_path and os.path.isdir(install_path):
                 shutil.rmtree(install_path, ignore_errors=True)
                 rc, out, err = 0, f"removed {install_path}", ""
             else:

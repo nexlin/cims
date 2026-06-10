@@ -1606,6 +1606,9 @@ def _deployment_to_json(r: dict) -> dict:
         "service_functions": sf_list,
         "status":       r.get("status"),
         "install_path": r.get("install_path"),
+        "prev_install_path": r.get("prev_install_path"),
+        "prev_package_version": r.get("prev_package_version"),
+        "install_history": r.get("install_history") if isinstance(r.get("install_history"), list) else [],
         "deployed_at":  _maybe_dt(r.get("deployed_at")),
         "last_job_id":  r.get("last_job_id"),
         "note":         r.get("note"),
@@ -1644,6 +1647,8 @@ async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> Handler
             if method == "DELETE": return await _delete_deployment(did, config)
         elif len(tail) == 2 and tail[1] == "job" and method == "POST":
             return await _queue_job(handler_args, did, config)
+        elif len(tail) == 2 and tail[1] == "rollback" and method == "POST":
+            return await _rollback_deployment(handler_args, did, config)
         elif len(tail) == 2 and tail[1] == "config":
             if method == "GET":  return await _get_deployment_config(did, config)
             if method == "PUT":  return await _put_deployment_config(handler_args, did, config)
@@ -1974,6 +1979,131 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
                                 {'status': transition[job_type], 'last_job_id': job_id})
     return HandlerResult(status=202, body={"job_id": job_id, "status": "queued"},
                          media_type="application/json")
+
+
+async def _rollback_deployment(handler_args: HandlerArgs, did: int, config):
+    """POST /deployments/{id}/rollback — 버전 단위 설치 롤백.
+
+    body (선택): { "install_path": str, "version": str }
+      미지정 시 install_history 의 직전 항목 → prev_install_path 순으로 자동 선택.
+
+    수행: deployment 레코드의 install_path/package_version 을 대상 버전으로 전환
+    → collection 재동기 (v3 collection 의 SoT = 활성 deployment 의 jsonl 이므로,
+    현 버전 디렉토리의 jsonl 을 sync REST 로 읽어 대상 버전 config/ 에 PUT —
+    구버전 설치 후 변경된 collection 의 stale 방지) → restart job 큐잉
+    (agent 가 supervised 경로 비교로 현재 버전 인스턴스를 먼저 stop).
+    실제 파일은 agent 가 보존 중인 버전 디렉토리 — 없으면 start 가 fail-fast.
+    """
+    body = _parse_body(handler_args)
+    dep = await asyncio.to_thread(_deploy_load, config, did)
+    if not dep:
+        return HandlerResult(status=404, body={"error": "deployment_not_found"},
+                             media_type="application/json")
+    _enrich_deploy([dep], config)
+    current = dep.get("install_path") or ""
+
+    # ── 대상 결정
+    target_path = (body.get("install_path") or "").strip()
+    target_ver  = (body.get("version") or "").strip()
+    hist = dep.get("install_history") if isinstance(dep.get("install_history"), list) else []
+    if not target_path and target_ver:
+        for h in reversed(hist):
+            if h.get("version") == target_ver and h.get("install_path") != current:
+                target_path = h.get("install_path") or ""
+                break
+        # 이력에 없으면 관례 경로 (<module_root>/<version>) 추정
+        if not target_path and current:
+            base = current.rstrip("/")
+            parent = os.path.dirname(base)
+            if dep.get("package_name") and os.path.basename(parent) == dep.get("package_name"):
+                target_path = os.path.join(parent, target_ver)
+    if not target_path:
+        for h in reversed(hist):
+            if h.get("install_path") and h.get("install_path") != current:
+                target_path = h["install_path"]
+                target_ver = target_ver or h.get("version") or ""
+                break
+    if not target_path:
+        prev = dep.get("prev_install_path")
+        if prev and prev != current:
+            target_path = prev
+            target_ver = target_ver or dep.get("prev_package_version") or ""
+    if not target_path or target_path == current:
+        return HandlerResult(status=409,
+            body={"error": "no_rollback_target",
+                  "hint": "install_history/prev_install_path 없음 — body.install_path 로 명시 가능",
+                  "current": current},
+            media_type="application/json")
+
+    # 대상 버전 미상이면 경로 basename 에서 유추 (<module_root>/<version>)
+    if not target_ver:
+        bn = os.path.basename(target_path.rstrip("/"))
+        import re as _re2
+        if _re2.match(r"^\d+(\.\d+){1,3}", bn):
+            target_ver = bn
+
+    # ── 레코드 전환 (버전 단위 설치: 롤백 = install_path 전환, 02_deployment.md §2)
+    patches = {"install_path": target_path, "status": "deploying",
+               "prev_install_path": current,
+               "prev_package_version": dep.get("package_version")}
+    if target_ver:
+        patches["package_version"] = target_ver
+        # 같은 (이름, 버전) 의 패키지가 등록돼 있으면 package_id 도 함께 전환
+        try:
+            p = await asyncio.to_thread(_pkg_load, config, None,
+                                        dep.get("package_name"), target_ver)
+            if p and p.get("id"):
+                patches["package_id"] = p.get("id")
+        except Exception:
+            pass
+    await asyncio.to_thread(_deploy_update, config, did, patches)
+
+    cfg = dep.get("config") if isinstance(dep.get("config"), (dict, list)) \
+          else _safe_json(dep.get("config_json"))
+    sf = dep.get("service_functions")
+    if isinstance(sf, str):
+        sf = _split_csv(sf)
+    base_params = {
+        "deployment_id": did,
+        "package_id":    dep.get("package_id"),
+        "package_name":  dep.get("package_name"),
+        "package_version": target_ver or dep.get("package_version"),
+        "process_name":  dep.get("process_name"),
+        "service_functions": sf or [],
+        "install_path":  target_path,
+        "config":        cfg,
+    }
+    # collection 재동기 — 현 버전 디렉토리의 jsonl (SoT) 을 대상 버전 config/ 로 복사.
+    # restart 전에 동기 수행 (PUT 의 SIGUSR1 은 미기동 프로세스에 무해).
+    synced = []
+    dep_proxy = await asyncio.to_thread(_fetch_deployment_for_proxy, did, config)
+    if dep_proxy and current:
+        tpl = dep_proxy.get("config_template_json")
+        tpl = tpl if isinstance(tpl, dict) else _safe_json(tpl)
+        col_keys = [c.get("key") for c in (tpl or {}).get("collections") or []
+                    if isinstance(c, dict) and c.get("key")]
+        for name in col_keys:
+            st, b = await asyncio.to_thread(
+                _agent_proxy_call, "GET", dep_proxy, "/collection",
+                {"install_path": current, "name": name}, None, 15, config)
+            recs = (b or {}).get("records") if isinstance(b, dict) else None
+            if st == 200 and isinstance(recs, list) and recs:
+                st2, _b2 = await asyncio.to_thread(
+                    _agent_proxy_call, "PUT", dep_proxy, "/collection",
+                    {"install_path": target_path, "name": name},
+                    {"records": recs, "signal": False}, 15, config)
+                synced.append(f"{name}({len(recs)}):{st2}")
+
+    restart_id = await asyncio.to_thread(_job_create, config, dep["agent_id"], "restart",
+                                         dict(base_params, extra={"rollback_from": current}))
+    await asyncio.to_thread(_deploy_update, config, did, {"last_job_id": restart_id})
+    logger.log_info(f"[deployment-rollback] dep={did} {current} -> {target_path} "
+                    f"(ver={target_ver or '?'}) synced={synced} restart_job={restart_id}")
+    return HandlerResult(status=202,
+        body={"ok": True, "job_ids": [restart_id], "restart_job_id": restart_id,
+              "collections_synced": synced,
+              "install_path": target_path, "version": target_ver or None},
+        media_type="application/json")
 
 
 # ════════════════════════════════════════════════════════════

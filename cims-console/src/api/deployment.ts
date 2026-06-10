@@ -383,6 +383,9 @@ export interface Deployment {
   service_functions: string[]     // machine names
   status: 'pending' | 'deploying' | 'running' | 'stopped' | 'failed' | 'removed'
   install_path: string | null
+  prev_install_path?: string | null
+  prev_package_version?: string | null
+  install_history?: Array<{ version: string | null; install_path: string; at: string; job_id?: number }>
   deployed_at: string | null
   last_job_id: number | null
   note: string | null
@@ -503,6 +506,10 @@ export const deploymentApi = {
   deleteDeployment: (id: number) => api.delete<null>(`/deployments/${id}`),
   queueJob: (id: number, job_type: JobType, extra?: Record<string, unknown>) =>
     api.post<{ job_id: number; status: string }>(`/deployments/${id}/job`, { job_type, extra }),
+  rollbackDeployment: (id: number, target?: { install_path?: string; version?: string }) =>
+    api.post<{ ok: boolean; job_ids: number[]; restart_job_id: number;
+               install_path: string; version: string | null }>(
+      `/deployments/${id}/rollback`, target || {}),
 
   // deployment config (템플릿 기반)
   getDeploymentConfig: (id: number) =>

@@ -29,36 +29,36 @@ CIMS 는 여러 물리 서버에 모듈을 개별 배포하고 **Console 에서 
 - **Deployment**: "특정 Agent 에 특정 Package 를 배치한 인스턴스". `process_name` (CSP/PSP/ISP/CMP/PMP/IMP) + `service_functions` (volte/ptt/ibcf/...) 필드로 변종 구분. `install_path/config.json` 의 deployment overlay 가 `csp.json`/`cmp.json` 시작 직전 머지 → 같은 base 바이너리에 다른 Roles/LocalIp/Port.
 - **Collection**: 각 Deployment 의 `install_path/config/*.jsonl` — listener, trunk, route, acl 등 행 단위 설정. 즉시 적용 (SIGUSR1).
 
-## 2. 배포 디렉토리 구조
+## 2. 배포 디렉토리 구조 (버전 단위 설치 — 2026-06-10 확립)
 
 ```
-<agent 설치 디렉토리>/modules/
-└── csp/
-    ├── 0.0.1/
-    │   ├── CSP/                  ← process=CSP (VoLTE+PTT+IBCF 통합)
+/opt/cims-agent/                      ← agent 설치 루트
+├── agent/                            ← agent 자신 (self-upgrade 가 통째로 교체)
+└── csp/                              ← 모듈 루트 (/opt/cims-agent/<module>)
+    ├── 0.0.35/                       ← 버전 디렉토리 = deployment.install_path
+    │   ├── csp/                      ←   tarball top dir (변종이면 psp/, isp/)
     │   │   ├── bin/csp
-    │   │   ├── cims.sh
-    │   │   ├── config.json       ← scalar 설정 (template sections)
-    │   │   └── config/
-    │   │       ├── listeners.jsonl
-    │   │       ├── trunks.jsonl
-    │   │       ├── routes.jsonl
-    │   │       ├── acl.jsonl
-    │   │       └── services.jsonl
-    │   └── PSP/                  ← process=PSP (PTT 전용, 같은 버전 공존)
-    └── 0.0.2/                    ← 새 버전은 병렬 설치 → 롤백 가능
+    │   │   ├── config/csp.json       ←   scalar 설정 (tarball 동봉 base)
+    │   │   └── config.json           ←   deployment overlay (Roles/LocalIp/Port)
+    │   ├── config/                   ←   HA 동기 collection jsonl — **해당 버전에 귀속**
+    │   │   ├── local_nodes.jsonl     ←   (CSP jsonlDir = csp.json 부모×3 = 여기)
+    │   │   ├── access_services.jsonl
+    │   │   └── ...
+    │   ├── run/  log/                ←   pid / 로그 (cims-svc DIST_DIR=버전 디렉토리)
+    └── 0.0.36/                       ← 새 버전 병렬 설치 → 롤백 가능 (최신 3개 유지)
 ```
 
-- 버전 업그레이드 시 기존 `config/` 와 `config.json` 을 새 버전 디렉토리로 자동 복사 (Agent `job_install`)
-- 같은 모듈의 여러 프로세스 변종(CSP/PSP/ISP 등) 공존 가능
-- 롤백: `agent_deployment.install_path` 를 이전 버전 경로로 전환
+- **버전 경로 파생은 Agent `job_install` 이 수행**: params 의 (install_path, package_name, package_version) 로 `<module_root>/<version>` 을 계산 — deployment 레코드가 legacy 경로(공유 루트/모듈 디렉토리)여도 자동 정규화. 설치 성공 stdout 의 `at <path> (` 를 OAM report 훅이 파싱해 `deployment.install_path` 갱신 + `prev_install_path`/`install_history` 기록.
+- **config 이관**: 직전 라이브 경로(legacy 포함) 또는 최신 sibling 버전에서 `config/*.jsonl`(collection) + `<pkg>/config.json`(overlay) 을 새 버전 디렉토리로 복사. `params.config` 가 오면 overlay 는 그 값이 SoT. **버전별 config 스키마가 다를 수 있으므로 collection 동기화(agent `job_sync_config`)도 항상 활성 버전 디렉토리의 `config/` 에 기록**된다.
+- **롤백**: `POST /api/v1/deployments/<id>/rollback` (body 생략 시 직전 버전) — 레코드 install_path 전환 → collection 재동기(sync_config; 구버전 설치 후 변경분 stale 방지) → restart 큐잉. Agent 는 supervised 경로 비교로 다른 경로(구 버전)에서 떠 있는 인스턴스를 먼저 stop 한다 (포트 충돌 방지).
+- **보존 정책**: 설치 성공 시 모듈 루트의 버전 디렉토리를 mtime 최신 3개만 유지(prune). 버전 패턴(`^\d+(\.\d+){1,3}…`) 디렉토리만 대상 — legacy 평탄 설치 잔재(bin/, config/ 등)는 건드리지 않는다.
+- 같은 모듈의 여러 프로세스 변종(CSP/PSP/ISP 등)은 각자 모듈 루트가 분리 (`/opt/cims-agent/psp/<ver>/`).
 
-> ⚠️ **install_path durability 제약** (2026-06-01 확립)
-> 모듈 `install_path` 는 반드시 **`/opt/cims-agent/<module>` (agent/ 트리 밖, `agent/` 와 sibling)** 이어야 한다.
-> - **이유**: agent self-upgrade(`install-agent.sh --update-only`)는 `/opt/cims-agent/agent/` 트리 전체를 교체(old → `agent.old` → 삭제)한다. install_path 가 `…/agent/modules/<m>/<ver>` 처럼 agent/ 안에 있으면 upgrade 마다 모듈 바이너리가 파괴되고, 실행 중 프로세스는 **deleted-inode 좀비**(`/proc/<pid>/exe` → `… (deleted)`)로 남아 재시작 불가가 된다.
-> - **각 모듈은 자기 하위 경로**(`/opt/cims-agent/isp`, `/opt/cims-agent/psp`)를 써야 한다. csp 와 동일한 `/opt/cims-agent` 로 주면 `jsonlDir = install_path/config` 가 겹쳐 **셋 다 5060 바인드 충돌**한다.
+> ⚠️ **install_path durability 제약** (2026-06-01 확립, 버전 단위 설치와 양립)
+> 모듈 루트는 반드시 **`/opt/cims-agent/<module>` (agent/ 트리 밖, `agent/` 와 sibling)** 이어야 한다.
+> - **이유**: agent self-upgrade(`install-agent.sh --update-only`)는 `/opt/cims-agent/agent/` 트리 전체를 교체(old → `agent.old` → 삭제)한다. install_path 가 agent/ 안에 있으면 upgrade 마다 모듈 바이너리가 파괴되고, 실행 중 프로세스는 **deleted-inode 좀비**(`/proc/<pid>/exe` → `… (deleted)`)로 남아 재시작 불가가 된다.
+> - 모듈 루트가 분리되므로 `jsonlDir = <버전 디렉토리>/config` 도 모듈·버전별로 격리 — 구 공유 루트(`/opt/cims-agent` 직접 지정) 시절의 listener 포트 바인드 충돌·collection 공유 문제가 구조적으로 사라진다.
 > - 경로 마이그레이션 후 옛 좀비는 `lifecycle.sh` `kill_deleted_inode_orphans <name>`(start 변종이 호출, deleted-inode 동일 이름만 kill)가 정리한다.
-> - install_path 변경은 **PUT** `/api/v1/deployments/<id>` body `{"install_path":…}` (PATCH 무시됨) → install → collection 재푸시 → start.
 
 ## 3. 제어 평면 (Control Plane)
 

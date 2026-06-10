@@ -634,9 +634,32 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
             new_status = "running" if jt in ("start","restart") else "stopped"
             patches = {'status': new_status, 'last_job_id': job_id}
             from datetime import datetime as _dt
-            patches['deployed_at'] = _dt.now().isoformat(timespec='seconds')
+            now_iso = _dt.now().isoformat(timespec='seconds')
+            patches['deployed_at'] = now_iso
             if new_install_path:
                 patches['install_path'] = new_install_path
+                # 버전 단위 설치: 직전 경로/버전 + 설치 이력 기록 → 롤백 근거.
+                from handlers.agents import _deploy_load
+                cur = await asyncio.to_thread(_deploy_load, config, dep_id) or {}
+                old_path = cur.get('install_path')
+                if old_path and old_path != new_install_path:
+                    patches['prev_install_path'] = old_path
+                    # raw 레코드엔 package_version 이 없을 수 있음(패키지 join 필드)
+                    # → 구 경로 basename 이 버전 형식이면 그걸 사용.
+                    prev_ver = cur.get('package_version')
+                    if not prev_ver:
+                        bn = os.path.basename(old_path.rstrip('/'))
+                        if _re.match(r'^\d+(\.\d+){1,3}', bn):
+                            prev_ver = bn
+                    patches['prev_package_version'] = prev_ver
+                hist = cur.get('install_history')
+                hist = list(hist) if isinstance(hist, list) else []
+                ver = (params.get('package_version') if isinstance(params, dict) else None) \
+                      or cur.get('package_version')
+                if not hist or hist[-1].get('install_path') != new_install_path:
+                    hist.append({'version': ver, 'install_path': new_install_path,
+                                 'at': now_iso, 'job_id': job_id})
+                patches['install_history'] = hist[-10:]
             await asyncio.to_thread(_deploy_update, config, dep_id, patches)
         elif dep_id and jt in ("stop", "uninstall"):
             new_status = "removed" if jt == "uninstall" else "stopped"

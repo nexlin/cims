@@ -32,10 +32,13 @@ if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
 #      ..  = install_path/csc/<ver>
 #      ../.. = install_path/csc
 #      ../../.. = install_path  ← 여기서 oam/<ver>/oam/src 매칭
+#   3) agent install 혼합 상태: csc 는 버전 경로인데 oam 모듈이 legacy 평탄
+#      (install_path/oam/src) 인 경우 — _COMPONENT_ROOT/../../../oam/src
 _OAM_SRC = None
 _candidates = [os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'oam', 'src'))]
 _glob_pattern = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', '..', 'oam', '*', 'oam', 'src'))
 _candidates += sorted(glob.glob(_glob_pattern), reverse=True)
+_candidates.append(os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', '..', 'oam', 'src')))
 for _c in _candidates:
     if os.path.isdir(_c):
         _OAM_SRC = _c
