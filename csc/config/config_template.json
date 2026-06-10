@@ -6,118 +6,253 @@
       "title": "Admin API (콘솔 ↔ CSC)",
       "description": "콘솔 UI 와 agent 가 연결하는 HTTPS 포트.",
       "fields": [
-        { "key": "Server.Ip", "label": "Admin API 바인딩 IP",
-          "type": "string", "default": "0.0.0.0",
-          "required": true, "restart": true,
-          "help": "0.0.0.0 = 모든 인터페이스." },
-        { "key": "Server.Port", "label": "Admin API 포트",
-          "type": "int", "default": 4421, "min": 1, "max": 65535,
-          "required": true, "restart": true,
-          "help": "Phase 1 Test-CSC 기본 4421 (Phase 2 배포본 기본 4420 과 분리)." }
-      ]
+        {
+          "key": "Server.Ip",
+          "label": "Admin API 바인딩 IP",
+          "type": "string",
+          "default": "0.0.0.0",
+          "required": true,
+          "restart": true,
+          "help": "0.0.0.0 = 모든 인터페이스."
+        },
+        {
+          "key": "Server.Port",
+          "label": "Admin API 포트",
+          "type": "int",
+          "default": 4421,
+          "min": 1,
+          "max": 65535,
+          "required": true,
+          "restart": true,
+          "help": "Phase 1 Test-CSC 기본 4421 (Phase 2 배포본 기본 4420 과 분리)."
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "mcptt_api",
       "title": "MCPTT API (단말 ↔ CSC)",
       "description": "cims-phone 등 MCPTT 클라이언트 용 HTTPS 포트.",
       "fields": [
-        { "key": "McpttServer.Ip", "label": "MCPTT API 바인딩 IP",
-          "type": "string", "default": "0.0.0.0", "restart": true },
-        { "key": "McpttServer.Port", "label": "MCPTT API 포트",
-          "type": "int", "default": 4430, "min": 1, "max": 65535,
-          "restart": true }
-      ]
+        {
+          "key": "McpttServer.Ip",
+          "label": "MCPTT API 바인딩 IP",
+          "type": "string",
+          "default": "0.0.0.0",
+          "restart": true
+        },
+        {
+          "key": "McpttServer.Port",
+          "label": "MCPTT API 포트",
+          "type": "int",
+          "default": 4430,
+          "min": 1,
+          "max": 65535,
+          "restart": true
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "notify",
       "title": "Signaling Notify",
       "description": "가입자/그룹 변경 실시간 반영 대상. CSP=VoLTE (CSCF/TAS) / PSP=PTT (CSCF/PTT-AS). PSP IP 가 CSP 와 다르면 자동 분리 broadcast — USER_CHANGED 는 양쪽, GROUP_CHANGED 는 PSP 전용.",
       "fields": [
-        { "key": "CspNotify.Ip", "label": "CSP (VoLTE) IP",
-          "type": "string", "default": "127.0.0.1", "deploy_value": "@CSP_IP@",
+        {
+          "key": "CspNotify.Ip",
+          "label": "CSP (VoLTE) IP",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@CSP_IP@",
           "restart": false,
-          "reload_hint": "런타임 리로드 가능 (다음 notify 부터 적용)." },
-        { "key": "CspNotify.Port", "label": "CSP Notify 포트",
-          "type": "int", "default": 4421, "min": 1, "max": 65535,
-          "restart": false },
-        { "key": "PspNotify.Ip", "label": "PSP (PTT) IP",
-          "type": "string", "default": "127.0.0.1", "deploy_value": "@PSP_IP@",
+          "reload_hint": "런타임 리로드 가능 (다음 notify 부터 적용)."
+        },
+        {
+          "key": "CspNotify.Port",
+          "label": "CSP Notify 포트",
+          "type": "int",
+          "default": 4421,
+          "min": 1,
+          "max": 65535,
+          "restart": false
+        },
+        {
+          "key": "PspNotify.Ip",
+          "label": "PSP (PTT) IP",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@PSP_IP@",
           "restart": false,
-          "help": "PTT 가입자/그룹 변경 알림 대상. CSP 와 동일 IP 면 단일 broadcast 됨." },
-        { "key": "PspNotify.Port", "label": "PSP Notify 포트",
-          "type": "int", "default": 4421, "min": 1, "max": 65535,
-          "restart": false }
-      ]
+          "help": "PTT 가입자/그룹 변경 알림 대상. CSP 와 동일 IP 면 단일 broadcast 됨."
+        },
+        {
+          "key": "PspNotify.Port",
+          "label": "PSP Notify 포트",
+          "type": "int",
+          "default": 4421,
+          "min": 1,
+          "max": 65535,
+          "restart": false
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "log",
       "title": "로깅",
       "fields": [
-        { "key": "Log.Level", "label": "로그 레벨",
-          "type": "enum", "options": ["DEBUG", "INFO", "WARN", "ERROR"],
-          "default": "INFO", "restart": false,
-          "reload_hint": "다음 요청부터 즉시 반영." },
-        { "key": "Log.File", "label": "로그 파일 경로 (상대)",
-          "type": "string", "default": "log/csc.log", "restart": true }
-      ]
+        {
+          "key": "Log.Level",
+          "label": "로그 레벨",
+          "type": "enum",
+          "options": [
+            "DEBUG",
+            "INFO",
+            "WARN",
+            "ERROR"
+          ],
+          "default": "INFO",
+          "restart": false,
+          "reload_hint": "다음 요청부터 즉시 반영."
+        },
+        {
+          "key": "Log.File",
+          "label": "로그 파일 경로 (상대)",
+          "type": "string",
+          "default": "log/csc.log",
+          "restart": true
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "db",
       "title": "데이터베이스",
       "description": "CIMS MariaDB 접속 정보. configure 시 @DB_*@ 로 치환.",
       "fields": [
-        { "key": "CimsDatabase.Host", "label": "DB Host",
-          "type": "string", "default": "127.0.0.1", "deploy_value": "@DB_HOST@",
-          "restart": true },
-        { "key": "CimsDatabase.Port", "label": "DB Port",
-          "type": "int", "default": 3306, "min": 1, "max": 65535,
-          "restart": true },
-        { "key": "CimsDatabase.User", "label": "DB User",
-          "type": "string", "default": "cims", "deploy_value": "@DB_USER@",
-          "restart": true },
-        { "key": "CimsDatabase.Password", "label": "DB Password",
-          "type": "password", "default": "", "deploy_value": "@DB_PASSWORD@",
-          "restart": true },
-        { "key": "CimsDatabase.Db", "label": "DB Name",
-          "type": "string", "default": "cims", "restart": true }
-      ]
+        {
+          "key": "CimsDatabase.Host",
+          "label": "DB Host",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@DB_HOST@",
+          "restart": true
+        },
+        {
+          "key": "CimsDatabase.Port",
+          "label": "DB Port",
+          "type": "int",
+          "default": 3306,
+          "min": 1,
+          "max": 65535,
+          "restart": true
+        },
+        {
+          "key": "CimsDatabase.User",
+          "label": "DB User",
+          "type": "string",
+          "default": "cims",
+          "deploy_value": "@DB_USER@",
+          "restart": true
+        },
+        {
+          "key": "CimsDatabase.Password",
+          "label": "DB Password",
+          "type": "password",
+          "default": "",
+          "deploy_value": "@DB_PASSWORD@",
+          "restart": true
+        },
+        {
+          "key": "CimsDatabase.Db",
+          "label": "DB Name",
+          "type": "string",
+          "default": "cims",
+          "restart": true
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "agent",
       "title": "Agent mTLS",
       "fields": [
-        { "key": "Agent.MtlsEnabled", "label": "mTLS 활성 (enroll 시 agent cert 발급)",
-          "type": "bool", "default": false, "restart": true }
-      ]
+        {
+          "key": "Agent.MtlsEnabled",
+          "label": "mTLS 활성 (enroll 시 agent cert 발급)",
+          "type": "bool",
+          "default": false,
+          "restart": true
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "idms_runtime",
       "title": "IdMs / KMS (런타임 파라미터)",
       "description": "JWT/KMS 엔드포인트 및 TTL. 시크릿은 _infra 에 별도 저장.",
       "fields": [
-        { "key": "IdMs.Issuer", "label": "Issuer",
-          "type": "string", "default": "idms.ptt.mnc001.mcc001.3gppnetwork.org", "deploy_value": "idms.@PTT_DOMAIN@",
+        {
+          "key": "IdMs.Issuer",
+          "label": "Issuer",
+          "type": "string",
+          "default": "idms.ptt.mnc001.mcc001.3gppnetwork.org",
+          "deploy_value": "idms.@PTT_DOMAIN@",
           "restart": true,
-          "help": "JWT iss 클레임. 보통 idms.<PTT_DOMAIN>." },
-        { "key": "IdMs.Domain", "label": "PTT 도메인",
-          "type": "string", "default": "ptt.mnc001.mcc001.3gppnetwork.org", "deploy_value": "@PTT_DOMAIN@",
-          "restart": true },
-        { "key": "IdMs.KmsUri", "label": "KMS URI",
-          "type": "string", "default": "kms.ptt.mnc001.mcc001.3gppnetwork.org", "deploy_value": "kms.@PTT_DOMAIN@",
-          "restart": true },
-        { "key": "IdMs.KmsClientReqUrl", "label": "KMS Client 초기 요청 URL",
-          "type": "string", "default": "https://127.0.0.1:4421/keymanagement/identity/v1/init", "deploy_value": "https://@CSC_HOST@:4420/keymanagement/identity/v1/init",
-          "restart": true },
-        { "key": "IdMs.AuthCodeTtl", "label": "Auth Code TTL (s)",
-          "type": "int", "default": 60, "min": 5, "max": 3600,
-          "restart": true },
-        { "key": "IdMs.AccessTokenTtl", "label": "Access Token TTL (s)",
-          "type": "int", "default": 3600, "min": 60, "max": 604800,
-          "restart": true },
-        { "key": "IdMs.RefreshTokenTtl", "label": "Refresh Token TTL (s)",
-          "type": "int", "default": 604800, "min": 600,
-          "restart": true }
-      ]
+          "help": "JWT iss 클레임. 보통 idms.<PTT_DOMAIN>."
+        },
+        {
+          "key": "IdMs.Domain",
+          "label": "PTT 도메인",
+          "type": "string",
+          "default": "ptt.mnc001.mcc001.3gppnetwork.org",
+          "deploy_value": "@PTT_DOMAIN@",
+          "restart": true
+        },
+        {
+          "key": "IdMs.KmsUri",
+          "label": "KMS URI",
+          "type": "string",
+          "default": "kms.ptt.mnc001.mcc001.3gppnetwork.org",
+          "deploy_value": "kms.@PTT_DOMAIN@",
+          "restart": true
+        },
+        {
+          "key": "IdMs.KmsClientReqUrl",
+          "label": "KMS Client 초기 요청 URL",
+          "type": "string",
+          "default": "https://127.0.0.1:4421/keymanagement/identity/v1/init",
+          "deploy_value": "https://@CSC_HOST@:4420/keymanagement/identity/v1/init",
+          "restart": true
+        },
+        {
+          "key": "IdMs.AuthCodeTtl",
+          "label": "Auth Code TTL (s)",
+          "type": "int",
+          "default": 60,
+          "min": 5,
+          "max": 3600,
+          "restart": true
+        },
+        {
+          "key": "IdMs.AccessTokenTtl",
+          "label": "Access Token TTL (s)",
+          "type": "int",
+          "default": 3600,
+          "min": 60,
+          "max": 604800,
+          "restart": true
+        },
+        {
+          "key": "IdMs.RefreshTokenTtl",
+          "label": "Refresh Token TTL (s)",
+          "type": "int",
+          "default": 604800,
+          "min": 600,
+          "restart": true
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "_infra",
@@ -125,49 +260,124 @@
       "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움. JWT 시크릿 포함.",
       "hidden": true,
       "groups": [
-        { "key": "secrets",         "title": "시크릿" },
-        { "key": "legacy_data",     "title": "Legacy 데이터 폴더 (DB fallback)" },
-        { "key": "packages",        "title": "패키지 저장소" },
-        { "key": "config_cache",    "title": "설정 캐시" },
-        { "key": "service_logging", "title": "서비스 로깅" }
+        {
+          "key": "secrets",
+          "title": "시크릿"
+        },
+        {
+          "key": "legacy_data",
+          "title": "Legacy 데이터 폴더 (DB fallback)"
+        },
+        {
+          "key": "packages",
+          "title": "패키지 저장소"
+        },
+        {
+          "key": "config_cache",
+          "title": "설정 캐시"
+        },
+        {
+          "key": "service_logging",
+          "title": "서비스 로깅"
+        }
       ],
       "fields": [
-        { "key": "IdMs.JwtSecret",        "label": "IdMs JWT 시크릿",  "group": "secrets",
-          "type": "password", "default": "", "deploy_value": "@IDMS_JWT_SECRET@",
-          "hidden": true, "restart": true,
-          "help": "configure 시 랜덤 생성. 재생성 시 발급된 모든 토큰 무효화." },
-        { "key": "CimsAuth.JwtSecret",    "label": "CIMS Admin JWT 시크릿", "group": "secrets",
-          "type": "password", "default": "", "deploy_value": "@CIMS_JWT_SECRET@",
-          "hidden": true, "restart": true,
-          "help": "콘솔 로그인 세션 서명 키." },
-
-        { "key": "Data.User",  "label": "User 데이터 폴더 (legacy)",  "group": "legacy_data",
-          "type": "path", "default": "../csp/user",  "hidden": true, "restart": true,
-          "help": "DB 가 SOT. DB 미연결 시 fallback." },
-        { "key": "Data.Group", "label": "Group 데이터 폴더 (legacy)", "group": "legacy_data",
-          "type": "path", "default": "../csp/group", "hidden": true, "restart": true,
-          "help": "DB 가 SOT. DB 미연결 시 fallback." },
-
-        { "key": "Packages.Dir",       "label": "Package 저장소",          "group": "packages",
-          "type": "path", "default": "packages", "restart": true,
-          "help": "배포(/deploy/packages)에서 업로드한 tarball 의 저장 위치. 빌드 산출물(build/dist/packages/)과는 별개." },
-        { "key": "Packages.BackupDir", "label": "Package 백업/trash",      "group": "packages",
-          "type": "path", "default": "packages_trash", "restart": true,
-          "help": "삭제된 배포 패키지의 백업 위치." },
-
-        { "key": "ConfigCacheDir",     "label": "설정 캐시 디렉토리",      "group": "config_cache",
-          "type": "path", "default": "cache", "hidden": true, "restart": true,
-          "help": "CSC 가 agent 별 push 한 설정을 캐시하는 경로." },
-
-        { "key": "ServiceLogging.Dir",    "label": "서비스 로그 루트",       "group": "service_logging",
-          "type": "path", "default": "service_log", "deploy_value": "@SERVICE_LOG_DIR@",
-          "hidden": true, "restart": true,
-          "help": "CSP/CMP 와 공유되는 서비스 로그 루트." },
-        { "key": "ServiceLogging.Enable", "label": "서비스 로그 인터페이스", "group": "service_logging",
-          "type": "string_list", "default": ["csp", "ue"],
-          "hidden": true, "restart": true,
-          "help": "CSC 가 기록하는 방향 (csp / ue)." }
-      ]
+        {
+          "key": "IdMs.JwtSecret",
+          "label": "IdMs JWT 시크릿",
+          "group": "secrets",
+          "type": "password",
+          "default": "",
+          "deploy_value": "@IDMS_JWT_SECRET@",
+          "hidden": true,
+          "restart": true,
+          "help": "configure 시 랜덤 생성. 재생성 시 발급된 모든 토큰 무효화."
+        },
+        {
+          "key": "CimsAuth.JwtSecret",
+          "label": "CIMS Admin JWT 시크릿",
+          "group": "secrets",
+          "type": "password",
+          "default": "",
+          "deploy_value": "@CIMS_JWT_SECRET@",
+          "hidden": true,
+          "restart": true,
+          "help": "콘솔 로그인 세션 서명 키."
+        },
+        {
+          "key": "Data.User",
+          "label": "User 데이터 폴더 (legacy)",
+          "group": "legacy_data",
+          "type": "path",
+          "default": "../csp/user",
+          "hidden": true,
+          "restart": true,
+          "help": "DB 가 SOT. DB 미연결 시 fallback."
+        },
+        {
+          "key": "Data.Group",
+          "label": "Group 데이터 폴더 (legacy)",
+          "group": "legacy_data",
+          "type": "path",
+          "default": "../csp/group",
+          "hidden": true,
+          "restart": true,
+          "help": "DB 가 SOT. DB 미연결 시 fallback."
+        },
+        {
+          "key": "Packages.Dir",
+          "label": "Package 저장소",
+          "group": "packages",
+          "type": "path",
+          "default": "packages",
+          "restart": true,
+          "help": "배포(/deploy/packages)에서 업로드한 tarball 의 저장 위치. 빌드 산출물(build/dist/packages/)과는 별개."
+        },
+        {
+          "key": "Packages.BackupDir",
+          "label": "Package 백업/trash",
+          "group": "packages",
+          "type": "path",
+          "default": "packages_trash",
+          "restart": true,
+          "help": "삭제된 배포 패키지의 백업 위치."
+        },
+        {
+          "key": "ConfigCacheDir",
+          "label": "설정 캐시 디렉토리",
+          "group": "config_cache",
+          "type": "path",
+          "default": "cache",
+          "hidden": true,
+          "restart": true,
+          "help": "CSC 가 agent 별 push 한 설정을 캐시하는 경로."
+        },
+        {
+          "key": "ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "group": "service_logging",
+          "type": "path",
+          "default": "service_log",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "hidden": true,
+          "restart": true,
+          "help": "CSP/CMP 와 공유되는 서비스 로그 루트."
+        },
+        {
+          "key": "ServiceLogging.Enable",
+          "label": "서비스 로그 인터페이스",
+          "group": "service_logging",
+          "type": "string_list",
+          "default": [
+            "csp",
+            "ue"
+          ],
+          "hidden": true,
+          "restart": true,
+          "help": "CSC 가 기록하는 방향 (csp / ue)."
+        }
+      ],
+      "scope": "system"
     }
   ],
   "presets": [

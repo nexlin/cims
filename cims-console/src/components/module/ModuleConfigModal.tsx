@@ -8,7 +8,7 @@ import {
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
 
-type FieldValue = string | number | boolean | null
+export type FieldValue = string | number | boolean | null
 type Tab = 'scalar' | string   // 'scalar' = sections 탭, 나머지는 collection.key
 
 export type ModuleConfigSource =
@@ -237,7 +237,7 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
                   <TabBtn key={c.key}
                           active={tab === c.key}
                           onClick={() => isGroupOnly
-                            ? show(`${c.title} 는 그룹 공통 설정 — /deploy/services 의 "⚙ 그룹 설정" 에서 편집`, 'err')
+                            ? show(`${c.title} 는 그룹 공통 설정 — 좌측 트리에서 HA 그룹 선택 → [⚙ 그룹 설정] 에서 편집`, 'err')
                             : setTab(c.key)}>
                     {isGroupOnly && '🔒 '}{c.title}
                   </TabBtn>
@@ -495,7 +495,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
   )
 }
 
-function SectionBlock({ section, values, initial, changed, showAdvanced, onChange, onReset }: {
+export function SectionBlock({ section, values, initial, changed, showAdvanced, onChange, onReset }: {
   section: {
     key: string; title: string; description?: string
     fields: ConfigTemplateField[]
@@ -698,7 +698,7 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
   )
 }
 
-function defaultValue(f: ConfigTemplateField): FieldValue {
+export function defaultValue(f: ConfigTemplateField): FieldValue {
   if (f.default !== undefined && f.default !== null) {
     return f.default as FieldValue
   }

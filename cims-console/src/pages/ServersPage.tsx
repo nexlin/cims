@@ -14,6 +14,7 @@ import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
+import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigModal'
 import HealthCheckModal from '../components/HealthCheckModal'
 import MetricTrend from '../components/MetricTrend'
 import { agentDisplayName } from '../components/agentDisplay'
@@ -53,6 +54,7 @@ export default function ServersPage() {
   const [metricsFor, setMetricsFor]         = useState<Agent | null>(null)
   const [healthCheckFor, setHealthCheckFor] = useState<Agent | null>(null)
   const [configFor, setConfigFor]           = useState<Deployment | null>(null)
+  const [groupConfigFor, setGroupConfigFor]  = useState<HaGroup | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -325,6 +327,7 @@ export default function ServersPage() {
             <GroupInspector group={selectedGroup} agents={agents}
               onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
               onReload={load}
+              onOpenConfig={() => setGroupConfigFor(selectedGroup)}
               onDeleteSystem={deleteSystem} />
           ) : (
             <div className="empty" style={{ padding: 40 }}>
@@ -361,6 +364,18 @@ export default function ServersPage() {
       {configFor &&
         <ModuleConfigModal source={{ type: 'deployment', deployment: configFor }}
           onClose={() => setConfigFor(null)} onDone={load} />}
+      {groupConfigFor &&
+        <GroupServiceConfigModal open
+          onClose={() => setGroupConfigFor(null)}
+          groupName={groupConfigFor.name}
+          members={groupConfigFor.members.map(m => ({
+            id: m.agent_id,
+            name: m.agent_name || agents.find(a => a.id === m.agent_id)?.name || `#${m.agent_id}`,
+          }))}
+          deployments={deployments}
+          packages={packages}
+          haMode={groupConfigFor.mode}
+          onApplied={async () => { await load() }} />}
     </div>
   )
 }
@@ -511,11 +526,12 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
 //  Group Inspector (HA 그룹 선택 시)
 // ──────────────────────────────────────────────────────────────
 
-function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSystem }: {
+function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig, onDeleteSystem }: {
   group: HaGroup
   agents: Agent[]
   onSelectMember: (aid: number) => void
   onReload: () => Promise<void>
+  onOpenConfig: () => void
   onDeleteSystem: (g: HaGroup) => void
 }) {
   const { show } = useToast()
@@ -733,6 +749,10 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onDeleteSyste
                  style={{ flex: 1, minWidth: 180 }} />
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>#{group.id} · vrid {group.vrid}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <button className="btn btn--sm" onClick={onOpenConfig}
+                    title="그룹 멤버 공통 서비스 설정 — 모듈별 탭, 동적 반영(scope=service) 항목 전용">
+              ⚙ 그룹 설정
+            </button>
             <button className="btn btn--sm btn--danger" onClick={() => onDeleteSystem(group)}
                     title="HA 그룹 + 모든 멤버 일괄 삭제">
               🗑 시스템 삭제

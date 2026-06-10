@@ -514,9 +514,11 @@ export const deploymentApi = {
   // deployment config (템플릿 기반)
   getDeploymentConfig: (id: number) =>
     api.get<DeploymentConfigView>(`/deployments/${id}/config`),
-  putDeploymentConfig: (id: number, values: Record<string, unknown>, queue_update = true) =>
+  putDeploymentConfig: (id: number, values: Record<string, unknown>, queue_update = true,
+                        propagate_to_ha_peers?: boolean) =>
     api.put<{ ok: boolean; job_id: number | null }>(`/deployments/${id}/config`,
-      { config: values, queue_update }),
+      { config: values, queue_update,
+        ...(propagate_to_ha_peers !== undefined ? { propagate_to_ha_peers } : {}) }),
 
   // deployment collections (jsonl-on-target via agent sync REST).
   // T1/T2 (2026-05-18) 이후 csc 가 ha_group 멤버 자동 fan-out + drift 정보.

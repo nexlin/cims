@@ -6,117 +6,241 @@
       "title": "Listen / 제어",
       "description": "CSP ↔ CMP JSON 제어 채널 바인딩. RTP 외부 IP 와 CSP 주소는 _infra 에 배치.",
       "fields": [
-        { "key": "ServerIp", "label": "제어 바인딩 IP",
-          "type": "string", "default": "0.0.0.0", "deploy_value": "@CMP_IP@",
-          "required": true, "restart": true,
-          "help": "CMP 제어 소켓 bind IP. 인스턴스 분리 (CMP/PMP/IMP) 환경에서는 host-specific 명시 (CMP_IP/PMP_IP/IMP_IP) — wildcard 면 같은 host 의 다른 인스턴스와 9000 충돌." },
-        { "key": "ServerPort", "label": "제어 포트",
-          "type": "int", "default": 9000, "min": 1, "max": 65535,
-          "required": true, "restart": true,
-          "help": "CSP → CMP 제어용 UDP 포트." },
-        { "key": "CspPort", "label": "CSP 수신 포트",
-          "type": "int", "default": 9001, "min": 1, "max": 65535,
+        {
+          "key": "ServerIp",
+          "label": "제어 바인딩 IP",
+          "type": "string",
+          "default": "0.0.0.0",
+          "deploy_value": "@CMP_IP@",
+          "required": true,
           "restart": true,
-          "help": "CMP → CSP 알림 송신 대상 포트 (CSP 측 수신)." }
-      ]
+          "help": "CMP 제어 소켓 bind IP. 인스턴스 분리 (CMP/PMP/IMP) 환경에서는 host-specific 명시 (CMP_IP/PMP_IP/IMP_IP) — wildcard 면 같은 host 의 다른 인스턴스와 9000 충돌."
+        },
+        {
+          "key": "ServerPort",
+          "label": "제어 포트",
+          "type": "int",
+          "default": 9000,
+          "min": 1,
+          "max": 65535,
+          "required": true,
+          "restart": true,
+          "help": "CSP → CMP 제어용 UDP 포트."
+        },
+        {
+          "key": "CspPort",
+          "label": "CSP 수신 포트",
+          "type": "int",
+          "default": 9001,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "CMP → CSP 알림 송신 대상 포트 (CSP 측 수신)."
+        }
+      ],
+      "scope": "system"
     },
     {
       "key": "voip_rtp",
       "title": "VoIP RTP 포트 풀",
       "description": "VoLTE B2BUA 통화용. 4 포트 블록 (Audio RTP/RTCP + Video RTP/RTCP) 단위로 할당.",
       "fields": [
-        { "key": "RtpStartPort", "label": "VoIP RTP 시작 포트",
-          "type": "int", "default": 50000, "min": 1024, "max": 65000,
-          "restart": true },
-        { "key": "RtpPoolSize", "label": "VoIP RTP 풀 크기",
-          "type": "int", "default": 20, "min": 1, "max": 10000,
+        {
+          "key": "RtpStartPort",
+          "label": "VoIP RTP 시작 포트",
+          "type": "int",
+          "default": 50000,
+          "min": 1024,
+          "max": 65000,
+          "restart": true
+        },
+        {
+          "key": "RtpPoolSize",
+          "label": "VoIP RTP 풀 크기",
+          "type": "int",
+          "default": 20,
+          "min": 1,
+          "max": 10000,
           "restart": true,
-          "help": "동시 처리 가능한 VoIP 호 수 (블록 단위)." }
-      ]
+          "help": "동시 처리 가능한 VoIP 호 수 (블록 단위)."
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "ptt_rtp",
       "title": "PTT RTP 포트 풀",
       "description": "PTT 그룹콜 전용. RTP + Floor(m=application) + Video 포트를 독립 소켓으로 할당.",
       "fields": [
-        { "key": "PttRtpStartPort", "label": "PTT RTP 시작 포트",
-          "type": "int", "default": 52000, "min": 1024, "max": 65000,
-          "restart": true },
-        { "key": "PttRtpPoolSize", "label": "PTT RTP 풀 크기",
-          "type": "int", "default": 10, "min": 1, "max": 10000,
+        {
+          "key": "PttRtpStartPort",
+          "label": "PTT RTP 시작 포트",
+          "type": "int",
+          "default": 52000,
+          "min": 1024,
+          "max": 65000,
+          "restart": true
+        },
+        {
+          "key": "PttRtpPoolSize",
+          "label": "PTT RTP 풀 크기",
+          "type": "int",
+          "default": 10,
+          "min": 1,
+          "max": 10000,
           "restart": true,
-          "help": "동시 활성 그룹콜 수." },
-        { "key": "PttFloorStartPort", "label": "PTT Floor 시작 포트",
-          "type": "int", "default": 54000, "min": 1024, "max": 65000,
+          "help": "동시 활성 그룹콜 수."
+        },
+        {
+          "key": "PttFloorStartPort",
+          "label": "PTT Floor 시작 포트",
+          "type": "int",
+          "default": 54000,
+          "min": 1024,
+          "max": 65000,
           "restart": true,
-          "help": "m=application (RTCP APP) 전용 소켓. MCPTT floor control." },
-        { "key": "PttVideoStartPort", "label": "PTT Video 시작 포트",
-          "type": "int", "default": 56000, "min": 1024, "max": 65000,
-          "restart": true }
-      ]
+          "help": "m=application (RTCP APP) 전용 소켓. MCPTT floor control."
+        },
+        {
+          "key": "PttVideoStartPort",
+          "label": "PTT Video 시작 포트",
+          "type": "int",
+          "default": 56000,
+          "min": 1024,
+          "max": 65000,
+          "restart": true
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "rtp_runtime",
       "title": "RTP 런타임",
       "fields": [
-        { "key": "RtpWorkerCount", "label": "RTP Worker 스레드 수",
-          "type": "int", "default": 4, "min": 1, "max": 32,
+        {
+          "key": "RtpWorkerCount",
+          "label": "RTP Worker 스레드 수",
+          "type": "int",
+          "default": 4,
+          "min": 1,
+          "max": 32,
           "restart": true,
-          "help": "RTP 송수신 처리 스레드 풀 크기." }
-      ]
+          "help": "RTP 송수신 처리 스레드 풀 크기."
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "dtmf_ptt",
       "title": "DTMF PTT",
       "description": "VoIP 단말이 DTMF 디지트로 PTT Push/Release 를 시뮬레이션 (단말이 MCPTT floor 를 모를 때).",
       "fields": [
-        { "key": "EnableDtmfPtt", "label": "DTMF PTT 사용",
-          "type": "bool", "default": true, "restart": true },
-        { "key": "DtmfPushDigit", "label": "Push 디지트",
-          "type": "string", "default": "*", "restart": true },
-        { "key": "DtmfReleaseDigit", "label": "Release 디지트",
-          "type": "string", "default": "#", "restart": true }
-      ]
+        {
+          "key": "EnableDtmfPtt",
+          "label": "DTMF PTT 사용",
+          "type": "bool",
+          "default": true,
+          "restart": true
+        },
+        {
+          "key": "DtmfPushDigit",
+          "label": "Push 디지트",
+          "type": "string",
+          "default": "*",
+          "restart": true
+        },
+        {
+          "key": "DtmfReleaseDigit",
+          "label": "Release 디지트",
+          "type": "string",
+          "default": "#",
+          "restart": true
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "session",
       "title": "세션 / 누수 회수 (sweeper)",
       "description": "CMP sweeper 는 RTP 무수신(inactivity) 시간 기준으로 고아 relay 를 회수한다. owner(CSP)가 비정상 종료(crash/kill)되면 CSP 가 만든 relay 가 REMOVE 를 못 받고 고아가 되는데, 이 sweeper 가 유일한 안전망이다.",
       "fields": [
-        { "key": "SessionTimeout", "label": "세션 타임아웃 (초)",
-          "type": "int", "default": 600, "min": 30, "max": 86400,
+        {
+          "key": "SessionTimeout",
+          "label": "세션 타임아웃 (초)",
+          "type": "int",
+          "default": 600,
+          "min": 30,
+          "max": 86400,
           "restart": true,
-          "help": "RTP 를 받은 적 있는(활성/홀드) 세션을 마지막 RTP 수신 이후 이 초만큼 무수신이면 회수. hold/DTX 로 RTP 가 잠시 멈출 수 있어 보수적으로 길게 둔다. 회수 시 reason=hold_timeout." },
-        { "key": "OrphanReclaimSec", "label": "고아 relay 회수 시간 (초)",
-          "type": "int", "default": 120, "min": 10, "max": 3600,
+          "help": "RTP 를 받은 적 있는(활성/홀드) 세션을 마지막 RTP 수신 이후 이 초만큼 무수신이면 회수. hold/DTX 로 RTP 가 잠시 멈출 수 있어 보수적으로 길게 둔다. 회수 시 reason=hold_timeout."
+        },
+        {
+          "key": "OrphanReclaimSec",
+          "label": "고아 relay 회수 시간 (초)",
+          "type": "int",
+          "default": 120,
+          "min": 10,
+          "max": 3600,
           "restart": true,
-          "help": "RTP 를 한 번도 못 받은(setup 실패/세션 시작됐으나 무RTP) relay 를 이 초 후 회수. SessionTimeout 보다 짧게(빠른 누수 차단). 회수 시 reason=orphan_no_rtp." },
-        { "key": "FloorIdleSec", "label": "PTT floor 무활동 회수 (초)",
-          "type": "int", "default": 10, "min": 0, "max": 600,
+          "help": "RTP 를 한 번도 못 받은(setup 실패/세션 시작됐으나 무RTP) relay 를 이 초 후 회수. SessionTimeout 보다 짧게(빠른 누수 차단). 회수 시 reason=orphan_no_rtp."
+        },
+        {
+          "key": "FloorIdleSec",
+          "label": "PTT floor 무활동 회수 (초)",
+          "type": "int",
+          "default": 10,
+          "min": 0,
+          "max": 600,
           "restart": true,
-          "help": "PTT 발언자(floor owner)가 RELEASE 없이 RTP 송출을 멈추면 마지막 RTP 후 이 초만큼 무수신 시 floor 를 강제 해제(REVOKE+IDLE). 실발언 중에는 RTP 가 갱신하므로 끊기지 않는다. 검증 마지막 발언자처럼 RELEASE 누락 시 floor 가 영구 점유되어 발언시간이 부풀던 문제 방지. 0=비활성." }
-      ]
+          "help": "PTT 발언자(floor owner)가 RELEASE 없이 RTP 송출을 멈추면 마지막 RTP 후 이 초만큼 무수신 시 floor 를 강제 해제(REVOKE+IDLE). 실발언 중에는 RTP 가 갱신하므로 끊기지 않는다. 검증 마지막 발언자처럼 RELEASE 누락 시 floor 가 영구 점유되어 발언시간이 부풀던 문제 방지. 0=비활성."
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "log",
       "title": "로깅",
       "fields": [
-        { "key": "LogLevel", "label": "로그 레벨",
-          "type": "enum", "options": ["DEBUG", "INFO", "WARN", "ERROR"],
+        {
+          "key": "LogLevel",
+          "label": "로그 레벨",
+          "type": "enum",
+          "options": [
+            "DEBUG",
+            "INFO",
+            "WARN",
+            "ERROR"
+          ],
           "default": "INFO",
-          "restart": true },
-        { "key": "LogDir", "label": "로그 디렉토리",
-          "type": "path", "default": "log", "restart": true },
-        { "key": "LogMaxSizeMB", "label": "로그 파일 최대 크기 (MB)",
-          "type": "int", "default": 10, "min": 1, "max": 1024,
-          "restart": true },
-        { "key": "LogMaxFiles", "label": "로그 파일 최대 개수",
-          "type": "int", "default": 5, "min": 1, "max": 100,
-          "restart": true },
-        { "key": "SystemId", "label": "시스템 ID",
-          "type": "string", "default": "cmp_01", "restart": true,
-          "help": "Flow/Msg 로그 파일명 접두어 (cmp_01.flow.jsonl 등)." }
-      ]
+          "restart": true
+        },
+        {
+          "key": "LogDir",
+          "label": "로그 디렉토리",
+          "type": "path",
+          "default": "log",
+          "restart": true
+        },
+        {
+          "key": "LogMaxSizeMB",
+          "label": "로그 파일 최대 크기 (MB)",
+          "type": "int",
+          "default": 10,
+          "min": 1,
+          "max": 1024,
+          "restart": true
+        },
+        {
+          "key": "LogMaxFiles",
+          "label": "로그 파일 최대 개수",
+          "type": "int",
+          "default": 5,
+          "min": 1,
+          "max": 100,
+          "restart": true
+        }
+      ],
+      "scope": "service"
     },
     {
       "key": "_infra",
@@ -124,39 +248,112 @@
       "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움.",
       "hidden": true,
       "groups": [
-        { "key": "network",         "title": "네트워크 연결" },
-        { "key": "service_logging", "title": "서비스 로깅 & 녹취" }
+        {
+          "key": "network",
+          "title": "네트워크 연결"
+        },
+        {
+          "key": "service_logging",
+          "title": "서비스 로깅 & 녹취"
+        }
       ],
       "fields": [
-        { "key": "RtpIp", "label": "RTP 외부 IP", "group": "network",
-          "type": "string", "default": "", "deploy_value": "@CMP_IP@",
-          "hidden": true, "restart": true,
-          "help": "SDP 에 기재되는 미디어 IP. CSP 가 SDP 에 광고하므로 외부 접근 가능한 주소여야 함." },
-        { "key": "CspIp", "label": "CSP IP", "group": "network",
-          "type": "string", "default": "", "deploy_value": "@CSP_IP@",
-          "hidden": true, "restart": true,
-          "help": "CMP → CSP 알림 송신 대상 IP." },
-
-        { "key": "ServiceLogging.Dir",         "label": "서비스 로그 루트",       "group": "service_logging",
-          "type": "path", "default": "service_log", "deploy_value": "@SERVICE_LOG_DIR@",
-          "hidden": true, "restart": true,
-          "help": "녹취(raw_*.rtp, seg_*.rtp) + flow.jsonl 저장 루트. CSP 와 공유." },
-        { "key": "ServiceLogging.Enable",      "label": "서비스 로그 인터페이스", "group": "service_logging",
-          "type": "string_list", "default": ["csp"],
-          "hidden": true, "restart": true,
-          "help": "CMP 는 csp 인터페이스로 제어 JSON 을 수신. 리스트에 있으면 해당 방향 로깅." },
-        { "key": "ServiceLogging.MediaTypes",  "label": "미디어 로그 종류",       "group": "service_logging",
-          "type": "string_list", "default": ["floor", "dtmf"],
-          "hidden": true, "restart": true,
-          "help": "flow.jsonl 에 기록할 미디어 이벤트 종류." },
-        { "key": "ServiceLogging.Flow.Floor",  "label": "Floor 이벤트 기록",      "group": "service_logging",
-          "type": "bool", "default": true,  "hidden": true, "restart": true },
-        { "key": "ServiceLogging.Flow.Dtmf",   "label": "DTMF 이벤트 기록",       "group": "service_logging",
-          "type": "bool", "default": true,  "hidden": true, "restart": true },
-        { "key": "ServiceLogging.Flow.Rtcp",   "label": "RTCP 이벤트 기록",       "group": "service_logging",
-          "type": "bool", "default": false, "hidden": true, "restart": true,
-          "help": "기본 off. 활성화 시 flow.jsonl 용량 크게 증가." }
-      ]
+        {
+          "key": "SystemId",
+          "label": "시스템 ID",
+          "type": "string",
+          "default": "cmp_01",
+          "restart": true,
+          "help": "Flow/Msg 로그 파일명 접두어 (cmp_01.flow.jsonl 등)."
+        },
+        {
+          "key": "RtpIp",
+          "label": "RTP 외부 IP",
+          "group": "network",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@CMP_IP@",
+          "hidden": true,
+          "restart": true,
+          "help": "SDP 에 기재되는 미디어 IP. CSP 가 SDP 에 광고하므로 외부 접근 가능한 주소여야 함."
+        },
+        {
+          "key": "CspIp",
+          "label": "CSP IP",
+          "group": "network",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@CSP_IP@",
+          "hidden": true,
+          "restart": true,
+          "help": "CMP → CSP 알림 송신 대상 IP."
+        },
+        {
+          "key": "ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "group": "service_logging",
+          "type": "path",
+          "default": "service_log",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "hidden": true,
+          "restart": true,
+          "help": "녹취(raw_*.rtp, seg_*.rtp) + flow.jsonl 저장 루트. CSP 와 공유."
+        },
+        {
+          "key": "ServiceLogging.Enable",
+          "label": "서비스 로그 인터페이스",
+          "group": "service_logging",
+          "type": "string_list",
+          "default": [
+            "csp"
+          ],
+          "hidden": true,
+          "restart": true,
+          "help": "CMP 는 csp 인터페이스로 제어 JSON 을 수신. 리스트에 있으면 해당 방향 로깅."
+        },
+        {
+          "key": "ServiceLogging.MediaTypes",
+          "label": "미디어 로그 종류",
+          "group": "service_logging",
+          "type": "string_list",
+          "default": [
+            "floor",
+            "dtmf"
+          ],
+          "hidden": true,
+          "restart": true,
+          "help": "flow.jsonl 에 기록할 미디어 이벤트 종류."
+        },
+        {
+          "key": "ServiceLogging.Flow.Floor",
+          "label": "Floor 이벤트 기록",
+          "group": "service_logging",
+          "type": "bool",
+          "default": true,
+          "hidden": true,
+          "restart": true
+        },
+        {
+          "key": "ServiceLogging.Flow.Dtmf",
+          "label": "DTMF 이벤트 기록",
+          "group": "service_logging",
+          "type": "bool",
+          "default": true,
+          "hidden": true,
+          "restart": true
+        },
+        {
+          "key": "ServiceLogging.Flow.Rtcp",
+          "label": "RTCP 이벤트 기록",
+          "group": "service_logging",
+          "type": "bool",
+          "default": false,
+          "hidden": true,
+          "restart": true,
+          "help": "기본 off. 활성화 시 flow.jsonl 용량 크게 증가."
+        }
+      ],
+      "scope": "system"
     }
   ],
   "presets": [
