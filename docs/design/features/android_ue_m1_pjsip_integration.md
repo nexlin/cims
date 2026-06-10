@@ -45,11 +45,11 @@
 
 ---
 
-## 2. PJSIP 안드로이드 빌드 플레이북 (M1.0, WSL2)
+## 2. PJSIP 안드로이드 빌드 플레이북 (M1.0, Ubuntu)
 
 ### 2.1 목표와 산출물
 
-WSL2(Ubuntu)에서 `pjproject`를 `arm64-v8a`용으로 크로스컴파일하여 산출물을 `android/core`에 투입한다.
+Ubuntu 24.04(WSL2/VM/네이티브 무관)에서 `pjproject`를 `arm64-v8a`용으로 크로스컴파일하여 산출물을 `android/core`에 투입한다. **실행 절차·스크립트·실측 상태의 정본은 [android/docs/M1_pjsip_build_ubuntu.md](../../../android/docs/M1_pjsip_build_ubuntu.md)** (2026-06-10: 개발 PC WSL 미설치 실측 → VMware VM `nex-ubuntu` 에 루트 불필요 프로비저닝 완료. 사용자 Ubuntu 전환 시 동일 스크립트 재사용).
 
 | 산출물 | 빌드 출력 경로(SWIG 기준) | core 배치 경로 |
 |---|---|---|
@@ -63,17 +63,17 @@ WSL2(Ubuntu)에서 `pjproject`를 `arm64-v8a`용으로 크로스컴파일하여 
 
 ### 2.2 WSL2 / 빌드 도구 / NDK / SWIG / JDK
 
-- **WSL2 Ubuntu 22.04/24.04 LTS.** 빌드는 전부 **WSL ext4 파일시스템(`~/`)** 안에서 수행. `/mnt/c`(NTFS) 직접 빌드 금지(심볼릭링크/권한/속도 문제). 산출물만 마지막에 NTFS core로 복사.
+- **Ubuntu 24.04 (WSL2/VM/네이티브 무관).** 빌드는 전부 **리눅스 ext4(`~/`)** 안에서 수행. NTFS(`/mnt/c` 등) 직접 빌드 금지(심볼릭링크/권한/속도 문제). 산출물만 마지막에 Windows core로 복사. sudo 불가 환경은 **userland 프로비저닝**(JDK tarball + swig deb 추출 + sdkmanager — `android/docs/scripts/m1_provision.sh`)으로 우회 가능(실측 검증).
 - 리눅스 패키지: `build-essential autoconf automake libtool pkg-config git curl unzip python3 swig`.
 - **JDK 17 / SWIG 4.x**: PJSIP 공식 요구사항이 아니라 **본 프로젝트가 고정한 호스트 빌드 버전**(versionSensitive). JDK17은 앱 JVM target과 정합. SWIG는 apt의 4.x면 통상 동작, 빌드 실패 시 소스 빌드. (구체 하한 "4.0.2"는 출처 불명이라 단정하지 않음.)
-- **NDK r28 계열**(예: `28.0.12916984`) 권장 — Android 15+ 16KB page-size 기본 대응. `sdkmanager`로 설치 가능 버전 실측. `platforms;android-37` 설치.
+- **NDK r28 계열** 권장 — Android 15+ 16KB page-size 기본 대응. **실측 설치: `28.2.13676358`**(sdkmanager 가 28.x 최신 자동 선택). `platforms;android-37`은 SWIG/native 빌드엔 불필요(앱 gradle 빌드는 Windows 호스트 SDK 사용).
 
 ```bash
 export ANDROID_SDK_ROOT=$HOME/android-sdk
 export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH
 yes | sdkmanager --licenses
-sdkmanager "ndk;28.0.12916984" "platforms;android-37" "platform-tools"
-export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/28.0.12916984
+sdkmanager "ndk;28.2.13676358" "platform-tools"
+export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/28.2.13676358
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ```
 
@@ -141,8 +141,7 @@ git describe --tags     # 2.16 기대
 ### 2.6 configure / build / SWIG
 
 ```bash
-export ANDROID_NDK_ROOT=$HOME/android-sdk/ndk/28.0.12916984
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+source ~/.m1env   # m1_provision.sh 산출 (ANDROID_NDK_ROOT/JAVA_HOME/SWIG_LIB/PATH)
 cd ~/pjproject
 
 # NDK r28은 16KB 정렬 기본 → page-size 수동 플래그 생략 권장.
