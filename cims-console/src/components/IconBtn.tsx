@@ -9,11 +9,14 @@ export default function IconBtn({ title, onClick, tone, disabled, children }: {
   disabled?: boolean
   children: React.ReactNode
 }) {
-  const cls = tone === 'danger' ? 'btn--danger' : tone === 'primary' ? 'btn--primary' : 'btn--ghost'
+  // danger 는 솔리드 빨강 대신 ghost+빨간 아이콘 — 행마다 반복되는 위험 액션이
+  // 화면을 지배하지 않도록 (hover 시에만 배경 강조).
+  const cls = tone === 'primary' ? 'btn--primary' : 'btn--ghost'
   return (
     <button title={title} aria-label={title} onClick={onClick} disabled={disabled}
-      className={`btn btn--sm ${cls}`}
-      style={{ padding: '3px 6px', display: 'inline-flex', alignItems: 'center', lineHeight: 0 }}>
+      className={`btn btn--sm ${cls}${tone === 'danger' ? ' icon-btn--danger' : ''}`}
+      style={{ padding: '3px 6px', display: 'inline-flex', alignItems: 'center', lineHeight: 0,
+               ...(tone === 'danger' ? { color: 'var(--danger, #c0392b)' } : {}) }}>
       {children}
     </button>
   )
