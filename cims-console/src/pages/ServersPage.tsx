@@ -301,11 +301,14 @@ export default function ServersPage() {
           style={{ width: 240 }} />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn--outline" onClick={() => void load()}>↻</button>
-          <button className="btn btn--primary" onClick={() => setSystemModalOpen(true)}
-                  disabled={!canEdit}
-                  title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
-            ＋ 시스템 추가
-          </button>
+          {/* 시스템 추가 = 시스템/서버 구성 작업 — 해당 탭에서만 노출 */}
+          {pageTab === 'infra' && (
+            <button className="btn btn--primary" onClick={() => setSystemModalOpen(true)}
+                    disabled={!canEdit}
+                    title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
+              ＋ 시스템 추가
+            </button>
+          )}
         </div>
       </div>
 
