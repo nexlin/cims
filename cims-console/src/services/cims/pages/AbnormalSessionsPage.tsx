@@ -39,10 +39,16 @@ export default function AbnormalSessionsPage() {
   const [date, setDate] = useState(new Date().toISOString().substring(0, 10))
   const [days, setDays] = useState(1)
   const [loading, setLoading] = useState(false)
+  // 스캔 폭주 일자는 수천 행 — 전체 DOM 렌더 시 페이지가 무거워져 페이지네이션.
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(100)
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setData(await api.get<AbnResp>(`/security/abnormal-sessions?date=${date}&days=${days}`)) }
+    try {
+      setData(await api.get<AbnResp>(`/security/abnormal-sessions?date=${date}&days=${days}`))
+      setPage(0)
+    }
     catch (e: unknown) { show(String(e), 'err') }
     finally { setLoading(false) }
   }, [date, days, show])
@@ -50,6 +56,8 @@ export default function AbnormalSessionsPage() {
   useEffect(() => { load() }, [load])
 
   const sessions = data?.sessions ?? []
+  const pageCount = Math.max(1, Math.ceil(sessions.length / pageSize))
+  const pageRows = sessions.slice(page * pageSize, (page + 1) * pageSize)
   const critical = sessions.filter(s => s.severity === 'critical').length
   const scanners = data?.by_reason?.scanner_ua ?? 0
   const srcIps = Object.keys(data?.by_ip ?? {}).length
@@ -112,7 +120,7 @@ export default function AbnormalSessionsPage() {
               </tr>
             </thead>
             <tbody>
-              {sessions.map((s, i) => {
+              {pageRows.map((s, i) => {
                 const sev = SEV[s.severity] || SEV.minor
                 return (
                   <tr key={i}>
@@ -143,6 +151,20 @@ export default function AbnormalSessionsPage() {
               {sessions.length === 0 && <tr><td colSpan={8} className="empty-cell">탐지된 비정상 세션 없음</td></tr>}
             </tbody>
           </table>
+          {sessions.length > pageSize && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '10px 0' }}>
+              <button className="btn btn--sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>← 이전</button>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {page * pageSize + 1}–{Math.min((page + 1) * pageSize, sessions.length)} / {sessions.length}건
+                (페이지 {page + 1}/{pageCount})
+              </span>
+              <button className="btn btn--sm" disabled={page >= pageCount - 1} onClick={() => setPage(p => p + 1)}>다음 →</button>
+              <select value={pageSize} style={{ fontSize: 12, padding: '2px 4px' }}
+                      onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}>
+                {[50, 100, 200, 500].map(n => <option key={n} value={n}>{n}/쪽</option>)}
+              </select>
+            </div>
+          )}
         </>
       )}
     </div>
