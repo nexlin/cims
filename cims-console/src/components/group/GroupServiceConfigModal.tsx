@@ -39,13 +39,15 @@ interface Props {
   // 표시용 — scope 필터에는 미사용 (그룹 설정 = scope=service 전용).
   haMode?: 'active_standby' | 'all_active' | 'standalone'
   onApplied?: () => Promise<void> | void
+  // true 면 오버레이 없이 패널만 렌더 (시스템/인프라 [패키지 설정] 탭의 페이지 임베드).
+  inline?: boolean
 }
 
 type Tab = { kind: 'scalar' } | { kind: 'preset' } | { kind: 'collection'; key: string }
 
 export function GroupServiceConfigModal({ open, onClose, groupName,
     members: liveMembers, deployments: liveDeployments, packages: livePackages,
-    haMode, onApplied }: Props) {
+    haMode, onApplied, inline }: Props) {
   // 부모(ServersPage)가 10초 폴링으로 state 배열을 갱신 → prop identity 가 매번
   // 바뀌면 template/collection/source 파생 객체도 새로 생성 → 하위 편집기의
   // useEffect 가 재실행되어 편집 중인 값이 서버 값으로 계속 덮어써진다.
@@ -226,13 +228,11 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
     setStatus('')
   }
 
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }}>
-      <div style={{ background: 'white', padding: 0, borderRadius: 6,
-                    width: '92vw', maxWidth: 1100, height: '88vh', display: 'flex', flexDirection: 'column' }}>
+  const panel = (
+      <div style={inline
+        ? { background: 'white', height: '100%', display: 'flex', flexDirection: 'column' }
+        : { background: 'white', padding: 0, borderRadius: 6,
+            width: '92vw', maxWidth: 1100, height: '88vh', display: 'flex', flexDirection: 'column' }}>
         {/* 헤더 */}
         <div style={{ padding: '14px 24px 0', borderBottom: '1px solid #e0e6ed' }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>그룹 설정 — {groupName}
@@ -438,12 +438,22 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
                            color: 'var(--text-muted)', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: 3 }}>
             {working ? '...' : `🔄 선택적 재기동 (${memberDepsForPkg.length})`}
           </button>
-          <button onClick={onClose} disabled={working}
-                  style={{ padding: '6px 14px', fontSize: 13 }}>
-            닫기
-          </button>
+          {!inline && (
+            <button onClick={onClose} disabled={working}
+                    style={{ padding: '6px 14px', fontSize: 13 }}>
+              닫기
+            </button>
+          )}
         </div>
       </div>
+  )
+  if (inline) return panel
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      {panel}
     </div>
   )
 }

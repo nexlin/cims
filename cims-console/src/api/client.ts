@@ -27,9 +27,30 @@ function getToken(): string | null {
   return localStorage.getItem('cims_token')
 }
 
+// ── admin 승격(sudo) 토큰 — 시스템/인프라 탭1·2 변이 작업용 ──────────────────
+// 비-admin(operator+) 세션이 admin 패스워드 인증으로 한시 승격. 메모리에만 보관
+// (localStorage 비저장 — 새로고침 시 소멸), 기본 30분. 활성 동안 모든 API 가
+// 승격 토큰을 사용 (백엔드 RBAC: 인프라/설치 변이=admin).
+let _elevated: { token: string; exp: number } | null = null
+const _elevListeners = new Set<() => void>()
+function _notifyElev() { _elevListeners.forEach(f => { try { f() } catch { /* noop */ } }) }
+export function setElevatedToken(token: string, ttlMs = 30 * 60_000) {
+  _elevated = { token, exp: Date.now() + ttlMs }
+  _notifyElev()
+}
+export function clearElevatedToken() { _elevated = null; _notifyElev() }
+export function elevationActive(): boolean {
+  if (_elevated && _elevated.exp <= Date.now()) { _elevated = null; _notifyElev() }
+  return !!_elevated
+}
+export function onElevationChange(f: () => void): () => void {
+  _elevListeners.add(f)
+  return () => { _elevListeners.delete(f) }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = getToken()
+  const token = (elevationActive() && _elevated) ? _elevated.token : getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
 
   const res = await fetch(buildApiUrl(path), {

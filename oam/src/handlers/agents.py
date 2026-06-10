@@ -394,10 +394,29 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
     }
 
 
+def _console_rbac(handler_args, *, read_role: str = "monitor", write_role: str = "admin"):
+    """콘솔용 API RBAC 게이트 — None=통과, HandlerResult=거부(401/403).
+
+    배경(2026-06-10): /api/v1 콘솔 API 가 무인증 노출이던 것을 차단. JWT
+    (Authorization Bearer, CimsAuth.JwtSecret) 필수. GET=read_role 이상,
+    그 외 메서드=write_role 이상. 권한 모델: 패키지 설정(config/collection)
+    =operator+, 인프라/설치 변이=admin (콘솔 UI 는 admin 패스워드 승격 지원).
+    agent 통신(/api/agent/*, X-Agent-Token)과 공개 에셋은 본 게이트 무관.
+    """
+    from services.admin_auth import require_role
+    need = read_role if handler_args.method.upper() == "GET" else write_role
+    _payload, err = require_role(handler_args, need)
+    return err
+
+
 async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     config = kwargs.get("config", {})
     tail = _path_tail(handler_args.full_path, _AGENT_BASE)
     method = handler_args.method.upper()
+
+    read_role = "admin" if (len(tail) >= 2 and tail[1] == "install-command") else "monitor"
+    deny = _console_rbac(handler_args, read_role=read_role)
+    if deny: return deny
 
     if not tail:
         if method == "GET":  return await _list_agents(config)
@@ -1180,6 +1199,9 @@ async def handle_packages(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     tail = _path_tail(handler_args.full_path, _PACKAGE_BASE)
     method = handler_args.method.upper()
 
+    deny = _console_rbac(handler_args)
+    if deny: return deny
+
     if not tail:
         if method == "GET":  return await _list_packages(config)
         if method == "POST": return await _create_package(handler_args, config)
@@ -1633,6 +1655,14 @@ async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> Handler
     config = kwargs.get("config", {})
     tail = _path_tail(handler_args.full_path, _DEPLOYMENT_BASE)
     method = handler_args.method.upper()
+
+    # 패키지 설정(탭3: config/collection) = operator+ (read 도 — 설정값에 민감정보).
+    # 그 외 변이(설치/잡/롤백/레코드) = admin.
+    if len(tail) >= 2 and tail[1] in ("config", "collection"):
+        deny = _console_rbac(handler_args, read_role="operator", write_role="operator")
+    else:
+        deny = _console_rbac(handler_args)
+    if deny: return deny
 
     if not tail:
         if method == "GET":  return await _list_deployments(config)
@@ -2594,6 +2624,8 @@ async def handle_sync_txn(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     from services import sync_txn
 
     config = kwargs.get("config", {})
+    deny = _console_rbac(handler_args)
+    if deny: return deny
     tail = _path_tail(handler_args.full_path, _SYNC_TXN_BASE)
     method = handler_args.method.upper()
 
@@ -2640,6 +2672,8 @@ async def handle_drift(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
     from services import drift_sweeper
 
     config = kwargs.get("config", {})
+    deny = _console_rbac(handler_args)
+    if deny: return deny
     tail = _path_tail(handler_args.full_path, _DRIFT_BASE)
     method = handler_args.method.upper()
 
@@ -2686,6 +2720,8 @@ async def handle_sip_services(handler_args: HandlerArgs, kwargs: dict) -> Handle
     POST/PUT/DELETE 는 410 Gone — 편집은 deployments collection PUT 으로.
     """
     config = kwargs.get("config", {})
+    deny = _console_rbac(handler_args)
+    if deny: return deny
     tail = _path_tail(handler_args.full_path, _SIP_SERVICES_BASE)
     method = handler_args.method.upper()
 

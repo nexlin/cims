@@ -19,6 +19,8 @@ interface Props {
   source: ModuleConfigSource
   onClose: () => void
   onDone?: () => void | Promise<void>
+  // true 면 Modal 오버레이 없이 패널만 렌더 (시스템/인프라 [패키지 설정] 탭의 페이지 임베드).
+  inline?: boolean
 }
 
 /**
@@ -28,7 +30,11 @@ interface Props {
  *  - module 모드:     Phase 1 로컬. PUT → build/dist/config.json (scalar) /
  *                     build/dist/{name}/config/*.jsonl (collection) + 로컬 PID SIGUSR1.
  */
-export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
+export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline }: Props) {
+  // 부모(ServersPage 등)가 주기 폴링으로 재렌더하며 source 객체를 매번 새로 만들면
+  // fetch/editor 의 useEffect 가 재실행돼 편집값이 서버 값으로 덮어써진다 —
+  // mount 시점 스냅샷으로 identity 고정 (모듈 전환은 caller 가 key 로 리마운트).
+  const [source] = useState(sourceProp)
   const { show } = useToast()
   const [loading, setLoading]     = useState(true)
   const [saving, setSaving]       = useState(false)
@@ -208,8 +214,7 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
     }
   }
 
-  return (
-    <Modal title={title} onClose={onClose} fullscreen>
+  const body = (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {loading ? (
           <div className="empty" style={{ padding: 40 }}>로딩 중...</div>
@@ -311,7 +316,7 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
 
         {/* sticky footer */}
         <div className="modal-footer" style={{ flex: '0 0 auto', marginTop: 0 }}>
-          <button className="btn btn--outline" onClick={onClose}>닫기</button>
+          {!inline && <button className="btn btn--outline" onClick={onClose}>닫기</button>}
           {template && tab === 'scalar' && (
             <>
               <button className="btn btn--primary" onClick={() => void save()}
@@ -330,6 +335,11 @@ export default function ModuleConfigModal({ source, onClose, onDone }: Props) {
           )}
         </div>
       </div>
+  )
+  if (inline) return body
+  return (
+    <Modal title={title} onClose={onClose} fullscreen>
+      {body}
     </Modal>
   )
 }

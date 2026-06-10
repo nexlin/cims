@@ -72,7 +72,9 @@ const CORE_SECTIONS: RouteSection[] = [
     defaultPath: '/deploy/servers',
     order: 60,
     routes: [
-      { path: '/deploy/servers',          title: '시스템/인프라', component: ServersPage,         adminOnly: true },
+      { path: '/deploy/servers',          title: '시스템/인프라', component: ServersPage,         requiredRole: 'operator' },
+      // ↑ RBAC (2026-06-10): 페이지 진입 operator+. 탭1(시스템/서버 구성)·탭2(패키지 설치)는
+      //   조회만 가능, 변이는 admin 세션 또는 admin 패스워드 승격. 탭3(패키지 설정)=operator 편집.
       { path: '/deploy/external-systems', title: '외부 시스템',   component: ExternalSystemsPage, adminOnly: true },
       { path: '/deploy/packages',         title: '패키지',        component: PackagesPage,        adminOnly: true },
       // HA 상세 편집 — ServersPage(시스템/인프라) 인스펙터가 HA 를 인라인 편집하므로

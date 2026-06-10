@@ -377,6 +377,9 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
 async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     """Dispatch /api/v1/ha-groups/* routes."""
     config = kwargs.get('config', {})
+    from handlers.agents import _console_rbac
+    deny = _console_rbac(handler_args)   # GET=monitor+, 변이=admin (무인증 차단, 2026-06-10)
+    if deny: return deny
     parts = _path_parts(handler_args.full_path, _HA_GROUPS_BASE)
     group_id = parts[0] if len(parts) > 0 else None
     sub      = parts[1] if len(parts) > 1 else None

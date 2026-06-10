@@ -18,11 +18,30 @@ import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigM
 import HealthCheckModal from '../components/HealthCheckModal'
 import MetricTrend from '../components/MetricTrend'
 import { agentDisplayName } from '../components/agentDisplay'
+import { useAdminCapable } from '../hooks/useAdminCapable'
+import AdminElevateDialog from '../components/AdminElevateDialog'
+import { clearElevatedToken, elevationActive } from '../api/client'
+import { useAuth } from '../contexts/AuthContext'
 
 type Selection =
   | { kind: 'agent'; id: number }
   | { kind: 'group'; id: number }
   | null
+
+// 상단 페이지 탭 — UX 개편 (2026-06-10): 좌측 선택(서버/그룹) 공유 + 우측 내용 분리.
+//  infra(시스템/서버 구성)·install(패키지 설치) = 조회 operator+, 변이 admin/승격.
+//  config(패키지 설정) = operator+ 편집 가능 (동적 반영 설정).
+type PageTab = 'infra' | 'install' | 'config'
+const PAGE_TABS: Array<{ key: PageTab; label: string; adminGated: boolean }> = [
+  { key: 'infra',   label: '시스템/서버 구성', adminGated: true },
+  { key: 'install', label: '패키지 설치',      adminGated: true },
+  { key: 'config',  label: '패키지 설정',      adminGated: false },
+]
+// fieldset 잠금 래퍼 — 내부 input/button 일괄 disable (조회는 가능)
+const LOCK_FIELDSET_STYLE: React.CSSProperties = {
+  border: 0, margin: 0, padding: 0, minWidth: 0,
+  flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+}
 
 export default function ServersPage() {
   const { show } = useToast()
@@ -54,7 +73,13 @@ export default function ServersPage() {
   const [metricsFor, setMetricsFor]         = useState<Agent | null>(null)
   const [healthCheckFor, setHealthCheckFor] = useState<Agent | null>(null)
   const [configFor, setConfigFor]           = useState<Deployment | null>(null)
-  const [groupConfigFor, setGroupConfigFor]  = useState<HaGroup | null>(null)
+  const [pageTab, setPageTab] = useState<PageTab>(() => {
+    const t = searchParams.get('t')
+    return (t === 'install' || t === 'config') ? t : 'infra'
+  })
+  const [elevateOpen, setElevateOpen] = useState(false)
+  const { user } = useAuth()
+  const canEdit = useAdminCapable()   // admin 세션 또는 admin 승격(sudo) 활성
 
   const load = useCallback(async () => {
     try {
@@ -277,9 +302,48 @@ export default function ServersPage() {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn--outline" onClick={() => void load()}>↻</button>
           <button className="btn btn--primary" onClick={() => setSystemModalOpen(true)}
-                  title="AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버">
+                  disabled={!canEdit}
+                  title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
             ＋ 시스템 추가
           </button>
+        </div>
+      </div>
+
+      {/* 페이지 탭 — 좌측 선택(서버/그룹) 공유, 우측 내용 전환 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, borderBottom: '2px solid var(--border)' }}>
+        {PAGE_TABS.map(t => {
+          const active = pageTab === t.key
+          const locked = t.adminGated && !canEdit
+          return (
+            <button key={t.key} onClick={() => setPageTab(t.key)}
+                    style={{
+                      padding: '9px 20px', fontSize: 13.5, fontWeight: active ? 700 : 400,
+                      background: active ? 'var(--surface)' : 'transparent',
+                      color: active ? '#1976d2' : 'var(--text-muted)',
+                      border: 'none',
+                      borderBottom: active ? '2px solid #1976d2' : '2px solid transparent',
+                      marginBottom: -2, cursor: 'pointer',
+                    }}
+                    title={locked ? '조회 가능 — 변경은 admin 권한 필요 (관리자 인증)' : ''}>
+              {t.label}{locked && <span style={{ marginLeft: 5, fontSize: 11 }}>🔒</span>}
+            </button>
+          )
+        })}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
+          {user?.role !== 'admin' && (
+            canEdit && elevationActive() ? (
+              <span style={{ fontSize: 12, color: '#27ae60' }}>
+                🔓 admin 승격 중
+                <button className="btn btn--sm btn--outline" style={{ marginLeft: 6 }}
+                        onClick={() => clearElevatedToken()}>해제</button>
+              </span>
+            ) : (
+              <button className="btn btn--sm" onClick={() => setElevateOpen(true)}
+                      title="admin 패스워드로 30분 승격 — 시스템 구성/패키지 설치 변경 허용">
+                🔐 관리자 인증
+              </button>
+            )
+          )}
         </div>
       </div>
 
@@ -307,28 +371,59 @@ export default function ServersPage() {
           border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
         }}>
           {selectedAgent ? (
-            <ServerInspector agent={selectedAgent}
-              deployments={depsByAgent.get(selectedAgent.id) || []}
-              packages={packages}
-              vipIps={vipIps}
-              onApprove={approveAgent}
-              onRevoke={revokeAgent}
-              onRemove={removeAgent}
-              onUpgrade={upgradeAgent}
-              onRestart={restartAgent}
-              onMetrics={setMetricsFor}
-              onHealthCheck={setHealthCheckFor}
-              onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
-              onConfigure={setConfigFor}
-              onJob={queueJob}
-              onRollback={rollbackDeployment}
-              onRemoveDep={removeDeployment} />
+            pageTab === 'config' ? (
+              <AgentConfigTab key={`${selectedAgent.id}:${packages.length > 0}`}
+                agent={selectedAgent}
+                deployments={depsByAgent.get(selectedAgent.id) || []}
+                onDone={load} />
+            ) : (
+              // infra/install: 조회는 operator+, 변이는 admin/승격 — fieldset 일괄 잠금
+              <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
+                <ServerInspector agent={selectedAgent} mode={pageTab}
+                  deployments={depsByAgent.get(selectedAgent.id) || []}
+                  packages={packages}
+                  vipIps={vipIps}
+                  onApprove={approveAgent}
+                  onRevoke={revokeAgent}
+                  onRemove={removeAgent}
+                  onUpgrade={upgradeAgent}
+                  onRestart={restartAgent}
+                  onMetrics={setMetricsFor}
+                  onHealthCheck={setHealthCheckFor}
+                  onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
+                  onConfigure={setConfigFor}
+                  onJob={queueJob}
+                  onRollback={rollbackDeployment}
+                  onRemoveDep={removeDeployment} />
+              </fieldset>
+            )
           ) : selectedGroup ? (
-            <GroupInspector group={selectedGroup} agents={agents}
-              onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
-              onReload={load}
-              onOpenConfig={() => setGroupConfigFor(selectedGroup)}
-              onDeleteSystem={deleteSystem} />
+            pageTab === 'config' ? (
+              <GroupServiceConfigModal key={`${selectedGroup.id}:${packages.length > 0}`}
+                open inline
+                onClose={() => { /* inline — 닫기 없음 */ }}
+                groupName={selectedGroup.name}
+                members={selectedGroup.members.map(m => ({
+                  id: m.agent_id,
+                  name: m.agent_name || agents.find(a => a.id === m.agent_id)?.name || `#${m.agent_id}`,
+                }))}
+                deployments={deployments}
+                packages={packages}
+                haMode={selectedGroup.mode}
+                onApplied={async () => { await load() }} />
+            ) : pageTab === 'install' ? (
+              <GroupInstallOverview group={selectedGroup} agents={agents}
+                depsByAgent={depsByAgent}
+                onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
+            ) : (
+              <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
+                <GroupInspector group={selectedGroup} agents={agents}
+                  onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
+                  onReload={load}
+                  onOpenConfig={() => setPageTab('config')}
+                  onDeleteSystem={deleteSystem} />
+              </fieldset>
+            )
           ) : (
             <div className="empty" style={{ padding: 40 }}>
               왼쪽 트리에서 서버 또는 HA 그룹을 선택하세요
@@ -364,18 +459,8 @@ export default function ServersPage() {
       {configFor &&
         <ModuleConfigModal source={{ type: 'deployment', deployment: configFor }}
           onClose={() => setConfigFor(null)} onDone={load} />}
-      {groupConfigFor &&
-        <GroupServiceConfigModal open
-          onClose={() => setGroupConfigFor(null)}
-          groupName={groupConfigFor.name}
-          members={groupConfigFor.members.map(m => ({
-            id: m.agent_id,
-            name: m.agent_name || agents.find(a => a.id === m.agent_id)?.name || `#${m.agent_id}`,
-          }))}
-          deployments={deployments}
-          packages={packages}
-          haMode={groupConfigFor.mode}
-          onApplied={async () => { await load() }} />}
+      {elevateOpen &&
+        <AdminElevateDialog onClose={() => setElevateOpen(false)} />}
     </div>
   )
 }
@@ -1181,10 +1266,12 @@ function StatChip({ label, value, sub, color }:
 
 type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
-function ServerInspector({ agent: a, deployments, packages, vipIps,
+function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
                           onApprove, onRevoke, onRemove, onUpgrade, onRestart, onMetrics, onHealthCheck,
                           onAddDeploy, onConfigure, onJob, onRollback, onRemoveDep }: {
   agent: Agent
+  // infra=시스템/서버 구성 (설치안내/정보/네트워크), install=패키지 설치 (모듈)
+  mode: 'infra' | 'install'
   deployments: Deployment[]
   packages: SipPackage[]
   vipIps?: Set<string>
@@ -1284,34 +1371,138 @@ function ServerInspector({ agent: a, deployments, packages, vipIps,
         </div>
       </div>
 
-      {/* 섹션 stack — accordion (default 모두 펼침, 개별 토글) */}
+      {/* 섹션 stack — 페이지 탭에 따라: infra=구성(설치안내/정보/네트워크), install=모듈 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {showInstall && (
-          <InspectorSection title={hasPendingInstall
-                                    ? `설치 안내 — ${a.name}`
-                                    : `재설치 / 토큰 재발급 — ${a.name}`}
-                            expanded={openSections.has('install')}
-                            onToggle={() => toggleSection('install')}>
-            <InstallSection agent={a} autoRegenSignal={autoRegenSignal} />
+        {mode === 'infra' && (
+          <>
+            {showInstall && (
+              <InspectorSection title={hasPendingInstall
+                                        ? `설치 안내 — ${a.name}`
+                                        : `재설치 / 토큰 재발급 — ${a.name}`}
+                                expanded={openSections.has('install')}
+                                onToggle={() => toggleSection('install')}>
+                <InstallSection agent={a} autoRegenSignal={autoRegenSignal} />
+              </InspectorSection>
+            )}
+            <InspectorSection title="정보" expanded={openSections.has('info')}
+                              onToggle={() => toggleSection('info')}>
+              <InfoTab agent={a} />
+            </InspectorSection>
+            <InspectorSection title="네트워크" expanded={openSections.has('network')}
+                              onToggle={() => toggleSection('network')}>
+              <NetworkTab agent={a} vipIps={vipIps} />
+            </InspectorSection>
+          </>
+        )}
+        {mode === 'install' && (
+          <InspectorSection title={`모듈 (${deployments.length})`}
+                            expanded={openSections.has('modules')}
+                            onToggle={() => toggleSection('modules')}>
+            <ModulesTab agent={a} deployments={deployments} packagesAvailable={packages.length > 0}
+              onAddDeploy={onAddDeploy} onConfigure={onConfigure}
+              onJob={onJob} onRollback={onRollback} onRemoveDep={onRemoveDep} />
           </InspectorSection>
         )}
-        <InspectorSection title="정보" expanded={openSections.has('info')}
-                          onToggle={() => toggleSection('info')}>
-          <InfoTab agent={a} />
-        </InspectorSection>
-        <InspectorSection title="네트워크" expanded={openSections.has('network')}
-                          onToggle={() => toggleSection('network')}>
-          <NetworkTab agent={a} vipIps={vipIps} />
-        </InspectorSection>
-        <InspectorSection title={`모듈 (${deployments.length})`}
-                          expanded={openSections.has('modules')}
-                          onToggle={() => toggleSection('modules')}>
-          <ModulesTab agent={a} deployments={deployments} packagesAvailable={packages.length > 0}
-            onAddDeploy={onAddDeploy} onConfigure={onConfigure}
-            onJob={onJob} onRollback={onRollback} onRemoveDep={onRemoveDep} />
-        </InspectorSection>
       </div>
     </>
+  )
+}
+
+// ── [패키지 설정] 탭 — 서버 선택: 모듈별 탭 + 설정 패널 (다이얼로그의 페이지화) ──
+function AgentConfigTab({ agent, deployments, onDone }: {
+  agent: Agent
+  deployments: Deployment[]
+  onDone: () => Promise<void> | void
+}) {
+  // 폴링 identity churn 차단 — mount 시 스냅샷 (모듈 전환은 key 리마운트)
+  const [deps] = useState(() => deployments.filter(d => d.status !== 'removed' && d.status !== 'pending'))
+  const [selDep, setSelDep] = useState<number>(deps[0]?.id ?? 0)
+  const dep = deps.find(d => d.id === selDep)
+  const source = useMemo(
+    () => dep ? ({ type: 'deployment' as const, deployment: dep }) : null,
+    [dep])
+  if (deps.length === 0) {
+    return <div className="empty" style={{ padding: 40 }}>
+      {agent.name} 에 설치된 모듈 없음 — [패키지 설치] 탭에서 모듈을 먼저 배포하세요
+    </div>
+  }
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', gap: 2, padding: '10px 16px 0', borderBottom: '1px solid var(--border)',
+                    background: 'var(--bg-soft)' }}>
+        {deps.map(d => {
+          const active = d.id === selDep
+          return (
+            <button key={d.id} onClick={() => setSelDep(d.id)}
+                    style={{
+                      padding: '8px 18px', fontSize: 13, fontWeight: active ? 700 : 400,
+                      background: active ? 'var(--surface)' : 'transparent',
+                      color: active ? '#1976d2' : 'var(--text-muted)',
+                      border: '1px solid var(--border)', borderBottom: 'none',
+                      borderRadius: '6px 6px 0 0', cursor: 'pointer',
+                    }}>
+              {d.package_name} <span style={{ fontSize: 10 }}>v{d.package_version}</span>
+            </button>
+          )
+        })}
+      </div>
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        {source && (
+          <ModuleConfigModal key={selDep} inline source={source}
+            onClose={() => { /* inline */ }} onDone={onDone} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── [패키지 설치] 탭 — 그룹 선택: 멤버별 배포 현황 요약 (작업은 멤버 서버에서) ──
+function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
+  group: HaGroup
+  agents: Agent[]
+  depsByAgent: Map<number, Deployment[]>
+  onSelectMember: (aid: number) => void
+}) {
+  return (
+    <div style={{ padding: 20, overflow: 'auto' }}>
+      <h4 style={{ marginTop: 0 }}>멤버별 패키지 배포 현황 — {group.name}</h4>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        설치/업그레이드/롤백 등 작업은 좌측 트리(또는 아래 멤버 클릭)에서 서버를 선택해 수행합니다.
+      </p>
+      <table className="data-table">
+        <thead>
+          <tr><th>서버</th><th>상태</th><th>배포 모듈</th></tr>
+        </thead>
+        <tbody>
+          {group.members.map(m => {
+            const ag = agents.find(a => a.id === m.agent_id)
+            const deps = depsByAgent.get(m.agent_id) || []
+            return (
+              <tr key={m.agent_id} style={{ cursor: 'pointer' }}
+                  onClick={() => onSelectMember(m.agent_id)}>
+                <td><b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b></td>
+                <td>
+                  <span style={{ color: agentStatusColor(ag?.status || 'offline'), fontSize: 12 }}>
+                    ● {ag?.status || '—'}
+                  </span>
+                </td>
+                <td>
+                  {deps.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>—</span> :
+                    deps.map(d => (
+                      <span key={d.id} className="tag" style={{
+                        background: depStatusColor(d.status), color: '#fff',
+                        fontSize: 11, padding: '2px 8px', borderRadius: 3, marginRight: 6,
+                      }}>
+                        {d.package_name} v{d.package_version} · {d.status}
+                      </span>
+                    ))}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
