@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
+import IconBtn from '../../../components/IconBtn'
 import { orgApi, type Organization, type OrgInput } from '../../../api/organizations'
 import { useToast } from '../../../components/Toast'
 
@@ -285,9 +287,10 @@ export default function OrganizationsPage() {
                         </>
                       ) : (
                         <>
-                          <button className="btn btn--sm btn--outline" onClick={() => startEdit(n)}>편집</button>
-                          <button className="btn btn--sm btn--outline" onClick={() => startAdd(n.id, n.id)} title="하위 추가">＋</button>
-                          <button className="btn btn--sm btn--danger" onClick={() => handleDelete(n.id)}>삭제</button>
+                          {/* 행마다 빨간 [삭제] 텍스트버튼이 반복돼 시각 소음 — 워크벤치와 동일한 아이콘 버튼으로 통일 */}
+                          <IconBtn title="편집" onClick={() => startEdit(n)}><Pencil size={14} /></IconBtn>
+                          <IconBtn title="하위 조직 추가" onClick={() => startAdd(n.id, n.id)}><Plus size={14} /></IconBtn>
+                          <IconBtn title="삭제" tone="danger" onClick={() => handleDelete(n.id)}><Trash2 size={14} /></IconBtn>
                         </>
                       )}
                     </td>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import IconBtn from '../../../components/IconBtn'
 import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown } from 'lucide-react'
 import { usersApi, type UserSummary, type Subscription, type UserInput } from '../../../api/users'
 import { orgApi, type Organization } from '../../../api/organizations'
@@ -27,16 +28,6 @@ type Expand = { key: string | number; userId: number; edit: boolean; hi?: string
 const ICON = 14
 
 // 작은 아이콘 액션 버튼
-function IconBtn({ title, onClick, tone, children }: { title: string; onClick: () => void; tone?: 'primary' | 'danger' | 'default'; children: React.ReactNode }) {
-  const cls = tone === 'danger' ? 'btn--danger' : tone === 'primary' ? 'btn--primary' : 'btn--ghost'
-  return (
-    <button title={title} aria-label={title} onClick={onClick}
-      className={`btn btn--sm ${cls}`}
-      style={{ padding: '3px 6px', display: 'inline-flex', alignItems: 'center', lineHeight: 0 }}>
-      {children}
-    </button>
-  )
-}
 
 // 펼침 표시 caret (열림/닫힘)
 function Caret({ open }: { open: boolean }) {

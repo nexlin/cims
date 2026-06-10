@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import IconBtn from '../../../components/IconBtn'
 import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown, ArrowLeft, ArrowRight, Crown } from 'lucide-react'
 import { groupsApi, type Group, type GroupInput, type Member } from '../../../api/groups'
 import { usersApi, type UserSummary } from '../../../api/users'
@@ -18,16 +19,6 @@ type GroupExt = Group
 
 const ICON = 14
 
-function IconBtn({ title, onClick, tone, disabled, children }: { title: string; onClick: () => void; tone?: 'primary' | 'danger' | 'default'; disabled?: boolean; children: React.ReactNode }) {
-  const cls = tone === 'danger' ? 'btn--danger' : tone === 'primary' ? 'btn--primary' : 'btn--ghost'
-  return (
-    <button title={title} aria-label={title} onClick={onClick} disabled={disabled}
-      className={`btn btn--sm ${cls}`}
-      style={{ padding: '3px 6px', display: 'inline-flex', alignItems: 'center', lineHeight: 0 }}>
-      {children}
-    </button>
-  )
-}
 
 function Caret({ open }: { open: boolean }) {
   return <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
