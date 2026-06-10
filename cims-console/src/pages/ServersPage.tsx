@@ -334,15 +334,17 @@ export default function ServersPage() {
               onAddMember={addMemberToGroup}
               onRemoveMember={removeMemberFromGroup} />
           </div>
-          {/* 시스템 추가 — 시스템 목록 바로 아래 (구성 작업, admin/승격 필요) */}
-          <div style={{ flex: '0 0 auto', padding: 10, borderTop: '1px solid var(--border)' }}>
-            <button className="btn btn--primary btn--sm" style={{ width: '100%' }}
-                    onClick={() => setSystemModalOpen(true)}
-                    disabled={!canEdit}
-                    title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
-              ＋ 시스템 추가
-            </button>
-          </div>
+          {/* 시스템 추가 — 시스템 목록 바로 아래. 구성 작업이므로 [시스템/서버 구성] 탭에서만 노출 */}
+          {pageTab === 'infra' && (
+            <div style={{ flex: '0 0 auto', padding: 10, borderTop: '1px solid var(--border)' }}>
+              <button className="btn btn--primary btn--sm" style={{ width: '100%' }}
+                      onClick={() => setSystemModalOpen(true)}
+                      disabled={!canEdit}
+                      title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
+                ＋ 시스템 추가
+              </button>
+            </div>
+          )}
         </div>
         {/* 우측 Inspector */}
         <div style={{
