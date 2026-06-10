@@ -43,7 +43,15 @@ interface Props {
 
 type Tab = { kind: 'scalar' } | { kind: 'preset' } | { kind: 'collection'; key: string }
 
-export function GroupServiceConfigModal({ open, onClose, groupName, members, deployments, packages, haMode, onApplied }: Props) {
+export function GroupServiceConfigModal({ open, onClose, groupName,
+    members: liveMembers, deployments: liveDeployments, packages: livePackages,
+    haMode, onApplied }: Props) {
+  // 부모(ServersPage)가 10초 폴링으로 state 배열을 갱신 → prop identity 가 매번
+  // 바뀌면 template/collection/source 파생 객체도 새로 생성 → 하위 편집기의
+  // useEffect 가 재실행되어 편집 중인 값이 서버 값으로 계속 덮어써진다.
+  // 모달이 열린 시점의 스냅샷으로 고정 (저장 후 갱신은 loadScalar/에디터가 직접 fetch).
+  const [frozen] = useState(() => ({ members: liveMembers, deployments: liveDeployments, packages: livePackages }))
+  const { members, deployments, packages } = frozen
   const [selectedPkg, setSelectedPkg] = useState<number>(0)
   const [selectedPreset, setSelectedPreset] = useState<string>('')
   const [tab, setTab] = useState<Tab>({ kind: 'scalar' })
@@ -78,7 +86,13 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
     () => deployments.filter(d => memberIds.has(d.agent_id) && d.package_id === effectivePkgId),
     [deployments, memberIds, effectivePkgId]
   )
-  const memberDeploymentIds = memberDepsForPkg.map(d => d.id)
+  const memberDeploymentIds = useMemo(
+    () => memberDepsForPkg.map(d => d.id), [memberDepsForPkg])
+  // ModuleConfigEditor 는 source identity 를 useEffect deps 로 사용 — 렌더마다
+  // 새 객체를 만들면 행 편집이 refetch 로 덮어써짐 (ModuleConfigModal 의 교훈 동일).
+  const groupEditorSource = useMemo(
+    () => ({ type: 'group' as const, deploymentIds: memberDeploymentIds }),
+    [memberDeploymentIds])
 
   // ── 서비스 설정 (scalar) 상태 ──
   const [svcValues, setSvcValues]   = useState<Record<string, FieldValue>>({})
@@ -398,7 +412,7 @@ export function GroupServiceConfigModal({ open, onClose, groupName, members, dep
                     {!c.restart && ' 별도 재기동 불필요 — agent 가 자동 SIGUSR1 reload.'}
                   </p>
                   <ModuleConfigEditor
-                    source={{ type: 'group', deploymentIds: memberDeploymentIds }}
+                    source={groupEditorSource}
                     collection={c}
                   />
                 </div>
