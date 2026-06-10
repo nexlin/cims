@@ -7,24 +7,35 @@ const DOCS = [
 ]
 
 function renderMd(md: string): string {
-  return md
+  // 1) 코드펜스를 먼저 추출해 보호 — 인라인 `code` 정규식이 ``` 의 백틱을 잡아먹어
+  //    펜스 안 다이어그램 전체가 인라인 <code> 로 말려 깨지던 문제 (아키텍처 문서).
+  const blocks: string[] = []
+  let s = md.replace(/^```[^\n]*\n([\s\S]*?)^```[ \t]*$/gm, (_m, body: string) => {
+    const esc = body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    blocks.push(`<pre class="md-pre"><code>${esc}</code></pre>`)
+    return `\u0000B${blocks.length - 1}\u0000`
+  })
+  s = s
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/^```(\w*)$/gm, '<pre><code>')
-    .replace(/^```$/gm, '</code></pre>')
     .replace(/^\|(.+)\|$/gm, (_m, row) => {
       const cells = row.split('|').map((c: string) => c.trim())
       return '<tr>' + cells.map((c: string) => `<td>${c}</td>`).join('') + '</tr>'
     })
     .replace(/^([-]{3,}\|?)+$/gm, '')
+    // 연속된 <tr> 묶음을 <table> 로 감쌈 — 고아 <tr> 은 HTML 파서가 태그를 버려
+    // 표가 줄글로 풀리던 문제.
+    .replace(/((?:<tr>.*<\/tr>\n?)+)/g, '<table class="md-table"><tbody>$1</tbody></table>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/^(&gt; .+)$/gm, '<blockquote>$1</blockquote>')
     .replace(/\n{2,}/g, '<br/><br/>')
     .replace(/\n/g, '<br/>')
+  // 2) 보호한 코드블록 복원
+  return s.replace(/\u0000B(\d+)\u0000(<br\/>)?/g, (_m, i) => blocks[Number(i)])
 }
 
 export default function DocsPage() {

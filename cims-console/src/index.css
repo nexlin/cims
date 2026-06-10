@@ -938,6 +938,13 @@ body {
 
 /* ── Docs viewer ─────────────────────────────────────────── */
 .docs-content { font-size: 14px; line-height: 1.7; color: var(--text); max-width: 900px; }
+.docs-content .md-pre {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 14px; overflow-x: auto; line-height: 1.35; font-size: 12px;
+}
+.docs-content .md-pre code { background: none; padding: 0; color: var(--text); }
+.docs-content .md-table { border-collapse: collapse; margin: 8px 0; }
+.docs-content .md-table td { border: 1px solid var(--border); padding: 4px 10px; font-size: 13px; }
 .docs-content h1 { font-size: 22px; font-weight: 700; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--primary); }
 .docs-content h2 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; color: var(--primary); }
 .docs-content h3 { font-size: 15px; font-weight: 600; margin: 16px 0 6px; }
