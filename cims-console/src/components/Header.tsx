@@ -23,6 +23,8 @@ export default function Header({ userName, userRole, onLogout, onChangePw }: Hea
           <span className="app-header-logo-text">CIMS</span>
         </div>
       </div>
+      {/* 페이지 위젯 편집 컨트롤 슬롯 — EditableLayout 이 portal 로 렌더 */}
+      <div id="layout-edit-slot" className="app-header-editslot" />
       <div className="app-header-right">
         <span className="app-header-user-name">{userName}</span>
         <span className={`badge ${userRole === 'admin' ? 'badge--blue' : 'badge--gray'}`}>

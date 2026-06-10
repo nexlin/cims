@@ -3,6 +3,7 @@
 // 영속: OAM /console/layouts/<id> (PUT 저장 / DELETE seed 리셋). 없으면 seed.
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../components/Toast'
 import { consoleApi } from '../api/console'
@@ -40,6 +41,11 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
   const [draft, setDraft] = useState<PageLayout | null>(null)
   const [addId, setAddId] = useState('')
   const [saving, setSaving] = useState(false)
+  // 편집 컨트롤은 글로벌 헤더의 슬롯(#layout-edit-slot)으로 portal — 콘텐츠/위젯
+  // 컨트롤과의 겹침 원천 차단 (구 우상단 플로팅 overlay 가 첫 행 위젯의
+  // ↑↓/폭/높이/✕ 를 덮던 문제). Header 가 먼저 마운트되므로 effect 에서 탐색.
+  const [editSlot, setEditSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => { setEditSlot(document.getElementById('layout-edit-slot')) }, [])
 
   useEffect(() => {
     let alive = true
@@ -95,37 +101,39 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
     finally { setSaving(false) }
   }
 
+  const editControls = (
+    <div className="layout-edit-headerbar">
+      {!editing ? (
+        <button className="btn btn--sm layout-edit-fab" onClick={beginEdit}
+                title="이 페이지를 위젯으로 편집">✎ 편집</button>
+      ) : (
+        <>
+          <span className="layout-edit-hint">편집 중</span>
+          <select className="form-input" value={addId} onChange={e => setAddId(e.target.value)}
+                  style={{ width: 180, fontSize: 12 }}>
+            <option value="">+ 위젯 추가…</option>
+            {widgetsByCategory().map(g => (
+              <optgroup key={g.category} label={g.label}>
+                {g.widgets.map(w => (
+                  <option key={w.id} value={w.id}>{w.title} ({w.serviceId || 'core'})</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <button className="btn btn--sm" onClick={addWidget} disabled={!addId}>추가</button>
+          <button className="btn btn--sm btn--primary" onClick={saveLayout} disabled={saving}>저장</button>
+          <button className="btn btn--sm" onClick={cancelEdit} disabled={saving}>취소</button>
+          <button className="btn btn--sm" onClick={resetLayout} disabled={saving}
+                  title="저장본 삭제 → 기본값 복귀">초기화</button>
+        </>
+      )}
+    </div>
+  )
+
   return (
     <div className="layout-host">
-      {/* 편집 컨트롤 — 콘텐츠 상단을 차지하지 않도록 우상단 반투명 플로팅 overlay. */}
-      {isAdmin && (
-        <div className={`layout-edit-overlay${editing ? '' : ' layout-edit-overlay--compact'}`}>
-          {!editing ? (
-            <button className="btn btn--sm layout-edit-fab" onClick={beginEdit}
-                    title="이 페이지를 위젯으로 편집">✎ 편집</button>
-          ) : (
-            <>
-              <span className="layout-edit-hint">편집 중 — 저장 전까지 반영 안 됨</span>
-              <select className="form-input" value={addId} onChange={e => setAddId(e.target.value)}
-                      style={{ width: 180, fontSize: 12 }}>
-                <option value="">+ 위젯 추가…</option>
-                {widgetsByCategory().map(g => (
-                  <optgroup key={g.category} label={g.label}>
-                    {g.widgets.map(w => (
-                      <option key={w.id} value={w.id}>{w.title} ({w.serviceId || 'core'})</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-              <button className="btn btn--sm" onClick={addWidget} disabled={!addId}>추가</button>
-              <button className="btn btn--sm btn--primary" onClick={saveLayout} disabled={saving}>저장</button>
-              <button className="btn btn--sm" onClick={cancelEdit} disabled={saving}>취소</button>
-              <button className="btn btn--sm" onClick={resetLayout} disabled={saving}
-                      title="저장본 삭제 → 기본값 복귀">초기화</button>
-            </>
-          )}
-        </div>
-      )}
+      {/* 편집 컨트롤 — 글로벌 헤더 중앙 슬롯에 portal (콘텐츠와 겹침 없음) */}
+      {isAdmin && editSlot && createPortal(editControls, editSlot)}
 
       {!editing ? (
         <GridRenderer layout={layout} />

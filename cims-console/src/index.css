@@ -952,7 +952,7 @@ body {
 
 /* ── Layout (Header + Sidebar + Content) ──────── */
 .app-layout {
-  --header-h: 52px;
+  --header-h: 64px;   /* 위젯 편집 컨트롤 수용 위해 확대 (구 52px) */
   --sidebar-w: 224px;
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
@@ -994,6 +994,17 @@ body {
   -webkit-text-fill-color: transparent;
 }
 .app-header-right { display: flex; align-items: center; gap: 8px; }
+/* 페이지 위젯 편집 컨트롤 슬롯 — 로고와 사용자 영역 사이, 우측 정렬 */
+.app-header-editslot {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; justify-content: flex-end;
+  margin: 0 20px; overflow: hidden;
+}
+.layout-edit-headerbar {
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: nowrap; min-width: 0; white-space: nowrap;
+}
+.layout-edit-headerbar .form-input { min-width: 0; }
 .app-header-user-name { font-size: 13px; font-weight: 600; color: var(--header-fg); }
 .app-header .btn--ghost { color: var(--header-muted); }
 .app-header .btn--ghost:hover { color: var(--header-fg); background: var(--sidebar-hover); }
@@ -1075,37 +1086,10 @@ body {
 }
 .app-content-body { padding: 24px; flex: 1; }
 
-/* ── 위젯 편집 overlay (모든 페이지 위젯 합성) ──────────────────────────
-   편집 컨트롤이 콘텐츠 상단 공간을 차지하지 않도록 우상단에 반투명 플로팅. */
+/* ── 위젯 편집 컨트롤 (글로벌 헤더 슬롯으로 portal — 2026-06-10) ─────────
+   구 우상단 플로팅 overlay 가 첫 행 위젯의 컨트롤(↑↓/폭/높이/✕)을 덮던 문제로
+   헤더(.app-header-editslot) 내 상주로 이전. */
 .layout-host { position: relative; }
-.layout-edit-overlay {
-  position: absolute;
-  top: 4px; right: 4px;
-  z-index: 40;
-  display: flex; align-items: center; flex-wrap: wrap;
-  justify-content: flex-end; gap: 6px;
-  max-width: min(720px, calc(100% - 8px));
-  padding: 6px 8px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.16);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-}
-/* idle 상태 — 작은 반투명 ✎ 버튼만 (pill chrome 없음). */
-.layout-edit-overlay--compact {
-  padding: 0; border: none; background: transparent; box-shadow: none;
-  -webkit-backdrop-filter: none; backdrop-filter: none;
-}
-.layout-edit-overlay--compact .layout-edit-fab {
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.12);
-  opacity: 0.78;
-  transition: opacity 0.15s ease;
-}
-.layout-edit-overlay--compact .layout-edit-fab:hover { opacity: 1; }
+.layout-edit-fab { opacity: 0.85; }
+.layout-edit-fab:hover { opacity: 1; }
 .layout-edit-hint { font-size: 12px; color: var(--primary); font-weight: 600; white-space: nowrap; }
