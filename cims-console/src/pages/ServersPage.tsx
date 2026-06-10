@@ -478,8 +478,8 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
             <div onClick={() => onSelect({ kind: 'group', id: g.id })}
                  style={{
                    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
-                   borderBottom: '1px solid #eee', cursor: 'pointer',
-                   background: isSelected ? '#eef5ff' : '#fafafa',
+                   borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                   background: isSelected ? 'var(--primary-soft, #eef5ff)' : 'var(--bg-soft)',
                  }}>
               <span onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}
                     style={{ width: 14, color: 'var(--text-muted)' }}>{isOpen ? '▼' : '▶'}</span>
@@ -525,8 +525,8 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                onClick={() => onSelect({ kind: 'agent', id: a.id })}
                style={{
                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
-                 borderBottom: '1px solid #eee', cursor: 'pointer',
-                 background: isSelected ? '#eef5ff' : '#fafafa',
+                 borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                 background: isSelected ? 'var(--primary-soft, #eef5ff)' : 'var(--bg-soft)',
                }}>
             <span style={{ width: 14 }} />  {/* expand 자리 비움 — group 정렬 맞춤 */}
             <span style={{
@@ -562,8 +562,8 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
          style={{
            display: 'flex', alignItems: 'center', gap: 6,
            padding: '6px 10px', paddingLeft: indent ? 32 : 10,
-           borderBottom: '1px solid #f4f4f4', cursor: 'pointer',
-           background: active ? '#eef5ff' : undefined,
+           borderBottom: '1px solid var(--border)', cursor: 'pointer',
+           background: active ? 'var(--primary-soft, #eef5ff)' : undefined,
          }}>
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar }} />
       <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{agentDisplayName(a.name)}</span>

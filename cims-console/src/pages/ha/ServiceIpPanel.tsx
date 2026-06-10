@@ -329,7 +329,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                 </tr>
               )
             }
-            const bg = kernelAuto ? '#f8f9fa' : undefined
+            const bg = kernelAuto ? 'var(--surface-2)' : undefined
             return (
               <tr key={rowKey} style={bg ? { background: bg } : undefined}>
                 <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.dst}</td>
