@@ -1738,6 +1738,11 @@ async def _put_deployment_config(handler_args, did: int, config):
     sync_id = None
     members_resp: list[dict] = []
     if queue_update and saved:
+        # _deploy_update 반환 = raw 레코드 (package_name/version 은 패키지 join 필드라
+        # 없음) → agent 의 pkg_subdir 해석(overlay 를 <pkg>/config.json 에 기록)에
+        # 필요하므로 재-enrich. 누락 시 overlay 가 install_path 루트에 쓰여 CSP 의
+        # SIGUSR1 즉시반영(_findDeploymentConfig = csp.json 부모×2)이 읽지 못한다.
+        _enrich_deploy(saved, config)
         member_rows: list[dict] = []
         for t in saved:
             sf = t.get("service_functions")

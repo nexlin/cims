@@ -1071,12 +1071,12 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
 
 
 def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
-    """multi-pkg agent 의 변종별 pid 디렉토리 분리에 사용. **config.json 위치 결정자
-    아님** — config.json 의 overlay 위치는 CSP 의 _findDeploymentConfig
-    (SipServerSetup.cpp:147-166) 가 csp.json 부모×2 = install_path/config.json 으로
-    고정. 본 함수는 _signal_process 의 pid 탐색 순서에만 사용.
+    """변종(pkg) 하위 디렉토리 해석 — pid 탐색 순서 및 overlay(config.json) 기록
+    위치(<pkg>/config.json = 모듈 바이너리의 _findDeploymentConfig 가 읽는 csp.json
+    부모×2) 결정에 사용.
 
-    우선순위: params.pkg_subdir 명시 → params.package_name 디렉토리 존재 → 빈 문자열.
+    우선순위: params.pkg_subdir 명시 → params.package_name 디렉토리 존재
+    → 파일시스템 자동 탐지 (모듈 구조 단일 디렉토리) → 빈 문자열.
     """
     explicit = (params.get("pkg_subdir") or "").strip()
     if explicit:
@@ -1084,6 +1084,17 @@ def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
     pkg_name = (params.get("package_name") or "").strip()
     if pkg_name and os.path.isdir(os.path.join(install_path, pkg_name)):
         return pkg_name
+    # 자동 탐지 — install_path 하위에서 모듈 구조(<d>/config/<d>.json 또는
+    # <d>/bin/<d>) 를 갖는 디렉토리가 정확히 1개면 그것. 버전 단위 설치에서
+    # 호출자가 package_name 을 빠뜨린 job params (raw 레코드 기반) 방어.
+    try:
+        cands = [d for d in os.listdir(install_path)
+                 if os.path.isfile(os.path.join(install_path, d, "config", f"{d}.json"))
+                 or os.path.isfile(os.path.join(install_path, d, "bin", d))]
+        if len(cands) == 1:
+            return cands[0]
+    except Exception:
+        pass
     return ""
 
 

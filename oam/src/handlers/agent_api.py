@@ -297,12 +297,11 @@ async def _sync_ack(handler_args: HandlerArgs, sid: int,
     agent 자신 (X-Agent-Token) 의 slot 만 갱신. 다른 agent 의 slot 은 변경 불가.
     """
     from services import sync_txn
-    try:
-        body = json.loads(handler_args.body or b"{}")
-        if not isinstance(body, dict):
-            raise ValueError("body must be object")
-    except Exception as e:
-        return HandlerResult(status=400, body={"error": "invalid_json", "detail": str(e)},
+    # 프레임워크가 JSON body 를 dict 로 선파싱함 — json.loads 재호출 시 TypeError
+    # → 모든 agent ack 가 400 으로 유실되던 버그. _parse_body 로 통일.
+    body = _parse_body(handler_args)
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={"error": "invalid_json"},
                              media_type="application/json")
     status = (body.get("status") or "ack").lower()
     if status not in ("ack", "nack"):
