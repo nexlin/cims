@@ -117,10 +117,10 @@ PJSIP 미디어 파이프라인은 **[RTP/RTCP]→[지터버퍼]→[AEC]→[conf
 
 | | 음성 AMR-WB | 영상 H.264 |
 |---|---|---|
-| PJSIP 기본 지원 | ❌ MediaCodec 오디오 래퍼 없음 → **커스텀 `pjmedia_codec_factory` 작성** | ✅ Android MediaCodec 비디오 경로 존재(`and_media`, `config_site.h`의 `PJMEDIA_HAS_ANDROID_MEDIACODEC`) |
-| 위험도 | **높음(최우선 검증)** | 낮음 |
-| 리스크 | MediaCodec은 비동기·버퍼링 스트리밍 API → 실시간 20ms 음성 프레임에서 지연/버퍼 정합 문제 | 영상은 버퍼링 지연 허용폭이 커서 궁합 좋음 |
-| 폴백 | 지연 부적합 시 (a)음성만 opencore-amr(특허 재검토) (b)디바이스 분기 | 디바이스 미지원 시 SW 인코더 |
+| PJSIP 기본 지원 | ✅ **And-Media 오디오 경로 존재**(교정 2026-06-10) — `and_aud_mediacodec.cpp` 2.16 실존 확인, `PJMEDIA_HAS_AND_MEDIA_AMRWB` 기본 1 → **커스텀 `pjmedia_codec_factory` 불필요**(원안 "오디오 래퍼 없음"은 오류) | ✅ Android MediaCodec 비디오 경로 존재(`and_media`) |
+| 위험도 | 낮음 — And-Media 내장 + M0 게이트(UNIWA ENC+DEC·실시간성) 통과. 잔여 = 서버 opencore 와의 상호운용(M1.2 실호 게이트) | 낮음 |
+| 리스크 | MediaCodec 비동기 API 의 20ms 정합은 PJSIP And-Media 구현이 처리 — 단말 단 검증은 M0 로 완료 | 영상은 버퍼링 지연 허용폭이 커서 궁합 좋음 |
+| 폴백 | M1.2 상호운용 게이트 실패 시 opencore-amr(경로 A, 특허 재검토 동반) | 디바이스 미지원 시 SW 인코더 |
 
 > **설계 원칙:** AMR-WB MediaCodec의 실시간성은 **M0 스파이크로 정량 측정**(end-to-end mouth-to-ear 지연, 프레임 드랍)한 뒤 본구현 진입. 측정 기준 미달 시 폴백 결정.
 
@@ -283,10 +283,10 @@ cims/
 
 ### 9.2 PJSIP 빌드
 
-- `configure-android`(NDK) → `make dep && make`. **`config_site.h`**: `PJMEDIA_HAS_OPENCORE_AMR 0`(번들 비활성, MediaCodec 사용), `PJMEDIA_HAS_ANDROID_MEDIACODEC 1`(영상), 불필요 코덱 off.
+- `configure-android`(NDK) → `make dep && make`. **`config_site.h`**: `PJMEDIA_HAS_AND_MEDIA_AMRWB 1`(음성 정본) + `PJMEDIA_HAS_OPENCORE_AMR{WB,NB}_CODEC 0`(중복 등록 방지), And-Media H264(영상), 불필요 코덱 off — 정본은 [M1 설계서](android_ue_m1_pjsip_integration.md) §2.5.
 - **SWIG** → `org.pjsip.pjsua2.*` Java + `libpjsua2.so`. Gradle 모듈로 패키징.
 - ABI: `arm64-v8a`(필수) + 필요시 `armeabi-v7a`.
-- 음성 AMR-WB는 PJSIP 내장 대신 **커스텀 코덱 팩토리**를 JNI로 등록(MediaCodec 연동).
+- 음성 AMR-WB는 PJSIP **내장 And-Media 코덱**(MediaCodec 구동, 2.16 실존 확인 2026-06-10)을 사용 — 커스텀 코덱 팩토리 불필요.
 
 ---
 
