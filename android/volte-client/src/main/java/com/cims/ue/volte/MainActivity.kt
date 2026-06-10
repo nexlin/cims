@@ -86,6 +86,7 @@ private fun ConfigScreen(
     var transport by remember { mutableStateOf(initial.transport) }
     var domain by remember { mutableStateOf(initial.domain) }
     var msisdn by remember { mutableStateOf(initial.msisdn) }
+    var imsi by remember { mutableStateOf(initial.imsi) }
     var name by remember { mutableStateOf(initial.displayName) }
     var loginId by remember { mutableStateOf(initial.loginId) }
     var authId by remember { mutableStateOf(initial.authId) }
@@ -115,16 +116,23 @@ private fun ConfigScreen(
             }
         }
 
-        ConfigField("도메인 / realm", domain) { domain = it }
-        ConfigField("MSISDN (번호)", msisdn) { msisdn = it }
+        ConfigField("도메인 (홈/서비스)", domain) { domain = it }
+        ConfigField("MSISDN — 공개 ID (sip:번호@도메인)", msisdn) { msisdn = it }
+        ConfigField("IMSI — 인증 ID 합성용 (IMSI@도메인)", imsi) { imsi = it.filter { ch -> ch.isDigit() } }
         ConfigField("이름", name) { name = it }
         ConfigField("로그인 ID", loginId) { loginId = it }
-        ConfigField("auth_id (비우면 MSISDN 사용)", authId) { authId = it }
+        ConfigField("auth_id (전체 IMPI 직접 입력 — 비우면 IMSI@도메인 합성)", authId) { authId = it }
         ConfigField("비밀번호", password, isPassword = true) { password = it }
+
+        Text(
+            "※ 공개 ID(MSISDN)와 인증 ID(IMSI@도메인)는 서로 다른 값입니다. 서버는 Digest username 으로 " +
+                "IMSI@도메인 정확 일치를 요구하며, 불일치 시 즉시 403 으로 거부합니다.",
+            style = MaterialTheme.typography.labelSmall,
+        )
 
         if (showError) {
             Text(
-                "필수 항목을 확인하세요: 서버/포트/도메인/MSISDN/비밀번호",
+                "필수 항목을 확인하세요: 서버/포트/도메인/MSISDN/IMSI(또는 auth_id)/비밀번호",
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -138,6 +146,7 @@ private fun ConfigScreen(
                     transport = transport,
                     domain = domain.trim(),
                     msisdn = msisdn.trim(),
+                    imsi = imsi.trim(),
                     displayName = name.trim(),
                     loginId = loginId.trim(),
                     authId = authId.trim(),
@@ -188,9 +197,10 @@ private fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("CIMS VoLTE", style = MaterialTheme.typography.titleLarge)
-        Text("계정: ${config.aor}", style = MaterialTheme.typography.bodyMedium)
+        Text("공개 ID(AOR): ${config.aor}", style = MaterialTheme.typography.bodyMedium)
+        Text("인증 ID(IMPI): ${config.digestUsername}", style = MaterialTheme.typography.bodyMedium)
         Text(
-            "서버: ${config.serverHost}:${config.serverPort}/${config.transport}   realm=${config.domain}",
+            "서버: ${config.serverHost}:${config.serverPort}/${config.transport}   도메인=${config.domain}",
             style = MaterialTheme.typography.bodySmall,
         )
         OutlinedButton(onClick = onEditConfig) { Text("설정 편집") }

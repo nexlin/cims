@@ -21,6 +21,7 @@ class ConfigStore(context: Context) {
         }.getOrDefault(SipAccountConfig.Transport.UDP),
         domain = prefs.getString(K_DOMAIN, "").orEmpty(),
         msisdn = prefs.getString(K_MSISDN, "").orEmpty(),
+        imsi = prefs.getString(K_IMSI, "").orEmpty(),
         displayName = prefs.getString(K_NAME, "").orEmpty(),
         loginId = prefs.getString(K_LOGIN, "").orEmpty(),
         authId = prefs.getString(K_AUTH, "").orEmpty(),
@@ -35,6 +36,7 @@ class ConfigStore(context: Context) {
             putString(K_TRANSPORT, c.transport.name)
             putString(K_DOMAIN, c.domain)
             putString(K_MSISDN, c.msisdn)
+            putString(K_IMSI, c.imsi)
             putString(K_NAME, c.displayName)
             putString(K_LOGIN, c.loginId)
             putString(K_AUTH, c.authId)
@@ -52,6 +54,7 @@ class ConfigStore(context: Context) {
         const val K_TRANSPORT = "transport"
         const val K_DOMAIN = "domain"
         const val K_MSISDN = "msisdn"
+        const val K_IMSI = "imsi"
         const val K_NAME = "name"
         const val K_LOGIN = "login"
         const val K_AUTH = "auth"

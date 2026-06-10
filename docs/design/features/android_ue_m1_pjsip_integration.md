@@ -249,7 +249,7 @@ android {
 | 항목 | 서버 강제값 | 근거 |
 |---|---|---|
 | Challenge / algorithm / qop | `Digest` / `MD5` / `auth` | `CscfModule.cpp:46-57` |
-| realm | service.domain (`ims.mnc033...`) | `AddChallenge`/`CheckAuthorization` |
+| realm | `EffectiveRealm` = auth_realm 있으면 그것, 없으면 service.domain | `AddChallenge`(`CscfModule.cpp:52-57`)·`EffectiveRealm`(`CspServiceMap.cpp:112`) |
 | A1 | `username:realm:password` (RFC 2617) | `:78` |
 | response(qop=auth) | `H(A1):nonce:nc:cnonce:qop:H(A2)` | `:87` |
 | nonce | 서버 발행·1회성(`NonceMap.Select`) | `:106,:172` |
@@ -284,7 +284,7 @@ private fun buildAccountConfig(c: SipAccountConfig): AccountConfig {
 ### 3.3 라우팅·realm 함정
 
 - **proxies vs registrarUri**: 테스트 도메인(`ims.mnc033...`)은 공인 DNS 미해석 → registrarUri host를 도메인으로 두면 일부 빌드에서 registrarUri 자체 DNS 조회를 먼저 시도해 지연/실패할 수 있다. **`proxies`에 실제 IP:port(`;lr`) route를 강제**하고 idUri/registrarUri host는 규격상 domain 유지. M1.1 1차 시도에서 막히면 차선책으로 registrarUri/idUri host도 서버 IP로 두는 변형을 준비(verify-on-machine).
-- **realm**: `AuthCredInfo.realm`은 challenge realm(=service.domain)과 **정확히 일치**시키거나 와일드카드 `"*"`(challenge realm echo) 사용 권장. 도메인을 오타로 박으면 challenge realm 불일치 시 자격증명 미적용 → 무한 401. (username=IMSI@domain과 realm은 독립 변수.)
+- **realm**(소스 재검증 2026-06-10): challenge realm = `EffectiveRealm`(auth_realm 우선, 없으면 service.domain — `CspServiceMap.cpp:112`)이고 **username 의 `@` 뒤 domain(=`svc.domain`)과는 별개 변수**다. 핵심: **서버는 클라이언트가 보낸 realm 을 검증하지 않고 그대로 A1=MD5(username:realm:password) 계산에 넣는다**(`CscfModule.cpp:150`). 따라서 서버측은 realm 값이 challenge 와 달라도 인증이 깨지지 않는다 — **무한 401 위험은 순수 PJSIP 클라이언트측 동작**(`AuthCredInfo.realm`이 challenge realm 과 불일치하면 PJSIP 가 그 credential 을 챌린지에 적용하지 않아 Authorization 미전송). 그러므로 `AuthCredInfo.realm = "*"`(challenge realm echo)가 **가장 견고**하다(도메인 하드코딩/오타 위험 제거).
 - NAT 환경에서 rport(pjsip 기본 활성)·필요시 STUN 점검.
 
 ### 3.4 스레딩 / 객체 수명 규칙 (사고 최빈 영역)
