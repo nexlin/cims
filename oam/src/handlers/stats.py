@@ -450,11 +450,19 @@ def _parse_msg_method(msg: str) -> str:
     first = msg.replace('\r', '\n').split('\n', 1)[0].strip()
     if not first:
         return 'unknown'
-    # CMP/CSC JSON-over-UDP
+    # CMP/CSC JSON-over-UDP — cmd/type/event 순으로 분류, 응답({result:..})은 RESPONSE.
     if first.startswith('{'):
         try:
             j = json.loads(msg)
-            return (j.get('payload', {}) or {}).get('cmd', 'json') or 'json'
+            payload = j.get('payload') if isinstance(j.get('payload'), dict) else {}
+            for src in (payload, j):
+                for k in ('cmd', 'type', 'event'):
+                    v = src.get(k)
+                    if v:
+                        return str(v)
+            if 'result' in j or 'status' in j or 'response' in j:
+                return 'RESPONSE'
+            return 'json'
         except Exception:
             return 'json'
     tok = first.split()
@@ -522,35 +530,65 @@ async def _messages_stats_v2(config, iface, date) -> HandlerResult:
         return HandlerResult(status=200, body={'date': date, 'interface': iface,
                                                'total': 0, 'buckets': [], 'method_counts': {}})
 
-    ifaces = [iface] if iface in ('sip', 'cmp', 'csc') else ['sip', 'cmp', 'csc']
-    # 시간당 단일 파일(*.msg.jsonl) + 5분 버킷 파일(*.msg.{mm5}.jsonl, open-per-write 전환) 모두 포함.
-    patterns = []
-    for ifc in ifaces:
-        patterns.append(os.path.join(base, yyyy, mm, dd, '*', f'csp_01_{ifc}.msg.jsonl'))
-        patterns.append(os.path.join(base, yyyy, mm, dd, '*', f'csp_01_{ifc}.msg.[0-9][0-9].jsonl'))
-
     hourly = {}         # hour → count
     method_counts = {}  # method/status → count
 
-    for pattern in patterns:
-        for fpath in _glob.glob(pattern):
-            try:
-                with open(fpath, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            entry = json.loads(line)
-                            ts = entry.get('ts', '')
-                            hour = int(ts.split(':')[0]) if ':' in ts else 0
-                            method = _parse_msg_method(entry.get('msg', ''))
-                            hourly[hour] = hourly.get(hour, 0) + 1
-                            method_counts[method] = method_counts.get(method, 0) + 1
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+    if iface == 'https':
+        # HTTPS(콘솔/XCAP) — *_ue.msg 에는 본문이 없어 method 불가 → flow 로그의
+        # proto=HTTPS 엔트리(method='GET /path', detail='status=NNN')로 집계.
+        # (구버전은 unknown iface 가 sip+cmp+csc 전체 합산으로 fallback — 잘못된 수치)
+        patterns = [os.path.join(base, yyyy, mm, dd, '*', '*.flow.jsonl'),
+                    os.path.join(base, yyyy, mm, dd, '*', '*.flow.[0-9][0-9].jsonl')]
+        for pattern in patterns:
+            for fpath in _glob.glob(pattern):
+                try:
+                    with open(fpath, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                entry = json.loads(line)
+                                if entry.get('proto') != 'HTTPS':
+                                    continue
+                                ts = entry.get('ts', '')
+                                hour = int(ts.split(':')[0]) if ':' in ts else 0
+                                hourly[hour] = hourly.get(hour, 0) + 1
+                                verb = str(entry.get('method', '')).split(' ', 1)[0].upper() or 'unknown'
+                                method_counts[verb] = method_counts.get(verb, 0) + 1
+                                m = str(entry.get('detail', ''))
+                                if m.startswith('status='):
+                                    code = m[7:].split()[0]
+                                    method_counts[code] = method_counts.get(code, 0) + 1
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+    elif iface in ('sip', 'cmp', 'csc'):
+        # 시간당 단일 파일(*.msg.jsonl) + 5분 버킷 파일(*.msg.{mm5}.jsonl) 모두 포함.
+        # systemId 는 와일드카드 — csp_01 하드코딩 시 csp_02(standby)/멀티노드 누락.
+        patterns = [os.path.join(base, yyyy, mm, dd, '*', f'*_{iface}.msg.jsonl'),
+                    os.path.join(base, yyyy, mm, dd, '*', f'*_{iface}.msg.[0-9][0-9].jsonl')]
+        for pattern in patterns:
+            for fpath in _glob.glob(pattern):
+                try:
+                    with open(fpath, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                entry = json.loads(line)
+                                ts = entry.get('ts', '')
+                                hour = int(ts.split(':')[0]) if ':' in ts else 0
+                                method = _parse_msg_method(entry.get('msg', ''))
+                                hourly[hour] = hourly.get(hour, 0) + 1
+                                method_counts[method] = method_counts.get(method, 0) + 1
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+    # unknown iface → 빈 결과 (구: 전체 합산 fallback)
 
     buckets = [{'hour': h, 'count': hourly.get(h, 0)} for h in range(24)]
     sorted_methods = dict(sorted(method_counts.items(), key=lambda x: -x[1]))
