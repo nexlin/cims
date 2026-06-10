@@ -61,7 +61,6 @@ export default function ServersPage() {
   const [haGroups, setHaGroups]       = useState<HaGroup[]>([])
   const [loading, setLoading]         = useState(true)
   const [selection, setSelection]     = useState<Selection>(initialSelection)
-  const [filter, setFilter]           = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())  // -1 = standalone
 
   const [systemModalOpen, setSystemModalOpen] = useState(false)
@@ -146,19 +145,13 @@ export default function ServersPage() {
   // group 별 멤버 분류 + standalone
   const groupedAgents = useMemo(() => {
     const byGroup = new Map<number, Agent[]>()  // -1 = standalone
-    const q = filter.trim().toLowerCase()
-    const matches = (a: Agent) => !q ||
-      a.name.toLowerCase().includes(q) ||
-      (a.hostname || '').toLowerCase().includes(q) ||
-      (a.ip_address || '').includes(q)
     for (const a of agents) {
-      if (!matches(a)) continue
       const gid = a.ha_group?.id ?? -1
       if (!byGroup.has(gid)) byGroup.set(gid, [])
       byGroup.get(gid)!.push(a)
     }
     return byGroup
-  }, [agents, filter])
+  }, [agents])
 
   const toggleGroupExpand = (gid: number) => {
     setExpandedGroups(prev => {
@@ -167,12 +160,6 @@ export default function ServersPage() {
       return next
     })
   }
-
-  const stats = useMemo(() => ({
-    total:  agents.length,
-    online: agents.filter(a => a.status === 'online').length,
-    pending: agents.filter(a => a.status === 'pending').length,
-  }), [agents])
 
   // 액션들
   async function approveAgent(a: Agent) {
@@ -290,28 +277,6 @@ export default function ServersPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: 'calc(100vh - 120px)' }}>
-      {/* 상단 요약 + 액션 */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <StatChip label="서버" value={`${stats.online}/${stats.total}`} sub="online" color="#2ecc71" />
-        {stats.pending > 0 &&
-          <StatChip label="승인대기" value={stats.pending} color="#f39c12" />}
-        <StatChip label="HA 그룹" value={haGroups.length} color="#3498db" />
-        <input className="form-input" placeholder="이름/호스트/IP 검색..."
-          value={filter} onChange={e => setFilter(e.target.value)}
-          style={{ width: 240 }} />
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="btn btn--outline" onClick={() => void load()}>↻</button>
-          {/* 시스템 추가 = 시스템/서버 구성 작업 — 해당 탭에서만 노출 */}
-          {pageTab === 'infra' && (
-            <button className="btn btn--primary" onClick={() => setSystemModalOpen(true)}
-                    disabled={!canEdit}
-                    title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
-              ＋ 시스템 추가
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* 페이지 탭 — 좌측 선택(서버/그룹) 공유, 우측 내용 전환 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, borderBottom: '2px solid var(--border)' }}>
         {PAGE_TABS.map(t => {
@@ -354,19 +319,30 @@ export default function ServersPage() {
       <div style={{ flex: 1, display: 'flex', gap: 12, overflow: 'hidden' }}>
         {/* 좌측 트리 */}
         <div style={{
-          flex: '0 0 320px', overflow: 'auto',
+          flex: '0 0 320px', overflow: 'hidden', display: 'flex', flexDirection: 'column',
           border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
         }}>
-          <ServerTree
-            haGroups={haGroups}
-            groupedAgents={groupedAgents}
-            depsByAgent={depsByAgent}
-            expanded={expandedGroups}
-            onToggleExpand={toggleGroupExpand}
-            selection={selection}
-            onSelect={setSelection}
-            onAddMember={addMemberToGroup}
-            onRemoveMember={removeMemberFromGroup} />
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <ServerTree
+              haGroups={haGroups}
+              groupedAgents={groupedAgents}
+              depsByAgent={depsByAgent}
+              expanded={expandedGroups}
+              onToggleExpand={toggleGroupExpand}
+              selection={selection}
+              onSelect={setSelection}
+              onAddMember={addMemberToGroup}
+              onRemoveMember={removeMemberFromGroup} />
+          </div>
+          {/* 시스템 추가 — 시스템 목록 바로 아래 (구성 작업, admin/승격 필요) */}
+          <div style={{ flex: '0 0 auto', padding: 10, borderTop: '1px solid var(--border)' }}>
+            <button className="btn btn--primary btn--sm" style={{ width: '100%' }}
+                    onClick={() => setSystemModalOpen(true)}
+                    disabled={!canEdit}
+                    title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
+              ＋ 시스템 추가
+            </button>
+          </div>
         </div>
         {/* 우측 Inspector */}
         <div style={{
@@ -1247,21 +1223,6 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
   )
 }
 
-function StatChip({ label, value, sub, color }:
-  { label: string; value: string | number; sub?: string; color?: string }) {
-  return (
-    <div style={{
-      background: 'var(--surface)', border: '1px solid var(--border)', padding: '8px 14px',
-      borderRadius: 6, minWidth: 110, display: 'flex', flexDirection: 'column', gap: 2,
-    }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
-      <span style={{ fontWeight: 600, fontSize: 18 }}>
-        <span style={{ color: color || '#333' }}>{value}</span>
-        {sub && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>{sub}</span>}
-      </span>
-    </div>
-  )
-}
 
 // ──────────────────────────────────────────────────────────────
 //  Inspector (선택된 서버 상세)
