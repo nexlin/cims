@@ -135,10 +135,14 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
         )}
       </div>
 
-      {loading && <div className="empty">로딩 중...</div>}
+      {/* 재조회 중에도 기존 데이터 유지 — 전체가 '로딩 중' 으로 갈리는 레이아웃 점프 방지 */}
+      {loading && !msgData && !svcData && <div className="empty">로딩 중...</div>}
+      {loading && (msgData || svcData) && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '2px 4px' }}>↻ 갱신 중…</div>
+      )}
 
       {/* 메시지 통계 */}
-      {subTab === 'messages' && msgData && !loading && (
+      {subTab === 'messages' && msgData && (
         <div className="panel" style={{ padding: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 12 }}>메시지 통계 — {msgData.date}</div>
           <BarChart data={msgData.buckets} labelKey="hour" valueKey="total" />
@@ -151,7 +155,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       )}
 
       {/* 서비스 통계 — VoIP */}
-      {subTab === 'service' && svcData?.volte && !loading && (
+      {subTab === 'service' && svcData?.volte && (
         <>
           <div style={{ display: 'flex', gap: 12 }}>
             <KpiCard label="호 시도" value={svcData.volte.total_attempts} unit="건" />
@@ -190,7 +194,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       )}
 
       {/* 서비스 통계 — PTT */}
-      {subTab === 'service' && svcData?.ptt && !loading && (
+      {subTab === 'service' && svcData?.ptt && (
         <>
           <div style={{ display: 'flex', gap: 12 }}>
             <KpiCard label="그룹콜 수" value={svcData.ptt.total_calls} unit="건" />
