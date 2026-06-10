@@ -2335,6 +2335,15 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                 "mounts": collect_mounts(),
                 "agent_version": AGENT_VERSION,
             }
+            # 호스트 사양도 매 heartbeat 동봉 — enroll 시점 스냅샷이 영구 표시되어
+            # VM 스펙 변경(코어/메모리 증설) 후 콘솔 정보가 실제와 다르던 문제 교정.
+            try:
+                _hi = collect_host_info()
+                for k in ("hostname", "os_info", "cpu_cores", "memory_mb", "disk_gb"):
+                    if _hi.get(k):
+                        hb_body[k] = _hi[k]
+            except Exception:
+                pass
             if sync_port: hb_body["sync_port"] = sync_port
             status, resp = http_post(f"{oam_url}/api/agent/heartbeat", hb_body,
                                      headers={"X-Agent-Token": state.session_token})
