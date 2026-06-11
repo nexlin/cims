@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   deploymentApi,
@@ -416,6 +416,7 @@ export default function ServersPage() {
 
       {systemModalOpen &&
         <SystemCreateModal
+          saAgents={agents.filter(a => !a.ha_group && (a.status === 'online' || a.status === 'approved'))}
           onClose={() => setSystemModalOpen(false)}
           onDone={load}
           onCreated={(firstAgentId) => {
@@ -1859,15 +1860,20 @@ function PendingMemberModal({ info, onClose }: {
 
 type SystemMode = 'active_standby' | 'all_active' | 'standalone'
 
-function SystemCreateModal({ onClose, onDone, onCreated }: {
+function SystemCreateModal({ onClose, onDone, onCreated, saAgents }: {
   onClose: () => void
   onDone: () => Promise<void> | void
   onCreated: (firstAgentId: number | null) => void
+  // 그룹 미소속(standalone) 서버 — AS 멤버로 기존 서버 편입 가능 (부트스트랩
+  // 호스트처럼 이미 enroll 된 서버를 두 번째 서버와 A/S 로 묶는 시나리오)
+  saAgents: Agent[]
 }) {
   const { show } = useToast()
   const [name, setName] = useState('')
   const [mode, setMode] = useState<SystemMode>('active_standby')
   const [authPass, setAuthPass] = useState('00000000')  // active_standby 만 사용 (VRRP)
+  // AS 멤버 슬롯: 0 = 신규 생성, 그 외 = 기존 standalone agent id
+  const [memberSel, setMemberSel] = useState<[number, number]>([0, 0])
   const [creating, setCreating] = useState(false)
   // 생성 결과 — Standalone 1건, AS 2건, AA 0건 (이후 그룹에서 추가)
   const [results, setResults] = useState<Array<{ name: string; enrollment_token: string; install_command: string }> | null>(null)
@@ -1885,15 +1891,29 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
         firstAgentId = r.id
         setResults([{ name: base, enrollment_token: r.enrollment_token, install_command: r.install_command }])
       } else {
-        const memberCount = mode === 'active_standby' ? 2 : 0
-        const memberAgents: Array<{ id: number; name: string; enrollment_token: string; install_command: string }> = []
-        for (let i = 1; i <= memberCount; i++) {
-          const nm = `${base}-${String(i).padStart(2, '0')}`
-          const r = await deploymentApi.createAgent(nm, '')
-          await deploymentApi.approveAgent(r.id)
-          memberAgents.push({ id: r.id, name: nm, enrollment_token: r.enrollment_token, install_command: r.install_command })
+        // AS = 2 슬롯 (각각 신규 생성 또는 기존 standalone 서버 편입). AA = 0 (이후 추가).
+        if (mode === 'active_standby' && memberSel[0] > 0 && memberSel[0] === memberSel[1]) {
+          show('멤버 1·2 에 같은 서버를 선택할 수 없습니다', 'err'); setCreating(false); return
         }
-        if (memberAgents.length > 0) firstAgentId = memberAgents[0].id
+        const slots = mode === 'active_standby' ? [memberSel[0], memberSel[1]] : []
+        const memberAgents: Array<{ name: string; enrollment_token: string; install_command: string }> = []
+        const groupMembers: Array<{ agent_id: number; role: 'master' | 'backup'; priority: number }> = []
+        for (let i = 0; i < slots.length; i++) {
+          const role: 'master' | 'backup' = i === 0 ? 'master' : 'backup'
+          const priority = i === 0 ? 100 : 90
+          if (slots[i] > 0) {
+            // 기존 서버 편입 — 이미 enroll 됨 → install-command 불필요, addMember 는
+            // 그룹 생성 시 members 로 일괄 (백엔드가 update_ha 를 멤버 전체에 큐잉)
+            groupMembers.push({ agent_id: slots[i], role, priority })
+          } else {
+            const nm = `${base}-${String(i + 1).padStart(2, '0')}`
+            const r = await deploymentApi.createAgent(nm, '')
+            await deploymentApi.approveAgent(r.id)
+            memberAgents.push({ name: nm, enrollment_token: r.enrollment_token, install_command: r.install_command })
+            groupMembers.push({ agent_id: r.id, role, priority })
+          }
+        }
+        if (groupMembers.length > 0) firstAgentId = groupMembers[0].agent_id
         await haGroupsApi.create({
           name: base,
           mode,
@@ -1901,15 +1921,9 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
           vip_mask: 24,
           // auth_pass — active_standby 만 의미 (VRRP 인증). all_active 는 keepalived 미사용이라 빈값.
           auth_pass: mode === 'active_standby' ? authPass : '',
-          members: memberAgents.map((m, i) => ({
-            agent_id: m.id,
-            role: (i === 0 && mode === 'active_standby' ? 'master' : 'backup'),
-            priority: i === 0 ? 100 : 90,
-          })),
+          members: groupMembers,
         })
-        setResults(memberAgents.map(m => ({
-          name: m.name, enrollment_token: m.enrollment_token, install_command: m.install_command,
-        })))
+        setResults(memberAgents)
       }
       show(`시스템 "${base}" 추가 (${mode === 'active_standby' ? 'AS' : mode === 'all_active' ? 'AA' : 'Standalone'})`, 'ok')
       await onDone()
@@ -1951,16 +1965,39 @@ function SystemCreateModal({ onClose, onDone, onCreated }: {
               <input className="form-input" value={authPass} type="password"
                 onChange={e => setAuthPass(e.target.value)} disabled={creating}
                 placeholder="최대 8글자 — VRRP 인증" maxLength={8} />
+              {[0, 1].map(i => (
+                <Fragment key={i}>
+                  <label>멤버 {i + 1} ({i === 0 ? 'master' : 'backup'})</label>
+                  <select className="form-input" value={memberSel[i]} disabled={creating}
+                    onChange={e => setMemberSel(prev => {
+                      const next: [number, number] = [...prev] as [number, number]
+                      next[i] = Number(e.target.value)
+                      return next
+                    })}>
+                    <option value={0}>신규 서버 생성 — {name || '<이름>'}-{String(i + 1).padStart(2, '0')}</option>
+                    {saAgents.map(a => (
+                      <option key={a.id} value={a.id} disabled={memberSel[1 - i] === a.id}>
+                        기존 서버 편입: {agentDisplayName(a.name)} ({a.status}{a.hostname ? ` · ${a.hostname}` : ''})
+                      </option>
+                    ))}
+                  </select>
+                </Fragment>
+              ))}
             </>
           )}
           <label style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             선택: <b>{modeLabel}</b>
-            {mode === 'active_standby' && <> · 멤버 이름: <code>{name || '<이름>'}-01</code> (master), <code>{name || '<이름>'}-02</code> (backup)</>}
+            {mode === 'active_standby' && memberSel.every(v => v === 0) &&
+              <> · 멤버 이름: <code>{name || '<이름>'}-01</code> (master), <code>{name || '<이름>'}-02</code> (backup)</>}
+            {mode === 'active_standby' && memberSel.some(v => v > 0) &&
+              <> · 기존 서버는 install-command 없이 즉시 편입되고 HA 설정이 자동 재적용됩니다</>}
           </label>
         </div>
       ) : results.length === 0 ? (
         <div style={{ color: '#2ecc71' }}>
-          ✓ AA 그룹 생성됨. 좌측 트리에서 그룹 선택 후 [+ 멤버 추가] 로 서버를 추가하세요.
+          {mode === 'active_standby'
+            ? <>✓ 기존 서버들로 A/S 시스템 구성 완료 — 트리에서 그룹을 선택해 VIP 를 설정하세요.</>
+            : <>✓ AA 그룹 생성됨. 좌측 트리에서 그룹 선택 후 [+ 멤버 추가] 로 서버를 추가하세요.</>}
         </div>
       ) : (
         <div>
