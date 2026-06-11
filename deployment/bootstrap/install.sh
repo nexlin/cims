@@ -80,14 +80,14 @@ MODULES_DIR="$PREFIX/modules"
 OAM_ROOT="$MODULES_DIR/oam/$OAM_VER"
 CON_ROOT="$MODULES_DIR/console/$CON_VER"
 RUNTIME_DIR="$MODULES_DIR/oam/runtime"     # 버전 무관 영속 store (업그레이드 생존)
-mkdir -p "$OAM_ROOT" "$CON_ROOT" "$RUNTIME_DIR" "$PREFIX/agent-assets"
+mkdir -p "$OAM_ROOT" "$CON_ROOT" "$RUNTIME_DIR"
 
 info "패키지 전개..."
 tar xzf "$OAM_TAR" -C "$OAM_ROOT"
 tar xzf "$CON_TAR" -C "$CON_ROOT"
-# agent: 에셋으로 전개 — OAM 이 /install-agent.sh, /cims_agent.py 를 여기서 서빙.
-# (이 서버의 agent 데몬 자체는 2단계에서 콘솔 install-command 로 enroll/설치)
-tar xzf "$AGT_TAR" -C "$PREFIX/agent-assets"
+# agent 는 전개하지 않음 — 설치 에셋(/install-agent.sh, /cims_agent.py,
+# /agent-bundle.tar.gz)의 SoT 는 패키지 저장소(seed 자동 등록). 버전별로
+# 보관되어 다른 모듈과 동일하게 업데이트/롤백 관리.
 mkdir -p "$OAM_ROOT/config" "$OAM_ROOT/run" "$OAM_ROOT/log"
 
 # seed 패키지 — OAM 첫 부팅 시 패키지 저장소 자동 등록 (1단계 산출물도
@@ -153,7 +153,6 @@ After=network-online.target
 Type=simple
 User=$SVC_USER
 WorkingDirectory=$OAM_ROOT/oam/src
-Environment=CIMS_AGENT_ASSET_DIR=$PREFIX/agent-assets/agent
 ExecStart=$START_CMD
 Restart=on-failure
 RestartSec=3
@@ -173,7 +172,6 @@ else
     cat > "$PREFIX/start-oam.sh" <<SH
 #!/usr/bin/env bash
 cd "$OAM_ROOT/oam/src"
-export CIMS_AGENT_ASSET_DIR="$PREFIX/agent-assets/agent"
 exec setsid nohup $START_CMD > "$OAM_ROOT/log/oam_stdout.log" 2>&1 < /dev/null &
 SH
     chmod +x "$PREFIX/start-oam.sh"
@@ -222,7 +220,8 @@ if [[ $DO_AGENT -eq 1 && $DO_START -eq 1 ]]; then
                 bash -c "$1"
             fi
         }
-        _run_as "cd '$PREFIX' && bash '$PREFIX/agent-assets/agent/install-agent.sh'             --oam-url 'https://127.0.0.1:$PORT'             --enrollment-token '$ENROLL_TOKEN' --name '$HOSTNM'"             && ok "agent 번들 설치 ($PREFIX/agent)"
+        curl -sk "https://127.0.0.1:$PORT/install-agent.sh" -o /tmp/cims-install-agent.sh
+        _run_as "cd '$PREFIX' && bash /tmp/cims-install-agent.sh --oam-url 'https://127.0.0.1:$PORT' --enrollment-token '$ENROLL_TOKEN' --name '$HOSTNM'" && ok "agent 번들 설치 ($PREFIX/agent — 패키지 저장소 서빙본)"
         # sudoers + linger 는 root 권한으로 직접 (init.sh 의 sudo 단계 선처리)
         if [[ $EUID -eq 0 && -f "$PREFIX/setup-sudoers.sh" ]]; then
             CIMS_AGENT_USER="$SVC_USER" bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 ||                 bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 || true

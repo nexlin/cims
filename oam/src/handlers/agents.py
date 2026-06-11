@@ -2222,7 +2222,45 @@ def _find_agent_asset(filename: str) -> str | None:
     return None
 
 
+def _latest_agent_pkg_path(config: dict) -> str | None:
+    """패키지 저장소의 최신 agent tarball 경로 (없으면 None)."""
+    pkgs_dir = file_store.domain_dir(config, "packages")
+    items = file_store.load_all(pkgs_dir) if os.path.isdir(pkgs_dir) else []
+    agent_pkgs = [p for p in items if p.get("name") == "agent" and p.get("file_path")
+                  and os.path.isfile(p.get("file_path") or "")]
+    if not agent_pkgs:
+        return None
+    agent_pkgs.sort(key=lambda p: p.get("uploaded_at") or "", reverse=True)
+    return agent_pkgs[0]["file_path"]
+
+
+def _read_agent_pkg_member(config: dict, member: str) -> bytes | None:
+    """최신 agent 패키지 tarball 에서 단일 파일(agent/<member>) 추출.
+
+    agent 설치 에셋의 SoT = 패키지 저장소 (버전별 보관·등록/삭제로 롤백 가능).
+    /install-agent.sh, /cims_agent.py 가 /agent-bundle.tar.gz 와 항상 같은
+    버전에서 나가도록 통일 — 별도 asset 디렉토리와의 버전 불일치 제거.
+    """
+    import tarfile as _tarfile
+    path = _latest_agent_pkg_path(config)
+    if not path:
+        return None
+    try:
+        with _tarfile.open(path, "r:gz") as tf:
+            f = tf.extractfile(f"agent/{member}")
+            return f.read() if f else None
+    except Exception:
+        return None
+
+
 async def _serve_install_script(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    config = kwargs.get("config", {})
+    # 1순위: 패키지 저장소의 최신 agent 패키지에서 추출 (bundle 과 동일 버전 보장)
+    data = await asyncio.to_thread(_read_agent_pkg_member, config, "install-agent.sh")
+    if data is not None:
+        return HandlerResult(status=200, body=data.decode("utf-8"),
+                             media_type="text/x-shellscript")
+    # fallback: dev 환경 (저장소 미등록) — repo/dist 의 agent 디렉토리
     p = _find_agent_asset("install-agent.sh")
     if not p:
         return HandlerResult(status=404, body="install-agent.sh not bundled",
@@ -2236,16 +2274,9 @@ async def _serve_agent_bundle(handler_args: HandlerArgs, kwargs: dict) -> Handle
     """최신 agent tarball (build/dist/packages/agent-*.tar.gz) 반환.
     install-agent.sh 가 cims_agent.py + bin/ + lib/ + keepalived/ + systemd/ 한 번에 받기 위함."""
     config = kwargs.get("config", {})
-    pkgs_dir = file_store.domain_dir(config, "packages")
-    items = file_store.load_all(pkgs_dir) if os.path.isdir(pkgs_dir) else []
-    agent_pkgs = [p for p in items if p.get("name") == "agent" and p.get("file_path")]
-    if not agent_pkgs:
+    tarball_path = _latest_agent_pkg_path(config)
+    if not tarball_path:
         return HandlerResult(status=404, body="agent package not registered",
-                             media_type="text/plain")
-    agent_pkgs.sort(key=lambda p: p.get("uploaded_at") or "", reverse=True)
-    tarball_path = agent_pkgs[0]["file_path"]
-    if not os.path.isfile(tarball_path):
-        return HandlerResult(status=404, body=f"tarball missing: {tarball_path}",
                              media_type="text/plain")
     with open(tarball_path, "rb") as f:
         return HandlerResult(status=200, body=f.read(),
@@ -2253,6 +2284,10 @@ async def _serve_agent_bundle(handler_args: HandlerArgs, kwargs: dict) -> Handle
 
 
 async def _serve_agent_binary(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    config = kwargs.get("config", {})
+    data = await asyncio.to_thread(_read_agent_pkg_member, config, "cims_agent.py")
+    if data is not None:
+        return HandlerResult(status=200, body=data, media_type="text/x-python")
     p = _find_agent_asset("cims_agent.py")
     if not p:
         return HandlerResult(status=404, body="cims_agent.py not bundled",
