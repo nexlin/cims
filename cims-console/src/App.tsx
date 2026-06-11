@@ -9,6 +9,8 @@ import LoginPage from './pages/LoginPage'
 import { FLAT_ROUTES } from './routes'
 import type { RouteDef } from './nav-types'
 import { canAccessRoute } from './utils/permissions'
+import { useDevMode } from './hooks/useDevMode'
+import { setDevMode } from './utils/devMode'
 import { authApi } from './api/auth'
 import { EditableLayout } from './widgets/EditableLayout'
 import { registerWidgets } from './widgets/registry'
@@ -70,8 +72,20 @@ function EditablePageHost({ route }: { route: RouteDef }) {
 
 function RouteGuard({ children, route }: { children: React.ReactNode; route: RouteDef }) {
   const { user } = useAuth()
+  const devMode = useDevMode()
   if (!canAccessRoute(user, route)) {
     return <div className="empty" style={{ marginTop: 80 }}>접근 권한이 없습니다</div>
+  }
+  // 개발 기능(릴리스 등)은 개발자 모드에서만 — 권한이 아닌 화면 모드 분리
+  if (route.devOnly && !devMode) {
+    return (
+      <div className="empty" style={{ marginTop: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+        <div>이 메뉴는 <b>개발자 모드</b>에서 사용합니다 (빌드·검증·패키징).</div>
+        <button className="btn btn--primary btn--sm" onClick={() => setDevMode(true)}>
+          {'</>'} 개발자 모드 켜기
+        </button>
+      </div>
+    )
   }
   return <>{children}</>
 }

@@ -299,7 +299,7 @@ export default function ServersPage() {
           )
         })}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
-          {!hasRole(user, 'admin') && (   /* developer(admin 동급)에겐 승격 불필요 */
+          {!hasRole(user, 'admin') && (
             canEdit && elevationActive() ? (
               <span style={{ fontSize: 12, color: '#27ae60' }}>
                 🔓 admin 승격 중

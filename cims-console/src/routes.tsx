@@ -92,9 +92,9 @@ const CORE_SECTIONS: RouteSection[] = [
     order: 70,
     prodHidden: true,                    // 배포 콘솔에서 숨김 (운영자는 패키징/검증 불필요)
     routes: [
-      { path: '/release/verify',          title: '검증',         component: VerificationV2Page, adminOnly: true },
-      { path: '/release/verify-history',  title: '검증 이력',     component: VerificationHistoryPage, adminOnly: true },
-      { path: '/release/package',         title: '패키징',       component: ServicesPage, adminOnly: true },
+      { path: '/release/verify',          title: '검증',         component: VerificationV2Page, adminOnly: true, devOnly: true },
+      { path: '/release/verify-history',  title: '검증 이력',     component: VerificationHistoryPage, adminOnly: true, devOnly: true },
+      { path: '/release/package',         title: '패키징',       component: ServicesPage, adminOnly: true, devOnly: true },
     ],
   },
   {

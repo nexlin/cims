@@ -25,9 +25,7 @@ _SECRET = 'cims_jwt_secret_change_me'  # config 로 갱신
 #    admin > manager > operator > monitor > user
 #    user 는 telephony 전용으로 OAM 콘솔 로그인 불가.
 # ─────────────────────────────────────────────────────────────
-# developer = 공급사 개발 계정 (패키지 내장, DB 가입자 테이블 비저장) — 권한은
-# admin 동급(rank 4). 고객측 관리자/운용자(manager/operator, DB 계정)와 신원 분리.
-_ROLE_RANK = {'user': 0, 'monitor': 1, 'operator': 2, 'manager': 3, 'admin': 4, 'developer': 4}
+_ROLE_RANK = {'user': 0, 'monitor': 1, 'operator': 2, 'manager': 3, 'admin': 4}
 ROLES = tuple(_ROLE_RANK.keys())
 
 

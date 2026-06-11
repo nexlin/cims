@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen, SlidersHorizontal, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useDevMode } from '../hooks/useDevMode'
 import { useMenu } from '../contexts/MenuContext'
 import { MenuEditorModal } from './MenuEditorModal'
 import { NAV_AREA_ORDER, NAV_AREA_LABELS, type NavArea, type RouteSection, type RouteDef } from '../nav-types'
@@ -24,8 +25,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const isAdmin = hasRole(user, 'admin')   // developer(admin 동급) 포함
 
   // leaf 가시성: hidden 아니고, 라우트 요구 역할 등급을 만족하는 사용자에게만 (RBAC).
+  const devMode = useDevMode()
   const visibleRoutes = (s: RouteSection): RouteDef[] =>
-    s.routes.filter(r => !r.hidden && canAccessRoute(user, r))
+    s.routes.filter(r => !r.hidden && canAccessRoute(user, r) && (!r.devOnly || devMode))
   const isLeafActive = (r: RouteDef) => pathname === r.path || pathname.startsWith(r.path + '/')
   const isGroupActive = (s: RouteSection) => visibleRoutes(s).some(isLeafActive)
   // 기본 펼침 = 현재 활성 그룹. 사용자가 토글하면 override.

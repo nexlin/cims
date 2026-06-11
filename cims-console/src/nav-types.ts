@@ -25,6 +25,8 @@ export type RouteDef = {
   adminOnly?: boolean
   // 사이드바 하위항목에서 숨김 — 라우트 자체는 활성 (link/직접 URL 진입 가능).
   hidden?: boolean
+  // 개발자 모드(admin 토글) ON 일 때만 노출 — 릴리스(빌드/검증/패키징) 등 공급사 개발 기능
+  devOnly?: boolean
 }
 
 // OAM 대영역 — EMS(Nokia NetAct 의 Monitor/Administer, TM Forum eTOM 의 Assurance/Fulfillment) 관례.

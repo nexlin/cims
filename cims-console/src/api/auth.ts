@@ -7,7 +7,7 @@ import type { Subscription } from './users'
 //   /users/me/subscriptions  → 본인 VoIP/PTT 가입자 배열 (Phone UE 용)
 // RBAC 역할 (계층적 5종) — docs/design/features/mcptt_authorization.md §3.
 //   admin > manager > operator > monitor > user (user=OAM 로그인 불가, telephony 전용).
-export type Role = 'admin' | 'developer' | 'manager' | 'operator' | 'monitor' | 'user'
+export type Role = 'admin' | 'manager' | 'operator' | 'monitor' | 'user'
 
 export interface AuthUser {
   id: number

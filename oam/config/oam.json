@@ -52,12 +52,6 @@
                 "name": "관리자",
                 "role": "admin",
                 "password_sha256": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
-            },
-            {
-                "login_id": "developer",
-                "name": "개발자",
-                "role": "developer",
-                "password_sha256": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
             }
         ]
     },

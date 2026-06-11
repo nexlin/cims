@@ -90,9 +90,10 @@ def require_admin(handler_args: HandlerArgs):
 #
 #  상용 구축 시나리오: base OAM 만 수동 배포된 단계(DB 미구축)에서 admin 으로
 #  로그인해 인프라 구축·전 모듈 배포를 수행해야 함 → 로그인이 DB 에 의존하면
-#  불가. admin(구축)/developer(빌드·검증·패키징) 는 공급사 계정으로 가입자
-#  테이블이 아닌 패키지(설정)에 내장한다. 고객측 manager/operator/monitor 는
-#  기존대로 DB(users) 계정.
+#  불가. admin(공급사 구축 계정)은 가입자 테이블이 아닌 패키지(설정)에 내장한다.
+#  개발 기능(빌드·검증·패키징)은 별도 계정이 아니라 admin 로그인 후 콘솔의
+#  '개발자 모드' 토글로 노출 (2026-06-11 정책). 고객측 manager/operator/monitor
+#  는 기존대로 DB(users) 계정.
 #
 #  설정: oam.json CimsAuth.BuiltinAccounts = [
 #    {"login_id": "admin", "name": "관리자", "role": "admin",
@@ -103,8 +104,7 @@ def require_admin(handler_args: HandlerArgs):
 # ─────────────────────────────────────────────────────────────
 
 _DEFAULT_BUILTINS = [
-    {'login_id': 'admin',     'name': '관리자',  'role': 'admin'},
-    {'login_id': 'developer', 'name': '개발자',  'role': 'developer'},
+    {'login_id': 'admin', 'name': '관리자', 'role': 'admin'},
 ]
 _DEFAULT_BUILTIN_PW_SHA = hashlib.sha256('1234'.encode()).hexdigest()
 # 내장 계정 id — DB users.id 와 충돌하지 않도록 음수 고정.
