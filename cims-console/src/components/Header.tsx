@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { KeyRound, LogOut, Radio, Sun, Moon } from 'lucide-react'
 import { getInitialTheme, applyTheme, type Theme } from '../theme'
+import { ROLE_LABELS, roleRank } from '../utils/permissions'
+import type { Role } from '../api/auth'
 
 interface HeaderProps {
   userName: string
@@ -27,8 +29,8 @@ export default function Header({ userName, userRole, onLogout, onChangePw }: Hea
       <div id="layout-edit-slot" className="app-header-editslot" />
       <div className="app-header-right">
         <span className="app-header-user-name">{userName}</span>
-        <span className={`badge ${userRole === 'admin' ? 'badge--blue' : 'badge--gray'}`}>
-          {userRole === 'admin' ? '관리자' : '사용자'}
+        <span className={`badge ${roleRank(userRole) >= 4 ? 'badge--blue' : 'badge--gray'}`}>
+          {ROLE_LABELS[userRole as Role] ?? userRole}
         </span>
         <button className="btn btn--ghost btn--sm" onClick={toggleTheme}
                 title={theme === 'dark' ? '라이트 모드로' : '다크 모드로'}>

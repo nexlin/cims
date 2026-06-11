@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useMenu } from '../contexts/MenuContext'
 import { MenuEditorModal } from './MenuEditorModal'
 import { NAV_AREA_ORDER, NAV_AREA_LABELS, type NavArea, type RouteSection, type RouteDef } from '../nav-types'
-import { canAccessRoute } from '../utils/permissions'
+import { hasRole, canAccessRoute } from '../utils/permissions'
 
 interface SidebarProps {
   collapsed: boolean
@@ -21,7 +21,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { sections } = useMenu()
   const [editing, setEditing] = useState(false)
   const [open, setOpen] = useState<Record<string, boolean>>({})
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = hasRole(user, 'admin')   // developer(admin 동급) 포함
 
   // leaf 가시성: hidden 아니고, 라우트 요구 역할 등급을 만족하는 사용자에게만 (RBAC).
   const visibleRoutes = (s: RouteSection): RouteDef[] =>

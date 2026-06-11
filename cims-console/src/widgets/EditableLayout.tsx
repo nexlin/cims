@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { hasRole } from '../utils/permissions'
 import { useToast } from '../components/Toast'
 import { consoleApi } from '../api/console'
 import { GridRenderer, widgetHeightCss } from './GridRenderer'
@@ -36,7 +37,7 @@ function _writeCache(id: string, l: PageLayout) {
 export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: PageLayout }) {
   const { user } = useAuth()
   const { show } = useToast()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = hasRole(user, 'admin')   // developer(admin 동급) 포함
   const [layout, setLayout] = useState<PageLayout>(() => _readCache(layoutId) || seed)
   const [draft, setDraft] = useState<PageLayout | null>(null)
   const [addId, setAddId] = useState('')

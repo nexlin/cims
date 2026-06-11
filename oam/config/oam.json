@@ -33,13 +33,33 @@
     "_cmp_comment": "대시보드 health 위젯의 CMP STATS probe 대상(ControlPort). AA 양노드 중 대표 1개 — media01.",
     "MediaServer": {
         "Endpoints": [
-            { "ip": "10.0.1.48", "port": 9000 },
-            { "ip": "10.0.1.49", "port": 9000 }
+            {
+                "ip": "10.0.1.48",
+                "port": 9000
+            },
+            {
+                "ip": "10.0.1.49",
+                "port": 9000
+            }
         ],
         "_comment": "서비스현황 노드 분산용 — 전 미디어 노드(media01/02) STATS probe 대상. csp.json MediaServer.Endpoints 와 동일."
     },
     "CimsAuth": {
-        "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8="
+        "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8=",
+        "BuiltinAccounts": [
+            {
+                "login_id": "admin",
+                "name": "관리자",
+                "role": "admin",
+                "password_sha256": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
+            },
+            {
+                "login_id": "developer",
+                "name": "개발자",
+                "role": "developer",
+                "password_sha256": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
+            }
+        ]
     },
     "Packages": {
         "Dir": "packages",

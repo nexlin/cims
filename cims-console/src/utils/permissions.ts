@@ -3,10 +3,12 @@
 //   여기서는 메뉴/버튼 노출 결정만 한다.
 import type { AuthUser, Role } from '../api/auth'
 
-const RANK: Record<Role, number> = { user: 0, monitor: 1, operator: 2, manager: 3, admin: 4 }
+// developer = 공급사 개발 계정 (패키지 내장, DB 비저장) — 권한은 admin 동급.
+const RANK: Record<Role, number> = { user: 0, monitor: 1, operator: 2, manager: 3, admin: 4, developer: 4 }
 
 export const ROLE_LABELS: Record<Role, string> = {
   admin:    '관리자',
+  developer: '개발자',
   manager:  '운영 관리자',
   operator: '운용자',
   monitor:  '모니터',
@@ -14,6 +16,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 }
 
 // 콘솔 계정으로 지정 가능한 역할 (user 는 telephony 전용 → 콘솔 로그인 불가, 보통 미지정).
+// developer 는 패키지 내장 전용 — DB 계정 role 로 지정 불가.
 export const ASSIGNABLE_ROLES: Role[] = ['admin', 'manager', 'operator', 'monitor', 'user']
 
 export function roleRank(role?: string | null): number {

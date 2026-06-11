@@ -3,10 +3,12 @@
 import { useEffect, useReducer } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { elevationActive, onElevationChange } from '../api/client'
+import { hasRole } from '../utils/permissions'
 
 export function useAdminCapable(): boolean {
   const { user } = useAuth()
   const [, force] = useReducer((x: number) => x + 1, 0)
   useEffect(() => onElevationChange(force), [])
-  return user?.role === 'admin' || elevationActive()
+  // rank 기반 — developer(공급사 개발 계정, admin 동급) 포함
+  return hasRole(user, 'admin') || elevationActive()
 }

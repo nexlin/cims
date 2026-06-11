@@ -109,6 +109,20 @@ async def _get_me(handler_args, config):
     if err:
         return err
 
+    # 패키지 내장 계정(admin/developer) — DB 미구축 부트스트랩에서도 동작해야
+    # 하므로 토큰 클레임만으로 프로파일 합성 (DB 조회 없음).
+    if payload.get('builtin'):
+        return HandlerResult(status=200, body={
+            'id': int(payload.get('sub') or -1000),
+            'name': payload.get('name') or payload.get('login_id'),
+            'login_id': payload.get('login_id'),
+            'role': payload.get('role'),
+            'org_id': None,
+            'builtin': True,
+            'create_time': None,
+            'update_time': None,
+        })
+
     try:
         with _auth._get_db(config) as conn:
             with conn.cursor() as cur:
@@ -143,6 +157,10 @@ async def _get_me_subscriptions(handler_args, config):
     payload, err = _auth.require_auth(handler_args)
     if err:
         return err
+
+    # 내장 계정은 가입자(전화) 정보가 없음 — DB 없이 빈 배열
+    if payload.get('builtin'):
+        return HandlerResult(status=200, body={'call_subscriptions': [], 'ptt_subscriptions': []})
     uid = int(payload['sub'])
 
     domain_map = _access_service_domain_map(config)

@@ -9,6 +9,7 @@
 import { useState } from 'react'
 import { authApi } from '../api/auth'
 import { setElevatedToken } from '../api/client'
+import { roleRank } from '../utils/permissions'
 
 export default function AdminElevateDialog({ onClose, onElevated }: {
   onClose: () => void
@@ -25,7 +26,7 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
     setError('')
     try {
       const r = await authApi.login(loginId, password)
-      if (r.user?.role !== 'admin') {
+      if (roleRank(r.user?.role) < roleRank('admin')) {
         setError('admin 권한 계정이 아닙니다')
         return
       }

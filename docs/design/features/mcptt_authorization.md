@@ -34,6 +34,33 @@
 | `operator` | 운용자(관제) | 구성 **조회만** + 운용 대응(알람 ack, MCPTT 관제) + **PTT그룹 생성 / 본인 소유 그룹만 관리** |
 | `monitor` | 모니터 | **조회 전용** (대시보드/성능/이력/녹취 보기, ack 불가) |
 | `user` | 일반 단말 사용자 | **OAM 로그인 불가**, telephony만 |
+| `developer` | 개발자 (공급사) | **admin 동급(rank 4)** — 단, DB 계정으로 지정 불가. 패키지 **내장 계정 전용** (아래 §3.1) |
+
+### 3.1 패키지 내장 계정 (Builtin Accounts — 2026-06-11)
+
+`admin`(구축)·`developer`(빌드/검증/패키징) 는 **공급사 계정**으로, 고객측
+관리자/운용자(manager/operator — DB `users` 테이블 계정)와 분리한다.
+가입자 DB 에 저장하지 않고 **OAM 패키지 설정에 내장**:
+
+```json
+"CimsAuth": {
+  "BuiltinAccounts": [
+    { "login_id": "admin",     "name": "관리자", "role": "admin",     "password_sha256": "<sha256hex>" },
+    { "login_id": "developer", "name": "개발자", "role": "developer", "password_sha256": "<sha256hex>" }
+  ]
+}
+```
+
+- **근거 (부트스트랩)**: 상용 구축은 base OAM 만 수동 배포 → admin 로그인 → 인프라
+  구축 → 전 모듈 배포 순서. 이 시점에 DB 가 없으므로 로그인이 DB 에 의존하면 불가.
+  내장 계정 로그인/`users/me` 는 **DB 를 일절 접근하지 않는다**.
+- 같은 login_id 의 DB 계정보다 내장 계정이 **항상 우선** (DB fallthrough 없음).
+- 미설정 시 코드 기본값(admin/developer, 비밀번호 `1234`) 적용 — **상용 패키징 시
+  password_sha256 교체 필수**. `BuiltinAccounts: []` 로 전체 비활성화 가능.
+- 내장 계정 id 는 음수(-1000부터) — DB FK 로 사용 금지. 비밀번호 변경은 콘솔이 아닌
+  설정 파일에서만 (PUT /auth/password → 403).
+- 구현: `oam/src/handlers/auth.py` `_builtin_accounts`/`_login`, `users.py` `_get_me`
+  (builtin 클레임 합성), 공유 rank: `csc/src/services/admin_auth.py` (`developer`=4).
 
 ### 권한 매트릭스
 | 도메인 | admin | manager | operator | monitor | user |

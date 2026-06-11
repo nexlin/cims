@@ -52,6 +52,10 @@ def _make_token(user: dict) -> str:
         'role':     user['role'],
         'exp':      datetime.datetime.utcnow() + datetime.timedelta(seconds=_TTL_SEC),
     }
+    if user.get('builtin'):
+        # /users/me 가 DB 조회 없이 프로파일 합성할 수 있도록 표식 + 이름 동봉
+        payload['builtin'] = True
+        payload['name'] = user.get('name') or user['login_id']
     return jwt.encode(payload, _SECRET, algorithm='HS256')
 
 
@@ -75,9 +79,63 @@ def require_admin(handler_args: HandlerArgs):
     payload, err = require_auth(handler_args)
     if err:
         return None, err
-    if payload.get('role') != 'admin':
+    # rank 기반 — developer(공급사 개발 계정, admin 동급) 포함
+    if _shared_auth.role_rank(payload.get('role')) < _shared_auth.role_rank('admin'):
         return None, HandlerResult(status=403, body={'error': '관리자 권한이 필요합니다'})
     return payload, None
+
+
+# ─────────────────────────────────────────────────────────────
+#  패키지 내장 계정 (DB 무관 — 부트스트랩/공급사용)
+#
+#  상용 구축 시나리오: base OAM 만 수동 배포된 단계(DB 미구축)에서 admin 으로
+#  로그인해 인프라 구축·전 모듈 배포를 수행해야 함 → 로그인이 DB 에 의존하면
+#  불가. admin(구축)/developer(빌드·검증·패키징) 는 공급사 계정으로 가입자
+#  테이블이 아닌 패키지(설정)에 내장한다. 고객측 manager/operator/monitor 는
+#  기존대로 DB(users) 계정.
+#
+#  설정: oam.json CimsAuth.BuiltinAccounts = [
+#    {"login_id": "admin", "name": "관리자", "role": "admin",
+#     "password_sha256": "<sha256hex>"}, ...]
+#  - 미설정 시 아래 기본값(admin/developer, 비밀번호 '1234') 사용.
+#  - 빈 배열([]) 로 내장 계정 전체 비활성화 가능.
+#  - 같은 login_id 의 DB 계정보다 내장 계정이 항상 우선.
+# ─────────────────────────────────────────────────────────────
+
+_DEFAULT_BUILTINS = [
+    {'login_id': 'admin',     'name': '관리자',  'role': 'admin'},
+    {'login_id': 'developer', 'name': '개발자',  'role': 'developer'},
+]
+_DEFAULT_BUILTIN_PW_SHA = hashlib.sha256('1234'.encode()).hexdigest()
+# 내장 계정 id — DB users.id 와 충돌하지 않도록 음수 고정.
+_BUILTIN_ID_BASE = -1000
+
+
+def _builtin_accounts(config: dict) -> dict:
+    """{login_id: account} — account = {id,name,role,password_sha256,builtin:True}"""
+    rows = (config.get('CimsAuth') or {}).get('BuiltinAccounts')
+    if rows is None:
+        rows = _DEFAULT_BUILTINS
+    out = {}
+    for i, r in enumerate(rows if isinstance(rows, list) else []):
+        lid = (r.get('login_id') or '').strip()
+        role = (r.get('role') or '').strip()
+        if not lid or _shared_auth.role_rank(role) <= 0:
+            continue
+        pw_sha = (r.get('password_sha256') or '').strip().lower()
+        if not pw_sha and r.get('password'):
+            pw_sha = hashlib.sha256(str(r['password']).encode()).hexdigest()
+        if not pw_sha:
+            pw_sha = _DEFAULT_BUILTIN_PW_SHA
+        out[lid] = {
+            'id': _BUILTIN_ID_BASE - i,
+            'name': r.get('name') or lid,
+            'login_id': lid,
+            'role': role,
+            'password_sha256': pw_sha,
+            'builtin': True,
+        }
+    return out
 
 
 # ── DB 헬퍼 ──────────────────────────────────────────────────
@@ -168,6 +226,16 @@ async def _login(body, config):
     if not login_id or not password:
         return HandlerResult(status=400, body={'error': '아이디와 비밀번호를 입력하세요'})
 
+    # 패키지 내장 계정 우선 — DB 미구축(부트스트랩) 상태에서도 동작해야 하므로
+    # DB 접근 전에 판정. 내장 login_id 와 일치하면 DB fallthrough 없이 종결.
+    acct = _builtin_accounts(config).get(login_id)
+    if acct is not None:
+        if _hash(password) != acct['password_sha256']:
+            return HandlerResult(status=401, body={'error': '아이디 또는 비밀번호가 잘못되었습니다'})
+        user = {k: acct[k] for k in ('id', 'name', 'login_id', 'role')}
+        token = _make_token(dict(user, builtin=True))
+        return HandlerResult(status=200, body={'token': token, 'user': dict(user, builtin=True)})
+
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -239,6 +307,11 @@ async def _change_password(handler_args, config):
         return HandlerResult(status=400, body={'error': '현재/새 비밀번호를 입력하세요'})
     if len(new_pw) < 4:
         return HandlerResult(status=400, body={'error': '새 비밀번호는 4자 이상이어야 합니다'})
+
+    if payload.get('builtin'):
+        return HandlerResult(status=403, body={
+            'error': '내장 계정 비밀번호는 콘솔에서 변경할 수 없습니다 — '
+                     'oam.json CimsAuth.BuiltinAccounts 의 password_sha256 으로 관리하세요'})
 
     uid = int(payload['sub'])
     with _get_db(config) as conn:

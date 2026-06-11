@@ -19,6 +19,7 @@ import HealthCheckModal from '../components/HealthCheckModal'
 import MetricTrend from '../components/MetricTrend'
 import { agentDisplayName } from '../components/agentDisplay'
 import { useAdminCapable } from '../hooks/useAdminCapable'
+import { hasRole } from '../utils/permissions'
 import AdminElevateDialog from '../components/AdminElevateDialog'
 import { clearElevatedToken, elevationActive } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -298,7 +299,7 @@ export default function ServersPage() {
           )
         })}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
-          {user?.role !== 'admin' && (
+          {!hasRole(user, 'admin') && (   /* developer(admin 동급)에겐 승격 불필요 */
             canEdit && elevationActive() ? (
               <span style={{ fontSize: 12, color: '#27ae60' }}>
                 🔓 admin 승격 중
