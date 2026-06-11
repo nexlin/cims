@@ -24,6 +24,9 @@
 #     --no-systemd     systemd 미사용 (start 스크립트 생성)
 #     --no-start       설치만 하고 기동하지 않음
 #     --no-agent       이 서버의 agent 자동 설치/기동 생략
+#     --batch          대화식 입력 생략 (옵션/기본값만 사용 — 자동화용)
+#   옵션 없이 실행하면 설치 경로/포트/admin 비밀번호를 단계별로 묻는다.
+#   제거: sudo <prefix>/uninstall-base.sh [--yes]
 #     --user USER      서비스 사용자 (기본: sudo 호출자) — agent/OAM 프로세스 소유자
 set -euo pipefail
 
@@ -33,6 +36,7 @@ ADMIN_PASS=""
 USE_SYSTEMD=1
 DO_START=1
 DO_AGENT=1
+BATCH=0
 # 서비스 사용자 — sudo 호출자 (agent/OAM 프로세스 소유자. 모듈 설치 경로 쓰기 주체)
 SVC_USER="${SUDO_USER:-$(id -un)}"
 
@@ -44,6 +48,7 @@ while [[ $# -gt 0 ]]; do
         --no-systemd) USE_SYSTEMD=0; shift ;;
         --no-start)   DO_START=0; shift ;;
         --no-agent)   DO_AGENT=0; shift ;;
+        --batch)      BATCH=1; shift ;;
         --user)       SVC_USER="$2"; shift 2 ;;
         -h|--help)    grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "알 수 없는 옵션: $1"; exit 1 ;;
@@ -61,7 +66,62 @@ err()  { echo -e "\033[0;31m[ERROR]\033[0m $*" >&2; }
 for c in python3 tar openssl; do
     command -v "$c" >/dev/null || { err "$c 필요 — 설치 후 재시도"; exit 1; }
 done
-if [[ $EUID -ne 0 && ! -w "$(dirname "$PREFIX")" ]]; then
+
+# ── 대화식 초기 설정 (tty + --batch 미지정 시) ────────────────────
+#    각 항목은 명령행 옵션으로 지정했으면 건너뛴다.
+PORT_GIVEN=0; PREFIX_GIVEN=0
+for _a in "$@"; do :; done   # (옵션 파싱은 위에서 완료 — 지정 여부는 기본값 비교로 판단)
+[[ "$PREFIX" != "/opt/cims-agent" ]] && PREFIX_GIVEN=1
+[[ "$PORT" != "4419" ]] && PORT_GIVEN=1
+
+if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE:-}" ]]; }; then
+    echo ""
+    echo "── CIMS base 초기 설정 (Enter = 기본값) ─────────────────────"
+    # [1] 설치 경로
+    if [[ $PREFIX_GIVEN -eq 0 ]]; then
+        read -r -p "  [1/4] 설치 경로 [$PREFIX]: " _in
+        [[ -n "$_in" ]] && PREFIX="$_in"
+    fi
+    # [2] 콘솔/OAM HTTPS 포트 (단일 오리진 — 콘솔 웹과 API/agent 통신이 같은 포트)
+    if [[ $PORT_GIVEN -eq 0 ]]; then
+        while :; do
+            read -r -p "  [2/4] 콘솔/OAM HTTPS 포트 (웹·API 단일) [$PORT]: " _in
+            [[ -z "$_in" ]] && break
+            if [[ "$_in" =~ ^[0-9]+$ ]] && (( _in >= 1 && _in <= 65535 )); then
+                PORT="$_in"; break
+            fi
+            echo "      포트는 1~65535 숫자여야 합니다"
+        done
+    fi
+    # [3] admin 비밀번호 최초 등록 (필수 — 미입력 시 반복)
+    if [[ -z "$ADMIN_PASS" ]]; then
+        while :; do
+            read -r -s -p "  [3/4] admin 비밀번호 (최초 등록, 4자 이상): " _p1; echo
+            if [[ ${#_p1} -lt 4 ]]; then echo "      4자 이상 입력하세요"; continue; fi
+            read -r -s -p "        비밀번호 확인: " _p2; echo
+            [[ "$_p1" == "$_p2" ]] && { ADMIN_PASS="$_p1"; break; }
+            echo "      일치하지 않습니다 — 다시 입력"
+        done
+    fi
+    # [4] 로컬 agent 자동 설치
+    read -r -p "  [4/4] 이 서버의 agent 자동 설치/기동 [Y/n]: " _in
+    [[ "$_in" == n* || "$_in" == N* ]] && DO_AGENT=0
+    echo ""
+    echo "── 설치 요약 ────────────────────────────────────────────────"
+    echo "    설치 경로     : $PREFIX"
+    echo "    HTTPS 포트    : $PORT  (콘솔 웹 + API + agent 통신 단일 오리진)"
+    echo "    admin 비밀번호: (입력됨)"
+    echo "    서비스 사용자 : $SVC_USER"
+    echo "    로컬 agent    : $([[ $DO_AGENT -eq 1 ]] && echo 설치 || echo 생략)"
+    read -r -p "  진행할까요? [Y/n]: " _in
+    [[ "$_in" == n* || "$_in" == N* ]] && { echo "중단"; exit 1; }
+    echo ""
+elif [[ -z "$ADMIN_PASS" ]]; then
+    err "admin 비밀번호 미설정 — 기본값(1234)으로 진행합니다. 상용에서는 --admin-pass 필수!"
+fi
+
+# 권한 체크 — 대화식 입력으로 확정된 PREFIX 기준
+if [[ $EUID -ne 0 && ! -w "$(dirname "$PREFIX")" && ! -w "$PREFIX" ]]; then
     err "root 권한 필요 (또는 $PREFIX 쓰기 가능해야 함) — sudo 로 실행"
     exit 1
 fi
@@ -136,6 +196,49 @@ json.dump(d, open(p, 'w'), ensure_ascii=False, indent=4)
 open(p, 'a').write('\n')
 print('  oam.json 구성 완료')
 PYEOF
+
+# ── uninstall 스크립트 생성 (install 의 대칭 — 언제든 단독 실행 가능) ──────
+#    agent 설치본의 자체 uninstall.sh(agent+모듈+sudoers)와 이름이 겹치지 않게
+#    uninstall-base.sh 로 생성하고, 있으면 그쪽에 위임 후 base 잔여를 정리한다.
+cat > "$PREFIX/uninstall-base.sh" <<UNINST
+#!/usr/bin/env bash
+# CIMS base(OAM+Console+Agent) 완전 제거 — install.sh 가 생성.
+#   sudo ./uninstall-base.sh [--yes]
+set -uo pipefail
+PREFIX="$PREFIX"
+YES=0; [[ "\${1:-}" == "--yes" || "\${1:-}" == "-y" ]] && YES=1
+echo "다음을 제거합니다:"
+echo "  • OAM/Console 서비스 (systemd cims-oam.service 또는 start-oam 프로세스)"
+echo "  • 이 서버의 agent + 배포된 모듈 (agent 의 uninstall.sh 위임)"
+echo "  • \$PREFIX 전체 (패키지 저장소/runtime 포함)"
+if [[ \$YES -ne 1 ]]; then
+    read -r -p "계속할까요? [y/N] " _a
+    [[ "\$_a" == y* || "\$_a" == Y* ]] || { echo "중단"; exit 1; }
+fi
+
+# 1) OAM 서비스 중지/해제
+if [[ -f /etc/systemd/system/cims-oam.service ]]; then
+    systemctl disable --now cims-oam.service 2>/dev/null || true
+    rm -f /etc/systemd/system/cims-oam.service
+    systemctl daemon-reload 2>/dev/null || true
+    echo "✓ systemd cims-oam.service 제거"
+else
+    # start-oam.sh(nohup) 경로 — oam_app 프로세스 종료
+    for _pid in \$(pgrep -f "\$PREFIX/modules/oam/.*oam_app.py" 2>/dev/null); do
+        kill "\$_pid" 2>/dev/null || true
+    done
+fi
+
+# 2) 로컬 agent + 모듈 — agent 설치본의 uninstall.sh 에 위임 (unit/sudoers/모듈 정리)
+if [[ -f "\$PREFIX/uninstall.sh" ]]; then
+    ( cd "\$PREFIX" && bash ./uninstall.sh --yes ) || true
+fi
+
+# 3) base 잔여 전체 삭제
+rm -rf "\$PREFIX"
+echo "✓ CIMS base 제거 완료 (\$PREFIX)"
+UNINST
+chmod +x "$PREFIX/uninstall-base.sh"
 
 # 서비스 사용자 소유 — 이후 agent 가 modules/ 에 설치/업그레이드를 수행하므로
 # 전체 트리를 서비스 사용자 소유로 (root 로 만든 디렉토리 교정).
@@ -256,5 +359,6 @@ cat <<DONE
    로그인 : admin / $([[ -n "$ADMIN_PASS" ]] && echo '<--admin-pass 로 설정한 비밀번호>' || echo '1234  ← 상용에서는 변경 권장 (--admin-pass)')
    다음   : 콘솔 → 시스템 > 시스템/인프라 → ＋시스템 추가 → 각 서버에
             install-command 실행(agent 설치) → 패키지 등록/설치/설정
+   제거   : sudo $PREFIX/uninstall-base.sh
 ────────────────────────────────────────────────────────────
 DONE
