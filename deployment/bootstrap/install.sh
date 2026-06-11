@@ -21,8 +21,10 @@
 #     --prefix DIR     설치 루트 (기본 /opt/cims-agent)
 #     --port N         OAM HTTPS 포트 (기본 4419)
 #     --admin-pass PW  내장 admin 비밀번호 설정 (기본 1234 — 상용은 변경 권장)
-#     --no-systemd     systemd 미사용 (start-oam.sh 생성)
+#     --no-systemd     systemd 미사용 (start 스크립트 생성)
 #     --no-start       설치만 하고 기동하지 않음
+#     --no-agent       이 서버의 agent 자동 설치/기동 생략
+#     --user USER      서비스 사용자 (기본: sudo 호출자) — agent/OAM 프로세스 소유자
 set -euo pipefail
 
 PREFIX=/opt/cims-agent
@@ -30,6 +32,9 @@ PORT=4419
 ADMIN_PASS=""
 USE_SYSTEMD=1
 DO_START=1
+DO_AGENT=1
+# 서비스 사용자 — sudo 호출자 (agent/OAM 프로세스 소유자. 모듈 설치 경로 쓰기 주체)
+SVC_USER="${SUDO_USER:-$(id -un)}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -38,6 +43,8 @@ while [[ $# -gt 0 ]]; do
         --admin-pass) ADMIN_PASS="$2"; shift 2 ;;
         --no-systemd) USE_SYSTEMD=0; shift ;;
         --no-start)   DO_START=0; shift ;;
+        --no-agent)   DO_AGENT=0; shift ;;
+        --user)       SVC_USER="$2"; shift 2 ;;
         -h|--help)    grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "알 수 없는 옵션: $1"; exit 1 ;;
     esac
@@ -68,10 +75,11 @@ _ver() { basename "$1" .tar.gz | sed 's/^[a-z]*-//'; }
 OAM_VER=$(_ver "$OAM_TAR"); CON_VER=$(_ver "$CON_TAR"); AGT_VER=$(_ver "$AGT_TAR")
 info "설치 구성: oam $OAM_VER / console $CON_VER / agent $AGT_VER → $PREFIX (HTTPS :$PORT)"
 
-# ── 레이아웃 (버전 단위 설치 — agent 배포 체계와 동일) ───────────
-OAM_ROOT="$PREFIX/oam/$OAM_VER"
-CON_ROOT="$PREFIX/console/$CON_VER"
-RUNTIME_DIR="$PREFIX/oam/runtime"          # 버전 무관 영속 store (업그레이드 생존)
+# ── 레이아웃 (버전 단위 설치 — agent 배포 체계와 동일, 모듈은 modules/ 하위) ──
+MODULES_DIR="$PREFIX/modules"
+OAM_ROOT="$MODULES_DIR/oam/$OAM_VER"
+CON_ROOT="$MODULES_DIR/console/$CON_VER"
+RUNTIME_DIR="$MODULES_DIR/oam/runtime"     # 버전 무관 영속 store (업그레이드 생존)
 mkdir -p "$OAM_ROOT" "$CON_ROOT" "$RUNTIME_DIR" "$PREFIX/agent-assets"
 
 info "패키지 전개..."
@@ -109,7 +117,7 @@ if [[ ! -f "$JWT_SECRET_FILE" ]]; then
     chmod 600 "$JWT_SECRET_FILE"
 fi
 PY=python3 OAM_ROOT="$OAM_ROOT" RUNTIME_DIR="$RUNTIME_DIR" PORT="$PORT" \
-CON_DIST="$CON_ROOT/console/dist" JWT_SECRET="$(cat "$JWT_SECRET_FILE")" \
+JWT_SECRET="$(cat "$JWT_SECRET_FILE")" \
 ADMIN_PASS="$ADMIN_PASS" python3 - <<'PYEOF'
 import hashlib, json, os
 p = os.path.join(os.environ['OAM_ROOT'], 'oam', 'config', 'oam.json')
@@ -117,7 +125,6 @@ d = json.load(open(p))
 d['Server'] = {'Ip': '0.0.0.0', 'Port': int(os.environ['PORT'])}
 d['CimsRuntimeDir'] = os.environ['RUNTIME_DIR']
 d.setdefault('Packages', {})['Dir'] = os.path.join(os.environ['RUNTIME_DIR'], 'pkg_files')
-d.setdefault('Console', {})['StaticDir'] = os.environ['CON_DIST']
 d.setdefault('CimsAuth', {})['JwtSecret'] = os.environ['JWT_SECRET']
 ap = os.environ.get('ADMIN_PASS') or ''
 if ap:
@@ -130,6 +137,10 @@ open(p, 'a').write('\n')
 print('  oam.json 구성 완료')
 PYEOF
 
+# 서비스 사용자 소유 — 이후 agent 가 modules/ 에 설치/업그레이드를 수행하므로
+# 전체 트리를 서비스 사용자 소유로 (root 로 만든 디렉토리 교정).
+chown -R "$SVC_USER":"$(id -gn "$SVC_USER")" "$PREFIX" 2>/dev/null || true
+
 # ── 기동 (systemd 또는 start 스크립트) ───────────────────────────
 START_CMD="/usr/bin/env python3 -u $OAM_ROOT/oam/src/oam_app.py"
 if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system && $EUID -eq 0 ]]; then
@@ -140,6 +151,7 @@ After=network-online.target
 
 [Service]
 Type=simple
+User=$SVC_USER
 WorkingDirectory=$OAM_ROOT/oam/src
 Environment=CIMS_AGENT_ASSET_DIR=$PREFIX/agent-assets/agent
 ExecStart=$START_CMD
@@ -188,10 +200,59 @@ if [[ $DO_START -eq 1 ]]; then
     fi
 fi
 
+# ── 로컬 agent 설치/기동 (이 서버도 콘솔에서 관리되도록) ────────────
+AGENT_STATE="미설치 (--no-agent)"
+if [[ $DO_AGENT -eq 1 && $DO_START -eq 1 ]]; then
+    info "로컬 agent 등록/설치..."
+    LOGIN_PW="${ADMIN_PASS:-1234}"
+    TOK=$(curl -sk -X POST -H "Content-Type: application/json"           -d "{\"login_id\":\"admin\",\"password\":\"$LOGIN_PW\"}"           "https://127.0.0.1:$PORT/api/v1/auth/login" |           python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+    HOSTNM=$(hostname -s 2>/dev/null || hostname)
+    ENROLL_TOKEN=""
+    if [[ -n "$TOK" ]]; then
+        ENROLL_TOKEN=$(curl -sk -X POST -H "Authorization: Bearer $TOK"             -H "Content-Type: application/json" -d "{\"name\":\"$HOSTNM\"}"             "https://127.0.0.1:$PORT/api/v1/agents" |             python3 -c "import sys,json;print(json.load(sys.stdin).get('enrollment_token',''))" 2>/dev/null)
+    fi
+    if [[ -z "$ENROLL_TOKEN" ]]; then
+        err "agent 등록 토큰 발급 실패 — 콘솔에서 수동으로 서버 추가 후 install-command 실행"
+        AGENT_STATE="실패 (콘솔에서 수동 설치)"
+    else
+        _run_as() {  # 서비스 사용자로 실행 (root 인 경우 su)
+            if [[ $EUID -eq 0 && "$SVC_USER" != "root" ]]; then
+                su - "$SVC_USER" -c "$1"
+            else
+                bash -c "$1"
+            fi
+        }
+        _run_as "cd '$PREFIX' && bash '$PREFIX/agent-assets/agent/install-agent.sh'             --oam-url 'https://127.0.0.1:$PORT'             --enrollment-token '$ENROLL_TOKEN' --name '$HOSTNM'"             && ok "agent 번들 설치 ($PREFIX/agent)"
+        # sudoers + linger 는 root 권한으로 직접 (init.sh 의 sudo 단계 선처리)
+        if [[ $EUID -eq 0 && -f "$PREFIX/setup-sudoers.sh" ]]; then
+            CIMS_AGENT_USER="$SVC_USER" bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 ||                 bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 || true
+        fi
+        if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then
+            if _run_as "cd '$PREFIX' && ./init.sh"; then
+                AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
+            else
+                AGENT_STATE="설치됨 — 기동 실패 ($PREFIX/init.sh 수동 실행)"
+            fi
+        else
+            # systemd 미사용 — enroll 후 nohup 직접 기동
+            _run_as "cd '$PREFIX' && CIMS_ENROLLMENT_TOKEN='$ENROLL_TOKEN'                 python3 ./agent/cims_agent.py --oam-url 'https://127.0.0.1:$PORT'                 --state-dir ./state --name '$HOSTNM' --enroll-only" || true
+            _run_as "cd '$PREFIX' && setsid nohup python3 ./agent/cims_agent.py                 --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM'                 > ./agent-stdout.log 2>&1 < /dev/null &"
+            sleep 3
+            AGENT_STATE="실행 중 (nohup — systemd 미사용 환경)"
+        fi
+    fi
+elif [[ $DO_AGENT -eq 1 ]]; then
+    AGENT_STATE="미기동 (--no-start)"
+fi
+
 cat <<DONE
 
 ────────────────────────────────────────────────────────────
  CIMS base 설치 완료
+   프로세스:
+     · oam     : 실행 중 — API + 콘솔 동시 서빙 (HTTPS :$PORT)
+     · console : 별도 프로세스 없음 — oam 이 정적 서빙 (위 포트)
+     · agent   : $AGENT_STATE
    콘솔   : https://<이 서버 IP>:$PORT/   (브라우저 인증서 경고는 self-signed 때문)
    로그인 : admin / $([[ -n "$ADMIN_PASS" ]] && echo '<--admin-pass 로 설정한 비밀번호>' || echo '1234  ← 상용에서는 변경 권장 (--admin-pass)')
    다음   : 콘솔 → 시스템 > 시스템/인프라 → ＋시스템 추가 → 각 서버에

@@ -779,11 +779,13 @@ _VERSION_DIR_RE = re.compile(r"^\d+(\.\d+){1,3}([.\-+][0-9A-Za-z.\-+]+)?$")
 
 
 def _module_root_of(install_path: str, module: str) -> str:
-    """install_path 로부터 모듈 루트(/…/<module>) 를 정규화.
+    """install_path 로부터 모듈 루트를 정규화.
 
-    - …/<module>/<version> → …/<module>      (이미 버전 경로)
-    - …/<module>           → 그대로           (durability 표준 경로)
-    - 그 외 (legacy 공유 루트 /opt/cims-agent 등) → <install_path>/<module>
+    - …/<module>/<version> → …/<module>      (이미 버전 경로 — 기존 설치 유지)
+    - …/<module>           → 그대로           (모듈 루트 직접 지정)
+    - 그 외 (공유 루트 /opt/cims-agent 등) → <install_path>/modules/<module>
+      (02_deployment.md §2 합의 레이아웃: 모듈은 modules/ 폴더 하위로 집결.
+       agent/ 트리 밖 sibling 이므로 durability 제약과도 양립.)
     """
     base = (install_path or "").rstrip("/")
     bn = os.path.basename(base)
@@ -791,7 +793,9 @@ def _module_root_of(install_path: str, module: str) -> str:
         return os.path.dirname(base)
     if bn == module:
         return base
-    return os.path.join(base, module)
+    if bn == "modules":
+        return os.path.join(base, module)
+    return os.path.join(base, "modules", module)
 
 
 def _versioned_install_path(params: dict) -> tuple:

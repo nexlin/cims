@@ -49,12 +49,22 @@ def resolve_console_static_dir(config: dict, component_root: str) -> str:
       3) flat 형제:      <root대비 ../console/dist>          (build/dist 개발 트리)
     """
     import glob as _glob
+    import re as _re
     cfg = (config.get('Console') or {}).get('StaticDir') or ''
     if cfg:
         p = cfg if os.path.isabs(cfg) else os.path.normpath(os.path.join(component_root, cfg))
         return p if os.path.isdir(p) else ''
+
+    def _ver_key(path):
+        # .../console/<ver>/console/dist → 버전 자연 정렬 (0.0.10 > 0.0.9)
+        m = _re.search(r'/console/([^/]+)/console/dist$', path.replace(os.sep, '/'))
+        if not m:
+            return (0,)
+        return tuple(int(x) if x.isdigit() else 0 for x in _re.split(r'[.\-]', m.group(1)))
+
     cands = sorted(_glob.glob(os.path.normpath(
-        os.path.join(component_root, '..', '..', '..', 'console', '*', 'console', 'dist'))), reverse=True)
+        os.path.join(component_root, '..', '..', '..', 'console', '*', 'console', 'dist'))),
+        key=_ver_key, reverse=True)
     cands.append(os.path.normpath(os.path.join(component_root, '..', 'console', 'dist')))
     for c in cands:
         if os.path.isdir(c):
