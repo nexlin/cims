@@ -117,7 +117,11 @@ if __name__ == '__main__':
         from handlers.org        import CIMS_ORG_HANDLER_LIST
     except Exception as _e:
         print(f'[bootstrap] subscriber/org handlers unavailable (csc 미설치): {_e}', flush=True)
-        CIMS_ADMIN_HANDLER_LIST, CIMS_ORG_HANDLER_LIST = [], []
+        # /users/me(본인 프로파일)는 콘솔 로그인 부트스트랩의 필수 경로 — 평소엔
+        # csc admin.handle_users 가 위임하지만, standalone 에선 oam 자체 users
+        # 핸들러를 직접 등록한다 (me 외 경로는 404 = 가입자 기능은 csc 설치 후).
+        from handlers.users import CIMS_USERS_HANDLER_LIST as CIMS_ADMIN_HANDLER_LIST
+        CIMS_ORG_HANDLER_LIST = []
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
     from handlers.stats          import CIMS_STATS_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init

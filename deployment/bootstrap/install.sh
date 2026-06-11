@@ -233,10 +233,28 @@ fi
 if [[ -f "\$PREFIX/uninstall.sh" ]]; then
     ( cd "\$PREFIX" && bash ./uninstall.sh --yes ) || true
 fi
+# agent 의 user systemd unit 이 남아있으면 직접 정지/해제 (Restart=always 부활 방지)
+if id "$SVC_USER" >/dev/null 2>&1; then
+    runuser -u "$SVC_USER" -- env XDG_RUNTIME_DIR="/run/user/\$(id -u "$SVC_USER")" \
+        systemctl --user disable --now cims-agent.service 2>/dev/null || true
+fi
 
-# 3) base 잔여 전체 삭제
+# 3) install.sh 가 기동한 잔여 프로세스 일괄 종료 (oam/agent/모듈 — \$PREFIX 경로 기반)
+_kill_prefix_procs() {
+    local sig="\$1" _pid
+    for _pid in \$(pgrep -f "\$PREFIX" 2>/dev/null); do
+        # 자기 자신/부모(sudo 래퍼) 제외 — cmdline 에 PREFIX 가 포함되므로
+        [[ "\$_pid" == "\$\$" || "\$_pid" == "\$PPID" ]] && continue
+        kill "-\$sig" "\$_pid" 2>/dev/null || true
+    done
+}
+_kill_prefix_procs TERM
+sleep 2
+_kill_prefix_procs KILL
+
+# 4) base 잔여 전체 삭제
 rm -rf "\$PREFIX"
-echo "✓ CIMS base 제거 완료 (\$PREFIX)"
+echo "✓ CIMS base 제거 완료 (\$PREFIX — 관련 프로세스 종료 포함)"
 UNINST
 chmod +x "$PREFIX/uninstall-base.sh"
 

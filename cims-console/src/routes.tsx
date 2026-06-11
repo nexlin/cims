@@ -90,7 +90,8 @@ const CORE_SECTIONS: RouteSection[] = [
     basePath: '/release',
     defaultPath: '/release/verify',
     order: 70,
-    prodHidden: true,                    // 배포 콘솔에서 숨김 (운영자는 패키징/검증 불필요)
+    // prodHidden 제거(2026-06-11): 빌드타임 숨김 대신 런타임 '개발자 모드'(devOnly)가
+    // 게이팅 — 상용 base 콘솔에서도 admin 이 개발자 모드를 켜면 릴리스 메뉴 사용 가능.
     routes: [
       { path: '/release/verify',          title: '검증',         component: VerificationV2Page, adminOnly: true, devOnly: true },
       { path: '/release/verify-history',  title: '검증 이력',     component: VerificationHistoryPage, adminOnly: true, devOnly: true },
