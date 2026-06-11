@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useDevMode } from '../hooks/useDevMode'
 import { useMenu } from '../contexts/MenuContext'
 import { MenuEditorModal } from './MenuEditorModal'
-import { NAV_AREA_ORDER, NAV_AREA_LABELS, type NavArea, type RouteSection, type RouteDef } from '../nav-types'
+import type { RouteSection, RouteDef } from '../nav-types'
 import { hasRole, canAccessRoute } from '../utils/permissions'
 
 interface SidebarProps {
@@ -19,7 +19,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const { user } = useAuth()
-  const { sections } = useMenu()
+  const { sections, areas } = useMenu()
   const [editing, setEditing] = useState(false)
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const isAdmin = hasRole(user, 'admin')   // developer(admin 동급) 포함
@@ -33,22 +33,26 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // 기본 펼침 = 현재 활성 그룹. 사용자가 토글하면 override.
   const isExpanded = (s: RouteSection) => open[s.key] ?? isGroupActive(s)
 
-  // 영역별 버킷 (보이는 leaf 가 있는 섹션만)
-  const byArea: Record<NavArea, RouteSection[]> = { ops: [], admin: [] }
+  // 영역별 버킷 (보이는 leaf 가 있는 섹션만). 영역 목록은 메뉴 편집으로 추가/이름변경 가능 —
+  // 알 수 없는 area 값(영역 삭제 등)은 'admin' 으로 수용.
+  const areaKeys = new Set(areas.map(a => a.key))
+  const byArea: Record<string, RouteSection[]> = {}
+  for (const a of areas) byArea[a.key] = []
   for (const s of sections) {
     if (visibleRoutes(s).length === 0) continue
-    byArea[(s.area ?? 'admin')].push(s)
+    const key = s.area && areaKeys.has(s.area) ? s.area : 'admin'
+    ;(byArea[key] ??= []).push(s)
   }
 
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <nav className="sidebar-nav">
-        {NAV_AREA_ORDER.map(area => {
-          const groups = byArea[area]
+        {areas.map(area => {
+          const groups = byArea[area.key] ?? []
           if (groups.length === 0) return null
           return (
-            <div key={area} className="sidebar-area">
-              {!collapsed && <div className="sidebar-area-label">{NAV_AREA_LABELS[area]}</div>}
+            <div key={area.key} className="sidebar-area">
+              {!collapsed && <div className="sidebar-area-label">{area.label}</div>}
               {groups.map(section => {
                 const Icon = section.icon
                 const leaves = visibleRoutes(section)

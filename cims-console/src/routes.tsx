@@ -31,6 +31,13 @@ export type { RouteDef, RouteSection } from './nav-types'
 const CONSOLE_TARGET = ((import.meta as unknown as { env: Record<string, string> }).env?.VITE_CONSOLE_TARGET) || 'dev'
 export const IS_PROD_CONSOLE = CONSOLE_TARGET === 'prod'
 
+// 콘솔 프로파일 — 'full'(기본) | 'base'(부트스트랩 동봉본: 관리>시스템 + 관리>릴리스(개발자모드)만).
+// base 는 서비스 무관 코어만 담는다 — 서비스 메뉴/위젯은 3·4단계(패키지 등록/설치)에서
+// 풀 프로파일 console 패키지로 업데이트되며 도착한다 (services/registry.ts 도 동일 게이트).
+// (정확한 import.meta.env.X 구문 — vite 빌드 시 리터럴 치환 → 상수 조건 → 서비스 코드 DCE)
+export const IS_BASE_CONSOLE = import.meta.env.VITE_CONSOLE_PROFILE === 'base'
+const BASE_PROFILE_SECTION_KEYS = new Set(['system', 'release'])
+
 // 활성 알람 뷰 (해소된 알람 숨김). 이력 뷰는 AlertsPage 기본.
 const ActiveAlarmsPage = () => <AlertsPage openOnly />
 
@@ -118,6 +125,7 @@ const SERVICE_SECTIONS: RouteSection[] = SERVICE_MANIFESTS.flatMap(
 )
 
 export const SECTIONS: RouteSection[] = [...CORE_SECTIONS, ...SERVICE_SECTIONS]
+  .filter(s => !IS_BASE_CONSOLE || BASE_PROFILE_SECTION_KEYS.has(s.key))
   .sort((a, b) => (a.order ?? 50) - (b.order ?? 50))
 
 // IS_PROD_CONSOLE 일 때 prodHidden=true 섹션 제거. dev 빌드는 모두 노출.
@@ -125,6 +133,10 @@ export const VISIBLE_SECTIONS: RouteSection[] = SECTIONS.filter(s => !IS_PROD_CO
 
 // 평탄화된 라우트 리스트 — <Routes> 렌더용
 export const FLAT_ROUTES: RouteDef[] = VISIBLE_SECTIONS.flatMap(s => s.routes)
+
+// 로그인 직후/루트(/) 랜딩 경로 — base 프로파일엔 /dashboard 가 없으므로 첫 섹션 기본 경로.
+export const HOME_PATH: string = VISIBLE_SECTIONS.find(s => s.key === 'dashboard')?.defaultPath
+  ?? VISIBLE_SECTIONS[0]?.defaultPath ?? '/dashboard'
 
 // 경로 → section/route 조회. 섹션이 자기 basePath 밖의 route 도 가질 수 있어(예: 구성↔서비스정의)
 // basePath prefix 가 아니라 route 멤버십으로 매칭한다.

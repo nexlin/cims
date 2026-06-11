@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { MenuProvider } from './contexts/MenuContext'
 import { ToastProvider } from './components/Toast'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import LoginPage from './pages/LoginPage'
-import { FLAT_ROUTES } from './routes'
+import { FLAT_ROUTES, HOME_PATH } from './routes'
+import { useMenu } from './contexts/MenuContext'
+import { findCustomPage } from './menu'
 import type { RouteDef } from './nav-types'
 import { canAccessRoute } from './utils/permissions'
 import { useDevMode } from './hooks/useDevMode'
@@ -68,6 +70,19 @@ function EditablePageHost({ route }: { route: RouteDef }) {
   // layoutId 별 key 로 강제 리마운트 → 새 seed/layout 로 초기화.
   const layoutId = routeLayoutId(route)
   return <EditableLayout key={layoutId} layoutId={layoutId} seed={routeSeed(route)} />
+}
+
+// 메뉴 편집으로 추가한 커스텀 페이지(/custom/<slug>) — 빈 위젯 seed 의 EditableLayout.
+// admin 이 위젯을 배치해 페이지를 구성한다. 메뉴(저장본)에서 제거된 slug 도 URL 직접 접근은
+// 허용 (저장된 layout 이 남아 있으면 그대로 렌더 — 링크 공유/복구 여지).
+function CustomPageHost() {
+  const { slug = '' } = useParams()
+  const { savedConfig } = useMenu()
+  const found = findCustomPage(savedConfig, slug)
+  const title = found?.page.title ?? slug
+  const layoutId = `custom.${slug}`
+  return <EditableLayout key={layoutId} layoutId={layoutId}
+    seed={{ id: layoutId, title, widgets: [] }} />
 }
 
 function RouteGuard({ children, route }: { children: React.ReactNode; route: RouteDef }) {
@@ -143,7 +158,7 @@ function Shell() {
         <main className="app-content">
           <div className="app-content-body">
             <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
               {/* 옛 경로 호환 — 알람 이력은 /alerts/history 로 이전 */}
               <Route path="/dashboard/alerts" element={<Navigate to="/alerts/history" replace />} />
               {FLAT_ROUTES.map(r => (
@@ -153,7 +168,9 @@ function Shell() {
                   element={<RouteGuard route={r}><EditablePageHost route={r} /></RouteGuard>}
                 />
               ))}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              {/* 메뉴 편집으로 추가한 커스텀 위젯 페이지 */}
+              <Route path="/custom/:slug" element={<CustomPageHost />} />
+              <Route path="*" element={<Navigate to={HOME_PATH} replace />} />
             </Routes>
           </div>
         </main>

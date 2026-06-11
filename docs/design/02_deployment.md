@@ -86,9 +86,21 @@ cims-bootstrap/
   목록과 `/install-agent.sh`·`/agent-bundle.tar.gz` 가 즉시 동작해 2단계(각 서버
   agent 설치)로 바로 진행 가능. 1단계 구성요소(oam/console/agent)도 패키지로
   보이므로 3~4단계에서 업데이트 가능.
-- 설치 레이아웃은 본 문서 §2 의 버전 단위 설치와 동일(`/opt/cims-agent/{oam,console}/<ver>/`,
-  runtime store 는 `/opt/cims-agent/oam/runtime` 버전 무관) — 이후 agent 배포
+- 설치 레이아웃은 본 문서 §2 의 버전 단위 설치와 동일(`/opt/cims-agent/modules/{oam,console}/<ver>/`,
+  runtime store 는 `modules/oam/runtime` 버전 무관) — 이후 agent 배포
   체계가 자연 인수.
+- **base 콘솔 프로파일** (2026-06-11): 동봉 콘솔은 `VITE_CONSOLE_PROFILE=base`
+  빌드 — 메뉴가 **관리>시스템 + 관리>릴리스(개발자모드)** 만 (서비스 pack
+  메뉴/위젯은 번들에서 제외, DCE). 서비스에 필요한 기본 메뉴·위젯(대시보드/
+  구성/성능/기록 등)은 3·4단계에서 **풀 프로파일 console 패키지**(동봉본보다
+  높은 버전 필수 — 동일 버전은 시드 멱등 skip)로 업데이트 시 나타난다.
+  `cims.sh installer` 가 base 빌드(`cims-console/dist-base`)를 자체 수행해
+  풀 콘솔 tarball 의 dist 만 교체·동봉 (`meta.json profile=base`).
+- **메뉴 편집** (콘솔 사이드바, admin): ① 영역(운용/관리 그룹핑) 라벨 변경·
+  커스텀 영역 추가/삭제 ② 섹션 순서/라벨/숨김/영역 이동 — 단 **시스템/릴리스
+  섹션은 잠금**(부트스트랩 생명선) ③ 커스텀 메뉴 그룹 + 위젯 합성 페이지
+  (`/custom/<slug>`, 빈 EditableLayout 보드) 추가. 저장은 OAM
+  `/api/v1/console/menu` (`items` + `custom_sections` + `areas`).
 
 ## 3. 제어 평면 (Control Plane)
 

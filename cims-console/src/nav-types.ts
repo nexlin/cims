@@ -43,8 +43,8 @@ export type RouteSection = {
   basePath: string
   defaultPath: string
   routes: RouteDef[]
-  // OAM 대영역 (운용/관리). 미지정 시 'admin' 취급.
-  area?: NavArea
+  // OAM 대영역 (운용/관리 또는 메뉴 편집으로 추가한 커스텀 영역 key). 미지정 시 'admin' 취급.
+  area?: string
   // nav 정렬 순서 (작을수록 앞). 미지정 시 50. 코어/서비스 섹션 병합 시 사용.
   order?: number
   // 이 섹션을 기여한 서비스 pack id (코어 섹션은 undefined). 향후 service on/off 토글용.

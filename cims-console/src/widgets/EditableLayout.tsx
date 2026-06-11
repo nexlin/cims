@@ -137,7 +137,12 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
       {isAdmin && editSlot && createPortal(editControls, editSlot)}
 
       {!editing ? (
-        <GridRenderer layout={layout} />
+        layout.widgets.length === 0 ? (
+          // 빈 페이지(메뉴 편집으로 만든 커스텀 페이지 등) — 보기 모드 안내
+          <div className="empty" style={{ padding: 40, textAlign: 'center' }}>
+            아직 위젯이 없습니다{isAdmin ? ' — 상단 [✎ 편집]으로 위젯을 배치하세요.' : '.'}
+          </div>
+        ) : <GridRenderer layout={layout} />
       ) : draft && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: 12, alignItems: 'start' }}>
           {draft.widgets.map((p, i) => {

@@ -6,6 +6,11 @@
 import type { ServiceManifest } from '../nav-types'
 import { cimsManifest } from './cims/manifest'
 
-export const SERVICE_MANIFESTS: ServiceManifest[] = [
+// base 프로파일(부트스트랩 동봉 콘솔)은 서비스 pack 미포함 — 메뉴·위젯 모두 제외(DCE).
+// 서비스 메뉴/위젯은 3·4단계에서 풀 프로파일 console 패키지 업데이트로 도착한다.
+// (정확한 import.meta.env.X 구문 — vite 가 빌드 시 리터럴 치환 → 상수 조건 → DCE)
+const IS_BASE_PROFILE = import.meta.env.VITE_CONSOLE_PROFILE === 'base'
+
+export const SERVICE_MANIFESTS: ServiceManifest[] = IS_BASE_PROFILE ? [] : [
   cimsManifest,
 ]

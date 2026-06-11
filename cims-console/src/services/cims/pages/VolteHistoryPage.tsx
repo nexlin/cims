@@ -352,7 +352,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
   const availNodes = useMemo(() => Array.from(new Set(allMsgs.map(nodeKey))).sort(), [allMsgs])
   const [offNodes, setOffNodes] = useState<Set<string>>(new Set())
   const msgs = useMemo(() => allMsgs.filter(m => !offNodes.has(nodeKey(m))), [allMsgs, offNodes])
-  const toggleNode = (n: string) => { setSelIdx(null); setBody(null); setOffNodes(prev => { const s = new Set(prev); s.has(n) ? s.delete(n) : s.add(n); return s }) }
+  const toggleNode = (n: string) => { setSelIdx(null); setBody(null); setOffNodes(prev => { const s = new Set(prev); if (s.has(n)) s.delete(n); else s.add(n); return s }) }
   const NODE_LABEL: Record<string, string> = { csp: 'CSP', cmp: 'CMP', csc: 'CSC' }
   const NODE_COLOR: Record<string, string> = { csp: '#2563eb', cmp: '#0891b2', csc: '#7c3aed' }
 

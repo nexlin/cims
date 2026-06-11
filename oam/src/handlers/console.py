@@ -100,7 +100,13 @@ async def handle_console(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
                 body = _body_dict(handler_args)
                 if not isinstance(body, dict) or not isinstance(body.get('items'), list):
                     return HandlerResult(status=400, body={'error': 'invalid_menu — items[] 필요'})
-                file_store.save(mdir, _MENU_KEY, {'items': body['items']})
+                doc = {'items': body['items']}
+                # 메뉴 편집 v2 (2026-06-11): 커스텀 그룹/페이지 + 영역(운용/관리 그룹핑) 편집.
+                if isinstance(body.get('custom_sections'), list):
+                    doc['custom_sections'] = body['custom_sections']
+                if isinstance(body.get('areas'), list):
+                    doc['areas'] = body['areas']
+                file_store.save(mdir, _MENU_KEY, doc)
                 return HandlerResult(status=200, body=file_store.load(mdir, _MENU_KEY))
             return HandlerResult(status=405, body={'error': 'method_not_allowed'})
 

@@ -9,8 +9,13 @@ export interface LayoutSummary {
   update_time?: string
 }
 
+// 저장 메뉴 문서 — items(섹션 override) + custom_sections(커스텀 그룹/페이지) + areas(영역).
+// 구버전 저장본은 items 만 가질 수 있음 (menu.ts normalizeMenuConfig 가 흡수).
 export interface ConsoleMenu {
   items: unknown[]
+  custom_sections?: unknown[]
+  areas?: unknown[]
+  found?: boolean
 }
 
 export const consoleApi = {
@@ -20,5 +25,6 @@ export const consoleApi = {
     api.put<PageLayout>(`/console/layouts/${encodeURIComponent(id)}`, layout),
   deleteLayout: (id: string) => api.delete<{ deleted: boolean }>(`/console/layouts/${encodeURIComponent(id)}`),
   getMenu:     () => api.get<ConsoleMenu>('/console/menu'),
-  putMenu:     (items: unknown[]) => api.put<ConsoleMenu>('/console/menu', { items }),
+  putMenu:     (menu: { items: unknown[]; custom_sections?: unknown[]; areas?: unknown[] }) =>
+    api.put<ConsoleMenu>('/console/menu', menu),
 }

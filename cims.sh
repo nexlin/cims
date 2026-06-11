@@ -1248,12 +1248,47 @@ cmd_installer() {
         return 1
     fi
     local oam_ver; oam_ver=$(basename "$oam_tar" .tar.gz | sed 's/^oam-//')
+    local con_ver; con_ver=$(basename "$con_tar" .tar.gz | sed 's/^console-//')
     local stage="$DIST_DIR/.installer.$$"
     rm -rf "$stage"
     mkdir -p "$stage/cims-bootstrap/packages"
     cp -f "$SCRIPT_DIR/deployment/bootstrap/install.sh" "$stage/cims-bootstrap/install.sh"
     chmod +x "$stage/cims-bootstrap/install.sh"
-    cp -f "$oam_tar" "$con_tar" "$agt_tar" "$stage/cims-bootstrap/packages/"
+    cp -f "$oam_tar" "$agt_tar" "$stage/cims-bootstrap/packages/"
+
+    # ── base 프로파일 콘솔 동봉 ────────────────────────────────────────
+    # 부트스트랩 콘솔은 관리>시스템 + 관리>릴리스(개발자모드) 메뉴만 담는다
+    # (VITE_CONSOLE_PROFILE=base — 서비스 pack 메뉴/위젯 제외). 서비스 메뉴·위젯은
+    # 3·4단계에서 풀 프로파일 console 패키지(버전 상향)로 업데이트되며 도착한다.
+    # 풀 콘솔 tarball 의 구조(meta.json + console/{pkg.json,dist})를 재사용해
+    # dist 만 base 빌드로 교체 — 패키지 스키마와 항상 일치.
+    if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then
+        info "base 프로파일 콘솔 빌드 (VITE_CONSOLE_PROFILE=base)"
+        if ! ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod VITE_CONSOLE_PROFILE=base \
+                 npx vite build --outDir dist-base --emptyOutDir 2>&1 | tail -2 ); then
+            rm -rf "$stage"
+            err "base 콘솔 빌드 실패 — installer 조립 중단"
+            return 1
+        fi
+        local cstage="$stage/.console-base"
+        mkdir -p "$cstage"
+        tar -xzf "$con_tar" -C "$cstage"
+        rm -rf "$cstage/console/dist"
+        cp -a "$SRC_CONSOLE/dist-base" "$cstage/console/dist"
+        python3 - "$cstage/meta.json" <<'PYEOF'
+import json, sys
+p = sys.argv[1]
+m = json.load(open(p))
+m['description'] = (m.get('description') or 'CIMS Console') + ' (base profile — 시스템/릴리스 메뉴만)'
+m['profile'] = 'base'
+json.dump(m, open(p, 'w'), ensure_ascii=False, indent=2)
+PYEOF
+        ( cd "$cstage" && tar czf "$stage/cims-bootstrap/packages/console-${con_ver}.tar.gz" meta.json console )
+        rm -rf "$cstage"
+    else
+        warn "콘솔 소스 없음 — 풀 프로파일 console 패키지를 그대로 동봉"
+        cp -f "$con_tar" "$stage/cims-bootstrap/packages/"
+    fi
     cat > "$stage/cims-bootstrap/README.md" <<EOR
 # CIMS 부트스트랩 인스톨러 (base 운영평면)
 
@@ -1267,7 +1302,12 @@ cmd_installer() {
   3) 패키지 등록 (서비스 모듈 + 본 인스톨러 구성요소 업데이트 패키지)
   4) 패키지 설치  5) 패키지 설정
 
-동봉: $(basename "$oam_tar") / $(basename "$con_tar") / $(basename "$agt_tar")
+동봉 콘솔은 base 프로파일 — 관리>시스템, 관리>릴리스(개발자모드) 메뉴만 포함.
+서비스 메뉴/위젯(대시보드·구성·성능·기록 등)은 3·4단계에서 풀 프로파일 console
+패키지로 업데이트 시 나타난다. ⚠️ 서비스 릴리스의 console 패키지는 동봉본보다
+높은 버전이어야 함 (동일 버전은 등록 시 멱등 skip — 동봉본: console-${con_ver}).
+
+동봉: $(basename "$oam_tar") / console-${con_ver}.tar.gz (base) / $(basename "$agt_tar")
 EOR
     local out="$out_dir/cims-bootstrap-${oam_ver}.tar.gz"
     ( cd "$stage" && tar czf "$out" cims-bootstrap )
