@@ -1496,6 +1496,49 @@ async def _create_package(handler_args: HandlerArgs, config):
     return HandlerResult(status=201, body=result, media_type="application/json")
 
 
+def seed_packages_from_dir(config: dict, seed_dir: str) -> int:
+    """시드 디렉토리의 *.tar.gz 를 file_store 패키지로 멱등 등록 (동기, startup 용).
+
+    부트스트랩 인스톨러가 oam/console/agent/csc tarball 을 seed_packages/ 에
+    떨궈 두면 OAM 첫 부팅 시 자동 등록 — /install-agent.sh, /agent-bundle.tar.gz
+    (file_store 의 agent 패키지 필요)와 콘솔의 패키지 목록이 즉시 동작한다.
+    (name, version) 이 이미 있으면 건너뜀. 등록 건수 반환.
+    """
+    import glob as _glob
+    if not seed_dir or not os.path.isdir(seed_dir):
+        return 0
+    n = 0
+    for src in sorted(_glob.glob(os.path.join(seed_dir, '*.tar.gz'))):
+        try:
+            raw = _read_file(src)
+            meta = _extract_meta_from_tarball(raw) or {}
+            name = (meta.get('name') or '').strip()
+            version = (meta.get('version') or '').strip()
+            if not name or not version:
+                logger.log_error(f'[pkg-seed] skip {os.path.basename(src)} — meta.json name/version 없음')
+                continue
+            if _pkg_existing(config, name, version):
+                continue
+            template = _extract_config_template_from_tarball(raw)
+            pkg_dir, _bak = _resolve_pkg_paths(config)
+            os.makedirs(pkg_dir, exist_ok=True)
+            fpath = os.path.join(pkg_dir, f'{name}-{version}.tar.gz')
+            fsha, fsize = _write_and_hash(fpath, raw)
+            desc_lines = [x for x in (
+                meta.get('description'),
+                f"build: {meta['build_date']}" if meta.get('build_date') else '',
+                f"git: {meta['git_sha']}" if meta.get('git_sha') else '',
+            ) if x]
+            _pkg_upsert(config, name, version, fpath, fsize, fsha,
+                        ' | '.join(desc_lines)[:255], 'seed',
+                        meta or None, template or None)
+            logger.log_info(f'[pkg-seed] registered {name} {version} ({fsize} bytes)')
+            n += 1
+        except Exception as e:
+            logger.log_error(f'[pkg-seed] {os.path.basename(src)} 실패: {e}')
+    return n
+
+
 def _move_to_backup(file_path: str, backup_dir: str) -> str:
     """활성 파일을 백업 디렉토리로 이동. 파일명은 <원본>.<timestamp>.bak 형태.
     성공 시 새 경로 반환, 실패 시 빈 문자열."""

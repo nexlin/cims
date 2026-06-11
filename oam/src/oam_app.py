@@ -45,6 +45,9 @@ _csc_candidates = [os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'csc', '
 import glob as _glob
 _csc_glob = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'csc', '*', 'csc', 'src'))
 _csc_candidates += sorted(_glob.glob(_csc_glob), reverse=True)
+# 버전 단위 설치 레이아웃: oam=<root>/oam/<ver>/oam → csc=<root>/csc/<ver>/csc/src 는 3-up.
+_csc_glob3 = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', '..', 'csc', '*', 'csc', 'src'))
+_csc_candidates += sorted(_glob.glob(_csc_glob3), reverse=True)
 for _c in _csc_candidates:
     if os.path.isdir(_c):
         _CSC_SRC = _c
@@ -106,8 +109,15 @@ if __name__ == '__main__':
     from handlers.auth           import CIMS_AUTH_HANDLER_LIST
     # 가입자/PTT그룹 CRUD — admin.handle_users 는 /users/me 를 users.handle_users 로 위임하는
     # superset 이라, /me(인증) + 가입자 admin(관리) 를 한 핸들러로 커버. (OAM=콘솔 단일 게이트웨이)
-    from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
-    from handlers.org            import CIMS_ORG_HANDLER_LIST
+    # admin(가입자/계정 CRUD)·org 는 csc(서비스 모듈) 측 핸들러 — 부트스트랩
+    # standalone OAM 패키지에는 서비스 모듈이 없으므로 선택 로드. 서비스 설치
+    # (3단계 이후, csc 모듈 배포) 후 OAM 재기동 시 자동 활성.
+    try:
+        from handlers.admin      import CIMS_ADMIN_HANDLER_LIST
+        from handlers.org        import CIMS_ORG_HANDLER_LIST
+    except Exception as _e:
+        print(f'[bootstrap] subscriber/org handlers unavailable (csc 미설치): {_e}', flush=True)
+        CIMS_ADMIN_HANDLER_LIST, CIMS_ORG_HANDLER_LIST = [], []
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
     from handlers.stats          import CIMS_STATS_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
@@ -284,11 +294,17 @@ if __name__ == '__main__':
         except Exception as _e:
             logger.log_error(f"ConfigCache init failed: {_e}")
 
-        # SSL certificates — csc/cert 공유 (Phase 4 호스트 분리 시 자체 cert 발급)
-        _cert_dir = os.path.join(_CSC_SRC, '..', 'cert')
-        _cert_dir = os.path.normpath(_cert_dir)
-        ssl_keyfile  = os.path.join(_cert_dir, 'server.key')  if os.path.exists(os.path.join(_cert_dir, 'server.key'))  else None
-        ssl_certfile = os.path.join(_cert_dir, 'server.crt') if os.path.exists(os.path.join(_cert_dir, 'server.crt')) else None
+        # SSL certificates — ① OAM 자체 cert(<oam>/cert, 부트스트랩 인스톨러가 생성)
+        #                    ② csc/cert 공유(개발/동거 환경 fallback)
+        ssl_keyfile = ssl_certfile = None
+        _cert_cands = [os.path.join(_COMPONENT_ROOT, 'cert')]
+        if _CSC_SRC:
+            _cert_cands.append(os.path.normpath(os.path.join(_CSC_SRC, '..', 'cert')))
+        for _cert_dir in _cert_cands:
+            if os.path.exists(os.path.join(_cert_dir, 'server.key')) and                os.path.exists(os.path.join(_cert_dir, 'server.crt')):
+                ssl_keyfile  = os.path.join(_cert_dir, 'server.key')
+                ssl_certfile = os.path.join(_cert_dir, 'server.crt')
+                break
         if ssl_keyfile and ssl_certfile:
             logger.log_info(f"SSL Enabled. Key: {ssl_keyfile}, Cert: {ssl_certfile}")
         else:
@@ -297,6 +313,30 @@ if __name__ == '__main__':
         # ── OAM Admin server (4419) ──────────────────────────────────────
         admin_conf = config.get('Server', {'Ip': '0.0.0.0', 'Port': 4419})
         cims_kwargs = {'config': config}
+
+        # ── 콘솔 정적 서빙 (상용/부트스트랩: vite dev 없이 OAM 단일 HTTPS 오리진) ──
+        from handlers.console_static import (resolve_console_static_dir,
+                                             CIMS_CONSOLE_STATIC_HANDLER_LIST)
+        _console_dir = resolve_console_static_dir(config, _COMPONENT_ROOT)
+        config['_ConsoleStaticDir'] = _console_dir
+        if _console_dir:
+            logger.log_info(f'[console-static] serving console SPA from {_console_dir}')
+        else:
+            logger.log_info('[console-static] console dist 미발견 — 정적 서빙 비활성 (dev 환경은 vite 사용)')
+
+        # ── 시드 패키지 자동 등록 (부트스트랩 인스톨러가 떨군 oam/console/agent/csc
+        #    tarball 을 file_store 에 멱등 등록 → /install-agent.sh, /agent-bundle.tar.gz
+        #    및 콘솔 패키지 목록이 첫 부팅부터 동작) ──
+        try:
+            from handlers.agents import seed_packages_from_dir
+            _seed_dir = (config.get('Packages') or {}).get('SeedDir') or 'seed_packages'
+            if not os.path.isabs(_seed_dir):
+                _seed_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, _seed_dir))
+            _n = seed_packages_from_dir(config, _seed_dir)
+            if _n:
+                logger.log_info(f'[pkg-seed] registered {_n} package(s) from {_seed_dir}')
+        except Exception as _e:
+            logger.log_error(f'[pkg-seed] seed failed: {_e}')
 
         # Service Descriptor 레지스트리 — startup config 캐시 + store 비면 CIMS seed 주입.
         # ha_groups/build/service_control 이 descriptor 구동(하드코딩 fallback 보존).
@@ -341,6 +381,11 @@ if __name__ == '__main__':
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_HA_GROUPS_HANDLER_LIST
         ])
+        if _console_dir:
+            admin_server.add_dynamic_rules([
+                (path, handler, cims_kwargs)
+                for path, handler, _ in CIMS_CONSOLE_STATIC_HANDLER_LIST
+            ])
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in CIMS_ALERTS_HANDLER_LIST

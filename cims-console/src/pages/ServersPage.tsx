@@ -1449,7 +1449,7 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
                   onClick={() => onSelectMember(m.agent_id)}>
                 <td><b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b></td>
                 <td>
-                  <span style={{ color: agentStatusColor(ag?.status || 'offline'), fontSize: 12 }}>
+                  <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
                     ● {ag?.status || '—'}
                   </span>
                 </td>

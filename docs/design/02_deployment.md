@@ -60,6 +60,36 @@ CIMS 는 여러 물리 서버에 모듈을 개별 배포하고 **Console 에서 
 > - 모듈 루트가 분리되므로 `jsonlDir = <버전 디렉토리>/config` 도 모듈·버전별로 격리 — 구 공유 루트(`/opt/cims-agent` 직접 지정) 시절의 listener 포트 바인드 충돌·collection 공유 문제가 구조적으로 사라진다.
 > - 경로 마이그레이션 후 옛 좀비는 `lifecycle.sh` `kill_deleted_inode_orphans <name>`(start 변종이 호출, deleted-inode 동일 이름만 kill)가 정리한다.
 
+## 2.1 상용(Private) 부트스트랩 — base 인스톨러 (2026-06-11)
+
+상용 반입 절차의 1단계(서비스 모듈과 무관한 base 운영평면 설치)는 빌드 산출물
+**`cims-bootstrap-<oam버전>.tar.gz`** (`./cims.sh pkg` 끝에 자동 조립, 단독은
+`./cims.sh installer`) 로 수행한다:
+
+```
+cims-bootstrap/
+├── install.sh            # sudo ./install.sh [--prefix /opt/cims-agent] [--port 4419]
+│                         #   [--admin-pass PW] [--no-systemd] [--no-start]
+├── packages/             # oam / console / agent tarball 3종 (서비스 모듈 미포함)
+└── README.md
+```
+
+- **standalone OAM**: oam 패키지에 csc/src 의 서비스-중립 공유 라이브러리
+  (httpsrv/util/services 일부)를 동봉 — csc(서비스 종속 모듈) 없이 단독 기동.
+  가입자/조직 핸들러(admin/org, csc 측)는 선택 로드 (서비스 설치 후 자동 활성).
+- **HTTPS 단일 오리진**: OAM 이 콘솔 SPA 정적 파일을 직접 서빙(`Console.StaticDir`,
+  SPA fallback) — 콘솔+API 가 :4419 HTTPS 하나로 동작 (dev vite/npx serve 불요,
+  air-gapped 에서 node 불요). self-signed cert·JwtSecret 은 install.sh 가 생성
+  (재설치 시 보존, 상용 인증서는 `<oam>/cert` 교체).
+- **시드 패키지 자동 등록**: 동봉 3종 tarball 을 `seed_packages/` 에 배치 → OAM
+  첫 부팅 시 패키지 저장소에 멱등 등록 (`Packages.SeedDir`) — 콘솔 패키지
+  목록과 `/install-agent.sh`·`/agent-bundle.tar.gz` 가 즉시 동작해 2단계(각 서버
+  agent 설치)로 바로 진행 가능. 1단계 구성요소(oam/console/agent)도 패키지로
+  보이므로 3~4단계에서 업데이트 가능.
+- 설치 레이아웃은 본 문서 §2 의 버전 단위 설치와 동일(`/opt/cims-agent/{oam,console}/<ver>/`,
+  runtime store 는 `/opt/cims-agent/oam/runtime` 버전 무관) — 이후 agent 배포
+  체계가 자연 인수.
+
 ## 3. 제어 평면 (Control Plane)
 
 ### 3.1 장기/배치 작업 — CSC → Agent (Pull 모델)

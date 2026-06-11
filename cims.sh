@@ -1230,6 +1230,52 @@ _resolve_version() {
     _pkg_bump_patch "$cur"
 }
 
+cmd_installer() {
+    # 상용 부트스트랩 인스톨러 조립 — base 운영평면(oam + console + agent)만 동봉.
+    # 서비스 종속 모듈(csp/cmp/csc/...)은 제외 — 3단계(콘솔 패키지 등록)에서 별도 반입.
+    # 산출: build/dist/packages/cims-bootstrap-<oam버전>.tar.gz
+    local out_dir="$DIST_DIR/packages"
+    local _latest
+    _latest() { ls -1 "$out_dir"/$1-*.tar.gz 2>/dev/null | sort -V | tail -1; }
+    local oam_tar con_tar agt_tar
+    oam_tar=$(_latest oam); con_tar=$(_latest console); agt_tar=$(_latest agent)
+    local miss=()
+    [[ -z "$oam_tar" ]] && miss+=(oam)
+    [[ -z "$con_tar" ]] && miss+=(console)
+    [[ -z "$agt_tar" ]] && miss+=(agent)
+    if [[ ${#miss[@]} -gt 0 ]]; then
+        err "installer 조립 불가 — 패키지 없음: ${miss[*]} (./cims.sh pkg ${miss[*]} 먼저)"
+        return 1
+    fi
+    local oam_ver; oam_ver=$(basename "$oam_tar" .tar.gz | sed 's/^oam-//')
+    local stage="$DIST_DIR/.installer.$$"
+    rm -rf "$stage"
+    mkdir -p "$stage/cims-bootstrap/packages"
+    cp -f "$SCRIPT_DIR/deployment/bootstrap/install.sh" "$stage/cims-bootstrap/install.sh"
+    chmod +x "$stage/cims-bootstrap/install.sh"
+    cp -f "$oam_tar" "$con_tar" "$agt_tar" "$stage/cims-bootstrap/packages/"
+    cat > "$stage/cims-bootstrap/README.md" <<EOR
+# CIMS 부트스트랩 인스톨러 (base 운영평면)
+
+상용(Private) 망 1단계 설치 — 서비스 모듈 없이 OAM + Console + Agent 에셋만.
+
+    sudo ./install.sh                # /opt/cims-agent, HTTPS :4419
+    sudo ./install.sh --admin-pass '<비밀번호>' --port 4419
+
+설치 후: https://<서버IP>:4419/ 접속 (admin) →
+  2) 시스템/서버 구성 (각 서버 install-command 로 agent 설치)
+  3) 패키지 등록 (서비스 모듈 + 본 인스톨러 구성요소 업데이트 패키지)
+  4) 패키지 설치  5) 패키지 설정
+
+동봉: $(basename "$oam_tar") / $(basename "$con_tar") / $(basename "$agt_tar")
+EOR
+    local out="$out_dir/cims-bootstrap-${oam_ver}.tar.gz"
+    ( cd "$stage" && tar czf "$out" cims-bootstrap )
+    rm -rf "$stage"
+    local size; size=$(stat -c%s "$out" 2>/dev/null || echo 0)
+    ok "부트스트랩 인스톨러: $(basename "$out") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo ${size}B))"
+}
+
 cmd_pkg() {
     # 3단계 중 3단계 (패키지화): configure 까지 끝난 build/dist 를 모듈별 tarball 로 묶는다.
     # 출력: build/dist/packages/<name>-<ver>.tar.gz
@@ -1396,6 +1442,34 @@ cmd_pkg() {
             pkg_root="$stage"
         elif [[ ! -d "$DIST_DIR/$src_sub" ]]; then
             warn "skip: $DIST_DIR/$src_sub 없음 (target=$t src_sub=$src_sub)"; continue
+        fi
+
+        # ── oam: standalone(부트스트랩) 실행을 위해 csc/src 의 서비스-중립 공유
+        #    라이브러리(httpsrv/util/services 일부)를 staging 에 동봉.
+        #    서비스 종속 모듈(mcptt/idms 등)은 제외 — 상용 1단계(베이스 설치)에
+        #    서비스 코드가 배포되지 않아야 함. dev 환경은 기존대로 csc/src mount.
+        if [[ "$t" == "oam" ]]; then
+            stage="$DIST_DIR/.pkgstage.$$.${t}"
+            rm -rf "$stage"
+            mkdir -p "$stage"
+            cp -a "$DIST_DIR/oam" "$stage/oam"
+            local _shsrc="$DIST_DIR/csc/src"
+            [[ -d "$_shsrc" ]] || _shsrc="$SCRIPT_DIR/csc/src"
+            if [[ -d "$_shsrc" ]]; then
+                cp -a "$_shsrc/httpsrv" "$stage/oam/src/httpsrv"
+                cp -a "$_shsrc/util"    "$stage/oam/src/util"
+                mkdir -p "$stage/oam/src/services"
+                local _svc
+                for _svc in __init__.py admin_auth.py file_store.py ha_lookup.py                             sync_txn.py drift_sweeper.py service_registry.py                             alert_log.py logger.py flow_logger.py config_cache.py                             sync_dispatch.py; do
+                    [[ -f "$_shsrc/services/$_svc" ]] && cp -f "$_shsrc/services/$_svc" "$stage/oam/src/services/"
+                done
+                [[ -d "$_shsrc/services/service_descriptors_seed" ]] &&                     cp -a "$_shsrc/services/service_descriptors_seed" "$stage/oam/src/services/"
+                # __pycache__ 제거
+                find "$stage/oam/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
+            else
+                warn "oam: csc/src 공유 라이브러리 미발견 — standalone 실행 불가 패키지"
+            fi
+            pkg_root="$stage"
         fi
 
         # build_date = 컴포넌트 dist 디렉토리 안에서 가장 최근 파일의 mtime (base dist 기준 — staging 은 cp 로 mtime 갱신될 수 있음).
@@ -1598,6 +1672,12 @@ PYEOF
     ls -lh "$out_dir"/*.tar.gz 2>/dev/null | awk '{printf "  %s  %s\n", $5, $9}'
     echo ""
     info "Console 에서 업로드: 배포 관리 → 패키지 → ＋ 업로드 (파일만 선택하면 meta 자동 인식)"
+
+    # 상용 부트스트랩 인스톨러 자동 조립 — base 3종(oam/console/agent) tarball 이
+    # 모두 준비된 경우에만 (개별 모듈 pkg 호출 시에는 보통 미충족 → skip).
+    if ls "$out_dir"/oam-*.tar.gz "$out_dir"/console-*.tar.gz "$out_dir"/agent-*.tar.gz >/dev/null 2>&1; then
+        cmd_installer || warn "부트스트랩 인스톨러 조립 실패 (개별 패키지는 정상)"
+    fi
 }
 
 # ── TB-CSC / TB-Console 운영 (개발 워크플로용 4419/3000 상시 동작) ──
@@ -1821,6 +1901,7 @@ case "${1:-}" in
     preflight) cmd_preflight ;;
     verify)    shift; cmd_verify "$@" ;;
     pkg)       shift; cmd_pkg "$@" ;;
+    installer) shift; cmd_installer "$@" ;;
     sync)      shift; cmd_sync "$@" ;;
     tb)        shift; cmd_tb "$@" ;;
     # 운영 명령 (start/stop/restart/status/log/ha) 은 agent/bin/cims-{svc,ha} 로 이전됨 (Phase 1.B+).

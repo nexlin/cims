@@ -31,7 +31,13 @@ from typing import Optional
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
 
-from services.mcptt import audit_config_change
+# mcptt(서비스 종속 모듈) 의존을 선택화 — 부트스트랩(standalone) OAM 패키지에는
+# 서비스 모듈이 없으므로 감사 함수만 fallback no-op 으로 대체.
+try:
+    from services.mcptt import audit_config_change
+except Exception:  # pragma: no cover — bootstrap (csc 미동봉)
+    def audit_config_change(*_a, **_k):
+        return None
 from services import service_registry
 
 logger = Logger()
