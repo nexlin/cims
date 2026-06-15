@@ -128,15 +128,21 @@ CIMS 설정은 두 종류이며 적용 경로가 다르다.
 
 ## 5. 단계 (Phase)
 
-| P | 내용 | 위험 | 비고 |
+| P | 내용 | 상태 | 커밋 |
 |---|---|---|---|
-| P1 | 시크릿 격리 `runtime/_secrets/` (.jwt_secret) 0700, 동기화/백업 제외 | 낮음 | 보안 즉효 |
-| P2 | OAM 자기 데이터 카테고리화 `control/`·`console/` (읽기 fallback) | 낮음 | 정리 |
-| P3 | 모듈 prefix `modules/<m>/runtime/collections/` + 레지스트리 유일성 검증 | 중 | **충돌 원천 차단 — 타 모듈 컬렉션 추가 전 선제** |
-| P4 | 라이프사이클 결합(배포 시 생성·읽기 무생성·uninstall prune) | 중 | media02 류 잔재 제거 |
-| P5 | 버전 귀속(schema_version 메타 + 업그레이드 마이그레이션 훅) | 높음 | 모듈 버전 간 schema 변경 대응 |
+| P1 | 시크릿 격리 `runtime/_secrets/` (.jwt_secret) 0700 | ✅ 완료 | `98fbe620` (+라이브 .49 적용) |
+| P2 | OAM 자기 데이터 카테고리화 `control/`·`console/` | ✅ 완료 | `5861b0c6` (라이브 dev 이행, 카운트 보존) |
+| P3 | 모듈 prefix `modules/<m>/runtime/collections/` + 레지스트리 유일성 | ✅ 완료 | `a05d6761` |
+| P4 | 라이프사이클 결합(읽기 무생성·uninstall prune) | ✅ 완료 | `ce3168a2` |
+| P5 | 버전/schema 정합(schema_version 메타 + 업그레이드 마이그레이션 훅) | ✅ 완료 | `1210d0a2` |
 
-**권장 순서**: P1 → P3 → P4 → P2 → P5. (지금이 컬렉션 보유 모듈 = csp 뿐 → 이행 비용 최소 시점.)
+**구현 순서**: P1 → P3 → P4 → P2 → P5 (전부 dev 라이브 검증). 핵심 헬퍼:
+`file_store.domain_dir`(P2 카테고리) · `ha_lookup.collection_dir`/`migrate_flat_collections`/
+`prune_module_collections`(P3·P4) · `services/collection_schema.py`(P5).
+
+> ⚠️ 프로덕션 정합: 컬렉션 경로(P3/P4)·schema(P5)는 csc·OAM 공유 코드라 **deployed csc/oam
+> 패키지 재배포로 정합** 필요(현재 컬렉션 데이터 0건이라 기능 영향 없음). dev 활성 plane
+> (repo OAM)은 이미 P1~P5 라이브.
 
 ## 6. 미결 / 검토 필요
 
