@@ -1513,7 +1513,7 @@ cmd_pkg() {
                 cp -a "$_shsrc/util"    "$stage/oam/src/util"
                 mkdir -p "$stage/oam/src/services"
                 local _svc
-                for _svc in __init__.py admin_auth.py file_store.py ha_lookup.py                             sync_txn.py drift_sweeper.py service_registry.py                             alert_log.py logger.py flow_logger.py config_cache.py                             sync_dispatch.py; do
+                for _svc in __init__.py admin_auth.py file_store.py ha_lookup.py                             sync_txn.py drift_sweeper.py service_registry.py                             alert_log.py logger.py flow_logger.py config_cache.py                             sync_dispatch.py collection_schema.py; do
                     [[ -f "$_shsrc/services/$_svc" ]] && cp -f "$_shsrc/services/$_svc" "$stage/oam/src/services/"
                 done
                 [[ -d "$_shsrc/services/service_descriptors_seed" ]] &&                     cp -a "$_shsrc/services/service_descriptors_seed" "$stage/oam/src/services/"
