@@ -171,11 +171,19 @@ else
 fi
 
 # ── oam.json 구성 ────────────────────────────────────────────
-JWT_SECRET_FILE="$RUNTIME_DIR/.jwt_secret"
+# 시크릿 격리 (runtime store v2 P1) — 시크릿은 runtime/_secrets/ 0700 에 모은다.
+# (데이터 도메인과 분리 → 백업/동기화 범위에서 제외, 권한 최소화)
+SECRETS_DIR="$RUNTIME_DIR/_secrets"
+mkdir -p "$SECRETS_DIR"; chmod 700 "$SECRETS_DIR"
+JWT_SECRET_FILE="$SECRETS_DIR/jwt_secret"
+# 마이그레이션 — 구 위치(runtime/.jwt_secret)에 있으면 보존 이동 (기존 토큰 유효 유지).
+if [[ ! -f "$JWT_SECRET_FILE" && -f "$RUNTIME_DIR/.jwt_secret" ]]; then
+    mv "$RUNTIME_DIR/.jwt_secret" "$JWT_SECRET_FILE"
+fi
 if [[ ! -f "$JWT_SECRET_FILE" ]]; then
     openssl rand -base64 32 > "$JWT_SECRET_FILE"
-    chmod 600 "$JWT_SECRET_FILE"
 fi
+chmod 600 "$JWT_SECRET_FILE"
 PY=python3 OAM_ROOT="$OAM_ROOT" RUNTIME_DIR="$RUNTIME_DIR" PORT="$PORT" \
 JWT_SECRET="$(cat "$JWT_SECRET_FILE")" \
 ADMIN_PASS="$ADMIN_PASS" python3 - <<'PYEOF'
