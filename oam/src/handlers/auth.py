@@ -21,6 +21,7 @@ from pathlib import PurePath
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services import admin_auth as _shared_auth
+from . import console_accounts as _ca
 
 # ── 상수 ──────────────────────────────────────────────────────
 _SECRET    = 'cims_jwt_secret_change_me'
@@ -46,16 +47,22 @@ def _hash(pw: str) -> str:
 
 
 def _make_token(user: dict) -> str:
+    # 콘솔 계정(내장/file_store)은 DB 숫자 id 가 없으므로 sub=login_id 로 발급.
+    uid = user.get('id')
     payload = {
-        'sub':      str(user['id']),
+        'sub':      str(uid) if uid is not None else user['login_id'],
         'login_id': user['login_id'],
         'role':     user['role'],
         'exp':      datetime.datetime.utcnow() + datetime.timedelta(seconds=_TTL_SEC),
     }
-    if user.get('builtin'):
-        # /users/me 가 DB 조회 없이 프로파일 합성할 수 있도록 표식 + 이름 동봉
-        payload['builtin'] = True
+    if user.get('builtin') or user.get('file_acct'):
+        # /users/me 가 DB 조회 없이 프로파일 합성할 수 있도록 표식 + 이름 동봉.
+        # builtin = oam.json 내장(비번 변경 불가), file_acct = console_accounts 도메인.
         payload['name'] = user.get('name') or user['login_id']
+        if user.get('builtin'):
+            payload['builtin'] = True
+        if user.get('file_acct'):
+            payload['file_acct'] = True
     return jwt.encode(payload, _SECRET, algorithm='HS256')
 
 
@@ -226,8 +233,8 @@ async def _login(body, config):
     if not login_id or not password:
         return HandlerResult(status=400, body={'error': '아이디와 비밀번호를 입력하세요'})
 
-    # 패키지 내장 계정 우선 — DB 미구축(부트스트랩) 상태에서도 동작해야 하므로
-    # DB 접근 전에 판정. 내장 login_id 와 일치하면 DB fallthrough 없이 종결.
+    # (1) 패키지 내장 계정 우선 — DB/파일 미구축(부트스트랩) 상태에서도 동작.
+    #     내장 login_id 와 일치하면 종결.
     acct = _builtin_accounts(config).get(login_id)
     if acct is not None:
         if _hash(password) != acct['password_sha256']:
@@ -236,61 +243,23 @@ async def _login(body, config):
         token = _make_token(dict(user, builtin=True))
         return HandlerResult(status=200, body={'token': token, 'user': dict(user, builtin=True)})
 
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, login_id, role FROM users "
-                "WHERE login_id=%s AND password=%s",
-                (login_id, _hash(password))
-            )
-            user = cur.fetchone()
-            if user is None:
-                return HandlerResult(status=401, body={'error': '아이디 또는 비밀번호가 잘못되었습니다'})
-
-    # RBAC: telephony 전용 사용자(role=user)는 관리 콘솔 로그인 불가.
-    if not _shared_auth.can_login(user.get('role')):
+    # (2) console_accounts file_store 도메인 — 콘솔 계정의 SoT.
+    #     (구 DB users 로그인은 제거 — users 는 가입자 person 전용으로 환원.)
+    acct = _ca.verify(config, login_id, password)
+    if acct is None:
+        return HandlerResult(status=401, body={'error': '아이디 또는 비밀번호가 잘못되었습니다'})
+    if not _shared_auth.can_login(acct.get('role')):
         return HandlerResult(status=403, body={'error': '관리 콘솔 접근 권한이 없습니다'})
-
-    # v3: 로그인 응답은 토큰 + 최소 user 정보만.
-    #   가입자 정보는 /users/me/subscriptions 로 분리 (Phone UE 가 별도 호출).
-    token = _make_token(user)
-    return HandlerResult(status=200, body={'token': token, 'user': user})
+    user = {'login_id': acct['login_id'], 'name': acct.get('name'), 'role': acct.get('role')}
+    token = _make_token(dict(user, file_acct=True))
+    return HandlerResult(status=200, body={'token': token, 'user': dict(user, file_acct=True)})
 
 
 async def _register(body, config):
-    if not isinstance(body, dict):
-        return HandlerResult(status=400, body={'error': 'JSON 형식이 아닙니다'})
-    name     = (body.get('name')     or '').strip()
-    login_id = (body.get('login_id') or '').strip()
-    password = (body.get('password') or '').strip()
-
-    if not name:
-        return HandlerResult(status=400, body={'error': '이름을 입력하세요'})
-    if not login_id:
-        return HandlerResult(status=400, body={'error': '아이디를 입력하세요'})
-    if not password or len(password) < 4:
-        return HandlerResult(status=400, body={'error': '비밀번호는 4자 이상이어야 합니다'})
-
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM users WHERE login_id=%s", (login_id,))
-            if cur.fetchone():
-                return HandlerResult(status=409, body={'error': '이미 사용 중인 아이디입니다'})
-            cur.execute(
-                "INSERT INTO users (name, login_id, password, role, org_id, create_time, update_time) "
-                "VALUES (%s, %s, %s, 'user', '', NOW(), NOW())",
-                (name, login_id, _hash(password))
-            )
-            uid = cur.lastrowid
-            cur.execute(
-                "SELECT id, name, login_id, role FROM users WHERE id=%s", (uid,)
-            )
-            user = cur.fetchone()
-
-    token = _make_token(user)
-    user.update({'call_subscriptions': [], 'ptt_subscriptions': []})
-    return HandlerResult(status=201, body={'token': token, 'user': user})
-
+    # 자가 회원가입은 폐지 (2026-06-15). 콘솔 계정은 admin 이 console-accounts API
+    # 로 생성하고, 가입자(person)는 프로비저닝(csc admin) 으로 등록한다.
+    return HandlerResult(status=410, body={
+        'error': '자가 회원가입은 지원하지 않습니다 — 콘솔 계정은 관리자에게 문의하세요'})
 
 
 async def _change_password(handler_args, config):
@@ -313,20 +282,13 @@ async def _change_password(handler_args, config):
             'error': '내장 계정 비밀번호는 콘솔에서 변경할 수 없습니다 — '
                      'oam.json CimsAuth.BuiltinAccounts 의 password_sha256 으로 관리하세요'})
 
-    uid = int(payload['sub'])
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM users WHERE id=%s AND password=%s",
-                (uid, _hash(old_pw))
-            )
-            if cur.fetchone() is None:
-                return HandlerResult(status=401, body={'error': '현재 비밀번호가 올바르지 않습니다'})
-            cur.execute(
-                "UPDATE users SET password=%s, update_time=NOW() WHERE id=%s",
-                (_hash(new_pw), uid)
-            )
-
+    # console_accounts file_store 도메인 계정의 self 비밀번호 변경.
+    login_id = payload.get('login_id') or ''
+    res = _ca.change_password(config, login_id, old_pw, new_pw)
+    if res == 'notfound':
+        return HandlerResult(status=404, body={'error': '계정을 찾을 수 없습니다'})
+    if res == 'badold':
+        return HandlerResult(status=401, body={'error': '현재 비밀번호가 올바르지 않습니다'})
     return HandlerResult(status=200, body={'ok': True})
 
 

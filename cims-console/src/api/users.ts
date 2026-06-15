@@ -1,5 +1,4 @@
 import { api } from './client'
-import type { Role } from './auth'
 
 export interface Subscription {
   id: string          // MSISDN of this line
@@ -14,12 +13,12 @@ export interface Subscription {
   logout_time?: string | null
 }
 
+// 가입자(person) — 콘솔 로그인 계정(login_id/password/role)은 별도(console_accounts).
 export interface UserSummary {
   id: number          // person ID (auto-increment)
   name: string
-  login_id: string
-  role?: Role         // RBAC 관리 권한 역할 (기본 'user')
   org_id: string
+  email?: string
   details?: string | null
   reject_id: string[]
   call_subscriptions: Subscription[]
@@ -32,8 +31,7 @@ export interface UserSummary {
 export type UserDetail = UserSummary
 
 export type UserInput = {
-  name: string; login_id?: string; org_id: string; details?: string; reject_id?: string[]
-  role?: Role; password?: string
+  name: string; org_id: string; email?: string; details?: string; reject_id?: string[]
 }
 
 const enc = (s: string) => encodeURIComponent(s)

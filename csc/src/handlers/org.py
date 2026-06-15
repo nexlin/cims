@@ -210,7 +210,7 @@ async def _list_org_users(org_id, config):
                 return HandlerResult(status=404, body={'error': 'Organization not found'})
             code = row['code']
             cur.execute(
-                "SELECT id, name, login_id, org_id FROM users WHERE org_id=%s ORDER BY name",
+                "SELECT id, name, org_id FROM users WHERE org_id=%s ORDER BY name",
                 (code,)
             )
             users = cur.fetchall()

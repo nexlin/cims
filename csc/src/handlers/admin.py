@@ -156,7 +156,7 @@ async def _list_users(config):
             has_email = _has_email_column(cur)
             email_col = ", u.email" if has_email else ""
             cur.execute(
-                f"SELECT u.id, u.name, u.login_id, u.role{email_col}, u.org_id, u.details, "
+                f"SELECT u.id, u.name{email_col}, u.org_id, u.details, "
                 "u.create_time, u.update_time "
                 "FROM users u "
                 "ORDER BY u.id"
@@ -215,7 +215,7 @@ async def _get_user(person_id: str, config):
             has_email = _has_email_column(cur)
             email_col = ", email" if has_email else ""
             cur.execute(
-                f"SELECT id, name, login_id, role{email_col}, org_id, details, create_time, update_time "
+                f"SELECT id, name{email_col}, org_id, details, create_time, update_time "
                 "FROM users WHERE id=%s",
                 (person_id,)
             )
@@ -270,44 +270,27 @@ async def _create_user(body, config, payload=None):
     if not name:
         return HandlerResult(status=400, body={'error': 'name is required'})
 
-    login_id   = body.get('login_id', '').strip()
-    password   = body.get('password', '')
+    # users = 가입자(person) 전용. 콘솔 로그인 계정(login_id/password/role)은
+    # OAM console_accounts(file_store) 로 분리됨 → 여기선 받지/저장하지 않는다.
     email      = body.get('email', '')
     org_id     = body.get('org_id', '')
     details    = body.get('details') or None
     reject_ids = body.get('reject_id', [])
-
-    # 역할 — 기본 'user'. 비-user(관리권한) 부여는 admin 만 가능 (계획서 §3).
-    role = (body.get('role') or 'user').strip()
-    if role not in admin_auth.ROLES:
-        return HandlerResult(status=400, body={'error': f'invalid role: {role}'})
-    if role != 'user' and payload is not None and payload.get('role') != 'admin':
-        return HandlerResult(status=403, body={'error': '역할 지정은 관리자만 가능합니다'})
-
-    # login_id 미지정 시 name 기반 자동 생성
-    if not login_id:
-        login_id = name.replace(' ', '_').lower()
-
-    # password → SHA-256 해시
-    import hashlib
-    pw_hash = hashlib.sha256(password.encode()).hexdigest() if password else ''
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             has_email = _has_email_column(cur)
             if has_email:
                 cur.execute(
-                    "INSERT INTO users "
-                    "(name, login_id, password, role, email, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())",
-                    (name, login_id, pw_hash, role, email, org_id, details)
+                    "INSERT INTO users (name, email, org_id, details, create_time, update_time) "
+                    "VALUES (%s, %s, %s, %s, NOW(), NOW())",
+                    (name, email, org_id, details)
                 )
             else:
                 cur.execute(
-                    "INSERT INTO users "
-                    "(name, login_id, password, role, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())",
-                    (name, login_id, pw_hash, role, org_id, details)
+                    "INSERT INTO users (name, org_id, details, create_time, update_time) "
+                    "VALUES (%s, %s, %s, NOW(), NOW())",
+                    (name, org_id, details)
                 )
             person_id = cur.lastrowid
 
@@ -331,15 +314,8 @@ async def _update_user(person_id: str, body, config, payload=None):
             fields.append(f'{col}=%s')
             values.append(body[col])
 
-    # 역할 변경은 admin 만 (계획서 §3 계정/권한 관리).
-    if 'role' in body:
-        new_role = (body.get('role') or '').strip()
-        if new_role not in admin_auth.ROLES:
-            return HandlerResult(status=400, body={'error': f'invalid role: {new_role}'})
-        if payload is not None and payload.get('role') != 'admin':
-            return HandlerResult(status=403, body={'error': '역할 변경은 관리자만 가능합니다'})
-        fields.append('role=%s')
-        values.append(new_role)
+    # login_id/password/role 은 users(person)에 더 이상 존재하지 않음 — 무시.
+    # (콘솔 계정은 OAM console_accounts API 로 관리.)
 
     if fields:
         fields.append('update_time=NOW()')
@@ -652,7 +628,7 @@ def _owner_map(cur, auth_ids):
         return {}
     fmt = ','.join(['%s'] * len(ids))
     cur.execute(
-        f"SELECT u.id, u.name, u.login_id, "
+        f"SELECT u.id, u.name, "
         f"  (SELECT id FROM ptt_subscriptions WHERE user_id=u.id ORDER BY id LIMIT 1) AS ptt_id "
         f"FROM users u WHERE u.id IN ({fmt})",
         tuple(ids)
@@ -662,7 +638,7 @@ def _owner_map(cur, auth_ids):
         ptt = r.get('ptt_id')
         out[r['id']] = {
             'authorized_user': (f"tel:{ptt}" if ptt else None),
-            'authorized_user_name': r.get('name') or r.get('login_id'),
+            'authorized_user_name': r.get('name'),
         }
     return out
 
@@ -1068,15 +1044,14 @@ async def _process_import(handler_args: HandlerArgs, config):
                     if name in name_to_id:
                         continue  # 이미 존재, 스킵
 
-                    login_id = str(rd.get('login_id', '') or '').strip()
                     org_id = str(rd.get('org_code', '') or '').strip()
                     details = str(rd.get('details', '') or '').strip()
                     reject_ids = str(rd.get('reject_ids', '') or '').strip()
 
                     try:
                         cur.execute(
-                            "INSERT INTO users (name, login_id, org_id, details) VALUES (%s,%s,%s,%s)",
-                            (name, login_id, org_id, details)
+                            "INSERT INTO users (name, org_id, details) VALUES (%s,%s,%s)",
+                            (name, org_id, details)
                         )
                         pid = cur.lastrowid
                         name_to_id[name] = pid

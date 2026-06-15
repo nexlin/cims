@@ -8,9 +8,7 @@ import { DataTable, type Column } from '../../../components/DataTable'
 import SubscriberPicker, { buildPickIndex, type PickItem } from '../../../components/SubscriberPicker'
 import { useToast } from '../../../components/Toast'
 import { useAuth } from '../../../contexts/AuthContext'
-import {
-  canWriteConfig, canAssignRole, ROLE_LABELS, ASSIGNABLE_ROLES,
-} from '../../../utils/permissions'
+import { canWriteConfig } from '../../../utils/permissions'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
 //  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
@@ -77,7 +75,6 @@ export default function ProvisioningWorkbenchPage() {
   const { show } = useToast()
   const { user: me } = useAuth()
   const canWrite = canWriteConfig(me)
-  const canRole = canAssignRole(me)
 
   const [tab, setTab] = useState<Tab>('users')
   const [orgScope, setOrgScope] = useState<string | null>(null)
@@ -135,7 +132,7 @@ export default function ProvisioningWorkbenchPage() {
   const userRows = useMemo(() => {
     const q = search.trim().toLowerCase()
     return users.filter(u => inScope(u.org_id || '') &&
-      (!q || u.name.toLowerCase().includes(q) || (u.login_id || '').toLowerCase().includes(q) || userHasNumber(u, q)))
+      (!q || u.name.toLowerCase().includes(q) || userHasNumber(u, q)))
   }, [users, inScope, search, userHasNumber])
 
   const buildNumberRows = useCallback((svc: 'call' | 'ptt'): NumberRow[] => {
@@ -173,8 +170,6 @@ export default function ProvisioningWorkbenchPage() {
   const userCols: Column<UserSummary>[] = [
     { key: 'exp', header: '', width: 26, render: u => <Caret open={exp?.key === u.id} /> },
     { key: 'name', header: '이름', sortable: true, width: 130, render: u => <span style={{ fontWeight: 500 }}>{u.name}</span> },
-    { key: 'login_id', header: '로그인ID', sortable: true, width: 150, render: u => <span className="ts">{u.login_id || '—'}</span> },
-    { key: 'role', header: '권한', width: 90, render: u => <span className="badge">{ROLE_LABELS[u.role || 'user']}</span> },
     { key: 'org', header: '조직', width: 220, sortValue: u => buildOrgPath(orgs, u.org_id), render: u => <span className="ts" title={buildOrgPath(orgs, u.org_id)}>{buildOrgPath(orgs, u.org_id)}</span> },
     { key: 'details', header: '설명', render: u => <span className="ts">{u.details || '—'}</span> },
     { key: 'nums', header: '번호', width: 220, render: u => {
@@ -228,7 +223,7 @@ export default function ProvisioningWorkbenchPage() {
   // 행 확장 렌더 (사용자 상세 = 기본정보 편집 + 번호 서브테이블) — 모드 전환 시 remount
   const renderDetail = () => exp && expUser
     ? <UserDetail key={`${expUser.id}:${exp.edit}`} user={expUser} catalog={catalog}
-        orgOpts={orgOpts} canRole={canRole} canWrite={canWrite} initialEdit={exp.edit}
+        orgOpts={orgOpts} canWrite={canWrite} initialEdit={exp.edit}
         highlight={exp.hi} onReload={load} />
     : null
 
@@ -278,7 +273,7 @@ export default function ProvisioningWorkbenchPage() {
         {tab === 'users' && addUserOpen && (
           <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', padding: '10px 16px' }}>
             <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 8 }}>새 사용자</div>
-            <UserBasicForm mode="add" orgOpts={orgOpts} canRole={canRole}
+            <UserBasicForm mode="add" orgOpts={orgOpts}
               defaultOrg={orgScope ? (orgScope.split('/').pop() || '') : ''}
               onSubmit={async (input) => { await usersApi.create(input); show('생성', 'ok'); setAddUserOpen(false); load() }}
               onCancel={() => setAddUserOpen(false)} />
@@ -339,41 +334,30 @@ function FieldRow({ children }: { children: React.ReactNode }) {
 }
 
 // ── 사용자 기본정보 폼 (추가 + 편집 공용) ──
-function UserBasicForm({ mode, initial, orgOpts, canRole, defaultOrg, onSubmit, onCancel }: {
+function UserBasicForm({ mode, initial, orgOpts, defaultOrg, onSubmit, onCancel }: {
   mode: 'add' | 'edit'
   initial?: UserSummary
   orgOpts: OrgOpt[]
-  canRole: boolean
   defaultOrg?: string
   onSubmit: (input: UserInput) => Promise<void> | void
   onCancel: () => void
 }) {
   const { show } = useToast()
+  // 가입자(person) 전용 — 콘솔 로그인 계정(login_id/password/role)은 '콘솔 계정' 메뉴에서 별도 관리.
   const [form, setForm] = useState<UserInput>(() => initial
-    ? { name: initial.name, login_id: initial.login_id, org_id: initial.org_id, details: initial.details || '', role: initial.role || 'user', password: '' }
-    : { name: '', login_id: '', org_id: defaultOrg || '', details: '', role: 'user', password: '' })
+    ? { name: initial.name, org_id: initial.org_id, details: initial.details || '' }
+    : { name: '', org_id: defaultOrg || '', details: '' })
   const [busy, setBusy] = useState(false)
 
   async function submit() {
     if (!form.name) { show('이름 필수', 'err'); return }
-    const body: UserInput = { ...form }
-    if (mode === 'edit' && !body.password) delete body.password   // 빈 암호 = 유지
     setBusy(true)
-    try { await onSubmit(body) } catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
+    try { await onSubmit({ ...form }) } catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
   }
 
   return (
     <FieldRow>
       <Field label="이름 *" w={150}><input className="form-input" autoFocus value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-      <Field label="로그인ID" w={150}><input className="form-input" placeholder="콘솔 로그인" value={form.login_id || ''} onChange={e => setForm({ ...form, login_id: e.target.value })} /></Field>
-      <Field label={mode === 'edit' ? '암호 (변경 시)' : '암호'} w={130}>
-        <input className="form-input" type="password" placeholder={mode === 'edit' ? '변경 시 입력' : '초기 암호'} value={form.password || ''} onChange={e => setForm({ ...form, password: e.target.value })} />
-      </Field>
-      {canRole && <Field label="권한" w={120}>
-        <select className="form-input" value={form.role || 'user'} onChange={e => setForm({ ...form, role: e.target.value as UserInput['role'] })}>
-          {ASSIGNABLE_ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-        </select>
-      </Field>}
       <Field label="조직" w={200}>
         <select className="form-input" value={form.org_id} onChange={e => setForm({ ...form, org_id: e.target.value })}>
           <option value="">없음</option>
@@ -392,8 +376,8 @@ function UserBasicForm({ mode, initial, orgOpts, canRole, defaultOrg, onSubmit, 
 // ════════════════════════════════════════════════════════════
 //  사용자 상세 (행 확장) — 기본정보(보기↔편집) + 번호 서브테이블
 // ════════════════════════════════════════════════════════════
-function UserDetail({ user, catalog, orgOpts, canRole, canWrite, initialEdit, highlight, onReload }: {
-  user: UserSummary; catalog: ServiceCat[]; orgOpts: OrgOpt[]; canRole: boolean; canWrite: boolean
+function UserDetail({ user, catalog, orgOpts, canWrite, initialEdit, highlight, onReload }: {
+  user: UserSummary; catalog: ServiceCat[]; orgOpts: OrgOpt[]; canWrite: boolean
   initialEdit: boolean; highlight?: string; onReload: () => void
 }) {
   const { show } = useToast()
@@ -408,14 +392,12 @@ function UserDetail({ user, catalog, orgOpts, canRole, canWrite, initialEdit, hi
     <div style={{ padding: '12px 16px' }}>
       {/* 기본정보 */}
       {editing ? (
-        <UserBasicForm mode="edit" initial={user} orgOpts={orgOpts} canRole={canRole}
+        <UserBasicForm mode="edit" initial={user} orgOpts={orgOpts}
           onSubmit={async (input) => { await usersApi.update(user.id, input); show('저장', 'ok'); setEditing(false); onReload() }}
           onCancel={() => setEditing(false)} />
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
           <span><b style={{ fontSize: 13 }}>{user.name}</b></span>
-          <span className="ts">로그인 {user.login_id || '—'}</span>
-          <span className="badge">{ROLE_LABELS[user.role || 'user']}</span>
           <span className="ts">조직 {orgPath}</span>
           {user.details && <span className="ts">{user.details}</span>}
           {canWrite && <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>기본정보 편집</button>}

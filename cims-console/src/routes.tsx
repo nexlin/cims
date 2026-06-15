@@ -24,6 +24,7 @@ import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
 import ExternalSystemsPage from './pages/ExternalSystemsPage'
+import ConsoleAccountsPage from './pages/ConsoleAccountsPage'
 
 export type { RouteDef, RouteSection } from './nav-types'
 
@@ -83,6 +84,7 @@ const CORE_SECTIONS: RouteSection[] = [
       // ↑ RBAC (2026-06-10): 페이지 진입 operator+. 탭1(시스템/서버 구성)·탭2(패키지 설치)는
       //   조회만 가능, 변이는 admin 세션 또는 admin 패스워드 승격. 탭3(패키지 설정)=operator 편집.
       { path: '/deploy/external-systems', title: '외부 시스템',   component: ExternalSystemsPage, adminOnly: true },
+      { path: '/deploy/console-accounts', title: '콘솔 계정',     component: ConsoleAccountsPage, adminOnly: true },
       { path: '/deploy/packages',         title: '패키지',        component: PackagesPage,        adminOnly: true },
       // HA 상세 편집 — ServersPage(시스템/인프라) 인스펙터가 HA 를 인라인 편집하므로
       // 사이드바 leaf 에서는 숨김(중복 제거). route 는 ServersPage 의 deep-link(?group=)용 유지.

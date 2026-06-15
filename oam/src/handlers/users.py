@@ -109,16 +109,16 @@ async def _get_me(handler_args, config):
     if err:
         return err
 
-    # 패키지 내장 계정(admin/developer) — DB 미구축 부트스트랩에서도 동작해야
-    # 하므로 토큰 클레임만으로 프로파일 합성 (DB 조회 없음).
-    if payload.get('builtin'):
+    # 콘솔 계정(내장 admin / console_accounts file_store) — DB 조회 없이 토큰
+    # 클레임만으로 프로파일 합성. (DB users 는 가입자 person 전용이라 콘솔 계정 아님.)
+    if payload.get('builtin') or payload.get('file_acct'):
         return HandlerResult(status=200, body={
-            'id': int(payload.get('sub') or -1000),
+            'id': payload.get('sub'),
             'name': payload.get('name') or payload.get('login_id'),
             'login_id': payload.get('login_id'),
             'role': payload.get('role'),
             'org_id': None,
-            'builtin': True,
+            'builtin': bool(payload.get('builtin')),
             'create_time': None,
             'update_time': None,
         })
@@ -158,8 +158,8 @@ async def _get_me_subscriptions(handler_args, config):
     if err:
         return err
 
-    # 내장 계정은 가입자(전화) 정보가 없음 — DB 없이 빈 배열
-    if payload.get('builtin'):
+    # 콘솔 계정(내장/console_accounts)은 가입자(전화) 정보가 없음 — DB 없이 빈 배열
+    if payload.get('builtin') or payload.get('file_acct'):
         return HandlerResult(status=200, body={'call_subscriptions': [], 'ptt_subscriptions': []})
     uid = int(payload['sub'])
 

@@ -36,7 +36,7 @@ export function buildPickIndex(users: UserSummary[], kind: 'ptt' | 'call' | 'use
   const out: PickItem[] = []
   for (const u of users) {
     if (kind === 'user') {
-      out.push({ value: String(u.id), label: u.name, sub: u.login_id || u.org_id || '', orgCode: u.org_id || '', userId: u.id, userName: u.name })
+      out.push({ value: String(u.id), label: u.name, sub: u.org_id || '', orgCode: u.org_id || '', userId: u.id, userName: u.name })
       continue
     }
     const subs = kind === 'ptt' ? u.ptt_subscriptions : u.call_subscriptions
