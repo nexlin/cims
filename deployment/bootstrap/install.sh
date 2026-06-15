@@ -21,6 +21,8 @@
 #     --prefix DIR     설치 루트 (기본 /opt/cims-agent)
 #     --port N         OAM HTTPS 포트 (기본 4419)
 #     --admin-pass PW  내장 admin 비밀번호 설정 (기본 1234 — 상용은 변경 권장)
+#     --server-name N  OAM 호스트(이 서버) 표시 이름 (기본 hostname)
+#     --mgmt-ip IP     관리(mgmt) IP — agent↔OAM 통신 기준 (AgentOamUrl/Mgmt.Cidr; 기본 첫 global IP)
 #     --no-systemd     systemd 미사용 (start 스크립트 생성)
 #     --no-start       설치만 하고 기동하지 않음
 #     --no-agent       이 서버의 agent 자동 설치/기동 생략
@@ -33,6 +35,8 @@ set -euo pipefail
 PREFIX=/opt/cims-agent
 PORT=4419
 ADMIN_PASS=""
+SERVER_NAME=""      # OAM 호스트(=이 서버) 표시 이름. 미지정 시 hostname.
+MGMT_IP=""          # 관리(mgmt) IP — agent↔OAM 통신 기준. AgentOamUrl/Mgmt.Cidr 에 반영.
 USE_SYSTEMD=1
 DO_START=1
 DO_AGENT=1
@@ -45,6 +49,8 @@ while [[ $# -gt 0 ]]; do
         --prefix)     PREFIX="$2"; shift 2 ;;
         --port)       PORT="$2"; shift 2 ;;
         --admin-pass) ADMIN_PASS="$2"; shift 2 ;;
+        --server-name) SERVER_NAME="$2"; shift 2 ;;
+        --mgmt-ip)     MGMT_IP="$2"; shift 2 ;;
         --no-systemd) USE_SYSTEMD=0; shift ;;
         --no-start)   DO_START=0; shift ;;
         --no-agent)   DO_AGENT=0; shift ;;
@@ -79,13 +85,13 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     echo "── CIMS base 초기 설정 (Enter = 기본값) ─────────────────────"
     # [1] 설치 경로
     if [[ $PREFIX_GIVEN -eq 0 ]]; then
-        read -r -p "  [1/4] 설치 경로 [$PREFIX]: " _in
+        read -r -p "  [1/6] 설치 경로 [$PREFIX]: " _in
         [[ -n "$_in" ]] && PREFIX="$_in"
     fi
     # [2] 콘솔/OAM HTTPS 포트 (단일 오리진 — 콘솔 웹과 API/agent 통신이 같은 포트)
     if [[ $PORT_GIVEN -eq 0 ]]; then
         while :; do
-            read -r -p "  [2/4] 콘솔/OAM HTTPS 포트 (웹·API 단일) [$PORT]: " _in
+            read -r -p "  [2/6] 콘솔/OAM HTTPS 포트 (웹·API 단일) [$PORT]: " _in
             [[ -z "$_in" ]] && break
             if [[ "$_in" =~ ^[0-9]+$ ]] && (( _in >= 1 && _in <= 65535 )); then
                 PORT="$_in"; break
@@ -93,23 +99,40 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
             echo "      포트는 1~65535 숫자여야 합니다"
         done
     fi
-    # [3] admin 비밀번호 최초 등록 (필수 — 미입력 시 반복)
+    # [3] 서버 명 (이 OAM 호스트의 표시 이름)
+    if [[ -z "$SERVER_NAME" ]]; then
+        _name_def=$(hostname -s 2>/dev/null || hostname)
+        read -r -p "  [3/6] 서버 명 [$_name_def]: " _in
+        SERVER_NAME="${_in:-$_name_def}"
+    fi
+    # [4] 관리(mgmt) IP — agent↔OAM 통신 기준. 후보 IP 제시.
+    if [[ -z "$MGMT_IP" ]]; then
+        _cands=$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr '\n' ' ')
+        [[ -z "$_cands" ]] && _cands=$(hostname -I 2>/dev/null)
+        _ip_def=$(echo $_cands | awk '{print $1}')
+        echo "        후보 IP: ${_cands:-(감지 실패 — 직접 입력)}"
+        read -r -p "  [4/6] 관리(mgmt) IP [${_ip_def:-직접입력}]: " _in
+        MGMT_IP="${_in:-$_ip_def}"
+    fi
+    # [5] admin 비밀번호 최초 등록 (필수 — 미입력 시 반복)
     if [[ -z "$ADMIN_PASS" ]]; then
         while :; do
-            read -r -s -p "  [3/4] admin 비밀번호 (최초 등록, 4자 이상): " _p1; echo
+            read -r -s -p "  [5/6] admin 비밀번호 (최초 등록, 4자 이상): " _p1; echo
             if [[ ${#_p1} -lt 4 ]]; then echo "      4자 이상 입력하세요"; continue; fi
             read -r -s -p "        비밀번호 확인: " _p2; echo
             [[ "$_p1" == "$_p2" ]] && { ADMIN_PASS="$_p1"; break; }
             echo "      일치하지 않습니다 — 다시 입력"
         done
     fi
-    # [4] 로컬 agent 자동 설치
-    read -r -p "  [4/4] 이 서버의 agent 자동 설치/기동 [Y/n]: " _in
+    # [6] 로컬 agent 자동 설치
+    read -r -p "  [6/6] 이 서버의 agent 자동 설치/기동 [Y/n]: " _in
     [[ "$_in" == n* || "$_in" == N* ]] && DO_AGENT=0
     echo ""
     echo "── 설치 요약 ────────────────────────────────────────────────"
     echo "    설치 경로     : $PREFIX"
     echo "    HTTPS 포트    : $PORT  (콘솔 웹 + API + agent 통신 단일 오리진)"
+    echo "    서버 명       : $SERVER_NAME"
+    echo "    관리(mgmt) IP : ${MGMT_IP:-(미지정)}"
     echo "    admin 비밀번호: (입력됨)"
     echo "    서비스 사용자 : $SVC_USER"
     echo "    로컬 agent    : $([[ $DO_AGENT -eq 1 ]] && echo 설치 || echo 생략)"
@@ -118,6 +141,13 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     echo ""
 elif [[ -z "$ADMIN_PASS" ]]; then
     err "admin 비밀번호 미설정 — 기본값(1234)으로 진행합니다. 상용에서는 --admin-pass 필수!"
+fi
+
+# 서버명/mgmt IP 기본값 보정 (비대화식·플래그 경로 포함 — 항상 값 보장)
+[[ -z "$SERVER_NAME" ]] && SERVER_NAME=$(hostname -s 2>/dev/null || hostname)
+if [[ -z "$MGMT_IP" ]]; then
+    MGMT_IP=$(ip -o -4 addr show scope global 2>/dev/null | awk 'NR==1{print $4}' | cut -d/ -f1)
+    [[ -z "$MGMT_IP" ]] && MGMT_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 fi
 
 # 권한 체크 — 대화식 입력으로 확정된 PREFIX 기준
@@ -185,12 +215,18 @@ if [[ ! -f "$JWT_SECRET_FILE" ]]; then
 fi
 chmod 600 "$JWT_SECRET_FILE"
 PY=python3 OAM_ROOT="$OAM_ROOT" RUNTIME_DIR="$RUNTIME_DIR" PORT="$PORT" \
-JWT_SECRET="$(cat "$JWT_SECRET_FILE")" \
+JWT_SECRET="$(cat "$JWT_SECRET_FILE")" MGMT_IP="$MGMT_IP" \
 ADMIN_PASS="$ADMIN_PASS" python3 - <<'PYEOF'
 import hashlib, json, os
 p = os.path.join(os.environ['OAM_ROOT'], 'oam', 'config', 'oam.json')
 d = json.load(open(p))
-d['Server'] = {'Ip': '0.0.0.0', 'Port': int(os.environ['PORT'])}
+port = int(os.environ['PORT'])
+d['Server'] = {'Ip': '0.0.0.0', 'Port': port}
+# 관리(mgmt) IP — agent↔OAM 통신 기준. AgentOamUrl(콘솔 install-command)·Mgmt.Cidr(/24) 반영.
+mgmt = (os.environ.get('MGMT_IP') or '').strip()
+if mgmt:
+    d['Server']['AgentOamUrl'] = f"https://{mgmt}:{port}"
+    d.setdefault('Mgmt', {})['Cidr'] = mgmt.rsplit('.', 1)[0] + '.0/24'
 d['CimsRuntimeDir'] = os.environ['RUNTIME_DIR']
 d.setdefault('Packages', {})['Dir'] = os.path.join(os.environ['RUNTIME_DIR'], 'pkg_files')
 d.setdefault('CimsAuth', {})['JwtSecret'] = os.environ['JWT_SECRET']
@@ -333,7 +369,7 @@ if [[ $DO_AGENT -eq 1 && $DO_START -eq 1 ]]; then
     info "로컬 agent 등록/설치..."
     LOGIN_PW="${ADMIN_PASS:-1234}"
     TOK=$(curl -sk -X POST -H "Content-Type: application/json"           -d "{\"login_id\":\"admin\",\"password\":\"$LOGIN_PW\"}"           "https://127.0.0.1:$PORT/api/v1/auth/login" |           python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
-    HOSTNM=$(hostname -s 2>/dev/null || hostname)
+    HOSTNM="${SERVER_NAME:-$(hostname -s 2>/dev/null || hostname)}"   # OAM 호스트 표시 이름 (설치 시 입력값)
     ENROLL_TOKEN=""
     if [[ -n "$TOK" ]]; then
         ENROLL_TOKEN=$(curl -sk -X POST -H "Authorization: Bearer $TOK"             -H "Content-Type: application/json" -d "{\"name\":\"$HOSTNM\"}"             "https://127.0.0.1:$PORT/api/v1/agents" |             python3 -c "import sys,json;print(json.load(sys.stdin).get('enrollment_token',''))" 2>/dev/null)

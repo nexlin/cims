@@ -173,10 +173,9 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                       </td>
                       <td style={{ padding: '4px 8px' }}>
                         {/* 용도(slot) — NIC 의 단일 분류 키. VIP→NIC 매핑도 이 값으로 결정.
-                            mgmt 는 자동 도출(소유 컬럼 배지), VIP 는 HA 그룹 바인딩에서 결정 → 읽기전용. */}
+                            VIP 는 HA 그룹 바인딩에서 결정 → 읽기전용. mgmt 는 IP 값은 잠금이나
+                            용도(slot)는 입력 가능 (mgmt NIC 도 운용자가 분류 라벨 지정). */}
                         {isVip ? (
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{slot || '—'}</span>
-                        ) : isMgmtIp ? (
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{slot || '—'}</span>
                         ) : (
                           <ImeSafeInput value={slot}
