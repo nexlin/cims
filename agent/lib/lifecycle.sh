@@ -642,10 +642,13 @@ cmd_status() {
     status_one csc
     status_one console
     status_one phone
-    echo ""
-    echo -e "  ${BOLD}[TB (Test-Bed — Phase 2/3 UI 유지용 상시 기동)]${NC}"
-    status_one tb-csc
-    status_one tb-console
+    # TB(Test-Bed)는 개발 전용 — 실제 기동 중일 때만 표시 (상용 배포본에선 숨김)
+    if is_running tb-csc || is_running tb-console; then
+        echo ""
+        echo -e "  ${BOLD}[TB (Test-Bed — Phase 2/3 UI 유지용 상시 기동)]${NC}"
+        status_one tb-csc
+        status_one tb-console
+    fi
     echo ""
 }
 

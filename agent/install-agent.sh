@@ -369,10 +369,26 @@ fi
 # 1. 모듈 process 정지 (install_path scope)
 if [[ \$keep_modules -ne 1 ]]; then
     SELF_PID=\$\$
+    # 보호 대상 = 자기 자신 + 모든 조상 PID (sudo / uninstall-base.sh 등 호출 트리 自害 방지).
+    #   구버전은 self(uninstall.sh)만 제외 + grep 'uninstall\\.sh' 라 'uninstall-base.sh' 래퍼를
+    #   매칭해 죽였고 → rm 도달 전 종료되어 /opt/cims-agent 가 남았음.
+    _protect=" \$SELF_PID "
+    _pp=\$SELF_PID
+    while :; do
+        _pp=\$(ps -o ppid= -p "\$_pp" 2>/dev/null | tr -d ' ')
+        [[ -z "\$_pp" || "\$_pp" == "0" || "\$_pp" == "1" ]] && break
+        _protect="\$_protect\$_pp "
+    done
     INSTALL_DIR_ABS="\$(pwd)"
     pids=\$( ( pgrep -af "\$INSTALL_DIR_ABS" 2>/dev/null \\
-                | grep -vE "cims_agent\\.py|setup-sudoers\\.sh|init\\.sh|update\\.sh|uninstall\\.sh" \\
-                | awk -v self=\$SELF_PID '\$1 != self {print \$1}' ) || true)
+                | grep -vE "cims_agent\\.py|setup-sudoers\\.sh|init\\.sh|update\\.sh|uninstall" \\
+                | awk '{print \$1}' ) || true)
+    _keep=""
+    for _pid in \$pids; do
+        case "\$_protect" in *" \$_pid "*) continue ;; esac
+        _keep="\$_keep \$_pid"
+    done
+    pids="\$_keep"
     if [[ -n "\$pids" ]]; then
         echo "→ install_path 안 모듈 process 정지:"
         for pid in \$pids; do

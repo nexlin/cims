@@ -66,6 +66,7 @@ PKG_DIR="$HERE/packages"
 
 info() { echo -e "\033[0;36m[INFO]\033[0m  $*"; }
 ok()   { echo -e "\033[0;32m[OK]\033[0m    $*"; }
+warn() { echo -e "\033[0;33m[WARN]\033[0m  $*" >&2; }
 err()  { echo -e "\033[0;31m[ERROR]\033[0m $*" >&2; }
 
 # ── 전제 확인 ─────────────────────────────────────────────────
@@ -107,7 +108,7 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     fi
     # [4] 관리(mgmt) IP — agent↔OAM 통신 기준. 후보 IP 제시.
     if [[ -z "$MGMT_IP" ]]; then
-        _cands=$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr '\n' ' ')
+        _cands=$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr '\n' ' ' || true)
         [[ -z "$_cands" ]] && _cands=$(hostname -I 2>/dev/null)
         _ip_def=$(echo $_cands | awk '{print $1}')
         echo "        후보 IP: ${_cands:-(감지 실패 — 직접 입력)}"
@@ -146,7 +147,7 @@ fi
 # 서버명/mgmt IP 기본값 보정 (비대화식·플래그 경로 포함 — 항상 값 보장)
 [[ -z "$SERVER_NAME" ]] && SERVER_NAME=$(hostname -s 2>/dev/null || hostname)
 if [[ -z "$MGMT_IP" ]]; then
-    MGMT_IP=$(ip -o -4 addr show scope global 2>/dev/null | awk 'NR==1{print $4}' | cut -d/ -f1)
+    MGMT_IP=$(ip -o -4 addr show scope global 2>/dev/null | awk 'NR==1{print $4}' | cut -d/ -f1 || true)
     [[ -z "$MGMT_IP" ]] && MGMT_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 fi
 
@@ -260,35 +261,41 @@ if [[ \$YES -ne 1 ]]; then
     [[ "\$_a" == y* || "\$_a" == Y* ]] || { echo "중단"; exit 1; }
 fi
 
-# 1) OAM 서비스 중지/해제
-if [[ -f /etc/systemd/system/cims-oam.service ]]; then
-    systemctl disable --now cims-oam.service 2>/dev/null || true
-    rm -f /etc/systemd/system/cims-oam.service
-    systemctl daemon-reload 2>/dev/null || true
-    echo "✓ systemd cims-oam.service 제거"
-else
-    # start-oam.sh(nohup) 경로 — oam_app 프로세스 종료
-    for _pid in \$(pgrep -f "\$PREFIX/modules/oam/.*oam_app.py" 2>/dev/null); do
-        kill "\$_pid" 2>/dev/null || true
-    done
-fi
-
-# 2) 로컬 agent + 모듈 — agent 설치본의 uninstall.sh 에 위임 (unit/sudoers/모듈 정리)
-if [[ -f "\$PREFIX/uninstall.sh" ]]; then
-    ( cd "\$PREFIX" && bash ./uninstall.sh --yes ) || true
-fi
-# agent 의 user systemd unit 이 남아있으면 직접 정지/해제 (Restart=always 부활 방지)
+# 1) 로컬 agent 먼저 중지 — watchdog 가 OAM/모듈을 재기동하지 못하게 (Restart=always 부활 방지)
+#    (OAM 이 agent 감독 대상이므로 OAM 보다 먼저 watchdog 를 끈다)
 if id "$SVC_USER" >/dev/null 2>&1; then
     runuser -u "$SVC_USER" -- env XDG_RUNTIME_DIR="/run/user/\$(id -u "$SVC_USER")" \
         systemctl --user disable --now cims-agent.service 2>/dev/null || true
 fi
+if [[ -f "\$PREFIX/uninstall.sh" ]]; then
+    ( cd "\$PREFIX" && bash ./uninstall.sh --yes ) || true
+fi
+
+# 2) OAM 중지 (agent/cims-svc·부트스트랩 nohup 프로세스 + 구버전 systemd unit 잔재)
+if [[ -f /etc/systemd/system/cims-oam.service ]]; then
+    systemctl disable --now cims-oam.service 2>/dev/null || true
+    rm -f /etc/systemd/system/cims-oam.service
+    systemctl daemon-reload 2>/dev/null || true
+    echo "✓ systemd cims-oam.service 제거 (구버전)"
+fi
+for _pid in \$(pgrep -f "\$PREFIX/modules/oam/.*oam_app.py" 2>/dev/null); do
+    kill "\$_pid" 2>/dev/null || true
+done
 
 # 3) install.sh 가 기동한 잔여 프로세스 일괄 종료 (oam/agent/모듈 — \$PREFIX 경로 기반)
+#    보호 PID = 자기 자신 + 모든 조상 (sudo 래퍼 체인 — grandparent 까지).
+#    \$\$/\$PPID 만 제외하면 조부모 sudo 를 죽여 rm 도달 전 自害(Killed)함.
+_PROTECT_PIDS=" \$\$ "
+_pp=\$\$
+while :; do
+    _pp=\$(ps -o ppid= -p "\$_pp" 2>/dev/null | tr -d ' ')
+    [[ -z "\$_pp" || "\$_pp" == "0" || "\$_pp" == "1" ]] && break
+    _PROTECT_PIDS="\$_PROTECT_PIDS\$_pp "
+done
 _kill_prefix_procs() {
     local sig="\$1" _pid
     for _pid in \$(pgrep -f "\$PREFIX" 2>/dev/null); do
-        # 자기 자신/부모(sudo 래퍼) 제외 — cmdline 에 PREFIX 가 포함되므로
-        [[ "\$_pid" == "\$\$" || "\$_pid" == "\$PPID" ]] && continue
+        case "\$_PROTECT_PIDS" in *" \$_pid "*) continue ;; esac
         kill "-\$sig" "\$_pid" 2>/dev/null || true
     done
 }
@@ -306,46 +313,32 @@ chmod +x "$PREFIX/uninstall-base.sh"
 # 전체 트리를 서비스 사용자 소유로 (root 로 만든 디렉토리 교정).
 chown -R "$SVC_USER":"$(id -gn "$SVC_USER")" "$PREFIX" 2>/dev/null || true
 
-# ── 기동 (systemd 또는 start 스크립트) ───────────────────────────
-START_CMD="/usr/bin/env python3 -u $OAM_ROOT/oam/src/oam_app.py"
-if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system && $EUID -eq 0 ]]; then
-    cat > /etc/systemd/system/cims-oam.service <<UNIT
-[Unit]
-Description=CIMS OAM (base management plane: API + Console)
-After=network-online.target
-
-[Service]
-Type=simple
-User=$SVC_USER
-WorkingDirectory=$OAM_ROOT/oam/src
-ExecStart=$START_CMD
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-    systemctl daemon-reload
-    systemctl enable cims-oam.service >/dev/null 2>&1 || true
-    if [[ $DO_START -eq 1 ]]; then
-        systemctl restart cims-oam.service
-        ok "systemd cims-oam.service 기동"
+# ── _run_as: 서비스 사용자(cims)로 실행 — OAM·agent 모두 cims 소유 프로세스로 ──
+#   설계: OAM 은 csp/cmp 등 다른 모듈과 동일하게 agent 의 cims-svc + watchdog 가 감독한다.
+#   단 agent enroll 에는 OAM 이 먼저 떠 있어야 하므로, 여기서는 OAM 을 1회 "부트스트랩"
+#   기동만 하고 — agent 설치 후 cims-svc 로 인계(pidfile + supervised.json)한다.
+#   → root systemd cims-oam.service 는 더 이상 만들지 않는다 (모듈 기동 방식과 일관).
+_run_as() {
+    if [[ $EUID -eq 0 && "$SVC_USER" != "root" ]]; then
+        su - "$SVC_USER" -c "$1"
     else
-        info "--no-start: 'systemctl start cims-oam' 으로 기동하세요"
+        bash -c "$1"
     fi
-else
-    cat > "$PREFIX/start-oam.sh" <<SH
+}
+
+# ── OAM 부트스트랩 기동 (agent 인계 전까지의 임시 기동, cims 소유) ──────
+cat > "$PREFIX/start-oam.sh" <<SH
 #!/usr/bin/env bash
+# OAM 부트스트랩 기동 — 정식 감독은 agent watchdog + cims-svc (start oam).
 cd "$OAM_ROOT/oam/src"
-exec setsid nohup $START_CMD > "$OAM_ROOT/log/oam_stdout.log" 2>&1 < /dev/null &
+setsid nohup /usr/bin/env python3 -u "$OAM_ROOT/oam/src/oam_app.py" > "$OAM_ROOT/log/oam_stdout.log" 2>&1 < /dev/null &
 SH
-    chmod +x "$PREFIX/start-oam.sh"
-    if [[ $DO_START -eq 1 ]]; then
-        bash "$PREFIX/start-oam.sh"; disown 2>/dev/null || true
-        ok "OAM 기동 (start 스크립트: $PREFIX/start-oam.sh)"
-    else
-        info "--no-start: $PREFIX/start-oam.sh 로 기동하세요"
-    fi
+chmod +x "$PREFIX/start-oam.sh"
+if [[ $DO_START -eq 1 ]]; then
+    _run_as "bash '$PREFIX/start-oam.sh'"
+    ok "OAM 부트스트랩 기동 (agent 설치 후 cims-svc 감독으로 인계)"
+else
+    info "--no-start: $PREFIX/start-oam.sh 로 기동하세요"
 fi
 
 # ── 헬스 체크 ────────────────────────────────────────────────
@@ -364,47 +357,134 @@ if [[ $DO_START -eq 1 ]]; then
 fi
 
 # ── 로컬 agent 설치/기동 (이 서버도 콘솔에서 관리되도록) ────────────
+# best-effort: OAM/Console 는 이미 설치·기동 완료. 이 블록의 어떤 단계가 실패해도
+# 설치 전체를 무음 중단시키지 않는다 — errexit 를 잠시 해제하고 단계별 진단을 남긴다.
+# 갓 (재)기동한 OAM 은 / 가 200 이어도 첫 요청이 일시 실패할 수 있어 각 단계를 재시도한다.
+# (구버전 footgun: set -euo pipefail 아래 curl|python 파이프가 nonzero 면 메시지 없이 즉시 exit)
 AGENT_STATE="미설치 (--no-agent)"
 if [[ $DO_AGENT -eq 1 && $DO_START -eq 1 ]]; then
     info "로컬 agent 등록/설치..."
+    set +e
+    _HTTP_FILE=$(mktemp)   # _api 가 HTTP status 를 여기 기록 (파이프 subshell 에서도 보존)
     LOGIN_PW="${ADMIN_PASS:-1234}"
-    TOK=$(curl -sk -X POST -H "Content-Type: application/json"           -d "{\"login_id\":\"admin\",\"password\":\"$LOGIN_PW\"}"           "https://127.0.0.1:$PORT/api/v1/auth/login" |           python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
     HOSTNM="${SERVER_NAME:-$(hostname -s 2>/dev/null || hostname)}"   # OAM 호스트 표시 이름 (설치 시 입력값)
+
+    # API 호출 헬퍼 — 응답 본문은 stdout, HTTP status code 는 $_HTTP_FILE 에 담는다.
+    _api() {
+        local method="$1" path="$2" data="${3:-}" auth="${4:-}" bf
+        bf=$(mktemp)
+        local cargs=(-sk -o "$bf" -w '%{http_code}' -X "$method" -H "Content-Type: application/json")
+        [[ -n "$auth" ]] && cargs+=(-H "Authorization: Bearer $auth")
+        [[ -n "$data" ]] && cargs+=(-d "$data")
+        curl "${cargs[@]}" "https://127.0.0.1:$PORT$path" 2>/dev/null > "$_HTTP_FILE"
+        cat "$bf" 2>/dev/null
+        rm -f "$bf"
+    }
+    _http() { cat "$_HTTP_FILE" 2>/dev/null || echo "?"; }
+    _jget() { python3 -c "import sys,json
+try: print((json.load(sys.stdin) or {}).get('$1','') or '')
+except Exception: print('')" 2>/dev/null; }
+
+    # 1) admin 로그인 (transient 대비 최대 6회 재시도)
+    TOK=""
+    for _i in 1 2 3 4 5 6; do
+        TOK=$(_api POST /api/v1/auth/login "{\"login_id\":\"admin\",\"password\":\"$LOGIN_PW\"}" | _jget token)
+        [[ -n "$TOK" ]] && break
+        sleep 1
+    done
+
     ENROLL_TOKEN=""
-    if [[ -n "$TOK" ]]; then
-        ENROLL_TOKEN=$(curl -sk -X POST -H "Authorization: Bearer $TOK"             -H "Content-Type: application/json" -d "{\"name\":\"$HOSTNM\"}"             "https://127.0.0.1:$PORT/api/v1/agents" |             python3 -c "import sys,json;print(json.load(sys.stdin).get('enrollment_token',''))" 2>/dev/null)
-    fi
-    if [[ -z "$ENROLL_TOKEN" ]]; then
-        err "agent 등록 토큰 발급 실패 — 콘솔에서 수동으로 서버 추가 후 install-command 실행"
-        AGENT_STATE="실패 (콘솔에서 수동 설치)"
+    if [[ -z "$TOK" ]]; then
+        err "admin 로그인 실패 (HTTP $(_http)) — agent 자동설치 건너뜀. 콘솔에서 수동 설치하세요."
+        AGENT_STATE="실패 (로그인 — 콘솔 수동설치)"
     else
-        _run_as() {  # 서비스 사용자로 실행 (root 인 경우 su)
-            if [[ $EUID -eq 0 && "$SVC_USER" != "root" ]]; then
-                su - "$SVC_USER" -c "$1"
-            else
-                bash -c "$1"
+        # 2) agent 등록 + enrollment token (신규 생성 → 이름 중복(409)이면 기존 레코드 삭제 후 재생성)
+        #    재실행 대비: 같은 이름 레코드가 남아 있으면(이전 설치 잔재) DELETE 후 새로 만든다.
+        #    (OAM 의 GET /agents 응답은 {"items":[...]}. regenerate-token 경로는 현재 500 →
+        #     delete+recreate 가 견고 — 검증된 201 경로 재사용.)
+        for _i in 1 2 3 4 5 6; do
+            ENROLL_TOKEN=$(_api POST /api/v1/agents "{\"name\":\"$HOSTNM\"}" "$TOK" | _jget enrollment_token)
+            [[ -n "$ENROLL_TOKEN" ]] && break
+            EID=$(_api GET "/api/v1/agents" "" "$TOK" | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin)
+    ags=(d.get('items') or d.get('agents') or []) if isinstance(d,dict) else d
+    print(next((str(a.get('id')) for a in ags if isinstance(a,dict) and a.get('name')=='$HOSTNM'),''))
+except Exception: print('')" 2>/dev/null)
+            if [[ -n "$EID" ]]; then
+                info "기존 등록 agent(id=$EID) 발견 — 삭제 후 재등록"
+                _api DELETE "/api/v1/agents/$EID" "" "$TOK" >/dev/null 2>&1
+                ENROLL_TOKEN=$(_api POST /api/v1/agents "{\"name\":\"$HOSTNM\"}" "$TOK" | _jget enrollment_token)
+                [[ -n "$ENROLL_TOKEN" ]] && break
             fi
-        }
-        curl -sk "https://127.0.0.1:$PORT/install-agent.sh" -o /tmp/cims-install-agent.sh
-        _run_as "cd '$PREFIX' && bash /tmp/cims-install-agent.sh --oam-url 'https://127.0.0.1:$PORT' --enrollment-token '$ENROLL_TOKEN' --name '$HOSTNM'" && ok "agent 번들 설치 ($PREFIX/agent — 패키지 저장소 서빙본)"
-        # sudoers + linger 는 root 권한으로 직접 (init.sh 의 sudo 단계 선처리)
-        if [[ $EUID -eq 0 && -f "$PREFIX/setup-sudoers.sh" ]]; then
-            CIMS_AGENT_USER="$SVC_USER" bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 ||                 bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 || true
-        fi
-        if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then
-            if _run_as "cd '$PREFIX' && ./init.sh"; then
-                AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
-            else
-                AGENT_STATE="설치됨 — 기동 실패 ($PREFIX/init.sh 수동 실행)"
-            fi
+            sleep 1
+        done
+        if [[ -z "$ENROLL_TOKEN" ]]; then
+            err "agent 등록 토큰 발급 실패 (HTTP $(_http)) — 콘솔에서 수동으로 서버 추가 후 install-command 실행"
+            AGENT_STATE="실패 (토큰 발급 — 콘솔 수동설치)"
         else
-            # systemd 미사용 — enroll 후 nohup 직접 기동
-            _run_as "cd '$PREFIX' && CIMS_ENROLLMENT_TOKEN='$ENROLL_TOKEN'                 python3 ./agent/cims_agent.py --oam-url 'https://127.0.0.1:$PORT'                 --state-dir ./state --name '$HOSTNM' --enroll-only" || true
-            _run_as "cd '$PREFIX' && setsid nohup python3 ./agent/cims_agent.py                 --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM'                 > ./agent-stdout.log 2>&1 < /dev/null &"
-            sleep 3
-            AGENT_STATE="실행 중 (nohup — systemd 미사용 환경)"
+            # (_run_as 는 OAM 부트스트랩 기동부에서 이미 정의됨 — 서비스 사용자로 실행)
+            # 3) install-agent.sh 다운로드 (최대 6회, HTTP 200 + 비어있지 않은 응답 확인)
+            #    ⚠️ /tmp(sticky·world-writable)의 "타인 소유" 파일에 root 가 -o(O_CREAT)하면
+            #    fs.protected_regular(=1/2)가 차단(curl rc≠0) → 매번 다운로드 실패.
+            #    따라서 PREFIX 하위(cims 소유·non-sticky)로 받는다.
+            _IA="$PREFIX/.cims-install-agent.sh"
+            _dl_ok=0; _dl_http=000
+            for _i in 1 2 3 4 5 6; do
+                _dl_http=$(curl -sk -o "$_IA" -w '%{http_code}' "https://127.0.0.1:$PORT/install-agent.sh" 2>/dev/null)
+                [[ "$_dl_http" == "200" && -s "$_IA" ]] && { _dl_ok=1; break; }
+                sleep 1
+            done
+            chmod 0644 "$_IA" 2>/dev/null || true   # su - 로 실행할 cims 가 읽을 수 있도록
+            if [[ $_dl_ok -ne 1 ]]; then
+                err "install-agent.sh 다운로드 실패 (HTTP $_dl_http) — agent 미설치 (콘솔 수동설치)"
+                AGENT_STATE="실패 (install-agent.sh 다운로드)"
+            elif _run_as "cd '$PREFIX' && bash '$_IA' --oam-url 'https://127.0.0.1:$PORT' --enrollment-token '$ENROLL_TOKEN' --name '$HOSTNM'"; then
+                ok "agent 번들 설치 ($PREFIX/agent — 패키지 저장소 서빙본)"
+                # OAM 을 cims-svc 로 인계 — 부트스트랩 nohup 을 정식 감독 프로세스로 교체.
+                #   start_oam 의 kill_stray 가 부트스트랩 OAM(같은 포트/경로)을 정리하고
+                #   pidfile($OAM_ROOT/run/oam.pid)을 남긴다 → 중복기동·고아 방지.
+                info "OAM 을 agent 관리(cims-svc)로 인계..."
+                # cims-svc 의 상세 상태 출력(=== CIMS 상태 ===/[검증 대상]/[TB] 등 개발용)은
+                # 설치 로그로만 남기고 화면엔 결과만 표시한다 (상용 설치 출력 정돈).
+                if _run_as "CIMS_DIST_DIR='$OAM_ROOT' CIMS_PYTHON=python3 '$PREFIX/agent/bin/cims-svc' start oam" \
+                        >> "$OAM_ROOT/log/oam_handover.log" 2>&1; then
+                    ok "OAM cims-svc 감독 전환 완료 (pidfile + watchdog)"
+                else
+                    warn "OAM cims-svc 인계 실패 — agent watchdog 가 후속 회수 (상세: $OAM_ROOT/log/oam_handover.log)"
+                fi
+                # agent watchdog 감독 등록: oam → versioned 모듈 경로 (supervise_tick 가 읽음)
+                mkdir -p "$PREFIX/run"
+                printf '{"oam": "%s"}\n' "$OAM_ROOT" > "$PREFIX/run/supervised.json"
+                # run/ 디렉터리째 서비스 사용자 소유로 — agent(cims)가 managed_ips.json 등을
+                # 여기 기록한다. (root 가 mkdir 하면 cims 가 파일 생성 불가 → Permission denied)
+                chown -R "$SVC_USER":"$(id -gn "$SVC_USER")" "$PREFIX/run" 2>/dev/null || true
+                # sudoers + linger 는 root 권한으로 직접 (init.sh 의 sudo 단계 선처리)
+                if [[ $EUID -eq 0 && -f "$PREFIX/setup-sudoers.sh" ]]; then
+                    CIMS_AGENT_USER="$SVC_USER" bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 || \
+                        bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 || true
+                fi
+                if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then
+                    if _run_as "cd '$PREFIX' && ./init.sh"; then
+                        AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
+                    else
+                        AGENT_STATE="설치됨 — 기동 실패 ($PREFIX/init.sh 수동 실행)"
+                    fi
+                else
+                    # systemd 미사용 — enroll 후 nohup 직접 기동
+                    _run_as "cd '$PREFIX' && CIMS_ENROLLMENT_TOKEN='$ENROLL_TOKEN' python3 ./agent/cims_agent.py --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM' --enroll-only" || true
+                    _run_as "cd '$PREFIX' && setsid nohup python3 ./agent/cims_agent.py --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM' > ./agent-stdout.log 2>&1 < /dev/null &"
+                    sleep 3
+                    AGENT_STATE="실행 중 (nohup — systemd 미사용 환경)"
+                fi
+            else
+                err "install-agent.sh 실행 실패 — 콘솔에서 수동 설치하세요 (install-command)"
+                AGENT_STATE="실패 (install-agent.sh 실행)"
+            fi
         fi
     fi
+    rm -f "$_HTTP_FILE"
+    set -e
 elif [[ $DO_AGENT -eq 1 ]]; then
     AGENT_STATE="미기동 (--no-start)"
 fi
@@ -414,7 +494,7 @@ cat <<DONE
 ────────────────────────────────────────────────────────────
  CIMS base 설치 완료
    프로세스:
-     · oam     : 실행 중 — API + 콘솔 동시 서빙 (HTTPS :$PORT)
+     · oam     : 실행 중 — agent(cims-svc) 감독, API+콘솔 서빙 (HTTPS :$PORT)
      · console : 별도 프로세스 없음 — oam 이 정적 서빙 (위 포트)
      · agent   : $AGENT_STATE
    콘솔   : https://<이 서버 IP>:$PORT/   (브라우저 인증서 경고는 self-signed 때문)
