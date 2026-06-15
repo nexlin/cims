@@ -2014,7 +2014,20 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
 
 
 async def _delete_deployment(did: int, config):
+    # runtime store v2 P4 — 모듈의 마지막 deployment 제거 시 그 모듈 컬렉션 SoT prune.
+    dep = await asyncio.to_thread(_deploy_load, config, did)
+    pkg = (dep or {}).get("package_name") or (dep or {}).get("package")
     await asyncio.to_thread(file_store.delete, _deploy_dir(config), did)
+    if pkg:
+        try:
+            remaining = [d for d in await asyncio.to_thread(_deploy_load_all, config)
+                         if (d.get("package_name") or d.get("package")) == pkg and d.get("id") != did]
+            if not remaining:
+                from services import ha_lookup
+                if await asyncio.to_thread(ha_lookup.prune_module_collections, config, pkg):
+                    logger.log_info(f"runtime store v2: '{pkg}' 마지막 deployment 제거 → 컬렉션 SoT prune")
+        except Exception as _e:
+            logger.log_warning(f"runtime store v2 prune skip (pkg={pkg}): {_e}")
     return HandlerResult(status=204, body=None, media_type="application/json")
 
 

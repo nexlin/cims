@@ -233,6 +233,26 @@ def collection_dir(config: dict, name: str, create: bool = False) -> str:
     return path
 
 
+def prune_module_collections(config: dict, owner: str) -> bool:
+    """모듈 uninstall(마지막 deployment 제거) 시 그 모듈의 컬렉션 SoT 디렉터리 제거
+    (runtime store v2 P4 — 라이프사이클 결합). owner 의 collections base 를 통째로 삭제.
+    삭제했으면 True. 데이터 유실 방지: 호출 측이 '마지막 deployment 제거' 를 보장해야 함."""
+    import shutil
+    base = _collections_base(config, owner)
+    # prod: .../modules/<owner>/runtime/collections   dev: {runtime}/collections/<owner>
+    if _os.path.isdir(base):
+        shutil.rmtree(base, ignore_errors=True)
+        # 표준 배포에서 비게 된 modules/<owner>/runtime 도 정리(다른 내용 없으면).
+        parent = _os.path.dirname(base)
+        if _os.path.basename(base) == 'collections' and _os.path.basename(parent) == 'runtime':
+            try:
+                _os.rmdir(parent)
+            except OSError:
+                pass
+        return True
+    return False
+
+
 def migrate_flat_collections(config: dict) -> int:
     """1회 이행 — 구 평면 {runtime_root}/<name> 의 컬렉션 데이터를 네임스페이스 경로로 이동.
     빈 잔재(데이터 없는 평면 도메인 디렉터리)는 제거. 이동/제거한 도메인 수 반환."""
