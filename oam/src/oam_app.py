@@ -146,12 +146,20 @@ if __name__ == '__main__':
         config = load_config()
         auth.init(config)
 
-        # runtime store v2 P3 — 구 평면 컬렉션 도메인을 소유 모듈 네임스페이스로 1회 이행.
+        # runtime store v2 — 구 평면 도메인 1회 이행 (도메인 접근 전 선행).
+        #   P2: OAM 자기 데이터 → control/·console/.   P3: 컬렉션 → modules/<owner>/runtime.
+        try:
+            from services import file_store as _fs
+            _m2 = _fs.migrate_oam_categories(config)
+            if _m2:
+                logger.log_info(f"runtime store v2 P2: OAM 자기 {_m2} 도메인 control/·console/ 이행")
+        except Exception as _e:
+            logger.log_warning(f"runtime store v2 P2 이행 skip: {_e}")
         try:
             from services import ha_lookup as _ha_lookup
             _moved = _ha_lookup.migrate_flat_collections(config)
             if _moved:
-                logger.log_info(f"runtime store v2: 컬렉션 {_moved} 도메인 네임스페이스 이행")
+                logger.log_info(f"runtime store v2 P3: 컬렉션 {_moved} 도메인 네임스페이스 이행")
         except Exception as _e:
             logger.log_warning(f"runtime store v2 collection 이행 skip: {_e}")
 

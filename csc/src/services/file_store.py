@@ -51,11 +51,56 @@ def runtime_root(config: dict) -> str:
     return os.path.abspath('runtime')
 
 
+# runtime store v2 P2 — OAM 자기 데이터 카테고리화.
+#   control/ = OAM 관리평면, console/ = OAM 콘솔. (서비스 모듈 컬렉션은 ha_lookup
+#   .collection_dir 로 modules/<owner>/runtime/collections 에 별도 — 여기 미포함.)
+#   효과: runtime 루트 평면에 성격이 다른 도메인이 섞이는 문제 해소(백업/권한/정책 분리).
+_OAM_CATEGORY = {
+    'agents': 'control', 'deployments': 'control', 'jobs': 'control',
+    'metrics': 'control', 'packages': 'control', 'ha_groups': 'control',
+    'csp_sync_txn': 'control',
+    'console_accounts': 'console', 'console_layouts': 'console', 'console_menu': 'console',
+}
+
+
+def _domain_rel(domain: str) -> str:
+    cat = _OAM_CATEGORY.get(domain)
+    return os.path.join(cat, domain) if cat else domain
+
+
 def domain_dir(config: dict, domain: str) -> str:
-    """도메인 디렉토리. 없으면 생성."""
-    path = os.path.join(runtime_root(config), domain)
+    """도메인 디렉토리. 없으면 생성. OAM 자기 도메인은 control/·console/ 로 카테고리화."""
+    path = os.path.join(runtime_root(config), _domain_rel(domain))
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def migrate_oam_categories(config: dict) -> int:
+    """1회 이행 — 구 평면 {runtime}/<domain> 의 OAM 자기 데이터를 control/·console/ 로 이동.
+    디렉터리 엔트리(파일/하위트리)를 rename 으로 옮기므로 nested(jobs/metrics) 보존·원자적.
+    이미 카테고리화된 dst 가 있으면 merge(없는 엔트리만 이동). 이동한 도메인 수 반환."""
+    rt = runtime_root(config)
+    moved = 0
+    for domain, cat in _OAM_CATEGORY.items():
+        flat = os.path.join(rt, domain)
+        if not os.path.isdir(flat):
+            continue
+        newp = os.path.join(rt, cat, domain)
+        if os.path.abspath(flat) == os.path.abspath(newp):
+            continue
+        entries = os.listdir(flat)
+        if entries:
+            os.makedirs(newp, exist_ok=True)
+            for e in entries:
+                src, dst = os.path.join(flat, e), os.path.join(newp, e)
+                if not os.path.exists(dst):
+                    os.rename(src, dst)
+            moved += 1
+        try:
+            os.rmdir(flat)
+        except OSError:
+            pass
+    return moved
 
 
 # ──────────────────────────────────────────────────────────────────────────
