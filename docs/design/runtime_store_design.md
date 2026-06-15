@@ -1,5 +1,8 @@
 # 파일 기반 Runtime Store — 설계
 
+> ⚠️ 2026-06-15: 본 문서 §2 평면 레이아웃은 [runtime_store_v2_module_namespacing.md](runtime_store_v2_module_namespacing.md)
+> 로 **개정 진행 중**(모듈/버전 귀속 네임스페이스 + 라이프사이클 결합). 새 작업은 v2 참조.
+
 > 2026-05-13 결정: **가입자 정보/상태 외 모든 데이터는 DB 가 아닌 파일로 관리**.
 > 외부 이중화 DB 인계 부담 최소화. 운영/배포/HA/런타임 설정 등은 모두 file-store.
 
