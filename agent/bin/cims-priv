@@ -356,7 +356,7 @@ case "${1:-}" in
         do_ensure_base_deps
         ;;
     version)
-        echo "cims-priv 0.6.0"
+        echo "cims-priv 0.6.1"
         ;;
     *)
         err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|net-sysctl|net-rps|ensure-base-deps|version} ..."

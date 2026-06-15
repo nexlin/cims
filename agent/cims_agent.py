@@ -226,6 +226,44 @@ def detect_mgmt_ip(oam_url: str) -> str | None:
         return None
 
 
+# `ip` 명령이 깨졌을 때(예: libmnl.so.0 누락 → rc=127) 프로세스당 1회만 self-heal.
+_DEPS_SELF_HEAL_DONE = False
+
+
+def _ip_self_heal(ctx: str, detail: str) -> bool:
+    """`ip -j <ctx>` 실패 시: 큰 로그 + 1회 base-deps 재설치 self-heal.
+
+    과거 keepalived uninstall 이 공유 의존성 libmnl0 까지 purge → `ip` 가
+    'error while loading shared libraries: libmnl.so.0' 로 깨지면 collect_* 가
+    조용히 [] 를 반환해 콘솔 네트워크 정보가 비던 버그의 자가복구. dpkg 폭주
+    방지를 위해 프로세스당 1회만 시도. 재설치를 수행했으면 True (호출자가 1회 재시도).
+    """
+    global _DEPS_SELF_HEAL_DONE
+    if _DEPS_SELF_HEAL_DONE:
+        return False
+    _DEPS_SELF_HEAL_DONE = True
+    print(f"[agent][net] 'ip -j {ctx}' 실패 ({detail}) — base deps self-heal 시도 (vendor deb 재설치)", flush=True)
+    ensure_base_deps()
+    return True
+
+
+def _ip_json(args: list, ctx: str):
+    """`ip -j <args>` 실행 → 파싱된 list. 실패 시 1회 self-heal 후 재시도.
+    최종 실패면 None 반환(호출자가 [] 처리). 실패를 침묵하지 않고 로그로 남긴다."""
+    for attempt in (1, 2):
+        try:
+            out = subprocess.run(["ip", "-j"] + args, capture_output=True, text=True, timeout=3)
+            if out.returncode != 0:
+                raise RuntimeError(f"rc={out.returncode} {(out.stderr or '').strip()[:200]}")
+            return json.loads(out.stdout or "[]")
+        except Exception as e:
+            if attempt == 1 and _ip_self_heal(ctx, str(e)):
+                continue
+            print(f"[agent][net] 'ip -j {ctx}' 수집 실패: {e}", flush=True)
+            return None
+    return None
+
+
 def collect_interfaces() -> list:
     """ip -j addr 로 IPv4 인터페이스 list 수집.
     한 iface 의 primary + secondary IP 모두 별도 row 로 추출 (VIP 보유 여부 추적용).
@@ -237,15 +275,10 @@ def collect_interfaces() -> list:
     cims-priv ip-add 가 부여한 label '<iface>:cims' 이 있는 IP 는 managed=True 로
     표시 — UI 에서 이런 IP 만 [삭제] 허용 (외부 IP 보호).
     """
-    try:
-        # -4 flag 를 쓰면 IPv4 없는 NIC 이 출력 자체에서 빠지므로, 전체 family 받고
-        # 아래 루프에서 family=='inet' 만 row 로 변환.
-        out = subprocess.run(["ip", "-j", "addr"],
-                             capture_output=True, text=True, timeout=3)
-        if out.returncode != 0:
-            return []
-        rows = json.loads(out.stdout or "[]")
-    except Exception:
+    # -4 flag 를 쓰면 IPv4 없는 NIC 이 출력 자체에서 빠지므로, 전체 family 받고
+    # 아래 루프에서 family=='inet' 만 row 로 변환. ip 실패 시 self-heal 후 [] (침묵 금지).
+    rows = _ip_json(["addr"], "addr")
+    if rows is None:
         return []
     result = []
     for r in rows:
@@ -290,13 +323,8 @@ def collect_routes() -> list:
                      사용자-추가 specific route — [삭제] 허용
     위 셋 모두 아닌 외부 specific route 도 표시 (readonly).
     """
-    try:
-        out = subprocess.run(["ip", "-j", "route"],
-                             capture_output=True, text=True, timeout=3)
-        if out.returncode != 0:
-            return []
-        rows = json.loads(out.stdout or "[]")
-    except Exception:
+    rows = _ip_json(["route"], "route")
+    if rows is None:
         return []
     managed_devs = set()
     for i in collect_interfaces():

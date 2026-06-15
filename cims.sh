@@ -1148,31 +1148,44 @@ _ensure_oam_vendor_ffmpeg() {
 # agent vendor 자동 채움 — keepalived offline 설치용 deb 6종
 # 누락된 패키지만 apt-get download 로 받음 (sudo 불필요). idempotent.
 # CIMS_SKIP_VENDOR_FETCH=1 로 끌 수 있음 (인터넷/apt 없는 환경).
-_KEEPALIVED_DEPS=(keepalived libmnl0 libnftnl11 libnl-3-200 libnl-genl-3-200 libsnmp40t64)
+# keepalived 전용 deps (uninstall 시 purge 대상). libmnl0 은 keepalived 와 iproute2(`ip`)
+# 가 공유하는 base 의존성이라 vendor/base 로 분리 — keepalived uninstall 이 purge 해도
+# `ip` 가 깨지지 않도록 (vendor/base/README.md 참조).
+_KEEPALIVED_DEPS=(keepalived libnftnl11 libnl-3-200 libnl-genl-3-200 libsnmp40t64)
+# OS base 공유 의존성 — 모든 노드 필요, uninstall 시 제거하지 않음. libmnl0 = `ip` 의존성.
+_BASE_DEPS=(libmnl0)
 
-_ensure_agent_vendor_keepalived() {
-    local vendor_dir="$SCRIPT_DIR/agent/vendor/keepalived"
+# vendor 서브디렉터리에 누락된 deb 를 apt-get download 로 채움 (sudo 불필요, idempotent).
+_ensure_agent_vendor_dir() {
+    local sub="$1"; shift
+    local deps=("$@")
+    local vendor_dir="$SCRIPT_DIR/agent/vendor/$sub"
     mkdir -p "$vendor_dir"
 
     [[ -n "${CIMS_SKIP_VENDOR_FETCH:-}" ]] && return 0
 
     local missing=() pkg
-    for pkg in "${_KEEPALIVED_DEPS[@]}"; do
+    for pkg in "${deps[@]}"; do
         compgen -G "$vendor_dir/${pkg}_*.deb" >/dev/null 2>&1 || missing+=("$pkg")
     done
     [[ ${#missing[@]} -eq 0 ]] && return 0
 
     if ! command -v apt-get &>/dev/null; then
-        warn "apt-get 미지원 환경 — agent/vendor/keepalived 누락: ${missing[*]} (수동 채움 필요)"
+        warn "apt-get 미지원 환경 — agent/vendor/$sub 누락: ${missing[*]} (수동 채움 필요)"
         return 0
     fi
 
-    info "agent/vendor/keepalived: ${#missing[@]}/${#_KEEPALIVED_DEPS[@]} 누락 → apt-get download (${missing[*]})"
+    info "agent/vendor/$sub: ${#missing[@]}/${#deps[@]} 누락 → apt-get download (${missing[*]})"
     if ! ( cd "$vendor_dir" && apt-get download "${missing[@]}" >/dev/null 2>&1 ); then
         warn "apt-get download 실패 — vendor 미완성 가능 (인터넷/apt 캐시 확인). CIMS_SKIP_VENDOR_FETCH=1 로 차단"
         return 0
     fi
-    ok "agent/vendor/keepalived: ${missing[*]} 자동 채움"
+    ok "agent/vendor/$sub: ${missing[*]} 자동 채움"
+}
+
+_ensure_agent_vendor_keepalived() {
+    _ensure_agent_vendor_dir keepalived "${_KEEPALIVED_DEPS[@]}"
+    _ensure_agent_vendor_dir base       "${_BASE_DEPS[@]}"
 }
 
 # 버전 유틸리티 — pkg.json 에 저장된 semver 를 읽고/bump/쓰기
