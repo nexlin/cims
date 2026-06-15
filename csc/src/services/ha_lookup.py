@@ -8,6 +8,7 @@ ha_group ↔ deployment ↔ agent 매핑 헬퍼.
 """
 from __future__ import annotations
 
+import os as _os
 from typing import Optional
 
 from services import file_store
@@ -193,8 +194,71 @@ def _collection_owner_package(collection: str) -> Optional[str]:
 
 
 def register_collection_owner(collection: str, package_name: str) -> None:
-    """런타임에서 컬렉션→패키지 매핑 추가 (cmp 등 미래 확장)."""
+    """런타임에서 컬렉션→패키지 매핑 추가 (cmp 등 미래 확장).
+
+    (owner, name) 유일성 강제 — 다른 패키지가 이미 같은 collection 이름을 소유하면
+    충돌이므로 거부 (runtime store v2 P3: 평면 네임스페이스 이름충돌 차단).
+    URL/API 가 collection 을 이름으로만 식별하므로 이름은 전역 유일해야 한다.
+    """
+    existing = _COLLECTION_OWNER.get(collection)
+    if existing and existing != package_name:
+        raise ValueError(
+            f"collection name collision: '{collection}' 는 이미 '{existing}' 소유 — "
+            f"'{package_name}' 로 재지정 불가. 모듈별 고유 이름 사용 필요.")
     _COLLECTION_OWNER[collection] = package_name
+
+
+# ── 컬렉션 SoT 디렉터리 — 모듈/소유자 네임스페이스 (runtime store v2 P3) ──
+#  평면 {CimsRuntimeDir}/<name> → 소유 모듈 네임스페이스로 분리해 모듈 간 충돌·
+#  소유권 역전을 차단.
+#   - 표준 배포(<PREFIX>/modules/oam/runtime): <PREFIX>/modules/<owner>/runtime/collections/<name>
+#   - dev/비표준(runtime_root 가 modules/oam/runtime 패턴 아님): {runtime_root}/collections/<owner>/<name>
+def _collections_base(config: dict, owner: str) -> str:
+    rt = file_store.runtime_root(config)
+    parent = _os.path.dirname(rt)
+    gp = _os.path.dirname(parent)
+    if (_os.path.basename(rt) == 'runtime' and _os.path.basename(parent) == 'oam'
+            and _os.path.basename(gp) == 'modules'):
+        return _os.path.join(gp, owner, 'runtime', 'collections')
+    return _os.path.join(rt, 'collections', owner)
+
+
+def collection_dir(config: dict, name: str, create: bool = False) -> str:
+    """컬렉션 SoT 디렉터리 경로. owner 는 _COLLECTION_OWNER 로 결정(미등록 시 'csp').
+    create=True 일 때만 mkdir (읽기는 부수효과 없음 — v2 P4 전제)."""
+    owner = _COLLECTION_OWNER.get(name) or 'csp'
+    path = _os.path.join(_collections_base(config, owner), name)
+    if create:
+        _os.makedirs(path, exist_ok=True)
+    return path
+
+
+def migrate_flat_collections(config: dict) -> int:
+    """1회 이행 — 구 평면 {runtime_root}/<name> 의 컬렉션 데이터를 네임스페이스 경로로 이동.
+    빈 잔재(데이터 없는 평면 도메인 디렉터리)는 제거. 이동/제거한 도메인 수 반환."""
+    rt = file_store.runtime_root(config)
+    moved = 0
+    for name in list(_COLLECTION_OWNER.keys()):
+        old = _os.path.join(rt, name)
+        if not _os.path.isdir(old):
+            continue
+        new = collection_dir(config, name, create=False)
+        if _os.path.abspath(old) == _os.path.abspath(new):
+            continue
+        records = [f for f in _os.listdir(old) if f.endswith('.json') and not f.startswith('.')]
+        if records:
+            _os.makedirs(new, exist_ok=True)
+            for f in _os.listdir(old):
+                src = _os.path.join(old, f); dst = _os.path.join(new, f)
+                if not _os.path.exists(dst):
+                    _os.replace(src, dst)
+            moved += 1
+        # 비거나 이동 완료된 구 평면 디렉터리 정리
+        try:
+            _os.rmdir(old)
+        except OSError:
+            pass
+    return moved
 
 
 def should_propagate(scope: Optional[str], mode: Optional[str],

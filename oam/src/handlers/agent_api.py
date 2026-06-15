@@ -265,13 +265,14 @@ async def _csp_config_pull(collection: str, config: dict, agent: dict) -> Handle
     items 는 원본 file_store row 그대로 (CSP 가 jsonl 로 직렬화해 install_path 에 쓸 수 있음).
     """
     import hashlib
-    from services import file_store
+    from services import file_store, ha_lookup
 
     dom = _AGENT_PULL_COLLECTIONS.get(collection)
     if not dom:
         return HandlerResult(status=404, body={"error": "unknown_collection", "collection": collection},
                              media_type="application/json")
-    rows = await asyncio.to_thread(file_store.load_all, file_store.domain_dir(config, dom))
+    # runtime store v2 P3: 소유 모듈 네임스페이스 경로에서 읽기 (create=False — 읽기 무생성)
+    rows = await asyncio.to_thread(file_store.load_all, ha_lookup.collection_dir(config, dom))
     # id 정렬 (csp 가 동일 순서로 jsonl 을 쓸 수 있도록)
     rows.sort(key=lambda r: r.get("id") or 0)
     # 직렬화된 본문 hash → etag

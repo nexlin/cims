@@ -65,7 +65,10 @@ _DOM_SERVICE  = 'sip_service'       # listener_ids 임베드
 
 
 def _dom_dir(config, domain):
-    return file_store.domain_dir(config, domain)
+    # runtime store v2 P3: 평면 {runtime}/<domain> → 소유 모듈 네임스페이스
+    # ({PREFIX}/modules/csp/runtime/collections/<domain>). ha_lookup 가 owner 결정.
+    from services import ha_lookup
+    return ha_lookup.collection_dir(config, domain, create=True)
 
 
 def _now_iso():

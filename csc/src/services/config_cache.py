@@ -296,7 +296,9 @@ class CscConfigCache:
         domain = _DOMAIN_BY_ENTITY.get(entity)
         if not domain:
             return []
-        d = file_store.domain_dir(self._runtime_config, domain)
+        # runtime store v2 P3: 소유 모듈 네임스페이스 경로 (ha_lookup.collection_dir)
+        from services import ha_lookup
+        d = ha_lookup.collection_dir(self._runtime_config, domain)
         rows = file_store.load_all(d)
         if entity == "listener":
             rows.sort(key=lambda r: r.get("id", 0))

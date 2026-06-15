@@ -146,6 +146,15 @@ if __name__ == '__main__':
         config = load_config()
         auth.init(config)
 
+        # runtime store v2 P3 — 구 평면 컬렉션 도메인을 소유 모듈 네임스페이스로 1회 이행.
+        try:
+            from services import ha_lookup as _ha_lookup
+            _moved = _ha_lookup.migrate_flat_collections(config)
+            if _moved:
+                logger.log_info(f"runtime store v2: 컬렉션 {_moved} 도메인 네임스페이스 이행")
+        except Exception as _e:
+            logger.log_warning(f"runtime store v2 collection 이행 skip: {_e}")
+
         # Phase 4d — Mgmt.Cidr 검증 + 명시 로깅.
         # mgmt 대역은 oam 운영의 기준선:
         #  - agent enroll/heartbeat 시 interface.role='mgmt' 자동 매핑 근거.
