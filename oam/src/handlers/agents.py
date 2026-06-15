@@ -2006,9 +2006,35 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
         patches["service_functions"] = sf
     if not patches:
         return HandlerResult(status=400, body={"error": "no_updatable_fields"}, media_type="application/json")
+    # runtime store v2 P5 — package_id 전환(버전 업/다운) 전 old package_id 확보.
+    _old_pkg_id = None
+    if "package_id" in patches:
+        _old_dep = await asyncio.to_thread(_deploy_load, config, did)
+        _old_pkg_id = (_old_dep or {}).get("package_id")
     r = await asyncio.to_thread(_deploy_update, config, did, patches)
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
+    # P5 — 버전 전환 시 컬렉션 SoT 를 대상 버전 schema 로 정합(멱등·예외 무해).
+    if "package_id" in patches and patches["package_id"] != _old_pkg_id:
+        try:
+            from services import collection_schema
+            newp = await asyncio.to_thread(_pkg_load, config, patches["package_id"])
+            oldp = await asyncio.to_thread(_pkg_load, config, _old_pkg_id) if _old_pkg_id else None
+            if newp and (not oldp or newp.get("name") == oldp.get("name")):
+                def _tmpl(p):
+                    t = (p or {}).get("config_template")
+                    return t if isinstance(t, dict) else _safe_json((p or {}).get("config_template_json"))
+                new_tmpl = _tmpl(newp); old_tmpl = _tmpl(oldp) if oldp else None
+                new_ver = (new_tmpl or {}).get("version")
+                owner = newp.get("name")
+                if new_tmpl and owner and new_ver is not None:
+                    migrated = await asyncio.to_thread(
+                        collection_schema.migrate_module_collections,
+                        config, owner, old_tmpl, new_tmpl, new_ver)
+                    if migrated:
+                        logger.log_info(f"runtime store v2 P5: '{owner}' 컬렉션 schema 정합 v{new_ver}: {migrated}")
+        except Exception as _e:
+            logger.log_warning(f"runtime store v2 P5 schema 정합 skip: {_e}")
     _enrich_deploy([r], config)
     return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
 
