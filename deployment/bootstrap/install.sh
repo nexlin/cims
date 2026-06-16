@@ -78,9 +78,16 @@ if [[ $EUID -ne 0 ]]; then
     err "(sudo 없이 실행하면 sudoers·linger·서비스 IP 등 권한 작업이 누락된 채 부분 설치됩니다)"
     exit 1
 fi
+# 보안 정책: root 계정에서 직접 실행 금지 — 반드시 "일반 계정 + sudo".
+#   sudo 는 호출자를 SUDO_USER 에 남긴다. 비어있거나 root 면 = root 로그인(또는 sudo 미경유)
+#   → 거부. (root 상시 로그인 운영을 막고, 책임 추적 가능한 일반 계정 경유를 강제)
+if [[ -z "${SUDO_USER:-}" || "$SUDO_USER" == "root" ]]; then
+    err "보안 정책상 root 계정에서 직접 실행할 수 없습니다 — 일반 계정에서 'sudo $0 [옵션]' 으로 실행하세요."
+    exit 1
+fi
+# 서비스 계정(agent/OAM 프로세스 소유자)도 root 가 되면 안 됨 (--user root 방지).
 if [[ "$SVC_USER" == "root" ]]; then
-    err "서비스 계정이 root 로 해석되었습니다 — agent/OAM 은 일반 계정 소유로 동작해야 합니다."
-    err "일반 계정에서 'sudo $0 [옵션]' 으로 실행하거나 '--user <계정>' 으로 서비스 계정을 지정하세요."
+    err "서비스 계정이 root 입니다 — agent/OAM 은 일반 계정 소유로 동작해야 합니다 ('--user <일반계정>')."
     exit 1
 fi
 

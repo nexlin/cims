@@ -353,6 +353,14 @@ cat > "$UNINSTALL_SH" <<EOF
 set -euo pipefail
 cd "\$(dirname "\$0")"
 
+# 권한 가드 — 제거는 "일반 계정 + sudo" 또는 "root 계정" 둘 다 허용.
+#   단, 일반 계정이면 sudo 가 가능해야 sudoers/keepalived 정리가 끝까지 진행됨
+#   (sudo 없으면 부분 제거) → 그 경우만 거부.
+if [[ \$EUID -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
+    echo "ERROR: 일반 계정으로 제거하려면 sudo 가 필요합니다 (또는 root 계정으로 실행하세요)." >&2
+    exit 1
+fi
+
 force=0
 keep_modules=0
 for arg in "\$@"; do
