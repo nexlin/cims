@@ -400,8 +400,10 @@ except Exception: print('')" 2>/dev/null; }
     else
         # 2) agent 등록 + enrollment token (신규 생성 → 이름 중복(409)이면 기존 레코드 삭제 후 재생성)
         #    재실행 대비: 같은 이름 레코드가 남아 있으면(이전 설치 잔재) DELETE 후 새로 만든다.
-        #    (OAM 의 GET /agents 응답은 {"items":[...]}. regenerate-token 경로는 현재 500 →
-        #     delete+recreate 가 견고 — 검증된 201 경로 재사용.)
+        #    (OAM 의 GET /agents 응답은 {"items":[...]}.) regenerate-token 엔드포인트도
+        #    정상 동작하지만(미만료 토큰=409 still_valid / 만료·무토큰=200 재발급) 재설치 시
+        #    유효 토큰이 남아 있으면 409 로 새 토큰을 못 받는다 → delete+recreate 가
+        #    토큰 상태와 무관히 항상 fresh 토큰을 주는 멱등 경로라 견고(검증된 201 재사용).
         for _i in 1 2 3 4 5 6; do
             ENROLL_TOKEN=$(_api POST /api/v1/agents "{\"name\":\"$HOSTNM\"}" "$TOK" | _jget enrollment_token)
             [[ -n "$ENROLL_TOKEN" ]] && break
