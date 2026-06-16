@@ -248,25 +248,54 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         if parts[0] == 'leak-reclaims':
             return await _leak_reclaims(config, qp('date'))
 
-        if parts[0] == 'service':
-            svc = parts[1] if len(parts) > 1 else 'summary'
-            if svc == 'live':
-                return await _service_live(config)
-            if svc == 'trend':
-                return await _service_trend(config, qp('window', '8h'))
-            if svc == 'events':
-                return await _service_events(config, qp('limit', '60'))
-            if svc == 'org':
-                return await _service_org(config)
-            if svc == 'ptt-members':
-                return await _ptt_members(config, qp('group', ''), qp('page', '1'), qp('limit', '50'))
-            gran = qp('granularity', '1d')
-            from_dt = qp('from')
-            to_dt = qp('to')
-            date = qp('date')
-            return await _service_stats(config, svc, gran, from_dt, to_dt, date)
+        # NOTE: service/* (KPI 관측) 는 svc-mgmt 모듈 귀속 (oam_base_service_split §4).
+        # 별도 핸들러 handle_stats_service(_STATS_SERVICE_BASE) 가 처리한다.
+        # --role all 에서는 두 핸들러가 모두 등록되며 controller 최장 일치로
+        # /api/v1/stats/service/* 는 handle_stats_service 로 라우팅된다(여기 도달 안 함).
+        # --role base 에서는 service 핸들러 미등록 → service/* 는 여기서 404 (격리).
 
         return HandlerResult(status=404, body={'error': 'Not Found'})
+    except Exception as e:
+        return HandlerResult(status=500, body={'error': str(e)})
+
+
+_STATS_SERVICE_BASE = '/api/v1/stats/service'
+
+
+async def handle_stats_service(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """서비스 KPI 관측 (CSP/CMP VoIP·PTT) — svc-mgmt 모듈 귀속.
+    base 의 노드 health(_health) 와 함수 단위로 분리(oam_base_service_split §4).
+    --role all 에서는 base handle_stats 와 함께 등록되어 controller 최장 일치로
+    /api/v1/stats/service/* 만 이 핸들러로 들어온다 (동작 무변경)."""
+    config = kwargs.get('config', {})
+    qs = handler_args.query_params or {}
+    parts = _path_parts(handler_args.full_path, _STATS_SERVICE_BASE)
+    method = handler_args.method.upper()
+
+    if method != 'GET':
+        return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
+    def qp(name, default=None):
+        v = qs.get(name)
+        return v if v not in (None, '') else default
+
+    try:
+        svc = parts[0] if len(parts) > 0 else 'summary'
+        if svc == 'live':
+            return await _service_live(config)
+        if svc == 'trend':
+            return await _service_trend(config, qp('window', '8h'))
+        if svc == 'events':
+            return await _service_events(config, qp('limit', '60'))
+        if svc == 'org':
+            return await _service_org(config)
+        if svc == 'ptt-members':
+            return await _ptt_members(config, qp('group', ''), qp('page', '1'), qp('limit', '50'))
+        gran = qp('granularity', '1d')
+        from_dt = qp('from')
+        to_dt = qp('to')
+        date = qp('date')
+        return await _service_stats(config, svc, gran, from_dt, to_dt, date)
     except Exception as e:
         return HandlerResult(status=500, body={'error': str(e)})
 
@@ -1920,6 +1949,13 @@ async def _ptt_members(config: dict, group: str, page='1', limit='50') -> Handle
     })
 
 
+# base(노드 health/messages/leak/subscribers) — base OAM 귀속.
 CIMS_STATS_HANDLER_LIST = [
     (_STATS_BASE, handle_stats, {}),
+]
+
+# service KPI(/api/v1/stats/service/*) — svc-mgmt 모듈 귀속.
+# controller 최장 일치 덕에 _STATS_BASE 와 충돌 없이 공존(longest match → service).
+CIMS_STATS_SERVICE_HANDLER_LIST = [
+    (_STATS_SERVICE_BASE, handle_stats_service, {}),
 ]

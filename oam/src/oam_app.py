@@ -66,6 +66,11 @@ if __name__ == '__main__':
     # 즉시 종료. agent 가 구 OAM 을 내리기 전에 신 OAM 패키지가 뜰 수 있는지 확인하는 용도.
     parser.add_argument('--preflight', action='store_true',
                         help='import + config 스모크만 수행하고 (bind 없이) 종료 — self-upgrade 검증용')
+    # oam_base_service_split P0: base/service 핸들러 그룹 분기.
+    #   all  = 현행 단일프로세스 (게이트웨이 + 공통 + in-process 서비스 핸들러 전부) — 기본·하위호환(I4)
+    #   base = 게이트웨이 + 공통 관리만. 서비스(가입자/녹취/flow/검증/KPI)는 미등록 → 독립 모듈 귀속.
+    parser.add_argument('--role', choices=['base', 'all'], default='all',
+                        help='base = 게이트웨이+공통 관리만 / all = 현행 단일프로세스(기본)')
     args_dict = vars(parser.parse_args())
 
     logger = Logger(log_dir=os.path.join(_COMPONENT_ROOT, "log"), log_file_prefix="app", retention_day=30)
@@ -111,23 +116,25 @@ if __name__ == '__main__':
     from services       import flow_logger, logger as csc_logger, config_cache, alert_log
     from handlers       import auth, recording
     from handlers.auth           import CIMS_AUTH_HANDLER_LIST
+    # /users/me (본인 프로파일) = identity-plane, base 귀속(oam_base_service_split D8).
+    # 콘솔 로그인 부트스트랩의 필수 경로 → base 가 항상 직접 등록(slim 핸들러).
+    from handlers.users          import CIMS_USERS_HANDLER_LIST as CIMS_ME_HANDLER_LIST
     # 가입자/PTT그룹 CRUD — admin.handle_users 는 /users/me 를 users.handle_users 로 위임하는
     # superset 이라, /me(인증) + 가입자 admin(관리) 를 한 핸들러로 커버. (OAM=콘솔 단일 게이트웨이)
     # admin(가입자/계정 CRUD)·org 는 csc(서비스 모듈) 측 핸들러 — 부트스트랩
     # standalone OAM 패키지에는 서비스 모듈이 없으므로 선택 로드. 서비스 설치
     # (3단계 이후, csc 모듈 배포) 후 OAM 재기동 시 자동 활성.
+    # P0: 이 핸들러들은 SERVICE 그룹 → --role all 에서만 등록(--role base 는 제외).
     try:
         from handlers.admin      import CIMS_ADMIN_HANDLER_LIST
         from handlers.org        import CIMS_ORG_HANDLER_LIST
     except Exception as _e:
         print(f'[bootstrap] subscriber/org handlers unavailable (csc 미설치): {_e}', flush=True)
-        # /users/me(본인 프로파일)는 콘솔 로그인 부트스트랩의 필수 경로 — 평소엔
-        # csc admin.handle_users 가 위임하지만, standalone 에선 oam 자체 users
-        # 핸들러를 직접 등록한다 (me 외 경로는 404 = 가입자 기능은 csc 설치 후).
-        from handlers.users import CIMS_USERS_HANDLER_LIST as CIMS_ADMIN_HANDLER_LIST
+        # csc 미설치 시 admin superset 부재 → base 의 slim /me 핸들러가 /users/me 를 커버.
+        CIMS_ADMIN_HANDLER_LIST = []
         CIMS_ORG_HANDLER_LIST = []
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
-    from handlers.stats          import CIMS_STATS_HANDLER_LIST
+    from handlers.stats          import CIMS_STATS_HANDLER_LIST, CIMS_STATS_SERVICE_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
     from handlers.build          import CIMS_BUILD_HANDLER_LIST, init as build_init
     from handlers.service_control import CIMS_SERVICE_CONTROL_HANDLER_LIST
@@ -387,69 +394,55 @@ if __name__ == '__main__':
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,
         )
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
-        admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_STATS_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_BUILD_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_SERVICE_CONTROL_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AGENT_ADMIN_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_MODULES_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_HA_GROUPS_HANDLER_LIST
-        ])
+        # ── oam_base_service_split P0 — 핸들러 BASE/SERVICE 그룹 분기 (§4, §11) ──
+        #   role=all  : BASE + SERVICE 전부 = 현행 단일프로세스(동작 무변경, 하위호환 I4).
+        #   role=base : BASE(게이트웨이 + 공통 관리)만. 서비스(가입자/녹취/flow/검증/KPI)는
+        #               미등록 → 독립 모듈/게이트웨이 프록시 귀속(P1+).
+        # all 모드의 최종 라우트 테이블은 BASE→SERVICE 등록 순서로 구 interleaved 등록과
+        # 동일하다(유일 충돌 = /api/v1/users[ME slim ← admin superset], /api/v1/recordings
+        # [FLOW ← RECORDING] — 둘 다 후순위 등록이 우선이라 현행 핸들러 선택 보존).
+        role = args_dict.get('role', 'all')
+        logger.log_info(f"[role] OAM role = {role}")
+
+        def _bind(L):
+            return [(path, handler, cims_kwargs) for path, handler, _ in L]
+
+        # ── BASE 공통 (모든 role) ──
+        # /users/me = identity-plane(D8) → base slim 핸들러를 항상 등록.
+        # all 모드에선 뒤의 SERVICE admin superset 이 /api/v1/users 를 덮어쓴다(현행 동작).
+        base_rules = _bind(CIMS_AUTH_HANDLER_LIST + CIMS_ME_HANDLER_LIST)
+        base_rules += _bind(CIMS_STATS_HANDLER_LIST)          # 노드 health/messages/leak
+        base_rules += _bind(CIMS_BUILD_HANDLER_LIST)
+        base_rules += _bind(CIMS_SERVICE_CONTROL_HANDLER_LIST)
+        base_rules += _bind(CIMS_AGENT_ADMIN_HANDLER_LIST)
+        base_rules += _bind(CIMS_MODULES_HANDLER_LIST)
+        base_rules += _bind(CIMS_HA_GROUPS_HANDLER_LIST)
         if _console_dir:
-            admin_server.add_dynamic_rules([
-                (path, handler, cims_kwargs)
-                for path, handler, _ in CIMS_CONSOLE_STATIC_HANDLER_LIST
-            ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_ALERTS_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_CONSOLE_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AGENT_API_HANDLER_LIST
-        ])
-        admin_server.add_dynamic_rules([
-            (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AGENT_PUBLIC_HANDLER_LIST
-        ])
+            base_rules += _bind(CIMS_CONSOLE_STATIC_HANDLER_LIST)
+        base_rules += _bind(CIMS_ALERTS_HANDLER_LIST)
+        base_rules += _bind(CIMS_CONSOLE_HANDLER_LIST)
+        base_rules += _bind(CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST)
+        base_rules += _bind(CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST)
+        base_rules += _bind(CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST)
+        base_rules += _bind(CIMS_AGENT_API_HANDLER_LIST)
+        base_rules += _bind(CIMS_AGENT_PUBLIC_HANDLER_LIST)
+        admin_server.add_dynamic_rules(base_rules)
+
+        # ── SERVICE (in-process; role=all 에서만; P2+ 게이트웨이 프록시로 이관) ──
+        if role == 'all':
+            # 가입자/조직 CRUD(csc 귀속) — admin superset 이 base slim /me 를 덮어씀.
+            admin_server.add_dynamic_rules(_bind(CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST))
+            # 녹취·flow(svc-mgmt 귀속) — 자기 init() 상태 사용(raw kwargs). FLOW→RECORDING
+            # 순서로 /api/v1/recordings 충돌 시 RECORDING 우선(현행 보존).
+            admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
+            admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
+            # 검증·service KPI(svc-mgmt 귀속).
+            admin_server.add_dynamic_rules(
+                _bind(CIMS_VERIFICATION_HANDLER_LIST + CIMS_STATS_SERVICE_HANDLER_LIST))
+        else:
+            logger.log_info('[role] base — 서비스 핸들러(가입자/녹취/flow/검증/KPI) 미등록 '
+                            '(독립 모듈/게이트웨이 프록시 귀속, P1+)')
+
         admin_server.start()
         logger.log_info(f"OAM server started on port {admin_conf.get('Port', 4419)}")
 
