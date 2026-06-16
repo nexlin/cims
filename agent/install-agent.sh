@@ -59,7 +59,23 @@ fi
 #   update = 자가업그레이드: 서비스 계정(non-root)으로 실행(파일 교체만, 권한작업 없음).
 if [[ "$MODE" == "fresh" ]]; then
     if [[ $EUID -ne 0 ]]; then
-        echo "ERROR: 설치는 root 권한이 필요합니다 — 일반 계정에서 'sudo bash $0 ...' 로 실행하세요." >&2
+        # 토큰 명령(curl|bash, 비root)으로 실행됨 → 설치(sudo 필요)는 하지 않는다.
+        # install-agent.sh 를 현재 디렉터리에 내려받고 sudo 실행 명령만 안내한다.
+        # (다운로드는 sudo 불필요 — "토큰 실행이 sudo 를 요구"하지 않게.)
+        _DEST="./install-agent.sh"
+        if curl -fsSLk "$OAM_URL/install-agent.sh" -o "$_DEST" 2>/dev/null && [[ -s "$_DEST" ]]; then
+            chmod +x "$_DEST" 2>/dev/null || true
+            echo ""
+            echo "✓ install-agent.sh 다운로드 완료 → $(pwd)/install-agent.sh"
+            echo ""
+            echo "  설치는 sudo 로 1줄 실행하세요 (일반 계정에서 sudo — root 직접 로그인 불필요):"
+            echo ""
+            echo "    sudo bash install-agent.sh --oam-url $OAM_URL --enrollment-token $ENROLL_TOKEN --name \"$AGENT_NAME\""
+            echo ""
+            echo "  (설치 경로 지정 시 끝에 '--install-dir /원하는/경로' 추가 — 기본 /opt/cims-agent)"
+            exit 0
+        fi
+        echo "ERROR: install-agent.sh 다운로드 실패 — $OAM_URL/install-agent.sh 확인" >&2
         exit 1
     fi
     SVC_USER="${SVC_USER_ARG:-${SUDO_USER:-}}"
