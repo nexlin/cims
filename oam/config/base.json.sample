@@ -32,7 +32,14 @@
             { "segment": "/api/v1/users",         "upstream": "http://127.0.0.1:4421", "module": "csc" },
             { "segment": "/api/v1/users/import",  "upstream": "http://127.0.0.1:4421", "module": "csc" },
             { "segment": "/api/v1/ptt/groups",    "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/organizations", "upstream": "http://127.0.0.1:4421", "module": "csc" }
+            { "segment": "/api/v1/organizations", "upstream": "http://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/stats/service",              "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/verification",               "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/recordings",                 "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/flow",                       "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/call/logs",                  "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/ptt/history",                "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/security/abnormal-sessions", "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" }
         ]
     }
 }

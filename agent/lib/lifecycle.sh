@@ -407,6 +407,47 @@ stop_oam() {
     stop_one oam
 }
 
+# oam_base_service_split P3 (D5) — svc-mgmt 독립 서비스 모듈(서비스 관측/녹취/flow/검증).
+#   base OAM(게이트웨이) 뒤 loopback(기본 4480) 업스트림. csc 와 동격 독립 프로세스.
+#   ⚠️ 추가(additive)·dormant: 기본 desired-state(supervised)에 자동 편입하지 않는다 —
+#      분리 배포(--role base) 채택 시점(P5)에 supervised.json 으로 등록. all 모드(단일
+#      프로세스)에선 미사용. kill_stray 패턴은 고유 절대경로(svc_mgmt_app.py)라 oam_app.py/
+#      csc_app.py 와 교차 매칭되지 않음(pgrep 자기명중 방지).
+start_svc_mgmt() {
+    if is_running svc-mgmt; then warn "svc-mgmt 이미 실행 중 (pid=$(read_pid svc-mgmt))"; return 0; fi
+    [[ ! -f "$DIST_DIR/svc-mgmt/src/svc_mgmt_app.py" ]] && err "svc-mgmt 소스 없음 (make dist 실행 필요)" && return 1
+    local svc_port
+    svc_port=$("$PYBIN" -c "
+import json, os
+base='$DIST_DIR/svc-mgmt/config/svc-mgmt.json'
+candidates=['$DIST_DIR/svc-mgmt/config.json', '$DIST_DIR/config.json']
+p=None
+for ov in candidates:
+    if not os.path.isfile(ov): continue
+    try:
+        f=json.load(open(ov))
+        if isinstance(f,dict):
+            p=f.get('Server.Port') or (f.get('Server',{}) or {}).get('Port')
+            if p: break
+    except: pass
+if not p:
+    try: p=json.load(open(base))['Server']['Port']
+    except: p=4480
+print(p)" 2>/dev/null || echo 4480)
+    kill_stray "$DIST_DIR/svc-mgmt/src/svc_mgmt_app.py" "$svc_port" tcp
+    info "svc-mgmt (서비스 관측/녹취/flow/검증) 시작... (port=$svc_port)"
+    cd "$DIST_DIR/svc-mgmt/src"
+    "$PYBIN" -u "$DIST_DIR/svc-mgmt/src/svc_mgmt_app.py" >> "$LOG_DIR/svc-mgmt.log" 2>&1 &
+    save_pid svc-mgmt $!
+    sleep 1.5
+    is_running svc-mgmt && ok "svc-mgmt 시작 완료 (pid=$(read_pid svc-mgmt), port=$svc_port)" \
+        || { err "svc-mgmt 시작 실패"; tail -3 "$LOG_DIR/svc-mgmt.log" | sed 's/^/  /'; return 1; }
+}
+
+stop_svc_mgmt() {
+    stop_one svc-mgmt
+}
+
 start_console() {
     if is_running console; then warn "console 이미 실행 중 (pid=$(read_pid console))"; return 0; fi
     # Console 3분화:
@@ -715,6 +756,7 @@ _start_one() {
         cwrtc)      start_cwrtc ;;
         oam)        start_oam ;;     # OAM 분리 Phase 3b
         csc)        start_csc ;;
+        svc-mgmt)   start_svc_mgmt ;;  # oam_base_service_split P3 — 명시 기동만(all 미포함)
         console)    start_console ;;
         phone)      start_phone ;;
         tb-csc)     start_tb_csc ;;
@@ -738,6 +780,7 @@ _stop_one() {
                 case "$c" in
                     csc)     stop_csc ;;
                     oam)     stop_oam ;;     # OAM 분리 Phase 3b
+                    svc-mgmt) stop_svc_mgmt ;;
                     console) stop_console ;;
                     phone)   stop_phone ;;
                     *)       stop_one "$c" ;;
@@ -798,6 +841,7 @@ _stop_one() {
             ;;
         csc)     stop_csc ;;
         oam)     stop_oam ;;        # OAM 분리 Phase 3b
+        svc-mgmt) stop_svc_mgmt ;;
         console) stop_console ;;
         phone)   stop_phone ;;
         *)       stop_one "$1" ;;

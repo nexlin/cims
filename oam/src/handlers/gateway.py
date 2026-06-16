@@ -178,17 +178,25 @@ def seed_routes(config: dict) -> int:
     return n
 
 
-# csc(가입자/조직/PTT그룹) 기본 업스트림 — 부트스트랩 첫 부팅용. svc-mgmt 는 P3 에서 추가.
-#   현 csc 가 실제 서빙하는 경로(canonical /api/v1/subscribers 리네이밍은 D6 후속):
-#     /api/v1/users          가입자 CRUD (단 /users/me 는 base identity-plane → 미프록시)
-#     /api/v1/users/import   가입자 일괄 import (longest-match 로 /users 보다 우선)
-#     /api/v1/ptt/groups     PTT 그룹/멤버/affiliation 관리
-#     /api/v1/organizations  조직 트리
+# 기본 업스트림 시드 — 부트스트랩 첫 부팅용(base.json Gateway.Routes 미지정 시).
+#   csc(가입자/조직/PTT그룹, admin 4421/TCP)·svc-mgmt(관측/녹취/flow/검증, 4480).
+#   canonical 리네이밍(/api/v1/subscribers, /api/v1/calls)은 D6 후속 — 현 실경로 등록.
+#     csc:      /api/v1/users(단 /users/me 는 base identity-plane)·/users/import·
+#               /ptt/groups·/organizations
+#     svc-mgmt: /api/v1/stats/service·/verification·/recordings·/flow·/call/logs·
+#               /ptt/history·/security/abnormal-sessions
 _DEFAULT_SEED_ROUTES = [
     {'segment': '/api/v1/users',         'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
     {'segment': '/api/v1/users/import',  'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
     {'segment': '/api/v1/ptt/groups',    'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
     {'segment': '/api/v1/organizations', 'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
+    {'segment': '/api/v1/stats/service',              'upstream': 'http://127.0.0.1:4480', 'module': 'svc-mgmt'},
+    {'segment': '/api/v1/verification',               'upstream': 'http://127.0.0.1:4480', 'module': 'svc-mgmt'},
+    {'segment': '/api/v1/recordings',                 'upstream': 'http://127.0.0.1:4480', 'module': 'svc-mgmt'},
+    {'segment': '/api/v1/flow',                       'upstream': 'http://127.0.0.1:4480', 'module': 'svc-mgmt'},
+    {'segment': '/api/v1/call/logs',                  'upstream': 'http://127.0.0.1:4480', 'module': 'svc-mgmt'},
+    {'segment': '/api/v1/ptt/history',                'upstream': 'http://127.0.0.1:4480', 'module': 'svc-mgmt'},
+    {'segment': '/api/v1/security/abnormal-sessions', 'upstream': 'http://127.0.0.1:4480', 'module': 'svc-mgmt'},
 ]
 
 

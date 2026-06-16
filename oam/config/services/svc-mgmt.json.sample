@@ -1,0 +1,34 @@
+{
+    "_comment": "oam_base_service_split §7 (D5) — svc-mgmt 독립 서비스 모듈 전용 설정. common.json 의 공유항목(JwtSecret/CimsDatabase/CimsRuntimeDir/ServiceLogging, read-only)을 가져오고 자기 bind/MediaServer/routes 는 여기서 소유. base 가 아니라 게이트웨이의 업스트림. 활성: svc-mgmt.json 으로 rename + svc_mgmt_app.py 가 CIMS_SVCMGMT_CONFIG 로 지정.",
+    "Server": {
+        "Ip": "127.0.0.1",
+        "Port": 4480,
+        "_comment": "I1: loopback 비공개. 외부 노출은 base 게이트웨이(4419) 경유만."
+    },
+    "SystemId": "svc_mgmt_01",
+    "MediaServer": {
+        "_comment": "서비스 KPI(stats/service) 의 CMP STATS probe 대상 — 전 미디어 노드.",
+        "Endpoints": [
+            { "ip": "10.0.1.48", "port": 9000 },
+            { "ip": "10.0.1.49", "port": 9000 }
+        ]
+    },
+    "CspNotify": {
+        "Ip": "121.161.164.47",
+        "Port": 4421,
+        "_comment": "stats/service 의 CSP STATS probe 대상."
+    },
+    "Gateway": {
+        "_comment": "svc-mgmt 가 base 게이트웨이에 self-register 할 라우트(설치 시 POST /api/v1/gateway/routes). canonical /api/v1/calls 통합은 D6 후속 — 현 실경로를 등록.",
+        "Routes": [
+            { "segment": "/api/v1/stats/service",              "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/verification",               "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/recordings",                 "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/flow",                       "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/call/logs",                  "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/ptt/history",                "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
+            { "segment": "/api/v1/security/abnormal-sessions", "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" }
+        ],
+        "RequiresBaseOam": "0.1.0"
+    }
+}
