@@ -69,6 +69,21 @@ ok()   { echo -e "\033[0;32m[OK]\033[0m    $*"; }
 warn() { echo -e "\033[0;33m[WARN]\033[0m  $*" >&2; }
 err()  { echo -e "\033[0;31m[ERROR]\033[0m $*" >&2; }
 
+# ── 권한 가드 — 반드시 "일반 계정에서 sudo 로" 실행 (부분 설치 차단) ──────────
+#   이 인스톨러는 sudoers/linger/서비스 IP/소유권 변경 등 root 작업과, agent/OAM 을
+#   일반(서비스) 계정 소유로 띄우는 작업을 함께 수행한다. sudo 없이 실행하면 일부
+#   단계만 진행돼(부분 설치) 추적이 어렵다 → 권한이 부족하면 즉시 종료한다.
+if [[ $EUID -ne 0 ]]; then
+    err "root 권한이 필요합니다 — 일반 계정에서 'sudo $0 [옵션]' 으로 다시 실행하세요."
+    err "(sudo 없이 실행하면 sudoers·linger·서비스 IP 등 권한 작업이 누락된 채 부분 설치됩니다)"
+    exit 1
+fi
+if [[ "$SVC_USER" == "root" ]]; then
+    err "서비스 계정이 root 로 해석되었습니다 — agent/OAM 은 일반 계정 소유로 동작해야 합니다."
+    err "일반 계정에서 'sudo $0 [옵션]' 으로 실행하거나 '--user <계정>' 으로 서비스 계정을 지정하세요."
+    exit 1
+fi
+
 # ── 전제 확인 ─────────────────────────────────────────────────
 for c in python3 tar openssl; do
     command -v "$c" >/dev/null || { err "$c 필요 — 설치 후 재시도"; exit 1; }
@@ -151,11 +166,7 @@ if [[ -z "$MGMT_IP" ]]; then
     [[ -z "$MGMT_IP" ]] && MGMT_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 fi
 
-# 권한 체크 — 대화식 입력으로 확정된 PREFIX 기준
-if [[ $EUID -ne 0 && ! -w "$(dirname "$PREFIX")" && ! -w "$PREFIX" ]]; then
-    err "root 권한 필요 (또는 $PREFIX 쓰기 가능해야 함) — sudo 로 실행"
-    exit 1
-fi
+# 권한 체크는 스크립트 상단 가드(반드시 sudo)에서 이미 강제됨 — 여기서는 생략.
 
 _latest() { ls -1 "$PKG_DIR"/$1-*.tar.gz 2>/dev/null | sort -V | tail -1; }
 OAM_TAR=$(_latest oam); CON_TAR=$(_latest console); AGT_TAR=$(_latest agent)
@@ -252,6 +263,11 @@ cat > "$PREFIX/uninstall-base.sh" <<UNINST
 set -uo pipefail
 PREFIX="$PREFIX"
 YES=0; [[ "\${1:-}" == "--yes" || "\${1:-}" == "-y" ]] && YES=1
+# 권한 가드 — 제거도 root 작업(systemd/소유권/rm). sudo 없이 실행하면 부분 제거 → 즉시 종료.
+if [[ \$EUID -ne 0 ]]; then
+    echo "ERROR: root 권한이 필요합니다 — 'sudo \$0 [--yes]' 로 실행하세요." >&2
+    exit 1
+fi
 echo "다음을 제거합니다:"
 echo "  • OAM/Console 서비스 (systemd cims-oam.service 또는 start-oam 프로세스)"
 echo "  • 이 서버의 agent + 배포된 모듈 (agent 의 uninstall.sh 위임)"

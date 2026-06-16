@@ -185,6 +185,19 @@ cat > "$INIT_SH" <<EOF
 set -euo pipefail
 cd "\$(dirname "\$0")"
 
+# ── 권한 가드 — 일반 계정 + sudo 사용 가능 필수 (부분 초기화 차단) ──
+#   init.sh 는 일반 계정으로 실행하고 sudoers/linger 만 내부에서 sudo 로 등록한다.
+#   root 로 실행하면 systemd --user 세션이 어긋나고, sudo 가 없으면 sudoers 등록이
+#   누락된 채 enroll/systemd 만 진행돼 부분 설치된다 → 둘 다 즉시 종료.
+if [[ \$EUID -eq 0 ]]; then
+    echo "ERROR: root 가 아니라 서비스 운영 계정으로 실행하세요 (sudo 는 init.sh 내부에서 호출)." >&2
+    exit 1
+fi
+if ! command -v sudo >/dev/null 2>&1; then
+    echo "ERROR: sudo 가 없습니다 — sudo 설치 후 재실행하세요 (sudoers·linger 등록에 root 권한 필요)." >&2
+    exit 1
+fi
+
 # (1) sudoers + linger
 if sudo -nl 2>/dev/null | grep -qF "\$(pwd)/agent/bin/cims-priv"; then
     echo "✓ sudoers 이미 등록됨 — skip"
