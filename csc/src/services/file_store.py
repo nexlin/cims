@@ -58,7 +58,7 @@ def runtime_root(config: dict) -> str:
 _OAM_CATEGORY = {
     'agents': 'control', 'deployments': 'control', 'jobs': 'control',
     'metrics': 'control', 'packages': 'control', 'ha_groups': 'control',
-    'csp_sync_txn': 'control',
+    'csp_sync_txn': 'control', 'gateway_routes': 'control',
     'console_accounts': 'console', 'console_layouts': 'console', 'console_menu': 'console',
 }
 

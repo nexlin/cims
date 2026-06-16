@@ -89,10 +89,37 @@ if __name__ == '__main__':
             applied += 1
         return applied
 
+    def _deep_merge(dst: dict, src: dict) -> dict:
+        for k, v in (src or {}).items():
+            if isinstance(v, dict) and isinstance(dst.get(k), dict):
+                _deep_merge(dst[k], v)
+            else:
+                dst[k] = v
+        return dst
+
+    def _load_base_config():
+        """oam_base_service_split §7 — 설정 분리(비파괴).
+          common.json 존재 시 = common.json + base.json (공통+base 전용 병합).
+          부재 시            = oam.json (현행 단일 설정, 하위호환).
+        반환: (config_dict, source_label)."""
+        cfg_dir = os.path.dirname(_CONFIG_PATH)
+        common_p = os.path.join(cfg_dir, 'common.json')
+        base_p = os.path.join(cfg_dir, 'base.json')
+        if os.path.isfile(common_p):
+            merged: dict = {}
+            with open(common_p, 'r') as f:
+                _deep_merge(merged, json.load(f))
+            if os.path.isfile(base_p):
+                with open(base_p, 'r') as f:
+                    _deep_merge(merged, json.load(f))
+            return merged, f'common.json+base.json ({cfg_dir})'
+        with open(_CONFIG_PATH, 'r') as f:
+            return json.load(f), _CONFIG_PATH
+
     def load_config():
         try:
-            with open(_CONFIG_PATH, 'r') as f:
-                c = json.load(f)
+            c, _src = _load_base_config()
+            logger.log_info(f"OAM config source: {_src}")
         except FileNotFoundError:
             logger.log_error(f"Config file not found at {_CONFIG_PATH}")
             return {}
@@ -147,6 +174,7 @@ if __name__ == '__main__':
     from handlers.console_accounts import CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST
     from handlers.service_descriptors import CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
     from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
+    from handlers.gateway              import CIMS_GATEWAY_HANDLER_LIST, register_gateway
     from services import service_registry
     from services.flow_logger    import FLOW_HANDLER_LIST
 
@@ -426,6 +454,7 @@ if __name__ == '__main__':
         base_rules += _bind(CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_API_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_PUBLIC_HANDLER_LIST)
+        base_rules += _bind(CIMS_GATEWAY_HANDLER_LIST)   # /api/v1/gateway/* 제어면(base 소유)
         admin_server.add_dynamic_rules(base_rules)
 
         # ── SERVICE (in-process; role=all 에서만; P2+ 게이트웨이 프록시로 이관) ──
@@ -442,6 +471,14 @@ if __name__ == '__main__':
         else:
             logger.log_info('[role] base — 서비스 핸들러(가입자/녹취/flow/검증/KPI) 미등록 '
                             '(독립 모듈/게이트웨이 프록시 귀속, P1+)')
+            # role=base: 서비스 세그먼트(/api/v1/<service>/*)를 라우트 테이블에 따라
+            # loopback 업스트림으로 프록시 마운트. all 모드는 in-process 핸들러가 세그먼트를
+            # 소유하므로 프록시를 마운트하지 않는다(충돌 방지).
+            try:
+                _gw_n = register_gateway(admin_server, config)
+                logger.log_info(f"[gateway] mounted {_gw_n} proxy route(s)")
+            except Exception as _e:
+                logger.log_error(f"[gateway] mount failed: {_e}")
 
         admin_server.start()
         logger.log_info(f"OAM server started on port {admin_conf.get('Port', 4419)}")

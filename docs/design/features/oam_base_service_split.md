@@ -307,7 +307,7 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 | Phase | 내용 | 위험 |
 |---|---|---|
 | **P0** ✅ | 핸들러 BASE/SERVICE 그룹화 + `--role {base\|all}` 플래그(기본 `all`). stats 함수 단위 분리(`handle_stats_service`/`/api/v1/stats/service`). **동작 0 변경**(라우트 테이블 diff: `all`=현행 + `/api/v1/stats/service` 전용 핸들러만 추가, 핸들러 선택 무변경; `base`=서비스 라우트 부재). `oam_app.py`·`handlers/stats.py`. | 낮음 |
-| **P1** | 게이트웨이(라우트 테이블·프록시·스트리밍 passthrough) + `common.json`/`base.json` 분리. 기본은 여전히 단일프로세스(`all`) | 낮음 |
+| **P1** ✅ | 게이트웨이(`handlers/gateway.py`: file_store `control/gateway_routes` 라우트 테이블 + aiohttp 프록시[method/body/query/header 화이트리스트 passthrough·ETag/304·Content-Disposition 보존·RFC8594 Deprecation/Sunset·loopback 업스트림 강제 I1] + self-register API `/api/v1/gateway/routes`) + `common.json`/`base.json` 분리(`load_config` 비파괴 fallback, `.sample` 동봉). `--role base` 에서만 프록시 마운트(all 은 in-process). 기본은 여전히 단일프로세스(`all`). | 낮음 |
 | **P2** | csc 가입자 API in-process import → **게이트웨이 프록시로 전환**(중복 제거, D3). dev 1노드 E2E | 중 |
 | **P3** | 공유 OAM-SDK 추출 + svc-mgmt 독립 모듈(`svc_mgmt_app.py`: stats/service·calls·verification) + supervised/preflight + `services/*.json` (D5) | 중 |
 | **P4** | 콘솔 D1: 위젯 카탈로그 + 사용자 레이아웃 저장 API + 프로파일 템플릿/개인화 UI | 중 |

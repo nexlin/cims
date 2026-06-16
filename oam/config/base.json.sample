@@ -1,0 +1,37 @@
+{
+    "_comment": "oam_base_service_split §7 — base(게이트웨이+공통 관리) 전용 설정. common.json 위에 deep-merge. base 가 /stats/health 를 직접 서빙하므로 노드 probe 대상(CspNotify/CmpIp/MediaServer)도 여기 둔다. Gateway.Routes = 게이트웨이 라우트 시드(테이블이 비었을 때만).",
+    "Server": {
+        "Ip": "0.0.0.0",
+        "Port": 4419,
+        "AgentOamUrl": "https://10.0.2.45:4419",
+        "DevMode": false
+    },
+    "Agent": {
+        "MtlsEnabled": false
+    },
+    "Packages": {
+        "Dir": "packages",
+        "BackupDir": "packages_trash"
+    },
+    "ConfigCacheDir": "cache",
+    "CspNotify": {
+        "Ip": "121.161.164.47",
+        "Port": 4421
+    },
+    "CmpIp": "10.0.1.48",
+    "CmpPort": 9000,
+    "MediaServer": {
+        "Endpoints": [
+            { "ip": "10.0.1.48", "port": 9000 },
+            { "ip": "10.0.1.49", "port": 9000 }
+        ]
+    },
+    "Gateway": {
+        "_comment": "세그먼트별 업스트림 시드. 업스트림은 loopback(127.0.0.1) 비공개 포트만 허용(I1). 서비스 모듈이 설치 시 POST /api/v1/gateway/routes 로 self-register 하면 이 시드는 첫 부팅 1회만 쓰인다.",
+        "Routes": [
+            { "segment": "/api/v1/subscribers", "upstream": "http://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/org",         "upstream": "http://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/ptt",         "upstream": "http://127.0.0.1:4421", "module": "csc" }
+        ]
+    }
+}

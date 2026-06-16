@@ -1,0 +1,36 @@
+{
+    "_comment": "oam_base_service_split §7 — 전 모듈 공유 설정(read-only 공유). base·csc·svc-mgmt 가 각자 import. 활성화: 이 파일을 common.json 으로 rename 하면 load_config 가 oam.json 대신 common.json+base.json 을 읽는다(단일프로세스 oam.json 과 비파괴 공존).",
+    "Mgmt": {
+        "Cidr": "10.0.2.0/24"
+    },
+    "CimsDatabase": {
+        "Host": "127.0.0.1",
+        "Port": 3306,
+        "User": "cims",
+        "Password": "!core0908",
+        "Db": "cims"
+    },
+    "CimsAuth": {
+        "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8=",
+        "BuiltinAccounts": [
+            {
+                "login_id": "admin",
+                "name": "관리자",
+                "role": "admin",
+                "password_sha256": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
+            }
+        ]
+    },
+    "CimsRuntimeDir": "/home/cims/work/cims/build/dist/ext_mnt/runtime",
+    "ServiceLogging": {
+        "Dir": "/mnt/cims/service_log",
+        "Enable": [
+            "csp",
+            "ue"
+        ]
+    },
+    "Log": {
+        "Level": "INFO",
+        "File": "log/oam.log"
+    }
+}
