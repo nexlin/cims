@@ -74,6 +74,14 @@ cims-bootstrap/
 └── README.md
 ```
 
+> **권한 정책 (2026-06-16)** — 설치 계열(`install.sh`·생성되는 `init` 단계)은
+> **반드시 일반 계정에서 `sudo` 로** 실행한다. `install.sh` 는 상단 가드에서
+> `EUID≠0` 또는 `SUDO_USER` 가 비어있거나 root(= root 직접 로그인 / sudo 미경유)면
+> **즉시 종료** — sudoers/linger/서비스 IP 등 권한 작업만 누락된 채 진행되는 부분
+> 설치를 차단. 서비스 계정(agent/OAM 프로세스 소유자)도 root 면 거부(`--user`/
+> `--svc-user` 로 일반 계정 지정). **제거(uninstall)는 반대로 root 또는 sudo 둘 다 허용**
+> (`uninstall-base.sh`/생성 `uninstall.sh` = `EUID≠0` 거부; 일반계정은 sudo 필요).
+
 - **standalone OAM**: oam 패키지에 csc/src 의 서비스-중립 공유 라이브러리
   (httpsrv/util/services 일부)를 동봉 — csc(서비스 종속 모듈) 없이 단독 기동.
   가입자/조직 핸들러(admin/org, csc 측)는 선택 로드 (서비스 설치 후 자동 활성).
@@ -86,6 +94,14 @@ cims-bootstrap/
   목록과 `/install-agent.sh`·`/agent-bundle.tar.gz` 가 즉시 동작해 2단계(각 서버
   agent 설치)로 바로 진행 가능. 1단계 구성요소(oam/console/agent)도 패키지로
   보이므로 3~4단계에서 업데이트 가능.
+- **base 모듈 deployment 자동 등록** (2026-06-16): install.sh 가 로컬 agent 설치
+  직후, 이 OAM 노드의 **oam·console 을 `status=running` deployment 로 등록**
+  (`_self_deploy`, 멱등). 부트스트랩은 oam/console 을 패키지로만 시드하고 agent
+  레코드만 만들 뿐 deployment 가 없어 콘솔 **"시스템/인프라 > 패키지 설치"**(=배포
+  목록)에 oam/console 이 안 보이던 문제 해소. `_create_deployment` 가 초기 `status`
+  를 honor(기본 pending; running/stopped 시 `deployed_at` 기록). console 은 별도
+  프로세스 없이 OAM 이 정적 서빙하므로 `module_down` 알람은 비데몬(console/agent)을
+  제외(metric.modules 미보고 → running 이어도 오탐하던 것 방지).
 - 설치 레이아웃은 본 문서 §2 의 버전 단위 설치와 동일(`/opt/cims-agent/modules/{oam,console}/<ver>/`,
   runtime store 는 `modules/oam/runtime` 버전 무관) — 이후 agent 배포
   체계가 자연 인수.
@@ -101,6 +117,45 @@ cims-bootstrap/
   섹션은 잠금**(부트스트랩 생명선) ③ 커스텀 메뉴 그룹 + 위젯 합성 페이지
   (`/custom/<slug>`, 빈 EditableLayout 보드) 추가. 저장은 OAM
   `/api/v1/console/menu` (`items` + `custom_sections` + `areas`).
+
+## 2.2 각 서버 agent 설치 — 통일 flow (2026-06-16)
+
+2단계(각 서버에 agent 설치)는 base 노드의 `sudo ./install.sh` 와 **동일한
+"일반 계정 + sudo" 패턴**으로 통일됐다(구: `curl|bash` 자동실행 + 별도 `init.sh`
+2단계는 폐지). `install-agent.sh` 단일 스크립트가 모드로 분기한다:
+
+```
+# 콘솔 "시스템/서버 구성" 이 발급하는 install-command (토큰 명령 = 다운로드 전용, sudo 불필요)
+curl -fsSLk https://<oam>:4419/install-agent.sh | bash -s -- \
+     --oam-url https://<oam>:4419 --enrollment-token <tok> --name <노드명>
+#  → 비root 실행이므로 install-agent.sh 가 download-mode 로 동작:
+#    install-agent.sh + (토큰/URL/이름 내장된) install.sh 를 현재 디렉터리에 생성하고
+#    "이제 설치는 1줄: sudo ./install.sh" 안내만 출력 (설치는 하지 않음).
+
+# 설치 (토큰 재입력 없이 1줄)
+sudo ./install.sh
+#  → 설치 디렉터리를 대화형으로 질문(엔터=기본 /opt/cims-agent; --install-dir 로 비대화 지정).
+#    추출 + sudoers + linger + enroll + systemd --user enable --now 까지 한 번에.
+#    (구 init.sh 가 하던 일을 흡수 — init.sh 생성 폐지.)
+```
+
+- **권한 모델**: `fresh` 설치는 root(sudo) 필수 — 서비스 계정은 `SUDO_USER`(또는
+  `--svc-user`). enroll·systemd `--user`·linger 등 **사용자 세션 작업은 `runuser -u <svc>`**
+  로 서비스 계정 컨텍스트에서 수행하고, sudoers/파일 소유권 등 root 작업은 직접.
+  agent 는 종전대로 **`systemd --user` + linger** 로 동작(재부팅 자동기동·watchdog 유지).
+- **`--update-only` (자가업그레이드)** 는 서비스 계정(non-root)으로 실행 — agent 의
+  `upgrade_agent` job 경로가 그대로 호출(파일 교체만, 권한작업 없음). `--no-systemd`
+  는 systemd 미사용 환경(base install.sh 의 nohup 경로)용으로 enroll 까지만 수행.
+- **제거**: `sudo /opt/cims-agent/uninstall.sh` (root/sudo 필수). root 로 동작하되
+  `systemd --user`/linger 정리는 서비스 사용자(`SUDO_USER`→없으면 설치 디렉터리 소유자)를
+  `runuser` 로 진입해 수행.
+- base install.sh 의 로컬 agent 단계도 이 통일된 `install-agent.sh`(root + `--svc-user`
+  + `--install-dir` + 필요 시 `--no-systemd`) 호출로 일원화됐다.
+
+> **OAM self-upgrade**: OAM 자기 자신을 업그레이드할 때의 안전 처리(health-gate·
+> report 재시도·부팅 self-reconcile·pre-flight `--preflight`·명시 롤백; 불변식=OAM 은
+> 자기 프로세스를 직접 kill 하지 않고 agent 가 재기동)는 별도 설계서
+> [features/oam_self_upgrade.md](features/oam_self_upgrade.md) 참조.
 
 ## 3. 제어 평면 (Control Plane)
 
