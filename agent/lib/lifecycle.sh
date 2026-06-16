@@ -365,9 +365,42 @@ print(p)" 2>/dev/null || echo 4419)
     cd "$DIST_DIR/oam/src"
     "$PYBIN" -u "$DIST_DIR/oam/src/oam_app.py" >> "$LOG_DIR/oam.log" 2>&1 &
     save_pid oam $!
-    sleep 1.5
-    is_running oam && ok "OAM 시작 완료 (pid=$(read_pid oam), port=$oam_port)" \
-        || { err "OAM 시작 실패"; tail -3 "$LOG_DIR/oam.log" | sed 's/^/  /'; return 1; }
+    # D1 (self-upgrade): sleep 1.5 단발 판정 대신 /health 200 까지 폴링(최대 T초).
+    # Python OAM 콜드스타트(config+마이그레이션+cert+bind)는 1.5s 를 넘길 수 있어,
+    # self-upgrade 시 agent 의 후속 report 가 "아직 안 뜬 신 OAM" 에 닿아 유실되던 문제 방지.
+    if _oam_health_gate "$oam_port" "${CIMS_OAM_HEALTH_TIMEOUT:-20}"; then
+        ok "OAM 시작 완료 (pid=$(read_pid oam), port=$oam_port, /health 200)"
+    else
+        err "OAM 시작 실패 — /health 미응답 (${CIMS_OAM_HEALTH_TIMEOUT:-20}s)"
+        tail -5 "$LOG_DIR/oam.log" | sed 's/^/  /'
+        return 1
+    fi
+}
+
+# OAM 전용 health-gate: 프로세스 생존 + https://127.0.0.1:<port>/health 200 까지
+# 최대 timeout_s 초 폴링. python(urllib, 인증서 무검증)으로 probe — curl 부재 환경 대비.
+# OAM /health 는 무인증 200 {"status":"ok"} (httpsrv 내장 라우트).
+_oam_health_gate() {
+    local port="$1" timeout_s="${2:-20}"
+    local i=0
+    while [[ $i -lt $((timeout_s * 2)) ]]; do
+        if ! is_running oam; then
+            # 프로세스가 떠 있지 않으면 잠깐 대기 후 재확인 (start 직후 race)
+            sleep 0.5; i=$((i + 1)); continue
+        fi
+        if "$PYBIN" - "$port" <<'PYHC' >/dev/null 2>&1
+import sys, ssl, urllib.request
+port = sys.argv[1]
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+r = urllib.request.urlopen("https://127.0.0.1:%s/health" % port, timeout=2, context=ctx)
+sys.exit(0 if r.status == 200 else 1)
+PYHC
+        then
+            return 0
+        fi
+        sleep 0.5; i=$((i + 1))
+    done
+    return 1
 }
 
 stop_oam() {

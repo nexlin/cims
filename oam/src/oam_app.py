@@ -62,6 +62,10 @@ from util.log_util import Logger
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
+    # D3 (oam self-upgrade pre-flight): 핸들러 import + config 로드만 검증하고 bind 없이
+    # 즉시 종료. agent 가 구 OAM 을 내리기 전에 신 OAM 패키지가 뜰 수 있는지 확인하는 용도.
+    parser.add_argument('--preflight', action='store_true',
+                        help='import + config 스모크만 수행하고 (bind 없이) 종료 — self-upgrade 검증용')
     args_dict = vars(parser.parse_args())
 
     logger = Logger(log_dir=os.path.join(_COMPONENT_ROOT, "log"), log_file_prefix="app", retention_day=30)
@@ -145,6 +149,16 @@ if __name__ == '__main__':
 
         config = load_config()
         auth.init(config)
+
+        # D3: --preflight 모드 — 여기까지 왔으면 핸들러 import(107~140) + config 로드 OK.
+        # bind/마이그레이션/sweeper 없이 즉시 종료(0). agent 가 구 OAM kill 전에 호출.
+        if args_dict.get('preflight'):
+            if not config:
+                print('OAM_PREFLIGHT_FAIL: empty config', flush=True)
+                sys.exit(2)
+            logger.log_info('[preflight] handler imports + config OK — exit 0 (no bind)')
+            print('OAM_PREFLIGHT_OK', flush=True)
+            sys.exit(0)
 
         # runtime store v2 — 구 평면 도메인 1회 이행 (도메인 접근 전 선행).
         #   P2: OAM 자기 데이터 → control/·console/.   P3: 컬렉션 → modules/<owner>/runtime.
@@ -438,6 +452,47 @@ if __name__ == '__main__':
         ])
         admin_server.start()
         logger.log_info(f"OAM server started on port {admin_conf.get('Port', 4419)}")
+
+        # ── D2: OAM self-upgrade self-reconcile ──────────────────────────────
+        # 자기 self-upgrade 의 마지막 report(restart 완료)가 유실되면 해당 deployment 가
+        # 'deploying' 에 stuck 된다(콘솔이 영원히 "배포 중"). 신 OAM(=나)이 이미 떠 있다는
+        # 사실이 곧 그 업그레이드의 성공 증거이므로, 내가 실행 중인 install_path
+        # (= _COMPONENT_ROOT 의 부모 = 버전 디렉터리)와 install_path 가 일치하는 oam
+        # deployment 만 골라 running 으로 자가 정정한다.
+        #   ⚠ install_path 일치로만 매칭 → 타 노드 oam deployment 오염 방지. HA 공유 store
+        #     에서의 host 스코핑은 후속(docs/design/features/oam_self_upgrade.md §7).
+        try:
+            from handlers.agents import (_deploy_load_all, _deploy_update,
+                                         _job_load, _job_update)
+            from datetime import datetime as _rdt
+            _my_install = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..'))
+            _my_real = os.path.realpath(_my_install)
+            _rec = 0
+            for _d in _deploy_load_all(config):
+                _proc = (_d.get('process_name') or _d.get('package_name') or '').lower()
+                if _proc != 'oam' or _d.get('status') != 'deploying':
+                    continue
+                _dp = _d.get('install_path') or ''
+                if not _dp or os.path.realpath(_dp) != _my_real:
+                    continue
+                _now_iso = _rdt.now().isoformat(timespec='seconds')
+                _deploy_update(config, _d['id'], {
+                    'status': 'running', 'deployed_at': _now_iso, 'reconciled': True,
+                })
+                _lj = _d.get('last_job_id')
+                if _lj:
+                    _j = _job_load(config, _lj)
+                    if _j and _j.get('status') in ('queued', 'running'):
+                        _job_update(config, _lj, {
+                            'status': 'succeeded', 'result_code': 0,
+                            'result_stdout': 'reconciled by oam self-upgrade startup',
+                            'completed_at': _now_iso})
+                _rec += 1
+            if _rec:
+                logger.log_info(f"[self-reconcile] oam deployment {_rec}건 "
+                                f"deploying→running 정정 (install_path={_my_install})")
+        except Exception as _e:
+            logger.log_warning(f"[self-reconcile] skip: {_e}")
 
         # ── Agent stale sweeper ─────────────────────────────────────────
         from handlers.agents import _get_db as _agent_db_conn
@@ -764,3 +819,7 @@ if __name__ == '__main__':
         tb_str = traceback.format_exc()
         logger.log_error(f'==================== stop : {e} : {tb_str} ====================')
         if admin_server:  admin_server.stop(5)
+        # D3: preflight 모드에서 import/config 예외는 "신 패키지 기동 불가" 신호 → 비0 종료.
+        if args_dict.get('preflight'):
+            print(f'OAM_PREFLIGHT_FAIL: {e}', flush=True)
+            sys.exit(2)

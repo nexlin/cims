@@ -1716,6 +1716,26 @@ def _run_cims_svc(install_path: str, action: str, svc: str, timeout: int = 60) -
         return 2, "", f"exec failed: {e}"
 
 
+def _oam_preflight(install_path: str, timeout: int = 30) -> tuple:
+    """D3 — OAM self-upgrade 시 구 OAM 을 내리기 전에 신 OAM 패키지가 뜰 수 있는지
+    검증. install_path/oam/src/oam_app.py --preflight 를 sub-process 로 실행
+    (oam_app.py 가 자기 sys.path/config 를 구성하므로 import·config 오류를 그대로 포착).
+    반환 (ok: bool, msg: str)."""
+    app = os.path.join(install_path, "oam", "src", "oam_app.py")
+    if not os.path.isfile(app):
+        return False, f"oam_app.py 없음: {app}"
+    try:
+        res = subprocess.run([sys.executable, "-u", app, "--preflight"],
+                             capture_output=True, text=True, timeout=timeout,
+                             cwd=os.path.dirname(app), env=dict(os.environ))
+        if res.returncode == 0:
+            return True, "preflight ok"
+        tail = ((res.stderr or "") + (res.stdout or "")).strip().replace("\n", " ")[-200:]
+        return False, f"rc={res.returncode} {tail}"
+    except Exception as e:
+        return False, f"preflight exec 실패: {e}"
+
+
 def _load_supervised() -> dict:
     try:
         with open(_SUPERVISE_FILE) as f:
@@ -1810,6 +1830,73 @@ def supervise_tick() -> None:
         print(f"[agent][watchdog] '{svc}' start rc={rc} {tail}", flush=True)
 
 
+# ──────────────────────────────────────────────────────────────
+#  D1 — job report 전달 견고화 (특히 OAM self-upgrade 의 restart report)
+#    신 OAM 콜드스타트로 일시 불통일 수 있어 짧은 재시도 후, 끝내 실패하면
+#    pending 큐(jsonl)에 적재 → 다음 heartbeat 성공 시 flush. 결과 유실 방지.
+# ──────────────────────────────────────────────────────────────
+_PENDING_REPORT_FILE = os.path.join(os.path.dirname(_AGENT_DIR), "run", "pending_reports.jsonl")
+
+
+def _post_report(oam_url: str, token: str, result: dict, timeout: int = 15) -> int:
+    st, _ = http_post(f"{oam_url}/api/agent/report", result,
+                      headers={"X-Agent-Token": token}, timeout=timeout)
+    return st
+
+
+def _enqueue_pending_report(result: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(_PENDING_REPORT_FILE), exist_ok=True)
+        with open(_PENDING_REPORT_FILE, "a") as f:
+            f.write(json.dumps(result) + "\n")
+    except Exception as e:
+        print(f"[agent] pending report 적재 실패: {e}", flush=True)
+
+
+def _flush_pending_reports(oam_url: str, token: str) -> None:
+    """미전달 report 재전송 — 전송 성공분만 제거. heartbeat 성공 직후 1회 호출."""
+    if not os.path.isfile(_PENDING_REPORT_FILE):
+        return
+    try:
+        with open(_PENDING_REPORT_FILE) as f:
+            lines = [ln for ln in f.read().splitlines() if ln.strip()]
+    except Exception:
+        return
+    remaining = []
+    for ln in lines:
+        try:
+            result = json.loads(ln)
+        except Exception:
+            continue   # 손상 줄은 폐기
+        if _post_report(oam_url, token, result) != 200:
+            remaining.append(ln)
+    try:
+        if remaining:
+            with open(_PENDING_REPORT_FILE, "w") as f:
+                f.write("\n".join(remaining) + "\n")
+        else:
+            os.unlink(_PENDING_REPORT_FILE)
+            print("[agent] pending report 전량 전달 완료", flush=True)
+    except Exception:
+        pass
+
+
+def _deliver_report(oam_url: str, token: str, result: dict, retries: int = 4) -> int:
+    """report 전달(짧은 지수 backoff 재시도). 끝내 실패 시 pending 큐 적재.
+    OAM self-upgrade 의 restart report 가 신 OAM 콜드스타트 창에서 유실되는 것을 방지
+    (lifecycle 의 /health gate 와 합쳐 대개 1회 성공)."""
+    delay = 1.0
+    for _i in range(max(1, retries)):
+        st = _post_report(oam_url, token, result)
+        if st == 200:
+            return st
+        time.sleep(min(delay, 4.0))
+        delay *= 2
+    _enqueue_pending_report(result)
+    print(f"[agent] report 전달 실패 — pending 큐 적재 (job_id={result.get('job_id')})", flush=True)
+    return 0
+
+
 def job_process_control(params: dict, job_type: str) -> tuple:
     """start/stop/restart — install_path/agent/bin/cims-svc 를 이용해 수행
     (Phase 1.B+, cims.sh 운영 명령 제거).
@@ -1829,12 +1916,21 @@ def job_process_control(params: dict, job_type: str) -> tuple:
             "process_name 누락 — deployment.process_name 필드 필수 "
             f"(install_path={install_path}, job_type={job_type})"
         )
+    prev_path = _load_supervised().get(svc)
+
+    # D3 (oam self-upgrade pre-flight): OAM 의 start/restart 는 구 OAM 을 내리기 전에
+    # 신 패키지가 뜰 수 있는지 검증한다. 실패면 아무것도 만지지 않고 즉시 반환 →
+    # 구 OAM 유지(다운타임 0). 깨진 패키지로 OAM 을 장기 다운시키는 것을 차단.
+    if svc == "oam" and job_type in ("start", "restart"):
+        ok_pf, pf_msg = _oam_preflight(install_path)
+        if not ok_pf:
+            return 1, "", f"oam preflight 실패 — 구 버전 유지 (kill 안 함): {pf_msg}"
+
     # 버전 단위 설치 전환: 현재 감독(supervised) 중인 인스턴스가 다른 경로
     # (구 버전 디렉토리 / legacy 평탄 설치) 에서 떠 있으면 먼저 그 경로에서 stop.
     # 미수행 시 신 버전 start 가 포트 바인드 충돌로 fail-fast (구 프로세스는
     # exe 경로가 달라 lifecycle 의 kill_stray/own-listener 정리에 안 잡힘).
     prev_note = ""
-    prev_path = _load_supervised().get(svc)
     if prev_path and prev_path != install_path and os.path.isdir(prev_path):
         prc, _pout, perr = _run_cims_svc(prev_path, "stop", svc)
         prev_note = f" (prev-stop {prev_path} rc={prc}{' ' + perr.strip()[:120] if prc else ''})"
@@ -1848,6 +1944,21 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     rc, out, err = _run_cims_svc(install_path, job_type, svc)
     if prev_note:
         out = (out or "") + prev_note
+
+    # D4 (oam self-upgrade rollback): OAM 의 start/restart 가 실패(신 OAM 이
+    # /health gate 안에 안 뜸)하고 직전 버전이 있으면 구 버전으로 명시 롤백한다.
+    # supervised.json 을 구 경로로 되돌려 watchdog 도 구버전을 회수하게 한다.
+    if rc != 0 and svc == "oam" and job_type in ("start", "restart") \
+            and prev_path and prev_path != install_path and os.path.isdir(prev_path):
+        r_rc, r_out, r_err = _run_cims_svc(prev_path, "start", svc)
+        if r_rc == 0:
+            _mark_supervised(svc, prev_path)
+            return 1, (out or "") + f" [rolled_back→{prev_path}]", \
+                   (err or "") + f" rollback ok"
+        # 롤백 start 도 실패 — supervised 는 구 경로로 남겨 watchdog 가 계속 시도.
+        _mark_supervised(svc, prev_path)
+        return 1, (out or ""), (err or "") + f" [rollback start rc={r_rc}: {(r_err or r_out)[:160]}]"
+
     # 모듈 감독 desired-state 갱신 — start/restart 성공 → 감독 등록, stop → 해제.
     # (watchdog 가 supervised 집합의 죽은 모듈을 auto-restart)
     if rc == 0:
@@ -2386,6 +2497,8 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                 if fail_count > 0:
                     print(f"[agent] heartbeat recovered after {fail_count} failures", flush=True)
                 fail_count = 0
+                # D1: 직전에 전달 못 한 job report 가 있으면 (신 OAM 이 이제 떴으니) flush.
+                _flush_pending_reports(oam_url, state.session_token)
                 # CSC 가 cert rotation 지시 → 새 cert 받아 저장 후 프로세스 종료 (systemd 재기동)
                 if resp.get("cert_rotate"):
                     print("[agent] cert rotation requested by CSC", flush=True)
@@ -2397,8 +2510,9 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                 for job in jobs:
                     print(f"[agent] exec job id={job['id']} type={job['type']}", flush=True)
                     result = execute_job(job, oam_url, state.session_token, state.name or "")
-                    rep_status, rep_body = http_post(f"{oam_url}/api/agent/report", result,
-                                                      headers={"X-Agent-Token": state.session_token})
+                    # D1: report 전달 견고화 — 재시도 후 실패 시 pending 큐 적재.
+                    # (OAM self-upgrade 의 restart 직후엔 신 OAM 콜드스타트 창과 겹칠 수 있음)
+                    rep_status = _deliver_report(oam_url, state.session_token, result)
                     print(f"[agent] report status={rep_status} rc={result['result_code']}", flush=True)
                     # upgrade_agent / agent_restart 성공 시 새 코드 image 로 self-exec.
                     # systemd 환경: execv 가 모든 fd close + 같은 PID 로 새 image 실행 (Restart=always 보다 빠름)
