@@ -460,18 +460,24 @@ except Exception: print('')" 2>/dev/null)
                 [[ "$_dl_http" == "200" && -s "$_IA" ]] && { _dl_ok=1; break; }
                 sleep 1
             done
-            chmod 0644 "$_IA" 2>/dev/null || true   # su - 로 실행할 cims 가 읽을 수 있도록
+            chmod 0644 "$_IA" 2>/dev/null || true
+            # 통일된 설치 경로 — install-agent.sh 를 root 로 직접 실행(=일반 install-command 와 동일 스크립트).
+            #   base 는 이미 root → 서비스 계정은 --svc-user 로 명시, 설치 경로는 --install-dir=PREFIX.
+            #   install-agent.sh 가 추출 + sudoers + linger + enroll + systemd --user enable 까지 수행
+            #   (구 setup-sudoers.sh + init.sh 단계 흡수). systemd 미사용 환경은 --no-systemd → 아래 nohup.
+            _ia_args=(--oam-url "https://127.0.0.1:$PORT" --enrollment-token "$ENROLL_TOKEN"
+                      --name "$HOSTNM" --install-dir "$PREFIX" --svc-user "$SVC_USER")
+            _use_sd=0
+            if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then _use_sd=1; else _ia_args+=(--no-systemd); fi
             if [[ $_dl_ok -ne 1 ]]; then
                 err "install-agent.sh 다운로드 실패 (HTTP $_dl_http) — agent 미설치 (콘솔 수동설치)"
                 AGENT_STATE="실패 (install-agent.sh 다운로드)"
-            elif _run_as "cd '$PREFIX' && bash '$_IA' --oam-url 'https://127.0.0.1:$PORT' --enrollment-token '$ENROLL_TOKEN' --name '$HOSTNM'"; then
-                ok "agent 번들 설치 ($PREFIX/agent — 패키지 저장소 서빙본)"
+            elif bash "$_IA" "${_ia_args[@]}" >> "$OAM_ROOT/log/agent_install.log" 2>&1; then
+                ok "agent 설치 완료 ($PREFIX/agent — sudoers/linger/enroll 포함)"
                 # OAM 을 cims-svc 로 인계 — 부트스트랩 nohup 을 정식 감독 프로세스로 교체.
                 #   start_oam 의 kill_stray 가 부트스트랩 OAM(같은 포트/경로)을 정리하고
                 #   pidfile($OAM_ROOT/run/oam.pid)을 남긴다 → 중복기동·고아 방지.
                 info "OAM 을 agent 관리(cims-svc)로 인계..."
-                # cims-svc 의 상세 상태 출력(=== CIMS 상태 ===/[검증 대상]/[TB] 등 개발용)은
-                # 설치 로그로만 남기고 화면엔 결과만 표시한다 (상용 설치 출력 정돈).
                 if _run_as "CIMS_DIST_DIR='$OAM_ROOT' CIMS_PYTHON=python3 '$PREFIX/agent/bin/cims-svc' start oam" \
                         >> "$OAM_ROOT/log/oam_handover.log" 2>&1; then
                     ok "OAM cims-svc 감독 전환 완료 (pidfile + watchdog)"
@@ -481,29 +487,17 @@ except Exception: print('')" 2>/dev/null)
                 # agent watchdog 감독 등록: oam → versioned 모듈 경로 (supervise_tick 가 읽음)
                 mkdir -p "$PREFIX/run"
                 printf '{"oam": "%s"}\n' "$OAM_ROOT" > "$PREFIX/run/supervised.json"
-                # run/ 디렉터리째 서비스 사용자 소유로 — agent(cims)가 managed_ips.json 등을
-                # 여기 기록한다. (root 가 mkdir 하면 cims 가 파일 생성 불가 → Permission denied)
                 chown -R "$SVC_USER":"$(id -gn "$SVC_USER")" "$PREFIX/run" 2>/dev/null || true
-                # sudoers + linger 는 root 권한으로 직접 (init.sh 의 sudo 단계 선처리)
-                if [[ $EUID -eq 0 && -f "$PREFIX/setup-sudoers.sh" ]]; then
-                    CIMS_AGENT_USER="$SVC_USER" bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 || \
-                        bash "$PREFIX/setup-sudoers.sh" >/dev/null 2>&1 || true
-                fi
-                if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then
-                    if _run_as "cd '$PREFIX' && ./init.sh"; then
-                        AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
-                    else
-                        AGENT_STATE="설치됨 — 기동 실패 ($PREFIX/init.sh 수동 실행)"
-                    fi
+                if [[ $_use_sd -eq 1 ]]; then
+                    AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
                 else
-                    # systemd 미사용 — enroll 후 nohup 직접 기동
-                    _run_as "cd '$PREFIX' && CIMS_ENROLLMENT_TOKEN='$ENROLL_TOKEN' python3 ./agent/cims_agent.py --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM' --enroll-only" || true
+                    # systemd 미사용 — install-agent.sh 가 enroll 까지만 했으므로 nohup 기동
                     _run_as "cd '$PREFIX' && setsid nohup python3 ./agent/cims_agent.py --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM' > ./agent-stdout.log 2>&1 < /dev/null &"
                     sleep 3
                     AGENT_STATE="실행 중 (nohup — systemd 미사용 환경)"
                 fi
             else
-                err "install-agent.sh 실행 실패 — 콘솔에서 수동 설치하세요 (install-command)"
+                err "install-agent.sh 실행 실패 (상세: $OAM_ROOT/log/agent_install.log) — 콘솔에서 수동 설치하세요"
                 AGENT_STATE="실패 (install-agent.sh 실행)"
             fi
         fi

@@ -3,19 +3,17 @@
 # 정책: systemd --user + linger 단일 운영 — die 시 자동 재기동, host 재기동 시 자동 기동.
 #       1 user = 1 agent. 같은 호스트 다중 agent 필요 시 별도 user 로 install.
 #
-# Mode 1 — fresh install (default):
-#   curl -k https://<OAM>:4419/install-agent.sh | bash -s -- \
-#        --oam-url https://<OAM>:4419 \
-#        --enrollment-token <token> \
-#        --name <agent-name> \
-#        [--install-dir /path/to/install]   # 미지정 시 현재 디렉터리(cwd)
-#   <install-dir>/init.sh        # sudoers + enroll + systemd unit + enable --now (sudo 비번 1회)
+# Mode 1 — fresh install (일반 계정에서 sudo 필수 — root 직접 실행 금지):
+#   curl -fsSLk https://<OAM>:4419/install-agent.sh -o install-agent.sh
+#   sudo bash install-agent.sh --oam-url https://<OAM>:4419 \
+#        --enrollment-token <token> --name <agent-name> \
+#        [--install-dir /opt/cims-agent]   # 미지정 시 /opt/cims-agent
+#   → sudoers + linger + enroll + systemd --user + enable --now 까지 한 번에 (init.sh 불필요).
+#   (agent 자체는 서비스 계정의 systemd --user 로 동작 — sudo 호출자(SUDO_USER) 또는 --svc-user)
 #
-# Mode 2 — update (bundle 전체 교체 + sub-script 재생성, enrollment/sudoers/systemd 안 건드림):
+# Mode 2 — update (bundle 교체 + sub-script 재생성; 서비스 계정으로 실행, root 아님):
 #   bash install-agent.sh --update-only \
-#        --oam-url https://<OAM>:4419 \
-#        --name <agent-name> \
-#        --install-dir /opt/cims-agent
+#        --oam-url https://<OAM>:4419 --name <agent-name> --install-dir /opt/cims-agent
 #   (호출자가 systemctl --user restart cims-agent.service 책임 — agent self-exit + systemd 자동 재기동)
 #
 # 호환성: --csc-url 도 동작 (deprecated alias). Phase 3b 이후 OAM 분리 — agent 는 OAM(4419) 과 통신.
@@ -27,6 +25,8 @@ ENROLL_TOKEN=""
 AGENT_NAME="$(hostname)"
 MODE="fresh"
 INSTALL_DIR_ARG=""
+SVC_USER_ARG=""
+NO_SYSTEMD=0   # fresh 에서 systemd --user 단계 생략(호출자가 기동) — base install.sh --no-systemd 용
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -35,6 +35,8 @@ while [[ $# -gt 0 ]]; do
         --enrollment-token)  ENROLL_TOKEN="$2"; shift 2 ;;
         --name)              AGENT_NAME="$2"; shift 2 ;;
         --install-dir)       INSTALL_DIR_ARG="$2"; shift 2 ;;
+        --svc-user)          SVC_USER_ARG="$2"; shift 2 ;;   # fresh 서비스 계정 명시(미지정 시 SUDO_USER)
+        --no-systemd)        NO_SYSTEMD=1; shift ;;          # fresh: systemd --user 생략(호출자 nohup 기동)
         --update-only)       MODE="update"; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -52,18 +54,46 @@ else
     fi
 fi
 
-if [[ $EUID -eq 0 ]]; then
-    echo "ERROR: root 로 실행하지 마세요. 서비스 운영 계정으로 실행하세요."
-    exit 1
+# ── 권한 + 서비스 계정 결정 (모드별 정책) ─────────────────────────────────
+#   fresh = 설치: 일반 계정에서 sudo 필수(root 직접 금지) — base install.sh 와 동일 정책.
+#   update = 자가업그레이드: 서비스 계정(non-root)으로 실행(파일 교체만, 권한작업 없음).
+if [[ "$MODE" == "fresh" ]]; then
+    if [[ $EUID -ne 0 ]]; then
+        echo "ERROR: 설치는 root 권한이 필요합니다 — 일반 계정에서 'sudo bash $0 ...' 로 실행하세요." >&2
+        exit 1
+    fi
+    SVC_USER="${SVC_USER_ARG:-${SUDO_USER:-}}"
+    if [[ -z "$SVC_USER" || "$SVC_USER" == "root" ]]; then
+        echo "ERROR: 서비스 계정을 알 수 없습니다(root 직접 실행?) — 일반 계정에서 sudo 로 실행하거나 '--svc-user <계정>' 을 지정하세요." >&2
+        exit 1
+    fi
+    if ! id "$SVC_USER" >/dev/null 2>&1; then
+        echo "ERROR: 서비스 계정이 존재하지 않습니다: $SVC_USER" >&2
+        exit 1
+    fi
+else
+    if [[ $EUID -eq 0 ]]; then
+        echo "ERROR: --update-only 는 서비스 계정으로 실행하세요 (root 아님)." >&2
+        exit 1
+    fi
+    SVC_USER="$(id -un)"
 fi
+SVC_GROUP="$(id -gn "$SVC_USER" 2>/dev/null || echo "$SVC_USER")"
+SVC_UID="$(id -u "$SVC_USER")"
+SVC_HOME="$(getent passwd "$SVC_USER" 2>/dev/null | cut -d: -f6 || true)"
+SVC_HOME="${SVC_HOME:-/home/$SVC_USER}"
 
-# 설치 디렉터리 — --install-dir 지정 시 fresh/update 모두 그 경로 사용(없으면 생성),
-# 미지정 시 현재 디렉터리(cwd). (구: fresh 는 cwd 고정 → 지정 불가했음)
-if [[ -n "$INSTALL_DIR_ARG" ]]; then
-    mkdir -p "$INSTALL_DIR_ARG" || { echo "ERROR: 설치 디렉터리 생성 실패: $INSTALL_DIR_ARG" >&2; exit 1; }
-    cd "$INSTALL_DIR_ARG"
+# ── 설치 디렉터리 ────────────────────────────────────────────────────────
+#   fresh: --install-dir 또는 기본 /opt/cims-agent (root 라 어디든 생성+소유권 부여).
+#   update: --install-dir 또는 현재 디렉터리(cwd).
+if [[ "$MODE" == "fresh" ]]; then
+    INSTALL_DIR="${INSTALL_DIR_ARG:-/opt/cims-agent}"
+    mkdir -p "$INSTALL_DIR" || { echo "ERROR: 설치 디렉터리 생성 실패: $INSTALL_DIR" >&2; exit 1; }
+else
+    [[ -n "$INSTALL_DIR_ARG" ]] && cd "$INSTALL_DIR_ARG"
+    INSTALL_DIR="$(pwd)"
 fi
-INSTALL_DIR="$(pwd)"
+cd "$INSTALL_DIR"
 STATE_DIR="$INSTALL_DIR/state"
 BIN_FILE="$INSTALL_DIR/agent/cims_agent.py"
 SUDOERS_FILE="/etc/sudoers.d/cims-priv"
@@ -74,7 +104,7 @@ else
     echo "==> Updating CIMS Agent (bundle + sub-script 재생성)"
 fi
 echo "    dir    : $INSTALL_DIR"
-echo "    user   : $USER"
+echo "    user   : $SVC_USER"
 echo "    name   : $AGENT_NAME"
 
 mkdir -p "$STATE_DIR"
@@ -119,7 +149,7 @@ chmod 755 "$BIN_FILE"
 # ──────────────────────────────────────────────────────────────────────
 # setup-sudoers.sh — root 권한으로 한 번 실행 (init.sh 가 자동 호출).
 #   (1) /etc/sudoers.d/cims-priv — cims-priv / cims-ha NOPASSWD
-#   (2) loginctl enable-linger $USER — host 재기동 시 systemd --user 자동 기동 보장
+#   (2) loginctl enable-linger $SVC_USER — host 재기동 시 systemd --user 자동 기동 보장
 #   (3) 자동 검증 (cims-priv version / cims-ha 호출 + linger 상태)
 # ──────────────────────────────────────────────────────────────────────
 SETUP_SUDOERS="$INSTALL_DIR/setup-sudoers.sh"
@@ -135,31 +165,31 @@ fi
 
 # (1) sudoers
 cat > $SUDOERS_FILE <<SUDO_EOF
-$USER ALL=(root) NOPASSWD: $INSTALL_DIR/agent/bin/cims-priv *
-$USER ALL=(root) NOPASSWD: $INSTALL_DIR/agent/bin/cims-ha *
+$SVC_USER ALL=(root) NOPASSWD: $INSTALL_DIR/agent/bin/cims-priv *
+$SVC_USER ALL=(root) NOPASSWD: $INSTALL_DIR/agent/bin/cims-ha *
 SUDO_EOF
 chmod 440 $SUDOERS_FILE
 echo "✓ $SUDOERS_FILE 설치 완료"
 
 # (2) linger — host 재기동 시 user systemd manager 자동 기동 보장
-if loginctl show-user "$USER" 2>/dev/null | grep -q '^Linger=yes'; then
+if loginctl show-user "$SVC_USER" 2>/dev/null | grep -q '^Linger=yes'; then
     echo "✓ linger 이미 활성"
 else
-    loginctl enable-linger "$USER"
+    loginctl enable-linger "$SVC_USER"
     echo "✓ linger 활성화 — host 재기동 시 systemd --user 자동 기동"
 fi
 
 # (3) 자동 검증
 fail=0
-if runuser -u $USER -- sudo -n $INSTALL_DIR/agent/bin/cims-priv version >/dev/null 2>&1; then
+if runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/bin/cims-priv version >/dev/null 2>&1; then
     echo "✓ cims-priv NOPASSWD 동작 확인"
 else
     echo "✗ cims-priv NOPASSWD 검증 실패"
     fail=1
 fi
-if runuser -u $USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha --help >/dev/null 2>&1 \\
-   || runuser -u $USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha version >/dev/null 2>&1 \\
-   || runuser -u $USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha 2>&1 | grep -qE "usage:|Usage:"; then
+if runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha --help >/dev/null 2>&1 \\
+   || runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha version >/dev/null 2>&1 \\
+   || runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha 2>&1 | grep -qE "usage:|Usage:"; then
     echo "✓ cims-ha NOPASSWD 동작 확인"
 else
     echo "✗ cims-ha NOPASSWD 검증 실패"
@@ -176,120 +206,6 @@ fi
 EOF
 chmod 755 "$SETUP_SUDOERS"
 
-# ──────────────────────────────────────────────────────────────────────
-# init.sh — 한 번에: sudoers + enroll + systemd unit + enable --now.
-#   사용자가 install_command 직후 1줄 실행. sudo 비번은 setup-sudoers.sh 호출 시 1회 prompt.
-# ──────────────────────────────────────────────────────────────────────
-INIT_SH="$INSTALL_DIR/init.sh"
-cat > "$INIT_SH" <<EOF
-#!/usr/bin/env bash
-# 초기화 — sudoers + linger + enrollment + systemd unit + enable --now 한 번에.
-# 이미 모두 끝난 항목은 NO-OP.
-set -euo pipefail
-cd "\$(dirname "\$0")"
-
-# ── 권한 가드 — 일반 계정 + sudo 사용 가능 필수 (부분 초기화 차단) ──
-#   init.sh 는 일반 계정으로 실행하고 sudoers/linger 만 내부에서 sudo 로 등록한다.
-#   root 로 실행하면 systemd --user 세션이 어긋나고, sudo 가 없으면 sudoers 등록이
-#   누락된 채 enroll/systemd 만 진행돼 부분 설치된다 → 둘 다 즉시 종료.
-if [[ \$EUID -eq 0 ]]; then
-    echo "ERROR: root 가 아니라 서비스 운영 계정으로 실행하세요 (sudo 는 init.sh 내부에서 호출)." >&2
-    exit 1
-fi
-if ! command -v sudo >/dev/null 2>&1; then
-    echo "ERROR: sudo 가 없습니다 — sudo 설치 후 재실행하세요 (sudoers·linger 등록에 root 권한 필요)." >&2
-    exit 1
-fi
-
-# (1) sudoers + linger
-if sudo -nl 2>/dev/null | grep -qF "\$(pwd)/agent/bin/cims-priv"; then
-    echo "✓ sudoers 이미 등록됨 — skip"
-else
-    echo "==> sudoers + linger 등록 (sudo 비번 1회)"
-    sudo "\$(pwd)/setup-sudoers.sh"
-fi
-
-# (2) enrollment — --enroll-only 로 state.json 생성
-if [[ -f state/state.json ]]; then
-    echo "✓ 이미 enroll 됨 — skip"
-else
-    echo "==> Running first-time enroll"
-    CIMS_ENROLLMENT_TOKEN="$ENROLL_TOKEN" /usr/bin/python3 ./agent/cims_agent.py \\
-        --oam-url "$OAM_URL" \\
-        --state-dir "./state" \\
-        --name "$AGENT_NAME" \\
-        --enroll-only || true
-    if [[ ! -f state/state.json ]]; then
-        echo "✗ enroll 실패 — token 만료 또는 csc 도달성 확인" >&2
-        exit 1
-    fi
-    echo "✓ enroll 완료 — state.json 생성됨"
-fi
-
-# (3) systemd --user unit 작성 + enable --now
-export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
-if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
-    echo "✗ systemd --user 사용 불가 환경" >&2
-    echo "  CIMS agent 정책: die 시 자동 재기동 + host 재기동 시 자동 기동 — systemd --user + linger 필수" >&2
-    exit 1
-fi
-
-UNIT_DIR="\${XDG_CONFIG_HOME:-\$HOME/.config}/systemd/user"
-UNIT_NAME="cims-agent.service"
-UNIT_FILE="\$UNIT_DIR/\$UNIT_NAME"
-mkdir -p "\$UNIT_DIR"
-
-# 마이그레이션: 옛 동적 unit (cims-agent-<NAME>.service) 잔재 정리
-for OLD in "\$UNIT_DIR"/cims-agent-*.service; do
-    [[ -e "\$OLD" ]] || continue
-    OLD_NAME="\$(basename "\$OLD")"
-    echo "==> legacy unit 정리: \$OLD_NAME (단일 이름 정책 전환)"
-    systemctl --user stop    "\$OLD_NAME" 2>/dev/null || true
-    systemctl --user disable "\$OLD_NAME" 2>/dev/null || true
-    rm -f "\$OLD" "\$UNIT_DIR/default.target.wants/\$OLD_NAME"
-done
-
-echo "==> Writing user systemd unit: \$UNIT_FILE"
-cat > "\$UNIT_FILE" <<UNIT
-[Unit]
-Description=CIMS Server Agent (dir=$INSTALL_DIR)
-After=network-online.target default.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$INSTALL_DIR
-ExecStart=/usr/bin/python3 $BIN_FILE \\\\
-    --oam-url $OAM_URL \\\\
-    --state-dir $STATE_DIR \\\\
-    --name $AGENT_NAME
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=default.target
-UNIT
-
-systemctl --user daemon-reload
-if systemctl --user is-active --quiet "\$UNIT_NAME"; then
-    echo "==> agent 재기동 (새 설정 반영)"
-    systemctl --user restart "\$UNIT_NAME"
-else
-    systemctl --user enable --now "\$UNIT_NAME"
-fi
-
-echo ""
-echo "==> Status:"
-systemctl --user --no-pager status "\$UNIT_NAME" || true
-echo ""
-echo "  로그   : journalctl --user -u \$UNIT_NAME -f"
-echo "  제어   : systemctl --user {status|restart|stop} \$UNIT_NAME"
-echo "  업데이트: $INSTALL_DIR/update.sh"
-echo "  완전제거: sudo $INSTALL_DIR/uninstall.sh   (root 권한 필요)"
-echo ""
-echo "==> 초기화 완료."
-EOF
-chmod 755 "$INIT_SH"
 
 # ──────────────────────────────────────────────────────────────────────
 # update.sh — agent bundle 갱신 + systemctl restart.
@@ -502,19 +418,93 @@ EOF
 chmod 755 "$UNINSTALL_SH"
 
 if [[ "$MODE" == "fresh" ]]; then
+    # 설치 디렉터리 소유권 → 서비스 계정 (root 로 풀었으므로). 생성된 sub-scripts·state/ 포함.
+    chown -R "$SVC_USER":"$SVC_GROUP" "$INSTALL_DIR"
+
+    # ── 구 init.sh 흡수 — sudoers + linger + enroll + systemd --user enable --now ──
+    #    설치가 sudo(root)로 실행되므로 권한 작업은 직접, 사용자 세션 작업
+    #    (enroll/systemd --user)은 runuser 로 서비스 계정 컨텍스트에서 수행.
+
+    # (1) sudoers + linger (root 직접 — setup-sudoers.sh 가 sudoers/linger/검증 수행)
+    echo "==> sudoers + linger 등록"
+    bash "$SETUP_SUDOERS"
+
+    # linger 직후 사용자 런타임 디렉터리(/run/user/UID)가 뜰 때까지 잠깐 대기
+    XRD="/run/user/$SVC_UID"
+    for _i in $(seq 1 20); do [[ -d "$XRD" ]] && break; sleep 0.3; done
+    _user_sc() { runuser -u "$SVC_USER" -- env XDG_RUNTIME_DIR="$XRD" systemctl --user "$@"; }
+
+    # (2) enrollment — 서비스 계정으로 state.json 생성
+    if [[ -f "$STATE_DIR/state.json" ]]; then
+        echo "✓ 이미 enroll 됨 — skip"
+    else
+        echo "==> first-time enroll (user=$SVC_USER)"
+        runuser -u "$SVC_USER" -- env CIMS_ENROLLMENT_TOKEN="$ENROLL_TOKEN" \
+            /usr/bin/python3 "$BIN_FILE" --oam-url "$OAM_URL" \
+            --state-dir "$STATE_DIR" --name "$AGENT_NAME" --enroll-only || true
+        if [[ ! -f "$STATE_DIR/state.json" ]]; then
+            echo "✗ enroll 실패 — token 만료 또는 OAM 도달성 확인" >&2
+            exit 1
+        fi
+        echo "✓ enroll 완료 — state.json 생성됨"
+    fi
+
+    # (3) systemd --user unit 작성 + enable --now (서비스 계정 세션)
+    #     --no-systemd (base install.sh 의 systemd 미사용 환경) 시 enroll 까지만 하고 기동은 호출자.
+    if [[ $NO_SYSTEMD -eq 1 ]]; then
+        echo ""
+        echo "✓ 설치 + enroll 완료 — systemd --user 생략(--no-systemd). 기동은 호출자(nohup)가 수행."
+        echo "  완전제거: sudo $INSTALL_DIR/uninstall.sh   (root 권한 필요)"
+        exit 0
+    fi
+    if ! command -v systemctl >/dev/null 2>&1 || ! _user_sc show-environment >/dev/null 2>&1; then
+        echo "✗ systemd --user 사용 불가 (XDG_RUNTIME_DIR=$XRD) — linger/세션 확인 필요." >&2
+        echo "  CIMS agent 정책: die 시 자동 재기동 + host 재기동 시 자동 기동 — systemd --user + linger 필수." >&2
+        echo "  (systemd 없는 환경이면 --no-systemd 로 enroll 까지만 수행하고 nohup 으로 기동하세요.)" >&2
+        exit 1
+    fi
+    USER_UNIT_DIR="$SVC_HOME/.config/systemd/user"
+    runuser -u "$SVC_USER" -- mkdir -p "$USER_UNIT_DIR"   # 사용자 소유로 디렉터리 생성
+    # 옛 동적 unit (cims-agent-*.service) 잔재 정리
+    for OLD in "$USER_UNIT_DIR"/cims-agent-*.service; do
+        [[ -e "$OLD" ]] || continue
+        ON="$(basename "$OLD")"
+        echo "==> legacy unit 정리: $ON"
+        _user_sc stop "$ON" 2>/dev/null || true
+        _user_sc disable "$ON" 2>/dev/null || true
+        rm -f "$OLD" "$USER_UNIT_DIR/default.target.wants/$ON"
+    done
+    cat > "$USER_UNIT_DIR/cims-agent.service" <<UNIT
+[Unit]
+Description=CIMS Server Agent (dir=$INSTALL_DIR)
+After=network-online.target default.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+ExecStart=/usr/bin/python3 $BIN_FILE --oam-url $OAM_URL --state-dir $STATE_DIR --name $AGENT_NAME
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+UNIT
+    chown "$SVC_USER":"$SVC_GROUP" "$USER_UNIT_DIR/cims-agent.service"
+    _user_sc daemon-reload
+    if _user_sc is-active --quiet cims-agent.service; then
+        echo "==> agent 재기동 (새 설정 반영)"
+        _user_sc restart cims-agent.service
+    else
+        _user_sc enable --now cims-agent.service
+    fi
+
     echo ""
-    echo "════════════════════════════════════════════════════════════════════"
-    echo "  ※ 다음 단계 — 1줄 실행"
-    echo "════════════════════════════════════════════════════════════════════"
-    echo "    $INSTALL_DIR/init.sh"
-    echo ""
-    echo "  (sudoers + linger 등록 → enrollment → systemd unit 작성 → enable --now)"
-    echo "  sudo 비번을 1회 prompt 합니다."
-    echo ""
-    echo "  (참고) 업데이트  : $INSTALL_DIR/update.sh        (agent 바이너리만 갱신 + restart)"
-    echo "  (참고) 완전 제거 : sudo $INSTALL_DIR/uninstall.sh   (root 권한 필요 — systemd unit + sudoers + keepalived + 파일 정리)"
-    echo ""
-    echo "==> 설치 완료."
+    echo "✓ 설치 완료 — agent 기동 (systemd --user, user=$SVC_USER, dir=$INSTALL_DIR)"
+    echo "  상태 : sudo -u $SVC_USER XDG_RUNTIME_DIR=$XRD systemctl --user status cims-agent.service"
+    echo "  로그 : sudo -u $SVC_USER XDG_RUNTIME_DIR=$XRD journalctl --user -u cims-agent.service -f"
+    echo "  업데이트: $INSTALL_DIR/update.sh   (서비스 계정으로 실행)"
+    echo "  완전제거: sudo $INSTALL_DIR/uninstall.sh   (root 권한 필요)"
 else
     echo ""
     echo "==> 업데이트 완료 — bundle + sub-script 재생성."

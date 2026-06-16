@@ -676,9 +676,10 @@ async def _regenerate_token(handler_args: HandlerArgs, aid: int, config):
     payload["enrollment_token_ttl_sec"] = ttl_sec
     oam_url = _oam_public_url(handler_args, config)
     import shlex
+    # 일반 계정에서 다운로드 후 sudo 로 실행 (root 직접 금지·init.sh 불필요·기본 /opt/cims-agent).
     payload["install_command"] = (
-        f"curl -k {oam_url}/install-agent.sh | "
-        f"bash -s -- --oam-url {oam_url} "
+        f"curl -fsSLk {oam_url}/install-agent.sh -o install-agent.sh && "
+        f"sudo bash install-agent.sh --oam-url {oam_url} "
         f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}"
     )
     return HandlerResult(status=200, body=payload, media_type="application/json")
@@ -713,8 +714,8 @@ async def _get_install_command(handler_args: HandlerArgs, aid: int, config):
             "enrollment_token_expires_at": row.get('enrollment_token_expires_at'),
         }, media_type="application/json")
     install_cmd = (
-        f"curl -k {oam_url}/install-agent.sh | "
-        f"bash -s -- --oam-url {oam_url} "
+        f"curl -fsSLk {oam_url}/install-agent.sh -o install-agent.sh && "
+        f"sudo bash install-agent.sh --oam-url {oam_url} "
         f"--enrollment-token {row['enrollment_token']} --name {shlex.quote(row['name'])}"
     )
     return HandlerResult(status=200, body={
