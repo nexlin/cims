@@ -408,6 +408,36 @@ if [[ $DO_AGENT -eq 1 && $DO_START -eq 1 ]]; then
 try: print((json.load(sys.stdin) or {}).get('$1','') or '')
 except Exception: print('')" 2>/dev/null; }
 
+    # 이 OAM 노드에 이미 설치·기동된 base 모듈(oam/console)을 deployment 레코드로 등록한다.
+    #   부트스트랩은 oam/console 을 패키지로만 시드하고 agent 만 만들 뿐 deployment 가 없어,
+    #   콘솔 "패키지 설치" 목록(=deployment 조회)에 oam/console 이 안 보였다. 여기서 보강.
+    #   멱등: 같은 agent+process 의 비-removed deployment 가 있으면 skip.
+    #   $1=package_name $2=install_path $3=process_name
+    _self_deploy() {
+        local pn="$1" ipath="$2" proc="$3" aid pid exists
+        aid=$(_api GET "/api/v1/agents" "" "$TOK" | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin); ags=(d.get('items') or []) if isinstance(d,dict) else []
+    print(next((str(a.get('id')) for a in ags if isinstance(a,dict) and a.get('name')=='$HOSTNM'),''))
+except Exception: print('')" 2>/dev/null)
+        pid=$(_api GET "/api/v1/packages" "" "$TOK" | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin); ps=(d.get('items') or []) if isinstance(d,dict) else []
+    c=sorted([p for p in ps if isinstance(p,dict) and p.get('name')=='$pn'], key=lambda p:str(p.get('version','')))
+    print(str(c[-1]['id']) if c else '')
+except Exception: print('')" 2>/dev/null)
+        [[ -z "$aid" || -z "$pid" ]] && { warn "self-deploy($pn): agent/package id 미확인 — skip"; return 1; }
+        exists=$(_api GET "/api/v1/deployments" "" "$TOK" | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin); ds=(d.get('items') or []) if isinstance(d,dict) else []
+    print('Y' if any(str(x.get('agent_id'))=='$aid' and (x.get('process_name') or x.get('package_name'))=='$proc' and x.get('status')!='removed' for x in ds if isinstance(x,dict)) else '')
+except Exception: print('')" 2>/dev/null)
+        [[ "$exists" == "Y" ]] && return 0
+        _api POST "/api/v1/deployments" \
+            "{\"agent_id\":$aid,\"package_id\":$pid,\"process_name\":\"$proc\",\"install_path\":\"$ipath\",\"status\":\"running\"}" \
+            "$TOK" >/dev/null 2>&1
+    }
+
     # 1) admin 로그인 (transient 대비 최대 6회 재시도)
     TOK=""
     for _i in 1 2 3 4 5 6; do
@@ -488,6 +518,9 @@ except Exception: print('')" 2>/dev/null)
                 mkdir -p "$PREFIX/run"
                 printf '{"oam": "%s"}\n' "$OAM_ROOT" > "$PREFIX/run/supervised.json"
                 chown -R "$SVC_USER":"$(id -gn "$SVC_USER")" "$PREFIX/run" 2>/dev/null || true
+                # 이 노드의 base 모듈(oam/console)을 deployment 로 등록 → 콘솔 "패키지 설치" 목록 노출.
+                _self_deploy oam     "$OAM_ROOT" oam     || true
+                _self_deploy console "$CON_ROOT" console || true
                 if [[ $_use_sd -eq 1 ]]; then
                     AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
                 else

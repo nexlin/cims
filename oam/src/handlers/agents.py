@@ -1968,6 +1968,14 @@ async def _create_deployment(handler_args: HandlerArgs, config):
         return HandlerResult(status=400, body={"error": "ha_mismatch", "detail": mismatch},
                              media_type="application/json")
 
+    # 초기 status — 기본 'pending'. 부트스트랩이 이미 설치·기동된 모듈(oam/console)을
+    # 등록할 때 'running' 등으로 명시 가능(화이트리스트). install_path 와 함께 쓰면
+    # "이미 설치된 상태"로 콘솔 패키지설치 목록에 즉시 노출된다.
+    _init_status = (body.get('status') or 'pending').lower()
+    if _init_status not in ('pending', 'deploying', 'running', 'stopped', 'failed', 'removed'):
+        _init_status = 'pending'
+    _now_iso = datetime.now().isoformat(timespec='seconds')
+
     def _do_create():
         new_id = file_store.next_id(_deploy_dir(config))
         dep = {
@@ -1977,11 +1985,11 @@ async def _create_deployment(handler_args: HandlerArgs, config):
             'process_name': process_name,
             'service_functions': functions if isinstance(functions, list) else _split_csv(functions),
             'install_path': install_path,
-            'status': 'pending',
+            'status': _init_status,
             'note': body.get('note'),
             'config': cfg_overlay if isinstance(cfg_overlay, dict) and cfg_overlay else None,
             'config_applied_at': None,
-            'deployed_at': None,
+            'deployed_at': (_now_iso if _init_status in ('running', 'stopped') else None),
             'last_job_id': None,
         }
         return _deploy_save(config, dep)

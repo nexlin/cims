@@ -660,6 +660,11 @@ if __name__ == '__main__':
                     # process_down 규칙으로 이미 평가되는 모듈(csp/cmp 등)은 제외 — 중복 alarm 방지.
                     if not proc or proc in proc_down_targets:
                         continue
+                    # 비데몬(별도 프로세스 없음) 모듈은 module_down 대상 아님 — agent 가 metric.modules
+                    # 에 보고하지 않으므로(_NON_DAEMON_MODULES) 'running' 이어도 항상 down 으로 오탐.
+                    #   console = OAM 이 정적 서빙(별도 프로세스 없음), agent = 자기 자신.
+                    if proc in ('console', 'agent'):
+                        continue
                     mo = f"{host}/{proc}"
                     kw = dict(mo=mo, host=host, module=proc)
                     res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
