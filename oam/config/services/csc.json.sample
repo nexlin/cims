@@ -4,14 +4,15 @@
         "Ip": "127.0.0.1",
         "AdminPort": 4421,
         "McpttPort": 4430,
-        "_comment": "I1: loopback 비공개. 외부 노출은 base 게이트웨이(4419) 경유만."
+        "_comment": "I1: loopback 비공개. 외부 노출은 base 게이트웨이(4419) 경유만. AdminPort=배포 csc.json Server.Port(4421/TCP)."
     },
     "Gateway": {
         "_comment": "csc 가 base 게이트웨이에 self-register 할 라우트(설치 시 POST /api/v1/gateway/routes).",
         "Routes": [
-            { "segment": "/api/v1/subscribers", "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/org",         "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/ptt",         "upstream": "http://127.0.0.1:4421", "module": "csc" }
+            { "segment": "/api/v1/users",         "upstream": "http://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/users/import",  "upstream": "http://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/ptt/groups",    "upstream": "http://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/organizations", "upstream": "http://127.0.0.1:4421", "module": "csc" }
         ],
         "RequiresBaseOam": "0.1.0"
     }

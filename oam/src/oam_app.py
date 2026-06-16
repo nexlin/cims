@@ -436,9 +436,7 @@ if __name__ == '__main__':
             return [(path, handler, cims_kwargs) for path, handler, _ in L]
 
         # ── BASE 공통 (모든 role) ──
-        # /users/me = identity-plane(D8) → base slim 핸들러를 항상 등록.
-        # all 모드에선 뒤의 SERVICE admin superset 이 /api/v1/users 를 덮어쓴다(현행 동작).
-        base_rules = _bind(CIMS_AUTH_HANDLER_LIST + CIMS_ME_HANDLER_LIST)
+        base_rules = _bind(CIMS_AUTH_HANDLER_LIST)
         base_rules += _bind(CIMS_STATS_HANDLER_LIST)          # 노드 health/messages/leak
         base_rules += _bind(CIMS_BUILD_HANDLER_LIST)
         base_rules += _bind(CIMS_SERVICE_CONTROL_HANDLER_LIST)
@@ -455,6 +453,15 @@ if __name__ == '__main__':
         base_rules += _bind(CIMS_AGENT_API_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_PUBLIC_HANDLER_LIST)
         base_rules += _bind(CIMS_GATEWAY_HANDLER_LIST)   # /api/v1/gateway/* 제어면(base 소유)
+
+        # D8 — /users/me(identity-plane)는 base 가 소유, 가입자 CRUD(/users/*)는 csc(resource).
+        #   all  : ME 를 /api/v1/users 에 mount → 뒤의 SERVICE admin superset 이 overwrite(현행 동작).
+        #   base : ME 를 /api/v1/users/me 에 mount → 나머지 /api/v1/users/* 는 게이트웨이가 csc 로
+        #          프록시(controller 최장 일치: /me* 는 base, 그 외는 게이트웨이). slim 핸들러는
+        #          parts 를 고정 _USERS_BASE 로 파싱하므로 mount 경로와 무관하게 me 를 처리.
+        _me_fn = CIMS_ME_HANDLER_LIST[0][1]
+        base_rules.append(('/api/v1/users/me' if role == 'base' else '/api/v1/users',
+                           _me_fn, cims_kwargs))
         admin_server.add_dynamic_rules(base_rules)
 
         # ── SERVICE (in-process; role=all 에서만; P2+ 게이트웨이 프록시로 이관) ──

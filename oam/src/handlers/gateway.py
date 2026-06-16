@@ -178,11 +178,17 @@ def seed_routes(config: dict) -> int:
     return n
 
 
-# csc(가입자/PTT/조직) 기본 업스트림 — 부트스트랩 첫 부팅용. svc-mgmt 는 P3 에서 추가.
+# csc(가입자/조직/PTT그룹) 기본 업스트림 — 부트스트랩 첫 부팅용. svc-mgmt 는 P3 에서 추가.
+#   현 csc 가 실제 서빙하는 경로(canonical /api/v1/subscribers 리네이밍은 D6 후속):
+#     /api/v1/users          가입자 CRUD (단 /users/me 는 base identity-plane → 미프록시)
+#     /api/v1/users/import   가입자 일괄 import (longest-match 로 /users 보다 우선)
+#     /api/v1/ptt/groups     PTT 그룹/멤버/affiliation 관리
+#     /api/v1/organizations  조직 트리
 _DEFAULT_SEED_ROUTES = [
-    {'segment': '/api/v1/subscribers', 'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
-    {'segment': '/api/v1/org',         'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
-    {'segment': '/api/v1/ptt',         'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
+    {'segment': '/api/v1/users',         'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
+    {'segment': '/api/v1/users/import',  'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
+    {'segment': '/api/v1/ptt/groups',    'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
+    {'segment': '/api/v1/organizations', 'upstream': 'http://127.0.0.1:4421', 'module': 'csc'},
 ]
 
 
@@ -208,6 +214,15 @@ def _filter_resp_headers(headers) -> dict:
         if k.lower() in _RESP_HEADER_ALLOW:
             out[k] = v
     return out
+
+
+def _ssl_param(upstream: str):
+    """loopback https 업스트림은 TLS 검증 비활성(I1: loopback 신뢰, self-signed 검증 무의미).
+    http 업스트림은 None(무시). aiohttp 의 request(ssl=...) 인자로 전달."""
+    p = urlparse(upstream or '')
+    if p.scheme == 'https' and (p.hostname or '').lower() in ('127.0.0.1', 'localhost', '::1'):
+        return False
+    return None
 
 
 def _request_body(handler_args: HandlerArgs):
@@ -246,7 +261,8 @@ async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
 
     try:
         kw = dict(params=handler_args.query_params or None,
-                  headers=req_headers or None, timeout=timeout, allow_redirects=False)
+                  headers=req_headers or None, timeout=timeout, allow_redirects=False,
+                  ssl=_ssl_param(upstream))
         if json_obj is not None:
             kw['json'] = json_obj
         elif content is not None:
@@ -315,7 +331,8 @@ async def _upstream_alive(upstream: str) -> bool:
         return False
     try:
         async with session.get(upstream + '/health',
-                               timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                               timeout=aiohttp.ClientTimeout(total=2.0),
+                               ssl=_ssl_param(upstream)) as resp:
             return resp.status < 500
     except Exception:
         return False
