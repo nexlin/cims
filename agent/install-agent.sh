@@ -70,7 +70,7 @@ if [[ "$MODE" == "fresh" ]]; then
             cat > ./install.sh <<WRAP
 #!/usr/bin/env bash
 # CIMS agent 설치 — 'sudo ./install.sh' 로 실행하세요 (등록 토큰/URL/이름 내장).
-#   설치 경로 변경:  sudo ./install.sh --install-dir /원하는/경로   (기본 /opt/cims-agent)
+#   실행하면 설치 디렉터리를 묻습니다(엔터 시 /opt/cims-agent). 비대화 지정: --install-dir /경로
 if [[ \$EUID -ne 0 ]]; then
     echo "ERROR: 'sudo ./install.sh' 로 실행하세요 (설치는 root 권한 필요)." >&2
     exit 1
@@ -85,7 +85,7 @@ WRAP
             echo "✓ 다운로드 완료 ($(pwd)) — install-agent.sh + install.sh 생성"
             echo ""
             echo "  이제 설치는 1줄:   sudo ./install.sh"
-            echo "  (경로 지정:        sudo ./install.sh --install-dir /원하는/경로  — 기본 /opt/cims-agent)"
+            echo "  (설치 중 설치 디렉터리를 묻습니다 — 엔터 시 기본 /opt/cims-agent)"
             echo ""
             exit 0
         fi
@@ -117,7 +117,17 @@ SVC_HOME="${SVC_HOME:-/home/$SVC_USER}"
 #   fresh: --install-dir 또는 기본 /opt/cims-agent (root 라 어디든 생성+소유권 부여).
 #   update: --install-dir 또는 현재 디렉터리(cwd).
 if [[ "$MODE" == "fresh" ]]; then
-    INSTALL_DIR="${INSTALL_DIR_ARG:-/opt/cims-agent}"
+    INSTALL_DIR="$INSTALL_DIR_ARG"
+    if [[ -z "$INSTALL_DIR" ]]; then
+        _def="/opt/cims-agent"
+        if [[ -t 0 ]]; then
+            # 대화형(sudo ./install.sh) — 설치 디렉터리를 묻는다(엔터 시 기본값).
+            read -r -p "설치 디렉터리 [$_def]: " _in
+            INSTALL_DIR="${_in:-$_def}"
+        else
+            INSTALL_DIR="$_def"   # 비대화형(파이프/자동화·base install.sh) — 기본값
+        fi
+    fi
     mkdir -p "$INSTALL_DIR" || { echo "ERROR: 설치 디렉터리 생성 실패: $INSTALL_DIR" >&2; exit 1; }
 else
     [[ -n "$INSTALL_DIR_ARG" ]] && cd "$INSTALL_DIR_ARG"
