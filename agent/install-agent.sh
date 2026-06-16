@@ -65,14 +65,28 @@ if [[ "$MODE" == "fresh" ]]; then
         _DEST="./install-agent.sh"
         if curl -fsSLk "$OAM_URL/install-agent.sh" -o "$_DEST" 2>/dev/null && [[ -s "$_DEST" ]]; then
             chmod +x "$_DEST" 2>/dev/null || true
+            # install.sh 래퍼 생성 — 등록 토큰/URL/이름을 박아, 설치는 'sudo ./install.sh' 1줄로.
+            # (토큰을 다시 입력할 필요 없음 — 토큰 명령은 다운로드만, 설치만 sudo.)
+            cat > ./install.sh <<WRAP
+#!/usr/bin/env bash
+# CIMS agent 설치 — 'sudo ./install.sh' 로 실행하세요 (등록 토큰/URL/이름 내장).
+#   설치 경로 변경:  sudo ./install.sh --install-dir /원하는/경로   (기본 /opt/cims-agent)
+if [[ \$EUID -ne 0 ]]; then
+    echo "ERROR: 'sudo ./install.sh' 로 실행하세요 (설치는 root 권한 필요)." >&2
+    exit 1
+fi
+exec bash "\$(cd "\$(dirname "\$0")" && pwd)/install-agent.sh" \\
+    --oam-url $(printf '%q' "$OAM_URL") \\
+    --enrollment-token $(printf '%q' "$ENROLL_TOKEN") \\
+    --name $(printf '%q' "$AGENT_NAME") "\$@"
+WRAP
+            chmod +x ./install.sh
             echo ""
-            echo "✓ install-agent.sh 다운로드 완료 → $(pwd)/install-agent.sh"
+            echo "✓ 다운로드 완료 ($(pwd)) — install-agent.sh + install.sh 생성"
             echo ""
-            echo "  설치는 sudo 로 1줄 실행하세요 (일반 계정에서 sudo — root 직접 로그인 불필요):"
+            echo "  이제 설치는 1줄:   sudo ./install.sh"
+            echo "  (경로 지정:        sudo ./install.sh --install-dir /원하는/경로  — 기본 /opt/cims-agent)"
             echo ""
-            echo "    sudo bash install-agent.sh --oam-url $OAM_URL --enrollment-token $ENROLL_TOKEN --name \"$AGENT_NAME\""
-            echo ""
-            echo "  (설치 경로 지정 시 끝에 '--install-dir /원하는/경로' 추가 — 기본 /opt/cims-agent)"
             exit 0
         fi
         echo "ERROR: install-agent.sh 다운로드 실패 — $OAM_URL/install-agent.sh 확인" >&2
