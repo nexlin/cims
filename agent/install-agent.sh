@@ -4,12 +4,12 @@
 #       1 user = 1 agent. 같은 호스트 다중 agent 필요 시 별도 user 로 install.
 #
 # Mode 1 — fresh install (default):
-#   cd /path/to/install
 #   curl -k https://<OAM>:4419/install-agent.sh | bash -s -- \
 #        --oam-url https://<OAM>:4419 \
 #        --enrollment-token <token> \
-#        --name <agent-name>
-#   ./init.sh                    # sudoers + enroll + systemd unit + enable --now (sudo 비번 1회)
+#        --name <agent-name> \
+#        [--install-dir /path/to/install]   # 미지정 시 현재 디렉터리(cwd)
+#   <install-dir>/init.sh        # sudoers + enroll + systemd unit + enable --now (sudo 비번 1회)
 #
 # Mode 2 — update (bundle 전체 교체 + sub-script 재생성, enrollment/sudoers/systemd 안 건드림):
 #   bash install-agent.sh --update-only \
@@ -57,7 +57,10 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
-if [[ "$MODE" == "update" && -n "$INSTALL_DIR_ARG" ]]; then
+# 설치 디렉터리 — --install-dir 지정 시 fresh/update 모두 그 경로 사용(없으면 생성),
+# 미지정 시 현재 디렉터리(cwd). (구: fresh 는 cwd 고정 → 지정 불가했음)
+if [[ -n "$INSTALL_DIR_ARG" ]]; then
+    mkdir -p "$INSTALL_DIR_ARG" || { echo "ERROR: 설치 디렉터리 생성 실패: $INSTALL_DIR_ARG" >&2; exit 1; }
     cd "$INSTALL_DIR_ARG"
 fi
 INSTALL_DIR="$(pwd)"
@@ -282,7 +285,7 @@ echo ""
 echo "  로그   : journalctl --user -u \$UNIT_NAME -f"
 echo "  제어   : systemctl --user {status|restart|stop} \$UNIT_NAME"
 echo "  업데이트: $INSTALL_DIR/update.sh"
-echo "  완전제거: $INSTALL_DIR/uninstall.sh"
+echo "  완전제거: sudo $INSTALL_DIR/uninstall.sh   (root 권한 필요)"
 echo ""
 echo "==> 초기화 완료."
 EOF
@@ -346,20 +349,33 @@ UNINSTALL_SH="$INSTALL_DIR/uninstall.sh"
 cat > "$UNINSTALL_SH" <<EOF
 #!/usr/bin/env bash
 # 완전 제거 — agent + 모듈(csp/cmp/...) 정지 + systemd unit + sudoers + keepalived + 파일 삭제.
-# Usage:
-#   ./uninstall.sh                 — 확인 prompt
-#   ./uninstall.sh --yes           — 모든 prompt skip (모듈 같이 정리)
-#   ./uninstall.sh --keep-modules  — 모듈은 남기고 agent 만 제거
+# Usage (root 권한 필수 — root 계정 또는 sudo):
+#   sudo ./uninstall.sh                 — 확인 prompt
+#   sudo ./uninstall.sh --yes           — 모든 prompt skip (모듈 같이 정리)
+#   sudo ./uninstall.sh --keep-modules  — 모듈은 남기고 agent 만 제거
 set -euo pipefail
 cd "\$(dirname "\$0")"
 
-# 권한 가드 — 제거는 "일반 계정 + sudo" 또는 "root 계정" 둘 다 허용.
-#   단, 일반 계정이면 sudo 가 가능해야 sudoers/keepalived 정리가 끝까지 진행됨
-#   (sudo 없으면 부분 제거) → 그 경우만 거부.
-if [[ \$EUID -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
-    echo "ERROR: 일반 계정으로 제거하려면 sudo 가 필요합니다 (또는 root 계정으로 실행하세요)." >&2
+# 권한 가드 — 제거는 root 권한 필수 (root 계정 또는 sudo). 일반 계정 직접 실행 거부.
+#   (sudoers/keepalived 제거·파일 삭제 등 root 작업 → 권한 없이 부분 제거되는 것 방지)
+if [[ \$EUID -ne 0 ]]; then
+    echo "ERROR: 제거는 root 권한이 필요합니다 — 'sudo \$0 \$*' 또는 root 계정으로 실행하세요." >&2
     exit 1
 fi
+
+# 서비스 사용자(agent 소유자) 식별 — sudo 호출자 우선, 없으면 설치 디렉터리 소유자.
+# systemd --user / linger 는 이 사용자 세션 기준이므로 root 가 아니라 이 사용자로 처리한다.
+SVC_USER="\${SUDO_USER:-}"
+if [[ -z "\$SVC_USER" || "\$SVC_USER" == "root" ]]; then
+    SVC_USER="\$(stat -c %U . 2>/dev/null || echo root)"
+fi
+SVC_UID="\$(id -u "\$SVC_USER" 2>/dev/null || echo 0)"
+SVC_HOME="\$(getent passwd "\$SVC_USER" 2>/dev/null | cut -d: -f6 || true)"
+SVC_HOME="\${SVC_HOME:-/home/\$SVC_USER}"
+# 서비스 사용자 컨텍스트에서 systemctl --user 실행 (root 에서 runuser 로 진입).
+_user_systemctl() {
+    runuser -u "\$SVC_USER" -- env XDG_RUNTIME_DIR="/run/user/\$SVC_UID" systemctl --user "\$@" 2>/dev/null || true
+}
 
 force=0
 keep_modules=0
@@ -432,18 +448,18 @@ if [[ \$keep_modules -ne 1 ]]; then
 fi
 
 # 2-a. user systemd unit 정지 + disable + 삭제 — linger 환경 자동 재기동 차단.
+#      root 로 실행되므로 서비스 사용자(\$SVC_USER) 세션 컨텍스트로 진입해 처리.
 #      단일 이름 (cims-agent.service) + 옛 동적 unit (cims-agent-*.service) 잔재 모두 정리.
-export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
-UNIT_DIR="\${XDG_CONFIG_HOME:-\$HOME/.config}/systemd/user"
+UNIT_DIR="\$SVC_HOME/.config/systemd/user"
 for OLD in "\$UNIT_DIR"/cims-agent.service "\$UNIT_DIR"/cims-agent-*.service; do
     [[ -e "\$OLD" ]] || continue
     UN="\$(basename "\$OLD")"
-    echo "→ user systemd unit 정지 + 삭제 (\$UN)"
-    systemctl --user stop    "\$UN" 2>/dev/null || true
-    systemctl --user disable "\$UN" 2>/dev/null || true
+    echo "→ user systemd unit 정지 + 삭제 (\$UN, user=\$SVC_USER)"
+    _user_systemctl stop    "\$UN"
+    _user_systemctl disable "\$UN"
     rm -f "\$OLD" "\$UNIT_DIR/default.target.wants/\$UN"
 done
-systemctl --user daemon-reload 2>/dev/null || true
+_user_systemctl daemon-reload
 
 # 2-b. agent process 종료 — systemd 정리 직후라 보통 이미 죽어있음.
 if pgrep -f "cims_agent.py.*--name $AGENT_NAME" >/dev/null 2>&1; then
@@ -454,23 +470,23 @@ if pgrep -f "cims_agent.py.*--name $AGENT_NAME" >/dev/null 2>&1; then
     kill -0 "\$PID" 2>/dev/null && kill -9 "\$PID" 2>/dev/null || true
 fi
 
-# 3. cims-ha uninstall — install 대칭 (keepalived + autoremove deps purge).
+# 3. cims-ha uninstall — install 대칭 (keepalived + autoremove deps purge). (root 직접)
 if [[ -x ./agent/bin/cims-ha ]] && command -v keepalived >/dev/null 2>&1; then
     echo "→ cims-ha uninstall (keepalived + deps purge)"
-    sudo -n ./agent/bin/cims-ha uninstall 2>&1 || \\
-        echo "  ⚠ cims-ha uninstall 실패 — 수동 정리: sudo apt-get -y purge keepalived && sudo apt-get -y autoremove --purge"
+    ./agent/bin/cims-ha uninstall 2>&1 || \\
+        echo "  ⚠ cims-ha uninstall 실패 — 수동 정리: apt-get -y purge keepalived && apt-get -y autoremove --purge"
 fi
 
-# 4. sudoers 제거 + linger 해제 안내 (자동 해제는 안 함 — 다른 user service 가능성).
-if [[ -x ./agent/bin/cims-priv ]] && sudo -n ./agent/bin/cims-priv version >/dev/null 2>&1; then
-    echo "→ /etc/sudoers.d/cims-priv 제거 (sudo 비번 필요)"
-    sudo rm -f /etc/sudoers.d/cims-priv && echo "✓ sudoers 파일 삭제"
+# 4. sudoers 제거 + linger 해제 안내 (자동 해제는 안 함 — 다른 user service 가능성). (root 직접)
+if [[ -f /etc/sudoers.d/cims-priv ]]; then
+    echo "→ /etc/sudoers.d/cims-priv 제거"
+    rm -f /etc/sudoers.d/cims-priv && echo "✓ sudoers 파일 삭제"
 else
     echo "→ sudoers 파일 미등록 — skip"
 fi
-if loginctl show-user "\$USER" 2>/dev/null | grep -q '^Linger=yes'; then
-    echo "  (참고) linger 가 켜져 있음 — 다른 user service 없으면 해제 권장:"
-    echo "         sudo loginctl disable-linger \$USER"
+if loginctl show-user "\$SVC_USER" 2>/dev/null | grep -q '^Linger=yes'; then
+    echo "  (참고) linger(\$SVC_USER) 가 켜져 있음 — 다른 user service 없으면 해제 권장:"
+    echo "         loginctl disable-linger \$SVC_USER"
 fi
 
 # 5. 잔재 파일 삭제 — sub-scripts + agent/ + state/.
@@ -496,7 +512,7 @@ if [[ "$MODE" == "fresh" ]]; then
     echo "  sudo 비번을 1회 prompt 합니다."
     echo ""
     echo "  (참고) 업데이트  : $INSTALL_DIR/update.sh        (agent 바이너리만 갱신 + restart)"
-    echo "  (참고) 완전 제거 : $INSTALL_DIR/uninstall.sh     (systemd unit + sudoers + keepalived + 파일 정리)"
+    echo "  (참고) 완전 제거 : sudo $INSTALL_DIR/uninstall.sh   (root 권한 필요 — systemd unit + sudoers + keepalived + 파일 정리)"
     echo ""
     echo "==> 설치 완료."
 else
