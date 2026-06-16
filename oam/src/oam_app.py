@@ -172,6 +172,7 @@ if __name__ == '__main__':
     from handlers.alerts         import CIMS_ALERTS_HANDLER_LIST
     from handlers.console        import CIMS_CONSOLE_HANDLER_LIST
     from handlers.console_accounts import CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST
+    from handlers.console_layouts  import CIMS_CONSOLE_LAYOUTS_HANDLER_LIST
     from handlers.service_descriptors import CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
     from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
     from handlers.gateway              import CIMS_GATEWAY_HANDLER_LIST, register_gateway
@@ -447,6 +448,8 @@ if __name__ == '__main__':
             base_rules += _bind(CIMS_CONSOLE_STATIC_HANDLER_LIST)
         base_rules += _bind(CIMS_ALERTS_HANDLER_LIST)
         base_rules += _bind(CIMS_CONSOLE_HANDLER_LIST)
+        # D1 사용자 레이아웃/카탈로그/프로파일 — console.py 보다 구체 경로(최장 일치 우선).
+        base_rules += _bind(CIMS_CONSOLE_LAYOUTS_HANDLER_LIST)
         base_rules += _bind(CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST)
         base_rules += _bind(CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST)
         base_rules += _bind(CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST)

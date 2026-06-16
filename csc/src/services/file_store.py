@@ -60,6 +60,7 @@ _OAM_CATEGORY = {
     'metrics': 'control', 'packages': 'control', 'ha_groups': 'control',
     'csp_sync_txn': 'control', 'gateway_routes': 'control',
     'console_accounts': 'console', 'console_layouts': 'console', 'console_menu': 'console',
+    'console_user_layouts': 'console',
 }
 
 
