@@ -937,11 +937,12 @@ cmd_sync() {
     local targets=("$@")
     [[ ${#targets[@]} -eq 0 ]] && targets=(all)
 
-    local did_csc=0 did_agent=0 did_scripts=0 did_pkg=0 did_console=0 did_phone=0
+    local did_csc=0 did_agent=0 did_scripts=0 did_pkg=0 did_console=0 did_phone=0 did_oamsvc=0
     for t in "${targets[@]}"; do
         case "$t" in
-            all) did_csc=1 did_agent=1 did_scripts=1 did_pkg=1 ;;
+            all) did_csc=1 did_agent=1 did_scripts=1 did_pkg=1 did_oamsvc=1 ;;
             csc)       did_csc=1 ;;
+            oam-svc)  did_oamsvc=1 ;;
             agent)     did_agent=1 ;;
             scripts)   did_scripts=1 ;;
             pkg-meta)  did_pkg=1 ;;
@@ -982,9 +983,16 @@ cmd_sync() {
             cp -f "$SCRIPT_DIR/oam/pkg.json" "$DIST_DIR/oam/pkg.json"
         fi
         # OAM 분리 Phase 3 — oam/config (oam.json / oam-tb.json) 동기화
+        # + oam_base_service_split §7 — base 모드 활성화 템플릿(common/base/services 샘플) 동봉.
+        #   운영자가 production 노드에서 .sample→실파일 rename 으로 --role base 전환할 수 있게.
         if [[ -d "$SCRIPT_DIR/oam/config" ]]; then
             mkdir -p "$DIST_DIR/oam/config"
             cp -f "$SCRIPT_DIR/oam/config/"*.json "$DIST_DIR/oam/config/" 2>/dev/null || true
+            cp -f "$SCRIPT_DIR/oam/config/"*.sample "$DIST_DIR/oam/config/" 2>/dev/null || true
+            if [[ -d "$SCRIPT_DIR/oam/config/services" ]]; then
+                mkdir -p "$DIST_DIR/oam/config/services"
+                cp -f "$SCRIPT_DIR/oam/config/services/"* "$DIST_DIR/oam/config/services/" 2>/dev/null || true
+            fi
         fi
         # OAM 녹취 변환툴(ffmpeg/ffprobe) vendor 자동 채움 — 빌드 시 정적 바이너리 다운로드.
         # 패키지에 동봉되어 air-gapped 런타임에서 별도 설치 없이 녹취 재생(raw RTP→mp4) 가능.
@@ -1006,6 +1014,27 @@ cmd_sync() {
             fi
         done
         ok "csc/src + oam/src (+ config, pkg.json, vendor, requirements.txt) ← $SCRIPT_DIR"
+        n_changed=$((n_changed+1))
+    fi
+
+    # ── oam-svc 독립 모듈 (oam_base_service_split D5) ──
+    #    thin 앱: 자기 src + config + pkg.json 만 동봉. 공유 라이브러리(oam/vendor·csc/src·
+    #    oam/src)는 런타임에 같은 노드의 oam/csc 설치본을 sys.path glob 으로 mount → tarball 에
+    #    복제하지 않음. (그래서 did_csc 도 함께 동기화돼야 dev 에서 import 가능 — pkg auto-sync 참조)
+    if [[ $did_oamsvc -eq 1 ]]; then
+        mkdir -p "$DIST_DIR/oam-svc/src" "$DIST_DIR/oam-svc/config"
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a --delete-excluded --exclude='__pycache__' --exclude='*.pyc' \
+                "$SCRIPT_DIR/oam-svc/src/" "$DIST_DIR/oam-svc/src/"
+        else
+            cp -r "$SCRIPT_DIR/oam-svc/src/." "$DIST_DIR/oam-svc/src/"
+        fi
+        find "$DIST_DIR/oam-svc/src" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+        [[ -d "$SCRIPT_DIR/oam-svc/config" ]] && \
+            cp -f "$SCRIPT_DIR/oam-svc/config/"*.json "$SCRIPT_DIR/oam-svc/config/"*.sample "$DIST_DIR/oam-svc/config/" 2>/dev/null
+        [[ -f "$SCRIPT_DIR/oam-svc/pkg.json" ]] && \
+            cp -f "$SCRIPT_DIR/oam-svc/pkg.json" "$DIST_DIR/oam-svc/pkg.json"
+        ok "oam-svc/src (+ config, pkg.json) ← $SCRIPT_DIR"
         n_changed=$((n_changed+1))
     fi
 
@@ -1249,19 +1278,17 @@ cmd_installer() {
     # 산출: build/dist/packages/cims-bootstrap-<oam버전>.tar.gz
     local out_dir="$DIST_DIR/packages"
     local _latest
-    _latest() { ls -1 "$out_dir"/$1-*.tar.gz 2>/dev/null | sort -V | tail -1; }
-    local oam_tar con_tar agt_tar
-    oam_tar=$(_latest oam); con_tar=$(_latest console); agt_tar=$(_latest agent)
+    _latest() { ls -1 "$out_dir"/$1-[0-9]*.tar.gz 2>/dev/null | sort -V | tail -1; }
+    local oam_tar agt_tar
+    oam_tar=$(_latest oam); agt_tar=$(_latest agent)
     local miss=()
     [[ -z "$oam_tar" ]] && miss+=(oam)
-    [[ -z "$con_tar" ]] && miss+=(console)
     [[ -z "$agt_tar" ]] && miss+=(agent)
     if [[ ${#miss[@]} -gt 0 ]]; then
         err "installer 조립 불가 — 패키지 없음: ${miss[*]} (./cims.sh pkg ${miss[*]} 먼저)"
         return 1
     fi
     local oam_ver; oam_ver=$(basename "$oam_tar" .tar.gz | sed 's/^oam-//')
-    local con_ver; con_ver=$(basename "$con_tar" .tar.gz | sed 's/^console-//')
     local stage="$DIST_DIR/.installer.$$"
     rm -rf "$stage"
     mkdir -p "$stage/cims-bootstrap/packages"
@@ -1269,39 +1296,9 @@ cmd_installer() {
     chmod +x "$stage/cims-bootstrap/install.sh"
     cp -f "$oam_tar" "$agt_tar" "$stage/cims-bootstrap/packages/"
 
-    # ── base 프로파일 콘솔 동봉 ────────────────────────────────────────
-    # 부트스트랩 콘솔은 관리>시스템 + 관리>릴리스(개발자모드) 메뉴만 담는다
-    # (VITE_CONSOLE_PROFILE=base — 서비스 pack 메뉴/위젯 제외). 서비스 메뉴·위젯은
-    # 3·4단계에서 풀 프로파일 console 패키지(버전 상향)로 업데이트되며 도착한다.
-    # 풀 콘솔 tarball 의 구조(meta.json + console/{pkg.json,dist})를 재사용해
-    # dist 만 base 빌드로 교체 — 패키지 스키마와 항상 일치.
-    if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then
-        info "base 프로파일 콘솔 빌드 (VITE_CONSOLE_PROFILE=base)"
-        if ! ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod VITE_CONSOLE_PROFILE=base \
-                 npx vite build --outDir dist-base --emptyOutDir 2>&1 | tail -2 ); then
-            rm -rf "$stage"
-            err "base 콘솔 빌드 실패 — installer 조립 중단"
-            return 1
-        fi
-        local cstage="$stage/.console-base"
-        mkdir -p "$cstage"
-        tar -xzf "$con_tar" -C "$cstage"
-        rm -rf "$cstage/console/dist"
-        cp -a "$SRC_CONSOLE/dist-base" "$cstage/console/dist"
-        python3 - "$cstage/meta.json" <<'PYEOF'
-import json, sys
-p = sys.argv[1]
-m = json.load(open(p))
-m['description'] = (m.get('description') or 'CIMS Console') + ' (base profile — 시스템/릴리스 메뉴만)'
-m['profile'] = 'base'
-json.dump(m, open(p, 'w'), ensure_ascii=False, indent=2)
-PYEOF
-        ( cd "$cstage" && tar czf "$stage/cims-bootstrap/packages/console-${con_ver}.tar.gz" meta.json console )
-        rm -rf "$cstage"
-    else
-        warn "콘솔 소스 없음 — 풀 프로파일 console 패키지를 그대로 동봉"
-        cp -f "$con_tar" "$stage/cims-bootstrap/packages/"
-    fi
+    # ── oam_base_service_split — console 은 oam-base 패키지에 동봉(별도 console 모듈 폐기) ──
+    # 부트스트랩은 oam(+동봉 console, 항상 full) + agent 만 시드. base/full 프로파일 빌드 폐기 —
+    # 위젯 노출은 런타임 카탈로그(D1/D7: 설치된 서비스 ∩ RBAC)가 게이팅한다.
     cat > "$stage/cims-bootstrap/README.md" <<EOR
 # CIMS 부트스트랩 인스톨러 (base 운영평면)
 
@@ -1315,12 +1312,11 @@ PYEOF
   3) 패키지 등록 (서비스 모듈 + 본 인스톨러 구성요소 업데이트 패키지)
   4) 패키지 설치  5) 패키지 설정
 
-동봉 콘솔은 base 프로파일 — 관리>시스템, 관리>릴리스(개발자모드) 메뉴만 포함.
-서비스 메뉴/위젯(대시보드·구성·성능·기록 등)은 3·4단계에서 풀 프로파일 console
-패키지로 업데이트 시 나타난다. ⚠️ 서비스 릴리스의 console 패키지는 동봉본보다
-높은 버전이어야 함 (동일 버전은 등록 시 멱등 skip — 동봉본: console-${con_ver}).
+콘솔은 oam-base 패키지에 동봉(항상 full). 서비스 메뉴/위젯은 런타임 카탈로그가
+설치된 서비스 모듈(csc/oam-svc 등) ∩ 사용자 RBAC 로 게이팅 — 서비스 모듈을
+설치하면 해당 위젯이 자동 노출된다(별도 console 패키지 불요).
 
-동봉: $(basename "$oam_tar") / console-${con_ver}.tar.gz (base) / $(basename "$agt_tar")
+동봉: $(basename "$oam_tar") (console 포함) / $(basename "$agt_tar")
 EOR
     local out="$out_dir/cims-bootstrap-${oam_ver}.tar.gz"
     ( cd "$stage" && tar czf "$out" cims-bootstrap )
@@ -1358,7 +1354,8 @@ cmd_pkg() {
     # csp 바이너리는 다용도 → csp/isp/psp 3 tarball (소스/dist 디렉토리는 동일,
     # tarball 이름과 meta.json 의 name 만 분리 — Roles/LocalIp 는 deploy overlay 가 결정).
     # cmp 바이너리도 동일 → cmp/imp/pmp.
-    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp csp psp isp cwrtc csc oam console phone cspsim agent)
+    # oam_base_service_split — console 은 oam-base 패키지에 동봉(별도 모듈 폐기). 명시 시만 단독 패키징.
+    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp csp psp isp cwrtc csc oam oam-svc phone cspsim agent)
 
     if [[ ! -d $DIST_DIR ]]; then
         err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
@@ -1378,7 +1375,9 @@ cmd_pkg() {
         local _t
         for _t in "${targets[@]}"; do
             case "$_t" in
-                csc|oam) _sync_set[csc]=1 ;;   # OAM 분리 Phase 2 — sync csc 가 oam/src 도 함께
+                csc) _sync_set[csc]=1 ;;   # OAM 분리 Phase 2 — sync csc 가 oam/src 도 함께
+                oam) _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-base = oam(+csc 공유) + console(동봉)
+                oam-svc) _sync_set[oam-svc]=1 ;;  # oam-svc = thin 앱(자기 src 만 tarball). oam/csc 공유코드는 런타임 import → 미동봉
                 agent)   _sync_set[agent]=1 ;;
                 console) _sync_set[console]=1 ;;
                 phone)   _sync_set[phone]=1 ;;
@@ -1422,6 +1421,7 @@ cmd_pkg() {
             cmp|pmp|imp) echo "$SCRIPT_DIR/cmp" ;;   # 동일 cmp 바이너리 + 동일 config_template
             csc)         echo "$SCRIPT_DIR/csc" ;;
             oam)         echo "$SCRIPT_DIR/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
+            oam-svc)    echo "$SCRIPT_DIR/oam-svc" ;;  # oam_base_service_split D5 — base 게이트웨이 뒤 독립 서비스 모듈
             cwrtc)       echo "$SCRIPT_DIR/cwrtc" ;;
             console)     echo "$SCRIPT_DIR/cims-console" ;;
             phone)       echo "$SCRIPT_DIR/cims-phone" ;;
@@ -1465,7 +1465,7 @@ cmd_pkg() {
     local t src_sub tar_file build_date pkg_root base_dist stage
     for t in "${targets[@]}"; do
         case "$t" in
-            cmp|pmp|imp|csp|psp|isp|cwrtc|csc|oam|console|phone|cspsim|agent)
+            cmp|pmp|imp|csp|psp|isp|cwrtc|csc|oam|oam-svc|console|phone|cspsim|agent)
                 src_sub=$(_src_sub_for "$t") ;;
             *) err "알 수 없는 컴포넌트: $t"; continue ;;
         esac
@@ -1521,6 +1521,20 @@ cmd_pkg() {
                 find "$stage/oam/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
             else
                 warn "oam: csc/src 공유 라이브러리 미발견 — standalone 실행 불가 패키지"
+            fi
+            # oam_base_service_split — console(full) 을 oam-base 패키지에 동봉.
+            #   별도 console 모듈 폐기: oam 이 <root>/oam/console/dist 를 직접 서빙
+            #   (console_static.resolve 의 번들 후보). base/full 프로파일 빌드 없이 항상 full,
+            #   위젯 노출은 런타임 카탈로그(D1/D7: 설치된 서비스 ∩ RBAC)가 게이팅.
+            local _condist="$DIST_DIR/console/dist"
+            [[ -d "$_condist" ]] || _condist="$SRC_CONSOLE/dist"
+            if [[ -d "$_condist" ]]; then
+                rm -rf "$stage/oam/console"
+                mkdir -p "$stage/oam/console"
+                cp -a "$_condist" "$stage/oam/console/dist"
+                find "$stage/oam/console" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
+            else
+                warn "oam: console dist 미발견($_condist) — 콘솔 미동봉 패키지(서빙 비활성)"
             fi
             pkg_root="$stage"
         fi
@@ -1673,12 +1687,12 @@ PYEOF
     # 이 라운드에 패키징한 component 만 정리 (다른 컴포넌트 손대지 않음).
     local _cleaned=0 _latest _stale
     for t in "${targets[@]}"; do
-        _latest=$(ls -1t "$out_dir/${t}-"*.tar.gz 2>/dev/null | head -1)
+        _latest=$(ls -1t "$out_dir/${t}-"[0-9]*.tar.gz 2>/dev/null | head -1)
         [[ -z "$_latest" ]] && continue
         while IFS= read -r _stale; do
             [[ "$_stale" == "$_latest" ]] && continue
             rm -f "$_stale" && _cleaned=$((_cleaned+1)) && info "stale 제거: $(basename "$_stale")"
-        done < <(ls -1 "$out_dir/${t}-"*.tar.gz 2>/dev/null)
+        done < <(ls -1 "$out_dir/${t}-"[0-9]*.tar.gz 2>/dev/null)
     done
     [[ $_cleaned -gt 0 ]] && ok "stale tarball $_cleaned 개 정리"
 
@@ -1726,9 +1740,9 @@ PYEOF
     echo ""
     info "Console 에서 업로드: 배포 관리 → 패키지 → ＋ 업로드 (파일만 선택하면 meta 자동 인식)"
 
-    # 상용 부트스트랩 인스톨러 자동 조립 — base 3종(oam/console/agent) tarball 이
-    # 모두 준비된 경우에만 (개별 모듈 pkg 호출 시에는 보통 미충족 → skip).
-    if ls "$out_dir"/oam-*.tar.gz "$out_dir"/console-*.tar.gz "$out_dir"/agent-*.tar.gz >/dev/null 2>&1; then
+    # 상용 부트스트랩 인스톨러 자동 조립 — oam-base(console 동봉) + agent tarball 이
+    # 준비된 경우에만 (개별 모듈 pkg 호출 시에는 보통 미충족 → skip).
+    if ls "$out_dir"/oam-[0-9]*.tar.gz "$out_dir"/agent-*.tar.gz >/dev/null 2>&1; then
         cmd_installer || warn "부트스트랩 인스톨러 조립 실패 (개별 패키지는 정상)"
     fi
 }

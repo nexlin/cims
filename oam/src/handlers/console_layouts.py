@@ -50,11 +50,11 @@ _BASE = '/api/v1/console'
 _DOMAIN = 'console_user_layouts'
 
 # 알려진 서비스 모듈(분리 배포 시 게이트웨이 업스트림). base(None) 위젯은 항상 가용.
-_KNOWN_SERVICES = ('csc', 'svc-mgmt')
+_KNOWN_SERVICES = ('csc', 'oam-svc')
 
 # ── 위젯 카탈로그(정책 SoT) ─────────────────────────────────────────────────
 #  콘솔 프런트(widgets registry)가 컴포넌트를 소유하고, 서버는 RBAC/가용성 정책을 소유.
-#  area: 운용(ops) / 관리(admin). requires_service: None=base · 'csc' · 'svc-mgmt'.
+#  area: 운용(ops) / 관리(admin). requires_service: None=base · 'csc' · 'oam-svc'.
 #  min_role: 이 위젯을 카탈로그에 노출할 최소 권한(서버 강제). default_w: 12-col 폭.
 _CATALOG = [
     # base(인프라/관제) — 서비스 무관, 항상 가용
@@ -65,14 +65,14 @@ _CATALOG = [
     {'id': 'core.ha',            'title': 'HA 그룹',          'area': 'admin', 'requires_service': None,       'min_role': 'operator', 'default_w': 6},
     {'id': 'core.deployment',    'title': '배포/패키지',      'area': 'admin', 'requires_service': None,       'min_role': 'manager',  'default_w': 12},
     {'id': 'core.external',      'title': '외부 시스템',      'area': 'admin', 'requires_service': None,       'min_role': 'operator', 'default_w': 6},
-    # svc-mgmt(서비스 관측/녹취/flow/검증)
-    {'id': 'svc.service-status', 'title': '서비스 현황',      'area': 'ops',   'requires_service': 'svc-mgmt', 'min_role': 'monitor',  'default_w': 12},
-    {'id': 'svc.stats-volte',    'title': 'VoLTE 통계',       'area': 'ops',   'requires_service': 'svc-mgmt', 'min_role': 'monitor',  'default_w': 6},
-    {'id': 'svc.stats-ptt',      'title': 'PTT 통계',         'area': 'ops',   'requires_service': 'svc-mgmt', 'min_role': 'monitor',  'default_w': 6},
-    {'id': 'svc.history-volte',  'title': 'VoLTE 호 이력',    'area': 'ops',   'requires_service': 'svc-mgmt', 'min_role': 'monitor',  'default_w': 12},
-    {'id': 'svc.history-ptt',    'title': 'PTT 세션 이력',    'area': 'ops',   'requires_service': 'svc-mgmt', 'min_role': 'monitor',  'default_w': 12},
-    {'id': 'svc.abnormal',       'title': '비정상 세션 이력', 'area': 'ops',   'requires_service': 'svc-mgmt', 'min_role': 'operator', 'default_w': 12},
-    {'id': 'svc.verification',   'title': '검증(S1~S6)',      'area': 'admin', 'requires_service': 'svc-mgmt', 'min_role': 'manager',  'default_w': 12},
+    # oam-svc(서비스 관측/녹취/flow/검증)
+    {'id': 'svc.service-status', 'title': '서비스 현황',      'area': 'ops',   'requires_service': 'oam-svc', 'min_role': 'monitor',  'default_w': 12},
+    {'id': 'svc.stats-volte',    'title': 'VoLTE 통계',       'area': 'ops',   'requires_service': 'oam-svc', 'min_role': 'monitor',  'default_w': 6},
+    {'id': 'svc.stats-ptt',      'title': 'PTT 통계',         'area': 'ops',   'requires_service': 'oam-svc', 'min_role': 'monitor',  'default_w': 6},
+    {'id': 'svc.history-volte',  'title': 'VoLTE 호 이력',    'area': 'ops',   'requires_service': 'oam-svc', 'min_role': 'monitor',  'default_w': 12},
+    {'id': 'svc.history-ptt',    'title': 'PTT 세션 이력',    'area': 'ops',   'requires_service': 'oam-svc', 'min_role': 'monitor',  'default_w': 12},
+    {'id': 'svc.abnormal',       'title': '비정상 세션 이력', 'area': 'ops',   'requires_service': 'oam-svc', 'min_role': 'operator', 'default_w': 12},
+    {'id': 'svc.verification',   'title': '검증(S1~S6)',      'area': 'admin', 'requires_service': 'oam-svc', 'min_role': 'manager',  'default_w': 12},
     # csc(가입자/조직/PTT그룹)
     {'id': 'csc.organizations',  'title': '조직',             'area': 'admin', 'requires_service': 'csc',      'min_role': 'operator', 'default_w': 6},
     {'id': 'csc.subscribers',    'title': '사용자',           'area': 'admin', 'requires_service': 'csc',      'min_role': 'operator', 'default_w': 12},

@@ -471,11 +471,11 @@ if __name__ == '__main__':
         if role == 'all':
             # 가입자/조직 CRUD(csc 귀속) — admin superset 이 base slim /me 를 덮어씀.
             admin_server.add_dynamic_rules(_bind(CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST))
-            # 녹취·flow(svc-mgmt 귀속) — 자기 init() 상태 사용(raw kwargs). FLOW→RECORDING
+            # 녹취·flow(oam-svc 귀속) — 자기 init() 상태 사용(raw kwargs). FLOW→RECORDING
             # 순서로 /api/v1/recordings 충돌 시 RECORDING 우선(현행 보존).
             admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
             admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
-            # 검증·service KPI(svc-mgmt 귀속).
+            # 검증·service KPI(oam-svc 귀속).
             admin_server.add_dynamic_rules(
                 _bind(CIMS_VERIFICATION_HANDLER_LIST + CIMS_STATS_SERVICE_HANDLER_LIST))
         else:

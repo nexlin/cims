@@ -1,4 +1,4 @@
-"""CIMS svc-mgmt — 서비스 관측/관리 독립 모듈 엔트리포인트 (oam_base_service_split P3, D5).
+"""CIMS oam-svc — 서비스 관측/관리 독립 모듈 엔트리포인트 (oam_base_service_split P3, D5).
 
 base OAM(게이트웨이) 뒤의 독립 서비스 모듈. csc(가입자/PTT)와 동격으로, 서비스 KPI 관측·
 녹취·SIP flow·검증(S1~S6)을 담당한다. loopback 비공개 포트(기본 4480)에 bind 하고 외부 노출은
@@ -27,9 +27,9 @@ import traceback
 import glob as _glob
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))   # = svc-mgmt/
-_CONFIG_PATH = os.environ.get('CIMS_SVCMGMT_CONFIG') \
-    or os.path.join(_COMPONENT_ROOT, 'config', 'svc-mgmt.json')
+_COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))   # = oam-svc/
+_CONFIG_PATH = os.environ.get('CIMS_OAMSVC_CONFIG') \
+    or os.path.join(_COMPONENT_ROOT, 'config', 'oam-svc.json')
 
 
 def _first_dir(cands):
@@ -106,8 +106,8 @@ if __name__ == '__main__':
         return applied
 
     def load_config():
-        """§7 설정 분리: common.json 존재 시 common.json + services/svc-mgmt.json,
-        부재 시 _CONFIG_PATH(svc-mgmt.json) 단독, 그것도 없으면 oam.json fallback."""
+        """§7 설정 분리: common.json 존재 시 common.json + services/oam-svc.json,
+        부재 시 _CONFIG_PATH(oam-svc.json) 단독, 그것도 없으면 oam.json fallback."""
         cfg_dir = os.path.dirname(_CONFIG_PATH)
         common_p = os.path.join(cfg_dir, 'common.json')
         merged: dict = {}
@@ -116,11 +116,11 @@ if __name__ == '__main__':
             if os.path.isfile(common_p):
                 with open(common_p, 'r') as f:
                     _deep_merge(merged, json.load(f))
-                svc_p = os.path.join(cfg_dir, 'services', 'svc-mgmt.json')
+                svc_p = os.path.join(cfg_dir, 'services', 'oam-svc.json')
                 if os.path.isfile(svc_p):
                     with open(svc_p, 'r') as f:
                         _deep_merge(merged, json.load(f))
-                src = f'common.json+services/svc-mgmt.json ({cfg_dir})'
+                src = f'common.json+services/oam-svc.json ({cfg_dir})'
             elif os.path.isfile(_CONFIG_PATH):
                 with open(_CONFIG_PATH, 'r') as f:
                     merged = json.load(f)
@@ -134,7 +134,7 @@ if __name__ == '__main__':
                         merged = json.load(f)
                     src = oam_json + ' (fallback)'
         except Exception as e:
-            logger.log_error(f"svc-mgmt config load error: {e}")
+            logger.log_error(f"oam-svc config load error: {e}")
             return {}
         # 배포 overlay (cims_agent 변종 디렉토리)
         try:
@@ -148,12 +148,12 @@ if __name__ == '__main__':
                     flat = json.load(f)
                 if isinstance(flat, dict) and flat:
                     n = _apply_overlay(merged, flat)
-                    logger.log_info(f"svc-mgmt overlay applied: {overlay} ({n} keys)")
+                    logger.log_info(f"oam-svc overlay applied: {overlay} ({n} keys)")
                     break
         except Exception as e:
-            logger.log_error(f"svc-mgmt overlay failed: {e}")
+            logger.log_error(f"oam-svc overlay failed: {e}")
         if src:
-            logger.log_info(f"svc-mgmt config source: {src}")
+            logger.log_info(f"oam-svc config source: {src}")
         return merged
 
     # 귀속 핸들러 import (공유 모듈) — preflight 가 여기 import 성공을 검증.
@@ -166,22 +166,22 @@ if __name__ == '__main__':
 
     admin_server = None
     try:
-        logger.log_info('==================== start (svc-mgmt) ====================')
+        logger.log_info('==================== start (oam-svc) ====================')
 
         config = load_config()
         auth.init(config)   # 공유 JwtSecret 로 토큰 독립 검증(§5)
 
         if args_dict.get('preflight'):
             if not config:
-                print('SVCMGMT_PREFLIGHT_FAIL: empty config', flush=True)
+                print('OAMSVC_PREFLIGHT_FAIL: empty config', flush=True)
                 sys.exit(2)
             logger.log_info('[preflight] handler imports + config OK — exit 0 (no bind)')
-            print('SVCMGMT_PREFLIGHT_OK', flush=True)
+            print('OAMSVC_PREFLIGHT_OK', flush=True)
             sys.exit(0)
 
         sl = config.get("ServiceLogging", {})
         _service_log_dir = sl.get("Dir", "") or config.get("ServiceLogDir", config.get("MsgLogDir", ""))
-        _system_id = config.get("SystemId", "svc_mgmt_01")
+        _system_id = config.get("SystemId", "oam_svc_01")
 
         # 신뢰망(비정상 세션 탐지에서 '외부' 제외) — mgmt CIDR + config 공인 IP /24 + override.
         _trusted = []
@@ -225,7 +225,7 @@ if __name__ == '__main__':
         recording.init(service_log_dir=_service_log_dir, ffmpeg_bin=_ffmpeg_bin,
                        transcode_workers=_tx_workers)
 
-        # SSL — svc-mgmt/cert 우선, 없으면 csc/cert 공유(dev/동거). loopback 은 평문도 허용.
+        # SSL — oam-svc/cert 우선, 없으면 csc/cert 공유(dev/동거). loopback 은 평문도 허용.
         ssl_keyfile = ssl_certfile = None
         _cert_cands = [os.path.join(_COMPONENT_ROOT, 'cert')]
         if _CSC_SRC:
@@ -258,7 +258,7 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules(
             _bind(CIMS_STATS_SERVICE_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST))
         admin_server.start()
-        logger.log_info(f"svc-mgmt server started on {admin_conf.get('Ip','127.0.0.1')}:{admin_conf.get('Port', 4480)}")
+        logger.log_info(f"oam-svc server started on {admin_conf.get('Ip','127.0.0.1')}:{admin_conf.get('Port', 4480)}")
 
         while True:
             time.sleep(1)
@@ -269,5 +269,5 @@ if __name__ == '__main__':
         if admin_server:
             admin_server.stop(5)
         if args_dict.get('preflight'):
-            print(f'SVCMGMT_PREFLIGHT_FAIL: {e}', flush=True)
+            print(f'OAMSVC_PREFLIGHT_FAIL: {e}', flush=True)
             sys.exit(2)

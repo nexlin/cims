@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "sections": [
+    {
+      "key": "server",
+      "title": "oam-svc bind (loopback)",
+      "description": "서비스 관측 모듈의 비공개 bind. I1: 외부 노출은 base OAM 게이트웨이(4419) 경유만이므로 loopback(127.0.0.1) 고정 권장.",
+      "fields": [
+        {
+          "key": "Server.Ip",
+          "label": "bind IP",
+          "type": "string",
+          "default": "127.0.0.1",
+          "required": true,
+          "restart": true,
+          "help": "I1: loopback 비공개. 0.0.0.0 으로 열지 말 것 (게이트웨이 우회 차단)."
+        },
+        {
+          "key": "Server.Port",
+          "label": "bind 포트",
+          "type": "int",
+          "default": 4480,
+          "min": 1,
+          "max": 65535,
+          "required": true,
+          "restart": true,
+          "help": "base 게이트웨이 라우트 테이블의 업스트림 포트와 일치해야 함."
+        },
+        {
+          "key": "SystemId",
+          "label": "System ID",
+          "type": "string",
+          "default": "oam_svc_01",
+          "restart": true,
+          "help": "노드별 분리 (oam_svc_01 / oam_svc_02)."
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "probe",
+      "title": "관측 대상 (KPI probe)",
+      "description": "stats/service KPI 가 STATS_REQUEST 로 질의하는 CSP/CMP 엔드포인트.",
+      "fields": [
+        {
+          "key": "CspNotify.Ip",
+          "label": "CSP probe IP",
+          "type": "string",
+          "default": "121.161.164.47",
+          "restart": false
+        },
+        {
+          "key": "CspNotify.Port",
+          "label": "CSP probe 포트",
+          "type": "int",
+          "default": 4421,
+          "min": 1,
+          "max": 65535,
+          "restart": false
+        }
+      ],
+      "scope": "service"
+    }
+  ]
+}

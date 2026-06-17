@@ -29,17 +29,17 @@
     "Gateway": {
         "_comment": "세그먼트별 업스트림 시드. 업스트림은 loopback(127.0.0.1) 비공개 포트만 허용(I1). 서비스 모듈이 설치 시 POST /api/v1/gateway/routes 로 self-register 하면 이 시드는 첫 부팅 1회만 쓰인다. csc admin HTTP 포트=4421/TCP(배포 csc.json Server.Port; CspNotify 4421/UDP 와 소켓 분리). /api/v1/users/me 는 base identity-plane 이므로 프록시하지 않는다(게이트웨이는 /api/v1/users 만 잡고 /users/me 는 base 가 더 구체적 경로로 선점).",
         "Routes": [
-            { "segment": "/api/v1/users",         "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/users/import",  "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/ptt/groups",    "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/organizations", "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/stats/service",              "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
-            { "segment": "/api/v1/verification",               "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
-            { "segment": "/api/v1/recordings",                 "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
-            { "segment": "/api/v1/flow",                       "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
-            { "segment": "/api/v1/call/logs",                  "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
-            { "segment": "/api/v1/ptt/history",                "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" },
-            { "segment": "/api/v1/security/abnormal-sessions", "upstream": "http://127.0.0.1:4480", "module": "svc-mgmt" }
+            { "segment": "/api/v1/users",         "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/users/import",  "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/ptt/groups",    "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/organizations", "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/stats/service",              "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
+            { "segment": "/api/v1/verification",               "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
+            { "segment": "/api/v1/recordings",                 "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
+            { "segment": "/api/v1/flow",                       "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
+            { "segment": "/api/v1/call/logs",                  "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
+            { "segment": "/api/v1/ptt/history",                "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
+            { "segment": "/api/v1/security/abnormal-sessions", "upstream": "https://127.0.0.1:4480", "module": "oam-svc" }
         ]
     }
 }

@@ -1,5 +1,5 @@
 {
-    "_comment": "oam_base_service_split §7 — 전 모듈 공유 설정(read-only 공유). base·csc·svc-mgmt 가 각자 import. 활성화: 이 파일을 common.json 으로 rename 하면 load_config 가 oam.json 대신 common.json+base.json 을 읽는다(단일프로세스 oam.json 과 비파괴 공존).",
+    "_comment": "oam_base_service_split §7 — 전 모듈 공유 설정(read-only 공유). base·csc·oam-svc 가 각자 import. 활성화: 이 파일을 common.json 으로 rename 하면 load_config 가 oam.json 대신 common.json+base.json 을 읽는다(단일프로세스 oam.json 과 비파괴 공존).",
     "Mgmt": {
         "Cidr": "10.0.2.0/24"
     },

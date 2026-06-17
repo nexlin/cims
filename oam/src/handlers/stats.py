@@ -248,7 +248,7 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         if parts[0] == 'leak-reclaims':
             return await _leak_reclaims(config, qp('date'))
 
-        # NOTE: service/* (KPI 관측) 는 svc-mgmt 모듈 귀속 (oam_base_service_split §4).
+        # NOTE: service/* (KPI 관측) 는 oam-svc 모듈 귀속 (oam_base_service_split §4).
         # 별도 핸들러 handle_stats_service(_STATS_SERVICE_BASE) 가 처리한다.
         # --role all 에서는 두 핸들러가 모두 등록되며 controller 최장 일치로
         # /api/v1/stats/service/* 는 handle_stats_service 로 라우팅된다(여기 도달 안 함).
@@ -263,7 +263,7 @@ _STATS_SERVICE_BASE = '/api/v1/stats/service'
 
 
 async def handle_stats_service(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """서비스 KPI 관측 (CSP/CMP VoIP·PTT) — svc-mgmt 모듈 귀속.
+    """서비스 KPI 관측 (CSP/CMP VoIP·PTT) — oam-svc 모듈 귀속.
     base 의 노드 health(_health) 와 함수 단위로 분리(oam_base_service_split §4).
     --role all 에서는 base handle_stats 와 함께 등록되어 controller 최장 일치로
     /api/v1/stats/service/* 만 이 핸들러로 들어온다 (동작 무변경)."""
@@ -1954,7 +1954,7 @@ CIMS_STATS_HANDLER_LIST = [
     (_STATS_BASE, handle_stats, {}),
 ]
 
-# service KPI(/api/v1/stats/service/*) — svc-mgmt 모듈 귀속.
+# service KPI(/api/v1/stats/service/*) — oam-svc 모듈 귀속.
 # controller 최장 일치 덕에 _STATS_BASE 와 충돌 없이 공존(longest match → service).
 CIMS_STATS_SERVICE_HANDLER_LIST = [
     (_STATS_SERVICE_BASE, handle_stats_service, {}),

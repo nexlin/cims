@@ -44,7 +44,14 @@ for _c in _candidates:
         _OAM_SRC = _c
         break
 if _OAM_SRC and _OAM_SRC not in sys.path:
-    sys.path.insert(0, _OAM_SRC)
+    # oam_base_service_split — oam/src 는 sys.path 뒤(append)에 둔다.
+    #   `handlers` 는 __init__.py 없는 PEP 420 namespace package 라 oam/src·csc/src
+    #   양쪽이 순서 무관 병합(auth/users=oam, admin/org=csc). 하지만 `services` 는 양쪽
+    #   모두 __init__.py 가 있는 *일반* 패키지라 sys.path 우선순위로 하나만 이긴다.
+    #   배포본 oam/src/services 는 서비스 코드 제외 subset 이므로, insert(0) 으로 앞에 두면
+    #   csc/src/services 의 mcptt/idms 를 가려 `services.mcptt` ModuleNotFoundError 가 난다.
+    #   append 로 csc/src/services(full superset)가 이기게 한다(handlers 병합은 그대로).
+    sys.path.append(_OAM_SRC)
 
 from httpsrv.server import HttpServer
 from util.log_util import Logger

@@ -9,10 +9,10 @@
     "Gateway": {
         "_comment": "csc 가 base 게이트웨이에 self-register 할 라우트(설치 시 POST /api/v1/gateway/routes).",
         "Routes": [
-            { "segment": "/api/v1/users",         "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/users/import",  "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/ptt/groups",    "upstream": "http://127.0.0.1:4421", "module": "csc" },
-            { "segment": "/api/v1/organizations", "upstream": "http://127.0.0.1:4421", "module": "csc" }
+            { "segment": "/api/v1/users",         "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/users/import",  "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/ptt/groups",    "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/organizations", "upstream": "https://127.0.0.1:4421", "module": "csc" }
         ],
         "RequiresBaseOam": "0.1.0"
     }

@@ -45,8 +45,9 @@ def resolve_console_static_dir(config: dict, component_root: str) -> str:
 
     우선순위:
       1) config Console.StaticDir (절대 또는 component_root 상대)
-      2) versioned 형제: <root>/console/<ver>/console/dist (모듈 버전 단위 설치)
-      3) flat 형제:      <root대비 ../console/dist>          (build/dist 개발 트리)
+      2) 번들: <component_root>/console/dist (oam_base_service_split — console 을 oam-base 에 동봉)
+      3) versioned 형제: <root>/console/<ver>/console/dist (구 분리 console 모듈 — 하위호환)
+      4) flat 형제:      <root대비 ../console/dist>          (build/dist 개발 트리)
     """
     import glob as _glob
     import re as _re
@@ -54,6 +55,11 @@ def resolve_console_static_dir(config: dict, component_root: str) -> str:
     if cfg:
         p = cfg if os.path.isabs(cfg) else os.path.normpath(os.path.join(component_root, cfg))
         return p if os.path.isdir(p) else ''
+
+    # oam_base_service_split — console 을 oam-base 패키지에 동봉(번들). 별도 console 모듈 불요.
+    bundled = os.path.normpath(os.path.join(component_root, 'console', 'dist'))
+    if os.path.isdir(bundled):
+        return bundled
 
     def _ver_key(path):
         # .../console/<ver>/console/dist → 버전 자연 정렬 (0.0.10 > 0.0.9)

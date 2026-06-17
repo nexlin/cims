@@ -175,25 +175,25 @@ fi
 
 # 권한 체크는 스크립트 상단 가드(반드시 sudo)에서 이미 강제됨 — 여기서는 생략.
 
-_latest() { ls -1 "$PKG_DIR"/$1-*.tar.gz 2>/dev/null | sort -V | tail -1; }
-OAM_TAR=$(_latest oam); CON_TAR=$(_latest console); AGT_TAR=$(_latest agent)
-for v in OAM_TAR CON_TAR AGT_TAR; do
+_latest() { ls -1 "$PKG_DIR"/$1-[0-9]*.tar.gz 2>/dev/null | sort -V | tail -1; }
+# oam_base_service_split — console 은 oam-base 패키지에 동봉. 별도 console tarball 은
+#   선택(있으면 하위호환으로 별도 모듈 설치, 없으면 oam 동봉 console 서빙).
+OAM_TAR=$(_latest oam); AGT_TAR=$(_latest agent); CON_TAR=$(_latest console)
+for v in OAM_TAR AGT_TAR; do
     [[ -n "${!v}" ]] || { err "packages/ 에 ${v%_TAR} tarball 없음"; exit 1; }
 done
 _ver() { basename "$1" .tar.gz | sed 's/^[a-z]*-//'; }
-OAM_VER=$(_ver "$OAM_TAR"); CON_VER=$(_ver "$CON_TAR"); AGT_VER=$(_ver "$AGT_TAR")
-info "설치 구성: oam $OAM_VER / console $CON_VER / agent $AGT_VER → $PREFIX (HTTPS :$PORT)"
+OAM_VER=$(_ver "$OAM_TAR"); AGT_VER=$(_ver "$AGT_TAR")
+info "설치 구성: oam-base $OAM_VER (console 동봉) / agent $AGT_VER → $PREFIX (HTTPS :$PORT)"
 
 # ── 레이아웃 (버전 단위 설치 — agent 배포 체계와 동일, 모듈은 modules/ 하위) ──
 MODULES_DIR="$PREFIX/modules"
 OAM_ROOT="$MODULES_DIR/oam/$OAM_VER"
-CON_ROOT="$MODULES_DIR/console/$CON_VER"
 RUNTIME_DIR="$MODULES_DIR/oam/runtime"     # 버전 무관 영속 store (업그레이드 생존)
-mkdir -p "$OAM_ROOT" "$CON_ROOT" "$RUNTIME_DIR"
+mkdir -p "$OAM_ROOT" "$RUNTIME_DIR"
 
 info "패키지 전개..."
 tar xzf "$OAM_TAR" -C "$OAM_ROOT"
-tar xzf "$CON_TAR" -C "$CON_ROOT"
 # agent 는 전개하지 않음 — 설치 에셋(/install-agent.sh, /cims_agent.py,
 # /agent-bundle.tar.gz)의 SoT 는 패키지 저장소(seed 자동 등록). 버전별로
 # 보관되어 다른 모듈과 동일하게 업데이트/롤백 관리.
@@ -202,7 +202,7 @@ mkdir -p "$OAM_ROOT/config" "$OAM_ROOT/run" "$OAM_ROOT/log"
 # seed 패키지 — OAM 첫 부팅 시 패키지 저장소 자동 등록 (1단계 산출물도
 # 콘솔에서 업데이트 가능한 패키지로 보이도록; 서비스 모듈은 3단계에서 등록)
 mkdir -p "$OAM_ROOT/oam/seed_packages"
-cp -f "$OAM_TAR" "$CON_TAR" "$AGT_TAR" "$OAM_ROOT/oam/seed_packages/"
+cp -f "$OAM_TAR" "$AGT_TAR" "$OAM_ROOT/oam/seed_packages/"
 
 # ── TLS 인증서 (self-signed; 재설치 시 보존) ─────────────────────
 CERT_DIR="$OAM_ROOT/oam/cert"
@@ -225,6 +225,8 @@ fi
 SECRETS_DIR="$RUNTIME_DIR/_secrets"
 mkdir -p "$SECRETS_DIR"; chmod 700 "$SECRETS_DIR"
 JWT_SECRET_FILE="$SECRETS_DIR/jwt_secret"
+# oam deployment overlay(upgrade-safe instance config) 임시 출력 — _self_deploy oam 가 읽음.
+OAM_OVERLAY_FILE="$SECRETS_DIR/.oam_deploy_overlay.json"
 # 마이그레이션 — 구 위치(runtime/.jwt_secret)에 있으면 보존 이동 (기존 토큰 유효 유지).
 if [[ ! -f "$JWT_SECRET_FILE" && -f "$RUNTIME_DIR/.jwt_secret" ]]; then
     mv "$RUNTIME_DIR/.jwt_secret" "$JWT_SECRET_FILE"
@@ -235,7 +237,7 @@ fi
 chmod 600 "$JWT_SECRET_FILE"
 PY=python3 OAM_ROOT="$OAM_ROOT" RUNTIME_DIR="$RUNTIME_DIR" PORT="$PORT" \
 JWT_SECRET="$(cat "$JWT_SECRET_FILE")" MGMT_IP="$MGMT_IP" \
-ADMIN_PASS="$ADMIN_PASS" python3 - <<'PYEOF'
+ADMIN_PASS="$ADMIN_PASS" OAM_OVERLAY_FILE="$OAM_OVERLAY_FILE" python3 - <<'PYEOF'
 import hashlib, json, os
 p = os.path.join(os.environ['OAM_ROOT'], 'oam', 'config', 'oam.json')
 d = json.load(open(p))
@@ -258,6 +260,24 @@ if ap:
 json.dump(d, open(p, 'w'), ensure_ascii=False, indent=4)
 open(p, 'a').write('\n')
 print('  oam.json 구성 완료')
+
+# ── upgrade-safe: 같은 instance 값을 deployment overlay(flat dotted)로도 기록 ──
+#   agent 가 config.json 으로 써서 oam.json 위에 적용(load_config) + 버전 간 이관 →
+#   oam upgrade 가 패키지 기본 oam.json 으로 덮어써도 포트/시크릿/경로/admin 복원.
+ov = {
+    'Server.Ip': '0.0.0.0',
+    'Server.Port': port,
+    'CimsRuntimeDir': d['CimsRuntimeDir'],
+    'Packages.Dir': d['Packages']['Dir'],
+    'CimsAuth.JwtSecret': d['CimsAuth']['JwtSecret'],
+    'CimsAuth.BuiltinAccounts': d['CimsAuth'].get('BuiltinAccounts', []),
+}
+if mgmt:
+    ov['Server.AgentOamUrl'] = d['Server']['AgentOamUrl']
+    ov['Mgmt.Cidr'] = d['Mgmt']['Cidr']
+ovf = os.environ.get('OAM_OVERLAY_FILE')
+if ovf:
+    json.dump(ov, open(ovf, 'w'), ensure_ascii=False)
 PYEOF
 
 # ── uninstall 스크립트 생성 (install 의 대칭 — 언제든 단독 실행 가능) ──────
@@ -414,7 +434,7 @@ except Exception: print('')" 2>/dev/null; }
     #   멱등: 같은 agent+process 의 비-removed deployment 가 있으면 skip.
     #   $1=package_name $2=install_path $3=process_name
     _self_deploy() {
-        local pn="$1" ipath="$2" proc="$3" aid pid exists
+        local pn="$1" ipath="$2" proc="$3" cfg="${4:-}" aid pid exists
         aid=$(_api GET "/api/v1/agents" "" "$TOK" | python3 -c "import sys,json
 try:
     d=json.load(sys.stdin); ags=(d.get('items') or []) if isinstance(d,dict) else []
@@ -433,8 +453,13 @@ try:
     print('Y' if any(str(x.get('agent_id'))=='$aid' and (x.get('process_name') or x.get('package_name'))=='$proc' and x.get('status')!='removed' for x in ds if isinstance(x,dict)) else '')
 except Exception: print('')" 2>/dev/null)
         [[ "$exists" == "Y" ]] && return 0
+        # config overlay 동봉(있으면) — upgrade 가 패키지 기본 config 로 덮어써도
+        #   deployment overlay(config.json)가 instance 값(포트/시크릿/경로/admin)을 복원한다.
+        #   agent 가 config.json 을 버전 간 이관하므로 영속(oam upgrade 안전성).
+        local cfg_field=""
+        [[ -n "$cfg" ]] && cfg_field=",\"config\":$cfg"
         _api POST "/api/v1/deployments" \
-            "{\"agent_id\":$aid,\"package_id\":$pid,\"process_name\":\"$proc\",\"install_path\":\"$ipath\",\"status\":\"running\"}" \
+            "{\"agent_id\":$aid,\"package_id\":$pid,\"process_name\":\"$proc\",\"install_path\":\"$ipath\",\"status\":\"running\"$cfg_field}" \
             "$TOK" >/dev/null 2>&1
     }
 
@@ -518,9 +543,9 @@ except Exception: print('')" 2>/dev/null)
                 mkdir -p "$PREFIX/run"
                 printf '{"oam": "%s"}\n' "$OAM_ROOT" > "$PREFIX/run/supervised.json"
                 chown -R "$SVC_USER":"$(id -gn "$SVC_USER")" "$PREFIX/run" 2>/dev/null || true
-                # 이 노드의 base 모듈(oam/console)을 deployment 로 등록 → 콘솔 "패키지 설치" 목록 노출.
-                _self_deploy oam     "$OAM_ROOT" oam     || true
-                _self_deploy console "$CON_ROOT" console || true
+                # 이 노드의 base 모듈(oam — console 동봉)을 deployment 로 등록 → 콘솔 "패키지 설치" 목록 노출.
+                # oam 은 upgrade-safe overlay(포트/시크릿/경로/admin) 동봉 — upgrade 시 instance config 보존.
+                _self_deploy oam     "$OAM_ROOT" oam "$(cat "$OAM_OVERLAY_FILE" 2>/dev/null)" || true
                 if [[ $_use_sd -eq 1 ]]; then
                     AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
                 else
@@ -547,7 +572,7 @@ cat <<DONE
  CIMS base 설치 완료
    프로세스:
      · oam     : 실행 중 — agent(cims-svc) 감독, API+콘솔 서빙 (HTTPS :$PORT)
-     · console : 별도 프로세스 없음 — oam 이 정적 서빙 (위 포트)
+     · console : oam-base 패키지에 동봉 — oam 이 정적 서빙 (위 포트)
      · agent   : $AGENT_STATE
    콘솔   : https://<이 서버 IP>:$PORT/   (브라우저 인증서 경고는 self-signed 때문)
    로그인 : admin / $([[ -n "$ADMIN_PASS" ]] && echo '<--admin-pass 로 설정한 비밀번호>' || echo '1234  ← 상용에서는 변경 권장 (--admin-pass)')
