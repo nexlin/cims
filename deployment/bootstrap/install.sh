@@ -19,7 +19,7 @@
 # 사용:
 #   sudo ./install.sh [옵션]
 #     --prefix DIR     설치 루트 (기본 /opt/cims-agent)
-#     --port N         OAM HTTPS 포트 (기본 4419)
+#     --port N         OAM bind 포트 (기본 4419)
 #     --admin-pass PW  내장 admin 비밀번호 설정 (기본 1234 — 상용은 변경 권장)
 #     --server-name N  OAM 호스트(이 서버) 표시 이름 (기본 hostname)
 #     --mgmt-ip IP     관리(mgmt) IP — agent↔OAM 통신 기준 (AgentOamUrl/Mgmt.Cidr; 기본 첫 global IP)
@@ -33,7 +33,7 @@
 set -euo pipefail
 
 PREFIX=/opt/cims-agent
-PORT=4419
+PORT=4419          # OAM 실제 bind 포트 (비특권 >=1024 — 비root 프로세스)
 ADMIN_PASS=""
 SERVER_NAME=""      # OAM 호스트(=이 서버) 표시 이름. 미지정 시 hostname.
 MGMT_IP=""          # 관리(mgmt) IP — agent↔OAM 통신 기준. AgentOamUrl/Mgmt.Cidr 에 반영.
@@ -47,7 +47,7 @@ SVC_USER="${SUDO_USER:-$(id -un)}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --prefix)     PREFIX="$2"; shift 2 ;;
-        --port)       PORT="$2"; shift 2 ;;
+        --port)       PORT="$2"; shift 2 ;;       # OAM bind 포트
         --admin-pass) ADMIN_PASS="$2"; shift 2 ;;
         --server-name) SERVER_NAME="$2"; shift 2 ;;
         --mgmt-ip)     MGMT_IP="$2"; shift 2 ;;
@@ -111,15 +111,16 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
         read -r -p "  [1/6] 설치 경로 [$PREFIX]: " _in
         [[ -n "$_in" ]] && PREFIX="$_in"
     fi
-    # [2] 콘솔/OAM HTTPS 포트 (단일 오리진 — 콘솔 웹과 API/agent 통신이 같은 포트)
+    # [2] OAM bind 포트 — OAM 이 실제 listen(비root → 1024~65535). 브라우저는 https://<IP>:<포트>.
+    #     (443 포트 생략 접속은 시스템/인프라의 포트 redirect 기능으로 별도 — 부트스트랩 영역 아님)
     if [[ $PORT_GIVEN -eq 0 ]]; then
         while :; do
-            read -r -p "  [2/6] 콘솔/OAM HTTPS 포트 (웹·API 단일) [$PORT]: " _in
+            read -r -p "  [2/6] OAM bind 포트 [$PORT]: " _in
             [[ -z "$_in" ]] && break
-            if [[ "$_in" =~ ^[0-9]+$ ]] && (( _in >= 1 && _in <= 65535 )); then
+            if [[ "$_in" =~ ^[0-9]+$ ]] && (( _in >= 1024 && _in <= 65535 )); then
                 PORT="$_in"; break
             fi
-            echo "      포트는 1~65535 숫자여야 합니다"
+            echo "      bind 포트는 1024~65535 (비root 프로세스라 특권 포트 불가)"
         done
     fi
     # [3] 서버 명 (이 OAM 호스트의 표시 이름)
@@ -153,7 +154,7 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     echo ""
     echo "── 설치 요약 ────────────────────────────────────────────────"
     echo "    설치 경로     : $PREFIX"
-    echo "    HTTPS 포트    : $PORT  (콘솔 웹 + API + agent 통신 단일 오리진)"
+    echo "    OAM bind 포트 : $PORT  (브라우저: https://<IP>:$PORT)"
     echo "    서버 명       : $SERVER_NAME"
     echo "    관리(mgmt) IP : ${MGMT_IP:-(미지정)}"
     echo "    admin 비밀번호: (입력됨)"
@@ -173,9 +174,19 @@ if [[ -z "$MGMT_IP" ]]; then
     [[ -z "$MGMT_IP" ]] && MGMT_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 fi
 
+# ── bind 포트 보정 ───────────────────────────────────────────────────────────
+#   OAM 은 비root(cims)라 특권 포트(<1024) 직접 bind 불가 → 4419 로 보정.
+#   (443 포트 생략 접속이 필요하면 시스템/인프라의 포트 redirect 기능으로 별도 설정)
+if (( PORT < 1024 )); then
+    warn "bind 포트 $PORT 는 특권 포트 — 비root OAM 은 직접 bind 불가 → 4419 로 보정."
+    PORT=4419
+fi
+
 # 권한 체크는 스크립트 상단 가드(반드시 sudo)에서 이미 강제됨 — 여기서는 생략.
 
-_latest() { ls -1 "$PKG_DIR"/$1-[0-9]*.tar.gz 2>/dev/null | sort -V | tail -1; }
+# || true: 매치 없을 때 ls(exit 2)+pipefail 이 set -e 로 스크립트를 죽이지 않게.
+#   (console 은 oam-base 동봉이라 별도 tarball 미존재 → _latest console 빈 결과 정상)
+_latest() { ls -1 "$PKG_DIR"/$1-[0-9]*.tar.gz 2>/dev/null | sort -V | tail -1 || true; }
 # oam_base_service_split — console 은 oam-base 패키지에 동봉. 별도 console tarball 은
 #   선택(있으면 하위호환으로 별도 모듈 설치, 없으면 oam 동봉 console 서빙).
 OAM_TAR=$(_latest oam); AGT_TAR=$(_latest agent); CON_TAR=$(_latest console)
