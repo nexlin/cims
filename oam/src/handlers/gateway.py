@@ -57,6 +57,8 @@ _STREAM_TIMEOUT = 120.0         # 대용량(녹취 등) 다운로드 타임아�
 
 _logger = Logger()
 _session = None                 # lazy aiohttp.ClientSession (bind 되는 event loop = 서버 루프)
+_ADMIN_SERVER = None            # register_gateway 에서 set — 런타임 hot-mount/unmount 용 (role base)
+_GW_CONFIG = None               # 〃 — proxy 핸들러 kwargs 의 config
 
 
 def _get_session():
@@ -178,26 +180,11 @@ def seed_routes(config: dict) -> int:
     return n
 
 
-# 기본 업스트림 시드 — 부트스트랩 첫 부팅용(base.json Gateway.Routes 미지정 시).
-#   csc(가입자/조직/PTT그룹, admin 4421/TCP)·oam-svc(관측/녹취/flow/검증, 4480).
-#   canonical 리네이밍(/api/v1/subscribers, /api/v1/calls)은 D6 후속 — 현 실경로 등록.
-#     csc:      /api/v1/users(단 /users/me 는 base identity-plane)·/users/import·
-#               /ptt/groups·/organizations
-#     oam-svc: /api/v1/stats/service·/verification·/recordings·/flow·/call/logs·
-#               /ptt/history·/security/abnormal-sessions
-_DEFAULT_SEED_ROUTES = [
-    {'segment': '/api/v1/users',         'upstream': 'https://127.0.0.1:4421', 'module': 'csc'},
-    {'segment': '/api/v1/users/import',  'upstream': 'https://127.0.0.1:4421', 'module': 'csc'},
-    {'segment': '/api/v1/ptt/groups',    'upstream': 'https://127.0.0.1:4421', 'module': 'csc'},
-    {'segment': '/api/v1/organizations', 'upstream': 'https://127.0.0.1:4421', 'module': 'csc'},
-    {'segment': '/api/v1/stats/service',              'upstream': 'https://127.0.0.1:4480', 'module': 'oam-svc'},
-    {'segment': '/api/v1/verification',               'upstream': 'https://127.0.0.1:4480', 'module': 'oam-svc'},
-    {'segment': '/api/v1/recordings',                 'upstream': 'https://127.0.0.1:4480', 'module': 'oam-svc'},
-    {'segment': '/api/v1/flow',                       'upstream': 'https://127.0.0.1:4480', 'module': 'oam-svc'},
-    {'segment': '/api/v1/call/logs',                  'upstream': 'https://127.0.0.1:4480', 'module': 'oam-svc'},
-    {'segment': '/api/v1/ptt/history',                'upstream': 'https://127.0.0.1:4480', 'module': 'oam-svc'},
-    {'segment': '/api/v1/security/abnormal-sessions', 'upstream': 'https://127.0.0.1:4480', 'module': 'oam-svc'},
-]
+# self-register 로 전환 — base 는 서비스 모듈을 미리 알지 않는다(하드코딩 시드 제거).
+#   라우트는 각 서비스 모듈 배포 시 OAM 이 그 모듈의 선언 세그먼트(pkg meta.gateway.routes)+
+#   실제 Server.Port 로 등록(register_module_routes)한다. base.json Gateway.Routes 로 수동
+#   시드도 가능하나 기본은 비움.
+_DEFAULT_SEED_ROUTES = []
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -313,6 +300,9 @@ def register_gateway(admin_server, config: dict) -> int:
     """라우트 테이블의 enabled 라우트마다 프록시 동적 라우트를 등록.
     반환=마운트한 라우트 수. base 고유 경로(/api/v1/stats/health 등)는 controller 최장 일치로
     base 가 우선 — 게이트웨이는 더 구체적이지 않은 세그먼트만 잡는다."""
+    global _ADMIN_SERVER, _GW_CONFIG
+    _ADMIN_SERVER = admin_server          # 런타임 self-register hot-mount 용
+    _GW_CONFIG = config
     seeded = seed_routes(config)
     if seeded:
         _logger.log_info(f'[gateway] seeded {seeded} route(s) (table was empty)')
@@ -324,6 +314,70 @@ def register_gateway(admin_server, config: dict) -> int:
         admin_server.add_dynamic_rules([(seg, proxy, {'config': config, '_route': r})])
         _logger.log_info(f"[gateway] mount {seg} → {r.get('upstream')} (module={r.get('module')})")
         n += 1
+    return n
+
+
+# ── 런타임 hot-mount / unmount (self-register) ──────────────────────────────
+def mount_route(route: dict) -> bool:
+    """라우트 1개를 라이브 프록시로 즉시 mount. role base(register_gateway 후)에서만 유효.
+    role all 등 _ADMIN_SERVER 미설정 시 no-op(persist 만)."""
+    if _ADMIN_SERVER is None or _GW_CONFIG is None:
+        return False
+    seg = _normalize_segment(route.get('segment'))
+    if not seg or not route.get('enabled', True):
+        return False
+    _ADMIN_SERVER.add_dynamic_rule(seg, proxy, {'config': _GW_CONFIG, '_route': route})
+    _logger.log_info(f"[gateway] hot-mount {seg} → {route.get('upstream')} (module={route.get('module')})")
+    return True
+
+
+def unmount_route(segment: str) -> bool:
+    if _ADMIN_SERVER is None:
+        return False
+    seg = _normalize_segment(segment)
+    if not seg:
+        return False
+    try:
+        _ADMIN_SERVER.del_dynamic_rule(seg)
+        _logger.log_info(f"[gateway] hot-unmount {seg}")
+        return True
+    except Exception as e:
+        _logger.log_warning(f"[gateway] unmount {seg} failed: {e}")
+        return False
+
+
+def register_module_routes(config: dict, module: str, ip: str, port, segments) -> int:
+    """서비스 모듈 배포 시 self-register: 모듈이 선언한 세그먼트들을 그 모듈의 실제
+    (ip, port=배포 config 의 Server.Port=SoT) loopback https upstream 으로 등록+hot-mount.
+    멱등(segment upsert). base 가 서비스 모듈을 미리 알 필요 없음(시드 하드코딩 대체)."""
+    ip = ip or '127.0.0.1'
+    base = f"https://{ip}:{port}"
+    n = 0
+    for seg in (segments or []):
+        try:
+            rec = upsert_route(config, {'segment': seg, 'upstream': base, 'module': module})
+            mount_route(rec)
+            n += 1
+        except ValueError as e:
+            _logger.log_warning(f"[gateway] self-register {module} {seg} skip: {e}")
+    if n:
+        _logger.log_info(f"[gateway] self-register {module}: {n} route(s) → {base}")
+    return n
+
+
+def deregister_module_routes(config: dict, module: str) -> int:
+    """모듈 제거 시: 그 모듈의 라우트 전부 unmount + 레지스트리 삭제."""
+    if not module:
+        return 0
+    d = _dir(config)
+    n = 0
+    for r in load_routes(config):
+        if str(r.get('module', '')) == str(module):
+            unmount_route(r.get('segment'))
+            file_store.delete(d, r.get('id'))
+            n += 1
+    if n:
+        _logger.log_info(f"[gateway] deregister {module}: {n} route(s)")
     return n
 
 
@@ -387,6 +441,7 @@ async def handle_gateway(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
                 rec = upsert_route(config, body)
             except ValueError as e:
                 return HandlerResult(status=400, body={'error': str(e)})
+            mount_route(rec)   # hot-mount — 재기동 없이 즉시 프록시 활성
             return HandlerResult(status=200, body={'route': rec})
 
         # GET / DELETE by id
@@ -408,7 +463,10 @@ async def handle_gateway(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
                 payload, err = auth.require_admin(handler_args)
                 if err:
                     return err
+                _rec = file_store.by_id(d, rid)   # segment 확보(unmount 용)
                 ok = file_store.delete(d, rid)
+                if ok and _rec:
+                    unmount_route(_rec.get('segment'))   # hot-unmount
                 return HandlerResult(status=200 if ok else 404,
                                      body={'deleted': ok, 'id': rid})
 

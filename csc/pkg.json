@@ -3,6 +3,14 @@
   "description": "CIMS Service Controller — 관리/인증/이력 REST API 서버",
   "version": "0.1.0",
   "ha_capability": "active_standby",
+  "gateway": {
+    "routes": [
+      "/api/v1/users",
+      "/api/v1/users/import",
+      "/api/v1/ptt/groups",
+      "/api/v1/organizations"
+    ]
+  },
   "service": {
     "functions": [
       {

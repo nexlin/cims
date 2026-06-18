@@ -1996,6 +1996,23 @@ async def _create_deployment(handler_args: HandlerArgs, config):
 
     r = await asyncio.to_thread(_do_create)
     _enrich_deploy([r], config)
+
+    # ── self-register: 서비스 모듈이 선언한 게이트웨이 라우트(pkg meta.gateway.routes)를
+    #    배포 config 의 Server.Port(SoT)+Ip 로 게이트웨이에 등록+hot-mount.
+    #    base 가 서비스 모듈을 미리 알 필요 없음(시드 하드코딩 대체). role base 에서만 mount.
+    try:
+        gw_routes = ((pkg_meta.get("gateway") or {}).get("routes")) or []
+        if gw_routes and isinstance(cfg_overlay, dict):
+            srv = cfg_overlay.get("Server") if isinstance(cfg_overlay.get("Server"), dict) else {}
+            _port = cfg_overlay.get("Server.Port") or srv.get("Port")
+            _ip = cfg_overlay.get("Server.Ip") or srv.get("Ip") or "127.0.0.1"
+            if _port:
+                import handlers.gateway as _gw
+                await asyncio.to_thread(_gw.register_module_routes, config,
+                                        process_name, _ip, int(_port), gw_routes)
+    except Exception as e:
+        logger.log_warning(f"[deploy] self-register routes 실패({process_name}): {e}")
+
     return HandlerResult(status=201, body=_deployment_to_json(r), media_type="application/json")
 
 
@@ -2051,6 +2068,14 @@ async def _delete_deployment(did: int, config):
     # runtime store v2 P4 — 모듈의 마지막 deployment 제거 시 그 모듈 컬렉션 SoT prune.
     dep = await asyncio.to_thread(_deploy_load, config, did)
     pkg = (dep or {}).get("package_name") or (dep or {}).get("package")
+    # self-register 해제: 이 deployment 의 모듈 라우트를 게이트웨이에서 deregister+unmount.
+    _proc = (dep or {}).get("process_name") or pkg
+    if _proc:
+        try:
+            import handlers.gateway as _gw
+            await asyncio.to_thread(_gw.deregister_module_routes, config, _proc)
+        except Exception as e:
+            logger.log_warning(f"[deploy] deregister routes 실패({_proc}): {e}")
     await asyncio.to_thread(file_store.delete, _deploy_dir(config), did)
     if pkg:
         try:

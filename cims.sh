@@ -1578,7 +1578,8 @@ meta_file, name, version, build_date, git_sha, git_branch, packaged_at, packaged
 desc = ""
 service = None
 ha_capability = None
-# 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "...", "ha_capability": "...", "service": {...} }
+gateway = None
+# 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "...", "ha_capability": "...", "service": {...}, "gateway": {...} }
 if meta_file and os.path.isfile(meta_file):
     try:
         with open(meta_file, 'r', encoding='utf-8') as f:
@@ -1590,12 +1591,16 @@ if meta_file and os.path.isfile(meta_file):
                 if isinstance(entry.get("service"), dict):
                     service = entry["service"]
                 ha_capability = entry.get("ha_capability")
+                if isinstance(entry.get("gateway"), dict):
+                    gateway = entry["gateway"]
             # 구(舊) 레지스트리 스키마 (후방 호환)
             elif name in entry and isinstance(entry[name], dict):
                 desc = entry[name].get("description", "")
                 if isinstance(entry[name].get("service"), dict):
                     service = entry[name]["service"]
                 ha_capability = entry[name].get("ha_capability")
+                if isinstance(entry[name].get("gateway"), dict):
+                    gateway = entry[name]["gateway"]
     except Exception:
         pass
 # csp/cmp 변종은 base description 끝에 역할 suffix 추가 (식별용).
@@ -1622,6 +1627,8 @@ if service is not None:
     meta["service"] = service
 if ha_capability is not None:
     meta["ha_capability"] = ha_capability
+if gateway is not None:
+    meta["gateway"] = gateway      # self-register: 모듈 선언 라우트(세그먼트) — OAM 이 배포 시 등록
 print(json.dumps(meta, indent=2, ensure_ascii=False))
 PYEOF
 
