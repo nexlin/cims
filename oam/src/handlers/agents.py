@@ -2024,7 +2024,9 @@ async def _create_deployment(handler_args: HandlerArgs, config):
         if gw_routes and isinstance(cfg_overlay, dict):
             srv = cfg_overlay.get("Server") if isinstance(cfg_overlay.get("Server"), dict) else {}
             _port = cfg_overlay.get("Server.Port") or srv.get("Port")
-            _ip = cfg_overlay.get("Server.Ip") or srv.get("Ip") or "127.0.0.1"
+            # 게이트웨이 upstream 은 항상 loopback(I1) — 모듈 bind Ip(0.0.0.0 등)와 무관하게
+            #   게이트웨이·모듈이 같은 호스트라 127.0.0.1 로 도달. (0.0.0.0 upstream 은 무효)
+            _ip = "127.0.0.1"
             if _port:
                 import handlers.gateway as _gw
                 await asyncio.to_thread(_gw.register_module_routes, config,
