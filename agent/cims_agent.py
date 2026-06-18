@@ -2581,6 +2581,12 @@ def main():
     if not args.oam_url:
         print("[agent] --oam-url (또는 --csc-url) 필수")
         return 1
+    # 시작 배너 — 실행 중 agent 버전 가시화(self-upgrade/execv 후 새 코드 로드 확인 + 운영 디버깅).
+    try:
+        _av = json.load(open(os.path.join(_AGENT_DIR, "pkg.json"))).get("version", "?")
+    except Exception:
+        _av = "?"
+    print(f"[agent] === CIMS agent start (version={_av}, pid={os.getpid()}) ===", flush=True)
 
     state = AgentState(args.state_dir)
     if not state.session_token:
