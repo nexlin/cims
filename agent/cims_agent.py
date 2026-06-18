@@ -2306,7 +2306,16 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
         if jt == "install":
             rc, out, err = job_install(params, oam_url, session_token)
         elif jt == "upgrade":
+            # upgrade = 신 파일 설치 + 재기동(신 코드 로드). install 만 하면 구 프로세스가
+            #   구 코드를 계속 실행한다(파일만 교체). restart 는 job_process_control 경유 →
+            #   oam self-upgrade preflight(D3)/rollback(D4) 안전장치 그대로 적용.
             rc, out, err = job_install(params, oam_url, session_token)
+            if rc == 0:
+                rc_r, out_r, err_r = job_process_control(params, "restart")
+                out = (out or "") + f"\n[upgrade→restart] rc={rc_r} {(out_r or '')[-300:]}"
+                if rc_r != 0:
+                    rc = rc_r
+                    err = (err or "") + f" [restart] {(err_r or '')[-300:]}"
         elif jt == "upgrade_agent":
             rc, out, err = job_upgrade_agent(oam_url, session_token, agent_name)
         elif jt == "agent_restart":
