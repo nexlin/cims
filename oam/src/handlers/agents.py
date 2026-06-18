@@ -1968,6 +1968,25 @@ async def _create_deployment(handler_args: HandlerArgs, config):
         return HandlerResult(status=400, body={"error": "ha_mismatch", "detail": mismatch},
                              media_type="application/json")
 
+    # JwtSecret 자동 공유 — 게이트웨이 프록시 서비스 모듈(meta.gateway.routes 보유)은
+    #   base 가 발급한 토큰을 검증해야 하므로 base 의 CimsAuth.JwtSecret 와 같아야 한다.
+    #   config_template 에서 JwtSecret 은 hidden 이라 콘솔 UI 로 못 넣으므로, 배포 시
+    #   OAM 이 자기 시크릿을 deployment config 에 자동 주입(미지정 시). 콘솔 배포만으로 통일.
+    try:
+        gw = (pkg_meta.get("gateway") or {}).get("routes")
+        if gw:
+            base_secret = (config.get("CimsAuth") or {}).get("JwtSecret")
+            if base_secret:
+                if not isinstance(cfg_overlay, dict):
+                    cfg_overlay = {}
+                has = cfg_overlay.get("CimsAuth.JwtSecret") or \
+                      (cfg_overlay.get("CimsAuth") or {}).get("JwtSecret")
+                if not has:
+                    cfg_overlay["CimsAuth.JwtSecret"] = base_secret
+                    logger.log_info(f"[deploy] {process_name}: base JwtSecret 자동 주입(게이트웨이 토큰 검증 통일)")
+    except Exception as e:
+        logger.log_warning(f"[deploy] JwtSecret 자동주입 skip({process_name}): {e}")
+
     # 초기 status — 기본 'pending'. 부트스트랩이 이미 설치·기동된 모듈(oam/console)을
     # 등록할 때 'running' 등으로 명시 가능(화이트리스트). install_path 와 함께 쓰면
     # "이미 설치된 상태"로 콘솔 패키지설치 목록에 즉시 노출된다.

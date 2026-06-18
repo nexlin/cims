@@ -535,6 +535,12 @@ except Exception: print('')" 2>/dev/null)
                       --name "$HOSTNM" --install-dir "$PREFIX" --svc-user "$SVC_USER")
             _use_sd=0
             if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then _use_sd=1; else _ia_args+=(--no-systemd); fi
+            # OAM_ROLE=base — base 노드는 게이트웨이. agent 가 OAM 을 --role base 로 기동해야
+            #   서비스 모듈(csc/oam-svc)이 self-register 한 라우트를 프록시한다. systemd --user
+            #   drop-in 으로 영속(watchdog 재기동에도 유지). install-agent.sh 의 enable 이 픽업.
+            if [[ $_use_sd -eq 1 ]]; then
+                _run_as "mkdir -p ~/.config/systemd/user/cims-agent.service.d && printf '[Service]\nEnvironment=OAM_ROLE=base\n' > ~/.config/systemd/user/cims-agent.service.d/override.conf" || true
+            fi
             if [[ $_dl_ok -ne 1 ]]; then
                 err "install-agent.sh 다운로드 실패 (HTTP $_dl_http) — agent 미설치 (콘솔 수동설치)"
                 AGENT_STATE="실패 (install-agent.sh 다운로드)"
@@ -543,8 +549,8 @@ except Exception: print('')" 2>/dev/null)
                 # OAM 을 cims-svc 로 인계 — 부트스트랩 nohup 을 정식 감독 프로세스로 교체.
                 #   start_oam 의 kill_stray 가 부트스트랩 OAM(같은 포트/경로)을 정리하고
                 #   pidfile($OAM_ROOT/run/oam.pid)을 남긴다 → 중복기동·고아 방지.
-                info "OAM 을 agent 관리(cims-svc)로 인계..."
-                if _run_as "CIMS_DIST_DIR='$OAM_ROOT' CIMS_PYTHON=python3 '$PREFIX/agent/bin/cims-svc' start oam" \
+                info "OAM 을 agent 관리(cims-svc)로 인계... (role=base, 게이트웨이)"
+                if _run_as "OAM_ROLE=base CIMS_DIST_DIR='$OAM_ROOT' CIMS_PYTHON=python3 '$PREFIX/agent/bin/cims-svc' start oam" \
                         >> "$OAM_ROOT/log/oam_handover.log" 2>&1; then
                     ok "OAM cims-svc 감독 전환 완료 (pidfile + watchdog)"
                 else

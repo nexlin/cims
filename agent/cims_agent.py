@@ -62,7 +62,11 @@ DEFAULT_STATE_DIR = os.environ.get(
 _AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_INSTALL_ROOT = os.environ.get(
     "CIMS_AGENT_INSTALL_ROOT",
-    os.path.join(_AGENT_DIR, "modules"),
+    # oam_base_service_split — 모듈 설치 루트를 부트스트랩 oam/console 과 동일하게
+    #   (<prefix>/modules). 이래야 csc/oam-svc 가 형제 oam/src 를 sys.path glob 으로
+    #   찾는다(gap1). 구 기본값 <agent_dir>/modules 는 oam(<prefix>/modules)과 루트가
+    #   달라 서비스 모듈이 oam/src 를 못 찾았음.
+    os.path.join(os.path.dirname(_AGENT_DIR), "modules"),
 )
 DEFAULT_HEARTBEAT_SEC = 2
 DEFAULT_METRIC_SEC = 2
