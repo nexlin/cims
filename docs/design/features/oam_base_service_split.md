@@ -311,7 +311,7 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 | **P2** ✅ | csc 가입자 API in-process import → **게이트웨이 프록시로 전환**(D3). `--role base` 에서 D8 `/me` 분리(base 가 `/api/v1/users/me` 직접, 나머지 `/users/*`·`/users/import`·`/ptt/groups`·`/organizations` 는 csc 프록시) + 라우트 시드를 csc 실경로(admin 4421/TCP)로 정정 + loopback-https 업스트림 TLS 검증 스킵(self-signed). **dev 1노드 E2E PASS**(격리포트 24419/24421, 라이브 DB: 로그인→/me=base[`builtin:true`]·/users·/users/2·/organizations=csc 프록시 200, gateway health 3 route alive). ⚠️분리 배포는 모듈간 JwtSecret 통일 필수(common.json §5; 현 dist 는 oam≠csc 시크릿). all 모드는 in-process 유지(production 무변경). | 중 |
 | **P3** ✅ | svc-mgmt 독립 모듈 `svc-mgmt/src/svc_mgmt_app.py`(stats/service·recording·flow·verification, loopback 4480, `--preflight`, common.json+services/svc-mgmt.json 로드) + 게이트웨이 svc-mgmt 라우트 시드 + `services/svc-mgmt.json.sample` + agent `lifecycle.sh start_svc_mgmt/stop_svc_mgmt`(dormant: `all` 미포함, 명시 기동만, kill_stray 고유 절대경로 매칭). **dev E2E PASS**(격리 24419/24480: /stats/health=base-local·/stats/service·/verification·/recordings=svc-mgmt 프록시 200, longest-match /stats vs /stats/service 공존). ⚠️**공유 OAM-SDK = 물리적 `oam-sdk/` 패키지 추출은 후속(P3.x)**: 현재는 svc_mgmt_app.py 가 기존 공유 모듈(csc/src httpsrv·services + oam/src handlers)을 sys.path import(oam↔csc 가 csc/src 공유하던 패턴과 동일 = de-facto SDK). 물리 추출은 빌드/패키징 재작업과 함께. | 중 |
 | **P4** ✅ | 콘솔 D1. **백엔드** `handlers/console_layouts.py`: `GET /console/catalog`(RBAC 필터 + 서비스 가용 annotate D7) · `GET /console/profiles`(role별 템플릿) · `GET/PUT/DELETE /console/layouts/me`(override↔프로파일, **PUT 서버측 RBAC 강제**=권한밖 403·미존재 400). 도메인 `console_user_layouts`(console, base 소유). 설치판정=게이트웨이 라우트∪in-process. **프런트** `api/consoleLayouts.ts` + `pages/MyLayoutPage.tsx`(`/dashboard/my-layout` = 프로파일 picker + 위젯 add/remove/↑↓ + 저장/되돌리기/초기화 + 카탈로그 가용성 배지·미설치 disabled+안내[503 graceful] + override/profile 표시). **dev E2E PASS**(admin/monitor 카탈로그 RBAC·svc 가용 flag·layouts CRUD·403/400/401) + `tsc -b`·`vite build`·eslint PASS(브라우저 실측은 미수행; reorder 는 ↑↓ — dnd 고도화 여지). | 중 |
-| **P5** | production(4노드) 적용, base/full 콘솔 단계 정합, §9 장애격리 검증 | 중 |
+| **P5** 🔄 | ctrl01 클린 부트스트랩(base 4419 `--role base`) + **csc 콘솔 배포·라이브 동작** + **콘솔 배포/설정 UX 정리**(§14). production(4노드) 적용·base/full 콘솔 단계 정합·§9 장애격리 검증은 잔여. | 중 |
 
 P0~P1 동안 운영은 단일 프로세스 그대로.
 
@@ -375,3 +375,47 @@ P0~P1 동안 운영은 단일 프로세스 그대로.
 - **근거(표준)**: 관심사 분리 — **`/me` 는 "인증 주체 자신"이라 IdP(base)의 책임**이지 피관리
   도메인 리소스가 아니다. 가입자는 시스템이 관리하는 도메인 엔티티이므로 서비스(csc) 소유. 메모리
   기록의 DB 분리(콘솔계정→OAM `console_accounts`, DB `users`=person 전용)와 정확히 일치.
+
+---
+
+## 14. 콘솔 배포·설정 UX (P5 진행 중)
+
+수동 배포(ctrl01 base + csc 콘솔 배포) 과정에서 정리한 콘솔 배포/설정 UX. 모두 **공통 메커니즘이라
+모든 모듈에 일괄 적용**된다.
+
+### 14.1 배포 마법사 — 모듈 이름 + 설명 (functions 폐기)
+- `service.functions`(예: csc `admin`/`mcptt`/`history`)는 분리 이후 **stale**(이력=oam-svc 로 이관)이고
+  `csc_app.py`/`cims_agent.py` 어디서도 읽지 않는 **순수 표시용**이었음 → 폐기.
+- `ServersPage.tsx` 배포 마법사: **"3. 프로세스" → "3. 모듈 이름"**, **"4. 기능"(체크박스 선택) →
+  "4. 설명"**(패키지 meta `description` 읽기전용 표시). 모듈 테이블 컬럼 **"프로세스"→"이름"·"기능"→"설명"**.
+- `csc/pkg.json`·`oam-svc/pkg.json`: `service.functions` 제거(`processes` 만 유지), `description` 을
+  분리 현실에 맞게 재작성(csc=가입자·조직·인증·MCPTT(XCAP), 이력/통계/녹취=oam-svc).
+
+### 14.2 standalone 노드의 service-scope 설정 노출
+- config_template `scope`: **service=그룹 공통**(원래 `GroupServiceConfigModal`["⚙ 그룹 설정"]에서 편집,
+  per-deployment 설정 탭은 숨김) / **system=노드별**(per-deployment 편집).
+- 문제: **HA 그룹 미소속(standalone) 노드**는 그룹 설정 진입점이 없어 csc 의 DB·notify·MCPTT·IdMs(전부
+  scope=service)를 **편집할 UI 가 전무** → "설정에 아무것도 없음".
+- 해결: `AgentConfigTab` 이 `forceServiceScope={!agent.ha_group}` 전달 → `ModuleConfigModal` 이
+  standalone 일 때 per-deployment 설정 탭에서도 **service-scope 섹션 노출**. 그룹 멤버는 종전대로
+  그룹 설정이 소유(중복 편집 방지).
+
+### 14.3 설치 전(pending) 배포도 설정 가능
+- 설정 탭(`AgentConfigTab`)이 `pending` 배포를 **필터로 제외**하던 것을 포함하도록 변경 → 설치 전에
+  DB/notify/시크릿을 미리 지정. 저장값은 **deployment.config overlay** 로 보존됐다가 설치 시
+  `<pkg>/config.json` 에 반영(install 경로가 overlay 적용, `agents.py` §config overlay).
+- pending 에선 프로세스가 없어 restart 불가 → "저장+재기동" 버튼/배너 숨기고 "설치 시 반영" 안내.
+- base↔csc 연동(JwtSecret)은 **배포 시 자동 주입**(`_create_deployment`: pkg meta 에 `gateway.routes`
+  존재 + overlay 에 `CimsAuth.JwtSecret` 부재 시 base 시크릿 주입) → 수동 설정 불필요.
+
+### 14.4 추천설정(presets)·고급설정 토글 제거 — 모든 설정 노출
+- config_template `presets` 폐기(csc·csp·cmp 에서 제거). 디폴트 SoT = 각 필드 `default`/`deploy_value`.
+- UI 전반에서 **"추천 설정" 바·"Preset 일괄 적용" 탭·"고급 설정/고급 필드" 토글** 제거
+  (`ModuleConfigModal`·`GroupServiceConfigModal`·`ModuleConfigEditor`). 섹션/필드 `hidden`·`advanced`
+  게이팅 제거 → **모든 섹션·필드 항상 노출**(시크릿/경로의 `_infra` 섹션은 "인프라" 배지 + 기본 접힘,
+  헤더 클릭으로 펼침 — 숨김 아님).
+
+### 14.5 부수 버그 fix
+- 패키지 업로드 핸들러 `_dt(val)` 가 file_store 의 ISO **문자열**에 무조건 `.isoformat()` 호출 →
+  동일 버전 재업로드(409 conflict 응답 직렬화)에서 500. `hasattr(val,"isoformat")` 가드로 정정
+  (`oam/src/handlers/agents.py`). ⚠️배포된 live oam 0.1.0 엔 다음 재기동/재배포 때 반영.

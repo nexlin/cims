@@ -1366,7 +1366,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
           <InspectorSection title={`모듈 (${deployments.length})`}
                             expanded={openSections.has('modules')}
                             onToggle={() => toggleSection('modules')}>
-            <ModulesTab agent={a} deployments={deployments} packagesAvailable={packages.length > 0}
+            <ModulesTab agent={a} deployments={deployments} packages={packages} packagesAvailable={packages.length > 0}
               onAddDeploy={onAddDeploy} onConfigure={onConfigure}
               onJob={onJob} onRollback={onRollback} onRemoveDep={onRemoveDep} />
           </InspectorSection>
@@ -1383,7 +1383,8 @@ function AgentConfigTab({ agent, deployments, onDone }: {
   onDone: () => Promise<void> | void
 }) {
   // 폴링 identity churn 차단 — mount 시 스냅샷 (모듈 전환은 key 리마운트)
-  const [deps] = useState(() => deployments.filter(d => d.status !== 'removed' && d.status !== 'pending'))
+  // pending(설치 전) 도 포함 — DB/notify/시크릿을 설치 전에 미리 지정(overlay 저장→설치 시 반영).
+  const [deps] = useState(() => deployments.filter(d => d.status !== 'removed'))
   const [selDep, setSelDep] = useState<number>(deps[0]?.id ?? 0)
   const dep = deps.find(d => d.id === selDep)
   const source = useMemo(
@@ -1417,6 +1418,7 @@ function AgentConfigTab({ agent, deployments, onDone }: {
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {source && (
           <ModuleConfigModal key={selDep} inline source={source}
+            forceServiceScope={!agent.ha_group}
             onClose={() => { /* inline */ }} onDone={onDone} />
         )}
       </div>
@@ -1501,10 +1503,11 @@ function InspectorSection({ title, expanded, onToggle, children }: {
   )
 }
 
-function ModulesTab({ agent: a, deployments, packagesAvailable,
+function ModulesTab({ agent: a, deployments, packages, packagesAvailable,
                      onAddDeploy, onConfigure, onJob, onRollback, onRemoveDep }: {
   agent: Agent
   deployments: Deployment[]
+  packages: SipPackage[]
   packagesAvailable: boolean
   onAddDeploy: () => void
   onConfigure: (d: Deployment) => void
@@ -1512,6 +1515,7 @@ function ModulesTab({ agent: a, deployments, packagesAvailable,
   onRollback: (d: Deployment) => void
   onRemoveDep: (d: Deployment) => void
 }) {
+  const pkgDesc = new Map(packages.map(p => [p.name, p.description]))
   return (
     <>
       {deployments.length === 0 ? (
@@ -1521,8 +1525,8 @@ function ModulesTab({ agent: a, deployments, packagesAvailable,
           <thead>
             <tr>
               <th style={{ width: 10 }}></th>
-              <th>프로세스</th>
-              <th>기능</th>
+              <th>이름</th>
+              <th>설명</th>
               <th>모듈 · 버전</th>
               <th>상태</th>
               <th style={{ width: 280 }}>작업</th>
@@ -1531,6 +1535,7 @@ function ModulesTab({ agent: a, deployments, packagesAvailable,
           <tbody>
             {deployments.map(d => (
               <DeploymentRow key={d.id} dep={d} agent={a}
+                desc={pkgDesc.get(d.package_name || '') ?? null}
                 onConfigure={onConfigure} onJob={onJob} onRollback={onRollback}
                 onRemove={onRemoveDep} />
             ))}
@@ -1547,8 +1552,9 @@ function ModulesTab({ agent: a, deployments, packagesAvailable,
   )
 }
 
-function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRollback, onRemove }: {
+function DeploymentRow({ dep: d, agent, desc, onConfigure, onJob, onRollback, onRemove }: {
   dep: Deployment; agent: Agent
+  desc: string | null
   onConfigure: (d: Deployment) => void
   onJob: (d: Deployment, jt: JobType) => void
   onRollback: (d: Deployment) => void
@@ -1571,7 +1577,7 @@ function DeploymentRow({ dep: d, agent, onConfigure, onJob, onRollback, onRemove
       </td>
       <td><b>{d.process_name || '—'}</b></td>
       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-        {d.service_functions.length === 0 ? '—' : d.service_functions.join(', ')}
+        {desc || '—'}
       </td>
       <td style={{ fontSize: 12 }}
           title={`설치 경로: ${d.install_path || '—'}${histTip ? `\n\n설치 이력:\n${histTip}` : ''}`}>
@@ -2049,7 +2055,6 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   const [moduleName, setModuleName] = useState<string>('')
   const [pkgId, setPkgId]           = useState(0)
   const [processName, setProcessName] = useState<string>('')
-  const [functions, setFunctions]   = useState<Set<string>>(new Set())
   const [note, setNote]             = useState('')
 
   // 모듈별로 버전 그룹
@@ -2080,7 +2085,6 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   // package 의 meta.service 구조
   const svcMeta = selectedPkg?.meta?.service
   const processOptions = svcMeta?.processes || []
-  const functionOptions = svcMeta?.functions || []
 
   // HA capability 검증 — backend (csc/handlers/agents.py:_create_deployment) 와
   // 동일 정책: ha_group 정의 시 strict, 미정의 시 모두 허용.
@@ -2098,42 +2102,31 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   }
   const selectedMismatch = selectedPkg ? moduleMismatch(selectedPkg.name) : null
 
-  // 모듈 바뀌면 버전/process/functions 리셋
+  // 모듈 바뀌면 버전/모듈 이름 리셋
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!moduleName) { setPkgId(0); setProcessName(''); setFunctions(new Set()); return }
+    if (!moduleName) { setPkgId(0); setProcessName(''); return }
     const latest = (pkgsByModule.get(moduleName) || [])[0]
     setPkgId(latest ? latest.id : 0)
   }, [moduleName, pkgsByModule])
 
-  // 버전 바뀌면 process/functions 디폴트 반영
+  // 버전 바뀌면 모듈 이름 디폴트 반영
   useEffect(() => {
-    if (!selectedPkg) { setProcessName(''); setFunctions(new Set()); return }
+    if (!selectedPkg) { setProcessName(''); return }
     const procs = selectedPkg.meta?.service?.processes || []
     setProcessName(procs.length > 0 ? procs[0] : (selectedPkg.name || '').toUpperCase())
-    const funcs = selectedPkg.meta?.service?.functions || []
-    // 기본으로 모든 functions 체크
-    setFunctions(new Set(funcs.map(f => f.name)))
   }, [selectedPkg])
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  function toggleFunc(name: string) {
-    setFunctions(prev => {
-      const n = new Set(prev)
-      if (n.has(name)) n.delete(name); else n.add(name)
-      return n
-    })
-  }
-
   async function create() {
     if (!pkgId) { show('모듈/버전 선택 필요', 'err'); return }
-    if (!processName.trim()) { show('프로세스 이름 필수', 'err'); return }
+    if (!processName.trim()) { show('모듈 이름 필수', 'err'); return }
     try {
       await deploymentApi.createDeployment({
         agent_id: agent.id,
         package_id: pkgId,
         process_name: processName.trim(),
-        service_functions: Array.from(functions),
+        service_functions: [],
         note: note || undefined,
       })
       show(`${agent.name} 에 ${processName} 배포 추가 (설치 전)`, 'ok')
@@ -2179,7 +2172,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
 
         {selectedPkg && (
           <>
-            <label>3. 프로세스 *</label>
+            <label>3. 모듈 이름 *</label>
             {processOptions.length > 1 ? (
               <select className="form-input" value={processName}
                 onChange={e => setProcessName(e.target.value)}>
@@ -2191,25 +2184,14 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
                 placeholder={selectedPkg.name.toUpperCase()} />
             )}
 
-            <label>4. 기능</label>
+            <label>4. 설명</label>
             <div style={{
               border: '1px solid var(--border)', borderRadius: 4, padding: 8,
-              display: 'flex', flexDirection: 'column', gap: 4,
+              fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap', minHeight: 36,
             }}>
-              {functionOptions.length === 0 ? (
-                <span className="text-muted" style={{ fontSize: 12 }}>
-                  (패키지 meta.json 에 functions 정의 없음 — 기능 선택 불필요)
-                </span>
-              ) : (
-                functionOptions.map(f => (
-                  <label key={f.name} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-                    <input type="checkbox" checked={functions.has(f.name)}
-                      onChange={() => toggleFunc(f.name)} />
-                    <span>{f.desc || f.name}</span>
-                    <span className="text-muted" style={{ fontSize: 11 }}>({f.name})</span>
-                  </label>
-                ))
-              )}
+              {selectedPkg.description
+                ? selectedPkg.description
+                : <span className="text-muted" style={{ fontSize: 12 }}>(패키지에 설명 없음)</span>}
             </div>
           </>
         )}

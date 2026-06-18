@@ -15,24 +15,6 @@
     ]
   },
   "service": {
-    "functions": [
-      {
-        "name": "stats_service",
-        "desc": "서비스 KPI 관측 (CSP/CMP VoIP·PTT)"
-      },
-      {
-        "name": "recording",
-        "desc": "녹취 조회 / 스트리밍"
-      },
-      {
-        "name": "flow",
-        "desc": "SIP flow / 호이력 / PTT 이력 / 비정상 세션"
-      },
-      {
-        "name": "verification",
-        "desc": "S1~S6 검증 파이프라인"
-      }
-    ],
     "processes": []
   }
 }

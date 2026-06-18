@@ -4,7 +4,6 @@ import { useToast } from '../Toast'
 import {
   deploymentApi,
   type Deployment, type ConfigTemplate, type ConfigTemplateField,
-  type ConfigTemplatePreset,
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
 
@@ -21,6 +20,9 @@ interface Props {
   onDone?: () => void | Promise<void>
   // true 면 Modal 오버레이 없이 패널만 렌더 (시스템/인프라 [패키지 설정] 탭의 페이지 임베드).
   inline?: boolean
+  // standalone 노드(HA 그룹 미소속): scope=service 섹션을 그룹 설정에서 편집할 수 없으므로
+  // per-deployment 설정 탭에서도 노출한다. 그룹 멤버는 false (그룹 서비스 설정이 소유).
+  forceServiceScope?: boolean
 }
 
 /**
@@ -30,7 +32,7 @@ interface Props {
  *  - module 모드:     Phase 1 로컬. PUT → build/dist/config.json (scalar) /
  *                     build/dist/{name}/config/*.jsonl (collection) + 로컬 PID SIGUSR1.
  */
-export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline }: Props) {
+export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline, forceServiceScope }: Props) {
   // 부모(ServersPage 등)가 주기 폴링으로 재렌더하며 source 객체를 매번 새로 만들면
   // fetch/editor 의 useEffect 가 재실행돼 편집값이 서버 값으로 덮어써진다 —
   // mount 시점 스냅샷으로 identity 고정 (모듈 전환은 caller 가 key 로 리마운트).
@@ -43,12 +45,14 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
   const [initial, setInitial]     = useState<Record<string, FieldValue>>({})
   const [appliedAt, setAppliedAt] = useState<string | null>(null)
   const [tab, setTab]             = useState<Tab>('scalar')
-  const [showAdvanced, setShowAdvanced] = useState(false)
 
   // 제목/식별자
   const title = source.type === 'deployment'
     ? `${source.deployment.package_name} v${source.deployment.package_version} — 설정`
     : `${source.name}${source.version ? ` v${source.version}` : ''} — 설정 (로컬)`
+
+  // 설치 전(pending) — 저장은 overlay 로 보존되고 설치 시 반영. 프로세스가 없어 restart 불가.
+  const isPending = source.type === 'deployment' && source.deployment.status === 'pending'
 
   // Editor 에 전달할 source — 매 렌더마다 새 객체를 만들면 Editor 가 useEffect 재실행 →
   // 편집 중이던 행이 서버 응답으로 덮어써진다. identity 고정 필수.
@@ -162,28 +166,6 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
     return null
   }
 
-  // preset 적용 — 해당 키만 set, 나머지는 현재 값 유지. 사용자 검토 후 저장 버튼.
-  function applyPreset(preset: ConfigTemplatePreset) {
-    if (!template) return
-    // 템플릿 소유 키만 (오타 방지)
-    const ownedKeys = new Set<string>()
-    for (const s of template.sections) for (const f of s.fields) ownedKeys.add(f.key)
-    const next = { ...values }
-    let applied = 0
-    const skipped: string[] = []
-    for (const [k, v] of Object.entries(preset.values)) {
-      if (!ownedKeys.has(k)) { skipped.push(k); continue }
-      next[k] = v as FieldValue
-      applied++
-    }
-    setValues(next)
-    if (skipped.length > 0) {
-      show(`${preset.label}: ${applied}개 적용 / ${skipped.length}개 키 모름 (${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '...' : ''})`, 'err')
-    } else {
-      show(`${preset.label} preset 적용 (${applied}개 필드 — 검토 후 저장)`, 'ok')
-    }
-  }
-
   async function save(opts: { restartAfter?: boolean } = {}) {
     if (changed.size === 0) { show('변경된 항목 없음', 'err'); return }
     const err = validate()
@@ -254,18 +236,10 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
             <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
               {tab === 'scalar' ? (
                 <>
-                  {(template.presets || []).length > 0 && (
-                    <PresetBar presets={template.presets!} onApply={applyPreset} />
-                  )}
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12,
                                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span>🔁 재기동 필요 · ⚡ 즉시 적용</span>
                     {appliedAt && <span>· 마지막 적용: {appliedAt}</span>}
-                    <label style={{ marginLeft: 'auto', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={showAdvanced}
-                        onChange={e => setShowAdvanced(e.target.checked)} />
-                      {' '}고급 설정 (배포/인프라)
-                    </label>
                   </div>
                   {changed.size > 0 && (
                     <ChangeSummaryPanel template={template} values={values} initial={initial}
@@ -274,26 +248,32 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                       onResetAll={() => setValues({ ...initial })} />
                   )}
                   {/* scope=service section 은 그룹 공통이라 멤버 단일 deployment 에서 편집 시 정합 깨질 위험 — 별도 트랙 안내 */}
-                  {source.type === 'deployment' && template.sections.some(s => s.scope === 'service') && (
+                  {!forceServiceScope && source.type === 'deployment' && template.sections.some(s => s.scope === 'service') && (
                     <div style={{
                       padding: 10, background: '#f5f7fa', border: '1px solid #d0d8e0',
                       borderRadius: 4, fontSize: 12, color: '#566', marginBottom: 12,
                     }}>
-                      🔒 <b>서비스 설정 (그룹 공통)</b> 은 본 modal 에서 편집 불가 — 별도 트랙 (예정).
-                      여기서는 멤버 specific 시스템 설정만 편집. 숨겨진 section:&nbsp;
+                      🔒 <b>서비스 설정 (그룹 공통)</b> 은 그룹 설정에서 편집합니다.
+                      여기서는 멤버 specific 시스템 설정만 편집. 그룹 설정 section:&nbsp;
                       {template.sections.filter(s => s.scope === 'service').map(s => s.title).join(', ')}
                     </div>
                   )}
                   {template.sections
-                    .filter(sec => showAdvanced || !sec.hidden)
-                    .filter(sec => source.type !== 'deployment' || sec.scope !== 'service')
+                    .filter(sec => forceServiceScope || source.type !== 'deployment' || sec.scope !== 'service')
                     .map(sec => (
                       <SectionBlock key={sec.key} section={sec} values={values}
-                        initial={initial} changed={changed} showAdvanced={showAdvanced}
+                        initial={initial} changed={changed}
                         onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))}
                         onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))} />
                     ))}
-                  {restartRequired && (
+                  {isPending ? (
+                    <div style={{
+                      marginTop: 12, padding: 10, background: '#e8f4fd',
+                      border: '1px solid #5dade2', borderRadius: 4, fontSize: 12,
+                    }}>
+                      ℹ 아직 <b>설치 전</b>입니다 — 저장한 값은 [패키지 설치] 탭에서 <b>설치</b> 실행 시 반영됩니다.
+                    </div>
+                  ) : restartRequired && (
                     <div style={{
                       marginTop: 12, padding: 10, background: '#fff3e0',
                       border: '1px solid #f39c12', borderRadius: 4, fontSize: 12,
@@ -323,7 +303,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                 disabled={saving || changed.size === 0}>
                 {saving ? '저장 중...' : `저장 (${changed.size} 변경)`}
               </button>
-              {source.type === 'deployment' && restartRequired && (
+              {source.type === 'deployment' && restartRequired && !isPending && (
                 <button className="btn btn--primary" onClick={() => void save({ restartAfter: true })}
                   disabled={saving || changed.size === 0}
                   style={{ background: '#e67e22', borderColor: '#e67e22' }}
@@ -341,53 +321,6 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
     <Modal title={title} onClose={onClose} fullscreen>
       {body}
     </Modal>
-  )
-}
-
-function PresetBar({ presets, onApply }: {
-  presets: ConfigTemplatePreset[]
-  onApply: (preset: ConfigTemplatePreset) => void
-}) {
-  const [selected, setSelected] = useState<string>('')
-  const cur = presets.find(p => p.name === selected) || null
-
-  return (
-    <div style={{
-      marginBottom: 12, padding: '10px 12px',
-      background: '#f5f7fa', border: '1px solid #d0d7de', borderRadius: 6,
-      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-    }}>
-      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>📋 추천 설정</span>
-      <select
-        value={selected}
-        onChange={e => setSelected(e.target.value)}
-        style={{ fontSize: 12, padding: '4px 8px', minWidth: 200 }}
-      >
-        <option value="">— preset 선택 —</option>
-        {presets.map(p => (
-          <option key={p.name} value={p.name}>{p.label}</option>
-        ))}
-      </select>
-      {cur && (
-        <>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>
-            {cur.description ?? `${Object.keys(cur.values).length}개 필드 변경`}
-          </span>
-          <button
-            onClick={() => onApply(cur)}
-            className="btn btn--sm btn--outline"
-            style={{ fontSize: 12 }}
-            title="해당 키만 일괄 변경합니다. 검토 후 저장하세요.">
-            적용 (검토 후 저장)
-          </button>
-        </>
-      )}
-      {!cur && (
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>
-          싱글노드/HA/대용량 등 시나리오별 권장값을 한 번에 채워 넣습니다.
-        </span>
-      )}
-    </div>
   )
 }
 
@@ -505,7 +438,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
   )
 }
 
-export function SectionBlock({ section, values, initial, changed, showAdvanced, onChange, onReset }: {
+export function SectionBlock({ section, values, initial, changed, onChange, onReset }: {
   section: {
     key: string; title: string; description?: string
     fields: ConfigTemplateField[]
@@ -515,15 +448,14 @@ export function SectionBlock({ section, values, initial, changed, showAdvanced, 
   values: Record<string, FieldValue>
   initial: Record<string, FieldValue>
   changed: Set<string>
-  showAdvanced: boolean
   onChange: (key: string, v: FieldValue) => void
   onReset: (key: string) => void
 }) {
-  // hidden section 은 기본 접힘 (pull-down 으로만 노출)
+  // 인프라 section 은 기본 접힘 (헤더 클릭으로 펼침) — 모든 필드는 노출.
   const [collapsed, setCollapsed] = useState(!!section.hidden)
 
-  // 가시 필드 — field.hidden 은 showAdvanced 토글로만 노출
-  const visibleFields = section.fields.filter(f => showAdvanced || !f.hidden)
+  // 모든 필드 노출 (고급/숨김 구분 제거).
+  const visibleFields = section.fields
 
   // 필드를 group 단위로 묶기 — groups 정의 없으면 단일 묶음.
   // 그룹 선언된 순서대로 정렬하고, 소속 없는 필드는 '기타' 로.
@@ -566,8 +498,8 @@ export function SectionBlock({ section, values, initial, changed, showAdvanced, 
         {section.hidden && (
           <span style={{
             fontSize: 10, padding: '1px 6px', borderRadius: 3,
-            background: '#e67e22', color: '#fff',
-          }}>고급</span>
+            background: '#7f8c8d', color: '#fff',
+          }}>인프라</span>
         )}
         {section.description && (
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>— {section.description}</span>

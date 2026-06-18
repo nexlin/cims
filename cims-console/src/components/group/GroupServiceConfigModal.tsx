@@ -24,8 +24,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { deploymentApi, type SipPackage, type Deployment,
-         type ConfigTemplateCollection, type ConfigTemplateSection,
-         type ConfigTemplatePreset } from '../../api/deployment'
+         type ConfigTemplateCollection, type ConfigTemplateSection } from '../../api/deployment'
 import ModuleConfigEditor from '../module/ModuleConfigEditor'
 import { SectionBlock, defaultValue, type FieldValue } from '../module/ModuleConfigModal'
 
@@ -43,7 +42,7 @@ interface Props {
   inline?: boolean
 }
 
-type Tab = { kind: 'scalar' } | { kind: 'preset' } | { kind: 'collection'; key: string }
+type Tab = { kind: 'scalar' } | { kind: 'collection'; key: string }
 
 export function GroupServiceConfigModal({ open, onClose, groupName,
     members: liveMembers, deployments: liveDeployments, packages: livePackages,
@@ -55,7 +54,6 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
   const [frozen] = useState(() => ({ members: liveMembers, deployments: liveDeployments, packages: livePackages }))
   const { members, deployments, packages } = frozen
   const [selectedPkg, setSelectedPkg] = useState<number>(0)
-  const [selectedPreset, setSelectedPreset] = useState<string>('')
   const [tab, setTab] = useState<Tab>({ kind: 'scalar' })
   const [status, setStatus] = useState<string>('')
   const [working, setWorking] = useState(false)
@@ -71,7 +69,6 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
   const effectivePkgId = selectedPkg || groupPackages[0]?.id || 0
   const pkg = groupPackages.find(p => p.id === effectivePkgId)
   const template = pkg?.config_template
-  const presets = template?.presets || []
 
   // 그룹 설정 = 동적 반영되는 서비스(scope=service) 설정 전용 (2026-06-10 정책).
   // scope=system (Local Node 등) 은 멤버별 — 각 모듈의 개별 [⚙ 설정] 에서.
@@ -100,7 +97,6 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
   const [svcValues, setSvcValues]   = useState<Record<string, FieldValue>>({})
   const [svcInitial, setSvcInitial] = useState<Record<string, FieldValue>>({})
   const [svcLoading, setSvcLoading] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const svcChanged = useMemo(() => {
     const s = new Set<string>()
     for (const k of new Set([...Object.keys(svcValues), ...Object.keys(svcInitial)])) {
@@ -168,37 +164,6 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
       : `⚠ ${ok}/${memberDepsForPkg.length} 성공 — ${errors.slice(0, 2).join('; ')}`)
     setSvcInitial({ ...svcValues })
     if (onApplied) await onApplied()
-  }
-
-  async function applyPreset() {
-    if (!pkg || !selectedPreset) return
-    const preset = presets.find((p: ConfigTemplatePreset) => p.name === selectedPreset)
-    if (!preset) return
-
-    setWorking(true)
-    setStatus(`${preset.label} 적용 중 (${memberDepsForPkg.length} 멤버)...`)
-
-    let ok = 0, fail = 0
-    const errors: string[] = []
-    for (const dep of memberDepsForPkg) {
-      try {
-        const view = await deploymentApi.getDeploymentConfig(dep.id)
-        const merged = { ...(view.config ?? {}), ...preset.values }
-        // propagate=false — 멤버별 merge 결과가 서로 다른 고유 키를 보존해야 하므로
-        // HA fan-out (마지막 멤버 값으로 전체 덮어쓰기) 비활성.
-        await deploymentApi.putDeploymentConfig(dep.id, merged, true, false)
-        ok++
-      } catch (e) {
-        fail++
-        errors.push(`deploy${dep.id}: ${(e as Error).message}`)
-      }
-    }
-    setWorking(false)
-    setStatus(fail === 0
-      ? `✓ preset 적용 + SIGUSR1 reload 큐잉 (${ok}/${memberDepsForPkg.length} 멤버). 부트스트랩 필드는 우측 하단 "재기동" 필요.`
-      : `⚠ ${ok}/${memberDepsForPkg.length} 성공 — ${errors.slice(0, 2).join('; ')}`)
-    if (onApplied) await onApplied()
-    await loadScalar()
   }
 
   async function restartAll() {
@@ -275,9 +240,6 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
             <TabButton active={tab.kind === 'scalar'} onClick={() => setTab({ kind: 'scalar' })}>
               🛠 서비스 설정 ({serviceSections.reduce((n, s) => n + s.fields.length, 0)})
             </TabButton>
-            <TabButton active={tab.kind === 'preset'} onClick={() => setTab({ kind: 'preset' })}>
-              ✨ Preset 일괄 적용
-            </TabButton>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '12px 0 4px' }}>
               서비스 컬렉션 (그룹 공통)
             </div>
@@ -323,15 +285,10 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10,
                                   display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span>기준값: {memberDepsForPkg[0] && (members.find(m => m.id === memberDepsForPkg[0].agent_id)?.name || `deploy#${memberDepsForPkg[0].id}`)}</span>
-                      <label style={{ marginLeft: 'auto', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={showAdvanced}
-                               onChange={e => setShowAdvanced(e.target.checked)} />
-                        {' '}고급 설정
-                      </label>
                     </div>
                     {serviceSections.map(sec => (
                       <SectionBlock key={sec.key} section={sec} values={svcValues}
-                        initial={svcInitial} changed={svcChanged} showAdvanced={showAdvanced}
+                        initial={svcInitial} changed={svcChanged}
                         onChange={(k, v) => setSvcValues(p => ({ ...p, [k]: v }))}
                         onReset={(k) => setSvcValues(p => ({ ...p, [k]: svcInitial[k] }))} />
                     ))}
@@ -356,38 +313,6 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
                     </div>
                   </>
                 )}
-              </div>
-            )}
-            {pkg && tab.kind === 'preset' && (
-              <div>
-                <h4 style={{ marginTop: 0 }}>Preset 일괄 적용 <span style={{ fontSize: 11, color: '#27ae60', fontWeight: 'normal' }}>· ⚡ SIGUSR1 reload</span></h4>
-                <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                  preset 의 키-값을 멤버 전체 config.json 에 merge → PUT → agent 가 SIGUSR1
-                  자동 발송. 부트스트랩 필드 (LocalIp, ThreadCount 등) 만 재기동 필요.
-                </p>
-                <div style={{ marginBottom: 16 }}>
-                  <select value={selectedPreset}
-                          onChange={e => setSelectedPreset(e.target.value)}
-                          disabled={working || presets.length === 0}
-                          style={{ width: '100%', padding: '6px 10px', fontSize: 13 }}>
-                    <option value="">— preset 선택 —</option>
-                    {presets.map(p => (
-                      <option key={p.name} value={p.name}>
-                        {p.label}{p.description ? ` — ${p.description}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button onClick={applyPreset}
-                        disabled={!selectedPreset || working || memberDepsForPkg.length === 0}
-                        style={{
-                          background: !selectedPreset || working ? '#aaa' : '#1976d2',
-                          color: 'white', padding: '8px 18px', fontSize: 13,
-                          borderRadius: 4, border: 'none',
-                          cursor: working || !selectedPreset ? 'not-allowed' : 'pointer',
-                        }}>
-                  {working ? '적용 중…' : '멤버 전체에 preset 적용'}
-                </button>
               </div>
             )}
             {pkg && tab.kind === 'collection' && (() => {

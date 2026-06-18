@@ -325,7 +325,10 @@ def _path_tail(full_path: str, base: str):
 
 
 def _dt(val):
-    return val.isoformat() if val is not None else None
+    if val is None:
+        return None
+    # file_store 는 ISO 문자열로 저장 → 이미 str 이면 그대로. datetime 이면 isoformat.
+    return val.isoformat() if hasattr(val, "isoformat") else val
 
 
 def _actor(handler_args: HandlerArgs) -> str:

@@ -37,7 +37,6 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
   const [original, setOriginal] = useState<Record_[]>([])
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [tagFilter, setTagFilter] = useState<string>('')
   const [refOpts, setRefOpts]     = useState<RefOptions>(refOptionsCache.current)
@@ -177,9 +176,7 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
     setEditingIdx(null)
   }
 
-  const visibleFields = fields.filter(f =>
-    !f.readonly && (showAdvanced || !f.advanced)
-  )
+  const visibleFields = fields.filter(f => !f.readonly)
   const summaryFields = fields.filter(f =>
     !f.advanced && !f.readonly && f.type !== 'object_list'
   ).slice(0, 4) // 목록 테이블에 표시할 주요 필드 (최대 4개)
@@ -289,10 +286,6 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
             <b style={{ fontSize: 13 }}>행 #{editingIdx + 1} 편집</b>
-            <label style={{ fontSize: 12, marginLeft: 'auto' }}>
-              <input type="checkbox" checked={showAdvanced}
-                onChange={e => setShowAdvanced(e.target.checked)} /> 고급 필드
-            </label>
           </div>
           <div style={{
             display: 'grid', gridTemplateColumns: '160px 1fr',
