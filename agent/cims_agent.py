@@ -57,12 +57,15 @@ DEFAULT_STATE_DIR = os.environ.get(
 )
 # 설치 루트 결정 우선순위:
 #   1) CIMS_AGENT_INSTALL_ROOT 환경변수
-#   2) <agent 바이너리 디렉토리>/modules    ← 권장 (agent 설치 디렉토리 기준 체계적 배치)
+#   2) <agent 바이너리 디렉토리>/../modules  = /opt/cims-agent/modules
+#      → agent 트리(/opt/cims-agent/agent) **밖**. 부트스트랩(install.sh: MODULES_DIR=$PREFIX/modules)
+#        과 동일 루트라 oam/csc 가 같은 곳에 설치돼 csc_app.py 의 oam/src 탐색이 성립하고,
+#        agent self-upgrade(agent/ 트리 교체) 시 모듈이 함께 삭제되는 것도 방지.
 # 이전 기본값 /opt/cims 는 root 권한 필요했는데 user-mode 설치와 맞지 않음.
 _AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_INSTALL_ROOT = os.environ.get(
     "CIMS_AGENT_INSTALL_ROOT",
-    os.path.join(_AGENT_DIR, "modules"),
+    os.path.normpath(os.path.join(_AGENT_DIR, "..", "modules")),
 )
 DEFAULT_HEARTBEAT_SEC = 2
 DEFAULT_METRIC_SEC = 2
