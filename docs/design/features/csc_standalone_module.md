@@ -130,10 +130,13 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
   마운트(_CSC_SRC) 제거, cert fallback 을 csc/cert→oam/cert 로, docstring 정정. oam-svc 는
   oam/src + oam/vendor 만 사용. 검증: py_compile OK · `sys.path=[oam-svc/src, oam/src, oam/vendor]`
   (csc/src 없음) 격리 import 성공. (oam-svc↔oam 간 oam/src 공유는 OAM 패밀리 내부 — 별도 고려.)
-- **P5 — csc 도메인 축소 (이제 아무도 csc 를 마운트 안 함)**: csc/src/services 에서 비도메인
-  모듈(sync_*·drift_sweeper·service_registry·collection_schema·alert_log·flow_logger) 물리 삭제,
-  csp_runtime(RETIRED) 정리, `__init__.py` 복원(csc 일반 패키지화). csc/src/services =
-  {mcptt, idms_storage, config_cache, file_store, ha_lookup, logger, admin_auth}.
+- **P5 — csc 도메인 축소 ✅ (완료, 아무도 csc 를 마운트 안 함)**: csc/src/services 에서 비도메인
+  모듈 7개(sync_dispatch·sync_txn·drift_sweeper·service_registry·collection_schema·alert_log·
+  flow_logger) + service_descriptors_seed 물리 삭제, `handlers/csp_runtime.py`(RETIRED) 삭제,
+  `__init__.py` 복원(csc 일반 패키지화 — 더 이상 namespace 병합 불요). csc/src/services 최종 =
+  {mcptt, idms_storage, config_cache, file_store, ha_lookup, logger, admin_auth} 7개.
+  검증: 삭제 모듈 코드 참조 0(주석/도메인명만) · py_compile OK · csc standalone import OK
+  (services 7 + __init__ 일반패키지, handlers admin3/org1).
 - **P6 — 게이트웨이/콘솔/빌드 정리**: `/users/me`(base)↔`/users`CRUD(csc) 라우팅 정합, 가입자 관리
   UI = 콘솔이 csc API 경유(oam-svc 오케스트레이션), cmd_pkg 의 oam←csc 복사·dual-mount glob·
   namespace 해킹 제거. 각 모듈 패키지가 자기 것만 동봉.
