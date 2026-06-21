@@ -111,10 +111,16 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
   init 제거(csc 는 flow API 미서빙, 자기 로깅은 csc_logger). ⚠️ **`__init__.py` 복원·csc 의
   비도메인 모듈 물리 삭제는 P3~P5 이후로 보류** — base·oam-svc 가 아직 csc/src 를 마운트하므로
   지금 지우면 그들이 깨진다.
-- **P3 — base(oam) 자족화**: oam 이 필요한 인프라(admin_auth·file_store·ha_lookup·sync_*·
+- **P3a — base 의 mcptt leak 제거 ✅ (완료)**: 계약 확정 — **MCPTT→CSP notify(notify_csp)·
+  config audit 는 csc 전용 기능. base 는 mcptt 함수를 절대 쓰지 않는다.** oam-svc 가 MCPTT
+  관련 동작이 필요하면 csc 가 규격에 따라 제공하는 **MCPTT API(HTTP)** 를 호출(csc 내부 코드 X).
+  - `service_control.py`: `services.mcptt.audit_config_change`(서비스 start/stop 감사 차용) →
+    base 자체 `_audit_service_action`(file_store JSONL, `service_control_audit` 도메인)로 대체.
+  - `oam_app.py`: mcptt.notify_csp 를 base 공유 라이브러리로 적던 docstring 정정.
+  - 검증: base 에 mcptt 내부 호출/ import 0 (notify_csp 는 docstring 설명만).
+- **P3b — base(oam) 자족화**: oam 이 필요한 인프라(admin_auth·file_store·ha_lookup·sync_*·
   drift_sweeper·service_registry·collection_schema·alert_log·logger·flow_logger)를 oam 자체
-  복사본으로 보유 → `oam_app.py` 의 `csc/src` 마운트 제거. oam→`mcptt.notify_csp/audit`
-  leak 을 csc API/이벤트 계약으로 전환. `make dist` + oam standalone import 검증.
+  복사본으로 보유 → `oam_app.py` 의 `csc/src` 마운트 제거. `make dist` + oam standalone import 검증.
 - **P4 — oam-svc 자족화**: oam-svc 가 flow_logger/logger 를 자체 보유(또는 oam/src 에서만) →
   `oam_svc_app.py` 의 `csc/src` 마운트 제거. oam-svc standalone 검증.
 - **P5 — csc 도메인 축소 (이제 아무도 csc 를 마운트 안 함)**: csc/src/services 에서 비도메인

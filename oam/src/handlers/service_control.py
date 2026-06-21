@@ -31,16 +31,28 @@ from typing import Optional
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
 
-# mcptt(서비스 종속 모듈) 의존을 선택화 — 부트스트랩(standalone) OAM 패키지에는
-# 서비스 모듈이 없으므로 감사 함수만 fallback no-op 으로 대체.
-try:
-    from services.mcptt import audit_config_change
-except Exception:  # pragma: no cover — bootstrap (csc 미동봉)
-    def audit_config_change(*_a, **_k):
-        return None
-from services import service_registry
+from services import file_store, service_registry
 
 logger = Logger()
+
+
+def _audit_service_action(config: dict, actor: str, actor_ip: str,
+                          service: str, action: str, reason: str = "") -> None:
+    """서비스 제어 감사 — base 자체 기록(file_store JSONL, mcptt 비의존).
+    {CimsRuntimeDir}/service_control_audit/YYYY/MM/DD.jsonl.
+    csc_standalone_module.md P3: base 는 csc 의 mcptt 함수를 빌려 쓰지 않는다 —
+    MCPTT→CSP notify/audit 는 csc 전용. base 는 자기 감사 로그만 남긴다."""
+    try:
+        from datetime import datetime as _dt
+        domain_path = file_store.domain_dir(config or {}, "service_control_audit")
+        file_store.jsonl_append(domain_path, "audit", {
+            "ts": _dt.now().isoformat(timespec='seconds'),
+            "actor": actor, "actor_ip": actor_ip,
+            "entity": "service", "entity_id": str(service),
+            "action": action, "reason": (reason or "")[:512] if reason else None,
+        })
+    except Exception as e:
+        logger.log_warning(f"service_control audit: {e}")
 
 _SERVICE_BASE = "/api/v1/services"
 # fallback — service descriptor 미존재 시. 평상시엔 registry.controllable_modules() 사용.
@@ -198,16 +210,11 @@ async def handle_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     actor = _actor_from_headers(handler_args.headers)
     result = await _invoke(action, service)
 
-    # 감사 로그
-    try:
-        audit_config_change(
-            config.get("CimsDatabase", {}),
-            actor, handler_args.client_ip,
-            "service", service, action.upper(),
-            before=None, after=None, reason=f"driver={_driver()}",
-        )
-    except Exception as e:
-        logger.log_warning(f"ServiceControl: audit failed: {e}")
+    # 감사 로그 (base 자체 — mcptt 비의존)
+    _audit_service_action(
+        config, actor, handler_args.client_ip,
+        service, action.upper(), reason=f"driver={_driver()}",
+    )
 
     logger.log_info(f"ServiceControl: {actor} {action} {service} rc={result.body.get('returncode')}")
     return result

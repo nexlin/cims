@@ -15,7 +15,9 @@ OAM 책임:
 - MCPTT IdMS/GMS/CMS/KMS (UE 통신)
 - CSP 가입자 데이터 notify_csp
 
-공유 라이브러리는 csc/src/services 에 그대로 (admin_auth, mcptt.notify_csp 등) — sys.path 에 csc/src 도 mount.
+공유 인프라(admin_auth/file_store/ha_lookup/service_registry 등)는 현재 csc/src/services 를
+sys.path mount 로 빌려 씀. base 는 mcptt(notify_csp/audit) 는 쓰지 않는다 — MCPTT→CSP notify 는
+csc 전용. ⚠️ csc/src mount 제거(base 자체 복사본 보유)는 csc_standalone_module.md P3 예정.
 """
 
 import argparse
