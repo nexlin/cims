@@ -1,5 +1,4 @@
 import argparse
-import glob
 import os
 import sys
 import time
@@ -17,41 +16,12 @@ _VENDOR = os.path.normpath(os.path.join(_COMPONENT_ROOT, 'vendor'))
 if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
     sys.path.insert(0, _VENDOR)
 
-# ── OAM 분리 Phase 1/3b: oam/src 를 sys.path 에 mount ──
-# 같은 binary 가 oam/src/handlers/ 의 모듈도 import. csc/src/handlers/ 와
-# oam/src/handlers/ 둘 다 __init__.py 없는 PEP 420 namespace package 라서
-# `from handlers.X import Y` 가 양쪽 디렉토리에서 모두 해석된다.
-# 설계: docs/design/oam_csc_split.md
-#
-# 후보 경로 (우선순위):
-#   1) dev env (build/dist 트리): _COMPONENT_ROOT/../oam/src
-#      → build/dist/csc/.. = build/dist → build/dist/oam/src ✓
-#   2) agent install (install_path/<pkg>/<ver>/<pkg> 구조):
-#      install_path/csc/<ver>/csc/../../../oam/*/oam/src 를 glob 검색
-#      _COMPONENT_ROOT = install_path/csc/<ver>/csc
-#      ..  = install_path/csc/<ver>
-#      ../.. = install_path/csc
-#      ../../.. = install_path  ← 여기서 oam/<ver>/oam/src 매칭
-#   3) agent install 혼합 상태: csc 는 버전 경로인데 oam 모듈이 legacy 평탄
-#      (install_path/oam/src) 인 경우 — _COMPONENT_ROOT/../../../oam/src
-_OAM_SRC = None
-_candidates = [os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'oam', 'src'))]
-_glob_pattern = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', '..', 'oam', '*', 'oam', 'src'))
-_candidates += sorted(glob.glob(_glob_pattern), reverse=True)
-_candidates.append(os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', '..', 'oam', 'src')))
-for _c in _candidates:
-    if os.path.isdir(_c):
-        _OAM_SRC = _c
-        break
-if _OAM_SRC and _OAM_SRC not in sys.path:
-    # oam_base_service_split — oam/src 는 sys.path 뒤(append)에 둔다.
-    #   `handlers` 는 __init__.py 없는 PEP 420 namespace package 라 oam/src·csc/src
-    #   양쪽이 순서 무관 병합(auth/users=oam, admin/org=csc). 하지만 `services` 는 양쪽
-    #   모두 __init__.py 가 있는 *일반* 패키지라 sys.path 우선순위로 하나만 이긴다.
-    #   배포본 oam/src/services 는 서비스 코드 제외 subset 이므로, insert(0) 으로 앞에 두면
-    #   csc/src/services 의 mcptt/idms 를 가려 `services.mcptt` ModuleNotFoundError 가 난다.
-    #   append 로 csc/src/services(full superset)가 이기게 한다(handlers 병합은 그대로).
-    sys.path.append(_OAM_SRC)
+# ── CSC 완전 독립 모듈 (csc_standalone_module.md P1) ──
+# csc 는 oam/src 를 마운트하지 않는다. base ↔ csc 결합은 계약(stable contract)으로만:
+# 게이트웨이 HTTP 프록시 + 공유 JwtSecret 기반 JWT verify + DB 스키마. csc 는 자기
+# handlers(admin/org)·services(mcptt/idms/config_cache + 인프라 유틸)·httpsrv·util 만으로
+# 기동한다(별도 프로세스 = sys.path 독립 = services 충돌 원천 소멸).
+# 로그인/토큰발급(auth)·본인프로파일(/users/me)은 base(oam) 책임 — csc 는 미서빙.
 
 from httpsrv.server import HttpServer
 from util.log_util import Logger
@@ -122,14 +92,14 @@ if __name__ == '__main__':
             logger.log_error(f"CSC overlay failed: {e}")
         return c
 
-    # OAM 분리 Phase 3b — csc_app.py 는 가입자 CRUD + MCPTT (IdMS/GMS/CMS/KMS) 만.
-    # OAM 책임 handler (agents/ha_groups/build/verification/...) 는 oam_app.py 에서.
+    # CSC 완전 독립 (csc_standalone_module.md P1) — csc 자기 handlers/services 만 import.
+    #   가입자 CRUD(admin) + 조직(org) + MCPTT(IdMS/GMS/CMS/KMS). 로그인/토큰발급(auth)·
+    #   본인프로파일(users /me)은 base(oam) 책임 → csc 미서빙·미import.
+    #   JWT 검증은 자체 services.admin_auth (공유 JwtSecret = 계약).
     from services.mcptt import load_shared_data, CSC_HANDLER_LIST, notify_csp
     from services       import flow_logger, logger as csc_logger
-    from handlers       import auth
+    from services       import admin_auth
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
-    from handlers.auth           import CIMS_AUTH_HANDLER_LIST
-    from handlers.users          import CIMS_USERS_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
 
     admin_server = None
@@ -138,7 +108,7 @@ if __name__ == '__main__':
         logger.log_info(f'==================== start (CSC) ====================')
 
         config = load_config()
-        auth.init(config)
+        admin_auth.init(config)
 
         # ServiceLogging 설정 (신규 통합)
         sl = config.get("ServiceLogging", {})
@@ -179,7 +149,7 @@ if __name__ == '__main__':
         def _extract_caller(handler_args) -> str:
             """Authorization Bearer JWT → login_id 추출. 없으면 body/query 에서 user 후보."""
             try:
-                payload = auth.extract_token(handler_args)
+                payload = admin_auth.extract_admin_jwt(handler_args.headers)
                 if payload:
                     return payload.get("login_id") or str(payload.get("sub", "")) or ""
             except Exception:
@@ -257,12 +227,10 @@ if __name__ == '__main__':
         else:
             logger.log_info("SSL Disabled (server.key / server.crt not found)")
 
-        # ── CSC Admin server (가입자 CRUD + auth + 본인정보 + org) ─────────────
-        # OAM 분리 Phase 3b — agents/ha_groups/build/verification/alerts/stats/
-        # recording/service_control/modules 등 OAM handler 는 oam_app.py 에서.
-        # 본 server 는 가입자 (admin.py) + 조직 (org.py) + auth (관리자 로그인) +
-        # users (본인 정보) 만. port 는 csc.json Server.Port (default 4420,
-        # OAM 의 4419 와 충돌 회피).
+        # ── CSC Admin server (가입자 CRUD + 조직) ─────────────────────────────
+        # CSC 완전 독립 (csc_standalone_module.md P1) — 가입자(admin.py) + 조직(org.py)만.
+        # 로그인/토큰발급(auth)·본인프로파일(users /me)은 base(oam) 책임. port 는
+        # csc.json Server.Port (default 4420, OAM 4419 와 충돌 회피).
         admin_conf = config.get('Server', {'Ip': '0.0.0.0', 'Port': 4420})
         cims_kwargs = {'config': config}
         admin_server = HttpServer(
@@ -273,8 +241,7 @@ if __name__ == '__main__':
         )
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_AUTH_HANDLER_LIST + CIMS_USERS_HANDLER_LIST
-                                  + CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
+            for path, handler, _ in CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
         ])
         admin_server.start()
         logger.log_info(f"CSC Admin server started on port {admin_conf.get('Port', 4420)}")
