@@ -328,6 +328,16 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/config/cwrtc.json.template  ${CMAKE_BINARY_DIR}/dist/cwrtc/config/cwrtc.json.template
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csc/config/config_template.json
 
+    # ── 3a. base <module>.json 생성 (config_template.json 의 field.default) ──
+    #    configure 미실행 상용 흐름(build→pkg→설치→web 설정→start)에서도 모듈이
+    #    기동 시 읽는 base conf 가 tarball 에 항상 포함되도록 보장. configure.sh 는
+    #    이후 같은 파일을 env(@VAR@) 값으로 덮어씀(dev). 변종(psp/isp/pmp/imp)은
+    #    cmd_pkg staging 이 config/<base>.json → config/<variant>.json 으로 자동 rename.
+    #    cmp/csp 는 C++ 바이너리라 base conf 부재 시 hard-fail → 대상. csc(Python)는
+    #    config 부재를 tolerate(soft) 하므로 비대상.
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/cmp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cmp/config/cmp.json
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/csp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/csp/config/csp.json
+
     # ── 4. CSP 데이터 복사 ─────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/User        ${CMAKE_BINARY_DIR}/dist/csp/user
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/Group       ${CMAKE_BINARY_DIR}/dist/csp/group
