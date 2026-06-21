@@ -155,6 +155,7 @@ if __name__ == '__main__':
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
     from handlers.stats          import CIMS_STATS_SERVICE_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
+    from handlers.subscriber_import import CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST
 
     admin_server = None
     try:
@@ -217,9 +218,14 @@ if __name__ == '__main__':
         recording.init(service_log_dir=_service_log_dir, ffmpeg_bin=_ffmpeg_bin,
                        transcode_workers=_tx_workers)
 
-        # SSL — oam-svc/cert 우선, 없으면 oam/cert(dev/동거). loopback 은 평문도 허용.
+        # SSL — 버전무관 runtime cert(modules/oam/runtime/cert) 우선(업그레이드 생존; oam_app
+        #   _resolve_oam_cert 가 SoT 로 seed) → oam-svc/cert → oam/cert(dev/동거). loopback 평문 허용.
+        #   과거: oam 버전업 시 oam/<ver>/oam/cert 만 보고 못 찾아 평문→게이트웨이 https 업스트림 502.
         ssl_keyfile = ssl_certfile = None
-        _cert_cands = [os.path.join(_COMPONENT_ROOT, 'cert')]
+        _cert_cands = []
+        if _OAM_SRC:
+            _cert_cands.append(os.path.normpath(os.path.join(_OAM_SRC, '..', '..', '..', 'runtime', 'cert')))
+        _cert_cands.append(os.path.join(_COMPONENT_ROOT, 'cert'))
         if _OAM_SRC:
             _cert_cands.append(os.path.normpath(os.path.join(_OAM_SRC, '..', 'cert')))
         for _cert_dir in _cert_cands:
@@ -248,7 +254,8 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
         admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
         admin_server.add_dynamic_rules(
-            _bind(CIMS_STATS_SERVICE_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST))
+            _bind(CIMS_STATS_SERVICE_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST
+                  + CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST))
         admin_server.start()
         logger.log_info(f"oam-svc server started on {admin_conf.get('Ip','127.0.0.1')}:{admin_conf.get('Port', 4480)}")
 

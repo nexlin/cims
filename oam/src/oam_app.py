@@ -22,7 +22,9 @@ audit)를 쓰지 않는다 — MCPTT→CSP notify 는 csc 전용. base↔csc 결
 """
 
 import argparse
+import glob as _glob
 import os
+import shutil as _shutil
 import sys
 import time
 import traceback
@@ -30,6 +32,54 @@ import traceback
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))  # = oam/
 _CONFIG_PATH = os.environ.get('CIMS_OAM_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'oam.json')
+
+
+def _resolve_oam_cert():
+    """OAM TLS cert (server.key, server.crt) 경로 결정 — 버전 업그레이드 생존이 핵심.
+
+    cert 가 버전 디렉터리(modules/oam/<ver>/oam/cert)에만 있으면 oam 버전업마다 새 디렉터리엔
+    cert 가 없어 평문 기동 → self-upgrade health-gate(HTTPS 프로브) 실패 → 롤백. oam-svc 도
+    동일 사유로 평문→게이트웨이 502. 그래서 **버전무관 위치(modules/oam/runtime/cert)** 를 SoT 로 한다.
+
+    우선순위: (1) runtime/cert (업그레이드 생존)  (2) 자기 버전 cert (dev/repo·구 레이아웃).
+    self-heal: runtime 이 비어있고 자기/형제 버전에 cert 가 있으면 runtime 으로 복사 → 이후
+    버전업이 자동 상속(부트스트랩 재실행 불요).
+    """
+    def _ok(d):
+        return bool(d) and os.path.exists(os.path.join(d, 'server.key')) \
+            and os.path.exists(os.path.join(d, 'server.crt'))
+
+    def _pair(d):
+        return os.path.join(d, 'server.key'), os.path.join(d, 'server.crt')
+
+    runtime_cert = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime', 'cert'))
+    if _ok(runtime_cert):
+        return _pair(runtime_cert)
+
+    # migration 소스: 자기 버전 → 형제 버전(최신 우선)
+    src = None
+    if _ok(os.path.join(_COMPONENT_ROOT, 'cert')):
+        src = os.path.join(_COMPONENT_ROOT, 'cert')
+    else:
+        for cand in sorted(_glob.glob(os.path.join(_COMPONENT_ROOT, '..', '..', '*', 'oam', 'cert')),
+                           reverse=True):
+            if _ok(cand):
+                src = cand
+                break
+    if not src:
+        return None, None
+    # self-heal: runtime 으로 복사(가능하면). 실패해도 src 직접 사용.
+    try:
+        os.makedirs(runtime_cert, exist_ok=True)
+        for fn in ('server.key', 'server.crt'):
+            dst = os.path.join(runtime_cert, fn)
+            if not os.path.exists(dst):
+                _shutil.copy2(os.path.join(src, fn), dst)
+        if _ok(runtime_cert):
+            return _pair(runtime_cert)
+    except Exception:
+        pass
+    return _pair(src)
 
 # ── Phase 4 vendor: private 환경 (인터넷 없음) 대응 ──
 # oam/vendor/ 에 사전 다운로드된 fastapi/uvicorn/pymysql/PyJWT/loguru/requests/
@@ -356,14 +406,9 @@ if __name__ == '__main__':
         except Exception as _e:
             logger.log_error(f"ConfigCache init failed: {_e}")
 
-        # SSL certificates — OAM 자체 cert(<oam>/cert, 부트스트랩 인스톨러가 생성)
-        ssl_keyfile = ssl_certfile = None
-        _cert_cands = [os.path.join(_COMPONENT_ROOT, 'cert')]
-        for _cert_dir in _cert_cands:
-            if os.path.exists(os.path.join(_cert_dir, 'server.key')) and                os.path.exists(os.path.join(_cert_dir, 'server.crt')):
-                ssl_keyfile  = os.path.join(_cert_dir, 'server.key')
-                ssl_certfile = os.path.join(_cert_dir, 'server.crt')
-                break
+        # SSL certificates — 버전무관 runtime cert(modules/oam/runtime/cert) 우선 + self-heal.
+        #   (버전 디렉터리 cert 만 있으면 버전업 시 평문→health-gate 롤백. _resolve_oam_cert 참조.)
+        ssl_keyfile, ssl_certfile = _resolve_oam_cert()
         if ssl_keyfile and ssl_certfile:
             logger.log_info(f"SSL Enabled. Key: {ssl_keyfile}, Cert: {ssl_certfile}")
         else:

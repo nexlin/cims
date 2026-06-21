@@ -215,9 +215,18 @@ mkdir -p "$OAM_ROOT/config" "$OAM_ROOT/run" "$OAM_ROOT/log"
 mkdir -p "$OAM_ROOT/oam/seed_packages"
 cp -f "$OAM_TAR" "$AGT_TAR" "$OAM_ROOT/oam/seed_packages/"
 
-# ── TLS 인증서 (self-signed; 재설치 시 보존) ─────────────────────
-CERT_DIR="$OAM_ROOT/oam/cert"
+# ── TLS 인증서 (self-signed; 재설치·업그레이드 시 보존) ─────────────────────
+# 버전무관 runtime 위치에 생성 — oam 버전업 시 새 버전 디렉터리엔 cert 가 없어 평문 기동
+# → self-upgrade health-gate(HTTPS) 롤백 / oam-svc 평문→게이트웨이 502 가 났다. runtime 은
+# 업그레이드 생존(영속 store) → base/oam-svc 둘 다 _resolve_oam_cert 로 여기서 읽는다.
+CERT_DIR="$RUNTIME_DIR/cert"
 mkdir -p "$CERT_DIR"
+# 구 레이아웃(버전 디렉터리 cert)에서 1회 이관 — 기존 토큰/인증서 유지.
+if [[ ( ! -f "$CERT_DIR/server.key" || ! -f "$CERT_DIR/server.crt" ) \
+      && -f "$OAM_ROOT/oam/cert/server.key" && -f "$OAM_ROOT/oam/cert/server.crt" ]]; then
+    cp -p "$OAM_ROOT/oam/cert/server.key" "$OAM_ROOT/oam/cert/server.crt" "$CERT_DIR/"
+    ok "구 cert(버전 디렉터리) → runtime 이관"
+fi
 if [[ ! -f "$CERT_DIR/server.key" || ! -f "$CERT_DIR/server.crt" ]]; then
     HOSTNM=$(hostname -f 2>/dev/null || hostname)
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
