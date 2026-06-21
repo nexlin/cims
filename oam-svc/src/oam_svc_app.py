@@ -155,6 +155,7 @@ if __name__ == '__main__':
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
     from handlers.stats          import CIMS_STATS_SERVICE_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
+    from handlers.subscriber_import import CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST
 
     admin_server = None
     try:
@@ -248,7 +249,8 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
         admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
         admin_server.add_dynamic_rules(
-            _bind(CIMS_STATS_SERVICE_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST))
+            _bind(CIMS_STATS_SERVICE_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST
+                  + CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST))
         admin_server.start()
         logger.log_info(f"oam-svc server started on {admin_conf.get('Ip','127.0.0.1')}:{admin_conf.get('Port', 4480)}")
 

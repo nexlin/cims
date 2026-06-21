@@ -2023,10 +2023,17 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     #    배포 config 의 Server.Port(SoT)+Ip 로 게이트웨이에 등록+hot-mount.
     #    base 가 서비스 모듈을 미리 알 필요 없음(시드 하드코딩 대체). role base 에서만 mount.
     try:
-        gw_routes = ((pkg_meta.get("gateway") or {}).get("routes")) or []
-        if gw_routes and isinstance(cfg_overlay, dict):
-            srv = cfg_overlay.get("Server") if isinstance(cfg_overlay.get("Server"), dict) else {}
-            _port = cfg_overlay.get("Server.Port") or srv.get("Port")
+        gw_meta = pkg_meta.get("gateway") or {}
+        gw_routes = gw_meta.get("routes") or []
+        if gw_routes:
+            # 포트 결정 우선순위: 배포 config 의 Server.Port(SoT) → gateway.default_port(패키지 선언
+            #   기본 포트 fallback). 콘솔 마법사는 Server.Port 를 채우지만, raw API(또는 config 미지정)
+            #   배포에선 비어 있어 과거엔 라우트 등록이 통째로 skip 돼 게이트웨이 404 가 났다.
+            #   → 패키지가 pkg.json 의 gateway.default_port 로 자기 기본 포트를 선언하면 그걸로 fallback.
+            srv = cfg_overlay.get("Server") if isinstance(cfg_overlay, dict) and isinstance(cfg_overlay.get("Server"), dict) else {}
+            _port = (cfg_overlay.get("Server.Port") if isinstance(cfg_overlay, dict) else None) \
+                    or srv.get("Port") \
+                    or gw_meta.get("default_port")
             # 게이트웨이 upstream 은 항상 loopback(I1) — 모듈 bind Ip(0.0.0.0 등)와 무관하게
             #   게이트웨이·모듈이 같은 호스트라 127.0.0.1 로 도달. (0.0.0.0 upstream 은 무효)
             _ip = "127.0.0.1"
@@ -2034,6 +2041,11 @@ async def _create_deployment(handler_args: HandlerArgs, config):
                 import handlers.gateway as _gw
                 await asyncio.to_thread(_gw.register_module_routes, config,
                                         process_name, _ip, int(_port), gw_routes)
+            else:
+                logger.log_warning(
+                    f"[deploy] {process_name}: gateway.routes 선언됐으나 Server.Port(config)·"
+                    f"gateway.default_port(pkg) 둘 다 없어 라우트 self-register skip "
+                    f"— 게이트웨이 프록시 404 위험. 배포 config 에 Server.Port 지정 또는 pkg.json 에 gateway.default_port 선언 필요.")
     except Exception as e:
         logger.log_warning(f"[deploy] self-register routes 실패({process_name}): {e}")
 

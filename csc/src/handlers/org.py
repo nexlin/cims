@@ -64,12 +64,6 @@ async def handle_organizations(handler_args: HandlerArgs, kwargs: dict) -> Handl
         if parts[0] == 'batch' and method == 'DELETE':
             return await _batch_delete_orgs(handler_args.body, config)
 
-        if parts[0] == 'import':
-            if len(parts) >= 2 and parts[1] == 'template' and method == 'GET':
-                return _generate_template()
-            if method == 'POST':
-                return await _import_orgs(handler_args, config)
-            return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         org_id = parts[0]
         if len(parts) == 1:
@@ -217,95 +211,6 @@ async def _list_org_users(org_id, config):
     return HandlerResult(status=200, body={'org_id': org_id, 'org_code': code, 'users': users})
 
 
-def _generate_template():
-    import openpyxl
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = 'organizations'
-    ws.append(['code', 'name', 'parent_code', 'sort_order'])
-    ws.append(['HQ', '본부', '', 1])
-    ws.append(['DEV', '개발부', 'HQ', 1])
-    ws.append(['DEV_01', '개발1팀', 'DEV', 1])
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return HandlerResult(status=200, body=buf.getvalue(), headers={
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': 'attachment; filename="cims_org_template.xlsx"',
-    })
-
-
-async def _import_orgs(handler_args, config):
-    import openpyxl
-    import base64
-
-    body = handler_args.body or {}
-    file_data = None
-    if 'file_base64' in body:
-        file_data = base64.b64decode(body['file_base64'])
-    if not file_data:
-        return HandlerResult(status=400, body={'error': 'file_base64 필요'})
-
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(file_data))
-    except Exception as e:
-        return HandlerResult(status=400, body={'error': f'파싱 실패: {e}'})
-
-    if 'organizations' not in wb.sheetnames:
-        return HandlerResult(status=400, body={'error': 'organizations 시트 필요'})
-
-    ws = wb['organizations']
-    headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-    rows_data = []
-    for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        rd = dict(zip(headers, row))
-        code = str(rd.get('code', '') or '').strip()
-        name = str(rd.get('name', '') or '').strip()
-        parent_code = str(rd.get('parent_code', '') or '').strip()
-        sort_order = int(rd.get('sort_order', 0) or 0)
-        if not code or not name:
-            continue
-        rows_data.append({'code': code, 'name': name, 'parent_code': parent_code, 'sort_order': sort_order, 'row': i})
-
-    created, updated, errors = 0, 0, []
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            # 기존 code → id 매핑
-            cur.execute("SELECT id, code FROM organizations")
-            code_to_id = {r['code']: r['id'] for r in cur.fetchall()}
-
-            # 1차: upsert (parent는 나중에)
-            for rd in rows_data:
-                try:
-                    if rd['code'] in code_to_id:
-                        cur.execute(
-                            "UPDATE organizations SET name=%s, sort_order=%s WHERE code=%s",
-                            (rd['name'], rd['sort_order'], rd['code'])
-                        )
-                        updated += 1
-                    else:
-                        cur.execute(
-                            "INSERT INTO organizations (code, name, sort_order) VALUES (%s,%s,%s)",
-                            (rd['code'], rd['name'], rd['sort_order'])
-                        )
-                        code_to_id[rd['code']] = cur.lastrowid
-                        created += 1
-                except Exception as e:
-                    errors.append({'row': rd['row'], 'error': str(e)})
-
-            # 2차: parent 설정
-            for rd in rows_data:
-                if rd['parent_code'] and rd['parent_code'] in code_to_id:
-                    parent_id = code_to_id[rd['parent_code']]
-                    cur.execute(
-                        "UPDATE organizations SET parent_id=%s WHERE code=%s",
-                        (parent_id, rd['code'])
-                    )
-
-    return HandlerResult(status=200, body={
-        'created': created, 'updated': updated, 'errors': errors
-    })
 
 
 CIMS_ORG_HANDLER_LIST = [

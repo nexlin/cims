@@ -33,3 +33,6 @@ aiohttp
 netifaces
 asyncstdlib
 strenum
+
+# oam-svc 가입자/조직 Excel 일괄 등록 오케스트레이션 (handlers/subscriber_import.py)
+openpyxl
