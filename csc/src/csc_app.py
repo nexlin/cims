@@ -97,7 +97,7 @@ if __name__ == '__main__':
     #   본인프로파일(users /me)은 base(oam) 책임 → csc 미서빙·미import.
     #   JWT 검증은 자체 services.admin_auth (공유 JwtSecret = 계약).
     from services.mcptt import load_shared_data, CSC_HANDLER_LIST, notify_csp
-    from services       import flow_logger, logger as csc_logger
+    from services       import logger as csc_logger
     from services       import admin_auth
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
@@ -118,11 +118,8 @@ if __name__ == '__main__':
             _service_log_dir = config.get("ServiceLogDir", config.get("MsgLogDir", ""))
         _system_id = config.get("SystemId", "csc_01")
 
-        flow_logger.init(
-            service_log_dir=_service_log_dir,
-            system_id=_system_id,
-        )
-
+        # flow_logger(통화이력/flow API)는 oam-svc 책임 — csc 는 미서빙(FLOW_HANDLER_LIST
+        # 미등록)이므로 init 불요. csc 자기 flow 로깅은 csc_logger(logger.py) 가 담당.
         csc_logger.init(
             service_log_dir=_service_log_dir,
             system_id=_system_id,

@@ -24,6 +24,22 @@ oam·oam-svc·csc 는 **서로 독립적으로 버전업·배포**된다. 이들
 
 → 결론: **공유 런타임 모듈을 두지 않는다.** 모듈 간 결합은 **안정 계약(stable contract)** 으로만.
 
+### 핵심 발견 (2026-06-21): 결합 방향은 *역방향* — base·oam-svc 가 csc 를 마운트
+
+분석 결과 실제 구조는 "oam 이 csc 로 복사"가 아니라 **csc/src 가 공유 라이브러리의 정본이고
+base(oam_app.py)와 oam-svc(oam_svc_app.py)가 `sys.path` 에 `csc/src` 를 *마운트*** 한다
+(cmd_pkg 의 oam←csc 복사는 패키징용 2차 수단). 즉 csc 는 서비스 모듈이면서 동시에
+**de-facto 공유 SDK 호스트**다. oam/src/services 는 repo 에서 사실상 비어 있고 csc/src/services 를
+빌려 쓴다.
+
+따라서 "csc 완전 분리" = **base·oam-svc 가 csc/src 마운트를 끊는 것**이 핵심이며, 순서는
+**소비자(oam·oam-svc)를 먼저 자족화 → 그 다음 csc 가 비도메인 모듈을 버림** 이어야 안전하다
+(역순으로 csc 에서 먼저 지우면 base/oam-svc 가 깨진다).
+
+oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `oam_app.py`/`service_control.py` 의
+`services.mcptt.notify_csp`·`audit_config_change` (base 가 MCPTT 내부를 직접 호출 — csc API/이벤트
+계약으로 전환 대상).
+
 ## 도메인 경계 (확정)
 
 | 개념 | 소유 모듈 | 저장소 | 설명 |
@@ -84,22 +100,30 @@ oam·oam-svc·csc 는 **서로 독립적으로 버전업·배포**된다. 이들
 - cims.sh `cmd_pkg` 의 oam→csc `services` 복사 + `__init__.py` 제외 해킹 — 삭제
 - `oam_csc_split.md` 의 namespace-merge(handlers/services) 전제 — csc 가 마운트 안 하므로 무효화
 
-## 단계 계획 (phased)
+## 단계 계획 (phased) — 핵심 발견 반영 (소비자 자족화 우선)
 
-각 단계 끝에 `make dist` + standalone csc 기동 스모크 게이트.
+각 단계 끝에 `make dist` + 해당 모듈 standalone import/기동 스모크 게이트.
 
-- **P1 — csc 마운트 제거 + 자족화**: csc_app.py 에서 `_OAM_SRC` 마운트·oam handlers
-  (auth/users) import 제거. csc 가 자기 handlers(admin/org)와 자기 services 만으로 기동.
-  csc 라우터에서 `/users/me`(oam) 제거 — base 책임으로. 자체 JWT verify 경로 확인.
-- **P2 — 인프라/오배치 정리**: csc 에서 flow_logger→oam-svc, csp_runtime→scripts(또는 삭제),
-  HA fan-out 모듈 제거. csc/src/services = {mcptt, idms_storage, config_cache, + 자체 vendor
-  유틸(file_store/logger 최소)} 로 축소. `__init__.py` 복원(csc 는 더 이상 namespace 병합 불요).
-- **P3 — 게이트웨이/계약 정리**: base 게이트웨이가 가입자 라우트를 csc 로 프록시(이미 self-register).
-  `/users/me` 는 base, 가입자 CRUD 는 csc 로 라우팅 정합. base 가 구독 데이터 필요 시 csc API 호출.
-- **P4 — 콘솔 토폴로지**: 가입자 관리 UI 를 oam-svc(csc API 소비) 경유로 정리. (UI 자체는 기존 콘솔
-  프로비저닝 워크벤치 재사용.)
-- **P5 — cims.sh/빌드 정리**: oam→csc services 복사·namespace 해킹·dual-mount glob 제거.
-  각 모듈 패키지가 자기 것만 동봉.
+- **P1 — csc 가 oam 을 안 본다 ✅ (완료)**: csc_app.py 에서 `_OAM_SRC` 마운트·oam handlers
+  (auth/users) import 제거. JWT 검증을 자체 services.admin_auth 로. csc 가 자기 handlers
+  (admin/org)·services 만으로 기동. 로그인/`/users/me` 는 base 책임(csc 미서빙).
+- **P2 — csc 런타임 잔재 정리 ✅ (완료, 무위험분)**: csc_app.py 의 flow_logger vestigial
+  init 제거(csc 는 flow API 미서빙, 자기 로깅은 csc_logger). ⚠️ **`__init__.py` 복원·csc 의
+  비도메인 모듈 물리 삭제는 P3~P5 이후로 보류** — base·oam-svc 가 아직 csc/src 를 마운트하므로
+  지금 지우면 그들이 깨진다.
+- **P3 — base(oam) 자족화**: oam 이 필요한 인프라(admin_auth·file_store·ha_lookup·sync_*·
+  drift_sweeper·service_registry·collection_schema·alert_log·logger·flow_logger)를 oam 자체
+  복사본으로 보유 → `oam_app.py` 의 `csc/src` 마운트 제거. oam→`mcptt.notify_csp/audit`
+  leak 을 csc API/이벤트 계약으로 전환. `make dist` + oam standalone import 검증.
+- **P4 — oam-svc 자족화**: oam-svc 가 flow_logger/logger 를 자체 보유(또는 oam/src 에서만) →
+  `oam_svc_app.py` 의 `csc/src` 마운트 제거. oam-svc standalone 검증.
+- **P5 — csc 도메인 축소 (이제 아무도 csc 를 마운트 안 함)**: csc/src/services 에서 비도메인
+  모듈(sync_*·drift_sweeper·service_registry·collection_schema·alert_log·flow_logger) 물리 삭제,
+  csp_runtime(RETIRED) 정리, `__init__.py` 복원(csc 일반 패키지화). csc/src/services =
+  {mcptt, idms_storage, config_cache, file_store, ha_lookup, logger, admin_auth}.
+- **P6 — 게이트웨이/콘솔/빌드 정리**: `/users/me`(base)↔`/users`CRUD(csc) 라우팅 정합, 가입자 관리
+  UI = 콘솔이 csc API 경유(oam-svc 오케스트레이션), cmd_pkg 의 oam←csc 복사·dual-mount glob·
+  namespace 해킹 제거. 각 모듈 패키지가 자기 것만 동봉.
 
 ## 비목표 / 주의
 
