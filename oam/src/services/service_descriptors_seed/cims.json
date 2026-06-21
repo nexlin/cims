@@ -1,0 +1,81 @@
+{
+  "id": "cims",
+  "label": "CIMS",
+  "modules": [
+    { "name": "csp",    "port": 5060, "proto": "udp", "controllable": true },
+    { "name": "isp",    "port": 5060, "proto": "udp" },
+    { "name": "psp",    "port": 5060, "proto": "udp" },
+    { "name": "cmp",    "port": 9000, "proto": "udp", "controllable": true },
+    { "name": "imp",    "port": 9000, "proto": "udp" },
+    { "name": "pmp",    "port": 9000, "proto": "udp" },
+    { "name": "csc",    "port": 4420, "proto": "tcp", "controllable": true },
+    { "name": "cwrtc",  "controllable": true },
+    { "name": "phone",  "controllable": true },
+    { "name": "cspsim" }
+  ],
+  "alert_rules": [
+    { "type": "process_down", "code": "CIMS-PRC-001", "perceived_severity": "critical",
+      "event_type": "processingError", "probable_cause": "softwareError", "mo_class": "software",
+      "check": "process_down", "target": "csp", "mo_instance": "cims/csp", "metric": "프로세스 가용성",
+      "msg_open": "{mo} 프로세스 응답 없음", "msg_close": "{mo} 정상화",
+      "effect": "CSP 호처리(SIP 시그널링) 중단", "recommended_action": "csp 재기동, 로그/코어 확인, HA 절체 점검" },
+    { "type": "process_down", "code": "CIMS-PRC-001", "perceived_severity": "critical",
+      "event_type": "processingError", "probable_cause": "softwareError", "mo_class": "software",
+      "check": "process_down", "target": "cmp", "mo_instance": "cims/cmp", "metric": "프로세스 가용성",
+      "msg_open": "{mo} 프로세스 응답 없음", "msg_close": "{mo} 정상화",
+      "effect": "CMP RTP 릴레이/미디어 처리 중단", "recommended_action": "cmp 재기동, 로그 확인, HA 절체 점검" },
+    { "type": "connection_lost", "code": "CIMS-COM-001", "perceived_severity": "critical",
+      "event_type": "communications", "probable_cause": "communicationsSubsystemFailure", "mo_class": "service",
+      "check": "db_down", "mo_instance": "cims/db", "metric": "DB 연결",
+      "msg_open": "{mo} 연결 끊김", "msg_close": "{mo} 연결 복구",
+      "effect": "가입자/그룹 조회·인증 실패", "recommended_action": "DB 가용성/방화벽/연결설정 확인" },
+    { "type": "threshold_crossed", "code": "CIMS-QOS-001", "perceived_severity": "warning",
+      "event_type": "qualityOfService", "probable_cause": "resourceAtOrNearingCapacity", "mo_class": "service",
+      "check": "rtp_pct_gte", "threshold": 80, "unit": "%", "mo_instance": "cims/rtp_ports", "metric": "RTP 포트 사용률",
+      "msg_open": "{mo} 사용률 {pct}% ({threshold}% 초과)", "msg_close": "{mo} 사용률 {pct}% (정상)",
+      "effect": "RTP 포트 고갈 임박 — 신규 미디어 세션 실패 위험", "recommended_action": "동시 세션/누수 점검, 포트 풀 증설" }
+  ],
+  "data_sources": [
+    { "id": "cims.msg.sip", "label": "SIP 메시지", "shapes": ["time-bar", "table"],
+      "endpoint": "/stats/messages/sip", "query": ["date"],
+      "map": {
+        "time-bar": { "from": "buckets", "label": ["hour"], "value": "count" },
+        "table": { "fromObject": "method_counts", "columns": ["메서드", "건수"] } } },
+    { "id": "cims.msg.cmp", "label": "CMP 메시지", "shapes": ["time-bar", "table"],
+      "endpoint": "/stats/messages/cmp", "query": ["date"],
+      "map": {
+        "time-bar": { "from": "buckets", "label": ["hour"], "value": "count" },
+        "table": { "fromObject": "method_counts", "columns": ["메서드", "건수"] } } },
+    { "id": "cims.msg.csc", "label": "CSC 메시지", "shapes": ["time-bar", "table"],
+      "endpoint": "/stats/messages/csc", "query": ["date"],
+      "map": {
+        "time-bar": { "from": "buckets", "label": ["hour"], "value": "count" },
+        "table": { "fromObject": "method_counts", "columns": ["메서드", "건수"] } } },
+    { "id": "cims.msg.https", "label": "HTTPS 메시지", "shapes": ["time-bar", "table"],
+      "endpoint": "/stats/messages/https", "query": ["date"],
+      "map": {
+        "time-bar": { "from": "buckets", "label": ["hour"], "value": "count" },
+        "table": { "fromObject": "method_counts", "columns": ["메서드", "건수"] } } },
+    { "id": "cims.svc.volte", "label": "VoLTE 서비스", "shapes": ["kpi", "time-bar", "distribution"],
+      "endpoint": "/stats/service/volte", "query": ["date", "granularity"],
+      "map": {
+        "kpi": { "items": [
+          { "label": "호 시도", "path": "volte.total_attempts", "unit": "건" },
+          { "label": "호 성공률", "path": "volte.success_rate", "unit": "%" },
+          { "label": "평균 통화시간", "path": "volte.avg_duration_sec", "format": "duration" },
+          { "label": "성공", "path": "volte.total_success", "unit": "건" } ] },
+        "time-bar": { "from": "volte.buckets", "label": ["hour", "date"], "value": "attempts" },
+        "distribution": { "fromObject": "volte.end_reasons", "totalPath": "volte.total_attempts" } } },
+    { "id": "cims.svc.ptt", "label": "PTT 서비스", "shapes": ["kpi", "time-bar", "distribution"],
+      "endpoint": "/stats/service/ptt", "query": ["date", "granularity"],
+      "map": {
+        "kpi": { "items": [
+          { "label": "그룹콜 수", "path": "ptt.total_calls", "unit": "건" },
+          { "label": "평균 세션 시간", "path": "ptt.avg_duration_sec", "format": "duration" } ] },
+        "time-bar": { "from": "ptt.buckets", "label": ["hour", "date"], "value": "calls" },
+        "distribution": { "fromObject": "ptt.by_group", "totalPath": "ptt.total_calls" } } },
+    { "id": "cims.msg-summary", "label": "메시지 합계 (전 interface)", "shapes": ["time-bar"],
+      "endpoint": "/stats/messages", "query": ["date"],
+      "map": { "time-bar": { "from": "buckets", "label": ["hour"], "value": "count" } } }
+  ]
+}

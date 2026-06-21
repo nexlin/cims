@@ -15,9 +15,10 @@ OAM 책임:
 - MCPTT IdMS/GMS/CMS/KMS (UE 통신)
 - CSP 가입자 데이터 notify_csp
 
-공유 인프라(admin_auth/file_store/ha_lookup/service_registry 등)는 현재 csc/src/services 를
-sys.path mount 로 빌려 씀. base 는 mcptt(notify_csp/audit) 는 쓰지 않는다 — MCPTT→CSP notify 는
-csc 전용. ⚠️ csc/src mount 제거(base 자체 복사본 보유)는 csc_standalone_module.md P3 예정.
+인프라(admin_auth/file_store/ha_lookup/service_registry/sync_txn/drift_sweeper/alert_log/
+collection_schema/config_cache/flow_logger/logger) + httpsrv + util 는 oam/src 자체 보유
+(csc_standalone_module.md P3b — csc/src 마운트 폐지, 코드 비공유). base 는 mcptt(notify_csp/
+audit)를 쓰지 않는다 — MCPTT→CSP notify 는 csc 전용. base↔csc 결합은 계약(HTTP/JWT/DB)만.
 """
 
 import argparse
@@ -38,24 +39,11 @@ _VENDOR = os.path.normpath(os.path.join(_COMPONENT_ROOT, 'vendor'))
 if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
     sys.path.insert(0, _VENDOR)
 
-# CSC 공유 라이브러리 (services.mcptt / services.admin_auth / services.flow_logger /
-# services.config_cache / services.drift_sweeper / services.sync_txn / services.alert_log /
-# httpsrv / util) 를 import 하기 위해 sys.path 에 csc/src mount.
-# Phase 4 vendor: agent install 환경 (install_path/csc/<ver>/csc/src) 도 glob 검색.
-_CSC_SRC = None
-_csc_candidates = [os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'csc', 'src'))]
-import glob as _glob
-_csc_glob = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'csc', '*', 'csc', 'src'))
-_csc_candidates += sorted(_glob.glob(_csc_glob), reverse=True)
-# 버전 단위 설치 레이아웃: oam=<root>/oam/<ver>/oam → csc=<root>/csc/<ver>/csc/src 는 3-up.
-_csc_glob3 = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', '..', 'csc', '*', 'csc', 'src'))
-_csc_candidates += sorted(_glob.glob(_csc_glob3), reverse=True)
-for _c in _csc_candidates:
-    if os.path.isdir(_c):
-        _CSC_SRC = _c
-        break
-if _CSC_SRC and _CSC_SRC not in sys.path:
-    sys.path.insert(0, _CSC_SRC)
+# OAM 자체 인프라 — csc/src 마운트 폐지 (csc_standalone_module.md P3b).
+#   oam/src/services(file_store·ha_lookup·admin_auth·sync_txn·drift_sweeper·service_registry·
+#   alert_log·collection_schema·config_cache·flow_logger·logger) + httpsrv + util 를 oam 자체
+#   복사본으로 보유. base↔csc 결합은 계약(게이트웨이 HTTP + JWT verify + DB 스키마)만 —
+#   코드 비공유(독립 업그레이드 가능). oam/src 가 sys.path[0](스크립트 디렉토리)라 별도 mount 불요.
 
 from httpsrv.server import HttpServer
 from util.log_util import Logger
@@ -368,12 +356,9 @@ if __name__ == '__main__':
         except Exception as _e:
             logger.log_error(f"ConfigCache init failed: {_e}")
 
-        # SSL certificates — ① OAM 자체 cert(<oam>/cert, 부트스트랩 인스톨러가 생성)
-        #                    ② csc/cert 공유(개발/동거 환경 fallback)
+        # SSL certificates — OAM 자체 cert(<oam>/cert, 부트스트랩 인스톨러가 생성)
         ssl_keyfile = ssl_certfile = None
         _cert_cands = [os.path.join(_COMPONENT_ROOT, 'cert')]
-        if _CSC_SRC:
-            _cert_cands.append(os.path.normpath(os.path.join(_CSC_SRC, '..', 'cert')))
         for _cert_dir in _cert_cands:
             if os.path.exists(os.path.join(_cert_dir, 'server.key')) and                os.path.exists(os.path.join(_cert_dir, 'server.crt')):
                 ssl_keyfile  = os.path.join(_cert_dir, 'server.key')

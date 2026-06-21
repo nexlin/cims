@@ -118,9 +118,13 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
     base 자체 `_audit_service_action`(file_store JSONL, `service_control_audit` 도메인)로 대체.
   - `oam_app.py`: mcptt.notify_csp 를 base 공유 라이브러리로 적던 docstring 정정.
   - 검증: base 에 mcptt 내부 호출/ import 0 (notify_csp 는 docstring 설명만).
-- **P3b — base(oam) 자족화**: oam 이 필요한 인프라(admin_auth·file_store·ha_lookup·sync_*·
-  drift_sweeper·service_registry·collection_schema·alert_log·logger·flow_logger)를 oam 자체
-  복사본으로 보유 → `oam_app.py` 의 `csc/src` 마운트 제거. `make dist` + oam standalone import 검증.
+- **P3b — base(oam) 자족화 ✅ (완료)**: oam 폐포 = services 11개(admin_auth·alert_log·
+  collection_schema·config_cache·drift_sweeper·file_store·flow_logger·ha_lookup·logger·
+  service_registry·sync_txn) + httpsrv + util 를 **oam/src 자체 복사본으로 보유**(repo 커밋,
+  csc 와 독립 — 발산 가능). `oam_app.py` 의 `csc/src` 마운트(_CSC_SRC glob)·csc/cert fallback 제거.
+  검증: py_compile OK · `sys.path=[oam/src, oam/vendor]`(csc/src 없음) 격리 import 성공
+  (services 11 + httpsrv + util + handlers auth/agents/gateway/service_control/stats 전부 해석).
+  ⚠️ cmd_pkg 의 csc→oam 복사는 P6 로 (현재 redundant·무해, P5 후 -f 가드 skip → oam 자체본 생존).
 - **P4 — oam-svc 자족화**: oam-svc 가 flow_logger/logger 를 자체 보유(또는 oam/src 에서만) →
   `oam_svc_app.py` 의 `csc/src` 마운트 제거. oam-svc standalone 검증.
 - **P5 — csc 도메인 축소 (이제 아무도 csc 를 마운트 안 함)**: csc/src/services 에서 비도메인
