@@ -320,6 +320,16 @@ fi
 if id "$SVC_USER" >/dev/null 2>&1; then
     runuser -u "$SVC_USER" -- env XDG_RUNTIME_DIR="/run/user/\$(id -u "$SVC_USER")" \
         systemctl --user disable --now cims-agent.service 2>/dev/null || true
+    # install.sh 가 만든 OAM_ROLE=base drop-in 까지 대칭 제거 (디렉터리째).
+    #   남기면 다음 설치 때 role 기본값(all)을 가려 "왜 또 base 로 뜨지" 혼란.
+    #   이 .d 디렉터리는 install.sh 의 override.conf 전용 — unit 본체는 여기 없음.
+    _SVC_HOME="\$(getent passwd "$SVC_USER" 2>/dev/null | cut -d: -f6)"
+    if [[ -n "\$_SVC_HOME" && -d "\$_SVC_HOME/.config/systemd/user/cims-agent.service.d" ]]; then
+        rm -rf "\$_SVC_HOME/.config/systemd/user/cims-agent.service.d"
+        runuser -u "$SVC_USER" -- env XDG_RUNTIME_DIR="/run/user/\$(id -u "$SVC_USER")" \
+            systemctl --user daemon-reload 2>/dev/null || true
+        echo "✓ OAM_ROLE drop-in 제거 (~/.config/systemd/user/cims-agent.service.d)"
+    fi
 fi
 if [[ -f "\$PREFIX/uninstall.sh" ]]; then
     ( cd "\$PREFIX" && bash ./uninstall.sh --yes ) || true
