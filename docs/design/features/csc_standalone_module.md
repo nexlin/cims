@@ -1,6 +1,12 @@
 # CSC 완전 독립 모듈화 — 공유 없는 계약 기반 분리
 
-상태: 설계 (2026-06-21) · 선행: [oam_csc_split.md](../oam_csc_split.md) · [oam_base_service_split.md](./oam_base_service_split.md)
+상태: **P1~P6 구현 완료 + 브랜치 push + 라이브 검증 (2026-06-22)** · 선행: [oam_csc_split.md](../oam_csc_split.md) · [oam_base_service_split.md](./oam_base_service_split.md)
+
+> 구현: branch `feat/csc-standalone-module` (7커밋 P1~P6, origin push 완료, **PR 미생성·main 미머지**).
+> 라이브 검증(dist 새 코드 격리 기동, 운영 oam 4419 무사): csc 단독(4421/4430, 무토큰 401·토큰 200
+> DB 가입자 실서빙) · oam-svc 단독(4480, /recordings·/stats 200) — 모두 타 모듈 src 마운트 없이 부팅·서빙.
+> oam(base)은 dist 자족 import 검증(4419 운영 점유로 라이브 부팅 생략).
+> ▶ 다음 세션: **풀 배포 3프로세스 게이트웨이 E2E**(`make dist` + 부트스트랩/배포) · 콘솔 가입자 UI(csc API 경유) · PR 머지.
 
 ## 배경 / 문제
 

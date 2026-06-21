@@ -174,7 +174,7 @@ Automated SIP/RTP client for load and functional testing.
 1. `SipMessageLogger` (ILogCallBack) captures all SIP TX/RX from psip stack + CMP JSON messages
 2. 파일: 원문 `{systemId}_{iface}.msg.{mm5}.jsonl`(iface=sip/cmp/csc) + 통합 flow `{systemId}.flow.{mm5}.jsonl` (`mm5`=5분 버킷 00~55). 매 줄 open/append/close (핸들 미유지 → 운영 중 로그삭제 시 `.nfs` 고아·데이터유실 방지).
 3. flow 엔트리의 `seq`=원문 msg 파일의 줄번호(버킷별 리셋) → 원문 역조회 시 `ts`(HH:MM:SS)로 5분 버킷 도출
-4. Flow API(`csc/src/services/flow_logger.py`)가 Call-ID→sesid→동일 sesid 전 엔트리 수집으로 B2BUA 메시지 흐름 재구성(양 leg via Session-ID). reader glob 은 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신 5분) 모두 매칭
+4. Flow API(`oam/src/services/flow_logger.py`, **oam-svc 모듈이 서빙** — csc 완전독립화로 csc 에서 이전, `docs/design/features/csc_standalone_module.md`)가 Call-ID→sesid→동일 sesid 전 엔트리 수집으로 B2BUA 메시지 흐름 재구성(양 leg via Session-ID). reader glob 은 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신 5분) 모두 매칭
 
 ## Verification (S1~S6 pipeline)
 

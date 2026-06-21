@@ -2,6 +2,18 @@
 
 2026-05-28 사용자 합의. 본 문서는 분리 방향·경계·인증·데이터·진행 계획을 확정한다. 실제 코드 작업은 Phase 1 부터 단계 진행.
 
+> ⚠️ **부분 SUPERSEDED (2026-06-22)** — 본 문서의 **"공유 라이브러리 sys.path 마운트 + handlers/services
+> PEP420 namespace 병합"** 구현 모델(특히 §6 코드구조·Phase 1)은 **폐기**되었다. 독립 업그레이드되는 모듈끼리
+> 코드를 런타임 공유하면 lockstep 결합이 되는 문제로, **[features/csc_standalone_module.md](features/csc_standalone_module.md)**
+> 에서 **계약 기반(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB 스키마) + 각 모듈 자체 인프라 vendoring**
+> 으로 재설계·구현 완료(P1~P6, branch `feat/csc-standalone-module`). 현행:
+> - csc 는 oam/src 를 **마운트하지 않음**. base(oam)·oam-svc 도 csc/src 를 **마운트하지 않음**.
+> - 각 모듈이 자기 services/httpsrv/util 자체 보유. csc = {mcptt, idms_storage, config_cache, file_store,
+>   ha_lookup, logger, admin_auth} 7개.
+> - 본 문서의 **결정(경계·인증 모델·역할 범위·운영 토폴로지)은 유효**하나, **구현 메커니즘(마운트/namespace)
+>   은 csc_standalone_module.md 가 정본**이다. 아래 §6/Phase 의 mount·namespace·"csc 는 file_store 미사용"
+>   서술은 역사적 기록으로 읽을 것(현행 csc 는 idms/config 스냅샷용으로 자체 file_store 사용).
+
 ## 배경
 
 현재 `csc/` 단일 프로세스가 4개 책임을 통합:

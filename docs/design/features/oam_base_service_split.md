@@ -14,6 +14,12 @@
 > - **D4** 설정 = **공통 config + 서비스별 `<service>.json` 분리**.
 >
 > 선행: [[oam_self_upgrade]](감독·preflight), 부트스트랩 base/full 콘솔 프로파일.
+>
+> **후속 (2026-06-22): [csc_standalone_module.md](csc_standalone_module.md)** — 본 설계는 분리 과정에서
+> base·oam-svc 가 **csc/src 를 sys.path 마운트**해 services/httpsrv/util 를 공유하는 de-facto-SDK 방식을
+> 썼다(I3 "base→service 의존 금지" 의 코드 수준 위반·잔재). csc_standalone_module.md(P1~P6)가 이 마운트를
+> 전부 제거하고 **각 모듈이 자기 인프라를 자체 보유 + 계약(HTTP/JWT/DB)만으로 결합** 하도록 완성해 I3 를
+> 코드 수준에서 실현했다. base 의 mcptt(notify_csp/audit) 차용 leak 도 제거(csc 전용 계약화).
 
 ---
 
