@@ -12,11 +12,10 @@ base OAM(게이트웨이) 뒤의 독립 서비스 모듈. csc(가입자/PTT)와 
                          /api/v1/security/abnormal-sessions
   - verification         /api/v1/verification      (S1~S6 검증 파이프라인)
 
-D5 — 독립 아티팩트 + 공유 라이브러리: 본 엔트리포인트는 oam_app.py 의 role flag 재사용이 아니라
-자기 프로세스/버전을 갖는 독립 모듈이다. 공통 코드(httpsrv·auth·file_store·핸들러)는 별도
-바이너리를 복제하지 않고 **공유 모듈을 import** 한다(현 코드베이스가 oam↔csc 간 csc/src 를
-공유 mount 하는 패턴과 동일 — de-facto OAM-SDK). 물리적 `oam-sdk/` 패키지 추출은 빌드/패키징
-재작업과 함께 후속(P3.x).
+D5 — 독립 아티팩트: 본 엔트리포인트는 oam_app.py 의 role flag 재사용이 아니라 자기 프로세스/
+버전을 갖는 독립 모듈이다. 공통 코드(httpsrv·util·flow_logger·logger·핸들러)는 **oam/src 에서만**
+import 한다(csc_standalone_module.md P4 — csc/src 마운트 폐지). csc 와는 코드 비공유 — 계약
+(HTTP/JWT/DB)으로만 결합. (oam-svc↔oam 간 oam/src 공유는 OAM 패밀리 내부로, 별도 고려.)
 """
 
 import argparse
@@ -39,9 +38,10 @@ def _first_dir(cands):
     return None
 
 
-# ── 공유 라이브러리/핸들러 경로 mount (D5: 바이너리 복제 아님, 모듈 공유) ──
-#   vendor(aiohttp/fastapi/uvicorn/pymysql 등)·csc/src(httpsrv·util·services)·
-#   oam/src(handlers: stats·recording·verification) 를 sys.path 에 올린다.
+# ── 공유 라이브러리/핸들러 경로 mount (csc_standalone_module.md P4) ──
+#   vendor + oam/src(services: flow_logger·logger / handlers: stats·recording·verification /
+#   httpsrv · util) 를 sys.path 에 올린다. **csc/src 마운트 폐지** — oam-svc 가 쓰는 것은 전부
+#   oam/src 에 있다(P3b 에서 oam 자체 보유). csc 와 코드 비공유 — base/oam-svc 는 csc 를 안 본다.
 #   dev = repo sibling 레이아웃, production = 버전단위 install glob 둘 다 지원.
 _repo_root = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..'))
 
@@ -52,14 +52,6 @@ _VENDOR = _first_dir(
 )
 if _VENDOR and _VENDOR not in sys.path:
     sys.path.insert(0, _VENDOR)
-
-_CSC_SRC = _first_dir(
-    [os.path.join(_repo_root, 'csc', 'src')]
-    + sorted(_glob.glob(os.path.join(_repo_root, '..', 'csc', '*', 'csc', 'src')), reverse=True)
-    + sorted(_glob.glob(os.path.join(_repo_root, '..', '..', 'csc', '*', 'csc', 'src')), reverse=True)
-)
-if _CSC_SRC and _CSC_SRC not in sys.path:
-    sys.path.insert(0, _CSC_SRC)
 
 _OAM_SRC = _first_dir(
     [os.path.join(_repo_root, 'oam', 'src')]
@@ -225,11 +217,11 @@ if __name__ == '__main__':
         recording.init(service_log_dir=_service_log_dir, ffmpeg_bin=_ffmpeg_bin,
                        transcode_workers=_tx_workers)
 
-        # SSL — oam-svc/cert 우선, 없으면 csc/cert 공유(dev/동거). loopback 은 평문도 허용.
+        # SSL — oam-svc/cert 우선, 없으면 oam/cert(dev/동거). loopback 은 평문도 허용.
         ssl_keyfile = ssl_certfile = None
         _cert_cands = [os.path.join(_COMPONENT_ROOT, 'cert')]
-        if _CSC_SRC:
-            _cert_cands.append(os.path.normpath(os.path.join(_CSC_SRC, '..', 'cert')))
+        if _OAM_SRC:
+            _cert_cands.append(os.path.normpath(os.path.join(_OAM_SRC, '..', 'cert')))
         for _cert_dir in _cert_cands:
             if os.path.exists(os.path.join(_cert_dir, 'server.key')) and \
                os.path.exists(os.path.join(_cert_dir, 'server.crt')):

@@ -125,8 +125,11 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
   검증: py_compile OK · `sys.path=[oam/src, oam/vendor]`(csc/src 없음) 격리 import 성공
   (services 11 + httpsrv + util + handlers auth/agents/gateway/service_control/stats 전부 해석).
   ⚠️ cmd_pkg 의 csc→oam 복사는 P6 로 (현재 redundant·무해, P5 후 -f 가드 skip → oam 자체본 생존).
-- **P4 — oam-svc 자족화**: oam-svc 가 flow_logger/logger 를 자체 보유(또는 oam/src 에서만) →
-  `oam_svc_app.py` 의 `csc/src` 마운트 제거. oam-svc standalone 검증.
+- **P4 — oam-svc 자족화 ✅ (완료)**: oam-svc 가 쓰는 것(flow_logger·logger·handlers recording/
+  stats/verification·httpsrv·util)은 전부 oam/src 에 있음(P3b) → `oam_svc_app.py` 의 `csc/src`
+  마운트(_CSC_SRC) 제거, cert fallback 을 csc/cert→oam/cert 로, docstring 정정. oam-svc 는
+  oam/src + oam/vendor 만 사용. 검증: py_compile OK · `sys.path=[oam-svc/src, oam/src, oam/vendor]`
+  (csc/src 없음) 격리 import 성공. (oam-svc↔oam 간 oam/src 공유는 OAM 패밀리 내부 — 별도 고려.)
 - **P5 — csc 도메인 축소 (이제 아무도 csc 를 마운트 안 함)**: csc/src/services 에서 비도메인
   모듈(sync_*·drift_sweeper·service_registry·collection_schema·alert_log·flow_logger) 물리 삭제,
   csp_runtime(RETIRED) 정리, `__init__.py` 복원(csc 일반 패키지화). csc/src/services =
