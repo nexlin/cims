@@ -137,9 +137,16 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
   {mcptt, idms_storage, config_cache, file_store, ha_lookup, logger, admin_auth} 7개.
   검증: 삭제 모듈 코드 참조 0(주석/도메인명만) · py_compile OK · csc standalone import OK
   (services 7 + __init__ 일반패키지, handlers admin3/org1).
-- **P6 — 게이트웨이/콘솔/빌드 정리**: `/users/me`(base)↔`/users`CRUD(csc) 라우팅 정합, 가입자 관리
-  UI = 콘솔이 csc API 경유(oam-svc 오케스트레이션), cmd_pkg 의 oam←csc 복사·dual-mount glob·
-  namespace 해킹 제거. 각 모듈 패키지가 자기 것만 동봉.
+- **P6 — 빌드(cmd_pkg) 정리 ✅ (완료)**: cmd_pkg 의 oam staging `_shsrc`(csc→oam httpsrv/util/
+  services 복사) 블록 제거 — oam 은 자족(cmd_sync 가 dist/oam/src 동기화). oam-svc auto-sync 가
+  csc 블록(=oam/src 동기화)도 타도록 + 주석 정정. 각 모듈 패키지가 자기 것만 동봉.
+  검증: bash -n OK · `sync csc oam-svc` 후 dist 레이아웃(dist/oam/src/services=11+httpsrv+util,
+  dist/csc/src/services=7+__init__, csp_runtime 삭제 전파) · **dist 트리 3모듈 자족 import 전부 OK**
+  (csc=csc/src+vendor, oam=oam/src+vendor, oam-svc=oam-svc/src+oam/src+vendor — 모두 csc 비의존).
+  - **라우팅(/users/me↔/users)은 이미 정합**: base 가 `/api/v1/users/me` in-process(D8, oam_app),
+    게이트웨이가 `/api/v1/users/*` → csc 프록시. 정상 경로(게이트웨이)는 P1 영향 없음.
+  - 🔲 **남은 항목(프런트, 비차단)**: 가입자 관리 UI 를 콘솔이 csc API 경유(oam-svc 오케스트레이션)로
+    제공 — 콘솔 프로비저닝 워크벤치 재사용. 코드 결합 아님(별도 프런트 작업).
 
 ## 비목표 / 주의
 

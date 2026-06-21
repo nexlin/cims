@@ -1017,10 +1017,10 @@ cmd_sync() {
         n_changed=$((n_changed+1))
     fi
 
-    # ── oam-svc 독립 모듈 (oam_base_service_split D5) ──
-    #    thin 앱: 자기 src + config + pkg.json 만 동봉. 공유 라이브러리(oam/vendor·csc/src·
-    #    oam/src)는 런타임에 같은 노드의 oam/csc 설치본을 sys.path glob 으로 mount → tarball 에
-    #    복제하지 않음. (그래서 did_csc 도 함께 동기화돼야 dev 에서 import 가능 — pkg auto-sync 참조)
+    # ── oam-svc 독립 모듈 (oam_base_service_split D5; csc_standalone_module.md P4/P6) ──
+    #    thin 앱: 자기 src + config + pkg.json 만 동봉. 공유 라이브러리(oam/vendor·oam/src)는
+    #    런타임에 같은 노드의 oam 설치본을 sys.path glob 으로 mount → tarball 에 복제하지 않음.
+    #    csc/src 는 더 이상 마운트하지 않음(P4) — csc 와 코드 비공유, 계약(HTTP/JWT/DB)만.
     if [[ $did_oamsvc -eq 1 ]]; then
         mkdir -p "$DIST_DIR/oam-svc/src" "$DIST_DIR/oam-svc/config"
         if command -v rsync >/dev/null 2>&1; then
@@ -1376,8 +1376,8 @@ cmd_pkg() {
         for _t in "${targets[@]}"; do
             case "$_t" in
                 csc) _sync_set[csc]=1 ;;   # OAM 분리 Phase 2 — sync csc 가 oam/src 도 함께
-                oam) _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-base = oam(+csc 공유) + console(동봉)
-                oam-svc) _sync_set[oam-svc]=1 ;;  # oam-svc = thin 앱(자기 src 만 tarball). oam/csc 공유코드는 런타임 import → 미동봉
+                oam) _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-base: csc 블록이 oam/src(자체 httpsrv/util/services)도 동기화 + console 동봉 (oam 은 자족 — csc 코드 미동봉)
+                oam-svc) _sync_set[oam-svc]=1; _sync_set[csc]=1 ;;  # oam-svc = thin(자기 src 만 tarball); csc 블록이 oam/src 동기화 → 런타임/dev import 가능
                 agent)   _sync_set[agent]=1 ;;
                 console) _sync_set[console]=1 ;;
                 phone)   _sync_set[phone]=1 ;;
@@ -1497,35 +1497,15 @@ cmd_pkg() {
             warn "skip: $DIST_DIR/$src_sub 없음 (target=$t src_sub=$src_sub)"; continue
         fi
 
-        # ── oam: standalone(부트스트랩) 실행을 위해 csc/src 의 서비스-중립 공유
-        #    라이브러리(httpsrv/util/services 일부)를 staging 에 동봉.
-        #    서비스 종속 모듈(mcptt/idms 등)은 제외 — 상용 1단계(베이스 설치)에
-        #    서비스 코드가 배포되지 않아야 함. dev 환경은 기존대로 csc/src mount.
+        # ── oam: P6 (csc_standalone_module.md) — oam 은 자족(self-contained).
+        #    httpsrv/util/services 를 oam/src 자체 보유(cmd_sync 가 rsync) → csc/src 복사 폐지.
+        #    런타임도 csc/src 마운트 안 함(P3b). 서비스 코드(mcptt/idms 등)는 csc 패키지에만.
         if [[ "$t" == "oam" ]]; then
             stage="$DIST_DIR/.pkgstage.$$.${t}"
             rm -rf "$stage"
             mkdir -p "$stage"
             cp -a "$DIST_DIR/oam" "$stage/oam"
-            local _shsrc="$DIST_DIR/csc/src"
-            [[ -d "$_shsrc" ]] || _shsrc="$SCRIPT_DIR/csc/src"
-            if [[ -d "$_shsrc" ]]; then
-                cp -a "$_shsrc/httpsrv" "$stage/oam/src/httpsrv"
-                cp -a "$_shsrc/util"    "$stage/oam/src/util"
-                mkdir -p "$stage/oam/src/services"
-                local _svc
-                # __init__.py 는 의도적으로 제외 — services 를 PEP420 namespace 패키지로
-                # 유지해야 csc_app.py 가 oam/src(이 subset) + csc/src(mcptt 등 full)을 병합 import.
-                # __init__.py 를 넣으면 oam/src/services 가 일반패키지가 되어 csc/src/services 를
-                # shadow → `services.mcptt` ModuleNotFoundError (handlers 와 동일하게 무-__init__).
-                for _svc in admin_auth.py file_store.py ha_lookup.py                             sync_txn.py drift_sweeper.py service_registry.py                             alert_log.py logger.py flow_logger.py config_cache.py                             sync_dispatch.py collection_schema.py; do
-                    [[ -f "$_shsrc/services/$_svc" ]] && cp -f "$_shsrc/services/$_svc" "$stage/oam/src/services/"
-                done
-                [[ -d "$_shsrc/services/service_descriptors_seed" ]] &&                     cp -a "$_shsrc/services/service_descriptors_seed" "$stage/oam/src/services/"
-                # __pycache__ 제거
-                find "$stage/oam/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-            else
-                warn "oam: csc/src 공유 라이브러리 미발견 — standalone 실행 불가 패키지"
-            fi
+            find "$stage/oam/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
             # oam_base_service_split — console(full) 을 oam-base 패키지에 동봉.
             #   별도 console 모듈 폐기: oam 이 <root>/oam/console/dist 를 직접 서빙
             #   (console_static.resolve 의 번들 후보). base/full 프로파일 빌드 없이 항상 full,
