@@ -188,7 +188,6 @@ export function GroupServiceConfigModal({ open, onClose, groupName,
 
   function switchPkg(pid: number) {
     setSelectedPkg(pid)
-    setSelectedPreset('')
     setTab({ kind: 'scalar' })
     setStatus('')
   }
