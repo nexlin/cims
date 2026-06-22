@@ -636,15 +636,21 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
             try: params = json.loads(params)
             except Exception: params = {}
         dep_id = params.get("deployment_id") if isinstance(params, dict) else None
-        # OAM 분리 Phase 4 fix: 'upgrade' 도 install 처럼 status=stopped 전이.
-        # 누락 시 upgrade 후 status=deploying 으로 stuck → 다음 job 안 만들어짐.
+        # status 전이:
+        #   install      → stopped (파일만 설치, 기동 안 함 → 별도 start 필요)
+        #   upgrade      → running (agent 의 upgrade = install + restart → 서비스 기동됨;
+        #                  cims_agent.execute_job 의 jt=="upgrade" 참조. 이 훅은 succeeded
+        #                  (=install·restart 모두 rc0) 일 때만 도달하므로 서비스는 떠 있음.
+        #                  과거 upgrade=install-only 시절엔 stopped 였으나 동작 변경에 맞춰 교정 —
+        #                  이게 누락되면 upgrade 후에도 status=stopped 로 남아 콘솔 오표시.)
+        #   start/restart → running
         if dep_id and jt in ("install", "upgrade", "start", "restart"):
             new_install_path = None
             if jt in ("install", "upgrade") and result_stdout:
                 import re as _re
                 m = _re.search(r"at\s+(\S+?)\s+\(", result_stdout)
                 if m: new_install_path = m.group(1)
-            new_status = "running" if jt in ("start","restart") else "stopped"
+            new_status = "running" if jt in ("start", "restart", "upgrade") else "stopped"
             patches = {'status': new_status, 'last_job_id': job_id}
             from datetime import datetime as _dt
             now_iso = _dt.now().isoformat(timespec='seconds')
