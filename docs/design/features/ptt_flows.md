@@ -45,9 +45,9 @@
 | # | 케이스 | 설명 |
 |---|--------|------|
 | B1 | 단말 SIP 등록 | REGISTER → Digest 인증 (호에 무영향 — 자동초대 없음) |
-| B1a | affiliation (PUBLISH) | 그룹 URI PUBLISH 로 affiliate → `ptt_affiliations` |
+| B1a | affiliation (PUBLISH) | 그룹 URI PUBLISH 로 affiliate → `ptt_affiliations` (※규격 전제: 인증·서비스인가·그룹구성 선행 — B1a 절) |
 | B1b | on-demand 그룹콜 개시 | 발신 UE 키업(그룹 INVITE) → fan-out (prearranged/broadcast) |
-| B2 | GMS/CMS 구독 + XCAP GET | xcap-diff 구독 → NOTIFY → CSC-1 토큰 → 문서 GET |
+| B2 | GMS/CMS 구독 + XCAP GET | xcap-diff 구독 → NOTIFY → CSC-1 토큰 → 문서 GET (※규격상 토큰=서비스 진입 첫 단계) |
 | B3 | 그룹 세션 수명 | on-demand(키업 시 생성/해제) vs chat(상시) |
 | B4 | 단말 등록 해제 | REGISTER Expires=0 → ClearUserCall + de-affiliation |
 
@@ -235,6 +235,33 @@ UE                      CSP (CCscfModule)
   │ ◄── 200 OK ──────── │  SIP-ETag (RFC 3903)
   │                      │  (active prearranged/chat 세션이면 late-entry InviteMember)
 ```
+
+> **규격 전제조건·순서 (3GPP) — affiliation 은 "인증 → 서비스인가 → 구성취득" 이후 단계.**
+> TS 33.180 §5 / TS 23.379 의 정규 서비스 진입 순서는:
+> 1. **MCPTT 사용자 인증** — CSC-1 OIDC/PKCE → `access_token` (서비스 진입의 첫 자격증명)
+> 2. **MCPTT service authorization** — SIP 로 access_token 제시(토큰 기반 서비스 인가)
+> 3. **구성 취득** — CMS user-profile / **GMS group documents** (affiliate 가능 그룹 목록의 근거)
+> 4. **affiliation (PUBLISH)** ← *본 절*
+> 5. 그룹콜(키업 INVITE)
+>
+> 즉 규격상 **토큰·그룹구성(B2)이 affiliation(B1a) 보다 앞**선다. 사용자는 자신이 멤버인
+> 그룹에만 affiliate 할 수 있고(TS 24.481/24.379), 그 멤버십·그룹 URI 는 GMS 문서에서 얻는다.
+> 따라서 "토큰 없음/구성 없음 상태의 affiliation" 은 규격상 성립하지 않는다.
+>
+> **CIMS 구현 차이 (의도된 단순화 — 위 다이어그램이 규격 순서와 다른 이유):**
+> CIMS 는 SIP 계층을 **Digest MD5**(B1)로 인증하고, OIDC `access_token` 은 **UE↔CSC XCAP
+> HTTP 접근 전용**(B2)으로만 사용한다. affiliation 인가는 **SIP 신원 + DB 멤버십
+> (`ptt_group_members`)** 으로 판정하므로 PUBLISH 에 OIDC 토큰이 필요 없다. 그 결과 CIMS 의
+> 실제 순서는 `B1(REGISTER/Digest) → B1a(affiliation) → B2(토큰+XCAP)` 로, 규격의
+> "토큰·구성 우선" 순서를 단순화한 것이다(토큰은 유일 소비처인 XCAP GET 직전에 lazy 취득).
+> 규격 완전 정합을 목표로 한다면 ①토큰을 서비스 진입 시점에 선취득하고 ②그룹구성(GMS)을
+> 받은 뒤 affiliation 하도록 순서를 재배치해야 한다.
+>
+> ⚠️ **SIP 세부 확인 필요:** 위 `Event: poc-settings` 는 OMA PoC 레거시 값으로 보인다.
+> TS 24.379 §9 affiliation 은 (a) 사용자 **자신**의 affiliation status change 와 (b) 권한자에
+> 의한 affiliation-command(`application/vnd.3gpp.mcptt-affiliation-command+xml`)가 구분되므로,
+> `Event` 헤더·본문 content-type 을 TS 24.379 §9.2.1 대조로 확정할 것(현재 값은 미검증).
+
 > 구 SUBSCRIBE-presence affiliation 경로는 호환을 위해 유지(추가형).
 
 ### B1b. on-demand 그룹콜 개시 (prearranged / broadcast — TS 24.379 §10.1/§10.3)
@@ -287,6 +314,13 @@ UE                      CSP                          CSC McpttServer(HTTPS :4430
   │ ◄── 304 Not Modified ─────────────────────────────────────────────────────  │
 ```
 > 무토큰 GET → 401. xcap-root 구 `http://{CSP}:4420`(라우트 없는 Admin 서버 오지정)을 `https://{CSC}:4430`(McpttServer)로 교정. cspsim 은 `RecvResponse`/NOTIFY 에서 floor·문서 경로를 학습해 동일 흐름 수행.
+>
+> **규격 순서 주의:** 3GPP(TS 33.180 §5)에서 CSC-1 토큰(/idms/*)은 **서비스 진입의 첫 단계**로,
+> affiliation(B1a)·구성취득보다 **앞서** 취득되어 SIP service authorization 의 자격증명으로도 쓰인다.
+> CIMS 는 SIP 를 Digest 로 인증하고 토큰을 XCAP 전용으로만 쓰므로, 위처럼 NOTIFY 수신 후
+> XCAP GET 직전에 **lazy 취득**한다 — PKCE 핸드셰이크 자체(authreq`code_challenge`→code→
+> tokenreq`code_verifier`→token)는 RFC 7636/OIDC 규격에 정합하나, 그 **취득 시점**은 규격의
+> token-first 순서를 단순화한 것이다(상세: B1a 절 "규격 전제조건·순서").
 
 ### B3. 그룹 세션 수명 (on-demand vs chat)
 
