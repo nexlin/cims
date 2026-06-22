@@ -15,7 +15,7 @@ CIMS is a 3-tier PTT/VoIP server: **CSP** (SIP signaling), **CMP** (RTP media), 
 - `cspsim/` — C++ endpoint simulator
 - `cwrtc/` — WebRTC bridge (ws://127.0.0.1:8080)
 - `csc/bin/csc_pihttp/` — Python HTTP API server (admin + MCPTT)
-- `cims-console/` — React admin Web UI (port 3001, targets admin API 4420)
+- `ems/core/console/` — React admin Web UI (port 3001, targets admin API 4420)
 - `cims-phone/` — React MCPTT soft-phone UE UI (port 3000, targets MCPTT API 4430)
 
 ## CSP Module Architecture (completed 2026-04-02)

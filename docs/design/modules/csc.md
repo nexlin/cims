@@ -2,7 +2,7 @@
 
 > ⚠️ **현행화 (2026-06-22)** — CSC 완전 독립 모듈화([features/csc_standalone_module.md](../features/csc_standalone_module.md), P1~P6) 로
 > 본 문서의 일부 구조 서술이 갱신됨. 현행 사실:
-> - **csc 는 oam/src 를 마운트하지 않는다**(자족 모듈). 결합은 계약(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB)만.
+> - **csc 는 ems/core/oam/src 를 마운트하지 않는다**(자족 모듈). 결합은 계약(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB)만.
 > - **`csp_runtime.py` 삭제**(RETIRED). **`services/flow_logger.py` 는 csc 에서 제거 → oam-svc 소유**(통화이력/Flow API).
 >   HA fan-out 인프라(sync_dispatch·sync_txn·drift_sweeper·service_registry·collection_schema·alert_log)도 csc 에서 제거(oam 자체 보유).
 > - **현행 `csc/src/services/` = mcptt · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth** (7개) + `__init__.py`.
@@ -732,7 +732,7 @@ CREATE TABLE refresh_tokens (
 
 - **프레임워크:** React + TypeScript
 - **빌드:** Vite
-- **위치:** `/cims-console/`
+- **위치:** `/ems/core/console/`
 
 ### 7.2 주요 페이지
 

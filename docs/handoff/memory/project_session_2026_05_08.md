@@ -31,8 +31,8 @@ originSessionId: 28af9309-57bc-4b49-ba8f-6a19c4447828
 - `verify/lib/live_store.py` (신규) — `verify_runs/live/<id>/{meta.json, stdout.log}` 관리
 - `tests/cims_verify.py` — `_TeeStream` + `cmd_run` 시작/종료에 live_store
 - `csc/src/handlers/verification.py` — `_start_job`/`_watch_job` live_store 사용, `/api/v1/verification/active` 엔드포인트, `/jobs/<id>` live_store fallback
-- `cims-console/src/api/verification.ts` — `getActive` + `ActiveRunSummary`
-- `cims-console/src/pages/VerificationV2Page.tsx` — mount 시 active 자동 attach
+- `ems/core/console/src/api/verification.ts` — `getActive` + `ActiveRunSummary`
+- `ems/core/console/src/pages/VerificationV2Page.tsx` — mount 시 active 자동 attach
 
 **효과**: 다른 페이지로 이동 → 복귀 시 진행 중 회차 자동 재부착. CLI 직접 실행 회차도 동일 시야로 표시.
 

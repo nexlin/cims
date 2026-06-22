@@ -190,7 +190,7 @@ CIMS agent/HA 모델 밖의 **외부 시스템**(외부 DB / 모니터링 / 스�
 - 저장: 신규 DB 테이블 없이 file_store 컬렉션(domain `external_systems`), 1레코드=1json.
 - 레코드: `{name, type(db|monitoring|storage|auth|other), endpoints:[{host,port,label?}], probe:{mode,host,port,timeout}, tags[], enabled, description}`.
 - Probe: `tcp`(구현, `socket.create_connection` → up/down + latency_ms) / `http`·`icmp`(예약→unknown) / `none`. host/port 미지정 시 `endpoints[0]` fallback.
-- API: `oam/src/handlers/external_systems.py` — CRUD + `GET /status`(enabled 전체 동시 probe) + `POST /{id}/probe`(즉시). 마운트 `/api/v1/external-systems`.
+- API: `ems/core/oam/src/handlers/external_systems.py` — CRUD + `GET /status`(enabled 전체 동시 probe) + `POST /{id}/probe`(즉시). 마운트 `/api/v1/external-systems`.
 - 콘솔: `ExternalSystemsPage`(테이블 + Modal CRUD), 시스템 영역 nav leaf.
 
 ---

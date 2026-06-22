@@ -75,7 +75,7 @@ e0c44a7 시점의 `StartServer failed` 는 **8080 충돌이 아닌** SIP UA UDP 
 **현 한계**: `cims.sh start tb-console` 이 dist 트리에서는 실행 불가. 소스 트리에서만.
 
 **해결 옵션** (실측 진입 전 불필요):
-- (a) `cims-console/nginx-tb.conf` 템플릿 추가 + `start tb-console` dist 모드 분기
+- (a) `ems/core/console/nginx-tb.conf` 템플릿 추가 + `start tb-console` dist 모드 분기
 - (b) vite preview 모드로 dist 서빙 + proxy 검증 (가능 여부 확인 필요)
 - (c) 현 설계 유지 (TB = 개발/검증 환경 전용이라 명시)
 
@@ -124,6 +124,6 @@ docs/VERIFICATION_PROCESS.md 부록 A 의 "TB-Console 빌드 분기: `VITE_ADMIN
 
 **해결** (cims.sh):
 - start_console / start_phone: `sleep 2` 후 `_pid_by_port "$port:tcp"` 로 실제 listener PID 갱신
-- stop_console / stop_phone 신규: stop_one + 양 모드 포트(`vite.*cims-console`/`serve dist -l 8080`) kill_stray
+- stop_console / stop_phone 신규: stop_one + 양 모드 포트(`vite.*ems/core/console`/`serve dist -l 8080`) kill_stray
 - _stop_one 디스패처에 console/phone case 추가
 - status_one: console 의 경우 보조 포트(Dev 3001 ↔ Test 8080) 도 확인 → orphan 시 "실행 중(stray)" 표시

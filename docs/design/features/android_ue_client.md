@@ -42,13 +42,13 @@
 
 ### 1.3 "VoLTE" 정의(중요)
 
-본 문서의 "VoLTE"는 통신사 무선망 IMS 연동이 아니라, **CSP를 향한 SIP 소프트폰**을 의미한다(정본: [01_UE_Interface_Guide.md](../../../cims-console/public/docs/01_UE_Interface_Guide.md) §2). 3자 앱이 단말 IMS 스택을 직접 사용하는 캐리어 VoLTE는 범위 밖이다.
+본 문서의 "VoLTE"는 통신사 무선망 IMS 연동이 아니라, **CSP를 향한 SIP 소프트폰**을 의미한다(정본: [01_UE_Interface_Guide.md](../../../ems/core/console/public/docs/01_UE_Interface_Guide.md) §2). 3자 앱이 단말 IMS 스택을 직접 사용하는 캐리어 VoLTE는 범위 밖이다.
 
 ### 1.4 참조
 
 | 문서 | 내용 |
 |---|---|
-| [01_UE_Interface_Guide.md](../../../cims-console/public/docs/01_UE_Interface_Guide.md) | **정본 UE 연동 규격** (메시지/SDP/floor 패킷 hex/CSC) |
+| [01_UE_Interface_Guide.md](../../../ems/core/console/public/docs/01_UE_Interface_Guide.md) | **정본 UE 연동 규격** (메시지/SDP/floor 패킷 hex/CSC) |
 | [volte_flows.md](volte_flows.md) | VoLTE 케이스·메시지 흐름 |
 | [ptt_flows.md](ptt_flows.md) | PTT 케이스·메시지 흐름(on-demand/affiliation/floor/broadcast) |
 | [mcptt_api.md](../../api/mcptt_api.md) | CSC IdMS/GMS/CMS/KMS API |
@@ -126,7 +126,7 @@ PJSIP 미디어 파이프라인은 **[RTP/RTCP]→[지터버퍼]→[AEC]→[conf
 
 ### 3.1 코덱 파라미터(서버 정합)
 
-- 음성: `AMR-WB/16000/1`, SDP fmtp **`octet-align=1; mode-set=0,1,2`** (서버 200 OK와 일치, [01_UE_Interface_Guide.md](../../../cims-console/public/docs/01_UE_Interface_Guide.md) §2.2). PT=99.
+- 음성: `AMR-WB/16000/1`, SDP fmtp **`octet-align=1; mode-set=0,1,2`** (서버 200 OK와 일치, [01_UE_Interface_Guide.md](../../../ems/core/console/public/docs/01_UE_Interface_Guide.md) §2.2). PT=99.
 - 영상: `H264/90000`, `profile-level-id` 서버 협상값 추종, `packetization-mode=1`.
 - 코덱 우선순위: AMR-WB 최상위, 그 외(opus/PCMU/PCMA)는 호환용 하위.
 

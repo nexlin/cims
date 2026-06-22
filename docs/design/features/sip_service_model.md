@@ -403,7 +403,7 @@ AccessServices:
 
 | 파일 | 역할 |
 |------|------|
-| `cims-console/src/components/module/ModuleConfigEditor.tsx` | 9개 탭 렌더, tag filter chip, ref 필드 dropdown |
+| `ems/core/console/src/components/module/ModuleConfigEditor.tsx` | 9개 탭 렌더, tag filter chip, ref 필드 dropdown |
 
 ### 문서
 

@@ -9,7 +9,7 @@ metadata:
 
 ## 결과 (2026-05-12)
 
-`cims-console/src/pages/HaServicesPage.tsx` — 서버 등록 + HA 구성 + 모듈 설치를 한 페이지에서 보는 **mock-up prototype**. 실제 API 호출 없음 (MOCK_NETWORK_IFACES + INITIAL_SERVICES). **10 commits push (origin/main fe5d49b)**.
+`ems/core/console/src/pages/HaServicesPage.tsx` — 서버 등록 + HA 구성 + 모듈 설치를 한 페이지에서 보는 **mock-up prototype**. 실제 API 호출 없음 (MOCK_NETWORK_IFACES + INITIAL_SERVICES). **10 commits push (origin/main fe5d49b)**.
 
 진입: `http://<console>/deploy/services` ("서버 + HA" 메뉴, deploy 섹션 최상단). 기존 `/deploy/servers`, `/deploy/ha-groups` 는 "(구)" 표시로 유지.
 
@@ -150,10 +150,10 @@ for (const srv of servers) {
 ## 핵심 파일
 
 ### 신규
-- `cims-console/src/pages/HaServicesPage.tsx` — ~1100줄, 단일 페이지에 모든 컴포넌트 (서비스 row + ServiceIpPanel + VipPanel + 패키지 grid)
+- `ems/core/console/src/pages/HaServicesPage.tsx` — ~1100줄, 단일 페이지에 모든 컴포넌트 (서비스 row + ServiceIpPanel + VipPanel + 패키지 grid)
 
 ### 수정
-- `cims-console/src/routes.tsx` — `/deploy/services` route 추가 (최상단, "서버 + HA"). 기존 routes 는 "(구)" 라벨
+- `ems/core/console/src/routes.tsx` — `/deploy/services` route 추가 (최상단, "서버 + HA"). 기존 routes 는 "(구)" 라벨
 
 ## Mock data 가정 (실제 wiring 시 교체 대상)
 
@@ -164,7 +164,7 @@ for (const srv of servers) {
 
 ## 검증
 
-- typecheck PASS (`npx tsc --noEmit -p cims-console`)
+- typecheck PASS (`npx tsc --noEmit -p ems/core/console`)
 - LIVE pipeline-full **38/PASS 34/FAIL 0/SKIP 4** — 회기능 무영향 (Console only, backend 무변경)
 - 브라우저 click-through: tree expand, IP/용도 편집, [적용]/[초기화], VIP 용도 선택 시 멤버 iface 자동 채움 확인
 

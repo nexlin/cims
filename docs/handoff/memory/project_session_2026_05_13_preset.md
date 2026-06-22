@@ -16,8 +16,8 @@ metadata:
 ## 변경 파일
 
 ```
-cims-console/src/api/deployment.ts                          — ConfigTemplatePreset 타입 신설
-cims-console/src/components/module/ModuleConfigModal.tsx    — applyPreset() + PresetBar UI
+ems/core/console/src/api/deployment.ts                          — ConfigTemplatePreset 타입 신설
+ems/core/console/src/components/module/ModuleConfigModal.tsx    — applyPreset() + PresetBar UI
 csp/config/config_template.json                              — 3 preset
 cmp/config/config_template.json                              — 3 preset
 csc/config/config_template.json                              — 3 preset
@@ -63,7 +63,7 @@ interface ConfigTemplatePreset {
 - `npx tsc --noEmit` — pass
 - `npx eslint` — pass
 - `npm run build` — pass (vite build 246ms, 513KB → 143KB gzip)
-- dist sync — `cp` × 3 templates + `cp -r cims-console/dist/. build/dist/console/dist/`
+- dist sync — `cp` × 3 templates + `cp -r ems/core/console/dist/. build/dist/console/dist/`
 
 ## 백엔드 (CSC) 무변경
 

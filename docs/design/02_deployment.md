@@ -110,7 +110,7 @@ cims-bootstrap/
   메뉴/위젯은 번들에서 제외, DCE). 서비스에 필요한 기본 메뉴·위젯(대시보드/
   구성/성능/기록 등)은 3·4단계에서 **풀 프로파일 console 패키지**(동봉본보다
   높은 버전 필수 — 동일 버전은 시드 멱등 skip)로 업데이트 시 나타난다.
-  `cims.sh installer` 가 base 빌드(`cims-console/dist-base`)를 자체 수행해
+  `cims.sh installer` 가 base 빌드(`ems/core/console/dist-base`)를 자체 수행해
   풀 콘솔 tarball 의 dist 만 교체·동봉 (`meta.json profile=base`).
 - **메뉴 편집** (콘솔 사이드바, admin): ① 영역(운용/관리 그룹핑) 라벨 변경·
   커스텀 영역 추가/삭제 ② 섹션 순서/라벨/숨김/영역 이동 — 단 **시스템/릴리스

@@ -58,7 +58,7 @@ csc_app.py (별도 프로세스, 4421 admin + 4430 mcptt/XCAP)  ← 이미 독�
 코드 근거:
 - 라우팅: `csc/src/httpsrv/controller.py:158-175` — 등록 base_path 중 **최장 일치** 디스패치.
   → 세그먼트 prefix 기반 게이트웨이가 추가 프레임워크 없이 성립.
-- 핸들러 등록: `oam/src/oam_app.py:384~` `add_dynamic_rules([(base_path, fn, kwargs)])`.
+- 핸들러 등록: `ems/core/oam/src/oam_app.py:384~` `add_dynamic_rules([(base_path, fn, kwargs)])`.
 - **조건부 로딩 선례**: `oam_app.py:118-128` — csc 측 `handlers.admin`/`org` 를 try/except 선택 로드,
   미설치 시 graceful. (D3 의 게이트웨이 프록시로 정식화할 하이브리드.)
 - 감독: `agent/lib/lifecycle.sh:340-366` `start_oam`(+`kill_stray`), `agent/cims_agent.py:1675~`
@@ -315,7 +315,7 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 | **P0** ✅ | 핸들러 BASE/SERVICE 그룹화 + `--role {base\|all}` 플래그(기본 `all`). stats 함수 단위 분리(`handle_stats_service`/`/api/v1/stats/service`). **동작 0 변경**(라우트 테이블 diff: `all`=현행 + `/api/v1/stats/service` 전용 핸들러만 추가, 핸들러 선택 무변경; `base`=서비스 라우트 부재). `oam_app.py`·`handlers/stats.py`. | 낮음 |
 | **P1** ✅ | 게이트웨이(`handlers/gateway.py`: file_store `control/gateway_routes` 라우트 테이블 + aiohttp 프록시[method/body/query/header 화이트리스트 passthrough·ETag/304·Content-Disposition 보존·RFC8594 Deprecation/Sunset·loopback 업스트림 강제 I1] + self-register API `/api/v1/gateway/routes`) + `common.json`/`base.json` 분리(`load_config` 비파괴 fallback, `.sample` 동봉). `--role base` 에서만 프록시 마운트(all 은 in-process). 기본은 여전히 단일프로세스(`all`). | 낮음 |
 | **P2** ✅ | csc 가입자 API in-process import → **게이트웨이 프록시로 전환**(D3). `--role base` 에서 D8 `/me` 분리(base 가 `/api/v1/users/me` 직접, 나머지 `/users/*`·`/users/import`·`/ptt/groups`·`/organizations` 는 csc 프록시) + 라우트 시드를 csc 실경로(admin 4421/TCP)로 정정 + loopback-https 업스트림 TLS 검증 스킵(self-signed). **dev 1노드 E2E PASS**(격리포트 24419/24421, 라이브 DB: 로그인→/me=base[`builtin:true`]·/users·/users/2·/organizations=csc 프록시 200, gateway health 3 route alive). ⚠️분리 배포는 모듈간 JwtSecret 통일 필수(common.json §5; 현 dist 는 oam≠csc 시크릿). all 모드는 in-process 유지(production 무변경). | 중 |
-| **P3** ✅ | svc-mgmt 독립 모듈 `svc-mgmt/src/svc_mgmt_app.py`(stats/service·recording·flow·verification, loopback 4480, `--preflight`, common.json+services/svc-mgmt.json 로드) + 게이트웨이 svc-mgmt 라우트 시드 + `services/svc-mgmt.json.sample` + agent `lifecycle.sh start_svc_mgmt/stop_svc_mgmt`(dormant: `all` 미포함, 명시 기동만, kill_stray 고유 절대경로 매칭). **dev E2E PASS**(격리 24419/24480: /stats/health=base-local·/stats/service·/verification·/recordings=svc-mgmt 프록시 200, longest-match /stats vs /stats/service 공존). ⚠️**공유 OAM-SDK = 물리적 `oam-sdk/` 패키지 추출은 후속(P3.x)**: 현재는 svc_mgmt_app.py 가 기존 공유 모듈(csc/src httpsrv·services + oam/src handlers)을 sys.path import(oam↔csc 가 csc/src 공유하던 패턴과 동일 = de-facto SDK). 물리 추출은 빌드/패키징 재작업과 함께. | 중 |
+| **P3** ✅ | svc-mgmt 독립 모듈 `svc-mgmt/src/svc_mgmt_app.py`(stats/service·recording·flow·verification, loopback 4480, `--preflight`, common.json+services/svc-mgmt.json 로드) + 게이트웨이 svc-mgmt 라우트 시드 + `services/svc-mgmt.json.sample` + agent `lifecycle.sh start_svc_mgmt/stop_svc_mgmt`(dormant: `all` 미포함, 명시 기동만, kill_stray 고유 절대경로 매칭). **dev E2E PASS**(격리 24419/24480: /stats/health=base-local·/stats/service·/verification·/recordings=svc-mgmt 프록시 200, longest-match /stats vs /stats/service 공존). ⚠️**공유 OAM-SDK = 물리적 `oam-sdk/` 패키지 추출은 후속(P3.x)**: 현재는 svc_mgmt_app.py 가 기존 공유 모듈(csc/src httpsrv·services + ems/core/oam/src handlers)을 sys.path import(oam↔csc 가 csc/src 공유하던 패턴과 동일 = de-facto SDK). 물리 추출은 빌드/패키징 재작업과 함께. | 중 |
 | **P4** ✅ | 콘솔 D1. **백엔드** `handlers/console_layouts.py`: `GET /console/catalog`(RBAC 필터 + 서비스 가용 annotate D7) · `GET /console/profiles`(role별 템플릿) · `GET/PUT/DELETE /console/layouts/me`(override↔프로파일, **PUT 서버측 RBAC 강제**=권한밖 403·미존재 400). 도메인 `console_user_layouts`(console, base 소유). 설치판정=게이트웨이 라우트∪in-process. **프런트** `api/consoleLayouts.ts` + `pages/MyLayoutPage.tsx`(`/dashboard/my-layout` = 프로파일 picker + 위젯 add/remove/↑↓ + 저장/되돌리기/초기화 + 카탈로그 가용성 배지·미설치 disabled+안내[503 graceful] + override/profile 표시). **dev E2E PASS**(admin/monitor 카탈로그 RBAC·svc 가용 flag·layouts CRUD·403/400/401) + `tsc -b`·`vite build`·eslint PASS(브라우저 실측은 미수행; reorder 는 ↑↓ — dnd 고도화 여지). | 중 |
 | **P5** 🔄 | ctrl01 클린 부트스트랩(base 4419 `--role base`) + **csc 콘솔 배포·라이브 동작** + **콘솔 배포/설정 UX 정리**(§14). production(4노드) 적용·base/full 콘솔 단계 정합·§9 장애격리 검증은 잔여. | 중 |
 
@@ -325,18 +325,18 @@ P0~P1 동안 운영은 단일 프로세스 그대로.
 
 ## 12. 영향 파일 (예상)
 
-- `oam/src/oam_app.py` — `--role {base|all}` 분기, 핸들러 그룹화, 게이트웨이 등록
+- `ems/core/oam/src/oam_app.py` — `--role {base|all}` 분기, 핸들러 그룹화, 게이트웨이 등록
 - **`oam-sdk/`** *(신규, D5)* — 공유 라이브러리(httpsrv·auth·file_store·핸들러 스캐폴딩) 추출
 - **`svc-mgmt/src/svc_mgmt_app.py`** *(신규, D5)* — svc-mgmt 독립 엔트리포인트(OAM-SDK 의존)
-- `oam/src/handlers/gateway.py` *(신규)* — 라우트 테이블 + 프록시 + self-register API + Sunset alias
-- `oam/src/handlers/console_layouts.py` *(신규)* — 사용자별 레이아웃 CRUD (D1)
-- `oam/src/handlers/stats.py` — base(health)/svc-mgmt(KPI) HANDLER_LIST 분리
-- `oam/config/` — `common.json`/`base.json`/`services/*.json` 도입(+`oam.json` fallback)
+- `ems/core/oam/src/handlers/gateway.py` *(신규)* — 라우트 테이블 + 프록시 + self-register API + Sunset alias
+- `ems/core/oam/src/handlers/console_layouts.py` *(신규)* — 사용자별 레이아웃 CRUD (D1)
+- `ems/core/oam/src/handlers/stats.py` — base(health)/svc-mgmt(KPI) HANDLER_LIST 분리
+- `ems/core/oam/config/` — `common.json`/`base.json`/`services/*.json` 도입(+`oam.json` fallback)
 - `agent/lib/lifecycle.sh` — `start_base_oam`/`start_svc_mgmt`, `kill_stray` role 매칭
 - `agent/cims_agent.py` — `supervised.json` 다중 모듈, watchdog/preflight
 - `csc/src/csc_app.py` — 가입자/PTT 관리 API self-register(게이트웨이 등록 메타)
 - `csc/src/httpsrv/client.py` — 스트리밍 passthrough 보강(필요 시)
-- 콘솔(`cims-console/src/...`) — 위젯 카탈로그·레이아웃 store·프로파일/개인화 UI·503 graceful
+- 콘솔(`ems/core/console/src/...`) — 위젯 카탈로그·레이아웃 store·프로파일/개인화 UI·503 graceful
 - 문서 — 본 문서 + CLAUDE.md OAM 절 갱신
 
 ---
@@ -424,4 +424,4 @@ P0~P1 동안 운영은 단일 프로세스 그대로.
 ### 14.5 부수 버그 fix
 - 패키지 업로드 핸들러 `_dt(val)` 가 file_store 의 ISO **문자열**에 무조건 `.isoformat()` 호출 →
   동일 버전 재업로드(409 conflict 응답 직렬화)에서 500. `hasattr(val,"isoformat")` 가드로 정정
-  (`oam/src/handlers/agents.py`). ⚠️배포된 live oam 0.1.0 엔 다음 재기동/재배포 때 반영.
+  (`ems/core/oam/src/handlers/agents.py`). ⚠️배포된 live oam 0.1.0 엔 다음 재기동/재배포 때 반영.

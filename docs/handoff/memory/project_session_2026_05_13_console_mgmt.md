@@ -30,14 +30,14 @@ metadata:
 신규 파일:
 - `csc/src/services/alert_log.py` — `record_event` / `read_recent` / `list_types`. 저장 경로 `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl` (한 줄당 open/close 이벤트).
 - `csc/src/handlers/alerts.py` — `GET /api/v1/alerts?days=&type=&limit=` + `GET /api/v1/alerts/types`. `CIMS_ALERTS_HANDLER_LIST`.
-- `cims-console/src/api/alerts.ts` — TypeScript API 클라이언트.
-- `cims-console/src/pages/AlertsPage.tsx` — open/close 페어링 (같은 type 의 가장 가까운 후속 close 매칭) → 발생/해제/지속시간 표. 기간 필터 (오늘/7일/30일/90일) + type 필터 + "해제 포함" 토글.
+- `ems/core/console/src/api/alerts.ts` — TypeScript API 클라이언트.
+- `ems/core/console/src/pages/AlertsPage.tsx` — open/close 페어링 (같은 type 의 가장 가까운 후속 close 매칭) → 발생/해제/지속시간 표. 기간 필터 (오늘/7일/30일/90일) + type 필터 + "해제 포함" 토글.
 
 수정:
 - `csc/src/csc_app.py` — `_sweep_alerts()` 추가. 메인 루프에서 `AlertSweepSec` (기본 30) 마다 호출. 상태 전이만 기록 (`csp_down`/`cmp_down`/`db_down`/`rtp_high`). `AlertRtpThresholdPct` 기본 80%. `_alert_open` in-memory dict 으로 open 추적.
-- `cims-console/src/routes.tsx` — `/dashboard/alerts` 라우트 추가 (대시보드 섹션 2번째 탭).
-- `cims-console/src/pages/DashboardPage.tsx` — 알람 패널에 "이력 보기 →" 링크 추가.
-- `cims-console/src/index.css` — `.badge--yellow` 추가 (warning severity 표시용).
+- `ems/core/console/src/routes.tsx` — `/dashboard/alerts` 라우트 추가 (대시보드 섹션 2번째 탭).
+- `ems/core/console/src/pages/DashboardPage.tsx` — 알람 패널에 "이력 보기 →" 링크 추가.
+- `ems/core/console/src/index.css` — `.badge--yellow` 추가 (warning severity 표시용).
 
 **제약**: sweeper 가 in-memory 로 open 상태를 들고 있어서 CSC 재시작 시 open 알람이 한 번 더 잡힐 수 있음 (re-emit). resolved 가 누적되는 부작용만 있고 데이터 무결성 영향 없음.
 

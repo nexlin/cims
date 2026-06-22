@@ -15,9 +15,9 @@ OAM base/service 분리(P0~P5)로 csc 는 게이트웨이 뒤 독립 서비스 �
 
 1. **`services` 패키지 충돌** — file_store·admin_auth·ha_lookup 등 인프라 모듈이
    csc/src/services 에 물리적으로 살고, 빌드 시 oam 패키지로 복사된다. csc 프로세스가
-   oam/src 를 마운트하면 두 `services` 가 충돌 → `__init__.py` 삭제·`sys.path.append`·
+   ems/core/oam/src 를 마운트하면 두 `services` 가 충돌 → `__init__.py` 삭제·`sys.path.append`·
    namespace 병합 같은 **뒷수습 해킹**으로 막아 왔다.
-2. **도메인 뒤엉킴** — csc 가 oam/src 를 마운트해 oam 의 `handlers.auth`(로그인/토큰발급),
+2. **도메인 뒤엉킴** — csc 가 ems/core/oam/src 를 마운트해 oam 의 `handlers.auth`(로그인/토큰발급),
    `handlers.users`(본인 프로파일/`/users/me`)를 **자기 프로세스에서 빌려 서빙**한다.
 3. **개념 혼동** — oam 의 "사용자"와 csc 의 "가입자"는 **서로 다른 것**인데 `/api/v1/users`
    접두사를 공유해 뒤섞였다.
@@ -35,7 +35,7 @@ oam·oam-svc·csc 는 **서로 독립적으로 버전업·배포**된다. 이들
 분석 결과 실제 구조는 "oam 이 csc 로 복사"가 아니라 **csc/src 가 공유 라이브러리의 정본이고
 base(oam_app.py)와 oam-svc(oam_svc_app.py)가 `sys.path` 에 `csc/src` 를 *마운트*** 한다
 (cmd_pkg 의 oam←csc 복사는 패키징용 2차 수단). 즉 csc 는 서비스 모듈이면서 동시에
-**de-facto 공유 SDK 호스트**다. oam/src/services 는 repo 에서 사실상 비어 있고 csc/src/services 를
+**de-facto 공유 SDK 호스트**다. ems/core/oam/src/services 는 repo 에서 사실상 비어 있고 csc/src/services 를
 빌려 쓴다.
 
 따라서 "csc 완전 분리" = **base·oam-svc 가 csc/src 마운트를 끊는 것**이 핵심이며, 순서는
@@ -61,7 +61,7 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
 
 ## 원칙
 
-1. **공유 런타임 모듈 금지.** csc 는 oam/src 를 마운트하지 않는다. 각 모듈은 자기에게
+1. **공유 런타임 모듈 금지.** csc 는 ems/core/oam/src 를 마운트하지 않는다. 각 모듈은 자기에게
    필요한 것을 **자체 보유(self-contained)** 하고 독립 버전으로 발산할 수 있다.
 2. **계약 기반 결합만.** base ↔ csc 사이는:
    - **HTTP** — base 게이트웨이가 `/api/v1/...subscriber...` 를 csc 로 프록시.
@@ -97,7 +97,7 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
 - 자체 vendor: csc 가 쓰는 최소 유틸(file_store-for-idms/config, logger) — **csc 자기 버전**
 
 **제거 (csc 에서):**
-- oam/src 마운트 (`_OAM_SRC` glob·`sys.path.append`) — 전체 삭제
+- ems/core/oam/src 마운트 (`_OAM_SRC` glob·`sys.path.append`) — 전체 삭제
 - oam `handlers.auth`·`handlers.users`(`/users/me`) 차용 — base 가 처리
 - `csp_runtime.py` (RETIRED, 2026-05-19) — 마이그레이션 헬퍼만 scripts 로
 - `flow_logger.py` — oam-svc 로 이전 (csc 미사용)
@@ -126,16 +126,16 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
   - 검증: base 에 mcptt 내부 호출/ import 0 (notify_csp 는 docstring 설명만).
 - **P3b — base(oam) 자족화 ✅ (완료)**: oam 폐포 = services 11개(admin_auth·alert_log·
   collection_schema·config_cache·drift_sweeper·file_store·flow_logger·ha_lookup·logger·
-  service_registry·sync_txn) + httpsrv + util 를 **oam/src 자체 복사본으로 보유**(repo 커밋,
+  service_registry·sync_txn) + httpsrv + util 를 **ems/core/oam/src 자체 복사본으로 보유**(repo 커밋,
   csc 와 독립 — 발산 가능). `oam_app.py` 의 `csc/src` 마운트(_CSC_SRC glob)·csc/cert fallback 제거.
-  검증: py_compile OK · `sys.path=[oam/src, oam/vendor]`(csc/src 없음) 격리 import 성공
+  검증: py_compile OK · `sys.path=[ems/core/oam/src, ems/core/oam/vendor]`(csc/src 없음) 격리 import 성공
   (services 11 + httpsrv + util + handlers auth/agents/gateway/service_control/stats 전부 해석).
   ⚠️ cmd_pkg 의 csc→oam 복사는 P6 로 (현재 redundant·무해, P5 후 -f 가드 skip → oam 자체본 생존).
 - **P4 — oam-svc 자족화 ✅ (완료)**: oam-svc 가 쓰는 것(flow_logger·logger·handlers recording/
-  stats/verification·httpsrv·util)은 전부 oam/src 에 있음(P3b) → `oam_svc_app.py` 의 `csc/src`
+  stats/verification·httpsrv·util)은 전부 ems/core/oam/src 에 있음(P3b) → `oam_svc_app.py` 의 `csc/src`
   마운트(_CSC_SRC) 제거, cert fallback 을 csc/cert→oam/cert 로, docstring 정정. oam-svc 는
-  oam/src + oam/vendor 만 사용. 검증: py_compile OK · `sys.path=[oam-svc/src, oam/src, oam/vendor]`
-  (csc/src 없음) 격리 import 성공. (oam-svc↔oam 간 oam/src 공유는 OAM 패밀리 내부 — 별도 고려.)
+  ems/core/oam/src + ems/core/oam/vendor 만 사용. 검증: py_compile OK · `sys.path=[ems/service/oam/src, ems/core/oam/src, ems/core/oam/vendor]`
+  (csc/src 없음) 격리 import 성공. (oam-svc↔oam 간 ems/core/oam/src 공유는 OAM 패밀리 내부 — 별도 고려.)
 - **P5 — csc 도메인 축소 ✅ (완료, 아무도 csc 를 마운트 안 함)**: csc/src/services 에서 비도메인
   모듈 7개(sync_dispatch·sync_txn·drift_sweeper·service_registry·collection_schema·alert_log·
   flow_logger) + service_descriptors_seed 물리 삭제, `handlers/csp_runtime.py`(RETIRED) 삭제,
@@ -145,10 +145,10 @@ oam→csc 역참조 중 코드가 아닌 **계약으로 바꿔야 할 leak**: `o
   (services 7 + __init__ 일반패키지, handlers admin3/org1).
 - **P6 — 빌드(cmd_pkg) 정리 ✅ (완료)**: cmd_pkg 의 oam staging `_shsrc`(csc→oam httpsrv/util/
   services 복사) 블록 제거 — oam 은 자족(cmd_sync 가 dist/oam/src 동기화). oam-svc auto-sync 가
-  csc 블록(=oam/src 동기화)도 타도록 + 주석 정정. 각 모듈 패키지가 자기 것만 동봉.
+  csc 블록(=ems/core/oam/src 동기화)도 타도록 + 주석 정정. 각 모듈 패키지가 자기 것만 동봉.
   검증: bash -n OK · `sync csc oam-svc` 후 dist 레이아웃(dist/oam/src/services=11+httpsrv+util,
   dist/csc/src/services=7+__init__, csp_runtime 삭제 전파) · **dist 트리 3모듈 자족 import 전부 OK**
-  (csc=csc/src+vendor, oam=oam/src+vendor, oam-svc=oam-svc/src+oam/src+vendor — 모두 csc 비의존).
+  (csc=csc/src+vendor, oam=ems/core/oam/src+vendor, oam-svc=ems/service/oam/src+ems/core/oam/src+vendor — 모두 csc 비의존).
   - **라우팅(/users/me↔/users)은 이미 정합**: base 가 `/api/v1/users/me` in-process(D8, oam_app),
     게이트웨이가 `/api/v1/users/*` → csc 프록시. 정상 경로(게이트웨이)는 P1 영향 없음.
   - 🔲 **남은 항목(프런트, 비차단)**: 가입자 관리 UI 를 콘솔이 csc API 경유(oam-svc 오케스트레이션)로

@@ -178,9 +178,9 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
 
 ### 3.6.2 트랜스코딩 주체 = OAM + 번들 ffmpeg
 
-- 트랜스코딩은 **OAM** `oam/src/handlers/recording.py` 가 수행(과거 문서의 CSC 아님). 출력은 **MP4**(H.264+AAC) `seg_NNNN.mp4`.
+- 트랜스코딩은 **OAM** `ems/core/oam/src/handlers/recording.py` 가 수행(과거 문서의 CSC 아님). 출력은 **MP4**(H.264+AAC) `seg_NNNN.mp4`.
 - ffmpeg/ffprobe는 **OAM 패키지에 동봉**(air-gapped 대응). 빌드 시 `cims.sh` 의 `_ensure_oam_vendor_ffmpeg`가
-  정적 바이너리를 `oam/vendor/bin/` 으로 다운로드(idempotent, `CIMS_SKIP_VENDOR_FETCH`/`CIMS_FFMPEG_URL`),
+  정적 바이너리를 `ems/core/oam/vendor/bin/` 으로 다운로드(idempotent, `CIMS_SKIP_VENDOR_FETCH`/`CIMS_FFMPEG_URL`),
   `cims.sh pkg oam` 이 vendor를 패키지에 포함. 경로 해석: 명시인자 → `CIMS_FFMPEG` env → PATH → fallback.
 - 메타데이터는 **DB 미사용** — 파일(call.json/segments.jsonl)이 SoT, `recording.py`가 디렉토리 스캔.
 
@@ -215,7 +215,7 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
 
 ### 3.6.4 콘솔 자동재생 (폴링)
 
-`cims-console/src/components/SegmentPlayer.tsx` — raw 세그먼트 재생 시 닫았다 다시 열 필요 없이 자동 재생.
+`ems/core/console/src/components/SegmentPlayer.tsx` — raw 세그먼트 재생 시 닫았다 다시 열 필요 없이 자동 재생.
 
 - 재생 클릭 → 미변환이면 `waitSegmentReady(url)` 가 같은 audio/video URL을 폴링
   (첫 **0.7초**, 이후 **1.5초** 간격, 최대 **120초**): 202면 대기, 200이면 src 지정 후 **자동 재생**.

@@ -7,7 +7,7 @@ originSessionId: b9397035-535c-4b7a-985c-20e0ae5efe36
 | Port | Proto | Service | Notes |
 |------|-------|---------|-------|
 | 3000 | TCP | **TB-Console** (Vite dev) | 상시 기동. TB-CSC UI. |
-| 3001 | TCP | **Dev-Console** (Phase 1, 소스 vite dev) | `cims-console/` 트리에서 기동. Test-CSC 4421 로 `/api` proxy. |
+| 3001 | TCP | **Dev-Console** (Phase 1, 소스 vite dev) | `ems/core/console/` 트리에서 기동. Test-CSC 4421 로 `/api` proxy. |
 | 3002 | TCP | cims-phone (Vite dev) | MCPTT soft-phone UE UI (2026-04-24 3000→3002) |
 | 4419 | TCP | **TB-CSC** | 상시 기동. 검증용 패키지/에이전트/배포 관리. |
 | 4420 | TCP | **배포 대상 CSC** (Phase 2 csc-server/csc/) | 운영 포트. Phase 2 tarball 배포본. |
@@ -26,7 +26,7 @@ originSessionId: b9397035-535c-4b7a-985c-20e0ae5efe36
 | 9903 | TCP | Test-agent (verify phase2) sync | `csc-server-local` Test-agent 가 사용. |
 
 ## Console 3분화 (2026-04-24 e0c44a7)
-같은 `cims-console/` 코드베이스가 기동 모드로 3개 인스턴스 형태:
+같은 `ems/core/console/` 코드베이스가 기동 모드로 3개 인스턴스 형태:
 - **Dev-Console** (3001) — `SRC_CONSOLE` 존재 시 vite dev. 개발 + Phase 1 기능 검증 UI.
 - **Test-Console** (8080) — dist 트리만 있을 때 `serve dist` (HTTPS). Phase 1 dist 검증용. 블록 A 전엔 cwrtc 충돌.
 - **배포본 console** (80) — Phase 2/3 csc-server/console/. 운영 포트 (cap_net_bind 또는 reverse proxy 설계 미정 — Phase 3 와 함께 재논의).

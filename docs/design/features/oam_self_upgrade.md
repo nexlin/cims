@@ -29,7 +29,7 @@ OAM(`oam_app.py`)은 다른 모듈(csp/cmp/csc/console)을 업그레이드·재�
 
 근거:
 - OAM `_queue_job` 은 job 을 file_store 에 적고 **즉시 반환**(동기 재기동 없음).
-  `oam/src/handlers/agents.py` `_queue_job` (job 생성 → deployment status 전이만).
+  `ems/core/oam/src/handlers/agents.py` `_queue_job` (job 생성 → deployment status 전이만).
 - agent 가 heartbeat **응답**으로 job 을 수령한 뒤(`cims_agent.py:2396`) 별도로
   `execute_job`(`:2399`)에서 실행한다 → job 전달은 OAM 사망 **전에 원자적으로 끝남**.
 - job/deployment 레코드는 **file_store(영속)** — 신 OAM 이 같은 파일을 읽어 이어받는다.
@@ -183,10 +183,10 @@ watchdog 는 전 과정에서 **안전망**으로 동작: 어떤 사유로든 OA
       200 폴링, `CIMS_OAM_HEALTH_TIMEOUT` 기본 20s; python urllib probe — curl 부재 대비) — D1
 - [x] `agent/cims_agent.py`: `_deliver_report`(재시도 4회 backoff) + `_enqueue_pending_report`
       /`_flush_pending_reports`(`run/pending_reports.jsonl`, heartbeat 성공 시 flush) — D1
-- [x] `oam/src/oam_app.py`: 부팅 self-reconcile (실행 install_path == deployment.install_path
+- [x] `ems/core/oam/src/oam_app.py`: 부팅 self-reconcile (실행 install_path == deployment.install_path
       인 oam·`deploying` 만 `running` 으로 정정 + stuck job 마감; 타 노드 오염 방지) — D2
 - [x] OAM `/health` — httpsrv 내장 무인증 200 `{"status":"ok"}` (추가 불요, 확인 완료) — D1/D3
-- [x] `oam/src/oam_app.py`: `--preflight`(import+config 스모크, bind 없이 종료 0/2) — D3
+- [x] `ems/core/oam/src/oam_app.py`: `--preflight`(import+config 스모크, bind 없이 종료 0/2) — D3
 - [x] `agent/cims_agent.py`: `_oam_preflight` + `job_process_control` 에서 oam start/restart 전
       pre-flight 게이트(실패 시 구 OAM 유지, kill 안 함) — D3
       *(설계 원안의 'job_install 내 import-스모크' 대신 **restart 직전 seam** 에 배치 —

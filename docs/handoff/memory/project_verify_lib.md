@@ -162,7 +162,7 @@ python3 -m unittest tests.test_verify_lib -v
 **삭제 — backend endpoint** (옛 run_all.py 호출):
 - `csc/src/handlers/verification.py` 의 `/api/v1/verification/run` (POST), `/report` (GET)
 
-**삭제 — UI** (cims-console/src/pages/VerificationPage.tsx):
+**삭제 — UI** (ems/core/console/src/pages/VerificationPage.tsx):
 - "Phase 1 상세 검증 (run_all.py)" 섹션 + `runDetail()` / `loadLegacyReport()` 함수
 - `VerResult` 타입, `detailRunning/detailResult/expandedModule/legacyReportMd` state
 - VerifyMode `'main'`, `'modules'` → `'full' | 'quick' | 'volte' | 'ptt'`

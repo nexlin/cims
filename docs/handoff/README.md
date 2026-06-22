@@ -136,7 +136,7 @@ claude                    # 대화형 진입
 ## 부록 — 알려진 환경 의존성
 
 - `cims.sh tb start` 가 csc 띄울 때 `build/dist/csc/config/csc-tb.json` 필요 → `./cims.sh build` 후 자동 생성.
-- TB-Console 의 dev 모드는 `cims-console/node_modules/` 필요 → `cims-console/` 에서 `npm install` 한 번. configure 가 자동 처리하지 않을 수 있음.
+- TB-Console 의 dev 모드는 `ems/core/console/node_modules/` 필요 → `ems/core/console/` 에서 `npm install` 한 번. configure 가 자동 처리하지 않을 수 있음.
 - netns 셋업은 `sudo` 필요 — 새 서버의 user 가 sudoers 에 있어야 함.
 - DB 는 외부 위임 결정 (`docs/handoff/memory/project_db_external.md`). 로컬 DB 안 띄워도 됨, 단 가입자 데이터 (volte_subscriptions / ptt_groups 등) 가 필요한 시나리오 (호 시험) 는 DB 연결 필요.
 - agent 의 enrollment_token 은 새 서버에서 재발급. 옛 token (메모리 안 노출 있을 수 있음) 은 무효.

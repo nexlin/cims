@@ -34,7 +34,7 @@ sleep 2 && ss -tlnp | grep ':4419'
 # (3) Vite dev (Console UI port 3000) — 재부팅 시 사라짐
 ss -tlnp | grep ':3000'
 # 안 떠 있으면:
-cd /home/nex/work/cims/cims-console
+cd /home/nex/work/cims/ems/core/console
 npm run dev -- --mode tb --port 3000 --host > /tmp/vite-tb.log 2>&1 & disown
 
 # (4) 4 agent process — 재부팅 시 사라짐
@@ -182,11 +182,11 @@ sudo ip netns exec ctrl-b ip addr show svc | grep '10.0.1.13' && echo "✓ ctrl-
 ### Agent `agent/cims_agent.py` (source + dist + 4 ns install dir 모두 sync)
 - `_resolve_install_path` 에 **cwd fallback** — params.install_path 가 쓰기 불가 시 (`/opt/cims` 권한 없음 시) cwd 사용. dev/netns 환경 대응
 
-### Frontend `cims-console/src/api/deployment.ts`
+### Frontend `ems/core/console/src/api/deployment.ts`
 - `Agent.enrollment_token_expires_at` 필드 추가
 - `regenerateToken(id)` / `getInstallCommand(id)` / `registerPackagesFromDist()` API
 
-### Frontend `cims-console/src/pages/HaServicesPage.tsx`
+### Frontend `ems/core/console/src/pages/HaServicesPage.tsx`
 - 통합 `handleInstallCmdClick` — 토큰 유효 시 복사, 만료 시 재발행
 - 1분 단위 `setMinuteTick` re-render (만료 카운트다운)
 - `isTokenValid` / `minutesLeft` helpers
@@ -200,7 +200,7 @@ sudo ip netns exec ctrl-b ip addr show svc | grep '10.0.1.13' && echo "✓ ctrl-
 - **`ImeSafeInput`** 컴포넌트 — 한글 입력 시 IME composition 깨짐 방지 (compositionend/blur/Enter 시점에만 commit)
 - `splitPrefixHost(ip, mask)` top-level helper (/8 /16 /24 지원)
 
-### Frontend `cims-console/src/pages/ServicesPage.tsx`
+### Frontend `ems/core/console/src/pages/ServicesPage.tsx`
 - release job 완료 watcher 가 success 시 `registerPackagesFromDist()` 자동 호출 (DevMode 만 동작 — Prod 는 메뉴 차단)
 
 ### Backend `csc/src/handlers/ha_groups.py` (2026-05-14 후반 — A/S split brain 근본 fix)

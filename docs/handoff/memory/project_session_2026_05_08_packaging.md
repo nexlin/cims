@@ -11,11 +11,11 @@ originSessionId: db0badef-da01-4396-bc02-9d22bd9c19ab
 ## 변경 파일 (5개, ~1500줄)
 
 ```
-cims-console/src/routes.tsx
-cims-console/src/pages/ServicesPage.tsx
-cims-console/src/pages/VerificationV2Page.tsx
-cims-console/src/pages/VerificationHistoryPage.tsx
-cims-console/src/api/build.ts
+ems/core/console/src/routes.tsx
+ems/core/console/src/pages/ServicesPage.tsx
+ems/core/console/src/pages/VerificationV2Page.tsx
+ems/core/console/src/pages/VerificationHistoryPage.tsx
+ems/core/console/src/api/build.ts
 csc/src/handlers/build.py
 csc/config/config_template.json
 cims.sh
@@ -49,7 +49,7 @@ cims.sh
 ## 백엔드 변경
 
 ### `cims.sh`
-- `cmd_build [-v X.Y.Z]` 추가 — 빌드 후 8개 컴포넌트 (csp/cmp/csc/cwrtc/cspsim/agent/cims-console/cims-phone) 의 source `pkg.json` 일괄 갱신. 변종 (psp/isp/pmp/imp) 은 base 의 pkg.json 공유.
+- `cmd_build [-v X.Y.Z]` 추가 — 빌드 후 8개 컴포넌트 (csp/cmp/csc/cwrtc/cspsim/agent/ems/core/console/cims-phone) 의 source `pkg.json` 일괄 갱신. 변종 (psp/isp/pmp/imp) 은 base 의 pkg.json 공유.
 - `cmd_pkg` 끝에 **manifest.json 자동 생성** (verify S4-PKG-MANIFEST 와 같은 로직 inline python heredoc — sha256/size/mtime/git/host)
 
 ### `csc/src/handlers/build.py`

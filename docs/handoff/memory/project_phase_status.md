@@ -97,7 +97,7 @@ git log -5 --oneline
 1. **async + blocking subprocess.run 자기 deadlock**: uvicorn 이벤트 루프 block → verify script 의 self-call (TB-CSC 4419) 실패. `asyncio.to_thread` worker 필수.
 2. **repo root 탐색 버그**: csc_app.py 의 tests_dir fallback 이 `build/dist/tests` (존재 안 함) 지정 → verification.py 가 엉뚱한 _REPORT_DIR. `cims.sh + CMakeLists.txt` 공존 찾기로 수정.
 
-### 프론트엔드 (cims-console/src/pages/VerificationPage.tsx)
+### 프론트엔드 (ems/core/console/src/pages/VerificationPage.tsx)
 - Phase 1/2/3 탭 + 옵션 체크박스 (--skip-build / --skip-pkg / --keep-agent)
 - 실행 → 판정 컬러 + returncode + stdout_tail + 자동 리포트 로드
 - 기존 run_all.py 세밀 검증은 하단 "Phase 1 상세 검증" 섹션으로 분리
@@ -750,7 +750,7 @@ docs 의 §0.10 신규 설계:
 - Phase 1 Test-Console: 3001 → **8080**
 - Phase 2 배포 csc: 4420 (유지), console: **80** (sudo/cap 필요)
 작업 범위:
-- `configure.sh` / `csc/config/config_template.json` / `cims-console/.env.local` / `cims.sh start_csc·start_console` / §0.1 TB 표 갱신
+- `configure.sh` / `csc/config/config_template.json` / `ems/core/console/.env.local` / `cims.sh start_csc·start_console` / §0.1 TB 표 갱신
 - console:80 은 `setcap 'cap_net_bind_service=+ep' <node>` 또는 별도 reverse proxy 고려
 
 #### (3순위) **Phase 3 실측 정통 구현**
@@ -809,9 +809,9 @@ configure.sh                    (+37 lines)     — apply_csc_tb_overlay + .env.
 csc/src/csc_app.py              (1 line)        — _CONFIG_PATH 에 CIMS_CSC_CONFIG ENV override
 cims-phone/vite.config.ts       (1 line)        — port 3000 → 3002
 cims-phone/nginx.conf           (1 line)        — listen 3000 → 3002
-cims-console/.gitignore         (+1 line)       — .env.*.local 추가
+ems/core/console/.gitignore         (+1 line)       — .env.*.local 추가
 ```
-(참고: `cims-console/.env.tb.local` 은 configure 가 생성, gitignored)
+(참고: `ems/core/console/.env.tb.local` 은 configure 가 생성, gitignored)
 
 ### 현재 상태 (세션 종료 시점, 커밋 전)
 - 브랜치: `feature/sip-console-runtime`
@@ -1017,7 +1017,7 @@ CSP 설정에서 이번 세션에 적용한 패턴을 CSC / CMP 에도:
 
 CSP 의 `_infra` 에 `groups` 배열 + 필드 `group` 속성이 이미 추가됐지만 Console UI 는 아직 이를 렌더링 안 함. CSC/CMP 도 같은 패턴 적용 후 UI 측 한번에 구현:
 
-- Console (cims-console) 의 모듈 설정 편집기 (`ModuleConfigEditor.tsx` 근처) 에서 섹션의 `groups` 를 읽어 sub-header 렌더
+- Console (ems/core/console) 의 모듈 설정 편집기 (`ModuleConfigEditor.tsx` 근처) 에서 섹션의 `groups` 를 읽어 sub-header 렌더
 - 필드의 `group` 속성으로 필드 그룹 정렬
 - `group` 미지정 필드는 "기타" 그룹 또는 상단에 그대로
 - `restart: false` 필드에 "즉시 반영" 배지 + `reload_hint` tooltip 표시

@@ -62,7 +62,7 @@ DB `users` 테이블 계정)와 분리한다. 가입자 DB 에 저장하지 않�
   password_sha256 교체 필수**. `BuiltinAccounts: []` 로 전체 비활성화 가능.
 - 내장 계정 id 는 음수(-1000부터) — DB FK 로 사용 금지. 비밀번호 변경은 콘솔이 아닌
   설정 파일에서만 (PUT /auth/password → 403).
-- 구현: `oam/src/handlers/auth.py` `_builtin_accounts`/`_login`, `users.py` `_get_me`
+- 구현: `ems/core/oam/src/handlers/auth.py` `_builtin_accounts`/`_login`, `users.py` `_get_me`
   (builtin 클레임 합성). 개발자 모드: `utils/devMode.ts` + 라우트 `devOnly`.
 
 ### 권한 매트릭스

@@ -146,5 +146,5 @@ originSessionId: 497b2867-5a2f-4a04-86bf-33c0b0a12e0e
 - `csc/bin/csc_pihttp/src/cims_recording.py` — 녹취 API
 - `csp/SipMessageLogger.cpp` / `csp/CallDir.h` — CSP flow/msg/녹취 디렉터리
 - `cmp/PCmpServer.cpp` — CMP flow/msg 기록
-- `cims-console/src/api/ptt.ts` / `pages/PttHistoryPage.tsx` — PTT 이력 UI (nodes 구조 대응)
-- `cims-console/src/pages/FlowPage.tsx` — Flow UI (노드 필터, detail 표시)
+- `ems/core/console/src/api/ptt.ts` / `pages/PttHistoryPage.tsx` — PTT 이력 UI (nodes 구조 대응)
+- `ems/core/console/src/pages/FlowPage.tsx` — Flow UI (노드 필터, detail 표시)

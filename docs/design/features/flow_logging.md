@@ -276,5 +276,5 @@ GET /api/v1/flow/body?date=&hour=&seq=&iface=&node=
 - `csc/src/csc_app.py` — `_post_hook` 등록 + base_path → service 매핑
 
 ### UI
-- `cims-console/src/api/flow.ts` — `flowApi.getBody(date, hour, seq, ts, dir, proto, iface, node)`
-- `cims-console/src/pages/FlowPage.tsx` — proto 색상, nodes 구조 처리
+- `ems/core/console/src/api/flow.ts` — `flowApi.getBody(date, hour, seq, ts, dir, proto, iface, node)`
+- `ems/core/console/src/pages/FlowPage.tsx` — proto 색상, nodes 구조 처리

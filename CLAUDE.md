@@ -62,6 +62,18 @@ cspsim  ←─ SIP (UDP 5060 / TCP 25061 / TLS 5061) ──→  CSP
                                                         CMP  ←─ RTP ─→ clients
 ```
 
+### OAM/Console 소스 레이아웃 (`ems/`)
+운영·관리 평면(OAM)과 콘솔은 backend/frontend 모두 core/service 축으로 `ems/` 아래 통일:
+
+```
+ems/
+  core/    { oam/ (base 게이트웨이 = `oam` 패키지),  console/ (공통 셸·base 메뉴) }
+  service/ { oam/ (서비스 모듈 = `oam-svc` 패키지), console/ (서비스 팩 — manifest/위젯/레이아웃, 위젯 위주) }
+```
+
+- **소스 레이아웃 ≠ 패키지명/런타임 경로**: pkg.json `name`(`oam`·`oam-svc`)·install 경로(`modules/oam/<ver>/oam`, `modules/oam-svc/<ver>/oam-svc`)·게이트웨이·`console_static` resolver 글롭은 전부 불변. 소스 이동은 배포/런타임에 무영향.
+- **콘솔 base/svc 분리**: 단일 소스(`ems/core/console` = Vite 루트 + `ems/service/console` = 서비스 팩)를 빌드타임 프로파일로 2벌 빌드 — base(`VITE_CONSOLE_PROFILE=base`, 서비스 manifest DCE 제거) → `oam` 패키지 동봉 / svc(base+서비스) → `oam-svc` 패키지 동봉. 교차 참조 alias `@core`(core src)·`@svc`(service/console src); core→svc 엣지는 `registry.ts`(`@svc/manifest`) 하나. base OAM resolver 가 배포된 `oam-svc` 의 svc 콘솔을 우선 서빙(미배포=동봉 base 콘솔) → **oam-svc 배포 시 풀 UI 자동 승격**. svc 가 core 루트 밖이라 bare import 해석용 node_modules 심링크는 `cims.sh` 가 빌드 시 생성(git 제외).
+
 ### CSP (`csp/`) — Call Service Platform
 IMS 역할 기반 모듈형 SIP 서버. 단일 프로세스에서 CSCF + TAS + PTT-AS + IBCF 역할을 설정 기반으로 활성화/비활성화.
 
@@ -174,7 +186,7 @@ Automated SIP/RTP client for load and functional testing.
 1. `SipMessageLogger` (ILogCallBack) captures all SIP TX/RX from psip stack + CMP JSON messages
 2. 파일: 원문 `{systemId}_{iface}.msg.{mm5}.jsonl`(iface=sip/cmp/csc) + 통합 flow `{systemId}.flow.{mm5}.jsonl` (`mm5`=5분 버킷 00~55). 매 줄 open/append/close (핸들 미유지 → 운영 중 로그삭제 시 `.nfs` 고아·데이터유실 방지).
 3. flow 엔트리의 `seq`=원문 msg 파일의 줄번호(버킷별 리셋) → 원문 역조회 시 `ts`(HH:MM:SS)로 5분 버킷 도출
-4. Flow API(`oam/src/services/flow_logger.py`, **oam-svc 모듈이 서빙** — csc 완전독립화로 csc 에서 이전, `docs/design/features/csc_standalone_module.md`)가 Call-ID→sesid→동일 sesid 전 엔트리 수집으로 B2BUA 메시지 흐름 재구성(양 leg via Session-ID). reader glob 은 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신 5분) 모두 매칭
+4. Flow API(`ems/core/oam/src/services/flow_logger.py`, **oam-svc 모듈이 서빙** — csc 완전독립화로 csc 에서 이전, `docs/design/features/csc_standalone_module.md`)가 Call-ID→sesid→동일 sesid 전 엔트리 수집으로 B2BUA 메시지 흐름 재구성(양 leg via Session-ID). reader glob 은 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신 5분) 모두 매칭
 
 ## Verification (S1~S6 pipeline)
 
@@ -205,8 +217,8 @@ python3 -m unittest tests.test_verify_lib   # 35 unit tests
 - `verify/lib/items/stage5/_legacy.py` — `_verify_phase2` 22단계 1회 호출 + step marker 파싱하여 자식별 결과 분배 어댑터 (향후 Python 포팅 시 자식 함수 본체만 교체)
 - `tests/cims_verify.py` — CLI (`--stage` / `--items` / `--preset`)
 - `csc/src/handlers/verification.py` — Backend API (`/stages`, `/stages/<N>`, `/run`, `/jobs/<id>`, `/runs`, `/runs/<id>`)
-- `cims-console/src/pages/VerificationV2Page.tsx` — Stepper + Accordion + 그룹 cascade + PDF 보고서 (LIVE polling)
-- `cims-console/src/pages/VerificationHistoryPage.tsx` — 회차 이력 list + detail modal
+- `ems/core/console/src/pages/VerificationV2Page.tsx` — Stepper + Accordion + 그룹 cascade + PDF 보고서 (LIVE polling)
+- `ems/core/console/src/pages/VerificationHistoryPage.tsx` — 회차 이력 list + detail modal
 
 **이력 저장**: 파일 기반 (`verify_runs/YYYY/MM/<id>.json`). `verify.lib.run_store` 가 record/list/get/stats 모두 처리. 옛 `verification_run` / `verification_run_item` DB 테이블 의존은 제거됨.
 

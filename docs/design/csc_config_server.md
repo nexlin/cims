@@ -69,9 +69,9 @@ CSC 의 `_get/put_deployment_collection` (`csc/src/handlers/agents.py:1708,1737`
 (`csc/src/handlers/agents.py`) 가 새 정의로 자동 fan-out 결정.
 
 UI 가 scope 메타로 자동 분류:
-- `cims-console/src/components/group/GroupServiceConfigModal.tsx:60` —
+- `ems/core/console/src/components/group/GroupServiceConfigModal.tsx:60` —
   `scope === undefined || scope === 'service'` 만 표시.
-- `cims-console/src/components/module/ModuleConfigModal.tsx` —
+- `ems/core/console/src/components/module/ModuleConfigModal.tsx` —
   scope=service collection 은 멤버 단일 모드에서 🔒.
 - A/S 그룹 + scope=system 의 새 분류는 T3 에서 ha_group 단위 보기 토글로 노출.
 
@@ -199,8 +199,8 @@ Phase B 에서 `csc/src/handlers/agents.py` 의 `_collection_schema` 가
 | agent `/collection` | `agent/cims_agent.py` | 889-921 |
 | `_signal_process` | `agent/cims_agent.py` | 831-848 |
 | `job_update_config` (gap) | `agent/cims_agent.py` | 498-507 |
-| group fan-out 클라이언트 | `cims-console/src/components/module/ModuleConfigEditor.tsx` | 88-107 |
-| GroupServiceConfigModal | `cims-console/src/components/group/GroupServiceConfigModal.tsx` | (전체) |
+| group fan-out 클라이언트 | `ems/core/console/src/components/module/ModuleConfigEditor.tsx` | 88-107 |
+| GroupServiceConfigModal | `ems/core/console/src/components/group/GroupServiceConfigModal.tsx` | (전체) |
 
 ## 10. 후속 (범위 밖 — Phase G)
 

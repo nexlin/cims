@@ -7,7 +7,7 @@
 > 코드를 런타임 공유하면 lockstep 결합이 되는 문제로, **[features/csc_standalone_module.md](features/csc_standalone_module.md)**
 > 에서 **계약 기반(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB 스키마) + 각 모듈 자체 인프라 vendoring**
 > 으로 재설계·구현 완료(P1~P6, branch `feat/csc-standalone-module`). 현행:
-> - csc 는 oam/src 를 **마운트하지 않음**. base(oam)·oam-svc 도 csc/src 를 **마운트하지 않음**.
+> - csc 는 ems/core/oam/src 를 **마운트하지 않음**. base(oam)·oam-svc 도 csc/src 를 **마운트하지 않음**.
 > - 각 모듈이 자기 services/httpsrv/util 자체 보유. csc = {mcptt, idms_storage, config_cache, file_store,
 >   ha_lookup, logger, admin_auth} 7개.
 > - 본 문서의 **결정(경계·인증 모델·역할 범위·운영 토폴로지)은 유효**하나, **구현 메커니즘(마운트/namespace)
@@ -179,18 +179,18 @@ cims/                                    cims/
 ### Phase 1: 코드 구조 분리 (소프트, 같은 프로세스) — ✅ **완료 (2026-05-29)**
 
 진행 결과:
-- **top-level `oam/`** 디렉토리 신설 (`oam/src/handlers/`, `oam/src/services/`, `oam/docs/`, `oam/README.md`).
-- handler 12개 git mv: `agents / agent_api / ha_groups / modules / build / service_control / verification / alerts / stats / recording / auth / users` → `oam/src/handlers/`. `csc/src/handlers/` 잔존: `admin / org / csp_runtime`.
+- **top-level `oam/`** 디렉토리 신설 (`ems/core/oam/src/handlers/`, `ems/core/oam/src/services/`, `oam/docs/`, `oam/README.md`).
+- handler 12개 git mv: `agents / agent_api / ha_groups / modules / build / service_control / verification / alerts / stats / recording / auth / users` → `ems/core/oam/src/handlers/`. `csc/src/handlers/` 잔존: `admin / org / csp_runtime`.
 - **PEP 420 namespace package** — `csc/src/handlers/__init__.py` 제거. oam/csc 양쪽이 `handlers` 패키지를 merge → 기존 `from handlers.X import Y` 임포트 unchanged.
-- `csc/src/services/admin_auth.py` 신설 — `verify_admin_jwt / extract_admin_jwt` thin wrapper. `oam/src/handlers/auth.py` 가 init 시 동일 비밀키 동기화.
+- `csc/src/services/admin_auth.py` 신설 — `verify_admin_jwt / extract_admin_jwt` thin wrapper. `ems/core/oam/src/handlers/auth.py` 가 init 시 동일 비밀키 동기화.
 - `csc_app.py` 가 `../oam/src` 를 `sys.path` 에 prepend (`_OAM_SRC`).
 - `CMakeLists.txt` `make dist` 단계에 `dist/oam/src` 복사 추가.
-- `cims.sh sync csc` 가 `csc/src` + `oam/src` 양쪽을 dist 로 rsync. namespace 전환에 따른 stale `__pycache__` 제거 단계 포함.
+- `cims.sh sync csc` 가 `csc/src` + `ems/core/oam/src` 양쪽을 dist 로 rsync. namespace 전환에 따른 stale `__pycache__` 제거 단계 포함.
 
 검증 결과 (py 측):
 - 21 모듈 (15 handler + 6 service) import 모두 OK.
 - 핸들러 리스트 분포: csc-side 3 (admin/org/mcptt), oam-side 12.
-- 전체 `csc/src` + `oam/src` `py_compile` PASS.
+- 전체 `csc/src` + `ems/core/oam/src` `py_compile` PASS.
 
 미진행 (Phase 1 보류 항목):
 - `services/mcptt.py` 의 `notify_csp / audit_config_change` 잔재 정리 — 호출 부 분포 (csc admin/csp_runtime ↔ oam service_control) 가 cross-package 이므로, **Phase 3 에서 함께 정리**하는 게 자연스러움. Phase 1 에선 boundary 만 명시.
@@ -201,9 +201,9 @@ cims/                                    cims/
 ### Phase 2: 패키지 분리 — ✅ **완료 (2026-05-29)**
 
 진행 결과:
-- `oam/pkg.json` 신설 (name=oam, version=0.0.1 → 0.0.2 auto-bump, ha_capability=active_standby, 7 function: agents/ha_groups/build/verification/alerts/stats/recording, processes=[] — 별도 systemd 없음). 같은 cims-csc 프로세스 유지.
+- `ems/core/oam/pkg.json` 신설 (name=oam, version=0.0.1 → 0.0.2 auto-bump, ha_capability=active_standby, 7 function: agents/ha_groups/build/verification/alerts/stats/recording, processes=[] — 별도 systemd 없음). 같은 cims-csc 프로세스 유지.
 - `cims.sh pkg` 4 위치에 oam 추가: default targets / auto-sync set / `_src_root_for` 매핑 / 컴포넌트 case allowlist.
-- `cims.sh sync csc` 가 `oam/pkg.json` 도 `dist/oam/` 으로 복사.
+- `cims.sh sync csc` 가 `ems/core/oam/pkg.json` 도 `dist/oam/` 으로 복사.
 - `CMakeLists.txt` `make dist` 가 `dist/oam/pkg.json` 복사.
 - `cims.sh pkg oam` 으로 **oam-0.0.2.tar.gz (108KB)** 빌드 성공. manifest.json 등재 (sha256 + size).
 - TB-CSC `POST /api/v1/packages/register-from-dist` 가 oam 자동 인식 → file_store packages 컬렉션에 `id=44 name=oam v=0.0.2` entry 생성.
@@ -226,10 +226,10 @@ agent install 흐름 (검토만):
 #### 단계 3a — TB 분리 기동 ✅ **완료 (2026-05-29)**
 
 진행 결과:
-- `oam/src/oam_app.py` 신설 — admin server (4419) + 12 OAM handler + 5 sweeper + flow_logger / config_cache / alert_log. csc 책임 (admin/org/mcptt server 4431) 제거.
-- `oam/config/oam.json` (prod) + `oam/config/oam-tb.json` (TB) — Server/CimsAuth.JwtSecret/CimsDatabase/Packages/ConfigCacheDir/ServiceLogging.
+- `ems/core/oam/src/oam_app.py` 신설 — admin server (4419) + 12 OAM handler + 5 sweeper + flow_logger / config_cache / alert_log. csc 책임 (admin/org/mcptt server 4431) 제거.
+- `ems/core/oam/config/oam.json` (prod) + `ems/core/oam/config/oam-tb.json` (TB) — Server/CimsAuth.JwtSecret/CimsDatabase/Packages/ConfigCacheDir/ServiceLogging.
 - `cims.sh tb` 에 oam target 추가 — default `all = oam + console` (csc 제외). csc target 은 deprecated 표기로 유지 (호환성).
-- `cims.sh sync csc` 가 `oam/pkg.json` + `oam/config/*.json` 도 dist 동기화. `CMakeLists.txt make dist` 도 동일.
+- `cims.sh sync csc` 가 `ems/core/oam/pkg.json` + `ems/core/oam/config/*.json` 도 dist 동기화. `CMakeLists.txt make dist` 도 동일.
 - **TB-CSC 불필요 확정** — 실측 24h 동안 CSC 책임 endpoint 호출 사실상 0 (내 검증 호출만 3건), mcptt server (4431) 연결 0. TB 환경에서 OAM 만으로 충분.
 
 LIVE 검증:
@@ -241,7 +241,7 @@ LIVE 검증:
 #### 단계 3b — 코드 작업 ✅ **완료 (2026-05-29)**
 
 진행 결과:
-- **agent URL rename** — `install-agent.sh` / `cims_agent.py` / `oam/src/handlers/agents.py` 의 `csc_url` → `oam_url`. cmdline 인자 `--oam-url` (신규) + `--csc-url` (deprecated alias) 호환. `_oam_public_url` 함수, `Server.AgentOamUrl` config key 우선 + `AgentCscUrl` fallback. install_command 출력은 `--oam-url`.
+- **agent URL rename** — `install-agent.sh` / `cims_agent.py` / `ems/core/oam/src/handlers/agents.py` 의 `csc_url` → `oam_url`. cmdline 인자 `--oam-url` (신규) + `--csc-url` (deprecated alias) 호환. `_oam_public_url` 함수, `Server.AgentOamUrl` config key 우선 + `AgentCscUrl` fallback. install_command 출력은 `--oam-url`.
 - **systemd unit** — 기존 `cims@.service.tpl` 의 instantiate 패턴 활용 (`cims@oam.service` 자동 동작). 별도 unit 파일 불필요.
 - **lifecycle.sh `start_oam / stop_oam`** — oam_app.py 시작/중지. `_svc_port_proto` / `_start_one` / `_stop_one` / `status_one` / `COMPONENTS` 모두 oam 추가. `cims-svc start oam` 으로 호출 가능.
 - **csc_app.py 본연 정리** — OAM handler 등록 12개 제거 (agents/agent_api/ha_groups/modules/build/service_control/verification/alerts/stats/recording/auth/users 중 csc 가 따로 보유 안 하는 것). 5 sweeper 제거 (oam_app.py 책임). csc는 가입자 (admin.py) + 조직 (org.py) + auth (관리자 로그인) + users (본인 정보) + mcptt server (IdMS/GMS/CMS/KMS) 만. admin server port 4420 (4419 는 OAM 차지).
@@ -316,7 +316,7 @@ management host (10.0.2.45):
   - `csc/src/httpsrv/controller.py` — numpy/pandas DataFrame body 처리 코드 제거 (JSON only).
   - `csc/src/httpsrv/handler.py` — pandas BodyData type 제거.
 - **requirements.txt** 작성: csc (8 deps) + oam (12 deps). fastapi/uvicorn/pymysql/PyJWT/loguru/requests/readerwriterlock + OAM (aiohttp/netifaces/strenum/asyncstdlib).
-- **csc/vendor/** (13MB) + **oam/vendor/** (23MB) — `pip3 install --target=vendor` 로 site-packages 형태. 사전 다운로드 in dev host.
+- **csc/vendor/** (13MB) + **ems/core/oam/vendor/** (23MB) — `pip3 install --target=vendor` 로 site-packages 형태. 사전 다운로드 in dev host.
 - **sys.path mount** — csc_app.py 가 `_COMPONENT_ROOT/vendor` 자동 등록. oam_app.py 도 oam vendor + csc/src + csc/vendor glob.
 - **CMakeLists.txt** make dist 가 vendor 디렉토리 복사.
 - **cims.sh sync csc** 도 vendor + requirements.txt rsync.
@@ -441,7 +441,7 @@ LIVE 검증:
 
 - **CSC → CSP UDP notify** (`notify_csp` 함수) — 현재 가입자 변경 시 CSP 에 UDP 알림. 분리 후에도 csc 가 호출자 (가입자 CRUD 측). 영향 없음.
 - **CSP → CSC 의존** — CSP 가 DB 에서 가입자 데이터 읽음. csc 분리와 무관 (DB 직접 접근).
-- **admin console (`cims-console`)** — 빌드 결과물 (정적 파일). oam 의 정적 자원으로 서빙 자연스러움. Phase 3 에서 결정.
+- **admin console (`ems/core/console`)** — 빌드 결과물 (정적 파일). oam 의 정적 자원으로 서빙 자연스러움. Phase 3 에서 결정.
 - **agent 의 cert rotation** — Phase 3 에서 agent ↔ oam 만 통신하므로 cert 도 oam 발급. 현재 csc 가 발급하는 cert 갱신 흐름은 oam 으로 이관.
 
 ## 관련

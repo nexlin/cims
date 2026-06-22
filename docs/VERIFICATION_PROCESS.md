@@ -71,7 +71,7 @@ csc/src/handlers/verification.py   # Backend (TB-CSC 4419)
    GET  /jobs/<id>, /runs, /runs/<id>, /runs/stats, /env
    GET  /items, /presets
 
-cims-console/src/
+ems/core/console/src/
 ├── api/verification.ts                # API client
 ├── pages/VerificationV2Page.tsx       # 6단계 LIVE
 ├── pages/VerificationHistoryPage.tsx  # 이력 list + stats + DetailModal PDF
@@ -87,7 +87,7 @@ cims-console/src/
 | ID | 검사 | 도구 |
 |---|---|---|
 | S1-PY-SYNTAX | Python 문법 | `py_compile` (verify/+tests/+csc/+scripts/) |
-| S1-FRONTEND-LINT | TS/JS lint | `npx eslint` (cims-console) |
+| S1-FRONTEND-LINT | TS/JS lint | `npx eslint` (ems/core/console) |
 | S1-FRONTEND-TYPECHECK | TS 타입 | `npx tsc -b --noEmit` |
 | S1-CPP-FORMAT | C++ 포맷 | `clang-format --dry-run -Werror` |
 | S1-UNIT-VERIFY-LIB | verify.lib 단위 | `python3 -m unittest tests.test_verify_lib` (103 OK) |

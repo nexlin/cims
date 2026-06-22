@@ -79,10 +79,10 @@ csc/src/handlers/verification.py  — Backend API
    _record_run(): job 종료 시 verification_run + verification_run_item INSERT
 csc/src/csc_app.py                — ver_init(tests_dir, config) 호출 (config 추가)
 
-cims-console/src/api/verification.ts        — verifyApi client
-cims-console/src/pages/VerificationV2Page.tsx       — LIVE polling (mock 제거)
-cims-console/src/pages/VerificationHistoryPage.tsx  — 회차 이력 list + DetailModal
-cims-console/src/routes.tsx                  — /testbed/verify-v2, /testbed/verify-history
+ems/core/console/src/api/verification.ts        — verifyApi client
+ems/core/console/src/pages/VerificationV2Page.tsx       — LIVE polling (mock 제거)
+ems/core/console/src/pages/VerificationHistoryPage.tsx  — 회차 이력 list + DetailModal
+ems/core/console/src/routes.tsx                  — /testbed/verify-v2, /testbed/verify-history
 
 sql/migrate_verification_runs.sql  — verification_run + verification_run_item
 ```

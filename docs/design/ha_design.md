@@ -271,7 +271,7 @@ class CmpRing:
 
 VIP 단일 endpoint 라 client 코드 변경 최소:
 
-- **Console** — `cims-console/vite.config.ts` 의 `VITE_ADMIN_TARGET` 을
+- **Console** — `ems/core/console/vite.config.ts` 의 `VITE_ADMIN_TARGET` 을
   `VIP_csc` 로 변경. proxy 가 자동으로 새 ARP 따라감.
 - **cims_agent** — `--csc-url https://VIP_csc:4420` 으로 기동. heartbeat
   실패 시 backoff + 재시도 (1.G 추가).
@@ -451,7 +451,7 @@ sql/migrate_ha_groups_vip_nullable.sql):
 { "key": "Setup.Sip.LocalIp", "type": "string",
   "ip_scope": "service", "ip_slot": "SIP", "ip_port": 5060, "ip_proto": "udp" }
 ```
-미설정 시 `cims-console SLOT_MAP` 의 hardcoded fallback 사용 (csp/cmp/psp 등).
+미설정 시 `ems/core/console SLOT_MAP` 의 hardcoded fallback 사용 (csp/cmp/psp 등).
 
 모듈 ha_capability (각 모듈 pkg.json):
 - `csp/psp/isp/csc` → `active_standby`

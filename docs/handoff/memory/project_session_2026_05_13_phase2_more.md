@@ -106,13 +106,13 @@ LIVE pipeline-full 회차:
 agent/cims_agent.py                       — collect_interfaces + job_apply_ip_config
 agent/keepalived/keepalived.conf.tpl      — ${VIP_LIST} multi-VIP
 agent/lib/ha.sh                            — _build_vip_list helper + INTERFACE per-service override
-cims-console/src/api/deployment.ts        — ServiceIpRow/NetIface + applyIpConfig
-cims-console/src/api/ha_groups.ts         — VipBinding + apply
-cims-console/src/components/Sidebar.tsx   — VISIBLE_SECTIONS
-cims-console/src/components/module/ModuleConfigModal.tsx — 154 lines (UX 4건)
-cims-console/src/pages/HaServicesPage.tsx — applyVip/applyServiceIp + ServerInspector link
-cims-console/src/pages/ServersPage.tsx    — ?agent=<id> query param
-cims-console/src/routes.tsx               — prodHidden + VISIBLE_SECTIONS
+ems/core/console/src/api/deployment.ts        — ServiceIpRow/NetIface + applyIpConfig
+ems/core/console/src/api/ha_groups.ts         — VipBinding + apply
+ems/core/console/src/components/Sidebar.tsx   — VISIBLE_SECTIONS
+ems/core/console/src/components/module/ModuleConfigModal.tsx — 154 lines (UX 4건)
+ems/core/console/src/pages/HaServicesPage.tsx — applyVip/applyServiceIp + ServerInspector link
+ems/core/console/src/pages/ServersPage.tsx    — ?agent=<id> query param
+ems/core/console/src/routes.tsx               — prodHidden + VISIBLE_SECTIONS
 cims.sh                                    — VITE_CONSOLE_TARGET=prod
 csp/CMakeLists.txt                         — hiredis find + link
 csp/CmpClient.{h,cpp}                      — session-sticky multi-endpoint

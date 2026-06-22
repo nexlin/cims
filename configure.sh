@@ -352,11 +352,11 @@ if [[ -n "$SRC_DIR" ]]; then
         CSC_SCHEME="http"
     fi
 
-    # cims-console/.env.local  (Vite dev proxy 대상 — Test-CSC 4421, Phase 1)
+    # ems/core/console/.env.local  (Vite dev proxy 대상 — Test-CSC 4421, Phase 1)
     write_env_if_changed "$SRC_DIR/ems/core/console/.env.local" "VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
 "
 
-    # cims-console/.env.tb.local  (TB-Console 전용, TB-CSC 4419 로 proxy)
+    # ems/core/console/.env.tb.local  (TB-Console 전용, TB-CSC 4419 로 proxy)
     write_env_if_changed "$SRC_DIR/ems/core/console/.env.tb.local" "VITE_ADMIN_TARGET=${CSC_SCHEME}://127.0.0.1:4419
 "
 

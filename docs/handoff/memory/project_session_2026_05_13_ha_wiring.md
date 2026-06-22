@@ -38,7 +38,7 @@ metadata:
 - `ha_groups.py _list_groups/_get_group`: `vip_bindings` 응답
 - `ha_groups.py _create_group/_update_group`: `vip_bindings` body → `vip_bindings_json` 저장
 
-**Frontend** (`cims-console/`):
+**Frontend** (`ems/core/console/`):
 - `api/deployment.ts`: `NetIface`, `ServiceIpRow` type 추가, `Agent.interfaces/service_ip_rows` 필드, `updateAgent` body 에 `service_ip_rows` 옵션
 - `api/ha_groups.ts`: `VipBinding` type, `HaGroup.vip_bindings`, `HaGroupInput.vip_bindings`
 - `pages/HaServicesPage.tsx`: 전체 rewrite (1239 → 730 lines, mock data 제거)
@@ -95,11 +95,11 @@ metadata:
 
 ```
 agent/cims_agent.py                       (interfaces 수집 + 보고)
-cims-console/src/api/deployment.ts        (NetIface, ServiceIpRow types)
-cims-console/src/api/ha_groups.ts         (VipBinding type)
-cims-console/src/pages/HaServicesPage.tsx (full rewrite, 730 lines)
-cims-console/src/pages/HaGroupsPage.tsx   (삭제)
-cims-console/src/routes.tsx               (defaultPath, HaGroupsPage 제거, 서버 Inspector 리네임)
+ems/core/console/src/api/deployment.ts        (NetIface, ServiceIpRow types)
+ems/core/console/src/api/ha_groups.ts         (VipBinding type)
+ems/core/console/src/pages/HaServicesPage.tsx (full rewrite, 730 lines)
+ems/core/console/src/pages/HaGroupsPage.tsx   (삭제)
+ems/core/console/src/routes.tsx               (defaultPath, HaGroupsPage 제거, 서버 Inspector 리네임)
 csc/src/handlers/agent_api.py             (interfaces_json persist)
 csc/src/handlers/agents.py                (interfaces/service_ip_rows in JSON + PUT)
 csc/src/handlers/ha_groups.py             (vip_bindings_json 저장/응답)

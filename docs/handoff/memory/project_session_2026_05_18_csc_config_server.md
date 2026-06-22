@@ -34,8 +34,8 @@ agent restart → 단계 5.4 (cspsim 호 시험) → 5.5 (SIGUSR1 검증) 진행
 | B | `csc/src/handlers/agents.py` | `_warn_missing_scope` + `_create_package` 호출 (warn-only). `import sys` |
 | C | `csc/src/handlers/ha_groups.py` | `GET/PUT /api/v1/ha-groups/{id}/collections/{name}` 신규 + helper 3개 + `import asyncio` |
 | D ★ | `agent/cims_agent.py` | `job_update_config` 끝에 SIGUSR1 + `_signal_process(pkg_subdir)` + `_resolve_pkg_subdir` |
-| F | `cims-console/src/pages/HaServicesPage.tsx` | `GroupServiceConfigModal` import 복구 + "⚙ 설정" 버튼 + Modal wiring |
-| F | `cims-console/src/components/group/GroupServiceConfigModal.tsx` | preset 안내 메시지 갱신 (Phase D 반영) |
+| F | `ems/core/console/src/pages/HaServicesPage.tsx` | `GroupServiceConfigModal` import 복구 + "⚙ 설정" 버튼 + Modal wiring |
+| F | `ems/core/console/src/components/group/GroupServiceConfigModal.tsx` | preset 안내 메시지 갱신 (Phase D 반영) |
 
 ## LIVE smoke (CSC restart 후)
 

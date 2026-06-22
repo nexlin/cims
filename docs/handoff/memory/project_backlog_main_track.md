@@ -100,7 +100,7 @@ Phase 1.D-2 (3 라운드, 2026-05-13 오후) — **완료** (LIVE 활성은 hire
 - `csp/` — SIP B2BUA state, register table 동기화
 - `cmp/` — RTP session 분산 + healthcheck
 - `csc/src/` — REST API endpoint + DB 연결 풀
-- `cims-console/` — fail-over 인지 (다중 endpoint URL 관리)
+- `ems/core/console/` — fail-over 인지 (다중 endpoint URL 관리)
 - `cims_agent.py` — heartbeat 표적 변경 (active CSC 선택)
 - `verify/lib/` — fail-over 시나리오 추가 (S6-FAILOVER-* 신규)
 
@@ -140,7 +140,7 @@ Phase 1.D-2 (3 라운드, 2026-05-13 오후) — **완료** (LIVE 활성은 hire
 ### 2.3 영향 컴포넌트
 
 - `csp/config_template.json`, `cmp/config_template.json`, `csc/config/config_template.json` — schema 보강 (validation rules 추가)
-- `cims-console/src/pages/ServersPage.tsx` — form UI 강화 + diff viewer
+- `ems/core/console/src/pages/ServersPage.tsx` — form UI 강화 + diff viewer
 - `csc/src/handlers/build.py` 또는 `service_control.py` — preview/hot-reload endpoint
 - `agent/cims_agent.py` — `job_update_config` 정합 (이미 존재)
 
@@ -175,7 +175,7 @@ Phase 1.D-2 (3 라운드, 2026-05-13 오후) — **완료** (LIVE 활성은 hire
 
 ### 3.3 영향 컴포넌트
 
-- `cims-console/src/pages/*.tsx` — 각 페이지 강화
+- `ems/core/console/src/pages/*.tsx` — 각 페이지 강화
 - `csc/src/handlers/stats.py`, `users.py`, `org.py` 등 — API 보강 (집계 query, bulk endpoint)
 - DB 추가 인덱스 / 집계 테이블 (성능)
 
@@ -189,7 +189,7 @@ Phase 1.D-2 (3 라운드, 2026-05-13 오후) — **완료** (LIVE 활성은 hire
 
 ### 4.1 현황
 
-현재 한 codebase (`cims-console`) 가 mode 분기로 동작:
+현재 한 codebase (`ems/core/console`) 가 mode 분기로 동작:
 - `mode=tb` — TB-Console (port 3000, proxy → TB-CSC 4419)
 - `mode=dev` — Dev-Console (port 3001, proxy → 배포본 CSC 4445)
 - `mode=test` — Test-Console (build → port 8080)
@@ -204,7 +204,7 @@ Phase 1.D-2 (3 라운드, 2026-05-13 오후) — **완료** (LIVE 활성은 hire
 - 빌드 1개로 두 용도 지원 가능
 - 분기 누락 시 운영본에 패키징 노출 위험
 
-옵션 B: **별도 codebase 분리** (`cims-console-dev` / `cims-console-prod`)
+옵션 B: **별도 codebase 분리** (`ems/core/console-dev` / `ems/core/console-prod`)
 - 공통 컴포넌트는 npm workspace / monorepo
 - 명확한 경계 + 운영본 사이즈 감소
 - 유지보수 비용 ×2
@@ -217,14 +217,14 @@ Phase 1.D-2 (3 라운드, 2026-05-13 오후) — **완료** (LIVE 활성은 hire
 
 ### 4.3 영향 컴포넌트
 
-- `cims-console/src/router.tsx` 또는 `App.tsx` — route 분기
-- `cims-console/src/components/Sidebar.tsx` 또는 menu config — 메뉴 항목 필터
+- `ems/core/console/src/router.tsx` 또는 `App.tsx` — route 분기
+- `ems/core/console/src/components/Sidebar.tsx` 또는 menu config — 메뉴 항목 필터
 - `vite.config.ts` — mode 별 env 주입
 - 빌드 파이프라인 (`make dist` / `cims.sh pkg`) — prod build flag
 
 ### 4.4 시작 지점
 
-`cims-console/src/router.tsx` 또는 `App.tsx` 의 라우팅 구성 → 어떤 페이지가 어느 mode 에 속하는지 매핑 → `VITE_CONSOLE_TARGET` 으로 분기.
+`ems/core/console/src/router.tsx` 또는 `App.tsx` 의 라우팅 구성 → 어떤 페이지가 어느 mode 에 속하는지 매핑 → `VITE_CONSOLE_TARGET` 으로 분기.
 
 ---
 

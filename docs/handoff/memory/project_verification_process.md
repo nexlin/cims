@@ -137,7 +137,7 @@ VerificationPage (`/testbed/verify`) 상단에 통합 검증 UI.
 - **중요 fix**: async handler 에서 `subprocess.run` 은 uvicorn 이벤트 루프 block → verify script 의 self-call (TB-CSC 4419 curl) 실패. `asyncio.to_thread` worker 필수.
 - **repo root 탐색 개선**: tests_dir fallback 이 엉뚱한 `build/dist/tests` (존재 안 함) 로 지정될 수 있음 → tests_dir 상위 6단계 올라가며 `cims.sh + CMakeLists.txt` 공존 찾기. env `CIMS_REPO_ROOT` override.
 
-### 프론트엔드 (`cims-console/src/pages/VerificationPage.tsx`)
+### 프론트엔드 (`ems/core/console/src/pages/VerificationPage.tsx`)
 - Phase 1/2/3 탭 + 옵션 체크박스 + 실행 버튼
 - 결과: 판정 (PASS/FAIL 컬러), returncode, stdout_tail, 자동 리포트 로드
 - 기존 run_all.py 세밀 검증은 하단 "Phase 1 상세 검증" 으로 분리 유지

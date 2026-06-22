@@ -190,6 +190,6 @@ CSC 가 콘솔에서 업로드받은 패키지를 보관하는 디렉토리 (def
 - `design/features/package_and_template.md` — 패키지 포맷 + config_template.json
 - `VERIFICATION_PROCESS.md` — S4 (패키지화) + S6 immutability gate
 - `api/admin_api.md` — 배포 메뉴 (`/deploy/packages`) 의 CSC API
-- 콘솔 코드: `cims-console/src/pages/ServicesPage.tsx` + `cims-console/src/api/build.ts`
+- 콘솔 코드: `ems/core/console/src/pages/ServicesPage.tsx` + `ems/core/console/src/api/build.ts`
 - 백엔드: `csc/src/handlers/build.py`
 - CLI: `cims.sh:cmd_build` (line 696~) / `cims.sh:cmd_pkg` (line 1671~)

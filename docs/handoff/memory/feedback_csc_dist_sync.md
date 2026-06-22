@@ -20,7 +20,7 @@ CSC 핸들러/모듈을 `csc/src/` 에서 수정한 뒤 동작이 반영 안 되
 - `cims.sh restart csc` 가 띄우는 csc 는 `build/dist/csc/src/csc_app.py`
   (= dist 의 복제본). 소스 트리는 직접 안 띄움. → sync 안 하면 옛 코드.
 - TB-Console(`192.168.199.129:3000`, vite mode=tb) 의 proxy 가
-  `cims-console/.env.tb.local` 의 `VITE_ADMIN_TARGET=https://127.0.0.1:4419`
+  `ems/core/console/.env.tb.local` 의 `VITE_ADMIN_TARGET=https://127.0.0.1:4419`
   → **TB-CSC** 로 향함. 그래서 일반 csc 만 재시작하면 dev-console 에서는
   여전히 옛 핸들러가 응답함 (404 등).
 - TB-CSC 와 CSC 는 **같은 dist** 의 csc_app.py 를 띄우지만 띄운 시점이

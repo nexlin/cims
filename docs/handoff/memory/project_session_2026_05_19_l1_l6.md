@@ -68,7 +68,7 @@ metadata:
 1. `agents.py` 에 `handle_sip_services` 추가 — GET /csp/services 가 첫 csp deployment 의 access_services 컬렉션 → SipService 형식으로 변환 반환
 2. `csc_app.py` — `CIMS_CSP_RUNTIME_HANDLER_LIST` import + 등록 제거. listener/trunk/route/access endpoint 는 404 No route
 3. `csp_runtime.py` — 파일은 보존 (migrate 스크립트 의존), 모듈 docstring 을 RETIRED 격상
-4. `cims-console/src/api/cspRuntime.ts` — listServices() 만 남기고 25개 미사용 함수 + types 삭제. `SipService.listeners` 타입 `number[]` → `string[]` (allowed_local_node_refs)
+4. `ems/core/console/src/api/cspRuntime.ts` — listServices() 만 남기고 25개 미사용 함수 + types 삭제. `SipService.listeners` 타입 `number[]` → `string[]` (allowed_local_node_refs)
 
 LIVE PASS: GET /csp/services 이제 volte-basic/ptt-basic 실제 데이터, GET 999 → 404, POST → 410, /csp/listeners → 404 no route. TS check + Vite build + Python 176 tests 모두 PASS.
 

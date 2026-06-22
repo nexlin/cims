@@ -1,6 +1,6 @@
 ---
 name: 검증 6단계 재설계 + V2 UI 프로토타입 (2026-04-29)
-description: 6단계(S1~S6) 재설계 합의안 + 30 부모/14 자식 매핑 + 그룹핑 인프라 + Console UI 프로토타입 (cims-console/src/pages/VerificationV2Page.tsx, /testbed/verify-v2 route). Phase A.5 거의 완료 미커밋. 다음 세션 Phase B (인프라 마이그레이션) 또는 검증 이력 페이지 신설.
+description: 6단계(S1~S6) 재설계 합의안 + 30 부모/14 자식 매핑 + 그룹핑 인프라 + Console UI 프로토타입 (ems/core/console/src/pages/VerificationV2Page.tsx, /testbed/verify-v2 route). Phase A.5 거의 완료 미커밋. 다음 세션 Phase B (인프라 마이그레이션) 또는 검증 이력 페이지 신설.
 type: project
 originSessionId: 2e28cf33-1d54-41ed-9641-9d6c549f654f
 ---
@@ -28,7 +28,7 @@ originSessionId: 2e28cf33-1d54-41ed-9641-9d6c549f654f
 ```
 S1 (5, 평면)
   S1-PY-SYNTAX           — python3 -m py_compile
-  S1-FRONTEND-LINT       — npm run lint (cims-console)
+  S1-FRONTEND-LINT       — npm run lint (ems/core/console)
   S1-FRONTEND-TYPECHECK  — tsc -b --noEmit
   S1-CPP-FORMAT          — clang-format --dry-run --Werror (csp/.clang-format)
   S1-UNIT-VERIFY-LIB     — python3 -m unittest tests.test_verify_lib (31 tests)
@@ -110,8 +110,8 @@ UI 표시:
 
 ## V2 UI 프로토타입 (이번 세션 산출물 — 미커밋)
 
-**신규 파일**: `cims-console/src/pages/VerificationV2Page.tsx` (1224 lines, mock 데이터)
-**route 추가**: `cims-console/src/routes.tsx` 의 testbed section 에 `/testbed/verify-v2` 추가
+**신규 파일**: `ems/core/console/src/pages/VerificationV2Page.tsx` (1224 lines, mock 데이터)
+**route 추가**: `ems/core/console/src/routes.tsx` 의 testbed section 에 `/testbed/verify-v2` 추가
 **확인 URL**: `http://192.168.199.129:3000/testbed/verify-v2`
 
 ### 디자인 합의안 (Option C 하이브리드)
@@ -235,8 +235,8 @@ UI 표시:
 ## 미커밋 작업 (이번 세션)
 
 ```
-M cims-console/src/routes.tsx                  # /testbed/verify-v2 route 추가
-?? cims-console/src/pages/VerificationV2Page.tsx  # 1224 lines 신규
+M ems/core/console/src/routes.tsx                  # /testbed/verify-v2 route 추가
+?? ems/core/console/src/pages/VerificationV2Page.tsx  # 1224 lines 신규
 ```
 
 별도 변경 없는 항목:

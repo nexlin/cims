@@ -237,5 +237,5 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → SET_FLOOR_TI
 - CMP: `cmp/PMcpttGroup.{h,cpp}`(tier·선점·로깅), `cmp/PCmpServer.cpp`(명령 파싱)
 - CSP: `csp/McpttInfo.{h,cpp}`(신규 파서), `csp/ModuleDispatcher.cpp`(EventIncomingCall/EventReInvite/EventMessage), `csp/GroupCallService.cpp`(condition·fan-out·descriptor), `csp/CmpClient.cpp`(필드 전송), `csp/CspPttGroup.{h,cpp}`·`csp/DbManager.cpp`(컬럼), `csp/CallDir.h`(이벤트)
 - CSC: `csc/src/services/mcptt.py`(XCAP DB연동), `csc/src/handlers/admin.py`(CRUD·user 프로파일)
-- 콘솔: `cims-console/src/api/groups.ts`, `.../pages/PttGroupsWorkbenchPage.tsx`, 사용자 워크벤치
+- 콘솔: `ems/core/console/src/api/groups.ts`, `.../pages/PttGroupsWorkbenchPage.tsx`, 사용자 워크벤치
 - 문서: 본 문서 + `docs/design/features/ptt_flows.md` 갱신

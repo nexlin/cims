@@ -28,7 +28,7 @@ LIVE pipeline-full **38 / PASS 34 / FAIL 0 / SKIP 4 / 270.5s** — 회기능 무
 
 - csp/psp/isp/csc → active_standby
 - cmp/pmp/imp → all_active
-- cwrtc/cspsim/agent/cims-console/cims-phone → standalone
+- cwrtc/cspsim/agent/ems/core/console/cims-phone → standalone
 
 각 모듈 pkg.json 에 `"ha_capability"` 필드. 변종 (psp/isp/pmp/imp) 는 base (csp/cmp) 의 pkg.json 따라가므로 자동 상속.
 
@@ -57,15 +57,15 @@ a1f6cd4 docs(ha): §11.6 Console HaGroupsPage flow + 자동 분배 흐름
 ### 신규
 - `sql/migrate_ha_groups.sql` — DB schema (ha_groups + ha_group_members)
 - `csc/src/handlers/ha_groups.py` — CSC API (CRUD + member + VRID 자동 + enqueue update_ha)
-- `cims-console/src/api/ha_groups.ts` — Console API client
-- `cims-console/src/pages/HaGroupsPage.tsx` — 카드 grid + 멤버 inline + 생성 모달
+- `ems/core/console/src/api/ha_groups.ts` — Console API client
+- `ems/core/console/src/pages/HaGroupsPage.tsx` — 카드 grid + 멤버 inline + 생성 모달
 
 ### 수정
 - 각 base 모듈 `pkg.json` — ha_capability 필드 추가 (8 base)
 - `cims.sh:cmd_pkg` — meta.json 에 ha_capability 자동 포함
 - `csc/src/handlers/agents.py:_create_deployment` — mismatch 검증 (group 정의 시만)
 - `csc/src/csc_app.py` — CIMS_HA_GROUPS_HANDLER_LIST 등록
-- `cims-console/src/routes.tsx` — /deploy/ha-groups route
+- `ems/core/console/src/routes.tsx` — /deploy/ha-groups route
 - `agent/cims_agent.py:execute_job` — update_ha job 추가 + `job_update_ha` 신규
 - `docs/design/ha_design.md` — §11.6 Console flow 신규
 

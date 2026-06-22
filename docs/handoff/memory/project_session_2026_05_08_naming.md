@@ -52,14 +52,14 @@ originSessionId: be82a7dc-18c2-4a0c-acb2-72d9bf3fd592
 - scn_cert_rotate.py: agent_name = "mgmt-server", state_crt path 도 `dist/mgmt-server/agent/state/`.
 
 ### UI display
-- 신규 `cims-console/src/components/agentDisplay.ts` — kebab → "VoLTE SIP Server" 매핑.
+- 신규 `ems/core/console/src/components/agentDisplay.ts` — kebab → "VoLTE SIP Server" 매핑.
 - ServersPage / PackagesPage: `agentDisplayName(agent_name)` 표시 + 괄호 안 raw kebab.
 
 ## 검증 결과
 
 - ✓ unit test **161/161 PASS** (0.6s)
 - ✓ cims.sh syntax OK
-- ✓ TypeScript typecheck (cims-console) OK
+- ✓ TypeScript typecheck (ems/core/console) OK
 - ✓ stage1 verify **5/5 PASS** (11.1s)
 
 stale reference 0 (`csc-server-local` 등 패턴 모두 제거됨).

@@ -11,7 +11,7 @@ originSessionId: cd6b1a78-c813-4476-94ff-9e4c03c1033d
 | 서비스 | 포트 | 구동 방식 | 설정 SoT |
 |---|---|---|---|
 | **TB-CSC**     | 4419 (admin), 4431 (mcptt) | `python3 csc_app.py` + `CIMS_CSC_CONFIG=.../csc-tb.json` | `build/dist/csc/config/csc-tb.json` (configure.sh 에서 생성) |
-| **TB-Console** | 3000 | `npm run dev -- --mode tb --port 3000 --host` | `cims-console/.env.tb.local` (VITE_ADMIN_TARGET=https://127.0.0.1:4419) |
+| **TB-Console** | 3000 | `npm run dev -- --mode tb --port 3000 --host` | `ems/core/console/.env.tb.local` (VITE_ADMIN_TARGET=https://127.0.0.1:4419) |
 | **TB-agent**   | sync 9902 | `python3 cims_agent.py --csc-url https://127.0.0.1:4419 --name tb-agent-local --state-dir /tmp/cims-tb-agent/state` | state 자체에 저장 (session_token + agent.crt/key) |
 
 ### Test-agent (Phase 2/3 verify 시 일시 기동)
@@ -73,5 +73,5 @@ admin 계정 override: `CIMS_TB_ADMIN_ID` / `CIMS_TB_ADMIN_PASSWORD` (기본 adm
 - `cims.sh`: start_tb_csc / start_tb_console / start_tb_agent / _tb_issue_enrollment_token / _svc_port_proto 확장 / cmd_status 섹션 분리 / cmd_preflight TB 구분 / cmd_reset TB 유지 안내
 - `configure.sh`: apply_csc_tb_overlay 추가, .env.tb.local 생성
 - `csc/src/csc_app.py`: CIMS_CSC_CONFIG ENV override 한 줄
-- `cims-console/.gitignore`: `.env.*.local` 추가
+- `ems/core/console/.gitignore`: `.env.*.local` 추가
 - `cims-phone/{vite.config.ts, nginx.conf}`: 3000 → 3002 이전
