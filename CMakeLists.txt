@@ -370,10 +370,10 @@ add_custom_target(dist
     #    Phase 3: oam_app.py 별도 프로세스 (oam-tb.json / oam.json).
     #    Phase 4: oam/vendor 에 OAM 전용 + 공통 의존성.
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/oam/src
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/src ${CMAKE_BINARY_DIR}/dist/oam/src
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/config ${CMAKE_BINARY_DIR}/dist/oam/config
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ems/core/oam/src ${CMAKE_BINARY_DIR}/dist/oam/src
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ems/core/oam/config ${CMAKE_BINARY_DIR}/dist/oam/config
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/oam/vendor
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/vendor ${CMAKE_BINARY_DIR}/dist/oam/vendor
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ems/core/oam/vendor ${CMAKE_BINARY_DIR}/dist/oam/vendor
 
     # ── 6b. Agent 에셋 복사 (CSC 가 /install-agent.sh 로 서빙) ──
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/agent
@@ -383,14 +383,14 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/pkg.json          ${CMAKE_BINARY_DIR}/dist/csp/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/pkg.json          ${CMAKE_BINARY_DIR}/dist/cmp/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/pkg.json          ${CMAKE_BINARY_DIR}/dist/csc/pkg.json
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/oam/pkg.json          ${CMAKE_BINARY_DIR}/dist/oam/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/ems/core/oam/pkg.json          ${CMAKE_BINARY_DIR}/dist/oam/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/pkg.json        ${CMAKE_BINARY_DIR}/dist/cwrtc/pkg.json
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-console/pkg.json ${CMAKE_BINARY_DIR}/dist/console/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/ems/core/console/pkg.json ${CMAKE_BINARY_DIR}/dist/console/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-phone/pkg.json   ${CMAKE_BINARY_DIR}/dist/phone/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cspsim/pkg.json       ${CMAKE_BINARY_DIR}/dist/cspsim/pkg.json
 
     # ── 7. Web UI nginx 설정 복사 ──────────────────────────────
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-console/nginx.conf ${CMAKE_BINARY_DIR}/dist/console/nginx.conf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/ems/core/console/nginx.conf ${CMAKE_BINARY_DIR}/dist/console/nginx.conf
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-phone/nginx.conf   ${CMAKE_BINARY_DIR}/dist/phone/nginx.conf
 
     # ── 8. 관리 스크립트 복사 ──────────────────────────────────

@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # dist/ 디렉터리 안에서 실행 시: DIST_DIR = 현재 디렉터리
 if [[ -f "$SCRIPT_DIR/CMakeLists.txt" ]]; then
     DIST_DIR="$SCRIPT_DIR/build/dist"
-    SRC_CONSOLE="$SCRIPT_DIR/cims-console"
+    SRC_CONSOLE="$SCRIPT_DIR/ems/core/console"
     SRC_PHONE="$SCRIPT_DIR/cims-phone"
 else
     DIST_DIR="$SCRIPT_DIR"
@@ -208,7 +208,7 @@ cmd_build() {
     # 변종 (psp/isp/pmp/imp) 은 자기 pkg.json 없음 → base (csp/cmp) 의 pkg.json 만 갱신해도 충분.
     if [[ -n $version ]]; then
         local _comp _pkgf
-        for _comp in csp cmp csc cwrtc cspsim agent cims-console cims-phone; do
+        for _comp in csp cmp csc cwrtc cspsim agent ems/core/console cims-phone; do
             _pkgf="$SCRIPT_DIR/$_comp/pkg.json"
             [[ -f $_pkgf ]] && _pkg_write_version "$_pkgf" "$version"
         done
@@ -964,10 +964,10 @@ cmd_sync() {
                 "$SCRIPT_DIR/csc/src/" "$DIST_DIR/csc/src/"
             rsync -a --delete-excluded \
                 --exclude='__pycache__' --exclude='*.pyc' \
-                "$SCRIPT_DIR/oam/src/" "$DIST_DIR/oam/src/"
+                "$SCRIPT_DIR/ems/core/oam/src/" "$DIST_DIR/oam/src/"
         else
             cp -r "$SCRIPT_DIR/csc/src/." "$DIST_DIR/csc/src/"
-            cp -r "$SCRIPT_DIR/oam/src/." "$DIST_DIR/oam/src/"
+            cp -r "$SCRIPT_DIR/ems/core/oam/src/." "$DIST_DIR/oam/src/"
         fi
         # __pycache__ stale 제거 (PEP 420 namespace 전환에 따른 옛 캐시 잔재)
         find "$DIST_DIR/csc/src" "$DIST_DIR/oam/src" -type d -name __pycache__ \
@@ -979,19 +979,19 @@ cmd_sync() {
                   "$DIST_DIR/csc/config/config_template.json"
         fi
         # OAM 분리 Phase 2 — pkg.json 동기화 (별도 tarball 등록에 필요)
-        if [[ -f "$SCRIPT_DIR/oam/pkg.json" ]]; then
-            cp -f "$SCRIPT_DIR/oam/pkg.json" "$DIST_DIR/oam/pkg.json"
+        if [[ -f "$SCRIPT_DIR/ems/core/oam/pkg.json" ]]; then
+            cp -f "$SCRIPT_DIR/ems/core/oam/pkg.json" "$DIST_DIR/oam/pkg.json"
         fi
         # OAM 분리 Phase 3 — oam/config (oam.json / oam-tb.json) 동기화
         # + oam_base_service_split §7 — base 모드 활성화 템플릿(common/base/services 샘플) 동봉.
         #   운영자가 production 노드에서 .sample→실파일 rename 으로 --role base 전환할 수 있게.
-        if [[ -d "$SCRIPT_DIR/oam/config" ]]; then
+        if [[ -d "$SCRIPT_DIR/ems/core/oam/config" ]]; then
             mkdir -p "$DIST_DIR/oam/config"
-            cp -f "$SCRIPT_DIR/oam/config/"*.json "$DIST_DIR/oam/config/" 2>/dev/null || true
-            cp -f "$SCRIPT_DIR/oam/config/"*.sample "$DIST_DIR/oam/config/" 2>/dev/null || true
-            if [[ -d "$SCRIPT_DIR/oam/config/services" ]]; then
+            cp -f "$SCRIPT_DIR/ems/core/oam/config/"*.json "$DIST_DIR/oam/config/" 2>/dev/null || true
+            cp -f "$SCRIPT_DIR/ems/core/oam/config/"*.sample "$DIST_DIR/oam/config/" 2>/dev/null || true
+            if [[ -d "$SCRIPT_DIR/ems/core/oam/config/services" ]]; then
                 mkdir -p "$DIST_DIR/oam/config/services"
-                cp -f "$SCRIPT_DIR/oam/config/services/"* "$DIST_DIR/oam/config/services/" 2>/dev/null || true
+                cp -f "$SCRIPT_DIR/ems/core/oam/config/services/"* "$DIST_DIR/oam/config/services/" 2>/dev/null || true
             fi
         fi
         # OAM 녹취 변환툴(ffmpeg/ffprobe) vendor 자동 채움 — 빌드 시 정적 바이너리 다운로드.
@@ -1025,15 +1025,15 @@ cmd_sync() {
         mkdir -p "$DIST_DIR/oam-svc/src" "$DIST_DIR/oam-svc/config"
         if command -v rsync >/dev/null 2>&1; then
             rsync -a --delete-excluded --exclude='__pycache__' --exclude='*.pyc' \
-                "$SCRIPT_DIR/oam-svc/src/" "$DIST_DIR/oam-svc/src/"
+                "$SCRIPT_DIR/ems/service/oam/src/" "$DIST_DIR/oam-svc/src/"
         else
-            cp -r "$SCRIPT_DIR/oam-svc/src/." "$DIST_DIR/oam-svc/src/"
+            cp -r "$SCRIPT_DIR/ems/service/oam/src/." "$DIST_DIR/oam-svc/src/"
         fi
         find "$DIST_DIR/oam-svc/src" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-        [[ -d "$SCRIPT_DIR/oam-svc/config" ]] && \
-            cp -f "$SCRIPT_DIR/oam-svc/config/"*.json "$SCRIPT_DIR/oam-svc/config/"*.sample "$DIST_DIR/oam-svc/config/" 2>/dev/null
-        [[ -f "$SCRIPT_DIR/oam-svc/pkg.json" ]] && \
-            cp -f "$SCRIPT_DIR/oam-svc/pkg.json" "$DIST_DIR/oam-svc/pkg.json"
+        [[ -d "$SCRIPT_DIR/ems/service/oam/config" ]] && \
+            cp -f "$SCRIPT_DIR/ems/service/oam/config/"*.json "$SCRIPT_DIR/ems/service/oam/config/"*.sample "$DIST_DIR/oam-svc/config/" 2>/dev/null
+        [[ -f "$SCRIPT_DIR/ems/service/oam/pkg.json" ]] && \
+            cp -f "$SCRIPT_DIR/ems/service/oam/pkg.json" "$DIST_DIR/oam-svc/pkg.json"
         ok "oam-svc/src (+ config, pkg.json) ← $SCRIPT_DIR"
         n_changed=$((n_changed+1))
     fi
@@ -1079,24 +1079,46 @@ cmd_sync() {
         for t in csp cmp csc cwrtc cspsim; do
             [[ -f "$SCRIPT_DIR/$t/pkg.json" ]] && cp -f "$SCRIPT_DIR/$t/pkg.json" "$DIST_DIR/$t/pkg.json" 2>/dev/null || true
         done
-        [[ -f "$SCRIPT_DIR/cims-console/pkg.json" ]] && cp -f "$SCRIPT_DIR/cims-console/pkg.json" "$DIST_DIR/console/pkg.json" 2>/dev/null || true
+        [[ -f "$SCRIPT_DIR/ems/core/console/pkg.json" ]] && cp -f "$SCRIPT_DIR/ems/core/console/pkg.json" "$DIST_DIR/console/pkg.json" 2>/dev/null || true
         [[ -f "$SCRIPT_DIR/cims-phone/pkg.json"   ]] && cp -f "$SCRIPT_DIR/cims-phone/pkg.json"   "$DIST_DIR/phone/pkg.json"   2>/dev/null || true
         ok "pkg-meta ← 각 모듈 루트의 pkg.json"
         n_changed=$((n_changed+1))
     fi
 
-    # ── Console 정적 빌드 (Vite) ─────────────────────────────────
+    # ── Console 정적 빌드 (Vite) — base/svc 분리 ─────────────────
     # VITE_CONSOLE_TARGET=prod — sync 도 배포본 dist 기준 (TB-Console 은 dev 서버 별도)
+    # 콘솔 소스 = ems/core/console(공통, Vite 루트) + ems/service/console(서비스 팩, @svc).
+    # 두 벌 빌드:
+    #   svc(full): base 메뉴 + 서비스 메뉴 전부 → dist/console/dist (oam-svc 패키지 동봉)
+    #   base     : base 메뉴만 (VITE_CONSOLE_PROFILE=base, @svc manifest DCE 제거)
+    #              → dist/console/dist-base → oam-base 패키지 동봉 (부트스트랩 기본 UI)
+    # oam(base 게이트웨이)은 동봉 base 를 기본 서빙하다가, oam-svc(동봉 svc 콘솔)이
+    # 배포되면 console_static.resolve 가 그쪽(svc=full)을 우선 서빙 → 자동 승격.
     if [[ $did_console -eq 1 ]]; then
+        mkdir -p "$DIST_DIR/console"
+        # svc 팩(ems/service/console)이 core 루트 밖이라 bare import(react 등) 해석을 위해
+        # core 의 node_modules 를 svc 디렉토리에 symlink (idempotent; node_modules 는 git 제외).
+        if [[ -d "$SRC_CONSOLE/node_modules" ]]; then
+            ln -sfn ../../core/console/node_modules "$SCRIPT_DIR/ems/service/console/node_modules" 2>/dev/null || true
+        fi
+        # 1) svc(full) — base + 서비스 메뉴
         ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod npm run build 2>&1 | tail -3 )
         if [[ -d "$SRC_CONSOLE/dist" ]]; then
-            mkdir -p "$DIST_DIR/console"
             rm -rf "$DIST_DIR/console/dist"
             cp -r "$SRC_CONSOLE/dist" "$DIST_DIR/console/dist"
             cp -f "$SRC_CONSOLE/nginx.conf" "$DIST_DIR/console/nginx.conf" 2>/dev/null || true
-            ok "console ← cims-console/dist"
+            ok "console(svc=base+서비스) ← cims-console/dist"
         else
-            err "cims-console/dist 없음 (빌드 실패?)"
+            err "cims-console/dist 없음 (svc 빌드 실패?)"
+        fi
+        # 2) base — base 메뉴만 (oam-base 동봉용)
+        ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod VITE_CONSOLE_PROFILE=base npm run build 2>&1 | tail -3 )
+        if [[ -d "$SRC_CONSOLE/dist" ]]; then
+            rm -rf "$DIST_DIR/console/dist-base"
+            cp -r "$SRC_CONSOLE/dist" "$DIST_DIR/console/dist-base"
+            ok "console-base(base 메뉴만) ← cims-console/dist"
+        else
+            err "cims-console/dist 없음 (base 빌드 실패?)"
         fi
         n_changed=$((n_changed+1))
     fi
@@ -1128,7 +1150,7 @@ cmd_sync() {
 _FFMPEG_STATIC_URL_DEFAULT="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
 
 _ensure_oam_vendor_ffmpeg() {
-    local bin_dir="$SCRIPT_DIR/oam/vendor/bin"
+    local bin_dir="$SCRIPT_DIR/ems/core/oam/vendor/bin"
     mkdir -p "$bin_dir"
 
     [[ -n "${CIMS_SKIP_VENDOR_FETCH:-}" ]] && return 0
@@ -1377,7 +1399,7 @@ cmd_pkg() {
             case "$_t" in
                 csc) _sync_set[csc]=1 ;;   # OAM 분리 Phase 2 — sync csc 가 oam/src 도 함께
                 oam) _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-base: csc 블록이 oam/src(자체 httpsrv/util/services)도 동기화 + console 동봉 (oam 은 자족 — csc 코드 미동봉)
-                oam-svc) _sync_set[oam-svc]=1; _sync_set[csc]=1 ;;  # oam-svc = thin(자기 src 만 tarball); csc 블록이 oam/src 동기화 → 런타임/dev import 가능
+                oam-svc) _sync_set[oam-svc]=1; _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-svc = thin(자기 src) + svc(full) console 동봉; csc 블록이 oam/src 동기화 → 런타임/dev import 가능
                 agent)   _sync_set[agent]=1 ;;
                 console) _sync_set[console]=1 ;;
                 phone)   _sync_set[phone]=1 ;;
@@ -1420,10 +1442,10 @@ cmd_pkg() {
             csp|psp|isp) echo "$SCRIPT_DIR/csp" ;;   # 동일 csp 바이너리 + 동일 config_template
             cmp|pmp|imp) echo "$SCRIPT_DIR/cmp" ;;   # 동일 cmp 바이너리 + 동일 config_template
             csc)         echo "$SCRIPT_DIR/csc" ;;
-            oam)         echo "$SCRIPT_DIR/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
-            oam-svc)    echo "$SCRIPT_DIR/oam-svc" ;;  # oam_base_service_split D5 — base 게이트웨이 뒤 독립 서비스 모듈
+            oam)         echo "$SCRIPT_DIR/ems/core/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
+            oam-svc)    echo "$SCRIPT_DIR/ems/service/oam" ;;  # oam_base_service_split D5 — base 게이트웨이 뒤 독립 서비스 모듈
             cwrtc)       echo "$SCRIPT_DIR/cwrtc" ;;
-            console)     echo "$SCRIPT_DIR/cims-console" ;;
+            console)     echo "$SCRIPT_DIR/ems/core/console" ;;
             phone)       echo "$SCRIPT_DIR/cims-phone" ;;
             cspsim)      echo "$SCRIPT_DIR/cspsim" ;;
             agent)       echo "$SCRIPT_DIR/agent" ;;
@@ -1506,11 +1528,14 @@ cmd_pkg() {
             mkdir -p "$stage"
             cp -a "$DIST_DIR/oam" "$stage/oam"
             find "$stage/oam/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-            # oam_base_service_split — console(full) 을 oam-base 패키지에 동봉.
-            #   별도 console 모듈 폐기: oam 이 <root>/oam/console/dist 를 직접 서빙
-            #   (console_static.resolve 의 번들 후보). base/full 프로파일 빌드 없이 항상 full,
-            #   위젯 노출은 런타임 카탈로그(D1/D7: 설치된 서비스 ∩ RBAC)가 게이팅.
-            local _condist="$DIST_DIR/console/dist"
+            # 콘솔 base/svc 분리 (백엔드 oam-base/oam-svc 와 대칭) —
+            #   oam-base 패키지엔 **base 메뉴 콘솔(dist-base)** 만 동봉.
+            #   oam 이 <root>/oam/console/dist 를 서빙(console_static.resolve 의 번들 후보).
+            #   svc(full=base+서비스) 콘솔은 **oam-svc 패키지에 동봉**(아래 oam-svc 블록) →
+            #   oam-svc 배포 시 base OAM resolver 가 그쪽을 우선 서빙(자동 승격).
+            #   (dist-base 미존재 시 svc full 로 폴백 → 구 동작 호환)
+            local _condist="$DIST_DIR/console/dist-base"
+            [[ -d "$_condist" ]] || _condist="$DIST_DIR/console/dist"
             [[ -d "$_condist" ]] || _condist="$SRC_CONSOLE/dist"
             if [[ -d "$_condist" ]]; then
                 rm -rf "$stage/oam/console"
@@ -1519,6 +1544,28 @@ cmd_pkg() {
                 find "$stage/oam/console" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
             else
                 warn "oam: console dist 미발견($_condist) — 콘솔 미동봉 패키지(서빙 비활성)"
+            fi
+            pkg_root="$stage"
+        fi
+
+        # ── oam-svc: 콘솔 base/svc 분리 — svc(full=base+서비스) 콘솔을 oam-svc 패키지에 동봉.
+        #    base OAM resolver 가 배포된 oam-svc 의 console/dist 를 oam-base 동봉 base 콘솔보다
+        #    우선 서빙 → oam-svc 배포 시 콘솔이 자동으로 풀 메뉴로 승격(백엔드 분리와 대칭).
+        if [[ "$t" == "oam-svc" ]]; then
+            stage="$DIST_DIR/.pkgstage.$$.${t}"
+            rm -rf "$stage"
+            mkdir -p "$stage"
+            cp -a "$DIST_DIR/oam-svc" "$stage/oam-svc"
+            find "$stage/oam-svc/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
+            local _svcdist="$DIST_DIR/console/dist"
+            [[ -d "$_svcdist" ]] || _svcdist="$SRC_CONSOLE/dist"
+            if [[ -d "$_svcdist" ]]; then
+                rm -rf "$stage/oam-svc/console"
+                mkdir -p "$stage/oam-svc/console"
+                cp -a "$_svcdist" "$stage/oam-svc/console/dist"
+                find "$stage/oam-svc/console" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
+            else
+                warn "oam-svc: svc console dist 미발견($_svcdist) — 콘솔 미동봉"
             fi
             pkg_root="$stage"
         fi

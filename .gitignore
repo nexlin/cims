@@ -60,7 +60,7 @@ test_run/log/
 
 # OAM 녹취 변환툴(ffmpeg/ffprobe) — 빌드 시 다운로드해 패키지에 동봉하는 정적 바이너리.
 # git 에 커밋하지 않음(대용량). cims.sh 의 _ensure_oam_vendor_ffmpeg 가 채움.
-oam/vendor/bin/
+ems/core/oam/vendor/bin/
 
 # Verify reports (cims.sh verify / tests/cims_verify.py 결과)
 verify_reports/
@@ -86,7 +86,10 @@ verify_runs/
 # HA per-node config (auth_pass 등 비밀 포함, host-specific) — example 만 git
 agent/keepalived/ha.json
 agent/keepalived/out/
-oam/cache/
+ems/core/oam/cache/
 
 # OAM file_store 패키지 (cims.sh pkg / POST /packages 산출 tarball — 빌드 아티팩트, 재생성 가능)
-oam/packages/
+ems/core/oam/packages/
+
+# 콘솔 svc 팩 node_modules 심링크(빌드시 cims.sh 가 생성, core 공유)
+ems/service/console/node_modules
