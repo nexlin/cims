@@ -452,9 +452,47 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         strContactUri = szFromBuf;
     }
 
+    // ── 규격 정합 (item 5): Content-Type / Event 헤더 + affiliation command 본문 파싱 ──
+    //   TS 24.379 §9 affiliation 본문 = application/vnd.3gpp.mcptt-affiliation-command+xml.
+    //   Content-Type 가 명시됐는데 affiliation 타입이 아니면 경고(호환 위해 거부는 안 함).
+    const std::string &strCtSub = pclsMessage->m_clsContentType.m_strSubType;
+    if ( !strCtSub.empty() && strCtSub.find( "mcptt-affiliation" ) == std::string::npos ) {
+        CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] 예상밖 Content-Type %s/%s (mcptt-affiliation-command 기대)",
+                     pclsMessage->m_clsContentType.m_strType.c_str(), strCtSub.c_str() );
+    }
+    CSipHeader *pclsEvent = pclsMessage->GetHeader( "Event" );
+    if ( pclsEvent && !pclsEvent->m_strValue.empty() ) {
+        CLog::Print( LOG_DEBUG, "[Affiliation/PUBLISH] Event=%s", pclsEvent->m_strValue.c_str() );
+    }
+
     int iExpires = pclsMessage->GetExpires();
-    bool bDeaffiliate =
-        ( iExpires == 0 ) || ( pclsMessage->m_strBody.find( "de-affiliate" ) != std::string::npos );
+    const std::string &strBody = pclsMessage->m_strBody;
+    // affiliate vs de-affiliate 판정 — affiliation command 요소 기반(단순 substring 아님):
+    //   Expires:0 | <de-affiliate.../> | <deaffiliate.../> | "de-affiliate" 텍스트 → 해제, else 등록.
+    bool bDeaffiliate = ( iExpires == 0 )
+                        || ( strBody.find( "deaffiliate" )  != std::string::npos )    // <deaffiliate> (무하이픈)
+                        || ( strBody.find( "de-affiliate" ) != std::string::npos );   // <de-affiliate> / 텍스트
+
+    // ── 규격 정합 (item 1): 멤버십 게이트 — 자신이 멤버인 그룹에만 affiliate 가능 ──
+    //   TS 24.481/24.379. (de-affiliate 는 멤버 여부와 무관하게 항상 허용.)
+    if ( !bDeaffiliate ) {
+        CspPttGroup clsGroup;
+        bool bMember = false;
+        if ( gclsGroupMap.Select( strReqUriUser.c_str(), clsGroup ) ) {
+            for ( const auto &pUser : clsGroup._pusers ) {
+                if ( pUser && ( pUser->_id == strFromId || pUser->_mcpttId == strFromId ) ) {
+                    bMember = true;
+                    break;
+                }
+            }
+        }
+        if ( !bMember ) {
+            CLog::Print( LOG_ERROR, "[Affiliation/PUBLISH] Rejected: user %s not a member of group %s",
+                         strFromId.c_str(), strReqUriUser.c_str() );
+            SendResponse( pclsMessage, 403 );
+            return true;
+        }
+    }
 
     if ( gclsDbManager.IsConnected() ) {
         if ( bDeaffiliate ) {
