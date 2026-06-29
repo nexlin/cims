@@ -74,6 +74,10 @@ class SipService : Service() {
     fun reject(callId: Int) = controller?.reject(callId)
     fun hangup(callId: Int) = controller?.hangup(callId)
 
+    /** M1.3 영상: 발신 전 영상 on/off + 수신 영상 렌더 Surface 전달. */
+    fun setVideoEnabled(on: Boolean) { controller?.videoEnabled = on }
+    fun setVideoSurface(surface: Any?) { controller?.setVideoSurface(surface) }
+
     /** 등록 해제 + Endpoint 정리 + 서비스 종료. */
     fun stopSip() {
         controller?.unregister()

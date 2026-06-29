@@ -8,6 +8,8 @@ import android.content.ServiceConnection
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -29,6 +31,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,8 +42,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -119,6 +124,12 @@ private fun HomeScreen(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { service?.ensureRegistered() }
 
+    // M1.3 영상 토글 + 카메라 권한
+    var videoOn by remember { mutableStateOf(false) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) service?.setVideoEnabled(true) else videoOn = false }
+
     // 상태 관찰 — 서비스 바인딩 전에도 안전하도록 안정적 fallback flow 사용
     val fallbackReg = remember { MutableStateFlow<RegState>(RegState.Idle) }
     val fallbackCall = remember { MutableStateFlow<CallState>(CallState.Null) }
@@ -157,6 +168,14 @@ private fun HomeScreen(
             OutlinedButton(onClick = onEditConfig) { Text("설정") }
         }
 
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = videoOn, onCheckedChange = { on ->
+                videoOn = on
+                if (on) cameraLauncher.launch(Manifest.permission.CAMERA) else service?.setVideoEnabled(false)
+            })
+            Text("영상 통화 (H.264)")
+        }
+
         HorizontalDivider()
 
         CallPanel(
@@ -168,6 +187,11 @@ private fun HomeScreen(
             onReject = { id -> service?.reject(id) },
             onHangup = { id -> service?.hangup(id) },
         )
+
+        // 수신 영상 렌더 — 통화 활성/발신 중 + 영상 on
+        if (videoOn && (call is CallState.Active || call is CallState.Outgoing)) {
+            VideoRender(onSurface = { service?.setVideoSurface(it) })
+        }
 
         HorizontalDivider()
 
@@ -223,6 +247,23 @@ private fun CallPanel(
             }
         }
     }
+}
+
+@Composable
+private fun VideoRender(onSurface: (Any?) -> Unit) {
+    // SurfaceView 의 Surface 를 PJSIP 영상 윈도우로 전달(M1.3). 컴포지션 이탈 시 surfaceDestroyed→null.
+    AndroidView(
+        modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f),
+        factory = { ctx ->
+            SurfaceView(ctx).apply {
+                holder.addCallback(object : SurfaceHolder.Callback {
+                    override fun surfaceCreated(h: SurfaceHolder) = onSurface(h.surface)
+                    override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) = onSurface(h.surface)
+                    override fun surfaceDestroyed(h: SurfaceHolder) = onSurface(null)
+                })
+            }
+        },
+    )
 }
 
 @Composable

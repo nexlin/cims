@@ -47,6 +47,16 @@ class SipController(private val config: SipAccountConfig) {
     @Volatile
     var videoEnabled = false                                       // M1.3 토글
 
+    /** 수신 영상 렌더 대상(Android Surface). UI SurfaceView 준비 시 [setVideoSurface] 로 주입. */
+    @Volatile var videoRenderSurface: Any? = null
+        private set
+
+    /** 렌더 Surface 설정/해제 + 활성 호에 재결선(미디어가 이미 active 였던 경우). */
+    fun setVideoSurface(surface: Any?) = onCtl {
+        videoRenderSurface = surface
+        if (surface != null) calls.values.forEach { runCatching { it.attachVideo(surface) } }
+    }
+
     // ── PTT(M2) 지원 ──
     /** 반이중(PTT): true 면 mic 는 floor GRANT 시에만 송신, spk 는 상시 청취. (VoLTE=false 전이중) */
     @Volatile var halfDuplex = false

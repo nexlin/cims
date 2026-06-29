@@ -7,6 +7,8 @@ import org.pjsip.pjsua2.Call
 import org.pjsip.pjsua2.OnCallMediaStateParam
 import org.pjsip.pjsua2.OnCallSdpCreatedParam
 import org.pjsip.pjsua2.OnCallStateParam
+import org.pjsip.pjsua2.VideoWindowHandle
+import org.pjsip.pjsua2.pjmedia_dir
 import org.pjsip.pjsua2.pjmedia_type
 import org.pjsip.pjsua2.pjsip_inv_state
 import org.pjsip.pjsua2.pjsua_call_media_status
@@ -74,7 +76,27 @@ class CimsCall : Call {
         runCatching {
             connectListen()
             if (!owner.halfDuplex) setMic(true)
+            owner.videoRenderSurface?.let { attachVideo(it) }   // M1.3 수신 영상 렌더
         }.onFailure { Log.w(TAG, "onCallMediaState: ${it.message}") }
+    }
+
+    /**
+     * 수신 H.264 영상을 [surface](Android Surface)에 렌더 (M1.3). 미디어 active 시 또는 surface 가
+     * 나중에 준비됐을 때 [SipController.setVideoSurface] 가 재호출. 송신(카메라)은 PJSIP 영상 디바이스 자동.
+     */
+    fun attachVideo(surface: Any) {
+        val ci = info
+        for (i in 0 until ci.media.size) {
+            val m = ci.media[i]
+            if (m.type == pjmedia_type.PJMEDIA_TYPE_VIDEO &&
+                m.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_ACTIVE &&
+                (m.dir and pjmedia_dir.PJMEDIA_DIR_DECODING) != 0
+            ) {
+                val vw = m.videoWindow
+                vw.setWindow(VideoWindowHandle().apply { handle.setWindow(surface) })
+                vw.Show(true)
+            }
+        }
     }
 
     /** 활성 오디오 미디어(없으면 null). Endpoint 소유이므로 보관 금지 — 매번 재취득(설계서 §3.4). */
