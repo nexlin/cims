@@ -1,7 +1,5 @@
 # Agent — 배포/프로세스 제어 데몬
 
-> 버전: 2.0 (2026-05-27 — systemd 단일 운영 정책 전환)
-
 **단일 Python 바이너리** (`agent/cims_agent.py`) 로 구성된 배포 데몬. 각 호스트에서 실행되며 CSC 의 명령을 수행하고 설정 jsonl 을 관리합니다.
 
 ## 1. 역할
@@ -25,7 +23,7 @@
 | host 재기동 시 자동 기동 | `loginctl enable-linger $USER` + unit `WantedBy=default.target` |
 | 1 user = 1 agent | unit 이름 단일 (`cims-agent.service`). 같은 호스트에 여러 agent 필요 시 별도 user (`cims2` 등) 로 install |
 
-옛 nohup 모드 / `--no-systemd` 옵션 / `setup-systemd.sh` 전환 sub-script 는 모두 폐기 — install 시점부터 systemd 운영.
+install 시점부터 systemd 로 운영한다.
 
 ## 3. 파일 레이아웃
 
@@ -59,7 +57,7 @@
 | `offline` | 일정 시간 heartbeat 끊김 (sweep `AgentStaleSec` 기본 8s = heartbeat 2s × 4) |
 | `revoked` | 관리자가 세션 폐기 — re-enroll 불가 |
 
-**re-enroll 시나리오 (host 다운/재install)**: token 재발급 후 enroll 호출 시 `offline` 상태도 허용 (`revoked` 만 차단). 옛 `pending/approved` whitelist 였던 동작이 2026-05-27 fix 로 완화됨.
+**re-enroll 시나리오 (host 다운/재install)**: token 재발급 후 enroll 호출 시 `pending`/`approved`/`offline` 상태 모두 허용 (`revoked` 만 차단).
 
 ## 5. 설치 방법 (2단계)
 

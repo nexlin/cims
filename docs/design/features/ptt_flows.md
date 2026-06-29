@@ -1,9 +1,6 @@
 # PTT 서비스 케이스 및 메시지 Flow
 
-**작성일:** 2026-04-03
-**최종 수정:** 2026-06-03 (3GPP MCPTT 규격전환 완료 — on-demand 호모델 / PUBLISH affiliation / XCAP HTTP / broadcast floor / 개시자 floor 정합)
-
-> **⭐ 2026-06-03 3GPP MCPTT 규격전환 완료 (UE↔CSP / UE↔CSC)** — 호 수명 모델이 `group_type` 으로 분기한다.
+> **현재 동작 요약 (3GPP MCPTT — UE↔CSP / UE↔CSC)** — 호 수명 모델이 `group_type` 으로 분기한다.
 >
 > | group_type | 모드 | 절차 |
 > |---|---|---|
@@ -11,14 +8,14 @@
 > | `chat` | **상시(persistent)** | 상시 세션, 멤버는 affiliation 시 합류, de-affiliate/dereg 시 이탈 (§10.2) |
 > | `broadcast` | on-demand + 발신자 floor 독점 | 개시자만 발언, 타 멤버 floor REQUEST 는 CMP 가 REJECT (TS 24.380 §10.3) |
 >
-> - **REGISTER 는 호에 무영향** (구 always-on 자동초대/기동 시 자동생성 제거). 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
-> - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. (구 SUBSCRIBE-presence 경로는 호환 유지.)
+> - **REGISTER 는 호에 무영향**. 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
+> - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다.
 > - **개시자(originator) 도 CMP floor/RTP 멤버**: `ProcessGroupCall` 이 caller 를 `JOIN_PTT_GROUP`(audio/floor=audio+1) → caller RTP 릴레이 + floor 참여. 200 OK 에 `m=application`(SharedFloorPort) 광고(psip `AddSdp` append, audio-only 호엔 무영향) → 개시자가 floor dest 학습.
 > - **broadcast**: `ADD_PTT_GROUP` 에 `group_type`+`initiator_id` 전달 → CMP `handleFloorRequest` 가 개시자 외 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`).
-> - **신규 그룹 즉시 발신**: `EventIncomingCall` 이 그룹 캐시 미스 시 `LoadFromDb()` lazy-reload (notify 도달 무관 안전망). + csc `notify_csp` GROUP_CHANGED 를 CSP+PSP 양쪽 broadcast.
-> - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` = `https://{CSC}:{4430}/`(`Setup.Xcap.{Host,Port,Scheme}`, 구 `http://{CSP}:4420` 오지정 교정). UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
+> - **신규 그룹 즉시 발신**: `EventIncomingCall` 이 그룹 캐시 미스 시 `LoadFromDb()` lazy-reload (notify 도달 무관 안전망). csc `notify_csp` GROUP_CHANGED 를 CSP+PSP 양쪽 broadcast.
+> - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` = `https://{CSC}:{4430}/`(`Setup.Xcap.{Host,Port,Scheme}`). UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
 >
-> **2026-06-02 3GPP 정합 (유지)**
+> **3GPP 정합 세부**
 > - 그룹 식별: `ptt_groups.id`=surrogate(키), `mcptt_group_id`=식별자. 멤버 `role`(chair/participant)·`mcptt_id`.
 > - INVITE: `mcptt-info+xml` + **`resource-lists+xml`(멤버 로스터)** + SDP. (로스터는 INVITE>8192B 우려 시 생략 → GMS 의존)
 > - **chair** = participant floor 항상 선점(TS 24.380). 200 OK 의 `m=application` floor 포트 파싱.
@@ -246,9 +243,8 @@ UE(단말)                CSP
   │ ── REGISTER+Auth ─► │
   │ ◄── 200 OK ──────── │  (Expires 3600 강제)
   │                      │
-  │  ※ 구 always-on 모델의 "그룹 자동초대" 는 제거됨.
-  │     REGISTER 갱신(refresh)은 진행 중인 호/floor 에 무영향
-  │     (구 버전은 갱신마다 teardown+재초대 → 밤샘 불안정의 원인이었음).
+  │  ※ REGISTER 는 그룹 호를 자동초대하지 않는다.
+  │     REGISTER 갱신(refresh)은 진행 중인 호/floor 에 무영향.
 ```
 
 ### B3. 구성 취득 (GMS/CMS — xcap-diff 구독 + XCAP 문서 GET; UE↔CSP NOTIFY + UE↔CSC HTTP)
@@ -272,7 +268,7 @@ UE                      CSP                          CSC McpttServer(HTTPS :4430
   │ ── HTTPS GET .. If-None-Match: {etag} ──────────────────────────────────► │
   │ ◄── 304 Not Modified ─────────────────────────────────────────────────────  │
 ```
-> 무토큰 GET → 401. xcap-root 구 `http://{CSP}:4420`(라우트 없는 Admin 서버 오지정)을 `https://{CSC}:4430`(McpttServer)로 교정. cspsim 은 `RecvResponse`/NOTIFY 에서 floor·문서 경로를 학습해 동일 흐름 수행.
+> 무토큰 GET → 401. xcap-root = `https://{CSC}:4430`(McpttServer). cspsim 은 `RecvResponse`/NOTIFY 에서 floor·문서 경로를 학습해 동일 흐름 수행.
 > **CIMS 실제 시점:** SUBSCRIBE/NOTIFY(SIP)는 Digest 세션으로 동작하며, access_token 은 위 XCAP
 > GET **직전에 B1 의 /idms PKCE 로 lazy 취득**한다(토큰의 유일 소비처가 XCAP).
 
@@ -307,7 +303,7 @@ UE                      CSP (CCscfModule)
 > TS 24.379 §9 affiliation 은 (a) 사용자 **자신**의 affiliation status change 와 (b) 권한자에
 > 의한 affiliation-command(`application/vnd.3gpp.mcptt-affiliation-command+xml`)가 구분되므로,
 > `Event` 헤더·본문 content-type 을 TS 24.379 §9.2.1 대조로 확정할 것(현재 값은 미검증).
-> 구 SUBSCRIBE-presence affiliation 경로는 호환을 위해 유지(추가형).
+> SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다(추가형).
 
 ### B5. on-demand 그룹콜 개시 (prearranged / broadcast — TS 24.379 §10.1/§10.3)
 
@@ -344,7 +340,7 @@ prearranged / broadcast (on-demand):
 
 chat (상시):
   CheckGroupIntegrity 가 active chat 세션 유지 — affiliate 멤버 합류(InviteMember),
-  de-affiliate/dereg 시 이탈. (구 "기동 시 전 그룹 자동 생성(SyncGroupsState proactive)" 은 제거됨.)
+  de-affiliate/dereg 시 이탈.
 ```
 
 > 신규 그룹은 `EventIncomingCall` 의 캐시 미스 lazy-reload 로 재기동 없이 즉시 발신 가능. CSC `notify_csp(GROUP_CHANGED)` 는 CSP+PSP 양쪽 broadcast.

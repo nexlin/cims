@@ -1,42 +1,28 @@
 # Runtime Store v2 — 모듈/버전 귀속 네임스페이스 설계
 
-> 2026-06-15 작성. [runtime_store_design.md](runtime_store_design.md)(평면 file-store 원설계)의
-> **개정안**. 본 문서는 설계 합의를 위한 것이며, 구현은 합의 후 단계 진행한다.
+> [runtime_store_design.md](runtime_store_design.md)(평면 file-store 원설계)를 모듈/버전 귀속
+> 네임스페이스로 개정한 현행 레이아웃이다.
 > 관련: [oam_csc_split.md](oam_csc_split.md) · [features/sip_runtime_config.md](features/sip_runtime_config.md) ·
 > [features/package_and_template.md](features/package_and_template.md)
 
-## 1. 배경 / 문제
+## 1. 설계 원칙
 
-현재 OAM runtime store 는 `{CimsRuntimeDir}/<domain>/` **단일 평면 네임스페이스**에 모든
-데이터를 둔다. 실측(media02, CSP 미배포 노드):
+OAM runtime store 는 모듈/버전 귀속 네임스페이스를 따른다. 평면 단일 네임스페이스
+(`{CimsRuntimeDir}/<domain>/`)가 야기하던 다음 결함을 회피하기 위함이다.
 
-```
-/opt/cims-agent/modules/oam/runtime/
-  .jwt_secret
-  agents/ deployments/ jobs/ metrics/ packages/ pkg_files/ ha_groups/   ← OAM 관리평면
-  console_accounts/ console_layouts/ console_menu/                       ← OAM 콘솔
-  csp_listener/ sip_service/ sip_trunk/ routing_rule/ routing_access_list/ csp_sync_txn/ services/
-                                        ← CSP 모듈 컬렉션 (OAM 디렉터리 안에 타 모듈 데이터)
-```
+1. **모듈 간 이름 충돌 방지** — 여러 모듈이 같은 이름 컬렉션(`rules`/`routes`/`services` 등)을
+   가질 수 있으므로, 컬렉션 SoT 를 모듈 네임스페이스로 분리하고 `(owner, name)` 유일성을 강제한다.
+2. **소유권 정합** — 모듈 컬렉션 SoT 는 그 모듈의 소유 공간(`modules/<owner>/runtime/`)에 둔다.
+   OAM 디렉터리에 타 모듈 데이터를 두지 않는다.
+3. **라이프사이클 결합** — 모듈 runtime 디렉터리는 그 모듈 배포 시에만 생성한다. 읽기만으로는
+   디렉터리를 만들지 않는다(읽기 부수효과 생성 제거).
+4. **버전 귀속/스키마 정합** — SoT 레코드(또는 도메인)에 schema_version 메타를 두어 적용 대상
+   모듈 버전과 대조한다. config_template(schema)은 패키지 버전에 동봉한다.
+5. **시크릿 격리** — `.jwt_secret` 등은 데이터와 분리된 권한/백업/동기화 범위(`_secrets/`)에 둔다.
+6. **래퍼/페이로드 config 단일화** — 모듈 바이너리가 읽는 위치를 SoT 로 명확화하고 래퍼 config
+   중복을 제거한다.
 
-### 확인된 문제
-
-1. **모듈 간 이름 충돌(잠재)** — 컬렉션 보유 모듈은 현재 csp(9)뿐(cmp/imp/psp/isp/csc=0).
-   어느 모듈이 같은 이름 컬렉션(`rules`/`routes`/`services` 등)을 추가하면 같은 전역
-   디렉터리에서 레코드가 섞인다. `(owner, name)` 유일성을 강제하는 장치 없음.
-2. **소유권 역전** — CSP 컬렉션 SoT 가 `modules/oam/runtime/` (OAM 디렉터리) 안에 존재.
-   모듈 데이터가 OAM 소유 공간에 종속됨.
-3. **라이프사이클 미결합** — `file_store.domain_dir()` 이 매 호출 `makedirs` → **읽기만 해도**
-   디렉터리 생성. CSP 미배포 노드(media02)에도 `csp_listener/` 등이 read 부수효과로 생김.
-   배포 여부와 무관하게 도메인이 materialize 된다.
-4. **버전 귀속 불일치** — SoT 는 버전 무관(`modules/oam/runtime/<col>`), 적용본은 버전 귀속
-   (`modules/<m>/<ver>/config/<col>.jsonl`), schema(`config_template.json`)도 버전 종속.
-   모듈 버전 간 **스키마 변경** 시 단일 SoT 가 어느 버전 모양인지 모호 → 버전 불일치 위험.
-5. **시크릿 노출면** — `.jwt_secret` 이 데이터와 동일 권한/백업/동기화 범위에 평면 위치.
-6. **래퍼/페이로드 config 중복** — `modules/<m>/<ver>/config/` (래퍼)와
-   `modules/<m>/<ver>/<pkg>/config/` (페이로드) 양쪽에 config 존재 → SoT 모호.
-
-## 2. 현재 설정 동기화 절차 (개정 대상 — 참고)
+## 2. 설정 동기화 절차
 
 CIMS 설정은 두 종류이며 적용 경로가 다르다.
 
@@ -67,7 +53,7 @@ CIMS 설정은 두 종류이며 적용 경로가 다르다.
   새 버전 디렉터리로 마이그레이션** → 모듈 측 설정은 **버전 귀속**.
 - 롤백 = deployment 가 이전 버전 디렉터리를 가리키게 전환(그 버전 config 그대로 생존).
 
-## 3. 목표 레이아웃 (v2)
+## 3. 디렉토리 레이아웃
 
 ```
 /opt/cims-agent/                          # PREFIX
@@ -126,25 +112,10 @@ CIMS 설정은 두 종류이며 적용 경로가 다르다.
 - **무중단 이행**: 읽기 시 v2 경로 우선 → 없으면 구 평면 경로 fallback. 1회 rename 이행
   스크립트 + 미배포 모듈 빈 잔재 디렉터리 제거.
 
-## 5. 단계 (Phase)
+핵심 헬퍼: `file_store.domain_dir`(카테고리) · `ha_lookup.collection_dir`/`migrate_flat_collections`/
+`prune_module_collections`(컬렉션 경로·라이프사이클) · `services/collection_schema.py`(버전/schema 정합).
 
-| P | 내용 | 상태 | 커밋 |
-|---|---|---|---|
-| P1 | 시크릿 격리 `runtime/_secrets/` (.jwt_secret) 0700 | ✅ 완료 | `98fbe620` (+라이브 .49 적용) |
-| P2 | OAM 자기 데이터 카테고리화 `control/`·`console/` | ✅ 완료 | `5861b0c6` (라이브 dev 이행, 카운트 보존) |
-| P3 | 모듈 prefix `modules/<m>/runtime/collections/` + 레지스트리 유일성 | ✅ 완료 | `a05d6761` |
-| P4 | 라이프사이클 결합(읽기 무생성·uninstall prune) | ✅ 완료 | `ce3168a2` |
-| P5 | 버전/schema 정합(schema_version 메타 + 업그레이드 마이그레이션 훅) | ✅ 완료 | `1210d0a2` |
-
-**구현 순서**: P1 → P3 → P4 → P2 → P5 (전부 dev 라이브 검증). 핵심 헬퍼:
-`file_store.domain_dir`(P2 카테고리) · `ha_lookup.collection_dir`/`migrate_flat_collections`/
-`prune_module_collections`(P3·P4) · `services/collection_schema.py`(P5).
-
-> ⚠️ 프로덕션 정합: 컬렉션 경로(P3/P4)·schema(P5)는 csc·OAM 공유 코드라 **deployed csc/oam
-> 패키지 재배포로 정합** 필요(현재 컬렉션 데이터 0건이라 기능 영향 없음). dev 활성 plane
-> (repo OAM)은 이미 P1~P5 라이브.
-
-## 6. 미결 / 검토 필요
+## 5. 미결 / 검토 필요
 
 - service-scope(그룹 공유) vs system+all_active(노드별 상이) 의 SoT 표현: 후자는
   `modules/<m>/runtime/collections/<col>/<deployment_id>/` 처럼 **인스턴스 키**가 필요한가?

@@ -44,7 +44,7 @@ CSP ──(JSON/UDP 9000)──→ CmpServer
 
 ### 2.2 VoIP/PTT 핸들러 분리
 
-이전 구조에서는 VoIP와 PTT가 동일한 PRtpTrans(4포트 블록)을 공유했으나, 현재는 용도별로 분리:
+VoIP와 PTT는 용도별로 핸들러를 분리한다:
 
 | 구분 | 핸들러 | 소켓 구성 | 포트 블록 |
 |------|--------|-----------|-----------|
@@ -252,7 +252,7 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 }
 ```
 
-- `rtp_ports_*` = VoIP 풀(`_freeResources`/`PRtpTrans`), `ptt_rtp_ports_*` = PTT 전용 풀(`_freePttResources`/`PPttTrans`) — 리소스 풀 분리(0.0.6+). OAM `/stats/health` 가 `cmp.rtp_ports` + `cmp.rtp_ports_ptt` 로 분리 전달.
+- `rtp_ports_*` = VoIP 풀(`_freeResources`/`PRtpTrans`), `ptt_rtp_ports_*` = PTT 전용 풀(`_freePttResources`/`PPttTrans`). OAM `/stats/health` 가 `cmp.rtp_ports` + `cmp.rtp_ports_ptt` 로 분리 전달.
 
 #### ALIVE / HEARTBEAT — 연결 확인
 
@@ -459,7 +459,7 @@ handleFloorRequest(sessionId, ssrc)
       │   └─ 전체에게 FLOOR_TAKEN 브로드캐스트
       └─ 비선점 → 요청자에게 FLOOR_REJECT
 ```
-> 2026-06: 멤버 `role`(chair/participant)이 JOIN_PTT_GROUP/멤버문자열(`id:prio:role`)로 전달되어 선점 판정에 사용.
+> 멤버 `role`(chair/participant)이 JOIN_PTT_GROUP/멤버문자열(`id:prio:role`)로 전달되어 선점 판정에 사용.
 > 모든 floor 이벤트는 세션 시간버킷 `{record_dir}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl` 에 기록(GRANT/REVOKE/REJECT/RELEASE/IDLE + prio/preempt).
 > 세그먼트는 `seg/{NNN}/`(100세그 shard), 빈 트랙(.rtp) 미생성. 상세 [recording.md](../features/recording.md).
 
@@ -649,7 +649,7 @@ CallMap(relay descriptor)이 소실되어 relay 가 REMOVE 를 영영 못 받고
 
 **관측**: STATS 응답에 `leak_reclaim_total`/`leak_reclaim_orphan`/`leak_reclaim_hold` + `orphan_reclaim_sec`/`session_timeout`.
 OAM `GET /api/v1/stats/leak-reclaims?date=` → reclaim.jsonl 목록 + reason/node 집계. 콘솔 '성능 > 누수 회수(sweeper)' 페이지.
-> RtpMap 포트단독키 버그(CSP) 수정 후 정상 환경에서는 이 카운터가 **0** 이 기대값 — 증가 시 CSP crash/teardown 누락 등 새 누수 신호.
+> 정상 환경에서는 이 카운터가 **0** 이 기대값 — 증가 시 CSP crash/teardown 누락 등 누수 신호.
 
 ---
 

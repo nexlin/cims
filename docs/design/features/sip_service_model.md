@@ -1,8 +1,7 @@
 # SIP 설정 모델 (Local/Remote Node + Rule/RuleSet + Policy)
 
-> **2026-04-22 개정 (v3)** — 기존 `service + trunk + route + acl` flat 4-collection 모델을
 > telco IBCF 계열의 **LocalNode / RemoteNode / Route / RouteSet + Rule / RuleSet + Policy**
-> 9-collection 모델로 재설계. Access(UE facing) 와 Peering(IMS 연동) 을 하이브리드로 구분.
+> 9-collection 모델. Access(UE facing) 와 Peering(IMS 연동) 을 하이브리드로 구분.
 >
 > 이 문서는 **데이터 모델/의미** 만 다루며, 저장/반영 경로는 `sip_runtime_config.md`,
 > 패키지 형식은 `package_and_template.md` 를 참조.
@@ -92,7 +91,7 @@ Access Service     UE 가 직접 붙는 서비스(voip/ptt) — domain + auth_re
 
 ### 2-1. LocalNode
 
-CSP 가 수신하는 bind 포트. 기존 listener 와 동일한 역할에 `edge` 분류를 추가.
+CSP 가 수신하는 bind 포트. `edge` 분류를 가진다.
 
 | 필드 | 의미 |
 |---|---|
@@ -200,6 +199,20 @@ Rule Set 이 match 하면 target 으로 호를 routing.
 | `transform_rule_set_refs[]` | **예약 필드** — 1차에서 런타임 미구현 |
 | `fail_action` | target=route_set 이 모두 dead 일 때 `reject` / `next_policy` |
 
+**런타임 적용 흐름:**
+
+RoutingPolicy 매칭 결과가 실제 메시지 forward 로 반영되는 경로:
+
+```
+ModuleDispatcher
+  ├─ routing_policies 매칭 (RoutingPolicyEngine)
+  ├─ RouteMap / RemoteNodeMap 조회 → RemoteNode.protocol(transport) 확인
+  ├─ PendingRouteMap (Call-ID 키) 에 적재
+  └─ B2BUA 가 B-leg dialog 생성 시 그 peer ip/port/transport 로 forward
+```
+
+- 내부 가입자(등록 단말) 콜 라우팅은 별도 경로로, `AddRoute(ip, port, transport)` 로 Route 헤더를 직접 주입한다.
+
 ### 2-8. AclPolicy — match → allow/deny
 
 Rule Set 이 match 하면 action.
@@ -225,13 +238,14 @@ UE 가 직접 REGISTER 하는 서비스 도메인.
 | `auth_realm` | 비우면 domain 상속 |
 | `inbound_policy` | `any` / `restricted` |
 | `allowed_local_node_refs[]` | restricted 일 때 허용 LocalNode 목록 |
+| `server_identity_uri` | (optional) OPTIONS/keepalive 등에서 서버 From identity 를 IMS 규격(`sip:cspserver@<domain>`)으로 조립할 때 사용. 미지정 시 service.domain 기반 자동 조립. 저장 위치는 `access_services.jsonl` file-store (SQL 테이블 아님). |
 | `priority` | 같은 domain 중복 시 먼저 매칭될 순서 |
 
 ---
 
-## 3. 인증 흐름 (변경 없음 — Access 경로)
+## 3. 인증 흐름 (Access 경로)
 
-기존 v2 모델과 동일. Access Service 가 이 흐름의 "service" 역할.
+Access Service 가 이 흐름의 "service" 역할.
 
 ```
 UE → REGISTER
@@ -248,7 +262,7 @@ CSP (CscfModule):
   5. 일치 → 200 OK + Contact 저장 + (binding_key → service_id) 맵 유지
 ```
 
-v2 의 `sip_service.domain/auth_realm` 과 동일 의미. 이름만 `access_services.*` 로 이전.
+domain/auth_realm 의 SOT 는 `access_services.*`.
 
 ---
 
@@ -343,61 +357,43 @@ AccessServices:
 수신 SIP 메시지의 `CSipMessage.m_iListenerId` 가 이 int id. ACL scope=local_node 와 restricted 정책
 모두 이 값으로 매칭.
 
-## 6. 서비스 판별 소스 코드 위치 (목표)
+## 6. 서비스 판별 소스 코드 위치
 
-| 기능 | 클래스 (목표) | 비고 |
+| 기능 | 클래스 | 비고 |
 |---|---|---|
-| Rule 평가 엔진 | `CRuleEvaluator` (신규) | ACL/Routing 공용 |
+| Rule 평가 엔진 | `CRuleEvaluator` | ACL/Routing 공용 |
 | Rule/RuleSet 캐시 | `CspConfigCache` (CACHE_RULE, CACHE_RULE_SET) | jsonl 로더 |
-| Routing 결정 | `CRoutingPolicyEngine` (기존 `CspRouteEngine` 재작성) | |
-| ACL 결정 | `CAclPolicyEngine` (기존 `CspAccessControl` 재작성) | |
-| RemoteNode/Route/RouteSet 캐시 | `CspRemoteNodeMap`, `CspRouteMap`, `CspRouteSetMap` | 신규 분리 (기존 `CspTrunkManager` 해체) |
-| Access service 캐시 | `CspAccessServiceMap` (기존 `CspServiceMap` 개명 + kind=ibcf 제거) | |
+| Routing 결정 | `CRoutingPolicyEngine` | |
+| ACL 결정 | `CAclPolicyEngine` | |
+| RemoteNode/Route/RouteSet 캐시 | `CspRemoteNodeMap`, `CspRouteMap`, `CspRouteSetMap` | |
+| Access service 캐시 | `CspAccessServiceMap` (voip/ptt 만) | |
 
 ---
 
-## 7. 마이그레이션 (hard cutover)
+## 7. csp.json 구성
 
-이 프로젝트는 개발 단계이므로 호환기간 없이 일괄 전환.
-
-### 7-1. 변환 규칙 (스크립트)
-
-| 구 레코드 | 신 레코드 |
-|---|---|
-| `services.jsonl` kind=voip/ptt 1건 | `access_services.jsonl` 1건 |
-| `services.jsonl` kind=ibcf 1건 | `route_sets.jsonl` 1건 (members = 그 service 의 trunks 변환 결과) |
-| `trunks.jsonl` 1건 | `remote_nodes.jsonl` 1건 + `routes.jsonl` 1건 + 해당 RouteSet.members 에 추가 |
-| `listeners.jsonl` 1건 | `local_nodes.jsonl` 1건 (service 필드 제거, edge 는 protocol/비고로 추론) |
-| `routes.jsonl` 구 1건 (match + target) | `rules.jsonl` N + `rule_sets.jsonl` 1 + `routing_policies.jsonl` 1 |
-| `acl.jsonl` 1건 | `rules.jsonl` 1 + `rule_sets.jsonl` 1 + `acl_policies.jsonl` 1 |
-
-구 파일은 변환 후 삭제(또는 `*.bak` 이동).
-
-### 7-2. csp.json 변화
-
-- `Setup.Sip.AuthRealm` 제거 (AccessService 가 realm 의 SOT)
-- `Setup.Realm[]` 제거 (AccessService 가 domain 의 SOT)
-- `Setup.Roles` 유지
-- `Setup.RtpRelay`, `Setup.Database`, `Setup.Log`, `Setup.Monitor`, `Setup.Security`, `Setup.ServiceLogging`, `Setup.Cdr`, `Setup.DataFolder`, `Setup.SystemId` 유지
+- `Setup.Sip.AuthRealm` / `Setup.Realm[]` 없음 — realm/domain 의 SOT 는 AccessService.
+- `Setup.Roles` 사용.
+- `Setup.RtpRelay`, `Setup.Database`, `Setup.Log`, `Setup.Monitor`, `Setup.Security`, `Setup.ServiceLogging`, `Setup.Cdr`, `Setup.DataFolder`, `Setup.SystemId` 사용.
 
 ---
 
-## 8. 관련 파일 (구조 변경 후 목표)
+## 8. 관련 파일
 
 ### CSP (C++)
 
 | 파일 | 역할 |
 |------|------|
-| `csp/CspConfigCache.{h,cpp}` | 9 collection 로딩 (entity enum 확장) |
-| `csp/CspLocalNodeMap.{h,cpp}` | (개명) 기존 CspListenerManager |
-| `csp/CspRemoteNodeMap.{h,cpp}` | 신규 — RemoteNode 캐시 |
-| `csp/CspRouteMap.{h,cpp}` | 신규 — Route 캐시 + (LN, RN) 조회 |
-| `csp/CspRouteSetMap.{h,cpp}` | 신규 — RouteSet + 분배 상태 |
-| `csp/CspRuleEvaluator.{h,cpp}` | 신규 — Rule/RuleSet 평가 엔진 |
-| `csp/CspRoutingPolicyEngine.{h,cpp}` | 기존 CspRouteEngine 재작성 |
-| `csp/CspAclPolicyEngine.{h,cpp}` | 기존 CspAccessControl 재작성 |
-| `csp/CspAccessServiceMap.{h,cpp}` | 기존 CspServiceMap 개명 (voip/ptt 만) |
-| `csp/SipServerSetup.{h,cpp}` | Realm/AuthRealm 로직 삭제, Setup.Sip 축소 |
+| `csp/CspConfigCache.{h,cpp}` | 9 collection 로딩 (entity enum) |
+| `csp/CspLocalNodeMap.{h,cpp}` | LocalNode 캐시 |
+| `csp/CspRemoteNodeMap.{h,cpp}` | RemoteNode 캐시 |
+| `csp/CspRouteMap.{h,cpp}` | Route 캐시 + (LN, RN) 조회 |
+| `csp/CspRouteSetMap.{h,cpp}` | RouteSet + 분배 상태 |
+| `csp/CspRuleEvaluator.{h,cpp}` | Rule/RuleSet 평가 엔진 |
+| `csp/CspRoutingPolicyEngine.{h,cpp}` | routing 결정 |
+| `csp/CspAclPolicyEngine.{h,cpp}` | ACL 결정 |
+| `csp/CspAccessServiceMap.{h,cpp}` | Access service (voip/ptt) |
+| `csp/SipServerSetup.{h,cpp}` | Setup.Sip 파싱 |
 
 ### Console
 
@@ -409,8 +405,8 @@ AccessServices:
 
 | 파일 | 역할 |
 |------|------|
-| `docs/design/features/sip_service_model.md` | 이 문서 (v3) |
-| `docs/design/features/sip_runtime_config.md` | collection 목록 / Init 시그니처 최신화 |
+| `docs/design/features/sip_service_model.md` | 이 문서 |
+| `docs/design/features/sip_runtime_config.md` | collection 목록 / Init 시그니처 |
 
 ---
 
@@ -423,11 +419,3 @@ AccessServices:
 | 헬스체크 `invite_response` 모드 | 2차 (1차는 `options_ping` 만) |
 | `hash_by_caller` 분배 | 2차 |
 | Rule field: `record_route`, `p_charging_vector` 등 | 필요시 추가 |
-
----
-
-## 10. 변경 내역
-
-- **v3 (2026-04-22)**: LocalNode/RemoteNode/Route/RouteSet/Rule/RuleSet/Policy 9 collection 재설계. AccessService 분리. Trunk/Service 단일 개념 폐기.
-- **v2 (2026-04-21)**: jsonl 전환 (DB → install_path/config/*.jsonl).
-- **v1 (P7)**: sip_service 중심 최초 설계 (DB 시절).

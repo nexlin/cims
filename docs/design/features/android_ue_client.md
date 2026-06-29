@@ -1,12 +1,6 @@
 # 안드로이드 VoLTE/PTT 단말(UE) 클라이언트 설계
 
-**작성일:** 2026-06-09
-**최종 수정:** 2026-06-09 (최초 작성 — 스택/아키텍처/마일스톤 확정)
-**상태:** Draft (검토 전)
-
----
-
-> **⭐ 핵심 결정 요약**
+> **핵심 결정 요약**
 >
 > CIMS 서버(CSP/CMP/CSC)에 직접 붙는 **신규 안드로이드 네이티브 단말 앱**을 개발한다.
 >
@@ -117,7 +111,7 @@ PJSIP 미디어 파이프라인은 **[RTP/RTCP]→[지터버퍼]→[AEC]→[conf
 
 | | 음성 AMR-WB | 영상 H.264 |
 |---|---|---|
-| PJSIP 기본 지원 | ✅ **And-Media 오디오 경로 존재**(교정 2026-06-10) — `and_aud_mediacodec.cpp` 2.16 실존 확인, `PJMEDIA_HAS_AND_MEDIA_AMRWB` 기본 1 → **커스텀 `pjmedia_codec_factory` 불필요**(원안 "오디오 래퍼 없음"은 오류) | ✅ Android MediaCodec 비디오 경로 존재(`and_media`) |
+| PJSIP 기본 지원 | ✅ **And-Media 오디오 경로 존재** — `and_aud_mediacodec.cpp`(2.16), `PJMEDIA_HAS_AND_MEDIA_AMRWB` 기본 1 → **커스텀 `pjmedia_codec_factory` 불필요** | ✅ Android MediaCodec 비디오 경로 존재(`and_media`) |
 | 위험도 | 낮음 — And-Media 내장 + M0 게이트(UNIWA ENC+DEC·실시간성) 통과. 잔여 = 서버 opencore 와의 상호운용(M1.2 실호 게이트) | 낮음 |
 | 리스크 | MediaCodec 비동기 API 의 20ms 정합은 PJSIP And-Media 구현이 처리 — 단말 단 검증은 M0 로 완료 | 영상은 버퍼링 지연 허용폭이 커서 궁합 좋음 |
 | 폴백 | M1.2 상호운용 게이트 실패 시 opencore-amr(경로 A, 특허 재검토 동반) | 디바이스 미지원 시 SW 인코더 |
@@ -286,7 +280,7 @@ cims/
 - `configure-android`(NDK) → `make dep && make`. **`config_site.h`**: `PJMEDIA_HAS_AND_MEDIA_AMRWB 1`(음성 정본) + `PJMEDIA_HAS_OPENCORE_AMR{WB,NB}_CODEC 0`(중복 등록 방지), And-Media H264(영상), 불필요 코덱 off — 정본은 [M1 설계서](android_ue_m1_pjsip_integration.md) §2.5.
 - **SWIG** → `org.pjsip.pjsua2.*` Java + `libpjsua2.so`. Gradle 모듈로 패키징.
 - ABI: `arm64-v8a`(필수) + 필요시 `armeabi-v7a`.
-- 음성 AMR-WB는 PJSIP **내장 And-Media 코덱**(MediaCodec 구동, 2.16 실존 확인 2026-06-10)을 사용 — 커스텀 코덱 팩토리 불필요.
+- 음성 AMR-WB는 PJSIP **내장 And-Media 코덱**(MediaCodec 구동, 2.16)을 사용 — 커스텀 코덱 팩토리 불필요.
 
 ---
 
@@ -330,16 +324,16 @@ cims/
 
 ---
 
-## 13. 미해결 / 결정 필요 항목 (Open Questions)
+## 13. 확정 사항 / 미해결 항목
 
-1. ~~코드 위치~~ → **확정**: 모노레포 `android/`, 클라이언트 2개 분리(`android/volte-client`, `android/ptt-client`). 잔여: 공유 `core` 라이브러리 모듈 채택 여부.
-2. ~~마일스톤 순서~~ → **확정**: VoLTE 먼저(M1), 이후 PTT(M2).
-3. **타깃 단말**: **UNIWA 러기드/PoC 지향 안드로이드 단말**(변경 가능). 정확 모델/Android 버전 확정 시 minSdk·arm64 여부·MediaCodec(AMR-WB/H.264) 가용성·지연 재확인. **특정 모델 하드코딩 금지.** UNIWA는 보통 하드웨어 PTT 키 보유 → M4에서 매핑.
-4. ~~TLS 시점~~ → **확정**: 초기 **UDP 5060**, TLS 5061은 **이후(M4)**.
-5. ~~영상 범위~~ → **확정**: 음성+영상 **함께**(M1부터).
-6. ~~PJSIP 라이선스 트랙~~ → **확정**: **GPL 공개**(앱을 GPL로 배포 → Teluu 상용 라이선스 불요, 대신 GPL 소스 공개 의무 준수).
-7. ~~공유 `core` 모듈 채택~~ → **확정**: `android/core`(Android Library)에 공유 코드(PJSIP·코덱·SIP/미디어). 두 앱이 `project(':core')` 의존.
+확정 사항:
 
----
+- **코드 위치**: 모노레포 `android/`, 공유 `core`(Android Library, PJSIP·코덱·SIP/미디어) + 클라이언트 2개(`android/volte-client`, `android/ptt-client`). 두 앱이 `project(':core')` 의존.
+- **마일스톤 순서**: VoLTE 먼저(M1), 이후 PTT(M2).
+- **TLS 시점**: 초기 **UDP 5060**, TLS 5061은 **이후(M4)**.
+- **영상 범위**: 음성+영상 **함께**(M1부터).
+- **PJSIP 라이선스 트랙**: **GPL 공개**(앱을 GPL로 배포 → Teluu 상용 라이선스 불요, 대신 GPL 소스 공개 의무 준수).
 
-> 본 문서는 검토용 Draft다. 위 Open Questions가 정리되면 M0(빌드+AMR-WB 스파이크) 착수로 진행한다.
+미해결:
+
+- **타깃 단말**: **UNIWA 러기드/PoC 지향 안드로이드 단말**(변경 가능). 정확 모델/Android 버전 확정 시 minSdk·arm64 여부·MediaCodec(AMR-WB/H.264) 가용성·지연 재확인. **특정 모델 하드코딩 금지.** UNIWA는 보통 하드웨어 PTT 키 보유 → M4에서 매핑.

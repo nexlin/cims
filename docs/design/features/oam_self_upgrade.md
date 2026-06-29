@@ -1,8 +1,8 @@
 # OAM self-upgrade (자기 교체)
 
-> 배경: 2026-06-15 부트스트랩에서 OAM 을 root systemd → **agent(cims-svc) 감독**으로 전환
-> ([[oam_csc_split]] §감독구조). 이때 남긴 미해결 설계 = "OAM 이 자기 자신을 업그레이드"
-> 하는 경우의 특별취급. 본 문서가 그 설계다.
+> 배경: OAM 은 root systemd 가 아니라 **agent(cims-svc) 가 감독**한다
+> ([[oam_csc_split]] §감독구조). 본 문서는 "OAM 이 자기 자신을 업그레이드"하는 경우의
+> 특별취급 설계다.
 
 OAM(`oam_app.py`)은 다른 모듈(csp/cmp/csc/console)을 업그레이드·재기동하는 **제어면**
 이면서, 동시에 자기 자신도 agent 가 감독하는 **하나의 supervised 모듈**이다. csp 를
@@ -178,30 +178,27 @@ watchdog 는 전 과정에서 **안전망**으로 동작: 어떤 사유로든 OA
 
 ---
 
-## 8. 구현 체크리스트 (2026-06-16 구현 완료)
-- [x] `agent/lib/lifecycle.sh`: `start_oam` 에 `_oam_health_gate`(프로세스 생존 + `/health`
-      200 폴링, `CIMS_OAM_HEALTH_TIMEOUT` 기본 20s; python urllib probe — curl 부재 대비) — D1
-- [x] `agent/cims_agent.py`: `_deliver_report`(재시도 4회 backoff) + `_enqueue_pending_report`
-      /`_flush_pending_reports`(`run/pending_reports.jsonl`, heartbeat 성공 시 flush) — D1
-- [x] `ems/core/oam/src/oam_app.py`: 부팅 self-reconcile (실행 install_path == deployment.install_path
-      인 oam·`deploying` 만 `running` 으로 정정 + stuck job 마감; 타 노드 오염 방지) — D2
-- [x] OAM `/health` — httpsrv 내장 무인증 200 `{"status":"ok"}` (추가 불요, 확인 완료) — D1/D3
-- [x] `ems/core/oam/src/oam_app.py`: `--preflight`(import+config 스모크, bind 없이 종료 0/2) — D3
-- [x] `agent/cims_agent.py`: `_oam_preflight` + `job_process_control` 에서 oam start/restart 전
-      pre-flight 게이트(실패 시 구 OAM 유지, kill 안 함) — D3
-      *(설계 원안의 'job_install 내 import-스모크' 대신 **restart 직전 seam** 에 배치 —
-      구 OAM kill 을 직접 가드하므로 더 정확)*
-- [x] `job_process_control`(start/restart, oam): health-gate 실패(rc≠0) 시 명시적 롤백
-      (구 버전 start + supervised.json 구 경로 복원) — D4
-- [ ] (선택) 카나리 대체포트 기동 경로 — D3 강화 (미구현, 후속)
-- [ ] Console: "OAM 업그레이드" 단일 액션이 upgrade→restart 체인 큐잉 (미구현 — 현재는
-      콘솔에서 upgrade·restart 를 순차 트리거하면 동작; 단일 버튼 UX 는 후속)
+## 8. 구현 항목
 
-**검증(dev, TB-OAM)**: `--preflight` 정상 0 / 깨진 config 2 · `/health` 200 probe · D2
-self-reconcile(stuck `deploying`→`running`, install_path 일치만; 불일치는 미정정 확인).
-agent 측 D1/D3/D4 는 단위 동작 검증(헬스 probe·preflight 호출) — 전체 self-upgrade
-E2E(실제 버전 전환)는 4노드 production 적용 시 라이브 확인 대상.
+- `agent/lib/lifecycle.sh`: `start_oam` 에 `_oam_health_gate`(프로세스 생존 + `/health`
+  200 폴링, `CIMS_OAM_HEALTH_TIMEOUT` 기본 20s; python urllib probe — curl 부재 대비) — D1
+- `agent/cims_agent.py`: `_deliver_report`(재시도 4회 backoff) + `_enqueue_pending_report`
+  /`_flush_pending_reports`(`run/pending_reports.jsonl`, heartbeat 성공 시 flush) — D1
+- `ems/core/oam/src/oam_app.py`: 부팅 self-reconcile (실행 install_path == deployment.install_path
+  인 oam·`deploying` 만 `running` 으로 정정 + stuck job 마감; 타 노드 오염 방지) — D2
+- OAM `/health` — httpsrv 내장 무인증 200 `{"status":"ok"}` — D1/D3
+- `ems/core/oam/src/oam_app.py`: `--preflight`(import+config 스모크, bind 없이 종료 0/2) — D3
+- `agent/cims_agent.py`: `_oam_preflight` + `job_process_control` 에서 oam start/restart 전
+  pre-flight 게이트(실패 시 구 OAM 유지, kill 안 함). restart 직전 seam 에 배치하여
+  구 OAM kill 을 직접 가드 — D3
+- `job_process_control`(start/restart, oam): health-gate 실패(rc≠0) 시 명시적 롤백
+  (구 버전 start + supervised.json 구 경로 복원) — D4
+
+미구현(후속):
+- (선택) 카나리 대체포트 기동 경로 — D3 강화
+- Console: "OAM 업그레이드" 단일 액션이 upgrade→restart 체인 큐잉 (현재는 콘솔에서
+  upgrade·restart 를 순차 트리거하면 동작; 단일 버튼 UX 는 후속)
 
 > ⚠️ 핵심 불변식: **재기동 권한은 agent 단독.** OAM 코드 어디에도 자기 프로세스를
-> kill/exec/restart 하는 경로를 추가하지 않는다(P1). — 구현에서 준수(OAM 은 `--preflight`
-> 로 자기검증만, 실제 kill/start 는 전적으로 agent `job_process_control`/watchdog).
+> kill/exec/restart 하는 경로를 두지 않는다(P1). OAM 은 `--preflight` 로 자기검증만 하고,
+> 실제 kill/start 는 전적으로 agent `job_process_control`/watchdog 가 수행한다.

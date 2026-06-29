@@ -1,29 +1,29 @@
 # 파일 기반 Runtime Store — 설계
 
-> ⚠️ 2026-06-15: 본 문서 §2 평면 레이아웃은 [runtime_store_v2_module_namespacing.md](runtime_store_v2_module_namespacing.md)
-> 로 **개정 진행 중**(모듈/버전 귀속 네임스페이스 + 라이프사이클 결합). 새 작업은 v2 참조.
+> 본 문서 §2 평면 레이아웃은 [runtime_store_v2_module_namespacing.md](runtime_store_v2_module_namespacing.md)
+> 의 모듈/버전 귀속 네임스페이스로 개정되었다. 현행 레이아웃은 v2 를 참조.
 
-> 2026-05-13 결정: **가입자 정보/상태 외 모든 데이터는 DB 가 아닌 파일로 관리**.
-> 외부 이중화 DB 인계 부담 최소화. 운영/배포/HA/런타임 설정 등은 모두 file-store.
+원칙: **가입자 정보/상태 외 모든 데이터는 DB 가 아닌 파일로 관리**한다. 외부 이중화 DB 인계
+부담을 최소화하기 위해 운영/배포/HA/런타임 설정 등은 모두 file-store 에 둔다.
 
-## 1. 범위 (단계별)
+> **규칙 (거버넌스):** 신규 데이터는 **DB 테이블을 새로 만들지 않고 file-store(collection/jsonl)로 시작**한다. DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이 본질적으로 필요한 데이터에 한정**한다. 새 테이블이 정말 필요하다고 판단되면 먼저 file-store 로 해결되지 않는 이유(JOIN·트랜잭션·FK 무결성 등)를 검토한 뒤에만 추가한다.
 
-| Phase | 대상 도메인 | 옛 테이블 |
-|---|---|---|
-| 1 | **패키지** | `cims_package` |
-| 2 | **에이전트** | `cims_agent` (옛 `cims_instance` 도메인은 미사용 — 2026-05-13 제거) |
-| 3 | **배포 + 작업 큐 + 메트릭** | `agent_deployment`, `agent_job`, `agent_metric` |
-| 4 | **HA 그룹** | `ha_groups`, `ha_group_members` |
-| 5 | **CSP 런타임 설정** | `csp_listener`, `sip_trunk`, `routing_rule(+match+transform)`, `routing_access_list`, `sip_service`, `sip_service_listener`, `csp_config_audit` |
-| 6 | **모니터링 집계** | `stats_daily`, `stats_monthly`, `stats_yearly` |
-| 7 | **녹취 메타** | `recordings`, `recording_segments` |
-| 8 | **IdMS 토큰** | `auth_codes`, `refresh_tokens` |
-| 9 | ~~조직~~ | **DB 유지 결정 (no-op)** — 가입자 도메인 일부 |
+## 1. 범위 (도메인별)
+
+| 대상 도메인 | 옛 테이블 |
+|---|---|
+| **패키지** | `cims_package` |
+| **에이전트** | `cims_agent` |
+| **배포 + 작업 큐 + 메트릭** | `agent_deployment`, `agent_job`, `agent_metric` |
+| **HA 그룹** | `ha_groups`, `ha_group_members` |
+| **CSP 런타임 설정** | `csp_listener`, `sip_trunk`, `routing_rule(+match+transform)`, `routing_access_list`, `sip_service`, `sip_service_listener`, `csp_config_audit` |
+| **녹취 메타** | `recordings`, `recording_segments` |
+| **IdMS 토큰** | `auth_codes`, `refresh_tokens` |
 
 **DB 유지 (영구)**: 가입자 도메인 + 조직
 - `users`, `volte_subscriptions`, `ptt_subscriptions`, `user_rejects`, `ptt_groups`, `ptt_group_members`, `ptt_session_seq`, `organizations`
 
-`organizations` 는 `users.org_id` FK 대상이라 가입자와 함께 외부 이중화 DB 에 인계 (2026-05-13 결정).
+`organizations` 는 `users.org_id` FK 대상이라 가입자와 함께 외부 이중화 DB 에 인계한다.
 
 ## 2. 디렉토리 레이아웃
 
@@ -110,47 +110,21 @@ def _atomic_write(path, content):
 - 예: `agent_deployment` list 시 `cims_agent`, `cims_package` 캐시 후 enrich.
 - "캐시" 는 단일 요청 scope (handler 함수 내 dict 1번 빌드). 디스크 read 횟수 = O(도메인 수).
 
-## 8. 마이그레이션 절차 (도메인 단위)
+## 8. 도메인 매핑 (구현 위치)
 
-```
-A. 데이터 마이그레이션 스크립트:
-   scripts/migrate_to_file_store.py --domain <name>
-   → DB 에서 SELECT → file-store 에 write → DROP TABLE (옵션, 안전상 _legacy 로 rename 권장)
+각 도메인 핸들러는 file_store(`load_all()`/`load(id)`/`save(id, data)`/`delete(id)`)만 읽고
+쓴다. DB JOIN 은 handler 가 명시적으로 처리(또는 lazy)한다.
 
-B. handler 수정:
-   - SELECT → file_store.load_all() / load(id)
-   - INSERT → file_store.save(new_id, data)
-   - UPDATE → file_store.save(id, merged)
-   - DELETE → file_store.delete(id)
-   - FK CASCADE → handler 가 명시적 처리 (또는 lazy)
+- **packages**: cims_package. `agent_deployment.package_id` JOIN 은 client-side enrich(`_enrich_deploy_with_pkg`).
+- **agents**: agents.py CRUD / agent_api.py 핫패스(enroll/heartbeat/cert/metric) / ha_groups.py 멤버 enrich / csc_app.py sweeper(stale offline + cert rotate). agent_deployment JOIN 은 `_enrich_deploy` 로 pkg + agent 통합.
+- **deployments/jobs/metrics**: agent_deployment CRUD + agent_job CRUD + JSONL 시계열 metric. `_job_pick_pending`(heartbeat 큐 pick), `_metric_append`/`_metric_load_recent`(시계열), `_job_create`(INSERT). report 핸들러는 agent_job 갱신 + agent_deployment 상태 hook(install_path 추출 포함).
+- **ha_groups**: members 배열을 그룹 JSON 안에 임베드. CRUD + vrid 자동 할당(file_store 순회 기반) + agent_name enrich. agents.py 의 `_ha_group_map_for_agents`/`_check_ha_capability` 도 file_store.
+- **csp runtime config**: csp_runtime.py 5 entities(listener/trunk/route/access/service) + audit JSONL. config_cache.py 도 file_store 로드. routing_rule 의 match/transform, sip_service 의 listeners 는 그룹 JSON 안에 임베드. CSP C++ 는 jsonl 파일이 SoT(access_services.jsonl 등) — 본 도메인은 Console 측 정리.
+- **recordings**: CSC handlers 가 파일 기반(call.json + recordings/). CSP `InsertRecording` no-op.
+- **auth tokens**: `csc/src/services/idms_storage.py` 의 auth_codes/refresh_tokens 도메인.
+- **organizations**: DB 유지 — `users.org_id` FK 대상이라 가입자 도메인과 함께 외부 이중화 DB 인계(`csc/src/handlers/org.py` 가 DB CRUD).
 
-C. 검증:
-   - S1 (lint/typecheck/format/unit)
-   - curl smoke (handler 별 list/get/create/delete)
-   - LIVE: TB-CSC 재기동 후 Console UI 기존 페이지 회기능 확인
-```
-
-## 9. 호환 정책 (전환기)
-
-- 마이그레이션 완료 도메인은 DB 테이블 DROP **하지 않고** `_legacy` 로 rename → 1 릴리스 후 DROP.
-- handler 는 file_store 만 읽음 (DB 우회). 옛 DB row 는 마이그레이션 스크립트가 옮긴 뒤 무시.
-- 외부 DB 인계 시점에는 이미 가입자 도메인만 남음.
-
-## 10. 백업 / 보존
+## 9. 백업 / 보존
 
 - `CimsRuntimeDir` 전체를 tar 로 백업 (compose 기반 배포의 volume 와 동일 단순성).
 - 일별 jsonl (jobs/metrics) 는 운영 정책으로 30~90일 보존 후 자동 삭제 (cron + `find -mtime`).
-
-## 11. 진척 추적
-
-| Phase | 상태 | 노트 |
-|---|---|---|
-| 1. packages | 🟢 **완료** (2026-05-13) | file_store 헬퍼 + cims_package 마이그레이션 (`csc/scripts/migrate_packages_db_to_file.py`). agent_deployment.package_id JOIN 4건 client-side enrich (`_enrich_deploy_with_pkg`). 9 패키지 LIVE 마이그레이션 확인. |
-| 2. agents | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_agents_db_to_file.py` (9 agent). agents.py CRUD / agent_api.py 핫패스(enroll/heartbeat/cert/metric) / ha_groups.py 멤버 enrich (3 JOIN 제거) / csc_app.py sweeper(stale offline + cert rotate) 모두 file_store. agent_deployment JOIN 은 `_enrich_deploy` 로 통합 (pkg + agent). LIVE: agents/deployments/ha-groups 정상 응답. **옛 `cims_instance` 도메인은 모든 deployment.instance_id 가 null 로 미사용 확인 → 2026-05-13 코드/도메인/마이그레이션/타입 정의 모두 제거.** |
-| 3. deployments/jobs/metrics | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_deployments_jobs_metrics_db_to_file.py` (21 deploy + 42 job + 427 metric). agent_deployment CRUD + agent_job CRUD + JSONL 시계열 metric. `_job_pick_pending` (heartbeat 큐 pick), `_metric_append`/`_metric_load_recent` (시계열). agent_job INSERT 5건 모두 `_job_create` 호출. report 핸들러: agent_job 갱신 + agent_deployment 상태 hook (install_path 추출 포함). LIVE: deployments/agent_metrics/packages/agents/alerts 회기능 정상. |
-| 4. ha_groups | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_ha_groups_db_to_file.py` (0 row). ha_groups.py 전면 재작성 — members 배열을 그룹 JSON 안에 임베드. CRUD + vrid 자동 할당 (file_store 순회 기반) + agent_name enrich. agents.py 의 `_ha_group_map_for_agents` / `_check_ha_capability` 도 file_store. LIVE smoke: AS 그룹 생성 → vrid=51 자동, 멤버 priority 정렬 OK, delete 성공. |
-| 5. csp runtime config | 🟢 **완료** (2026-05-13) | `csc/scripts/migrate_csp_runtime_db_to_file.py`. csp_runtime.py 52 SQL ops 5 entities (listener/trunk/route/access/service) + audit JSONL. config_cache.py 도 file_store 로드로 전환. CSP C++ 는 이미 jsonl 파일 SOT (access_services.jsonl 등) — 본 Phase 는 Console 측 정리. routing_rule 의 match/transform, sip_service 의 listeners 는 그룹 JSON 안에 임베드. mcptt.audit_config_change → JSONL append. LIVE smoke: CRUD + audit JSONL 두 줄(CREATE/DELETE) 정상. |
-| 6. monitoring stats | 🟢 **완료** (2026-05-13) | stats_daily/monthly/yearly 는 코드 미사용 unused tables — 마이그 불필요, DROP 대상. |
-| 7. recordings | 🟢 **완료** (2026-05-13) | CSC handlers 이미 파일 기반 (call.json + recordings/). CSP `InsertRecording` no-op 화. |
-| 8. auth tokens | 🟢 **완료** (2026-05-13) | `csc/src/services/idms_storage.py` 전면 재작성. auth_codes/refresh_tokens 도메인. |
-| 9. organizations | 🟢 **완료** (2026-05-13) | **DB 유지 결정** — `users.org_id` FK 대상이라 가입자 도메인과 함께 외부 이중화 DB 인계. 코드 변경 없음 (`csc/src/handlers/org.py` 그대로 DB CRUD 유지). |

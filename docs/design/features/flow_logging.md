@@ -32,14 +32,14 @@
 Flow 엔트리의 `seq`+`iface`로 원문을 역조회한다(`seq`=msg 파일 줄번호).
 
 **CSP 5분 버킷·open-per-write** (`SipMessageLogger`): 매 줄 `fopen(append)`→write→`fclose`, 파일명에 5분 접미사.
-시간당 핸들을 1시간 유지하던 구방식의 `.nfs` 고아·운영중 로그삭제 데이터유실·대용량 검색 부담을 해소.
+이로써 `.nfs` 고아·운영중 로그삭제 데이터유실·대용량 검색 부담을 피한다.
 `seq` 는 5분 버킷별로 리셋되므로 **원문 역조회 시 flow 엔트리 `ts`(HH:MM:SS)로 버킷(mm5)을 도출**해 해당 파일을 연다.
-리더(`flow_logger.py`)는 `.msg.jsonl`(구 시간당) + `.msg.{mm5}.jsonl`(신 5분) glob 을 모두 매칭(하위호환).
+리더(`flow_logger.py`)는 `.msg.jsonl` + `.msg.{mm5}.jsonl` glob 을 모두 매칭한다.
 
-**CMP/CSC 도 동일하게 5분 버킷**으로 전환됨(`cmp_0N`/`csc_01`/`oam_01` SystemId 분리). 더불어 **CSP·CMP·CSC 모두
-비동기 배치 writer** 사용(2026-06): 생산자(로깅 호출부)는 한 줄을 포맷·seq 부여 후 큐에 적재만 하고 즉시 반환(파일 I/O 없음),
+**CMP/CSC 도 동일하게 5분 버킷**(`cmp_0N`/`csc_01`/`oam_01` SystemId 분리). **CSP·CMP·CSC 모두
+비동기 배치 writer** 사용: 생산자(로깅 호출부)는 한 줄을 포맷·seq 부여 후 큐에 적재만 하고 즉시 반환(파일 I/O 없음),
 단일 writer 스레드가 flush 주기(100ms)·큐 임계마다 큐를 비워 **파일경로별로 라인을 합쳐 경로당 1회 open→append→close**
-(open-per-write → open-per-batch). 단일 writer FIFO 라 파일 줄순서=enqueue(=seq) 순서가 유지되어 `seq↔원문 줄번호` 정합 보존.
+(open-per-batch). 단일 writer FIFO 라 파일 줄순서=enqueue(=seq) 순서가 유지되어 `seq↔원문 줄번호` 정합 보존.
 목적: NFS 동기 I/O 가 **단일 수신/디스패치 스레드**(csp CmpClient RecvLoop, cmp control loop)를 막던 HOL 블로킹 제거
 (상세: [csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md)). 구현: csp `CSipMessageLogger`,
 cmp `PCmpServer`(enqueueLine/logWriterLoop), csc `logger.py`(deque+writer 스레드).
@@ -74,7 +74,7 @@ cmp `PCmpServer`(enqueueLine/logWriterLoop), csc `logger.py`(deque+writer 스레
 - **TX**: From 도메인
 - **응답(SIP/2.0 ...)**: Call-ID 캐시(`m_mapCallService`)에서 요청 시점 service 계승
 - 미매칭 → `service=""` (log에 key 생략)
-- ⚠ MCPTT 키워드(Accept-Contact) fallback은 **제거**됨. 비준수 UE는 미지원.
+- 분류는 도메인 기반만 사용한다 (MCPTT Accept-Contact 키워드 fallback 없음 — 비준수 UE 미지원).
 
 ### per-call 도메인 override (MCPTT)
 PTT 그룹 INVITE는 전역 도메인(보통 volte) 대신 mcptt 도메인을 써야 하므로 psip `CSipDialog::m_strOverrideDomain` 필드 + `CreateCall(..., pszOverrideDomain)` 로 주입. `GroupCallService::InviteMember` 에서 `GetDomainForService("mcptt")` 를 전달.
@@ -219,11 +219,11 @@ GET /api/v1/flow/{call_id}?date=YYYY-MM-DD&call_type=volte
 ```
 반환: `{call_id, date, nodes: {csp: [msgs...], cmp: [msgs...]}}`
 
-내부 동작 (2026-05-07 `9db25ff` 정립):
+내부 동작:
 1. `call_id` + `call_type` → `_find_d_dir_by_callid(volte)` 한 type 안에서만 검색 → `.d` 디렉터리 조회 → `session.json`에서 `call_ids` (B2BUA 2 legs) 추출
 2. SIP msg.jsonl (raw SIP 메시지) 에서 `call_ids` 매칭 라인의 sesid 추출 — `_extract_sesids_from_msg_jsonl`. flow.jsonl 의 SIP 라인은 Call-ID 필드를 가지지 않으므로 (caller/callee/sesid/method/seq/iface 만) flow.jsonl 단독 매칭으로는 0건이 나옴.
 3. SIP/CMP msg 검색을 **sesid 매칭 우선** + legacy substring fallback (sesid 누락 로그 회귀용). HEARTBEAT 만 무조건 제외.
-4. `call_type` 미전달 시 옛 동작은 volte+ptt 모든 .d 디렉토리 검색 후 prefix 매칭 → VoLTE call_id 가 PTT group_id 와 매칭되는 충돌. 이제 console 이 항상 `call_type` 명시 (`flowApi.get(callId, date, callType)`).
+4. console 은 항상 `call_type` 을 명시한다 (`flowApi.get(callId, date, callType)`) — 한 type 안에서만 검색해 VoLTE call_id 와 PTT group_id 의 prefix 충돌을 피한다.
 
 ### 10.2 PTT
 ```
@@ -231,13 +231,13 @@ GET /api/v1/ptt/history/{group_id}/{session}/flow?date=YYYY-MM-DD
 ```
 반환: `{call_id: group_id, date, nodes}`
 
-내부 동작 (2026-05-08 `c700744` 정립):
+내부 동작:
 1. session 시간 범위 내 group_id 매칭 메시지에서 sesid 모음
 2. **sesid 매칭으로 전체 메시지 필터** — startup-time `ADD_PTT_GROUP`, 종료 후 `REMOVE_PTT_GROUP`, member join/leave 등 라이프사이클이 시간 범위와 무관하게 자연 포함됨
 3. sesid 매칭 0 건 시 fallback: legacy substring 매칭 (`detail` | `sesid` | `subid` 중 하나에 `group_id` 포함)
-4. **HEARTBEAT 만 제외**. 옛 cross-service method 블랙리스트 (`VoLTE flow 에서 PTT method, PTT flow 에서 SESSION method`) + `_GROUP_LIFECYCLE` 시간 우회 트릭은 모두 제거 — UX 결정은 console 책임.
+4. **HEARTBEAT 만 제외**. cross-service method 필터 등 UX 결정은 console 책임.
 
-> CSP 측 보강 (`e344302`): `_endSessionLocked` 의 `m_mapPttSession.erase` 제거 → 첫 멤버 OnCallTerminated 시점에 session map 이 비어버려 이후 멤버의 join/leave 가 events.jsonl 에 기록 안 되던 버그 해소. 5인 그룹콜에서 5명 모두 member_join + member_leave 정상 기록.
+> CSP `_endSessionLocked` 는 `m_mapPttSession.erase` 를 수행하지 않는다 — 첫 멤버 OnCallTerminated 시점에 session map 이 비면 이후 멤버의 join/leave 가 events.jsonl 에 기록되지 않으므로, 그룹의 모든 멤버가 member_join + member_leave 를 정상 기록하도록 세션 엔트리를 유지한다.
 
 ### 10.3 body 조회
 ```
@@ -269,8 +269,8 @@ GET /api/v1/flow/body?date=&hour=&seq=&iface=&node=
 - `cmp/PCmpServer.h/.cpp` — `_sesidMap`, `_serviceMap`, `_logFlowFloor/Dtmf/Rtcp`, `logFlow`, `writeMsgLine`
 - `cmp/PMcpttGroup.h/.cpp` — Floor control logFlow (onRtcpPacket + broadcastFloorStatus), DTMF `_dtmfFlowLog`, RTCP SR/RR/SDES/BYE 옵션 로깅
 
-### CSC
-- `csc/src/services/flow_logger.py` — `issue_sesid`, `get_or_issue_sesid`, `log_flow`, `log_console` + sesid 매칭 검색
+### CSC / OAM-svc
+- `ems/core/oam/src/services/flow_logger.py` — `issue_sesid`, `get_or_issue_sesid`, `log_flow`, `log_console` + sesid 매칭 검색 (oam-svc 모듈이 서빙)
 - `csc/src/services/mcptt.py` — `notify_csp(service, sesid)` + `_notify_targets` (CSP/PSP 분기)
 - `csc/src/httpsrv/controller.py` — `DynamicRouteProc.set_request_hooks` (pre/post hook)
 - `csc/src/csc_app.py` — `_post_hook` 등록 + base_path → service 매핑

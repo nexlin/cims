@@ -1,7 +1,6 @@
 # CIMS 검증 절차
 
-> **6단계 (S1~S6) 파이프라인** — 2026-05-06 도입, 2026-05-07 S5 native 100% 완료.
-> 옛 3단계(Phase 1/2/3) 체계는 부록 D 참고 (역사적 매핑).
+> **6단계 (S1~S6) 파이프라인**.
 >
 > **SSOT**: 이 문서. 실행 가이드는 `docs/VERIFICATION_MANUAL.md`.
 
@@ -77,6 +76,62 @@ ems/core/console/src/
 ├── pages/VerificationHistoryPage.tsx  # 이력 list + stats + DetailModal PDF
 └── components/VerificationPrintReport.tsx
 ```
+
+### 0.4 신규 검증 항목 추가 규약
+
+검증 항목은 **명시적 import 없이 자동 노출**된다. `verify/lib/items/__init__.py` 가 `pkgutil.iter_modules` 로 `items/` 하위 패키지를 **재귀 import** 하며, 각 모듈이 import 되는 순간 `@verify_item` 데코레이터가 항목을 전역 `_REGISTRY` 에 적재한다. import 가 끝나면 `validate_registry()` 로 group/parent 무결성을 검사하고 issue 가 있으면 `ImportError` 로 즉시 차단한다 (조용한 실패 방지).
+
+규칙:
+- `__` 로 시작하는 파일(`__init__.py`)은 스캔 제외. `_` 로 시작하는 파일(`_helpers.py`·`_native_steps.py` 등)은 helper 로 import 되지만 통상 `@verify_item` 을 갖지 않는다.
+- 디렉토리는 `__init__.py` 가 있어야 패키지로 인식되어 재귀 스캔 대상이 된다.
+- `id` 는 registry 전역에서 유일해야 한다 (중복 시 `ValueError`). 자식 항목은 `parent="<부모 ID>"`, 부모와 같은 `stage` 여야 한다.
+
+**추가 절차** — 적합한 `verify/lib/items/stage{N}/<cat>/` (또는 `stage{N}/`) 아래에 파일 1개를 만들고 `@verify_item(...)` 데코레이터 + 함수를 작성하면 끝. 별도 등록·import 코드 불필요 → CLI(`cims.sh verify list`)·Console UI 에 자동 노출된다.
+
+```python
+# verify/lib/items/stage3/my_check.py
+from ...registry import verify_item, ItemResult, ItemStatus
+from ...context import VerifyContext
+
+@verify_item(
+    id="S3-MY-CHECK",
+    stage=3,
+    category="시나리오",
+    name="내 신규 점검",
+    depends_on=["S3-HEALTH"],
+    side_effects=["read-only"],
+    timeout_s=30,
+    description="한 줄 설명 (미지정 시 함수 docstring 첫 줄)",
+)
+def my_check(ctx: VerifyContext) -> ItemResult:
+    ok = True  # ... 실제 검사 ...
+    return ItemResult(
+        id="S3-MY-CHECK", name="내 신규 점검",
+        status=ItemStatus.PASS if ok else ItemStatus.FAIL,
+        detail="...", stage=3,
+    )
+```
+
+함수는 `ItemResult` 또는 `bool` 을 반환한다. `is_group=True` 부모 항목은 runner 가 자식 실행을 자동 처리하므로 본체는 placeholder 여도 무방하다.
+
+#### `side_effects` 표준 값
+
+`@verify_item(side_effects=[...])` 는 항목이 환경에 끼치는 영향을 선언한다 (UI 배지·실행 위험 표시용). 코드에서 실제 사용 중인 값:
+
+| 값 | 의미 |
+|---|---|
+| `read-only` | 부작용 없음 — 조회/검사만 (lint, health, 매니페스트 매칭 등) |
+| `fs-write` | 파일 시스템 쓰기 (configure, build, 패키지 산출, seed) |
+| `db-write` | DB row INSERT/UPDATE |
+| `db-truncate` | DB 테이블 비우기 (reset) |
+| `network` | 네트워크 호출 (API/배포/원격 enroll) |
+| `process-start` | 새 프로세스 기동 (Test-agent 등) |
+| `process-kill` | 프로세스 종료 (reset) |
+| `process-state` | 프로세스 상태 전환 (failover 시나리오의 stop/start) |
+| `service-start` | 서비스 모듈 기동 (csc/csp/cmp/console) |
+| `service-state` | 서비스 상태 전환 (finalize stop list 등) |
+| `service-signal` | 기동 중 서비스에 시그널 (SIGUSR1 reload) |
+| `sim-call` | cspsim 호 발생 (VoIP/PTT 스모크·통합 시나리오) |
 
 ---
 
@@ -164,7 +219,7 @@ S5-MODULES-RUN                (60) ─ group
 S5-FINALIZE                   (70) — step 22: 기본 기동 유지 / --stop-after 시 stop list (3 mgmt + 4 service = 7) + kill 5 agents
 ```
 
-옛 step 02/03/04 (Build/Configure/Pkg) 는 S2/S3/S4 가 이미 흡수.
+Build/Configure/Pkg 는 S2/S3/S4 가 담당하므로 S5 step 에서 제외.
 
 #### 공유 상태 (`ctx.state["_s5_native"]`)
 
@@ -248,7 +303,7 @@ backend `_parse_items_progress(log_path)` 가 폴링으로 파싱.
 
 ### 3.2 회차 이력
 
-각 job 종료 시 `_record_run()` 자동 INSERT — `verification_run` + `verification_run_item`. `pkg_manifest_hash` 컬럼 (S6 immutability gate 의 SoT). API:
+각 job 종료 시 회차 record 를 파일로 저장 — `verify.lib.run_store` 가 `verify_runs/YYYY/MM/<id>.json` 1 파일로 기록(record/list/get/stats 모두 파일시스템 스캔). `pkg_manifest_hash` 필드가 S6 immutability gate 의 SoT. API:
 
 - `GET /api/v1/verification/runs?days=N&scope=...&verdict=...&limit=...`
 - `GET /api/v1/verification/runs/<id>` — 회차 + 항목 결과 + manifest hash
@@ -304,14 +359,6 @@ build/dist/
 ```
 
 각 `<server>/` 내부: `agent/` (cims_agent + state + 발급 cert) · `<모듈>/` (pkg.json + config.json overlay + modules/**) · `config/` (collection jsonl).
-
-> 매핑 (옛 → 신, 2026-05-08 `11a58b0`):
-> `csc-server-local` → `mgmt-server` /
-> `csp-server-local` → `volte-sip-server` /
-> `cmp-server-local` → `volte-media-server` /
-> 신규 `psp-server-local` → `ptt-sip-server` /
-> 신규 `pmp-server-local` → `ptt-media-server` /
-> `sim-server-local` → mgmt-server 에 흡수.
 
 ## 부록 B. 포트 매핑
 

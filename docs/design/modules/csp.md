@@ -142,6 +142,10 @@ REGISTER 수신
       └─ 실패 → 401 Unauthorized (재도전)
 ```
 
+**SIP 헤더 주입 (IMS 규격 준수):**
+
+REGISTER 200 OK 와 B2BUA 발신 INVITE 에 `P-Asserted-Identity`(`<sip:user@domain>`)를 주입한다.
+
 **Static 헬퍼:**
 
 | 메서드 | 역할 |
@@ -292,6 +296,14 @@ INVITE to group@domain
       └─ 매핑: memberCallId → {groupId, memberId, sessionId}
 ```
 
+**MCPTT INVITE 헤더 주입 (3GPP 규격 준수):**
+
+그룹 INVITE 에는 MCPTT 서비스 식별을 위한 헤더를 함께 주입한다.
+
+- `P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt`
+- `Accept-Contact` (ICSI ref)
+- `Answer-Mode: Auto`
+
 **멤버 생명주기:**
 
 | 이벤트 | 처리 |
@@ -415,7 +427,7 @@ Session-ID 기반 서비스 로깅 디렉토리 관리.
   │   ├─ session.json         (Session-ID ↔ Call-ID 매핑)
   │   └─ seg_NNNN_*.rtp / seg_NNNN.json / segments.jsonl  (CMP 녹취)
   │
-  └─ ptt/{id}/                         # id = ptt_groups.id (surrogate)  ※2026-06 시간버킷 재구조화
+  └─ ptt/{id}/                         # id = ptt_groups.id (surrogate)
       ├─ group.json                     (그룹 디스크립터: id/mcptt_group_id/group_type/members[role]…)
       └─ {YYYY}/{MM}/{DD}/{HH}/         # 시간버킷
           ├─ events.jsonl               (멤버 참가/퇴장)
@@ -423,7 +435,7 @@ Session-ID 기반 서비스 로깅 디렉토리 관리.
           ├─ segments.jsonl
           └─ seg/{NNN}/seg_NNNN_*.rtp + seg_NNNN.json   (100세그 shard)
 ```
-> 옛 `ptt/{group}/sessions/{key}.d`(+recordings//daily/) 폐지. 상세 [recording.md](../features/recording.md).
+> 상세 [recording.md](../features/recording.md).
 
 **Session-ID 생성:**
 
@@ -647,7 +659,7 @@ class CCallInfo {                  // CallMap value (key = Call-ID)
 - **answer(200 OK)**: callee 주소를 `gclsCmpClient.ModifySession(session_id, …, peerIdx=1)` 로 CMP 에 MODIFY.
 - **stale 호 정리**: `DeleteTimeout` → `Delete`(bStopPort) → 동일 session_id RemoveSession.
 
-> **구 `CRtpMap`(포트단독키, `RtpThread`/`CRtpInfo` 소켓 relay) 제거됨** — 미디어서버 분리 전 CSP 직접 relay 시절 코드. 멀티 미디어노드(`MediaServer.Endpoints`) 도입 후 같은 포트가 노드별 비유일이라 포트키 충돌로 teardown 이 엉뚱한 세션을 회수 → relay 누수했다. session_id(전역 유일) 키로 전환해 근본 해소(`RtpMap.cpp`/`RtpThread.cpp` 삭제, `RtpMap.h` 는 `SOCKET_COUNT_PER_MEDIA` 상수만 잔존). CSP 비정상 종료 시의 고아 relay 는 CMP sweeper 가 회수(cmp.md §5).
+relay bookkeeping 의 키는 **session_id**(`cmp_sess_N`, 전역 유일)다. 멀티 미디어노드(`MediaServer.Endpoints`) 환경에서 같은 포트가 노드별로 유일하지 않으므로, 포트가 아니라 session_id 로 CMP 세션을 지목한다. CSP 비정상 종료 시의 고아 relay 는 CMP sweeper 가 회수(cmp.md §5). (`RtpMap.h` 는 `SOCKET_COUNT_PER_MEDIA` 상수만 잔존.)
 
 ### 4.4 DB 스키마 (CDbManager)
 
@@ -656,13 +668,13 @@ class CCallInfo {                  // CallMap value (key = Call-ID)
 | 테이블 | 용도 |
 |--------|------|
 | users | 가입자 기본 정보 |
-| volte_subscriptions | VoLTE 회선 (ID, AuthId, Password, DND, Forward) — v3(2026-04-22) `voip_subscriptions` → 개명 |
+| volte_subscriptions | VoLTE 회선 (ID, AuthId, Password, DND, Forward) |
 | ptt_subscriptions | PTT 회선 (ID, AuthId, Password) |
 | ptt_groups | PTT 그룹 설정 |
 | ptt_group_members | 그룹 멤버십 |
 | recordings / recording_segments | 녹취 메타데이터 |
 
-통화 이력은 DB 미적재. 파일 기반 — `service_log/{volte|ptt}/.../<call_id>.d/call.json`. 옛 `voip_call_logs` / `ptt_call_logs` 는 v3(2026-04-22) DROP. 전체 인벤토리는 [docs/design/db_schema.md](../db_schema.md).
+통화 이력은 DB 미적재. 파일 기반 — `service_log/{volte|ptt}/.../<call_id>.d/call.json`. 전체 인벤토리는 [docs/design/db_schema.md](../db_schema.md).
 
 ---
 

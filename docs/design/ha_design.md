@@ -1,22 +1,11 @@
 # HA 이중화 설계 — Active/Standby + All Active
 
-> 버전: 1.0 (2026-05-12)
->
 > CIMS 운영 환경의 가용성을 위한 이중화 토폴로지 설계. SIP 서버군 (CSP/PSP)
-> 과 관리 서버 (CSC) 는 Active/Standby, Media 서버군 (CMP/PMP) 은 All
-> Active. 본 문서는 메인 백로그 1번 (Phase 1.A) 의 deliverable 이며
-> 후속 1.B ~ 1.H 의 코드 작업을 위한 합의 기준이다.
+> 과 관리 서버 (CSC) 는 Active/Standby, Media 서버군 (CMP/PMP) 은 All Active.
 
 ## 1. 개요
 
-### 1.1 배경
-
-현재 (2026-05-12 기준) CIMS 는 모든 컴포넌트가 단일 인스턴스 가정으로
-구현되어 있다. P2 라운드에서 IBCF (ISP/IMP) 가 VoLTE 인스턴스와 공존
-하도록 토폴로지가 정리되었으나, 노드 하나가 죽으면 서비스가 중단된다.
-이를 보완하기 위해 노드 2개를 활용한 이중화 도입이 필요하다.
-
-### 1.2 목표
+### 1.1 목표
 
 | 지표 | 목표 |
 |---|---|
@@ -26,7 +15,7 @@
 | 진행중 통화 (in-call) | fail-over 시 끊김 허용 (cold dialog 정책) |
 | Media (CMP/PMP) | 인스턴스 N 개 중 1 개 장애 시 신규 세션 분산 자동 유지 |
 
-### 1.3 비목표
+### 1.2 비목표
 
 - **DB 이중화** — MariaDB Galera / Master-Master 등은 별도 트랙. 본 문서
   범위 밖. 이번 단계에서는 단일 DB 가정을 유지하며, DB 장애는 별도
@@ -36,7 +25,7 @@
 - **WebRTC bridge (cwrtc)** — 별도 검증 항목 (사용자 요청 예정) 으로
   본 범위 외.
 
-## 2. 사용자 확정 결정사항 (2026-05-12)
+## 2. 핵심 결정사항
 
 | 항목 | 결정 | 근거 |
 |---|---|---|
@@ -87,7 +76,7 @@
                              ▼           ▼
                          ┌───────────────────┐
                          │  Redis (register) │  ← state replication
-                         │  10.0.0.20        │     (sentinel 1.D-2)
+                         │  10.0.0.20        │     (sentinel 후속)
                          └───────────────────┘
                                    │
                          ┌───────────────────┐
@@ -127,7 +116,7 @@
 
 1. keepalived 가 advert miss (1s × 3) → 3초 후 VRRP 상태 전이
 2. Node B 가 `VIP_csc` 인수, `csc` 프로세스가 4420/4430 binding 시작 (이미
-   기동 상태였다면 binding 만 인수 — 자세한 운영 시퀀스는 1.F)
+   기동 상태였다면 binding 만 인수 — 자세한 운영 시퀀스는 §8 참조)
 3. `Console` 의 다음 API 호출 → 새 ARP 로 Node B 로 라우팅
 4. `cims_agent` 의 heartbeat (30s 주기) 가 다음 회차에서 자동 재연결
    (`session_token` 은 동일 DB share 라 양쪽 유효)
@@ -216,10 +205,8 @@ cims:reg:idx:domain:<domain>        # SADD <aor>, 도메인별 인덱스 (옵션
 
 ### 6.6 Redis 인스턴스 운영
 
-- **Phase 1 (1.D-1)**: 단일 Redis 인스턴스, 별도 노드 (10.0.0.20) 또는
-  mgmt 노드 (10.0.0.11) 에 함께 기동
-- **Phase 2 (1.D-2, 후속)**: Redis Sentinel 또는 Cluster — 단, register
-  state 손실 허용범위 작아서 별도 검토 후 결정
+- 단일 Redis 인스턴스, 별도 노드 (10.0.0.20) 또는 mgmt 노드 (10.0.0.11) 에 함께 기동
+- (후속) Redis Sentinel 또는 Cluster — register state 손실 허용범위가 작아 별도 검토 후 결정
 
 ## 7. Consistent hash 분배 알고리즘 (CMP/PMP)
 
@@ -273,31 +260,25 @@ VIP 단일 endpoint 라 client 코드 변경 최소:
 
 - **Console** — `ems/core/console/vite.config.ts` 의 `VITE_ADMIN_TARGET` 을
   `VIP_csc` 로 변경. proxy 가 자동으로 새 ARP 따라감.
-- **cims_agent** — `--csc-url https://VIP_csc:4420` 으로 기동. heartbeat
-  실패 시 backoff + 재시도 (1.G 추가).
+- **cims_agent** — `--oam-url https://VIP_csc:4419` 으로 기동. heartbeat
+  실패 시 backoff + 재시도.
 - **DB session_token** — CSC 양쪽이 동일 DB 를 share 하므로 token 검증
   통과. 추가 작업 없음.
 
-다만 standby CSC 가 write API 를 허용할 경우 split-brain 위험이 있어
-1.F 에서 다음 중 결정 → **(1) VIP-only cold-spare 채택 (2026-05-12)**:
+standby CSC 가 write API 를 허용하면 split-brain 위험이 있어 **VIP-only
+cold-spare** 모델을 채택한다:
 
-1. **VIP-only mode (채택)** — Standby 노드의 `cims-csc.service` 는 stopped
-   상태. keepalived 의 `notify` 스크립트가 MASTER 전이 시 `systemctl start
-   cims-csc`, BACKUP/FAULT 시 `systemctl stop cims-csc` 수행.
-   → 단순, split-brain 원천 차단. 단점은 fail-over 시 약 1~3초 추가 기동
-   지연 (cims.sh start csc 의 sleep + DB 연결).
-2. (대안) Always-on standby + write freeze — 후속 라운드에서 RTO 단축
-   필요 시 (2) 로 전환 가능. CSC 의 read endpoint 만 응답하고 write 는 412
-   반환하는 모드 추가 작업.
-3. (기각) Both active — DB HA 결정에 종속, 권장 안 함.
+- Standby 노드의 `cims-csc.service` 는 stopped 상태. keepalived 의 `notify`
+  스크립트가 MASTER 전이 시 `systemctl start cims-csc`, BACKUP/FAULT 시
+  `systemctl stop cims-csc` 수행. 단순하며 split-brain 을 원천 차단한다.
+  단점은 fail-over 시 약 1~3초 추가 기동 지연 (start 의 sleep + DB 연결).
+- (대안) Always-on standby + write freeze — RTO 단축이 필요할 때 read
+  endpoint 만 응답하고 write 는 412 반환하는 모드로 전환 가능.
 
-**구현 (1.F 완료)**: `agent/keepalived/notify_*.sh` + `agent/systemd/
-cims-{csc,csp,psp}.service.tpl` + `cims.sh ha config|apply` 가 systemd
-unit 도 함께 다룸.
+구현: `agent/keepalived/notify_*.sh` + `agent/systemd/cims-{csc,csp,psp}.service.tpl`
++ `cims.sh ha config|apply` 가 systemd unit 도 함께 다룬다.
 
 ## 9. verify 시나리오 매핑
-
-후속 1.H 에서 신규 추가 예정 (현재는 stub):
 
 | 항목 ID | 시나리오 | 검증 절차 |
 |---|---|---|
@@ -305,24 +286,20 @@ unit 도 함께 다룸.
 | S6-FAILOVER-CSP | CSP active 강제 종료 → 단말 REGISTER 복원 | active CSP kill → cspsim REGISTER → Redis lookup hit 확인 |
 | S6-FAILOVER-CMP | CMP-A 강제 종료 → 신규 세션 CMP-B 분산 | active CMP-A kill → cspsim 신규 통화 5개 → 모두 CMP-B 도착 확인 |
 
-## 10. 후속 작업 분해 (1.B ~ 1.H)
+## 10. 구성 요소별 구현 위치
 
-| 단계 | 작업 | 주요 영향 파일 | 예상 규모 |
-|---|---|---|---|
-| 1.A | 본 설계 문서 | `docs/design/ha_design.md` (이 파일) | (완료 2026-05-12) |
-| 1.B | keepalived 인프라 자동화 | `agent/keepalived/`, `cims.sh ha` | (완료 2026-05-12) |
-| 1.D-1 | Redis register replication 골격 (stub) | ✅ `csp/RedisStore.{h,cpp}` 신규 (cold-mode no-op) + `csp/CspUser.cpp` SetBinding/DelBinding hook. hiredis 통합은 1.D-2 에서. | (완료 2026-05-12) |
-| 1.D-2 | hiredis 통합 + Redis Sentinel/Cluster | RedisStore 본체 hiredis 구현 + CMakeLists link + Sentinel 평가 | (미정) |
-| 1.E | CMP consistent hash 분배 (골격) | ✅ `csp/ConsistentHashRing.h` 신규 + `csp/CmpClient.{h,cpp}` endpoint vector + AddEndpoint + SelectEndpointForSession. SendRequestAndWait 의 endpoint 분배 활성은 1.E-2 (caller 인터페이스 확장). | (완료 2026-05-12) |
-| 1.F | CSC/CSP/PSP active/standby 모드 (VIP-only cold-spare) | `agent/systemd/cims-*.service.tpl`, `agent/keepalived/notify_*.sh`, `cims.sh ha config|apply` | (완료 2026-05-12) |
-| 1.G | cims_agent VIP target + backoff | ✅ `agent/cims_agent.py:run_loop` exponential backoff (5s→10s→20s→max 60s, 성공 시 reset). VIP target 은 `--csc-url` 인자만 변경. | (완료 2026-05-12) |
-| 1.H | verify 시나리오 stub | ✅ `verify/lib/items/stage6/scn_failover_{csc,csp,cmp}.py` 3개 (SKIP body, ha.json + multi-CMP 감지 시 LIVE 활성 분기). | (완료 2026-05-12 — stub) |
+| 구성 요소 | 주요 영향 파일 |
+|---|---|
+| keepalived 인프라 자동화 | `agent/keepalived/`, `cims.sh ha` |
+| Redis register replication 골격 | `csp/RedisStore.{h,cpp}` (cold-mode no-op) + `csp/CspUser.cpp` SetBinding/DelBinding hook. hiredis 통합은 후속. |
+| CMP consistent hash 분배 | `csp/ConsistentHashRing.h` + `csp/CmpClient.{h,cpp}` endpoint vector + AddEndpoint + SelectEndpointForSession |
+| CSC/CSP/PSP active/standby 모드 (VIP-only cold-spare) | `agent/systemd/cims-*.service.tpl`, `agent/keepalived/notify_*.sh`, `cims.sh ha config|apply` |
+| cims_agent VIP target + backoff | `agent/cims_agent.py:run_loop` exponential backoff (5s→10s→20s→max 60s, 성공 시 reset). VIP target 은 `--csc-url` 인자로 변경. |
+| verify 시나리오 | `verify/lib/items/stage6/scn_failover_{csc,csp,cmp}.py` 3개 (ha.json + multi-CMP 감지 시 LIVE 활성 분기). |
 
-총량 예상: 본 설계 확정 후 1.B → 1.H 순서로 진행, 각 단계 독립 PR.
+## 11. 운영 가이드 — keepalived 인프라
 
-## 11. 운영 가이드 — keepalived 인프라 (1.B)
-
-### 11.1 파일 구조 (B 옵션 통합 + 운영 도구 분리)
+### 11.1 파일 구조
 
 운영 시 cims.sh 는 사용 안 함 — agent 패키지가 자체 운영 도구를 들고감.
 
@@ -376,10 +353,9 @@ standby 가 자기 자신을 띄우는 일 없음.
 > **VIP 바인딩 / NIC 매핑 (multi-VIP)** — HA 그룹은 `vip_bindings: [{slot, ip, mask}]` 로
 > 망별 다중 VIP 를 한 vrrp_instance 에 둔다. 각 VIP 가 붙을 NIC(`dev`)은
 > **VIP 바인딩의 slot 과 동일 용도(slot) 를 가진 멤버 `service_ip_rows` 의 iface** 로 결정
-> (`oam ha_groups._render_ha_for_agent`; memberIfaces 명시 시 우선). 망(role) 모델은 폐지됨.
+> (`oam ha_groups._render_ha_for_agent`; memberIfaces 명시 시 우선).
 > vrrp advert NIC 은 mgmt NIC 자동 선택. **VIP 는 서비스망(예 121.161.164.x/24)에만 둔다 —
-> 내부/관리망(10.0.x) VIP 는 불필요**(과거 internal VIP 가 부팅마다 NIC 점유해 콘솔 IP 편집을
-> 막던 문제로 제거). cims-priv 관리 IP/마운트 영속성은 `modules/agent.md §11` 참조.
+> 내부/관리망(10.0.x) VIP 는 불필요**. cims-priv 관리 IP/마운트 영속성은 `modules/agent.md §11` 참조.
 
 ### 11.3 health probe 정책
 
@@ -402,9 +378,8 @@ standby 가 자기 자신을 띄우는 일 없음.
 
 모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록.
 
-1.D-1 도입 시: CSP/PSP 의 MASTER 승격에서 `cims-svc start csp` (cims@csp.service
-의 ExecStart) 가 기동 시 Redis 에서 register state 를 일괄 복원 — notify 스크립트
-변경 없음.
+CSP/PSP 의 MASTER 승격에서 `cims-svc start csp` (cims@csp.service 의 ExecStart) 가
+기동 시 Redis 에서 register state 를 일괄 복원 — notify 스크립트 변경 없음.
 
 ### 11.5 cims.sh 와의 관계
 
@@ -430,7 +405,7 @@ sql/migrate_ha_groups_vip_nullable.sql):
 
 > standalone 서비스 = ha_group 미배정 agent (음수 id `-agent.id` 로 frontend 매핑)
 
-### 11.7 Phase 2 적용 흐름 — Apply API + multi-VIP rendering
+### 11.7 적용 흐름 — Apply API + multi-VIP rendering
 
 운영자가 VipPanel / ServiceIpPanel 의 `[적용]` 클릭 시:
 
@@ -445,7 +420,7 @@ sql/migrate_ha_groups_vip_nullable.sql):
 - agent 별 iface 는 `binding.memberIfaces[agent_id]` 또는 service 의 `interface` field
 - 한 group 내 모든 binding 은 같은 iface 사용 (제약 — 다중 iface 필요 시 그룹 분할)
 
-**config_template ip 메타** (HaServicesPage Phase 2.3):
+**config_template ip 메타**:
 패키지 `config_template.json` 의 field 에 다음 attribute 추가하면 SLOT_MAP hardcoded 대체:
 ```json
 { "key": "Setup.Sip.LocalIp", "type": "string",
@@ -481,7 +456,7 @@ VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 �
 
 2-node fail-over 시나리오 (`S6-SCN-FAILOVER-CSP/CMP/CSC`) 는 **실제 4개 agent**
 (ctrl01/ctrl02 = Control A/S, media01/media02 = Media All-Active) 위에서 LIVE
-검증한다. (옛 단일-호스트 NetNS 시뮬 환경은 폐기됨 — 실 인프라로 일원화.)
+검증한다.
 
 **토폴로지**:
 
@@ -506,10 +481,8 @@ VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 �
 
 ## 12. 미확정 / 추후 검토
 
-- **Redis sentinel / cluster 도입 시점** — 1.D-1 안정화 후 register
-  손실 허용범위 재평가
-- **CSC active/standby 모드의 hot vs cold spare** — 1.F 에서 운영
-  요구사항 (RTO) 재확정
+- **Redis sentinel / cluster 도입 시점** — register 손실 허용범위 재평가
+- **CSC active/standby 모드의 hot vs cold spare** — 운영 요구사항 (RTO) 재확정
 - **CMP all-active 시 RTP 포트 충돌** — 양 노드의 RTP pool 이 동일 50000~
   대역이면 NAT/SIP `c=` 라인 IP 가 노드 IP 라 문제 없음 (확인 필요)
 - **단말 SIP TLS 재핸드셰이크** — VIP fail-over 후 TLS 세션 인수 불가,

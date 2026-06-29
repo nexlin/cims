@@ -1,14 +1,12 @@
-# MCPTT 권한 모델 & 그룹 소유(authorized user) 설계 — 구현 계획서
+# MCPTT 권한 모델 & 그룹 소유(authorized user) 설계
 
-> 상태: **설계 확정 / 구현 대기(다음 세션)**. 본 문서는 다음 세션에서 한 번에 구현할 스펙이다.
-> 작성 배경: PTT 그룹 `group.json`의 placeholder 필드(`session_id="permanent"`, `call_id="autojoin"`) 정리 논의에서 출발해,
-> "그룹 owner = 누구인가 / OAM 운영자와 가입자 신원 관계 / 권한 모델"로 확장되어 합의된 결과.
+본 문서는 CIMS 의 콘솔/운영 권한 모델(역할)과 PTT 그룹 소유(authorized user) 모델을 정의한다.
 
 ---
 
 ## 1. Context (왜)
 
-- 현재 `group.json` 에는 옛 "세션=1통화" 모델의 placeholder(`session_id`,`call_id`,`initiator`)만 있고, 그룹을 식별·관리할 핵심 정보(소유자/관리자, 식별자, 유형)가 빠져 있다.
+- `group.json` 은 그룹을 식별·관리할 핵심 정보(소유자/관리자, 식별자, 유형)를 담는 자기완결형 디스크립터다.
 - 3GPP MCPTT(TS 23.280 / 24.481)에서 그룹 생성·관리 주체는 **authorized user**(MCPTT 사용자)이다. 별도의 "운영자 계정"이 아니라 **권한을 가진 가입자**다.
 - CIMS는 이미 **단일 신원 모델**: 콘솔 로그인 계정과 가입자가 같은 `users` 테이블의 한 person이다(`users.login_id/password/role` = 콘솔 인증, `*_subscriptions` = telephony). → 이 위에 **세분 권한(역할)** 을 얹으면 "가입자 = 운영자 = MCPTT 관리자"가 하나로 통합된다.
 - 따라서: ① 콘솔/운영 권한을 **역할(role)** 로 정리, ② 그룹 소유를 **authorized_user_id** 로 명시, ③ `group.json` 을 자기완결형 디스크립터로 재설계.
@@ -35,7 +33,7 @@
 | `monitor` | 모니터 | **조회 전용** (대시보드/성능/이력/녹취 보기, ack 불가) |
 | `user` | 일반 단말 사용자 | **OAM 로그인 불가**, telephony만 |
 
-### 3.1 패키지 내장 계정 + 개발자 모드 (2026-06-11)
+### 3.1 패키지 내장 계정 + 개발자 모드
 
 `admin` 은 **공급사 구축 계정**으로, 고객측 관리자/운용자(manager/operator —
 DB `users` 테이블 계정)와 분리한다. 가입자 DB 에 저장하지 않고 **OAM 패키지
@@ -95,9 +93,8 @@ DB `users` 테이블 계정)와 분리한다. 가입자 DB 에 저장하지 않�
 - **편집 인가 규칙**: `admin`·`manager` → 모든 그룹 / `operator` → `authorized_user_id == 본인` 만 / 생성 시 `authorized_user_id=본인` 자동.
 - 제약: authorized user 는 **PTT 가입자여야** 함(규격). admin/manager 대리 생성 시 owner를 PTT 가입자 중 지정.
 
-## 5. `group.json` 재설계 (자기완결형, CSP 기록)
+## 5. `group.json` (자기완결형 디스크립터, CSP 기록)
 
-placeholder(`session_id`,`call_id`,`initiator`) **제거** → 디스크립터:
 ```json
 {
   "id": 1,                              // ptt_groups.id (surrogate, = 디렉터리 키)
@@ -118,26 +115,26 @@ placeholder(`session_id`,`call_id`,`initiator`) **제거** → 디스크립터:
 }
 ```
 
-## 6. 구현 범위 / 파일 (다음 세션)
+## 6. 구현 범위 / 파일
 
-### Phase A — DB
-- `sql/migrate_*_rbac.sql` (신규):
+### DB
+- `sql/migrate_*_rbac.sql`:
   - `users.role` → `ENUM('admin','manager','operator','monitor','user') DEFAULT 'user'` (기존 'admin'→'admin', 그 외/가입자→'user').
   - `ptt_groups` 에 `authorized_user_id BIGINT NULL` (FK→users.id, ON DELETE SET NULL) + `created_at DATETIME DEFAULT CURRENT_TIMESTAMP`.
 - `sql/cims_schema.sql` inline 반영.
 
-### Phase B — 인가 (CSC/OAM)
+### 인가 (CSC/OAM)
 - `csc/src/services/admin_auth.py` — 로그인: `role=='user'` 거부. JWT 에 `role` 포함.
 - 인가 미들웨어/데코레이터: 핸들러별 **요구 등급** 선언 + (그룹은) 소유 스코프 체크. `csc/src/handlers/admin.py`(그룹 CRUD: operator 생성 허용 + edit/delete `authorized_user_id==self` 게이트), org/users 핸들러 등급 게이팅.
 - `csc/src/handlers/admin.py` `_create_group`: `authorized_user_id` 입력/기본=생성자, PTT 가입자 검증. `_list_groups`/`_get_group`: `authorized_user`(파생 MCPTT ID) 포함.
 - `csc/src/services/mcptt.py` GMS: `<list-service>`/ruleset 에 authorized user 반영.
 
-### Phase C — CSP (group.json/GMS)
+### CSP (group.json/GMS)
 - `csp/GroupCallService.cpp` `BuildGroupDescriptor(clsGroup)` — §5 전체 필드 생성(멤버 role 포함, authorized_user_id).
-- `csp/CallDir.h` `PttSessionStart` — wrapper 를 디스크립터 + `state/created_at/updated_at` 로 (session_id/call_id/initiator 제거). initiator 는 state 파일용으로만 유지.
+- `csp/CallDir.h` `PttSessionStart` — 디스크립터 + `state/created_at/updated_at` 기록. initiator 는 state 파일용으로만 유지.
 - `csp/CspPttGroup.{h,cpp}` + `csp/DbManager.cpp` `SelectGroup` — `authorized_user_id` 로드.
 
-### Phase D — 콘솔
+### 콘솔
 - 계정 관리 페이지: role 지정(5종) UI + 기본 default-deny.
 - 메뉴/버튼 게이팅: role 등급별 노출/비활성. `monitor`=쓰기 숨김.
 - PTT 그룹 페이지: operator 에게 **본인 그룹=편집 / 타인 그룹=읽기(잠금)**. 그룹 생성 시 authorized user 지정.

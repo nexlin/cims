@@ -27,8 +27,8 @@ Console 에서 CSP 의 수신 엔드포인트/피어 연결/라우팅 정책/ACL
 
 ```
 <install_path>/config/
-├── local_nodes.jsonl           # 수신 엔드포인트 (구 listeners.jsonl)
-├── remote_nodes.jsonl          # 피어 서버 (구 trunks 의 transport 부분)
+├── local_nodes.jsonl           # 수신 엔드포인트
+├── remote_nodes.jsonl          # 피어 서버 (transport)
 ├── routes.jsonl                # (LN, RN) pair + auth/outbound 파라미터
 ├── route_sets.jsonl            # Route 클러스터 + 분배 정책
 ├── rules.jsonl                 # 원자 조건
@@ -165,11 +165,11 @@ if (g_reloadFlag && gclsCspConfigCache.IsJsonlMode()) {
 - `LocalNodeMap.GetByIntId(listener_id)` → `LocalNodeInfo` (name 등 포함)
 - `LocalNodeMap.GetByName(name)` → `LocalNodeInfo`
 
-## 9. psip v3 확장 (2026-04-22)
+## 9. psip 리스너 식별 확장
 
-수신 메시지에 리스너 식별 정보를 실어주도록 psip stack 확장.
+수신 메시지에 리스너 식별 정보를 실어주도록 psip stack 을 확장한다.
 
-- **`CSipMessage.m_iListenerId`** (신규 필드) — UDP 수신 시 `CSipStackUdpListener.m_iId` 값 복사.
+- **`CSipMessage.m_iListenerId`** — UDP 수신 시 `CSipStackUdpListener.m_iId` 값 복사.
   송신/미지정/TCP/TLS 는 `-1`.
 - **수신 경로** (`SipStackComm.hpp`): UDP 수신 스레드가 세팅하는 `t_iCurrentListenerId` (thread-local)
   을 메시지 구성 시점에 복사.
@@ -179,10 +179,26 @@ if (g_reloadFlag && gclsCspConfigCache.IsJsonlMode()) {
 - **AccessService restricted**: `CCspServiceMap::IsInboundAllowed(svc, listener_int_id)` 로
   `svc.listeners[]` (LocalNode 이름 → hash int 파생) 과 매칭. CscfModule REGISTER 경로에서 적용.
 
+psip 다중 리스너 인프라:
+- psip `CSipStack` 은 UDP/TCP/TLS **세 transport 모두 다중 리스너**를 지원한다. 각각 `m_vecUdpListeners` / `m_vecTcpListeners` / `m_vecTlsListeners` 벡터로 보유하며, 런타임 add/remove API(`AddUdpListener` / `AddTcpListener` / `AddTlsListener` + 각 Remove + GetInfo)로 무중단 변경한다.
+- 스레딩: UDP 는 per-listener recv 스레드 풀(`m_iThreadCount` = local_nodes 의 thread_count). TCP/TLS 는 per-listener accept 스레드 1개 + 공유 worker 풀.
+- TLS 는 per-listener 인증서(`m_strCertFile` / `m_strKeyFile` / `m_strCaCertFile` → `SSLServerCtxCreate` 로 `SSL_CTX* m_pSslCtx`)를 accept 시점에 선택하며, 리스너 ctx 가 NULL 이면 stack-global ctx 로 폴백한다.
+
 한계:
-- TCP/TLS 수신은 현재 단일 리스너 구조 — listener_id 는 UDP 만 의미. TCP/TLS 다중 리스너 전환은 후속.
+- 다중 리스너 인프라는 3 transport 모두에 존재하지만, listener 기반 ACL(scope=local_node) 및 restricted 매칭에 쓰이는 `m_iListenerId` 전파는 UDP 수신 경로의 thread-local(`t_iCurrentListenerId`)로 설정된다. 즉 listener_id 기반 ACL scope=local_node 매칭은 UDP 수신에 적용된다.
 
-## 10. 변경 내역
+## 10. outbound 자기 주소 동적 선택 (CspAddressing)
 
-- **v3.0 (2026-04-22)**: 4 collection → 9 collection 재설계. Rule/RuleSet/Policy 도입.
-- **v2.0 (2026-04-21)**: DB + UDP notify 경로 → jsonl + SIGUSR1 로 전환.
+§9 의 inbound listener 식별에 대응하여, **발신 SIP 메시지의 자기 주소**(Via/From/Contact/source)도 단일 primary 값이 아니라 수신 맥락·route·서비스에 따라 동적으로 고른다. `csp/CspAddressing.{h,cpp}` 의 헬퍼 4종이 담당한다.
+
+| 헬퍼 | 선택 규칙 | 적용 위치 |
+|------|-----------|-----------|
+| `GetLocalSipAddress(inbound_listener_id)` / `GetLocalSipPort(...)` | 수신 listener id(>0)면 `LocalNodeMap.GetByIntId` 의 bind_ip/port 를 응답·Contact 주소로 사용 | REGISTER 200 OK Contact, 302 Contact, out-of-dialog NOTIFY 등 |
+| `GetLocalSipAddressForOutbound(proto, edge)` | protocol+edge → protocol-only → primary 의 3단 폴백 | 발신 From/Call-ID host |
+| `GetServerIdentityForService(kind)` | access_service 의 `server_identity_uri` 가 있으면 그대로, 없으면 `sip:cspserver@{service.domain}` 조립(매칭 실패 시 `sip:cspserver@{LocalIp}`) | 서비스별 서버 identity |
+
+- **B2BUA B-leg outbound 자기 주소**: route 의 `local_node_ref` → bind_ip/port → `clsRoute.m_strOutboundLocalIp` / `m_iOutboundLocalPort` 로 전달.
+- **psip 자동 Contact**: 수신 `m_iListenerId` 의 bind_ip:port 를 사용(모든 응답 포함).
+- **TCP/TLS outbound source bind**: `TcpConnectFrom(srcIp, ...)`, client thread 의 `m_strSourceIp`(비면 OS 기본)로 발신 소스 주소를 지정할 수 있다.
+
+이 동작은 멀티-listener / 멀티-realm / 피어링 환경에서 inbound 와 outbound 주소의 대칭성을 보장한다.
