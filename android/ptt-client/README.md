@@ -25,7 +25,15 @@ TS 규격대로 구현 — interop 위해 서버(CMP/CSP) 의 규격 정렬은 �
   IdMS `/idms/*`, GMS/CMS XCAP, ETag 캐시).
 - `mcptt/` — `McpttXml`: mcptt-info / resource-lists / affiliation-command 빌더 + GMS 그룹문서(OMA POC) 파서.
 
-**미구현(M2-PJSIP)**: affiliation PUBLISH 전송·키업 그룹 INVITE(multipart)·core `SipController` 연동·
-floor↔오디오 브리지 — PJSIP/SIP 의존이라 실기기 단계에서 배선.
+**M2-PJSIP 배선 완료(컴파일 검증, 실기기 미검증):**
+- core `SipController` 확장: `sendRequest`(affiliation PUBLISH, targetUri+Expires)·`makeGroupCall`
+  (multipart mcptt-info+resource-lists + SDP `m=application` floor 주입)·`onCallSdpCreated`(주입/원격
+  floor 포트 파싱→`floorRemote`)·반이중 mic(`setMicEnabled`, GRANT/RELEASE 토글).
+- `PttController` — CSC 인증/그룹 → REGISTER → affiliate → 키업 그룹콜 → floor 학습/송수신 → 오디오
+  반이중 오케스트레이션. `PttService`(FGS) + PTT UI(누르고 있는 동안 발언).
+
+**실기기 검증 대기**: SDP `m=application` 주입의 PJSIP 동작·multipart INVITE·affiliation PUBLISH
+라우팅은 실기기+라이브 서버에서 확인. **서버 TS 규격 정렬 전엔 floor interop 안 됨**
+([mcptt_standard_conformance.md](../../docs/design/features/mcptt_standard_conformance.md)).
 
 설계: [../../docs/design/features/android_ue_client.md](../../docs/design/features/android_ue_client.md) (§5 floor=TS 24.380, §7 CSC)

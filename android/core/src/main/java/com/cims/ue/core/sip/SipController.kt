@@ -10,6 +10,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.pjsip.pjsua2.AccountConfig
 import org.pjsip.pjsua2.AuthCredInfo
 import org.pjsip.pjsua2.CallOpParam
+import org.pjsip.pjsua2.SendRequestParam
+import org.pjsip.pjsua2.SipHeader
+import org.pjsip.pjsua2.SipHeaderVector
+import org.pjsip.pjsua2.SipMediaType
+import org.pjsip.pjsua2.SipMultipartPart
+import org.pjsip.pjsua2.SipMultipartPartVector
+import org.pjsip.pjsua2.SipTxOption
 import org.pjsip.pjsua2.pjsip_status_code
 import java.util.concurrent.ConcurrentHashMap
 
@@ -40,6 +47,17 @@ class SipController(private val config: SipAccountConfig) {
     @Volatile
     var videoEnabled = false                                       // M1.3 토글
 
+    // ── PTT(M2) 지원 ──
+    /** 반이중(PTT): true 면 mic 는 floor GRANT 시에만 송신, spk 는 상시 청취. (VoLTE=false 전이중) */
+    @Volatile var halfDuplex = false
+
+    /** 그룹콜 SDP 에 주입할 floor 라인(`m=application …`). makeGroupCall 직전 설정. */
+    @Volatile var injectApplicationSdp: String? = null
+
+    /** 수신 SDP 에서 학습한 CMP floor 목적지(ip,port). FloorClient 가 여기로 송신. */
+    private val _floorRemote = MutableStateFlow<Pair<String, Int>?>(null)
+    val floorRemote: StateFlow<Pair<String, Int>?> = _floorRemote.asStateFlow()
+
     private fun onCtl(block: () -> Unit) = h.post {
         runCatching {
             PjLib.ensureThread("pj-ctl")
@@ -66,6 +84,8 @@ class SipController(private val config: SipAccountConfig) {
         val acc = account ?: run {
             _call.value = CallState.Disconnected(-1, 0, "not registered"); return@onCtl
         }
+        halfDuplex = false                                        // VoLTE = 전이중
+        injectApplicationSdp = null
         val call = CimsCall(this, acc)
         val prm = CallOpParam(true).apply {
             opt.audioCount = 1L
@@ -85,7 +105,64 @@ class SipController(private val config: SipAccountConfig) {
 
     fun hangup(callId: Int) = onCtl { calls[callId]?.hangup(CallOpParam()) }
 
+    // ── PTT(M2): affiliation PUBLISH / 그룹콜(multipart+floor SDP) / 반이중 mic ──
+
+    /** 마이크 송신 토글 (PTT floor GRANT→true, RELEASE/REVOKE→false). */
+    fun setMicEnabled(callId: Int, on: Boolean) = onCtl { calls[callId]?.setMic(on) }
+
+    /**
+     * 임의 SIP 요청 송신 (affiliation 은 method="PUBLISH"). body/헤더는 호출자(ptt-client)가 규격대로 구성.
+     * @param targetUri Request-URI (예: 그룹 `sip:group@domain`)
+     */
+    fun sendRequest(
+        method: String,
+        targetUri: String,
+        contentType: String?,
+        body: String?,
+        headers: Map<String, String> = emptyMap(),
+    ) = onCtl {
+        val acc = account ?: return@onCtl
+        val tx = SipTxOption().apply {
+            this.targetUri = targetUri
+            if (contentType != null) this.contentType = contentType
+            if (body != null) this.msgBody = body
+            if (headers.isNotEmpty()) this.headers = headers.toSipHeaders()
+        }
+        acc.sendRequest(SendRequestParam().apply { this.method = method; txOption = tx })
+    }
+
+    /**
+     * 키업 그룹 INVITE — multipart 본문(mcptt-info + resource-lists, ptt-client 가 규격대로 구성) +
+     * SDP 에 `m=application` floor 라인 주입. 응답 SDP 의 floor 포트는 [floorRemote] 로 학습.
+     * @param applicationSdp 주입할 floor SDP 라인(예: "m=application <port> UDP MCPTT\r\nc=IN IP4 ..\r\na=floorid:0 mstrm:audio")
+     */
+    fun makeGroupCall(
+        groupUri: String,
+        parts: List<SipBodyPart>,
+        applicationSdp: String,
+    ) = onCtl {
+        val acc = account ?: return@onCtl
+        halfDuplex = true
+        injectApplicationSdp = applicationSdp
+        _floorRemote.value = null
+        val call = CimsCall(this, acc)
+        val prm = CallOpParam(true).apply {
+            opt.audioCount = 1L
+            opt.videoCount = 0L
+            if (parts.isNotEmpty()) {
+                txOption.multipartContentType = SipMediaType().apply { type = "multipart"; subType = "mixed" }
+                txOption.multipartParts = parts.toMultipart()
+            }
+        }
+        call.makeCall(groupUri, prm)
+        calls[call.id] = call
+    }
+
     // ── 콜백 진입점 (CimsAccount/CimsCall 에서 호출) ──
+
+    internal fun onRemoteFloorLearned(ip: String, port: Int) {
+        _floorRemote.value = ip to port
+    }
 
     internal fun dispatchReg(active: Boolean, code: Int, reason: String) {
         _reg.value = when {
@@ -136,7 +213,23 @@ class SipController(private val config: SipAccountConfig) {
         return ac
     }
 
+    private fun Map<String, String>.toSipHeaders(): SipHeaderVector = SipHeaderVector().also { v ->
+        forEach { (k, value) -> v.add(SipHeader().apply { hName = k; hValue = value }) }
+    }
+
+    private fun List<SipBodyPart>.toMultipart(): SipMultipartPartVector = SipMultipartPartVector().also { v ->
+        forEach { p ->
+            v.add(SipMultipartPart().apply {
+                contentType = SipMediaType().apply { type = p.type; subType = p.subType }
+                body = p.body
+            })
+        }
+    }
+
     private companion object {
         const val TAG = "SipController"
     }
 }
+
+/** multipart INVITE 본문 한 파트 (예: type="application", subType="vnd.3gpp.mcptt-info+xml"). */
+data class SipBodyPart(val type: String, val subType: String, val body: String)

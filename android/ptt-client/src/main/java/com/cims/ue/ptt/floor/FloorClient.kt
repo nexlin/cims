@@ -33,15 +33,16 @@ sealed interface FloorEvent {
  * UI 는 main 으로 디스패치할 것. 현재 상태는 [state] StateFlow.
  */
 class FloorClient(
-    remoteHost: String,
-    private val remotePort: Int,
     private val ssrc: Long,
     private val userId: String,
     localPort: Int = 0,
     private val onEvent: (FloorEvent) -> Unit = {},
 ) {
     private val socket = DatagramSocket(localPort)
-    private val remoteAddr = InetAddress.getByName(remoteHost)
+
+    // 원격(CMP floor) 목적지는 그룹 INVITE 200 OK SDP 의 m=application 에서 학습 → connectRemote 로 설정.
+    @Volatile private var remoteAddr: InetAddress? = null
+    @Volatile private var remotePort: Int = 0
 
     private val _state = MutableStateFlow(FloorState.IDLE)
     val state: StateFlow<FloorState> = _state.asStateFlow()
@@ -51,6 +52,14 @@ class FloorClient(
 
     @Volatile private var running = true
     private val rx = thread(name = "floor-rx", start = true) { receiveLoop() }
+
+    /** SDP 에서 학습한 CMP floor 목적지 설정(송신 가능해짐). */
+    fun connectRemote(host: String, port: Int) {
+        remoteAddr = InetAddress.getByName(host)
+        remotePort = port
+    }
+
+    val hasRemote: Boolean get() = remoteAddr != null
 
     // ── 송신 (PTT down/up) ──
 
@@ -70,7 +79,8 @@ class FloorClient(
     fun sendAck() = send(FloorCodec.ack(ssrc))
 
     private fun send(pkt: ByteArray) = runCatching {
-        socket.send(DatagramPacket(pkt, pkt.size, remoteAddr, remotePort))
+        val addr = remoteAddr ?: run { Log.w(TAG, "floor send before remote learned"); return@runCatching }
+        socket.send(DatagramPacket(pkt, pkt.size, addr, remotePort))
     }.onFailure { Log.w(TAG, "floor send failed: ${it.message}") }
 
     // ── 수신 ──
