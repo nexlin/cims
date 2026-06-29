@@ -1,0 +1,4 @@
+<resources>
+    <!-- 플랫폼 테마 사용 (Material Components 의존 회피). UI 는 Compose Material3 로 렌더 -->
+    <style name="Theme.CimsPtt" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

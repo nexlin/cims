@@ -163,29 +163,43 @@ PJSIP의 SDP 협상기는 표준 audio/video만 생성/이해한다. MCPTT의 `m
    (pjsip_module on_tx_request/on_tx_response 또는 PJSUA2 SDP 생성 콜백)
 ③ 수신 SDP(200 OK/INVITE)의 m=application 포트 파싱
    → CMP floor 목적지 학습 (※ "RTP+1" 고정 가정 금지 — 반드시 SDP에서 파싱)
-④ 발언권 REQUEST/RELEASE 송신, GRANT/REJECT/IDLE/TAKEN/REVOKE 수신 → 상태머신 반영
+④ 발언권 Request/Release 송신, Granted/Deny/Idle/Taken/Revoke 수신 → 상태머신 반영
 ```
 
-### 5.2 패킷 포맷 (`"MCPT"` RTCP-APP, 정본: UE Interface Guide §3.4)
+### 5.2 패킷 포맷 (`"MCPT"` RTCP-APP, **정본: 3GPP TS 24.380 §8**)
+
+> **규격 정합 결정:** 단말은 **TS 24.380 규격**대로 구현한다. 메시지 타입은 RTCP-APP **subtype(5비트)**
+> 에 싣고, 본문은 `Field ID(8) + Length(8) + value` **TLV 필드**의 나열이다. (서버 CMP 의 현행 구현은
+> `opcode/id_len/speaker_id` 자체 **simplified** 포맷이라 규격과 다르며 — interop 위해 **CMP 를 TS 24.380
+> 으로 정렬하는 별도 작업** 필요. UE Interface Guide §3.4 는 그 simplified 포맷을 문서화한 것.)
 
 ```
 0               1               2               3
-V=2 P subtype | PT=204        | length(32bit words-1)         |
-SSRC (송신자; CMP가 join 시 1000~ 할당)                         |
+V=2 P subtype | PT=204        | length(32bit words-1)         |   ← subtype = 메시지 타입
+SSRC (floor participant)                                       |
 name = "MCPT" (0x4D435054)                                     |
-opcode | id_len | reserved(0x0000)                             |
-speaker_id (가변, 4바이트 정렬 패딩)                            |
+[ Field ID | Length | value(Length) | (string필드는 4B 정렬패딩) ] ... |
 ```
 
-| opcode | 이름 | 방향 | 설명 |
-|---|---|---|---|
-| 1 | FLOOR_REQUEST | UE→CMP | 발언권 요청(PTT down) |
-| 2 | FLOOR_GRANT | CMP→UE | 승인(요청자) |
-| 3 | FLOOR_REJECT | CMP→UE | 거부(우선순위↓ / broadcast 비개시자) |
-| 4 | FLOOR_RELEASE | UE→CMP | 해제(PTT up) |
-| 5 | FLOOR_IDLE | CMP→ALL | 발언권 없음 |
-| 6 | FLOOR_TAKEN | CMP→ALL | 화자 점유(speaker_id 포함) |
-| 7 | FLOOR_REVOKE | CMP→UE | 강제 회수(선점) |
+메시지 타입(subtype) — TS 24.380 Table 8.2.2-1:
+
+| subtype | 메시지 | 방향 |
+|---|---|---|
+| 0 | Floor Request | UE→서버 |
+| 1 | Floor Granted | 서버→UE |
+| 2 | Floor Taken | 서버→ALL |
+| 3 | Floor Deny | 서버→UE |
+| 4 | Floor Release | UE→서버 |
+| 5 | Floor Idle | 서버→ALL |
+| 6 | Floor Revoke | 서버→화자 |
+| 8 | Floor Queue Position Request | UE→서버 |
+| 9 | Floor Queue Position Info | 서버→UE |
+| 10 | Floor Ack | both |
+
+주요 Field ID(TS 24.380 §8.2.3): 0 Floor Priority · 1 Duration · 2 Reject Cause · 3 Queue Info ·
+4 Granted Party's Identity · 5 Permission · 6 User ID · 7 Queue Size · 8 Msg Seq No · 10 Source ·
+11 Track Info · 13 Floor Indicator(비트마스크: emergency 0x1000 / imminent 0x0800 …) · 14 SSRC.
+구현: `ptt-client/floor/{FloorControl,FloorCodec,FloorClient}.kt` (가변 문자열 필드만 4B 정렬).
 
 ### 5.3 단말 Floor 상태머신
 
@@ -196,10 +210,10 @@ speaker_id (가변, 4바이트 정렬 패딩)                            |
         TAKEN(타인 화자) ─► [LISTENING] ─ IDLE ─►─┘◄── TAKEN(타 화자)──┘
 ```
 
-- **PTT 버튼 down** → mic 트랙을 conference bridge에 connect **+** FLOOR_REQUEST 송신. GRANT 수신 후에만 실제 발화 UX(톤/진동) 확정.
-- **REVOKE/REJECT** 수신 → 즉시 mic disconnect + UX 알림.
-- **TAKEN** → 화자 표시(speaker_id), 수신 음성 재생.
-- **레거시 폴백**: 서버는 DTMF(PT=101)도 floor 트리거로 허용([ptt_flows.md](ptt_flows.md) C1). 1차 구현은 RTCP-APP 정공법 사용.
+- **PTT 버튼 down** → mic 트랙을 conference bridge에 connect **+** Floor Request 송신. Granted 수신 후에만 실제 발화 UX(톤/진동) 확정.
+- **Revoke/Deny** 수신 → 즉시 mic disconnect + UX 알림.
+- **Taken** → 화자 표시(Granted Party's Identity), 수신 음성 재생.
+- **레거시 폴백**: 서버는 DTMF(PT=101)도 floor 트리거로 허용([ptt_flows.md](ptt_flows.md) C1). 1차 구현은 RTCP-APP(TS 24.380) 정공법 사용.
 
 ---
 

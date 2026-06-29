@@ -16,4 +16,16 @@
 
 ## 상태
 
-스캐폴드 대기 (M2 ~ M4). 설계: [../../docs/design/features/android_ue_client.md](../../docs/design/features/android_ue_client.md) (마일스톤 M2~M4)
+**M2 비-PJSIP 코어 구현 완료(3GPP TS 규격 정합, JVM 검증).** CMP 의 현행 simplified 포맷이 아니라
+TS 규격대로 구현 — interop 위해 서버(CMP/CSP) 의 규격 정렬은 별도 작업.
+
+- `floor/` — **TS 24.380 §8** RTCP-APP `"MCPT"` 코덱(`FloorControl`/`FloorCodec`: subtype=메시지타입,
+  TLV 필드, 가변 문자열 4B 정렬) + `FloorClient`(별도 UDP 소켓·상태머신·이벤트). 단위테스트 8/8.
+- `csc/` — **TS 33.180** OAuth2 PKCE(S256, `Pkce` — RFC 7636 벡터 검증) + `CscClient`(OkHttp:
+  IdMS `/idms/*`, GMS/CMS XCAP, ETag 캐시).
+- `mcptt/` — `McpttXml`: mcptt-info / resource-lists / affiliation-command 빌더 + GMS 그룹문서(OMA POC) 파서.
+
+**미구현(M2-PJSIP)**: affiliation PUBLISH 전송·키업 그룹 INVITE(multipart)·core `SipController` 연동·
+floor↔오디오 브리지 — PJSIP/SIP 의존이라 실기기 단계에서 배선.
+
+설계: [../../docs/design/features/android_ue_client.md](../../docs/design/features/android_ue_client.md) (§5 floor=TS 24.380, §7 CSC)
