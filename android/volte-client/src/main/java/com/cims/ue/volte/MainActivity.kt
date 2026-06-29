@@ -1,8 +1,17 @@
 package com.cims.ue.volte
 
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +31,8 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,7 +48,11 @@ import com.cims.ue.core.codec.AmrWbLoopbackSpike
 import com.cims.ue.core.codec.MediaCodecCapabilities
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.config.SipAccountConfig
+import com.cims.ue.core.sip.CallState
+import com.cims.ue.core.sip.RegState
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -73,6 +89,175 @@ private fun App() {
         )
     }
 }
+
+// ─────────────────────────────────────── 통화 홈 (M1) ───────────────────────────────────────
+
+@Composable
+private fun HomeScreen(
+    config: SipAccountConfig,
+    onEditConfig: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // SipService 바인딩
+    var service by remember { mutableStateOf<SipService?>(null) }
+    DisposableEffect(Unit) {
+        val conn = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                service = (binder as? SipService.LocalBinder)?.service
+            }
+            override fun onServiceDisconnected(name: ComponentName?) { service = null }
+        }
+        SipService.start(context)
+        context.bindService(Intent(context, SipService::class.java), conn, Context.BIND_AUTO_CREATE)
+        onDispose { runCatching { context.unbindService(conn) } }
+    }
+
+    // 권한 요청 → 승인되면 등록 시도
+    val permLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { service?.ensureRegistered() }
+
+    // 상태 관찰 — 서비스 바인딩 전에도 안전하도록 안정적 fallback flow 사용
+    val fallbackReg = remember { MutableStateFlow<RegState>(RegState.Idle) }
+    val fallbackCall = remember { MutableStateFlow<CallState>(CallState.Null) }
+    val reg by (service?.regState ?: fallbackReg).collectAsState()
+    val call by (service?.callState ?: fallbackCall).collectAsState()
+
+    var dst by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("CIMS VoLTE", style = MaterialTheme.typography.titleLarge)
+        Text("공개 ID(AOR): ${config.aor}", style = MaterialTheme.typography.bodyMedium)
+        Text("인증 ID(IMPI): ${config.digestUsername}", style = MaterialTheme.typography.bodySmall)
+        Text(
+            "서버: ${config.serverHost}:${config.serverPort}/${config.transport}   도메인=${config.domain}",
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        val regText = when (val r = reg) {
+            RegState.Idle -> "대기"
+            RegState.Registering -> "등록 중…"
+            is RegState.Registered -> "✅ 등록됨 (${r.code})"
+            RegState.Unregistered -> "등록 해제됨"
+            is RegState.Failed -> "❌ 등록 실패: ${r.reason}"
+        }
+        Text("등록: $regText", style = MaterialTheme.typography.titleMedium)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { permLauncher.launch(requiredPermissions()) }) { Text("등록") }
+            OutlinedButton(onClick = { service?.stopSip(); service = null }) { Text("해제") }
+            OutlinedButton(onClick = onEditConfig) { Text("설정") }
+        }
+
+        HorizontalDivider()
+
+        CallPanel(
+            call = call,
+            dst = dst,
+            onDstChange = { dst = it },
+            onDial = { service?.makeCall(dst.trim()) },
+            onAnswer = { id -> service?.answer(id) },
+            onReject = { id -> service?.reject(id) },
+            onHangup = { id -> service?.hangup(id) },
+        )
+
+        HorizontalDivider()
+
+        CodecDiagnostics(scope)
+    }
+}
+
+@Composable
+private fun CallPanel(
+    call: CallState,
+    dst: String,
+    onDstChange: (String) -> Unit,
+    onDial: () -> Unit,
+    onAnswer: (Int) -> Unit,
+    onReject: (Int) -> Unit,
+    onHangup: (Int) -> Unit,
+) {
+    Text("통화", style = MaterialTheme.typography.titleMedium)
+    when (val c = call) {
+        CallState.Null,
+        is CallState.Disconnected -> {
+            if (c is CallState.Disconnected && c.id >= 0) {
+                Text("종료: ${c.code} ${c.reason}", style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedTextField(
+                value = dst,
+                onValueChange = onDstChange,
+                label = { Text("상대 번호 (MSISDN)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(enabled = dst.isNotBlank(), onClick = onDial) { Text("발신") }
+        }
+        is CallState.Outgoing -> Card {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("발신 중… ${c.remote}")
+                Button(onClick = { onHangup(c.id) }) { Text("취소") }
+            }
+        }
+        is CallState.Incoming -> Card {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("수신 전화: ${c.remote}")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { onAnswer(c.id) }) { Text("받기") }
+                    OutlinedButton(onClick = { onReject(c.id) }) { Text("거절") }
+                }
+            }
+        }
+        is CallState.Active -> Card {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("통화 중: ${c.remote}")
+                Button(onClick = { onHangup(c.id) }) { Text("종료") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CodecDiagnostics(scope: CoroutineScope) {
+    var output by remember { mutableStateOf("") }
+    var running by remember { mutableStateOf(false) }
+    Text("MediaCodec 점검 (M0)", style = MaterialTheme.typography.titleMedium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(enabled = !running, onClick = {
+            running = true; output = "조회 중…"
+            scope.launch {
+                val r = withContext(Dispatchers.Default) { MediaCodecCapabilities.summary() }
+                output = r; running = false
+            }
+        }) { Text("코덱 가용성") }
+        OutlinedButton(enabled = !running, onClick = {
+            running = true; output = "스파이크 실행 중…"
+            scope.launch {
+                val r = withContext(Dispatchers.Default) { AmrWbLoopbackSpike().run().report() }
+                output = r; running = false
+            }
+        }) { Text("AMR-WB 스파이크") }
+    }
+    if (running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    if (output.isNotBlank()) Text(output, style = MaterialTheme.typography.bodySmall)
+}
+
+private fun requiredPermissions(): Array<String> = buildList {
+    add(Manifest.permission.RECORD_AUDIO)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+}.toTypedArray()
+
+// ─────────────────────────────────────── 설정 화면 ───────────────────────────────────────
 
 @Composable
 private fun ConfigScreen(
@@ -179,60 +364,4 @@ private fun ConfigField(
         visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         modifier = Modifier.fillMaxWidth(),
     )
-}
-
-@Composable
-private fun HomeScreen(
-    config: SipAccountConfig,
-    onEditConfig: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    var output by remember { mutableStateOf("") }
-    var running by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text("CIMS VoLTE", style = MaterialTheme.typography.titleLarge)
-        Text("공개 ID(AOR): ${config.aor}", style = MaterialTheme.typography.bodyMedium)
-        Text("인증 ID(IMPI): ${config.digestUsername}", style = MaterialTheme.typography.bodyMedium)
-        Text(
-            "서버: ${config.serverHost}:${config.serverPort}/${config.transport}   도메인=${config.domain}",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        OutlinedButton(onClick = onEditConfig) { Text("설정 편집") }
-
-        HorizontalDivider()
-
-        Text("MediaCodec 점검 (M0)", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !running, onClick = {
-                running = true; output = "조회 중…"
-                scope.launch {
-                    val r = withContext(Dispatchers.Default) { MediaCodecCapabilities.summary() }
-                    output = r; running = false
-                }
-            }) { Text("코덱 가용성") }
-            Button(enabled = !running, onClick = {
-                running = true; output = "스파이크 실행 중…"
-                scope.launch {
-                    val r = withContext(Dispatchers.Default) { AmrWbLoopbackSpike().run().report() }
-                    output = r; running = false
-                }
-            }) { Text("AMR-WB 스파이크") }
-        }
-
-        // M1.1: PJSIP 통합 후 활성화 예정
-        Button(enabled = false, onClick = {}) { Text("등록(REGISTER) — PJSIP 통합 후 (M1.1)") }
-
-        if (running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        Text(
-            text = output,
-            modifier = Modifier.verticalScroll(rememberScrollState()),
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
 }
