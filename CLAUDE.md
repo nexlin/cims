@@ -121,6 +121,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [volte_flows.md](docs/design/features/volte_flows.md) — VoLTE 호 flow
 - [mcptt_authorization.md](docs/design/features/mcptt_authorization.md) — MCPTT 권한/RBAC
 - [mcptt_emergency_modes.md](docs/design/features/mcptt_emergency_modes.md) — 긴급/임박/알림/ad-hoc 모드
+- [mcptt_standard_conformance.md](docs/design/features/mcptt_standard_conformance.md) — MCPTT 서버(CSC/CSP/CMP) 3GPP TS 규격 정합 보완 사항(단말 interop 전제)
 - [recording.md](docs/design/features/recording.md) — 녹취 구조
 - [flow_logging.md](docs/design/features/flow_logging.md) — SIP/Flow 로깅 (sesid 규칙·5분 버킷)
 - [monitoring.md](docs/design/features/monitoring.md) — 모니터링
