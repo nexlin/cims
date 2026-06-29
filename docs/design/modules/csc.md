@@ -688,6 +688,21 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 }
 ```
 
+### 8.1 설정 로딩 우선순위 (overlay = primary, base = optional)
+
+`csc_app.py:load_config()` 는 두 파일을 병합한다 — 배포 계약상 **deployment overlay
+가 SoT 이고 base 는 선택**이다 (`lifecycle.sh:start_csc` 포트 탐지, CSP 의
+`SipServerSetup._findDeploymentConfig` 와 동일한 모델).
+
+| 우선순위 | 파일 | 누가 만드나 | 비고 |
+|---|---|---|---|
+| base | `csc/config/csc.json` | `configure.sh:apply_config_template` (configure 단계) | 상용 배포본은 `build→pkg`(configure 생략)이라 **부재가 정상**. 패키지엔 `config_template.json`(스키마)만 동봉 |
+| overlay (primary) | `csc/config.json` (legacy: `../config.json`) | agent 가 install 시 렌더 기록 (`cims_agent.py:_write_config_file`) | flat dot-path 키(`"Server.Port": 4421`)를 base 위에 머지. 실제 운영 설정의 SoT |
+
+base 가 없으면 빈 dict 에서 시작해 overlay 만으로 기동한다. 따라서 상용 배포본은
+agent 가 쓴 `csc/config.json` 단독으로 정상 동작해야 하며, base 부재를 이유로
+빈 설정(포트 4420 default·dummy user·JWT 미설정 → 401)으로 떨어지면 안 된다.
+
 ---
 
 ## 9. 파일 구조
