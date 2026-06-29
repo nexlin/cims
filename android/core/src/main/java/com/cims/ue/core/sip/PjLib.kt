@@ -28,6 +28,10 @@ object PjLib {
     lateinit var ep: Endpoint
         private set
 
+    // 스레드별 PJSIP 등록 여부. libIsThreadRegistered() 는 미등록 스레드에서 호출 시 native abort 하므로
+    // 쓰지 않고, 이 ThreadLocal 로 스레드당 정확히 1회 libRegisterThread 를 보장한다(설계서 §3.5 대안).
+    private val threadRegistered = ThreadLocal.withInitial { false }
+
     @Synchronized
     fun boot(logLevel: Int = 4) {
         if (booted) return
@@ -54,14 +58,19 @@ object PjLib {
         endpoint.libStart()
         ep = endpoint
         booted = true
+        threadRegistered.set(true)            // libInit 가 boot 스레드를 등록함
         Log.i(TAG, "PJSIP started — state=${endpoint.libGetState()}, SIP UDP transport up")
 
         logRegisteredCodecs()
     }
 
-    /** 현재 스레드를 PJSIP 워커로 등록(미등록 스레드의 ep.* 호출은 native abort). 멱등. */
+    /**
+     * 현재 스레드를 PJSIP 워커로 등록(미등록 스레드의 ep.* 호출은 native abort). 스레드당 1회.
+     * ⚠️ `libIsThreadRegistered()` 는 미등록 스레드에서 호출 자체가 abort 하므로 쓰지 않고 ThreadLocal 로 가드.
+     */
     fun ensureThread(name: String = Thread.currentThread().name) {
-        if (!ep.libIsThreadRegistered()) ep.libRegisterThread(name)
+        if (!booted || threadRegistered.get()) return
+        runCatching { ep.libRegisterThread(name) }.onSuccess { threadRegistered.set(true) }
     }
 
     /**

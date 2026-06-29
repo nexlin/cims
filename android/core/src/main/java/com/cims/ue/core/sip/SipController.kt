@@ -70,7 +70,7 @@ class SipController(private val config: SipAccountConfig) {
 
     private fun onCtl(block: () -> Unit) = h.post {
         runCatching {
-            PjLib.ensureThread("pj-ctl")
+            if (PjLib.booted) PjLib.ensureThread("pj-ctl")   // 부팅 전(최초 register)엔 ep 미초기화 → skip
             block()
         }.onFailure {
             Log.e(TAG, "pj-ctl error", it)
@@ -82,13 +82,15 @@ class SipController(private val config: SipAccountConfig) {
 
     fun register() = onCtl {
         PjLib.boot()
+        PjLib.ensureThread("pj-ctl")                  // 부팅 직후 pj-ctl 스레드 1회 등록
         CodecConfig.apply(PjLib.ep)
         _reg.value = RegState.Registering
         val acc = CimsAccount(this).also { account = it }
         acc.create(buildAccountConfig(config))                    // registerOnAdd=true → REGISTER 발신
     }
 
-    fun unregister() = onCtl { account?.setRegistration(false) }  // de-REGISTER(expires=0)
+    // de-REGISTER(expires=0). 미등록 상태면 PJSIP 가 EINVALIDOP 를 던지므로 조용히 무시.
+    fun unregister() = onCtl { account?.let { runCatching { it.setRegistration(false) } } }
 
     fun makeCall(dstNumber: String) = onCtl {
         val acc = account ?: run {
