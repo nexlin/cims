@@ -53,6 +53,8 @@ import com.cims.ue.core.codec.AmrWbLoopbackSpike
 import com.cims.ue.core.codec.MediaCodecCapabilities
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.config.SipAccountConfig
+import com.cims.ue.core.provision.CscEndpoint
+import com.cims.ue.core.provision.ProvisioningClient
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.RegState
 import kotlinx.coroutines.CoroutineScope
@@ -72,25 +74,94 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { HOME, CONFIG }
+private enum class Screen { LOGIN, HOME, CONFIG }
 
 @Composable
 private fun App() {
     val context = LocalContext.current
     val store = remember { ConfigStore(context) }
     var config by remember { mutableStateOf(store.load()) }
-    var screen by remember { mutableStateOf(if (config.isComplete()) Screen.HOME else Screen.CONFIG) }
+    var screen by remember { mutableStateOf(if (config.isComplete()) Screen.HOME else Screen.LOGIN) }
 
     when (screen) {
+        Screen.LOGIN -> LoginScreen(
+            initialCscHost = config.serverHost,
+            onProvisioned = { c -> store.save(c); config = c; screen = Screen.HOME },
+            onManual = { screen = Screen.CONFIG },
+        )
         Screen.CONFIG -> ConfigScreen(
             initial = config,
             canCancel = config.isComplete(),
             onSave = { c -> store.save(c); config = c; screen = Screen.HOME },
-            onCancel = { screen = Screen.HOME },
+            onCancel = { screen = if (config.isComplete()) Screen.HOME else Screen.LOGIN },
         )
         Screen.HOME -> HomeScreen(
             config = config,
             onEditConfig = { screen = Screen.CONFIG },
+        )
+    }
+}
+
+// ─────────────────────────────────────── 로그인(자동 프로비저닝) ───────────────────────────────────────
+
+@Composable
+private fun LoginScreen(
+    initialCscHost: String,
+    onProvisioned: (SipAccountConfig) -> Unit,
+    onManual: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var cscHost by remember { mutableStateOf(initialCscHost) }
+    var userName by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("로그인", style = MaterialTheme.typography.titleLarge)
+        Text("로그인하면 서버·계정 정보를 자동으로 받아 설정합니다.", style = MaterialTheme.typography.bodySmall)
+
+        ConfigField("CSC 서버 주소", cscHost) { cscHost = it }
+        ConfigField("아이디", userName) { userName = it }
+        ConfigField("비밀번호", password, isPassword = true) { password = it }
+
+        Button(
+            enabled = !busy && cscHost.isNotBlank() && userName.isNotBlank() && password.isNotBlank(),
+            onClick = {
+                busy = true; status = "로그인 중…"
+                scope.launch {
+                    val cfg = runCatching {
+                        withContext(Dispatchers.IO) {
+                            val pc = ProvisioningClient(CscEndpoint(host = cscHost.trim()), allowInsecureTls = true)
+                            val tok = pc.login(userName.trim(), password)
+                            val profile = pc.fetchProfile(tok.accessToken)
+                            val svc = profile.service("volte")
+                                ?: error("이 계정에 VoLTE 서비스가 없습니다")
+                            svc.toSipAccountConfig(
+                                loginId = profile.loginId ?: userName.trim(),
+                                displayName = profile.displayName ?: userName.trim(),
+                                loginPassword = password,
+                            )
+                        }
+                    }
+                    busy = false
+                    cfg.onSuccess { onProvisioned(it) }
+                        .onFailure { status = "로그인/프로비저닝 실패: ${it.message}\n수동 설정을 사용하세요." }
+                }
+            },
+        ) { Text("로그인") }
+
+        if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+
+        HorizontalDivider()
+        OutlinedButton(onClick = onManual) { Text("수동 설정 (고급)") }
+        Text(
+            "※ 서버 프로비저닝(GET /provisioning/me)이 준비되기 전에는 '수동 설정'으로 접속 정보를 직접 입력하세요.",
+            style = MaterialTheme.typography.labelSmall,
         )
     }
 }

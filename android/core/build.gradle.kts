@@ -41,4 +41,7 @@ kotlin {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)   // StateFlow 노출
+    implementation(libs.okhttp)                        // 로그인·프로비저닝(CSC HTTPS)
+
+    testImplementation(libs.junit)                     // Pkce 등 JVM 단위테스트
 }

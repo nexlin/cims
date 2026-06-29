@@ -1,4 +1,4 @@
-package com.cims.ue.ptt.csc
+package com.cims.ue.core.provision
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -8,7 +8,6 @@ import org.junit.Test
 class PkceTest {
 
     @Test fun rfc7636Vector() {
-        // RFC 7636 §B: verifier → challenge(S256)
         val verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
         val expected = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         assertEquals(expected, Pkce.challenge(verifier))
@@ -17,7 +16,7 @@ class PkceTest {
     @Test fun verifierIsUrlSafeAndLongEnough() {
         val v = Pkce.newVerifier()
         assertTrue("length ${v.length}", v.length in 43..128)
-        assertTrue(v.all { it.isLetterOrDigit() || it == '-' || it == '_' })   // base64url, no padding
+        assertTrue(v.all { it.isLetterOrDigit() || it == '-' || it == '_' })
     }
 
     @Test fun challengeIsUnpaddedBase64Url() {

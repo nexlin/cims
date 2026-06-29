@@ -1,13 +1,13 @@
-package com.cims.ue.ptt.csc
+package com.cims.ue.core.provision
 
 import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * OAuth2 PKCE (RFC 7636, **S256만**) — MCPTT IdMS 인증 (3GPP TS 33.180, 설계서 §7).
+ * OAuth2 PKCE (RFC 7636, **S256만**) — MCPTT IdMS 로그인 (3GPP TS 33.180).
+ * 공유 위치(core): volte-client·ptt-client 둘 다 로그인에 사용.
  *
- * 서버(csc/services/mcptt.py)는 S256 만 허용하고 plain 은 거부한다. code_verifier 는
- * [43,128] 길이의 unreserved 문자열, code_challenge = BASE64URL(SHA-256(verifier)).
+ * code_verifier = [43,128] unreserved 문자열, code_challenge = BASE64URL(SHA-256(verifier)).
  */
 object Pkce {
 
