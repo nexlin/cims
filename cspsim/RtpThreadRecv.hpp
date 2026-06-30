@@ -129,3 +129,57 @@ FUNC_END:
 
   return 0;
 }
+
+// Floor control 수신 스레드: m=application 소켓에서 RTCP APP 패킷 수신 후 opcode 파싱
+THREAD_API RtpThreadFloorRecv(LPVOID lpParameter) {
+  CRtpThread *pRtpThread = (CRtpThread *)lpParameter;
+
+  pRtpThread->m_bFloorRecvThreadRun = true;
+
+  pollfd sttPoll[1];
+  TcpSetPollIn(sttPoll[0], pRtpThread->m_hFloorRecvSocket);
+
+  char buf[512];
+  char szIp[21];
+  unsigned short sPort;
+
+  while (pRtpThread->m_bStopEvent == false) {
+    if (poll(sttPoll, 1, 200) <= 0) {
+      continue;
+    }
+
+    int iLen = sizeof(buf);
+    if (UdpRecv(pRtpThread->m_hFloorRecvSocket, buf, &iLen, szIp, sizeof(szIp), &sPort) == false) {
+      continue;
+    }
+
+    // RTCP APP 최소 크기: 12바이트 (헤더4 + SSRC4 + Name4)
+    // FloorControlPacket 고정 헤더: 12바이트 + opcode(1) 등 = 최소 16바이트
+    if (iLen < 16) continue;
+
+    // PT = buf[1] == 204 (RTCP APP)
+    unsigned char pt = (unsigned char)buf[1];
+    if (pt != 204) continue;
+
+    // name 필드: buf[8..11] = "MCPT"
+    if (buf[8] != 'M' || buf[9] != 'C' || buf[10] != 'P' || buf[11] != 'T') continue;
+
+    unsigned char opcode = (unsigned char)buf[0] & 0x1F;  // TS 24.380 §8.2: opcode in subtype field
+    pRtpThread->m_iLastFloorOp.store(opcode);
+
+    const char* opName = "UNKNOWN";
+    switch (opcode) {
+      case 1: opName = "REQUEST"; break;
+      case 2: opName = "GRANT";   break;
+      case 3: opName = "REJECT";  break;
+      case 4: opName = "RELEASE"; break;
+      case 5: opName = "IDLE";    break;
+      case 6: opName = "TAKEN";   break;
+      case 7: opName = "REVOKE";  break;
+    }
+    printf("[FLOOR] Received opcode=%d (%s) from %s:%d\n", opcode, opName, szIp, sPort);
+  }
+
+  pRtpThread->m_bFloorRecvThreadRun = false;
+  return 0;
+}

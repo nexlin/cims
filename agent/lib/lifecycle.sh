@@ -342,6 +342,60 @@ print(p)" 2>/dev/null || echo 4420)
 start_oam() {
     if is_running oam; then warn "OAM 이미 실행 중 (pid=$(read_pid oam))"; return 0; fi
     [[ ! -f "$DIST_DIR/oam/src/oam_app.py" ]] && err "OAM 소스 없음 (make dist 실행 필요)" && return 1
+
+    # ── oam.json 경로 자가 교정 ───────────────────────────────────────────────
+    # make dist 로 생성된 oam.json 은 배포 서버 기준 경로(/home/cims/work/...)를 담는다.
+    # 개발 환경(build/dist)에서 그대로 쓰면 PermissionError 로 OAM 이 즉시 종료.
+    # 시작 직전 두 필드가 현재 환경에서 쓰기 가능한지 확인하고, 불가능하면 DIST_DIR
+    # 상대 기본값으로 자동 교정한다.
+    local _oam_cfg="$DIST_DIR/oam/config/oam.json"
+    "$PYBIN" -c "
+import json, os, sys
+
+cfg_path = '$_oam_cfg'
+dist_dir = '$DIST_DIR'
+
+def can_mkdir(p):
+    try:
+        os.makedirs(p, exist_ok=True)
+        return True
+    except (PermissionError, OSError):
+        return False
+
+try:
+    with open(cfg_path) as f:
+        c = json.load(f)
+except Exception as e:
+    sys.exit(0)  # 읽기 실패 시 OAM 자체에 맡김
+
+changed = False
+
+# CimsRuntimeDir
+cur = c.get('CimsRuntimeDir', '')
+if cur and not can_mkdir(cur):
+    new = os.path.join(dist_dir, 'ext_mnt', 'runtime')
+    os.makedirs(new, exist_ok=True)
+    c['CimsRuntimeDir'] = new
+    changed = True
+    print(f'[auto-fix] CimsRuntimeDir: {cur} -> {new}', flush=True)
+
+# ServiceLogging.Dir
+sl = c.get('ServiceLogging', {})
+cur_sl = sl.get('Dir', '')
+if cur_sl and not can_mkdir(cur_sl):
+    new_sl = os.path.join(dist_dir, 'ext_mnt', 'service_log')
+    os.makedirs(new_sl, exist_ok=True)
+    sl['Dir'] = new_sl
+    c['ServiceLogging'] = sl
+    changed = True
+    print(f'[auto-fix] ServiceLogging.Dir: {cur_sl} -> {new_sl}', flush=True)
+
+if changed:
+    with open(cfg_path, 'w') as f:
+        json.dump(c, f, indent=4, ensure_ascii=False)
+" 2>/dev/null
+    # ─────────────────────────────────────────────────────────────────────────
+
     local oam_port
     oam_port=$("$PYBIN" -c "
 import json, os
@@ -644,8 +698,8 @@ _svc_port_proto() {
             if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then echo "3001:tcp"
             else echo "8080:tcp"; fi ;;
         phone)      echo "3002:tcp" ;;
-        tb-csc)     echo "4419:tcp" ;;
-        tb-oam)     echo "4419:tcp" ;;
+        tb-csc)     echo "" ;;          # OAM 이 4419 소유 — 포트 공유 오탐 방지; PID 파일로만 감지
+        tb-oam)     echo "" ;;
         tb-console) echo "3000:tcp" ;;
         *)          echo "" ;;
     esac

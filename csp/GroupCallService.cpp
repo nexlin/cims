@@ -640,7 +640,8 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 if ( itRtp2 != m_mapGroupRtp.end() && itRtp2->second.iFloorPort > 0 )
                     iFloorPort = itRtp2->second.iFloorPort;
             }
-            WrapMultipartBody( pclsInvite, strGroupXml, strRosterXml, strSharedIp, iFloorPort );
+            std::string strGroupUri = "sip:" + std::string( pszGroupId ) + "@" + strMcpttDomain;
+            WrapMultipartBody( pclsInvite, strGroupXml, strRosterXml, strSharedIp, iFloorPort, strGroupUri );
 
             // MCPTT capability required (3GPP TS 24.379 §6.3.1)
             pclsInvite->AddHeader(
@@ -650,19 +651,18 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             pclsInvite->AddHeader( "P-Preferred-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" );
             // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
             pclsInvite->AddHeader( "Answer-Mode", "Auto" );
-            // Resource-Priority (RFC 4412, TS 24.379) — 긴급/임박 호의 베어러/시그널 우선순위.
-            //   namespace(mcpttp)·level 은 배포 RP 프로비저닝에 맞춰 조정(기본: emergency>imminent).
+            // Resource-Priority (RFC 4412, TS 24.379) — namespace당 값 하나 (F-08 수정)
             if ( iGroupCond >= 2 )
                 pclsInvite->AddHeader( "Resource-Priority", "mcpttp.4" );
             else if ( iGroupCond == 1 )
                 pclsInvite->AddHeader( "Resource-Priority", "mcpttp.2" );
+            else
+                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.6" );
             // Callee identity (MCPTT 도메인 사용)
             std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
             char szPCalledParty[256];
             snprintf( szPCalledParty, sizeof( szPCalledParty ), "<sip:%s@%s>", pszUserId, strMcpttDomain.c_str() );
             pclsInvite->AddHeader( "P-Called-Party-ID", szPCalledParty );
-            // Group call priority
-            pclsInvite->AddHeader( "Resource-Priority", "mcpttp.6" );
             // isfocus: indicate server is conference focus for this group call (domain-based URI)
             char szContact[256];
             snprintf( szContact, sizeof( szContact ), "<sip:%s@%s>;isfocus", pszGroupId, strMcpttDomain.c_str() );
@@ -1148,21 +1148,56 @@ void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, con
 
     if ( vecCallIds.empty() ) return;
 
-    // 2. Build conference-info+xml body (RFC 4575 partial update)
+    // 2. Build conference-info+xml body (RFC 4575)
+    //    F-09: version=1(첫 NOTIFY)은 state="full" + 전체 멤버 목록, 이후는 state="partial" + 변경분
+    //    F-10: entity는 sip: URI (tel: → RFC 4575 §5.3 위반)
     std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
     std::ostringstream oss;
-    oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
-        << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
-        << "  entity=\"sip:" << strGroupId << "@" << strMcpttDomain << "\"\r\n"
-        << "  state=\"partial\" version=\"" << iVersion << "\">\r\n"
-        << "  <users>\r\n"
-        << "    <user entity=\"tel:" << strChangedUser << "\" state=\"" << strJoining << "\">\r\n"
-        << "      <endpoint entity=\"tel:" << strChangedUser << "\">\r\n"
-        << "        <status>" << strStatus << "</status>\r\n"
-        << "      </endpoint>\r\n"
-        << "    </user>\r\n"
-        << "  </users>\r\n"
-        << "</conference-info>\r\n";
+
+    if ( iVersion == 1 ) {
+        // state="full": 현재 그룹에 속한 모든 참가자를 열거
+        std::vector<std::string> vecAllMembers;
+        {
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            for ( const auto &kv : m_mapCallSession ) {
+                if ( kv.second.strGroupId == strGroupId ) {
+                    vecAllMembers.push_back( kv.second.strMemberId );
+                }
+            }
+        }
+        oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+            << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
+            << "  entity=\"sip:" << strGroupId << "@" << strMcpttDomain << "\"\r\n"
+            << "  state=\"full\" version=\"" << iVersion << "\">\r\n"
+            << "  <users>\r\n";
+        for ( const auto &strMember : vecAllMembers ) {
+            std::string strMemberStatus = ( strMember == strChangedUser ) ? strStatus : "connected";
+            std::string strMemberJoining = ( strMember == strChangedUser ) ? strJoining : "added";
+            oss << "    <user entity=\"sip:" << strMember << "@" << strMcpttDomain
+                << "\" state=\"" << strMemberJoining << "\">\r\n"
+                << "      <endpoint entity=\"sip:" << strMember << "@" << strMcpttDomain << "\">\r\n"
+                << "        <status>" << strMemberStatus << "</status>\r\n"
+                << "      </endpoint>\r\n"
+                << "    </user>\r\n";
+        }
+        oss << "  </users>\r\n"
+            << "</conference-info>\r\n";
+    } else {
+        // state="partial": 변경된 멤버 하나만
+        oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+            << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
+            << "  entity=\"sip:" << strGroupId << "@" << strMcpttDomain << "\"\r\n"
+            << "  state=\"partial\" version=\"" << iVersion << "\">\r\n"
+            << "  <users>\r\n"
+            << "    <user entity=\"sip:" << strChangedUser << "@" << strMcpttDomain
+            << "\" state=\"" << strJoining << "\">\r\n"
+            << "      <endpoint entity=\"sip:" << strChangedUser << "@" << strMcpttDomain << "\">\r\n"
+            << "        <status>" << strStatus << "</status>\r\n"
+            << "      </endpoint>\r\n"
+            << "    </user>\r\n"
+            << "  </users>\r\n"
+            << "</conference-info>\r\n";
+    }
     std::string strBody = oss.str();
 
     // 3. Send in-dialog NOTIFY to each active participant via SipUserAgent
@@ -1298,10 +1333,16 @@ std::string CGroupCallService::BuildGroupDescriptor( const CspPttGroup &clsGroup
  */
 void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::string &strGroupXml,
                                            const std::string &strRosterXml, const std::string &strFloorIp,
-                                           int iFloorPort ) {
+                                           int iFloorPort, const std::string &strGroupUri ) {
     if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
 
-    const std::string strBoundary = "mcptt";
+    // F-16: boundary를 랜덤 hex 문자열로 생성 — body 내 "mcptt" 등장과 충돌 방지 (RFC 2046 §5.1.1)
+    struct timespec _ts;
+    clock_gettime( CLOCK_REALTIME, &_ts );
+    unsigned _uRnd = (unsigned)( _ts.tv_nsec ^ (uintptr_t)pclsInvite );
+    char _szBoundary[32];
+    snprintf( _szBoundary, sizeof( _szBoundary ), "mcptt_%08x%08x", (unsigned)_ts.tv_sec, _uRnd );
+    const std::string strBoundary = _szBoundary;
     std::string strSdp = pclsInvite->m_strBody;
 
     // SDP 끝에 MCPTT floor control 미디어 라인 추가 (3GPP TS 24.379)
@@ -1311,6 +1352,8 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
              << "c=IN IP4 " << strFloorIp << "\r\n"
              << "a=floorid:0 mstrm:audio\r\n"
              << "a=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
+    if ( !strGroupUri.empty() )
+        sdpFloor << "a=mcptt-floor-request-uri:" << strGroupUri << "\r\n";  // TS 24.379 §C.3
     strSdp += sdpFloor.str();
 
     // INVITE 가 SIP UDP 패킷 한계(psip SIP_PACKET_MAX_SIZE=8192)를 넘으면 수신측에서

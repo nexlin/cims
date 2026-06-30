@@ -58,12 +58,12 @@ int BuildFloorPacket(char* buf, int bufSize, unsigned char opcode,
 
     memset(buf, 0, total);
     FloorControlPacket* pkt = (FloorControlPacket*)buf;
-    pkt->version_subtype = 0x80;
+    pkt->version_subtype = 0x80 | (opcode & 0x1F);  // TS 24.380 §8.2: opcode goes in subtype field
     pkt->type   = RTCP_PT_APP;
     pkt->length = htons((uint16_t)(total / 4 - 1));
     pkt->ssrc   = htonl(ssrc);
     memcpy(pkt->name, "MCPT", 4);
-    pkt->opcode = opcode;
+    pkt->opcode = 0;
     pkt->id_len = (unsigned char)idLen;
 
     if (idLen > 0)
@@ -244,7 +244,7 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
     FloorControlPacket* pkt = (FloorControlPacket*)buf;
     if (pkt->type != RTCP_PT_APP) return;
 
-    unsigned char opcode = pkt->opcode;
+    unsigned char opcode = pkt->version_subtype & 0x1F;  // TS 24.380 §8.2: opcode is in subtype field
     static const char* opcodeStr[] = {"?","REQUEST","GRANT","REJECT","RELEASE","IDLE","TAKEN","REVOKE"};
     const char* opName = (opcode < 8) ? opcodeStr[opcode] : "?";
     LOG_INFO("PMcpttGroup", "[%s] Floor %s from session=%s %s:%d",
@@ -312,7 +312,7 @@ void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int l
         return;
     }
 
-    unsigned char opcode = pkt->opcode;
+    unsigned char opcode = pkt->version_subtype & 0x1F;  // TS 24.380 §8.2: opcode is in subtype field
     unsigned int pktSsrc = ntohl(pkt->ssrc);
 
     static const char* opcodeStr[] = {"?","REQUEST","GRANT","REJECT","RELEASE","IDLE","TAKEN","REVOKE"};
@@ -701,7 +701,7 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
     char pktBuf[256];
     int pktLen = BuildFloorPacket(pktBuf, sizeof(pktBuf), opcode, ssrc, speakerId);
     if (pktLen > 0)
-        sendAudioRtcpToAll(pktBuf, pktLen, "", 0);
+        sendFloorToAll(pktBuf, pktLen, "", 0);
 
     // CMP → UE 전체 브로드캐스트 Flow 기록 (TAKEN/IDLE/REVOKE 등)
     if (_logFlow) {
@@ -734,11 +734,12 @@ void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& e
     }
 }
 
-void PMcpttGroup::sendAudioRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
+void PMcpttGroup::sendFloorToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
     if (_pttSession) {
         for (auto const& [sid, peer] : _members) {
             if (peer.ip == excludeIp && peer.port == excludePort) continue;
-            _pttSession->sendFloorTo(peer.ip, peer.port + 1, (char*)data, len);
+            if (peer.floorPort > 0)
+                _pttSession->sendFloorTo(peer.ip, peer.floorPort, (char*)data, len);
         }
     }
 }

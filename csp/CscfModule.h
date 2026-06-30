@@ -24,8 +24,8 @@ public:
 
     // 인증 헬퍼 (다른 모듈에서도 사용 가능)
     //   strRealmOverride: 서비스 엔티티에서 계산된 realm 전달. 비면 전역 AuthRealm 사용.
-    static bool AddChallenge( CSipMessage *psttResponse, const std::string &strRealmOverride = "" );
-    static bool SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride = "" );
+    static bool AddChallenge( CSipMessage *psttResponse, const std::string &strRealmOverride = "", bool bStale = false );
+    static bool SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride = "", bool bStale = false );
     static bool CheckAuthorizationResponse( const char *pszUserName, const char *pszRealm, const char *pszNonce,
                                             const char *pszUri, const char *pszResponse, const char *pszPassWord,
                                             const char *pszMethod, const char *pszQop, const char *pszNc,

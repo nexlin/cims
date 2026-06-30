@@ -21,6 +21,7 @@
 
 #include "SipUdp.h"
 #include <vector>
+#include <atomic>
 
 class CRtpThread
 {
@@ -42,16 +43,20 @@ public:
     void SetVideoFile(const std::string& strPath) { m_strVideoFile = strPath; }
 
 	Socket	m_hSocket;
-	Socket	m_hRtcpSocket;    // RTCP 소켓 (RTP 포트 + 1)
-	int			m_iPort;
-	bool		m_bStopEvent;
-	bool		m_bSendThreadRun;
-	bool		m_bRecvThreadRun;
+	Socket	m_hRtcpSocket;       // RTCP 소켓 (RTP 포트 + 1)
+	Socket  m_hFloorRecvSocket;  // floor 수신 소켓 (m=application)
+	int		m_iPort;
+	int     m_iFloorRecvPort;    // 로컬 floor 수신 포트
+	bool	m_bStopEvent;
+	bool	m_bSendThreadRun;
+	bool	m_bRecvThreadRun;
+    bool    m_bFloorRecvThreadRun;
 	std::string	m_strDestIp;
-	int					m_iDestPort;
-	int					m_iDestFloorPort;  // m=application floor control 포트 (0이면 audio+1)
-	int					m_iDestVideoPort;  // 서버 비디오 포트 (0이면 audio+2)
+	int		m_iDestPort;
+	int		m_iDestFloorPort;    // 서버 floor 포트 (m=application, 0이면 미학습)
+	int		m_iDestVideoPort;    // 서버 비디오 포트
     std::string m_strMediaFile;
+    std::atomic<int> m_iLastFloorOp; // 마지막 수신된 floor opcode (0=없음, 2=GRANT, 5=IDLE, ...)
 
     // Video RTP
     Socket  m_hVideoSocket;
