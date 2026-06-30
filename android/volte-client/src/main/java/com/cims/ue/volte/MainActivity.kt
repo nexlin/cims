@@ -28,16 +28,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,8 +68,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.cims.ue.core.calllog.CallEntry
+import com.cims.ue.core.calllog.CallLogStore
+import com.cims.ue.core.calllog.CallType
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.config.SipAccountConfig
+import com.cims.ue.core.contacts.Contact
+import com.cims.ue.core.contacts.ContactStore
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.RegState
 import kotlinx.coroutines.Dispatchers
@@ -71,6 +82,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,6 +97,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen { GATE, HOME, CONFIG }
+private enum class Tab { CONTACTS, RECENTS, KEYPAD }
 
 @Composable
 private fun App() {
@@ -193,7 +207,7 @@ private fun SsoGateScreen(
     }
 }
 
-// ─────────────────────────────────────── 전화 홈 ───────────────────────────────────────
+// ─────────────────────────────────────── 전화 홈 (탭 구성) ───────────────────────────────────────
 
 @Composable
 private fun HomeScreen(
@@ -201,6 +215,8 @@ private fun HomeScreen(
     onEditConfig: () -> Unit,
 ) {
     val context = LocalContext.current
+    val callLog = remember { CallLogStore(context) }
+    val contacts = remember { ContactStore(context) }
 
     // SipService 바인딩 — 등록은 서비스가 자동으로 유지한다(수동 등록 버튼 없음).
     var service by remember { mutableStateOf<SipService?>(null) }
@@ -222,18 +238,55 @@ private fun HomeScreen(
     ) { service?.ensureRegistered() }
     LaunchedEffect(Unit) { permLauncher.launch(requiredPermissions()) }
 
-    // 영상 통화 권한
-    var videoOn by remember { mutableStateOf(false) }
-    val cameraLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted -> if (granted) service?.setVideoEnabled(true) else videoOn = false }
-
     val fallbackReg = remember { MutableStateFlow<RegState>(RegState.Idle) }
     val fallbackCall = remember { MutableStateFlow<CallState>(CallState.Null) }
     val reg by (service?.regState ?: fallbackReg).collectAsState()
     val call by (service?.callState ?: fallbackCall).collectAsState()
 
+    // 발신: 음성/영상 구분. 영상은 카메라 권한 확보 후 발신.
+    var videoOn by remember { mutableStateOf(false) }
+    var pendingVideoNumber by remember { mutableStateOf<String?>(null) }
+
+    fun doDial(number: String, video: Boolean) {
+        val n = number.trim()
+        if (n.isBlank()) return
+        videoOn = video
+        service?.setVideoEnabled(video)
+        callLog.add(extractNumber(n), CallType.OUTGOING)
+        service?.makeCall(n)
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val num = pendingVideoNumber; pendingVideoNumber = null
+        if (granted && !num.isNullOrBlank()) doDial(num, true) else videoOn = false
+    }
+    fun dial(number: String, video: Boolean) {
+        if (number.isBlank()) return
+        if (video) { pendingVideoNumber = number; cameraLauncher.launch(Manifest.permission.CAMERA) }
+        else doDial(number, false)
+    }
+
+    // 수신/부재중 기록: Incoming→Active=수신(연결), Incoming→Disconnected(미연결)=부재중.
+    var incomingNumber by remember { mutableStateOf<String?>(null) }
+    var incomingAnswered by remember { mutableStateOf(false) }
+    LaunchedEffect(call) {
+        when (val c = call) {
+            is CallState.Incoming -> { incomingNumber = extractNumber(c.remote); incomingAnswered = false }
+            is CallState.Active -> if (incomingNumber != null) incomingAnswered = true
+            is CallState.Disconnected -> {
+                incomingNumber?.let { n ->
+                    callLog.add(n, if (incomingAnswered) CallType.INCOMING else CallType.MISSED)
+                    incomingNumber = null
+                }
+            }
+            else -> {}
+        }
+    }
+
+    var tab by remember { mutableStateOf(Tab.KEYPAD) }
     val inCall = call is CallState.Incoming || call is CallState.Outgoing || call is CallState.Active
+
     if (inCall) {
         CallScreen(
             call = call,
@@ -248,87 +301,109 @@ private fun HomeScreen(
             onHangup = { id -> service?.hangup(id) },
         )
     } else {
-        DialerScreen(
-            myNumber = config.displayName.ifBlank { config.msisdn },
-            reg = reg,
-            lastEnded = call as? CallState.Disconnected,
-            onDial = { number -> service?.makeCall(number) },
-            onSettings = onEditConfig,
+        Scaffold(
+            topBar = { HeaderBar(reg, onEditConfig) },
+            bottomBar = { BottomNav(tab) { tab = it } },
+        ) { pad ->
+            Box(Modifier.padding(pad).fillMaxSize()) {
+                when (tab) {
+                    Tab.CONTACTS -> ContactsScreen(
+                        store = contacts,
+                        onCallVoice = { dial(it, false) },
+                        onCallVideo = { dial(it, true) },
+                    )
+                    Tab.RECENTS -> RecentsScreen(
+                        store = callLog,
+                        contacts = contacts,
+                        onCall = { dial(it, false) },
+                    )
+                    Tab.KEYPAD -> KeypadScreen(
+                        myNumber = config.displayName.ifBlank { config.msisdn },
+                        onVoice = { dial(it, false) },
+                        onVideo = { dial(it, true) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeaderBar(reg: RegState, onSettings: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        RegStatusChip(reg)
+        TextButton(onClick = onSettings) { Text("설정") }
+    }
+}
+
+@Composable
+private fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
+    NavigationBar {
+        NavigationBarItem(
+            selected = current == Tab.CONTACTS, onClick = { onSelect(Tab.CONTACTS) },
+            icon = { Text("👤", fontSize = 20.sp) }, label = { Text("연락처") },
+        )
+        NavigationBarItem(
+            selected = current == Tab.RECENTS, onClick = { onSelect(Tab.RECENTS) },
+            icon = { Text("🕘", fontSize = 20.sp) }, label = { Text("최근기록") },
+        )
+        NavigationBarItem(
+            selected = current == Tab.KEYPAD, onClick = { onSelect(Tab.KEYPAD) },
+            icon = { Text("⌨", fontSize = 20.sp) }, label = { Text("키패드") },
         )
     }
 }
 
-// ─────────────────────────────────────── 다이얼러 ───────────────────────────────────────
+// ─────────────────────────────────────── 키패드 탭 ───────────────────────────────────────
 
 @Composable
-private fun DialerScreen(
+private fun KeypadScreen(
     myNumber: String,
-    reg: RegState,
-    lastEnded: CallState.Disconnected?,
-    onDial: (String) -> Unit,
-    onSettings: () -> Unit,
+    onVoice: (String) -> Unit,
+    onVideo: (String) -> Unit,
 ) {
     var dialed by remember { mutableStateOf("") }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // 상단 바: 등록 상태 + 설정
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            RegStatusChip(reg)
-            TextButton(onClick = onSettings) { Text("설정") }
-        }
         if (myNumber.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
             Text("내 번호 $myNumber", style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         Spacer(Modifier.weight(1f))
 
-        // 입력된 번호
-        Box(modifier = Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.Center) {
-            Text(
-                text = dialed,
-                style = MaterialTheme.typography.displaySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-            )
-        }
-        // 직전 통화 종료 사유(있을 때만, 짧게)
-        if (lastEnded != null && lastEnded.id >= 0 && dialed.isEmpty()) {
-            Text("최근 통화 종료 (${lastEnded.code})", style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-
-        Spacer(Modifier.height(12.dp))
-        Keypad(onDigit = { dialed += it })
-        Spacer(Modifier.height(16.dp))
-
-        // 발신 + 지우기
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Box(Modifier.size(72.dp))  // 좌측 균형용 빈 공간
-            RoundButton(
-                label = "📞",   // 📞
-                bg = CALL_GREEN, size = 72.dp, enabled = dialed.isNotBlank(),
-            ) { onDial(dialed.trim()) }
-            Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+        // 입력 번호 + 지우기
+        Row(modifier = Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(56.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Text(dialed, style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            }
+            Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
                 if (dialed.isNotEmpty()) {
-                    TextButton(onClick = { dialed = dialed.dropLast(1) }) {
-                        Text("⌫", fontSize = 28.sp)   // ⌫
-                    }
+                    TextButton(onClick = { dialed = dialed.dropLast(1) }) { Text("⌫", fontSize = 24.sp) }
                 }
             }
         }
+
         Spacer(Modifier.height(8.dp))
+        Keypad(onDigit = { dialed += it })
+        Spacer(Modifier.height(20.dp))
+
+        // 음성/영상 발신 구분
+        Row(horizontalArrangement = Arrangement.spacedBy(40.dp)) {
+            LabeledRound("음성", CALL_GREEN, "📞", enabled = dialed.isNotBlank()) { onVoice(dialed.trim()) }
+            LabeledRound("영상", VIDEO_BLUE, "📹", enabled = dialed.isNotBlank()) { onVideo(dialed.trim()) }
+        }
+        Spacer(Modifier.height(20.dp))
     }
 }
 
@@ -340,7 +415,7 @@ private fun Keypad(onDigit: (String) -> Unit) {
         listOf("7" to "PQRS", "8" to "TUV", "9" to "WXYZ"),
         listOf("*" to "", "0" to "+", "#" to ""),
     )
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         rows.forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                 row.forEach { (digit, letters) -> KeypadKey(digit, letters) { onDigit(digit) } }
@@ -353,14 +428,14 @@ private fun Keypad(onDigit: (String) -> Unit) {
 private fun KeypadKey(digit: String, letters: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(68.dp)
+            .size(64.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(digit, fontSize = 28.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text(digit, fontSize = 26.sp, color = MaterialTheme.colorScheme.onSurface)
             if (letters.isNotBlank()) {
                 Text(letters, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -368,17 +443,171 @@ private fun KeypadKey(digit: String, letters: String, onClick: () -> Unit) {
     }
 }
 
+// ─────────────────────────────────────── 연락처 탭 ───────────────────────────────────────
+
 @Composable
-private fun RegStatusChip(reg: RegState) {
-    val (dot, label) = when (reg) {
-        is RegState.Registered -> CALL_GREEN to "통화 가능"
-        RegState.Registering, RegState.Idle -> Color(0xFFF9A825) to "연결 중…"
-        RegState.Unregistered -> Color(0xFFF9A825) to "등록 해제됨"
-        is RegState.Failed -> HANGUP_RED to "오프라인"
+private fun ContactsScreen(
+    store: ContactStore,
+    onCallVoice: (String) -> Unit,
+    onCallVideo: (String) -> Unit,
+) {
+    var list by remember { mutableStateOf(store.all()) }
+    var editing by remember { mutableStateOf<Contact?>(null) }
+    var showAdd by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("연락처", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { showAdd = true }) { Text("+ 추가") }
+        }
+        if (list.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("저장된 연락처가 없습니다.\n‘+ 추가’ 로 등록하세요.",
+                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(list, key = { it.id }) { c ->
+                    ContactRow(c,
+                        onCallVoice = { onCallVoice(c.number) },
+                        onCallVideo = { onCallVideo(c.number) },
+                        onEdit = { editing = c })
+                    HorizontalDivider()
+                }
+            }
+        }
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
-        Text(label, style = MaterialTheme.typography.labelMedium)
+
+    if (showAdd) {
+        ContactDialog(null,
+            onDismiss = { showAdd = false },
+            onSave = { name, num -> store.upsert(name, num); list = store.all(); showAdd = false })
+    }
+    editing?.let { c ->
+        ContactDialog(c,
+            onDismiss = { editing = null },
+            onSave = { name, num -> store.upsert(name, num, c.id); list = store.all(); editing = null },
+            onDelete = { store.delete(c.id); list = store.all(); editing = null })
+    }
+}
+
+@Composable
+private fun ContactRow(
+    c: Contact,
+    onCallVoice: () -> Unit,
+    onCallVideo: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onCallVoice() }.padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) { Text(c.name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+        Spacer(Modifier.size(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(c.name.ifBlank { c.number }, style = MaterialTheme.typography.bodyLarge)
+            if (c.name.isNotBlank()) {
+                Text(c.number, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        TextButton(onClick = onCallVideo) { Text("📹", fontSize = 18.sp) }
+        TextButton(onClick = onEdit) { Text("수정") }
+    }
+}
+
+@Composable
+private fun ContactDialog(
+    initial: Contact?,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+    onDelete: (() -> Unit)? = null,
+) {
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var number by remember { mutableStateOf(initial?.number ?: "") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial == null) "연락처 추가" else "연락처 수정") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, { name = it }, label = { Text("이름") }, singleLine = true)
+                OutlinedTextField(number, { number = it.filter { ch -> ch.isDigit() || ch == '+' } },
+                    label = { Text("번호 (MSISDN)") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            Button(enabled = name.isNotBlank() && number.isNotBlank(),
+                onClick = { onSave(name, number) }) { Text("저장") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (onDelete != null) TextButton(onClick = onDelete) {
+                    Text("삭제", color = HANGUP_RED)
+                }
+                TextButton(onClick = onDismiss) { Text("취소") }
+            }
+        },
+    )
+}
+
+// ─────────────────────────────────────── 최근기록 탭 ───────────────────────────────────────
+
+@Composable
+private fun RecentsScreen(
+    store: CallLogStore,
+    contacts: ContactStore,
+    onCall: (String) -> Unit,
+) {
+    var log by remember { mutableStateOf(store.all()) }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("최근기록", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.weight(1f))
+            if (log.isNotEmpty()) TextButton(onClick = { store.clear(); log = emptyList() }) { Text("지우기") }
+        }
+        if (log.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("최근 통화 기록이 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(log) { e ->
+                    RecentRow(e, contacts.nameFor(e.number), onClick = { onCall(e.number) })
+                    HorizontalDivider()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentRow(e: CallEntry, name: String?, onClick: () -> Unit) {
+    val (glyph, glyphColor, missed) = when (e.type) {
+        CallType.OUTGOING -> Triple("↗", MaterialTheme.colorScheme.onSurfaceVariant, false)
+        CallType.INCOMING -> Triple("↙", MaterialTheme.colorScheme.onSurfaceVariant, false)
+        CallType.MISSED -> Triple("↙", HANGUP_RED, true)
+    }
+    val typeLabel = when (e.type) {
+        CallType.OUTGOING -> "발신"; CallType.INCOMING -> "수신"; CallType.MISSED -> "부재중"
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(glyph, color = glyphColor, fontSize = 18.sp, modifier = Modifier.size(28.dp), textAlign = TextAlign.Center)
+        Spacer(Modifier.size(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name ?: e.number, style = MaterialTheme.typography.bodyLarge,
+                color = if (missed) HANGUP_RED else MaterialTheme.colorScheme.onSurface)
+            Text("$typeLabel · ${formatTime(e.time)}", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("📞", fontSize = 18.sp)
     }
 }
 
@@ -400,9 +629,9 @@ private fun CallScreen(
     ) {
         Spacer(Modifier.height(48.dp))
         val (remote, stateLine) = when (val c = call) {
-            is CallState.Incoming -> c.remote to "수신 전화"
-            is CallState.Outgoing -> c.remote to "발신 중…"
-            is CallState.Active -> c.remote to "통화 중"
+            is CallState.Incoming -> extractNumber(c.remote) to (if (videoOn) "영상 수신 전화" else "수신 전화")
+            is CallState.Outgoing -> extractNumber(c.remote) to (if (videoOn) "영상 발신 중…" else "발신 중…")
+            is CallState.Active -> extractNumber(c.remote) to "통화 중"
             else -> "" to ""
         }
         Text(remote, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
@@ -429,28 +658,20 @@ private fun CallScreen(
         Spacer(Modifier.weight(1f))
 
         when (val c = call) {
-            is CallState.Incoming -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    LabeledRound("거절", HANGUP_RED, "✕") { onReject(c.id) }      // ✕
-                    LabeledRound("받기", CALL_GREEN, "📞") { onAnswer(c.id) } // 📞
-                }
+            is CallState.Incoming -> Row(
+                modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                LabeledRound("거절", HANGUP_RED, "✕") { onReject(c.id) }
+                LabeledRound("받기", CALL_GREEN, "📞") { onAnswer(c.id) }
             }
             is CallState.Active -> {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    LabeledRound(
-                        if (videoOn) "영상 끄기" else "영상", MaterialTheme.colorScheme.surfaceVariant,
-                        "📹", fg = MaterialTheme.colorScheme.onSurface,
-                    ) { onToggleVideo(!videoOn) }
-                }
+                LabeledRound(
+                    if (videoOn) "영상 끄기" else "영상 켜기", VIDEO_BLUE, "📹",
+                ) { onToggleVideo(!videoOn) }
                 Spacer(Modifier.height(20.dp))
                 LabeledRound("종료", HANGUP_RED, "📞") { onHangup(c.id) }
             }
-            is CallState.Outgoing -> {
-                LabeledRound("취소", HANGUP_RED, "📞") { onHangup(c.id) }
-            }
+            is CallState.Outgoing -> LabeledRound("취소", HANGUP_RED, "📞") { onHangup(c.id) }
             else -> {}
         }
         Spacer(Modifier.height(24.dp))
@@ -458,9 +679,9 @@ private fun CallScreen(
 }
 
 @Composable
-private fun LabeledRound(label: String, bg: Color, glyph: String, fg: Color = Color.White, onClick: () -> Unit) {
+private fun LabeledRound(label: String, bg: Color, glyph: String, fg: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        RoundButton(label = glyph, bg = bg, fg = fg, size = 72.dp, onClick = onClick)
+        RoundButton(label = glyph, bg = bg, fg = fg, size = 72.dp, enabled = enabled, onClick = onClick)
         Spacer(Modifier.height(8.dp))
         Text(label, style = MaterialTheme.typography.labelMedium)
     }
@@ -488,6 +709,20 @@ private fun RoundButton(
 }
 
 @Composable
+private fun RegStatusChip(reg: RegState) {
+    val (dot, label) = when (reg) {
+        is RegState.Registered -> CALL_GREEN to "통화 가능"
+        RegState.Registering, RegState.Idle -> Color(0xFFF9A825) to "연결 중…"
+        RegState.Unregistered -> Color(0xFFF9A825) to "등록 해제됨"
+        is RegState.Failed -> HANGUP_RED to "오프라인"
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
+        Text(label, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
 private fun VideoRender(onSurface: (Any?) -> Unit) {
     // SurfaceView 의 Surface 를 PJSIP 영상 윈도우로 전달. 컴포지션 이탈 시 surfaceDestroyed→null.
     AndroidView(
@@ -504,6 +739,18 @@ private fun VideoRender(onSurface: (Any?) -> Unit) {
     )
 }
 
+/** SIP URI("\"이름\" <sip:번호@도메인>")에서 표시용 번호만 추출. 패턴이 없으면 원문 반환. */
+private fun extractNumber(remote: String): String {
+    var s = remote.trim()
+    if (s.contains("<") && s.contains(">")) s = s.substringAfter("<").substringBefore(">")
+    s = s.removePrefix("sip:").removePrefix("sips:").removePrefix("tel:")
+    s = s.substringBefore("@").substringBefore(";")
+    return s.ifBlank { remote }
+}
+
+private fun formatTime(ts: Long): String =
+    SimpleDateFormat("M월 d일 a h:mm", Locale.KOREA).format(java.util.Date(ts))
+
 private fun requiredPermissions(): Array<String> = buildList {
     add(Manifest.permission.RECORD_AUDIO)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -513,6 +760,7 @@ private fun requiredPermissions(): Array<String> = buildList {
 
 private val CALL_GREEN = Color(0xFF2E7D32)
 private val HANGUP_RED = Color(0xFFC62828)
+private val VIDEO_BLUE = Color(0xFF1565C0)
 
 // ─────────────────────────────────────── 설정 화면 (고급/수동) ───────────────────────────────────────
 
