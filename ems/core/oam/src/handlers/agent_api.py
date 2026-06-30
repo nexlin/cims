@@ -510,6 +510,10 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
     # agent_version 도 매 heartbeat 시 갱신 — update.sh 후 새 버전 즉시 반영.
     if ver:
         patches['agent_version'] = ver[:32]
+    # 설치된 agent 버전 목록(롤백 대상 선택용) — current 제외 mtime 최신순.
+    avs = body.get("agent_versions")
+    if isinstance(avs, list):
+        patches['agent_versions'] = [str(v)[:32] for v in avs[:10] if v]
     # 호스트 사양 갱신 (agent 0.0.67+) — enroll 스냅샷 고착으로 VM 스펙 변경이
     # 콘솔에 반영되지 않던 문제 (예: ctrl01 4코어/7GB 표시, 실제 8코어/15GB).
     if body.get("hostname"):

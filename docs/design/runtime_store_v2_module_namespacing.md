@@ -56,12 +56,15 @@ CIMS 설정은 두 종류이며 적용 경로가 다르다.
 ## 3. 디렉토리 레이아웃
 
 ```
-/opt/cims-agent/                          # PREFIX
-├── agent/                                # agent 번들 (in-place 교체)
-├── state/  run/                          # agent 고유 상태/런타임
+/opt/cims-agent/                          # PREFIX (CIMS_AGENT_PREFIX)
+├── agent/
+│   ├── <ver>/                            # agent 번들 (버전단위, 최신 3개)
+│   └── current -> <ver>                  # 활성 버전 심볼릭
+├── state/  run/                          # agent 고유 상태/런타임 (버전 밖, 영속)
 └── modules/
     ├── oam/
     │   ├── <ver>/                        # 버전단위 설치 (페이로드 + meta.json)
+    │   ├── current -> <ver>              # 활성 버전 심볼릭 (CIMS_DIST_DIR 통로)
     │   └── runtime/                      # ── OAM 자기 데이터 (버전 무관) ──
     │       ├── _secrets/                 #    .jwt_secret 등 — 0700, 동기화/백업 제외
     │       ├── control/                  #    agents/ deployments/ jobs/ metrics/ packages/ pkg_files/ ha_groups/ sync_txn/
@@ -71,6 +74,7 @@ CIMS 설정은 두 종류이며 적용 경로가 다르다.
     │   ├── <ver>/                        # 버전단위 설치
     │   │   ├── config/<col>.jsonl        #    적용본(이 버전용) — 기존 유지
     │   │   └── csp/...                    #    페이로드
+    │   ├── current -> <ver>              # 활성 버전 심볼릭 (CIMS_DIST_DIR / jsonlDir 통로)
     │   └── runtime/                      # ── CSP 모듈 데이터 (버전 무관 영속, csp 소유) ──
     │       └── collections/
     │           └── <collection>/         #    local_nodes/ remote_nodes/ routes/ rules/ ...

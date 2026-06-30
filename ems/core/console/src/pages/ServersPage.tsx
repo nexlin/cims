@@ -193,6 +193,26 @@ export default function ServersPage() {
       await load()
     } catch (e) { show((e as Error).message, 'err') }
   }
+  async function rollbackAgent(a: Agent) {
+    // 롤백 대상 = current(현재 버전) 제외 설치된 버전 중 직전(mtime 최신). 여러 개면 선택.
+    const others = (a.agent_versions || []).filter(v => v && v !== a.agent_version)
+    if (others.length === 0) {
+      show('롤백 가능한 직전 agent 버전이 없습니다 (단일 버전)', 'err'); return
+    }
+    let target = others[0]
+    if (others.length > 1) {
+      const pick = prompt(`롤백할 agent 버전을 입력하세요 (현재 v${a.agent_version}).\n설치됨: ${others.join(', ')}`, others[0])
+      if (!pick) return
+      target = pick.trim()
+    } else if (!confirm(`${a.name} 의 agent 를 v${target} 로 롤백할까요? (현재 v${a.agent_version} — self-exec 재기동)`)) {
+      return
+    }
+    try {
+      const r = await deploymentApi.rollbackAgent(a.id, target)
+      show(`롤백 job 큐잉 (#${r.job_id} → v${r.target_version || target})`, 'ok')
+      await load()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
   async function queueJob(d: Deployment, jt: JobType) {
     // destructive / 서비스 영향 큰 job 은 confirm.
     const destructiveDesc: Partial<Record<JobType, string>> = {
@@ -370,6 +390,7 @@ export default function ServersPage() {
                   onRemove={removeAgent}
                   onUpgrade={upgradeAgent}
                   onRestart={restartAgent}
+                  onRollbackAgent={rollbackAgent}
                   onMetrics={setMetricsFor}
                   onHealthCheck={setHealthCheckFor}
                   onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
@@ -1235,7 +1256,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
 type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
 function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
-                          onApprove, onRevoke, onRemove, onUpgrade, onRestart, onMetrics, onHealthCheck,
+                          onApprove, onRevoke, onRemove, onUpgrade, onRestart, onRollbackAgent, onMetrics, onHealthCheck,
                           onAddDeploy, onConfigure, onJob, onRollback, onRemoveDep }: {
   agent: Agent
   // infra=시스템/서버 구성 (설치안내/정보/네트워크), install=패키지 설치 (모듈)
@@ -1248,6 +1269,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
   onRemove: (a: Agent) => void
   onUpgrade: (a: Agent) => void
   onRestart: (a: Agent) => void
+  onRollbackAgent: (a: Agent) => void
   onMetrics: (a: Agent) => void
   onHealthCheck: (a: Agent) => void
   onAddDeploy: () => void
@@ -1319,6 +1341,12 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
                   disabled={a.status !== 'online'} title="agent 바이너리를 최신 버전으로 교체">
                   ↑ 업그레이드
                 </button>
+                {(a.agent_versions || []).filter(v => v && v !== a.agent_version).length > 0 && (
+                  <button className="btn btn--sm" onClick={() => onRollbackAgent(a)}
+                    disabled={a.status !== 'online'} title="agent 를 직전(또는 선택) 버전으로 롤백 (current flip + execv)">
+                    ↓ 롤백
+                  </button>
+                )}
                 {a.status !== 'online' && (
                   <button className="btn btn--sm" onClick={onClickReinstall}
                     title="물리 서버 교체 / 신규 install — 새 enrollment_token 발급 + InstallSection 펼침">

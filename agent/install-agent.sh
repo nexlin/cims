@@ -135,7 +135,7 @@ else
 fi
 cd "$INSTALL_DIR"
 STATE_DIR="$INSTALL_DIR/state"
-BIN_FILE="$INSTALL_DIR/agent/cims_agent.py"
+BIN_FILE="$INSTALL_DIR/agent/current/cims_agent.py"   # current 통로 — 버전 무관 고정 경로
 SUDOERS_FILE="/etc/sudoers.d/cims-priv"
 
 if [[ "$MODE" == "fresh" ]]; then
@@ -158,33 +158,36 @@ if ! curl -fsSLk "$OAM_URL/agent-bundle.tar.gz" -o "$BUNDLE_TMP"; then
     echo "ERROR: failed to download $OAM_URL/agent-bundle.tar.gz"
     exit 4
 fi
-if [[ "$MODE" == "fresh" ]]; then
-    # fresh: 빈 디렉토리에 직접 풀기.
-    if ! tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR" agent/ 2>/dev/null; then
-        tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR"
-    fi
-else
-    # update: agent.new/ 에 풀고 atomic rename — agent process 동작 중 race 차단.
-    rm -rf "$INSTALL_DIR/agent.new" "$INSTALL_DIR/agent.old"
-    mkdir -p "$INSTALL_DIR/agent.new"
-    if ! tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR/agent.new" --strip-components=1 agent/ 2>/dev/null; then
-        tar xzf "$BUNDLE_TMP" -C "$INSTALL_DIR/agent.new" --strip-components=1
-    fi
-    if [[ ! -f "$INSTALL_DIR/agent.new/cims_agent.py" ]]; then
-        echo "ERROR: agent.new/cims_agent.py not found after extract"
-        rm -rf "$INSTALL_DIR/agent.new"
-        exit 5
-    fi
-    [[ -d "$INSTALL_DIR/agent" ]] && mv "$INSTALL_DIR/agent" "$INSTALL_DIR/agent.old"
-    mv "$INSTALL_DIR/agent.new" "$INSTALL_DIR/agent"
-    rm -rf "$INSTALL_DIR/agent.old"
+# 버전 단위 + current 심볼릭 — fresh/update 공통: staging 에 풀고 pkg.json 버전으로
+# agent/<ver>/ 에 배치 후 current 를 원자적 flip. 구버전 디렉토리는 prune(최신 3개)까지
+# 보존 → 롤백(rollback_agent)은 다운로드 없이 current flip 만으로 가능.
+STAGE="$(mktemp -d "$INSTALL_DIR/.agent-stage.XXXXXX")"
+if ! tar xzf "$BUNDLE_TMP" -C "$STAGE" --strip-components=1 agent/ 2>/dev/null; then
+    tar xzf "$BUNDLE_TMP" -C "$STAGE" --strip-components=1
 fi
+if [[ ! -f "$STAGE/cims_agent.py" ]]; then
+    echo "ERROR: agent bundle 전개 후 cims_agent.py 없음 ($STAGE)"
+    rm -rf "$STAGE"; exit 5
+fi
+AGENT_VER="$(python3 -c "import json;print(json.load(open('$STAGE/pkg.json'))['version'])" 2>/dev/null || true)"
+[[ -z "$AGENT_VER" ]] && AGENT_VER="unknown"
+mkdir -p "$INSTALL_DIR/agent"
+VER_DIR="$INSTALL_DIR/agent/$AGENT_VER"
+rm -rf "$VER_DIR"
+mv "$STAGE" "$VER_DIR"
+chmod 755 "$VER_DIR/cims_agent.py"
+[[ -d "$VER_DIR/bin" ]] && chmod 755 "$VER_DIR/bin/"*
+# current flip (원자적: symlink→tmp→rename)
+ln -sfn "$AGENT_VER" "$INSTALL_DIR/agent/.current.tmp"
+mv -Tf "$INSTALL_DIR/agent/.current.tmp" "$INSTALL_DIR/agent/current"
+# prune — 버전 디렉토리(숫자.숫자…) 중 mtime 최신 3개만 유지. 방금 설치본(=current 타겟)이
+#   최신이라 항상 보존. current 심볼릭·잔재는 grep 패턴으로 비대상.
+mapfile -t _OLD_VERS < <(cd "$INSTALL_DIR/agent" && ls -1dt */ 2>/dev/null | sed 's:/$::' | grep -E '^[0-9]+(\.[0-9]+)+' || true)
+for _v in "${_OLD_VERS[@]:3}"; do rm -rf "$INSTALL_DIR/agent/$_v"; done
 if [[ ! -f "$BIN_FILE" ]]; then
-    echo "ERROR: tarball extracted but $BIN_FILE not found"
+    echo "ERROR: $BIN_FILE not found after extract (current flip 실패?)"
     exit 5
 fi
-chmod 755 "$BIN_FILE"
-[[ -d "$INSTALL_DIR/agent/bin" ]] && chmod 755 "$INSTALL_DIR/agent/bin/"*
 
 # ──────────────────────────────────────────────────────────────────────
 # setup-sudoers.sh — root 권한으로 한 번 실행 (init.sh 가 자동 호출).
@@ -205,8 +208,8 @@ fi
 
 # (1) sudoers
 cat > $SUDOERS_FILE <<SUDO_EOF
-$SVC_USER ALL=(root) NOPASSWD: $INSTALL_DIR/agent/bin/cims-priv *
-$SVC_USER ALL=(root) NOPASSWD: $INSTALL_DIR/agent/bin/cims-ha *
+$SVC_USER ALL=(root) NOPASSWD: $INSTALL_DIR/agent/current/bin/cims-priv *
+$SVC_USER ALL=(root) NOPASSWD: $INSTALL_DIR/agent/current/bin/cims-ha *
 SUDO_EOF
 chmod 440 $SUDOERS_FILE
 echo "✓ $SUDOERS_FILE 설치 완료"
@@ -221,15 +224,15 @@ fi
 
 # (3) 자동 검증
 fail=0
-if runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/bin/cims-priv version >/dev/null 2>&1; then
+if runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/current/bin/cims-priv version >/dev/null 2>&1; then
     echo "✓ cims-priv NOPASSWD 동작 확인"
 else
     echo "✗ cims-priv NOPASSWD 검증 실패"
     fail=1
 fi
-if runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha --help >/dev/null 2>&1 \\
-   || runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha version >/dev/null 2>&1 \\
-   || runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/bin/cims-ha 2>&1 | grep -qE "usage:|Usage:"; then
+if runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/current/bin/cims-ha --help >/dev/null 2>&1 \\
+   || runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/current/bin/cims-ha version >/dev/null 2>&1 \\
+   || runuser -u $SVC_USER -- sudo -n $INSTALL_DIR/agent/current/bin/cims-ha 2>&1 | grep -qE "usage:|Usage:"; then
     echo "✓ cims-ha NOPASSWD 동작 확인"
 else
     echo "✗ cims-ha NOPASSWD 검증 실패"
@@ -240,7 +243,7 @@ if [[ \$fail -eq 0 ]]; then
 else
     echo "⚠ 일부 검증 실패 — sudoers 또는 wrapper 파일 위치 확인 필요"
     echo "    sudoers : $SUDOERS_FILE"
-    echo "    wrapper : $INSTALL_DIR/agent/bin/cims-{priv,ha}"
+    echo "    wrapper : $INSTALL_DIR/agent/current/bin/cims-{priv,ha}"
     exit 2
 fi
 EOF
@@ -427,9 +430,9 @@ if pgrep -f "cims_agent.py.*--name $AGENT_NAME" >/dev/null 2>&1; then
 fi
 
 # 3. cims-ha uninstall — install 대칭 (keepalived + autoremove deps purge). (root 직접)
-if [[ -x ./agent/bin/cims-ha ]] && command -v keepalived >/dev/null 2>&1; then
+if [[ -x ./agent/current/bin/cims-ha ]] && command -v keepalived >/dev/null 2>&1; then
     echo "→ cims-ha uninstall (keepalived + deps purge)"
-    ./agent/bin/cims-ha uninstall 2>&1 || \\
+    ./agent/current/bin/cims-ha uninstall 2>&1 || \\
         echo "  ⚠ cims-ha uninstall 실패 — 수동 정리: apt-get -y purge keepalived && apt-get -y autoremove --purge"
 fi
 
@@ -523,6 +526,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
+Environment=CIMS_AGENT_PREFIX=$INSTALL_DIR
 ExecStart=/usr/bin/python3 $BIN_FILE --oam-url $OAM_URL --state-dir $STATE_DIR --name $AGENT_NAME
 Restart=always
 RestartSec=10

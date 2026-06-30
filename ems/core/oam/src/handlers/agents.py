@@ -371,6 +371,7 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
         "memory_mb": r.get("memory_mb"),
         "disk_gb": r.get("disk_gb"),
         "agent_version": r.get("agent_version"),
+        "agent_versions": r.get("agent_versions") if isinstance(r.get("agent_versions"), list) else [],
         "last_heartbeat": _maybe_dt(r.get("last_heartbeat")),
         "last_metric":    _maybe_dt(r.get("last_metric")),
         "enrolled_at":    _maybe_dt(r.get("enrolled_at")),
@@ -448,6 +449,8 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _agent_metrics(aid, config)
         if action == "upgrade" and method == "POST":
             return await _upgrade_agent_binary(handler_args, aid, config)
+        if action == "rollback" and method == "POST":
+            return await _rollback_agent_binary(handler_args, aid, config)
         if action == "restart" and method == "POST":
             return await _restart_agent(handler_args, aid, config)
         if action == "apply-ip-config" and method == "POST":
@@ -1095,6 +1098,33 @@ async def _restart_agent(handler_args: HandlerArgs, aid: int, config):
     return HandlerResult(status=202,
                          body={"ok": True, "agent_id": aid, "job_id": job_id,
                                "hint": "agent 가 다음 heartbeat 에서 pickup 후 self-exec 합니다 (수 초 내)"},
+                         media_type="application/json")
+
+
+async def _rollback_agent_binary(handler_args: HandlerArgs, aid: int, config):
+    """Agent 롤백 job 큐잉 — agent/current 를 직전(또는 body.version) 버전으로 flip 후 execv.
+    버전 디렉토리는 prune(최신 3개)까지 보존되므로 다운로드 불요. die 한 agent 는 깨울 수 없음."""
+    row = await asyncio.to_thread(_agent_load, config, aid)
+    if not row:
+        return HandlerResult(status=404, body={"error": "agent_not_found"},
+                             media_type="application/json")
+    if row.get("status") != "online":
+        return HandlerResult(status=409,
+                             body={"error": "agent_not_online",
+                                   "hint": "오프라인 agent 는 롤백 job 을 pickup 하지 못함 — 온라인 복귀 후 재시도"},
+                             media_type="application/json")
+    body = _parse_body(handler_args)
+    params = {}
+    ver = (body.get("version") or "").strip()
+    if ver:
+        params["version"] = ver
+    job_id = await asyncio.to_thread(_job_create, config, aid, 'rollback_agent', params)
+    logger.log_info(f"[agent-rollback] queued job_id={job_id} agent_id={aid} "
+                    f"name={row.get('name')} target={ver or '직전'}")
+    return HandlerResult(status=202,
+                         body={"ok": True, "agent_id": aid, "job_id": job_id,
+                               "target_version": ver or None,
+                               "hint": "agent 가 다음 heartbeat 에서 pickup 후 current flip + self-exec 합니다 (수 초 내)"},
                          media_type="application/json")
 
 
