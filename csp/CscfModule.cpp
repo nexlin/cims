@@ -17,6 +17,7 @@
 #include "GroupCallService.h"
 #include "GroupMap.h"
 #include "Log.h"
+#include "McpttInfo.h"  // ParseAffiliationCommand (TS 24.379 §9 affiliation-command)
 #include "NonceMap.h"
 #include "SipMd5.h"
 #include "SipServer.h"
@@ -29,6 +30,7 @@
 extern CSipUserAgent gclsUserAgent;
 extern void SendInitialNotify( const SubscriptionInfo &sub );
 extern void SendTerminatedNotify( const SubscriptionInfo &sub );
+extern void SendAffiliationNotify( const std::string &strUserId );  // C2
 
 // F-04/F-13: PUBLISH affiliation ETag 저장소 (key = "userId:groupId")
 static std::map<std::string, std::string> s_mapEtag;
@@ -375,8 +377,17 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     std::string strReqUriUser = pclsMessage->m_clsReqUri.m_strUser;
     bool bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
 
+    // C2: affiliation-info 구독 판별 (TS 24.379 §9.3) — Event:presence 또는
+    //   Accept: application/vnd.3gpp.mcptt-affiliation-info+xml → 제휴상태 NOTIFY 대상.
+    CSipHeader *pclsSubEvent  = pclsMessage->GetHeader( "Event" );
+    CSipHeader *pclsSubAccept = pclsMessage->GetHeader( "Accept" );
+    bool bAffInfo = ( pclsSubEvent && pclsSubEvent->m_strValue == "presence" ) ||
+                    ( pclsSubAccept && pclsSubAccept->m_strValue.find( "mcptt-affiliation-info" ) != std::string::npos );
+
     std::string strEventType;
-    if ( bAffiliation ) {
+    if ( bAffInfo ) {
+        strEventType = "affiliation";  // 제휴상태(affiliation-info) 구독 → presence NOTIFY
+    } else if ( bAffiliation ) {
         strEventType = "conference";  // 그룹 affiliation/conference 상태 구독
     } else if ( strReqUri.find( "gms" ) != std::string::npos ) {
         strEventType = "gms";
@@ -487,26 +498,31 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         strContactUri = szFromBuf;
     }
 
-    // ── 규격 정합 (item 5): Content-Type / Event 헤더 + affiliation command 본문 파싱 ──
-    //   TS 24.379 §9 affiliation 본문 = application/vnd.3gpp.mcptt-affiliation-command+xml.
-    //   Content-Type 가 명시됐는데 affiliation 타입이 아니면 경고(호환 위해 거부는 안 함).
+    // ── C1: Content-Type 검증 + affiliation-command XML 파싱 (TS 24.379 §9) ──
+    //   본문이 있으면 Content-Type = application/vnd.3gpp.mcptt-affiliation-command+xml 강제.
+    //   (body 없는 순수 Expires:0 refresh 는 관대 처리.)
+    const std::string &strBody = pclsMessage->m_strBody;
     const std::string &strCtSub = pclsMessage->m_clsContentType.m_strSubType;
-    if ( !strCtSub.empty() && strCtSub.find( "mcptt-affiliation" ) == std::string::npos ) {
-        CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] 예상밖 Content-Type %s/%s (mcptt-affiliation-command 기대)",
+    if ( !strBody.empty() && !strCtSub.empty() &&
+         strCtSub.find( "mcptt-affiliation" ) == std::string::npos ) {
+        CLog::Print( LOG_ERROR, "[Affiliation/PUBLISH] 415: Content-Type %s/%s (mcptt-affiliation-command 기대)",
                      pclsMessage->m_clsContentType.m_strType.c_str(), strCtSub.c_str() );
-    }
-    CSipHeader *pclsEvent = pclsMessage->GetHeader( "Event" );
-    if ( pclsEvent && !pclsEvent->m_strValue.empty() ) {
-        CLog::Print( LOG_DEBUG, "[Affiliation/PUBLISH] Event=%s", pclsEvent->m_strValue.c_str() );
+        SendResponse( pclsMessage, 415 );  // Unsupported Media Type
+        return true;
     }
 
     int iExpires = pclsMessage->GetExpires();
-    const std::string &strBody = pclsMessage->m_strBody;
-    // affiliate vs de-affiliate 판정 — affiliation command 요소 기반(단순 substring 아님):
-    //   Expires:0 | <de-affiliate.../> | <deaffiliate.../> | "de-affiliate" 텍스트 → 해제, else 등록.
-    bool bDeaffiliate = ( iExpires == 0 )
-                        || ( strBody.find( "deaffiliate" )  != std::string::npos )    // <deaffiliate> (무하이픈)
-                        || ( strBody.find( "de-affiliate" ) != std::string::npos );   // <de-affiliate> / 텍스트
+    // affiliate vs de-affiliate 판정 — affiliation-command 액션 요소 기반 파싱(요소 앵커, substring 아님).
+    //   액션이 de-affiliate 이거나 Expires:0 이면 해제, else 등록. group 속성은 Req-URI 와 교차검증.
+    CMcpttAffiliation clsCmd = ParseAffiliationCommand( strBody );
+    bool bDeaffiliate = ( iExpires == 0 ) || ( clsCmd.bValid && clsCmd.bDeaffiliate );
+    if ( clsCmd.bValid && !clsCmd.strGroup.empty() &&
+         clsCmd.strGroup.find( strReqUriUser ) == std::string::npos ) {
+        CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] command group=%s ≠ Req-URI group=%s (Req-URI 우선)",
+                     clsCmd.strGroup.c_str(), strReqUriUser.c_str() );
+    }
+    CLog::Print( LOG_DEBUG, "[Affiliation/PUBLISH] cmd valid=%d deaffiliate=%d group=%s expires=%d",
+                 clsCmd.bValid, bDeaffiliate, clsCmd.strGroup.c_str(), iExpires );
 
     // ── 규격 정합 (item 1): 멤버십 게이트 — 자신이 멤버인 그룹에만 affiliate 가능 ──
     //   TS 24.481/24.379. (de-affiliate 는 멤버 여부와 무관하게 항상 허용.)
@@ -558,6 +574,8 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
             CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
                          strReqUriUser.c_str(), iExpires > 0 ? iExpires : 3600 );
         }
+        // C2: 제휴상태 변경 → 해당 가입자의 affiliation-info(presence) 구독자에게 NOTIFY.
+        SendAffiliationNotify( strFromId );
     }
 
     // de-affiliate: ETag 저장소에서 제거 후 200 반환
