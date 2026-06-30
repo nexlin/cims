@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import com.cims.ue.core.calllog.CallEntry
 import com.cims.ue.core.calllog.CallLogStore
 import com.cims.ue.core.calllog.CallType
@@ -80,6 +82,7 @@ import com.cims.ue.core.contacts.CompanyDirectoryStore
 import com.cims.ue.core.contacts.CompanyOrg
 import com.cims.ue.core.contacts.Contact
 import com.cims.ue.core.contacts.ContactStore
+import com.cims.ue.core.contacts.FavoriteStore
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.RegState
 import kotlinx.coroutines.Dispatchers
@@ -223,6 +226,7 @@ private fun HomeScreen(
     val callLog = remember { CallLogStore(context) }
     val contacts = remember { ContactStore(context) }
     val companyDir = remember { CompanyDirectoryStore(context) }
+    val favorites = remember { FavoriteStore(context) }
 
     // SipService 바인딩 — 등록은 서비스가 자동으로 유지한다(수동 등록 버튼 없음).
     var service by remember { mutableStateOf<SipService?>(null) }
@@ -316,8 +320,10 @@ private fun HomeScreen(
                     Tab.CONTACTS -> ContactsScreen(
                         personal = contacts,
                         company = companyDir,
+                        favorites = favorites,
                         onCallVoice = { dial(it, false) },
                         onCallVideo = { dial(it, true) },
+                        onSendMessage = { number, text -> service?.sendMessage(number, text) },
                     )
                     Tab.RECENTS -> RecentsScreen(
                         store = callLog,
@@ -452,28 +458,47 @@ private fun KeypadKey(digit: String, letters: String, onClick: () -> Unit) {
 
 // ─────────────────────────────────────── 연락처 탭 ───────────────────────────────────────
 
+/** 상세 화면 대상 — 행을 누르면 바로 발신하지 않고 정보+작업(음성/영상/문자/즐겨찾기)을 띄운다. */
+private data class DetailTarget(val name: String, val number: String, val org: String?)
+
 @Composable
 private fun ContactsScreen(
     personal: ContactStore,
     company: CompanyDirectoryStore,
+    favorites: FavoriteStore,
     onCallVoice: (String) -> Unit,
     onCallVideo: (String) -> Unit,
+    onSendMessage: (String, String) -> Unit,
 ) {
-    var seg by remember { mutableStateOf(0) }   // 0=회사, 1=개인
+    var seg by remember { mutableStateOf(1) }            // 0=즐겨찾기 1=회사 2=개인
+    var detail by remember { mutableStateOf<DetailTarget?>(null) }
+    var favVersion by remember { mutableStateOf(0) }     // 즐겨찾기 변경 트리거
 
     Column(Modifier.fillMaxSize()) {
-        // 회사/개인 구분 세그먼트
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SegTab("회사", seg == 0, Modifier.weight(1f)) { seg = 0 }
-            SegTab("개인", seg == 1, Modifier.weight(1f)) { seg = 1 }
+            SegTab("즐겨찾기", seg == 0, Modifier.weight(1f)) { seg = 0 }
+            SegTab("회사", seg == 1, Modifier.weight(1f)) { seg = 1 }
+            SegTab("개인", seg == 2, Modifier.weight(1f)) { seg = 2 }
         }
         when (seg) {
-            0 -> CompanyContacts(company, onCallVoice, onCallVideo)
-            else -> PersonalContacts(personal, onCallVoice, onCallVideo)
+            0 -> FavoritesScreen(favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ })
+            1 -> CompanyContacts(company, favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ })
+            else -> PersonalContacts(personal, favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ })
         }
+    }
+
+    detail?.let { t ->
+        ContactDetailDialog(
+            target = t, favorites = favorites,
+            onDismiss = { detail = null },
+            onVoice = { onCallVoice(t.number); detail = null },
+            onVideo = { onCallVideo(t.number); detail = null },
+            onSendMessage = { text -> onSendMessage(t.number, text) },
+            onFavChanged = { favVersion++ },
+        )
     }
 }
 
@@ -487,39 +512,107 @@ private fun SegTab(label: String, selected: Boolean, modifier: Modifier = Modifi
     ) { Text(label, color = fg, style = MaterialTheme.typography.labelLarge) }
 }
 
-/** 회사 연락처 — 서버 프로비저닝 제공, 읽기전용. 조직 트리(접기/펼치기) + 검색. */
+/** 공용 연락처 행 — 별표 토글 + 탭(상세). [trailing] 으로 추가 버튼(개인=수정). */
+@Composable
+private fun ContactListRow(
+    name: String, line2: String, depth: Int, isFav: Boolean,
+    onTap: () -> Unit, onToggleFav: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onTap() }
+            .padding(start = (depth * 16).dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) { Text(name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+        Spacer(Modifier.size(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name.ifBlank { line2 }, style = MaterialTheme.typography.bodyLarge)
+            Text(line2, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(onClick = onToggleFav) {
+            Text(if (isFav) "★" else "☆", fontSize = 20.sp,
+                color = if (isFav) FAV_GOLD else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        trailing?.invoke()
+    }
+}
+
+// ── 즐겨찾기 ──
+@Composable
+private fun FavoritesScreen(
+    favorites: FavoriteStore, favVersion: Int,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
+) {
+    val list = remember(favVersion) { favorites.all() }
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Text("즐겨찾기", style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(vertical = 6.dp))
+        if (list.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("즐겨찾기가 없습니다.\n연락처에서 ★ 로 추가하세요.",
+                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else LazyColumn(Modifier.fillMaxSize()) {
+            items(list, key = { it.number }) { f ->
+                ContactListRow(f.name, f.number, depth = 0, isFav = true,
+                    onTap = { onOpen(DetailTarget(f.name, f.number, null)) },
+                    onToggleFav = { favorites.toggle(f.name, f.number); onFavChanged() })
+                HorizontalDivider()
+            }
+        }
+    }
+}
+
+/** 회사 연락처 — 서버 프로비저닝 제공, 읽기전용. 조직 트리 + 검색 + 동기화(버전 기반). */
 @Composable
 private fun CompanyContacts(
-    store: CompanyDirectoryStore,
-    onCallVoice: (String) -> Unit,
-    onCallVideo: (String) -> Unit,
+    store: CompanyDirectoryStore, favorites: FavoriteStore, favVersion: Int,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var dir by remember { mutableStateOf(store.load()) }
+    var lastSync by remember { mutableStateOf(store.lastSyncedAt()) }
     var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
-    var collapsed by remember { mutableStateOf(setOf<String>()) }   // 접힌 조직 code
+    var collapsed by remember { mutableStateOf(setOf<String>()) }
+    val favSet = remember(favVersion) { favorites.all().map { it.number }.toSet() }
 
-    fun refresh() {
+    fun sync() {
         if (loading) return
-        loading = true; error = ""
+        loading = true; note = ""
         scope.launch {
-            val fetched = withContext(Dispatchers.IO) { SsoProvisioner.fetchDirectory(context) }
-            if (fetched != null) { store.replace(fetched); dir = fetched }
-            else if (dir.members.isEmpty()) error = "회사 연락처를 불러오지 못했습니다."
+            val res = withContext(Dispatchers.IO) { SsoProvisioner.fetchDirectory(context, store.etag()) }
+            val now = System.currentTimeMillis()
+            when {
+                res == null -> note = "동기화 실패 — 네트워크/로그인을 확인하세요."
+                res.changed && res.dir != null -> { store.replace(res.dir!!, res.etag, now); dir = res.dir!!; lastSync = now; note = "최신으로 갱신했습니다." }
+                else -> { store.touchSynced(now); lastSync = now; note = "이미 최신입니다." }
+            }
             loading = false
         }
     }
-    LaunchedEffect(Unit) { refresh() }   // 캐시 즉시 표시 + 백그라운드 최신화
+    LaunchedEffect(Unit) { sync() }   // 진입 시 버전 확인(변경 시에만 다운로드)
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("회사 전화번호부", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text("회사 전화번호부", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    (if (lastSync > 0) "마지막 동기화: ${formatTime(lastSync)}" else "동기화 안 됨") +
+                        (if (note.isNotBlank()) " · $note" else ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (loading) CircularProgressIndicator(Modifier.size(20.dp))
-            else TextButton(onClick = { refresh() }) { Text("새로고침") }
+            else TextButton(onClick = { sync() }) { Text("동기화") }
         }
         OutlinedTextField(
             value = query, onValueChange = { query = it },
@@ -528,17 +621,15 @@ private fun CompanyContacts(
         )
 
         val q = query.trim()
+        val orgName = remember(dir) { dir.orgs.associate { it.code to it.name } }
         if (dir.members.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(error.ifBlank { "회사 연락처가 없습니다." },
+                Text(note.ifBlank { "회사 연락처가 없습니다." },
                     textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else if (q.isNotBlank()) {
-            // 검색 모드 — 트리 무시, 일치 가입자 평면 표시(소속 조직명 부제).
-            val orgName = remember(dir) { dir.orgs.associate { it.code to it.name } }
             val hits = remember(dir, q) {
-                dir.members.filter { it.name.contains(q, true) || it.number.contains(q) }
-                    .sortedBy { it.name }
+                dir.members.filter { it.name.contains(q, true) || it.number.contains(q) }.sortedBy { it.name }
             }
             if (hits.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -546,25 +637,25 @@ private fun CompanyContacts(
                 }
             } else LazyColumn(Modifier.fillMaxSize()) {
                 items(hits, key = { "hit:${it.number}" }) { m ->
-                    CompanyMemberRow(m.name, m.number, orgName[m.orgCode] ?: m.orgCode, depth = 0,
-                        onCallVoice = { onCallVoice(m.number) }, onCallVideo = { onCallVideo(m.number) })
+                    val on = orgName[m.orgCode] ?: m.orgCode
+                    ContactListRow(m.name, "${m.number} · $on", depth = 0, isFav = m.number in favSet,
+                        onTap = { onOpen(DetailTarget(m.name, m.number, on)) },
+                        onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() })
                     HorizontalDivider()
                 }
             }
         } else {
-            // 트리 모드
             val rows = remember(dir, collapsed) { buildDirRows(dir, collapsed) }
             LazyColumn(Modifier.fillMaxSize()) {
                 items(rows, key = { it.key }) { row ->
                     when (row) {
                         is DirRow.Org -> OrgHeaderRow(row) {
-                            collapsed = if (row.org.code in collapsed) collapsed - row.org.code
-                                        else collapsed + row.org.code
+                            collapsed = if (row.org.code in collapsed) collapsed - row.org.code else collapsed + row.org.code
                         }
                         is DirRow.Member -> {
-                            CompanyMemberRow(row.c.name, row.c.number, subtitle = null, depth = row.depth,
-                                onCallVoice = { onCallVoice(row.c.number) },
-                                onCallVideo = { onCallVideo(row.c.number) })
+                            ContactListRow(row.c.name, row.c.number, depth = row.depth, isFav = row.c.number in favSet,
+                                onTap = { onOpen(DetailTarget(row.c.name, row.c.number, orgName[row.c.orgCode])) },
+                                onToggleFav = { favorites.toggle(row.c.name, row.c.number); onFavChanged() })
                             HorizontalDivider()
                         }
                     }
@@ -603,9 +694,7 @@ private fun buildDirRows(dir: CompanyDirectory, collapsed: Set<String>): List<Di
             membersByOrg[org.code]?.sortedBy { it.name }?.forEach { out.add(DirRow.Member(it, depth + 1)) }
         }
     }
-    dir.orgs.filter { it.parent.isBlank() || it.parent !in orgByCode }.sortedBy { it.sort }
-        .forEach { walk(it, 0) }
-    // 조직 미지정(고아) 가입자
+    dir.orgs.filter { it.parent.isBlank() || it.parent !in orgByCode }.sortedBy { it.sort }.forEach { walk(it, 0) }
     val orphan = dir.members.filter { it.orgCode.isBlank() || it.orgCode !in orgByCode }
     if (orphan.isNotEmpty()) {
         out.add(DirRow.Org(CompanyOrg("", "(조직 미지정)", "", 9999), 0, true, orphan.size))
@@ -629,41 +718,17 @@ private fun OrgHeaderRow(row: DirRow.Org, onToggle: () -> Unit) {
     }
 }
 
-@Composable
-private fun CompanyMemberRow(
-    name: String, number: String, subtitle: String?, depth: Int,
-    onCallVoice: () -> Unit, onCallVideo: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable { onCallVoice() }
-            .padding(start = (depth * 16).dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
-            contentAlignment = Alignment.Center,
-        ) { Text(name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onSecondaryContainer) }
-        Spacer(Modifier.size(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(name.ifBlank { number }, style = MaterialTheme.typography.bodyLarge)
-            Text(if (subtitle != null) "$number · $subtitle" else number,
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        TextButton(onClick = onCallVideo) { Text("📹", fontSize = 18.sp) }
-    }
-}
-
-/** 개인 연락처 — 단말 로컬, 추가/수정/삭제 가능. */
+/** 개인 연락처 — 단말 로컬, 추가/수정/삭제 가능 + 검색. */
 @Composable
 private fun PersonalContacts(
-    store: ContactStore,
-    onCallVoice: (String) -> Unit,
-    onCallVideo: (String) -> Unit,
+    store: ContactStore, favorites: FavoriteStore, favVersion: Int,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
 ) {
     var list by remember { mutableStateOf(store.all()) }
     var editing by remember { mutableStateOf<Contact?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    val favSet = remember(favVersion) { favorites.all().map { it.number }.toSet() }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -677,23 +742,19 @@ private fun PersonalContacts(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         )
         val q = query.trim()
-        val shown = if (q.isBlank()) list
-                    else list.filter { it.name.contains(q, true) || it.number.contains(q) }
+        val shown = if (q.isBlank()) list else list.filter { it.name.contains(q, true) || it.number.contains(q) }
         if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (list.isEmpty()) "저장된 개인 연락처가 없습니다.\n‘+ 추가’ 로 등록하세요."
-                     else "검색 결과가 없습니다.",
+                Text(if (list.isEmpty()) "저장된 개인 연락처가 없습니다.\n‘+ 추가’ 로 등록하세요." else "검색 결과가 없습니다.",
                     textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(shown, key = { it.id }) { c ->
-                    ContactRow(c,
-                        onCallVoice = { onCallVoice(c.number) },
-                        onCallVideo = { onCallVideo(c.number) },
-                        onEdit = { editing = c })
-                    HorizontalDivider()
-                }
+        } else LazyColumn(Modifier.fillMaxSize()) {
+            items(shown, key = { it.id }) { c ->
+                ContactListRow(c.name, c.number, depth = 0, isFav = c.number in favSet,
+                    onTap = { onOpen(DetailTarget(c.name, c.number, null)) },
+                    onToggleFav = { favorites.toggle(c.name, c.number); onFavChanged() },
+                    trailing = { TextButton(onClick = { editing = c }) { Text("수정") } })
+                HorizontalDivider()
             }
         }
     }
@@ -708,34 +769,6 @@ private fun PersonalContacts(
             onDismiss = { editing = null },
             onSave = { name, num -> store.upsert(name, num, c.id); list = store.all(); editing = null },
             onDelete = { store.delete(c.id); list = store.all(); editing = null })
-    }
-}
-
-@Composable
-private fun ContactRow(
-    c: Contact,
-    onCallVoice: () -> Unit,
-    onCallVideo: () -> Unit,
-    onEdit: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable { onCallVoice() }.padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) { Text(c.name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onPrimaryContainer) }
-        Spacer(Modifier.size(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(c.name.ifBlank { c.number }, style = MaterialTheme.typography.bodyLarge)
-            if (c.name.isNotBlank()) {
-                Text(c.number, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        TextButton(onClick = onCallVideo) { Text("📹", fontSize = 18.sp) }
-        TextButton(onClick = onEdit) { Text("수정") }
     }
 }
 
@@ -764,14 +797,76 @@ private fun ContactDialog(
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (onDelete != null) TextButton(onClick = onDelete) {
-                    Text("삭제", color = HANGUP_RED)
-                }
+                if (onDelete != null) TextButton(onClick = onDelete) { Text("삭제", color = HANGUP_RED) }
                 TextButton(onClick = onDismiss) { Text("취소") }
             }
         },
     )
 }
+
+/** 연락처 상세 — 정보 + 음성/영상/문자/즐겨찾기. 행을 누르면 표시된다. */
+@Composable
+private fun ContactDetailDialog(
+    target: DetailTarget, favorites: FavoriteStore,
+    onDismiss: () -> Unit, onVoice: () -> Unit, onVideo: () -> Unit,
+    onSendMessage: (String) -> Unit, onFavChanged: () -> Unit,
+) {
+    var fav by remember { mutableStateOf(favorites.isFavorite(target.number)) }
+    var composing by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf("") }
+    var sent by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.padding(20.dp).widthIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // 헤더
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(target.name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+                    Spacer(Modifier.size(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(target.name.ifBlank { target.number }, style = MaterialTheme.typography.titleLarge)
+                        Text(target.number + (target.org?.let { " · $it" } ?: ""),
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                if (!composing) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        LabeledRound("음성", CALL_GREEN, "📞") { onVoice() }
+                        LabeledRound("영상", VIDEO_BLUE, "📹") { onVideo() }
+                        LabeledRound("문자", MaterialTheme.colorScheme.surfaceVariant, "✉",
+                            fg = MaterialTheme.colorScheme.onSurface) { composing = true }
+                        LabeledRound(if (fav) "즐겨찾기" else "즐겨찾기",
+                            if (fav) FAV_GOLD else MaterialTheme.colorScheme.surfaceVariant,
+                            if (fav) "★" else "☆",
+                            fg = if (fav) Color.White else MaterialTheme.colorScheme.onSurface) {
+                            fav = favorites.toggle(target.name, target.number); onFavChanged()
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onDismiss) { Text("닫기") }
+                    }
+                } else {
+                    OutlinedTextField(msg, { msg = it; sent = false }, label = { Text("문자 내용") },
+                        modifier = Modifier.fillMaxWidth(), minLines = 2)
+                    if (sent) Text("문자를 전송했습니다.", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { composing = false }) { Text("뒤로") }
+                        Spacer(Modifier.weight(1f))
+                        Button(enabled = msg.isNotBlank(), onClick = { onSendMessage(msg.trim()); sent = true; msg = "" }) {
+                            Text("보내기")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 // ─────────────────────────────────────── 최근기록 탭 ───────────────────────────────────────
 
@@ -980,6 +1075,7 @@ private fun requiredPermissions(): Array<String> = buildList {
 private val CALL_GREEN = Color(0xFF2E7D32)
 private val HANGUP_RED = Color(0xFFC62828)
 private val VIDEO_BLUE = Color(0xFF1565C0)
+private val FAV_GOLD = Color(0xFFF9A825)
 
 // ─────────────────────────────────────── 설정 화면 (고급/수동) ───────────────────────────────────────
 

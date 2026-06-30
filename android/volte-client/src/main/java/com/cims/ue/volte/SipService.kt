@@ -92,6 +92,17 @@ class SipService : Service() {
     }
 
     fun makeCall(dst: String) = controller?.makeCall(dst)
+
+    /** 문자(SIP MESSAGE, RFC 3428 page-mode) 송신. 대상=sip:번호@도메인. */
+    fun sendMessage(dst: String, text: String) {
+        val cfg = ConfigStore(this).load()
+        controller?.sendRequest(
+            method = "MESSAGE",
+            targetUri = "sip:${dst}@${cfg.domain}",
+            contentType = "text/plain",
+            body = text,
+        )
+    }
     fun answer(callId: Int) = controller?.answer(callId)
     fun reject(callId: Int) = controller?.reject(callId)
     fun hangup(callId: Int) = controller?.hangup(callId)

@@ -1577,8 +1577,17 @@ async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> Hand
         logger.log_error(f"[provisioning/directory] DB error: {e}")
         return HandlerResult(status=503, body={"error": "db_error", "detail": str(e)}, media_type="application/json")
 
-    logger.log_info(f"[provisioning/directory] orgs={len(orgs)} entries={len(entries)}")
-    return HandlerResult(status=200, body={"orgs": orgs, "entries": entries}, media_type="application/json")
+    # 버전(ETag) — 내용 해시. 단말의 If-None-Match 와 같으면 304(다운로드 생략).
+    import hashlib, json as _json
+    payload = {"orgs": orgs, "entries": entries}
+    canon = _json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    etag = '"' + hashlib.sha256(canon.encode('utf-8')).hexdigest()[:32] + '"'
+    inm = args.headers.get('if-none-match') or args.headers.get('If-None-Match')
+    if inm and inm == etag:
+        logger.log_info(f"[provisioning/directory] not-modified etag={etag}")
+        return HandlerResult(status=304, headers={"ETag": etag})
+    logger.log_info(f"[provisioning/directory] orgs={len(orgs)} entries={len(entries)} etag={etag}")
+    return HandlerResult(status=200, body=payload, headers={"ETag": etag}, media_type="application/json")
 
 
 # Route Mapping (MCPTT server — port 4430)
