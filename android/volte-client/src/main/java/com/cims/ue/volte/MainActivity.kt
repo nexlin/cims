@@ -14,34 +14,36 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,26 +51,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.cims.ue.core.codec.AmrWbLoopbackSpike
-import com.cims.ue.core.codec.MediaCodecCapabilities
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.config.SipAccountConfig
-import com.cims.ue.core.provision.CscEndpoint
-import com.cims.ue.core.provision.ProvisioningClient
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.RegState
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -150,7 +149,7 @@ private fun SsoGateScreen(
     }
 
     // 진입 시 공유 계정 있으면 자동 구성(로그인 UI 없음).
-    androidx.compose.runtime.LaunchedEffect(hasAccount) { if (hasAccount && !busy) provision() }
+    LaunchedEffect(hasAccount) { if (hasAccount && !busy) provision() }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -194,7 +193,7 @@ private fun SsoGateScreen(
     }
 }
 
-// ─────────────────────────────────────── 통화 홈 (M1) ───────────────────────────────────────
+// ─────────────────────────────────────── 전화 홈 ───────────────────────────────────────
 
 @Composable
 private fun HomeScreen(
@@ -202,9 +201,8 @@ private fun HomeScreen(
     onEditConfig: () -> Unit,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
-    // SipService 바인딩
+    // SipService 바인딩 — 등록은 서비스가 자동으로 유지한다(수동 등록 버튼 없음).
     var service by remember { mutableStateOf<SipService?>(null) }
     DisposableEffect(Unit) {
         val conn = object : ServiceConnection {
@@ -218,139 +216,280 @@ private fun HomeScreen(
         onDispose { runCatching { context.unbindService(conn) } }
     }
 
-    // 권한 요청 → 승인되면 등록 시도
+    // 통화/알림 권한 — 진입 시 1회 요청(승인되면 재등록 트리거).
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { service?.ensureRegistered() }
+    LaunchedEffect(Unit) { permLauncher.launch(requiredPermissions()) }
 
-    // M1.3 영상 토글 + 카메라 권한
+    // 영상 통화 권한
     var videoOn by remember { mutableStateOf(false) }
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted -> if (granted) service?.setVideoEnabled(true) else videoOn = false }
 
-    // 상태 관찰 — 서비스 바인딩 전에도 안전하도록 안정적 fallback flow 사용
     val fallbackReg = remember { MutableStateFlow<RegState>(RegState.Idle) }
     val fallbackCall = remember { MutableStateFlow<CallState>(CallState.Null) }
     val reg by (service?.regState ?: fallbackReg).collectAsState()
     val call by (service?.callState ?: fallbackCall).collectAsState()
 
-    var dst by remember { mutableStateOf("") }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text("CIMS VoLTE", style = MaterialTheme.typography.titleLarge)
-        Text("공개 ID(AOR): ${config.aor}", style = MaterialTheme.typography.bodyMedium)
-        Text("인증 ID(IMPI): ${config.digestUsername}", style = MaterialTheme.typography.bodySmall)
-        Text(
-            "서버: ${config.serverHost}:${config.serverPort}/${config.transport}   도메인=${config.domain}",
-            style = MaterialTheme.typography.bodySmall,
-        )
-
-        val regText = when (val r = reg) {
-            RegState.Idle -> "대기"
-            RegState.Registering -> "등록 중…"
-            is RegState.Registered -> "✅ 등록됨 (${r.code})"
-            RegState.Unregistered -> "등록 해제됨"
-            is RegState.Failed -> "❌ 등록 실패: ${r.reason}"
-        }
-        Text("등록: $regText", style = MaterialTheme.typography.titleMedium)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { permLauncher.launch(requiredPermissions()) }) { Text("등록") }
-            OutlinedButton(onClick = { service?.stopSip(); service = null }) { Text("해제") }
-            OutlinedButton(onClick = onEditConfig) { Text("설정") }
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Switch(checked = videoOn, onCheckedChange = { on ->
+    val inCall = call is CallState.Incoming || call is CallState.Outgoing || call is CallState.Active
+    if (inCall) {
+        CallScreen(
+            call = call,
+            videoOn = videoOn,
+            onToggleVideo = { on ->
                 videoOn = on
                 if (on) cameraLauncher.launch(Manifest.permission.CAMERA) else service?.setVideoEnabled(false)
-            })
-            Text("영상 통화 (H.264)")
-        }
-
-        HorizontalDivider()
-
-        CallPanel(
-            call = call,
-            dst = dst,
-            onDstChange = { dst = it },
-            onDial = { service?.makeCall(dst.trim()) },
+            },
+            onSurface = { service?.setVideoSurface(it) },
             onAnswer = { id -> service?.answer(id) },
             onReject = { id -> service?.reject(id) },
             onHangup = { id -> service?.hangup(id) },
         )
+    } else {
+        DialerScreen(
+            myNumber = config.displayName.ifBlank { config.msisdn },
+            reg = reg,
+            lastEnded = call as? CallState.Disconnected,
+            onDial = { number -> service?.makeCall(number) },
+            onSettings = onEditConfig,
+        )
+    }
+}
 
-        // 수신 영상 렌더 — 통화 활성/발신 중 + 영상 on
-        if (videoOn && (call is CallState.Active || call is CallState.Outgoing)) {
-            VideoRender(onSurface = { service?.setVideoSurface(it) })
+// ─────────────────────────────────────── 다이얼러 ───────────────────────────────────────
+
+@Composable
+private fun DialerScreen(
+    myNumber: String,
+    reg: RegState,
+    lastEnded: CallState.Disconnected?,
+    onDial: (String) -> Unit,
+    onSettings: () -> Unit,
+) {
+    var dialed by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // 상단 바: 등록 상태 + 설정
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            RegStatusChip(reg)
+            TextButton(onClick = onSettings) { Text("설정") }
+        }
+        if (myNumber.isNotBlank()) {
+            Text("내 번호 $myNumber", style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        HorizontalDivider()
+        Spacer(Modifier.weight(1f))
 
-        CodecDiagnostics(scope)
+        // 입력된 번호
+        Box(modifier = Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.Center) {
+            Text(
+                text = dialed,
+                style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+        }
+        // 직전 통화 종료 사유(있을 때만, 짧게)
+        if (lastEnded != null && lastEnded.id >= 0 && dialed.isEmpty()) {
+            Text("최근 통화 종료 (${lastEnded.code})", style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Keypad(onDigit = { dialed += it })
+        Spacer(Modifier.height(16.dp))
+
+        // 발신 + 지우기
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Box(Modifier.size(72.dp))  // 좌측 균형용 빈 공간
+            RoundButton(
+                label = "📞",   // 📞
+                bg = CALL_GREEN, size = 72.dp, enabled = dialed.isNotBlank(),
+            ) { onDial(dialed.trim()) }
+            Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                if (dialed.isNotEmpty()) {
+                    TextButton(onClick = { dialed = dialed.dropLast(1) }) {
+                        Text("⌫", fontSize = 28.sp)   // ⌫
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
 @Composable
-private fun CallPanel(
+private fun Keypad(onDigit: (String) -> Unit) {
+    val rows = listOf(
+        listOf("1" to "", "2" to "ABC", "3" to "DEF"),
+        listOf("4" to "GHI", "5" to "JKL", "6" to "MNO"),
+        listOf("7" to "PQRS", "8" to "TUV", "9" to "WXYZ"),
+        listOf("*" to "", "0" to "+", "#" to ""),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        rows.forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                row.forEach { (digit, letters) -> KeypadKey(digit, letters) { onDigit(digit) } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeypadKey(digit: String, letters: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(68.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(digit, fontSize = 28.sp, color = MaterialTheme.colorScheme.onSurface)
+            if (letters.isNotBlank()) {
+                Text(letters, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RegStatusChip(reg: RegState) {
+    val (dot, label) = when (reg) {
+        is RegState.Registered -> CALL_GREEN to "통화 가능"
+        RegState.Registering, RegState.Idle -> Color(0xFFF9A825) to "연결 중…"
+        RegState.Unregistered -> Color(0xFFF9A825) to "등록 해제됨"
+        is RegState.Failed -> HANGUP_RED to "오프라인"
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
+        Text(label, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+// ─────────────────────────────────────── 통화 화면 ───────────────────────────────────────
+
+@Composable
+private fun CallScreen(
     call: CallState,
-    dst: String,
-    onDstChange: (String) -> Unit,
-    onDial: () -> Unit,
+    videoOn: Boolean,
+    onToggleVideo: (Boolean) -> Unit,
+    onSurface: (Any?) -> Unit,
     onAnswer: (Int) -> Unit,
     onReject: (Int) -> Unit,
     onHangup: (Int) -> Unit,
 ) {
-    Text("통화", style = MaterialTheme.typography.titleMedium)
-    when (val c = call) {
-        CallState.Null,
-        is CallState.Disconnected -> {
-            if (c is CallState.Disconnected && c.id >= 0) {
-                Text("종료: ${c.code} ${c.reason}", style = MaterialTheme.typography.bodySmall)
-            }
-            OutlinedTextField(
-                value = dst,
-                onValueChange = onDstChange,
-                label = { Text("상대 번호 (MSISDN)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(enabled = dst.isNotBlank(), onClick = onDial) { Text("발신") }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(48.dp))
+        val (remote, stateLine) = when (val c = call) {
+            is CallState.Incoming -> c.remote to "수신 전화"
+            is CallState.Outgoing -> c.remote to "발신 중…"
+            is CallState.Active -> c.remote to "통화 중"
+            else -> "" to ""
         }
-        is CallState.Outgoing -> Card {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("발신 중… ${c.remote}")
-                Button(onClick = { onHangup(c.id) }) { Text("취소") }
-            }
+        Text(remote, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+
+        if (call is CallState.Active) {
+            var elapsed by remember { mutableStateOf(0) }
+            LaunchedEffect(Unit) { while (true) { delay(1000); elapsed++ } }
+            Text("%02d:%02d".format(elapsed / 60, elapsed % 60),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            Text(stateLine, style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        is CallState.Incoming -> Card {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("수신 전화: ${c.remote}")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { onAnswer(c.id) }) { Text("받기") }
-                    OutlinedButton(onClick = { onReject(c.id) }) { Text("거절") }
+
+        // 수신 영상 렌더 — 통화/발신 중 + 영상 on
+        if (videoOn && (call is CallState.Active || call is CallState.Outgoing)) {
+            Spacer(Modifier.height(16.dp))
+            VideoRender(onSurface = onSurface)
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        when (val c = call) {
+            is CallState.Incoming -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    LabeledRound("거절", HANGUP_RED, "✕") { onReject(c.id) }      // ✕
+                    LabeledRound("받기", CALL_GREEN, "📞") { onAnswer(c.id) } // 📞
                 }
             }
-        }
-        is CallState.Active -> Card {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("통화 중: ${c.remote}")
-                Button(onClick = { onHangup(c.id) }) { Text("종료") }
+            is CallState.Active -> {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    LabeledRound(
+                        if (videoOn) "영상 끄기" else "영상", MaterialTheme.colorScheme.surfaceVariant,
+                        "📹", fg = MaterialTheme.colorScheme.onSurface,
+                    ) { onToggleVideo(!videoOn) }
+                }
+                Spacer(Modifier.height(20.dp))
+                LabeledRound("종료", HANGUP_RED, "📞") { onHangup(c.id) }
             }
+            is CallState.Outgoing -> {
+                LabeledRound("취소", HANGUP_RED, "📞") { onHangup(c.id) }
+            }
+            else -> {}
         }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun LabeledRound(label: String, bg: Color, glyph: String, fg: Color = Color.White, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        RoundButton(label = glyph, bg = bg, fg = fg, size = 72.dp, onClick = onClick)
+        Spacer(Modifier.height(8.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
+private fun RoundButton(
+    label: String,
+    bg: Color,
+    fg: Color = Color.White,
+    size: androidx.compose.ui.unit.Dp = 72.dp,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(if (enabled) bg else bg.copy(alpha = 0.35f))
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = fg, fontSize = 28.sp)
     }
 }
 
 @Composable
 private fun VideoRender(onSurface: (Any?) -> Unit) {
-    // SurfaceView 의 Surface 를 PJSIP 영상 윈도우로 전달(M1.3). 컴포지션 이탈 시 surfaceDestroyed→null.
+    // SurfaceView 의 Surface 를 PJSIP 영상 윈도우로 전달. 컴포지션 이탈 시 surfaceDestroyed→null.
     AndroidView(
         modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f),
         factory = { ctx ->
@@ -365,31 +504,6 @@ private fun VideoRender(onSurface: (Any?) -> Unit) {
     )
 }
 
-@Composable
-private fun CodecDiagnostics(scope: CoroutineScope) {
-    var output by remember { mutableStateOf("") }
-    var running by remember { mutableStateOf(false) }
-    Text("MediaCodec 점검 (M0)", style = MaterialTheme.typography.titleMedium)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(enabled = !running, onClick = {
-            running = true; output = "조회 중…"
-            scope.launch {
-                val r = withContext(Dispatchers.Default) { MediaCodecCapabilities.summary() }
-                output = r; running = false
-            }
-        }) { Text("코덱 가용성") }
-        OutlinedButton(enabled = !running, onClick = {
-            running = true; output = "스파이크 실행 중…"
-            scope.launch {
-                val r = withContext(Dispatchers.Default) { AmrWbLoopbackSpike().run().report() }
-                output = r; running = false
-            }
-        }) { Text("AMR-WB 스파이크") }
-    }
-    if (running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-    if (output.isNotBlank()) Text(output, style = MaterialTheme.typography.bodySmall)
-}
-
 private fun requiredPermissions(): Array<String> = buildList {
     add(Manifest.permission.RECORD_AUDIO)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -397,7 +511,10 @@ private fun requiredPermissions(): Array<String> = buildList {
     }
 }.toTypedArray()
 
-// ─────────────────────────────────────── 설정 화면 ───────────────────────────────────────
+private val CALL_GREEN = Color(0xFF2E7D32)
+private val HANGUP_RED = Color(0xFFC62828)
+
+// ─────────────────────────────────────── 설정 화면 (고급/수동) ───────────────────────────────────────
 
 @Composable
 private fun ConfigScreen(
@@ -426,7 +543,7 @@ private fun ConfigScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("접속/계정 설정", style = MaterialTheme.typography.titleLarge)
-        Text("최초 실행 — 서버와 가입자 정보를 입력하세요.", style = MaterialTheme.typography.bodySmall)
+        Text("자동 구성(SSO) 대신 수동으로 입력합니다.", style = MaterialTheme.typography.bodySmall)
 
         ConfigField("서버 IP/호스트", host) { host = it }
         ConfigField("SIP 포트", port) { port = it.filter { ch -> ch.isDigit() } }
@@ -481,11 +598,6 @@ private fun ConfigScreen(
             }) { Text("저장") }
             if (canCancel) OutlinedButton(onClick = onCancel) { Text("취소") }
         }
-
-        Text(
-            "※ 비밀번호는 현재 평문 저장(개발용). 운영 시 EncryptedSharedPreferences/Keystore 적용 예정.",
-            style = MaterialTheme.typography.labelSmall,
-        )
     }
 }
 
