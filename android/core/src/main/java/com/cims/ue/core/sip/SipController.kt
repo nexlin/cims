@@ -227,7 +227,8 @@ class SipController(private val config: SipAccountConfig) {
         ac.idUri = if (c.displayName.isBlank()) c.aor                 // sip:msisdn@domain (공개 ID)
         else "\"${c.displayName}\" <${c.aor}>"
 
-        ac.regConfig.registrarUri = "sip:${c.domain}:${c.serverPort};transport=udp"
+        val tp = c.transport.name.lowercase()                        // udp/tcp/tls — 설정 추종
+        ac.regConfig.registrarUri = "sip:${c.domain}:${c.serverPort};transport=$tp"
         ac.regConfig.timeoutSec = c.expiresSec.toLong()              // 희망값(서버 200 OK Expires 추종)
         ac.regConfig.registerOnAdd = true
 
@@ -251,7 +252,7 @@ class SipController(private val config: SipAccountConfig) {
         )
 
         // 도메인 DNS 미해석 회피: 실제 서버 IP:port 로 route 강제(;lr)
-        ac.sipConfig.proxies.add("sip:${c.serverHost}:${c.serverPort};transport=udp;lr")
+        ac.sipConfig.proxies.add("sip:${c.serverHost}:${c.serverPort};transport=$tp;lr")
         return ac
     }
 

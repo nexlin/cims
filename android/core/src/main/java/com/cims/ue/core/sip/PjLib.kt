@@ -49,17 +49,24 @@ object PjLib {
         }
         endpoint.libInit(epc)
 
-        // UDP transport (M1 은 UDP only — SRTP/TLS off, 설계서 §2.5). port=0 → 임의 포트 바인드.
+        // UDP + TCP transport (port=0 → 임의 포트 바인드). 계정의 transport 설정에 따라 선택 사용.
+        // TCP 는 UDP 가 NAT 헤어핀/방화벽에 막힐 때 등록 경로 확보용(공인 IP 뒤 단말).
         endpoint.transportCreate(
             pjsip_transport_type_e.PJSIP_TRANSPORT_UDP,
             TransportConfig().apply { port = 0 },
         )
+        runCatching {
+            endpoint.transportCreate(
+                pjsip_transport_type_e.PJSIP_TRANSPORT_TCP,
+                TransportConfig().apply { port = 0 },
+            )
+        }.onFailure { Log.w(TAG, "TCP transport create failed (UDP-only fallback)", it) }
 
         endpoint.libStart()
         ep = endpoint
         booted = true
         threadRegistered.set(true)            // libInit 가 boot 스레드를 등록함
-        Log.i(TAG, "PJSIP started — state=${endpoint.libGetState()}, SIP UDP transport up")
+        Log.i(TAG, "PJSIP started — state=${endpoint.libGetState()}, SIP UDP+TCP transport up")
 
         logRegisteredCodecs()
     }
