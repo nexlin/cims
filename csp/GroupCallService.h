@@ -126,7 +126,8 @@ private:
      * @param iFloorPort   Floor control UDP port
      */
     static void WrapMultipartBody( class CSipMessage *pclsInvite, const std::string &strGroupXml,
-                                   const std::string &strRosterXml, const std::string &strFloorIp, int iFloorPort );
+                                   const std::string &strRosterXml, const std::string &strFloorIp, int iFloorPort,
+                                   const std::string &strGroupUri = "" );
 
     bool m_bMonitorRunning;
     std::thread m_threadMonitor;

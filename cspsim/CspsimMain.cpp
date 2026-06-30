@@ -321,6 +321,9 @@ static void PrintUsage(const char* pszBin) {
     printf("  -no_video                비디오 비활성화 (음성 전용 통화)\n");
     printf("  -no_register             REGISTER 송신 skip (외부 SIP peer 모드)\n");
     printf("  -no_xcap                 xcap-diff NOTIFY 수신 시 XCAP HTTP GET skip (기본: 자동 GET)\n");
+    printf("  -csc_ip <IP>             [ptt] CSC 서버 IP — REGISTER 전 IdMS auth 수행\n");
+    printf("  -csc_port <N>            [ptt] CSC McpttServer 포트 (기본: 4530)\n");
+    printf("  -csc_tls                 [ptt] CSC TLS 사용 (기본: off, 테스트 환경)\n");
     printf("  -xcap_root <url>         [ptt] SUBSCRIBE 후 XCAP 문서 능동 GET (예: https://121.161.164.47:4430/)\n");
     printf("  -interval    <ms>        단말 기동 간격 ms (default: 100)\n");
     printf("  -db          <csp.json>  DB에서 가입자 정보 로드 (user/auth_id/password/domain 자동 설정)\n");
@@ -566,18 +569,39 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                         }
                         printf("[Scenario] Member %d (%s): PTT Request (floor)\n",
                                i, sessions[i]->m_strUser.c_str());
+                        sessions[i]->m_clsRtpThread.m_iLastFloorOp.store(0);
                         sessions[i]->SendPttRequest();
 
+                        // GRANT 대기 (최대 3초)
+                        bool bGranted = false;
+                        for (int t = 0; t < 30 && !g_bQuit; ++t) {
+                            if (sessions[i]->m_clsRtpThread.m_iLastFloorOp.load() == 2) {
+                                bGranted = true;
+                                break;
+                            }
+                            usleep(100000);
+                        }
+                        if (!bGranted) {
+                            printf("[Scenario]   GRANT timeout — skipping (REJECT/TAKEN?)\n");
+                            continue;
+                        }
+
                         // Speaking time: -floor_hold 초 (참여자별 발언 시간, default 5)
-                        printf("[Scenario]   floor hold %ds...\n", iFloorHold);
+                        printf("[Scenario]   GRANT received, speaking %ds...\n", iFloorHold);
                         for (int t = 0; t < iFloorHold * 10 && !g_bQuit; ++t) usleep(100000);
 
                         printf("[Scenario] Member %d (%s): PTT Release\n",
                                i, sessions[i]->m_strUser.c_str());
                         sessions[i]->SendPttRelease();
 
-                        // 1 second gap between speakers
-                        for (int t = 0; t < 10 && !g_bQuit; ++t) usleep(100000);
+                        // IDLE 대기 (최대 2초) — 다음 멤버 REQUEST 전 floor 정리 확인
+                        for (int t = 0; t < 20 && !g_bQuit; ++t) {
+                            if (sessions[i]->m_clsRtpThread.m_iLastFloorOp.load() == 5) break;
+                            usleep(100000);
+                        }
+
+                        // 화자 전환 간격 0.3s
+                        for (int t = 0; t < 3 && !g_bQuit; ++t) usleep(100000);
                     }
                 } while ((iFloorLoop || iPass < iFloorRounds) && !g_bQuit);
                 printf("[Scenario] Floor rotation complete (passes=%d)\n", iPass);
@@ -664,6 +688,10 @@ int main(int argc, char* argv[])
     bool bNoRegister           = HasFlag(argc, argv, "-no_register");
     // XCAP HTTP GET 비활성화 (Phase 3D). 기본은 xcap-diff NOTIFY 수신 시 자동 GET.
     bool bNoXcap               = HasFlag(argc, argv, "-no_xcap");
+    // CSC 연동: REGISTER 전 IdMS auth 수행 (올바른 순서)
+    std::string strCscIp       = GetArg(argc, argv, "-csc_ip",   "");
+    int iCscPort               = atoi(GetArg(argc, argv, "-csc_port", "4530").c_str());
+    bool bCscTls               = HasFlag(argc, argv, "-csc_tls");
 
     if (strLocalIp.empty()) strLocalIp = GetLocalIp();
 
@@ -794,6 +822,7 @@ int main(int argc, char* argv[])
         );
         s->SetNoRegister(bNoRegister);
         s->SetNoXcap(bNoXcap);
+        if (!strCscIp.empty()) s->SetCscHost(strCscIp, iCscPort, bCscTls);
 
         // Per-session media files from directory (round-robin)
         if (!vecAudioFiles.empty()) {
@@ -872,7 +901,12 @@ int main(int argc, char* argv[])
         // BYE 처리 대기 (서버측 OnCallTerminated + DB 갱신 시간 확보)
         usleep(1500000 + iCount * 300000);
 
-        // SIP 스택 종료 (REGISTER Expires=0 전송 → 등록 해제)
+        // 표준 로그아웃: de-affiliate PUBLISH + SUBSCRIBE Expires=0 (gms/cms)
+        for (auto* s : sessions) s->Logout();
+        // SUBSCRIBE Expires=0 전송 완료 대기
+        usleep(500000);
+
+        // SIP 스택 종료 (UA.Stop() 내부에서 REGISTER Expires=0 전송)
         for (auto* s : sessions) {
             s->m_clsRtpThread.Stop();
             s->m_clsUserAgent.Stop();

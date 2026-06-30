@@ -54,6 +54,11 @@ public:
                                  std::list<SubscriptionInfo> &outList );
 
     /**
+     * @brief Get a single subscription by Call-ID (returns false if not found)
+     */
+    bool GetSubscriptionByCallId( const std::string &strCallId, SubscriptionInfo &outInfo );
+
+    /**
      * @brief Increment NOTIFY CSeq for a subscription and return the new value
      */
     int IncrementNotifySeq( const std::string &strCallId );

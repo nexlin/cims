@@ -562,6 +562,60 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
 }
 
 /**
+ * @brief Send final NOTIFY with Subscription-State: terminated (RFC 3265 §3.1.4)
+ *        Called when SUBSCRIBE Expires=0 is received.
+ */
+void SendTerminatedNotify( const SubscriptionInfo &sub ) {
+    const int iListenerId = sub.iInboundListenerId;
+    const int iFallbackPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
+    const std::string strLocalIp = CspAddressing::GetLocalSipAddress( iListenerId );
+    const int iLocalPort = CspAddressing::GetLocalSipPort( iListenerId, iFallbackPort );
+
+    int iSeq = gclsSubscriptionManager.IncrementNotifySeq( sub.strCallId );
+
+    std::string strTarget = sub.strContact.empty() ? sub.strSubscriberUri : sub.strContact;
+
+    CSipMessage *pMsg = new CSipMessage();
+    pMsg->m_strSipMethod = "NOTIFY";
+    pMsg->m_clsReqUri.Parse( strTarget.c_str(), (int)strTarget.size() );
+
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+    SipMakeBranch( szBranch, sizeof( szBranch ) );
+    pMsg->AddVia( strLocalIp.c_str(), iLocalPort, szBranch );
+
+    std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
+    pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    if ( !sub.strToTag.empty() ) {
+        pMsg->m_clsFrom.InsertParam( SIP_TAG, sub.strToTag.c_str() );
+    }
+
+    pMsg->m_clsTo.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
+    if ( !sub.strFromTag.empty() ) {
+        pMsg->m_clsTo.InsertParam( SIP_TAG, sub.strFromTag.c_str() );
+    }
+
+    pMsg->m_clsCallId.Parse( sub.strCallId.c_str(), (int)sub.strCallId.size() );
+    pMsg->m_clsCSeq.Set( iSeq, "NOTIFY" );
+    pMsg->m_iMaxForwards = 70;
+
+    CUserInfo clsUserInfo;
+    if ( gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo ) ) {
+        CSipCallRoute clsRoute;
+        clsUserInfo.GetCallRoute( clsRoute );
+        pMsg->AddRoute( clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP );
+    }
+
+    pMsg->AddHeader( "Event", "xcap-diff" );
+    pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
+    pMsg->m_iContentLength = 0;
+
+    CLog::Print( LOG_INFO, "SendTerminatedNotify: User=%s Type=%s Target=%s CSeq=%d",
+                 sub.strUserId.c_str(), sub.strEventType.c_str(), strTarget.c_str(), iSeq );
+
+    gclsUserAgent.m_clsSipStack.SendSipMessage( pMsg );
+}
+
+/**
  * @brief Send initial NOTIFY immediately after 200 OK to SUBSCRIBE
  *        (Active state, no specific document change)
  */

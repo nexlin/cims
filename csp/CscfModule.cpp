@@ -6,6 +6,9 @@
 
 #include "CscfModule.h"
 
+#include <map>
+#include <mutex>
+#include <time.h>
 #include "CspAddressing.h"
 #include "CspPttGroup.h"
 #include "CspServiceMap.h"
@@ -25,6 +28,11 @@
 
 extern CSipUserAgent gclsUserAgent;
 extern void SendInitialNotify( const SubscriptionInfo &sub );
+extern void SendTerminatedNotify( const SubscriptionInfo &sub );
+
+// F-04/F-13: PUBLISH affiliation ETag 저장소 (key = "userId:groupId")
+static std::map<std::string, std::string> s_mapEtag;
+static std::mutex s_etagMutex;
 
 bool CCscfModule::IsEnabled() const {
     return gclsSetup.m_bRoleCscf;
@@ -34,7 +42,7 @@ bool CCscfModule::IsEnabled() const {
 //  인증 헬퍼 (static)
 // ──────────────────────────────────────────────────────────────
 
-bool CCscfModule::AddChallenge( CSipMessage *psttResponse, const std::string &strRealmOverride ) {
+bool CCscfModule::AddChallenge( CSipMessage *psttResponse, const std::string &strRealmOverride, bool bStale ) {
     CSipChallenge clsChallenge;
     char szNonce[33];
 
@@ -55,16 +63,17 @@ bool CCscfModule::AddChallenge( CSipMessage *psttResponse, const std::string &st
     }
     clsChallenge.m_strRealm = strRealmOverride.empty() ? strFallbackRealm : strRealmOverride;
     clsChallenge.m_strQop = "auth";
+    if ( bStale ) clsChallenge.m_strStale = "true";
 
     psttResponse->m_clsWwwAuthenticateList.push_back( clsChallenge );
     return true;
 }
 
-bool CCscfModule::SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride ) {
+bool CCscfModule::SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride, bool bStale ) {
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
     if ( pclsResponse == NULL ) return false;
 
-    AddChallenge( pclsResponse, strRealmOverride );
+    AddChallenge( pclsResponse, strRealmOverride, bStale );
     gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
     return true;
 }
@@ -170,7 +179,7 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
 
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
-            SendUnAuthorizedResponse( pclsMessage );
+            SendUnAuthorizedResponse( pclsMessage, "", true );
             return false;
         case E_AUTH_ERROR: {
             CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
@@ -238,7 +247,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
-            SendUnAuthorizedResponse( pclsMessage );
+            SendUnAuthorizedResponse( pclsMessage, "", true );  // F-07: stale=true
             return true;
         case E_AUTH_ERROR:
             SendResponse( pclsMessage, SIP_FORBIDDEN );
@@ -270,8 +279,17 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
         if ( pclsResponse == NULL ) return false;
 
+        // F-12: 단말 요청 Expires 협상 (RFC 3261 §10.3). 요청값이 유효하면 그대로, 초과 시 3600으로 조정.
+        int iReqExpires = pclsMessage->GetExpires();
+        int iGrantedExpires = ( iReqExpires > 0 && iReqExpires <= 3600 ) ? iReqExpires : 3600;
+
+        // F-03: Contact에 expires 파라미터 포함 (RFC 3261 §10.3)
+        char szExpires[16];
+        snprintf( szExpires, sizeof( szExpires ), "%d", iGrantedExpires );
+        clsContact.InsertParam( "expires", szExpires );
+
         pclsResponse->m_clsContactList.push_back( clsContact );
-        pclsResponse->AddHeader( "Expires", 3600 );
+        pclsResponse->AddHeader( "Expires", iGrantedExpires );
         pclsResponse->AddHeader( "Supported", "path,100rel,precondition" );
 
         // v3 (2026-04-22): AccessServiceMap 이 SOT. fallback 은 Setup.Realm (레거시).
@@ -328,7 +346,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     std::string strFromId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
     if ( !gclsUserMap.Select( strFromId.c_str() ) ) {
         CLog::Print( LOG_ERROR, "SUBSCRIBE Rejected: User %s not registered", strFromId.c_str() );
-        SendResponse( pclsMessage, 403 );
+        SendUnAuthorizedResponse( pclsMessage );
         return true;
     }
 
@@ -371,13 +389,21 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     int iExpires = pclsMessage->GetExpires();
 
     if ( iExpires == 0 ) {
+        // RFC 3265 §3.1.4: 200 OK 먼저, 그 다음 final NOTIFY (Subscription-State: terminated)
+        SendResponse( pclsMessage, 200 );
+
+        SubscriptionInfo subInfo;
+        if ( gclsSubscriptionManager.GetSubscriptionByCallId( strSubCallId, subInfo ) ) {
+            SendTerminatedNotify( subInfo );
+        }
+
         gclsSubscriptionManager.RemoveSubscription( strSubCallId );
+
         if ( bAffiliation && gclsDbManager.IsConnected() ) {
             gclsDbManager.RemoveAffiliation( strReqUriUser, strFromId, strContactUri );
             CLog::Print( LOG_INFO, "[Affiliation] de-affiliate user=%s group=%s", strFromId.c_str(),
                          strReqUriUser.c_str() );
         }
-        SendResponse( pclsMessage, 200 );
         return true;
     }
 
@@ -435,6 +461,15 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         return true;
     }
 
+    // F-05: Event 헤더 검증 — TS 24.379 §9는 "mcptt" 요구, 불일치 시 489 Bad Event
+    CSipHeader *pclsEventHdr = pclsMessage->GetHeader( "Event" );
+    if ( pclsEventHdr == NULL || pclsEventHdr->m_strValue != "mcptt" ) {
+        CLog::Print( LOG_ERROR, "PUBLISH Rejected: invalid or missing Event header (got '%s')",
+                     pclsEventHdr ? pclsEventHdr->m_strValue.c_str() : "" );
+        SendResponse( pclsMessage, 489 );
+        return true;
+    }
+
     std::string strReqUriUser = pclsMessage->m_clsReqUri.m_strUser;
     bool bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
     if ( !bAffiliation ) {
@@ -456,6 +491,24 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     bool bDeaffiliate =
         ( iExpires == 0 ) || ( pclsMessage->m_strBody.find( "de-affiliate" ) != std::string::npos );
 
+    // F-13: SIP-If-Match 검증 (RFC 3903 §4)
+    //   헤더 있음 = refresh PUBLISH → 저장된 ETag와 일치해야 함
+    //   헤더 없음 = initial PUBLISH → 검증 skip
+    std::string strEtagKey = strFromId + ":" + strReqUriUser;
+    CSipHeader *pclsIfMatch = pclsMessage->GetHeader( "SIP-If-Match" );
+    if ( pclsIfMatch != NULL && !bDeaffiliate ) {
+        std::unique_lock<std::mutex> lock( s_etagMutex );
+        auto it = s_mapEtag.find( strEtagKey );
+        if ( it == s_mapEtag.end() || it->second != pclsIfMatch->m_strValue ) {
+            CLog::Print( LOG_ERROR, "PUBLISH 412: ETag mismatch user=%s group=%s If-Match=%s stored=%s",
+                         strFromId.c_str(), strReqUriUser.c_str(),
+                         pclsIfMatch->m_strValue.c_str(),
+                         ( it != s_mapEtag.end() ) ? it->second.c_str() : "(none)" );
+            SendResponse( pclsMessage, 412 );
+            return true;
+        }
+    }
+
     if ( gclsDbManager.IsConnected() ) {
         if ( bDeaffiliate ) {
             gclsDbManager.RemoveAffiliation( strReqUriUser, strFromId, strContactUri );
@@ -469,10 +522,31 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         }
     }
 
+    // de-affiliate: ETag 저장소에서 제거 후 200 반환
+    if ( bDeaffiliate ) {
+        std::unique_lock<std::mutex> lock( s_etagMutex );
+        s_mapEtag.erase( strEtagKey );
+        SendResponse( pclsMessage, 200 );
+        return true;
+    }
+
+    // F-04: SIP-ETag 생성 — 밀리초 + 포인터 기반 랜덤 비트 (초 단위 충돌 방지)
+    struct timespec ts;
+    clock_gettime( CLOCK_REALTIME, &ts );
+    unsigned uRnd = (unsigned)( ts.tv_nsec ^ (uintptr_t)pclsMessage );
+    char szEtag[64];
+    snprintf( szEtag, sizeof( szEtag ), "aff-%llx%08x",
+              (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL,
+              uRnd );
+
+    // ETag 저장 (initial 또는 refresh 모두 갱신)
+    {
+        std::unique_lock<std::mutex> lock( s_etagMutex );
+        s_mapEtag[strEtagKey] = szEtag;
+    }
+
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
     if ( pclsResponse ) {
-        char szEtag[80];
-        snprintf( szEtag, sizeof( szEtag ), "aff-%s-%ld", strReqUriUser.c_str(), (long)time( NULL ) );
         pclsResponse->AddHeader( "SIP-ETag", szEtag );
         pclsResponse->AddHeader( "Expires", iExpires > 0 ? iExpires : 3600 );
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
