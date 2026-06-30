@@ -139,7 +139,7 @@ private fun LoginScreen(
             singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(user, { user = it }, label = { Text("아이디 (tel:+82...)") },
+        OutlinedTextField(user, { user = it }, label = { Text("로그인 ID (예: test001)") },
             singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(password, { password = it }, label = { Text("비밀번호") },

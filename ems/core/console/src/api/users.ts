@@ -13,10 +13,12 @@ export interface Subscription {
   logout_time?: string | null
 }
 
-// 가입자(person) — 콘솔 로그인 계정(login_id/password/role)은 별도(console_accounts).
+// 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격 — MCPTT ID 와 별개.
+//   (콘솔 admin 계정은 별도 console_accounts. passwd 는 목록 응답에 미포함, 편집 입력만.)
 export interface UserSummary {
   id: number          // person ID (auto-increment)
   name: string
+  login_id?: string | null   // 단말/IdMS 로그인 ID (예: test001)
   org_id: string
   email?: string
   details?: string | null
@@ -32,6 +34,7 @@ export type UserDetail = UserSummary
 
 export type UserInput = {
   name: string; org_id: string; email?: string; details?: string; reject_id?: string[]
+  login_id?: string; passwd?: string   // 단말 IdMS 로그인 자격 (passwd 는 변경 시에만 전송)
 }
 
 const enc = (s: string) => encodeURIComponent(s)

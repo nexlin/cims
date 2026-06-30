@@ -156,7 +156,7 @@ async def _list_users(config):
             has_email = _has_email_column(cur)
             email_col = ", u.email" if has_email else ""
             cur.execute(
-                f"SELECT u.id, u.name{email_col}, u.org_id, u.details, "
+                f"SELECT u.id, u.name, u.login_id{email_col}, u.org_id, u.details, "
                 "u.create_time, u.update_time "
                 "FROM users u "
                 "ORDER BY u.id"
@@ -215,7 +215,7 @@ async def _get_user(person_id: str, config):
             has_email = _has_email_column(cur)
             email_col = ", email" if has_email else ""
             cur.execute(
-                f"SELECT id, name{email_col}, org_id, details, create_time, update_time "
+                f"SELECT id, name, login_id{email_col}, org_id, details, create_time, update_time "
                 "FROM users WHERE id=%s",
                 (person_id,)
             )
@@ -270,28 +270,28 @@ async def _create_user(body, config, payload=None):
     if not name:
         return HandlerResult(status=400, body={'error': 'name is required'})
 
-    # users = 가입자(person) 전용. 콘솔 로그인 계정(login_id/password/role)은
-    # OAM console_accounts(file_store) 로 분리됨 → 여기선 받지/저장하지 않는다.
+    # users = 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격 — MCPTT ID 와 별개.
+    #   (콘솔 admin 계정은 OAM console_accounts(file_store) — 여기와 무관.)
     email      = body.get('email', '')
     org_id     = body.get('org_id', '')
     details    = body.get('details') or None
+    login_id   = (body.get('login_id') or '').strip() or None
+    passwd     = body.get('passwd') or None
     reject_ids = body.get('reject_id', [])
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             has_email = _has_email_column(cur)
+            cols = ['name', 'login_id', 'passwd', 'org_id', 'details']
+            vals = [name, login_id, passwd, org_id, details]
             if has_email:
-                cur.execute(
-                    "INSERT INTO users (name, email, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, %s, NOW(), NOW())",
-                    (name, email, org_id, details)
-                )
-            else:
-                cur.execute(
-                    "INSERT INTO users (name, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, NOW(), NOW())",
-                    (name, org_id, details)
-                )
+                cols.insert(1, 'email'); vals.insert(1, email)
+            placeholders = ', '.join(['%s'] * len(vals))
+            cur.execute(
+                f"INSERT INTO users ({', '.join(cols)}, create_time, update_time) "
+                f"VALUES ({placeholders}, NOW(), NOW())",
+                vals
+            )
             person_id = cur.lastrowid
 
             if reject_ids:
@@ -309,13 +309,11 @@ async def _update_user(person_id: str, body, config, payload=None):
 
     fields = []
     values = []
-    for col in ('name', 'email', 'org_id', 'details'):
+    # login_id/passwd = 단말(IdMS) 로그인 자격(가입자). 콘솔 admin 계정(OAM)과는 별개.
+    for col in ('name', 'login_id', 'passwd', 'email', 'org_id', 'details'):
         if col in body:
             fields.append(f'{col}=%s')
             values.append(body[col])
-
-    # login_id/password/role 은 users(person)에 더 이상 존재하지 않음 — 무시.
-    # (콘솔 계정은 OAM console_accounts API 로 관리.)
 
     if fields:
         fields.append('update_time=NOW()')

@@ -170,6 +170,7 @@ export default function ProvisioningWorkbenchPage() {
   const userCols: Column<UserSummary>[] = [
     { key: 'exp', header: '', width: 26, render: u => <Caret open={exp?.key === u.id} /> },
     { key: 'name', header: '이름', sortable: true, width: 130, render: u => <span style={{ fontWeight: 500 }}>{u.name}</span> },
+    { key: 'login_id', header: '로그인ID', sortable: true, width: 110, sortValue: u => u.login_id || '', render: u => <span className="ts" title="단말 로그인 ID">{u.login_id || '—'}</span> },
     { key: 'org', header: '조직', width: 220, sortValue: u => buildOrgPath(orgs, u.org_id), render: u => <span className="ts" title={buildOrgPath(orgs, u.org_id)}>{buildOrgPath(orgs, u.org_id)}</span> },
     { key: 'details', header: '설명', render: u => <span className="ts">{u.details || '—'}</span> },
     { key: 'nums', header: '번호', width: 220, render: u => {
@@ -343,21 +344,27 @@ function UserBasicForm({ mode, initial, orgOpts, defaultOrg, onSubmit, onCancel 
   onCancel: () => void
 }) {
   const { show } = useToast()
-  // 가입자(person) 전용 — 콘솔 로그인 계정(login_id/password/role)은 '콘솔 계정' 메뉴에서 별도 관리.
+  // 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격(MCPTT ID 와 별개).
+  //   콘솔 admin 계정은 '콘솔 계정' 메뉴에서 별도 관리. passwd 는 입력 시에만 전송(편집 시 빈칸=유지).
   const [form, setForm] = useState<UserInput>(() => initial
-    ? { name: initial.name, org_id: initial.org_id, details: initial.details || '' }
-    : { name: '', org_id: defaultOrg || '', details: '' })
+    ? { name: initial.name, org_id: initial.org_id, details: initial.details || '', login_id: initial.login_id || '' }
+    : { name: '', org_id: defaultOrg || '', details: '', login_id: '' })
   const [busy, setBusy] = useState(false)
 
   async function submit() {
     if (!form.name) { show('이름 필수', 'err'); return }
     setBusy(true)
-    try { await onSubmit({ ...form }) } catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
+    // passwd 빈칸이면 전송하지 않음(기존 비번 유지). 추가 모드에선 빈칸이면 미설정.
+    const payload: UserInput = { ...form }
+    if (!payload.passwd) delete payload.passwd
+    try { await onSubmit(payload) } catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
   }
 
   return (
     <FieldRow>
       <Field label="이름 *" w={150}><input className="form-input" autoFocus value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+      <Field label="로그인 ID" w={130}><input className="form-input" placeholder="예: test001" value={form.login_id || ''} onChange={e => setForm({ ...form, login_id: e.target.value })} /></Field>
+      <Field label={mode === 'add' ? '비밀번호' : '비밀번호(변경 시)'} w={140}><input className="form-input" type="password" placeholder={mode === 'add' ? '' : '미변경'} value={form.passwd || ''} onChange={e => setForm({ ...form, passwd: e.target.value })} /></Field>
       <Field label="조직" w={200}>
         <select className="form-input" value={form.org_id} onChange={e => setForm({ ...form, org_id: e.target.value })}>
           <option value="">없음</option>
