@@ -1,8 +1,6 @@
-# CSP 제어평면 부하 견고화 — 버그 분석 및 수정 (2026-06-06)
+# CSP 제어평면 부하 견고화 — 버그 분석 및 수정
 
 > VoLTE 다중 cps 부하 시험 중 발견·수정한 CSP 측 결함 5건의 근본원인·증거·수정 정리.
-> 후속 세션이 같은 맥락을 빠르게 잡을 수 있도록 작성. 관련 메모리:
-> `project_session_2026_06_06_4cps_500_cmpclient_nfs_logging`.
 
 ## 0. 배경 / 증상
 
@@ -148,7 +146,7 @@ MODIFY/REMOVE 도 동일. → **같은 `trans_id`+payload 재전송이 안전**(
 
 ---
 
-## 추가 발견 (2026-06-06 후속) — UDP 드롭의 실제 위치 + 408 의 진짜 근본
+## 추가 발견 — UDP 드롭의 실제 위치 + 408 의 진짜 근본
 
 "로컬 내부망인데 UDP 재전송이 발생하는 건 이상하다" 는 지적에서 출발해 실제 커널 드롭 카운터를 조사한 결과,
 재전송이 잡던 손실보다 **훨씬 큰 두 가지 문제**를 발견.
@@ -169,16 +167,13 @@ MODIFY/REMOVE 도 동일. → **같은 `trans_id`+payload 재전송이 안전**(
   근본은 라우팅이 매 호 전체 그룹을 재로드하지 않도록 고치는 것**.
 - 조치 후 UdpThreadCount 는 2 로 원복.
 
-### ✅ (b) 수정 — `EventIncomingCall` 그룹 lazy-load 게이트 + 단건 조회 (csp 0.0.28)
+### (b) 수정 — `EventIncomingCall` 그룹 lazy-load 게이트 + 단건 조회
 PTT-AS lazy-load 를 두 조건으로 게이트:
 1. **착신이 등록된 가입자(`gclsCspUserMap.isAlive`) 면 DB 조회 자체 생략** — 1:1 VoLTE 호는 그룹이 아니므로 폭풍 원천 차단.
 2. 미등록 타겟(신규 그룹 가능성)만 **`CGroupMap::LoadOneFromDb(pszTo)` — 전체(LoadAllGroups) 대신 해당 id 단건만 조회·로드**
    (`SelectGroup` 재사용, 맵 Clear/재구축 없음). 그룹이면 Insert 후 ProcessGroupCall, 아니면 1회 cheap SELECT 로 끝.
-   - (초기엔 3초 throttle+LoadFromDb 로 구현했으나, 사용자 제안대로 **단건 조회**가 더 정확·효율적이라 그것으로 대체.)
-- 검증 v11(10cps/ht5, ctrl01 동거): **per-call 그룹 DB 조회 0**(VoLTE 착신=등록가입자라 isAlive 에서 skip;
-  LoadAllGroups 5=startup only, single-group 0), **408 584→0, 200 성공 408, setup p50 1122ms**.
-  남은 500×60 은 **동거 포화**(CMP 타임아웃·재전송; off-box v8 500=0) — csp 결함 아닌 테스트환경 한계.
-  **즉 408/DB폭풍 완전 해결.**
+- 효과: per-call 그룹 DB 조회 0(VoLTE 착신=등록가입자라 isAlive 에서 skip; LoadAllGroups 는 startup only),
+  408 소멸 → **408/DB폭풍 완전 해결.**
 
 ## 후속/주의 사항
 
@@ -187,10 +182,6 @@ PTT-AS lazy-load 를 두 조건으로 게이트:
    **분산 부하생성기(다중 호스트 cspsim) + 전용 HW + 다노드 csp/cmp** 필요.
 3. **`Network` 로그 OFF 부작용**: psip `NETWORK` 레벨 콜백이 SipMessageLogger 의 SIP 메시지/flow 기록을 트리거 →
    `Setup.Log.Level.Network=false` 면 **SIP flow 로깅도 비활성화**된다(부하 시험엔 OFF 권장하나 SIP 추적 불가).
-4. **운영 상태 변경분**(이번 세션, 커밋 전 정리 필요):
-   - csp 0.0.26 양 노드 배포(바이너리 in-place swap, **OAM 미경유·비공식** — 정식 재배포 권장).
-   - ctrl01/ctrl02 `csp.json` 의 `Log.Level.Debug/Network=false` 로 변경됨.
-   - 검증 위해 VIP 121.161.164.47 을 ctrl02 로 failover(ctrl01 keepalived stop) — **`sudo systemctl start keepalived` 로 원복 필요**.
 
 ## 교훈 및 진단 플레이북 (다음에 더 빠르고 확실하게)
 
@@ -239,20 +230,18 @@ UDP 버퍼 → SIP 소켓 버퍼 → 라우팅 LoadAllGroups). 매번 "고쳤는
 - 부하: `build/bin/cspsim -server_ip <VIP> -mode volte -scenario call -domain ims.mnc033… -cps N -ht H -calls C -count 200 -no_video -media_dir tests/media -db <csp.json>` (착신 등록 위해 `-count` 充, 음성만 `-no_video`).
 - HA failover 로 부하생성기 분리: ctrl01 `sudo systemctl stop keepalived`(VIP→ctrl02), 원복 `start`.
 
-## 변경 파일 (커밋 대상)
+## 관련 파일 (fix 위치)
 - `csp/SipMessageLogger.{h,cpp}` — 버그1(비동기 배치 writer)
 - `csp/CmpClient.{h,cpp}` — 버그2(predicate)·3(SO_RCVBUF)·4(재전송 100ms×3). (다중 recv스레드는 시도 후 단일로 환원)
 - `csp/ModuleDispatcher.cpp` + `csp/GroupMap.{h,cpp}` — (b) EventIncomingCall 그룹 lazy-load 게이트 +
   `CGroupMap::LoadOneFromDb`(전체 재로드 대신 단건 조회·로드)
-- `csp/pkg.json` — 0.0.21 → 0.0.28
 - OS(4서버): `net.core.rmem_default=4MB, rmem_max=8MB` (sysctl; `/etc/sysctl.d` 영속화 권장)
 
 ---
 
-# 부록 (2026-06-07) — PTT 소크 후속: csc/cmp 비동기 로깅 + csp DB 데드락
+# 부록 — PTT 소크 후속: csc/cmp 비동기 로깅 + csp DB 데드락
 
-> PTT 그룹콜(g001 40명, floor 10s 순환) 오버나잇 소크 중 발견·수정. 관련 메모리:
-> `project_session_2026_06_07_async_logging_overnight`.
+> PTT 그룹콜(g001 40명, floor 10s 순환) 오버나잇 소크 중 발견·수정.
 
 ## 버그 6 — csp DbManager: 단일 DB 연결을 락으로 직렬화 + 쿼리 타임아웃 부재 → 데드락
 
@@ -272,23 +261,21 @@ UDP 버퍼 → SIP 소켓 버퍼 → 라우팅 LoadAllGroups). 매번 "고쳤는
 - `ps -L -o wchan`: csp 스레드 **5개가 `futex_do_wait`**(뮤텍스 락 대기), 락보유 후보가 `poll_schedule_timeout`(=DB 쿼리 네트워크 대기). **CmpClient(별도 스레드)만 정상**(heartbeat OK).
 - 트리거 = 40 동시 REGISTER 버스트(DB 경합 급증). sysctl rmem 은 이미 4MB(버퍼가 아니라 **드레인** 문제).
 
-### 수정 (csp 0.0.30)
+### 수정
 `DbManager::Connect()` 에 `mysql_options` 로 타임아웃 추가:
 `MYSQL_OPT_CONNECT_TIMEOUT/READ_TIMEOUT/WRITE_TIMEOUT = 5초`.
 멈춘 쿼리가 **무한 대신 유한 시간 후 실패** → 락 해제 → 회복(다음 쿼리에서 RECONNECT). 영구 wedge 제거.
 (근본 아키텍처 개선=DB 연결 풀이나 lock 밖 쿼리이나, 단일연결+락 구조상 타임아웃이 최소·고위험낮은 핵심 fix.)
 
-### 검증
-- csp 0.0.30 배포 후 **무패치 csp 가 데드락 났던 ~3.5h 시점을 넘겨 3h41m+ 무재발**, REGISTER FAILED 동결, SIP `r0`.
-- gdb(ptrace_scope=0) 백트레이스로 락 확정 예정이었으나 fix 후 미재발(=좋은 결과). 감시기
-  `scripts/csp_deadlock_watch.sh` 가 SIP 5060 wedge 감지 시 ps wchan + gdb 백트레이스 자동 캡처 + csp restart.
+### 감시기
+`scripts/csp_deadlock_watch.sh` 가 SIP 5060 wedge 감지 시 ps wchan + gdb 백트레이스 자동 캡처 + csp restart.
 
 ## csc/cmp 비동기 배치 로깅 (버그 1 패턴 이식)
 csp `SipMessageLogger` 의 비동기 배치 writer(생산자=포맷+enqueue만, 단일 writer 스레드가 경로별 open-per-batch)를
-- **cmp** `PCmpServer`(0.0.12): writeMsgLine/logFlow/logBody/writeLeakReclaim → `enqueueLine`+`logWriterLoop`.
+- **cmp** `PCmpServer`: writeMsgLine/logFlow/logBody/writeLeakReclaim → `enqueueLine`+`logWriterLoop`.
   단일 control 스레드가 매 패킷 NFS open-per-write(특히 `sendResponse` 가 `sendto` **전에** 기록)로 막히던 HOL 제거.
-- **csc** `logger.py`(0.0.14): `log_flow` open-per-write → deque + writer 스레드 + `_flush_batch`.
-양쪽 4서버 배포, 10h+ 안정. (OAM 은 관리플레인이라 미적용.)
+- **csc** `logger.py`: `log_flow` open-per-write → deque + writer 스레드 + `_flush_batch`.
+(OAM 은 관리플레인이라 미적용.)
 
 ## 테스트 인프라 교훈 (소크 운영)
 - ⚠️ **부하생성기 로그를 tmpfs(/tmp)+usrquota 에 두지 마라**: cspsim RTP STATS 폭증이 /tmp(RAM) 를 채워
@@ -299,8 +286,8 @@ csp `SipMessageLogger` 의 비동기 배치 writer(생산자=포맷+enqueue만, 
   동거 → 스왑 thrashing(`ksoftirqd` 100% = BLOCK softirq=스왑 페이징 I/O 완료) + **OOM killer 가 csp 주기 kill**(watchdog 복구).
   진단: `vmstat`(si/wa/st), `/proc/softirqs`(BLOCK vs NET_RX), `journalctl ... 'OOM killer killed'`. csp 재기동 ≠ 데드락일 수 있음.
 
-## 변경 파일 (2026-06-07, 커밋 대상)
-- `csp/DbManager.cpp` — 버그6(DB connect/read/write 타임아웃 5s). `csp/pkg.json` 0.0.28→0.0.30.
-- `cmp/PCmpServer.{h,cpp}` + `cmp/pkg.json`(0.0.10→0.0.12) — 비동기 배치 로깅.
-- `csc/src/services/logger.py` + `csc/pkg.json`(0.0.12→0.0.14) — 비동기 배치 로깅.
-- `scripts/overnight_ptt_0608.sh`·`scripts/csp_deadlock_watch.sh` — 소크 러너·데드락 감시기(신규).
+## 관련 파일 (부록 fix 위치)
+- `csp/DbManager.cpp` — 버그6(DB connect/read/write 타임아웃 5s).
+- `cmp/PCmpServer.{h,cpp}` — 비동기 배치 로깅.
+- `csc/src/services/logger.py` — 비동기 배치 로깅.
+- `scripts/overnight_ptt_0608.sh`·`scripts/csp_deadlock_watch.sh` — 소크 러너·데드락 감시기.

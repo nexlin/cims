@@ -520,7 +520,9 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
     pMsg->m_clsCSeq.Set(1, "PUBLISH");
     pMsg->m_iMaxForwards = 70;
     pMsg->AddHeader("Expires", bDeaffiliate ? "0" : "3600");
-    pMsg->AddHeader("Event", "mcptt");  // TS 24.379 §9
+    // Event 헤더(RFC 3903 필수). TS 24.379 §9 의 3GPP affiliation event = "mcptt".
+    // (F-05: CSP RecvRequestPublish 가 Event != "mcptt" 시 489 Bad Event 로 거절)
+    pMsg->AddHeader("Event", "mcptt");
 
     char szContact[128];
     snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
@@ -790,6 +792,24 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
             }
         }
         return false;
+    }
+
+    // affiliation PUBLISH 응답 검증 (TS 24.379 §9 / RFC 3903) — CSP 멤버십 게이트(item 1)
+    //   덕에 비멤버 그룹 제휴는 403 으로 거부됨. 200 OK(SIP-ETag) vs 4xx 를 구분 기록해
+    //   affiliation E2E(멤버=200 / 비멤버=403) 를 검증 가능하게 한다.
+    if (pclsMessage->m_clsCSeq.m_strMethod == "PUBLISH") {
+        int st = pclsMessage->m_iStatusCode;
+        if (st / 100 == 2) {
+            m_stats.iAffiliateOk++;
+            CSipHeader* pEtag = pclsMessage->GetHeader("SIP-ETag");
+            printf("[%d] AFFILIATION %d OK group=%s SIP-ETag=%s\n", m_iId, st,
+                   m_strGroupId.c_str(), pEtag ? pEtag->m_strValue.c_str() : "");
+        } else if (st >= 400) {
+            m_stats.iAffiliateRej++;
+            printf("[%d] AFFILIATION REJECTED %d group=%s (CSP 멤버십 게이트 거부 가능 — 비멤버 그룹?)\n",
+                   m_iId, st, m_strGroupId.c_str());
+        }
+        return true;
     }
 
     if (pclsMessage->m_clsCSeq.m_strMethod != "SUBSCRIBE") return false;

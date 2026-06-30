@@ -97,11 +97,37 @@ scp nex-ubuntu:'~/pjproject/pjsip-apps/src/swig/java/android/pjsua2/src/main/jav
 
 앱이 `Endpoint libCreate→libInit→UDP transport→libStart→destroy` 를 크래시/`UnsatisfiedLinkError` 없이 통과 + logcat 에 PJSIP 버전 배너 + **`codecEnum2()` 출력에 AMR-WB 정확히 1개**(중복 등록 없음 — 경로 C 게이트). 콜드스타트 10회 연속. 실기기(UNIWA) 필요.
 
-## 진행 스냅샷 (2026-06-10)
+## 빌드 메타 (산출물 재현용)
 
-- [x] **M1.0-1** 빌드 환경 — nex-ubuntu 프로비저닝 완료(`~/.m1env`)
-- [ ] **M1.0-2~4** pjproject 2.16 + config_site.h + make + SWIG (`m1_build_pjsip.sh` 실행만 남음)
-- [ ] **M1.0-5** 산출물 core 투입 + gradle 소스셋
-- [ ] **M1.0-6** PjLib 부팅 코드 + 부팅 스모크(실기기)
+| 항목 | 값 |
+|---|---|
+| pjproject | **2.16** (`git checkout 2.16`) |
+| NDK | **28.2.13676358** (r28c) — arm64-v8a, `--use-ndk-cflags`, APP_PLATFORM=28 |
+| SWIG | **4.1.0** (4.4.0 와 4.1.0 동시 추출 시 4.1.0 사용 — 2.16 호환 안전) |
+| JDK(빌드 호스트) | 17(네이티브/SWIG), 21(gradle 데몬) |
+| `config_site.h` sha256 | `de61f562955ef4d5456c9e03be8754b96e3b4f7999cfb4159484a1bab00a9de7` (경로 C 확정본) |
+| 산출물 | `libpjsua2.so`(arm64, Android 28) + `libc++_shared.so` + SWIG Java 306파일 → `core/src/pjsua2/` |
+
+## 진행 스냅샷
+
+- [x] **M1.0-1** 빌드 환경 프로비저닝(`~/.m1env`: JDK17/JDK21/SWIG4.1/NDK r28)
+- [x] **M1.0-2~4** pjproject 2.16 + config_site.h(경로 C) + make(arm64) + SWIG Java
+- [x] **M1.0-5** 산출물 core 투입(`core/src/pjsua2/{jniLibs,java}`) + gradle 소스셋/abiFilter/packaging
+- [x] **M1.0-6** PjLib/SipController/CimsAccount/CimsCall + SipService(FGS) + UI 작성 → `:volte-client:assembleDebug` **APK 빌드 성공**(arm64 .so 동봉 확인)
+- [ ] **M1.0-게이트** 실기기(UNIWA) 부팅 스모크: `libStart` + UDP transport + `codecEnum2` AMR-WB 1개 (off-box, 기기 필요)
+- [ ] **M1.1** REGISTER(Digest) 실서버 — 실기기 + 라이브 CSP(15060)
+
+> **SWIG 시그니처 실측 교정(설계서 verify-on-machine 해소):** 이 SWIG 빌드의 enum 은 Java enum 이
+> 아니라 `public final static int` 상수 → **`swigValue()` 없음**(설계 스켈레톤 전제와 다름). 정수
+> 상수를 직접 쓴다. `transportCreate(int, TransportConfig)`, `OnRegStateParam.getCode():int`,
+> SWIG 벡터(`CodecInfoVector2`/`CallMediaInfoVector`)는 `AbstractList` 상속이라 **`.size` 프로퍼티 +
+> `[i]` 인덱싱**(`.size()` 호출 불가). 코드는 이 실측값 기준으로 작성됨.
+
+## 빌드 환경 메모 (gradle 데몬)
+
+`gradle/gradle-daemon-jvm.properties` 는 Android Studio 가 JBR(vendor=jetbrains) 21 로 생성하는데,
+이는 IDE 번들 전용이라 **headless/CI 에서 자동 프로비저닝 불가**(foojay 에 JBR URL 없음). 본 레포는
+이식성을 위해 **벤더 무관 `toolchainVersion=21`** 로 둔다(임의 JDK 21 데몬 허용). headless 빌드:
+`gradle ... -Dorg.gradle.java.installations.paths=<JDK21경로>`.
 
 트러블슈팅 빠른 표는 설계서 §2.9.

@@ -1,0 +1,94 @@
+{
+  "version": 2,
+  "sections": [
+    {
+      "key": "server",
+      "title": "OAM 서버 / 포트",
+      "description": "OAM(게이트웨이+콘솔 서빙) bind 포트. 변경 후 재기동 시 OAM 이 새 포트로 재bind. 브라우저는 https://<IP>:<포트> 로 접속. (443 포트 생략 접속이 필요하면 시스템/인프라의 포트 redirect 기능으로 별도 설정 — OAM 패키지 영역 아님.)",
+      "fields": [
+        {
+          "key": "Server.Ip",
+          "label": "bind IP",
+          "type": "string",
+          "default": "0.0.0.0",
+          "required": true,
+          "restart": true,
+          "help": "0.0.0.0 = 모든 인터페이스."
+        },
+        {
+          "key": "Server.Port",
+          "label": "OAM bind 포트 (실제 listen)",
+          "type": "int",
+          "default": 4419,
+          "min": 1024,
+          "max": 65535,
+          "required": true,
+          "restart": true,
+          "help": "OAM 프로세스가 실제 listen 하는 포트. 비root 라 1024 이상. 변경+재기동 시 재bind."
+        }
+      ],
+      "scope": "system"
+    },
+    {
+      "key": "_infra",
+      "title": "Infrastructure (내부 전용)",
+      "description": "UI 비노출 인프라 값. 부트스트랩/agent 가 채움. upgrade 시 deployment overlay 로 보존.",
+      "hidden": true,
+      "groups": [
+        { "key": "secrets", "title": "시크릿" },
+        { "key": "paths", "title": "런타임/패키지 경로" }
+      ],
+      "fields": [
+        {
+          "key": "CimsAuth.JwtSecret",
+          "label": "콘솔/게이트웨이 JWT 시크릿",
+          "group": "secrets",
+          "type": "password",
+          "default": "",
+          "hidden": true,
+          "restart": true,
+          "help": "전 모듈(csc/oam-svc) 동일값 — 게이트웨이 프록시 토큰 검증. 재생성 시 전 세션 무효화."
+        },
+        {
+          "key": "Server.AgentOamUrl",
+          "label": "Agent→OAM URL",
+          "group": "paths",
+          "type": "string",
+          "default": "",
+          "hidden": true,
+          "restart": true,
+          "help": "agent/install-command 가 쓰는 OAM 주소(mgmt:bind포트)."
+        },
+        {
+          "key": "Mgmt.Cidr",
+          "label": "관리망 CIDR",
+          "group": "paths",
+          "type": "string",
+          "default": "",
+          "hidden": true,
+          "restart": false
+        },
+        {
+          "key": "CimsRuntimeDir",
+          "label": "런타임 store",
+          "group": "paths",
+          "type": "path",
+          "default": "",
+          "hidden": true,
+          "restart": true,
+          "help": "file_store 루트(deployments·packages·gateway_routes). 버전 무관 영속."
+        },
+        {
+          "key": "Packages.Dir",
+          "label": "패키지 저장소",
+          "group": "paths",
+          "type": "path",
+          "default": "",
+          "hidden": true,
+          "restart": true
+        }
+      ],
+      "scope": "system"
+    }
+  ]
+}

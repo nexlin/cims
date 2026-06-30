@@ -1,0 +1,10 @@
+.env.local
+.env.*.local
+dist/
+dist-base/
+node_modules/
+cdp-shot.mjs
+cdp-click-shot.mjs
+cdp-eval.mjs
+cdp-console.mjs
+probe_*.mjs

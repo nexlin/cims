@@ -46,7 +46,7 @@ Agent 데몬이 CSC 와 통신하는 프로토콜. **Agent 가 CSC 에 요청하
 
 ## POST /api/agent/heartbeat
 
-주기 호출(기본 2초 — Observability Phase1). pending job 반환 + 현재 네트워크/마운트 상태 보고.
+주기 호출(기본 2초). pending job 반환 + 현재 네트워크/마운트 상태 보고.
 
 **Headers**: `X-Agent-Token: <session_token>`
 

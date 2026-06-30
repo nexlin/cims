@@ -4,9 +4,8 @@
 > 코드/마이그레이션 정합성의 단일 출처(SoT).
 > 스키마 생성 = `sql/cims_schema.sql` + `sql/migrate_*.sql` 순차 적용.
 >
-> **2026-05-13 결정**: 가입자 정보/상태 외 모든 데이터는 파일 기반으로 이전 중.
-> 단계별 마이그레이션 plan: [runtime_store_design.md](runtime_store_design.md) §1.
-> 본 인벤토리는 마이그레이션 진행에 따라 활성 → 옛 표로 이동.
+> 가입자 정보/상태 외 모든 데이터는 파일 기반(file_store)이 SoT.
+> file_store 도메인 상세: [runtime_store_design.md](runtime_store_design.md) §1.
 
 ## 1. 적용 순서 (신규 환경)
 
@@ -18,42 +17,43 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 `migrate_*.sql` 은 idempotent(`IF EXISTS` / `IF NOT EXISTS`) 로 작성. 이미 반영된 환경 재실행 시 NO-OP.
 
-## 2. 현재 활성 테이블 (33개, 도메인별)
+## 2. 테이블 인벤토리 (도메인별)
+
+> **규칙:** 신규 데이터는 DB 테이블을 새로 만들지 않고 file-store(collection/jsonl)로 시작한다. DB 는 가입자(person/VoLTE/PTT) 도메인 등 관계형이 본질적으로 필요한 데이터에 한정한다 → [runtime_store_design.md](runtime_store_design.md).
+>
+> 취소선(~~table~~) 항목은 DB 테이블 없이 파일 기반(file_store)으로 운영되는 도메인.
 
 | 도메인 | 테이블 | 정의 파일 | 비고 |
 |---|---|---|---|
 | **가입자** | `users` | cims_schema.sql + migrate_add_email.sql | 개인 (name/email/org_id/details) |
-| | `voip_subscriptions` → `volte_subscriptions` | cims_schema.sql + **migrate_voip_to_volte.sql** | VoLTE MSISDN, SIP 인증, dnd/forward (table 명 v3 부터 `volte_*`) |
+| | `volte_subscriptions` | cims_schema.sql + migrate_voip_to_volte.sql | VoLTE MSISDN, SIP 인증, dnd/forward |
 | | `user_rejects` | cims_schema.sql | VoLTE 착신거부 목록 |
 | | `ptt_subscriptions` | cims_schema.sql + migrate_auth.sql + migrate_auth_id_dropped.sql | MCPTT ID, IMPI 인증 |
-| | `users.login_id/password/role` | migrate_auth.sql | 콘솔 인증(가입자와 동일 신원). `role` 은 현재 거친 값 → 계획: `ENUM('admin','manager','operator','monitor','user')` RBAC ([mcptt_authorization.md](features/mcptt_authorization.md)) |
-| **PTT 그룹** | `ptt_groups` | cims_schema.sql + migrate_ptt_groups_v2.sql + **migrate_ptt_groups_v3_3gpp.sql** | **id=surrogate BIGINT AI(PK, 디렉터리/FK 키)**, `mcptt_group_id`(UNIQUE 식별자), name/priority/encryption/emergency/video_enabled/org_code, **group_type(prearranged/chat/broadcast)/on_network/max_members/require_affiliation/alias/icon_url** (3GPP). ※ 계획: `authorized_user_id`(그룹 소유=authorized user)/`created_at` 추가 → [mcptt_authorization.md](features/mcptt_authorization.md) |
+| | `users.login_id/password/role` | migrate_auth.sql | 콘솔 인증(가입자와 동일 신원). `role` RBAC ([mcptt_authorization.md](features/mcptt_authorization.md)) |
+| **PTT 그룹** | `ptt_groups` | cims_schema.sql + migrate_ptt_groups_v2.sql + migrate_ptt_groups_v3_3gpp.sql | **id=surrogate BIGINT AI(PK, 디렉터리/FK 키)**, `mcptt_group_id`(UNIQUE 식별자), name/priority/encryption/emergency/video_enabled/org_code, **group_type(prearranged/chat/broadcast)/on_network/max_members/require_affiliation/alias/icon_url** (3GPP) |
 | | `ptt_group_members` | cims_schema.sql + migrate_ptt_groups_v3_3gpp.sql | group_id=**surrogate ptt_groups.id(BIGINT FK)**, user_id, priority, **role(chair/participant), mcptt_id** |
 | | `ptt_affiliations` | migrate_ptt_groups_v3_3gpp.sql | MCPTT affiliation(TS 24.379 §9): (group_id, user_id, client_id) + affiliated_at/expires_at/status |
 | | `ptt_session_seq` (시퀀스) | migrate_ptt_session_seq.sql | PTT 세션 ID 발급 시퀀스 |
-| **조직** | `organizations` | migrate_organizations.sql | code/name/parent_id 트리 — `users.org_id` FK 대상으로 가입자 도메인과 함께 DB 유지 (2026-05-13 Phase 9 결정) |
-| **인증** | ~~`auth_codes`~~ | — | **파일 기반 완료** (2026-05-13 Phase 8) — `{CimsRuntimeDir}/auth_codes/<code>.json` |
-| | ~~`refresh_tokens`~~ | — | **파일 기반 완료** (Phase 8) — `refresh_tokens/<token>.json` |
-| **녹취** | ~~`recordings`~~ | — | **파일 기반 완료** (2026-05-13 Phase 7) — call.json + recordings/ 디렉토리. CSP InsertRecording no-op, CSC `/api/v1/recordings` 가 파일 스캔. |
+| **조직** | `organizations` | migrate_organizations.sql | code/name/parent_id 트리 — `users.org_id` FK 대상으로 가입자 도메인과 함께 DB 유지 |
+| **인증** | ~~`auth_codes`~~ | — | **파일 기반** — `{CimsRuntimeDir}/auth_codes/<code>.json` |
+| | ~~`refresh_tokens`~~ | — | **파일 기반** — `refresh_tokens/<token>.json` |
+| **녹취** | ~~`recordings`~~ | — | **파일 기반** — call.json + recordings/ 디렉토리. CSP InsertRecording no-op, CSC `/api/v1/recordings` 가 파일 스캔. |
 | | ~~`recording_segments`~~ | — | (call.d 내 segments.jsonl 임베드) |
-| **모니터링** | ~~`stats_daily`~~ | — | (Phase 6 — 코드 미사용 unused tables, DROP 대상) |
-| | ~~`stats_monthly`~~ | — | (미사용) |
-| | ~~`stats_yearly`~~ | — | (미사용) |
-| **CSP 런타임** | ~~`csp_listener`~~ | — | **파일 기반 완료** (2026-05-13 Phase 5) — `{CimsRuntimeDir}/csp_listener/<id>.json` |
-| | ~~`sip_trunk`~~ | — | **파일 기반 완료** (Phase 5) |
-| | ~~`routing_rule (+match/transform)`~~ | — | **파일 기반 완료** (Phase 5) — match/transform 임베드 |
-| | ~~`routing_access_list`~~ | — | **파일 기반 완료** (Phase 5) |
-| | ~~`csp_config_audit`~~ | — | **파일 기반 완료** (Phase 5) — JSONL 시계열 (`csp_config_audit/audit/YYYY/MM/DD.jsonl`) |
-| | ~~`sip_service (+sip_service_listener)`~~ | — | **파일 기반 완료** (Phase 5) — listeners 배열 임베드 |
+| **모니터링** | ~~`stats_daily`~~ / ~~`stats_monthly`~~ / ~~`stats_yearly`~~ | — | 코드 미사용 unused tables (DROP 대상) |
+| **CSP 런타임** | ~~`csp_listener`~~ | — | **파일 기반** — `{CimsRuntimeDir}/csp_listener/<id>.json` |
+| | ~~`sip_trunk`~~ | — | **파일 기반** |
+| | ~~`routing_rule (+match/transform)`~~ | — | **파일 기반** — match/transform 임베드 |
+| | ~~`routing_access_list`~~ | — | **파일 기반** |
+| | ~~`csp_config_audit`~~ | — | **파일 기반** — JSONL 시계열 (`csp_config_audit/audit/YYYY/MM/DD.jsonl`) |
+| | ~~`sip_service (+sip_service_listener)`~~ | — | **파일 기반** — listeners 배열 임베드 |
 | **구독↔서비스** | `voip_subscriptions.service_id` / `ptt_subscriptions.service_id` | migrate_subscriptions_service_ref.sql | FK → sip_service |
-| **HA** | ~~`ha_groups`~~ | — | **파일 기반 완료** (2026-05-13 Phase 4) — `{CimsRuntimeDir}/ha_groups/<id>.json` (members 배열 임베드) |
+| **HA** | ~~`ha_groups`~~ | — | **파일 기반** — `{CimsRuntimeDir}/ha_groups/<id>.json` (members 배열 임베드) |
 | | ~~`ha_group_members`~~ | — | (그룹 JSON 안에 임베드) |
-| **에이전트/배포** | ~~`cims_instance`~~ | — | **제거됨** (2026-05-13) — 옛 데이터 모델 잔재. agent 자체 분리 (volte-sip-server / ptt-sip-server 등) 로 대체. file_store 'instances' 도메인 자체 폐기. |
-| | ~~`cims_agent`~~ | — | **파일 기반 완료** (2026-05-13 Phase 2) — `{CimsRuntimeDir}/agents/<id>.json` |
-| | ~~`cims_package`~~ | — | **파일 기반 완료** (2026-05-13 Phase 1) — `{CimsRuntimeDir}/packages/<name>__<version>.json` |
-| | ~~`agent_deployment`~~ | — | **파일 기반 완료** (2026-05-13 Phase 3) — `{CimsRuntimeDir}/deployments/<id>.json` |
-| | ~~`agent_job`~~ | — | **파일 기반 완료** (2026-05-13 Phase 3) — `{CimsRuntimeDir}/jobs/<id>.json` |
-| | ~~`agent_metric`~~ | — | **파일 기반 완료** (2026-05-13 Phase 3) — `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` (시계열) |
+| **에이전트/배포** | ~~`cims_agent`~~ | — | **파일 기반** — `{CimsRuntimeDir}/agents/<id>.json` |
+| | ~~`cims_package`~~ | — | **파일 기반** — `{CimsRuntimeDir}/packages/<name>__<version>.json` |
+| | ~~`agent_deployment`~~ | — | **파일 기반** — `{CimsRuntimeDir}/deployments/<id>.json` |
+| | ~~`agent_job`~~ | — | **파일 기반** — `{CimsRuntimeDir}/jobs/<id>.json` |
+| | ~~`agent_metric`~~ | — | **파일 기반** — `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` (시계열) |
 
 ### 주요 FK / 참조
 
@@ -96,7 +96,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 ## 5. 알려진 정합성 이슈
 
-(현재 미해결 없음 — 2026-05-13 stats.py call_logs 의존 제거 + 관련 docs 4건 정합화 완료)
+(현재 미해결 없음)
 
 ## 6. 외부 이중화 DB 인계 체크리스트
 

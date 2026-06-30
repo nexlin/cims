@@ -218,6 +218,7 @@ cmd_ha() {
             # idempotent — 이미 설치 + binary 실제 동작 가능하면 short-circuit.
             # `command -v` 만으론 broken state (vendor deps 깨져 exit 127) 식별 불가 → -v 실행 검증.
             local vendor_dir="$SCRIPT_DIR/../vendor/keepalived"
+            local base_dir="$SCRIPT_DIR/../vendor/base"
             if command -v keepalived >/dev/null 2>&1 && keepalived -v >/dev/null 2>&1; then
                 ok "keepalived already installed: $(keepalived -v 2>&1 | head -1)"
             else
@@ -227,12 +228,16 @@ cmd_ha() {
                 # vendor (offline) — private 환경 기본 경로. vendor 없으면 apt fallback.
                 if ls "$vendor_dir"/*.deb >/dev/null 2>&1; then
                     info "keepalived offline 설치 (vendor: $vendor_dir, --force-confnew --force-overwrite)"
+                    # base 공유 의존성(libmnl0 등)도 함께 — keepalived 가 의존하므로 air-gapped
+                    # 에서 같은 dpkg 호출에 포함해 의존성 충족 (base deb 는 uninstall 시 제거 안 함).
+                    local _ka_debs=("$vendor_dir"/*.deb)
+                    ls "$base_dir"/*.deb >/dev/null 2>&1 && _ka_debs+=("$base_dir"/*.deb)
                     # --force-confnew: 옛 conf 보존 안 함 (cims-ha apply 가 어차피 덮어씀)
                     # --force-overwrite: 다른 package 의 file 과 conflict 시 덮어쓰기 (재설치 안정성)
-                    sudo dpkg -i --force-confnew --force-overwrite "$vendor_dir"/*.deb || {
+                    sudo dpkg -i --force-confnew --force-overwrite "${_ka_debs[@]}" || {
                         warn "dpkg -i 실패 — broken deps fix-broken 시도"
                         sudo apt-get -y --fix-broken install || true
-                        sudo dpkg -i --force-confnew --force-overwrite "$vendor_dir"/*.deb || {
+                        sudo dpkg -i --force-confnew --force-overwrite "${_ka_debs[@]}" || {
                             err "dpkg -i 재시도 실패"
                             return 1
                         }
@@ -316,11 +321,20 @@ cmd_ha() {
             #       → vendor *.deb 의 package list 추출 후 dpkg -P 로 직접 제거 (apt 안 거침).
             local vendor_dir="$SCRIPT_DIR/../vendor/keepalived"
             local pkgs=()
+            # base 공유 의존성 denylist — keepalived 와 함께 쓰이지만 iproute2(`ip`)
+            # 등 OS base 도 의존하므로 절대 purge 하지 않는다. (vendor/base 로 분리했어도
+            # 혹시 keepalived dir 에 남아있을 경우의 방어. libmnl0 제거 → `ip` 깨짐 재발 차단.)
+            local _base_keep=" libmnl0 "
             if ls "$vendor_dir"/*.deb >/dev/null 2>&1; then
                 local deb pkg
                 for deb in "$vendor_dir"/*.deb; do
                     pkg=$(dpkg-deb -f "$deb" Package 2>/dev/null)
-                    [[ -n $pkg ]] && pkgs+=("$pkg")
+                    [[ -z $pkg ]] && continue
+                    if [[ "$_base_keep" == *" $pkg "* ]]; then
+                        info "base 공유 의존성 보존 (purge 제외): $pkg"
+                        continue
+                    fi
+                    pkgs+=("$pkg")
                 done
             fi
             # vendor list 없으면 keepalived 만 — apt 설치 시나리오 fallback.

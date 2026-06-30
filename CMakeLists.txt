@@ -328,6 +328,16 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/config/cwrtc.json.template  ${CMAKE_BINARY_DIR}/dist/cwrtc/config/cwrtc.json.template
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csc/config/config_template.json
 
+    # ── 3a. base <module>.json 생성 (config_template.json 의 field.default) ──
+    #    configure 미실행 상용 흐름(build→pkg→설치→web 설정→start)에서도 모듈이
+    #    기동 시 읽는 base conf 가 tarball 에 항상 포함되도록 보장. configure.sh 는
+    #    이후 같은 파일을 env(@VAR@) 값으로 덮어씀(dev). 변종(psp/isp/pmp/imp)은
+    #    cmd_pkg staging 이 config/<base>.json → config/<variant>.json 으로 자동 rename.
+    #    cmp/csp 는 C++ 바이너리라 base conf 부재 시 hard-fail → 대상. csc(Python)는
+    #    config 부재를 tolerate(soft) 하므로 비대상.
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/cmp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cmp/config/cmp.json
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/csp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/csp/config/csp.json
+
     # ── 4. CSP 데이터 복사 ─────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/User        ${CMAKE_BINARY_DIR}/dist/csp/user
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/Group       ${CMAKE_BINARY_DIR}/dist/csp/group
@@ -360,10 +370,10 @@ add_custom_target(dist
     #    Phase 3: oam_app.py 별도 프로세스 (oam-tb.json / oam.json).
     #    Phase 4: oam/vendor 에 OAM 전용 + 공통 의존성.
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/oam/src
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/src ${CMAKE_BINARY_DIR}/dist/oam/src
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/config ${CMAKE_BINARY_DIR}/dist/oam/config
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ems/core/oam/src ${CMAKE_BINARY_DIR}/dist/oam/src
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ems/core/oam/config ${CMAKE_BINARY_DIR}/dist/oam/config
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/oam/vendor
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/oam/vendor ${CMAKE_BINARY_DIR}/dist/oam/vendor
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ems/core/oam/vendor ${CMAKE_BINARY_DIR}/dist/oam/vendor
 
     # ── 6b. Agent 에셋 복사 (CSC 가 /install-agent.sh 로 서빙) ──
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/agent
@@ -373,14 +383,14 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/pkg.json          ${CMAKE_BINARY_DIR}/dist/csp/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/pkg.json          ${CMAKE_BINARY_DIR}/dist/cmp/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/pkg.json          ${CMAKE_BINARY_DIR}/dist/csc/pkg.json
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/oam/pkg.json          ${CMAKE_BINARY_DIR}/dist/oam/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/ems/core/oam/pkg.json          ${CMAKE_BINARY_DIR}/dist/oam/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/pkg.json        ${CMAKE_BINARY_DIR}/dist/cwrtc/pkg.json
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-console/pkg.json ${CMAKE_BINARY_DIR}/dist/console/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/ems/core/console/pkg.json ${CMAKE_BINARY_DIR}/dist/console/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-phone/pkg.json   ${CMAKE_BINARY_DIR}/dist/phone/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cspsim/pkg.json       ${CMAKE_BINARY_DIR}/dist/cspsim/pkg.json
 
     # ── 7. Web UI nginx 설정 복사 ──────────────────────────────
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-console/nginx.conf ${CMAKE_BINARY_DIR}/dist/console/nginx.conf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/ems/core/console/nginx.conf ${CMAKE_BINARY_DIR}/dist/console/nginx.conf
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cims-phone/nginx.conf   ${CMAKE_BINARY_DIR}/dist/phone/nginx.conf
 
     # ── 8. 관리 스크립트 복사 ──────────────────────────────────

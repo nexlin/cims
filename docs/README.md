@@ -53,17 +53,13 @@ docs/
 | 빌드/패키징 워크플로우 | `design/features/build_and_packaging.md` |
 | 검증 절차 (S1~S6) | `VERIFICATION_PROCESS.md` (SSOT) → `VERIFICATION_MANUAL.md` |
 
-## 버전 정책
-
-각 문서 상단의 "버전" / "작성일" 은 주요 설계 변경 시점에만 갱신. 세부 변경은 git 로그를 참조.
-
 ## 관련 자료
 
 - 빌드/실행: 저장소 루트 `README` (CLAUDE.md 의 Build 섹션 참조)
 - SQL 스키마/마이그레이션: `sql/`
 - 런타임 설정 템플릿: `csp/config/config_template.json`, `cmp/config/config_template.json`, `csc/config/config_template.json`
 - 검증 절차 SoT: `VERIFICATION_PROCESS.md` (실행 가이드는 `VERIFICATION_MANUAL.md`)
-- 콘솔 메뉴 구조 (2026-05-08~):
+- 콘솔 메뉴 구조:
   - `대시보드` / `가입자관리` / `서비스` / `통계`
   - `패키징` (`/release/...`) — 검증 실행 / 검증 이력 / 빌드 & 패키징
   - `배포` (`/deploy/...`) — 패키지 업로드 / 서버 등록

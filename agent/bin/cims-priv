@@ -356,7 +356,12 @@ case "${1:-}" in
         do_ensure_base_deps
         ;;
     version)
-        echo "cims-priv 0.6.0"
+        # 버전은 agent 패키지와 항상 일치 — 옆 pkg.json(agent/pkg.json)을 단일 SoT 로 읽는다.
+        # (하드코딩 시 agent bump 때마다 desync → 동적 조회로 자동 동기화. python 의존 회피.)
+        _priv_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        _priv_ver=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                    "$_priv_dir/../pkg.json" 2>/dev/null | head -1)
+        echo "cims-priv ${_priv_ver:-unknown}"
         ;;
     *)
         err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|net-sysctl|net-rps|ensure-base-deps|version} ..."

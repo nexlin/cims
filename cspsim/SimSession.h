@@ -41,6 +41,8 @@ struct SimStats {
     std::atomic<int> iCmsOk{0};       // CMS SUBSCRIBE 성공
     std::atomic<int> iNotifyRecv{0};  // NOTIFY 수신 횟수
     std::atomic<int> iConfNotify{0};  // Conference NOTIFY 수신 횟수
+    std::atomic<int> iAffiliateOk{0};  // affiliation PUBLISH 200 OK
+    std::atomic<int> iAffiliateRej{0}; // affiliation PUBLISH 4xx (CSP 멤버십 게이트 403 등)
     std::atomic<int> iXcapTokenOk{0}; // CSC-1 토큰 취득 성공 (Phase 3C)
     std::atomic<int> iXcapTokenFail{0};
     std::atomic<int> iXcapOk{0};      // XCAP GET 200 (Phase 3D)

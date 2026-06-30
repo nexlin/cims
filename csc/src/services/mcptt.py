@@ -9,6 +9,7 @@ import jwt
 import asyncio
 import hashlib
 import base64
+import secrets as _secrets
 from typing import Dict, Tuple, Optional, List
 
 from httpsrv.handler import HandlerArgs, HandlerResult, BodyData
@@ -17,7 +18,11 @@ from services.idms_storage import IdmsStorage
 from services import logger as _logger
 
 # --- Configuration & Data ---
-SECRET_KEY = "mcptt_jwt_secret_change_me"
+# JWT 서명 시크릿. 구 하드코딩 default("mcptt_jwt_secret_change_me") 제거 — 알려진 기본값은
+# 토큰 위조를 허용하므로 보안 결함. 기본값 = 프로세스 시작 시 임의 생성(예측 불가). 운영은
+# IdMs.JwtSecret 로 고정 권장(미설정 시 재기동마다 토큰 무효화). IdMS 가 발급하고 동일 프로세스의
+# XCAP 가 검증하므로 임의 시크릿으로도 정상 동작.
+SECRET_KEY = _secrets.token_urlsafe(32)
 IDMS_ISSUER = "idms.mcptt.com"
 KMS_URI = "kms.mcptt.com"
 IDMS_DOMAIN = "mcptt.com"
@@ -126,6 +131,9 @@ def load_shared_data(config):
     idms_config = config.get('IdMs', {})
     if idms_config.get('JwtSecret'):
         SECRET_KEY = idms_config['JwtSecret']
+    else:
+        logger.log_error("[IdMS] IdMs.JwtSecret 미설정 — 임의 시크릿 사용(재기동 시 토큰 무효화). "
+                         "운영은 IdMs.JwtSecret 설정 권장.")
     if idms_config.get('Issuer'):
         IDMS_ISSUER = idms_config['Issuer']
     if idms_config.get('KmsUri'):
@@ -573,6 +581,36 @@ def validate_access_token(token):
         return None
 
 # --- XML Generators ---
+def _content_etag(content: str) -> str:
+    """문서 내용 파생 ETag (RFC 7232). 구 정적 ETag(etag_{gid}/svcfg_etag_v1 등)는 문서가
+    바뀌어도 동일 → If-None-Match 가 304 를 반환해 클라이언트가 stale 캐시를 받던 결함을 해소.
+    내용이 바뀌면 ETag 가 바뀌어 정상적으로 새 문서를 받는다."""
+    return '"' + hashlib.sha256((content or '').encode('utf-8')).hexdigest()[:16] + '"'
+
+
+def _norm_mcptt_uri(u: str) -> str:
+    """MCPTT URI 정규화(비교용) — scheme(sip:/tel:) 제거 + 소문자."""
+    s = (u or '').strip().lower()
+    for p in ('sip:', 'tel:'):
+        if s.startswith(p):
+            return s[len(p):]
+    return s
+
+
+def _uri_eq(a: str, b: str) -> bool:
+    na = _norm_mcptt_uri(a)
+    return na != '' and na == _norm_mcptt_uri(b)
+
+
+def _is_group_member(group: dict, uri: str) -> bool:
+    """uri 가 그룹의 멤버(또는 authorized_user)인지 — XCAP 그룹문서 접근 인가용 (TS 24.481)."""
+    if not group:
+        return False
+    if any(_uri_eq(m.get('uri'), uri) for m in group.get('members', [])):
+        return True
+    return _uri_eq(group.get('authorized_user'), uri)
+
+
 def get_group_xml(group_uri):
     group = GROUPS.get(group_uri)
     if not group:
@@ -648,7 +686,7 @@ def get_group_xml(group_uri):
     xml += """
   </list-service>
 </group>"""
-    return xml, group['etag']
+    return xml, _content_etag(xml)
 
 def get_user_profile_xml(user_uri):
     user = USERS.get(user_uri)
@@ -680,7 +718,7 @@ def get_user_profile_xml(user_uri):
     <MCPTTUserID>{user_uri}</MCPTTUserID>
   </OnNetwork>
 </mcptt-user-profile>"""
-    return xml, user['profile_etag']
+    return xml, _content_etag(xml)
 
 def get_service_config_xml(user_uri):
     xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -698,7 +736,7 @@ def get_service_config_xml(user_uri):
     <max-on-network-affiliations-N2>10</max-on-network-affiliations-N2>
   </on-network>
 </mcptt-service-config>"""
-    return xml, "svcfg_etag_v1"
+    return xml, _content_etag(xml)
 
 def get_kms_init_xml(user_uri):
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -1035,6 +1073,15 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
     path = args.full_path
     parts = [p for p in path.split('/') if p]
 
+    # 인가 (item 2): XCAP 사용자 트리 소유 검사 — /users/{tree_owner}/ 는 토큰 본인 트리만 접근.
+    #   타 사용자 트리(그룹목록 enumerate 포함) 접근 차단 (수평 권한 상승 방지).
+    from urllib.parse import unquote as _unq
+    requester = (token_payload or {}).get('mcptt_id')
+    tree_owner = _unq(parts[2]) if len(parts) >= 3 else ""
+    if tree_owner and not _uri_eq(requester, tree_owner):
+        logger.log_error(f"[GMS] Forbidden: token '{requester}' != XCAP tree owner '{tree_owner}'")
+        return HandlerResult(status=403, body="Forbidden: cannot access another user's XCAP tree")
+
     # 서비스 로그: GMS 요청 기록 (그룹 ID가 있으면 해당 그룹 디렉터리에)
     group_uri = parts[3] if len(parts) >= 4 else ""
     user_uri = parts[2] if len(parts) >= 3 else ""
@@ -1057,6 +1104,11 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
 
     try:
         if args.method == 'GET':
+            # 인가 (item 2): 멤버(또는 authorized_user)만 그룹 문서 열람 (TS 24.481).
+            grp = GROUPS.get(group_uri)
+            if grp and not _is_group_member(grp, requester):
+                logger.log_error(f"[GMS] Forbidden: '{requester}' not a member of group '{group_uri}'")
+                return HandlerResult(status=403, body="Forbidden: not a member of this group")
             xml, etag = get_group_xml(group_uri)
             if xml:
                 if_none_match = args.headers.get('if-none-match', '')
@@ -1121,6 +1173,12 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     except:
         return HandlerResult(status=400)
 
+    # 인가 (item 2): 본인 user-profile 만 접근 (수평 권한 상승 방지).
+    from urllib.parse import unquote as _unq
+    if not _uri_eq(token_payload.get('mcptt_id'), _unq(user_uri)):
+        logger.log_error(f"[CMS] Forbidden: token '{token_payload.get('mcptt_id')}' != user-profile '{user_uri}'")
+        return HandlerResult(status=403, body="Forbidden: cannot access another user's profile")
+
     logger.log_info(f"[CMS] User Profile: {user_uri}")
     xml, etag = get_user_profile_xml(user_uri)
 
@@ -1147,6 +1205,12 @@ async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
         user_uri = path[start:end]
     except:
         return HandlerResult(status=400)
+
+    # 인가 (item 2): 본인 service-config 만 접근 (수평 권한 상승 방지).
+    from urllib.parse import unquote as _unq
+    if not _uri_eq(token_payload.get('mcptt_id'), _unq(user_uri)):
+        logger.log_error(f"[CMS] Forbidden: token '{token_payload.get('mcptt_id')}' != service-config '{user_uri}'")
+        return HandlerResult(status=403, body="Forbidden: cannot access another user's service-config")
 
     logger.log_info(f"[CMS] Service Config: {user_uri}")
     xml, etag = get_service_config_xml(user_uri)

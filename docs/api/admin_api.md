@@ -1056,7 +1056,7 @@ Authorization: Bearer <token>
 ```
 
 - `csp.{subscribers_total, volte_numbers, volte_registered, ptt_numbers, ptt_registered, ptt_groups_total}` — 대시보드 KPI 용 **DB 카운트**(`_get_dashboard_counts`, 3s 캐시). 등록 = `register_time NOT NULL AND (logout_time NULL OR register_time>logout_time)`.
-- `cmp.rtp_ports` = VoIP 풀(하위호환), `cmp.rtp_ports_ptt` = PTT 전용 풀(구버전 CMP 면 0).
+- `cmp.rtp_ports` = VoIP 풀, `cmp.rtp_ports_ptt` = PTT 전용 풀.
 - csp/cmp probe 는 비블로킹(thread gather) + 3s 캐시. probe 대상 IP 는 `oam.json` 의 CspNotify/CmpIp (미지정 시 127.0.0.1 fallback → VIP/미디어 호스트 down 오탐).
 
 ### 10.2 가입자 통계
@@ -1330,7 +1330,7 @@ Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/age
 
 응답 필드:
 - `mode` — `active_standby` | `all_active` (standalone 은 ha_groups 미배정 agent 로 표현)
-- `vip` — legacy 단일 VIP (Phase 2 부터 nullable, `vip_bindings` 가 권장)
+- `vip` — 단일 VIP (nullable). `vip_bindings` 사용을 권장
 - `vip_bindings` — VIP slot 별 binding `[{bid, slot, ip, mask?, status?, memberIfaces?}]`
   (`memberIfaces` 는 `{agent_id: iface_name}` 매핑)
 

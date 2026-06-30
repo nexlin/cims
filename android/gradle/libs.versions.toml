@@ -6,6 +6,10 @@ coreKtx = "1.19.0"
 activityCompose = "1.13.0"
 composeBom = "2026.05.01"
 lifecycleRuntimeKtx = "2.10.0"
+lifecycleService = "2.10.0"
+coroutines = "1.10.2"
+okhttp = "4.12.0"
+junit = "4.13.2"
 
 minSdk = "26"
 compileSdk = "37"
@@ -15,6 +19,10 @@ targetSdk = "37"
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+androidx-lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycleService" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }

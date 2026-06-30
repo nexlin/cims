@@ -415,17 +415,94 @@ if not p:
     except: p=4419
 print(p)" 2>/dev/null || echo 4419)
     kill_stray "$DIST_DIR/oam/src/oam_app.py" "$oam_port" tcp
-    info "OAM (Operation & Management REST API) 시작... (port=$oam_port)"
+    # oam_base_service_split §8 — 역할 플래그. 기본 all = 현행 단일프로세스(무변경).
+    # 분리 배포(게이트웨이) 노드만 OAM_ROLE=base 로 기동 → 서비스 라우트는 csc/oam-svc 로 프록시.
+    local oam_role="${OAM_ROLE:-all}"
+    info "OAM (Operation & Management REST API) 시작... (port=$oam_port, role=$oam_role)"
     cd "$DIST_DIR/oam/src"
-    "$PYBIN" -u "$DIST_DIR/oam/src/oam_app.py" >> "$LOG_DIR/oam.log" 2>&1 &
+    "$PYBIN" -u "$DIST_DIR/oam/src/oam_app.py" --role "$oam_role" >> "$LOG_DIR/oam.log" 2>&1 &
     save_pid oam $!
-    sleep 1.5
-    is_running oam && ok "OAM 시작 완료 (pid=$(read_pid oam), port=$oam_port)" \
-        || { err "OAM 시작 실패"; tail -3 "$LOG_DIR/oam.log" | sed 's/^/  /'; return 1; }
+    # D1 (self-upgrade): sleep 1.5 단발 판정 대신 /health 200 까지 폴링(최대 T초).
+    # Python OAM 콜드스타트(config+마이그레이션+cert+bind)는 1.5s 를 넘길 수 있어,
+    # self-upgrade 시 agent 의 후속 report 가 "아직 안 뜬 신 OAM" 에 닿아 유실되던 문제 방지.
+    if _oam_health_gate "$oam_port" "${CIMS_OAM_HEALTH_TIMEOUT:-20}"; then
+        ok "OAM 시작 완료 (pid=$(read_pid oam), port=$oam_port, /health 200)"
+    else
+        err "OAM 시작 실패 — /health 미응답 (${CIMS_OAM_HEALTH_TIMEOUT:-20}s)"
+        tail -5 "$LOG_DIR/oam.log" | sed 's/^/  /'
+        return 1
+    fi
+}
+
+# OAM 전용 health-gate: 프로세스 생존 + https://127.0.0.1:<port>/health 200 까지
+# 최대 timeout_s 초 폴링. python(urllib, 인증서 무검증)으로 probe — curl 부재 환경 대비.
+# OAM /health 는 무인증 200 {"status":"ok"} (httpsrv 내장 라우트).
+_oam_health_gate() {
+    local port="$1" timeout_s="${2:-20}"
+    local i=0
+    while [[ $i -lt $((timeout_s * 2)) ]]; do
+        if ! is_running oam; then
+            # 프로세스가 떠 있지 않으면 잠깐 대기 후 재확인 (start 직후 race)
+            sleep 0.5; i=$((i + 1)); continue
+        fi
+        if "$PYBIN" - "$port" <<'PYHC' >/dev/null 2>&1
+import sys, ssl, urllib.request
+port = sys.argv[1]
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+r = urllib.request.urlopen("https://127.0.0.1:%s/health" % port, timeout=2, context=ctx)
+sys.exit(0 if r.status == 200 else 1)
+PYHC
+        then
+            return 0
+        fi
+        sleep 0.5; i=$((i + 1))
+    done
+    return 1
 }
 
 stop_oam() {
     stop_one oam
+}
+
+# oam_base_service_split P3 (D5) — oam-svc 독립 서비스 모듈(서비스 관측/녹취/flow/검증).
+#   base OAM(게이트웨이) 뒤 loopback(기본 4480) 업스트림. csc 와 동격 독립 프로세스.
+#   ⚠️ 추가(additive)·dormant: 기본 desired-state(supervised)에 자동 편입하지 않는다 —
+#      분리 배포(--role base) 채택 시점(P5)에 supervised.json 으로 등록. all 모드(단일
+#      프로세스)에선 미사용. kill_stray 패턴은 고유 절대경로(oam_svc_app.py)라 oam_app.py/
+#      csc_app.py 와 교차 매칭되지 않음(pgrep 자기명중 방지).
+start_oam_svc() {
+    if is_running oam-svc; then warn "oam-svc 이미 실행 중 (pid=$(read_pid oam-svc))"; return 0; fi
+    [[ ! -f "$DIST_DIR/oam-svc/src/oam_svc_app.py" ]] && err "oam-svc 소스 없음 (make dist 실행 필요)" && return 1
+    local svc_port
+    svc_port=$("$PYBIN" -c "
+import json, os
+base='$DIST_DIR/oam-svc/config/oam-svc.json'
+candidates=['$DIST_DIR/oam-svc/config.json', '$DIST_DIR/config.json']
+p=None
+for ov in candidates:
+    if not os.path.isfile(ov): continue
+    try:
+        f=json.load(open(ov))
+        if isinstance(f,dict):
+            p=f.get('Server.Port') or (f.get('Server',{}) or {}).get('Port')
+            if p: break
+    except: pass
+if not p:
+    try: p=json.load(open(base))['Server']['Port']
+    except: p=4480
+print(p)" 2>/dev/null || echo 4480)
+    kill_stray "$DIST_DIR/oam-svc/src/oam_svc_app.py" "$svc_port" tcp
+    info "oam-svc (서비스 관측/녹취/flow/검증) 시작... (port=$svc_port)"
+    cd "$DIST_DIR/oam-svc/src"
+    "$PYBIN" -u "$DIST_DIR/oam-svc/src/oam_svc_app.py" >> "$LOG_DIR/oam-svc.log" 2>&1 &
+    save_pid oam-svc $!
+    sleep 1.5
+    is_running oam-svc && ok "oam-svc 시작 완료 (pid=$(read_pid oam-svc), port=$svc_port)" \
+        || { err "oam-svc 시작 실패"; tail -3 "$LOG_DIR/oam-svc.log" | sed 's/^/  /'; return 1; }
+}
+
+stop_oam_svc() {
+    stop_one oam-svc
 }
 
 start_console() {
@@ -696,10 +773,13 @@ cmd_status() {
     status_one csc
     status_one console
     status_one phone
-    echo ""
-    echo -e "  ${BOLD}[TB (Test-Bed — Phase 2/3 UI 유지용 상시 기동)]${NC}"
-    status_one tb-csc
-    status_one tb-console
+    # TB(Test-Bed)는 개발 전용 — 실제 기동 중일 때만 표시 (상용 배포본에선 숨김)
+    if is_running tb-csc || is_running tb-console; then
+        echo ""
+        echo -e "  ${BOLD}[TB (Test-Bed — Phase 2/3 UI 유지용 상시 기동)]${NC}"
+        status_one tb-csc
+        status_one tb-console
+    fi
     echo ""
 }
 
@@ -733,6 +813,7 @@ _start_one() {
         cwrtc)      start_cwrtc ;;
         oam)        start_oam ;;     # OAM 분리 Phase 3b
         csc)        start_csc ;;
+        oam-svc)   start_oam_svc ;;  # oam_base_service_split P3 — 명시 기동만(all 미포함)
         console)    start_console ;;
         phone)      start_phone ;;
         tb-csc)     start_tb_csc ;;
@@ -756,6 +837,7 @@ _stop_one() {
                 case "$c" in
                     csc)     stop_csc ;;
                     oam)     stop_oam ;;     # OAM 분리 Phase 3b
+                    oam-svc) stop_oam_svc ;;
                     console) stop_console ;;
                     phone)   stop_phone ;;
                     *)       stop_one "$c" ;;
@@ -816,6 +898,7 @@ _stop_one() {
             ;;
         csc)     stop_csc ;;
         oam)     stop_oam ;;        # OAM 분리 Phase 3b
+        oam-svc) stop_oam_svc ;;
         console) stop_console ;;
         phone)   stop_phone ;;
         *)       stop_one "$1" ;;

@@ -33,10 +33,10 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 - **규칙** (`service_descriptors_seed/cims.json` `alert_rules[]`, `service_registry._CORE_ALERT_RULES`):
   `{ type, severity(critical|warning), check, target?, threshold?, unit?, metric, msg_open, msg_close, scope? }`
-- **평가/발생** (`oam/src/oam_app.py` `_sweep_alerts`→`_eval_alert_rule`/`_eval_agent_rule`→`_transition`→`_emit`).
+- **평가/발생** (`ems/core/oam/src/oam_app.py` `_sweep_alerts`→`_eval_alert_rule`/`_eval_agent_rule`→`_transition`→`_emit`).
 - **이벤트 레코드** (`csc/src/services/alert_log.py`, `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl`):
   `{ ts, type, severity, action(open|close), message }`
-- **API** (`oam/src/handlers/alerts.py`): `GET /alerts`, `/types`, `/summary`, `/rules`.
+- **API** (`ems/core/oam/src/handlers/alerts.py`): `GET /alerts`, `/types`, `/summary`, `/rules`.
 - **UI**: `AlertsPage.tsx`(이력/통계/규칙) · `AlertBannerWidget`(활성 배너). 색은 critical/warning 2색.
 
 ### 2.1 격차

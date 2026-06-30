@@ -1,6 +1,6 @@
 # 패키지 포맷 + config_template.json 스키마
 
-> 버전: 1.1 (2026-05-08) — base 8 + 변종 4 = **12 tarball**, manifest.json 자동 생성, csc 의 `Packages.Dir` 직접 편집 노출.
+> base 8 + 변종 4 = **12 tarball**, manifest.json 자동 생성, csc 의 `Packages.Dir` 직접 편집 노출.
 
 모듈 패키지(`cims.sh pkg`) 가 생성하는 tarball 의 구조와 내부 메타데이터 스키마를 정의합니다.
 
