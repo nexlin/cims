@@ -18,6 +18,7 @@ import org.pjsip.pjsua2.SipMultipartPart
 import org.pjsip.pjsua2.SipMultipartPartVector
 import org.pjsip.pjsua2.SipTxOption
 import org.pjsip.pjsua2.pjsip_status_code
+import org.pjsip.pjsua2.pjsua_stun_use
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -91,6 +92,21 @@ class SipController(private val config: SipAccountConfig) {
 
     // de-REGISTER(expires=0). 미등록 상태면 PJSIP 가 EINVALIDOP 를 던지므로 조용히 무시.
     fun unregister() = onCtl { account?.let { runCatching { it.setRegistration(false) } } }
+
+    /**
+     * 강제 재등록 — 네트워크 복귀/포그라운드 복귀 시 호출(등록 keepalive).
+     * 계정이 이미 있으면 즉시 REGISTER 재발신, 없으면(서비스가 죽었다 살아난 경우) 무시(호출부에서 register).
+     */
+    fun reregister() = onCtl {
+        val acc = account ?: return@onCtl
+        if (!PjLib.booted) return@onCtl
+        _reg.value = RegState.Registering
+        runCatching { acc.setRegistration(true) }
+            .onFailure { Log.w(TAG, "reregister failed", it) }
+    }
+
+    /** 등록된 계정이 있는지(서비스에서 reregister vs register 판단용). */
+    fun hasAccount(): Boolean = account != null
 
     fun makeCall(dstNumber: String) = onCtl {
         val acc = account ?: run {
@@ -214,6 +230,20 @@ class SipController(private val config: SipAccountConfig) {
         ac.regConfig.registrarUri = "sip:${c.domain}:${c.serverPort};transport=udp"
         ac.regConfig.timeoutSec = c.expiresSec.toLong()              // 희망값(서버 200 OK Expires 추종)
         ac.regConfig.registerOnAdd = true
+
+        // ── 등록 keepalive 보강(doze/슬립·네트워크 단절 후 자동 복구) ──
+        ac.regConfig.retryIntervalSec = 30                           // 등록 실패 시 재시도 주기
+        ac.regConfig.firstRetryIntervalSec = 5                       // 첫 재시도는 빠르게
+        ac.regConfig.randomRetryIntervalSec = 5                      // 다수 단말 동시 재시도 분산
+        ac.regConfig.delayBeforeRefreshSec = 10                      // 만료 전 미리 갱신(여유)
+        ac.regConfig.dropCallsOnFail = false                         // 등록 일시 실패로 통화 끊지 않음
+
+        // NAT 바인딩 유지 — UDP keep-alive 로 서버 도달성 유지(슬립 후 단방향 음성/미수신 방지)
+        ac.natConfig.udpKaIntervalSec = 15                           // 15초 CRLF keep-alive
+        ac.natConfig.contactRewriteUse = 1                           // 서버가 본 공인주소로 Contact 재작성
+        ac.natConfig.viaRewriteUse = 1
+        ac.natConfig.sipStunUse = pjsua_stun_use.PJSUA_STUN_USE_DISABLED    // STUN 서버 없음
+        ac.natConfig.mediaStunUse = pjsua_stun_use.PJSUA_STUN_USE_DISABLED
 
         // Digest: username = IMPI(IMSI@domain), realm="*"(challenge realm echo — 도메인 오타/불일치 무한401 회피, §3.3)
         ac.sipConfig.authCreds.add(

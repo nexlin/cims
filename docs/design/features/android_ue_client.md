@@ -260,7 +260,7 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 | 항목 | 설계 |
 |---|---|
 | 등록 유지 | **Foreground Service**(통화/대기 알림) + 부분 wakelock, 배터리 최적화 예외 요청 |
-| Doze/네트워크 | Doze 진입 시 소켓 정지 대비 — FGS 유지 + 등록 refresh 주기 점검(서버 Expires 3600) |
+| Doze/네트워크 | FGS 유지 + 등록 refresh(서버 Expires 추종) + **등록 keepalive 보강**: ①PJSIP 등록 실패 자동 재시도(`regConfig.firstRetryIntervalSec=5`/`retryIntervalSec=30`) ②NAT 바인딩 UDP keep-alive(`natConfig.udpKaIntervalSec=15`, contact/via rewrite) ③기본 네트워크 복귀 시 재등록(`ConnectivityManager.registerDefaultNetworkCallback`→`SipController.reregister`) ④앱 포그라운드 복귀 시 재등록(`MainActivity.onResume`→`SipService.poke`) |
 | 스레딩 | PJSIP 콜백=워커 스레드 → UI는 main으로 디스패치. **PJSIP 외 스레드에서 호출 시 `Endpoint.libRegisterThread()` 필수** |
 | 객체 수명 | `Account`/`Call`/`AudioMedia` 래퍼 GC 방지(강참조 유지) + 명시적 delete |
 | 권한 | RECORD_AUDIO, CAMERA(영상), POST_NOTIFICATIONS, FOREGROUND_SERVICE(_MICROPHONE), 네트워크 |

@@ -102,6 +102,14 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    // 포그라운드 복귀 시 등록 재시도(keepalive) — doze/슬립 후 끊긴 등록 즉시 복구.
+    override fun onResume() {
+        super.onResume()
+        if (com.cims.ue.core.account.SsoProvisioner.hasAccount(this) || ConfigStore(this).load().isComplete()) {
+            runCatching { SipService.poke(this) }
+        }
+    }
 }
 
 private enum class Screen { GATE, HOME, CONFIG }

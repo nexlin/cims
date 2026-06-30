@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -34,6 +36,7 @@ class SipService : Service() {
     private val scope = CoroutineScope(SupervisorJob())
     private var controller: SipController? = null
     private var stateJob: Job? = null
+    private var netCallback: ConnectivityManager.NetworkCallback? = null
 
     val regState: StateFlow<RegState>? get() = controller?.regState
     val callState: StateFlow<CallState>? get() = controller?.callState
@@ -49,9 +52,15 @@ class SipService : Service() {
         super.onCreate()
         createChannel()
         startForegroundCompat(buildNotification("CIMS VoLTE", "시작 중…"))
+        registerNetworkCallback()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 포그라운드 복귀/네트워크 복귀 등 keepalive 트리거 — 등록만 재시도(계정 있으면 reregister).
+        if (intent?.getBooleanExtra("reregister", false) == true) {
+            if (controller?.hasAccount() == true) controller?.reregister() else ensureRegistered()
+            return START_STICKY
+        }
         // 부팅/SSO 자동시작: 설정이 비어 있고 공유 계정이 있으면 프로비저닝으로 자동 구성 후 등록.
         val autostart = intent?.getBooleanExtra("autostart", false) == true
         if (autostart && !ConfigStore(this).load().isComplete()) {
@@ -59,6 +68,17 @@ class SipService : Service() {
         }
         ensureRegistered()
         return START_STICKY
+    }
+
+    /** 기본 네트워크 복귀 시 재등록 — doze/슬립/와이파이↔LTE 전환 후 등록 끊김 자동 복구. */
+    private fun registerNetworkCallback() {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                if (controller?.hasAccount() == true) controller?.reregister()
+            }
+        }
+        runCatching { cm.registerDefaultNetworkCallback(cb); netCallback = cb }
     }
 
     /** SSO(공유 계정) → /provisioning/me(kind=volte) → ConfigStore 저장 → 등록. 블로킹(IO). */
@@ -150,6 +170,8 @@ class SipService : Service() {
 
     override fun onDestroy() {
         stateJob?.cancel()
+        netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
+        netCallback = null
         controller?.shutdown()
         controller = null
         super.onDestroy()
@@ -221,6 +243,13 @@ class SipService : Service() {
 
         fun start(ctx: Context) {
             val i = Intent(ctx, SipService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i)
+            else ctx.startService(i)
+        }
+
+        /** 포그라운드 복귀 시 등록 재시도 트리거(keepalive). 서비스가 죽어 있었으면 기동+등록. */
+        fun poke(ctx: Context) {
+            val i = Intent(ctx, SipService::class.java).putExtra("reregister", true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i)
             else ctx.startService(i)
         }
