@@ -287,6 +287,21 @@ apply_config_template "$DIST_DIR/csp/config/config_template.json"          "$DIS
 apply_template "$DIST_DIR/cwrtc/config/cwrtc.json.template"                "$DIST_DIR/cwrtc/config/cwrtc.json"
 apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIST_DIR/csc/config/csc.json"
 
+# ── 자동 프로비저닝(/provisioning/me) 서비스 매핑 주입 (android_ue_provisioning.md §3) ─
+#   서비스 kind 별 시그널링 도메인/포트. host 빈값 = 단말이 접속한 CSC Host(올인원 기본).
+#   다중 노드면 host 를 CSP/PSP 대표(VIP) 주소로 채운다(여기선 LOCAL_IP, 빈값 유지도 가능).
+python3 - "$DIST_DIR/csc/config/csc.json" "$VOLTE_DOMAIN" "$PTT_DOMAIN" <<'PY'
+import json, sys
+path, volte_dom, ptt_dom = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path) as f: c = json.load(f)
+c["Provisioning"] = {"Services": {
+    "volte": {"host": "", "port": 5060, "transport": "UDP", "domain": volte_dom},
+    "ptt":   {"host": "", "port": 5060, "transport": "UDP", "domain": ptt_dom},
+}}
+with open(path, "w") as f: json.dump(c, f, indent=4, ensure_ascii=False); f.write("\n")
+print("  csc.json Provisioning 주입: volte=%s ptt=%s" % (volte_dom, ptt_dom))
+PY
+
 # ── TB-CSC (4419) overlay: csc.json 을 기반으로 포트/경로만 치환 ─
 #   TB 는 검증 Phase 진행 중 UI 세션 유지용 임시 기동 모듈.
 #   DB/시크릿/도메인은 Test-CSC(4421, Phase 1 직접 기동본) 와 공유.

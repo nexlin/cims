@@ -67,6 +67,13 @@ CSP_NOTIFY_PORT = 4421
 PSP_NOTIFY_IP = ""           # ""=PSP 미설정 (legacy: CSP 만 사용)
 PSP_NOTIFY_PORT = 4421
 
+# 자동 프로비저닝(/provisioning/me, android_ue_provisioning.md §3) —
+#   서비스 kind 별 시그널링 서버/도메인. host 빈값이면 요청 Host(=UE 가 접속한 IP) 사용(올인원 기본).
+#   다중 노드면 host 를 CSP/PSP 대표(VIP) 주소로 지정.
+PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,port,transport,domain}, "ptt":{...}}}
+_DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
+_MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
+
 
 def _group_uri(gid: str) -> str:
     """mcptt_group_id 식별자 → GMS 그룹 URI.
@@ -178,6 +185,12 @@ def load_shared_data(config):
         PSP_NOTIFY_IP = psp_cfg['Ip']
     if psp_cfg.get('Port'):
         PSP_NOTIFY_PORT = int(psp_cfg['Port'])
+
+    # 자동 프로비저닝(/provisioning/me) — DB 핸들 + 서비스별 시그널링/도메인 매핑 보관.
+    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT
+    _DB_CONFIG = db_config
+    PROVISIONING = config.get('Provisioning', {}) or {}
+    _MCPTT_PORT = int((config.get('McpttServer', {}) or {}).get('Port', 4430))
 
     global GROUP_DIR
     if group_path:
@@ -1364,10 +1377,97 @@ async def handle_openid_config(args: HandlerArgs, kwargs: dict) -> HandlerResult
     return HandlerResult(status=200, body=doc, media_type="application/json")
 
 
+# ── 자동 프로비저닝 (GET /provisioning/me, android_ue_provisioning.md §3) ──
+#   Bearer access_token → mcptt_id → DB 가입자(person 기준 volte+ptt) → 서비스별 프로파일 JSON.
+#   단말은 로그인 1회로 접속/계정 정보를 받아 자동 구성(수동설정 불필요).
+def _msisdn_from_id(u: str) -> str:
+    """mcptt_id/sub (tel:+82.../sip:+82...@dom/+82...) → 가입자 키 msisdn(+82...)."""
+    s = (u or '').strip()
+    low = s.lower()
+    for p in ('sip:', 'tel:'):
+        if low.startswith(p):
+            s = s[len(p):]
+            break
+    return s.split('@', 1)[0].strip()
+
+def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str) -> dict:
+    svc = (PROVISIONING.get('Services') or {}).get(kind, {}) if isinstance(PROVISIONING, dict) else {}
+    account = {
+        "msisdn": sid,
+        "imsi": imsi or "",
+        "authId": auth_id or "",        # 빈값이면 단말이 imsi@domain 합성
+        "sipPassword": None,            # null → 단말이 로그인 비번을 SIP Digest 비번으로 재사용
+    }
+    if kind == "ptt":
+        account["mcpttId"] = sid if sid.startswith(("tel:", "sip:")) else f"tel:{sid}"
+    return {
+        "kind": kind,
+        "sip": {
+            "host": svc.get('host') or host_ip,     # 빈값 → 요청 Host(올인원). 다중노드면 CSP/PSP VIP.
+            "port": int(svc.get('port', 5060)),
+            "transport": svc.get('transport', 'UDP'),
+            "domain": svc.get('domain') or IDMS_DOMAIN,
+        },
+        "account": account,
+    }
+
+async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
+    if not token:
+        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+    msisdn = _msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
+    host_ip = (args.headers.get('host') or args.headers.get('Host') or '').split(':')[0]
+    if not _DB_CONFIG:
+        return HandlerResult(status=503, body={"error": "db_unavailable"}, media_type="application/json")
+
+    services: list = []
+    display_name = None
+    try:
+        import pymysql
+        conn = pymysql.connect(host=_DB_CONFIG.get('Host', '127.0.0.1'),
+                               port=int(_DB_CONFIG.get('Port', 3306)),
+                               user=_DB_CONFIG.get('User', 'root'),
+                               password=_DB_CONFIG.get('Password', ''),
+                               database=_DB_CONFIG.get('Db', 'cims'), connect_timeout=5)
+        try:
+            cur = conn.cursor()
+            # 로그인 msisdn 으로 person(user_id) 확인 → 그 person 의 volte+ptt 전 서비스 반환.
+            user_id = None
+            for t in ('volte_subscriptions', 'ptt_subscriptions'):
+                cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (msisdn,))
+                r = cur.fetchone()
+                if r:
+                    user_id = r[0]
+                    break
+            if user_id is not None:
+                for t, kind in (('volte_subscriptions', 'volte'), ('ptt_subscriptions', 'ptt')):
+                    cur.execute(f"SELECT id, imsi, auth_id FROM {t} WHERE user_id=%s ORDER BY id", (user_id,))
+                    for sid, imsi, auth_id in cur.fetchall():
+                        services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip))
+                cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
+                rr = cur.fetchone()
+                display_name = rr[0] if rr else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.log_error(f"[provisioning/me] DB error: {e}")
+        return HandlerResult(status=503, body={"error": "db_error", "detail": str(e)}, media_type="application/json")
+
+    body = {
+        "user": {"displayName": display_name, "loginId": token.get('mcptt_id') or msisdn},
+        "csc": {"host": host_ip, "port": _MCPTT_PORT},
+        "services": services,
+    }
+    logger.log_info(f"[provisioning/me] msisdn={msisdn} user_id services={[s['kind'] for s in services]}")
+    return HandlerResult(status=200, body=body, media_type="application/json")
+
+
 # Route Mapping (MCPTT server — port 4430)
 CSC_HANDLER_LIST = [
     # OIDC Discovery (3GPP TS 33.180 / OpenID Connect Discovery 1.0)
     ("/.well-known/openid-configuration", handle_openid_config, {}),
+    # 자동 프로비저닝 (UE 로그인 후 서비스별 프로파일)
+    ("/provisioning/me", handle_provisioning_me, {}),
     # IdMS (3GPP TS 33.180 / OAuth 2.0 PKCE)
     ("/idms/authreq",     handle_auth_req,          {}),
     ("/idms/tokenreq",    handle_token_req,          {}),

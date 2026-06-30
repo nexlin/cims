@@ -136,6 +136,7 @@ if __name__ == '__main__':
         # base_path 접두어 → service 매핑 (긴 prefix 우선 매칭)
         _BASE_PATH_SERVICE = [
             ("/.well-known/openid-configuration",      "mcptt"),
+            ("/provisioning/",                         "mcptt"),
             ("/idms/",                                 "mcptt"),
             ("/org.openmobilealliance.groups",         "mcptt"),
             ("/org.3gpp.mcptt",                        "mcptt"),

@@ -4,8 +4,9 @@
 > 단말이 자동 구성**한다. VoLTE(CSP)와 PTT(PSP)가 **다른 서버**일 수 있으므로 응답은 **서비스별 프로파일**
 > 목록으로 구성한다. 신원·설정 플레인은 **CSC(IdMS)** 한 곳이며, 시그널링은 서비스별 서버로 분기한다.
 >
-> 본 기능은 **클라이언트 + 서버(신규 엔드포인트)** 양쪽이 필요하다. 클라이언트는 contract 에 맞춰 구현하고
-> (서버 준비 전엔 수동설정 fallback), 서버측 `GET /provisioning/me` 와 `access_services` 확장은 별도 작업.
+> 본 기능은 **클라이언트 + 서버** 양쪽으로 구현돼 있다. 클라이언트는 contract 에 맞춰 동작하고
+> (실패 시 수동설정 fallback), 서버는 CSC 가 `GET /provisioning/me` 를 제공한다(아래 §4). 서비스별
+> 시그널링 도메인/주소는 `access_services` 확장 대신 CSC 설정 `Provisioning.Services.<kind>` 로 내려준다.
 
 ---
 
@@ -68,14 +69,19 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 
 오류: 토큰 무효 401. 사용자에 해당 서비스 없으면 `services` 에서 제외(빈 배열 가능).
 
-## 4. 서버측 작업 (CSC, 별도 담당)
+## 4. 서버측 구현 (CSC)
 
-1. **신규 엔드포인트 `GET /provisioning/me`** — 토큰의 `mcptt_id` 로 DB 조회해 위 JSON 조립:
-   - 계정: `volte_subscriptions`/`ptt_subscriptions` (imsi/msisdn/authId/service_ref).
-   - 도메인: `access_services`(서비스별 domain/auth_realm).
-   - **시그널링 서버 host:port** ← 아래 #2.
-2. **`access_services` 확장 (핵심)**: 현재 `domain`/`auth_realm` 만 있고 **UE 가 접속할 시그널링 서버 host:port:transport 가 없다.** 서비스별 `signaling: {host,port,transport}` 를 추가해야 CSC 가 volte=CSP, ptt=PSP 주소를 내려줄 수 있다. (서버가 여러 노드면 대표/VIP 주소.)
-3. 비번 정책: 로그인 비번과 SIP Digest 비번 일치 보장(재사용 전제) 또는 응답 `sipPassword` 채움.
+1. **엔드포인트 `GET /provisioning/me`** (`csc/src/services/mcptt.py` `handle_provisioning_me`, CSC mcptt 서버 4430):
+   - 인증: Bearer access_token → `mcptt_id`(또는 sub) → msisdn 추출.
+   - 조회: 로그인 msisdn 으로 person(`user_id`) 확인 → 그 person 의 `volte_subscriptions`+`ptt_subscriptions`
+     전 서비스를 반환(로그인 1회로 보유 서비스 모두). 계정: id(msisdn)/imsi/auth_id.
+   - 사용자: `users.name` → displayName.
+2. **시그널링 도메인/주소** ← CSC 설정 `Provisioning.Services.<kind>` `{host,port,transport,domain}`
+   (configure.sh 가 `VOLTE_DOMAIN`/`PTT_DOMAIN` 으로 주입). `host` 빈값이면 요청 Host(=UE 가 접속한 CSC IP)를
+   사용(올인원 기본). 다중 노드면 volte=CSP, ptt=PSP 대표/VIP 주소로 채운다.
+   (표준 `access_services` 는 CSP 컬렉션이라 CSC 가 직접 못 읽으므로, 시그널링 매핑은 CSC 설정으로 둔다.)
+3. 비번: 응답 `sipPassword=null` → 단말이 로그인 비번을 SIP Digest 비번으로 재사용(망에 SIP 비번 미전송).
+   서비스별 SIP 비번이 다르면 응답에 명시.
 
 > 참고: 이는 TS 24.484 CMS 설정 플레인의 **확장**으로 볼 수 있다(표준 user-profile/service-config 는 SIP 코어 접속 주소를 담지 않으므로 본 프로젝트 전용 프로비저닝 문서로 정의). 서버 정합 갭은 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) 와 함께 관리.
 
