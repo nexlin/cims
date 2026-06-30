@@ -19,11 +19,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -46,8 +53,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cims.ue.core.codec.AmrWbLoopbackSpike
 import com.cims.ue.core.codec.MediaCodecCapabilities
@@ -114,54 +124,132 @@ private fun LoginScreen(
     var cscHost by remember { mutableStateOf(initialCscHost) }
     var userName by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf("") }
+    var showPw by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text("로그인", style = MaterialTheme.typography.titleLarge)
-        Text("로그인하면 서버·계정 정보를 자동으로 받아 설정합니다.", style = MaterialTheme.typography.bodySmall)
-
-        ConfigField("CSC 서버 주소", cscHost) { cscHost = it }
-        ConfigField("아이디", userName) { userName = it }
-        ConfigField("비밀번호", password, isPassword = true) { password = it }
-
-        Button(
-            enabled = !busy && cscHost.isNotBlank() && userName.isNotBlank() && password.isNotBlank(),
-            onClick = {
-                busy = true; status = "로그인 중…"
-                scope.launch {
-                    val cfg = runCatching {
-                        withContext(Dispatchers.IO) {
-                            val pc = ProvisioningClient(CscEndpoint(host = cscHost.trim()), allowInsecureTls = true)
-                            val tok = pc.login(userName.trim(), password)
-                            val profile = pc.fetchProfile(tok.accessToken)
-                            val svc = profile.service("volte")
-                                ?: error("이 계정에 VoLTE 서비스가 없습니다")
-                            svc.toSipAccountConfig(
-                                loginId = profile.loginId ?: userName.trim(),
-                                displayName = profile.displayName ?: userName.trim(),
-                                loginPassword = password,
-                            )
-                        }
-                    }
-                    busy = false
-                    cfg.onSuccess { onProvisioned(it) }
-                        .onFailure { status = "로그인/프로비저닝 실패: ${it.message}\n수동 설정을 사용하세요." }
+    val canSubmit = !busy && cscHost.isNotBlank() && userName.isNotBlank() && password.isNotBlank()
+    fun submit() {
+        busy = true; error = ""
+        scope.launch {
+            val cfg = runCatching {
+                withContext(Dispatchers.IO) {
+                    val pc = ProvisioningClient(CscEndpoint(host = cscHost.trim()), allowInsecureTls = true)
+                    val tok = pc.login(userName.trim(), password)
+                    val profile = pc.fetchProfile(tok.accessToken)
+                    val svc = profile.service("volte") ?: error("이 계정에 VoLTE 서비스가 없습니다")
+                    svc.toSipAccountConfig(
+                        loginId = profile.loginId ?: userName.trim(),
+                        displayName = profile.displayName ?: userName.trim(),
+                        loginPassword = password,
+                    )
                 }
-            },
-        ) { Text("로그인") }
+            }
+            busy = false
+            cfg.onSuccess { onProvisioned(it) }
+                .onFailure { error = it.message ?: "로그인에 실패했습니다" }
+        }
+    }
 
-        if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-
-        HorizontalDivider()
-        OutlinedButton(onClick = onManual) { Text("수동 설정 (고급)") }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Spacer(Modifier.height(24.dp))
+        // 브랜드 헤더
         Text(
-            "※ 서버 프로비저닝(GET /provisioning/me)이 준비되기 전에는 '수동 설정'으로 접속 정보를 직접 입력하세요.",
+            "CIMS",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text("VoLTE 단말 로그인", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "로그인하면 서버·계정 정보를 자동으로 받아 설정합니다.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(20.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                OutlinedTextField(
+                    value = cscHost, onValueChange = { cscHost = it },
+                    label = { Text("CSC 서버 주소") },
+                    placeholder = { Text("예: 121.161.164.45") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                )
+                OutlinedTextField(
+                    value = userName, onValueChange = { userName = it },
+                    label = { Text("아이디") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = password, onValueChange = { password = it },
+                    label = { Text("비밀번호") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = if (showPw) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        TextButton(onClick = { showPw = !showPw }) {
+                            Text(if (showPw) "숨김" else "표시", style = MaterialTheme.typography.labelMedium)
+                        }
+                    },
+                )
+
+                if (error.isNotBlank()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            error,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = { submit() },
+                    enabled = canSubmit,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.height(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Text("로그인")
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onManual) { Text("수동 설정 (고급)") }
+        Text(
+            "서버 프로비저닝(/provisioning/me) 준비 전에는 '수동 설정'으로 접속 정보를 직접 입력하세요.",
             style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 420.dp),
         )
     }
 }
