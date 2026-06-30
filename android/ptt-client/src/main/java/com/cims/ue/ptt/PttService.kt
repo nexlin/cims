@@ -48,10 +48,12 @@ class PttService : Service() {
         val autostart = intent?.getBooleanExtra("autostart", false) == true
         // 사용자 실행(포그라운드)이면 talk 대비 mic 로 승격; 부팅 자동시작이면 specialUse 유지.
         if (!autostart) elevateForCall(true)
-        if (autostart && !ConfigStore(this).load().isComplete()) {
+        // 공유 계정 있으면 최신 정보 재취득(포트/비번 변경 반영). 없으면 캐시 설정으로 등록.
+        if (autostart && com.cims.ue.core.account.SsoProvisioner.hasAccount(this)) {
             scope.launch(kotlinx.coroutines.Dispatchers.IO) { ssoAutoConfigure() }
+        } else {
+            ensureRegistered()
         }
-        ensureRegistered()
         return START_STICKY
     }
 
@@ -68,13 +70,16 @@ class PttService : Service() {
         ensureRegistered()
     }
 
+    private var activeConfig: com.cims.ue.core.config.SipAccountConfig? = null
+
     fun ensureRegistered() {
-        if (controller != null) return
         val cfg = ConfigStore(this).load()
         if (!cfg.isComplete()) { update("CIMS-McPtt", "로그인 필요"); return }
+        if (controller != null && activeConfig == cfg) return   // 동일 설정 → 그대로
+        controller?.let { runCatching { it.shutdown() } }       // 설정 변경(포트/비번) → 재등록
         val mcpttId = "tel:+${cfg.msisdn}"
         val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
-        val c = PttController(cfg, mcpttId, csc, allowInsecureTls = true).also { controller = it }
+        val c = PttController(cfg, mcpttId, csc, allowInsecureTls = true).also { controller = it; activeConfig = cfg }
         observe(c)
         c.register()
     }

@@ -91,7 +91,11 @@ private fun App() {
     val context = LocalContext.current
     val store = remember { ConfigStore(context) }
     var config by remember { mutableStateOf(store.load()) }
-    var screen by remember { mutableStateOf(if (config.isComplete()) Screen.HOME else Screen.GATE) }
+    // 공유 계정 있으면 진입 시 항상 최신 정보 재취득(GATE→재프로비저닝). 계정 없으면 캐시 설정으로 HOME.
+    var screen by remember { mutableStateOf(
+        if (com.cims.ue.core.account.SsoProvisioner.hasAccount(context)) Screen.GATE
+        else if (config.isComplete()) Screen.HOME else Screen.GATE
+    ) }
 
     when (screen) {
         // CIMS-Phone 는 자체 로그인 없음 — CIMS 공유 계정으로 자동 구성(SSO). 계정 없으면 CIMS 앱 로그인 유도.

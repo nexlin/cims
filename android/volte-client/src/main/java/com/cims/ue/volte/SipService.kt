@@ -74,15 +74,19 @@ class SipService : Service() {
         ensureRegistered()
     }
 
-    /** 설정이 완성되어 있으면 컨트롤러를 만들고 REGISTER. 멱등. */
+    private var activeConfig: com.cims.ue.core.config.SipAccountConfig? = null
+
+    /** 설정이 완성되어 있으면 컨트롤러를 만들고 REGISTER. 설정이 바뀌면(재프로비저닝) 재등록. 멱등. */
     fun ensureRegistered() {
-        if (controller != null) return
         val cfg = ConfigStore(this).load()
         if (!cfg.isComplete()) {
             updateNotification("CIMS Phone", "로그인 필요")
             return
         }
-        val c = SipController(cfg).also { controller = it }
+        if (controller != null && activeConfig == cfg) return   // 동일 설정 → 그대로
+        // 최초 또는 설정 변경(포트/비번 등) → 기존 컨트롤러 정리 후 재등록
+        controller?.let { runCatching { it.unregister() }; runCatching { it.shutdown() } }
+        val c = SipController(cfg).also { controller = it; activeConfig = cfg }
         observe(c)
         c.register()
     }
