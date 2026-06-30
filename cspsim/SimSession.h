@@ -94,6 +94,7 @@ public:
 
     void SetNoRegister(bool b) { m_bNoRegister = b; }
     void SetNoXcap(bool b) { m_bNoXcap = b; }
+    void SetCscHost(const std::string& h, int p, bool tls) { m_strCscHost = h; m_iCscPort = p; m_bCscTls = tls; }
 
     // 액션
     void StartCall(const std::string& strTarget = "");
@@ -143,6 +144,9 @@ public:
     bool         m_bInCall;
     bool         m_bNoRegister{false};  // true 면 REGISTER 자동 송신 skip (외부 SIP peer 모드)
     bool         m_bNoXcap{false};      // true 면 NOTIFY 수신 시 XCAP HTTP GET skip (Phase 3D)
+    std::string  m_strCscHost;          // CSC IP — REGISTER 전 IdMS auth 대상 (빈 문자열이면 skip)
+    int          m_iCscPort{0};         // CSC McpttServer 포트
+    bool         m_bCscTls{false};      // CSC TLS 여부
     bool         m_bGmsSubscribed;
     bool         m_bCmsSubscribed;
     std::string  m_strAccessToken;      // CSC-1 bearer 토큰 캐시 (Phase 3C)
@@ -166,6 +170,16 @@ private:
                        std::string& strCallIdOut,
                        int& iSeqOut,
                        std::string& strFromTagOut);
+
+    // SUBSCRIBE Expires=0 — 기존 다이얼로그(Call-ID/From-tag) 재사용
+    void SendUnsubscribe(const std::string& strPsi,
+                         const std::string& strCallId,
+                         int& iSeq,
+                         const std::string& strFromTag);
+
+    // 표준 로그아웃 플로우: de-affiliate → SUBSCRIBE Expires=0 × 2
+    // (REGISTER Expires=0 는 m_clsUserAgent.Stop() 에서 자동 처리)
+    public: void Logout(); private:
 
     // 수신된 NOTIFY 처리
     void HandleNotify(CSipMessage* pclsMessage);

@@ -50,6 +50,17 @@ void CSubscriptionManager::GetSubscriptionsByUser( const std::string &strUserId,
     }
 }
 
+bool CSubscriptionManager::GetSubscriptionByCallId( const std::string &strCallId, SubscriptionInfo &outInfo ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+
+    auto it = m_mapSubs.find( strCallId );
+    if ( it != m_mapSubs.end() ) {
+        outInfo = it->second;
+        return true;
+    }
+    return false;
+}
+
 int CSubscriptionManager::IncrementNotifySeq( const std::string &strCallId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 

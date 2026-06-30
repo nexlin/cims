@@ -262,6 +262,16 @@ SimSession::~SimSession() {
 bool SimSession::Start() {
     m_stats.tRegStart = NowMs();
 
+    // IdMS auth — REGISTER 전에 먼저 수행 (올바른 순서: IdMS → REGISTER → SUBSCRIBE → ...)
+    if (!m_strCscHost.empty() && m_iCscPort > 0) {
+        printf("[%d] IdMS auth (pre-REGISTER) → %s:%d\n", m_iId, m_strCscHost.c_str(), m_iCscPort);
+        if (!AcquireXcapToken(m_strCscHost, m_iCscPort, m_bCscTls)) {
+            printf("[%d] IdMS auth failed — abort\n", m_iId);
+            m_stats.iRegFail++;
+            return false;
+        }
+    }
+
     if (!m_bNoRegister) {
         m_clsUserAgent.InsertRegisterInfo(m_clsServerInfo);
     }
@@ -299,9 +309,14 @@ bool SimSession::Start() {
 }
 
 void SimSession::Stop() {
+    // 통화 중이면 먼저 BYE
     if (!m_strInviteId.empty()) {
         m_clsUserAgent.StopCall(m_strInviteId.c_str());
     }
+    // 표준 로그아웃: de-affiliate → SUBSCRIBE Expires=0 → REGISTER Expires=0
+    Logout();
+    // 메시지 전송 완료 대기 (UDP 소켓이 닫히기 전 패킷이 나가야 함)
+    usleep(300000);
     m_clsRtpThread.Stop();
     m_clsUserAgent.Stop();
 }
@@ -401,6 +416,77 @@ void SimSession::SubscribeCms() {
     SendSubscribe("cms_psi", m_strCmsCallId, m_iCmsSeq, m_strCmsFromTag);
 }
 
+// ─────────────────────────────────────────────
+//  SUBSCRIBE Expires=0 (구독 해제, RFC 3265 §3.1.4)
+//  기존 다이얼로그(Call-ID / From-tag)를 재사용해야 서버가 같은 구독으로 인식한다.
+// ─────────────────────────────────────────────
+void SimSession::SendUnsubscribe(const std::string& strPsi,
+                                  const std::string& strCallId,
+                                  int& iSeq,
+                                  const std::string& strFromTag)
+{
+    if (strCallId.empty() || strFromTag.empty()) return;  // 구독 없음 — skip
+
+    const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
+
+    CSipMessage* pMsg = new CSipMessage();
+    pMsg->m_strSipMethod = "SUBSCRIBE";
+
+    pMsg->m_clsReqUri.Set("sip", strPsi.c_str(), m_strDomain.c_str(), m_iServerPort);
+
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+    SipMakeBranch(szBranch, sizeof(szBranch));
+    pMsg->AddVia(strLocalIp.c_str(), m_iLocalPort, szBranch);
+
+    pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsFrom.InsertParam(SIP_TAG, strFromTag.c_str());
+
+    pMsg->m_clsTo.m_clsUri.Set("sip", strPsi.c_str(), m_strDomain.c_str(), 0);
+
+    pMsg->m_clsCallId.Parse(strCallId.c_str(), (int)strCallId.size());
+
+    pMsg->m_clsCSeq.Set(++iSeq, "SUBSCRIBE");
+
+    pMsg->m_iMaxForwards = 70;
+    pMsg->AddHeader("Expires", "0");
+    pMsg->AddHeader("Event", "xcap-diff");
+
+    char szContact[128];
+    snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
+             m_strUser.c_str(), strLocalIp.c_str(), m_iLocalPort);
+    pMsg->AddHeader("Contact", szContact);
+
+    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+
+    printf("[%d] UNSUBSCRIBE %s Call-ID=%s CSeq=%d\n", m_iId, strPsi.c_str(), strCallId.c_str(), iSeq);
+    m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
+// ─────────────────────────────────────────────
+//  표준 로그아웃 플로우 (실제 단말 대응)
+//  순서: de-affiliate PUBLISH → SUBSCRIBE Expires=0(gms) → SUBSCRIBE Expires=0(cms)
+//        → REGISTER Expires=0 (DeRegister → psip 내부 스레드가 전송)
+// ─────────────────────────────────────────────
+void SimSession::Logout()
+{
+    // 1. MCPTT 그룹 affiliation 해제
+    if (m_bPttMode && !m_strGroupId.empty()) {
+        AffiliateGroup(true);
+    }
+
+    // 2. GMS / CMS 구독 해제 (Expires=0, 기존 다이얼로그 재사용)
+    if (m_bGmsSubscribed) {
+        SendUnsubscribe("gms_psi", m_strGmsCallId, m_iGmsSeq, m_strGmsFromTag);
+        m_bGmsSubscribed = false;
+    }
+    if (m_bCmsSubscribed) {
+        SendUnsubscribe("cms_psi", m_strCmsCallId, m_iCmsSeq, m_strCmsFromTag);
+        m_bCmsSubscribed = false;
+    }
+
+    // 3. REGISTER Expires=0 — m_clsUserAgent.Stop() 내부에서 자동 전송되므로 여기서는 생략
+}
+
 // MCPTT 그룹 affiliation (TS 24.379 §9): 그룹 URI 로 SIP PUBLISH 송신(RFC 3903).
 //   Content-Type: application/vnd.3gpp.mcptt-affiliation-command+xml.
 //   CSP CscfModule::RecvRequestPublish 가 Request-URI 그룹이면 (user,group,client) affiliation 등록.
@@ -434,9 +520,9 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
     pMsg->m_clsCSeq.Set(1, "PUBLISH");
     pMsg->m_iMaxForwards = 70;
     pMsg->AddHeader("Expires", bDeaffiliate ? "0" : "3600");
-    // Event 헤더(RFC 3903 필수). "poc-settings" 는 OMA PoC 레거시 값 — TS 24.379 §9.2.1 의
-    // 3GPP affiliation event 로 추후 확정 필요(현 CSP 는 Event 값을 강제하지 않음). 미검증.
-    pMsg->AddHeader("Event", "poc-settings");
+    // Event 헤더(RFC 3903 필수). TS 24.379 §9 의 3GPP affiliation event = "mcptt".
+    // (F-05: CSP RecvRequestPublish 가 Event != "mcptt" 시 489 Bad Event 로 거절)
+    pMsg->AddHeader("Event", "mcptt");
 
     char szContact[128];
     snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
@@ -474,6 +560,9 @@ void SimSession::StartCall(const std::string& strTarget) {
     clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
     // AMR-WB (PT=99) when media file is provided, otherwise PCMU (PT=0)
     clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : 99;
+    // PTT: SDP에 m=application(floor 수신 포트) 광고
+    if (m_bPttMode && m_clsRtpThread.m_iFloorRecvPort > 0)
+        clsRtp.m_iApplicationPort = m_clsRtpThread.m_iFloorRecvPort;
 
 #ifdef USE_MEDIA_LIST
     // Audio media line
@@ -958,6 +1047,13 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
                                           const char* pszTo, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage) {
     printf("[%d] INVITE from=%s to=%s\n", m_pOwner->m_iId, pszFrom, pszTo);
 
+    // TS 24.379: 이미 통화 중이면 486 Busy Here (실 단말과 동일)
+    if (m_pOwner->m_bInCall) {
+        printf("[%d] [PTT] Already in call — reject INVITE with 486 Busy\n", m_pOwner->m_iId);
+        m_pUserAgent->StopCall(pszCallId, 486);
+        return;
+    }
+
     if (m_pInviteId) *m_pInviteId = pszCallId;
 
     // PTT 모드: 180 Ringing → 200 OK 자동응답 (실 단말 동작과 동일)
@@ -992,6 +1088,10 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
             clsLocalRtp.m_clsMediaList.push_back(clsVideo);
         }
 #endif
+
+        // PTT 200 OK: m=application(floor 수신 포트) 광고
+        if (m_pOwner->m_clsRtpThread.m_iFloorRecvPort > 0)
+            clsLocalRtp.m_iApplicationPort = m_pOwner->m_clsRtpThread.m_iFloorRecvPort;
 
         printf("[%d] [PTT] Sending 200 OK\n", m_pOwner->m_iId);
         m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);

@@ -129,7 +129,7 @@ private:
                         const char* extraJson = nullptr);
 
     void sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
-    void sendAudioRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
+    void sendFloorToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     // Video functions for future use
     void sendVideoToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
     void sendVideoRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort);

@@ -51,9 +51,11 @@ bool CheckError(int n, const char *pszLog) {
 
 
 CRtpThread::CRtpThread()
-    : m_hSocket(INVALID_SOCKET), m_hRtcpSocket(INVALID_SOCKET), m_iPort(0), m_bStopEvent(false),
-      m_bSendThreadRun(false), m_bRecvThreadRun(false),
-      m_iDestFloorPort(0), m_iDestVideoPort(0),
+    : m_hSocket(INVALID_SOCKET), m_hRtcpSocket(INVALID_SOCKET),
+      m_hFloorRecvSocket(INVALID_SOCKET), m_iPort(0), m_iFloorRecvPort(0),
+      m_bStopEvent(false), m_bSendThreadRun(false), m_bRecvThreadRun(false),
+      m_bFloorRecvThreadRun(false),
+      m_iDestFloorPort(0), m_iDestVideoPort(0), m_iLastFloorOp(0),
       m_hVideoSocket(INVALID_SOCKET), m_iVideoPort(0),
       m_bVideoSendThreadRun(false) {}
 
@@ -89,6 +91,15 @@ bool CRtpThread::Create() {
     }
   }
 
+  // Floor receive socket: OS 자동 포트 할당
+  m_hFloorRecvSocket = UdpListen(0, NULL);
+  if (m_hFloorRecvSocket != INVALID_SOCKET) {
+    m_iFloorRecvPort = GetSocketPort(m_hFloorRecvSocket);
+    printf("[RTP] Floor recv socket created on port %d\n", m_iFloorRecvPort);
+  } else {
+    printf("[RTP] Warning: failed to create floor recv socket\n");
+  }
+
   return true;
 }
 
@@ -104,6 +115,10 @@ bool CRtpThread::Destroy() {
   if (m_hVideoSocket != INVALID_SOCKET) {
     closesocket(m_hVideoSocket);
     m_hVideoSocket = INVALID_SOCKET;
+  }
+  if (m_hFloorRecvSocket != INVALID_SOCKET) {
+    closesocket(m_hFloorRecvSocket);
+    m_hFloorRecvSocket = INVALID_SOCKET;
   }
 
   return true;
@@ -138,6 +153,13 @@ bool CRtpThread::Start(const char *pszDestIp, int iDestPort) {
       printf("[RTP] Warning: failed to start video send thread\n");
     }
   }
+
+  // Floor 수신 스레드: floor 소켓이 열려있으면 항상 시작
+  if (m_hFloorRecvSocket != INVALID_SOCKET) {
+    if (StartThread("RtpThreadFloorRecv", RtpThreadFloorRecv, this) == false) {
+      printf("[RTP] Warning: failed to start floor recv thread\n");
+    }
+  }
 #endif
 
   return true;
@@ -148,7 +170,7 @@ bool CRtpThread::Stop() {
 
   for (int i = 0; i < 100; ++i) {
     if (m_bSendThreadRun == false && m_bRecvThreadRun == false
-        && m_bVideoSendThreadRun == false) {
+        && m_bVideoSendThreadRun == false && m_bFloorRecvThreadRun == false) {
       break;
     }
 
@@ -161,7 +183,9 @@ bool CRtpThread::Stop() {
 }
 
 bool CRtpThread::SendFloorControl(int iOpCode) {
-    Socket hSock = (m_hRtcpSocket != INVALID_SOCKET) ? m_hRtcpSocket : m_hSocket;
+    // floor 패킷은 SDP m=application에 광고한 동일 소켓(m_hFloorRecvSocket)으로 보내야 함.
+    // CMP는 멤버의 floor 포트(JOIN_PTT_GROUP의 user_floor_port)에서 오는 패킷만 해당 멤버로 인식.
+    Socket hSock = (m_hFloorRecvSocket != INVALID_SOCKET) ? m_hFloorRecvSocket : m_hSocket;
     if (hSock == INVALID_SOCKET) return false;
 
     // Construct RTCP APP Packet
@@ -171,35 +195,28 @@ bool CRtpThread::SendFloorControl(int iOpCode) {
     uint8_t buffer[1024];
     uint8_t *ptr = buffer;
     
-    // 1. RTCP Header
-    // V=2(10), P=0, Subtype=1 (00001) -> 1000 0001 -> 0x81
-    *ptr++ = 0x81; 
+    // 1. RTCP Header — TS 24.380 §8.2: opcode goes in Subtype(5bits), not app-data
+    // V=2(10), P=0, Subtype=opcode
+    *ptr++ = 0x80 | ((uint8_t)iOpCode & 0x1F);
     *ptr++ = 204; // PT=APP
-    
-    // Length: (Length in 32-bit words) - 1. 
-    // Header(4) + SSRC(4) + Name(4) + Data(4) = 16 bytes = 4 words. Length = 3.
-    // Data is OpCode (1 byte) + Padding (3 bytes) ? 
-    // Let's stick to simplest: OpCode (Request=1, Release=4)
-    // Floor Control Protocol defined in CmpServer: 
-    // Subtype=1 (Floor), Name="MCPT", Data=[OpCode, ...]
-    
-    uint16_t len = 3; // 1(SSRC) + 1(Name) + 1(Data) = 3 words payload
+
+    // Length: (total_bytes / 4) - 1.  Header(4)+SSRC(4)+Name(4)+Data(4) = 16 bytes = 3
+    uint16_t len = 3;
     *ptr++ = (len >> 8) & 0xFF;
     *ptr++ = len & 0xFF;
-    
-    // 2. SSRC (Local) - just use random or 0x12345678
+
+    // 2. SSRC
     uint32_t ssrc = 0x12345678;
     *ptr++ = (ssrc >> 24) & 0xFF;
     *ptr++ = (ssrc >> 16) & 0xFF;
     *ptr++ = (ssrc >> 8) & 0xFF;
     *ptr++ = ssrc & 0xFF;
-    
-    // 3. Name (ASCII) "MCPT"
+
+    // 3. Name "MCPT"
     *ptr++ = 'M'; *ptr++ = 'C'; *ptr++ = 'P'; *ptr++ = 'T';
-    
-    // 4. Data (OpCode) + Padding
-    *ptr++ = (uint8_t)iOpCode;
-    *ptr++ = 0; *ptr++ = 0; *ptr++ = 0; // Padding to 32-bit boundary
+
+    // 4. App-data (opcode field cleared, id_len=0, reserved=0)
+    *ptr++ = 0; *ptr++ = 0; *ptr++ = 0; *ptr++ = 0;
     
     int packetLen = ptr - buffer;
     
