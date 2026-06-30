@@ -86,8 +86,20 @@ private fun PttScreen() {
     val status by (ctl?.status ?: fbStatus).collectAsState()
 
     var groupId by remember { mutableStateOf("") }
-    var user by remember { mutableStateOf("") }
-    var pw by remember { mutableStateOf("") }
+    val hasAccount = remember { com.cims.ue.core.account.SsoProvisioner.hasAccount(context) }
+
+    // SSO: 컨트롤러 연결 시 CIMS 공유 계정의 MCPTT(TS 33.180) 토큰을 주입(별도 로그인 없음).
+    androidx.compose.runtime.LaunchedEffect(ctl) {
+        val c = ctl ?: return@LaunchedEffect
+        if (!com.cims.ue.core.account.SsoProvisioner.hasAccount(context)) return@LaunchedEffect
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val am = android.accounts.AccountManager.get(context)
+            val acct = com.cims.ue.core.account.CimsAccounts.get(am) ?: return@withContext
+            val tok = com.cims.ue.core.account.CimsAccounts.blockingToken(
+                am, acct, com.cims.ue.core.account.CimsAccounts.TOKEN_MCPTT)
+            if (tok != null) c.setAccessToken(tok)
+        }
+    }
 
     Column(
         Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
@@ -110,13 +122,19 @@ private fun PttScreen() {
         }
 
         HorizontalDivider()
-        Text("CSC (선택)", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(user, { user = it }, label = { Text("user_name (tel:)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(pw, { pw = it }, label = { Text("password") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { ctl?.login(user.trim(), pw) }) { Text("CSC 로그인") }
+        Text("계정 (CIMS SSO)", style = MaterialTheme.typography.titleMedium)
+        if (hasAccount) {
+            Text("CIMS 계정으로 자동 인증 — 별도 로그인 없음", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = { ctl?.loadGroups() }) { Text("그룹 조회") }
+        } else {
+            Text("CIMS 앱에서 먼저 로그인하세요.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = {
+                val act = context as? android.app.Activity
+                android.accounts.AccountManager.get(context).addAccount(
+                    com.cims.ue.core.account.CimsAccounts.ACCOUNT_TYPE,
+                    com.cims.ue.core.account.CimsAccounts.TOKEN_MCPTT,
+                    null, null, act, null, null)
+            }) { Text("CIMS 로그인 열기") }
         }
 
         HorizontalDivider()

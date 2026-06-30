@@ -144,7 +144,8 @@ class PttService : Service() {
         private const val CH = "cims_ptt"
         private const val NID = 2001
         fun start(ctx: Context) {
-            val i = Intent(ctx, PttService::class.java)
+            // autostart=true → 공유 계정(SSO)으로 자동 구성(별도 로그인 없음).
+            val i = Intent(ctx, PttService::class.java).putExtra("autostart", true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
         }
     }

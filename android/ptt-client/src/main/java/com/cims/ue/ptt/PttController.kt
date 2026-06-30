@@ -80,6 +80,13 @@ class PttController(
             .onFailure { _status.value = "CSC 인증 실패: ${it.message}" }
     }
 
+    /** SSO: CIMS 공유 계정에서 받은 MCPTT(TS 33.180) access_token 직접 적용 — 수동 CSC 로그인 대체. */
+    fun setAccessToken(accessToken: String) {
+        token = TokenSet(accessToken = accessToken, tokenType = "Bearer",
+                         refreshToken = null, idToken = null, expiresInSec = 3600, scope = null)
+        _status.value = "CIMS 계정 토큰 적용"
+    }
+
     fun loadGroups() = scope.launch {
         val c = csc ?: return@launch
         val t = token?.accessToken ?: run { _status.value = "토큰 없음"; return@launch }

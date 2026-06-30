@@ -84,18 +84,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { LOGIN, HOME, CONFIG }
+private enum class Screen { GATE, HOME, CONFIG }
 
 @Composable
 private fun App() {
     val context = LocalContext.current
     val store = remember { ConfigStore(context) }
     var config by remember { mutableStateOf(store.load()) }
-    var screen by remember { mutableStateOf(if (config.isComplete()) Screen.HOME else Screen.LOGIN) }
+    var screen by remember { mutableStateOf(if (config.isComplete()) Screen.HOME else Screen.GATE) }
 
     when (screen) {
-        Screen.LOGIN -> LoginScreen(
-            initialCscHost = config.serverHost,
+        // CIMS-Phone 는 자체 로그인 없음 — CIMS 공유 계정으로 자동 구성(SSO). 계정 없으면 CIMS 앱 로그인 유도.
+        Screen.GATE -> SsoGateScreen(
             onProvisioned = { c -> store.save(c); config = c; screen = Screen.HOME },
             onManual = { screen = Screen.CONFIG },
         )
@@ -103,7 +103,7 @@ private fun App() {
             initial = config,
             canCancel = config.isComplete(),
             onSave = { c -> store.save(c); config = c; screen = Screen.HOME },
-            onCancel = { screen = if (config.isComplete()) Screen.HOME else Screen.LOGIN },
+            onCancel = { screen = if (config.isComplete()) Screen.HOME else Screen.GATE },
         )
         Screen.HOME -> HomeScreen(
             config = config,
@@ -115,142 +115,78 @@ private fun App() {
 // ─────────────────────────────────────── 로그인(자동 프로비저닝) ───────────────────────────────────────
 
 @Composable
-private fun LoginScreen(
-    initialCscHost: String,
+private fun SsoGateScreen(
     onProvisioned: (SipAccountConfig) -> Unit,
     onManual: () -> Unit,
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var cscHost by remember { mutableStateOf(initialCscHost) }
-    var userName by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var showPw by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var hasAccount by remember { mutableStateOf(com.cims.ue.core.account.SsoProvisioner.hasAccount(context)) }
     var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
 
-    val canSubmit = !busy && cscHost.isNotBlank() && userName.isNotBlank() && password.isNotBlank()
-    fun submit() {
-        busy = true; error = ""
+    fun provision() {
+        busy = true; status = "CIMS 계정으로 구성 중…"
         scope.launch {
             val cfg = runCatching {
                 withContext(Dispatchers.IO) {
-                    val pc = ProvisioningClient(CscEndpoint(host = cscHost.trim()), allowInsecureTls = true)
-                    val tok = pc.login(userName.trim(), password)
-                    val profile = pc.fetchProfile(tok.accessToken)
-                    val svc = profile.service("volte") ?: error("이 계정에 VoLTE 서비스가 없습니다")
+                    val prof = com.cims.ue.core.account.SsoProvisioner.fetchProfile(context)
+                        ?: error("CIMS 로그인 세션이 없습니다")
+                    val svc = prof.service("volte") ?: error("이 계정에 VoLTE 서비스가 없습니다")
                     svc.toSipAccountConfig(
-                        loginId = profile.loginId ?: userName.trim(),
-                        displayName = profile.displayName ?: userName.trim(),
-                        loginPassword = password,
+                        loginId = prof.loginId ?: "",
+                        displayName = prof.displayName ?: "",
+                        loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(context),
                     )
                 }
             }
             busy = false
-            cfg.onSuccess { onProvisioned(it) }
-                .onFailure { error = it.message ?: "로그인에 실패했습니다" }
+            cfg.onSuccess { onProvisioned(it) }.onFailure { status = it.message ?: "구성 실패" }
         }
     }
 
+    // 진입 시 공유 계정 있으면 자동 구성(로그인 UI 없음).
+    androidx.compose.runtime.LaunchedEffect(hasAccount) { if (hasAccount && !busy) provision() }
+
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .imePadding()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
+        modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
-        Spacer(Modifier.height(24.dp))
-        // 브랜드 헤더
-        Text(
-            "CIMS",
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text("VoLTE 단말 로그인", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "로그인하면 서버·계정 정보를 자동으로 받아 설정합니다.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(20.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                OutlinedTextField(
-                    value = cscHost, onValueChange = { cscHost = it },
-                    label = { Text("CSC 서버 주소") },
-                    placeholder = { Text("예: 121.161.164.45") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                )
-                OutlinedTextField(
-                    value = userName, onValueChange = { userName = it },
-                    label = { Text("아이디") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = password, onValueChange = { password = it },
-                    label = { Text("비밀번호") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = if (showPw) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    trailingIcon = {
-                        TextButton(onClick = { showPw = !showPw }) {
-                            Text(if (showPw) "숨김" else "표시", style = MaterialTheme.typography.labelMedium)
-                        }
-                    },
-                )
-
-                if (error.isNotBlank()) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = MaterialTheme.shapes.small,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            error,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(12.dp),
-                        )
-                    }
-                }
-
-                Button(
-                    onClick = { submit() },
-                    enabled = canSubmit,
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                ) {
-                    if (busy) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.height(20.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    } else {
-                        Text("로그인")
-                    }
-                }
+        Text("CIMS", style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text("CIMS-Phone", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(16.dp))
+        if (hasAccount) {
+            Text("CIMS 계정으로 자동 구성합니다.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(12.dp))
+            if (busy) CircularProgressIndicator()
+            if (status.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(status, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                if (!busy) { Spacer(Modifier.height(8.dp)); Button(onClick = { provision() }) { Text("다시 시도") } }
             }
+        } else {
+            Text("이 앱은 별도 로그인이 없습니다.\nCIMS 앱에서 먼저 로그인하세요.",
+                style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    val act = context as? android.app.Activity
+                    android.accounts.AccountManager.get(context).addAccount(
+                        com.cims.ue.core.account.CimsAccounts.ACCOUNT_TYPE,
+                        com.cims.ue.core.account.CimsAccounts.TOKEN_PROVISIONING,
+                        null, null, act,
+                        { _ -> hasAccount = com.cims.ue.core.account.SsoProvisioner.hasAccount(context) },
+                        android.os.Handler(android.os.Looper.getMainLooper()),
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().widthIn(max = 360.dp),
+            ) { Text("CIMS 로그인 열기") }
         }
-
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(20.dp))
         TextButton(onClick = onManual) { Text("수동 설정 (고급)") }
-        Text(
-            "서버 프로비저닝(/provisioning/me) 준비 전에는 '수동 설정'으로 접속 정보를 직접 입력하세요.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 420.dp),
-        )
     }
 }
 
