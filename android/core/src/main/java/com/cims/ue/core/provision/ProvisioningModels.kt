@@ -18,7 +18,9 @@ data class CscEndpoint(
     val port: Int = 4430,
     val clientId: String = "MCPTT_UE",
     val redirectUri: String = "https://localhost/callback",
-    val scope: String = "openid 3gpp:mcptt:ptt_server",
+    // 로그인 시 두 scope 함께 grant — 이후 AccountManager 가 용도별로 좁혀 발급.
+    //   cims:provisioning=부트스트랩(/provisioning/me), 3gpp:mcptt:ptt_server=MCPTT 서비스(TS 33.180).
+    val scope: String = "openid cims:provisioning 3gpp:mcptt:ptt_server",
 ) {
     val baseUrl: String get() = "https://$host:$port"
 }

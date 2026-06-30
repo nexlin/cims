@@ -52,8 +52,26 @@ class SipService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 부팅/SSO 자동시작: 설정이 비어 있고 공유 계정이 있으면 프로비저닝으로 자동 구성 후 등록.
+        val autostart = intent?.getBooleanExtra("autostart", false) == true
+        if (autostart && !ConfigStore(this).load().isComplete()) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) { ssoAutoConfigure() }
+        }
         ensureRegistered()
         return START_STICKY
+    }
+
+    /** SSO(공유 계정) → /provisioning/me(kind=volte) → ConfigStore 저장 → 등록. 블로킹(IO). */
+    private fun ssoAutoConfigure() {
+        val prof = com.cims.ue.core.account.SsoProvisioner.fetchProfile(this) ?: return
+        val svc = prof.service("volte") ?: return
+        val cfg = svc.toSipAccountConfig(
+            loginId = prof.loginId ?: svc.msisdn,
+            displayName = prof.displayName ?: svc.msisdn,
+            loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),  // sipPassword=null → 공유 로그인 비번 재사용
+        )
+        ConfigStore(this).save(cfg)
+        ensureRegistered()
     }
 
     /** 설정이 완성되어 있으면 컨트롤러를 만들고 REGISTER. 멱등. */
@@ -61,7 +79,7 @@ class SipService : Service() {
         if (controller != null) return
         val cfg = ConfigStore(this).load()
         if (!cfg.isComplete()) {
-            updateNotification("CIMS VoLTE", "설정 필요")
+            updateNotification("CIMS Phone", "로그인 필요")
             return
         }
         val c = SipController(cfg).also { controller = it }
@@ -102,6 +120,7 @@ class SipService : Service() {
             }.launchIn(this)
 
             c.callState.onEach { call ->
+                elevateForCall(call is CallState.Active || call is CallState.Outgoing || call is CallState.Incoming)
                 val line = when (call) {
                     is CallState.Incoming -> "수신: ${call.remote}"
                     is CallState.Outgoing -> "발신: ${call.remote}"
@@ -109,7 +128,7 @@ class SipService : Service() {
                     is CallState.Disconnected -> null
                     CallState.Null -> null
                 }
-                if (line != null) updateNotification("CIMS VoLTE", line)
+                if (line != null) updateNotification("CIMS Phone", line)
             }.launchIn(this)
         }
     }
@@ -144,11 +163,32 @@ class SipService : Service() {
             .notify(NOTIF_ID, buildNotification(title, text))
     }
 
-    private fun startForegroundCompat(n: Notification) {
+    /**
+     * 등록유지 FGS. Android 14+(API34)에서 microphone 타입은 **백그라운드(부팅)에서 시작 불가**이므로
+     * 등록 단계는 specialUse 로 시작하고(부팅 자동시작 가능), 통화 활성 시 [elevateForCall] 로
+     * microphone 으로 승격한다. 13 이하는 종전대로 microphone.
+     */
+    private fun fgsType(inCall: Boolean): Int = when {
+        Build.VERSION.SDK_INT >= 34 ->
+            if (inCall) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            else ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        else -> 0
+    }
+
+    private fun startForegroundCompat(n: Notification, inCall: Boolean = false) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            startForeground(NOTIF_ID, n, fgsType(inCall))
         } else {
             startForeground(NOTIF_ID, n)
+        }
+    }
+
+    /** 통화 활성/종료 시 FGS 타입 승격/복귀 (마이크 접근 권한 보장). */
+    private fun elevateForCall(active: Boolean) {
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForegroundCompat(buildNotification("CIMS Phone", if (active) "통화 중" else "등록 유지"), inCall = active)
         }
     }
 

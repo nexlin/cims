@@ -27,6 +27,11 @@ SECRET_KEY = _secrets.token_urlsafe(32)
 #   ⚠ 본 파생은 가입자별 **구조적 프로비저닝**(UserDecryptKey/SSK/PVT 가 사용자마다 다름)을 제공하나,
 #   참값 ECCSI/SAKKE(RFC 6507/6508)는 pairing 암호 라이브러리가 필요한 후속 과제다(E2E 암호화 도입 시).
 KMS_MASTER_SECRET = _secrets.token_bytes(32)
+# IdMS scope 분리 — 평면별 토큰 용도 구분(TS 33.180 / 본 프로젝트 프로비저닝).
+#   CIMS 앱 로그인은 두 scope 를 함께 grant 받고, AccountManager 가 refresh 로 용도별 토큰을 좁혀 발급.
+SCOPE_PROVISIONING = "cims:provisioning"      # 디바이스 부트스트랩(/provisioning/me)
+SCOPE_MCPTT        = "3gpp:mcptt:ptt_server"  # MCPTT 서비스 평면(XCAP/KMS/affiliation)
+
 IDMS_ISSUER = "idms.mcptt.com"
 KMS_URI = "kms.mcptt.com"
 IDMS_DOMAIN = "mcptt.com"
@@ -1087,9 +1092,19 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         
         # 4. refresh token rotation
         user_id = token_data["user_id"]
-        scope = token_data.get("scope", "")
-        
-        # 새 토큰 발급
+        granted_scope = token_data.get("scope", "") or ""
+
+        # scope 분리: refresh 요청이 scope 를 명시하면 원 grant 의 subset 으로 좁혀 발급한다.
+        #   (AccountManager 가 authTokenType 별로 provisioning / mcptt 토큰을 따로 받기 위함.)
+        requested_scope = (data.get('scope') or "").strip()
+        if requested_scope:
+            granted_set = set(granted_scope.split())
+            req = [s for s in requested_scope.split() if s in granted_set]
+            scope = " ".join(req) if req else granted_scope   # 교집합 없으면 원 scope 유지
+        else:
+            scope = granted_scope
+
+        # 새 토큰 발급 (요청 scope 반영)
         id_token, access_token, new_refresh_token = create_tokens(user_id, scope, client_id)
         
         # 기존 토큰 회수
@@ -1415,6 +1430,14 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
         return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+    # scope 분리: provisioning 토큰만 허용(빈 scope=레거시 허용). mcptt 전용 토큰은 거부 → 평면 혼용 방지.
+    _sc = token.get('scope') or []
+    if isinstance(_sc, str):
+        _sc = _sc.split()
+    if _sc and SCOPE_PROVISIONING not in _sc:
+        return HandlerResult(status=403,
+                             body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
+                             media_type="application/json")
     msisdn = _msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
     host_ip = (args.headers.get('host') or args.headers.get('Host') or '').split(':')[0]
     if not _DB_CONFIG:

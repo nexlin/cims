@@ -21,5 +21,6 @@ dependencyResolutionManagement {
 rootProject.name = "cims-android"
 
 include(":core")
+include(":cims")
 include(":volte-client")
 include(":ptt-client")

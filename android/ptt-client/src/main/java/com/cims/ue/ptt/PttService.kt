@@ -45,14 +45,33 @@ class PttService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val autostart = intent?.getBooleanExtra("autostart", false) == true
+        // 사용자 실행(포그라운드)이면 talk 대비 mic 로 승격; 부팅 자동시작이면 specialUse 유지.
+        if (!autostart) elevateForCall(true)
+        if (autostart && !ConfigStore(this).load().isComplete()) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) { ssoAutoConfigure() }
+        }
         ensureRegistered()
         return START_STICKY
+    }
+
+    /** SSO(공유 계정) → /provisioning/me(kind=ptt) → ConfigStore 저장 → 등록. 블로킹(IO). */
+    private fun ssoAutoConfigure() {
+        val prof = com.cims.ue.core.account.SsoProvisioner.fetchProfile(this) ?: return
+        val svc = prof.service("ptt") ?: return
+        val cfg = svc.toSipAccountConfig(
+            loginId = prof.loginId ?: svc.msisdn,
+            displayName = prof.displayName ?: svc.msisdn,
+            loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),
+        )
+        ConfigStore(this).save(cfg)
+        ensureRegistered()
     }
 
     fun ensureRegistered() {
         if (controller != null) return
         val cfg = ConfigStore(this).load()
-        if (!cfg.isComplete()) { update("CIMS PTT", "설정 필요"); return }
+        if (!cfg.isComplete()) { update("CIMS-McPtt", "로그인 필요"); return }
         val mcpttId = "tel:+${cfg.msisdn}"
         val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
         val c = PttController(cfg, mcpttId, csc, allowInsecureTls = true).also { controller = it }
@@ -97,10 +116,23 @@ class PttService : Service() {
     private fun update(title: String, text: String) =
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NID, notification(title, text))
 
-    private fun startForegroundCompat(n: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-            startForeground(NID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+    // Android 14+: 부팅 등록단계는 specialUse(백그라운드 시작 가능), talk 시 mic 로 승격.
+    private fun fgsType(inCall: Boolean): Int = when {
+        Build.VERSION.SDK_INT >= 34 ->
+            if (inCall) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            else ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        else -> 0
+    }
+
+    private fun startForegroundCompat(n: Notification, inCall: Boolean = false) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(NID, n, fgsType(inCall))
         else startForeground(NID, n)
+    }
+
+    /** talk(floor) 활성 시 mic 타입 승격 (포그라운드 사용 시). */
+    private fun elevateForCall(active: Boolean) {
+        if (Build.VERSION.SDK_INT >= 34) startForegroundCompat(notification("CIMS-McPtt", if (active) "PTT 사용 중" else "등록 유지"), inCall = active)
     }
 
     private fun stopForegroundCompat() {

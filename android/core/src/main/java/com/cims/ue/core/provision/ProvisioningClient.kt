@@ -77,6 +77,31 @@ class ProvisioningClient(
         }
     }
 
+    /**
+     * refresh_token grant → 새 access_token (+회전된 refresh_token). [scope] 지정 시 원 grant 의
+     * subset 으로 좁혀 발급(AccountManager 가 provisioning / mcptt 용도별 토큰을 따로 받기 위함).
+     */
+    fun refresh(refreshToken: String, scope: String? = null): TokenSet {
+        val fb = FormBody.Builder()
+            .add("grant_type", "refresh_token")
+            .add("refresh_token", refreshToken)
+            .add("client_id", csc.clientId)
+        if (!scope.isNullOrBlank()) fb.add("scope", scope)
+        http.newCall(Request.Builder().url("${csc.baseUrl}/idms/tokenreq").post(fb.build()).build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            check(resp.isSuccessful) { "refresh ${resp.code}: $body" }
+            val j = JSONObject(body)
+            return TokenSet(
+                accessToken = j.getString("access_token"),
+                tokenType = j.optString("token_type", "Bearer"),
+                refreshToken = j.optString("refresh_token", null),
+                idToken = j.optString("id_token", null),
+                expiresInSec = j.optInt("expires_in", 3600),
+                scope = j.optString("scope", null),
+            )
+        }
+    }
+
     /** GET /provisioning/me → 서비스별 프로파일. */
     fun fetchProfile(accessToken: String): ProvisioningProfile {
         val req = Request.Builder()
