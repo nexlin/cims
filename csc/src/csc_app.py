@@ -65,12 +65,17 @@ if __name__ == '__main__':
 
     def load_config():
         # Configuration file location resolved via _CONFIG_PATH (absolute)
+        # base(config/csc.json)는 configure 단계(apply_config_template)에서만 생성되므로
+        # 상용 배포본(build→pkg, configure 생략)에는 없는 게 정상이다. 이때 실제 설정은
+        # agent 가 쓴 deployment overlay(config.json)가 SoT 이므로, base 부재 시에도
+        # overlay 머지를 계속 진행한다 (배포 계약: overlay=primary, base=optional —
+        # lifecycle.sh / SipServerSetup 과 동일).
         try:
             with open(_CONFIG_PATH, 'r') as f:
                 c = json.load(f)
         except FileNotFoundError:
-            logger.log_error(f"Config file not found at {_CONFIG_PATH}")
-            return {}
+            logger.log_info(f"base config not found at {_CONFIG_PATH} — overlay(config.json) 만으로 기동")
+            c = {}
         # Deployment overlay: cims_agent 가 멀티-변종 install 지원으로 변종 디렉토리
         # 안에 config.json 을 쓰므로 (install_path/csc/config.json), 거기를 먼저 본다.
         # 후방 호환으로 legacy 위치 (install_path/config.json) 도 fallback.

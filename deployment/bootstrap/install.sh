@@ -197,14 +197,18 @@ _ver() { basename "$1" .tar.gz | sed 's/^[a-z]*-//'; }
 OAM_VER=$(_ver "$OAM_TAR"); AGT_VER=$(_ver "$AGT_TAR")
 info "설치 구성: oam-base $OAM_VER (console 동봉) / agent $AGT_VER → $PREFIX (HTTPS :$PORT)"
 
-# ── 레이아웃 (버전 단위 설치 — agent 배포 체계와 동일, 모듈은 modules/ 하위) ──
+# ── 레이아웃 (버전 단위 설치 + current 심볼릭 — agent 배포 체계와 동일, 모듈은 modules/ 하위) ──
 MODULES_DIR="$PREFIX/modules"
 OAM_ROOT="$MODULES_DIR/oam/$OAM_VER"
+OAM_CURRENT="$MODULES_DIR/oam/current"     # 활성 버전 통로 (CIMS_DIST_DIR / supervised)
 RUNTIME_DIR="$MODULES_DIR/oam/runtime"     # 버전 무관 영속 store (업그레이드 생존)
 mkdir -p "$OAM_ROOT" "$RUNTIME_DIR"
 
 info "패키지 전개..."
 tar xzf "$OAM_TAR" -C "$OAM_ROOT"
+# current 심볼릭 flip (원자적, 상대 타겟) — 이후 agent 배포 체계가 동일 방식으로 인수
+ln -sfn "$OAM_VER" "$MODULES_DIR/oam/.current.tmp"
+mv -Tf "$MODULES_DIR/oam/.current.tmp" "$OAM_CURRENT"
 # agent 는 전개하지 않음 — 설치 에셋(/install-agent.sh, /cims_agent.py,
 # /agent-bundle.tar.gz)의 SoT 는 패키지 저장소(seed 자동 등록). 버전별로
 # 보관되어 다른 모듈과 동일하게 업데이트/롤백 관리.
@@ -403,8 +407,9 @@ _run_as() {
 cat > "$PREFIX/start-oam.sh" <<SH
 #!/usr/bin/env bash
 # OAM 부트스트랩 기동 — 정식 감독은 agent watchdog + cims-svc (start oam).
-cd "$OAM_ROOT/oam/src"
-setsid nohup /usr/bin/env python3 -u "$OAM_ROOT/oam/src/oam_app.py" > "$OAM_ROOT/log/oam_stdout.log" 2>&1 < /dev/null &
+# current 통로로 기동 — 이후 oam 업그레이드 시 이 스크립트가 자동으로 활성 버전을 가리킨다.
+cd "$OAM_CURRENT/oam/src"
+setsid nohup /usr/bin/env python3 -u "$OAM_CURRENT/oam/src/oam_app.py" > "$OAM_ROOT/log/oam_stdout.log" 2>&1 < /dev/null &
 SH
 chmod +x "$PREFIX/start-oam.sh"
 if [[ $DO_START -eq 1 ]]; then
@@ -569,7 +574,7 @@ except Exception: print('')" 2>/dev/null)
                 #   start_oam 의 kill_stray 가 부트스트랩 OAM(같은 포트/경로)을 정리하고
                 #   pidfile($OAM_ROOT/run/oam.pid)을 남긴다 → 중복기동·고아 방지.
                 info "OAM 을 agent 관리(cims-svc)로 인계... (role=base, 게이트웨이)"
-                if _run_as "OAM_ROLE=base CIMS_DIST_DIR='$OAM_ROOT' CIMS_PYTHON=python3 '$PREFIX/agent/bin/cims-svc' start oam" \
+                if _run_as "OAM_ROLE=base CIMS_DIST_DIR='$OAM_CURRENT' CIMS_PYTHON=python3 '$PREFIX/agent/current/bin/cims-svc' start oam" \
                         >> "$OAM_ROOT/log/oam_handover.log" 2>&1; then
                     ok "OAM cims-svc 감독 전환 완료 (pidfile + watchdog)"
                 else
@@ -577,7 +582,7 @@ except Exception: print('')" 2>/dev/null)
                 fi
                 # agent watchdog 감독 등록: oam → versioned 모듈 경로 (supervise_tick 가 읽음)
                 mkdir -p "$PREFIX/run"
-                printf '{"oam": "%s"}\n' "$OAM_ROOT" > "$PREFIX/run/supervised.json"
+                printf '{"oam": "%s"}\n' "$OAM_CURRENT" > "$PREFIX/run/supervised.json"
                 chown -R "$SVC_USER":"$(id -gn "$SVC_USER")" "$PREFIX/run" 2>/dev/null || true
                 # 이 노드의 base 모듈(oam — console 동봉)을 deployment 로 등록 → 콘솔 "패키지 설치" 목록 노출.
                 # oam 은 upgrade-safe overlay(포트/시크릿/경로/admin) 동봉 — upgrade 시 instance config 보존.
@@ -586,7 +591,7 @@ except Exception: print('')" 2>/dev/null)
                     AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
                 else
                     # systemd 미사용 — install-agent.sh 가 enroll 까지만 했으므로 nohup 기동
-                    _run_as "cd '$PREFIX' && setsid nohup python3 ./agent/cims_agent.py --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM' > ./agent-stdout.log 2>&1 < /dev/null &"
+                    _run_as "cd '$PREFIX' && CIMS_AGENT_PREFIX='$PREFIX' setsid nohup python3 ./agent/current/cims_agent.py --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM' > ./agent-stdout.log 2>&1 < /dev/null &"
                     sleep 3
                     AGENT_STATE="실행 중 (nohup — systemd 미사용 환경)"
                 fi

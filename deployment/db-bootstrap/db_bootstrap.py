@@ -40,7 +40,7 @@ def _load_pymysql():
             os.path.join(here, 'vendor'),                 # 동봉(패키지)
             os.path.join(here, '..', '..', 'oam', 'vendor'),
             os.path.join(here, '..', '..', 'csc', 'vendor'),
-            '/opt/cims-agent/oam/vendor',
+            '/opt/cims-agent/modules/oam/current/oam/vendor',
         ]
         for c in cands:
             if os.path.isdir(os.path.join(c, 'pymysql')):

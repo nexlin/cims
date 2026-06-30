@@ -168,7 +168,7 @@ CSC 는 결과에 따라 다음을 자동 처리:
 
 > ⚠️ CSC(OAM) 의 `agent_api.py _metric()` 는 record 화이트리스트로 필드를 거른다 — **신규 metric 필드(`mounts` 등)는 화이트리스트에 명시 추가하지 않으면 저장 시 버려진다**. 마찬가지로 응답 직렬화(`_agent_metrics._row`)에서도 `per_iface`/`mounts` 를 노출해야 대시보드에 전달된다.
 
-> ⚠️ 모듈 liveness 탐지(`_metric_module_names()`)는 `_DEFAULT_METRIC_MODULES`(csp/cmp/csc/cwrtc) ∪ `DEFAULT_INSTALL_ROOT` listdir ∪ **`supervised.json` 키**. install_path 가 agent 트리 밖(`/opt/cims-agent/<module>`)인 모듈은 listdir 로 안 잡혀 OAM `module_down` 알람이 false 로 뜨므로, 워치독 등록(supervised.json)을 합쳐 경로 독립적으로 탐지한다.
+> ⚠️ 모듈 liveness 탐지(`_metric_module_names()`)는 `_DEFAULT_METRIC_MODULES`(csp/cmp/csc/cwrtc) ∪ `DEFAULT_INSTALL_ROOT`(`<prefix>/modules`) listdir ∪ **`supervised.json` 키**. supervised 에 등록되지 않았거나 기본 집합 밖인 모듈(isp/psp 등)도 listdir 또는 supervised 로 합쳐 경로 독립적으로 탐지해 OAM `module_down` 오탐을 막는다.
 
 **Response 200**: `{"ok": true}`
 
@@ -183,10 +183,11 @@ CSC 는 결과에 따라 다음을 자동 처리:
 | `uninstall` | 디렉토리 제거 | `install_path` |
 | `start` / `stop` / `restart` | 프로세스 제어 | `install_path`, `process_name` |
 | `update_config` | config.json 재기록 | `install_path`, `config` |
-| `upgrade_agent` | agent 바이너리 교체 (`install-agent.sh --update-only` → bundle 다운로드 → `agent/` 트리 교체: old→`agent.old`→삭제) | (없음) |
+| `upgrade_agent` | agent 업그레이드 (`install-agent.sh --update-only` → bundle 다운로드 → `agent/<신버전>/` 전개 → `current` flip → execv; 구버전 prune 3개 보존) | (없음) |
+| `rollback_agent` | agent 롤백 (`current` 를 직전/지정 버전으로 flip → execv; 다운로드 불요) | `version` (생략 시 직전) |
 | `health_check` | 포트 probe | `process_name` |
 | `collect_log` | 로그 일부 반환 | `log_path` |
 | `apply_ip_config` | service IP/route 적용 (cims-priv) — sync REST `/apply-ip-config` 와 동일 경로 | `service_ip_rows[]`, `routes[]` |
 | `apply_mounts` | 마운트 적용 (cims-priv mount-add/del → `/etc/fstab` 영속) — sync REST `/apply-mounts` | `mounts[]` (`{op,fstype,source,target,options?}`) |
 
-> ⚠️ `upgrade_agent` 는 `agent/` 트리를 통째로 교체하므로 **모듈 install_path 는 agent/ 트리 밖**(`/opt/cims-agent/<module>`)이어야 한다. 안에 두면 upgrade 시 모듈이 deleted-inode 좀비로 파괴된다 — 상세는 `docs/design/02_deployment.md` §2 install_path durability 제약.
+> ⚠️ 모듈은 `/opt/cims-agent/modules/<module>/<ver>/` (agent/ 트리 밖) 에 설치된다. `upgrade_agent`/`rollback_agent` 는 `agent/current` 심볼릭만 flip 하므로 모듈 바이너리에 영향이 없다. agent·state·run·sub-script 가 버전 트리 밖에 있어야 하는 영속(durability) 제약은 `docs/design/02_deployment.md` §2 참조.

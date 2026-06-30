@@ -29,36 +29,62 @@ CIMS 는 여러 물리 서버에 모듈을 개별 배포하고 **Console 에서 
 - **Deployment**: "특정 Agent 에 특정 Package 를 배치한 인스턴스". `process_name` (CSP/PSP/ISP/CMP/PMP/IMP) + `service_functions` (volte/ptt/ibcf/...) 필드로 변종 구분. `install_path/config.json` 의 deployment overlay 가 `csp.json`/`cmp.json` 시작 직전 머지 → 같은 base 바이너리에 다른 Roles/LocalIp/Port.
 - **Collection**: 각 Deployment 의 `install_path/config/*.jsonl` — listener, trunk, route, acl 등 행 단위 설정. 즉시 적용 (SIGUSR1).
 
-## 2. 배포 디렉토리 구조 (버전 단위 설치)
+## 2. 배포 디렉토리 구조 (버전 단위 설치 — `current` 심볼릭)
+
+agent 와 모든 모듈은 **버전 디렉토리를 병렬로 보존**하고, 활성 버전을 가리키는
+**`current` 소프트 링크**로 운영한다. 버전 전환(업그레이드/롤백) = `ln -sfn <ver> current`
+(원자적) + 재기동. 프로세스·systemd·sudoers·모니터링은 전부 고정 경로 `.../current` 만
+참조하므로 버전 번호와 무관하다.
 
 ```
-/opt/cims-agent/                      ← agent 설치 루트
-├── agent/                            ← agent 자신 (self-upgrade 가 통째로 교체)
-└── csp/                              ← 모듈 루트 (/opt/cims-agent/<module>)
-    ├── 0.0.35/                       ← 버전 디렉토리 = deployment.install_path
-    │   ├── csp/                      ←   tarball top dir (변종이면 psp/, isp/)
-    │   │   ├── bin/csp
-    │   │   ├── config/csp.json       ←   scalar 설정 (tarball 동봉 base)
-    │   │   └── config.json           ←   deployment overlay (Roles/LocalIp/Port)
-    │   ├── config/                   ←   HA 동기 collection jsonl — **해당 버전에 귀속**
-    │   │   ├── local_nodes.jsonl     ←   (CSP jsonlDir = csp.json 부모×3 = 여기)
-    │   │   ├── access_services.jsonl
-    │   │   └── ...
-    │   ├── run/  log/                ←   pid / 로그 (cims-svc DIST_DIR=버전 디렉토리)
-    └── 0.0.36/                       ← 새 버전 병렬 설치 → 롤백 가능 (최신 3개 유지)
+/opt/cims-agent/                      ← 설치 루트 (prefix; CIMS_AGENT_PREFIX)
+├── agent/                            ← agent 자신 (버전 단위 + 롤백)
+│   ├── 0.0.40/  0.0.41/              ←   버전 디렉토리 (최신 3개 유지)
+│   └── current -> 0.0.41             ←   활성 버전 심볼릭 (systemd ExecStart·sudoers 의 고정 경로)
+├── modules/<module>/                 ← 모듈 루트 (/opt/cims-agent/modules/<module>)
+│   ├── 0.0.35/                       ←   버전 디렉토리 = deployment.install_path (DB 기록)
+│   │   ├── <pkg>/                    ←     tarball top dir (변종이면 psp/, isp/)
+│   │   │   ├── bin/<pkg>
+│   │   │   ├── config/<pkg>.json     ←     scalar 설정 (tarball 동봉 base)
+│   │   │   └── config.json           ←     deployment overlay (Roles/LocalIp/Port)
+│   │   ├── config/                   ←     HA 동기 collection jsonl — 해당 버전에 귀속
+│   │   │   ├── local_nodes.jsonl     ←     (jsonlDir = <module_root>/current/config 로 접근)
+│   │   │   └── ...
+│   │   └── run/  log/                ←     pid / 로그
+│   ├── 0.0.36/                       ←   새 버전 병렬 설치 → 롤백 가능 (최신 3개 유지)
+│   ├── current -> 0.0.36             ←   활성 버전 심볼릭 (CIMS_DIST_DIR / jsonlDir 통로)
+│   └── (oam 전용) runtime/           ←   버전 무관 영속 store (cert / _secrets / file_store)
+├── state/                            ← agent enroll 상태 (state.json, agent.crt/key) — 버전 밖, 영속
+├── run/                              ← supervised.json / managed_ips.json / pending_reports.jsonl — 버전 밖
+└── update.sh  uninstall.sh  setup-sudoers.sh   ← 버전 밖 (current flip 에 불변)
 ```
 
-- **버전 경로 파생은 Agent `job_install` 이 수행**: params 의 (install_path, package_name, package_version) 로 `<module_root>/<version>` 을 계산 — deployment 레코드가 legacy 경로(공유 루트/모듈 디렉토리)여도 자동 정규화. 설치 성공 stdout 의 `at <path> (` 를 OAM report 훅이 파싱해 `deployment.install_path` 갱신 + `prev_install_path`/`install_history` 기록.
-- **config 이관**: 직전 라이브 경로(legacy 포함) 또는 최신 sibling 버전에서 `config/*.jsonl`(collection) + `<pkg>/config.json`(overlay) 을 새 버전 디렉토리로 복사. `params.config` 가 오면 overlay 는 그 값이 SoT. **버전별 config 스키마가 다를 수 있으므로 collection 동기화(agent `job_sync_config`)도 항상 활성 버전 디렉토리의 `config/` 에 기록**된다.
-- **롤백**: `POST /api/v1/deployments/<id>/rollback` (body 생략 시 직전 버전) — 레코드 install_path 전환 → collection 재동기(sync_config; 구버전 설치 후 변경분 stale 방지) → restart 큐잉. Agent 는 supervised 경로 비교로 다른 경로(구 버전)에서 떠 있는 인스턴스를 먼저 stop 한다 (포트 충돌 방지).
-- **보존 정책**: 설치 성공 시 모듈 루트의 버전 디렉토리를 mtime 최신 3개만 유지(prune). 버전 패턴(`^\d+(\.\d+){1,3}…`) 디렉토리만 대상 — legacy 평탄 설치 잔재(bin/, config/ 등)는 건드리지 않는다.
-- 같은 모듈의 여러 프로세스 변종(CSP/PSP/ISP 등)은 각자 모듈 루트가 분리 (`/opt/cims-agent/psp/<ver>/`).
+- **활성 버전 지시 = `current` 심볼릭 (운영 통로).** 프로세스는 항상 `.../current` 경로로 기동한다:
+  모듈은 `CIMS_DIST_DIR=<module_root>/current`, agent 는 systemd `ExecStart=agent/current/cims_agent.py`,
+  sudoers 는 `agent/current/bin/cims-priv|cims-ha`. 버전 번호가 바뀌어도 `current` 경로는 불변이라
+  systemd/sudoers/모니터링을 다시 건드리지 않는다.
+- **DB 는 기록(SoT 아님).** `deployment.install_path` 는 버전 디렉토리(`modules/csp/0.0.36`),
+  `package_version`/`prev_install_path`/`install_history` 와 함께 보존된다. Agent 가 install/start/
+  restart/rollback 시 **"DB 가 준 버전 디렉토리로 `current` 를 맞추고(`ln -sfn`) current 로 띄운다"** —
+  DB↔심볼릭 동기·번역은 전적으로 agent 내부. (콘솔은 DB 레코드로 배포 목록·버전을 표시.)
+- **prefix 앵커.** agent 코드는 `CIMS_AGENT_PREFIX`(systemd 가 주입) 또는 `agent` 디렉토리 컴포넌트
+  까지 walk-up 으로 prefix 를 도출한다 — flat/버전화/심볼릭 경유 무관. `state/`·`run/`·`modules/`·
+  sub-script 가 **버전 트리 밖**(prefix 직하)이라 업그레이드·롤백·재enroll 에 생존한다.
+- **버전 경로 파생은 Agent `job_install` 이 수행**: params 의 (install_path, package_name, package_version) 로 `<module_root>/<version>` 을 계산 — deployment 레코드가 legacy 경로(공유 루트/모듈 디렉토리)여도 자동 정규화. 전개·prune 후 `ln -sfn <version> current`. 설치 성공 stdout 의 `at <path> (` 를 OAM report 훅이 파싱해 `deployment.install_path`(버전 디렉토리) 갱신 + `prev_install_path`/`install_history` 기록.
+- **config 이관**: 직전 라이브 경로(legacy 포함) 또는 최신 sibling 버전에서 `config/*.jsonl`(collection) + `<pkg>/config.json`(overlay) 을 새 버전 디렉토리로 복사. `params.config` 가 오면 overlay 는 그 값이 SoT. **버전별 config 스키마가 다를 수 있으므로 collection 동기화도 항상 활성 버전 디렉토리의 `config/` 에 기록**된다 (`current/config` 와 동일 inode).
+- **롤백**: `POST /api/v1/deployments/<id>/rollback` (body 생략 시 직전 버전) — DB install_path 를 이전 버전으로 전환 → collection 재동기(구버전 설치 후 변경분 stale 방지) → restart 큐잉. Agent 는 restart 시 flip 직전 `readlink(current)` 로 직전 버전을 보존하고 `current` 를 타겟 버전으로 flip 한 뒤, **`/proc/<pid>/exe` 실경로가 타겟 버전 디렉토리 밖인 인스턴스(=구버전)를 먼저 stop**(포트 충돌 방지) 하고 기동한다.
+- **보존 정책**: 설치 성공 시 모듈 루트(및 agent/)의 버전 디렉토리를 mtime 최신 3개만 유지(prune). 버전 패턴(`^\d+(\.\d+){1,3}…`) 디렉토리만 대상 — `current` 심볼릭·legacy 평탄 잔재(bin/, config/ 등)는 건드리지 않는다.
+- 같은 모듈의 여러 프로세스 변종(CSP/PSP/ISP 등)은 각자 모듈 루트가 분리 (`/opt/cims-agent/modules/psp/<ver>/`, 각자 `current`).
 
-> ⚠️ **install_path durability 제약** (버전 단위 설치와 양립)
-> 모듈 루트는 반드시 **`/opt/cims-agent/<module>` (agent/ 트리 밖, `agent/` 와 sibling)** 이어야 한다.
-> - **이유**: agent self-upgrade(`install-agent.sh --update-only`)는 `/opt/cims-agent/agent/` 트리 전체를 교체(old → `agent.old` → 삭제)한다. install_path 가 agent/ 안에 있으면 upgrade 마다 모듈 바이너리가 파괴되고, 실행 중 프로세스는 **deleted-inode 좀비**(`/proc/<pid>/exe` → `… (deleted)`)로 남아 재시작 불가가 된다.
-> - 모듈 루트가 분리되므로 `jsonlDir = <버전 디렉토리>/config` 도 모듈·버전별로 격리되어 listener 포트 바인드 충돌·collection 공유 문제가 구조적으로 발생하지 않는다.
-> - 경로 마이그레이션 후 옛 좀비는 `lifecycle.sh` `kill_deleted_inode_orphans <name>`(start 변종이 호출, deleted-inode 동일 이름만 kill)가 정리한다.
+> ⚠️ **버전 트리 밖 영속(durability) 제약**
+> 다음은 **버전 디렉토리 밖**(prefix 직하 또는 모듈 루트 직하)에 둔다 — `current` flip / prune 에 생존해야 하기 때문:
+> - agent `state/`(enroll·cert), `run/`(supervised.json·managed_ips·pending_reports), sub-script(update/uninstall/setup-sudoers). 버전 디렉토리 안에 두면 매 업그레이드마다 re-enroll·감독 상태 유실.
+> - oam `modules/oam/runtime/`(file_store·`_secrets`·cert·JWT). 버전 안에 두면 업그레이드마다 토큰·계정·배포기록 소실. oam.json `CimsRuntimeDir` 는 절대경로라 `current` 경유 기동에도 동일 store 를 찾는다.
+>
+> **stale 인스턴스 정리**: `current` 통로 기동에선 신·구 버전 프로세스의 명령 경로가 같으므로(`current/bin/<m>`),
+> 경로 문자열이 아니라 **`/proc/<pid>/exe` 실경로**(exec 가 심볼릭을 해소 → 실제 버전 inode)로 구버전을 식별해 stop 한다.
+> prune(최신 3개 유지) 전이라 실경로가 유효하며, prune 이후의 deleted-inode 잔재는 `lifecycle.sh`
+> `kill_deleted_inode_orphans <name>`(동일 이름 deleted-inode 만 kill)가 정리한다.
 
 ## 2.1 상용(Private) 부트스트랩 — base 인스톨러
 
@@ -101,9 +127,10 @@ cims-bootstrap/
   를 honor(기본 pending; running/stopped 시 `deployed_at` 기록). console 은 별도
   프로세스 없이 OAM 이 정적 서빙하므로 `module_down` 알람은 비데몬(console/agent)을
   제외한다(metric.modules 미보고 → running 이어도 오탐 방지).
-- 설치 레이아웃은 본 문서 §2 의 버전 단위 설치와 동일(`/opt/cims-agent/modules/{oam,console}/<ver>/`,
-  runtime store 는 `modules/oam/runtime` 버전 무관) — 이후 agent 배포
-  체계가 자연 인수.
+- 설치 레이아웃은 본 문서 §2 의 버전 단위 설치와 동일(`/opt/cims-agent/modules/{oam,console}/<ver>/`
+  + `current` 심볼릭, runtime store 는 `modules/oam/runtime` 버전 무관) — 이후 agent 배포
+  체계가 자연 인수. install.sh 는 oam 전개 후 `ln -sfn <oam버전> modules/oam/current` 를 걸고
+  `CIMS_DIST_DIR=modules/oam/current` 로 기동·감독(supervised.json)한다.
 - **base 콘솔 프로파일**: 동봉 콘솔은 `VITE_CONSOLE_PROFILE=base`
   빌드 — 메뉴가 **관리>시스템 + 관리>릴리스(개발자모드)** 만 (서비스 pack
   메뉴/위젯은 번들에서 제외, DCE). 서비스에 필요한 기본 메뉴·위젯(대시보드/

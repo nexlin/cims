@@ -130,6 +130,7 @@ export interface Agent {
   memory_mb: number | null
   disk_gb: number | null
   agent_version: string | null
+  agent_versions?: string[]      // 설치된 버전(롤백 대상; current 제외 mtime 최신순)
   last_heartbeat: string | null
   last_metric: string | null
   enrolled_at: string | null
@@ -455,6 +456,10 @@ export const deploymentApi = {
       source_dir: string
     }>(`/packages/register-from-dist`, {}),
   upgradeAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/upgrade`, {}),
+  // body 생략 시 직전 버전으로 롤백; version 지정 시 해당 버전(agent_versions 중)으로.
+  rollbackAgent: (id: number, version?: string) =>
+    api.post<{ ok: boolean; job_id: number; target_version: string | null }>(
+      `/agents/${id}/rollback`, version ? { version } : {}),
   restartAgent:  (id: number) => api.post<{ ok: boolean; job_id: number }>(`/agents/${id}/restart`, {}),
   healthCheck:   (id: number, scope: 'ha'|'modules'|'all' = 'all') =>
     api.post<AgentHealthCheck>(`/agents/${id}/health-check`, { scope }),

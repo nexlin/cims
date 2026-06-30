@@ -55,18 +55,36 @@ DEFAULT_STATE_DIR = os.environ.get(
     "CIMS_AGENT_STATE",
     os.path.expanduser("~/.local/state/cims-agent"),
 )
-# 설치 루트 결정 우선순위:
-#   1) CIMS_AGENT_INSTALL_ROOT 환경변수
-#   2) <agent 바이너리 디렉토리>/modules    ← 권장 (agent 설치 디렉토리 기준 체계적 배치)
-# 이전 기본값 /opt/cims 는 root 권한 필요했는데 user-mode 설치와 맞지 않음.
 _AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _resolve_prefix() -> str:
+    """설치 루트(prefix, 예: /opt/cims-agent) 도출 — 레이아웃 비의존.
+
+    버전화 레이아웃에서 agent 는 `<prefix>/agent/current/cims_agent.py` (심볼릭 경유)
+    로 기동되므로 `_AGENT_DIR` = `<prefix>/agent/current`. dirname 횟수를 고정하면
+    flat(`<prefix>/agent`, dev/legacy)과 어긋나므로, 단계 수가 아니라 **`agent`
+    디렉토리 컴포넌트의 부모**를 prefix 로 삼는다 (flat/버전화/current 경유 모두 일치).
+      1) CIMS_AGENT_PREFIX (systemd 가 주입) 우선
+      2) `_AGENT_DIR` 에서 basename == "agent" 인 조상까지 walk-up → 그 부모
+    """
+    env = os.environ.get("CIMS_AGENT_PREFIX")
+    if env:
+        return env
+    d = _AGENT_DIR
+    while d and d != "/" and os.path.basename(d) != "agent":
+        d = os.path.dirname(d)
+    return os.path.dirname(d) if os.path.basename(d) == "agent" else os.path.dirname(_AGENT_DIR)
+
+
+_PREFIX = _resolve_prefix()
+# 모듈 설치 루트 결정 우선순위:
+#   1) CIMS_AGENT_INSTALL_ROOT 환경변수
+#   2) <prefix>/modules — 부트스트랩 oam/console 과 동일 루트라야 csc/oam-svc 가
+#      형제 oam/src 를 sys.path glob 으로 찾는다(oam_base_service_split gap1).
 DEFAULT_INSTALL_ROOT = os.environ.get(
     "CIMS_AGENT_INSTALL_ROOT",
-    # oam_base_service_split — 모듈 설치 루트를 부트스트랩 oam/console 과 동일하게
-    #   (<prefix>/modules). 이래야 csc/oam-svc 가 형제 oam/src 를 sys.path glob 으로
-    #   찾는다(gap1). 구 기본값 <agent_dir>/modules 는 oam(<prefix>/modules)과 루트가
-    #   달라 서비스 모듈이 oam/src 를 못 찾았음.
-    os.path.join(os.path.dirname(_AGENT_DIR), "modules"),
+    os.path.join(_PREFIX, "modules"),
 )
 DEFAULT_HEARTBEAT_SEC = 2
 DEFAULT_METRIC_SEC = 2
@@ -180,6 +198,7 @@ def collect_host_info() -> dict:
         "hostname": socket.gethostname(),
         "os_info": f"{platform.system()} {platform.release()}",
         "agent_version": AGENT_VERSION,
+        "agent_versions": _agent_versions(),   # 롤백 대상 선택용(콘솔 드롭다운)
     }
     try:
         info["cpu_cores"] = os.cpu_count() or 0
@@ -858,25 +877,95 @@ def _runtime_install_path(params: dict) -> str:
     return legacy
 
 
+def _flip_current(module_root: str, version_dir: str) -> str:
+    """`<module_root>/current` 심볼릭을 version_dir 로 (재)지정 — 활성 버전 통로.
+
+    상대 타겟(basename)으로 걸어 module_root 이동에도 견고하고, tmp→os.replace 로
+    원자적 교체(읽는 프로세스가 보는 링크는 항상 완전한 구/신 둘 중 하나).
+    반환: current 경로(성공) 또는 빈 문자열(실패)."""
+    if not module_root or not version_dir:
+        return ""
+    cur = os.path.join(module_root, "current")
+    ver = os.path.basename(version_dir.rstrip("/"))
+    try:
+        tmp = cur + ".tmp"
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        os.symlink(ver, tmp)
+        os.replace(tmp, cur)
+        return cur
+    except Exception as e:
+        print(f"[agent] current flip 실패 ({module_root} -> {ver}): {e}", flush=True)
+        return ""
+
+
+def _agent_versions() -> list:
+    """설치된 agent 버전 디렉토리 목록(mtime 최신순) — `<prefix>/agent/<ver>/cims_agent.py`
+    가 있는 것만. current 심볼릭·잔재는 제외. 롤백 대상 선택(콘솔)·heartbeat 보고용."""
+    root = os.path.join(_PREFIX, "agent")
+    out = []
+    try:
+        for nm in os.listdir(root):
+            p = os.path.join(root, nm)
+            if os.path.isdir(p) and not os.path.islink(p) and _VERSION_DIR_RE.match(nm) \
+                    and os.path.isfile(os.path.join(p, "cims_agent.py")):
+                try:
+                    out.append((os.path.getmtime(p), nm))
+                except OSError:
+                    pass
+    except Exception:
+        return []
+    out.sort(reverse=True)
+    return [nm for _mt, nm in out]
+
+
+def _module_vdir_from_exe(exe_real: str, module_root: str) -> str:
+    """프로세스 exe 실경로에서 module_root 직하의 버전 디렉토리를 추출.
+
+    `current` 통로로 기동해도 `/proc/<pid>/exe` 는 exec 가 심볼릭을 해소한 실제 버전
+    inode(예 `<module_root>/0.0.35/<pkg>/bin/<svc>`)를 가리키므로, 거기서 버전
+    디렉토리(`<module_root>/0.0.35`)를 복원한다. exe 가 module_root 밖이면 ''
+    (legacy 평탄 설치 — 버전 디렉토리 개념 없음)."""
+    if not module_root or not exe_real:
+        return ""
+    root = os.path.realpath(module_root)
+    if not exe_real.startswith(root + os.sep):
+        return ""
+    first = exe_real[len(root) + 1:].split(os.sep, 1)[0]
+    return os.path.join(root, first) if first else ""
+
+
 def _prune_old_versions(module_root: str, keep: int = 3) -> list:
     """모듈 루트의 버전 디렉토리를 mtime 최신 keep 개만 남기고 제거.
 
     버전 패턴(_VERSION_DIR_RE) 디렉토리만 대상 — legacy 평탄 설치 잔재(bin/,
-    config/ 등)는 절대 건드리지 않음. 제거 목록 반환 (로그용)."""
+    config/ 등)·`current` 심볼릭은 절대 건드리지 않음. 현재 `current` 가 가리키는
+    버전은 mtime 과 무관하게 보존(롤백으로 구버전이 활성일 때 자해 방지).
+    제거 목록 반환 (로그용)."""
     removed = []
     try:
         if not os.path.isdir(module_root):
             return removed
+        # current 가 가리키는 실제 버전 디렉토리 — 절대 prune 하지 않음
+        cur_real = ""
+        try:
+            cur_real = os.path.realpath(os.path.join(module_root, "current"))
+        except OSError:
+            pass
         vers = []
         for nm in os.listdir(module_root):
             p = os.path.join(module_root, nm)
-            if os.path.isdir(p) and _VERSION_DIR_RE.match(nm):
+            if os.path.isdir(p) and not os.path.islink(p) and _VERSION_DIR_RE.match(nm):
                 try:
                     vers.append((os.path.getmtime(p), p))
                 except OSError:
                     pass
         vers.sort(reverse=True)
         for _mt, p in vers[keep:]:
+            if os.path.realpath(p) == cur_real:
+                continue
             try:
                 shutil.rmtree(p)
                 removed.append(p)
@@ -1096,6 +1185,13 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
 
     # 오래된 버전 디렉토리 prune (최신 3개 유지; 방금 설치본이 mtime 최신이므로
     # 직전 버전 2개까지 롤백 가능). legacy 평탄 잔재는 비대상.
+    # current 심볼릭을 방금 설치한 버전으로 flip — 활성 버전 통로(start/restart 가 이 경로로 기동).
+    # (flip 후 prune: current 타겟은 prune 보호 대상이라 안전)
+    flipped = ""
+    if module_root and install_path != legacy_path:
+        if _flip_current(module_root, install_path):
+            flipped = " current->" + os.path.basename(install_path)
+
     pruned = ""
     if module_root and install_path != legacy_path:
         removed = _prune_old_versions(module_root, keep=3)
@@ -1103,7 +1199,7 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
             pruned = f" pruned={','.join(os.path.basename(p) for p in removed)}"
 
     return 0, (f"installed pkg_id={pkg_id} at {install_path} ({len(data)} bytes) "
-               f"config={cfg_path}{migrated}{pruned}"), ""
+               f"config={cfg_path}{migrated}{flipped}{pruned}"), ""
 
 
 def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
@@ -1538,7 +1634,7 @@ def job_apply_mounts(params: dict) -> tuple:
 #  있으므로(실제 사례: reboot 후 OAM 미기동 → csp DB IP 10.0.1.45 소실 → 전체 장애),
 #  마지막 적용 상태를 로컬에 스냅샷하고 부팅 시 자력 재적용한다 (OAM 연결 무관).
 # ──────────────────────────────────────────────────────────────
-_MANAGED_IPS_FILE = os.path.join(os.path.dirname(_AGENT_DIR), "run", "managed_ips.json")
+_MANAGED_IPS_FILE = os.path.join(_PREFIX, "run", "managed_ips.json")
 
 def _snapshot_managed_ips() -> None:
     """현재 cims-managed IP + managed route 를 로컬 저장 (desired-state)."""
@@ -1587,7 +1683,7 @@ def reapply_managed_ips() -> None:
 #  근거: 단일 NIC 큐 + RPS off 시 RX softirq 가 IRQ 코어 1개에 집중 → 고RTP 시 ksoftirqd
 #  포화 → 네트워크 stall. RPS 로 softirq 를 여러 코어로 분산.
 # ──────────────────────────────────────────────────────────────
-_NET_TUNING_FILE = os.path.join(os.path.dirname(_AGENT_DIR), "run", "net_tuning.json")
+_NET_TUNING_FILE = os.path.join(_PREFIX, "run", "net_tuning.json")
 
 def job_apply_net_tuning(params: dict) -> tuple:
     """서버별 네트워크 튜닝 적용. sysctl 은 영속(sysctl.d), RPS 는 스냅샷+부팅 재적용.
@@ -1689,7 +1785,7 @@ def reapply_net_tuning() -> None:
 #  CIMS_AGENT_NO_SUPERVISE=1 로 비활성화.
 # ──────────────────────────────────────────────────────────────
 
-_SUPERVISE_FILE = os.path.join(os.path.dirname(_AGENT_DIR), "run", "supervised.json")
+_SUPERVISE_FILE = os.path.join(_PREFIX, "run", "supervised.json")
 _WATCHDOG_BACKOFF: dict = {}     # module -> {"ts": float, "fails": int}
 SUPERVISE_INTERVAL_SEC = 10
 
@@ -1697,7 +1793,7 @@ SUPERVISE_INTERVAL_SEC = 10
 def _find_cims_svc(install_path: str):
     for c in (os.path.join(install_path, "agent", "bin", "cims-svc"),
               os.path.join(_AGENT_DIR, "bin", "cims-svc"),
-              "/opt/cims-agent/agent/bin/cims-svc"):
+              os.path.join(_PREFIX, "agent", "current", "bin", "cims-svc")):
         if os.path.isfile(c):
             return c
     return None
@@ -1785,8 +1881,7 @@ def _seed_supervised_from_pidfiles() -> None:
     """agent 기동 시 1회 — install_path/run/*.pid 의 모듈을 감독 집합에 편입.
     pid 파일은 agent 의 cims-svc start 만 만들므로 (build/dist 등 별도 인스턴스는
     자기 run/ 사용) 정확히 agent-managed 모듈만 잡힌다."""
-    install_path = os.path.dirname(_AGENT_DIR)   # 예: /opt/cims-agent
-    pid_dir = os.path.join(install_path, "run")
+    pid_dir = os.path.join(_PREFIX, "run")
     if not os.path.isdir(pid_dir):
         return
     sup = _load_supervised()
@@ -1798,7 +1893,9 @@ def _seed_supervised_from_pidfiles() -> None:
             svc = fn[:-4]
             if svc in _NON_DAEMON_MODULES or svc in sup:
                 continue
-            sup[svc] = install_path
+            # 감독 경로 = 모듈의 current 통로 (없으면 prefix fallback — 구 평탄 설치)
+            _cur = os.path.join(DEFAULT_INSTALL_ROOT, svc, "current")
+            sup[svc] = _cur if os.path.isdir(_cur) else _PREFIX
             changed = True
     except Exception:
         return
@@ -1839,7 +1936,7 @@ def supervise_tick() -> None:
 #    신 OAM 콜드스타트로 일시 불통일 수 있어 짧은 재시도 후, 끝내 실패하면
 #    pending 큐(jsonl)에 적재 → 다음 heartbeat 성공 시 flush. 결과 유실 방지.
 # ──────────────────────────────────────────────────────────────
-_PENDING_REPORT_FILE = os.path.join(os.path.dirname(_AGENT_DIR), "run", "pending_reports.jsonl")
+_PENDING_REPORT_FILE = os.path.join(_PREFIX, "run", "pending_reports.jsonl")
 
 
 def _post_report(oam_url: str, token: str, result: dict, timeout: int = 15) -> int:
@@ -1908,7 +2005,7 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     기준으로 DIST_DIR 결정 (install_path 의 csc/console 시작).
     """
     # 버전 전환 레이스 방어: deployment 레코드가 stale 이어도 설치 완료된
-    # 버전 디렉토리가 있으면 그쪽을 실효 경로로 사용.
+    # 버전 디렉토리가 있으면 그쪽을 실효 경로로 사용. (install_path = 타겟 버전 디렉토리)
     install_path = _runtime_install_path(params)
     svc = (params.get("process_name") or params.get("service_kind") or "").lower()
     # Phase 4 fix: svc 빈 경우 명시 에러. cims-svc 가 svc 인자 없이 호출되면
@@ -1920,54 +2017,81 @@ def job_process_control(params: dict, job_type: str) -> tuple:
             "process_name 누락 — deployment.process_name 필드 필수 "
             f"(install_path={install_path}, job_type={job_type})"
         )
-    prev_path = _load_supervised().get(svc)
 
-    # D3 (oam self-upgrade pre-flight): OAM 의 start/restart 는 구 OAM 을 내리기 전에
-    # 신 패키지가 뜰 수 있는지 검증한다. 실패면 아무것도 만지지 않고 즉시 반환 →
-    # 구 OAM 유지(다운타임 0). 깨진 패키지로 OAM 을 장기 다운시키는 것을 차단.
+    # ── current 심볼릭 모델: 활성 버전 통로 ────────────────────────────────
+    #   install_path(버전 디렉토리)가 버전 패턴이면 module_root/current 로 통로화한다.
+    #   프로세스는 항상 <module_root>/current 로 기동(CIMS_DIST_DIR) → systemd·모니터링
+    #   고정 경로. legacy 평탄 설치(버전 패턴 아님)는 current 없이 install_path 직접.
+    _ip = install_path.rstrip("/")
+    is_versioned = bool(_VERSION_DIR_RE.match(os.path.basename(_ip)))
+    module_root = os.path.dirname(_ip) if is_versioned else ""
+    cur_path = os.path.join(module_root, "current") if module_root else ""
+    launch_path = cur_path if cur_path else install_path
+
+    # D3 (oam self-upgrade pre-flight): 구 OAM 을 내리기 전에 신 패키지(=타겟 버전
+    # 디렉토리)가 뜰 수 있는지 검증. 실패면 아무것도 만지지 않고 반환(구 OAM 유지).
     if svc == "oam" and job_type in ("start", "restart"):
         ok_pf, pf_msg = _oam_preflight(install_path)
         if not ok_pf:
             return 1, "", f"oam preflight 실패 — 구 버전 유지 (kill 안 함): {pf_msg}"
 
-    # 버전 단위 설치 전환: 현재 감독(supervised) 중인 인스턴스가 다른 경로
-    # (구 버전 디렉토리 / legacy 평탄 설치) 에서 떠 있으면 먼저 그 경로에서 stop.
-    # 미수행 시 신 버전 start 가 포트 바인드 충돌로 fail-fast (구 프로세스는
-    # exe 경로가 달라 lifecycle 의 kill_stray/own-listener 정리에 안 잡힘).
+    # start/restart: flip 직전 current 가 가리키던 버전(=직전 활성, 롤백 대상)을 보존하고
+    # current 를 타겟 버전으로 flip. stop 은 flip 하지 않는다(도는 것을 그대로 내림).
+    prev_vdir = ""
+    if module_root and job_type in ("start", "restart"):
+        if os.path.islink(cur_path) or os.path.exists(cur_path):
+            prev_vdir = os.path.realpath(cur_path)
+        _flip_current(module_root, install_path)
+
+    # stale-stop: 타겟 버전 밖에서 도는 인스턴스(구버전)를 먼저 stop → 포트 바인드 충돌
+    # 방지. current 통로에선 신·구 명령 경로가 같으므로 /proc/<pid>/exe 실경로로 식별한다.
+    #   (구 인스턴스의 pid 파일은 자기 버전 run/ 에 있어 current 기준 stop 으론 안 잡힘 →
+    #    그 버전 디렉토리로 직접 stop)
     prev_note = ""
-    if prev_path and prev_path != install_path and os.path.isdir(prev_path):
-        prc, _pout, perr = _run_cims_svc(prev_path, "stop", svc)
-        prev_note = f" (prev-stop {prev_path} rc={prc}{' ' + perr.strip()[:120] if prc else ''})"
-        if job_type == "stop":
-            _unmark_supervised(svc)
-    # 우선순위:
-    #  1) install_path/agent/bin/cims-svc — 모듈 자체에 운영 도구를 ship 하는 경우 (구식)
-    #  2) _AGENT_DIR/bin/cims-svc — 일반 케이스. 에이전트가 자기 옆 bin/cims-svc 사용
-    #     (install-agent.sh 가 /opt/cims-agent/agent/bin/ 에 둠).
-    #  3) /opt/cims-agent/agent/bin/cims-svc — agent 가 다른 곳에서 실행되는 경우 명시 fallback
-    rc, out, err = _run_cims_svc(install_path, job_type, svc)
+    if module_root and job_type in ("start", "restart"):
+        hit = _pgrep_module(svc)
+        if hit:
+            try:
+                exe = os.path.realpath(f"/proc/{hit[0]}/exe")
+            except OSError:
+                exe = ""
+            target_real = os.path.realpath(install_path) + os.sep
+            if exe and not exe.startswith(target_real):
+                stale_vdir = _module_vdir_from_exe(exe, module_root) or prev_vdir
+                if stale_vdir and os.path.realpath(stale_vdir) != os.path.realpath(install_path) \
+                        and os.path.isdir(stale_vdir):
+                    prc, _po, perr = _run_cims_svc(stale_vdir, "stop", svc)
+                    prev_note = (f" (prev-stop {os.path.basename(stale_vdir)} rc={prc}"
+                                 f"{' ' + perr.strip()[:120] if prc else ''})")
+    elif not module_root:
+        # legacy 평탄 설치 — 구 동작 유지(supervised 경로 비교로 prev-stop)
+        prev_path = _load_supervised().get(svc)
+        if prev_path and prev_path != install_path and os.path.isdir(prev_path):
+            prc, _po, perr = _run_cims_svc(prev_path, "stop", svc)
+            prev_note = f" (prev-stop {prev_path} rc={prc}{' ' + perr.strip()[:120] if prc else ''})"
+
+    rc, out, err = _run_cims_svc(launch_path, job_type, svc)
     if prev_note:
         out = (out or "") + prev_note
 
-    # D4 (oam self-upgrade rollback): OAM 의 start/restart 가 실패(신 OAM 이
-    # /health gate 안에 안 뜸)하고 직전 버전이 있으면 구 버전으로 명시 롤백한다.
-    # supervised.json 을 구 경로로 되돌려 watchdog 도 구버전을 회수하게 한다.
+    # D4 (oam self-upgrade rollback): 신 OAM 이 health-gate 안에 못 뜨면(rc≠0) current 를
+    # 직전 버전으로 flip-back + 구 버전 start. supervised 는 current 경로 일관.
     if rc != 0 and svc == "oam" and job_type in ("start", "restart") \
-            and prev_path and prev_path != install_path and os.path.isdir(prev_path):
-        r_rc, r_out, r_err = _run_cims_svc(prev_path, "start", svc)
+            and prev_vdir and os.path.realpath(prev_vdir) != os.path.realpath(install_path) \
+            and os.path.isdir(prev_vdir):
+        _flip_current(module_root, prev_vdir)
+        r_rc, r_out, r_err = _run_cims_svc(cur_path, "start", svc)
+        _mark_supervised(svc, cur_path)
         if r_rc == 0:
-            _mark_supervised(svc, prev_path)
-            return 1, (out or "") + f" [rolled_back→{prev_path}]", \
-                   (err or "") + f" rollback ok"
-        # 롤백 start 도 실패 — supervised 는 구 경로로 남겨 watchdog 가 계속 시도.
-        _mark_supervised(svc, prev_path)
+            return 1, (out or "") + f" [rolled_back→{os.path.basename(prev_vdir)}]", \
+                   (err or "") + " rollback ok"
         return 1, (out or ""), (err or "") + f" [rollback start rc={r_rc}: {(r_err or r_out)[:160]}]"
 
-    # 모듈 감독 desired-state 갱신 — start/restart 성공 → 감독 등록, stop → 해제.
-    # (watchdog 가 supervised 집합의 죽은 모듈을 auto-restart)
+    # 모듈 감독 desired-state 갱신 — start/restart 성공 → 감독 등록(current 통로), stop → 해제.
+    sup_path = launch_path
     if rc == 0:
         if job_type in ("start", "restart"):
-            _mark_supervised(svc, install_path)
+            _mark_supervised(svc, sup_path)
         elif job_type == "stop":
             _unmark_supervised(svc)
     return rc, out, err
@@ -2048,7 +2172,7 @@ def job_upgrade_agent(oam_url: str, session_token: str, agent_name: str) -> tupl
     """install-agent.sh --update-only 호출 — bundle 전체 + sub-script 일괄 교체.
     INSTALL_DIR 은 cims_agent.py 위치 기반 추론 (<INSTALL_DIR>/agent/cims_agent.py).
     성공 시 호출자가 self-exec → systemd 재기동."""
-    install_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    install_dir = _PREFIX
     src_url = f"{oam_url}/install-agent.sh"
     status, data, meta = http_get_binary(src_url, {"X-Agent-Token": session_token})
     if status != 200 or not data or len(data) < 1024:
@@ -2073,6 +2197,29 @@ def job_upgrade_agent(oam_url: str, session_token: str, agent_name: str) -> tupl
     finally:
         try: os.unlink(installer_path)
         except Exception: pass
+
+
+def job_rollback_agent(params: dict) -> tuple:
+    """agent 롤백 — `<prefix>/agent/current` 를 직전(또는 params.version) 버전으로 flip.
+
+    버전 디렉토리는 prune(최신 3개)까지 보존되므로 다운로드 불요 — 순수 심볼릭 flip.
+    systemd ExecStart·sudoers 가 `agent/current` 고정 경로라 flip 만으로 충분.
+    성공(rc 0) 시 호출자(run_loop)가 `os.execv` 로 self-restart → 구버전 코드 기동."""
+    root = os.path.join(_PREFIX, "agent")
+    cur_link = os.path.join(root, "current")
+    cur = os.path.basename(os.path.realpath(cur_link)) if os.path.exists(cur_link) else ""
+    target = (params.get("version") or "").strip()
+    if not target:
+        cands = [v for v in _agent_versions() if v != cur]
+        target = cands[0] if cands else ""   # 직전(mtime 최신) 버전
+    if not target:
+        return 1, "", "no rollback target — 설치된 직전 agent 버전 없음 (단일 버전)"
+    tdir = os.path.join(root, target)
+    if not os.path.isfile(os.path.join(tdir, "cims_agent.py")):
+        return 1, "", f"rollback 대상 버전 미설치: {target} ({tdir})"
+    if not _flip_current(root, tdir):
+        return 1, "", f"agent current flip 실패 (target={target})"
+    return 0, f"agent rolled back to {target} (was {cur}) — execv self-restart", ""
 
 
 # ──────────────────────────────────────────────────────────────
@@ -2322,6 +2469,9 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
                     err = (err or "") + f" [restart] {(err_r or '')[-300:]}"
         elif jt == "upgrade_agent":
             rc, out, err = job_upgrade_agent(oam_url, session_token, agent_name)
+        elif jt == "rollback_agent":
+            # agent 롤백 — current 를 직전/지정 버전으로 flip. heartbeat loop 가 execv 처리.
+            rc, out, err = job_rollback_agent(params)
         elif jt == "agent_restart":
             # agent 자체 self-restart. heartbeat loop 가 execv 처리.
             rc, out, err = 0, "agent restart requested — execv self", ""
@@ -2354,7 +2504,7 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             # 안전 가드: agent 자신을 포함하는 경로(공유 루트 /opt/cims-agent 등)는
             # rmtree 금지 — legacy 공유 install_path deployment 의 uninstall 이
             # agent/형제 모듈까지 파괴하는 사고 방지. pkg 디렉토리만 제거.
-            agent_root = os.path.dirname(_AGENT_DIR)
+            agent_root = _PREFIX
             if install_path and os.path.isdir(install_path) and \
                     os.path.realpath(install_path) in (os.path.realpath(agent_root),
                                                        os.path.realpath(_AGENT_DIR)):
@@ -2495,7 +2645,8 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
             # VM 스펙 변경(코어/메모리 증설) 후 콘솔 정보가 실제와 다르던 문제 교정.
             try:
                 _hi = collect_host_info()
-                for k in ("hostname", "os_info", "cpu_cores", "memory_mb", "disk_gb"):
+                for k in ("hostname", "os_info", "cpu_cores", "memory_mb", "disk_gb",
+                          "agent_version", "agent_versions"):
                     if _hi.get(k):
                         hb_body[k] = _hi[k]
             except Exception:
@@ -2530,8 +2681,8 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
                     # upgrade_agent / agent_restart 성공 시 새 코드 image 로 self-exec.
                     # systemd 환경: execv 가 모든 fd close + 같은 PID 로 새 image 실행 (Restart=always 보다 빠름)
                     # nohup 환경 (no-systemd): execv 가 유일한 재기동 경로 — 부모 shell 이 죽었으므로 외부 monitor 없음
-                    if job["type"] in ("upgrade_agent", "agent_restart") and result["result_code"] == 0:
-                        action = "upgrade" if job["type"] == "upgrade_agent" else "restart"
+                    if job["type"] in ("upgrade_agent", "rollback_agent", "agent_restart") and result["result_code"] == 0:
+                        action = {"upgrade_agent": "upgrade", "rollback_agent": "rollback"}.get(job["type"], "restart")
                         print(f"[agent] {action} done — execv self", flush=True)
                         try:
                             os.execv(sys.executable, [sys.executable] + sys.argv)

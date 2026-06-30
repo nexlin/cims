@@ -135,9 +135,11 @@ agent `job_install`(oam) 또는 별도 `validate` 단계에서 **구 OAM 을 내
 
 ### D4 (→G4): 명시적 롤백 + 레코드 정합
 - `restart`(oam) 결과가 health-gate(D1) 안에 성공 못 하면 agent 가:
-  1. supervised.json 을 **직전 버전 경로로 되돌리고**(prev_path 보존),
+  1. `current` 를 **직전 버전으로 flip-back**(flip 직전 `readlink(current)` 로 보존한 경로),
   2. `cims-svc start oam`(구버전)로 복구,
   3. report 에 `rolled_back: true` + 사유 첨부.
+- supervised.json 은 전 모듈 일관되게 `modules/oam/current` 를 가리킨다(버전 무관) — "직전 버전"의
+  진실원은 supervised 가 아니라 `current` 심볼릭이며, flip 직전 `readlink` 로 읽어 보존한다.
 - 신 OAM self-reconcile(D2)가 version_mismatch 를 잡으면 deployment.install_path 도
   실제 가동 버전으로 되돌려 레코드-실제 어긋남(G4-c)을 해소.
 
@@ -173,8 +175,9 @@ watchdog 는 전 과정에서 **안전망**으로 동작: 어떤 사유로든 OA
 - **OAM HA(active/standby)** 로 self-upgrade 다운타임을 ~0 으로: standby 먼저 업그레이드 →
   VIP 전환 → 구 active 업그레이드. 본 설계(P2)는 단일 OAM 의 짧은 계획 다운타임을 수용하는
   단계까지다. HA 는 [[ha_design]] 확장으로 별도 설계.
-- **다운그레이드(롤백 버튼)**: 버전 단위 설치가 구버전 디렉터리를 (3개까지) 보존하므로
-  `restart` 대상 경로만 구버전으로 지정하면 기술적으로 가능 — UX/검증은 별도.
+> 다운그레이드(롤백)는 더 이상 범위 밖이 아니다 — `current` 심볼릭 모델에서 정식 경로가 됐다:
+> `POST /api/v1/deployments/<id>/rollback` 이 DB install_path 를 구버전으로 전환·restart 큐잉하고,
+> agent 가 `current` 를 구버전으로 flip-back(구버전 디렉터리는 prune 3개까지 보존)한다 ([02_deployment.md §2](../02_deployment.md)).
 
 ---
 
@@ -185,14 +188,17 @@ watchdog 는 전 과정에서 **안전망**으로 동작: 어떤 사유로든 OA
 - `agent/cims_agent.py`: `_deliver_report`(재시도 4회 backoff) + `_enqueue_pending_report`
   /`_flush_pending_reports`(`run/pending_reports.jsonl`, heartbeat 성공 시 flush) — D1
 - `ems/core/oam/src/oam_app.py`: 부팅 self-reconcile (실행 install_path == deployment.install_path
-  인 oam·`deploying` 만 `running` 으로 정정 + stuck job 마감; 타 노드 오염 방지) — D2
+  인 oam·`deploying` 만 `running` 으로 정정 + stuck job 마감; 타 노드 오염 방지) — D2.
+  비교는 **양변 `os.path.realpath`** 라 `modules/oam/current` 경유 기동(`__file__`)이 버전 디렉토리로
+  해소되고 DB(버전 디렉토리)와 그대로 매칭 — 심볼릭 모델에 추가 변경 불요.
 - OAM `/health` — httpsrv 내장 무인증 200 `{"status":"ok"}` — D1/D3
 - `ems/core/oam/src/oam_app.py`: `--preflight`(import+config 스모크, bind 없이 종료 0/2) — D3
 - `agent/cims_agent.py`: `_oam_preflight` + `job_process_control` 에서 oam start/restart 전
   pre-flight 게이트(실패 시 구 OAM 유지, kill 안 함). restart 직전 seam 에 배치하여
   구 OAM kill 을 직접 가드 — D3
-- `job_process_control`(start/restart, oam): health-gate 실패(rc≠0) 시 명시적 롤백
-  (구 버전 start + supervised.json 구 경로 복원) — D4
+- `job_process_control`(start/restart, oam): `current` flip(타겟 버전) + `/proc/exe` 실경로로
+  구버전 stale-stop 후 기동. health-gate 실패(rc≠0) 시 명시적 롤백 — `current` 를 flip 직전
+  `readlink` 로 보존한 직전 버전으로 flip-back + 구 버전 start (supervised 는 `current` 경로 일관) — D4
 
 미구현(후속):
 - (선택) 카나리 대체포트 기동 경로 — D3 강화
