@@ -217,9 +217,11 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                 설정 ({template.sections.reduce((n, s) => n + s.fields.length, 0)})
               </TabBtn>
               {(template.collections || []).map(c => {
-                // scope=service 는 그룹 공통 — 본 modal (멤버 단일 deployment) 에서 편집 시
-                // 정합 깨질 위험. 잠금 표시 + 클릭 시 안내 toast.
-                const isGroupOnly = c.scope === 'service' && source.type === 'deployment'
+                // scope=service 는 그룹 공통 — HA 그룹 멤버 deployment 에서 편집 시 정합 깨질 위험이라
+                // 잠금하고 [⚙ 그룹 설정] 으로 유도. 단, standalone 노드(forceServiceScope, HA 그룹 미소속)는
+                // 그룹 설정 진입점이 없으므로 per-deployment 에서 직접 편집 허용
+                // (backend _put_deployment_collection 은 ha_group 없으면 단일 deployment 에만 PUT).
+                const isGroupOnly = c.scope === 'service' && source.type === 'deployment' && !forceServiceScope
                 return (
                   <TabBtn key={c.key}
                           active={tab === c.key}
