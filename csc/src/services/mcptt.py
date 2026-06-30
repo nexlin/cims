@@ -570,7 +570,10 @@ def verify_pkce(code_verifier: str, code_challenge: str, method: str = "S256") -
         return False
 
 # --- Token Logic ---
-def create_tokens(user_id, scope, client_id="mcptt_client", nonce=None):
+# scope        = access_token 에 실리는 (좁혀진) 용도 scope.
+# refresh_scope= 회전된 refresh_token 에 보존할 scope. None 이면 scope 와 동일.
+#   scope 분리 refresh 시 access 만 좁히고 refresh 는 원 grant(broad) 유지 → 다음 다른-용도 refresh 가능.
+def create_tokens(user_id, scope, client_id="mcptt_client", nonce=None, refresh_scope=None):
     now = int(time.time())
     # sub = 안정적 가입자 식별자(매 발급마다 random uuid 였던 것을 user 고정값으로 — OIDC sub 의미).
     sub = user_id
@@ -605,7 +608,7 @@ def create_tokens(user_id, scope, client_id="mcptt_client", nonce=None):
     refresh_data = {
         "user_id": user_id,
         "client_id": client_id,
-        "scope": scope,
+        "scope": refresh_scope if refresh_scope is not None else scope,
         "issued_at": now,
         "expires_at": now + REFRESH_TOKEN_TTL,
         "revoked": False,
@@ -1104,8 +1107,9 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         else:
             scope = granted_scope
 
-        # 새 토큰 발급 (요청 scope 반영)
-        id_token, access_token, new_refresh_token = create_tokens(user_id, scope, client_id)
+        # 새 토큰 발급 — access 는 좁힌 scope, refresh 는 원 grant(broad) 보존(다음 다른-용도 refresh 가능).
+        id_token, access_token, new_refresh_token = create_tokens(
+            user_id, scope, client_id, refresh_scope=granted_scope)
         
         # 기존 토큰 회수
         storage.revoke_refresh_token(refresh_token, rotated_to=new_refresh_token)
