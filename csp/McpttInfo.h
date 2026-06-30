@@ -52,6 +52,54 @@ inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
     return info;
 }
 
+// ── affiliation-command 파싱 (application/vnd.3gpp.mcptt-affiliation-command+xml, TS 24.379 §9) ──
+//  <affiliation-command xmlns="urn:3gpp:ns:mcpttAffiliation:1.0">
+//    <actions> <affiliate group="sip:g@d"/> | <de-affiliate group="sip:g@d"/> </actions>
+//  </affiliation-command>
+//  액션 요소(시작태그 '<' 앵커)로 affiliate/de-affiliate 를 판정하고 group 속성을 추출한다.
+//  단순 텍스트 substring 이 아니라 **요소 기반** 판정(group 속성값에 "de-affiliate" 가 들어 있어도
+//  '<' 앵커라 오판 없음). 단말 McpttXml.affiliationCommand 와 정합. namespace prefix 무관.
+struct CMcpttAffiliation {
+    bool bValid       = false;   // 액션 요소를 하나라도 찾음
+    bool bDeaffiliate = false;   // de-affiliate 액션
+    std::string strGroup;        // group 속성값(있으면)
+};
+
+// 시작태그(예: "affiliate") 의 group="..." 속성 추출.
+inline std::string _McpttTagGroupAttr( const std::string &body, size_t tagStart ) {
+    size_t gt = body.find( '>', tagStart );
+    if ( gt == std::string::npos ) return "";
+    std::string tag = body.substr( tagStart, gt - tagStart );
+    size_t g = tag.find( "group" );
+    if ( g == std::string::npos ) return "";
+    size_t q1 = tag.find( '"', g );
+    if ( q1 == std::string::npos ) return "";
+    size_t q2 = tag.find( '"', q1 + 1 );
+    if ( q2 == std::string::npos ) return "";
+    return tag.substr( q1 + 1, q2 - q1 - 1 );
+}
+
+inline CMcpttAffiliation ParseAffiliationCommand( const std::string &body ) {
+    CMcpttAffiliation out;
+    if ( body.empty() ) return out;
+    // <actions> 구간으로 한정(없으면 본문 전체).
+    size_t scan = body.find( "<actions" );
+    if ( scan == std::string::npos ) scan = 0;
+    size_t deaff = body.find( "<de-affiliate", scan );
+    if ( deaff == std::string::npos ) deaff = body.find( "<deaffiliate", scan );
+    size_t aff = body.find( "<affiliate", scan );  // '<affiliate' 는 '<de-affiliate' 에 매칭 안 됨
+    if ( deaff != std::string::npos ) {
+        out.bValid = true;
+        out.bDeaffiliate = true;
+        out.strGroup = _McpttTagGroupAttr( body, deaff );
+    } else if ( aff != std::string::npos ) {
+        out.bValid = true;
+        out.bDeaffiliate = false;
+        out.strGroup = _McpttTagGroupAttr( body, aff );
+    }
+    return out;
+}
+
 // 멀티파트 바디의 resource-lists+xml part 에서 멤버 식별자(tel: 뒤 숫자/+) 추출.
 //  ad hoc 그룹콜(TS 22.179 Rel-18): 개시자가 INVITE 에 동적 멤버 목록을 실어 보냄.
 //  mcptt-info part 의 tel: 는 제외(resource-lists 구간만 스캔).

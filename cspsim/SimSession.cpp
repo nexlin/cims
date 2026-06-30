@@ -681,7 +681,8 @@ void SimSession::StartGroupCall(const std::string& strGroupId) {
 // ─────────────────────────────────────────────
 //  RTP Floor Control
 // ─────────────────────────────────────────────
-void SimSession::SendPttRequest()  { if (m_bPttMode) m_clsRtpThread.SendFloorControl(1); }
+// TS 24.380 §8.2 subtype: Floor Request=0, Floor Release=4 (CMP/단말 FloorCodec 와 동일).
+void SimSession::SendPttRequest()  { if (m_bPttMode) m_clsRtpThread.SendFloorControl(0); }
 void SimSession::SendPttRelease()  { if (m_bPttMode) m_clsRtpThread.SendFloorControl(4); }
 
 // ─────────────────────────────────────────────

@@ -153,9 +153,8 @@ THREAD_API RtpThreadFloorRecv(LPVOID lpParameter) {
       continue;
     }
 
-    // RTCP APP 최소 크기: 12바이트 (헤더4 + SSRC4 + Name4)
-    // FloorControlPacket 고정 헤더: 12바이트 + opcode(1) 등 = 최소 16바이트
-    if (iLen < 16) continue;
+    // RTCP APP 최소 크기: 12바이트 (헤더4 + SSRC4 + Name4). TLV 본문은 선택.
+    if (iLen < 12) continue;
 
     // PT = buf[1] == 204 (RTCP APP)
     unsigned char pt = (unsigned char)buf[1];
@@ -164,18 +163,21 @@ THREAD_API RtpThreadFloorRecv(LPVOID lpParameter) {
     // name 필드: buf[8..11] = "MCPT"
     if (buf[8] != 'M' || buf[9] != 'C' || buf[10] != 'P' || buf[11] != 'T') continue;
 
-    unsigned char opcode = (unsigned char)buf[0] & 0x1F;  // TS 24.380 §8.2: opcode in subtype field
+    // TS 24.380 §8.2: 메시지 타입 = 5비트 subtype.
+    unsigned char opcode = (unsigned char)buf[0] & 0x1F;
     pRtpThread->m_iLastFloorOp.store(opcode);
 
     const char* opName = "UNKNOWN";
     switch (opcode) {
-      case 1: opName = "REQUEST"; break;
-      case 2: opName = "GRANT";   break;
-      case 3: opName = "REJECT";  break;
-      case 4: opName = "RELEASE"; break;
-      case 5: opName = "IDLE";    break;
-      case 6: opName = "TAKEN";   break;
-      case 7: opName = "REVOKE";  break;
+      case 0:  opName = "REQUEST";        break;
+      case 1:  opName = "GRANTED";        break;
+      case 2:  opName = "TAKEN";          break;
+      case 3:  opName = "DENY";           break;
+      case 4:  opName = "RELEASE";        break;
+      case 5:  opName = "IDLE";           break;
+      case 6:  opName = "REVOKE";         break;
+      case 9:  opName = "QUEUE_POS_INFO"; break;
+      case 10: opName = "ACK";            break;
     }
     printf("[FLOOR] Received opcode=%d (%s) from %s:%d\n", opcode, opName, szIp, sPort);
   }

@@ -578,17 +578,19 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                         sessions[i]->m_clsRtpThread.m_iLastFloorOp.store(0);
                         sessions[i]->SendPttRequest();
 
-                        // GRANT 대기 (최대 3초)
+                        // GRANT 대기 (최대 3초) — TS 24.380 subtype: Granted=1, Taken=2.
+                        //   요청자는 GRANT(1, unicast) 와 TAKEN(2, broadcast) 를 모두 수신하므로 둘 다 성공으로 본다.
                         bool bGranted = false;
                         for (int t = 0; t < 30 && !g_bQuit; ++t) {
-                            if (sessions[i]->m_clsRtpThread.m_iLastFloorOp.load() == 2) {
+                            int op = sessions[i]->m_clsRtpThread.m_iLastFloorOp.load();
+                            if (op == 1 || op == 2) {
                                 bGranted = true;
                                 break;
                             }
                             usleep(100000);
                         }
                         if (!bGranted) {
-                            printf("[Scenario]   GRANT timeout — skipping (REJECT/TAKEN?)\n");
+                            printf("[Scenario]   GRANT timeout — skipping (DENY/QUEUE?)\n");
                             continue;
                         }
 

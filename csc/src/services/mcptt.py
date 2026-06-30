@@ -23,6 +23,10 @@ from services import logger as _logger
 # IdMs.JwtSecret 로 고정 권장(미설정 시 재기동마다 토큰 무효화). IdMS 가 발급하고 동일 프로세스의
 # XCAP 가 검증하므로 임의 시크릿으로도 정상 동작.
 SECRET_KEY = _secrets.token_urlsafe(32)
+# KMS master secret — 가입자별 키 material 파생용(HKDF). 구 구현은 전 사용자 동일 고정 hex 였음.
+#   ⚠ 본 파생은 가입자별 **구조적 프로비저닝**(UserDecryptKey/SSK/PVT 가 사용자마다 다름)을 제공하나,
+#   참값 ECCSI/SAKKE(RFC 6507/6508)는 pairing 암호 라이브러리가 필요한 후속 과제다(E2E 암호화 도입 시).
+KMS_MASTER_SECRET = _secrets.token_bytes(32)
 IDMS_ISSUER = "idms.mcptt.com"
 KMS_URI = "kms.mcptt.com"
 IDMS_DOMAIN = "mcptt.com"
@@ -41,6 +45,20 @@ logger = Logger()
 AUTH_CODE_TTL = 60               # 60초
 ACCESS_TOKEN_TTL = 3600          # 1시간
 REFRESH_TOKEN_TTL = 7 * 24 * 3600  # 7일
+
+# S4: service-config 기본값 (TS 24.484). 하드코딩 리터럴 대신 dict 로 두어 config 로 덮어쓰고
+#   가입자별(USERS[uri]['service_config']) 오버라이드를 허용한다. load_shared_data 에서 config 반영.
+SERVICE_CONFIG_DEFAULTS = {
+    "num-levels-group-hierarchy": 3,
+    "num-levels-user-hierarchy": 3,
+    "max-affiliations-N2": 10,
+    "allow-create-delete-group": True,
+    "allow-private-call": True,
+    "allow-emergency-call": True,
+    "allow-alert": True,
+    "allow-transmit-request": True,
+    "max-on-network-affiliations-N2": 10,
+}
 
 CSP_NOTIFY_IP = "127.0.0.1"
 CSP_NOTIFY_PORT = 4421
@@ -534,24 +552,31 @@ def verify_pkce(code_verifier: str, code_challenge: str, method: str = "S256") -
         return False
 
 # --- Token Logic ---
-def create_tokens(user_id, scope, client_id="mcptt_client"):
+def create_tokens(user_id, scope, client_id="mcptt_client", nonce=None):
     now = int(time.time())
-    
-    # ID Token
+    # sub = 안정적 가입자 식별자(매 발급마다 random uuid 였던 것을 user 고정값으로 — OIDC sub 의미).
+    sub = user_id
+
+    # ID Token (OIDC) — nonce 가 있으면 반영(S2b: CSRF/replay 방지, OIDC Core §3.1.2.1)
     id_token_payload = {
         "mcptt_id": user_id,
         "iss": IDMS_ISSUER,
-        "sub": str(uuid.uuid4()),
-        "aud": "mcptt_client",
+        "sub": sub,
+        "aud": client_id or "mcptt_client",
         "exp": now + ACCESS_TOKEN_TTL,
         "iat": now
     }
+    if nonce:
+        id_token_payload["nonce"] = nonce
     id_token = jwt.encode(id_token_payload, SECRET_KEY, algorithm="HS256")
-    
-    # Access Token
+
+    # Access Token — S2a: OIDC 표준 클레임(sub/iss/iat) 보강.
     access_token_payload = {
         "mcptt_id": user_id,
+        "iss": IDMS_ISSUER,
+        "sub": sub,
         "aud": "mcptt_client",
+        "iat": now,
         "exp": now + ACCESS_TOKEN_TTL,
         "scope": scope.split() if scope else []
     }
@@ -721,19 +746,30 @@ def get_user_profile_xml(user_uri):
     return xml, _content_etag(xml)
 
 def get_service_config_xml(user_uri):
-    xml = """<?xml version="1.0" encoding="UTF-8"?>
+    # S4: 동적 생성 — SERVICE_CONFIG_DEFAULTS 에 가입자별 오버라이드(USERS[uri]['service_config'])를
+    #   덮어써 사용자/시스템별 정책을 반영한다. ETag 는 내용 파생이라 값이 바뀌면 자동 갱신.
+    cfg = dict(SERVICE_CONFIG_DEFAULTS)
+    user = USERS.get(user_uri) or {}
+    over = user.get('service_config') if isinstance(user.get('service_config'), dict) else None
+    if over:
+        cfg.update(over)
+
+    def _b(k):  # bool → "true"/"false"
+        return "true" if cfg.get(k) else "false"
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <mcptt-service-config xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <num-levels-group-hierarchy>3</num-levels-group-hierarchy>
-  <num-levels-user-hierarchy>3</num-levels-user-hierarchy>
-  <max-affiliations-N2>10</max-affiliations-N2>
-  <allow-create-delete-group>true</allow-create-delete-group>
-  <allow-private-call>true</allow-private-call>
-  <allow-emergency-call>true</allow-emergency-call>
-  <allow-alert>true</allow-alert>
+  <num-levels-group-hierarchy>{int(cfg.get('num-levels-group-hierarchy', 3))}</num-levels-group-hierarchy>
+  <num-levels-user-hierarchy>{int(cfg.get('num-levels-user-hierarchy', 3))}</num-levels-user-hierarchy>
+  <max-affiliations-N2>{int(cfg.get('max-affiliations-N2', 10))}</max-affiliations-N2>
+  <allow-create-delete-group>{_b('allow-create-delete-group')}</allow-create-delete-group>
+  <allow-private-call>{_b('allow-private-call')}</allow-private-call>
+  <allow-emergency-call>{_b('allow-emergency-call')}</allow-emergency-call>
+  <allow-alert>{_b('allow-alert')}</allow-alert>
   <on-network>
-    <allow-transmit-request>true</allow-transmit-request>
-    <max-on-network-affiliations-N2>10</max-on-network-affiliations-N2>
+    <allow-transmit-request>{_b('allow-transmit-request')}</allow-transmit-request>
+    <max-on-network-affiliations-N2>{int(cfg.get('max-on-network-affiliations-N2', 10))}</max-on-network-affiliations-N2>
   </on-network>
 </mcptt-service-config>"""
     return xml, _content_etag(xml)
@@ -769,8 +805,30 @@ def get_kms_init_xml(user_uri):
 </KmsResponse>"""
     return xml
 
+# S5: 가입자별 KMS 키 material 파생 (HKDF-Expand 유사, HMAC-SHA256 기반).
+#   동일 (master_secret, user_uri, label) → 동일 값(재현 가능), 사용자마다 상이.
+def _kms_derive(user_uri: str, label: str, nbytes: int) -> str:
+    import hmac
+    out = b""
+    counter = 1
+    info = f"{label}:{user_uri}".encode("utf-8")
+    while len(out) < nbytes:
+        out += hmac.new(KMS_MASTER_SECRET, info + bytes([counter]), hashlib.sha256).digest()
+        counter += 1
+    return out[:nbytes].hex().upper()
+
 def get_kms_keyprov_xml(user_uri):
+    # S5: 가입자별 키 프로비저닝(TS 33.180 Annex D.3.3 KmsKeyProv 구조). 구 전사용자 고정 hex 폐기 —
+    #   UserDecryptKey(SAKKE RSK)/UserSigningKeySSK(ECCSI SSK)/UserPubTokenPVT(ECCSI PVT)를 가입자별 파생.
+    #   ⚠ 파생값은 구조적 placeholder(가입자별 상이·재현가능)이며 참 ECCSI/SAKKE 점은 아니다(후속 과제).
     now = datetime.datetime.now(datetime.timezone.utc)
+    valid_from = "2016-11-01T00:00:00+09:00"
+    valid_to = "2036-10-31T23:59:59+09:00"
+    key_period = 2419200
+    key_period_no = int(time.time()) // key_period
+    rsk = _kms_derive(user_uri, "UserDecryptKey", 128)      # SAKKE Receiver Secret Key
+    ssk = _kms_derive(user_uri, "UserSigningKeySSK", 32)    # ECCSI Secret Signing Key
+    pvt = _kms_derive(user_uri, "UserPubTokenPVT", 65)      # ECCSI Public Validation Token
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <KmsResponse Version="1.1.0" xmlns="http://org.csc.kms" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
 <KmsUri>{KMS_URI}</KmsUri>
@@ -779,20 +837,21 @@ def get_kms_keyprov_xml(user_uri):
 <KmsId>kmsprovider12345</KmsId>
 <ClientReqUrl>{KMS_CLIENT_REQ_URL}</ClientReqUrl>
 <KmsMessage>
-<KmsInit Version="1.0.0">
-<KmsCertificate Version="1.0.0" Role="Root">
+<KmsKeyProv Version="1.0.0">
+<KmsKeySet Version="1.0.0">
 <KmsUri>{KMS_URI}</KmsUri>
+<CertUri>{KMS_URI}/cert1</CertUri>
 <Issuer>www.mcptt.com</Issuer>
-<ValidFrom>2016-11-01T00:00:00+09:00</ValidFrom>
-<ValidTo>2036-10-31T23:59:59+09:00</ValidTo>
-<UserIdFormat>2</UserIdFormat>
-<UserKeyPeriod>2419200</UserKeyPeriod>
-<UserKeyOffset>0</UserKeyOffset>
-<PubEncKey>041C7B84B4FD620D49F3DC2366A7F62F48221D7B32D61D2A16685A015FDACF03CDDBAA66B78C597410C290EE3E8D7FE950193B87DABD3A33180DCEEF66893B24504EA22C9C7FD46BDCD385AF14EC71A57F94363692FA7FE0CE931BCF7A4F95A32723A459AC0ED72ECF17A8E9E2EBF94976E493134F5D11EE3D42165B5EF6E22FDD5269CBD01D339A5768521E36E1A1BEF2EC0D4B2606943DFAFB010A806F553E81350039EABD25FBF0758F25FC38E730553C19675B796DFE005C16696B3879388547282B3A3F56ADA1EA3C01AF77DE412EA62D4676D2386F745304B8B3AD63BB8E4E01C3C342B984B57512EA58A5049CE04BA2D00A36A3C78F46A364A670DE9F64</PubEncKey>
-<PubAuthKey>0467EF33902289EA2F42A82912CFD12B517A321EED22D56EB9B5AA60A3A38F97B77A29B3875339F141E454E3A9CF53A3C0353B1A88868A39A15D74A7B235E09EB8</PubAuthKey>
-<ParameterSet>1</ParameterSet>
-</KmsCertificate>
-</KmsInit>
+<UserUri>{user_uri}@{IDMS_DOMAIN}</UserUri>
+<UserID>{user_uri}</UserID>
+<ValidFrom>{valid_from}</ValidFrom>
+<ValidTo>{valid_to}</ValidTo>
+<KeyPeriodNo>{key_period_no}</KeyPeriodNo>
+<UserDecryptKey>{rsk}</UserDecryptKey>
+<UserSigningKeySSK>{ssk}</UserSigningKeySSK>
+<UserPubTokenPVT>{pvt}</UserPubTokenPVT>
+</KmsKeySet>
+</KmsKeyProv>
 </KmsMessage>
 </KmsResponse>"""
     return xml
@@ -817,7 +876,8 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     redirect_uri = params.get('redirect_uri')
     state = params.get('state', '')
     scope = params.get('scope', '')
-    
+    nonce = params.get('nonce', '')   # S2b: OIDC nonce (id_token 에 반영)
+
     # PKCE 파라미터 (필수)
     code_challenge = params.get('code_challenge')
     code_challenge_method = params.get('code_challenge_method', 'S256')
@@ -878,9 +938,10 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         "state": state,
         "issued_at": now,
         "expires_at": now + AUTH_CODE_TTL,
-        "used": False
+        "used": False,
+        "nonce": nonce   # S2b: token 발급 시 id_token 에 반영
     }
-    
+
     # PKCE 저장 (있으면)
     if code_challenge:
         auth_data["code_challenge"] = code_challenge
@@ -962,11 +1023,12 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
             
             logger.log_info("PKCE: verification success")
         
-        # 7. 성공 - 토큰 발급
+        # 7. 성공 - 토큰 발급 (S2b: authreq 에서 받은 nonce 를 id_token 에 반영)
         user_id = auth_data["user_id"]
         scope = auth_data.get("scope", "")
-        
-        id_token, access_token, refresh_token = create_tokens(user_id, scope, client_id)
+        nonce = auth_data.get("nonce", "")
+
+        id_token, access_token, refresh_token = create_tokens(user_id, scope, client_id, nonce=nonce)
         
         # auth-code 삭제 (1회성)
         storage.delete_auth_code(code)
@@ -1280,8 +1342,32 @@ async def handle_token_introspect(args: HandlerArgs, kwargs: dict) -> HandlerRes
         return HandlerResult(status=200, body={"active": False}, media_type="application/json")
 
 
+# S1: OIDC Discovery — GET /.well-known/openid-configuration (TS 33.180 / OIDC Discovery 1.0)
+#   단말이 엔드포인트를 하드코딩하지 않고 동적 발견. base URL 은 요청 Host 헤더에서 유도.
+async def handle_openid_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    host = (args.headers.get('host') or args.headers.get('Host') or f"{IDMS_DOMAIN}").strip()
+    base = f"https://{host}"
+    doc = {
+        "issuer": IDMS_ISSUER,
+        "authorization_endpoint": f"{base}/idms/authreq",
+        "token_endpoint": f"{base}/idms/tokenreq",
+        "introspection_endpoint": f"{base}/idms/introspect",
+        "token_endpoint_auth_methods_supported": ["none"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "response_types_supported": ["code"],
+        "code_challenge_methods_supported": ["S256"],
+        "scopes_supported": ["openid", "3gpp:mcptt:ptt_server"],
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported": ["HS256"],
+        "claims_supported": ["sub", "iss", "iat", "exp", "aud", "mcptt_id", "nonce", "scope"],
+    }
+    return HandlerResult(status=200, body=doc, media_type="application/json")
+
+
 # Route Mapping (MCPTT server — port 4430)
 CSC_HANDLER_LIST = [
+    # OIDC Discovery (3GPP TS 33.180 / OpenID Connect Discovery 1.0)
+    ("/.well-known/openid-configuration", handle_openid_config, {}),
     # IdMS (3GPP TS 33.180 / OAuth 2.0 PKCE)
     ("/idms/authreq",     handle_auth_req,          {}),
     ("/idms/tokenreq",    handle_token_req,          {}),
