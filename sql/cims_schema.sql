@@ -48,14 +48,17 @@ CREATE TABLE IF NOT EXISTS organizations (
 CREATE TABLE IF NOT EXISTS users (
     id          INT          NOT NULL AUTO_INCREMENT COMMENT '개인 고유 ID (자동 발행)',
     name        VARCHAR(128) NOT NULL COMMENT '표시 이름',
+    login_id    VARCHAR(64)           DEFAULT NULL COMMENT '단말/IdMS 로그인 ID (CIMS 로그인 자격 — MCPTT ID 와 별개)',
+    passwd      VARCHAR(128)          DEFAULT NULL COMMENT '단말/IdMS 로그인 비밀번호',
     email       VARCHAR(255) NOT NULL DEFAULT '' COMMENT '이메일',
     org_id      VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '소속 조직 코드 (organizations.code)',
     details     TEXT                  DEFAULT NULL COMMENT '세부사항',
     create_time DATETIME              DEFAULT NULL,
     update_time DATETIME              DEFAULT NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uk_users_login_id (login_id),
     KEY idx_users_org (org_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='가입자(person) 기본 정보 — 콘솔 로그인 계정은 OAM console_accounts(file)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='가입자(person) — login_id/passwd=단말 IdMS 로그인(MCPTT ID 와 분리). 콘솔 admin 계정은 OAM console_accounts(file)';
 
 -- ─────────────────────────────────────────────
 --  VoLTE 가입자 인증 정보 (VoLTE Subscriptions)

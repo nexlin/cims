@@ -36,7 +36,10 @@ IDMS_ISSUER = "idms.mcptt.com"
 KMS_URI = "kms.mcptt.com"
 IDMS_DOMAIN = "mcptt.com"
 KMS_CLIENT_REQ_URL = "http://localhost:4420/keymanagement/identity/v1/init"
-USERS = {}
+USERS = {}            # tel:+msisdn → {password,...} (XCAP/profile 키 = MCPTT ID)
+# IdMS 로그인 자격 — CIMS 로그인 ID(인증) ↔ MCPTT ID(서비스 신원) 분리.
+#   login_id(예 test001) → {password, user_id, mcptt_id(tel:+msisdn 파생), name}
+LOGIN_ACCOUNTS = {}
 GROUPS = {}
 TOKENS = {}
 GROUP_DIR = None
@@ -131,8 +134,27 @@ def load_shared_data(config):
                             if uri not in USERS:
                                 USERS[uri] = {"password": pw, "name": uid, "profile_etag": "etag_" + uri}
                                 logger.log_info(f"Loaded DB User: {uri}")
+
+                    # IdMS 로그인 계정(login_id) — MCPTT ID 는 ptt(없으면 volte) msisdn 에서 tel:+ 파생.
+                    LOGIN_ACCOUNTS.clear()
+                    cur.execute(
+                        "SELECT u.id uid, u.login_id, u.passwd, u.name, "
+                        "(SELECT id FROM ptt_subscriptions WHERE user_id=u.id LIMIT 1) ptt, "
+                        "(SELECT id FROM volte_subscriptions WHERE user_id=u.id LIMIT 1) volte "
+                        "FROM users u WHERE u.login_id IS NOT NULL AND u.login_id<>''")
+                    for r in cur.fetchall():
+                        msisdn = r.get('ptt') or r.get('volte')
+                        if msisdn:
+                            mcptt_id = msisdn if str(msisdn).startswith('tel:') else (
+                                f"tel:{msisdn}" if str(msisdn).startswith('+') else f"tel:+{msisdn}")
+                        else:
+                            mcptt_id = f"login:{r['login_id']}"
+                        LOGIN_ACCOUNTS[r['login_id']] = {
+                            "password": r.get('passwd') or '', "user_id": r['uid'],
+                            "mcptt_id": mcptt_id, "name": r.get('name'),
+                        }
             db_users_loaded = True
-            logger.log_info(f"Users loaded from DB: {len(USERS)}")
+            logger.log_info(f"Users loaded from DB: {len(USERS)} (login accounts: {len(LOGIN_ACCOUNTS)})")
         except Exception as e:
             logger.log_error(f"DB user load failed, will fall back to files: {e}")
 
@@ -573,14 +595,15 @@ def verify_pkce(code_verifier: str, code_challenge: str, method: str = "S256") -
 # scope        = access_token 에 실리는 (좁혀진) 용도 scope.
 # refresh_scope= 회전된 refresh_token 에 보존할 scope. None 이면 scope 와 동일.
 #   scope 분리 refresh 시 access 만 좁히고 refresh 는 원 grant(broad) 유지 → 다음 다른-용도 refresh 가능.
-def create_tokens(user_id, scope, client_id="mcptt_client", nonce=None, refresh_scope=None):
+def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_scope=None, mcptt_id=None):
     now = int(time.time())
-    # sub = 안정적 가입자 식별자(매 발급마다 random uuid 였던 것을 user 고정값으로 — OIDC sub 의미).
-    sub = user_id
+    # sub = CIMS 로그인 ID(인증 신원). mcptt_id = 규격 MCPTT 서비스 신원(분리). 미지정 시 subject 로 폴백.
+    sub = subject
+    mcptt = mcptt_id or subject
 
     # ID Token (OIDC) — nonce 가 있으면 반영(S2b: CSRF/replay 방지, OIDC Core §3.1.2.1)
     id_token_payload = {
-        "mcptt_id": user_id,
+        "mcptt_id": mcptt,
         "iss": IDMS_ISSUER,
         "sub": sub,
         "aud": client_id or "mcptt_client",
@@ -591,9 +614,9 @@ def create_tokens(user_id, scope, client_id="mcptt_client", nonce=None, refresh_
         id_token_payload["nonce"] = nonce
     id_token = jwt.encode(id_token_payload, SECRET_KEY, algorithm="HS256")
 
-    # Access Token — S2a: OIDC 표준 클레임(sub/iss/iat) 보강.
+    # Access Token — S2a: OIDC 표준 클레임(sub/iss/iat) 보강. sub=login_id, mcptt_id=MCPTT 신원.
     access_token_payload = {
-        "mcptt_id": user_id,
+        "mcptt_id": mcptt,
         "iss": IDMS_ISSUER,
         "sub": sub,
         "aud": "mcptt_client",
@@ -602,11 +625,12 @@ def create_tokens(user_id, scope, client_id="mcptt_client", nonce=None, refresh_
         "scope": scope.split() if scope else []
     }
     access_token = jwt.encode(access_token_payload, SECRET_KEY, algorithm="HS256")
-    
-    # Refresh Token (UUID + 영속성 저장)
+
+    # Refresh Token (UUID + 영속성 저장) — subject/mcptt_id 보존(refresh 재발급 시 동일 신원).
     refresh_token = str(uuid.uuid4())
     refresh_data = {
-        "user_id": user_id,
+        "user_id": subject,
+        "mcptt_id": mcptt,
         "client_id": client_id,
         "scope": refresh_scope if refresh_scope is not None else scope,
         "issued_at": now,
@@ -929,30 +953,36 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     
     logger.log_info(f"[IdMS] Auth Req: user={user_name}, client={client_id}, pkce=S256")
 
-    # 사용자 인증
-    if user_name not in USERS:
-        logger.log_error(f"[IdMS] Auth Req Failed: user {user_name} not found in USERS keys: {list(USERS.keys())}")
-        return HandlerResult(
-            status=401,
+    # 사용자 인증 — CIMS 로그인 ID(login_id) 우선. 토큰 sub=login_id, mcptt_id=규격 MCPTT ID(분리).
+    #   (DB 미연결 등으로 LOGIN_ACCOUNTS 가 비면 legacy: USERS(tel:+msisdn) 직접 로그인 호환.)
+    acct = LOGIN_ACCOUNTS.get(user_name)
+    expected_pw = None
+    mcptt_id = user_name
+    if acct is not None:
+        expected_pw = acct.get("password")
+        mcptt_id = acct.get("mcptt_id") or user_name
+    elif user_name in USERS:
+        expected_pw = USERS[user_name].get("password")
+        mcptt_id = user_name
+    if expected_pw is None:
+        logger.log_error(f"[IdMS] Auth Req Failed: login_id {user_name} not found")
+        return HandlerResult(status=401,
             body={"error": "access_denied", "error_description": "사용자를 찾을 수 없습니다"},
-            media_type="application/json"
-        )
-
-    if USERS[user_name]['password'] != user_password:
+            media_type="application/json")
+    if expected_pw != user_password:
         logger.log_error(f"[IdMS] Auth Req Failed: Password mismatch for {user_name}")
-        return HandlerResult(
-            status=401,
+        return HandlerResult(status=401,
             body={"error": "access_denied", "error_description": "비밀번호가 올바르지 않습니다"},
-            media_type="application/json"
-        )
+            media_type="application/json")
 
     # auth-code 생성
     code = str(uuid.uuid4())
     now = int(time.time())
-    
-    # auth-code 데이터
+
+    # auth-code 데이터 — login_id(sub) 와 mcptt_id(서비스 신원) 분리 보관.
     auth_data = {
-        "user_id": user_name,
+        "login_id": user_name,
+        "mcptt_id": mcptt_id,
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": scope,
@@ -1044,17 +1074,19 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
             
             logger.log_info("PKCE: verification success")
         
-        # 7. 성공 - 토큰 발급 (S2b: authreq 에서 받은 nonce 를 id_token 에 반영)
-        user_id = auth_data["user_id"]
+        # 7. 성공 - 토큰 발급 (sub=login_id, mcptt_id=서비스 신원 분리. nonce 반영)
+        login_id = auth_data.get("login_id") or auth_data.get("user_id")
+        mcptt_id = auth_data.get("mcptt_id", login_id)
         scope = auth_data.get("scope", "")
         nonce = auth_data.get("nonce", "")
 
-        id_token, access_token, refresh_token = create_tokens(user_id, scope, client_id, nonce=nonce)
+        id_token, access_token, refresh_token = create_tokens(
+            login_id, scope, client_id, nonce=nonce, mcptt_id=mcptt_id)
         
         # auth-code 삭제 (1회성)
         storage.delete_auth_code(code)
         
-        logger.log_info(f"Token issued for user: {user_id}")
+        logger.log_info(f"Token issued for login_id={login_id} mcptt_id={mcptt_id}")
         return HandlerResult(status=200, body={
             "access_token": access_token,
             "refresh_token": refresh_token,
@@ -1094,7 +1126,8 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
             return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
         
         # 4. refresh token rotation
-        user_id = token_data["user_id"]
+        login_id = token_data["user_id"]                 # = subject(login_id)
+        mcptt_id = token_data.get("mcptt_id", login_id)  # 규격 MCPTT 신원 보존
         granted_scope = token_data.get("scope", "") or ""
 
         # scope 분리: refresh 요청이 scope 를 명시하면 원 grant 의 subset 으로 좁혀 발급한다.
@@ -1109,12 +1142,12 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 
         # 새 토큰 발급 — access 는 좁힌 scope, refresh 는 원 grant(broad) 보존(다음 다른-용도 refresh 가능).
         id_token, access_token, new_refresh_token = create_tokens(
-            user_id, scope, client_id, refresh_scope=granted_scope)
+            login_id, scope, client_id, refresh_scope=granted_scope, mcptt_id=mcptt_id)
         
         # 기존 토큰 회수
         storage.revoke_refresh_token(refresh_token, rotated_to=new_refresh_token)
         
-        logger.log_info(f"Refresh token rotated for user: {user_id}")
+        logger.log_info(f"Refresh token rotated for user: {login_id}")
         return HandlerResult(status=200, body={
             "access_token": access_token,
             "refresh_token": new_refresh_token,
@@ -1481,7 +1514,7 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
         return HandlerResult(status=503, body={"error": "db_error", "detail": str(e)}, media_type="application/json")
 
     body = {
-        "user": {"displayName": display_name, "loginId": token.get('mcptt_id') or msisdn},
+        "user": {"displayName": display_name, "loginId": token.get('sub') or msisdn},
         "csc": {"host": host_ip, "port": _MCPTT_PORT},
         "services": services,
     }
