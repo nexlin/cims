@@ -102,6 +102,33 @@ class ProvisioningClient(
         }
     }
 
+    /** GET /provisioning/directory → 회사 전화번호부(조직 트리 + VoLTE 가입자, 읽기전용). */
+    fun fetchDirectory(accessToken: String): com.cims.ue.core.contacts.CompanyDirectory {
+        val req = Request.Builder()
+            .url("${csc.baseUrl}/provisioning/directory")
+            .addHeader("Authorization", "Bearer $accessToken")
+            .get().build()
+        http.newCall(req).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            check(resp.isSuccessful) { "directory ${resp.code}: $body" }
+            val j = JSONObject(body)
+            val orgArr = j.optJSONArray("orgs") ?: JSONArray()
+            val memArr = j.optJSONArray("entries") ?: JSONArray()
+            val orgs = (0 until orgArr.length()).map { i ->
+                val o = orgArr.getJSONObject(i)
+                com.cims.ue.core.contacts.CompanyOrg(
+                    code = o.optString("code"), name = o.optString("name"),
+                    parent = o.optString("parent"), sort = o.optInt("sort"))
+            }
+            val members = (0 until memArr.length()).map { i ->
+                val o = memArr.getJSONObject(i)
+                com.cims.ue.core.contacts.CompanyContact(
+                    orgCode = o.optString("org"), name = o.optString("name"), number = o.optString("msisdn"))
+            }
+            return com.cims.ue.core.contacts.CompanyDirectory(orgs, members)
+        }
+    }
+
     /** GET /provisioning/me → 서비스별 프로파일. */
     fun fetchProfile(accessToken: String): ProvisioningProfile {
         val req = Request.Builder()

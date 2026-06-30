@@ -71,8 +71,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.cims.ue.core.calllog.CallEntry
 import com.cims.ue.core.calllog.CallLogStore
 import com.cims.ue.core.calllog.CallType
+import com.cims.ue.core.account.SsoProvisioner
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.config.SipAccountConfig
+import com.cims.ue.core.contacts.CompanyContact
+import com.cims.ue.core.contacts.CompanyDirectory
+import com.cims.ue.core.contacts.CompanyDirectoryStore
+import com.cims.ue.core.contacts.CompanyOrg
 import com.cims.ue.core.contacts.Contact
 import com.cims.ue.core.contacts.ContactStore
 import com.cims.ue.core.sip.CallState
@@ -217,6 +222,7 @@ private fun HomeScreen(
     val context = LocalContext.current
     val callLog = remember { CallLogStore(context) }
     val contacts = remember { ContactStore(context) }
+    val companyDir = remember { CompanyDirectoryStore(context) }
 
     // SipService 바인딩 — 등록은 서비스가 자동으로 유지한다(수동 등록 버튼 없음).
     var service by remember { mutableStateOf<SipService?>(null) }
@@ -308,7 +314,8 @@ private fun HomeScreen(
             Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
                     Tab.CONTACTS -> ContactsScreen(
-                        store = contacts,
+                        personal = contacts,
+                        company = companyDir,
                         onCallVoice = { dial(it, false) },
                         onCallVideo = { dial(it, true) },
                     )
@@ -447,6 +454,208 @@ private fun KeypadKey(digit: String, letters: String, onClick: () -> Unit) {
 
 @Composable
 private fun ContactsScreen(
+    personal: ContactStore,
+    company: CompanyDirectoryStore,
+    onCallVoice: (String) -> Unit,
+    onCallVideo: (String) -> Unit,
+) {
+    var seg by remember { mutableStateOf(0) }   // 0=회사, 1=개인
+
+    Column(Modifier.fillMaxSize()) {
+        // 회사/개인 구분 세그먼트
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SegTab("회사", seg == 0, Modifier.weight(1f)) { seg = 0 }
+            SegTab("개인", seg == 1, Modifier.weight(1f)) { seg = 1 }
+        }
+        when (seg) {
+            0 -> CompanyContacts(company, onCallVoice, onCallVideo)
+            else -> PersonalContacts(personal, onCallVoice, onCallVideo)
+        }
+    }
+}
+
+@Composable
+private fun SegTab(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier.clip(CircleShape).background(bg).clickable { onClick() }.padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, color = fg, style = MaterialTheme.typography.labelLarge) }
+}
+
+/** 회사 연락처 — 서버 프로비저닝 제공, 읽기전용. 조직 트리(접기/펼치기) + 검색. */
+@Composable
+private fun CompanyContacts(
+    store: CompanyDirectoryStore,
+    onCallVoice: (String) -> Unit,
+    onCallVideo: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var dir by remember { mutableStateOf(store.load()) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
+    var collapsed by remember { mutableStateOf(setOf<String>()) }   // 접힌 조직 code
+
+    fun refresh() {
+        if (loading) return
+        loading = true; error = ""
+        scope.launch {
+            val fetched = withContext(Dispatchers.IO) { SsoProvisioner.fetchDirectory(context) }
+            if (fetched != null) { store.replace(fetched); dir = fetched }
+            else if (dir.members.isEmpty()) error = "회사 연락처를 불러오지 못했습니다."
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { refresh() }   // 캐시 즉시 표시 + 백그라운드 최신화
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("회사 전화번호부", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.weight(1f))
+            if (loading) CircularProgressIndicator(Modifier.size(20.dp))
+            else TextButton(onClick = { refresh() }) { Text("새로고침") }
+        }
+        OutlinedTextField(
+            value = query, onValueChange = { query = it },
+            label = { Text("이름·번호 검색") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        )
+
+        val q = query.trim()
+        if (dir.members.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(error.ifBlank { "회사 연락처가 없습니다." },
+                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else if (q.isNotBlank()) {
+            // 검색 모드 — 트리 무시, 일치 가입자 평면 표시(소속 조직명 부제).
+            val orgName = remember(dir) { dir.orgs.associate { it.code to it.name } }
+            val hits = remember(dir, q) {
+                dir.members.filter { it.name.contains(q, true) || it.number.contains(q) }
+                    .sortedBy { it.name }
+            }
+            if (hits.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("검색 결과가 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else LazyColumn(Modifier.fillMaxSize()) {
+                items(hits, key = { "hit:${it.number}" }) { m ->
+                    CompanyMemberRow(m.name, m.number, orgName[m.orgCode] ?: m.orgCode, depth = 0,
+                        onCallVoice = { onCallVoice(m.number) }, onCallVideo = { onCallVideo(m.number) })
+                    HorizontalDivider()
+                }
+            }
+        } else {
+            // 트리 모드
+            val rows = remember(dir, collapsed) { buildDirRows(dir, collapsed) }
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(rows, key = { it.key }) { row ->
+                    when (row) {
+                        is DirRow.Org -> OrgHeaderRow(row) {
+                            collapsed = if (row.org.code in collapsed) collapsed - row.org.code
+                                        else collapsed + row.org.code
+                        }
+                        is DirRow.Member -> {
+                            CompanyMemberRow(row.c.name, row.c.number, subtitle = null, depth = row.depth,
+                                onCallVoice = { onCallVoice(row.c.number) },
+                                onCallVideo = { onCallVideo(row.c.number) })
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 트리 한 행 — 조직 헤더 또는 가입자. */
+private sealed interface DirRow {
+    val key: String
+    data class Org(val org: CompanyOrg, val depth: Int, val expanded: Boolean, val count: Int) : DirRow {
+        override val key get() = "org:${org.code}"
+    }
+    data class Member(val c: CompanyContact, val depth: Int) : DirRow {
+        override val key get() = "mem:${c.orgCode}:${c.number}"
+    }
+}
+
+/** 조직 트리를 펼침 상태에 맞춰 평면 행 목록으로 전개. */
+private fun buildDirRows(dir: CompanyDirectory, collapsed: Set<String>): List<DirRow> {
+    val orgByCode = dir.orgs.associateBy { it.code }
+    val byParent = dir.orgs.groupBy { it.parent }
+    val membersByOrg = dir.members.groupBy { it.orgCode }
+    val countCache = HashMap<String, Int>()
+    fun subtreeCount(code: String): Int = countCache.getOrPut(code) {
+        (membersByOrg[code]?.size ?: 0) + (byParent[code]?.sumOf { subtreeCount(it.code) } ?: 0)
+    }
+    val out = ArrayList<DirRow>()
+    fun walk(org: CompanyOrg, depth: Int) {
+        val expanded = org.code !in collapsed
+        out.add(DirRow.Org(org, depth, expanded, subtreeCount(org.code)))
+        if (expanded) {
+            byParent[org.code]?.sortedBy { it.sort }?.forEach { walk(it, depth + 1) }
+            membersByOrg[org.code]?.sortedBy { it.name }?.forEach { out.add(DirRow.Member(it, depth + 1)) }
+        }
+    }
+    dir.orgs.filter { it.parent.isBlank() || it.parent !in orgByCode }.sortedBy { it.sort }
+        .forEach { walk(it, 0) }
+    // 조직 미지정(고아) 가입자
+    val orphan = dir.members.filter { it.orgCode.isBlank() || it.orgCode !in orgByCode }
+    if (orphan.isNotEmpty()) {
+        out.add(DirRow.Org(CompanyOrg("", "(조직 미지정)", "", 9999), 0, true, orphan.size))
+        orphan.sortedBy { it.name }.forEach { out.add(DirRow.Member(it, 1)) }
+    }
+    return out
+}
+
+@Composable
+private fun OrgHeaderRow(row: DirRow.Org, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onToggle() }
+            .padding(start = (row.depth * 16).dp, top = 10.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp), textAlign = TextAlign.Center)
+        Spacer(Modifier.size(4.dp))
+        Text("${row.org.name} (${row.count})", style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+@Composable
+private fun CompanyMemberRow(
+    name: String, number: String, subtitle: String?, depth: Int,
+    onCallVoice: () -> Unit, onCallVideo: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onCallVoice() }
+            .padding(start = (depth * 16).dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center,
+        ) { Text(name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onSecondaryContainer) }
+        Spacer(Modifier.size(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name.ifBlank { number }, style = MaterialTheme.typography.bodyLarge)
+            Text(if (subtitle != null) "$number · $subtitle" else number,
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(onClick = onCallVideo) { Text("📹", fontSize = 18.sp) }
+    }
+}
+
+/** 개인 연락처 — 단말 로컬, 추가/수정/삭제 가능. */
+@Composable
+private fun PersonalContacts(
     store: ContactStore,
     onCallVoice: (String) -> Unit,
     onCallVideo: (String) -> Unit,
@@ -454,21 +663,31 @@ private fun ContactsScreen(
     var list by remember { mutableStateOf(store.all()) }
     var editing by remember { mutableStateOf<Contact?>(null) }
     var showAdd by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("연락처", style = MaterialTheme.typography.titleLarge)
+            Text("개인 연락처", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { showAdd = true }) { Text("+ 추가") }
         }
-        if (list.isEmpty()) {
+        OutlinedTextField(
+            value = query, onValueChange = { query = it },
+            label = { Text("이름·번호 검색") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        )
+        val q = query.trim()
+        val shown = if (q.isBlank()) list
+                    else list.filter { it.name.contains(q, true) || it.number.contains(q) }
+        if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("저장된 연락처가 없습니다.\n‘+ 추가’ 로 등록하세요.",
+                Text(if (list.isEmpty()) "저장된 개인 연락처가 없습니다.\n‘+ 추가’ 로 등록하세요."
+                     else "검색 결과가 없습니다.",
                     textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                items(list, key = { it.id }) { c ->
+                items(shown, key = { it.id }) { c ->
                     ContactRow(c,
                         onCallVoice = { onCallVoice(c.number) },
                         onCallVideo = { onCallVideo(c.number) },

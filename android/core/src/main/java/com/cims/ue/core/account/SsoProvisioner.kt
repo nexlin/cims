@@ -29,6 +29,21 @@ object SsoProvisioner {
         }
     }
 
+    /** 회사 전화번호부(`/provisioning/directory`, 조직 트리+가입자) 조회. 만료 토큰 1회 재시도. 실패 시 null. */
+    fun fetchDirectory(context: Context): com.cims.ue.core.contacts.CompanyDirectory? {
+        val am = AccountManager.get(context)
+        val account = CimsAccounts.get(am) ?: return null
+        val token = CimsAccounts.blockingToken(am, account, CimsAccounts.TOKEN_PROVISIONING) ?: return null
+        val ep = CimsAccounts.cscEndpoint(am, account)
+        return try {
+            ProvisioningClient(ep, allowInsecureTls = true).fetchDirectory(token)
+        } catch (e: Exception) {
+            CimsAccounts.invalidate(am, token)
+            val retry = CimsAccounts.blockingToken(am, account, CimsAccounts.TOKEN_PROVISIONING) ?: return null
+            runCatching { ProvisioningClient(ep, allowInsecureTls = true).fetchDirectory(retry) }.getOrNull()
+        }
+    }
+
     /** 로그인(공유 계정) 존재 여부. */
     fun hasAccount(context: Context): Boolean = CimsAccounts.get(context) != null
 

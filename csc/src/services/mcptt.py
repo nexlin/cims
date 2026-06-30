@@ -1525,12 +1525,70 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
     return HandlerResult(status=200, body=body, media_type="application/json")
 
 
+async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """회사 전화번호부 — 조직 트리 + VoLTE 가입자. 단말 '회사 연락처'(읽기전용) 소스.
+
+    provisioning scope 토큰 필요. 조직(organizations) 계층(parent_id)과 전 VoLTE 가입자를 반환한다.
+    `orgs[]` = 조직 트리(code/name/parent code/sort), `entries[]` = 가입자(org=조직 code).
+    users.org_id 는 조직 코드(organizations.code)를 담는다.
+    """
+    token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
+    if not token:
+        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+    _sc = token.get('scope') or []
+    if isinstance(_sc, str):
+        _sc = _sc.split()
+    if _sc and SCOPE_PROVISIONING not in _sc:
+        return HandlerResult(status=403,
+                             body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
+                             media_type="application/json")
+    if not _DB_CONFIG:
+        return HandlerResult(status=503, body={"error": "db_unavailable"}, media_type="application/json")
+
+    orgs: list = []
+    entries: list = []
+    try:
+        import pymysql
+        conn = pymysql.connect(host=_DB_CONFIG.get('Host', '127.0.0.1'),
+                               port=int(_DB_CONFIG.get('Port', 3306)),
+                               user=_DB_CONFIG.get('User', 'root'),
+                               password=_DB_CONFIG.get('Password', ''),
+                               database=_DB_CONFIG.get('Db', 'cims'), connect_timeout=5)
+        try:
+            cur = conn.cursor()
+            # 조직 트리 — parent_id(id)를 parent code 로 환산해 내려준다.
+            cur.execute("SELECT id, code, name, parent_id, sort_order FROM organizations")
+            rows = cur.fetchall()
+            id2code = {r[0]: r[1] for r in rows}
+            for _id, code, name, parent_id, so in rows:
+                orgs.append({"code": code or "", "name": name or "",
+                             "parent": id2code.get(parent_id, "") if parent_id is not None else "",
+                             "sort": so or 0})
+            # 가입자 — org = users.org_id(조직 code)
+            cur.execute(
+                "SELECT u.org_id AS org, u.name AS name, v.id AS msisdn "
+                "FROM volte_subscriptions v JOIN users u ON u.id = v.user_id "
+                "ORDER BY u.name")
+            for org, name, msisdn in cur.fetchall():
+                entries.append({"org": org or "", "name": name or "", "msisdn": msisdn or ""})
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.log_error(f"[provisioning/directory] DB error: {e}")
+        return HandlerResult(status=503, body={"error": "db_error", "detail": str(e)}, media_type="application/json")
+
+    logger.log_info(f"[provisioning/directory] orgs={len(orgs)} entries={len(entries)}")
+    return HandlerResult(status=200, body={"orgs": orgs, "entries": entries}, media_type="application/json")
+
+
 # Route Mapping (MCPTT server — port 4430)
 CSC_HANDLER_LIST = [
     # OIDC Discovery (3GPP TS 33.180 / OpenID Connect Discovery 1.0)
     ("/.well-known/openid-configuration", handle_openid_config, {}),
     # 자동 프로비저닝 (UE 로그인 후 서비스별 프로파일)
     ("/provisioning/me", handle_provisioning_me, {}),
+    # 회사 전화번호부 (조직별 VoLTE 가입자 — 단말 '회사 연락처' 읽기전용 소스)
+    ("/provisioning/directory", handle_provisioning_directory, {}),
     # IdMS (3GPP TS 33.180 / OAuth 2.0 PKCE)
     ("/idms/authreq",     handle_auth_req,          {}),
     ("/idms/tokenreq",    handle_token_req,          {}),

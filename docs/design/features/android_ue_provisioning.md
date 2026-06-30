@@ -47,7 +47,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
       "sip":     { "host": "<CSP host>", "port": 5060, "transport": "UDP",
                    "domain": "ims.mnc033.mcc450.3gppnetwork.org" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000001",
-                   "authId": "", "sipPassword": null }
+                   "authId": "", "sipPassword": "1234" }
     },
     {
       "kind": "ptt",
@@ -64,10 +64,33 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 - `sip.host/port/transport/domain`: 단말이 접속할 **서비스별 시그널링 서버**. VoLTE=CSP, PTT=PSP (다를 수 있음).
 - `account.imsi`: Digest username = `imsi@sip.domain`(서버 CscfModule 강제). 서비스별로 다를 수 있음.
 - `account.msisdn`: 공개 ID(AOR user part). `authId`: 전체 IMPI 직접지정(보통 빈값 → imsi@domain 합성).
-- `account.sipPassword`: **옵션**. `null`/생략 시 단말은 **로그인 비번을 SIP Digest 비번으로 재사용**(권장 — 비번이 망에 안 돌아다님). 서비스별 SIP 비번이 다른 정책이면 명시.
+- `account.sipPassword`: **서비스 가입(subscription) 비번**(`*_subscriptions.passwd`). CIMS 로그인(IdMS `users.passwd`)과 **별개 자격증명** — CSP 는 이 비번으로 REGISTER Digest 를 검증한다. 단말은 이 값을 우선 사용하고, `null`/생략일 때만 로그인 비번으로 폴백.
 - `account.mcpttId`: PTT 프로파일에만. GMS/CMS/affiliation/floor 에서 사용.
 
 오류: 토큰 무효 401. 사용자에 해당 서비스 없으면 `services` 에서 제외(빈 배열 가능).
+
+## 3-1. Contract — `GET /provisioning/directory`
+
+회사 전화번호부(단말 '회사 연락처' 탭의 읽기전용 소스). provisioning scope 토큰 필요.
+조직 트리(`organizations` 의 `parent_id` 계층)와 전 VoLTE 가입자를 반환한다.
+
+```json
+{
+  "orgs": [
+    { "code": "CORP",   "name": "CIMS",   "parent": "",     "sort": 0 },
+    { "code": "DIV1",   "name": "제1본부", "parent": "CORP", "sort": 1 },
+    { "code": "TEAM01", "name": "팀01",    "parent": "DIV1", "sort": 1 }
+  ],
+  "entries": [
+    { "org": "TEAM01", "name": "테스트001", "msisdn": "+821300000001" },
+    { "org": "TEAM01", "name": "테스트002", "msisdn": "+821300000002" }
+  ]
+}
+```
+
+- `orgs[]`: 조직 트리. `parent` = 상위 조직 **코드**(루트는 빈 문자열). `organizations.parent_id`(id) 를 code 로 환산해 내려준다.
+- `entries[].org`: 가입자 소속 조직 **코드**(`users.org_id`). `orgs[].code` 와 매칭.
+- 단말: `orgs` 로 트리를 구성하고 `entries` 를 조직 코드로 매달아 **접기/펼치기 트리**로 표시. **편집 불가**(추가/수정/삭제는 '개인 연락처'만). 이름·번호 **검색** 시 트리 무시·일치 가입자 평면 표시. 캐시(`CompanyDirectoryStore`)로 오프라인 표시.
 
 ## 4. 서버측 구현 (CSC)
 
