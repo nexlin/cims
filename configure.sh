@@ -295,8 +295,8 @@ import json, sys
 path, volte_dom, ptt_dom = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path) as f: c = json.load(f)
 c["Provisioning"] = {"Services": {
-    "volte": {"host": "", "port": 5060, "transport": "UDP", "domain": volte_dom},
-    "ptt":   {"host": "", "port": 5060, "transport": "UDP", "domain": ptt_dom},
+    "volte": {"host": "", "port": 15060, "transport": "UDP", "domain": volte_dom},
+    "ptt":   {"host": "", "port": 15060, "transport": "UDP", "domain": ptt_dom},
 }}
 with open(path, "w") as f: json.dump(c, f, indent=4, ensure_ascii=False); f.write("\n")
 print("  csc.json Provisioning 주입: volte=%s ptt=%s" % (volte_dom, ptt_dom))
