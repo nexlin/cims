@@ -1442,13 +1442,16 @@ def _msisdn_from_id(u: str) -> str:
             break
     return s.split('@', 1)[0].strip()
 
-def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str) -> dict:
+def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str,
+                       sip_password: str = "") -> dict:
     svc = (PROVISIONING.get('Services') or {}).get(kind, {}) if isinstance(PROVISIONING, dict) else {}
     account = {
         "msisdn": sid,
         "imsi": imsi or "",
         "authId": auth_id or "",        # 빈값이면 단말이 imsi@domain 합성
-        "sipPassword": None,            # null → 단말이 로그인 비번을 SIP Digest 비번으로 재사용
+        # SIP Digest 비번 = 서비스 가입(subscription) 비번. CIMS 로그인(IdMS) 비번과 별개 —
+        # CSP 는 이 비번으로 REGISTER 를 검증한다. 비어 있으면 단말이 로그인 비번으로 폴백.
+        "sipPassword": sip_password or None,
     }
     if kind == "ptt":
         account["mcpttId"] = sid if sid.startswith(("tel:", "sip:")) else f"tel:{sid}"
@@ -1501,9 +1504,9 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                     break
             if user_id is not None:
                 for t, kind in (('volte_subscriptions', 'volte'), ('ptt_subscriptions', 'ptt')):
-                    cur.execute(f"SELECT id, imsi, auth_id FROM {t} WHERE user_id=%s ORDER BY id", (user_id,))
-                    for sid, imsi, auth_id in cur.fetchall():
-                        services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip))
+                    cur.execute(f"SELECT id, imsi, auth_id, passwd FROM {t} WHERE user_id=%s ORDER BY id", (user_id,))
+                    for sid, imsi, auth_id, passwd in cur.fetchall():
+                        services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip, passwd or ''))
                 cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
                 rr = cur.fetchone()
                 display_name = rr[0] if rr else None
