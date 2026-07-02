@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen { GATE, HOME, CONFIG }
-private enum class Tab { CONTACTS, RECENTS, KEYPAD, MESSAGES }
+private enum class Tab { CONTACTS, RECENTS, KEYPAD, MESSAGES, SETTINGS }
 
 @Composable
 private fun App(
@@ -178,7 +178,7 @@ private fun App(
         )
         Screen.HOME -> HomeScreen(
             config = config,
-            onEditConfig = { screen = Screen.CONFIG },
+            onConfigChanged = { c -> store.save(c); config = c },
             notifAnswer = notifAnswer,
             notifOpenMessages = notifOpenMessages,
         )
@@ -274,7 +274,7 @@ private fun SsoGateScreen(
 @Composable
 private fun HomeScreen(
     config: SipAccountConfig,
-    onEditConfig: () -> Unit,
+    onConfigChanged: (SipAccountConfig) -> Unit,
     notifAnswer: MutableStateFlow<Pair<Int, Boolean>?>,
     notifOpenMessages: MutableStateFlow<Boolean>,
 ) {
@@ -447,7 +447,7 @@ private fun HomeScreen(
         val msgStore = remember { MessageStore(context) }
         val unread = remember(msgVersion) { msgStore.unreadTotal() }
         Scaffold(
-            bottomBar = { BottomNav(tab, unread, onSettings = onEditConfig) { tab = it } },
+            bottomBar = { BottomNav(tab, unread) { tab = it } },
         ) { pad ->
             // top 여백 = 화면 최상단 전역 상태배지(오버레이)와 겹치지 않게 확보
             Box(Modifier.padding(pad).padding(top = 32.dp).fillMaxSize()) {
@@ -482,6 +482,17 @@ private fun HomeScreen(
                         onSend = { peer, text -> service?.sendMessage(peer, text) },
                         onMarkRead = { peer -> service?.markThreadRead(peer) ?: msgStore.markRead(peer) },
                     )
+                    // 설정 = 탭 콘텐츠(하단 내비 유지). 저장 시 즉시 재등록 반영.
+                    Tab.SETTINGS -> ConfigScreen(
+                        initial = config,
+                        canCancel = true,
+                        onSave = { c ->
+                            onConfigChanged(c)
+                            service?.ensureRegistered()
+                            tab = Tab.KEYPAD
+                        },
+                        onCancel = { tab = Tab.KEYPAD },
+                    )
                 }
             }
         }
@@ -489,7 +500,7 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun BottomNav(current: Tab, unread: Int, onSettings: () -> Unit, onSelect: (Tab) -> Unit) {
+private fun BottomNav(current: Tab, unread: Int, onSelect: (Tab) -> Unit) {
     NavigationBar {
         NavigationBarItem(
             selected = current == Tab.CONTACTS, onClick = { onSelect(Tab.CONTACTS) },
@@ -513,7 +524,7 @@ private fun BottomNav(current: Tab, unread: Int, onSettings: () -> Unit, onSelec
             label = { Text("문자") },
         )
         NavigationBarItem(
-            selected = false, onClick = onSettings,
+            selected = current == Tab.SETTINGS, onClick = { onSelect(Tab.SETTINGS) },
             icon = { Text("⚙", fontSize = 20.sp) }, label = { Text("설정") },
         )
     }
