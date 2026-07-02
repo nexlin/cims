@@ -17,7 +17,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import com.cims.ue.core.config.ConfigStore
@@ -49,6 +51,10 @@ class SipService : Service() {
     private var stateJob: Job? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
     private var ringtone: Ringtone? = null
+
+    /** 화면 최상단 전역 상태배지(오버레이) — View 조작이라 main 스레드에서만 갱신. */
+    private val overlay by lazy { RegStatusOverlay(this) }
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     val regState: StateFlow<RegState>? get() = controller?.regState
     val callState: StateFlow<CallState>? get() = controller?.callState
@@ -190,6 +196,7 @@ class SipService : Service() {
         controller?.unregister()
         controller?.shutdown()
         controller = null
+        mainHandler.post { overlay.hide() }
         stopForegroundCompat()
         stopSelf()
     }
@@ -197,7 +204,7 @@ class SipService : Service() {
     private fun observe(c: SipController) {
         stateJob?.cancel()
         stateJob = scope.launch {
-            // 등록 상태 = 상시 알림 텍스트 + 상태바 아이콘(단말 맨위 wifi/LTE 옆) — 한눈에 통화 가능 여부.
+            // 등록 상태 = 상시 알림(상태바 아이콘) + 화면 최상단 전역 배지(오버레이) — 한눈에 통화 가능 여부.
             c.regState.onEach { reg ->
                 val (line, icon) = when (reg) {
                     is RegState.Registered -> "통화 가능" to android.R.drawable.sym_action_call
@@ -207,6 +214,14 @@ class SipService : Service() {
                     is RegState.Failed -> "오프라인 (${reg.reason})" to android.R.drawable.stat_notify_error
                 }
                 updateNotification("CIMS Phone", line, icon)
+                val color = when (reg) {
+                    is RegState.Registered -> 0xFF00C853.toInt()
+                    RegState.Registering, RegState.Idle -> 0xFFF9A825.toInt()
+                    RegState.Unregistered -> 0xFF9E9E9E.toInt()
+                    is RegState.Failed -> 0xFFEA4335.toInt()
+                }
+                val badge = if (reg is RegState.Failed) "오프라인" else line
+                mainHandler.post { overlay.update(color, badge) }
             }.launchIn(this)
 
             c.callState.onEach { call ->
@@ -242,6 +257,7 @@ class SipService : Service() {
 
     override fun onDestroy() {
         stopRinging()
+        mainHandler.post { overlay.hide() }
         stateJob?.cancel()
         netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
         netCallback = null

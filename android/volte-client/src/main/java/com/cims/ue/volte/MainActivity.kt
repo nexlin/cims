@@ -299,6 +299,41 @@ private fun HomeScreen(
     ) { service?.ensureRegistered() }
     LaunchedEffect(Unit) { permLauncher.launch(requiredPermissions()) }
 
+    // 화면 최상단 전역 상태배지 — '다른 앱 위에 표시' 권한 안내(1회).
+    var askOverlay by remember {
+        mutableStateOf(
+            !Settings.canDrawOverlays(context) &&
+                !context.getSharedPreferences("ui_prefs", Context.MODE_PRIVATE)
+                    .getBoolean("overlay_asked", false),
+        )
+    }
+    if (askOverlay) {
+        fun done() {
+            context.getSharedPreferences("ui_prefs", Context.MODE_PRIVATE)
+                .edit().putBoolean("overlay_asked", true).apply()
+            askOverlay = false
+        }
+        AlertDialog(
+            onDismissRequest = { done() },
+            title = { Text("화면 상단 상태 표시") },
+            text = { Text("어떤 앱을 쓰고 있어도 화면 맨 위에 통화 가능 상태를 표시하려면 '다른 앱 위에 표시' 권한이 필요합니다.") },
+            confirmButton = {
+                Button(onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                android.net.Uri.parse("package:${context.packageName}"),
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                    done()
+                }) { Text("허용하러 가기") }
+            },
+            dismissButton = { TextButton(onClick = { done() }) { Text("나중에") } },
+        )
+    }
+
     val fallbackReg = remember { MutableStateFlow<RegState>(RegState.Idle) }
     val fallbackCall = remember { MutableStateFlow<CallState>(CallState.Null) }
     val reg by (service?.regState ?: fallbackReg).collectAsState()
