@@ -93,7 +93,6 @@ import com.cims.ue.core.contacts.FavoriteStore
 import com.cims.ue.core.message.MessageStore
 import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.sip.CallState
-import com.cims.ue.core.sip.RegState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -340,9 +339,8 @@ private fun HomeScreen(
         )
     }
 
-    val fallbackReg = remember { MutableStateFlow<RegState>(RegState.Idle) }
+    // 등록상태 표시는 화면 최상단 전역 배지(오버레이)+상태바 알림이 담당 — 인앱 칩은 두지 않는다.
     val fallbackCall = remember { MutableStateFlow<CallState>(CallState.Null) }
-    val reg by (service?.regState ?: fallbackReg).collectAsState()
     val call by (service?.callState ?: fallbackCall).collectAsState()
 
     // 발신: 음성/영상 구분. 영상은 카메라 권한 확보 후 발신.
@@ -449,10 +447,10 @@ private fun HomeScreen(
         val msgStore = remember { MessageStore(context) }
         val unread = remember(msgVersion) { msgStore.unreadTotal() }
         Scaffold(
-            topBar = { HeaderBar(reg, onEditConfig) },
-            bottomBar = { BottomNav(tab, unread) { tab = it } },
+            bottomBar = { BottomNav(tab, unread, onSettings = onEditConfig) { tab = it } },
         ) { pad ->
-            Box(Modifier.padding(pad).fillMaxSize()) {
+            // top 여백 = 화면 최상단 전역 상태배지(오버레이)와 겹치지 않게 확보
+            Box(Modifier.padding(pad).padding(top = 32.dp).fillMaxSize()) {
                 when (tab) {
                     Tab.CONTACTS -> ContactsScreen(
                         personal = contacts,
@@ -491,19 +489,7 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun HeaderBar(reg: RegState, onSettings: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        RegStatusChip(reg)
-        TextButton(onClick = onSettings) { Text("설정") }
-    }
-}
-
-@Composable
-private fun BottomNav(current: Tab, unread: Int, onSelect: (Tab) -> Unit) {
+private fun BottomNav(current: Tab, unread: Int, onSettings: () -> Unit, onSelect: (Tab) -> Unit) {
     NavigationBar {
         NavigationBarItem(
             selected = current == Tab.CONTACTS, onClick = { onSelect(Tab.CONTACTS) },
@@ -525,6 +511,10 @@ private fun BottomNav(current: Tab, unread: Int, onSelect: (Tab) -> Unit) {
                 }
             },
             label = { Text("문자") },
+        )
+        NavigationBarItem(
+            selected = false, onClick = onSettings,
+            icon = { Text("⚙", fontSize = 20.sp) }, label = { Text("설정") },
         )
     }
 }
@@ -1392,20 +1382,6 @@ private fun RoundButton(
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = fg, fontSize = 28.sp)
-    }
-}
-
-@Composable
-private fun RegStatusChip(reg: RegState) {
-    val (dot, label) = when (reg) {
-        is RegState.Registered -> CALL_GREEN to "통화 가능"
-        RegState.Registering, RegState.Idle -> Color(0xFFF9A825) to "연결 중…"
-        RegState.Unregistered -> Color(0xFFF9A825) to "등록 해제됨"
-        is RegState.Failed -> HANGUP_RED to "오프라인"
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
-        Text(label, style = MaterialTheme.typography.labelMedium)
     }
 }
 
