@@ -124,8 +124,11 @@ if __name__ == '__main__':
                 src = _CONFIG_PATH
             else:
                 # fallback: base oam.json 상속 — oam-svc 는 oam 동거가 전제(코드 import 도
-                #   oam/src 에서)이므로 공유값(CimsDatabase/JwtSecret/ServiceLogging 등)을
-                #   base 설정에서 가져온다. dist 형제 / dev ems 트리 / production modules
+                #   oam/src 에서)이므로 공유값(CimsAuth.JwtSecret/ServiceLogging/CimsRuntimeDir
+                #   /Mgmt)을 base 설정에서 가져온다. 서비스 관측 키(CimsDatabase/CspNotify/
+                #   MediaServer)는 oam.json 에 없다(base 전용 설정만 보유) — 콘솔 배포설정
+                #   (config_template → 배포 overlay config.json)이 정규 관리 경로.
+                #   dist 형제 / dev ems 트리 / production modules
                 #   (활성 버전 = current 심링크) 세 레이아웃 지원.
                 #   디렉토리 존재가 아니라 oam.json 실재로 선별 — dev ems 트리에선
                 #   _repo_root/oam/config 가 oam-svc 자기 config(sample만)와 겹치므로.

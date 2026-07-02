@@ -132,8 +132,12 @@ def _load_active_states(config: dict, kind: str) -> list:
 def _get_cmp_stats(config: dict) -> dict:
     """CMP에 stats 요청 (3s 캐시)."""
     def probe():
-        cmp_ip = config.get('CmpIp', '127.0.0.1')
-        cmp_port = int(config.get('CmpPort', 9000))
+        cmp_ip = config.get('CmpIp')
+        if cmp_ip:
+            cmp_port = int(config.get('CmpPort', 9000))
+        else:
+            # CmpIp 미설정(콘솔 관리 oam-svc 설정) — MediaServer.Endpoints 첫 노드를 대표 probe.
+            cmp_ip, cmp_port = _media_endpoints(config)[0]
         resp = _udp_request(cmp_ip, cmp_port, {
             "trans_id": int(time.time()) % 100000,
             "payload": {"cmd": "STATS_REQUEST"}

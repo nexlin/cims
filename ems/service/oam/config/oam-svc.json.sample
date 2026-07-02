@@ -1,11 +1,23 @@
 {
-    "_comment": "oam_base_service_split §7 (D5) — oam-svc 독립 서비스 모듈 전용 설정. 런타임 활성: 이 파일을 oam-svc.json 으로 rename. 서비스 관측 설정(CimsDatabase/CspNotify/MediaServer/ServiceLogging)의 소유는 oam-svc — 콘솔 배포설정(config_template)이 정규 관리 경로이고, 미설정 시 동거 base 의 oam.json 에서 fallback 상속(공유값: JwtSecret/CimsRuntimeDir 포함, base 전용 Server 제외). base 가 아니라 base 게이트웨이의 업스트림.",
+    "_comment": "oam_base_service_split §7 (D5) — oam-svc 독립 서비스 모듈 전용 설정. 런타임 활성: 이 파일을 oam-svc.json 으로 rename. 서비스 관측 설정(CimsDatabase/CspNotify/MediaServer/ServiceLogging)의 소유는 oam-svc — 정규 관리 경로는 콘솔 배포설정(config_template db/probe/logging 섹션 → 배포 overlay config.json)이며, base oam.json 은 이 키들을 갖지 않는다(base 전용 설정만 보유). 이 파일이 존재하면 base oam.json 상속 fallback 이 비활성화되므로 공유값(CimsAuth.JwtSecret — base 와 동일해야 토큰 검증 가능)까지 여기서 채워야 한다. base 가 아니라 base 게이트웨이의 업스트림.",
     "Server": {
         "Ip": "127.0.0.1",
         "Port": 4480,
         "_comment": "I1: loopback 비공개. 외부 노출은 base 게이트웨이(4419) 경유만."
     },
     "SystemId": "oam_svc_01",
+    "CimsAuth": {
+        "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8=",
+        "_comment": "base oam.json 의 CimsAuth.JwtSecret 과 동일 값이어야 게이트웨이 경유 토큰을 독립 검증할 수 있다(§5)."
+    },
+    "CimsDatabase": {
+        "Host": "127.0.0.1",
+        "Port": 3306,
+        "User": "cims",
+        "Password": "!core0908",
+        "Db": "cims",
+        "_comment": "조직/가입자 통계·호이력 필터·db_down 알람용 (read-only 성격)."
+    },
     "MediaServer": {
         "_comment": "서비스 KPI(stats/service) 의 CMP STATS probe 대상 — 전 미디어 노드.",
         "Endpoints": [
@@ -17,6 +29,10 @@
         "Ip": "121.161.164.47",
         "Port": 4421,
         "_comment": "stats/service 의 CSP STATS probe 대상."
+    },
+    "ServiceLogging": {
+        "Dir": "/mnt/cims/service_log",
+        "_comment": "CSP/CMP/CSC 와 공유하는 서비스 로그 루트 — stats(messages/leak)·flow·녹취 + 서비스 계열 알람(alert_log) 기록 위치."
     },
     "Gateway": {
         "_comment": "oam-svc 가 base 게이트웨이에 self-register 할 라우트(설치 시 POST /api/v1/gateway/routes). canonical /api/v1/calls 통합은 D6 후속 — 현 실경로를 등록.",

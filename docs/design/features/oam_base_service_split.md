@@ -251,11 +251,13 @@ config/
   `services/<svc>.json`.
 - 장점: 새 서비스 = `services/<svc>.json` 추가 + self-register, **공통/타서비스 설정 무영향**(D4 의도).
 - 하위호환: `common.json` 부재 시 자기 `oam-svc.json` 단독, 그것도 없으면 **base `oam.json` 상속
-  fallback** — oam-svc 는 oam 동거가 전제(코드 import 도 oam/src)이므로 공유값(CimsDatabase/
-  JwtSecret/ServiceLogging 등)을 base 설정에서 읽는다. 탐색 순서: dist 형제(`<dist>/oam/config`) →
+  fallback** — oam-svc 는 oam 동거가 전제(코드 import 도 oam/src)이므로 공유값(CimsAuth.JwtSecret/
+  ServiceLogging/CimsRuntimeDir/Mgmt)을 base 설정에서 읽는다. 탐색 순서: dist 형제(`<dist>/oam/config`) →
   dev ems 트리(`ems/core/oam/config`) → production modules(`modules/oam/current/oam/config`,
   활성 버전 심링크). 단 base 전용 bind 인 `Server`(0.0.0.0:4419) 는 상속에서 제외 — oam-svc 는
   loopback 4480 기본(I1)이고, 배포 overlay(`config.json`)의 `Server.*` 가 그 위에 적용된다.
+  `oam-svc.json` 이 존재하면 이 fallback 은 동작하지 않으므로 공유값(특히 base 와 동일해야 하는
+  `CimsAuth.JwtSecret`)까지 그 파일에서 채워야 한다(`oam-svc.json.sample` 참조).
 
 ### 서비스 관측 설정의 소유 — oam-svc (콘솔 관리)
 `CimsDatabase`/`CspNotify`/`MediaServer.Endpoints`/`ServiceLogging` 은 **서비스 관측 설정으로
@@ -264,13 +266,18 @@ oam-svc 소유**다. 정규 관리 경로는 콘솔 배포설정 — oam-svc `co
 `update_config` job → 배포 overlay(`config.json`). 우선순위:
 
 ```
-배포 overlay(콘솔 설정)  >  oam-svc.json(패키지 동봉 시)  >  base oam.json fallback 상속
+배포 overlay(콘솔 설정)  >  oam-svc.json(패키지 동봉 시)  >  base oam.json fallback 상속(공유값만)
 ```
 
-base `oam.json` 의 동일 키들은 `--role all`(단일 프로세스 dev/TB) 구동과 위 fallback 상속의
-소스로만 쓰인다 — **`--role base` 는 이 키들을 읽지 않는다**(base 프로세스는 DB 미접속).
-`MediaServer.Endpoints` 는 `{ip,port}` dict(oam.json)와 `"ip:port"` 문자열(템플릿
-string_list) 둘 다 허용.
+**base `oam.json` 은 base 전용 설정만 갖는다** — 서비스 관측 키(`CimsDatabase`/`CspNotify`/
+`CmpIp`·`CmpPort`/`MediaServer`)를 두지 않으며, **`--role base` 는 이 키들을 읽지 않는다**
+(base 프로세스는 DB 미접속). 예외는 `ServiceLogging` — base 도 agent 계열 알람(alert_log)
+저장·조회와 콘솔 flow 기록에 쓰는 공유 키라 `oam.json` 에 남으며, oam-svc 는 콘솔 미설정 시
+이를 fallback 상속한다. `--role all`(단일 프로세스 dev/TB)에서 서비스 관측이 필요하면 키를
+배포 overlay(`config.json`) 또는 로컬/TB 설정(`oam-tb.json` 등)으로 제공한다 — 레포 `oam.json`
+에는 두지 않는다. `MediaServer.Endpoints` 는 `{ip,port}` dict 와 `"ip:port"` 문자열(템플릿
+string_list) 둘 다 허용하며, 대시보드 health 위젯의 CMP probe 는 `CmpIp` 미설정 시
+`MediaServer.Endpoints` 첫 노드를 대표로 사용한다.
 
 ### file_store 소유권 (I5)
 | 도메인/컬렉션 | 소유 |

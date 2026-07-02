@@ -65,7 +65,7 @@
           "type": "string_list",
           "default": [],
           "restart": false,
-          "help": "전 미디어 노드 \"ip:port\" 목록 (예: 10.0.1.48:9000). 비우면 base oam.json 상속값 사용."
+          "help": "전 미디어 노드 \"ip:port\" 목록 (예: 10.0.1.48:9000). 첫 노드가 대시보드 health 위젯의 대표 probe 대상. 비우면 CMP 관측 비활성."
         }
       ],
       "scope": "service"
@@ -73,7 +73,7 @@
     {
       "key": "db",
       "title": "데이터베이스",
-      "description": "CIMS MariaDB 접속 정보 — 조직/가입자 통계·호이력 필터·DB health 알람 조회용 (read-only 성격). 비우면 base oam.json 상속값 사용.",
+      "description": "CIMS MariaDB 접속 정보 — 조직/가입자 통계·호이력 필터·DB health 알람 조회용 (read-only 성격). 소유는 oam-svc — 여기(콘솔 배포설정)가 정규 관리 경로.",
       "fields": [
         {
           "key": "CimsDatabase.Host",
