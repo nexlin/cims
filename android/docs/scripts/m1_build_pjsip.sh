@@ -48,6 +48,31 @@ cat > pjlib/include/pj/config_site.h <<'EOF'
 EOF
 sha256sum pjlib/include/pj/config_site.h
 
+echo "=== [2-3] AMR-WB codec_setting NULL 크래시 패치 (upstream 2.16 버그) ==="
+# and_aud_mediacodec.cpp: AMR 설정 초기화 블록(codec_id==AMRNB||AMRWB 처리)이
+# `#if PJMEDIA_HAS_AND_MEDIA_AMRNB` 로만 가드돼, AMRNB=0/AMRWB=1(경로 C) 빌드에서
+# 통째로 컴파일 제외 → codec_data->codec_setting=NULL → 첫 RX/TX 미디어 프레임에서
+# parse_amr/pack_amr 이 NULL amr_settings_t 역참조(SIGSEGV). 가드를 AMRWB 포함으로 확대.
+# 멱등: 이미 패치돼 있으면 skip.
+python3 - <<'PYEOF'
+import re
+p = "pjmedia/src/pjmedia-codec/and_aud_mediacodec.cpp"
+src = open(p).read()
+anchor = ("#if PJMEDIA_HAS_AND_MEDIA_AMRNB\n"
+          "    if (and_media_data->codec_id == AND_AUD_CODEC_AMRNB ||\n"
+          "        and_media_data->codec_id == AND_AUD_CODEC_AMRWB)")
+fixed  = ("#if PJMEDIA_HAS_AND_MEDIA_AMRNB || PJMEDIA_HAS_AND_MEDIA_AMRWB\n"
+          "    if (and_media_data->codec_id == AND_AUD_CODEC_AMRNB ||\n"
+          "        and_media_data->codec_id == AND_AUD_CODEC_AMRWB)")
+if fixed in src:
+    print("  already patched (skip)")
+elif anchor in src:
+    open(p, "w").write(src.replace(anchor, fixed, 1))
+    print("  patched: AMR settings guard -> AMRNB || AMRWB")
+else:
+    raise SystemExit("  ERROR: AMR guard anchor not found (pjproject layout changed?)")
+PYEOF
+
 echo "=== [3] configure-android + make (arm64-v8a) ==="
 export APP_PLATFORM=28
 export TARGET_ABI=arm64-v8a

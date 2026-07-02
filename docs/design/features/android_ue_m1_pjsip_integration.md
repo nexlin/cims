@@ -136,6 +136,17 @@ git describe --tags     # 2.16 기대
 >
 > **Speex 비활성 주의:** `PJMEDIA_HAS_SPEEX_CODEC 0`은 speex *코덱*만 끈다. AEC/preprocessing은 speex DSP를 쓰므로 `PJMEDIA_HAS_SPEEX_AEC`는 별개 — AEC가 필요하면 전처리 매크로는 유지.
 
+> **⚠️ AMR-WB codec_setting NULL 크래시 패치 (upstream 2.16 버그, 경로 C 필수).**
+> `and_aud_mediacodec.cpp` 의 AMR 설정 초기화 블록(codec open 시 `amr_settings_t` 할당 →
+> `codec_data->codec_setting`)은 내부적으로 AMR-NB·WB 둘 다 처리하지만 `#if
+> PJMEDIA_HAS_AND_MEDIA_AMRNB` 로만 가드돼 있다. **경로 C 는 AMRNB=0/AMRWB=1** 이므로 이
+> 블록이 통째로 컴파일 제외되어 `codec_setting` 이 NULL 로 남고, 첫 미디어 프레임에서
+> `parse_amr`(RX)·`pack_amr`(TX)가 `(amr_settings_t*)NULL->dec/enc_setting` 를 역참조해
+> **SIGSEGV(fault addr ~0x1/0x2, thread "media")로 앱이 죽는다** — 통화는 SIP 상 연결(200 OK)되나
+> 응답 즉시 크래시해 통화화면·오디오가 사라진다. 수정: 가드를 `#if PJMEDIA_HAS_AND_MEDIA_AMRNB
+> || PJMEDIA_HAS_AND_MEDIA_AMRWB` 로 확대. `m1_build_pjsip.sh` `[2-3]` 단계가 clone 후 멱등
+> 적용한다(빌드 재현성). 실기기 검증: cspsim↔단말 AMR-WB 음성 + H.264 영상 통화 크래시 없이 성립.
+
 ### 2.6 configure / build / SWIG
 
 ```bash
