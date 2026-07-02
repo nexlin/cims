@@ -10,18 +10,22 @@
 
 ---
 
-## 1. 흐름
+## 1. 흐름 — CIMS 단일 SSO
+
+로그인은 **CIMS 오너앱 1회**(AccountManager 공유 계정, accountType `com.cims.ue`). CIMS-Phone/CIMS-McPtt 는 자체 로그인이 없다.
 
 ```
-앱 첫 실행 → [로그인 화면]  (CSC 주소 + 아이디 + 비번; CSC 주소는 앱 기본값/빌드설정 가능)
-  → IdMS OAuth2 PKCE 인증(TS 33.180) → access_token
-  → GET /provisioning/me (Bearer)  → 서비스별 프로파일 수신
-  → 앱이 자기 service kind 프로파일로 SipAccountConfig 자동 구성·저장
-  → [홈/통화 화면]   (수동 설정은 "고급" fallback 으로만 노출)
+CIMS 앱 [로그인 화면]  (CSC 주소 + 아이디 + 비번)
+  → IdMS OAuth2 PKCE 인증(TS 33.180) → refresh_token 을 공유 계정에 보관
+  → 로그인 성공 즉시 CIMS-Phone/McPtt 등록유지 서비스 기동(startForegroundService,
+     exported 서비스 + signature 권한 `com.cims.ue.permission.CIMS_SUITE`)
+      → 각 앱 서비스가 공유 계정 토큰으로 GET /provisioning/me (Bearer)
+      → 자기 service kind 프로파일로 SipAccountConfig 자동 구성·저장 → SIP REGISTER
+  → 이후 앱을 열지 않아도 백그라운드 착신/문자 수신 가능 (부팅 후엔 각 앱 BootReceiver 가 동일 수행)
 ```
 
 - 로그인은 **CSC(IdMS) 한 곳**. CSP/PSP 시그널링 서버 주소는 프로비저닝 응답으로 받는다.
-- **volte-client** 는 `kind=="volte"`, **ptt-client** 는 `kind=="ptt"` 프로파일을 사용. 두 앱은 별도 APK 라 각자 로그인(같은 자격증명).
+- **volte-client** 는 `kind=="volte"`, **ptt-client** 는 `kind=="ptt"` 프로파일을 사용. 앱 진입 시 항상 재프로비저닝(GATE)해 서버 설정 변경(포트 등)을 자동 반영. 수동 설정은 "고급" fallback.
 
 ## 2. 신원 계층 (혼동 방지)
 

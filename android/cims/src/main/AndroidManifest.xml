@@ -5,6 +5,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 로그인 직후 CIMS-Phone/McPtt 등록유지 서비스 기동(동일 서명 signature 권한) -->
+    <uses-permission android:name="com.cims.ue.permission.CIMS_SUITE" />
+
+    <!-- Android 11+ 패키지 가시성 — companion 앱 서비스 explicit intent 해석용 -->
+    <queries>
+        <package android:name="com.cims.ue.volte" />
+        <package android:name="com.cims.ue.ptt" />
+    </queries>
 
     <application
         android:allowBackup="true"

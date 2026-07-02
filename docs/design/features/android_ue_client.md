@@ -263,7 +263,11 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 | Doze/네트워크 | FGS 유지 + 등록 refresh(서버 Expires 추종) + **등록 keepalive 보강**: ①PJSIP 등록 실패 자동 재시도(`regConfig.firstRetryIntervalSec=5`/`retryIntervalSec=30`) ②NAT 바인딩 UDP keep-alive(`natConfig.udpKaIntervalSec=15`, contact/via rewrite) ③기본 네트워크 복귀 시 재등록(`ConnectivityManager.registerDefaultNetworkCallback`→`SipController.reregister`) ④앱 포그라운드 복귀 시 재등록(`MainActivity.onResume`→`SipService.poke`) |
 | 스레딩 | PJSIP 콜백=워커 스레드 → UI는 main으로 디스패치. **PJSIP 외 스레드에서 호출 시 `Endpoint.libRegisterThread()` 필수** |
 | 객체 수명 | `Account`/`Call`/`AudioMedia` 래퍼 GC 방지(강참조 유지) + 명시적 delete |
-| 권한 | RECORD_AUDIO, CAMERA(영상), POST_NOTIFICATIONS, FOREGROUND_SERVICE(_MICROPHONE), 네트워크 |
+| **백그라운드 착신** | 기본 전화앱처럼 앱 미실행/화면 꺼짐에도 착신: `SipService` 가 `CallState.Incoming` 에 **CallStyle 착신 알림**(받기/거절 액션) + `fullScreenIntent`(잠금·꺼진 화면이면 통화화면 직행, MainActivity `showWhenLocked`/`turnScreenOn`) + **벨소리 루프**(`RingtoneManager` TYPE_RINGTONE, `isLooping`). "받기"=MainActivity 경유(`EXTRA_ANSWER_CALL_ID`/`EXTRA_ANSWER_VIDEO`, 서비스 연결 후 응답), "거절"=서비스 액션(`ACTION_REJECT`). 서비스 기동 경로 3종: ①CIMS 로그인 직후(오너앱이 `startForegroundService`, exported+signature 권한 `com.cims.ue.permission.CIMS_SUITE`) ②부팅(BootReceiver) ③앱 실행 |
+| **착신 영상 응답** | 수신 INVITE 원문 SDP 의 `m=video` 로 영상호 감지(`CallState.Incoming.video`) → 통화화면에 "영상" 응답 버튼(CAMERA 권한 확보 후 `answer(withVideo)`=`opt.videoCount=1`) |
+| **로컬 카메라 프리뷰** | 영상 통화 중 우하단 PiP(내 화면): `VideoPreview`(전면 카메라 우선, `VidDevManager.enumDev2` 이름 "front" 매칭) + `SurfaceView.setZOrderMediaOverlay` — 호 종료/shutdown 시 자동 정리 |
+| **문자(SIP MESSAGE)** | RFC 3428 page-mode 송수신: 송신=`SipController.sendRequest("MESSAGE")`, 수신=`Account.onInstantMessage`→`SipController.incomingMessage`(SharedFlow)→`SipService` 가 **인박스 저장 + 알림**. 인박스=core `MessageStore`(상대별 스레드·안읽음 카운트, SharedPreferences+JSON). UI=문자 탭(스레드 목록→말풍선 대화·전송, 안읽음 배지) |
+| 권한 | RECORD_AUDIO, CAMERA(영상), POST_NOTIFICATIONS, USE_FULL_SCREEN_INTENT·VIBRATE(착신), FOREGROUND_SERVICE(_MICROPHONE), 네트워크 |
 | 오디오 포커스 | AudioManager 포커스 + 통화 라우팅(스피커/리시버/BT) |
 | 하드웨어 PTT | 러기드 단말의 물리 PTT 키 매핑(KeyEvent/벤더 인텐트) — 옵션, M2+ |
 | UX 모드 | VoLTE=전이중 다이얼러, PTT=반이중 푸시투토크(발언권 표시/대기열) |

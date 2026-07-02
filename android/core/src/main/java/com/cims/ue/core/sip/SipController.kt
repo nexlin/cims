@@ -4,8 +4,11 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import com.cims.ue.core.config.SipAccountConfig
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.pjsip.pjsua2.AccountConfig
 import org.pjsip.pjsua2.AuthCredInfo
@@ -17,6 +20,11 @@ import org.pjsip.pjsua2.SipMediaType
 import org.pjsip.pjsua2.SipMultipartPart
 import org.pjsip.pjsua2.SipMultipartPartVector
 import org.pjsip.pjsua2.SipTxOption
+import org.pjsip.pjsua2.VideoPreview
+import org.pjsip.pjsua2.VideoPreviewOpParam
+import org.pjsip.pjsua2.VideoWindowHandle
+import org.pjsip.pjsua2.pjmedia_dir
+import org.pjsip.pjsua2.pjmedia_vid_dev_std_index
 import org.pjsip.pjsua2.pjsip_status_code
 import org.pjsip.pjsua2.pjsua_stun_use
 import java.util.concurrent.ConcurrentHashMap
@@ -39,6 +47,10 @@ class SipController(private val config: SipAccountConfig) {
     private val _call = MutableStateFlow<CallState>(CallState.Null)
     val callState: StateFlow<CallState> = _call.asStateFlow()
 
+    /** 수신 문자(SIP MESSAGE) 이벤트. PJSIP 콜백 스레드에서 tryEmit — 구독자(서비스)가 저장/알림. */
+    private val _incomingMessage = MutableSharedFlow<ImMessage>(extraBufferCapacity = 32)
+    val incomingMessage: SharedFlow<ImMessage> = _incomingMessage.asSharedFlow()
+
     private val ctl = HandlerThread("pj-ctl").apply { start() }
     private val h = Handler(ctl.looper)
 
@@ -57,6 +69,40 @@ class SipController(private val config: SipAccountConfig) {
         videoRenderSurface = surface
         if (surface != null) calls.values.forEach { runCatching { it.attachVideo(surface) } }
     }
+
+    /** 로컬 카메라 프리뷰(내 화면). UI SurfaceView 준비 시 Surface 주입, null 이면 중지. */
+    private var preview: VideoPreview? = null
+
+    fun setPreviewSurface(surface: Any?) = onCtl {
+        stopPreview()
+        if (surface == null) return@onCtl
+        val vp = VideoPreview(frontCaptureDev())
+        vp.start(
+            VideoPreviewOpParam().apply {
+                window = VideoWindowHandle().apply { handle.setWindow(surface) }
+            },
+        )
+        preview = vp
+    }
+
+    // pj-ctl 스레드에서만 호출.
+    private fun stopPreview() {
+        preview?.let { runCatching { it.stop() }; runCatching { it.delete() } }
+        preview = null
+    }
+
+    /** 전면 카메라 캡처 장치 우선 선택(이름 "front" 매칭), 없으면 기본 캡처 장치. */
+    private fun frontCaptureDev(): Int = runCatching {
+        val devs = PjLib.ep.vidDevManager().enumDev2()
+        var fallback = pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV
+        for (i in 0 until devs.size) {
+            val d = devs[i]
+            if ((d.dir and pjmedia_dir.PJMEDIA_DIR_CAPTURE) == 0) continue
+            if (d.name.contains("front", ignoreCase = true)) return@runCatching d.id
+            if (fallback == pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV) fallback = d.id
+        }
+        fallback
+    }.getOrDefault(pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV)
 
     // ── PTT(M2) 지원 ──
     /** 반이중(PTT): true 면 mic 는 floor GRANT 시에만 송신, spk 는 상시 청취. (VoLTE=false 전이중) */
@@ -123,8 +169,16 @@ class SipController(private val config: SipAccountConfig) {
         calls[call.id] = call
     }
 
-    fun answer(callId: Int) = onCtl {
-        calls[callId]?.answer(CallOpParam().apply { statusCode = pjsip_status_code.PJSIP_SC_OK })
+    /** 착신 응답. [withVideo]=true 면 영상까지 협상(상대가 m=video 를 offer 한 경우). */
+    fun answer(callId: Int, withVideo: Boolean = false) = onCtl {
+        if (withVideo) videoEnabled = true
+        calls[callId]?.answer(
+            CallOpParam(true).apply {
+                statusCode = pjsip_status_code.PJSIP_SC_OK
+                opt.audioCount = 1L
+                opt.videoCount = if (withVideo) 1L else 0L
+            },
+        )
     }
 
     fun reject(callId: Int) = onCtl {
@@ -200,19 +254,25 @@ class SipController(private val config: SipAccountConfig) {
         }
     }
 
-    internal fun dispatchIncoming(call: CimsCall, from: String) {
+    internal fun dispatchIncoming(call: CimsCall, from: String, video: Boolean) {
         calls[call.id] = call
-        _call.value = CallState.Incoming(call.id, from)
+        _call.value = CallState.Incoming(call.id, from, video)
     }
 
     internal fun dispatchCallState(callId: Int, s: CallState) {
         _call.value = s
         if (s is CallState.Disconnected) {
             calls.remove(callId)?.let { runCatching { it.delete() } }
+            onCtl { if (calls.isEmpty()) stopPreview() }        // 마지막 호 종료 → 프리뷰 정리
         }
     }
 
+    internal fun dispatchInstantMessage(fromUri: String, contentType: String, body: String) {
+        _incomingMessage.tryEmit(ImMessage(fromUri, contentType, body))
+    }
+
     fun shutdown() = onCtl {
+        stopPreview()
         calls.values.forEach { runCatching { it.delete() } }
         calls.clear()
         account?.let { runCatching { it.delete() } }

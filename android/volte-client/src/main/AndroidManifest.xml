@@ -11,8 +11,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 백그라운드 착신 — 잠금/꺼진 화면에서 통화화면 직행 + 진동 -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 부팅 자동 로그인 (공유 계정 존재 시 REGISTER 재개) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- CIMS 제품군 내부 기동 권한(signature) — CIMS 오너앱이 로그인 직후 등록유지 서비스를 시작. -->
+    <permission
+        android:name="com.cims.ue.permission.CIMS_SUITE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.cims.ue.permission.CIMS_SUITE" />
     <!-- M1.3 영상 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
@@ -25,16 +34,22 @@
         android:theme="@style/Theme.CimsUe">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true">
+            <!-- showWhenLocked/turnScreenOn: 착신 fullScreenIntent 가 잠금/꺼진 화면 위로 통화화면을 띄운다 -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <!-- exported+signature 권한: CIMS 오너앱(동일 서명)이 로그인 직후 백그라운드 등록을 시작할 수 있게 -->
         <service
             android:name=".SipService"
-            android:exported="false"
+            android:exported="true"
+            android:permission="com.cims.ue.permission.CIMS_SUITE"
             android:foregroundServiceType="microphone|specialUse">
             <!-- specialUse: 부팅 시 등록유지 FGS (Android 14+ 백그라운드 mic 시작 제약 회피, 통화 시 mic 로 승격) -->
             <property

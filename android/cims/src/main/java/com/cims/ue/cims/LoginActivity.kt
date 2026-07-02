@@ -3,6 +3,8 @@ package com.cims.ue.cims
 import android.accounts.Account
 import android.accounts.AccountAuthenticatorResponse
 import android.accounts.AccountManager
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -99,6 +101,7 @@ class LoginActivity : ComponentActivity() {
                     putString(AccountManager.KEY_ACCOUNT_TYPE, account.type)
                 })
                 runOnUiThread {
+                    startCompanionServices()
                     onResult(true, "로그인 성공 — 계정이 등록되었습니다")
                     finish()
                 }
@@ -106,6 +109,24 @@ class LoginActivity : ComponentActivity() {
                 runOnUiThread { onResult(false, "로그인 실패: ${e.message}") }
             }
         }.start()
+    }
+
+    /**
+     * 로그인 직후 CIMS-Phone/McPtt 등록유지 서비스를 즉시 시작 — 앱을 한 번도 열지 않아도
+     * 백그라운드에서 SIP 등록이 유지돼 착신 가능(기본 전화앱처럼). 포그라운드 Activity 발신이라
+     * FGS 시작이 허용되며, 미설치 앱은 조용히 건너뛴다. 부팅 이후는 각 앱 BootReceiver 가 담당.
+     */
+    private fun startCompanionServices() {
+        listOf(
+            ComponentName("com.cims.ue.volte", "com.cims.ue.volte.SipService"),
+            ComponentName("com.cims.ue.ptt", "com.cims.ue.ptt.PttService"),
+        ).forEach { cn ->
+            runCatching {
+                val i = Intent().setComponent(cn).putExtra("autostart", true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i)
+                else startService(i)
+            }
+        }
     }
 }
 

@@ -4,6 +4,7 @@ import android.util.Log
 import org.pjsip.pjsua2.Account
 import org.pjsip.pjsua2.CallOpParam
 import org.pjsip.pjsua2.OnIncomingCallParam
+import org.pjsip.pjsua2.OnInstantMessageParam
 import org.pjsip.pjsua2.OnRegStateParam
 import org.pjsip.pjsua2.pjsip_status_code
 
@@ -25,10 +26,17 @@ class CimsAccount(private val owner: SipController) : Account() {
     override fun onIncomingCall(prm: OnIncomingCallParam) {
         val call = CimsCall(owner, this, prm.callId)
         val from = runCatching { call.info.remoteUri }.getOrDefault("")
+        // 영상 여부 = 수신 INVITE 원문의 SDP 에 m=video offer 존재(협상 전이라 CallInfo.media 는 비어 있음).
+        val video = runCatching { prm.rdata.wholeMsg.contains("m=video") }.getOrDefault(false)
         // 180 Ringing 만 자동 응답 — 실제 200 OK 는 사용자 answer().
         runCatching {
             call.answer(CallOpParam().apply { statusCode = pjsip_status_code.PJSIP_SC_RINGING })
         }
-        owner.dispatchIncoming(call, from)
+        owner.dispatchIncoming(call, from, video)
+    }
+
+    /** 문자(SIP MESSAGE) 수신 — 200 OK 응답은 PJSIP 가 자동, 본문만 컨트롤러로 중계. */
+    override fun onInstantMessage(prm: OnInstantMessageParam) {
+        owner.dispatchInstantMessage(prm.fromUri, prm.contentType, prm.msgBody)
     }
 }

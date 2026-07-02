@@ -27,14 +27,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -83,6 +87,8 @@ import com.cims.ue.core.contacts.CompanyOrg
 import com.cims.ue.core.contacts.Contact
 import com.cims.ue.core.contacts.ContactStore
 import com.cims.ue.core.contacts.FavoriteStore
+import com.cims.ue.core.message.MessageStore
+import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.RegState
 import kotlinx.coroutines.Dispatchers
@@ -94,12 +100,39 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+
+    /** 착신 알림 "받기" 요청(callId, video) — HomeScreen 이 서비스 연결 후 소비. */
+    private val notifAnswer = MutableStateFlow<Pair<Int, Boolean>?>(null)
+
+    /** 문자 알림 탭 → 문자 탭으로 진입 요청. */
+    private val notifOpenMessages = MutableStateFlow(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleIntent(intent)
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) { App() }
+                Surface(modifier = Modifier.fillMaxSize()) { App(notifAnswer, notifOpenMessages) }
             }
+        }
+    }
+
+    // launchMode=singleTask — 알림 PendingIntent 가 기존 인스턴스로 들어온다.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(i: Intent?) {
+        i ?: return
+        val answerId = i.getIntExtra(SipService.EXTRA_ANSWER_CALL_ID, -1)
+        if (answerId >= 0) {
+            notifAnswer.value = answerId to i.getBooleanExtra(SipService.EXTRA_ANSWER_VIDEO, false)
+            i.removeExtra(SipService.EXTRA_ANSWER_CALL_ID)
+        }
+        if (i.getBooleanExtra(SipService.EXTRA_OPEN_MESSAGES, false)) {
+            notifOpenMessages.value = true
+            i.removeExtra(SipService.EXTRA_OPEN_MESSAGES)
         }
     }
 
@@ -113,10 +146,13 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen { GATE, HOME, CONFIG }
-private enum class Tab { CONTACTS, RECENTS, KEYPAD }
+private enum class Tab { CONTACTS, RECENTS, KEYPAD, MESSAGES }
 
 @Composable
-private fun App() {
+private fun App(
+    notifAnswer: MutableStateFlow<Pair<Int, Boolean>?>,
+    notifOpenMessages: MutableStateFlow<Boolean>,
+) {
     val context = LocalContext.current
     val store = remember { ConfigStore(context) }
     var config by remember { mutableStateOf(store.load()) }
@@ -141,6 +177,8 @@ private fun App() {
         Screen.HOME -> HomeScreen(
             config = config,
             onEditConfig = { screen = Screen.CONFIG },
+            notifAnswer = notifAnswer,
+            notifOpenMessages = notifOpenMessages,
         )
     }
 }
@@ -229,6 +267,8 @@ private fun SsoGateScreen(
 private fun HomeScreen(
     config: SipAccountConfig,
     onEditConfig: () -> Unit,
+    notifAnswer: MutableStateFlow<Pair<Int, Boolean>?>,
+    notifOpenMessages: MutableStateFlow<Boolean>,
 ) {
     val context = LocalContext.current
     val callLog = remember { CallLogStore(context) }
@@ -285,6 +325,28 @@ private fun HomeScreen(
         else doDial(number, false)
     }
 
+    // 착신 응답: 영상 응답은 카메라 권한 확보 후 answer(withVideo). 거부되면 음성으로만 받는다.
+    var pendingVideoAnswer by remember { mutableStateOf<Int?>(null) }
+    val answerCamLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val id = pendingVideoAnswer; pendingVideoAnswer = null
+        if (id != null) { videoOn = granted; service?.answer(id, granted) }
+    }
+    fun answerCall(id: Int, video: Boolean) {
+        if (video) { pendingVideoAnswer = id; answerCamLauncher.launch(Manifest.permission.CAMERA) }
+        else { videoOn = false; service?.answer(id, false) }
+    }
+
+    // 착신 알림 "받기" — 서비스 연결을 기다렸다 응답(잠금화면/백그라운드에서 알림으로 진입한 경우).
+    val notifAnswerReq by notifAnswer.collectAsState()
+    LaunchedEffect(service, notifAnswerReq) {
+        val req = notifAnswerReq ?: return@LaunchedEffect
+        if (service == null) return@LaunchedEffect
+        notifAnswer.value = null
+        answerCall(req.first, req.second)
+    }
+
     // 수신/부재중 기록: Incoming→Active=수신(연결), Incoming→Disconnected(미연결)=부재중.
     var incomingNumber by remember { mutableStateOf<String?>(null) }
     var incomingAnswered by remember { mutableStateOf(false) }
@@ -305,6 +367,16 @@ private fun HomeScreen(
     var tab by remember { mutableStateOf(Tab.KEYPAD) }
     val inCall = call is CallState.Incoming || call is CallState.Outgoing || call is CallState.Active
 
+    // 문자 알림 탭 → 문자 탭으로.
+    val openMessagesReq by notifOpenMessages.collectAsState()
+    LaunchedEffect(openMessagesReq) {
+        if (openMessagesReq) { tab = Tab.MESSAGES; notifOpenMessages.value = false }
+    }
+
+    // 문자 저장소 변경 신호(수신/발신) — 배지·목록 갱신 트리거.
+    val fallbackMsgVer = remember { MutableStateFlow(0L) }
+    val msgVersion by (service?.messagesVersion ?: fallbackMsgVer).collectAsState()
+
     if (inCall) {
         CallScreen(
             call = call,
@@ -314,14 +386,18 @@ private fun HomeScreen(
                 if (on) cameraLauncher.launch(Manifest.permission.CAMERA) else service?.setVideoEnabled(false)
             },
             onSurface = { service?.setVideoSurface(it) },
-            onAnswer = { id -> service?.answer(id) },
+            onPreviewSurface = { service?.setPreviewSurface(it) },
+            onAnswer = { id -> answerCall(id, false) },
+            onAnswerVideo = { id -> answerCall(id, true) },
             onReject = { id -> service?.reject(id) },
             onHangup = { id -> service?.hangup(id) },
         )
     } else {
+        val msgStore = remember { MessageStore(context) }
+        val unread = remember(msgVersion) { msgStore.unreadTotal() }
         Scaffold(
             topBar = { HeaderBar(reg, onEditConfig) },
-            bottomBar = { BottomNav(tab) { tab = it } },
+            bottomBar = { BottomNav(tab, unread) { tab = it } },
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
@@ -343,6 +419,13 @@ private fun HomeScreen(
                         onVoice = { dial(it, false) },
                         onVideo = { dial(it, true) },
                     )
+                    Tab.MESSAGES -> MessagesScreen(
+                        store = msgStore,
+                        version = msgVersion,
+                        nameFor = { n -> contacts.nameFor(n) },
+                        onSend = { peer, text -> service?.sendMessage(peer, text) },
+                        onMarkRead = { peer -> service?.markThreadRead(peer) ?: msgStore.markRead(peer) },
+                    )
                 }
             }
         }
@@ -362,7 +445,7 @@ private fun HeaderBar(reg: RegState, onSettings: () -> Unit) {
 }
 
 @Composable
-private fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
+private fun BottomNav(current: Tab, unread: Int, onSelect: (Tab) -> Unit) {
     NavigationBar {
         NavigationBarItem(
             selected = current == Tab.CONTACTS, onClick = { onSelect(Tab.CONTACTS) },
@@ -375,6 +458,15 @@ private fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
         NavigationBarItem(
             selected = current == Tab.KEYPAD, onClick = { onSelect(Tab.KEYPAD) },
             icon = { Text("⌨", fontSize = 20.sp) }, label = { Text("키패드") },
+        )
+        NavigationBarItem(
+            selected = current == Tab.MESSAGES, onClick = { onSelect(Tab.MESSAGES) },
+            icon = {
+                BadgedBox(badge = { if (unread > 0) Badge { Text("$unread") } }) {
+                    Text("✉", fontSize = 20.sp)
+                }
+            },
+            label = { Text("문자") },
         )
     }
 }
@@ -933,6 +1025,154 @@ private fun RecentRow(e: CallEntry, name: String?, onClick: () -> Unit) {
     }
 }
 
+// ─────────────────────────────────────── 문자 탭 ───────────────────────────────────────
+
+/** 문자 탭 — 대화(스레드) 목록, 탭하면 대화 화면. [version] 변경 시 목록 재로딩. */
+@Composable
+private fun MessagesScreen(
+    store: MessageStore,
+    version: Long,
+    nameFor: (String) -> String?,
+    onSend: (String, String) -> Unit,
+    onMarkRead: (String) -> Unit,
+) {
+    var openPeer by remember { mutableStateOf<String?>(null) }
+
+    val peer = openPeer
+    if (peer != null) {
+        ConversationScreen(
+            peer = peer,
+            title = nameFor(peer) ?: peer,
+            store = store,
+            version = version,
+            onSend = { text -> onSend(peer, text) },
+            onBack = { openPeer = null },
+        )
+        // 대화 진입/새 문자 도착 시 읽음 처리
+        LaunchedEffect(peer, version) { onMarkRead(peer) }
+        return
+    }
+
+    val threads = remember(version) { store.threads() }
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Text("문자", style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(vertical = 6.dp))
+        if (threads.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("주고받은 문자가 없습니다.\n연락처 상세에서 문자를 보낼 수 있습니다.",
+                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else LazyColumn(Modifier.fillMaxSize()) {
+            items(threads, key = { it.peer }) { t ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { openPeer = t.peer }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(40.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text((nameFor(t.peer) ?: t.peer).take(1),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                    Spacer(Modifier.size(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(nameFor(t.peer) ?: t.peer, style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = if (t.unread > 0) FontWeight.Bold else FontWeight.Normal)
+                        Text(t.last.text, style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(formatTime(t.last.time), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (t.unread > 0) {
+                            Spacer(Modifier.height(4.dp))
+                            Badge { Text("${t.unread}") }
+                        }
+                    }
+                }
+                HorizontalDivider()
+            }
+        }
+    }
+}
+
+/** 대화 화면 — 말풍선(수신 좌/발신 우) + 입력·전송. */
+@Composable
+private fun ConversationScreen(
+    peer: String,
+    title: String,
+    store: MessageStore,
+    version: Long,
+    onSend: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    val entries = remember(version) { store.thread(peer) }
+    var input by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    LaunchedEffect(entries.size) {
+        if (entries.isNotEmpty()) listState.scrollToItem(entries.size - 1)
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onBack) { Text("←", fontSize = 20.sp) }
+            Column {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                if (title != peer) Text(peer, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        HorizontalDivider()
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(entries) { e ->
+                val incoming = e.direction == MsgDirection.IN
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (incoming) Arrangement.Start else Arrangement.End,
+                ) {
+                    Column(
+                        Modifier.widthIn(max = 280.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (incoming) MaterialTheme.colorScheme.surfaceVariant
+                                else MaterialTheme.colorScheme.primaryContainer,
+                            )
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text(e.text, style = MaterialTheme.typography.bodyMedium)
+                        Text(formatTime(e.time), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = input, onValueChange = { input = it },
+                modifier = Modifier.weight(1f), placeholder = { Text("문자 입력") },
+                maxLines = 3,
+            )
+            Button(enabled = input.isNotBlank(), onClick = { onSend(input.trim()); input = "" }) {
+                Text("전송")
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────── 통화 화면 ───────────────────────────────────────
 
 @Composable
@@ -941,7 +1181,9 @@ private fun CallScreen(
     videoOn: Boolean,
     onToggleVideo: (Boolean) -> Unit,
     onSurface: (Any?) -> Unit,
+    onPreviewSurface: (Any?) -> Unit,
     onAnswer: (Int) -> Unit,
+    onAnswerVideo: (Int) -> Unit,
     onReject: (Int) -> Unit,
     onHangup: (Int) -> Unit,
 ) {
@@ -951,7 +1193,7 @@ private fun CallScreen(
     ) {
         Spacer(Modifier.height(48.dp))
         val (remote, stateLine) = when (val c = call) {
-            is CallState.Incoming -> extractNumber(c.remote) to (if (videoOn) "영상 수신 전화" else "수신 전화")
+            is CallState.Incoming -> extractNumber(c.remote) to (if (c.video) "영상 수신 전화" else "수신 전화")
             is CallState.Outgoing -> extractNumber(c.remote) to (if (videoOn) "영상 발신 중…" else "발신 중…")
             is CallState.Active -> extractNumber(c.remote) to "통화 중"
             else -> "" to ""
@@ -971,10 +1213,16 @@ private fun CallScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        // 수신 영상 렌더 — 통화/발신 중 + 영상 on
+        // 영상: 상대 화면(수신 렌더) + 우하단 내 화면(로컬 카메라 프리뷰 PiP)
         if (videoOn && (call is CallState.Active || call is CallState.Outgoing)) {
             Spacer(Modifier.height(16.dp))
-            VideoRender(onSurface = onSurface)
+            Box(Modifier.fillMaxWidth().aspectRatio(4f / 3f)) {
+                VideoRender(onSurface = onSurface)
+                Box(
+                    Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                        .width(100.dp).aspectRatio(3f / 4f),
+                ) { PreviewRender(onSurface = onPreviewSurface) }
+            }
         }
 
         Spacer(Modifier.weight(1f))
@@ -985,6 +1233,7 @@ private fun CallScreen(
             ) {
                 LabeledRound("거절", HANGUP_RED, "✕") { onReject(c.id) }
                 LabeledRound("받기", CALL_GREEN, "📞") { onAnswer(c.id) }
+                if (c.video) LabeledRound("영상", VIDEO_BLUE, "📹") { onAnswerVideo(c.id) }
             }
             is CallState.Active -> {
                 LabeledRound(
@@ -1048,9 +1297,27 @@ private fun RegStatusChip(reg: RegState) {
 private fun VideoRender(onSurface: (Any?) -> Unit) {
     // SurfaceView 의 Surface 를 PJSIP 영상 윈도우로 전달. 컴포지션 이탈 시 surfaceDestroyed→null.
     AndroidView(
-        modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f),
+        modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             SurfaceView(ctx).apply {
+                holder.addCallback(object : SurfaceHolder.Callback {
+                    override fun surfaceCreated(h: SurfaceHolder) = onSurface(h.surface)
+                    override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) = onSurface(h.surface)
+                    override fun surfaceDestroyed(h: SurfaceHolder) = onSurface(null)
+                })
+            }
+        },
+    )
+}
+
+@Composable
+private fun PreviewRender(onSurface: (Any?) -> Unit) {
+    // 로컬 카메라 프리뷰(내 화면). PiP 위에 그려지도록 media overlay + Z-top.
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { ctx ->
+            SurfaceView(ctx).apply {
+                setZOrderMediaOverlay(true)
                 holder.addCallback(object : SurfaceHolder.Callback {
                     override fun surfaceCreated(h: SurfaceHolder) = onSurface(h.surface)
                     override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) = onSurface(h.surface)
