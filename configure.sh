@@ -58,6 +58,7 @@ DB_USER="cims"
 DB_PASSWORD="${CIMS_DB_PASSWORD:-${_init_db_password:-cims1234}}"
 VOLTE_DOMAIN=""
 PTT_DOMAIN=""
+COUNTRY_CODE=""
 IDMS_JWT_SECRET=""
 CIMS_JWT_SECRET=""
 MSG_LOG_DIR=""
@@ -91,6 +92,7 @@ ${BOLD}데이터베이스:${NC}
 ${BOLD}도메인:${NC}
   --volte-domain DOM  VoLTE SIP 도메인 / 인증 Realm (기본: ims.mnc001.mcc001.3gppnetwork.org)
   --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: volte-domain의 ims→ptt 치환)
+  --country-code CC   홈 국가코드(E.164 digits, 단말 번호 로컬 표기용. 기본: 82)
 
 ${BOLD}로그/녹취:${NC}
   --msg-log-dir      DIR  메시지 통계 로그 디렉터리 (기본: DIST_DIR/ext_mnt/msg_log)
@@ -130,6 +132,7 @@ while [[ $# -gt 0 ]]; do
         --db-password)  DB_PASSWORD="$2";   shift 2 ;;
         --volte-domain) VOLTE_DOMAIN="$2";  shift 2 ;;
         --ptt-domain)   PTT_DOMAIN="$2";    shift 2 ;;
+        --country-code) COUNTRY_CODE="$2";  shift 2 ;;
         --msg-log-dir)      MSG_LOG_DIR="$2";       shift 2 ;;
         --service-log-dir)  SERVICE_LOG_DIR="$2";   shift 2 ;;
         --record-dir)       RECORD_DIR="$2";        shift 2 ;;
@@ -163,6 +166,7 @@ CSC_HOST="${CSC_HOST:-$LOCAL_IP}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
 VOLTE_DOMAIN="${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
 PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^ims\./ptt./')}"
+COUNTRY_CODE="${COUNTRY_CODE:-82}"
 
 # 로그/녹취 디렉터리 기본값
 SERVICE_LOG_DIR="${SERVICE_LOG_DIR:-$DIST_DIR/ext_mnt/service_log}"
@@ -191,6 +195,7 @@ echo "  CSC_HOST     = $CSC_HOST"
 echo "  DB_HOST      = $DB_HOST / $DB_USER"
 echo "  VOLTE_DOMAIN = $VOLTE_DOMAIN"
 echo "  PTT_DOMAIN   = $PTT_DOMAIN"
+echo "  COUNTRY_CODE = +$COUNTRY_CODE"
 echo "  MSG_LOG_DIR     = $MSG_LOG_DIR"
 echo "  SERVICE_LOG_DIR = $SERVICE_LOG_DIR"
 echo "  RECORD_DIR      = $RECORD_DIR"
@@ -290,16 +295,19 @@ apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIS
 # ── 자동 프로비저닝(/provisioning/me) 서비스 매핑 주입 (android_ue_provisioning.md §3) ─
 #   서비스 kind 별 시그널링 도메인/포트. host 빈값 = 단말이 접속한 CSC Host(올인원 기본).
 #   다중 노드면 host 를 CSP/PSP 대표(VIP) 주소로 채운다(여기선 LOCAL_IP, 빈값 유지도 가능).
-python3 - "$DIST_DIR/csc/config/csc.json" "$VOLTE_DOMAIN" "$PTT_DOMAIN" <<'PY'
+python3 - "$DIST_DIR/csc/config/csc.json" "$VOLTE_DOMAIN" "$PTT_DOMAIN" "$COUNTRY_CODE" <<'PY'
 import json, sys
-path, volte_dom, ptt_dom = sys.argv[1], sys.argv[2], sys.argv[3]
+path, volte_dom, ptt_dom, country = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 with open(path) as f: c = json.load(f)
-c["Provisioning"] = {"Services": {
-    "volte": {"host": "", "port": 15060, "transport": "UDP", "domain": volte_dom},
-    "ptt":   {"host": "", "port": 15060, "transport": "UDP", "domain": ptt_dom},
-}}
+c["Provisioning"] = {
+    "CountryCode": country,   # 홈 국가코드(digits) — /provisioning/me countryCode SoT
+    "Services": {
+        "volte": {"host": "", "port": 15060, "transport": "UDP", "domain": volte_dom},
+        "ptt":   {"host": "", "port": 15060, "transport": "UDP", "domain": ptt_dom},
+    },
+}
 with open(path, "w") as f: json.dump(c, f, indent=4, ensure_ascii=False); f.write("\n")
-print("  csc.json Provisioning 주입: volte=%s ptt=%s" % (volte_dom, ptt_dom))
+print("  csc.json Provisioning 주입: volte=%s ptt=%s cc=+%s" % (volte_dom, ptt_dom, country))
 PY
 
 # ── TB-CSC (4419) overlay: csc.json 을 기반으로 포트/경로만 치환 ─

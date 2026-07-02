@@ -1442,6 +1442,24 @@ def _msisdn_from_id(u: str) -> str:
             break
     return s.split('@', 1)[0].strip()
 
+# 2자리 E.164 국가코드 집합 (ITU-T E.164 할당분) — _country_code_of 유도용.
+_E164_CC2 = {
+    "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45",
+    "46", "47", "48", "49", "51", "52", "53", "54", "55", "56", "57", "58", "60", "61",
+    "62", "63", "64", "65", "66", "81", "82", "84", "86", "90", "91", "92", "93", "94",
+    "95", "98",
+}
+
+def _country_code_of(msisdn: str) -> str:
+    """E.164 msisdn → 국가코드(digits, 예 '82'). ITU 자릿수 규칙: 1(NANP)/7=1자리,
+    유효 2자리 셋, 그 외 3자리. 판정 불가 시 빈 문자열."""
+    d = ''.join(ch for ch in (msisdn or '') if ch.isdigit())
+    if len(d) < 4:
+        return ""
+    if d[0] in ('1', '7'):
+        return d[0]
+    return d[:2] if d[:2] in _E164_CC2 else d[:3]
+
 def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str,
                        sip_password: str = "") -> dict:
     svc = (PROVISIONING.get('Services') or {}).get(kind, {}) if isinstance(PROVISIONING, dict) else {}
@@ -1516,12 +1534,20 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
         logger.log_error(f"[provisioning/me] DB error: {e}")
         return HandlerResult(status=503, body={"error": "db_error", "detail": str(e)}, media_type="application/json")
 
+    # 홈 국가코드(digits, 예 '82') — 단말 번호 로컬 표기(+82… → 0…)의 SoT.
+    # 설정 Provisioning.CountryCode 우선, 없으면 로그인 msisdn 에서 유도.
+    country = ''
+    if isinstance(PROVISIONING, dict):
+        country = str(PROVISIONING.get('CountryCode') or '').lstrip('+').strip()
+    if not country:
+        country = _country_code_of(msisdn)
     body = {
         "user": {"displayName": display_name, "loginId": token.get('sub') or msisdn},
         "csc": {"host": host_ip, "port": _MCPTT_PORT},
+        "countryCode": country,     # 판정 불가 시 "" (null 금지 — Android org.json 이 "null" 문자열화)
         "services": services,
     }
-    logger.log_info(f"[provisioning/me] msisdn={msisdn} user_id services={[s['kind'] for s in services]}")
+    logger.log_info(f"[provisioning/me] msisdn={msisdn} user_id services={[s['kind'] for s in services]} cc={country}")
     return HandlerResult(status=200, body=body, media_type="application/json")
 
 
