@@ -38,6 +38,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:screenOrientation="portrait"
             android:showWhenLocked="true"
             android:turnScreenOn="true">
             <!-- showWhenLocked/turnScreenOn: 착신 fullScreenIntent 가 잠금/꺼진 화면 위로 통화화면을 띄운다 -->
