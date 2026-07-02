@@ -5,9 +5,12 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.provider.Settings
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.ComponentActivity
@@ -473,6 +476,38 @@ private fun BottomNav(current: Tab, unread: Int, onSelect: (Tab) -> Unit) {
 
 // ─────────────────────────────────────── 키패드 탭 ───────────────────────────────────────
 
+/**
+ * 키패드 DTMF 터치 톤 — 기본 전화앱처럼 키를 누를 때 해당 DTMF 음을 낸다.
+ * 시스템 설정 "다이얼 시 터치음"(DTMF_TONE_WHEN_DIALING) 을 존중하고, STREAM_DTMF 로 재생.
+ */
+@Composable
+private fun rememberDtmfTonePlayer(): (String) -> Unit {
+    val context = LocalContext.current
+    val gen = remember {
+        runCatching { ToneGenerator(AudioManager.STREAM_DTMF, DTMF_TONE_VOLUME) }.getOrNull()
+    }
+    DisposableEffect(Unit) { onDispose { runCatching { gen?.release() } } }
+    val enabled = remember {
+        Settings.System.getInt(context.contentResolver, Settings.System.DTMF_TONE_WHEN_DIALING, 1) == 1
+    }
+    return remember(gen, enabled) {
+        { digit: String ->
+            if (enabled && gen != null) {
+                val tone = when (digit) {
+                    "0" -> ToneGenerator.TONE_DTMF_0; "1" -> ToneGenerator.TONE_DTMF_1
+                    "2" -> ToneGenerator.TONE_DTMF_2; "3" -> ToneGenerator.TONE_DTMF_3
+                    "4" -> ToneGenerator.TONE_DTMF_4; "5" -> ToneGenerator.TONE_DTMF_5
+                    "6" -> ToneGenerator.TONE_DTMF_6; "7" -> ToneGenerator.TONE_DTMF_7
+                    "8" -> ToneGenerator.TONE_DTMF_8; "9" -> ToneGenerator.TONE_DTMF_9
+                    "*" -> ToneGenerator.TONE_DTMF_S; "#" -> ToneGenerator.TONE_DTMF_P
+                    else -> -1
+                }
+                if (tone >= 0) runCatching { gen.startTone(tone, DTMF_TONE_MS) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun KeypadScreen(
     myNumber: String,
@@ -480,6 +515,7 @@ private fun KeypadScreen(
     onVideo: (String) -> Unit,
 ) {
     var dialed by remember { mutableStateOf("") }
+    val playDtmf = rememberDtmfTonePlayer()
 
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
@@ -508,7 +544,7 @@ private fun KeypadScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        Keypad(onDigit = { dialed += it })
+        Keypad(onDigit = { dialed += it; playDtmf(it) })
         Spacer(Modifier.height(20.dp))
 
         // 음성/영상 발신 구분
@@ -1347,10 +1383,15 @@ private fun requiredPermissions(): Array<String> = buildList {
     }
 }.toTypedArray()
 
-private val CALL_GREEN = Color(0xFF2E7D32)
-private val HANGUP_RED = Color(0xFFC62828)
-private val VIDEO_BLUE = Color(0xFF1565C0)
+// 기본 전화앱(AOSP/Google 다이얼러) 팔레트 — 통화=밝은 초록, 종료/거절=구글 레드, 영상=구글 블루.
+private val CALL_GREEN = Color(0xFF00C853)
+private val HANGUP_RED = Color(0xFFEA4335)
+private val VIDEO_BLUE = Color(0xFF4285F4)
 private val FAV_GOLD = Color(0xFFF9A825)
+
+// DTMF 터치 톤 — 기본 다이얼러와 유사한 볼륨(0~100)/길이(ms).
+private const val DTMF_TONE_VOLUME = 80
+private const val DTMF_TONE_MS = 120
 
 // ─────────────────────────────────────── 설정 화면 (고급/수동) ───────────────────────────────────────
 
