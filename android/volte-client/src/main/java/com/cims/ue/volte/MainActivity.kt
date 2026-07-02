@@ -18,7 +18,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,15 +41,32 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.Message
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -68,6 +87,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -113,7 +133,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
         setContent {
-            MaterialTheme {
+            // 시스템 다크/라이트 테마 추종 — 일반 전화앱과 동일한 흰/검 배경.
+            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) PhoneDark else PhoneLight) {
                 Surface(modifier = Modifier.fillMaxSize()) { App(notifAnswer, notifOpenMessages) }
             }
         }
@@ -501,31 +522,31 @@ private fun HomeScreen(
 
 @Composable
 private fun BottomNav(current: Tab, unread: Int, onSelect: (Tab) -> Unit) {
-    NavigationBar {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
         NavigationBarItem(
             selected = current == Tab.CONTACTS, onClick = { onSelect(Tab.CONTACTS) },
-            icon = { Text("👤", fontSize = 20.sp) }, label = { Text("연락처") },
+            icon = { Icon(Icons.Filled.Person, contentDescription = "연락처") }, label = { Text("연락처") },
         )
         NavigationBarItem(
             selected = current == Tab.RECENTS, onClick = { onSelect(Tab.RECENTS) },
-            icon = { Text("🕘", fontSize = 20.sp) }, label = { Text("최근기록") },
+            icon = { Icon(Icons.Filled.History, contentDescription = "최근기록") }, label = { Text("최근기록") },
         )
         NavigationBarItem(
             selected = current == Tab.KEYPAD, onClick = { onSelect(Tab.KEYPAD) },
-            icon = { Text("⌨", fontSize = 20.sp) }, label = { Text("키패드") },
+            icon = { Icon(Icons.Filled.Dialpad, contentDescription = "키패드") }, label = { Text("키패드") },
         )
         NavigationBarItem(
             selected = current == Tab.MESSAGES, onClick = { onSelect(Tab.MESSAGES) },
             icon = {
                 BadgedBox(badge = { if (unread > 0) Badge { Text("$unread") } }) {
-                    Text("✉", fontSize = 20.sp)
+                    Icon(Icons.AutoMirrored.Filled.Message, contentDescription = "문자")
                 }
             },
             label = { Text("문자") },
         )
         NavigationBarItem(
             selected = current == Tab.SETTINGS, onClick = { onSelect(Tab.SETTINGS) },
-            icon = { Text("⚙", fontSize = 20.sp) }, label = { Text("설정") },
+            icon = { Icon(Icons.Filled.Settings, contentDescription = "설정") }, label = { Text("설정") },
         )
     }
 }
@@ -585,64 +606,92 @@ private fun KeypadScreen(
 
         Spacer(Modifier.weight(1f))
 
-        // 입력 번호 + 지우기
-        Row(modifier = Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(56.dp))
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text(dialed, style = MaterialTheme.typography.displaySmall,
-                    color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-            }
-            Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
-                if (dialed.isNotEmpty()) {
-                    TextButton(onClick = { dialed = dialed.dropLast(1) }) { Text("⌫", fontSize = 24.sp) }
-                }
-            }
+        // 입력 번호 표시
+        Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
+            Text(dialed, style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         Keypad(onDigit = { dialed += it; playDtmf(it) })
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // 음성/영상 발신 구분
-        Row(horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-            LabeledRound("음성", CALL_GREEN, "📞", enabled = dialed.isNotBlank()) { onVoice(dialed.trim()) }
-            LabeledRound("영상", VIDEO_BLUE, "📹", enabled = dialed.isNotBlank()) { onVideo(dialed.trim()) }
+        // 하단 액션 — 영상(좌) · 음성(중앙, 초록) · ⌫(우)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(56.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable(enabled = dialed.isNotBlank()) { onVideo(dialed.trim()) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Videocam, contentDescription = "영상통화",
+                    tint = if (dialed.isNotBlank()) CALL_GREEN else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Box(
+                Modifier.size(72.dp).clip(CircleShape)
+                    .background(if (dialed.isNotBlank()) CALL_GREEN else CALL_GREEN.copy(alpha = 0.4f))
+                    .clickable(enabled = dialed.isNotBlank()) { onVoice(dialed.trim()) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Call, contentDescription = "음성통화", tint = Color.White,
+                    modifier = Modifier.size(32.dp))
+            }
+            Box(
+                Modifier.size(56.dp).clip(CircleShape)
+                    .clickable(enabled = dialed.isNotEmpty()) { dialed = dialed.dropLast(1) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "지우기",
+                    tint = if (dialed.isNotEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+            }
         }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
     }
 }
 
 @Composable
 private fun Keypad(onDigit: (String) -> Unit) {
+    // (숫자, 한글, 영문) — 일반 전화앱과 동일한 서브라벨
     val rows = listOf(
-        listOf("1" to "", "2" to "ABC", "3" to "DEF"),
-        listOf("4" to "GHI", "5" to "JKL", "6" to "MNO"),
-        listOf("7" to "PQRS", "8" to "TUV", "9" to "WXYZ"),
-        listOf("*" to "", "0" to "+", "#" to ""),
+        listOf(Triple("1", "ㄱㅋ", ".QZ"), Triple("2", "ㄴ", "ABC"), Triple("3", "ㄷㅌ", "DEF")),
+        listOf(Triple("4", "ㄹ", "GHI"), Triple("5", "ㅁ", "JKL"), Triple("6", "ㅂㅍ", "MNO")),
+        listOf(Triple("7", "ㅅ", "PRS"), Triple("8", "ㅇ", "TUV"), Triple("9", "ㅈㅊ", "WXY")),
+        listOf(Triple("*", "", ","), Triple("0", "ㅎ", "+"), Triple("#", "", ";")),
     )
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         rows.forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-                row.forEach { (digit, letters) -> KeypadKey(digit, letters) { onDigit(digit) } }
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                row.forEach { (digit, kor, eng) -> KeypadKey(digit, kor, eng) { onDigit(digit) } }
             }
         }
     }
 }
 
+/** 플랫 키 — 배경 원 없이 큰 숫자 + 우측 한글/영문 서브라벨 (일반 전화앱 스타일). */
 @Composable
-private fun KeypadKey(digit: String, letters: String, onClick: () -> Unit) {
-    Box(
+private fun KeypadKey(digit: String, kor: String, eng: String, onClick: () -> Unit) {
+    Row(
         modifier = Modifier
-            .size(64.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .width(92.dp)
+            .height(62.dp)
+            .clip(RoundedCornerShape(14.dp))
             .clickable { onClick() },
-        contentAlignment = Alignment.Center,
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(digit, fontSize = 26.sp, color = MaterialTheme.colorScheme.onSurface)
-            if (letters.isNotBlank()) {
-                Text(letters, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(digit, fontSize = 34.sp, color = MaterialTheme.colorScheme.onBackground)
+        if (kor.isNotBlank() || eng.isNotBlank()) {
+            Spacer(Modifier.width(5.dp))
+            Column {
+                if (kor.isNotBlank()) Text(kor, fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (eng.isNotBlank()) Text(eng, fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -676,9 +725,9 @@ private fun ContactsScreen(
             SegTab("개인", seg == 2, Modifier.weight(1f)) { seg = 2 }
         }
         when (seg) {
-            0 -> FavoritesScreen(favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ })
-            1 -> CompanyContacts(company, favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ })
-            else -> PersonalContacts(personal, favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ })
+            0 -> FavoritesScreen(favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
+            1 -> CompanyContacts(company, favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
+            else -> PersonalContacts(personal, favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
         }
     }
 
@@ -704,11 +753,12 @@ private fun SegTab(label: String, selected: Boolean, modifier: Modifier = Modifi
     ) { Text(label, color = fg, style = MaterialTheme.typography.labelLarge) }
 }
 
-/** 공용 연락처 행 — 별표 토글 + 탭(상세). [trailing] 으로 추가 버튼(개인=수정). */
+/** 공용 연락처 행 — 별표 토글 + 초록 전화(바로 발신) + 탭(상세). [trailing] 으로 추가 버튼(개인=수정). */
 @Composable
 private fun ContactListRow(
     name: String, line2: String, depth: Int, isFav: Boolean,
     onTap: () -> Unit, onToggleFav: () -> Unit,
+    onCall: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -717,9 +767,9 @@ private fun ContactListRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
-        ) { Text(name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+        ) { Text(name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {
             Text(name.ifBlank { line2 }, style = MaterialTheme.typography.bodyLarge)
@@ -727,8 +777,21 @@ private fun ContactListRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         TextButton(onClick = onToggleFav) {
-            Text(if (isFav) "★" else "☆", fontSize = 20.sp,
-                color = if (isFav) FAV_GOLD else MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(if (isFav) Icons.Filled.Star else Icons.Filled.StarBorder, contentDescription = "즐겨찾기",
+                tint = if (isFav) FAV_GOLD else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp))
+        }
+        if (onCall != null) {
+            Box(
+                Modifier.size(38.dp).clip(CircleShape)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                    .clickable { onCall() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Call, contentDescription = "전화", tint = CALL_GREEN,
+                    modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.size(8.dp))
         }
         trailing?.invoke()
     }
@@ -738,7 +801,7 @@ private fun ContactListRow(
 @Composable
 private fun FavoritesScreen(
     favorites: FavoriteStore, favVersion: Int,
-    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
 ) {
     val list = remember(favVersion) { favorites.all() }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -753,7 +816,8 @@ private fun FavoritesScreen(
             items(list, key = { it.number }) { f ->
                 ContactListRow(f.name, f.number, depth = 0, isFav = true,
                     onTap = { onOpen(DetailTarget(f.name, f.number, null)) },
-                    onToggleFav = { favorites.toggle(f.name, f.number); onFavChanged() })
+                    onToggleFav = { favorites.toggle(f.name, f.number); onFavChanged() },
+                    onCall = { onCall(f.number) })
                 HorizontalDivider()
             }
         }
@@ -764,7 +828,7 @@ private fun FavoritesScreen(
 @Composable
 private fun CompanyContacts(
     store: CompanyDirectoryStore, favorites: FavoriteStore, favVersion: Int,
-    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -832,7 +896,8 @@ private fun CompanyContacts(
                     val on = orgName[m.orgCode] ?: m.orgCode
                     ContactListRow(m.name, "${m.number} · $on", depth = 0, isFav = m.number in favSet,
                         onTap = { onOpen(DetailTarget(m.name, m.number, on)) },
-                        onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() })
+                        onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() },
+                        onCall = { onCall(m.number) })
                     HorizontalDivider()
                 }
             }
@@ -847,7 +912,8 @@ private fun CompanyContacts(
                         is DirRow.Member -> {
                             ContactListRow(row.c.name, row.c.number, depth = row.depth, isFav = row.c.number in favSet,
                                 onTap = { onOpen(DetailTarget(row.c.name, row.c.number, orgName[row.c.orgCode])) },
-                                onToggleFav = { favorites.toggle(row.c.name, row.c.number); onFavChanged() })
+                                onToggleFav = { favorites.toggle(row.c.name, row.c.number); onFavChanged() },
+                                onCall = { onCall(row.c.number) })
                             HorizontalDivider()
                         }
                     }
@@ -914,7 +980,7 @@ private fun OrgHeaderRow(row: DirRow.Org, onToggle: () -> Unit) {
 @Composable
 private fun PersonalContacts(
     store: ContactStore, favorites: FavoriteStore, favVersion: Int,
-    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
 ) {
     var list by remember { mutableStateOf(store.all()) }
     var editing by remember { mutableStateOf<Contact?>(null) }
@@ -945,6 +1011,7 @@ private fun PersonalContacts(
                 ContactListRow(c.name, c.number, depth = 0, isFav = c.number in favSet,
                     onTap = { onOpen(DetailTarget(c.name, c.number, null)) },
                     onToggleFav = { favorites.toggle(c.name, c.number); onFavChanged() },
+                    onCall = { onCall(c.number) },
                     trailing = { TextButton(onClick = { editing = c }) { Text("수정") } })
                 HorizontalDivider()
             }
@@ -1027,13 +1094,13 @@ private fun ContactDetailDialog(
 
                 if (!composing) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        LabeledRound("음성", CALL_GREEN, "📞") { onVoice() }
-                        LabeledRound("영상", VIDEO_BLUE, "📹") { onVideo() }
-                        LabeledRound("문자", MaterialTheme.colorScheme.surfaceVariant, "✉",
+                        LabeledRound("음성", CALL_GREEN, Icons.Filled.Call) { onVoice() }
+                        LabeledRound("영상", VIDEO_BLUE, Icons.Filled.Videocam) { onVideo() }
+                        LabeledRound("문자", MaterialTheme.colorScheme.surfaceVariant, Icons.AutoMirrored.Filled.Message,
                             fg = MaterialTheme.colorScheme.onSurface) { composing = true }
-                        LabeledRound(if (fav) "즐겨찾기" else "즐겨찾기",
+                        LabeledRound("즐겨찾기",
                             if (fav) FAV_GOLD else MaterialTheme.colorScheme.surfaceVariant,
-                            if (fav) "★" else "☆",
+                            if (fav) Icons.Filled.Star else Icons.Filled.StarBorder,
                             fg = if (fav) Color.White else MaterialTheme.colorScheme.onSurface) {
                             fav = favorites.toggle(target.name, target.number); onFavChanged()
                         }
@@ -1113,7 +1180,13 @@ private fun RecentRow(e: CallEntry, name: String?, onClick: () -> Unit) {
             Text("$typeLabel · ${formatTime(e.time)}", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text("📞", fontSize = 18.sp)
+        Box(
+            Modifier.size(38.dp).clip(CircleShape)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Call, contentDescription = "전화", tint = CALL_GREEN, modifier = Modifier.size(18.dp))
+        }
     }
 }
 
@@ -1327,21 +1400,21 @@ private fun CallScreen(
             is CallState.Incoming -> Row(
                 modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                LabeledRound("거절", HANGUP_RED, "✕") { onReject(c.id) }
-                LabeledRound("받기", CALL_GREEN, "📞") { onAnswer(c.id) }
-                if (c.video) LabeledRound("영상", VIDEO_BLUE, "📹") { onAnswerVideo(c.id) }
+                LabeledRound("거절", HANGUP_RED, Icons.Filled.CallEnd) { onReject(c.id) }
+                LabeledRound("받기", CALL_GREEN, Icons.Filled.Call) { onAnswer(c.id) }
+                if (c.video) LabeledRound("영상", VIDEO_BLUE, Icons.Filled.Videocam) { onAnswerVideo(c.id) }
             }
             is CallState.Active -> {
                 // 통화중 컨트롤 — 음소거/스피커/영상 (토글 시 강조색)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    ToggleRound("음소거", "🔇", muted) { onToggleMute(c.id, !muted) }
-                    ToggleRound("스피커", "🔊", speakerOn) { onToggleSpeaker(!speakerOn) }
-                    ToggleRound("영상", "📹", videoOn, activeBg = VIDEO_BLUE) { onToggleVideo(!videoOn) }
+                    ToggleRound("음소거", Icons.Filled.MicOff, muted) { onToggleMute(c.id, !muted) }
+                    ToggleRound("스피커", Icons.AutoMirrored.Filled.VolumeUp, speakerOn) { onToggleSpeaker(!speakerOn) }
+                    ToggleRound("영상", Icons.Filled.Videocam, videoOn, activeBg = VIDEO_BLUE) { onToggleVideo(!videoOn) }
                 }
                 Spacer(Modifier.height(24.dp))
-                LabeledRound("종료", HANGUP_RED, "📞") { onHangup(c.id) }
+                LabeledRound("종료", HANGUP_RED, Icons.Filled.CallEnd) { onHangup(c.id) }
             }
-            is CallState.Outgoing -> LabeledRound("취소", HANGUP_RED, "📞") { onHangup(c.id) }
+            is CallState.Outgoing -> LabeledRound("취소", HANGUP_RED, Icons.Filled.CallEnd) { onHangup(c.id) }
             else -> {}
         }
         Spacer(Modifier.height(24.dp))
@@ -1349,9 +1422,18 @@ private fun CallScreen(
 }
 
 @Composable
-private fun LabeledRound(label: String, bg: Color, glyph: String, fg: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
+private fun LabeledRound(label: String, bg: Color, icon: ImageVector, fg: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        RoundButton(label = glyph, bg = bg, fg = fg, size = 72.dp, enabled = enabled, onClick = onClick)
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(if (enabled) bg else bg.copy(alpha = 0.35f))
+                .clickable(enabled = enabled) { onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = label, tint = fg, modifier = Modifier.size(30.dp))
+        }
         Spacer(Modifier.height(8.dp))
         Text(label, style = MaterialTheme.typography.labelMedium)
     }
@@ -1361,7 +1443,7 @@ private fun LabeledRound(label: String, bg: Color, glyph: String, fg: Color = Co
 @Composable
 private fun ToggleRound(
     label: String,
-    glyph: String,
+    icon: ImageVector,
     active: Boolean,
     activeBg: Color = TOGGLE_ACTIVE,
     onClick: () -> Unit,
@@ -1369,31 +1451,10 @@ private fun ToggleRound(
     LabeledRound(
         label = label,
         bg = if (active) activeBg else MaterialTheme.colorScheme.surfaceVariant,
-        glyph = glyph,
+        icon = icon,
         fg = if (active) Color.White else MaterialTheme.colorScheme.onSurface,
         onClick = onClick,
     )
-}
-
-@Composable
-private fun RoundButton(
-    label: String,
-    bg: Color,
-    fg: Color = Color.White,
-    size: androidx.compose.ui.unit.Dp = 72.dp,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(if (enabled) bg else bg.copy(alpha = 0.35f))
-            .clickable(enabled = enabled) { onClick() },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = fg, fontSize = 28.sp)
-    }
 }
 
 @Composable
@@ -1456,6 +1517,24 @@ private val HANGUP_RED = Color(0xFFEA4335)
 private val VIDEO_BLUE = Color(0xFF4285F4)
 private val FAV_GOLD = Color(0xFFF9A825)
 private val TOGGLE_ACTIVE = Color(0xFF5F6368)   // 음소거/스피커 토글 on (다이얼러 회색 강조)
+
+// 라이트/다크 테마 — 흰/검 배경 + 하단 내비 선택 필=연파랑 (일반 전화앱 스타일).
+private val PhoneLight = lightColorScheme(
+    primary = Color(0xFF1A73E8),
+    background = Color.White,
+    surface = Color.White,
+    surfaceVariant = Color(0xFFF1F3F4),
+    secondaryContainer = Color(0xFFDCE9FB),       // 내비 선택 필(연파랑)
+    onSecondaryContainer = Color(0xFF17324D),
+)
+private val PhoneDark = darkColorScheme(
+    primary = Color(0xFF8AB4F8),
+    background = Color(0xFF121212),
+    surface = Color(0xFF121212),
+    surfaceVariant = Color(0xFF2A2B2E),
+    secondaryContainer = Color(0xFF2A3B50),
+    onSecondaryContainer = Color(0xFFDCE9FB),
+)
 
 // DTMF 터치 톤 — 기본 다이얼러와 유사한 볼륨(0~100)/길이(ms).
 private const val DTMF_TONE_VOLUME = 80
