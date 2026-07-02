@@ -41,16 +41,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -62,11 +68,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -77,6 +87,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +98,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -714,20 +726,38 @@ private fun ContactsScreen(
     var seg by remember { mutableStateOf(1) }            // 0=즐겨찾기 1=회사 2=개인
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
     var favVersion by remember { mutableStateOf(0) }     // 즐겨찾기 변경 트리거
+    var query by remember { mutableStateOf("") }         // 공통 검색(최상단)
+    val showAddPersonal = remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
+        // 최상단 검색 — 라운드 필드(일반 전화앱 스타일), 모든 세그먼트에 공통 적용.
+        SearchField(query) { query = it }
+
+        // 언더라인 탭 + (개인 탭) 우측 끝 연락처 추가
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            SegTab("즐겨찾기", seg == 0, Modifier.weight(1f)) { seg = 0 }
-            SegTab("회사", seg == 1, Modifier.weight(1f)) { seg = 1 }
-            SegTab("개인", seg == 2, Modifier.weight(1f)) { seg = 2 }
+            UnderlineTab("즐겨찾기", seg == 0) { seg = 0 }
+            Spacer(Modifier.width(20.dp))
+            UnderlineTab("회사", seg == 1) { seg = 1 }
+            Spacer(Modifier.width(20.dp))
+            UnderlineTab("개인", seg == 2) { seg = 2 }
+            Spacer(Modifier.weight(1f))
+            if (seg == 2) {
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape).clickable { showAddPersonal.value = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.PersonAdd, contentDescription = "연락처 추가",
+                        tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
+                }
+            }
         }
         when (seg) {
-            0 -> FavoritesScreen(favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
-            1 -> CompanyContacts(company, favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
-            else -> PersonalContacts(personal, favorites, favVersion, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
+            0 -> FavoritesScreen(favorites, favVersion, query, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
+            1 -> CompanyContacts(company, favorites, favVersion, query, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
+            else -> PersonalContacts(personal, favorites, favVersion, query, showAddPersonal, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
         }
     }
 
@@ -743,14 +773,63 @@ private fun ContactsScreen(
     }
 }
 
+/** 최상단 라운드 검색 필드 — 돋보기 + placeholder + 지우기(입력 시). */
 @Composable
-private fun SegTab(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-    Box(
-        modifier.clip(CircleShape).background(bg).clickable { onClick() }.padding(vertical = 8.dp),
-        contentAlignment = Alignment.Center,
-    ) { Text(label, color = fg, style = MaterialTheme.typography.labelLarge) }
+private fun SearchField(query: String, onChange: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Spacer(Modifier.width(12.dp))
+        Icon(Icons.Filled.Search, contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        BasicTextField(
+            value = query,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = LocalTextStyle.current.copy(
+                color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier.weight(1f),
+            decorationBox = { inner ->
+                if (query.isEmpty()) {
+                    Text("이름·전화번호 검색", fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                inner()
+            },
+        )
+        if (query.isNotEmpty()) {
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).clickable { onChange("") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "지우기",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            }
+        }
+        Spacer(Modifier.width(4.dp))
+    }
+}
+
+/** 언더라인 텍스트 탭 — 선택=굵게+밑줄 (일반 전화앱 스타일). */
+@Composable
+private fun UnderlineTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    Column(Modifier.width(IntrinsicSize.Min).clickable { onClick() }) {
+        Text(label, fontSize = 16.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1)
+        Spacer(Modifier.height(5.dp))
+        Box(
+            Modifier.fillMaxWidth().height(2.dp)
+                .background(if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent),
+        )
+    }
 }
 
 /** 공용 연락처 행 — 별표 토글 + 초록 전화(바로 발신) + 탭(상세). [trailing] 으로 추가 버튼(개인=수정). */
@@ -800,16 +879,17 @@ private fun ContactListRow(
 // ── 즐겨찾기 ──
 @Composable
 private fun FavoritesScreen(
-    favorites: FavoriteStore, favVersion: Int,
+    favorites: FavoriteStore, favVersion: Int, query: String,
     onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
 ) {
-    val list = remember(favVersion) { favorites.all() }
+    val q = query.trim()
+    val list = remember(favVersion, q) {
+        favorites.all().filter { q.isBlank() || it.name.contains(q, true) || it.number.contains(q) }
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Text("즐겨찾기", style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(vertical = 6.dp))
         if (list.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("즐겨찾기가 없습니다.\n연락처에서 ★ 로 추가하세요.",
+                Text(if (q.isBlank()) "즐겨찾기가 없습니다.\n연락처에서 ★ 로 추가하세요." else "검색 결과가 없습니다.",
                     textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else LazyColumn(Modifier.fillMaxSize()) {
@@ -827,7 +907,7 @@ private fun FavoritesScreen(
 /** 회사 연락처 — 서버 프로비저닝 제공, 읽기전용. 조직 트리 + 검색 + 동기화(버전 기반). */
 @Composable
 private fun CompanyContacts(
-    store: CompanyDirectoryStore, favorites: FavoriteStore, favVersion: Int,
+    store: CompanyDirectoryStore, favorites: FavoriteStore, favVersion: Int, query: String,
     onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -836,7 +916,6 @@ private fun CompanyContacts(
     var lastSync by remember { mutableStateOf(store.lastSyncedAt()) }
     var loading by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
     var collapsed by remember { mutableStateOf(setOf<String>()) }
     val favSet = remember(favVersion) { favorites.all().map { it.number }.toSet() }
 
@@ -870,11 +949,6 @@ private fun CompanyContacts(
             if (loading) CircularProgressIndicator(Modifier.size(20.dp))
             else TextButton(onClick = { sync() }) { Text("동기화") }
         }
-        OutlinedTextField(
-            value = query, onValueChange = { query = it },
-            label = { Text("이름·번호 검색") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        )
 
         val q = query.trim()
         val orgName = remember(dir) { dir.orgs.associate { it.code to it.name } }
@@ -976,52 +1050,65 @@ private fun OrgHeaderRow(row: DirRow.Org, onToggle: () -> Unit) {
     }
 }
 
-/** 개인 연락처 — 단말 로컬, 추가/수정/삭제 가능 + 검색. */
+/** 개인 연락처 — 단말 로컬, 추가(탭 우측 아이콘)/수정/삭제(좌로 스와이프) 가능. */
 @Composable
 private fun PersonalContacts(
-    store: ContactStore, favorites: FavoriteStore, favVersion: Int,
+    store: ContactStore, favorites: FavoriteStore, favVersion: Int, query: String,
+    showAdd: MutableState<Boolean>,
     onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
 ) {
     var list by remember { mutableStateOf(store.all()) }
     var editing by remember { mutableStateOf<Contact?>(null) }
-    var showAdd by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
     val favSet = remember(favVersion) { favorites.all().map { it.number }.toSet() }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("개인 연락처", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { showAdd = true }) { Text("+ 추가") }
-        }
-        OutlinedTextField(
-            value = query, onValueChange = { query = it },
-            label = { Text("이름·번호 검색") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        )
         val q = query.trim()
         val shown = if (q.isBlank()) list else list.filter { it.name.contains(q, true) || it.number.contains(q) }
         if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (list.isEmpty()) "저장된 개인 연락처가 없습니다.\n‘+ 추가’ 로 등록하세요." else "검색 결과가 없습니다.",
+                Text(if (list.isEmpty()) "저장된 개인 연락처가 없습니다.\n오른쪽 위 추가 버튼으로 등록하세요." else "검색 결과가 없습니다.",
                     textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else LazyColumn(Modifier.fillMaxSize()) {
             items(shown, key = { it.id }) { c ->
-                ContactListRow(c.name, c.number, depth = 0, isFav = c.number in favSet,
-                    onTap = { onOpen(DetailTarget(c.name, c.number, null)) },
-                    onToggleFav = { favorites.toggle(c.name, c.number); onFavChanged() },
-                    onCall = { onCall(c.number) },
-                    trailing = { TextButton(onClick = { editing = c }) { Text("수정") } })
+                // 좌로 스와이프 → 삭제 (빨간 배경 + 휴지통)
+                val dismissState = rememberSwipeToDismissBoxState(
+                    confirmValueChange = { v ->
+                        if (v == SwipeToDismissBoxValue.EndToStart) {
+                            store.delete(c.id); list = store.all(); true
+                        } else false
+                    },
+                )
+                SwipeToDismissBox(
+                    state = dismissState,
+                    enableDismissFromStartToEnd = false,
+                    backgroundContent = {
+                        Box(
+                            Modifier.fillMaxSize().background(HANGUP_RED),
+                            contentAlignment = Alignment.CenterEnd,
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = "삭제",
+                                tint = Color.White, modifier = Modifier.padding(end = 24.dp))
+                        }
+                    },
+                ) {
+                    Box(Modifier.background(MaterialTheme.colorScheme.background)) {
+                        ContactListRow(c.name, c.number, depth = 0, isFav = c.number in favSet,
+                            onTap = { onOpen(DetailTarget(c.name, c.number, null)) },
+                            onToggleFav = { favorites.toggle(c.name, c.number); onFavChanged() },
+                            onCall = { onCall(c.number) },
+                            trailing = { TextButton(onClick = { editing = c }) { Text("수정") } })
+                    }
+                }
                 HorizontalDivider()
             }
         }
     }
 
-    if (showAdd) {
+    if (showAdd.value) {
         ContactDialog(null,
-            onDismiss = { showAdd = false },
-            onSave = { name, num -> store.upsert(name, num); list = store.all(); showAdd = false })
+            onDismiss = { showAdd.value = false },
+            onSave = { name, num -> store.upsert(name, num); list = store.all(); showAdd.value = false })
     }
     editing?.let { c ->
         ContactDialog(c,
