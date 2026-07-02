@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.ConnectivityManager
@@ -158,6 +160,31 @@ class SipService : Service() {
     fun setVideoSurface(surface: Any?) { controller?.setVideoSurface(surface) }
     fun setPreviewSurface(surface: Any?) { controller?.setPreviewSurface(surface) }
 
+    /** 통화중 마이크 음소거 토글. */
+    fun setMuted(callId: Int, on: Boolean) { controller?.setMuted(callId, on) }
+
+    /**
+     * 스피커폰 전환 — 플랫폼 오디오 라우팅(PJSIP Android 오디오가 추종).
+     * API 31+ 는 communication device, 이하는 speakerphoneOn. 통화 종료 시 자동 원복.
+     */
+    fun setSpeaker(on: Boolean) {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (on) {
+                    am.availableCommunicationDevices
+                        .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                        ?.let { am.setCommunicationDevice(it) }
+                } else {
+                    am.clearCommunicationDevice()
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                am.isSpeakerphoneOn = on
+            }
+        }
+    }
+
     /** 등록 해제 + Endpoint 정리 + 서비스 종료. */
     fun stopSip() {
         controller?.unregister()
@@ -170,15 +197,16 @@ class SipService : Service() {
     private fun observe(c: SipController) {
         stateJob?.cancel()
         stateJob = scope.launch {
+            // 등록 상태 = 상시 알림 텍스트 + 상태바 아이콘(단말 맨위 wifi/LTE 옆) — 한눈에 통화 가능 여부.
             c.regState.onEach { reg ->
-                val line = when (reg) {
-                    is RegState.Registered -> "등록됨 (${reg.code})"
-                    RegState.Registering -> "등록 중…"
-                    RegState.Unregistered -> "등록 해제"
-                    is RegState.Failed -> "등록 실패: ${reg.reason}"
-                    RegState.Idle -> "대기"
+                val (line, icon) = when (reg) {
+                    is RegState.Registered -> "통화 가능" to android.R.drawable.sym_action_call
+                    RegState.Registering -> "연결 중…" to android.R.drawable.presence_away
+                    RegState.Idle -> "대기" to android.R.drawable.presence_away
+                    RegState.Unregistered -> "등록 해제됨" to android.R.drawable.presence_invisible
+                    is RegState.Failed -> "오프라인 (${reg.reason})" to android.R.drawable.stat_notify_error
                 }
-                updateNotification("CIMS VoLTE", line)
+                updateNotification("CIMS Phone", line, icon)
             }.launchIn(this)
 
             c.callState.onEach { call ->
@@ -191,6 +219,7 @@ class SipService : Service() {
                     stopRinging()
                     notificationManager().cancel(NOTIF_INCOMING)
                 }
+                if (call is CallState.Disconnected) setSpeaker(false)   // 스피커폰 원복
                 val line = when (call) {
                     is CallState.Incoming -> "수신: ${call.remote}"
                     is CallState.Outgoing -> "발신: ${call.remote}"
@@ -325,17 +354,21 @@ class SipService : Service() {
         notificationManager().notify(NOTIF_MESSAGE, n)
     }
 
-    private fun buildNotification(title: String, text: String): Notification =
+    private fun buildNotification(
+        title: String,
+        text: String,
+        icon: Int = android.R.drawable.sym_action_call,
+    ): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.sym_action_call)
+            .setSmallIcon(icon)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-    private fun updateNotification(title: String, text: String) {
-        notificationManager().notify(NOTIF_ID, buildNotification(title, text))
+    private fun updateNotification(title: String, text: String, icon: Int = android.R.drawable.sym_action_call) {
+        notificationManager().notify(NOTIF_ID, buildNotification(title, text, icon))
     }
 
     /**

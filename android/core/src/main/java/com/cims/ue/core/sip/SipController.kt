@@ -104,6 +104,15 @@ class SipController(private val config: SipAccountConfig) {
         fallback
     }.getOrDefault(pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV)
 
+    /** 통화중 마이크 음소거(VoLTE 전이중). 미디어 재협상(onCallMediaState 재진입) 후에도 유지. */
+    @Volatile var muted = false
+        private set
+
+    fun setMuted(callId: Int, on: Boolean) = onCtl {
+        muted = on
+        calls[callId]?.setMic(!on)
+    }
+
     // ── PTT(M2) 지원 ──
     /** 반이중(PTT): true 면 mic 는 floor GRANT 시에만 송신, spk 는 상시 청취. (VoLTE=false 전이중) */
     @Volatile var halfDuplex = false
@@ -159,6 +168,7 @@ class SipController(private val config: SipAccountConfig) {
             _call.value = CallState.Disconnected(-1, 0, "not registered"); return@onCtl
         }
         halfDuplex = false                                        // VoLTE = 전이중
+        muted = false                                             // 새 호는 음소거 해제로 시작
         injectApplicationSdp = null
         val call = CimsCall(this, acc)
         val prm = CallOpParam(true).apply {
@@ -171,6 +181,7 @@ class SipController(private val config: SipAccountConfig) {
 
     /** 착신 응답. [withVideo]=true 면 영상까지 협상(상대가 m=video 를 offer 한 경우). */
     fun answer(callId: Int, withVideo: Boolean = false) = onCtl {
+        muted = false
         if (withVideo) videoEnabled = true
         calls[callId]?.answer(
             CallOpParam(true).apply {

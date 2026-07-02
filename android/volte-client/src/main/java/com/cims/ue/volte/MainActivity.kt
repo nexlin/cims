@@ -350,6 +350,10 @@ private fun HomeScreen(
         answerCall(req.first, req.second)
     }
 
+    // 통화중 음소거/스피커 토글 상태 — 통화 종료 시 초기화(스피커 라우팅은 서비스가 원복).
+    var muted by remember { mutableStateOf(false) }
+    var speakerOn by remember { mutableStateOf(false) }
+
     // 수신/부재중 기록: Incoming→Active=수신(연결), Incoming→Disconnected(미연결)=부재중.
     var incomingNumber by remember { mutableStateOf<String?>(null) }
     var incomingAnswered by remember { mutableStateOf(false) }
@@ -358,6 +362,7 @@ private fun HomeScreen(
             is CallState.Incoming -> { incomingNumber = extractNumber(c.remote); incomingAnswered = false }
             is CallState.Active -> if (incomingNumber != null) incomingAnswered = true
             is CallState.Disconnected -> {
+                muted = false; speakerOn = false
                 incomingNumber?.let { n ->
                     callLog.add(n, if (incomingAnswered) CallType.INCOMING else CallType.MISSED)
                     incomingNumber = null
@@ -384,10 +389,14 @@ private fun HomeScreen(
         CallScreen(
             call = call,
             videoOn = videoOn,
+            muted = muted,
+            speakerOn = speakerOn,
             onToggleVideo = { on ->
                 videoOn = on
                 if (on) cameraLauncher.launch(Manifest.permission.CAMERA) else service?.setVideoEnabled(false)
             },
+            onToggleMute = { id, on -> muted = on; service?.setMuted(id, on) },
+            onToggleSpeaker = { on -> speakerOn = on; service?.setSpeaker(on) },
             onSurface = { service?.setVideoSurface(it) },
             onPreviewSurface = { service?.setPreviewSurface(it) },
             onAnswer = { id -> answerCall(id, false) },
@@ -418,7 +427,12 @@ private fun HomeScreen(
                         onCall = { dial(it, false) },
                     )
                     Tab.KEYPAD -> KeypadScreen(
-                        myNumber = config.displayName.ifBlank { config.msisdn },
+                        // 이름 + 전화번호 병기 (예: "테스트001 (+821300000001)")
+                        myNumber = when {
+                            config.displayName.isBlank() -> config.msisdn
+                            config.msisdn.isBlank() -> config.displayName
+                            else -> "${config.displayName} (${config.msisdn})"
+                        },
                         onVoice = { dial(it, false) },
                         onVideo = { dial(it, true) },
                     )
@@ -1215,7 +1229,11 @@ private fun ConversationScreen(
 private fun CallScreen(
     call: CallState,
     videoOn: Boolean,
+    muted: Boolean,
+    speakerOn: Boolean,
     onToggleVideo: (Boolean) -> Unit,
+    onToggleMute: (Int, Boolean) -> Unit,
+    onToggleSpeaker: (Boolean) -> Unit,
     onSurface: (Any?) -> Unit,
     onPreviewSurface: (Any?) -> Unit,
     onAnswer: (Int) -> Unit,
@@ -1272,10 +1290,13 @@ private fun CallScreen(
                 if (c.video) LabeledRound("영상", VIDEO_BLUE, "📹") { onAnswerVideo(c.id) }
             }
             is CallState.Active -> {
-                LabeledRound(
-                    if (videoOn) "영상 끄기" else "영상 켜기", VIDEO_BLUE, "📹",
-                ) { onToggleVideo(!videoOn) }
-                Spacer(Modifier.height(20.dp))
+                // 통화중 컨트롤 — 음소거/스피커/영상 (토글 시 강조색)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    ToggleRound("음소거", "🔇", muted) { onToggleMute(c.id, !muted) }
+                    ToggleRound("스피커", "🔊", speakerOn) { onToggleSpeaker(!speakerOn) }
+                    ToggleRound("영상", "📹", videoOn, activeBg = VIDEO_BLUE) { onToggleVideo(!videoOn) }
+                }
+                Spacer(Modifier.height(24.dp))
                 LabeledRound("종료", HANGUP_RED, "📞") { onHangup(c.id) }
             }
             is CallState.Outgoing -> LabeledRound("취소", HANGUP_RED, "📞") { onHangup(c.id) }
@@ -1292,6 +1313,24 @@ private fun LabeledRound(label: String, bg: Color, glyph: String, fg: Color = Co
         Spacer(Modifier.height(8.dp))
         Text(label, style = MaterialTheme.typography.labelMedium)
     }
+}
+
+/** 통화중 토글 버튼 — off=회색, on=강조색(기본 전화앱의 음소거/스피커 토글과 동일한 패턴). */
+@Composable
+private fun ToggleRound(
+    label: String,
+    glyph: String,
+    active: Boolean,
+    activeBg: Color = TOGGLE_ACTIVE,
+    onClick: () -> Unit,
+) {
+    LabeledRound(
+        label = label,
+        bg = if (active) activeBg else MaterialTheme.colorScheme.surfaceVariant,
+        glyph = glyph,
+        fg = if (active) Color.White else MaterialTheme.colorScheme.onSurface,
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -1388,6 +1427,7 @@ private val CALL_GREEN = Color(0xFF00C853)
 private val HANGUP_RED = Color(0xFFEA4335)
 private val VIDEO_BLUE = Color(0xFF4285F4)
 private val FAV_GOLD = Color(0xFFF9A825)
+private val TOGGLE_ACTIVE = Color(0xFF5F6368)   // 음소거/스피커 토글 on (다이얼러 회색 강조)
 
 // DTMF 터치 톤 — 기본 다이얼러와 유사한 볼륨(0~100)/길이(ms).
 private const val DTMF_TONE_VOLUME = 80

@@ -11,6 +11,7 @@ import org.pjsip.pjsua2.VideoWindowHandle
 import org.pjsip.pjsua2.pjmedia_dir
 import org.pjsip.pjsua2.pjmedia_type
 import org.pjsip.pjsua2.pjsip_inv_state
+import org.pjsip.pjsua2.pjsip_role_e
 import org.pjsip.pjsua2.pjsua_call_media_status
 
 /**
@@ -33,7 +34,9 @@ class CimsCall : Call {
         val mapped = when (ci.state) {
             pjsip_inv_state.PJSIP_INV_STATE_CALLING,
             pjsip_inv_state.PJSIP_INV_STATE_EARLY ->
-                CallState.Outgoing(id, ci.remoteUri)
+                // 착신(UAS)의 EARLY(자동 180)는 Incoming 을 덮어쓰면 안 됨 — 발신(UAC)만 Outgoing.
+                if (ci.role == pjsip_role_e.PJSIP_ROLE_UAC) CallState.Outgoing(id, ci.remoteUri)
+                else return
 
             pjsip_inv_state.PJSIP_INV_STATE_CONNECTING,
             pjsip_inv_state.PJSIP_INV_STATE_CONFIRMED ->
@@ -75,7 +78,7 @@ class CimsCall : Call {
     override fun onCallMediaState(prm: OnCallMediaStateParam) {
         runCatching {
             connectListen()
-            if (!owner.halfDuplex) setMic(true)
+            if (!owner.halfDuplex) setMic(!owner.muted)         // 통화중 음소거 유지(재협상 후에도)
             owner.videoRenderSurface?.let { attachVideo(it) }   // M1.3 수신 영상 렌더
         }.onFailure { Log.w(TAG, "onCallMediaState: ${it.message}") }
     }
