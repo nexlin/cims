@@ -56,6 +56,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
@@ -69,9 +71,8 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -991,7 +992,7 @@ private fun CompanyContacts(
                 curOrg = orgByCode[curOrg!!]?.parent?.takeIf { it in orgByCode }
             }
 
-            // 조직 선택 — 현재 범위(경로) 표시 + 드롭다운(조직 트리 들여쓰기, 인원수)
+            // 조직 선택 — 현재 범위(경로) 버튼 → 바텀시트(단계별 펼침 트리)
             val subtreeCount = remember(dir) {
                 val cache = HashMap<String, Int>()
                 fun cnt(code: String): Int = cache.getOrPut(code) {
@@ -1000,51 +1001,28 @@ private fun CompanyContacts(
                 dir.orgs.forEach { cnt(it.code) }
                 cache
             }
-            val preOrder = remember(dir) {
-                val out = ArrayList<Pair<CompanyOrg, Int>>()
-                fun walk(o: CompanyOrg, d: Int) {
-                    out.add(o to d)
-                    byParent[o.code]?.sortedBy { it.sort }?.forEach { walk(it, d + 1) }
-                }
-                roots.forEach { walk(it, 0) }
-                out
-            }
             var orgMenuOpen by remember { mutableStateOf(false) }
-            Box {
-                Row(
-                    Modifier.clip(RoundedCornerShape(8.dp)).clickable { orgMenuOpen = true }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (path.isEmpty()) "전체 조직" else path.joinToString(" > ") { it.name },
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "조직 선택",
-                        tint = MaterialTheme.colorScheme.primary)
-                }
-                DropdownMenu(expanded = orgMenuOpen, onDismissRequest = { orgMenuOpen = false }) {
-                    DropdownMenuItem(
-                        text = {
-                            Text("전체 조직",
-                                fontWeight = if (curOrg == null) FontWeight.Bold else FontWeight.Normal)
-                        },
-                        onClick = { curOrg = null; orgMenuOpen = false },
-                    )
-                    preOrder.forEach { (o, depth) ->
-                        DropdownMenuItem(
-                            text = {
-                                Text("${o.name} (${subtreeCount[o.code] ?: 0})",
-                                    modifier = Modifier.padding(start = (depth * 16).dp),
-                                    fontWeight = if (curOrg == o.code) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (curOrg == o.code) MaterialTheme.colorScheme.primary
-                                    else Color.Unspecified)
-                            },
-                            onClick = { curOrg = o.code; orgMenuOpen = false },
-                        )
-                    }
-                }
+            Row(
+                Modifier.clip(RoundedCornerShape(8.dp)).clickable { orgMenuOpen = true }
+                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (path.isEmpty()) "전체 조직" else path.joinToString(" > ") { it.name },
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = "조직 선택",
+                    tint = MaterialTheme.colorScheme.primary)
+            }
+            if (orgMenuOpen) {
+                OrgPickerSheet(
+                    roots = roots, byParent = byParent, subtreeCount = subtreeCount,
+                    current = curOrg,
+                    initialExpanded = path.map { it.code }.toSet(),
+                    onSelect = { curOrg = it; orgMenuOpen = false },
+                    onDismiss = { orgMenuOpen = false },
+                )
             }
 
             // 섹션 = 선택 범위(하위 포함) 내 직접 구성원 보유 조직, 라벨 = 전체 경로
@@ -1088,6 +1066,83 @@ private fun CompanyContacts(
                     }
                 }
             }
+        }
+    }
+}
+
+/** 조직 선택 바텀시트 — 단계별 펼침 트리(처음엔 최상위+현재 경로만 펼침). 이름 탭=선택, ▸ 탭=펼침. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun OrgPickerSheet(
+    roots: List<CompanyOrg>,
+    byParent: Map<String, List<CompanyOrg>>,
+    subtreeCount: Map<String, Int>,
+    current: String?,
+    initialExpanded: Set<String>,
+    onSelect: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(initialExpanded) }
+    val rows = remember(expanded) {
+        buildList {
+            fun walk(o: CompanyOrg, d: Int) {
+                add(Triple(o, d, byParent[o.code].orEmpty().isNotEmpty()))
+                if (o.code in expanded) byParent[o.code].orEmpty().sortedBy { it.sort }.forEach { walk(it, d + 1) }
+            }
+            roots.forEach { walk(it, 0) }
+        }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Text("조직 선택", style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(start = 24.dp, bottom = 4.dp))
+        LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            item(key = "all") {
+                OrgPickRow("전체 조직", count = null, depth = 0, hasChildren = false,
+                    isExpanded = false, selected = current == null,
+                    onToggle = {}, onPick = { onSelect(null) })
+            }
+            items(rows, key = { it.first.code }) { (o, d, hasKids) ->
+                OrgPickRow(o.name, subtreeCount[o.code], d, hasKids,
+                    isExpanded = o.code in expanded, selected = o.code == current,
+                    onToggle = {
+                        expanded = if (o.code in expanded) expanded - o.code else expanded + o.code
+                    },
+                    onPick = { onSelect(o.code) })
+            }
+        }
+    }
+}
+
+/** 조직 피커 한 행 — [▸/▾](펼침 토글) + 이름(탭=선택) + 인원수. */
+@Composable
+private fun OrgPickRow(
+    name: String, count: Int?, depth: Int, hasChildren: Boolean,
+    isExpanded: Boolean, selected: Boolean,
+    onToggle: () -> Unit, onPick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onPick() }
+            .padding(start = (16 + depth * 20).dp, end = 24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(CircleShape)
+                .then(if (hasChildren) Modifier.clickable { onToggle() } else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (hasChildren) {
+                Icon(if (isExpanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
+                    contentDescription = if (isExpanded) "접기" else "펼치기",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(name, style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f).padding(vertical = 14.dp))
+        count?.let {
+            Text("${it}명", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
