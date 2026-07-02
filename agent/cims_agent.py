@@ -595,8 +595,11 @@ def _pgrep_module(name: str):
     """모듈 프로세스 (pid, cmdline) 1개 반환, 없으면 None.
     1) comm 정확 매칭(-x) — C++ 바이너리(csp/cmp/isp/cwrtc). 비앵커 매칭은 'isp' 가
        'networkd-dispatcher' 에 오매칭되므로 반드시 -x.
-    2) `<name>_app.py` cmdline 매칭(-f) — python 데몬(csc/oam). comm 이 python3 라 1)로 안 잡힘."""
-    for argv in (["pgrep", "-ax", name], ["pgrep", "-af", f"{name}_app.py"]):
+    2) `<stem>_app.py` cmdline 매칭(-f) — python 데몬(csc/oam/oam-svc). comm 이 python3 라 1)로
+       안 잡힘. 패키지명(예: oam-svc)은 하이픈을 포함할 수 있으나 python 엔트리포인트 파일명은
+       언더스코어(oam_svc_app.py)이므로 stem 은 하이픈→언더스코어로 정규화한다."""
+    script_stem = name.replace("-", "_")
+    for argv in (["pgrep", "-ax", name], ["pgrep", "-af", f"{script_stem}_app.py"]):
         try:
             r = subprocess.run(argv, capture_output=True, text=True, timeout=2)
         except Exception:
