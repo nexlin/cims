@@ -33,6 +33,13 @@ export interface FlowBodyResponse {
   body: string
 }
 
+export interface RegisterFlowResponse {
+  user: string
+  date: string
+  nodes: Record<string, FlowMessage[]>
+  error?: string
+}
+
 export const flowApi = {
   list(date?: string): Promise<FlowListResponse> {
     const q = date ? `?date=${date}` : ''
@@ -52,6 +59,11 @@ export const flowApi = {
   /** 메시지 body 조회 (interface jsonl seq 기반, fallback: ts+dir)
    *  node: 'csp' | 'cmp' | 'csc' — 여러 노드가 같은 iface에 msg 파일을 쓸 때 정확한 파일 선택에 사용
    */
+  getRegisterFlow(user: string, date?: string): Promise<RegisterFlowResponse> {
+    const params = new URLSearchParams({ user })
+    if (date) params.set('date', date)
+    return api.get(`/flow/register?${params.toString()}`)
+  },
   getBody(date: string, hour: string | undefined, seq?: number, ts?: string, dir?: string, proto?: string, iface?: string, node?: string): Promise<FlowBodyResponse> {
     const params = new URLSearchParams({ date })
     if (hour) params.set('hour', hour)

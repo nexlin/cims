@@ -20,6 +20,7 @@ import ProvisioningWorkbenchPage from './pages/ProvisioningWorkbenchPage'
 import OrganizationsPage from './pages/OrganizationsPage'
 import PttGroupsWorkbenchPage from './pages/PttGroupsWorkbenchPage'
 import LeakReclaimsPage from './pages/LeakReclaimsPage'
+import RegisterFlowPage from './pages/RegisterFlowPage'
 import AbnormalSessionsPage from './pages/AbnormalSessionsPage'
 import ServiceDescriptorsPage from '../../pages/ServiceDescriptorsPage'  // 코어 페이지 — '구성' 그룹에 배치
 
@@ -55,6 +56,7 @@ export const cimsManifest: ServiceManifest = {
         { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', requiredRole: 'monitor' },
         { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   requiredRole: 'monitor' },
         { path: '/service/abnormal-sessions', title: '비정상 세션 이력', component: AbnormalSessionsPage, requiredRole: 'monitor' },
+        { path: '/service/register-flow',     title: '단말 등록 플로우', component: RegisterFlowPage,     requiredRole: 'monitor' },
       ],
     },
     // ── 성능 (ops) — 통계(KPI/카운터). FCAPS Performance. ──

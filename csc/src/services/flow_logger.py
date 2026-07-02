@@ -2549,8 +2549,161 @@ async def _handle_abnormal_sessions(handler_args: HandlerArgs, kwargs: dict) -> 
     }), media_type="application/json")
 
 
+def _add_seconds_to_ts(ts: str, secs: float) -> str:
+    """HH:MM:SS.uuuuuu 형식 타임스탬프에 초를 더함"""
+    try:
+        parts = ts.split(":")
+        total = float(parts[2]) + secs
+        extra_m = int(total // 60)
+        total = total % 60
+        mins = int(parts[1]) + extra_m
+        extra_h = mins // 60
+        mins = mins % 60
+        hrs = int(parts[0]) + extra_h
+        return f"{hrs:02d}:{mins:02d}:{total:09.6f}"
+    except Exception:
+        return ts
+
+
+async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """GET /api/v1/flow/register?user=1001&date=YYYY-MM-DD
+    특정 사용자의 가장 최근 REGISTER 흐름 (REGISTER→401→REGISTER→200 OK→SUBSCRIBE→NOTIFY→PUBLISH) 반환.
+    """
+    if handler_args.method != "GET":
+        return HandlerResult(status=405, body="Method Not Allowed")
+
+    qp = getattr(handler_args, 'query_params', {}) or {}
+    qs = parse_qs(urlparse(handler_args.full_path or "").query)
+    def _q(name, default=None):
+        v = qp.get(name)
+        if v:
+            return v[0] if isinstance(v, list) else v
+        vl = qs.get(name)
+        return vl[0] if vl else default
+
+    user = (_q("user") or "").strip()
+    date_str = _q("date", datetime.now().strftime("%Y-%m-%d"))
+    hour = _q("hour")
+
+    if not user:
+        return HandlerResult(status=400, body=json.dumps({"error": "user parameter required"}),
+                             media_type="application/json")
+    if not _sip_log_dir and not _calls_dir:
+        return HandlerResult(status=503, body=json.dumps({"error": "SIP log not configured"}),
+                             media_type="application/json")
+
+    # 1. flow.jsonl에서 가장 최근 REGISTER sesid 검색
+    #    REGISTER detail = From URI (e.g. "sip:1001@csp") — SipMessageLogger 참조
+    match_str = f":{user}@"   # ":1001@" — 앞뒤 anchor로 "10011" 오매칭 방지
+    best_ts = ""
+    best_sesid = ""
+    flow_paths = _resolve_flow_paths(date_str, hour, "volte")
+
+    for jsonl_path in flow_paths:
+        try:
+            with open(jsonl_path, 'r') as fh:
+                for line in fh:
+                    if '"REGISTER"' not in line or match_str not in line:
+                        continue
+                    try:
+                        obj = json.loads(line.strip())
+                    except Exception:
+                        continue
+                    if obj.get("method") != "REGISTER":
+                        continue
+                    if match_str not in obj.get("detail", ""):
+                        continue
+                    ts = obj.get("ts", "")
+                    sesid = obj.get("sesid", "")
+                    if ts > best_ts and sesid:
+                        best_ts = ts
+                        best_sesid = sesid
+        except Exception as e:
+            logger.error("register_flow scan: %s", e)
+
+    if not best_sesid:
+        return HandlerResult(status=404, body=json.dumps({
+            "error": f"No REGISTER found for user '{user}' on {date_str}"
+        }), media_type="application/json")
+
+    # 2. 해당 sesid의 REGISTER 다이얼로그 전체 (REGISTER→401→REGISTER→200 OK)
+    sesid_set = {best_sesid}
+    sip_msgs = _search_sip_messages([], date_str, hour, service="volte", sesid_set=sesid_set)
+
+    # 3. 200 OK 타임스탬프 추출 → 이후 SUBSCRIBE/NOTIFY/PUBLISH 탐색 윈도우 계산
+    ts_200 = ""
+    for m in sorted(sip_msgs, key=lambda x: x.get("ts", "")):
+        method = m.get("method", "")
+        ts = m.get("ts", "")
+        if "200" in method and ts > best_ts:
+            ts_200 = ts
+            break
+
+    ts_window_start = best_ts
+    ts_window_end = _add_seconds_to_ts(ts_200 or best_ts, 120)
+
+    # 4. REGISTER 이후 120초 윈도우에서 SUBSCRIBE/NOTIFY/PUBLISH 수집
+    #    (서로 다른 sesid이므로 시간 범위 필터 사용)
+    follow_msgs = []
+    seen_follow = set()
+    for jsonl_path in flow_paths:
+        try:
+            with open(jsonl_path, 'r') as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or '"SIP"' not in line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    if obj.get("proto") != "SIP":
+                        continue
+                    ts = obj.get("ts", "")
+                    if not ts or ts <= ts_window_start or ts > ts_window_end:
+                        continue
+                    if obj.get("method") == "REGISTER":
+                        continue
+                    if obj.get("sesid", "") in sesid_set:
+                        continue
+                    # UE 관련 메시지만 (SUBSCRIBE/NOTIFY/PUBLISH/응답)
+                    from_a = obj.get("from", "")
+                    to_a = obj.get("to", "")
+                    if "ue" not in from_a and "ue" not in to_a:
+                        continue
+                    # 중복 제거 (같은 ts+method가 여러 flow 파일에 있을 수 있음)
+                    key = (ts, obj.get("method", ""), obj.get("sesid", ""))
+                    if key in seen_follow:
+                        continue
+                    seen_follow.add(key)
+                    follow_msgs.append(obj)
+        except Exception as e:
+            logger.error("register_flow follow scan: %s", e)
+
+    # 5. FlowMessage 형식으로 변환 후 시간순 병합
+    messages = []
+    for obj in sip_msgs:
+        messages.append(_flow_msg_from_log(obj))
+    for obj in follow_msgs:
+        messages.append(_flow_msg_from_log(obj))
+    messages.sort(key=lambda m: m.get("ts", ""))
+
+    # 6. 노드별 분류
+    nodes: dict = {}
+    for m in messages:
+        node = _flow_node_of(m)
+        nodes.setdefault(node, []).append(m)
+    for node_msgs in nodes.values():
+        node_msgs.sort(key=lambda m: m.get("ts", ""))
+
+    return HandlerResult(status=200, body=json.dumps({
+        "user": user, "date": date_str, "nodes": nodes,
+    }), media_type="application/json")
+
+
 FLOW_HANDLER_LIST = [
     ("/api/v1/flow/body", _handle_flow_body, {}),
+    ("/api/v1/flow/register", _handle_register_flow, {}),
     ("/api/v1/flow", _handle_flow, {}),
     ("/api/v1/call/logs", _handle_call_logs, {}),
     ("/api/v1/recordings", _handle_recordings, {}),
