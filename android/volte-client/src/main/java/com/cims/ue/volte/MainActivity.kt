@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,10 +41,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -68,6 +70,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -108,7 +111,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
 import com.cims.ue.core.calllog.CallEntry
 import com.cims.ue.core.calllog.CallLogStore
 import com.cims.ue.core.calllog.CallType
@@ -755,9 +757,9 @@ private fun ContactsScreen(
             }
         }
         when (seg) {
-            0 -> FavoritesScreen(favorites, favVersion, query, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
-            1 -> CompanyContacts(company, favorites, favVersion, query, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
-            else -> PersonalContacts(personal, favorites, favVersion, query, showAddPersonal, onOpen = { detail = it }, onFavChanged = { favVersion++ }, onCall = onCallVoice)
+            0 -> FavoritesScreen(favorites, favVersion, query, onOpen = { detail = it }, onFavChanged = { favVersion++ })
+            1 -> CompanyContacts(company, favorites, favVersion, query, onOpen = { detail = it }, onFavChanged = { favVersion++ })
+            else -> PersonalContacts(personal, favorites, favVersion, query, showAddPersonal, onOpen = { detail = it }, onFavChanged = { favVersion++ })
         }
     }
 
@@ -818,12 +820,14 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
 /** 언더라인 텍스트 탭 — 선택=굵게+밑줄 (일반 전화앱 스타일). */
 @Composable
 private fun UnderlineTab(label: String, selected: Boolean, onClick: () -> Unit) {
-    Column(Modifier.width(IntrinsicSize.Min).clickable { onClick() }) {
+    // IntrinsicSize.Max = 한 줄 전체 텍스트 폭 (CJK 는 Min 이 글자 하나 폭이라 잘림).
+    Column(Modifier.width(IntrinsicSize.Max).clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, fontSize = 16.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
             color = if (selected) MaterialTheme.colorScheme.onSurface
             else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1)
+            maxLines = 1, softWrap = false)
         Spacer(Modifier.height(5.dp))
         Box(
             Modifier.fillMaxWidth().height(2.dp)
@@ -832,12 +836,11 @@ private fun UnderlineTab(label: String, selected: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** 공용 연락처 행 — 별표 토글 + 초록 전화(바로 발신) + 탭(상세). [trailing] 으로 추가 버튼(개인=수정). */
+/** 공용 연락처 행 — 별표 토글 + 탭(상세에서 발신). [trailing] 으로 추가 버튼(개인=수정). */
 @Composable
 private fun ContactListRow(
     name: String, line2: String, depth: Int, isFav: Boolean,
     onTap: () -> Unit, onToggleFav: () -> Unit,
-    onCall: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -860,18 +863,6 @@ private fun ContactListRow(
                 tint = if (isFav) FAV_GOLD else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp))
         }
-        if (onCall != null) {
-            Box(
-                Modifier.size(38.dp).clip(CircleShape)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                    .clickable { onCall() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.Call, contentDescription = "전화", tint = CALL_GREEN,
-                    modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.size(8.dp))
-        }
         trailing?.invoke()
     }
 }
@@ -880,7 +871,7 @@ private fun ContactListRow(
 @Composable
 private fun FavoritesScreen(
     favorites: FavoriteStore, favVersion: Int, query: String,
-    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
 ) {
     val q = query.trim()
     val list = remember(favVersion, q) {
@@ -896,8 +887,7 @@ private fun FavoritesScreen(
             items(list, key = { it.number }) { f ->
                 ContactListRow(f.name, f.number, depth = 0, isFav = true,
                     onTap = { onOpen(DetailTarget(f.name, f.number, null)) },
-                    onToggleFav = { favorites.toggle(f.name, f.number); onFavChanged() },
-                    onCall = { onCall(f.number) })
+                    onToggleFav = { favorites.toggle(f.name, f.number); onFavChanged() })
                 HorizontalDivider()
             }
         }
@@ -908,7 +898,7 @@ private fun FavoritesScreen(
 @Composable
 private fun CompanyContacts(
     store: CompanyDirectoryStore, favorites: FavoriteStore, favVersion: Int, query: String,
-    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -970,8 +960,7 @@ private fun CompanyContacts(
                     val on = orgName[m.orgCode] ?: m.orgCode
                     ContactListRow(m.name, "${m.number} · $on", depth = 0, isFav = m.number in favSet,
                         onTap = { onOpen(DetailTarget(m.name, m.number, on)) },
-                        onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() },
-                        onCall = { onCall(m.number) })
+                        onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() })
                     HorizontalDivider()
                 }
             }
@@ -986,8 +975,7 @@ private fun CompanyContacts(
                         is DirRow.Member -> {
                             ContactListRow(row.c.name, row.c.number, depth = row.depth, isFav = row.c.number in favSet,
                                 onTap = { onOpen(DetailTarget(row.c.name, row.c.number, orgName[row.c.orgCode])) },
-                                onToggleFav = { favorites.toggle(row.c.name, row.c.number); onFavChanged() },
-                                onCall = { onCall(row.c.number) })
+                                onToggleFav = { favorites.toggle(row.c.name, row.c.number); onFavChanged() })
                             HorizontalDivider()
                         }
                     }
@@ -1055,7 +1043,7 @@ private fun OrgHeaderRow(row: DirRow.Org, onToggle: () -> Unit) {
 private fun PersonalContacts(
     store: ContactStore, favorites: FavoriteStore, favVersion: Int, query: String,
     showAdd: MutableState<Boolean>,
-    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit, onCall: (String) -> Unit,
+    onOpen: (DetailTarget) -> Unit, onFavChanged: () -> Unit,
 ) {
     var list by remember { mutableStateOf(store.all()) }
     var editing by remember { mutableStateOf<Contact?>(null) }
@@ -1096,7 +1084,6 @@ private fun PersonalContacts(
                         ContactListRow(c.name, c.number, depth = 0, isFav = c.number in favSet,
                             onTap = { onOpen(DetailTarget(c.name, c.number, null)) },
                             onToggleFav = { favorites.toggle(c.name, c.number); onFavChanged() },
-                            onCall = { onCall(c.number) },
                             trailing = { TextButton(onClick = { editing = c }) { Text("수정") } })
                     }
                 }
@@ -1150,7 +1137,7 @@ private fun ContactDialog(
     )
 }
 
-/** 연락처 상세 — 정보 + 음성/영상/문자/즐겨찾기. 행을 누르면 표시된다. */
+/** 연락처 상세 — 전화앱 스타일 전체화면(아바타/이름 중앙 + 액션 버튼 + 정보). 행을 누르면 표시된다. */
 @Composable
 private fun ContactDetailDialog(
     target: DetailTarget, favorites: FavoriteStore,
@@ -1162,28 +1149,40 @@ private fun ContactDetailDialog(
     var msg by remember { mutableStateOf("") }
     var sent by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.padding(20.dp).widthIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // 헤더
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center,
-                    ) { Text(target.name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onPrimaryContainer) }
-                    Spacer(Modifier.size(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(target.name.ifBlank { target.number }, style = MaterialTheme.typography.titleLarge)
-                        Text(target.number + (target.org?.let { " · $it" } ?: ""),
-                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+    BackHandler(onBack = onDismiss)   // 시스템 뒤로가기 → 목록으로
+
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize()) {
+            // 상단 바 — 뒤로
+            Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                 }
+            }
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // 아바타 + 이름(중앙)
+                Box(
+                    Modifier.size(96.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(target.name.take(1).ifBlank { "?" }, style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(target.name.ifBlank { target.number }, style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(24.dp))
 
                 if (!composing) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        LabeledRound("음성", CALL_GREEN, Icons.Filled.Call) { onVoice() }
-                        LabeledRound("영상", VIDEO_BLUE, Icons.Filled.Videocam) { onVideo() }
-                        LabeledRound("문자", MaterialTheme.colorScheme.surfaceVariant, Icons.AutoMirrored.Filled.Message,
+                    // 액션 버튼 행 (음성통화/영상통화/메시지/즐겨찾기)
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly) {
+                        LabeledRound("음성통화", CALL_GREEN, Icons.Filled.Call) { onVoice() }
+                        LabeledRound("영상통화", VIDEO_BLUE, Icons.Filled.Videocam) { onVideo() }
+                        LabeledRound("메시지", MaterialTheme.colorScheme.surfaceVariant, Icons.AutoMirrored.Filled.Message,
                             fg = MaterialTheme.colorScheme.onSurface) { composing = true }
                         LabeledRound("즐겨찾기",
                             if (fav) FAV_GOLD else MaterialTheme.colorScheme.surfaceVariant,
@@ -1192,22 +1191,57 @@ private fun ContactDetailDialog(
                             fav = favorites.toggle(target.name, target.number); onFavChanged()
                         }
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss) { Text("닫기") }
+                    Spacer(Modifier.height(28.dp))
+                    // 정보 섹션 (휴대전화/소속) — 번호 우측에 초록 전화 버튼
+                    HorizontalDivider()
+                    ContactInfoRow("휴대전화", target.number, onCall = onVoice)
+                    target.org?.takeIf { it.isNotBlank() }?.let {
+                        HorizontalDivider()
+                        ContactInfoRow("소속", it, onCall = null)
                     }
+                    HorizontalDivider()
                 } else {
-                    OutlinedTextField(msg, { msg = it; sent = false }, label = { Text("문자 내용") },
-                        modifier = Modifier.fillMaxWidth(), minLines = 2)
-                    if (sent) Text("문자를 전송했습니다.", style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { composing = false }) { Text("뒤로") }
-                        Spacer(Modifier.weight(1f))
-                        Button(enabled = msg.isNotBlank(), onClick = { onSendMessage(msg.trim()); sent = true; msg = "" }) {
-                            Text("보내기")
+                    // 문자 작성
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(msg, { msg = it; sent = false }, label = { Text("문자 내용") },
+                            modifier = Modifier.fillMaxWidth(), minLines = 2)
+                        if (sent) Text("문자를 전송했습니다.", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { composing = false }) { Text("뒤로") }
+                            Spacer(Modifier.weight(1f))
+                            Button(enabled = msg.isNotBlank(), onClick = { onSendMessage(msg.trim()); sent = true; msg = "" }) {
+                                Text("보내기")
+                            }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** 상세 정보 행 — 라벨(작게)+값(크게), 우측 초록 전화 버튼(있으면 발신). */
+@Composable
+private fun ContactInfoRow(label: String, value: String, onCall: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(2.dp))
+            Text(value, style = MaterialTheme.typography.titleMedium)
+        }
+        if (onCall != null) {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { onCall() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Call, contentDescription = "전화", tint = CALL_GREEN, modifier = Modifier.size(20.dp))
             }
         }
     }
