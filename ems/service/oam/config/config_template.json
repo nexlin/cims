@@ -39,15 +39,16 @@
     },
     {
       "key": "probe",
-      "title": "관측 대상 (KPI probe)",
-      "description": "stats/service KPI 가 STATS_REQUEST 로 질의하는 CSP/CMP 엔드포인트.",
+      "title": "관측 대상 (KPI/health probe)",
+      "description": "stats(health/service KPI)·알람 sweeper 가 STATS_REQUEST 로 질의하는 CSP/CMP 엔드포인트.",
       "fields": [
         {
           "key": "CspNotify.Ip",
           "label": "CSP probe IP",
           "type": "string",
           "default": "121.161.164.47",
-          "restart": false
+          "restart": false,
+          "help": "CSP CscInterface(UDP) bind 주소 — A/S HA 에선 VIP 로 두면 항상 active master."
         },
         {
           "key": "CspNotify.Port",
@@ -57,6 +58,79 @@
           "min": 1,
           "max": 65535,
           "restart": false
+        },
+        {
+          "key": "MediaServer.Endpoints",
+          "label": "CMP probe 엔드포인트",
+          "type": "string_list",
+          "default": [],
+          "restart": false,
+          "help": "전 미디어 노드 \"ip:port\" 목록 (예: 10.0.1.48:9000). 비우면 base oam.json 상속값 사용."
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "db",
+      "title": "데이터베이스",
+      "description": "CIMS MariaDB 접속 정보 — 조직/가입자 통계·호이력 필터·DB health 알람 조회용 (read-only 성격). 비우면 base oam.json 상속값 사용.",
+      "fields": [
+        {
+          "key": "CimsDatabase.Host",
+          "label": "DB Host",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@DB_HOST@",
+          "restart": true
+        },
+        {
+          "key": "CimsDatabase.Port",
+          "label": "DB Port",
+          "type": "int",
+          "default": 3306,
+          "min": 1,
+          "max": 65535,
+          "restart": true
+        },
+        {
+          "key": "CimsDatabase.User",
+          "label": "DB User",
+          "type": "string",
+          "default": "cims",
+          "deploy_value": "@DB_USER@",
+          "restart": true
+        },
+        {
+          "key": "CimsDatabase.Password",
+          "label": "DB Password",
+          "type": "password",
+          "default": "",
+          "deploy_value": "@DB_PASSWORD@",
+          "restart": true
+        },
+        {
+          "key": "CimsDatabase.Db",
+          "label": "DB Name",
+          "type": "string",
+          "default": "cims",
+          "restart": true
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "logging",
+      "title": "서비스 로그",
+      "description": "CSP/CMP/CSC 와 공유하는 서비스 로그 루트 — stats(messages/leak)·flow·녹취 조회 + 알람(alert_log) 기록 위치.",
+      "fields": [
+        {
+          "key": "ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "type": "path",
+          "default": "",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "restart": true,
+          "help": "비우면 base oam.json 상속값 사용."
         }
       ],
       "scope": "service"

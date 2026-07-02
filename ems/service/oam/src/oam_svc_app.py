@@ -123,12 +123,25 @@ if __name__ == '__main__':
                     merged = json.load(f)
                 src = _CONFIG_PATH
             else:
-                # fallback: oam.json (단일 설정 공유 — dev 편의)
-                oam_p = _first_dir([os.path.join(_repo_root, 'oam', 'config')]) or ''
-                oam_json = os.path.join(oam_p, 'oam.json') if oam_p else ''
-                if oam_json and os.path.isfile(oam_json):
+                # fallback: base oam.json 상속 — oam-svc 는 oam 동거가 전제(코드 import 도
+                #   oam/src 에서)이므로 공유값(CimsDatabase/JwtSecret/ServiceLogging 등)을
+                #   base 설정에서 가져온다. dist 형제 / dev ems 트리 / production modules
+                #   (활성 버전 = current 심링크) 세 레이아웃 지원.
+                #   디렉토리 존재가 아니라 oam.json 실재로 선별 — dev ems 트리에선
+                #   _repo_root/oam/config 가 oam-svc 자기 config(sample만)와 겹치므로.
+                oam_json = ''
+                for _c in (os.path.join(_repo_root, 'oam', 'config'),
+                           os.path.join(_repo_root, '..', 'core', 'oam', 'config'),
+                           os.path.join(_repo_root, '..', '..', 'oam', 'current', 'oam', 'config')):
+                    if os.path.isfile(os.path.join(_c, 'oam.json')):
+                        oam_json = os.path.join(_c, 'oam.json')
+                        break
+                if oam_json:
                     with open(oam_json, 'r') as f:
                         merged = json.load(f)
+                    # base 전용 bind(Server=0.0.0.0:4419)는 상속 제외 — oam-svc 는
+                    #   loopback 4480 기본(I1). 배포 overlay 의 Server.* 는 이후 적용이라 우선.
+                    merged.pop('Server', None)
                     src = oam_json + ' (fallback)'
         except Exception as e:
             logger.log_error(f"oam-svc config load error: {e}")
@@ -158,7 +171,7 @@ if __name__ == '__main__':
     from services.flow_logger    import FLOW_HANDLER_LIST
     from handlers                import recording, auth
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
-    from handlers.stats          import CIMS_STATS_SERVICE_HANDLER_LIST
+    from handlers.stats          import CIMS_STATS_HANDLER_LIST, CIMS_STATS_SERVICE_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
     from handlers.subscriber_import import CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST
 
@@ -258,14 +271,42 @@ if __name__ == '__main__':
         # FLOW → RECORDING 순서로 /api/v1/recordings 충돌 시 RECORDING 우선(oam_app 과 동일).
         admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
         admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
+        # stats 전체(/api/v1/stats — health/subscribers/messages/leak + service KPI) 귀속:
+        # 서비스 관측 데이터(CSP/CMP probe·DB·서비스 로그)라 base 가 아닌 여기서 서빙.
+        # 게이트웨이(base)가 /api/v1/stats 세그먼트를 이리로 프록시(콘솔 URL 불변).
         admin_server.add_dynamic_rules(
-            _bind(CIMS_STATS_SERVICE_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST
-                  + CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST))
+            _bind(CIMS_STATS_HANDLER_LIST + CIMS_STATS_SERVICE_HANDLER_LIST
+                  + CIMS_VERIFICATION_HANDLER_LIST + CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST))
         admin_server.start()
         logger.log_info(f"oam-svc server started on {admin_conf.get('Ip','127.0.0.1')}:{admin_conf.get('Port', 4480)}")
 
+        # ── 서비스 알람 sweeper (alarm_standardization) ──────────────────
+        # 서비스 계열 규칙(csp_down/cmp_down/db_down/rtp_high)의 평가·발화는 oam-svc 소유
+        # (oam_base_service_split §4) — probe 대상·DB 가 이 모듈 설정이므로. base 는
+        # agent 계열(disk/module)만 평가. 저장(alert_log→ServiceLogging.Dir)·조회 API 는
+        # base 유지 — 같은 노드 동거 전제라 동일 디렉토리에 기록한다.
+        from services import alarm_sweeper
+        ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
+        ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
+        _alert_open = alarm_sweeper.restore_open_state(
+            _service_log_dir, scope='service', log=logger)
+        if _service_log_dir:
+            logger.log_info(f"[alert-sweep] interval={ALERT_SWEEP_INTERVAL}s, "
+                            f"rtp_threshold={ALERT_RTP_THRESHOLD}%, dir={_service_log_dir}")
+        else:
+            logger.log_info("[alert-sweep] disabled — no ServiceLogging.Dir")
+
+        _last_alert_sweep = 0.0
         while True:
             time.sleep(1)
+            if _service_log_dir and time.time() - _last_alert_sweep >= ALERT_SWEEP_INTERVAL:
+                try:
+                    alarm_sweeper.sweep_service_rules(
+                        config, _alert_open, _service_log_dir,
+                        detected_by='oam-svc', rtp_threshold=ALERT_RTP_THRESHOLD, log=logger)
+                except Exception as e:
+                    logger.log_error(f"[alarm-sweep] error: {e}")
+                _last_alert_sweep = time.time()
 
     except Exception as e:
         tb_str = traceback.format_exc()

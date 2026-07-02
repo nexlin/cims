@@ -79,6 +79,12 @@ admin_users         ← 관리자 계정
 
 CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대시보드에 표시한다.
 
+> **서빙 주체**: `/api/v1/stats/*` 전체(health/subscribers/messages/leak + service KPI)는
+> **oam-svc** 가 서빙한다(서비스 관측 — CSP/CMP probe·DB·서비스 로그가 oam-svc 설정 소유,
+> oam_base_service_split §4). 분리 배포에서 base(4419)는 게이트웨이 프록시만 하고 콘솔 URL 은
+> 불변. `--role all` 단일 프로세스에서는 in-process 등록. 표의 "CSC →" 는 이 관측 프로세스를
+> 뜻한다(구 단일 CSC 시절 명칭).
+
 ### 1.1 헬스체크
 
 | 항목 | 판정 기준 | 수집 방식 |

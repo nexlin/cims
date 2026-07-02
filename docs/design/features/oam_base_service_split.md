@@ -108,17 +108,30 @@
 | `agents`,`agent_api`,`modules`,`ha_groups` | base 공통 | `/api/v1/{agents,modules,ha}` | 인프라 제어면 |
 | `build`,`service_descriptors`,`service_control` | base 공통 | `/api/v1/{build,services}` | 배포 오케스트레이션 |
 | `external_systems` | base 공통 | `/api/v1/external-systems` | 외부 형상(대시보드) |
-| `alerts`(프레임워크) | base 공통 | `/api/v1/alerts` | 골격 공통(서비스는 push) |
-| `stats(/health)` | base 공통 | `/api/v1/stats/health` | 노드 헬스/형상 |
+| `alerts`(저장·조회 + agent 계열 발화) | base 공통 | `/api/v1/alerts` | 골격 공통(서비스 계열은 oam-svc 가 push) |
 | `admin`,`org`(가입자 CRUD) | **csc 모듈** | `/api/v1/subscribers`, `/api/v1/org` | D3 가입자=csc 도메인 |
 | (PTT 그룹/affiliation 관리) | **csc 모듈** | `/api/v1/ptt` | D3 |
-| `stats(/service/voip\|ptt)` | **svc-mgmt 모듈** | `/api/v1/stats/service` | CSP/CMP KPI 관측 |
-| `recording`, `flow_logger` | **svc-mgmt 모듈** | `/api/v1/calls` | 녹취·SIP flow 관측 |
-| `verification` | **svc-mgmt 모듈** | `/api/v1/verification` | S1~S6 검증(testbed) |
+| `stats` **전체** (health/subscribers/messages/leak + service KPI) | **oam-svc 모듈** | `/api/v1/stats` | 서비스 관측 데이터(CSP/CMP probe·DB·서비스 로그) — 소비자도 svc 콘솔 팩 위젯뿐 |
+| `recording`, `flow_logger` | **oam-svc 모듈** | `/api/v1/calls` | 녹취·SIP flow 관측 |
+| `verification` | **oam-svc 모듈** | `/api/v1/verification` | S1~S6 검증(testbed) |
 
-> `stats` 는 base(health)·svc-mgmt(KPI) 로 **핸들러 함수 단위 분리**(모듈 파일은 공유, HANDLER_LIST
-> 만 둘로). 가입자 CRUD 핸들러는 현재 OAM in-process import(`oam_app.py:118`) → 목표는 **csc 가
+> `stats` 는 `/api/v1/stats` 세그먼트 **전체가 oam-svc 귀속** — base 는 stats 를 직접 서빙하지
+> 않고(`--role base` 미등록) 게이트웨이 프록시만 한다. 콘솔 URL 은 불변(위젯/페이지 무수정).
+> `--role all`(단일 프로세스)에서는 SERVICE 그룹으로 in-process 등록되어 동작 무변경.
+> **배포 제약**: base 와 oam-svc 는 이 경계를 맞춘 버전으로 **함께 배포**해야 한다 — stats 미등록
+> base + `/api/v1/stats` 라우트 없는 구 oam-svc 조합이면 `/stats/*` 404 (라우트는 oam-svc
+> 배포 시 self-register 로 갱신).
+> 가입자 CRUD 핸들러는 현재 OAM in-process import(`oam_app.py:118`) → 목표는 **csc 가
 > 직접 서빙하고 base 가 프록시**(중복 제거).
+
+**알람 sweeper 분리** (`services/alarm_sweeper.py` 공용 코어):
+- **서비스 계열**(`csp_down`/`cmp_down`/`db_down`/`rtp_high`, scope≠`agent`) 평가·발화 = **oam-svc**
+  (`detected_by='oam-svc'`) — probe 대상·DB 가 oam-svc 설정이므로. `--role all` 에서는 base 가
+  대행 평가(`detected_by='oam'`).
+- **agent 계열**(`disk_high`/`module_down`, scope=`agent`, heartbeat 메트릭 기반) = **base** 잔류.
+- 저장(`alert_log` → `ServiceLogging.Dir`)·조회 API(`/api/v1/alerts`)는 base 소유 불변 — 동거
+  노드 전제로 양쪽이 같은 디렉토리에 기록하고, 기동 시 open-state 복원은 소유 계열만
+  (`restore_open_state` scope: 서비스=`cims/*` mo, agent=그 외).
 
 base 엔트리포인트 역할 분기:
 ```python
@@ -146,14 +159,14 @@ if role == 'base':
   /api/v1/subscribers  → csc      (127.0.0.1:4421)
   /api/v1/org          → csc
   /api/v1/ptt          → csc
-  /api/v1/calls        → svc-mgmt (127.0.0.1:44xx)
-  /api/v1/stats/service→ svc-mgmt
-  /api/v1/verification → svc-mgmt
+  /api/v1/calls        → oam-svc  (127.0.0.1:4480)
+  /api/v1/stats        → oam-svc  (health/subscribers/messages/leak + service KPI 전체)
+  /api/v1/verification → oam-svc
   (그 외 /api/v1/*      → base 직접 처리)
 ```
 
-- `controller.py` **최장 일치** 규칙 덕에 base 고유의 더 구체적 경로(`/api/v1/stats/health`)는
-  base 가 우선, `/api/v1/stats/service/*` 는 svc-mgmt 로 프록시 — 충돌 없이 공존.
+- `controller.py` **최장 일치** 규칙 덕에 base 고유의 더 구체적 경로(`/api/v1/users/me` 등)는
+  base 가 우선 — 충돌 없이 공존. `/api/v1/stats` 는 base 직접 경로가 없어 세그먼트 전체가 프록시.
 - **self-register**: 서비스 모듈 설치 시 자기 매니페스트의 `routes`(+upstream 주소)를 게이트웨이
   라우트 테이블(file_store `control/gateway_routes`)에 등록. 새 서비스 = 테이블 한 줄, **코어 무수정**.
 - 미등록/`Enabled:false`/업스트림 부재 → 게이트웨이가 503(I3).
@@ -237,7 +250,27 @@ config/
 - **각 서비스 모듈** 로드 = `common.json` 의 공유항목(JwtSecret/DB/RuntimeDir, read-only) + 자기
   `services/<svc>.json`.
 - 장점: 새 서비스 = `services/<svc>.json` 추가 + self-register, **공통/타서비스 설정 무영향**(D4 의도).
-- 하위호환: `common.json` 부재 시 기존 단일 `oam.json` 에서 키를 읽는 fallback 유지.
+- 하위호환: `common.json` 부재 시 자기 `oam-svc.json` 단독, 그것도 없으면 **base `oam.json` 상속
+  fallback** — oam-svc 는 oam 동거가 전제(코드 import 도 oam/src)이므로 공유값(CimsDatabase/
+  JwtSecret/ServiceLogging 등)을 base 설정에서 읽는다. 탐색 순서: dist 형제(`<dist>/oam/config`) →
+  dev ems 트리(`ems/core/oam/config`) → production modules(`modules/oam/current/oam/config`,
+  활성 버전 심링크). 단 base 전용 bind 인 `Server`(0.0.0.0:4419) 는 상속에서 제외 — oam-svc 는
+  loopback 4480 기본(I1)이고, 배포 overlay(`config.json`)의 `Server.*` 가 그 위에 적용된다.
+
+### 서비스 관측 설정의 소유 — oam-svc (콘솔 관리)
+`CimsDatabase`/`CspNotify`/`MediaServer.Endpoints`/`ServiceLogging` 은 **서비스 관측 설정으로
+oam-svc 소유**다. 정규 관리 경로는 콘솔 배포설정 — oam-svc `config_template.json` 의
+`db`/`probe`/`logging` 섹션(csp/csc 와 동일 관례) → `PUT /deployments/<id>/config` →
+`update_config` job → 배포 overlay(`config.json`). 우선순위:
+
+```
+배포 overlay(콘솔 설정)  >  oam-svc.json(패키지 동봉 시)  >  base oam.json fallback 상속
+```
+
+base `oam.json` 의 동일 키들은 `--role all`(단일 프로세스 dev/TB) 구동과 위 fallback 상속의
+소스로만 쓰인다 — **`--role base` 는 이 키들을 읽지 않는다**(base 프로세스는 DB 미접속).
+`MediaServer.Endpoints` 는 `{ip,port}` dict(oam.json)와 `"ip:port"` 문자열(템플릿
+string_list) 둘 다 허용.
 
 ### file_store 소유권 (I5)
 | 도메인/컬렉션 | 소유 |

@@ -145,10 +145,22 @@ def _get_cmp_stats(config: dict) -> dict:
 
 
 def _media_endpoints(config: dict):
-    """전 미디어 노드 (ip, port). MediaServer.Endpoints 우선, 없으면 CmpIp 단일."""
+    """전 미디어 노드 (ip, port). MediaServer.Endpoints 우선, 없으면 CmpIp 단일.
+    Endpoints 원소는 {ip, port} dict(oam.json) 또는 "ip:port" 문자열
+    (oam-svc config_template string_list) 둘 다 허용."""
     ms = config.get('MediaServer', {}) or {}
     eps = ms.get('Endpoints') or []
-    out = [(e.get('ip'), int(e.get('port', 9000))) for e in eps if e.get('ip')]
+    out = []
+    for e in eps:
+        if isinstance(e, str):
+            ip, _, port = e.partition(':')
+            if ip.strip():
+                try:
+                    out.append((ip.strip(), int(port.strip() or 9000)))
+                except ValueError:
+                    pass
+        elif isinstance(e, dict) and e.get('ip'):
+            out.append((e['ip'], int(e.get('port', 9000))))
     if not out:
         out = [(config.get('CmpIp', '127.0.0.1'), int(config.get('CmpPort', 9000)))]
     return out

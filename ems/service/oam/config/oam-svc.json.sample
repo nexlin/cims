@@ -1,5 +1,5 @@
 {
-    "_comment": "oam_base_service_split §7 (D5) — oam-svc 독립 서비스 모듈 전용 설정. 런타임 활성: 이 파일을 oam-svc.json 으로 rename. 공유항목(JwtSecret/CimsDatabase/CimsRuntimeDir/ServiceLogging)은 같은 config 디렉터리의 common.json 에서 read-only 로 가져온다(base·csc 와 동일 시크릿 필수 — 분리 배포 전제). base 가 아니라 base 게이트웨이의 업스트림.",
+    "_comment": "oam_base_service_split §7 (D5) — oam-svc 독립 서비스 모듈 전용 설정. 런타임 활성: 이 파일을 oam-svc.json 으로 rename. 서비스 관측 설정(CimsDatabase/CspNotify/MediaServer/ServiceLogging)의 소유는 oam-svc — 콘솔 배포설정(config_template)이 정규 관리 경로이고, 미설정 시 동거 base 의 oam.json 에서 fallback 상속(공유값: JwtSecret/CimsRuntimeDir 포함, base 전용 Server 제외). base 가 아니라 base 게이트웨이의 업스트림.",
     "Server": {
         "Ip": "127.0.0.1",
         "Port": 4480,
@@ -21,7 +21,7 @@
     "Gateway": {
         "_comment": "oam-svc 가 base 게이트웨이에 self-register 할 라우트(설치 시 POST /api/v1/gateway/routes). canonical /api/v1/calls 통합은 D6 후속 — 현 실경로를 등록.",
         "Routes": [
-            { "segment": "/api/v1/stats/service",              "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
+            { "segment": "/api/v1/stats",                      "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
             { "segment": "/api/v1/verification",               "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
             { "segment": "/api/v1/recordings",                 "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },
             { "segment": "/api/v1/flow",                       "upstream": "https://127.0.0.1:4480", "module": "oam-svc" },

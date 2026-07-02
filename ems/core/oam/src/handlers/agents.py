@@ -31,8 +31,6 @@ from typing import Optional
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
-import pymysql
-import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
@@ -290,16 +288,6 @@ def _resolve_pkg_paths(config: dict) -> tuple:
     if not os.path.isabs(active):  active = os.path.normpath(os.path.join(_COMPONENT_ROOT, active))
     if not os.path.isabs(backup):  backup = os.path.normpath(os.path.join(_COMPONENT_ROOT, backup))
     return active, backup
-
-
-def _get_db(config: dict):
-    db = config.get("CimsDatabase", {})
-    return pymysql.connect(
-        host=db.get("Host", "127.0.0.1"), port=int(db.get("Port", 3306)),
-        user=db.get("User", "cims"), password=db.get("Password", ""),
-        database=db.get("Db", "cims"),
-        charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor, autocommit=True,
-    )
 
 
 def _parse_body(handler_args: HandlerArgs) -> dict:

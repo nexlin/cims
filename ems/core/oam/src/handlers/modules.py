@@ -41,7 +41,7 @@ from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
 
 from handlers.agents import (
-    _COMPONENT_ROOT, _get_db, _safe_json, _actor,
+    _COMPONENT_ROOT, _safe_json, _actor,
     _collection_schema, _validate_record, _pkg_load_all, _pkg_load_latest_by_name,
 )
 

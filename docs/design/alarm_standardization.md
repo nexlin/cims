@@ -33,7 +33,12 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 - **규칙** (`service_descriptors_seed/cims.json` `alert_rules[]`, `service_registry._CORE_ALERT_RULES`):
   `{ type, severity(critical|warning), check, target?, threshold?, unit?, metric, msg_open, msg_close, scope? }`
-- **평가/발생** (`ems/core/oam/src/oam_app.py` `_sweep_alerts`→`_eval_alert_rule`/`_eval_agent_rule`→`_transition`→`_emit`).
+- **평가/발생** — 코어는 `ems/core/oam/src/services/alarm_sweeper.py`(emit/transition/서비스 규칙
+  평가). 소유 분리(oam_base_service_split §4): **서비스 계열**(csp/cmp/db/rtp, scope≠`agent`)은
+  **oam-svc** sweeper 가 발화(`oam_svc_app.py`, `detected_by='oam-svc'`; `--role all` 단일 프로세스
+  에서만 base 가 대행 `detected_by='oam'`), **agent 계열**(disk/module)은 base(`oam_app.py`
+  `_sweep_alerts`→`_eval_agent_rule`) 잔류. 기동 시 open-state 복원도 소유 계열별
+  (`restore_open_state` — 서비스=`cims/*` mo, agent=그 외).
 - **이벤트 레코드** (`csc/src/services/alert_log.py`, `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl`):
   `{ ts, type, severity, action(open|close), message }`
 - **API** (`ems/core/oam/src/handlers/alerts.py`): `GET /alerts`, `/types`, `/summary`, `/rules`.
@@ -128,7 +133,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 **(b) 발생 소스 (managedObject + detected-by)** — 알람이 "무엇에서/어디서" 났는지 표준화.
 - `mo_class`: software | service | equipment | host | network (managedObjectClass).
 - `mo_instance`: DN-유사 경로. service 규칙 = `cims/<target>` · agent 규칙 = `<host>/<module|disk|rtp>`. (계층: `<service|host>/<component>[/<instance>]`)
-- `detected_by`: 탐지 주체 — `oam`(중앙 stats poll) 또는 `agent:<host>`(per-agent metric). 고장 객체(mo_instance)와 탐지 주체가 다를 수 있음(예: db_down 은 oam 탐지, 객체는 cims/db).
+- `detected_by`: 탐지 주체 — `oam-svc`(서비스 계열 stats poll, 분리 배포) | `oam`(단일 프로세스 `--role all` 대행) | `agent:<host>`(per-agent metric). 고장 객체(mo_instance)와 탐지 주체가 다를 수 있음(예: db_down 은 oam-svc 탐지, 객체는 cims/db).
 
 **(c) alarm_id (발생 인스턴스 id, occurrence / X.733 notificationIdentifier)**
 - 활성 알람 식별 = `(code, mo_instance)` (동일 객체의 동일 알람은 하나만 active).
