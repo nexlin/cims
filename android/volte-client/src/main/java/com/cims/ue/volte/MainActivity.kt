@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -823,7 +824,7 @@ private fun UnderlineTab(label: String, selected: Boolean, onClick: () -> Unit) 
     // IntrinsicSize.Max = 한 줄 전체 텍스트 폭 (CJK 는 Min 이 글자 하나 폭이라 잘림).
     Column(Modifier.width(IntrinsicSize.Max).clickable { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, fontSize = 16.sp,
+        Text(label, fontSize = 14.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
             color = if (selected) MaterialTheme.colorScheme.onSurface
             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -894,7 +895,8 @@ private fun FavoritesScreen(
     }
 }
 
-/** 회사 연락처 — 서버 프로비저닝 제공, 읽기전용. 조직 트리 + 검색 + 동기화(버전 기반). */
+/** 회사 연락처 — 서버 프로비저닝 제공, 읽기전용. 조직 칩 + 팀별 sticky 섹션 + 검색 + 동기화(버전 기반). */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun CompanyContacts(
     store: CompanyDirectoryStore, favorites: FavoriteStore, favVersion: Int, query: String,
@@ -906,7 +908,7 @@ private fun CompanyContacts(
     var lastSync by remember { mutableStateOf(store.lastSyncedAt()) }
     var loading by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
-    var collapsed by remember { mutableStateOf(setOf<String>()) }
+    var curOrg by remember { mutableStateOf<String?>(null) }   // 폴더 탐색 현재 위치 (null=최상위)
     val favSet = remember(favVersion) { favorites.all().map { it.number }.toSet() }
 
     fun sync() {
@@ -927,15 +929,13 @@ private fun CompanyContacts(
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("회사 전화번호부", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    (if (lastSync > 0) "마지막 동기화: ${formatTime(lastSync)}" else "동기화 안 됨") +
-                        (if (note.isNotBlank()) " · $note" else ""),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                (if (lastSync > 0) "마지막 동기화: ${formatTime(lastSync)}" else "동기화 안 됨") +
+                    (if (note.isNotBlank()) " · $note" else ""),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
             if (loading) CircularProgressIndicator(Modifier.size(20.dp))
             else TextButton(onClick = { sync() }) { Text("동기화") }
         }
@@ -965,19 +965,82 @@ private fun CompanyContacts(
                 }
             }
         } else {
-            val rows = remember(dir, collapsed) { buildDirRows(dir, collapsed) }
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(rows, key = { it.key }) { row ->
-                    when (row) {
-                        is DirRow.Org -> OrgHeaderRow(row) {
-                            collapsed = if (row.org.code in collapsed) collapsed - row.org.code else collapsed + row.org.code
-                        }
-                        is DirRow.Member -> {
-                            ContactListRow(row.c.name, row.c.number, depth = row.depth, isFav = row.c.number in favSet,
-                                onTap = { onOpen(DetailTarget(row.c.name, row.c.number, orgName[row.c.orgCode])) },
-                                onToggleFav = { favorites.toggle(row.c.name, row.c.number); onFavChanged() })
-                            HorizontalDivider()
-                        }
+            // 계단식 조직 칩(범위 선택) + 팀별 sticky 섹션(전체 경로) 평면 리스트.
+            val orgByCode = remember(dir) { dir.orgs.associateBy { it.code } }
+            val byParent = remember(dir) { dir.orgs.groupBy { it.parent } }
+            val membersByOrg = remember(dir) { dir.members.groupBy { it.orgCode } }
+            val roots = remember(dir) {
+                dir.orgs.filter { it.parent.isBlank() || it.parent !in orgByCode }.sortedBy { it.sort }
+            }
+            // 선택 경로 (최상위→현재) — 칩 계단 전개·뒤로가기용
+            val path = remember(dir, curOrg) {
+                val p = ArrayList<CompanyOrg>()
+                var c = curOrg
+                while (c != null) {
+                    val o = orgByCode[c] ?: break
+                    p.add(0, o)
+                    c = o.parent.takeIf { it in orgByCode }
+                }
+                p
+            }
+            // 시스템 뒤로가기 = 한 단계 위 범위로 (상세 화면이 열려 있으면 그쪽 BackHandler 가 우선)
+            BackHandler(enabled = curOrg != null) {
+                curOrg = orgByCode[curOrg!!]?.parent?.takeIf { it in orgByCode }
+            }
+
+            // 칩 줄: 전체 + 최상위 조직 + 선택 경로상 각 조직의 하위 조직(계단식 전개)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OrgChip("전체", selected = curOrg == null) { curOrg = null }
+                roots.forEach { o -> OrgChip(o.name, selected = curOrg == o.code) { curOrg = o.code } }
+                path.forEach { anc ->
+                    byParent[anc.code]?.sortedBy { it.sort }?.forEach { o ->
+                        OrgChip(o.name, selected = curOrg == o.code) { curOrg = o.code }
+                    }
+                }
+            }
+
+            // 섹션 = 선택 범위(하위 포함) 내 직접 구성원 보유 조직, 라벨 = 전체 경로
+            val sections = remember(dir, curOrg) {
+                fun pathLabel(code: String): String {
+                    val names = ArrayList<String>()
+                    var c: String? = code
+                    while (c != null) {
+                        val o = orgByCode[c] ?: break
+                        names.add(0, o.name)
+                        c = o.parent.takeIf { it in orgByCode }
+                    }
+                    return names.joinToString(" > ")
+                }
+                val out = ArrayList<Pair<String, List<CompanyContact>>>()
+                fun walk(o: CompanyOrg) {
+                    membersByOrg[o.code]?.takeIf { it.isNotEmpty() }
+                        ?.let { out.add(pathLabel(o.code) to it.sortedBy { m -> m.name }) }
+                    byParent[o.code]?.sortedBy { it.sort }?.forEach { walk(it) }
+                }
+                if (curOrg == null) {
+                    roots.forEach { walk(it) }
+                    val orphan = dir.members.filter { it.orgCode.isBlank() || it.orgCode !in orgByCode }
+                    if (orphan.isNotEmpty()) out.add("(조직 미지정)" to orphan.sortedBy { it.name })
+                } else orgByCode[curOrg]?.let { walk(it) }
+                out
+            }
+
+            if (sections.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("구성원이 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else LazyColumn(Modifier.fillMaxSize()) {
+                sections.forEach { (label, mems) ->
+                    stickyHeader(key = "hdr:$label") { DirSectionHeader(label, mems.size) }
+                    items(mems, key = { "m:${it.orgCode}:${it.number}" }) { m ->
+                        ContactListRow(m.name, m.number, depth = 0, isFav = m.number in favSet,
+                            onTap = { onOpen(DetailTarget(m.name, m.number, orgName[m.orgCode])) },
+                            onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() })
+                        HorizontalDivider()
                     }
                 }
             }
@@ -985,56 +1048,32 @@ private fun CompanyContacts(
     }
 }
 
-/** 트리 한 행 — 조직 헤더 또는 가입자. */
-private sealed interface DirRow {
-    val key: String
-    data class Org(val org: CompanyOrg, val depth: Int, val expanded: Boolean, val count: Int) : DirRow {
-        override val key get() = "org:${org.code}"
-    }
-    data class Member(val c: CompanyContact, val depth: Int) : DirRow {
-        override val key get() = "mem:${c.orgCode}:${c.number}"
-    }
-}
-
-/** 조직 트리를 펼침 상태에 맞춰 평면 행 목록으로 전개. */
-private fun buildDirRows(dir: CompanyDirectory, collapsed: Set<String>): List<DirRow> {
-    val orgByCode = dir.orgs.associateBy { it.code }
-    val byParent = dir.orgs.groupBy { it.parent }
-    val membersByOrg = dir.members.groupBy { it.orgCode }
-    val countCache = HashMap<String, Int>()
-    fun subtreeCount(code: String): Int = countCache.getOrPut(code) {
-        (membersByOrg[code]?.size ?: 0) + (byParent[code]?.sumOf { subtreeCount(it.code) } ?: 0)
-    }
-    val out = ArrayList<DirRow>()
-    fun walk(org: CompanyOrg, depth: Int) {
-        val expanded = org.code !in collapsed
-        out.add(DirRow.Org(org, depth, expanded, subtreeCount(org.code)))
-        if (expanded) {
-            byParent[org.code]?.sortedBy { it.sort }?.forEach { walk(it, depth + 1) }
-            membersByOrg[org.code]?.sortedBy { it.name }?.forEach { out.add(DirRow.Member(it, depth + 1)) }
-        }
-    }
-    dir.orgs.filter { it.parent.isBlank() || it.parent !in orgByCode }.sortedBy { it.sort }.forEach { walk(it, 0) }
-    val orphan = dir.members.filter { it.orgCode.isBlank() || it.orgCode !in orgByCode }
-    if (orphan.isNotEmpty()) {
-        out.add(DirRow.Org(CompanyOrg("", "(조직 미지정)", "", 9999), 0, true, orphan.size))
-        orphan.sortedBy { it.name }.forEach { out.add(DirRow.Member(it, 1)) }
-    }
-    return out
-}
-
+/** 조직 필터 칩 — 선택=primary 채움. */
 @Composable
-private fun OrgHeaderRow(row: DirRow.Org, onToggle: () -> Unit) {
+private fun OrgChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(50))
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** sticky 섹션 헤더 — 조직 전체 경로(CIMS > 본부 > 팀) + 인원수. 불투명 배경(밑으로 스크롤 통과 방지). */
+@Composable
+private fun DirSectionHeader(pathLabel: String, count: Int) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable { onToggle() }
-            .padding(start = (row.depth * 16).dp, top = 10.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(if (row.expanded) "▾" else "▸", color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp), textAlign = TextAlign.Center)
-        Spacer(Modifier.size(4.dp))
-        Text("${row.org.name} (${row.count})", style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary)
+        Text(pathLabel, style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+        Text("${count}명", style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
