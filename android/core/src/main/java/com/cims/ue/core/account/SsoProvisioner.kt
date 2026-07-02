@@ -31,21 +31,22 @@ object SsoProvisioner {
 
     /**
      * 회사 전화번호부 동기화(`/provisioning/directory`). [knownEtag] 를 보내 서버 버전이 같으면
-     * 변경 없음(changed=false)로 응답(다운로드 생략). 만료 토큰 1회 재시도. 실패 시 null.
+     * 변경 없음(changed=false)로 응답(다운로드 생략). 만료 토큰 1회 재시도.
+     * **어떤 실패든 null** (UI 는 "동기화 실패" 안내) — 토큰 획득 실패(bind failure 등)도 포함.
      */
-    fun fetchDirectory(context: Context, knownEtag: String? = null): com.cims.ue.core.contacts.DirectorySync? {
+    fun fetchDirectory(context: Context, knownEtag: String? = null): com.cims.ue.core.contacts.DirectorySync? = runCatching {
         val am = AccountManager.get(context)
         val account = CimsAccounts.get(am) ?: return null
         val token = CimsAccounts.blockingToken(am, account, CimsAccounts.TOKEN_PROVISIONING) ?: return null
         val ep = CimsAccounts.cscEndpoint(am, account)
-        return try {
+        try {
             ProvisioningClient(ep, allowInsecureTls = true).fetchDirectory(token, knownEtag)
         } catch (e: Exception) {
             CimsAccounts.invalidate(am, token)
             val retry = CimsAccounts.blockingToken(am, account, CimsAccounts.TOKEN_PROVISIONING) ?: return null
             runCatching { ProvisioningClient(ep, allowInsecureTls = true).fetchDirectory(retry, knownEtag) }.getOrNull()
         }
-    }
+    }.getOrNull()
 
     /** 로그인(공유 계정) 존재 여부. */
     fun hasAccount(context: Context): Boolean = CimsAccounts.get(context) != null

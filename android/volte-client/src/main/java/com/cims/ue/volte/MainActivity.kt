@@ -215,7 +215,13 @@ private fun SsoGateScreen(
                 }
             }
             busy = false
-            cfg.onSuccess { onProvisioned(it) }.onFailure { status = it.message ?: "구성 실패" }
+            cfg.onSuccess { onProvisioned(it) }.onFailure { e ->
+                // 재프로비저닝 일시 실패(예: CIMS 앱 bind failure) — 캐시된 설정이 있으면
+                // 그걸로 즉시 진입한다(최신화는 다음 실행/서비스 몫). 캐시도 없을 때만 에러 표시.
+                val cached = ConfigStore(context).load()
+                if (cached.isComplete()) onProvisioned(cached)
+                else status = e.message ?: "구성 실패"
+            }
         }
     }
 

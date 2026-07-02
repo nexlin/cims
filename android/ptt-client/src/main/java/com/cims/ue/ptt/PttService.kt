@@ -57,16 +57,19 @@ class PttService : Service() {
         return START_STICKY
     }
 
-    /** SSO(공유 계정) → /provisioning/me(kind=ptt) → ConfigStore 저장 → 등록. 블로킹(IO). */
+    /** SSO(공유 계정) → /provisioning/me(kind=ptt) → ConfigStore 저장 → 등록. 블로킹(IO).
+     *  실패(owner 앱 bind failure 등)해도 던지지 않고 캐시 설정으로 등록을 진행한다. */
     private fun ssoAutoConfigure() {
-        val prof = com.cims.ue.core.account.SsoProvisioner.fetchProfile(this) ?: return
-        val svc = prof.service("ptt") ?: return
-        val cfg = svc.toSipAccountConfig(
-            loginId = prof.loginId ?: svc.msisdn,
-            displayName = prof.displayName ?: svc.msisdn,
-            loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),
-        )
-        ConfigStore(this).save(cfg)
+        runCatching {
+            val prof = com.cims.ue.core.account.SsoProvisioner.fetchProfile(this) ?: return@runCatching
+            val svc = prof.service("ptt") ?: return@runCatching
+            val cfg = svc.toSipAccountConfig(
+                loginId = prof.loginId ?: svc.msisdn,
+                displayName = prof.displayName ?: svc.msisdn,
+                loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),
+            )
+            ConfigStore(this).save(cfg)
+        }
         ensureRegistered()
     }
 

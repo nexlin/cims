@@ -107,9 +107,11 @@ class SipService : Service() {
         runCatching { cm.registerDefaultNetworkCallback(cb); netCallback = cb }
     }
 
-    /** SSO(공유 계정) → /provisioning/me(kind=volte) → ConfigStore 저장 → 등록. 블로킹(IO). */
+    /** SSO(공유 계정) → /provisioning/me(kind=volte) → ConfigStore 저장 → 등록. 블로킹(IO).
+     *  실패(owner 앱 bind failure 등)해도 던지지 않는다 — 캐시 설정으로 ensureRegistered 가 진행. */
     private fun ssoAutoConfigure() {
-        val prof = com.cims.ue.core.account.SsoProvisioner.fetchProfile(this) ?: return
+        val prof = runCatching { com.cims.ue.core.account.SsoProvisioner.fetchProfile(this) }
+            .getOrNull() ?: return
         val svc = prof.service("volte") ?: return
         val cfg = svc.toSipAccountConfig(
             loginId = prof.loginId ?: svc.msisdn,

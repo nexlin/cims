@@ -54,11 +54,25 @@ object CimsAccounts {
 
     /**
      * 블로킹 토큰 획득(**IO 스레드/코루틴에서만** 호출). 캐시 없으면 authenticator 가 refresh 로 발급.
-     * 실패/계정없음 시 null.
+     * 토큰 없음(계정 문제) 시 null.
+     *
+     * ⚠️ owner(CIMS) 앱 프로세스가 죽어 있으면(강제종료·제조사 백그라운드 킬러 등) 시스템의
+     * 인증자 서비스 바인딩이 `AuthenticatorException("bind failure")` 로 일시 실패할 수 있다
+     * → 짧게 1회 재시도(시스템이 owner 프로세스를 띄울 시간), 그래도 실패면 원인 메시지로 던진다.
      */
     fun blockingToken(am: AccountManager, account: Account, tokenType: String): String? {
-        val bundle: Bundle = am.getAuthToken(account, tokenType, null, false, null, null).result ?: return null
-        return bundle.getString(AccountManager.KEY_AUTHTOKEN)
+        var last: Exception? = null
+        repeat(2) { attempt ->
+            try {
+                val bundle: Bundle = am.getAuthToken(account, tokenType, null, false, null, null).result
+                    ?: return null
+                return bundle.getString(AccountManager.KEY_AUTHTOKEN)
+            } catch (e: Exception) {
+                last = e
+                if (attempt == 0) Thread.sleep(700)
+            }
+        }
+        throw IllegalStateException("CIMS 앱(계정 서비스) 연결 실패 — 잠시 후 다시 시도하세요", last)
     }
 
     /** 만료 의심 토큰 캐시 무효화 → 다음 호출 시 refresh 재발급. */
