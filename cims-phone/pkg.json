@@ -1,6 +1,6 @@
 {
   "name": "phone",
   "description": "Phone(PTT) UE 웹 클라이언트",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "ha_capability": "standalone"
 }
