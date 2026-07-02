@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,6 +46,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -69,6 +69,8 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -319,6 +321,7 @@ private fun HomeScreen(
     val contacts = remember { ContactStore(context) }
     val companyDir = remember { CompanyDirectoryStore(context) }
     val favorites = remember { FavoriteStore(context) }
+    homeCountryCode = countryCodeOf(config.msisdn)   // 내 번호 기준 — 같은 국가는 로컬 표기
 
     // SipService 바인딩 — 등록은 서비스가 자동으로 유지한다(수동 등록 버튼 없음).
     var service by remember { mutableStateOf<SipService?>(null) }
@@ -502,11 +505,11 @@ private fun HomeScreen(
                         onCall = { dial(it, false) },
                     )
                     Tab.KEYPAD -> KeypadScreen(
-                        // 이름 + 전화번호 병기 (예: "테스트001 (+821300000001)")
+                        // 이름 + 전화번호 병기 (예: "테스트001 (01300000001)")
                         myNumber = when {
-                            config.displayName.isBlank() -> config.msisdn
+                            config.displayName.isBlank() -> fmtNumber(config.msisdn)
                             config.msisdn.isBlank() -> config.displayName
-                            else -> "${config.displayName} (${config.msisdn})"
+                            else -> "${config.displayName} (${fmtNumber(config.msisdn)})"
                         },
                         onVoice = { dial(it, false) },
                         onVideo = { dial(it, true) },
@@ -886,7 +889,7 @@ private fun FavoritesScreen(
             }
         } else LazyColumn(Modifier.fillMaxSize()) {
             items(list, key = { it.number }) { f ->
-                ContactListRow(f.name, f.number, depth = 0, isFav = true,
+                ContactListRow(f.name, fmtNumber(f.number), depth = 0, isFav = true,
                     onTap = { onOpen(DetailTarget(f.name, f.number, null)) },
                     onToggleFav = { favorites.toggle(f.name, f.number); onFavChanged() })
                 HorizontalDivider()
@@ -958,7 +961,7 @@ private fun CompanyContacts(
             } else LazyColumn(Modifier.fillMaxSize()) {
                 items(hits, key = { "hit:${it.number}" }) { m ->
                     val on = orgName[m.orgCode] ?: m.orgCode
-                    ContactListRow(m.name, "${m.number} · $on", depth = 0, isFav = m.number in favSet,
+                    ContactListRow(m.name, "${fmtNumber(m.number)} · $on", depth = 0, isFav = m.number in favSet,
                         onTap = { onOpen(DetailTarget(m.name, m.number, on)) },
                         onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() })
                     HorizontalDivider()
@@ -988,17 +991,58 @@ private fun CompanyContacts(
                 curOrg = orgByCode[curOrg!!]?.parent?.takeIf { it in orgByCode }
             }
 
-            // 칩 줄: 전체 + 최상위 조직 + 선택 경로상 각 조직의 하위 조직(계단식 전개)
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OrgChip("전체", selected = curOrg == null) { curOrg = null }
-                roots.forEach { o -> OrgChip(o.name, selected = curOrg == o.code) { curOrg = o.code } }
-                path.forEach { anc ->
-                    byParent[anc.code]?.sortedBy { it.sort }?.forEach { o ->
-                        OrgChip(o.name, selected = curOrg == o.code) { curOrg = o.code }
+            // 조직 선택 — 현재 범위(경로) 표시 + 드롭다운(조직 트리 들여쓰기, 인원수)
+            val subtreeCount = remember(dir) {
+                val cache = HashMap<String, Int>()
+                fun cnt(code: String): Int = cache.getOrPut(code) {
+                    (membersByOrg[code]?.size ?: 0) + (byParent[code]?.sumOf { cnt(it.code) } ?: 0)
+                }
+                dir.orgs.forEach { cnt(it.code) }
+                cache
+            }
+            val preOrder = remember(dir) {
+                val out = ArrayList<Pair<CompanyOrg, Int>>()
+                fun walk(o: CompanyOrg, d: Int) {
+                    out.add(o to d)
+                    byParent[o.code]?.sortedBy { it.sort }?.forEach { walk(it, d + 1) }
+                }
+                roots.forEach { walk(it, 0) }
+                out
+            }
+            var orgMenuOpen by remember { mutableStateOf(false) }
+            Box {
+                Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).clickable { orgMenuOpen = true }
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (path.isEmpty()) "전체 조직" else path.joinToString(" > ") { it.name },
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "조직 선택",
+                        tint = MaterialTheme.colorScheme.primary)
+                }
+                DropdownMenu(expanded = orgMenuOpen, onDismissRequest = { orgMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = {
+                            Text("전체 조직",
+                                fontWeight = if (curOrg == null) FontWeight.Bold else FontWeight.Normal)
+                        },
+                        onClick = { curOrg = null; orgMenuOpen = false },
+                    )
+                    preOrder.forEach { (o, depth) ->
+                        DropdownMenuItem(
+                            text = {
+                                Text("${o.name} (${subtreeCount[o.code] ?: 0})",
+                                    modifier = Modifier.padding(start = (depth * 16).dp),
+                                    fontWeight = if (curOrg == o.code) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (curOrg == o.code) MaterialTheme.colorScheme.primary
+                                    else Color.Unspecified)
+                            },
+                            onClick = { curOrg = o.code; orgMenuOpen = false },
+                        )
                     }
                 }
             }
@@ -1037,7 +1081,7 @@ private fun CompanyContacts(
                 sections.forEach { (label, mems) ->
                     stickyHeader(key = "hdr:$label") { DirSectionHeader(label, mems.size) }
                     items(mems, key = { "m:${it.orgCode}:${it.number}" }) { m ->
-                        ContactListRow(m.name, m.number, depth = 0, isFav = m.number in favSet,
+                        ContactListRow(m.name, fmtNumber(m.number), depth = 0, isFav = m.number in favSet,
                             onTap = { onOpen(DetailTarget(m.name, m.number, orgName[m.orgCode])) },
                             onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() })
                         HorizontalDivider()
@@ -1045,20 +1089,6 @@ private fun CompanyContacts(
                 }
             }
         }
-    }
-}
-
-/** 조직 필터 칩 — 선택=primary 채움. */
-@Composable
-private fun OrgChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier.clip(RoundedCornerShape(50))
-            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-    ) {
-        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false,
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1120,7 +1150,7 @@ private fun PersonalContacts(
                     },
                 ) {
                     Box(Modifier.background(MaterialTheme.colorScheme.background)) {
-                        ContactListRow(c.name, c.number, depth = 0, isFav = c.number in favSet,
+                        ContactListRow(c.name, fmtNumber(c.number), depth = 0, isFav = c.number in favSet,
                             onTap = { onOpen(DetailTarget(c.name, c.number, null)) },
                             onToggleFav = { favorites.toggle(c.name, c.number); onFavChanged() },
                             trailing = { TextButton(onClick = { editing = c }) { Text("수정") } })
@@ -1211,7 +1241,7 @@ private fun ContactDetailDialog(
                         color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
                 Spacer(Modifier.height(16.dp))
-                Text(target.name.ifBlank { target.number }, style = MaterialTheme.typography.headlineSmall,
+                Text(target.name.ifBlank { fmtNumber(target.number) }, style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(24.dp))
 
@@ -1233,7 +1263,7 @@ private fun ContactDetailDialog(
                     Spacer(Modifier.height(28.dp))
                     // 정보 섹션 (휴대전화/소속) — 번호 우측에 초록 전화 버튼
                     HorizontalDivider()
-                    ContactInfoRow("휴대전화", target.number, onCall = onVoice)
+                    ContactInfoRow("휴대전화", fmtNumber(target.number), onCall = onVoice)
                     target.org?.takeIf { it.isNotBlank() }?.let {
                         HorizontalDivider()
                         ContactInfoRow("소속", it, onCall = null)
@@ -1335,7 +1365,7 @@ private fun RecentRow(e: CallEntry, name: String?, onClick: () -> Unit) {
         Text(glyph, color = glyphColor, fontSize = 18.sp, modifier = Modifier.size(28.dp), textAlign = TextAlign.Center)
         Spacer(Modifier.size(8.dp))
         Column(Modifier.weight(1f)) {
-            Text(name ?: e.number, style = MaterialTheme.typography.bodyLarge,
+            Text(name ?: fmtNumber(e.number), style = MaterialTheme.typography.bodyLarge,
                 color = if (missed) HANGUP_RED else MaterialTheme.colorScheme.onSurface)
             Text("$typeLabel · ${formatTime(e.time)}", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1404,7 +1434,7 @@ private fun MessagesScreen(
                     }
                     Spacer(Modifier.size(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(nameFor(t.peer) ?: t.peer, style = MaterialTheme.typography.bodyLarge,
+                        Text(nameFor(t.peer) ?: fmtNumber(t.peer), style = MaterialTheme.typography.bodyLarge,
                             fontWeight = if (t.unread > 0) FontWeight.Bold else FontWeight.Normal)
                         Text(t.last.text, style = MaterialTheme.typography.bodySmall, maxLines = 1,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1527,7 +1557,7 @@ private fun CallScreen(
             is CallState.Active -> extractNumber(c.remote) to "통화 중"
             else -> "" to ""
         }
-        Text(remote, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
+        Text(fmtNumber(remote), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
 
@@ -1659,6 +1689,32 @@ private fun extractNumber(remote: String): String {
     s = s.removePrefix("sip:").removePrefix("sips:").removePrefix("tel:")
     s = s.substringBefore("@").substringBefore(";")
     return s.ifBlank { remote }
+}
+
+/** 홈 국가코드 — 프로비저닝된 내 번호에서 유도(HomeScreen 진입 시 설정). null 이면 축약 없음. */
+private var homeCountryCode: String? = null
+
+/** ITU 자릿수 규칙으로 E.164 국가코드 추정: 1(NANP)/7=1자리, 유효 2자리 셋, 그 외 3자리. */
+private fun countryCodeOf(msisdn: String): String? {
+    val d = msisdn.trim().removePrefix("tel:").removePrefix("+").filter { it.isDigit() }
+    if (d.length < 4) return null
+    if (d[0] == '1' || d[0] == '7') return d.take(1)
+    val two = d.take(2)
+    val twoDigit = setOf(
+        "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45",
+        "46", "47", "48", "49", "51", "52", "53", "54", "55", "56", "57", "58", "60", "61",
+        "62", "63", "64", "65", "66", "81", "82", "84", "86", "90", "91", "92", "93", "94",
+        "95", "98",
+    )
+    return if (two in twoDigit) two else d.take(3)
+}
+
+/** 홈 국가코드(+82 등)와 같은 국제표기 번호는 로컬 표기(0…)로 축약. 타국 번호는 그대로. */
+private fun fmtNumber(number: String): String {
+    val cc = homeCountryCode ?: return number
+    val n = number.trim().removePrefix("tel:")
+    val digits = n.removePrefix("+")
+    return if (n.startsWith("+") && digits.startsWith(cc)) "0" + digits.removePrefix(cc) else number
 }
 
 private fun formatTime(ts: Long): String =
