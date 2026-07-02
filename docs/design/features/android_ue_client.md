@@ -255,7 +255,7 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 
 ## 8. 안드로이드 런타임 설계
 
-> **프로비저닝(첫 실행 설정):** 서버(IP/포트/전송)·계정(도메인/MSISDN/이름/로그인ID/auth_id/비밀번호)은 **하드코딩하지 않고 첫 실행 설정 화면에서 입력·저장**한다. 구현: `core`의 `SipAccountConfig`+`ConfigStore`, `volte-client`의 ConfigScreen. SIP 매핑: AOR=`sip:<msisdn>@<domain>`, Digest username=`authId`(비우면 msisdn), Registrar=`serverHost:serverPort`. 비밀번호는 운영 시 EncryptedSharedPreferences/Keystore.
+> **프로비저닝:** 서버(IP/포트/전송)·계정(도메인/MSISDN/이름/로그인ID/auth_id/비밀번호)은 **하드코딩하지 않고 CIMS SSO 자동 프로비저닝으로 수신·저장**한다. 설정 화면(`SettingsScreen`, 안드로이드 설정 스타일)은 SSO 구성 상태에서 **읽기 전용**이며, 테스트용 **수동 설정 모드**만 편집 허용 — [android_ue_provisioning.md](android_ue_provisioning.md) §5-1. 구현: `core`의 `SipAccountConfig`+`ConfigStore`. SIP 매핑: AOR=`sip:<msisdn>@<domain>`, Digest username=`imsi@domain`(또는 authId 전체 IMPI), Registrar=`serverHost:serverPort`. 비밀번호는 운영 시 EncryptedSharedPreferences/Keystore.
 
 | 항목 | 설계 |
 |---|---|

@@ -67,6 +67,7 @@ class PttService : Service() {
                 loginId = prof.loginId ?: svc.msisdn,
                 displayName = prof.displayName ?: svc.msisdn,
                 loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),
+                countryCode = prof.countryCode.orEmpty(),
             )
             ConfigStore(this).save(cfg)
         }

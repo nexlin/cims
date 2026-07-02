@@ -110,6 +110,7 @@ class SipService : Service() {
     /** SSO(공유 계정) → /provisioning/me(kind=volte) → ConfigStore 저장 → 등록. 블로킹(IO).
      *  실패(owner 앱 bind failure 등)해도 던지지 않는다 — 캐시 설정으로 ensureRegistered 가 진행. */
     private fun ssoAutoConfigure() {
+        if (ConfigStore(this).isManual()) return   // 수동 설정 모드 — 프로비저닝이 덮어쓰지 않음
         val prof = runCatching { com.cims.ue.core.account.SsoProvisioner.fetchProfile(this) }
             .getOrNull() ?: return
         val svc = prof.service("volte") ?: return
@@ -117,6 +118,7 @@ class SipService : Service() {
             loginId = prof.loginId ?: svc.msisdn,
             displayName = prof.displayName ?: svc.msisdn,
             loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),  // sipPassword=null → 공유 로그인 비번 재사용
+            countryCode = prof.countryCode.orEmpty(),
         )
         ConfigStore(this).save(cfg)
         ensureRegistered()

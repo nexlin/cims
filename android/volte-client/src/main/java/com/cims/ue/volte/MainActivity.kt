@@ -89,6 +89,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -197,22 +198,25 @@ private fun App(
     val context = LocalContext.current
     val store = remember { ConfigStore(context) }
     var config by remember { mutableStateOf(store.load()) }
-    // 공유 계정 있으면 진입 시 항상 최신 정보 재취득(GATE→재프로비저닝). 계정 없으면 캐시 설정으로 HOME.
+    // 수동 설정 모드면 재프로비저닝 없이 저장값으로 HOME. 아니면 공유 계정 있을 때
+    // 진입 시 항상 최신 정보 재취득(GATE→재프로비저닝), 계정 없으면 캐시 설정으로 HOME.
     var screen by remember { mutableStateOf(
-        if (com.cims.ue.core.account.SsoProvisioner.hasAccount(context)) Screen.GATE
+        if (store.isManual() && config.isComplete()) Screen.HOME
+        else if (com.cims.ue.core.account.SsoProvisioner.hasAccount(context)) Screen.GATE
         else if (config.isComplete()) Screen.HOME else Screen.GATE
     ) }
 
     when (screen) {
         // CIMS-Phone 는 자체 로그인 없음 — CIMS 공유 계정으로 자동 구성(SSO). 계정 없으면 CIMS 앱 로그인 유도.
         Screen.GATE -> SsoGateScreen(
-            onProvisioned = { c -> store.save(c); config = c; screen = Screen.HOME },
-            onManual = { screen = Screen.CONFIG },
+            onProvisioned = { c -> store.setManual(false); store.save(c); config = c; screen = Screen.HOME },
+            onManual = { store.setManual(true); screen = Screen.CONFIG },
         )
-        Screen.CONFIG -> ConfigScreen(
-            initial = config,
-            canCancel = config.isComplete(),
-            onSave = { c -> store.save(c); config = c; screen = Screen.HOME },
+        Screen.CONFIG -> SettingsScreen(
+            config = config,
+            standalone = true,
+            onApply = { c -> store.save(c); config = c },
+            onDone = { screen = Screen.HOME },
             onCancel = { screen = if (config.isComplete()) Screen.HOME else Screen.GATE },
         )
         Screen.HOME -> HomeScreen(
@@ -249,6 +253,7 @@ private fun SsoGateScreen(
                         loginId = prof.loginId ?: "",
                         displayName = prof.displayName ?: "",
                         loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(context),
+                        countryCode = prof.countryCode.orEmpty(),
                     )
                 }
             }
@@ -322,7 +327,8 @@ private fun HomeScreen(
     val contacts = remember { ContactStore(context) }
     val companyDir = remember { CompanyDirectoryStore(context) }
     val favorites = remember { FavoriteStore(context) }
-    homeCountryCode = countryCodeOf(config.msisdn)   // 내 번호 기준 — 같은 국가는 로컬 표기
+    // 프로비저닝 수신값(SoT) 우선, 미수신(구서버)일 때만 내 번호에서 유도 — 같은 국가는 로컬 표기
+    homeCountryCode = config.countryCode.ifBlank { countryCodeOf(config.msisdn) ?: "" }.ifBlank { null }
 
     // SipService 바인딩 — 등록은 서비스가 자동으로 유지한다(수동 등록 버튼 없음).
     var service by remember { mutableStateOf<SipService?>(null) }
@@ -522,16 +528,14 @@ private fun HomeScreen(
                         onSend = { peer, text -> service?.sendMessage(peer, text) },
                         onMarkRead = { peer -> service?.markThreadRead(peer) ?: msgStore.markRead(peer) },
                     )
-                    // 설정 = 탭 콘텐츠(하단 내비 유지). 저장 시 즉시 재등록 반영.
-                    Tab.SETTINGS -> ConfigScreen(
-                        initial = config,
-                        canCancel = true,
-                        onSave = { c ->
+                    // 설정 = 탭 콘텐츠(하단 내비 유지). 항목 변경 즉시 저장·재등록 반영.
+                    Tab.SETTINGS -> SettingsScreen(
+                        config = config,
+                        standalone = false,
+                        onApply = { c ->
                             onConfigChanged(c)
                             service?.ensureRegistered()
-                            tab = Tab.KEYPAD
                         },
-                        onCancel = { tab = Tab.KEYPAD },
                     )
                 }
             }
@@ -1746,10 +1750,11 @@ private fun extractNumber(remote: String): String {
     return s.ifBlank { remote }
 }
 
-/** 홈 국가코드 — 프로비저닝된 내 번호에서 유도(HomeScreen 진입 시 설정). null 이면 축약 없음. */
+/** 홈 국가코드 — 프로비저닝 응답 countryCode(HomeScreen 진입 시 설정). null 이면 축약 없음. */
 private var homeCountryCode: String? = null
 
-/** ITU 자릿수 규칙으로 E.164 국가코드 추정: 1(NANP)/7=1자리, 유효 2자리 셋, 그 외 3자리. */
+/** ITU 자릿수 규칙 E.164 국가코드 추정 — 프로비저닝 미수신(구서버) fallback 전용.
+ *  1(NANP)/7=1자리, 유효 2자리 셋, 그 외 3자리. */
 private fun countryCodeOf(msisdn: String): String? {
     val d = msisdn.trim().removePrefix("tel:").removePrefix("+").filter { it.isDigit() }
     if (d.length < 4) return null
@@ -1811,106 +1816,267 @@ private val PhoneDark = darkColorScheme(
 private const val DTMF_TONE_VOLUME = 80
 private const val DTMF_TONE_MS = 120
 
-// ─────────────────────────────────────── 설정 화면 (고급/수동) ───────────────────────────────────────
+// ─────────────────────── 설정 화면 (안드로이드 설정 스타일 — 카테고리 + 항목행 + 편집 다이얼로그) ───────────────────────
 
+/**
+ * 접속/계정 설정. 값의 SoT 는 CIMS 프로비저닝 — SSO 자동 구성 상태에서는 **읽기 전용**으로
+ * 보여주고, "수동 설정 모드" 스위치를 켠 경우에만 편집을 허용한다(테스트용, 프로비저닝
+ * 덮어쓰기 중지). 항목 변경은 즉시 [onApply](저장+재등록)로 반영 — 별도 저장 버튼 없음.
+ *
+ * [standalone] = GATE 수동 진입(전체화면): 하단 완료/취소 버튼 표시, 수동 모드 고정.
+ */
 @Composable
-private fun ConfigScreen(
-    initial: SipAccountConfig,
-    canCancel: Boolean,
-    onSave: (SipAccountConfig) -> Unit,
-    onCancel: () -> Unit,
+private fun SettingsScreen(
+    config: SipAccountConfig,
+    standalone: Boolean,
+    onApply: (SipAccountConfig) -> Unit,
+    onDone: () -> Unit = {},
+    onCancel: () -> Unit = {},
 ) {
-    var host by remember { mutableStateOf(initial.serverHost) }
-    var port by remember { mutableStateOf(if (initial.serverPort > 0) initial.serverPort.toString() else "") }
-    var transport by remember { mutableStateOf(initial.transport) }
-    var domain by remember { mutableStateOf(initial.domain) }
-    var msisdn by remember { mutableStateOf(initial.msisdn) }
-    var imsi by remember { mutableStateOf(initial.imsi) }
-    var name by remember { mutableStateOf(initial.displayName) }
-    var loginId by remember { mutableStateOf(initial.loginId) }
-    var authId by remember { mutableStateOf(initial.authId) }
-    var password by remember { mutableStateOf(initial.password) }
-    var showError by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val store = remember { ConfigStore(context) }
+    val hasSso = remember { SsoProvisioner.hasAccount(context) }
+    // 편집 가능 = 수동 모드(또는 GATE 수동 진입, CIMS 계정 자체가 없는 단말).
+    var manual by remember { mutableStateOf(store.isManual() || standalone || !hasSso) }
+    var reprovisioning by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text("접속/계정 설정", style = MaterialTheme.typography.titleLarge)
-        Text("자동 구성(SSO) 대신 수동으로 입력합니다.", style = MaterialTheme.typography.bodySmall)
-
-        ConfigField("서버 IP/호스트", host) { host = it }
-        ConfigField("SIP 포트", port) { port = it.filter { ch -> ch.isDigit() } }
-
-        Text("전송 프로토콜", style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SipAccountConfig.Transport.entries.forEach { t ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = transport == t, onClick = { transport = t })
-                    Text(t.name)
-                }
-            }
-        }
-
-        ConfigField("도메인 (홈/서비스)", domain) { domain = it }
-        ConfigField("MSISDN — 공개 ID (sip:번호@도메인)", msisdn) { msisdn = it }
-        ConfigField("IMSI — 인증 ID 합성용 (IMSI@도메인)", imsi) { imsi = it.filter { ch -> ch.isDigit() } }
-        ConfigField("이름", name) { name = it }
-        ConfigField("로그인 ID", loginId) { loginId = it }
-        ConfigField("auth_id (전체 IMPI 직접 입력 — 비우면 IMSI@도메인 합성)", authId) { authId = it }
-        ConfigField("비밀번호", password, isPassword = true) { password = it }
-
-        Text(
-            "※ 공개 ID(MSISDN)와 인증 ID(IMSI@도메인)는 서로 다른 값입니다. 서버는 Digest username 으로 " +
-                "IMSI@도메인 정확 일치를 요구하며, 불일치 시 즉시 403 으로 거부합니다.",
-            style = MaterialTheme.typography.labelSmall,
-        )
-
-        if (showError) {
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+        ) {
             Text(
-                "필수 항목을 확인하세요: 서버/포트/도메인/MSISDN/IMSI(또는 auth_id)/비밀번호",
-                color = MaterialTheme.colorScheme.error,
+                "설정", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 4.dp),
+            )
+
+            PrefCategory("구성")
+            if (hasSso && !standalone) {
+                if (!manual) {
+                    PrefRow(
+                        title = "CIMS 계정으로 자동 구성됨",
+                        summary = "아래 값은 서버 프로비저닝이 관리하며 앱 진입 시 자동 갱신됩니다.",
+                    )
+                }
+                PrefSwitchRow(
+                    title = "수동 설정 모드",
+                    summary = if (manual) "자동 구성을 중지하고 아래 값을 직접 편집합니다(테스트용). " +
+                        "끄면 CIMS 프로비저닝 값으로 복원됩니다."
+                    else "테스트용 — 켜면 자동 구성을 중지하고 직접 편집할 수 있습니다.",
+                    checked = manual,
+                    enabled = !reprovisioning,
+                ) { on ->
+                    if (on) {
+                        store.setManual(true); manual = true
+                    } else {
+                        // 끄기 = 즉시 재프로비저닝으로 서버 값 복원(실패 시 기존 값 유지, 다음 진입 시 복원).
+                        store.setManual(false); manual = false; reprovisioning = true
+                        scope.launch {
+                            val cfg = runCatching {
+                                withContext(Dispatchers.IO) {
+                                    val prof = SsoProvisioner.fetchProfile(context)
+                                        ?: error("CIMS 로그인 세션이 없습니다")
+                                    val svc = prof.service("volte") ?: error("VoLTE 서비스가 없습니다")
+                                    svc.toSipAccountConfig(
+                                        loginId = prof.loginId ?: "",
+                                        displayName = prof.displayName ?: "",
+                                        loginPassword = SsoProvisioner.loginPassword(context),
+                                        countryCode = prof.countryCode.orEmpty(),
+                                    )
+                                }
+                            }.getOrNull()
+                            reprovisioning = false
+                            cfg?.let(onApply)
+                        }
+                    }
+                }
+                if (reprovisioning) {
+                    PrefRow(title = "CIMS 프로비저닝 값으로 복원 중…", summary = null)
+                }
+            } else {
+                PrefRow(
+                    title = "수동 구성",
+                    summary = if (hasSso) "CIMS 자동 구성 대신 직접 입력한 값을 사용합니다."
+                    else "CIMS 계정 없음 — 직접 입력한 값을 사용합니다.",
+                )
+            }
+
+            PrefCategory("서버")
+            PrefTextRow("서버 주소", config.serverHost, manual) { onApply(config.copy(serverHost = it)) }
+            PrefTextRow("SIP 포트", if (config.serverPort > 0) config.serverPort.toString() else "", manual,
+                digitsOnly = true) { onApply(config.copy(serverPort = it.toIntOrNull() ?: 0)) }
+            PrefChoiceRow("전송 프로토콜", config.transport, manual) { onApply(config.copy(transport = it)) }
+            PrefTextRow("서비스 도메인", config.domain, manual) { onApply(config.copy(domain = it)) }
+
+            PrefCategory("계정")
+            PrefTextRow("이름", config.displayName, manual) { onApply(config.copy(displayName = it)) }
+            PrefTextRow("내 번호 (MSISDN)", config.msisdn, manual) { onApply(config.copy(msisdn = it)) }
+            PrefTextRow("IMSI", config.imsi, manual, digitsOnly = true) { onApply(config.copy(imsi = it)) }
+            PrefTextRow("SIP 비밀번호", config.password, manual, isPassword = true) {
+                onApply(config.copy(password = it))
+            }
+
+            PrefCategory("고급")
+            PrefTextRow("인증 ID (전체 IMPI)", config.authId, manual,
+                summaryOverride = config.authId.ifBlank { "미지정 — IMSI@도메인 자동 합성" }) {
+                onApply(config.copy(authId = it))
+            }
+            Text(
+                "공개 ID(MSISDN)와 인증 ID(IMSI@도메인)는 다른 값입니다. 서버는 Digest username 으로 " +
+                    "IMSI@도메인 정확 일치를 요구하며, 불일치 시 즉시 403 으로 거부합니다.",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
-                val cfg = initial.copy(
-                    serverHost = host.trim(),
-                    serverPort = port.toIntOrNull() ?: 0,
-                    transport = transport,
-                    domain = domain.trim(),
-                    msisdn = msisdn.trim(),
-                    imsi = imsi.trim(),
-                    displayName = name.trim(),
-                    loginId = loginId.trim(),
-                    authId = authId.trim(),
-                    password = password,
+        if (standalone) {
+            if (!config.isComplete()) {
+                Text(
+                    "필수: 서버/포트/도메인/내 번호/IMSI(또는 인증 ID)/비밀번호",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 20.dp),
                 )
-                if (cfg.isComplete()) onSave(cfg) else showError = true
-            }) { Text("저장") }
-            if (canCancel) OutlinedButton(onClick = onCancel) { Text("취소") }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(onClick = onDone, enabled = config.isComplete()) { Text("완료") }
+                OutlinedButton(onClick = onCancel) { Text("취소") }
+            }
         }
     }
 }
 
+/** 카테고리 라벨 — 안드로이드 설정의 굵은 primary 소제목. */
 @Composable
-private fun ConfigField(
-    label: String,
+private fun PrefCategory(title: String) {
+    Text(
+        title, style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 4.dp),
+    )
+}
+
+/** 설정 항목 행 — 제목 + 아래 회색 요약(현재값). [enabled]=false 면 흐리게·클릭 불가. */
+@Composable
+private fun PrefRow(
+    title: String,
+    summary: String?,
+    enabled: Boolean = true,
+    onClick: (() -> Unit)? = null,
+    trailing: @Composable (() -> Unit)? = null,
+) {
+    val titleColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f)
+    val summaryColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .let { if (onClick != null && enabled) it.clickable(onClick = onClick) else it }
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = titleColor)
+            if (!summary.isNullOrBlank()) {
+                Text(summary, style = MaterialTheme.typography.bodyMedium, color = summaryColor)
+            }
+        }
+        trailing?.invoke()
+    }
+}
+
+/** 스위치 항목 행. */
+@Composable
+private fun PrefSwitchRow(
+    title: String,
+    summary: String?,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onToggle: (Boolean) -> Unit,
+) {
+    PrefRow(title, summary, enabled, onClick = { onToggle(!checked) }) {
+        Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled)
+    }
+}
+
+/** 문자열 항목 행 — 탭하면 편집 다이얼로그(EditTextPreference 스타일), 확인 시 즉시 적용. */
+@Composable
+private fun PrefTextRow(
+    title: String,
     value: String,
+    enabled: Boolean,
     isPassword: Boolean = false,
+    digitsOnly: Boolean = false,
+    summaryOverride: String? = null,
     onChange: (String) -> Unit,
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label) },
-        singleLine = true,
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    var editing by remember { mutableStateOf(false) }
+    val summary = summaryOverride ?: when {
+        value.isBlank() -> "미설정"
+        isPassword -> "••••••••"
+        else -> value
+    }
+    PrefRow(title, summary, enabled, onClick = { editing = true })
+    if (editing) {
+        var text by remember(editing) { mutableStateOf(value) }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text(title) },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = if (digitsOnly) it.filter { ch -> ch.isDigit() } else it },
+                    singleLine = true,
+                    visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onChange(if (isPassword) text else text.trim()); editing = false
+                }) { Text("확인") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("취소") } },
+        )
+    }
+}
+
+/** 선택 항목 행 — 탭하면 라디오 목록 다이얼로그(ListPreference 스타일). */
+@Composable
+private fun PrefChoiceRow(
+    title: String,
+    value: SipAccountConfig.Transport,
+    enabled: Boolean,
+    onChange: (SipAccountConfig.Transport) -> Unit,
+) {
+    var choosing by remember { mutableStateOf(false) }
+    PrefRow(title, value.name, enabled, onClick = { choosing = true })
+    if (choosing) {
+        AlertDialog(
+            onDismissRequest = { choosing = false },
+            title = { Text(title) },
+            text = {
+                Column {
+                    SipAccountConfig.Transport.entries.forEach { t ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onChange(t); choosing = false }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = value == t, onClick = { onChange(t); choosing = false })
+                            Text(t.name, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosing = false }) { Text("취소") } },
+        )
+    }
 }

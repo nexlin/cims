@@ -168,16 +168,21 @@ class ProvisioningClient(
                 msisdn = acc.optString("msisdn", ""),
                 imsi = acc.optString("imsi", ""),
                 authId = acc.optString("authId", ""),
-                sipPassword = acc.optString("sipPassword", null),
-                mcpttId = acc.optString("mcpttId", null),
+                sipPassword = acc.stringOrNull("sipPassword"),
+                mcpttId = acc.stringOrNull("mcpttId"),
             )
         }
         return ProvisioningProfile(
-            displayName = user?.optString("displayName", null),
-            loginId = user?.optString("loginId", null),
+            displayName = user?.stringOrNull("displayName"),
+            loginId = user?.stringOrNull("loginId"),
+            countryCode = j.stringOrNull("countryCode")?.takeIf { it.isNotBlank() },
             services = services,
         )
     }
+
+    /** JSON 명시적 null 안전 문자열 추출 — org.json optString 은 명시적 null 을 "null" 문자열로 만든다. */
+    private fun JSONObject.stringOrNull(name: String): String? =
+        if (isNull(name)) null else optString(name, null)
 
     private fun insecure(b: OkHttpClient.Builder) {
         val tm = object : javax.net.ssl.X509TrustManager {

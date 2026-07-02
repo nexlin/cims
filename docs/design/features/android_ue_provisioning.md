@@ -25,7 +25,7 @@ CIMS 앱 [로그인 화면]  (CSC 주소 + 아이디 + 비번)
 ```
 
 - 로그인은 **CSC(IdMS) 한 곳**. CSP/PSP 시그널링 서버 주소는 프로비저닝 응답으로 받는다.
-- **volte-client** 는 `kind=="volte"`, **ptt-client** 는 `kind=="ptt"` 프로파일을 사용. 앱 진입 시 항상 재프로비저닝(GATE)해 서버 설정 변경(포트 등)을 자동 반영. 수동 설정은 "고급" fallback.
+- **volte-client** 는 `kind=="volte"`, **ptt-client** 는 `kind=="ptt"` 프로파일을 사용. 앱 진입 시 항상 재프로비저닝(GATE)해 서버 설정 변경(포트 등)을 자동 반영. 수동 설정은 **수동 설정 모드**(§5-1) 한정.
 
 ## 2. 신원 계층 (혼동 방지)
 
@@ -45,6 +45,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 {
   "user":  { "displayName": "테스트001", "loginId": "test001" },
   "csc":   { "host": "<CSC host>", "port": 4430 },
+  "countryCode": "82",
   "services": [
     {
       "kind": "volte",
@@ -70,6 +71,9 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 - `account.msisdn`: 공개 ID(AOR user part). `authId`: 전체 IMPI 직접지정(보통 빈값 → imsi@domain 합성).
 - `account.sipPassword`: **서비스 가입(subscription) 비번**(`*_subscriptions.passwd`). CIMS 로그인(IdMS `users.passwd`)과 **별개 자격증명** — CSP 는 이 비번으로 REGISTER Digest 를 검증한다. 단말은 이 값을 우선 사용하고, `null`/생략일 때만 로그인 비번으로 폴백.
 - `account.mcpttId`: PTT 프로파일에만. GMS/CMS/affiliation/floor 에서 사용.
+- `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
+  CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면
+  빈 문자열(`""`) — 명시적 `null` 은 보내지 않는다(Android `org.json` 이 `"null"` 문자열로 오독).
 
 오류: 토큰 무효 401. 사용자에 해당 서비스 없으면 `services` 에서 제외(빈 배열 가능).
 
@@ -108,8 +112,9 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 - **즐겨찾기**: 회사/개인 행의 ★ 토글로 추가·삭제(`FavoriteStore`, 로컬). '즐겨찾기' 세그먼트에서 모아 본다.
 - **상세/통화**: 행을 누르면 **전체화면 상세**(아바타/이름 중앙 + 음성통화·영상통화·메시지(SIP MESSAGE)·
   즐겨찾기 액션 + 휴대전화/소속 정보 행). 발신은 상세에서만(목록 행에 바로걸기 없음).
-- **번호 표기(홈 국가코드 축약)**: 프로비저닝된 내 msisdn 에서 국가코드를 유도(ITU 자릿수 규칙,
-  예: +82)해 같은 국가 번호는 로컬 표기(`+821300000001` → `01300000001`)로 표시. 타국 번호는 그대로.
+- **번호 표기(홈 국가코드 축약)**: 프로비저닝 응답 `countryCode`(§3)가 SoT — 같은 국가 번호는
+  로컬 표기(`+821300000001` → `01300000001`)로 표시, 타국 번호는 그대로. `countryCode` 미수신
+  (구서버)일 때만 단말이 내 msisdn 에서 유도(ITU 자릿수 규칙)하는 fallback.
   **표시 전용** — 발신·저장·즐겨찾기 매칭 키는 원본(+E.164) 유지.
 
 ## 4. 서버측 구현 (CSC)
@@ -125,15 +130,30 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
    (표준 `access_services` 는 CSP 컬렉션이라 CSC 가 직접 못 읽으므로, 시그널링 매핑은 CSC 설정으로 둔다.)
 3. 비번: 응답 `sipPassword=null` → 단말이 로그인 비번을 SIP Digest 비번으로 재사용(망에 SIP 비번 미전송).
    서비스별 SIP 비번이 다르면 응답에 명시.
+4. **홈 국가코드** ← CSC 설정 `Provisioning.CountryCode`(configure.sh `--country-code`, 기본 82).
+   미설정 시 로그인 msisdn 에서 유도(`_country_code_of`, 단말 fallback 과 동일한 ITU 자릿수 규칙).
+   응답 `countryCode` 로 내려주며 단말은 이 값을 번호 로컬 표기의 SoT 로 저장(`SipAccountConfig.countryCode`).
 
 > 참고: 이는 TS 24.484 CMS 설정 플레인의 **확장**으로 볼 수 있다(표준 user-profile/service-config 는 SIP 코어 접속 주소를 담지 않으므로 본 프로젝트 전용 프로비저닝 문서로 정의). 서버 정합 갭은 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) 와 함께 관리.
 
 ## 5. 클라이언트 구현 (core + 각 앱)
 
 - **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginPassword)`.
-- **volte-client / ptt-client**: 첫 진입 = `LoginScreen` → `ProvisioningClient` → 자기 kind 프로파일을 `ConfigStore` 에 저장 → 홈. 수동 `ConfigScreen` 은 "고급" fallback.
+- **volte-client / ptt-client**: 첫 진입 = `LoginScreen` → `ProvisioningClient` → 자기 kind 프로파일을 `ConfigStore` 에 저장 → 홈. 수동 설정은 §5-1 수동 설정 모드.
 - 토큰: access_token 보관, 만료 시 재로그인(또는 refresh). SIP 비번 미수신 시 로그인 비번 재사용.
 - 서버 엔드포인트 준비 전: 로그인/프로비저닝 실패 시 **수동설정으로 graceful fallback**.
+
+### 5-1. 설정 화면·수동 설정 모드 (volte-client)
+
+- 설정 탭 = **안드로이드 설정 스타일**(`SettingsScreen`): 카테고리(구성/서버/계정/고급) + 항목 행
+  (제목+현재값 요약), 항목 탭 = 편집 다이얼로그(텍스트/라디오), 변경 즉시 저장·재등록(별도 저장 버튼 없음).
+- **SSO 자동 구성 상태에선 전 항목 읽기 전용**(흐림 처리) — 값의 SoT 는 CIMS 프로비저닝이며 앱
+  진입 시 재프로비저닝이 덮어쓰므로 편집을 허용하지 않는다.
+- **수동 설정 모드**(구성 카테고리 스위치, `ConfigStore.isManual`): 테스트용으로 켜면
+  ①SSO 재프로비저닝(GATE·SipService autostart)이 저장값을 덮어쓰지 않고 ②전 항목 편집 가능.
+  끄면 즉시 재프로비저닝으로 서버 값 복원(실패 시 다음 진입에서 복원). GATE "수동 설정 (고급)"
+  진입(프로비저닝 실패/계정 없음 fallback)도 같은 화면(standalone, 완료/취소 버튼)이며 수동 모드를 켠다.
+- CIMS 계정이 아예 없는 단말은 수동 구성으로 동작(스위치 없이 편집 가능).
 
 ## 6. 미해결/후속
 

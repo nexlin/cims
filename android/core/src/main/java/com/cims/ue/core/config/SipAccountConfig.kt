@@ -29,6 +29,7 @@ data class SipAccountConfig(
     val authId: String = "",            // 전체 IMPI 직접 지정(고급). 비우면 imsi@domain 합성
     val password: String = "",
     val expiresSec: Int = 3600,         // 희망 등록 주기(서버는 200 OK 에서 3600 하드코딩으로 덮어씀)
+    val countryCode: String = "",       // 홈 국가코드(digits, 예 "82") — 프로비저닝 수신, 번호 로컬 표기용(표시 전용)
 ) {
     /**
      * Digest 인증 username (= full IMPI). msisdn 폴백 없음.

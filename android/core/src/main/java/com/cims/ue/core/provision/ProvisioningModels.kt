@@ -29,6 +29,7 @@ data class CscEndpoint(
 data class ProvisioningProfile(
     val displayName: String?,
     val loginId: String?,
+    val countryCode: String?,         // 홈 국가코드(digits, 예 "82") — 번호 로컬 표기 SoT. 구서버는 null
     val services: List<ServiceProfile>,
 ) {
     /** 주어진 kind("volte"/"ptt")의 서비스 프로파일(없으면 null). */
@@ -50,9 +51,14 @@ data class ServiceProfile(
 ) {
     /**
      * 이 서비스 프로파일을 [SipAccountConfig] 로 매핑. SIP Digest 비번은 [sipPassword] 우선,
-     * 없으면 [loginPassword](로그인 비번) 재사용.
+     * 없으면 [loginPassword](로그인 비번) 재사용. [countryCode] = 프로비저닝 응답 홈 국가코드.
      */
-    fun toSipAccountConfig(loginId: String, displayName: String, loginPassword: String): SipAccountConfig =
+    fun toSipAccountConfig(
+        loginId: String,
+        displayName: String,
+        loginPassword: String,
+        countryCode: String = "",
+    ): SipAccountConfig =
         SipAccountConfig(
             serverHost = sipHost,
             serverPort = sipPort,
@@ -65,5 +71,6 @@ data class ServiceProfile(
             loginId = loginId,
             authId = authId,
             password = sipPassword?.takeIf { it.isNotBlank() } ?: loginPassword,
+            countryCode = countryCode,
         )
 }
