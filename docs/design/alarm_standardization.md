@@ -80,7 +80,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 ```
 - **type/code 는 알람 클래스** (process_down). 어느 프로세스인지는 `source.mo_instance`(§3.4/§3.5). `csp_down`/`cmp_down` 처럼 프로세스명을 type 에 박지 않음.
 - `perceived_severity` 가 기존 `severity` 를 대체. **하위호환**: `severity` 만 있으면 perceived_severity 로 승격(critical/warning 표준 값 유효). 신규 major/minor/indeterminate 가능.
-- managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4): service 규칙 = `cims/<target>`, agent 규칙 = `<host>/<module|disk|rtp>`.
+- managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4): service 규칙 = `cims/<target>`, agent 규칙 = `<host>/<module|disk|rtp>`. CMP 는 다중 미디어 노드(AA)를 개별 관측하므로 endpoint 별 `cims/cmp/<ip>:<port>` 로 합성.
 
 ### 3.2 이벤트 레코드(alert_log) 확장
 
@@ -113,7 +113,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 | code | type(클래스) | eventType | probableCause (rule별) | mo_class | mo_instance 예시 | severity(rule별) | detected_by |
 |---|---|---|---|---|---|---|---|
-| `CIMS-PRC-001` | `process_down` | processingError | softwareError | software | `cims/csp` · `cims/cmp` · `<host>/<module>` | critical | oam / agent:<host> |
+| `CIMS-PRC-001` | `process_down` | processingError | softwareError | software | `cims/csp` · `cims/cmp/<ip>:<port>`(미디어 노드별) · `<host>/<module>` | critical | oam / agent:<host> |
 | `CIMS-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `cims/db` (향후 `cims/trunk/<id>`·peer) | critical | oam |
 | `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` (향후 `<host>/cpu`·`mem`·`<iface>`) | warning(minor/major 승격) | oam / agent:<host> |
 

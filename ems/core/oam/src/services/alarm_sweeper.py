@@ -105,11 +105,22 @@ def eval_service_rule(rule: dict, ctx: dict, rtp_threshold: int = 80) -> bool:
 def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                         detected_by: str = 'oam-svc', rtp_threshold: int = 80, log=None):
     """서비스 계열 규칙 1회 평가 — CSP/CMP UDP probe + DB 체크 + RTP 사용률.
-    probe 헬퍼는 handlers.stats 공유(3s 캐시). 규칙은 service_registry(코어 + descriptor)."""
+    probe 헬퍼는 handlers.stats 공유(3s 캐시). 규칙은 service_registry(코어 + descriptor).
+
+    CMP 는 전 미디어 노드 개별 평가(AA 다중 노드) — process_down(target=cmp)은
+    endpoint 마다 mo_instance='cims/cmp/<ip>:<port>' 로 발화해 어느 노드가 죽었는지
+    식별한다. RTP 사용률은 전 노드 합산. MediaServer.Endpoints/CmpIp 미설정이면
+    CMP 관측 비활성(cmp 계열 규칙 skip)."""
     from services import service_registry
-    from handlers.stats import _get_csp_stats, _get_cmp_stats, _get_db
+    from handlers.stats import (_get_csp_stats, _get_db,
+                                _media_endpoints, _probe_cmp)
     csp = _get_csp_stats(config)
-    cmp = _get_cmp_stats(config)
+    cmp_configured = bool(((config.get('MediaServer') or {}).get('Endpoints'))
+                          or config.get('CmpIp'))
+    cmp_nodes = []          # [(mo_suffix, stats dict)]
+    if cmp_configured:
+        cmp_nodes = [(f"{ip}:{port}", _probe_cmp(ip, port))
+                     for ip, port in _media_endpoints(config)]
     try:
         conn = _get_db(config)
         try:
@@ -120,13 +131,32 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
             conn.close()
     except Exception:
         db_ok = False
-    total = cmp.get('rtp_ports_total', 0) or 0
-    used = cmp.get('rtp_ports_used', 0) or 0
+    total = sum((s.get('rtp_ports_total', 0) or 0) for _, s in cmp_nodes)
+    used = sum((s.get('rtp_ports_used', 0) or 0) for _, s in cmp_nodes)
     pct = int(round(used / total * 100)) if total > 0 else 0
-    ctx = {'csp': csp, 'cmp': cmp, 'db_ok': db_ok, 'rtp_pct': pct}
+    ctx = {'csp': csp, 'db_ok': db_ok, 'rtp_pct': pct}
     rules = [r for r in service_registry.alert_rules(config) if r.get('scope') != 'agent']
     for r in rules:
         thr = r.get('threshold', rtp_threshold)
+        if r.get('check') == 'process_down' and r.get('target') == 'cmp':
+            # 노드별 개별 알람 — endpoint 목록이 바뀌면 사라진 노드의 open 알람은
+            # 남을 수 있으나(평가 대상 이탈) 재기동 시 restore 후 대상 재구성으로 수렴.
+            base_mo = r.get('mo_instance') or 'cims/cmp'
+            for suffix, stats in cmp_nodes:
+                mo = f"{base_mo}/{suffix}"
+                transition(state, service_log_dir, r, mo, detected_by,
+                           not bool(stats),
+                           fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr),
+                           fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr), log=log)
+            # 구 집계 인스턴스(cims/cmp)로 열려 복원된 알람은 노드별 전환 후 평가
+            # 대상이 없어 영영 안 닫히므로 여기서 close.
+            if f"{r.get('code')}@{base_mo}" in state:
+                transition(state, service_log_dir, r, base_mo, detected_by, False, '',
+                           fmt(r.get('msg_close'), mo=base_mo, pct=pct, threshold=thr),
+                           log=log)
+            continue
+        if r.get('check') == 'rtp_pct_gte' and not cmp_nodes:
+            continue    # CMP 관측 비활성 — 사용률 평가 불가
         mo = r.get('mo_instance') or f"cims/{r.get('target', '')}"
         msg_open = fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr)
         msg_close = fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr)

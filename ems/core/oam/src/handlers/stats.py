@@ -31,7 +31,7 @@ def _get_db(config: dict):
     return pymysql.connect(
         host=db.get('Host', '127.0.0.1'),
         port=int(db.get('Port', 3306)),
-        user=db.get('User', 'root'),
+        user=db.get('User', 'cims'),
         password=db.get('Password', ''),
         database=db.get('Db', 'cims'),
         charset='utf8mb4',
@@ -362,17 +362,28 @@ def _get_dashboard_counts(config: dict) -> dict:
 async def _health(config: dict) -> HandlerResult:
     # csp/cmp UDP probe + DB 체크를 thread 로 병렬 — 이벤트 루프 비블로킹(down 서버 timeout 이
     # 다른 요청을 막지 않도록). 캐시(_cached)와 함께 /stats/health 지연 대폭 감소.
-    csp, cmp, db_ok, counts = await asyncio.gather(
+    # CMP 는 전 미디어 노드 집계(AA 다중 노드) — up = any 노드 응답, 카운터는 전 노드 합산.
+    csp, media, db_ok, counts = await asyncio.gather(
         asyncio.to_thread(_get_csp_stats, config),
-        asyncio.to_thread(_get_cmp_stats, config),
+        asyncio.to_thread(_all_media_stats, config),
         asyncio.to_thread(_check_db_health, config),
         asyncio.to_thread(_get_dashboard_counts, config),
     )
+    nodes = [nd.get('stats') or {} for nd in media]
+    cmp = {}
+    if any(nodes):
+        _sum_keys = ('sessions', 'groups',
+                     'rtp_ports_total', 'rtp_ports_used', 'rtp_ports_free',
+                     'ptt_rtp_ports_total', 'ptt_rtp_ports_used', 'ptt_rtp_ports_free',
+                     'session_timeout', 'leak_reclaim_total',
+                     'leak_reclaim_orphan', 'leak_reclaim_hold')
+        cmp = {k: sum((s.get(k, 0) or 0) for s in nodes) for k in _sum_keys}
+        cmp['orphan_reclaim_sec'] = max((s.get('orphan_reclaim_sec', 0) or 0) for s in nodes)
 
     result = {
         'health': {
             'csp': 'up' if csp else 'down',
-            'cmp': 'up' if cmp else 'down',
+            'cmp': 'up' if any(nodes) else 'down',
             'db': 'up' if db_ok else 'down',
         },
         'csp': {

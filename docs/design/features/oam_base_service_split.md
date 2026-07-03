@@ -250,13 +250,13 @@ config/
 - **각 서비스 모듈** 로드 = `common.json` 의 공유항목(JwtSecret/DB/RuntimeDir, read-only) + 자기
   `services/<svc>.json`.
 - 장점: 새 서비스 = `services/<svc>.json` 추가 + self-register, **공통/타서비스 설정 무영향**(D4 의도).
-- 하위호환: `common.json` 부재 시 자기 `oam-svc.json` 단독, 그것도 없으면 **base `oam.json` 상속
-  fallback** — oam-svc 는 oam 동거가 전제(코드 import 도 oam/src)이므로 공유값(CimsAuth.JwtSecret/
-  ServiceLogging/CimsRuntimeDir/Mgmt)을 base 설정에서 읽는다. 탐색 순서: dist 형제(`<dist>/oam/config`) →
-  dev ems 트리(`ems/core/oam/config`) → production modules(`modules/oam/current/oam/config`,
-  활성 버전 심링크). 단 base 전용 bind 인 `Server`(0.0.0.0:4419) 는 상속에서 제외 — oam-svc 는
-  loopback 4480 기본(I1)이고, 배포 overlay(`config.json`)의 `Server.*` 가 그 위에 적용된다.
-  `oam-svc.json` 이 존재하면 이 fallback 은 동작하지 않으므로 공유값(특히 base 와 동일해야 하는
+- 하위호환: `common.json` 부재 시 자기 `oam-svc.json` 단독. **base `oam.json` 상속(fallback)은
+  없다** — oam-svc 는 자기 설정(배포 overlay `config.json` 또는 `oam-svc.json`)만 읽는 완전
+  독립 설정 모듈이다(csp/cmp/csc 와 동일 모델). base 와 공유해야 하는 값(`CimsAuth.JwtSecret`/
+  `CimsRuntimeDir`/`Mgmt.Cidr`)은 상속이 아니라 **배포 시 base OAM 이 주입**한다(아래 실체화
+  참조). 설정 파일이 하나도 없으면 기동 로그에 명시적 에러를 남기고 preflight 가 실패한다 —
+  빠진 설정을 코드 기본값이 조용히 메워 오동작하는 경로를 두지 않는다.
+  `oam-svc.json` 을 직접 쓰는 경우(패키지 동봉/dev)는 공유값(특히 base 와 동일해야 하는
   `CimsAuth.JwtSecret`)까지 그 파일에서 채워야 한다(`oam-svc.json.sample` 참조).
 
 ### 서비스 관측 설정의 소유 — oam-svc (콘솔 관리)
@@ -266,13 +266,19 @@ oam-svc 소유**다. 정규 관리 경로는 콘솔 배포설정 — oam-svc `co
 `update_config` job → 배포 overlay(`config.json`). 우선순위:
 
 ```
-배포 overlay(콘솔 설정)  >  oam-svc.json(패키지 동봉 시)  >  base oam.json fallback 상속(공유값만)
+배포 overlay(콘솔 설정, 실체화됨)  >  oam-svc.json(패키지 동봉 시)
 ```
 
-**`config.json`(배포 overlay)이 완전한 유효 설정이다 — csc/csp/cmp 와 동일.** 콘솔 배포설정
-UI(deployment 모드)는 `config_template` 의 **전 필드를 default+입력값으로 채워** 전송하고
-백엔드(`_put_deployment_config`)가 그대로 저장하므로, `config.json` 은 항상 서비스 관측 키
-전체를 담는다(부분 저장이 아님). 따라서 `config_template.json` 이 구조·기본값의 SoT이며,
+**`config.json`(배포 overlay)이 완전한 유효 설정이다 — csc/csp/cmp 와 동일.** 이를 보장하는
+주체는 콘솔 UI 가 아니라 **백엔드 실체화**(`agents._materialize_deploy_config`)다: OAM 이
+install/upgrade/update_config job 을 디스패치할 때 ① `config_template` 전 필드의 `default`
+를 base 로 깔고 ② deployment 레코드의 overlay(사용자 변경분)를 병합하고 ③ 게이트웨이 서비스
+모듈(meta.gateway.routes 보유)에는 base 소유 공유값(`CimsAuth.JwtSecret`/`CimsRuntimeDir`/
+`Mgmt.Cidr`, 비어있으면 `ServiceLogging.Dir`)을 주입해 완전한 config 를 agent 에 전달한다.
+deployment **레코드는 sparse overlay(사용자 변경분)로 유지** — template default 가 바뀌면
+다음 job 디스패치에서 자동 추종되고, template 에 필드가 늘어도 기존 배포가 재배포/설정저장
+시 자동으로 완전한 config.json 을 받는다(빈 default `''`/`[]` 는 '미설정' 시맨틱 보존을 위해
+실체화에서 제외). 따라서 `config_template.json` 이 구조·기본값의 SoT이며,
 그 `default` 는 **환경 비종속 중립값**(예: `CimsDatabase.Host=127.0.0.1`, `CimsDatabase.User=cims`,
 `CspNotify.Ip=127.0.0.1`)으로 두고 실주소는 배포 시 콘솔에서 채운다(레포에 테스트베드 IP 금지).
 Python 서비스 모듈(csc·oam-svc)은 C++ 과 달리 base conf 부재를 tolerate 하므로 `make dist`
@@ -281,8 +287,8 @@ base conf 생성(`gen_default_config`) 대상이 아니다 — `config.json` 에
 **base `oam.json` 은 base 전용 설정만 갖는다** — 서비스 관측 키(`CimsDatabase`/`CspNotify`/
 `CmpIp`·`CmpPort`/`MediaServer`)를 두지 않으며, **`--role base` 는 이 키들을 읽지 않는다**
 (base 프로세스는 DB 미접속). 예외는 `ServiceLogging` — base 도 agent 계열 알람(alert_log)
-저장·조회와 콘솔 flow 기록에 쓰는 공유 키라 `oam.json` 에 남으며, oam-svc 는 콘솔 미설정 시
-이를 fallback 상속한다. `--role all`(단일 프로세스 dev/TB)에서 서비스 관측이 필요하면 키를
+저장·조회와 콘솔 flow 기록에 쓰는 공유 키라 `oam.json` 에 남으며, oam-svc 콘솔 설정이 비어
+있으면 배포 실체화가 base 값을 주입한다. `--role all`(단일 프로세스 dev/TB)에서 서비스 관측이 필요하면 키를
 배포 overlay(`config.json`) 또는 로컬/TB 설정(`oam-tb.json` 등)으로 제공한다 — 레포 `oam.json`
 에는 두지 않는다.
 
@@ -291,8 +297,10 @@ base conf 생성(`gen_default_config`) 대상이 아니다 — `config.json` 에
 `ModuleConfigModal`·모듈 모드 `ModuleConfigEditor` 둘 다 콤마↔배열), (2) 백엔드 coerce
 (`_put_deployment_config` list-coerce + 모듈 모드 `_coerce_value`), (3) 소비자
 (`stats._media_endpoints` 가 최상위 문자열도 콤마 분해). 원소는 `"ip:port"` 문자열과
-`{ip,port}` dict 를 모두 허용하며, 대시보드 health 위젯의 CMP probe 는 `CmpIp` 미설정 시
-`MediaServer.Endpoints` 첫 노드를 대표로 사용한다.
+`{ip,port}` dict 를 모두 허용한다. **CMP 관측은 전 노드 평가**(AA 다중 노드): 대시보드
+health 위젯은 전 노드 probe 집계(up = any 노드 응답, 카운터는 합산)이고, 알람 sweeper 의
+`process_down(target=cmp)` 는 endpoint 마다 `mo_instance='cims/cmp/<ip>:<port>'` 로 개별
+발화한다. `Endpoints`/`CmpIp` 미설정이면 CMP 관측 비활성(cmp 계열 규칙 skip).
 
 ### file_store 소유권 (I5)
 | 도메인/컬렉션 | 소유 |

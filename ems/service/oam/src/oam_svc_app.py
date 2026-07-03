@@ -104,7 +104,11 @@ if __name__ == '__main__':
 
     def load_config():
         """§7 설정 분리: common.json 존재 시 common.json + services/oam-svc.json,
-        부재 시 _CONFIG_PATH(oam-svc.json) 단독, 그것도 없으면 oam.json fallback."""
+        부재 시 _CONFIG_PATH(oam-svc.json) 단독. base oam.json 상속(fallback)은 없다 —
+        정규 경로는 콘솔 배포설정: OAM 이 job 디스패치 시 config_template default +
+        base 공유값(JwtSecret/CimsRuntimeDir/Mgmt.Cidr)을 병합한 완전한 유효설정을
+        config.json 으로 실체화한다(agents._materialize_deploy_config). 설정이 비면
+        조용히 코드 기본값으로 동작하는 대신 여기서 명시적으로 실패한다."""
         cfg_dir = os.path.dirname(_CONFIG_PATH)
         common_p = os.path.join(cfg_dir, 'common.json')
         merged: dict = {}
@@ -122,34 +126,10 @@ if __name__ == '__main__':
                 with open(_CONFIG_PATH, 'r') as f:
                     merged = json.load(f)
                 src = _CONFIG_PATH
-            else:
-                # fallback: base oam.json 상속 — oam-svc 는 oam 동거가 전제(코드 import 도
-                #   oam/src 에서)이므로 공유값(CimsAuth.JwtSecret/ServiceLogging/CimsRuntimeDir
-                #   /Mgmt)을 base 설정에서 가져온다. 서비스 관측 키(CimsDatabase/CspNotify/
-                #   MediaServer)는 oam.json 에 없다(base 전용 설정만 보유) — 콘솔 배포설정
-                #   (config_template → 배포 overlay config.json)이 정규 관리 경로.
-                #   dist 형제 / dev ems 트리 / production modules
-                #   (활성 버전 = current 심링크) 세 레이아웃 지원.
-                #   디렉토리 존재가 아니라 oam.json 실재로 선별 — dev ems 트리에선
-                #   _repo_root/oam/config 가 oam-svc 자기 config(sample만)와 겹치므로.
-                oam_json = ''
-                for _c in (os.path.join(_repo_root, 'oam', 'config'),
-                           os.path.join(_repo_root, '..', 'core', 'oam', 'config'),
-                           os.path.join(_repo_root, '..', '..', 'oam', 'current', 'oam', 'config')):
-                    if os.path.isfile(os.path.join(_c, 'oam.json')):
-                        oam_json = os.path.join(_c, 'oam.json')
-                        break
-                if oam_json:
-                    with open(oam_json, 'r') as f:
-                        merged = json.load(f)
-                    # base 전용 bind(Server=0.0.0.0:4419)는 상속 제외 — oam-svc 는
-                    #   loopback 4480 기본(I1). 배포 overlay 의 Server.* 는 이후 적용이라 우선.
-                    merged.pop('Server', None)
-                    src = oam_json + ' (fallback)'
         except Exception as e:
             logger.log_error(f"oam-svc config load error: {e}")
             return {}
-        # 배포 overlay (cims_agent 변종 디렉토리)
+        # 배포 overlay (cims_agent 변종 디렉토리) — 실체화된 완전 설정
         try:
             for overlay in (
                 os.path.join(_COMPONENT_ROOT, 'config.json'),
@@ -162,11 +142,16 @@ if __name__ == '__main__':
                 if isinstance(flat, dict) and flat:
                     n = _apply_overlay(merged, flat)
                     logger.log_info(f"oam-svc overlay applied: {overlay} ({n} keys)")
+                    if not src:
+                        src = overlay
                     break
         except Exception as e:
             logger.log_error(f"oam-svc overlay failed: {e}")
         if src:
             logger.log_info(f"oam-svc config source: {src}")
+        else:
+            logger.log_error("oam-svc config 없음 — oam-svc.json/common.json/배포 config.json "
+                             "중 어느 것도 발견 못함. 콘솔 배포설정으로 배포했는지 확인 필요.")
         return merged
 
     # 귀속 핸들러 import (공유 모듈) — preflight 가 여기 import 성공을 검증.
@@ -183,6 +168,13 @@ if __name__ == '__main__':
         logger.log_info('==================== start (oam-svc) ====================')
 
         config = load_config()
+        # 관측 설정 무결성 — 빠지면 관측이 코드 기본값으로 조용히 오동작(엉뚱한 probe
+        #   대상·DB 계정)하는 대신 기동 로그에 드러낸다. MediaServer 비움=CMP 관측
+        #   비활성(허용)이라 제외.
+        for _k in ('CimsDatabase', 'CspNotify', 'CimsRuntimeDir'):
+            if not config.get(_k):
+                logger.log_warning(f"[config] '{_k}' 미설정 — 관련 관측/기능이 비활성 또는 "
+                                   "오동작. 콘솔 배포설정(oam-svc) 확인 필요.")
         auth.init(config)   # 공유 JwtSecret 로 토큰 독립 검증(§5)
 
         if args_dict.get('preflight'):

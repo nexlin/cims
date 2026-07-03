@@ -88,6 +88,57 @@ def _coerce_list_fields(template: dict, values: dict) -> dict:
     return out
 
 
+def _template_defaults(template: dict) -> dict:
+    """config_template 전 필드의 default 를 flat(dot-key) dict 로.
+    빈 default(None/''/[])는 '미설정' 시맨틱(예: ServiceLogging.Dir 비움=상속) 보존을
+    위해 제외한다."""
+    out: dict = {}
+    for sec in (template or {}).get("sections", []):
+        for fld in sec.get("fields", []):
+            k, d = fld.get("key"), fld.get("default")
+            if k and d is not None and d != "" and d != []:
+                out[k] = d
+    return out
+
+
+def _materialize_deploy_config(config, pkg_file, overlay):
+    """배포 config 실체화 — agent 가 쓰는 config.json 이 항상 완전한 유효설정이 되도록
+    config_template default 를 base 로 깔고 deployment overlay(사용자 변경분)를 병합.
+    deployment 레코드는 sparse overlay 그대로 유지(사용자 의도 SoT) — template default
+    변경은 다음 job 디스패치에서 자동 추종된다.
+
+    게이트웨이 서비스 모듈(meta.gateway.routes 보유 — oam-svc)에는 base 소유 공유값도
+    주입한다: oam-svc 의 base oam.json fallback 상속 폐지의 대체 경로.
+      - CimsAuth.JwtSecret / CimsRuntimeDir / Mgmt.Cidr — base 가 SoT, overlay 보다 우선
+        (시크릿 회전·runtime 이동 시 base 현재값 추종).
+      - ServiceLogging.Dir — template 소유(콘솔 편집 가능), 비어있을 때만 base 값 주입."""
+    overlay = overlay if isinstance(overlay, dict) else {}
+    tmpl = (pkg_file or {}).get("config_template") if isinstance(pkg_file, dict) else None
+    if isinstance(tmpl, dict):
+        overlay = _coerce_list_fields(tmpl, overlay)
+        out = _template_defaults(tmpl)
+    else:
+        out = {}
+    for k, v in overlay.items():
+        if v is None or v == "":   # 빈 overlay 값은 default/주입값을 지우지 않음 ([] 는 유효값)
+            continue
+        out[k] = v
+    pkg_meta = (pkg_file or {}).get("meta") if isinstance(pkg_file, dict) else None
+    if isinstance(pkg_meta, dict) and (pkg_meta.get("gateway") or {}).get("routes"):
+        secret = (config.get("CimsAuth") or {}).get("JwtSecret")
+        if secret:
+            out["CimsAuth.JwtSecret"] = secret
+        if config.get("CimsRuntimeDir"):
+            out["CimsRuntimeDir"] = config["CimsRuntimeDir"]
+        if (config.get("Mgmt") or {}).get("Cidr"):
+            out["Mgmt.Cidr"] = config["Mgmt"]["Cidr"]
+        if not out.get("ServiceLogging.Dir"):
+            sld = (config.get("ServiceLogging") or {}).get("Dir")
+            if sld:
+                out["ServiceLogging.Dir"] = sld
+    return out
+
+
 def _pkg_load_all(config) -> list:
     return file_store.load_all(_pkg_dir(config))
 
@@ -1826,6 +1877,7 @@ async def _put_deployment_config(handler_args, did: int, config):
     # string_list/ref_list 필드가 콤마 문자열로 오면 배열로 정규화(백엔드 coerce).
     #   프론트 위젯 누락·raw API 우회 시에도 config.json 에 항상 배열로 저장되게 하는
     #   최종 방어. (예: MediaServer.Endpoints "a:9000, b:9000" → ["a:9000","b:9000"])
+    _pkg = None
     try:
         _pkg = await asyncio.to_thread(_pkg_load, config, dep.get("package_id"))
         _tmpl = (_pkg or {}).get("config_template") if isinstance(_pkg, dict) else None
@@ -1868,6 +1920,9 @@ async def _put_deployment_config(handler_args, did: int, config):
         # 필요하므로 재-enrich. 누락 시 overlay 가 install_path 루트에 쓰여 CSP 의
         # SIGUSR1 즉시반영(_findDeploymentConfig = csp.json 부모×2)이 읽지 못한다.
         _enrich_deploy(saved, config)
+        # 레코드는 sparse(values) 그대로, agent 로 나가는 job config 만 실체화 —
+        #   template default + base 공유값 병합으로 config.json 을 완전한 유효설정으로.
+        _job_cfg = _materialize_deploy_config(config, _pkg, values)
         member_rows: list[dict] = []
         for t in saved:
             sf = t.get("service_functions")
@@ -1881,7 +1936,7 @@ async def _put_deployment_config(handler_args, did: int, config):
                 "process_name":    t.get("process_name"),
                 "service_functions": sf or [],
                 "install_path":    t.get("install_path"),
-                "config":          values,
+                "config":          _job_cfg,
             }
             jid = await asyncio.to_thread(_job_create, config, t["agent_id"],
                                           "update_config", params)
@@ -2191,6 +2246,14 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
     _enrich_deploy([dep], config)
     cfg = dep.get("config") if isinstance(dep.get("config"), (dict, list)) \
           else _safe_json(dep.get("config_json"))
+    # 레코드의 sparse overlay 를 실체화 — install/upgrade/update_config 가 agent 에
+    #   전달하는 config 는 template default + base 공유값이 병합된 완전한 유효설정.
+    if isinstance(cfg, dict) or cfg is None:
+        try:
+            _pkg = await asyncio.to_thread(_pkg_load, config, dep.get("package_id"))
+            cfg = _materialize_deploy_config(config, _pkg, cfg)
+        except Exception as _e:
+            logger.log_warning(f"job config materialize skip (dep={did}): {_e}")
     sf = dep.get("service_functions")
     if isinstance(sf, str):
         sf = _split_csv(sf)
