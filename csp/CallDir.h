@@ -295,6 +295,14 @@ public:
                 _writePttState( strInitiator, strGroupId, sessId, strCallId, "initiator", ts, dir );
             }
         }
+
+        // 개시자(발신 단말)도 입장 이력(events.jsonl)에 기록 — member_join 은 CSP 가 초대한
+        // 멤버의 응답(OnCallStarted) 경로에서만 남아 개시자가 세션이력 참가자에서 누락됐다.
+        // (PttLogEvent 가 m_mtx 를 잡으므로 반드시 lock 밖에서 호출)
+        if ( !strInitiator.empty() && strInitiator != "autojoin" ) {
+            PttLogEvent( strGroupId, "member_join",
+                         "{\"member\":\"" + Esc( strInitiator ) + "\",\"role\":\"initiator\"}" );
+        }
     }
 
     void PttSessionEnd( const std::string &strGroupId ) {

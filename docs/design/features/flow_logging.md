@@ -239,6 +239,11 @@ GET /api/v1/ptt/history/{group_id}/{session}/flow?date=YYYY-MM-DD
 
 > CSP `_endSessionLocked` 는 `m_mapPttSession.erase` 를 수행하지 않는다 — 첫 멤버 OnCallTerminated 시점에 session map 이 비면 이후 멤버의 join/leave 가 events.jsonl 에 기록되지 않으므로, 그룹의 모든 멤버가 member_join + member_leave 를 정상 기록하도록 세션 엔트리를 유지한다.
 
+> 세션 **개시자(발신 단말)** 는 CSP 가 초대한 멤버의 응답(`OnCallStarted`) 경로를 타지 않으므로,
+> `PttSessionStart` 가 개시자를 `member_join`(`role:"initiator"`) 으로 events.jsonl 에 직접 기록한다.
+> OAM `_derive_session_meta_from_events` 는 이 명시 role 을 "첫 join 추정"보다 우선해 세션
+> initiator 로 삼고, 콘솔 타임라인은 해당 입장 행에 "개시자" 배지를 표시한다.
+
 ### 10.3 body 조회
 ```
 GET /api/v1/flow/body?date=&hour=&seq=&iface=&node=
