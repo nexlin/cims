@@ -61,19 +61,25 @@ _ACTIONS = {"start", "stop", "restart"}
 
 # cims-svc 위치 탐색 (agent/bin/cims-svc — 운영 lifecycle 도구)
 def _find_cims_svc() -> Optional[str]:
-    # 우선순위: 환경변수 → /dist/agent/bin/cims-svc (CSC 상대) → 표준 위치
+    """우선순위:
+      1) CIMS_SVC_PATH — 명시 오버라이드.
+      2) $CIMS_AGENT_PREFIX/agent/current/bin/cims-svc — 배포 환경 정본 규약(agent.md §3).
+         agent 가 모듈을 env 상속으로 기동하므로 배포된 base 는 이 env 를 이미 가진다.
+         current 심링크 = systemd/sudoers 와 동일한 버전 무관 고정 경로.
+      3) __file__ 부모 walk-up — 레포/dist 개발 트리(agent/bin) + prefix 직접 실행
+         (agent/current/bin, env 부재 대비) fallback."""
     env_path = os.environ.get("CIMS_SVC_PATH")
     if env_path and os.path.isfile(env_path):
         return env_path
-    # CSC 소스에서 dist 루트 찾아 agent/bin/cims-svc 검색
+    prefix = os.environ.get("CIMS_AGENT_PREFIX")
+    if prefix:
+        cand = Path(prefix) / "agent" / "current" / "bin" / "cims-svc"
+        if cand.is_file(): return str(cand)
     here = Path(__file__).resolve()
     for p in here.parents:
-        cand = p / "agent" / "bin" / "cims-svc"
-        if cand.is_file(): return str(cand)
-    # 표준 운영 / 개발 위치
-    for cand in ("/home/nex/work/cims/build/dist/agent/bin/cims-svc",
-                 "/opt/cims/agent/bin/cims-svc", "/usr/local/bin/cims-svc"):
-        if os.path.isfile(cand): return cand
+        for cand in (p / "agent" / "bin" / "cims-svc",
+                     p / "agent" / "current" / "bin" / "cims-svc"):
+            if cand.is_file(): return str(cand)
     return None
 
 
@@ -113,7 +119,8 @@ async def _invoke_cims_svc(action: str, service: str) -> HandlerResult:
     script = _find_cims_svc()
     if not script:
         return HandlerResult(status=500,
-            body={"error": "cims_svc_not_found", "hint": "Set CIMS_SVC_PATH env var"},
+            body={"error": "cims_svc_not_found",
+                  "hint": "Set CIMS_SVC_PATH or CIMS_AGENT_PREFIX env var"},
             media_type="application/json")
     cwd = str(Path(script).parent)
     argv = ["/bin/bash", script, action, service]
@@ -180,7 +187,10 @@ async def handle_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
         # 전체 상태 — agent/bin/cims-svc status 호출
         script = _find_cims_svc()
         if not script:
-            return HandlerResult(status=500, body={"error": "cims_svc_not_found"}, media_type="application/json")
+            return HandlerResult(status=500,
+                body={"error": "cims_svc_not_found",
+                      "hint": "Set CIMS_SVC_PATH or CIMS_AGENT_PREFIX env var"},
+                media_type="application/json")
         rc, out, err = await _run_cmd(["/bin/bash", script, "status"], cwd=str(Path(script).parent), timeout=10, env=_sanitized_env())
         return HandlerResult(status=200, body={
             "driver": _driver(),

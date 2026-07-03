@@ -124,6 +124,15 @@
 > 가입자 CRUD 핸들러는 현재 OAM in-process import(`oam_app.py:118`) → 목표는 **csc 가
 > 직접 서빙하고 base 가 프록시**(중복 제거).
 
+> `service_control`(`/api/v1/services`) 은 로컬 호스트의 `cims-svc`(agent 번들 운영 도구)를
+> subprocess 로 구동한다. 스크립트 위치 해석: `CIMS_SVC_PATH`(명시 오버라이드) →
+> `$CIMS_AGENT_PREFIX/agent/current/bin/cims-svc`(배포 환경 정본 — agent.md §3 prefix 규약,
+> agent 가 모듈 기동 시 env 상속으로 전달; `current` 심링크 = systemd/sudoers 와 동일한 버전
+> 무관 고정 경로) → 레포/dist 트리 walk-up(`agent/bin`, `agent/current/bin`) fallback.
+> 이 API 는 **개발서버(devMode 릴리스 메뉴) 도구** — 배포 환경에서 모듈 생명주기의 정본은
+> agent job(`POST /api/v1/deployments/{id}/job` start/stop/restart)이며, cims-svc 직접 제어는
+> agent supervised(HA 자동복구)와 이중 제어가 될 수 있어 배포 환경에선 상태조회 용도로만 쓴다.
+
 **알람 sweeper 분리** (`services/alarm_sweeper.py` 공용 코어):
 - **서비스 계열**(`csp_down`/`cmp_down`/`db_down`/`rtp_high`, scope≠`agent`) 평가·발화 = **oam-svc**
   (`detected_by='oam-svc'`) — probe 대상·DB 가 oam-svc 설정이므로. `--role all` 에서는 base 가
