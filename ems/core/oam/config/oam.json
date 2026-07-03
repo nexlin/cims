@@ -1,12 +1,12 @@
 {
     "Server": {
-        "Ip": "0.0.0.0",
+        "Ip": "121.161.164.134",
         "Port": 4419,
-        "AgentOamUrl": "https://10.0.2.45:4419",
+        "AgentOamUrl": "https://121.161.164.134:4419",
         "DevMode": false
     },
     "Mgmt": {
-        "Cidr": "10.0.2.0/24",
+        "Cidr": "121.161.164.0/24",
         "_comment": "mgmt 망 대역 — agent enroll 시 interface.role='mgmt' 자동 매핑 근거. AgentOamUrl 의 IP 도 이 대역이어야 함."
     },
     "Log": {
@@ -35,7 +35,7 @@
     "_runtime_comment": "관리 데이터(file_store) SoT 는 mgmt host(ctrl01) 로컬 유지. ServiceLogging.Dir 을 공유 NAS 로 옮겨도 runtime store 가 따라가지 않도록 명시 고정.",
     "ServiceLogging": {
         "_comment": "base 도 사용하는 공유 키 — agent 계열 알람(alert_log) 저장·조회 API 와 콘솔 flow 기록 위치. oam-svc 는 콘솔 배포설정(config_template logging 섹션)으로 관리하고, 미설정 시 이 값을 fallback 상속.",
-        "Dir": "/mnt/cims/service_log",
+        "Dir": "/NAS/cims_johnyim/service_log",
         "Enable": [
             "csp",
             "ue"
