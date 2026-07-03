@@ -538,13 +538,27 @@ CodecParam cp = ep.codecGetParam("<AMR-WB codecId>");
 // cp.payload type 필드를 99로 set (pjmedia_codec_mgr_set_default_param 등가)
 ep.codecSetParam("<AMR-WB codecId>", cp);
 
-// 영상: H.264 최우선 + 인코딩 해상도 480x640(세로) 고정
+// 영상: H.264 최우선 + 인코딩 해상도 480x640(세로)/15fps/≤500kbps
 ep.videoCodecSetPriority("H264/97", (short)254);
 VidCodecParam vp = ep.getVideoCodecParam("H264/97");
 vp.getEncFmt().setWidth(480); vp.getEncFmt().setHeight(640);   // 발신 영상 480x640
+vp.getEncFmt().setFpsNum(15); vp.getEncFmt().setFpsDenum(1);   // 15fps
+vp.getEncFmt().setAvgBps(400000); vp.getEncFmt().setMaxBps(500000);  // 목표 400/상한 500kbps
 // profile-level-id / packetization-mode 등 서버 협상값 정합
 ep.setVideoCodecParam("H264/97", vp);
 ```
+
+**영상 인코딩 파라미터(발신) 정본:** 해상도 480x640(세로), 15fps, 400kbps(상한 500kbps), IDR(I-frame) 주기 2초.
+- 해상도·fps 는 위 `VidCodecParam` 로 설정.
+- **비트레이트·IDR 주기·CBR 은 And-Media 인코더 네이티브(`and_vid_mediacodec.cpp`) 설정이며 libpjsua2
+  빌드 시 반영**(`m1_build_pjsip.sh` 멱등 패치 [2-4]/[2-5]):
+  - IDR 주기 = `#define KEYFRAME_INTERVAL 2`(초). 인코더 `i-frame-interval` 로만 유효(디스크립터
+    `keyframe_interval` 필드는 dead field).
+  - 비트레이트 = `avg_bps` 를 500kbps 로 캡(PJSIP 이 협상 시 해상도 기반으로 480x640@15 → ~920kbps
+    로 재계산하는 과도값 방지).
+  - **CBR 모드**(`"bitrate-mode"=2`) 필수 — Android MediaCodec 의 min-quality(VQApply) 기능이
+    **VBR 저비트레이트를 품질 floor(921kbps)로 강제 상향**하는 것을 우회(로그 `VQApply: minquality:
+    applies only to VBR encoding` = 무력화 확인).
 
 ### 4.3.1 영상 캡처(카메라) 활성 4대 요건 — 발신 영상·셀프뷰 전제
 

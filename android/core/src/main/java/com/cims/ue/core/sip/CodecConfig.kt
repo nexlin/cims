@@ -57,7 +57,11 @@ object CodecConfig {
         add(CodecFmtp().apply { name = "mode-set"; `val` = "0,1,2" })
     }
 
-    /** H.264 인코딩 해상도 고정(세로 480x640). 캡처(카메라)·인코더가 이 크기로 협상된다. */
+    /**
+     * H.264 인코딩 파라미터 고정: 해상도 480x640(세로), 15fps, 평균 400kbps/최대 500kbps.
+     * (I-frame/IDR 주기 2초는 And-Media 인코더 네이티브 상수 — libpjsua2 빌드 시 설정.)
+     * 캡처(카메라)·인코더가 이 크기/레이트로 협상·설정된다.
+     */
     private fun applyVideoSize(ep: Endpoint, codecId: String, w: Long, h: Long) = runCatching {
         val vp = ep.getVideoCodecParam(codecId)
         vp.encFmt.apply {
@@ -65,8 +69,10 @@ object CodecConfig {
             height = h
             fpsNum = 15
             fpsDenum = 1
+            avgBps = 400_000        // 목표 400kbps
+            maxBps = 500_000        // 상한 500kbps
         }
         ep.setVideoCodecParam(codecId, vp)
-        Log.i(TAG, "H264 enc size set ${w}x$h")
+        Log.i(TAG, "H264 enc set ${w}x$h 15fps avg=400k max=500k")
     }.onFailure { Log.w(TAG, "applyVideoSize failed: ${it.message}") }
 }

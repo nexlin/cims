@@ -114,6 +114,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -1724,12 +1725,12 @@ private fun VideoCallFullScreen(
         // 상대 영상(전체화면)
         VideoRender(onSurface = onSurface)
 
-        // 내 화면(로컬 카메라 프리뷰) PiP — 우상단 라운드 박스.
+        // 내 화면(로컬 카메라 프리뷰) PiP — 우하단 라운드 박스(하단 컨트롤 위).
         Box(
             Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 48.dp, end = 16.dp)
-                .width(108.dp).aspectRatio(3f / 4f)
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 200.dp, end = 16.dp)
+                .width(96.dp).aspectRatio(3f / 4f)
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF222222))
                 .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
@@ -1751,41 +1752,41 @@ private fun VideoCallFullScreen(
                 Text("%02d:%02d".format(elapsed / 60, elapsed % 60),
                     color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium)
             }
-            // 하단: 컨트롤
+            // 하단: 컨트롤(작게 + 화면 하단에 더 가깝게)
             Column(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.35f))
-                    .padding(top = 16.dp, bottom = 32.dp),
+                    .padding(top = 12.dp, bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    ToggleRound("음소거", Icons.Filled.MicOff, muted) { onToggleMute(call.id, !muted) }
-                    ToggleRound("스피커", Icons.AutoMirrored.Filled.VolumeUp, speakerOn) { onToggleSpeaker(!speakerOn) }
-                    ToggleRound("영상", Icons.Filled.Videocam, true, activeBg = VIDEO_BLUE) { onToggleVideo(false) }
+                    ToggleRound("음소거", Icons.Filled.MicOff, muted, size = 52.dp) { onToggleMute(call.id, !muted) }
+                    ToggleRound("스피커", Icons.AutoMirrored.Filled.VolumeUp, speakerOn, size = 52.dp) { onToggleSpeaker(!speakerOn) }
+                    ToggleRound("영상", Icons.Filled.Videocam, true, activeBg = VIDEO_BLUE, size = 52.dp) { onToggleVideo(false) }
                 }
-                Spacer(Modifier.height(20.dp))
-                LabeledRound("종료", HANGUP_RED, Icons.Filled.CallEnd) { onHangup(call.id) }
+                Spacer(Modifier.height(12.dp))
+                LabeledRound("종료", HANGUP_RED, Icons.Filled.CallEnd, size = 52.dp) { onHangup(call.id) }
             }
         }
     }
 }
 
 @Composable
-private fun LabeledRound(label: String, bg: Color, icon: ImageVector, fg: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
+private fun LabeledRound(label: String, bg: Color, icon: ImageVector, fg: Color = Color.White, enabled: Boolean = true, size: Dp = 72.dp, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(72.dp)
+                .size(size)
                 .clip(CircleShape)
                 .background(if (enabled) bg else bg.copy(alpha = 0.35f))
                 .clickable(enabled = enabled) { onClick() },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = label, tint = fg, modifier = Modifier.size(30.dp))
+            Icon(icon, contentDescription = label, tint = fg, modifier = Modifier.size(size * 0.42f))
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         Text(label, style = MaterialTheme.typography.labelMedium)
     }
 }
@@ -1797,6 +1798,7 @@ private fun ToggleRound(
     icon: ImageVector,
     active: Boolean,
     activeBg: Color = TOGGLE_ACTIVE,
+    size: Dp = 72.dp,
     onClick: () -> Unit,
 ) {
     LabeledRound(
@@ -1804,6 +1806,7 @@ private fun ToggleRound(
         bg = if (active) activeBg else MaterialTheme.colorScheme.surfaceVariant,
         icon = icon,
         fg = if (active) Color.White else MaterialTheme.colorScheme.onSurface,
+        size = size,
         onClick = onClick,
     )
 }

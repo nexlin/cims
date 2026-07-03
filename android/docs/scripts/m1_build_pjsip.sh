@@ -73,6 +73,47 @@ else:
     raise SystemExit("  ERROR: AMR guard anchor not found (pjproject layout changed?)")
 PYEOF
 
+echo "=== [2-4] H.264 I-frame(IDR) 주기 2초 패치 ==="
+# and_vid_mediacodec.cpp: 인코더 i-frame-interval(초)이 KEYFRAME_INTERVAL 매크로에 하드코딩(기본 1초).
+# 대역폭/복구 균형 위해 2초로. (and_media_codec 디스크립터의 keyframe_interval 필드는 미사용 dead field
+# 이므로 매크로 변경의 유일한 실효과는 인코더 IFR_INTERVAL.) 멱등.
+python3 - <<'PYEOF'
+p = "pjmedia/src/pjmedia-codec/and_vid_mediacodec.cpp"
+src = open(p).read()
+if "#define KEYFRAME_INTERVAL       2" in src:
+    print("  already patched (skip)")
+elif "#define KEYFRAME_INTERVAL       1" in src:
+    open(p, "w").write(src.replace("#define KEYFRAME_INTERVAL       1",
+                                    "#define KEYFRAME_INTERVAL       2", 1))
+    print("  patched: KEYFRAME_INTERVAL 1 -> 2 (2s IDR)")
+else:
+    raise SystemExit("  ERROR: KEYFRAME_INTERVAL anchor not found (pjproject layout changed?)")
+PYEOF
+
+echo "=== [2-5] H.264 발신 비트레이트 상한 500kbps + CBR 패치 ==="
+# and_vid_mediacodec.cpp: ①인코더 BIT_RATE 를 500kbps 로 캡(PJSIP 협상 시 해상도 기반 재계산으로
+# 과도, 480x640@15 → ~920kbps). ②CBR 모드 — Android min-quality(VQApply)가 VBR 저비트레이트를
+# 품질 floor(921kbps)로 강제 상향하는 것을 방지(목표 비트레이트 준수). 멱등.
+python3 - <<'PYEOF'
+p = "pjmedia/src/pjmedia-codec/and_vid_mediacodec.cpp"
+src = open(p).read()
+anchor = ("    AMediaFormat_setInt32(vid_fmt, AND_MEDIA_KEY_BIT_RATE,\n"
+          "                          param->enc_fmt.det.vid.avg_bps);")
+fixed  = ("    {\n"
+          "        pj_uint32_t cims_br = param->enc_fmt.det.vid.avg_bps;\n"
+          "        if (cims_br == 0 || cims_br > 500000) cims_br = 500000;\n"
+          "        AMediaFormat_setInt32(vid_fmt, AND_MEDIA_KEY_BIT_RATE, cims_br);\n"
+          "        AMediaFormat_setInt32(vid_fmt, \"bitrate-mode\", 2 /* BITRATE_MODE_CBR */);\n"
+          "    }")
+if "cims_br" in src:
+    print("  already patched (skip)")
+elif anchor in src:
+    open(p, "w").write(src.replace(anchor, fixed, 1))
+    print("  patched: BIT_RATE cap 500kbps + CBR")
+else:
+    raise SystemExit("  ERROR: BIT_RATE anchor not found (pjproject layout changed?)")
+PYEOF
+
 echo "=== [3] configure-android + make (arm64-v8a) ==="
 export APP_PLATFORM=28
 export TARGET_ABI=arm64-v8a
