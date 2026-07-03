@@ -8,6 +8,8 @@ import org.pjsip.pjsua2.CallVidSetStreamParam
 import org.pjsip.pjsua2.OnCallMediaStateParam
 import org.pjsip.pjsua2.OnCallSdpCreatedParam
 import org.pjsip.pjsua2.OnCallStateParam
+import org.pjsip.pjsua2.OnCallTsxStateParam
+import org.pjsip.pjsua2.pjsip_event_id_e
 import org.pjsip.pjsua2.VideoWindowHandle
 import org.pjsip.pjsua2.pjmedia_dir
 import org.pjsip.pjsua2.pjmedia_type
@@ -27,6 +29,10 @@ import org.pjsip.pjsua2.pjsua_call_vid_strm_op
 class CimsCall : Call {
 
     private val owner: SipController
+
+    /** 이 호의 송신 SDP 에 주입할 floor(m=application) 섹션 — 그룹콜 발신/응답 시 설정.
+     *  호별 보관(전역이면 멀티그룹 동시 세션에서 서로의 floor 포트가 섞인다). */
+    @Volatile var pendingAppSdp: String? = null
 
     constructor(owner: SipController, acc: Account) : super(acc) { this.owner = owner }
     constructor(owner: SipController, acc: Account, callId: Int) : super(acc, callId) { this.owner = owner }
@@ -59,17 +65,55 @@ class CimsCall : Call {
      */
     override fun onCallSdpCreated(prm: OnCallSdpCreatedParam) {
         runCatching {
-            owner.injectApplicationSdp?.let { extra ->
+            pendingAppSdp?.let { extra ->
                 val sdp = prm.sdp
                 val whole = sdp.wholeSdp
                 if (!whole.contains("m=application")) {
-                    sdp.wholeSdp = whole.trimEnd('\r', '\n') + "\r\n" + extra.trim('\r', '\n') + "\r\n"
+                    var section = extra.trim('\r', '\n')
+                    // pjsua 오퍼는 세션 레벨 c= 없이 미디어별 c= — 주입 섹션에도 c= 필수
+                    // (없으면 pjmedia_sdp_validate EMISSINGCONN assert 로 네이티브 abort)
+                    if (!section.contains("c=IN ")) {
+                        val ip = whole.lineSequence().map { it.trim() }
+                            .firstOrNull { it.startsWith("c=IN IP4 ") }
+                            ?.removePrefix("c=IN IP4 ")?.trim()
+                        if (ip != null) {
+                            val lines = section.split("\r\n", "\n").toMutableList()
+                            lines.add(1, "c=IN IP4 $ip")
+                            section = lines.joinToString("\r\n")
+                        }
+                    }
+                    sdp.wholeSdp = whole.trimEnd('\r', '\n') + "\r\n" + section + "\r\n"
                 }
             }
             prm.remSdp?.wholeSdp?.let { rem ->
-                parseApplication(rem)?.let { (ip, port) -> owner.onRemoteFloorLearned(ip, port) }
+                parseApplication(rem)?.let { (ip, port) -> owner.onRemoteFloorLearned(id, ip, port) }
             }
         }.onFailure { Log.w(TAG, "onCallSdpCreated: ${it.message}") }
+    }
+
+    /**
+     * 발신(UAC) 응답의 floor 목적지 학습 — [onCallSdpCreated] 는 **로컬 SDP 생성 시에만** 호출되어
+     * UAC 가 받는 응답(200 OK) SDP 를 볼 수 없다. 수신 트랜잭션 원문에서 `m=application` 을 파싱한다.
+     */
+    override fun onCallTsxState(prm: OnCallTsxStateParam) {
+        runCatching {
+            val e = prm.e ?: return
+            if (e.type != pjsip_event_id_e.PJSIP_EVENT_TSX_STATE) return@runCatching
+            val msg = e.body?.tsxState?.src?.rdata?.wholeMsg ?: return@runCatching
+            // 발신 응답(200 OK) SDP 의 floor 목적지 학습
+            if (msg.contains("m=application")) {
+                val sdp = msg.substringAfter("\r\n\r\n", "")
+                parseApplication(sdp)?.let { (ip, port) -> owner.onRemoteFloorLearned(id, ip, port) }
+            }
+            // 참가자 변경 in-dialog NOTIFY (RFC 4575 conference-info) → 참가자 목록 갱신
+            // ※ pjsip 다이얼로그는 evsub 미소유 NOTIFY 에 500 을 응답하지만, invite usage 의
+            //   tsx 이벤트로 원문은 전달되므로 여기서 본문을 읽는다(응답코드와 무관).
+            if (msg.startsWith("NOTIFY ") && msg.contains("conference-info")) {
+                Log.i(TAG, "conference NOTIFY received (${msg.length}B)")
+                val body = msg.substringAfter("\r\n\r\n", "")
+                if (body.isNotBlank()) owner.dispatchConferenceInfo(id, body)
+            }
+        }.onFailure { Log.w(TAG, "onCallTsxState: ${it.message}") }
     }
 
     /**
@@ -191,6 +235,13 @@ class CimsCall : Call {
         val aud = audioMedia() ?: return
         val cap = PjLib.ep.audDevManager().captureDevMedia
         if (on) cap.startTransmit(aud) else cap.stopTransmit(aud)
+    }
+
+    /** 수신(청취) 토글 — 멀티그룹 듣기 정책: 비채널 그룹은 참여 유지하되 음소거. */
+    fun setListen(on: Boolean) {
+        val aud = audioMedia() ?: return
+        val spk = PjLib.ep.audDevManager().playbackDevMedia
+        if (on) aud.startTransmit(spk) else aud.stopTransmit(spk)
     }
 
     private fun parseApplication(sdp: String): Pair<String, Int>? {

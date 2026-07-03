@@ -1,11 +1,13 @@
 package com.cims.ue.ptt
 
+import android.os.SystemClock
 import android.util.Log
 import com.cims.ue.core.config.SipAccountConfig
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.RegState
 import com.cims.ue.core.sip.SipBodyPart
 import com.cims.ue.core.sip.SipController
+import com.cims.ue.ptt.audio.PttFeedback
 import com.cims.ue.ptt.csc.CscClient
 import com.cims.ue.ptt.csc.CscConfig
 import com.cims.ue.ptt.csc.GroupSummary
@@ -16,21 +18,43 @@ import com.cims.ue.ptt.floor.FloorState
 import com.cims.ue.ptt.mcptt.McpttXml
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** 현재 발언자 — 내 GRANT([self]=true) 또는 타인 TAKEN. [sinceMs]=elapsedRealtime(경과시간 표시용).
+ *  [groupId]=발언이 들리는 그룹(멀티그룹 모니터링에서 주채널 밖 발언 구분). */
+data class Speaker(val id: String, val self: Boolean, val sinceMs: Long, val groupId: String? = null)
+
+/** 채널 지정 — 주(발언 대상, 1개)/부(모니터링)/일반. */
+enum class ChannelRole { PRIMARY, SECONDARY, NONE }
+
+/** 듣기 정책 — 주·부채널만 / 참여한 모든 그룹. */
+enum class ListenPolicy { CHANNELS_ONLY, ALL }
+
+/** 참여 중인 그룹 세션의 UI 상태. */
+data class GroupCallState(
+    val groupId: String,
+    val callId: Int,                      // -1 = 협상 중
+    val active: Boolean,                  // 통화 성립 여부
+    val role: ChannelRole,
+    val floorState: FloorState,
+    val speaker: Speaker?,
+    val participants: Map<String, String>,
+    val audible: Boolean,                 // 듣기 정책 적용 결과
+)
+
 /**
  * MCPTT 그룹 PTT 오케스트레이션 — 비-PJSIP 코어(CSC/floor/XML)와 core PJSIP `SipController` 를 묶는다.
  *
- * 부팅 순서(설계서 §7): **CSC 인증 → 그룹 조회 → SIP REGISTER → affiliation PUBLISH → 키업 그룹 INVITE**.
- * 키업 INVITE 는 multipart(mcptt-info + resource-lists) + SDP `m=application`(floor) 주입; 응답 SDP 에서
- * CMP floor 포트를 학습해 [FloorClient] 에 연결. floor GRANT/RELEASE 가 mic 송신을 토글(반이중).
- *
- * 모든 floor/SIP 규약은 3GPP TS(24.380/24.379/33.180) 정합 — 서버측 규격 정렬 전엔 interop 안 될 수 있음.
+ * **멀티그룹 동시 참여**(TS 22.179 group scanning): 그룹마다 독립 SIP 호 + floor 소켓을 유지한다.
+ * 발언(PTT)은 항상 **주채널** 로만, 수신은 PJSIP conference bridge 가 자동 믹싱하되
+ * [ListenPolicy] 에 따라 비채널 그룹을 음소거(setCallListen)한다.
  */
 class PttController(
     private val sipConfig: SipAccountConfig,
@@ -45,30 +69,274 @@ class PttController(
     val regState: StateFlow<RegState> get() = sip.regState
     val callState: StateFlow<CallState> get() = sip.callState
 
+    /** 사용자 피드백(톤+진동) — 서비스가 Context 로 생성해 주입. */
+    var feedback: PttFeedback? = null
+
+    // ── 그룹별 세션 ──
+
+    private inner class Session(val groupId: String) {
+        var callId: Int = -1
+        var active: Boolean = false
+        var role: ChannelRole = ChannelRole.NONE
+        var floorState: FloorState = FloorState.IDLE
+        var speaker: Speaker? = null
+        var participants: MutableMap<String, String> = mutableMapOf(bareId(mcpttId) to "connected")
+        var audible: Boolean = true
+        val floor: FloorClient = FloorClient(ssrc, mcpttId, localPort = 0,
+            onEvent = { ev -> onFloorEvent(groupId, ev) })
+
+        fun toState() = GroupCallState(groupId, callId, active, role, floorState, speaker, participants.toMap(), audible)
+        fun close() { runCatching { floor.close() } }
+    }
+
+    private val lock = Any()
+    private val sessionMap = LinkedHashMap<String, Session>()   // groupId → Session (참여 순서 유지)
+
+    private val _sessions = MutableStateFlow<List<GroupCallState>>(emptyList())
+    /** 참여 중인 그룹 세션들(참여 순). */
+    val sessions: StateFlow<List<GroupCallState>> = _sessions.asStateFlow()
+
+    private val _listenPolicy = MutableStateFlow(ListenPolicy.ALL)
+    /** 듣기 정책 — 주·부채널만/전체. */
+    val listenPolicy: StateFlow<ListenPolicy> = _listenPolicy.asStateFlow()
+
+    private val _audioRoute = MutableStateFlow(SipController.AUDIO_ROUTE_DEFAULT)
+    /** 오디오 출력 라우팅(전역) — 일반(자동)/수화구/스피커. */
+    val audioRoute: StateFlow<Int> = _audioRoute.asStateFlow()
+
+    // ── 주채널 파생 상태 (발언자 카드·PTT 버튼용) ──
+
     private val _floorState = MutableStateFlow(FloorState.IDLE)
+    /** 주채널 floor 상태. */
     val floorState: StateFlow<FloorState> = _floorState.asStateFlow()
+
+    private val _speaker = MutableStateFlow<Speaker?>(null)
+    /** 현재 들리는 발언자(주채널 우선, 없으면 가청 그룹 중 첫 발언자 — groupId 로 구분). */
+    val speaker: StateFlow<Speaker?> = _speaker.asStateFlow()
 
     private val _groups = MutableStateFlow<List<GroupSummary>>(emptyList())
     val groups: StateFlow<List<GroupSummary>> = _groups.asStateFlow()
+
+    private val _selectedGroup = MutableStateFlow<String?>(null)
+    /** 그룹 목록에서 선택된 그룹(참여 전 하이라이트·affiliation 대상). */
+    val selectedGroup: StateFlow<String?> = _selectedGroup.asStateFlow()
+
+    private val _affiliated = MutableStateFlow<Set<String>>(emptySet())
+    /** affiliate PUBLISH 를 보낸 그룹(낙관적 로컬 추적 — 서버 상태 구독은 후속). */
+    val affiliated: StateFlow<Set<String>> = _affiliated.asStateFlow()
 
     private val _status = MutableStateFlow("대기")
     val status: StateFlow<String> = _status.asStateFlow()
 
     private var csc: CscClient? = cscConfig?.let { CscClient(it, allowInsecureTls) }
     @Volatile private var token: TokenSet? = null
-    @Volatile private var floor: FloorClient? = null
-    @Volatile private var activeCallId: Int = -1
+    @Volatile private var pttHeld = false
+    private var requestTimeout: Job? = null
     private val ssrc: Long = (mcpttId.hashCode().toLong() and 0xffffffffL).let { if (it == 0L) 1L else it }
 
     init {
-        // 학습된 CMP floor 목적지 → FloorClient 연결
+        // 학습된 CMP floor 목적지(호별) → 해당 세션 FloorClient 연결 + Ack 1회(NAT latch 유도)
         scope.launch {
-            sip.floorRemote.collect { rem -> rem?.let { (ip, port) -> floor?.connectRemote(ip, port); _status.value = "floor 연결 $ip:$port" } }
+            sip.floorRemote.collect { rem ->
+                rem?.let { (callId, ip, port) ->
+                    sessionByCall(callId)?.let { s ->
+                        s.floor.connectRemote(ip, port)
+                        s.floor.sendAck()
+                        _status.value = "[${s.groupId}] floor 연결 $ip:$port"
+                    }
+                }
+            }
         }
-        // 활성 호 id 추적
+        // 호 상태 → 세션 매핑 + MCPTT 그룹콜 착신 자동 수락(ptt_ue.md §12.3)
         scope.launch {
-            sip.callState.collect { st -> if (st is CallState.Active) activeCallId = st.id else if (st is CallState.Disconnected) activeCallId = -1 }
+            sip.callState.collect { st ->
+                when (st) {
+                    is CallState.Outgoing -> bindCall(bareId(st.remote), st.id)
+                    is CallState.Active -> {
+                        bindCall(bareId(st.remote), st.id, active = true)
+                        sip.setAudioRoute(_audioRoute.value)        // 통화별 라우팅 재적용
+                        applyListenPolicy()
+                    }
+                    is CallState.Disconnected -> onCallEnded(st.id)
+                    is CallState.Incoming -> if (st.mcptt) autoJoinGroupCall(st)
+                    else -> Unit
+                }
+            }
         }
+        // 참가자 목록 — in-dialog conference NOTIFY(RFC 4575), 호별
+        scope.launch {
+            sip.conferenceInfo.collect { (callId, xml) ->
+                runCatching { sessionByCall(callId)?.let { onConferenceInfo(it, xml) } }
+            }
+        }
+        // 등록 완료 시 선택 그룹 자동 affiliation — CSP 는 affiliation 된 멤버에게만 INVITE fan-out
+        scope.launch {
+            sip.regState.collect { r ->
+                if (r is RegState.Registered) _selectedGroup.value?.let { ensureAffiliated(it) }
+            }
+        }
+    }
+
+    // ── 세션 헬퍼 ──
+
+    private fun sessionByCall(callId: Int): Session? =
+        synchronized(lock) { sessionMap.values.firstOrNull { it.callId == callId } }
+
+    private fun bindCall(groupId: String, callId: Int, active: Boolean = false) {
+        synchronized(lock) {
+            val s = sessionMap[groupId] ?: return
+            s.callId = callId
+            if (active) s.active = true
+        }
+        publish()
+    }
+
+    private fun onCallEnded(callId: Int) {
+        val gid = synchronized(lock) {
+            val s = sessionMap.values.firstOrNull { it.callId == callId } ?: return
+            sessionMap.remove(s.groupId)
+            s.close()
+            // 주채널이 사라지면 남은 첫 세션을 주채널로 승격
+            if (s.role == ChannelRole.PRIMARY) sessionMap.values.firstOrNull()?.role = ChannelRole.PRIMARY
+            s.groupId
+        }
+        _status.value = "[$gid] 그룹콜 종료"
+        publish()
+    }
+
+    /** 세션 스냅샷 발행 + 주채널 파생 상태(floor/speaker) 갱신. */
+    private fun publish() {
+        val list = synchronized(lock) { sessionMap.values.map { it.toState() } }
+        _sessions.value = list
+        val primary = list.firstOrNull { it.role == ChannelRole.PRIMARY }
+        _floorState.value = primary?.floorState ?: FloorState.IDLE
+        _speaker.value = primary?.speaker?.copy(groupId = null)
+            ?: list.firstOrNull { it.audible && it.speaker != null }?.let { it.speaker!!.copy(groupId = it.groupId) }
+    }
+
+    private fun primarySession(): Session? =
+        synchronized(lock) { sessionMap.values.firstOrNull { it.role == ChannelRole.PRIMARY } }
+
+    // ── 채널/듣기/오디오 설정 ──
+
+    /** [groupId] 를 주채널로 — 기존 주채널은 부채널로 강등. */
+    fun setPrimary(groupId: String) {
+        synchronized(lock) {
+            val s = sessionMap[groupId] ?: return
+            sessionMap.values.firstOrNull { it.role == ChannelRole.PRIMARY }?.let {
+                if (it !== s) it.role = ChannelRole.SECONDARY
+            }
+            s.role = ChannelRole.PRIMARY
+        }
+        applyListenPolicy()
+    }
+
+    /** 부채널 토글(주채널에는 적용 안 함). */
+    fun toggleSecondary(groupId: String) {
+        synchronized(lock) {
+            val s = sessionMap[groupId] ?: return
+            if (s.role == ChannelRole.PRIMARY) return
+            s.role = if (s.role == ChannelRole.SECONDARY) ChannelRole.NONE else ChannelRole.SECONDARY
+        }
+        applyListenPolicy()
+    }
+
+    fun setListenPolicy(p: ListenPolicy) {
+        _listenPolicy.value = p
+        applyListenPolicy()
+    }
+
+    /** 듣기 정책 적용 — 비채널 그룹은 참여 유지하되 수신 음소거. */
+    private fun applyListenPolicy() {
+        val policy = _listenPolicy.value
+        synchronized(lock) {
+            for (s in sessionMap.values) {
+                val on = policy == ListenPolicy.ALL || s.role != ChannelRole.NONE
+                if (s.audible != on) {
+                    s.audible = on
+                    if (s.callId >= 0) sip.setCallListen(s.callId, on)
+                }
+            }
+        }
+        publish()
+    }
+
+    /** 오디오 출력 라우팅(전역) — [SipController.AUDIO_ROUTE_DEFAULT]/EARPIECE/SPEAKER. */
+    fun setAudioRoute(route: Int) {
+        _audioRoute.value = route
+        sip.setAudioRoute(route)
+    }
+
+    private fun ensureAffiliated(groupId: String) {
+        if (!_affiliated.value.contains(groupId)) affiliate(groupId, true)
+    }
+
+    // ── 그룹콜 참여/이탈 ──
+
+    /** 키업 그룹콜 참여(발신). 이미 참여 중이면 무시. 첫 세션은 주채널. */
+    fun joinGroupCall(groupId: String, members: List<McpttXml.ResourceEntry> = emptyList()) {
+        val s = synchronized(lock) {
+            if (sessionMap.containsKey(groupId)) return
+            Session(groupId).also {
+                it.role = if (sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY }) ChannelRole.PRIMARY
+                else ChannelRole.NONE
+                sessionMap[groupId] = it
+            }
+        }
+        ensureAffiliated(groupId)
+        val appSdp = "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio"
+        val parts = ArrayList<SipBodyPart>()
+        parts.add(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
+            McpttXml.mcpttInfo(McpttXml.SessionType.PREARRANGED, "tel:$groupId", mcpttId, "tel:$groupId")))
+        if (members.isNotEmpty())
+            parts.add(SipBodyPart("application", "resource-lists+xml", McpttXml.resourceLists(members)))
+        sip.makeGroupCall("sip:$groupId@${sipConfig.domain}", parts, appSdp)
+        _status.value = "그룹콜 참여 $groupId"
+        publish()
+    }
+
+    /** 그룹콜 착신 자동 수락 — 미참여 그룹이면 세션 생성 후 응답 SDP 에 m=application 주입. */
+    private fun autoJoinGroupCall(inc: CallState.Incoming) {
+        val groupId = bareId(inc.remote)
+        if (groupId.isBlank()) return
+        val s = synchronized(lock) {
+            if (sessionMap.containsKey(groupId)) return          // 이미 참여 중
+            Session(groupId).also {
+                it.callId = inc.id
+                it.role = if (sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY }) ChannelRole.PRIMARY
+                else ChannelRole.NONE
+                sessionMap[groupId] = it
+            }
+        }
+        sip.answerGroupCall(inc.id, "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio")
+        _status.value = "그룹콜 자동 참여: $groupId"
+        publish()
+    }
+
+    /** 그룹별 나가기. */
+    fun leaveGroup(groupId: String) {
+        val callId = synchronized(lock) { sessionMap[groupId]?.callId ?: return }
+        if (callId >= 0) sip.hangup(callId) else {
+            synchronized(lock) { sessionMap.remove(groupId)?.close() }
+            publish()
+        }
+    }
+
+    /** RFC 4575 conference-info 파싱 — 해당 세션의 참가자 맵 갱신. */
+    private fun onConferenceInfo(s: Session, xml: String) {
+        val full = Regex("<conference-info\\b[^>]*state=\"full\"").containsMatchIn(xml)
+        val cur = if (full) mutableMapOf() else s.participants
+        val userRe = Regex("<user\\b[^>]*entity=\"([^\"]+)\"[^>]*>(.*?)</user>", RegexOption.DOT_MATCHES_ALL)
+        val stRe = Regex("<status>\\s*([A-Za-z-]+)\\s*</status>")
+        for (m in userRe.findAll(xml)) {
+            val id = bareId(m.groupValues[1])
+            if (id.isBlank()) continue
+            val status = stRe.find(m.groupValues[2])?.groupValues?.get(1) ?: "connected"
+            if (status.equals("disconnected", ignoreCase = true)) cur.remove(id) else cur[id] = status
+        }
+        cur[bareId(mcpttId)] = "connected"                  // 본인은 항상 포함
+        s.participants = cur
+        publish()
     }
 
     // ── CSC (선택) ──
@@ -85,14 +353,29 @@ class PttController(
         token = TokenSet(accessToken = accessToken, tokenType = "Bearer",
                          refreshToken = null, idToken = null, expiresInSec = 3600, scope = null)
         _status.value = "CIMS 계정 토큰 적용"
+        loadGroups()
     }
 
     fun loadGroups() = scope.launch {
         val c = csc ?: return@launch
         val t = token?.accessToken ?: run { _status.value = "토큰 없음"; return@launch }
         runCatching { withContext(Dispatchers.IO) { c.listGroups(t, mcpttId) } }
-            .onSuccess { _groups.value = it; _status.value = "그룹 ${it.size}개" }
+            .onSuccess { list ->
+                _groups.value = list
+                if (_selectedGroup.value == null) {
+                    list.firstOrNull()?.let { bareId(it.uri) }?.also { g ->
+                        _selectedGroup.value = g
+                        if (regState.value is RegState.Registered) ensureAffiliated(g)
+                    }
+                }
+                _status.value = "그룹 ${list.size}개"
+            }
             .onFailure { _status.value = "그룹 조회 실패: ${it.message}" }
+    }
+
+    fun selectGroup(groupId: String) {
+        _selectedGroup.value = groupId
+        if (regState.value is RegState.Registered) ensureAffiliated(groupId)
     }
 
     // ── SIP ──
@@ -107,65 +390,126 @@ class PttController(
             targetUri = groupSip,
             contentType = McpttXml.CT_AFFILIATION,
             body = McpttXml.affiliationCommand("tel:$groupId", on),
-            headers = mapOf("Expires" to if (on) "3600" else "0"),
+            // Event: mcptt 필수 — TS 24.379 §9 (없으면 CSP 가 489 Bad Event 거부)
+            headers = mapOf("Event" to "mcptt", "Expires" to if (on) "3600" else "0"),
         )
+        _affiliated.value = if (on) _affiliated.value + groupId else _affiliated.value - groupId
         _status.value = if (on) "affiliate $groupId" else "de-affiliate $groupId"
     }
 
-    /** 키업 그룹콜 — multipart INVITE + floor SDP 주입. [members] 비우면 resource-lists 생략. */
-    fun startGroupCall(groupId: String, members: List<McpttXml.ResourceEntry> = emptyList()) {
-        floor?.close()
-        val f = FloorClient(ssrc, mcpttId, localPort = 0, onEvent = ::onFloorEvent).also { floor = it }
-        val appSdp = "m=application ${f.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio"
+    // ── PTT 버튼 (주채널 전용) ──
 
-        val parts = ArrayList<SipBodyPart>()
-        parts.add(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
-            McpttXml.mcpttInfo(McpttXml.SessionType.PREARRANGED, "tel:$groupId", mcpttId, "tel:$groupId")))
-        if (members.isNotEmpty())
-            parts.add(SipBodyPart("application", "resource-lists+xml", McpttXml.resourceLists(members)))
-
-        _floorState.value = FloorState.IDLE
-        sip.makeGroupCall("sip:$groupId@${sipConfig.domain}", parts, appSdp)
-        _status.value = "그룹콜 $groupId (floor localPort=${f.localPort})"
-    }
-
-    fun hangup() {
-        if (activeCallId >= 0) sip.hangup(activeCallId)
-        floor?.close(); floor = null
-        _floorState.value = FloorState.IDLE
-    }
-
-    // ── PTT 버튼 ──
-
-    /** PTT down — Floor Request. GRANT 수신 시에만 실제 발화(mic on). */
+    /** PTT down — 주채널에 Floor Request. GRANT 수신 시에만 실제 발화(mic on). */
     fun pttDown() {
-        floor?.requestFloor(priority = 0)
-        _floorState.value = FloorState.REQUESTING
-    }
-
-    /** PTT up — Floor Release + mic off. */
-    fun pttUp() {
-        floor?.releaseFloor()
-        if (activeCallId >= 0) sip.setMicEnabled(activeCallId, false)
-        _floorState.value = FloorState.IDLE
-    }
-
-    private fun onFloorEvent(ev: FloorEvent) {
-        when (ev) {
-            is FloorEvent.Granted -> { if (activeCallId >= 0) sip.setMicEnabled(activeCallId, true); _floorState.value = FloorState.SPEAKING; _status.value = "발언권 획득" }
-            is FloorEvent.Denied -> { if (activeCallId >= 0) sip.setMicEnabled(activeCallId, false); _floorState.value = FloorState.IDLE; _status.value = "발언권 거부: ${ev.text ?: ev.cause}" }
-            is FloorEvent.Revoked -> { if (activeCallId >= 0) sip.setMicEnabled(activeCallId, false); _floorState.value = FloorState.IDLE; _status.value = "발언권 회수: ${ev.text ?: ev.cause}" }
-            is FloorEvent.Taken -> { _floorState.value = FloorState.LISTENING; _status.value = "화자: ${ev.speaker ?: "?"}" }
-            FloorEvent.Idle -> { _floorState.value = FloorState.IDLE }
-            is FloorEvent.QueuePosition -> { _floorState.value = FloorState.QUEUED; _status.value = "대기열 ${ev.position}" }
-            is FloorEvent.Other -> Log.d(TAG, "floor other ${ev.type}")
+        val s = primarySession() ?: run { _status.value = "그룹콜을 먼저 시작하세요"; return }
+        when (s.floorState) {
+            FloorState.SPEAKING, FloorState.REQUESTING -> return
+            FloorState.LISTENING -> { feedback?.denyTone(); _status.value = "다른 사용자가 발언 중"; return }
+            else -> Unit
+        }
+        pttHeld = true
+        s.floor.requestFloor(priority = 0)
+        s.floorState = FloorState.REQUESTING
+        publish()
+        // GRANT/DENY 무응답 방어 — 타임아웃 시 IDLE 복귀 + 거부 톤
+        requestTimeout?.cancel()
+        requestTimeout = scope.launch {
+            delay(REQUEST_TIMEOUT_MS)
+            val p = primarySession() ?: return@launch
+            if (p.floorState == FloorState.REQUESTING) {
+                p.floorState = FloorState.IDLE
+                feedback?.denyTone()
+                _status.value = "발언권 응답 없음"
+                publish()
+            }
         }
     }
 
+    /** PTT up — 주채널 Floor Release + mic off. */
+    fun pttUp() {
+        pttHeld = false
+        requestTimeout?.cancel()
+        val s = primarySession() ?: return
+        val wasSpeaking = s.floorState == FloorState.SPEAKING
+        s.floor.releaseFloor()
+        if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
+        if (s.floorState != FloorState.LISTENING) s.floorState = FloorState.IDLE
+        if (s.speaker?.self == true) s.speaker = null
+        if (wasSpeaking) feedback?.releaseTone()
+        publish()
+    }
+
+    private fun onFloorEvent(groupId: String, ev: FloorEvent) {
+        val s = synchronized(lock) { sessionMap[groupId] } ?: return
+        val isPrimary = s.role == ChannelRole.PRIMARY
+        when (ev) {
+            is FloorEvent.Granted -> {
+                requestTimeout?.cancel()
+                if (!isPrimary || !pttHeld) {        // 늦은 GRANT/비주채널 — 즉시 반납
+                    s.floor.releaseFloor()
+                    s.floorState = FloorState.IDLE
+                    publish()
+                    return
+                }
+                s.floorState = FloorState.SPEAKING
+                s.speaker = Speaker(mcpttId, self = true, sinceMs = SystemClock.elapsedRealtime())
+                _status.value = "발언권 획득"
+                // "삑 후 말하기": 승인 톤 재생이 끝난 뒤 mic 개방(톤이 그룹으로 송출되지 않게)
+                scope.launch {
+                    delay(feedback?.grantTone() ?: 0L)
+                    val p = primarySession()
+                    if (pttHeld && p?.floorState == FloorState.SPEAKING && p.callId >= 0)
+                        sip.setMicEnabled(p.callId, true)
+                }
+            }
+            is FloorEvent.Denied -> {
+                if (isPrimary) {
+                    requestTimeout?.cancel()
+                    if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
+                    feedback?.denyTone()
+                    _status.value = "발언권 거부: ${ev.text ?: ev.cause}"
+                }
+                s.floorState = FloorState.IDLE
+            }
+            is FloorEvent.Revoked -> {
+                if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
+                s.floorState = FloorState.IDLE
+                if (s.speaker?.self == true) s.speaker = null
+                if (isPrimary) { feedback?.revokeTone(); _status.value = "발언권 회수: ${ev.text ?: ev.cause}" }
+            }
+            is FloorEvent.Taken -> {
+                s.floorState = FloorState.LISTENING
+                s.speaker = Speaker(ev.speaker ?: "?", self = false, sinceMs = SystemClock.elapsedRealtime())
+            }
+            FloorEvent.Idle -> {
+                if (s.floorState != FloorState.SPEAKING) s.floorState = FloorState.IDLE
+                if (s.speaker?.self != true) s.speaker = null
+            }
+            is FloorEvent.QueuePosition -> { s.floorState = FloorState.QUEUED; _status.value = "대기열 ${ev.position}" }
+            is FloorEvent.Other -> Log.d(TAG, "floor other ${ev.type}")
+        }
+        publish()
+    }
+
     fun shutdown() {
-        floor?.close(); floor = null
+        requestTimeout?.cancel()
+        synchronized(lock) {
+            sessionMap.values.forEach { it.close() }
+            sessionMap.clear()
+        }
+        feedback?.close(); feedback = null
         sip.shutdown()
     }
 
-    private companion object { const val TAG = "PttController" }
+    companion object {
+        private const val TAG = "PttController"
+        /** Floor Request 후 GRANT/DENY 무응답 시 IDLE 복귀 시한. */
+        private const val REQUEST_TIMEOUT_MS = 3000L
+
+        /** URI("tel:g001"/"sip:g001@dom"/"\"이름\" <sip:..>") → 번호부("g001"). */
+        fun bareId(uri: String): String {
+            val m = Regex("(?:tel:|sips?:)([^@>;\\s]+)").find(uri)
+            return (m?.groupValues?.get(1) ?: uri.trim()).substringBefore('@')
+        }
+    }
 }

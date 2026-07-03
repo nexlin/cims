@@ -53,6 +53,10 @@ class FloorClient(
     @Volatile private var running = true
     private val rx = thread(name = "floor-rx", start = true) { receiveLoop() }
 
+    // 송신 전용 스레드 — pttDown/Up 은 UI(main) 스레드에서 호출되는데 main 에서의
+    // socket.send 는 NetworkOnMainThreadException 으로 즉시 실패한다.
+    private val tx = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "floor-tx") }
+
     /** SDP 에서 학습한 CMP floor 목적지 설정(송신 가능해짐). */
     fun connectRemote(host: String, port: Int) {
         remoteAddr = InetAddress.getByName(host)
@@ -76,12 +80,18 @@ class FloorClient(
     }
 
     fun requestQueuePosition() = send(FloorCodec.queuePositionRequest(ssrc, userId))
-    fun sendAck() = send(FloorCodec.ack(ssrc))
 
-    private fun send(pkt: ByteArray) = runCatching {
-        val addr = remoteAddr ?: run { Log.w(TAG, "floor send before remote learned"); return@runCatching }
-        socket.send(DatagramPacket(pkt, pkt.size, addr, remotePort))
-    }.onFailure { Log.w(TAG, "floor send failed: ${it.message}") }
+    /** Floor Ack(User ID 포함) — 참여 직후 1회 송신해 NAT 유입 매핑을 열고 서버 latch 를 유도. */
+    fun sendAck() = send(FloorCodec.ack(ssrc, userId))
+
+    private fun send(pkt: ByteArray) {
+        val addr = remoteAddr ?: run { Log.w(TAG, "floor send before remote learned"); return }
+        val port = remotePort
+        tx.execute {
+            runCatching { socket.send(DatagramPacket(pkt, pkt.size, addr, port)) }
+                .onFailure { Log.w(TAG, "floor send failed: ${it.javaClass.simpleName}: ${it.message}") }
+        }
+    }
 
     // ── 수신 ──
 
@@ -104,7 +114,14 @@ class FloorClient(
             FloorMsgType.GRANTED -> { _state.value = FloorState.SPEAKING; FloorEvent.Granted(msg.durationSec) }
             FloorMsgType.DENY -> { _state.value = FloorState.IDLE; FloorEvent.Denied(msg.rejectCause, FloorCause.REJECT[msg.rejectCause]) }
             FloorMsgType.IDLE -> { if (_state.value != FloorState.SPEAKING) _state.value = FloorState.IDLE; FloorEvent.Idle }
-            FloorMsgType.TAKEN -> { _state.value = FloorState.LISTENING; FloorEvent.Taken(msg.grantedParty ?: msg.userId) }
+            FloorMsgType.TAKEN -> {
+                val sp = msg.grantedParty ?: msg.userId
+                // 서버가 전체 멤버에게 방송하는 TAKEN 에 내 GRANT 도 포함 — 화자=나면
+                // 발언 상태를 강등하지 않는다(마이크 개방 유지).
+                if (sameUser(sp, userId)) return
+                _state.value = FloorState.LISTENING
+                FloorEvent.Taken(sp)
+            }
             FloorMsgType.REVOKE -> { _state.value = FloorState.IDLE; FloorEvent.Revoked(msg.rejectCause, FloorCause.REVOKE[msg.rejectCause]) }
             FloorMsgType.QUEUE_POS_INFO -> { _state.value = FloorState.QUEUED; FloorEvent.QueuePosition(msg.queuePosition) }
             else -> FloorEvent.Other(msg.type)
@@ -113,8 +130,16 @@ class FloorClient(
         runCatching { onEvent(ev) }
     }
 
+    /** MCPTT ID 동일성 — "tel:+82..@dom"/"sip:.."/"+82.." 표기 차이를 무시하고 비교. */
+    private fun sameUser(a: String?, b: String?): Boolean {
+        if (a == null || b == null) return false
+        fun bare(s: String) = s.substringAfter(':').substringBefore('@')
+        return bare(a) == bare(b)
+    }
+
     fun close() {
         running = false
+        runCatching { tx.shutdownNow() }
         runCatching { socket.close() }
         runCatching { rx.join(500) }
     }

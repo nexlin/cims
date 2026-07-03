@@ -43,6 +43,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)   // 통화 컨트롤 벡터 아이콘(CIMS-Phone 과 동일)
     implementation(libs.okhttp)                       // CSC: IdMS(OAuth2 PKCE)/GMS/CMS HTTPS
 
     debugImplementation(libs.androidx.ui.tooling)

@@ -104,8 +104,11 @@ object FloorCodec {
     fun queuePositionRequest(ssrc: Long, userId: String): ByteArray =
         encode(FloorMessage(FloorMsgType.QUEUE_POS_REQUEST, ssrc, listOf(FloorField(FloorFieldId.USER_ID, userId.toByteArray()))))
 
-    /** Floor Ack. */
-    fun ack(ssrc: Long): ByteArray = encode(FloorMessage(FloorMsgType.ACK, ssrc, emptyList()))
+    /** Floor Ack — [userId] 포함 시 서버가 NAT 뒤 참가자의 floor 주소를 latch 할 수 있다(경로 개방). */
+    fun ack(ssrc: Long, userId: String? = null): ByteArray = encode(
+        FloorMessage(FloorMsgType.ACK, ssrc,
+            if (userId == null) emptyList()
+            else listOf(FloorField(FloorFieldId.USER_ID, userId.toByteArray(Charsets.UTF_8)))))
 
     private fun u16Field(id: Int, v: Int) =
         FloorField(id, byteArrayOf(((v ushr 8) and 0xff).toByte(), (v and 0xff).toByte()))

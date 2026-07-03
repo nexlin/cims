@@ -27,8 +27,10 @@ import kotlinx.coroutines.launch
 class PttService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob())
-    var controller: PttController? = null
-        private set
+    // StateFlow — 바인드 시점에 아직 컨트롤러가 없어도(SSO 재취득 중) 생성 시 UI 재구성
+    private val _controller = kotlinx.coroutines.flow.MutableStateFlow<PttController?>(null)
+    val controllerFlow: kotlinx.coroutines.flow.StateFlow<PttController?> = _controller
+    val controller: PttController? get() = _controller.value
     private var job: Job? = null
 
     inner class LocalBinder : Binder() {
@@ -81,16 +83,18 @@ class PttService : Service() {
         if (!cfg.isComplete()) { update("CIMS-McPtt", "로그인 필요"); return }
         if (controller != null && activeConfig == cfg) return   // 동일 설정 → 그대로
         controller?.let { runCatching { it.shutdown() } }       // 설정 변경(포트/비번) → 재등록
-        val mcpttId = "tel:+${cfg.msisdn}"
+        // msisdn 은 프로비저닝에 따라 "+8250..."/"8250..." 혼재 — tel: URI 로 정규화(+ 중복 방지)
+        val mcpttId = "tel:" + cfg.msisdn.removePrefix("tel:").let { if (it.startsWith("+")) it else "+$it" }
         val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
-        val c = PttController(cfg, mcpttId, csc, allowInsecureTls = true).also { controller = it; activeConfig = cfg }
+        val c = PttController(cfg, mcpttId, csc, allowInsecureTls = true).also { _controller.value = it; activeConfig = cfg }
+        c.feedback = com.cims.ue.ptt.audio.PttFeedback(this)
         observe(c)
         c.register()
     }
 
     fun stopSip() {
         controller?.shutdown()
-        controller = null
+        _controller.value = null
         stopForegroundCompat()
         stopSelf()
     }
@@ -105,7 +109,7 @@ class PttService : Service() {
     override fun onDestroy() {
         job?.cancel()
         controller?.shutdown()
-        controller = null
+        _controller.value = null
         super.onDestroy()
     }
 

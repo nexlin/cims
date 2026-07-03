@@ -210,9 +210,15 @@ name = "MCPT" (0x4D435054)                                     |
         TAKEN(타인 화자) ─► [LISTENING] ─ IDLE ─►─┘◄── TAKEN(타 화자)──┘
 ```
 
-- **PTT 버튼 down** → mic 트랙을 conference bridge에 connect **+** Floor Request 송신. Granted 수신 후에만 실제 발화 UX(톤/진동) 확정.
-- **Revoke/Deny** 수신 → 즉시 mic disconnect + UX 알림.
-- **Taken** → 화자 표시(Granted Party's Identity), 수신 음성 재생.
+- **PTT 버튼 down** → Floor Request 송신(+REQUESTING). GRANT 수신 시 **승인 톤(이중 삑)+진동 재생을 마친 뒤에** mic 개방("삑 후 말하기" — 톤이 그룹으로 송출되지 않게). 3초 내 GRANT/DENY 무응답이면 IDLE 복귀+거부 톤.
+- **늦은 GRANT**(버튼을 이미 뗀 뒤 도착) → 즉시 Release 반납(mic 미개방).
+- **Revoke/Deny** 수신 → 즉시 mic disconnect + 거부/회수 톤(승인과 구별되는 저음)+진동.
+- **Taken** → 발언자 카드에 화자(Granted Party's Identity)+발언 경과시간 표시, LISTENING 중 버튼 누름은 무시(불필요한 REJECT 방지).
+- **UX 구현**: 톤/진동=`ptt-client/audio/PttFeedback.kt`(ToneGenerator STREAM_VOICE_CALL+Vibrator, 서비스가 컨트롤러에 주입), 발언자 추적=`PttController.speaker: StateFlow<Speaker?>`(내 GRANT/타인 TAKEN, elapsedRealtime 기준). PTT 화면(`MainActivity`)=상단 등록상태·그룹 카드 + 중앙 발언자 카드(경과 타이머) + 하단 원형 220dp PTT 버튼(IDLE=파랑/REQUESTING=주황/SPEAKING=초록+펄스 링/LISTENING=회색).
+- **하드웨어 PTT 버튼**(`HwPtt.kt`): 하드웨어 버튼 단말은 화면 PTT 버튼을 숨기고 안내 문구로 대체, 키 down/up=`MainActivity.dispatchKeyEvent`→pttDown/Up. 매핑 키코드=F10/F11/**309**(W999 실측: 측면 PTT 키 scancode 87→OEM 이 keycode 309 로 매핑 — Android 13 이라 `input keyevent 309` 주입은 불가, 커널 경로로만 전달). 감지 3중화=①과거 PTT 키 수신 이력(영속) ②기종 allowlist(UNIWA W999 — GPIO 장치 `droi_gpio_keys` 가 앱 InputDevice 열거에 미노출) ③입력장치 F10/F11 능력 스캔. 컨트롤러 접근은 `PttService.controllerFlow`(StateFlow — 바인드 후 늦게 생성되는 컨트롤러도 UI 재구성). ⚠️일부 러기드 단말은 `persist.log.tag=I` 로 Log.d 전역 차단 — 진단 로그는 Log.i.
+- **착신 그룹콜 자동 수락**(ptt_ue.md §12.3): 수신 INVITE 원문에 `mcptt-info` 존재 → `CallState.Incoming.mcptt` → `PttController.autoJoinGroupCall`(floor 소켓 개설+`answerGroupCall` 로 응답 SDP 에 m=application 주입). 전제=**자동 affiliation**(등록 완료/그룹 선택 시 PUBLISH, `Event: mcptt` 헤더 필수 — 없으면 CSP 489 Bad Event). CSP 는 affiliation 된 멤버에게만 그룹 INVITE fan-out.
+- **참가자 목록**: CSP in-dialog conference NOTIFY(RFC 4575)를 `CimsCall.onCallTsxState` 의 수신 원문에서 파싱(`SipController.conferenceInfo` SharedFlow → `PttController.participants`). ⚠️pjsip 다이얼로그는 evsub 미소유 NOTIFY 에 500 을 응답하지만 invite usage 의 tsx 이벤트로 원문은 전달됨 — 정식 conference 이벤트 구독은 후속 과제.
+- **NAT 경로 개방**: ①floor 연결 직후 **Floor Ack(User ID 포함) 1회** 송신 → CMP 가 floor 주소 latch(TAKEN/GRANT 수신 가능) ②PJSIP `PJMEDIA_STREAM_ENABLE_KA=1`(config_site, 재빌드)로 오디오 소켓 keepalive → CMP NAT-KA latch 로 청취 전용 상태에서도 하향 오디오 수신. UAC 발신 응답의 floor 목적지는 `onCallTsxState` 의 200 OK 원문에서 학습(onCallSdpCreated 는 로컬 SDP 생성 시에만 호출됨). floor UDP 송신은 전용 스레드(main 스레드 send 는 NetworkOnMainThreadException).
 - **레거시 폴백**: 서버는 DTMF(PT=101)도 floor 트리거로 허용([ptt_flows.md](ptt_flows.md) C1). 1차 구현은 RTCP-APP(TS 24.380) 정공법 사용.
 
 ---

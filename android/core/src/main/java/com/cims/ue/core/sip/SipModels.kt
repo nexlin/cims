@@ -32,8 +32,9 @@ sealed interface CallState {
     /** 발신 진행(CALLING/EARLY). */
     data class Outgoing(val id: Int, val remote: String) : CallState
 
-    /** 착신 수신(INVITE 도착, 180 자동 응답 후 사용자 응답 대기). [video]=상대 SDP 에 m=video 포함. */
-    data class Incoming(val id: Int, val remote: String, val video: Boolean = false) : CallState
+    /** 착신 수신(INVITE 도착, 180 자동 응답 후 사용자 응답 대기). [video]=상대 SDP 에 m=video 포함.
+     *  [mcptt]=multipart 에 mcptt-info 포함(MCPTT 그룹콜 — PTT 앱이 자동 수락). */
+    data class Incoming(val id: Int, val remote: String, val video: Boolean = false, val mcptt: Boolean = false) : CallState
 
     /** 통화 활성(CONNECTING/CONFIRMED). */
     data class Active(val id: Int, val remote: String) : CallState

@@ -49,6 +49,10 @@ class SipController(private val config: SipAccountConfig) {
     private val _incomingMessage = MutableSharedFlow<ImMessage>(extraBufferCapacity = 32)
     val incomingMessage: SharedFlow<ImMessage> = _incomingMessage.asSharedFlow()
 
+    /** in-dialog conference NOTIFY(RFC 4575) 본문 — (callId, XML). PTT 참가자 목록 갱신용. */
+    private val _conferenceInfo = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 16)
+    val conferenceInfo: SharedFlow<Pair<Int, String>> = _conferenceInfo.asSharedFlow()
+
     private val ctl = HandlerThread("pj-ctl").apply { start() }
     private val h = Handler(ctl.looper)
 
@@ -122,12 +126,9 @@ class SipController(private val config: SipAccountConfig) {
     /** 반이중(PTT): true 면 mic 는 floor GRANT 시에만 송신, spk 는 상시 청취. (VoLTE=false 전이중) */
     @Volatile var halfDuplex = false
 
-    /** 그룹콜 SDP 에 주입할 floor 라인(`m=application …`). makeGroupCall 직전 설정. */
-    @Volatile var injectApplicationSdp: String? = null
-
-    /** 수신 SDP 에서 학습한 CMP floor 목적지(ip,port). FloorClient 가 여기로 송신. */
-    private val _floorRemote = MutableStateFlow<Pair<String, Int>?>(null)
-    val floorRemote: StateFlow<Pair<String, Int>?> = _floorRemote.asStateFlow()
+    /** 수신 SDP 에서 학습한 CMP floor 목적지 — (callId, ip, port). 그룹별 FloorClient 가 여기로 송신. */
+    private val _floorRemote = MutableStateFlow<Triple<Int, String, Int>?>(null)
+    val floorRemote: StateFlow<Triple<Int, String, Int>?> = _floorRemote.asStateFlow()
 
     /**
      * pj-ctl 스레드에서 제어 작업 실행. [affectsReg]=true(등록 계열)일 때만 실패를 등록
@@ -181,7 +182,6 @@ class SipController(private val config: SipAccountConfig) {
         }
         halfDuplex = false                                        // VoLTE = 전이중
         muted = false                                             // 새 호는 음소거 해제로 시작
-        injectApplicationSdp = null
         val call = CimsCall(this, acc)
         val prm = CallOpParam(true).apply {
             opt.audioCount = 1L
@@ -189,6 +189,25 @@ class SipController(private val config: SipAccountConfig) {
         }
         call.makeCall("sip:$dstNumber@${config.domain}", prm)
         calls[call.id] = call
+    }
+
+    /**
+     * MCPTT 그룹콜 착신 자동 수락(ptt_ue.md §12.3) — 응답 SDP 에 `m=application`(floor) 주입,
+     * 상대(INVITE offer)의 floor 포트는 [floorRemote] 로 학습(onCallSdpCreated remSdp).
+     */
+    fun answerGroupCall(callId: Int, applicationSdp: String) = onCtl {
+        halfDuplex = true
+        muted = false
+        calls[callId]?.apply {
+            pendingAppSdp = applicationSdp
+            answer(
+                CallOpParam(true).apply {
+                    statusCode = pjsip_status_code.PJSIP_SC_OK
+                    opt.audioCount = 1L
+                    opt.videoCount = 0L
+                },
+            )
+        }
     }
 
     /** 착신 응답. [withVideo]=true 면 영상까지 협상(상대가 m=video 를 offer 한 경우). */
@@ -214,6 +233,24 @@ class SipController(private val config: SipAccountConfig) {
 
     /** 마이크 송신 토글 (PTT floor GRANT→true, RELEASE/REVOKE→false). */
     fun setMicEnabled(callId: Int, on: Boolean) = onCtl { calls[callId]?.setMic(on) }
+
+    /** 오디오 출력 라우팅 — PTT(무전) UX 용 스피커폰 토글. */
+    fun setLoudspeaker(on: Boolean) =
+        setAudioRoute(if (on) AUDIO_ROUTE_SPEAKER else AUDIO_ROUTE_EARPIECE)
+
+    /** 오디오 출력 3단 라우팅 — [AUDIO_ROUTE_DEFAULT](자동: 이어폰 연결 시 이어폰)/수화구/스피커. */
+    fun setAudioRoute(route: Int) = onCtl {
+        PjLib.ep.audDevManager().setOutputRoute(
+            when (route) {
+                AUDIO_ROUTE_SPEAKER -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_LOUDSPEAKER
+                AUDIO_ROUTE_EARPIECE -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_EARPIECE
+                else -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_DEFAULT
+            },
+        )
+    }
+
+    /** 통화별 청취(수신 오디오 → 스피커) 토글 — 멀티그룹 듣기 정책용. */
+    fun setCallListen(callId: Int, on: Boolean) = onCtl { calls[callId]?.setListen(on) }
 
     /**
      * 임의 SIP 요청 송신 (affiliation 은 method="PUBLISH"). body/헤더는 호출자(ptt-client)가 규격대로 구성.
@@ -248,9 +285,8 @@ class SipController(private val config: SipAccountConfig) {
     ) = onCtl {
         val acc = account ?: return@onCtl
         halfDuplex = true
-        injectApplicationSdp = applicationSdp
-        _floorRemote.value = null
         val call = CimsCall(this, acc)
+        call.pendingAppSdp = applicationSdp
         val prm = CallOpParam(true).apply {
             opt.audioCount = 1L
             opt.videoCount = 0L
@@ -265,8 +301,8 @@ class SipController(private val config: SipAccountConfig) {
 
     // ── 콜백 진입점 (CimsAccount/CimsCall 에서 호출) ──
 
-    internal fun onRemoteFloorLearned(ip: String, port: Int) {
-        _floorRemote.value = ip to port
+    internal fun onRemoteFloorLearned(callId: Int, ip: String, port: Int) {
+        _floorRemote.value = Triple(callId, ip, port)
     }
 
     internal fun dispatchReg(active: Boolean, code: Int, reason: String) {
@@ -277,9 +313,13 @@ class SipController(private val config: SipAccountConfig) {
         }
     }
 
-    internal fun dispatchIncoming(call: CimsCall, from: String, video: Boolean) {
+    internal fun dispatchIncoming(call: CimsCall, from: String, video: Boolean, mcptt: Boolean = false) {
         calls[call.id] = call
-        _call.value = CallState.Incoming(call.id, from, video)
+        _call.value = CallState.Incoming(call.id, from, video, mcptt)
+    }
+
+    internal fun dispatchConferenceInfo(callId: Int, xml: String) {
+        _conferenceInfo.tryEmit(callId to xml)
     }
 
     internal fun dispatchCallState(callId: Int, s: CallState) {
@@ -377,8 +417,13 @@ class SipController(private val config: SipAccountConfig) {
         }
     }
 
-    private companion object {
-        const val TAG = "SipController"
+    companion object {
+        private const val TAG = "SipController"
+
+        /** 오디오 출력 라우팅 상수 — [setAudioRoute]. */
+        const val AUDIO_ROUTE_DEFAULT = 0   // 자동(이어폰 연결 시 이어폰)
+        const val AUDIO_ROUTE_EARPIECE = 1  // 수화구
+        const val AUDIO_ROUTE_SPEAKER = 2   // 외장 스피커
     }
 }
 
