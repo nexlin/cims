@@ -269,14 +269,29 @@ oam-svc 소유**다. 정규 관리 경로는 콘솔 배포설정 — oam-svc `co
 배포 overlay(콘솔 설정)  >  oam-svc.json(패키지 동봉 시)  >  base oam.json fallback 상속(공유값만)
 ```
 
+**`config.json`(배포 overlay)이 완전한 유효 설정이다 — csc/csp/cmp 와 동일.** 콘솔 배포설정
+UI(deployment 모드)는 `config_template` 의 **전 필드를 default+입력값으로 채워** 전송하고
+백엔드(`_put_deployment_config`)가 그대로 저장하므로, `config.json` 은 항상 서비스 관측 키
+전체를 담는다(부분 저장이 아님). 따라서 `config_template.json` 이 구조·기본값의 SoT이며,
+그 `default` 는 **환경 비종속 중립값**(예: `CimsDatabase.Host=127.0.0.1`, `CimsDatabase.User=cims`,
+`CspNotify.Ip=127.0.0.1`)으로 두고 실주소는 배포 시 콘솔에서 채운다(레포에 테스트베드 IP 금지).
+Python 서비스 모듈(csc·oam-svc)은 C++ 과 달리 base conf 부재를 tolerate 하므로 `make dist`
+base conf 생성(`gen_default_config`) 대상이 아니다 — `config.json` 에 의존한다.
+
 **base `oam.json` 은 base 전용 설정만 갖는다** — 서비스 관측 키(`CimsDatabase`/`CspNotify`/
 `CmpIp`·`CmpPort`/`MediaServer`)를 두지 않으며, **`--role base` 는 이 키들을 읽지 않는다**
 (base 프로세스는 DB 미접속). 예외는 `ServiceLogging` — base 도 agent 계열 알람(alert_log)
 저장·조회와 콘솔 flow 기록에 쓰는 공유 키라 `oam.json` 에 남으며, oam-svc 는 콘솔 미설정 시
 이를 fallback 상속한다. `--role all`(단일 프로세스 dev/TB)에서 서비스 관측이 필요하면 키를
 배포 overlay(`config.json`) 또는 로컬/TB 설정(`oam-tb.json` 등)으로 제공한다 — 레포 `oam.json`
-에는 두지 않는다. `MediaServer.Endpoints` 는 `{ip,port}` dict 와 `"ip:port"` 문자열(템플릿
-string_list) 둘 다 허용하며, 대시보드 health 위젯의 CMP probe 는 `CmpIp` 미설정 시
+에는 두지 않는다.
+
+`MediaServer.Endpoints`(type `string_list`)는 `"ip:port"` **배열**로 저장·소비된다. 콘솔
+입력의 콤마 문자열은 배열로 정규화되는데, 세 지점에서 보장한다: (1) 콘솔 위젯(deployment 모드
+`ModuleConfigModal`·모듈 모드 `ModuleConfigEditor` 둘 다 콤마↔배열), (2) 백엔드 coerce
+(`_put_deployment_config` list-coerce + 모듈 모드 `_coerce_value`), (3) 소비자
+(`stats._media_endpoints` 가 최상위 문자열도 콤마 분해). 원소는 `"ip:port"` 문자열과
+`{ip,port}` dict 를 모두 허용하며, 대시보드 health 위젯의 CMP probe 는 `CmpIp` 미설정 시
 `MediaServer.Endpoints` 첫 노드를 대표로 사용한다.
 
 ### file_store 소유권 (I5)

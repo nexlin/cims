@@ -46,9 +46,10 @@
           "key": "CspNotify.Ip",
           "label": "CSP probe IP",
           "type": "string",
-          "default": "121.161.164.47",
+          "default": "127.0.0.1",
+          "deploy_value": "@CSP_IP@",
           "restart": false,
-          "help": "CSP CscInterface(UDP) bind 주소 — A/S HA 에선 VIP 로 두면 항상 active master."
+          "help": "CSP CscInterface(UDP) bind 주소 — CSP 가 뜬 노드 IP. A/S HA 에선 VIP 로 두면 항상 active master."
         },
         {
           "key": "CspNotify.Port",

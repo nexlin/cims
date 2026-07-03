@@ -181,6 +181,13 @@ def _coerce_value(field: dict, raw):
         if not isinstance(raw, str) or raw not in opts:
             return (None, f"not_in_enum({opts})")
         return (raw, None)
+    if t in ("string_list", "ref_list"):
+        # 배열 또는 콤마 문자열 허용 → 항상 문자열 배열로 정규화.
+        if isinstance(raw, str):
+            raw = [s.strip() for s in raw.split(",") if s.strip()]
+        if not isinstance(raw, list):
+            return (None, "not_list")
+        return ([str(x) for x in raw], None)
     # string / password / path / 기타 → 문자열
     if not isinstance(raw, str):
         return (None, "not_string")

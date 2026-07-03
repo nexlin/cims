@@ -68,6 +68,26 @@ def _pkg_load(config, pid: int = None, name: str = None, version: str = None):
     return None
 
 
+def _coerce_list_fields(template: dict, values: dict) -> dict:
+    """config_template 의 string_list/ref_list 필드 값이 콤마 문자열이면 배열로 정규화.
+    프론트 위젯 누락·raw API 우회에도 config.json 에 배열로 저장되게 하는 백엔드 방어."""
+    if not isinstance(values, dict):
+        return values
+    list_keys = set()
+    for sec in (template or {}).get("sections", []):
+        for fld in sec.get("fields", []):
+            if (fld.get("type") or "").lower() in ("string_list", "ref_list") and fld.get("key"):
+                list_keys.add(fld["key"])
+    if not list_keys:
+        return values
+    out = dict(values)
+    for k in list_keys:
+        v = out.get(k)
+        if isinstance(v, str):
+            out[k] = [s.strip() for s in v.split(",") if s.strip()]
+    return out
+
+
 def _pkg_load_all(config) -> list:
     return file_store.load_all(_pkg_dir(config))
 
@@ -1802,6 +1822,17 @@ async def _put_deployment_config(handler_args, did: int, config):
                              media_type="application/json")
     _enrich_deploy([dep], config)
     pkg_name = dep.get("package_name")
+
+    # string_list/ref_list 필드가 콤마 문자열로 오면 배열로 정규화(백엔드 coerce).
+    #   프론트 위젯 누락·raw API 우회 시에도 config.json 에 항상 배열로 저장되게 하는
+    #   최종 방어. (예: MediaServer.Endpoints "a:9000, b:9000" → ["a:9000","b:9000"])
+    try:
+        _pkg = await asyncio.to_thread(_pkg_load, config, dep.get("package_id"))
+        _tmpl = (_pkg or {}).get("config_template") if isinstance(_pkg, dict) else None
+        if isinstance(_tmpl, dict):
+            values = _coerce_list_fields(_tmpl, values)
+    except Exception as _e:
+        logger.log_warning(f"deployment config list-coerce skip: {_e}")
 
     # ── 적용 대상 deployment 들 결정
     targets: list[dict] = [dep]

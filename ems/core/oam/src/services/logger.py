@@ -168,7 +168,13 @@ def clear_sesid(key: str):
 
 
 def _ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
+    # exist_ok=True 여도 공유 NAS(NFS)에서 base/oam-svc/csc 가 같은 시각 버킷 디렉토리를
+    # 프로세스 간 동시 생성하면 속성 캐시 레이스로 FileExistsError 가 새어나온다
+    # (in-process 락으론 못 막음). 이미 존재하면 성공으로 간주.
+    try:
+        os.makedirs(path, exist_ok=True)
+    except FileExistsError:
+        pass
 
 
 def _ts_hms() -> str:

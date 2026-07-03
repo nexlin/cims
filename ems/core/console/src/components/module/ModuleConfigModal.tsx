@@ -7,7 +7,7 @@ import {
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
 
-export type FieldValue = string | number | boolean | null
+export type FieldValue = string | number | boolean | null | string[]
 type Tab = 'scalar' | string   // 'scalar' = sections 탭, 나머지는 collection.key
 
 export type ModuleConfigSource =
@@ -632,6 +632,19 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
       <input className="form-input" type="password"
         value={(value as string) ?? ''}
         onChange={e => onChange(e.target.value)} />
+    )
+  }
+  if (f.type === 'string_list' || f.type === 'ref_list') {
+    // 콤마 분리 입력 ↔ 문자열 배열 (ModuleConfigEditor 와 동일 동작).
+    const arr = Array.isArray(value) ? (value as unknown[]).map(String) : []
+    return (
+      <input className="form-input" type="text"
+        value={arr.join(', ')}
+        placeholder="콤마로 구분 (예: 10.0.1.48:9000, 10.0.1.49:9000)"
+        onChange={e => {
+          const parts = e.target.value.split(',').map(s => s.trim()).filter(s => s !== '')
+          onChange(parts)
+        }} />
     )
   }
   // string / path

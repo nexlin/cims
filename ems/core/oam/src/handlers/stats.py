@@ -154,6 +154,10 @@ def _media_endpoints(config: dict):
     (oam-svc config_template string_list) 둘 다 허용."""
     ms = config.get('MediaServer', {}) or {}
     eps = ms.get('Endpoints') or []
+    # 최상위 값이 콤마 문자열이면 리스트로 분해 — string_list 가 배열로 정규화되지 않고
+    # 들어온 경우에도 문자 단위 순회로 깨지지 않게 방어. (예: "a:9000, b:9000")
+    if isinstance(eps, str):
+        eps = [s.strip() for s in eps.split(',') if s.strip()]
     out = []
     for e in eps:
         if isinstance(e, str):
