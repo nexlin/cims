@@ -124,19 +124,26 @@ class SipController(private val config: SipAccountConfig) {
     private val _floorRemote = MutableStateFlow<Pair<String, Int>?>(null)
     val floorRemote: StateFlow<Pair<String, Int>?> = _floorRemote.asStateFlow()
 
-    private fun onCtl(block: () -> Unit) = h.post {
+    /**
+     * pj-ctl 스레드에서 제어 작업 실행. [affectsReg]=true(등록 계열)일 때만 실패를 등록
+     * 상태(_reg)로 반영한다. 프리뷰·렌더·음소거 등 **미디어/부가 작업의 실패가 등록 배지를
+     * "오프라인"으로 오표시하지 않도록** 분리 — 등록의 정본은 onRegState(dispatchReg) 이다.
+     * (예: 영상통화 중 pjsua_vid_preview_start 실패(PJMEDIA_EVID_SYSERR)가 REGISTER 와 무관하게
+     * 배지를 오프라인으로 만들던 버그 수정.)
+     */
+    private fun onCtl(affectsReg: Boolean = false, block: () -> Unit) = h.post {
         runCatching {
             if (PjLib.booted) PjLib.ensureThread("pj-ctl")   // 부팅 전(최초 register)엔 ep 미초기화 → skip
             block()
         }.onFailure {
-            Log.e(TAG, "pj-ctl error", it)
-            _reg.value = RegState.Failed(it.message ?: "error")
+            Log.e(TAG, "pj-ctl error (affectsReg=$affectsReg)", it)
+            if (affectsReg) _reg.value = RegState.Failed(it.message ?: "error")
         }
     }
 
     // ── 외부 명령 ──
 
-    fun register() = onCtl {
+    fun register() = onCtl(affectsReg = true) {
         PjLib.boot()
         PjLib.ensureThread("pj-ctl")                  // 부팅 직후 pj-ctl 스레드 1회 등록
         CodecConfig.apply(PjLib.ep)
