@@ -11,8 +11,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.provider.Settings
+import android.graphics.SurfaceTexture
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.TextureView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -1725,15 +1728,14 @@ private fun VideoCallFullScreen(
         // 상대 영상(전체화면)
         VideoRender(onSurface = onSurface)
 
-        // 내 화면(로컬 카메라 프리뷰) PiP — 우하단 라운드 박스(하단 컨트롤 위).
+        // 내 화면(로컬 카메라 프리뷰) PiP — 우하단 코너(여백 최소, 테두리 없이 라운드만).
         Box(
             Modifier
                 .align(Alignment.BottomEnd)
-                .padding(bottom = 200.dp, end = 16.dp)
+                .padding(bottom = 24.dp, end = 12.dp)
                 .width(96.dp).aspectRatio(3f / 4f)
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF222222))
-                .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                .background(Color(0xFF222222)),
         ) { PreviewRender(onSurface = onPreviewSurface) }
 
         // 오버레이(터치 시 표시) — 상단 정보 + 하단 컨트롤. 스크림으로 가독성 확보.
@@ -1830,17 +1832,18 @@ private fun VideoRender(onSurface: (Any?) -> Unit) {
 
 @Composable
 private fun PreviewRender(onSurface: (Any?) -> Unit) {
-    // 로컬 카메라 프리뷰(내 화면). PiP 위에 그려지도록 media overlay + Z-top.
+    // 로컬 카메라 프리뷰(내 화면). SurfaceView 는 별도 서피스라 Compose .clip()/clipToOutline 로
+    // 모서리 라운드가 안 되므로 TextureView 를 쓴다(뷰 계층 텍스처 → 부모 clip 으로 라운드 적용).
     AndroidView(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
         factory = { ctx ->
-            SurfaceView(ctx).apply {
-                setZOrderMediaOverlay(true)
-                holder.addCallback(object : SurfaceHolder.Callback {
-                    override fun surfaceCreated(h: SurfaceHolder) = onSurface(h.surface)
-                    override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) = onSurface(h.surface)
-                    override fun surfaceDestroyed(h: SurfaceHolder) = onSurface(null)
-                })
+            TextureView(ctx).apply {
+                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) = onSurface(Surface(st))
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean { onSurface(null); return true }
+                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                }
             }
         },
     )
