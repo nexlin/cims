@@ -3,6 +3,7 @@ import { useToast } from '../Toast'
 import {
   deploymentApi, type ConfigTemplateCollection, type ConfigTemplateField,
 } from '../../api/deployment'
+import StringListInput from './StringListInput'
 
 type Record_ = Record<string, unknown>
 
@@ -425,17 +426,7 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
   }
   if (f.type === 'string_list') {
     // 콤마 분리 입력 ↔ 문자열 배열
-    const arr = Array.isArray(value) ? (value as unknown[]).map(String) : []
-    return (
-      <input className="form-input" type="text"
-        value={arr.join(', ')}
-        placeholder="콤마로 구분"
-        onChange={e => {
-          const raw = e.target.value
-          const parts = raw.split(',').map(s => s.trim()).filter(s => s !== '')
-          onChange(parts)
-        }} />
-    )
+    return <StringListInput value={value} onChange={onChange} />
   }
   if (f.type === 'ref_list') {
     const options = (f.ref_collection && refOpts[f.ref_collection]) || []

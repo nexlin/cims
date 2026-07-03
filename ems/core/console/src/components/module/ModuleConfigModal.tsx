@@ -6,6 +6,7 @@ import {
   type Deployment, type ConfigTemplate, type ConfigTemplateField,
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
+import StringListInput from './StringListInput'
 
 export type FieldValue = string | number | boolean | null | string[]
 type Tab = 'scalar' | string   // 'scalar' = sections 탭, 나머지는 collection.key
@@ -636,15 +637,10 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
   }
   if (f.type === 'string_list' || f.type === 'ref_list') {
     // 콤마 분리 입력 ↔ 문자열 배열 (ModuleConfigEditor 와 동일 동작).
-    const arr = Array.isArray(value) ? (value as unknown[]).map(String) : []
     return (
-      <input className="form-input" type="text"
-        value={arr.join(', ')}
+      <StringListInput value={value}
         placeholder="콤마로 구분 (예: 10.0.1.48:9000, 10.0.1.49:9000)"
-        onChange={e => {
-          const parts = e.target.value.split(',').map(s => s.trim()).filter(s => s !== '')
-          onChange(parts)
-        }} />
+        onChange={onChange} />
     )
   }
   // string / path
