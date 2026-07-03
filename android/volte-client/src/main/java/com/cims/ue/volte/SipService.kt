@@ -173,6 +173,7 @@ class SipService : Service() {
     fun setVideoEnabled(on: Boolean) { controller?.videoEnabled = on }
     fun setVideoSurface(surface: Any?) { controller?.setVideoSurface(surface) }
     fun setPreviewSurface(surface: Any?) { controller?.setPreviewSurface(surface) }
+    fun switchCamera() { controller?.switchCamera() }
 
     /** 통화중 마이크 음소거 토글. */
     fun setMuted(callId: Int, on: Boolean) { controller?.setMuted(callId, on) }

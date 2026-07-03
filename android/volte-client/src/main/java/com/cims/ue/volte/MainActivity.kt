@@ -56,6 +56,7 @@ import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dialpad
@@ -489,6 +490,7 @@ private fun HomeScreen(
             onToggleSpeaker = { on -> speakerOn = on; service?.setSpeaker(on) },
             onSurface = { service?.setVideoSurface(it) },
             onPreviewSurface = { service?.setPreviewSurface(it) },
+            onSwitchCamera = { service?.switchCamera() },
             onAnswer = { id -> answerCall(id, false) },
             onAnswerVideo = { id -> answerCall(id, true) },
             onReject = { id -> service?.reject(id) },
@@ -1605,6 +1607,7 @@ private fun CallScreen(
     onToggleSpeaker: (Boolean) -> Unit,
     onSurface: (Any?) -> Unit,
     onPreviewSurface: (Any?) -> Unit,
+    onSwitchCamera: () -> Unit,
     onAnswer: (Int) -> Unit,
     onAnswerVideo: (Int) -> Unit,
     onReject: (Int) -> Unit,
@@ -1621,6 +1624,7 @@ private fun CallScreen(
             onToggleVideo = onToggleVideo,
             onSurface = onSurface,
             onPreviewSurface = onPreviewSurface,
+            onSwitchCamera = onSwitchCamera,
             onHangup = onHangup,
         )
         return
@@ -1693,8 +1697,8 @@ private fun CallScreen(
 
 /**
  * 영상 통화 전체화면 — 상대 영상이 화면을 채우고, 화면을 터치하면 상단(번호/시간)·하단(컨트롤)
- * 오버레이가 나타났다 자동으로 사라진다(기본 전화/FaceTime 패턴). 우상단에 내 화면(로컬 카메라
- * 프리뷰) PiP. 컨트롤: 음소거·스피커·영상끄기·종료.
+ * 오버레이가 나타났다 자동으로 사라진다(기본 전화/FaceTime 패턴). 우측 상단에 전면/후면 카메라
+ * 전환 버튼, 우하단에 내 화면(로컬 카메라 프리뷰) PiP. 컨트롤: 음소거·스피커·영상·종료(아이콘만).
  */
 @Composable
 private fun VideoCallFullScreen(
@@ -1706,6 +1710,7 @@ private fun VideoCallFullScreen(
     onToggleVideo: (Boolean) -> Unit,
     onSurface: (Any?) -> Unit,
     onPreviewSurface: (Any?) -> Unit,
+    onSwitchCamera: () -> Unit,
     onHangup: (Int) -> Unit,
 ) {
     var controlsVisible by remember { mutableStateOf(true) }
@@ -1728,55 +1733,61 @@ private fun VideoCallFullScreen(
         // 상대 영상(전체화면)
         VideoRender(onSurface = onSurface)
 
-        // 내 화면(로컬 카메라 프리뷰) PiP — 우하단 코너(여백 최소, 테두리 없이 라운드만).
+        // 전면/후면 카메라 전환 — 우측 상단(항상 표시).
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 48.dp, end = 12.dp)
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable { onSwitchCamera() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Cameraswitch, contentDescription = "카메라 전환",
+                tint = Color.White, modifier = Modifier.size(24.dp))
+        }
+
+        // 내 화면(로컬 카메라 프리뷰) PiP — 우하단(우측 버튼열 왼쪽), 라운드, 테두리 없음. 항상 표시.
         Box(
             Modifier
                 .align(Alignment.BottomEnd)
-                .padding(bottom = 24.dp, end = 12.dp)
+                .padding(bottom = 24.dp, end = 76.dp)
                 .width(96.dp).aspectRatio(3f / 4f)
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF222222)),
         ) { PreviewRender(onSurface = onPreviewSurface) }
 
-        // 오버레이(터치 시 표시) — 상단 정보 + 하단 컨트롤. 스크림으로 가독성 확보.
+        // 오버레이(터치 시 표시) — 상단 정보(좌) + 우하단 컨트롤 세로열(아이콘만).
         if (controlsVisible) {
-            // 상단: 번호 + 경과시간
             Column(
                 Modifier
                     .align(Alignment.TopStart)
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .padding(top = 40.dp, bottom = 12.dp, start = 20.dp, end = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .padding(top = 44.dp, start = 20.dp, end = 72.dp),
             ) {
                 Text(fmtNumber(extractNumber(call.remote)), color = Color.White,
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text("%02d:%02d".format(elapsed / 60, elapsed % 60),
                     color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium)
             }
-            // 하단: 컨트롤(작게 + 화면 하단에 더 가깝게)
             Column(
                 Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .padding(top = 12.dp, bottom = 16.dp),
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 8.dp, bottom = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    ToggleRound("음소거", Icons.Filled.MicOff, muted, size = 52.dp) { onToggleMute(call.id, !muted) }
-                    ToggleRound("스피커", Icons.AutoMirrored.Filled.VolumeUp, speakerOn, size = 52.dp) { onToggleSpeaker(!speakerOn) }
-                    ToggleRound("영상", Icons.Filled.Videocam, true, activeBg = VIDEO_BLUE, size = 52.dp) { onToggleVideo(false) }
-                }
-                Spacer(Modifier.height(12.dp))
-                LabeledRound("종료", HANGUP_RED, Icons.Filled.CallEnd, size = 52.dp) { onHangup(call.id) }
+                ToggleRound("음소거", Icons.Filled.MicOff, muted, size = 52.dp, showLabel = false) { onToggleMute(call.id, !muted) }
+                ToggleRound("스피커", Icons.AutoMirrored.Filled.VolumeUp, speakerOn, size = 52.dp, showLabel = false) { onToggleSpeaker(!speakerOn) }
+                ToggleRound("영상", Icons.Filled.Videocam, true, activeBg = VIDEO_BLUE, size = 52.dp, showLabel = false) { onToggleVideo(false) }
+                LabeledRound("종료", HANGUP_RED, Icons.Filled.CallEnd, size = 52.dp, showLabel = false) { onHangup(call.id) }
             }
         }
     }
 }
 
 @Composable
-private fun LabeledRound(label: String, bg: Color, icon: ImageVector, fg: Color = Color.White, enabled: Boolean = true, size: Dp = 72.dp, onClick: () -> Unit) {
+private fun LabeledRound(label: String, bg: Color, icon: ImageVector, fg: Color = Color.White, enabled: Boolean = true, size: Dp = 72.dp, showLabel: Boolean = true, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
@@ -1788,8 +1799,10 @@ private fun LabeledRound(label: String, bg: Color, icon: ImageVector, fg: Color 
         ) {
             Icon(icon, contentDescription = label, tint = fg, modifier = Modifier.size(size * 0.42f))
         }
-        Spacer(Modifier.height(6.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium)
+        if (showLabel) {
+            Spacer(Modifier.height(6.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium)
+        }
     }
 }
 
@@ -1801,6 +1814,7 @@ private fun ToggleRound(
     active: Boolean,
     activeBg: Color = TOGGLE_ACTIVE,
     size: Dp = 72.dp,
+    showLabel: Boolean = true,
     onClick: () -> Unit,
 ) {
     LabeledRound(
@@ -1809,6 +1823,7 @@ private fun ToggleRound(
         icon = icon,
         fg = if (active) Color.White else MaterialTheme.colorScheme.onSurface,
         size = size,
+        showLabel = showLabel,
         onClick = onClick,
     )
 }

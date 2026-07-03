@@ -86,6 +86,29 @@ class SipController(private val config: SipAccountConfig) {
         runCatching { PjCamera2.SetPreviewSurface(null) }
     }
 
+    // 현재 캡처 카메라 장치 id(초기 -1 → 최초 전환 시 전면으로 확정). 전면↔후면 토글 추적.
+    @Volatile
+    private var camDev = -1
+
+    /** 전면↔후면 카메라 전환 — 활성 영상호의 캡처 장치를 현재와 다른 Android 카메라로 교체. */
+    fun switchCamera() = onCtl {
+        val call = calls.values.firstOrNull() ?: run { Log.w(TAG, "switchCamera: no active call"); return@onCtl }
+        val devs = PjLib.ep.vidDevManager().enumDev2()
+        val caps = ArrayList<Int>()
+        for (i in 0 until devs.size) {
+            val d = devs[i]
+            if ((d.dir and pjmedia_dir.PJMEDIA_DIR_CAPTURE) == 0) continue
+            if (!d.driver.equals("Android", ignoreCase = true)) continue   // Colorbar 등 합성 장치 제외
+            caps.add(d.id)
+        }
+        if (caps.size < 2) { Log.w(TAG, "switchCamera: 카메라 ${caps.size}개(전환 불가) caps=$caps"); return@onCtl }
+        if (camDev < 0) camDev = frontCaptureDev()
+        val next = caps.firstOrNull { it != camDev } ?: caps[0]
+        Log.i(TAG, "switchCamera: $camDev -> $next (caps=$caps)")
+        call.switchCaptureDevice(next)
+        camDev = next
+    }
+
     /** 통화중 마이크 음소거(VoLTE 전이중). 미디어 재협상(onCallMediaState 재진입) 후에도 유지. */
     @Volatile var muted = false
         private set

@@ -150,6 +150,25 @@ class CimsCall : Call {
         return null
     }
 
+    /** 활성 영상 미디어의 캡처 장치를 [dev]로 전환(전면↔후면). PJSIP 이 카메라를 재오픈하며,
+     * 셀프뷰 프리뷰 surface(PjCamera2 정적 등록)는 새 인스턴스에 자동 재결선된다. */
+    fun switchCaptureDevice(dev: Int) {
+        val ci = runCatching { info }.getOrNull() ?: return
+        var done = false
+        for (i in 0 until ci.media.size) {
+            val m = ci.media[i]
+            if (m.type == pjmedia_type.PJMEDIA_TYPE_VIDEO &&
+                m.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_ACTIVE
+            ) {
+                val p = CallVidSetStreamParam().apply { medIdx = m.index.toInt(); capDev = dev }
+                runCatching { vidSetStream(pjsua_call_vid_strm_op.PJSUA_CALL_VID_STRM_CHANGE_CAP_DEV, p) }
+                    .onSuccess { done = true; Log.i(TAG, "switchCaptureDevice: medIdx=${m.index} capDev=$dev OK") }
+                    .onFailure { Log.w(TAG, "switchCaptureDevice medIdx=${m.index}: ${it.message}") }
+            }
+        }
+        if (!done) Log.w(TAG, "switchCaptureDevice: no active video media")
+    }
+
     /** 활성 오디오 미디어(없으면 null). Endpoint 소유이므로 보관 금지 — 매번 재취득(설계서 §3.4). */
     private fun audioMedia(): AudioMedia? {
         val ci = info
