@@ -322,6 +322,19 @@ if (rmtIp == _peers[i].ip && rmtPort != _peers[i].port) {
 }
 ```
 
+**MCPTT 그룹의 NAT latch (PMcpttGroup):**
+
+포트 변환 NAT 뒤 단말은 SDP 에 사설 주소가 실려 (ip,port) 매칭이 모두 실패한다. 3단 latch:
+
+1. **Floor**: 주소 매칭((ip,port) → port-only) 실패 시 **TS 24.380 User ID 필드(§8.2.3.6)** 로
+   멤버를 식별하고 관측 소스 주소(ip+floorPort)를 latch(+`floorNatLatched` 마킹) →
+   GRANT/TAKEN/IDLE 회신 도달. 단말은 참여 직후 Floor Ack(User ID 포함) 1회로 이 latch 를 유도.
+2. **발언자 RTP**: 미매칭 RTP 가 현재 발언권 소유자의 floor-latch 된 공인 IP 에서 오면
+   소유자의 RTP 주소로 latch(제3자 스푸핑 방지 조건).
+3. **수신단 RTP keepalive**: 단말(PJSIP `PJMEDIA_STREAM_ENABLE_KA`)이 보내는 empty-RTP KA 를,
+   `floorNatLatched` 멤버 중 공인 IP 일치 후보가 **유일**할 때만 latch — 발언한 적 없는
+   청취 전용 참가자의 하향 오디오 경로 개방(동일 호스트 멤버 오-latch 방지 조건).
+
 **녹취:**
 
 ```cpp

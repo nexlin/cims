@@ -225,6 +225,28 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
                 }
             }
         }
+        // NAT(포트변환) 단말: 주소 매칭 전부 실패 → TS 24.380 User ID 필드(§8.2.3.6)로
+        // 멤버를 식별하고 관측 소스 주소를 latch (symmetric floor). 이후 GRANT/TAKEN/IDLE 도달 가능.
+        if (sessionId.empty()) {
+            std::string uid = msg.userId();
+            if (!uid.empty()) {
+                size_t colon = uid.find(':');                 // "tel:+82..@dom" → "+82.."
+                if (colon != std::string::npos) uid = uid.substr(colon + 1);
+                size_t at = uid.find('@');
+                if (at != std::string::npos) uid = uid.substr(0, at);
+                auto it = _members.find(uid);
+                if (it != _members.end()) {
+                    LOG_INFO("PMcpttGroup", "[%s] Floor addr latched (NAT) %s: %s:%d -> %s:%d",
+                             _groupId.c_str(), uid.c_str(),
+                             it->second.ip.c_str(), it->second.floorPort, ip.c_str(), port);
+                    it->second.ip = ip;
+                    it->second.floorPort = port;
+                    it->second.floorNatLatched = true;
+                    sessionId = uid;
+                    senderSsrc = it->second.ssrc;
+                }
+            }
+        }
     }
 
     if (sessionId.empty()) {
@@ -372,6 +394,38 @@ void PMcpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int le
                 senderId = sid;
                 senderSsrc = peer.ssrc;
                 break;
+            }
+        }
+
+        // NAT(포트변환) 단말: 발언권 소유자의 RTP 소스 latch — floor 로 이미 학습된
+        // 공인 IP 와 일치할 때만(제3자 스푸핑 방지). latch 후엔 수신(청취) 경로도 열린다.
+        if (senderId.empty() && _floorTaken && !_floorOwnerSessionId.empty()) {
+            auto it = _members.find(_floorOwnerSessionId);
+            if (it != _members.end() && it->second.ip == ip && it->second.port != port) {
+                LOG_INFO("PMcpttGroup", "[%s] RTP addr latched (NAT) %s: port %d -> %d",
+                         _groupId.c_str(), _floorOwnerSessionId.c_str(), it->second.port, port);
+                it->second.port = port;
+                senderId = _floorOwnerSessionId;
+                senderSsrc = it->second.ssrc;
+            }
+        }
+
+        // NAT 수신단 RTP keepalive(PJMEDIA empty RTP): floor 가 User ID 로 NAT-latch 된
+        // 멤버(NAT 단말 확정) 중 공인 IP 일치 후보가 '유일'할 때만 latch —
+        // 청취 전용 참가자의 하향 오디오 경로 개방. (동일 호스트 멤버 오-latch 방지)
+        if (senderId.empty()) {
+            std::string cand;
+            int nCand = 0;
+            for (auto const& [sid, peer] : _members) {
+                if (peer.floorNatLatched && peer.ip == ip && peer.port != port) { cand = sid; nCand++; }
+            }
+            if (nCand == 1) {
+                auto it = _members.find(cand);
+                LOG_INFO("PMcpttGroup", "[%s] RTP addr latched (NAT-KA) %s: port %d -> %d",
+                         _groupId.c_str(), cand.c_str(), it->second.port, port);
+                it->second.port = port;
+                senderId = cand;
+                senderSsrc = it->second.ssrc;
             }
         }
 
