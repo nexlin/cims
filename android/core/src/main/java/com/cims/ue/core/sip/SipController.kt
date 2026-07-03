@@ -20,9 +20,7 @@ import org.pjsip.pjsua2.SipMediaType
 import org.pjsip.pjsua2.SipMultipartPart
 import org.pjsip.pjsua2.SipMultipartPartVector
 import org.pjsip.pjsua2.SipTxOption
-import org.pjsip.pjsua2.VideoPreview
-import org.pjsip.pjsua2.VideoPreviewOpParam
-import org.pjsip.pjsua2.VideoWindowHandle
+import org.pjsip.PjCamera2
 import org.pjsip.pjsua2.pjmedia_dir
 import org.pjsip.pjsua2.pjmedia_vid_dev_std_index
 import org.pjsip.pjsua2.pjsip_status_code
@@ -70,43 +68,23 @@ class SipController(private val config: SipAccountConfig) {
         if (surface != null) calls.values.forEach { runCatching { it.attachVideo(surface) } }
     }
 
-    /** 로컬 카메라 프리뷰(내 화면). UI SurfaceView 준비 시 Surface 주입, null 이면 중지. */
-    private var preview: VideoPreview? = null
-
+    /**
+     * 로컬 카메라 프리뷰(내 화면). UI SurfaceView 준비 시 Surface 주입, null 이면 중지.
+     *
+     * 카메라를 **두 번째로 열지 않는다**(과거 VideoPreview/pjsua_vid_preview_start 방식은 Android
+     * 카메라 단일 오픈 제약으로 활성 영상통화 중 PJMEDIA_EVID_SYSERR). 대신 PJSIP 캡처가 이미 연
+     * CameraDevice 의 CaptureSession 에 셀프뷰 surface 를 **출력 target 으로 추가**하도록
+     * [PjCamera2.SetPreviewSurface] 에 등록한다(Camera2 다중 출력 surface). 통화 전 등록해두면
+     * 캡처 시작 시 승계되고, 통화 중 등록하면 세션이 재구성된다.
+     */
     fun setPreviewSurface(surface: Any?) = onCtl {
-        stopPreview()
-        if (surface == null) return@onCtl
-        // 활성 영상통화가 이미 연 캡처 장치와 동일한 ID 로 프리뷰를 시작해야 PJSIP 가 카메라를
-        // 공유한다(다른 ID면 Android 카메라 2중 오픈 → PJMEDIA_EVID_SYSERR). 활성 호가 없으면
-        // (발신 전 등) 전면 카메라 fallback.
-        val dev = calls.values.firstNotNullOfOrNull { it.videoCapDev() } ?: frontCaptureDev()
-        val vp = VideoPreview(dev)
-        vp.start(
-            VideoPreviewOpParam().apply {
-                window = VideoWindowHandle().apply { handle.setWindow(surface) }
-            },
-        )
-        preview = vp
+        runCatching { PjCamera2.SetPreviewSurface(surface as? android.view.Surface) }
     }
 
     // pj-ctl 스레드에서만 호출.
     private fun stopPreview() {
-        preview?.let { runCatching { it.stop() }; runCatching { it.delete() } }
-        preview = null
+        runCatching { PjCamera2.SetPreviewSurface(null) }
     }
-
-    /** 전면 카메라 캡처 장치 우선 선택(이름 "front" 매칭), 없으면 기본 캡처 장치. */
-    private fun frontCaptureDev(): Int = runCatching {
-        val devs = PjLib.ep.vidDevManager().enumDev2()
-        var fallback = pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV
-        for (i in 0 until devs.size) {
-            val d = devs[i]
-            if ((d.dir and pjmedia_dir.PJMEDIA_DIR_CAPTURE) == 0) continue
-            if (d.name.contains("front", ignoreCase = true)) return@runCatching d.id
-            if (fallback == pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV) fallback = d.id
-        }
-        fallback
-    }.getOrDefault(pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV)
 
     /** 통화중 마이크 음소거(VoLTE 전이중). 미디어 재협상(onCallMediaState 재진입) 후에도 유지. */
     @Volatile var muted = false
@@ -335,8 +313,33 @@ class SipController(private val config: SipAccountConfig) {
 
         // 도메인 DNS 미해석 회피: 실제 서버 IP:port 로 route 강제(;lr)
         ac.sipConfig.proxies.add("sip:${c.serverHost}:${c.serverPort};transport=$tp;lr")
+
+        // ── 영상통화 캡처 설정 ──
+        // autoTransmitOutgoing 기본 false → 명시하지 않으면 m=video sendrecv 로 협상돼도 카메라
+        // 캡처(발신 영상)가 시작되지 않는다. 켜야 상대가 우리 카메라를 받고, 동시에 그 열린
+        // 카메라(PjCamera2)에 셀프뷰 surface 를 붙일 수 있다([setPreviewSurface]).
+        ac.videoConfig.autoTransmitOutgoing = true
+        ac.videoConfig.autoShowIncoming = false                      // 수신 렌더는 앱이 setVideoSurface 로 직접 결선
+        ac.videoConfig.defaultCaptureDevice = frontCaptureDev()      // 셀프뷰=전면 카메라
         return ac
     }
+
+    /** 전면 카메라 캡처 장치 우선 선택(이름 "front" 매칭), 없으면 기본 캡처 장치. */
+    private fun frontCaptureDev(): Int = runCatching {
+        val devs = PjLib.ep.vidDevManager().enumDev2()
+        Log.i(TAG, "vidDev count=${devs.size}")
+        var fallback = pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV
+        for (i in 0 until devs.size) {
+            val d = devs[i]
+            Log.i(TAG, "vidDev[$i] id=${d.id} dir=${d.dir} name='${d.name}' drv='${d.driver}'")
+            if ((d.dir and pjmedia_dir.PJMEDIA_DIR_CAPTURE) == 0) continue
+            if (d.name.contains("front", ignoreCase = true)) return@runCatching d.id
+            if (fallback == pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV) fallback = d.id
+        }
+        Log.i(TAG, "frontCaptureDev -> $fallback")
+        fallback
+    }.onFailure { Log.w(TAG, "frontCaptureDev enum failed: ${it.message}") }
+        .getOrDefault(pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV)
 
     private fun Map<String, String>.toSipHeaders(): SipHeaderVector = SipHeaderVector().also { v ->
         forEach { (k, value) -> v.add(SipHeader().apply { hName = k; hValue = value }) }

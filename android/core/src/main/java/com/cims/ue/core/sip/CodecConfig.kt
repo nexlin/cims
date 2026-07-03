@@ -32,10 +32,13 @@ object CodecConfig {
         audioIds.filter { it != amrwb && !it.startsWith("PCMA") /* G.711 안전망 1종은 남겨도 무방 */ }
             .forEach { runCatching { ep.codecSetPriority(it, 0.toShort()) } }
 
-        // 영상: H.264 최우선
+        // 영상: H.264 최우선 + 인코딩 해상도 480x640(세로) 고정
         val vidIds = ep.videoCodecEnum2().let { v -> (0 until v.size).map { v[it].codecId } }
         vidIds.firstOrNull { it.contains("H264", ignoreCase = true) }
-            ?.let { ep.videoCodecSetPriority(it, 254.toShort()) }
+            ?.let { h264 ->
+                ep.videoCodecSetPriority(h264, 254.toShort())
+                applyVideoSize(ep, h264, 480, 640)
+            }
 
         Log.i(TAG, "codec priorities applied. audio=$audioIds video=$vidIds amrwb=$amrwb")
     }.onFailure { Log.w(TAG, "codec config failed: ${it.message}") }
@@ -53,4 +56,17 @@ object CodecConfig {
         add(CodecFmtp().apply { name = "octet-align"; `val` = "1" })
         add(CodecFmtp().apply { name = "mode-set"; `val` = "0,1,2" })
     }
+
+    /** H.264 인코딩 해상도 고정(세로 480x640). 캡처(카메라)·인코더가 이 크기로 협상된다. */
+    private fun applyVideoSize(ep: Endpoint, codecId: String, w: Long, h: Long) = runCatching {
+        val vp = ep.getVideoCodecParam(codecId)
+        vp.encFmt.apply {
+            width = w
+            height = h
+            fpsNum = 15
+            fpsDenum = 1
+        }
+        ep.setVideoCodecParam(codecId, vp)
+        Log.i(TAG, "H264 enc size set ${w}x$h")
+    }.onFailure { Log.w(TAG, "applyVideoSize failed: ${it.message}") }
 }

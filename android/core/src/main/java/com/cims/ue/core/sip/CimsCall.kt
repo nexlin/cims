@@ -4,6 +4,7 @@ import android.util.Log
 import org.pjsip.pjsua2.Account
 import org.pjsip.pjsua2.AudioMedia
 import org.pjsip.pjsua2.Call
+import org.pjsip.pjsua2.CallVidSetStreamParam
 import org.pjsip.pjsua2.OnCallMediaStateParam
 import org.pjsip.pjsua2.OnCallSdpCreatedParam
 import org.pjsip.pjsua2.OnCallStateParam
@@ -13,6 +14,7 @@ import org.pjsip.pjsua2.pjmedia_type
 import org.pjsip.pjsua2.pjsip_inv_state
 import org.pjsip.pjsua2.pjsip_role_e
 import org.pjsip.pjsua2.pjsua_call_media_status
+import org.pjsip.pjsua2.pjsua_call_vid_strm_op
 
 /**
  * `Call` 서브클래스 — 호 상태/미디어/SDP 콜백을 [SipController] 로 중계 (설계서 §3.7, §5.1).
@@ -80,7 +82,33 @@ class CimsCall : Call {
             connectListen()
             if (!owner.halfDuplex) setMic(!owner.muted)         // 통화중 음소거 유지(재협상 후에도)
             owner.videoRenderSurface?.let { attachVideo(it) }   // M1.3 수신 영상 렌더
+            startVideoTransmit()                                // 발신 영상(카메라) 송신 개시 → 셀프뷰 소스
         }.onFailure { Log.w(TAG, "onCallMediaState: ${it.message}") }
+    }
+
+    /**
+     * 활성 영상 미디어의 **발신(카메라) 송신을 명시적으로 개시**한다. 계정 autoTransmitOutgoing
+     * 만으로는 캡처가 시작되지 않는 경우가 있어(협상 dir 이 수신 위주로 열림), START_TRANSMIT 로
+     * 확실히 카메라(PjCamera2)를 열어 상대에게 우리 영상을 보내고 셀프뷰 소스도 확보한다.
+     */
+    fun startVideoTransmit() {
+        val ci = runCatching { info }.getOrNull() ?: return
+        for (i in 0 until ci.media.size) {
+            val m = ci.media[i]
+            if (m.type == pjmedia_type.PJMEDIA_TYPE_VIDEO &&
+                m.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_ACTIVE
+            ) {
+                val hasEnc = (m.dir and pjmedia_dir.PJMEDIA_DIR_ENCODING) != 0
+                Log.i(TAG, "startVideoTransmit: medIdx=${m.index} dir=${m.dir} hasEnc=$hasEnc")
+                val p = CallVidSetStreamParam().apply { medIdx = m.index.toInt() }
+                // 송신 방향이 아직 없으면 sendrecv 로 방향 변경(캡처 개시), 있으면 송신 시작.
+                val op = if (hasEnc) pjsua_call_vid_strm_op.PJSUA_CALL_VID_STRM_START_TRANSMIT
+                else pjsua_call_vid_strm_op.PJSUA_CALL_VID_STRM_CHANGE_DIR
+                if (!hasEnc) p.dir = pjmedia_dir.PJMEDIA_DIR_ENCODING_DECODING
+                runCatching { vidSetStream(op, p) }
+                    .onFailure { Log.w(TAG, "startVideoTransmit vidSetStream(op=$op): ${it.message}") }
+            }
+        }
     }
 
     /**

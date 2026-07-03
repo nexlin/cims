@@ -538,12 +538,37 @@ CodecParam cp = ep.codecGetParam("<AMR-WB codecId>");
 // cp.payload type 필드를 99로 set (pjmedia_codec_mgr_set_default_param 등가)
 ep.codecSetParam("<AMR-WB codecId>", cp);
 
-// 영상: H.264 최우선
+// 영상: H.264 최우선 + 인코딩 해상도 480x640(세로) 고정
 ep.videoCodecSetPriority("H264/97", (short)254);
 VidCodecParam vp = ep.getVideoCodecParam("H264/97");
+vp.getEncFmt().setWidth(480); vp.getEncFmt().setHeight(640);   // 발신 영상 480x640
 // profile-level-id / packetization-mode 등 서버 협상값 정합
 ep.setVideoCodecParam("H264/97", vp);
 ```
+
+### 4.3.1 영상 캡처(카메라) 활성 4대 요건 — 발신 영상·셀프뷰 전제
+
+M1.3 영상통화에서 **발신 카메라 캡처와 셀프뷰**가 동작하려면 아래 4가지가 모두 필요하다.
+하나라도 빠지면 원격 수신 영상은 렌더돼도 카메라가 열리지 않아(인코더만 생성되고 입력이 없음)
+자기 영상이 상대에게 안 가고 셀프뷰도 비어 있다.
+
+1. **CameraManager 주입(필수·최우선)** — PJSIP Android 캡처 디바이스(`PjCamera2`)는
+   `org.pjsip.PjCameraInfo2.SetCameraManager(cm)` 로 `CameraManager` 를 받아야만 카메라를 열거한다.
+   **미주입 시 `enumDev2()` 에 실제 카메라가 없고 `Colorbar`(합성 테스트패턴)만 잡혀** 발신 영상이
+   컬러바가 되거나 캡처가 안 열린다. `libInit`(영상 서브시스템 init·카메라 열거)보다 **먼저** 호출해야
+   하므로 `PjLib.boot()` 초입에서 주입한다(`SipService.onCreate` 가 `CameraManager` 를 넘김).
+2. **발신 영상 자동 송신** — `AccountConfig.videoConfig.autoTransmitOutgoing=true`
+   (기본 false). `defaultCaptureDevice` 는 전면 카메라 id(`enumDev2()` 에서 `name` 이 "front"·
+   `driver`="Android" 인 항목)로 지정. 보강으로 미디어 활성 시(`onCallMediaState`)
+   `Call.vidSetStream(START_TRANSMIT)` 을 명시 호출한다.
+3. **셀프뷰 = 카메라 재오픈 금지, 출력 surface 추가** — 통화가 이미 전면 카메라를 점유하므로
+   별도 `VideoPreview`/`pjsua_vid_preview_start` 로 두 번째로 열면 `PJMEDIA_EVID_SYSERR`(단일 오픈
+   제약). 대신 `PjCamera2` 가 이미 연 `CameraDevice` 의 `CameraCaptureSession` 에 셀프뷰 `Surface`
+   를 **출력 target 으로 추가**한다(`PjCamera2.SetPreviewSurface(surface)` → 실행 중이면 세션 재구성).
+   Camera2 다중 출력 surface 원리로 인코딩용 `ImageReader` 와 셀프뷰가 카메라 하나를 공유한다.
+4. **재구성 race 방지** — `surfaceCreated`/`surfaceChanged` 가 같은 `Surface` 로 여러 번 콜백하므로
+   참조 동일 시 재구성을 건너뛴다. `onConfigured` 는 `camera==null`/정지 중이면 세션만 닫고
+   `Stop()`(카메라 전체 teardown)을 부르지 않는다 — 그렇지 않으면 셀프뷰가 열렸다가 곧 사라진다.
 
 ### 4.4 AMR-WB SDP/fmtp 정합 규칙 (교정 반영)
 

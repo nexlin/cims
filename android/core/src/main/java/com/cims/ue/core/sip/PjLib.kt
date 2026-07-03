@@ -1,6 +1,8 @@
 package com.cims.ue.core.sip
 
+import android.hardware.camera2.CameraManager
 import android.util.Log
+import org.pjsip.PjCameraInfo2
 import org.pjsip.pjsua2.Endpoint
 import org.pjsip.pjsua2.EpConfig
 import org.pjsip.pjsua2.TransportConfig
@@ -28,6 +30,14 @@ object PjLib {
     lateinit var ep: Endpoint
         private set
 
+    /**
+     * Android 카메라 매니저 — [boot] 전(영상 캡처 디바이스 열거 전)에 [SipService] 가 주입한다.
+     * PJSIP Android 영상 캡처 디바이스(PjCamera2)는 `PjCameraInfo2.SetCameraManager` 로 CameraManager
+     * 를 받아야만 카메라를 열거한다. 미주입 시 카메라 0개(Colorbar 합성 디바이스만) → 발신 영상/셀프뷰 불가.
+     */
+    @Volatile
+    var cameraManager: CameraManager? = null
+
     // 스레드별 PJSIP 등록 여부. libIsThreadRegistered() 는 미등록 스레드에서 호출 시 native abort 하므로
     // 쓰지 않고, 이 ThreadLocal 로 스레드당 정확히 1회 libRegisterThread 를 보장한다(설계서 §3.5 대안).
     private val threadRegistered = ThreadLocal.withInitial { false }
@@ -39,6 +49,12 @@ object PjLib {
         // libpjsua2.so 로드. SWIG static initializer 가 이미 로드했으면 중복(무해).
         // c++_shared(libc++_shared.so) 동봉이 선행 조건(설계서 위험 #2).
         System.loadLibrary("pjsua2")
+
+        // 영상 캡처 디바이스 열거는 libInit(영상 서브시스템 init) 시점에 일어나므로 그 전에 주입해야 한다.
+        cameraManager?.let {
+            PjCameraInfo2.SetCameraManager(it)
+            Log.i(TAG, "CameraManager injected for video capture enumeration")
+        } ?: Log.w(TAG, "CameraManager not set — 카메라 캡처 디바이스 열거 불가(발신 영상/셀프뷰 안 됨)")
 
         val endpoint = Endpoint()
         endpoint.libCreate()

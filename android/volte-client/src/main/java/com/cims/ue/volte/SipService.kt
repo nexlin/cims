@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
+import android.hardware.camera2.CameraManager
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
@@ -26,6 +27,7 @@ import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.message.MessageStore
 import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.sip.CallState
+import com.cims.ue.core.sip.PjLib
 import com.cims.ue.core.sip.RegState
 import com.cims.ue.core.sip.SipController
 import com.cims.ue.core.sip.extractSipNumber
@@ -71,6 +73,8 @@ class SipService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // PJSIP boot 전(영상 캡처 디바이스 열거 전)에 CameraManager 주입 — 발신 영상/셀프뷰 카메라 열거의 전제.
+        PjLib.cameraManager = getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         createChannel()
         startForegroundCompat(buildNotification("CIMS VoLTE", "시작 중…"))
         registerNetworkCallback()
