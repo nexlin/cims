@@ -1032,6 +1032,8 @@ function SlotTimeline({ slot, speakerOrder, participants, recId, audio }: {
                 <span style={{ color: 'var(--text, #1a1d2e)' }}>
                   {ev.member && <span style={{ fontWeight: 500 }}>{ev.member} </span>}
                   {disp.label}
+                  {ev.type === 'member_join' && ev.role === 'initiator' &&
+                    <span className="badge badge--gray" style={{ fontSize: 9, marginLeft: 6 }}>개시자</span>}
                   {ev.duration != null && <span className="ts"> ({fmtDur(ev.duration)})</span>}
                 </span>
               </div>

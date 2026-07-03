@@ -1640,6 +1640,7 @@ def _derive_session_meta_from_events(d_dir: str) -> dict:
 
     members = set()
     initiator = ""
+    initiator_explicit = False
     start_time = ""
     end_time = ""
     state = "active"
@@ -1654,13 +1655,18 @@ def _derive_session_meta_from_events(d_dir: str) -> dict:
         if t == "session_start":
             if ev.get("initiator"):
                 initiator = ev["initiator"]
+                initiator_explicit = True
         elif t == "session_end":
             state = "ended"
         elif t == "member_join":
             m = ev.get("member")
             if m:
                 members.add(m)
-                if not initiator:
+                # CSP 가 세션 개시자(발신 단말)에 role:"initiator" 를 명시 — 첫 join 추정보다 우선
+                if ev.get("role") == "initiator" and not initiator_explicit:
+                    initiator = m
+                    initiator_explicit = True
+                elif not initiator:
                     initiator = m
         elif t == "member_leave":
             pass
