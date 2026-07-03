@@ -21,6 +21,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -1605,6 +1606,22 @@ private fun CallScreen(
     onReject: (Int) -> Unit,
     onHangup: (Int) -> Unit,
 ) {
+    // 영상 통화 활성: 상대 영상 전체화면 + 화면 터치 시 오버레이 컨트롤(자동 숨김) + 내 화면 PiP.
+    if (videoOn && call is CallState.Active) {
+        VideoCallFullScreen(
+            call = call,
+            muted = muted,
+            speakerOn = speakerOn,
+            onToggleMute = onToggleMute,
+            onToggleSpeaker = onToggleSpeaker,
+            onToggleVideo = onToggleVideo,
+            onSurface = onSurface,
+            onPreviewSurface = onPreviewSurface,
+            onHangup = onHangup,
+        )
+        return
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1667,6 +1684,91 @@ private fun CallScreen(
             else -> {}
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * 영상 통화 전체화면 — 상대 영상이 화면을 채우고, 화면을 터치하면 상단(번호/시간)·하단(컨트롤)
+ * 오버레이가 나타났다 자동으로 사라진다(기본 전화/FaceTime 패턴). 우상단에 내 화면(로컬 카메라
+ * 프리뷰) PiP. 컨트롤: 음소거·스피커·영상끄기·종료.
+ */
+@Composable
+private fun VideoCallFullScreen(
+    call: CallState.Active,
+    muted: Boolean,
+    speakerOn: Boolean,
+    onToggleMute: (Int, Boolean) -> Unit,
+    onToggleSpeaker: (Boolean) -> Unit,
+    onToggleVideo: (Boolean) -> Unit,
+    onSurface: (Any?) -> Unit,
+    onPreviewSurface: (Any?) -> Unit,
+    onHangup: (Int) -> Unit,
+) {
+    var controlsVisible by remember { mutableStateOf(true) }
+    var elapsed by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(1000); elapsed++ } }
+    // 컨트롤 표시 후 4초 뒤 자동 숨김.
+    LaunchedEffect(controlsVisible) {
+        if (controlsVisible) { delay(4000); controlsVisible = false }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+            ) { controlsVisible = !controlsVisible },
+    ) {
+        // 상대 영상(전체화면)
+        VideoRender(onSurface = onSurface)
+
+        // 내 화면(로컬 카메라 프리뷰) PiP — 우상단 라운드 박스.
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 48.dp, end = 16.dp)
+                .width(108.dp).aspectRatio(3f / 4f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF222222))
+                .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+        ) { PreviewRender(onSurface = onPreviewSurface) }
+
+        // 오버레이(터치 시 표시) — 상단 정보 + 하단 컨트롤. 스크림으로 가독성 확보.
+        if (controlsVisible) {
+            // 상단: 번호 + 경과시간
+            Column(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .padding(top = 40.dp, bottom = 12.dp, start = 20.dp, end = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(fmtNumber(extractNumber(call.remote)), color = Color.White,
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("%02d:%02d".format(elapsed / 60, elapsed % 60),
+                    color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium)
+            }
+            // 하단: 컨트롤
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .padding(top = 16.dp, bottom = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    ToggleRound("음소거", Icons.Filled.MicOff, muted) { onToggleMute(call.id, !muted) }
+                    ToggleRound("스피커", Icons.AutoMirrored.Filled.VolumeUp, speakerOn) { onToggleSpeaker(!speakerOn) }
+                    ToggleRound("영상", Icons.Filled.Videocam, true, activeBg = VIDEO_BLUE) { onToggleVideo(false) }
+                }
+                Spacer(Modifier.height(20.dp))
+                LabeledRound("종료", HANGUP_RED, Icons.Filled.CallEnd) { onHangup(call.id) }
+            }
+        }
     }
 }
 

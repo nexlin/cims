@@ -76,7 +76,11 @@ class SipController(private val config: SipAccountConfig) {
     fun setPreviewSurface(surface: Any?) = onCtl {
         stopPreview()
         if (surface == null) return@onCtl
-        val vp = VideoPreview(frontCaptureDev())
+        // 활성 영상통화가 이미 연 캡처 장치와 동일한 ID 로 프리뷰를 시작해야 PJSIP 가 카메라를
+        // 공유한다(다른 ID면 Android 카메라 2중 오픈 → PJMEDIA_EVID_SYSERR). 활성 호가 없으면
+        // (발신 전 등) 전면 카메라 fallback.
+        val dev = calls.values.firstNotNullOfOrNull { it.videoCapDev() } ?: frontCaptureDev()
+        val vp = VideoPreview(dev)
         vp.start(
             VideoPreviewOpParam().apply {
                 window = VideoWindowHandle().apply { handle.setWindow(surface) }

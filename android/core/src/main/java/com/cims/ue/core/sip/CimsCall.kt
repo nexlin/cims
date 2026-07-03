@@ -102,6 +102,26 @@ class CimsCall : Call {
         }
     }
 
+    /**
+     * 활성 영상 송신(ENCODING) 미디어의 캡처 장치 ID(없으면 null). 로컬 셀프뷰 프리뷰가
+     * 통화 송신과 **동일한 장치 ID** 로 시작해야 PJSIP 가 카메라를 공유(ref++)하고, Android
+     * 카메라 단일 오픈 제약으로 인한 PJMEDIA_EVID_SYSERR(장치 2중 오픈)을 피한다.
+     */
+    fun videoCapDev(): Int? {
+        val ci = runCatching { info }.getOrNull() ?: return null
+        for (i in 0 until ci.media.size) {
+            val m = ci.media[i]
+            if (m.type == pjmedia_type.PJMEDIA_TYPE_VIDEO &&
+                m.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_ACTIVE &&
+                (m.dir and pjmedia_dir.PJMEDIA_DIR_ENCODING) != 0
+            ) {
+                val dev = runCatching { m.videoCapDev }.getOrDefault(-1)
+                if (dev >= 0) return dev
+            }
+        }
+        return null
+    }
+
     /** 활성 오디오 미디어(없으면 null). Endpoint 소유이므로 보관 금지 — 매번 재취득(설계서 §3.4). */
     private fun audioMedia(): AudioMedia? {
         val ci = info
