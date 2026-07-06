@@ -133,7 +133,7 @@ build/
 ```
 <m>-<ver>.tar.gz
 ├── meta.json                  ← name/version/desc/build_date/git/service
-├── config_template.json       ← UI 렌더링 스키마 (csp/cmp/csc 만)
+├── config_template.json       ← UI 렌더링 스키마 (csp/cmp/csc/cwrtc 만)
 ├── <m>/                       ← 모듈 자기 디렉토리 (변종은 rename 됨)
 │   ├── bin/<m> [+ <m>.sh]
 │   ├── config/<m>.json [+ collection jsonl]

@@ -1,0 +1,194 @@
+{
+  "version": 2,
+  "sections": [
+    {
+      "key": "network",
+      "title": "네트워크",
+      "description": "브라우저·CSP 양쪽에서 접근하는 cwrtc 자기 주소. SDP/SIP Contact 에 기재되므로 실 IP 필수.",
+      "fields": [
+        {
+          "key": "Setup.LocalIp",
+          "label": "cwrtc 노드 IP",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@CWRTC_IP@",
+          "required": true,
+          "restart": true,
+          "help": "cwrtc 가 설치된 노드의 실 IP. 브라우저 DTLS-SRTP 미디어와 CSP SIP Contact 양쪽에 광고된다. loopback 이면 로컬 브라우저 시험만 가능."
+        },
+        {
+          "key": "Setup.WsPort",
+          "label": "WebSocket 포트",
+          "type": "int",
+          "default": 8443,
+          "min": 1,
+          "max": 65535,
+          "required": true,
+          "restart": true,
+          "help": "브라우저(phone 웹앱) ↔ cwrtc WebSocket 포트. phone 의 /cwrtc 프록시 대상."
+        },
+        {
+          "key": "Setup.Wss",
+          "label": "WSS (TLS) 사용",
+          "type": "int",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "restart": true,
+          "help": "1=WSS(TLS). 브라우저 마이크 권한(HTTPS 페이지)에서 접속하려면 WSS 필수. 0=평문 WS (로컬 시험용)."
+        },
+        {
+          "key": "Setup.CertFile",
+          "label": "TLS 인증서 (PEM)",
+          "type": "path",
+          "default": "cert/csp.pem",
+          "restart": true,
+          "help": "WSS 용 인증서+키 결합 PEM. 패키지 동봉 기본값."
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "sip",
+      "title": "SIP (CSP 연동)",
+      "description": "cwrtc → CSP SIP 등록/발신 대상. 배포 토폴로지의 CSP 주소를 지정한다.",
+      "fields": [
+        {
+          "key": "Setup.Sip.ServerIp",
+          "label": "CSP IP",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@CSP_IP@",
+          "required": true,
+          "restart": true,
+          "help": "SIP REGISTER/INVITE 를 보낼 CSP 주소."
+        },
+        {
+          "key": "Setup.Sip.ServerPort",
+          "label": "CSP SIP 포트",
+          "type": "int",
+          "default": 5060,
+          "min": 1,
+          "max": 65535,
+          "restart": true
+        },
+        {
+          "key": "Setup.Sip.Domain",
+          "label": "VoLTE 도메인",
+          "type": "string",
+          "default": "ims.mnc033.mcc450.3gppnetwork.org",
+          "deploy_value": "@VOLTE_DOMAIN@",
+          "required": true,
+          "restart": true,
+          "help": "SIP Request-URI/From 도메인. CSP 설정과 일치해야 등록된다."
+        },
+        {
+          "key": "Setup.Sip.PttDomain",
+          "label": "PTT 도메인",
+          "type": "string",
+          "default": "ptt.mnc033.mcc450.3gppnetwork.org",
+          "deploy_value": "@PTT_DOMAIN@",
+          "required": true,
+          "restart": true,
+          "help": "MCPTT 그룹호 도메인. CSP 의 PTT 도메인과 일치해야 한다."
+        },
+        {
+          "key": "Setup.Sip.LocalPort",
+          "label": "SIP 로컬 포트",
+          "type": "int",
+          "default": 5062,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "cwrtc 가 SIP 송수신에 bind 하는 UDP 포트."
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "rtp",
+      "title": "RTP 포트 풀",
+      "description": "브라우저↔cwrtc DTLS-SRTP 및 cwrtc↔CMP RTP 용. 방화벽에서 이 범위를 열어야 미디어가 흐른다.",
+      "fields": [
+        {
+          "key": "Setup.Rtp.PortBase",
+          "label": "RTP 시작 포트",
+          "type": "int",
+          "default": 50100,
+          "min": 1024,
+          "max": 65000,
+          "restart": true
+        },
+        {
+          "key": "Setup.Rtp.PortCount",
+          "label": "RTP 포트 수",
+          "type": "int",
+          "default": 50,
+          "min": 2,
+          "max": 10000,
+          "restart": true,
+          "help": "동시 세션 수 한계. 브라우저당 포트 블록을 소모한다."
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "log",
+      "title": "로깅",
+      "fields": [
+        {
+          "key": "Setup.Log.Dir",
+          "label": "로그 디렉토리",
+          "type": "path",
+          "default": "log",
+          "restart": true
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "_infra",
+      "title": "Infrastructure (내부 전용)",
+      "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움.",
+      "hidden": true,
+      "fields": [
+        {
+          "key": "Setup.DocRoot",
+          "label": "정적 파일 루트",
+          "type": "path",
+          "default": "html",
+          "hidden": true,
+          "restart": true,
+          "help": "cwrtc 내장 HTTP 서버의 문서 루트 (자체 시험 페이지)."
+        },
+        {
+          "key": "Setup.UserAgent",
+          "label": "SIP User-Agent",
+          "type": "string",
+          "default": "CWRTC_1.0",
+          "hidden": true,
+          "restart": true
+        },
+        {
+          "key": "Setup.AccessNetworkInfo",
+          "label": "P-Access-Network-Info",
+          "type": "string",
+          "default": "IEEE-802.11",
+          "hidden": true,
+          "restart": true
+        },
+        {
+          "key": "Setup.MsgLog.Dir",
+          "label": "SIP 메시지 로그 디렉토리",
+          "type": "path",
+          "default": "log",
+          "deploy_value": "@MSG_LOG_DIR@",
+          "hidden": true,
+          "restart": true,
+          "help": "SIP flow 로깅(msg_log) 저장 루트. CSP/CMP 와 공유 가능."
+        }
+      ],
+      "scope": "system"
+    }
+  ]
+}

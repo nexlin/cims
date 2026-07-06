@@ -321,11 +321,10 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClientCaller.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
 
     # ── 3. 설정 템플릿 복사 (deploy_value: "@PLACEHOLDER@" 포함, configure.sh 로 채움) ──
-    #    CSP/CMP/CSC 모두 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.
-    #    cwrtc 만 레거시 .json.template 유지 (향후 전환 대상).
+    #    CSP/CMP/CSC/cwrtc 모두 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/cmp/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csp/config/config_template.json
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/config/cwrtc.json.template  ${CMAKE_BINARY_DIR}/dist/cwrtc/config/cwrtc.json.template
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cwrtc/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csc/config/config_template.json
 
     # ── 3a. base <module>.json 생성 (config_template.json 의 field.default) ──
@@ -333,10 +332,11 @@ add_custom_target(dist
     #    기동 시 읽는 base conf 가 tarball 에 항상 포함되도록 보장. configure.sh 는
     #    이후 같은 파일을 env(@VAR@) 값으로 덮어씀(dev). 변종(psp/isp/pmp/imp)은
     #    cmd_pkg staging 이 config/<base>.json → config/<variant>.json 으로 자동 rename.
-    #    cmp/csp 는 C++ 바이너리라 base conf 부재 시 hard-fail → 대상. csc(Python)는
+    #    cmp/csp/cwrtc 는 C++ 바이너리라 base conf 부재 시 hard-fail → 대상. csc(Python)는
     #    config 부재를 tolerate(soft) 하므로 비대상.
     COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/cmp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cmp/config/cmp.json
     COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/csp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/csp/config/csp.json
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/cwrtc/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cwrtc/config/cwrtc.json
 
     # ── 4. CSP 데이터 복사 ─────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/User        ${CMAKE_BINARY_DIR}/dist/csp/user
