@@ -343,7 +343,7 @@ void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int l
     //   direction: UE → CMP (RTCP APP 수신)
     //   detail JSON: {"op":"REQUEST","user":"+82...","ssrc":N,"prio":P}
     if (_logFlow) {
-        int prio = 999;
+        int prio = 0;
         {
             PAutoLock lock(_mutex);
             auto itP = _priorities.find(sessionId);
@@ -518,7 +518,7 @@ void PMcpttGroup::onVideoRtpPacket(const std::string& ip, int port, char* buf, i
 
 void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int ssrc, int indicatorBits) {
     PAutoLock lock(_mutex);
-    int requesterPrio = 999;
+    int requesterPrio = 0;
     if (_priorities.find(sessionId) != _priorities.end()) requesterPrio = _priorities[sessionId];
 
     // 수신 Floor Indicator(emergency/imminent) → tier 승격(단말 개시 긴급/임박).
@@ -552,13 +552,13 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
 
     if (_floorOwnerSessionId == sessionId) return;   // 이미 보유자
 
-    int ownerPrio = 999;
+    int ownerPrio = 0;
     if (_priorities.find(_floorOwnerSessionId) != _priorities.end()) ownerPrio = _priorities[_floorOwnerSessionId];
 
     // TS 24.380 선점 서열: condition tier(emergency>imminent>normal) > chair > 수치 priority.
     //   1) emergency/imminent 발언자는 하위 tier 점유자를 선점(반대는 불가).
     //   2) 동tier 면 chair override(chair 가 participant 선점, 역은 불가).
-    //   3) 동tier·동role 이면 수치 priority(낮을수록 우선).
+    //   3) 동tier·동role 이면 수치 priority(TS 24.380: 0~255, 클수록 우선, 미지정=0 최저).
     int  reqTier   = tierOf(sessionId);
     int  ownTier   = tierOf(_floorOwnerSessionId);
     bool requesterChair = isChair(sessionId);
@@ -567,7 +567,7 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
     if (reqTier != ownTier)                 bPreempt = (reqTier > ownTier);
     else if (requesterChair && !ownerChair) bPreempt = true;
     else if (!requesterChair && ownerChair) bPreempt = false;
-    else                                    bPreempt = (requesterPrio < ownerPrio);
+    else                                    bPreempt = (requesterPrio > ownerPrio);
 
     if (bPreempt) {
         // PREEMPTION — 현재 화자 REVOKE(cause=preempted) 후 신규 화자 grant.
@@ -704,11 +704,11 @@ void PMcpttGroup::_sendDeny(const std::string& sessionId, unsigned int ssrc, int
 }
 
 int PMcpttGroup::_queuePositionOf(const std::string& sessionId) const {
-    // 정렬 기준(우선순위 높을수록 앞): tier desc, chair, prio asc, ts asc.
+    // 정렬 기준(우선순위 높을수록 앞): tier desc, chair, prio desc, ts asc.
     auto better = [](const QueuedReq& a, const QueuedReq& b) {
         if (a.tier != b.tier) return a.tier > b.tier;
         if (a.chair != b.chair) return a.chair;
-        if (a.prio != b.prio) return a.prio < b.prio;
+        if (a.prio != b.prio) return a.prio > b.prio;
         return a.ts < b.ts;
     };
     int pos = 1;
@@ -722,7 +722,7 @@ int PMcpttGroup::_queuePositionOf(const std::string& sessionId) const {
 
 void PMcpttGroup::_sendQueuePos(const std::string& sessionId, unsigned int ssrc) {
     int pos = _queuePositionOf(sessionId);
-    int prio = 999;
+    int prio = 0;
     if (_priorities.find(sessionId) != _priorities.end()) prio = _priorities[sessionId];
     char buf[256];
     std::vector<FloorTlv> f{ FloorTlv(FF_QUEUE_INFO, FloorQueueInfo(pos, prio)),
@@ -743,7 +743,7 @@ std::string PMcpttGroup::_popBestQueued(unsigned int& outSsrc, int& outPrio) {
     auto better = [](const QueuedReq& a, const QueuedReq& b) {
         if (a.tier != b.tier) return a.tier > b.tier;
         if (a.chair != b.chair) return a.chair;
-        if (a.prio != b.prio) return a.prio < b.prio;
+        if (a.prio != b.prio) return a.prio > b.prio;
         return a.ts < b.ts;
     };
     size_t best = 0;
@@ -759,7 +759,7 @@ std::string PMcpttGroup::_popBestQueued(unsigned int& outSsrc, int& outPrio) {
 void PMcpttGroup::_advanceFloorOrIdle() {
     // 현재 owner 는 이미 해제된 상태에서 호출. 대기자 있으면 grant, 없으면 IDLE.
     while (!_floorQueue.empty()) {
-        unsigned int qssrc = 0; int qprio = 999;
+        unsigned int qssrc = 0; int qprio = 0;
         std::string next = _popBestQueued(qssrc, qprio);
         if (next.empty()) break;
         if (_members.find(next) == _members.end()) continue;   // 이미 떠난 멤버 skip
@@ -781,7 +781,7 @@ void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int 
         _floorOwnerSessionId = "";
         _floorOwnerSsrc = 0;
 
-        int ownerPrio = 999;
+        int ownerPrio = 0;
         if (_priorities.find(sessionId) != _priorities.end()) ownerPrio = _priorities[sessionId];
         _logFloorLocal("RELEASE", sessionId, ssrc, ownerPrio);
         LOG_INFO("PMcpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
@@ -813,7 +813,7 @@ bool PMcpttGroup::checkFloorInactivity(int idleSec) {
 
     std::string owner = _floorOwnerSessionId;
     unsigned int ssrc = _floorOwnerSsrc;
-    int ownerPrio = 999;
+    int ownerPrio = 0;
     if (_priorities.find(owner) != _priorities.end()) ownerPrio = _priorities[owner];
     int idleMs = (int)((now - ref) / 1000);
 

@@ -465,7 +465,7 @@ handleFloorRequest(sessionId, ssrc)
   │
   └─ Floor TAKEN 상태
       ├─ 동일 화자 → 무시
-      ├─ 선점 판정: chair > participant (chair 항상 선점), 동급이면 우선순위(낮을수록 우선)
+      ├─ 선점 판정: chair > participant (chair 항상 선점), 동급이면 우선순위(TS 24.380: 0~255 클수록 우선, 미지정=0 최저)
       ├─ 선점 시
       │   ├─ 현재 화자에게 FLOOR_REVOKE
       │   ├─ 새 화자 등록, FLOOR_GRANT

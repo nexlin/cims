@@ -65,7 +65,7 @@ ALTER TABLE ptt_groups
 ```cpp
 enum FloorTier { TIER_NORMAL = 0, TIER_IMMINENT = 1, TIER_EMERGENCY = 2 };
 // PMcpttGroup 내부
-std::map<std::string,int>      _priorities;   // 기존 수치(낮을수록 우선)
+std::map<std::string,int>      _priorities;   // 수치 우선순위(TS 24.380: 0~255, 클수록 우선)
 std::map<std::string,std::string> _roles;     // 기존 chair/participant
 std::map<std::string,int>      _tier;          // 신규: 세션별 현재 condition tier
 ```
