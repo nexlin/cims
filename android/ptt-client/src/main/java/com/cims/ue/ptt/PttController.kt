@@ -10,6 +10,7 @@ import com.cims.ue.core.sip.SipController
 import com.cims.ue.ptt.audio.PttFeedback
 import com.cims.ue.ptt.csc.CscClient
 import com.cims.ue.ptt.csc.CscConfig
+import com.cims.ue.ptt.csc.GroupDoc
 import com.cims.ue.ptt.csc.GroupSummary
 import com.cims.ue.ptt.csc.TokenSet
 import com.cims.ue.ptt.floor.FloorClient
@@ -140,6 +141,10 @@ class PttController(
 
     private val _groups = MutableStateFlow<List<GroupSummary>>(emptyList())
     val groups: StateFlow<List<GroupSummary>> = _groups.asStateFlow()
+
+    private val _groupDocs = MutableStateFlow<Map<String, GroupDoc>>(emptyMap())
+    /** 그룹 문서(TS 24.481) 캐시 — groupId → 멤버(이름·번호·역할·우선순위)·그룹 속성. [loadGroupDetail] 로 적재. */
+    val groupDocs: StateFlow<Map<String, GroupDoc>> = _groupDocs.asStateFlow()
 
     private val _selectedGroup = MutableStateFlow<String?>(null)
     /** 그룹 목록에서 선택된 그룹(참여 전 하이라이트·affiliation 대상). */
@@ -411,6 +416,21 @@ class PttController(
                 _status.value = "그룹 ${list.size}개"
             }
             .onFailure { _status.value = "그룹 조회 실패: ${it.message}" }
+    }
+
+    /** 그룹 문서(TS 24.481, GMS XCAP) 조회 — 채널 상세 진입 시 호출. ETag(If-None-Match) 캐시. */
+    fun loadGroupDetail(groupId: String) = scope.launch {
+        val c = csc ?: return@launch
+        val t = token?.accessToken ?: return@launch
+        val uri = _groups.value.firstOrNull { bareId(it.uri) == groupId }?.uri ?: "tel:$groupId"
+        val cached = _groupDocs.value[groupId]
+        runCatching { withContext(Dispatchers.IO) { c.getGroupDoc(t, mcpttId, uri, cached?.etag) } }
+            .onSuccess { doc ->
+                if (!doc.notModified) doc.body?.let { body ->
+                    _groupDocs.value = _groupDocs.value + (groupId to GroupDoc.parse(uri, body, doc.etag))
+                }
+            }
+            .onFailure { Log.d(TAG, "group doc $groupId 조회 실패: ${it.message}") }
     }
 
     fun selectGroup(groupId: String) {

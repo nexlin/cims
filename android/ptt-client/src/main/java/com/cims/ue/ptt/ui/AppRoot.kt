@@ -31,6 +31,7 @@ import com.cims.ue.ptt.ListenPolicy
 import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.PttService
 import com.cims.ue.ptt.Speaker
+import com.cims.ue.ptt.csc.GroupDoc
 import com.cims.ue.ptt.csc.GroupSummary
 import com.cims.ue.ptt.floor.FloorState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +53,7 @@ class PttUiState(
     val speaker: Speaker?,
     val status: String,
     val groups: List<GroupSummary>,
+    val groupDocs: Map<String, GroupDoc>,
     val sessions: List<GroupCallState>,
     val affiliated: Set<String>,
     val policy: ListenPolicy,
@@ -78,6 +80,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbSpeaker = remember { MutableStateFlow<Speaker?>(null) }
     val fbStatus = remember { MutableStateFlow("서비스 연결 중…") }
     val fbGroups = remember { MutableStateFlow<List<GroupSummary>>(emptyList()) }
+    val fbGroupDocs = remember { MutableStateFlow<Map<String, GroupDoc>>(emptyMap()) }
     val fbAffil = remember { MutableStateFlow<Set<String>>(emptySet()) }
     val fbSessions = remember { MutableStateFlow<List<GroupCallState>>(emptyList()) }
     val fbPolicy = remember { MutableStateFlow(ListenPolicy.ALL) }
@@ -90,6 +93,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         speaker = (ctl?.speaker ?: fbSpeaker).collectAsState().value,
         status = (ctl?.status ?: fbStatus).collectAsState().value,
         groups = (ctl?.groups ?: fbGroups).collectAsState().value,
+        groupDocs = (ctl?.groupDocs ?: fbGroupDocs).collectAsState().value,
         sessions = (ctl?.sessions ?: fbSessions).collectAsState().value,
         affiliated = (ctl?.affiliated ?: fbAffil).collectAsState().value,
         policy = (ctl?.listenPolicy ?: fbPolicy).collectAsState().value,
