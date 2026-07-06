@@ -196,13 +196,14 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
             }
         }
 
-        // 입력바(시안) — [＋]자리는 후속(미디어 첨부 서버 경로 미구현), 입력 + 전송
+        // 입력바(시안) — 첨부(사진/동영상, 전송은 서버 경로 연동 후) + 입력 + 전송
         Row(
             Modifier.fillMaxWidth().background(Ct.Surface)
                 .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            AttachButton(42)
             Box(
                 Modifier.weight(1f).height(42.dp)
                     .clip(RoundedCornerShape(21.dp)).background(Ct.SurfaceHi)

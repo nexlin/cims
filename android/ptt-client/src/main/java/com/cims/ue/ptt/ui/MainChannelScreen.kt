@@ -1,8 +1,7 @@
 package com.cims.ue.ptt.ui
 
-import android.content.Context
-import android.media.AudioManager
 import android.os.SystemClock
+import android.text.format.DateFormat
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -20,13 +19,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -37,6 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,197 +48,208 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.sip.RegState
 import com.cims.ue.core.sip.SipController
+import com.cims.ue.ptt.ChannelRole
 import com.cims.ue.ptt.GroupCallState
 import com.cims.ue.ptt.HwPtt
 import com.cims.ue.ptt.ListenPolicy
 import com.cims.ue.ptt.PttController
+import com.cims.ue.ptt.PttService
 import com.cims.ue.ptt.R
 import com.cims.ue.ptt.floor.FloorState
 import kotlinx.coroutines.delay
+import java.util.Date
 
-/** 주채널 화면(시안 `주부채널화면.png`) — 주채널 카드(발언 상태+PTT) + 부채널 카드들. */
+/** 주채널 화면 — 카드 없이 전면 배치: 채널 정보/발언 상태/음량 + 하단 인라인 채팅.
+ *  주채널 외 참여 채널은 전체채널 탭에서 확인. [주채널 선택] → 시트에서 즉시 지정. */
 @Composable
 fun MainChannelScreen(
     st: PttUiState,
+    svc: PttService?,
     onOpenThread: (String) -> Unit,
-    onOpenChannels: () -> Unit,
-    onOpenSettings: () -> Unit,
 ) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        val (regColor, regText) = when (st.reg) {
-            is RegState.Registered -> Ct.Mint to "접속"
-            RegState.Registering -> Ct.Amber to "연결 중"
-            is RegState.Failed -> Ct.Red to "등록 실패"
-            else -> Ct.TextFaint to "미접속"
-        }
-        ScreenHeader(
-            label = st.ctl?.mcpttId?.let { PttController.bareId(it) },
-            title = st.primary?.let { st.groupName(it.groupId) } ?: "주채널",
-            trailing = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    var picker by remember { mutableStateOf(false) }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            val (regColor, regText) = when (st.reg) {
+                is RegState.Registered -> Ct.Mint to "접속"
+                RegState.Registering -> Ct.Amber to "연결 중"
+                is RegState.Failed -> Ct.Red to "등록 실패"
+                else -> Ct.TextFaint to "미접속"
+            }
+            ScreenHeader(
+                label = st.ctl?.mcpttId?.let { PttController.bareId(it) },
+                title = "주채널",
+                trailing = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         StatusDot(regColor)
                         Text(regText, color = regColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
-                    Box(
-                        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
-                            .background(Ct.SurfaceHi).clickable(onClick = onOpenSettings),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(painterResource(R.drawable.ic_nav_settings), contentDescription = "설정",
-                            tint = Ct.TextDim, modifier = Modifier.size(18.dp))
-                    }
-                }
-            },
-        )
+                },
+            )
+            Spacer(Modifier.height(10.dp))
 
-        val primary = st.primary
-        if (primary == null) {
-            SectionCard {
-                Column(Modifier.fillMaxWidth().padding(vertical = 18.dp),
+            val primary = st.primary
+            if (primary != null) {
+                PrimaryChannelPanel(st, svc, primary, onOpenThread,
+                    onSelect = { picker = true }, modifier = Modifier.weight(1f))
+            } else {
+                Column(Modifier.weight(1f).fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    verticalArrangement = Arrangement.Center) {
                     Icon(painterResource(R.drawable.ic_connected), contentDescription = null,
                         tint = Ct.TextFaint, modifier = Modifier.size(40.dp))
+                    Spacer(Modifier.height(12.dp))
                     Text("참여 중인 채널이 없습니다", color = Ct.TextDim, fontSize = 14.sp)
-                    MintButton("전체채널에서 선택", Modifier.fillMaxWidth(0.7f), onClick = onOpenChannels)
+                    Spacer(Modifier.height(14.dp))
+                    MintButton("주채널 선택", Modifier.fillMaxWidth(0.6f)) { picker = true }
                 }
+                Spacer(Modifier.height(10.dp))
+                AudioControlRow(st)
             }
-        } else {
-            PrimaryChannelCard(st, primary, onOpenThread)
+
+            Text(st.status, color = Ct.TextFaint, fontSize = 11.sp,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
         }
 
-        st.secondaries.forEach { s ->
-            SecondaryChannelCard(st, s, onOpenThread)
-        }
+        if (picker) ChannelSelectSheet(st, onDismiss = { picker = false })
+    }
+}
 
-        // 채널 외 참여 그룹(일반) — 간단 행으로 노출
-        val others = st.sessions.filter {
-            it.role == com.cims.ue.ptt.ChannelRole.NONE
-        }
-        if (others.isNotEmpty()) {
-            SectionLabel("모니터링 중 (${others.size})")
-            others.forEach { s ->
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Ct.Surface)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(st.groupName(s.groupId), color = Ct.Text, fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    if (!s.audible) PillBadge("음소거", Ct.Gray)
-                    Spacer(Modifier.width(8.dp))
-                    Text("주채널 설정", color = Ct.Mint, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable { st.ctl?.setPrimary(s.groupId) })
-                }
-            }
-        }
+/** 주채널 전면 패널(카드 없음) — 채널명/태그/발언 상태/음량/PTT(터치 단말만)/컨트롤 + 하단 채팅. */
+@Composable
+private fun PrimaryChannelPanel(
+    st: PttUiState,
+    svc: PttService?,
+    s: GroupCallState,
+    onOpenThread: (String) -> Unit,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // 그룹 문서(P우선순위 배지) — ETag 캐시라 재호출 저비용
+    LaunchedEffect(s.groupId) { st.ctl?.loadGroupDetail(s.groupId) }
 
-        // 스피커 출력/듣기 정책 — 시안 하단 여백 자리에 컨트롤 행
+    Column(modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(st.groupName(s.groupId), color = Ct.Text, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            st.groupDocs[s.groupId]?.priority?.let { PillBadge("P$it", Ct.Mint) }
+            if (s.emergency) PillBadge("긴급", Ct.Red, filled = true)
+            Spacer(Modifier.weight(1f))
+            Text("주채널 선택", color = Ct.Mint, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Ct.MintDim)
+                    .clickable(onClick = onSelect)
+                    .padding(horizontal = 10.dp, vertical = 5.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            TagChip("음성", R.drawable.ic_voice)
+            TagChip("구성원 (${s.participants.size})")
+            Spacer(Modifier.weight(1f))
+            SpeakingIndicator(s)
+        }
+        Spacer(Modifier.height(10.dp))
+        SpeakerStatusStrip(st, s)
+        Spacer(Modifier.height(8.dp))
+        ChannelVolumeRow(st, s)
+
+        // 화면 PTT 바 — 터치 단말만(하드웨어 PTT 버튼 단말은 표시하지 않음)
+        val hwPtt by HwPtt.present.collectAsState()
+        if (!hwPtt) {
+            Spacer(Modifier.height(8.dp))
+            PttBar(floor = st.floor, enabled = st.inCall, modifier = Modifier.fillMaxWidth(),
+                onDown = { st.ctl?.pttDown() }, onUp = { st.ctl?.pttUp() })
+        }
+        Spacer(Modifier.height(8.dp))
         AudioControlRow(st)
+        Spacer(Modifier.height(10.dp))
 
-        Text(st.status, color = Ct.TextFaint, fontSize = 11.sp,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
+        InlineChat(st, svc, s.groupId, onOpenThread, Modifier.weight(1f))
     }
 }
 
-/** 주채널 카드 — 배지·태그·송신자 표시·수신 음량·PTT 버튼(+메시지). */
+/** 주채널 선택 시트 — 화면 이동 없이 그룹 리스트에서 즉시 지정.
+ *  미참여 그룹이면 참여(joinGroupCall)부터 수행 후 주채널로. */
 @Composable
-private fun PrimaryChannelCard(st: PttUiState, s: GroupCallState, onOpenThread: (String) -> Unit) {
-    SectionCard {
-        SectionLabel("주채널")
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            RoleBadge("주", if (s.emergency) Ct.Red else Ct.Mint, if (s.emergency) Ct.RedDim else Ct.MintDim)
-            Column(Modifier.weight(1f)) {
-                Text(st.groupName(s.groupId), color = Ct.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(top = 4.dp)) {
-                    TagChip("음성", R.drawable.ic_voice)
-                    TagChip("구성원 (${s.participants.size})")
-                    if (s.emergency) PillBadge("긴급", Ct.Red)
-                }
-            }
-            SpeakingIndicator(s)
-        }
-
-        Spacer(Modifier.height(14.dp))
-        SpeakerStatusPanel(st, s)
-        Spacer(Modifier.height(14.dp))
-
-        VolumeRow()
-        Spacer(Modifier.height(12.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            val hwPtt by HwPtt.present.collectAsState()
-            if (hwPtt) {
-                Box(
-                    Modifier.weight(1f).height(64.dp).clip(RoundedCornerShape(14.dp))
-                        .background(Ct.MintDim),
-                    contentAlignment = Alignment.Center,
+private fun ChannelSelectSheet(st: PttUiState, onDismiss: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+        .pointerInput(Unit) { detectTapGestures { onDismiss() } }) {
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                .background(Ct.Surface)
+                .pointerInput(Unit) { detectTapGestures { } }   // 시트 내부 탭이 scrim 으로 새지 않게
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text("주채널 선택", color = Ct.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp))
+            if (st.groups.isEmpty())
+                Text("선택 가능한 채널이 없습니다", color = Ct.TextFaint, fontSize = 12.sp,
+                    modifier = Modifier.padding(vertical = 10.dp))
+            st.groups.forEach { g ->
+                val gid = PttController.bareId(g.uri)
+                val s = st.session(gid)
+                val selected = s?.role == ChannelRole.PRIMARY
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) Ct.MintDim else Color.Transparent)
+                        .clickable {
+                            st.ctl?.let { c ->
+                                if (s == null) c.joinGroupCall(gid)
+                                c.setPrimary(gid)
+                            }
+                            onDismiss()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("측면 PTT 버튼을 눌러 발언", color = Ct.Mint, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(st.groupName(gid), color = if (selected) Ct.Mint else Ct.Text,
+                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    st.groupDocs[gid]?.priority?.let { PillBadge("P$it", Ct.Mint) }
+                    when {
+                        selected -> PillBadge("주채널", Ct.Red)
+                        s != null -> PillBadge("참여 중", Ct.Gray)
+                        else -> Text("미참여", color = Ct.TextFaint, fontSize = 11.sp)
+                    }
                 }
-            } else {
-                PttBar(floor = st.floor, enabled = st.inCall, modifier = Modifier.weight(1f),
-                    onDown = { st.ctl?.pttDown() }, onUp = { st.ctl?.pttUp() })
             }
-            MessageSquareButton { onOpenThread(s.groupId) }
         }
     }
 }
 
-/** 부채널 카드 — 이름·송신자·[주채널 설정]. */
-@Composable
-private fun SecondaryChannelCard(st: PttUiState, s: GroupCallState, onOpenThread: (String) -> Unit) {
-    SectionCard {
-        SectionLabel("부채널")
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            RoleBadge("부", Ct.Amber, Ct.AmberDim)
-            Column(Modifier.weight(1f)) {
-                Text(st.groupName(s.groupId), color = Ct.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(top = 4.dp)) {
-                    TagChip("음성", R.drawable.ic_voice)
-                    TagChip("구성원 (${s.participants.size})")
-                    if (s.emergency) PillBadge("긴급", Ct.Red)
-                }
-            }
-            SpeakingIndicator(s)
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GhostButton("주채널 설정", Modifier.weight(1f), color = Ct.Mint) { st.ctl?.setPrimary(s.groupId) }
-            MessageSquareButton { onOpenThread(s.groupId) }
-        }
-    }
-}
-
-/** 카드 우상단 "▶ ○○ 송신" 표시. */
+/** 우상단 "▶ ○○ 송신" 칩(시안 — 어두운 민트 면 위 민트 텍스트). */
 @Composable
 private fun SpeakingIndicator(s: GroupCallState) {
     val sp = s.speaker ?: return
     val name = if (sp.self) "나" else PttController.bareId(sp.id)
-    val color = if (sp.self) Ct.Mint else Ct.Amber
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(
+        Modifier.clip(RoundedCornerShape(6.dp)).background(Ct.MintDim)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Icon(painterResource(R.drawable.ic_voice), contentDescription = null,
-            tint = color, modifier = Modifier.size(13.dp))
-        Text("$name 송신", color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            tint = Ct.Mint, modifier = Modifier.size(12.dp))
+        Text("$name 송신", color = Ct.Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 
-/** 카드 중앙 상태 패널 — 시안의 영상 영역 자리(음성 전용: 발언자/경과시간/상태). */
+/** 발언 상태 스트립 — 슬림 한 줄(발언자/경과시간/상태). */
 @Composable
-private fun SpeakerStatusPanel(st: PttUiState, s: GroupCallState) {
+private fun SpeakerStatusStrip(st: PttUiState, s: GroupCallState) {
     var nowMs by remember { mutableLongStateOf(0L) }
     val sp = s.speaker
     LaunchedEffect(sp) {
@@ -243,47 +258,44 @@ private fun SpeakerStatusPanel(st: PttUiState, s: GroupCallState) {
             delay(1000)
         }
     }
-    Box(
-        Modifier.fillMaxWidth().height(96.dp).clip(RoundedCornerShape(12.dp)).background(Ct.Bg),
-        contentAlignment = Alignment.Center,
+    Row(
+        Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(10.dp)).background(Ct.Surface)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         when {
             sp != null -> {
                 val elapsed = ((nowMs - sp.sinceMs).coerceAtLeast(0L)) / 1000
-                Column(horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        if (sp.self) "내가 발언 중" else "${PttController.bareId(sp.id)} 발언 중",
-                        color = if (sp.self) Ct.Mint else Ct.Amber,
-                        fontSize = 17.sp, fontWeight = FontWeight.Bold,
-                    )
-                    Text("%d:%02d".format(elapsed / 60, elapsed % 60), color = Ct.TextDim, fontSize = 13.sp)
-                }
+                Text(
+                    if (sp.self) "내가 발언 중" else "${PttController.bareId(sp.id)} 발언 중",
+                    color = if (sp.self) Ct.Mint else Ct.Amber,
+                    fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("%d:%02d".format(elapsed / 60, elapsed % 60), color = Ct.TextDim, fontSize = 13.sp)
             }
             st.floor == FloorState.REQUESTING -> Text("발언권 요청 중…", color = Ct.Amber,
-                fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            s.active -> Text("대기 중 — 버튼을 눌러 발언", color = Ct.TextFaint, fontSize = 13.sp)
+                fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            s.active -> Text("대기 중", color = Ct.TextFaint, fontSize = 13.sp)
             else -> Text("연결 중…", color = Ct.TextFaint, fontSize = 13.sp)
         }
     }
 }
 
-/** 수신 음량 행 — 레벨미터 아이콘 + 슬라이더(통화 스트림 볼륨, 시안의 음량 슬라이더). */
+/** 채널별 수신 음량 행 — 레벨미터 아이콘 + 슬라이더(conference bridge 유입 레벨 0~2, 1=원음). */
 @Composable
-private fun VolumeRow() {
-    val context = LocalContext.current
-    val am = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
-    val max = remember { am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL).coerceAtLeast(1) }
-    var vol by remember { mutableFloatStateOf(am.getStreamVolume(AudioManager.STREAM_VOICE_CALL).toFloat()) }
+private fun ChannelVolumeRow(st: PttUiState, s: GroupCallState) {
+    var vol by remember(s.groupId) { mutableFloatStateOf(s.volume) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(painterResource(R.drawable.ic_level_meter), contentDescription = "수신 음량",
             tint = Ct.Mint, modifier = Modifier.size(18.dp))
         Slider(
             value = vol, onValueChange = {
                 vol = it
-                am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, it.toInt(), 0)
+                st.ctl?.setChannelVolume(s.groupId, it)
             },
-            valueRange = 0f..max.toFloat(), steps = (max - 1).coerceAtLeast(0),
+            valueRange = 0f..2f,
             modifier = Modifier.weight(1f).height(24.dp),
             colors = SliderDefaults.colors(
                 thumbColor = Ct.Mint, activeTrackColor = Ct.Mint,
@@ -358,18 +370,109 @@ private fun PttBar(floor: FloorState, enabled: Boolean, modifier: Modifier = Mod
     }
 }
 
-/** PTT 바 우측 정사각 메시지 버튼(시안). */
+/** 주채널 인라인 채팅 — 하단 영역(말풍선 리스트 + 입력바). 헤더 확장 버튼=전체 대화 화면. */
 @Composable
-private fun MessageSquareButton(onClick: () -> Unit) {
-    Box(
-        Modifier.size(width = 56.dp, height = 50.dp).clip(RoundedCornerShape(14.dp))
-            .background(Ct.SurfaceHi).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(painterResource(R.drawable.ic_message), contentDescription = "메시지",
-            tint = Ct.Mint, modifier = Modifier.size(20.dp))
+private fun InlineChat(st: PttUiState, svc: PttService?, groupId: String,
+                       onOpenThread: (String) -> Unit, modifier: Modifier = Modifier) {
+    val tick = svc?.messageTick?.collectAsState()?.value ?: 0
+    val entries = remember(tick, svc, groupId) { svc?.messages?.thread(groupId) ?: emptyList() }
+    var input by remember(groupId) { mutableStateOf("") }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(groupId, entries.size) {
+        if (entries.isNotEmpty()) listState.scrollToItem(entries.size - 1)
+        svc?.markThreadRead(groupId)
+    }
+
+    Column(modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("채팅", color = Ct.TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f))
+            Icon(painterResource(R.drawable.ic_message), contentDescription = "전체 화면",
+                tint = Ct.TextFaint,
+                modifier = Modifier.size(16.dp).clickable { onOpenThread(groupId) })
+        }
+        Spacer(Modifier.height(6.dp))
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(Ct.Surface)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (entries.isEmpty()) {
+                items(1) {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                        Text("메시지가 없습니다", color = Ct.TextFaint, fontSize = 11.sp)
+                    }
+                }
+            }
+            itemsIndexed(entries) { _, e ->
+                val mine = e.direction == MsgDirection.OUT
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    if (mine) Text(chatTime(e.time), color = Ct.TextFaint, fontSize = 9.sp,
+                        modifier = Modifier.padding(end = 5.dp, bottom = 2.dp))
+                    Text(
+                        e.text,
+                        color = if (mine) Ct.OnMint else Ct.Text,
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .widthIn(max = 240.dp)
+                            .clip(RoundedCornerShape(
+                                topStart = 12.dp, topEnd = 12.dp,
+                                bottomStart = if (mine) 12.dp else 4.dp,
+                                bottomEnd = if (mine) 4.dp else 12.dp))
+                            .background(if (mine) Ct.Mint else Ct.SurfaceHi)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                    if (!mine) Text(chatTime(e.time), color = Ct.TextFaint, fontSize = 9.sp,
+                        modifier = Modifier.padding(start = 5.dp, bottom = 2.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+
+        // 입력바 — 첨부 + 입력 + 전송(SIP MESSAGE 그룹 fan-out)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AttachButton(38)
+            Box(
+                Modifier.weight(1f).height(38.dp)
+                    .clip(RoundedCornerShape(19.dp)).background(Ct.SurfaceHi)
+                    .padding(horizontal = 13.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (input.isEmpty()) Text("메시지 입력", color = Ct.TextFaint, fontSize = 12.sp)
+                BasicTextField(
+                    value = input, onValueChange = { input = it },
+                    textStyle = TextStyle(color = Ct.Text, fontSize = 13.sp),
+                    cursorBrush = SolidColor(Ct.Mint),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            val canSend = input.isNotBlank()
+            Box(
+                Modifier.size(38.dp).clip(CircleShape)
+                    .background(if (canSend) Ct.Mint else Ct.SurfaceHi)
+                    .clickable(enabled = canSend) {
+                        svc?.sendGroupMessage(groupId, input.trim())
+                        input = ""
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(painterResource(R.drawable.ic_send), contentDescription = "전송",
+                    tint = if (canSend) Ct.OnMint else Ct.TextFaint, modifier = Modifier.size(16.dp))
+            }
+        }
     }
 }
+
+private fun chatTime(t: Long): String = DateFormat.format("HH:mm", Date(t)).toString()
 
 /** 스피커 출력·듣기 정책·SOS — 기존 기능 유지(시안 톤으로 재구성). */
 @Composable
@@ -386,7 +489,7 @@ private fun AudioControlRow(st: PttUiState) {
         val all = st.policy == ListenPolicy.ALL
         ControlToggle(
             icon = R.drawable.ic_connected,
-            label = if (all) "전체듣기" else "주·부만", active = all, modifier = Modifier.weight(1f),
+            label = if (all) "전체듣기" else "주채널만", active = all, modifier = Modifier.weight(1f),
         ) {
             st.ctl?.setListenPolicy(if (all) ListenPolicy.CHANNELS_ONLY else ListenPolicy.ALL)
         }

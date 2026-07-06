@@ -42,9 +42,9 @@ private fun prioColors(p: Int?): Pair<Color, Color> = when {
 }
 
 /**
- * 채널 상세(시안 `채널선택화면-상세.png`) — 헤더(우선순위·유형·CH) + 역할 배지 3케이스 +
+ * 채널 상세(시안 `채널선택화면-상세.png`) — 헤더(우선순위·유형·CH) + 역할 배너 +
  * 채널 상태 카드 + 접속 중/오프라인 구성원(이름·역할·우선순위·번호, TS 24.481 그룹 문서) +
- * 하단 [주채널 설정]/[부채널 설정] 케이스별 버튼.
+ * 하단 [주채널 설정]/[나가기] 케이스별 버튼.
  *
  * 구성원 정보의 출처는 GMS 그룹 문서(TS 24.481)의 표준 필드만 사용한다:
  * entry uri(tel:번호)·display-name·participant-type(chair/participant)·user-priority.
@@ -95,17 +95,15 @@ fun ChannelDetailScreen(
             when {
                 s?.emergency == true -> PillBadge("긴급", Ct.Red, filled = true)
                 s?.role == ChannelRole.PRIMARY -> PillBadge("주채널", Ct.Mint, filled = true)
-                s?.role == ChannelRole.SECONDARY -> PillBadge("부채널", Ct.Amber, filled = true)
                 joined -> PillBadge("참여 중", Ct.Gray)
             }
         }
         Spacer(Modifier.height(12.dp))
 
-        // 역할 배지 3케이스 배너(시안) — 주채널/부채널/일반
+        // 역할 배너(시안) — 주채널/일반 참여/미참여
         val notice = when {
             s?.role == ChannelRole.PRIMARY -> "현재 주채널로 설정되어 있습니다." to Ct.Mint
-            s?.role == ChannelRole.SECONDARY -> "현재 부채널로 설정되어 있습니다." to Ct.Amber
-            joined -> "주채널 또는 부채널로 설정할 수 있습니다." to Ct.TextDim
+            joined -> "주채널로 설정할 수 있습니다." to Ct.TextDim
             else -> "주채널로 설정하면 참여와 함께 발언할 수 있습니다." to Ct.TextDim
         }
         Row(
@@ -213,7 +211,7 @@ fun ChannelDetailScreen(
             }
         }
 
-        // 하단 액션 — 시안 케이스별: A 주채널=버튼 없음(나가기만) / B 부채널=[주채널 설정] / C 일반=2버튼
+        // 하단 액션 — 케이스별: 미참여=[주채널로 참여]/[참여만] / 주채널=나가기만 / 일반 참여=[주채널 설정]/[나가기]
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             when {
@@ -229,15 +227,8 @@ fun ChannelDetailScreen(
                         st.ctl?.leaveGroup(groupId); onBack()
                     }
                 }
-                s?.role == ChannelRole.SECONDARY -> {
-                    MintButton("주채널 설정", Modifier.weight(1f)) { st.ctl?.setPrimary(groupId) }
-                    GhostButton("나가기", color = Ct.Red) { st.ctl?.leaveGroup(groupId); onBack() }
-                }
                 else -> {
                     MintButton("주채널 설정", Modifier.weight(1f)) { st.ctl?.setPrimary(groupId) }
-                    GhostButton("부채널 설정", Modifier.weight(1f), color = Ct.Amber) {
-                        st.ctl?.toggleSecondary(groupId)
-                    }
                     GhostButton("나가기", color = Ct.Red) { st.ctl?.leaveGroup(groupId); onBack() }
                 }
             }

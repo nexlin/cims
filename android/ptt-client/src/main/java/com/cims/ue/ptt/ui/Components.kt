@@ -1,5 +1,9 @@
 package com.cims.ue.ptt.ui
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +37,28 @@ import com.cims.ue.ptt.R
 fun Modifier.plainClickable(onClick: () -> Unit): Modifier = this.then(
     Modifier.clickable(indication = null, interactionSource = MutableInteractionSource(), onClick = onClick),
 )
+
+/** 채팅 입력바 첨부(사진/동영상) 버튼 — 시스템 포토 피커.
+ *  미디어 전송은 서버 업로드 경로 연동 후 지원(현재는 선택 시 안내만). */
+@Composable
+fun AttachButton(size: Int = 38) {
+    val context = LocalContext.current
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            Toast.makeText(context, "사진·동영상 전송은 서버 연동 후 지원됩니다", Toast.LENGTH_SHORT).show()
+        }
+    }
+    Box(
+        Modifier.size(size.dp).clip(CircleShape).background(Ct.SurfaceHi)
+            .clickable {
+                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(R.drawable.ic_attach), contentDescription = "사진·동영상 첨부",
+            tint = Ct.TextDim, modifier = Modifier.size((size * 9 / 20).dp))
+    }
+}
 
 /** 화면 공통 헤더 — 위 작은 민트 라벨(기관/맥락) + 큰 제목, 우측 액션 슬롯. */
 @Composable
@@ -139,7 +166,7 @@ fun MintButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = t
     }
 }
 
-/** 보조 버튼 — 어두운 면 + 테두리(시안 "부채널 설정"). */
+/** 보조 버튼 — 어두운 면 + 테두리(나가기·참여만 등). */
 @Composable
 fun GhostButton(text: String, modifier: Modifier = Modifier, color: Color = Ct.Text, onClick: () -> Unit) {
     Box(
@@ -177,8 +204,8 @@ fun InitialAvatar(name: String, active: Boolean = true, size: Int = 36) {
 enum class Tab(val label: String, val icon: Int) {
     MAIN("주채널", R.drawable.ic_nav_main),
     CHANNELS("전체채널", R.drawable.ic_nav_channels),
-    HISTORY("통화이력", R.drawable.ic_history),
     MESSAGES("메시지", R.drawable.ic_nav_message),
+    SETTINGS("설정", R.drawable.ic_nav_settings),
 }
 
 /** 하단 내비 4탭 — 시안: 다크 바, 활성=민트 아이콘+라벨. [badge]=탭별 뱃지 수(메시지 안읽음). */

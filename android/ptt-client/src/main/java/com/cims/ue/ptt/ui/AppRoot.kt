@@ -42,7 +42,6 @@ sealed interface Nav {
     data class Home(val tab: Tab) : Nav
     data class Channel(val groupId: String) : Nav
     data class Thread(val peer: String) : Nav
-    data object Settings : Nav
 }
 
 /** 컨트롤러 상태 묶음 — 화면들에 한 번에 전달. */
@@ -61,7 +60,6 @@ class PttUiState(
     val hasAccount: Boolean,
 ) {
     val primary: GroupCallState? get() = sessions.firstOrNull { it.role == com.cims.ue.ptt.ChannelRole.PRIMARY }
-    val secondaries: List<GroupCallState> get() = sessions.filter { it.role == com.cims.ue.ptt.ChannelRole.SECONDARY }
     val inCall: Boolean get() = sessions.any { it.active || it.callId >= 0 }
     val emergencySession: GroupCallState? get() = sessions.firstOrNull { it.emergency }
     fun session(groupId: String): GroupCallState? = sessions.firstOrNull { it.groupId == groupId }
@@ -136,7 +134,6 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         nav = when (nav) {
             is Nav.Channel -> Nav.Home(Tab.CHANNELS)
             is Nav.Thread -> Nav.Home(Tab.MESSAGES)
-            Nav.Settings -> Nav.Home(Tab.MAIN)
             else -> Nav.Home(Tab.MAIN)
         }
     }
@@ -152,7 +149,8 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
                 onTab = { nav = Nav.Home(it) },
                 onOpenChannel = { nav = Nav.Channel(it) },
                 onOpenThread = { nav = Nav.Thread(it) },
-                onOpenSettings = { nav = Nav.Settings },
+                onStopSip = onStopSip,
+                onOpenKeyConfig = { showKeyConfig = true },
             )
             is Nav.Channel -> ChannelDetailScreen(
                 st = st, groupId = n.groupId,
@@ -162,12 +160,6 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
             is Nav.Thread -> MessageThreadScreen(
                 st = st, svc = svc, peer = n.peer,
                 onBack = { nav = Nav.Home(Tab.MESSAGES) },
-            )
-            Nav.Settings -> SettingsScreen(
-                st = st, svc = svc,
-                onBack = { nav = Nav.Home(Tab.MAIN) },
-                onStopSip = onStopSip,
-                onOpenKeyConfig = { showKeyConfig = true },
             )
         }
 
@@ -185,7 +177,8 @@ private fun HomeScaffold(
     onTab: (Tab) -> Unit,
     onOpenChannel: (String) -> Unit,
     onOpenThread: (String) -> Unit,
-    onOpenSettings: () -> Unit,
+    onStopSip: () -> Unit,
+    onOpenKeyConfig: () -> Unit,
 ) {
     val msgTick = svc?.messageTick?.collectAsState()?.value ?: 0
     val unread = remember(msgTick, svc) { svc?.messages?.threads()?.sumOf { it.unread } ?: 0 }
@@ -196,11 +189,10 @@ private fun HomeScaffold(
 
         Box(Modifier.weight(1f)) {
             when (tab) {
-                Tab.MAIN -> MainChannelScreen(st, onOpenThread = onOpenThread,
-                    onOpenChannels = { onTab(Tab.CHANNELS) }, onOpenSettings = onOpenSettings)
+                Tab.MAIN -> MainChannelScreen(st, svc, onOpenThread = onOpenThread)
                 Tab.CHANNELS -> ChannelsScreen(st, onOpenChannel = onOpenChannel, onOpenThread = onOpenThread)
-                Tab.HISTORY -> HistoryScreen(st, svc)
                 Tab.MESSAGES -> MessagesScreen(st, svc, onOpenThread = onOpenThread)
+                Tab.SETTINGS -> SettingsScreen(st, svc, onStopSip = onStopSip, onOpenKeyConfig = onOpenKeyConfig)
             }
         }
         AppBottomNav(current = tab, badge = mapOf(Tab.MESSAGES to unread), onSelect = onTab)

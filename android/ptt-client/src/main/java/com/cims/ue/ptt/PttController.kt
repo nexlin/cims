@@ -34,9 +34,9 @@ import kotlinx.coroutines.withContext
 data class Speaker(val id: String, val self: Boolean, val sinceMs: Long, val groupId: String? = null)
 
 /** 채널 지정 — 주(발언 대상, 1개)/부(모니터링)/일반. */
-enum class ChannelRole { PRIMARY, SECONDARY, NONE }
+enum class ChannelRole { PRIMARY, NONE }
 
-/** 듣기 정책 — 주·부채널만 / 참여한 모든 그룹. */
+/** 듣기 정책 — 주채널만 / 참여한 모든 그룹. */
 enum class ListenPolicy { CHANNELS_ONLY, ALL }
 
 /** 통화이력용 이벤트 종별. */
@@ -57,6 +57,7 @@ data class GroupCallState(
     val audible: Boolean,                 // 듣기 정책 적용 결과
     val emergency: Boolean = false,       // 긴급 상태(내 개시 또는 수신 감지)
     val emergencyMine: Boolean = false,   // 내가 개시자(취소 권한 — 서버는 개시자 취소만 수용)
+    val volume: Float = 1f,               // 채널별 수신 음량(0~2, 1=원음)
 )
 
 /**
@@ -101,6 +102,7 @@ class PttController(
         var speaker: Speaker? = null
         var participants: MutableMap<String, String> = mutableMapOf(bareId(mcpttId) to "connected")
         var audible: Boolean = true
+        var volume: Float = 1f
         var emergency: Boolean = false
         var emergencyMine: Boolean = false
         var mySpeakStartMs: Long = 0          // 이력용 — 내 발언 시작(elapsedRealtime)
@@ -110,7 +112,7 @@ class PttController(
             onEvent = { ev -> onFloorEvent(groupId, ev) })
 
         fun toState() = GroupCallState(groupId, callId, active, role, floorState, speaker, participants.toMap(),
-            audible, emergency, emergencyMine)
+            audible, emergency, emergencyMine, volume)
         fun close() { runCatching { floor.close() } }
     }
 
@@ -122,7 +124,7 @@ class PttController(
     val sessions: StateFlow<List<GroupCallState>> = _sessions.asStateFlow()
 
     private val _listenPolicy = MutableStateFlow(ListenPolicy.ALL)
-    /** 듣기 정책 — 주·부채널만/전체. */
+    /** 듣기 정책 — 주채널만/전체. */
     val listenPolicy: StateFlow<ListenPolicy> = _listenPolicy.asStateFlow()
 
     private val _audioRoute = MutableStateFlow(SipController.AUDIO_ROUTE_DEFAULT)
@@ -249,24 +251,14 @@ class PttController(
 
     // ── 채널/듣기/오디오 설정 ──
 
-    /** [groupId] 를 주채널로 — 기존 주채널은 부채널로 강등. */
+    /** [groupId] 를 주채널로 — 기존 주채널은 일반 참여로 강등. */
     fun setPrimary(groupId: String) {
         synchronized(lock) {
             val s = sessionMap[groupId] ?: return
             sessionMap.values.firstOrNull { it.role == ChannelRole.PRIMARY }?.let {
-                if (it !== s) it.role = ChannelRole.SECONDARY
+                if (it !== s) it.role = ChannelRole.NONE
             }
             s.role = ChannelRole.PRIMARY
-        }
-        applyListenPolicy()
-    }
-
-    /** 부채널 토글(주채널에는 적용 안 함). */
-    fun toggleSecondary(groupId: String) {
-        synchronized(lock) {
-            val s = sessionMap[groupId] ?: return
-            if (s.role == ChannelRole.PRIMARY) return
-            s.role = if (s.role == ChannelRole.SECONDARY) ChannelRole.NONE else ChannelRole.SECONDARY
         }
         applyListenPolicy()
     }
@@ -276,7 +268,7 @@ class PttController(
         applyListenPolicy()
     }
 
-    /** 듣기 정책 적용 — 비채널 그룹은 참여 유지하되 수신 음소거. */
+    /** 듣기 정책 적용 — 비채널 그룹은 참여 유지하되 수신 음소거. 채널별 수신 음량도 재적용(미디어 재협상 시 리셋). */
     private fun applyListenPolicy() {
         val policy = _listenPolicy.value
         synchronized(lock) {
@@ -286,7 +278,18 @@ class PttController(
                     s.audible = on
                     if (s.callId >= 0) sip.setCallListen(s.callId, on)
                 }
+                if (s.callId >= 0 && s.active && s.volume != 1f) sip.setCallRxLevel(s.callId, s.volume)
             }
+        }
+        publish()
+    }
+
+    /** 채널별 수신 음량(0~2, 1=원음) — conference bridge 유입 레벨. */
+    fun setChannelVolume(groupId: String, level: Float) {
+        synchronized(lock) {
+            val s = sessionMap[groupId] ?: return
+            s.volume = level
+            if (s.callId >= 0 && s.active) sip.setCallRxLevel(s.callId, level)
         }
         publish()
     }

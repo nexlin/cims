@@ -119,7 +119,6 @@ private fun ChannelRow(
     val (badge, color, dim) = when {
         s?.emergency == true -> Triple("긴급", Ct.Red, Ct.RedDim)
         s?.role == ChannelRole.PRIMARY -> Triple("주", Ct.Mint, Ct.MintDim)
-        s?.role == ChannelRole.SECONDARY -> Triple("부", Ct.Amber, Ct.AmberDim)
         s != null -> Triple("참", Ct.Gray, Ct.GrayDim)
         else -> Triple(name.take(1), Ct.TextFaint, Ct.GrayDim)
     }

@@ -244,6 +244,11 @@ class CimsCall : Call {
         if (on) aud.startTransmit(spk) else aud.stopTransmit(spk)
     }
 
+    /** 수신 음량(채널별) — conference bridge 유입 레벨(1.0=원음, 0=무음). 미디어 재협상 시 리셋되므로 재적용 필요. */
+    fun setRxLevel(level: Float) {
+        audioMedia()?.adjustRxLevel(level)
+    }
+
     private fun parseApplication(sdp: String): Pair<String, Int>? {
         var sessionIp: String? = null
         var port = -1

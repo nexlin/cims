@@ -25,7 +25,7 @@ object Ct {
     val TextFaint = Color(0xFF5E6E6A)   // 비활성·힌트
     val Red = Color(0xFFEF5350)         // 긴급·오류
     val RedDim = Color(0xFF3A1B1B)
-    val Amber = Color(0xFFF5C24B)       // 부채널·주의
+    val Amber = Color(0xFFF5C24B)       // 주의(발언 요청·연결 중)
     val AmberDim = Color(0xFF39301A)
     val Gray = Color(0xFF8A9995)        // 일반 우선순위
     val GrayDim = Color(0xFF232B29)

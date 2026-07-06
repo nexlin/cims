@@ -12,13 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -26,7 +24,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,34 +33,22 @@ import com.cims.ue.ptt.HwPtt
 import com.cims.ue.ptt.ListenPolicy
 import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.PttService
-import com.cims.ue.ptt.R
 
-/** 설정 화면(시안 `설정화면.png`) — 프로필/통신 설정/채널 설정/기타. */
+/** 설정 탭(시안 `설정화면.png`) — 프로필/통신 설정/채널 설정/기타. */
 @Composable
 fun SettingsScreen(
     st: PttUiState,
     svc: PttService?,
-    onBack: () -> Unit,
     onStopSip: () -> Unit,
     onOpenKeyConfig: () -> Unit,
 ) {
     Column(
-        Modifier.fillMaxSize().statusBarsPadding()
+        Modifier.fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(
-                Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Ct.SurfaceHi)
-                    .clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(painterResource(R.drawable.ic_back), contentDescription = "뒤로",
-                    tint = Ct.Text, modifier = Modifier.size(18.dp))
-            }
-            Text("설정", color = Ct.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        }
+        ScreenHeader(label = null, title = "설정")
 
         // ── 기본 설정: 프로필 ──
         SectionLabel("기본 설정")
@@ -106,7 +91,7 @@ fun SettingsScreen(
             }
             Divider()
             val all = st.policy == ListenPolicy.ALL
-            ToggleRow("전체 듣기", "끄면 주·부채널만 수신", all) {
+            ToggleRow("전체 듣기", "끄면 주채널만 수신", all) {
                 st.ctl?.setListenPolicy(if (all) ListenPolicy.CHANNELS_ONLY else ListenPolicy.ALL)
             }
         }

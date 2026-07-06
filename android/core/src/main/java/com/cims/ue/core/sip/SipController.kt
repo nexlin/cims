@@ -252,6 +252,9 @@ class SipController(private val config: SipAccountConfig) {
     /** 통화별 청취(수신 오디오 → 스피커) 토글 — 멀티그룹 듣기 정책용. */
     fun setCallListen(callId: Int, on: Boolean) = onCtl { calls[callId]?.setListen(on) }
 
+    /** 통화별 수신 음량(1.0=원음, 0=무음) — 채널별 볼륨 슬라이더용. */
+    fun setCallRxLevel(callId: Int, level: Float) = onCtl { calls[callId]?.setRxLevel(level) }
+
     /**
      * 임의 SIP 요청 송신 (affiliation 은 method="PUBLISH"). body/헤더는 호출자(ptt-client)가 규격대로 구성.
      * @param targetUri Request-URI (예: 그룹 `sip:group@domain`)
