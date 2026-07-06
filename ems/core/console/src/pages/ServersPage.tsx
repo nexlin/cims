@@ -30,13 +30,16 @@ type Selection =
   | null
 
 // 상단 페이지 탭 — UX 개편 (2026-06-10): 좌측 선택(서버/그룹) 공유 + 우측 내용 분리.
-//  infra(시스템/서버 구성)·install(패키지 설치) = 조회 operator+, 변이 admin/승격.
+//  infra(시스템/서버 구성)·install(패키지 설치)·control(패키지 제어) = 조회 operator+, 변이 admin/승격.
 //  config(패키지 설정) = operator+ 편집 가능 (동적 반영 설정).
-type PageTab = 'infra' | 'install' | 'config'
+//  역할 분리: install=파일 배치(설치/재설치/롤백/삭제), control=프로세스(start/stop/restart),
+//  config=설정 — 한 탭에 섞여 있던 작업을 라이프사이클 단계별로 분리.
+type PageTab = 'infra' | 'install' | 'config' | 'control'
 const PAGE_TABS: Array<{ key: PageTab; label: string; adminGated: boolean }> = [
   { key: 'infra',   label: '시스템/서버 구성', adminGated: true },
   { key: 'install', label: '패키지 설치',      adminGated: true },
   { key: 'config',  label: '패키지 설정',      adminGated: false },
+  { key: 'control', label: '패키지 제어',      adminGated: true },
 ]
 // fieldset 잠금 래퍼 — 내부 input/button 일괄 disable (조회는 가능)
 const LOCK_FIELDSET_STYLE: React.CSSProperties = {
@@ -72,10 +75,9 @@ export default function ServersPage() {
   const [deployModal, setDeployModal]       = useState<{ agent: Agent } | null>(null)
   const [metricsFor, setMetricsFor]         = useState<Agent | null>(null)
   const [healthCheckFor, setHealthCheckFor] = useState<Agent | null>(null)
-  const [configFor, setConfigFor]           = useState<Deployment | null>(null)
   const [pageTab, setPageTab] = useState<PageTab>(() => {
     const t = searchParams.get('t')
-    return (t === 'install' || t === 'config') ? t : 'infra'
+    return (t === 'install' || t === 'config' || t === 'control') ? t : 'infra'
   })
   const [elevateOpen, setElevateOpen] = useState(false)
   const { user } = useAuth()
@@ -394,7 +396,6 @@ export default function ServersPage() {
                   onMetrics={setMetricsFor}
                   onHealthCheck={setHealthCheckFor}
                   onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
-                  onConfigure={setConfigFor}
                   onJob={queueJob}
                   onRollback={rollbackDeployment}
                   onRemoveDep={removeDeployment} />
@@ -418,6 +419,13 @@ export default function ServersPage() {
               <GroupInstallOverview group={selectedGroup} agents={agents}
                 depsByAgent={depsByAgent}
                 onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
+            ) : pageTab === 'control' ? (
+              <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
+                <GroupControlMatrix group={selectedGroup} agents={agents}
+                  depsByAgent={depsByAgent}
+                  onJob={queueJob}
+                  onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
+              </fieldset>
             ) : (
               <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
                 <GroupInspector group={selectedGroup} agents={agents}
@@ -460,9 +468,6 @@ export default function ServersPage() {
         <MetricsModal agent={metricsFor} onClose={() => setMetricsFor(null)} />}
       {healthCheckFor &&
         <HealthCheckModal agents={[healthCheckFor]} onClose={() => setHealthCheckFor(null)} />}
-      {configFor &&
-        <ModuleConfigModal source={{ type: 'deployment', deployment: configFor }}
-          onClose={() => setConfigFor(null)} onDone={load} />}
       {elevateOpen &&
         <AdminElevateDialog onClose={() => setElevateOpen(false)} />}
     </div>
@@ -1257,10 +1262,11 @@ type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
 function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
                           onApprove, onRevoke, onRemove, onUpgrade, onRestart, onRollbackAgent, onMetrics, onHealthCheck,
-                          onAddDeploy, onConfigure, onJob, onRollback, onRemoveDep }: {
+                          onAddDeploy, onJob, onRollback, onRemoveDep }: {
   agent: Agent
-  // infra=시스템/서버 구성 (설치안내/정보/네트워크), install=패키지 설치 (모듈)
-  mode: 'infra' | 'install'
+  // infra=시스템/서버 구성 (설치안내/정보/네트워크), install=패키지 설치 (모듈 파일 배치),
+  // control=패키지 제어 (프로세스 start/stop/restart)
+  mode: 'infra' | 'install' | 'control'
   deployments: Deployment[]
   packages: SipPackage[]
   vipIps?: Set<string>
@@ -1273,7 +1279,6 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
   onMetrics: (a: Agent) => void
   onHealthCheck: (a: Agent) => void
   onAddDeploy: () => void
-  onConfigure: (d: Deployment) => void
   onJob: (d: Deployment, jt: JobType) => void
   onRollback: (d: Deployment) => void
   onRemoveDep: (d: Deployment) => void
@@ -1395,8 +1400,15 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
                             expanded={openSections.has('modules')}
                             onToggle={() => toggleSection('modules')}>
             <ModulesTab agent={a} deployments={deployments} packages={packages} packagesAvailable={packages.length > 0}
-              onAddDeploy={onAddDeploy} onConfigure={onConfigure}
+              onAddDeploy={onAddDeploy}
               onJob={onJob} onRollback={onRollback} onRemoveDep={onRemoveDep} />
+          </InspectorSection>
+        )}
+        {mode === 'control' && (
+          <InspectorSection title={`모듈 제어 (${deployments.length})`}
+                            expanded={openSections.has('modules')}
+                            onToggle={() => toggleSection('modules')}>
+            <ControlTab agent={a} deployments={deployments} packages={packages} onJob={onJob} />
           </InspectorSection>
         )}
       </div>
@@ -1532,13 +1544,12 @@ function InspectorSection({ title, expanded, onToggle, children }: {
 }
 
 function ModulesTab({ agent: a, deployments, packages, packagesAvailable,
-                     onAddDeploy, onConfigure, onJob, onRollback, onRemoveDep }: {
+                     onAddDeploy, onJob, onRollback, onRemoveDep }: {
   agent: Agent
   deployments: Deployment[]
   packages: SipPackage[]
   packagesAvailable: boolean
   onAddDeploy: () => void
-  onConfigure: (d: Deployment) => void
   onJob: (d: Deployment, jt: JobType) => void
   onRollback: (d: Deployment) => void
   onRemoveDep: (d: Deployment) => void
@@ -1557,14 +1568,14 @@ function ModulesTab({ agent: a, deployments, packages, packagesAvailable,
               <th>설명</th>
               <th>모듈 · 버전</th>
               <th>상태</th>
-              <th style={{ width: 280 }}>작업</th>
+              <th style={{ width: 220 }}>작업</th>
             </tr>
           </thead>
           <tbody>
             {deployments.map(d => (
               <DeploymentRow key={d.id} dep={d} agent={a}
                 desc={pkgDesc.get(d.package_name || '') ?? null}
-                onConfigure={onConfigure} onJob={onJob} onRollback={onRollback}
+                onJob={onJob} onRollback={onRollback}
                 onRemove={onRemoveDep} />
             ))}
           </tbody>
@@ -1580,10 +1591,11 @@ function ModulesTab({ agent: a, deployments, packages, packagesAvailable,
   )
 }
 
-function DeploymentRow({ dep: d, agent, desc, onConfigure, onJob, onRollback, onRemove }: {
+// [패키지 설치] 탭 모듈 행 — 파일 배치 작업만 (설치/재설치/롤백/삭제).
+// 프로세스 start/stop/restart 는 [패키지 제어] 탭, 설정은 [패키지 설정] 탭.
+function DeploymentRow({ dep: d, agent, desc, onJob, onRollback, onRemove }: {
   dep: Deployment; agent: Agent
   desc: string | null
-  onConfigure: (d: Deployment) => void
   onJob: (d: Deployment, jt: JobType) => void
   onRollback: (d: Deployment) => void
   onRemove: (d: Deployment) => void
@@ -1592,10 +1604,8 @@ function DeploymentRow({ dep: d, agent, desc, onConfigure, onJob, onRollback, on
   const online = agent.status === 'online'
   // pending = 생성만 됨 (파일 없음), stopped = 설치됐지만 실행 안됨
   const notInstalled = d.status === 'pending'
-  const canStart = online && (d.status === 'stopped' || d.status === 'running')
-  const canOps   = online && (d.status === 'running' || d.status === 'stopped')
   // 버전 단위 설치: 이전 버전 경로가 보존돼 있을 때만 롤백 가능
-  const canRollback = canOps && !!d.prev_install_path
+  const canRollback = online && (d.status === 'running' || d.status === 'stopped') && !!d.prev_install_path
   const histTip = (d.install_history || [])
     .map(h => `v${h.version || '?'} ${h.at} ${h.install_path}`).join('\n')
   return (
@@ -1618,18 +1628,10 @@ function DeploymentRow({ dep: d, agent, desc, onConfigure, onJob, onRollback, on
       </td>
       <td>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          <button className="btn btn--sm" title="설정"
-            onClick={() => onConfigure(d)}>⚙ 설정</button>
           <button className="btn btn--sm" disabled={!online} title="install (파일 배치 + 설정 적용)"
             onClick={() => onJob(d, 'install')}>
             {notInstalled ? '설치' : '재설치'}
           </button>
-          <button className="btn btn--sm" disabled={!canStart} title="start"
-            onClick={() => onJob(d, 'start')}>▶</button>
-          <button className="btn btn--sm" disabled={!canOps} title="restart"
-            onClick={() => onJob(d, 'restart')}>↻</button>
-          <button className="btn btn--sm" disabled={!canOps} title="stop"
-            onClick={() => onJob(d, 'stop')}>■</button>
           <button className="btn btn--sm" disabled={!canRollback}
             title={canRollback
               ? `이전 버전으로 롤백 (v${d.prev_package_version || '?'} · ${d.prev_install_path})`
@@ -1640,6 +1642,156 @@ function DeploymentRow({ dep: d, agent, desc, onConfigure, onJob, onRollback, on
         </div>
       </td>
     </tr>
+  )
+}
+
+// ── [패키지 제어] 탭 — 서버 선택: 모듈별 프로세스 start/stop/restart ──
+function ControlTab({ agent: a, deployments, packages, onJob }: {
+  agent: Agent
+  deployments: Deployment[]
+  packages: SipPackage[]
+  onJob: (d: Deployment, jt: JobType) => void
+}) {
+  const pkgDesc = new Map(packages.map(p => [p.name, p.description]))
+  if (deployments.length === 0) {
+    return <div className="empty">배포된 모듈 없음 — [패키지 설치] 탭에서 모듈을 먼저 배포하세요</div>
+  }
+  return (
+    <table className="data-table">
+      <thead>
+        <tr>
+          <th style={{ width: 10 }}></th>
+          <th>이름</th>
+          <th>설명</th>
+          <th>모듈 · 버전</th>
+          <th>상태</th>
+          <th style={{ width: 220 }}>제어</th>
+        </tr>
+      </thead>
+      <tbody>
+        {deployments.map(d => (
+          <tr key={d.id}>
+            <td style={{ padding: 0 }}>
+              <div style={{ width: 4, background: depStatusColor(d.status), height: 32 }} />
+            </td>
+            <td><b>{d.process_name || '—'}</b></td>
+            <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {pkgDesc.get(d.package_name || '') ?? '—'}
+            </td>
+            <td style={{ fontSize: 12 }}>
+              {d.package_name} <span style={{ color: 'var(--text-muted)' }}>v{d.package_version}</span>
+            </td>
+            <td>
+              <span className="tag" style={{
+                background: depStatusColor(d.status), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
+              }}>{d.status}</span>
+            </td>
+            <td><ProcessControlButtons dep={d} agent={a} onJob={onJob} /></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+// 프로세스 제어 버튼 3종 — ControlTab(서버)·GroupControlMatrix(그룹) 공용.
+// pending(미설치) 은 전부 비활성 — 설치는 [패키지 설치] 탭.
+function ProcessControlButtons({ dep: d, agent, onJob }: {
+  dep: Deployment; agent?: Agent
+  onJob: (d: Deployment, jt: JobType) => void
+}) {
+  const online = agent?.status === 'online'
+  const notInstalled = d.status === 'pending'
+  const canStart = online && !notInstalled && (d.status === 'stopped' || d.status === 'running')
+  const canOps   = online && !notInstalled && (d.status === 'running' || d.status === 'stopped')
+  const pendingTip = notInstalled ? '설치 필요 — [패키지 설치] 탭에서 먼저 설치' : ''
+  return (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      <button className="btn btn--sm" disabled={!canStart} title={pendingTip || 'start'}
+        onClick={() => onJob(d, 'start')}>▶ 시작</button>
+      <button className="btn btn--sm" disabled={!canOps} title={pendingTip || 'restart'}
+        onClick={() => onJob(d, 'restart')}>↻ 재시작</button>
+      <button className="btn btn--sm" disabled={!canOps} title={pendingTip || 'stop'}
+        onClick={() => onJob(d, 'stop')}>■ 정지</button>
+    </div>
+  )
+}
+
+// ── [패키지 제어] 탭 — 그룹 선택: 멤버 × 모듈 프로세스 상태/제어 매트릭스 ──
+function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember }: {
+  group: HaGroup
+  agents: Agent[]
+  depsByAgent: Map<number, Deployment[]>
+  onJob: (d: Deployment, jt: JobType) => void
+  onSelectMember: (aid: number) => void
+}) {
+  return (
+    <div style={{ padding: 20, overflow: 'auto' }}>
+      <h4 style={{ marginTop: 0 }}>멤버별 프로세스 제어 — {group.name}</h4>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        그룹 멤버 전체의 모듈 프로세스 상태를 한눈에 보고 시작/재시작/정지합니다.
+        설치/재설치/롤백은 [패키지 설치] 탭에서 수행합니다.
+      </p>
+      <table className="data-table">
+        <thead>
+          <tr><th>서버</th><th>서버 상태</th><th>모듈 · 버전</th><th>모듈 상태</th><th style={{ width: 220 }}>제어</th></tr>
+        </thead>
+        <tbody>
+          {group.members.map(m => {
+            const ag = agents.find(a => a.id === m.agent_id)
+            const deps = (depsByAgent.get(m.agent_id) || []).filter(d => d.status !== 'removed')
+            const serverCells = (
+              <>
+                <td style={{ cursor: 'pointer' }} onClick={() => onSelectMember(m.agent_id)}
+                    title="클릭 시 해당 서버 선택">
+                  <b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b>
+                </td>
+                <td>
+                  <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
+                    ● {ag?.status || '—'}
+                  </span>
+                </td>
+              </>
+            )
+            if (deps.length === 0) {
+              return (
+                <tr key={m.agent_id}>
+                  {serverCells}
+                  <td colSpan={3} style={{ color: 'var(--text-muted)' }}>배포된 모듈 없음</td>
+                </tr>
+              )
+            }
+            return deps.map((d, i) => (
+              <tr key={`${m.agent_id}:${d.id}`}>
+                {i === 0 ? (
+                  <>
+                    <td rowSpan={deps.length} style={{ cursor: 'pointer', verticalAlign: 'top' }}
+                        onClick={() => onSelectMember(m.agent_id)} title="클릭 시 해당 서버 선택">
+                      <b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b>
+                    </td>
+                    <td rowSpan={deps.length} style={{ verticalAlign: 'top' }}>
+                      <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
+                        ● {ag?.status || '—'}
+                      </span>
+                    </td>
+                  </>
+                ) : null}
+                <td style={{ fontSize: 12 }}>
+                  <b>{d.process_name || d.package_name}</b>{' '}
+                  <span style={{ color: 'var(--text-muted)' }}>{d.package_name} v{d.package_version}</span>
+                </td>
+                <td>
+                  <span className="tag" style={{
+                    background: depStatusColor(d.status), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
+                  }}>{d.status}</span>
+                </td>
+                <td><ProcessControlButtons dep={d} agent={ag} onJob={onJob} /></td>
+              </tr>
+            ))
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
