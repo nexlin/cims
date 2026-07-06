@@ -98,24 +98,34 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** 하드웨어 PTT 키(측면 버튼) — down=발언 요청, up=해제. 화면 버튼과 동일 경로. */
+    /** 하드웨어 PTT 키(측면 버튼) — down=발언 요청, up=해제. 화면 버튼과 동일 경로.
+     *  SOS(2번째 측면 키)=긴급 개시 — 해제는 오조작 방지 위해 화면 배너에서만. */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         // 키코드 실측용 (persist.log.tag=I 단말이 있어 Log.i)
         if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0)
             android.util.Log.i("HwPtt", "keyDown code=${event.keyCode} scan=${event.scanCode} dev=${event.deviceId}")
-        if (HwPtt.isPttKey(event.keyCode)) {
-            HwPtt.markSeen(this)
-            when (event.action) {
-                android.view.KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) svc?.controller?.pttDown()
-                android.view.KeyEvent.ACTION_UP -> svc?.controller?.pttUp()
+        when (HwPtt.classify(event.keyCode, event.scanCode)) {
+            HwPtt.Kind.SOS -> {
+                if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0)
+                    svc?.controller?.startEmergency()
+                return true
             }
-            return true
+            HwPtt.Kind.PTT -> {
+                HwPtt.markSeen(this)
+                when (event.action) {
+                    android.view.KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) svc?.controller?.pttDown()
+                    android.view.KeyEvent.ACTION_UP -> svc?.controller?.pttUp()
+                }
+                return true
+            }
+            HwPtt.Kind.NONE -> Unit
         }
         return super.dispatchKeyEvent(event)
     }
 }
 
 // PTT 상태 색상 언어(제안서 §3): IDLE=파랑, REQUESTING=주황, SPEAKING=초록, LISTENING=회색
+private val ColEmergency = Color(0xFFC62828)
 private val ColIdle = Color(0xFF1565C0)
 private val ColRequest = Color(0xFFF9A825)
 private val ColSpeak = Color(0xFF2E7D32)
@@ -191,6 +201,9 @@ private fun PttScreen(svc: PttService?, onStopSip: () -> Unit) {
                 Button(onClick = { perm.launch(perms()) }) { Text("등록") }
             }
         }
+
+        // ── 긴급 배너 — 긴급 상태 그룹이 있으면 최상단 붉은 배너(개시자에게만 해제 버튼) ──
+        sessions.firstOrNull { it.emergency }?.let { e -> EmergencyBanner(e, ctl) }
 
         // ── 계정(CIMS SSO) 미로그인 안내 ──
         if (!hasAccount) {
@@ -296,6 +309,8 @@ private fun PttScreen(svc: PttService?, onStopSip: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        // SOS — 길게 눌러 긴급 개시(오발동 방지). 해제는 상단 배너에서.
+        SosButton(active = sessions.any { it.emergency }, onActivate = { ctl?.startEmergency() })
         val speakerOn = route == SipController.AUDIO_ROUTE_SPEAKER
         // 스피커폰: on=외장 스피커 / off=일반(수화구·이어폰 자동)
         OverlayIconButton(
@@ -319,6 +334,64 @@ private fun PttScreen(svc: PttService?, onStopSip: () -> Unit) {
             ctl?.setListenPolicy(if (all) ListenPolicy.CHANNELS_ONLY else ListenPolicy.ALL)
         }
     }
+    }
+}
+
+/** 긴급 상태 배너 — 깜빡이는 붉은 배경 + 그룹/개시자, 개시자에게만 [해제] (서버도 개시자 취소만 수용). */
+@Composable
+private fun EmergencyBanner(e: GroupCallState, ctl: PttController?) {
+    val blink = rememberInfiniteTransition(label = "emgBlink")
+    val a by blink.animateFloat(
+        initialValue = 1f, targetValue = 0.55f,
+        animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Reverse),
+        label = "emgAlpha",
+    )
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(ColEmergency.copy(alpha = a))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("🚨 긴급 — ${e.groupId}", color = Color.White,
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(if (e.emergencyMine) "내가 개시 — 상황 종료 시 해제하세요" else "긴급 상황 수신 중",
+                color = Color.White, style = MaterialTheme.typography.bodySmall)
+        }
+        if (e.emergencyMine) {
+            TextButton(onClick = { ctl?.cancelEmergency() }) {
+                Text("해제", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/** SOS 버튼(우하단 오버레이) — 오발동 방지 위해 **길게 눌러** 긴급 개시. 활성 시 붉은 점멸. */
+@Composable
+private fun SosButton(active: Boolean, onActivate: () -> Unit) {
+    val blink = rememberInfiniteTransition(label = "sosBlink")
+    val a by blink.animateFloat(
+        initialValue = 1f, targetValue = 0.5f,
+        animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Reverse),
+        label = "sosAlpha",
+    )
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(if (active) ColEmergency.copy(alpha = a) else Color(0xFFF2DBDB))
+                .pointerInput(active) {
+                    detectTapGestures(onLongPress = { if (!active) onActivate() })
+                },
+        ) {
+            Text("SOS", color = if (active) Color.White else ColEmergency,
+                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        }
+        Text(if (active) "긴급 중" else "긴급(길게)", style = MaterialTheme.typography.labelSmall,
+            color = ColEmergency, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -365,6 +438,7 @@ private fun GroupRow(
             .clip(RoundedCornerShape(8.dp))
             .background(
                 when {
+                    session?.emergency == true -> Color(0xFFFBE4E4)
                     session?.role == ChannelRole.PRIMARY -> Color(0xFFE0F1E1)
                     joined -> Color(0xFFEFF4FA)
                     selected -> ColChipBg
@@ -384,6 +458,7 @@ private fun GroupRow(
                     ChannelRole.SECONDARY -> Badge("부", Color(0xFF1565C0), Color.White)
                     else -> Unit
                 }
+                if (session?.emergency == true) Badge("긴급", ColEmergency, Color.White)
                 if (joined && session?.audible == false) Badge("음소거", Color(0xFF9E9E9E), Color.White)
                 if (!joined && affiliated) Badge("가입", Color(0xFFDCEDC8), Color(0xFF33691E))
             }

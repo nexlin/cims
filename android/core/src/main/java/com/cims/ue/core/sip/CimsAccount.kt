@@ -31,11 +31,13 @@ class CimsAccount(private val owner: SipController) : Account() {
         val video = whole.contains("m=video")
         // MCPTT 그룹콜 = multipart 의 mcptt-info 본문(ptt_ue.md §7) — PTT 앱이 자동 수락
         val mcptt = whole.contains("mcptt-info")
+        // 긴급 그룹콜 = fan-out INVITE mcptt-info 의 emergency-ind=true (TS 24.379) — 긴급 UI/톤
+        val emergency = mcptt && Regex("<emergency-ind>\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(whole)
         // 180 Ringing 만 자동 응답 — 실제 200 OK 는 사용자 answer().
         runCatching {
             call.answer(CallOpParam().apply { statusCode = pjsip_status_code.PJSIP_SC_RINGING })
         }
-        owner.dispatchIncoming(call, from, video, mcptt)
+        owner.dispatchIncoming(call, from, video, mcptt, emergency)
     }
 
     /** 문자(SIP MESSAGE) 수신 — 200 OK 응답은 PJSIP 가 자동, 본문만 컨트롤러로 중계. */

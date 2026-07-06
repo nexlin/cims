@@ -14,6 +14,7 @@ import com.cims.ue.ptt.csc.GroupSummary
 import com.cims.ue.ptt.csc.TokenSet
 import com.cims.ue.ptt.floor.FloorClient
 import com.cims.ue.ptt.floor.FloorEvent
+import com.cims.ue.ptt.floor.FloorIndicator
 import com.cims.ue.ptt.floor.FloorState
 import com.cims.ue.ptt.mcptt.McpttXml
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +48,8 @@ data class GroupCallState(
     val speaker: Speaker?,
     val participants: Map<String, String>,
     val audible: Boolean,                 // 듣기 정책 적용 결과
+    val emergency: Boolean = false,       // 긴급 상태(내 개시 또는 수신 감지)
+    val emergencyMine: Boolean = false,   // 내가 개시자(취소 권한 — 서버는 개시자 취소만 수용)
 )
 
 /**
@@ -82,10 +85,13 @@ class PttController(
         var speaker: Speaker? = null
         var participants: MutableMap<String, String> = mutableMapOf(bareId(mcpttId) to "connected")
         var audible: Boolean = true
+        var emergency: Boolean = false
+        var emergencyMine: Boolean = false
         val floor: FloorClient = FloorClient(ssrc, mcpttId, localPort = 0,
             onEvent = { ev -> onFloorEvent(groupId, ev) })
 
-        fun toState() = GroupCallState(groupId, callId, active, role, floorState, speaker, participants.toMap(), audible)
+        fun toState() = GroupCallState(groupId, callId, active, role, floorState, speaker, participants.toMap(),
+            audible, emergency, emergencyMine)
         fun close() { runCatching { floor.close() } }
     }
 
@@ -273,13 +279,20 @@ class PttController(
 
     // ── 그룹콜 참여/이탈 ──
 
-    /** 키업 그룹콜 참여(발신). 이미 참여 중이면 무시. 첫 세션은 주채널. */
-    fun joinGroupCall(groupId: String, members: List<McpttXml.ResourceEntry> = emptyList()) {
+    /** 키업 그룹콜 참여(발신). 이미 참여 중이면 무시. 첫 세션은 주채널.
+     *  [emergency]=true 면 긴급 그룹콜로 개시(INVITE mcptt-info emergency-ind, TS 24.379). */
+    fun joinGroupCall(
+        groupId: String,
+        members: List<McpttXml.ResourceEntry> = emptyList(),
+        emergency: Boolean = false,
+    ) {
         val s = synchronized(lock) {
             if (sessionMap.containsKey(groupId)) return
             Session(groupId).also {
                 it.role = if (sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY }) ChannelRole.PRIMARY
                 else ChannelRole.NONE
+                it.emergency = emergency
+                it.emergencyMine = emergency
                 sessionMap[groupId] = it
             }
         }
@@ -287,15 +300,17 @@ class PttController(
         val appSdp = "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio"
         val parts = ArrayList<SipBodyPart>()
         parts.add(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
-            McpttXml.mcpttInfo(McpttXml.SessionType.PREARRANGED, "tel:$groupId", mcpttId, "tel:$groupId")))
+            McpttXml.mcpttInfo(McpttXml.SessionType.PREARRANGED, "tel:$groupId", mcpttId, "tel:$groupId",
+                emergency = if (emergency) true else null)))
         if (members.isNotEmpty())
             parts.add(SipBodyPart("application", "resource-lists+xml", McpttXml.resourceLists(members)))
         sip.makeGroupCall("sip:$groupId@${sipConfig.domain}", parts, appSdp)
-        _status.value = "그룹콜 참여 $groupId"
+        _status.value = if (emergency) "🚨 긴급 그룹콜 개시 $groupId" else "그룹콜 참여 $groupId"
         publish()
     }
 
-    /** 그룹콜 착신 자동 수락 — 미참여 그룹이면 세션 생성 후 응답 SDP 에 m=application 주입. */
+    /** 그룹콜 착신 자동 수락 — 미참여 그룹이면 세션 생성 후 응답 SDP 에 m=application 주입.
+     *  fan-out INVITE 의 emergency-ind → 긴급 표시 + 경고 톤. */
     private fun autoJoinGroupCall(inc: CallState.Incoming) {
         val groupId = bareId(inc.remote)
         if (groupId.isBlank()) return
@@ -305,11 +320,13 @@ class PttController(
                 it.callId = inc.id
                 it.role = if (sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY }) ChannelRole.PRIMARY
                 else ChannelRole.NONE
+                it.emergency = inc.emergency
                 sessionMap[groupId] = it
             }
         }
         sip.answerGroupCall(inc.id, "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio")
-        _status.value = "그룹콜 자동 참여: $groupId"
+        if (inc.emergency) feedback?.emergencyTone()
+        _status.value = if (inc.emergency) "🚨 긴급 그룹콜 자동 참여: $groupId" else "그룹콜 자동 참여: $groupId"
         publish()
     }
 
@@ -397,6 +414,50 @@ class PttController(
         _status.value = if (on) "affiliate $groupId" else "de-affiliate $groupId"
     }
 
+    // ── 긴급(SOS) — TS 24.379 in-call emergency ──
+
+    /**
+     * 긴급(SOS) 개시 — 하드웨어 SOS 키/화면 SOS 버튼.
+     * 주채널 통화 중이면 re-INVITE(mcptt-info emergency-ind=true)로 상향, 미참여면 긴급 그룹콜 발신.
+     * 서버(CSP)가 그룹 capability(emergency_call) 미허용이면 normal 로 하향 수용된다.
+     */
+    fun startEmergency() {
+        val s = primarySession()
+        if (s == null) {
+            val gid = _selectedGroup.value ?: run { _status.value = "긴급: 대상 그룹 없음"; return }
+            joinGroupCall(gid, emergency = true)
+            feedback?.emergencyTone()
+            return
+        }
+        if (s.emergency) { _status.value = "[${s.groupId}] 이미 긴급 상태"; return }
+        s.emergency = true
+        s.emergencyMine = true
+        if (s.callId >= 0) sendConditionReinvite(s, emergency = true)
+        feedback?.emergencyTone()
+        _status.value = "🚨 [${s.groupId}] 긴급 개시"
+        publish()
+    }
+
+    /** 긴급 해제 — 개시자만 유효(서버는 비개시자의 취소 re-INVITE 를 무시, TS 24.379). */
+    fun cancelEmergency() {
+        val s = synchronized(lock) { sessionMap.values.firstOrNull { it.emergency && it.emergencyMine } }
+            ?: run { _status.value = "해제할 긴급 없음(개시자만 해제 가능)"; return }
+        s.emergency = false
+        s.emergencyMine = false
+        if (s.callId >= 0) sendConditionReinvite(s, emergency = false)
+        _status.value = "[${s.groupId}] 긴급 해제"
+        publish()
+    }
+
+    /** in-dialog re-INVITE 로 긴급 상태 상향/하향 광고 — CSP ApplyInCallCondition 경로. */
+    private fun sendConditionReinvite(s: Session, emergency: Boolean) {
+        sip.reinviteWithBody(s.callId, listOf(
+            SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
+                McpttXml.mcpttInfo(McpttXml.SessionType.PREARRANGED, "tel:${s.groupId}", mcpttId,
+                    "tel:${s.groupId}", emergency = emergency)),
+        ))
+    }
+
     // ── PTT 버튼 (주채널 전용) ──
 
     /** PTT down — 주채널에 Floor Request. GRANT 수신 시에만 실제 발화(mic on). */
@@ -408,7 +469,9 @@ class PttController(
             else -> Unit
         }
         pttHeld = true
-        s.floor.requestFloor(priority = 0)
+        // 긴급 세션의 발언은 Floor Indicator 에 emergency 비트 — CMP tier 상향/선점(TS 24.380)
+        s.floor.requestFloor(priority = 0,
+            indicator = if (s.emergency) FloorIndicator.EMERGENCY else null)
         s.floorState = FloorState.REQUESTING
         publish()
         // GRANT/DENY 무응답 방어 — 타임아웃 시 IDLE 복귀 + 거부 톤
@@ -480,6 +543,13 @@ class PttController(
             is FloorEvent.Taken -> {
                 s.floorState = FloorState.LISTENING
                 s.speaker = Speaker(ev.speaker ?: "?", self = false, sinceMs = SystemClock.elapsedRealtime())
+                // CMP 는 긴급 tier 발언자의 TAKEN 에 emergency 비트를 방송 — 수신측 긴급 표시 latch
+                // (CSP 는 상향을 fan-out 하지 않으므로 이것이 in-call 수신 경로의 유일한 신호)
+                if ((ev.indicator ?: 0) and FloorIndicator.EMERGENCY != 0 && !s.emergency) {
+                    s.emergency = true
+                    feedback?.emergencyTone()
+                    if (isPrimary) _status.value = "🚨 [${s.groupId}] 긴급 발언 수신"
+                }
             }
             FloorEvent.Idle -> {
                 if (s.floorState != FloorState.SPEAKING) s.floorState = FloorState.IDLE

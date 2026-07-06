@@ -12,12 +12,13 @@ import kotlin.concurrent.thread
 /** 단말 floor 상태머신 (TS 24.380 / 설계서 §5.3). */
 enum class FloorState { IDLE, REQUESTING, SPEAKING, LISTENING, QUEUED }
 
-/** 서버에서 수신한 floor 사건 → UI/오디오 제어 트리거. */
+/** 서버에서 수신한 floor 사건 → UI/오디오 제어 트리거.
+ *  [indicator]=Floor Indicator 비트([FloorIndicator]) — CMP 가 발언자의 긴급/임박 tier 를 방송. */
 sealed interface FloorEvent {
-    data class Granted(val durationSec: Int?) : FloorEvent
+    data class Granted(val durationSec: Int?, val indicator: Int? = null) : FloorEvent
     data class Denied(val cause: Int?, val text: String?) : FloorEvent
     data object Idle : FloorEvent
-    data class Taken(val speaker: String?) : FloorEvent
+    data class Taken(val speaker: String?, val indicator: Int? = null) : FloorEvent
     data class Revoked(val cause: Int?, val text: String?) : FloorEvent
     data class QueuePosition(val position: Int?) : FloorEvent
     data class Other(val type: Int) : FloorEvent
@@ -111,7 +112,7 @@ class FloorClient(
 
     private fun handle(msg: FloorMessage) {
         val ev: FloorEvent = when (msg.type) {
-            FloorMsgType.GRANTED -> { _state.value = FloorState.SPEAKING; FloorEvent.Granted(msg.durationSec) }
+            FloorMsgType.GRANTED -> { _state.value = FloorState.SPEAKING; FloorEvent.Granted(msg.durationSec, msg.floorIndicator) }
             FloorMsgType.DENY -> { _state.value = FloorState.IDLE; FloorEvent.Denied(msg.rejectCause, FloorCause.REJECT[msg.rejectCause]) }
             FloorMsgType.IDLE -> { if (_state.value != FloorState.SPEAKING) _state.value = FloorState.IDLE; FloorEvent.Idle }
             FloorMsgType.TAKEN -> {
@@ -120,7 +121,7 @@ class FloorClient(
                 // 발언 상태를 강등하지 않는다(마이크 개방 유지).
                 if (sameUser(sp, userId)) return
                 _state.value = FloorState.LISTENING
-                FloorEvent.Taken(sp)
+                FloorEvent.Taken(sp, msg.floorIndicator)
             }
             FloorMsgType.REVOKE -> { _state.value = FloorState.IDLE; FloorEvent.Revoked(msg.rejectCause, FloorCause.REVOKE[msg.rejectCause]) }
             FloorMsgType.QUEUE_POS_INFO -> { _state.value = FloorState.QUEUED; FloorEvent.QueuePosition(msg.queuePosition) }

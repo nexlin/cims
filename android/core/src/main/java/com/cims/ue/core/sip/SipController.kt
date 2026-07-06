@@ -299,6 +299,24 @@ class SipController(private val config: SipAccountConfig) {
         calls[call.id] = call
     }
 
+    /**
+     * in-dialog re-INVITE — multipart 본문(mcptt-info) 교체 송신. MCPTT 긴급/임박 상태의
+     * 통화 중 상향·하향(TS 24.379)에 사용. SDP 는 재협상되며 floor(m=application) 라인은
+     * 호별 [CimsCall.pendingAppSdp] 로 재주입된다.
+     */
+    fun reinviteWithBody(callId: Int, parts: List<SipBodyPart>) = onCtl {
+        calls[callId]?.reinvite(
+            CallOpParam(true).apply {
+                opt.audioCount = 1L
+                opt.videoCount = 0L
+                if (parts.isNotEmpty()) {
+                    txOption.multipartContentType = SipMediaType().apply { type = "multipart"; subType = "mixed" }
+                    txOption.multipartParts = parts.toMultipart()
+                }
+            },
+        )
+    }
+
     // ── 콜백 진입점 (CimsAccount/CimsCall 에서 호출) ──
 
     internal fun onRemoteFloorLearned(callId: Int, ip: String, port: Int) {
@@ -313,9 +331,15 @@ class SipController(private val config: SipAccountConfig) {
         }
     }
 
-    internal fun dispatchIncoming(call: CimsCall, from: String, video: Boolean, mcptt: Boolean = false) {
+    internal fun dispatchIncoming(
+        call: CimsCall,
+        from: String,
+        video: Boolean,
+        mcptt: Boolean = false,
+        emergency: Boolean = false,
+    ) {
         calls[call.id] = call
-        _call.value = CallState.Incoming(call.id, from, video, mcptt)
+        _call.value = CallState.Incoming(call.id, from, video, mcptt, emergency)
     }
 
     internal fun dispatchConferenceInfo(callId: Int, xml: String) {

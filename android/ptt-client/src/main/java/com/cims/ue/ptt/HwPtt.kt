@@ -17,15 +17,24 @@ import kotlinx.coroutines.flow.StateFlow
  *  2) 기종 allowlist — W999 는 GPIO 입력장치(droi_gpio_keys, KEY_F10/F11)가 앱의
  *     InputDevice 열거에 노출되지 않아 능력 기반 감지가 불가능
  *  3) 입력장치 키 능력 스캔 (F10/F11 을 광고하는 장치)
- * ※ F10/F11 중 어느 쪽이 PTT/SOS 인지는 단말별 상이 — 우선 둘 다 PTT 로 취급하고
- *   긴급(SOS) 기능 도입 시 실측으로 분리한다.
+ *
+ * PTT/SOS 키 구분(W999 실측): GPIO 장치(droi_gpio_keys)는 두 측면 버튼(scan 68=KEY_F10,
+ * scan 87=KEY_F11)을 Generic.kl 에서 **둘 다 keycode 309("PTT")** 로 매핑한다 — keycode 만으로는
+ * 구분 불가, **scanCode 로 분리**한다: PTT 버튼=scan 87(기존 실측), SOS(2번째 버튼)=scan 68.
  */
 object HwPtt {
-    /** W999 측면 PTT 키 실측값 — scancode 87(KEY_F11)을 OEM 이 keycode 309 로 매핑. */
+    /** W999 측면 키 공통 keycode — Generic.kl 이 scan 68/87 둘 다 "PTT"(309)로 매핑. */
     private const val KEYCODE_W999_PTT = 309
+    /** W999 측면 PTT 버튼 scancode (KEY_F11) — 실측. */
+    private const val SCAN_W999_PTT = 87
+    /** W999 측면 SOS(2번째) 버튼 scancode (KEY_F10) — GPIO 장치 키 능력 실측(getevent -p). */
+    private const val SCAN_W999_SOS = 68
 
-    private val PTT_KEYCODES = intArrayOf(KeyEvent.KEYCODE_F10, KeyEvent.KEYCODE_F11, KEYCODE_W999_PTT)
+    private val PTT_KEYCODES = intArrayOf(KeyEvent.KEYCODE_F11, KEYCODE_W999_PTT)
     private val KNOWN_MODELS = setOf("W999")
+
+    /** 측면 하드웨어 키 분류. */
+    enum class Kind { NONE, PTT, SOS }
 
     private val _present = MutableStateFlow(false)
     /** 하드웨어 PTT 버튼 단말 여부 — true 면 화면 PTT 버튼 숨김. */
@@ -39,6 +48,15 @@ object HwPtt {
     }
 
     fun isPttKey(keyCode: Int): Boolean = PTT_KEYCODES.contains(keyCode)
+
+    /** 키 이벤트 분류 — W999 는 두 측면 키가 동일 keycode(309)라 scanCode 로 PTT/SOS 를 가른다.
+     *  scanCode 미보고(0) 단말은 PTT 로 폴백. 일반 단말은 F11=PTT / F10=SOS. */
+    fun classify(keyCode: Int, scanCode: Int): Kind = when (keyCode) {
+        KEYCODE_W999_PTT -> if (scanCode == SCAN_W999_SOS) Kind.SOS else Kind.PTT
+        KeyEvent.KEYCODE_F11 -> Kind.PTT
+        KeyEvent.KEYCODE_F10 -> Kind.SOS
+        else -> Kind.NONE
+    }
 
     /** 하드웨어 PTT 키 첫 수신 → 학습·영속(모든 단말에서 이후 화면 버튼 숨김). */
     fun markSeen(context: Context) {

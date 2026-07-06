@@ -46,6 +46,12 @@ class PttFeedback(context: Context) {
     /** 발언 종료(내 RELEASE) 로컬 확인 — 짧은 단일 삑. */
     fun releaseTone() = play(ToneGenerator.TONE_PROP_BEEP)
 
+    /** 긴급(SOS) 개시/수신 — 긴 경고 톤 + 강한 삼중 진동(다른 톤과 뚜렷이 구별). */
+    fun emergencyTone() {
+        play(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 800)
+        vibrate(longArrayOf(0, 150, 100, 150, 100, 300))
+    }
+
     private fun play(toneType: Int, durationMs: Int = -1) {
         val t = tone ?: run { android.util.Log.w("PttFeedback", "ToneGenerator unavailable"); return }
         runCatching {

@@ -30,14 +30,15 @@ object McpttXml {
 
     // ── 빌더: 키업 그룹 INVITE multipart 본문 ──
 
-    /** `application/vnd.3gpp.mcptt-info+xml` 본문 (TS 24.379 §F.1). */
+    /** `application/vnd.3gpp.mcptt-info+xml` 본문 (TS 24.379 §F.1).
+     *  [emergency]/[imminentPeril] — null=미기재, true=상향, false=명시 하향(긴급 취소 re-INVITE). */
     fun mcpttInfo(
         sessionType: SessionType,
         requestUri: String,
         callingUserId: String,
         callingGroupId: String,
-        emergency: Boolean = false,
-        imminentPeril: Boolean = false,
+        emergency: Boolean? = null,
+        imminentPeril: Boolean? = null,
     ): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         append("<mcpttinfo xmlns=\"$NS_MCPTT_INFO\">\n  <mcptt-Params>\n")
@@ -45,8 +46,8 @@ object McpttXml {
         append("    <mcptt-request-uri>${esc(requestUri)}</mcptt-request-uri>\n")
         append("    <mcptt-calling-user-id>${esc(callingUserId)}</mcptt-calling-user-id>\n")
         append("    <mcptt-calling-group-id>${esc(callingGroupId)}</mcptt-calling-group-id>\n")
-        if (emergency) append("    <emergency-ind>true</emergency-ind>\n")
-        if (imminentPeril) append("    <imminentperil-ind>true</imminentperil-ind>\n")
+        emergency?.let { append("    <emergency-ind>$it</emergency-ind>\n") }
+        imminentPeril?.let { append("    <imminentperil-ind>$it</imminentperil-ind>\n") }
         append("  </mcptt-Params>\n</mcpttinfo>\n")
     }
 
