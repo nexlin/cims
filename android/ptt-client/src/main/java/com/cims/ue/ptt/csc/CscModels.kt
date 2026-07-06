@@ -10,7 +10,8 @@ data class TokenSet(
     val scope: String?,
 )
 
-/** GMS 그룹 목록 항목 (GET /org.openmobilealliance.groups/users/{me}). */
+/** GMS 그룹 목록 항목 (GET /org.openmobilealliance.groups/users/{me}).
+ *  우선순위·영상 여부 등 그룹 속성은 표준 경로인 그룹 문서(TS 24.481, [GroupDoc])에서 조회한다. */
 data class GroupSummary(
     val uri: String,
     val displayName: String?,
@@ -24,7 +25,7 @@ data class GroupMember(
     val name: String?,
     /** TS 24.380 participant-type — "chair" | "participant". */
     val role: String,
-    /** TS 24.481 user-priority (발언권 우선순위, 낮을수록 높음). */
+    /** TS 24.481 user-priority (발언권 우선순위, 0~255 클수록 높음). */
     val priority: Int?,
 )
 

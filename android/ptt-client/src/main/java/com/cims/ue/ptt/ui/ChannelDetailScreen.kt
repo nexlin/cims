@@ -1,6 +1,7 @@
 package com.cims.ue.ptt.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,15 +19,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cims.ue.ptt.ChannelRole
@@ -34,17 +44,12 @@ import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.R
 import com.cims.ue.ptt.csc.GroupMember
 
-/** 우선순위 → 배지 색(시안: 1=붉은, 2~3=민트, 그 외=회색). */
-private fun prioColors(p: Int?): Pair<Color, Color> = when {
-    p != null && p <= 1 -> Ct.Red to Ct.RedDim
-    p != null && p <= 3 -> Ct.Mint to Ct.MintDim
-    else -> Ct.Gray to Ct.GrayDim
-}
-
 /**
- * 채널 상세(시안 `채널선택화면-상세.png`) — 헤더(우선순위·유형·CH) + 역할 배너 +
- * 채널 상태 카드 + 접속 중/오프라인 구성원(이름·역할·우선순위·번호, TS 24.481 그룹 문서) +
- * 하단 [주채널 설정]/[나가기] 케이스별 버튼.
+ * 채널 상세(시안 `채널선택화면-상세.png`, `채널상세화면-주채널표시.png`) —
+ * 헤더(우선순위·유형·CH) + 역할 배너(주채널/일반 알약 배지, 배너 터치=토글) +
+ * 채널 상태 카드(참여 중이면 수신 음량 슬라이더 포함) +
+ * 접속 중/오프라인 구성원(이름·역할·우선순위·번호, TS 24.481 그룹 문서) +
+ * 하단 참여/나가기 토글 버튼.
  *
  * 구성원 정보의 출처는 GMS 그룹 문서(TS 24.481)의 표준 필드만 사용한다:
  * entry uri(tel:번호)·display-name·participant-type(chair/participant)·user-priority.
@@ -81,40 +86,68 @@ fun ChannelDetailScreen(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = 1.dp),
                 ) {
-                    doc?.priority?.let { p ->
-                        val (c, d) = prioColors(p)
-                        RoleBadge("$p", c, d)
-                    }
                     TagChip(if (doc?.video == true) "영상" else "음성")
+                    // TS 24.481 on-network-group-priority (클수록 높음)
+                    doc?.priority?.let { TagChip("P$it") }
                     if (doc?.sessionType == "chat") TagChip("채팅형")
                     Text("CH $groupId", color = Ct.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
                 }
             }
-            when {
-                s?.emergency == true -> PillBadge("긴급", Ct.Red, filled = true)
-                s?.role == ChannelRole.PRIMARY -> PillBadge("주채널", Ct.Mint, filled = true)
-                joined -> PillBadge("참여 중", Ct.Gray)
-            }
+            if (s?.emergency == true) PillBadge("긴급", Ct.Red, filled = true)
         }
         Spacer(Modifier.height(12.dp))
 
-        // 역할 배너(시안) — 주채널/일반 참여/미참여
-        val notice = when {
-            s?.role == ChannelRole.PRIMARY -> "현재 주채널로 설정되어 있습니다." to Ct.Mint
-            joined -> "주채널로 설정할 수 있습니다." to Ct.TextDim
-            else -> "주채널로 설정하면 참여와 함께 발언할 수 있습니다." to Ct.TextDim
-        }
+        // 역할 배너(시안 `채널상세화면-주채널표시.png`) — 민트 외곽선 박스 + 알약 배지 + 안내.
+        // 배너 터치 = 주채널↔일반 토글(일반→주채널은 미참여 시 참여부터), 안내문도 함께 전환.
+        val isPrimary = s?.role == ChannelRole.PRIMARY
+        val bannerColor = if (isPrimary) Ct.Mint else Ct.Gray
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                .background(notice.second.copy(alpha = 0.10f))
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                .background(if (isPrimary) Ct.Mint.copy(alpha = 0.06f) else Ct.Surface)
+                .border(1.dp, bannerColor.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                .clickable {
+                    st.ctl?.let { c ->
+                        if (isPrimary) c.clearPrimary(groupId)
+                        else {
+                            if (!joined) c.joinGroupCall(groupId)
+                            c.setPrimary(groupId)
+                        }
+                    }
+                }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            StatusDot(notice.second, 6)
-            Spacer(Modifier.width(8.dp))
-            Text(notice.first, color = notice.second, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            // 배지 — 고정폭 소형 사각(모서리만 살짝 라운딩), 주채널/일반 크기 동일.
+            // includeFontPadding 제거로 글자에 딱 붙는 최소 상하 여백(시안).
+            Text(
+                if (isPrimary) "주채널" else "일반",
+                color = if (isPrimary) Ct.OnMint else Ct.TextDim,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                style = TextStyle(
+                    fontSize = 11.sp, lineHeight = 12.sp,
+                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                ),
+                modifier = Modifier.width(46.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (isPrimary) Ct.Mint else Ct.SurfaceHi)
+                    .border(1.dp, if (isPrimary) Ct.Text.copy(alpha = 0.35f)
+                                  else Ct.Gray.copy(alpha = 0.4f), RoundedCornerShape(5.dp))
+                    .padding(vertical = 1.dp),
+            )
+            Text(
+                when {
+                    isPrimary -> "현재 주채널로 설정되어 있습니다."
+                    joined -> "터치하면 주채널로 설정됩니다."
+                    else -> "터치하면 참여와 함께 주채널로 설정됩니다."
+                },
+                color = if (isPrimary) Ct.Mint else Ct.TextDim,
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
         }
         Spacer(Modifier.height(12.dp))
 
@@ -124,10 +157,11 @@ fun ChannelDetailScreen(
         val members = doc?.members.orEmpty()
         val byPhone = members.associateBy { PttController.bareId(it.uri) }
         val onlineIds = s?.participants.orEmpty()
+        // user-priority 는 클수록 높음(TS 24.481) — 높은 우선순위부터, 미지정=최저
         val online = onlineIds.keys.sortedWith(
-            compareBy({ byPhone[it]?.priority ?: Int.MAX_VALUE }, { it }))
+            compareByDescending<String> { byPhone[it]?.priority ?: -1 }.thenBy { it })
         val offline = members.filter { PttController.bareId(it.uri) !in onlineIds }
-            .sortedBy { it.priority ?: Int.MAX_VALUE }
+            .sortedByDescending { it.priority ?: -1 }
 
         // 채널 상태 카드 — 구성원 N명 · 접속 중 M명
         SectionCard {
@@ -146,7 +180,7 @@ fun ChannelDetailScreen(
                     s?.speaker?.let { sp ->
                         val spName = byPhone[PttController.bareId(sp.id)]?.name
                         Text(
-                            (if (sp.self) "내가" else spName ?: PttController.bareId(sp.id)) + " 발언 중",
+                            (if (sp.self) "내가" else spName ?: PttController.fmtNumber(PttController.bareId(sp.id))) + " 발언 중",
                             color = if (sp.self) Ct.Mint else Ct.Amber, fontSize = 12.sp,
                             modifier = Modifier.padding(top = 3.dp),
                         )
@@ -170,6 +204,29 @@ fun ChannelDetailScreen(
                         Icon(painterResource(R.drawable.ic_message), contentDescription = "메시지",
                             tint = Ct.Mint, modifier = Modifier.size(17.dp))
                     }
+                }
+            }
+            // 채널별 수신 음량 — conference bridge 유입 레벨(0~2, 1=원음). 참여 중일 때만.
+            if (s != null) {
+                Spacer(Modifier.height(8.dp))
+                var vol by remember(groupId) { mutableFloatStateOf(s.volume) }
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(painterResource(R.drawable.ic_level_meter), contentDescription = "수신 음량",
+                        tint = Ct.Mint, modifier = Modifier.size(16.dp))
+                    Slider(
+                        value = vol, onValueChange = {
+                            vol = it
+                            st.ctl?.setChannelVolume(groupId, it)
+                        },
+                        valueRange = 0f..2f,
+                        modifier = Modifier.weight(1f).height(24.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Ct.Mint, activeTrackColor = Ct.Mint,
+                            inactiveTrackColor = Ct.SurfaceHi, activeTickColor = Color.Transparent,
+                            inactiveTickColor = Color.Transparent,
+                        ),
+                    )
                 }
             }
         }
@@ -211,26 +268,13 @@ fun ChannelDetailScreen(
             }
         }
 
-        // 하단 액션 — 케이스별: 미참여=[주채널로 참여]/[참여만] / 주채널=나가기만 / 일반 참여=[주채널 설정]/[나가기]
+        // 하단 액션 — 참여/나가기 토글 단일 버튼(주채널 설정/해제는 상단 배너에서)
         Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            when {
-                !joined -> {
-                    MintButton("주채널로 참여", Modifier.weight(1f)) {
-                        st.ctl?.joinGroupCall(groupId)
-                        st.ctl?.setPrimary(groupId)
-                    }
-                    GhostButton("참여만", Modifier.weight(0.6f)) { st.ctl?.joinGroupCall(groupId) }
-                }
-                s?.role == ChannelRole.PRIMARY -> {
-                    GhostButton("나가기", Modifier.weight(1f), color = Ct.Red) {
-                        st.ctl?.leaveGroup(groupId); onBack()
-                    }
-                }
-                else -> {
-                    MintButton("주채널 설정", Modifier.weight(1f)) { st.ctl?.setPrimary(groupId) }
-                    GhostButton("나가기", color = Ct.Red) { st.ctl?.leaveGroup(groupId); onBack() }
-                }
+        if (!joined) {
+            MintButton("참여", Modifier.fillMaxWidth()) { st.ctl?.joinGroupCall(groupId) }
+        } else {
+            GhostButton("나가기", Modifier.fillMaxWidth(), color = Ct.Red) {
+                st.ctl?.leaveGroup(groupId); onBack()
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -251,7 +295,8 @@ private fun MemberRow(
     pending: Boolean,
     online: Boolean?,
 ) {
-    val dispName = member?.name?.takeIf { it != member.uri && it != phone } ?: phone
+    val phoneDisp = PttController.fmtNumber(phone)   // +82… → 0… 로컬 표기(표시 전용)
+    val dispName = member?.name?.takeIf { it != member.uri && it != phone } ?: phoneDisp
     val dim = online == false
     val nameColor = if (dim) Ct.TextFaint else Ct.Text
 
@@ -269,15 +314,15 @@ private fun MemberRow(
                     if (isMe) "$dispName (나)" else dispName,
                     color = nameColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 )
+                // TS 24.481 user-priority (0~255 클수록 높음) — 값만 표기
                 member?.priority?.let { p ->
-                    val (c, _) = prioColors(p)
-                    PillBadge("P$p", if (dim) Ct.TextFaint else c)
+                    PillBadge("P$p", if (dim) Ct.TextFaint else Ct.Gray)
                 }
                 if (member?.role == "chair") PillBadge("의장", if (dim) Ct.TextFaint else Ct.Amber)
             }
-            if (dispName != phone) {
-                Text(phone, color = if (dim) Ct.TextFaint else Ct.TextDim, fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 2.dp))
+            if (dispName != phoneDisp) {
+                Text(phoneDisp, color = if (dim) Ct.TextFaint else Ct.TextDim, fontSize = 11.sp,
+                    lineHeight = 12.sp)
             }
         }
         if (online == true) {

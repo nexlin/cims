@@ -53,7 +53,7 @@ fun SettingsScreen(
         // ── 기본 설정: 프로필 ──
         SectionLabel("기본 설정")
         SectionCard {
-            val id = st.ctl?.mcpttId?.let { PttController.bareId(it) } ?: "-"
+            val id = st.ctl?.mcpttId?.let { PttController.fmtNumber(PttController.bareId(it)) } ?: "-"
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 InitialAvatar(id, active = st.reg is RegState.Registered, size = 42)
                 Column(Modifier.weight(1f)) {

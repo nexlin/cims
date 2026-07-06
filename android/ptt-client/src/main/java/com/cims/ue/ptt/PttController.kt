@@ -166,6 +166,9 @@ class PttController(
     private val ssrc: Long = (mcpttId.hashCode().toLong() and 0xffffffffL).let { if (it == 0L) 1L else it }
 
     init {
+        // 번호 로컬 표기(+82→0…)용 홈 국가코드 — 프로비저닝 countryCode 우선, 내 msisdn 유도 폴백
+        homeCountryCode = sipConfig.countryCode.ifBlank { countryCodeOf(mcpttId) ?: "" }.ifBlank { null }
+
         // 학습된 CMP floor 목적지(호별) → 해당 세션 FloorClient 연결 + Ack 1회(NAT latch 유도)
         scope.launch {
             sip.floorRemote.collect { rem ->
@@ -259,6 +262,16 @@ class PttController(
                 if (it !== s) it.role = ChannelRole.NONE
             }
             s.role = ChannelRole.PRIMARY
+        }
+        applyListenPolicy()
+    }
+
+    /** 주채널 해제 — 일반 참여로 강등(다른 채널 자동 승격 없음, 주채널 없는 상태 허용). */
+    fun clearPrimary(groupId: String) {
+        synchronized(lock) {
+            val s = sessionMap[groupId] ?: return
+            if (s.role != ChannelRole.PRIMARY) return
+            s.role = ChannelRole.NONE
         }
         applyListenPolicy()
     }
@@ -662,6 +675,33 @@ class PttController(
         fun bareId(uri: String): String {
             val m = Regex("(?:tel:|sips?:)([^@>;\\s]+)").find(uri)
             return (m?.groupValues?.get(1) ?: uri.trim()).substringBefore('@')
+        }
+
+        /** 홈 국가코드(digits) — 프로비저닝 countryCode, 없으면 내 msisdn ITU 규칙 유도(VoLTE 앱과 동일). */
+        var homeCountryCode: String? = null
+
+        /** ITU 자릿수 규칙 E.164 국가코드 추정 — 프로비저닝 미수신 fallback 전용.
+         *  1(NANP)/7=1자리, 유효 2자리 셋, 그 외 3자리. */
+        fun countryCodeOf(msisdn: String): String? {
+            val d = msisdn.trim().removePrefix("tel:").removePrefix("+").filter { it.isDigit() }
+            if (d.length < 4) return null
+            if (d[0] == '1' || d[0] == '7') return d.take(1)
+            val two = d.take(2)
+            val twoDigit = setOf(
+                "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45",
+                "46", "47", "48", "49", "51", "52", "53", "54", "55", "56", "57", "58", "60", "61",
+                "62", "63", "64", "65", "66", "81", "82", "84", "86", "90", "91", "92", "93", "94",
+                "95", "98",
+            )
+            return if (two in twoDigit) two else d.take(3)
+        }
+
+        /** 홈 국가코드(+82 등)와 같은 국제표기 번호는 로컬 표기(0…)로 축약. 타국 번호는 그대로(표시 전용). */
+        fun fmtNumber(number: String): String {
+            val cc = homeCountryCode ?: return number
+            val n = number.trim().removePrefix("tel:")
+            val digits = n.removePrefix("+")
+            return if (n.startsWith("+") && digits.startsWith(cc)) "0" + digits.removePrefix(cc) else number
         }
     }
 }

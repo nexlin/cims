@@ -28,10 +28,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cims.ue.ptt.R
+
+/** 배지/칩 공통 컴팩트 텍스트 스타일 — includeFontPadding 제거로 상하 여백 최소화. */
+private fun chipStyle(size: Int = 11) = TextStyle(
+    fontSize = size.sp, lineHeight = (size + 1).sp,
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+)
 
 /** 클릭 리플 없는 clickable (시안의 플랫한 다크 UI 톤 유지용은 기본 리플 사용, 오버레이 스크림에만 사용). */
 fun Modifier.plainClickable(onClick: () -> Unit): Modifier = this.then(
@@ -104,15 +112,29 @@ fun TagChip(text: String, iconRes: Int? = null, tint: Color = Ct.TextDim) {
         Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(Ct.SurfaceHi)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .padding(horizontal = 7.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         if (iconRes != null) {
             Icon(painterResource(iconRes), contentDescription = null, tint = tint, modifier = Modifier.size(11.dp))
         }
-        Text(text, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = tint, fontWeight = FontWeight.Medium, style = chipStyle())
     }
+}
+
+/** 소형 사각 배지 — "주"/"일반" 등 한두 글자, 모서리 미세 라운드 + 상하 여백 최소(시안). */
+@Composable
+fun SquareBadge(text: String, color: Color) {
+    Text(
+        text, color = color, fontWeight = FontWeight.Bold,
+        style = chipStyle(),
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .border(1.dp, color.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+            .background(color.copy(alpha = 0.14f))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    )
 }
 
 /** 채널 우선순위/역할 배지 — 시안 좌측의 컬러 사각 배지(P1 붉은·P3 노랑 등). */
@@ -136,12 +158,12 @@ fun PillBadge(text: String, color: Color = Ct.Mint, filled: Boolean = false) {
     Text(
         text,
         color = if (filled) Ct.OnMint else color,
-        fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
+        style = chipStyle(),
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(if (filled) color else color.copy(alpha = 0.14f))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }
 
