@@ -210,7 +210,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         // 발신자 호출 추적
         {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
-            m_mapUserCall[pszCallerInfo] = pszCallId;
+            m_mapUserCall[{ pszCallerInfo, pszGroupId }] = pszCallId;
             m_mapCallSession[pszCallId] = { pszGroupId, pszCallerInfo, pszCallerInfo };
         }
         CLog::Print( LOG_INFO, "ProcessGroupCall: AcceptCall OK → Caller(%s) SharedPort(%d)", pszCallerInfo,
@@ -353,65 +353,83 @@ void CGroupCallService::ApplyInCallCondition( const std::string &strGroupId, con
 }
 
 void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
-    std::string strGroupId, strSessionId, strCallId;
-    bool bStillActive = false;
+    // 멀티그룹: 사용자의 모든 그룹 콜을 정리한다 (그룹별 독립 다이얼로그).
+    struct ClearItem {
+        std::string strCallId;
+        std::string strGroupId;
+        std::string strSessionId;
+        bool bStillActive = false;
+    };
+    std::vector<ClearItem> vecItems;
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
-        auto it = m_mapUserCall.find( strUserId );
-        if ( it == m_mapUserCall.end() ) return;
-
-        strCallId = it->second;
-        CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing callId=%s", strUserId.c_str(), strCallId.c_str() );
-
-        auto itSess = m_mapCallSession.find( strCallId );
-        if ( itSess != m_mapCallSession.end() ) {
-            strGroupId = itSess->second.strGroupId;
-            strSessionId = itSess->second.strSessionId;
-            m_mapCallSession.erase( itSess );
-        }
-        m_mapUserCall.erase( it );
-
-        // 해당 그룹에 아직 다른 멤버가 남아있는지 확인
-        for ( const auto &kv : m_mapCallSession ) {
-            if ( kv.second.strGroupId == strGroupId ) {
-                bStillActive = true;
-                break;
+        for ( auto it = m_mapUserCall.begin(); it != m_mapUserCall.end(); ) {
+            if ( it->first.first != strUserId ) {
+                ++it;
+                continue;
             }
+            ClearItem clsItem;
+            clsItem.strCallId = it->second;
+            CLog::Print( LOG_INFO, "ClearUserCall(%s): clearing callId=%s", strUserId.c_str(),
+                         clsItem.strCallId.c_str() );
+
+            auto itSess = m_mapCallSession.find( clsItem.strCallId );
+            if ( itSess != m_mapCallSession.end() ) {
+                clsItem.strGroupId = itSess->second.strGroupId;
+                clsItem.strSessionId = itSess->second.strSessionId;
+                m_mapCallSession.erase( itSess );
+            }
+            it = m_mapUserCall.erase( it );
+            vecItems.push_back( clsItem );
         }
-        if ( !bStillActive && !strGroupId.empty() ) {
-            auto itRtp = m_mapGroupRtp.find( strGroupId );
-            if ( itRtp != m_mapGroupRtp.end() ) {
-                itRtp->second.strSessionCallId.clear();
+        if ( vecItems.empty() ) return;
+
+        // 그룹별로 아직 다른 멤버가 남아있는지 확인
+        for ( auto &clsItem : vecItems ) {
+            if ( clsItem.strGroupId.empty() ) continue;
+            for ( const auto &kv : m_mapCallSession ) {
+                if ( kv.second.strGroupId == clsItem.strGroupId ) {
+                    clsItem.bStillActive = true;
+                    break;
+                }
+            }
+            if ( !clsItem.bStillActive ) {
+                auto itRtp = m_mapGroupRtp.find( clsItem.strGroupId );
+                if ( itRtp != m_mapGroupRtp.end() ) {
+                    itRtp->second.strSessionCallId.clear();
+                }
             }
         }
     }
-    // 기존 SIP 다이얼로그 정상 종료(BYE) — 고아 다이얼로그 누수 방지 (1E)
-    if ( !strCallId.empty() ) {
-        gclsUserAgent.StopCall( strCallId.c_str() );
-        gclsCallMap.Delete( strCallId.c_str(), false );
-    }
-    // lock 해제 후 CMP/DB 호출
-    if ( !strGroupId.empty() ) {
-        gclsCmpClient.LeaveGroup( strGroupId, strSessionId, GetOrIssueGroupSesId( strGroupId ) );
+    for ( const auto &clsItem : vecItems ) {
+        // 기존 SIP 다이얼로그 정상 종료(BYE) — 고아 다이얼로그 누수 방지 (1E)
+        if ( !clsItem.strCallId.empty() ) {
+            gclsUserAgent.StopCall( clsItem.strCallId.c_str() );
+            gclsCallMap.Delete( clsItem.strCallId.c_str(), false );
+        }
+        // lock 해제 후 CMP/DB 호출
+        const std::string &strGroupId = clsItem.strGroupId;
+        if ( strGroupId.empty() ) continue;
+        gclsCmpClient.LeaveGroup( strGroupId, clsItem.strSessionId, GetOrIssueGroupSesId( strGroupId ) );
 
         // PTT history: member leave event
         if ( gclsCallDir.IsEnabled() ) {
             gclsCallDir.PttMemberLeave( strGroupId, strUserId );
-            if ( !bStillActive ) {
+            if ( !clsItem.bStillActive ) {
                 gclsCallDir.PttSessionEnd( strGroupId );
             }
         }
 
         if ( gclsDbManager.IsConnected() ) {
             gclsDbManager.UpdateParticipantLeft( strGroupId, strUserId );
-            if ( !bStillActive ) {
+            if ( !clsItem.bStillActive ) {
                 gclsDbManager.EndGroupCallLog( strGroupId );
             }
         }
 
         // on-demand 그룹(prearranged/broadcast): 마지막 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
         //   stale 캐시로 JOIN→'Group Not Found' 되던 문제도 원천 차단.
-        if ( !bStillActive ) {
+        if ( !clsItem.bStillActive ) {
             CspPttGroup clsGrp;
             bool bSelected = gclsGroupMap.Select( strGroupId.c_str(), clsGrp );
             bool bChat = bSelected && clsGrp._groupType == "chat";
@@ -437,21 +455,41 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
 bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGroupId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
-    // 활성 호가 남아있으면 정리 후 재시도
-    if ( m_mapUserCall.find( pszUserId ) != m_mapUserCall.end() ) {
-        std::string strStaleCallId = m_mapUserCall[pszUserId];
-        CLog::Print( LOG_INFO, "InviteMember(%s, %s): stale call exists (%s), clearing", pszUserId, pszGroupId,
-                     strStaleCallId.c_str() );
+    // 같은 그룹에 기존 콜이 있으면: 다이얼로그가 살아있는 한 이미 세션 참여 중 — 재초대하지 않는다.
+    //   (선참여 멤버를 stale 로 오판해 LEAVE+재초대하면 CMP 멤버십이 끊기는 좀비 상태가 됐었음.
+    //    다른 그룹의 콜은 멀티그룹 동시 참여이므로 여기서 건드리지 않는다.)
+    auto itUC = m_mapUserCall.find( { pszUserId, pszGroupId } );
+    if ( itUC != m_mapUserCall.end() ) {
+        std::string strExistCallId = itUC->second;
+        // 라이브 SIP 다이얼로그가 살아있으면 이미 참여 중 — 재초대 금지.
+        //   개시자(AcceptCall)·CSP초대(StartCall) 양쪽 레그가 모두 UA 다이얼로그 맵에 있으므로
+        //   CallMap(=CSP 초대 레그만) 대신 다이얼로그 맵으로 판정한다.
+        SIP_CALL_ID_LIST clsCallIds;
+        gclsUserAgent.GetCallIdList( clsCallIds );
+        bool bAlive = false;
+        for ( const auto &strId : clsCallIds ) {
+            if ( strId == strExistCallId ) {
+                bAlive = true;
+                break;
+            }
+        }
+        if ( bAlive ) {
+            CLog::Print( LOG_DEBUG, "InviteMember(%s, %s): already in session (%s) — skip", pszUserId, pszGroupId,
+                         strExistCallId.c_str() );
+            return true;
+        }
 
-        // stale 세션 정리
+        // 죽은 다이얼로그만 stale 정리 후 재초대
+        CLog::Print( LOG_INFO, "InviteMember(%s, %s): stale call exists (%s), clearing", pszUserId, pszGroupId,
+                     strExistCallId.c_str() );
         std::string strStaleGroup, strStaleSession;
-        auto itSess = m_mapCallSession.find( strStaleCallId );
+        auto itSess = m_mapCallSession.find( strExistCallId );
         if ( itSess != m_mapCallSession.end() ) {
             strStaleGroup = itSess->second.strGroupId;
             strStaleSession = itSess->second.strSessionId;
             m_mapCallSession.erase( itSess );
         }
-        m_mapUserCall.erase( pszUserId );
+        m_mapUserCall.erase( itUC );
 
         // lock 해제하고 CMP 정리
         lock.unlock();
@@ -688,7 +726,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         gclsCallMap.Insert( strCallId.c_str(), clsCallInfo );
 
         // Track Session Info
-        m_mapUserCall[pszUserId] = strCallId;
+        m_mapUserCall[{ pszUserId, pszGroupId }] = strCallId;
         m_mapCallSession[strCallId] = { pszGroupId, pszUserId, pszUserId };  // Use UserId as SessionId
         CLog::Print( LOG_DEBUG, "InviteMember(%s): Added to Maps. CallId=%s", pszUserId, strCallId.c_str() );
 
@@ -696,7 +734,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             CLog::Print( LOG_ERROR, "InviteMember StartCall failed" );
             gclsCallMap.Delete( strCallId.c_str() );
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
-            m_mapUserCall.erase( pszUserId );
+            m_mapUserCall.erase( { pszUserId, pszGroupId } );
             m_mapCallSession.erase( strCallId );
             return false;
         }
@@ -850,7 +888,7 @@ void CGroupCallService::CheckMemberState() {
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
         for ( auto it = m_mapUserCall.begin(); it != m_mapUserCall.end(); ++it ) {
-            std::string strUserId = it->first;
+            std::string strUserId = it->first.first;
             std::string strCallId = it->second;
 
             auto itSess = m_mapCallSession.find( strCallId );
@@ -962,7 +1000,8 @@ void CGroupCallService::CheckGroupIntegrity() {
             bool bInCall;
             {
                 std::unique_lock<std::recursive_mutex> lock( m_mutex );
-                bInCall = ( m_mapUserCall.find( strUserId ) != m_mapUserCall.end() );
+                // 멀티그룹: '이 그룹' 참여 여부만 본다 (다른 그룹 통화 중이어도 초대 대상)
+                bInCall = ( m_mapUserCall.find( { strUserId, group._id } ) != m_mapUserCall.end() );
             }
             if ( !bInCall ) {
                 CLog::Print( LOG_DEBUG, "CheckGroupIntegrity: invite %s → %s (type=%s)", strUserId.c_str(),

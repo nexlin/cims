@@ -168,8 +168,9 @@ private:
     // CallId -> Info
     std::map<std::string, CallSessionInfo> m_mapCallSession;
 
-    // Track Active Calls (UserId -> CallId)
-    std::map<std::string, std::string> m_mapUserCall;
+    // Track Active Calls ((UserId, GroupId) -> CallId)
+    //   멀티그룹 동시 참여: 사용자는 그룹별 독립 다이얼로그를 가진다 (그룹당 1콜).
+    std::map<std::pair<std::string, std::string>, std::string> m_mapUserCall;
     std::recursive_mutex m_mutex;
 };
 
