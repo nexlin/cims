@@ -335,6 +335,57 @@ def load_shared_data(config):
             except Exception as e:
                 logger.log_error(f"Error loading group {fpath}: {e}")
 
+def refresh_group_members(group_id: str) -> bool:
+    """DB에서 해당 그룹 멤버를 재조회해 in-memory GROUPS 에 반영한다.
+    admin API 멤버 변경이 GMS 그룹 목록/문서에 즉시 보이도록 admin.py 가 호출
+    (GROUPS 는 기동 시 1회 적재 — 이 갱신이 없으면 재기동 전까지 stale)."""
+    if not _DB_CONFIG:
+        return False
+    uri = _group_uri(group_id)
+    grp = GROUPS.get(uri)
+    if not grp:
+        return False
+    try:
+        import pymysql, pymysql.cursors
+        conn = pymysql.connect(
+            host=_DB_CONFIG.get('Host', '127.0.0.1'),
+            port=int(_DB_CONFIG.get('Port', 3306)),
+            user=_DB_CONFIG.get('User', 'root'),
+            password=_DB_CONFIG.get('Password', ''),
+            database=_DB_CONFIG.get('Db', 'cims'),
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=5,
+        )
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
+                    "       u.name AS user_name "
+                    "FROM ptt_group_members gm "
+                    "JOIN ptt_groups g ON g.id = gm.group_id "
+                    "LEFT JOIN ptt_subscriptions ps ON ps.id = gm.user_id "
+                    "LEFT JOIN users u ON u.id = ps.user_id "
+                    "WHERE g.mcptt_group_id=%s ORDER BY gm.priority",
+                    (group_id,)
+                )
+                members = []
+                for row in cur.fetchall():
+                    uid = row['user_id']
+                    m_uri = row.get('mcptt_id') or (f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}")
+                    members.append({
+                        "uri": m_uri, "name": row.get('user_name') or m_uri,
+                        "role": row.get('role') or "participant",
+                        "priority": row['priority'], "joined_at": ""
+                    })
+        grp['members'] = members
+        logger.log_info(f"refresh_group_members({group_id}): {len(members)} members")
+        return True
+    except Exception as e:
+        logger.log_error(f"refresh_group_members({group_id}) failed: {e}")
+        return False
+
+
 # [FIX] Notify CSP logic
 _notify_seq = 0
 

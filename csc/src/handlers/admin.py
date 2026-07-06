@@ -22,7 +22,7 @@ import pymysql
 import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
-from services.mcptt import notify_csp
+from services.mcptt import notify_csp, refresh_group_members
 from services import admin_auth
 
 # ──────────────────────────────────────────────────────────────
@@ -867,6 +867,7 @@ async def _update_group(group_id: str, body, config, payload=None):
                 cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
                 for m in body['members']:
                     _insert_member(cur, gpk, m)
+    refresh_group_members(group_id)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
 
@@ -920,6 +921,7 @@ async def _add_member(group_id: str, body, config):
                 "ON DUPLICATE KEY UPDATE priority=VALUES(priority), role=VALUES(role), mcptt_id=VALUES(mcptt_id)",
                 (gpk, user_id, priority, role, mcptt_id)
             )
+    refresh_group_members(group_id)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=201, body={'group_id': group_id, 'user_id': user_id})
 
@@ -936,6 +938,7 @@ async def _remove_member(group_id: str, user_id: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Member not found'})
+    refresh_group_members(group_id)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'group_id': group_id, 'user_id': user_id})
 
