@@ -38,6 +38,12 @@ enum class ChannelRole { PRIMARY, SECONDARY, NONE }
 /** 듣기 정책 — 주·부채널만 / 참여한 모든 그룹. */
 enum class ListenPolicy { CHANNELS_ONLY, ALL }
 
+/** 통화이력용 이벤트 종별. */
+enum class PttEventKind { JOIN, LEAVE, TALK_ME, TALK_OTHER, EMERGENCY, EMERGENCY_IN, EMERGENCY_END }
+
+/** 통화이력용 이벤트 — [PttController.onEvent] 로 방출(서비스가 HistoryStore 에 영속). */
+data class PttEvent(val kind: PttEventKind, val groupId: String, val peer: String? = null, val durationMs: Long = 0)
+
 /** 참여 중인 그룹 세션의 UI 상태. */
 data class GroupCallState(
     val groupId: String,
@@ -75,6 +81,15 @@ class PttController(
     /** 사용자 피드백(톤+진동) — 서비스가 Context 로 생성해 주입. */
     var feedback: PttFeedback? = null
 
+    /** 통화이력 이벤트 훅 — 서비스가 주입(HistoryStore 영속). 컨트롤러 스레드에서 호출되므로 가볍게. */
+    var onEvent: ((PttEvent) -> Unit)? = null
+    private fun emit(kind: PttEventKind, groupId: String, peer: String? = null, durationMs: Long = 0) {
+        runCatching { onEvent?.invoke(PttEvent(kind, groupId, peer, durationMs)) }
+    }
+
+    /** 수신 문자(SIP MESSAGE) — core 흐름 그대로 노출(서비스가 MessageStore 에 영속). */
+    val incomingMessage get() = sip.incomingMessage
+
     // ── 그룹별 세션 ──
 
     private inner class Session(val groupId: String) {
@@ -87,6 +102,9 @@ class PttController(
         var audible: Boolean = true
         var emergency: Boolean = false
         var emergencyMine: Boolean = false
+        var mySpeakStartMs: Long = 0          // 이력용 — 내 발언 시작(elapsedRealtime)
+        var otherSpeaker: String? = null      // 이력용 — 수신 중 발언자
+        var otherSpeakStartMs: Long = 0
         val floor: FloorClient = FloorClient(ssrc, mcpttId, localPort = 0,
             onEvent = { ev -> onFloorEvent(groupId, ev) })
 
@@ -207,6 +225,7 @@ class PttController(
             s.groupId
         }
         _status.value = "[$gid] 그룹콜 종료"
+        emit(PttEventKind.LEAVE, gid)
         publish()
     }
 
@@ -306,6 +325,8 @@ class PttController(
             parts.add(SipBodyPart("application", "resource-lists+xml", McpttXml.resourceLists(members)))
         sip.makeGroupCall("sip:$groupId@${sipConfig.domain}", parts, appSdp)
         _status.value = if (emergency) "🚨 긴급 그룹콜 개시 $groupId" else "그룹콜 참여 $groupId"
+        emit(PttEventKind.JOIN, groupId)
+        if (emergency) emit(PttEventKind.EMERGENCY, groupId)
         publish()
     }
 
@@ -327,6 +348,8 @@ class PttController(
         sip.answerGroupCall(inc.id, "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio")
         if (inc.emergency) feedback?.emergencyTone()
         _status.value = if (inc.emergency) "🚨 긴급 그룹콜 자동 참여: $groupId" else "그룹콜 자동 참여: $groupId"
+        emit(PttEventKind.JOIN, groupId)
+        if (inc.emergency) emit(PttEventKind.EMERGENCY_IN, groupId)
         publish()
     }
 
@@ -414,6 +437,17 @@ class PttController(
         _status.value = if (on) "affiliate $groupId" else "de-affiliate $groupId"
     }
 
+    /** 그룹 문자(SIP MESSAGE) 발신 — CSP 가 그룹 URI 수신 시 멤버 fan-out. 로컬 저장은 서비스 몫. */
+    fun sendGroupMessage(groupId: String, text: String) {
+        if (text.isBlank()) return
+        sip.sendRequest(
+            method = "MESSAGE",
+            targetUri = "sip:$groupId@${sipConfig.domain}",
+            contentType = "text/plain",
+            body = text,
+        )
+    }
+
     // ── 긴급(SOS) — TS 24.379 in-call emergency ──
 
     /**
@@ -435,6 +469,7 @@ class PttController(
         if (s.callId >= 0) sendConditionReinvite(s, emergency = true)
         feedback?.emergencyTone()
         _status.value = "🚨 [${s.groupId}] 긴급 개시"
+        emit(PttEventKind.EMERGENCY, s.groupId)
         publish()
     }
 
@@ -446,6 +481,7 @@ class PttController(
         s.emergencyMine = false
         if (s.callId >= 0) sendConditionReinvite(s, emergency = false)
         _status.value = "[${s.groupId}] 긴급 해제"
+        emit(PttEventKind.EMERGENCY_END, s.groupId)
         publish()
     }
 
@@ -494,6 +530,11 @@ class PttController(
         requestTimeout?.cancel()
         val s = primarySession() ?: return
         val wasSpeaking = s.floorState == FloorState.SPEAKING
+        if (wasSpeaking && s.mySpeakStartMs > 0) {
+            emit(PttEventKind.TALK_ME, s.groupId,
+                durationMs = SystemClock.elapsedRealtime() - s.mySpeakStartMs)
+            s.mySpeakStartMs = 0
+        }
         s.floor.releaseFloor()
         if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
         if (s.floorState != FloorState.LISTENING) s.floorState = FloorState.IDLE
@@ -516,6 +557,7 @@ class PttController(
                 }
                 s.floorState = FloorState.SPEAKING
                 s.speaker = Speaker(mcpttId, self = true, sinceMs = SystemClock.elapsedRealtime())
+                s.mySpeakStartMs = SystemClock.elapsedRealtime()
                 _status.value = "발언권 획득"
                 // "삑 후 말하기": 승인 톤 재생이 끝난 뒤 mic 개방(톤이 그룹으로 송출되지 않게)
                 scope.launch {
@@ -537,23 +579,40 @@ class PttController(
             is FloorEvent.Revoked -> {
                 if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
                 s.floorState = FloorState.IDLE
+                if (s.speaker?.self == true && s.mySpeakStartMs > 0) {
+                    emit(PttEventKind.TALK_ME, s.groupId,
+                        durationMs = SystemClock.elapsedRealtime() - s.mySpeakStartMs)
+                    s.mySpeakStartMs = 0
+                }
                 if (s.speaker?.self == true) s.speaker = null
                 if (isPrimary) { feedback?.revokeTone(); _status.value = "발언권 회수: ${ev.text ?: ev.cause}" }
             }
             is FloorEvent.Taken -> {
                 s.floorState = FloorState.LISTENING
                 s.speaker = Speaker(ev.speaker ?: "?", self = false, sinceMs = SystemClock.elapsedRealtime())
+                s.otherSpeaker?.let { prev ->      // 발언자 교대 — 직전 수신 발언 마감
+                    emit(PttEventKind.TALK_OTHER, s.groupId, peer = prev,
+                        durationMs = SystemClock.elapsedRealtime() - s.otherSpeakStartMs)
+                }
+                s.otherSpeaker = ev.speaker?.let { bareId(it) } ?: "?"
+                s.otherSpeakStartMs = SystemClock.elapsedRealtime()
                 // CMP 는 긴급 tier 발언자의 TAKEN 에 emergency 비트를 방송 — 수신측 긴급 표시 latch
                 // (CSP 는 상향을 fan-out 하지 않으므로 이것이 in-call 수신 경로의 유일한 신호)
                 if ((ev.indicator ?: 0) and FloorIndicator.EMERGENCY != 0 && !s.emergency) {
                     s.emergency = true
                     feedback?.emergencyTone()
+                    emit(PttEventKind.EMERGENCY_IN, s.groupId, peer = s.otherSpeaker)
                     if (isPrimary) _status.value = "🚨 [${s.groupId}] 긴급 발언 수신"
                 }
             }
             FloorEvent.Idle -> {
                 if (s.floorState != FloorState.SPEAKING) s.floorState = FloorState.IDLE
                 if (s.speaker?.self != true) s.speaker = null
+                s.otherSpeaker?.let { prev ->      // 수신 발언 종료 — 이력 마감
+                    emit(PttEventKind.TALK_OTHER, s.groupId, peer = prev,
+                        durationMs = SystemClock.elapsedRealtime() - s.otherSpeakStartMs)
+                    s.otherSpeaker = null
+                }
             }
             is FloorEvent.QueuePosition -> { s.floorState = FloorState.QUEUED; _status.value = "대기열 ${ev.position}" }
             is FloorEvent.Other -> Log.d(TAG, "floor other ${ev.type}")

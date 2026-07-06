@@ -40,6 +40,24 @@ class PttService : Service() {
     private val binder = LocalBinder()
     override fun onBind(intent: Intent?): IBinder = binder
 
+    /** 통화이력/그룹문자 저장소 — UI(Activity)가 바인드해 함께 사용. */
+    val history by lazy { com.cims.ue.ptt.history.HistoryStore(this) }
+    val messages by lazy { com.cims.ue.core.message.MessageStore(this) }
+    private val _messageTick = kotlinx.coroutines.flow.MutableStateFlow(0)
+    /** 문자 저장 변경 틱 — UI 재조회 트리거(MessageStore 자체엔 변경 알림이 없음). */
+    val messageTick: kotlinx.coroutines.flow.StateFlow<Int> = _messageTick
+
+    /** 그룹 문자 발신 + 로컬 스레드 저장. */
+    fun sendGroupMessage(groupId: String, text: String) {
+        controller?.sendGroupMessage(groupId, text) ?: return
+        messages.add(groupId, text, com.cims.ue.core.message.MsgDirection.OUT)
+        _messageTick.value++
+    }
+
+    fun markThreadRead(peer: String) {
+        if (messages.markRead(peer)) _messageTick.value++
+    }
+
     override fun onCreate() {
         super.onCreate()
         createChannel()
@@ -101,8 +119,17 @@ class PttService : Service() {
 
     private fun observe(c: PttController) {
         job?.cancel()
+        c.onEvent = { e -> history.add(e.groupId, e.kind.name, e.peer, e.durationMs) }
         job = scope.launch {
             c.status.onEach { update("CIMS PTT", it) }.launchIn(this)
+            // 수신 문자(SIP MESSAGE) → 인박스 영속 (그룹 fan-out 도 발신자 URI 로 도착 — 상대별 스레드)
+            c.incomingMessage.onEach { im ->
+                if (im.contentType.startsWith("text/")) {
+                    messages.add(PttController.bareId(im.fromUri), im.body,
+                        com.cims.ue.core.message.MsgDirection.IN)
+                    _messageTick.value++
+                }
+            }.launchIn(this)
         }
     }
 

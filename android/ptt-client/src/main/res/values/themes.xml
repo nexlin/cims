@@ -1,4 +1,9 @@
 <resources>
-    <!-- 플랫폼 테마 사용 (Material Components 의존 회피). UI 는 Compose Material3 로 렌더 -->
-    <style name="Theme.CimsPtt" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- 플랫폼 테마 사용 (Material Components 의존 회피). UI 는 Compose Material3 로 렌더.
+         다크 고정 — 시안(다크 배경+민트 액센트) 기준, 콜드 스타트 윈도우 배경도 다크. -->
+    <style name="Theme.CimsPtt" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0D1211</item>
+        <item name="android:statusBarColor">#0D1211</item>
+        <item name="android:navigationBarColor">#111917</item>
+    </style>
 </resources>
