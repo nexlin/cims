@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.HearingDisabled
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
@@ -99,12 +100,19 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 하드웨어 PTT 키(측면 버튼) — down=발언 요청, up=해제. 화면 버튼과 동일 경로.
-     *  SOS(2번째 측면 키)=긴급 개시 — 해제는 오조작 방지 위해 화면 배너에서만. */
+     *  SOS(2번째 측면 키)=긴급 개시 — 해제는 오조작 방지 위해 화면 배너에서만.
+     *  버튼 학습 모드면 눌린 keycode 를 대상 버튼으로 저장(HwPtt.consumeLearn). */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         // 키코드 실측용 (persist.log.tag=I 단말이 있어 Log.i)
         if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0)
             android.util.Log.i("HwPtt", "keyDown code=${event.keyCode} scan=${event.scanCode} dev=${event.deviceId}")
-        when (HwPtt.classify(event.keyCode, event.scanCode)) {
+        // 버튼 학습: DOWN 에서 캡처, UP 은 소비만(정상 dispatch 로 새지 않게)
+        if (HwPtt.learning.value != null) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0)
+                HwPtt.consumeLearn(this, event.keyCode)
+            if (!HwPtt.isSystemNav(event.keyCode)) return true
+        }
+        when (HwPtt.classify(event.keyCode)) {
             HwPtt.Kind.SOS -> {
                 if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0)
                     svc?.controller?.startEmergency()
@@ -166,6 +174,7 @@ private fun PttScreen(svc: PttService?, onStopSip: () -> Unit) {
 
     val hasAccount = remember { com.cims.ue.core.account.SsoProvisioner.hasAccount(context) }
     val inCall = sessions.any { it.active || it.callId >= 0 }
+    var showKeyConfig by remember { mutableStateOf(false) }
 
     // SSO: 컨트롤러 연결 시 CIMS 공유 계정의 MCPTT(TS 33.180) 토큰을 주입(별도 로그인 없음).
     LaunchedEffect(ctl) {
@@ -195,6 +204,10 @@ private fun PttScreen(svc: PttService?, onStopSip: () -> Unit) {
             Spacer(Modifier.size(8.dp))
             Text(regText, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.weight(1f))
+            // 하드웨어 버튼 설정(PTT/SOS 학습)
+            IconButton(onClick = { showKeyConfig = true }) {
+                Icon(Icons.Filled.Settings, contentDescription = "버튼 설정", tint = ColListen)
+            }
             if (reg is RegState.Registered) {
                 TextButton(onClick = onStopSip) { Text("해제") }
             } else {
@@ -334,6 +347,9 @@ private fun PttScreen(svc: PttService?, onStopSip: () -> Unit) {
             ctl?.setListenPolicy(if (all) ListenPolicy.CHANNELS_ONLY else ListenPolicy.ALL)
         }
     }
+
+    // ── 하드웨어 버튼 설정 오버레이(같은 Activity 윈도우 — 물리 키가 dispatchKeyEvent 로 유입되게) ──
+    if (showKeyConfig) KeyConfigOverlay(onDismiss = { HwPtt.cancelLearn(); showKeyConfig = false })
     }
 }
 
@@ -363,6 +379,73 @@ private fun EmergencyBanner(e: GroupCallState, ctl: PttController?) {
             TextButton(onClick = { ctl?.cancelEmergency() }) {
                 Text("해제", color = Color.White, fontWeight = FontWeight.Bold)
             }
+        }
+    }
+}
+
+/**
+ * 하드웨어 버튼 설정 오버레이 — PTT/SOS 물리 키 학습. "설정" 을 누르면 학습 대기가 되고, 그 뒤 단말의
+ * 물리 버튼을 누르면 그 keycode 가 해당 기능으로 매핑·영속된다(신규 기종 대응).
+ *
+ * 🔑 별도 Dialog 윈도우가 아니라 **같은 Activity 윈도우 안의 오버레이**로 그린다. 러기드 단말의 측면
+ * 물리 키(예: W999 SOS=310)는 gamepad-class 입력장치라, 별도 Dialog 윈도우가 포커스를 잡으면 focus
+ * 네비게이션에 소비돼 앱으로 오지 않는다. 오버레이면 Activity 가 키 포커스를 유지해 물리 키가
+ * [MainActivity.dispatchKeyEvent] → [HwPtt.consumeLearn] 으로 그대로 유입된다.
+ */
+@Composable
+private fun KeyConfigOverlay(onDismiss: () -> Unit) {
+    val mapping by HwPtt.mapping.collectAsState()
+    val learning by HwPtt.learning.collectAsState()
+    val context = LocalContext.current
+    fun label(code: Int) = if (code > 0) "keycode $code" else "기본값"
+
+    Box(
+        Modifier.fillMaxSize().background(Color(0x99000000))
+            .clickable(indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {
+                onDismiss()   // 바깥 탭 → 닫기
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Card(Modifier.fillMaxWidth().padding(24.dp)
+            .clickable(indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {}) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("하드웨어 버튼 설정", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("측면 물리 버튼을 기능에 매핑합니다. ‘설정’을 누른 뒤 원하는 버튼을 누르세요.",
+                    style = MaterialTheme.typography.bodySmall, color = ColListen)
+                KeyConfigRow(
+                    name = "PTT (발언)", value = label(mapping.ptt),
+                    learningNow = learning == HwPtt.Kind.PTT,
+                    onLearn = { HwPtt.startLearn(HwPtt.Kind.PTT) },
+                )
+                KeyConfigRow(
+                    name = "SOS (긴급)", value = label(mapping.sos),
+                    learningNow = learning == HwPtt.Kind.SOS,
+                    onLearn = { HwPtt.startLearn(HwPtt.Kind.SOS) },
+                )
+                if (learning != null) {
+                    Text("⌨ 지금 ${if (learning == HwPtt.Kind.PTT) "PTT" else "SOS"} 로 쓸 버튼을 누르세요…",
+                        style = MaterialTheme.typography.bodyMedium, color = ColRequest, fontWeight = FontWeight.Bold)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = { HwPtt.resetMapping(context) }) { Text("기본값으로 초기화") }
+                    TextButton(onClick = onDismiss) { Text("닫기") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyConfigRow(name: String, value: String, learningNow: Boolean, onLearn: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(value, style = MaterialTheme.typography.bodySmall, color = ColListen)
+        }
+        OutlinedButton(onClick = onLearn, enabled = !learningNow) {
+            Text(if (learningNow) "대기 중…" else "설정")
         }
     }
 }
