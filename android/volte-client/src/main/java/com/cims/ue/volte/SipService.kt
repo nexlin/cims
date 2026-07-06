@@ -54,8 +54,10 @@ class SipService : Service() {
     private var netCallback: ConnectivityManager.NetworkCallback? = null
     private var ringtone: Ringtone? = null
 
-    /** 화면 최상단 전역 상태배지(오버레이) — View 조작이라 main 스레드에서만 갱신. */
-    private val overlay by lazy { RegStatusOverlay(this) }
+    /** 화면 최상단 전역 상태 아이콘 배지(오버레이, 전화 아이콘=중앙 좌측) — main 스레드에서만 갱신. */
+    private val overlay by lazy {
+        com.cims.ue.core.ui.StatusIconOverlay(this, android.R.drawable.sym_action_call, xOffsetDp = -22)
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
 
     val regState: StateFlow<RegState>? get() = controller?.regState
@@ -229,8 +231,8 @@ class SipService : Service() {
                     RegState.Unregistered -> 0xFF9E9E9E.toInt()
                     is RegState.Failed -> 0xFFEA4335.toInt()
                 }
-                val badge = if (reg is RegState.Failed) "오프라인" else line
-                mainHandler.post { overlay.update(color, badge) }
+                // 아이콘만 표시 — 상태는 tint 색으로(텍스트 없음), 라벨은 접근성용.
+                mainHandler.post { overlay.update(color, if (reg is RegState.Failed) "오프라인" else line) }
             }.launchIn(this)
 
             c.callState.onEach { call ->

@@ -130,6 +130,45 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         }
     }
 
+    // 화면 최상단 전역 상태 아이콘 배지(다른 앱 위에 표시) — 권한 안내 1회(CIMS-Phone 과 동일 패턴).
+    var askOverlay by remember {
+        mutableStateOf(
+            !android.provider.Settings.canDrawOverlays(context) &&
+                !context.getSharedPreferences("ui_prefs", android.content.Context.MODE_PRIVATE)
+                    .getBoolean("overlay_asked", false),
+        )
+    }
+    if (askOverlay && nav is Nav.Home) {
+        fun done() {
+            context.getSharedPreferences("ui_prefs", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean("overlay_asked", true).apply()
+            askOverlay = false
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { done() },
+            title = { androidx.compose.material3.Text("화면 상단 상태 표시") },
+            text = { androidx.compose.material3.Text("어떤 앱을 쓰고 있어도 화면 맨 위에 PTT 가능 상태 아이콘을 표시하려면 '다른 앱 위에 표시' 권한이 필요합니다.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(
+                            android.content.Intent(
+                                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                android.net.Uri.parse("package:${context.packageName}"),
+                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                    done()
+                }) { androidx.compose.material3.Text("허용하러 가기") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { done() }) {
+                    androidx.compose.material3.Text("나중에")
+                }
+            },
+        )
+    }
+
     BackHandler(enabled = nav !is Nav.Home && nav !is Nav.Splash) {
         nav = when (nav) {
             is Nav.Channel -> Nav.Home(Tab.CHANNELS)

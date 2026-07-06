@@ -24,8 +24,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +57,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dialpad
@@ -73,7 +74,6 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -82,12 +82,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -158,8 +155,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
         setContent {
-            // 시스템 다크/라이트 테마 추종 — 일반 전화앱과 동일한 흰/검 배경.
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) PhoneDark else PhoneLight) {
+            // 시안 다크 고정 — PTT 앱과 같은 다크·민트 톤(Theme.kt).
+            PhoneTheme {
                 Surface(modifier = Modifier.fillMaxSize()) { App(notifAnswer, notifOpenMessages) }
             }
         }
@@ -399,13 +396,21 @@ private fun HomeScreen(
     var videoOn by remember { mutableStateOf(false) }
     var pendingVideoNumber by remember { mutableStateOf<String?>(null) }
 
+    // 통화 기록용 미결 상태 — 발신은 doDial 시점에 확정(즉시 실패 호는 StateFlow 컨플레이션으로
+    // Outgoing 상태가 관측되지 않을 수 있음), 수신은 Incoming 상태 관측으로 잡는다.
+    var pendingNumber by remember { mutableStateOf<String?>(null) }
+    var pendingIncoming by remember { mutableStateOf(false) }
+    var pendingVideo by remember { mutableStateOf(false) }
+    var connectedAt by remember { mutableStateOf(0L) }
+
     fun doDial(number: String, video: Boolean) {
         val n = number.trim()
         if (n.isBlank()) return
         videoOn = video
+        pendingNumber = extractNumber(n); pendingIncoming = false
+        pendingVideo = video; connectedAt = 0L
         service?.setVideoEnabled(video)
-        callLog.add(extractNumber(n), CallType.OUTGOING)
-        service?.makeCall(n)
+        service?.makeCall(n)   // 기록은 종료 시점에 통화시간과 함께 남긴다
     }
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -445,19 +450,30 @@ private fun HomeScreen(
     var muted by remember { mutableStateOf(false) }
     var speakerOn by remember { mutableStateOf(false) }
 
-    // 수신/부재중 기록: Incoming→Active=수신(연결), Incoming→Disconnected(미연결)=부재중.
-    var incomingNumber by remember { mutableStateOf<String?>(null) }
-    var incomingAnswered by remember { mutableStateOf(false) }
-    LaunchedEffect(call) {
+    // 통화 기록 — 종료 시점에 한 건 기록: 방향(발신/수신/부재중) + 연결 통화시간 + 영상 여부.
+    LaunchedEffect(call, videoOn) {
         when (val c = call) {
-            is CallState.Incoming -> { incomingNumber = extractNumber(c.remote); incomingAnswered = false }
-            is CallState.Active -> if (incomingNumber != null) incomingAnswered = true
+            is CallState.Incoming -> {
+                pendingNumber = extractNumber(c.remote); pendingIncoming = true
+                pendingVideo = c.video; connectedAt = 0L
+            }
+            is CallState.Active -> {
+                if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
+                if (videoOn) pendingVideo = true   // 통화 중 영상 전환도 영상통화로 기록
+            }
             is CallState.Disconnected -> {
                 muted = false; speakerOn = false
-                incomingNumber?.let { n ->
-                    callLog.add(n, if (incomingAnswered) CallType.INCOMING else CallType.MISSED)
-                    incomingNumber = null
+                pendingNumber?.let { n ->
+                    val dur = if (connectedAt > 0) ((System.currentTimeMillis() - connectedAt) / 1000).toInt() else 0
+                    val type = when {
+                        !pendingIncoming -> CallType.OUTGOING
+                        connectedAt > 0 -> CallType.INCOMING
+                        else -> CallType.MISSED
+                    }
+                    callLog.add(n, type, durationSec = dur, video = pendingVideo)
+                    pendingNumber = null; pendingVideo = false
                 }
+                connectedAt = 0L
             }
             else -> {}
         }
@@ -516,15 +532,11 @@ private fun HomeScreen(
                     Tab.RECENTS -> RecentsScreen(
                         store = callLog,
                         contacts = contacts,
-                        onCall = { dial(it, false) },
+                        myLine = myLine(config),
+                        onCall = { n, video -> dial(n, video) },
                     )
                     Tab.KEYPAD -> KeypadScreen(
-                        // 이름 + 전화번호 병기 (예: "테스트001 (01300000001)")
-                        myNumber = when {
-                            config.displayName.isBlank() -> fmtNumber(config.msisdn)
-                            config.msisdn.isBlank() -> config.displayName
-                            else -> "${config.displayName} (${fmtNumber(config.msisdn)})"
-                        },
+                        myNumber = myLine(config),
                         onVoice = { dial(it, false) },
                         onVideo = { dial(it, true) },
                     )
@@ -550,35 +562,23 @@ private fun HomeScreen(
     }
 }
 
+/** 하단 내비 5탭 — PTT 앱과 같은 다크 바(민트 활성, 문자=안읽음 뱃지). */
 @Composable
 private fun BottomNav(current: Tab, unread: Int, onSelect: (Tab) -> Unit) {
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-        NavigationBarItem(
-            selected = current == Tab.CONTACTS, onClick = { onSelect(Tab.CONTACTS) },
-            icon = { Icon(Icons.Filled.Person, contentDescription = "연락처") }, label = { Text("연락처") },
-        )
-        NavigationBarItem(
-            selected = current == Tab.RECENTS, onClick = { onSelect(Tab.RECENTS) },
-            icon = { Icon(Icons.Filled.History, contentDescription = "최근기록") }, label = { Text("최근기록") },
-        )
-        NavigationBarItem(
-            selected = current == Tab.KEYPAD, onClick = { onSelect(Tab.KEYPAD) },
-            icon = { Icon(Icons.Filled.Dialpad, contentDescription = "키패드") }, label = { Text("키패드") },
-        )
-        NavigationBarItem(
-            selected = current == Tab.MESSAGES, onClick = { onSelect(Tab.MESSAGES) },
-            icon = {
-                BadgedBox(badge = { if (unread > 0) Badge { Text("$unread") } }) {
-                    Icon(Icons.AutoMirrored.Filled.Message, contentDescription = "문자")
-                }
-            },
-            label = { Text("문자") },
-        )
-        NavigationBarItem(
-            selected = current == Tab.SETTINGS, onClick = { onSelect(Tab.SETTINGS) },
-            icon = { Icon(Icons.Filled.Settings, contentDescription = "설정") }, label = { Text("설정") },
-        )
-    }
+    val tabs = listOf(Tab.CONTACTS, Tab.RECENTS, Tab.KEYPAD, Tab.MESSAGES, Tab.SETTINGS)
+    val items = listOf(
+        NavItem("연락처", Icons.Filled.Person),
+        NavItem("통화이력", Icons.Filled.History),
+        NavItem("키패드", Icons.Filled.Dialpad),
+        NavItem("문자", Icons.AutoMirrored.Filled.Message),
+        NavItem("설정", Icons.Filled.Settings),
+    )
+    DarkBottomNav(
+        items = items,
+        currentIndex = tabs.indexOf(current),
+        badge = mapOf(tabs.indexOf(Tab.MESSAGES) to unread),
+        onSelect = { onSelect(tabs[it]) },
+    )
 }
 
 // ─────────────────────────────────────── 키패드 탭 ───────────────────────────────────────
@@ -942,25 +942,32 @@ private fun CompanyContacts(
     }
     LaunchedEffect(Unit) { sync() }   // 진입 시 버전 확인(변경 시에만 다운로드)
 
+    // 당겨서 새로고침(PTT 앱과 동일 패턴) — 별도 동기화 버튼 없음.
+    PullToRefreshBox(
+        isRefreshing = loading,
+        onRefresh = { sync() },
+        modifier = Modifier.fillMaxSize(),
+    ) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                (if (lastSync > 0) "마지막 동기화: ${formatTime(lastSync)}" else "동기화 안 됨") +
+                (if (lastSync > 0) "마지막 동기화: ${formatTime(lastSync)}" else "동기화 안 됨 — 아래로 당겨 동기화") +
                     (if (note.isNotBlank()) " · $note" else ""),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).padding(vertical = 6.dp),
             )
-            if (loading) CircularProgressIndicator(Modifier.size(20.dp))
-            else TextButton(onClick = { sync() }) { Text("동기화") }
         }
 
         val q = query.trim()
         val orgName = remember(dir) { dir.orgs.associate { it.code to it.name } }
         if (dir.members.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(note.ifBlank { "회사 연락처가 없습니다." },
-                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // 빈 상태도 스크롤 가능해야 당겨서 새로고침 제스처가 동작한다.
+            Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.Center) {
+                Text(note.ifBlank { "회사 연락처가 없습니다.\n아래로 당겨 동기화하세요." },
+                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 120.dp))
             }
         } else if (q.isNotBlank()) {
             val hits = remember(dir, q) {
@@ -1079,6 +1086,7 @@ private fun CompanyContacts(
             }
         }
     }
+    }   // PullToRefreshBox
 }
 
 /** 조직 선택 바텀시트 — 단계별 펼침 트리(처음엔 최상위+현재 경로만 펼침). 이름 탭=선택, ▸ 탭=펼침. */
@@ -1383,68 +1391,220 @@ private fun ContactInfoRow(label: String, value: String, onCall: (() -> Unit)?) 
 }
 
 
-// ─────────────────────────────────────── 최근기록 탭 ───────────────────────────────────────
+// ─────────────────────────────────────── 통화이력 탭 ───────────────────────────────────────
 
+/** 통화이력 — 시안(통화이력.png): 헤더+필터 칩(전체/수신/발신/부재중)+일자 섹션+방향·통화시간.
+ *  삭제 = 행 좌로 스와이프(한 건) 또는 선택 모드(헤더 [선택]·행 길게 누름 → 체크+전체 선택+선택 삭제).
+ *  한번에 전체 지우기 버튼은 두지 않는다. */
 @Composable
 private fun RecentsScreen(
     store: CallLogStore,
     contacts: ContactStore,
-    onCall: (String) -> Unit,
+    myLine: String,
+    onCall: (String, Boolean) -> Unit,
 ) {
     var log by remember { mutableStateOf(store.all()) }
+    var filter by remember { mutableStateOf(0) }   // 0=전체 1=수신 2=발신 3=부재중
+    var selecting by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(setOf<CallEntry>()) }
+
+    fun exitSelect() { selecting = false; selected = emptySet() }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("최근기록", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.weight(1f))
-            if (log.isNotEmpty()) TextButton(onClick = { store.clear(); log = emptyList() }) { Text("지우기") }
+        ScreenHeader(
+            label = "CIMS", title = "통화이력",
+            subtitle = myLine.ifBlank { null },
+            trailing = {
+                if (log.isNotEmpty()) {
+                    Text(if (selecting) "취소" else "선택", color = Ct.TextDim, fontSize = 13.sp,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                            .clickable { if (selecting) exitSelect() else selecting = true }
+                            .padding(horizontal = 8.dp, vertical = 6.dp))
+                }
+            },
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("전체", "수신", "발신", "부재중").forEachIndexed { i, label ->
+                FilterPill(label, filter == i) { filter = i }
+            }
         }
-        if (log.isEmpty()) {
+        Spacer(Modifier.height(4.dp))
+
+        val shown = when (filter) {
+            1 -> log.filter { it.type == CallType.INCOMING }
+            2 -> log.filter { it.type == CallType.OUTGOING }
+            3 -> log.filter { it.type == CallType.MISSED }
+            else -> log
+        }
+
+        // 선택 모드 액션 행 — 전체 선택(현재 필터 결과 기준) + 선택 삭제.
+        if (selecting) {
+            val allSelected = shown.isNotEmpty() && selected.containsAll(shown)
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilterPill(if (allSelected) "전체 해제" else "전체 선택", allSelected) {
+                    selected = if (allSelected) selected - shown.toSet() else selected + shown
+                }
+                Spacer(Modifier.weight(1f))
+                val n = selected.size
+                Text("선택 삭제${if (n > 0) " ($n)" else ""}",
+                    color = if (n > 0) Ct.Red else Ct.TextFaint,
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = n > 0) {
+                            store.removeAll(selected); log = store.all(); exitSelect()
+                        }
+                        .padding(horizontal = 8.dp, vertical = 6.dp))
+            }
+        }
+
+        if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("최근 통화 기록이 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (log.isEmpty()) "통화 기록이 없습니다." else "해당하는 기록이 없습니다.", color = Ct.TextDim)
             }
         } else {
+            // 일자별 섹션 (오늘/어제/yyyy.MM.dd) — 기록이 최신순이라 섹션도 최신순.
+            val groups = shown.groupBy { dayLabel(it.time) }
             LazyColumn(Modifier.fillMaxSize()) {
-                items(log) { e ->
-                    RecentRow(e, contacts.nameFor(e.number), onClick = { onCall(e.number) })
-                    HorizontalDivider()
+                groups.forEach { (day, entries) ->
+                    item(key = "day:$day") { SectionLabel(day, Modifier.padding(top = 4.dp)) }
+                    items(entries, key = { "${it.time}:${it.number}:${it.type}" }) { e ->
+                        if (selecting) {
+                            RecentRow(e, contacts.nameFor(e.number),
+                                selecting = true, checked = e in selected,
+                                onClick = { selected = if (e in selected) selected - e else selected + e })
+                        } else {
+                            // 좌로 스와이프 → 한 건 삭제 (빨간 배경 + 휴지통, 개인 연락처와 동일 패턴)
+                            val dismissState = rememberSwipeToDismissBoxState(
+                                confirmValueChange = { v ->
+                                    if (v == SwipeToDismissBoxValue.EndToStart) {
+                                        store.remove(e); log = store.all(); true
+                                    } else false
+                                },
+                            )
+                            SwipeToDismissBox(
+                                state = dismissState,
+                                enableDismissFromStartToEnd = false,
+                                backgroundContent = {
+                                    Box(
+                                        Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(HANGUP_RED),
+                                        contentAlignment = Alignment.CenterEnd,
+                                    ) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "삭제",
+                                            tint = Color.White, modifier = Modifier.padding(end = 24.dp))
+                                    }
+                                },
+                            ) {
+                                Box(Modifier.background(Ct.Bg)) {
+                                    RecentRow(e, contacts.nameFor(e.number),
+                                        onClick = { onCall(e.number, e.video) },
+                                        onLongPress = { selecting = true; selected = setOf(e) })
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/** 이력 한 행 — 좌 아이콘 박스(발신=민트/부재중=적/영상=캠) + 이름·음성/영상 칩·일시 + 우 방향·통화시간.
+ *  [selecting]=선택 모드(맨 앞 체크 원, 탭=토글), [onLongPress]=길게 눌러 선택 모드 진입. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun RecentRow(e: CallEntry, name: String?, onClick: () -> Unit) {
-    val (glyph, glyphColor, missed) = when (e.type) {
-        CallType.OUTGOING -> Triple("↗", MaterialTheme.colorScheme.onSurfaceVariant, false)
-        CallType.INCOMING -> Triple("↙", MaterialTheme.colorScheme.onSurfaceVariant, false)
-        CallType.MISSED -> Triple("↙", HANGUP_RED, true)
+private fun RecentRow(
+    e: CallEntry,
+    name: String?,
+    selecting: Boolean = false,
+    checked: Boolean = false,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
+    val missed = e.type == CallType.MISSED
+    val (dirText, dirColor) = when (e.type) {
+        CallType.OUTGOING -> "↑발신" to Ct.Mint
+        CallType.INCOMING -> "↓수신" to Ct.TextDim
+        CallType.MISSED -> "부재중" to Ct.Red
     }
-    val typeLabel = when (e.type) {
-        CallType.OUTGOING -> "발신"; CallType.INCOMING -> "수신"; CallType.MISSED -> "부재중"
+    val iconTint = when (e.type) {
+        CallType.OUTGOING -> Ct.Mint
+        CallType.MISSED -> Ct.Red
+        else -> Ct.TextDim
     }
     Row(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(glyph, color = glyphColor, fontSize = 18.sp, modifier = Modifier.size(28.dp), textAlign = TextAlign.Center)
-        Spacer(Modifier.size(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(name ?: fmtNumber(e.number), style = MaterialTheme.typography.bodyLarge,
-                color = if (missed) HANGUP_RED else MaterialTheme.colorScheme.onSurface)
-            Text("$typeLabel · ${formatTime(e.time)}", style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (selecting) {
+            Box(
+                Modifier.size(22.dp).clip(CircleShape)
+                    .background(if (checked) Ct.Mint else Color.Transparent)
+                    .border(1.5.dp, if (checked) Ct.Mint else Ct.Border, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (checked) {
+                    Icon(Icons.Filled.Check, contentDescription = "선택됨",
+                        tint = Ct.OnMint, modifier = Modifier.size(14.dp))
+                }
+            }
+            Spacer(Modifier.width(10.dp))
         }
         Box(
-            Modifier.size(38.dp).clip(CircleShape)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
+                .background(when (e.type) {
+                    CallType.OUTGOING -> Ct.MintDim
+                    CallType.MISSED -> Ct.RedDim
+                    else -> Ct.SurfaceHi
+                })
+                .border(1.dp, iconTint.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Call, contentDescription = "전화", tint = CALL_GREEN, modifier = Modifier.size(18.dp))
+            Icon(if (e.video) Icons.Filled.Videocam else Icons.Filled.Call,
+                contentDescription = null, tint = iconTint, modifier = Modifier.size(19.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(name ?: fmtNumber(e.number), color = if (missed) Ct.Red else Ct.Text,
+                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                TagChip(if (e.video) "영상" else "음성", tint = if (e.video) Ct.Mint else Ct.TextDim)
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(logTime(e.time), color = Ct.TextFaint, fontSize = 12.sp)
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(dirText, color = dirColor, fontWeight = FontWeight.SemiBold, style = chipStyle(12))
+            Spacer(Modifier.height(3.dp))
+            Text(
+                if (e.durationSec > 0) "%02d:%02d".format(e.durationSec / 60, e.durationSec % 60) else "—",
+                color = Ct.TextFaint, fontSize = 12.sp,
+            )
         }
     }
 }
+
+/** 통화이력 일자 섹션 라벨 — 오늘/어제/yyyy.MM.dd. */
+private fun dayLabel(ts: Long): String {
+    val fmt = SimpleDateFormat("yyyy.MM.dd", Locale.KOREA)
+    val day = fmt.format(java.util.Date(ts))
+    val now = System.currentTimeMillis()
+    return when (day) {
+        fmt.format(java.util.Date(now)) -> "오늘"
+        fmt.format(java.util.Date(now - 86_400_000L)) -> "어제"
+        else -> day
+    }
+}
+
+/** 통화이력 행 일시 — 시안 표기(2026.06.30 09:41:23). */
+private fun logTime(ts: Long): String =
+    SimpleDateFormat("yyyy.MM.dd HH:mm:ss", Locale.KOREA).format(java.util.Date(ts))
 
 // ─────────────────────────────────────── 문자 탭 ───────────────────────────────────────
 
@@ -1634,13 +1794,25 @@ private fun CallScreen(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(44.dp))
         val (remote, stateLine) = when (val c = call) {
             is CallState.Incoming -> extractNumber(c.remote) to (if (c.video) "영상 수신 전화" else "수신 전화")
             is CallState.Outgoing -> extractNumber(c.remote) to (if (videoOn) "영상 발신 중…" else "발신 중…")
             is CallState.Active -> extractNumber(c.remote) to "통화 중"
             else -> "" to ""
         }
+        // 상단 중앙 — 상태 라벨(민트) + 이니셜 아바타 + 큰 번호 (수신 전체화면 참고 UX).
+        Text(stateLine, color = Ct.Mint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(20.dp))
+        Box(
+            Modifier.size(88.dp).clip(CircleShape).background(Ct.MintDim)
+                .border(1.dp, Ct.Mint.copy(alpha = 0.4f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(fmtNumber(remote).take(1).ifBlank { "?" }, color = Ct.Mint,
+                fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(18.dp))
         Text(fmtNumber(remote), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
@@ -1650,9 +1822,6 @@ private fun CallScreen(
             LaunchedEffect(Unit) { while (true) { delay(1000); elapsed++ } }
             Text("%02d:%02d".format(elapsed / 60, elapsed % 60),
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            Text(stateLine, style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
@@ -1892,6 +2061,13 @@ private fun countryCodeOf(msisdn: String): String? {
     return if (two in twoDigit) two else d.take(3)
 }
 
+/** 이름 + 전화번호 병기 (예: "테스트001 (01300000001)") — 키패드·통화이력 헤더 표기. */
+private fun myLine(config: SipAccountConfig): String = when {
+    config.displayName.isBlank() -> fmtNumber(config.msisdn)
+    config.msisdn.isBlank() -> config.displayName
+    else -> "${config.displayName} (${fmtNumber(config.msisdn)})"
+}
+
 /** 홈 국가코드(+82 등)와 같은 국제표기 번호는 로컬 표기(0…)로 축약. 타국 번호는 그대로. */
 private fun fmtNumber(number: String): String {
     val cc = homeCountryCode ?: return number
@@ -1910,30 +2086,12 @@ private fun requiredPermissions(): Array<String> = buildList {
     }
 }.toTypedArray()
 
-// 기본 전화앱(AOSP/Google 다이얼러) 팔레트 — 통화=밝은 초록, 종료/거절=구글 레드, 영상=구글 블루.
+// 통화 기능색 — 받기/통화=초록, 종료/거절=빨강, 영상=파랑 (전화 관습색은 유지, 그 외 톤은 Ct 토큰).
 private val CALL_GREEN = Color(0xFF00C853)
 private val HANGUP_RED = Color(0xFFEA4335)
 private val VIDEO_BLUE = Color(0xFF4285F4)
 private val FAV_GOLD = Color(0xFFF9A825)
 private val TOGGLE_ACTIVE = Color(0xFF5F6368)   // 음소거/스피커 토글 on (다이얼러 회색 강조)
-
-// 라이트/다크 테마 — 흰/검 배경 + 하단 내비 선택 필=연파랑 (일반 전화앱 스타일).
-private val PhoneLight = lightColorScheme(
-    primary = Color(0xFF1A73E8),
-    background = Color.White,
-    surface = Color.White,
-    surfaceVariant = Color(0xFFF1F3F4),
-    secondaryContainer = Color(0xFFDCE9FB),       // 내비 선택 필(연파랑)
-    onSecondaryContainer = Color(0xFF17324D),
-)
-private val PhoneDark = darkColorScheme(
-    primary = Color(0xFF8AB4F8),
-    background = Color(0xFF121212),
-    surface = Color(0xFF121212),
-    surfaceVariant = Color(0xFF2A2B2E),
-    secondaryContainer = Color(0xFF2A3B50),
-    onSecondaryContainer = Color(0xFFDCE9FB),
-)
 
 // DTMF 터치 톤 — 기본 다이얼러와 유사한 볼륨(0~100)/길이(ms).
 private const val DTMF_TONE_VOLUME = 80

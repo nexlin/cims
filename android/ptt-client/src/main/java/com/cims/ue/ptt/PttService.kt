@@ -33,6 +33,13 @@ class PttService : Service() {
     val controller: PttController? get() = _controller.value
     private var job: Job? = null
 
+    /** 화면 최상단 전역 상태 아이콘 배지(오버레이, PTT 아이콘=중앙 우측 — CIMS-Phone 전화 아이콘과
+     *  자리를 나눔). 아이콘만 표시하고 상태는 tint 색으로. main 스레드에서만 갱신. */
+    private val overlay by lazy {
+        com.cims.ue.core.ui.StatusIconOverlay(this, R.drawable.ic_ptt, xOffsetDp = 22)
+    }
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     inner class LocalBinder : Binder() {
         val service: PttService get() = this@PttService
     }
@@ -113,6 +120,7 @@ class PttService : Service() {
     fun stopSip() {
         controller?.shutdown()
         _controller.value = null
+        mainHandler.post { overlay.hide() }
         stopForegroundCompat()
         stopSelf()
     }
@@ -122,6 +130,17 @@ class PttService : Service() {
         c.onEvent = { e -> history.add(e.groupId, e.kind.name, e.peer, e.durationMs) }
         job = scope.launch {
             c.status.onEach { update("CIMS PTT", it) }.launchIn(this)
+            // 전역 상태 아이콘 배지 — 등록됨=초록/연결 중=황색/해제=회색/실패=적색 (CIMS-Phone 과 동일 색).
+            c.regState.onEach { reg ->
+                val color = when (reg) {
+                    is com.cims.ue.core.sip.RegState.Registered -> 0xFF00C853.toInt()
+                    com.cims.ue.core.sip.RegState.Registering,
+                    com.cims.ue.core.sip.RegState.Idle -> 0xFFF9A825.toInt()
+                    com.cims.ue.core.sip.RegState.Unregistered -> 0xFF9E9E9E.toInt()
+                    is com.cims.ue.core.sip.RegState.Failed -> 0xFFEA4335.toInt()
+                }
+                mainHandler.post { overlay.update(color, "PTT ${if (reg is com.cims.ue.core.sip.RegState.Registered) "가능" else "연결 안 됨"}") }
+            }.launchIn(this)
             // 수신 문자(SIP MESSAGE) → 인박스 영속 (그룹 fan-out 도 발신자 URI 로 도착 — 상대별 스레드)
             c.incomingMessage.onEach { im ->
                 if (im.contentType.startsWith("text/")) {
@@ -137,6 +156,7 @@ class PttService : Service() {
         job?.cancel()
         controller?.shutdown()
         _controller.value = null
+        mainHandler.post { overlay.hide() }
         super.onDestroy()
     }
 
