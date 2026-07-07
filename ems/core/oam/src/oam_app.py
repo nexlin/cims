@@ -755,6 +755,54 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[drift-sweep] error: {e}")
 
+        # ── HA 자동 동기화 스위퍼 (R4) ──────────────────────────────────
+        #  AS 그룹 × 스위치 ON 패키지의 STANDBY 를 실측 ACTIVE(heartbeat VIP 관측)
+        #  기준으로 자동 교정. 판정 불가·버전 불일치는 reconcile 내부에서 skip/보류.
+        #  컬렉션 정합은 agent proxy GET 비용이 있어 매 N 라운드마다만 포함.
+        AUTO_SYNC_SWEEP_INTERVAL = int(config.get('AutoSyncSweepSec', 60))
+        AUTO_SYNC_COLL_EVERY     = max(1, int(config.get('AutoSyncCollectionEvery', 5)))
+        _auto_sync_round = {'n': 0}
+        _observed_active: dict = {}   # gid → 마지막 확정 active_agent_id (절체 감지)
+
+        def _sweep_auto_sync():
+            try:
+                from services import ha_lookup
+                from handlers.agents import reconcile_group_package
+                _auto_sync_round['n'] += 1
+                include_colls = (_auto_sync_round['n'] % AUTO_SYNC_COLL_EVERY) == 0
+                for g in ha_lookup.ha_groups_all(config):
+                    if g.get('mode') != 'active_standby':
+                        continue
+                    gid = g.get('id')
+                    # 절체 감지 — 확정 판정 간 변화만 기록 (판정 불가(None)는 미갱신)
+                    obs = ha_lookup.vip_observation(config, g)
+                    active = obs['active_agent_id']
+                    prev = _observed_active.get(gid)
+                    if active is not None:
+                        if prev is not None and active != prev:
+                            logger.log_info(
+                                f"[auto-sync] HA 절체 감지 — group#{gid}"
+                                f"({g.get('name')}) agent#{prev} → agent#{active}")
+                        _observed_active[gid] = active
+                    for pkg_name in sorted(ha_lookup.packages_in_group(config, g)):
+                        if not ha_lookup.auto_sync_enabled(g, pkg_name):
+                            continue
+                        r = reconcile_group_package(
+                            config, g, pkg_name,
+                            include_collections=include_colls, actor='sweeper')
+                        if r['status'] == 'synced':
+                            logger.log_info(
+                                f"[auto-sync] group#{gid} pkg={pkg_name} 교정 — "
+                                f"keys={len(r['synced_keys']) + len(r['removed_keys'])} "
+                                f"colls={len(r['collections'])} "
+                                f"active=agent#{r['active_agent_id']} sync#{r['sync_id']}")
+                        elif r['deferred']:
+                            logger.log_info(
+                                f"[auto-sync] group#{gid} pkg={pkg_name} 보류 — "
+                                f"버전 불일치 {r['deferred']}")
+            except Exception as e:
+                logger.log_error(f"[auto-sync] error: {e}")
+
         # ── Metric JSONL retention purge sweeper ────────────────────────
         # heartbeat 2s × 다수 host → metrics/<id>/YYYY/MM/DD.jsonl 무한 누적.
         # retain_days 보다 오래된 일별 파일 삭제 (B 트랙 Phase 1 의 24h purge 설계 구현).
@@ -781,12 +829,15 @@ if __name__ == '__main__':
         logger.log_info(f"[sync-txn-sweep] interval={SYNC_TXN_SWEEP_INTERVAL}s")
         logger.log_info(f"[drift-sweep] interval={DRIFT_SWEEP_INTERVAL}s "
                         f"auto_resync={DRIFT_AUTO_RESYNC}")
+        logger.log_info(f"[auto-sync] interval={AUTO_SYNC_SWEEP_INTERVAL}s, "
+                        f"collections_every={AUTO_SYNC_COLL_EVERY} round(s)")
         logger.log_info(f"[metric-purge] retain={METRIC_RETAIN_DAYS}d, interval={METRIC_PURGE_INTERVAL}s")
         _last_sweep = 0
         _last_cert_sweep = 0
         _last_alert_sweep = 0
         _last_sync_txn_sweep = 0
         _last_drift_sweep = 0
+        _last_auto_sync_sweep = 0
         _last_metric_purge = 0
         while True:
             time.sleep(1)
@@ -806,6 +857,9 @@ if __name__ == '__main__':
             if _now - _last_drift_sweep >= DRIFT_SWEEP_INTERVAL:
                 _sweep_drift()
                 _last_drift_sweep = _now
+            if _now - _last_auto_sync_sweep >= AUTO_SYNC_SWEEP_INTERVAL:
+                _sweep_auto_sync()
+                _last_auto_sync_sweep = _now
             if _now - _last_metric_purge >= METRIC_PURGE_INTERVAL:
                 _sweep_metric_purge()
                 _last_metric_purge = _now

@@ -672,6 +672,33 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                                  'at': now_iso, 'job_id': job_id})
                 patches['install_history'] = hist[-10:]
             await asyncio.to_thread(_deploy_update, config, dep_id, patches)
+            # R4 자동 동기화 트리거 — upgrade/start/restart 성공 = 멤버 기동·버전 변경
+            # 시점. AS 그룹 + 스위치 ON 이면 ACTIVE 기준 즉시 정합 시도 (롤링 업그레이드
+            # 마지막 단계: STANDBY 가 같은 버전으로 올라오는 순간 ACTIVE 설정 자동 복사).
+            # 판정 불가·버전 불일치는 reconcile 내부에서 skip — 다음 스위퍼가 재시도.
+            if jt in ("upgrade", "start", "restart"):
+                def _auto_sync_after_event():
+                    try:
+                        from services import ha_lookup
+                        from handlers.agents import (_deploy_load, _enrich_deploy,
+                                                     reconcile_group_package)
+                        dep = _deploy_load(config, dep_id)
+                        if not dep:
+                            return
+                        _enrich_deploy([dep], config)
+                        pkg_name = dep.get('package_name')
+                        aid = dep.get('agent_id')
+                        if not pkg_name:
+                            return
+                        for grp in ha_lookup.ha_groups_for_package(config, pkg_name):
+                            if any(m.get('agent_id') == aid
+                                   for m in ha_lookup.members_of(grp)):
+                                reconcile_group_package(config, grp, pkg_name,
+                                                        include_collections=True,
+                                                        actor='post-job')
+                    except Exception:
+                        pass   # 정합은 스위퍼가 재시도 — job report 응답을 막지 않는다
+                await asyncio.to_thread(_auto_sync_after_event)
         elif dep_id and jt in ("stop", "uninstall"):
             new_status = "removed" if jt == "uninstall" else "stopped"
             await asyncio.to_thread(_deploy_update, config, dep_id,

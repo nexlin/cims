@@ -21,7 +21,9 @@ config-server 역할을 겸직하는 방식과 그 데이터 흐름을 명문화
 
 1. CSC file_store 를 **단일 SoT** 로 명문화. 모든 설정 변경이 CSC 를
    경유. install_path 의 on-disk 파일은 running CSP 가 읽는 캐시.
-2. HA 그룹의 **scope=service** collection 변경 시 모든 멤버에 자동 fan-out.
+2. 설정 저장(PUT)은 **항상 단일 deployment 대상** — AS 그룹의 멤버 간 정합은
+   동기화 스위치(기본 ON) + 자동 교정(실측 ACTIVE 기준, `reconcile_group_package`)이
+   맞춘다. scope=service 는 그 교정의 복사 대상/드리프트 판정 기준.
 3. **`SIGUSR1` 발송이 scalar / collection 양쪽 PUT 모두에서 동작**.
 
 ## 2. 데이터 모델
@@ -50,21 +52,18 @@ CSC 의 `_get/put_deployment_collection` (`csc/src/handlers/agents.py:1708,1737`
 
 `csp/config/config_template.json` 의 각 section / collection 에
 `"scope": "system" | "service"` 가 명시되어 있다. **이것이 SoT**.
+필드에 `scope` 를 주면 섹션 값을 오버라이드한다 — 유효 scope =
+`field.scope ?? section.scope ?? "service"`.
 
-| scope | 의미 | 분배 결정 | UI 위치 |
-|---|---|---|---|
-| `service` | 그룹 공통 — 항상 양 멤버 동일 | 모든 mode 에서 fan-out | 그룹 카드 (GroupServiceConfigModal) |
-| `system` | mode 따라 분배 — *멤버 분리가 필요할 때만* 분리 | active_standby → fan-out (서비스와 동일), all_active → 멤버별, standalone → 단일 | A/S 면 그룹 카드, AA 면 서버 카드 |
+| scope | 의미 | 역할 |
+|---|---|---|
+| `service` | 그룹 공통 — 멤버 간 동일해야 하는 값 | [HA 공통 설정] 탭 배치, 그룹 동기화 복사 대상, 불일치=드리프트 경고 |
+| `system` | 서버(노드)별 고유값 — bind IP·SystemId 등 | [서버 개별 설정] 탭 배치, 동기화로 절대 복사 안 됨 |
 
-csc 의 `_put_deployment_collection` (`csc/src/handlers/agents.py`) 가
-이 정의로 자동 fan-out 을 결정한다.
-
-UI 가 scope 메타로 자동 분류:
-- `ems/core/console/src/components/group/GroupServiceConfigModal.tsx:60` —
-  `scope === undefined || scope === 'service'` 만 표시.
-- `ems/core/console/src/components/module/ModuleConfigModal.tsx` —
-  scope=service collection 은 멤버 단일 모드에서 🔒.
-- A/S 그룹 + scope=system 은 ha_group 단위 보기 토글로 노출.
+scope 는 저장 시 전파를 결정하지 않는다 — 저장은 항상 단일 deployment 대상이며,
+`_sync_deployment_config`(`ems/core/oam/src/handlers/agents.py`)가 이 정의로
+동기화 복사 마스크와 드리프트 판정(`drift_sweeper`)을 결정한다.
+상세는 [oam_base_service_split.md](features/oam_base_service_split.md) §14.2/§14.6.
 
 ## 3. Push 흐름
 
@@ -96,7 +95,8 @@ UI 가 scope 메타로 자동 분류:
 | `GET /api/v1/deployments/{id}/config` | scalar config + template 반환 | `collections: {<name>: {records, schema}}` 통합 view 포함. |
 | `PUT /api/v1/deployments/{id}/config` | scalar 저장 + update_config job 큐잉 | job stdout 의 `signaled` 가 채워짐. |
 | `GET /api/v1/deployments/{id}/collections/{name}` | 해당 deployment + ha_group 멤버 records 비교. drift_detected / peers[] 포함. | records/schema 응답. |
-| `PUT /api/v1/deployments/{id}/collections/{name}` | records 저장 + ha_group fan-out (scope+mode 자동 결정). 응답에 sync_id / peers / propagated. body 의 `propagate_to_ha_peers` 로 override 가능. | `agents.py:_put_deployment_collection`. |
+| `PUT /api/v1/deployments/{id}/collections/{name}` | records 저장 — **이 deployment 의 agent 에만** (그룹 전파 없음). | `agents.py:_put_deployment_collection`. |
+| `POST /api/v1/deployments/{id}/sync` | 그룹 동기화 — source 의 scope=service 키/컬렉션을 지정 target 멤버들로 복사. 같은 패키지+같은 버전 가드(409). | `agents.py:_sync_deployment_config`. |
 
 ### 4.2 HA group 단위
 

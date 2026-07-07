@@ -403,8 +403,8 @@ export default function ServersPage() {
             )
           ) : selectedGroup ? (
             pageTab === 'config' ? (
-              // R2: 그룹 설정 편집 폐지 — 멤버별 설정을 나란히 비교하는 읽기 전용 뷰.
-              // 편집은 멤버 서버 선택 → 패키지 설정 탭 (필드별 🔗 동기화).
+              // 그룹 = 멤버별 설정 비교 + 명시적 [동기화] (기준 서버 → 나머지 복사).
+              // 편집은 멤버 서버 선택 → 패키지 설정 탭 (항상 그 서버에만 저장).
               <GroupConfigCompareView key={`${selectedGroup.id}:${packages.length > 0}`}
                 group={selectedGroup}
                 members={selectedGroup.members.map(m => ({
@@ -952,22 +952,30 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                               }}>{isMasterSel ? 'M' : 'B'}</span>
                       </td>
                       <td>
-                        {/* A/S = 실제 VIP 보유 (관측값) — [🔄 실측] 으로 health-check 후 채워짐. */}
+                        {/* A/S = 실제 VIP 보유. 기본은 heartbeat 관측(≤30s 지연, R4) —
+                            [🔄 실측] 은 sync health-check 로 즉시 재확인 (관측 override). */}
                         {(() => {
                           const o = vipObs[a.id]
                           if (o === 'active') return (
-                            <span title="VIP 실제 보유 — Active"
+                            <span title="VIP 실제 보유 — Active (실측)"
                                   style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● Active</span>)
                           if (o === 'standby') return (
-                            <span title="VIP 미보유 — Standby"
+                            <span title="VIP 미보유 — Standby (실측)"
                                   style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
                           if (o === 'fail') return (
                             <span title="점검 실패 — offline 또는 health-check 오류"
                                   style={{ fontSize: 11, color: '#c0392b' }}>✕</span>)
                           if (vipChecking) return (
                             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>…</span>)
+                          const hb = group.members.find(gm => gm.agent_id === a.id)?.vip_observed
+                          if (hb === true) return (
+                            <span title="VIP 실제 보유 — Active (heartbeat 관측, ≤30s 지연)"
+                                  style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● Active</span>)
+                          if (hb === false) return (
+                            <span title="VIP 미보유 — Standby (heartbeat 관측, ≤30s 지연)"
+                                  style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
                           return (
-                            <span title="미점검 — 상단 [🔄 실측] 버튼으로 확인"
+                            <span title="판정 불가 (heartbeat stale·VIP 미설정) — [🔄 실측] 으로 확인"
                                   style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>)
                         })()}
                       </td>

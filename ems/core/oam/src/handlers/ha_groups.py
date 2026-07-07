@@ -366,6 +366,8 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
                 break
         ha_json = _render_ha_for_agent(group, members, m['agent_id'], agent, peer, vip_bindings, config)
         params = {
+            # install_path 는 구 agent(flat 레이아웃) 호환용 잔재 — 신 agent 는 무시하고
+            # <prefix>/run/keepalived/ 에 기록한다 (agent job_update_ha 참조).
             "install_path": f"/opt/cims/{agent.get('name','agent')}",
             "ha_json": ha_json,
         }
@@ -378,9 +380,14 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
     """Dispatch /api/v1/ha-groups/* routes."""
     config = kwargs.get('config', {})
     from handlers.agents import _console_rbac
-    deny = _console_rbac(handler_args)   # GET=monitor+, 변이=admin (무인증 차단, 2026-06-10)
-    if deny: return deny
     parts = _path_parts(handler_args.full_path, _HA_GROUPS_BASE)
+    # 그룹×패키지 공통 설정/동기화 스위치 = operator+ (deployment config 와 동일 권한).
+    # 그 외: GET=monitor+, 변이=admin (무인증 차단, 2026-06-10).
+    if len(parts) > 1 and parts[1] == 'packages':
+        deny = _console_rbac(handler_args, read_role='operator', write_role='operator')
+    else:
+        deny = _console_rbac(handler_args)
+    if deny: return deny
     group_id = parts[0] if len(parts) > 0 else None
     sub      = parts[1] if len(parts) > 1 else None
     member   = parts[2] if len(parts) > 2 else None
@@ -435,6 +442,17 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
                 return await _put_group_collection(gid, member, handler_args, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
+        # 그룹×패키지 공통 설정 (R4) — /ha-groups/{gid}/packages/{pkg}/config|auto-sync
+        if sub == 'packages':
+            if not member:
+                return HandlerResult(status=400, body={'error': 'package name required'})
+            action = parts[3] if len(parts) > 3 else None
+            if action == 'config' and method == 'PUT':
+                return await _put_group_pkg_config(gid, member, handler_args, config)
+            if action == 'auto-sync' and method == 'PUT':
+                return await _put_group_auto_sync(gid, member, handler_args, config)
+            return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
         return HandlerResult(status=404, body={'error': 'Not Found'})
     except pymysql.IntegrityError as e:
         # uk_agent (1 agent = 1 group) / uk_vrid 위반 등
@@ -479,6 +497,16 @@ def _serialize_group(g: dict, config: dict) -> dict:
     out.setdefault('vip_bindings', [])
     # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
     out['failover_options'] = _normalize_failover_options(out.get('failover_options'))
+    # 실측 ACTIVE (R4) — heartbeat interfaces[] 의 VIP 보유 관측. 정적 role 과 별개로
+    # 콘솔이 실제 ACTIVE/STANDBY 를 상시 표시. AS 만 의미 (AA/SA 는 null 생략).
+    if out.get('mode') == 'active_standby':
+        from services import ha_lookup
+        obs = ha_lookup.vip_observation(config, g)
+        out['active_agent_id'] = obs['active_agent_id']
+        for m in out['members']:
+            m['vip_observed'] = obs['observed'].get(m.get('agent_id'))
+        # 패키지별 자동 동기화 스위치 (부재 = 기본 ON — 콘솔은 auto_sync[pkg] ?? true)
+        out['auto_sync'] = dict(out.get('auto_sync') or {})
     return out
 
 
@@ -804,6 +832,149 @@ async def _put_group_collection(gid: int, name: str, handler_args, config):
     overall_ok = all('error' not in r for r in results)
     return HandlerResult(status=200 if overall_ok else 207,
         body={'ok': overall_ok, 'members': results})
+
+
+# ════════════════════════════════════════════════════════════
+#  그룹×패키지 공통 설정 + 자동 동기화 스위치 (R4)
+# ════════════════════════════════════════════════════════════
+
+async def _put_group_pkg_config(gid: int, pkg_name: str, handler_args, config):
+    """그룹 공통(service) 설정 저장 — 콘솔 그룹 탭 편집기 (AS 그룹 전용).
+
+    body = { "values": {<key>: <value>, ...},   # 유효 scope=service 키만 (아니면 400)
+             "target_deployment_id"?: int,      # 스위치 OFF 의 멤버 선택 편집
+             "queue_update"?: bool }
+
+    스위치 ON:  target 없이 호출 — 전 멤버 overlay 에 merge (버전 혼재면 409).
+                target 지정은 400 — ON 상태의 멤버별 저장은 자동 교정이 곧 되돌리므로
+                편집 모델에서 배제 (스위치 OFF 후 수정하도록 안내).
+    스위치 OFF: target_deployment_id 필수 — 그 멤버에만 merge (업그레이드 창 편집).
+    """
+    from services import ha_lookup
+    from handlers.agents import (_enrich_deploy, _pkg_load, _safe_json,
+                                 _service_scope_keys, _coerce_list_fields,
+                                 _deploy_update, _enqueue_update_config_jobs)
+
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if g.get('mode') != 'active_standby':
+        return HandlerResult(status=409, body={'error': 'not_active_standby',
+            'hint': 'AA/standalone 은 그룹 공통 설정 편집이 없음 — 각 서버에서 편집'})
+
+    body = handler_args.body if isinstance(handler_args.body, dict) else {}
+    values = body.get('values')
+    if not isinstance(values, dict) or not values:
+        return HandlerResult(status=400, body={'error': 'values dict required'})
+    queue_update = body.get('queue_update', True)
+    target_id = body.get('target_deployment_id')
+    sync_on = ha_lookup.auto_sync_enabled(g, pkg_name)
+    if sync_on and target_id is not None:
+        return HandlerResult(status=400, body={'error': 'target_not_allowed_while_sync_on',
+            'hint': '멤버별 저장은 동기화 스위치 OFF 상태에서만'})
+    if not sync_on and target_id is None:
+        return HandlerResult(status=409, body={'error': 'target_required_while_sync_off',
+            'hint': '동기화 OFF — 편집할 멤버(target_deployment_id)를 선택'})
+
+    deps = await asyncio.to_thread(
+        ha_lookup.deployments_in_group_for_package, config, gid, pkg_name)
+    if not deps:
+        return HandlerResult(status=404, body={'error': 'package_not_deployed_in_group'})
+    _enrich_deploy(deps, config)
+
+    if target_id is not None:
+        targets = [d for d in deps if d.get('id') == int(target_id)]
+        if not targets:
+            return HandlerResult(status=404,
+                body={'error': 'target_not_in_group', 'deployment_id': target_id})
+    else:
+        # ON: 전 멤버 — 버전 혼재면 어느 템플릿 기준인지 모호 → 409 (스위치 OFF 유도)
+        vers = {d.get('package_version') for d in deps}
+        if len(vers) > 1:
+            return HandlerResult(status=409,
+                body={'error': 'version_mismatch', 'versions': sorted(v or '?' for v in vers),
+                      'hint': '버전 혼재 — 스위치 OFF 후 멤버별로 편집'})
+        targets = deps
+
+    # 키 검증 — 각 target 의 템플릿 기준 유효 scope=service 만 허용
+    saved = []
+    applied_keys: set = set()
+    for t in targets:
+        pkg = await asyncio.to_thread(_pkg_load, config, t.get('package_id')) or {}
+        template = pkg.get('config_template') if isinstance(pkg, dict) else None
+        allowed = _service_scope_keys(template)
+        bad = [k for k in values.keys() if k not in allowed]
+        if bad:
+            return HandlerResult(status=400,
+                body={'error': 'non_service_keys', 'keys': sorted(bad),
+                      'hint': 'scope=system(서버 개별) 키는 각 서버의 설정 탭에서'})
+        vals = _coerce_list_fields(template, dict(values)) if isinstance(template, dict) else dict(values)
+        cur = t.get('config')
+        if not isinstance(cur, dict):
+            cur = _safe_json(t.get('config_json')) or {}
+        new_overlay = {**cur, **vals}
+        updated = await asyncio.to_thread(_deploy_update, config, t['id'],
+                                          {'config': new_overlay})
+        if updated:
+            saved.append(updated)
+            applied_keys.update(vals.keys())
+
+    members, sync_id = [], None
+    if queue_update and saved:
+        _enrich_deploy(saved, config)
+        pkg = await asyncio.to_thread(_pkg_load, config, saved[0].get('package_id')) or {}
+        members, sync_id = await asyncio.to_thread(
+            _enqueue_update_config_jobs, config, saved, pkg,
+            op='group_config', actor='console',
+            note=f"group_config ha_group#{gid} pkg={pkg_name}"
+                 f"{f' target#{target_id}' if target_id is not None else ''}")
+
+    return HandlerResult(status=200, body={
+        'ok': True,
+        'applied_keys': sorted(applied_keys),
+        'sync_on': sync_on,
+        'members': members,
+        'sync_id': sync_id,
+    })
+
+
+async def _put_group_auto_sync(gid: int, pkg_name: str, handler_args, config):
+    """그룹×패키지 자동 동기화 스위치 (R4). body = {"enabled": bool}
+
+    ha_group.auto_sync[pkg] 영속 (부재 = 기본 ON). ON 전환 시 즉시 정합 1회 실행 —
+    ACTIVE 판정 불가·버전 혼재면 정합은 보류되고 사유가 응답에 담긴다 (스위퍼가
+    조건 충족 시 자동 재시도)."""
+    from services import ha_lookup
+    from handlers.agents import reconcile_group_package
+
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if g.get('mode') != 'active_standby':
+        return HandlerResult(status=409, body={'error': 'not_active_standby'})
+    body = handler_args.body if isinstance(handler_args.body, dict) else {}
+    if not isinstance(body.get('enabled'), bool):
+        return HandlerResult(status=400, body={'error': 'enabled bool required'})
+    enabled = body['enabled']
+
+    def _persist():
+        g2 = ha_lookup.ha_group_by_id(config, gid)
+        au = dict(g2.get('auto_sync') or {})
+        au[pkg_name] = enabled
+        g2['auto_sync'] = au
+        ha_lookup.save_group(config, g2)
+        return g2
+    g = await asyncio.to_thread(_persist)
+
+    reconcile = None
+    if enabled:
+        reconcile = await asyncio.to_thread(
+            reconcile_group_package, config, g, pkg_name,
+            include_collections=True, actor='switch-on')
+    return HandlerResult(status=200, body={
+        'ok': True, 'package': pkg_name, 'enabled': enabled,
+        'reconcile': reconcile,
+    })
 
 
 CIMS_HA_GROUPS_HANDLER_LIST = (

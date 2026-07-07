@@ -150,7 +150,7 @@ function pad2(n: number): string {
   return n.toString().padStart(2, '0')
 }
 
-function agentToServer(a: Agent, role: Role): ServerRow {
+function agentToServer(a: Agent, role: Role, vipObserved?: boolean | null): ServerRow {
   const status: ServerStatus =
     a.status === 'online' ? 'online'
     : a.status === 'offline' || a.status === 'error' ? 'offline'
@@ -159,6 +159,7 @@ function agentToServer(a: Agent, role: Role): ServerRow {
     id: a.id,
     name: a.name,
     role,
+    vipObserved,
     ip: a.ip_address,
     status,
     agent_version: a.agent_version,
@@ -168,6 +169,26 @@ function agentToServer(a: Agent, role: Role): ServerRow {
     serviceIpRows: (a.service_ip_rows ?? []) as ServiceIpRow[],
     routes: a.routes ?? [],
   }
+}
+
+// 실측 VIP 보유 뱃지 (R4, AS 만) — 정적 role(우선순위 설정)과 달리 절체를 반영
+// (agent heartbeat interfaces[] 관측, ≤30s 지연). null(판정 불가)은 미표시.
+function VipObservedBadge({ v, size = 9 }: { v?: boolean | null; size?: number }) {
+  if (v === true) return (
+    <span title="실측 ACTIVE — 현재 VIP 보유 (heartbeat 관측)"
+          style={{ fontSize: size, padding: '0 4px', borderRadius: 2,
+                   background: '#27ae60', color: '#fff', fontWeight: 700 }}>
+      ● ACT
+    </span>
+  )
+  if (v === false) return (
+    <span title="실측 STANDBY — VIP 미보유 (heartbeat 관측)"
+          style={{ fontSize: size, padding: '0 4px', borderRadius: 2,
+                   border: '1px solid #95a5a6', color: '#7f8c8d' }}>
+      ○ SBY
+    </span>
+  )
+  return null
 }
 
 // ── 토큰 만료 헬퍼 ──
@@ -299,7 +320,8 @@ export default function HaServicesPage() {
       const servers = members.map(m => {
         const a = agentMap.get(m.agent_id)
         if (!a) return null
-        return agentToServer(a, g.mode === 'active_standby' ? m.role : null)
+        return agentToServer(a, g.mode === 'active_standby' ? m.role : null,
+                             g.mode === 'active_standby' ? (m.vip_observed ?? null) : undefined)
       }).filter((s): s is ServerRow => s !== null)
       const agentIds = new Set(members.map(m => m.agent_id))
       const groupDeps = deployments.filter(d => agentIds.has(d.agent_id))
@@ -958,6 +980,7 @@ function SystemListItem({ svc, selected, expanded, onClickSystem, onToggleExpand
                   }}>
                     {srv.name}
                   </span>
+                  <VipObservedBadge v={srv.vipObserved} />
                   {srv.role && (
                     <span style={{ fontSize: 9, padding: '0 4px', borderRadius: 2,
                                    background: srv.role === 'master' ? '#e67e22' : '#7f8c8d', color: '#fff' }}>
@@ -1088,6 +1111,9 @@ function SystemDetail(p: SystemDetailProps) {
                       {srv.role}
                     </span>
                   )}
+                  <span style={{ marginLeft: 4 }}>
+                    <VipObservedBadge v={srv.vipObserved} size={10} />
+                  </span>
                 </td>
                 <td style={{ padding: '4px 8px', color: srv.ip ? '#333' : '#aaa' }}>
                   {srv.ip ?? '— (enroll 후 자동)'}
@@ -1262,6 +1288,7 @@ function ServerDetail(p: ServerDetailProps) {
             {srv.role}
           </span>
         )}
+        <VipObservedBadge v={srv.vipObserved} size={11} />
         <span style={{ color: STATUS_COLOR[srv.status], fontWeight: 'bold' }}>
           {STATUS_ICON[srv.status]} {srv.status}
         </span>

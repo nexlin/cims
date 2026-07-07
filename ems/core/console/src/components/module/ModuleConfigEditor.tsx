@@ -17,12 +17,14 @@ export type ModuleConfigEditorSource =
   | { type: 'module';     moduleName: string }
   // HA 그룹 단위 — fetch 는 첫 멤버, save 는 모든 멤버에 PUT.
   // R2(그룹 설정 편집 폐지) 이후 콘솔 미사용 — 백엔드 그룹 collection API 와 세트라 보존.
-  // 컬렉션 정합은 deployment source + 백엔드 scope 기반 자동 전파가 담당.
+  // 컬렉션 저장은 이 서버에만 — 그룹 정합은 그룹 [설정 비교]의 명시적 [동기화]로.
   | { type: 'group';      deploymentIds: number[] }
 
 interface Props {
   source: ModuleConfigEditorSource
   collection: ConfigTemplateCollection
+  // 저장 성공 직후 훅 — 그룹 설정 패널이 ON 상태에서 즉시 멤버 전파에 사용 (R4)
+  onSaved?: () => void | Promise<void>
 }
 
 // T2 (2026-05-18) drift 정보 응답 구조 — UI 가 ha_group 멤버 정합 표시용.
@@ -34,7 +36,7 @@ interface DriftInfo {
   scope?: string | null
 }
 
-function ModuleConfigEditorInner({ source, collection }: Props) {
+function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
   const { show } = useToast()
   const [records, setRecords]   = useState<Record_[]>([])
   const [original, setOriginal] = useState<Record_[]>([])
@@ -87,10 +89,9 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
     })
   }, [fields, source])
 
-  // source 분기 fetch/save
-  // T1/T2 (2026-05-18): csc 가 _put_deployment_collection 에서 자동 fan-out 함.
-  // group 케이스도 deployment 1개에만 PUT 하면 csc 가 ha_group 멤버 전체에 분배.
+  // source 분기 fetch/save — PUT 은 해당 deployment 에만 저장 (그룹 전파 없음).
   // GET 응답에 drift_detected / peers 가 포함되어 UI 가 양 멤버 정합 표시 가능.
+  // 멤버 간 정합은 그룹 [설정 비교] 뷰의 명시적 [동기화]로 맞춘다.
   const fetchCollection = useCallback(() => {
     if (source.type === 'deployment')
       return deploymentApi.getDeploymentCollection(source.deploymentId, collection.key)
@@ -104,7 +105,7 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
       return deploymentApi.putDeploymentCollection(source.deploymentId, collection.key, recs, true)
     }
     if (source.type === 'group') {
-      // csc 가 자동 fan-out → 첫 멤버만 PUT 해도 양 멤버 동기화됨.
+      // 미사용 경로 보존 — 첫 멤버에만 PUT (전파 없음).
       return deploymentApi.putDeploymentCollection(source.deploymentIds[0], collection.key, recs, true)
     }
     return deploymentApi.putModuleCollection(source.moduleName, collection.key, recs, true)
@@ -167,6 +168,7 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
       const r = await saveCollection(records)
       show(`${collection.title} 저장됨 (${r.count}개, signal: ${r.signaled.length ? r.signaled.join(',') : 'n/a'})`, 'ok')
       setOriginal(JSON.parse(JSON.stringify(records)))
+      if (onSaved) await onSaved()
     } catch (e) {
       show(`저장 실패: ${(e as Error).message}`, 'err')
     } finally {
@@ -227,7 +229,7 @@ function ModuleConfigEditorInner({ source, collection }: Props) {
               ({drift.peers.map(p => `dep#${p.deployment_id}: ${p.count ?? 'err'}건 (${p.hash.slice(0, 6) || '–'})`).join(' / ')})
             </span>
           )}
-          <span style={{ marginLeft: 8 }}>저장 시 자동으로 양 멤버에 동기화됩니다.</span>
+          <span style={{ marginLeft: 8 }}>정합은 그룹 선택 → [설정 비교] 뷰의 [동기화]로 맞춥니다.</span>
         </div>
       )}
       {!drift.detected && drift.peers.length > 1 && (

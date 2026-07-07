@@ -28,25 +28,26 @@ CIMS 설정은 두 종류이며 적용 경로가 다르다.
 
 ### A. 모듈 스칼라 설정 (csp.json/cmp.json) — `update_config`
 1. 콘솔 `PUT /deployments/{id}/config {config:{k:v}}`
-2. OAM: deployment 레코드에 값 저장(SoT) → `ha_lookup.should_propagate` 로 HA 멤버 결정
-3. 멤버별 `update_config` job + `sync_txn` 1건
+2. OAM: **이 deployment 레코드에만** 값 저장(SoT) — HA 전파 없음
+3. `update_config` job 1건
 4. agent `job_update_config`: `install_path/<pkg>/config.json` 재기록(버전 디렉터리) → 모듈 SIGUSR1 reload → ack
 
-### B. 컬렉션 (local_nodes/routes/sip_service…) — fan-out / `sync_config`
+### B. 컬렉션 (local_nodes/routes/sip_service…) — `sync_config`
 1. 콘솔 `PUT /deployments/{id}/collection/{name} {records:[...]}`
 2. OAM: config_template schema 검증 → SoT 저장 `modules/oam/runtime/<collection>/` **(버전 무관)**
-3. fan-out 대상 = `_COLLECTION_OWNER[col]` 모듈의 HA-group deployment 들 (scope 규칙)
-4. agent `PUT /collection`(push) 또는 `job_sync_config`(pull `/api/agent/csp-config/<col>`):
-   `install_path/config/<col>.jsonl` atomic write(버전 디렉터리) → SIGUSR1 → `sync_txn` ack
-5. GET 시 멤버 간 records hash 비교로 **drift 감지**
+3. agent `PUT /collection`(push) 또는 `job_sync_config`(pull `/api/agent/csp-config/<col>`):
+   `install_path/config/<col>.jsonl` atomic write(버전 디렉터리) → SIGUSR1 → ack —
+   **이 deployment 에만** (그룹 전파 없음)
+4. GET 시 멤버 간 records hash 비교로 **drift 감지**
 
-### HA 전파 규칙 (`should_propagate`)
-| scope | mode | 전파 |
-|---|---|---|
-| service | (any) | 항상 전 멤버 (그룹 공유) |
-| system | active_standby | 전파 (VIP, 양 노드 동일) |
-| system | all_active | 전파 안 함 (노드별 다른 값=정상) |
-| (any) | standalone | 단일 노드 |
+### HA 멤버 정합 — 자동 동기화 (스위치 + ACTIVE 기준 교정)
+저장은 A/B 모두 단일 deployment 대상이다. AS 그룹의 멤버 간 정합은 그룹×패키지
+동기화 스위치(기본 ON)가 켜져 있으면 `reconcile_group_package` 가 실측
+ACTIVE(heartbeat VIP 관측) 멤버 기준으로 STANDBY 의 유효 scope=service 키/컬렉션을
+자동 교정한다(스위퍼 주기 + job 성공 훅, 버전 가드). 그룹 공통 설정 편집은
+`PUT /ha-groups/{gid}/packages/{pkg}/config`. `ha_lookup.should_propagate` 는
+drift_sweeper 의 "동일해야 정상인 컬렉션" 판정에만 쓰인다.
+상세: oam_base_service_split.md §14.6.
 
 ### 업그레이드/롤백 시 설정 승계
 - 설치/업그레이드 시 agent 가 **직전 버전 디렉터리의 config(jsonl + `<pkg>/config.json`)를

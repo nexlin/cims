@@ -274,6 +274,9 @@ export interface ConfigTemplateField {
   ip_slot?: string                // 'SIP' / 'Admin' / 'RTP' 등 (자유 명명, 정렬 키)
   ip_port?: number                // 참고용 포트
   ip_proto?: 'tcp' | 'udp'
+  // 필드 레벨 scope 오버라이드 — 섹션 안에 공통값·노드별 값이 섞인 경우
+  // (예: csp media_server.LocalIp). 유효 scope = field.scope ?? section.scope.
+  scope?: ConfigScope
 }
 
 export interface ConfigTemplateSection {
@@ -300,24 +303,26 @@ export interface CollectionSchema {
 /**
  * scope — config 항목이 HA 그룹 멤버 간에 어떻게 분배되는지 표시.
  *
- *  "service" — 그룹 공통. 항상 양 멤버에 동일 값. 그룹 단위 일괄 편집.
- *              예: access_services, routes, rules, remote_nodes.
+ *  "service" — 그룹 공통이어야 하는 값 (타이머·정책·공유 DB·목적지 VIP·포트 번호 등).
+ *              [HA 공통 설정] 탭에 배치되고, 그룹 [설정 비교]의 명시적 [동기화]가
+ *              복사하는 대상. 불일치 = 드리프트 경고.
  *
- *  "system"  — 멤버 분리가 *필요할 때만* 분리. HA mode 따라 결정:
- *                ─ active_standby: 양 멤버 동일 (VIP 1개 + 동일 listener 정의) →
- *                                  실질적으로 "service" 처럼 fan-out
- *                ─ all_active:     멤버별 다른 svc IP 정상 → 멤버별 분리
- *                ─ standalone:     단일 멤버 — 분리 무의미
- *              예: local_nodes (bind_ip 가 VIP 일 수도 멤버 svc IP 일 수도).
+ *  "system"  — 서버(노드)별 고유값 (bind IP·자기 광고 주소·SystemId 등).
+ *              [서버 개별 설정] 탭에 배치되고, 동기화로 절대 복사되지 않는다.
  *
  *  undefined — 기본값 "service" (보수적 — 공통 가정. 명시 권장).
  *
- * 옛 정의 (~2026-05-18 이전): "system" = 무조건 멤버별 분리. A/S 모드에서도 멤버별
- *  편집을 강제하여 split-brain config 위험이 있었음. T4 (commit 후속) 에서 mode 인식
- *  으로 의미 재정의. csc 의 fan-out 결정 함수 (_put_deployment_collection) 가 동일
- *  룰로 동작.
+ * 저장(PUT config/collection)은 항상 단일 서버 대상 — scope 는 저장 시 전파 여부가
+ * 아니라 "탭 배치 + 동기화 복사 마스크 + 드리프트 판정" 을 결정한다. 섹션/컬렉션
+ * 단위가 기본이며, 필드에 scope 를 주면 섹션 값을 오버라이드한다 (effectiveScope).
  */
 export type ConfigScope = 'system' | 'service'
+
+// 필드 유효 scope — field.scope ?? section.scope, 기본 service.
+// 백엔드 handlers.agents._effective_scope 와 동일 규칙이어야 한다.
+export function effectiveScope(f: ConfigTemplateField, sectionScope?: ConfigScope): ConfigScope {
+  return f.scope ?? sectionScope ?? 'service'
+}
 
 export interface ConfigTemplateCollection {
   key: string
@@ -404,15 +409,14 @@ export interface DeploymentCreateInput {
   note?: string
 }
 
-// R2: dep 이 소속된 HA 그룹이 이 패키지를 호스팅할 때만 채워짐 (standalone = null).
-// sync_keys = ha_group.config_sync[pkg] (동기화 체크 영속) — null 이면 프론트가
-// scope=service 섹션 필드 기본 체크로 계산.
+// dep 이 소속된 HA 그룹이 이 패키지를 호스팅할 때만 채워짐 (standalone = null).
+// 콘솔이 그룹 컨텍스트 표시(공통/개별 탭 안내·설정 비교 링크·버전 가드)에 사용.
 export interface DeploymentConfigHa {
   group_id: number
   group_name: string
   mode: string
-  sync_keys: string[] | null
-  members: { deployment_id: number; agent_id: number; agent_name: string | null }[]
+  members: { deployment_id: number; agent_id: number; agent_name: string | null;
+             package_version: string | null }[]
 }
 
 export interface DeploymentConfigView {
@@ -528,22 +532,34 @@ export const deploymentApi = {
                install_path: string; version: string | null }>(
       `/deployments/${id}/rollback`, target || {}),
 
-  // deployment config (템플릿 기반)
+  // deployment config (템플릿 기반) — 저장은 항상 이 서버에만 (전파 없음).
+  //   구 백엔드(sync_keys 이전)와의 혼재 배포 대비 propagate_to_ha_peers=false 를
+  //   항상 명시 — 옛 백엔드의 레거시 통짜 전파 경로를 차단.
   getDeploymentConfig: (id: number) =>
     api.get<DeploymentConfigView>(`/deployments/${id}/config`),
-  // sync: R2 필드 단위 HA 동기화 — keys(변경∩체크: 피어에 merge 할 키. []=피어 무변경),
-  //   checked(체크 상태 전체: ha_group.config_sync 영속). 미전달=레거시(피어 통짜 전파).
-  putDeploymentConfig: (id: number, values: Record<string, unknown>, queue_update = true,
-                        propagate_to_ha_peers?: boolean,
-                        sync?: { keys: string[]; checked: string[] }) =>
-    api.put<{ ok: boolean; job_id: number | null; sync_keys_applied?: string[] | null }>(
+  putDeploymentConfig: (id: number, values: Record<string, unknown>, queue_update = true) =>
+    api.put<{ ok: boolean; job_id: number | null;
+              members: Array<{ deployment_id: number; agent_id: number; job_id: number }> }>(
       `/deployments/${id}/config`,
-      { config: values, queue_update,
-        ...(propagate_to_ha_peers !== undefined ? { propagate_to_ha_peers } : {}),
-        ...(sync ? { sync_keys: sync.keys, sync_checked: sync.checked } : {}) }),
+      { config: values, queue_update, propagate_to_ha_peers: false }),
+  // 그룹 설정 동기화 — 명시적 방향성 복사 (source=id → targets). 같은 패키지·
+  // 같은 버전만 허용(409 version_mismatch), keys 는 유효 scope=service 만 적용.
+  syncDeploymentConfig: (id: number, body: {
+    targets: number[]; keys?: string[]; collections?: string[]; queue_update?: boolean
+  }) =>
+    api.post<{
+      ok: boolean; source_deployment_id: number; ha_group_id: number
+      applied_keys: string[]; removed_keys: string[]; skipped_keys: string[]
+      members: Array<{ deployment_id: number; agent_id: number; job_id: number }>
+      collections: Array<{ name: string; ok: boolean; skipped?: string; count?: number
+                           peers?: Array<{ deployment_id: number; agent_id: number
+                                           status: number; ok: boolean; error?: unknown }> }>
+      sync_id: number | null
+    }>(`/deployments/${id}/sync`, body),
 
   // deployment collections (jsonl-on-target via agent sync REST).
-  // T1/T2 (2026-05-18) 이후 csc 가 ha_group 멤버 자동 fan-out + drift 정보.
+  // PUT 은 이 서버에만 저장 — 그룹 정합은 syncDeploymentConfig(collections)로.
+  // GET 은 멤버 hash 비교(drift_detected) 포함 — 비교 뷰/드리프트 배너용.
   getDeploymentCollection: (id: number, name: string) =>
     api.get<{
       records: Record<string, unknown>[];
@@ -559,21 +575,17 @@ export const deploymentApi = {
       `/deployments/${id}/collection/${name}`
     ),
   putDeploymentCollection: (id: number, name: string,
-                            records: Record<string, unknown>[], signal = true,
-                            propagate_to_ha_peers?: boolean) =>
+                            records: Record<string, unknown>[], signal = true) =>
     api.put<{
       ok: boolean; count: number; signaled: number[];
       peers?: Array<{ deployment_id: number; agent_id: number; status: number;
                       ok: boolean; count: number | null; signaled: number[];
                       error?: unknown }>;
-      ha_group_id?:   number | null;
-      ha_group_mode?: string | null;
-      scope?:         ConfigScope;
-      propagated?:    boolean;
-      sync_id?:       number | null;
+      scope?:      ConfigScope;
+      propagated?: boolean;
     }>(
       `/deployments/${id}/collection/${name}`,
-      { records, signal, ...(propagate_to_ha_peers !== undefined ? { propagate_to_ha_peers } : {}) }
+      { records, signal, propagate_to_ha_peers: false }
     ),
 
   // Phase 1 로컬 모듈 overlay 설정

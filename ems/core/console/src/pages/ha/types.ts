@@ -27,6 +27,9 @@ export interface ServerRow {
   id: number                    // = Agent.id (음수 = pending placeholder)
   name: string
   role: Role
+  // 실측 VIP 보유 (R4, AS 만) — heartbeat interfaces[] 관측 (≤30s 지연).
+  // role(우선순위 설정)과 달리 절체를 반영. true=ACTIVE / false=STANDBY / null=판정 불가
+  vipObserved?: boolean | null
   ip: string | null             // = Agent.ip_address (mgmt)
   status: ServerStatus
   agent_version: string | null

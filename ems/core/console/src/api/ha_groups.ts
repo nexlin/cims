@@ -8,6 +8,9 @@ export interface HaMember {
   agent_name?: string
   priority: number
   role: HaRole
+  // 실측 VIP 보유 (R4, AS 만) — heartbeat interfaces[] 관측.
+  // true=보유(ACTIVE) / false=미보유 / null=판정 불가(heartbeat stale·VIP 미정의)
+  vip_observed?: boolean | null
 }
 
 // HaServicesPage 의 VIP slot binding — group 단위. 멤버별 iface 자동 매핑 + 수동 override
@@ -56,9 +59,10 @@ export interface HaGroup {
   note?: string
   vip_bindings?: VipBinding[]
   failover_options?: FailoverOptions
-  // R2: 패키지별 설정 동기화 체크 상태 (deployments/{id}/config PUT 의 sync_checked 로
-  // 백엔드가 기록 — ha-groups PUT 로는 갱신하지 않는 콘솔 메타)
-  config_sync?: Record<string, string[]>
+  // 실측 ACTIVE (R4, AS 만) — 비-stale 멤버 중 정확히 1명이 VIP 보유일 때만 확정
+  active_agent_id?: number | null
+  // 패키지별 자동 동기화 스위치 — 부재 시 기본 ON (auto_sync[pkg] ?? true)
+  auto_sync?: Record<string, boolean>
   create_time?: string
   update_time?: string
   members: HaMember[]
@@ -94,4 +98,23 @@ export const haGroupsApi = {
   // VipPanel "[적용]" 진입점 — 데이터 변경 없이 멤버들에게 update_ha job 강제 큐잉
   apply: (id: number) =>
     api.post<{ group_id: number; jobs_queued: number }>(`/ha-groups/${id}/apply`, {}),
+
+  // ── 그룹×패키지 공통 설정 (R4) ──
+  // 스위치 ON: target 없이 — 전 멤버 적용. OFF: target_deployment_id 필수(멤버 선택 편집).
+  putGroupPkgConfig: (id: number, pkg: string, body: {
+    values: Record<string, unknown>; target_deployment_id?: number; queue_update?: boolean
+  }) =>
+    api.put<{ ok: boolean; applied_keys: string[]; sync_on: boolean
+              members: Array<{ deployment_id: number; agent_id: number; job_id: number }>
+              sync_id: number | null }>(
+      `/ha-groups/${id}/packages/${encodeURIComponent(pkg)}/config`, body),
+  // 자동 동기화 스위치 — ON 전환 시 즉시 정합 1회 (결과 reconcile 에 요약)
+  putGroupAutoSync: (id: number, pkg: string, enabled: boolean) =>
+    api.put<{ ok: boolean; package: string; enabled: boolean
+              reconcile: { status: string; reason: string | null
+                           active_agent_id: number | null
+                           synced_keys: string[]; removed_keys: string[]
+                           deferred: Array<{ deployment_id: number; package_version: string | null }>
+                           sync_id: number | null } | null }>(
+      `/ha-groups/${id}/packages/${encodeURIComponent(pkg)}/auto-sync`, { enabled }),
 }
