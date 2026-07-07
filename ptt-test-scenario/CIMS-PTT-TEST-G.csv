@@ -1,0 +1,15 @@
+﻿G-1: 통화 중 CSP 재시작,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+G-1-1,준비,통화 중,4명 JOIN 완료,정상 통화 중,CMP groups=1 sessions=4,CMP STATS 확인,,
+G-1-2,장애,CSP 재시작,통화 중,CSP 프로세스 kill → 재시작,CSP CallMap 소실 → CMP에 REMOVE 못 보냄,CSP 로그: 재시작,,CMP orphan 세션 발생
+G-1-3,대기,sweeper,CSP 재시작 후,120초 대기,CMP sweeper orphan 4개 세션 정리,CMP 로그: orphan_no_rtp reclaim x4,,reclaim.jsonl 확인
+G-1-4,확인,리소스 정리,sweeper 완료,CMP STATS 조회,sessions=0 / groups=0,CMP STATS 확인,,leak_reclaim_total 증가 확인
+G-1-5,재통화,정상 복구,CSP 재시작 완료,4명 재등록 + 재통화,정상 통화 가능,cspsim: REGISTERED x4,,
+,,,,,,,,
+G-2: 통화 중 CMP 재시작,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+G-2-1,준비,통화 중,4명 JOIN 완료,정상 통화 중,CMP groups=1,CMP STATS 확인,,
+G-2-2,장애,CMP 재시작,통화 중,CMP 프로세스 kill → 재시작,RTP relay 중단 + CSP CallMap 잔존,CMP 로그: 재시작,,CSP는 세션 있다고 생각하는 상태
+G-2-3,확인,CSP 누수,CMP 재시작 후,CSP에 HEARTBEAT 확인,CSP → CMP HEARTBEAT 재연결,CSP 로그: CmpClient TX HEARTBEAT,,
+G-2-4,확인,리소스 누수,CMP 재시작 후,CMP STATS 조회,sessions=0 (CMP 초기화됨),CMP STATS 확인,,CSP CallMap은 잔존 → 누수 위험
+G-2-5,재통화,정상 복구,기존 세션 정리 후,4명 재통화 시도,정상 통화 가능 여부 확인,cspsim: CALL STARTED,,

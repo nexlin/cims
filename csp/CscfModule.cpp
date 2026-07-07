@@ -239,8 +239,10 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     }
 
     SIP_CREDENTIAL_LIST::iterator itCL = pclsMessage->m_clsAuthorizationList.begin();
+    // realm = Request-URI host (실제 단말과 동일하게 네트워크 도메인 사용)
+    const std::string strRegRealm = pclsMessage->m_clsReqUri.m_strHost;
     if ( itCL == pclsMessage->m_clsAuthorizationList.end() ) {
-        return SendUnAuthorizedResponse( pclsMessage );
+        return SendUnAuthorizedResponse( pclsMessage, strRegRealm );
     }
 
     CspUser clsUser;
@@ -249,7 +251,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
-            SendUnAuthorizedResponse( pclsMessage, "", true );  // F-07: stale=true
+            SendUnAuthorizedResponse( pclsMessage, strRegRealm, true );  // F-07: stale=true
             return true;
         case E_AUTH_ERROR:
             SendResponse( pclsMessage, SIP_FORBIDDEN );
@@ -316,8 +318,13 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             const std::string &strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
             snprintf( szPAUri, sizeof( szPAUri ), "<sip:%s@%s>", strUser.c_str(), strRegDomain.c_str() );
             pclsResponse->AddHeader( "P-Associated-URI", szPAUri );
-            // P-Asserted-Identity (3GPP TS 24.229 §5.4.3.2) — 인증된 사용자 신원
-            pclsResponse->AddHeader( "P-Asserted-Identity", szPAUri );
+            // E.164 user ID 인 경우 user=phone URI 추가 (3GPP TS 24.229)
+            if( !strUser.empty() && strUser[0] == '+' ) {
+                char szPAUriPhone[512];
+                snprintf( szPAUriPhone, sizeof( szPAUriPhone ),
+                          "<sip:%s@%s;user=phone>", strUser.c_str(), strRegDomain.c_str() );
+                pclsResponse->AddHeader( "P-Associated-URI", szPAUriPhone );
+            }
         }
 
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );

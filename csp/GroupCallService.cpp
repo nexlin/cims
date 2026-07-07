@@ -964,6 +964,18 @@ void CGroupCallService::CheckGroupIntegrity() {
             if ( !bActive ) return;  // on-demand: active 세션 아니면 무동작
         }
 
+        // BYE 처리 중 race condition 방지: 5초 grace period 동안 재-INVITE 보류.
+        // 여러 멤버 BYE가 순차 처리되는 사이에 CheckGroupIntegrity가 끼어드는 것을 차단.
+        {
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            auto itTerm = m_mapGroupLastTerminate.find( group._id );
+            if ( itTerm != m_mapGroupLastTerminate.end() ) {
+                auto elapsed = std::chrono::steady_clock::now() - itTerm->second;
+                if ( elapsed < std::chrono::seconds( 5 ) ) return;
+                m_mapGroupLastTerminate.erase( itTerm );
+            }
+        }
+
         // 3) 컨텍스트 보장 (chat 최초 합류 시 생성; active on-demand 는 이미 존재)
         if ( !bHasContext ) {
             std::string ip;
@@ -1122,6 +1134,8 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
                 itRtp->second.strSessionCallId.clear();
             }
         }
+        // BYE 처리 시각 기록: CheckGroupIntegrity race condition 방지용 (5초 grace period)
+        m_mapGroupLastTerminate[strGroupId] = std::chrono::steady_clock::now();
         bFound = true;
     }
     // 2. lock 해제 후 외부 호출 (CMP, DB)

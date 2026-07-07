@@ -21,6 +21,8 @@
 
 #include "SipMessage.h"
 #include "SipStack.h"
+#include <vector>
+#include <utility>
 
 /**
  * @ingroup SipUserAgent
@@ -60,6 +62,9 @@ public:
 
 	/** P-Access-Network-Info 헤더 값 (비어있으면 추가 안함) */
 	std::string		m_strPAccessNetworkInfo;
+
+	/** Contact feature tag 목록 — {name, value} 쌍. value 빈 문자열이면 플래그 파라미터 */
+	std::vector<std::pair<std::string,std::string>> m_vecContactFeatureTags;
 
 	/** �α��� ���� �ð� (�ʴ���) */
 	int						m_iLoginTimeout;

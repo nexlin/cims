@@ -3,7 +3,7 @@
 **작성일:** 2026-06-22  
 **최종 수정:** 2026-06-29 (F-03, F-12 추가 / 런타임 검증 결과 추가)  
 **검토 기준:** RFC 3261, RFC 3903, RFC 4575, RFC 2046, RFC 3856, 3GPP TS 24.379, TS 24.380  
-**검증 아티팩트:** https://claude.ai/code/artifact/e7cd1c4d-3c70-4271-83e9-d65ab2f78c55
+**검증 아티팩트:** [standards_violation_review.html](standards_violation_review.html)
 
 ---
 
@@ -26,7 +26,7 @@
 | F-10 | CSP 로그 L49364 | ✅ 확인 | `entity="sip:g001@csp"`, `entity="sip:1001@csp"` (sip: URI) |
 | F-11 | CMP 소스 확인 | ✅ 확인 | `PMcpttGroup.cpp:61` `version_subtype = 0x80 \| (opcode & 0x1F)` |
 | F-12 | CSP 로그 L47748 | ✅ 확인 | `Expires: 600` (요청값 그대로 반환) |
-| F-13 | 코드 확인 | ⚠️ 코드만 | `CscfModule.cpp:501-507` 412 로직 확인. cspsim이 re-PUBLISH 미지원으로 런타임 미재현 |
+| F-13 | 런타임 확인 | ✅ 확인 | `tests/f13_if_match.py` PASS — 잘못된 ETag → 412, 올바른 ETag → 200 OK 확인 |
 | F-14 | CSP 로그 L57239 | ✅ 확인 | `Subscription-State: terminated;reason=timeout` 16건 (4세션×GMS+CMS) |
 | F-15 | CSP 로그 L48948 | ✅ 확인 | `a=mcptt-floor-request-uri:sip:g001@csp` in INVITE SDP |
 | F-16 | CSP 로그 L48872 | ✅ 확인 | `boundary=mcptt_6a41fdb5ce018d8c` (INVITE별 다른 suffix) |
@@ -166,10 +166,11 @@
 - **파일:** `csp/CscfModule.cpp`
 - **내용:** PUBLISH refresh/modify 시 SIP-If-Match 헤더 미검증 → 항상 initial PUBLISH로 처리
 - **위반:** RFC 3903 §4
-- **상태:** ✅ 수정 완료 (2026-06-29)
+- **상태:** ✅ 수정 완료 + 런타임 검증 PASS (2026-06-29)
   - `csp/CscfModule.cpp` 상단 — `s_mapEtag` (key=`userId:groupId`), `s_etagMutex` 추가
   - `RecvRequestPublish()` — SIP-If-Match 있으면 저장 ETag와 비교, 불일치 시 412 반환
   - affiliate 성공 시 ETag 저장·갱신, de-affiliate 시 ETag 삭제
+  - **런타임 검증:** `python3 tests/f13_if_match.py` — 잘못된 ETag → 412, 올바른 ETag → 200 OK + 새 ETag 발급 확인
 
 ---
 

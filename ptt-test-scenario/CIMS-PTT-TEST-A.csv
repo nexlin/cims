@@ -1,0 +1,22 @@
+﻿#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+A-1-1,1단계 IdMS,authreq,4명 DB 등록 완료,GET /idms/authreq (4명),4명 모두 200 OK,CSC 로그: authreq 200 OK x4,,
+A-1-2,1단계 IdMS,tokenreq,authreq 완료,POST /idms/tokenreq (4명),200 OK + access_token 발급,CSC 로그: tokenreq 200 OK x4,,
+A-1-3,2단계 REGISTER,Digest 챌린지,토큰 발급 완료,REGISTER CSeq:1 (4명),401 + nonce 응답,CSP 로그: 401 x4,,
+A-1-4,2단계 REGISTER,Digest 인증,401 수신 완료,REGISTER CSeq:2 + Authorization,200 OK + Expires:3600,CSP 로그: user inserted x4,,username=IMSI@domain 확인
+A-1-5,3단계 SUBSCRIBE,GMS 구독,REGISTER 완료,SUBSCRIBE gms_psi (4명),200 OK + 즉시 NOTIFY,CSP 로그: NOTIFY x4,,
+A-1-6,3단계 SUBSCRIBE,XCAP GET 그룹,NOTIFY 수신,GET /groups/.../g001,200 OK + 문서 수신 (2883B),CSC 로그: 200 OK,,g001·g002·g003 각각 확인
+A-1-7,3단계 SUBSCRIBE,XCAP 캐시,XCAP 200 완료,동일 URL 재요청 If-None-Match,304 Not Modified,CSC 로그: 304 x4,,ETag 동작 확인
+A-1-8,3단계 SUBSCRIBE,CMS 구독,GMS 완료,SUBSCRIBE cms_psi (4명),200 OK + service-config 200,CSC 로그: service-config 200 x4,,user-profile 404는 정상
+A-1-9,4단계 통화시작,PUBLISH affiliate,SUBSCRIBE 완료,PUBLISH affiliation (4명 → g001),200 OK + DB 기록,CSP 로그: affiliate x4,,
+A-1-10,4단계 통화시작,개시자 INVITE,affiliate 완료,1001 INVITE sip:g001@csp,ADD_PTT_GROUP + 포트 할당,CMP 로그: allocPttResource,,
+A-1-11,4단계 통화시작,fan-out INVITE,ADD_PTT_GROUP 완료,CSP → 1002·1003·1004 INVITE,3명 INVITE 수신 + 180 Ringing,CSP 로그: INVITE x3,,session=prearranged 확인
+A-1-12,4단계 통화시작,멤버 JOIN,fan-out 수신,1002·1003·1004 → 200 OK,JOIN_PTT_GROUP x4 (개시자 포함),CMP 로그: Member added total=4,,개시자도 JOIN 확인
+A-1-13,4단계 통화시작,Conference NOTIFY,JOIN 완료,멤버 상태 변경,4명 NOTIFY connected 수신,cspsim: CONF NOTIFY connected,,
+A-1-14,5단계 Floor,REQUEST→GRANT,4명 통화 중,1001 Floor REQUEST,GRANT + TAKEN 브로드캐스트,CMP 로그: GRANTED prio=1,,
+A-1-15,5단계 Floor,RTP 송수신,GRANT 완료,1001 RTP 전송,1002·1003·1004 relay 수신,cspsim: RTP STATS Packets>0,,
+A-1-16,5단계 Floor,녹음 시작,GRANT 완료,CMP 녹음 시작,seg_0001_audio.rtp.recording 생성,CMP 로그: Recording started,,
+A-1-17,5단계 Floor,RELEASE→IDLE,발화 완료,1001 Floor RELEASE,IDLE 브로드캐스트 + 파일 확정,CMP 로그: duration≈5000ms,,
+A-1-18,5단계 Floor,4명 로테이션,IDLE 상태,1002→1003→1004 순서 반복,seg_0001~0004 각각 생성,CMP 로그: seg_0001~0004,,
+A-1-19,6단계 종료,멤버 이탈,로테이션 완료,4명 BYE 전송,LEAVE_GROUP x4 + remaining=0,CMP 로그: Member left x4,,
+A-1-20,6단계 종료,세션 소멸,전원 이탈,REMOVE_GROUP 처리,포트 반납 + 세션 소멸,CMP 로그: freePttResource,,
+A-1-21,6단계 종료,리소스 정리,REMOVE_GROUP 완료,CMP STATS 조회,sessions=0 / groups=0 / ports_used=0,CMP STATS 확인,,

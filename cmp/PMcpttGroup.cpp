@@ -258,6 +258,23 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
              _groupId.c_str(), _floorOpName(msg.subtype), sessionId.c_str(), ip.c_str(), port,
              msg.priority(), msg.indicator() < 0 ? 0 : msg.indicator());
 
+    // 수신 Floor 메시지 Flow 기록 (UE → CMP) — REQUEST/RELEASE 만 (QUEUE_POS/ACK 노이즈 제외)
+    if (_logFlow && (msg.subtype == FLOOR_REQUEST || msg.subtype == FLOOR_RELEASE)) {
+        const char* opName = _floorOpName(msg.subtype);
+        int prio = 0;
+        {
+            PAutoLock lock(_mutex);
+            auto itP = _priorities.find(sessionId);
+            if (itP != _priorities.end()) prio = itP->second;
+        }
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d}",
+                 opName, sessionId.c_str(), senderSsrc, prio);
+        std::string label = std::string("FLOOR_") + opName;
+        _logFlow(_groupId, "ue", "cmp", "MCPTT", label.c_str(), detail);
+    }
+
     switch (msg.subtype) {
         case FLOOR_REQUEST:        handleFloorRequest(sessionId, senderSsrc, msg.indicator()); break;
         case FLOOR_RELEASE:        handleFloorRelease(sessionId, senderSsrc); break;

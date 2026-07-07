@@ -953,6 +953,12 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
         RemoveCallOwner( pszCallId );
         RemoveCallOwner( clsCallInfo.m_strPeerCallId.c_str() );
     } else {
+        // PTT 개시자(originator) BYE: AcceptCall 경로라 gclsCallMap 미등록.
+        // OnCallTerminated 미호출 시 m_mapCallSession에 1001 엔트리가 잔존 →
+        // 마지막 fan-out BYE 처리 시 bStillActive=true → REMOVE_PTT_GROUP 누락 →
+        // CheckGroupIntegrity 재-INVITE 폭주. 여기서 처리해야 정상 종료.
+        gclsGroupCallService.OnCallTerminated( pszCallId );
+
         std::string strCallId;
         if ( gclsTransCallMap.Select( pszCallId, strCallId ) ) {
             gclsUserAgent.SendNotify( strCallId.c_str(), iSipStatus );

@@ -7,6 +7,7 @@
 #include "SipStack.h"
 #include "SipMessage.h"
 #include <atomic>
+#include <map>
 #include <string>
 #include <vector>
 #include <mutex>
@@ -150,6 +151,7 @@ public:
     bool         m_bGmsSubscribed;
     bool         m_bCmsSubscribed;
     std::string  m_strAccessToken;      // CSC-1 bearer 토큰 캐시 (Phase 3C)
+    std::map<std::string, std::string> m_mapXcapEtag;  // URL → ETag 캐시 (앱 종료 시 초기화)
 
     // SUBSCRIBE 다이얼로그 정보
     std::string  m_strGmsCallId;

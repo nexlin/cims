@@ -166,6 +166,7 @@ THREAD_API RtpThreadFloorRecv(LPVOID lpParameter) {
     // TS 24.380 §8.2: 메시지 타입 = 5비트 subtype.
     unsigned char opcode = (unsigned char)buf[0] & 0x1F;
     pRtpThread->m_iLastFloorOp.store(opcode);
+    if (opcode == 1) pRtpThread->m_bGrantReceived.store(true);  // GRANTED(subtype=1, TS 24.380) — TAKEN이 즉시 덮어써도 보존
 
     const char* opName = "UNKNOWN";
     switch (opcode) {
