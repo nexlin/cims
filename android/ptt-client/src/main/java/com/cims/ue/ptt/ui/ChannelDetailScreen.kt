@@ -314,6 +314,10 @@ private fun MemberRow(
                     if (isMe) "$dispName (나)" else dispName,
                     color = nameColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 )
+                // 직함 (cims:user-title, CIMS 확장) — 이름 옆 보조 표기
+                member?.title?.let { t ->
+                    Text(t, color = if (dim) Ct.TextFaint else Ct.TextDim, fontSize = 11.sp)
+                }
                 // TS 24.481 user-priority (0~255 클수록 높음) — 값만 표기
                 member?.priority?.let { p ->
                     PillBadge("P$p", if (dim) Ct.TextFaint else Ct.Gray)

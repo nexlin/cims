@@ -95,6 +95,15 @@ def _group_uri(gid: str) -> str:
     return f"tel:{gid}"
 
 
+def _users_has_title(cur) -> bool:
+    """users.title(직함) 존재 여부 — migrate_users_title.sql 미적용 DB 허용."""
+    cur.execute(
+        "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='title'"
+    )
+    return cur.fetchone()['cnt'] > 0
+
+
 def load_shared_data(config):
     # Do not reassign global variables, modify them in place
     USERS.clear()
@@ -276,10 +285,11 @@ def load_shared_data(config):
                                                 if row.get('authorized_user_msisdn') else ""),
                             "members": []
                         }
-                    # 멤버 목록 + users 테이블에서 이름 조회 (group_id=surrogate → mcptt_group_id JOIN)
+                    # 멤버 목록 + users 테이블에서 이름·직함 조회 (group_id=surrogate → mcptt_group_id JOIN)
+                    title_col = ", u.title AS user_title" if _users_has_title(cur) else ""
                     cur.execute(
                         "SELECT g.mcptt_group_id AS mcptt_group_id, gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
-                        "       u.name AS user_name "
+                        f"       u.name AS user_name{title_col} "
                         "FROM ptt_group_members gm "
                         "JOIN ptt_groups g ON g.id = gm.group_id "
                         "LEFT JOIN ptt_subscriptions ps ON ps.id = gm.user_id "
@@ -295,7 +305,8 @@ def load_shared_data(config):
                             GROUPS[g_uri]['members'].append({
                                 "uri": m_uri, "name": m_name,
                                 "role": row.get('role') or "participant",
-                                "priority": row['priority'], "joined_at": ""
+                                "priority": row['priority'], "joined_at": "",
+                                "title": row.get('user_title') or ""
                             })
                     for uri in GROUPS:
                         logger.log_info(f"Loaded DB Group: {uri} ({len(GROUPS[uri]['members'])} members)")
@@ -322,7 +333,8 @@ def load_shared_data(config):
                             members.append({
                                 "uri": m_uri, "name": m_uri,
                                 "role": m.get('role', 'participant'),
-                                "priority": m.get('priority', 5), "joined_at": ""
+                                "priority": m.get('priority', 5), "joined_at": "",
+                                "title": m.get('title', '')
                             })
                     GROUPS[uri] = {
                         "display_name": data.get('name', 'Group'),
@@ -359,9 +371,10 @@ def refresh_group_members(group_id: str) -> bool:
         )
         with conn:
             with conn.cursor() as cur:
+                title_col = ", u.title AS user_title" if _users_has_title(cur) else ""
                 cur.execute(
                     "SELECT gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
-                    "       u.name AS user_name "
+                    f"       u.name AS user_name{title_col} "
                     "FROM ptt_group_members gm "
                     "JOIN ptt_groups g ON g.id = gm.group_id "
                     "LEFT JOIN ptt_subscriptions ps ON ps.id = gm.user_id "
@@ -376,7 +389,8 @@ def refresh_group_members(group_id: str) -> bool:
                     members.append({
                         "uri": m_uri, "name": row.get('user_name') or m_uri,
                         "role": row.get('role') or "participant",
-                        "priority": row['priority'], "joined_at": ""
+                        "priority": row['priority'], "joined_at": "",
+                        "title": row.get('user_title') or ""
                     })
         grp['members'] = members
         logger.log_info(f"refresh_group_members({group_id}): {len(members)} members")
@@ -743,18 +757,25 @@ def get_group_xml(group_uri):
   xmlns:cp="urn:ietf:params:xml:ns:common-policy"
   xmlns:ocp="urn:oma:xml:xdm:common-policy"
   xmlns:oxe="urn:oma:xml:xdm:extensions"
-  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0">
+  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
+  xmlns:cims="urn:cims:groupinfo:1.0">
   <list-service uri="{group_uri}">
     <display-name xml:lang="en-us">{group['display_name']}</display-name>
     <list>"""
-    
+
     for member in group['members']:
         xml += f"""
       <entry uri="{member['uri']}">
         <rl:display-name>{member['name']}</rl:display-name>
         <mcpttgi:on-network-required/>
         <mcpttgi:participant-type>{member.get('role', 'participant')}</mcpttgi:participant-type>
-        <mcpttgi:user-priority>{member.get('priority', 5)}</mcpttgi:user-priority>
+        <mcpttgi:user-priority>{member.get('priority', 5)}</mcpttgi:user-priority>"""
+        # 직함 — 3GPP 미정의 필드라 CIMS 전용 네임스페이스 확장으로 전달
+        # (<entry> 는 ##other lax 확장 허용, 표준 단말은 무시 — TS 24.481 정합)
+        if member.get('title'):
+            xml += f"""
+        <cims:user-title>{member['title']}</cims:user-title>"""
+        xml += """
       </entry>"""
 
     video_val = 'true' if group.get('video_enabled') else 'false'

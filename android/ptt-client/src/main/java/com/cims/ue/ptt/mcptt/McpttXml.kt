@@ -22,6 +22,9 @@ object McpttXml {
     const val NS_POC_LIST = "urn:oma:xml:poc:list-service"
     const val NS_AFFILIATION = "urn:3gpp:ns:mcpttAffiliation:1.0"
 
+    /** CIMS 확장 (직함 등 3GPP 미정의 필드 — `<entry>` 의 ##other lax 확장 지점 사용). */
+    const val NS_CIMS = "urn:cims:groupinfo:1.0"
+
     const val CT_MCPTT_INFO = "application/vnd.3gpp.mcptt-info+xml"
     const val CT_RESOURCE_LISTS = "application/resource-lists+xml"
     const val CT_AFFILIATION = "application/vnd.3gpp.mcptt-affiliation-command+xml"
@@ -86,7 +89,7 @@ object McpttXml {
         val members: List<GroupMember>,
     )
 
-    data class GroupMember(val uri: String, val displayName: String?, val participantType: String?, val userPriority: Int?)
+    data class GroupMember(val uri: String, val displayName: String?, val participantType: String?, val userPriority: Int?, val userTitle: String? = null)
 
     /** OMA POC `list-service` 그룹 문서 파싱 (TS 24.481 / `urn:oma:xml:poc:list-service`). */
     fun parseGroupDoc(xml: String): GroupDoc {
@@ -104,6 +107,7 @@ object McpttXml {
                     displayName = firstText(e, "display-name"),
                     participantType = firstTextNs(e, NS_GROUP_INFO, "participant-type"),
                     userPriority = firstTextNs(e, NS_GROUP_INFO, "user-priority")?.toIntOrNull(),
+                    userTitle = firstTextNs(e, NS_CIMS, "user-title"),
                 ),
             )
         }

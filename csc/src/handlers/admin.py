@@ -138,13 +138,18 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         return HandlerResult(status=500, body={'error': str(e)})
 
 
-def _has_email_column(cur) -> bool:
-    """Check whether users.email column exists (migration may not have run yet)."""
+def _has_user_column(cur, column: str) -> bool:
+    """Check whether users.<column> exists (migration may not have run yet)."""
     cur.execute(
         "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='email'"
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME=%s",
+        (column,)
     )
     return cur.fetchone()['cnt'] > 0
+
+
+def _has_email_column(cur) -> bool:
+    return _has_user_column(cur, 'email')
 
 
 async def _list_users(config):
@@ -155,8 +160,10 @@ async def _list_users(config):
         with conn.cursor() as cur:
             has_email = _has_email_column(cur)
             email_col = ", u.email" if has_email else ""
+            has_title = _has_user_column(cur, 'title')
+            title_col = ", u.title" if has_title else ""
             cur.execute(
-                f"SELECT u.id, u.name, u.login_id{email_col}, u.org_id, u.details, "
+                f"SELECT u.id, u.name, u.login_id{email_col}, u.org_id{title_col}, u.details, "
                 "u.create_time, u.update_time "
                 "FROM users u "
                 "ORDER BY u.id"
@@ -201,6 +208,8 @@ async def _list_users(config):
             for row in rows:
                 if not has_email:
                     row['email'] = ''
+                if not has_title:
+                    row['title'] = ''
                 row['create_time'] = _dt(row['create_time'])
                 row['update_time'] = _dt(row['update_time'])
                 row['reject_id']          = rejects_by_user.get(row['id'], [])
@@ -214,8 +223,10 @@ async def _get_user(person_id: str, config):
         with conn.cursor() as cur:
             has_email = _has_email_column(cur)
             email_col = ", email" if has_email else ""
+            has_title = _has_user_column(cur, 'title')
+            title_col = ", title" if has_title else ""
             cur.execute(
-                f"SELECT id, name, login_id{email_col}, org_id, details, create_time, update_time "
+                f"SELECT id, name, login_id{email_col}, org_id{title_col}, details, create_time, update_time "
                 "FROM users WHERE id=%s",
                 (person_id,)
             )
@@ -224,6 +235,8 @@ async def _get_user(person_id: str, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
             if not has_email:
                 row['email'] = ''
+            if not has_title:
+                row['title'] = ''
             row['create_time'] = _dt(row['create_time'])
             row['update_time'] = _dt(row['update_time'])
 
@@ -274,6 +287,7 @@ async def _create_user(body, config, payload=None):
     #   (콘솔 admin 계정은 OAM console_accounts(file_store) — 여기와 무관.)
     email      = body.get('email', '')
     org_id     = body.get('org_id', '')
+    title      = body.get('title', '')
     details    = body.get('details') or None
     login_id   = (body.get('login_id') or '').strip() or None
     passwd     = body.get('passwd') or None
@@ -286,6 +300,8 @@ async def _create_user(body, config, payload=None):
             vals = [name, login_id, passwd, org_id, details]
             if has_email:
                 cols.insert(1, 'email'); vals.insert(1, email)
+            if _has_user_column(cur, 'title'):
+                cols.append('title'); vals.append(title)
             placeholders = ', '.join(['%s'] * len(vals))
             cur.execute(
                 f"INSERT INTO users ({', '.join(cols)}, create_time, update_time) "
@@ -310,7 +326,7 @@ async def _update_user(person_id: str, body, config, payload=None):
     fields = []
     values = []
     # login_id/passwd = 단말(IdMS) 로그인 자격(가입자). 콘솔 admin 계정(OAM)과는 별개.
-    for col in ('name', 'login_id', 'passwd', 'email', 'org_id', 'details'):
+    for col in ('name', 'login_id', 'passwd', 'email', 'org_id', 'title', 'details'):
         if col in body:
             fields.append(f'{col}=%s')
             values.append(body[col])

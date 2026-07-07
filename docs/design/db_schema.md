@@ -25,7 +25,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 | 도메인 | 테이블 | 정의 파일 | 비고 |
 |---|---|---|---|
-| **가입자** | `users` | cims_schema.sql + migrate_add_email.sql | 개인 (name/email/org_id/details) |
+| **가입자** | `users` | cims_schema.sql + migrate_add_email.sql + migrate_users_title.sql | 개인 (name/email/org_id/title/details) — `title`=직함, GMS 그룹문서 `cims:user-title` 로 UE 전달 |
 | | `volte_subscriptions` | cims_schema.sql + migrate_voip_to_volte.sql | VoLTE MSISDN, SIP 인증, dnd/forward |
 | | `user_rejects` | cims_schema.sql | VoLTE 착신거부 목록 |
 | | `ptt_subscriptions` | cims_schema.sql + migrate_auth.sql + migrate_auth_id_dropped.sql | MCPTT ID, IMPI 인증 |

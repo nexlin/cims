@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS users (
     passwd      VARCHAR(128)          DEFAULT NULL COMMENT '단말/IdMS 로그인 비밀번호',
     email       VARCHAR(255) NOT NULL DEFAULT '' COMMENT '이메일',
     org_id      VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '소속 조직 코드 (organizations.code)',
+    title       VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '직함/직위 (그룹문서 cims:user-title 로 UE 전달)',
     details     TEXT                  DEFAULT NULL COMMENT '세부사항',
     create_time DATETIME              DEFAULT NULL,
     update_time DATETIME              DEFAULT NULL,

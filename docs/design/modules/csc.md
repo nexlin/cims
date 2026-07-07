@@ -481,12 +481,17 @@ XCAP 기반 그룹 관리.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<group xmlns="urn:oma:xml:poc:list-service">
+<group xmlns="urn:oma:xml:poc:list-service"
+  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
+  xmlns:cims="urn:cims:groupinfo:1.0">
   <list-service uri="sip:group_1000@ptt.csp">
     <display-name>작전 1팀</display-name>
     <list>
       <entry uri="sip:+82571900001@ptt.csp">
         <display-name>사용자1</display-name>
+        <mcpttgi:participant-type>chair</mcpttgi:participant-type>
+        <mcpttgi:user-priority>10</mcpttgi:user-priority>
+        <cims:user-title>팀장</cims:user-title>
       </entry>
       <entry uri="sip:+82571900002@ptt.csp">
         <display-name>사용자2</display-name>
@@ -495,6 +500,11 @@ XCAP 기반 그룹 관리.
   </list-service>
 </group>
 ```
+
+멤버 `<entry>` 의 이름·직함은 `users` 테이블(name/title)에서 채운다. `<cims:user-title>`(직함) 은
+3GPP 미정의 필드라 CIMS 전용 네임스페이스(`urn:cims:groupinfo:1.0`) 확장으로 전달한다 —
+`<entry>` 는 `##other` lax 확장을 허용하므로(TS 24.481/RFC 4826 resource-lists) 규격 적합이며,
+표준 단말은 무시한다. 직함이 빈 값이면 요소를 생략한다.
 
 ### 4.3 CMS (Configuration Management Service)
 

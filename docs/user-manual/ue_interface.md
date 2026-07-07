@@ -328,13 +328,15 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 <resource-lists xmlns="urn:ietf:params:xml:ns:resource-lists"
   xmlns:rl="urn:ietf:params:xml:ns:resource-lists"
   xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
-  xmlns:pocgi="urn:oma:xml:poc:list-service">
+  xmlns:pocgi="urn:oma:xml:poc:list-service"
+  xmlns:cims="urn:cims:groupinfo:1.0">
   <list-service uri="tel:+82571910001">
     <display-name xml:lang="en-us">Alpha그룹</display-name>
     <list>
       <entry uri="tel:+82571900001">
         <rl:display-name>테스트001</rl:display-name>
         <mcpttgi:user-priority>0</mcpttgi:user-priority>
+        <cims:user-title>팀장</cims:user-title>
       </entry>
       <entry uri="tel:+821030432632">
         <rl:display-name>관리자</rl:display-name>
@@ -348,6 +350,9 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
   </list-service>
 </resource-lists>
 ```
+
+`<cims:user-title>` = 구성원 직함(DB `users.title`). 3GPP 미정의 필드라 CIMS 전용
+네임스페이스(`urn:cims:groupinfo:1.0`) 확장으로 전달하며(빈 값이면 생략), 표준 단말은 무시한다.
 
 ### 3.3 PTT 그룹 통화 흐름
 
@@ -686,7 +691,8 @@ Authorization: Bearer <access_token>
 <?xml version="1.0" encoding="UTF-8"?>
 <resource-lists xmlns="urn:ietf:params:xml:ns:resource-lists"
   xmlns:rl="urn:ietf:params:xml:ns:resource-lists"
-  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0">
+  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
+  xmlns:cims="urn:cims:groupinfo:1.0">
   <list-service uri="tel:+82571910001">
     <display-name xml:lang="en-us">Alpha그룹</display-name>
     <list>
@@ -694,6 +700,7 @@ Authorization: Bearer <access_token>
         <rl:display-name>테스트001</rl:display-name>
         <mcpttgi:on-network-required/>
         <mcpttgi:user-priority>0</mcpttgi:user-priority>
+        <cims:user-title>팀장</cims:user-title>
       </entry>
       <entry uri="tel:+821030432632">
         <rl:display-name>관리자</rl:display-name>

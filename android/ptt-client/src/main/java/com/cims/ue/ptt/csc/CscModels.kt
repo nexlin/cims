@@ -27,6 +27,8 @@ data class GroupMember(
     val role: String,
     /** TS 24.481 user-priority (발언권 우선순위, 0~255 클수록 높음). */
     val priority: Int?,
+    /** 직함/직위 — CIMS 확장 `cims:user-title`(urn:cims:groupinfo:1.0, 3GPP 미정의). */
+    val title: String? = null,
 )
 
 /** TS 24.481 그룹 문서(list-service) — 채널 상세 화면용 요약. [GroupDoc.parse] 로 XML 에서 생성. */
@@ -48,6 +50,7 @@ data class GroupDoc(
         private val nameRe = Regex("<(?:\\w+:)?display-name[^>]*>(.*?)</(?:\\w+:)?display-name>")
         private val roleRe = Regex("<(?:\\w+:)?participant-type>\\s*(\\w+)")
         private val prioRe = Regex("<(?:\\w+:)?user-priority>\\s*(\\d+)")
+        private val titleRe = Regex("<(?:\\w+:)?user-title[^>]*>(.*?)</(?:\\w+:)?user-title>")
 
         private fun unescape(s: String) = s
             .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
@@ -62,6 +65,7 @@ data class GroupDoc(
                     name = nameRe.find(body)?.groupValues?.get(1)?.let { unescape(it.trim()) }?.ifBlank { null },
                     role = roleRe.find(body)?.groupValues?.get(1) ?: "participant",
                     priority = prioRe.find(body)?.groupValues?.get(1)?.toIntOrNull(),
+                    title = titleRe.find(body)?.groupValues?.get(1)?.let { unescape(it.trim()) }?.ifBlank { null },
                 )
             }.toList()
             // 그룹 display-name = <entry> 밖(list-service 직하) 첫 display-name
