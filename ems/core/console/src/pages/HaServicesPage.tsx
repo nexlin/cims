@@ -14,11 +14,12 @@
  *   packageIds      ← deployments.filter(...).map(d => d.package_id) (실배포 = 의도)
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { haGroupsApi, type HaGroup } from '../api/ha_groups'
 import { deploymentApi, type Agent, type SipPackage, type Deployment, type AgentMetric,
          type ServiceIpRow as ApiServiceIpRow } from '../api/deployment'
-import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigModal'
+import { GroupConfigCompareView } from '../components/group/GroupConfigCompareView'
+import Modal from '../components/Modal'
 import HealthCheckModal from '../components/HealthCheckModal'
 import MetricTrend from '../components/MetricTrend'
 import { summarizeApplyResult } from './ha/helpers'
@@ -223,6 +224,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 
 export default function HaServicesPage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   // ServersPage 의 [📋 상세 편집] 진입점 — ?group=<id> 로 자동 시스템 선택.
   const initialGroupId = (() => {
     const q = searchParams.get('group')
@@ -810,19 +812,22 @@ export default function HaServicesPage() {
         }}>{toast}</div>
       )}
 
-      {/* 그룹 서비스 설정 — scope=service collection 일괄 편집 (멤버 전체 동시 PUT). */}
-      {configModalFor && configModalFor.mode !== 'standalone' && (
-        <GroupServiceConfigModal
-          open={true}
-          onClose={() => setConfigModalFor(null)}
-          groupName={configModalFor.name}
-          members={configModalFor.servers.map(s => ({ id: s.id, name: s.name }))}
-          deployments={deployments}
-          packages={packages}
-          haMode={configModalFor.mode}
-          onApplied={async () => { await load() }}
-        />
-      )}
+      {/* 그룹 설정 비교 (R2) — 멤버별 설정값 읽기 전용 비교. 편집은 시스템/인프라 >
+          패키지 설정 탭 (셀 클릭 시 해당 서버로 딥링크). */}
+      {configModalFor && configModalFor.mode !== 'standalone' && (() => {
+        const g = haGroups.find(x => x.id === configModalFor.id)
+        if (!g) return null
+        return (
+          <Modal title={`${configModalFor.name} — 설정 비교`} onClose={() => setConfigModalFor(null)} fullscreen>
+            <GroupConfigCompareView
+              group={g}
+              members={configModalFor.servers.map(s => ({ id: s.id, name: s.name }))}
+              deployments={deployments}
+              packages={packages}
+              onSelectMember={(aid) => navigate(`/deploy/servers?agent=${aid}&t=config`)} />
+          </Modal>
+        )
+      })()}
 
       {/* 그룹 단위 실시간 점검 — 온라인 멤버를 한 모달에 동시 점검 */}
       {healthCheckGroup && (() => {
@@ -1033,7 +1038,7 @@ function SystemDetail(p: SystemDetailProps) {
                 title={p.canHealthCheck ? '온라인 멤버 동시 실시간 점검' : '온라인 멤버 없음'}>🩺 점검</button>
         {!isStandalone && (
           <button onClick={p.onOpenConfig} style={btnSecondary()}
-                  title="그룹 멤버 공통 서비스 설정">⚙ 설정</button>
+                  title="멤버별 설정값 비교 (읽기 전용) — 편집은 시스템/인프라 > 패키지 설정 탭">🔍 설정 비교</button>
         )}
         <button onClick={p.onDelete} style={btnDanger()}>삭제</button>
       </div>

@@ -68,7 +68,7 @@ def _db_conn():
         return pymysql.connect(
             host=_db_config.get('Host', '127.0.0.1'),
             port=int(_db_config.get('Port', 3306)),
-            user=_db_config.get('User', 'root'),
+            user=_db_config.get('User', 'cims'),
             password=_db_config.get('Password', ''),
             database=_db_config.get('Db', 'cims'),
             charset='utf8mb4',

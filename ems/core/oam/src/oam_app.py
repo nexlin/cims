@@ -180,7 +180,7 @@ if __name__ == '__main__':
             logger.log_error(f"OAM overlay failed: {e}")
         return c
 
-    from services       import flow_logger, logger as csc_logger, config_cache, alert_log
+    from services       import flow_logger, logger as csc_logger
     from handlers       import auth, recording
     from handlers.auth           import CIMS_AUTH_HANDLER_LIST
     # /users/me (본인 프로파일) = identity-plane, base 귀속(oam_base_service_split D8).
@@ -389,23 +389,6 @@ if __name__ == '__main__':
 
         DynamicRouteProc.set_request_hooks(pre=None, post=_post_hook)
 
-        # CSP 런타임 설정 캐시 (DB→mem→file). DB 장애 시 파일 캐시로 read-only 모드 작동.
-        _cache_path = config.get('ConfigCacheDir')
-        if _cache_path and not os.path.isabs(_cache_path):
-            _cache_path = os.path.normpath(os.path.join(_COMPONENT_ROOT, _cache_path))
-        if not _cache_path:
-            _cache_path = os.path.normpath(os.path.join(_COMPONENT_ROOT, 'cache'))
-        config['ConfigCacheDir'] = _cache_path
-        try:
-            _cc = config_cache.init_config_cache(config)
-            logger.log_info(
-                f"ConfigCache ready (read_only={_cc.is_read_only()}) dir={_cache_path} "
-                f"listeners={len(_cc.get_all('listener'))} trunks={len(_cc.get_all('trunk'))} "
-                f"routes={len(_cc.get_all('route'))} access={len(_cc.get_all('access'))}"
-            )
-        except Exception as _e:
-            logger.log_error(f"ConfigCache init failed: {_e}")
-
         # SSL certificates — 버전무관 runtime cert(modules/oam/runtime/cert) 우선 + self-heal.
         #   (버전 디렉터리 cert 만 있으면 버전업 시 평문→health-gate 롤백. _resolve_oam_cert 참조.)
         ssl_keyfile, ssl_certfile = _resolve_oam_cert()
@@ -470,7 +453,6 @@ if __name__ == '__main__':
 
         # ── BASE 공통 (모든 role) ──
         base_rules = _bind(CIMS_AUTH_HANDLER_LIST)
-        base_rules += _bind(CIMS_STATS_HANDLER_LIST)          # 노드 health/messages/leak
         base_rules += _bind(CIMS_BUILD_HANDLER_LIST)
         base_rules += _bind(CIMS_SERVICE_CONTROL_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_ADMIN_HANDLER_LIST)
@@ -507,9 +489,11 @@ if __name__ == '__main__':
             # 순서로 /api/v1/recordings 충돌 시 RECORDING 우선(현행 보존).
             admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
             admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
-            # 검증·service KPI(oam-svc 귀속).
+            # 검증·stats 전체(/api/v1/stats — health/subscribers/messages/leak + service KPI,
+            # oam-svc 귀속. 서비스 관측 데이터라 base 미등록 — role=base 는 게이트웨이 프록시).
             admin_server.add_dynamic_rules(
-                _bind(CIMS_VERIFICATION_HANDLER_LIST + CIMS_STATS_SERVICE_HANDLER_LIST))
+                _bind(CIMS_VERIFICATION_HANDLER_LIST + CIMS_STATS_HANDLER_LIST
+                      + CIMS_STATS_SERVICE_HANDLER_LIST))
         else:
             logger.log_info('[role] base — 서비스 핸들러(가입자/녹취/flow/검증/KPI) 미등록 '
                             '(독립 모듈/게이트웨이 프록시 귀속, P1+)')
@@ -567,7 +551,6 @@ if __name__ == '__main__':
             logger.log_warning(f"[self-reconcile] skip: {_e}")
 
         # ── Agent stale sweeper ─────────────────────────────────────────
-        from handlers.agents import _get_db as _agent_db_conn
         from handlers.agent_api import _AGENT_CERT_ROTATE_THRESHOLD_DAYS
         STALE_SEC = int(config.get('AgentStaleSec', 8))
         SWEEP_INTERVAL = int(config.get('AgentSweepIntervalSec', 2))
@@ -626,83 +609,24 @@ if __name__ == '__main__':
                 logger.log_error(f"[cert-sweep] error: {e}")
 
         # ── Alert sweeper ───────────────────────────────────────────────
-        from handlers.stats import _get_csp_stats, _get_cmp_stats, _get_db as _cims_db_conn
+        # 코어(emit/transition/서비스 규칙 평가)는 services.alarm_sweeper 공용.
+        # 서비스 계열(csp_down/cmp_down/db_down/rtp_high)은 oam-svc 소유
+        # (oam_base_service_split §4) — base 는 role=all(단일 프로세스)에서만 대행 평가하고,
+        # role=base 는 agent 계열(disk_high/module_down)만 평가한다(CSP/CMP probe·DB 미접속).
+        from services import alarm_sweeper
         ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
         ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
         _service_log = config.get('ServiceLogging', {}).get('Dir') \
             or config.get('ServiceLogDir', config.get('MsgLogDir', ''))
-        # _alert_open: { akey(code@mo_instance) : alarm_id }  — 활성 알람 추적.
-        _alert_open: dict = {}
-        if _service_log:
-            try:
-                restored = alert_log.compute_open_state(_service_log, days=30)  # {akey: alarm_id}
-                _alert_open.update(restored)
-                if restored:
-                    logger.log_info(f"[alarm] restored open state: {sorted(restored.keys())}")
-            except Exception as e:
-                logger.log_error(f"[alarm] restore failed: {e}")
+        # _alert_open: { akey(code@mo_instance) : alarm_id } — 자기 소유 계열만 추적.
+        _alert_open: dict = alarm_sweeper.restore_open_state(
+            _service_log, scope=('all' if role == 'all' else 'agent'), log=logger)
 
-        def _check_db():
-            try:
-                conn = _cims_db_conn(config)
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT 1")
-                    return True
-                finally:
-                    conn.close()
-            except Exception:
-                return False
+        _fmt = alarm_sweeper.fmt
 
-        class _Safe(dict):
-            def __missing__(self, k):  # 템플릿에 없는 키는 빈 문자열 (KeyError 방지)
-                return ''
-
-        def _fmt(tmpl: str, **kw) -> str:
-            return (tmpl or '').format_map(_Safe(kw))
-
-        # 표준 알람 이벤트 기록 (X.733/32.111 — code/severity/event_type/probable_cause/source/alarm_id).
-        def _emit_alarm(action, rule, mo_instance, detected_by, message, alarm_id):
-            from datetime import datetime as _dt
-            sev = 'cleared' if action == 'close' else rule.get('perceived_severity', 'warning')
-            rec = {
-                'ts': _dt.now().isoformat(timespec='seconds'),
-                'alarm_id': alarm_id,
-                'type': rule.get('type'), 'code': rule.get('code'),
-                'perceived_severity': sev, 'severity': sev,   # 'severity' 구 reader 호환
-                'event_type': rule.get('event_type'), 'probable_cause': rule.get('probable_cause'),
-                'source': {'mo_class': rule.get('mo_class'), 'mo_instance': mo_instance, 'detected_by': detected_by},
-                'action': action, 'message': message,
-            }
-            if rule.get('effect'):
-                rec['effect'] = rule['effect']
-            if rule.get('recommended_action'):
-                rec['recommended_action'] = rule['recommended_action']
-            alert_log.record_event(_service_log, rec)
-
-        # 활성식별 akey=(code@mo_instance). open 시 alarm_id 생성, close 가 동일 alarm_id 참조.
         def _transition(rule, mo_instance, detected_by, is_open, msg_open, msg_close):
-            akey = f"{rule.get('code')}@{mo_instance}"
-            was = akey in _alert_open
-            if is_open and not was:
-                alarm_id = f"{akey}@{int(time.time())}"
-                _alert_open[akey] = alarm_id
-                _emit_alarm('open', rule, mo_instance, detected_by, msg_open, alarm_id)
-                logger.log_info(f"[alarm] OPEN {akey} sev={rule.get('perceived_severity')} — {msg_open}")
-            elif not is_open and was:
-                alarm_id = _alert_open.pop(akey)
-                _emit_alarm('close', rule, mo_instance, detected_by, msg_close, alarm_id)
-                logger.log_info(f"[alarm] CLEAR {akey}")
-
-        def _eval_alert_rule(rule: dict, ctx: dict) -> bool:
-            chk = rule.get('check')
-            if chk == 'process_down':
-                return not bool(ctx.get(rule.get('target')))
-            if chk == 'db_down':
-                return not ctx.get('db_ok')
-            if chk == 'rtp_pct_gte':
-                return ctx.get('rtp_pct', 0) >= int(rule.get('threshold', ALERT_RTP_THRESHOLD))
-            return False
+            alarm_sweeper.transition(_alert_open, _service_log, rule, mo_instance,
+                                     detected_by, is_open, msg_open, msg_close, log=logger)
 
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
                              deps: list, proc_down_targets: set) -> list:
@@ -774,23 +698,17 @@ if __name__ == '__main__':
 
         def _sweep_alerts():
             try:
-                csp = _get_csp_stats(config)
-                cmp = _get_cmp_stats(config)
-                db_ok = _check_db()
-                total = cmp.get('rtp_ports_total', 0) or 0
-                used = cmp.get('rtp_ports_used', 0) or 0
-                pct = int(round(used / total * 100)) if total > 0 else 0
-                ctx = {'csp': csp, 'cmp': cmp, 'db_ok': db_ok, 'rtp_pct': pct}
                 rules = service_registry.alert_rules(config)   # 표준 정규화됨
                 svc_rules   = [r for r in rules if r.get('scope') != 'agent']
                 agent_rules = [r for r in rules if r.get('scope') == 'agent']
-                for r in svc_rules:
-                    thr = r.get('threshold', ALERT_RTP_THRESHOLD)
-                    mo = r.get('mo_instance') or f"cims/{r.get('target', '')}"
-                    msg_open = _fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr)
-                    msg_close = _fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr)
-                    _transition(r, mo, 'oam', _eval_alert_rule(r, ctx), msg_open, msg_close)
+                # 서비스 계열 — 분리 배포(role=base)에서는 oam-svc sweeper 가 발화
+                # (detected_by='oam-svc'). 여기서는 role=all 대행만.
+                if role == 'all' and svc_rules:
+                    alarm_sweeper.sweep_service_rules(
+                        config, _alert_open, _service_log,
+                        detected_by='oam', rtp_threshold=ALERT_RTP_THRESHOLD, log=logger)
                 if agent_rules:
+                    # process_down 대상(csp/cmp)은 module_down 중복 alarm 제외 기준으로만 사용.
                     proc_down_targets = {(r.get('target') or '').lower()
                                          for r in svc_rules if r.get('check') == 'process_down'}
                     _sweep_agent_alerts(agent_rules, proc_down_targets)

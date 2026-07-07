@@ -31,7 +31,7 @@ def _get_db(config: dict):
     return pymysql.connect(
         host=db.get('Host', '127.0.0.1'),
         port=int(db.get('Port', 3306)),
-        user=db.get('User', 'root'),
+        user=db.get('User', 'cims'),
         password=db.get('Password', ''),
         database=db.get('Db', 'cims'),
         charset='utf8mb4',
@@ -132,8 +132,12 @@ def _load_active_states(config: dict, kind: str) -> list:
 def _get_cmp_stats(config: dict) -> dict:
     """CMP에 stats 요청 (3s 캐시)."""
     def probe():
-        cmp_ip = config.get('CmpIp', '127.0.0.1')
-        cmp_port = int(config.get('CmpPort', 9000))
+        cmp_ip = config.get('CmpIp')
+        if cmp_ip:
+            cmp_port = int(config.get('CmpPort', 9000))
+        else:
+            # CmpIp 미설정(콘솔 관리 oam-svc 설정) — MediaServer.Endpoints 첫 노드를 대표 probe.
+            cmp_ip, cmp_port = _media_endpoints(config)[0]
         resp = _udp_request(cmp_ip, cmp_port, {
             "trans_id": int(time.time()) % 100000,
             "payload": {"cmd": "STATS_REQUEST"}
@@ -145,10 +149,26 @@ def _get_cmp_stats(config: dict) -> dict:
 
 
 def _media_endpoints(config: dict):
-    """전 미디어 노드 (ip, port). MediaServer.Endpoints 우선, 없으면 CmpIp 단일."""
+    """전 미디어 노드 (ip, port). MediaServer.Endpoints 우선, 없으면 CmpIp 단일.
+    Endpoints 원소는 {ip, port} dict(oam.json) 또는 "ip:port" 문자열
+    (oam-svc config_template string_list) 둘 다 허용."""
     ms = config.get('MediaServer', {}) or {}
     eps = ms.get('Endpoints') or []
-    out = [(e.get('ip'), int(e.get('port', 9000))) for e in eps if e.get('ip')]
+    # 최상위 값이 콤마 문자열이면 리스트로 분해 — string_list 가 배열로 정규화되지 않고
+    # 들어온 경우에도 문자 단위 순회로 깨지지 않게 방어. (예: "a:9000, b:9000")
+    if isinstance(eps, str):
+        eps = [s.strip() for s in eps.split(',') if s.strip()]
+    out = []
+    for e in eps:
+        if isinstance(e, str):
+            ip, _, port = e.partition(':')
+            if ip.strip():
+                try:
+                    out.append((ip.strip(), int(port.strip() or 9000)))
+                except ValueError:
+                    pass
+        elif isinstance(e, dict) and e.get('ip'):
+            out.append((e['ip'], int(e.get('port', 9000))))
     if not out:
         out = [(config.get('CmpIp', '127.0.0.1'), int(config.get('CmpPort', 9000)))]
     return out
@@ -342,17 +362,28 @@ def _get_dashboard_counts(config: dict) -> dict:
 async def _health(config: dict) -> HandlerResult:
     # csp/cmp UDP probe + DB 체크를 thread 로 병렬 — 이벤트 루프 비블로킹(down 서버 timeout 이
     # 다른 요청을 막지 않도록). 캐시(_cached)와 함께 /stats/health 지연 대폭 감소.
-    csp, cmp, db_ok, counts = await asyncio.gather(
+    # CMP 는 전 미디어 노드 집계(AA 다중 노드) — up = any 노드 응답, 카운터는 전 노드 합산.
+    csp, media, db_ok, counts = await asyncio.gather(
         asyncio.to_thread(_get_csp_stats, config),
-        asyncio.to_thread(_get_cmp_stats, config),
+        asyncio.to_thread(_all_media_stats, config),
         asyncio.to_thread(_check_db_health, config),
         asyncio.to_thread(_get_dashboard_counts, config),
     )
+    nodes = [nd.get('stats') or {} for nd in media]
+    cmp = {}
+    if any(nodes):
+        _sum_keys = ('sessions', 'groups',
+                     'rtp_ports_total', 'rtp_ports_used', 'rtp_ports_free',
+                     'ptt_rtp_ports_total', 'ptt_rtp_ports_used', 'ptt_rtp_ports_free',
+                     'session_timeout', 'leak_reclaim_total',
+                     'leak_reclaim_orphan', 'leak_reclaim_hold')
+        cmp = {k: sum((s.get(k, 0) or 0) for s in nodes) for k in _sum_keys}
+        cmp['orphan_reclaim_sec'] = max((s.get('orphan_reclaim_sec', 0) or 0) for s in nodes)
 
     result = {
         'health': {
             'csp': 'up' if csp else 'down',
-            'cmp': 'up' if cmp else 'down',
+            'cmp': 'up' if any(nodes) else 'down',
             'db': 'up' if db_ok else 'down',
         },
         'csp': {

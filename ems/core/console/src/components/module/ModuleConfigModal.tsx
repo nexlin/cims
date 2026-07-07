@@ -4,10 +4,12 @@ import { useToast } from '../Toast'
 import {
   deploymentApi,
   type Deployment, type ConfigTemplate, type ConfigTemplateField,
+  type DeploymentConfigHa,
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
+import StringListInput from './StringListInput'
 
-export type FieldValue = string | number | boolean | null
+export type FieldValue = string | number | boolean | null | string[]
 type Tab = 'scalar' | string   // 'scalar' = sections 탭, 나머지는 collection.key
 
 export type ModuleConfigSource =
@@ -20,19 +22,19 @@ interface Props {
   onDone?: () => void | Promise<void>
   // true 면 Modal 오버레이 없이 패널만 렌더 (시스템/인프라 [패키지 설정] 탭의 페이지 임베드).
   inline?: boolean
-  // standalone 노드(HA 그룹 미소속): scope=service 섹션을 그룹 설정에서 편집할 수 없으므로
-  // per-deployment 설정 탭에서도 노출한다. 그룹 멤버는 false (그룹 서비스 설정이 소유).
-  forceServiceScope?: boolean
 }
 
 /**
  * 모듈 설정 모달 — deployment 모드 (배포 > 서버) / module 모드 (빌드 · 검증 > 모듈관리) 공용.
  *
  *  - deployment 모드: agent_deployment 레코드 대상. PUT → DB + update_config job.
+ *    모든 섹션·컬렉션을 이 화면에서 편집 (그룹/서버 이원화 폐지 — R2). HA 그룹 멤버면
+ *    필드별 🔗 동기화 체크박스 — 체크+변경된 필드만 저장 시 그룹 멤버 전체에 전파,
+ *    체크 상태는 ha_group.config_sync 에 영속 (기본값: scope=service 섹션 필드 ON).
  *  - module 모드:     Phase 1 로컬. PUT → build/dist/config.json (scalar) /
  *                     build/dist/{name}/config/*.jsonl (collection) + 로컬 PID SIGUSR1.
  */
-export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline, forceServiceScope }: Props) {
+export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline }: Props) {
   // 부모(ServersPage 등)가 주기 폴링으로 재렌더하며 source 객체를 매번 새로 만들면
   // fetch/editor 의 useEffect 가 재실행돼 편집값이 서버 값으로 덮어써진다 —
   // mount 시점 스냅샷으로 identity 고정 (모듈 전환은 caller 가 key 로 리마운트).
@@ -45,6 +47,9 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
   const [initial, setInitial]     = useState<Record<string, FieldValue>>({})
   const [appliedAt, setAppliedAt] = useState<string | null>(null)
   const [tab, setTab]             = useState<Tab>('scalar')
+  // HA 동기화 (deployment 모드 + HA 그룹 멤버일 때만) — ha=null 이면 체크박스 미노출.
+  const [ha, setHa]               = useState<DeploymentConfigHa | null>(null)
+  const [syncChecked, setSyncChecked] = useState<Set<string>>(new Set())
 
   // 제목/식별자
   const title = source.type === 'deployment'
@@ -71,6 +76,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
         template: r.template,
         config:   r.config || {},
         appliedAt: r.config_applied_at,
+        ha:       r.ha ?? null,
       }
     }
     const r = await deploymentApi.getModuleConfig(source.name)
@@ -78,6 +84,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
       template:  r.template,
       config:    r.current || {},
       appliedAt: null,
+      ha:        null,
     }
   }, [source])
 
@@ -85,8 +92,17 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
   const saveConfig = useCallback(async (vals: Record<string, FieldValue>,
                                         changedKeys: Set<string>) => {
     if (source.type === 'deployment') {
-      const r = await deploymentApi.putDeploymentConfig(source.deployment.id, vals, true)
-      return { ok: true, message: r.job_id ? `저장됨. update_config job #${r.job_id}` : '저장됨' }
+      // sync.keys = 변경∩체크 (피어에 merge 할 키만 — 체크됐지만 안 바뀐 필드는 미전파,
+      // 잔여 드리프트는 그룹 비교 뷰가 경고로 노출). standalone(ha 없음)은 빈 배열 —
+      // 항상 sync 를 보내 레거시 통짜 전파 경로를 쓰지 않는다.
+      const sync = ha
+        ? { keys: [...changedKeys].filter(k => syncChecked.has(k)), checked: [...syncChecked] }
+        : { keys: [], checked: [] }
+      const r = await deploymentApi.putDeploymentConfig(source.deployment.id, vals, true,
+                                                        undefined, sync)
+      const synced = r.sync_keys_applied?.length ?? 0
+      const base = r.job_id ? `저장됨. update_config job #${r.job_id}` : '저장됨'
+      return { ok: true, message: synced > 0 ? `${base} · ${synced}개 필드 그룹 동기화` : base }
     }
     // module 모드: 변경된 키만 보냄 (not_owned_by_module 오류 회피 위해 모든 키 아닌 템플릿 소유 키만)
     const payload: Record<string, unknown> = {}
@@ -96,7 +112,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
       ok: true,
       message: `${r.applied}개 저장${r.removed ? ` · ${r.removed}개 제거` : ''}${r.restart_required ? ' · 재시작 필요' : ''}`,
     }
-  }, [source])
+  }, [source, ha, syncChecked])
 
   const load = useCallback(async () => {
     try {
@@ -119,6 +135,9 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
       }
       setValues(base)
       setInitial(base)
+      // 동기화 체크 복원 — 영속값(ha.sync_keys) 없으면 scope=service 섹션 필드 기본 체크
+      setHa(r.ha)
+      setSyncChecked(new Set(r.ha ? (r.ha.sync_keys ?? serviceScopeKeys(r.template)) : []))
     } catch (e) {
       show((e as Error).message, 'err')
     } finally {
@@ -128,11 +147,12 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
 
   useEffect(() => { void load() }, [load])
 
-  // 변경된 필드 추적
+  // 변경된 필드 추적 — string[] 은 참조가 아닌 내용 비교 (StringListInput 이 새 배열을
+  // 반환해도 값이 같으면 미변경 — 체크된 배열 필드의 불필요한 피어 전파 차단)
   const changed = useMemo(() => {
     const s = new Set<string>()
     for (const k of new Set([...Object.keys(values), ...Object.keys(initial)])) {
-      if (values[k] !== initial[k]) s.add(k)
+      if (!fieldValueEq(values[k], initial[k])) s.add(k)
     }
     return s
   }, [values, initial])
@@ -216,22 +236,13 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
               <TabBtn active={tab === 'scalar'} onClick={() => setTab('scalar')}>
                 설정 ({template.sections.reduce((n, s) => n + s.fields.length, 0)})
               </TabBtn>
-              {(template.collections || []).map(c => {
-                // scope=service 는 그룹 공통 — HA 그룹 멤버 deployment 에서 편집 시 정합 깨질 위험이라
-                // 잠금하고 [⚙ 그룹 설정] 으로 유도. 단, standalone 노드(forceServiceScope, HA 그룹 미소속)는
-                // 그룹 설정 진입점이 없으므로 per-deployment 에서 직접 편집 허용
-                // (backend _put_deployment_collection 은 ha_group 없으면 단일 deployment 에만 PUT).
-                const isGroupOnly = c.scope === 'service' && source.type === 'deployment' && !forceServiceScope
-                return (
-                  <TabBtn key={c.key}
-                          active={tab === c.key}
-                          onClick={() => isGroupOnly
-                            ? show(`${c.title} 는 그룹 공통 설정 — 좌측 트리에서 HA 그룹 선택 → [⚙ 그룹 설정] 에서 편집`, 'err')
-                            : setTab(c.key)}>
-                    {isGroupOnly && '🔒 '}{c.title}
-                  </TabBtn>
-                )
-              })}
+              {/* 컬렉션은 백엔드가 scope 기반 자동 전파(should_propagate) — 멤버 어디서
+                  편집해도 정합 유지되므로 서버 화면에서 항상 편집 가능 (R2 잠금 폐지). */}
+              {(template.collections || []).map(c => (
+                <TabBtn key={c.key} active={tab === c.key} onClick={() => setTab(c.key)}>
+                  {c.title}
+                </TabBtn>
+              ))}
             </div>
 
             {/* 스크롤 영역 */}
@@ -241,6 +252,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12,
                                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span>🔁 재기동 필요 · ⚡ 즉시 적용</span>
+                    {ha && <span>· 🔗 체크 = 저장 시 그룹({ha.group_name}) 멤버 전체에 반영, 해제 = 이 서버만</span>}
                     {appliedAt && <span>· 마지막 적용: {appliedAt}</span>}
                   </div>
                   {changed.size > 0 && (
@@ -249,25 +261,22 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                       onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
                       onResetAll={() => setValues({ ...initial })} />
                   )}
-                  {/* scope=service section 은 그룹 공통이라 멤버 단일 deployment 에서 편집 시 정합 깨질 위험 — 별도 트랙 안내 */}
-                  {!forceServiceScope && source.type === 'deployment' && template.sections.some(s => s.scope === 'service') && (
-                    <div style={{
-                      padding: 10, background: '#f5f7fa', border: '1px solid #d0d8e0',
-                      borderRadius: 4, fontSize: 12, color: '#566', marginBottom: 12,
-                    }}>
-                      🔒 <b>서비스 설정 (그룹 공통)</b> 은 그룹 설정에서 편집합니다.
-                      여기서는 멤버 specific 시스템 설정만 편집. 그룹 설정 section:&nbsp;
-                      {template.sections.filter(s => s.scope === 'service').map(s => s.title).join(', ')}
-                    </div>
-                  )}
-                  {template.sections
-                    .filter(sec => forceServiceScope || source.type !== 'deployment' || sec.scope !== 'service')
-                    .map(sec => (
-                      <SectionBlock key={sec.key} section={sec} values={values}
-                        initial={initial} changed={changed}
-                        onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))}
-                        onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))} />
-                    ))}
+                  {/* R2: 모든 섹션을 항상 편집 — scope=service 도 여기서 편집하고,
+                      그룹 정합은 필드별 🔗 동기화(기본 ON)로 유지한다. */}
+                  {template.sections.map(sec => (
+                    <SectionBlock key={sec.key} section={sec} values={values}
+                      initial={initial} changed={changed}
+                      onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))}
+                      onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
+                      syncCtx={ha ? {
+                        checked: syncChecked,
+                        onToggle: (k) => setSyncChecked(prev => {
+                          const next = new Set(prev)
+                          if (next.has(k)) next.delete(k); else next.add(k)
+                          return next
+                        }),
+                      } : undefined} />
+                  ))}
                   {isPending ? (
                     <div style={{
                       marginTop: 12, padding: 10, background: '#e8f4fd',
@@ -440,7 +449,13 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
   )
 }
 
-export function SectionBlock({ section, values, initial, changed, onChange, onReset }: {
+// HA 동기화 체크 컨텍스트 — 없으면(standalone/module 모드) 🔗 체크박스 미렌더.
+export interface SyncCtx {
+  checked: Set<string>
+  onToggle: (key: string) => void
+}
+
+export function SectionBlock({ section, values, initial, changed, onChange, onReset, syncCtx }: {
   section: {
     key: string; title: string; description?: string
     fields: ConfigTemplateField[]
@@ -452,6 +467,7 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   changed: Set<string>
   onChange: (key: string, v: FieldValue) => void
   onReset: (key: string) => void
+  syncCtx?: SyncCtx
 }) {
   // 인프라 section 은 기본 접힘 (헤더 클릭으로 펼침) — 모든 필드는 노출.
   const [collapsed, setCollapsed] = useState(!!section.hidden)
@@ -534,7 +550,8 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
                     initialValue={initial[f.key]}
                     isChanged={changed.has(f.key)}
                     onChange={v => onChange(f.key, v)}
-                    onReset={() => onReset(f.key)} />
+                    onReset={() => onReset(f.key)}
+                    syncCtx={syncCtx} />
                 ))}
               </div>
             </div>
@@ -545,13 +562,14 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   )
 }
 
-function FieldRow({ field, value, initialValue, isChanged, onChange, onReset }: {
+function FieldRow({ field, value, initialValue, isChanged, onChange, onReset, syncCtx }: {
   field: ConfigTemplateField
   value: FieldValue
   initialValue: FieldValue
   isChanged: boolean
   onChange: (v: FieldValue) => void
   onReset: () => void
+  syncCtx?: SyncCtx
 }) {
   const needsRestart = field.restart !== false
   const badgeStyle: React.CSSProperties = {
@@ -589,6 +607,19 @@ function FieldRow({ field, value, initialValue, isChanged, onChange, onReset }: 
               ↺
             </button>
           )}
+          {syncCtx && (() => {
+            const on = syncCtx.checked.has(field.key)
+            return (
+              <label title={on ? '🔗 동기화 — 이 필드를 변경해 저장하면 그룹 내 다른 멤버에도 같은 값 반영'
+                               : '동기화 해제 — 이 서버에만 저장'}
+                     style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11,
+                              color: on ? '#1a73e8' : 'var(--text-muted)',
+                              whiteSpace: 'nowrap', cursor: 'pointer', flexShrink: 0, userSelect: 'none' }}>
+                <input type="checkbox" checked={on} onChange={() => syncCtx.onToggle(field.key)} />
+                🔗
+              </label>
+            )
+          })()}
         </div>
         {field.help && (
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{field.help}</div>
@@ -634,6 +665,14 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
         onChange={e => onChange(e.target.value)} />
     )
   }
+  if (f.type === 'string_list' || f.type === 'ref_list') {
+    // 콤마 분리 입력 ↔ 문자열 배열 (ModuleConfigEditor 와 동일 동작).
+    return (
+      <StringListInput value={value}
+        placeholder="콤마로 구분 (예: 10.0.1.48:9000, 10.0.1.49:9000)"
+        onChange={onChange} />
+    )
+  }
   // string / path
   return (
     <input className="form-input" type="text"
@@ -651,4 +690,22 @@ export function defaultValue(f: ConfigTemplateField): FieldValue {
     case 'int':  return 0
     default:     return ''
   }
+}
+
+// FieldValue 내용 비교 — string[] 은 참조가 아닌 원소 비교 (changed 오탐 방지).
+export function fieldValueEq(a: FieldValue | undefined, b: FieldValue | undefined): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) return JSON.stringify(a) === JSON.stringify(b)
+  return a === b
+}
+
+// scope=service 섹션의 전 필드 키 — 동기화 체크 기본값 (영속값 없을 때).
+// ModuleConfigModal 과 GroupConfigCompareView 가 동일 규칙 공유.
+export function serviceScopeKeys(t: ConfigTemplate | null): string[] {
+  if (!t) return []
+  const out: string[] = []
+  for (const s of t.sections) {
+    if (s.scope !== 'service') continue
+    for (const f of s.fields) out.push(f.key)
+  }
+  return out
 }

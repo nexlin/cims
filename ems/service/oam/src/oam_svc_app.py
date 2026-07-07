@@ -104,7 +104,11 @@ if __name__ == '__main__':
 
     def load_config():
         """§7 설정 분리: common.json 존재 시 common.json + services/oam-svc.json,
-        부재 시 _CONFIG_PATH(oam-svc.json) 단독, 그것도 없으면 oam.json fallback."""
+        부재 시 _CONFIG_PATH(oam-svc.json) 단독. base oam.json 상속(fallback)은 없다 —
+        정규 경로는 콘솔 배포설정: OAM 이 job 디스패치 시 config_template default +
+        base 공유값(JwtSecret/CimsRuntimeDir/Mgmt.Cidr)을 병합한 완전한 유효설정을
+        config.json 으로 실체화한다(agents._materialize_deploy_config). 설정이 비면
+        조용히 코드 기본값으로 동작하는 대신 여기서 명시적으로 실패한다."""
         cfg_dir = os.path.dirname(_CONFIG_PATH)
         common_p = os.path.join(cfg_dir, 'common.json')
         merged: dict = {}
@@ -122,18 +126,10 @@ if __name__ == '__main__':
                 with open(_CONFIG_PATH, 'r') as f:
                     merged = json.load(f)
                 src = _CONFIG_PATH
-            else:
-                # fallback: oam.json (단일 설정 공유 — dev 편의)
-                oam_p = _first_dir([os.path.join(_repo_root, 'oam', 'config')]) or ''
-                oam_json = os.path.join(oam_p, 'oam.json') if oam_p else ''
-                if oam_json and os.path.isfile(oam_json):
-                    with open(oam_json, 'r') as f:
-                        merged = json.load(f)
-                    src = oam_json + ' (fallback)'
         except Exception as e:
             logger.log_error(f"oam-svc config load error: {e}")
             return {}
-        # 배포 overlay (cims_agent 변종 디렉토리)
+        # 배포 overlay (cims_agent 변종 디렉토리) — 실체화된 완전 설정
         try:
             for overlay in (
                 os.path.join(_COMPONENT_ROOT, 'config.json'),
@@ -146,11 +142,16 @@ if __name__ == '__main__':
                 if isinstance(flat, dict) and flat:
                     n = _apply_overlay(merged, flat)
                     logger.log_info(f"oam-svc overlay applied: {overlay} ({n} keys)")
+                    if not src:
+                        src = overlay
                     break
         except Exception as e:
             logger.log_error(f"oam-svc overlay failed: {e}")
         if src:
             logger.log_info(f"oam-svc config source: {src}")
+        else:
+            logger.log_error("oam-svc config 없음 — oam-svc.json/common.json/배포 config.json "
+                             "중 어느 것도 발견 못함. 콘솔 배포설정으로 배포했는지 확인 필요.")
         return merged
 
     # 귀속 핸들러 import (공유 모듈) — preflight 가 여기 import 성공을 검증.
@@ -158,7 +159,7 @@ if __name__ == '__main__':
     from services.flow_logger    import FLOW_HANDLER_LIST
     from handlers                import recording, auth
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
-    from handlers.stats          import CIMS_STATS_SERVICE_HANDLER_LIST
+    from handlers.stats          import CIMS_STATS_HANDLER_LIST, CIMS_STATS_SERVICE_HANDLER_LIST
     from handlers.verification   import CIMS_VERIFICATION_HANDLER_LIST, init as ver_init
     from handlers.subscriber_import import CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST
 
@@ -167,6 +168,13 @@ if __name__ == '__main__':
         logger.log_info('==================== start (oam-svc) ====================')
 
         config = load_config()
+        # 관측 설정 무결성 — 빠지면 관측이 코드 기본값으로 조용히 오동작(엉뚱한 probe
+        #   대상·DB 계정)하는 대신 기동 로그에 드러낸다. MediaServer 비움=CMP 관측
+        #   비활성(허용)이라 제외.
+        for _k in ('CimsDatabase', 'CspNotify', 'CimsRuntimeDir'):
+            if not config.get(_k):
+                logger.log_warning(f"[config] '{_k}' 미설정 — 관련 관측/기능이 비활성 또는 "
+                                   "오동작. 콘솔 배포설정(oam-svc) 확인 필요.")
         auth.init(config)   # 공유 JwtSecret 로 토큰 독립 검증(§5)
 
         if args_dict.get('preflight'):
@@ -258,14 +266,42 @@ if __name__ == '__main__':
         # FLOW → RECORDING 순서로 /api/v1/recordings 충돌 시 RECORDING 우선(oam_app 과 동일).
         admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)
         admin_server.add_dynamic_rules(CIMS_RECORDING_HANDLER_LIST)
+        # stats 전체(/api/v1/stats — health/subscribers/messages/leak + service KPI) 귀속:
+        # 서비스 관측 데이터(CSP/CMP probe·DB·서비스 로그)라 base 가 아닌 여기서 서빙.
+        # 게이트웨이(base)가 /api/v1/stats 세그먼트를 이리로 프록시(콘솔 URL 불변).
         admin_server.add_dynamic_rules(
-            _bind(CIMS_STATS_SERVICE_HANDLER_LIST + CIMS_VERIFICATION_HANDLER_LIST
-                  + CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST))
+            _bind(CIMS_STATS_HANDLER_LIST + CIMS_STATS_SERVICE_HANDLER_LIST
+                  + CIMS_VERIFICATION_HANDLER_LIST + CIMS_SUBSCRIBER_IMPORT_HANDLER_LIST))
         admin_server.start()
         logger.log_info(f"oam-svc server started on {admin_conf.get('Ip','127.0.0.1')}:{admin_conf.get('Port', 4480)}")
 
+        # ── 서비스 알람 sweeper (alarm_standardization) ──────────────────
+        # 서비스 계열 규칙(csp_down/cmp_down/db_down/rtp_high)의 평가·발화는 oam-svc 소유
+        # (oam_base_service_split §4) — probe 대상·DB 가 이 모듈 설정이므로. base 는
+        # agent 계열(disk/module)만 평가. 저장(alert_log→ServiceLogging.Dir)·조회 API 는
+        # base 유지 — 같은 노드 동거 전제라 동일 디렉토리에 기록한다.
+        from services import alarm_sweeper
+        ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
+        ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
+        _alert_open = alarm_sweeper.restore_open_state(
+            _service_log_dir, scope='service', log=logger)
+        if _service_log_dir:
+            logger.log_info(f"[alert-sweep] interval={ALERT_SWEEP_INTERVAL}s, "
+                            f"rtp_threshold={ALERT_RTP_THRESHOLD}%, dir={_service_log_dir}")
+        else:
+            logger.log_info("[alert-sweep] disabled — no ServiceLogging.Dir")
+
+        _last_alert_sweep = 0.0
         while True:
             time.sleep(1)
+            if _service_log_dir and time.time() - _last_alert_sweep >= ALERT_SWEEP_INTERVAL:
+                try:
+                    alarm_sweeper.sweep_service_rules(
+                        config, _alert_open, _service_log_dir,
+                        detected_by='oam-svc', rtp_threshold=ALERT_RTP_THRESHOLD, log=logger)
+                except Exception as e:
+                    logger.log_error(f"[alarm-sweep] error: {e}")
+                _last_alert_sweep = time.time()
 
     except Exception as e:
         tb_str = traceback.format_exc()

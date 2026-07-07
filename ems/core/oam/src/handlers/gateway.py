@@ -298,8 +298,9 @@ async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
 
 def register_gateway(admin_server, config: dict) -> int:
     """라우트 테이블의 enabled 라우트마다 프록시 동적 라우트를 등록.
-    반환=마운트한 라우트 수. base 고유 경로(/api/v1/stats/health 등)는 controller 최장 일치로
-    base 가 우선 — 게이트웨이는 더 구체적이지 않은 세그먼트만 잡는다."""
+    반환=마운트한 라우트 수. base 고유 경로(/api/v1/users/me 등)는 controller 최장 일치로
+    base 가 우선 — 게이트웨이는 더 구체적이지 않은 세그먼트만 잡는다.
+    (/api/v1/stats 는 전체가 oam-svc 귀속 세그먼트 — base 직접 서빙 없음.)"""
     global _ADMIN_SERVER, _GW_CONFIG
     _ADMIN_SERVER = admin_server          # 런타임 self-register hot-mount 용
     _GW_CONFIG = config

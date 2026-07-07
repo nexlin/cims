@@ -108,17 +108,39 @@
 | `agents`,`agent_api`,`modules`,`ha_groups` | base 공통 | `/api/v1/{agents,modules,ha}` | 인프라 제어면 |
 | `build`,`service_descriptors`,`service_control` | base 공통 | `/api/v1/{build,services}` | 배포 오케스트레이션 |
 | `external_systems` | base 공통 | `/api/v1/external-systems` | 외부 형상(대시보드) |
-| `alerts`(프레임워크) | base 공통 | `/api/v1/alerts` | 골격 공통(서비스는 push) |
-| `stats(/health)` | base 공통 | `/api/v1/stats/health` | 노드 헬스/형상 |
+| `alerts`(저장·조회 + agent 계열 발화) | base 공통 | `/api/v1/alerts` | 골격 공통(서비스 계열은 oam-svc 가 push) |
 | `admin`,`org`(가입자 CRUD) | **csc 모듈** | `/api/v1/subscribers`, `/api/v1/org` | D3 가입자=csc 도메인 |
 | (PTT 그룹/affiliation 관리) | **csc 모듈** | `/api/v1/ptt` | D3 |
-| `stats(/service/voip\|ptt)` | **svc-mgmt 모듈** | `/api/v1/stats/service` | CSP/CMP KPI 관측 |
-| `recording`, `flow_logger` | **svc-mgmt 모듈** | `/api/v1/calls` | 녹취·SIP flow 관측 |
-| `verification` | **svc-mgmt 모듈** | `/api/v1/verification` | S1~S6 검증(testbed) |
+| `stats` **전체** (health/subscribers/messages/leak + service KPI) | **oam-svc 모듈** | `/api/v1/stats` | 서비스 관측 데이터(CSP/CMP probe·DB·서비스 로그) — 소비자도 svc 콘솔 팩 위젯뿐 |
+| `recording`, `flow_logger` | **oam-svc 모듈** | `/api/v1/calls` | 녹취·SIP flow 관측 |
+| `verification` | **oam-svc 모듈** | `/api/v1/verification` | S1~S6 검증(testbed) |
 
-> `stats` 는 base(health)·svc-mgmt(KPI) 로 **핸들러 함수 단위 분리**(모듈 파일은 공유, HANDLER_LIST
-> 만 둘로). 가입자 CRUD 핸들러는 현재 OAM in-process import(`oam_app.py:118`) → 목표는 **csc 가
+> `stats` 는 `/api/v1/stats` 세그먼트 **전체가 oam-svc 귀속** — base 는 stats 를 직접 서빙하지
+> 않고(`--role base` 미등록) 게이트웨이 프록시만 한다. 콘솔 URL 은 불변(위젯/페이지 무수정).
+> `--role all`(단일 프로세스)에서는 SERVICE 그룹으로 in-process 등록되어 동작 무변경.
+> **배포 제약**: base 와 oam-svc 는 이 경계를 맞춘 버전으로 **함께 배포**해야 한다 — stats 미등록
+> base + `/api/v1/stats` 라우트 없는 구 oam-svc 조합이면 `/stats/*` 404 (라우트는 oam-svc
+> 배포 시 self-register 로 갱신).
+> 가입자 CRUD 핸들러는 현재 OAM in-process import(`oam_app.py:118`) → 목표는 **csc 가
 > 직접 서빙하고 base 가 프록시**(중복 제거).
+
+> `service_control`(`/api/v1/services`) 은 로컬 호스트의 `cims-svc`(agent 번들 운영 도구)를
+> subprocess 로 구동한다. 스크립트 위치 해석: `CIMS_SVC_PATH`(명시 오버라이드) →
+> `$CIMS_AGENT_PREFIX/agent/current/bin/cims-svc`(배포 환경 정본 — agent.md §3 prefix 규약,
+> agent 가 모듈 기동 시 env 상속으로 전달; `current` 심링크 = systemd/sudoers 와 동일한 버전
+> 무관 고정 경로) → 레포/dist 트리 walk-up(`agent/bin`, `agent/current/bin`) fallback.
+> 이 API 는 **개발서버(devMode 릴리스 메뉴) 도구** — 배포 환경에서 모듈 생명주기의 정본은
+> agent job(`POST /api/v1/deployments/{id}/job` start/stop/restart)이며, cims-svc 직접 제어는
+> agent supervised(HA 자동복구)와 이중 제어가 될 수 있어 배포 환경에선 상태조회 용도로만 쓴다.
+
+**알람 sweeper 분리** (`services/alarm_sweeper.py` 공용 코어):
+- **서비스 계열**(`csp_down`/`cmp_down`/`db_down`/`rtp_high`, scope≠`agent`) 평가·발화 = **oam-svc**
+  (`detected_by='oam-svc'`) — probe 대상·DB 가 oam-svc 설정이므로. `--role all` 에서는 base 가
+  대행 평가(`detected_by='oam'`).
+- **agent 계열**(`disk_high`/`module_down`, scope=`agent`, heartbeat 메트릭 기반) = **base** 잔류.
+- 저장(`alert_log` → `ServiceLogging.Dir`)·조회 API(`/api/v1/alerts`)는 base 소유 불변 — 동거
+  노드 전제로 양쪽이 같은 디렉토리에 기록하고, 기동 시 open-state 복원은 소유 계열만
+  (`restore_open_state` scope: 서비스=`cims/*` mo, agent=그 외).
 
 base 엔트리포인트 역할 분기:
 ```python
@@ -146,14 +168,14 @@ if role == 'base':
   /api/v1/subscribers  → csc      (127.0.0.1:4421)
   /api/v1/org          → csc
   /api/v1/ptt          → csc
-  /api/v1/calls        → svc-mgmt (127.0.0.1:44xx)
-  /api/v1/stats/service→ svc-mgmt
-  /api/v1/verification → svc-mgmt
+  /api/v1/calls        → oam-svc  (127.0.0.1:4480)
+  /api/v1/stats        → oam-svc  (health/subscribers/messages/leak + service KPI 전체)
+  /api/v1/verification → oam-svc
   (그 외 /api/v1/*      → base 직접 처리)
 ```
 
-- `controller.py` **최장 일치** 규칙 덕에 base 고유의 더 구체적 경로(`/api/v1/stats/health`)는
-  base 가 우선, `/api/v1/stats/service/*` 는 svc-mgmt 로 프록시 — 충돌 없이 공존.
+- `controller.py` **최장 일치** 규칙 덕에 base 고유의 더 구체적 경로(`/api/v1/users/me` 등)는
+  base 가 우선 — 충돌 없이 공존. `/api/v1/stats` 는 base 직접 경로가 없어 세그먼트 전체가 프록시.
 - **self-register**: 서비스 모듈 설치 시 자기 매니페스트의 `routes`(+upstream 주소)를 게이트웨이
   라우트 테이블(file_store `control/gateway_routes`)에 등록. 새 서비스 = 테이블 한 줄, **코어 무수정**.
 - 미등록/`Enabled:false`/업스트림 부재 → 게이트웨이가 503(I3).
@@ -237,7 +259,57 @@ config/
 - **각 서비스 모듈** 로드 = `common.json` 의 공유항목(JwtSecret/DB/RuntimeDir, read-only) + 자기
   `services/<svc>.json`.
 - 장점: 새 서비스 = `services/<svc>.json` 추가 + self-register, **공통/타서비스 설정 무영향**(D4 의도).
-- 하위호환: `common.json` 부재 시 기존 단일 `oam.json` 에서 키를 읽는 fallback 유지.
+- 하위호환: `common.json` 부재 시 자기 `oam-svc.json` 단독. **base `oam.json` 상속(fallback)은
+  없다** — oam-svc 는 자기 설정(배포 overlay `config.json` 또는 `oam-svc.json`)만 읽는 완전
+  독립 설정 모듈이다(csp/cmp/csc 와 동일 모델). base 와 공유해야 하는 값(`CimsAuth.JwtSecret`/
+  `CimsRuntimeDir`/`Mgmt.Cidr`)은 상속이 아니라 **배포 시 base OAM 이 주입**한다(아래 실체화
+  참조). 설정 파일이 하나도 없으면 기동 로그에 명시적 에러를 남기고 preflight 가 실패한다 —
+  빠진 설정을 코드 기본값이 조용히 메워 오동작하는 경로를 두지 않는다.
+  `oam-svc.json` 을 직접 쓰는 경우(패키지 동봉/dev)는 공유값(특히 base 와 동일해야 하는
+  `CimsAuth.JwtSecret`)까지 그 파일에서 채워야 한다(`oam-svc.json.sample` 참조).
+
+### 서비스 관측 설정의 소유 — oam-svc (콘솔 관리)
+`CimsDatabase`/`CspNotify`/`MediaServer.Endpoints`/`ServiceLogging` 은 **서비스 관측 설정으로
+oam-svc 소유**다. 정규 관리 경로는 콘솔 배포설정 — oam-svc `config_template.json` 의
+`db`/`probe`/`logging` 섹션(csp/csc 와 동일 관례) → `PUT /deployments/<id>/config` →
+`update_config` job → 배포 overlay(`config.json`). 우선순위:
+
+```
+배포 overlay(콘솔 설정, 실체화됨)  >  oam-svc.json(패키지 동봉 시)
+```
+
+**`config.json`(배포 overlay)이 완전한 유효 설정이다 — csc/csp/cmp 와 동일.** 이를 보장하는
+주체는 콘솔 UI 가 아니라 **백엔드 실체화**(`agents._materialize_deploy_config`)다: OAM 이
+install/upgrade/update_config job 을 디스패치할 때 ① `config_template` 전 필드의 `default`
+를 base 로 깔고 ② deployment 레코드의 overlay(사용자 변경분)를 병합하고 ③ 게이트웨이 서비스
+모듈(meta.gateway.routes 보유)에는 base 소유 공유값(`CimsAuth.JwtSecret`/`CimsRuntimeDir`/
+`Mgmt.Cidr`, 비어있으면 `ServiceLogging.Dir`)을 주입해 완전한 config 를 agent 에 전달한다.
+deployment **레코드는 sparse overlay(사용자 변경분)로 유지** — template default 가 바뀌면
+다음 job 디스패치에서 자동 추종되고, template 에 필드가 늘어도 기존 배포가 재배포/설정저장
+시 자동으로 완전한 config.json 을 받는다(빈 default `''`/`[]` 는 '미설정' 시맨틱 보존을 위해
+실체화에서 제외). 따라서 `config_template.json` 이 구조·기본값의 SoT이며,
+그 `default` 는 **환경 비종속 중립값**(예: `CimsDatabase.Host=127.0.0.1`, `CimsDatabase.User=cims`,
+`CspNotify.Ip=127.0.0.1`)으로 두고 실주소는 배포 시 콘솔에서 채운다(레포에 테스트베드 IP 금지).
+Python 서비스 모듈(csc·oam-svc)은 C++ 과 달리 base conf 부재를 tolerate 하므로 `make dist`
+base conf 생성(`gen_default_config`) 대상이 아니다 — `config.json` 에 의존한다.
+
+**base `oam.json` 은 base 전용 설정만 갖는다** — 서비스 관측 키(`CimsDatabase`/`CspNotify`/
+`CmpIp`·`CmpPort`/`MediaServer`)를 두지 않으며, **`--role base` 는 이 키들을 읽지 않는다**
+(base 프로세스는 DB 미접속). 예외는 `ServiceLogging` — base 도 agent 계열 알람(alert_log)
+저장·조회와 콘솔 flow 기록에 쓰는 공유 키라 `oam.json` 에 남으며, oam-svc 콘솔 설정이 비어
+있으면 배포 실체화가 base 값을 주입한다. `--role all`(단일 프로세스 dev/TB)에서 서비스 관측이 필요하면 키를
+배포 overlay(`config.json`) 또는 로컬/TB 설정(`oam-tb.json` 등)으로 제공한다 — 레포 `oam.json`
+에는 두지 않는다.
+
+`MediaServer.Endpoints`(type `string_list`)는 `"ip:port"` **배열**로 저장·소비된다. 콘솔
+입력의 콤마 문자열은 배열로 정규화되는데, 세 지점에서 보장한다: (1) 콘솔 위젯(deployment 모드
+`ModuleConfigModal`·모듈 모드 `ModuleConfigEditor` 둘 다 콤마↔배열), (2) 백엔드 coerce
+(`_put_deployment_config` list-coerce + 모듈 모드 `_coerce_value`), (3) 소비자
+(`stats._media_endpoints` 가 최상위 문자열도 콤마 분해). 원소는 `"ip:port"` 문자열과
+`{ip,port}` dict 를 모두 허용한다. **CMP 관측은 전 노드 평가**(AA 다중 노드): 대시보드
+health 위젯은 전 노드 probe 집계(up = any 노드 응답, 카운터는 합산)이고, 알람 sweeper 의
+`process_down(target=cmp)` 는 endpoint 마다 `mo_instance='cims/cmp/<ip>:<port>'` 로 개별
+발화한다. `Endpoints`/`CmpIp` 미설정이면 CMP 관측 비활성(cmp 계열 규칙 skip).
 
 ### file_store 소유권 (I5)
 | 도메인/컬렉션 | 소유 |
@@ -382,14 +454,15 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
   모듈 테이블 컬럼 **"이름"·"설명"**.
 - `csc/pkg.json`·`oam-svc/pkg.json` `description`: csc=가입자·조직·인증·MCPTT(XCAP), 이력/통계/녹취=oam-svc.
 
-### 14.2 standalone 노드의 service-scope 설정 노출
-- config_template `scope`: **service=그룹 공통**(원래 `GroupServiceConfigModal`["⚙ 그룹 설정"]에서 편집,
-  per-deployment 설정 탭은 숨김) / **system=노드별**(per-deployment 편집).
-- 문제: **HA 그룹 미소속(standalone) 노드**는 그룹 설정 진입점이 없어 csc 의 DB·notify·MCPTT·IdMs(전부
-  scope=service)를 **편집할 UI 가 전무** → "설정에 아무것도 없음".
-- 해결: `AgentConfigTab` 이 `forceServiceScope={!agent.ha_group}` 전달 → `ModuleConfigModal` 이
-  standalone 일 때 per-deployment 설정 탭에서도 **service-scope 섹션 노출**. 그룹 멤버는 종전대로
-  그룹 설정이 소유(중복 편집 방지).
+### 14.2 설정 편집 일원화 — 개별 서버의 패키지 설정 탭
+- **모든 설정 편집은 개별 서버(멤버) 선택 → [패키지 설정] 탭에서 한다.** scope 별 편집 트랙
+  분리(그룹=service / 서버=system)는 없다 — `ModuleConfigModal` 이 전 섹션·컬렉션을 항상 편집
+  가능하게 노출하고, HA 정합은 필드별 동기화(§14.6)가 담당한다.
+- config_template `scope` 의 역할: **service=동기화 체크 기본 ON**(그룹 공통 권장) /
+  **system=기본 OFF**(노드별 고유값). 편집 위치를 가르지 않고 전파 기본값만 가른다.
+- 그룹 선택 → [패키지 설정] 탭은 **읽기 전용 비교 뷰**(`GroupConfigCompareView`) — 멤버별
+  설정값을 나란히 비교(동기화+동일=정상 / 동기화+상이=드리프트 경고 / 비동기=개별),
+  셀 클릭 시 해당 서버의 편집 화면으로 점프. 그룹 단위 편집기(`GroupServiceConfigModal`)는 없다.
 
 ### 14.3 설치 전(pending) 배포도 설정 가능
 - 설정 탭(`AgentConfigTab`)은 `pending` 배포도 포함 → 설치 전에
@@ -402,10 +475,37 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 ### 14.4 모든 설정 노출
 - config_template 에 `presets` 는 없다(csc·csp·cmp). 디폴트 SoT = 각 필드 `default`/`deploy_value`.
 - UI 에 "추천 설정" 바·"Preset 일괄 적용" 탭·"고급 설정/고급 필드" 토글이 없다
-  (`ModuleConfigModal`·`GroupServiceConfigModal`·`ModuleConfigEditor`). 섹션/필드 `hidden`·`advanced`
+  (`ModuleConfigModal`·`ModuleConfigEditor`). 섹션/필드 `hidden`·`advanced`
   게이팅 없음 → **모든 섹션·필드 항상 노출**(시크릿/경로의 `_infra` 섹션은 "인프라" 배지 + 기본 접힘,
   헤더 클릭으로 펼침 — 숨김 아님).
 
 ### 14.5 패키지 업로드 핸들러
 - `_dt(val)` 는 file_store 의 ISO 문자열에 대해 `hasattr(val,"isoformat")` 가드 후 변환
   (동일 버전 재업로드 409 conflict 응답 직렬화 시 500 방지, `ems/core/oam/src/handlers/agents.py`).
+
+### 14.6 필드 단위 HA 동기화 (config sync)
+설정 저장의 HA 전파는 **필드 단위 opt-in** 이다 — 그룹 통짜 전파 없음.
+
+**API 계약** (`PUT /api/v1/deployments/{id}/config`, `agents.py _put_deployment_config`):
+- `sync_keys?: string[]` — 피어 deployment 에 merge 할 키 목록(= **변경∩동기화체크**).
+  부재=레거시(피어에 values 통짜 — 구 클라이언트 호환) · `[]`=피어 무변경.
+- `sync_checked?: string[]` — 체크 상태 전체. 저장 성공 시 `ha_group.config_sync[package_name]`
+  에 영속(부재 시 미갱신). 콘솔 UI 복원용 메타 — keepalived/update_ha 와 무관.
+- 요청 dep 은 values 를 overlay 전체로 저장(기존 계약), **피어만** `{**peer.config, **subset}`
+  부분 merge → 피어 고유 설정(SystemId·LocalIp 등) 보존.
+- 전파 대상 그룹은 **요청 dep 의 agent 가 멤버로 소속된 그룹으로 한정**(동일 패키지 다중 그룹
+  오전파 방지). update_config job 의 config 는 **target 별 overlay 로 각각 실체화**.
+- `GET /deployments/{id}/config` 응답에 `ha` block: `{group_id, group_name, mode,
+  sync_keys(=config_sync[pkg] | null), members[]}` — standalone 이면 null.
+
+**콘솔 UX** (`ModuleConfigModal`):
+- HA 그룹 멤버의 필드마다 **🔗 동기화 체크박스**. 체크+값 변경+저장 = 그룹 멤버 전체에 그 값
+  반영, 해제 = 이 서버만. standalone 은 체크박스 없음(항상 `sync_keys:[]` 전송).
+- 기본값: 영속값(`config_sync[pkg]`) 있으면 복원, 없으면 **scope=service 섹션 필드 = ON**.
+- 체크됐지만 값이 안 바뀐 필드는 전파하지 않는다(최소 놀람) — 잔여 드리프트는 그룹 비교 뷰
+  (§14.2)가 경고로 노출하고, 기준 서버에서 해당 필드 재저장으로 해소한다.
+- 동시 편집은 키 단위 last-write-wins (피어 read→merge→save 사이 창은 수용).
+- RBAC: config PUT 은 operator — `config_sync` 기록은 그 저장의 파생 상태라 ha-groups
+  PUT(admin) 을 경유하지 않고 백엔드가 직접 기록한다.
+- **컬렉션(jsonl)은 이 모델 밖** — 종전대로 백엔드 scope 기반 자동 전파(`should_propagate`)
+  + drift 감지. 서버 화면에서 항상 편집 가능(그룹 전용 잠금 없음).

@@ -13,36 +13,8 @@
         "Level": "INFO",
         "File": "log/oam.log"
     },
-    "CimsDatabase": {
-        "Host": "127.0.0.1",
-        "Port": 3306,
-        "User": "cims",
-        "Password": "!core0908",
-        "Db": "cims"
-    },
     "Agent": {
         "MtlsEnabled": false
-    },
-    "CspNotify": {
-        "Ip": "121.161.164.47",
-        "Port": 4421,
-        "_comment": "대시보드 health 위젯의 CSP STATS probe 대상. CSP CscInterface(UDP) 가 bind 한 주소 — A/S HA 에선 VIP 로 두면 항상 active master 를 가리킨다."
-    },
-    "CmpIp": "10.0.1.48",
-    "CmpPort": 9000,
-    "_cmp_comment": "대시보드 health 위젯의 CMP STATS probe 대상(ControlPort). AA 양노드 중 대표 1개 — media01.",
-    "MediaServer": {
-        "Endpoints": [
-            {
-                "ip": "10.0.1.48",
-                "port": 9000
-            },
-            {
-                "ip": "10.0.1.49",
-                "port": 9000
-            }
-        ],
-        "_comment": "서비스현황 노드 분산용 — 전 미디어 노드(media01/02) STATS probe 대상. csp.json MediaServer.Endpoints 와 동일."
     },
     "CimsAuth": {
         "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8=",
@@ -59,10 +31,10 @@
         "Dir": "packages",
         "BackupDir": "packages_trash"
     },
-    "ConfigCacheDir": "cache",
     "CimsRuntimeDir": "/home/cims/work/cims/build/dist/ext_mnt/runtime",
     "_runtime_comment": "관리 데이터(file_store) SoT 는 mgmt host(ctrl01) 로컬 유지. ServiceLogging.Dir 을 공유 NAS 로 옮겨도 runtime store 가 따라가지 않도록 명시 고정.",
     "ServiceLogging": {
+        "_comment": "base 도 사용하는 공유 키 — agent 계열 알람(alert_log) 저장·조회 API 와 콘솔 flow 기록 위치. oam-svc 는 콘솔 배포설정(config_template logging 섹션)으로 관리하고, 미설정 시 이 값을 fallback 상속.",
         "Dir": "/mnt/cims/service_log",
         "Enable": [
             "csp",

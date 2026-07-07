@@ -289,7 +289,7 @@ PY
 # ── dist 설정 파일 생성 ─────────────────────────────────────────
 apply_config_template "$DIST_DIR/cmp/config/config_template.json"          "$DIST_DIR/cmp/config/cmp.json"
 apply_config_template "$DIST_DIR/csp/config/config_template.json"          "$DIST_DIR/csp/config/csp.json"
-apply_template "$DIST_DIR/cwrtc/config/cwrtc.json.template"                "$DIST_DIR/cwrtc/config/cwrtc.json"
+apply_config_template "$DIST_DIR/cwrtc/config/config_template.json"        "$DIST_DIR/cwrtc/config/cwrtc.json"
 apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIST_DIR/csc/config/csc.json"
 
 # ── 자동 프로비저닝(/provisioning/me) 서비스 매핑 주입 (android_ue_provisioning.md §3) ─

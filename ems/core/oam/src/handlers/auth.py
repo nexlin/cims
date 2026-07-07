@@ -14,8 +14,6 @@ import hashlib
 import datetime
 
 import jwt
-import pymysql
-import pymysql.cursors
 from urllib.parse import urlparse
 from pathlib import PurePath
 
@@ -145,53 +143,6 @@ def _builtin_accounts(config: dict) -> dict:
     return out
 
 
-# ── DB 헬퍼 ──────────────────────────────────────────────────
-
-def _get_db(config: dict):
-    db = config.get('CimsDatabase', {})
-    return pymysql.connect(
-        host=db.get('Host', '127.0.0.1'),
-        port=int(db.get('Port', 3306)),
-        user=db.get('User', 'root'),
-        password=db.get('Password', ''),
-        database=db.get('Db', 'cims'),
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=True,
-    )
-
-
-def _dt(val):
-    return val.isoformat() if val else None
-
-
-def _user_with_subs(cur, user_id: int) -> dict:
-    # 소프트폰 자동 등록에 passwd 필요 → 본인 조회이므로 포함
-    cur.execute(
-        "SELECT id, service_ref, imsi, passwd, dnd, forward_id, register_time, logout_time "
-        "FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
-        (user_id,)
-    )
-    call_subs = cur.fetchall()
-    for s in call_subs:
-        s['dnd'] = bool(s['dnd'])
-        s['register_time'] = _dt(s['register_time'])
-        s['logout_time']   = _dt(s['logout_time'])
-
-    cur.execute(
-        "SELECT id, service_ref, imsi, passwd, dnd, forward_id, register_time, logout_time "
-        "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
-        (user_id,)
-    )
-    ptt_subs = cur.fetchall()
-    for s in ptt_subs:
-        s['dnd'] = bool(s['dnd'])
-        s['register_time'] = _dt(s['register_time'])
-        s['logout_time']   = _dt(s['logout_time'])
-
-    return {'call_subscriptions': call_subs, 'ptt_subscriptions': ptt_subs}
-
-
 # ── 핸들러 ──────────────────────────────────────────────────────
 
 _AUTH_BASE = '/api/v1/auth'
@@ -221,7 +172,7 @@ async def handle_auth(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
             return await _change_password(handler_args, config)
         # v3 (2026-04-22): /auth/me 제거 — /users/me 로 이관
         return HandlerResult(status=404, body={'error': 'Not Found'})
-    except pymysql.Error as e:
+    except Exception as e:
         return HandlerResult(status=500, body={'error': str(e)})
 
 

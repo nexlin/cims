@@ -978,31 +978,47 @@ curl -k -X PUT "https://192.168.0.2:4420/api/v1/ptt/groups/%2B82571910001" \
 
 ### A.2 cwrtc 설정 (cwrtc.json)
 
+패키지에는 `config_template.json` 의 default 로 생성된 base `config/cwrtc.json` 이 동봉되며,
+콘솔 배포설정(웹 UI)이 쓴 deployment overlay(`config.json`, flat dotted key)가 기동 시
+merge 되어 우선한다 (csp/cmp 와 동일 계약). 개발 환경은 `configure.sh` 가 같은 템플릿의
+`deploy_value` 로 렌더링한다.
+
 | 파라미터 | 타입 | 기본값 | 설명 |
 |---------|------|--------|------|
-| `HttpPort` | int | 8080 | HTTP/WebSocket 서버 포트 |
-| `CspIp` | string | "127.0.0.1" | CSP SIP 서버 IP |
-| `CspPort` | int | 5060 | CSP SIP 포트 |
-| `RtpIp` | string | "0.0.0.0" | RTP 바인드 IP |
-| `RtpStartPort` | int | 30000 | RTP 포트 풀 시작 (세션당 6포트) |
-| `DocumentRoot` | string | "../phone/dist" | 정적 파일 서빙 경로 (Phone App) |
-| `ApiToken` | string | "" | 선택적 API 인증 토큰 (빈 문자열=비활성) |
+| `Setup.LocalIp` | string | "127.0.0.1" | cwrtc 노드 IP (SDP/SIP Contact 광고, 실 IP 필수) |
+| `Setup.WsPort` | int | 8443 | WebSocket 서버 포트 |
+| `Setup.Wss` | int | 1 | 1=WSS(TLS). HTTPS 페이지에서 접속하려면 필수 |
+| `Setup.CertFile` | string | "cert/csp.pem" | WSS 용 인증서+키 결합 PEM |
+| `Setup.DocRoot` | string | "html" | 내장 HTTP 서버 문서 루트 |
+| `Setup.Sip.ServerIp` | string | "127.0.0.1" | CSP SIP 서버 IP |
+| `Setup.Sip.ServerPort` | int | 5060 | CSP SIP 포트 |
+| `Setup.Sip.Domain` | string | ims.mnc033.… | VoLTE 도메인 (CSP 와 일치 필요) |
+| `Setup.Sip.PttDomain` | string | ptt.mnc033.… | PTT 도메인 (CSP 와 일치 필요) |
+| `Setup.Sip.LocalPort` | int | 5062 | cwrtc SIP bind UDP 포트 |
+| `Setup.Rtp.PortBase` | int | 50100 | RTP 포트 풀 시작 |
+| `Setup.Rtp.PortCount` | int | 50 | RTP 포트 수 (동시 세션 한계) |
+| `Setup.Log.Dir` | string | "log" | 로그 디렉토리 |
+| `Setup.MsgLog.Dir` | string | "log" | SIP 메시지 로그 디렉토리 |
 
 ```json
 {
-  "HttpPort": 8080,
-  "CspIp": "192.168.0.2",
-  "CspPort": 5060,
-  "RtpIp": "192.168.0.2",
-  "RtpStartPort": 30000,
-  "DocumentRoot": "../phone/dist"
+  "Setup": {
+    "LocalIp": "192.168.0.134",
+    "WsPort": 8443,
+    "Wss": 1,
+    "CertFile": "cert/csp.pem",
+    "Sip": { "ServerIp": "192.168.0.135", "ServerPort": 5060,
+             "Domain": "ims.mnc033.mcc450.3gppnetwork.org",
+             "PttDomain": "ptt.mnc033.mcc450.3gppnetwork.org", "LocalPort": 5062 },
+    "Rtp": { "PortBase": 50100, "PortCount": 50 }
+  }
 }
 ```
 
 ### A.3 포트 레이아웃 (세션당 6포트)
 
 ```
-세션 N의 기본 포트 = RtpStartPort + (N × 6)
+세션 N의 기본 포트 = Setup.Rtp.PortBase + (N × 6)     (N < Setup.Rtp.PortCount)
 
   +0: Audio DTLS    (브라우저↔cwrtc, DTLS-SRTP 암호화)
   +1: Audio RTP     (cwrtc↔CMP, 평문 RTP)
@@ -1011,8 +1027,11 @@ curl -k -X PUT "https://192.168.0.2:4420/api/v1/ptt/groups/%2B82571910001" \
   +4: Video RTP     (cwrtc↔CMP, 평문 RTP)
   +5: Video RTCP    (cwrtc↔CMP)
 
-예시 (세션 0): 30000, 30001, 30002, 30003, 30004, 30005
-예시 (세션 1): 30006, 30007, 30008, 30009, 30010, 30011
+예시 (세션 0): 50100, 50101, 50102, 50103, 50104, 50105
+예시 (세션 1): 50106, 50107, 50108, 50109, 50110, 50111
+
+전체 UDP 범위 = PortBase ~ PortBase + PortCount×6 - 1 (기본 50100~50399).
+방화벽은 이 범위를 열어야 브라우저 미디어가 흐른다.
 ```
 
 ### A.4 SDP 변환 (DTLS-SRTP → Plain RTP)

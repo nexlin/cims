@@ -24,8 +24,6 @@ import socket
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
-import pymysql
-import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
@@ -149,16 +147,6 @@ def _issue_agent_server_cert(config: dict, agent_id: int, hostname: str) -> dict
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
-
-
-def _get_db(config: dict):
-    db = config.get("CimsDatabase", {})
-    return pymysql.connect(
-        host=db.get("Host", "127.0.0.1"), port=int(db.get("Port", 3306)),
-        user=db.get("User", "cims"), password=db.get("Password", ""),
-        database=db.get("Db", "cims"),
-        charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor, autocommit=True,
-    )
 
 
 def _parse_body(handler_args: HandlerArgs) -> dict:

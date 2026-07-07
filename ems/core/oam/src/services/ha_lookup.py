@@ -39,6 +39,12 @@ def ha_group_by_id(config, gid: int) -> Optional[dict]:
     return file_store.by_id(_ha_dir(config), gid)
 
 
+def save_group(config, group: dict) -> dict:
+    """그룹 레코드 atomic 저장 — config_sync 등 콘솔 메타 갱신용 (id 필수)."""
+    file_store.save(_ha_dir(config), int(group['id']), group)
+    return group
+
+
 def members_of(group: dict) -> list[dict]:
     """그룹 dict 의 members 리스트. 없으면 빈 리스트."""
     ms = group.get('members') or []

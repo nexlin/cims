@@ -31,8 +31,6 @@ from typing import Optional
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
-import pymysql
-import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
@@ -68,6 +66,77 @@ def _pkg_load(config, pid: int = None, name: str = None, version: str = None):
     if pid is not None:
         return file_store.by_id(d, pid)
     return None
+
+
+def _coerce_list_fields(template: dict, values: dict) -> dict:
+    """config_template 의 string_list/ref_list 필드 값이 콤마 문자열이면 배열로 정규화.
+    프론트 위젯 누락·raw API 우회에도 config.json 에 배열로 저장되게 하는 백엔드 방어."""
+    if not isinstance(values, dict):
+        return values
+    list_keys = set()
+    for sec in (template or {}).get("sections", []):
+        for fld in sec.get("fields", []):
+            if (fld.get("type") or "").lower() in ("string_list", "ref_list") and fld.get("key"):
+                list_keys.add(fld["key"])
+    if not list_keys:
+        return values
+    out = dict(values)
+    for k in list_keys:
+        v = out.get(k)
+        if isinstance(v, str):
+            out[k] = [s.strip() for s in v.split(",") if s.strip()]
+    return out
+
+
+def _template_defaults(template: dict) -> dict:
+    """config_template 전 필드의 default 를 flat(dot-key) dict 로.
+    빈 default(None/''/[])는 '미설정' 시맨틱(예: ServiceLogging.Dir 비움=상속) 보존을
+    위해 제외한다."""
+    out: dict = {}
+    for sec in (template or {}).get("sections", []):
+        for fld in sec.get("fields", []):
+            k, d = fld.get("key"), fld.get("default")
+            if k and d is not None and d != "" and d != []:
+                out[k] = d
+    return out
+
+
+def _materialize_deploy_config(config, pkg_file, overlay):
+    """배포 config 실체화 — agent 가 쓰는 config.json 이 항상 완전한 유효설정이 되도록
+    config_template default 를 base 로 깔고 deployment overlay(사용자 변경분)를 병합.
+    deployment 레코드는 sparse overlay 그대로 유지(사용자 의도 SoT) — template default
+    변경은 다음 job 디스패치에서 자동 추종된다.
+
+    게이트웨이 서비스 모듈(meta.gateway.routes 보유 — oam-svc)에는 base 소유 공유값도
+    주입한다: oam-svc 의 base oam.json fallback 상속 폐지의 대체 경로.
+      - CimsAuth.JwtSecret / CimsRuntimeDir / Mgmt.Cidr — base 가 SoT, overlay 보다 우선
+        (시크릿 회전·runtime 이동 시 base 현재값 추종).
+      - ServiceLogging.Dir — template 소유(콘솔 편집 가능), 비어있을 때만 base 값 주입."""
+    overlay = overlay if isinstance(overlay, dict) else {}
+    tmpl = (pkg_file or {}).get("config_template") if isinstance(pkg_file, dict) else None
+    if isinstance(tmpl, dict):
+        overlay = _coerce_list_fields(tmpl, overlay)
+        out = _template_defaults(tmpl)
+    else:
+        out = {}
+    for k, v in overlay.items():
+        if v is None or v == "":   # 빈 overlay 값은 default/주입값을 지우지 않음 ([] 는 유효값)
+            continue
+        out[k] = v
+    pkg_meta = (pkg_file or {}).get("meta") if isinstance(pkg_file, dict) else None
+    if isinstance(pkg_meta, dict) and (pkg_meta.get("gateway") or {}).get("routes"):
+        secret = (config.get("CimsAuth") or {}).get("JwtSecret")
+        if secret:
+            out["CimsAuth.JwtSecret"] = secret
+        if config.get("CimsRuntimeDir"):
+            out["CimsRuntimeDir"] = config["CimsRuntimeDir"]
+        if (config.get("Mgmt") or {}).get("Cidr"):
+            out["Mgmt.Cidr"] = config["Mgmt"]["Cidr"]
+        if not out.get("ServiceLogging.Dir"):
+            sld = (config.get("ServiceLogging") or {}).get("Dir")
+            if sld:
+                out["ServiceLogging.Dir"] = sld
+    return out
 
 
 def _pkg_load_all(config) -> list:
@@ -290,16 +359,6 @@ def _resolve_pkg_paths(config: dict) -> tuple:
     if not os.path.isabs(active):  active = os.path.normpath(os.path.join(_COMPONENT_ROOT, active))
     if not os.path.isabs(backup):  backup = os.path.normpath(os.path.join(_COMPONENT_ROOT, backup))
     return active, backup
-
-
-def _get_db(config: dict):
-    db = config.get("CimsDatabase", {})
-    return pymysql.connect(
-        host=db.get("Host", "127.0.0.1"), port=int(db.get("Port", 3306)),
-        user=db.get("User", "cims"), password=db.get("Password", ""),
-        database=db.get("Db", "cims"),
-        charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor, autocommit=True,
-    )
 
 
 def _parse_body(handler_args: HandlerArgs) -> dict:
@@ -1765,8 +1824,31 @@ async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> Handler
     return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
 
+def _ha_group_for_deployment(config, dep: dict, pkg_name: str, strict: bool = False):
+    """dep.agent_id 가 멤버로 소속된, pkg_name 을 호스팅하는 ha_group.
+
+    동일 패키지를 여러 그룹이 호스팅해도 요청 dep 이 속한 그룹으로만 한정
+    (오전파 방지). strict=False 면 멤버십 매치 실패 시 첫 매치 fallback
+    (레거시 ha_group_for_package 동작 보존), strict=True 면 None."""
+    from services import ha_lookup
+    groups = ha_lookup.ha_groups_for_package(config, pkg_name)
+    if not groups:
+        return None
+    aid = dep.get("agent_id")
+    for g in groups:
+        if any(m.get("agent_id") == aid for m in ha_lookup.members_of(g)):
+            return g
+    return None if strict else groups[0]
+
+
 async def _get_deployment_config(did: int, config):
-    """해당 배포의 현재 설정 값 + 참조 템플릿을 함께 반환."""
+    """해당 배포의 현재 설정 값 + 참조 템플릿을 함께 반환.
+
+    ha block: dep 이 소속된 ha_group 이 이 패키지를 호스팅하면
+    {group_id, group_name, mode, sync_keys(=config_sync[pkg] | null), members[]}.
+    소속 그룹 없으면(standalone) null — 콘솔 동기화 체크박스 노출 판단 기준."""
+    from services import ha_lookup
+
     r = await asyncio.to_thread(_deploy_load, config, did)
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
@@ -1777,26 +1859,51 @@ async def _get_deployment_config(did: int, config):
     ca = r.get("config_applied_at")
     if hasattr(ca, "isoformat"):
         ca = ca.isoformat()
+
+    ha_block = None
+    pkg_name = pkg.get("name")
+    if pkg_name:
+        g = await asyncio.to_thread(_ha_group_for_deployment, config, r, pkg_name, True)
+        if g and g.get("id") is not None:
+            member_rows = await asyncio.to_thread(
+                ha_lookup.deployments_in_group_for_package, config, g["id"], pkg_name)
+            _enrich_with_agent(member_rows, config)
+            ha_block = {
+                "group_id":   g.get("id"),
+                "group_name": g.get("name"),
+                "mode":       g.get("mode"),
+                "sync_keys":  (g.get("config_sync") or {}).get(pkg_name),
+                "members":    [{"deployment_id": m.get("id"),
+                                "agent_id":      m.get("agent_id"),
+                                "agent_name":    m.get("agent_name")} for m in member_rows],
+            }
+
     return HandlerResult(status=200,
         body={
             "config":             cfg or {},
             "config_applied_at":  ca,
             "template":           pkg.get("config_template"),
             "meta":               pkg.get("meta"),
+            "ha":                 ha_block,
         },
         media_type="application/json")
 
 
 async def _put_deployment_config(handler_args, did: int, config):
     """설정 값 저장. body = {
-         "config":         {<key>: <value>, ...},
+         "config":         {<key>: <value>, ...},   # 요청 dep 의 새 overlay 전체
          "queue_update"?:  bool (기본 true),
          "propagate_to_ha_peers"?: bool (기본 true),
+         "sync_keys"?:     [<key>, ...],   # 피어에 merge 할 키만 (변경∩동기화체크).
+                                           #   부재=레거시(피어에 values 통짜) · []=피어 무변경
+         "sync_checked"?:  [<key>, ...],   # 동기화 체크 상태 전체 — ha_group.config_sync[pkg] 영속
        }
 
-    A/S/AA HA 그룹 멤버 deployment 가 함께 있으면 그들의 config 도 동일하게 갱신
-    (split-brain config 방지). propagate_to_ha_peers=false 면 단일 deployment 만.
-    queue_update=true 이면 멤버별 update_config job 일괄 enqueue + sync 트랜잭션 1건 생성.
+    요청 dep 은 values 를 overlay 전체로 저장(기존 계약). HA 그룹 피어는
+    sync_keys 지정 시 해당 키 값만 기존 overlay 에 merge — 피어 고유 설정 보존.
+    sync_keys 부재 시 레거시: 피어에도 values 통짜 저장(split-brain config 방지).
+    propagate_to_ha_peers=false 면 단일 deployment 만.
+    queue_update=true 이면 갱신된 멤버별 update_config job enqueue + sync 트랜잭션 1건 생성.
     """
     from services import ha_lookup, sync_txn
 
@@ -1807,6 +1914,14 @@ async def _put_deployment_config(handler_args, did: int, config):
                              media_type="application/json")
     queue_update = body.get("queue_update", True)
     propagate    = body.get("propagate_to_ha_peers", True)
+    sync_keys    = body.get("sync_keys")      # None=레거시 통짜 | list=피어 merge 키
+    sync_checked = body.get("sync_checked")   # None=미갱신 | list=config_sync 영속
+    if sync_keys is not None and not isinstance(sync_keys, list):
+        return HandlerResult(status=400, body={"error": "sync_keys must be a list"},
+                             media_type="application/json")
+    if sync_checked is not None and not isinstance(sync_checked, list):
+        return HandlerResult(status=400, body={"error": "sync_checked must be a list"},
+                             media_type="application/json")
 
     dep = await asyncio.to_thread(_deploy_load, config, did)
     if not dep:
@@ -1815,11 +1930,24 @@ async def _put_deployment_config(handler_args, did: int, config):
     _enrich_deploy([dep], config)
     pkg_name = dep.get("package_name")
 
-    # ── 적용 대상 deployment 들 결정
+    # string_list/ref_list 필드가 콤마 문자열로 오면 배열로 정규화(백엔드 coerce).
+    #   프론트 위젯 누락·raw API 우회 시에도 config.json 에 항상 배열로 저장되게 하는
+    #   최종 방어. (예: MediaServer.Endpoints "a:9000, b:9000" → ["a:9000","b:9000"])
+    _pkg = None
+    try:
+        _pkg = await asyncio.to_thread(_pkg_load, config, dep.get("package_id"))
+        _tmpl = (_pkg or {}).get("config_template") if isinstance(_pkg, dict) else None
+        if isinstance(_tmpl, dict):
+            values = _coerce_list_fields(_tmpl, values)
+    except Exception as _e:
+        logger.log_warning(f"deployment config list-coerce skip: {_e}")
+
+    # ── 적용 대상 deployment 들 결정 — 요청 dep 이 멤버로 소속된 그룹으로 한정
+    #    (동일 패키지 다중 그룹 오전파 방지, 멤버십 미매치 시 첫 매치 fallback)
     targets: list[dict] = [dep]
     ha_group_id = None
     if propagate and pkg_name:
-        g = await asyncio.to_thread(ha_lookup.ha_group_for_package, config, pkg_name)
+        g = await asyncio.to_thread(_ha_group_for_deployment, config, dep, pkg_name)
         if g and g.get("id") is not None:
             ha_group_id = g.get("id")
             peers = await asyncio.to_thread(
@@ -1833,12 +1961,40 @@ async def _put_deployment_config(handler_args, did: int, config):
                     seen.add(pid)
             _enrich_deploy(targets, config)
 
-    # ── 모든 대상 deployment.config 일괄 갱신
+    # ── 대상 deployment.config 갱신 — 요청 dep=values 전체(overlay 교체),
+    #    피어=sync_keys 값만 기존 overlay 에 merge (레거시: sync_keys 부재 → 통짜)
+    subset = None
+    if sync_keys is not None:
+        subset = {k: values[k] for k in sync_keys if k in values}
     saved: list[dict] = []
     for t in targets:
-        updated = await asyncio.to_thread(_deploy_update, config, t["id"], {"config": values})
+        if t["id"] == dep["id"] or subset is None:
+            new_overlay = values
+        else:
+            if not subset:
+                continue   # 동기화 대상 없음 — 피어 무변경 (job/sync_txn 도 자연 배제)
+            cur = t.get("config")
+            if not isinstance(cur, dict):
+                cur = _safe_json(t.get("config_json")) or {}
+            new_overlay = {**cur, **subset}
+        updated = await asyncio.to_thread(_deploy_update, config, t["id"], {"config": new_overlay})
         if updated:
             saved.append(updated)
+
+    # ── 동기화 체크 상태 영속 — ha_group.config_sync[pkg] (콘솔 UI 복원용 메타).
+    #    operator 의 config 저장에 파생된 상태라 ha_groups PUT(admin) 를 경유하지 않고
+    #    직접 기록. keepalived 와 무관 — update_ha job enqueue 없음.
+    if ha_group_id is not None and isinstance(sync_checked, list) and pkg_name:
+        def _persist_config_sync():
+            g2 = ha_lookup.ha_group_by_id(config, ha_group_id)
+            if not g2:
+                return
+            cs = g2.get("config_sync")
+            cs = dict(cs) if isinstance(cs, dict) else {}
+            cs[pkg_name] = [str(k) for k in sync_checked]
+            g2["config_sync"] = cs
+            ha_lookup.save_group(config, g2)
+        await asyncio.to_thread(_persist_config_sync)
 
     # ── update_config job 일괄 enqueue + sync_txn 생성
     sync_id = None
@@ -1849,6 +2005,10 @@ async def _put_deployment_config(handler_args, did: int, config):
         # 필요하므로 재-enrich. 누락 시 overlay 가 install_path 루트에 쓰여 CSP 의
         # SIGUSR1 즉시반영(_findDeploymentConfig = csp.json 부모×2)이 읽지 못한다.
         _enrich_deploy(saved, config)
+        # 레코드는 sparse overlay 그대로, agent 로 나가는 job config 만 실체화 —
+        #   template default + base 공유값 병합으로 config.json 을 완전한 유효설정으로.
+        #   per-target: 피어는 sync_keys 부분 merge 로 overlay 가 서로 다를 수 있어
+        #   각자의 저장된 overlay 로 실체화 (레거시 경로는 전 target 동일 → 결과 동일).
         member_rows: list[dict] = []
         for t in saved:
             sf = t.get("service_functions")
@@ -1862,7 +2022,7 @@ async def _put_deployment_config(handler_args, did: int, config):
                 "process_name":    t.get("process_name"),
                 "service_functions": sf or [],
                 "install_path":    t.get("install_path"),
-                "config":          values,
+                "config":          _materialize_deploy_config(config, _pkg, t.get("config")),
             }
             jid = await asyncio.to_thread(_job_create, config, t["agent_id"],
                                           "update_config", params)
@@ -1902,6 +2062,7 @@ async def _put_deployment_config(handler_args, did: int, config):
             "ha_group_id":  ha_group_id,
             "sync_id":      sync_id,
             "propagated":   len(saved) > 1,
+            "sync_keys_applied": sorted(subset) if subset is not None else None,
         },
         media_type="application/json")
 
@@ -2172,6 +2333,14 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
     _enrich_deploy([dep], config)
     cfg = dep.get("config") if isinstance(dep.get("config"), (dict, list)) \
           else _safe_json(dep.get("config_json"))
+    # 레코드의 sparse overlay 를 실체화 — install/upgrade/update_config 가 agent 에
+    #   전달하는 config 는 template default + base 공유값이 병합된 완전한 유효설정.
+    if isinstance(cfg, dict) or cfg is None:
+        try:
+            _pkg = await asyncio.to_thread(_pkg_load, config, dep.get("package_id"))
+            cfg = _materialize_deploy_config(config, _pkg, cfg)
+        except Exception as _e:
+            logger.log_warning(f"job config materialize skip (dep={did}): {_e}")
     sf = dep.get("service_functions")
     if isinstance(sf, str):
         sf = _split_csv(sf)
