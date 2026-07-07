@@ -24,7 +24,8 @@
           "max": 65535,
           "required": true,
           "restart": true,
-          "help": "OAM 프로세스가 실제 listen 하는 포트. 비root 라 1024 이상. 변경+재기동 시 재bind."
+          "help": "OAM 프로세스가 실제 listen 하는 포트. 비root 라 1024 이상. 변경+재기동 시 재bind.",
+          "scope": "service"
         }
       ],
       "scope": "system"

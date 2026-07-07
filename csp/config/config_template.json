@@ -175,7 +175,8 @@
           "default": "0.0.0.0",
           "deploy_value": "@CSP_IP@",
           "restart": true,
-          "help": "CSP 가 미디어서버 응답을 받을 로컬 bind IP. 0.0.0.0 이면 모든 인터페이스."
+          "help": "CSP 가 미디어서버 응답을 받을 로컬 bind IP. 0.0.0.0 이면 모든 인터페이스.",
+          "scope": "system"
         }
       ],
       "scope": "service"
@@ -673,8 +674,8 @@
         "kind": "jsonl",
         "file": "config/local_nodes.jsonl"
       },
-      "scope": "system",
-      "scope_note": "system: HA mode 따라 분배. active_standby → 양 멤버 동일 (VIP), all_active → 멤버별 svc IP. csc 의 _put_deployment_collection 이 자동 결정."
+      "scope": "service",
+      "scope_note": "service: 그룹 공통 — CSP 는 active_standby 전용이고 bind_ip=VIP 라 멤버 간 리스너 정의가 동일해야 한다. 편집은 그룹 탭, 정합은 자동 동기화."
     },
     {
       "key": "remote_nodes",

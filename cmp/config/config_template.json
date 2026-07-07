@@ -25,7 +25,8 @@
           "max": 65535,
           "required": true,
           "restart": true,
-          "help": "CSP → CMP 제어용 UDP 포트."
+          "help": "CSP → CMP 제어용 UDP 포트.",
+          "scope": "service"
         },
         {
           "key": "CspPort",
@@ -35,7 +36,8 @@
           "min": 1,
           "max": 65535,
           "restart": true,
-          "help": "CMP → CSP 알림 송신 대상 포트 (CSP 측 수신)."
+          "help": "CMP → CSP 알림 송신 대상 포트 (CSP 측 수신).",
+          "scope": "service"
         }
       ],
       "scope": "system"

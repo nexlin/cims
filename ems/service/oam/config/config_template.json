@@ -13,7 +13,8 @@
           "default": "127.0.0.1",
           "required": true,
           "restart": true,
-          "help": "I1: loopback 비공개. 0.0.0.0 으로 열지 말 것 (게이트웨이 우회 차단)."
+          "help": "I1: loopback 비공개. 0.0.0.0 으로 열지 말 것 (게이트웨이 우회 차단).",
+          "scope": "system"
         },
         {
           "key": "Server.Port",
@@ -32,7 +33,8 @@
           "type": "string",
           "default": "oam_svc_01",
           "restart": true,
-          "help": "노드별 분리 (oam_svc_01 / oam_svc_02)."
+          "help": "노드별 분리 (oam_svc_01 / oam_svc_02).",
+          "scope": "system"
         }
       ],
       "scope": "service"
