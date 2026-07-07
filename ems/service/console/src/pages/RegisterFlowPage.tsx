@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { flowApi, type FlowMessage } from '../../../api/flow'
-import FlowPage from '../../../pages/FlowPage'
+import { flowApi, type FlowMessage } from '@core/api/flow'
+import FlowPage from '@core/pages/FlowPage'
 
 type PageState = 'form' | 'flow'
 
