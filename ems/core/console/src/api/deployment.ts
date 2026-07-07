@@ -404,11 +404,23 @@ export interface DeploymentCreateInput {
   note?: string
 }
 
+// R2: dep 이 소속된 HA 그룹이 이 패키지를 호스팅할 때만 채워짐 (standalone = null).
+// sync_keys = ha_group.config_sync[pkg] (동기화 체크 영속) — null 이면 프론트가
+// scope=service 섹션 필드 기본 체크로 계산.
+export interface DeploymentConfigHa {
+  group_id: number
+  group_name: string
+  mode: string
+  sync_keys: string[] | null
+  members: { deployment_id: number; agent_id: number; agent_name: string | null }[]
+}
+
 export interface DeploymentConfigView {
   config: Record<string, unknown>
   config_applied_at: string | null
   template: ConfigTemplate | null
   meta: PackageMeta | null
+  ha?: DeploymentConfigHa | null
 }
 
 export type JobType =
@@ -519,11 +531,16 @@ export const deploymentApi = {
   // deployment config (템플릿 기반)
   getDeploymentConfig: (id: number) =>
     api.get<DeploymentConfigView>(`/deployments/${id}/config`),
+  // sync: R2 필드 단위 HA 동기화 — keys(변경∩체크: 피어에 merge 할 키. []=피어 무변경),
+  //   checked(체크 상태 전체: ha_group.config_sync 영속). 미전달=레거시(피어 통짜 전파).
   putDeploymentConfig: (id: number, values: Record<string, unknown>, queue_update = true,
-                        propagate_to_ha_peers?: boolean) =>
-    api.put<{ ok: boolean; job_id: number | null }>(`/deployments/${id}/config`,
+                        propagate_to_ha_peers?: boolean,
+                        sync?: { keys: string[]; checked: string[] }) =>
+    api.put<{ ok: boolean; job_id: number | null; sync_keys_applied?: string[] | null }>(
+      `/deployments/${id}/config`,
       { config: values, queue_update,
-        ...(propagate_to_ha_peers !== undefined ? { propagate_to_ha_peers } : {}) }),
+        ...(propagate_to_ha_peers !== undefined ? { propagate_to_ha_peers } : {}),
+        ...(sync ? { sync_keys: sync.keys, sync_checked: sync.checked } : {}) }),
 
   // deployment collections (jsonl-on-target via agent sync REST).
   // T1/T2 (2026-05-18) 이후 csc 가 ha_group 멤버 자동 fan-out + drift 정보.

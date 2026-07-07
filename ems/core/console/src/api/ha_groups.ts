@@ -56,6 +56,9 @@ export interface HaGroup {
   note?: string
   vip_bindings?: VipBinding[]
   failover_options?: FailoverOptions
+  // R2: 패키지별 설정 동기화 체크 상태 (deployments/{id}/config PUT 의 sync_checked 로
+  // 백엔드가 기록 — ha-groups PUT 로는 갱신하지 않는 콘솔 메타)
+  config_sync?: Record<string, string[]>
   create_time?: string
   update_time?: string
   members: HaMember[]

@@ -14,7 +14,7 @@ import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
-import { GroupServiceConfigModal } from '../components/group/GroupServiceConfigModal'
+import { GroupConfigCompareView } from '../components/group/GroupConfigCompareView'
 import HealthCheckModal from '../components/HealthCheckModal'
 import MetricTrend from '../components/MetricTrend'
 import { agentDisplayName } from '../components/agentDisplay'
@@ -403,18 +403,17 @@ export default function ServersPage() {
             )
           ) : selectedGroup ? (
             pageTab === 'config' ? (
-              <GroupServiceConfigModal key={`${selectedGroup.id}:${packages.length > 0}`}
-                open inline
-                onClose={() => { /* inline — 닫기 없음 */ }}
-                groupName={selectedGroup.name}
+              // R2: 그룹 설정 편집 폐지 — 멤버별 설정을 나란히 비교하는 읽기 전용 뷰.
+              // 편집은 멤버 서버 선택 → 패키지 설정 탭 (필드별 🔗 동기화).
+              <GroupConfigCompareView key={`${selectedGroup.id}:${packages.length > 0}`}
+                group={selectedGroup}
                 members={selectedGroup.members.map(m => ({
                   id: m.agent_id,
                   name: m.agent_name || agents.find(a => a.id === m.agent_id)?.name || `#${m.agent_id}`,
                 }))}
                 deployments={deployments}
                 packages={packages}
-                haMode={selectedGroup.mode}
-                onApplied={async () => { await load() }} />
+                onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
             ) : pageTab === 'install' ? (
               <GroupInstallOverview group={selectedGroup} agents={agents}
                 depsByAgent={depsByAgent}
@@ -844,8 +843,8 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>#{group.id} · vrid {group.vrid}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             <button className="btn btn--sm" onClick={onOpenConfig}
-                    title="그룹 멤버 공통 서비스 설정 — 모듈별 탭, 동적 반영(scope=service) 항목 전용">
-              ⚙ 그룹 설정
+                    title="멤버별 설정값 나란히 비교 (읽기 전용) — 편집은 각 멤버 서버의 패키지 설정 탭">
+              🔍 설정 비교
             </button>
             <button className="btn btn--sm btn--danger" onClick={() => onDeleteSystem(group)}
                     title="HA 그룹 + 모든 멤버 일괄 삭제">
@@ -1458,7 +1457,6 @@ function AgentConfigTab({ agent, deployments, onDone }: {
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {source && (
           <ModuleConfigModal key={selDep} inline source={source}
-            forceServiceScope={!agent.ha_group}
             onClose={() => { /* inline */ }} onDone={onDone} />
         )}
       </div>
