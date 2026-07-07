@@ -18,6 +18,7 @@ export interface Subscription {
 export interface UserSummary {
   id: number          // person ID (auto-increment)
   name: string
+  title?: string | null      // 직함 (예: 팀장) — 그룹문서 cims:user-title 확장으로 단말에 전달
   login_id?: string | null   // 단말/IdMS 로그인 ID (예: test001)
   org_id: string
   email?: string
@@ -33,7 +34,7 @@ export interface UserSummary {
 export type UserDetail = UserSummary
 
 export type UserInput = {
-  name: string; org_id: string; email?: string; details?: string; reject_id?: string[]
+  name: string; org_id: string; title?: string; email?: string; details?: string; reject_id?: string[]
   login_id?: string; passwd?: string   // 단말 IdMS 로그인 자격 (passwd 는 변경 시에만 전송)
 }
 

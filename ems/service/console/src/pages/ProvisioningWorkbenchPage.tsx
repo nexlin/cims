@@ -132,7 +132,7 @@ export default function ProvisioningWorkbenchPage() {
   const userRows = useMemo(() => {
     const q = search.trim().toLowerCase()
     return users.filter(u => inScope(u.org_id || '') &&
-      (!q || u.name.toLowerCase().includes(q) || userHasNumber(u, q)))
+      (!q || u.name.toLowerCase().includes(q) || (u.title || '').toLowerCase().includes(q) || userHasNumber(u, q)))
   }, [users, inScope, search, userHasNumber])
 
   const buildNumberRows = useCallback((svc: 'call' | 'ptt'): NumberRow[] => {
@@ -170,6 +170,7 @@ export default function ProvisioningWorkbenchPage() {
   const userCols: Column<UserSummary>[] = [
     { key: 'exp', header: '', width: 26, render: u => <Caret open={exp?.key === u.id} /> },
     { key: 'name', header: '이름', sortable: true, width: 130, render: u => <span style={{ fontWeight: 500 }}>{u.name}</span> },
+    { key: 'title', header: '직함', sortable: true, width: 90, sortValue: u => u.title || '', render: u => <span className="ts">{u.title || '—'}</span> },
     { key: 'login_id', header: '로그인ID', sortable: true, width: 110, sortValue: u => u.login_id || '', render: u => <span className="ts" title="단말 로그인 ID">{u.login_id || '—'}</span> },
     { key: 'org', header: '조직', width: 220, sortValue: u => buildOrgPath(orgs, u.org_id), render: u => <span className="ts" title={buildOrgPath(orgs, u.org_id)}>{buildOrgPath(orgs, u.org_id)}</span> },
     { key: 'details', header: '설명', render: u => <span className="ts">{u.details || '—'}</span> },
@@ -347,8 +348,8 @@ function UserBasicForm({ mode, initial, orgOpts, defaultOrg, onSubmit, onCancel 
   // 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격(MCPTT ID 와 별개).
   //   콘솔 admin 계정은 '콘솔 계정' 메뉴에서 별도 관리. passwd 는 입력 시에만 전송(편집 시 빈칸=유지).
   const [form, setForm] = useState<UserInput>(() => initial
-    ? { name: initial.name, org_id: initial.org_id, details: initial.details || '', login_id: initial.login_id || '' }
-    : { name: '', org_id: defaultOrg || '', details: '', login_id: '' })
+    ? { name: initial.name, title: initial.title || '', org_id: initial.org_id, details: initial.details || '', login_id: initial.login_id || '' }
+    : { name: '', title: '', org_id: defaultOrg || '', details: '', login_id: '' })
   const [busy, setBusy] = useState(false)
 
   async function submit() {
@@ -363,6 +364,7 @@ function UserBasicForm({ mode, initial, orgOpts, defaultOrg, onSubmit, onCancel 
   return (
     <FieldRow>
       <Field label="이름 *" w={150}><input className="form-input" autoFocus value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+      <Field label="직함" w={110}><input className="form-input" placeholder="예: 팀장" value={form.title || ''} onChange={e => setForm({ ...form, title: e.target.value })} /></Field>
       <Field label="로그인 ID" w={130}><input className="form-input" placeholder="예: test001" value={form.login_id || ''} onChange={e => setForm({ ...form, login_id: e.target.value })} /></Field>
       <Field label={mode === 'add' ? '비밀번호' : '비밀번호(변경 시)'} w={140}><input className="form-input" type="password" placeholder={mode === 'add' ? '' : '미변경'} value={form.passwd || ''} onChange={e => setForm({ ...form, passwd: e.target.value })} /></Field>
       <Field label="조직" w={200}>
@@ -404,7 +406,7 @@ function UserDetail({ user, catalog, orgOpts, canWrite, initialEdit, highlight, 
           onCancel={() => setEditing(false)} />
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
-          <span><b style={{ fontSize: 13 }}>{user.name}</b></span>
+          <span><b style={{ fontSize: 13 }}>{user.name}</b>{user.title && <span className="ts" style={{ marginLeft: 6 }}>{user.title}</span>}</span>
           <span className="ts">조직 {orgPath}</span>
           {user.details && <span className="ts">{user.details}</span>}
           {canWrite && <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>기본정보 편집</button>}
