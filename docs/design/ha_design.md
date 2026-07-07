@@ -315,11 +315,10 @@ agent/
 │   └── ha.sh                           # cmd_ha 본체 + B 통합 render
 ├── keepalived/
 │   ├── ha.json.example                 # 노드별 HA config 예시 (commit 됨)
-│   ├── ha.json                         # 실제 노드 config (.gitignore, 노드별 분리)
-│   ├── keepalived.conf.tpl             # 단일 generic template (services 반복 렌더)
-│   └── out/                            # `cims-ha config` 생성 결과 (.gitignore)
-│       ├── keepalived.conf
-│       └── cims@.service
+│   └── keepalived.conf.tpl             # 단일 generic template (services 반복 렌더)
+│   # 실제 ha.json 과 out/ 은 번들 밖 <prefix>/run/keepalived/ (update_ha job 이 기록,
+│   # agent 버전 트리와 분리). apply 시 cims-health/cims-notify + ha.json 이
+│   # /etc/keepalived/{bin/,} 에 root:root 로 스테이징된다.
 ├── systemd/
 │   └── cims@.service.tpl               # systemd instantiated unit (%i = svc slug)
 ├── cims_agent.py                       # heartbeat daemon
@@ -440,13 +439,17 @@ install 정책 (csc/src/handlers/agents.py:_create_deployment):
   후 install 권장)
 - `standalone` 모듈은 어느 그룹/그룹 없음 OK
 
-자동 분배 (csc/src/handlers/ha_groups.py + agent/cims_agent.py:job_update_ha):
+자동 분배 (ems/core/oam/src/handlers/ha_groups.py + agent/cims_agent.py:job_update_ha):
 1. 운영자 Console 에서 그룹 생성 / 멤버 추가 / 멤버 제거 / 그룹 수정
-2. CSC `_enqueue_update_ha_for_members` 가 멤버별 ha.json render → `agent_job`
-   테이블에 `update_ha` job INSERT (params: install_path + ha_json)
+2. OAM `_enqueue_update_ha_for_members` 가 멤버별 ha.json render → `update_ha` job
+   큐잉 (params.ha_json — install_path 는 구 agent 호환 잔재, 신 agent 는 무시)
 3. cims_agent heartbeat 시 job 회수 → `job_update_ha`:
-   - `install_path/agent/keepalived/ha.json` 갱신
-   - `agent/bin/cims-ha config + apply` 자동 실행 (sudo 권한 필요)
+   - `<prefix>/run/keepalived/ha.json` 갱신 (버전 트리 밖 — agent 업그레이드 무관)
+   - `cims-ha --ha-dir <그 경로> install + config + apply` 자동 실행 (sudo 권한 필요)
+     · 템플릿은 실행 중인 cims-ha 번들(`agent/current/keepalived/`)에서 해석
+     · apply 가 cims-health/cims-notify + ha.json 을 `/etc/keepalived/{bin/,}` 에
+       **root:root 로 스테이징** — keepalived.conf 는 이 고정 경로만 참조.
+       버전 디렉토리 비의존 + `enable_script_security`(root 소유 요구) 통과
    - dev / sudo 미등록 시 ha.json 만 갱신 + apply 실패는 log 만 (graceful)
 
 VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 수동

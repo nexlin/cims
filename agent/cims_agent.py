@@ -1357,20 +1357,26 @@ def _sync_ack_and_return(oam_url: str, session_token: str, sync_id,
 
 
 def job_update_ha(params: dict) -> tuple:
-    """install_path/agent/keepalived/ha.json 갱신 + cims-ha config|apply 자동 실행.
+    """<prefix>/run/keepalived/ha.json 갱신 + cims-ha config|apply 자동 실행.
 
     Params:
-      - install_path: install root (예: /opt/cims/mgmt-server)
-      - ha_json: dict — CSC 가 ha_groups + members 로부터 render 한 내용
+      - install_path: (무시 — 구 OAM 호환 잔재. 과거엔 이 값의 쓰기불가 cwd-fallback
+        이 우연히 flat 레이아웃의 <prefix>/agent/keepalived/ 에 떨어져 동작했으나,
+        agent 버전화 이후 그 위치는 템플릿 없는 잔재 디렉토리라 cims-ha config 가
+        실패했다 — keepalived 갱신 불능의 원인.)
+      - ha_json: dict — OAM 이 ha_groups + members 로부터 render 한 내용
 
+    ha.json 은 버전 트리 밖 <prefix>/run/keepalived/ 에 기록 (agent 업그레이드
+    무관 영속 — managed_ips/supervised 와 동일 위치 규칙). 템플릿은 cims-ha 가
+    자기 번들(current 경유)에서 찾고, apply 가 health/notify 스크립트와 ha.json 을
+    /etc/keepalived/ 에 root 소유로 스테이징한다 (enable_script_security 충족).
     cims-ha apply 는 sudo 권한이 필요. 미등록 환경 (dev 등) 에서는 graceful
     skip — config 까지만 진행하고 apply 실패는 log 만 남기고 성공 반환.
     """
-    install_path = _resolve_install_path(params)
     ha_json = params.get("ha_json") or {}
     if not isinstance(ha_json, dict) or not ha_json:
         return 1, "", "ha_json missing or empty"
-    ha_path = os.path.join(install_path, "agent", "keepalived", "ha.json")
+    ha_path = os.path.join(_PREFIX, "run", "keepalived", "ha.json")
     try:
         os.makedirs(os.path.dirname(ha_path), exist_ok=True)
         with open(ha_path, "w", encoding="utf-8") as f:

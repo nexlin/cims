@@ -21,15 +21,24 @@ _ha_check_config() {
     return 0
 }
 
+# cims-health/cims-notify 스테이징 경로 — `cims-ha apply` 가 root:root 로 복사.
+# 버전 디렉토리(agent/<ver>/bin) 대신 이 고정 경로를 keepalived.conf 가 참조 —
+# agent 업그레이드(current flip)에 안전 + enable_script_security(root 소유 요구) 통과.
+HA_STAGE_BIN="/etc/keepalived/bin"
+
 # 단일 keepalived.conf.tpl + ha.json.services 반복 → out/keepalived.conf
 _ha_render_keepalived() {
     local out="$1"
+    # 템플릿은 실행 중인 번들(cims-ha 와 같은 버전 트리)이 정본. --ha-dir 로 ha.json
+    # 위치가 분리된 경우(agent 의 update_ha job — run/keepalived/) 그 디렉토리에는
+    # 템플릿이 없으므로 번들 fallback 이 필수.
     local tpl="$HA_DIR/keepalived.conf.tpl"
-    [[ ! -f $tpl ]] && { err "템플릿 없음: $tpl"; return 1; }
+    [[ ! -f $tpl ]] && tpl="$SCRIPT_DIR/../keepalived/keepalived.conf.tpl"
+    [[ ! -f $tpl ]] && { err "템플릿 없음: $HA_DIR 및 $SCRIPT_DIR/../keepalived"; return 1; }
 
-    python3 - "$HA_JSON" "$tpl" "$HA_DIR" "$out" <<'PY'
+    python3 - "$HA_JSON" "$tpl" "$HA_STAGE_BIN" "$out" <<'PY'
 import json, re, sys
-ha_json, tpl_path, ha_dir, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+ha_json, tpl_path, bin_dir, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 cfg = json.load(open(ha_json))
 
 required_top = ["node_name", "interface", "local_ip", "peer_ip", "initial_state",
@@ -72,7 +81,7 @@ common = {
     "INITIAL_STATE": cfg["initial_state"],
     "VIP_MASK":      str(cfg["vip_mask"]),
     "AUTH_PASS":     cfg["auth_pass"],
-    "HA_DIR":        ha_dir,
+    "BIN_DIR":       bin_dir,
     "CIMS_HOME":     cfg.get("cims_home", "/opt/cims"),
     "CIMS_USER":     cfg.get("cims_user", "cims"),
 }
@@ -287,6 +296,16 @@ cmd_ha() {
             local unit="$HA_OUT/cims@.service"
             [[ ! -f $out ]] && { err "config 미생성: $out — 먼저 'cims-ha config' 실행"; return 1; }
             [[ ! -f $unit ]] && { err "unit 미생성: $unit"; return 1; }
+            # health/notify 스크립트 + ha.json 스테이징 — root:root 고정 경로.
+            #   · conf 의 script/notify 가 ${HA_STAGE_BIN} 을 참조 (버전 트리 비의존)
+            #   · root 소유 + group-write 없음 → enable_script_security 통과
+            #     (agent 배포 트리는 비-root 소유라 keepalived 가 "insecure" 로 비활성화)
+            #   · cims-health 는 자기 위치 기준 ../ha.json lookup → 함께 스테이징
+            info "health/notify 스크립트 스테이징: $HA_STAGE_BIN (root:root)"
+            sudo install -d -m 755 -o root -g root /etc/keepalived "$HA_STAGE_BIN"
+            sudo install -m 755 -o root -g root \
+                "$SCRIPT_DIR/cims-health" "$SCRIPT_DIR/cims-notify" "$HA_STAGE_BIN/"
+            sudo install -m 644 -o root -g root "$HA_JSON" /etc/keepalived/ha.json
             info "/etc/keepalived/keepalived.conf 적용 — sudo 권한 필요"
             sudo cp "$out" /etc/keepalived/keepalived.conf
             info "/etc/systemd/system/cims@.service 적용"
