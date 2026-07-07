@@ -4,9 +4,6 @@
 편의 래퍼(`cims.sh`)를 쓰지 않고 각 컴포넌트를 직접 빌드/실행하는 경로를 본문으로,
 래퍼로 한 번에 처리하는 방법을 각 절 끝에 함께 적었습니다.
 
-> 검증 기준: 이 문서는 2026-06-09 기준 리포지터리 실태(`cims.sh`, `configure.sh`,
-> `CMakeLists.txt`, `cims-console/vite.config.ts`, `sql/`)를 직접 확인하여 작성했습니다.
-
 ---
 
 ## 0. 구성요소 한눈에 보기
@@ -17,9 +14,9 @@
 | **CSP** | SIP 호 처리 (등록/발착신/PTT) | `build/bin/csp` (C++) | 바이너리 | 5060/5061/25061, 9001 |
 | **cwrtc** | WebRTC ↔ SIP/RTP 게이트웨이 | `build/bin/cwrtc` (C++) | 바이너리 | WS 8080 / WSS 8443, SIP 5062 |
 | **cspsim** | SIP 단말 시뮬레이터 (테스트) | `build/bin/cspsim` (C++) | 바이너리(CLI) | — |
-| **OAM** | 운영·관리 REST API (콘솔 백엔드) | Python (vendored) | `python3 oam/src/oam_app.py` | HTTPS 4419 |
+| **OAM** | 운영·관리 REST API (콘솔 백엔드) | Python (vendored) | `python3 ems/core/oam/src/oam_app.py` | HTTPS 4419 |
 | **CSC** | 가입자/그룹/MCPTT REST API | Python (vendored) | `python3 csc/src/csc_app.py` | HTTPS 4420/4421, MCPTT 4430 |
-| **Console** | 관리자 Web UI (React/Vite) | `cims-console/dist/` 또는 dev 서버 | `npm run dev` (개발) | HTTP 3000 |
+| **Console** | 관리자 Web UI (React/Vite) | `ems/core/console/dist/` 또는 dev 서버 | `npm run dev` (개발) | HTTP 3000 |
 | **MariaDB** | 가입자/그룹/조직/RBAC 등 영속 저장 | — | 시스템 서비스 | 3306 |
 
 **의존 순서**: MariaDB → (C++/Python 빌드) → **CMP → CSP** → cwrtc → OAM → CSC → Console.
@@ -45,7 +42,7 @@ sudo apt-get install -y \
 | CMake | 3.10+ | `CMakeLists.txt` `cmake_minimum_required(VERSION 3.10)` |
 | GCC/G++ | C++17 지원 | `set(CMAKE_CXX_STANDARD 17)` |
 | Python | 3.x | csc/oam 실행. 의존성은 vendored(아래 §5) |
-| Node/npm | 18+ 권장 | Vite 8.x 사용 (`cims-console/package.json`) |
+| Node/npm | 18+ 권장 | Vite 8.x 사용 (`ems/core/console/package.json`) |
 | MariaDB | 10.x | 가입자/그룹 영속 저장소 |
 | clang-format | 임의 | 검증 S1 정적검사용. 없으면 SKIP |
 
@@ -101,11 +98,11 @@ cd build && make dist
 
 ---
 
-## 4. Console (cims-console, React/Vite)
+## 4. Console (ems/core/console, React/Vite)
 
 ### 4.1 개발 모드 (권장 — HMR, 배포 불필요)
 ```bash
-cd cims-console
+cd ems/core/console
 npm install
 npm run dev -- --port 3000 --host
 ```
@@ -121,9 +118,9 @@ npm run dev -- --port 3000 --host
 
 ### 4.2 운영(정적) 빌드
 ```bash
-cd cims-console
+cd ems/core/console
 npm install
-VITE_CONSOLE_TARGET=prod npm run build   # 산출물: cims-console/dist/
+VITE_CONSOLE_TARGET=prod npm run build   # 산출물: ems/core/console/dist/
 ```
 - prod 타깃은 packaging 메뉴를 숨깁니다. 정적 파일을 웹서버로 서빙(또는 `make dist` 시 `build/dist/console/` 로 복사).
 
@@ -131,17 +128,17 @@ VITE_CONSOLE_TARGET=prod npm run build   # 산출물: cims-console/dist/
 
 ## 5. Python 서비스 (OAM / CSC)
 
-두 서비스 모두 의존성을 **vendored** 로 동봉합니다(`oam/vendor/`, `csc/vendor/`).
+두 서비스 모두 의존성을 **vendored** 로 동봉합니다(`ems/core/oam/vendor/`, `csc/vendor/`).
 **상용=air-gapped 전제 → 런타임 pip/apt 설치 금지.** 시스템 `python3` 만 있으면 실행됩니다.
 
 ### 5.1 OAM (콘솔 백엔드, :4419)
 ```bash
-cd oam/src
+cd ems/core/oam/src
 python3 -u oam_app.py
-# 설정: oam/config/oam.json (CIMS_OAM_CONFIG 로 경로 override 가능)
+# 설정: ems/core/oam/config/oam.json (CIMS_OAM_CONFIG 로 경로 override 가능)
 ```
 - 기동 로그에 `Uvicorn running on https://0.0.0.0:4419` 가 보이면 정상.
-- `oam_app.py` 가 `oam/vendor/` 와 `csc/src/`(공유 서비스) 를 sys.path 에 자동 추가.
+- `oam_app.py` 가 `ems/core/oam/vendor/` 와 `csc/src/`(공유 서비스) 를 sys.path 에 자동 추가.
 
 ### 5.2 CSC (가입자/그룹/MCPTT API, :4421/:4420, MCPTT :4430)
 ```bash
@@ -153,7 +150,7 @@ python3 -u csc_app.py
 ### 5.3 (의존성 갱신이 필요할 때만) vendor 재생성
 일반적으로는 불필요. 패키지를 바꿔야 할 때만, 빌드 머신에서:
 ```bash
-pip install --target=oam/vendor -r oam/requirements.txt
+pip install --target=ems/core/oam/vendor -r oam/requirements.txt
 pip install --target=csc/vendor -r csc/requirements.txt
 ```
 - 주요 의존성: fastapi, uvicorn, starlette, pymysql, PyJWT, loguru, requests, readerwriterlock (+OAM: aiohttp, netifaces, asyncstdlib, strenum)
@@ -193,7 +190,7 @@ FLUSH PRIVILEGES;
   --db-host 127.0.0.1 --db-user cims --db-password '<DB_PASSWORD>' \
   --volte-domain ims.mnc033.mcc450.3gppnetwork.org
 ```
-- 생성 대상: `build/dist/{cmp,csp,csc,cwrtc}/config/*.json` + `cims-console/.env.local`/`.env.tb.local`(`VITE_ADMIN_TARGET`) + `build/dist/sql/grant_db_access.sql`
+- 생성 대상: `build/dist/{cmp,csp,csc,cwrtc}/config/*.json` + `ems/core/console/.env.local`/`.env.tb.local`(`VITE_ADMIN_TARGET`) + `build/dist/sql/grant_db_access.sql`
 - 주요 플래그: `--csp-ip/--cmp-ip/--cwrtc-ip/--csc-host`, `--db-host/--db-user/--db-password`,
   `--volte-domain/--ptt-domain`, `--service-log-dir/--msg-log-dir/--record-dir`, `--cims-secret/--idms-secret`
 - 재실행 멱등성: `--local-ip`/`--db-password` 는 `.cims/server.local.json` 에 저장되어 다음 실행 시 기본값으로 사용.
@@ -220,9 +217,9 @@ FLUSH PRIVILEGES;
 ./build/dist/cwrtc/bin/cwrtc ./build/dist/cwrtc/config/cwrtc.json
 
 # 4) OAM → 5) CSC → 6) Console (§5, §4)
-cd oam/src && python3 -u oam_app.py        # :4419
+cd ems/core/oam/src && python3 -u oam_app.py        # :4419
 cd csc/src && python3 -u csc_app.py        # :4421/4420, 4430
-cd cims-console && npm run dev -- --port 3000 --host
+cd ems/core/console && npm run dev -- --port 3000 --host
 ```
 
 ### 8.2 포트 맵 (USAGE.md §7 기준)
@@ -279,7 +276,7 @@ git clone <repo> cims && cd cims
 # 2) 빌드 (C++ + dist + console + phone)
 ./cims.sh build -j$(nproc)
 #   (수동: cd build && cmake .. && make -j$(nproc) && make dist
-#          cd ../cims-console && npm install && npm run dev ...)
+#          cd ../ems/core/console && npm install && npm run dev ...)
 
 # 3) DB
 sudo mysql -u root < sql/cims_schema.sql
@@ -292,9 +289,9 @@ sudo mysql -u root < build/dist/sql/grant_db_access.sql
 # 5) 실행 (CMP → CSP → cwrtc → OAM → CSC → Console)
 ./build/dist/cmp/bin/cmp ./build/dist/cmp/config/cmp.json &
 ./build/dist/csp/bin/csp ./build/dist/csp/config/csp.json -n &
-( cd oam/src && setsid nohup python3 -u oam_app.py >/tmp/oam.log 2>&1 & )
+( cd ems/core/oam/src && setsid nohup python3 -u oam_app.py >/tmp/oam.log 2>&1 & )
 ( cd csc/src && setsid nohup python3 -u csc_app.py >/tmp/csc.log 2>&1 & )
-( cd cims-console && setsid nohup npm run dev -- --port 3000 --host >/tmp/console.log 2>&1 & )
+( cd ems/core/console && setsid nohup npm run dev -- --port 3000 --host >/tmp/console.log 2>&1 & )
 ```
 
 ---

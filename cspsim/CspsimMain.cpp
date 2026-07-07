@@ -240,6 +240,7 @@ static std::vector<std::string> ListFilesInDir(const std::string& strDir, const 
 static void PrintStats(const std::vector<SimSession*>& sessions) {
     int totalReg = 0, failReg = 0, gmsOk = 0, cmsOk = 0;
     int notifyRecv = 0, confNotify = 0, callOk = 0, callFail = 0, callEnd = 0;
+    int affiliateOk = 0, affiliateRej = 0;
     int xcapTokenOk = 0, xcapTokenFail = 0, xcapOk = 0, xcap304 = 0, xcapFail = 0;
     long long totalRegMs = 0, totalCallMs = 0;
     int registered = 0, inCall = 0;
@@ -251,6 +252,8 @@ static void PrintStats(const std::vector<SimSession*>& sessions) {
         cmsOk      += s->m_stats.iCmsOk.load();
         notifyRecv += s->m_stats.iNotifyRecv.load();
         confNotify += s->m_stats.iConfNotify.load();
+        affiliateOk  += s->m_stats.iAffiliateOk.load();
+        affiliateRej += s->m_stats.iAffiliateRej.load();
         xcapTokenOk   += s->m_stats.iXcapTokenOk.load();
         xcapTokenFail += s->m_stats.iXcapTokenFail.load();
         xcapOk        += s->m_stats.iXcapOk.load();
@@ -273,6 +276,9 @@ static void PrintStats(const std::vector<SimSession*>& sessions) {
     printf("  CMS Subscribed: %d\n", cmsOk);
     printf("  NOTIFY Recv   : %d\n", notifyRecv);
     printf("  Conf NOTIFY   : %d\n", confNotify);
+    if (affiliateOk || affiliateRej)
+        printf("  Affiliation   : ok=%d rej=%d  (rej=CSP 멤버십 게이트 403 — 비멤버 그룹)\n",
+               affiliateOk, affiliateRej);
     if (xcapTokenOk || xcapTokenFail || xcapOk || xcap304 || xcapFail) {
         printf("  XCAP Token    : %d  (fail=%d)\n", xcapTokenOk, xcapTokenFail);
         printf("  XCAP GET      : 200=%d 304=%d fail=%d\n", xcapOk, xcap304, xcapFail);
@@ -592,7 +598,7 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                             usleep(100000);
                         }
                         if (!bGranted) {
-                            printf("[Scenario]   GRANT timeout — skipping (REJECT/TAKEN?)\n");
+                            printf("[Scenario]   GRANT timeout — skipping (DENY/QUEUE?)\n");
                             continue;
                         }
 

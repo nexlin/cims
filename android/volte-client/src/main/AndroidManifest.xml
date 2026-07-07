@@ -1,21 +1,75 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- M0 스파이크는 합성 PCM 사용 → 권한 불필요.
-         M1(실통화)부터 RECORD_AUDIO / INTERNET / FOREGROUND_SERVICE 등 추가 예정. -->
+    <!-- M1: 실통화. SIP/RTP 네트워크 + 마이크 + 등록유지 Foreground Service. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 백그라운드 착신 — 잠금/꺼진 화면에서 통화화면 직행 + 진동 -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 화면 최상단 전역 등록상태 배지(다른 앱 위에 표시) — 사용자가 설정에서 허용 시 표시 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 부팅 자동 로그인 (공유 계정 존재 시 REGISTER 재개) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- CIMS 제품군 내부 기동 권한(signature) — CIMS 오너앱이 로그인 직후 등록유지 서비스를 시작. -->
+    <permission
+        android:name="com.cims.ue.permission.CIMS_SUITE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.cims.ue.permission.CIMS_SUITE" />
+    <!-- M1.3 영상 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.microphone" android:required="true" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.CimsUe">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true">
+            <!-- showWhenLocked/turnScreenOn: 착신 fullScreenIntent 가 잠금/꺼진 화면 위로 통화화면을 띄운다 -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- exported+signature 권한: CIMS 오너앱(동일 서명)이 로그인 직후 백그라운드 등록을 시작할 수 있게 -->
+        <service
+            android:name=".SipService"
+            android:exported="true"
+            android:permission="com.cims.ue.permission.CIMS_SUITE"
+            android:foregroundServiceType="microphone|specialUse">
+            <!-- specialUse: 부팅 시 등록유지 FGS (Android 14+ 백그라운드 mic 시작 제약 회피, 통화 시 mic 로 승격) -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="voip_registration_keepalive" />
+        </service>
+
+        <!-- 부팅 자동 로그인 리시버 -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

@@ -158,11 +158,24 @@ void CGroupMap::Clear() {
 }
 
 void CGroupMap::IterateInternal( std::function<void( const CspPttGroup & )> fn ) {
-    m_clsMutex.lock();
-    for ( auto const &[key, group] : m_clsMap ) {
+    // 락 순서 불변식: GroupMap 락을 쥔 채 다른 락(DbManager 등)을 잡지 않는다.
+    //   콜백(CheckGroupIntegrity·SyncGroupsState·affiliation NOTIFY 등)이 DbManager·
+    //   GroupCallService 락을 취득하는데, 맵 락을 쥔 채 콜백을 돌리면
+    //   LoadAllGroups(DbManager→GroupMap)와 역순이 되어 ABBA 데드락이 된다.
+    //   → 락 하에서 값 스냅샷만 뜨고 해제한 뒤 콜백 실행(CspUserMap::Select 와 동일한
+    //   "DB 호출 전 자기 락 해제" 원칙). _pusers 는 shared_ptr 라 스냅샷이 멤버 수명을
+    //   보장하므로 콜백 도중 동시 Remove 되어도 안전하다.
+    std::vector<CspPttGroup> vecSnapshot;
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_clsMutex );
+        vecSnapshot.reserve( m_clsMap.size() );
+        for ( auto const &[key, group] : m_clsMap ) {
+            vecSnapshot.push_back( group );
+        }
+    }
+    for ( const auto &group : vecSnapshot ) {
         fn( group );
     }
-    m_clsMutex.unlock();
 }
 
 bool CGroupMap::FindGroupsByUser( std::string strUserId ) {

@@ -295,6 +295,14 @@ public:
                 _writePttState( strInitiator, strGroupId, sessId, strCallId, "initiator", ts, dir );
             }
         }
+
+        // 개시자(발신 단말)도 입장 이력(events.jsonl)에 기록 — member_join 은 CSP 가 초대한
+        // 멤버의 응답(OnCallStarted) 경로에서만 남아 개시자가 세션이력 참가자에서 누락됐다.
+        // (PttLogEvent 가 m_mtx 를 잡으므로 반드시 lock 밖에서 호출)
+        if ( !strInitiator.empty() && strInitiator != "autojoin" ) {
+            PttLogEvent( strGroupId, "member_join",
+                         "{\"member\":\"" + Esc( strInitiator ) + "\",\"role\":\"initiator\"}" );
+        }
     }
 
     void PttSessionEnd( const std::string &strGroupId ) {
@@ -350,6 +358,35 @@ public:
         // 시간버킷 events.jsonl 에 append (dir=그룹 base → {YYYY}/{MM}/{DD}/{HH}/events.jsonl)
         std::string hourDir = _pttHourDir( dir );
         FILE *f = fopen( ( hourDir + "/events.jsonl" ).c_str(), "a" );
+        if ( f ) {
+            fprintf( f, "%s\n", line.c_str() );
+            fclose( f );
+        }
+    }
+
+    // ── MCData 그룹 메시지 보관 ────────────────────────
+    //   경로: {ServiceLogDir}/message/{gid}/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl
+    //   PTT 세션 여부와 무관 (그룹콜 없이 문자만 오가도 기록). open-append-close 는
+    //   PttLogEvent 와 동일 방침 (사람 메시징 볼륨 전제).
+    void McDataMessageLog( const std::string &strGroupId, const std::string &strJsonData ) {
+        if ( m_strCallsDir.empty() ) return;
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        std::string line = "{\"ts\":\"" + std::string( ts ) + "\"";
+        if ( !strJsonData.empty() && strJsonData.front() == '{' && strJsonData.back() == '}' ) {
+            std::string inner = strJsonData.substr( 1, strJsonData.size() - 2 );
+            if ( !inner.empty() ) line += "," + inner;
+        }
+        line += "}";
+
+        time_t now = time( NULL );
+        struct tm t;
+        localtime_r( &now, &t );
+        char sub[64];
+        snprintf( sub, sizeof( sub ), "/%04d/%02d/%02d/%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour );
+        std::string dir = m_strCallsDir + "/message/" + San( strGroupId, 64 ) + sub;
+        MkdirP( dir );
+        FILE *f = fopen( ( dir + "/messages.jsonl" ).c_str(), "a" );
         if ( f ) {
             fprintf( f, "%s\n", line.c_str() );
             fclose( f );

@@ -1,6 +1,6 @@
 # 패키지 포맷 + config_template.json 스키마
 
-> 버전: 1.1 (2026-05-08) — base 8 + 변종 4 = **12 tarball**, manifest.json 자동 생성, csc 의 `Packages.Dir` 직접 편집 노출.
+> base 8 + 변종 4 = **12 tarball**, manifest.json 자동 생성, csc 의 `Packages.Dir` 직접 편집 노출.
 
 모듈 패키지(`cims.sh pkg`) 가 생성하는 tarball 의 구조와 내부 메타데이터 스키마를 정의합니다.
 
@@ -152,7 +152,8 @@ config_template_json}` 컬럼에 저장. 파일은 `csc.json` 의 `Packages.Dir`
 | csp | sip, roles, log, db | listeners, trunks, routes, acl | + psp / isp |
 | cmp | network, rtp_pool, log | — | + pmp / imp |
 | csc | network, tls, notify (Csp+Psp), log, db, **packages** | — | — |
-| 그 외 (agent/console/cwrtc/phone/cspsim) | 없음 | 없음 | — |
+| cwrtc | network, sip, rtp, log | — | — |
+| 그 외 (agent/console/phone/cspsim) | 없음 | 없음 | — |
 
 > csc 의 `Packages.Dir` / `Packages.BackupDir` 는 카드의 ¹ 설정 모달
 > "패키지 저장소" 그룹으로 사용자가 직접 편집 가능.

@@ -169,8 +169,9 @@ private:
     // CallId -> Info
     std::map<std::string, CallSessionInfo> m_mapCallSession;
 
-    // Track Active Calls (UserId -> CallId)
-    std::map<std::string, std::string> m_mapUserCall;
+    // Track Active Calls ((UserId, GroupId) -> CallId)
+    //   멀티그룹 동시 참여: 사용자는 그룹별 독립 다이얼로그를 가진다 (그룹당 1콜).
+    std::map<std::pair<std::string, std::string>, std::string> m_mapUserCall;
 
     // BYE 처리 중 race condition 방지: OnCallTerminated 호출 시 그룹별 최종 종료 시각 기록.
     // CheckGroupIntegrity가 BYE 처리 틈새에서 재-INVITE하지 않도록 5초 grace period 부여.

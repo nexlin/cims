@@ -1,7 +1,5 @@
 # Agent — 배포/프로세스 제어 데몬
 
-> 버전: 2.0 (2026-05-27 — systemd 단일 운영 정책 전환)
-
 **단일 Python 바이너리** (`agent/cims_agent.py`) 로 구성된 배포 데몬. 각 호스트에서 실행되며 CSC 의 명령을 수행하고 설정 jsonl 을 관리합니다.
 
 ## 1. 역할
@@ -13,7 +11,8 @@
    - `start` / `stop` / `restart`: `install_path/cims.sh` 호출
    - `update_config`: `config.json` 재기록
    - `uninstall`: install_path 제거
-   - `upgrade_agent`: 자기 자신(cims_agent.py) 교체 후 재시작
+   - `upgrade_agent`: 신 버전을 `agent/<신버전>/` 에 전개 → `current` flip → execv self-restart
+   - `rollback_agent`: `current` 를 직전(또는 지정) 버전 디렉토리로 flip → execv (다운로드 불요)
    - `health_check`: 포트 probe
 4. **Sync REST 서버** (HTTPS): CSC 가 collection(jsonl) 을 즉시 read/write 할 수 있게 REST 엔드포인트 노출
 
@@ -25,29 +24,37 @@
 | host 재기동 시 자동 기동 | `loginctl enable-linger $USER` + unit `WantedBy=default.target` |
 | 1 user = 1 agent | unit 이름 단일 (`cims-agent.service`). 같은 호스트에 여러 agent 필요 시 별도 user (`cims2` 등) 로 install |
 
-옛 nohup 모드 / `--no-systemd` 옵션 / `setup-systemd.sh` 전환 sub-script 는 모두 폐기 — install 시점부터 systemd 운영.
+install 시점부터 systemd 로 운영한다.
 
 ## 3. 파일 레이아웃
 
+agent 자신도 **버전 단위 + `current` 심볼릭**으로 설치된다(모듈과 동일 — [02_deployment.md §2](../02_deployment.md)).
+systemd `ExecStart` 와 sudoers 는 고정 경로 `agent/current/...` 를 가리키므로 버전이 바뀌어도 불변이다.
+
 ```
-<INSTALL_DIR, 예: /opt/cims-agent>/
+<INSTALL_DIR, 예: /opt/cims-agent>/   ← prefix (CIMS_AGENT_PREFIX)
 ├── agent/
-│   ├── cims_agent.py             바이너리
-│   ├── bin/{cims-priv, cims-ha, cims-svc, ...}
-│   ├── lib/, keepalived/, systemd/
-├── init.sh                       1회 초기화 — sudoers + linger + enroll + systemd unit + enable --now
-├── update.sh                     bundle 갱신 + systemctl restart
+│   ├── 0.0.40/  0.0.41/          버전 디렉토리 (최신 3개 유지)
+│   │   ├── cims_agent.py             바이너리
+│   │   ├── bin/{cims-priv, cims-ha, cims-svc, ...}
+│   │   └── lib/, keepalived/, systemd/, pkg.json
+│   └── current -> 0.0.41         활성 버전 심볼릭 (ExecStart·sudoers 의 고정 경로)
+├── update.sh                     bundle 갱신(--update-only) + systemctl restart
 ├── uninstall.sh                  완전 제거 (systemd unit + sudoers + keepalived + 파일)
-├── setup-sudoers.sh              root 실행 — sudoers + linger (init.sh 가 자동 호출)
-├── state/
+├── setup-sudoers.sh              root 실행 — sudoers + linger (install-agent.sh 가 자동 호출)
+├── state/                        ← 버전 밖 (업그레이드/롤백 생존)
 │   ├── state.json                {agent_id, session_token, name}
 │   ├── agent.crt / agent.key     self-signed 인증서 (Sync REST 서버용)
+├── run/                          ← 버전 밖 (supervised.json / managed_ips.json / pending_reports.jsonl)
 └── modules/                      배포된 모듈들
-    └── <module>/<version>/<process>/  ...
+    └── <module>/{<version>/, current -> <version>}
 
-~/.config/systemd/user/cims-agent.service       (init.sh 가 작성)
-/etc/sudoers.d/cims-priv                         (setup-sudoers.sh 가 작성)
+~/.config/systemd/user/cims-agent.service       (install-agent.sh 가 작성 — Environment=CIMS_AGENT_PREFIX, ExecStart=agent/current/cims_agent.py)
+/etc/sudoers.d/cims-priv                         (setup-sudoers.sh 가 작성 — agent/current/bin/cims-{priv,ha})
 ```
+
+- **prefix 도출**: `CIMS_AGENT_PREFIX`(systemd Environment) 우선, 없으면 `__file__` 에서 `agent`
+  디렉토리 컴포넌트까지 거슬러 올라가 그 부모를 prefix 로 삼는다 — flat/버전화/`current` 경유 무관.
 
 ## 4. 상태 머신
 
@@ -59,7 +66,7 @@
 | `offline` | 일정 시간 heartbeat 끊김 (sweep `AgentStaleSec` 기본 8s = heartbeat 2s × 4) |
 | `revoked` | 관리자가 세션 폐기 — re-enroll 불가 |
 
-**re-enroll 시나리오 (host 다운/재install)**: token 재발급 후 enroll 호출 시 `offline` 상태도 허용 (`revoked` 만 차단). 옛 `pending/approved` whitelist 였던 동작이 2026-05-27 fix 로 완화됨.
+**re-enroll 시나리오 (host 다운/재install)**: token 재발급 후 enroll 호출 시 `pending`/`approved`/`offline` 상태 모두 허용 (`revoked` 만 차단).
 
 ## 5. 설치 방법 (2단계)
 
@@ -106,13 +113,13 @@ Agent 는 PUT /collection 의 `signal=true` 파라미터 수신 시 `install_pat
 
 - 세션 토큰은 `state/state.json` (파일 모드 0600)
 - Sync REST: 자체 서명 인증서 (`state/agent.crt/key`) + session 토큰 헤더
-- 업그레이드: `cims_agent.py` 자체 교체 시 기존 바이너리 덮어쓰기 후 프로세스 종료 → systemd 가 재기동 (`Restart=always`)
+- 업그레이드/롤백: 신 버전을 `agent/<ver>/` 에 병렬 전개하고 `current` 심볼릭만 flip 한 뒤 `os.execv` 로 같은 PID self-restart(`current/cims_agent.py` 가 ExecStart·argv 라 새 타겟 자동 실행). 실패 시 systemd `Restart=always` 가 `current` 로 부활. 구버전 디렉토리는 prune(최신 3개) 까지 보존되어 롤백은 다운로드 없이 flip 만으로 가능
 - `setup-sudoers.sh` 가 NOPASSWD 화이트리스트로 `cims-priv`, `cims-ha` 만 허용. 그 외 sudo 권한 없음.
 
 ## 9. 운영 시 주의
 
 - **`state/` 디렉토리 손실 = re-enroll 필요** (Console 에서 token 재발급 → install_command 다시 1줄 → init.sh)
-- Agent 업그레이드는 `upgrade_agent` job 또는 `update.sh` 로만 수행 (파일 수동 교체 시 세션 상태 불일치)
+- Agent 업그레이드는 `upgrade_agent` job 또는 `update.sh`, 롤백은 `rollback_agent` job 으로만 수행 (파일/심볼릭 수동 교체 시 세션 상태 불일치). 설치된 버전 목록은 heartbeat 가 `agent_versions` 로 보고 → 콘솔이 롤백 대상 선택에 사용
 - 동일 호스트에 Agent 여러 개 필요 시 **별도 user 로 install** (`cims2` 등). 같은 user 에 다중 install 은 unit 이름 충돌로 불가
 
 ## 10. 관측성 (Observability)
@@ -133,7 +140,7 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 `collect_metrics()` 와 `_health_check_modules()` 는 공유 `_pgrep_module(name)` 로 모듈 프로세스를 찾는다:
 
 1. `pgrep -a <name>` — C++ 데몬(csp/cmp/isp/cwrtc, comm 매칭).
-2. `pgrep -af <name>_app.py` — python 데몬(csc/oam, comm 이 `python3` 라 1)로 안 잡힘).
+2. `pgrep -af <stem>_app.py` — python 데몬(csc/oam/oam-svc, comm 이 `python3` 라 1)로 안 잡힘). 패키지명은 하이픈을 가질 수 있으나(`oam-svc`) python 엔트리포인트 파일명은 언더스코어(`oam_svc_app.py`)이므로 `<stem>` 은 모듈명의 하이픈을 언더스코어로 정규화한 값이다.
 
 탐지 대상 = **설치된 모듈**(`modules/<module>/`) ∪ 기본 집합 − 비데몬(`agent`/`console`). 설치 모듈을 동적 enumerate 하므로 isp 등 기본 집합 밖 모듈도 누락 없이 보고 → OAM 의 `module_down` alert 오탐 방지.
 

@@ -328,13 +328,15 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 <resource-lists xmlns="urn:ietf:params:xml:ns:resource-lists"
   xmlns:rl="urn:ietf:params:xml:ns:resource-lists"
   xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
-  xmlns:pocgi="urn:oma:xml:poc:list-service">
+  xmlns:pocgi="urn:oma:xml:poc:list-service"
+  xmlns:cims="urn:cims:groupinfo:1.0">
   <list-service uri="tel:+82571910001">
     <display-name xml:lang="en-us">Alpha그룹</display-name>
     <list>
       <entry uri="tel:+82571900001">
         <rl:display-name>테스트001</rl:display-name>
         <mcpttgi:user-priority>0</mcpttgi:user-priority>
+        <cims:user-title>팀장</cims:user-title>
       </entry>
       <entry uri="tel:+821030432632">
         <rl:display-name>관리자</rl:display-name>
@@ -348,6 +350,9 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
   </list-service>
 </resource-lists>
 ```
+
+`<cims:user-title>` = 구성원 직함(DB `users.title`). 3GPP 미정의 필드라 CIMS 전용
+네임스페이스(`urn:cims:groupinfo:1.0`) 확장으로 전달하며(빈 값이면 생략), 표준 단말은 무시한다.
 
 ### 3.3 PTT 그룹 통화 흐름
 
@@ -502,7 +507,7 @@ RTCP APP 패킷 (포트: RTP포트 + 1)으로 제어합니다.
 | 7 | FLOOR_REVOKE | CMP→현재 화자 | 현재 화자 SSRC | 현재 화자 session ID | 강제 발언권 회수 (우선순위 선점 시) |
 
 **우선순위 선점 규칙:**
-- 우선순위 값이 **낮을수록** 높은 우선순위 (0 = 최고)
+- 우선순위 값이 **클수록** 높은 우선순위 (TS 24.380: 0~255, 미지정=0 최저)
 - 동일 우선순위는 선점 불가 → FLOOR_REJECT
 - 현재 화자보다 높은 우선순위 요청 시: 현재 화자에게 REVOKE → 요청자에게 GRANT → 전체에게 TAKEN
 - 화자가 그룹에서 나가면 자동으로 FLOOR_IDLE 브로드캐스트
@@ -686,7 +691,8 @@ Authorization: Bearer <access_token>
 <?xml version="1.0" encoding="UTF-8"?>
 <resource-lists xmlns="urn:ietf:params:xml:ns:resource-lists"
   xmlns:rl="urn:ietf:params:xml:ns:resource-lists"
-  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0">
+  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
+  xmlns:cims="urn:cims:groupinfo:1.0">
   <list-service uri="tel:+82571910001">
     <display-name xml:lang="en-us">Alpha그룹</display-name>
     <list>
@@ -694,6 +700,7 @@ Authorization: Bearer <access_token>
         <rl:display-name>테스트001</rl:display-name>
         <mcpttgi:on-network-required/>
         <mcpttgi:user-priority>0</mcpttgi:user-priority>
+        <cims:user-title>팀장</cims:user-title>
       </entry>
       <entry uri="tel:+821030432632">
         <rl:display-name>관리자</rl:display-name>

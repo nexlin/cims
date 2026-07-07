@@ -13,20 +13,69 @@ class PRtpRelay;
 class PRtpMulticast;
 class PSyncRtpRecorder;
 
-// RTCP APP Packet for Floor Control (Simplified)
-// 3GPP TS 24.379 uses specific RTCP APP packets. 
-// We will use a simplified structure for this implementation.
+// RTCP APP Packet for Floor Control — 3GPP TS 24.380 §8 (Media Plane Control).
+// 메시지 타입은 RTCP APP 의 5비트 subtype 으로 운반되고, 본문은 floor control
+// specific field 들의 TLV(Field ID(8)+Length(8)+value) 나열이다. 단말
+// (android/ptt-client floor/FloorCodec.kt)과 동일 규약.
 
 #define RTCP_PT_APP 204
+#define RTCP_APP_HDR 12   // RTCP APP 고정 헤더(V/P/subtype + PT + length + SSRC + name)
 
+// Floor control 메시지 타입 = RTCP APP subtype (TS 24.380 Table 8.2.2-1).
 enum FloorOpCode {
-    FLOOR_REQUEST = 1,
-    FLOOR_GRANT   = 2,
-    FLOOR_REJECT  = 3,
-    FLOOR_RELEASE = 4,
-    FLOOR_IDLE    = 5,
-    FLOOR_TAKEN   = 6,
-    FLOOR_REVOKE  = 7
+    FLOOR_REQUEST  = 0,   // Floor Request          (UE→서버)
+    FLOOR_GRANT    = 1,   // Floor Granted          (서버→UE)
+    FLOOR_TAKEN    = 2,   // Floor Taken            (서버→ALL)
+    FLOOR_REJECT   = 3,   // Floor Deny             (서버→UE)
+    FLOOR_RELEASE  = 4,   // Floor Release          (UE→서버)
+    FLOOR_IDLE     = 5,   // Floor Idle             (서버→ALL)
+    FLOOR_REVOKE   = 6,   // Floor Revoke           (서버→화자)
+    FLOOR_QUEUE_POS_REQ  = 8,  // Floor Queue Position Request (UE→서버)
+    FLOOR_QUEUE_POS_INFO = 9,  // Floor Queue Position Info    (서버→UE)
+    FLOOR_ACK      = 10   // Floor Ack
+};
+
+// Floor control field ID (TS 24.380 §8.2.3).
+enum FloorFieldId {
+    FF_PRIORITY       = 0,
+    FF_DURATION       = 1,
+    FF_REJECT_CAUSE   = 2,   // Floor Deny / Floor Revoke 공용 cause
+    FF_QUEUE_INFO     = 3,
+    FF_GRANTED_PARTY  = 4,   // 문자열(4B 정렬)
+    FF_PERMISSION     = 5,
+    FF_USER_ID        = 6,   // 문자열(4B 정렬)
+    FF_QUEUE_SIZE     = 7,
+    FF_MSG_SEQ        = 8,
+    FF_QUEUED_USER_ID = 9,   // 문자열(4B 정렬)
+    FF_SOURCE         = 10,
+    FF_TRACK_INFO     = 11,  // 문자열(4B 정렬)
+    FF_MSG_TYPE       = 12,
+    FF_FLOOR_INDICATOR= 13,
+    FF_SSRC           = 14
+};
+
+// Floor Indicator 비트마스크 (TS 24.380 §8.2.3.13).
+enum FloorIndicatorBits {
+    FI_NORMAL          = 0x8000,
+    FI_BROADCAST_GROUP = 0x4000,
+    FI_SYSTEM          = 0x2000,
+    FI_EMERGENCY       = 0x1000,
+    FI_IMMINENT_PERIL  = 0x0800,
+    FI_QUEUEING        = 0x0400,
+    FI_DUAL_FLOOR      = 0x0200,
+    FI_TEMPORARY_GROUP = 0x0100,
+    FI_MULTI_TALKER    = 0x0080
+};
+
+// Floor Deny/Revoke cause 코드 (TS 24.380 §8.2.3.4 / §8.2.3.x).
+enum FloorCause {
+    CAUSE_DENY_ANOTHER_CLIENT = 1,   // Another MCPTT client has permission
+    CAUSE_DENY_ONLY_ONE       = 3,   // Only one participant
+    CAUSE_DENY_RECEIVE_ONLY   = 5,   // Receive only (broadcast 비개시자)
+    CAUSE_DENY_NO_RESOURCES   = 6,   // No resources available
+    CAUSE_DENY_QUEUE_FULL     = 7,   // Queue full
+    CAUSE_REVOKE_PREEMPTED    = 4,   // Media Burst pre-empted
+    CAUSE_OTHER               = 255  // Other reason
 };
 
 // Floor 우선순위 tier (TS 24.380) — emergency > imminent peril > normal.
@@ -39,24 +88,49 @@ enum FloorTier {
 // tier 문자열("emergency"/"imminent"/"normal" 또는 숫자) → FloorTier
 int ParseFloorTier(const std::string& s);
 
-// 고정 헤더 (12 bytes RTCP APP + 8 bytes app-data)
-struct FloorControlPacket {
-    unsigned char version_subtype; // V=2, P=0, Subtype=...
+// RTCP APP 고정 헤더 (12 bytes) — TS 24.380 §8.2.1.
+//   |V=2|P| subtype |    PT=204     |        length(words-1)        |
+//   |                         SSRC (sender)                         |
+//   |                       name = "MCPT"                           |
+// subtype(5비트)=메시지타입. 본문은 헤더 직후부터 TLV 나열.
+struct RtcpAppHeader {
+    unsigned char version_subtype; // V=2(0x80), P=0, Subtype=메시지타입
     unsigned char type;            // PT=204 (APP)
-    unsigned short length;
-    unsigned int ssrc;             // SSRC of sender
+    unsigned short length;         // words - 1 (network order)
+    unsigned int ssrc;             // SSRC of sender (network order)
     char name[4];                  // "MCPT"
-    unsigned char opcode;          // FloorOpCode
-    unsigned char id_len;          // speaker identity 문자열 길이 (0이면 없음)
-    unsigned short reserved;
-    // 가변: char speaker_id[id_len] + padding (4-byte aligned)
 };
 
-// Floor 패킷 빌드 헬퍼 (speaker_id 문자열 포함)
-int BuildFloorPacket(char* buf, int bufSize, unsigned char opcode,
-                     unsigned int ssrc, const std::string& speakerId);
-// Floor 패킷에서 speaker_id 추출
-std::string ParseFloorSpeakerId(const char* buf, int len);
+// 하나의 floor control 필드(TLV). value 는 패딩 제외한 실제 값 바이트.
+struct FloorTlv {
+    int id;
+    std::string value;
+    FloorTlv(int i, const std::string& v) : id(i), value(v) {}
+};
+
+// 파싱된 floor control 메시지.
+struct ParsedFloor {
+    int subtype = -1;
+    unsigned int ssrc = 0;
+    std::vector<FloorTlv> fields;
+    const FloorTlv* field(int id) const;
+    std::string str(int id) const;          // 문자열 필드(User ID 등)
+    int u16(int id, int dflt = -1) const;    // 2옥텟 필드(Indicator/Cause/Duration)
+    std::string userId() const { return str(FF_USER_ID); }
+    int priority() const;                    // FF_PRIORITY 첫 옥텟, 없으면 -1
+    int indicator() const { return u16(FF_FLOOR_INDICATOR); }
+};
+
+// TLV 필드 값 빌더(big-endian u16 / priority 2옥텟 / queue-info 2옥텟).
+std::string FloorU16(int v);
+std::string FloorPriority(int prio);
+std::string FloorQueueInfo(int position, int prio);
+
+// Floor 메시지 빌드: 12B RTCP APP 헤더 + TLV 본문(문자열 필드 4B 정렬, 전체 4B 정렬).
+int BuildFloorMessage(char* buf, int bufSize, unsigned char subtype,
+                      unsigned int ssrc, const std::vector<FloorTlv>& fields);
+// 수신 패킷 파싱(MCPT APP 아니면 false).
+bool ParseFloorMessage(const char* buf, int len, ParsedFloor& out);
 
 class PMcpttGroup {
 public:
@@ -71,7 +145,8 @@ public:
     bool hasMember(const std::string& sessionId);
 
     // Floor Control Logic
-    void handleFloorRequest(const std::string& sessionId, unsigned int userId);
+    //   indicatorBits: 수신 REQUEST 의 Floor Indicator(emergency/imminent) 비트마스크(-1=없음).
+    void handleFloorRequest(const std::string& sessionId, unsigned int userId, int indicatorBits = -1);
     void handleFloorRelease(const std::string& sessionId, unsigned int userId);
 
     // Called by PRtpRelay when an RTCP packet is received (legacy)
@@ -136,6 +211,37 @@ private:
     void sendToMember(const std::string& sessionId, const char* data, int len);
     void broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId);
 
+    // ── Floor 송신 헬퍼 (TS 24.380 TLV) — 호출자는 _mutex 보유 ──
+    // emergency/imminent tier → Floor Indicator 비트마스크.
+    int  _indicatorFor(const std::string& sessionId) const;
+    // 화자에게 GRANTED(Duration+Granted Party+Indicator) 송신 + 전체 TAKEN + 녹취 시작.
+    void _grantFloorTo(const std::string& sessionId, unsigned int ssrc, int prio,
+                       bool preempt, const std::string& prevOwner);
+    // 현재 owner 해제 후: 큐가 있으면 최우선 대기자에게 grant, 없으면 IDLE 브로드캐스트.
+    void _advanceFloorOrIdle();
+    // Floor Deny(cause) 송신.
+    void _sendDeny(const std::string& sessionId, unsigned int ssrc, int cause);
+    // Floor Queue Position Info 송신(position=1-based, 없으면 0).
+    void _sendQueuePos(const std::string& sessionId, unsigned int ssrc);
+    // 큐 항목을 우선순위(tier>chair>prio>ts)로 정렬한 순서에서의 1-based 위치(없으면 0).
+    int  _queuePositionOf(const std::string& sessionId) const;
+    // 큐에서 최우선 대기자 추출(없으면 빈 문자열). 추출 시 큐에서 제거.
+    std::string _popBestQueued(unsigned int& outSsrc, int& outPrio);
+
+    // Floor 대기열 (TS 24.380 §8 queueing — SDP `mc_queueing` 광고).
+    struct QueuedReq {
+        std::string sessionId;
+        unsigned int ssrc;
+        int prio;
+        int tier;
+        bool chair;
+        int64_t ts;
+    };
+    std::vector<QueuedReq> _floorQueue;
+    bool _queueEnable = true;       // SDP mc_queueing 광고 → 비선점 요청은 큐잉
+    int  _queueMax = 30;            // 큐 상한(초과 시 Deny cause=queue full)
+    int  _grantDurationSec = 60;    // Floor Granted Duration 필드(최대 발언시간 표시값)
+
     std::string _groupId;
     
     struct Peer {
@@ -150,6 +256,7 @@ private:
         uint16_t videoSeqOut;   // 수신자별 비디오 시퀀스 카운터
         uint32_t audioSsrcOut;  // 수신자에게 보내는 고정 오디오 SSRC
         uint32_t videoSsrcOut;  // 수신자에게 보내는 고정 비디오 SSRC
+        bool floorNatLatched = false;  // floor User ID latch 이력 — NAT 단말 판정(KA RTP latch 자격)
     };
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority

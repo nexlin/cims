@@ -1,0 +1,19 @@
+{
+    "_comment": "oam_base_service_split §7 (D3) — csc 독립 서비스 모듈 전용 설정. csc 는 common.json 의 공유항목(JwtSecret/CimsDatabase/CimsRuntimeDir, read-only)만 가져오고 자기 bind/XCAP/CspNotify/routes 는 여기서 소유. base 가 아니라 게이트웨이의 업스트림이다. (실 csc 설정 키는 csc/bin/csc_pihttp/config/csc.json 참고 — 이 파일은 base/service 분리 문서용 스켈레톤.)",
+    "Bind": {
+        "Ip": "127.0.0.1",
+        "AdminPort": 4421,
+        "McpttPort": 4430,
+        "_comment": "I1: loopback 비공개. 외부 노출은 base 게이트웨이(4419) 경유만. AdminPort=배포 csc.json Server.Port(4421/TCP)."
+    },
+    "Gateway": {
+        "_comment": "csc 가 base 게이트웨이에 self-register 할 라우트(설치 시 POST /api/v1/gateway/routes).",
+        "Routes": [
+            { "segment": "/api/v1/users",         "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/users/import",  "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/ptt/groups",    "upstream": "https://127.0.0.1:4421", "module": "csc" },
+            { "segment": "/api/v1/organizations", "upstream": "https://127.0.0.1:4421", "module": "csc" }
+        ],
+        "RequiresBaseOam": "0.1.0"
+    }
+}

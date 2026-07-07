@@ -1,8 +1,6 @@
 # CIMS UE — M1(VoLTE 1:1 음성+영상) 종합 설계서
 
-본 문서는 신규 안드로이드 단말 앱의 M1 마일스톤(VoLTE 1:1 음성+영상)에 대한 4개 트랙(빌드 / SipController / 코덱 통합 / M1 시퀀스) 설계를 단일 정본으로 종합한다. 각 트랙의 검증 단계에서 도출된 교정(issues)을 모두 반영했으며, 머신 실측이 필요한 항목은 `verify-on-machine`으로 명시한다.
-
-> 작성 기준일 2026-06-09. 작성자 지식 시점(2026-01) 한계로 PJSIP/NDK/SWIG 버전 의존 사실은 실측 대상으로 표기한다.
+본 문서는 신규 안드로이드 단말 앱의 M1 마일스톤(VoLTE 1:1 음성+영상)에 대한 4개 트랙(빌드 / SipController / 코덱 통합 / M1 시퀀스) 설계를 단일 정본으로 종합한다. 머신 실측이 필요한 항목은 `verify-on-machine`으로 명시한다.
 
 ---
 
@@ -14,7 +12,7 @@
 |---|---|
 | 모노레포 | `android/core`(공유 라이브러리: PJSIP 래퍼·코덱·SIP·미디어제어), `android/volte-client`(M1 앱), `android/ptt-client`(M2+) |
 | 시그널링/미디어 | PJSIP(pjsua2) — SIP + RTP/지터버퍼/AEC/conference bridge |
-| 코덱 | 음성 AMR-WB, 영상 H.264 — **모두 And-Media(Android MediaCodec, 경로 C) 확정**(2026-06-10, §4.1) |
+| 코덱 | 음성 AMR-WB, 영상 H.264 — **모두 And-Media(Android MediaCodec, 경로 C)**(§4.1) |
 | 빌드 baseline | AGP 9.2.1 / Gradle 9.4.1 / Kotlin 2.4.0 / compileSdk 37 / minSdk 26 / JVM target 17 |
 | 라이선스 | GPL 공개 |
 | 타깃 | UNIWA 러기드/PoC 안드로이드(arm64-v8a, 실기기 보유) |
@@ -49,7 +47,7 @@
 
 ### 2.1 목표와 산출물
 
-Ubuntu 24.04(WSL2/VM/네이티브 무관)에서 `pjproject`를 `arm64-v8a`용으로 크로스컴파일하여 산출물을 `android/core`에 투입한다. **실행 절차·스크립트·실측 상태의 정본은 [android/docs/M1_pjsip_build_ubuntu.md](../../../android/docs/M1_pjsip_build_ubuntu.md)** (2026-06-10: 개발 PC WSL 미설치 실측 → VMware VM `nex-ubuntu` 에 루트 불필요 프로비저닝 완료. 사용자 Ubuntu 전환 시 동일 스크립트 재사용).
+Ubuntu 24.04(WSL2/VM/네이티브 무관)에서 `pjproject`를 `arm64-v8a`용으로 크로스컴파일하여 산출물을 `android/core`에 투입한다. **실행 절차·스크립트·실측 상태의 정본은 [android/docs/M1_pjsip_build_ubuntu.md](../../../android/docs/M1_pjsip_build_ubuntu.md)**.
 
 | 산출물 | 빌드 출력 경로(SWIG 기준) | core 배치 경로 |
 |---|---|---|
@@ -77,11 +75,11 @@ export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/28.2.13676358
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ```
 
-### 2.3 외부 코덱 라이브러리 선빌드 — **경로 C 확정으로 불필요** (2026-06-10)
+### 2.3 외부 코덱 라이브러리 선빌드 — 불필요 (경로 C)
 
-> **음성=경로 C(And-Media) 확정(§4.1)으로 본 단계는 통째로 삭제된다.** And-Media AMR-WB는 기기 MediaCodec(`audio/amr-wb`)을 PJSIP 내부 코덱으로 구동하므로 외부 코덱 라이브러리 크로스컴파일이 없다. `and_aud_mediacodec.cpp`가 **2.16 태그에 실존**함을 1차 근거로 확인(GitHub API 트리 + raw 소스 grep, 2026-06-10): 코덱 테이블 `{"AMR-WB", "audio/amr-wb", …, 16000, 1, …}`(`:340`), 기본 fmtp `octet-align=1`(`:346`), 인코더 후보 `OMX.google.amrwb.encoder`/`c2.android.amrwb.encoder`(`:220-224`).
+> **음성=경로 C(And-Media)**(§4.1)이므로 외부 코덱 라이브러리 선빌드 단계가 없다. And-Media AMR-WB는 기기 MediaCodec(`audio/amr-wb`)을 PJSIP 내부 코덱으로 구동한다. `and_aud_mediacodec.cpp`가 **2.16 태그에 실존**: 코덱 테이블 `{"AMR-WB", "audio/amr-wb", …, 16000, 1, …}`(`:340`), 기본 fmtp `octet-align=1`(`:346`), 인코더 후보 `OMX.google.amrwb.encoder`/`c2.android.amrwb.encoder`(`:220-224`).
 >
-> (경로 A 폴백 시에만) opencore-amr + vo-amrwbenc arm64 선빌드가 부활한다 — 절차는 git 이력의 본 절 구판(커밋 `b1277d94`) 참조.
+> (경로 A 폴백 시에만) opencore-amr + vo-amrwbenc arm64 선빌드가 필요하다.
 
 ### 2.4 pjproject 소스: 2.16 태그 고정
 
@@ -114,7 +112,7 @@ git describe --tags     # 2.16 기대
 #define PJMEDIA_HAS_AND_MEDIA_VP8      0   /* 실효: 빌드 제외 */
 #define PJMEDIA_HAS_AND_MEDIA_VP9      0   /* 실효: 빌드 제외 */
 
-/* 3) 음성 AMR-WB = 경로 C(And-Media/MediaCodec) 확정 (2026-06-10, §4.1) */
+/* 3) 음성 AMR-WB = 경로 C(And-Media/MediaCodec) (§4.1) */
 /*    opencore 계열은 반드시 명시적으로 끈다('AMR-WB/16000/1' 중복 등록 방지) */
 #define PJMEDIA_HAS_AND_MEDIA_AMRWB    1   /* 기본 1 (no-op, 정본 음성 명시) */
 #define PJMEDIA_HAS_AND_MEDIA_AMRNB    0   /* M1은 WB만 — NB 빌드 제외(협상표면 축소) */
@@ -137,6 +135,17 @@ git describe --tags     # 2.16 기대
 > **중복 등록 함정(경로 C 방향).** `'AMR-WB/16000/1'` factory가 And-Media + opencore **둘 다** 등록되면 `codecSetPriority`(ID 문자열 기반)의 선택이 비결정적이 된다. 경로 C 확정에 따라 **opencore 계열을 0으로 빌드 제외**해 단일 등록을 보장한다(M1.0 게이트: `codecEnum2()`에 AMR-WB 정확히 1개). 어차피 opencore 라이브러리를 선빌드하지 않으므로(§2.3) 링크 자체가 없지만, 매크로도 명시 0으로 이중 안전.
 >
 > **Speex 비활성 주의:** `PJMEDIA_HAS_SPEEX_CODEC 0`은 speex *코덱*만 끈다. AEC/preprocessing은 speex DSP를 쓰므로 `PJMEDIA_HAS_SPEEX_AEC`는 별개 — AEC가 필요하면 전처리 매크로는 유지.
+
+> **⚠️ AMR-WB codec_setting NULL 크래시 패치 (upstream 2.16 버그, 경로 C 필수).**
+> `and_aud_mediacodec.cpp` 의 AMR 설정 초기화 블록(codec open 시 `amr_settings_t` 할당 →
+> `codec_data->codec_setting`)은 내부적으로 AMR-NB·WB 둘 다 처리하지만 `#if
+> PJMEDIA_HAS_AND_MEDIA_AMRNB` 로만 가드돼 있다. **경로 C 는 AMRNB=0/AMRWB=1** 이므로 이
+> 블록이 통째로 컴파일 제외되어 `codec_setting` 이 NULL 로 남고, 첫 미디어 프레임에서
+> `parse_amr`(RX)·`pack_amr`(TX)가 `(amr_settings_t*)NULL->dec/enc_setting` 를 역참조해
+> **SIGSEGV(fault addr ~0x1/0x2, thread "media")로 앱이 죽는다** — 통화는 SIP 상 연결(200 OK)되나
+> 응답 즉시 크래시해 통화화면·오디오가 사라진다. 수정: 가드를 `#if PJMEDIA_HAS_AND_MEDIA_AMRNB
+> || PJMEDIA_HAS_AND_MEDIA_AMRWB` 로 확대. `m1_build_pjsip.sh` `[2-3]` 단계가 clone 후 멱등
+> 적용한다(빌드 재현성). 실기기 검증: cspsim↔단말 AMR-WB 음성 + H.264 영상 통화 크래시 없이 성립.
 
 ### 2.6 configure / build / SWIG
 
@@ -281,7 +290,7 @@ private fun buildAccountConfig(c: SipAccountConfig): AccountConfig {
 ### 3.3 라우팅·realm 함정
 
 - **proxies vs registrarUri**: 테스트 도메인(`ims.mnc033...`)은 공인 DNS 미해석 → registrarUri host를 도메인으로 두면 일부 빌드에서 registrarUri 자체 DNS 조회를 먼저 시도해 지연/실패할 수 있다. **`proxies`에 실제 IP:port(`;lr`) route를 강제**하고 idUri/registrarUri host는 규격상 domain 유지. M1.1 1차 시도에서 막히면 차선책으로 registrarUri/idUri host도 서버 IP로 두는 변형을 준비(verify-on-machine).
-- **realm**(소스 재검증 2026-06-10): challenge realm = `EffectiveRealm`(auth_realm 우선, 없으면 service.domain — `CspServiceMap.cpp:112`)이고 **username 의 `@` 뒤 domain(=`svc.domain`)과는 별개 변수**다. 핵심: **서버는 클라이언트가 보낸 realm 을 검증하지 않고 그대로 A1=MD5(username:realm:password) 계산에 넣는다**(`CscfModule.cpp:150`). 따라서 서버측은 realm 값이 challenge 와 달라도 인증이 깨지지 않는다 — **무한 401 위험은 순수 PJSIP 클라이언트측 동작**(`AuthCredInfo.realm`이 challenge realm 과 불일치하면 PJSIP 가 그 credential 을 챌린지에 적용하지 않아 Authorization 미전송). 그러므로 `AuthCredInfo.realm = "*"`(challenge realm echo)가 **가장 견고**하다(도메인 하드코딩/오타 위험 제거).
+- **realm**: challenge realm = `EffectiveRealm`(auth_realm 우선, 없으면 service.domain — `CspServiceMap.cpp:112`)이고 **username 의 `@` 뒤 domain(=`svc.domain`)과는 별개 변수**다. 핵심: **서버는 클라이언트가 보낸 realm 을 검증하지 않고 그대로 A1=MD5(username:realm:password) 계산에 넣는다**(`CscfModule.cpp:150`). 따라서 서버측은 realm 값이 challenge 와 달라도 인증이 깨지지 않는다 — **무한 401 위험은 순수 PJSIP 클라이언트측 동작**(`AuthCredInfo.realm`이 challenge realm 과 불일치하면 PJSIP 가 그 credential 을 챌린지에 적용하지 않아 Authorization 미전송). 그러므로 `AuthCredInfo.realm = "*"`(challenge realm echo)가 **가장 견고**하다(도메인 하드코딩/오타 위험 제거).
 - NAT 환경에서 rport(pjsip 기본 활성)·필요시 STUN 점검.
 
 ### 3.4 스레딩 / 객체 수명 규칙 (사고 최빈 영역)
@@ -481,20 +490,20 @@ sealed interface CallState {
 
 ## 4. AMR-WB 코덱 통합 + H.264 영상
 
-### 4.1 미디어 경로: 3개 후보로 재정의
+### 4.1 미디어 경로
 
-원안의 2개(A/B) 비교는 PJSIP의 **제3 경로(C)** 를 누락했다. PJSIP는 MediaCodec을 "내부 코덱"으로 직접 구동하는 빌트인 코덱군(`PJMEDIA_HAS_AND_MEDIA_{AMRNB,AMRWB,H264}`, 모두 기본 1)을 제공한다 — HW 코덱을 쓰면서 **RTP 페이로딩·지터버퍼·페이로더는 PJSIP가 처리**(자체 FU-A 페이로더 신규 구현 불필요).
+PJSIP는 MediaCodec을 "내부 코덱"으로 직접 구동하는 빌트인 코덱군(`PJMEDIA_HAS_AND_MEDIA_{AMRNB,AMRWB,H264}`, 모두 기본 1)을 제공한다 — HW 코덱을 쓰면서 **RTP 페이로딩·지터버퍼·페이로더는 PJSIP가 처리**(자체 FU-A 페이로더 신규 구현 불필요). 후보 경로는 3개다.
 
 | 경로 | 코덱 구동 | RTP 페이로딩 | 평가 |
 |---|---|---|---|
 | **A. PJSIP 내장 SW** | opencore-amr(음성)/openh264(영상) | PJSIP | 음성 최단경로·서버와 동일 라이브러리(동등성). 영상 openh264는 §4.5 제약 |
-| **C. PJSIP And-Media** | MediaCodec을 PJSIP 내부 코덱으로 | PJSIP | HW 가속 + PJSIP가 FU-A(mode1) 페이로딩 처리. **영상 1순위** |
+| **C. PJSIP And-Media** | MediaCodec을 PJSIP 내부 코덱으로 | PJSIP | HW 가속 + PJSIP가 FU-A(mode1) 페이로딩 처리. **채택** |
 | **B. 완전 커스텀** | MediaCodec + 자체 RFC6184 페이로더를 custom pjmedia transport에 결선 | 직접 구현 | 동기/비동기 정합·octet-align 재패킹 부담 → **최후 수단** |
 
-**M1 확정 (2026-06-10, 팀 결정 — 구 "음성=A 권장"을 반전):**
-- **음성(M1.2) = 경로 C(And-Media AMR-WB).** 근거: ① **헤드라인 결정 정합** — "OEM MediaCodec 사용 → AMR 특허 노출 완화"(android_ue_client.md §11-12). 경로 A는 GPL APK에 AMR 코덱 소스를 번들해 특허 노출을 재유입. ② **2.16 태그에 `and_aud_mediacodec.cpp` 실존·AMR-WB 완전 등록** 1차 확인(2026-06-10): 코덱 테이블 `{"AMR-WB","audio/amr-wb",…,16000,1,…}`(`:340`), 기본 fmtp `octet-align=1`(`:346`), 인코더 `OMX.google.amrwb.encoder`/`c2.android.amrwb.encoder`(`:220-224`). 표준 codec manager factory 등록이라 pjsua2 `codecEnum2`/`codecSetPriority`/`codecGet·SetParam` 그대로 동작. ③ 타깃 UNIWA 실기기 AMR-WB ENC+DEC 가용 + 루프백 실시간성은 **M0 게이트로 확인 완료**. ④ §2.3 외부 라이브러리 선빌드 단계 통째 삭제 → M1.0 대폭 단순화.
-- **영상(M1.3) = 경로 C(And-Media H264).** HW 가속 + PJSIP가 FU-A 패킹 처리 → §4.5의 openh264 single-NAL 제약을 자연 회피. 음성·영상이 단일 And-Media 경로로 통일.
-- **경로 A(opencore)는 폴백으로 강등.** 구 권장의 핵심 근거였던 "서버와 동일 라이브러리 = 비트스트림 동등성"은 경로 C에서 상실되므로, **단말 MediaCodec ↔ 서버 opencore/vo-amrwbenc 상호운용을 M1.2 실호 캡처로 검증하는 것이 GO의 전제 게이트**(§5.3). 게이트 실패 시에만 A 재검토(특허 재검토 동반).
+**M1 채택 = 경로 C(And-Media), 음성·영상 통일:**
+- **음성(M1.2) = 경로 C(And-Media AMR-WB).** 근거: ① **헤드라인 결정 정합** — "OEM MediaCodec 사용 → AMR 특허 노출 완화"(android_ue_client.md §11-12). 경로 A는 GPL APK에 AMR 코덱 소스를 번들해 특허 노출을 재유입한다. ② **2.16 태그에 `and_aud_mediacodec.cpp` 실존·AMR-WB 완전 등록**: 코덱 테이블 `{"AMR-WB","audio/amr-wb",…,16000,1,…}`(`:340`), 기본 fmtp `octet-align=1`(`:346`), 인코더 `OMX.google.amrwb.encoder`/`c2.android.amrwb.encoder`(`:220-224`). 표준 codec manager factory 등록이라 pjsua2 `codecEnum2`/`codecSetPriority`/`codecGet·SetParam` 그대로 동작. ③ 타깃 UNIWA 실기기 AMR-WB ENC+DEC 가용 + 루프백 실시간성은 **M0 게이트로 확인 완료**. ④ 외부 라이브러리 선빌드(§2.3) 불필요 → M1.0 단순화.
+- **영상(M1.3) = 경로 C(And-Media H264).** HW 가속 + PJSIP가 FU-A 패킹 처리 → §4.5의 openh264 single-NAL 제약을 자연 회피한다.
+- **경로 A(opencore)는 폴백.** 경로 C는 "서버와 동일 라이브러리 = 비트스트림 동등성" 근거가 없으므로, **단말 MediaCodec ↔ 서버 opencore/vo-amrwbenc 상호운용을 M1.2 실호 캡처로 검증하는 것이 GO의 전제 게이트**(§5.3). 게이트 실패 시에만 A 재검토(특허 재검토 동반).
 
 > 경로 C 강제를 위해 §2.5대로 `PJMEDIA_HAS_OPENCORE_AMR{WB,NB}_CODEC`을 0으로 빌드 제외해 `'AMR-WB/16000/1'` 단일 등록을 보장한다(중복 등록 시 코덱 선택 비결정). M1.0에서 `codecEnum2()`로 AMR-WB 단일 등록 선확인.
 
@@ -529,12 +538,51 @@ CodecParam cp = ep.codecGetParam("<AMR-WB codecId>");
 // cp.payload type 필드를 99로 set (pjmedia_codec_mgr_set_default_param 등가)
 ep.codecSetParam("<AMR-WB codecId>", cp);
 
-// 영상: H.264 최우선
+// 영상: H.264 최우선 + 인코딩 해상도 480x640(세로)/15fps/≤500kbps
 ep.videoCodecSetPriority("H264/97", (short)254);
 VidCodecParam vp = ep.getVideoCodecParam("H264/97");
+vp.getEncFmt().setWidth(480); vp.getEncFmt().setHeight(640);   // 발신 영상 480x640
+vp.getEncFmt().setFpsNum(15); vp.getEncFmt().setFpsDenum(1);   // 15fps
+vp.getEncFmt().setAvgBps(400000); vp.getEncFmt().setMaxBps(500000);  // 목표 400/상한 500kbps
 // profile-level-id / packetization-mode 등 서버 협상값 정합
 ep.setVideoCodecParam("H264/97", vp);
 ```
+
+**영상 인코딩 파라미터(발신) 정본:** 해상도 480x640(세로), 15fps, 400kbps(상한 500kbps), IDR(I-frame) 주기 2초.
+- 해상도·fps 는 위 `VidCodecParam` 로 설정.
+- **비트레이트·IDR 주기·CBR 은 And-Media 인코더 네이티브(`and_vid_mediacodec.cpp`) 설정이며 libpjsua2
+  빌드 시 반영**(`m1_build_pjsip.sh` 멱등 패치 [2-4]/[2-5]):
+  - IDR 주기 = `#define KEYFRAME_INTERVAL 2`(초). 인코더 `i-frame-interval` 로만 유효(디스크립터
+    `keyframe_interval` 필드는 dead field).
+  - 비트레이트 = `avg_bps` 를 500kbps 로 캡(PJSIP 이 협상 시 해상도 기반으로 480x640@15 → ~920kbps
+    로 재계산하는 과도값 방지).
+  - **CBR 모드**(`"bitrate-mode"=2`) 필수 — Android MediaCodec 의 min-quality(VQApply) 기능이
+    **VBR 저비트레이트를 품질 floor(921kbps)로 강제 상향**하는 것을 우회(로그 `VQApply: minquality:
+    applies only to VBR encoding` = 무력화 확인).
+
+### 4.3.1 영상 캡처(카메라) 활성 4대 요건 — 발신 영상·셀프뷰 전제
+
+M1.3 영상통화에서 **발신 카메라 캡처와 셀프뷰**가 동작하려면 아래 4가지가 모두 필요하다.
+하나라도 빠지면 원격 수신 영상은 렌더돼도 카메라가 열리지 않아(인코더만 생성되고 입력이 없음)
+자기 영상이 상대에게 안 가고 셀프뷰도 비어 있다.
+
+1. **CameraManager 주입(필수·최우선)** — PJSIP Android 캡처 디바이스(`PjCamera2`)는
+   `org.pjsip.PjCameraInfo2.SetCameraManager(cm)` 로 `CameraManager` 를 받아야만 카메라를 열거한다.
+   **미주입 시 `enumDev2()` 에 실제 카메라가 없고 `Colorbar`(합성 테스트패턴)만 잡혀** 발신 영상이
+   컬러바가 되거나 캡처가 안 열린다. `libInit`(영상 서브시스템 init·카메라 열거)보다 **먼저** 호출해야
+   하므로 `PjLib.boot()` 초입에서 주입한다(`SipService.onCreate` 가 `CameraManager` 를 넘김).
+2. **발신 영상 자동 송신** — `AccountConfig.videoConfig.autoTransmitOutgoing=true`
+   (기본 false). `defaultCaptureDevice` 는 전면 카메라 id(`enumDev2()` 에서 `name` 이 "front"·
+   `driver`="Android" 인 항목)로 지정. 보강으로 미디어 활성 시(`onCallMediaState`)
+   `Call.vidSetStream(START_TRANSMIT)` 을 명시 호출한다.
+3. **셀프뷰 = 카메라 재오픈 금지, 출력 surface 추가** — 통화가 이미 전면 카메라를 점유하므로
+   별도 `VideoPreview`/`pjsua_vid_preview_start` 로 두 번째로 열면 `PJMEDIA_EVID_SYSERR`(단일 오픈
+   제약). 대신 `PjCamera2` 가 이미 연 `CameraDevice` 의 `CameraCaptureSession` 에 셀프뷰 `Surface`
+   를 **출력 target 으로 추가**한다(`PjCamera2.SetPreviewSurface(surface)` → 실행 중이면 세션 재구성).
+   Camera2 다중 출력 surface 원리로 인코딩용 `ImageReader` 와 셀프뷰가 카메라 하나를 공유한다.
+4. **재구성 race 방지** — `surfaceCreated`/`surfaceChanged` 가 같은 `Surface` 로 여러 번 콜백하므로
+   참조 동일 시 재구성을 건너뛴다. `onConfigured` 는 `camera==null`/정지 중이면 세션만 닫고
+   `Stop()`(카메라 전체 teardown)을 부르지 않는다 — 그렇지 않으면 셀프뷰가 열렸다가 곧 사라진다.
 
 ### 4.4 AMR-WB SDP/fmtp 정합 규칙 (교정 반영)
 
@@ -678,7 +726,7 @@ UI        SipController(pj-ctl)     pjsua2/Account          CSP(15060/UDP)
 
 ### 6.2 verify-on-machine (버전 의존 — 머신 실측 필요)
 
-- **PJSIP 2.16 빌드 동작/매크로**: ~~And-Media 오디오 2.16 실존~~ → **원격 소스로 확인 완료**(2026-06-10, `and_aud_mediacodec.cpp` + `PJMEDIA_HAS_AND_MEDIA_AMRWB` 기본 1). 잔여: `git checkout 2.16` 후 §2.5 config_site.h 조합(AND_MEDIA_AMRWB=1 + OPENCORE=0)이 실제 빌드에 반영되는지 configure/빌드 로그 확인.
+- **PJSIP 2.16 빌드 동작/매크로**: And-Media 오디오 2.16 실존(`and_aud_mediacodec.cpp` + `PJMEDIA_HAS_AND_MEDIA_AMRWB` 기본 1)은 소스로 확인됨. 잔여: `git checkout 2.16` 후 §2.5 config_site.h 조합(AND_MEDIA_AMRWB=1 + OPENCORE=0)이 실제 빌드에 반영되는지 configure/빌드 로그 확인.
 - **NDK 정확 버전 문자열**(`28.0.12916984`)과 16KB page-size 플래그 필요 여부: `sdkmanager --list`.
 - **단말 MediaCodec ↔ 서버 opencore/vo-amrwbenc AMR-WB 상호운용**(위험 #13): M1.2 실호 양방향 가청 + mode-set 협상 수렴(M0 스파이크 23850=mode 8 과 운영 mode-set 정렬, 위험 #15) 실측.
 - **AMR-WB codecId 문자열**(`AMR-WB/16000/1` 기대)과 **`PJMEDIA_RTP_PT_AMRWB` 실수치**: `codecEnum2()` 출력 + `types.h`.
@@ -692,11 +740,10 @@ UI        SipController(pj-ctl)     pjsua2/Account          CSP(15060/UDP)
 
 ### 6.3 Open Questions
 
-1. ~~미디어 경로 최종 확정~~ → **확정(2026-06-10, 팀 결정)**: 음성·영상 모두 **경로 C(And-Media/MediaCodec)**. 2.16 태그 `and_aud_mediacodec.cpp` 실존·AMR-WB 등록 1차 확인 + 헤드라인 특허 완화 정합 + M0 게이트(UNIWA ENC+DEC). 경로 A(opencore)는 M1.2 상호운용 게이트(위험 #13) 실패 시 폴백.
-2. **CSP 15060 전송 프로토콜**(UDP/TCP/TLS) 실측 확정 — 현재 "가정".
-3. **테스트 계정의 IMSI·service_ref(voip 바인딩)·password**가 서버 DB에 사전 등록되어 있는가? 없으면 운영팀 선행.
-4. **AMR-WB pt=99를 서버가 강제하는지** vs 단말 offer의 동적 pt를 수용하는지 — 서버 SDP 템플릿으로 재확인.
-5. **mode-set=0,1,2가 인코더 모드까지 강제 수렴**하는지(서버가 mode-set 미광고 시 fallback) + M0 스파이크의 bitRate 23850(mode 8)과의 정합 — 운영 SDP mode-set 범위 내로 정렬.
-6. **H.264 협상 정본**(profile-level-id / 해상도 / 비트레이트 / IDR 주기 / packetization-mode) 정의 위치 — M1.3 진입 전 확보.
-7. **minSdk 26 기기(API 26~27) 코덱 폴백 정책** — 28+ 타깃 제한 vs G.711/SW 폴백.
-8. **M2+ 음성 HW AMR-WB(옵션 B) 필요성 측정 기준**(임계 CPU%/배터리)을 누가 정의할지.
+1. **CSP 15060 전송 프로토콜**(UDP/TCP/TLS) 실측 확정 — 현재 "가정".
+2. **테스트 계정의 IMSI·service_ref(voip 바인딩)·password**가 서버 DB에 사전 등록되어 있는가? 없으면 운영팀 선행.
+3. **AMR-WB pt=99를 서버가 강제하는지** vs 단말 offer의 동적 pt를 수용하는지 — 서버 SDP 템플릿으로 재확인.
+4. **mode-set=0,1,2가 인코더 모드까지 강제 수렴**하는지(서버가 mode-set 미광고 시 fallback) + M0 스파이크의 bitRate 23850(mode 8)과의 정합 — 운영 SDP mode-set 범위 내로 정렬.
+5. **H.264 협상 정본**(profile-level-id / 해상도 / 비트레이트 / IDR 주기 / packetization-mode) 정의 위치 — M1.3 진입 전 확보.
+6. **minSdk 26 기기(API 26~27) 코덱 폴백 정책** — 28+ 타깃 제한 vs G.711/SW 폴백.
+7. **M2+ 음성 HW AMR-WB(옵션 B) 필요성 측정 기준**(임계 CPU%/배터리)을 누가 정의할지.

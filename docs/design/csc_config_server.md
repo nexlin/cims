@@ -1,34 +1,28 @@
 # CSC Config-Server — CSP 설정 단방향 흐름
 
-> 버전: 1.0 (2026-05-18)
->
-> CIMS 의 모든 CSP 설정 변경이 **Console → CSC file_store → agent →
-> install_path → SIGUSR1** 단일 경로로 흐르도록 정착시키는 설계.
-> 본 문서는 CSC 가 config-server 역할을 겸직하는 방식과 그 의도된
-> 데이터 흐름을 명문화하여 후속 drift 를 감지 가능하게 한다.
->
-> 트랙 plan: `~/.claude/plans/csp-bubbly-sketch.md` (Phase A).
+CIMS 의 모든 CSP 설정 변경이 **Console → CSC file_store → agent →
+install_path → SIGUSR1** 단일 경로로 흐른다. 본 문서는 CSC 가
+config-server 역할을 겸직하는 방식과 그 데이터 흐름을 명문화한다.
 
 ## 1. 배경
 
-2026-05-17 walkthrough 회기에서 다음이 노출되었다.
+설정 분산·정합 위험의 구조적 배경은 다음과 같다.
 
 - `csp.json` (scalar Setup) + `config/*.jsonl` (9 collection) 두 source 가
-  분산되어 있고, 운영자가 어느 한 쪽을 수동 편집했을 때 다른 쪽과의
+  분산되어 있어, 운영자가 어느 한 쪽을 수동 편집했을 때 다른 쪽과의
   정합이 깨질 위험.
 - HA 그룹 멤버 (예: csp@ctrl-a / csp@ctrl-b) 의 그룹 공통 설정
   (`access_services`, `routes`, role flags 등) 이 두 멤버에 일관되게
-  적용되어야 하나, 멤버별 deployment.config 가 따로 저장되어 drift 발생.
-- agent 의 `job_update_config` 가 `config.json` 만 쓰고 `SIGUSR1` 을
-  안 보내, scalar 변경이 다음 재기동 전까지 반영되지 않는 gap.
+  적용되어야 한다.
+- agent 의 `job_update_config` 가 `config.json` 을 쓰고 `SIGUSR1` 을
+  보내 scalar 변경이 즉시 반영되도록 해야 한다.
 
 본 설계의 목표:
 
 1. CSC file_store 를 **단일 SoT** 로 명문화. 모든 설정 변경이 CSC 를
    경유. install_path 의 on-disk 파일은 running CSP 가 읽는 캐시.
 2. HA 그룹의 **scope=service** collection 변경 시 모든 멤버에 자동 fan-out.
-3. **`SIGUSR1` 발송이 scalar / collection 양쪽 PUT 모두에서 동작**하도록
-   agent 의 한 줄 gap (Phase D) 을 닫음.
+3. **`SIGUSR1` 발송이 scalar / collection 양쪽 PUT 모두에서 동작**.
 
 ## 2. 데이터 모델
 
@@ -57,23 +51,20 @@ CSC 의 `_get/put_deployment_collection` (`csc/src/handlers/agents.py:1708,1737`
 `csp/config/config_template.json` 의 각 section / collection 에
 `"scope": "system" | "service"` 가 명시되어 있다. **이것이 SoT**.
 
-**T4 (commit `9b5699b` 후속) — 의미 재정의**:
-
 | scope | 의미 | 분배 결정 | UI 위치 |
 |---|---|---|---|
 | `service` | 그룹 공통 — 항상 양 멤버 동일 | 모든 mode 에서 fan-out | 그룹 카드 (GroupServiceConfigModal) |
 | `system` | mode 따라 분배 — *멤버 분리가 필요할 때만* 분리 | active_standby → fan-out (서비스와 동일), all_active → 멤버별, standalone → 단일 | A/S 면 그룹 카드, AA 면 서버 카드 |
 
-옛 정의 (~2026-05-18 이전): `system` = 무조건 멤버별 분리. A/S 모드에서도 멤버별
-편집을 강제하여 split-brain config 위험. csc 의 `_put_deployment_collection`
-(`csc/src/handlers/agents.py`) 가 새 정의로 자동 fan-out 결정.
+csc 의 `_put_deployment_collection` (`csc/src/handlers/agents.py`) 가
+이 정의로 자동 fan-out 을 결정한다.
 
 UI 가 scope 메타로 자동 분류:
-- `cims-console/src/components/group/GroupServiceConfigModal.tsx:60` —
+- `ems/core/console/src/components/group/GroupServiceConfigModal.tsx:60` —
   `scope === undefined || scope === 'service'` 만 표시.
-- `cims-console/src/components/module/ModuleConfigModal.tsx` —
+- `ems/core/console/src/components/module/ModuleConfigModal.tsx` —
   scope=service collection 은 멤버 단일 모드에서 🔒.
-- A/S 그룹 + scope=system 의 새 분류는 T3 에서 ha_group 단위 보기 토글로 노출.
+- A/S 그룹 + scope=system 은 ha_group 단위 보기 토글로 노출.
 
 ## 3. Push 흐름
 
@@ -81,7 +72,7 @@ UI 가 scope 메타로 자동 분류:
 [Console]
    ↓ PUT /api/v1/deployments/{id}/config
    ↓ PUT /api/v1/deployments/{id}/collections/{name}
-   ↓ PUT /api/v1/ha-groups/{id}/collections/{name}  ← Phase C 신규
+   ↓ PUT /api/v1/ha-groups/{id}/collections/{name}
 [CSC]
    ↓ file_store.save (deployments/<id>.json)            // scalar 변경 시
    ↓ _job_create('update_config', params)              // scalar
@@ -89,7 +80,7 @@ UI 가 scope 메타로 자동 분류:
 [agent]
    ↓ job_update_config → install_path/config.json
    ↓ _write_jsonl_atomic → install_path/config/<name>.jsonl
-   ↓ _signal_process(install_path, 'usr1')              ★ Phase D 의 한 줄
+   ↓ _signal_process(install_path, 'usr1')
 [CSP]
    ↓ SIGUSR1 → g_reloadFlag = 1
    ↓ main loop → gclsSetup.Read() + ReloadFromJsonl() + 9 map Sync()
@@ -98,16 +89,16 @@ UI 가 scope 메타로 자동 분류:
 
 ## 4. API 스펙
 
-### 4.1 기존 (변경 없음 또는 응답 보강)
+### 4.1 deployment 단위
 
 | Endpoint | 동작 | 비고 |
 |---|---|---|
-| `GET /api/v1/deployments/{id}/config` | scalar config + template 반환 | Phase C 에서 `collections: {<name>: {records, schema}}` 통합 view 추가 (옵션 — 기존 응답 보존). |
-| `PUT /api/v1/deployments/{id}/config` | scalar 저장 + update_config job 큐잉 | Phase D 이후 job stdout 의 `signaled` 가 채워짐. |
-| `GET /api/v1/deployments/{id}/collections/{name}` | 해당 deployment + ha_group 멤버 records 비교. drift_detected / peers[] 포함. | T2 후속 — 옛 응답 (records/schema) 호환 유지. |
-| `PUT /api/v1/deployments/{id}/collections/{name}` | records 저장 + ha_group fan-out (scope+mode 자동 결정). 응답에 sync_id / peers / propagated. body 의 `propagate_to_ha_peers` 로 override 가능. | T1 후속 — `agents.py:_put_deployment_collection`. |
+| `GET /api/v1/deployments/{id}/config` | scalar config + template 반환 | `collections: {<name>: {records, schema}}` 통합 view 포함. |
+| `PUT /api/v1/deployments/{id}/config` | scalar 저장 + update_config job 큐잉 | job stdout 의 `signaled` 가 채워짐. |
+| `GET /api/v1/deployments/{id}/collections/{name}` | 해당 deployment + ha_group 멤버 records 비교. drift_detected / peers[] 포함. | records/schema 응답. |
+| `PUT /api/v1/deployments/{id}/collections/{name}` | records 저장 + ha_group fan-out (scope+mode 자동 결정). 응답에 sync_id / peers / propagated. body 의 `propagate_to_ha_peers` 로 override 가능. | `agents.py:_put_deployment_collection`. |
 
-### 4.2 신규 (Phase C)
+### 4.2 HA group 단위
 
 | Endpoint | 동작 |
 |---|---|
@@ -128,9 +119,8 @@ UI 가 scope 메타로 자동 분류:
 
 ## 5. 부트스트랩
 
-agent 가 CSC URL 을 아는 경로는 변경 없음 — `install-agent.sh` 가 enrollment
-시 `CSC_URL` 을 inject (현 패턴). dev 와 prod (`/opt/cims`) 모두
-이 경로가 동작하는 것은 walkthrough 단계 1~4 에서 검증됨.
+agent 가 CSC URL 을 아는 경로 — `install-agent.sh` 가 enrollment
+시 `CSC_URL` 을 inject. dev 와 prod (`/opt/cims`) 모두 동일.
 
 ## 6. Fallback
 
@@ -158,7 +148,7 @@ agent 의 기존 heartbeat 루프가 자연스럽게 수행 — 추가 코드 �
 
 - `csp.json` 직접 편집 (e.g. vi) → deprecated. 변경은 모두 Console 또는
   CSC API 경유. 운영 매뉴얼 (`docs/user-manual/deployment_workflow.md`) 에 명기.
-- 옛 `agent_deployment` DB 테이블 — 이미 file_store 로 이전됨 (2026-05-13).
+- deployment 메타는 DB 테이블이 아니라 file_store 에 저장된다.
 
 ### 7.2 유지
 
@@ -167,21 +157,21 @@ agent 의 기존 heartbeat 루프가 자연스럽게 수행 — 추가 코드 �
 - `deployment/bin/render.py` (env+scenario → bundle 생성) — 초기 설치 시
   bundle 생산용. 운영 중 PUT 은 render.py 미경유.
 
-### 7.3 새 PR 의 schema 검증
+### 7.3 schema 검증
 
-Phase B 에서 `csc/src/handlers/agents.py` 의 `_collection_schema` 가
-패키지 업로드 시 `scope` 누락을 경고. 1 릴리스 후 fatal 로 승격.
+`csc/src/handlers/agents.py` 의 `_collection_schema` 가
+패키지 업로드 시 `scope` 누락을 검증한다.
 
 ## 8. 위험 / 알려진 한계
 
 - **Bootstrap 필드 hot-reload 불가**: `Setup.Sip.UdpThreadCount`,
   `Setup.Sip.LocalIp` 등은 SIGUSR1 후에도 이미 bound 된 socket / thread pool
-  에 반영되지 않음. UI 에서 "재기동 필요" 명시 (Phase F).
+  에 반영되지 않음. UI 에서 "재기동 필요" 명시.
 - **Stale pid**: CSP 가 crash 후 수동 재기동 시 pid 파일이 defunct PID
   가리킬 수 있음. `_signal_process` 의 except 블록이 swallow (`agent/cims_agent.py:846-847`).
 - **Multi-pkg agent (mgmt-server: csc+console+phone)**: pid 파일이
   `install_path/<pkg>/run/<pkg>.pid` 에 있음. `_signal_process` 가 인자
-  `pkg_subdir` 받아 우선 탐색 (Phase D).
+  `pkg_subdir` 받아 우선 탐색.
 - **DB scalar 재로드**: `gclsSetup.Read()` 는 csp.json 재파싱하지만
   `DbManager` 가 connection pool 을 재초기화하지 않음. DB 설정 변경은
   CSP 재기동 필요 — 알려진 한계.
@@ -199,10 +189,10 @@ Phase B 에서 `csc/src/handlers/agents.py` 의 `_collection_schema` 가
 | agent `/collection` | `agent/cims_agent.py` | 889-921 |
 | `_signal_process` | `agent/cims_agent.py` | 831-848 |
 | `job_update_config` (gap) | `agent/cims_agent.py` | 498-507 |
-| group fan-out 클라이언트 | `cims-console/src/components/module/ModuleConfigEditor.tsx` | 88-107 |
-| GroupServiceConfigModal | `cims-console/src/components/group/GroupServiceConfigModal.tsx` | (전체) |
+| group fan-out 클라이언트 | `ems/core/console/src/components/module/ModuleConfigEditor.tsx` | 88-107 |
+| GroupServiceConfigModal | `ems/core/console/src/components/group/GroupServiceConfigModal.tsx` | (전체) |
 
-## 10. 후속 (범위 밖 — Phase G)
+## 10. 후속 (범위 밖)
 
 - **CMP** — `cmp.json` 의 hot-reload. CMP 코드에 SIGUSR1 reload 로직
   신설 필요. 본 트랙의 CSP 패턴을 복제.

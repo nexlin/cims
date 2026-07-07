@@ -21,5 +21,6 @@ dependencyResolutionManagement {
 rootProject.name = "cims-android"
 
 include(":core")
+include(":cims")
 include(":volte-client")
-// :ptt-client 는 M2 에서 추가 (현재는 README 만 존재)
+include(":ptt-client")

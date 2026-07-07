@@ -75,6 +75,7 @@ public:
 
 	// SipStackAgentSms.hpp
 	bool SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute );
+	bool SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute, const char * pszContentType );
 
 	// SipUserAgentSend.hpp
 	bool SendReInvite( const char * pszCallId, CSipCallRtp * pclsRtp );

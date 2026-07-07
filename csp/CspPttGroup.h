@@ -74,6 +74,14 @@ public:
     /** ad hoc 동적 그룹(Rel-18) — 비영속 in-memory, 통화 종료 시 GroupMap 에서 제거 */
     bool _isAdhoc;
 
+    // ── MCData 그룹 메시징 게이트 (TS 24.481 §7.2.4.2) ──
+    /** SDS 메시징 허용 (mcdata-allow-short-data-service) */
+    bool _allowSds;
+    /** 파일전송 허용 (mcdata-allow-file-distribution) */
+    bool _allowFd;
+    /** SDS payload 최대 크기 octets (mcdata-on-network-max-data-size-for-SDS, 0=무제한) */
+    int _maxSdsSize;
+
     /** 소속 조직 코드 */
     std::string _orgCode;
 

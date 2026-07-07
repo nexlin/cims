@@ -1,12 +1,11 @@
 # CIMS 통화 녹취 설계서
 
-> 버전: 1.3 (2026-06-01)
 > 상위 문서: [04_Monitoring_Statistics.md](04_Monitoring_Statistics.md) Part 2 참조
 > 이 문서는 녹취의 CMP 구현 상세(RTP 덤프, 파일 형식)를 다룸. UI/API는 상위 문서 Part 2에 통합.
 >
-> ⚠️ **§2~§3.5 및 §5(DB)는 초기 설계(2026-04) 기준.** 현행 런타임 구현(트랜스코딩 주체=**OAM**,
-> 공유 NAS, ffmpeg 번들, 변환 워커 풀, 콘솔 자동재생)은 **[§3.6 재생 변환 런타임(현행)](#36-재생-변환-런타임-현행-구현-2026-06)** 을 정본으로 본다.
-> (녹취 메타는 DB 미사용 — call.json/segments.jsonl 파일 SoT, OAM `recording.py` 가 파일 스캔.)
+> 재생 변환 런타임의 정본은 **[§3.6 재생 변환 런타임](#36-재생-변환-런타임)** 이다(트랜스코딩 주체=**OAM**,
+> 공유 NAS, ffmpeg 번들, 변환 워커 풀, 콘솔 자동재생).
+> 녹취 메타는 DB 미사용 — call.json/segments.jsonl 파일 SoT, OAM `recording.py` 가 파일 스캔.
 
 ---
 
@@ -108,10 +107,10 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
 5. 세션 종료 → McpttGroup::stopRecording() → 파일 close
 ```
 
-**파일 구조 (2026-06 시간버킷 재구조화):**
+**파일 구조 (시간버킷):**
 ```
 {ServiceLogDir}/ptt/{id}/                       # id = ptt_groups.id (surrogate, mcptt_group_id 아님)
-  ├── group.json                                # 그룹 디스크립터 (CSP, base 1개) — session.json 대체
+  ├── group.json                                # 그룹 디스크립터 (CSP, base 1개)
   └── {YYYY}/{MM}/{DD}/{HH}/                     # 시간버킷 (시간검색) — VoLTE 관례와 통일
       ├── events.jsonl                           # 멤버 join/leave 등 (CSP)
       ├── floor.jsonl                            # floor 이벤트 GRANT/REVOKE/REJECT/RELEASE/IDLE (CMP)
@@ -121,8 +120,7 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
           ├── seg_NNNN_video.rtp                 # 영상그룹 + 실제 영상 있을 때만 (빈 파일 미생성)
           └── seg_NNNN.json                      # speaker_id/priority/preempt, audio_file=상대경로(seg/NNN/…)
 ```
-> 옛 구조 `ptt/{group}/sessions/{key}.d` (상시그룹 세그먼트 단일 디렉터리 무한 누적) 폐지.
-> `recordings/`·`daily/`·`sessions/`·placeholder(session_id/call_id) 제거. 그룹 키 = surrogate `id`.
+> 그룹 키 = surrogate `id`.
 
 ### 3.4 CSC: on-demand 트랜스코딩 (파일시스템 기반)
 
@@ -159,9 +157,9 @@ VoIP 녹취: GET /api/v1/recordings/{call_id}/audio
 
 ---
 
-## 3.6 재생 변환 런타임 (현행 구현, 2026-06)
+## 3.6 재생 변환 런타임
 
-초기 설계(§2~§3.5)와 달리 현행 런타임은 다음과 같다. 이 절이 정본이다.
+재생 변환 런타임은 다음과 같다. 이 절이 정본이다.
 
 ### 3.6.1 저장 위치 — 공유 NAS (분산 CMP 정합)
 
@@ -178,9 +176,9 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
 
 ### 3.6.2 트랜스코딩 주체 = OAM + 번들 ffmpeg
 
-- 트랜스코딩은 **OAM** `oam/src/handlers/recording.py` 가 수행(과거 문서의 CSC 아님). 출력은 **MP4**(H.264+AAC) `seg_NNNN.mp4`.
+- 트랜스코딩은 **OAM** `ems/core/oam/src/handlers/recording.py` 가 수행. 출력은 **MP4**(H.264+AAC) `seg_NNNN.mp4`.
 - ffmpeg/ffprobe는 **OAM 패키지에 동봉**(air-gapped 대응). 빌드 시 `cims.sh` 의 `_ensure_oam_vendor_ffmpeg`가
-  정적 바이너리를 `oam/vendor/bin/` 으로 다운로드(idempotent, `CIMS_SKIP_VENDOR_FETCH`/`CIMS_FFMPEG_URL`),
+  정적 바이너리를 `ems/core/oam/vendor/bin/` 으로 다운로드(idempotent, `CIMS_SKIP_VENDOR_FETCH`/`CIMS_FFMPEG_URL`),
   `cims.sh pkg oam` 이 vendor를 패키지에 포함. 경로 해석: 명시인자 → `CIMS_FFMPEG` env → PATH → fallback.
 - 메타데이터는 **DB 미사용** — 파일(call.json/segments.jsonl)이 SoT, `recording.py`가 디렉토리 스캔.
 
@@ -215,7 +213,7 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
 
 ### 3.6.4 콘솔 자동재생 (폴링)
 
-`cims-console/src/components/SegmentPlayer.tsx` — raw 세그먼트 재생 시 닫았다 다시 열 필요 없이 자동 재생.
+`ems/core/console/src/components/SegmentPlayer.tsx` — raw 세그먼트 재생 시 닫았다 다시 열 필요 없이 자동 재생.
 
 - 재생 클릭 → 미변환이면 `waitSegmentReady(url)` 가 같은 audio/video URL을 폴링
   (첫 **0.7초**, 이후 **1.5초** 간격, 최대 **120초**): 202면 대기, 200이면 src 지정 후 **자동 재생**.
@@ -231,9 +229,9 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
 
 ## 4. 파일 저장 구조
 
-> ⚠️ 아래는 옛 개념 레이아웃(raw/converted 분리)이다. **실제 on-disk 구조는 §3.3 참조**:
+> **실제 on-disk 구조는 §3.3 참조**:
 > VoLTE=`volte/YYYY/MM/DD/HH/.../*.d/`, PTT=`ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/seg/{NNN}/` (시간버킷+shard).
-> 변환 mp4(`seg_NNNN.mp4`)는 원본 옆(.d/window 디렉터리)에 캐시된다.
+> 변환 mp4(`seg_NNNN.mp4`)는 원본 옆(.d/window 디렉터리)에 캐시된다. 아래는 raw/converted 분리의 개념 레이아웃이다.
 
 ```
 /recordings/
@@ -399,13 +397,3 @@ DELETE /api/v1/recordings/{id}                     삭제 (raw + converted 모�
 - raw 파일: 변환 완료 후 보관 기간 설정 (예: 7일 후 삭제)
 - converted 파일: 장기 보관 (예: 90일)
 - 정기 삭제 크론잡으로 관리
-
----
-
-## 변경 이력
-
-| 날짜 | 버전 | 내용 |
-|------|------|------|
-| 2026-04-02 | 1.0 | 초기 설계 |
-| 2026-04-02 | 1.1 | CMP/CSC 역할 분리 — CMP는 raw 저장만, 트랜스코딩은 CSC on-demand |
-| 2026-06-01 | 1.3 | §3.6 현행 런타임 추가 — 트랜스코딩 주체 OAM, 공유 NAS(/mnt/cims) 정합, ffmpeg 패키지 번들, **온디맨드 + 변환 워커 풀(bounded)**, 콘솔 자동재생 폴링. (메타 DB 미사용=파일 SoT) |

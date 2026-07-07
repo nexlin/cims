@@ -1,10 +1,54 @@
 #include "CwrtcSetup.h"
 #include "SimpleJson.h"
 #include "Log.h"
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
 CCwrtcSetup gclsCwrtcSetup;
+
+// config.json overlay: flat 키 ("Setup.Sip.ServerIp": "1.2.3.4") 를 root 의 중첩 경로에 set.
+// 같은 경로가 이미 있으면 덮어씀. SipServerSetup.cpp 의 overlay 계약과 동일.
+static void _setByDotPath(SimpleJson::JsonNode& parent, const std::string& dotPath,
+                          const SimpleJson::JsonNode& value)
+{
+    size_t pos = dotPath.find('.');
+    if (pos == std::string::npos) {
+        parent.Set(dotPath, value);
+        return;
+    }
+    std::string head = dotPath.substr(0, pos);
+    std::string rest = dotPath.substr(pos + 1);
+    SimpleJson::JsonNode sub = parent.Has(head) ? parent.Get(head) : SimpleJson::JsonNode();
+    if (sub.type != SimpleJson::JSON_OBJECT) {
+        sub = SimpleJson::JsonNode();
+        sub.type = SimpleJson::JSON_OBJECT;
+    }
+    _setByDotPath(sub, rest, value);
+    parent.Set(head, sub);
+}
+
+// install_path 기준으로 overlay 파일 경로 탐색. 시도 순서:
+//   1) CIMS_DEPLOYMENT_CONFIG 환경변수
+//   2) <cwrtc.json 디렉토리>/../../config.json     (install_path/config.json, 배포 배치)
+//   3) (없음) — overlay 생략
+static std::string _findDeploymentConfig(const std::string& cwrtcJsonPath)
+{
+    if (const char* env = getenv("CIMS_DEPLOYMENT_CONFIG")) {
+        if (*env) {
+            std::ifstream f(env);
+            if (f) return env;
+        }
+    }
+    std::string dir = cwrtcJsonPath;
+    size_t s = dir.find_last_of('/');
+    if (s != std::string::npos) dir = dir.substr(0, s);
+    // dir = install_path/cwrtc/config  →  ../.. = install_path
+    std::string cand = dir + "/../../config.json";
+    std::ifstream f(cand);
+    if (f) return cand;
+    return "";
+}
 
 CCwrtcSetup::CCwrtcSetup()
     : m_iWsPort(3000)
@@ -33,6 +77,24 @@ bool CCwrtcSetup::Load(const char* pszConfigFile)
 
     SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(oss.str());
     if (root.type != SimpleJson::JSON_OBJECT) return false;
+
+    // Deployment overlay: install_path/config.json 을 flat key → nested 로 merge.
+    std::string strOverlayPath = _findDeploymentConfig(pszConfigFile);
+    if (!strOverlayPath.empty()) {
+        std::ifstream of(strOverlayPath);
+        std::ostringstream ob;
+        ob << of.rdbuf();
+        SimpleJson::JsonNode over = SimpleJson::JsonNode::Parse(ob.str());
+        if (over.type == SimpleJson::JSON_OBJECT) {
+            int applied = 0;
+            for (const auto& kv : over.objects) {
+                _setByDotPath(root, kv.first, kv.second);
+                ++applied;
+            }
+            CLog::Print(LOG_INFO, "CwrtcSetup: overlay %s applied (%d keys)",
+                strOverlayPath.c_str(), applied);
+        }
+    }
 
     SimpleJson::JsonNode setup = root.Get("Setup");
     if (setup.type != SimpleJson::JSON_OBJECT) return false;

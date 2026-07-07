@@ -1,7 +1,5 @@
 # 빌드 / 패키징 워크플로우
 
-> 버전: 1.0 (2026-05-09)
->
 > CIMS 코드를 빌드 → 변종 12개 tarball → 다운로드까지 한 화면에서 수행하는
 > 워크플로우. 콘솔 메뉴 **"패키징"** (`/release/package`) + CLI `cims.sh
 > build` / `cims.sh pkg` 가 동등한 진입점.
@@ -38,15 +36,14 @@ agent   배포/프로세스 제어 데몬
 
 # 3. 패키지화 (build/dist → packages/*.tar.gz 12개 + manifest.json)
 ./cims.sh pkg --no-bump               # 위에서 결정된 버전 그대로 (권장)
-./cims.sh pkg                         # 옛: pkg.json patch +1 자동 (변종간 drift 위험)
 ./cims.sh pkg -v 0.0.10               # explicit (-v 우선)
 ./cims.sh pkg csp psp isp             # 묶음 산출 (3종 동시)
 ```
 
-> **빌드 시점 버전 결정 모델 (2026-05-08~)**: 패키지 단계의 auto-bump 가
-> 변종 12종의 patch +1 누적 위험이 있어 폐기. 빌드 단계에서 `-v X.Y.Z` 로
-> 모든 base pkg.json 을 동기화한 뒤 `pkg --no-bump` 로 그대로 산출하는 흐름이
-> 현재 정책. 콘솔 ▶ 버튼이 이 모델로 묶여 있다.
+> **빌드 시점 버전 결정 모델**: 빌드 단계에서 `-v X.Y.Z` 로 모든 base
+> pkg.json 을 동기화한 뒤 `pkg --no-bump` 로 그대로 산출한다. 콘솔 ▶ 버튼이
+> 이 모델로 묶여 있다. (패키지 단계 auto-bump 는 변종 12종 patch +1 누적
+> 위험이 있어 권장하지 않는다.)
 
 ## 3. 콘솔 통합 — `/release/package`
 
@@ -136,7 +133,7 @@ build/
 ```
 <m>-<ver>.tar.gz
 ├── meta.json                  ← name/version/desc/build_date/git/service
-├── config_template.json       ← UI 렌더링 스키마 (csp/cmp/csc 만)
+├── config_template.json       ← UI 렌더링 스키마 (csp/cmp/csc/cwrtc 만)
 ├── <m>/                       ← 모듈 자기 디렉토리 (변종은 rename 됨)
 │   ├── bin/<m> [+ <m>.sh]
 │   ├── config/<m>.json [+ collection jsonl]
@@ -175,7 +172,7 @@ CSC 가 콘솔에서 업로드받은 패키지를 보관하는 디렉토리 (def
 | `build/dist/packages/` | `cims.sh pkg` 산출 / 콘솔 다운로드 (`/release/package`) | `csc/src/handlers/build.py` 의 `_DIST_PKG_DIR` |
 | `csc.json:Packages.Dir` | 사용자 업로드 (배포 메뉴 `/deploy/packages`) | `csc/src/handlers/agents.py:_create_package` |
 
-코드 레벨 완전 분리 — 같은 변수명을 공유하지 않는다. `Packages.Dir` 는 2026-05-08 (`f4d90ef`) 부터 csc 카드의 ¹ 설정 모달 "패키지 저장소" 그룹에서 사용자가 직접 편집 가능 (옛 `"hidden": true` 제거).
+코드 레벨 완전 분리 — 같은 변수명을 공유하지 않는다. `Packages.Dir` 는 csc 카드의 ¹ 설정 모달 "패키지 저장소" 그룹에서 사용자가 직접 편집 가능하다.
 
 ## 7. 흔한 함정
 
@@ -190,6 +187,6 @@ CSC 가 콘솔에서 업로드받은 패키지를 보관하는 디렉토리 (def
 - `design/features/package_and_template.md` — 패키지 포맷 + config_template.json
 - `VERIFICATION_PROCESS.md` — S4 (패키지화) + S6 immutability gate
 - `api/admin_api.md` — 배포 메뉴 (`/deploy/packages`) 의 CSC API
-- 콘솔 코드: `cims-console/src/pages/ServicesPage.tsx` + `cims-console/src/api/build.ts`
+- 콘솔 코드: `ems/core/console/src/pages/ServicesPage.tsx` + `ems/core/console/src/api/build.ts`
 - 백엔드: `csc/src/handlers/build.py`
 - CLI: `cims.sh:cmd_build` (line 696~) / `cims.sh:cmd_pkg` (line 1671~)

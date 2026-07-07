@@ -493,8 +493,6 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::st
 
 /**
  * @brief Build reginfo+xml body for reg-event NOTIFY (RFC 3680)
- *   실제 UE 는 REGISTER 직후 Event: reg 로 자신의 등록 상태를 구독하고,
- *   서버는 등록 AoR + Contact + 잔여 expires 를 reginfo 문서로 내려준다.
  */
 static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInfo &clsUserInfo, bool bRegistered,
                                      int iVersion ) {
@@ -518,6 +516,30 @@ static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInf
     }
     strBody += "</registration>\r\n";
     strBody += "</reginfo>\r\n";
+    return strBody;
+}
+
+/**
+ * @brief C2: affiliation-info NOTIFY 본문 (TS 24.379 §9.3/F.4)
+ */
+static std::string BuildAffiliationInfoBody( const std::string &strUserId ) {
+    std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
+    std::string strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    strBody += "<mcptt-affiliation-info xmlns=\"urn:3gpp:ns:mcpttAffiliation:1.0\">\r\n";
+    bool bDb = gclsDbManager.IsConnected();
+    gclsGroupMap.IterateInternal( [&]( const CspPttGroup &clsGroup ) {
+        bool bMember = false;
+        for ( const auto &pUser : clsGroup._pusers ) {
+            if ( pUser && ( pUser->_id == strUserId || pUser->_mcpttId == strUserId ) ) { bMember = true; break; }
+        }
+        if ( !bMember ) return;
+        bool bAff = bDb ? gclsDbManager.IsAffiliated( clsGroup._id, strUserId ) : true;
+        if ( !bAff ) return;
+        strBody += "  <affiliation group=\"sip:" + clsGroup._id + "@" + strDomain + "\">\r\n";
+        strBody += "    <status>affiliated</status>\r\n";
+        strBody += "  </affiliation>\r\n";
+    } );
+    strBody += "</mcptt-affiliation-info>\r\n";
     return strBody;
 }
 
@@ -548,13 +570,13 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     SipMakeBranch( szBranch, sizeof( szBranch ) );
     pMsg->AddVia( strLocalIp.c_str(), iLocalPort, szBranch );
 
-    // From: tag = sub.strToTag (the tag we sent in 200 OK).
-    //   reg-event 는 SUBSCRIBE 의 To(=가입자 자신의 AoR)가 dialog 상대이므로 From = 가입자 AoR,
-    //   gms/cms 는 server PSI.
     if ( sub.strEventType == "reg" ) {
+        // reg-event: From = 가입자 자신의 AoR (RFC 3680)
         pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
+        std::string strServerPsi = ( sub.strEventType == "gms" )         ? "gms_psi"
+                                 : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
+                                                                         : "cms_psi";
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -591,6 +613,10 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         pMsg->AddHeader( "Event", "reg" );
         strBody = BuildRegInfoBody( sub, clsUserInfo, bRegistered, iSeq - 1 );
         pMsg->m_clsContentType.Set( "application", "reginfo+xml" );
+    } else if ( sub.strEventType == "affiliation" ) {
+        pMsg->AddHeader( "Event", "presence" );
+        strBody = BuildAffiliationInfoBody( sub.strUserId );
+        pMsg->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-affiliation-info+xml" );
     } else {
         pMsg->AddHeader( "Event", "xcap-diff" );
         strBody = BuildXcapDiffBody( sub, etag, strChangedId );
@@ -653,7 +679,9 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
         pMsg->AddRoute( clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP );
     }
 
-    pMsg->AddHeader( "Event", sub.strEventType == "reg" ? "reg" : "xcap-diff" );
+    pMsg->AddHeader( "Event", sub.strEventType == "reg"         ? "reg"
+                           : sub.strEventType == "affiliation" ? "presence"
+                           :                                     "xcap-diff" );
     pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
     pMsg->m_iContentLength = 0;
 
@@ -669,9 +697,16 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
  */
 void SendInitialNotify( const SubscriptionInfo &sub ) {
     if ( sub.strEventType == "reg" ) {
-        // reg-event: 등록 상태 reginfo 문서 1건 (etag/changedId 미사용)
+        // reg-event: 등록 상태 reginfo 문서 1건
         SendNotifyToSubscriber( sub, "", "" );
-    } else if ( sub.strEventType == "gms" ) {
+        return;
+    }
+    if ( sub.strEventType == "affiliation" ) {
+        // C2: 제휴상태 초기 NOTIFY (현재 affiliated 그룹 목록).
+        SendNotifyToSubscriber( sub, "init", "" );
+        return;
+    }
+    if ( sub.strEventType == "gms" ) {
         // GMS 초기 동기화: 가입자가 속한 그룹별로 group document NOTIFY 발송.
         //   (기존엔 빈 group sel `tel:` 하나만 보내 UE GET 이 404 였음.)
         std::vector<std::string> vecGroupIds;
@@ -733,6 +768,19 @@ void SendSipNotify( const std::string &uri, const std::string &etag, const std::
         for ( auto &sub : subList ) {
             SendNotifyToSubscriber( sub, etag, strId );
         }
+    }
+}
+
+/**
+ * @brief C2: 가입자의 affiliation 상태 변경 시 그 가입자의 "affiliation"(presence) 구독자에게
+ *   affiliation-info NOTIFY 를 푸시한다. RecvRequestPublish(affiliate/de-affiliate) 에서 호출.
+ */
+void SendAffiliationNotify( const std::string &strUserId ) {
+    std::list<SubscriptionInfo> subList;
+    gclsSubscriptionManager.GetSubscriptionsByUser( strUserId, "affiliation", subList );
+    CLog::Print( LOG_INFO, "SendAffiliationNotify: User=%s subs=%d", strUserId.c_str(), (int)subList.size() );
+    for ( auto &sub : subList ) {
+        SendNotifyToSubscriber( sub, "aff", "" );
     }
 }
 

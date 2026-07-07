@@ -22,7 +22,7 @@ import pymysql
 import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
-from services.mcptt import notify_csp
+from services.mcptt import notify_csp, refresh_group_members
 from services import admin_auth
 
 # ──────────────────────────────────────────────────────────────
@@ -138,13 +138,18 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         return HandlerResult(status=500, body={'error': str(e)})
 
 
-def _has_email_column(cur) -> bool:
-    """Check whether users.email column exists (migration may not have run yet)."""
+def _has_user_column(cur, column: str) -> bool:
+    """Check whether users.<column> exists (migration may not have run yet)."""
     cur.execute(
         "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='email'"
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME=%s",
+        (column,)
     )
     return cur.fetchone()['cnt'] > 0
+
+
+def _has_email_column(cur) -> bool:
+    return _has_user_column(cur, 'email')
 
 
 async def _list_users(config):
@@ -155,8 +160,10 @@ async def _list_users(config):
         with conn.cursor() as cur:
             has_email = _has_email_column(cur)
             email_col = ", u.email" if has_email else ""
+            has_title = _has_user_column(cur, 'title')
+            title_col = ", u.title" if has_title else ""
             cur.execute(
-                f"SELECT u.id, u.name, u.login_id, u.role{email_col}, u.org_id, u.details, "
+                f"SELECT u.id, u.name, u.login_id{email_col}, u.org_id{title_col}, u.details, "
                 "u.create_time, u.update_time "
                 "FROM users u "
                 "ORDER BY u.id"
@@ -201,6 +208,8 @@ async def _list_users(config):
             for row in rows:
                 if not has_email:
                     row['email'] = ''
+                if not has_title:
+                    row['title'] = ''
                 row['create_time'] = _dt(row['create_time'])
                 row['update_time'] = _dt(row['update_time'])
                 row['reject_id']          = rejects_by_user.get(row['id'], [])
@@ -214,8 +223,10 @@ async def _get_user(person_id: str, config):
         with conn.cursor() as cur:
             has_email = _has_email_column(cur)
             email_col = ", email" if has_email else ""
+            has_title = _has_user_column(cur, 'title')
+            title_col = ", title" if has_title else ""
             cur.execute(
-                f"SELECT id, name, login_id, role{email_col}, org_id, details, create_time, update_time "
+                f"SELECT id, name, login_id{email_col}, org_id{title_col}, details, create_time, update_time "
                 "FROM users WHERE id=%s",
                 (person_id,)
             )
@@ -224,6 +235,8 @@ async def _get_user(person_id: str, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
             if not has_email:
                 row['email'] = ''
+            if not has_title:
+                row['title'] = ''
             row['create_time'] = _dt(row['create_time'])
             row['update_time'] = _dt(row['update_time'])
 
@@ -270,45 +283,31 @@ async def _create_user(body, config, payload=None):
     if not name:
         return HandlerResult(status=400, body={'error': 'name is required'})
 
-    login_id   = body.get('login_id', '').strip()
-    password   = body.get('password', '')
+    # users = 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격 — MCPTT ID 와 별개.
+    #   (콘솔 admin 계정은 OAM console_accounts(file_store) — 여기와 무관.)
     email      = body.get('email', '')
     org_id     = body.get('org_id', '')
+    title      = body.get('title', '')
     details    = body.get('details') or None
+    login_id   = (body.get('login_id') or '').strip() or None
+    passwd     = body.get('passwd') or None
     reject_ids = body.get('reject_id', [])
-
-    # 역할 — 기본 'user'. 비-user(관리권한) 부여는 admin 만 가능 (계획서 §3).
-    role = (body.get('role') or 'user').strip()
-    if role not in admin_auth.ROLES:
-        return HandlerResult(status=400, body={'error': f'invalid role: {role}'})
-    if role != 'user' and payload is not None and payload.get('role') != 'admin':
-        return HandlerResult(status=403, body={'error': '역할 지정은 관리자만 가능합니다'})
-
-    # login_id 미지정 시 name 기반 자동 생성
-    if not login_id:
-        login_id = name.replace(' ', '_').lower()
-
-    # password → SHA-256 해시
-    import hashlib
-    pw_hash = hashlib.sha256(password.encode()).hexdigest() if password else ''
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             has_email = _has_email_column(cur)
+            cols = ['name', 'login_id', 'passwd', 'org_id', 'details']
+            vals = [name, login_id, passwd, org_id, details]
             if has_email:
-                cur.execute(
-                    "INSERT INTO users "
-                    "(name, login_id, password, role, email, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())",
-                    (name, login_id, pw_hash, role, email, org_id, details)
-                )
-            else:
-                cur.execute(
-                    "INSERT INTO users "
-                    "(name, login_id, password, role, org_id, details, create_time, update_time) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())",
-                    (name, login_id, pw_hash, role, org_id, details)
-                )
+                cols.insert(1, 'email'); vals.insert(1, email)
+            if _has_user_column(cur, 'title'):
+                cols.append('title'); vals.append(title)
+            placeholders = ', '.join(['%s'] * len(vals))
+            cur.execute(
+                f"INSERT INTO users ({', '.join(cols)}, create_time, update_time) "
+                f"VALUES ({placeholders}, NOW(), NOW())",
+                vals
+            )
             person_id = cur.lastrowid
 
             if reject_ids:
@@ -326,20 +325,11 @@ async def _update_user(person_id: str, body, config, payload=None):
 
     fields = []
     values = []
-    for col in ('name', 'email', 'org_id', 'details'):
+    # login_id/passwd = 단말(IdMS) 로그인 자격(가입자). 콘솔 admin 계정(OAM)과는 별개.
+    for col in ('name', 'login_id', 'passwd', 'email', 'org_id', 'title', 'details'):
         if col in body:
             fields.append(f'{col}=%s')
             values.append(body[col])
-
-    # 역할 변경은 admin 만 (계획서 §3 계정/권한 관리).
-    if 'role' in body:
-        new_role = (body.get('role') or '').strip()
-        if new_role not in admin_auth.ROLES:
-            return HandlerResult(status=400, body={'error': f'invalid role: {new_role}'})
-        if payload is not None and payload.get('role') != 'admin':
-            return HandlerResult(status=403, body={'error': '역할 변경은 관리자만 가능합니다'})
-        fields.append('role=%s')
-        values.append(new_role)
 
     if fields:
         fields.append('update_time=NOW()')
@@ -611,6 +601,7 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 _GROUP_COLS = (
     "id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
     "imminent_peril_call, emergency_alert, adhoc_enabled, "
+    "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
     "require_affiliation, alias, authorized_user_id, created_at"
 )
@@ -629,6 +620,10 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     g['imminent_peril_call'] = bool(g.get('imminent_peril_call', 1))
     g['emergency_alert'] = bool(g.get('emergency_alert', 1))
     g['adhoc_enabled'] = bool(g.get('adhoc_enabled', 0))
+    g['allow_sds'] = bool(g.get('allow_sds', 1))
+    g['allow_fd'] = bool(g.get('allow_fd', 0))
+    g['max_sds_size'] = int(g.get('max_sds_size', 10000) or 0)
+    g['max_auto_recv'] = int(g.get('max_auto_recv', 1048576) or 0)
     g['on_network'] = bool(g.get('on_network', 1))
     g['require_affiliation'] = bool(g.get('require_affiliation', 1))
     if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
@@ -652,7 +647,7 @@ def _owner_map(cur, auth_ids):
         return {}
     fmt = ','.join(['%s'] * len(ids))
     cur.execute(
-        f"SELECT u.id, u.name, u.login_id, "
+        f"SELECT u.id, u.name, "
         f"  (SELECT id FROM ptt_subscriptions WHERE user_id=u.id ORDER BY id LIMIT 1) AS ptt_id "
         f"FROM users u WHERE u.id IN ({fmt})",
         tuple(ids)
@@ -662,7 +657,7 @@ def _owner_map(cur, auth_ids):
         ptt = r.get('ptt_id')
         out[r['id']] = {
             'authorized_user': (f"tel:{ptt}" if ptt else None),
-            'authorized_user_name': r.get('name') or r.get('login_id'),
+            'authorized_user_name': r.get('name'),
         }
     return out
 
@@ -780,6 +775,10 @@ async def _create_group(body, config, payload=None):
     imminent_peril_call = 1 if body.get('imminent_peril_call', True) else 0
     emergency_alert     = 1 if body.get('emergency_alert', True) else 0
     adhoc_enabled       = 1 if body.get('adhoc_enabled', False) else 0
+    allow_sds           = 1 if body.get('allow_sds', True) else 0
+    allow_fd            = 1 if body.get('allow_fd', False) else 0
+    max_sds_size        = int(body.get('max_sds_size', 10000))
+    max_auto_recv       = int(body.get('max_auto_recv', 1048576))
     org_code       = body.get('org_code', '') or None
     session_start  = body.get('session_start') or None
     session_end    = body.get('session_end') or None
@@ -816,11 +815,13 @@ async def _create_group(body, config, payload=None):
             cur.execute(
                 "INSERT INTO ptt_groups (mcptt_group_id, name, video_enabled, priority, encryption, "
                 "emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled, "
+                "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                 "org_code, session_start, session_end, group_type, on_network, "
                 "max_members, require_affiliation, alias, authorized_user_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
                  emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled,
+                 allow_sds, allow_fd, max_sds_size, max_auto_recv,
                  org_code, session_start, session_end, group_type,
                  on_network, max_members, require_affiliation, alias, authorized_user_id)
             )
@@ -863,12 +864,13 @@ async def _update_group(group_id: str, body, config, payload=None):
             if 'video_enabled' in body:
                 update_fields.append('video_enabled=%s')
                 update_vals.append(1 if body['video_enabled'] else 0)
-            for fld in ('priority', 'max_members'):
+            for fld in ('priority', 'max_members', 'max_sds_size', 'max_auto_recv'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(int(body[fld]))
             for fld in ('encryption', 'emergency_call', 'imminent_peril_call', 'emergency_alert',
-                        'adhoc_enabled', 'on_network', 'require_affiliation'):
+                        'adhoc_enabled', 'on_network', 'require_affiliation',
+                        'allow_sds', 'allow_fd'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(1 if body[fld] else 0)
@@ -893,6 +895,7 @@ async def _update_group(group_id: str, body, config, payload=None):
                 cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
                 for m in body['members']:
                     _insert_member(cur, gpk, m)
+    refresh_group_members(group_id)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
 
@@ -946,6 +949,7 @@ async def _add_member(group_id: str, body, config):
                 "ON DUPLICATE KEY UPDATE priority=VALUES(priority), role=VALUES(role), mcptt_id=VALUES(mcptt_id)",
                 (gpk, user_id, priority, role, mcptt_id)
             )
+    refresh_group_members(group_id)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=201, body={'group_id': group_id, 'user_id': user_id})
 
@@ -962,6 +966,7 @@ async def _remove_member(group_id: str, user_id: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Member not found'})
+    refresh_group_members(group_id)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'group_id': group_id, 'user_id': user_id})
 
@@ -971,225 +976,10 @@ async def _remove_member(group_id: str, user_id: str, config):
 # ──────────────────────────────────────────────────────────────
 
 
-# ──────────────────────────────────────────────────────────────
-#  Excel Import / Template
-# ──────────────────────────────────────────────────────────────
-
-_IMPORT_BASE = '/api/v1/users/import'
-
-
-async def handle_import(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    config = kwargs.get('config', {})
-    method = handler_args.method.upper()
-    parts = _path_parts(handler_args.full_path, _IMPORT_BASE)
-
-    if len(parts) >= 1 and parts[0] == 'template' and method == 'GET':
-        return _generate_template()
-
-    if method == 'POST':
-        return await _process_import(handler_args, config)
-
-    return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
-
-
-def _generate_template():
-    """빈 Excel 템플릿 생성 후 반환"""
-    import openpyxl
-    import io
-
-    wb = openpyxl.Workbook()
-    # Sheet 1: users
-    ws1 = wb.active
-    ws1.title = 'users'
-    ws1.append(['name', 'login_id', 'org_code', 'details', 'reject_ids'])
-    ws1.append(['홍길동', 'hong', 'DEV_01', '개발1팀', '+8210001,+8210002'])
-
-    # Sheet 2: volte_subscriptions
-    ws2 = wb.create_sheet('volte_subscriptions')
-    ws2.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'dnd', 'forward_id'])
-    ws2.append(['홍길동', '+821357007100', '45003310000100@ims.domain', '123456', 'N', ''])
-
-    # Sheet 3: ptt_subscriptions
-    ws3 = wb.create_sheet('ptt_subscriptions')
-    ws3.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'dnd'])
-    ws3.append(['홍길동', '+82571900100', '', '123456', 'N'])
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-
-    return HandlerResult(status=200, body=buf.getvalue(), headers={
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': 'attachment; filename="cims_import_template.xlsx"',
-    })
-
-
-async def _process_import(handler_args: HandlerArgs, config):
-    """Excel 파일을 파싱하여 가입자/구독 일괄 등록"""
-    import openpyxl
-    import io
-
-    # multipart body에서 파일 데이터 추출
-    file_data = handler_args.raw_body if hasattr(handler_args, 'raw_body') else None
-    if not file_data:
-        # JSON body에 base64 인코딩된 파일이 올 수도 있음
-        body = handler_args.body or {}
-        if 'file_base64' in body:
-            import base64
-            file_data = base64.b64decode(body['file_base64'])
-        else:
-            return HandlerResult(status=400, body={'error': 'file_base64 필드가 필요합니다'})
-
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(file_data))
-    except Exception as e:
-        return HandlerResult(status=400, body={'error': f'Excel 파일 파싱 실패: {e}'})
-
-    result = {'created_users': 0, 'created_voip': 0, 'created_ptt': 0, 'errors': []}
-    name_to_id = {}  # name → person_id 매핑
-
-    with _get_db(config) as conn:
-        with conn.cursor() as cur:
-            # 기존 사용자 name → id 매핑 로드
-            cur.execute("SELECT id, name FROM users")
-            for row in cur.fetchall():
-                name_to_id[row['name']] = row['id']
-
-            # Sheet 1: users
-            if 'users' in wb.sheetnames:
-                ws = wb['users']
-                headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-                for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                    rd = dict(zip(headers, row))
-                    name = str(rd.get('name', '') or '').strip()
-                    if not name:
-                        result['errors'].append({'row': i, 'sheet': 'users', 'error': 'name 필수'})
-                        continue
-                    if name in name_to_id:
-                        continue  # 이미 존재, 스킵
-
-                    login_id = str(rd.get('login_id', '') or '').strip()
-                    org_id = str(rd.get('org_code', '') or '').strip()
-                    details = str(rd.get('details', '') or '').strip()
-                    reject_ids = str(rd.get('reject_ids', '') or '').strip()
-
-                    try:
-                        cur.execute(
-                            "INSERT INTO users (name, login_id, org_id, details) VALUES (%s,%s,%s,%s)",
-                            (name, login_id, org_id, details)
-                        )
-                        pid = cur.lastrowid
-                        name_to_id[name] = pid
-                        result['created_users'] += 1
-
-                        if reject_ids:
-                            for rid in reject_ids.split(','):
-                                rid = rid.strip()
-                                if rid:
-                                    cur.execute(
-                                        "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s,%s)",
-                                        (pid, rid)
-                                    )
-                    except Exception as e:
-                        result['errors'].append({'row': i, 'sheet': 'users', 'error': str(e)})
-
-            # Sheet 2: volte_subscriptions
-            if 'volte_subscriptions' in wb.sheetnames:
-                ws = wb['volte_subscriptions']
-                headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-                for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                    rd = dict(zip(headers, row))
-                    name = str(rd.get('name', '') or '').strip()
-                    msisdn = str(rd.get('msisdn', '') or '').strip()
-                    if not name or not msisdn:
-                        result['errors'].append({'row': i, 'sheet': 'volte_subscriptions', 'error': 'name/msisdn 필수'})
-                        continue
-
-                    pid = name_to_id.get(name)
-                    if not pid:
-                        # 자동 생성
-                        try:
-                            cur.execute("INSERT INTO users (name) VALUES (%s)", (name,))
-                            pid = cur.lastrowid
-                            name_to_id[name] = pid
-                            result['created_users'] += 1
-                        except Exception as e:
-                            result['errors'].append({'row': i, 'sheet': 'volte_subscriptions', 'error': f'사용자 생성 실패: {e}'})
-                            continue
-
-                    imsi    = str(rd.get('imsi', '') or '').strip() or msisdn.lstrip('+')
-                    svc_id  = rd.get('service_ref')
-                    svc_id = str(svc_id).strip() if svc_id not in (None, "", 0) else None
-                    # v3: service_ref 는 문자열
-                    passwd = str(rd.get('password', '') or '').strip() or '123456'
-                    dnd = 1 if str(rd.get('dnd', '')).upper() in ('Y', 'YES', '1', 'TRUE') else 0
-                    forward_id = str(rd.get('forward_id', '') or '').strip()
-
-                    try:
-                        cur.execute(
-                            "INSERT IGNORE INTO volte_subscriptions (id, user_id, service_ref, imsi, passwd, dnd, forward_id) "
-                            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                            (msisdn, pid, svc_id, imsi, passwd, dnd, forward_id)
-                        )
-                        if cur.rowcount > 0:
-                            result['created_voip'] += 1
-                            notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
-                        else:
-                            result['errors'].append({'row': i, 'sheet': 'volte_subscriptions', 'error': f'MSISDN 중복: {msisdn}'})
-                    except Exception as e:
-                        result['errors'].append({'row': i, 'sheet': 'volte_subscriptions', 'error': str(e)})
-
-            # Sheet 3: ptt_subscriptions
-            if 'ptt_subscriptions' in wb.sheetnames:
-                ws = wb['ptt_subscriptions']
-                headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-                for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                    rd = dict(zip(headers, row))
-                    name = str(rd.get('name', '') or '').strip()
-                    msisdn = str(rd.get('msisdn', '') or '').strip()
-                    if not name or not msisdn:
-                        result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': 'name/msisdn 필수'})
-                        continue
-
-                    pid = name_to_id.get(name)
-                    if not pid:
-                        try:
-                            cur.execute("INSERT INTO users (name) VALUES (%s)", (name,))
-                            pid = cur.lastrowid
-                            name_to_id[name] = pid
-                            result['created_users'] += 1
-                        except Exception as e:
-                            result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': f'사용자 생성 실패: {e}'})
-                            continue
-
-                    imsi    = str(rd.get('imsi', '') or '').strip() or msisdn.lstrip('+')
-                    svc_id  = rd.get('service_ref')
-                    svc_id = str(svc_id).strip() if svc_id not in (None, "", 0) else None
-                    # v3: service_ref 는 문자열
-                    passwd = str(rd.get('password', '') or '').strip() or '123456'
-                    dnd = 1 if str(rd.get('dnd', '')).upper() in ('Y', 'YES', '1', 'TRUE') else 0
-
-                    try:
-                        cur.execute(
-                            "INSERT IGNORE INTO ptt_subscriptions (id, user_id, service_ref, imsi, passwd, dnd) "
-                            "VALUES (%s,%s,%s,%s,%s,%s)",
-                            (msisdn, pid, svc_id, imsi, passwd, dnd)
-                        )
-                        if cur.rowcount > 0:
-                            result['created_ptt'] += 1
-                            notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
-                        else:
-                            result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': f'MSISDN 중복: {msisdn}'})
-                    except Exception as e:
-                        result['errors'].append({'row': i, 'sheet': 'ptt_subscriptions', 'error': str(e)})
-
-    result['total'] = result['created_users'] + result['created_voip'] + result['created_ptt']
-    return HandlerResult(status=200, body=result)
 
 
 CIMS_ADMIN_HANDLER_LIST = [
     (_USERS_BASE,    handle_users,      {}),
-    (_IMPORT_BASE,   handle_import,     {}),
     (_GROUPS_BASE,   handle_ptt_groups, {}),
     # call_logs는 csc_flow.py의 파일시스템 기반 API로 이동
 ]

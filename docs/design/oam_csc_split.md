@@ -1,6 +1,14 @@
 # OAM / CSC 분리 설계
 
-2026-05-28 사용자 합의. 본 문서는 분리 방향·경계·인증·데이터·진행 계획을 확정한다. 실제 코드 작업은 Phase 1 부터 단계 진행.
+본 문서는 OAM/CSC 분리의 방향·경계·인증·데이터 모델을 확정한다.
+
+> ⚠️ **구현 메커니즘은 [features/csc_standalone_module.md](features/csc_standalone_module.md) 가 정본** —
+> 본 문서의 **결정(경계·인증 모델·역할 범위·운영 토폴로지)은 유효**하나, 모듈 간 코드 공유 방식은
+> "공유 라이브러리 sys.path 마운트 + handlers/services PEP420 namespace 병합" 이 아니라
+> **계약 기반(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB 스키마) + 각 모듈 자체 인프라 vendoring** 이다. 현행:
+> - csc 는 ems/core/oam/src 를 **마운트하지 않음**. base(oam)·oam-svc 도 csc/src 를 **마운트하지 않음**.
+> - 각 모듈이 자기 services/httpsrv/util 을 자체 보유. csc = {mcptt, idms_storage, config_cache, file_store,
+>   ha_lookup, logger, admin_auth} 7개. (csc 는 idms/config 스냅샷용으로 자체 file_store 사용)
 
 ## 배경
 
@@ -73,7 +81,7 @@ Agent  ──heartbeat/job pickup──→  oam (4419)
 Agent  ──(없음)──→  csc                   ← 통신 안 함
 ```
 
-- agent_api.py 가 oam 책임. agent 의 `csc_url` 설정은 `oam_url` 로 갱신 (Phase 3 에서).
+- agent_api.py 가 oam 책임. agent 의 설정 키는 `oam_url`.
 - install_command 의 URL 도 oam 으로 변경.
 - csc 는 단말(UE) 통신만, agent 와 무관.
 
@@ -95,11 +103,9 @@ Agent  ──(없음)──→  csc                   ← 통신 안 함
 | refresh_tokens | oam | Admin JWT refresh |
 | sip_listener / sip_trunk / routing_rule / routing_access_list / sip_service | (retired) | csp_runtime 폐기 후 잔존 코드 |
 
-**csc 는 file_store 미사용**. 가입자 데이터는 MariaDB 가 SoT.
+가입자 데이터는 MariaDB 가 SoT. csc 는 idms/config 스냅샷용으로 자체 file_store 를 사용한다.
 
-⚠️ 단 — `mcptt.py` 의 `save_group_to_file` 같은 잔재 함수가 있다면 Phase 1 검토 시 정리 (대부분 MariaDB 로 통합되어 있어야 함).
-
-## 패키지 구조 (Phase 2 이후)
+## 패키지 구조
 
 ```
 cims/                                    cims/
@@ -162,275 +168,53 @@ cims/                                    cims/
 - oam 호스트: 인터넷 격리 가능 (내부 운영망만)
 - csc 호스트: 단말 접근 허용 (서비스망)
 
-## Phase 진행 계획
+## 현행 운영 모델
 
-### Phase 1: 코드 구조 분리 (소프트, 같은 프로세스) — ✅ **완료 (2026-05-29)**
+분리는 코드 구조 → 패키지 → 프로세스 순으로 진행되어, oam(O&M) 과 csc(가입자/MCPTT)
+가 별도 패키지·별도 프로세스로 운영된다.
 
-진행 결과:
-- **top-level `oam/`** 디렉토리 신설 (`oam/src/handlers/`, `oam/src/services/`, `oam/docs/`, `oam/README.md`).
-- handler 12개 git mv: `agents / agent_api / ha_groups / modules / build / service_control / verification / alerts / stats / recording / auth / users` → `oam/src/handlers/`. `csc/src/handlers/` 잔존: `admin / org / csp_runtime`.
-- **PEP 420 namespace package** — `csc/src/handlers/__init__.py` 제거. oam/csc 양쪽이 `handlers` 패키지를 merge → 기존 `from handlers.X import Y` 임포트 unchanged.
-- `csc/src/services/admin_auth.py` 신설 — `verify_admin_jwt / extract_admin_jwt` thin wrapper. `oam/src/handlers/auth.py` 가 init 시 동일 비밀키 동기화.
-- `csc_app.py` 가 `../oam/src` 를 `sys.path` 에 prepend (`_OAM_SRC`).
-- `CMakeLists.txt` `make dist` 단계에 `dist/oam/src` 복사 추가.
-- `cims.sh sync csc` 가 `csc/src` + `oam/src` 양쪽을 dist 로 rsync. namespace 전환에 따른 stale `__pycache__` 제거 단계 포함.
+- **oam** (top-level `oam/`, `oam_app.py`) — admin server **4419**. Agent/HA/배포/검증/통계/알림.
+  4서버 agent heartbeat 의 endpoint. ha_capability=active_standby.
+- **csc** (`csc_app.py`) — admin server **4421** + mcptt server **4430**. 가입자/조직 CRUD + auth(관리자 로그인) + IdMS/GMS/CMS/KMS(UE 통신).
+- **공유 비밀키 K** — oam/csc config 양쪽 동일 값. csc 는 admin JWT 를 로컬 검증만(발급은 oam).
+- **agent URL** — agent 는 oam 만 호출(`--oam-url`, 구 `--csc-url` alias 호환). `Server.AgentOamUrl` config key 우선.
+- private 환경 자족 — 각 모듈이 Python 의존성을 `vendor/` 에 동봉(pip 의존 0).
 
-검증 결과 (py 측):
-- 21 모듈 (15 handler + 6 service) import 모두 OK.
-- 핸들러 리스트 분포: csc-side 3 (admin/org/mcptt), oam-side 12.
-- 전체 `csc/src` + `oam/src` `py_compile` PASS.
-
-미진행 (Phase 1 보류 항목):
-- `services/mcptt.py` 의 `notify_csp / audit_config_change` 잔재 정리 — 호출 부 분포 (csc admin/csp_runtime ↔ oam service_control) 가 cross-package 이므로, **Phase 3 에서 함께 정리**하는 게 자연스러움. Phase 1 에선 boundary 만 명시.
-- LIVE 검증 (4서버 cims-csc 재기동 + verdict=healthy) — 사용자 영역.
-
-위험도: 낮음 (실제로도 낮았음).
-
-### Phase 2: 패키지 분리 — ✅ **완료 (2026-05-29)**
-
-진행 결과:
-- `oam/pkg.json` 신설 (name=oam, version=0.0.1 → 0.0.2 auto-bump, ha_capability=active_standby, 7 function: agents/ha_groups/build/verification/alerts/stats/recording, processes=[] — 별도 systemd 없음). 같은 cims-csc 프로세스 유지.
-- `cims.sh pkg` 4 위치에 oam 추가: default targets / auto-sync set / `_src_root_for` 매핑 / 컴포넌트 case allowlist.
-- `cims.sh sync csc` 가 `oam/pkg.json` 도 `dist/oam/` 으로 복사.
-- `CMakeLists.txt` `make dist` 가 `dist/oam/pkg.json` 복사.
-- `cims.sh pkg oam` 으로 **oam-0.0.2.tar.gz (108KB)** 빌드 성공. manifest.json 등재 (sha256 + size).
-- TB-CSC `POST /api/v1/packages/register-from-dist` 가 oam 자동 인식 → file_store packages 컬렉션에 `id=44 name=oam v=0.0.2` entry 생성.
-- Console "패키지" 메뉴에서 oam 이 별도 항목으로 노출 가능 (자동 register-from-dist 또는 수동 업로드 둘 다).
-
-agent install 흐름 (검토만):
-- tarball top-level `oam/` 검출 → scope=`install_path/oam/` 만 wipe (csc 와 sibling 공존, csp/isp 같은 multi-pkg 패턴 재사용).
-- Phase 1 의 `csc_app.py` 가 `_COMPONENT_ROOT/../oam/src` 를 sys.path mount → install 시 자동 동작.
-- ⚠️ **운영 주의**: 새 csc 코드 (Phase 1 이후) 를 deploy 할 때 **oam 도 같이 deploy** 해야 시작 성공. csc 단독 deploy 시 `from handlers.agents import ...` 실패. 4서버 LIVE 적용은 Phase 3 책임.
-
-미진행 (Phase 3 로 이관):
-- 4서버 LIVE deploy (csc + oam 함께)
-- agent 의 deployment 가 "csc 와 oam 을 동반 배포" 단위로 인식하는 매커니즘.
-- 별도 systemd unit / 포트 분리.
-
-위험도: 중간 (실제로는 낮았음 — agent install 매커니즘 재사용).
-
-### Phase 3: 프로세스 분리 — 진행 중
-
-#### 단계 3a — TB 분리 기동 ✅ **완료 (2026-05-29)**
-
-진행 결과:
-- `oam/src/oam_app.py` 신설 — admin server (4419) + 12 OAM handler + 5 sweeper + flow_logger / config_cache / alert_log. csc 책임 (admin/org/mcptt server 4431) 제거.
-- `oam/config/oam.json` (prod) + `oam/config/oam-tb.json` (TB) — Server/CimsAuth.JwtSecret/CimsDatabase/Packages/ConfigCacheDir/ServiceLogging.
-- `cims.sh tb` 에 oam target 추가 — default `all = oam + console` (csc 제외). csc target 은 deprecated 표기로 유지 (호환성).
-- `cims.sh sync csc` 가 `oam/pkg.json` + `oam/config/*.json` 도 dist 동기화. `CMakeLists.txt make dist` 도 동일.
-- **TB-CSC 불필요 확정** — 실측 24h 동안 CSC 책임 endpoint 호출 사실상 0 (내 검증 호출만 3건), mcptt server (4431) 연결 0. TB 환경에서 OAM 만으로 충분.
-
-LIVE 검증:
-- `cims.sh tb stop csc && cims.sh tb start oam` → 4419 PID 3592256 (oam_app.py) LISTEN.
-- 4 agent heartbeat 200 OK 연속 (자연 전환 — port 같음).
-- OAM 7 endpoint (agents/ha-groups/packages/deployments/alerts/verification/csp/services) 200, CSC 2 endpoint (users/orgs) 404 (의도된 분리).
-- Python traceback 없음.
-
-#### 단계 3b — 코드 작업 ✅ **완료 (2026-05-29)**
-
-진행 결과:
-- **agent URL rename** — `install-agent.sh` / `cims_agent.py` / `oam/src/handlers/agents.py` 의 `csc_url` → `oam_url`. cmdline 인자 `--oam-url` (신규) + `--csc-url` (deprecated alias) 호환. `_oam_public_url` 함수, `Server.AgentOamUrl` config key 우선 + `AgentCscUrl` fallback. install_command 출력은 `--oam-url`.
-- **systemd unit** — 기존 `cims@.service.tpl` 의 instantiate 패턴 활용 (`cims@oam.service` 자동 동작). 별도 unit 파일 불필요.
-- **lifecycle.sh `start_oam / stop_oam`** — oam_app.py 시작/중지. `_svc_port_proto` / `_start_one` / `_stop_one` / `status_one` / `COMPONENTS` 모두 oam 추가. `cims-svc start oam` 으로 호출 가능.
-- **csc_app.py 본연 정리** — OAM handler 등록 12개 제거 (agents/agent_api/ha_groups/modules/build/service_control/verification/alerts/stats/recording/auth/users 중 csc 가 따로 보유 안 하는 것). 5 sweeper 제거 (oam_app.py 책임). csc는 가입자 (admin.py) + 조직 (org.py) + auth (관리자 로그인) + users (본인 정보) + mcptt server (IdMS/GMS/CMS/KMS) 만. admin server port 4420 (4419 는 OAM 차지).
-- **공유 비밀키 K** — Phase 1 의 `services/admin_auth.py` 가 이미 wiring 완료. oam/csc config 양쪽 동일 K.
-
-LIVE 검증 (TB):
-- TB-OAM 새 PID 3603983 4419 LISTEN. startup banner + sweeper 5 시작 + alert state 복원.
-- API smoke (agents/ha-groups/packages/deployments) 200 OK.
-- `POST /api/v1/agents` → install_command 가 `--oam-url` 형식으로 발급 확인.
-- 4서버 agent heartbeat 200 OK 연속 (port 같음).
-
-#### 단계 3c — management host LIVE 절체 ✅ **완료 (2026-05-29)**
-
-전제 재정의:
-- 4서버 (ctrl01/ctrl02/media01/media02) 는 **csp/cmp/isp 만** 운영. csc/oam deployment 자체가 없음.
-- csc/oam 은 **management host (10.0.2.45 ctrl01)** 에서 통합 운영.
-- 따라서 "4서버 LIVE 절체" 가 아니라 **management host 의 csc 단일 프로세스를 OAM + CSC 두 프로세스로 분리** 가 본질.
-
-진행 결과:
-- 4서버 agent heartbeat 는 Phase 3a 부터 이미 TB-OAM (4419) 으로 자연 전환 → 영향 없음.
-- 옛 prod csc (PID 327897, May 21~ 7d22h 동작, Phase 0 코드) SIGTERM 종료.
-- 새 csc_app.py (Phase 3b 정리 코드) 로 재기동 → port 4421 admin + 4430 mcptt LISTEN. 시작 banner `start (CSC)`.
-- TB-OAM (PID 3603983, port 4419) 그대로 유지 — OAM 책임.
-
-LIVE 검증:
-- TB-OAM (4419) — OAM endpoint 5개 (agents/ha-groups/packages/deployments/verification) 200 OK, CSC endpoint (users/orgs) 404.
-- 새 CSC (4421) — CSC endpoint (users/organizations) 200 OK, OAM endpoint (agents/ha-groups/packages/deployments) 404 — 의도된 분리.
-- mcptt server (4430) LISTEN.
-- 4서버 agent heartbeat 200 OK 연속 — 절체 무영향.
-- Python traceback 없음.
-- 옛 csc → 새 csc 다운타임 ≈ 6초 (SIGTERM ~ startup banner). 4서버 agent 안 봄 + UE 미통신 환경이라 실질 영향 0.
-
-운영 모델 (결과):
 ```
-management host (10.0.2.45):
+management host:
   ┌─────────────────────────┐    ┌──────────────────────────────┐
   │ cims-oam (oam_app.py)   │    │ cims-csc (csc_app.py)        │
   │  port 4419              │    │  port 4421 admin + 4430 mcptt│
   │  Agent/HA/배포/검증/통계   │    │  가입자/조직/auth/mcptt        │
-  │  PID 3603983            │    │  PID 3611504                 │
   └─────────────────────────┘    └──────────────────────────────┘
             ▲                              ▲
             │ heartbeat (4419)              │ MCPTT (4430) — UE 통신
             │                              │
-       4서버 agent                       UE 단말 (PTT/VoLTE 가입자)
-       (10.0.2.45~49)
+       각 노드 agent                     UE 단말 (PTT/VoLTE 가입자)
 ```
 
-미진행 (후속):
-- **systemd 영구화** — 현재 두 프로세스 모두 nohup 으로 띄워짐 (host 재기동 시 소실). `cims-oam.service` + `cims-csc.service` systemd unit 설치 필요. (Phase 4 호스트 분리 시 또는 별도 운영 cycle)
-- **csc-tb.json 폐기** — TB-CSC 폐기 결정이지만 dist/csc/config/csc-tb.json 잔재. `cims.sh tb start csc` 호출 시 4419 충돌. 정리 필요.
-- **agent install_command URL** — 현재 `https://10.0.2.45:4419` (TB-OAM). prod 망 분리 시 mgmt 망 IP 로 변경.
+### NIC role 모델 + VIP slot 자동 매핑
 
-#### 단계 4a — csc 배포 (ctrl01 + ctrl02) — 부분 완료 (2026-05-29)
+- **Mgmt.Cidr** (oam.json) — oam 운영의 mgmt 대역 기준선. oam_app.py 시작 시 로드 + AgentOamUrl host IP 검증.
+- **interface role** (agent.interfaces[].role) — mgmt 는 agent 의 `detect_mgmt_ip`(oam_url outgoing IP) + Mgmt.Cidr 검증으로 자동, service/internal 은 admin 명시(`PUT /api/v1/agents/<id>/interface-roles`). overrides 는 heartbeat 마다 정규화.
+- **HA VIP slot ↔ role 자동 매핑** (`ha_groups.py::_render_ha_for_agent`) — vip_bindings.slot 이 mgmt/service/internal 이고 memberIfaces 미지정 시 agent.interfaces 의 role 매칭 NIC 자동 추론. `vips[].dev` 명시로 다중 망 multi-VIP 를 한 vrrp_instance 에서 dev 분리.
 
-사용자 요구: csc 는 ctrl01, ctrl02 로 배포, oam 은 TB-OAM 유지.
+### deployment 정합
 
-진행 결과:
-- **csc-0.0.4.tar.gz** (124KB) 빌드 — Phase 3b 코드 + `csc_app.py` sys.path mount 개선 (install_path 구조 지원: `_COMPONENT_ROOT/../../oam/*/oam/src` glob 검색).
-- **csc deployment** — agent 51 (ctrl01) dep 9, agent 52 (ctrl02) dep 10 신규. install 완료 (status=stopped, install_path=`/opt/cims-agent/agent/modules/csc/0.0.3`).
-- **oam deployment** — agent 51 dep 11, agent 52 dep 12 신규. install 완료 (사용자 의도: install 만, start 안 함 — TB-OAM 으로 OAM 통신). 단 csc 의 `from handlers import auth` import 위해 oam 코드 install 필수.
-- **csc-tb.json 폐기** — dist/csc/config/csc-tb.json 삭제. `cims.sh tb csc` target 도 deprecated 마크 유지.
-- **systemd 가이드** — `oam/SYSTEMD.md` 작성 (사용자 sudo 권한 필요).
+- **process_name 자동 추론** (`agents.py::_create_deployment`) — POST 시 process_name 누락 + package_name 있으면 `process_name = package_name` 자동 채움. (`cims-svc start` 의 default 'all' fallback 으로 인한 single-module install 실패 차단.)
+- **agent safety net** (`cims_agent.py::job_process_control`) — svc 빈 경우 명시 에러(`process_name 누락 — deployment.process_name 필드 필수`).
 
-#### 단계 4c — vendor 화 (private 환경 대응) ✅ **완료 (2026-05-29)**
-
-상용 private 환경 (인터넷 없음) 대응. csp 의 libmariadb.so.3 vendor 패턴 따라 Python 의존성을 패키지 내 포함.
-
-진행:
-- **Dead code 제거**:
-  - `csc/src/util/db/` 전체 — sqlalchemy/pandas 사용. 어디서도 import 안 됨. 7 파일 삭제.
-  - `csc/src/httpsrv/controller.py` — numpy/pandas DataFrame body 처리 코드 제거 (JSON only).
-  - `csc/src/httpsrv/handler.py` — pandas BodyData type 제거.
-- **requirements.txt** 작성: csc (8 deps) + oam (12 deps). fastapi/uvicorn/pymysql/PyJWT/loguru/requests/readerwriterlock + OAM (aiohttp/netifaces/strenum/asyncstdlib).
-- **csc/vendor/** (13MB) + **oam/vendor/** (23MB) — `pip3 install --target=vendor` 로 site-packages 형태. 사전 다운로드 in dev host.
-- **sys.path mount** — csc_app.py 가 `_COMPONENT_ROOT/vendor` 자동 등록. oam_app.py 도 oam vendor + csc/src + csc/vendor glob.
-- **CMakeLists.txt** make dist 가 vendor 디렉토리 복사.
-- **cims.sh sync csc** 도 vendor + requirements.txt rsync.
-
-tarball 결과:
-- **csc-0.0.6.tar.gz 3.7MB** (이전 124KB → 30배, vendor 포함).
-- **oam-0.0.3.tar.gz 6.1MB** (이전 108KB → 56배).
-- private 환경 자족 — install 만 하면 즉시 동작.
-
-LIVE 검증:
-- TB-OAM (PID 3703368) startup 정상 + API endpoint 200.
-- register-from-dist 로 csc-0.0.6 (id=48) + oam-0.0.3 (id=49) packages 컬렉션 등록 — Console 자동 노출.
-
-git impact:
-- 1470 파일, +437,388/-603 (대부분 vendor wheel 풀린 site-packages).
-- repo 크기 +36MB.
-
-#### 단계 4b — LIVE 절체 — 부분 완료 (2026-05-29)
-
-**ctrl01 csc agent-managed 운영 전환 PASS**:
-- agent_api.py `_sync_report` 의 transition list 에 'upgrade' 추가 — upgrade succeeded 후 status=stopped 정상 전이 (이전: deploying stuck bug).
-- csc_app.py sys.path glob `'../..'` → `'../../..'` 한 단계 추가 — agent install (install_path/csc/<ver>/csc) 에서 install_path/oam/<ver>/oam/src 정확히 검색.
-- csc-0.0.5 빌드 + 등록 (id=47).
-- ctrl01 (agent 51, dep 9) — agent-managed csc 시작 성공 (PID 3686055, port 4421+4430). 옛 nohup csc 정리.
-- API 검증: 4421 의 users/organizations 200 OK, OAM endpoint 404 (분리 완료).
-
-**ctrl02 csc 시작** — ✅ **Phase 4c vendor 화로 자동 해결**:
-- csc-0.0.6 (3.7MB, vendor 포함) + oam-0.0.3 (6.1MB, vendor 포함) upgrade → install.
-- csc start LIVE PASS — PID 625296, port 4421 LISTEN, status=running.
-- 사용자 pip 명령 불필요 — vendor 의 fastapi/uvicorn/pymysql 등 자동 로드.
-- ctrl02 외부 접근 (10.0.1.46:4421) 은 firewall 정책 별개.
-
-#### 단계 4d2 — NIC role 모델 + VIP slot 자동 매핑 — ✅ **2026-05-29 완료**
-
-사용자 의도: "IP 를 추가하거나 해당 IP 에 대해 용도를 기입하는 방식. mgmt 의 용도는 자동입력, 다른 망은 admin 명시."
-
-**Mgmt.Cidr** (oam.json/oam-tb.json):
-- `"Mgmt": {"Cidr": "10.0.2.0/24"}` 명시 — oam 운영의 mgmt 대역 기준선.
-- oam_app.py 시작 시 로드 + AgentOamUrl 의 host IP 가 그 대역 안인지 검증 로그.
-
-**interface role 모델**:
-- agent.interfaces[].role 자동/수동 hybrid:
-  - **mgmt**: agent 의 `detect_mgmt_ip` (oam_url outgoing IP) + server 측 Mgmt.Cidr 검증 → role='mgmt' 자동.
-  - **service / internal**: admin 명시 API.
-- `PUT /api/v1/agents/<id>/interface-roles` Body `{"<ip>": "<role>"}` — service/internal/mgmt/'' (clear).
-- `GET /api/v1/agents/<id>/interface-roles` — overrides + 현재 interfaces+role.
-- `agent.interface_role_overrides` 에 보존 → heartbeat 마다 정규화 (mgmt 자동 + override 적용).
-
-**HA VIP slot ↔ role 자동 매핑** (`ha_groups.py::_render_ha_for_agent`):
-- vip_bindings.slot 이 `'mgmt'/'service'/'internal'` 이고 memberIfaces 미지정 시 agent.interfaces 의 role 매칭 NIC 자동 추론.
-- `_pick_default_iface` 강화 — vrrp_instance.interface 가 agent.interfaces 의 mgmt NIC 자동 (unicast_src_ip 와 정합).
-- `vips[].dev` 명시 — 다중 망 multi-VIP 한 vrrp_instance 정확히 dev 분리.
-
-LIVE 검증:
-- ctrl01 + ctrl02 의 interfaces:
-  - ens3 (121.x.x.4{5,6}) → role='service' (admin 명시)
-  - ens4 (10.0.1.4{5,6}) → role='internal' (admin 명시)
-  - ens5 (10.0.2.4{5,6}) → role='mgmt' + mgmt=True (자동)
-- HA group 3 PUT — vip_bindings (slot='service', slot='internal', memberIfaces 없음):
-  - ha.json services.Control-Server.interface = 'ens5' (mgmt, vrrp advert)
-  - VIP 121.161.164.47/24 dev ens3 ✓
-  - VIP 10.0.1.47/24 dev ens4 ✓
-- keepalived reload 후 ip addr 정확:
-  - `121.161.164.47/24 secondary proto 0x12 ens3`
-  - `10.0.1.47/24 secondary proto 0x12 ens4`
-
-#### 단계 4d — 운영 마무리 — ✅ **2026-05-29 완료**
-
-**process_name 자동 추론** (`agents.py::_create_deployment`):
-- POST 시 process_name 누락 + package_name 있으면 → `process_name = package_name` 자동 채움.
-- 옛 deployment 가 process_name 비어있으면 agent 의 `cims-svc start` 가 default 'all' fallback → 단일 모듈 install 에서 cmp 못 찾아 fail. 자동 추론으로 차단.
-
-**Agent safety net** (`cims_agent.py::job_process_control`):
-- svc 빈 경우 명시 에러 반환 `process_name 누락 — deployment.process_name 필드 필수`.
-- 옛 silent default 'all' fallback 제거.
-
-**csc HA VIP 10.0.1.47** — HA group 3 (Control-Server, A/S) 에 csc slot 추가:
-- vip_bindings = [
-    {slot: "서비스", ip: "121.161.164.47", ens3 — 외부망},
-    {slot: "csc", ip: "10.0.1.47", ens4 — 내부 서비스망}
-  ]
-- ctrl01 master 가 자동 인수 (ip addr show ens4: 10.0.1.47/24 secondary).
-- `https://10.0.1.47:4421/api/v1/users` → 200 OK (csc PID 3713168 응답).
-- ctrl02 backup 은 VIP 없음 (정상). master 다운 시 자동 인수.
-- 단 ctrl02 firewall 4421 열기 필요 (failover 시 외부 traffic 받기 위해).
-
-**ctrl02 firewall** — 사용자 sudo 안내:
-- `! ssh cims@10.0.2.46 'sudo ufw allow 4421/tcp; sudo ufw allow 4430/tcp; sudo ufw allow 112/any'`
-- VRRP advert (protocol 112) 도 master/backup 통신용 허용 필요.
-
-**ctrl01 csc-0.0.6 upgrade** — ✅ **2026-05-29 완료**:
-- dep 11 oam-0.0.3 + dep 9 csc-0.0.6 upgrade (vendor 포함).
-- restart job → 옛 PID 3686055 → 새 PID 3713168 절체 (port 4421+4430 자동 인계).
-- API 검증: users 200, organizations 200.
-- TB-OAM (PID 3703368) 유지, 4서버 agent heartbeat 정상.
-
-**최종 운영 모델 (4서버 전체 vendor 화)**:
-- ctrl01 mgmt host: TB-OAM(4419 PID 3703368) + agent-managed CSC(4421+4430 PID 3713168, csc-0.0.6 vendor).
-- ctrl02: agent-managed CSC(4421+4430 PID 625296, csc-0.0.6 vendor).
-- media01/02: csp/cmp/isp deployment 만, 영향 없음.
-- private 환경 자족 — vendor 로 pip 의존 0.
-
-**systemd 영구화 안내**:
-- oam/SYSTEMD.md + 인라인 명령 제공 (사용자 sudo 필요).
-- cims-oam.service 등록 시 `pkill -f oam_app.py` + `systemctl enable --now cims-oam.service`.
-- ctrl01 csc 는 agent + cims@.service.tpl 매커니즘으로 host 재기동 후 자동 부활 — systemd 별도 등록 불필요.
-
-현 운영 (4서버 무영향, ctrl01 분리 LIVE):
-- management host = ctrl01 (10.0.2.45):
-  - TB-OAM (4419, PID 3680745, nohup): OAM 책임, 4서버 agent heartbeat.
-  - agent-managed CSC (4421+4430, PID 3686055): 가입자 CRUD + mcptt.
-- ctrl02 (10.0.2.46): csc/oam 코드 install 완료, start 미진행 (uvicorn).
-- 4서버 csp/cmp/isp deployment 전혀 영향 없음.
-
-### Phase 4: 호스트 분리 (선택)
+### 호스트 분리 (선택)
 - **목표**: oam 호스트 (운영망), csc 호스트 (서비스망).
 - 네트워크 ACL / TLS / 인증 분리.
-- 예상 작업: 운영 합의 + 인프라.
 - 위험도: 운영 / 인프라 의존.
 
-## 진행 시 주의사항
+## 주의사항
 
-- **CSC → CSP UDP notify** (`notify_csp` 함수) — 현재 가입자 변경 시 CSP 에 UDP 알림. 분리 후에도 csc 가 호출자 (가입자 CRUD 측). 영향 없음.
+- **CSC → CSP UDP notify** (`notify_csp` 함수) — 가입자 변경 시 CSP 에 UDP 알림. csc 가 호출자 (가입자 CRUD 측).
 - **CSP → CSC 의존** — CSP 가 DB 에서 가입자 데이터 읽음. csc 분리와 무관 (DB 직접 접근).
-- **admin console (`cims-console`)** — 빌드 결과물 (정적 파일). oam 의 정적 자원으로 서빙 자연스러움. Phase 3 에서 결정.
-- **agent 의 cert rotation** — Phase 3 에서 agent ↔ oam 만 통신하므로 cert 도 oam 발급. 현재 csc 가 발급하는 cert 갱신 흐름은 oam 으로 이관.
+- **admin console (`ems/core/console`)** — 빌드 결과물 (정적 파일). oam 의 정적 자원으로 서빙.
+- **agent 의 cert rotation** — agent ↔ oam 만 통신하므로 cert 도 oam 발급.
 
 ## 관련
 

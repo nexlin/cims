@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- M2 MCPTT: SIP/RTP + floor(UDP) + 마이크 + CSC(HTTPS) + 등록유지 FGS -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 화면 최상단 전역 상태 아이콘 배지(다른 앱 위에 표시) — CIMS-Phone 과 동일 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 부팅 자동 로그인 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-feature android:name="android.hardware.microphone" android:required="true" />
+
+    <!-- CIMS 제품군 내부 기동 권한(signature) — CIMS 오너앱이 로그인 직후 등록유지 서비스를 시작. -->
+    <permission
+        android:name="com.cims.ue.permission.CIMS_SUITE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.cims.ue.permission.CIMS_SUITE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CimsPtt">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- exported+signature 권한: CIMS 오너앱(동일 서명)이 로그인 직후 백그라운드 등록을 시작할 수 있게 -->
+        <service
+            android:name=".PttService"
+            android:exported="true"
+            android:permission="com.cims.ue.permission.CIMS_SUITE"
+            android:foregroundServiceType="microphone|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="mcptt_registration_keepalive" />
+        </service>
+
+        <!-- MCData FD 첨부 열기 — files/mcdata/ 를 다른 앱(뷰어)에 공유 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- 부팅 자동 로그인 리시버 -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

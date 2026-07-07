@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- CIMS (owner) — 단일 로그인/계정 소유. AccountManager 인증자 호스팅 + 프로비저닝 로그인 UI. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 로그인 직후 CIMS-Phone/McPtt 등록유지 서비스 기동(동일 서명 signature 권한) -->
+    <uses-permission android:name="com.cims.ue.permission.CIMS_SUITE" />
+
+    <!-- Android 11+ 패키지 가시성 — companion 앱 서비스 explicit intent 해석용 -->
+    <queries>
+        <package android:name="com.cims.ue.volte" />
+        <package android:name="com.cims.ue.ptt" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Cims">
+
+        <!-- 프로비저닝 로그인 Activity (런처 + 인증자 addAccount/재로그인 액션) -->
+        <activity
+            android:name=".LoginActivity"
+            android:exported="true"
+            android:excludeFromRecents="false"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.cims.ue.account.LOGIN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- AccountManager 인증자 서비스 -->
+        <service
+            android:name=".AuthenticatorService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accounts.AccountAuthenticator"
+                android:resource="@xml/authenticator" />
+        </service>
+    </application>
+</manifest>

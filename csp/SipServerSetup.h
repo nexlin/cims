@@ -153,6 +153,7 @@ public:
     bool m_bRoleTas;
     bool m_bRolePttAs;
     bool m_bRoleIbcf;
+    bool m_bRoleMcData;
 
     // ================================================================
     // 로그 기능

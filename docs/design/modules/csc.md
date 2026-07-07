@@ -1,5 +1,9 @@
 # 12. CSC (CIMS Service Controller) 모듈 상세 설계
 
+> CSC 는 자족 독립 모듈이다([features/csc_standalone_module.md](../features/csc_standalone_module.md)). OAM(`ems/core/oam/src`)을 마운트하지 않으며, 결합은 계약(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB)만이다.
+> - 통화 이력/Flow API(`services/flow_logger.py`)는 **oam-svc 소유**다. HA fan-out 인프라(sync_dispatch·sync_txn·drift_sweeper·service_registry·collection_schema·alert_log)도 oam 이 보유한다.
+> - 현행 `csc/src/services/` = **mcptt · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth** (7개) + `__init__.py`.
+
 ## 1. 개요
 
 CSC는 CIMS 시스템의 관리/MCPTT 서비스 서버로, REST API 기반 가입자/그룹 관리와 3GPP MCPTT 서비스(IdMS/GMS/CMS/KMS)를 제공한다.
@@ -52,9 +56,9 @@ Admin API Server ─────────────────────
   ├─ agents.py          (Agent/Package/Deployment)  │
   ├─ agent_api.py       (Agent ↔ CSC 콜백)         │
   ├─ modules.py         (deployment 의 collection)  │
-  ├─ service_control.py (로컬 서비스 ▶/■/↻ — TB)    │
-  ├─ csp_runtime.py     (csp jsonl 런타임 설정)     │
-  └─ services/flow_logger.py (통화 이력 + Flow)     │
+  └─ service_control.py (로컬 서비스 ▶/■/↻ — TB)    │
+                                                    │
+  ※ 통화 이력 + Flow API 는 oam-svc 소유            │
                                                     │
 MCPTT UE (단말)                                     │
      │                                              │
@@ -92,10 +96,9 @@ HANDLER_LIST = (
     CIMS_HA_GROUPS_HANDLER_LIST +    # /api/v1/ha-groups/* (HaServicesPage primary)
     AGENT_API_HANDLER_LIST +         # /api/agent/*  (Agent → CSC enroll/heartbeat/report)
     MODULES_HANDLER_LIST +           # /api/v1/deployments/<id>/collection/*
-    SERVICE_CONTROL_HANDLER_LIST +   # /api/v1/services/<name>/<start|stop|restart> (TB-CSC 만)
-    CSP_RUNTIME_HANDLER_LIST +       # CSP runtime 설정 (legacy 직접 path)
-    FLOW_HANDLER_LIST                # /api/v1/flow/*, /api/v1/ptt/history/*/flow
+    SERVICE_CONTROL_HANDLER_LIST     # /api/v1/services/<name>/<start|stop|restart> (TB-CSC 만)
 )
+# 통화 이력 + Flow API(/api/v1/flow/*, /api/v1/ptt/history/*/flow)는 oam-svc 가 서빙
 ```
 
 ---
@@ -170,7 +173,7 @@ POST /api/v1/users
   "name": "홍길동",
   "email": "hong@example.com",
   "org_id": 1,
-  "voip_subscriptions": [
+  "volte_subscriptions": [
     {
       "id": "+821001",
       "auth_id": "1001",
@@ -295,7 +298,9 @@ notify_csp("GROUP_CHANGED", uri=group_id, action="PUT", etag=new_etag)
 | PUT | `/organizations/{org_id}` | 조직 수정 |
 | DELETE | `/organizations/{org_id}` | 조직 삭제 |
 
-### 3.7 통화 이력/Flow (services/flow_logger.py)
+### 3.7 통화 이력/Flow (oam-svc 의 services/flow_logger.py)
+
+> 통화 이력 + Flow API 는 oam-svc 모듈이 서빙한다. 아래 명세는 해당 API 규격이다.
 
 **Base:** `/api/v1`
 
@@ -476,12 +481,17 @@ XCAP 기반 그룹 관리.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<group xmlns="urn:oma:xml:poc:list-service">
+<group xmlns="urn:oma:xml:poc:list-service"
+  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
+  xmlns:cims="urn:cims:groupinfo:1.0">
   <list-service uri="sip:group_1000@ptt.csp">
     <display-name>작전 1팀</display-name>
     <list>
       <entry uri="sip:+82571900001@ptt.csp">
         <display-name>사용자1</display-name>
+        <mcpttgi:participant-type>chair</mcpttgi:participant-type>
+        <mcpttgi:user-priority>10</mcpttgi:user-priority>
+        <cims:user-title>팀장</cims:user-title>
       </entry>
       <entry uri="sip:+82571900002@ptt.csp">
         <display-name>사용자2</display-name>
@@ -490,6 +500,11 @@ XCAP 기반 그룹 관리.
   </list-service>
 </group>
 ```
+
+멤버 `<entry>` 의 이름·직함은 `users` 테이블(name/title)에서 채운다. `<cims:user-title>`(직함) 은
+3GPP 미정의 필드라 CIMS 전용 네임스페이스(`urn:cims:groupinfo:1.0`) 확장으로 전달한다 —
+`<entry>` 는 `##other` lax 확장을 허용하므로(TS 24.481/RFC 4826 resource-lists) 규격 적합이며,
+표준 단말은 무시한다. 직함이 빈 값이면 요소를 생략한다.
 
 ### 4.3 CMS (Configuration Management Service)
 
@@ -553,7 +568,7 @@ DynamicRouteProc.set_request_hooks(pre=_pre_hook, post=_post_hook)
 ```
 
 - `_pre_hook` : 요청 수신 시 JWT Bearer 토큰에서 caller 추출 (`handlers/auth.py::extract_token`), 요청 path prefix 를 service 로 매핑
-- `_post_hook` : 핸들러 반환 후 `services/flow_logger.py::log_flow()` 호출 (body 는 `log_msg`)
+- `_post_hook` : 핸들러 반환 후 `services/logger.py` 의 Flow 기록 호출 (body 는 `log_msg`)
 
 | 경로 prefix | service |
 |-------------|---------|
@@ -596,125 +611,24 @@ Console UI → REST API → DB 수정 → notify_csp()
 
 ## 6. 데이터베이스 스키마
 
-### 6.1 핵심 테이블
+> **DB 스키마 SoT 는 [db_schema.md](../db_schema.md)** — 테이블명·키 구조·DROP 이력은 그쪽이 단일 출처다. 여기서는 상세 DDL 을 중복 기재하지 않고 CSC 가 실제 사용하는 테이블만 나열한다.
 
-```sql
--- 가입자 기본 정보
-CREATE TABLE users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(200),
-    org_id INT,
-    details TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이 본질적으로 필요한 데이터에만 한정**한다. 통화/녹취 이력, IdMS 인증 코드·리프레시 토큰, CSP 런타임 설정, 검증 회차 등은 모두 파일 기반(file_store)이 SoT 이며 DB 테이블이 없다 ([db_schema.md](../db_schema.md) §3·§4, [runtime_store_design.md](../runtime_store_design.md)).
 
--- VoIP 구독 (SIP 회선)
-CREATE TABLE voip_subscriptions (
-    id VARCHAR(50) PRIMARY KEY,      -- MSISDN (+821001)
-    user_id INT NOT NULL,
-    auth_id VARCHAR(100) NOT NULL,   -- SIP 인증 ID
-    passwd VARCHAR(100) NOT NULL,    -- SIP 인증 비밀번호
-    dnd BOOLEAN DEFAULT FALSE,
-    forward_id VARCHAR(50),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+### 6.1 CSC 가 사용하는 테이블
 
--- VoIP 착신거부 목록
-CREATE TABLE user_rejects (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    subscription_id VARCHAR(50) NOT NULL,
-    reject_id VARCHAR(50) NOT NULL,
-    FOREIGN KEY (subscription_id) REFERENCES voip_subscriptions(id) ON DELETE CASCADE
-);
+| 테이블 | 키 | 용도 |
+|--------|----|------|
+| `users` | `id INT AI PK` | 가입자 개인정보(name/email/org_id/details) + 콘솔 인증(login_id/password/role) |
+| `volte_subscriptions` | `id VARCHAR PK`(MSISDN) | VoLTE 회선: SIP 인증, dnd/forward. `user_id` → users(CASCADE) |
+| `user_rejects` | `id INT AI PK` | VoLTE 착신거부 목록. `subscription_id` → volte_subscriptions(CASCADE) |
+| `ptt_subscriptions` | `id VARCHAR PK`(MCPTT ID) | MCPTT 회선: IMPI 인증. `user_id` → users(CASCADE) |
+| `ptt_groups` | **`id BIGINT AI PK`**(surrogate) | PTT 그룹. `mcptt_group_id` 는 UNIQUE 식별자(키 아님). group_type(prearranged/chat/broadcast)/priority/emergency/video_enabled/require_affiliation 등 |
+| `ptt_group_members` | `id INT AI PK` | 멤버. `group_id` → **ptt_groups.id(surrogate BIGINT FK)**, role(chair/participant), mcptt_id |
+| `ptt_affiliations` | (group_id, user_id, client_id) | MCPTT affiliation(TS 24.379 §9). `group_id` → ptt_groups.id(CASCADE) |
+| `organizations` | `id INT AI PK` | code/name/parent_id 트리. users.org_id FK 대상 |
 
--- PTT 구독
-CREATE TABLE ptt_subscriptions (
-    id VARCHAR(50) PRIMARY KEY,      -- MCPTT ID (+82571900001)
-    user_id INT NOT NULL,
-    auth_id VARCHAR(100) NOT NULL,   -- IMPI (id@domain)
-    passwd VARCHAR(100) NOT NULL,
-    dnd BOOLEAN DEFAULT FALSE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
--- PTT 그룹
-CREATE TABLE ptt_groups (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(200) NOT NULL,
-    video_enabled BOOLEAN DEFAULT FALSE,
-    priority INT DEFAULT 5,
-    encryption BOOLEAN DEFAULT FALSE,
-    emergency_call BOOLEAN DEFAULT FALSE,
-    org_code VARCHAR(50),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- PTT 그룹 멤버
-CREATE TABLE ptt_group_members (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    group_id VARCHAR(50) NOT NULL,
-    user_id VARCHAR(50) NOT NULL,    -- PTT subscription ID
-    priority INT DEFAULT 5,
-    FOREIGN KEY (group_id) REFERENCES ptt_groups(id) ON DELETE CASCADE,
-    UNIQUE KEY (group_id, user_id)
-);
-
--- 조직
-CREATE TABLE organizations (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(200) NOT NULL,
-    code VARCHAR(50) UNIQUE,
-    parent_id INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 통화 이력은 DB 미적재. 파일 기반(SOT):
---   service_log/{volte|ptt}/YYYY/MM/DD/HH/.../<call_id>.d/call.json (VoLTE)
---   service_log/ptt/YYYY/MM/DD/HH/.../<call_id>.d/call.jsonl       (PTT, 세션 누적)
---   참여자: participants.jsonl
---   조회: GET /api/v1/call/logs (csc/src/services/flow_logger.py)
---   집계: GET /api/v1/stats/service/{volte|ptt|summary} (csc/src/handlers/stats.py)
--- 옛 voip_call_logs / ptt_call_logs 테이블은 v3(2026-04-22) DROP.
--- 전체 인벤토리는 docs/design/db_schema.md 참조.
-
--- 녹취 메타데이터
-CREATE TABLE recordings (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    call_id VARCHAR(200),
-    call_type VARCHAR(10),
-    group_id VARCHAR(50),
-    caller VARCHAR(100),
-    callee VARCHAR(100),
-    raw_dir VARCHAR(500),
-    status VARCHAR(20) DEFAULT 'raw',  -- raw/transcoding/ready
-    has_video BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- IdMS 인증 코드
-CREATE TABLE auth_codes (
-    code VARCHAR(200) PRIMARY KEY,
-    client_id VARCHAR(200),
-    user_id VARCHAR(200),
-    redirect_uri VARCHAR(500),
-    code_challenge VARCHAR(200),
-    code_challenge_method VARCHAR(10),
-    expires_at TIMESTAMP,
-    used BOOLEAN DEFAULT FALSE
-);
-
--- IdMS 리프레시 토큰
-CREATE TABLE refresh_tokens (
-    token VARCHAR(200) PRIMARY KEY,
-    client_id VARCHAR(200),
-    user_id VARCHAR(200),
-    expires_at TIMESTAMP,
-    revoked BOOLEAN DEFAULT FALSE
-);
-```
+> 주의: 구 `voip_subscriptions` 는 `volte_subscriptions` 로 rename 되었고, `ptt_groups` 의 PK 는 옛 `VARCHAR id` 가 아니라 **surrogate `BIGINT AUTO_INCREMENT`** 이며 MCPTT 그룹 식별자는 별도 `mcptt_group_id` 컬럼이다. `voip_call_logs`/`volte_call_logs`/`ptt_call_logs` 등 통화 이력 계열과 `recordings`/`recording_segments` 는 DROP 되어 파일 기반으로 대체되었다. 정확한 현행명·마이그레이션 매핑은 [db_schema.md](../db_schema.md) 를 따른다.
 
 ---
 
@@ -724,7 +638,7 @@ CREATE TABLE refresh_tokens (
 
 - **프레임워크:** React + TypeScript
 - **빌드:** Vite
-- **위치:** `/cims-console/`
+- **위치:** `/ems/core/console/`
 
 ### 7.2 주요 페이지
 
@@ -784,6 +698,21 @@ CREATE TABLE refresh_tokens (
 }
 ```
 
+### 8.1 설정 로딩 우선순위 (overlay = primary, base = optional)
+
+`csc_app.py:load_config()` 는 두 파일을 병합한다 — 배포 계약상 **deployment overlay
+가 SoT 이고 base 는 선택**이다 (`lifecycle.sh:start_csc` 포트 탐지, CSP 의
+`SipServerSetup._findDeploymentConfig` 와 동일한 모델).
+
+| 우선순위 | 파일 | 누가 만드나 | 비고 |
+|---|---|---|---|
+| base | `csc/config/csc.json` | `configure.sh:apply_config_template` (configure 단계) | 상용 배포본은 `build→pkg`(configure 생략)이라 **부재가 정상**. 패키지엔 `config_template.json`(스키마)만 동봉 |
+| overlay (primary) | `csc/config.json` (legacy: `../config.json`) | agent 가 install 시 렌더 기록 (`cims_agent.py:_write_config_file`) | flat dot-path 키(`"Server.Port": 4421`)를 base 위에 머지. 실제 운영 설정의 SoT |
+
+base 가 없으면 빈 dict 에서 시작해 overlay 만으로 기동한다. 따라서 상용 배포본은
+agent 가 쓴 `csc/config.json` 단독으로 정상 동작해야 하며, base 부재를 이유로
+빈 설정(포트 4420 default·dummy user·JWT 미설정 → 401)으로 떨어지면 안 된다.
+
 ---
 
 ## 9. 파일 구조
@@ -804,13 +733,15 @@ csc/
 │   │   ├── agents.py               # Agent/Package/Deployment CRUD (배포 메뉴)
 │   │   ├── agent_api.py            # Agent → CSC enroll/heartbeat/report
 │   │   ├── modules.py              # deployment 의 jsonl collection 프록시
-│   │   ├── service_control.py      # 로컬 서비스 ▶/■/↻ (TB-CSC 전용)
-│   │   └── csp_runtime.py          # CSP runtime 설정 (legacy 직접 path)
-│   ├── services/                   # 비-HTTP 서비스
-│   │   ├── flow_logger.py          # 통화 이력 + sesid 매칭 검색 + Flow API
+│   │   └── service_control.py      # 로컬 서비스 ▶/■/↻ (TB-CSC 전용)
+│   ├── services/                   # 비-HTTP 서비스 (7개)
 │   │   ├── mcptt.py                # MCPTT IdMS/GMS/CMS/KMS + notify_csp/_psp
+│   │   ├── idms_storage.py         # IdMS auth_code/refresh_token 저장
 │   │   ├── config_cache.py         # csc.json 부팅 시 1회 로드
-│   │   └── ...
+│   │   ├── file_store.py           # 파일 기반 저장
+│   │   ├── ha_lookup.py            # HA 멤버 조회
+│   │   ├── logger.py               # 비동기 배치 로그 writer
+│   │   └── admin_auth.py           # admin JWT verify
 │   ├── httpsrv/                    # HTTP 서버 프레임워크 (pre/post hook)
 │   └── util/                       # 공통 유틸 (db, async, net, ...)
 ├── config/

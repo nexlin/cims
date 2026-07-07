@@ -375,47 +375,27 @@
           "hidden": true,
           "restart": true,
           "help": "CSC 가 기록하는 방향 (csp / ue)."
+        },
+        {
+          "key": "McDataFd.Dir",
+          "label": "MCData 파일 저장 루트",
+          "group": "service_logging",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "그룹 파일전송(FD) 원본 저장 경로. 비우면 {ServiceLogging.Dir}/mcdata_fd."
+        },
+        {
+          "key": "McDataFd.MaxBytes",
+          "label": "MCData 파일 최대 크기(byte)",
+          "group": "service_logging",
+          "type": "int",
+          "default": 52428800,
+          "restart": true,
+          "help": "그룹 파일전송(FD) 업로드 상한 (기본 50MB)."
         }
       ],
       "scope": "system"
-    }
-  ],
-  "presets": [
-    {
-      "name": "integrated",
-      "label": "통합 배포 (CSP=PSP 동일 호스트)",
-      "description": "VoLTE/PTT 단일 인스턴스 호스트 — Notify 단일 broadcast, mTLS off",
-      "values": {
-        "CspNotify.Ip": "127.0.0.1",
-        "CspNotify.Port": 4421,
-        "PspNotify.Ip": "127.0.0.1",
-        "PspNotify.Port": 4421,
-        "Agent.MtlsEnabled": false,
-        "Log.Level": "INFO",
-        "IdMs.AuthCodeTtl": 60,
-        "IdMs.AccessTokenTtl": 3600,
-        "IdMs.RefreshTokenTtl": 604800
-      }
-    },
-    {
-      "name": "split-ptt-mtls",
-      "label": "PTT 분리 + mTLS",
-      "description": "CSP(VoLTE)/PSP(PTT) 별도 호스트 + agent mTLS — Notify IP 는 배포 후 IP 입력",
-      "values": {
-        "Agent.MtlsEnabled": true,
-        "Log.Level": "INFO",
-        "IdMs.AccessTokenTtl": 3600
-      }
-    },
-    {
-      "name": "long-session",
-      "label": "장기 세션",
-      "description": "MCPTT 토큰 만료 길게 — 단말 재로그인 빈도 감소",
-      "values": {
-        "IdMs.AuthCodeTtl": 300,
-        "IdMs.AccessTokenTtl": 86400,
-        "IdMs.RefreshTokenTtl": 2592000
-      }
     }
   ]
 }

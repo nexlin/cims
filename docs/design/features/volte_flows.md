@@ -1,8 +1,5 @@
 # VoLTE(VoIP) 서비스 케이스 및 메시지 Flow
 
-**작성일:** 2026-04-03
-**최종 수정:** 2026-04-13 (CMP VoIP/PTT 핸들러 분리 반영)
-
 ---
 
 ## 케이스 목록
@@ -360,7 +357,7 @@ INVITE 수신
 
 ### VoLTE 통화 상태 (call.json 파일)
 
-옛 `voip_call_logs` DB 테이블은 v3(2026-04-22) DROP. 현재 SoT 는 `service_log/volte/YYYY/MM/DD/HH/.../<call_id>.d/call.json` (CSP `CCallDir` 가 작성).
+SoT 는 `service_log/volte/YYYY/MM/DD/HH/.../<call_id>.d/call.json` (CSP `CCallDir` 가 작성).
 
 | 상태 | 시점 | 갱신 필드 |
 |------|------|---------|

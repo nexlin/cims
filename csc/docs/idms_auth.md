@@ -674,7 +674,7 @@ REFRESH_TOKEN_TTL = 60
 | `created_at` | 생성 시간 | `"2026-02-10..."` | ISO 8601 |
 | `users` | 멤버 목록 | `[...]` | 배열 |
 | `users[].id` | 멤버 ID | `"2001"` | **tel:+ 접두사 없음** |
-| `users[].priority` | 우선순위 | `5` | 0~7 (낮을수록 높음) |
+| `users[].priority` | 우선순위 | `5` | 0~255 (TS 24.481, 클수록 높음) |
 | `users[].role` | 역할 | `"owner"` | owner, participant |
 | `users[].joined_at` | 참여 시간 | `"2026-02-10..."` | |
 

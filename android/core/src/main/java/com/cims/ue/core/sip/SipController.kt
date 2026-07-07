@@ -1,0 +1,458 @@
+package com.cims.ue.core.sip
+
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Log
+import com.cims.ue.core.config.SipAccountConfig
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.pjsip.pjsua2.AccountConfig
+import org.pjsip.pjsua2.AuthCredInfo
+import org.pjsip.pjsua2.CallOpParam
+import org.pjsip.pjsua2.SendRequestParam
+import org.pjsip.pjsua2.SipHeader
+import org.pjsip.pjsua2.SipHeaderVector
+import org.pjsip.pjsua2.SipMediaType
+import org.pjsip.pjsua2.SipMultipartPart
+import org.pjsip.pjsua2.SipMultipartPartVector
+import org.pjsip.pjsua2.SipTxOption
+import org.pjsip.PjCamera2
+import org.pjsip.pjsua2.pjmedia_dir
+import org.pjsip.pjsua2.pjmedia_vid_dev_std_index
+import org.pjsip.pjsua2.pjsip_status_code
+import org.pjsip.pjsua2.pjsua_stun_use
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * VoLTE 1:1 SIP 진입 클래스 (설계서 §3.6, M1.1~M1.2).
+ *
+ * **스레딩 규약(사고 최빈 영역):** 모든 pjsua2 호출을 단일 `pj-ctl` HandlerThread 로 직렬화하고,
+ * 그 스레드에서 1회 [PjLib.ensureThread]. UI/코루틴은 이 스레드로 post 만 한다. 콜백은 PJSIP 스레드.
+ *
+ * **수명:** `account` 강참조, `Call` 은 [calls] 맵 강참조 → DISCONNECTED 에서만 remove+delete (GC 방지).
+ *
+ * 상태는 [regState]/[callState] StateFlow 로만 노출 — pjsua2 타입이 UI 로 새지 않는 경계.
+ */
+class SipController(private val config: SipAccountConfig) {
+
+    private val _reg = MutableStateFlow<RegState>(RegState.Idle)
+    val regState: StateFlow<RegState> = _reg.asStateFlow()
+
+    private val _call = MutableStateFlow<CallState>(CallState.Null)
+    val callState: StateFlow<CallState> = _call.asStateFlow()
+
+    /** 수신 문자(SIP MESSAGE) 이벤트. PJSIP 콜백 스레드에서 tryEmit — 구독자(서비스)가 저장/알림. */
+    private val _incomingMessage = MutableSharedFlow<ImMessage>(extraBufferCapacity = 32)
+    val incomingMessage: SharedFlow<ImMessage> = _incomingMessage.asSharedFlow()
+
+    /** in-dialog conference NOTIFY(RFC 4575) 본문 — (callId, XML). PTT 참가자 목록 갱신용. */
+    private val _conferenceInfo = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 16)
+    val conferenceInfo: SharedFlow<Pair<Int, String>> = _conferenceInfo.asSharedFlow()
+
+    private val ctl = HandlerThread("pj-ctl").apply { start() }
+    private val h = Handler(ctl.looper)
+
+    private var account: CimsAccount? = null                       // 강참조
+    private val calls = ConcurrentHashMap<Int, CimsCall>()         // callId → Call 강참조
+
+    @Volatile
+    var videoEnabled = false                                       // M1.3 토글
+
+    /** 수신 영상 렌더 대상(Android Surface). UI SurfaceView 준비 시 [setVideoSurface] 로 주입. */
+    @Volatile var videoRenderSurface: Any? = null
+        private set
+
+    /** 렌더 Surface 설정/해제 + 활성 호에 재결선(미디어가 이미 active 였던 경우). */
+    fun setVideoSurface(surface: Any?) = onCtl {
+        videoRenderSurface = surface
+        if (surface != null) calls.values.forEach { runCatching { it.attachVideo(surface) } }
+    }
+
+    /**
+     * 로컬 카메라 프리뷰(내 화면). UI SurfaceView 준비 시 Surface 주입, null 이면 중지.
+     *
+     * 카메라를 **두 번째로 열지 않는다**(과거 VideoPreview/pjsua_vid_preview_start 방식은 Android
+     * 카메라 단일 오픈 제약으로 활성 영상통화 중 PJMEDIA_EVID_SYSERR). 대신 PJSIP 캡처가 이미 연
+     * CameraDevice 의 CaptureSession 에 셀프뷰 surface 를 **출력 target 으로 추가**하도록
+     * [PjCamera2.SetPreviewSurface] 에 등록한다(Camera2 다중 출력 surface). 통화 전 등록해두면
+     * 캡처 시작 시 승계되고, 통화 중 등록하면 세션이 재구성된다.
+     */
+    fun setPreviewSurface(surface: Any?) = onCtl {
+        runCatching { PjCamera2.SetPreviewSurface(surface as? android.view.Surface) }
+    }
+
+    // pj-ctl 스레드에서만 호출.
+    private fun stopPreview() {
+        runCatching { PjCamera2.SetPreviewSurface(null) }
+    }
+
+    // 현재 캡처 카메라 장치 id(초기 -1 → 최초 전환 시 전면으로 확정). 전면↔후면 토글 추적.
+    @Volatile
+    private var camDev = -1
+
+    /** 전면↔후면 카메라 전환 — 활성 영상호의 캡처 장치를 현재와 다른 Android 카메라로 교체. */
+    fun switchCamera() = onCtl {
+        val call = calls.values.firstOrNull() ?: run { Log.w(TAG, "switchCamera: no active call"); return@onCtl }
+        val devs = PjLib.ep.vidDevManager().enumDev2()
+        val caps = ArrayList<Int>()
+        for (i in 0 until devs.size) {
+            val d = devs[i]
+            if ((d.dir and pjmedia_dir.PJMEDIA_DIR_CAPTURE) == 0) continue
+            if (!d.driver.equals("Android", ignoreCase = true)) continue   // Colorbar 등 합성 장치 제외
+            caps.add(d.id)
+        }
+        if (caps.size < 2) { Log.w(TAG, "switchCamera: 카메라 ${caps.size}개(전환 불가) caps=$caps"); return@onCtl }
+        if (camDev < 0) camDev = frontCaptureDev()
+        val next = caps.firstOrNull { it != camDev } ?: caps[0]
+        Log.i(TAG, "switchCamera: $camDev -> $next (caps=$caps)")
+        call.switchCaptureDevice(next)
+        camDev = next
+    }
+
+    /** 통화중 마이크 음소거(VoLTE 전이중). 미디어 재협상(onCallMediaState 재진입) 후에도 유지. */
+    @Volatile var muted = false
+        private set
+
+    fun setMuted(callId: Int, on: Boolean) = onCtl {
+        muted = on
+        calls[callId]?.setMic(!on)
+    }
+
+    // ── PTT(M2) 지원 ──
+    /** 반이중(PTT): true 면 mic 는 floor GRANT 시에만 송신, spk 는 상시 청취. (VoLTE=false 전이중) */
+    @Volatile var halfDuplex = false
+
+    /** 수신 SDP 에서 학습한 CMP floor 목적지 — (callId, ip, port). 그룹별 FloorClient 가 여기로 송신. */
+    private val _floorRemote = MutableStateFlow<Triple<Int, String, Int>?>(null)
+    val floorRemote: StateFlow<Triple<Int, String, Int>?> = _floorRemote.asStateFlow()
+
+    /**
+     * pj-ctl 스레드에서 제어 작업 실행. [affectsReg]=true(등록 계열)일 때만 실패를 등록
+     * 상태(_reg)로 반영한다. 프리뷰·렌더·음소거 등 **미디어/부가 작업의 실패가 등록 배지를
+     * "오프라인"으로 오표시하지 않도록** 분리 — 등록의 정본은 onRegState(dispatchReg) 이다.
+     * (예: 영상통화 중 pjsua_vid_preview_start 실패(PJMEDIA_EVID_SYSERR)가 REGISTER 와 무관하게
+     * 배지를 오프라인으로 만들던 버그 수정.)
+     */
+    private fun onCtl(affectsReg: Boolean = false, block: () -> Unit) = h.post {
+        runCatching {
+            if (PjLib.booted) PjLib.ensureThread("pj-ctl")   // 부팅 전(최초 register)엔 ep 미초기화 → skip
+            block()
+        }.onFailure {
+            Log.e(TAG, "pj-ctl error (affectsReg=$affectsReg)", it)
+            if (affectsReg) _reg.value = RegState.Failed(it.message ?: "error")
+        }
+    }
+
+    // ── 외부 명령 ──
+
+    fun register() = onCtl(affectsReg = true) {
+        PjLib.boot()
+        PjLib.ensureThread("pj-ctl")                  // 부팅 직후 pj-ctl 스레드 1회 등록
+        CodecConfig.apply(PjLib.ep)
+        _reg.value = RegState.Registering
+        val acc = CimsAccount(this).also { account = it }
+        acc.create(buildAccountConfig(config))                    // registerOnAdd=true → REGISTER 발신
+    }
+
+    // de-REGISTER(expires=0). 미등록 상태면 PJSIP 가 EINVALIDOP 를 던지므로 조용히 무시.
+    fun unregister() = onCtl { account?.let { runCatching { it.setRegistration(false) } } }
+
+    /**
+     * 강제 재등록 — 네트워크 복귀/포그라운드 복귀 시 호출(등록 keepalive).
+     * 계정이 이미 있으면 즉시 REGISTER 재발신, 없으면(서비스가 죽었다 살아난 경우) 무시(호출부에서 register).
+     */
+    fun reregister() = onCtl {
+        val acc = account ?: return@onCtl
+        if (!PjLib.booted) return@onCtl
+        _reg.value = RegState.Registering
+        runCatching { acc.setRegistration(true) }
+            .onFailure { Log.w(TAG, "reregister failed", it) }
+    }
+
+    /** 등록된 계정이 있는지(서비스에서 reregister vs register 판단용). */
+    fun hasAccount(): Boolean = account != null
+
+    fun makeCall(dstNumber: String) = onCtl {
+        val acc = account ?: run {
+            _call.value = CallState.Disconnected(-1, 0, "not registered"); return@onCtl
+        }
+        halfDuplex = false                                        // VoLTE = 전이중
+        muted = false                                             // 새 호는 음소거 해제로 시작
+        val call = CimsCall(this, acc)
+        val prm = CallOpParam(true).apply {
+            opt.audioCount = 1L
+            opt.videoCount = if (videoEnabled) 1L else 0L
+        }
+        call.makeCall("sip:$dstNumber@${config.domain}", prm)
+        calls[call.id] = call
+    }
+
+    /**
+     * MCPTT 그룹콜 착신 자동 수락(ptt_ue.md §12.3) — 응답 SDP 에 `m=application`(floor) 주입,
+     * 상대(INVITE offer)의 floor 포트는 [floorRemote] 로 학습(onCallSdpCreated remSdp).
+     */
+    fun answerGroupCall(callId: Int, applicationSdp: String) = onCtl {
+        halfDuplex = true
+        muted = false
+        calls[callId]?.apply {
+            pendingAppSdp = applicationSdp
+            answer(
+                CallOpParam(true).apply {
+                    statusCode = pjsip_status_code.PJSIP_SC_OK
+                    opt.audioCount = 1L
+                    opt.videoCount = 0L
+                },
+            )
+        }
+    }
+
+    /** 착신 응답. [withVideo]=true 면 영상까지 협상(상대가 m=video 를 offer 한 경우). */
+    fun answer(callId: Int, withVideo: Boolean = false) = onCtl {
+        muted = false
+        if (withVideo) videoEnabled = true
+        calls[callId]?.answer(
+            CallOpParam(true).apply {
+                statusCode = pjsip_status_code.PJSIP_SC_OK
+                opt.audioCount = 1L
+                opt.videoCount = if (withVideo) 1L else 0L
+            },
+        )
+    }
+
+    fun reject(callId: Int) = onCtl {
+        calls[callId]?.answer(CallOpParam().apply { statusCode = pjsip_status_code.PJSIP_SC_BUSY_HERE })
+    }
+
+    fun hangup(callId: Int) = onCtl { calls[callId]?.hangup(CallOpParam()) }
+
+    // ── PTT(M2): affiliation PUBLISH / 그룹콜(multipart+floor SDP) / 반이중 mic ──
+
+    /** 마이크 송신 토글 (PTT floor GRANT→true, RELEASE/REVOKE→false). */
+    fun setMicEnabled(callId: Int, on: Boolean) = onCtl { calls[callId]?.setMic(on) }
+
+    /** 오디오 출력 라우팅 — PTT(무전) UX 용 스피커폰 토글. */
+    fun setLoudspeaker(on: Boolean) =
+        setAudioRoute(if (on) AUDIO_ROUTE_SPEAKER else AUDIO_ROUTE_EARPIECE)
+
+    /** 오디오 출력 3단 라우팅 — [AUDIO_ROUTE_DEFAULT](자동: 이어폰 연결 시 이어폰)/수화구/스피커. */
+    fun setAudioRoute(route: Int) = onCtl {
+        PjLib.ep.audDevManager().setOutputRoute(
+            when (route) {
+                AUDIO_ROUTE_SPEAKER -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_LOUDSPEAKER
+                AUDIO_ROUTE_EARPIECE -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_EARPIECE
+                else -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_DEFAULT
+            },
+        )
+    }
+
+    /** 통화별 청취(수신 오디오 → 스피커) 토글 — 멀티그룹 듣기 정책용. */
+    fun setCallListen(callId: Int, on: Boolean) = onCtl { calls[callId]?.setListen(on) }
+
+    /** 통화별 수신 음량(1.0=원음, 0=무음) — 채널별 볼륨 슬라이더용. */
+    fun setCallRxLevel(callId: Int, level: Float) = onCtl { calls[callId]?.setRxLevel(level) }
+
+    /**
+     * 임의 SIP 요청 송신 (affiliation 은 method="PUBLISH"). body/헤더는 호출자(ptt-client)가 규격대로 구성.
+     * @param targetUri Request-URI (예: 그룹 `sip:group@domain`)
+     */
+    fun sendRequest(
+        method: String,
+        targetUri: String,
+        contentType: String?,
+        body: String?,
+        headers: Map<String, String> = emptyMap(),
+    ) = onCtl {
+        val acc = account ?: return@onCtl
+        val tx = SipTxOption().apply {
+            this.targetUri = targetUri
+            if (contentType != null) this.contentType = contentType
+            if (body != null) this.msgBody = body
+            if (headers.isNotEmpty()) this.headers = headers.toSipHeaders()
+        }
+        acc.sendRequest(SendRequestParam().apply { this.method = method; txOption = tx })
+    }
+
+    /**
+     * 키업 그룹 INVITE — multipart 본문(mcptt-info + resource-lists, ptt-client 가 규격대로 구성) +
+     * SDP 에 `m=application` floor 라인 주입. 응답 SDP 의 floor 포트는 [floorRemote] 로 학습.
+     * @param applicationSdp 주입할 floor SDP 라인(예: "m=application <port> UDP MCPTT\r\nc=IN IP4 ..\r\na=floorid:0 mstrm:audio")
+     */
+    fun makeGroupCall(
+        groupUri: String,
+        parts: List<SipBodyPart>,
+        applicationSdp: String,
+    ) = onCtl {
+        val acc = account ?: return@onCtl
+        halfDuplex = true
+        val call = CimsCall(this, acc)
+        call.pendingAppSdp = applicationSdp
+        val prm = CallOpParam(true).apply {
+            opt.audioCount = 1L
+            opt.videoCount = 0L
+            if (parts.isNotEmpty()) {
+                txOption.multipartContentType = SipMediaType().apply { type = "multipart"; subType = "mixed" }
+                txOption.multipartParts = parts.toMultipart()
+            }
+        }
+        call.makeCall(groupUri, prm)
+        calls[call.id] = call
+    }
+
+    /**
+     * in-dialog re-INVITE — multipart 본문(mcptt-info) 교체 송신. MCPTT 긴급/임박 상태의
+     * 통화 중 상향·하향(TS 24.379)에 사용. SDP 는 재협상되며 floor(m=application) 라인은
+     * 호별 [CimsCall.pendingAppSdp] 로 재주입된다.
+     */
+    fun reinviteWithBody(callId: Int, parts: List<SipBodyPart>) = onCtl {
+        calls[callId]?.reinvite(
+            CallOpParam(true).apply {
+                opt.audioCount = 1L
+                opt.videoCount = 0L
+                if (parts.isNotEmpty()) {
+                    txOption.multipartContentType = SipMediaType().apply { type = "multipart"; subType = "mixed" }
+                    txOption.multipartParts = parts.toMultipart()
+                }
+            },
+        )
+    }
+
+    // ── 콜백 진입점 (CimsAccount/CimsCall 에서 호출) ──
+
+    internal fun onRemoteFloorLearned(callId: Int, ip: String, port: Int) {
+        _floorRemote.value = Triple(callId, ip, port)
+    }
+
+    internal fun dispatchReg(active: Boolean, code: Int, reason: String) {
+        _reg.value = when {
+            active && code in 200..299 -> RegState.Registered(code)
+            !active && code in 200..299 -> RegState.Unregistered      // de-REGISTER 200
+            else -> RegState.Failed("$code $reason")
+        }
+    }
+
+    internal fun dispatchIncoming(
+        call: CimsCall,
+        from: String,
+        video: Boolean,
+        mcptt: Boolean = false,
+        emergency: Boolean = false,
+    ) {
+        calls[call.id] = call
+        _call.value = CallState.Incoming(call.id, from, video, mcptt, emergency)
+    }
+
+    internal fun dispatchConferenceInfo(callId: Int, xml: String) {
+        _conferenceInfo.tryEmit(callId to xml)
+    }
+
+    internal fun dispatchCallState(callId: Int, s: CallState) {
+        _call.value = s
+        if (s is CallState.Disconnected) {
+            calls.remove(callId)?.let { runCatching { it.delete() } }
+            onCtl { if (calls.isEmpty()) stopPreview() }        // 마지막 호 종료 → 프리뷰 정리
+        }
+    }
+
+    internal fun dispatchInstantMessage(fromUri: String, contentType: String, body: String) {
+        _incomingMessage.tryEmit(ImMessage(fromUri, contentType, body))
+    }
+
+    fun shutdown() = onCtl {
+        stopPreview()
+        calls.values.forEach { runCatching { it.delete() } }
+        calls.clear()
+        account?.let { runCatching { it.delete() } }
+        account = null
+        PjLib.shutdown()
+    }
+
+    // ── config → pjsua2 매핑 (설계서 §3.2, Digest 계약) ──
+
+    private fun buildAccountConfig(c: SipAccountConfig): AccountConfig {
+        val ac = AccountConfig()
+        ac.idUri = if (c.displayName.isBlank()) c.aor                 // sip:msisdn@domain (공개 ID)
+        else "\"${c.displayName}\" <${c.aor}>"
+
+        val tp = c.transport.name.lowercase()                        // udp/tcp/tls — 설정 추종
+        ac.regConfig.registrarUri = "sip:${c.domain}:${c.serverPort};transport=$tp"
+        ac.regConfig.timeoutSec = c.expiresSec.toLong()              // 희망값(서버 200 OK Expires 추종)
+        ac.regConfig.registerOnAdd = true
+
+        // ── 등록 keepalive 보강(doze/슬립·네트워크 단절 후 자동 복구) ──
+        ac.regConfig.retryIntervalSec = 30                           // 등록 실패 시 재시도 주기
+        ac.regConfig.firstRetryIntervalSec = 5                       // 첫 재시도는 빠르게
+        ac.regConfig.randomRetryIntervalSec = 5                      // 다수 단말 동시 재시도 분산
+        ac.regConfig.delayBeforeRefreshSec = 10                      // 만료 전 미리 갱신(여유)
+        ac.regConfig.dropCallsOnFail = false                         // 등록 일시 실패로 통화 끊지 않음
+
+        // NAT 바인딩 유지 — UDP keep-alive 로 서버 도달성 유지(슬립 후 단방향 음성/미수신 방지)
+        ac.natConfig.udpKaIntervalSec = 15                           // 15초 CRLF keep-alive
+        ac.natConfig.contactRewriteUse = 1                           // 서버가 본 공인주소로 Contact 재작성
+        ac.natConfig.viaRewriteUse = 1
+        ac.natConfig.sipStunUse = pjsua_stun_use.PJSUA_STUN_USE_DISABLED    // STUN 서버 없음
+        ac.natConfig.mediaStunUse = pjsua_stun_use.PJSUA_STUN_USE_DISABLED
+
+        // Digest: username = IMPI(IMSI@domain), realm="*"(challenge realm echo — 도메인 오타/불일치 무한401 회피, §3.3)
+        ac.sipConfig.authCreds.add(
+            AuthCredInfo("digest", "*", c.digestUsername, 0, c.password),
+        )
+
+        // 도메인 DNS 미해석 회피: 실제 서버 IP:port 로 route 강제(;lr)
+        ac.sipConfig.proxies.add("sip:${c.serverHost}:${c.serverPort};transport=$tp;lr")
+
+        // ── 영상통화 캡처 설정 ──
+        // autoTransmitOutgoing 기본 false → 명시하지 않으면 m=video sendrecv 로 협상돼도 카메라
+        // 캡처(발신 영상)가 시작되지 않는다. 켜야 상대가 우리 카메라를 받고, 동시에 그 열린
+        // 카메라(PjCamera2)에 셀프뷰 surface 를 붙일 수 있다([setPreviewSurface]).
+        ac.videoConfig.autoTransmitOutgoing = true
+        ac.videoConfig.autoShowIncoming = false                      // 수신 렌더는 앱이 setVideoSurface 로 직접 결선
+        ac.videoConfig.defaultCaptureDevice = frontCaptureDev()      // 셀프뷰=전면 카메라
+        return ac
+    }
+
+    /** 전면 카메라 캡처 장치 우선 선택(이름 "front" 매칭), 없으면 기본 캡처 장치. */
+    private fun frontCaptureDev(): Int = runCatching {
+        val devs = PjLib.ep.vidDevManager().enumDev2()
+        Log.i(TAG, "vidDev count=${devs.size}")
+        var fallback = pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV
+        for (i in 0 until devs.size) {
+            val d = devs[i]
+            Log.i(TAG, "vidDev[$i] id=${d.id} dir=${d.dir} name='${d.name}' drv='${d.driver}'")
+            if ((d.dir and pjmedia_dir.PJMEDIA_DIR_CAPTURE) == 0) continue
+            if (d.name.contains("front", ignoreCase = true)) return@runCatching d.id
+            if (fallback == pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV) fallback = d.id
+        }
+        Log.i(TAG, "frontCaptureDev -> $fallback")
+        fallback
+    }.onFailure { Log.w(TAG, "frontCaptureDev enum failed: ${it.message}") }
+        .getOrDefault(pjmedia_vid_dev_std_index.PJMEDIA_VID_DEFAULT_CAPTURE_DEV)
+
+    private fun Map<String, String>.toSipHeaders(): SipHeaderVector = SipHeaderVector().also { v ->
+        forEach { (k, value) -> v.add(SipHeader().apply { hName = k; hValue = value }) }
+    }
+
+    private fun List<SipBodyPart>.toMultipart(): SipMultipartPartVector = SipMultipartPartVector().also { v ->
+        forEach { p ->
+            v.add(SipMultipartPart().apply {
+                contentType = SipMediaType().apply { type = p.type; subType = p.subType }
+                body = p.body
+            })
+        }
+    }
+
+    companion object {
+        private const val TAG = "SipController"
+
+        /** 오디오 출력 라우팅 상수 — [setAudioRoute]. */
+        const val AUDIO_ROUTE_DEFAULT = 0   // 자동(이어폰 연결 시 이어폰)
+        const val AUDIO_ROUTE_EARPIECE = 1  // 수화구
+        const val AUDIO_ROUTE_SPEAKER = 2   // 외장 스피커
+    }
+}
+
+/** multipart INVITE 본문 한 파트 (예: type="application", subType="vnd.3gpp.mcptt-info+xml"). */
+data class SipBodyPart(val type: String, val subType: String, val body: String)

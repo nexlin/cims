@@ -1,9 +1,5 @@
 # CIMS 모니터링·이력·통계 설계서
 
-> 버전: 4.1 (2026-06-01)
-
----
-
 ## 개요
 
 Console UI에서 제공하는 운영 기능을 3개 파트로 구분한다.
@@ -83,6 +79,12 @@ admin_users         ← 관리자 계정
 
 CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대시보드에 표시한다.
 
+> **서빙 주체**: `/api/v1/stats/*` 전체(health/subscribers/messages/leak + service KPI)는
+> **oam-svc** 가 서빙한다(서비스 관측 — CSP/CMP probe·DB·서비스 로그가 oam-svc 설정 소유,
+> oam_base_service_split §4). 분리 배포에서 base(4419)는 게이트웨이 프록시만 하고 콘솔 URL 은
+> 불변. `--role all` 단일 프로세스에서는 in-process 등록. 표의 "CSC →" 는 이 관측 프로세스를
+> 뜻한다(구 단일 CSC 시절 명칭).
+
 ### 1.1 헬스체크
 
 | 항목 | 판정 기준 | 수집 방식 |
@@ -119,7 +121,7 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 | RTP 포트 사용률 (VoIP) | 사용중 / 전체 | CMP `_freeResources` (VoIP `PRtpTrans` 풀, `RtpStartPort`) |
 | RTP 포트 사용률 (PTT) | 사용중 / 전체 | CMP `_freePttResources` (PTT `PPttTrans` 풀, `PttRtpStartPort`) |
 
-VoIP/PTT 리소스 풀이 분리되어 있어 CMP STATS 응답도 분리 노출한다 — `rtp_ports_{total,used,free}`(VoIP) + `ptt_rtp_ports_{total,used,free}`(PTT). `/stats/health` 는 이를 `cmp.rtp_ports`(하위호환=VoIP) + `cmp.rtp_ports_ptt` 두 객체로 전달한다(구버전 CMP 면 PTT 0).
+VoIP/PTT 리소스 풀이 분리되어 있어 CMP STATS 응답도 분리 노출한다 — `rtp_ports_{total,used,free}`(VoIP) + `ptt_rtp_ports_{total,used,free}`(PTT). `/stats/health` 는 이를 `cmp.rtp_ports`(하위호환=VoIP) + `cmp.rtp_ports_ptt` 두 객체로 전달한다(구버전 CMP 면 PTT 0). CMP 관측은 `MediaServer.Endpoints` **전 노드 집계**(AA 다중 노드)다 — `health.cmp` up = any 노드 응답, 카운터(sessions/rtp 풀/누수회수)는 전 노드 합산.
 
 ### 1.4 PTT 그룹통화 상태
 
@@ -151,7 +153,7 @@ VoIP/PTT 리소스 풀이 분리되어 있어 CMP STATS 응답도 분리 노출�
 | `per_iface` rx/tx + rate | `/proc/net/dev` delta | 누적 bytes + rate(B/s) |
 | `modules[]` (pid/cpu/mem) | `_metric_module_names()` 각각 `_pgrep_module` | 아래 참조 |
 
-- **모듈 liveness 탐지 = `_metric_module_names()`**: `_DEFAULT_METRIC_MODULES`(csp/cmp/csc/cwrtc) ∪ `DEFAULT_INSTALL_ROOT` listdir ∪ **`supervised.json` 키**. supervised 를 합치는 이유 — install_path 가 agent 트리 밖(`/opt/cims-agent/isp`)인 모듈은 listdir 로 안 잡혀 OAM 의 `module_down` 알람이 **false 로 뜬다**(deployment=running 인데 agent 미보고). supervised.json(워치독 등록 모듈)을 보면 경로 독립적으로 탐지된다.
+- **모듈 liveness 탐지 = `_metric_module_names()`**: `_DEFAULT_METRIC_MODULES`(csp/cmp/csc/cwrtc) ∪ `DEFAULT_INSTALL_ROOT` listdir ∪ **`supervised.json` 키**. supervised 를 합치는 이유 — 기본 집합 밖 모듈(`/opt/cims-agent/modules/isp` 등)은 listdir 로만은 누락될 수 있어 OAM 의 `module_down` 알람이 **false 로 뜰 수 있다**(deployment=running 인데 agent 미보고). supervised.json(워치독 등록 모듈)을 보면 경로 독립적으로 탐지된다.
 - 대시보드 "시스템 리소스" 위젯(`SystemResourceWidget`)은 데이터 0건이어도 패널을 항상 렌더(placeholder)하고, 서버 목록은 즉시 표시·메트릭은 4s 타임아웃 가드로 보강 — 느린/빈 메트릭에 위젯이 사라지거나 행 걸리지 않는다. 위젯은 지표(CPU/메모리/디스크/네트워크) 체크박스 선택 + 서버×지표 area 추이 차트(기준선·현재점·임계색) 형태.
 
 > ⚠️ **OAM 화이트리스트 함정**: agent 가 metric 필드를 보내도, CSC(OAM)의 `agent_api.py _metric()` record 화이트리스트에 없으면 저장 시 버려진다 — 신규 metric 필드(예 `mounts`)는 화이트리스트에 명시 추가 필수. 응답 직렬화(`agents.py _agent_metrics._row`)에서도 `per_iface`/`mounts` 를 노출해야 대시보드에 도달한다.
@@ -190,7 +192,7 @@ CIMS agent/HA 모델 밖의 **외부 시스템**(외부 DB / 모니터링 / 스�
 - 저장: 신규 DB 테이블 없이 file_store 컬렉션(domain `external_systems`), 1레코드=1json.
 - 레코드: `{name, type(db|monitoring|storage|auth|other), endpoints:[{host,port,label?}], probe:{mode,host,port,timeout}, tags[], enabled, description}`.
 - Probe: `tcp`(구현, `socket.create_connection` → up/down + latency_ms) / `http`·`icmp`(예약→unknown) / `none`. host/port 미지정 시 `endpoints[0]` fallback.
-- API: `oam/src/handlers/external_systems.py` — CRUD + `GET /status`(enabled 전체 동시 probe) + `POST /{id}/probe`(즉시). 마운트 `/api/v1/external-systems`.
+- API: `ems/core/oam/src/handlers/external_systems.py` — CRUD + `GET /status`(enabled 전체 동시 probe) + `POST /{id}/probe`(즉시). 마운트 `/api/v1/external-systems`.
 - 콘솔: `ExternalSystemsPage`(테이블 + Modal CRUD), 시스템 영역 nav leaf.
 
 ---
@@ -691,14 +693,6 @@ GET /api/v1/stats/service/summary?granularity=1d&date=2026-04-03
 
 ## Console UI 탭 구조
 
-기존:
-
-```
-[가입자 관리] [PTT 그룹 관리] [통화현황] [녹취 관리] [문서]
-```
-
-개선:
-
 ```
 [대시보드] [가입자 관리] [PTT 그룹 관리] [서비스 이력] [통계] [문서]
 ```
@@ -722,15 +716,3 @@ GET /api/v1/stats/service/summary?granularity=1d&date=2026-04-03
 | **CMP** | service_log/.../*.rtp (녹취 raw, record_dir) | - | - |
 | **CSC** | - | - | REST API: 이력조회, Flow(sip.jsonl 검색), 녹취 on-demand 변환, 통계 집계 |
 | **Console** | - | - | UI: 대시보드, 이력+Flow+녹취, 통계 차트 |
-
----
-
-## 변경 이력
-
-| 날짜 | 버전 | 내용 |
-|------|------|------|
-| 2026-04-02 | 1.0 | 초기 정의 — CSP 모듈별 상태/통계 항목 |
-| 2026-04-03 | 2.0 | 3파트 재설계 — 실시간 모니터링 / 서비스 이력(Flow+녹취 통합) / 통계 |
-| 2026-04-03 | 2.1 | Part 3 통계 보완 — 다중 시간 단위(5m/10m/1h/1d/1M/1y), 계층적 집계/저장, DB 스키마 |
-| 2026-04-10 | 4.0 | VoLTE B2BUA 전환: Proxy 모드 제거, SipMessageLogger(sip.jsonl) 기반 Flow, session.json 매핑, 녹취 recv_usec 추가, 트랜스코딩(DTX/FU-A/sync) 상세화 |
-| 2026-06-01 | 4.1 | 대시보드 위젯 합성화(KPI 7카드/SystemTopology/SystemResource) + KPI DB카운트(등록 단말, register_time/logout_time) + RTP 풀 VoIP/PTT 분리(`rtp_ports`+`rtp_ports_ptt`) + agent `mounts[]`·`cpu_pct`(2s) + 외부 시스템 레지스트리(§1.8) + 메트릭 조회 tail-read 성능(§1.5) |

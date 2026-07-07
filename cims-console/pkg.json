@@ -1,6 +1,0 @@
-{
-  "name": "console",
-  "description": "관리자 웹 콘솔",
-  "version": "0.0.2",
-  "ha_capability": "standalone"
-}

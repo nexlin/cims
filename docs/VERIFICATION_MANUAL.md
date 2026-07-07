@@ -2,7 +2,7 @@
 
 > 원본 SSOT: `docs/VERIFICATION_PROCESS.md`
 > 본 문서: 사용자가 직접 단계별로 따라할 수 있도록 정리한 실행용 체크리스트.
-> 6단계 (S1~S6) 파이프라인 기준 — 옛 Phase 1/2/3 가이드는 git history 참조.
+> 6단계 (S1~S6) 파이프라인 기준.
 
 ---
 
@@ -106,10 +106,6 @@ python3 -m tests.cims_verify run --preset pipeline-full
 
 검증 실행은 **TB-Console (3000)** 에서 수행 — TB-CSC 4419 backend.
 
-> URL 변경 (2026-05-08): 옛 `/testbed/verify-v2` / `/testbed/verify-history` /
-> `/testbed/modules` 는 모두 `/release/...` 로 이동. 사이드바 메뉴 라벨도
-> "빌드·검증" → **"패키징"** 으로 변경. 하단 "배포" 메뉴는 별도.
-
 ---
 
 ## 2. Stage 별 합격 체크
@@ -154,8 +150,7 @@ FAIL 시 → S2~S6 자동 BLOCKED. 코드 수정 후 재시도.
 > 변종 4종은 `cims.sh cmd_pkg` 의 staging 단계에서 base dist 디렉토리를 임시
 > 복사한 뒤 바이너리 (`bin/csp` → `bin/psp`), config (`config/csp.json` →
 > `config/psp.json`), launcher (`csp.sh` → `psp.sh`) 를 rename 후 tar — 즉
-> tarball 안 디렉토리 구조가 진짜 분리된 형태다 (옛 가짜 분리 = meta.json
-> name 만 다름, 2026-05-08 `c79cbaf` 에서 폐기). 콘솔 `/release/package`
+> tarball 안 디렉토리 구조가 실제로 분리된 형태다. 콘솔 `/release/package`
 > 카드의 ⤓ 다운로드 버튼은 변종별로 노출.
 
 ### 2.5 S5 — 로컬 배포 (22 native step, 5 server)
@@ -339,6 +334,26 @@ grep LocalIp build/dist/csp/config/csp.json
   │            │            │            │            │            │
   └ FAIL = stage gate ─▶ stage>N 자동 BLOCKED. FAIL 분석 후 해당 stage 재실행.
 ```
+
+---
+
+## 부록. 시뮬레이터 (cspsim) 수동 실행
+
+`cspsim` 은 SIP/RTP 단말 시뮬레이터로, S3 스모크·S6 통합 검증의 호 발생기다. 빌드 산출물은
+`build/bin/cspsim`. 단독 수동 시험에도 사용한다.
+
+```bash
+# VoIP 호 (2 세션)
+./bin/cspsim -server_ip 127.0.0.1 -count 2 -user 1001 -domain csp -password 1234 -mode volte -scenario call -call_duration 5
+
+# PTT 그룹콜 (4 세션)
+./bin/cspsim -server_ip 127.0.0.1 -count 4 -user 1001 -domain csp -password 1234 -mode ptt -group 1000 -scenario group_call -call_duration 10
+```
+
+인터랙티브 명령: `s`(stats) · `c`(call) · `g`(group call) · `t`/`r`(PTT push/release) · `sub`(subscribe) · `q`(quit).
+
+> S6 통합 검증이 cspsim 에 넘기는 시나리오별 인자(`-mode`/`-scenario`/`-count`/`-no_video` 등)는
+> 위 「2.6 S6 — 통합 검증」 표를 참조한다.
 
 ---
 

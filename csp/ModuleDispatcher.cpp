@@ -109,9 +109,10 @@ CModuleDispatcher::~CModuleDispatcher() {
 // ──────────────────────────────────────────────────────────────
 
 void CModuleDispatcher::InitModules() {
-    CLog::Print( LOG_SYSTEM, "ModuleDispatcher: Roles CSCF=%s TAS=%s PTT-AS=%s IBCF=%s",
+    CLog::Print( LOG_SYSTEM, "ModuleDispatcher: Roles CSCF=%s TAS=%s PTT-AS=%s IBCF=%s MCDATA-AS=%s",
                  m_clsCscf.IsEnabled() ? "ON" : "OFF", m_clsTas.IsEnabled() ? "ON" : "OFF",
-                 m_clsPttAs.IsEnabled() ? "ON" : "OFF", m_clsIbcf.IsEnabled() ? "ON" : "OFF" );
+                 m_clsPttAs.IsEnabled() ? "ON" : "OFF", m_clsIbcf.IsEnabled() ? "ON" : "OFF",
+                 m_clsMcDataAs.IsEnabled() ? "ON" : "OFF" );
 }
 
 bool CModuleDispatcher::Start( CSipStackSetup &clsSetup ) {
@@ -1136,11 +1137,19 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
         return true;
     }
 
+    // MCData 그룹 SDS (TS 24.282) — 그룹 대상 MESSAGE 는 MCDATA-AS 가 게이트+fan-out.
+    if ( m_clsMcDataAs.IsEnabled() && m_clsMcDataAs.OnMessage( pszFrom, pszTo, pclsMessage ) ) return true;
+
     CUserInfo clsUserInfo;
     CSipCallRoute clsRoute;
     if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) return false;
     clsUserInfo.GetCallRoute( clsRoute );
-    return gclsUserAgent.SendSms( pszFrom, pszTo, pclsMessage->m_strBody.c_str(), &clsRoute );
+    // 1:1 전달 — Content-Type 보존 (MCData disposition 통지 등 text/plain 이외 본문 대응)
+    char szContentType[512];
+    szContentType[0] = '\0';
+    pclsMessage->m_clsContentType.ToString( szContentType, sizeof( szContentType ) );
+    return gclsUserAgent.SendSms( pszFrom, pszTo, pclsMessage->m_strBody.c_str(), &clsRoute,
+                                  szContentType[0] ? szContentType : NULL );
 }
 
 // ──────────────────────────────────────────────────────────────

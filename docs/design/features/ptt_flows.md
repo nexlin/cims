@@ -1,9 +1,6 @@
 # PTT 서비스 케이스 및 메시지 Flow
 
-**작성일:** 2026-04-03
-**최종 수정:** 2026-06-03 (3GPP MCPTT 규격전환 완료 — on-demand 호모델 / PUBLISH affiliation / XCAP HTTP / broadcast floor / 개시자 floor 정합)
-
-> **⭐ 2026-06-03 3GPP MCPTT 규격전환 완료 (UE↔CSP / UE↔CSC)** — 호 수명 모델이 `group_type` 으로 분기한다.
+> **현재 동작 요약 (3GPP MCPTT — UE↔CSP / UE↔CSC)** — 호 수명 모델이 `group_type` 으로 분기한다.
 >
 > | group_type | 모드 | 절차 |
 > |---|---|---|
@@ -11,14 +8,14 @@
 > | `chat` | **상시(persistent)** | 상시 세션, 멤버는 affiliation 시 합류, de-affiliate/dereg 시 이탈 (§10.2) |
 > | `broadcast` | on-demand + 발신자 floor 독점 | 개시자만 발언, 타 멤버 floor REQUEST 는 CMP 가 REJECT (TS 24.380 §10.3) |
 >
-> - **REGISTER 는 호에 무영향** (구 always-on 자동초대/기동 시 자동생성 제거). 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
-> - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. (구 SUBSCRIBE-presence 경로는 호환 유지.)
+> - **REGISTER 는 호에 무영향**. 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
+> - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다.
 > - **개시자(originator) 도 CMP floor/RTP 멤버**: `ProcessGroupCall` 이 caller 를 `JOIN_PTT_GROUP`(audio/floor=audio+1) → caller RTP 릴레이 + floor 참여. 200 OK 에 `m=application`(SharedFloorPort) 광고(psip `AddSdp` append, audio-only 호엔 무영향) → 개시자가 floor dest 학습.
 > - **broadcast**: `ADD_PTT_GROUP` 에 `group_type`+`initiator_id` 전달 → CMP `handleFloorRequest` 가 개시자 외 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`).
-> - **신규 그룹 즉시 발신**: `EventIncomingCall` 이 그룹 캐시 미스 시 `LoadFromDb()` lazy-reload (notify 도달 무관 안전망). + csc `notify_csp` GROUP_CHANGED 를 CSP+PSP 양쪽 broadcast.
-> - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` = `https://{CSC}:{4430}/`(`Setup.Xcap.{Host,Port,Scheme}`, 구 `http://{CSP}:4420` 오지정 교정). UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
+> - **신규 그룹 즉시 발신**: `EventIncomingCall` 이 그룹 캐시 미스 시 `LoadFromDb()` lazy-reload (notify 도달 무관 안전망). csc `notify_csp` GROUP_CHANGED 를 CSP+PSP 양쪽 broadcast.
+> - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` = `https://{CSC}:{4430}/`(`Setup.Xcap.{Host,Port,Scheme}`). UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
 >
-> **2026-06-02 3GPP 정합 (유지)**
+> **3GPP 정합 세부**
 > - 그룹 식별: `ptt_groups.id`=surrogate(키), `mcptt_group_id`=식별자. 멤버 `role`(chair/participant)·`mcptt_id`.
 > - INVITE: `mcptt-info+xml` + **`resource-lists+xml`(멤버 로스터)** + SDP. (로스터는 INVITE>8192B 우려 시 생략 → GMS 의존)
 > - **chair** = participant floor 항상 선점(TS 24.380). 200 OK 의 `m=application` floor 포트 파싱.
@@ -42,14 +39,17 @@
 
 ### Part B. 단말 등록 및 서비스 진입
 
+> 번호 = **3GPP 정규 서비스 진입 순서**. CIMS 실제 순서는 `B2 → B4 → B1+B3(lazy)` (본문 주석 참조).
+
 | # | 케이스 | 설명 |
 |---|--------|------|
-| B1 | 단말 SIP 등록 | REGISTER → Digest 인증 (호에 무영향 — 자동초대 없음) |
-| B1a | affiliation (PUBLISH) | 그룹 URI PUBLISH 로 affiliate → `ptt_affiliations` |
-| B1b | on-demand 그룹콜 개시 | 발신 UE 키업(그룹 INVITE) → fan-out (prearranged/broadcast) |
-| B2 | GMS/CMS 구독 + XCAP GET | xcap-diff 구독 → NOTIFY → CSC-1 토큰 → 문서 GET |
-| B3 | 그룹 세션 수명 | on-demand(키업 시 생성/해제) vs chat(상시) |
-| B4 | 단말 등록 해제 | REGISTER Expires=0 → ClearUserCall + de-affiliation |
+| B1 | MCPTT 사용자 인증 (CSC-1) | OIDC/PKCE → `access_token` (규격: 서비스 진입 첫 자격증명. CIMS: XCAP 전용·lazy) |
+| B2 | 단말 SIP 등록 (+service authz) | REGISTER → Digest MD5 (호 무영향. 규격은 토큰 제시 service authz) |
+| B3 | 구성 취득 (GMS/CMS) | xcap-diff 구독 → NOTIFY → XCAP 문서 GET (Bearer) |
+| B4 | affiliation (PUBLISH) | 그룹 URI PUBLISH → `ptt_affiliations` (※규격 전제: B1·B3 선행) |
+| B5 | on-demand 그룹콜 개시 | 발신 UE 키업(그룹 INVITE) → fan-out (prearranged/broadcast) |
+| B6 | 그룹 세션 수명 | on-demand(키업 시 생성/해제) vs chat(상시) |
+| B7 | 단말 등록 해제 | REGISTER Expires=0 → ClearUserCall + de-affiliation |
 
 ### Part C. 서비스 중 (통화/플로어)
 
@@ -206,7 +206,34 @@ Console            CSC                 CSP                     CMP
 
 ## Part B. 단말 등록 및 서비스 진입
 
-### B1. 단말 SIP 등록 (호에 무영향)
+> **절 번호 = 3GPP(TS 33.180 §5 / TS 23.379) 정규 서비스 진입 순서.** CIMS 실제 구현 순서는
+> 이와 달라 — `B2(REGISTER/Digest) → B4(affiliation) → B1+B3(토큰+XCAP, lazy 취득)`. CIMS 는
+> SIP 를 Digest MD5 로 인증하고 OIDC access_token 을 XCAP HTTP 전용으로만 쓰므로 규격의
+> "토큰·구성 우선" 순서를 단순화했다. 각 절의 **"CIMS 실제 시점"** 주석 참조.
+
+### B1. MCPTT 사용자 인증 (CSC-1 OIDC/PKCE — TS 33.180 §5 / TS 24.482)
+
+규격상 **서비스 진입의 첫 단계**. UE 가 IdMS(CSC McpttServer)에서 OIDC Authorization Code +
+PKCE 로 `access_token` 을 취득 — 이 토큰이 이후 B2(service authorization)·B3(XCAP HTTP) 양쪽의
+자격증명이 된다.
+
+```
+UE                                              CSC McpttServer(HTTPS :4430)
+  │ ── HTTPS GET /idms/authreq?..code_challenge(PKCE,S256) ──────────────────► │
+  │ ◄── {code} ──────────────────────────────────────────────────────────────  │
+  │ ── HTTPS POST /idms/tokenreq {code, code_verifier} ──────────────────────► │
+  │ ◄── {access_token, id_token, refresh_token} (Bearer) ────────────────────  │
+```
+> PKCE 핸드셰이크(authreq`code_challenge`→code→tokenreq`code_verifier`→token)는 RFC 7636 /
+> OIDC 규격에 정합. 무토큰 XCAP GET → 401.
+> **CIMS 실제 시점:** CIMS 는 SIP 를 Digest(B2)로 인증하고 이 토큰을 **XCAP 전용**으로만 쓰므로,
+> 실제로는 여기서 선취득하지 않고 **B3 의 XCAP GET 직전에 lazy 취득**한다.
+
+### B2. 단말 SIP 등록 (+ service authorization — 호에 무영향)
+
+규격: SIP 등록 후 access_token(B1)을 제시해 MCPTT service authorization 수행.
+**CIMS 실제 시점:** SIP 인증을 **Digest MD5** 로 대체하고 OIDC 토큰을 SIP 에 제시하지 않음
+(토큰 기반 service authorization 미사용 — 단순화).
 
 ```
 UE(단말)                CSP
@@ -216,12 +243,36 @@ UE(단말)                CSP
   │ ── REGISTER+Auth ─► │
   │ ◄── 200 OK ──────── │  (Expires 3600 강제)
   │                      │
-  │  ※ 구 always-on 모델의 "그룹 자동초대" 는 제거됨.
-  │     REGISTER 갱신(refresh)은 진행 중인 호/floor 에 무영향
-  │     (구 버전은 갱신마다 teardown+재초대 → 밤샘 불안정의 원인이었음).
+  │  ※ REGISTER 는 그룹 호를 자동초대하지 않는다.
+  │     REGISTER 갱신(refresh)은 진행 중인 호/floor 에 무영향.
 ```
 
-### B1a. affiliation (SIP PUBLISH — TS 24.379 §9)
+### B3. 구성 취득 (GMS/CMS — xcap-diff 구독 + XCAP 문서 GET; UE↔CSP NOTIFY + UE↔CSC HTTP)
+
+규격: affiliate 가능 그룹 목록·user-profile·service-config 취득(B4 affiliation 의 근거). access_token
+(B1)을 Bearer 로 제시.
+
+```
+UE                      CSP                          CSC McpttServer(HTTPS :4430)
+  │                      │                            │
+  │ ── SUBSCRIBE ──────► │  Event: xcap-diff (gms_psi/cms_psi)
+  │ ◄── 200 OK ──────── │
+  │ ◄── NOTIFY ──────── │  xcap-diff:
+  │ ── 200 OK ────────► │   xcap-root="https://{CSC}:4430/"   ← Setup.Xcap.{Host,Port,Scheme}
+  │                      │   <document sel="org.openmobilealliance.groups/users/tel:{u}/tel:{group}"/>  (gms, 가입자 그룹별)
+  │                      │   <document sel="org.3gpp.mcptt.user-profile/.../user-profile"/>  (cms)
+  │                      │   <document sel="org.3gpp.mcptt.service-config/.../service-config"/>
+  │                      │                            │
+  │ ── HTTPS GET {xcap-root}{sel}  Authorization: Bearer {access_token(B1)} ──► │  GMS/CMS 문서
+  │ ◄── 200 + XML (Etag) ─────────────────────────────────────────────────────  │
+  │ ── HTTPS GET .. If-None-Match: {etag} ──────────────────────────────────► │
+  │ ◄── 304 Not Modified ─────────────────────────────────────────────────────  │
+```
+> 무토큰 GET → 401. xcap-root = `https://{CSC}:4430`(McpttServer). cspsim 은 `RecvResponse`/NOTIFY 에서 floor·문서 경로를 학습해 동일 흐름 수행.
+> **CIMS 실제 시점:** SUBSCRIBE/NOTIFY(SIP)는 Digest 세션으로 동작하며, access_token 은 위 XCAP
+> GET **직전에 B1 의 /idms PKCE 로 lazy 취득**한다(토큰의 유일 소비처가 XCAP).
+
+### B4. affiliation (SIP PUBLISH — TS 24.379 §9)
 
 ```
 UE                      CSP (CCscfModule)
@@ -235,9 +286,26 @@ UE                      CSP (CCscfModule)
   │ ◄── 200 OK ──────── │  SIP-ETag (RFC 3903)
   │                      │  (active prearranged/chat 세션이면 late-entry InviteMember)
 ```
-> 구 SUBSCRIBE-presence affiliation 경로는 호환을 위해 유지(추가형).
 
-### B1b. on-demand 그룹콜 개시 (prearranged / broadcast — TS 24.379 §10.1/§10.3)
+> **규격 전제조건 (3GPP):** affiliation 은 ① 인증(B1 토큰) → ② service authorization(B2) →
+> ③ 구성취득(B3, GMS group docs = affiliate 가능 그룹의 근거) **이후** 단계다(TS 33.180 §5 /
+> TS 23.379). 사용자는 자신이 멤버인 그룹에만 affiliate 할 수 있고(TS 24.481/24.379), 그
+> 멤버십·그룹 URI 는 GMS 문서(B3)에서 얻는다. 따라서 "토큰·구성 없는 affiliation" 은 규격상
+> 성립하지 않는다.
+>
+> **CIMS 구현 차이(의도된 단순화):** CIMS 는 SIP 를 Digest(B2)로 인증하고 affiliation 인가를
+> **SIP 신원 + DB 멤버십(`ptt_group_members`)** 으로 판정하므로 PUBLISH 에 OIDC 토큰이 불필요.
+> 그 결과 CIMS 실제 순서는 `B2(REGISTER) → B4(affiliation) → B1+B3(토큰+XCAP, lazy)` 로 규격의
+> 토큰·구성 우선 순서를 단순화한 것이다. 규격 완전 정합 시 ①토큰 선취득(B1) ②그룹구성(B3) 취득
+> 후 affiliation 하도록 순서를 재배치해야 한다.
+>
+> ⚠️ **SIP 세부 확인 필요:** 위 `Event: poc-settings` 는 OMA PoC 레거시 값으로 보인다.
+> TS 24.379 §9 affiliation 은 (a) 사용자 **자신**의 affiliation status change 와 (b) 권한자에
+> 의한 affiliation-command(`application/vnd.3gpp.mcptt-affiliation-command+xml`)가 구분되므로,
+> `Event` 헤더·본문 content-type 을 TS 24.379 §9.2.1 대조로 확정할 것(현재 값은 미검증).
+> SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다(추가형).
+
+### B5. on-demand 그룹콜 개시 (prearranged / broadcast — TS 24.379 §10.1/§10.3)
 
 ```
 발신 UE(개시자)          CSP                          CMP
@@ -264,44 +332,20 @@ UE                      CSP (CCscfModule)
   │     chat 은 상시 유지.
 ```
 
-### B2. GMS/CMS 구독 + XCAP 문서 취득 (UE↔CSP NOTIFY + UE↔CSC HTTP)
-
-```
-UE                      CSP                          CSC McpttServer(HTTPS :4430)
-  │                      │                            │
-  │ ── SUBSCRIBE ──────► │  Event: xcap-diff (gms_psi/cms_psi)
-  │ ◄── 200 OK ──────── │
-  │ ◄── NOTIFY ──────── │  xcap-diff:
-  │ ── 200 OK ────────► │   xcap-root="https://{CSC}:4430/"   ← Setup.Xcap.{Host,Port,Scheme}
-  │                      │   <document sel="org.openmobilealliance.groups/users/tel:{u}/tel:{group}"/>  (gms, 가입자 그룹별)
-  │                      │   <document sel="org.3gpp.mcptt.user-profile/.../user-profile"/>  (cms)
-  │                      │   <document sel="org.3gpp.mcptt.service-config/.../service-config"/>
-  │                      │                            │
-  │ ── HTTPS GET /idms/authreq?..code_challenge(PKCE) ───────────────────────► │  (CSC-1 토큰)
-  │ ◄── {code} ──────────────────────────────────────────────────────────────  │
-  │ ── HTTPS POST /idms/tokenreq {code, code_verifier} ──────────────────────► │
-  │ ◄── {access_token} (Bearer) ─────────────────────────────────────────────  │
-  │ ── HTTPS GET {xcap-root}{sel}  Authorization: Bearer .. ─────────────────► │  GMS/CMS 문서
-  │ ◄── 200 + XML (Etag) ─────────────────────────────────────────────────────  │
-  │ ── HTTPS GET .. If-None-Match: {etag} ──────────────────────────────────► │
-  │ ◄── 304 Not Modified ─────────────────────────────────────────────────────  │
-```
-> 무토큰 GET → 401. xcap-root 구 `http://{CSP}:4420`(라우트 없는 Admin 서버 오지정)을 `https://{CSC}:4430`(McpttServer)로 교정. cspsim 은 `RecvResponse`/NOTIFY 에서 floor·문서 경로를 학습해 동일 흐름 수행.
-
-### B3. 그룹 세션 수명 (on-demand vs chat)
+### B6. 그룹 세션 수명 (on-demand vs chat)
 
 ```
 prearranged / broadcast (on-demand):
-  세션 없음 ──(개시자 키업 INVITE: B1b)──► ADD_PTT_GROUP + 세션 ──(마지막 멤버 이탈)──► REMOVE_PTT_GROUP
+  세션 없음 ──(개시자 키업 INVITE: B5)──► ADD_PTT_GROUP + 세션 ──(마지막 멤버 이탈)──► REMOVE_PTT_GROUP
 
 chat (상시):
   CheckGroupIntegrity 가 active chat 세션 유지 — affiliate 멤버 합류(InviteMember),
-  de-affiliate/dereg 시 이탈. (구 "기동 시 전 그룹 자동 생성(SyncGroupsState proactive)" 은 제거됨.)
+  de-affiliate/dereg 시 이탈.
 ```
 
 > 신규 그룹은 `EventIncomingCall` 의 캐시 미스 lazy-reload 로 재기동 없이 즉시 발신 가능. CSC `notify_csp(GROUP_CHANGED)` 는 CSP+PSP 양쪽 broadcast.
 
-### B4. 단말 등록 해제
+### B7. 단말 등록 해제
 
 ```
 UE                      CSP                          CMP

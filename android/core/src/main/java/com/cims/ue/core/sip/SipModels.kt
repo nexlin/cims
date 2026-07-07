@@ -32,12 +32,32 @@ sealed interface CallState {
     /** 발신 진행(CALLING/EARLY). */
     data class Outgoing(val id: Int, val remote: String) : CallState
 
-    /** 착신 수신(INVITE 도착, 180 자동 응답 후 사용자 응답 대기). */
-    data class Incoming(val id: Int, val remote: String) : CallState
+    /** 착신 수신(INVITE 도착, 180 자동 응답 후 사용자 응답 대기). [video]=상대 SDP 에 m=video 포함.
+     *  [mcptt]=multipart 에 mcptt-info 포함(MCPTT 그룹콜 — PTT 앱이 자동 수락).
+     *  [emergency]=mcptt-info 에 emergency-ind=true(긴급 그룹콜 fan-out — 긴급 UI/톤). */
+    data class Incoming(
+        val id: Int,
+        val remote: String,
+        val video: Boolean = false,
+        val mcptt: Boolean = false,
+        val emergency: Boolean = false,
+    ) : CallState
 
     /** 통화 활성(CONNECTING/CONFIRMED). */
     data class Active(val id: Int, val remote: String) : CallState
 
     /** 통화 종료. [code]/[reason] = 마지막 상태 코드/사유. */
     data class Disconnected(val id: Int, val code: Int, val reason: String) : CallState
+}
+
+/** 수신 문자(SIP MESSAGE, RFC 3428 page-mode). [fromUri] 는 SIP URI 원문. */
+data class ImMessage(val fromUri: String, val contentType: String, val body: String)
+
+/** SIP URI("\"이름\" <sip:번호@도메인>")에서 표시용 번호만 추출. 패턴이 없으면 원문 반환. */
+fun extractSipNumber(remote: String): String {
+    var s = remote.trim()
+    if (s.contains("<") && s.contains(">")) s = s.substringAfter("<").substringBefore(">")
+    s = s.removePrefix("sip:").removePrefix("sips:").removePrefix("tel:")
+    s = s.substringBefore("@").substringBefore(";")
+    return s.ifBlank { remote }
 }

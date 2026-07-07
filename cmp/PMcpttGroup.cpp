@@ -46,40 +46,8 @@ void PMcpttGroup::_logFloorLocal(const char* op, const std::string& user, unsign
     fclose(f);
 }
 
-// ── Floor 패킷 빌드/파싱 헬퍼 ─────────────────────────────────────────────────
-
-int BuildFloorPacket(char* buf, int bufSize, unsigned char opcode,
-                     unsigned int ssrc, const std::string& speakerId)
-{
-    int idLen = (int)speakerId.size();
-    int padded = (idLen + 3) & ~3;  // 4-byte 정렬
-    int total = 12 + 4 + padded;    // RTCP APP 헤더(12) + opcode+id_len+reserved(4) + speakerId
-    if (total > bufSize) return 0;
-
-    memset(buf, 0, total);
-    FloorControlPacket* pkt = (FloorControlPacket*)buf;
-    pkt->version_subtype = 0x80 | (opcode & 0x1F);  // TS 24.380 §8.2: opcode goes in subtype field
-    pkt->type   = RTCP_PT_APP;
-    pkt->length = htons((uint16_t)(total / 4 - 1));
-    pkt->ssrc   = htonl(ssrc);
-    memcpy(pkt->name, "MCPT", 4);
-    pkt->opcode = 0;
-    pkt->id_len = (unsigned char)idLen;
-
-    if (idLen > 0)
-        memcpy(buf + sizeof(FloorControlPacket), speakerId.c_str(), idLen);
-
-    return total;
-}
-
-std::string ParseFloorSpeakerId(const char* buf, int len)
-{
-    if (len < (int)sizeof(FloorControlPacket)) return "";
-    const FloorControlPacket* pkt = (const FloorControlPacket*)buf;
-    int idLen = pkt->id_len;
-    if (idLen <= 0 || (int)sizeof(FloorControlPacket) + idLen > len) return "";
-    return std::string(buf + sizeof(FloorControlPacket), idLen);
-}
+// Floor 패킷 빌드/파싱 헬퍼(TS 24.380 §8.2 RTCP APP "MCPT" + TLV)는 PFloorCodec.cpp
+// 에 분리되어 있다(단말 floor/FloorCodec.kt 와 동일 규약, 단위테스트 대상).
 
 PMcpttGroup::PMcpttGroup(const std::string& groupId)
     : _groupId(groupId), _pttSession(NULL),
@@ -117,11 +85,12 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     LOG_INFO("PMcpttGroup", "[%s] Member added session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
     if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "MEMBER_JOIN", sessionId.c_str());
     
-    // If floor is taken, notify new member
+    // If floor is taken, notify new member (Floor Taken = 화자 identity + Indicator).
     if (_floorTaken) {
          char pktBuf[256];
-         int pktLen = BuildFloorPacket(pktBuf, sizeof(pktBuf), FLOOR_TAKEN,
-                                       _floorOwnerSsrc, _floorOwnerSessionId);
+         std::vector<FloorTlv> f{ FloorTlv(FF_GRANTED_PARTY, _floorOwnerSessionId),
+                                  FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_indicatorFor(_floorOwnerSessionId))) };
+         int pktLen = BuildFloorMessage(pktBuf, sizeof(pktBuf), FLOOR_TAKEN, _floorOwnerSsrc, f);
          if (pktLen > 0)
              sendToMember(sessionId, pktBuf, pktLen);
          LOG_DEBUG("PMcpttGroup", "[%s] Notified new member %s about floor taken by %s",
@@ -133,6 +102,9 @@ void PMcpttGroup::removeMember(const std::string& sessionId) {
     PAutoLock lock(_mutex);
     _members.erase(sessionId);
     _roles.erase(sessionId);
+    // 떠난 멤버를 floor 대기열에서 제거.
+    for (auto it = _floorQueue.begin(); it != _floorQueue.end(); )
+        it = (it->sessionId == sessionId) ? _floorQueue.erase(it) : it + 1;
     LOG_INFO("PMcpttGroup", "[%s] Member %s left. (remaining=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
     if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "MEMBER_LEAVE", sessionId.c_str());
 
@@ -146,8 +118,9 @@ void PMcpttGroup::removeMember(const std::string& sessionId) {
         _floorTaken = false;
         _floorOwnerSessionId = "";
         _floorOwnerSsrc = 0;
-        broadcastFloorStatus(FLOOR_IDLE, 0, "");
-        LOG_INFO("PMcpttGroup", "[%s] Floor owner %s left. Floor -> IDLE", _groupId.c_str(), sessionId.c_str());
+        LOG_INFO("PMcpttGroup", "[%s] Floor owner %s left.", _groupId.c_str(), sessionId.c_str());
+        // 대기열 있으면 다음 화자에게 넘기고, 없으면 IDLE.
+        _advanceFloorOrIdle();
     }
 }
 
@@ -206,8 +179,26 @@ bool PMcpttGroup::hasMember(const std::string& sessionId) {
     return _members.find(sessionId) != _members.end();
 }
 
+// Floor 메시지 타입명 (로그용) — TS 24.380 subtype.
+static const char* _floorOpName(int subtype) {
+    switch (subtype) {
+        case FLOOR_REQUEST: return "REQUEST";
+        case FLOOR_GRANT:   return "GRANT";
+        case FLOOR_TAKEN:   return "TAKEN";
+        case FLOOR_REJECT:  return "DENY";
+        case FLOOR_RELEASE: return "RELEASE";
+        case FLOOR_IDLE:    return "IDLE";
+        case FLOOR_REVOKE:  return "REVOKE";
+        case FLOOR_QUEUE_POS_REQ:  return "QUEUE_POS_REQ";
+        case FLOOR_QUEUE_POS_INFO: return "QUEUE_POS_INFO";
+        case FLOOR_ACK:     return "ACK";
+        default:            return "?";
+    }
+}
+
 void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int len) {
-    if (len < (int)sizeof(FloorControlPacket)) return;
+    ParsedFloor msg;
+    if (!ParseFloorMessage(buf, len, msg)) return;
 
     // 멤버의 floorPort로 매칭
     std::string sessionId = "";
@@ -234,6 +225,28 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
                 }
             }
         }
+        // NAT(포트변환) 단말: 주소 매칭 전부 실패 → TS 24.380 User ID 필드(§8.2.3.6)로
+        // 멤버를 식별하고 관측 소스 주소를 latch (symmetric floor). 이후 GRANT/TAKEN/IDLE 도달 가능.
+        if (sessionId.empty()) {
+            std::string uid = msg.userId();
+            if (!uid.empty()) {
+                size_t colon = uid.find(':');                 // "tel:+82..@dom" → "+82.."
+                if (colon != std::string::npos) uid = uid.substr(colon + 1);
+                size_t at = uid.find('@');
+                if (at != std::string::npos) uid = uid.substr(0, at);
+                auto it = _members.find(uid);
+                if (it != _members.end()) {
+                    LOG_INFO("PMcpttGroup", "[%s] Floor addr latched (NAT) %s: %s:%d -> %s:%d",
+                             _groupId.c_str(), uid.c_str(),
+                             it->second.ip.c_str(), it->second.floorPort, ip.c_str(), port);
+                    it->second.ip = ip;
+                    it->second.floorPort = port;
+                    it->second.floorNatLatched = true;
+                    sessionId = uid;
+                    senderSsrc = it->second.ssrc;
+                }
+            }
+        }
     }
 
     if (sessionId.empty()) {
@@ -241,17 +254,14 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
         return;
     }
 
-    FloorControlPacket* pkt = (FloorControlPacket*)buf;
-    if (pkt->type != RTCP_PT_APP) return;
+    LOG_INFO("PMcpttGroup", "[%s] Floor %s from session=%s %s:%d (prio=%d ind=0x%x)",
+             _groupId.c_str(), _floorOpName(msg.subtype), sessionId.c_str(), ip.c_str(), port,
+             msg.priority(), msg.indicator() < 0 ? 0 : msg.indicator());
 
-    unsigned char opcode = pkt->version_subtype & 0x1F;  // TS 24.380 §8.2: opcode is in subtype field
-    static const char* opcodeStr[] = {"?","REQUEST","GRANT","REJECT","RELEASE","IDLE","TAKEN","REVOKE"};
-    const char* opName = (opcode < 8) ? opcodeStr[opcode] : "?";
-    LOG_INFO("PMcpttGroup", "[%s] Floor %s from session=%s %s:%d",
-             _groupId.c_str(), opName, sessionId.c_str(), ip.c_str(), port);
-
-    if (_logFlow && (opcode == FLOOR_REQUEST || opcode == FLOOR_RELEASE)) {
-        int prio = 999;
+    // 수신 Floor 메시지 Flow 기록 (UE → CMP) — REQUEST/RELEASE 만 (QUEUE_POS/ACK 노이즈 제외)
+    if (_logFlow && (msg.subtype == FLOOR_REQUEST || msg.subtype == FLOOR_RELEASE)) {
+        const char* opName = _floorOpName(msg.subtype);
+        int prio = 0;
         {
             PAutoLock lock(_mutex);
             auto itP = _priorities.find(sessionId);
@@ -265,12 +275,25 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
         _logFlow(_groupId, "ue", "cmp", "MCPTT", label.c_str(), detail);
     }
 
-    if (opcode == FLOOR_REQUEST) handleFloorRequest(sessionId, senderSsrc);
-    else if (opcode == FLOOR_RELEASE) handleFloorRelease(sessionId, senderSsrc);
+    switch (msg.subtype) {
+        case FLOOR_REQUEST:        handleFloorRequest(sessionId, senderSsrc, msg.indicator()); break;
+        case FLOOR_RELEASE:        handleFloorRelease(sessionId, senderSsrc); break;
+        case FLOOR_QUEUE_POS_REQ: {
+            PAutoLock lock(_mutex);
+            _sendQueuePos(sessionId, senderSsrc);
+            break;
+        }
+        case FLOOR_ACK:
+            // 신뢰성 Ack — 재전송을 하지 않으므로 수신 확인만(no-op).
+            LOG_DEBUG("PMcpttGroup", "[%s] Floor ACK from %s", _groupId.c_str(), sessionId.c_str());
+            break;
+        default:
+            break;
+    }
 }
 
 void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int len) {
-    if (len < (int)sizeof(FloorControlPacket)) {
+    if (len < RTCP_APP_HDR) {
         LOG_DEBUG("PMcpttGroup", "[%s] RTCP too short len=%d from %s:%d", _groupId.c_str(), len, ip.c_str(), port);
         return;
     }
@@ -295,10 +318,10 @@ void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int l
         return;
     }
 
-    FloorControlPacket* pkt = (FloorControlPacket*)buf;
+    unsigned char pt = (unsigned char)buf[1];
 
     // RTCP SR(200)/RR(201)/SDES(202)/BYE(203) 선택적 Flow 기록
-    if (pkt->type != RTCP_PT_APP) {
+    if (pt != RTCP_PT_APP) {
         if (_logFlow && _rtcpLogEnable) {
             unsigned short rtcpLen = (((unsigned char)buf[2]) << 8) | ((unsigned char)buf[3]);
             unsigned int rtcpSsrc = 0;
@@ -307,7 +330,7 @@ void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int l
                            (((unsigned char)buf[6]) << 8)  |  ((unsigned char)buf[7]);
             }
             const char* rtcpName = "RTCP";
-            switch (pkt->type) {
+            switch (pt) {
                 case 200: rtcpName = "SR";   break;
                 case 201: rtcpName = "RR";   break;
                 case 202: rtcpName = "SDES"; break;
@@ -316,30 +339,28 @@ void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int l
             char detail[256];
             snprintf(detail, sizeof(detail),
                      "{\"type\":%u,\"pt\":\"%s\",\"ssrc\":%u,\"len\":%u,\"user\":\"%s\"}",
-                     (unsigned)pkt->type, rtcpName, rtcpSsrc, (unsigned)(rtcpLen * 4 + 4), sessionId.c_str());
+                     (unsigned)pt, rtcpName, rtcpSsrc, (unsigned)(rtcpLen * 4 + 4), sessionId.c_str());
             _logFlow(_groupId, "ue", "cmp", "RTCP", rtcpName, detail);
         }
-        LOG_DEBUG("PMcpttGroup", "[%s] RTCP pt=%d (not APP=204), skip", _groupId.c_str(), pkt->type);
-        return;
-    }
-    if (memcmp(pkt->name, "MCPT", 4) != 0) {
-        LOG_DEBUG("PMcpttGroup", "[%s] RTCP APP name mismatch, skip", _groupId.c_str());
+        LOG_DEBUG("PMcpttGroup", "[%s] RTCP pt=%d (not APP=204), skip", _groupId.c_str(), pt);
         return;
     }
 
-    unsigned char opcode = pkt->version_subtype & 0x1F;  // TS 24.380 §8.2: opcode is in subtype field
-    unsigned int pktSsrc = ntohl(pkt->ssrc);
+    ParsedFloor msg;
+    if (!ParseFloorMessage(buf, len, msg)) {
+        LOG_DEBUG("PMcpttGroup", "[%s] RTCP APP name mismatch / parse fail, skip", _groupId.c_str());
+        return;
+    }
 
-    static const char* opcodeStr[] = {"?","REQUEST","GRANT","REJECT","RELEASE","IDLE","TAKEN","REVOKE"};
-    const char* opName = (opcode < 8) ? opcodeStr[opcode] : "?";
-    LOG_INFO("PMcpttGroup", "[%s] Floor RTCP opcode=%d(%s) ssrc=%u session=%s from %s:%d",
-             _groupId.c_str(), opcode, opName, pktSsrc, sessionId.c_str(), ip.c_str(), port);
+    const char* opName = _floorOpName(msg.subtype);
+    LOG_INFO("PMcpttGroup", "[%s] Floor RTCP subtype=%d(%s) ssrc=%u session=%s from %s:%d",
+             _groupId.c_str(), msg.subtype, opName, msg.ssrc, sessionId.c_str(), ip.c_str(), port);
 
-    // 수신한 모든 Floor op-code 를 Flow 에 기록 (JSON detail)
+    // 수신한 모든 Floor 메시지를 Flow 에 기록 (JSON detail)
     //   direction: UE → CMP (RTCP APP 수신)
     //   detail JSON: {"op":"REQUEST","user":"+82...","ssrc":N,"prio":P}
     if (_logFlow) {
-        int prio = 999;
+        int prio = 0;
         {
             PAutoLock lock(_mutex);
             auto itP = _priorities.find(sessionId);
@@ -348,18 +369,26 @@ void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int l
         char detail[256];
         snprintf(detail, sizeof(detail),
                  "{\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d}",
-                 opName, sessionId.c_str(), pktSsrc, prio);
+                 opName, sessionId.c_str(), msg.ssrc, prio);
         std::string label = std::string("FLOOR_") + opName;
         _logFlow(_groupId, "ue", "cmp", "MCPTT", label.c_str(), detail);
     }
 
     // Dispatch — senderSsrc는 CMP가 할당한 SSRC
-    switch(opcode) {
+    switch(msg.subtype) {
         case FLOOR_REQUEST:
-            handleFloorRequest(sessionId, senderSsrc);
+            handleFloorRequest(sessionId, senderSsrc, msg.indicator());
             break;
         case FLOOR_RELEASE:
             handleFloorRelease(sessionId, senderSsrc);
+            break;
+        case FLOOR_QUEUE_POS_REQ: {
+            PAutoLock lock(_mutex);
+            _sendQueuePos(sessionId, senderSsrc);
+            break;
+        }
+        case FLOOR_ACK:
+            LOG_DEBUG("PMcpttGroup", "[%s] Floor ACK from %s", _groupId.c_str(), sessionId.c_str());
             break;
         default:
             break;
@@ -382,6 +411,38 @@ void PMcpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int le
                 senderId = sid;
                 senderSsrc = peer.ssrc;
                 break;
+            }
+        }
+
+        // NAT(포트변환) 단말: 발언권 소유자의 RTP 소스 latch — floor 로 이미 학습된
+        // 공인 IP 와 일치할 때만(제3자 스푸핑 방지). latch 후엔 수신(청취) 경로도 열린다.
+        if (senderId.empty() && _floorTaken && !_floorOwnerSessionId.empty()) {
+            auto it = _members.find(_floorOwnerSessionId);
+            if (it != _members.end() && it->second.ip == ip && it->second.port != port) {
+                LOG_INFO("PMcpttGroup", "[%s] RTP addr latched (NAT) %s: port %d -> %d",
+                         _groupId.c_str(), _floorOwnerSessionId.c_str(), it->second.port, port);
+                it->second.port = port;
+                senderId = _floorOwnerSessionId;
+                senderSsrc = it->second.ssrc;
+            }
+        }
+
+        // NAT 수신단 RTP keepalive(PJMEDIA empty RTP): floor 가 User ID 로 NAT-latch 된
+        // 멤버(NAT 단말 확정) 중 공인 IP 일치 후보가 '유일'할 때만 latch —
+        // 청취 전용 참가자의 하향 오디오 경로 개방. (동일 호스트 멤버 오-latch 방지)
+        if (senderId.empty()) {
+            std::string cand;
+            int nCand = 0;
+            for (auto const& [sid, peer] : _members) {
+                if (peer.floorNatLatched && peer.ip == ip && peer.port != port) { cand = sid; nCand++; }
+            }
+            if (nCand == 1) {
+                auto it = _members.find(cand);
+                LOG_INFO("PMcpttGroup", "[%s] RTP addr latched (NAT-KA) %s: port %d -> %d",
+                         _groupId.c_str(), cand.c_str(), it->second.port, port);
+                it->second.port = port;
+                senderId = cand;
+                senderSsrc = it->second.ssrc;
             }
         }
 
@@ -472,166 +533,257 @@ void PMcpttGroup::onVideoRtpPacket(const std::string& ip, int port, char* buf, i
     }
 }
 
-void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int ssrc) {
+void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int ssrc, int indicatorBits) {
     PAutoLock lock(_mutex);
-    int requesterPrio = 999;
+    int requesterPrio = 0;
     if (_priorities.find(sessionId) != _priorities.end()) requesterPrio = _priorities[sessionId];
 
+    // 수신 Floor Indicator(emergency/imminent) → tier 승격(단말 개시 긴급/임박).
+    // CSP SET_FLOOR_TIER 로 설정된 tier 와 max 결합(영속 → 무활동 자동회수 제외 등에 반영).
+    if (indicatorBits > 0) {
+        int indTier = (indicatorBits & FI_EMERGENCY)      ? TIER_EMERGENCY
+                    : (indicatorBits & FI_IMMINENT_PERIL) ? TIER_IMMINENT
+                    : TIER_NORMAL;
+        if (indTier > tierOf(sessionId)) _tier[sessionId] = indTier;
+    }
+
     // Broadcast 그룹 (TS 24.380 §10.3): 개시자(initiator)만 floor 보유.
-    //   비개시자의 floor REQUEST 는 floor 점유 여부와 무관하게 항상 REJECT.
+    //   비개시자의 floor REQUEST 는 floor 점유 여부와 무관하게 항상 Deny(receive only).
     if (_groupType == "broadcast" && !_initiatorSessionId.empty() && sessionId != _initiatorSessionId) {
-        char rejBuf[256];
-        int rejLen = BuildFloorPacket(rejBuf, sizeof(rejBuf), FLOOR_REJECT, ssrc, sessionId);
-        if (rejLen > 0) sendToMember(sessionId, rejBuf, rejLen);
-        LOG_INFO("PMcpttGroup", "[%s] Floor REJECTED (broadcast) session=%s — initiator=%s only",
+        _sendDeny(sessionId, ssrc, CAUSE_DENY_RECEIVE_ONLY);
+        LOG_INFO("PMcpttGroup", "[%s] Floor DENY (broadcast) session=%s — initiator=%s only",
                  _groupId.c_str(), sessionId.c_str(), _initiatorSessionId.c_str());
-        if (_logFlow) {
-            char detail[256];
-            snprintf(detail, sizeof(detail),
-                     "{\"op\":\"REJECT\",\"reason\":\"broadcast\",\"user\":\"%s\",\"ssrc\":%u,\"initiator\":\"%s\"}",
-                     sessionId.c_str(), ssrc, _initiatorSessionId.c_str());
-            _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REJECT", detail);
-        }
         {
             char ex[160];
-            snprintf(ex, sizeof(ex), "\"reason\":\"broadcast\",\"initiator\":\"%s\"", _initiatorSessionId.c_str());
-            _logFloorLocal("REJECT", sessionId, ssrc, requesterPrio, ex);
+            snprintf(ex, sizeof(ex), "\"reason\":\"broadcast\",\"cause\":%d,\"initiator\":\"%s\"",
+                     CAUSE_DENY_RECEIVE_ONLY, _initiatorSessionId.c_str());
+            _logFloorLocal("DENY", sessionId, ssrc, requesterPrio, ex);
         }
         return;
     }
 
     if (!_floorTaken) {
-        // Grant Floor
-        _floorTaken = true;
-        _floorOwnerSessionId = sessionId;
-        _floorOwnerSsrc = ssrc;
-        _floorGrantUsec = _nowUsec();
-        _lastRtpUsec = 0;
-
-        // Send Grant to Requestor (speakerId = 자기 자신)
-        char grantBuf[256];
-        int grantLen = BuildFloorPacket(grantBuf, sizeof(grantBuf), FLOOR_GRANT, ssrc, sessionId);
-        if (grantLen > 0) sendToMember(sessionId, grantBuf, grantLen);
-
-        LOG_INFO("PMcpttGroup", "[%s] Floor GRANTED to session=%s ssrc=%u prio=%d",
-                 _groupId.c_str(), sessionId.c_str(), ssrc, requesterPrio);
-        if (_logFlow) {
-            char detail[256];
-            snprintf(detail, sizeof(detail),
-                     "{\"op\":\"GRANT\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d}",
-                     sessionId.c_str(), ssrc, requesterPrio);
-            _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", detail);
-        }
-        _logFloorLocal("GRANT", sessionId, ssrc, requesterPrio);
-
-        // Broadcast Taken to all (화자 identity 포함)
-        broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
-
-        // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작 (recorder 가 시간버킷/shard/seq 관리)
-        if (_recordEnable && !_recorder) startRecording();
-        if (_recordEnable && _recorder) {
-            _recorder->startPttSegment(sessionId, requesterPrio);
-        }
-    } else {
-        if (_floorOwnerSessionId == sessionId) return;
-
-        int ownerPrio = 999;
-        if (_priorities.find(_floorOwnerSessionId) != _priorities.end()) ownerPrio = _priorities[_floorOwnerSessionId];
-
-        // TS 24.380 선점 서열: condition tier(emergency>imminent>normal) > chair > 수치 priority.
-        //   1) emergency/imminent 발언자는 하위 tier 점유자를 선점(반대는 불가).
-        //   2) 동tier 면 chair override(chair 가 participant 선점, 역은 불가).
-        //   3) 동tier·동role 이면 수치 priority(낮을수록 우선).
-        int  reqTier   = tierOf(sessionId);
-        int  ownTier   = tierOf(_floorOwnerSessionId);
-        bool requesterChair = isChair(sessionId);
-        bool ownerChair     = isChair(_floorOwnerSessionId);
-        bool bPreempt;
-        if (reqTier != ownTier)                 bPreempt = (reqTier > ownTier);
-        else if (requesterChair && !ownerChair) bPreempt = true;
-        else if (!requesterChair && ownerChair) bPreempt = false;
-        else                                    bPreempt = (requesterPrio < ownerPrio);
-        const char* preemptReason = (reqTier > ownTier && reqTier == TIER_EMERGENCY) ? "emergency_preempt"
-                                   : (reqTier > ownTier && reqTier == TIER_IMMINENT) ? "imminent_preempt"
-                                   : "priority_preempt";
-
-        if (bPreempt) {
-            // PREEMPTION
-            LOG_INFO("PMcpttGroup", "[%s] Floor PREEMPTED by %s (prio=%d chair=%d) from %s (prio=%d chair=%d)",
-                   _groupId.c_str(), sessionId.c_str(), requesterPrio, requesterChair,
-                   _floorOwnerSessionId.c_str(), ownerPrio, ownerChair);
-
-            // 선점 직전 화자 보존 (revoke/세그먼트 메타용)
-            std::string prevOwner = _floorOwnerSessionId;
-
-            // Revoke Current
-            char revBuf[256];
-            int revLen = BuildFloorPacket(revBuf, sizeof(revBuf), FLOOR_REVOKE, _floorOwnerSsrc, _floorOwnerSessionId);
-            if (revLen > 0) sendToMember(_floorOwnerSessionId, revBuf, revLen);
-            {
-                char ex[160];
-                snprintf(ex, sizeof(ex), "\"preempted_by\":\"%s\"", sessionId.c_str());
-                _logFloorLocal("REVOKE", prevOwner, _floorOwnerSsrc, ownerPrio, ex);
-            }
-
-            // 녹취: 이전 화자 세그먼트 종료
-            if (_recordEnable && _recorder && _recorder->isActive()) {
-                _recorder->finishSegment();
-            }
-
-            // Grant New
-            _floorOwnerSessionId = sessionId;
-            _floorOwnerSsrc = ssrc;
-            _floorGrantUsec = _nowUsec();
-            _lastRtpUsec = 0;
-
-            char grantBuf[256];
-            int grantLen = BuildFloorPacket(grantBuf, sizeof(grantBuf), FLOOR_GRANT, ssrc, sessionId);
-            if (grantLen > 0) sendToMember(sessionId, grantBuf, grantLen);
-
-            {
-                char ex[224];
-                snprintf(ex, sizeof(ex), "\"preempt\":true,\"preempted_from\":\"%s\",\"reason\":\"%s\",\"tier\":\"%s\"",
-                         prevOwner.c_str(), preemptReason, _tierName(reqTier));
-                _logFloorLocal("GRANT", sessionId, ssrc, requesterPrio, ex);
-            }
-            if (_logFlow) {
-                char detail[256];
-                snprintf(detail, sizeof(detail),
-                         "{\"op\":\"GRANT\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d,\"preempt\":true,\"preempted_from\":\"%s\"}",
-                         sessionId.c_str(), ssrc, requesterPrio, prevOwner.c_str());
-                _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", detail);
-            }
-
-            // Broadcast Taken (New Owner)
-            broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
-
-            // 녹취: 새 화자 세그먼트 시작 (선점 메타 포함)
-            if (_recordEnable && _recorder) {
-                _recorder->startPttSegment(sessionId, requesterPrio, true, prevOwner);
-            }
-        } else {
-            // REJECT
-            char rejBuf[256];
-            int rejLen = BuildFloorPacket(rejBuf, sizeof(rejBuf), FLOOR_REJECT, ssrc, sessionId);
-            if (rejLen > 0) sendToMember(sessionId, rejBuf, rejLen);
-            LOG_INFO("PMcpttGroup", "[%s] Floor REJECTED session=%s (prio=%d). Owner=%s (prio=%d)",
-                   _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
-            if (_logFlow) {
-                char detail[256];
-                snprintf(detail, sizeof(detail),
-                         "{\"op\":\"REJECT\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d,\"owner\":\"%s\",\"owner_prio\":%d}",
-                         sessionId.c_str(), ssrc, requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
-                _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REJECT", detail);
-            }
-            {
-                char ex[224];
-                snprintf(ex, sizeof(ex), "\"owner\":\"%s\",\"owner_prio\":%d,\"tier\":\"%s\",\"owner_tier\":\"%s\"",
-                         _floorOwnerSessionId.c_str(), ownerPrio, _tierName(reqTier), _tierName(ownTier));
-                _logFloorLocal("REJECT", sessionId, ssrc, requesterPrio, ex);
-            }
-        }
+        _grantFloorTo(sessionId, ssrc, requesterPrio, false, "");
+        return;
     }
+
+    if (_floorOwnerSessionId == sessionId) return;   // 이미 보유자
+
+    int ownerPrio = 0;
+    if (_priorities.find(_floorOwnerSessionId) != _priorities.end()) ownerPrio = _priorities[_floorOwnerSessionId];
+
+    // TS 24.380 선점 서열: condition tier(emergency>imminent>normal) > chair > 수치 priority.
+    //   1) emergency/imminent 발언자는 하위 tier 점유자를 선점(반대는 불가).
+    //   2) 동tier 면 chair override(chair 가 participant 선점, 역은 불가).
+    //   3) 동tier·동role 이면 수치 priority(TS 24.380: 0~255, 클수록 우선, 미지정=0 최저).
+    int  reqTier   = tierOf(sessionId);
+    int  ownTier   = tierOf(_floorOwnerSessionId);
+    bool requesterChair = isChair(sessionId);
+    bool ownerChair     = isChair(_floorOwnerSessionId);
+    bool bPreempt;
+    if (reqTier != ownTier)                 bPreempt = (reqTier > ownTier);
+    else if (requesterChair && !ownerChair) bPreempt = true;
+    else if (!requesterChair && ownerChair) bPreempt = false;
+    else                                    bPreempt = (requesterPrio > ownerPrio);
+
+    if (bPreempt) {
+        // PREEMPTION — 현재 화자 REVOKE(cause=preempted) 후 신규 화자 grant.
+        LOG_INFO("PMcpttGroup", "[%s] Floor PREEMPTED by %s (prio=%d chair=%d) from %s (prio=%d chair=%d)",
+               _groupId.c_str(), sessionId.c_str(), requesterPrio, requesterChair,
+               _floorOwnerSessionId.c_str(), ownerPrio, ownerChair);
+
+        std::string prevOwner = _floorOwnerSessionId;
+        unsigned int prevSsrc = _floorOwnerSsrc;
+
+        // Revoke Current (Reject Cause 필드 = Media Burst pre-empted)
+        {
+            char revBuf[256];
+            std::vector<FloorTlv> f{ FloorTlv(FF_REJECT_CAUSE, FloorU16(CAUSE_REVOKE_PREEMPTED)),
+                                     FloorTlv(FF_GRANTED_PARTY, prevOwner) };
+            int revLen = BuildFloorMessage(revBuf, sizeof(revBuf), FLOOR_REVOKE, prevSsrc, f);
+            if (revLen > 0) sendToMember(prevOwner, revBuf, revLen);
+        }
+        {
+            char ex[160];
+            snprintf(ex, sizeof(ex), "\"preempted_by\":\"%s\",\"cause\":%d", sessionId.c_str(), CAUSE_REVOKE_PREEMPTED);
+            _logFloorLocal("REVOKE", prevOwner, prevSsrc, ownerPrio, ex);
+        }
+
+        // 녹취: 이전 화자 세그먼트 종료
+        if (_recordEnable && _recorder && _recorder->isActive()) {
+            _recorder->finishSegment();
+        }
+
+        _grantFloorTo(sessionId, ssrc, requesterPrio, true, prevOwner);
+        return;
+    }
+
+    // 비선점 — SDP `mc_queueing` 광고 시 큐잉(TS 24.380 §8). 큐가 가득 차면 Deny.
+    if (_queueEnable && (int)_floorQueue.size() < _queueMax) {
+        // 중복 제거 후 큐 추가
+        for (auto it = _floorQueue.begin(); it != _floorQueue.end(); )
+            it = (it->sessionId == sessionId) ? _floorQueue.erase(it) : it + 1;
+        QueuedReq q{ sessionId, ssrc, requesterPrio, reqTier, requesterChair, _nowUsec() };
+        _floorQueue.push_back(q);
+        LOG_INFO("PMcpttGroup", "[%s] Floor QUEUED session=%s pos=%d/%zu (owner=%s)",
+                 _groupId.c_str(), sessionId.c_str(), _queuePositionOf(sessionId), _floorQueue.size(),
+                 _floorOwnerSessionId.c_str());
+        _sendQueuePos(sessionId, ssrc);
+        {
+            char ex[160];
+            snprintf(ex, sizeof(ex), "\"owner\":\"%s\",\"pos\":%d,\"qsize\":%zu",
+                     _floorOwnerSessionId.c_str(), _queuePositionOf(sessionId), _floorQueue.size());
+            _logFloorLocal("QUEUE", sessionId, ssrc, requesterPrio, ex);
+        }
+        return;
+    }
+
+    // 큐 비활성/포화 → Deny(queue full).
+    _sendDeny(sessionId, ssrc, _queueEnable ? CAUSE_DENY_QUEUE_FULL : CAUSE_DENY_ANOTHER_CLIENT);
+    LOG_INFO("PMcpttGroup", "[%s] Floor DENY session=%s (prio=%d). Owner=%s (prio=%d)",
+           _groupId.c_str(), sessionId.c_str(), requesterPrio, _floorOwnerSessionId.c_str(), ownerPrio);
+    {
+        char ex[224];
+        snprintf(ex, sizeof(ex), "\"owner\":\"%s\",\"owner_prio\":%d,\"tier\":\"%s\",\"owner_tier\":\"%s\"",
+                 _floorOwnerSessionId.c_str(), ownerPrio, _tierName(reqTier), _tierName(ownTier));
+        _logFloorLocal("DENY", sessionId, ssrc, requesterPrio, ex);
+    }
+}
+
+// ── Floor 송신 헬퍼 (caller 가 _mutex 보유) ─────────────────────────────────
+
+int PMcpttGroup::_indicatorFor(const std::string& sessionId) const {
+    int t = tierOf(sessionId);
+    if (t >= TIER_EMERGENCY) return FI_EMERGENCY;
+    if (t == TIER_IMMINENT)  return FI_IMMINENT_PERIL;
+    return FI_NORMAL;
+}
+
+void PMcpttGroup::_grantFloorTo(const std::string& sessionId, unsigned int ssrc, int prio,
+                                bool preempt, const std::string& prevOwner) {
+    _floorTaken = true;
+    _floorOwnerSessionId = sessionId;
+    _floorOwnerSsrc = ssrc;
+    _floorGrantUsec = _nowUsec();
+    _lastRtpUsec = 0;
+
+    // Floor Granted → 요청자(Duration + Granted Party + Floor Indicator).
+    {
+        char buf[256];
+        std::vector<FloorTlv> f{ FloorTlv(FF_DURATION, FloorU16(_grantDurationSec)),
+                                 FloorTlv(FF_GRANTED_PARTY, sessionId),
+                                 FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_indicatorFor(sessionId))) };
+        int n = BuildFloorMessage(buf, sizeof(buf), FLOOR_GRANT, ssrc, f);
+        if (n > 0) sendToMember(sessionId, buf, n);
+    }
+
+    // Floor Taken → 전체(화자 identity + Indicator).
+    broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
+
+    LOG_INFO("PMcpttGroup", "[%s] Floor GRANTED to session=%s ssrc=%u prio=%d preempt=%d",
+             _groupId.c_str(), sessionId.c_str(), ssrc, prio, preempt);
+    if (_logFlow) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"GRANT\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d,\"preempt\":%s}",
+                 sessionId.c_str(), ssrc, prio, preempt ? "true" : "false");
+        _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", detail);
+    }
+    if (preempt) {
+        char ex[224];
+        snprintf(ex, sizeof(ex), "\"preempt\":true,\"preempted_from\":\"%s\",\"tier\":\"%s\"",
+                 prevOwner.c_str(), _tierName(tierOf(sessionId)));
+        _logFloorLocal("GRANT", sessionId, ssrc, prio, ex);
+    } else {
+        _logFloorLocal("GRANT", sessionId, ssrc, prio);
+    }
+
+    // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작.
+    if (_recordEnable && !_recorder) startRecording();
+    if (_recordEnable && _recorder) {
+        if (preempt) _recorder->startPttSegment(sessionId, prio, true, prevOwner);
+        else         _recorder->startPttSegment(sessionId, prio);
+    }
+}
+
+void PMcpttGroup::_sendDeny(const std::string& sessionId, unsigned int ssrc, int cause) {
+    char buf[256];
+    std::vector<FloorTlv> f{ FloorTlv(FF_REJECT_CAUSE, FloorU16(cause)) };
+    int n = BuildFloorMessage(buf, sizeof(buf), FLOOR_REJECT, ssrc, f);
+    if (n > 0) sendToMember(sessionId, buf, n);
+    if (_logFlow) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"DENY\",\"user\":\"%s\",\"ssrc\":%u,\"cause\":%d}",
+                 sessionId.c_str(), ssrc, cause);
+        _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_DENY", detail);
+    }
+}
+
+int PMcpttGroup::_queuePositionOf(const std::string& sessionId) const {
+    // 정렬 기준(우선순위 높을수록 앞): tier desc, chair, prio desc, ts asc.
+    auto better = [](const QueuedReq& a, const QueuedReq& b) {
+        if (a.tier != b.tier) return a.tier > b.tier;
+        if (a.chair != b.chair) return a.chair;
+        if (a.prio != b.prio) return a.prio > b.prio;
+        return a.ts < b.ts;
+    };
+    int pos = 1;
+    const QueuedReq* self = nullptr;
+    for (const auto& q : _floorQueue) if (q.sessionId == sessionId) { self = &q; break; }
+    if (!self) return 0;
+    for (const auto& q : _floorQueue)
+        if (q.sessionId != sessionId && better(q, *self)) pos++;
+    return pos;
+}
+
+void PMcpttGroup::_sendQueuePos(const std::string& sessionId, unsigned int ssrc) {
+    int pos = _queuePositionOf(sessionId);
+    int prio = 0;
+    if (_priorities.find(sessionId) != _priorities.end()) prio = _priorities[sessionId];
+    char buf[256];
+    std::vector<FloorTlv> f{ FloorTlv(FF_QUEUE_INFO, FloorQueueInfo(pos, prio)),
+                             FloorTlv(FF_QUEUE_SIZE, FloorU16((int)_floorQueue.size())) };
+    int n = BuildFloorMessage(buf, sizeof(buf), FLOOR_QUEUE_POS_INFO, ssrc, f);
+    if (n > 0) sendToMember(sessionId, buf, n);
+    if (_logFlow) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"QUEUE_POS_INFO\",\"user\":\"%s\",\"pos\":%d,\"qsize\":%zu}",
+                 sessionId.c_str(), pos, _floorQueue.size());
+        _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_QUEUE_POS_INFO", detail);
+    }
+}
+
+std::string PMcpttGroup::_popBestQueued(unsigned int& outSsrc, int& outPrio) {
+    if (_floorQueue.empty()) return "";
+    auto better = [](const QueuedReq& a, const QueuedReq& b) {
+        if (a.tier != b.tier) return a.tier > b.tier;
+        if (a.chair != b.chair) return a.chair;
+        if (a.prio != b.prio) return a.prio > b.prio;
+        return a.ts < b.ts;
+    };
+    size_t best = 0;
+    for (size_t i = 1; i < _floorQueue.size(); ++i)
+        if (better(_floorQueue[i], _floorQueue[best])) best = i;
+    QueuedReq q = _floorQueue[best];
+    _floorQueue.erase(_floorQueue.begin() + best);
+    outSsrc = q.ssrc;
+    outPrio = q.prio;
+    return q.sessionId;
+}
+
+void PMcpttGroup::_advanceFloorOrIdle() {
+    // 현재 owner 는 이미 해제된 상태에서 호출. 대기자 있으면 grant, 없으면 IDLE.
+    while (!_floorQueue.empty()) {
+        unsigned int qssrc = 0; int qprio = 0;
+        std::string next = _popBestQueued(qssrc, qprio);
+        if (next.empty()) break;
+        if (_members.find(next) == _members.end()) continue;   // 이미 떠난 멤버 skip
+        _grantFloorTo(next, qssrc, qprio, false, "");
+        return;
+    }
+    broadcastFloorStatus(FLOOR_IDLE, 0, "");
 }
 
 void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int ssrc) {
@@ -646,12 +798,13 @@ void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int 
         _floorOwnerSessionId = "";
         _floorOwnerSsrc = 0;
 
-        int ownerPrio = 999;
+        int ownerPrio = 0;
         if (_priorities.find(sessionId) != _priorities.end()) ownerPrio = _priorities[sessionId];
         _logFloorLocal("RELEASE", sessionId, ssrc, ownerPrio);
-
-        broadcastFloorStatus(FLOOR_IDLE, 0, "");
         LOG_INFO("PMcpttGroup", "[%s] Floor RELEASED by session=%s", _groupId.c_str(), sessionId.c_str());
+
+        // 대기열 있으면 최우선 대기자에게 넘기고, 없으면 IDLE.
+        _advanceFloorOrIdle();
         // RX FLOOR_RELEASE 는 onRtcpPacket 에서 이미 기록됨 (중복 방지)
     }
 }
@@ -677,7 +830,7 @@ bool PMcpttGroup::checkFloorInactivity(int idleSec) {
 
     std::string owner = _floorOwnerSessionId;
     unsigned int ssrc = _floorOwnerSsrc;
-    int ownerPrio = 999;
+    int ownerPrio = 0;
     if (_priorities.find(owner) != _priorities.end()) ownerPrio = _priorities[owner];
     int idleMs = (int)((now - ref) / 1000);
 
@@ -686,13 +839,17 @@ bool PMcpttGroup::checkFloorInactivity(int idleSec) {
         _recorder->finishSegment();
     }
 
-    // 응답 없는 owner 에게 REVOKE 송출
-    char revBuf[256];
-    int revLen = BuildFloorPacket(revBuf, sizeof(revBuf), FLOOR_REVOKE, ssrc, owner);
-    if (revLen > 0) sendToMember(owner, revBuf, revLen);
+    // 응답 없는 owner 에게 REVOKE 송출 (Reject Cause 필드 = Other reason).
+    {
+        char revBuf[256];
+        std::vector<FloorTlv> f{ FloorTlv(FF_REJECT_CAUSE, FloorU16(CAUSE_OTHER)),
+                                 FloorTlv(FF_GRANTED_PARTY, owner) };
+        int revLen = BuildFloorMessage(revBuf, sizeof(revBuf), FLOOR_REVOKE, ssrc, f);
+        if (revLen > 0) sendToMember(owner, revBuf, revLen);
+    }
     {
         char ex[96];
-        snprintf(ex, sizeof(ex), "\"reason\":\"inactivity\",\"idle_ms\":%d", idleMs);
+        snprintf(ex, sizeof(ex), "\"reason\":\"inactivity\",\"cause\":%d,\"idle_ms\":%d", CAUSE_OTHER, idleMs);
         _logFloorLocal("REVOKE", owner, ssrc, ownerPrio, ex);
     }
 
@@ -702,7 +859,6 @@ bool PMcpttGroup::checkFloorInactivity(int idleSec) {
     _floorGrantUsec = 0;
     _lastRtpUsec = 0;
 
-    broadcastFloorStatus(FLOOR_IDLE, 0, "");
     LOG_INFO("PMcpttGroup", "[%s] Floor auto-REVOKED (inactivity %dms, no RELEASE) owner=%s",
              _groupId.c_str(), idleMs, owner.c_str());
     if (_logFlow) {
@@ -712,17 +868,27 @@ bool PMcpttGroup::checkFloorInactivity(int idleSec) {
                  owner.c_str(), ssrc, idleMs);
         _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REVOKE", detail);
     }
+    // 대기열 있으면 다음 화자에게 넘기고, 없으면 IDLE.
+    _advanceFloorOrIdle();
     return true;
 }
 
 void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId) {
-    static const char* opcodeStr[] = {"?","REQUEST","GRANT","REJECT","RELEASE","IDLE","TAKEN","REVOKE"};
-    const char* opName = (opcode < 8) ? opcodeStr[opcode] : "?";
-    LOG_INFO("PMcpttGroup", "[%s] broadcastFloorStatus opcode=%d(%s) speaker=%s ssrc=%u → %lu members",
+    const char* opName = _floorOpName(opcode);
+    LOG_INFO("PMcpttGroup", "[%s] broadcastFloorStatus subtype=%d(%s) speaker=%s ssrc=%u → %lu members",
              _groupId.c_str(), opcode, opName, speakerId.c_str(), ssrc, _members.size());
 
+    // 메시지별 TLV 필드 (TS 24.380): TAKEN=Granted Party+Indicator, IDLE=필드 없음.
+    std::vector<FloorTlv> fields;
+    if (opcode == FLOOR_TAKEN && !speakerId.empty()) {
+        fields.push_back(FloorTlv(FF_GRANTED_PARTY, speakerId));
+        fields.push_back(FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_indicatorFor(speakerId))));
+    } else if (opcode != FLOOR_IDLE && !speakerId.empty()) {
+        fields.push_back(FloorTlv(FF_GRANTED_PARTY, speakerId));
+    }
+
     char pktBuf[256];
-    int pktLen = BuildFloorPacket(pktBuf, sizeof(pktBuf), opcode, ssrc, speakerId);
+    int pktLen = BuildFloorMessage(pktBuf, sizeof(pktBuf), opcode, ssrc, fields);
     if (pktLen > 0)
         sendFloorToAll(pktBuf, pktLen, "", 0);
 

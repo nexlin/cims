@@ -27,6 +27,7 @@ class ConfigStore(context: Context) {
         authId = prefs.getString(K_AUTH, "").orEmpty(),
         password = prefs.getString(K_PW, "").orEmpty(),
         expiresSec = prefs.getInt(K_EXPIRES, 3600),
+        countryCode = prefs.getString(K_CC, "").orEmpty(),
     )
 
     fun save(c: SipAccountConfig) {
@@ -42,11 +43,23 @@ class ConfigStore(context: Context) {
             putString(K_AUTH, c.authId)
             putString(K_PW, c.password)
             putInt(K_EXPIRES, c.expiresSec)
+            putString(K_CC, c.countryCode)
             apply()
         }
     }
 
     fun isProvisioned(): Boolean = load().isComplete()
+
+    /**
+     * 수동 설정 모드 — true 면 SSO 자동 프로비저닝이 저장값을 덮어쓰지 않는다.
+     * CIMS 로그인 없이(또는 무시하고) 직접 입력한 값을 시험하기 위한 모드. 끄면 다음
+     * 프로비저닝 시 서버 값으로 복원된다.
+     */
+    fun isManual(): Boolean = prefs.getBoolean(K_MANUAL, false)
+
+    fun setManual(on: Boolean) {
+        prefs.edit().putBoolean(K_MANUAL, on).apply()
+    }
 
     private companion object {
         const val K_HOST = "host"
@@ -60,5 +73,7 @@ class ConfigStore(context: Context) {
         const val K_AUTH = "auth"
         const val K_PW = "pw"
         const val K_EXPIRES = "expires"
+        const val K_CC = "cc"
+        const val K_MANUAL = "manual"
     }
 }
