@@ -4,16 +4,19 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
 
 ## 0. 전제
 
-- CSC/Console 이미 구동 중
-- 관리자 계정으로 Console 로그인 (`https://<CSC>:8081/` 또는 dev `http://<ens160>:3000/`)
+- base 운영평면(oam/console/agent) 구동 중 — 부트스트랩은 `design/02_deployment.md` §2.1
+- Console 로그인 (`https://<OAM>:4419/`) — operator 이상. 시스템 구성/패키지 설치·제어의
+  **변경**은 admin 세션 또는 우측 상단 [🔐 관리자 인증](admin 패스워드 30분 승격) 필요
 
-> 좌측 메뉴는 두 갈래:
-> - **패키징** (`/release/...`) — 검증 / 검증 이력 / 빌드·패키징·다운로드
-> - **배포** (`/deploy/...`) — 패키지 / 서버+HA (primary) / 서버 Inspector (advanced)
+> 배포·운영의 primary 화면은 **관리 > 시스템 > 시스템/인프라** (`/deploy/servers`) 하나다.
+> 상단 탭 4개가 라이프사이클 단계를 가른다:
+> **[시스템/서버 구성]**(서버·HA·네트워크) → **[패키지 설치]**(파일 배치) →
+> **[패키지 설정]**(설정 편집) → **[패키지 제어]**(프로세스 시작/정지).
+> 좌측 서버 목록에서 무엇을 골랐는지(그룹 vs 서버)에 따라 우측 상세 패널 내용이 바뀐다.
 
-## 1. 패키지 업로드 (배포 메뉴)
+## 1. 패키지 업로드
 
-**메뉴**: 좌측 `배포 > 패키지` (`/deploy/packages`)
+**메뉴**: `관리 > 시스템 > 패키지` (`/deploy/packages`, admin)
 
 1. `＋ 패키지 업로드` 클릭
 2. 빌드된 tarball (`<module>-<version>.tar.gz`) 을 선택 (여러 개 동시 가능)
@@ -23,108 +26,113 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
 
 **재업로드**: 동일 (모듈명, 버전) 업로드 시 자동으로 덮어쓰기.
 
-> CIMS 자체에서 빌드한 tarball 은 `패키징 > 패키징` (`/release/package`)
+> CIMS 자체에서 빌드한 tarball 은 `릴리스 > 패키징` (`/release/package`)
 > 카드의 ⤓ 다운로드 버튼으로 받아서 그대로 위 화면에 업로드한다. 자세한
 > 워크플로우는 `design/features/build_and_packaging.md` 참고.
 
-## 2. 서비스 + 서버 등록 (primary 흐름)
+## 2. 시스템(서버) 등록 — [시스템/서버 구성] 탭
 
-**메뉴**: 좌측 `배포 > 서버 + HA` (`/deploy/services`)
+**메뉴**: `시스템/인프라` → 상단 [시스템/서버 구성] 탭
 
-서비스(=HA 그룹 또는 standalone) 단위로 서버를 묶어 inline 편집. 팝업 없음.
-
-1. `＋ 시스템 추가` 클릭
-2. 이름 입력 + 유형 선택:
-   - **A/S** — master + backup 2개 자동 발급 (예: SIP 서버 이중화)
-   - **AA** — 시작 1개 발급, `＋ 서버 추가` 로 N개 확장 (예: 미디어 서버 분산)
-   - **Standalone** — agent 1개 (예: 단일 노드)
-3. `생성` — agent 자동 발급 + (A/S·AA 만) ha_groups 자동 생성
-4. 각 서버 row 의 `📋 복사` 로 install command 복사 → 대상 호스트에서 실행:
+1. 좌측 서버 목록 하단 `＋ 시스템 추가` 클릭. 이름 입력 + 유형 선택:
+   - **A/S** — master + backup 서버 2개 자동 발급 (예: SIP 서버 이중화)
+   - **AA** — 시작 1개 발급, 트리의 [+] 로 N개 확장 (예: 미디어 서버 분산)
+   - **SA** — 단일 서버
+2. 생성되면 좌측 트리에 그룹/서버가 나타난다. 서버 선택 → 우측 "설치 안내" 섹션의
+   install command 를 복사해 대상 호스트에서 실행:
    ```bash
-   mkdir /opt/cims-agent && cd /opt/cims-agent
-   curl -k https://<CSC>:4420/install-agent.sh | bash -s -- \
-     --csc-url https://<CSC>:4420 \
+   curl -k https://<OAM>:4419/install-agent.sh | bash -s -- \
+     --oam-url https://<OAM>:4419 \
      --enrollment-token <TOKEN> \
      --name <이름>
+   # 이후 대상 호스트에서 sudo ./install.sh
    ```
-5. agent enroll 완료 → `pending → online` 자동 전환 + `interfaces` 자동 보고
-6. 서버 row 의 `📡 인터페이스 N개` 펼침 → IP / 용도 입력 → 자동 저장
-7. (A/S·AA) 서비스 row 의 `📡 VIP` 펼침 → 용도 선택 → VIP IP 입력 → 멤버별 iface 자동 매핑
+3. agent enroll 완료 → `pending → online` 자동 전환 + 인터페이스 자동 보고
+4. 서버 선택 → "네트워크" 섹션에서 IP/Routing · 마운트 · 네트워크 튜닝(RPS/sysctl) 설정
+5. (A/S·AA) 그룹 선택 → "절체 조건" · "멤버" · "VIP Bindings" 표에서 HA 구성 → 각 영역의
+   [▶ 적용] 으로 반영 (keepalived 즉시 재적용)
 
-**패키지 추가**: 서비스 행 펼침 → `＋ 패키지 추가` → 체크박스 → 서비스의 모든 멤버에 일괄 deployment 생성.
+## 3. 모듈 배포 — [패키지 설치] 탭
 
-> 검증/시험 환경에서는 `volte-sip-server` / `volte-media-server` /
-> `ptt-sip-server` / `ptt-media-server` / `mgmt-server` 5개 이름을 그대로
-> 따라 등록하면 verify pipeline 의 `_INSTANCES` 매핑과 일치한다.
+**위치**: [패키지 설치] 탭 → 서버 선택 → 모듈 목록 → `＋ 모듈 추가`
 
-## 3. 모듈 세부 설정 (Advanced — Server Inspector)
-
-**메뉴**: 좌측 `배포 > 서버 Inspector` (`/deploy/servers`)
-
-서비스 단위 일괄 배포(2.)로 부족할 때 — process_name 커스터마이즈,
-service_functions 체크박스(volte/ptt/ibcf), per-deployment 메모.
-
-**위치**: 서버 선택 → `모듈` 탭 → `＋ 모듈 추가`
-
-1. **Module** 선택 (예: `csp`, `psp`, `cmp`, `pmp`, ...)
+1. **모듈** 선택 (예: `csp`, `psp`, `cmp`, `pmp`, ...)
    - 같은 base 바이너리의 변종은 별도 패키지로 노출 (csp/psp/isp / cmp/pmp/imp)
-2. **Version** 선택 (예: `0.0.10` / 최신)
-3. **Process** 선택 — `CSP` (통합), `PSP` (PTT 전용), `ISP` (IBCF 전용),
-   `CMP`, `PMP`, `IMP` 중. 보통 모듈명과 일치
-4. **Functions** 선택 — process 별로 체크박스 (`volte`, `ptt`, `ibcf`)
-5. 메모 (선택) → `추가`
+   - HA 그룹 멤버면 패키지의 `ha_capability` 와 그룹 mode 가 맞아야 선택 가능
+2. **버전** 선택 (기본 = 최신 업로드)
+3. **모듈 이름** — 프로세스 이름 (기본 = 패키지 meta 의 process, 예: `CSP`)
+4. 메모 (선택) → `추가`
 
 → Deployment 가 `pending` 상태로 생성됨. 아직 파일 없음.
 
-## 4. 설정 입력
+모듈 행의 작업 버튼은 **파일 배치**만 담당한다: `설치/재설치` · `⤺ 롤백`(이전 버전 보존 시) ·
+`✕`(제거). 그룹을 선택하면 멤버별 배포 현황을 읽기 전용으로 보여준다.
 
-**위치**: 해당 모듈 row → `⚙ 설정` 버튼
+**설치**: 모듈 행 → `설치` — `install` job 큐잉 → Agent 가 heartbeat(30s) 시 pickup.
+완료까지 최대 ~1분, status 가 `stopped` 로 전환.
+
+## 4. 설정 — [패키지 설정] 탭
+
+**위치**: [패키지 설정] 탭 → **개별 서버 선택** → 모듈별 탭 (operator 편집 가능)
+
+모든 설정(그룹 공통 포함)은 개별 서버 화면에서 편집한다. `pending`(설치 전) 배포도 설정
+가능 — 저장값은 overlay 로 보존됐다가 설치 시 반영된다.
 
 ### 4.1 scalar 설정 (탭: "설정")
 
 - `config_template.json` 의 sections 가 폼으로 렌더링
-- 🔁 재기동 필요 / ⚡ 즉시 적용 표시
-- 변경한 필드는 ● 표시
-- 저장 시 `update_config` job 큐잉
+- 🔁 재기동 필요 / ⚡ 즉시 적용 표시, 변경한 필드는 ● 표시
+- **🔗 동기화 체크박스** (HA 그룹 멤버일 때만, 필드마다):
+  - 체크 + 값 변경 + 저장 = 그룹의 다른 멤버에도 같은 값 저장 (동기화)
+  - 해제 = 이 서버에만 저장 (서버 고유값, 운영 중 한쪽만 수정할 때)
+  - 기본값: 그룹 공통 권장(scope=service) 필드는 체크, 나머지는 해제.
+    바꾼 체크 상태는 그룹에 저장되어 다음 편집 때 복원된다
+- 저장 시 대상 멤버별 `update_config` job 큐잉
 
 ### 4.2 collection 설정 (탭: "리스너" 등)
 
 - deployment 가 **install 되어 있어야** 활성화 (pending 상태에선 에러)
 - `＋ 추가` → 행 편집 → `저장`
 - 저장 시 Agent 의 jsonl 에 즉시 반영 + SIGUSR1 시그널 (CSP 가 실행 중이면 즉시 rebind)
+- HA 정합은 백엔드가 scope 기반 자동 전파 — 멤버 간 차이(drift)는 peers 표시로 확인
 
-## 5. 설치 (Install)
+### 4.3 그룹 설정 비교 (읽기 전용)
 
-**위치**: 모듈 row → `설치` 버튼 (pending 상태에서만)
+**위치**: [패키지 설정] 탭 → **그룹 선택** (또는 그룹 인스펙터의 [🔍 설정 비교])
 
-- 내부적으로 `install` job 큐잉 → Agent 가 heartbeat(30s) 시 pickup
-- 완료까지 최대 ~1분. Status 가 `stopped` 로 전환
+- 멤버별 설정값을 나란히 비교: 🔗 동기화+값 동일=정상(녹색) / ⚠ 동기화인데 값 다름=드리프트
+  경고(주황) / 개별=서버 고유값(중립)
+- 편집 불가 — 셀/서버명 클릭 시 해당 서버의 설정 화면으로 이동
+- 드리프트 해소: 기준 서버에서 해당 필드를 🔗 체크 상태로 재저장
 
-## 6. 시작 (Start)
+## 5. 시작 — [패키지 제어] 탭
 
-**위치**: 모듈 row → `▶ Start`
+**위치**: [패키지 제어] 탭 → 서버 선택 → 모듈 행 → `▶ 시작`
 
-- `start` job → Agent 가 `install_path/cims.sh start <process>` 실행
-- 성공 시 `running`
+- `start` job → Agent 가 `install_path/cims.sh start <process>` 실행 → 성공 시 `running`
+- `↻ 재시작` / `■ 정지` 도 같은 행 (미설치 pending 모듈은 비활성)
+- 그룹 선택 시 **멤버 × 모듈 매트릭스** — 그룹 전체 프로세스 상태를 한눈에 보고 셀별 제어
 
-## 7. 이후 운영
+## 6. 이후 운영
 
-| 작업 | 메뉴 / 버튼 |
+| 작업 | 탭 / 버튼 |
 |---|---|
-| 설정 변경 | ⚙ 설정 (탭 선택) |
-| 재기동 | ↻ (Restart) |
-| 중지 | ■ (Stop) |
-| 재설치 (같은 or 상위 버전) | 설치 |
-| 모듈 제거 | ✕ (Delete deployment) |
+| 설정 변경 | [패키지 설정] → 서버 선택 |
+| 그룹 설정 비교 / 드리프트 확인 | [패키지 설정] → 그룹 선택 (읽기 전용) |
+| 프로세스 시작/재기동/중지 | [패키지 제어] → ▶ / ↻ / ■ |
+| 재설치 (같은 or 상위 버전) | [패키지 설치] → 설치/재설치 |
+| 모듈 버전 롤백 | [패키지 설치] → ⤺ 롤백 |
+| 모듈 제거 | [패키지 설치] → ✕ |
 | 서버 세션 폐기 | 서버 헤더의 "폐기" |
-| Agent 바이너리 업그레이드 | "↑ 업그레이드" |
+| Agent 바이너리 업그레이드/롤백 | 서버 헤더의 "↑ 업그레이드" / "↓ 롤백" |
 
-## 8. 문제 해결
+## 7. 문제 해결
 
 | 증상 | 확인 |
 |---|---|
-| Agent status 가 `approved` 에서 `online` 으로 안 바뀜 | 대상 호스트에서 `systemctl --user status cims-agent` active 인지, `journalctl --user -u cims-agent` 로그, CSC URL 유효한지 |
+| Agent status 가 `approved` 에서 `online` 으로 안 바뀜 | 대상 호스트에서 `systemctl --user status cims-agent` active 인지, `journalctl --user -u cims-agent` 로그, OAM URL 유효한지 |
 | "＋ 모듈 추가" 에서 모듈 목록이 비어있음 | 1. 패키지 업로드 먼저 |
 | 설정 저장 시 `not_installed` | 설치 버튼 먼저 눌러 deployment.install_path 생성 |
-| Collection 탭에서 `agent_proxy_failed` | Agent 가 heartbeat 보내 `sync_port` 가 DB 에 기록됐는지, 방화벽 9900 포트 |
+| 그룹 설정 비교에서 ⚠ 드리프트 경고 | 의도한 개별값이면 해당 필드의 🔗 체크 해제(개별 전환), 어긋난 것이면 기준 서버에서 🔗 체크 상태로 재저장 |
+| Collection 탭에서 `agent_proxy_failed` | Agent 가 heartbeat 보내 `sync_port` 가 기록됐는지, 방화벽 9900 포트 |
 | `signaled:[]` 로 반환 (빈 배열) | `install_path/run/*.pid` 파일이 없음. CSP 가 pid 를 쓰도록 실행 중이어야 함 |

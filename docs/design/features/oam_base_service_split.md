@@ -454,14 +454,15 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
   모듈 테이블 컬럼 **"이름"·"설명"**.
 - `csc/pkg.json`·`oam-svc/pkg.json` `description`: csc=가입자·조직·인증·MCPTT(XCAP), 이력/통계/녹취=oam-svc.
 
-### 14.2 standalone 노드의 service-scope 설정 노출
-- config_template `scope`: **service=그룹 공통**(원래 `GroupServiceConfigModal`["⚙ 그룹 설정"]에서 편집,
-  per-deployment 설정 탭은 숨김) / **system=노드별**(per-deployment 편집).
-- 문제: **HA 그룹 미소속(standalone) 노드**는 그룹 설정 진입점이 없어 csc 의 DB·notify·MCPTT·IdMs(전부
-  scope=service)를 **편집할 UI 가 전무** → "설정에 아무것도 없음".
-- 해결: `AgentConfigTab` 이 `forceServiceScope={!agent.ha_group}` 전달 → `ModuleConfigModal` 이
-  standalone 일 때 per-deployment 설정 탭에서도 **service-scope 섹션 노출**. 그룹 멤버는 종전대로
-  그룹 설정이 소유(중복 편집 방지).
+### 14.2 설정 편집 일원화 — 개별 서버의 패키지 설정 탭
+- **모든 설정 편집은 개별 서버(멤버) 선택 → [패키지 설정] 탭에서 한다.** scope 별 편집 트랙
+  분리(그룹=service / 서버=system)는 없다 — `ModuleConfigModal` 이 전 섹션·컬렉션을 항상 편집
+  가능하게 노출하고, HA 정합은 필드별 동기화(§14.6)가 담당한다.
+- config_template `scope` 의 역할: **service=동기화 체크 기본 ON**(그룹 공통 권장) /
+  **system=기본 OFF**(노드별 고유값). 편집 위치를 가르지 않고 전파 기본값만 가른다.
+- 그룹 선택 → [패키지 설정] 탭은 **읽기 전용 비교 뷰**(`GroupConfigCompareView`) — 멤버별
+  설정값을 나란히 비교(동기화+동일=정상 / 동기화+상이=드리프트 경고 / 비동기=개별),
+  셀 클릭 시 해당 서버의 편집 화면으로 점프. 그룹 단위 편집기(`GroupServiceConfigModal`)는 없다.
 
 ### 14.3 설치 전(pending) 배포도 설정 가능
 - 설정 탭(`AgentConfigTab`)은 `pending` 배포도 포함 → 설치 전에
@@ -474,10 +475,37 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 ### 14.4 모든 설정 노출
 - config_template 에 `presets` 는 없다(csc·csp·cmp). 디폴트 SoT = 각 필드 `default`/`deploy_value`.
 - UI 에 "추천 설정" 바·"Preset 일괄 적용" 탭·"고급 설정/고급 필드" 토글이 없다
-  (`ModuleConfigModal`·`GroupServiceConfigModal`·`ModuleConfigEditor`). 섹션/필드 `hidden`·`advanced`
+  (`ModuleConfigModal`·`ModuleConfigEditor`). 섹션/필드 `hidden`·`advanced`
   게이팅 없음 → **모든 섹션·필드 항상 노출**(시크릿/경로의 `_infra` 섹션은 "인프라" 배지 + 기본 접힘,
   헤더 클릭으로 펼침 — 숨김 아님).
 
 ### 14.5 패키지 업로드 핸들러
 - `_dt(val)` 는 file_store 의 ISO 문자열에 대해 `hasattr(val,"isoformat")` 가드 후 변환
   (동일 버전 재업로드 409 conflict 응답 직렬화 시 500 방지, `ems/core/oam/src/handlers/agents.py`).
+
+### 14.6 필드 단위 HA 동기화 (config sync)
+설정 저장의 HA 전파는 **필드 단위 opt-in** 이다 — 그룹 통짜 전파 없음.
+
+**API 계약** (`PUT /api/v1/deployments/{id}/config`, `agents.py _put_deployment_config`):
+- `sync_keys?: string[]` — 피어 deployment 에 merge 할 키 목록(= **변경∩동기화체크**).
+  부재=레거시(피어에 values 통짜 — 구 클라이언트 호환) · `[]`=피어 무변경.
+- `sync_checked?: string[]` — 체크 상태 전체. 저장 성공 시 `ha_group.config_sync[package_name]`
+  에 영속(부재 시 미갱신). 콘솔 UI 복원용 메타 — keepalived/update_ha 와 무관.
+- 요청 dep 은 values 를 overlay 전체로 저장(기존 계약), **피어만** `{**peer.config, **subset}`
+  부분 merge → 피어 고유 설정(SystemId·LocalIp 등) 보존.
+- 전파 대상 그룹은 **요청 dep 의 agent 가 멤버로 소속된 그룹으로 한정**(동일 패키지 다중 그룹
+  오전파 방지). update_config job 의 config 는 **target 별 overlay 로 각각 실체화**.
+- `GET /deployments/{id}/config` 응답에 `ha` block: `{group_id, group_name, mode,
+  sync_keys(=config_sync[pkg] | null), members[]}` — standalone 이면 null.
+
+**콘솔 UX** (`ModuleConfigModal`):
+- HA 그룹 멤버의 필드마다 **🔗 동기화 체크박스**. 체크+값 변경+저장 = 그룹 멤버 전체에 그 값
+  반영, 해제 = 이 서버만. standalone 은 체크박스 없음(항상 `sync_keys:[]` 전송).
+- 기본값: 영속값(`config_sync[pkg]`) 있으면 복원, 없으면 **scope=service 섹션 필드 = ON**.
+- 체크됐지만 값이 안 바뀐 필드는 전파하지 않는다(최소 놀람) — 잔여 드리프트는 그룹 비교 뷰
+  (§14.2)가 경고로 노출하고, 기준 서버에서 해당 필드 재저장으로 해소한다.
+- 동시 편집은 키 단위 last-write-wins (피어 read→merge→save 사이 창은 수용).
+- RBAC: config PUT 은 operator — `config_sync` 기록은 그 저장의 파생 상태라 ha-groups
+  PUT(admin) 을 경유하지 않고 백엔드가 직접 기록한다.
+- **컬렉션(jsonl)은 이 모델 밖** — 종전대로 백엔드 scope 기반 자동 전파(`should_propagate`)
+  + drift 감지. 서버 화면에서 항상 편집 가능(그룹 전용 잠금 없음).
