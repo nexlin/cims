@@ -40,8 +40,28 @@ class CimsAccount(private val owner: SipController) : Account() {
         owner.dispatchIncoming(call, from, video, mcptt, emergency)
     }
 
-    /** 문자(SIP MESSAGE) 수신 — 200 OK 응답은 PJSIP 가 자동, 본문만 컨트롤러로 중계. */
+    /** 문자(SIP MESSAGE) 수신 — 200 OK 응답은 PJSIP 가 자동, 본문만 컨트롤러로 중계.
+     *
+     * ⚠️ pjsua2 Java 바인딩 실측: `multipart/mixed` MESSAGE 는 [OnInstantMessageParam.msgBody] 가
+     *  **빈 문자열**로, `contentType` 도 boundary 파라미터가 빠진 "multipart/mixed" 만 넘어온다
+     *  (pjsip 이 multipart body 를 String 으로 재구성하지 않음 — MCData 그룹 SDS/FD 수신 불가).
+     *  이 경우 착신 INVITE 와 동일하게 원문([SipRxData.wholeMsg])에서 Content-Type(boundary 포함)
+     *  헤더와 본문을 직접 추출한다. text/plain 등 단일 파트는 종전대로 msgBody 사용. */
     override fun onInstantMessage(prm: OnInstantMessageParam) {
-        owner.dispatchInstantMessage(prm.fromUri, prm.contentType, prm.msgBody)
+        var ct = prm.contentType ?: ""
+        var body = prm.msgBody ?: ""
+        if (body.isEmpty() || (ct.startsWith("multipart/", true) && !ct.contains("boundary", true))) {
+            val whole = runCatching { prm.rdata.wholeMsg }.getOrDefault("")
+            if (whole.isNotEmpty()) {
+                val sep = whole.indexOf("\r\n\r\n").let { if (it >= 0) it to 4 else whole.indexOf("\n\n") to 2 }
+                if (sep.first >= 0) {
+                    val headers = whole.substring(0, sep.first)
+                    body = whole.substring(sep.first + sep.second)
+                    Regex("(?im)^Content-Type:\\s*(.+)$").find(headers)?.groupValues?.get(1)?.trim()
+                        ?.let { ct = it }
+                }
+            }
+        }
+        owner.dispatchInstantMessage(prm.fromUri, ct, body)
     }
 }
