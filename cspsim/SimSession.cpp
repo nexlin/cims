@@ -241,6 +241,23 @@ SimSession::SimSession(int id,
     m_clsServerInfo.m_eTransport     = E_SIP_UDP;
     m_clsServerInfo.m_iPort          = m_iServerPort;
     m_clsServerInfo.m_iLoginTimeout  = 600;
+    // 3GPP IMS 헤더 — 실제 단말과 동일한 패턴
+    m_clsServerInfo.m_strPPreferredIdentity = "<sip:" + m_strUser + "@" + m_strDomain + ">";
+    m_clsServerInfo.m_strPAccessNetworkInfo = "3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=0000000000000000";
+    // Contact feature tag — PTT: mcptt, VoLTE: mmtel
+    if( m_bPttMode ) {
+        m_clsServerInfo.m_vecContactFeatureTags = {
+            { "+g.3gpp.icsi-ref", "\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"" },
+            { "+g.3gpp.mcptt",    "" },
+            { "video",            "" }
+        };
+    } else {
+        m_clsServerInfo.m_vecContactFeatureTags = {
+            { "+g.3gpp.icsi-ref", "\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel\"" },
+            { "+g.3gpp.smsip",    "" },
+            { "video",            "" }
+        };
+    }
 
     m_clsSetup.m_iLocalUdpPort = m_iLocalPort;
     m_clsSetup.m_strLocalIp    = m_strLocalIp;
@@ -469,6 +486,9 @@ void SimSession::SendUnsubscribe(const std::string& strPsi,
 // ─────────────────────────────────────────────
 void SimSession::Logout()
 {
+    // 앱 종료 시 XCAP ETag 캐시 초기화 (다음 세션은 새로 GET)
+    m_mapXcapEtag.clear();
+
     // 1. MCPTT 그룹 affiliation 해제
     if (m_bPttMode && !m_strGroupId.empty()) {
         AffiliateGroup(true);
@@ -975,6 +995,12 @@ void SimSession::FetchXcapDoc(const std::string& strXcapRoot, const std::string&
     std::vector<std::pair<std::string, std::string> > hdrs;
     hdrs.push_back(std::make_pair("Authorization", "Bearer " + m_strAccessToken));
 
+    // 캐시된 ETag 있으면 If-None-Match 조건부 요청 (실제 단말 동작)
+    auto itEtag = m_mapXcapEtag.find(strPath);
+    if (itEtag != m_mapXcapEtag.end() && !itEtag->second.empty()) {
+        hdrs.push_back(std::make_pair("If-None-Match", itEtag->second));
+    }
+
     int iStatus = 0; std::string strBody, strEtag;
     if (!XcapHttp(strHost, iPort, bTls, "GET", strPath, hdrs, "", "", iStatus, strBody, strEtag)) {
         printf("[%d]   XCAP GET %s — connect/recv failed\n", m_iId, strSel.c_str());
@@ -985,17 +1011,7 @@ void SimSession::FetchXcapDoc(const std::string& strXcapRoot, const std::string&
     if (iStatus == 200) {
         m_stats.iXcapOk++;
         printf("[%d]   XCAP GET 200 %s (%zuB, etag=%s)\n", m_iId, strSel.c_str(), strBody.size(), strEtag.c_str());
-        // ETag 조건부 요청 검증: If-None-Match 로 재요청 → 304 기대
-        if (!strEtag.empty()) {
-            std::vector<std::pair<std::string, std::string> > hdrs2;
-            hdrs2.push_back(std::make_pair("Authorization", "Bearer " + m_strAccessToken));
-            hdrs2.push_back(std::make_pair("If-None-Match", strEtag));
-            int iSt2 = 0; std::string b2, e2;
-            if (XcapHttp(strHost, iPort, bTls, "GET", strPath, hdrs2, "", "", iSt2, b2, e2)) {
-                if (iSt2 == 304) { m_stats.iXcap304++; printf("[%d]   XCAP GET 304 (If-None-Match) %s\n", m_iId, strSel.c_str()); }
-                else printf("[%d]   XCAP GET %d (expected 304) %s\n", m_iId, iSt2, strSel.c_str());
-            }
-        }
+        if (!strEtag.empty()) m_mapXcapEtag[strPath] = strEtag;
     } else if (iStatus == 304) {
         m_stats.iXcap304++;
         printf("[%d]   XCAP GET 304 (not modified) %s\n", m_iId, strSel.c_str());

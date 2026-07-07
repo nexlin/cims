@@ -56,7 +56,7 @@ export const cimsManifest: ServiceManifest = {
         { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', requiredRole: 'monitor' },
         { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   requiredRole: 'monitor' },
         { path: '/service/abnormal-sessions', title: '비정상 세션 이력', component: AbnormalSessionsPage, requiredRole: 'monitor' },
-        { path: '/service/register-flow',     title: '단말 등록 플로우', component: RegisterFlowPage,     requiredRole: 'monitor' },
+        { path: '/service/register-flow',     title: '단말 메세지 이력', component: RegisterFlowPage,     requiredRole: 'monitor' },
       ],
     },
     // ── 성능 (ops) — 통계(KPI/카운터). FCAPS Performance. ──

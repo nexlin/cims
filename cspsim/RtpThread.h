@@ -56,7 +56,8 @@ public:
 	int		m_iDestFloorPort;    // 서버 floor 포트 (m=application, 0이면 미학습)
 	int		m_iDestVideoPort;    // 서버 비디오 포트
     std::string m_strMediaFile;
-    std::atomic<int> m_iLastFloorOp; // 마지막 수신된 floor opcode (0=없음, 2=GRANT, 5=IDLE, ...)
+    std::atomic<int>  m_iLastFloorOp;   // 마지막 수신된 floor opcode (0=없음, 2=GRANT, 5=IDLE, ...)
+    std::atomic<bool> m_bGrantReceived; // GRANT(opcode=2) 수신 여부 — TAKEN이 덮어써도 보존
 
     // Video RTP
     Socket  m_hVideoSocket;

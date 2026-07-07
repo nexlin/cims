@@ -1,0 +1,29 @@
+﻿D-1: 발언 중 멤버 강제 종료 (BYE 없음),,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+D-1-1,준비,통화 중,4명 JOIN 완료,1002 Floor GRANT 받아 발언 중,1002 발언 중,CMP 로그: TAKEN speaker=1002,,
+D-1-2,강제종료,프로세스 kill,1002 발언 중,1002 세션 강제 종료 (kill -9),BYE 없음 → CMP가 1002 RTP 무수신 감지,CMP 로그: RTP 수신 없음,,BYE 없이 사라지는 시뮬레이션
+D-1-3,대기,sweeper 동작,1002 종료 후,120초 대기 (OrphanReclaimSec),CMP sweeper가 1002 세션 정리,CMP 로그: orphan_no_rtp reclaim,,reclaim.jsonl 생성 확인
+D-1-4,확인,나머지 유지,sweeper 동작 후,1001·1003·1004 상태 확인,나머지 3명 통화 계속 유지,CMP STATS: sessions 확인,,
+D-1-5,종료,정리,통화 종료,나머지 BYE,sessions=0,CMP STATS 확인,,
+,,,,,,,,
+D-2: 개시자 강제 종료,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+D-2-1,준비,통화 중,4명 JOIN 완료,정상 통화 중,통화 유지,CMP 로그: sessions=1,,
+D-2-2,강제종료,개시자 kill,통화 중,1001(개시자) 강제 종료,BYE 없음,CSP 로그: 1001 무응답,,
+D-2-3,확인,나머지 통화,1001 종료 후,1002·1003·1004 상태 확인,나머지 3명 통화 유지 여부,CMP STATS: groups=1,,on-demand에서 개시자 이탈 시 동작 확인
+D-2-4,대기,sweeper,120초 대기,1001 sweeper 처리,1001 세션만 정리,CMP 로그: reclaim session=1001,,
+D-2-5,종료,정리,통화 종료,나머지 BYE,sessions=0,CMP STATS 확인,,
+,,,,,,,,
+D-3: 전원 동시 강제 종료,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+D-3-1,준비,통화 중,4명 JOIN 완료,정상 통화 중,통화 유지,CMP 로그: groups=1,,
+D-3-2,강제종료,전원 kill,통화 중,cspsim 프로세스 강제 종료,BYE 없음 → 4개 세션 orphan,CSP/CMP: 아무 신호 없음,,
+D-3-3,대기,sweeper,전원 종료 후,120초 대기,CMP sweeper 4개 세션 일괄 정리,CMP 로그: reclaim x4,,
+D-3-4,확인,리소스 정리,sweeper 완료,CMP STATS 조회,sessions=0 / groups=0 / ports_used=0,CMP STATS 확인,,leak_reclaim_total 카운터 증가 확인
+,,,,,,,,
+D-4: PUBLISH 패킷 손실 시뮬레이션,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+D-4-1,준비,UDP 차단,4명 REGISTER 완료,iptables로 1004의 PUBLISH 패킷 DROP,1004 PUBLISH CSP 미수신,CSP 로그: affiliate x3,,"iptables -A INPUT -s 1004IP -p udp --dport 5160 -m string --string ""PUBLISH"" -j DROP"
+D-4-2,통화시작,INVITE,3명만 affiliate,1001이 g001로 INVITE,1004 제외 → 3명 fan-out,CSP 로그: INVITE x2,,
+D-4-3,확인,JOIN,fan-out 완료,1002·1003 JOIN,CMP total=3,CMP 로그: Member added total=3,,
+D-4-4,종료,정리,통화 종료,iptables 규칙 제거 + BYE,sessions=0,CMP STATS 확인,,

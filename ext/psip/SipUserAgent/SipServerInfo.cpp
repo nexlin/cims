@@ -113,6 +113,16 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 
 	m_bAuth = false;
 
+	// 3GPP IMS TS 24.229: 첫 REGISTER (challenge 없음) 에도 빈 Authorization 헤더 포함
+	if( pclsResponse == nullptr && m_clsChallenge.m_strAlgorithm.empty() )
+	{
+		CSipCredential clsEmpty;
+		clsEmpty.m_strType = "Digest";
+		clsEmpty.m_strUserName = m_strAuthId.empty() ? m_strUserId : m_strAuthId;
+		clsEmpty.m_strUri = "sip:" + m_strDomain;
+		pclsRequest->m_clsAuthorizationList.push_front( clsEmpty );
+	}
+
 	if( pclsResponse )
 	{
 		m_bAuth = AddAuth( pclsRequest, pclsResponse );
@@ -133,6 +143,19 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 	}
 
 	pclsRequest->m_eTransport = m_eTransport;
+
+	// Contact feature tag 설정된 경우 미리 Contact 빌드 (SipStack 자동생성 억제)
+	if( !m_vecContactFeatureTags.empty() )
+	{
+		CSipFrom clsContact;
+		clsContact.m_clsUri.m_strProtocol = "sip";
+		clsContact.m_clsUri.m_strUser = m_strUserId;
+		clsContact.m_clsUri.m_strHost = pclsSipStack->m_clsSetup.m_strLocalIp;
+		clsContact.m_clsUri.m_iPort   = pclsSipStack->m_clsSetup.m_iLocalUdpPort;
+		for( const auto & tag : m_vecContactFeatureTags )
+			clsContact.InsertParam( tag.first.c_str(), tag.second.empty() ? NULL : tag.second.c_str() );
+		pclsRequest->m_clsContactList.push_back( clsContact );
+	}
 
 	return pclsRequest;
 }

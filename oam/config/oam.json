@@ -17,7 +17,7 @@
         "Host": "127.0.0.1",
         "Port": 3306,
         "User": "cims",
-        "Password": "!core0908",
+        "Password": "cims1234",
         "Db": "cims"
     },
     "Agent": {
@@ -60,10 +60,10 @@
         "BackupDir": "packages_trash"
     },
     "ConfigCacheDir": "cache",
-    "CimsRuntimeDir": "/home/cims/work/cims/build/dist/ext_mnt/runtime",
+    "CimsRuntimeDir": "/home/cbm/js/cims/build/dist/ext_mnt/runtime",
     "_runtime_comment": "관리 데이터(file_store) SoT 는 mgmt host(ctrl01) 로컬 유지. ServiceLogging.Dir 을 공유 NAS 로 옮겨도 runtime store 가 따라가지 않도록 명시 고정.",
     "ServiceLogging": {
-        "Dir": "/mnt/cims/service_log",
+        "Dir": "/home/cbm/js/cims/build/dist/ext_mnt/service_log",
         "Enable": [
             "csp",
             "ue"

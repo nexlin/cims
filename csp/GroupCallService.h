@@ -5,6 +5,7 @@
 #ifndef _GROUP_CALL_SERVICE_H_
 #define _GROUP_CALL_SERVICE_H_
 
+#include <chrono>
 #include <map>
 #include <mutex>
 #include <string>
@@ -170,6 +171,11 @@ private:
 
     // Track Active Calls (UserId -> CallId)
     std::map<std::string, std::string> m_mapUserCall;
+
+    // BYE 처리 중 race condition 방지: OnCallTerminated 호출 시 그룹별 최종 종료 시각 기록.
+    // CheckGroupIntegrity가 BYE 처리 틈새에서 재-INVITE하지 않도록 5초 grace period 부여.
+    std::map<std::string, std::chrono::steady_clock::time_point> m_mapGroupLastTerminate;
+
     std::recursive_mutex m_mutex;
 };
 

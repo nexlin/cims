@@ -55,7 +55,7 @@ CRtpThread::CRtpThread()
       m_hFloorRecvSocket(INVALID_SOCKET), m_iPort(0), m_iFloorRecvPort(0),
       m_bStopEvent(false), m_bSendThreadRun(false), m_bRecvThreadRun(false),
       m_bFloorRecvThreadRun(false),
-      m_iDestFloorPort(0), m_iDestVideoPort(0), m_iLastFloorOp(0),
+      m_iDestFloorPort(0), m_iDestVideoPort(0), m_iLastFloorOp(0), m_bGrantReceived(false),
       m_hVideoSocket(INVALID_SOCKET), m_iVideoPort(0),
       m_bVideoSendThreadRun(false) {}
 

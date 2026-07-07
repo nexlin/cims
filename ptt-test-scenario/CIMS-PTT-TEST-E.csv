@@ -1,0 +1,20 @@
+﻿E-1: REGISTER 직후 PUBLISH 전 INVITE,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+E-1-1,준비,타이밍 설정,전원 DB 등록,"1001·1002·1003 정상 시작, 1004 REGISTER만 완료 (PUBLISH 직전 상태)","1004 REGISTER O, affiliate X",CSP 로그: user inserted (1004),,타이밍 재현이 어려워 수동 제어 필요
+E-1-2,통화시작,INVITE,1004 PUBLISH 전,1001이 즉시 INVITE,CSP affiliate 확인 → 1004 미포함,CSP 로그: fan-out x2 (1002·1003),,REGISTER는 됐지만 affiliate 없어서 제외
+E-1-3,확인,JOIN,fan-out 완료,1002·1003 JOIN,CMP total=3,CMP 로그: Member added total=3,,
+E-1-4,종료,정리,통화 종료,BYE x3,sessions=0,CMP STATS 확인,,
+,,,,,,,,
+E-2: 통화 중 새 멤버 affiliate 시도,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+E-2-1,준비,3명 통화 중,"1001·1002·1003 통화 중, 1004 미참가",3명 통화 정상 유지,CMP total=3,CMP 로그: groups=1,,
+E-2-2,참가 시도,1004 affiliate,3명 통화 중,1004 REGISTER + PUBLISH,CSP affiliate 등록,CSP 로그: affiliate 1004,,
+E-2-3,확인,합류 불가,1004 affiliate 완료,기존 통화 세션에 1004 합류 여부,기존 통화에 합류 불가 (on-demand 특성),CMP 로그: total=3 유지,,다음 키업 시 참가 가능
+E-2-4,재통화,신규 INVITE,기존 통화 종료 후,1001이 다시 INVITE,1004 포함 4명 fan-out,CMP 로그: total=4,,
+,,,,,,,,
+E-3: 통화 중 re-REGISTER,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+E-3-1,준비,통화 중,4명 JOIN 완료,정상 통화 중,통화 유지,CMP 로그: groups=1,,
+E-3-2,재등록,re-REGISTER,통화 중,1003이 REGISTER 재전송 (Expires 갱신),CSP 바인딩 갱신 + 통화 유지,CSP 로그: user(1003) updated,,
+E-3-3,확인,RTP 유지,re-REGISTER 완료,1003 RTP 수신 확인,RTP 계속 수신 중,cspsim: RTP STATS Packets>0,,re-REGISTER 후 RTP 끊김 없음 확인
+E-3-4,종료,정리,통화 종료,BYE x4,sessions=0,CMP STATS 확인,,

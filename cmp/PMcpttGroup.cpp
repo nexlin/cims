@@ -250,6 +250,21 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
     LOG_INFO("PMcpttGroup", "[%s] Floor %s from session=%s %s:%d",
              _groupId.c_str(), opName, sessionId.c_str(), ip.c_str(), port);
 
+    if (_logFlow && (opcode == FLOOR_REQUEST || opcode == FLOOR_RELEASE)) {
+        int prio = 999;
+        {
+            PAutoLock lock(_mutex);
+            auto itP = _priorities.find(sessionId);
+            if (itP != _priorities.end()) prio = itP->second;
+        }
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d}",
+                 opName, sessionId.c_str(), senderSsrc, prio);
+        std::string label = std::string("FLOOR_") + opName;
+        _logFlow(_groupId, "ue", "cmp", "MCPTT", label.c_str(), detail);
+    }
+
     if (opcode == FLOOR_REQUEST) handleFloorRequest(sessionId, senderSsrc);
     else if (opcode == FLOOR_RELEASE) handleFloorRelease(sessionId, senderSsrc);
 }
@@ -498,9 +513,6 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         int grantLen = BuildFloorPacket(grantBuf, sizeof(grantBuf), FLOOR_GRANT, ssrc, sessionId);
         if (grantLen > 0) sendToMember(sessionId, grantBuf, grantLen);
 
-        // Broadcast Taken to all (화자 identity 포함)
-        broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
-
         LOG_INFO("PMcpttGroup", "[%s] Floor GRANTED to session=%s ssrc=%u prio=%d",
                  _groupId.c_str(), sessionId.c_str(), ssrc, requesterPrio);
         if (_logFlow) {
@@ -511,6 +523,9 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
             _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", detail);
         }
         _logFloorLocal("GRANT", sessionId, ssrc, requesterPrio);
+
+        // Broadcast Taken to all (화자 identity 포함)
+        broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
 
         // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작 (recorder 가 시간버킷/shard/seq 관리)
         if (_recordEnable && !_recorder) startRecording();
@@ -574,14 +589,22 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
             int grantLen = BuildFloorPacket(grantBuf, sizeof(grantBuf), FLOOR_GRANT, ssrc, sessionId);
             if (grantLen > 0) sendToMember(sessionId, grantBuf, grantLen);
 
-            // Broadcast Taken (New Owner)
-            broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
             {
                 char ex[224];
                 snprintf(ex, sizeof(ex), "\"preempt\":true,\"preempted_from\":\"%s\",\"reason\":\"%s\",\"tier\":\"%s\"",
                          prevOwner.c_str(), preemptReason, _tierName(reqTier));
                 _logFloorLocal("GRANT", sessionId, ssrc, requesterPrio, ex);
             }
+            if (_logFlow) {
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "{\"op\":\"GRANT\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d,\"preempt\":true,\"preempted_from\":\"%s\"}",
+                         sessionId.c_str(), ssrc, requesterPrio, prevOwner.c_str());
+                _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_GRANT", detail);
+            }
+
+            // Broadcast Taken (New Owner)
+            broadcastFloorStatus(FLOOR_TAKEN, ssrc, sessionId);
 
             // 녹취: 새 화자 세그먼트 시작 (선점 메타 포함)
             if (_recordEnable && _recorder) {

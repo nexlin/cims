@@ -33,6 +33,17 @@ export interface FlowBodyResponse {
   body: string
 }
 
+export interface RegisterEntry {
+  ts: string    // 첫 번째 REGISTER 수신 시각 (HH:MM:SS.usec)
+  sesid: string // 등록 세션 ID
+}
+
+export interface RegisterListResponse {
+  user: string
+  date: string
+  registers: RegisterEntry[]
+}
+
 export interface RegisterFlowResponse {
   user: string
   date: string
@@ -59,9 +70,15 @@ export const flowApi = {
   /** 메시지 body 조회 (interface jsonl seq 기반, fallback: ts+dir)
    *  node: 'csp' | 'cmp' | 'csc' — 여러 노드가 같은 iface에 msg 파일을 쓸 때 정확한 파일 선택에 사용
    */
-  getRegisterFlow(user: string, date?: string): Promise<RegisterFlowResponse> {
+  listRegisterFlow(user: string, date?: string): Promise<RegisterListResponse> {
     const params = new URLSearchParams({ user })
     if (date) params.set('date', date)
+    return api.get(`/flow/register/list?${params.toString()}`)
+  },
+  getRegisterFlow(user: string, date?: string, sesid?: string): Promise<RegisterFlowResponse> {
+    const params = new URLSearchParams({ user })
+    if (date) params.set('date', date)
+    if (sesid) params.set('sesid', sesid)
     return api.get(`/flow/register?${params.toString()}`)
   },
   getBody(date: string, hour: string | undefined, seq?: number, ts?: string, dir?: string, proto?: string, iface?: string, node?: string): Promise<FlowBodyResponse> {

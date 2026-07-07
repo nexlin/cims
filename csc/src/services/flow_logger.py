@@ -17,6 +17,7 @@ API:
 
 import json
 import os
+import re
 import subprocess
 import struct
 import glob as _glob
@@ -2565,9 +2566,10 @@ def _add_seconds_to_ts(ts: str, secs: float) -> str:
         return ts
 
 
-async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """GET /api/v1/flow/register?user=1001&date=YYYY-MM-DD
-    특정 사용자의 가장 최근 REGISTER 흐름 (REGISTER→401→REGISTER→200 OK→SUBSCRIBE→NOTIFY→PUBLISH) 반환.
+async def _handle_register_list(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """GET /api/v1/flow/register/list?user=1001&date=YYYY-MM-DD
+    해당 날짜에 특정 사용자가 수행한 REGISTER 세션 목록 반환 (sesid 기준 고유).
+    [{ts, sesid}] — ts 는 첫 번째 REGISTER 수신 시각.
     """
     if handler_args.method != "GET":
         return HandlerResult(status=405, body="Method Not Allowed")
@@ -2583,7 +2585,6 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
 
     user = (_q("user") or "").strip()
     date_str = _q("date", datetime.now().strftime("%Y-%m-%d"))
-    hour = _q("hour")
 
     if not user:
         return HandlerResult(status=400, body=json.dumps({"error": "user parameter required"}),
@@ -2592,18 +2593,16 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
         return HandlerResult(status=503, body=json.dumps({"error": "SIP log not configured"}),
                              media_type="application/json")
 
-    # 1. flow.jsonl에서 가장 최근 REGISTER sesid 검색
-    #    REGISTER detail = From URI (e.g. "sip:1001@csp") — SipMessageLogger 참조
-    match_str = f":{user}@"   # ":1001@" — 앞뒤 anchor로 "10011" 오매칭 방지
-    best_ts = ""
-    best_sesid = ""
-    flow_paths = _resolve_flow_paths(date_str, hour, "volte")
+    user_token = f'"{user}"'
+    flow_paths = _resolve_flow_paths(date_str, None, "volte")
 
+    # sesid → 첫 번째 REGISTER 시각 (같은 sesid=같은 등록 세션, re-REGISTER 포함)
+    sesid_first: dict = {}
     for jsonl_path in flow_paths:
         try:
             with open(jsonl_path, 'r') as fh:
                 for line in fh:
-                    if '"REGISTER"' not in line or match_str not in line:
+                    if '"REGISTER"' not in line or user_token not in line:
                         continue
                     try:
                         obj = json.loads(line.strip())
@@ -2611,84 +2610,161 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
                         continue
                     if obj.get("method") != "REGISTER":
                         continue
-                    if match_str not in obj.get("detail", ""):
+                    if obj.get("caller") != user and obj.get("detail") != user:
                         continue
-                    ts = obj.get("ts", "")
                     sesid = obj.get("sesid", "")
-                    if ts > best_ts and sesid:
-                        best_ts = ts
-                        best_sesid = sesid
+                    ts = obj.get("ts", "")
+                    if not sesid or not ts:
+                        continue
+                    if sesid not in sesid_first or ts < sesid_first[sesid]:
+                        sesid_first[sesid] = ts
         except Exception as e:
-            logger.error("register_flow scan: %s", e)
+            logger.error("register_list scan: %s", e)
 
-    if not best_sesid:
-        return HandlerResult(status=404, body=json.dumps({
-            "error": f"No REGISTER found for user '{user}' on {date_str}"
-        }), media_type="application/json")
+    registers = sorted(
+        [{"ts": ts, "sesid": sesid} for sesid, ts in sesid_first.items()],
+        key=lambda x: x["ts"]
+    )
 
-    # 2. 해당 sesid의 REGISTER 다이얼로그 전체 (REGISTER→401→REGISTER→200 OK)
-    sesid_set = {best_sesid}
-    sip_msgs = _search_sip_messages([], date_str, hour, service="volte", sesid_set=sesid_set)
+    return HandlerResult(status=200, body=json.dumps({
+        "user": user, "date": date_str, "registers": registers,
+    }), media_type="application/json")
 
-    # 3. 200 OK 타임스탬프 추출 → 이후 SUBSCRIBE/NOTIFY/PUBLISH 탐색 윈도우 계산
-    ts_200 = ""
-    for m in sorted(sip_msgs, key=lambda x: x.get("ts", "")):
-        method = m.get("method", "")
-        ts = m.get("ts", "")
-        if "200" in method and ts > best_ts:
-            ts_200 = ts
-            break
 
-    ts_window_start = best_ts
-    ts_window_end = _add_seconds_to_ts(ts_200 or best_ts, 120)
+async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """GET /api/v1/flow/register?user=1001&date=YYYY-MM-DD
+    해당 날짜에 특정 사용자의 REGISTER/SUBSCRIBE/PUBLISH 전체 흐름 반환.
+    sesid 필터 없이 하루치 전체 수집 — 응답(401/200/NOTIFY) 포함.
+    """
+    if handler_args.method != "GET":
+        return HandlerResult(status=405, body="Method Not Allowed")
 
-    # 4. REGISTER 이후 120초 윈도우에서 SUBSCRIBE/NOTIFY/PUBLISH 수집
-    #    (서로 다른 sesid이므로 시간 범위 필터 사용)
-    follow_msgs = []
-    seen_follow = set()
+    qp = getattr(handler_args, 'query_params', {}) or {}
+    qs = parse_qs(urlparse(handler_args.full_path or "").query)
+    def _q(name, default=None):
+        v = qp.get(name)
+        if v:
+            return v[0] if isinstance(v, list) else v
+        vl = qs.get(name)
+        return vl[0] if vl else default
+
+    user = (_q("user") or "").strip()
+    date_str = _q("date", datetime.now().strftime("%Y-%m-%d"))
+
+    if not user:
+        return HandlerResult(status=400, body=json.dumps({"error": "user parameter required"}),
+                             media_type="application/json")
+    if not _sip_log_dir and not _calls_dir:
+        return HandlerResult(status=503, body=json.dumps({"error": "SIP log not configured"}),
+                             media_type="application/json")
+
+    user_token = f'"{user}"'
+    flow_paths = _resolve_flow_paths(date_str, None, "volte")
+
+    # 1. 하루치 flow 전체 스캔: caller==user + REGISTER/SUBSCRIBE/PUBLISH 인 sesid 수집
+    _TARGET_METHODS = {"REGISTER", "SUBSCRIBE", "PUBLISH"}
+    sesid_set: set = set()
+
     for jsonl_path in flow_paths:
         try:
             with open(jsonl_path, 'r') as fh:
                 for line in fh:
                     line = line.strip()
-                    if not line or '"SIP"' not in line:
+                    if not line or user_token not in line:
                         continue
                     try:
                         obj = json.loads(line)
                     except Exception:
                         continue
-                    if obj.get("proto") != "SIP":
+                    if obj.get("method") not in _TARGET_METHODS:
+                        continue
+                    if obj.get("caller") != user:
+                        continue
+                    sesid = obj.get("sesid", "")
+                    if sesid:
+                        sesid_set.add(sesid)
+        except Exception as e:
+            logger.error("register_flow scan: %s", e)
+
+    if not sesid_set:
+        return HandlerResult(status=404, body=json.dumps({
+            "error": f"No REGISTER/SUBSCRIBE/PUBLISH found for user '{user}' on {date_str}"
+        }), media_type="application/json")
+
+    # 2. 수집된 sesid에 속한 모든 메시지 수집 (응답/NOTIFY 포함)
+    all_msgs = []
+    seen: set = set()
+
+    for jsonl_path in flow_paths:
+        try:
+            with open(jsonl_path, 'r') as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    sesid = obj.get("sesid", "")
+                    if sesid not in sesid_set:
                         continue
                     ts = obj.get("ts", "")
-                    if not ts or ts <= ts_window_start or ts > ts_window_end:
+                    key = (ts, obj.get("method", ""), sesid, obj.get("from", ""))
+                    if key in seen:
                         continue
-                    if obj.get("method") == "REGISTER":
-                        continue
-                    if obj.get("sesid", "") in sesid_set:
-                        continue
-                    # UE 관련 메시지만 (SUBSCRIBE/NOTIFY/PUBLISH/응답)
-                    from_a = obj.get("from", "")
-                    to_a = obj.get("to", "")
-                    if "ue" not in from_a and "ue" not in to_a:
-                        continue
-                    # 중복 제거 (같은 ts+method가 여러 flow 파일에 있을 수 있음)
-                    key = (ts, obj.get("method", ""), obj.get("sesid", ""))
-                    if key in seen_follow:
-                        continue
-                    seen_follow.add(key)
-                    follow_msgs.append(obj)
+                    seen.add(key)
+                    all_msgs.append(obj)
         except Exception as e:
-            logger.error("register_flow follow scan: %s", e)
+            logger.error("register_flow collect: %s", e)
 
-    # 5. FlowMessage 형식으로 변환 후 시간순 병합
-    messages = []
-    for obj in sip_msgs:
-        messages.append(_flow_msg_from_log(obj))
-    for obj in follow_msgs:
-        messages.append(_flow_msg_from_log(obj))
+    # 3. CSC HTTPS 트래픽 별도 수집 (caller가 "tel:+1001" 형식 → 번호만 추출 후 매칭)
+    #    SIP flow의 caller는 "1001"이지만 CSC는 "tel:+1001"로 기록 → sesid 수집 단계에서 누락됨.
+    for jsonl_path in flow_paths:
+        try:
+            with open(jsonl_path, 'r') as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or user not in line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    if obj.get("proto") != "HTTPS":
+                        continue
+                    # HTTP post_hook 항목만 수집 (method 에 슬래시 포함: "GMS/GET ...", "IdMS/POST ...")
+                    # 서비스 레이어 중복 항목 제외 ("GMS GET tel:..." 형식 — 같은 요청의 이중 로그)
+                    method_field = obj.get("method", "")
+                    if re.match(r'^(GMS|CMS|KMS)\s+\w+\s+', method_field):
+                        continue
+                    caller = obj.get("caller", "")
+                    caller_norm = caller
+                    if caller_norm.startswith("tel:+"):
+                        caller_norm = caller_norm[5:]
+                    elif caller_norm.startswith("tel:"):
+                        caller_norm = caller_norm[4:]
+                    # caller 없는 경우 method(URL 경로)에서 사용자 ID 추출
+                    # 예: "GMS/GET /org.openmobilealliance.groups/users/tel:1001/..."
+                    if not caller_norm:
+                        m = re.search(r'tel:[+]?(\d+)', obj.get("method", ""))
+                        if m:
+                            caller_norm = m.group(1)
+                    if caller_norm != user:
+                        continue
+                    ts = obj.get("ts", "")
+                    key = (ts, obj.get("method", ""), obj.get("sesid", ""), obj.get("from", ""))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    all_msgs.append(obj)
+        except Exception as e:
+            logger.error("register_flow csc collect: %s", e)
+
+    # 4. FlowMessage 변환 → 시간순 정렬 → 노드별 분류
+    messages = [_flow_msg_from_log(obj) for obj in all_msgs]
     messages.sort(key=lambda m: m.get("ts", ""))
 
-    # 6. 노드별 분류
     nodes: dict = {}
     for m in messages:
         node = _flow_node_of(m)
@@ -2703,6 +2779,7 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
 
 FLOW_HANDLER_LIST = [
     ("/api/v1/flow/body", _handle_flow_body, {}),
+    ("/api/v1/flow/register/list", _handle_register_list, {}),
     ("/api/v1/flow/register", _handle_register_flow, {}),
     ("/api/v1/flow", _handle_flow, {}),
     ("/api/v1/call/logs", _handle_call_logs, {}),

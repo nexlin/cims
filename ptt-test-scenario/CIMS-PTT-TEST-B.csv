@@ -1,0 +1,26 @@
+﻿B-1: 1004 REGISTER 없음,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+B-1-1,준비,부분 등록,전원 DB 등록 완료,"1001·1002·1003만 cspsim 실행, 1004 제외",3명만 REGISTER 200 OK,CSP 로그: user inserted x3,,
+B-1-2,통화시작,INVITE,3명 affiliate 완료,1001이 g001로 INVITE,CSP가 등록된 멤버 목록 확인 → 1004 제외,CSP 로그: fan-out INVITE x2 (1002·1003),,1004는 REGISTER 없으므로 제외
+B-1-3,통화시작,JOIN 확인,fan-out 완료,1002·1003 200 OK,CMP JOIN_PTT_GROUP x3 (1001·1002·1003),CMP 로그: Member added total=3,,total=3 확인
+B-1-4,통화 중,Floor/RTP,3명 JOIN 완료,1001 Floor REQUEST,GRANT + TAKEN → 3 members 브로드캐스트,CMP 로그: → 3 members,,4 members 아닌 3 확인
+B-1-5,종료,리소스 정리,통화 종료,BYE x3,LEAVE x3 + REMOVE_GROUP + sessions=0,CMP STATS 확인,,
+,,,,,,,,
+B-2: 1004 affiliate 없음,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+B-2-1,준비,부분 affiliate,4명 REGISTER 완료,"1001·1002·1003만 PUBLISH affiliate, 1004 생략",3명만 affiliate 상태,CSP 로그: affiliate x3,,
+B-2-2,통화시작,INVITE,3명 affiliate 완료,1001이 g001로 INVITE,CSP affiliate 목록 확인 → 1004 제외,CSP 로그: fan-out x2,,1004는 REGISTER 됐어도 affiliate 없으면 제외
+B-2-3,통화시작,JOIN 확인,fan-out 완료,1002·1003 200 OK,CMP total=3,CMP 로그: Member added total=3,,
+B-2-4,종료,리소스 정리,통화 종료,BYE x3,sessions=0,CMP STATS 확인,,
+,,,,,,,,
+B-3: 개시자 혼자만 조건 만족,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+B-3-1,준비,단독 등록,전원 DB 등록 완료,1001만 cspsim 실행 + PUBLISH,1001만 REGISTER + affiliate,CSP 로그: user inserted x1,,
+B-3-2,통화시작,INVITE,1001만 조건 만족,1001이 g001로 INVITE,ADD_PTT_GROUP + 1001만 JOIN,CMP 로그: Member added total=1,,세션 생성 자체는 성공
+B-3-3,통화 중,Floor,1001 단독 세션,1001 Floor REQUEST,GRANT (혼자이므로 즉시),CMP 로그: GRANTED,,
+B-3-4,종료,리소스 정리,통화 종료,BYE,REMOVE_GROUP + sessions=0,CMP STATS 확인,,
+,,,,,,,,
+B-4: 전원 미등록,,,,,,,,
+#,단계,구분,사전 조건,테스트 절차,예상 결과,확인 방법,결과,비고
+B-4-1,준비,미등록,CSP 기동 완료,cspsim 실행하지 않음 (REGISTER 없음),CSP UserMap 비어있음,CSP 로그: 등록 없음,,
+B-4-2,통화시작,INVITE 시도,전원 미등록,수동으로 INVITE sip:g001@csp 전송,등록된 멤버 없음 → 세션 생성 실패 또는 오류 응답,CSP 로그: 오류 확인,,수동 SIP 툴(sipsak 등) 필요
