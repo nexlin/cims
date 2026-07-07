@@ -43,6 +43,8 @@ data class GroupDoc(
     /** session-type — prearranged/chat. */
     val sessionType: String?,
     val maxParticipants: Int?,
+    /** mcdata-on-network-max-data-size-auto-recv — 파일(FD) 자동 다운로드 임계 octets (TS 24.481). */
+    val autoRecvBytes: Int? = null,
     val etag: String?,
 ) {
     companion object {
@@ -79,11 +81,19 @@ data class GroupDoc(
                 video = Regex("mcptt-video>\\s*true").containsMatchIn(xml),
                 sessionType = Regex("session-type>\\s*(\\w+)").find(xml)?.groupValues?.get(1),
                 maxParticipants = Regex("max-participant-count>\\s*(\\d+)").find(xml)?.groupValues?.get(1)?.toIntOrNull(),
+                autoRecvBytes = Regex("max-data-size-auto-recv>\\s*(\\d+)").find(xml)?.groupValues?.get(1)?.toIntOrNull(),
                 etag = etag,
             )
         }
     }
 }
+
+/** MCData FD 업로드 결과 (POST /mcdata/fd). */
+data class FdUpload(
+    val url: String,
+    val size: Long,
+    val name: String,
+)
 
 /** ETag 캐시가 적용되는 XCAP 문서 조회 결과. [notModified] 면 [body] 는 캐시 사용. */
 data class XcapDoc(

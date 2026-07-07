@@ -19,6 +19,9 @@ CspPttGroup::CspPttGroup()
       _imminentPerilCall( true ),
       _emergencyAlert( true ),
       _isAdhoc( false ),
+      _allowSds( true ),
+      _allowFd( false ),
+      _maxSdsSize( 10000 ),
       _sessionStart( 0 ),
       _sessionEnd( 0 ),
       _sessionSeq( 0 ),
@@ -83,6 +86,11 @@ bool CspPttGroup::load( std::string groupId ) {
     if ( root.Has( "require_affiliation" ) ) _requireAffiliation = ( root.GetInt( "require_affiliation" ) != 0 );
     if ( root.Has( "alias" ) ) _alias = root.GetString( "alias" );
 
+    // MCData 그룹 메시징 게이트 (JSON fallback)
+    if ( root.Has( "allow_sds" ) ) _allowSds = ( root.GetInt( "allow_sds" ) != 0 );
+    if ( root.Has( "allow_fd" ) ) _allowFd = ( root.GetInt( "allow_fd" ) != 0 );
+    if ( root.Has( "max_sds_size" ) ) _maxSdsSize = root.GetInt( "max_sds_size" );
+
     if ( root.Has( "users" ) ) {
         SimpleJson::JsonNode users = root.Get( "users" );
         if ( users.type == SimpleJson::JSON_ARRAY ) {
@@ -117,6 +125,9 @@ void CspPttGroup::Clear() {
     _imminentPerilCall = true;
     _emergencyAlert = true;
     _isAdhoc = false;
+    _allowSds = true;
+    _allowFd = false;
+    _maxSdsSize = 10000;
     _orgCode.clear();
     _sessionStart = 0;
     _sessionEnd = 0;

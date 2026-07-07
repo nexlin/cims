@@ -443,7 +443,7 @@ private fun InlineChat(st: PttUiState, svc: PttService?, groupId: String,
                     if (mine) Text(chatTime(e.time), color = Ct.TextFaint, fontSize = 9.sp,
                         modifier = Modifier.padding(end = 5.dp, bottom = 2.dp))
                     Text(
-                        e.text,
+                        if (e.attName.isNotBlank()) "📎 ${e.attName}" else e.text,
                         color = if (mine) Ct.OnMint else Ct.Text,
                         fontSize = 13.sp,
                         modifier = Modifier
@@ -465,7 +465,7 @@ private fun InlineChat(st: PttUiState, svc: PttService?, groupId: String,
         // 입력바 — 첨부 + 입력 + 전송(SIP MESSAGE 그룹 fan-out)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AttachButton(38)
+            AttachButton(38) { uri -> svc?.sendGroupAttachment(groupId, uri) }
             Box(
                 Modifier.weight(1f).height(38.dp)
                     .clip(RoundedCornerShape(19.dp)).background(Ct.SurfaceHi)

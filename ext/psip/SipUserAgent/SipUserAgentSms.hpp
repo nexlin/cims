@@ -18,14 +18,24 @@
 
 /**
  * @ingroup SipUserAgent
- * @brief text ±â¹Ý SMS ¸Þ½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
- * @param pszFrom		¹ß½ÅÀÚ ¾ÆÀÌµð
- * @param pszTo			¼ö½ÅÀÚ ¾ÆÀÌµð
- * @param pszText		SMS ¸Þ½ÃÁö
- * @param pclsRoute SIP ¸Þ½ÃÁö ¸ñÀûÁö ÁÖ¼Ò ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
+ * @brief text ï¿½ï¿½ï¿½ SMS ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
+ * @param pszFrom		ï¿½ß½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+ * @param pszTo			ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ìµï¿½
+ * @param pszText		SMS ï¿½Þ½ï¿½ï¿½ï¿½
+ * @param pclsRoute SIP ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ö¼ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼
+ * @returns ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ true ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ false ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ñ´ï¿½.
  */
 bool CSipUserAgent::SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute )
+{
+	return SendSms( pszFrom, pszTo, pszText, pclsRoute, NULL );
+}
+
+/**
+ * @ingroup SipUserAgent
+ * @brief SMS message with explicit Content-Type (NULL => text/plain).
+ * @param pszContentType full Content-Type value incl. parameters (e.g. "multipart/mixed;boundary=x")
+ */
+bool CSipUserAgent::SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute, const char * pszContentType )
 {
 	CSipMessage * pclsRequest = new CSipMessage();
 	if( pclsRequest == NULL ) return false;
@@ -44,7 +54,17 @@ bool CSipUserAgent::SendSms( const char * pszFrom, const char * pszTo, const cha
 	pclsRequest->AddRoute( pclsRoute->m_strDestIp.c_str(), pclsRoute->m_iDestPort, pclsRoute->m_eTransport );
 	pclsRequest->m_clsCallId.Make( m_clsSipStack.m_clsSetup.m_strLocalIp.c_str() );
 
-	pclsRequest->m_clsContentType.Set( "text", "plain" );
+	if( pszContentType && pszContentType[0] )
+	{
+		if( pclsRequest->m_clsContentType.Parse( pszContentType, (int)strlen( pszContentType ) ) == -1 )
+		{
+			pclsRequest->m_clsContentType.Set( "text", "plain" );
+		}
+	}
+	else
+	{
+		pclsRequest->m_clsContentType.Set( "text", "plain" );
+	}
 	pclsRequest->m_strBody = pszText;
 	pclsRequest->m_iContentLength = (int)pclsRequest->m_strBody.length();
 

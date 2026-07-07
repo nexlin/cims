@@ -2783,6 +2783,79 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
     }), media_type="application/json")
 
 
+# ── MCData 그룹 메시지 이력 ──────────────────────────────────────
+#   CSP MCDATA-AS 가 남기는 {ServiceLogDir}/message/{gid}/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl
+#   스캔 (docs/design/features/mcdata_messaging.md). 레코드: ts/group/from/msg_type(sds|fd|text)/
+#   conv_id/msg_id/text/size/disposition_req/fanout(+file_*).
+async def _handle_messages(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    if handler_args.method != "GET":
+        return HandlerResult(status=405, body="Method Not Allowed")
+    if not _calls_dir:
+        return HandlerResult(status=503, body=json.dumps({"error": "service log dir not configured"}),
+                             media_type="application/json")
+
+    qp = getattr(handler_args, 'query_params', {}) or {}
+    qs = parse_qs(urlparse(handler_args.full_path or "").query)
+
+    def _q(name, default=None):
+        v = qp.get(name)
+        if v:
+            return v[0] if isinstance(v, list) else v
+        vl = qs.get(name)
+        return vl[0] if vl else default
+
+    date_str = _parse_date(_q("date", datetime.now().strftime("%Y-%m-%d")))
+    y, m, d = _date_parts(date_str)
+    group_id = _q("group_id", "")
+    hour = _q("hour", "")
+    query = (_q("q", "") or "").lower()
+    try:
+        limit = min(int(_q("limit", "200")), 1000)
+        offset = max(int(_q("offset", "0")), 0)
+    except ValueError:
+        limit, offset = 200, 0
+
+    base = os.path.join(_calls_dir, "message")
+    try:
+        all_groups = sorted(e for e in os.listdir(base) if os.path.isdir(os.path.join(base, e)))
+    except OSError:
+        all_groups = []
+    groups = [group_id] if group_id else all_groups
+    hours = [f"{int(hour):02d}"] if hour else [f"{h:02d}" for h in range(24)]
+
+    items = []
+    for gid in groups:
+        for hh in hours:
+            path = os.path.join(base, gid, y, m, d, hh, "messages.jsonl")
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except ValueError:
+                            continue
+                        if query and query not in (obj.get("text", "") or "").lower() \
+                                and query not in (obj.get("from", "") or "").lower() \
+                                and query not in (obj.get("file_name", "") or "").lower():
+                            continue
+                        items.append(obj)
+            except OSError:
+                continue
+
+    items.sort(key=lambda o: o.get("ts", ""), reverse=True)
+    total = len(items)
+    items = items[offset:offset + limit]
+    return HandlerResult(status=200, body=json.dumps({
+        "date": date_str, "group_id": group_id, "total": total,
+        "items": items, "groups": all_groups,
+    }, ensure_ascii=False), media_type="application/json")
+
+
 FLOW_HANDLER_LIST = [
     ("/api/v1/flow/body", _handle_flow_body, {}),
     ("/api/v1/flow/register/list", _handle_register_list, {}),
@@ -2792,4 +2865,5 @@ FLOW_HANDLER_LIST = [
     ("/api/v1/recordings", _handle_recordings, {}),
     ("/api/v1/ptt/history", _handle_ptt_history, {}),
     ("/api/v1/security/abnormal-sessions", _handle_abnormal_sessions, {}),
+    ("/api/v1/messages", _handle_messages, {}),
 ]

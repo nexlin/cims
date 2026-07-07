@@ -7,6 +7,7 @@
 #include "CscfModule.h"
 #include "IModule.h"
 #include "IbcfModule.h"
+#include "McDataAsModule.h"
 #include "PttAsModule.h"
 #include "SipMutex.h"
 #include "SipUserAgent.h"
@@ -54,6 +55,9 @@ public:
     CIbcfModule *GetIbcf() {
         return &m_clsIbcf;
     }
+    CMcDataAsModule *GetMcDataAs() {
+        return &m_clsMcDataAs;
+    }
 
     // ISipStackCallBack
     bool RecvRequest( int iThreadId, CSipMessage *pclsMessage ) override;
@@ -90,6 +94,7 @@ private:
     CTasModule m_clsTas;
     CPttAsModule m_clsPttAs;
     CIbcfModule m_clsIbcf;
+    CMcDataAsModule m_clsMcDataAs;
 
     std::map<std::string, IModule *> m_mapCallOwner;
     CSipMutex m_clsOwnerMutex;

@@ -13,6 +13,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.ptt.csc.CscConfig
+import com.cims.ue.ptt.mcdata.McDataCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -54,16 +55,100 @@ class PttService : Service() {
     /** 문자 저장 변경 틱 — UI 재조회 트리거(MessageStore 자체엔 변경 알림이 없음). */
     val messageTick: kotlinx.coroutines.flow.StateFlow<Int> = _messageTick
 
-    /** 그룹 문자 발신 + 로컬 스레드 저장. */
+    /** 그룹 문자(MCData SDS) 발신 + 로컬 스레드 저장 — msgId 보존(delivered 통지 대사용). */
     fun sendGroupMessage(groupId: String, text: String) {
-        controller?.sendGroupMessage(groupId, text) ?: return
-        messages.add(groupId, text, com.cims.ue.core.message.MsgDirection.OUT)
+        val msgId = controller?.sendGroupMessage(groupId, text) ?: return
+        if (msgId.isEmpty()) return
+        messages.add(groupId, text, com.cims.ue.core.message.MsgDirection.OUT, msgId = msgId)
         _messageTick.value++
     }
 
     fun markThreadRead(peer: String) {
         if (messages.markRead(peer)) _messageTick.value++
     }
+
+    // ── MCData FD (파일전송) ──
+
+    /** 첨부 전송 — content Uri 읽기 → CSC 업로드 → FD SIGNALLING (mcdata_messaging.md). */
+    fun sendGroupAttachment(groupId: String, uri: android.net.Uri) {
+        val c = controller ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val picked = readContent(uri) ?: run {
+                mainHandler.post { toast("첨부 파일을 읽을 수 없습니다") }; return@launch
+            }
+            val (data, name, mime) = picked
+            val sent = c.sendGroupAttachment(groupId, data, name, mime)
+            if (sent == null) { mainHandler.post { toast("첨부 전송 실패 (그룹 파일전송 허용 여부 확인)") }; return@launch }
+            // 발신본은 로컬 파일로 바로 보관 (재다운로드 불필요)
+            val path = writeAttachment(sent.msgId, name, data)
+            messages.add(groupId, "", com.cims.ue.core.message.MsgDirection.OUT, msgId = sent.msgId,
+                attName = name, attUrl = sent.url, attSize = sent.size, attPath = path ?: "")
+            _messageTick.value++
+        }
+    }
+
+    /** 수신 첨부 다운로드(수동/자동 공용) — 완료 시 스토어에 로컬 경로 기록. */
+    fun downloadAttachment(entry: com.cims.ue.core.message.MessageEntry) {
+        if (entry.attPath.isNotBlank()) return
+        downloadAttachment(entry.msgId, entry.attUrl, entry.attName)
+    }
+
+    private fun downloadAttachment(msgId: String, url: String, name: String) {
+        val c = controller ?: return
+        if (url.isBlank()) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val data = c.downloadAttachment(url) ?: run {
+                mainHandler.post { toast("파일 다운로드 실패") }; return@launch
+            }
+            val path = writeAttachment(msgId, name.ifBlank { "file.bin" }, data)
+            if (path != null && messages.setAttachmentPath(msgId, path)) _messageTick.value++
+        }
+    }
+
+    /** 다운로드된 첨부 열기 — FileProvider 경유 ACTION_VIEW. */
+    fun openAttachment(entry: com.cims.ue.core.message.MessageEntry) {
+        if (entry.attPath.isBlank()) return
+        val file = java.io.File(entry.attPath)
+        if (!file.exists()) { toast("파일이 없습니다 (다시 다운로드)"); return }
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", file)
+            val mime = contentResolver.getType(uri)
+                ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase())
+                ?: "application/octet-stream"
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }.onFailure { toast("열 수 있는 앱이 없습니다") }
+    }
+
+    private fun toast(msg: String) =
+        android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+
+    /** content Uri → (bytes, 표시이름, mime). 50MB 상한(서버 게이트와 동일). */
+    private fun readContent(uri: android.net.Uri): Triple<ByteArray, String, String>? = runCatching {
+        var name = "file.bin"; var size = -1L
+        contentResolver.query(uri, null, null, null, null)?.use { cur ->
+            if (cur.moveToFirst()) {
+                val ni = cur.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val si = cur.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (ni >= 0) cur.getString(ni)?.let { name = it }
+                if (si >= 0) size = cur.getLong(si)
+            }
+        }
+        if (size > MAX_ATTACH) return null
+        val data = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        if (data.size > MAX_ATTACH) return null
+        Triple(data, name, contentResolver.getType(uri) ?: "application/octet-stream")
+    }.getOrNull()
+
+    /** 첨부 로컬 저장 — files/mcdata/{msgId}_{name} (FileProvider file_paths 와 일치). */
+    private fun writeAttachment(msgId: String, name: String, data: ByteArray): String? = runCatching {
+        val dir = java.io.File(filesDir, "mcdata").apply { mkdirs() }
+        val safe = name.replace(Regex("[/\\\\:*?\"<>|]"), "_")
+        java.io.File(dir, "${msgId.take(12)}_$safe").apply { writeBytes(data) }.absolutePath
+    }.getOrNull()
 
     override fun onCreate() {
         super.onCreate()
@@ -141,11 +226,53 @@ class PttService : Service() {
                 }
                 mainHandler.post { overlay.update(color, "PTT ${if (reg is com.cims.ue.core.sip.RegState.Registered) "가능" else "연결 안 됨"}") }
             }.launchIn(this)
-            // 수신 문자(SIP MESSAGE) → 인박스 영속 (그룹 fan-out 도 발신자 URI 로 도착 — 상대별 스레드)
+            // 수신 문자(SIP MESSAGE) → 인박스 영속.
+            //  - MCData SDS(multipart/mixed): mcdata-info 의 그룹 URI 로 그룹 스레드 귀속 +
+            //    disposition 요청 시 DELIVERED 통지 회신, DELIVERED 통지 수신 시 발신 문자에 반영.
+            //  - text/plain(구버전 앱 호환): 발신자 스레드로 저장.
             c.incomingMessage.onEach { im ->
-                if (im.contentType.startsWith("text/")) {
-                    messages.add(PttController.bareId(im.fromUri), im.body,
-                        com.cims.ue.core.message.MsgDirection.IN)
+                val sender = PttController.bareId(im.fromUri)
+                if (im.contentType.lowercase().startsWith("multipart/mixed")) {
+                    when (val p = McDataCodec.parse(im.contentType, im.body)) {
+                        is McDataCodec.SdsMessage -> {
+                            if (p.text.isNotEmpty()) {
+                                val gid = p.groupUri?.let(PttController::bareId)
+                                    ?.takeUnless { it.isBlank() } ?: sender
+                                messages.add(gid, p.text, com.cims.ue.core.message.MsgDirection.IN,
+                                    sender = sender, msgId = p.msgId)
+                                _messageTick.value++
+                            }
+                            if (p.dispositionReq and McDataCodec.DISP_REQ_DELIVERY != 0) {
+                                controller?.sendSdsNotification(
+                                    sender, p.convId, p.msgId, McDataCodec.NOTIF_DELIVERED)
+                            }
+                        }
+                        is McDataCodec.FdMessage -> {
+                            if (p.fileUrl.isNotBlank()) {
+                                val gid = p.groupUri?.let(PttController::bareId)
+                                    ?.takeUnless { it.isBlank() } ?: sender
+                                messages.add(gid, "", com.cims.ue.core.message.MsgDirection.IN,
+                                    sender = sender, msgId = p.msgId,
+                                    attName = p.fileName.ifBlank { "file.bin" },
+                                    attUrl = p.fileUrl, attSize = p.fileSize)
+                                _messageTick.value++
+                                // 자동 다운로드 — 그룹문서 auto-recv 임계 이내 (TS 24.481)
+                                val autoRecv = c.groupDocs.value[gid]?.autoRecvBytes ?: DEFAULT_AUTO_RECV
+                                if (p.fileSize in 1..autoRecv.toLong()) {
+                                    downloadAttachment(p.msgId, p.fileUrl, p.fileName)
+                                }
+                            }
+                        }
+                        is McDataCodec.SdsNotification -> {
+                            if (p.type == McDataCodec.NOTIF_DELIVERED ||
+                                p.type == McDataCodec.NOTIF_DELIVERED_READ) {
+                                if (messages.markDelivered(p.msgId)) _messageTick.value++
+                            }
+                        }
+                        null -> {}
+                    }
+                } else if (im.contentType.startsWith("text/")) {
+                    messages.add(sender, im.body, com.cims.ue.core.message.MsgDirection.IN)
                     _messageTick.value++
                 }
             }.launchIn(this)
@@ -203,6 +330,10 @@ class PttService : Service() {
     companion object {
         private const val CH = "cims_ptt"
         private const val NID = 2001
+        /** 첨부 크기 상한 — CSC McDataFd.MaxBytes 기본값과 동일(50MB). */
+        private const val MAX_ATTACH = 52428800L
+        /** 그룹문서에 auto-recv 미지정 시 자동 다운로드 임계 (1MB). */
+        private const val DEFAULT_AUTO_RECV = 1048576
         fun start(ctx: Context) {
             // autostart=true → 공유 계정(SSO)으로 자동 구성(별도 로그인 없음).
             val i = Intent(ctx, PttService::class.java).putExtra("autostart", true)

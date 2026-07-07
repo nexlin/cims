@@ -259,6 +259,10 @@ if __name__ == '__main__':
             ssl_certfile=ssl_certfile,
         )
         mcptt_server.add_dynamic_rules(CSC_HANDLER_LIST)
+        # MCData FD 콘텐츠 서버 — 파일 업로드/다운로드 (mcdata_messaging.md, 토큰 인증 동일)
+        from services import mcdata_fd
+        mcdata_fd.init(config)
+        mcptt_server.add_dynamic_rules(mcdata_fd.MCDATA_FD_HANDLER_LIST)
         mcptt_server.start()
         logger.log_info(f"MCPTT server started on port {mcptt_conf.get('Port', 4430)}")
 

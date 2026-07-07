@@ -50,6 +50,12 @@ import java.util.Date
 
 private fun fmtTime(t: Long): String = DateFormat.format("HH:mm", Date(t)).toString()
 private fun fmtDay(t: Long): String = DateFormat.format("M월 d일", Date(t)).toString()
+private fun fmtSize(n: Long): String = when {
+    n >= 1048576 -> "%.1fMB".format(n / 1048576.0)
+    n >= 1024 -> "%.1fKB".format(n / 1024.0)
+    n > 0 -> "${n}B"
+    else -> ""
+}
 
 /** 메시지 탭 — 대화(스레드) 목록. */
 @Composable
@@ -89,7 +95,8 @@ fun MessagesScreen(st: PttUiState, svc: PttService?, onOpenThread: (String) -> U
                             Text(fmtTime(th.last.time), color = Ct.TextFaint, fontSize = 11.sp)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                            Text(th.last.text, color = Ct.TextDim, fontSize = 12.sp,
+                            Text(th.last.text.ifBlank { if (th.last.attName.isNotBlank()) "📎 ${th.last.attName}" else "" },
+                                color = Ct.TextDim, fontSize = 12.sp,
                                 maxLines = 1, modifier = Modifier.weight(1f))
                             if (th.unread > 0) {
                                 Box(
@@ -165,31 +172,52 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                 }
                 items(listOf("msg-$i")) {
                     val mine = e.direction == MsgDirection.OUT
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        if (mine) {
-                            Text(fmtTime(e.time), color = Ct.TextFaint, fontSize = 10.sp,
-                                modifier = Modifier.padding(end = 6.dp, bottom = 2.dp))
+                    Column(Modifier.fillMaxWidth()) {
+                        // 그룹 수신 문자 — 발신자 라벨 (MCData mcdata-info 그룹 귀속으로 스레드=그룹)
+                        if (!mine && e.sender.isNotBlank() && e.sender != peer) {
+                            Text(e.sender, color = Ct.TextFaint, fontSize = 10.sp,
+                                modifier = Modifier.padding(start = 4.dp, bottom = 1.dp))
                         }
-                        Text(
-                            e.text,
-                            color = if (mine) Ct.OnMint else Ct.Text,
-                            fontSize = 14.sp,
-                            modifier = Modifier
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            if (mine) {
+                                // MCData DELIVERED 통지 수신 시 전달확인 표시
+                                Text(if (e.delivered) "✓ ${fmtTime(e.time)}" else fmtTime(e.time),
+                                    color = if (e.delivered) Ct.Mint else Ct.TextFaint, fontSize = 10.sp,
+                                    modifier = Modifier.padding(end = 6.dp, bottom = 2.dp))
+                            }
+                            // 첨부(MCData FD) — 탭: 미다운로드 → 다운로드, 완료 → 열기
+                            val isAtt = e.attName.isNotBlank()
+                            val bubble = Modifier
                                 .widthIn(max = 264.dp)
                                 .clip(RoundedCornerShape(
                                     topStart = 14.dp, topEnd = 14.dp,
                                     bottomStart = if (mine) 14.dp else 4.dp,
                                     bottomEnd = if (mine) 4.dp else 14.dp))
                                 .background(if (mine) Ct.Mint else Ct.SurfaceHi)
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                        )
-                        if (!mine) {
-                            Text(fmtTime(e.time), color = Ct.TextFaint, fontSize = 10.sp,
-                                modifier = Modifier.padding(start = 6.dp, bottom = 2.dp))
+                                .let { m ->
+                                    if (isAtt) m.clickable {
+                                        if (e.attPath.isBlank()) svc?.downloadAttachment(e)
+                                        else svc?.openAttachment(e)
+                                    } else m
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                            Text(
+                                if (isAtt) {
+                                    val st = if (e.attPath.isBlank()) "받기" else "열기"
+                                    "📎 ${e.attName}\n${fmtSize(e.attSize)} · $st"
+                                } else e.text,
+                                color = if (mine) Ct.OnMint else Ct.Text,
+                                fontSize = 14.sp,
+                                modifier = bubble,
+                            )
+                            if (!mine) {
+                                Text(fmtTime(e.time), color = Ct.TextFaint, fontSize = 10.sp,
+                                    modifier = Modifier.padding(start = 6.dp, bottom = 2.dp))
+                            }
                         }
                     }
                 }
@@ -203,7 +231,7 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            AttachButton(42)
+            AttachButton(42) { uri -> svc?.sendGroupAttachment(peer, uri) }
             Box(
                 Modifier.weight(1f).height(42.dp)
                     .clip(RoundedCornerShape(21.dp)).background(Ct.SurfaceHi)

@@ -17,6 +17,7 @@ import com.cims.ue.ptt.floor.FloorClient
 import com.cims.ue.ptt.floor.FloorEvent
 import com.cims.ue.ptt.floor.FloorIndicator
 import com.cims.ue.ptt.floor.FloorState
+import com.cims.ue.ptt.mcdata.McDataCodec
 import com.cims.ue.ptt.mcptt.McpttXml
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -473,14 +474,74 @@ class PttController(
         _status.value = if (on) "affiliate $groupId" else "de-affiliate $groupId"
     }
 
-    /** 그룹 문자(SIP MESSAGE) 발신 — CSP 가 그룹 URI 수신 시 멤버 fan-out. 로컬 저장은 서비스 몫. */
-    fun sendGroupMessage(groupId: String, text: String) {
-        if (text.isBlank()) return
+    /**
+     * 그룹 문자 발신 — MCData 그룹 SDS (TS 24.282 §9.2.2). multipart/mixed 본문
+     * (mcdata-info + SDS SIGNALLING PAYLOAD + DATA PAYLOAD)으로 CSP(MCDATA-AS)가
+     * 게이트(allow-SDS·멤버십·크기) 후 affiliate 멤버에게 fan-out. 로컬 저장은 서비스 몫.
+     * @return message ID (UUID hex 32자, delivered 통지 대사용) — 빈 문자열이면 미발신
+     */
+    fun sendGroupMessage(groupId: String, text: String): String {
+        if (text.isBlank()) return ""
+        val convId = McDataCodec.conversationIdOf(groupId)
+        val msgId = McDataCodec.newMessageId()
+        val (ct, body) = McDataCodec.buildGroupSds(
+            groupUri = "tel:$groupId", text = text, convId = convId, msgId = msgId,
+        )
         sip.sendRequest(
             method = "MESSAGE",
             targetUri = "sip:$groupId@${sipConfig.domain}",
-            contentType = "text/plain",
-            body = text,
+            contentType = ct,
+            body = body,
+        )
+        return msgId
+    }
+
+    /** FD 전송 결과 — 로컬 이력 저장용. */
+    data class FdSent(val msgId: String, val url: String, val size: Long)
+
+    /**
+     * 그룹 파일전송 — FD via HTTP (TS 23.282): CSC 콘텐츠 서버 업로드 → FD SIGNALLING
+     * PAYLOAD(SIP MESSAGE) 전파. 블로킹(업로드 HTTP) — Dispatchers.IO 에서 호출할 것.
+     * @return null 이면 실패 (토큰 없음/업로드 거부 — allow_fd·크기 게이트는 서버가 판정)
+     */
+    fun sendGroupAttachment(groupId: String, data: ByteArray, fileName: String, mime: String): FdSent? {
+        val c = csc ?: return null
+        val t = token?.accessToken ?: run { _status.value = "첨부: 토큰 없음"; return null }
+        val up = runCatching { c.uploadFd(t, data, fileName, mime, groupId) }
+            .onFailure { Log.w(TAG, "FD 업로드 실패: ${it.message}"); _status.value = "첨부 업로드 실패" }
+            .getOrNull() ?: return null
+        val convId = McDataCodec.conversationIdOf(groupId)
+        val msgId = McDataCodec.newMessageId()
+        val (ct, body) = McDataCodec.buildGroupFd(
+            groupUri = "tel:$groupId", fileUrl = up.url, fileName = up.name,
+            fileSize = up.size, mime = mime, convId = convId, msgId = msgId,
+        )
+        sip.sendRequest(
+            method = "MESSAGE",
+            targetUri = "sip:$groupId@${sipConfig.domain}",
+            contentType = ct,
+            body = body,
+        )
+        return FdSent(msgId, up.url, up.size)
+    }
+
+    /** FD 첨부 다운로드 — 블로킹, Dispatchers.IO 에서 호출. */
+    fun downloadAttachment(url: String): ByteArray? {
+        val c = csc ?: return null
+        val t = token?.accessToken ?: return null
+        return runCatching { c.downloadFd(t, url) }
+            .onFailure { Log.w(TAG, "FD 다운로드 실패: ${it.message}") }
+            .getOrNull()
+    }
+
+    /** SDS disposition 통지(TS 24.282 §12.2) — 수신 메시지의 원 발신자에게 1:1 전송. */
+    fun sendSdsNotification(peerId: String, convId: String, msgId: String, notifType: Int) {
+        val (ct, body) = McDataCodec.buildNotification(convId, msgId, notifType)
+        sip.sendRequest(
+            method = "MESSAGE",
+            targetUri = "sip:$peerId@${sipConfig.domain}",
+            contentType = ct,
+            body = body,
         )
     }
 

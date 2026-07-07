@@ -51,6 +51,17 @@
                 android:value="mcptt_registration_keepalive" />
         </service>
 
+        <!-- MCData FD 첨부 열기 — files/mcdata/ 를 다른 앱(뷰어)에 공유 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- 부팅 자동 로그인 리시버 -->
         <receiver
             android:name=".BootReceiver"

@@ -251,6 +251,7 @@ def load_shared_data(config):
                     cur.execute(
                         "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
                         "emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled, "
+                        "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                         "org_code, session_start, session_end, "
                         "group_type, on_network, max_members, require_affiliation, alias, "
                         "authorized_user_id, "
@@ -270,6 +271,10 @@ def load_shared_data(config):
                             "imminent_peril_call": bool(row.get('imminent_peril_call', 1)),
                             "emergency_alert": bool(row.get('emergency_alert', 1)),
                             "adhoc_enabled": bool(row.get('adhoc_enabled', 0)),
+                            "allow_sds": bool(row.get('allow_sds', 1)),
+                            "allow_fd": bool(row.get('allow_fd', 0)),
+                            "max_sds_size": row.get('max_sds_size', 10000),
+                            "max_auto_recv": row.get('max_auto_recv', 1048576),
                             "org_code": row.get('org_code', ''),
                             "group_type": row.get('group_type', 'prearranged'),
                             "on_network": bool(row.get('on_network', 1)),
@@ -789,9 +794,23 @@ def get_group_xml(group_uri):
     # max_members 0(무제한) 이면 관례값 10 노출
     max_count = group.get('max_members') or 10
     affil_required = 'true' if group.get('require_affiliation', True) else 'false'
+    # MCData 그룹 메시징 게이트 (TS 24.481 §7.2.4.2 — mcpttgi 네임스페이스 표준 요소)
+    sds_val = 'true' if group.get('allow_sds', True) else 'false'
+    fd_val = 'true' if group.get('allow_fd', False) else 'false'
+    max_sds = int(group.get('max_sds_size') or 0)
     xml += f"""
     </list>
     <mcpttgi:session-type>{group_type}</mcpttgi:session-type>
+    <mcpttgi:mcdata-allow-short-data-service>{sds_val}</mcpttgi:mcdata-allow-short-data-service>
+    <mcpttgi:mcdata-allow-file-distribution>{fd_val}</mcpttgi:mcdata-allow-file-distribution>"""
+    if max_sds > 0:
+        xml += f"""
+    <mcpttgi:mcdata-on-network-max-data-size-for-SDS>{max_sds}</mcpttgi:mcdata-on-network-max-data-size-for-SDS>"""
+    max_auto = int(group.get('max_auto_recv') or 0)
+    if max_auto > 0:
+        xml += f"""
+    <mcpttgi:mcdata-on-network-max-data-size-auto-recv>{max_auto}</mcpttgi:mcdata-on-network-max-data-size-auto-recv>"""
+    xml += f"""
     <mcpttgi:mcptt-video>{video_val}</mcpttgi:mcptt-video>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>{max_count}</mcpttgi:on-network-max-participant-count>
@@ -809,13 +828,22 @@ def get_group_xml(group_uri):
           <mcpttgi:allow-MCPTT-emergency-alert>{alert_val}</mcpttgi:allow-MCPTT-emergency-alert>
         </cp:actions>
       </cp:rule>
-    </cp:ruleset>
+    </cp:ruleset>"""
+    xml += """
     <oxe:supported-services>
      <oxe:service enabler="example.mcptt">
       <oxe:group-media>
        <mcpttgi:mcptt-speech/>
       </oxe:group-media>
-     </oxe:service>
+     </oxe:service>"""
+    # MCData 서비스 enabler (TS 24.481 §7.2.2 — ICSI 값은 TS 24.282 §6.2.1.1)
+    if group.get('allow_sds', True):
+        xml += """
+     <oxe:service enabler="urn:urn-7:3gpp-service.ims.icsi.mcdata.sds"/>"""
+    if group.get('allow_fd', False):
+        xml += """
+     <oxe:service enabler="urn:urn-7:3gpp-service.ims.icsi.mcdata.fd"/>"""
+    xml += """
     </oxe:supported-services>"""
     if org_code:
         xml += f"""

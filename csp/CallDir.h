@@ -364,6 +364,35 @@ public:
         }
     }
 
+    // ── MCData 그룹 메시지 보관 ────────────────────────
+    //   경로: {ServiceLogDir}/message/{gid}/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl
+    //   PTT 세션 여부와 무관 (그룹콜 없이 문자만 오가도 기록). open-append-close 는
+    //   PttLogEvent 와 동일 방침 (사람 메시징 볼륨 전제).
+    void McDataMessageLog( const std::string &strGroupId, const std::string &strJsonData ) {
+        if ( m_strCallsDir.empty() ) return;
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        std::string line = "{\"ts\":\"" + std::string( ts ) + "\"";
+        if ( !strJsonData.empty() && strJsonData.front() == '{' && strJsonData.back() == '}' ) {
+            std::string inner = strJsonData.substr( 1, strJsonData.size() - 2 );
+            if ( !inner.empty() ) line += "," + inner;
+        }
+        line += "}";
+
+        time_t now = time( NULL );
+        struct tm t;
+        localtime_r( &now, &t );
+        char sub[64];
+        snprintf( sub, sizeof( sub ), "/%04d/%02d/%02d/%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour );
+        std::string dir = m_strCallsDir + "/message/" + San( strGroupId, 64 ) + sub;
+        MkdirP( dir );
+        FILE *f = fopen( ( dir + "/messages.jsonl" ).c_str(), "a" );
+        if ( f ) {
+            fprintf( f, "%s\n", line.c_str() );
+            fclose( f );
+        }
+    }
+
     // ── Flow 메시지 기록 ────────────────────────────
     void LogVoip( const std::string &strCallId, const char *from, const char *to, const char *proto, const char *label,
                   const char *body ) {

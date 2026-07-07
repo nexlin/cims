@@ -601,6 +601,7 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 _GROUP_COLS = (
     "id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
     "imminent_peril_call, emergency_alert, adhoc_enabled, "
+    "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
     "require_affiliation, alias, authorized_user_id, created_at"
 )
@@ -619,6 +620,10 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     g['imminent_peril_call'] = bool(g.get('imminent_peril_call', 1))
     g['emergency_alert'] = bool(g.get('emergency_alert', 1))
     g['adhoc_enabled'] = bool(g.get('adhoc_enabled', 0))
+    g['allow_sds'] = bool(g.get('allow_sds', 1))
+    g['allow_fd'] = bool(g.get('allow_fd', 0))
+    g['max_sds_size'] = int(g.get('max_sds_size', 10000) or 0)
+    g['max_auto_recv'] = int(g.get('max_auto_recv', 1048576) or 0)
     g['on_network'] = bool(g.get('on_network', 1))
     g['require_affiliation'] = bool(g.get('require_affiliation', 1))
     if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
@@ -770,6 +775,10 @@ async def _create_group(body, config, payload=None):
     imminent_peril_call = 1 if body.get('imminent_peril_call', True) else 0
     emergency_alert     = 1 if body.get('emergency_alert', True) else 0
     adhoc_enabled       = 1 if body.get('adhoc_enabled', False) else 0
+    allow_sds           = 1 if body.get('allow_sds', True) else 0
+    allow_fd            = 1 if body.get('allow_fd', False) else 0
+    max_sds_size        = int(body.get('max_sds_size', 10000))
+    max_auto_recv       = int(body.get('max_auto_recv', 1048576))
     org_code       = body.get('org_code', '') or None
     session_start  = body.get('session_start') or None
     session_end    = body.get('session_end') or None
@@ -806,11 +815,13 @@ async def _create_group(body, config, payload=None):
             cur.execute(
                 "INSERT INTO ptt_groups (mcptt_group_id, name, video_enabled, priority, encryption, "
                 "emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled, "
+                "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                 "org_code, session_start, session_end, group_type, on_network, "
                 "max_members, require_affiliation, alias, authorized_user_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
                  emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled,
+                 allow_sds, allow_fd, max_sds_size, max_auto_recv,
                  org_code, session_start, session_end, group_type,
                  on_network, max_members, require_affiliation, alias, authorized_user_id)
             )
@@ -853,12 +864,13 @@ async def _update_group(group_id: str, body, config, payload=None):
             if 'video_enabled' in body:
                 update_fields.append('video_enabled=%s')
                 update_vals.append(1 if body['video_enabled'] else 0)
-            for fld in ('priority', 'max_members'):
+            for fld in ('priority', 'max_members', 'max_sds_size', 'max_auto_recv'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(int(body[fld]))
             for fld in ('encryption', 'emergency_call', 'imminent_peril_call', 'emergency_alert',
-                        'adhoc_enabled', 'on_network', 'require_affiliation'):
+                        'adhoc_enabled', 'on_network', 'require_affiliation',
+                        'allow_sds', 'allow_fd'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(1 if body[fld] else 0)

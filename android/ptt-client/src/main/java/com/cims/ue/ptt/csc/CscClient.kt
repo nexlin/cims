@@ -3,8 +3,10 @@ package com.cims.ue.ptt.csc
 import com.cims.ue.core.provision.Pkce
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
@@ -138,6 +140,36 @@ class CscClient(
                 etag = resp.header("ETag") ?: resp.header("Etag"),
                 contentType = resp.header("Content-Type") ?: accept,
             )
+        }
+    }
+
+    // ── MCData FD (파일 업로드/다운로드 — docs/design/features/mcdata_messaging.md) ──
+
+    /** POST /mcdata/fd — 파일 업로드 (그룹 allow_fd·멤버십·크기는 서버가 게이트). */
+    fun uploadFd(token: String, data: ByteArray, fileName: String, mime: String, groupId: String): FdUpload {
+        val url = "${cfg.baseUrl}/mcdata/fd".toHttpUrl().newBuilder()
+            .addQueryParameter("name", fileName)
+            .addQueryParameter("group", groupId)
+            .addQueryParameter("type", mime)
+            .build()
+        val body = data.toRequestBody("application/octet-stream".toMediaType())
+        http.newCall(bearer(token, url.toString()).post(body).build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            check(resp.isSuccessful) { "fd upload ${resp.code}: $text" }
+            val j = JSONObject(text)
+            return FdUpload(
+                url = j.getString("url"),
+                size = j.optLong("size", data.size.toLong()),
+                name = j.optString("name", fileName),
+            )
+        }
+    }
+
+    /** FD 파일 다운로드 — FD SIGNALLING 으로 받은 절대 URL 그대로 GET. */
+    fun downloadFd(token: String, url: String): ByteArray {
+        http.newCall(bearer(token, url).get().build()).execute().use { resp ->
+            check(resp.isSuccessful) { "fd download ${resp.code}" }
+            return resp.body?.bytes() ?: ByteArray(0)
         }
     }
 

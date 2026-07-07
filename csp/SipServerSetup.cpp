@@ -105,6 +105,7 @@ CSipServerSetup::CSipServerSetup()
       m_bRoleTas( true ),
       m_bRolePttAs( true ),
       m_bRoleIbcf( true ),
+      m_bRoleMcData( true ),
       m_bRecordEnable( false ),
       m_strRecordDir( "/mnt/nas/cims/recordings" ),
       m_iFileSize( 0 ) {
@@ -340,6 +341,7 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( roles.Has( "TAS" ) ) m_bRoleTas = ( roles.GetString( "TAS" ) == "true" );
                 if ( roles.Has( "PTT_AS" ) ) m_bRolePttAs = ( roles.GetString( "PTT_AS" ) == "true" );
                 if ( roles.Has( "IBCF" ) ) m_bRoleIbcf = ( roles.GetString( "IBCF" ) == "true" );
+                if ( roles.Has( "MCDATA" ) ) m_bRoleMcData = ( roles.GetString( "MCDATA" ) == "true" );
             }
 
             // 녹취 설정

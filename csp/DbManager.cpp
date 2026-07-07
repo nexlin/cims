@@ -237,7 +237,8 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
         "COALESCE(g.authorized_user_id,0), "
         "COALESCE(DATE_FORMAT(g.created_at,'%Y-%m-%dT%H:%i:%s'),''), "
         "COALESCE(ps.id,''), "
-        "g.imminent_peril_call, g.emergency_alert "
+        "g.imminent_peril_call, g.emergency_alert, "
+        "g.allow_sds, g.allow_fd, g.max_sds_size "
         "FROM ptt_groups g "
         "LEFT JOIN ptt_subscriptions ps ON ps.user_id = g.authorized_user_id "
         "WHERE g.mcptt_group_id='" +
@@ -274,6 +275,9 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     clsGroup._authorizedUser = row[18] ? row[18] : "";  // 소유자 PTT MSISDN (파생 MCPTT ID)
     clsGroup._imminentPerilCall = row[19] ? ( atoi( row[19] ) != 0 ) : true;
     clsGroup._emergencyAlert = row[20] ? ( atoi( row[20] ) != 0 ) : true;
+    clsGroup._allowSds = row[21] ? ( atoi( row[21] ) != 0 ) : true;
+    clsGroup._allowFd = row[22] ? ( atoi( row[22] ) != 0 ) : false;
+    clsGroup._maxSdsSize = row[23] ? atoi( row[23] ) : 10000;
     mysql_free_result( pRes );
 
     // 멤버 목록 — group_id 는 surrogate ptt_groups.id 참조

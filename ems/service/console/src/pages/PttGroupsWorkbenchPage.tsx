@@ -185,8 +185,8 @@ function GroupDrawer(p: GroupDrawerProps) {
   const [editing, setEditing] = useState(isNew)
 
   const [form, setForm] = useState<Partial<GroupExt>>(() => existing
-    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, imminent_peril_call: existing.imminent_peril_call ?? true, emergency_alert: existing.emergency_alert ?? true, adhoc_enabled: existing.adhoc_enabled ?? false, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type }
-    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, imminent_peril_call: true, emergency_alert: true, adhoc_enabled: false, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null })
+    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, imminent_peril_call: existing.imminent_peril_call ?? true, emergency_alert: existing.emergency_alert ?? true, adhoc_enabled: existing.adhoc_enabled ?? false, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type }
+    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, imminent_peril_call: true, emergency_alert: true, adhoc_enabled: false, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null })
   // 소유자 표시명 (피커 선택 결과 보존)
   const [ownerName, setOwnerName] = useState<string>(existing?.authorized_user_name || '')
 
@@ -274,7 +274,11 @@ function GroupDrawer(p: GroupDrawerProps) {
             <label title="allow-imminent-peril-call" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.imminent_peril_call ?? true} onChange={e => setForm({ ...form, imminent_peril_call: e.target.checked })} />임박위험</label>
             <label title="allow-MCPTT-emergency-alert" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.emergency_alert ?? true} onChange={e => setForm({ ...form, emergency_alert: e.target.checked })} />긴급경보</label>
             <label title="ad hoc 그룹콜 허용 (Rel-18)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.adhoc_enabled || false} onChange={e => setForm({ ...form, adhoc_enabled: e.target.checked })} />애드혹</label>
+            <label title="mcdata-allow-short-data-service (그룹 메시징, TS 24.481)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.allow_sds ?? true} onChange={e => setForm({ ...form, allow_sds: e.target.checked })} />메시징</label>
+            <label title="mcdata-allow-file-distribution (그룹 파일전송)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.allow_fd || false} onChange={e => setForm({ ...form, allow_fd: e.target.checked })} />파일전송</label>
           </div>
+          <Field label="메시지 최대(byte)" w={110}><input className="form-input" type="number" title="mcdata-on-network-max-data-size-for-SDS (0=무제한)" value={form.max_sds_size ?? 10000} onChange={e => setForm({ ...form, max_sds_size: Number(e.target.value) })} /></Field>
+          <Field label="자동수신 최대(byte)" w={120}><input className="form-input" type="number" title="mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계)" value={form.max_auto_recv ?? 1048576} onChange={e => setForm({ ...form, max_auto_recv: Number(e.target.value) })} /></Field>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button className="btn btn--sm btn--primary" onClick={save}>저장</button>
             <button className="btn btn--sm btn--ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</button>

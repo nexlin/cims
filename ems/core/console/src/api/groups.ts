@@ -18,6 +18,10 @@ export interface Group {
   imminent_peril_call?: boolean   // allow-imminent-peril-call (TS 24.481)
   emergency_alert?: boolean        // allow-MCPTT-emergency-alert
   adhoc_enabled?: boolean          // ad hoc 그룹콜 허용 (Rel-18)
+  allow_sds?: boolean              // mcdata-allow-short-data-service (그룹 SDS 메시징, TS 24.481)
+  allow_fd?: boolean               // mcdata-allow-file-distribution (그룹 파일전송)
+  max_sds_size?: number            // mcdata-on-network-max-data-size-for-SDS (octets, 0=무제한)
+  max_auto_recv?: number           // mcdata-on-network-max-data-size-auto-recv (octets)
   video_enabled?: boolean
   org_code?: string
   session_start?: string | null

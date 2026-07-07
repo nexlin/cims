@@ -47,13 +47,14 @@ fun Modifier.plainClickable(onClick: () -> Unit): Modifier = this.then(
 )
 
 /** 채팅 입력바 첨부(사진/동영상) 버튼 — 시스템 포토 피커.
- *  미디어 전송은 서버 업로드 경로 연동 후 지원(현재는 선택 시 안내만). */
+ *  [onPick] 선택 파일 콜백 (MCData FD 업로드 — mcdata_messaging.md). 미지정 시 안내만. */
 @Composable
-fun AttachButton(size: Int = 38) {
+fun AttachButton(size: Int = 38, onPick: ((android.net.Uri) -> Unit)? = null) {
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            Toast.makeText(context, "사진·동영상 전송은 서버 연동 후 지원됩니다", Toast.LENGTH_SHORT).show()
+            if (onPick != null) onPick(uri)
+            else Toast.makeText(context, "사진·동영상 전송은 서버 연동 후 지원됩니다", Toast.LENGTH_SHORT).show()
         }
     }
     Box(
