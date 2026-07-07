@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "ensure-links": "node scripts/ensure-svc-modules.mjs",
+    "predev": "npm run ensure-links",
     "dev": "vite",
+    "prebuild": "npm run ensure-links",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
