@@ -168,7 +168,11 @@ ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential
 bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
     SIP_CREDENTIAL_LIST::iterator itCL = pclsMessage->m_clsAuthorizationList.begin();
 
-    if ( itCL == pclsMessage->m_clsAuthorizationList.end() ) {
+    // 3GPP pre-auth: nonce/response 없는 빈 Authorization은 'Authorization 없음'과 동일 취급.
+    //   (RecvRequestRegister 와 동일 가드 — 첫 챌린지에 stale=true 가 붙는 버그 방지)
+    const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() &&
+                                 itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
+    if ( itCL == pclsMessage->m_clsAuthorizationList.end() || bEmptyPreAuth ) {
         SendUnAuthorizedResponse( pclsMessage );
         return false;
     }
@@ -237,9 +241,18 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     }
 
     SIP_CREDENTIAL_LIST::iterator itCL = pclsMessage->m_clsAuthorizationList.begin();
-    // realm = Request-URI host (실제 단말과 동일하게 네트워크 도메인 사용)
-    const std::string strRegRealm = pclsMessage->m_clsReqUri.m_strHost;
-    if ( itCL == pclsMessage->m_clsAuthorizationList.end() ) {
+    // realm: 실제 IMS 망은 등록 도메인(ptt/ims)과 무관하게 항상 IMS core realm 을 사용한다.
+    //   access_services 의 auth_realm 이 SOT — Request-URI host 로 서비스 조회 후 EffectiveRealm.
+    //   (auth_realm 미지정 시 domain 상속 = 기존 동작.) 서비스 미정의 도메인은 host fallback.
+    ServiceInfo svcReg = gclsServiceMap.GetByDomain( pclsMessage->m_clsReqUri.m_strHost );
+    const std::string strRegRealm = ( svcReg.id > 0 ) ? CCspServiceMap::EffectiveRealm( svcReg )
+                                                      : pclsMessage->m_clsReqUri.m_strHost;
+    // 3GPP pre-auth: 첫 REGISTER 의 빈 Authorization(nonce/response 없음)은 IMPI 광고일 뿐
+    //   답안 제출이 아니다. 'Authorization 없음'과 동일하게 취급 — nonce 조회로 넘기면
+    //   E_AUTH_NONCE_NOT_FOUND(F-07 stale=true) 경로로 빠져 첫 챌린지에 stale 이 붙는 버그가 됨.
+    const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() &&
+                                 itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
+    if ( itCL == pclsMessage->m_clsAuthorizationList.end() || bEmptyPreAuth ) {
         return SendUnAuthorizedResponse( pclsMessage, strRegRealm );
     }
 
@@ -316,13 +329,6 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             const std::string &strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
             snprintf( szPAUri, sizeof( szPAUri ), "<sip:%s@%s>", strUser.c_str(), strRegDomain.c_str() );
             pclsResponse->AddHeader( "P-Associated-URI", szPAUri );
-            // E.164 user ID 인 경우 user=phone URI 추가 (3GPP TS 24.229)
-            if( !strUser.empty() && strUser[0] == '+' ) {
-                char szPAUriPhone[512];
-                snprintf( szPAUriPhone, sizeof( szPAUriPhone ),
-                          "<sip:%s@%s;user=phone>", strUser.c_str(), strRegDomain.c_str() );
-                pclsResponse->AddHeader( "P-Associated-URI", szPAUriPhone );
-            }
         }
 
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
@@ -376,6 +382,17 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         strContactUri = szFromBuf;
     }
 
+    // Event 헤더 추출 (";id=..." 등 파라미터는 제거하고 토큰만)
+    std::string strEventHdr;
+    {
+        CSipHeader *pclsEventHdr = pclsMessage->GetHeader( "Event" );
+        if ( pclsEventHdr ) {
+            strEventHdr = pclsEventHdr->m_strValue;
+            size_t nSemi = strEventHdr.find( ';' );
+            if ( nSemi != std::string::npos ) strEventHdr = strEventHdr.substr( 0, nSemi );
+        }
+    }
+
     // 그룹 affiliation 판별 (TS 24.379 §9): Request-URI user 부분이 알려진 그룹 ID 이면
     //   해당 SUBSCRIBE 를 (user, group, client) affiliation 으로 처리한다.
     //   Event 헤더가 presence/conference 면 더 명확하나, 그룹 매칭만으로 충분.
@@ -383,7 +400,11 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     bool bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
 
     std::string strEventType;
-    if ( bAffiliation ) {
+    if ( strEventHdr == "reg" ) {
+        // RFC 3680 reg-event: 실제 UE 는 REGISTER 200 OK 직후 자신의 등록 상태를 구독.
+        //   NOTIFY body = application/reginfo+xml (등록 상태 + Contact).
+        strEventType = "reg";
+    } else if ( bAffiliation ) {
         strEventType = "conference";  // 그룹 affiliation/conference 상태 구독
     } else if ( strReqUri.find( "gms" ) != std::string::npos ) {
         strEventType = "gms";

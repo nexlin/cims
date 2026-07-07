@@ -2631,10 +2631,14 @@ async def _handle_register_list(handler_args: HandlerArgs, kwargs: dict) -> Hand
     }), media_type="application/json")
 
 
-async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """GET /api/v1/flow/register?user=1001&date=YYYY-MM-DD
-    해당 날짜에 특정 사용자의 REGISTER/SUBSCRIBE/PUBLISH 전체 흐름 반환.
-    sesid 필터 없이 하루치 전체 수집 — 응답(401/200/NOTIFY) 포함.
+async def _handle_user_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """GET /api/v1/flow/user?user=+821000000001&date=YYYY-MM-DD
+    해당 날짜에 특정 사용자가 관여한 **모든** 메시지 흐름 반환 (메세지 이력 페이지).
+    포함 규칙: 엔트리의 caller/callee == user, 또는 sesid 가 "{user}::" 프리픽스
+    (사용자 개시 세션 — 해당 세션의 CMP 제어 메시지 등 caller 없는 엔트리 포함).
+    REGISTER/SUBSCRIBE 뿐 아니라 INVITE/BYE/NOTIFY/응답 등 전 메서드 + CSC HTTPS.
+    그룹 fan-out 세션은 이 사용자 leg 의 엔트리만 포함 (타 멤버 leg 제외).
+    (구 /api/v1/flow/register 는 이 핸들러의 legacy alias)
     """
     if handler_args.method != "GET":
         return HandlerResult(status=405, body="Method Not Allowed")
@@ -2658,65 +2662,72 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
         return HandlerResult(status=503, body=json.dumps({"error": "SIP log not configured"}),
                              media_type="application/json")
 
-    user_token = f'"{user}"'
     flow_paths = _resolve_flow_paths(date_str, None, "volte")
 
-    # 1. 하루치 flow 전체 스캔: caller==user + REGISTER/SUBSCRIBE/PUBLISH 인 sesid 수집
-    _TARGET_METHODS = {"REGISTER", "SUBSCRIBE", "PUBLISH"}
-    sesid_set: set = set()
-
-    for jsonl_path in flow_paths:
-        try:
-            with open(jsonl_path, 'r') as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line or user_token not in line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        continue
-                    if obj.get("method") not in _TARGET_METHODS:
-                        continue
-                    if obj.get("caller") != user:
-                        continue
-                    sesid = obj.get("sesid", "")
-                    if sesid:
-                        sesid_set.add(sesid)
-        except Exception as e:
-            logger.error("register_flow scan: %s", e)
-
-    if not sesid_set:
-        return HandlerResult(status=404, body=json.dumps({
-            "error": f"No REGISTER/SUBSCRIBE/PUBLISH found for user '{user}' on {date_str}"
-        }), media_type="application/json")
-
-    # 2. 수집된 sesid에 속한 모든 메시지 수집 (응답/NOTIFY 포함)
+    # 1. 하루치 flow 전체 스캔: 사용자가 관여한 엔트리 직접 수집.
+    #    요청/응답 모두 caller/callee 필드를 가지므로 per-entry 매칭으로 충분하고,
+    #    sesid 단위 수집(구 방식)과 달리 그룹 fan-out 세션에서 타 멤버 leg 가 섞이지 않는다.
+    #    CMP(JSON) 제어 메시지는 caller/callee 없이 detail 에 사용자 ID 가 실리므로
+    #    (JOIN/LEAVE_PTT_GROUP), 그 (sesid, mid) 쌍을 수집해 2단계에서 OK 응답까지 짝지어 포함.
+    sesid_prefix = f"{user}::"
     all_msgs = []
     seen: set = set()
+    cmp_mid_keys: set = set()  # 사용자 관련 CMP 명령의 (sesid, mid) — OK 응답 매칭용
+
+    def _collect(obj):
+        ts = obj.get("ts", "")
+        key = (ts, obj.get("method", ""), obj.get("sesid", ""), obj.get("from", ""), obj.get("seq"))
+        if key in seen:
+            return
+        seen.add(key)
+        all_msgs.append(obj)
 
     for jsonl_path in flow_paths:
         try:
             with open(jsonl_path, 'r') as fh:
                 for line in fh:
                     line = line.strip()
-                    if not line:
+                    if not line or user not in line:
                         continue
                     try:
                         obj = json.loads(line)
                     except Exception:
                         continue
-                    sesid = obj.get("sesid", "")
-                    if sesid not in sesid_set:
+                    if obj.get("proto") == "HTTPS":
+                        continue  # CSC HTTPS 는 아래 3단계에서 별도 수집 (caller 형식 상이)
+                    if obj.get("iface") == "cmp" and obj.get("detail") == user:
+                        # CMP 제어 명령 (JOIN/LEAVE_PTT_GROUP 등) — OK 응답 매칭 키 등록
+                        cmp_mid_keys.add((obj.get("sesid", ""), obj.get("mid", "")))
+                        _collect(obj)
                         continue
-                    ts = obj.get("ts", "")
-                    key = (ts, obj.get("method", ""), sesid, obj.get("from", ""))
-                    if key in seen:
+                    if not (obj.get("caller") == user or obj.get("callee") == user
+                            or obj.get("sesid", "").startswith(sesid_prefix)):
                         continue
-                    seen.add(key)
-                    all_msgs.append(obj)
+                    _collect(obj)
         except Exception as e:
-            logger.error("register_flow collect: %s", e)
+            logger.error("user_flow scan: %s", e)
+
+    # 2. CMP OK 응답 수집: 위에서 등록한 (sesid, mid) 와 짝. OK 라인에는 사용자 ID 가
+    #    없어 1단계 프리필터(user in line)에 걸리지 않으므로 별도 패스로 수집한다.
+    if cmp_mid_keys:
+        for jsonl_path in flow_paths:
+            try:
+                with open(jsonl_path, 'r') as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line or '"cmp"' not in line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except Exception:
+                            continue
+                        if obj.get("iface") != "cmp":
+                            continue
+                        if (obj.get("sesid", ""), obj.get("mid", "")) not in cmp_mid_keys:
+                            continue
+                        _collect(obj)
+            except Exception as e:
+                logger.error("user_flow cmp collect: %s", e)
 
     # 3. CSC HTTPS 트래픽 별도 수집 (caller가 "tel:+1001" 형식 → 번호만 추출 후 매칭)
     #    SIP flow의 caller는 "1001"이지만 CSC는 "tel:+1001"로 기록 → sesid 수집 단계에서 누락됨.
@@ -2738,19 +2749,21 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
                     method_field = obj.get("method", "")
                     if re.match(r'^(GMS|CMS|KMS)\s+\w+\s+', method_field):
                         continue
+                    # 사용자 ID 정규화: "tel:" 프리픽스와 선행 "+" 를 양쪽에서 제거하고 비교.
+                    #   (E.164 전환 후 caller="tel:+8210..." vs user="+8210..." — "+" 까지
+                    #    잘라내던 구 로직은 항상 불일치 → CSC 항목 누락 버그였음.)
+                    user_norm = user[4:] if user.startswith("tel:") else user
+                    user_norm = user_norm.lstrip("+")
                     caller = obj.get("caller", "")
-                    caller_norm = caller
-                    if caller_norm.startswith("tel:+"):
-                        caller_norm = caller_norm[5:]
-                    elif caller_norm.startswith("tel:"):
-                        caller_norm = caller_norm[4:]
+                    caller_norm = caller[4:] if caller.startswith("tel:") else caller
+                    caller_norm = caller_norm.lstrip("+")
                     # caller 없는 경우 method(URL 경로)에서 사용자 ID 추출
-                    # 예: "GMS/GET /org.openmobilealliance.groups/users/tel:1001/..."
+                    # 예: "GMS/GET /org.openmobilealliance.groups/users/tel:+8210.../..."
                     if not caller_norm:
                         m = re.search(r'tel:[+]?(\d+)', obj.get("method", ""))
                         if m:
                             caller_norm = m.group(1)
-                    if caller_norm != user:
+                    if caller_norm != user_norm:
                         continue
                     ts = obj.get("ts", "")
                     key = (ts, obj.get("method", ""), obj.get("sesid", ""), obj.get("from", ""))
@@ -2759,7 +2772,12 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
                     seen.add(key)
                     all_msgs.append(obj)
         except Exception as e:
-            logger.error("register_flow csc collect: %s", e)
+            logger.error("user_flow csc collect: %s", e)
+
+    if not all_msgs:
+        return HandlerResult(status=404, body=json.dumps({
+            "error": f"No messages found for user '{user}' on {date_str}"
+        }), media_type="application/json")
 
     # 4. FlowMessage 변환 → 시간순 정렬 → 노드별 분류
     messages = [_flow_msg_from_log(obj) for obj in all_msgs]
@@ -2780,7 +2798,8 @@ async def _handle_register_flow(handler_args: HandlerArgs, kwargs: dict) -> Hand
 FLOW_HANDLER_LIST = [
     ("/api/v1/flow/body", _handle_flow_body, {}),
     ("/api/v1/flow/register/list", _handle_register_list, {}),
-    ("/api/v1/flow/register", _handle_register_flow, {}),
+    ("/api/v1/flow/user", _handle_user_flow, {}),
+    ("/api/v1/flow/register", _handle_user_flow, {}),  # legacy alias (구 단말 등록 이력)
     ("/api/v1/flow", _handle_flow, {}),
     ("/api/v1/call/logs", _handle_call_logs, {}),
     ("/api/v1/recordings", _handle_recordings, {}),

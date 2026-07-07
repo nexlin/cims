@@ -103,6 +103,7 @@ public:
     void SetAdhocMembers(const std::vector<std::string>& v) { m_vecAdhoc = v; }  // ad hoc 멤버 MSISDN
     void SubscribeGms();
     void SubscribeCms();
+    void SubscribeReg();   // Event: reg — 자신의 등록 상태 구독 (RFC 3680, 실제 UE 플로우)
     void AffiliateGroup(bool bDeaffiliate = false);   // MCPTT 그룹 affiliation (TS 24.379 §9) — 그룹 URI 로 PUBLISH
     void SendPttRequest();
     void SendPttRelease();
@@ -158,6 +159,12 @@ public:
     int          m_iCmsSeq;
     std::string  m_strGmsFromTag;
     std::string  m_strCmsFromTag;
+
+    // reg-event 구독 다이얼로그 (RFC 3680 — 실제 UE 는 REGISTER 직후 자신의 등록 상태 구독)
+    bool         m_bRegSubscribed{false};
+    std::string  m_strRegSubCallId;
+    int          m_iRegSubSeq{0};
+    std::string  m_strRegSubFromTag;
 
     // 통계
     SimStats m_stats;

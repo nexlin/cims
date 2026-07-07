@@ -25,6 +25,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="$SCRIPT_DIR/build/dist"
 SVC="bash $DIST_DIR/agent/bin/cims-svc"
 
+# CSC/OAM(Python) 은 3.10+ 필요 (vendor click 의 match 문 등). 시스템 python3 가 3.8 이라
+# venv 가 있으면 CIMS_PYTHON 으로 지정 — cims-svc lifecycle 이 이 값을 우선 사용한다.
+if [[ -z "${CIMS_PYTHON:-}" && -x "$SCRIPT_DIR/.venv314/bin/python3" ]]; then
+    export CIMS_PYTHON="$SCRIPT_DIR/.venv314/bin/python3"
+fi
+
 # ── 테스트 설정 ───────────────────────────────────────────────
 SERVER_IP="121.134.202.23"
 SIP_PORT="5160"          # 기본 5060 + 오프셋 100
@@ -39,10 +45,11 @@ DB_PASS="cims1234"
 DB_NAME="cims"
 MYSQL="mysql -h$DB_HOST -P$DB_PORT -u$DB_USER -p$DB_PASS $DB_NAME"
 
-# 테스트 사용자 (PTT MSISDN)
-USERS=(1001 1002 1003 1004)
+# 테스트 사용자 (PTT MSISDN — E.164, 실제 단말 형식)
+USERS=(+821000000001 +821000000002 +821000000003 +821000000004)
 USER_PWD="1234"
-SIP_DOMAIN="csp"
+SIP_DOMAIN="ptt.mnc033.mcc450.3gppnetwork.org"
+AUTH_REALM="ims.mnc033.mcc450.3gppnetwork.org"   # 실제 망: realm 은 PTT 도메인과 무관하게 IMS core realm
 IMSI_BASE="001011000000001"   # USERS[0]의 IMSI; 이후 세션은 +1씩 자동 증가
 
 # 테스트 그룹
@@ -229,7 +236,7 @@ if changed:
     # access_services.jsonl — CSP가 PTT 도메인/realm을 인식하기 위해 필요 (항상 덮어씀)
     local svc_file="$cfg_dir/access_services.jsonl"
     cat > "$svc_file" <<EOF
-{"id":1,"name":"ptt","kind":"ptt","domain":"$SIP_DOMAIN","auth_realm":"$SIP_DOMAIN","allowed_local_node_refs":["access-udp"]}
+{"id":1,"name":"ptt","kind":"ptt","domain":"$SIP_DOMAIN","auth_realm":"$AUTH_REALM","allowed_local_node_refs":["access-udp"]}
 EOF
     echo "[OK] access_services.jsonl 생성/갱신: $svc_file"
 
@@ -270,10 +277,10 @@ SET @u4 = (SELECT id FROM users WHERE login_id='ptt1004' LIMIT 1);
 
 INSERT IGNORE INTO ptt_subscriptions (id, user_id, passwd, dnd, forward_id, service_ref, imsi)
 VALUES
-  ('1001', @u1, '$USER_PWD', 0, '', 'ptt', '001011000000001'),
-  ('1002', @u2, '$USER_PWD', 0, '', 'ptt', '001011000000002'),
-  ('1003', @u3, '$USER_PWD', 0, '', 'ptt', '001011000000003'),
-  ('1004', @u4, '$USER_PWD', 0, '', 'ptt', '001011000000004');
+  ('${USERS[0]}', @u1, '$USER_PWD', 0, '', 'ptt', '001011000000001'),
+  ('${USERS[1]}', @u2, '$USER_PWD', 0, '', 'ptt', '001011000000002'),
+  ('${USERS[2]}', @u3, '$USER_PWD', 0, '', 'ptt', '001011000000003'),
+  ('${USERS[3]}', @u4, '$USER_PWD', 0, '', 'ptt', '001011000000004');
 
 -- ── 테스트 그룹 삽입 ────────────────────────────────────────
 INSERT IGNORE INTO ptt_groups (mcptt_group_id, name, group_type, require_affiliation, created_at)
@@ -287,26 +294,26 @@ SET @g1 = (SELECT id FROM ptt_groups WHERE mcptt_group_id='$GROUP_PREARRANGED');
 SET @g2 = (SELECT id FROM ptt_groups WHERE mcptt_group_id='$GROUP_BROADCAST');
 SET @g3 = (SELECT id FROM ptt_groups WHERE mcptt_group_id='$GROUP_CHAT');
 
--- prearranged: 4명 모두, 1001이 chair
+-- prearranged: 4명 모두, ${USERS[0]}이 chair
 INSERT IGNORE INTO ptt_group_members (group_id, user_id, priority, role) VALUES
-  (@g1, '1001', 1, 'chair'),
-  (@g1, '1002', 2, 'participant'),
-  (@g1, '1003', 3, 'participant'),
-  (@g1, '1004', 4, 'participant');
+  (@g1, '${USERS[0]}', 1, 'chair'),
+  (@g1, '${USERS[1]}', 2, 'participant'),
+  (@g1, '${USERS[2]}', 3, 'participant'),
+  (@g1, '${USERS[3]}', 4, 'participant');
 
--- broadcast: 4명 모두, 1001이 broadcast 개시자(chair)
+-- broadcast: 4명 모두, ${USERS[0]}이 broadcast 개시자(chair)
 INSERT IGNORE INTO ptt_group_members (group_id, user_id, priority, role) VALUES
-  (@g2, '1001', 1, 'chair'),
-  (@g2, '1002', 2, 'participant'),
-  (@g2, '1003', 3, 'participant'),
-  (@g2, '1004', 4, 'participant');
+  (@g2, '${USERS[0]}', 1, 'chair'),
+  (@g2, '${USERS[1]}', 2, 'participant'),
+  (@g2, '${USERS[2]}', 3, 'participant'),
+  (@g2, '${USERS[3]}', 4, 'participant');
 
 -- chat: 4명 모두, 동등 participant
 INSERT IGNORE INTO ptt_group_members (group_id, user_id, priority, role) VALUES
-  (@g3, '1001', 1, 'participant'),
-  (@g3, '1002', 2, 'participant'),
-  (@g3, '1003', 3, 'participant'),
-  (@g3, '1004', 4, 'participant');
+  (@g3, '${USERS[0]}', 1, 'participant'),
+  (@g3, '${USERS[1]}', 2, 'participant'),
+  (@g3, '${USERS[2]}', 3, 'participant'),
+  (@g3, '${USERS[3]}', 4, 'participant');
 
 SELECT 'DB 설정 완료' AS result;
 SQL
@@ -334,7 +341,7 @@ DELETE FROM ptt_affiliations
 DELETE FROM ptt_groups
   WHERE mcptt_group_id IN ('$GROUP_PREARRANGED','$GROUP_BROADCAST','$GROUP_CHAT');
 DELETE FROM ptt_subscriptions
-  WHERE id IN ('1001','1002','1003','1004');
+  WHERE id IN ('${USERS[0]}','${USERS[1]}','${USERS[2]}','${USERS[3]}');
 DELETE FROM users
   WHERE name IN ('PTT Test 1','PTT Test 2','PTT Test 3','PTT Test 4');
 
@@ -352,7 +359,7 @@ cmd_db_status() {
 
     echo ""
     echo "── PTT 가입자 ──"
-    $MYSQL -e "SELECT id, user_id, dnd FROM ptt_subscriptions WHERE id IN ('1001','1002','1003','1004');"
+    $MYSQL -e "SELECT id, user_id, dnd FROM ptt_subscriptions WHERE id IN ('${USERS[0]}','${USERS[1]}','${USERS[2]}','${USERS[3]}');"
 
     echo ""
     echo "── PTT 그룹 ──"
@@ -471,12 +478,12 @@ cmd_run() {
         # ── B 시나리오 ──────────────────────────────────────────
         b1)
             _clean_affiliations
-            echo "[B-1] 1004 제외, 1001·1002·1003만 REGISTER/affiliate"
+            echo "[B-1] ${USERS[3]} 제외, ${USERS[0]}·${USERS[1]}·${USERS[2]}만 REGISTER/affiliate"
             _run_cspsim "$GROUP_PREARRANGED" "B-1: 부분 등록 (3명)" 3
             ;;
         b3)
             _clean_affiliations
-            echo "[B-3] 1001만 REGISTER/affiliate (단독 세션)"
+            echo "[B-3] ${USERS[0]}만 REGISTER/affiliate (단독 세션)"
             _run_cspsim "$GROUP_PREARRANGED" "B-3: 개시자 단독" 1
             ;;
         *)
@@ -489,7 +496,7 @@ cmd_run() {
             echo ""
             echo "  B 시나리오 (부분 등록):"
             echo "    b1             B-1: 1004 REGISTER 없음 (3명만)"
-            echo "    b3             B-3: 개시자(1001) 단독"
+            echo "    b3             B-3: 개시자(첫 멤버) 단독"
             exit 1
             ;;
     esac
@@ -526,8 +533,8 @@ case "${1:-}" in
         echo "  run prearranged    A-1: 4명 prearranged 그룹콜"
         echo "  run broadcast      A-1: 4명 broadcast 그룹콜"
         echo "  run chat           A-1: 4명 chat 그룹콜"
-        echo "  run b1             B-1: 1004 REGISTER 없음 (3명)"
-        echo "  run b3             B-3: 개시자(1001) 단독"
+        echo "  run b1             B-1: 4번째 멤버 REGISTER 없음 (3명)"
+        echo "  run b3             B-3: 개시자(첫 멤버) 단독"
         echo ""
         echo "  stats              CMP 포트/세션/누수 통계 조회"
         exit 1

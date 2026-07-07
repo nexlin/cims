@@ -492,6 +492,36 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::st
 }
 
 /**
+ * @brief Build reginfo+xml body for reg-event NOTIFY (RFC 3680)
+ *   실제 UE 는 REGISTER 직후 Event: reg 로 자신의 등록 상태를 구독하고,
+ *   서버는 등록 AoR + Contact + 잔여 expires 를 reginfo 문서로 내려준다.
+ */
+static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInfo &clsUserInfo, bool bRegistered,
+                                     int iVersion ) {
+    time_t tRemaining = 0;
+    if ( bRegistered ) {
+        tRemaining = ( clsUserInfo.m_iLoginTime + clsUserInfo.m_iLoginTimeout ) - time( NULL );
+        if ( tRemaining < 0 ) tRemaining = 0;
+    }
+
+    std::string strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    strBody += "<reginfo xmlns=\"urn:ietf:params:xml:ns:reginfo\" version=\"" + std::to_string( iVersion ) +
+               "\" state=\"full\">\r\n";
+    strBody += "<registration aor=\"" + sub.strSubscriberUri + "\" id=\"" + sub.strUserId + "\" state=\"" +
+               ( bRegistered ? "active" : "terminated" ) + "\">\r\n";
+    if ( bRegistered ) {
+        strBody += "<contact id=\"1\" state=\"active\" event=\"registered\" expires=\"" +
+                   std::to_string( (int)tRemaining ) + "\">\r\n";
+        strBody += "<uri>sip:" + sub.strUserId + "@" + clsUserInfo.m_strIp + ":" +
+                   std::to_string( clsUserInfo.m_iPort ) + "</uri>\r\n";
+        strBody += "</contact>\r\n";
+    }
+    strBody += "</registration>\r\n";
+    strBody += "</reginfo>\r\n";
+    return strBody;
+}
+
+/**
  * @brief Send a proper in-dialog NOTIFY to a single subscriber
  */
 static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::string &etag,
@@ -518,9 +548,15 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     SipMakeBranch( szBranch, sizeof( szBranch ) );
     pMsg->AddVia( strLocalIp.c_str(), iLocalPort, szBranch );
 
-    // From: server (our PSI), tag = sub.strToTag (the tag we sent in 200 OK)
-    std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
-    pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    // From: tag = sub.strToTag (the tag we sent in 200 OK).
+    //   reg-event 는 SUBSCRIBE 의 To(=가입자 자신의 AoR)가 dialog 상대이므로 From = 가입자 AoR,
+    //   gms/cms 는 server PSI.
+    if ( sub.strEventType == "reg" ) {
+        pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
+    } else {
+        std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
+        pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    }
     if ( !sub.strToTag.empty() ) {
         pMsg->m_clsFrom.InsertParam( SIP_TAG, sub.strToTag.c_str() );
     }
@@ -539,19 +575,27 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
 
     // Route to subscriber's registered address
     CUserInfo clsUserInfo;
-    if ( gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo ) ) {
+    bool bRegistered = gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo );
+    if ( bRegistered ) {
         CSipCallRoute clsRoute;
         clsUserInfo.GetCallRoute( clsRoute );
         pMsg->AddRoute( clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP );
     }
 
-    pMsg->AddHeader( "Event", "xcap-diff" );
     time_t tRemaining = ( sub.tStartTime + sub.iExpires ) - time( NULL );
     if ( tRemaining < 0 ) tRemaining = 0;
     pMsg->AddHeader( "Subscription-State", ( "active;expires=" + std::to_string( (int)tRemaining ) ).c_str() );
 
-    std::string strBody = BuildXcapDiffBody( sub, etag, strChangedId );
-    pMsg->m_clsContentType.Set( "application", "xcap-diff+xml" );
+    std::string strBody;
+    if ( sub.strEventType == "reg" ) {
+        pMsg->AddHeader( "Event", "reg" );
+        strBody = BuildRegInfoBody( sub, clsUserInfo, bRegistered, iSeq - 1 );
+        pMsg->m_clsContentType.Set( "application", "reginfo+xml" );
+    } else {
+        pMsg->AddHeader( "Event", "xcap-diff" );
+        strBody = BuildXcapDiffBody( sub, etag, strChangedId );
+        pMsg->m_clsContentType.Set( "application", "xcap-diff+xml" );
+    }
     pMsg->m_strBody = strBody;
     pMsg->m_iContentLength = (int)strBody.size();
 
@@ -583,8 +627,12 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
     SipMakeBranch( szBranch, sizeof( szBranch ) );
     pMsg->AddVia( strLocalIp.c_str(), iLocalPort, szBranch );
 
-    std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
-    pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    if ( sub.strEventType == "reg" ) {
+        pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
+    } else {
+        std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
+        pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    }
     if ( !sub.strToTag.empty() ) {
         pMsg->m_clsFrom.InsertParam( SIP_TAG, sub.strToTag.c_str() );
     }
@@ -605,7 +653,7 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
         pMsg->AddRoute( clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP );
     }
 
-    pMsg->AddHeader( "Event", "xcap-diff" );
+    pMsg->AddHeader( "Event", sub.strEventType == "reg" ? "reg" : "xcap-diff" );
     pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
     pMsg->m_iContentLength = 0;
 
@@ -620,7 +668,10 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
  *        (Active state, no specific document change)
  */
 void SendInitialNotify( const SubscriptionInfo &sub ) {
-    if ( sub.strEventType == "gms" ) {
+    if ( sub.strEventType == "reg" ) {
+        // reg-event: 등록 상태 reginfo 문서 1건 (etag/changedId 미사용)
+        SendNotifyToSubscriber( sub, "", "" );
+    } else if ( sub.strEventType == "gms" ) {
         // GMS 초기 동기화: 가입자가 속한 그룹별로 group document NOTIFY 발송.
         //   (기존엔 빈 group sel `tel:` 하나만 보내 UE GET 이 404 였음.)
         std::vector<std::string> vecGroupIds;
