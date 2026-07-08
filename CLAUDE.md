@@ -34,12 +34,15 @@ cspsim  ←─ SIP (UDP 5060 / TCP 25061 / TLS 5061) ──→  CSP
 
 ## 개발/빌드 환경
 
-**Prerequisites**: `cmake`, `build-essential`, `libssl-dev`, `git`, `clang-format`
+**Prerequisites**: `cmake`, `build-essential`, `libssl-dev`, `libmariadb-dev`, `git`, `clang-format`
 
 ```bash
-sudo apt-get install -y cmake build-essential libssl-dev clang-format
+sudo apt-get install -y cmake build-essential libssl-dev libmariadb-dev clang-format
 ```
 
+`libmariadb-dev` 는 MariaDB **클라이언트 라이브러리·헤더** (DB 서버 아님) — CSP 빌드 필수
+(`csp/CMakeLists.txt` 가 없으면 configure 중단). MariaDB 서버는 별도 장비에 둘 수 있다
+([docs/DEV_SERVER_SETUP.md](docs/DEV_SERVER_SETUP.md) §1.2, §6).
 `clang-format` 은 검증 stage 1 (`S1-CPP-FORMAT`) 의 정적 검사용. 미설치 시 SKIP.
 
 **Build** (out-of-source, 레포 루트에서):
@@ -57,6 +60,9 @@ make -j$(nproc)
 cd build && make dist     # build/dist/ (컴포넌트별 tarball + manifest)
 ```
 
+**개발 원스톱**: `./cims.sh up [--skip-build]` — build → configure -y → 전체 재시작.
+역할 분담: `cims.sh`(빌드/패키징/설정) · `agent/bin/cims-svc`(운영) · `./cims-verify`(검증).
+
 **실행** (CMP 를 CSP 보다 먼저 기동):
 ```bash
 ./bin/cmp ../cmp/cmp.json
@@ -66,7 +72,7 @@ cd build && make dist     # build/dist/ (컴포넌트별 tarball + manifest)
 **시뮬레이터(cspsim)·검증 파이프라인(S1~S6)** — 단말 시뮬레이터 사용법과 상용 배포 전 검증
 게이트는 검증 문서가 정본이다. 절차·게이트 정의는
 [docs/VERIFICATION_PROCESS.md](docs/VERIFICATION_PROCESS.md), 실행/시뮬레이터 사용법은
-[docs/VERIFICATION_MANUAL.md](docs/VERIFICATION_MANUAL.md) 를 본다. 진입점은 `cims.sh verify`
+[docs/VERIFICATION_MANUAL.md](docs/VERIFICATION_MANUAL.md) 를 본다. 진입점은 `cims-verify`
 또는 콘솔 `/testbed/verify-v2`.
 
 ### 디렉토리 구조
@@ -84,7 +90,7 @@ agent/      노드 에이전트
 deployment/ 부트스트랩·DB 부트스트랩 모듈
 verify/     S1~S6 검증 인프라 (verify/lib/)
 tests/      테스트
-scripts/    운영/시험 스크립트
+scripts/    개발 파이프라인 단위 스크립트 (sync.sh, package.sh, lib/common.sh) + 운영/시험 스크립트
 sql/        DB 스키마/마이그레이션
 ext/, pkg/  외부 의존성 소스 / 설치 산출물
 docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)

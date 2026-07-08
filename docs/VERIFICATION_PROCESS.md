@@ -29,8 +29,8 @@
 
 | 형태 | 명령 / URL |
 |---|---|
-| CLI | `./cims.sh verify stage<N>` (1~6) |
-| CLI 메타 | `./cims.sh verify list [--stage N]` / `list-presets` / `describe <ID>` |
+| CLI | `./cims-verify stage<N>` (1~6) |
+| CLI 메타 | `./cims-verify list [--stage N]` / `list-presets` / `describe <ID>` |
 | CLI 직접 | `python3 -m tests.cims_verify run --stage N \| --items ID,... \| --preset NAME` |
 | Console UI | `http://<ens160>:3000/release/verify` (LIVE 1.5s 폴링) |
 | 이력 | `http://<ens160>:3000/release/verify-history` (회차 + 통계 + DetailModal PDF) |
@@ -86,7 +86,7 @@ ems/core/console/src/
 - 디렉토리는 `__init__.py` 가 있어야 패키지로 인식되어 재귀 스캔 대상이 된다.
 - `id` 는 registry 전역에서 유일해야 한다 (중복 시 `ValueError`). 자식 항목은 `parent="<부모 ID>"`, 부모와 같은 `stage` 여야 한다.
 
-**추가 절차** — 적합한 `verify/lib/items/stage{N}/<cat>/` (또는 `stage{N}/`) 아래에 파일 1개를 만들고 `@verify_item(...)` 데코레이터 + 함수를 작성하면 끝. 별도 등록·import 코드 불필요 → CLI(`cims.sh verify list`)·Console UI 에 자동 노출된다.
+**추가 절차** — 적합한 `verify/lib/items/stage{N}/<cat>/` (또는 `stage{N}/`) 아래에 파일 1개를 만들고 `@verify_item(...)` 데코레이터 + 함수를 작성하면 끝. 별도 등록·import 코드 불필요 → CLI(`cims-verify list`)·Console UI 에 자동 노출된다.
 
 ```python
 # verify/lib/items/stage3/my_check.py
@@ -322,14 +322,14 @@ V2Page 노란 배너 + history page row 에 BLOCKED. 차단 원인 stage 의 FAI
 ### 4.2 immutability gate 불일치
 
 S6-ENTRY-CHECK FAIL 시 detail 에 두 sha 출력. 복구:
-1. `cims.sh verify stage4` — manifest 재생성
-2. `cims.sh verify stage5` — 재배포 + marker 갱신
-3. `cims.sh verify stage6` — 재진입
+1. `cims-verify stage4` — manifest 재생성
+2. `cims-verify stage5` — 재배포 + marker 갱신
+3. `cims-verify stage6` — 재진입
 
 ### 4.3 디버그용 강제 FAIL 주입
 
 ```bash
-./cims.sh verify stage1 --inject-fail S1-CPP-FORMAT
+./cims-verify stage1 --inject-fail S1-CPP-FORMAT
 # stdout: "강제 FAIL 주입 (--inject-fail)" detail
 ```
 

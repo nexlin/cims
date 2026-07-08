@@ -2,7 +2,8 @@
 
 > CIMS 코드를 빌드 → 변종 12개 tarball → 다운로드까지 한 화면에서 수행하는
 > 워크플로우. 콘솔 메뉴 **"패키징"** (`/release/package`) + CLI `cims.sh
-> build` / `cims.sh pkg` 가 동등한 진입점.
+> build` / `cims.sh pkg` 가 동등한 진입점. `pkg`/`sync` 의 본체는
+> `scripts/package.sh` / `scripts/sync.sh` (cims.sh 는 CLI 계약 유지 + 위임).
 
 ## 1. 컴포넌트 / 변종
 

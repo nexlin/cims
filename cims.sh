@@ -24,15 +24,9 @@ LOG_DIR="$DIST_DIR/log"
 
 mkdir -p "$LOG_DIR"
 
-# ── 색상 ───────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-
-info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()      { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-err()     { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-header()  { echo -e "\n${BOLD}$*${NC}"; }
+# ── 공용 라이브러리 (색상/로그, .cims 리더) ─────────────────────
+source "$SCRIPT_DIR/scripts/lib/common.sh" || {
+    echo "[ERROR] scripts/lib/common.sh 없음 — 레포/dist 트리 손상" >&2; exit 1; }
 
 # ── 초기 설정 (init wizard) ────────────────────────────────────
 # 새 개발서버 첫 진입 시 한 번 실행. local_ip / db_password 등 환경 의존값을
@@ -59,15 +53,13 @@ EOF
 
     header "=== CIMS 초기 설정 ==="
 
-    # 기존 값 (재실행 시 default 로 표시)
+    # 기존 값 (재실행 시 default 로 표시) — 공용 리더 (scripts/lib/common.sh)
     local cur_local_ip="" cur_db_password=""
     if [[ -f $cfg_file ]]; then
-        cur_local_ip=$(CFG="$cfg_file" python3 -c \
-            'import json,os; print(json.load(open(os.environ["CFG"])).get("local_ip",""))' \
-            2>/dev/null || true)
-        cur_db_password=$(CFG="$cfg_file" python3 -c \
-            'import json,os; print(json.load(open(os.environ["CFG"])).get("db_password",""))' \
-            2>/dev/null || true)
+        local _init_local_ip="" _init_db_password=""
+        eval "$(cims_local_cfg_eval "$cfg_file")"
+        cur_local_ip="$_init_local_ip"
+        cur_db_password="$_init_db_password"
         info "기존 설정 발견: $cfg_file"
     fi
 
@@ -148,7 +140,7 @@ PY
     info "다음 단계:"
     info "  ./cims.sh build                    # 빌드"
     info "  ./cims.sh configure                # 시험환경 (server.local.json 자동 read)"
-    info "  ./cims.sh start                    # 기동"
+    info "  ./agent/bin/cims-svc start         # 기동"
     echo ""
     info "환경변수 override (CI):"
     info "  CIMS_LOCAL_IP=192.168.1.10 CIMS_DB_PASSWORD=mypw \\"
@@ -220,7 +212,7 @@ cmd_build() {
     echo ""
     info "다음 단계:"
     info "  [2/3] ./cims.sh configure --local-ip <서버IP> [--db-password <PW>]   # 시험환경 설정"
-    info "        ./cims.sh start                                                # Phase 1 기능 검증"
+    info "        ./agent/bin/cims-svc start                                     # Phase 1 기능 검증"
     info "  [3/3] ./cims.sh pkg ${version:+[--no-bump 자동]}                              # 배포 패키지화"
 }
 
@@ -229,6 +221,39 @@ cmd_build() {
 # 도메인 / 로그·녹취 경로 등 환경 의존값을 build/dist 의 설정 파일에 반영한다.
 cmd_configure() {
     "$SCRIPT_DIR/configure.sh" "$@"
+}
+
+# ── up — 로컬 개발 파이프라인 합성 ──────────────────────────────
+# build → configure -y → 전체 재시작. 재시작을 전체로 하는 이유:
+# configure 재실행이 JWT 시크릿을 갱신하므로 발급(oam)/검증(csc/csp)이
+# 함께 새 설정을 읽어야 한다 (부분 재시작 시 토큰 검증 401).
+cmd_up() {
+    [[ -z "$SRC_CONSOLE" ]] && err "up 명령은 소스 트리에서만 실행 가능" && exit 1
+    local skip_build=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --skip-build) skip_build=1; shift ;;
+            -h|--help)
+                cat <<EOF
+$(basename "$0") up [--skip-build]
+  로컬 개발 파이프라인 원스톱: [1/3] build → [2/3] configure -y → 전체 재시작.
+  --skip-build: 코드 변경 없이 설정만 재반영할 때
+  (검증 게이트는 ./cims-verify, 개별 재시작은 ./agent/bin/cims-svc)
+EOF
+                return 0 ;;
+            *) err "알 수 없는 옵션: $1 (up 은 --skip-build 만)"; return 1 ;;
+        esac
+    done
+    header "=== CIMS up: build → configure → restart ==="
+    if (( skip_build )); then
+        info "[1/3] build 생략 (--skip-build)"
+    else
+        cmd_build
+    fi
+    cmd_configure -y
+    "$SCRIPT_DIR/agent/bin/cims-svc" restart
+    echo ""
+    ok "up 완료 — 콘솔: https://<서버IP>:4419 (configure 재실행으로 시크릿 갱신 → 재로그인 필요)"
 }
 
 # ── 데이터 정리 ───────────────────────────────────────────────
@@ -564,7 +589,7 @@ cmd_preflight() {
         line=$(ss -Htlnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print; exit}' || true)
         if [[ -n $line ]]; then
             pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
-            warn "$label (port $port/tcp) 잔존 (pid=${pid:-?}) — './cims.sh reset' 또는 'verify phase2 --stop-after' 권장"
+            warn "$label (port $port/tcp) 잔존 (pid=${pid:-?}) — './cims.sh reset' 권장"
             p2_residual=1
         fi
     done
@@ -596,26 +621,8 @@ PY
     echo ""
 }
 
-# ── 검증 (verify) — 단계/항목 단위 실행 ─────────────────────────
-# 6단계 (S1~S6) 파이프라인. 모든 stage 의 본체는 verify/lib (cims_verify CLI).
-#   S1=정적검사, S2=빌드, S3=스모크, S4=패키지화, S5=로컬배포, S6=통합검증
-# 메타 명령 (list / describe / list-presets / run) 은 verify_lib 로 위임.
-cmd_verify() {
-    local stage="${1:-stage1}"
-    shift || true
-
-    case "$stage" in
-        list|describe|run|list-presets|purge-runs|delete-run)
-            python3 -m tests.cims_verify "$stage" "$@"; return $? ;;
-        stage1|1) python3 -m tests.cims_verify run --stage 1 "$@" ;;
-        stage2|2) python3 -m tests.cims_verify run --stage 2 "$@" ;;
-        stage3|3) python3 -m tests.cims_verify run --stage 3 "$@" ;;
-        stage4|4) python3 -m tests.cims_verify run --stage 4 "$@" ;;
-        stage5|5) python3 -m tests.cims_verify run --stage 5 "$@" ;;
-        stage6|6) python3 -m tests.cims_verify run --stage 6 "$@" ;;
-        *) err "지원하지 않는 stage: $stage (stage1~stage6 지원)"; return 1 ;;
-    esac
-}
+# ── 검증 (S1~S6) — ./cims-verify 전용 진입점으로 이전 ──────────
+# 본체는 verify/lib (tests/cims_verify.py CLI). dispatch 의 안내 스텁 참조.
 
 
 
@@ -818,7 +825,7 @@ ${BOLD}서비스 명령 (운영 도구는 agent/bin 으로 분리됨):${NC}
   agent/bin/cims-ha   install|config|check|apply|start|stop  — HA (keepalived + systemd)
   agent/bin/cims-health <svc>   — listen probe (keepalived 가 호출)
   agent/bin/cims-notify <svc> ...  — state hook (keepalived 가 호출)
-  cims.sh 는 개발 단계 명령만 (build/configure/pkg/sim/verify/sync 등).
+  cims.sh 는 개발 단계 명령만 (build/configure/pkg/sim/sync 등). 검증은 ./cims-verify.
 
 ${BOLD}TB 2종 (개발 워크플로 — 4419/3000 상시 동작):${NC}
   tb start|stop|restart [csc|console|all]   기본: all
@@ -839,8 +846,14 @@ ${BOLD}3단계 분리: 빌드 → 시험환경 설정 → 패키지화${NC}
   [2/3] configure [options]
                        시험환경 설정. 로컬 네트워크 IP / DB / 도메인 / 로그경로를
                        build/dist 의 설정 파일에 반영 → configure.sh 에 위임.
+                       옵션 없이 TTY 에서 실행하면 항목별 기본값 제시형 대화형
+                       wizard (Enter=수락, 답변은 .cims/server.local.json 에 저장).
+                       -y/--defaults: 대화형 없이 저장값/기본값으로 즉시 진행.
   [3/3] pkg [-v ...] [--no-bump] [-m ...]
                        배포 tarball 생성 (아래 "배포 패키지" 섹션 참조).
+
+  up [--skip-build]    원스톱: build → configure -y → 전체 재시작.
+                       코드/설정 변경을 로컬 서버에 한 번에 반영할 때 사용.
 
   sync   [targets]     C++ 빌드 없이 Python/스크립트/메타만 dist 로 복사
                        targets: csc | agent | scripts | pkg-meta | console | phone | all
@@ -867,20 +880,8 @@ ${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
                         (보존: users, organizations, volte_subscriptions,
                          ptt_subscriptions, ptt_groups, ptt_group_members, user_rejects)
   preflight             사전조건 확인 (ens160 IP, 포트 점유, git 상태, DB 연결)
-  verify [phase1] [--skip-build|--skip-reset]
-                        Phase 1 전체 자동 실행: preflight → reset → [1/3] build →
-                        [2/3] configure(ens160 IP) → start (전체) → health → 회귀 시나리오 → 리포트
-                        → verify_reports/<ts>_phase1.md
-                        ([3/3] pkg 는 포함 안 함 — Phase 2 에서 별도 실행)
-  verify phase2 [--skip-build] [--skip-pkg] [--keep-agent]
-                        Phase 2 배포 검증 (v2): csc/console tarball 배포 + start(4445)/health/stop
-                        → verify_reports/<ts>_phase2.md (기능 회귀는 반복 X)
-  verify phase3 [--skip-build] [--skip-pkg] [--keep-agent]
-                        Phase 3 배포 이후 검증 (v1 install-only):
-                        Phase 1 서버 모듈 중지 → 4 service-server Test-agent enroll
-                        → service-server tarball 업로드 → deployment 생성 →
-                        install job 폴링 → 설치 파일 검증 → verify_reports/<ts>_phase3.md
-                        (v2 예정: start/health/stop. v3 예정: 4시나리오 자동 실행)
+  (검증 실행은 ./cims-verify — stage1~6 | list | list-presets | run --preset <NAME>.
+   콘솔 진입: /testbed/verify-v2. 정본: docs/VERIFICATION_PROCESS.md)
 
 ${BOLD}배포 패키지 (Console 업로드용) — [3/3] 단계:${NC}
   pkg [-v X.Y.Z] [--no-bump] [--no-sync] [-m <changelog>] [name...]
@@ -922,869 +923,11 @@ EOF
 }
 
 
-cmd_sync() {
-    # 소스 트리 → dist 로 Python/스크립트/메타를 복사 (C++ 빌드 없이 빠른 배포).
-    # Usage: ./cims.sh sync [csc|agent|scripts|pkg-meta|console|phone|all]
-    if [[ -z "$SRC_CONSOLE" ]]; then
-        err "sync 명령은 소스 트리에서만 실행 가능 (dist 안에서는 의미 없음)"
-        return 1
-    fi
-    if [[ ! -d $DIST_DIR ]]; then
-        err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build 한 번 실행)"
-        return 1
-    fi
-
-    local targets=("$@")
-    [[ ${#targets[@]} -eq 0 ]] && targets=(all)
-
-    local did_csc=0 did_agent=0 did_scripts=0 did_pkg=0 did_console=0 did_phone=0 did_oamsvc=0
-    for t in "${targets[@]}"; do
-        case "$t" in
-            all) did_csc=1 did_agent=1 did_scripts=1 did_pkg=1 did_oamsvc=1 ;;
-            csc)       did_csc=1 ;;
-            oam-svc)  did_oamsvc=1 ;;
-            agent)     did_agent=1 ;;
-            scripts)   did_scripts=1 ;;
-            pkg-meta)  did_pkg=1 ;;
-            console)   did_console=1 ;;
-            phone)     did_phone=1 ;;
-            *) err "알 수 없는 sync 대상: $t"; return 1 ;;
-        esac
-    done
-
-    local n_changed=0
-
-    # ── CSC Python 소스 (+ OAM Phase 1: 같은 binary, sys.path mount) ──
-    if [[ $did_csc -eq 1 ]]; then
-        mkdir -p "$DIST_DIR/csc/src" "$DIST_DIR/oam/src"
-        # rsync 가 있으면 사용, 없으면 cp -r (목적지 깨끗이)
-        if command -v rsync >/dev/null 2>&1; then
-            rsync -a --delete-excluded \
-                --exclude='__pycache__' --exclude='*.pyc' \
-                "$SCRIPT_DIR/csc/src/" "$DIST_DIR/csc/src/"
-            rsync -a --delete-excluded \
-                --exclude='__pycache__' --exclude='*.pyc' \
-                "$SCRIPT_DIR/ems/core/oam/src/" "$DIST_DIR/oam/src/"
-        else
-            cp -r "$SCRIPT_DIR/csc/src/." "$DIST_DIR/csc/src/"
-            cp -r "$SCRIPT_DIR/ems/core/oam/src/." "$DIST_DIR/oam/src/"
-        fi
-        # __pycache__ stale 제거 (PEP 420 namespace 전환에 따른 옛 캐시 잔재)
-        find "$DIST_DIR/csc/src" "$DIST_DIR/oam/src" -type d -name __pycache__ \
-            -exec rm -rf {} + 2>/dev/null || true
-        # config_template.json 도 동기화 (apply_config_template 가 읽는 파일)
-        if [[ -f "$SCRIPT_DIR/csc/config/config_template.json" ]]; then
-            mkdir -p "$DIST_DIR/csc/config"
-            cp -f "$SCRIPT_DIR/csc/config/config_template.json" \
-                  "$DIST_DIR/csc/config/config_template.json"
-        fi
-        # OAM 분리 Phase 2 — pkg.json 동기화 (별도 tarball 등록에 필요)
-        if [[ -f "$SCRIPT_DIR/ems/core/oam/pkg.json" ]]; then
-            cp -f "$SCRIPT_DIR/ems/core/oam/pkg.json" "$DIST_DIR/oam/pkg.json"
-        fi
-        # OAM 분리 Phase 3 — oam/config (oam.json / oam-tb.json) 동기화
-        # + oam_base_service_split §7 — base 모드 활성화 템플릿(common/base/services 샘플) 동봉.
-        #   운영자가 production 노드에서 .sample→실파일 rename 으로 --role base 전환할 수 있게.
-        if [[ -d "$SCRIPT_DIR/ems/core/oam/config" ]]; then
-            mkdir -p "$DIST_DIR/oam/config"
-            cp -f "$SCRIPT_DIR/ems/core/oam/config/"*.json "$DIST_DIR/oam/config/" 2>/dev/null || true
-            cp -f "$SCRIPT_DIR/ems/core/oam/config/"*.sample "$DIST_DIR/oam/config/" 2>/dev/null || true
-            if [[ -d "$SCRIPT_DIR/ems/core/oam/config/services" ]]; then
-                mkdir -p "$DIST_DIR/oam/config/services"
-                cp -f "$SCRIPT_DIR/ems/core/oam/config/services/"* "$DIST_DIR/oam/config/services/" 2>/dev/null || true
-            fi
-        fi
-        # OAM 녹취 변환툴(ffmpeg/ffprobe) vendor 자동 채움 — 빌드 시 정적 바이너리 다운로드.
-        # 패키지에 동봉되어 air-gapped 런타임에서 별도 설치 없이 녹취 재생(raw RTP→mp4) 가능.
-        _ensure_oam_vendor_ffmpeg
-        # Phase 4 vendor: private 환경 (인터넷 없음) 대응 — csc/vendor + oam/vendor 동기화.
-        # csc/requirements.txt, oam/requirements.txt 도 함께.
-        for _comp in csc oam; do
-            if [[ -d "$SCRIPT_DIR/$_comp/vendor" ]]; then
-                mkdir -p "$DIST_DIR/$_comp/vendor"
-                if command -v rsync >/dev/null 2>&1; then
-                    rsync -a --delete-excluded --exclude='__pycache__' --exclude='*.pyc' \
-                        "$SCRIPT_DIR/$_comp/vendor/" "$DIST_DIR/$_comp/vendor/"
-                else
-                    cp -r "$SCRIPT_DIR/$_comp/vendor/." "$DIST_DIR/$_comp/vendor/"
-                fi
-            fi
-            if [[ -f "$SCRIPT_DIR/$_comp/requirements.txt" ]]; then
-                cp -f "$SCRIPT_DIR/$_comp/requirements.txt" "$DIST_DIR/$_comp/requirements.txt"
-            fi
-        done
-        ok "csc/src + oam/src (+ config, pkg.json, vendor, requirements.txt) ← $SCRIPT_DIR"
-        n_changed=$((n_changed+1))
-    fi
-
-    # ── oam-svc 독립 모듈 (oam_base_service_split D5; csc_standalone_module.md P4/P6) ──
-    #    thin 앱: 자기 src + config + pkg.json 만 동봉. 공유 라이브러리(oam/vendor·oam/src)는
-    #    런타임에 같은 노드의 oam 설치본을 sys.path glob 으로 mount → tarball 에 복제하지 않음.
-    #    csc/src 는 더 이상 마운트하지 않음(P4) — csc 와 코드 비공유, 계약(HTTP/JWT/DB)만.
-    if [[ $did_oamsvc -eq 1 ]]; then
-        mkdir -p "$DIST_DIR/oam-svc/src" "$DIST_DIR/oam-svc/config"
-        if command -v rsync >/dev/null 2>&1; then
-            rsync -a --delete-excluded --exclude='__pycache__' --exclude='*.pyc' \
-                "$SCRIPT_DIR/ems/service/oam/src/" "$DIST_DIR/oam-svc/src/"
-        else
-            cp -r "$SCRIPT_DIR/ems/service/oam/src/." "$DIST_DIR/oam-svc/src/"
-        fi
-        find "$DIST_DIR/oam-svc/src" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-        [[ -d "$SCRIPT_DIR/ems/service/oam/config" ]] && \
-            cp -f "$SCRIPT_DIR/ems/service/oam/config/"*.json "$SCRIPT_DIR/ems/service/oam/config/"*.sample "$DIST_DIR/oam-svc/config/" 2>/dev/null
-        [[ -f "$SCRIPT_DIR/ems/service/oam/pkg.json" ]] && \
-            cp -f "$SCRIPT_DIR/ems/service/oam/pkg.json" "$DIST_DIR/oam-svc/pkg.json"
-        ok "oam-svc/src (+ config, pkg.json) ← $SCRIPT_DIR"
-        n_changed=$((n_changed+1))
-    fi
-
-    # ── Agent 바이너리 + 운영 도구 (bin/lib/keepalived/systemd) ──
-    if [[ $did_agent -eq 1 ]]; then
-        _ensure_agent_vendor_keepalived
-        mkdir -p "$DIST_DIR/agent"
-        cp -f "$SCRIPT_DIR/agent/cims_agent.py"     "$DIST_DIR/agent/"
-        cp -f "$SCRIPT_DIR/agent/install-agent.sh"  "$DIST_DIR/agent/"
-        chmod +x "$DIST_DIR/agent/install-agent.sh"
-        [[ -f "$SCRIPT_DIR/agent/pkg.json" ]] && cp -f "$SCRIPT_DIR/agent/pkg.json" "$DIST_DIR/agent/"
-        # 운영 도구 (cims-svc / cims-ha / cims-health / cims-notify + lifecycle.sh / ha.sh) + vendor deb
-        if command -v rsync >/dev/null 2>&1; then
-            for sub in bin lib keepalived systemd vendor; do
-                [[ -d "$SCRIPT_DIR/agent/$sub" ]] && \
-                    rsync -a --delete --exclude='out/' --exclude='ha.json' \
-                          "$SCRIPT_DIR/agent/$sub/" "$DIST_DIR/agent/$sub/"
-            done
-        else
-            for sub in bin lib keepalived systemd vendor; do
-                [[ -d "$SCRIPT_DIR/agent/$sub" ]] && \
-                    { rm -rf "$DIST_DIR/agent/$sub"; cp -r "$SCRIPT_DIR/agent/$sub" "$DIST_DIR/agent/$sub"; }
-            done
-        fi
-        chmod +x "$DIST_DIR/agent/bin/"* 2>/dev/null || true
-        chmod +x "$DIST_DIR/agent/lib/"*.sh 2>/dev/null || true
-        chmod +x "$DIST_DIR/agent/keepalived/"*.sh 2>/dev/null || true
-        ok "agent (+ bin/lib/keepalived/systemd) ← $SCRIPT_DIR/agent"
-        n_changed=$((n_changed+1))
-    fi
-
-    # ── 관리 스크립트 (cims.sh, configure.sh) ────────────────────
-    if [[ $did_scripts -eq 1 ]]; then
-        cp -f "$SCRIPT_DIR/cims.sh"      "$DIST_DIR/cims.sh"      && chmod +x "$DIST_DIR/cims.sh"
-        cp -f "$SCRIPT_DIR/configure.sh" "$DIST_DIR/configure.sh" && chmod +x "$DIST_DIR/configure.sh"
-        ok "scripts ← cims.sh, configure.sh"
-        n_changed=$((n_changed+1))
-    fi
-
-    # ── 컴포넌트별 pkg.json (description 소스) ──────────────────
-    if [[ $did_pkg -eq 1 ]]; then
-        for t in csp cmp csc cwrtc cspsim; do
-            [[ -f "$SCRIPT_DIR/$t/pkg.json" ]] && cp -f "$SCRIPT_DIR/$t/pkg.json" "$DIST_DIR/$t/pkg.json" 2>/dev/null || true
-        done
-        [[ -f "$SCRIPT_DIR/ems/core/console/pkg.json" ]] && cp -f "$SCRIPT_DIR/ems/core/console/pkg.json" "$DIST_DIR/console/pkg.json" 2>/dev/null || true
-        [[ -f "$SCRIPT_DIR/cims-phone/pkg.json"   ]] && cp -f "$SCRIPT_DIR/cims-phone/pkg.json"   "$DIST_DIR/phone/pkg.json"   2>/dev/null || true
-        ok "pkg-meta ← 각 모듈 루트의 pkg.json"
-        n_changed=$((n_changed+1))
-    fi
-
-    # ── Console 정적 빌드 (Vite) — base/svc 분리 ─────────────────
-    # VITE_CONSOLE_TARGET=prod — sync 도 배포본 dist 기준 (TB-Console 은 dev 서버 별도)
-    # 콘솔 소스 = ems/core/console(공통, Vite 루트) + ems/service/console(서비스 팩, @svc).
-    # 두 벌 빌드:
-    #   svc(full): base 메뉴 + 서비스 메뉴 전부 → dist/console/dist (oam-svc 패키지 동봉)
-    #   base     : base 메뉴만 (VITE_CONSOLE_PROFILE=base, @svc manifest DCE 제거)
-    #              → dist/console/dist-base → oam-base 패키지 동봉 (부트스트랩 기본 UI)
-    # oam(base 게이트웨이)은 동봉 base 를 기본 서빙하다가, oam-svc(동봉 svc 콘솔)이
-    # 배포되면 console_static.resolve 가 그쪽(svc=full)을 우선 서빙 → 자동 승격.
-    if [[ $did_console -eq 1 ]]; then
-        mkdir -p "$DIST_DIR/console"
-        # svc 팩(ems/service/console)이 core 루트 밖이라 bare import(react 등) 해석을 위해
-        # core 의 node_modules 를 svc 디렉토리에 symlink (idempotent; node_modules 는 git 제외).
-        if [[ -d "$SRC_CONSOLE/node_modules" ]]; then
-            ln -sfn ../../core/console/node_modules "$SCRIPT_DIR/ems/service/console/node_modules" 2>/dev/null || true
-        fi
-        # 1) svc(full) — base + 서비스 메뉴
-        ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod npm run build 2>&1 | tail -3 )
-        if [[ -d "$SRC_CONSOLE/dist" ]]; then
-            rm -rf "$DIST_DIR/console/dist"
-            cp -r "$SRC_CONSOLE/dist" "$DIST_DIR/console/dist"
-            cp -f "$SRC_CONSOLE/nginx.conf" "$DIST_DIR/console/nginx.conf" 2>/dev/null || true
-            ok "console(svc=base+서비스) ← cims-console/dist"
-        else
-            err "cims-console/dist 없음 (svc 빌드 실패?)"
-        fi
-        # 2) base — base 메뉴만 (oam-base 동봉용)
-        ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod VITE_CONSOLE_PROFILE=base npm run build 2>&1 | tail -3 )
-        if [[ -d "$SRC_CONSOLE/dist" ]]; then
-            rm -rf "$DIST_DIR/console/dist-base"
-            cp -r "$SRC_CONSOLE/dist" "$DIST_DIR/console/dist-base"
-            ok "console-base(base 메뉴만) ← cims-console/dist"
-        else
-            err "cims-console/dist 없음 (base 빌드 실패?)"
-        fi
-        n_changed=$((n_changed+1))
-    fi
-
-    # ── Phone 정적 빌드 ─────────────────────────────────────────
-    if [[ $did_phone -eq 1 ]]; then
-        ( cd "$SRC_PHONE" && npm run build 2>&1 | tail -3 )
-        if [[ -d "$SRC_PHONE/dist" ]]; then
-            mkdir -p "$DIST_DIR/phone"
-            rm -rf "$DIST_DIR/phone/dist"
-            cp -r "$SRC_PHONE/dist" "$DIST_DIR/phone/dist"
-            cp -f "$SRC_PHONE/nginx.conf" "$DIST_DIR/phone/nginx.conf" 2>/dev/null || true
-            ok "phone ← cims-phone/dist"
-        else
-            err "cims-phone/dist 없음 (빌드 실패?)"
-        fi
-        n_changed=$((n_changed+1))
-    fi
-
-    echo ""
-    info "sync 완료 ($n_changed 개 대상). 서비스 재기동: ./cims.sh restart <name>"
-}
-
-# OAM 녹취 변환툴(ffmpeg/ffprobe) vendor 자동 채움 — 빌드 시 정적 바이너리 다운로드.
-# 녹취 재생(raw RTP→mp4 변환)에 필요. air-gapped 런타임 설치 회피 위해 패키지에 동봉.
-# idempotent (ffmpeg+ffprobe 둘 다 있으면 skip). CIMS_SKIP_VENDOR_FETCH=1 로 끔.
-# 소스: 정적 빌드(amd64). CIMS_FFMPEG_URL 로 사내 미러/다른 빌드 지정 가능.
-# 결과: oam/vendor/bin/{ffmpeg,ffprobe} (oam_app 이 자동 탐지, .gitignore 처리됨).
-_FFMPEG_STATIC_URL_DEFAULT="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-
-_ensure_oam_vendor_ffmpeg() {
-    local bin_dir="$SCRIPT_DIR/ems/core/oam/vendor/bin"
-    mkdir -p "$bin_dir"
-
-    [[ -n "${CIMS_SKIP_VENDOR_FETCH:-}" ]] && return 0
-    # 이미 둘 다 실행 가능하면 skip (idempotent)
-    [[ -x "$bin_dir/ffmpeg" && -x "$bin_dir/ffprobe" ]] && return 0
-
-    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-        warn "curl/wget 없음 — oam/vendor/bin ffmpeg 자동 다운로드 불가 (수동 채움 필요)"
-        return 0
-    fi
-
-    local url="${CIMS_FFMPEG_URL:-$_FFMPEG_STATIC_URL_DEFAULT}"
-    local tmp; tmp="$(mktemp -d)"
-    local tarball="$tmp/ffmpeg-static.tar.xz"
-    info "OAM vendor: ffmpeg 정적 빌드 다운로드 중 ($url) ..."
-    if command -v curl >/dev/null 2>&1; then
-        curl -fL --retry 2 -o "$tarball" "$url" 2>/dev/null \
-            || { warn "ffmpeg 다운로드 실패 ($url) — 패키지에 변환툴 미포함. CIMS_FFMPEG_URL 로 미러 지정 가능."; rm -rf "$tmp"; return 0; }
-    else
-        wget -q -O "$tarball" "$url" \
-            || { warn "ffmpeg 다운로드 실패 ($url) — 패키지에 변환툴 미포함. CIMS_FFMPEG_URL 로 미러 지정 가능."; rm -rf "$tmp"; return 0; }
-    fi
-
-    # 압축 해제 (.tar.xz / .tar.gz 모두 시도) 후 ffmpeg/ffprobe 추출
-    if ! tar -xf "$tarball" -C "$tmp" 2>/dev/null; then
-        warn "ffmpeg tarball 해제 실패 ($tarball)"; rm -rf "$tmp"; return 0
-    fi
-    local f found
-    for f in ffmpeg ffprobe; do
-        found="$(find "$tmp" -type f -name "$f" 2>/dev/null | head -1)"
-        if [[ -n "$found" ]]; then
-            cp -f "$found" "$bin_dir/$f" && chmod +x "$bin_dir/$f"
-        fi
-    done
-    rm -rf "$tmp"
-
-    if [[ -x "$bin_dir/ffmpeg" ]]; then
-        local v; v="$("$bin_dir/ffmpeg" -version 2>/dev/null | head -1)"
-        ok "OAM vendor: ffmpeg 동봉 완료 → $bin_dir (${v:-ffmpeg})"
-        [[ -x "$bin_dir/ffprobe" ]] || warn "ffprobe 추출 실패 — 길이검출 fallback 사용(재생엔 영향 적음)"
-    else
-        warn "ffmpeg 추출 실패 — 패키지에 변환툴 미포함"
-    fi
-}
-
-# agent vendor 자동 채움 — keepalived offline 설치용 deb 6종
-# 누락된 패키지만 apt-get download 로 받음 (sudo 불필요). idempotent.
-# CIMS_SKIP_VENDOR_FETCH=1 로 끌 수 있음 (인터넷/apt 없는 환경).
-# keepalived 전용 deps (uninstall 시 purge 대상). libmnl0 은 keepalived 와 iproute2(`ip`)
-# 가 공유하는 base 의존성이라 vendor/base 로 분리 — keepalived uninstall 이 purge 해도
-# `ip` 가 깨지지 않도록 (vendor/base/README.md 참조).
-_KEEPALIVED_DEPS=(keepalived libnftnl11 libnl-3-200 libnl-genl-3-200 libsnmp40t64)
-# OS base 공유 의존성 — 모든 노드 필요, uninstall 시 제거하지 않음. libmnl0 = `ip` 의존성.
-_BASE_DEPS=(libmnl0)
-
-# vendor 서브디렉터리에 누락된 deb 를 apt-get download 로 채움 (sudo 불필요, idempotent).
-_ensure_agent_vendor_dir() {
-    local sub="$1"; shift
-    local deps=("$@")
-    local vendor_dir="$SCRIPT_DIR/agent/vendor/$sub"
-    mkdir -p "$vendor_dir"
-
-    [[ -n "${CIMS_SKIP_VENDOR_FETCH:-}" ]] && return 0
-
-    local missing=() pkg
-    for pkg in "${deps[@]}"; do
-        compgen -G "$vendor_dir/${pkg}_*.deb" >/dev/null 2>&1 || missing+=("$pkg")
-    done
-    [[ ${#missing[@]} -eq 0 ]] && return 0
-
-    if ! command -v apt-get &>/dev/null; then
-        warn "apt-get 미지원 환경 — agent/vendor/$sub 누락: ${missing[*]} (수동 채움 필요)"
-        return 0
-    fi
-
-    info "agent/vendor/$sub: ${#missing[@]}/${#deps[@]} 누락 → apt-get download (${missing[*]})"
-    if ! ( cd "$vendor_dir" && apt-get download "${missing[@]}" >/dev/null 2>&1 ); then
-        warn "apt-get download 실패 — vendor 미완성 가능 (인터넷/apt 캐시 확인). CIMS_SKIP_VENDOR_FETCH=1 로 차단"
-        return 0
-    fi
-    ok "agent/vendor/$sub: ${missing[*]} 자동 채움"
-}
-
-_ensure_agent_vendor_keepalived() {
-    _ensure_agent_vendor_dir keepalived "${_KEEPALIVED_DEPS[@]}"
-    _ensure_agent_vendor_dir base       "${_BASE_DEPS[@]}"
-}
-
-# 버전 유틸리티 — pkg.json 에 저장된 semver 를 읽고/bump/쓰기
-_pkg_read_version() {
-    local pkg="$1"
-    [[ -z $pkg || ! -f $pkg ]] && { echo ""; return; }
-    python3 - "$pkg" <<'PY' 2>/dev/null || echo ""
-import sys, json
-try:
-    with open(sys.argv[1], 'r', encoding='utf-8') as f:
-        d = json.load(f)
-    print(d.get('version', '') if isinstance(d, dict) else '')
-except Exception:
-    print('')
-PY
-}
-
-_pkg_bump_patch() {
-    local ver="$1"
-    [[ -z $ver ]] && ver="0.0.0"
-    local major minor patch
-    IFS='.' read -r major minor patch <<< "$ver"
-    major="${major:-0}"; minor="${minor:-0}"; patch="${patch:-0}"
-    # patch 에 숫자 아닌 것이 섞여 있으면 0 으로 리셋 (예: 1.0.0-rc1)
-    [[ ! "$patch" =~ ^[0-9]+$ ]] && patch=0
-    echo "${major}.${minor}.$((patch+1))"
-}
-
-_pkg_write_version() {
-    local pkg="$1" new_ver="$2"
-    [[ -z $pkg || ! -f $pkg || -z $new_ver ]] && return
-    python3 - "$pkg" "$new_ver" <<'PY' 2>/dev/null
-import sys, json
-p, v = sys.argv[1], sys.argv[2]
-try:
-    with open(p, 'r', encoding='utf-8') as f:
-        d = json.load(f)
-except Exception:
-    d = {}
-if not isinstance(d, dict): d = {}
-d['version'] = v
-with open(p, 'w', encoding='utf-8') as f:
-    json.dump(d, f, indent=2, ensure_ascii=False)
-    f.write('\n')
-PY
-}
-
-# (meta_file, explicit_ver, no_bump) → 실제 적용할 버전
-_resolve_version() {
-    local meta="$1" explicit="$2" nobump="$3"
-    if [[ -n $explicit ]]; then echo "$explicit"; return; fi
-    local cur; cur=$(_pkg_read_version "$meta")
-    [[ -z $cur ]] && cur="0.0.0"
-    if [[ "$nobump" == "1" ]]; then echo "$cur"; return; fi
-    _pkg_bump_patch "$cur"
-}
-
-cmd_installer() {
-    # 상용 부트스트랩 인스톨러 조립 — base 운영평면(oam + console + agent)만 동봉.
-    # 서비스 종속 모듈(csp/cmp/csc/...)은 제외 — 3단계(콘솔 패키지 등록)에서 별도 반입.
-    # 산출: build/dist/packages/cims-bootstrap-<oam버전>.tar.gz
-    local out_dir="$DIST_DIR/packages"
-    local _latest
-    _latest() { ls -1 "$out_dir"/$1-[0-9]*.tar.gz 2>/dev/null | sort -V | tail -1; }
-    local oam_tar agt_tar
-    oam_tar=$(_latest oam); agt_tar=$(_latest agent)
-    local miss=()
-    [[ -z "$oam_tar" ]] && miss+=(oam)
-    [[ -z "$agt_tar" ]] && miss+=(agent)
-    if [[ ${#miss[@]} -gt 0 ]]; then
-        err "installer 조립 불가 — 패키지 없음: ${miss[*]} (./cims.sh pkg ${miss[*]} 먼저)"
-        return 1
-    fi
-    local oam_ver; oam_ver=$(basename "$oam_tar" .tar.gz | sed 's/^oam-//')
-    local stage="$DIST_DIR/.installer.$$"
-    rm -rf "$stage"
-    mkdir -p "$stage/cims-bootstrap/packages"
-    cp -f "$SCRIPT_DIR/deployment/bootstrap/install.sh" "$stage/cims-bootstrap/install.sh"
-    chmod +x "$stage/cims-bootstrap/install.sh"
-    cp -f "$oam_tar" "$agt_tar" "$stage/cims-bootstrap/packages/"
-
-    # ── oam_base_service_split — console 은 oam-base 패키지에 동봉(별도 console 모듈 폐기) ──
-    # 부트스트랩은 oam(+동봉 console, 항상 full) + agent 만 시드. base/full 프로파일 빌드 폐기 —
-    # 위젯 노출은 런타임 카탈로그(D1/D7: 설치된 서비스 ∩ RBAC)가 게이팅한다.
-    cat > "$stage/cims-bootstrap/README.md" <<EOR
-# CIMS 부트스트랩 인스톨러 (base 운영평면)
-
-상용(Private) 망 1단계 설치 — 서비스 모듈 없이 OAM + Console + Agent 에셋만.
-
-    sudo ./install.sh                # /opt/cims-agent, HTTPS :4419
-    sudo ./install.sh --admin-pass '<비밀번호>' --port 4419
-
-설치 후: https://<서버IP>:4419/ 접속 (admin) →
-  2) 시스템/서버 구성 (각 서버 install-command 로 agent 설치)
-  3) 패키지 등록 (서비스 모듈 + 본 인스톨러 구성요소 업데이트 패키지)
-  4) 패키지 설치  5) 패키지 설정
-
-콘솔은 oam-base 패키지에 동봉(항상 full). 서비스 메뉴/위젯은 런타임 카탈로그가
-설치된 서비스 모듈(csc/oam-svc 등) ∩ 사용자 RBAC 로 게이팅 — 서비스 모듈을
-설치하면 해당 위젯이 자동 노출된다(별도 console 패키지 불요).
-
-동봉: $(basename "$oam_tar") (console 포함) / $(basename "$agt_tar")
-EOR
-    local out="$out_dir/cims-bootstrap-${oam_ver}.tar.gz"
-    ( cd "$stage" && tar czf "$out" cims-bootstrap )
-    rm -rf "$stage"
-    local size; size=$(stat -c%s "$out" 2>/dev/null || echo 0)
-    ok "부트스트랩 인스톨러: $(basename "$out") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo ${size}B))"
-}
-
-cmd_pkg() {
-    # 3단계 중 3단계 (패키지화): configure 까지 끝난 build/dist 를 모듈별 tarball 로 묶는다.
-    # 출력: build/dist/packages/<name>-<ver>.tar.gz
-    # 각 tarball 최상위에 meta.json (name, version, description, build/git/changelog) +
-    # config_template.json (설정 스키마) 포함.
-    #
-    # 버전 결정 로직:
-    #   1) -v <ver> 지정: 모든 대상 모듈이 그 버전 사용 + pkg.json 업데이트
-    #   2) --no-bump:     현재 pkg.json 의 version 그대로 사용 (재패키징)
-    #   3) 기본:          pkg.json 의 patch 를 +1 (auto-bump) + pkg.json 업데이트
-    local version=""
-    local changelog=""
-    local no_bump=0
-    local no_sync=0
-    local targets=()
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -v|--version)   version="$2"; shift 2 ;;
-            -m|--changelog) changelog="$2"; shift 2 ;;
-            --no-bump)      no_bump=1; shift ;;
-            --no-sync)      no_sync=1; shift ;;
-            -*) err "알 수 없는 옵션: $1"; return 1 ;;
-            *)  targets+=("$1"); shift ;;
-        esac
-    done
-    # default targets — 9 모듈 + 부가 (cwrtc/phone/agent).
-    # csp 바이너리는 다용도 → csp/isp/psp 3 tarball (소스/dist 디렉토리는 동일,
-    # tarball 이름과 meta.json 의 name 만 분리 — Roles/LocalIp 는 deploy overlay 가 결정).
-    # cmp 바이너리도 동일 → cmp/imp/pmp.
-    # oam_base_service_split — console 은 oam-base 패키지에 동봉(별도 모듈 폐기). 명시 시만 단독 패키징.
-    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp cmdp csp psp isp cwrtc csc oam oam-svc phone cspsim agent)
-
-    if [[ ! -d $DIST_DIR ]]; then
-        err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
-        return 1
-    fi
-
-    # ── 소스 → dist auto-sync (#15) ───────────────────────────────────────
-    # cmd_pkg 가 dist 를 tar 하므로, source 가 변경됐는데 dist 에 미반영이면 옛 코드가
-    # tarball 에 박힘. 이 함정에 반복적으로 막힌 회기 이력 (agent 0.0.13/16/20, CSC handler)
-    # 으로 인해 자동 sync 를 기본 동작으로. --no-sync 로 끄기 가능.
-    # C++ 바이너리 (csp/cmp/cspsim) 는 cmake build 가 별도 → 여기서는 mtime 비교 후 warn.
-    if [[ $no_sync -ne 1 && -n "$SRC_CONSOLE" ]]; then
-        local -A _sync_set=()
-        # pkg-meta / scripts 는 어느 컴포넌트를 패키징하든 항상 동기화 (cims.sh / pkg.json 박힘 방지)
-        _sync_set[pkg-meta]=1
-        _sync_set[scripts]=1
-        local _t
-        for _t in "${targets[@]}"; do
-            case "$_t" in
-                csc) _sync_set[csc]=1 ;;   # OAM 분리 Phase 2 — sync csc 가 oam/src 도 함께
-                oam) _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-base: csc 블록이 oam/src(자체 httpsrv/util/services)도 동기화 + console 동봉 (oam 은 자족 — csc 코드 미동봉)
-                oam-svc) _sync_set[oam-svc]=1; _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-svc = thin(자기 src) + svc(full) console 동봉; csc 블록이 oam/src 동기화 → 런타임/dev import 가능
-                agent)   _sync_set[agent]=1 ;;
-                console) _sync_set[console]=1 ;;
-                phone)   _sync_set[phone]=1 ;;
-            esac
-        done
-        local _sync_list=("${!_sync_set[@]}")
-        if [[ ${#_sync_list[@]} -gt 0 ]]; then
-            info "auto-sync (소스 → dist): ${_sync_list[*]}"
-            cmd_sync "${_sync_list[@]}" || warn "auto-sync 일부 실패 — 옛 dist 로 패키징 진행"
-        fi
-    elif [[ $no_sync -eq 1 ]]; then
-        warn "--no-sync 모드: source → dist sync 건너뜀 (옛 dist 로 패키징됨)"
-    fi
-
-    # C++ 바이너리 stale 경고 (dist 바이너리가 src 보다 오래된 경우)
-    local -A _bin_checked=()
-    local _bin_key _bin _src
-    for _t in "${targets[@]}"; do
-        case "$_t" in
-            csp|psp|isp) _bin_key="csp" ;;
-            cmp|pmp|imp) _bin_key="cmp" ;;
-            cspsim)      _bin_key="cspsim" ;;
-            *)           _bin_key="" ;;
-        esac
-        [[ -z "$_bin_key" || -n "${_bin_checked[$_bin_key]:-}" ]] && continue
-        _bin_checked[$_bin_key]=1
-        _bin="$DIST_DIR/$_bin_key/bin/$_bin_key"
-        _src="$SCRIPT_DIR/$_bin_key/src"
-        if [[ -f "$_bin" && -d "$_src" ]]; then
-            if find "$_src" -type f \( -name '*.cpp' -o -name '*.cc' -o -name '*.h' -o -name '*.hpp' \) -newer "$_bin" 2>/dev/null | grep -q .; then
-                warn "$_bin_key: dist 바이너리가 src 보다 오래됨 → 'cims.sh build' 후 다시 pkg 권장"
-            fi
-        fi
-    done
-
-    # 컴포넌트별 소스 루트 매핑 — 각 소스 루트의 pkg.json 에서 name/description 를 가져옴
-    # (dist/ 밖에서 실행되는 경우만 소스 루트가 있으며, 그 외에는 dist/<comp>/pkg.json 로 fallback)
-    _src_root_for() {
-        case "$1" in
-            csp|psp|isp) echo "$SCRIPT_DIR/csp" ;;   # 동일 csp 바이너리 + 동일 config_template
-            cmp|pmp|imp) echo "$SCRIPT_DIR/cmp" ;;   # 동일 cmp 바이너리 + 동일 config_template
-            cmdp)        echo "$SCRIPT_DIR/cmdp" ;;  # MCData media plane (MSRP)
-            csc)         echo "$SCRIPT_DIR/csc" ;;
-            oam)         echo "$SCRIPT_DIR/ems/core/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
-            oam-svc)    echo "$SCRIPT_DIR/ems/service/oam" ;;  # oam_base_service_split D5 — base 게이트웨이 뒤 독립 서비스 모듈
-            cwrtc)       echo "$SCRIPT_DIR/cwrtc" ;;
-            console)     echo "$SCRIPT_DIR/ems/core/console" ;;
-            phone)       echo "$SCRIPT_DIR/cims-phone" ;;
-            cspsim)      echo "$SCRIPT_DIR/cspsim" ;;
-            agent)       echo "$SCRIPT_DIR/agent" ;;
-            *)           echo "" ;;
-        esac
-    }
-
-    # Tarball 안 모듈 디렉토리 이름 — 패키지 정체성 분리: psp/isp/pmp/imp 도
-    # 자기 이름의 디렉토리로 들어감. dist 트리는 csp/cmp 한 종 그대로 두고,
-    # 변종은 pkg 단계에서 staging 디렉토리 (dist/csp 복사 + 바이너리/config rename)
-    # 로 새 디렉토리를 만든 후 tar.
-    _src_sub_for() {
-        case "$1" in
-            *) echo "$1" ;;   # 모든 컴포넌트 자기 이름
-        esac
-    }
-
-    # 변종 (psp/isp/pmp/imp) 의 base dist 디렉토리 — 같은 ELF 사용
-    _base_dist_for() {
-        case "$1" in
-            psp|isp) echo "csp" ;;
-            pmp|imp) echo "cmp" ;;
-            *)       echo "" ;;
-        esac
-    }
-
-    # Git 정보 (가능한 경우)
-    local git_sha="" git_branch=""
-    if git -C "$SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-        git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "")
-        git_branch=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-    fi
-    local packaged_at; packaged_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    local packaged_by="${USER:-unknown}@$(hostname -s 2>/dev/null || echo unknown)"
-
-    local out_dir="$DIST_DIR/packages"
-    mkdir -p "$out_dir"
-
-    local t src_sub tar_file build_date pkg_root base_dist stage
-    for t in "${targets[@]}"; do
-        case "$t" in
-            cmp|pmp|imp|cmdp|csp|psp|isp|cwrtc|csc|oam|oam-svc|console|phone|cspsim|agent)
-                src_sub=$(_src_sub_for "$t") ;;
-            *) err "알 수 없는 컴포넌트: $t"; continue ;;
-        esac
-
-        # 변종 (psp/isp/pmp/imp): staging 에 base dist (csp/cmp) 복사 + 바이너리/config
-        # 이름을 변종 이름으로 rename → tar root 가 staging 이 됨. dist/csp 자체는 손대지 않음.
-        pkg_root="$DIST_DIR"
-        stage=""
-        base_dist=$(_base_dist_for "$t")
-        if [[ -n "$base_dist" ]]; then
-            if [[ ! -d "$DIST_DIR/$base_dist" ]]; then
-                warn "skip: $DIST_DIR/$base_dist 없음 (variant=$t base=$base_dist)"; continue
-            fi
-            stage="$DIST_DIR/.pkgstage.$$.${t}"
-            rm -rf "$stage"
-            mkdir -p "$stage/$t"
-            # base dist 의 내용 그대로 복사 (cp -a 로 권한/심볼릭 보존).
-            cp -a "$DIST_DIR/$base_dist/." "$stage/$t/"
-            # 바이너리 rename (csp → psp 등).
-            [[ -f "$stage/$t/bin/$base_dist" ]] && mv "$stage/$t/bin/$base_dist" "$stage/$t/bin/$t"
-            # 시작 스크립트 rename (있을 때만 — csp.sh → psp.sh).
-            [[ -f "$stage/$t/bin/$base_dist.sh" ]] && mv "$stage/$t/bin/$base_dist.sh" "$stage/$t/bin/$t.sh"
-            # config 파일 rename (configure 후라면 있고, 빌드 직후라면 없음).
-            [[ -f "$stage/$t/config/$base_dist.json" ]] && mv "$stage/$t/config/$base_dist.json" "$stage/$t/config/$t.json"
-            # cims.sh 도 staging 으로 (tar root 에 포함).
-            [[ -f "$DIST_DIR/cims.sh" ]] && cp "$DIST_DIR/cims.sh" "$stage/"
-            pkg_root="$stage"
-        elif [[ ! -d "$DIST_DIR/$src_sub" ]]; then
-            warn "skip: $DIST_DIR/$src_sub 없음 (target=$t src_sub=$src_sub)"; continue
-        fi
-
-        # ── oam: P6 (csc_standalone_module.md) — oam 은 자족(self-contained).
-        #    httpsrv/util/services 를 oam/src 자체 보유(cmd_sync 가 rsync) → csc/src 복사 폐지.
-        #    런타임도 csc/src 마운트 안 함(P3b). 서비스 코드(mcptt/idms 등)는 csc 패키지에만.
-        if [[ "$t" == "oam" ]]; then
-            stage="$DIST_DIR/.pkgstage.$$.${t}"
-            rm -rf "$stage"
-            mkdir -p "$stage"
-            cp -a "$DIST_DIR/oam" "$stage/oam"
-            find "$stage/oam/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-            # 콘솔 base/svc 분리 (백엔드 oam-base/oam-svc 와 대칭) —
-            #   oam-base 패키지엔 **base 메뉴 콘솔(dist-base)** 만 동봉.
-            #   oam 이 <root>/oam/console/dist 를 서빙(console_static.resolve 의 번들 후보).
-            #   svc(full=base+서비스) 콘솔은 **oam-svc 패키지에 동봉**(아래 oam-svc 블록) →
-            #   oam-svc 배포 시 base OAM resolver 가 그쪽을 우선 서빙(자동 승격).
-            #   (dist-base 미존재 시 svc full 로 폴백 → 구 동작 호환)
-            local _condist="$DIST_DIR/console/dist-base"
-            [[ -d "$_condist" ]] || _condist="$DIST_DIR/console/dist"
-            [[ -d "$_condist" ]] || _condist="$SRC_CONSOLE/dist"
-            if [[ -d "$_condist" ]]; then
-                rm -rf "$stage/oam/console"
-                mkdir -p "$stage/oam/console"
-                cp -a "$_condist" "$stage/oam/console/dist"
-                find "$stage/oam/console" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-            else
-                warn "oam: console dist 미발견($_condist) — 콘솔 미동봉 패키지(서빙 비활성)"
-            fi
-            pkg_root="$stage"
-        fi
-
-        # ── oam-svc: 콘솔 base/svc 분리 — svc(full=base+서비스) 콘솔을 oam-svc 패키지에 동봉.
-        #    base OAM resolver 가 배포된 oam-svc 의 console/dist 를 oam-base 동봉 base 콘솔보다
-        #    우선 서빙 → oam-svc 배포 시 콘솔이 자동으로 풀 메뉴로 승격(백엔드 분리와 대칭).
-        if [[ "$t" == "oam-svc" ]]; then
-            stage="$DIST_DIR/.pkgstage.$$.${t}"
-            rm -rf "$stage"
-            mkdir -p "$stage"
-            cp -a "$DIST_DIR/oam-svc" "$stage/oam-svc"
-            find "$stage/oam-svc/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-            local _svcdist="$DIST_DIR/console/dist"
-            [[ -d "$_svcdist" ]] || _svcdist="$SRC_CONSOLE/dist"
-            if [[ -d "$_svcdist" ]]; then
-                rm -rf "$stage/oam-svc/console"
-                mkdir -p "$stage/oam-svc/console"
-                cp -a "$_svcdist" "$stage/oam-svc/console/dist"
-                find "$stage/oam-svc/console" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-            else
-                warn "oam-svc: svc console dist 미발견($_svcdist) — 콘솔 미동봉"
-            fi
-            pkg_root="$stage"
-        fi
-
-        # build_date = 컴포넌트 dist 디렉토리 안에서 가장 최근 파일의 mtime (base dist 기준 — staging 은 cp 로 mtime 갱신될 수 있음).
-        local _bd_root="$DIST_DIR/${base_dist:-$src_sub}"
-        build_date=$(find "$_bd_root" -type f -printf '%T@\n' 2>/dev/null \
-                        | sort -nr | head -1 \
-                        | xargs -I{} date -u -d @{} +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
-
-        # 소스 루트 pkg.json 에서 description/version 을 읽음 (없으면 dist/<comp>/pkg.json fallback)
-        local comp_meta=""
-        local src_root; src_root=$(_src_root_for "$t")
-        for cand in "$src_root/pkg.json" "$DIST_DIR/$t/pkg.json"; do
-            [[ -n $cand && -f $cand ]] && comp_meta="$cand" && break
-        done
-        [[ -z $comp_meta ]] && warn "$t: pkg.json 없음 — description 공란"
-
-        # 이 모듈의 실제 적용 버전 결정 (explicit > no-bump > auto-bump patch).
-        # 변종 (psp/isp/pmp/imp) 은 base (csp/cmp) 의 version 을 read-only 로 따라감 —
-        # 9 tarball 이 같은 patch+1 을 3번 누적하지 않도록.
-        local effective_no_bump="$no_bump"
-        case "$t" in
-            psp|isp|pmp|imp) effective_no_bump=1 ;;
-        esac
-        local comp_ver; comp_ver=$(_resolve_version "$comp_meta" "$version" "$effective_no_bump")
-        # pkg.json 에 반영 (base 만 — 변종은 read-only)
-        if [[ -n $comp_ver && "$effective_no_bump" != "1" ]]; then
-            [[ -n $comp_meta ]] && _pkg_write_version "$comp_meta" "$comp_ver"
-            local dist_meta="$DIST_DIR/$t/pkg.json"
-            [[ -f $dist_meta && "$dist_meta" != "$comp_meta" ]] && _pkg_write_version "$dist_meta" "$comp_ver"
-        fi
-
-        # meta.json 생성 (pkg_root 안에 임시로 작성 → tar 루트에 추가 후 삭제;
-        # 변종은 staging, 그 외는 DIST_DIR).
-        local tmp_meta="$pkg_root/.pkgmeta.$$.json"
-        python3 - "$comp_meta" "$t" "$comp_ver" "$build_date" "$git_sha" "$git_branch" \
-                  "$packaged_at" "$packaged_by" "$changelog" <<'PYEOF' > "$tmp_meta"
-import sys, json, os
-meta_file, name, version, build_date, git_sha, git_branch, packaged_at, packaged_by, changelog = sys.argv[1:]
-desc = ""
-service = None
-ha_capability = None
-gateway = None
-# 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "...", "ha_capability": "...", "service": {...}, "gateway": {...} }
-if meta_file and os.path.isfile(meta_file):
-    try:
-        with open(meta_file, 'r', encoding='utf-8') as f:
-            entry = json.load(f)
-        if isinstance(entry, dict):
-            # 단일 컴포넌트 스키마
-            if "description" in entry:
-                desc = entry.get("description", "")
-                if isinstance(entry.get("service"), dict):
-                    service = entry["service"]
-                ha_capability = entry.get("ha_capability")
-                if isinstance(entry.get("gateway"), dict):
-                    gateway = entry["gateway"]
-            # 구(舊) 레지스트리 스키마 (후방 호환)
-            elif name in entry and isinstance(entry[name], dict):
-                desc = entry[name].get("description", "")
-                if isinstance(entry[name].get("service"), dict):
-                    service = entry[name]["service"]
-                ha_capability = entry[name].get("ha_capability")
-                if isinstance(entry[name].get("gateway"), dict):
-                    gateway = entry[name]["gateway"]
-    except Exception:
-        pass
-# csp/cmp 변종은 base description 끝에 역할 suffix 추가 (식별용).
-_ROLE_SUFFIX = {
-    "psp": " · PSP role (PTT CSCF + PTT-AS)",
-    "isp": " · ISP role (IBCF / IP-PBX trunk)",
-    "pmp": " · PMP role (PTT RTP/Floor)",
-    "imp": " · IMP role (IBCF media)",
-}
-if name in _ROLE_SUFFIX:
-    desc = (desc or "").rstrip() + _ROLE_SUFFIX[name]
-meta = {
-    "name": name,
-    "version": version,
-    "description": desc,
-    "build_date": build_date or None,
-    "git_sha": git_sha or None,
-    "git_branch": git_branch or None,
-    "packaged_at": packaged_at,
-    "packaged_by": packaged_by,
-    "changelog": changelog or "",
-}
-if service is not None:
-    meta["service"] = service
-if ha_capability is not None:
-    meta["ha_capability"] = ha_capability
-if gateway is not None:
-    meta["gateway"] = gateway      # self-register: 모듈 선언 라우트(세그먼트) — OAM 이 배포 시 등록
-print(json.dumps(meta, indent=2, ensure_ascii=False))
-PYEOF
-
-        # config_template.json: v3 (2026-04-22) 부터 소스의 config/ 아래.
-        #   tarball 에는 그대로 최상위(/config_template.json) 로 포함 (agents.py 가 루트에서 파싱).
-        local tmp_tmpl="$pkg_root/.pkgtmpl.$$.json"
-        local tmpl_basename=".pkgtmpl.$$.json"
-        local has_template=0
-        if [[ -n "$src_root" ]]; then
-            local _tmpl_src=""
-            if   [[ -f "$src_root/config/config_template.json" ]]; then _tmpl_src="$src_root/config/config_template.json"
-            elif [[ -f "$src_root/config_template.json"       ]]; then _tmpl_src="$src_root/config_template.json"   # legacy fallback
-            fi
-            if [[ -n "$_tmpl_src" ]]; then
-                cp "$_tmpl_src" "$tmp_tmpl"
-                has_template=1
-            fi
-        fi
-
-        tar_file="$out_dir/${t}-${comp_ver}.tar.gz"
-        info "패키징: $t-$comp_ver  (git=$git_sha/$git_branch)"
-
-        # tar 구성: meta.json(루트) + config_template.json(루트, 있을 때) + <component>/ + cims.sh
-        local meta_basename=".pkgmeta.$$.json"
-        # 런타임 산출물/상태 디렉토리는 배포에서 제외
-        #  log/         : 서비스 로그 (csp/csc 등)
-        #  run/         : pid 파일
-        #  cache/       : CSC 설정 캐시 (고정값이 아닌 현재 상태)
-        #  packages/    : 배포본 CSC 가 수집한 업로드 tarball (신규 배포에 포함되면 중복 팽창)
-        #  packages_tb/ : TB-CSC 가 수집한 업로드 tarball — packages 와 별개 store.
-        #                 누락 시 csc tarball 이 GB 단위로 부풀어 S5-CSC-DEPLOY-INSTALL 60s timeout.
-        #  packages_trash/ : TB-CSC 삭제 보관소
-        #  cdr/         : CDR 산출물
-        #  dist/        : 번들러 산출물 이 아닌 상위 dist 와 혼동 방지 (cwrtc/dist 등 없음)
-        ( cd "$pkg_root" && \
-            tar czf "$tar_file" \
-                --exclude="$src_sub/log" \
-                --exclude="$src_sub/run" \
-                --exclude="$src_sub/cache" \
-                --exclude="$src_sub/cache_tb" \
-                --exclude="$src_sub/packages" \
-                --exclude="$src_sub/packages_tb" \
-                --exclude="$src_sub/packages_trash" \
-                --exclude="$src_sub/cdr" \
-                --exclude='*.pid' --exclude='*.pyc' \
-                --exclude='__pycache__' --exclude='.cache' \
-                --transform="s|^$meta_basename\$|meta.json|" \
-                --transform="s|^$tmpl_basename\$|config_template.json|" \
-                "$meta_basename" \
-                $( [[ $has_template -eq 1 ]] && echo "$tmpl_basename" ) \
-                "$src_sub" $( [[ -f cims.sh ]] && echo cims.sh ) )
-        rm -f "$tmp_meta"
-        [[ $has_template -eq 1 ]] && rm -f "$tmp_tmpl"
-        # 변종 staging cleanup
-        [[ -n "$stage" && -d "$stage" ]] && rm -rf "$stage"
-        local size; size=$(stat -c%s "$tar_file" 2>/dev/null || echo 0)
-        ok "$(basename "$tar_file") ($(numfmt --to=iec --suffix=B "$size" 2>/dev/null || echo "${size}B"))"
-    done
-
-    # stale 버전 cleanup — 각 component 의 mtime 기준 최신 1개만 보존, 나머지 제거.
-    # 배경: verify/lib/items/stage5/_native_steps.py:_latest_tarball() 의 natural-sort 가
-    #   잔재 0.0.2 같은 stale tarball 을 선택 → deploy 가 OLD binary 사용.
-    # 이 라운드에 패키징한 component 만 정리 (다른 컴포넌트 손대지 않음).
-    local _cleaned=0 _latest _stale
-    for t in "${targets[@]}"; do
-        _latest=$(ls -1t "$out_dir/${t}-"[0-9]*.tar.gz 2>/dev/null | head -1)
-        [[ -z "$_latest" ]] && continue
-        while IFS= read -r _stale; do
-            [[ "$_stale" == "$_latest" ]] && continue
-            rm -f "$_stale" && _cleaned=$((_cleaned+1)) && info "stale 제거: $(basename "$_stale")"
-        done < <(ls -1 "$out_dir/${t}-"[0-9]*.tar.gz 2>/dev/null)
-    done
-    [[ $_cleaned -gt 0 ]] && ok "stale tarball $_cleaned 개 정리"
-
-    # manifest.json 생성/갱신 — 현재 packages/*.tar.gz 의 SHA256 + size + mtime 기록.
-    # Console UI 의 다운로드 라벨 (버전 표시) 과 검증 S6 의 immutability gate 가 이 파일 사용.
-    # 검증 S4-PKG-MANIFEST 가 같은 로직으로 만들지만, cmd_pkg 직후에도 항상 fresh 하도록.
-    local manifest_path="$out_dir/manifest.json"
-    local _git_sha="${git_sha:-}" _git_branch="${git_branch:-}"
-    local _host; _host=$(hostname -s 2>/dev/null || echo unknown)
-    python3 - "$out_dir" "$manifest_path" "$_git_sha" "$_git_branch" "$_host" <<'PYEOF' \
-        && ok "manifest.json 갱신 → $manifest_path" \
-        || warn "manifest.json 갱신 실패"
-import sys, os, json, hashlib
-from datetime import datetime, timezone
-out_dir, out_path, git_sha, git_branch, host = sys.argv[1:6]
-def sha256(p):
-    h = hashlib.sha256()
-    with open(p, 'rb') as f:
-        for chunk in iter(lambda: f.read(64*1024), b''):
-            h.update(chunk)
-    return h.hexdigest()
-entries = []
-for fn in sorted(os.listdir(out_dir)):
-    if not fn.endswith('.tar.gz'): continue
-    full = os.path.join(out_dir, fn)
-    entries.append({
-        'name':   fn,
-        'size':   os.path.getsize(full),
-        'sha256': sha256(full),
-        'mtime':  datetime.fromtimestamp(os.path.getmtime(full), tz=timezone.utc).isoformat(),
-    })
-manifest = {
-    'ts': datetime.now(timezone.utc).astimezone().isoformat(),
-    'git': {'branch': git_branch, 'sha': git_sha},
-    'host': host,
-    'ens_ip': '',
-    'packages': entries,
-}
-with open(out_path, 'w', encoding='utf-8') as f:
-    json.dump(manifest, f, ensure_ascii=False, indent=2)
-PYEOF
-
-    header "[3/3] 생성된 패키지 (업로드 대상):"
-    ls -lh "$out_dir"/*.tar.gz 2>/dev/null | awk '{printf "  %s  %s\n", $5, $9}'
-    echo ""
-    info "Console 에서 업로드: 배포 관리 → 패키지 → ＋ 업로드 (파일만 선택하면 meta 자동 인식)"
-
-    # 상용 부트스트랩 인스톨러 자동 조립 — oam-base(console 동봉) + agent tarball 이
-    # 준비된 경우에만 (개별 모듈 pkg 호출 시에는 보통 미충족 → skip).
-    if ls "$out_dir"/oam-[0-9]*.tar.gz "$out_dir"/agent-*.tar.gz >/dev/null 2>&1; then
-        cmd_installer || warn "부트스트랩 인스톨러 조립 실패 (개별 패키지는 정상)"
-    fi
-}
+# ── 동기화/패키징 — scripts/{sync,package}.sh 로 분리 ──────────
+# 본체는 scripts/ (소스 트리 전용). CLI 계약은 여기(cims.sh sync|pkg|installer)가 유지.
+cmd_sync()      { "$SCRIPT_DIR/scripts/sync.sh" "$@"; }
+cmd_pkg()       { "$SCRIPT_DIR/scripts/package.sh" pkg "$@"; }
+cmd_installer() { "$SCRIPT_DIR/scripts/package.sh" installer "$@"; }
 
 # ── TB-CSC / TB-Console 운영 (개발 워크플로용 4419/3000 상시 동작) ──
 # 운영 daemon 은 agent/bin/cims-svc, TB 2종은 여기. dist 트리에서는 csc 만 가능 (console=npm dev 서버).
@@ -2001,11 +1144,16 @@ case "${1:-}" in
     init)      shift; cmd_init "$@" ;;
     build)     shift; cmd_build "$@" ;;
     configure) shift; cmd_configure "$@" ;;
+    up)        shift; cmd_up "$@" ;;
     sim)       shift; cmd_sim "$@" ;;
     clean)     shift; cmd_clean "${1:-all}" ;;
     reset)     shift; cmd_reset "$@" ;;
     preflight) cmd_preflight ;;
-    verify)    shift; cmd_verify "$@" ;;
+    # 검증(S1~S6)은 ./cims-verify 로 이전됨 (cims.sh = 빌드/패키징/설정, cims-svc = 운영).
+    verify)
+        err "검증 명령은 ./cims-verify 로 이전됨"
+        err "  사용: $(dirname "${BASH_SOURCE[0]}")/cims-verify ${2:-stage1}"
+        err "  (항목/프리셋: cims-verify list | list-presets | run --preset <NAME>)"; exit 2 ;;
     pkg)       shift; cmd_pkg "$@" ;;
     installer) shift; cmd_installer "$@" ;;
     sync)      shift; cmd_sync "$@" ;;

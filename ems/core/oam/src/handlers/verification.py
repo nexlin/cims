@@ -2,7 +2,7 @@
 
 엔드포인트:
   /stages (GET)                            — 6 stage 메타 + 각 stage 의 항목 트리
-  /stages/<N> (POST)                       — cims.sh verify stage<N> 실행 (N=1~6)
+  /stages/<N> (POST)                       — cims-verify stage<N> 실행 (N=1~6)
                                               body:
                                                 - async=true 지정 시 job_id 즉시 반환
                                                 - items/preset/only_children 으로 부분 실행
@@ -46,7 +46,7 @@ _REPORT_DIR = ''          # verify_reports/ 경로
 _run_store = None         # 지연 import — _SCRIPT_DIR 결정 후 로드
 _live_store = None        # 지연 import — verify.lib.live_store
 
-# cims.sh verify stage<N> 의 합리적 timeout (초)
+# cims-verify stage<N> 의 합리적 timeout (초)
 _STAGE_TIMEOUT = {
     1:  300,   # 정적 검사 (lint/typecheck/syntax/unit)
     2:  900,   # 빌드
@@ -103,7 +103,7 @@ async def handle_verification(handler_args: HandlerArgs, kwargs: dict) -> Handle
     if after == 'stages' and method == 'GET':
         return await _get_stages_overview()
 
-    # /stages/<N> — cims.sh verify stage<N> 실행
+    # /stages/<N> — cims-verify stage<N> 실행
     m = re.fullmatch(r'stages/(\d+)', after)
     if m and method == 'POST':
         return await _run_stage(int(m.group(1)), handler_args)
@@ -854,11 +854,11 @@ async def _get_active_runs() -> HandlerResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Stage 실행 (cims.sh verify stage<N>)
+# Stage 실행 (cims-verify stage<N>)
 # ─────────────────────────────────────────────────────────────
 
 def _build_stage_argv(stage: int, opts: dict) -> list:
-    """opts → cims.sh argv. stage 별 옵션 호환성 적용."""
+    """opts → cims-verify argv. stage 별 옵션 호환성 적용."""
     skip_build = bool(opts.get('skip_build', True))
     skip_pkg   = bool(opts.get('skip_pkg', True))
     skip_reset = bool(opts.get('skip_reset', False))
@@ -866,7 +866,7 @@ def _build_stage_argv(stage: int, opts: dict) -> list:
     items      = opts.get('items') or []
     only_children = opts.get('only_children') or {}
 
-    argv = [os.path.join(_SCRIPT_DIR, 'cims.sh'), 'verify', f'stage{stage}']
+    argv = [os.path.join(_SCRIPT_DIR, 'cims-verify'), f'stage{stage}']
     # 옵션 — 모든 stage 가 cims_verify CLI 위임이므로 동일하게 통과
     if skip_build: argv.append('--skip-build')
     if skip_pkg:   argv.append('--skip-pkg')
@@ -890,8 +890,8 @@ def _build_stage_argv(stage: int, opts: dict) -> list:
 async def _run_stage(stage: int, handler_args: HandlerArgs) -> HandlerResult:
     if stage not in _VALID_STAGES:
         return HandlerResult(status=400, body={'error': f'stage must be 1~6 (got {stage})'})
-    if not _SCRIPT_DIR or not os.path.isfile(os.path.join(_SCRIPT_DIR, 'cims.sh')):
-        return HandlerResult(status=500, body={'error': f'cims.sh not found at {_SCRIPT_DIR}'})
+    if not _SCRIPT_DIR or not os.path.isfile(os.path.join(_SCRIPT_DIR, 'cims-verify')):
+        return HandlerResult(status=500, body={'error': f'cims-verify not found at {_SCRIPT_DIR}'})
 
     body = handler_args.body or {}
     opts = body if isinstance(body, dict) else {}

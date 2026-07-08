@@ -17,7 +17,7 @@
 | **OAM** | 운영·관리 REST API (콘솔 백엔드) | Python (vendored) | `python3 ems/core/oam/src/oam_app.py` | HTTPS 4419 |
 | **CSC** | 가입자/그룹/MCPTT REST API | Python (vendored) | `python3 csc/src/csc_app.py` | HTTPS 4420/4421, MCPTT 4430 |
 | **Console** | 관리자 Web UI (React/Vite) | `ems/core/console/dist/` 또는 dev 서버 | `npm run dev` (개발) | HTTP 3000 |
-| **MariaDB** | 가입자/그룹/조직/RBAC 등 영속 저장 | — | 시스템 서비스 | 3306 |
+| **MariaDB** | 가입자/그룹/조직/RBAC 등 영속 저장 | — | 시스템 서비스 (별도 장비 가능) | 3306 |
 
 **의존 순서**: MariaDB → (C++/Python 빌드) → **CMP → CSP** → cwrtc → OAM → CSC → Console.
 CMP 는 CSP 의 제어 명령(UDP 9000)을 받으므로 **반드시 CSP 보다 먼저** 떠 있어야 합니다.
@@ -26,24 +26,35 @@ CMP 는 CSP 의 제어 명령(UDP 9000)을 받으므로 **반드시 CSP 보다 �
 
 ## 1. 사전 준비 (시스템 패키지)
 
-### 1.1 빌드/런타임 도구
+### 1.1 빌드/런타임 도구 (빌드·서비스 장비)
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
   cmake build-essential libssl-dev git make \
   clang-format \
+  libmariadb-dev \
   python3 python3-dev \
-  nodejs npm \
-  mariadb-server mariadb-client
+  nodejs npm
 ```
+
+> `libmariadb-dev` 는 MariaDB **클라이언트 라이브러리·헤더**로, DB 서버가 아닙니다.
+> `csp/CMakeLists.txt` 가 이것이 없으면 configure 를 중단하므로 **빌드 장비에 필수**이며,
+> DB 서버를 별도 장비에 두는 구성과 무관하게 설치해야 합니다.
+
+### 1.2 MariaDB 서버 (DB 장비 — 빌드 장비와 다를 수 있음)
+```bash
+sudo apt-get install -y mariadb-server mariadb-client
+```
+스키마 적용·계정 권한은 §6 을 참조. DB 를 별도 장비에 두는 경우 §6.2 의 원격 접속 주의 참조.
 
 | 도구 | 최소 버전 | 비고 |
 |---|---|---|
 | CMake | 3.10+ | `CMakeLists.txt` `cmake_minimum_required(VERSION 3.10)` |
 | GCC/G++ | C++17 지원 | `set(CMAKE_CXX_STANDARD 17)` |
+| libmariadb-dev | 임의 | **CSP 빌드 필수** — MariaDB 클라이언트 라이브러리·헤더 (`mysql.h`). 배포 시 `libmariadb.so` vendoring 에도 사용 |
 | Python | 3.x | csc/oam 실행. 의존성은 vendored(아래 §5) |
 | Node/npm | 18+ 권장 | Vite 8.x 사용 (`ems/core/console/package.json`) |
-| MariaDB | 10.x | 가입자/그룹 영속 저장소 |
+| MariaDB 서버 | 10.x | 가입자/그룹 영속 저장소. 별도 장비 가능 (§1.2, §6) |
 | clang-format | 임의 | 검증 S1 정적검사용. 없으면 SKIP |
 
 > **첫 C++ 빌드는 네트워크가 필요합니다.** CMake `ExternalProject_Add` 가
@@ -173,6 +184,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON cims.* TO 'cims'@'localhost'  IDENTIFIED
 FLUSH PRIVILEGES;
 ```
 - DB 이름 `cims`, 기본 사용자 `cims`, 포트 3306. 자격증명은 각 컴포넌트 json 의 `CimsDatabase` 블록과 **일치**해야 합니다.
+- **DB 를 별도 장비에 두는 경우**: 위 GRANT 의 `'cims'@'127.0.0.1'`/`'localhost'` 를 **서비스 장비의 IP** 로
+  바꾸고, MariaDB 의 `bind-address` 가 외부 접속을 허용하는지 확인합니다. 각 컴포넌트 json 의
+  `CimsDatabase.host` (configure 시 `--db-host`) 에는 DB 장비 주소를 지정합니다.
 
 ### 6.3 `migrate_*.sql` 의 용도
 `sql/migrate_*.sql`(31개) 은 **기존 DB 를 올릴 때 쓰는 이력성 마이그레이션**입니다.
@@ -184,16 +198,33 @@ FLUSH PRIVILEGES;
 ## 7. 설정 생성 (`configure.sh`)
 
 각 컴포넌트 json(IP/도메인/DB/로그경로)을 로컬 환경에 맞게 한 번에 생성합니다.
+
+**대화형 모드 (기본)** — 옵션 없이 터미널에서 실행하면 항목별로 기본값을 제시하고
+Enter(수락) 또는 직접 입력으로 진행합니다:
+```bash
+./configure.sh          # 또는 ./cims.sh configure
+```
+- 항목: LOCAL_IP(자동 감지) → 컴포넌트별 IP 분리(y/N) → DB → 도메인/국가코드 → 로그·녹취 경로(y/N)
+- `-` 입력 = 해당 항목을 파생 기본값(예: CSP_IP=LOCAL_IP)으로 되돌림
+- 답변은 `.cims/server.local.json` 에 저장되어 재실행·`cims-verify` 자동 호출 시 기본값으로 사용
+- `-y/--defaults`: 대화형 없이 저장값/기본값으로 즉시 진행, `-i/--interactive`: 대화형 강제
+
+**비대화 모드** — 옵션을 하나라도 주거나 TTY 가 아니면(스크립트/CI/verify) 기존처럼 즉시 실행:
 ```bash
 ./configure.sh \
   --local-ip 192.168.1.10 \
   --db-host 127.0.0.1 --db-user cims --db-password '<DB_PASSWORD>' \
   --volte-domain ims.mnc033.mcc450.3gppnetwork.org
 ```
-- 생성 대상: `build/dist/{cmp,csp,csc,cwrtc}/config/*.json` + `ems/core/console/.env.local`/`.env.tb.local`(`VITE_ADMIN_TARGET`) + `build/dist/sql/grant_db_access.sql`
-- 주요 플래그: `--csp-ip/--cmp-ip/--cwrtc-ip/--csc-host`, `--db-host/--db-user/--db-password`,
+- 생성 대상: `build/dist/{cmp,cmdp,csp,csc,cwrtc}/config/*.json` + `build/dist/config/local_nodes.jsonl`
+  + `ems/core/console/.env.local`/`.env.tb.local`(`VITE_ADMIN_TARGET`) + `build/dist/sql/grant_db_access.sql`
+- `local_nodes.jsonl` (SIP 리스너 컬렉션): CSP 는 SIP 리스너를 이 컬렉션에서만 생성하고 primary
+  부재 시 기동을 중단하므로, configure 가 UDP 5060(primary)/TCP 25061/TLS 5061 을 최초 1회
+  시드한다 (**non-clobber** — 파일이 있으면 UI/운영 편집을 보존하고 건드리지 않음).
+- 주요 플래그: `--csp-ip/--cmp-ip/--cmdp-ip/--cwrtc-ip/--csc-host`, `--db-host/--db-user/--db-password`,
   `--volte-domain/--ptt-domain`, `--service-log-dir/--msg-log-dir/--record-dir`, `--cims-secret/--idms-secret`
-- 재실행 멱등성: `--local-ip`/`--db-password` 는 `.cims/server.local.json` 에 저장되어 다음 실행 시 기본값으로 사용.
+- 재실행 멱등성: 명시 옵션 > 환경변수(`CIMS_LOCAL_IP` 등) > `.cims/server.local.json` 저장값 > 내장 기본값.
+  비대화 실행의 명시 옵션은 저장값을 덮어쓰지 않음(일회성).
 - 편의 래퍼: `./cims.sh configure [동일 옵션]`
 
 > 도메인 주의: cspsim/단말의 Digest username 은 `imsi@domain` 이라 도메인이 정확해야 인증됩니다.
@@ -265,10 +296,11 @@ curl -s  -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/api/v1/agents   
 ## 10. 빠른 전체 시퀀스 (요약)
 
 ```bash
-# 0) 패키지
+# 0) 패키지 (mariadb-server/-client 는 DB 장비에만 — 별도 장비면 거기서 설치)
 sudo apt-get update && sudo apt-get install -y \
   cmake build-essential libssl-dev git make clang-format \
-  python3 python3-dev nodejs npm mariadb-server mariadb-client
+  libmariadb-dev python3 python3-dev nodejs npm \
+  mariadb-server mariadb-client
 
 # 1) 소스
 git clone <repo> cims && cd cims
@@ -303,12 +335,14 @@ sudo mysql -u root < build/dist/sql/grant_db_access.sql
 | `./cims.sh init` | `.cims/server.local.json` 초기화(로컬 IP/DB 등) |
 | `./cims.sh build [-j N] [-v X.Y.Z]` | C++ + dist + Console + phone 빌드 |
 | `./cims.sh configure [opts]` | `configure.sh` 래퍼(설정 json 생성) |
+| `./cims.sh up [--skip-build]` | 원스톱: build → configure -y → 전체 재시작 |
 | `./cims.sh clean [all\|cpp\|py]` | 빌드 산출물 정리 |
 | `./cims.sh reset [--files\|--db]` | 하드 리셋 |
 | `./cims.sh preflight` | 사전 점검(python3/node 등) |
 | `./cims.sh sim [opts]` | cspsim 시뮬레이터 실행 |
-| `./cims.sh pkg [opts]` | 배포 tarball 패키징 |
-| `./cims.sh verify stage<N> \| run --preset <name>` | 검증 파이프라인 S1~S6 |
+| `./cims.sh pkg [opts]` | 배포 tarball 패키징 (본체: `scripts/package.sh`) |
+| `./cims.sh sync [targets]` | 소스→dist 증분 동기화 (본체: `scripts/sync.sh`) |
+| `./cims-verify stage<N> \| run --preset <name>` | 검증 파이프라인 S1~S6 |
 | `./cims.sh tb start\|stop\|status [oam\|csc\|console\|all]` | 테스트베드(OAM 4419 / Console 3000) 라이프사이클 |
 
 > 참고: 운영 환경의 서비스 라이프사이클(start/stop/upgrade/HA)은 `agent/`(cims-agent)와 OAM API 가 담당합니다.
@@ -320,6 +354,8 @@ sudo mysql -u root < build/dist/sql/grant_db_access.sql
 - **단말 REGISTER 403**: Digest username `imsi@domain` 불일치. cspsim `-domain` 을 설정한 도메인과 일치시킬 것.
 - **녹취 미생성**: 미디어 디렉터리/NFS 마운트 또는 ffmpeg(재생 변환) 문제 — `--record-dir` 와 마운트 상태 확인.
 - **첫 빌드 실패(네트워크)**: oneTBB/googletest 다운로드 실패. 사내망/프록시 또는 사전 캐시 필요(§3.3).
+- **`./cims.sh build` 가 조용히 중단 (make 로그 없음)**: cmake configure 실패 — 출력이
+  `build/dist/log/cmake.log` 로만 가므로 화면에 에러가 안 보임. 로그를 열어 원인 확인.
+  대표 사례: `MariaDB/MySQL client library not found` → 빌드 장비에 `libmariadb-dev` 설치(§1.1).
 - **`./cims.sh build` 가 "소스 트리에서만" 오류**: dist 디렉터리에서 실행하면 안 됨. 리포지터리 루트에서 실행.
 - **DB 인증 실패**: 각 컴포넌트 json 의 `CimsDatabase`(host/user/password/db) 가 실제 MariaDB 계정과 일치하는지 확인. `configure.sh` 로 일괄 주입 권장.
-```

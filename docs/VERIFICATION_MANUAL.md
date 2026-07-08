@@ -57,40 +57,40 @@ python3 -m tests.cims_verify run --preset pipeline-full
 ### 1.2 stage 단위 실행
 
 ```bash
-./cims.sh verify stage1                       # 정적 검사
-./cims.sh verify stage2                       # 빌드
-./cims.sh verify stage3                       # 스모크 (1콜 VoIP/PTT)
-./cims.sh verify stage4                       # 패키지화 (manifest.json)
-./cims.sh verify stage5                       # 로컬 배포 (csc/console/csp/cmp)
-./cims.sh verify stage6                       # 통합 검증 (4 시나리오)
+./cims-verify stage1                       # 정적 검사
+./cims-verify stage2                       # 빌드
+./cims-verify stage3                       # 스모크 (1콜 VoIP/PTT)
+./cims-verify stage4                       # 패키지화 (manifest.json)
+./cims-verify stage5                       # 로컬 배포 (csc/console/csp/cmp)
+./cims-verify stage6                       # 통합 검증 (4 시나리오)
 ```
 
-각 stage 에 옵션 통과 가능: `./cims.sh verify stage5 --stop-after`.
+각 stage 에 옵션 통과 가능: `./cims-verify stage5 --stop-after`.
 
 ### 1.3 메타 조회
 
 ```bash
-./cims.sh verify list                         # 전체 항목
-./cims.sh verify list --stage 5               # stage 5 만 (execution_order 순)
-./cims.sh verify list-presets                 # 12 프리셋
-./cims.sh verify describe S5-CSC-DEPLOY-INSTALL
+./cims-verify list                         # 전체 항목
+./cims-verify list --stage 5               # stage 5 만 (execution_order 순)
+./cims-verify list-presets                 # 12 프리셋
+./cims-verify describe S5-CSC-DEPLOY-INSTALL
 ```
 
 ### 1.4 부분 실행
 
 ```bash
 # items (자식 ID 직접)
-./cims.sh verify run --items S5-CSC-DEPLOY-PKG-UPLOAD,S5-CSC-DEPLOY-INSTALL
+./cims-verify run --items S5-CSC-DEPLOY-PKG-UPLOAD,S5-CSC-DEPLOY-INSTALL
 
 # preset
-./cims.sh verify run --preset stage5-full
-./cims.sh verify run --preset post-deploy     # S5 + S6 (배포 + 통합)
+./cims-verify run --preset stage5-full
+./cims-verify run --preset post-deploy     # S5 + S6 (배포 + 통합)
 
 # 자식 필터 (그룹 안에서 일부만)
-./cims.sh verify run --preset stage5-full --only-children S5-CSC-DEPLOY=S5-CSC-DEPLOY-INSTALL
+./cims-verify run --preset stage5-full --only-children S5-CSC-DEPLOY=S5-CSC-DEPLOY-INSTALL
 
 # 디버그용 강제 FAIL 주입 (gate / 회귀 점검)
-./cims.sh verify stage1 --inject-fail S1-CPP-FORMAT
+./cims-verify stage1 --inject-fail S1-CPP-FORMAT
 ```
 
 ### 1.5 Console UI
@@ -113,7 +113,7 @@ python3 -m tests.cims_verify run --preset pipeline-full
 ### 2.1 S1 — 정적 검사
 
 ```bash
-./cims.sh verify stage1
+./cims-verify stage1
 # 5 항목: PY-SYNTAX / FRONTEND-LINT / FRONTEND-TYPECHECK / CPP-FORMAT / UNIT-VERIFY-LIB
 # 기대: 5/5 PASS, 종료 코드 0
 ```
@@ -123,7 +123,7 @@ FAIL 시 → S2~S6 자동 BLOCKED. 코드 수정 후 재시도.
 ### 2.2 S2 — 빌드
 
 ```bash
-./cims.sh verify stage2
+./cims-verify stage2
 # PREFLIGHT → BUILD (depends_on)
 # 기대: warning/error 0, build/dist/ 갱신
 ```
@@ -131,7 +131,7 @@ FAIL 시 → S2~S6 자동 BLOCKED. 코드 수정 후 재시도.
 ### 2.3 S3 — 스모크
 
 ```bash
-./cims.sh verify stage3
+./cims-verify stage3
 # RESET → CONFIGURE → START → SEED → HEALTH → {VOIP-SMOKE, PTT-SMOKE}
 # 기대: 7/7 PASS, seg_*.rtp 녹취 +2 이상
 ```
@@ -139,7 +139,7 @@ FAIL 시 → S2~S6 자동 BLOCKED. 코드 수정 후 재시도.
 ### 2.4 S4 — 패키지화
 
 ```bash
-./cims.sh verify stage4
+./cims-verify stage4
 # PKG-BUILD → PKG-MANIFEST
 # 기대: build/dist/packages/<m>-<ver>.tar.gz 12개 (base 8 + 변종 4) +
 #       packages/manifest.json (SHA-256, manifest.json 자체 _self_sha256 포함)
@@ -156,8 +156,8 @@ FAIL 시 → S2~S6 자동 BLOCKED. 코드 수정 후 재시도.
 ### 2.5 S5 — 로컬 배포 (22 native step, 5 server)
 
 ```bash
-./cims.sh verify stage5                       # 기본: 4 ports 기동 유지
-./cims.sh verify stage5 --stop-after          # 종료 시 stop+kill
+./cims-verify stage5                       # 기본: 4 ports 기동 유지
+./cims-verify stage5 --stop-after          # 종료 시 stop+kill
 ```
 
 **5 server 토폴로지 (P1)** — `verify/lib/items/stage5/_native_steps.py`
@@ -204,7 +204,7 @@ cat build/dist/.deployed-manifest.json    # manifest_sha + ts
 ### 2.6 S6 — 통합 검증
 
 ```bash
-./cims.sh verify stage6
+./cims-verify stage6
 # ENTRY-CHECK (6 host:port + immutability) → SEED → 시나리오 → SUMMARY
 ```
 
@@ -272,8 +272,8 @@ stage N FAIL → stage>N 의 leaf 가 BLOCKED 로 표시. V2Page 노란 배너 +
 
 ```bash
 # 대응: FAIL 항목 detail 확인 → 해당 stage 만 재실행 → 잔여 자동 진행
-./cims.sh verify stage<N>     # FAIL 발생한 stage
-./cims.sh verify run --preset pipeline-full   # 또는 전체 재실행
+./cims-verify stage<N>     # FAIL 발생한 stage
+./cims-verify run --preset pipeline-full   # 또는 전체 재실행
 ```
 
 ### 4.2 Immutability gate 불일치 (S6-ENTRY-CHECK FAIL)
@@ -282,9 +282,9 @@ S5 배포 후 S4 를 다시 돌리면 manifest sha 변경 → S6 진입 실패.
 
 ```bash
 # 복구
-./cims.sh verify stage4       # manifest 재생성
-./cims.sh verify stage5       # 재배포 + marker 갱신
-./cims.sh verify stage6       # 재진입
+./cims-verify stage4       # manifest 재생성
+./cims-verify stage5       # 재배포 + marker 갱신
+./cims-verify stage6       # 재진입
 ```
 
 ### 4.3 6 endpoint 미기동 (S6-ENTRY-CHECK FAIL)
@@ -294,7 +294,7 @@ S5 배포 후 S4 를 다시 돌리면 manifest sha 변경 → S6 진입 실패.
 ss -tln | grep -E ':(4445|8081)\b'
 ss -uln | grep -E '127.0.0.[123]:(5060|9000)\b'
 # 미충족 → S5 선행
-./cims.sh verify stage5
+./cims-verify stage5
 ```
 
 ### 4.4 흔한 함정
@@ -385,7 +385,7 @@ echo $?    # 0=PASS, 1=FAIL
 기본 `--target verify` (csc=4445, console=8081) 외에 운영 배포본 (csc=4420, console=80) 도 동일 native step 으로 검증 가능. step_09 overlay / step_12~15 LISTEN / S6-ENTRY-CHECK / SCN-DB-SYNC admin login 모두 `target` 따라 분기. csp/cmp 포트는 환경 동일 (5060/9000/udp).
 
 ```bash
-./cims.sh verify run --preset post-deploy --target prod
+./cims-verify run --preset post-deploy --target prod
 ```
 
 ### unit test
@@ -402,16 +402,16 @@ python3 -m unittest tests.test_verify_lib    # 161 OK
 
 ```bash
 # stage gate: S1 한 항목 FAIL → S2~S6 모두 BLOCKED
-./cims.sh verify run --preset pipeline-full --inject-fail S1-CPP-FORMAT
+./cims-verify run --preset pipeline-full --inject-fail S1-CPP-FORMAT
 
 # immutability gate: marker 누락 시 S6-ENTRY-CHECK FAIL
 rm -f build/dist/.deployed-manifest.json
-./cims.sh verify run --preset post-deploy --inject-fail S5-MODULES-RUN-START
+./cims-verify run --preset post-deploy --inject-fail S5-MODULES-RUN-START
 
 # 복구
-./cims.sh verify stage4    # manifest 재생성
-./cims.sh verify stage5    # 재배포 + marker 갱신
-./cims.sh verify stage6
+./cims-verify stage4    # manifest 재생성
+./cims-verify stage5    # 재배포 + marker 갱신
+./cims-verify stage6
 ```
 
 ---
@@ -421,14 +421,14 @@ rm -f build/dist/.deployed-manifest.json
 회차 = `verify_runs/YYYY/MM/<ms_ts>.json` 1 파일. 휘발성 데이터, 기본 retention 7일.
 
 ```bash
-./cims.sh verify purge-runs                  # 7일 초과 삭제, 최근 10개 보존
-./cims.sh verify purge-runs --days 30
-./cims.sh verify purge-runs --all            # 즉시 모두 삭제
-./cims.sh verify delete-run 1778125658339    # 단건
-./cims.sh verify purge-runs --json           # CI 연동
+./cims-verify purge-runs                  # 7일 초과 삭제, 최근 10개 보존
+./cims-verify purge-runs --days 30
+./cims-verify purge-runs --all            # 즉시 모두 삭제
+./cims-verify delete-run 1778125658339    # 단건
+./cims-verify purge-runs --json           # CI 연동
 
 # cron 자동 정리 예시
-0 3 * * * cd /home/nex/work/cims && ./cims.sh verify purge-runs --json >> /tmp/cims-verify-purge.log 2>&1
+0 3 * * * cd /home/nex/work/cims && ./cims-verify purge-runs --json >> /tmp/cims-verify-purge.log 2>&1
 ```
 
 ---

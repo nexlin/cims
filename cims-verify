@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# =============================================================
+# cims-verify — CIMS 검증(S1~S6) 전용 진입점
+#
+# verify/lib CLI(tests/cims_verify.py)의 bash 래퍼.
+# 역할 분담: 개발 파이프라인(build/configure/pkg/sync)은 cims.sh,
+#            운영(start/stop/status)은 agent/bin/cims-svc.
+# 의존 방향: cims-verify → cims.sh / agent/bin/cims-svc 호출 허용, 역방향 금지.
+# 콘솔 진입(/testbed/verify-v2)은 OAM handlers/verification.py 가 본 스크립트를 호출.
+# =============================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+source "$SCRIPT_DIR/scripts/lib/common.sh" || {
+    echo "[ERROR] scripts/lib/common.sh 없음 — 레포 루트에서 실행 필요" >&2; exit 1; }
+
+usage() {
+    cat <<EOF
+${BOLD}CIMS 검증 도구${NC} — S1~S6 게이트 실행 (정본: docs/VERIFICATION_PROCESS.md)
+
+사용법: $(basename "$0") <command> [options]
+
+${BOLD}Stage 실행:${NC}
+  stage<N>              stage N(1~6) 프리셋 실행 (예: stage1, stage3)
+  run [--stage N | --items ID,... | --preset NAME]
+                        임의 항목/프리셋 실행 (multi-stage 가능)
+
+${BOLD}메타:${NC}
+  list [--stage N]      등록 항목 트리
+  list-presets          프리셋 목록
+  describe <ITEM_ID>    항목 메타 상세
+  purge-runs / delete-run <RUN_ID>   회차 기록 정리
+
+${BOLD}공통 옵션${NC} (tests/cims_verify.py 로 그대로 전달):
+  --skip-build --skip-pkg --skip-reset --keep-agent
+  --items ID,...  --inject-fail ID  --json  --report-dir PATH
+
+${BOLD}예시:${NC}
+  $(basename "$0") stage1                      # 정적 검사
+  $(basename "$0") stage3 --skip-build         # 기능 회귀 (빌드 생략)
+  $(basename "$0") run --preset pipeline-full
+  $(basename "$0") list --stage 6
+EOF
+}
+
+# tests/·verify/ 모듈 해석은 레포 루트 기준
+cd "$SCRIPT_DIR"
+
+cmd="${1:-}"
+[[ $# -gt 0 ]] && shift
+
+case "$cmd" in
+    list|describe|run|list-presets|purge-runs|delete-run)
+        exec python3 -m tests.cims_verify "$cmd" "$@" ;;
+    stage1|stage2|stage3|stage4|stage5|stage6)
+        exec python3 -m tests.cims_verify run --stage "${cmd#stage}" "$@" ;;
+    1|2|3|4|5|6)
+        exec python3 -m tests.cims_verify run --stage "$cmd" "$@" ;;
+    help|--help|-h|"")
+        usage; exit 0 ;;
+    *)
+        err "알 수 없는 명령: $cmd (stage1~stage6 | list | list-presets | describe | run)"
+        echo ""; usage; exit 1 ;;
+esac

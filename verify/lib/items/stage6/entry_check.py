@@ -92,9 +92,9 @@ def entry_check(ctx: VerifyContext) -> ItemResult:
     detail = "\n".join(lines)
     if not ok:
         detail += ("\n\n[복구 절차]\n"
-                   "  ./cims.sh verify stage4   # 새 manifest 산출\n"
-                   "  ./cims.sh verify stage5   # 새 패키지로 재배포\n"
-                   "  ./cims.sh verify stage6   # 통합 검증 진입")
+                   "  ./cims-verify stage4   # 새 manifest 산출\n"
+                   "  ./cims-verify stage5   # 새 패키지로 재배포\n"
+                   "  ./cims-verify stage6   # 통합 검증 진입")
     return ItemResult(
         id="S6-ENTRY-CHECK", name="진입 조건 체크",
         status=ItemStatus.PASS if ok else ItemStatus.FAIL,
