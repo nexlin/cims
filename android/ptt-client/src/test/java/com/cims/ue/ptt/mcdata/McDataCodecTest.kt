@@ -125,6 +125,31 @@ class McDataCodecTest {
         assertEquals(1 + 3, len)                                    // TLV 길이 = content-type(1)+data
     }
 
+    @Test fun parseInfoUrisFromInviteBody() {
+        // 서버(InviteMsrpReceiver) mcdata-info multipart 형식 — 그룹·원발신자 추출
+        val invite = """
+            INVITE sip:+82500000001@ptt.x SIP/2.0
+            Content-Type: multipart/mixed;boundary=mcdata_ab12
+
+            --mcdata_ab12
+            Content-Type: application/vnd.3gpp.mcdata-info+xml
+
+            <?xml version="1.0" encoding="UTF-8"?>
+            <mcdatainfo xmlns="urn:3gpp:ns:mcdataInfo:1.0">
+              <mcdata-Params>
+                <request-type>group-sds</request-type>
+                <mcdata-request-uri type="Normal"><mcdataURI>tel:g001</mcdataURI></mcdata-request-uri>
+                <mcdata-calling-user-id type="Normal"><mcdataURI>tel:+82500000002</mcdataURI></mcdata-calling-user-id>
+              </mcdata-Params>
+            </mcdatainfo>
+            --mcdata_ab12--
+        """.trimIndent()
+        val (group, caller) = McDataCodec.parseInfoUris(invite)
+        assertEquals("tel:g001", group)
+        assertEquals("tel:+82500000002", caller)
+        assertEquals(null to null, McDataCodec.parseInfoUris("no info here"))
+    }
+
     @Test fun nonMcDataBodyReturnsNull() {
         assertNull(McDataCodec.parse("text/plain", "hello"))
         assertNull(McDataCodec.parse("multipart/mixed;boundary=x", "--x\r\nContent-Type: text/plain\r\n\r\nhi\r\n--x--\r\n"))

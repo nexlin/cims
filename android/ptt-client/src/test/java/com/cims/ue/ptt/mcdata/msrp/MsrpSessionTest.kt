@@ -91,6 +91,62 @@ class MsrpSessionTest {
         }
     }
 
+    @Test fun receiveMessageAssemblesServerChunks() {
+        ServerSocket(0).use { server ->
+            // cmdp 송신 레그 흉내: bodiless 바인딩 SEND 수신→200, 이후 청크 2개('+','$') 송신, 200 수신
+            val body = "수신 본문 ".repeat(2000).toByteArray()   // multi-chunk 크기
+            val ct = "multipart/mixed;boundary=cmdp-test1"
+            val acks = ArrayList<Int>()
+            val peer = thread {
+                server.accept().use { sock ->
+                    val ins = sock.getInputStream()
+                    val out = sock.getOutputStream()
+                    val parser = MsrpCodec.Parser()
+                    val rx = ByteArray(65536)
+                    // 1) 바인딩 SEND 대기 → 200
+                    var bind: MsrpCodec.Frame? = null
+                    while (bind == null) {
+                        val n = ins.read(rx); if (n <= 0) return@thread
+                        bind = parser.feed(rx, 0, n).firstOrNull { it.method == "SEND" }
+                    }
+                    out.write(MsrpCodec.buildResponse(bind.tid, 200, "OK",
+                        bind.header("from-path").orEmpty(), bind.header("to-path").orEmpty()))
+                    out.flush()
+                    // 2) 16KB 청크 스트리밍 (cmdp nextSendChunk 동일 규칙) — 청크별 200 대기
+                    var off = 0
+                    while (off < body.size) {
+                        val n2 = minOf(16 * 1024, body.size - off)
+                        val last = off + n2 >= body.size
+                        val tid = MsrpCodec.newTid()
+                        out.write(MsrpCodec.buildSendChunk(tid,
+                            bind.header("from-path").orEmpty(), bind.header("to-path").orEmpty(),
+                            "srvmsg", ct, body.copyOfRange(off, off + n2),
+                            off + 1L, (off + n2).toLong(), body.size.toLong(),
+                            flag = if (last) '$' else '+'))
+                        out.flush()
+                        var resp: MsrpCodec.Frame? = null
+                        while (resp == null) {
+                            val n3 = ins.read(rx); if (n3 <= 0) return@thread
+                            resp = parser.feed(rx, 0, n3).firstOrNull { it.isResponse && it.tid == tid }
+                        }
+                        acks.add(resp.statusCode)
+                        off += n2
+                    }
+                }
+            }
+            val toPath = "msrp://127.0.0.1:${server.localPort}/srv;tcp"
+            val received = MsrpSession(toPath, "msrp://127.0.0.1:2855/cli;tcp").use { s ->
+                s.connect()
+                s.receiveMessage()
+            }
+            peer.join(5000)
+            assertTrue(received != null)
+            assertEquals(ct, received!!.first)
+            assertArrayEquals(body, received.second)
+            assertTrue(acks.all { it == 200 })
+        }
+    }
+
     @Test fun non200ResponseFails() {
         ServerSocket(0).use { server ->
             val peer = thread {

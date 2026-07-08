@@ -65,6 +65,13 @@ sealed interface MsrpEvent {
     /** 200 OK answer 의 서버 MSRP `a=path` 학습 — TCP 접속 대상. */
     data class PathReady(val callId: Int, val path: String) : MsrpEvent
 
+    /** 서버발 MSRP 배포 INVITE 착신(UAS) — [inviteMsg]=INVITE 원문(wholeMsg;
+     *  a=path·mcdata-info 는 상위 계층이 파싱). 벨소리/통화 UI 없이 격리 처리. */
+    data class Incoming(val callId: Int, val remote: String, val inviteMsg: String) : MsrpEvent
+
+    /** UAS 200 answer 송신 완료(CONNECTING/CONFIRMED) — TCP 접속 개시 시점. */
+    data class Answered(val callId: Int) : MsrpEvent
+
     /** MSRP 호 종료 — 서버 BYE(정상 완료 신호) 또는 실패 응답. */
     data class Closed(val callId: Int, val code: Int, val reason: String) : MsrpEvent
 }

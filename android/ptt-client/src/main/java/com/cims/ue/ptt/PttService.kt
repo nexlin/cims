@@ -234,19 +234,7 @@ class PttService : Service() {
                 val sender = PttController.bareId(im.fromUri)
                 if (im.contentType.lowercase().startsWith("multipart/mixed")) {
                     when (val p = McDataCodec.parse(im.contentType, im.body)) {
-                        is McDataCodec.SdsMessage -> {
-                            if (p.text.isNotEmpty()) {
-                                val gid = p.groupUri?.let(PttController::bareId)
-                                    ?.takeUnless { it.isBlank() } ?: sender
-                                messages.add(gid, p.text, com.cims.ue.core.message.MsgDirection.IN,
-                                    sender = sender, msgId = p.msgId)
-                                _messageTick.value++
-                            }
-                            if (p.dispositionReq and McDataCodec.DISP_REQ_DELIVERY != 0) {
-                                controller?.sendSdsNotification(
-                                    sender, p.convId, p.msgId, McDataCodec.NOTIF_DELIVERED)
-                            }
-                        }
+                        is McDataCodec.SdsMessage -> onSdsParsed(p, sender)
                         is McDataCodec.FdMessage -> {
                             if (p.fileUrl.isNotBlank()) {
                                 val gid = p.groupUri?.let(PttController::bareId)
@@ -276,6 +264,33 @@ class PttService : Service() {
                     _messageTick.value++
                 }
             }.launchIn(this)
+            // MSRP 미디어평면 수신 SDS (대용량 — TS 24.282 §9.2.3) → 동일 저장·통지 경로.
+            // 발신자 미상(구서버 — mcdata-info 없는 배포 레그, sender==groupId 폴백)이면
+            // 통지 대상이 그룹이 되므로 회신 억제(notifiable=false).
+            c.incomingSds.onEach { m ->
+                onSdsParsed(m.msg, m.sender, gidOverride = m.groupId,
+                    notifiable = m.sender != m.groupId)
+            }.launchIn(this)
+        }
+    }
+
+    /** 수신 SDS 공통 처리 — C-plane MESSAGE 와 MSRP 미디어평면 공용(저장·tick·DELIVERED 통지). */
+    private fun onSdsParsed(
+        p: McDataCodec.SdsMessage,
+        sender: String,
+        gidOverride: String? = null,
+        notifiable: Boolean = true,
+    ) {
+        val gid = gidOverride
+            ?: p.groupUri?.let(PttController::bareId)?.takeUnless { it.isBlank() }
+            ?: sender
+        if (p.text.isNotEmpty()) {
+            messages.add(gid, p.text, com.cims.ue.core.message.MsgDirection.IN,
+                sender = sender, msgId = p.msgId)
+            _messageTick.value++
+        }
+        if (notifiable && p.dispositionReq and McDataCodec.DISP_REQ_DELIVERY != 0) {
+            controller?.sendSdsNotification(sender, p.convId, p.msgId, McDataCodec.NOTIF_DELIVERED)
         }
     }
 

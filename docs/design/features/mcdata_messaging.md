@@ -133,8 +133,10 @@ signalling control plane"`** 으로 거절한다(TS 24.282 §9.2.2 step 8; `McDa
 cmdp: 종단·조립 → TLV 파싱(McDataCodec 공용) → FD 스토어 기록 → MSG_RECEIVED event → CSP
 CSP fan-out (하이브리드):
    ├─ MSRP 광고 단말(REGISTER Contact +g.3gpp.icsi-ref 에 icsi.mcdata) → 서버발 INVITE
-   │    (더미 audio + m=message a=sendonly) + cmdp 송신 세션 → 수신 UE 가 out-connect 후 수신
-   └─ 그 외(현재 앱) → FD SIGNALLING FILEURL MESSAGE (§4.5 HTTP 다운로드 경로 재사용)
+   │    (multipart/mixed: **mcdata-info**(request-uri=그룹, calling-user-id=원발신자 — 수신
+   │    단말의 스레드 귀속·발신자 표시·disposition 회신 대상) + SDP(더미 audio PCMU/PCMA
+   │    + m=message a=sendonly)) + cmdp 송신 세션 → 수신 UE 가 out-connect 후 수신
+   └─ 그 외 → FD SIGNALLING FILEURL MESSAGE (§4.5 HTTP 다운로드 경로 재사용)
 → 보관(messages.jsonl, via=msrp·file_url 포함) → 발신 레그 BYE
 ```
 
@@ -185,6 +187,14 @@ CSP fan-out (하이브리드):
   out-connect(`mcdata/msrp/MsrpSession`) → SIGNALLING/PAYLOAD TLV(raw, base64 CTE 없음)
   16KB 청크 SEND → 서버 BYE 로 완료. MSRP 호 상태는 `MsrpEvent` 플로우로 일반 통화
   상태와 격리(그룹 URI 동일로 인한 PTT 세션 callId 오염 방지).
+- 수신(MSRP 미디어평면): REGISTER Contact 에 `;+g.3gpp.icsi-ref="…icsi.mcdata.sds"` 광고
+  (`SipController.contactParams`) → 서버발 배포 INVITE(`TCP/MSRP`)를 `CimsAccount` 가 감지,
+  벨소리/통화 UI 없이 `msrpMode` 격리 → `acceptMsrpCall`(200 answer 의 m=message 섹션을
+  a=setup:active/recvonly 로 교체 — pjsua 는 미지원 미디어를 포트 0 으로 답하므로 패치) →
+  서버 a=path 로 out-connect(`MsrpSession.receiveMessage`: bodiless 바인딩 SEND → 청크 수신·
+  200 응답·조립) → 코덱 파싱 → `incomingSds` → 아래 C-plane 수신과 동일 저장·통지 경로.
+  그룹/발신자는 INVITE mcdata-info(request-uri/calling-user-id), 구서버 폴백=From(그룹,
+  이때 DELIVERED 회신은 억제).
 - 수신(`PttService`): `multipart/mixed` → 코덱 파싱 —
   - SDS 메시지: `mcdata-info` 그룹 URI 로 **그룹 스레드 귀속**(스레드 키=그룹 ID, 발신자는
     `sender` 필드), disposition 요청 시 DELIVERED 통지 자동 회신.
@@ -220,21 +230,17 @@ CSP fan-out (하이브리드):
 | 성공 응답 | 참여기능 202/200 | 200 OK (거부 403/413 은 선행 송신 — 후행 200 은 트랜잭션상 무시됨) | psip RecvMessageRequest 계약(긴급경보 경로와 동일) |
 | E2E 보안 (TS 33.180) | Protected Payload | 미적용 (TLS + 서버측 RBAC) | 서버 보관·관리자 모니터링 요구와 상충 |
 | READ 통지·InReplyTo | 지원 | 미사용 (DELIVERED 만; 파서는 IE skip 지원) | 최소 프로파일 |
-| media plane SDS 의 SDP | `m=message` 단독 | **더미 `m=audio` 라인 동반** — 서버는 포트≠0(9) + `a=inactive` 로 응답/오퍼 (CMP 할당·RTP 없음) | pjsua2 는 알려진 미디어가 포트≠0 으로 협상돼야 콜 유지 (`got_media` 규칙). MCPTT `m=audio`+`m=application` 기존 패턴과 동일 |
+| media plane SDS 의 SDP | `m=message` 단독 | **더미 `m=audio` 라인 동반** — 서버는 포트≠0(9) + `a=inactive` 로 응답/오퍼 (CMP 할당·RTP 없음). 서버발 오퍼의 더미 오디오는 **PCMU+PCMA(0 8)** 병기 | pjsua2 는 알려진 미디어가 포트≠0 으로 협상돼야 콜 유지 (`got_media` 규칙). 앱 코덱 정책이 PCMU 를 비활성(PCMA 안전망만 유지)하므로 PCMU 단독 오퍼는 자동 488 — 실기기 확인 | 
 | media plane 수신 배포 | 전 수신자 INVITE+MSRP | **하이브리드** — MSRP 광고 단말만 INVITE+MSRP, 그 외는 FD FILEURL MESSAGE 폴백 (§4.5 HTTP 다운로드) | 전환기 호환 (현재 앱은 MSRP 미지원). 폴백 수신자에겐 장문이 첨부(`sds_*.txt`)로 보임 |
 | 단말 a=path 포트 | 단말이 해당 포트 리슨 가능 | 광고용 (단말은 항상 out-connect, 서버 상시 `a=setup:passive`) | NAT 관통 — RTP relay 와 동일한 방향성 |
 | c-plane 임계 | 서비스 설정 문서로 전파 | csp.json + CSC provisioning `mcdata.maxPayloadSdsCplaneBytes` 이중 설정 (운영자 동기) | CMS 서비스설정 문서 미구현 — provisioning 채널 재사용 |
 
 ## 8. 잔여 과제
 
-- **앱 MSRP 수신**(송신은 §5 구현 완료 — 태그 미광고라 수신은 FILEURL 폴백으로 동작):
-  incoming INVITE 의 `TCP/MSRP` 감지 → `msrpMode` 격리 → answer SDP 패치(pjsua2 UAS 답
-  주입은 Phase 0 스파이크로 go/no-go, 폴백=`CallOpParam.sdp`) → 서버 path 로 out-connect
-  수신 → `MessageStore` 저장 + DELIVERED. feature tag(`+g.3gpp.icsi-ref` mcdata,
-  `AccountSipConfig.contactParams`)는 수신 구현 후에만 광고.
+- **임계 활성화**: 앱(송신+수신, §5 구현 완료) 배포 후 csp
+  `Setup.McData.MaxPayloadSizeSdsCplaneBytes` 와 csc
+  `Provisioning.McData.MaxPayloadSdsCplaneBytes` 를 함께 설정(현재 라이브 0=무제한).
   검증용 표준 단말 대역 = `tests/msrp_sds_client.py`.
-- **임계 활성화**: 앱(송신+수신) 배포 후 csp `Setup.McData.MaxPayloadSizeSdsCplaneBytes` 와
-  csc `Provisioning.McData.MaxPayloadSdsCplaneBytes` 를 함께 설정(현재 라이브 0=무제한).
 - 1:1 standalone SDS over media plane (현재 그룹 대상만 — 비그룹 타겟 MSRP INVITE 는 403)
 - FD over media plane (TS 24.282 §10.2.5 — cmdp 기계 동일, RFC 5547 file-selector SDP)
 - MSRPS(TLS)·배포 레그 실패 시 FILEURL 재시도 정책·media-plane disposition

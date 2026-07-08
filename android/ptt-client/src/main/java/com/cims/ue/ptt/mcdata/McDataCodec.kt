@@ -103,6 +103,15 @@ object McDataCodec {
      *  동일하게 DATA PAYLOAD 의 내용 바이트(=UTF-8 텍스트 길이, content-type 옥텟 제외). */
     fun sdsPayloadSize(text: String): Int = text.toByteArray(Charsets.UTF_8).size
 
+    /** mcdata-info XML 을 포함한 임의 문자열(예: 서버발 MSRP INVITE 원문)에서
+     *  (mcdata-request-uri, mcdata-calling-user-id) URI 추출 — 없으면 각각 null. */
+    fun parseInfoUris(s: String): Pair<String?, String?> {
+        fun uriOf(elem: String): String? = Regex(
+            "<$elem[^>]*>\\s*<mcdataURI>([^<]+)</mcdataURI>", RegexOption.DOT_MATCHES_ALL,
+        ).find(s)?.groupValues?.get(1)?.trim()
+        return uriOf("mcdata-request-uri") to uriOf("mcdata-calling-user-id")
+    }
+
     /** 그룹 SDS 발신 본문 생성. @return (Content-Type, body) */
     fun buildGroupSds(
         groupUri: String,

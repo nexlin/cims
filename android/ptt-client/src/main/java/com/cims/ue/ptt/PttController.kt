@@ -29,8 +29,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -101,6 +104,11 @@ class PttController(
 
     /** 수신 문자(SIP MESSAGE) — core 흐름 그대로 노출(서비스가 MessageStore 에 영속). */
     val incomingMessage get() = sip.incomingMessage
+
+    /** MSRP 미디어평면으로 수신한 SDS — [MediaSds] (서비스가 MessageStore 영속·통지). */
+    data class MediaSds(val groupId: String, val sender: String, val msg: McDataCodec.SdsMessage)
+    private val _incomingSds = MutableSharedFlow<MediaSds>(extraBufferCapacity = 16)
+    val incomingSds: SharedFlow<MediaSds> = _incomingSds.asSharedFlow()
 
     // ── 그룹별 세션 ──
 
@@ -178,6 +186,17 @@ class PttController(
     init {
         // 번호 로컬 표기(+82→0…)용 홈 국가코드 — 프로비저닝 countryCode 우선, 내 msisdn 유도 폴백
         homeCountryCode = sipConfig.countryCode.ifBlank { countryCodeOf(mcpttId) ?: "" }.ifBlank { null }
+
+        // MCData MSRP 수신 capability 광고(TS 24.282 §6.3) — 서버가 이 태그를 보고
+        // 그룹 SDS 미디어평면 배포 레그(INVITE+MSRP)를 이 단말로 보낸다.
+        sip.contactParams = ";+g.3gpp.icsi-ref=\"$MCDATA_ICSI\""
+
+        // 서버발 MSRP 배포 INVITE — 수락·수신·저장 (통화 UI 와 무관, 격리 처리)
+        scope.launch {
+            sip.msrpEvents.collect { ev ->
+                if (ev is MsrpEvent.Incoming) launch { runCatching { handleIncomingMsrp(ev) } }
+            }
+        }
 
         // 학습된 CMP floor 목적지(호별) → 해당 세션 FloorClient 연결 + Ack 1회(NAT latch 유도)
         scope.launch {
@@ -569,6 +588,7 @@ class PttController(
                             Log.w(TAG, "MSRP INVITE 거절: ${ev.code} ${ev.reason}")
                             return@withTimeoutOrNull
                         }
+                        else -> Unit    // Incoming/Answered = 수신 레그 이벤트
                     }
                 }
             }
@@ -614,6 +634,87 @@ class PttController(
             s.localAddress.hostAddress
         }
     }.getOrNull()
+
+    /**
+     * 서버발 MSRP 배포 INVITE 처리 — 200 answer(m=message 교체, a=setup:active/recvonly) →
+     * 서버 a=path 로 TCP out-connect → 조립 수신 → [incomingSds] 방출. 그룹/발신자는
+     * INVITE 의 mcdata-info(request-uri/calling-user-id), 폴백=From(그룹).
+     */
+    private suspend fun handleIncomingMsrp(ev: MsrpEvent.Incoming) {
+        val serverPath = Regex("a=path:(\\S+)").find(ev.inviteMsg)?.groupValues?.get(1) ?: run {
+            Log.w(TAG, "MSRP INVITE 에 a=path 없음 — 거절")
+            sip.rejectMsrpCall(ev.callId)
+            return
+        }
+        val (groupUri, callingUser) = McDataCodec.parseInfoUris(ev.inviteMsg)
+        val groupId = groupUri?.let { bareId(it) }?.takeUnless { it.isBlank() } ?: bareId(ev.remote)
+        val sender = callingUser?.let { bareId(it) }?.takeUnless { it.isBlank() } ?: groupId
+
+        val localIp = withContext(Dispatchers.IO) { localIpFor(sipConfig.serverHost) } ?: run {
+            sip.rejectMsrpCall(ev.callId)
+            return
+        }
+        val sessionId = UUID.randomUUID().toString().replace("-", "").take(12)
+        val localPath = "msrp://$localIp:2855/$sessionId;tcp"
+        val answerSdp = listOf(
+            "m=message 2855 TCP/MSRP *",
+            "a=path:$localPath",
+            "a=accept-types:${MsrpCodec.ACCEPT_TYPES}",
+            "a=setup:active",
+            "a=recvonly",
+        ).joinToString("\r\n")
+
+        val events = Channel<MsrpEvent>(Channel.UNLIMITED)
+        val collector = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            sip.msrpEvents.collect { events.trySend(it) }
+        }
+        try {
+            sip.acceptMsrpCall(ev.callId, answerSdp)
+            val answered = withTimeoutOrNull(MSRP_INVITE_TIMEOUT_MS) {
+                for (e in events) {
+                    if (e is MsrpEvent.Answered && e.callId == ev.callId) return@withTimeoutOrNull true
+                    if (e is MsrpEvent.Closed && e.callId == ev.callId) return@withTimeoutOrNull false
+                }
+                false
+            }
+            if (answered != true) {
+                Log.w(TAG, "MSRP 수신: answer 실패/종료 (group=$groupId)")
+                sip.rejectMsrpCall(ev.callId)
+                return
+            }
+
+            val received = withContext(Dispatchers.IO) {
+                runCatching {
+                    MsrpSession(serverPath, localPath).use { sess ->
+                        sess.connect()
+                        sess.receiveMessage()
+                    }
+                }.onFailure { Log.w(TAG, "MSRP 수신 실패: ${it.message}") }.getOrNull()
+            }
+            if (received == null) {
+                sip.rejectMsrpCall(ev.callId)
+                return
+            }
+            val (ct, body) = received
+            // raw 바이너리 파트 보존 위해 ISO_8859_1 (McDataCodec Part.bytes 가 동일 인코딩으로 복원)
+            when (val p = McDataCodec.parse(ct, String(body, Charsets.ISO_8859_1))) {
+                is McDataCodec.SdsMessage -> {
+                    _incomingSds.tryEmit(MediaSds(groupId, sender, p))
+                    _status.value = "[$groupId] 대용량 문자 수신 (${body.size}B)"
+                }
+                else -> Log.w(TAG, "MSRP 수신 본문 파싱 실패/비 SDS (ct=$ct, ${body.size}B)")
+            }
+            // 서버가 SEND_RESULT 후 BYE — 미도착 시 우리가 정리
+            val closed = withTimeoutOrNull(MSRP_BYE_TIMEOUT_MS) {
+                for (e in events) if (e is MsrpEvent.Closed && e.callId == ev.callId) return@withTimeoutOrNull true
+                false
+            }
+            if (closed != true) sip.hangup(ev.callId)
+        } finally {
+            collector.cancel()
+            events.close()
+        }
+    }
 
     /** FD 전송 결과 — 로컬 이력 저장용. */
     data class FdSent(val msgId: String, val url: String, val size: Long)

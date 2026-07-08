@@ -80,7 +80,10 @@ class CimsCall : Call {
             pendingMsrpSdp?.let { extra ->
                 val sdp = prm.sdp
                 val whole = sdp.wholeSdp
-                if (!whole.contains("m=message")) sdp.wholeSdp = appendMediaSection(whole, extra)
+                // UAC 오퍼 = 섹션 추가. UAS 답 = pjsua 가 미지원 m=message 를 포트 0 으로 답하므로
+                // 그 섹션을 우리 것으로 교체(오퍼/재협상에서 이미 주입된 경우도 최신으로 갱신).
+                sdp.wholeSdp = if (!whole.contains("m=message")) appendMediaSection(whole, extra)
+                else replaceMessageSection(whole, extra)
             }
             if (!msrpMode) prm.remSdp?.wholeSdp?.let { rem ->
                 parseApplication(rem)?.let { (ip, port) -> owner.onRemoteFloorLearned(id, ip, port) }
@@ -89,10 +92,25 @@ class CimsCall : Call {
     }
 
     /** [whole] SDP 끝에 미디어 섹션 [extra] 를 덧붙인다(주입 일반화 — floor/MSRP 공용). */
-    private fun appendMediaSection(whole: String, extra: String): String {
+    private fun appendMediaSection(whole: String, extra: String): String =
+        whole.trimEnd('\r', '\n') + "\r\n" + withConnLine(whole, extra) + "\r\n"
+
+    /** [whole] 의 기존 `m=message` 섹션(다음 m= 전까지)을 [extra] 로 교체 — UAS answer 패치. */
+    private fun replaceMessageSection(whole: String, extra: String): String {
+        val lines = whole.trimEnd('\r', '\n').split("\r\n", "\n").toMutableList()
+        val start = lines.indexOfFirst { it.trim().startsWith("m=message") }
+        if (start < 0) return appendMediaSection(whole, extra)
+        var end = start + 1
+        while (end < lines.size && !lines[end].trim().startsWith("m=")) end++
+        val section = withConnLine(whole, extra).split("\r\n", "\n")
+        val out = lines.subList(0, start) + section + lines.subList(end, lines.size)
+        return out.joinToString("\r\n") + "\r\n"
+    }
+
+    /** 주입 섹션에 c= 라인 보장 — pjsua SDP 는 세션 레벨 c= 없이 미디어별 c= 라
+     *  섹션에 c= 이 없으면 pjmedia_sdp_validate EMISSINGCONN assert 로 네이티브 abort. */
+    private fun withConnLine(whole: String, extra: String): String {
         var section = extra.trim('\r', '\n')
-        // pjsua 오퍼는 세션 레벨 c= 없이 미디어별 c= — 주입 섹션에도 c= 필수
-        // (없으면 pjmedia_sdp_validate EMISSINGCONN assert 로 네이티브 abort)
         if (!section.contains("c=IN ")) {
             val ip = whole.lineSequence().map { it.trim() }
                 .firstOrNull { it.startsWith("c=IN IP4 ") }
@@ -103,7 +121,7 @@ class CimsCall : Call {
                 section = lines.joinToString("\r\n")
             }
         }
-        return whole.trimEnd('\r', '\n') + "\r\n" + section + "\r\n"
+        return section
     }
 
     /**

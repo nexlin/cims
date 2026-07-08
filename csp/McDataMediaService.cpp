@@ -1,6 +1,8 @@
 #include "McDataMediaService.h"
 
+#include <stdint.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "CmdpClient.h"
 #include "CspServiceMap.h"
@@ -97,11 +99,65 @@ static CSdpMedia _BuildInactiveAudio( const CSdpMedia *pclsOffered ) {
     } else {
         clsAudio.m_strMedia = "audio";
         clsAudio.m_strProtocol = "RTP/AVP";
-        clsAudio.AddFmt( 0 );  // PCMU (static PT — rtpmap 불필요)
+        // PCMU+PCMA (static PT — rtpmap 불필요). 더미(inactive)지만 수신 단말 pjsua 가
+        // 수락 가능한 코덱이 하나는 있어야 488 을 내지 않는다 — 앱은 PCMU 비활성·PCMA 안전망 유지.
+        clsAudio.AddFmt( 0 );
+        clsAudio.AddFmt( 8 );
     }
     clsAudio.m_iPort = 9;  // discard — RTP 무흐름, 0 금지
     clsAudio.AddAttribute( "inactive", "" );
     return clsAudio;
+}
+
+/** tel: URI 표기 — 이미 스킴이 있으면 그대로, 없으면 tel: 부여 (user part 만 보관되는 관례). */
+static std::string _TelUriOf( const std::string &strId ) {
+    if ( strId.compare( 0, 4, "tel:" ) == 0 || strId.compare( 0, 4, "sip:" ) == 0 ) return strId;
+    return "tel:" + strId;
+}
+
+/**
+ * 배포 레그 INVITE 본문을 multipart/mixed(mcdata-info + SDP)로 재구성 —
+ * 수신 단말이 그룹 스레드 귀속(request-uri)과 발신자 표시·disposition 회신 대상
+ * (calling-user-id)을 알 수 있게 한다 (GroupCallService::WrapMultipartBody 패턴).
+ */
+static void _WrapMcDataInfoBody( CSipMessage *pclsInvite, const std::string &strGroup,
+                                 const std::string &strCaller ) {
+    if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
+
+    struct timespec _ts;
+    clock_gettime( CLOCK_REALTIME, &_ts );
+    char _szBoundary[40];
+    snprintf( _szBoundary, sizeof( _szBoundary ), "mcdata_%08x%08x", (unsigned)_ts.tv_sec,
+              (unsigned)( _ts.tv_nsec ^ (uintptr_t)pclsInvite ) );
+    const std::string strBoundary = _szBoundary;
+
+    std::string strInfo =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+        "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\r\n"
+        "  <mcdata-Params>\r\n"
+        "    <request-type>group-sds</request-type>\r\n"
+        "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + _TelUriOf( strGroup ) +
+        "</mcdataURI></mcdata-request-uri>\r\n"
+        "    <mcdata-calling-user-id type=\"Normal\"><mcdataURI>" + _TelUriOf( strCaller ) +
+        "</mcdataURI></mcdata-calling-user-id>\r\n"
+        "  </mcdata-Params>\r\n"
+        "</mcdatainfo>";
+
+    std::string strSdp = pclsInvite->m_strBody;
+    std::string strBody;
+    strBody.reserve( strInfo.size() + strSdp.size() + 300 );
+    strBody += "--" + strBoundary + "\r\n";
+    strBody += "Content-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n";
+    strBody += strInfo;
+    strBody += "\r\n--" + strBoundary + "\r\n";
+    strBody += "Content-Type: application/sdp\r\n\r\n";
+    strBody += strSdp;
+    strBody += "\r\n--" + strBoundary + "--\r\n";
+
+    pclsInvite->m_strBody = strBody;
+    pclsInvite->m_iContentLength = (int)strBody.size();
+    pclsInvite->m_clsContentType.Set( "multipart", "mixed" );
+    pclsInvite->m_clsContentType.InsertParam( "boundary", strBoundary.c_str() );
 }
 
 static CSdpMedia _BuildMsrpMedia( int iPort, const std::string &strProtocol, const std::string &strPath,
@@ -412,6 +468,9 @@ bool CMcDataMediaService::InviteMsrpReceiver( const std::string &strGroup, const
             "Accept-Contact", "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit" );
         pclsInvite->AddHeader( "P-Preferred-Service", "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds" );
         pclsInvite->AddHeader( "Answer-Mode", "Auto" );
+        // mcdata-info multipart — 수신 단말의 그룹 스레드 귀속·발신자 표시·disposition 회신 대상
+        // (TS 24.282: controlling function 발신 INVITE 는 mcdata-info 포함)
+        _WrapMcDataInfoBody( pclsInvite, strGroup, strFrom );
     }
 
     {

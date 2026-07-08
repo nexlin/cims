@@ -80,6 +80,38 @@ class MsrpSession(
         return true
     }
 
+    /**
+     * 수신 세션(서버발 배포 레그) — bodiless SEND 로 연결을 세션에 바인딩한 뒤 서버(cmdp)의
+     * SEND 청크를 수신·청크별 200 응답·Message-ID 단위 조립. 완결(`$`)까지 조립되면 반환.
+     * @return (Content-Type, body) — 실패/타임아웃 시 null
+     */
+    fun receiveMessage(bindMsgId: String = "b0"): Pair<String, ByteArray>? {
+        val out = output ?: error("connect() 선행 필요")
+        out.write(MsrpCodec.buildSendChunk(MsrpCodec.newTid(), toPath, fromPath, bindMsgId,
+            contentType = null, body = ByteArray(0), rangeStart = 1, rangeEnd = 0, total = 0))
+        out.flush()
+        var contentType = ""
+        var curMsgId: String? = null
+        var assembled = ByteArray(0)
+        while (true) {
+            val f = awaitFrame { it.method == "SEND" } ?: return null   // 바인딩 200 응답은 큐에 남고 무시
+            val msgId = f.header("message-id")
+            if (msgId != curMsgId) {
+                curMsgId = msgId
+                contentType = f.header("content-type").orEmpty()
+                assembled = ByteArray(0)
+            }
+            assembled += f.body
+            out.write(MsrpCodec.buildResponse(f.tid, 200, "OK",
+                f.header("from-path") ?: toPath, fromPath))
+            out.flush()
+            when (f.contFlag) {
+                '$' -> return contentType to assembled
+                '#' -> { curMsgId = null; assembled = ByteArray(0) }    // 발신측 중단 — 폐기
+            }
+        }
+    }
+
     /** 다음 수신 프레임 중 [pred] 일치 프레임 대기(불일치 프레임은 큐 보존). 타임아웃 시 null. */
     fun awaitFrame(pred: (MsrpCodec.Frame) -> Boolean): MsrpCodec.Frame? {
         pending.firstOrNull(pred)?.let { pending.remove(it); return it }

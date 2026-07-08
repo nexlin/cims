@@ -57,6 +57,10 @@ class SipController(private val config: SipAccountConfig) {
     private val _msrpEvents = MutableSharedFlow<MsrpEvent>(extraBufferCapacity = 32)
     val msrpEvents: SharedFlow<MsrpEvent> = _msrpEvents.asSharedFlow()
 
+    /** REGISTER Contact 에 부가할 파라미터(예: MCData ICSI feature tag) — [register] 전에 설정.
+     *  예: `;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"` */
+    @Volatile var contactParams: String = ""
+
     private val ctl = HandlerThread("pj-ctl").apply { start() }
     private val h = Handler(ctl.looper)
 
@@ -340,6 +344,26 @@ class SipController(private val config: SipAccountConfig) {
     }
 
     /**
+     * 서버발 MSRP 배포 INVITE 수락(UAS) — 200 answer 의 `m=message` 섹션을 [msrpAnswerSdp] 로
+     * 교체(pjsua 는 미지원 미디어를 포트 0 으로 답하므로 패치 필수). 진행은 [msrpEvents] 로 흐른다.
+     */
+    fun acceptMsrpCall(callId: Int, msrpAnswerSdp: String) = onCtl {
+        calls[callId]?.apply {
+            pendingMsrpSdp = msrpAnswerSdp
+            answer(
+                CallOpParam(true).apply {
+                    statusCode = pjsip_status_code.PJSIP_SC_OK
+                    opt.audioCount = 1L
+                    opt.videoCount = 0L
+                },
+            )
+        }
+    }
+
+    /** MSRP 배포 INVITE 거절/정리 — 협상 전이면 486, 이후면 BYE (pjsua hangup 이 자동 판별). */
+    fun rejectMsrpCall(callId: Int) = onCtl { calls[callId]?.hangup(CallOpParam()) }
+
+    /**
      * in-dialog re-INVITE — multipart 본문(mcptt-info) 교체 송신. MCPTT 긴급/임박 상태의
      * 통화 중 상향·하향(TS 24.379)에 사용. SDP 는 재협상되며 floor(m=application) 라인은
      * 호별 [CimsCall.pendingAppSdp] 로 재주입된다.
@@ -369,10 +393,19 @@ class SipController(private val config: SipAccountConfig) {
 
     /** MSRP 호 상태 — [dispatchCallState] 와 분리(전역 _call 미접촉, 호 수명만 관리). */
     internal fun dispatchMsrpCallState(callId: Int, s: CallState) {
-        if (s is CallState.Disconnected) {
-            calls.remove(callId)?.let { runCatching { it.delete() } }
-            _msrpEvents.tryEmit(MsrpEvent.Closed(callId, s.code, s.reason))
+        when (s) {
+            is CallState.Active -> _msrpEvents.tryEmit(MsrpEvent.Answered(callId))
+            is CallState.Disconnected -> {
+                calls.remove(callId)?.let { runCatching { it.delete() } }
+                _msrpEvents.tryEmit(MsrpEvent.Closed(callId, s.code, s.reason))
+            }
+            else -> Unit
         }
+    }
+
+    internal fun dispatchMsrpIncoming(call: CimsCall, from: String, inviteMsg: String) {
+        calls[call.id] = call
+        _msrpEvents.tryEmit(MsrpEvent.Incoming(call.id, from, inviteMsg))
     }
 
     internal fun dispatchReg(active: Boolean, code: Int, reason: String) {
@@ -449,6 +482,9 @@ class SipController(private val config: SipAccountConfig) {
         ac.sipConfig.authCreds.add(
             AuthCredInfo("digest", "*", c.digestUsername, 0, c.password),
         )
+
+        // Contact 부가 파라미터(capability feature tag 등) — 서버가 MSRP 배포 대상 판정에 사용
+        if (contactParams.isNotBlank()) ac.sipConfig.contactParams = contactParams
 
         // 도메인 DNS 미해석 회피: 실제 서버 IP:port 로 route 강제(;lr)
         ac.sipConfig.proxies.add("sip:${c.serverHost}:${c.serverPort};transport=$tp;lr")
