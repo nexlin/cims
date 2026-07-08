@@ -53,6 +53,10 @@ class SipController(private val config: SipAccountConfig) {
     private val _conferenceInfo = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 16)
     val conferenceInfo: SharedFlow<Pair<Int, String>> = _conferenceInfo.asSharedFlow()
 
+    /** MCData MSRP 미디어평면 호 이벤트 — [CallState] 와 격리(그룹 URI 동일로 인한 세션 오염 방지). */
+    private val _msrpEvents = MutableSharedFlow<MsrpEvent>(extraBufferCapacity = 32)
+    val msrpEvents: SharedFlow<MsrpEvent> = _msrpEvents.asSharedFlow()
+
     private val ctl = HandlerThread("pj-ctl").apply { start() }
     private val h = Handler(ctl.looper)
 
@@ -303,6 +307,39 @@ class SipController(private val config: SipAccountConfig) {
     }
 
     /**
+     * MCData MSRP 발신 INVITE (TS 24.282 §9.2.3 SDS over media plane) — pjsua 생성 SDP(m=audio)에
+     * `m=message TCP/MSRP` 섹션([msrpSdp])을 주입해 송신. 호 상태는 [msrpEvents] 로만 흐른다.
+     * 서버(CSP)는 오디오를 포트≠0 + a=inactive 로 응답(계약)하고 200 의 a=path 가
+     * [MsrpEvent.PathReady] 로 학습된다.
+     */
+    fun makeMsrpInvite(
+        targetUri: String,
+        msrpSdp: String,
+        headers: Map<String, String> = emptyMap(),
+    ) = onCtl {
+        val acc = account ?: run {
+            _msrpEvents.tryEmit(MsrpEvent.Closed(-1, 0, "not registered")); return@onCtl
+        }
+        val call = CimsCall(this, acc)
+        call.msrpMode = true
+        call.pendingMsrpSdp = msrpSdp
+        val prm = CallOpParam(true).apply {
+            opt.audioCount = 1L
+            opt.videoCount = 0L
+            if (headers.isNotEmpty()) txOption.headers = headers.toSipHeaders()
+        }
+        runCatching { call.makeCall(targetUri, prm) }
+            .onSuccess {
+                calls[call.id] = call
+                _msrpEvents.tryEmit(MsrpEvent.Started(call.id, targetUri))
+            }
+            .onFailure {
+                Log.w(TAG, "makeMsrpInvite failed: ${it.message}")
+                _msrpEvents.tryEmit(MsrpEvent.Closed(-1, 0, it.message ?: "invite error"))
+            }
+    }
+
+    /**
      * in-dialog re-INVITE — multipart 본문(mcptt-info) 교체 송신. MCPTT 긴급/임박 상태의
      * 통화 중 상향·하향(TS 24.379)에 사용. SDP 는 재협상되며 floor(m=application) 라인은
      * 호별 [CimsCall.pendingAppSdp] 로 재주입된다.
@@ -324,6 +361,18 @@ class SipController(private val config: SipAccountConfig) {
 
     internal fun onRemoteFloorLearned(callId: Int, ip: String, port: Int) {
         _floorRemote.value = Triple(callId, ip, port)
+    }
+
+    internal fun onMsrpPathLearned(callId: Int, path: String) {
+        _msrpEvents.tryEmit(MsrpEvent.PathReady(callId, path))
+    }
+
+    /** MSRP 호 상태 — [dispatchCallState] 와 분리(전역 _call 미접촉, 호 수명만 관리). */
+    internal fun dispatchMsrpCallState(callId: Int, s: CallState) {
+        if (s is CallState.Disconnected) {
+            calls.remove(callId)?.let { runCatching { it.delete() } }
+            _msrpEvents.tryEmit(MsrpEvent.Closed(callId, s.code, s.reason))
+        }
     }
 
     internal fun dispatchReg(active: Boolean, code: Int, reason: String) {

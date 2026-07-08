@@ -170,6 +170,8 @@ class ProvisioningClient(
                 authId = acc.optString("authId", ""),
                 sipPassword = acc.stringOrNull("sipPassword"),
                 mcpttId = acc.stringOrNull("mcpttId"),
+                maxPayloadSdsCplaneBytes = s.optJSONObject("mcdata")
+                    ?.optInt("maxPayloadSdsCplaneBytes", 0) ?: 0,
             )
         }
         return ProvisioningProfile(

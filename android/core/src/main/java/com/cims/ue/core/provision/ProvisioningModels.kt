@@ -48,6 +48,9 @@ data class ServiceProfile(
     val authId: String = "",
     val sipPassword: String? = null,  // null 이면 로그인 비번 재사용
     val mcpttId: String? = null,      // PTT 전용
+    /** MCData C-plane SDS payload 상한(byte) — 초과 시 MSRP 미디어평면 발신(TS 24.282 §9.2.1.1).
+     *  0/미수신 = 무제한(항상 C-plane MESSAGE). 서버 `services[].mcdata.maxPayloadSdsCplaneBytes`. */
+    val maxPayloadSdsCplaneBytes: Int = 0,
 ) {
     /**
      * 이 서비스 프로파일을 [SipAccountConfig] 로 매핑. SIP Digest 비번은 [sipPassword] 우선,
@@ -72,5 +75,6 @@ data class ServiceProfile(
             authId = authId,
             password = sipPassword?.takeIf { it.isNotBlank() } ?: loginPassword,
             countryCode = countryCode,
+            maxPayloadSdsCplaneBytes = maxPayloadSdsCplaneBytes,
         )
 }

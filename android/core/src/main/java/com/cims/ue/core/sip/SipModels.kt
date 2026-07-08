@@ -53,6 +53,22 @@ sealed interface CallState {
 /** 수신 문자(SIP MESSAGE, RFC 3428 page-mode). [fromUri] 는 SIP URI 원문. */
 data class ImMessage(val fromUri: String, val contentType: String, val body: String)
 
+/**
+ * MCData MSRP 미디어평면 호(SDS over media plane, TS 24.282 §9.2.3) 이벤트.
+ * 일반 통화 상태([CallState])와 **분리** — MSRP 호의 대상 URI(그룹)가 PTT 음성 세션과 같아
+ * [CallState] 로 흘리면 그룹 세션의 callId 를 오염시킨다(bareId 충돌).
+ */
+sealed interface MsrpEvent {
+    /** MSRP INVITE 발신(UAC) 개시 — [callId] 확보(타임아웃 시 hangup 대상). */
+    data class Started(val callId: Int, val remote: String) : MsrpEvent
+
+    /** 200 OK answer 의 서버 MSRP `a=path` 학습 — TCP 접속 대상. */
+    data class PathReady(val callId: Int, val path: String) : MsrpEvent
+
+    /** MSRP 호 종료 — 서버 BYE(정상 완료 신호) 또는 실패 응답. */
+    data class Closed(val callId: Int, val code: Int, val reason: String) : MsrpEvent
+}
+
 /** SIP URI("\"이름\" <sip:번호@도메인>")에서 표시용 번호만 추출. 패턴이 없으면 원문 반환. */
 fun extractSipNumber(remote: String): String {
     var s = remote.trim()

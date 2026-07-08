@@ -178,7 +178,13 @@ CSP fan-out (하이브리드):
 ## 5. 앱 동작
 
 - 발신: `PttController.sendGroupMessage` — MCData multipart 생성, msgId 반환 →
-  `MessageStore`(OUT, msgId) 저장.
+  `MessageStore`(OUT, msgId) 저장. payload(UTF-8 텍스트 바이트, 서버 게이트와 동일 기준)가
+  프로비저닝 임계 `mcdata.maxPayloadSdsCplaneBytes`(0=무제한)를 초과하면 C-plane MESSAGE
+  대신 **MSRP 미디어평면 발신**(§4.7) — `SipController.makeMsrpInvite`(더미 m=audio +
+  `m=message TCP/MSRP` SDP 주입, Accept-Contact mcdata ICSI) → 200 OK `a=path` 로 TCP
+  out-connect(`mcdata/msrp/MsrpSession`) → SIGNALLING/PAYLOAD TLV(raw, base64 CTE 없음)
+  16KB 청크 SEND → 서버 BYE 로 완료. MSRP 호 상태는 `MsrpEvent` 플로우로 일반 통화
+  상태와 격리(그룹 URI 동일로 인한 PTT 세션 callId 오염 방지).
 - 수신(`PttService`): `multipart/mixed` → 코덱 파싱 —
   - SDS 메시지: `mcdata-info` 그룹 URI 로 **그룹 스레드 귀속**(스레드 키=그룹 ID, 발신자는
     `sender` 필드), disposition 요청 시 DELIVERED 통지 자동 회신.
@@ -221,13 +227,14 @@ CSP fan-out (하이브리드):
 
 ## 8. 잔여 과제
 
-- **앱 MSRP 클라이언트** (서버측 §4.7 은 구현 완료): 송신 = pjsua2 `onCallSdpCreated` SDP 주입
-  (기존 MCPTT `m=application` 주입과 동일 기제, `CimsCall.kt:66`) + Kotlin MSRP TCP 클라이언트
-  (`MsrpCodec/MsrpSession`) + `PttController.sendGroupMessage` 임계 분기(provisioning
-  `mcdata.maxPayloadSdsCplaneBytes`). 수신 = incoming INVITE 의 `TCP/MSRP` 감지 →
-  `msrpMode` 격리 → answer SDP 패치 → out-connect 수신. feature tag
-  (`+g.3gpp.icsi-ref` mcdata, `AccountSipConfig.contactParams`)는 수신 구현 후에만 광고.
+- **앱 MSRP 수신**(송신은 §5 구현 완료 — 태그 미광고라 수신은 FILEURL 폴백으로 동작):
+  incoming INVITE 의 `TCP/MSRP` 감지 → `msrpMode` 격리 → answer SDP 패치(pjsua2 UAS 답
+  주입은 Phase 0 스파이크로 go/no-go, 폴백=`CallOpParam.sdp`) → 서버 path 로 out-connect
+  수신 → `MessageStore` 저장 + DELIVERED. feature tag(`+g.3gpp.icsi-ref` mcdata,
+  `AccountSipConfig.contactParams`)는 수신 구현 후에만 광고.
   검증용 표준 단말 대역 = `tests/msrp_sds_client.py`.
+- **임계 활성화**: 앱(송신+수신) 배포 후 csp `Setup.McData.MaxPayloadSizeSdsCplaneBytes` 와
+  csc `Provisioning.McData.MaxPayloadSdsCplaneBytes` 를 함께 설정(현재 라이브 0=무제한).
 - 1:1 standalone SDS over media plane (현재 그룹 대상만 — 비그룹 타겟 MSRP INVITE 는 403)
 - FD over media plane (TS 24.282 §10.2.5 — cmdp 기계 동일, RFC 5547 file-selector SDP)
 - MSRPS(TLS)·배포 레그 실패 시 FILEURL 재시도 정책·media-plane disposition

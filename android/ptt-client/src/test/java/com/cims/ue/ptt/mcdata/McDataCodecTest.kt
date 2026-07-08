@@ -90,6 +90,41 @@ class McDataCodecTest {
         assertEquals("tel:g001", p.groupUri)
     }
 
+    @Test fun rawTlvBuildersMatchGroupSdsParts() {
+        // buildGroupSds 가 raw 빌더 산출물의 base64 인 것 확인 — MSRP(raw)와 C-plane(base64) 동일 TLV
+        val convId = McDataCodec.conversationIdOf("g001")
+        val msgId = McDataCodec.newMessageId()
+        val sig = McDataCodec.buildSdsSignallingTlv(convId, msgId, timeSec = 1_700_000_000L)
+        val pay = McDataCodec.buildSdsPayloadTlv("가나다 abc")
+        val (_, body) = McDataCodec.buildGroupSds(
+            groupUri = "tel:g001", text = "가나다 abc", convId = convId, msgId = msgId,
+            timeSec = 1_700_000_000L,
+        )
+        val b64 = java.util.Base64.getEncoder()
+        assertTrue(body.contains(b64.encodeToString(sig)))
+        assertTrue(body.contains(b64.encodeToString(pay)))
+    }
+
+    @Test fun rawSignallingTlvLayout() {
+        val convId = McDataCodec.conversationIdOf("g001")
+        val msgId = McDataCodec.newMessageId()
+        val withDisp = McDataCodec.buildSdsSignallingTlv(convId, msgId, timeSec = 1L)
+        assertEquals(39, withDisp.size)
+        assertEquals(McDataCodec.MSG_SDS_SIGNALLING, withDisp[0].toInt())
+        assertEquals((0x80 or McDataCodec.DISP_REQ_DELIVERY).toByte(), withDisp[38])
+        val noDisp = McDataCodec.buildSdsSignallingTlv(convId, msgId, requestDelivery = false, timeSec = 1L)
+        assertEquals(38, noDisp.size)
+    }
+
+    @Test fun sdsPayloadSizeIsUtf8ContentBytes() {
+        // 서버 게이트(McDataCodec.cpp payload content 합산)와 동일 기준 — content-type 옥텟 제외
+        assertEquals(3, McDataCodec.sdsPayloadSize("abc"))
+        assertEquals(3, McDataCodec.sdsPayloadSize("가"))          // UTF-8 3바이트
+        val pay = McDataCodec.buildSdsPayloadTlv("abc")
+        val len = (pay[3].toInt() and 0xFF shl 8) or (pay[4].toInt() and 0xFF)
+        assertEquals(1 + 3, len)                                    // TLV 길이 = content-type(1)+data
+    }
+
     @Test fun nonMcDataBodyReturnsNull() {
         assertNull(McDataCodec.parse("text/plain", "hello"))
         assertNull(McDataCodec.parse("multipart/mixed;boundary=x", "--x\r\nContent-Type: text/plain\r\n\r\nhi\r\n--x--\r\n"))

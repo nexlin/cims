@@ -72,6 +72,37 @@ object McDataCodec {
 
     fun newMessageId(): String = hex(UUID.randomUUID())
 
+    /** SDS SIGNALLING PAYLOAD TLV (raw) — C-plane MESSAGE(base64)·MSRP 미디어평면(raw) 공용. */
+    fun buildSdsSignallingTlv(
+        convId: String,
+        msgId: String,
+        requestDelivery: Boolean = true,
+        timeSec: Long = System.currentTimeMillis() / 1000,
+    ): ByteArray = ByteBuffer.allocate(39).apply {
+        put(MSG_SDS_SIGNALLING.toByte())
+        putDateTime(timeSec)
+        put(hexToBytes(convId))
+        put(hexToBytes(msgId))
+        if (requestDelivery) put((0x80 or DISP_REQ_DELIVERY).toByte())  // TV type1, IEI=8-
+    }.array().let { if (requestDelivery) it else it.copyOf(38) }
+
+    /** DATA PAYLOAD TLV (raw) — TEXT 단일 payload. */
+    fun buildSdsPayloadTlv(text: String): ByteArray {
+        val textBytes = text.toByteArray(Charsets.UTF_8)
+        return ByteBuffer.allocate(2 + 3 + 1 + textBytes.size).apply {
+            put(MSG_DATA_PAYLOAD.toByte())
+            put(1)                                   // Number of payloads
+            put(0x78)                                // Payload IEI (TLV-E)
+            putShort((1 + textBytes.size).toShort()) // content-type + data
+            put(PAYLOAD_TEXT.toByte())
+            put(textBytes)
+        }.array()
+    }
+
+    /** C-plane 임계 비교 기준 payload 크기 — 서버 게이트(McDataCodec.cpp payload content 합산)와
+     *  동일하게 DATA PAYLOAD 의 내용 바이트(=UTF-8 텍스트 길이, content-type 옥텟 제외). */
+    fun sdsPayloadSize(text: String): Int = text.toByteArray(Charsets.UTF_8).size
+
     /** 그룹 SDS 발신 본문 생성. @return (Content-Type, body) */
     fun buildGroupSds(
         groupUri: String,
@@ -81,24 +112,8 @@ object McDataCodec {
         requestDelivery: Boolean = true,
         timeSec: Long = System.currentTimeMillis() / 1000,
     ): Pair<String, String> {
-        val signalling = ByteBuffer.allocate(39).apply {
-            put(MSG_SDS_SIGNALLING.toByte())
-            putDateTime(timeSec)
-            put(hexToBytes(convId))
-            put(hexToBytes(msgId))
-            if (requestDelivery) put((0x80 or DISP_REQ_DELIVERY).toByte())  // TV type1, IEI=8-
-        }.array().let { if (requestDelivery) it else it.copyOf(38) }
-
-        val textBytes = text.toByteArray(Charsets.UTF_8)
-        val payload = ByteBuffer.allocate(2 + 3 + 1 + textBytes.size).apply {
-            put(MSG_DATA_PAYLOAD.toByte())
-            put(1)                                   // Number of payloads
-            put(0x78)                                // Payload IEI (TLV-E)
-            putShort((1 + textBytes.size).toShort()) // content-type + data
-            put(PAYLOAD_TEXT.toByte())
-            put(textBytes)
-        }.array()
-
+        val signalling = buildSdsSignallingTlv(convId, msgId, requestDelivery, timeSec)
+        val payload = buildSdsPayloadTlv(text)
         val info = mcDataInfoXml(groupUri)
         val boundary = "mcdata-${msgId.take(16)}"
         val body = buildString {
