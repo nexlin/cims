@@ -44,6 +44,8 @@ class MsrpSession(
     /**
      * 메시지 1건 송신 — [chunkSize] 청크 stop-and-wait, 청크마다 200 확인.
      * [successReport]=true 면 최종 청크 후 서버 REPORT 도 대기(미도착은 경고성 — 200 이 성공 기준).
+     * [onProgress] 는 청크 200 수리 시마다 누적 송신 바이트로 호출(진행률 표시용).
+     * [chunkDelayMs] > 0 이면 청크 사이 지연 — 진행률 UI 육안 확인용(디버그 속성으로만 활성).
      * @return 모든 청크가 200 으로 수리되면 true
      */
     fun sendMessage(
@@ -51,6 +53,8 @@ class MsrpSession(
         contentType: String,
         body: ByteArray,
         successReport: Boolean = false,
+        onProgress: ((sentBytes: Int) -> Unit)? = null,
+        chunkDelayMs: Long = 0,
     ): Boolean {
         val out = output ?: error("connect() 선행 필요")
         var offset = 0
@@ -71,6 +75,8 @@ class MsrpSession(
             val resp = awaitFrame { it.isResponse && it.tid == tid } ?: return false
             if (resp.statusCode != 200) return false
             offset += n
+            onProgress?.invoke(offset)
+            if (chunkDelayMs > 0 && !last) Thread.sleep(chunkDelayMs)
             if (body.isEmpty()) break
         }
         if (successReport) {

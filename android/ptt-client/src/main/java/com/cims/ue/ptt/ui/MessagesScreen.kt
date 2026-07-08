@@ -42,8 +42,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.fillMaxHeight
 import com.cims.ue.core.message.MessageThread
 import com.cims.ue.core.message.MsgDirection
+import com.cims.ue.core.message.SendState
 import com.cims.ue.ptt.PttService
 import com.cims.ue.ptt.R
 import java.util.Date
@@ -120,6 +122,8 @@ fun MessagesScreen(st: PttUiState, svc: PttService?, onOpenThread: (String) -> U
 fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: () -> Unit) {
     val tick = svc?.messageTick?.collectAsState()?.value ?: 0
     val entries = remember(tick, svc, peer) { svc?.messages?.thread(peer) ?: emptyList() }
+    // MSRP 발신 진행률(msgId → 0f~1f) — 전송 중 말풍선 진행 바
+    val progress = svc?.sendProgress?.collectAsState()?.value ?: emptyMap()
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val joined = st.session(peer) != null
@@ -184,10 +188,22 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                             verticalAlignment = Alignment.Bottom,
                         ) {
                             if (mine) {
-                                // MCData DELIVERED 통지 수신 시 전달확인 표시
-                                Text(if (e.delivered) "✓ ${fmtTime(e.time)}" else fmtTime(e.time),
-                                    color = if (e.delivered) Ct.Mint else Ct.TextFaint, fontSize = 10.sp,
-                                    modifier = Modifier.padding(end = 6.dp, bottom = 2.dp))
+                                // 전송 상태 — 🕓 전송중(%)/⚠ 실패(탭=재전송)/✓ 전송됨/✓✓ 전달확인
+                                val (label, color) = when {
+                                    e.sendState == SendState.PENDING -> {
+                                        val pct = progress[e.msgId]
+                                            ?.let { " ${(it * 100).toInt()}%" }.orEmpty()
+                                        "🕓$pct" to Ct.TextFaint
+                                    }
+                                    e.sendState == SendState.FAILED -> "⚠ 실패 · 재전송" to Ct.Red
+                                    e.delivered -> "✓✓ ${fmtTime(e.time)}" to Ct.Mint
+                                    else -> "✓ ${fmtTime(e.time)}" to Ct.TextFaint
+                                }
+                                Text(label, color = color, fontSize = 10.sp,
+                                    modifier = Modifier.padding(end = 6.dp, bottom = 2.dp).let { m ->
+                                        if (e.sendState == SendState.FAILED)
+                                            m.clickable { svc?.resendMessage(e) } else m
+                                    })
                             }
                             // 첨부(MCData FD) — 탭: 미다운로드 → 다운로드, 완료 → 열기
                             val isAtt = e.attName.isNotBlank()
@@ -217,6 +233,19 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                             if (!mine) {
                                 Text(fmtTime(e.time), color = Ct.TextFaint, fontSize = 10.sp,
                                     modifier = Modifier.padding(start = 6.dp, bottom = 2.dp))
+                            }
+                        }
+                        // MSRP 전송 진행 바 — 청크 진행률(작은 문자는 순간 완료라 안 보임)
+                        if (mine && e.sendState == SendState.PENDING) {
+                            progress[e.msgId]?.let { f ->
+                                Box(
+                                    Modifier.align(Alignment.End).padding(top = 3.dp, end = 2.dp)
+                                        .width(140.dp).height(3.dp)
+                                        .clip(RoundedCornerShape(2.dp)).background(Ct.SurfaceHi),
+                                ) {
+                                    Box(Modifier.fillMaxHeight().fillMaxWidth(f.coerceIn(0f, 1f))
+                                        .background(Ct.Mint))
+                                }
                             }
                         }
                     }

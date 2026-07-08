@@ -187,6 +187,12 @@ CSP fan-out (하이브리드):
   out-connect(`mcdata/msrp/MsrpSession`) → SIGNALLING/PAYLOAD TLV(raw, base64 CTE 없음)
   16KB 청크 SEND → 서버 BYE 로 완료. MSRP 호 상태는 `MsrpEvent` 플로우로 일반 통화
   상태와 격리(그룹 URI 동일로 인한 PTT 세션 callId 오염 방지).
+  - **전송 상태 말풍선**: MSRP 발신은 PENDING(🕓+진행률%·진행 바) → 성공 SENT(✓)/실패
+    FAILED(⚠, 탭=같은 msgId 재전송) — `MessageStore.sendState`+`PttController.sendResult/
+    sendProgress`. DELIVERED 통지 수신 시 ✓✓. C-plane 발신은 종전대로 즉시 SENT.
+    서비스 재기동 시 잔존 PENDING 은 FAILED 로 마감(재전송 유도).
+  - 진행률 육안 시험(릴리스 무영향): `adb shell setprop debug.cims.msrp.slow <청크간 ms>`
+    + `setprop debug.cims.msrp.chunk <청크 bytes>` — 0=끔.
 - 수신(MSRP 미디어평면): REGISTER Contact 에 `;+g.3gpp.icsi-ref="…icsi.mcdata.sds"` 광고
   (`SipController.contactParams`) → 서버발 배포 INVITE(`TCP/MSRP`)를 `CimsAccount` 가 감지,
   벨소리/통화 UI 없이 `msrpMode` 격리 → `acceptMsrpCall` — **완전한 answer SDP 를 수동 구성해

@@ -110,6 +110,20 @@ class PttController(
     private val _incomingSds = MutableSharedFlow<MediaSds>(extraBufferCapacity = 16)
     val incomingSds: SharedFlow<MediaSds> = _incomingSds.asSharedFlow()
 
+    /** MSRP 발신 진행 — (msgId, 송신 바이트, 전체 바이트). 청크 200 수리 시마다 방출. */
+    data class SendProgress(val msgId: String, val sent: Int, val total: Int)
+    private val _sendProgress = MutableSharedFlow<SendProgress>(extraBufferCapacity = 64)
+    val sendProgress: SharedFlow<SendProgress> = _sendProgress.asSharedFlow()
+
+    /** MSRP 발신 결과 — (msgId, 성공 여부). 서비스가 MessageStore 상태(SENT/FAILED) 반영. */
+    private val _sendResult = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 16)
+    val sendResult: SharedFlow<Pair<String, Boolean>> = _sendResult.asSharedFlow()
+
+    /** [text] 가 C-plane 임계를 초과해 MSRP 미디어평면으로 발신되는가 — 초기 말풍선 상태 판단용. */
+    fun willUseMsrp(text: String): Boolean =
+        sipConfig.maxPayloadSdsCplaneBytes > 0 &&
+            McDataCodec.sdsPayloadSize(text) > sipConfig.maxPayloadSdsCplaneBytes
+
     // ── 그룹별 세션 ──
 
     private inner class Session(val groupId: String) {
@@ -516,8 +530,7 @@ class PttController(
         if (text.isBlank()) return ""
         val convId = McDataCodec.conversationIdOf(groupId)
         val msgId = McDataCodec.newMessageId()
-        val threshold = sipConfig.maxPayloadSdsCplaneBytes
-        if (threshold > 0 && McDataCodec.sdsPayloadSize(text) > threshold) {
+        if (willUseMsrp(text)) {
             scope.launch { sendGroupMessageMsrp(groupId, text, convId, msgId) }
             return msgId
         }
@@ -550,7 +563,11 @@ class PttController(
     ): Unit = msrpMutex.withLock {
         val sessionId = UUID.randomUUID().toString().replace("-", "").take(12)
         val localIp = withContext(Dispatchers.IO) { localIpFor(sipConfig.serverHost) }
-            ?: run { _status.value = "[$groupId] MSRP 발신 실패: 로컬 IP 확인 불가"; return }
+            ?: run {
+                _status.value = "[$groupId] MSRP 발신 실패: 로컬 IP 확인 불가"
+                _sendResult.tryEmit(msgId to false)
+                return
+            }
         // a=path 포트는 광고용(리슨 안 함) — 서버가 항상 passive, 단말이 out-connect(NAT)
         val localPath = "msrp://$localIp:2855/$sessionId;tcp"
         val msrpSdp = listOf(
@@ -595,25 +612,39 @@ class PttController(
             val path = serverPath ?: run {
                 _status.value = "[$groupId] MSRP 발신 실패: 서버 응답 없음"
                 if (callId >= 0) sip.hangup(callId)
+                _sendResult.tryEmit(msgId to false)
                 return
             }
 
+            // 진행률 확인용 디버그 감속 — adb 로만 켬(릴리스 무영향):
+            //   setprop debug.cims.msrp.slow 300   (청크 사이 ms, 0=끔)
+            //   setprop debug.cims.msrp.chunk 256  (청크 크기 축소 — 청크 수 증가)
+            val slowMs = debugProp("debug.cims.msrp.slow")
+            val chunk = debugProp("debug.cims.msrp.chunk").takeIf { it in 64..65536 } ?: 16 * 1024
+            val sig = McDataCodec.buildSdsSignallingTlv(convId, msgId)
+            val payload = McDataCodec.buildSdsPayloadTlv(text)
+            val total = sig.size + payload.size
             val sent = withContext(Dispatchers.IO) {
                 runCatching {
-                    MsrpSession(path, localPath).use { sess ->
+                    MsrpSession(path, localPath, chunkSize = chunk).use { sess ->
                         sess.connect()
-                        sess.sendMessage("s$sessionId", McDataCodec.CT_SIGNALLING,
-                            McDataCodec.buildSdsSignallingTlv(convId, msgId)) &&
-                            sess.sendMessage("p$sessionId", McDataCodec.CT_PAYLOAD,
-                                McDataCodec.buildSdsPayloadTlv(text), successReport = true)
+                        sess.sendMessage("s$sessionId", McDataCodec.CT_SIGNALLING, sig,
+                            onProgress = { _sendProgress.tryEmit(SendProgress(msgId, it, total)) },
+                            chunkDelayMs = slowMs.toLong()) &&
+                            sess.sendMessage("p$sessionId", McDataCodec.CT_PAYLOAD, payload,
+                                successReport = true,
+                                onProgress = { _sendProgress.tryEmit(SendProgress(msgId, sig.size + it, total)) },
+                                chunkDelayMs = slowMs.toLong())
                     }
                 }.onFailure { Log.w(TAG, "MSRP 전송 실패: ${it.message}") }.getOrDefault(false)
             }
             if (!sent) {
                 _status.value = "[$groupId] MSRP 전송 실패"
                 if (callId >= 0) sip.hangup(callId)
+                _sendResult.tryEmit(msgId to false)
                 return
             }
+            _sendResult.tryEmit(msgId to true)
             // 서버가 수신 완료 시 BYE 로 정리 — 미도착이면 우리가 hangup
             val closed = withTimeoutOrNull(MSRP_BYE_TIMEOUT_MS) {
                 for (ev in events) if (ev is MsrpEvent.Closed && ev.callId == callId) return@withTimeoutOrNull true
@@ -626,6 +657,13 @@ class PttController(
             events.close()
         }
     }
+
+    /** `debug.cims.*` 시스템 속성(int) — adb `setprop` 으로 켜는 시험용 노브. 실패/미설정=0. */
+    private fun debugProp(name: String): Int = runCatching {
+        val cls = Class.forName("android.os.SystemProperties")
+        (cls.getMethod("getInt", String::class.java, Int::class.javaPrimitiveType)
+            .invoke(null, name, 0) as Int)
+    }.getOrDefault(0)
 
     /** [host] 로 나가는 기본 로컬 IP — MSRP a=path 광고용(UDP connect 트릭, 실송신 없음). */
     private fun localIpFor(host: String): String? = runCatching {
@@ -725,6 +763,21 @@ class PttController(
         } finally {
             collector.cancel()
             events.close()
+        }
+    }
+
+    /** 실패 문자 재전송 — 같은 msgId 재사용(수신측 중복 대사는 msgId 기준). 결과는 [sendResult]. */
+    fun resendGroupMessage(groupId: String, text: String, msgId: String) {
+        if (text.isBlank() || msgId.isBlank()) return
+        val convId = McDataCodec.conversationIdOf(groupId)
+        if (willUseMsrp(text)) {
+            scope.launch { sendGroupMessageMsrp(groupId, text, convId, msgId) }
+        } else {
+            val (ct, body) = McDataCodec.buildGroupSds(
+                groupUri = "tel:$groupId", text = text, convId = convId, msgId = msgId,
+            )
+            sip.sendRequest("MESSAGE", "sip:$groupId@${sipConfig.domain}", ct, body)
+            _sendResult.tryEmit(msgId to true)      // C-plane 은 종전대로 fire-and-forget
         }
     }
 
