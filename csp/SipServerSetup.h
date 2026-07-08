@@ -196,6 +196,21 @@ public:
     std::vector< std::pair< std::string, int > > m_vecCmpEndpoints;
 
     // ================================================================
+    // CMDP(MCData Media Plane, MSRP) 연동 설정 — Setup.McDataMedia.*
+    bool m_bUseMcDataMedia;     // Enable (기본 false — cmdp 미배치 환경 무영향)
+    std::string m_strCmdpIp;    // cmdp 제어 주소
+    int m_iCmdpPort;            // cmdp 제어 포트 (기본 9100)
+    int m_iLocalCmdpPort;       // CSP 측 수신 포트 (기본 9101) — cmdp 이벤트 도착지
+
+    // MCData C-plane 정책 — Setup.McData.*
+    //   MaxPayloadSizeSdsCplaneBytes: TS 24.484 <max-payload-size-sds-cplane-bytes>.
+    //   0/미설정=무제한(현행 동작). 초과 SDS MESSAGE 는 403 + Warning 203 거부(미디어평면 유도).
+    int m_iMaxSdsCplaneBytes;
+    //   FdUrlBase: FILEURL 폴백 배포의 다운로드 URL base (예: https://host:4430).
+    //   비면 Xcap Host:4430 로 유도.
+    std::string m_strFdUrlBase;
+
+    // ================================================================
     // XCAP / CSC 연동 (UE↔CSC, 3GPP TS 24.484 — Phase 3)
     //   xcap-diff NOTIFY 의 xcap-root URL 로 advertise 할 CSC XCAP(MCPTT) 서버 주소.
     //   비어있으면 m_strLocalIp 로 fallback (CSP 자기 IP — 단일 노드 호환).

@@ -262,6 +262,7 @@ LINK_LIBRARIES( ${PASF_LIB} pthread rt m)
 
 
 add_subdirectory(cmp)
+add_subdirectory(cmdp)
 add_subdirectory(csp)
 add_subdirectory(cspsim)
 add_subdirectory(cwrtc)
@@ -275,6 +276,11 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/config
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/cert
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/log
+
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmdp/bin
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmdp/config
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmdp/cert
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmdp/log
 
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/bin
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/lib
@@ -313,6 +319,7 @@ add_custom_target(dist
 
     # ── 2. 바이너리 복사 ────────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cmp      ${CMAKE_BINARY_DIR}/dist/cmp/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cmdp     ${CMAKE_BINARY_DIR}/dist/cmdp/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/csp      ${CMAKE_BINARY_DIR}/dist/csp/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.sh   ${CMAKE_BINARY_DIR}/dist/csp/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cwrtc    ${CMAKE_BINARY_DIR}/dist/cwrtc/bin/
@@ -323,6 +330,7 @@ add_custom_target(dist
     # ── 3. 설정 템플릿 복사 (deploy_value: "@PLACEHOLDER@" 포함, configure.sh 로 채움) ──
     #    CSP/CMP/CSC/cwrtc 모두 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/cmp/config/config_template.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmdp/config/config_template.json  ${CMAKE_BINARY_DIR}/dist/cmdp/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csp/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cwrtc/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csc/config/config_template.json
@@ -335,6 +343,7 @@ add_custom_target(dist
     #    cmp/csp/cwrtc 는 C++ 바이너리라 base conf 부재 시 hard-fail → 대상. csc(Python)는
     #    config 부재를 tolerate(soft) 하므로 비대상.
     COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/cmp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cmp/config/cmp.json
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/cmdp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cmdp/config/cmdp.json
     COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/csp/config/config_template.json ${CMAKE_BINARY_DIR}/dist/csp/config/csp.json
     COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gen_default_config.py ${CMAKE_BINARY_DIR}/dist/cwrtc/config/config_template.json ${CMAKE_BINARY_DIR}/dist/cwrtc/config/cwrtc.json
 
@@ -382,6 +391,7 @@ add_custom_target(dist
     # ── 6c. 컴포넌트별 pkg.json 복사 (cims.sh pkg 가 description 에 사용) ──
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/pkg.json          ${CMAKE_BINARY_DIR}/dist/csp/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/pkg.json          ${CMAKE_BINARY_DIR}/dist/cmp/pkg.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmdp/pkg.json         ${CMAKE_BINARY_DIR}/dist/cmdp/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/pkg.json          ${CMAKE_BINARY_DIR}/dist/csc/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/ems/core/oam/pkg.json          ${CMAKE_BINARY_DIR}/dist/oam/pkg.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cwrtc/pkg.json        ${CMAKE_BINARY_DIR}/dist/cwrtc/pkg.json

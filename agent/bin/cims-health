@@ -28,7 +28,8 @@ import json, sys, os
 ha_json, svc = sys.argv[1], sys.argv[2]
 defaults = {"csc": (4420, "tcp", ""),
             "csp": (5060, "udp", ""),
-            "psp": (5060, "udp", "")}
+            "psp": (5060, "udp", ""),
+            "cmdp": (9100, "udp", "")}
 port, proto, bind_ip = defaults.get(svc, (0, "udp", ""))
 tracked = []
 if os.path.isfile(ha_json):

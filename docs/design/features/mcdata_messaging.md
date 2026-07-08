@@ -21,7 +21,8 @@
 - participating/controlling 통합 배치는 CIMS PTT 와 동일한 배치(deployment) 선택으로 규격 위반이
   아니다. 단말은 그룹 URI(`sip:<gid>@domain`)로 직행 전송한다(표준의 participating PSI 라우팅
   단순화 — §7 편차 참조).
-- CMP 는 관여하지 않는다 (시그널링 평면 SDS 전용; 미디어평면 MSRP 는 미도입).
+- CMP 는 관여하지 않는다. **대용량 SDS 의 미디어평면(MSRP)은 별도 프로세스 `cmdp` 가 종단한다
+  (§4.7)** — C-plane 게이트(`allow_sds`·멤버십)와 보관은 두 평면이 공용이다.
 
 ## 2. 그룹별 게이트 — TS 24.481 그룹문서
 
@@ -116,6 +117,64 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 - 수신 앱: 그룹문서 `max-data-size-auto-recv` 이내면 자동 다운로드, 초과분은 말풍선 탭으로
   수동 다운로드 → FileProvider ACTION_VIEW 로 열기 (`files/mcdata/`).
 
+## 4.7 대용량 SDS — media plane (MSRP, TS 24.282 §9.2.3)
+
+SDS payload 가 `<max-payload-size-sds-cplane-bytes>`(TS 24.484 서비스 설정) 를 초과하면
+단말은 **standalone SDS over media plane(MSRP, RFC 4975)** 을 써야 하고, CSP participating
+검사는 초과 C-plane MESSAGE 를 **403 + Warning `203 "message too large to send over
+signalling control plane"`** 으로 거절한다(TS 24.282 §9.2.2 step 8; `McDataAsModule` 게이트 0).
+임계 미설정(0)이면 무제한 — TS 24.484 "요소 미포함 = 제한 없음" 프로파일로 규격 적합.
+
+```
+발신 UE ── INVITE (SDP: 더미 m=audio + m=message TCP/MSRP a=sendonly a=setup:actpass) ──→ CSP
+   │  McDataMediaService: 게이트(allow_sds·멤버십, C-plane 과 공용) → CmdpClient
+   │  ADD_MSRP_RECV_SESSION (UDP JSON 9100) → 200 OK (a=path=cmdp, a=setup:passive, a=recvonly)
+발신 UE ── TCP connect → MSRP SEND (raw TLV: signalling+payload 2건 또는 multipart 1건) ──→ cmdp
+cmdp: 종단·조립 → TLV 파싱(McDataCodec 공용) → FD 스토어 기록 → MSG_RECEIVED event → CSP
+CSP fan-out (하이브리드):
+   ├─ MSRP 광고 단말(REGISTER Contact +g.3gpp.icsi-ref 에 icsi.mcdata) → 서버발 INVITE
+   │    (더미 audio + m=message a=sendonly) + cmdp 송신 세션 → 수신 UE 가 out-connect 후 수신
+   └─ 그 외(현재 앱) → FD SIGNALLING FILEURL MESSAGE (§4.5 HTTP 다운로드 경로 재사용)
+→ 보관(messages.jsonl, via=msrp·file_url 포함) → 발신 레그 BYE
+```
+
+- **cmdp** (`cmdp/`, 별도 프로세스·패키지 0.1.0) — MCData media plane. TS 23.282 media storage
+  function 에 해당: MSRP 를 **종단**하고(릴레이 아님) 수신 본문을 CSC FD 스토어
+  (`McDataFd.Dir`, §4.5 와 동일 디렉터리·인덱스 스키마)에 기록한다 → FILEURL 폴백 수신자는
+  기존 `GET /mcdata/fd/{id}`(Bearer) 로 그대로 내려받는다. 재전달용 MSRP 원문은 `{id}.msrp`.
+  - 프로세스 골격 = cmp 클론: UDP JSON 제어채널(기본 **9100**), epoll 리액터(TCP 동적 fd
+    + 지연 삭제), 비동기 배치 jsonl 로거(5분 버킷), deployment overlay, 스위퍼(orphan 60s /
+    idle 300s). MSRP TCP 리슨 기본 **2855**, 광고 IP `MsrpIp`(단말 도달 가능해야 함).
+  - MSRP 스코프: SEND 청킹(Byte-Range·end-line `$/+/#`)·응답·REPORT(Success-Report)·
+    To-Path 세션 바인딩. 릴레이(RFC 4976)·MSRPS(TLS) 미지원(후속).
+  - 소스 공유: `csp/McDataCodec.cpp`(TLV 파서)·`Base64.cpp` 를 직접 컴파일.
+- **제어 프로토콜** (CSP `CmdpClient` ↔ cmdp, cmp envelope 동일): `ADD_MSRP_RECV_SESSION` /
+  `ADD_MSRP_SEND_SESSION`(file_id 재전달) / `SET_REMOTE_PATH`(수신자 answer 후) /
+  `REMOVE_MSRP_SESSION` / `HEARTBEAT` / `STATS`. 명령은 session_id 멱등.
+  **비동기 이벤트**(cmdp→CSP, ack `{"event_ack":id}` + 1s×5 재전송): `MSG_RECEIVED`
+  (file_id·conv/msg id·disposition·text 요약) / `SEND_RESULT` / `SESSION_ABORTED`
+  (size_exceeded·orphan·idle·conn_reset·parse_error).
+- **CSP `McDataMediaService`** (`csp/McDataMediaService.{h,cpp}`) — INVITE 의 m=message 감지
+  (`ModuleDispatcher::EventIncomingCall` 훅, PTT-AS 그룹 분기보다 선행)·SDP answer/offer 생성
+  (psip 무수정: `CSipCallRtp::m_clsMediaList` → `CSipDialog::AddSdp`)·레그 수명
+  (`EventCallStart`/`EventCallEnd` 훅)·하이브리드 fan-out. 크기 게이트는 cmdp 가
+  `min(그룹 max_sds_size, MaxMessageBytes)` 로 강제 — 초과 시 MSRP 413 + 세션 중단 + BYE.
+- **capability 판정**: REGISTER Contact 의 `+g.3gpp.icsi-ref` 값에 `icsi.mcdata` 포함 시
+  `CUserInfo::m_bMcDataMsrp`(등록 단위, 바인딩 만료와 소멸). 배포 INVITE 에는
+  `Accept-Contact: *;+g.3gpp.icsi-ref="...mcdata.sds";require;explicit` 부여.
+- **설정**:
+  - csp.json `Setup.McDataMedia.{Enable(기본 false),Host,ControlPort(9100),LocalPort(9101)}`,
+    `Setup.McData.{MaxPayloadSizeSdsCplaneBytes(기본 0=무제한),FdUrlBase}` — 콘솔
+    `mcdata_media` 섹션. Enable=false 면 기존 C-plane 만 동작(현행 무영향).
+  - cmdp.json `ServerIp/ServerPort(9100)/MsrpIp/MsrpPort(2855)/MaxMessageBytes(10MB)/
+    SessionTimeout/OrphanReclaimSec/McDataFd.Dir(CSC 와 공유)/ServiceLogging.Dir/SystemId`.
+  - csc.json `Provisioning.McData.MaxPayloadSdsCplaneBytes` → `/provisioning/me` 의 ptt
+    프로파일 `mcdata.maxPayloadSdsCplaneBytes` 로 단말에 전달. **CSP 값과 운영자 동기 유지.**
+- **시험**: `tests/cmdp_msrp_parser_test.cpp`(프레이머 단위, 단독 g++),
+  `tests/msrp_sds_client.py`(sender/receiver/fallback/negative — 라이브 CSP+cmdp 대상 E2E).
+- 패키징/수명주기: `cims.sh pkg` 대상·`cims-svc`·`cims-health(9100/udp)`·verify S4 EXPECTED 에
+  cmdp 등록. agent 계약은 cmp 와 동일(`bin/cmdp config/cmdp.json`).
+
 ## 5. 앱 동작
 
 - 발신: `PttController.sendGroupMessage` — MCData multipart 생성, msgId 반환 →
@@ -134,6 +193,10 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 1. DB: `sql/migrate_mcdata_sds.sql` (csp 보다 먼저 — SelectGroup 이 새 컬럼 참조)
 2. csc 0.2.7 (그룹문서·admin API·FD 콘텐츠 서버) → 3. csp 0.2.6 (MCDATA-AS·메시지 보관)
    → 4. oam-svc 0.2.13 (/messages API) + 콘솔 dist → 5. 앱 APK 배포
+- **media plane(§4.7) 추가 배포**: cmdp 0.1.0 을 먼저 기동(McDataFd.Dir=CSC 와 동일 NAS 경로)
+  → csp 에 `Setup.McDataMedia.Enable=true` + 재기동. Enable=false 상태에서는 무영향이므로
+  cmdp 없이도 기존 기능 정상. C-plane 임계는 csp `MaxPayloadSizeSdsCplaneBytes` 와 csc
+  provisioning 값을 함께 설정(앱 MSRP 지원 배포 전에는 0=무제한 유지 권장).
 - 구앱↔신서버: 구앱 text/plain 그룹 문자도 fan-out 됨(이전에는 603 Decline — 신규 동작).
 - 신앱↔구서버: multipart 그룹 문자가 603 Decline (서버 먼저 배포할 것).
 - 구앱이 신앱의 multipart 수신 시 무시(표시 안 됨) — 전 단말 동시 업데이트 권장.
@@ -151,11 +214,25 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 | 성공 응답 | 참여기능 202/200 | 200 OK (거부 403/413 은 선행 송신 — 후행 200 은 트랜잭션상 무시됨) | psip RecvMessageRequest 계약(긴급경보 경로와 동일) |
 | E2E 보안 (TS 33.180) | Protected Payload | 미적용 (TLS + 서버측 RBAC) | 서버 보관·관리자 모니터링 요구와 상충 |
 | READ 통지·InReplyTo | 지원 | 미사용 (DELIVERED 만; 파서는 IE skip 지원) | 최소 프로파일 |
+| media plane SDS 의 SDP | `m=message` 단독 | **더미 `m=audio` 라인 동반** — 서버는 포트≠0(9) + `a=inactive` 로 응답/오퍼 (CMP 할당·RTP 없음) | pjsua2 는 알려진 미디어가 포트≠0 으로 협상돼야 콜 유지 (`got_media` 규칙). MCPTT `m=audio`+`m=application` 기존 패턴과 동일 |
+| media plane 수신 배포 | 전 수신자 INVITE+MSRP | **하이브리드** — MSRP 광고 단말만 INVITE+MSRP, 그 외는 FD FILEURL MESSAGE 폴백 (§4.5 HTTP 다운로드) | 전환기 호환 (현재 앱은 MSRP 미지원). 폴백 수신자에겐 장문이 첨부(`sds_*.txt`)로 보임 |
+| 단말 a=path 포트 | 단말이 해당 포트 리슨 가능 | 광고용 (단말은 항상 out-connect, 서버 상시 `a=setup:passive`) | NAT 관통 — RTP relay 와 동일한 방향성 |
+| c-plane 임계 | 서비스 설정 문서로 전파 | csp.json + CSC provisioning `mcdata.maxPayloadSdsCplaneBytes` 이중 설정 (운영자 동기) | CMS 서비스설정 문서 미구현 — provisioning 채널 재사용 |
 
 ## 8. 잔여 과제
 
+- **앱 MSRP 클라이언트** (서버측 §4.7 은 구현 완료): 송신 = pjsua2 `onCallSdpCreated` SDP 주입
+  (기존 MCPTT `m=application` 주입과 동일 기제, `CimsCall.kt:66`) + Kotlin MSRP TCP 클라이언트
+  (`MsrpCodec/MsrpSession`) + `PttController.sendGroupMessage` 임계 분기(provisioning
+  `mcdata.maxPayloadSdsCplaneBytes`). 수신 = incoming INVITE 의 `TCP/MSRP` 감지 →
+  `msrpMode` 격리 → answer SDP 패치 → out-connect 수신. feature tag
+  (`+g.3gpp.icsi-ref` mcdata, `AccountSipConfig.contactParams`)는 수신 구현 후에만 광고.
+  검증용 표준 단말 대역 = `tests/msrp_sds_client.py`.
+- 1:1 standalone SDS over media plane (현재 그룹 대상만 — 비그룹 타겟 MSRP INVITE 는 403)
+- FD over media plane (TS 24.282 §10.2.5 — cmdp 기계 동일, RFC 5547 file-selector SDP)
+- MSRPS(TLS)·배포 레그 실패 시 FILEURL 재시도 정책·media-plane disposition
 - Late entry(부재중 수신): 서버 보관분(§4.1 messages.jsonl) 기반 단말 pull API — 규격
   message store(IMAP)는 비실용, 자체 정의
 - 멤버 단위 송신권한 `<mcdata-allow-transmit-data-in-this-group>` (수신전용 멤버)
 - 메시지·FD 파일 retention/purge (녹취와 공통 정리 메커니즘)
-- FD NOTIFICATION(다운로드 완료)·READ 통지·MSRP 미디어평면
+- FD NOTIFICATION(다운로드 완료)·READ 통지

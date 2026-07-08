@@ -1,0 +1,13 @@
+{
+  "name": "cmdp",
+  "description": "CIMS MCData Media Plane — MSRP 종단 (TS 24.282 SDS over media plane) + FD 스토어 연동",
+  "version": "0.1.0",
+  "ha_capability": "all_active",
+  "service": {
+    "functions": [
+      { "name": "msrp_sds", "desc": "대용량 SDS via MSRP 수신·저장·재전달" },
+      { "name": "fd_store", "desc": "CSC FD 스토어 공유 기록 (FILEURL 폴백)" }
+    ],
+    "processes": ["CMDP"]
+  }
+}

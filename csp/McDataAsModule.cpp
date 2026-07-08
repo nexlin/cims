@@ -8,6 +8,7 @@
 #include "GroupMap.h"
 #include "Log.h"
 #include "McDataCodec.h"
+#include "McDataGates.h"
 #include "ModuleDispatcher.h"
 #include "SipServerSetup.h"
 #include "SipStatusCode.h"
@@ -15,39 +16,6 @@
 
 bool CMcDataAsModule::IsEnabled() const {
     return gclsSetup.m_bRoleMcData;
-}
-
-/** JSON 문자열 이스케이프 (보관 레코드용) */
-static std::string _jesc( const std::string &s ) {
-    std::string r;
-    r.reserve( s.size() + 16 );
-    for ( unsigned char c : s ) {
-        switch ( c ) {
-            case '"':
-                r += "\\\"";
-                break;
-            case '\\':
-                r += "\\\\";
-                break;
-            case '\n':
-                r += "\\n";
-                break;
-            case '\r':
-                r += "\\r";
-                break;
-            case '\t':
-                r += "\\t";
-                break;
-            default:
-                if ( c < 0x20 ) {
-                    char h[8];
-                    snprintf( h, 8, "\\u%04x", c );
-                    r += h;
-                } else
-                    r += (char)c;
-        }
-    }
-    return r;
 }
 
 /**
@@ -76,25 +44,24 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     bool bFd = bMcData && clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING;
     int iPayloadSize = bMcData ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
 
-    // 게이트 1 — 그룹문서 mcdata-allow-short-data-service / mcdata-allow-file-distribution (TS 24.481)
-    if ( bFd ? clsGroup._allowFd == false : clsGroup._allowSds == false ) {
-        CLog::Print( LOG_INFO, "McDataAs: group(%s) %s disabled — reject 403 from(%s)", pszTo, bFd ? "FD" : "SDS",
-                     pszFrom );
-        gclsDispatcher.SendResponse( pclsMessage, SIP_FORBIDDEN );
+    // 게이트 0 — max-payload-size-sds-cplane-bytes (TS 24.484 서비스 설정, 0/미설정=무제한).
+    //   초과 SDS 는 media plane(MSRP) 을 써야 한다 — participating 검사 (TS 24.282 §9.2.2 step 8).
+    if ( !bFd && gclsSetup.m_iMaxSdsCplaneBytes > 0 && iPayloadSize > gclsSetup.m_iMaxSdsCplaneBytes ) {
+        CLog::Print( LOG_INFO, "McDataAs: payload %d > cplane max %d — reject 403 Warning 203 from(%s)",
+                     iPayloadSize, gclsSetup.m_iMaxSdsCplaneBytes, pszFrom );
+        CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+        if ( pclsResponse ) {
+            pclsResponse->AddHeader( "Warning",
+                                     "203 CIMS \"message too large to send over signalling control plane\"" );
+            gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+        }
         return true;
     }
 
-    // 게이트 2 — 발신자 그룹 멤버십 (controlling function 검사)
-    bool bMember = false;
-    for ( const auto &pUser : clsGroup._pusers ) {
-        if ( pUser && pUser->_id == pszFrom ) {
-            bMember = true;
-            break;
-        }
-    }
-    if ( bMember == false ) {
-        CLog::Print( LOG_INFO, "McDataAs: from(%s) is not a member of group(%s) — reject 403", pszFrom, pszTo );
-        gclsDispatcher.SendResponse( pclsMessage, SIP_FORBIDDEN );
+    // 게이트 1·2 — allow_sds/allow_fd + 발신자 멤버십 (media plane 과 공용, McDataGates)
+    int iGate = McDataGateCheck( clsGroup, pszFrom, bFd );
+    if ( iGate != 0 ) {
+        gclsDispatcher.SendResponse( pclsMessage, iGate );
         return true;
     }
 
@@ -108,47 +75,25 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     }
 
     // fan-out — 발신자 제외. affiliation 요구 그룹은 affiliate 멤버만 (긴급경보 경로와 동일 규칙).
+    std::vector<std::string> vecTargets;
+    McDataDeliveryTargets( clsGroup, pszFrom, pszTo, vecTargets );
     int iFanout = 0;
-    for ( const auto &pUser : clsGroup._pusers ) {
-        if ( !pUser || pUser->_id == pszFrom ) continue;
-        if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
-             !gclsDbManager.IsAffiliated( pszTo, pUser->_id ) )
-            continue;
+    for ( const auto &strMember : vecTargets ) {
         CUserInfo clsMemInfo;
-        if ( gclsUserMap.Select( pUser->_id.c_str(), clsMemInfo ) ) {
+        if ( gclsUserMap.Select( strMember.c_str(), clsMemInfo ) ) {
             CSipCallRoute clsMemRoute;
             clsMemInfo.GetCallRoute( clsMemRoute );
-            if ( gclsUserAgent.SendSms( pszFrom, pUser->_id.c_str(), pclsMessage->m_strBody.c_str(), &clsMemRoute,
+            if ( gclsUserAgent.SendSms( pszFrom, strMember.c_str(), pclsMessage->m_strBody.c_str(), &clsMemRoute,
                                         szContentType[0] ? szContentType : NULL ) )
                 iFanout++;
         }
     }
 
-    if ( gclsCallDir.IsEnabled() ) {
-        char szEvt[512];
-        snprintf( szEvt, sizeof( szEvt ),
-                  "{\"actor\":\"%s\",\"target\":\"%s\",\"conv_id\":\"%s\",\"msg_id\":\"%s\","
-                  "\"payload_size\":%d,\"disposition_req\":%d,\"fanout\":%d,\"mcdata\":%s}",
-                  pszFrom, pszTo, clsInfo.m_strConvId.c_str(), clsInfo.m_strMsgId.c_str(), iPayloadSize,
-                  clsInfo.m_iDispositionReq, iFanout, bMcData ? "true" : "false" );
-        gclsCallDir.PttLogEvent( pszTo, "message_sent", szEvt );
-
-        // 메시지 보관 — {ServiceLogDir}/message/{gid}/{시간버킷}/messages.jsonl (콘솔 모니터링 SoT)
+    {
         const char *pszType = bFd ? "fd" : ( bMcData ? "sds" : "text" );
-        std::string strText = bMcData ? clsInfo.m_strText : pclsMessage->m_strBody;
-        std::string strRec = std::string( "{\"group\":\"" ) + _jesc( pszTo ) + "\",\"from\":\"" + _jesc( pszFrom ) +
-                             "\",\"msg_type\":\"" + pszType + "\",\"conv_id\":\"" + clsInfo.m_strConvId +
-                             "\",\"msg_id\":\"" + clsInfo.m_strMsgId + "\",\"text\":\"" + _jesc( strText ) +
-                             "\",\"size\":" + std::to_string( iPayloadSize ) +
-                             ",\"disposition_req\":" + std::to_string( clsInfo.m_iDispositionReq ) +
-                             ",\"fanout\":" + std::to_string( iFanout );
-        if ( bFd ) {
-            strRec += std::string( ",\"file_name\":\"" ) + _jesc( clsInfo.m_strFileName ) + "\",\"file_url\":\"" +
-                      _jesc( clsInfo.m_strFileUrl ) + "\",\"file_size\":" + std::to_string( clsInfo.m_llFileSize ) +
-                      ",\"file_type\":\"" + _jesc( clsInfo.m_strFileType ) + "\"";
-        }
-        strRec += "}";
-        gclsCallDir.McDataMessageLog( pszTo, strRec );
+        CMcDataSdsInfo clsArcInfo = clsInfo;
+        if ( !bMcData ) clsArcInfo.m_strText = pclsMessage->m_strBody;
+        McDataArchiveMessage( pszTo, pszFrom, pszType, clsArcInfo, iPayloadSize, iFanout, "", "", bMcData );
     }
 
     CLog::Print( LOG_INFO, "McDataAs: group SDS from(%s) to(%s) mcdata=%d size=%d fanout=%d conv(%s) msg(%s)", pszFrom,

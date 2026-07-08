@@ -75,6 +75,23 @@ public:
 /** Content-Type 이 multipart/mixed 인지 (MCData SDS 판별 1차 조건) */
 bool McDataIsMultipartMixed( const std::string &strContentType );
 
+/** 그룹 상시 대화 Conversation ID — UUID v3(MD5) 결정적 발급 (앱 conversationIdOf 와 동일 규칙) */
+std::string McDataConversationIdOf( const std::string &strGroupId );
+
+/** Message ID — UUID v4 hex 32자 발급 */
+std::string McDataNewMessageId();
+
+/**
+ * @brief FD SIGNALLING PAYLOAD(0x02) multipart/mixed 본문 생성 — FILEURL 폴백 배포용.
+ *        앱 McDataCodec.kt buildGroupFd 와 바이트 호환 (base64 CTE, mcdata-info + signalling 2파트).
+ * @param strContentTypeOut [out] boundary 포함 Content-Type
+ * @return SIP MESSAGE 본문
+ */
+std::string McDataBuildFdSignallingBody( std::string &strContentTypeOut, const std::string &strGroupUri,
+                                         const std::string &strFileUrl, const std::string &strFileName,
+                                         long long llFileSize, const std::string &strFileType,
+                                         const std::string &strConvId, const std::string &strMsgId );
+
 /**
  * @brief MCData SDS multipart 본문 파싱.
  * @param strContentType Content-Type 헤더 원문 (boundary 파라미터 포함; 없으면 본문 첫 줄에서 유도)
