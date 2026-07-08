@@ -1,4 +1,4 @@
-"""S3-START — start all (cmp → csp → cwrtc → csc → console → phone)."""
+"""S3-START — start all (cmp → cmdp → csp → oam → csc → console)."""
 from __future__ import annotations
 
 from ...registry import verify_item, ItemResult, ItemStatus
@@ -9,7 +9,7 @@ from ... import shell
 @verify_item(
     id="S3-START",
     stage=3, category="환경",
-    name="start all (cmp → csp → cwrtc → csc → console → phone)",
+    name="start all (cmp → cmdp → csp → oam → csc → console)",
     depends_on=["S3-CONFIGURE"],
     presets=["stage3-full", "pipeline-full", "pre-package"],
     side_effects=["service-start"], timeout_s=120,

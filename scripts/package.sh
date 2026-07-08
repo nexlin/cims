@@ -98,12 +98,12 @@ cmd_pkg() {
             *)  targets+=("$1"); shift ;;
         esac
     done
-    # default targets — 9 모듈 + 부가 (cwrtc/phone/agent).
-    # csp 바이너리는 다용도 → csp/isp/psp 3 tarball (소스/dist 디렉토리는 동일,
+    # default targets — csp 바이너리는 다용도 → csp/isp/psp 3 tarball (소스/dist 디렉토리는 동일,
     # tarball 이름과 meta.json 의 name 만 분리 — Roles/LocalIp 는 deploy overlay 가 결정).
     # cmp 바이너리도 동일 → cmp/imp/pmp.
     # oam_base_service_split — console 은 oam-base 패키지에 동봉(별도 모듈 폐기). 명시 시만 단독 패키징.
-    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp cmdp csp psp isp cwrtc csc oam oam-svc phone cspsim agent)
+    # cwrtc/phone 은 재설계 예정 — 빌드/dist/패키징 제외 (CMakeLists.txt 동기).
+    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp cmdp csp psp isp csc oam oam-svc cspsim agent)
 
     if [[ ! -d $DIST_DIR ]]; then
         err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
@@ -128,7 +128,6 @@ cmd_pkg() {
                 oam-svc) _sync_set[oam-svc]=1; _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-svc = thin(자기 src) + svc(full) console 동봉; csc 블록이 oam/src 동기화 → 런타임/dev import 가능
                 agent)   _sync_set[agent]=1 ;;
                 console) _sync_set[console]=1 ;;
-                phone)   _sync_set[phone]=1 ;;
             esac
         done
         local _sync_list=("${!_sync_set[@]}")
@@ -171,9 +170,7 @@ cmd_pkg() {
             csc)         echo "$SCRIPT_DIR/csc" ;;
             oam)         echo "$SCRIPT_DIR/ems/core/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
             oam-svc)    echo "$SCRIPT_DIR/ems/service/oam" ;;  # oam_base_service_split D5 — base 게이트웨이 뒤 독립 서비스 모듈
-            cwrtc)       echo "$SCRIPT_DIR/cwrtc" ;;
             console)     echo "$SCRIPT_DIR/ems/core/console" ;;
-            phone)       echo "$SCRIPT_DIR/cims-phone" ;;
             cspsim)      echo "$SCRIPT_DIR/cspsim" ;;
             agent)       echo "$SCRIPT_DIR/agent" ;;
             *)           echo "" ;;
@@ -214,8 +211,9 @@ cmd_pkg() {
     local t src_sub tar_file build_date pkg_root base_dist stage
     for t in "${targets[@]}"; do
         case "$t" in
-            cmp|pmp|imp|cmdp|csp|psp|isp|cwrtc|csc|oam|oam-svc|console|phone|cspsim|agent)
+            cmp|pmp|imp|cmdp|csp|psp|isp|csc|oam|oam-svc|console|cspsim|agent)
                 src_sub=$(_src_sub_for "$t") ;;
+            cwrtc|phone) err "$t: 재설계 예정 — 빌드/패키징 제외됨"; continue ;;
             *) err "알 수 없는 컴포넌트: $t"; continue ;;
         esac
 

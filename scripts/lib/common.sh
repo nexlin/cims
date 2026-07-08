@@ -14,9 +14,17 @@
 [[ -n "${_CIMS_COMMON_SH_LOADED:-}" ]] && return 0
 _CIMS_COMMON_SH_LOADED=1
 
-# ── 색상 / 로그 ────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+# ── 색상 / 로그 (출력 규약) ────────────────────────────────────
+# 규약 — 개발 스크립트(cims.sh/configure.sh/cims-verify)와 운영 엔진(agent/bin·lib,
+# 자기완결이라 함수는 중복 정의하되 포맷은 동일)이 공유하는 출력 형식:
+#   header "=== <섹션> ==="   섹션 구분 (빈 줄 + 굵게)
+#   info/ok/warn/err          [INFO]/[OK]/[WARN]/[ERROR] 프리픽스 (err 는 stderr)
+#   단계 표기                 파이프라인 단계는 "[1/3] build" 식으로 메시지에 명시
+#   상세 출력                 빌드/설치 등 장문 출력은 $LOG_DIR/*.log 로 돌리고
+#                             성공 시 요약 1줄 + 로그 경로, 실패 시에만 tail 노출
+# ANSI-C 인용($'...') — echo -e 뿐 아니라 heredoc(cat <<EOF)에서도 렌더링되도록.
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 
 info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()      { echo -e "${GREEN}[OK]${NC}    $*"; }

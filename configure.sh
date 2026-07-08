@@ -287,7 +287,6 @@ info "배포 설정:"
 echo "  CSP_IP       = $CSP_IP"
 echo "  CMP_IP       = $CMP_IP"
 echo "  CMDP_IP      = $CMDP_IP"
-echo "  CWRTC_IP     = $CWRTC_IP"
 echo "  CSC_HOST     = $CSC_HOST"
 echo "  DB_HOST      = $DB_HOST / $DB_USER"
 echo "  VOLTE_DOMAIN = $VOLTE_DOMAIN"
@@ -431,7 +430,6 @@ PY
 apply_config_template "$DIST_DIR/cmp/config/config_template.json"          "$DIST_DIR/cmp/config/cmp.json"
 apply_config_template "$DIST_DIR/cmdp/config/config_template.json"         "$DIST_DIR/cmdp/config/cmdp.json"
 apply_config_template "$DIST_DIR/csp/config/config_template.json"          "$DIST_DIR/csp/config/csp.json"
-apply_config_template "$DIST_DIR/cwrtc/config/config_template.json"        "$DIST_DIR/cwrtc/config/cwrtc.json"
 apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIST_DIR/csc/config/csc.json"
 
 # ── base OAM JwtSecret 정렬 (oam_base_service_split §5) ────────
@@ -586,17 +584,7 @@ if [[ -n "$SRC_DIR" ]]; then
     write_env_if_changed "$SRC_DIR/ems/core/console/.env.tb.local" "VITE_ADMIN_TARGET=${CSC_SCHEME}://127.0.0.1:4419
 "
 
-    # cwrtc WSS 여부 자동 감지
-    CWRTC_WS_SCHEME="ws"
-    if [[ -f "$DIST_DIR/cwrtc/cert/csp.pem" ]]; then
-        CWRTC_WS_SCHEME="wss"
-    fi
-
-    # cims-phone/.env.local  (Test-CSC 4421 admin + Test-MCPTT 4430 + Test-CWRTC 8443)
-    write_env_if_changed "$SRC_DIR/cims-phone/.env.local" "VITE_ADMIN_TARGET=${CSC_SCHEME}://${CSC_HOST}:4421
-VITE_MCPTT_TARGET=${CSC_SCHEME}://${CSC_HOST}:4430
-VITE_CWRTC_TARGET=${CWRTC_WS_SCHEME}://${CWRTC_IP}:8443
-"
+    # cwrtc/cims-phone 은 재설계 예정 — env 렌더 제외 (빌드/패키징도 제외).
 fi
 
 # ── DB 접속 권한 SQL 생성 ───────────────────────────────────────

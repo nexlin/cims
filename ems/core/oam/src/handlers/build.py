@@ -37,12 +37,14 @@ _BUILD_BASE = '/api/v1/build'
 _SCRIPT_DIR = ''
 _DIST_PKG_DIR = ''
 
-# 12개 — base 8 + csp/cmp 변종 4 (psp/isp/pmp/imp). 변종은 cims.sh pkg 가 staging
-# 으로 dist/csp 또는 dist/cmp 를 복사 + 바이너리/config rename 후 tar.
+# scripts/package.sh cmd_pkg 화이트리스트와 동기 (변경 시 양쪽 갱신).
+# 변종(psp/isp/pmp/imp)은 cims.sh pkg 가 staging 으로 dist/csp 또는 dist/cmp 를
+# 복사 + 바이너리/config rename 후 tar. console 은 oam 패키지 동봉 — 명시 시만 단독.
+# cwrtc/phone 은 재설계 예정 — 빌드/dist/패키징 제외.
 _VALID_MODULES = (
-    'cmp', 'pmp', 'imp',
+    'cmp', 'pmp', 'imp', 'cmdp',
     'csp', 'psp', 'isp',
-    'cwrtc', 'csc', 'console', 'phone', 'cspsim', 'agent',
+    'csc', 'oam', 'oam-svc', 'console', 'cspsim', 'agent',
 )
 
 

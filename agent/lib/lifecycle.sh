@@ -3,12 +3,12 @@
 #
 # 본 파일은 source 후 함수만 노출하는 library — standalone 실행 금지.
 # Caller (agent/bin/cims-svc) 가 아래 환경변수와 helpers 를 미리 정의해야 함:
-#   변수:    SCRIPT_DIR, DIST_DIR, PID_DIR, LOG_DIR, SRC_CONSOLE, SRC_PHONE
+#   변수:    SCRIPT_DIR, DIST_DIR, PID_DIR, LOG_DIR
 #   색상:    RED, GREEN, YELLOW, CYAN, BOLD, NC
 #   logger:  info(), ok(), warn(), err(), header()
 #
-# cims.sh 의 운영 영역 (line 40~89, 102~198, 200~410, 419~503, 507~596,
-# 1368~1379, 1499~1602, 2088~2093) 에서 1:1 이전. 변경 없이 같은 동작 보장.
+# 엔진 순수성: 배포본 계약(dist 의 bin/config/overlay)만 다룬다. 소스 트리
+# 전용 동작(vite dev 콘솔 등)은 개발 프론트 cims.sh 의 영역 — 여기 넣지 않는다.
 
 # ── python 인터프리터 결정 ───────────────────────────────────
 # private/air-gapped 호스트엔 `python3` 가 PATH 에 없을 수 있다 (agent 는 절대경로
@@ -508,8 +508,7 @@ stop_oam_svc() {
 
 start_console() {
     if is_running console; then warn "console 이미 실행 중 (pid=$(read_pid console))"; return 0; fi
-    # Console 3분화:
-    #   Dev-Console     : 소스 vite dev, 기본 3001
+    # Console 2형 (엔진은 dist 정적 서빙만 — vite dev 콘솔은 개발 프론트 './cims.sh tb start console'):
     #   Test-Console    : build/dist/console/dist serve, 기본 8080 (HTTPS)
     #   배포본 console  : mgmt-server/console/, deployment overlay 의 Port 로 기동 (기본 8081)
     # overlay port: deployment POST 의 config 필드가 저장. cims_agent 가 변종별로
@@ -529,17 +528,7 @@ for ov in candidates:
     except: pass
 print(p if p else '')" 2>/dev/null)
 
-    if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then
-        [[ -z $port ]] && port=3001
-        kill_stray "vite.*cims-console" "$port" tcp
-        info "Dev-Console (Admin Web UI, 소스 Vite dev) 시작... (port $port → Test-CSC 4421 proxy)"
-        cd "$SRC_CONSOLE"
-        npm run dev -- --port "$port" --host >> "$LOG_DIR/console.log" 2>&1 &
-        save_pid console $!
-        sleep 2
-        is_running console && ok "Dev-Console 시작 완료 (pid=$(read_pid console), port=$port)" \
-            || { err "Dev-Console 시작 실패"; tail -3 "$LOG_DIR/console.log" | sed 's/^/  /'; return 1; }
-    elif [[ -d "$DIST_DIR/console/dist" ]]; then
+    if [[ -d "$DIST_DIR/console/dist" ]]; then
         [[ -z $port ]] && port=8080
         kill_stray "serve dist -l $port" "$port" tcp
         info "Test-Console (Admin Web UI, dist 정적 서빙) 시작... (port $port, HTTPS)"
@@ -570,14 +559,7 @@ start_phone() {
     if is_running phone; then warn "phone 이미 실행 중 (pid=$(read_pid phone))"; return 0; fi
     # 포트 3002 점유 프로세스(serve 좀비 포함) 먼저 정리
     kill_stray "serve dist -l 3002" 3002 tcp
-    if [[ -n "$SRC_PHONE" && -d "$SRC_PHONE" ]]; then
-        # 소스 모드: Vite 개발 서버 (API proxy 포함)
-        kill_stray "vite.*cims-phone"
-        info "phone (MCPTT UE Web) 개발 서버 시작... (port 3002)"
-        cd "$SRC_PHONE"
-        npm run dev >> "$LOG_DIR/phone.log" 2>&1 &
-        save_pid phone $!
-    elif [[ -d "$DIST_DIR/phone/dist" ]]; then
+    if [[ -d "$DIST_DIR/phone/dist" ]]; then
         # dist 전용 모드: 정적 서빙 (proxy 없음 — nginx 필요)
         info "phone (MCPTT UE Web) 정적 서빙 시작... (port 3002, HTTPS)"
         cd "$DIST_DIR/phone"
@@ -616,21 +598,9 @@ start_tb_csc() {
 }
 
 start_tb_console() {
-    if is_running tb-console; then warn "TB-Console 이미 실행 중 (pid=$(read_pid tb-console))"; return 0; fi
-    # dev 모드 기반 (vite proxy 로 /api → TB-CSC 4419 전달). 소스 트리에서만 동작.
-    if [[ -z "$SRC_CONSOLE" || ! -d "$SRC_CONSOLE" ]]; then
-        err "TB-Console 은 소스 트리에서만 기동 (vite dev proxy 필요). SRC_CONSOLE=$SRC_CONSOLE"
-        return 1
-    fi
-    [[ ! -f "$SRC_CONSOLE/.env.tb.local" ]] && err ".env.tb.local 없음. ./cims.sh configure 실행" && return 1
-    kill_stray "vite.*--mode tb" 3000 tcp
-    info "TB-Console (Admin Web UI for TB-CSC) dev 서버 시작... (port 3000, mode=tb, target=:4419)"
-    cd "$SRC_CONSOLE"
-    npm run dev -- --mode tb --port 3000 --host >> "$LOG_DIR/tb-console.log" 2>&1 &
-    save_pid tb-console $!
-    sleep 3
-    is_running tb-console && ok "TB-Console 시작 완료 (pid=$(read_pid tb-console), port=3000)" \
-        || { err "TB-Console 시작 실패"; tail -5 "$LOG_DIR/tb-console.log" | sed 's/^/  /'; return 1; }
+    # vite dev 서버(소스 트리) 필요 — 개발 프론트 전용. 엔진(배포본 tarball)에는 소스가 없다.
+    err "TB-Console 은 개발 프론트 전용 — './cims.sh tb start console' 사용 (vite dev, 소스 트리)"
+    return 1
 }
 
 # ── 중지 함수 ──
@@ -694,10 +664,7 @@ _svc_port_proto() {
         cwrtc)      echo "8443:tcp" ;;
         csc)        echo "4421:tcp" ;;
         oam)        echo "4419:tcp" ;;   # OAM 분리 Phase 3b
-        # console 은 모드별 포트 분기 — Dev(소스 트리) 3001 / Test(dist 전용) 8080.
-        console)
-            if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then echo "3001:tcp"
-            else echo "8080:tcp"; fi ;;
+        console)    echo "8080:tcp" ;;   # dist 정적 서빙 (vite dev 콘솔은 개발 프론트 전용)
         phone)      echo "3002:tcp" ;;
         tb-csc)     echo "" ;;          # OAM 이 4419 소유 — 포트 공유 오탐 방지; PID 파일로만 감지
         tb-oam)     echo "" ;;
@@ -745,16 +712,6 @@ status_one() {
             return
         fi
     fi
-    # console 의 경우 모드별 보조 포트도 확인 (Dev 3001 ↔ Test 8080) — orphan stray 검출용
-    if [[ "$name" == "console" ]]; then
-        local alt_port
-        if [[ -n "$SRC_CONSOLE" && -d "$SRC_CONSOLE" ]]; then alt_port=8080; else alt_port=3001; fi
-        local ext_pid; ext_pid="$(_pid_by_port "$alt_port:tcp")"
-        if [[ -n $ext_pid ]]; then
-            echo -e "  ${YELLOW}●${NC} $(printf '%-12s' "$name")  실행 중(stray)  (pid=$ext_pid, port=$alt_port)"
-            return
-        fi
-    fi
     echo -e "  ${RED}●${NC} $(printf '%-12s' "$name")  중지됨"
 }
 
@@ -763,17 +720,14 @@ cmd_status() {
     echo -e "  실행 디렉터리: ${CYAN}$DIST_DIR${NC}"
     echo ""
     echo -e "  ${BOLD}[검증 대상]${NC}"
-    status_one cmp
-    status_one pmp
-    status_one imp
-    status_one csp
-    status_one psp
-    status_one isp
-    status_one cwrtc
-    status_one oam
-    status_one csc
-    status_one console
-    status_one phone
+    # 설치 디렉터리($DIST_DIR/<svc>/)가 있는 모듈만 표시 — 개발서버 build/dist 에는
+    # 변종(pmp/imp/psp/isp) 디렉터리가 없어 자동 숨김, 변종 배포본에선 자기 모듈만 표시.
+    # cwrtc/phone 은 재설계 예정 — 기동/상태 대상에서 제외 (패키징은 유지).
+    local _svc
+    for _svc in cmp pmp imp cmdp csp psp isp oam csc console; do
+        [[ -d "$DIST_DIR/$_svc" ]] || continue
+        status_one "$_svc"
+    done
     # TB(Test-Bed)는 개발 전용 — 실제 기동 중일 때만 표시 (상용 배포본에선 숨김)
     if is_running tb-csc || is_running tb-console; then
         echo ""
@@ -799,11 +753,13 @@ cmd_log() {
 }
 
 # ── 컴포넌트 dispatcher ──
-COMPONENTS=(cmp cmdp csp cwrtc oam csc console phone)
+# cwrtc/phone 은 재설계 예정 — all 기동/중지/상태 제외 (명시 지정 시에만 개별 동작)
+COMPONENTS=(cmp cmdp csp oam csc console)
 
 _start_one() {
     case "$1" in
-        all)        start_cmp; start_cmdp; start_csp; sleep 0.5; start_cwrtc; start_oam; start_csc; start_console; start_phone ;;
+        # cwrtc/phone 은 재설계 예정 — all 기동/상태 제외 (명시 기동만. stop all 은 잔존 정리 위해 유지)
+        all)        start_cmp; start_cmdp; start_csp; sleep 0.5; start_oam; start_csc; start_console ;;
         tb)         start_tb_csc; sleep 0.5; start_tb_console ;;
         cmp)        start_cmp ;;
         pmp)        start_pmp ;;

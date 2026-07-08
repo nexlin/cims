@@ -35,12 +35,13 @@ def pkg_build(ctx: VerifyContext) -> ItemResult:
 
     # 기대 컴포넌트 — scripts/package.sh cmd_pkg 의 default targets 와 동기.
     # 변경 시 양쪽 모두 갱신 필요.
-    # (console 은 oam-base 패키지에 동봉 — 별도 tarball 없음, 명시 시만 단독 패키징)
+    # (console 은 oam-base 패키지에 동봉 — 별도 tarball 없음, 명시 시만 단독 패키징.
+    #  cwrtc/phone 은 재설계 예정 — 빌드/dist/패키징 제외)
     EXPECTED = {
         "cmp", "pmp", "imp",       # 미디어 (VoLTE/PTT/IBCF)
         "cmdp",                    # MCData media plane (MSRP)
         "csp", "psp", "isp",       # 시그널링 (VoLTE/PTT/IBCF)
-        "cwrtc", "csc", "oam", "oam-svc", "phone", "cspsim", "agent",
+        "csc", "oam", "oam-svc", "cspsim", "agent",
     }
     # 파일명 `<name>-<ver>.tar.gz` 에서 컴포넌트 이름 추출.
     present = {os.path.basename(t).rsplit("-", 1)[0] for t in tarballs}

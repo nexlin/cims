@@ -19,7 +19,7 @@ SRC_PHONE="$SCRIPT_DIR/cims-phone"
 
 cmd_sync() {
     # 소스 트리 → dist 로 Python/스크립트/메타를 복사 (C++ 빌드 없이 빠른 배포).
-    # Usage: ./cims.sh sync [csc|agent|scripts|pkg-meta|console|phone|all]
+    # Usage: ./cims.sh sync [csc|agent|scripts|pkg-meta|console|all]
     if [[ -z "$SRC_CONSOLE" ]]; then
         err "sync 명령은 소스 트리에서만 실행 가능 (dist 안에서는 의미 없음)"
         return 1
@@ -32,7 +32,7 @@ cmd_sync() {
     local targets=("$@")
     [[ ${#targets[@]} -eq 0 ]] && targets=(all)
 
-    local did_csc=0 did_agent=0 did_scripts=0 did_pkg=0 did_console=0 did_phone=0 did_oamsvc=0
+    local did_csc=0 did_agent=0 did_scripts=0 did_pkg=0 did_console=0 did_oamsvc=0
     for t in "${targets[@]}"; do
         case "$t" in
             all) did_csc=1 did_agent=1 did_scripts=1 did_pkg=1 did_oamsvc=1 ;;
@@ -42,7 +42,7 @@ cmd_sync() {
             scripts)   did_scripts=1 ;;
             pkg-meta)  did_pkg=1 ;;
             console)   did_console=1 ;;
-            phone)     did_phone=1 ;;
+            phone)     err "phone(cims-phone) 은 재설계 예정 — sync 대상에서 제외됨"; return 1 ;;
             *) err "알 수 없는 sync 대상: $t"; return 1 ;;
         esac
     done
@@ -177,11 +177,10 @@ cmd_sync() {
 
     # ── 컴포넌트별 pkg.json (description 소스) ──────────────────
     if [[ $did_pkg -eq 1 ]]; then
-        for t in csp cmp csc cwrtc cspsim; do
+        for t in csp cmp csc cspsim; do
             [[ -f "$SCRIPT_DIR/$t/pkg.json" ]] && cp -f "$SCRIPT_DIR/$t/pkg.json" "$DIST_DIR/$t/pkg.json" 2>/dev/null || true
         done
         [[ -f "$SCRIPT_DIR/ems/core/console/pkg.json" ]] && cp -f "$SCRIPT_DIR/ems/core/console/pkg.json" "$DIST_DIR/console/pkg.json" 2>/dev/null || true
-        [[ -f "$SCRIPT_DIR/cims-phone/pkg.json"   ]] && cp -f "$SCRIPT_DIR/cims-phone/pkg.json"   "$DIST_DIR/phone/pkg.json"   2>/dev/null || true
         ok "pkg-meta ← 각 모듈 루트의 pkg.json"
         n_changed=$((n_changed+1))
     fi
@@ -224,20 +223,7 @@ cmd_sync() {
         n_changed=$((n_changed+1))
     fi
 
-    # ── Phone 정적 빌드 ─────────────────────────────────────────
-    if [[ $did_phone -eq 1 ]]; then
-        ( cd "$SRC_PHONE" && npm run build 2>&1 | tail -3 )
-        if [[ -d "$SRC_PHONE/dist" ]]; then
-            mkdir -p "$DIST_DIR/phone"
-            rm -rf "$DIST_DIR/phone/dist"
-            cp -r "$SRC_PHONE/dist" "$DIST_DIR/phone/dist"
-            cp -f "$SRC_PHONE/nginx.conf" "$DIST_DIR/phone/nginx.conf" 2>/dev/null || true
-            ok "phone ← cims-phone/dist"
-        else
-            err "cims-phone/dist 없음 (빌드 실패?)"
-        fi
-        n_changed=$((n_changed+1))
-    fi
+    # phone(cims-phone) 은 재설계 예정 — sync 대상에서 제외 (빌드/패키징도 제외).
 
     echo ""
     info "sync 완료 ($n_changed 개 대상). 서비스 재기동: ./cims.sh restart <name>"

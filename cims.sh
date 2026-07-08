@@ -140,7 +140,7 @@ PY
     info "다음 단계:"
     info "  ./cims.sh build                    # 빌드"
     info "  ./cims.sh configure                # 시험환경 (server.local.json 자동 read)"
-    info "  ./agent/bin/cims-svc start         # 기동"
+    info "  ./cims.sh start                    # 기동 (agent/bin/cims-svc 위임)"
     echo ""
     info "환경변수 override (CI):"
     info "  CIMS_LOCAL_IP=192.168.1.10 CIMS_DB_PASSWORD=mypw \\"
@@ -182,29 +182,31 @@ cmd_build() {
     cd "$SRC_CONSOLE"
     npm install --silent
     # VITE_CONSOLE_TARGET=prod — 배포본은 packaging 메뉴 숨김 (routes.tsx VISIBLE_SECTIONS)
-    VITE_CONSOLE_TARGET=prod npm run build
-    cp -r dist "$DIST_DIR/console/"
-    ok "cims-console 빌드 완료 (prod target — packaging 메뉴 제외)"
+    # 상세 출력은 로그로 (실패 시에만 tail 노출) — 콘솔엔 결과 요약만.
+    if VITE_CONSOLE_TARGET=prod npm run build > "$LOG_DIR/console_build.log" 2>&1; then
+        rm -rf "$DIST_DIR/console/dist"
+        cp -r dist "$DIST_DIR/console/"
+        ok "cims-console 빌드 완료 (prod target — packaging 메뉴 제외, log: $LOG_DIR/console_build.log)"
+    else
+        err "cims-console 빌드 실패 — $LOG_DIR/console_build.log"
+        tail -10 "$LOG_DIR/console_build.log" | sed 's/^/  /'
+        exit 1
+    fi
     # TB-Console 은 dev 모드 기반 (vite proxy 필요) → 별도 dist 빌드 불필요.
     # configure.sh 가 .env.tb.local 에 VITE_ADMIN_TARGET=https://127.0.0.1:4419 를 기록하고,
     # cims.sh start tb-console 이 npm run dev -- --mode tb --port 3000 으로 기동한다 (VITE_CONSOLE_TARGET 미설정=dev).
 
-    header "=== Web UI 빌드 (cims-phone) ==="
-    cd "$SRC_PHONE"
-    npm install --silent
-    npm run build
-    cp -r dist "$DIST_DIR/phone/"
-    ok "cims-phone 빌드 완료"
+    # cwrtc/cims-phone 은 재설계 예정 — 빌드/dist/패키징 제외 (CMakeLists.txt 동기).
 
     # -v 명시 시 source 의 pkg.json version 갱신 — 이후 cims.sh pkg --no-bump 가 그 버전 사용.
     # 변종 (psp/isp/pmp/imp) 은 자기 pkg.json 없음 → base (csp/cmp) 의 pkg.json 만 갱신해도 충분.
     if [[ -n $version ]]; then
         local _comp _pkgf
-        for _comp in csp cmp csc cwrtc cspsim agent ems/core/console cims-phone; do
+        for _comp in csp cmp csc cspsim agent ems/core/console; do
             _pkgf="$SCRIPT_DIR/$_comp/pkg.json"
             [[ -f $_pkgf ]] && _pkg_write_version "$_pkgf" "$version"
         done
-        ok "pkg.json 버전 갱신 → $version (8개 컴포넌트)"
+        ok "pkg.json 버전 갱신 → $version (6개 컴포넌트)"
     fi
 
     echo ""
@@ -212,7 +214,7 @@ cmd_build() {
     echo ""
     info "다음 단계:"
     info "  [2/3] ./cims.sh configure --local-ip <서버IP> [--db-password <PW>]   # 시험환경 설정"
-    info "        ./agent/bin/cims-svc start                                     # Phase 1 기능 검증"
+    info "        ./cims.sh start                                                # Phase 1 기능 검증"
     info "  [3/3] ./cims.sh pkg ${version:+[--no-bump 자동]}                              # 배포 패키지화"
 }
 
@@ -238,7 +240,7 @@ cmd_up() {
 $(basename "$0") up [--skip-build]
   로컬 개발 파이프라인 원스톱: [1/3] build → [2/3] configure -y → 전체 재시작.
   --skip-build: 코드 변경 없이 설정만 재반영할 때
-  (검증 게이트는 ./cims-verify, 개별 재시작은 ./agent/bin/cims-svc)
+  (검증 게이트는 ./cims.sh verify, 개별 재시작은 ./cims.sh restart <svc>)
 EOF
                 return 0 ;;
             *) err "알 수 없는 옵션: $1 (up 은 --skip-build 만)"; return 1 ;;
@@ -252,6 +254,8 @@ EOF
     fi
     cmd_configure -y
     "$SCRIPT_DIR/agent/bin/cims-svc" restart
+    header "=== TB (개발 워크플로 — 4419/3000 상시) ==="
+    cmd_tb status
     echo ""
     ok "up 완료 — 콘솔: https://<서버IP>:4419 (configure 재실행으로 시크릿 갱신 → 재로그인 필요)"
 }
@@ -551,7 +555,8 @@ cmd_preflight() {
     # 3) 포트 점유 확인
     # 검증 대상 포트 — 기동 전엔 "가용" 이어야 정상.
     # TB 포트(4419/3000) 는 반대로 "점유" 되어 있어야 정상 (TB 상시 동작 전제).
-    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp")
+    # cwrtc(8443)/phone(3002) 은 재설계 예정 — 점검 제외 (reset 의 잔존 정리에는 유지).
+    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "8080:tcp")
     local tb_ports=("4419:tcp:TB-CSC" "3000:tcp:TB-Console")
     local pp port proto line pid label
     info "[검증 대상] 기동 전엔 가용해야 함"
@@ -619,6 +624,30 @@ PY
     fi
 
     echo ""
+}
+
+# ── 통합 status — 모듈(cims-svc) + TB(4419/3000) 한 화면 ──────
+cmd_status_front() {
+    local full=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --full) full=1; shift ;;
+            -h|--help)
+                cat <<EOF
+$(basename "$0") status [--full]
+  전체 모듈 상태(agent/bin/cims-svc status) + TB 2종(4419/3000)을 한 화면에 출력.
+  --full: preflight (포트 점유 / git / DB 사전조건) 요약까지 포함.
+EOF
+                return 0 ;;
+            *) err "알 수 없는 옵션: $1 (status 는 --full 만)"; return 1 ;;
+        esac
+    done
+    "$SCRIPT_DIR/agent/bin/cims-svc" status
+    header "=== TB (개발 워크플로 — 4419/3000 상시) ==="
+    cmd_tb status
+    echo ""
+    if (( full )); then cmd_preflight; fi
+    return 0
 }
 
 # ── 검증 (S1~S6) — ./cims-verify 전용 진입점으로 이전 ──────────
@@ -816,48 +845,69 @@ print(best.get('domain','') if best else '')
 # ── 도움말 ─────────────────────────────────────────────────────
 usage() {
     cat <<EOF
-${BOLD}CIMS 통합 관리 스크립트${NC}
+${BOLD}CIMS 개발 서버 통합 진입점${NC} — 빌드 → 설정 → 기동 → 확인 → 검증 → 패키징
 
 사용법: $(basename "$0") <command> [options]
 
-${BOLD}서비스 명령 (운영 도구는 agent/bin 으로 분리됨):${NC}
-  agent/bin/cims-svc  start|stop|restart|status|log [svc]    — lifecycle
-  agent/bin/cims-ha   install|config|check|apply|start|stop  — HA (keepalived + systemd)
-  agent/bin/cims-health <svc>   — listen probe (keepalived 가 호출)
-  agent/bin/cims-notify <svc> ...  — state hook (keepalived 가 호출)
-  cims.sh 는 개발 단계 명령만 (build/configure/pkg/sim/sync 등). 검증은 ./cims-verify.
+역할 분담 (cims.sh 는 개발 프론트 — 본체는 각 정본에 위임):
+  운영 엔진  agent/bin/cims-svc   배포본·agent·OAM 이 직접 호출하는 lifecycle 정본
+  검증       ./cims-verify        S1~S6 게이트 (소스 트리 전용)
+  HA         agent/bin/cims-ha    keepalived + systemd (배포 전용)
 
-${BOLD}TB 2종 (개발 워크플로 — 4419/3000 상시 동작):${NC}
-  tb start|stop|restart [csc|console|all]   기본: all
-  tb status                                 4419/3000 점유 확인
-  tb help                                   자세한 설명
-                                  TB-CSC     https://127.0.0.1:4419 (csc-tb.json)
-                                  TB-Console http://127.0.0.1:3000 (vite dev, 소스 트리만)
-
-${BOLD}초기 설정 (새 서버 첫 진입 시 한 번):${NC}
+${BOLD}[0] 초기 설정 (새 서버 첫 진입 시 한 번):${NC}
   init [--non-interactive]
                        local_ip / db_password 를 .cims/server.local.json 에 저장.
                        env: CIMS_LOCAL_IP, CIMS_DB_PASSWORD
 
-${BOLD}3단계 분리: 빌드 → 시험환경 설정 → 패키지화${NC}
-  [1/3] build  [-j N]
+${BOLD}[1/3] 빌드:${NC}
+  build [-j N] [-v X.Y.Z]
                        C++ + Web UI 빌드 → build/dist 복사만 수행.
-                       환경값 반영 없음 (configure 단계 책임).
-  [2/3] configure [options]
-                       시험환경 설정. 로컬 네트워크 IP / DB / 도메인 / 로그경로를
-                       build/dist 의 설정 파일에 반영 → configure.sh 에 위임.
+                       환경값 반영 없음 (configure 단계 책임). -v 는 pkg.json 버전 갱신.
+
+${BOLD}[2/3] 시험환경 설정:${NC}
+  configure [options]  로컬 네트워크 IP / DB / 도메인 / 로그경로를 build/dist 의
+                       설정 파일에 반영 → configure.sh 에 위임.
                        옵션 없이 TTY 에서 실행하면 항목별 기본값 제시형 대화형
                        wizard (Enter=수락, 답변은 .cims/server.local.json 에 저장).
                        -y/--defaults: 대화형 없이 저장값/기본값으로 즉시 진행.
-  [3/3] pkg [-v ...] [--no-bump] [-m ...]
-                       배포 tarball 생성 (아래 "배포 패키지" 섹션 참조).
+
+${BOLD}기동/상태/로그 (→ agent/bin/cims-svc 위임):${NC}
+  start|stop|restart [svc]
+                       svc: all(기본) | cmp|cmdp|csp|oam|csc|console
+                       (변종 pmp|imp|psp|isp 는 배포본 전용, cwrtc|phone 은 재설계 예정 — 제외)
+  status [--full]      전체 모듈 + TB 상태 (--full: preflight 사전조건 요약 포함)
+  log <svc>            로그 tail -f
 
   up [--skip-build]    원스톱: build → configure -y → 전체 재시작.
                        코드/설정 변경을 로컬 서버에 한 번에 반영할 때 사용.
+  sync [targets]       C++ 빌드 없이 Python/스크립트/메타만 dist 로 복사
+                       targets: csc | agent | scripts | pkg-meta | console | all
+                       (기본: all — C++ 제외. 예: ./cims.sh sync csc && ./cims.sh restart csc)
 
-  sync   [targets]     C++ 빌드 없이 Python/스크립트/메타만 dist 로 복사
-                       targets: csc | agent | scripts | pkg-meta | console | phone | all
-                       (기본: all — C++ 제외. 예: ./cims.sh sync csc → agent/bin/cims-svc restart csc)
+${BOLD}검증 (docs/VERIFICATION_PROCESS.md — 콘솔 진입: /testbed/verify-v2):${NC}
+  verify <cmd>         S1~S6 게이트 (→ ./cims-verify 위임, 소스 트리 전용)
+                       stage1~6 | run --preset <NAME> | list | list-presets | describe
+  preflight            사전조건 확인 (ens160 IP, 포트 점유, git 상태, DB 연결)
+  reset  [--all|--files|--db] [--path <dir>] [--keep-processes] [--keep-deployed]
+                       가입자 테이블 보존 상태로 설정/배포/세션 DB + 파일 + 프로세스 초기화
+                       (보존: users, organizations, volte_subscriptions,
+                        ptt_subscriptions, ptt_groups, ptt_group_members, user_rejects)
+
+${BOLD}[3/3] 배포 패키지 (Console 업로드용):${NC}
+  pkg [-v X.Y.Z] [--no-bump] [--no-sync] [-m <changelog>] [name...]
+                       configure 완료된 build/dist 를 모듈별 tar.gz 로 패키징.
+                       각 tarball 최상위: meta.json (name/version/설명) +
+                       config_template.json (설정 스키마) + <모듈>/ 파일.
+                       기본: auto-bump patch + source→dist auto-sync.
+                       -v 지정 시 해당 버전 강제 + pkg.json 반영
+                       --no-bump 면 현재 pkg.json 버전 그대로 (재패키징)
+                       --no-sync 면 auto-sync 건너뜀 (옛 dist 그대로 — 디버깅용)
+                       C++ 바이너리 (csp/cmp/cspsim) 는 mtime 검사 후 warn 만.
+
+${BOLD}TB 2종 (개발 워크플로 — 4419/3000 상시 동작):${NC}
+  tb start|stop|restart|status [oam|csc|console|all]   기본: all (자세히: tb help)
+                       TB-OAM     https://127.0.0.1:4419 (oam-tb.json)
+                       TB-Console http://127.0.0.1:3000 (vite dev, 소스 트리만)
 
 ${BOLD}시뮬레이터:${NC}
   sim [options]
@@ -874,51 +924,22 @@ ${BOLD}시뮬레이터:${NC}
 ${BOLD}데이터 정리:${NC}
   clean [all|log|data]   로그/서비스이력/녹취 삭제 (기본: all)
 
-${BOLD}검증 절차 (docs/VERIFICATION_PROCESS.md):${NC}
-  reset  [--all|--files|--db] [--path <dir>]
-                        가입자 테이블 보존 상태로 설정/배포/세션 DB + 파일 + 프로세스 초기화
-                        (보존: users, organizations, volte_subscriptions,
-                         ptt_subscriptions, ptt_groups, ptt_group_members, user_rejects)
-  preflight             사전조건 확인 (ens160 IP, 포트 점유, git 상태, DB 연결)
-  (검증 실행은 ./cims-verify — stage1~6 | list | list-presets | run --preset <NAME>.
-   콘솔 진입: /testbed/verify-v2. 정본: docs/VERIFICATION_PROCESS.md)
-
-${BOLD}배포 패키지 (Console 업로드용) — [3/3] 단계:${NC}
-  pkg [-v X.Y.Z] [--no-bump] [--no-sync] [-m <changelog>] [name...]
-                                 configure 완료된 build/dist 를 모듈별 tar.gz 로 패키징.
-                                 각 tarball 최상위: meta.json (name/version/설명) +
-                                 config_template.json (설정 스키마) + <모듈>/ 파일.
-                                 기본: auto-bump patch + source→dist auto-sync.
-                                 -v 지정 시 해당 버전 강제 + pkg.json 반영
-                                 --no-bump 면 현재 pkg.json 버전 그대로 (재패키징)
-                                 --no-sync 면 auto-sync 건너뜀 (옛 dist 그대로 — 디버깅용)
-                                 C++ 바이너리 (csp/cmp/cspsim) 는 mtime 검사 후 warn 만.
-                                 예: ./cims.sh pkg               # 0.0.3 → 0.0.4 자동 + 동기화
-                                     ./cims.sh pkg -v 1.0.0 csp  # csp 만 1.0.0 강제
-
-${BOLD}예시:${NC}
-  # [1/3] 빌드 → [2/3] 시험환경 설정 → 기동 (소스 트리)
-  $(basename "$0") build
-  $(basename "$0") configure --local-ip 192.168.1.10 --db-password secret
-  $(dirname "${BASH_SOURCE[0]}")/agent/bin/cims-svc start
-
-  # [3/3] 배포 패키지 생성 (Phase 1 검증 통과 후)
-  $(basename "$0") pkg                            # 모든 모듈 auto-bump
-  $(basename "$0") pkg -v 1.2.0 csp               # csp 만 1.2.0 강제
+${BOLD}예시 — 개발 루프:${NC}
+  $(basename "$0") build && $(basename "$0") configure -y && $(basename "$0") start
+  $(basename "$0") up                              # 위 3단계 원스톱
+  $(basename "$0") status                          # 모듈 상태 확인
+  $(basename "$0") log csp                         # 로그 추적
+  $(basename "$0") verify stage1                   # 정적 검사 게이트
+  $(basename "$0") pkg                             # 배포 tarball (auto-bump)
+  $(basename "$0") pkg -v 1.2.0 csp                # csp 만 1.2.0 강제
 
   # 배포 서버에서 (dist/ 내부)
   ./cims.sh configure --local-ip 192.168.1.10
-  ./agent/bin/cims-svc start
+  ./cims.sh start
 
   # 시뮬레이터 (동시 실행)
-  $(basename "$0") clean                                  # 데이터 정리
   $(basename "$0") sim -mode ptt -group +82571910001      # 영상 PTT 포그라운드
-  $(basename "$0") sim -mode ptt -group +82571910001 --bg # 영상 PTT 백그라운드
   $(basename "$0") sim -mode volte --bg                   # VoLTE 동시 실행
-
-  ./agent/bin/cims-svc stop all
-  ./agent/bin/cims-svc status
-  ./agent/bin/cims-svc log csp
 EOF
 }
 
@@ -1149,20 +1170,23 @@ case "${1:-}" in
     clean)     shift; cmd_clean "${1:-all}" ;;
     reset)     shift; cmd_reset "$@" ;;
     preflight) cmd_preflight ;;
-    # 검증(S1~S6)은 ./cims-verify 로 이전됨 (cims.sh = 빌드/패키징/설정, cims-svc = 운영).
+    # 검증(S1~S6) — 정본은 ./cims-verify (소스 트리 전용). 여기는 개발 프론트 위임.
     verify)
-        err "검증 명령은 ./cims-verify 로 이전됨"
-        err "  사용: $(dirname "${BASH_SOURCE[0]}")/cims-verify ${2:-stage1}"
-        err "  (항목/프리셋: cims-verify list | list-presets | run --preset <NAME>)"; exit 2 ;;
+        shift
+        if [[ -x "$SCRIPT_DIR/cims-verify" ]]; then
+            exec "$SCRIPT_DIR/cims-verify" "$@"
+        fi
+        err "검증(cims-verify)은 소스 트리 전용 — dist 트리에서는 사용 불가"; exit 2 ;;
     pkg)       shift; cmd_pkg "$@" ;;
     installer) shift; cmd_installer "$@" ;;
     sync)      shift; cmd_sync "$@" ;;
     tb)        shift; cmd_tb "$@" ;;
-    # 운영 명령 (start/stop/restart/status/log/ha) 은 agent/bin/cims-{svc,ha} 로 이전됨 (Phase 1.B+).
-    start|stop|restart|status|log)
-        err "운영 명령 '$1' 은 agent/bin/cims-svc 로 이전됨"
-        err "  사용: $(dirname "${BASH_SOURCE[0]}")/agent/bin/cims-svc $1 ${2:-}"
-        err "  (TB-CSC/TB-Console 은 'cims.sh tb $1' 사용)"; exit 2 ;;
+    # 운영 lifecycle — 정본(엔진)은 agent/bin/cims-svc (agent/OAM/verify 가 직접 호출).
+    # 개발 서버 UX 를 위해 여기서 passthrough 위임 (TB 는 'cims.sh tb' 별도).
+    # status 만 통합 뷰 (모듈 + TB [+ --full: preflight]).
+    status)    shift; cmd_status_front "$@" ;;
+    start|stop|restart|log)
+        exec "$SCRIPT_DIR/agent/bin/cims-svc" "$@" ;;
     ha)
         err "ha 명령은 agent/bin/cims-ha 로 이전됨"
         err "  사용: $(dirname "${BASH_SOURCE[0]}")/agent/bin/cims-ha ${2:-help}"; exit 2 ;;

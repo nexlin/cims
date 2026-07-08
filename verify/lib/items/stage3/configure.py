@@ -9,7 +9,7 @@ from ... import shell
 @verify_item(
     id="S3-CONFIGURE",
     stage=3, category="환경",
-    name="configure --local-ip <local_ip> (csp/cmp/csc/cwrtc/console 설정 재생성)",
+    name="configure --local-ip <local_ip> (csp/cmp/csc/console 설정 재생성)",
     # S3-RESET 는 의도적으로 `prep-reset` preset 으로 분리됨 (stage3/5/pipeline-full 미포함).
     # 따라서 depends_on=[S3-RESET] 으로 묶지 않는다 — runner 가 동일 preset 안에서만
     # depends_on 을 강제하므로, cross-preset 표기는 misleading. 사용자가 직접
