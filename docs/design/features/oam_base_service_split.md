@@ -121,8 +121,15 @@
 > **배포 제약**: base 와 oam-svc 는 이 경계를 맞춘 버전으로 **함께 배포**해야 한다 — stats 미등록
 > base + `/api/v1/stats` 라우트 없는 구 oam-svc 조합이면 `/stats/*` 404 (라우트는 oam-svc
 > 배포 시 self-register 로 갱신).
-> 가입자 CRUD 핸들러는 현재 OAM in-process import(`oam_app.py:118`) → 목표는 **csc 가
-> 직접 서빙하고 base 가 프록시**(중복 제거).
+> 가입자/조직 CRUD 핸들러는 **csc 가 직접 서빙하고 base 가 프록시**한다. csc/src 마운트
+> 폐지(P3b) 이후 OAM 은 이 핸들러를 in-process 로 로드하지 못하므로, `--role all` 도
+> csc 핸들러 미로드 시 **하이브리드**로 동작한다: `module='csc'` 라우트만 게이트웨이
+> 프록시로 mount 하고(`register_gateway(modules={'csc'})`), `/users/me` 는 base slim
+> 핸들러가 커버(mount 경로 `/api/v1/users/me`). stats/녹취/flow/검증은 in-process 유지
+> — 모듈 필터가 oam-svc 계열 라우트의 중복 mount(세그먼트 충돌)를 막는다.
+> dev(build/dist)는 배포 단계가 없어 csc 라우트를 base `oam.json` 의 `Gateway.Routes`
+> 로 시드하며(라우트 테이블 비었을 때 1회), 콘솔(4419) 토큰의 csc 측 독립 검증을 위해
+> `configure.sh` 가 `oam.json CimsAuth.JwtSecret` 을 csc.json 렌더값과 동일하게 정렬한다.
 
 > `service_control`(`/api/v1/services`) 은 로컬 호스트의 `cims-svc`(agent 번들 운영 도구)를
 > subprocess 로 구동한다. 스크립트 위치 해석: `CIMS_SVC_PATH`(명시 오버라이드) →

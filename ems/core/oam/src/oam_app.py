@@ -477,14 +477,29 @@ if __name__ == '__main__':
         #          프록시(controller 최장 일치: /me* 는 base, 그 외는 게이트웨이). slim 핸들러는
         #          parts 를 고정 _USERS_BASE 로 파싱하므로 mount 경로와 무관하게 me 를 처리.
         _me_fn = CIMS_ME_HANDLER_LIST[0][1]
-        base_rules.append(('/api/v1/users/me' if role == 'base' else '/api/v1/users',
+        # csc 핸들러(admin/org)가 in-process 로 로드됐을 때만 ME 를 /users 전체에 mount
+        # (superset 이 덮어씀). 미로드(P3b 이후 csc 별도 프로세스) 시 base 와 동일하게
+        # /users/me 만 잡고 나머지 /users/* 는 아래 게이트웨이 프록시가 csc 로 넘긴다.
+        _csc_inproc = bool(CIMS_ADMIN_HANDLER_LIST)
+        base_rules.append(('/api/v1/users' if (role == 'all' and _csc_inproc) else '/api/v1/users/me',
                            _me_fn, cims_kwargs))
         admin_server.add_dynamic_rules(base_rules)
 
         # ── SERVICE (in-process; role=all 에서만; P2+ 게이트웨이 프록시로 이관) ──
         if role == 'all':
-            # 가입자/조직 CRUD(csc 귀속) — admin superset 이 base slim /me 를 덮어씀.
-            admin_server.add_dynamic_rules(_bind(CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST))
+            if _csc_inproc:
+                # 가입자/조직 CRUD(csc 귀속) — admin superset 이 base slim /me 를 덮어씀.
+                admin_server.add_dynamic_rules(_bind(CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST))
+            else:
+                # P3b(csc/src 마운트 폐지) 이후 csc 핸들러는 OAM 에 동봉되지 않음 —
+                # 가입자/조직(csc 귀속) 세그먼트는 role=all 에서도 게이트웨이 프록시로 커버.
+                # module='csc' 라우트만 mount: stats/recordings 등 in-process 소유 세그먼트
+                # (oam-svc 계열 라우트가 테이블에 있어도) 와의 충돌 방지.
+                try:
+                    _gw_n = register_gateway(admin_server, config, modules={'csc'})
+                    logger.log_info(f"[gateway] role=all hybrid — csc proxy {_gw_n} route(s) mounted")
+                except Exception as _e:
+                    logger.log_error(f"[gateway] role=all csc proxy mount failed: {_e}")
             # 녹취·flow(oam-svc 귀속) — 자기 init() 상태 사용(raw kwargs). FLOW→RECORDING
             # 순서로 /api/v1/recordings 충돌 시 RECORDING 우선(현행 보존).
             admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)

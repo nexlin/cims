@@ -40,5 +40,25 @@
             "csp",
             "ue"
         ]
+    },
+    "Gateway": {
+        "_comment": "게이트웨이 라우트 수동 시드 — 라우트 테이블(file_store)이 비었을 때 1회 반영(seed_routes). 정규 경로는 서비스 모듈 배포 시 pkg meta.gateway.routes self-register 이며, dev(build/dist 직접 기동)는 배포 단계가 없어 여기서 csc(4421) 라우트를 시드한다. upstream 은 loopback 만 허용(I1).",
+        "Routes": [
+            {
+                "segment": "/api/v1/users",
+                "upstream": "https://127.0.0.1:4421",
+                "module": "csc"
+            },
+            {
+                "segment": "/api/v1/ptt/groups",
+                "upstream": "https://127.0.0.1:4421",
+                "module": "csc"
+            },
+            {
+                "segment": "/api/v1/organizations",
+                "upstream": "https://127.0.0.1:4421",
+                "module": "csc"
+            }
+        ]
     }
 }
