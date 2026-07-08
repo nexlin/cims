@@ -36,13 +36,13 @@ else
     if [[ -f "$_AGENT_PARENT/CMakeLists.txt" ]]; then
         # case 1 — 소스 트리에서 직접
         DIST_DIR="$_AGENT_PARENT/build/dist"
-        SRC_CONSOLE="$_AGENT_PARENT/cims-console"
+        SRC_CONSOLE="$_AGENT_PARENT/ems/core/console"
         SRC_PHONE="$_AGENT_PARENT/cims-phone"
     elif [[ -f "$_AGENT_PARENT/../../CMakeLists.txt" ]]; then
         # case 2 — 소스 트리의 build/dist 안 (개발 회차)
         DIST_DIR="$_AGENT_PARENT"
         _REPO="$(cd "$_AGENT_PARENT/../.." && pwd)"
-        SRC_CONSOLE="$_REPO/cims-console"
+        SRC_CONSOLE="$_REPO/ems/core/console"
         SRC_PHONE="$_REPO/cims-phone"
     else
         # case 3 — 배포본
