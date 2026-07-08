@@ -1254,7 +1254,8 @@ GET /api/v1/recordings/{id}/video   → video/mp4
 | GET | `/build/packages` | manifest.packages[] (없으면 디렉토리 스캔) |
 | GET | `/build/packages/<m>` | tarball octet-stream 다운로드 |
 
-지원 모듈 (`_VALID_MODULES`): cmp/pmp/imp/csp/psp/isp + cwrtc/csc/console/phone/cspsim/agent (12종).
+지원 모듈 (`_VALID_MODULES`): cmp/pmp/imp/cmdp/csp/psp/isp + csc/oam/oam-svc/console/cspsim/agent
+(scripts/package.sh 기본 타겟과 동기. console 은 명시 시만 단독, cwrtc/phone 은 재설계 예정 — 제외).
 
 ---
 

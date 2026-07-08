@@ -12,13 +12,16 @@
 ─────────────────────────────────             ───────────
 csp     CSP (VoLTE/PTT/IBCF SIP)              psp  PSP role (PTT)
 cmp     CMP (RTP relay)                       isp  ISP role (IBCF)
-cwrtc   WebRTC bridge                         pmp  PMP role (PTT 미디어)
-csc     Admin API + UI backend                imp  IMP role (IBCF 미디어)
-console Web UI (vite)
-phone   Web 단말 (vite)
+cmdp    CMDP (MCData media plane, MSRP)       pmp  PMP role (PTT 미디어)
+csc     CSC (가입자/MCPTT API)                imp  IMP role (IBCF 미디어)
+oam     OAM base 게이트웨이 (base console 동봉)
+oam-svc OAM 서비스 모듈 (svc console 동봉)
 cspsim  SIP/RTP 시뮬레이터
 agent   배포/프로세스 제어 데몬
 ```
+
+- **console** 은 oam/oam-svc 패키지에 동봉 — 명시 지정 시에만 단독 tarball.
+- **cwrtc / phone** 은 재설계 예정 — 빌드(CMake)·dist·패키징·기동 대상에서 제외.
 
 - **base** = 자기 소스 트리 + `pkg.json` 보유. 빌드 (`cmake`/`make`/`npm`) 결과가 `build/dist/<comp>/` 로 흘러간다.
 - **변종 (psp/isp/pmp/imp)** = base (csp / cmp) 와 동일한 ELF + `config_template.json` 을 그대로 쓰는 패키지 정체성. tarball 안 디렉토리/바이너리/`config/<m>.json`/`<m>.sh` 만 변종 이름으로 rename. 배포 시 deployment overlay (`install_path/config.json`) 가 Roles/LocalIp/Port 분기.
@@ -100,7 +103,7 @@ GET  /api/v1/build/packages             → manifest.packages[] (없으면 디�
 GET  /api/v1/build/packages/<module>    → tarball octet-stream
 ```
 
-- `_VALID_MODULES = (cmp, pmp, imp, csp, psp, isp, cwrtc, csc, console, phone, cspsim, agent)` — 12종 화이트리스트.
+- `_VALID_MODULES = (cmp, pmp, imp, cmdp, csp, psp, isp, csc, oam, oam-svc, console, cspsim, agent)` — 화이트리스트 (scripts/package.sh 기본 타겟과 동기, console 은 명시 시만 단독).
 - 동시 실행 가드: module-level `asyncio.Lock` — 진행 중 추가 요청은 409.
 - 인자 검증: `version` 정규식 `[0-9A-Za-z._+\-]{1,64}` (shell injection 방지).
 - 소스 루트 결정: `init(repo_root)` 가 cims.sh + CMakeLists.txt search-up → dist 안에서 띄워진 csc 라도 진짜 소스 트리에서 build 명령 실행.
@@ -110,7 +113,7 @@ GET  /api/v1/build/packages/<module>    → tarball octet-stream
 ```
 build/
 ├── dist/                              # 빌드 결과 (정리 시 보존)
-│   ├── csp/   cmp/   cwrtc/  csc/    console/  phone/  cspsim/  agent/
+│   ├── csp/  cmp/  cmdp/  csc/  oam/  oam-svc/  console/  cspsim/  agent/
 │   ├── cims.sh                       # 공통 launcher
 │   └── packages/                     # 패키지 산출물 (정리 시 삭제)
 │       ├── csp-0.0.10.tar.gz
@@ -119,10 +122,10 @@ build/
 │       ├── cmp-0.0.10.tar.gz
 │       ├── pmp-0.0.10.tar.gz
 │       ├── imp-0.0.10.tar.gz
-│       ├── cwrtc-0.0.10.tar.gz
+│       ├── cmdp-0.0.10.tar.gz
 │       ├── csc-0.0.10.tar.gz
-│       ├── console-0.0.10.tar.gz
-│       ├── phone-0.0.10.tar.gz
+│       ├── oam-0.0.10.tar.gz
+│       ├── oam-svc-0.0.10.tar.gz
 │       ├── cspsim-0.0.10.tar.gz
 │       ├── agent-0.0.10.tar.gz
 │       └── manifest.json             ← cmd_pkg 끝에서 자동 생성
@@ -134,7 +137,7 @@ build/
 ```
 <m>-<ver>.tar.gz
 ├── meta.json                  ← name/version/desc/build_date/git/service
-├── config_template.json       ← UI 렌더링 스키마 (csp/cmp/csc/cwrtc 만)
+├── config_template.json       ← UI 렌더링 스키마 (csp/cmp/cmdp/csc 만)
 ├── <m>/                       ← 모듈 자기 디렉토리 (변종은 rename 됨)
 │   ├── bin/<m> [+ <m>.sh]
 │   ├── config/<m>.json [+ collection jsonl]

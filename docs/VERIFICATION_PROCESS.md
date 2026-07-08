@@ -164,15 +164,15 @@ S2 FAIL → S3~S6 BLOCKED.
 
 - **S3-RESET**: `cims.sh reset` (가입자 보존)
 - **S3-CONFIGURE**: `configure --local-ip <ens160>`
-- **S3-START**: cmp/csp/cwrtc/csc/console/phone 순서 기동
+- **S3-START**: cmp/cmdp/csp/oam/csc/console 순서 기동 (cwrtc/phone 은 재설계 예정 — 제외)
 - **S3-SEED**: csp jsonlDir 에 `access_services.jsonl` 시드 + DB 가입자 선택
-- **S3-HEALTH**: `tcp:4421 / 4430 / 8443` + `udp:5060 / 9000` LISTEN + log error 0
+- **S3-HEALTH**: csp/cmp `[E]/[F]` + csc `ERROR:/CRITICAL:` 로그 스캔 (파일별 최근 2000행) 0건
 - **S3-SCN-VOIP-SMOKE**: cspsim VoIP 1콜 (B2BUA, RTP relay, seg_*.rtp +1)
 - **S3-SCN-PTT-SMOKE**: cspsim PTT 그룹콜 1회 (multipart INVITE, floor)
 
 ### S4 — 패키지화 (2 항목)
 
-- **S4-PKG-BUILD**: `cims.sh pkg --no-bump` → `build/dist/packages/<m>-<ver>.tar.gz` 12종 (base 8 + 변종 4: psp/isp/pmp/imp)
+- **S4-PKG-BUILD**: `cims.sh pkg --no-bump` → `build/dist/packages/<m>-<ver>.tar.gz` 12종 (base 8: cmp/cmdp/csp/csc/oam/oam-svc/cspsim/agent + 변종 4: psp/isp/pmp/imp)
 - **S4-PKG-MANIFEST**: 12 tarball 의 SHA-256 → `packages/manifest.json` (자동 생성). `_self_sha256` 가 S5/S6 immutability gate 의 SoT.
 
 패키지 포맷·변종 staging·빌드 흐름은 [`design/features/build_and_packaging.md`](design/features/build_and_packaging.md) + [`design/features/package_and_template.md`](design/features/package_and_template.md) 참조.
@@ -348,7 +348,7 @@ python3 -m tests.cims_verify run --items S5-CSC-DEPLOY-PKG-UPLOAD
 
 ```
 build/dist/
-├── csc/ csp/ cmp/ cwrtc/ console/ phone/ cspsim/   # S2/S3 직접 기동 대상
+├── csc/ csp/ cmp/ cmdp/ oam/ oam-svc/ console/ cspsim/   # S2/S3 직접 기동 대상
 ├── packages/                                       # S4 산출물 (12 tarball + manifest.json)
 ├── mgmt-server/                                    # S5 mgmt 체인 (csc + console + sim 모두 흡수)
 │   └── {agent, csc, console, sim, config/}
@@ -364,15 +364,13 @@ build/dist/
 
 | 구분 | 서비스 | 포트 |
 |---|---|---|
-| **TB** (상시) | TB-CSC | 4419 |
+| **TB** (상시) | TB-OAM (구 TB-CSC — deprecated) | 4419 |
 | | TB-Console | 3000 |
-| **S2/S3 직접 기동 (Test-\*)** | Test-CSC | 4421 |
-| | Dev-Console | 3001 |
+| **S2/S3 직접 기동 (Test-\*)** | Test-OAM (dev 는 role=all 로 4419 겸함) | 4419 |
+| | Test-CSC | 4421 |
 | | Test-Console (dist) | 8080 |
 | | Test-CSP | 5060/udp + 5061/tls + 25061/tcp |
 | | Test-CMP | 9000/udp + RTP 풀 |
-| | Test-CWRTC | 8443 (WSS) |
-| | Test-Phone | 3002 |
 | **S5 배포본 (verify, 5 server)** | mgmt csc | **4445** |
 | | mgmt console | **8081** |
 | | volte-sip (csp) | 5060/udp · LocalIp 127.0.0.1 |

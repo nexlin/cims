@@ -12,15 +12,18 @@
 |---|---|---|---|---|
 | **CMP** | RTP 미디어 릴레이 + PTT 발언권 | `build/bin/cmp` (C++) | 바이너리 | UDP 9000 (control) |
 | **CSP** | SIP 호 처리 (등록/발착신/PTT) | `build/bin/csp` (C++) | 바이너리 | 5060/5061/25061, 9001 |
-| **cwrtc** | WebRTC ↔ SIP/RTP 게이트웨이 | `build/bin/cwrtc` (C++) | 바이너리 | WS 8080 / WSS 8443, SIP 5062 |
+| **CMDP** | MCData media plane (MSRP 종단) | `build/bin/cmdp` (C++) | 바이너리 | MSRP 및 UDP 제어 |
 | **cspsim** | SIP 단말 시뮬레이터 (테스트) | `build/bin/cspsim` (C++) | 바이너리(CLI) | — |
 | **OAM** | 운영·관리 REST API (콘솔 백엔드) | Python (vendored) | `python3 ems/core/oam/src/oam_app.py` | HTTPS 4419 |
 | **CSC** | 가입자/그룹/MCPTT REST API | Python (vendored) | `python3 csc/src/csc_app.py` | HTTPS 4420/4421, MCPTT 4430 |
 | **Console** | 관리자 Web UI (React/Vite) | `ems/core/console/dist/` 또는 dev 서버 | `npm run dev` (개발) | HTTP 3000 |
 | **MariaDB** | 가입자/그룹/조직/RBAC 등 영속 저장 | — | 시스템 서비스 (별도 장비 가능) | 3306 |
 
-**의존 순서**: MariaDB → (C++/Python 빌드) → **CMP → CSP** → cwrtc → OAM → CSC → Console.
+**의존 순서**: MariaDB → (C++/Python 빌드) → **CMP → CMDP → CSP** → OAM → CSC → Console.
 CMP 는 CSP 의 제어 명령(UDP 9000)을 받으므로 **반드시 CSP 보다 먼저** 떠 있어야 합니다.
+
+> cwrtc(WebRTC 게이트웨이)와 phone(cims-phone 웹 단말)은 재설계 예정 —
+> 빌드/설정/기동 대상에서 제외되어 있습니다.
 
 ---
 
@@ -73,7 +76,7 @@ cd cims
 
 ---
 
-## 3. C++ 빌드 (CMP / CSP / cwrtc / cspsim)
+## 3. C++ 빌드 (CMP / CMDP / CSP / cspsim)
 
 ### 3.1 수동 빌드 (out-of-source)
 ```bash
@@ -82,14 +85,14 @@ cmake ..
 make -j$(nproc)
 ```
 - 첫 빌드는 외부 의존성 다운로드/컴파일로 수 분~수십 분 소요됩니다.
-- 산출물: `build/bin/{cmp,csp,cwrtc,cspsim}`
+- 산출물: `build/bin/{cmp,cmdp,csp,cspsim}`
 
 ### 3.2 배포 디렉터리 생성 (`make dist`)
 설정/스크립트와 함께 한 곳(`build/dist/`)에 모으려면:
 ```bash
 cd build && make dist
 ```
-- `build/dist/{cmp,csp,cwrtc}/{bin,config}/...` 구조로 바이너리+설정 템플릿+기동 스크립트(`csp.sh` 등)가 모입니다.
+- `build/dist/{cmp,cmdp,csp}/{bin,config}/...` 구조로 바이너리+설정 템플릿+기동 스크립트(`csp.sh` 등)가 모입니다.
 - 운영/실행은 보통 `build/dist/` 에서 합니다(설정도 여기에 생성됨 — §7).
 
 ### 3.3 외부 의존성
@@ -105,7 +108,7 @@ cd build && make dist
 ```bash
 ./cims.sh build -j$(nproc)
 ```
-→ C++ 빌드 + `make dist` + **Console(prod) 빌드** + cims-phone 빌드 까지 한 번에. (소스 트리에서만 실행)
+→ C++ 빌드 + `make dist` + **Console(prod) 빌드** 까지 한 번에. (소스 트리에서만 실행)
 
 ---
 
@@ -216,12 +219,12 @@ Enter(수락) 또는 직접 입력으로 진행합니다:
   --db-host 127.0.0.1 --db-user cims --db-password '<DB_PASSWORD>' \
   --volte-domain ims.mnc033.mcc450.3gppnetwork.org
 ```
-- 생성 대상: `build/dist/{cmp,cmdp,csp,csc,cwrtc}/config/*.json` + `build/dist/config/local_nodes.jsonl`
+- 생성 대상: `build/dist/{cmp,cmdp,csp,csc}/config/*.json` + `build/dist/config/local_nodes.jsonl`
   + `ems/core/console/.env.local`/`.env.tb.local`(`VITE_ADMIN_TARGET`) + `build/dist/sql/grant_db_access.sql`
 - `local_nodes.jsonl` (SIP 리스너 컬렉션): CSP 는 SIP 리스너를 이 컬렉션에서만 생성하고 primary
   부재 시 기동을 중단하므로, configure 가 UDP 5060(primary)/TCP 25061/TLS 5061 을 최초 1회
   시드한다 (**non-clobber** — 파일이 있으면 UI/운영 편집을 보존하고 건드리지 않음).
-- 주요 플래그: `--csp-ip/--cmp-ip/--cmdp-ip/--cwrtc-ip/--csc-host`, `--db-host/--db-user/--db-password`,
+- 주요 플래그: `--csp-ip/--cmp-ip/--cmdp-ip/--csc-host`, `--db-host/--db-user/--db-password`,
   `--volte-domain/--ptt-domain`, `--service-log-dir/--msg-log-dir/--record-dir`, `--cims-secret/--idms-secret`
 - 재실행 멱등성: 명시 옵션 > 환경변수(`CIMS_LOCAL_IP` 등) > `.cims/server.local.json` 저장값 > 내장 기본값.
   비대화 실행의 명시 옵션은 저장값을 덮어쓰지 않음(일회성).
@@ -244,10 +247,7 @@ Enter(수락) 또는 직접 입력으로 진행합니다:
 ./build/dist/csp/bin/csp ./build/dist/csp/config/csp.json -n
 # (또는: ./build/dist/csp/bin/csp.sh start)
 
-# 3) cwrtc (WebRTC 가 필요할 때)
-./build/dist/cwrtc/bin/cwrtc ./build/dist/cwrtc/config/cwrtc.json
-
-# 4) OAM → 5) CSC → 6) Console (§5, §4)
+# 3) OAM → 4) CSC → 5) Console (§5, §4)
 cd ems/core/oam/src && python3 -u oam_app.py        # :4419
 cd csc/src && python3 -u csc_app.py        # :4421/4420, 4430
 cd ems/core/console && npm run dev -- --port 3000 --host

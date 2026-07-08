@@ -143,7 +143,7 @@ FAIL 시 → S2~S6 자동 BLOCKED. 코드 수정 후 재시도.
 # PKG-BUILD → PKG-MANIFEST
 # 기대: build/dist/packages/<m>-<ver>.tar.gz 12개 (base 8 + 변종 4) +
 #       packages/manifest.json (SHA-256, manifest.json 자체 _self_sha256 포함)
-#   base 8 : csp / cmp / cwrtc / csc / console / phone / cspsim / agent
+#   base 8 : csp / cmp / cmdp / csc / oam / oam-svc / cspsim / agent
 #   변종 4 : psp · isp (CSP staging) · pmp · imp (CMP staging)
 ```
 

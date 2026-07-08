@@ -61,9 +61,18 @@ cd build && make dist     # build/dist/ (컴포넌트별 tarball + manifest)
 ```
 
 **개발 원스톱**: `./cims.sh up [--skip-build]` — build → configure -y → 전체 재시작.
-역할 분담: `cims.sh`(빌드/패키징/설정) · `agent/bin/cims-svc`(운영) · `./cims-verify`(검증).
 
-**실행** (CMP 를 CSP 보다 먼저 기동):
+**단일 프론트/엔진 경계**: 개발 서버에서는 `cims.sh` 가 단일 진입점(프론트) — 빌드/설정/패키징에
+더해 기동·상태·로그(`start|stop|restart|status [--full]|log`)와 검증(`verify`)도 서브커맨드로
+위임 실행한다. 정본(엔진)은 `agent/bin/cims-svc`(운영 lifecycle — 배포본·agent·OAM 이 직접 호출)
+와 `./cims-verify`(검증, 소스 트리 전용). 엔진은 dist 계약만 취급 — 소스 트리 전용 동작(vite dev
+콘솔 등)은 프론트에만 둔다.
+
+> cwrtc(WebRTC 게이트웨이)·cims-phone(웹 단말)은 **재설계 예정** — 빌드/패키징/기동 대상에서
+> 제외 (소스만 보존).
+
+**실행**: `./cims.sh start` (기동 순서·pid/log 관리는 엔진이 처리). 개별 바이너리 직접 실행 시
+CMP 를 CSP 보다 먼저 기동:
 ```bash
 ./bin/cmp ../cmp/cmp.json
 ./bin/csp ../csp/csp.json -n          # -n=foreground (백그라운드는 csp.sh)
