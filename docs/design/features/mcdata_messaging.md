@@ -189,8 +189,10 @@ CSP fan-out (하이브리드):
   상태와 격리(그룹 URI 동일로 인한 PTT 세션 callId 오염 방지).
 - 수신(MSRP 미디어평면): REGISTER Contact 에 `;+g.3gpp.icsi-ref="…icsi.mcdata.sds"` 광고
   (`SipController.contactParams`) → 서버발 배포 INVITE(`TCP/MSRP`)를 `CimsAccount` 가 감지,
-  벨소리/통화 UI 없이 `msrpMode` 격리 → `acceptMsrpCall`(200 answer 의 m=message 섹션을
-  a=setup:active/recvonly 로 교체 — pjsua 는 미지원 미디어를 포트 0 으로 답하므로 패치) →
+  벨소리/통화 UI 없이 `msrpMode` 격리 → `acceptMsrpCall` — **완전한 answer SDP 를 수동 구성해
+  `CallOpParam.sdp`(answer_with_sdp)로 응답**(오퍼 오디오 payload 에코+inactive,
+  m=message a=setup:active/recvonly; pjsua UAS 는 착신 처리 시점에 answer SDP 를 미리
+  생성하므로 `onCallSdpCreated` 패치로는 늦고 m=message 가 포트 0 으로 나감 — 실기기 확인) →
   서버 a=path 로 out-connect(`MsrpSession.receiveMessage`: bodiless 바인딩 SEND → 청크 수신·
   200 응답·조립) → 코덱 파싱 → `incomingSds` → 아래 C-plane 수신과 동일 저장·통지 경로.
   그룹/발신자는 INVITE mcdata-info(request-uri/calling-user-id), 구서버 폴백=From(그룹,

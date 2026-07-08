@@ -656,12 +656,24 @@ class PttController(
         }
         val sessionId = UUID.randomUUID().toString().replace("-", "").take(12)
         val localPath = "msrp://$localIp:2855/$sessionId;tcp"
+        // 완전한 answer SDP (answer_with_sdp) — 오퍼와 같은 m-line 순서:
+        // 더미 오디오(오퍼 payload 에코, inactive) + m=message(active/recvonly)
+        val offeredAudio = Regex("m=audio \\d+ RTP/AVP ([0-9 ]+)")
+            .find(ev.inviteMsg)?.groupValues?.get(1)?.trim() ?: "0 8"
         val answerSdp = listOf(
+            "v=0",
+            "o=- 3 3 IN IP4 $localIp",
+            "s=-",
+            "c=IN IP4 $localIp",
+            "t=0 0",
+            "m=audio 9 RTP/AVP $offeredAudio",
+            "a=inactive",
             "m=message 2855 TCP/MSRP *",
             "a=path:$localPath",
             "a=accept-types:${MsrpCodec.ACCEPT_TYPES}",
             "a=setup:active",
             "a=recvonly",
+            "",
         ).joinToString("\r\n")
 
         val events = Channel<MsrpEvent>(Channel.UNLIMITED)

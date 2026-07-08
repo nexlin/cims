@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.pjsip.pjsua2.AccountConfig
 import org.pjsip.pjsua2.AuthCredInfo
 import org.pjsip.pjsua2.CallOpParam
+import org.pjsip.pjsua2.SdpSession
 import org.pjsip.pjsua2.SendRequestParam
 import org.pjsip.pjsua2.SipHeader
 import org.pjsip.pjsua2.SipHeaderVector
@@ -344,20 +345,20 @@ class SipController(private val config: SipAccountConfig) {
     }
 
     /**
-     * 서버발 MSRP 배포 INVITE 수락(UAS) — 200 answer 의 `m=message` 섹션을 [msrpAnswerSdp] 로
-     * 교체(pjsua 는 미지원 미디어를 포트 0 으로 답하므로 패치 필수). 진행은 [msrpEvents] 로 흐른다.
+     * 서버발 MSRP 배포 INVITE 수락(UAS) — [answerSdp](완전한 answer SDP)로 응답
+     * (`CallOpParam.sdp` = answer_with_sdp). pjsua UAS 는 착신 처리 시점에 answer SDP 를
+     * 미리 생성해 두므로 `onCallSdpCreated` 패치로는 늦는다(m=message 가 포트 0 으로 나감 —
+     * 실기기 확인). 진행은 [msrpEvents] 로 흐른다.
      */
-    fun acceptMsrpCall(callId: Int, msrpAnswerSdp: String) = onCtl {
-        calls[callId]?.apply {
-            pendingMsrpSdp = msrpAnswerSdp
-            answer(
-                CallOpParam(true).apply {
-                    statusCode = pjsip_status_code.PJSIP_SC_OK
-                    opt.audioCount = 1L
-                    opt.videoCount = 0L
-                },
-            )
-        }
+    fun acceptMsrpCall(callId: Int, answerSdp: String) = onCtl {
+        calls[callId]?.answer(
+            CallOpParam(true).apply {
+                statusCode = pjsip_status_code.PJSIP_SC_OK
+                opt.audioCount = 1L
+                opt.videoCount = 0L
+                sdp = SdpSession().apply { wholeSdp = answerSdp }
+            },
+        )
     }
 
     /** MSRP 배포 INVITE 거절/정리 — 협상 전이면 486, 이후면 BYE (pjsua hangup 이 자동 판별). */
