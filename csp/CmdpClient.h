@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -91,6 +92,16 @@ private:
     std::thread m_threadKeepAlive;
     std::atomic<bool> m_bRecvRunning;
     std::thread m_threadRecv;
+
+    // 이벤트는 전용 스레드에서 dispatch — 콜백(fan-out)이 AddSendSession 등 동기 요청을
+    // 다시 부르는데, RecvLoop 스레드에서 직접 콜백하면 응답을 받아줄 스레드가 자신이라
+    // 자기 데드락(타임아웃)이 된다.
+    std::deque<SimpleJson::JsonNode> m_eventQueue;
+    std::mutex m_mutexEvents;
+    std::condition_variable m_cvEvents;
+    std::atomic<bool> m_bEventRunning;
+    std::thread m_threadEventDispatch;
+    void EventDispatchLoop();
 
     bool m_bConnected;
     int m_iAliveFailCount;

@@ -24,6 +24,7 @@ CCmdpClient::CCmdpClient()
       m_iNextTransId( 1 ),
       m_bKeepAliveRunning( false ),
       m_bRecvRunning( false ),
+      m_bEventRunning( false ),
       m_bConnected( false ),
       m_iAliveFailCount( 0 ) {
 }
@@ -32,6 +33,12 @@ CCmdpClient::~CCmdpClient() {
     m_bKeepAliveRunning = false;
     if ( m_threadKeepAlive.joinable() ) {
         m_threadKeepAlive.join();
+    }
+
+    m_bEventRunning = false;
+    m_cvEvents.notify_all();
+    if ( m_threadEventDispatch.joinable() ) {
+        m_threadEventDispatch.join();
     }
 
     m_bRecvRunning = false;
@@ -85,8 +92,32 @@ bool CCmdpClient::Init( const std::string &strCmdpIp, int iCmdpPort, int iLocalP
         m_threadKeepAlive = std::thread( &CCmdpClient::KeepAliveLoop, this );
     }
 
+    if ( !m_bEventRunning ) {
+        m_bEventRunning = true;
+        m_threadEventDispatch = std::thread( &CCmdpClient::EventDispatchLoop, this );
+    }
+
     CLog::Print( LOG_INFO, "CmdpClient: init %s:%d (local=%d)", strCmdpIp.c_str(), iCmdpPort, iLocalPort );
     return true;
+}
+
+// 이벤트 전용 dispatch 스레드 — RecvLoop 가 큐에 넣고 여기서 콜백을 부른다.
+//   콜백(McDataMediaService fan-out)이 AddSendSession/RemoveSession 등 동기 요청을 수행해도
+//   응답은 RecvLoop 가 정상 수신하므로 데드락이 없다.
+void CCmdpClient::EventDispatchLoop() {
+    while ( m_bEventRunning ) {
+        SimpleJson::JsonNode clsEvent;
+        {
+            std::unique_lock<std::mutex> lock( m_mutexEvents );
+            m_cvEvents.wait( lock, [this] { return !m_eventQueue.empty() || !m_bEventRunning; } );
+            if ( !m_bEventRunning && m_eventQueue.empty() ) break;
+            clsEvent = m_eventQueue.front();
+            m_eventQueue.pop_front();
+        }
+        if ( m_fnEventCallback ) {
+            m_fnEventCallback( clsEvent );
+        }
+    }
 }
 
 void CCmdpClient::OnTransactionComplete( unsigned int transId, bool success, const std::string &response ) {
@@ -292,9 +323,11 @@ void CCmdpClient::RecvLoop() {
                                           strPacket.c_str(), "mcdata", std::to_string( llEventId ).c_str(),
                                           root.Get( "payload" ).GetString( "sesid" ).c_str(), "", "", "" );
             }
-            if ( m_fnEventCallback ) {
-                m_fnEventCallback( root );
+            {
+                std::lock_guard<std::mutex> lock( m_mutexEvents );
+                m_eventQueue.push_back( root );
             }
+            m_cvEvents.notify_one();
             continue;
         }
 

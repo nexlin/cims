@@ -51,9 +51,11 @@ def digest(username, realm, password, method, uri, nonce, qop="auth", cnonce="1"
 class SipUa:
     """최소 SIP UA (UDP) — REGISTER digest / INVITE(UAC·UAS) / MESSAGE."""
 
-    def __init__(self, server_ip, server_port, user, domain, password, feature_tag=""):
+    def __init__(self, server_ip, server_port, user, domain, password, feature_tag="",
+                 auth_user=""):
         self.server = (server_ip, server_port)
         self.user, self.domain, self.password = user, domain, password
+        self.auth_user = auth_user or user  # digest username (CIMS v3: imsi@svc-domain)
         self.feature_tag = feature_tag
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.connect(self.server)          # 로컬 IP 확정용
@@ -129,8 +131,8 @@ class SipUa:
         if not m:
             fail(f"REGISTER 응답에 nonce 없음: {rsp.splitlines()[0] if rsp else 'timeout'}")
             return False
-        resp = digest(self.user, realm, self.password, "REGISTER", uri, m.group(1))
-        auth = (f'Authorization: Digest username="{self.user}", realm="{realm}", nonce="{m.group(1)}", '
+        resp = digest(self.auth_user, realm, self.password, "REGISTER", uri, m.group(1))
+        auth = (f'Authorization: Digest username="{self.auth_user}", realm="{realm}", nonce="{m.group(1)}", '
                 f'uri="{uri}", response="{resp}", algorithm=MD5, cnonce="1", qop=auth, nc=00000001')
         self.send(build(2, auth))
         rsp = self.wait_for(lambda m2: m2.startswith("SIP/2.0") and " REGISTER" in self.header(m2, "CSeq"))
@@ -247,32 +249,38 @@ def msrp_send_frame(tid, to_path, from_path, msg_id, ct, body, success_report=Fa
     return h.encode() + f"-------{tid}{flag}\r\n".encode()
 
 
-def msrp_read_frames(sock, want, timeout=8.0):
+def msrp_read_frames(sock, want, timeout=8.0, buf=None):
+    """buf: bytearray — 호출 간 잔여 스트림 보존용(한 recv 에 여러 프레임 도착 대응)."""
     sock.settimeout(timeout)
-    buf = b""
+    if buf is None:
+        buf = bytearray()
     out = []
+    # 이전 호출 잔여분에서 먼저 프레임 추출
+    _extract_frames(buf, out, want)
     while len(out) < want:
         chunk = sock.recv(65536)
         if not chunk:
             break
-        buf += chunk
-        while True:
-            m = buf.find(b"MSRP ")
-            if m < 0:
-                break
-            eol = buf.find(b"\r\n", m)
-            if eol < 0:
-                break
-            tid = buf[m:eol].split()[1]
-            e = buf.find(b"-------" + tid, eol)
-            if e < 0 or e + 7 + len(tid) + 3 > len(buf):
-                break
-            frame = buf[m:e + 7 + len(tid) + 3]
-            buf = buf[e + 7 + len(tid) + 3:]
-            out.append(frame)
-            if len(out) >= want:
-                break
+        buf.extend(chunk)
+        _extract_frames(buf, out, want)
     return out
+
+
+def _extract_frames(buf, out, want):
+    """bytearray buf 에서 완성 프레임을 in-place 로 잘라 out 에 적재."""
+    while len(out) < want:
+        m = buf.find(b"MSRP ")
+        if m < 0:
+            return
+        eol = buf.find(b"\r\n", m)
+        if eol < 0:
+            return
+        tid = bytes(buf[m:eol]).split()[1]
+        e = buf.find(b"-------" + tid, eol)
+        if e < 0 or e + 7 + len(tid) + 3 > len(buf):
+            return
+        out.append(bytes(buf[m:e + 7 + len(tid) + 3]))
+        del buf[:e + 7 + len(tid) + 3]
 
 
 def sdp_path_of(sdp_or_sip):
@@ -294,7 +302,7 @@ def msrp_offer_sdp(local_ip, session):
 # ── 모드 구현 ────────────────────────────────────────────────────────────────
 
 def mode_sender(args):
-    ua = SipUa(args.ip, args.port, args.user, args.domain, args.password)
+    ua = SipUa(args.ip, args.port, args.user, args.domain, args.password, auth_user=args.auth_user)
     if not ua.register():
         fail("REGISTER 실패")
         return 1
@@ -319,15 +327,16 @@ def mode_sender(args):
 
     host, port = re.match(r"msrp://([^:/]+):(\d+)/", server_path).groups()
     s = socket.create_connection((host, int(port)), timeout=5)
+    rxbuf = bytearray()  # 호출 간 스트림 잔여분 보존
     local_path = f"msrp://{ua.local_ip}:2855/{session};tcp"
     conv, msgid = uuid.uuid4().hex, uuid.uuid4().hex
     s.sendall(msrp_send_frame("t1" + uuid.uuid4().hex[:6], server_path, local_path, "m1",
                               "application/vnd.3gpp.mcdata-signalling", tlv_signalling(conv, msgid)))
-    f1 = msrp_read_frames(s, 1)
+    f1 = msrp_read_frames(s, 1, buf=rxbuf)
     ok("signalling SEND → 200") if f1 and b" 200" in f1[0].splitlines()[0] else fail("signalling 200 미수신")
     s.sendall(msrp_send_frame("t2" + uuid.uuid4().hex[:6], server_path, local_path, "m2",
                               "application/vnd.3gpp.mcdata-payload", tlv_payload(args.text), True))
-    f2 = msrp_read_frames(s, 2)
+    f2 = msrp_read_frames(s, 2, buf=rxbuf)
     ok("payload SEND → 200+REPORT") if len(f2) >= 2 else fail(f"payload 응답 부족: {len(f2)}")
 
     bye = ua.wait_for(lambda m: m.startswith("BYE "), timeout=10)
@@ -341,7 +350,7 @@ def mode_sender(args):
 
 
 def mode_receiver(args):
-    ua = SipUa(args.ip, args.port, args.user, args.domain, args.password, feature_tag=MCDATA_ICSI)
+    ua = SipUa(args.ip, args.port, args.user, args.domain, args.password, feature_tag=MCDATA_ICSI, auth_user=args.auth_user)
     if not ua.register():
         fail("REGISTER 실패")
         return 1
@@ -367,6 +376,7 @@ def mode_receiver(args):
 
     host, port = re.match(r"msrp://([^:/]+):(\d+)/", server_path).groups()
     s = socket.create_connection((host, int(port)), timeout=5)
+    rxbuf = bytearray()  # 호출 간 스트림 잔여분 보존
     local_path = f"msrp://{ua.local_ip}:2855/{session};tcp"
     tid = "bnd" + uuid.uuid4().hex[:6]
     s.sendall(msrp_send_frame(tid, server_path, local_path, "b0", "", b""))  # bodiless 바인딩
@@ -374,7 +384,7 @@ def mode_receiver(args):
     body = b""
     done = False
     while not done:
-        frames = msrp_read_frames(s, 1, timeout=10)
+        frames = msrp_read_frames(s, 1, timeout=10, buf=rxbuf)
         if not frames:
             break
         for f in frames:
@@ -405,7 +415,7 @@ def mode_receiver(args):
 
 
 def mode_fallback(args):
-    ua = SipUa(args.ip, args.port, args.user, args.domain, args.password)  # 태그 없음
+    ua = SipUa(args.ip, args.port, args.user, args.domain, args.password, auth_user=args.auth_user)  # 태그 없음
     if not ua.register():
         fail("REGISTER 실패")
         return 1
@@ -428,7 +438,7 @@ def mode_fallback(args):
 
 
 def mode_negative(args):
-    ua = SipUa(args.ip, args.port, args.user, args.domain, args.password)
+    ua = SipUa(args.ip, args.port, args.user, args.domain, args.password, auth_user=args.auth_user)
     if not ua.register():
         fail("REGISTER 실패")
         return 1
@@ -454,6 +464,7 @@ def main():
     ap.add_argument("--group", default="9001")
     ap.add_argument("--domain", default="ptt.mnc033.mcc450.3gppnetwork.org")
     ap.add_argument("--password", default="1234")
+    ap.add_argument("--auth-user", default="", help="digest username (기본: user; CIMS v3 는 imsi@svc-domain)")
     ap.add_argument("--text", default="MSRP 대용량 SDS 시험 " + "x" * 2500)
     ap.add_argument("--oversize", type=int, default=20000, help="negative 모드 payload 크기")
     ap.add_argument("--wait", type=int, default=120, help="receiver/fallback 대기 초")
