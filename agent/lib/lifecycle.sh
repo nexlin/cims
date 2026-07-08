@@ -250,6 +250,7 @@ _start_cmp_variant() {
 start_cmp() { _start_cmp_variant cmp; }
 start_pmp() { _start_cmp_variant pmp; }
 start_imp() { _start_cmp_variant imp; }
+start_cmdp() { _start_cmp_variant cmdp; }  # MCData media plane — 계약 동일 (bin/cmdp config/cmdp.json)
 
 _start_csp_variant() {
     # $1 = pid name (csp/psp/isp). 각 변종은 자기 dist/<name>/ 디렉토리에서
@@ -798,15 +799,16 @@ cmd_log() {
 }
 
 # ── 컴포넌트 dispatcher ──
-COMPONENTS=(cmp csp cwrtc oam csc console phone)
+COMPONENTS=(cmp cmdp csp cwrtc oam csc console phone)
 
 _start_one() {
     case "$1" in
-        all)        start_cmp; start_csp; sleep 0.5; start_cwrtc; start_oam; start_csc; start_console; start_phone ;;
+        all)        start_cmp; start_cmdp; start_csp; sleep 0.5; start_cwrtc; start_oam; start_csc; start_console; start_phone ;;
         tb)         start_tb_csc; sleep 0.5; start_tb_console ;;
         cmp)        start_cmp ;;
         pmp)        start_pmp ;;
         imp)        start_imp ;;
+        cmdp)       start_cmdp ;;
         csp)        start_csp ;;
         psp)        start_psp ;;
         isp)        start_isp ;;

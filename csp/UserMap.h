@@ -60,6 +60,10 @@ public:
 
     /** Call Pickup 을 위한 그룹 아이디 */
     std::string m_strGroupId;
+
+    /** REGISTER Contact 에 MCData ICSI feature tag(+g.3gpp.icsi-ref=...icsi.mcdata...) 광고 —
+     *  MSRP(media plane) 배포 가능 단말 표시. fan-out 하이브리드 분기에 사용. */
+    bool m_bMcDataMsrp;
 };
 
 typedef std::map<std::string, CUserInfo> USER_MAP;

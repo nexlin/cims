@@ -51,6 +51,7 @@ CCallDir gclsCallDir;
 #include "Directory.h"
 #include "GroupCallService.h"
 #include "GroupMap.h"
+#include "McDataMediaService.h"
 #include "Log.h"
 #include "MemoryDebug.h"
 #include "ModuleDispatcher.h"
@@ -233,6 +234,9 @@ int ServiceMain() {
     gclsCmpClient.SetConnectionCallback(
         []( bool bConnected ) { gclsGroupCallService.OnCmpStatusChanged( bConnected ); } );
     gclsGroupCallService.StartMonitor();
+
+    // MCData media plane(cmdp, MSRP) — Setup.McDataMedia.Enable 시에만 기동
+    gclsMcDataMediaService.Init();
 
     // DB 연결 (DbHost 가 설정된 경우 항상 연결)
     bool bNeedDb = !gclsSetup.m_strDbHost.empty();

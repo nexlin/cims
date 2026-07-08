@@ -1,0 +1,175 @@
+{
+  "version": 2,
+  "sections": [
+    {
+      "key": "listen",
+      "title": "Listen / 제어",
+      "description": "CSP ↔ CMDP JSON 제어 채널 + MSRP TCP 리스너.",
+      "fields": [
+        {
+          "key": "ServerIp",
+          "label": "제어 바인딩 IP",
+          "type": "string",
+          "default": "0.0.0.0",
+          "deploy_value": "@CMDP_IP@",
+          "required": true,
+          "restart": true,
+          "help": "CMDP 제어 소켓 bind IP."
+        },
+        {
+          "key": "ServerPort",
+          "label": "제어 포트",
+          "type": "int",
+          "default": 9100,
+          "min": 1,
+          "max": 65535,
+          "required": true,
+          "restart": true,
+          "help": "CSP → CMDP 제어용 UDP 포트 (cmp 9000 과 회피)."
+        },
+        {
+          "key": "MsrpIp",
+          "label": "MSRP 광고 IP",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@CMDP_IP@",
+          "required": true,
+          "restart": true,
+          "help": "SDP a=path 에 광고할 IP — 단말이 도달 가능해야 한다 (cmp RtpIp 와 동일 성격)."
+        },
+        {
+          "key": "MsrpPort",
+          "label": "MSRP TCP 포트",
+          "type": "int",
+          "default": 2855,
+          "min": 1,
+          "max": 65535,
+          "required": true,
+          "restart": true,
+          "help": "MSRP(RFC 4975) TCP 리슨 포트. 단말은 항상 out-connect (서버 setup:passive)."
+        }
+      ],
+      "scope": "system"
+    },
+    {
+      "key": "session",
+      "title": "세션/크기 정책",
+      "description": "MSRP 세션 수명과 메시지 크기 상한.",
+      "fields": [
+        {
+          "key": "MaxMessageBytes",
+          "label": "메시지 절대 상한 (bytes)",
+          "type": "int",
+          "default": 10485760,
+          "min": 1024,
+          "restart": false,
+          "help": "세션당 수신 총량 절대 상한. 그룹 max_sds_size 와 min 적용. 초과 시 MSRP 413 + 세션 중단."
+        },
+        {
+          "key": "SessionTimeout",
+          "label": "세션 idle 타임아웃 (초)",
+          "type": "int",
+          "default": 300,
+          "min": 0,
+          "restart": false,
+          "help": "무활동 세션 회수 (REMOVE 누락 안전망). 0=비활성."
+        },
+        {
+          "key": "OrphanReclaimSec",
+          "label": "고아 세션 회수 (초)",
+          "type": "int",
+          "default": 60,
+          "min": 0,
+          "restart": false,
+          "help": "TCP 미접속(setup 실패) 세션 회수. 0=비활성."
+        },
+        {
+          "key": "MsrpWorkerCount",
+          "label": "리액터 워커 수",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 8,
+          "restart": true,
+          "help": "MSRP epoll 리액터 스레드 수. SDS 트래픽은 1 이면 충분."
+        }
+      ],
+      "scope": "system"
+    },
+    {
+      "key": "store",
+      "title": "콘텐츠 스토어",
+      "description": "CSC FD 콘텐츠 서버(mcdata_fd)와 공유하는 저장소 — FILEURL 폴백 다운로드 대상.",
+      "fields": [
+        {
+          "key": "McDataFd.Dir",
+          "label": "FD 스토어 디렉터리",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@SERVICE_LOG_DIR@/mcdata_fd",
+          "restart": false,
+          "help": "csc McDataFd.Dir 와 같은 경로 (NAS 공유). 비면 ServiceLogging.Dir/mcdata_fd."
+        }
+      ],
+      "scope": "system"
+    },
+    {
+      "key": "logging",
+      "title": "로깅",
+      "description": "시스템 로그 + 서비스 flow/msg jsonl (5분 버킷).",
+      "fields": [
+        {
+          "key": "LogDir",
+          "label": "시스템 로그 디렉터리",
+          "type": "string",
+          "default": "log",
+          "restart": true,
+          "help": "cmdp.log 회전 파일 위치."
+        },
+        {
+          "key": "LogLevel",
+          "label": "로그 레벨",
+          "type": "string",
+          "default": "INFO",
+          "restart": false,
+          "help": "DEBUG/INFO/WARN/ERROR."
+        },
+        {
+          "key": "LogMaxSizeMB",
+          "label": "로그 파일 최대 크기 (MB)",
+          "type": "int",
+          "default": 10,
+          "restart": true,
+          "help": ""
+        },
+        {
+          "key": "LogMaxFiles",
+          "label": "로그 보존 개수",
+          "type": "int",
+          "default": 5,
+          "restart": true,
+          "help": ""
+        },
+        {
+          "key": "ServiceLogging.Dir",
+          "label": "서비스 로그 디렉터리",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "restart": false,
+          "help": "flow/msg jsonl 루트 (csp/cmp 와 통합 디렉터리)."
+        },
+        {
+          "key": "SystemId",
+          "label": "시스템 ID",
+          "type": "string",
+          "default": "cmdp_01",
+          "deploy_value": "@SYSTEM_ID@",
+          "restart": true,
+          "help": "로그 파일명 접두사."
+        }
+      ],
+      "scope": "system"
+    }
+  ]
+}

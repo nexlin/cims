@@ -1377,7 +1377,7 @@ cmd_pkg() {
     # tarball 이름과 meta.json 의 name 만 분리 — Roles/LocalIp 는 deploy overlay 가 결정).
     # cmp 바이너리도 동일 → cmp/imp/pmp.
     # oam_base_service_split — console 은 oam-base 패키지에 동봉(별도 모듈 폐기). 명시 시만 단독 패키징.
-    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp csp psp isp cwrtc csc oam oam-svc phone cspsim agent)
+    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp cmdp csp psp isp cwrtc csc oam oam-svc phone cspsim agent)
 
     if [[ ! -d $DIST_DIR ]]; then
         err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
@@ -1441,6 +1441,7 @@ cmd_pkg() {
         case "$1" in
             csp|psp|isp) echo "$SCRIPT_DIR/csp" ;;   # 동일 csp 바이너리 + 동일 config_template
             cmp|pmp|imp) echo "$SCRIPT_DIR/cmp" ;;   # 동일 cmp 바이너리 + 동일 config_template
+            cmdp)        echo "$SCRIPT_DIR/cmdp" ;;  # MCData media plane (MSRP)
             csc)         echo "$SCRIPT_DIR/csc" ;;
             oam)         echo "$SCRIPT_DIR/ems/core/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
             oam-svc)    echo "$SCRIPT_DIR/ems/service/oam" ;;  # oam_base_service_split D5 — base 게이트웨이 뒤 독립 서비스 모듈
@@ -1487,7 +1488,7 @@ cmd_pkg() {
     local t src_sub tar_file build_date pkg_root base_dist stage
     for t in "${targets[@]}"; do
         case "$t" in
-            cmp|pmp|imp|csp|psp|isp|cwrtc|csc|oam|oam-svc|console|phone|cspsim|agent)
+            cmp|pmp|imp|cmdp|csp|psp|isp|cwrtc|csc|oam|oam-svc|console|phone|cspsim|agent)
                 src_sub=$(_src_sub_for "$t") ;;
             *) err "알 수 없는 컴포넌트: $t"; continue ;;
         esac

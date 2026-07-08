@@ -79,8 +79,8 @@ usage() {
   status                  전체 상태
   log      <svc>          로그 tail -f
 
-  svc: cmp|pmp|imp|csp|psp|isp|cwrtc|csc|console|phone|tb-csc|tb-console
-       all = cmp csp cwrtc csc console phone
+  svc: cmp|pmp|imp|cmdp|csp|psp|isp|cwrtc|csc|console|phone|tb-csc|tb-console
+       all = cmp cmdp csp cwrtc csc console phone
        tb  = tb-csc tb-console
 
 DIST_DIR=$DIST_DIR

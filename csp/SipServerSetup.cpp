@@ -98,6 +98,11 @@ CSipServerSetup::CSipServerSetup()
       m_strCmpIp( "127.0.0.1" ),
       m_iCmpPort( 9000 ),
       m_iLocalCmpPort( 9001 ),
+      m_bUseMcDataMedia( false ),
+      m_strCmdpIp( "127.0.0.1" ),
+      m_iCmdpPort( 9100 ),
+      m_iLocalCmdpPort( 9101 ),
+      m_iMaxSdsCplaneBytes( 0 ),
       m_strXcapHost( "" ),
       m_iXcapPort( 4430 ),
       m_strXcapScheme( "https" ),
@@ -248,6 +253,23 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( rtp.Has( "CmpIp" ) ) m_strCmpIp = rtp.GetString( "CmpIp" );
                 if ( rtp.Has( "CmpPort" ) ) m_iCmpPort = (int)rtp.GetInt( "CmpPort" );
                 if ( rtp.Has( "LocalCmpPort" ) ) m_iLocalCmpPort = (int)rtp.GetInt( "LocalCmpPort" );
+            }
+
+            // MCData media plane(cmdp, MSRP) 연동 — 기본 비활성 (cmdp 미배치 환경 무영향)
+            if ( setup.Has( "McDataMedia" ) ) {
+                SimpleJson::JsonNode md = setup.Get( "McDataMedia" );
+                if ( md.Has( "Enable" ) ) m_bUseMcDataMedia = ( md.Get( "Enable" ).AsString() == "true" );
+                if ( md.Has( "Host" ) ) m_strCmdpIp = md.GetString( "Host" );
+                if ( md.Has( "ControlPort" ) ) m_iCmdpPort = (int)md.GetInt( "ControlPort" );
+                if ( md.Has( "LocalPort" ) ) m_iLocalCmdpPort = (int)md.GetInt( "LocalPort" );
+            }
+
+            // MCData C-plane 정책 (TS 24.484 <max-payload-size-sds-cplane-bytes> 대응)
+            if ( setup.Has( "McData" ) ) {
+                SimpleJson::JsonNode mc = setup.Get( "McData" );
+                if ( mc.Has( "MaxPayloadSizeSdsCplaneBytes" ) )
+                    m_iMaxSdsCplaneBytes = (int)mc.GetInt( "MaxPayloadSizeSdsCplaneBytes" );
+                if ( mc.Has( "FdUrlBase" ) ) m_strFdUrlBase = mc.GetString( "FdUrlBase" );
             }
 
             // XCAP / CSC 연동 (Phase 3): xcap-diff NOTIFY 의 xcap-root 로 advertise 할

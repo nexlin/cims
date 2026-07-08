@@ -55,13 +55,28 @@ class PttService : Service() {
     /** 문자 저장 변경 틱 — UI 재조회 트리거(MessageStore 자체엔 변경 알림이 없음). */
     val messageTick: kotlinx.coroutines.flow.StateFlow<Int> = _messageTick
 
-    /** 그룹 문자(MCData SDS) 발신 + 로컬 스레드 저장 — msgId 보존(delivered 통지 대사용). */
+    /** 그룹 문자(MCData SDS) 발신 + 로컬 스레드 저장 — msgId 보존(delivered 통지 대사용).
+     *  MSRP(미디어평면) 경로는 수 초 걸리고 실패 가능 → PENDING 으로 시작(결과는 sendResult 반영). */
     fun sendGroupMessage(groupId: String, text: String) {
+        val viaMsrp = controller?.willUseMsrp(text) == true
         val msgId = controller?.sendGroupMessage(groupId, text) ?: return
         if (msgId.isEmpty()) return
-        messages.add(groupId, text, com.cims.ue.core.message.MsgDirection.OUT, msgId = msgId)
+        messages.add(groupId, text, com.cims.ue.core.message.MsgDirection.OUT, msgId = msgId,
+            sendState = if (viaMsrp) com.cims.ue.core.message.SendState.PENDING
+            else com.cims.ue.core.message.SendState.SENT)
         _messageTick.value++
     }
+
+    /** 실패 문자 재전송(말풍선 탭) — PENDING 복귀 후 같은 msgId 로 재시도. */
+    fun resendMessage(e: com.cims.ue.core.message.MessageEntry) {
+        if (e.msgId.isBlank() || e.text.isBlank()) return
+        if (messages.setSendState(e.msgId, com.cims.ue.core.message.SendState.PENDING)) _messageTick.value++
+        controller?.resendGroupMessage(e.peer, e.text, e.msgId)
+    }
+
+    /** MSRP 발신 진행률(msgId → 0f~1f) — 말풍선 진행 바용(런타임 전용, 미영속). */
+    private val _sendProgress = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Float>>(emptyMap())
+    val sendProgress: kotlinx.coroutines.flow.StateFlow<Map<String, Float>> = _sendProgress
 
     fun markThreadRead(peer: String) {
         if (messages.markRead(peer)) _messageTick.value++
@@ -212,6 +227,8 @@ class PttService : Service() {
 
     private fun observe(c: PttController) {
         job?.cancel()
+        // 이전 세션의 미결 PENDING — 결과 이벤트 유실 상태이므로 실패로 마감(재전송 가능)
+        if (messages.failStalePending()) _messageTick.value++
         c.onEvent = { e -> history.add(e.groupId, e.kind.name, e.peer, e.durationMs) }
         job = scope.launch {
             c.status.onEach { update("CIMS PTT", it) }.launchIn(this)
@@ -234,19 +251,7 @@ class PttService : Service() {
                 val sender = PttController.bareId(im.fromUri)
                 if (im.contentType.lowercase().startsWith("multipart/mixed")) {
                     when (val p = McDataCodec.parse(im.contentType, im.body)) {
-                        is McDataCodec.SdsMessage -> {
-                            if (p.text.isNotEmpty()) {
-                                val gid = p.groupUri?.let(PttController::bareId)
-                                    ?.takeUnless { it.isBlank() } ?: sender
-                                messages.add(gid, p.text, com.cims.ue.core.message.MsgDirection.IN,
-                                    sender = sender, msgId = p.msgId)
-                                _messageTick.value++
-                            }
-                            if (p.dispositionReq and McDataCodec.DISP_REQ_DELIVERY != 0) {
-                                controller?.sendSdsNotification(
-                                    sender, p.convId, p.msgId, McDataCodec.NOTIF_DELIVERED)
-                            }
-                        }
+                        is McDataCodec.SdsMessage -> onSdsParsed(p, sender)
                         is McDataCodec.FdMessage -> {
                             if (p.fileUrl.isNotBlank()) {
                                 val gid = p.groupUri?.let(PttController::bareId)
@@ -276,6 +281,45 @@ class PttService : Service() {
                     _messageTick.value++
                 }
             }.launchIn(this)
+            // MSRP 발신 결과 → 말풍선 상태(SENT/FAILED) 반영 + 진행률 정리
+            c.sendResult.onEach { (msgId, ok) ->
+                _sendProgress.value = _sendProgress.value - msgId
+                val st = if (ok) com.cims.ue.core.message.SendState.SENT
+                else com.cims.ue.core.message.SendState.FAILED
+                if (messages.setSendState(msgId, st)) _messageTick.value++
+            }.launchIn(this)
+            // MSRP 발신 진행률(청크 단위) → 말풍선 진행 바
+            c.sendProgress.onEach { p ->
+                if (p.total > 0) _sendProgress.value =
+                    _sendProgress.value + (p.msgId to p.sent.toFloat() / p.total)
+            }.launchIn(this)
+            // MSRP 미디어평면 수신 SDS (대용량 — TS 24.282 §9.2.3) → 동일 저장·통지 경로.
+            // 발신자 미상(구서버 — mcdata-info 없는 배포 레그, sender==groupId 폴백)이면
+            // 통지 대상이 그룹이 되므로 회신 억제(notifiable=false).
+            c.incomingSds.onEach { m ->
+                onSdsParsed(m.msg, m.sender, gidOverride = m.groupId,
+                    notifiable = m.sender != m.groupId)
+            }.launchIn(this)
+        }
+    }
+
+    /** 수신 SDS 공통 처리 — C-plane MESSAGE 와 MSRP 미디어평면 공용(저장·tick·DELIVERED 통지). */
+    private fun onSdsParsed(
+        p: McDataCodec.SdsMessage,
+        sender: String,
+        gidOverride: String? = null,
+        notifiable: Boolean = true,
+    ) {
+        val gid = gidOverride
+            ?: p.groupUri?.let(PttController::bareId)?.takeUnless { it.isBlank() }
+            ?: sender
+        if (p.text.isNotEmpty()) {
+            messages.add(gid, p.text, com.cims.ue.core.message.MsgDirection.IN,
+                sender = sender, msgId = p.msgId)
+            _messageTick.value++
+        }
+        if (notifiable && p.dispositionReq and McDataCodec.DISP_REQ_DELIVERY != 0) {
+            controller?.sendSdsNotification(sender, p.convId, p.msgId, McDataCodec.NOTIF_DELIVERED)
         }
     }
 

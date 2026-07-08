@@ -29,7 +29,12 @@
 CUserMap gclsUserMap;
 
 CUserInfo::CUserInfo()
-    : m_iPort( 0 ), m_iLoginTime( 0 ), m_iLoginTimeout( 3600 ), m_iOptionsSeq( 0 ), m_iSendOptionsTime( 0 ) {
+    : m_iPort( 0 ),
+      m_iLoginTime( 0 ),
+      m_iLoginTimeout( 3600 ),
+      m_iOptionsSeq( 0 ),
+      m_iSendOptionsTime( 0 ),
+      m_bMcDataMsrp( false ) {
 }
 
 void CUserInfo::GetCallRoute( CSipCallRoute &clsRoute ) {
@@ -72,6 +77,16 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CSipFrom *pclsContact, CspUser 
 
     clsInfo.m_strGroupId = pclsXmlUser->m_strOrganizationId;
 
+    // MCData media plane capability — Contact 의 +g.3gpp.icsi-ref 에 icsi.mcdata 포함 여부
+    //   (RFC 3840 feature tag; 등록 단위로 판정 — 바인딩 만료와 함께 소멸)
+    if ( pclsMessage->m_clsContactList.empty() == false ) {
+        std::string strIcsi;
+        if ( pclsMessage->m_clsContactList.front().SelectParam( "+g.3gpp.icsi-ref", strIcsi ) &&
+             strIcsi.find( "mcdata" ) != std::string::npos ) {
+            clsInfo.m_bMcDataMsrp = true;
+        }
+    }
+
     m_clsMutex.acquire();
     itMap = m_clsMap.find( strUserId );
     if ( itMap == m_clsMap.end() ) {
@@ -85,6 +100,9 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CSipFrom *pclsContact, CspUser 
         itMap->second.m_iPort = clsInfo.m_iPort;
         itMap->second.m_eTransport = clsInfo.m_eTransport;
         itMap->second.m_strGroupId = clsInfo.m_strGroupId;
+        // 재등록 갱신 — REGISTER 에서만 capability 재평가 (비REGISTER 갱신은 Contact 미포함)
+        if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) )
+            itMap->second.m_bMcDataMsrp = clsInfo.m_bMcDataMsrp;
 
         CLog::Print( LOG_DEBUG, "user(%s) is updated (%s:%d:%d) group(%s)", strUserId.c_str(), clsInfo.m_strIp.c_str(),
                      clsInfo.m_iPort, clsInfo.m_eTransport, clsInfo.m_strGroupId.c_str() );

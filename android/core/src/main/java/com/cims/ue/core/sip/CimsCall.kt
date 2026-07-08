@@ -34,6 +34,13 @@ class CimsCall : Call {
      *  호별 보관(전역이면 멀티그룹 동시 세션에서 서로의 floor 포트가 섞인다). */
     @Volatile var pendingAppSdp: String? = null
 
+    /** 이 호의 송신 SDP 에 주입할 MCData MSRP(m=message TCP/MSRP) 섹션 — MSRP 발신 시 설정. */
+    @Volatile var pendingMsrpSdp: String? = null
+
+    /** MCData MSRP 미디어평면 호 — 상태를 [CallState] 대신 [SipController.msrpEvents] 로 격리
+     *  (대상 그룹 URI 가 PTT 음성 세션과 같아 CallState 로 흘리면 세션 callId 오염). */
+    @Volatile var msrpMode = false
+
     constructor(owner: SipController, acc: Account) : super(acc) { this.owner = owner }
     constructor(owner: SipController, acc: Account, callId: Int) : super(acc, callId) { this.owner = owner }
 
@@ -55,7 +62,7 @@ class CimsCall : Call {
 
             else -> return
         }
-        owner.dispatchCallState(id, mapped)
+        if (msrpMode) owner.dispatchMsrpCallState(id, mapped) else owner.dispatchCallState(id, mapped)
     }
 
     /**
@@ -68,27 +75,53 @@ class CimsCall : Call {
             pendingAppSdp?.let { extra ->
                 val sdp = prm.sdp
                 val whole = sdp.wholeSdp
-                if (!whole.contains("m=application")) {
-                    var section = extra.trim('\r', '\n')
-                    // pjsua 오퍼는 세션 레벨 c= 없이 미디어별 c= — 주입 섹션에도 c= 필수
-                    // (없으면 pjmedia_sdp_validate EMISSINGCONN assert 로 네이티브 abort)
-                    if (!section.contains("c=IN ")) {
-                        val ip = whole.lineSequence().map { it.trim() }
-                            .firstOrNull { it.startsWith("c=IN IP4 ") }
-                            ?.removePrefix("c=IN IP4 ")?.trim()
-                        if (ip != null) {
-                            val lines = section.split("\r\n", "\n").toMutableList()
-                            lines.add(1, "c=IN IP4 $ip")
-                            section = lines.joinToString("\r\n")
-                        }
-                    }
-                    sdp.wholeSdp = whole.trimEnd('\r', '\n') + "\r\n" + section + "\r\n"
-                }
+                if (!whole.contains("m=application")) sdp.wholeSdp = appendMediaSection(whole, extra)
             }
-            prm.remSdp?.wholeSdp?.let { rem ->
+            pendingMsrpSdp?.let { extra ->
+                val sdp = prm.sdp
+                val whole = sdp.wholeSdp
+                // UAC 오퍼 = 섹션 추가. UAS 답 = pjsua 가 미지원 m=message 를 포트 0 으로 답하므로
+                // 그 섹션을 우리 것으로 교체(오퍼/재협상에서 이미 주입된 경우도 최신으로 갱신).
+                sdp.wholeSdp = if (!whole.contains("m=message")) appendMediaSection(whole, extra)
+                else replaceMessageSection(whole, extra)
+            }
+            if (!msrpMode) prm.remSdp?.wholeSdp?.let { rem ->
                 parseApplication(rem)?.let { (ip, port) -> owner.onRemoteFloorLearned(id, ip, port) }
             }
         }.onFailure { Log.w(TAG, "onCallSdpCreated: ${it.message}") }
+    }
+
+    /** [whole] SDP 끝에 미디어 섹션 [extra] 를 덧붙인다(주입 일반화 — floor/MSRP 공용). */
+    private fun appendMediaSection(whole: String, extra: String): String =
+        whole.trimEnd('\r', '\n') + "\r\n" + withConnLine(whole, extra) + "\r\n"
+
+    /** [whole] 의 기존 `m=message` 섹션(다음 m= 전까지)을 [extra] 로 교체 — UAS answer 패치. */
+    private fun replaceMessageSection(whole: String, extra: String): String {
+        val lines = whole.trimEnd('\r', '\n').split("\r\n", "\n").toMutableList()
+        val start = lines.indexOfFirst { it.trim().startsWith("m=message") }
+        if (start < 0) return appendMediaSection(whole, extra)
+        var end = start + 1
+        while (end < lines.size && !lines[end].trim().startsWith("m=")) end++
+        val section = withConnLine(whole, extra).split("\r\n", "\n")
+        val out = lines.subList(0, start) + section + lines.subList(end, lines.size)
+        return out.joinToString("\r\n") + "\r\n"
+    }
+
+    /** 주입 섹션에 c= 라인 보장 — pjsua SDP 는 세션 레벨 c= 없이 미디어별 c= 라
+     *  섹션에 c= 이 없으면 pjmedia_sdp_validate EMISSINGCONN assert 로 네이티브 abort. */
+    private fun withConnLine(whole: String, extra: String): String {
+        var section = extra.trim('\r', '\n')
+        if (!section.contains("c=IN ")) {
+            val ip = whole.lineSequence().map { it.trim() }
+                .firstOrNull { it.startsWith("c=IN IP4 ") }
+                ?.removePrefix("c=IN IP4 ")?.trim()
+            if (ip != null) {
+                val lines = section.split("\r\n", "\n").toMutableList()
+                lines.add(1, "c=IN IP4 $ip")
+                section = lines.joinToString("\r\n")
+            }
+        }
+        return section
     }
 
     /**
@@ -100,6 +133,14 @@ class CimsCall : Call {
             val e = prm.e ?: return
             if (e.type != pjsip_event_id_e.PJSIP_EVENT_TSX_STATE) return@runCatching
             val msg = e.body?.tsxState?.src?.rdata?.wholeMsg ?: return@runCatching
+            // MSRP 호: 발신 응답(2xx) SDP 의 서버 a=path 학습 → TCP 접속 대상
+            if (msrpMode) {
+                if (msg.startsWith("SIP/2.0 2") && msg.contains("TCP/MSRP")) {
+                    Regex("a=path:(\\S+)").find(msg)?.groupValues?.get(1)
+                        ?.let { owner.onMsrpPathLearned(id, it) }
+                }
+                return@runCatching
+            }
             // 발신 응답(200 OK) SDP 의 floor 목적지 학습
             if (msg.contains("m=application")) {
                 val sdp = msg.substringAfter("\r\n\r\n", "")
@@ -123,6 +164,7 @@ class CimsCall : Call {
      */
     override fun onCallMediaState(prm: OnCallMediaStateParam) {
         runCatching {
+            if (msrpMode) return@runCatching                    // 더미 오디오(a=inactive) — 결선 없음
             connectListen()
             if (!owner.halfDuplex) setMic(!owner.muted)         // 통화중 음소거 유지(재협상 후에도)
             owner.videoRenderSurface?.let { attachVideo(it) }   // M1.3 수신 영상 렌더

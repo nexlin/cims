@@ -123,6 +123,14 @@
           "type": "bool",
           "default": false,
           "restart": true
+        },
+        {
+          "key": "Setup.Roles.MCDATA",
+          "label": "MCDATA-AS (MCData 메시징)",
+          "type": "bool",
+          "default": "true",
+          "restart": true,
+          "help": "MCData 그룹 SDS/FD 메시징 (TS 24.282). 끄면 그룹 MESSAGE/MSRP INVITE 를 처리하지 않는다."
         }
       ],
       "scope": "service"
@@ -179,6 +187,68 @@
         }
       ],
       "scope": "service"
+    },
+    {
+      "key": "mcdata_media",
+      "title": "MCData 미디어평면 (CMDP/MSRP)",
+      "description": "대용량 SDS 의 MSRP(media plane) 경로 — cmdp 프로세스 연동 (TS 24.282 §9.2.3).",
+      "fields": [
+        {
+          "key": "Setup.McDataMedia.Enable",
+          "label": "CMDP 사용",
+          "type": "bool",
+          "default": "false",
+          "restart": true,
+          "help": "MSRP media plane 활성화. cmdp 모듈 배치 필요. 꺼져 있으면 기존 C-plane 경로만 동작."
+        },
+        {
+          "key": "Setup.McDataMedia.Host",
+          "label": "CMDP 주소",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@CMDP_IP@",
+          "restart": true,
+          "help": "cmdp 제어 채널 주소."
+        },
+        {
+          "key": "Setup.McDataMedia.ControlPort",
+          "label": "CMDP 제어 포트",
+          "type": "int",
+          "default": 9100,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "cmdp UDP 제어 포트."
+        },
+        {
+          "key": "Setup.McDataMedia.LocalPort",
+          "label": "CSP 수신 포트",
+          "type": "int",
+          "default": 9101,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "CSP 측 응답/이벤트 수신 UDP 포트."
+        },
+        {
+          "key": "Setup.McData.MaxPayloadSizeSdsCplaneBytes",
+          "label": "C-plane SDS 최대 payload (bytes)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "restart": false,
+          "help": "TS 24.484 max-payload-size-sds-cplane-bytes. 0=무제한(현행). 초과 SDS MESSAGE 는 403+Warning 203 거부 — 단말은 MSRP 로 전환해야 한다. CSC provisioning 의 mcdata.maxPayloadSdsCplaneBytes 와 동기 유지."
+        },
+        {
+          "key": "Setup.McData.FdUrlBase",
+          "label": "FD 다운로드 URL base",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "help": "FILEURL 폴백 배포의 다운로드 URL base (예: https://host:4430). 비면 Xcap Host:4430."
+        }
+      ],
+      "scope": "system"
     },
     {
       "key": "xcap",

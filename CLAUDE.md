@@ -23,6 +23,7 @@ cspsim  ←─ SIP (UDP 5060 / TCP 25061 / TLS 5061) ──→  CSP
 |---|---|---|
 | **CSP** (`csp/`) | IMS 역할 기반 모듈형 SIP 서버 (CSCF/TAS/PTT-AS/IBCF) | [docs/design/modules/csp.md](docs/design/modules/csp.md) |
 | **CMP** (`cmp/`) | RTP relay + MCPTT floor control (CSP 의 UDP JSON 제어) | [docs/design/modules/cmp.md](docs/design/modules/cmp.md) |
+| **CMDP** (`cmdp/`) | MCData media plane — 대용량 SDS MSRP 종단 + FD 스토어 (CSP 의 UDP JSON 제어) | [docs/design/features/mcdata_messaging.md](docs/design/features/mcdata_messaging.md) §4.7 |
 | **cspsim** (`cspsim/`) | SIP/RTP 부하·기능 시험용 단말 시뮬레이터 | — |
 | **CSC** (`csc/`) | 가입자 관리 + MCPTT(IdMS/GMS/CMS/XCAP) 서버 | [docs/design/modules/csc.md](docs/design/modules/csc.md) |
 | **OAM/Console** (`ems/`) | 운영·관리 평면 게이트웨이 + 웹 콘솔 (core/service 분리) | [docs/design/console_platform.md](docs/design/console_platform.md), [docs/design/oam_csc_split.md](docs/design/oam_csc_split.md) |
@@ -73,6 +74,7 @@ cd build && make dist     # build/dist/ (컴포넌트별 tarball + manifest)
 ```
 csp/        CSP — SIP 서버 (소스 + csp.json)
 cmp/        CMP — 미디어 서버 (소스 + cmp.json, config_template.json)
+cmdp/       CMDP — MCData 미디어평면 (MSRP 종단, cmdp.json)
 cspsim/     단말 시뮬레이터
 csc/        CSC — 가입자/MCPTT 서버 (Python), csc.json
 ems/        OAM + 콘솔

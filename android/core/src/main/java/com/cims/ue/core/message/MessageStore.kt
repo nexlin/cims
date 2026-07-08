@@ -7,6 +7,10 @@ import org.json.JSONObject
 /** 문자 방향 — 수신/발신. */
 enum class MsgDirection { IN, OUT }
 
+/** 발신 문자 전송 상태 — [SENT]=완료(기본, C-plane 즉시), [PENDING]=미디어평면(MSRP) 전송 중,
+ *  [FAILED]=실패(말풍선 탭으로 재전송). 수신 문자는 항상 SENT. */
+enum class SendState { SENT, PENDING, FAILED }
+
 /** 문자 한 건. [peer] 는 상대 번호 또는 그룹 ID(표시용, sip:/@도메인 제거됨), [time] 은 epoch millis.
  *  [sender] 는 그룹 수신 문자의 실제 발신자(1:1 은 빈 값), [msgId]/[delivered] 는 MCData SDS
  *  message ID·전달확인(disposition DELIVERED) 상태. */
@@ -19,6 +23,7 @@ data class MessageEntry(
     val sender: String = "",
     val msgId: String = "",
     val delivered: Boolean = false,
+    val sendState: SendState = SendState.SENT,
     // MCData FD 첨부 (파일전송) — [attPath] 는 로컬 다운로드 완료 시 채워짐
     val attName: String = "",
     val attUrl: String = "",
@@ -64,13 +69,26 @@ class MessageStore(context: Context) {
         attUrl: String = "",
         attSize: Long = 0,
         attPath: String = "",
+        sendState: SendState = SendState.SENT,
     ) {
         if (peer.isBlank() || (text.isBlank() && attName.isBlank())) return
         val list = all().toMutableList()
         list.add(MessageEntry(peer, text, time, direction, read = direction == MsgDirection.OUT,
-            sender = sender, msgId = msgId,
+            sender = sender, msgId = msgId, sendState = sendState,
             attName = attName, attUrl = attUrl, attSize = attSize, attPath = attPath))
         save(list.sortedByDescending { it.time }.take(MAX))
+    }
+
+    /** 발신 문자 전송 상태 갱신(PENDING→SENT/FAILED, 재전송 시 →PENDING). @return 실제 변경 여부. */
+    fun setSendState(msgId: String, state: SendState): Boolean {
+        if (msgId.isBlank()) return false
+        val list = all()
+        if (list.none { it.msgId == msgId && it.direction == MsgDirection.OUT && it.sendState != state })
+            return false
+        save(list.map {
+            if (it.msgId == msgId && it.direction == MsgDirection.OUT) it.copy(sendState = state) else it
+        })
+        return true
     }
 
     /** FD 첨부 다운로드 완료 — 로컬 경로 기록. @return 실제 변경 여부. */
@@ -89,6 +107,17 @@ class MessageStore(context: Context) {
         if (list.none { it.msgId == msgId && it.direction == MsgDirection.OUT && !it.delivered }) return false
         save(list.map {
             if (it.msgId == msgId && it.direction == MsgDirection.OUT) it.copy(delivered = true) else it
+        })
+        return true
+    }
+
+    /** 서비스 재기동으로 결과 이벤트를 못 받게 된 PENDING 발신을 실패로 마감(재전송 유도). */
+    fun failStalePending(): Boolean {
+        val list = all()
+        if (list.none { it.direction == MsgDirection.OUT && it.sendState == SendState.PENDING }) return false
+        save(list.map {
+            if (it.direction == MsgDirection.OUT && it.sendState == SendState.PENDING)
+                it.copy(sendState = SendState.FAILED) else it
         })
         return true
     }
@@ -122,6 +151,8 @@ class MessageStore(context: Context) {
                 sender = o.optString("s"),
                 msgId = o.optString("mid"),
                 delivered = o.optBoolean("dlv", false),
+                sendState = runCatching { SendState.valueOf(o.optString("st")) }
+                    .getOrDefault(SendState.SENT),
                 attName = o.optString("an"),
                 attUrl = o.optString("au"),
                 attSize = o.optLong("al", 0),
@@ -138,6 +169,7 @@ class MessageStore(context: Context) {
             if (it.sender.isNotEmpty()) o.put("s", it.sender)
             if (it.msgId.isNotEmpty()) o.put("mid", it.msgId)
             if (it.delivered) o.put("dlv", true)
+            if (it.sendState != SendState.SENT) o.put("st", it.sendState.name)
             if (it.attName.isNotEmpty()) o.put("an", it.attName)
             if (it.attUrl.isNotEmpty()) o.put("au", it.attUrl)
             if (it.attSize > 0) o.put("al", it.attSize)

@@ -1573,7 +1573,7 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
     }
     if kind == "ptt":
         account["mcpttId"] = sid if sid.startswith(("tel:", "sip:")) else f"tel:{sid}"
-    return {
+    profile = {
         "kind": kind,
         "sip": {
             "host": svc.get('host') or host_ip,     # 빈값 → 요청 Host(올인원). 다중노드면 CSP/PSP VIP.
@@ -1583,6 +1583,15 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         },
         "account": account,
     }
+    if kind == "ptt":
+        # MCData 서비스 설정 (TS 24.484 <max-payload-size-sds-cplane-bytes> 대응).
+        # 0/미설정=무제한(단말은 항상 C-plane). 값 설정 시 초과 SDS 를 MSRP(media plane)로 전환.
+        # ⚠ CSP csp.json Setup.McData.MaxPayloadSizeSdsCplaneBytes 와 운영자 동기 유지.
+        mcdata_cfg = (PROVISIONING.get('McData') or {}) if isinstance(PROVISIONING, dict) else {}
+        profile["mcdata"] = {
+            "maxPayloadSdsCplaneBytes": int(mcdata_cfg.get('MaxPayloadSdsCplaneBytes', 0) or 0),
+        }
+    return profile
 
 async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))

@@ -37,6 +37,7 @@ def pkg_build(ctx: VerifyContext) -> ItemResult:
     # 변경 시 양쪽 모두 갱신 필요.
     EXPECTED = {
         "cmp", "pmp", "imp",       # 미디어 (VoLTE/PTT/IBCF)
+        "cmdp",                    # MCData media plane (MSRP)
         "csp", "psp", "isp",       # 시그널링 (VoLTE/PTT/IBCF)
         "cwrtc", "csc", "console", "phone", "cspsim", "agent",
     }

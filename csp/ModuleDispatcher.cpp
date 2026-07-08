@@ -31,6 +31,7 @@
 #include "DbManager.h"
 #include "Directory.h"
 #include "GroupCallService.h"
+#include "McDataMediaService.h"
 #include "GroupMap.h"
 #include "McpttInfo.h"
 #include "Log.h"
@@ -572,6 +573,13 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         }
     }
 
+    // MCData media plane — SDP 에 m=message TCP/MSRP 가 있으면 그룹콜이 아닌 대용량 SDS
+    //   INVITE (TS 24.282 §9.2.3). PTT-AS 그룹 분기보다 먼저 선점해야 한다.
+    if ( m_clsMcDataAs.IsEnabled() && gclsMcDataMediaService.IsMsrpInvite( pclsRtp ) ) {
+        gclsMcDataMediaService.OnIncomingMsrpInvite( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage );
+        return;
+    }
+
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsGroupRoute;
@@ -838,6 +846,9 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallStart(%s)", pszCallId );
 
+    // MCData media plane 레그 — CallMap 밖에서 자체 수명 관리 (미선점 시 아래 else 가 StopCall)
+    if ( gclsMcDataMediaService.OnCallStarted( pszCallId, pclsRtp ) ) return;
+
     // 확립(answer) 표시 — sweeper 가 미확립(pending) 호만 빠르게 회수하도록.
     gclsCallMap.SetEstablished( pszCallId );
 
@@ -919,6 +930,9 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
 void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallEnd(%s:%d)", pszCallId, iSipStatus );
+
+    // MCData media plane 레그 — cmdp 세션 정리 (UE 발 BYE·실패 응답 포함)
+    if ( gclsMcDataMediaService.OnCallTerminated( pszCallId ) ) return;
 
     bool bSelHit = gclsCallMap.Select( pszCallId, clsCallInfo );
     CLog::Print( LOG_DEBUG, "EventCallEnd callid=%s sip=%d selHit=%d peer=%s peerRtpPort=%d", pszCallId, iSipStatus,

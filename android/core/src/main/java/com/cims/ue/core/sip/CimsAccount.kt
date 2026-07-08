@@ -27,6 +27,13 @@ class CimsAccount(private val owner: SipController) : Account() {
         val call = CimsCall(owner, this, prm.callId)
         val from = runCatching { call.info.remoteUri }.getOrDefault("")
         val whole = runCatching { prm.rdata.wholeMsg }.getOrDefault("")
+        // MCData MSRP 배포 INVITE(TS 24.282 §9.2.3, m=message TCP/MSRP) — 통화가 아니므로
+        // 벨소리/Incoming UI 없이 msrpMode 로 격리 처리(수락·수신은 상위 계층 몫).
+        if (whole.contains("TCP/MSRP") && whole.contains("a=path:")) {
+            call.msrpMode = true
+            owner.dispatchMsrpIncoming(call, from, whole)
+            return
+        }
         // 영상 여부 = 수신 INVITE 원문의 SDP 에 m=video offer 존재(협상 전이라 CallInfo.media 는 비어 있음).
         val video = whole.contains("m=video")
         // MCPTT 그룹콜 = multipart 의 mcptt-info 본문(ptt_ue.md §7) — PTT 앱이 자동 수락

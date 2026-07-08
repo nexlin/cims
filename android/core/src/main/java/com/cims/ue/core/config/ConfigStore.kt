@@ -28,6 +28,7 @@ class ConfigStore(context: Context) {
         password = prefs.getString(K_PW, "").orEmpty(),
         expiresSec = prefs.getInt(K_EXPIRES, 3600),
         countryCode = prefs.getString(K_CC, "").orEmpty(),
+        maxPayloadSdsCplaneBytes = prefs.getInt(K_SDS_CPLANE_MAX, 0),
     )
 
     fun save(c: SipAccountConfig) {
@@ -44,6 +45,7 @@ class ConfigStore(context: Context) {
             putString(K_PW, c.password)
             putInt(K_EXPIRES, c.expiresSec)
             putString(K_CC, c.countryCode)
+            putInt(K_SDS_CPLANE_MAX, c.maxPayloadSdsCplaneBytes)
             apply()
         }
     }
@@ -74,6 +76,7 @@ class ConfigStore(context: Context) {
         const val K_PW = "pw"
         const val K_EXPIRES = "expires"
         const val K_CC = "cc"
+        const val K_SDS_CPLANE_MAX = "sds_cplane_max"
         const val K_MANUAL = "manual"
     }
 }
