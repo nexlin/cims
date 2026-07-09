@@ -385,6 +385,13 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                regCount, (int)sessions.size() - skipCount, skipCount);
     }
 
+    // 실제 UE 플로우: REGISTER 200 OK 직후 자신의 등록 상태를 Event: reg 로 구독 (RFC 3680)
+    for (auto* s : sessions) {
+        if (s->m_bNoRegister || !s->m_bRegistered) continue;
+        s->SubscribeReg();
+        usleep(30000);
+    }
+
     if (eScenario == E_SCENARIO_REGISTER) return;
 
     // 2. PTT: GMS/CMS SUBSCRIBE
@@ -576,14 +583,15 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                         printf("[Scenario] Member %d (%s): PTT Request (floor)\n",
                                i, sessions[i]->m_strUser.c_str());
                         sessions[i]->m_clsRtpThread.m_iLastFloorOp.store(0);
+                        sessions[i]->m_clsRtpThread.m_bGrantReceived.store(false);
                         sessions[i]->SendPttRequest();
 
-                        // GRANT 대기 (최대 3초) — TS 24.380 subtype: Granted=1, Taken=2.
-                        //   요청자는 GRANT(1, unicast) 와 TAKEN(2, broadcast) 를 모두 수신하므로 둘 다 성공으로 본다.
+                        // GRANT 대기 (최대 3초)
+                        // m_bGrantReceived 사용: GRANT(2) 직후 TAKEN(6) broadcast가 와서
+                        // m_iLastFloorOp을 덮어써도 GRANT 수신 사실을 잃지 않는다.
                         bool bGranted = false;
                         for (int t = 0; t < 30 && !g_bQuit; ++t) {
-                            int op = sessions[i]->m_clsRtpThread.m_iLastFloorOp.load();
-                            if (op == 1 || op == 2) {
+                            if (sessions[i]->m_clsRtpThread.m_bGrantReceived.load()) {
                                 bGranted = true;
                                 break;
                             }

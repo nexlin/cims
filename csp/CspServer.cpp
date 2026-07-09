@@ -496,9 +496,35 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::st
 }
 
 /**
- * @brief C2: affiliation-info NOTIFY 본문 (application/vnd.3gpp.mcptt-affiliation-info+xml, TS 24.379 §9.3/F.4)
- *   가입자가 active affiliation 을 가진 그룹들을 <affiliation group="sip:g@domain"><status>affiliated</status></affiliation>
- *   로 나열한다. DB 미연결 시 멤버십(그룹 소속) 기준으로 fallback.
+ * @brief Build reginfo+xml body for reg-event NOTIFY (RFC 3680)
+ */
+static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInfo &clsUserInfo, bool bRegistered,
+                                     int iVersion ) {
+    time_t tRemaining = 0;
+    if ( bRegistered ) {
+        tRemaining = ( clsUserInfo.m_iLoginTime + clsUserInfo.m_iLoginTimeout ) - time( NULL );
+        if ( tRemaining < 0 ) tRemaining = 0;
+    }
+
+    std::string strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    strBody += "<reginfo xmlns=\"urn:ietf:params:xml:ns:reginfo\" version=\"" + std::to_string( iVersion ) +
+               "\" state=\"full\">\r\n";
+    strBody += "<registration aor=\"" + sub.strSubscriberUri + "\" id=\"" + sub.strUserId + "\" state=\"" +
+               ( bRegistered ? "active" : "terminated" ) + "\">\r\n";
+    if ( bRegistered ) {
+        strBody += "<contact id=\"1\" state=\"active\" event=\"registered\" expires=\"" +
+                   std::to_string( (int)tRemaining ) + "\">\r\n";
+        strBody += "<uri>sip:" + sub.strUserId + "@" + clsUserInfo.m_strIp + ":" +
+                   std::to_string( clsUserInfo.m_iPort ) + "</uri>\r\n";
+        strBody += "</contact>\r\n";
+    }
+    strBody += "</registration>\r\n";
+    strBody += "</reginfo>\r\n";
+    return strBody;
+}
+
+/**
+ * @brief C2: affiliation-info NOTIFY 본문 (TS 24.379 §9.3/F.4)
  */
 static std::string BuildAffiliationInfoBody( const std::string &strUserId ) {
     std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
@@ -548,11 +574,15 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     SipMakeBranch( szBranch, sizeof( szBranch ) );
     pMsg->AddVia( strLocalIp.c_str(), iLocalPort, szBranch );
 
-    // From: server (our PSI), tag = sub.strToTag (the tag we sent in 200 OK)
-    std::string strServerPsi = ( sub.strEventType == "gms" )         ? "gms_psi"
-                             : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
-                                                                     : "cms_psi";
-    pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    if ( sub.strEventType == "reg" ) {
+        // reg-event: From = 가입자 자신의 AoR (RFC 3680)
+        pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
+    } else {
+        std::string strServerPsi = ( sub.strEventType == "gms" )         ? "gms_psi"
+                                 : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
+                                                                         : "cms_psi";
+        pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    }
     if ( !sub.strToTag.empty() ) {
         pMsg->m_clsFrom.InsertParam( SIP_TAG, sub.strToTag.c_str() );
     }
@@ -571,7 +601,8 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
 
     // Route to subscriber's registered address
     CUserInfo clsUserInfo;
-    if ( gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo ) ) {
+    bool bRegistered = gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo );
+    if ( bRegistered ) {
         CSipCallRoute clsRoute;
         clsUserInfo.GetCallRoute( clsRoute );
         pMsg->AddRoute( clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP );
@@ -581,10 +612,12 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     if ( tRemaining < 0 ) tRemaining = 0;
     pMsg->AddHeader( "Subscription-State", ( "active;expires=" + std::to_string( (int)tRemaining ) ).c_str() );
 
-    // C2: affiliation 구독은 presence 이벤트 + affiliation-info 본문(TS 24.379 §9.3),
-    //     그 외(gms/cms)는 xcap-diff(TS 24.481/24.484).
     std::string strBody;
-    if ( sub.strEventType == "affiliation" ) {
+    if ( sub.strEventType == "reg" ) {
+        pMsg->AddHeader( "Event", "reg" );
+        strBody = BuildRegInfoBody( sub, clsUserInfo, bRegistered, iSeq - 1 );
+        pMsg->m_clsContentType.Set( "application", "reginfo+xml" );
+    } else if ( sub.strEventType == "affiliation" ) {
         pMsg->AddHeader( "Event", "presence" );
         strBody = BuildAffiliationInfoBody( sub.strUserId );
         pMsg->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-affiliation-info+xml" );
@@ -624,8 +657,12 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
     SipMakeBranch( szBranch, sizeof( szBranch ) );
     pMsg->AddVia( strLocalIp.c_str(), iLocalPort, szBranch );
 
-    std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
-    pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    if ( sub.strEventType == "reg" ) {
+        pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
+    } else {
+        std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
+        pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
+    }
     if ( !sub.strToTag.empty() ) {
         pMsg->m_clsFrom.InsertParam( SIP_TAG, sub.strToTag.c_str() );
     }
@@ -646,7 +683,9 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
         pMsg->AddRoute( clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP );
     }
 
-    pMsg->AddHeader( "Event", sub.strEventType == "affiliation" ? "presence" : "xcap-diff" );
+    pMsg->AddHeader( "Event", sub.strEventType == "reg"         ? "reg"
+                           : sub.strEventType == "affiliation" ? "presence"
+                           :                                     "xcap-diff" );
     pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
     pMsg->m_iContentLength = 0;
 
@@ -661,6 +700,11 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
  *        (Active state, no specific document change)
  */
 void SendInitialNotify( const SubscriptionInfo &sub ) {
+    if ( sub.strEventType == "reg" ) {
+        // reg-event: 등록 상태 reginfo 문서 1건
+        SendNotifyToSubscriber( sub, "", "" );
+        return;
+    }
     if ( sub.strEventType == "affiliation" ) {
         // C2: 제휴상태 초기 NOTIFY (현재 affiliated 그룹 목록).
         SendNotifyToSubscriber( sub, "init", "" );

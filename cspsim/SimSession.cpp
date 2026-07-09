@@ -434,6 +434,57 @@ void SimSession::SubscribeCms() {
 }
 
 // ─────────────────────────────────────────────
+//  reg-event 구독 (RFC 3680) — 실제 UE 는 REGISTER 200 OK 직후
+//  자신의 AoR 로 Event: reg SUBSCRIBE 를 보내 등록 상태를 구독한다.
+//  Request-URI/From/To 모두 자신의 AoR, body 없음.
+// ─────────────────────────────────────────────
+void SimSession::SubscribeReg()
+{
+    const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
+    int iLocalPort = m_iLocalPort;
+
+    char szCallId[128];
+    snprintf(szCallId, sizeof(szCallId), "regsub_%s_%d_%d",
+             m_strUser.c_str(), m_iId, (int)time(NULL));
+    m_strRegSubCallId = szCallId;
+    m_iRegSubSeq = 1;
+
+    char szTag[64];
+    SipMakeTag(szTag, sizeof(szTag));
+    m_strRegSubFromTag = szTag;
+
+    CSipMessage* pMsg = new CSipMessage();
+    pMsg->m_strSipMethod = "SUBSCRIBE";
+    pMsg->m_clsReqUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), m_iServerPort);
+
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+    SipMakeBranch(szBranch, sizeof(szBranch));
+    pMsg->AddVia(strLocalIp.c_str(), iLocalPort, szBranch);
+
+    pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
+    pMsg->m_clsTo.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
+
+    pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
+    pMsg->m_clsCSeq.Set(m_iRegSubSeq, "SUBSCRIBE");
+    pMsg->m_iMaxForwards = 70;
+    pMsg->AddHeader("Expires", "3600");
+    pMsg->AddHeader("Event", "reg");
+    pMsg->AddHeader("Accept", "application/reginfo+xml");
+
+    char szContact[128];
+    snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
+             m_strUser.c_str(), strLocalIp.c_str(), iLocalPort);
+    pMsg->AddHeader("Contact", szContact);
+
+    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+
+    m_bRegSubscribed = true;
+    printf("[%d] SUBSCRIBE reg-event Call-ID=%s\n", m_iId, szCallId);
+    m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
+// ─────────────────────────────────────────────
 //  SUBSCRIBE Expires=0 (구독 해제, RFC 3265 §3.1.4)
 //  기존 다이얼로그(Call-ID / From-tag)를 재사용해야 서버가 같은 구독으로 인식한다.
 // ─────────────────────────────────────────────
@@ -466,7 +517,8 @@ void SimSession::SendUnsubscribe(const std::string& strPsi,
 
     pMsg->m_iMaxForwards = 70;
     pMsg->AddHeader("Expires", "0");
-    pMsg->AddHeader("Event", "xcap-diff");
+    // reg-event 다이얼로그(자신의 AoR 구독)면 Event: reg, 그 외 xcap-diff
+    pMsg->AddHeader("Event", strCallId == m_strRegSubCallId ? "reg" : "xcap-diff");
 
     char szContact[128];
     snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
@@ -494,7 +546,7 @@ void SimSession::Logout()
         AffiliateGroup(true);
     }
 
-    // 2. GMS / CMS 구독 해제 (Expires=0, 기존 다이얼로그 재사용)
+    // 2. GMS / CMS / reg-event 구독 해제 (Expires=0, 기존 다이얼로그 재사용)
     if (m_bGmsSubscribed) {
         SendUnsubscribe("gms_psi", m_strGmsCallId, m_iGmsSeq, m_strGmsFromTag);
         m_bGmsSubscribed = false;
@@ -502,6 +554,10 @@ void SimSession::Logout()
     if (m_bCmsSubscribed) {
         SendUnsubscribe("cms_psi", m_strCmsCallId, m_iCmsSeq, m_strCmsFromTag);
         m_bCmsSubscribed = false;
+    }
+    if (m_bRegSubscribed) {
+        SendUnsubscribe(m_strUser, m_strRegSubCallId, m_iRegSubSeq, m_strRegSubFromTag);
+        m_bRegSubscribed = false;
     }
 
     // 3. REGISTER Expires=0 — m_clsUserAgent.Stop() 내부에서 자동 전송되므로 여기서는 생략
@@ -848,6 +904,8 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
             m_bCmsSubscribed = true;
             m_stats.iCmsOk++;
             printf("[%d] CMS SUBSCRIBED OK\n", m_iId);
+        } else if (strCallId == m_strRegSubCallId) {
+            printf("[%d] REG-EVENT SUBSCRIBED OK\n", m_iId);
         }
     } else if (iStatus >= 400) {
         printf("[%d] SUBSCRIBE %d error (CallId=%s)\n",
@@ -878,6 +936,21 @@ void SimSession::HandleNotify(CSipMessage* pclsMessage) {
 
     const std::string& strBody = pclsMessage->m_strBody;
     if (strBody.empty()) return;
+
+    // reg-event NOTIFY (reginfo+xml): 등록 상태만 출력 (RFC 3680)
+    if (strEvent.rfind("reg", 0) == 0 && strEvent.find("xcap") == std::string::npos) {
+        size_t p = strBody.find("<registration ");
+        if (p != std::string::npos) {
+            size_t sp = strBody.find("state=\"", p);
+            std::string strRegState = "?";
+            if (sp != std::string::npos) {
+                size_t se = strBody.find('"', sp + 7);
+                if (se != std::string::npos) strRegState = strBody.substr(sp + 7, se - sp - 7);
+            }
+            printf("[%d]   reginfo: registration state=%s\n", m_iId, strRegState.c_str());
+        }
+        return;
+    }
 
     // xcap-root="http://{CSC}:{port}/" 추출 (Phase 3B 교정 결과)
     std::string strXcapRoot;

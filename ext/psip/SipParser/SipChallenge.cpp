@@ -137,7 +137,9 @@ int CSipChallenge::ToString( char * pszText, int iTextSize )
 	if( SetQuoteString( pszData, iPos, iTextSize, "opaque", m_strOpaque ) == false ) return -1;
 	if( SetString( pszData, iPos, iTextSize, "stale", m_strStale ) == false ) return -1;
 	if( SetString( pszData, iPos, iTextSize, "algorithm", m_strAlgorithm ) == false ) return -1;
-	if( SetString( pszData, iPos, iTextSize, "qop", m_strQop ) == false ) return -1;
+	// RFC 2617/7616: 챌린지의 qop-options 는 quoted-string (qop="auth").
+	//   비인용 qop=auth 는 엄격한 단말 파서가 챌린지 무시 → 인증 진행 불가.
+	if( SetQuoteString( pszData, iPos, iTextSize, "qop", m_strQop ) == false ) return -1;
 
 	SIP_PARAMETER_LIST::iterator	itList;
 

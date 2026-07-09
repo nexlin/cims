@@ -75,11 +75,12 @@ export const flowApi = {
     if (date) params.set('date', date)
     return api.get(`/flow/register/list?${params.toString()}`)
   },
-  getRegisterFlow(user: string, date?: string, sesid?: string): Promise<RegisterFlowResponse> {
+  /** 특정 사용자가 관여한 모든 메시지 흐름 (메세지 이력 페이지) — REGISTER/SUBSCRIBE 외 호 처리 포함 */
+  getUserFlow(user: string, date?: string, sesid?: string): Promise<RegisterFlowResponse> {
     const params = new URLSearchParams({ user })
     if (date) params.set('date', date)
     if (sesid) params.set('sesid', sesid)
-    return api.get(`/flow/register?${params.toString()}`)
+    return api.get(`/flow/user?${params.toString()}`)
   },
   getBody(date: string, hour: string | undefined, seq?: number, ts?: string, dir?: string, proto?: string, iface?: string, node?: string): Promise<FlowBodyResponse> {
     const params = new URLSearchParams({ date })

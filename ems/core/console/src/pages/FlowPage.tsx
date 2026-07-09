@@ -80,8 +80,9 @@ const ARROW_Y_OFFSET = 16  // 텍스트 기준선 아래 화살표 위치
 // proto별 색상
 const PROTO_COLOR: Record<string, string> = {
   SIP:   '#4b8cda',
-  JSON:  '#e6832a',
+  JSON:  '#e6832a',   // CSP↔CMP 제어
   CSC:   '#2ecc71',
+  HTTPS: '#2ecc71',   // UE↔CSC (XCAP/IdMS)
   WS:    '#57b65a',
   RTP:   '#d94bbf',
   RTCP:  '#9b59b6',
@@ -92,6 +93,90 @@ const PROTO_COLOR: Record<string, string> = {
 
 function protoColor(proto: string) {
   return PROTO_COLOR[proto] ?? '#888'
+}
+
+// SIP 메서드 계열별 색상 — 전부 파란색으로 뭉치지 않게 계열을 나눈다.
+const SIP_METHOD_COLOR: Record<string, string> = {
+  REGISTER:  '#4b8cda',  // 등록 (파랑)
+  SUBSCRIBE: '#8e5ad8',  // 구독/알림 (보라)
+  NOTIFY:    '#8e5ad8',
+  PUBLISH:   '#a44bd9',
+  INVITE:    '#0d9488',  // 호 제어 (청록)
+  ACK:       '#0d9488',
+  BYE:       '#0d9488',
+  CANCEL:    '#0d9488',
+  UPDATE:    '#0d9488',
+  PRACK:     '#0d9488',
+  REFER:     '#0d9488',
+  MESSAGE:   '#0d9488',
+  INFO:      '#0d9488',
+  OPTIONS:   '#0d9488',
+}
+
+const SIP_FAIL_COLOR = '#d64545'  // 4xx~6xx — 실패는 계열과 무관하게 빨강 유지
+
+/** 색상/응답 주석이 붙은 메시지 */
+type ColoredMsg = FlowMessage & {
+  _color?: string      // 표시 색 (요청: 계열색, 응답: 대응 요청의 계열색)
+  _resp?: boolean      // 응답 여부 (점선 화살표)
+  _reqMethod?: string  // 응답이 대응하는 요청 메서드 (라벨 표기)
+}
+
+/** 요청-응답 매칭 색상 부여: 응답은 "무엇에 대한 응답인지" 를 색과 라벨로 보여준다.
+ *  같은 sesid 안에서 (from→to) 방향별 직전 요청 메서드를 기억해두고,
+ *  역방향 응답이 오면 그 요청의 계열색을 물려받는다. (실패 응답은 빨강 고정)
+ */
+function annotateColors(messages: FlowMessage[]): ColoredMsg[] {
+  const lastReq: Record<string, string> = {}  // `${sesid}|${from}>${to}` → 요청 메서드
+  return messages.map(m => {
+    const label = (m.label || '').trim()
+    if (m.proto === 'SIP') {
+      const head = label.split(/[ (]/)[0]
+      if (SIP_METHOD_COLOR[head]) {
+        lastReq[`${m.sesid}|${m.from}>${m.to}`] = head
+        return { ...m, _color: SIP_METHOD_COLOR[head], _resp: false }
+      }
+      const code = parseInt(label, 10)
+      if (!isNaN(code)) {
+        const reqMethod = lastReq[`${m.sesid}|${m.to}>${m.from}`]
+        const famColor = (reqMethod && SIP_METHOD_COLOR[reqMethod]) || PROTO_COLOR.SIP
+        return {
+          ...m,
+          _color: code >= 400 ? SIP_FAIL_COLOR : famColor,
+          _resp: true,
+          _reqMethod: reqMethod,
+        }
+      }
+      return { ...m, _color: PROTO_COLOR.SIP, _resp: false }
+    }
+    // CMP JSON: 명령(주황) / OK 응답은 직전 명령과 짝 (같은 mid)
+    if (m.proto === 'JSON') {
+      if (label === 'OK' || label === 'ERROR') {
+        const reqMethod = lastReq[`${m.sesid}|${m.to}>${m.from}|${m.mid || ''}`]
+        return {
+          ...m,
+          _color: label === 'ERROR' ? SIP_FAIL_COLOR : protoColor('JSON'),
+          _resp: true,
+          _reqMethod: reqMethod,
+        }
+      }
+      lastReq[`${m.sesid}|${m.from}>${m.to}|${m.mid || ''}`] = label
+      return { ...m, _color: protoColor('JSON'), _resp: false }
+    }
+    return { ...m, _color: protoColor(m.proto), _resp: false }
+  })
+}
+
+/** 메시지별 표시 색 (annotateColors 주석 우선, 없으면 proto 색) */
+function msgColor(msg: ColoredMsg): string {
+  return msg._color ?? protoColor(msg.proto)
+}
+
+/** 응답 라벨: "200 ← REGISTER" 형태로 어떤 요청의 응답인지 표기 */
+function msgLabel(msg: ColoredMsg): string {
+  const base = msg.label || ''
+  if (msg._resp && msg._reqMethod) return `${base} ‹${msg._reqMethod}›`
+  return base
 }
 
 function actorX(name: string, actors: string[], colW: number = COL_W): number {
@@ -164,7 +249,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
           const y   = i * ROW_H
           const x1  = actorX(msg.from, actors, colW)
           const x2  = actorX(msg.to, actors, colW)
-          const col = protoColor(msg.proto)
+          const col = msgColor(msg)
           const dir = x2 > x1 ? 1 : x2 < x1 ? -1 : 0
           const arrowTip = dir !== 0 ? x2 - dir * 10 : x2
           const isSelected = selIdx === i
@@ -175,14 +260,15 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
               <text x={4} y={y + 14} fill="#6b7280" fontSize={10}>{msg.ts.slice(0, 12)}</text>
               {dir !== 0 && <>
                 <line x1={x1} y1={y + ARROW_Y_OFFSET} x2={arrowTip} y2={y + ARROW_Y_OFFSET}
-                  stroke={col} strokeWidth={isSelected ? 2 : 1.5} />
+                  stroke={col} strokeWidth={isSelected ? 2 : 1.5}
+                  strokeDasharray={(msg as ColoredMsg)._resp ? '5 3' : undefined} />
                 <polygon
                   points={`${x2},${y + ARROW_Y_OFFSET} ${x2 - dir * 8},${y + ARROW_Y_OFFSET - 5} ${x2 - dir * 8},${y + ARROW_Y_OFFSET + 5}`}
                   fill={col} />
               </>}
               <text x={(x1 + x2) / 2} y={y + ARROW_Y_OFFSET - 4}
                 textAnchor="middle" fill={col} fontSize={11} fontWeight="bold">
-                {msg.label}{msg.detail ? `(${msg.detail})` : ''}
+                {msgLabel(msg as ColoredMsg)}{msg.detail ? `(${msg.detail})` : ''}
               </text>
             </g>
           )
@@ -237,7 +323,7 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
         const y   = HEAD_H + i * ROW_H
         const x1  = actorX(msg.from, ACTORS, colW)
         const x2  = actorX(msg.to, ACTORS, colW)
-        const col = protoColor(msg.proto)
+        const col = msgColor(msg)
         const dir = x2 > x1 ? 1 : -1
         const arrowTip = x2 - dir * 10
         const isSelected = selectedIdx === i
@@ -252,9 +338,10 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
             {/* 타임스탬프 */}
             <text x={4} y={y + 14} fill="#6b7280" fontSize={10}>{msg.ts.slice(0, 12)}</text>
 
-            {/* 화살선 */}
+            {/* 화살선 (응답은 점선) */}
             <line x1={x1} y1={y + ARROW_Y_OFFSET} x2={arrowTip} y2={y + ARROW_Y_OFFSET}
-              stroke={col} strokeWidth={isSelected ? 2 : 1.5} />
+              stroke={col} strokeWidth={isSelected ? 2 : 1.5}
+              strokeDasharray={(msg as ColoredMsg)._resp ? '5 3' : undefined} />
             {/* 화살촉 */}
             <polygon
               points={`${x2},${y + ARROW_Y_OFFSET} ${x2 - dir * 8},${y + ARROW_Y_OFFSET - 5} ${x2 - dir * 8},${y + ARROW_Y_OFFSET + 5}`}
@@ -266,7 +353,7 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
               const labelY = y + ARROW_Y_OFFSET - 4
               return (
                 <text x={mx} y={labelY} textAnchor="middle" fill={col} fontSize={11} fontWeight="bold">
-                  {msg.label}{msg.detail ? `(${msg.detail})` : ''}
+                  {msgLabel(msg as ColoredMsg)}{msg.detail ? `(${msg.detail})` : ''}
                 </text>
               )
             })()}
@@ -338,8 +425,8 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                     {msg.proto}
                   </span>
                 </td>
-                <td style={{ ...tdStyle, fontWeight: 600, color: protoColor(msg.proto) }}>
-                  {msg.label}{msg.detail ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({msg.detail})</span> : ''}
+                <td style={{ ...tdStyle, fontWeight: 600, color: msgColor(msg) }}>
+                  {msgLabel(msg as ColoredMsg)}{msg.detail ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({msg.detail})</span> : ''}
                 </td>
               </tr>
             )
@@ -375,9 +462,11 @@ interface FlowPageProps {
   onClose: () => void
   prefetchedNodes?: Record<string, FlowMessage[]>
   prefetchedMessages?: FlowMessage[]
+  /** true 면 Modal 없이 페이지 안에 바로 렌더 (메세지 이력 페이지 등 임베드용) */
+  inline?: boolean
 }
 
-export default function FlowPage({ callId, date, callType, onClose, prefetchedNodes, prefetchedMessages }: FlowPageProps) {
+export default function FlowPage({ callId, date, callType, onClose, prefetchedNodes, prefetchedMessages, inline }: FlowPageProps) {
   const [allNodes, setAllNodes] = useState<Record<string, FlowMessage[]>>({})
   const [enabledNodes, setEnabledNodes] = useState<Set<string>>(new Set())
   const [loading,  setLoading]  = useState(!prefetchedMessages)
@@ -422,11 +511,13 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
       .finally(() => setLoading(false))
   }, [callId, date, callType, prefetchedNodes, prefetchedMessages, applyResponse])
 
-  // 선택된 노드의 메시지를 합쳐서 시간순 정렬
-  const messages = Object.entries(allNodes)
-    .filter(([node]) => enabledNodes.has(node))
-    .flatMap(([, msgs]) => msgs)
-    .sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
+  // 선택된 노드의 메시지를 합쳐서 시간순 정렬 → 요청-응답 매칭 색상 부여
+  const messages = annotateColors(
+    Object.entries(allNodes)
+      .filter(([node]) => enabledNodes.has(node))
+      .flatMap(([, msgs]) => msgs)
+      .sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
+  )
 
   function handleSelect(idx: number) {
     const newIdx = selIdx === idx ? null : idx
@@ -464,12 +555,8 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
   // 정규화된 메시지 (다이어그램용)
   const normalizedMsgs = normalizeMessages(messages)
 
-  return (
-    <Modal
-      title={`메시지 플로우 — ${callId}`}
-      onClose={onClose}
-      fullscreen
-    >
+  const inner = (
+    <>
       {/* 노드 필터 */}
       {Object.keys(allNodes).length > 0 && (
         <div style={{ display: 'flex', gap: 12, padding: '6px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, alignItems: 'center' }}>
@@ -486,6 +573,24 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
               <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({allNodes[node]?.length || 0})</span>
             </label>
           ))}
+
+          {/* 색상 범례 — 응답은 요청과 같은 색(점선 화살표), 실패(4xx+)만 빨강 */}
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap', alignItems: 'center' }}>
+            {[
+              ['등록', '#4b8cda'], ['구독/알림', '#8e5ad8'], ['호 제어', '#0d9488'],
+              ['실패응답', '#d64545'],
+              ['CMP제어', '#e6832a'], ['CSC(XCAP)', '#2ecc71'],
+            ].map(([name, c]) => (
+              <span key={name} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />
+                {name}
+              </span>
+            ))}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <svg width={22} height={10}><line x1={0} y1={5} x2={22} y2={5} stroke="#8a9ab0" strokeWidth={1.5} strokeDasharray="5 3" /></svg>
+              응답 (요청과 같은 색)
+            </span>
+          </span>
         </div>
       )}
 
@@ -546,6 +651,25 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
           </div>
         )
       })()}
+    </>
+  )
+
+  // inline: Modal 래핑 없이 페이지 안에 바로 렌더
+  if (inline) {
+    return (
+      <div style={{ flex: 1, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {inner}
+      </div>
+    )
+  }
+
+  return (
+    <Modal
+      title={`메시지 플로우 — ${callId}`}
+      onClose={onClose}
+      fullscreen
+    >
+      {inner}
     </Modal>
   )
 }

@@ -801,7 +801,9 @@ bool CSipMessage::AddIpPortToTopVia(const char *pszIp, int iPort,
     itViaList->InsertParam(SIP_RPORT, szNum);
   }
 
-  if (bReceived == false && strcmp(itViaList->m_strHost.c_str(), pszIp)) {
+  // RFC 3581 §4: rport 를 채택하는 경우 received 는 host 동일 여부와 무관하게 MUST 추가.
+  //   (실제 IMS 망 응답도 received 를 항상 포함 — 일부 단말은 이를 기대함)
+  if (bReceived == false) {
     itViaList->InsertParam(SIP_RECEIVED, pszIp);
   }
 
