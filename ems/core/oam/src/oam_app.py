@@ -34,6 +34,32 @@ _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))  # = oam/
 _CONFIG_PATH = os.environ.get('CIMS_OAM_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'oam.json')
 
 
+def _generate_self_signed_cert(dest_dir):
+    """cert 가 어디에도 없을 때 runtime/cert 에 self-signed 생성 — 부트스트랩 없이 패키지
+    배포로 올라온 노드도 항상 HTTPS 로 기동해 에이전트 health-gate(HTTPS 전용)가 성립한다.
+    install.sh 의 부트스트랩 생성과 동형 (CN=hostname/O=CIMS + SAN).
+    실패 시 (None, None) — 기존 평문 fallback 유지 (호출부가 SSL Disabled 로그)."""
+    import socket as _socket
+    import subprocess as _subprocess
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        host = _socket.gethostname() or 'cims-oam'
+        key = os.path.join(dest_dir, 'server.key')
+        crt = os.path.join(dest_dir, 'server.crt')
+        _subprocess.run(
+            ['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '3650',
+             '-subj', f'/CN={host}/O=CIMS',
+             '-addext', f'subjectAltName=DNS:{host},IP:127.0.0.1',
+             '-keyout', key, '-out', crt],
+            check=True, capture_output=True, timeout=60)
+        os.chmod(key, 0o600)
+        print(f'[oam-cert] self-signed TLS cert 생성: {dest_dir} (CN={host})', flush=True)
+        return key, crt
+    except Exception as e:
+        print(f'[oam-cert] self-signed 생성 실패 — 평문 기동: {e}', flush=True)
+        return None, None
+
+
 def _resolve_oam_cert():
     """OAM TLS cert (server.key, server.crt) 경로 결정 — 버전 업그레이드 생존이 핵심.
 
@@ -41,7 +67,8 @@ def _resolve_oam_cert():
     cert 가 없어 평문 기동 → self-upgrade health-gate(HTTPS 프로브) 실패 → 롤백. oam-svc 도
     동일 사유로 평문→게이트웨이 502. 그래서 **버전무관 위치(modules/oam/runtime/cert)** 를 SoT 로 한다.
 
-    우선순위: (1) runtime/cert (업그레이드 생존)  (2) 자기 버전 cert (dev/repo·구 레이아웃).
+    우선순위: (1) runtime/cert (업그레이드 생존)  (2) 자기 버전 cert (dev/repo·구 레이아웃)
+    (3) 형제 버전 cert  (4) 어디에도 없으면 self-signed 를 runtime 에 생성 (패키지 배포 노드).
     self-heal: runtime 이 비어있고 자기/형제 버전에 cert 가 있으면 runtime 으로 복사 → 이후
     버전업이 자동 상속(부트스트랩 재실행 불요).
     """
@@ -67,7 +94,7 @@ def _resolve_oam_cert():
                 src = cand
                 break
     if not src:
-        return None, None
+        return _generate_self_signed_cert(runtime_cert)
     # self-heal: runtime 으로 복사(가능하면). 실패해도 src 직접 사용.
     try:
         os.makedirs(runtime_cert, exist_ok=True)
@@ -730,7 +757,20 @@ if __name__ == '__main__':
         # ── HA fan-out drift sweeper ────────────────────────────────────
         DRIFT_SWEEP_INTERVAL  = int(config.get('DriftSweepSec', 300))
         DRIFT_AUTO_RESYNC     = bool(config.get('AutoResyncDrift', False))
+        # 기동 시 open drift 알람을 alert_log 리플레이로 복원 — 빈 dict 로 시작하면
+        # 재시작 이전에 열린 알람의 close 를 영원히 발행하지 못한다 (좀비).
+        # drift 이벤트는 alarm_id 없이 type(config_drift::g<id>::<coll>) 이 그대로
+        # akey 라 emit_drift_alerts 의 open_state 키와 포맷이 동일.
         _drift_open: dict = {}
+        if _service_log:
+            try:
+                from services import alert_log as _alert_log
+                _drift_open = {k: True for k in _alert_log.compute_open_state(_service_log)
+                               if k.startswith('config_drift::')}
+                if _drift_open:
+                    logger.log_info(f"[drift-sweep] restored {len(_drift_open)} open drift alarm(s)")
+            except Exception as e:
+                logger.log_error(f"[drift-sweep] open-state restore failed: {e}")
 
         def _sweep_drift():
             try:

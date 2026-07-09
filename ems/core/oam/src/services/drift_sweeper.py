@@ -215,6 +215,20 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
     counts = {'opened': 0, 'closed': 0, 'still_open': 0}
     if not service_log_dir:
         return counts
+    # 고아 reap — 이번 스윕의 비교 대상(모든 row, all_ok 무관)에 더 이상 없는 open 키는
+    # 그룹 삭제/컬렉션 제거/배포 재구성으로 재평가가 불가능해진 알람 → close 발행.
+    # (all_ok=False row 도 universe 에 포함되므로 proxy 일시 실패로 오닫힘 없음.)
+    universe = {f"config_drift::g{r['ha_group_id']}::{r['collection']}" for r in scan_results}
+    for typ in [t for t in open_state if t not in universe]:
+        open_state.pop(typ, None)
+        alert_log.record_event(service_log_dir, {
+            'ts': now,
+            'type': typ,
+            'severity': 'warning',
+            'action': 'close',
+            'message': f"HA drift 대상 소멸 (그룹/컬렉션 제거) — {typ}",
+        })
+        counts['closed'] += 1
     for r in scan_results:
         if not r.get('all_ok'):
             continue  # proxy 실패는 drift 판정 보류
