@@ -675,7 +675,7 @@
         "file": "config/local_nodes.jsonl"
       },
       "scope": "service",
-      "scope_note": "service: 그룹 공통 — CSP 는 active_standby 전용이고 bind_ip=VIP 라 멤버 간 리스너 정의가 동일해야 한다. 편집은 그룹 탭, 정합은 자동 동기화."
+      "scope_note": "service: 그룹 공통 — CSP active_standby 는 keepalived 가 VIP 를 부여하는 방식이라 bind_ip=0.0.0.0 (기본값) 으로 실IP/VIP 를 모두 수신하며, 멤버 간 리스너 정의가 동일해야 한다. 명시 IP bind 는 같은 host 다중 인스턴스 (CSP/PSP/ISP) 구분 등 특수한 경우만. 편집은 그룹 탭, 정합은 자동 동기화."
     },
     {
       "key": "remote_nodes",

@@ -580,6 +580,11 @@ CSC(관리 서버)로부터 설정 변경 이벤트를 UDP로 수신.
 
 **수신 포트:** 4421 (UDP)
 
+**bind IP:** primary local_node 의 `bind_ip` 원문을 따른다. `0.0.0.0`/빈값이면 INADDR_ANY
+(실IP·keepalived VIP 모두 수신 — SIP 리스너와 동일 규칙), 명시 IP 면 그 IP 로 bind (같은 호스트에서
+CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). `gclsSetup.m_strLocalIp` 는
+기동 시 `0.0.0.0` 이 실IP 로 치환된 값이라 bind 판단에 쓰지 않는다.
+
 **이벤트 형식:**
 
 ```json
@@ -688,7 +693,7 @@ relay bookkeeping 의 키는 **session_id**(`cmp_sess_N`, 전역 유일)다. 멀
 | SIP Callback Pool | 5 (설정) | ISipStackCallBack 디스패치 |
 | CMP KeepAlive | 1 | CMP heartbeat (30초) |
 | CMP RecvLoop | 1 | CMP 응답 수신 |
-| CSC Interface | 1 | CSC 이벤트 수신 (TCP 4421) |
+| CSC Interface | 1 | CSC 이벤트 수신 (UDP 4421) |
 | GroupCall Monitor | 1 | 그룹 상태 주기 점검 |
 | Monitor Server | 1 | HTTP 모니터링 인터페이스 |
 
@@ -771,7 +776,7 @@ ServiceMain()
   5. CGroupMap 로드 (DB 또는 파일)
   6. CspUserMap 로드 (DB 또는 파일)
   7. MariaDB 연결 (DbHost 설정 시)
-  8. CCscInterface 시작 (TCP 4421)
+  8. CCscInterface 시작 (UDP 4421)
   9. CModuleDispatcher 시작 (SIP 스택 + 콜백 등록)
   10. Monitor Server 시작
   11. Main Loop:
