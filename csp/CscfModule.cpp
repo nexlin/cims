@@ -114,7 +114,12 @@ bool CCscfModule::CheckAuthorizationResponse( const char *pszUserName, const cha
 ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential, const char *pszFromId,
                                                   const char *pszMethod, CspUser &clsXmlUser ) {
     if ( pclsCredential->m_strUserName.empty() ) return E_AUTH_ERROR;
-    if ( gclsNonceMap.Select( pclsCredential->m_strNonce.c_str() ) == false ) return E_AUTH_NONCE_NOT_FOUND;
+    // RFC 7616: qop 사용 시 nonce 는 nc 증가와 함께 재사용 가능 (실제 IMS 망 동일).
+    //   여기서는 존재만 확인(삭제 안 함)하고, 해시 검증 통과 후 CheckAndUpdateNc 로 replay 차단.
+    //   qop 미사용(레거시) credential 은 기존대로 1회용 삭제.
+    const bool bQop = !pclsCredential->m_strQop.empty();
+    if ( gclsNonceMap.Select( pclsCredential->m_strNonce.c_str(), !bQop ) == false )
+        return E_AUTH_NONCE_NOT_FOUND;
     if ( gclsCspUserMap.Select( pszFromId, clsXmlUser ) == false ) return E_AUTH_ERROR;
 
     // v3 (2026-04-22): 가입자의 service_ref 가 비어있으면 REGISTER 거부
@@ -163,6 +168,15 @@ ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential
                                      pclsCredential->m_strResponse.c_str(), clsXmlUser.m_strPassWord.c_str(), pszMethod,
                                      pszQop, pszNc, pszCnonce ) == false )
         return E_AUTH_ERROR;
+
+    // qop 재사용 credential: 해시 통과 후 nc 단조증가 검사 (동일 nc 재전송 = replay → stale 재챌린지)
+    if ( bQop ) {
+        unsigned int uiNc = pszNc ? (unsigned int)strtoul( pszNc, NULL, 16 ) : 0;
+        if ( gclsNonceMap.CheckAndUpdateNc( pclsCredential->m_strNonce.c_str(), uiNc ) == false ) {
+            CLog::Print( LOG_ERROR, "Auth reject: nc replay (user=%s nc=%s)", pszFromId, pszNc ? pszNc : "" );
+            return E_AUTH_NONCE_NOT_FOUND;
+        }
+    }
 
     return E_AUTH_OK;
 }

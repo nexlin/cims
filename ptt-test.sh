@@ -47,10 +47,10 @@ MYSQL="mysql -h$DB_HOST -P$DB_PORT -u$DB_USER -p$DB_PASS $DB_NAME"
 
 # 테스트 사용자 (PTT MSISDN — E.164, 실제 단말 형식)
 USERS=(+821000000001 +821000000002 +821000000003 +821000000004)
-USER_PWD="1234"
+USER_PWD="123456"
 SIP_DOMAIN="ptt.mnc033.mcc450.3gppnetwork.org"
 AUTH_REALM="ims.mnc033.mcc450.3gppnetwork.org"   # 실제 망: realm 은 PTT 도메인과 무관하게 IMS core realm
-IMSI_BASE="001011000000001"   # USERS[0]의 IMSI; 이후 세션은 +1씩 자동 증가
+IMSI_BASE="45033821000000001"   # USERS[0]의 IMSI (실단말 규칙: 45033+번호); 이후 세션은 +1씩 자동 증가
 
 # 테스트 그룹
 GROUP_PREARRANGED="g001"
@@ -233,10 +233,11 @@ if changed:
         fi
     fi
 
-    # access_services.jsonl — CSP가 PTT 도메인/realm을 인식하기 위해 필요 (항상 덮어씀)
+    # access_services.jsonl — CSP가 PTT/VoLTE 도메인/realm을 인식하기 위해 필요 (항상 덮어씀)
     local svc_file="$cfg_dir/access_services.jsonl"
     cat > "$svc_file" <<EOF
 {"id":1,"name":"ptt","kind":"ptt","domain":"$SIP_DOMAIN","auth_realm":"$AUTH_REALM","allowed_local_node_refs":["access-udp"]}
+{"id":2,"name":"volte","kind":"volte","domain":"$AUTH_REALM","auth_realm":"$AUTH_REALM","allowed_local_node_refs":["access-udp"]}
 EOF
     echo "[OK] access_services.jsonl 생성/갱신: $svc_file"
 
@@ -277,10 +278,10 @@ SET @u4 = (SELECT id FROM users WHERE login_id='ptt1004' LIMIT 1);
 
 INSERT IGNORE INTO ptt_subscriptions (id, user_id, passwd, dnd, forward_id, service_ref, imsi)
 VALUES
-  ('${USERS[0]}', @u1, '$USER_PWD', 0, '', 'ptt', '001011000000001'),
-  ('${USERS[1]}', @u2, '$USER_PWD', 0, '', 'ptt', '001011000000002'),
-  ('${USERS[2]}', @u3, '$USER_PWD', 0, '', 'ptt', '001011000000003'),
-  ('${USERS[3]}', @u4, '$USER_PWD', 0, '', 'ptt', '001011000000004');
+  ('${USERS[0]}', @u1, '$USER_PWD', 0, '', 'ptt', '45033821000000001'),
+  ('${USERS[1]}', @u2, '$USER_PWD', 0, '', 'ptt', '45033821000000002'),
+  ('${USERS[2]}', @u3, '$USER_PWD', 0, '', 'ptt', '45033821000000003'),
+  ('${USERS[3]}', @u4, '$USER_PWD', 0, '', 'ptt', '45033821000000004');
 
 -- ── 테스트 그룹 삽입 ────────────────────────────────────────
 INSERT IGNORE INTO ptt_groups (mcptt_group_id, name, group_type, require_affiliation, created_at)

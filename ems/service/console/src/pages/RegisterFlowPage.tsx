@@ -104,9 +104,10 @@ export default function RegisterFlowPage() {
         </div>
       )}
 
-      {/* ── flow: FlowPage ── */}
+      {/* ── flow: FlowPage (Modal 없이 페이지 내 바로 표시) ── */}
       {pageState === 'flow' && flow && (
         <FlowPage
+          inline
           callId={`${flow.user} 메세지 이력 (${flow.date})`}
           date={flow.date}
           onClose={backToForm}

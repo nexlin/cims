@@ -462,9 +462,11 @@ interface FlowPageProps {
   onClose: () => void
   prefetchedNodes?: Record<string, FlowMessage[]>
   prefetchedMessages?: FlowMessage[]
+  /** true 면 Modal 없이 페이지 안에 바로 렌더 (메세지 이력 페이지 등 임베드용) */
+  inline?: boolean
 }
 
-export default function FlowPage({ callId, date, callType, onClose, prefetchedNodes, prefetchedMessages }: FlowPageProps) {
+export default function FlowPage({ callId, date, callType, onClose, prefetchedNodes, prefetchedMessages, inline }: FlowPageProps) {
   const [allNodes, setAllNodes] = useState<Record<string, FlowMessage[]>>({})
   const [enabledNodes, setEnabledNodes] = useState<Set<string>>(new Set())
   const [loading,  setLoading]  = useState(!prefetchedMessages)
@@ -553,12 +555,8 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
   // 정규화된 메시지 (다이어그램용)
   const normalizedMsgs = normalizeMessages(messages)
 
-  return (
-    <Modal
-      title={`메시지 플로우 — ${callId}`}
-      onClose={onClose}
-      fullscreen
-    >
+  const inner = (
+    <>
       {/* 노드 필터 */}
       {Object.keys(allNodes).length > 0 && (
         <div style={{ display: 'flex', gap: 12, padding: '6px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, alignItems: 'center' }}>
@@ -653,6 +651,25 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
           </div>
         )
       })()}
+    </>
+  )
+
+  // inline: Modal 래핑 없이 페이지 안에 바로 렌더
+  if (inline) {
+    return (
+      <div style={{ flex: 1, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {inner}
+      </div>
+    )
+  }
+
+  return (
+    <Modal
+      title={`메시지 플로우 — ${callId}`}
+      onClose={onClose}
+      fullscreen
+    >
+      {inner}
     </Modal>
   )
 }

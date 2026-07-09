@@ -82,6 +82,31 @@ bool CNonceMap::Select( const char *pszNonce, bool bDelete ) {
 
 /**
  * @ingroup CspServer
+ * @brief 해시 검증 통과 후 nc(nonce count) 재사용 검사 — RFC 7616 nonce 재사용 지원.
+ *   nonce 가 존재하고 nc 가 마지막 통과값보다 크면 갱신 후 true (replay 차단).
+ * @param pszNonce	nonce 문자열
+ * @param uiNc			요청의 nc 값 (16진수 파싱 결과)
+ * @returns 통과하면 true, nonce 미존재 또는 nc 역행(replay)이면 false
+ */
+bool CNonceMap::CheckAndUpdateNc( const char *pszNonce, unsigned int uiNc ) {
+    bool bOk = false;
+
+    m_clsMutex.acquire();
+    NONCE_MAP::iterator it = m_clsMap.find( pszNonce );
+    if ( it != m_clsMap.end() && uiNc > it->second.m_uiLastNc ) {
+        it->second.m_uiLastNc = uiNc;
+        // 사용 중인 nonce 는 수명 연장 (sliding TTL) — 재등록 갱신 주기가 TTL 보다 길어도
+        // 단말이 nc 증가 재사용을 계속하는 한 stale 재챌린지가 발생하지 않는다.
+        time( &it->second.m_iTime );
+        bOk = true;
+    }
+    m_clsMutex.release();
+
+    return bOk;
+}
+
+/**
+ * @ingroup CspServer
  * @brief 입력한 시간 이전에 입력된 nonce 값을 모두 삭제한다.
  * @param iSecond		timeout 시간 (초단위)
  */

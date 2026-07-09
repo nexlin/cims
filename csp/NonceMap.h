@@ -18,6 +18,8 @@ class CNonceInfo {
 public:
     /** nonce 저장 시간 */
     time_t m_iTime;
+    /** 마지막으로 검증 통과한 nonce count (RFC 7616 재사용 시 replay 방지, 0=미사용) */
+    unsigned int m_uiLastNc = 0;
 };
 
 typedef std::map<std::string, CNonceInfo> NONCE_MAP;
@@ -28,6 +30,8 @@ public:
 
     bool GetNewValue( char *pszNonce, int iNonceSize );
     bool Select( const char *pszNonce, bool bDelete = true );
+    /** 해시 검증 통과 후 호출 — nonce 존재 && nc 가 이전보다 크면 갱신하고 true (replay 차단) */
+    bool CheckAndUpdateNc( const char *pszNonce, unsigned int uiNc );
     void DeleteTimeout( int iSecond );
     int GetCount();
 
