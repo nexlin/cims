@@ -3,13 +3,16 @@
 #
 # 사용법:
 #   cims-health <svc>
-#     <svc> = csc | csp | psp | ...   (ha.json services.<svc> 에 등록된 slug)
+#     <svc> = ha.json services.<svc> 에 등록된 slug (그룹명)
 #
-# 동작:
-#   ha.json 의 services.<svc>.{port, proto, bind_ip, tracked_modules} 를 lookup 후
-#   1) `ss -ln{t,u}` 로 binding 확인 (listen 중이면 PASS)
+# 동작 (상태 인지 — cold-spare 정합):
+#   0) 이 노드가 해당 서비스의 VIP 를 보유하지 않으면 무조건 PASS —
+#      standby 는 cold 모듈이 정지 상태인 것이 정상이라, 포트 검사를 하면
+#      영구 FAULT 로 승격 자격을 잃는 데드락이 된다 (헬스는 VIP 보유자만 검사).
+#   1) VIP 보유 노드: ha.json services.<svc>.{port, proto, bind_ip} lookup 후
+#      `ss -ln{t,u}` 로 binding 확인 (listen 중이면 PASS)
 #   2) tracked_modules 가 지정되면 `pgrep -x <mod>` 도 모두 PASS 해야 rc=0
-#   둘 다 통과해야 rc=0, 하나라도 실패면 rc=1.
+#   실패 시 rc=1 → keepalived FAULT → VIP 이양 → 피어가 승격.
 #
 # 옛 check_{csc,csp,psp}.sh (각 서비스별 분리) 의 대체.
 
@@ -27,16 +30,16 @@ fi
 SVC="${1:-}"
 [[ -z "$SVC" ]] && { echo "usage: cims-health <svc>" >&2; exit 2; }
 
-# ha.json 에서 port / proto / bind_ip / tracked_modules lookup. 미존재 시 default.
-# 출력 형식: PORT|PROTO|BIND_IP|MOD1,MOD2,...  (bind_ip 빈값 케이스에서 split 충돌 회피)
-IFS='|' read -r PORT PROTO BIND_IP TRACKED < <(python3 - "$HA_JSON" "$SVC" <<'PY'
+# ha.json 에서 port / proto / bind_ip / vips / tracked_modules lookup. 미존재 시 default.
+# 출력 형식: PORT|PROTO|BIND_IP|VIP1,VIP2|MOD1,MOD2  (빈값 케이스에서 split 충돌 회피)
+IFS='|' read -r PORT PROTO BIND_IP VIPS TRACKED < <(python3 - "$HA_JSON" "$SVC" <<'PY'
 import json, sys, os
 ha_json, svc = sys.argv[1], sys.argv[2]
-defaults = {"csc": (4420, "tcp", ""),
+defaults = {"csc": (4421, "tcp", ""),
             "csp": (5060, "udp", ""),
             "psp": (5060, "udp", "")}
 port, proto, bind_ip = defaults.get(svc, (0, "udp", ""))
-tracked = []
+vips, tracked = [], []
 if os.path.isfile(ha_json):
     try:
         cfg = json.load(open(ha_json))
@@ -44,13 +47,31 @@ if os.path.isfile(ha_json):
         port = s.get("port", port)
         proto = s.get("proto", proto)
         bind_ip = s.get("bind_ip", bind_ip)
+        vips = [str(v.get("ip")).strip() for v in (s.get("vips") or [])
+                if isinstance(v, dict) and v.get("ip")]
+        if s.get("vip"):
+            vips.append(str(s["vip"]).strip())
         fo = s.get("failover_options") or {}
         tracked = [str(m).strip() for m in (fo.get("tracked_modules") or []) if str(m).strip()]
     except Exception:
         pass
-print(f"{port}|{proto}|{bind_ip}|{','.join(tracked)}")
+print(f"{port}|{proto}|{bind_ip}|{','.join(vips)}|{','.join(tracked)}")
 PY
 )
+
+# 0) VIP 보유 검사 — 미보유(BACKUP/standby)면 서비스 상태와 무관하게 PASS.
+#    (VIP 미정의 그룹은 판정 불가 → 종전대로 포트 검사로 진행.)
+if [[ -n "${VIPS:-}" ]]; then
+    LOCAL_ADDRS=$(ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+    HOLD=0
+    IFS=',' read -r -a VIPARR <<< "$VIPS"
+    for v in "${VIPARR[@]}"; do
+        if [[ -n "$v" ]] && grep -qxF "$v" <<< "$LOCAL_ADDRS"; then HOLD=1; break; fi
+    done
+    if [[ $HOLD -eq 0 ]]; then
+        exit 0      # standby — cold 모듈 정지가 정상, 헬스는 VIP 보유자만 검사
+    fi
+fi
 
 if [[ -z "${PORT:-}" || "$PORT" == "0" ]]; then
     echo "cims-health: port unknown for svc=$SVC" >&2

@@ -1129,6 +1129,8 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
     const next = cur.includes(mod) ? cur.filter(x => x !== mod) : [...cur, mod]
     set('tracked_modules', next)
   }
+  const setModuleMode = (mod: string, mode: 'cold' | 'hot') =>
+    set('module_modes', { ...(value.module_modes || {}), [mod]: mode })
   return (
     <div style={{ marginTop: 0, border: '1px solid #e0e0e0', borderRadius: 4 }}>
       <div style={{ padding: '8px 12px', background: 'var(--bg-soft)',
@@ -1218,6 +1220,38 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
                   {mod}
                 </label>
               ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ width: 150, color: 'var(--text-muted)', display: 'inline-block' }}
+                   title={
+                     'Cold (기본): standby 노드에서 모듈 정지 — MASTER 승격 시 keepalived 가 자동 기동. ' +
+                     'split-brain (양쪽 동시 write) 원천 차단, 절체 시 기동 수초 소요.\n' +
+                     'Hot: 양쪽 상시 기동 — VIP 만 절체. 기동 지연 없음, 모듈이 이중 기동에 안전할 때만.'
+                   }>
+              모듈 절체 모드
+            </label>
+            <span style={{ color: 'var(--text-muted)' }}>
+              standby 에서 모듈을 내려둘지(Cold, 기본) 켜둘지(Hot). 배포된 모듈에만 적용.
+            </span>
+            <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 8, paddingLeft: 150 }}>
+              {TRACKABLE_MODULE_CANDIDATES.map(mod => {
+                const mode = (value.module_modes || {})[mod] ?? 'cold'
+                return (
+                  <span key={mod} style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
+                                           padding: '2px 8px', border: '1px solid var(--border)', borderRadius: 3,
+                                           background: mode === 'hot' ? '#fff3e0' : '#e8f5e9' }}>
+                    {mod}
+                    <select value={mode}
+                            onChange={e => setModuleMode(mod, e.target.value as 'cold' | 'hot')}
+                            className="form-input" style={{ padding: '0 2px', fontSize: 11, height: 20 }}>
+                      <option value="cold">Cold</option>
+                      <option value="hot">Hot</option>
+                    </select>
+                  </span>
+                )
+              })}
             </div>
           </div>
 

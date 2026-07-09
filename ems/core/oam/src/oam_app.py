@@ -655,8 +655,34 @@ if __name__ == '__main__':
             alarm_sweeper.transition(_alert_open, _service_log, rule, mo_instance,
                                      detected_by, is_open, msg_open, msg_close, log=logger)
 
+        def _cold_standby_skip_set() -> set:
+            """{(agent_id, module)} — cold-spare standby(VIP 미보유 확정) 멤버의 cold
+            모듈. module_down 평가에서 제외 — 정지가 정상 상태라 알람이 아니다.
+            VIP 관측 True(active)/None(판정 불가) 멤버는 종전대로 평가."""
+            skip = set()
+            try:
+                from handlers.ha_groups import _agent_daemon_modules
+                from services import ha_lookup
+                for g in ha_lookup.ha_groups_all(config):
+                    if g.get('mode') != 'active_standby':
+                        continue
+                    fo = g.get('failover_options') if isinstance(g.get('failover_options'), dict) else {}
+                    modes = fo.get('module_modes') if isinstance(fo.get('module_modes'), dict) else {}
+                    observed = ha_lookup.vip_observation(config, g)['observed']
+                    for m in ha_lookup.members_of(g):
+                        aid = m.get('agent_id')
+                        if observed.get(aid) is not False:
+                            continue
+                        for mod in _agent_daemon_modules(aid, config):
+                            if modes.get(mod, 'cold') != 'hot':
+                                skip.add((aid, mod))
+            except Exception as e:
+                logger.log_error(f"[alarm-sweep] cold-standby skip 계산 실패: {e}")
+            return skip
+
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
-                             deps: list, proc_down_targets: set) -> list:
+                             deps: list, proc_down_targets: set,
+                             cold_skip: set) -> list:
             """scope='agent' 규칙을 한 agent 최신 metric 으로 평가.
             반환: (mo_instance, is_open, msg_open, msg_close) 목록."""
             chk = rule.get('check')
@@ -688,6 +714,9 @@ if __name__ == '__main__':
                     #   console = OAM 이 정적 서빙(별도 프로세스 없음), agent = 자기 자신.
                     if proc in ('console', 'agent'):
                         continue
+                    # cold-spare standby 의 cold 모듈 — 정지가 desired state, 오탐 방지.
+                    if (agent.get('id'), proc) in cold_skip:
+                        continue
                     mo = f"{host}/{proc}"
                     kw = dict(mo=mo, host=host, module=proc)
                     res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
@@ -700,6 +729,7 @@ if __name__ == '__main__':
             agents = _agent_load_all(config)
             deps = _deploy_load_all(config)
             mroot = _metric_root(config)
+            cold_skip = _cold_standby_skip_set()
             active = set()
             for ag in agents:
                 if ag.get('status') != 'online':
@@ -709,7 +739,7 @@ if __name__ == '__main__':
                 if not metric:
                     continue
                 for r in agent_rules:
-                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets):
+                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip):
                         active.add(f"{r.get('code')}@{mo}")
                         _transition(r, mo, f"agent:{host}", is_open, msg_open, msg_close)
             # agent 알람(mo_instance 가 cims/ 가 아닌 host/…) 중 이번에 평가 안 된 것 = 관측 불가 → close.

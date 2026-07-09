@@ -32,9 +32,13 @@ export interface FailoverOptions {
     fall: number                                // default 2 (회)
     rise: number                                // default 2 (회)
     timeout: number                             // default 3 (sec)
+    port?: number                               // 수동 오버라이드 — 미지정 시 배포 실효설정/descriptor 유도
+    proto?: 'tcp' | 'udp'
   }
   track_interface: boolean                      // service NIC link down 즉시 감지 (default false)
   tracked_modules: string[]                     // pgrep 검사 모듈 (default [] = port only)
+  // 모듈별 절체 모드 — cold(기본): standby 정지 + MASTER 승격 시 기동 / hot: 양쪽 상시 기동.
+  module_modes?: Record<string, 'cold' | 'hot'>
   preempt: 'preempt' | 'nopreempt'              // default nopreempt
   preempt_delay: number                         // preempt 모드만 적용 (sec, default 0)
 }
@@ -44,6 +48,7 @@ export const FAILOVER_DEFAULTS: FailoverOptions = {
   health: { interval: 2, fall: 2, rise: 2, timeout: 3 },
   track_interface: false,
   tracked_modules: [],
+  module_modes: {},
   preempt: 'nopreempt',
   preempt_delay: 0,
 }

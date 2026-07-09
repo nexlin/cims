@@ -1376,6 +1376,15 @@ def job_update_ha(params: dict) -> tuple:
     ha_json = params.get("ha_json") or {}
     if not isinstance(ha_json, dict) or not ha_json:
         return 1, "", "ha_json missing or empty"
+    # cims_home/cims_user 는 노드 로컬 사실 — OAM 렌더 값은 placeholder(/opt/cims, cims)
+    # 라 실제 설치 루트/실행 계정과 다를 수 있다. agent 자신이 정본으로 덮어쓴다
+    # (cims-notify 의 cims-svc 경로·runuser 대상, cims@.service ExecStart 치환에 사용).
+    ha_json["cims_home"] = _PREFIX
+    try:
+        import getpass
+        ha_json["cims_user"] = getpass.getuser()
+    except Exception:
+        pass
     ha_path = os.path.join(_PREFIX, "run", "keepalived", "ha.json")
     try:
         os.makedirs(os.path.dirname(ha_path), exist_ok=True)
@@ -1798,6 +1807,38 @@ _SUPERVISE_FILE = os.path.join(_PREFIX, "run", "supervised.json")
 _WATCHDOG_BACKOFF: dict = {}     # module -> {"ts": float, "fails": int}
 SUPERVISE_INTERVAL_SEC = 10
 
+# cold-spare 게이트 — update_ha 가 기록한 ha.json 의 services.*.cold_modules 기준.
+_HA_JSON_PATH = os.path.join(_PREFIX, "run", "keepalived", "ha.json")
+
+
+def _cold_standby_module(svc: str) -> bool:
+    """svc 가 cold-spare 모듈이고 이 노드가 해당 서비스 VIP 를 보유하지 않으면 True.
+
+    True = standby 에선 기동하지 않는다 — start job 은 스킵, watchdog 은 재기동
+    보류 (MASTER 승격 시 keepalived notify 가 기동; VIP 취득 후엔 이 게이트가
+    False 가 되어 watchdog 이 crash 재기동 백스톱으로 복귀).
+    ha.json 부재/파싱 실패/VIP 미정의는 False — 종전(hot) 동작 유지."""
+    try:
+        with open(_HA_JSON_PATH) as f:
+            cfg = json.load(f)
+    except Exception:
+        return False
+    svc = (svc or "").lower()
+    vips = []
+    for s in (cfg.get("services") or {}).values():
+        cold = [str(m).lower() for m in (s.get("cold_modules") or [])]
+        if svc not in cold:
+            continue
+        vips = [str(v.get("ip")) for v in (s.get("vips") or [])
+                if isinstance(v, dict) and v.get("ip")]
+        if s.get("vip"):
+            vips.append(str(s["vip"]))
+        break
+    if not vips:
+        return False
+    local = {r.get("ip") for r in collect_interfaces() if r.get("ip")}
+    return not any(v in local for v in vips)
+
 
 def _find_cims_svc(install_path: str):
     for c in (os.path.join(install_path, "agent", "bin", "cims-svc"),
@@ -1926,6 +1967,12 @@ def supervise_tick() -> None:
             continue
         if _pgrep_module(svc):
             _WATCHDOG_BACKOFF.pop(svc, None)     # 정상 — backoff 리셋
+            continue
+        # cold-spare standby — 정지가 desired state (notify 가 강등 시 내림).
+        # 여기서 재기동하면 keepalived 와 엎치락뒤치락한다. VIP 취득 후엔 게이트가
+        # 풀려 crash 재기동 백스톱으로 복귀.
+        if _cold_standby_module(svc):
+            _WATCHDOG_BACKOFF.pop(svc, None)
             continue
         st = _WATCHDOG_BACKOFF.setdefault(svc, {"ts": 0.0, "fails": 0})
         backoff = min(300, 5 * (2 ** st["fails"]))
@@ -2078,6 +2125,14 @@ def job_process_control(params: dict, job_type: str) -> tuple:
         if prev_path and prev_path != install_path and os.path.isdir(prev_path):
             prc, _po, perr = _run_cims_svc(prev_path, "stop", svc)
             prev_note = f" (prev-stop {prev_path} rc={prc}{' ' + perr.strip()[:120] if prc else ''})"
+
+    # cold-spare standby — 실제 기동은 스킵 (current flip/prev-stop 은 이미 수행 →
+    # 승격 시 notify/watchdog 이 신 버전으로 기동). supervised 에는 desired-state 로
+    # 등록해 VIP 취득 후 watchdog 백스톱이 동작하게 한다.
+    if job_type in ("start", "restart") and _cold_standby_module(svc):
+        _mark_supervised(svc, launch_path)
+        return 0, (f"cold standby — '{svc}' 기동 억제 (VIP 미보유; MASTER 승격 시 "
+                   f"keepalived notify 가 기동){prev_note}"), ""
 
     rc, out, err = _run_cims_svc(launch_path, job_type, svc)
     if prev_note:

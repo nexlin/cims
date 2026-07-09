@@ -8,7 +8,7 @@
     { "name": "cmp",    "port": 9000, "proto": "udp", "controllable": true },
     { "name": "imp",    "port": 9000, "proto": "udp" },
     { "name": "pmp",    "port": 9000, "proto": "udp" },
-    { "name": "csc",    "port": 4420, "proto": "tcp", "controllable": true },
+    { "name": "csc",    "port": 4421, "proto": "tcp", "controllable": true },
     { "name": "cwrtc",  "controllable": true },
     { "name": "phone",  "controllable": true },
     { "name": "cspsim" }

@@ -30,7 +30,8 @@
 | 항목 | 결정 | 근거 |
 |---|---|---|
 | VIP 메커니즘 | **keepalived (VRRP)** | Linux 표준, advert 1s + dead 3s 로 ~3초 fail-over, on-prem 친화 |
-| CSP/PSP state 인계 | **하이브리드** (register=hot, dialog=cold) | UE 재등록 부담 ↓, 진행중 통화는 끊김 허용 — 복잡도 / 무손실 트레이드오프 |
+| A/S standby 모듈 정책 | **기본 cold-spare** (standby 정지, 승격 시 notify 가 기동) + **모듈별 hot 선택** (콘솔 `module_modes`) | cold: split-brain 원천 차단 + 승격 시점에 최신 설정으로 기동 (재기동 필요 설정의 실시간 반영 문제 없음). hot: 절체 기동 지연 제거 — 단 세션/상태 인계가 없어 (register 인계 Redis 미구현) 단말 재등록 의존, 이중 기동에 안전한 모듈만 |
+| CSP/PSP state 인계 | **하이브리드** (register=hot, dialog=cold) — register 인계(Redis)는 미구현, 현재는 절체 후 단말 재등록 의존 | UE 재등록 부담 ↓ 목표, 진행중 통화는 끊김 허용 — 복잡도 / 무손실 트레이드오프 |
 | CMP/PMP 분배 | **Consistent hash on Session-ID** | 동일 세션 stickiness 보장 + healthcheck 로 unhealthy 노드 ring 제외 |
 | DB 이중화 | **별도 트랙** | 본 문서 범위 외 |
 
@@ -87,6 +88,9 @@
 
 - **VIP_csc / VIP_csp / VIP_psp** 가 각자 VRRP 그룹으로 별도 운용
   (서비스별 fail-over 독립). Media 는 VIP 없이 양쪽 모두 healthy 면 분산.
+- **⏸ standby = cold(기본): 프로세스 정지** — MASTER 승격 시 keepalived notify 가
+  기동 (§11.4). 콘솔 절체 조건의 `module_modes` 로 모듈별 **hot**(standby 도 상시
+  기동, VIP-only 절체) 선택 가능.
 - Redis 는 active 가 write, standby 가 시작 시 + lazy read.
 - DB 는 양쪽 active 가 모두 접근 (단일 instance, HA 별도).
 
@@ -115,24 +119,24 @@
 ### 5.1 CSC active 장애
 
 1. keepalived 가 advert miss (1s × 3) → 3초 후 VRRP 상태 전이
-2. Node B 가 `VIP_csc` 인수, `csc` 프로세스가 4420/4430 binding 시작 (이미
-   기동 상태였다면 binding 만 인수 — 자세한 운영 시퀀스는 §8 참조)
+2. Node B 가 `VIP_csc` 인수 → notify 가 cold 모듈(csc)을 `cims-svc start` 로 기동
+   (hot 선택 시 이미 기동 상태 — binding 만 인수). §11.4 참조
 3. `Console` 의 다음 API 호출 → 새 ARP 로 Node B 로 라우팅
 4. `cims_agent` 의 heartbeat (30s 주기) 가 다음 회차에서 자동 재연결
    (`session_token` 은 동일 DB share 라 양쪽 유효)
 5. **체감 영향**: Console 의 in-flight HTTP 1개 정도 실패 (재시도로 복구),
-   cims_agent 는 최대 30초 사이 unsynced
+   cims_agent 는 최대 30초 사이 unsynced. cold 모듈 기동 수초 추가.
 
 ### 5.2 CSP active 장애 (VoLTE/IBCF)
 
 1. keepalived advert miss → 3초 fail-over
-2. Node B 의 `csp` 프로세스 (이미 standby 모드로 기동) 가 VIP_csp 인수
-   → 단말 다음 REGISTER 가 Node B 로 도착
-3. Node B 는 Redis 에서 register state lookup → `CspUserMap` 에 lazy
-   restore → 200 OK 응답
+2. Node B 가 VIP_csp 인수 → notify 가 cold 모듈(csp)을 기동 (hot 선택 시 이미
+   기동 상태 — binding 만 인수) → 단말 다음 REGISTER 가 Node B 로 도착
+3. register 인계 (Redis lookup → `CspUserMap` lazy restore) 는 미구현 —
+   단말 재등록(주기 REGISTER)으로 복원
 4. 진행중 dialog (B2BUA in-call) 는 cold 정책으로 손실 → 단말이 BYE 또는
    재 INVITE 로 복구
-5. **체감 영향**: 진행중 통화 끊김, 신규 통화는 5초 내 가능
+5. **체감 영향**: 진행중 통화 끊김, 신규 통화는 재등록 후 가능
 
 ### 5.3 PSP active 장애 (PTT)
 
@@ -265,18 +269,18 @@ VIP 단일 endpoint 라 client 코드 변경 최소:
 - **DB session_token** — CSC 양쪽이 동일 DB 를 share 하므로 token 검증
   통과. 추가 작업 없음.
 
-standby CSC 가 write API 를 허용하면 split-brain 위험이 있어 **VIP-only
-cold-spare** 모델을 채택한다:
+standby CSC 가 write API 를 허용하면 split-brain 위험이 있어 **cold-spare**
+(A/S 공통 기본값 — §2) 를 적용한다:
 
-- Standby 노드의 `cims-csc.service` 는 stopped 상태. keepalived 의 `notify`
-  스크립트가 MASTER 전이 시 `systemctl start cims-csc`, BACKUP/FAULT 시
-  `systemctl stop cims-csc` 수행. 단순하며 split-brain 을 원천 차단한다.
+- Standby 노드의 csc 프로세스는 정지 상태. keepalived `notify`(cims-notify)가
+  MASTER 전이 시 `cims-svc start csc`, BACKUP/FAULT 시 `cims-svc stop csc` 수행
+  (ha.json `services.<svc>.cold_modules` 기반 — §11.4). split-brain 원천 차단.
   단점은 fail-over 시 약 1~3초 추가 기동 지연 (start 의 sleep + DB 연결).
-- (대안) Always-on standby + write freeze — RTO 단축이 필요할 때 read
-  endpoint 만 응답하고 write 는 412 반환하는 모드로 전환 가능.
+- RTO 단축이 필요하면 콘솔 절체 조건의 `module_modes` 에서 csc 를 hot 으로 —
+  단, 이중 기동(양쪽 write) 안전성 검토가 선행돼야 한다.
 
-구현: `agent/keepalived/notify_*.sh` + `agent/systemd/cims-{csc,csp,psp}.service.tpl`
-+ `cims.sh ha config|apply` 가 systemd unit 도 함께 다룬다.
+구현: `agent/bin/cims-notify` + `oam ha_groups._render_ha_for_agent`(cold_modules
+렌더) + agent `cims-ha config|apply`.
 
 ## 9. verify 시나리오 매핑
 
@@ -293,7 +297,7 @@ cold-spare** 모델을 채택한다:
 | keepalived 인프라 자동화 | `agent/keepalived/`, `cims.sh ha` |
 | Redis register replication 골격 | `csp/RedisStore.{h,cpp}` (cold-mode no-op) + `csp/CspUser.cpp` SetBinding/DelBinding hook. hiredis 통합은 후속. |
 | CMP consistent hash 분배 | `csp/ConsistentHashRing.h` + `csp/CmpClient.{h,cpp}` endpoint vector + AddEndpoint + SelectEndpointForSession |
-| CSC/CSP/PSP active/standby 모드 (VIP-only cold-spare) | `agent/systemd/cims-*.service.tpl`, `agent/keepalived/notify_*.sh`, `cims.sh ha config|apply` |
+| A/S cold-spare + 모듈별 hot 선택 | `oam ha_groups.py`(module_modes 정규화 + cold_modules 렌더), `agent/bin/cims-notify`(승격/강등 시 cims-svc start/stop), `agent/bin/cims-health`(VIP 미보유 노드 PASS), `agent/cims_agent.py`(cold-standby 기동 억제 게이트), 콘솔 `ServersPage FailoverSection`(Cold/Hot 토글) |
 | cims_agent VIP target + backoff | `agent/cims_agent.py:run_loop` exponential backoff (5s→10s→20s→max 60s, 성공 시 reset). VIP target 은 `--csc-url` 인자로 변경. |
 | verify 시나리오 | `verify/lib/items/stage6/scn_failover_{csc,csp,cmp}.py` 3개 (ha.json + multi-CMP 감지 시 LIVE 활성 분기). |
 
@@ -340,14 +344,15 @@ cp agent/keepalived/ha.json.example agent/keepalived/ha.json
 
 agent/bin/cims-ha config          # ha.json + 단일 tpl → out/keepalived.conf + cims@.service
 agent/bin/cims-ha check           # keepalived -t syntax 검증
-agent/bin/cims-ha apply           # /etc/keepalived/ + /etc/systemd/system/ 적용 +
-                                  # systemctl enable cims@{csc,csp,psp}.service (start 안 함)
+agent/bin/cims-ha apply           # /etc/keepalived/{bin/,} 스테이징 + keepalived 재기동
+                                  # (cims@ instance enable 하지 않음 — §11.4)
 
 agent/bin/cims-ha status          # 동작 확인
 ```
 
-cims@<svc>.service 는 `enable` 만 — `start` 는 keepalived notify 가 제어. 부팅 시
-standby 가 자기 자신을 띄우는 일 없음.
+절체 시 모듈 기동/정지는 keepalived notify(`cims-notify`)가 ha.json
+`services.<svc>.cold_modules` 를 보고 `cims-svc` 로 직접 수행한다 (§11.4) —
+systemd `cims@` instance 는 enable 하지 않는다.
 
 > **VIP 바인딩 / NIC 매핑 (multi-VIP)** — HA 그룹은 `vip_bindings: [{slot, ip, mask}]` 로
 > 망별 다중 VIP 를 한 vrrp_instance 에 둔다. 각 VIP 가 붙을 NIC(`dev`)은
@@ -360,25 +365,37 @@ standby 가 자기 자신을 띄우는 일 없음.
 
 - `agent/bin/cims-health <svc>` — ha.json `services.<svc>.{port, proto, bind_ip}`
   lookup 후 `ss -ln{t,u}` 로 binding 확인. rc=0 / rc=1.
-- 신규 서비스 추가 시 `services.<svc>.{port,proto}` 만 추가 — probe script 추가 불필요.
+- **port/proto 유도**: OAM 렌더(`ha_groups._infer_health_port_proto`)가 그룹 멤버 배포의
+  대표 daemon 모듈로 결정. csc 는 배포 실효 설정(config_template default + overlay)의
+  `Server.Port` 를 정본으로 유도 — 콘솔에서 포트를 바꿔도 다음 render 가 자동 추종.
+  그 외 모듈은 service descriptor 기본값. 그룹 `failover_options.health.{port,proto}`
+  수동 오버라이드가 최우선.
 - keepalived `rise=2, fall=2, interval=2s` → 4초 fault 감지, advert 1s + dead 3s
   와 합쳐 ~7초 fail-over.
+- vrrp_instance 는 전 노드 `state BACKUP` 시작 — MASTER 는 priority 차등으로 선출
+  (state MASTER + nopreempt 는 keepalived 가 nopreempt 를 무시하는 모순 조합).
 
 ### 11.4 notify 스크립트 동작
+
+keepalived 는 기본적으로 **VIP 만 옮기고 서비스는 건드리지 않는다**. 절체 시 함께
+기동/정지할 모듈은 ha.json `services.<svc>.cold_modules[]` 에 등록된 것만 제어한다
+(cold-spare — 미지정/빈 목록이면 hot: 양쪽 상시 기동, VIP-only 절체).
 
 상태 전이 매핑 (`cims-notify <svc> <TYPE> <NAME> <STATE> <PRIO>`):
 
 | keepalived state | 동작 |
 |---|---|
-| MASTER  | `systemctl start cims@<svc>.service` — VIP 인수 후 서비스 기동 |
-| BACKUP  | `systemctl stop cims@<svc>.service` — 강등 시 서비스 정지 (cold-spare) |
-| FAULT   | `systemctl stop cims@<svc>.service` — health probe fail 시 자기 정지 |
+| MASTER  | cold_modules 각각 `cims-svc start <mod>` (선언 순서) — 없으면 로그만 |
+| BACKUP  | cold_modules 각각 `cims-svc stop <mod>` (역순) — 없으면 로그만 |
+| FAULT   | BACKUP 과 동일 — health probe fail 시 자기 정지 |
 | STOP    | 변경 없음 — keepalived 자체 종료 시 서비스 그대로 유지 |
 
-모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록.
+모듈 제어는 systemd `cims@` 유닛을 경유하지 않고 `runuser -u <cims_user> --
+<cims_home>/agent/current/bin/cims-svc` 직접 호출 — pid/health-gate/supervised 와
+단일 lifecycle 경로. `cims_home`/`cims_user` 는 agent 가 ha.json 기록 시 자기 설치
+루트/실행 계정으로 채운다 (OAM 렌더 값은 placeholder).
 
-CSP/PSP 의 MASTER 승격에서 `cims-svc start csp` (cims@csp.service 의 ExecStart) 가
-기동 시 Redis 에서 register state 를 일괄 복원 — notify 스크립트 변경 없음.
+모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록.
 
 ### 11.5 cims.sh 와의 관계
 
@@ -474,7 +491,7 @@ VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 �
 - CSP A/S: active(ctrl01) 의 csp 프로세스 kill → keepalived 가 VIP 를 ctrl02 로
   인계 (VRRP advert_int 수백 ms) → 신규 REGISTER 가 동일 VIP 로 ≤수초 내 응답.
 - CMP All-Active: media01 kill → 신규 세션이 consistent-hash ring 으로 media02 에 분배.
-- 진행 중 호 drop 은 허용 (Hot Standby — Standby 도 모듈 기동 유지 정책).
+- 진행 중 호 drop 은 허용 (cold dialog 정책 — 절체 시 신규 세션만 보장).
 
 **S6 FAILOVER 구현 진입점**:
 1. `verify/lib/items/stage6/scn_failover_csp.py` — active CSP kill → VIP 인계 후
@@ -484,8 +501,13 @@ VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 �
 
 ## 12. 미확정 / 추후 검토
 
-- **Redis sentinel / cluster 도입 시점** — register 손실 허용범위 재평가
-- **CSC active/standby 모드의 hot vs cold spare** — 운영 요구사항 (RTO) 재확정
+- **Redis register replication 구현** — hot 모듈의 register 인계 전제 (현재
+  cold-mode no-op, 절체 후 단말 재등록 의존). sentinel/cluster 도입 시점 포함.
+- **OAM active/standby file_store 정합** — 두 노드 oam 스토어(배포/그룹/알람
+  이력)는 독립이라 절체 후 관리 데이터가 불일치. cold-spare 가 동시 write 는
+  막지만 데이터 복제/공유는 별도 설계 필요.
+- **cold 절체 RTO 실측** — 승격 → cold 모듈 기동 → 서비스 응답까지 목표(≤5초)
+  대비 실측.
 - **CMP all-active 시 RTP 포트 충돌** — 양 노드의 RTP pool 이 동일 50000~
   대역이면 NAT/SIP `c=` 라인 IP 가 노드 IP 라 문제 없음 (확인 필요)
 - **단말 SIP TLS 재핸드셰이크** — VIP fail-over 후 TLS 세션 인수 불가,

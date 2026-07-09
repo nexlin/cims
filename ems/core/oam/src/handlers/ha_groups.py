@@ -45,6 +45,7 @@ _FAILOVER_DEFAULTS = {
     },
     'track_interface': False,
     'tracked_modules': [],
+    'module_modes':    {},   # {module: 'cold'|'hot'} — 미지정 = cold (기본 cold-spare)
     'preempt':         'nopreempt',
     'preempt_delay':   0,
 }
@@ -57,6 +58,8 @@ def _normalize_failover_options(raw) -> dict:
     range:
       advert_int: 0.5~5 (float, sec)
       health.interval / fall / rise / timeout: 1~60 (int)
+      health.port: 1~65535 / health.proto: tcp|udp (선택 — 수동 오버라이드)
+      module_modes: {module: 'cold'|'hot'} — 미지정 모듈은 cold
       preempt: 'preempt' | 'nopreempt'
       preempt_delay: 0~300 (int, sec)
     """
@@ -84,6 +87,16 @@ def _normalize_failover_options(raw) -> dict:
                 health[k] = _FAILOVER_DEFAULTS['health'][k]
         except (TypeError, ValueError):
             health[k] = _FAILOVER_DEFAULTS['health'][k]
+    # port/proto 수동 오버라이드 (선택) — 미지정 시 배포 실효설정/descriptor 로 유도.
+    try:
+        hp = int(health_in.get('port', 0) or 0)
+        if 0 < hp < 65536:
+            health['port'] = hp
+    except (TypeError, ValueError):
+        pass
+    hproto = health_in.get('proto')
+    if hproto in ('tcp', 'udp'):
+        health['proto'] = hproto
     out['health'] = health
 
     out['track_interface'] = bool(raw.get('track_interface', False))
@@ -93,6 +106,15 @@ def _normalize_failover_options(raw) -> dict:
         out['tracked_modules'] = [str(x).strip().lower() for x in tm if str(x).strip()]
     else:
         out['tracked_modules'] = []
+
+    # 모듈별 절체 모드 — cold(기본): standby 정지, MASTER 승격 시 notify 가 기동.
+    # hot: 양쪽 상시 기동(VIP-only 절체). 미지정 모듈은 cold. 실제 daemon 모듈과의
+    # 교차는 render(_render_ha_for_agent)에서 수행 — 여기선 값 정규화만.
+    mm = raw.get('module_modes') if isinstance(raw.get('module_modes'), dict) else {}
+    out['module_modes'] = {
+        str(k).strip().lower(): ('hot' if str(v).strip().lower() == 'hot' else 'cold')
+        for k, v in mm.items() if str(k).strip()
+    }
 
     pe = raw.get('preempt') or _FAILOVER_DEFAULTS['preempt']
     out['preempt'] = pe if pe in ('preempt', 'nopreempt') else _FAILOVER_DEFAULTS['preempt']
@@ -182,7 +204,7 @@ _MODULE_HEALTH_DEFAULTS = {
     'csp':   (5060, 'udp'),
     'isp':   (5060, 'udp'),
     'psp':   (5060, 'udp'),
-    'csc':   (4420, 'tcp'),
+    'csc':   (4421, 'tcp'),
     'cmp':   (9000, 'udp'),
     'imp':   (9000, 'udp'),
     'pmp':   (9000, 'udp'),
@@ -191,6 +213,26 @@ _MODULE_HEALTH_DEFAULTS = {
 # Control: csp 가 핵심 (SIP signaling) — psp/isp/csc 는 부수.
 # Media: cmp 가 핵심 (RTP relay).
 _HEALTH_MODULE_PRIORITY = ['csp', 'cmp', 'csc', 'psp', 'isp', 'pmp', 'imp']
+
+
+def _csc_effective_health_port(dep: dict, config: dict):
+    """csc 배포의 실효 설정(template default + overlay)에서 Server.Port 유도.
+
+    descriptor 기본값은 배포 실설정과 어긋날 수 있다 (실제 리슨 4421 vs seed 4420 —
+    헬스체크가 없는 포트를 봐서 양쪽 FAULT 고착·VIP 미할당). 운영자가 콘솔에서
+    Server.Port 를 바꿔도 다음 render 가 자동 추종하도록 실효값을 정본으로 삼는다.
+    실패 시 None (caller 가 descriptor 기본값 사용)."""
+    try:
+        from handlers.agents import _materialize_deploy_config
+        pkg = file_store.by_id(file_store.domain_dir(config, 'packages'),
+                               dep.get('package_id')) or {}
+        eff = _materialize_deploy_config(config, pkg, dep.get('config'))
+        port = int(((eff.get('Server') or {}).get('Port')) or 0)
+        if 0 < port < 65536:
+            return port
+    except Exception:
+        pass
+    return None
 
 
 def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
@@ -209,17 +251,39 @@ def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
     # process_name 우선 (CSP/CMP/CSC 등 대문자 → lowercase). cspsim 등 non-daemon 제외.
     # service descriptor 의 모듈 health 맵 (없으면 하드코딩 fallback — 전환 안전망).
     defaults = service_registry.module_health_defaults(config) or _MODULE_HEALTH_DEFAULTS
-    daemon_modules = set()
+    daemon_modules: dict = {}
     for d in deps:
         mod = (d.get('process_name') or '').lower().strip()
         if mod in defaults:
-            daemon_modules.add(mod)
+            daemon_modules.setdefault(mod, d)
     # descriptor 모듈 순서 + 기존 우선순위 휴리스틱 병합 (priority 우선, 그 외 descriptor 순).
     order = _HEALTH_MODULE_PRIORITY + [m for m in defaults if m not in _HEALTH_MODULE_PRIORITY]
     for mod in order:
         if mod in daemon_modules:
+            # csc 는 단일 설정키(Server.Port)로 리슨 포트가 정해지므로 실효 설정 우선.
+            # (csp 계열은 local_nodes 컬렉션 기반이라 descriptor 기본값 유지.)
+            if mod == 'csc':
+                port = _csc_effective_health_port(daemon_modules[mod], config)
+                if port:
+                    return (port, 'tcp')
             return defaults[mod]
     return (None, None)
+
+
+def _agent_daemon_modules(agent_id: int, config: dict) -> list:
+    """agent 의 daemon deployment 모듈 목록 (health 우선순위 순) — cold_modules 렌더용.
+    descriptor 에 port 가 있는 모듈(=리슨 데몬)만. cspsim/console 등 비데몬 제외."""
+    try:
+        from handlers.agents import _deploy_load_all
+        deps = [d for d in _deploy_load_all(config)
+                if d.get('agent_id') == agent_id]
+    except Exception:
+        return []
+    defaults = service_registry.module_health_defaults(config) or _MODULE_HEALTH_DEFAULTS
+    present = {(d.get('process_name') or '').lower().strip() for d in deps}
+    present = {m for m in present if m in defaults}
+    order = _HEALTH_MODULE_PRIORITY + [m for m in defaults if m not in _HEALTH_MODULE_PRIORITY]
+    return [m for m in order if m in present]
 
 
 def _compute_master_aid(members: list) -> int | None:
@@ -243,8 +307,8 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     vip_bindings 가 있으면 multi-VIP 한 vrrp_instance (services.<group_name>.vips[]).
     없으면 legacy 단일 vip path (group.vip).
 
-    priority 는 멤버 record 값 그대로 ha.json 에 박힘. initial_state 는 priority
-    최대 멤버가 MASTER, 나머지 BACKUP (VRRP 본래 모델).
+    priority 는 멤버 record 값 그대로 ha.json 에 박힘. initial_state 는 전원 BACKUP —
+    MASTER 는 priority 차등으로 선출 (VRRP 본래 모델, nopreempt 정합).
     """
     master_aid = _compute_master_aid(members)
     is_master = (master_aid == agent_id)
@@ -260,6 +324,22 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     h_port, h_proto = _infer_health_port_proto(agent_id, config) if config else (None, None)
 
     failover_options = _normalize_failover_options(group.get('failover_options'))
+    # 그룹 옵션의 수동 오버라이드가 최우선 (운영자 명시 > 배포 실효설정 유도 > descriptor 기본).
+    fo_health = failover_options.get('health') or {}
+    if fo_health.get('port'):
+        h_port = fo_health['port']
+        h_proto = fo_health.get('proto') or h_proto or 'tcp'
+    elif fo_health.get('proto'):
+        h_proto = fo_health['proto']
+
+    # cold-spare 절체 대상 — AS 그룹의 daemon 모듈 중 module_modes 가 hot 이 아닌 전부
+    # (기본 cold). cims-notify 가 MASTER 승격 시 start / BACKUP·FAULT 강등 시 stop.
+    # hot 모듈과 oam(descriptor 비데몬 — 관리 평면 자신)은 양쪽 상시 기동 유지.
+    cold_modules: list = []
+    if group.get('mode') == 'active_standby' and config:
+        modes = failover_options.get('module_modes') or {}
+        cold_modules = [m for m in _agent_daemon_modules(agent_id, config)
+                        if modes.get(m, 'cold') != 'hot']
 
     services: dict = {}
     if vip_bindings:
@@ -298,6 +378,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             }
             if h_port:  entry['port']  = h_port
             if h_proto: entry['proto'] = h_proto
+            if cold_modules: entry['cold_modules'] = cold_modules
             services[group['name']] = entry
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
         # legacy 단일 vip
@@ -311,6 +392,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         }
         if h_port:  entry['port']  = h_port
         if h_proto: entry['proto'] = h_proto
+        if cold_modules: entry['cold_modules'] = cold_modules
         services[group['name']] = entry
 
     # local_ip / peer_ip 은 VRRP advertise 가 송신되는 interface 의 IP 여야 함.
@@ -325,7 +407,10 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         "interface":     default_iface,
         "local_ip":      local_ip,
         "peer_ip":       peer_ip,
-        "initial_state": "MASTER" if is_master else "BACKUP",
+        # 전원 BACKUP 시작 — priority 차등이 MASTER 를 결정 (VRRP 본래 모델).
+        # state MASTER + nopreempt 는 keepalived 가 "will not work" 경고와 함께
+        # nopreempt 를 무시하는 모순 조합이라 initial_state 로 쓰지 않는다.
+        "initial_state": "BACKUP",
         "vip_mask":      group['vip_mask'],
         "auth_pass":     group['auth_pass'],
         "ha_log_dir":    "/var/log/cims-ha",
