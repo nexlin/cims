@@ -47,6 +47,9 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
   const [refOpts, setRefOpts]     = useState<RefOptions>(refOptionsCache.current)
   const [drift, setDrift]       = useState<DriftInfo>({ detected: false, peers: [] })
   const refOptsLoaded = useRef(new Set<string>())
+  // load() 가 편집 중 refetch 로 입력을 덮어쓰지 않도록 하는 가드 미러 —
+  // useCallback 클로저가 스테일 값을 보지 않게 ref 로 최신 상태 유지.
+  const editGuardRef = useRef({ dirty: false, editing: false })
 
   const fields = collection.schema.fields
   const idField = collection.schema.id_field || 'id'
@@ -111,7 +114,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
     return deploymentApi.putModuleCollection(source.moduleName, collection.key, recs, true)
   }, [source, collection.key])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true)
     try {
       const r = await fetchCollection() as Record_ & {
@@ -121,8 +124,13 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
         ha_group_mode?: string | null
         scope?: string | null
       }
-      setRecords(r.records)
-      setOriginal(JSON.parse(JSON.stringify(r.records)))
+      // 편집 중(미저장 변경 또는 행 편집 열림) refetch 는 버퍼를 덮어쓰지 않는다 —
+      // 불안정한 부모 prop 등으로 load 가 재실행돼도 입력 소실 방지. drift 정보만 갱신.
+      // force = 사용자의 명시적 [다시 읽기] — 편집 중이어도 서버 값으로 교체.
+      if (force || (!editGuardRef.current.dirty && !editGuardRef.current.editing)) {
+        setRecords(r.records)
+        setOriginal(JSON.parse(JSON.stringify(r.records)))
+      }
       setDrift({
         detected: !!r.drift_detected,
         peers:    r.peers || [],
@@ -142,6 +150,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
     () => JSON.stringify(records) !== JSON.stringify(original),
     [records, original]
   )
+  editGuardRef.current = { dirty, editing: editingIdx !== null }
 
   function addRow() {
     const r: Record_ = {}
@@ -177,7 +186,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
   }
 
   async function reload() {
-    await load()
+    await load(true)
     setEditingIdx(null)
   }
 

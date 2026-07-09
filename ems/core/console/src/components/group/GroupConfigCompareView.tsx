@@ -113,6 +113,13 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   const basePkg = baseDep ? packages.find(p => p.id === baseDep.package_id) : undefined
   const template = basePkg?.config_template
 
+  // ModuleConfigEditor 의 memo(prev.source === next.source)가 성립하도록 identity 고정 —
+  // 인라인 리터럴이면 부모 폴링 리렌더마다 refetch 되어 편집 중 입력이 리셋된다
+  // (ModuleConfigModal/ServicesPage 와 동일 관용).
+  const editorSource = useMemo(
+    () => baseDep ? { type: 'deployment' as const, deploymentId: baseDep.id } : null,
+    [baseDep?.id])
+
   // 유효 scope=service 필드/섹션/컬렉션 (백엔드 마스크와 동일 규칙)
   const syncKeys = useMemo(
     () => new Set(serviceScopeKeys(template ?? null)), [template])
@@ -443,7 +450,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           /* ── 공통 컬렉션 편집 (base 멤버 대상, ON 저장 시 즉시 전파) ── */
           (() => {
             const coll = svcCollections.find(c => c.key === view)
-            if (!coll || !baseDep) return <div className="empty">collection 을 찾을 수 없음</div>
+            if (!coll || !baseDep || !editorSource) return <div className="empty">collection 을 찾을 수 없음</div>
             return (
               <>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
@@ -454,7 +461,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                 </div>
                 <ModuleConfigEditor
                   key={`${baseDep.id}:${coll.key}:${autoSyncOn}`}
-                  source={{ type: 'deployment', deploymentId: baseDep.id }}
+                  source={editorSource}
                   collection={coll}
                   onSaved={collectionSavedHook(coll.key)} />
               </>
