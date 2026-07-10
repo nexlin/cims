@@ -69,6 +69,39 @@
           "default": [],
           "restart": false,
           "help": "전 미디어 노드 \"ip:port\" 목록 (예: 10.0.1.48:9000). 첫 노드가 대시보드 health 위젯의 대표 probe 대상. 비우면 CMP 관측 비활성."
+        },
+        {
+          "key": "MediaServer.ProbeTimeoutMs",
+          "label": "probe 응답 대기 (ms)",
+          "type": "int",
+          "default": 1200,
+          "min": 100,
+          "max": 4000,
+          "restart": false,
+          "advanced": true,
+          "help": "CSP/CMP STATS probe 의 시도당 UDP 응답 대기. 노드 probe 는 병렬이므로 (대기 × 시도횟수) 가 노드 수와 무관한 상한이며, 게이트웨이 프록시 타임아웃 5s 보다 작아야 한다."
+        },
+        {
+          "key": "MediaServer.ProbeAttempts",
+          "label": "probe 시도 횟수",
+          "type": "int",
+          "default": 2,
+          "min": 1,
+          "max": 5,
+          "restart": false,
+          "advanced": true,
+          "help": "UDP 는 재전송이 없어 데이터그램 한 개만 유실돼도 대기 전액을 문다. 2 이상이면 재전송으로 복구."
+        },
+        {
+          "key": "MediaServer.LastGoodTtlSec",
+          "label": "probe 최근 정상값 유지 (초)",
+          "type": "int",
+          "default": 30,
+          "min": 0,
+          "max": 300,
+          "restart": false,
+          "advanced": true,
+          "help": "probe miss 시 이 시간까지 마지막 정상값을 유지해, 일시 타임아웃 한 번으로 대시보드 RTP 합계가 0 으로 튀지 않게 한다. 초과하면 노드를 down 으로 인정."
         }
       ],
       "scope": "service"
