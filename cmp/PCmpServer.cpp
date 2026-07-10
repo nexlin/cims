@@ -402,6 +402,9 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
         rtp = allocResource(rtpIp, rtpPort, videoPort);
         if (rtp) {
             rtp->setSessionId(sessionId);
+            // 풀 재사용 relay 의 잔존 활동시각 초기화 — 없으면 idle 이 풀 생성시각 기준으로
+            // 계산되어 새 세션이 다음 sweep(60s)에 orphan_no_rtp 로 즉시 회수된다.
+            rtp->resetActivity();
             _sessions[sessionId] = rtp;
         }
     } else {

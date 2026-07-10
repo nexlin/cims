@@ -38,6 +38,9 @@ void CSipCallRtp::SetIpPort( const char * pszIp, int iPort, int iSocketCountPerM
 	for( itMedia = m_clsMediaList.begin(); itMedia != m_clsMediaList.end(); ++itMedia )
 	{
 		itMedia->m_iPort = m_iPort + iIndex * iSocketCountPerMedia;
+		// 미디어 레벨 c= 는 세션 레벨 c= 를 덮어쓰므로(RFC 4566) relay 치환 시 제거한다.
+		// 남겨두면 상대가 원본 사설 IP 로 RTP 를 보내 relay 에 미디어가 도달하지 않는다.
+		itMedia->m_clsConnection.Clear();
 		itMedia->DeleteAttribute( "rtcp" );
 
 		++iIndex;
