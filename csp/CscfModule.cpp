@@ -347,7 +347,8 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
                 pclsResponse->m_clsContactList.push_back( clsContact );
             }
         }
-        // Expires 헤더는 싣지 않음 — 실망 REGISTER 200 OK 는 Contact 의 expires 파라미터만 사용
+        // 부여한 만료시간 — Contact 의 expires 파라미터와 Expires 헤더 양쪽에 포함
+        pclsResponse->AddHeader( "Expires", iGrantedExpires );
         pclsResponse->AddHeader( "Allow", SIP_ALLOW_METHODS );
         pclsResponse->AddHeader( "Supported", "path,100rel,precondition" );
 

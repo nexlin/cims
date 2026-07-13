@@ -121,8 +121,8 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 
 - **REGISTER 401/200 OK**: `Allow`(전체 메서드 목록, `SIP_ALLOW_METHODS`) 포함. 401 에는 Contact 없음
   (psip 가 REGISTER 응답에는 Contact 자동생성 안 함). 200 OK Contact = **요청 Contact 원본 에코**
-  (RFC 3261 §10.3 — URI·feature tag 보존, expires 파라미터만 부여값으로 교체). 별도 Expires 헤더는
-  싣지 않음(Contact `;expires` 만). 요청 Expires 는 그대로 수락(무지정 시 3600).
+  (RFC 3261 §10.3 — URI·feature tag 보존, expires 파라미터만 부여값으로 교체). 부여값은 Contact
+  `;expires` 파라미터와 `Expires` 헤더 양쪽에 동일하게 포함. 요청 Expires 는 그대로 수락(무지정 시 3600).
 - **응답 공통**: Max-Forwards 는 요청 전용(RFC 3261 §8.1.1.6) — 응답에는 없음.
 - **SUBSCRIBE 2xx**: `Expires` 필수(RFC 6665 §4.2.1.1 — 부여값, 해지 시 0), Allow/Supported 포함,
   Contact = user 없는 서버 자기 주소(`<sip:ip:port>`, dialog remote target). To tag 단일
