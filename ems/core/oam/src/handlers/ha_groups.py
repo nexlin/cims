@@ -216,29 +216,24 @@ _HEALTH_MODULE_PRIORITY = ['csp', 'cmp', 'csc', 'psp', 'isp', 'pmp', 'imp']
 
 
 def _csc_effective_health_port(dep: dict, config: dict):
-    """csc 배포의 실효 설정(template default + overlay)에서 Server.Port 유도.
-
-    descriptor 기본값은 배포 실설정과 어긋날 수 있다 (실제 리슨 4421 vs seed 4420 —
-    헬스체크가 없는 포트를 봐서 양쪽 FAULT 고착·VIP 미할당). 운영자가 콘솔에서
-    Server.Port 를 바꿔도 다음 render 가 자동 추종하도록 실효값을 정본으로 삼는다.
-    실패 시 None (caller 가 descriptor 기본값 사용)."""
+    """csc 배포의 실효 admin 포트 — 게이트웨이 self-register 와 동일한 단일 해석
+    (handlers.agents.effective_server_port: materialize Server.Port flat/nested →
+    pkg gateway.default_port). 운영자가 콘솔에서 Server.Port 를 바꿔도 다음 render
+    가 자동 추종한다. 실패 시 None (caller 가 descriptor 기본값 사용)."""
     try:
-        from handlers.agents import _materialize_deploy_config
+        from handlers.agents import effective_server_port
         pkg = file_store.by_id(file_store.domain_dir(config, 'packages'),
                                dep.get('package_id')) or {}
-        eff = _materialize_deploy_config(config, pkg, dep.get('config'))
-        port = int(((eff.get('Server') or {}).get('Port')) or 0)
-        if 0 < port < 65536:
-            return port
+        return effective_server_port(config, pkg, dep.get('config'))
     except Exception:
         pass
     return None
 
 
 def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
-    """agent 의 daemon deployment 들 중 가장 적합한 module 로 (port, proto) 추정.
+    """agent 의 daemon deployment 들 중 가장 적합한 module 로 (port, proto, module) 추정.
 
-    찾지 못하면 (None, None) 반환 — 이 경우 services entry 에 port/proto 미기재
+    찾지 못하면 (None, None, None) 반환 — 이 경우 services entry 에 port/proto 미기재
     (cims-health 가 csp default 5060/udp 로 fallback).
     """
     try:
@@ -246,7 +241,7 @@ def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
         deps = [d for d in _deploy_load_all(config)
                 if d.get('agent_id') == agent_id]
     except Exception:
-        return (None, None)
+        return (None, None, None)
     # deployment file 에는 package_name 이 없고 process_name 만 있는 케이스가 있음.
     # process_name 우선 (CSP/CMP/CSC 등 대문자 → lowercase). cspsim 등 non-daemon 제외.
     # service descriptor 의 모듈 health 맵 (없으면 하드코딩 fallback — 전환 안전망).
@@ -265,9 +260,9 @@ def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
             if mod == 'csc':
                 port = _csc_effective_health_port(daemon_modules[mod], config)
                 if port:
-                    return (port, 'tcp')
-            return defaults[mod]
-    return (None, None)
+                    return (port, 'tcp', mod)
+            return defaults[mod] + (mod,)
+    return (None, None, None)
 
 
 def _agent_daemon_modules(agent_id: int, config: dict) -> list:
@@ -321,7 +316,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     default_iface = _pick_default_iface(vip_bindings, agent_id, agent_row) or "eth0"
 
     # cims-health 가 lookup 하는 port/proto — agent 의 deployment 로 추정.
-    h_port, h_proto = _infer_health_port_proto(agent_id, config) if config else (None, None)
+    h_port, h_proto, h_module = _infer_health_port_proto(agent_id, config) if config else (None, None, None)
 
     failover_options = _normalize_failover_options(group.get('failover_options'))
     # 그룹 옵션의 수동 오버라이드가 최우선 (운영자 명시 > 배포 실효설정 유도 > descriptor 기본).
@@ -331,6 +326,15 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         h_proto = fo_health.get('proto') or h_proto or 'tcp'
     elif fo_health.get('proto'):
         h_proto = fo_health['proto']
+
+    # 진실 기반 헬스체크 힌트 — csc(설정 단일키로 리슨 포트가 정해지는 모듈)는
+    # cims-health 가 검사 시점에 노드 로컬 배포 config.json 의 Server.Port 를 직접
+    # 읽어 검사한다 (배포기록↔실파일 드리프트가 나도 HA 는 실제 bind 포트를 봄 —
+    # 드리프트 자체는 config_out_of_sync 알람이 노출). 운영자가 health.port 를
+    # 수동 지정하면 힌트를 내리지 않아 오버라이드가 그대로 최우선.
+    h_cfg_key = None
+    if h_module == 'csc' and not fo_health.get('port'):
+        h_cfg_key = 'Server.Port'
 
     # cold-spare 절체 대상 — AS 그룹의 daemon 모듈 중 module_modes 가 hot 이 아닌 전부
     # (기본 cold). cims-notify 가 MASTER 승격 시 start / BACKUP·FAULT 강등 시 stop.
@@ -378,6 +382,9 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             }
             if h_port:  entry['port']  = h_port
             if h_proto: entry['proto'] = h_proto
+            if h_cfg_key:
+                entry['health_module'] = h_module
+                entry['health_config_key'] = h_cfg_key
             if cold_modules: entry['cold_modules'] = cold_modules
             services[group['name']] = entry
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
@@ -392,6 +399,9 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         }
         if h_port:  entry['port']  = h_port
         if h_proto: entry['proto'] = h_proto
+        if h_cfg_key:
+            entry['health_module'] = h_module
+            entry['health_config_key'] = h_cfg_key
         if cold_modules: entry['cold_modules'] = cold_modules
         services[group['name']] = entry
 
@@ -458,6 +468,17 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
         }
         _job_create(config, m['agent_id'], 'update_ha', params)
         enqueued += 1
+    return enqueued
+
+
+def enqueue_update_ha_for_agent(agent_id: int, config: dict) -> int:
+    """agent 가 속한 모든 HA 그룹에 update_ha 재렌더 큐잉 — 배포 설정 변경으로
+    헬스포트 등 렌더 입력이 바뀌었을 때 ha.json 이 자동 추종하는 경로.
+    (그룹 렌더는 멤버 전체가 한 단위 — 해당 그룹 전 멤버에게 재푸시.)"""
+    enqueued = 0
+    for g in _ha_load_all(config):
+        if any(m.get('agent_id') == agent_id for m in (g.get('members') or [])):
+            enqueued += _enqueue_update_ha_for_members(g.get('id'), config)
     return enqueued
 
 

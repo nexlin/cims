@@ -139,6 +139,42 @@ def _materialize_deploy_config(config, pkg_file, overlay):
     return out
 
 
+def effective_server_port(config, pkg_file, overlay):
+    """배포의 실효 admin 포트 — 게이트웨이 self-register 와 HA 헬스포트 유도가
+    공유하는 단일 해석. 해석이 갈라지면 프록시와 헬스체크가 서로 다른 포트를 보는
+    반쪽 장애가 되므로 여기 한 곳만 고친다.
+      materialize(template default + overlay) 의 Server.Port — flat dot-key
+      (배포 config.json 표준 형태) 우선, nested 수용 → pkg meta.gateway.default_port.
+    실패/범위 밖은 None."""
+    def _valid(p):
+        try:
+            p = int(p)
+        except (TypeError, ValueError):
+            return None
+        return p if 0 < p < 65536 else None
+
+    try:
+        eff = _materialize_deploy_config(config, pkg_file, overlay)
+        port = _valid(eff.get("Server.Port"))
+        if port is None and isinstance(eff.get("Server"), dict):
+            port = _valid(eff["Server"].get("Port"))
+        if port:
+            return port
+    except Exception:
+        pass
+    meta = (pkg_file or {}).get("meta") if isinstance(pkg_file, dict) else None
+    return _valid(((meta or {}).get("gateway") or {}).get("default_port"))
+
+
+def deploy_config_hash(config, pkg_file, overlay) -> str:
+    """배포 config 실체화본의 canonical hash 12hex — agent 가 metric.cfg_hashes 로
+    보고하는 노드 실파일 hash (cims_agent._cfg_hash_for_module) 와 동일 규칙
+    (parse→sort_keys canonical dump→sha256). 불일치 = config_out_of_sync 알람."""
+    eff = _materialize_deploy_config(config, pkg_file, overlay)
+    return hashlib.sha256(json.dumps(eff, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()[:12]
+
+
 def _pkg_load_all(config) -> list:
     return file_store.load_all(_pkg_dir(config))
 
@@ -1962,6 +1998,30 @@ async def _put_deployment_config(handler_args, did: int, config):
         members_resp.append({"deployment_id": updated["id"],
                              "agent_id": updated.get("agent_id"), "job_id": job_id})
 
+        # ── 실효 포트 변경 전파 — 게이트웨이 라우트 재등록 + HA ha.json 재렌더.
+        #   라우트는 배포 생성 시 1회 등록이라 Server.Port 변경 시 여기서 재등록하지
+        #   않으면 프록시가 구 포트를 계속 본다. ha.json 헬스포트도 그룹 변경 시에만
+        #   재렌더되므로 동일하게 추종시킨다. (전파 실패는 저장 성공에 영향 없음.)
+        try:
+            old_port = effective_server_port(config, _pkg, dep.get("config"))
+            new_port = effective_server_port(config, _pkg, updated.get("config"))
+            if new_port and new_port != old_port:
+                _meta = (_pkg or {}).get("meta") if isinstance(_pkg, dict) else None
+                gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
+                if gw_routes and updated.get("process_name"):
+                    import handlers.gateway as _gw
+                    await asyncio.to_thread(_gw.register_module_routes, config,
+                                            updated["process_name"], "127.0.0.1",
+                                            int(new_port), gw_routes)
+                from handlers.ha_groups import enqueue_update_ha_for_agent
+                n = await asyncio.to_thread(enqueue_update_ha_for_agent,
+                                            updated.get("agent_id"), config)
+                logger.log_info(f"[deploy-config] dep={updated['id']} 실효포트 "
+                                f"{old_port}->{new_port}: gateway 재등록"
+                                f"={'O' if gw_routes else 'X'}, update_ha {n}건")
+        except Exception as e:
+            logger.log_warning(f"[deploy-config] 포트 변경 전파 실패(dep={did}): {e}")
+
     return HandlerResult(status=200,
         body={
             "ok":      True,
@@ -2560,14 +2620,9 @@ async def _create_deployment(handler_args: HandlerArgs, config):
         gw_meta = pkg_meta.get("gateway") or {}
         gw_routes = gw_meta.get("routes") or []
         if gw_routes:
-            # 포트 결정 우선순위: 배포 config 의 Server.Port(SoT) → gateway.default_port(패키지 선언
-            #   기본 포트 fallback). 콘솔 마법사는 Server.Port 를 채우지만, raw API(또는 config 미지정)
-            #   배포에선 비어 있어 과거엔 라우트 등록이 통째로 skip 돼 게이트웨이 404 가 났다.
-            #   → 패키지가 pkg.json 의 gateway.default_port 로 자기 기본 포트를 선언하면 그걸로 fallback.
-            srv = cfg_overlay.get("Server") if isinstance(cfg_overlay, dict) and isinstance(cfg_overlay.get("Server"), dict) else {}
-            _port = (cfg_overlay.get("Server.Port") if isinstance(cfg_overlay, dict) else None) \
-                    or srv.get("Port") \
-                    or gw_meta.get("default_port")
+            # 포트 = effective_server_port (materialize Server.Port → gateway.default_port).
+            #   HA 헬스포트 유도와 같은 해석 — 프록시/헬스가 다른 포트를 보는 드리프트 차단.
+            _port = effective_server_port(config, pkg_file, cfg_overlay)
             # 게이트웨이 upstream 은 항상 loopback(I1) — 모듈 bind Ip(0.0.0.0 등)와 무관하게
             #   게이트웨이·모듈이 같은 호스트라 127.0.0.1 로 도달. (0.0.0.0 upstream 은 무효)
             _ip = "127.0.0.1"
@@ -2630,6 +2685,28 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
                         logger.log_info(f"runtime store v2 P5: '{owner}' 컬렉션 schema 정합 v{new_ver}: {migrated}")
         except Exception as _e:
             logger.log_warning(f"runtime store v2 P5 schema 정합 skip: {_e}")
+    # 실효 포트 전파 — package_id 전환으로 template default 포트가 바뀌면
+    # 게이트웨이 라우트/HA 헬스포트가 추종 (deployment config 변경 경로와 동일).
+    if "package_id" in patches and patches["package_id"] != _old_pkg_id:
+        try:
+            newp = await asyncio.to_thread(_pkg_load, config, patches["package_id"])
+            oldp = await asyncio.to_thread(_pkg_load, config, _old_pkg_id) if _old_pkg_id else None
+            old_port = effective_server_port(config, oldp, r.get("config"))
+            new_port = effective_server_port(config, newp, r.get("config"))
+            if new_port and new_port != old_port:
+                _meta = (newp or {}).get("meta") if isinstance(newp, dict) else None
+                gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
+                if gw_routes and r.get("process_name"):
+                    import handlers.gateway as _gw
+                    await asyncio.to_thread(_gw.register_module_routes, config,
+                                            r["process_name"], "127.0.0.1",
+                                            int(new_port), gw_routes)
+                from handlers.ha_groups import enqueue_update_ha_for_agent
+                n = await asyncio.to_thread(enqueue_update_ha_for_agent, r.get("agent_id"), config)
+                logger.log_info(f"[deploy-update] dep={did} 실효포트 {old_port}->{new_port} "
+                                f"(pkg 전환): gateway 재등록={'O' if gw_routes else 'X'}, update_ha {n}건")
+        except Exception as e:
+            logger.log_warning(f"[deploy-update] 포트 변경 전파 실패(dep={did}): {e}")
     _enrich_deploy([r], config)
     return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
 
@@ -2788,6 +2865,16 @@ async def _rollback_deployment(handler_args: HandlerArgs, did: int, config):
 
     cfg = dep.get("config") if isinstance(dep.get("config"), (dict, list)) \
           else _safe_json(dep.get("config_json"))
+    # job 으로 나가는 config 는 실체화 (record 는 sparse overlay 유지) — 다른
+    # 디스패치 경로와 동일. agent job_health_check 포트 유도가 template default
+    # 를 보게 한다.
+    if cfg is None or isinstance(cfg, dict):
+        try:
+            _rb_pkg = await asyncio.to_thread(_pkg_load, config,
+                                              patches.get("package_id") or dep.get("package_id"))
+            cfg = _materialize_deploy_config(config, _rb_pkg, cfg)
+        except Exception as _e:
+            logger.log_warning(f"[deployment-rollback] config 실체화 skip: {_e}")
     sf = dep.get("service_functions")
     if isinstance(sf, str):
         sf = _split_csv(sf)
