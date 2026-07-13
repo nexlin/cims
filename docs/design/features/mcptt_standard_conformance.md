@@ -114,6 +114,32 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
   (`GroupCallService.cpp`). 단말은 floor 목적지를 이 `m=application` 포트에서 학습.
 - 보존: multipart(mcptt-info+resource-lists+SDP), `urn:3gpp:ns:mcpttInfo:1.0` 등 namespace.
 
+### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
+
+REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 맞춘다
+(`CscfModule.cpp`, `CspServer.cpp`, psip `SipStackComm.hpp`/`SipMessage`).
+
+- **REGISTER 401/200 OK**: `Allow`(전체 메서드 목록, `SIP_ALLOW_METHODS`) 포함. 401 에는 Contact 없음
+  (psip 가 REGISTER 응답에는 Contact 자동생성 안 함). 200 OK Contact = **요청 Contact 원본 에코**
+  (RFC 3261 §10.3 — URI·feature tag 보존, expires 파라미터만 부여값으로 교체). 별도 Expires 헤더는
+  싣지 않음(Contact `;expires` 만). 요청 Expires 는 그대로 수락(무지정 시 3600).
+- **응답 공통**: Max-Forwards 는 요청 전용(RFC 3261 §8.1.1.6) — 응답에는 없음.
+- **SUBSCRIBE 2xx**: `Expires` 필수(RFC 6665 §4.2.1.1 — 부여값, 해지 시 0), Allow/Supported 포함,
+  Contact = user 없는 서버 자기 주소(`<sip:ip:port>`, dialog remote target). To tag 단일
+  (구독 저장 tag 로 교체 — CreateResponseWithToTag 생성분 위에 중복 삽입 금지).
+- **NOTIFY**: Route 헤더 없음 — NAT 뒤 단말 도달은 psip `m_strSendDestIp/m_iSendDestPort`
+  전송 목적지 오버라이드(등록 바인딩 received/rport latch)로 처리. Contact = 서버 자기 주소(user 없음).
+- **reg-event reginfo (RFC 3680)**: version 은 구독 내 0 부터 순증. 구독 직후 initial 은 `state="full"`
+  (contact `event="registered"`), 등록 상태 변경은 `state="partial"` 로 바뀐 바인딩만 통지 —
+  재등록 `refreshed`, 잔존 구독 하 신규 등록 `created`, Expires:0 해제 `unregistered`,
+  sweep 만료 `expired`(모두 `SendRegEventNotify`, 종료 통지는 삭제 직전 바인딩을 expires=0 로 실음).
+  `<contact>` 속성 `duration-registered`/`expires`(잔여초)/`cseq`, 등록 Contact 의 feature 파라미터는
+  `<unknown-param>` 으로 나열(%XX 디코딩). `<uri>` = as-registered Contact(`CUserInfo.m_strContactUri`).
+- **등록 바인딩 수명**: 재등록(REGISTER 갱신)이 `m_iLoginTime/m_iLoginTimeout` 을 리셋 — 만료 sweep 은
+  마지막 재등록 기준으로만 발동.
+- 미구현/향후: NOTIFY 최종 실패(타임아웃/481) 시 구독 종료(RFC 6665 MUST), 명시적 구독해지의
+  Subscription-State reason 구분(현재 timeout 고정), reginfo 다중 바인딩·tel URI registration 블록.
+
 ### 보존 — 정합/유지
 - Digest(username=`IMSI@domain`, MD5, qop=auth), emergency/imminent 게이팅·re-INVITE condition,
   conference-info NOTIFY(RFC 4575), ad-hoc/chat/broadcast/prearranged, GMS/CMS xcap-diff NOTIFY.

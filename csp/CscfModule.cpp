@@ -31,6 +31,8 @@ extern CSipUserAgent gclsUserAgent;
 extern void SendInitialNotify( const SubscriptionInfo &sub );
 extern void SendTerminatedNotify( const SubscriptionInfo &sub );
 extern void SendAffiliationNotify( const std::string &strUserId );  // C2
+extern void SendRegEventNotify( const std::string &strUserId, const char *pszEvent,
+                                const CUserInfo *pclsInfo );  // RFC 3680 partial
 
 // F-04/F-13: PUBLISH affiliation ETag 저장소 (key = "userId:groupId")
 static std::map<std::string, std::string> s_mapEtag;
@@ -75,6 +77,7 @@ bool CCscfModule::SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std:
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
     if ( pclsResponse == NULL ) return false;
 
+    pclsResponse->AddHeader( "Allow", SIP_ALLOW_METHODS );
     AddChallenge( pclsResponse, strRealmOverride, bStale );
     gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
     return true;
@@ -210,7 +213,7 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
             break;
     }
 
-    gclsUserMap.Insert( pclsMessage, NULL, &clsUser );
+    gclsUserMap.Insert( pclsMessage, &clsUser );
     return true;
 }
 
@@ -290,6 +293,9 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     // UNREGISTER
     if ( pclsMessage->GetExpires() == 0 ) {
         std::string strUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+        // 삭제 직전 바인딩 보관 — reg-event 구독자 통지(partial, event=unregistered)용
+        CUserInfo clsRegInfo;
+        bool bHadBinding = gclsUserMap.Select( strUserId.c_str(), clsRegInfo );
         gclsUserMap.Delete( strUserId.c_str() );
         // DB logout_time 갱신 + CspUserMap 캐시 업데이트
         gclsCspUserMap.unregisterUser( strUserId );
@@ -301,26 +307,48 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         }
         SendResponse( pclsMessage, SIP_OK );
         CLog::Print( LOG_INFO, "RecvRequestRegister: user(%s) unregistered (de-affiliated)", strUserId.c_str() );
+        // reg-event 구독자에게 등록 해제 통지 (partial, 삭제 직전 바인딩)
+        if ( bHadBinding ) {
+            SendRegEventNotify( strUserId, "unregistered", &clsRegInfo );
+        }
         return true;
     }
 
     // REGISTER
-    CSipFrom clsContact;
-    if ( gclsUserMap.Insert( pclsMessage, &clsContact, &clsUser ) ) {
+    const bool bRefresh = gclsUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str() );
+    if ( gclsUserMap.Insert( pclsMessage, &clsUser ) ) {
         CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
         if ( pclsResponse == NULL ) return false;
 
-        // F-12: 단말 요청 Expires 협상 (RFC 3261 §10.3). 요청값이 유효하면 그대로, 초과 시 3600으로 조정.
+        // F-12: 요청 Expires 를 그대로 수락 (요청에 없으면 3600 기본값)
         int iReqExpires = pclsMessage->GetExpires();
-        int iGrantedExpires = ( iReqExpires > 0 && iReqExpires <= 3600 ) ? iReqExpires : 3600;
-
-        // F-03: Contact에 expires 파라미터 포함 (RFC 3261 §10.3)
+        int iGrantedExpires = ( iReqExpires > 0 ) ? iReqExpires : 3600;
         char szExpires[16];
         snprintf( szExpires, sizeof( szExpires ), "%d", iGrantedExpires );
-        clsContact.InsertParam( "expires", szExpires );
 
-        pclsResponse->m_clsContactList.push_back( clsContact );
-        pclsResponse->AddHeader( "Expires", iGrantedExpires );
+        // 200 OK Contact = 요청 Contact 을 그대로 에코 (RFC 3261 §10.3 — 등록된 바인딩 반환).
+        //   NAT 뒤 단말의 실제 도달 주소는 UserMap 바인딩(received/rport latch)이 따로 관리한다.
+        for ( SIP_FROM_LIST::iterator itContact = pclsMessage->m_clsContactList.begin();
+              itContact != pclsMessage->m_clsContactList.end(); ++itContact ) {
+            CSipFrom clsContact = *itContact;
+            if ( clsContact.UpdateParam( "expires", szExpires ) == false )
+                clsContact.InsertParam( "expires", szExpires );
+            pclsResponse->m_clsContactList.push_back( clsContact );
+        }
+        // Contact 없는 REGISTER(바인딩 조회) — 저장된 as-registered Contact 로 응답
+        if ( pclsResponse->m_clsContactList.empty() ) {
+            CUserInfo clsRegInfo;
+            if ( gclsUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsRegInfo ) &&
+                 clsRegInfo.m_strContactUri.empty() == false ) {
+                CSipFrom clsContact;
+                clsContact.m_clsUri.Parse( clsRegInfo.m_strContactUri.c_str(),
+                                           (int)clsRegInfo.m_strContactUri.size() );
+                clsContact.InsertParam( "expires", szExpires );
+                pclsResponse->m_clsContactList.push_back( clsContact );
+            }
+        }
+        // Expires 헤더는 싣지 않음 — 실망 REGISTER 200 OK 는 Contact 의 expires 파라미터만 사용
+        pclsResponse->AddHeader( "Allow", SIP_ALLOW_METHODS );
         pclsResponse->AddHeader( "Supported", "path,100rel,precondition" );
 
         // v3 (2026-04-22): AccessServiceMap 이 SOT. fallback 은 Setup.Realm (레거시).
@@ -350,6 +378,10 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
 
         gclsCspUserMap.registerUser( clsUser.m_strId, "" );
+
+        // reg-event 구독자에게 등록 갱신 통지 (partial — RFC 3680).
+        //   최초 등록은 구독이 있을 수 없어 통상 no-op, 구독 잔존 상태의 재등록이면 created.
+        SendRegEventNotify( pclsMessage->m_clsFrom.m_clsUri.m_strUser, bRefresh ? "refreshed" : "created", NULL );
 
         // [MCPTT 규격] REGISTER 는 호에 부작용 없음 (TS 24.379).
         //   그룹콜 조인 트리거 = (a) 발신 UE 의 그룹 INVITE → ProcessGroupCall fan-out,
@@ -442,7 +474,20 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
 
     if ( iExpires == 0 ) {
         // RFC 3265 §3.1.4: 200 OK 먼저, 그 다음 final NOTIFY (Subscription-State: terminated)
-        SendResponse( pclsMessage, 200 );
+        //   구독 해지 2xx 에도 Expires: 0 포함 (RFC 6665 §4.2.1.1)
+        CSipMessage *pclsUnsubResp = pclsMessage->CreateResponseWithToTag( 200 );
+        if ( pclsUnsubResp ) {
+            pclsUnsubResp->AddHeader( "Allow", SIP_ALLOW_METHODS );
+            pclsUnsubResp->AddHeader( "Expires", 0 );
+            pclsUnsubResp->AddHeader( "Supported", "path,100rel,precondition" );
+            CSipFrom clsSelfContact;
+            clsSelfContact.m_clsUri.m_strProtocol = "sip";
+            const int iListenerId = GetCurrentInboundListenerId();
+            clsSelfContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
+            clsSelfContact.m_clsUri.m_iPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
+            pclsUnsubResp->m_clsContactList.push_back( clsSelfContact );
+            gclsUserAgent.m_clsSipStack.SendSipMessage( pclsUnsubResp );
+        }
 
         SubscriptionInfo subInfo;
         if ( gclsSubscriptionManager.GetSubscriptionByCallId( strSubCallId, subInfo ) ) {
@@ -486,7 +531,23 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
 
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
     if ( pclsResponse ) {
-        pclsResponse->m_clsTo.InsertParam( SIP_TAG, szToTag );
+        // dialog 식별용 To tag 를 구독에 저장한 szToTag 로 교체
+        //   (CreateResponseWithToTag 가 생성한 tag 위에 Insert 하면 tag 중복)
+        if ( pclsResponse->m_clsTo.UpdateParam( SIP_TAG, szToTag ) == false )
+            pclsResponse->m_clsTo.InsertParam( SIP_TAG, szToTag );
+        pclsResponse->AddHeader( "Allow", SIP_ALLOW_METHODS );
+        // RFC 6665 §4.2.1.1: SUBSCRIBE 2xx 는 부여한 구독시간 Expires 필수
+        pclsResponse->AddHeader( "Expires", info.iExpires );
+        pclsResponse->AddHeader( "Supported", "path,100rel,precondition" );
+        // dialog Contact = 서버 자기 주소 (user 없음 — 실망 형태)
+        {
+            CSipFrom clsSelfContact;
+            clsSelfContact.m_clsUri.m_strProtocol = "sip";
+            const int iListenerId = GetCurrentInboundListenerId();
+            clsSelfContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
+            clsSelfContact.m_clsUri.m_iPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
+            pclsResponse->m_clsContactList.push_back( clsSelfContact );
+        }
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
     }
 

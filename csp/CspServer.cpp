@@ -70,6 +70,7 @@ CCallDir gclsCallDir;
 // Forward Declaration for Notify Helpers
 void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
 void SendInitialNotify( const SubscriptionInfo &sub );
+void SendRegEventNotify( const std::string &strUserId, const char *pszEvent, const CUserInfo *pclsInfo );
 
 bool gbFork = true;
 /**
@@ -396,13 +397,16 @@ int ServiceMain() {
             gclsNonceMap.DeleteTimeout( 1000 );
 
             // 등록 만료 사용자 삭제 → DB logout_time 동기화 + PTT 세션 정리
-            USER_ID_LIST clsExpiredUsers;
+            USER_INFO_LIST clsExpiredUsers;
             gclsUserMap.DeleteTimeout( 1000, clsExpiredUsers );
-            for ( const auto &strUserId : clsExpiredUsers ) {
+            for ( const auto &clsExpired : clsExpiredUsers ) {
+                const std::string &strUserId = clsExpired.first;
                 CLog::Print( LOG_INFO, "Registration expired: user(%s) — syncing DB and cleaning resources",
                              strUserId.c_str() );
                 gclsCspUserMap.unregisterUser( strUserId );
                 gclsGroupCallService.ClearUserCall( strUserId );
+                // reg-event 구독자에게 만료 통지 (partial, 삭제 직전 바인딩)
+                SendRegEventNotify( strUserId, "expired", &clsExpired.second );
             }
 
             gclsUserMap.SendOptions();
@@ -496,26 +500,79 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::st
 }
 
 /**
- * @brief Build reginfo+xml body for reg-event NOTIFY (RFC 3680)
+ * @brief SIP 파라미터 값의 %XX escape 해제 — reginfo <unknown-param> 은 디코딩된 값으로 실린다
+ *        (예: Contact 의 urn%3Aurn-7%3A... → "urn:urn-7:...")
+ */
+static std::string UnescapeParamValue( const std::string &strIn ) {
+    std::string strOut;
+    strOut.reserve( strIn.size() );
+    for ( size_t i = 0; i < strIn.size(); ++i ) {
+        if ( strIn[i] == '%' && i + 2 < strIn.size() && isxdigit( (unsigned char)strIn[i + 1] ) &&
+             isxdigit( (unsigned char)strIn[i + 2] ) ) {
+            strOut += (char)strtol( strIn.substr( i + 1, 2 ).c_str(), NULL, 16 );
+            i += 2;
+        } else {
+            strOut += strIn[i];
+        }
+    }
+    return strOut;
+}
+
+/**
+ * @brief Build reginfo+xml body for reg-event NOTIFY (RFC 3680, 실망 패킷 형태)
+ * @param pszEvent NULL/"" = 구독 직후 initial 문서 (state="full", event="registered").
+ *        "refreshed"|"created"|"unregistered"|"expired" = 등록 상태 변경 통지 —
+ *        state="partial" 로 바뀐 바인딩만 싣는다 (RFC 3680 §5.2).
  */
 static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInfo &clsUserInfo, bool bRegistered,
-                                     int iVersion ) {
-    time_t tRemaining = 0;
+                                     int iVersion, const char *pszEvent = NULL ) {
+    const bool bPartial = ( pszEvent != NULL && pszEvent[0] != '\0' );
+    const char *pszContactEvent = bPartial ? pszEvent : "registered";
+
+    time_t tNow = time( NULL );
+    time_t tRemaining = 0, tDuration = 0;
     if ( bRegistered ) {
-        tRemaining = ( clsUserInfo.m_iLoginTime + clsUserInfo.m_iLoginTimeout ) - time( NULL );
+        tRemaining = ( clsUserInfo.m_iLoginTime + clsUserInfo.m_iLoginTimeout ) - tNow;
         if ( tRemaining < 0 ) tRemaining = 0;
+    }
+    if ( clsUserInfo.m_iLoginTime > 0 ) {
+        // 종료 통지에서도 삭제 직전 바인딩 기준 등록 지속시간을 알린다
+        tDuration = tNow - clsUserInfo.m_iLoginTime;
+        if ( tDuration < 0 ) tDuration = 0;
     }
 
     std::string strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
-    strBody += "<reginfo xmlns=\"urn:ietf:params:xml:ns:reginfo\" version=\"" + std::to_string( iVersion ) +
-               "\" state=\"full\">\r\n";
+    strBody += "<reginfo xmlns=\"urn:ietf:params:xml:ns:reginfo\" "
+               "xmlns:cp=\"urn:ietf:params:xml:ns:common-policy\" "
+               "xmlns:eri=\"urn:3gpp:ns:extRegInfo:1.0\" version=\"" +
+               std::to_string( iVersion ) + "\" state=\"" + ( bPartial ? "partial" : "full" ) + "\">\r\n";
     strBody += "<registration aor=\"" + sub.strSubscriberUri + "\" id=\"" + sub.strUserId + "\" state=\"" +
                ( bRegistered ? "active" : "terminated" ) + "\">\r\n";
-    if ( bRegistered ) {
-        strBody += "<contact id=\"1\" state=\"active\" event=\"registered\" expires=\"" +
-                   std::to_string( (int)tRemaining ) + "\">\r\n";
-        strBody += "<uri>sip:" + sub.strUserId + "@" + clsUserInfo.m_strIp + ":" +
-                   std::to_string( clsUserInfo.m_iPort ) + "</uri>\r\n";
+
+    // 바인딩이 있으면 <contact> 를 싣는다 — 종료 통지(partial unregistered/expired)도
+    //   삭제 직전 바인딩을 expires=0 으로 실어 어떤 바인딩이 사라졌는지 알린다.
+    if ( clsUserInfo.m_strContactUri.empty() == false || clsUserInfo.m_strIp.empty() == false ) {
+        // <uri> = as-registered Contact (RFC 3680 — 단말이 등록한 URI 그대로),
+        //   feature 파라미터는 <unknown-param> 으로 나열 (실망 형태)
+        std::string strContactUri = clsUserInfo.m_strContactUri;
+        if ( strContactUri.empty() ) {
+            strContactUri = "sip:" + sub.strUserId + "@" + clsUserInfo.m_strIp + ":" +
+                            std::to_string( clsUserInfo.m_iPort );
+        }
+        strBody += "<contact id=\"1\" state=\"" + std::string( bRegistered ? "active" : "terminated" ) +
+                   "\" event=\"" + pszContactEvent + "\" duration-registered=\"" +
+                   std::to_string( (int)tDuration ) + "\" expires=\"" + std::to_string( (int)tRemaining ) +
+                   "\" cseq=\"" + std::to_string( clsUserInfo.m_iRegisterCSeq ) + "\">\r\n";
+        strBody += "<uri>" + strContactUri + "</uri>\r\n";
+        for ( SIP_PARAMETER_LIST::const_iterator itParam = clsUserInfo.m_clsContactParamList.begin();
+              itParam != clsUserInfo.m_clsContactParamList.end(); ++itParam ) {
+            if ( itParam->m_strValue.empty() ) {
+                strBody += "<unknown-param name=\"" + itParam->m_strName + "\"/>\r\n";
+            } else {
+                strBody += "<unknown-param name=\"" + itParam->m_strName + "\">" +
+                           UnescapeParamValue( itParam->m_strValue ) + "</unknown-param>\r\n";
+            }
+        }
         strBody += "</contact>\r\n";
     }
     strBody += "</registration>\r\n";
@@ -550,8 +607,15 @@ static std::string BuildAffiliationInfoBody( const std::string &strUserId ) {
 /**
  * @brief Send a proper in-dialog NOTIFY to a single subscriber
  */
+/**
+ * @param pszRegEvent  reg-event 전용: NULL = initial full 문서,
+ *                     "refreshed"|"created"|"unregistered"|"expired" = partial 변경 통지
+ * @param pclsRegInfo  reg-event 전용: 등록 삭제 후 통지(unregistered/expired)처럼 UserMap 에서
+ *                     더 이상 조회할 수 없는 경우 삭제 직전 바인딩을 넘긴다 (body·전송 목적지에 사용)
+ */
 static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::string &etag,
-                                    const std::string &strChangedId ) {
+                                    const std::string &strChangedId, const char *pszRegEvent = NULL,
+                                    const CUserInfo *pclsRegInfo = NULL ) {
     // SUBSCRIBE 수신 listener 의 bind_ip:bind_port 를 Via/From 자기 주소로 사용.
     // listener id 가 0 (옛 dialog) 이거나 매칭 실패 시 stack primary 로 fallback.
     const int iListenerId = sub.iInboundListenerId;
@@ -599,13 +663,30 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     // Max-Forwards
     pMsg->m_iMaxForwards = 70;
 
-    // Route to subscriber's registered address
+    // Contact = 서버 자기 주소 (user 없음 — 실망 형태, 예: <sip:scscf11.ims...>)
+    {
+        CSipFrom clsSelfContact;
+        clsSelfContact.m_clsUri.m_strProtocol = "sip";
+        clsSelfContact.m_clsUri.m_strHost = strLocalIp;
+        clsSelfContact.m_clsUri.m_iPort = iLocalPort;
+        pMsg->m_clsContactList.push_back( clsSelfContact );
+    }
+
+    // 전송 목적지 = 등록 바인딩(received/rport latch). Route 헤더는 싣지 않는다 —
+    //   실망 NOTIFY 에는 Route 가 없으며, NAT 도달은 dest 오버라이드로 처리.
+    //   등록 삭제 후 통지(unregistered/expired)는 UserMap 조회가 실패하므로
+    //   호출자가 넘긴 삭제 직전 바인딩(pclsRegInfo)을 사용한다.
     CUserInfo clsUserInfo;
-    bool bRegistered = gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo );
-    if ( bRegistered ) {
-        CSipCallRoute clsRoute;
-        clsUserInfo.GetCallRoute( clsRoute );
-        pMsg->AddRoute( clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP );
+    bool bRegistered;
+    if ( pclsRegInfo != NULL ) {
+        clsUserInfo = *pclsRegInfo;
+        bRegistered = false;  // 삭제 직전 바인딩 전달 = 이미 등록 해제된 상태
+    } else {
+        bRegistered = gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo );
+    }
+    if ( clsUserInfo.m_strIp.empty() == false ) {
+        pMsg->m_strSendDestIp = clsUserInfo.m_strIp;
+        pMsg->m_iSendDestPort = clsUserInfo.m_iPort;
     }
 
     time_t tRemaining = ( sub.tStartTime + sub.iExpires ) - time( NULL );
@@ -615,7 +696,8 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     std::string strBody;
     if ( sub.strEventType == "reg" ) {
         pMsg->AddHeader( "Event", "reg" );
-        strBody = BuildRegInfoBody( sub, clsUserInfo, bRegistered, iSeq - 1 );
+        // reginfo version 은 구독 내 0 부터 시작 (RFC 3680) — 첫 NOTIFY 의 iSeq 가 2 이므로 -2
+        strBody = BuildRegInfoBody( sub, clsUserInfo, bRegistered, iSeq - 2, pszRegEvent );
         pMsg->m_clsContentType.Set( "application", "reginfo+xml" );
     } else if ( sub.strEventType == "affiliation" ) {
         pMsg->AddHeader( "Event", "presence" );
@@ -676,11 +758,20 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
     pMsg->m_clsCSeq.Set( iSeq, "NOTIFY" );
     pMsg->m_iMaxForwards = 70;
 
+    // Contact = 서버 자기 주소 (user 없음 — SendNotifyToSubscriber 와 동일)
+    {
+        CSipFrom clsSelfContact;
+        clsSelfContact.m_clsUri.m_strProtocol = "sip";
+        clsSelfContact.m_clsUri.m_strHost = strLocalIp;
+        clsSelfContact.m_clsUri.m_iPort = iLocalPort;
+        pMsg->m_clsContactList.push_back( clsSelfContact );
+    }
+
     CUserInfo clsUserInfo;
     if ( gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo ) ) {
-        CSipCallRoute clsRoute;
-        clsUserInfo.GetCallRoute( clsRoute );
-        pMsg->AddRoute( clsRoute.m_strDestIp.c_str(), clsRoute.m_iDestPort, E_SIP_UDP );
+        // Route 헤더 없이 등록 바인딩으로 직접 전송 (SendNotifyToSubscriber 와 동일)
+        pMsg->m_strSendDestIp = clsUserInfo.m_strIp;
+        pMsg->m_iSendDestPort = clsUserInfo.m_iPort;
     }
 
     pMsg->AddHeader( "Event", sub.strEventType == "reg"         ? "reg"
@@ -730,6 +821,22 @@ void SendInitialNotify( const SubscriptionInfo &sub ) {
     } else {
         // CMS: user-profile + service-config 문서 (BuildXcapDiffBody cms 분기).
         SendNotifyToSubscriber( sub, "init", "" );
+    }
+}
+
+/**
+ * @brief 등록 상태 변경을 reg-event 구독자에게 통지 (RFC 3680 — state="partial")
+ * @param strUserId  등록 상태가 바뀐 가입자
+ * @param pszEvent   "refreshed" | "created" | "unregistered" | "expired"
+ * @param pclsInfo   등록 삭제 후 통지(unregistered/expired)는 삭제 직전 바인딩을 넘긴다.
+ *                   갱신(refreshed/created)은 NULL — UserMap 에서 현재 바인딩 조회.
+ */
+void SendRegEventNotify( const std::string &strUserId, const char *pszEvent, const CUserInfo *pclsInfo ) {
+    std::list<SubscriptionInfo> clsSubList;
+    gclsSubscriptionManager.GetSubscriptionsByUser( strUserId, "reg", clsSubList );
+
+    for ( std::list<SubscriptionInfo>::iterator itSub = clsSubList.begin(); itSub != clsSubList.end(); ++itSub ) {
+        SendNotifyToSubscriber( *itSub, "", "", pszEvent, pclsInfo );
     }
 }
 

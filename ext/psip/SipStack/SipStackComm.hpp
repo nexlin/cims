@@ -263,7 +263,14 @@ bool CSipStack::Send( CSipMessage * pclsMessage, bool bCheckMessage )
 	if( pclsMessage->IsRequest() )
 	{
 		SIP_FROM_LIST::iterator itList = pclsMessage->m_clsRouteList.begin();
-		if( itList == pclsMessage->m_clsRouteList.end() )
+		if( pclsMessage->m_strSendDestIp.empty() == false && pclsMessage->m_iSendDestPort > 0 )
+		{
+			// 전송 목적지 오버라이드 — Route 헤더 없이 지정 주소로 전송 (NAT 뒤 단말 등)
+			pszIp = pclsMessage->m_strSendDestIp.c_str();
+			iPort = pclsMessage->m_iSendDestPort;
+			eTransport = pclsMessage->m_eTransport;
+		}
+		else if( itList == pclsMessage->m_clsRouteList.end() )
 		{
 			if( pclsMessage->m_clsReqUri.m_strHost.empty() ) return false;
 
@@ -462,7 +469,13 @@ void CSipStack::CheckSipMessage( CSipMessage * pclsMessage )
 		pclsMessage->m_strSipVersion = SIP_VERSION;
 	}
 
-	if( pclsMessage->m_clsContactList.size() == 0 )
+	// REGISTER 응답의 Contact 은 등록된 바인딩 에코 전용 (RFC 3261 §10.3) —
+	//   401/403 등엔 Contact 을 싣지 않고, 200 OK 는 응용이 명시적으로 채운다.
+	const bool bRegisterResponse =
+		( pclsMessage->IsRequest() == false &&
+		  strcasecmp( pclsMessage->m_clsCSeq.m_strMethod.c_str(), SIP_METHOD_REGISTER ) == 0 );
+
+	if( pclsMessage->m_clsContactList.size() == 0 && bRegisterResponse == false )
 	{
 		ESipTransport eTransport = E_SIP_UDP;
 
@@ -561,7 +574,8 @@ void CSipStack::CheckSipMessage( CSipMessage * pclsMessage )
 		pclsMessage->m_strUserAgent = m_clsSetup.m_strUserAgent;
 	}
 
-	if( pclsMessage->m_iMaxForwards == -1 )
+	// Max-Forwards 는 요청 전용 헤더 (RFC 3261 §8.1.1.6) — 응답에는 싣지 않는다
+	if( pclsMessage->m_iMaxForwards == -1 && pclsMessage->IsRequest() )
 	{
 		pclsMessage->m_iMaxForwards = SIP_MAX_FORWARDS;
 	}

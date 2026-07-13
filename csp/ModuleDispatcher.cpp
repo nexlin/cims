@@ -264,8 +264,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     if ( pclsMessage->IsMethod( SIP_METHOD_OPTIONS ) ) {
         CSipMessage *pclsResp = pclsMessage->CreateResponse( SIP_OK );
         if ( pclsResp ) {
-            pclsResp->AddHeader( "Allow",
-                                 "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, MESSAGE, REFER" );
+            pclsResp->AddHeader( "Allow", SIP_ALLOW_METHODS );
             gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
         }
         return true;

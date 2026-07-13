@@ -34,7 +34,8 @@ CUserInfo::CUserInfo()
       m_iLoginTimeout( 3600 ),
       m_iOptionsSeq( 0 ),
       m_iSendOptionsTime( 0 ),
-      m_bMcDataMsrp( false ) {
+      m_bMcDataMsrp( false ),
+      m_iRegisterCSeq( 0 ) {
 }
 
 void CUserInfo::GetCallRoute( CSipCallRoute &clsRoute ) {
@@ -53,11 +54,10 @@ CUserMap::~CUserMap() {
  * @ingroup CspServer
  * @brief 로그인된 클라이언트 정보를 저장한다.
  * @param pclsMessage SIP REGISTER 메시지
- * @param pclsContact	SIP REGISTER 응답 메시지에 포함될 Contact Url
  * @param pclsXmlUser	XML 에 저장된 사용자 정보
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
-bool CUserMap::Insert( CSipMessage *pclsMessage, CSipFrom *pclsContact, CspUser *pclsXmlUser ) {
+bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
     CUserInfo clsInfo;
     std::string strUserId;
     USER_MAP::iterator itMap;
@@ -85,7 +85,19 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CSipFrom *pclsContact, CspUser 
              strIcsi.find( "mcdata" ) != std::string::npos ) {
             clsInfo.m_bMcDataMsrp = true;
         }
+
+        // as-registered Contact URI·파라미터 보관 (200 OK 에코·reginfo <uri>/<unknown-param> 용)
+        char szContactUri[256];
+        if ( pclsMessage->m_clsContactList.front().m_clsUri.ToString( szContactUri, sizeof( szContactUri ) ) > 0 ) {
+            clsInfo.m_strContactUri = szContactUri;
+        }
+        for ( SIP_PARAMETER_LIST::iterator itParam = pclsMessage->m_clsContactList.front().m_clsParamList.begin();
+              itParam != pclsMessage->m_clsContactList.front().m_clsParamList.end(); ++itParam ) {
+            if ( strcasecmp( itParam->m_strName.c_str(), "expires" ) != 0 )
+                clsInfo.m_clsContactParamList.push_back( *itParam );
+        }
     }
+    clsInfo.m_iRegisterCSeq = pclsMessage->m_clsCSeq.m_iDigit;
 
     m_clsMutex.acquire();
     itMap = m_clsMap.find( strUserId );
@@ -100,22 +112,23 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CSipFrom *pclsContact, CspUser 
         itMap->second.m_iPort = clsInfo.m_iPort;
         itMap->second.m_eTransport = clsInfo.m_eTransport;
         itMap->second.m_strGroupId = clsInfo.m_strGroupId;
-        // 재등록 갱신 — REGISTER 에서만 capability 재평가 (비REGISTER 갱신은 Contact 미포함)
-        if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) )
+        // 재등록 갱신 — REGISTER 에서만 capability·Contact 재평가 (비REGISTER 갱신은 Contact 미포함)
+        if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
+            // 바인딩 수명 연장 — 재등록이 만료시각을 리셋해야 sweep 에 의한 유령 만료가 없다
+            itMap->second.m_iLoginTime = clsInfo.m_iLoginTime;
+            itMap->second.m_iLoginTimeout = clsInfo.m_iLoginTimeout;
             itMap->second.m_bMcDataMsrp = clsInfo.m_bMcDataMsrp;
+            if ( clsInfo.m_strContactUri.empty() == false ) {
+                itMap->second.m_strContactUri = clsInfo.m_strContactUri;
+                itMap->second.m_clsContactParamList = clsInfo.m_clsContactParamList;
+            }
+            itMap->second.m_iRegisterCSeq = clsInfo.m_iRegisterCSeq;
+        }
 
         CLog::Print( LOG_DEBUG, "user(%s) is updated (%s:%d:%d) group(%s)", strUserId.c_str(), clsInfo.m_strIp.c_str(),
                      clsInfo.m_iPort, clsInfo.m_eTransport, clsInfo.m_strGroupId.c_str() );
     }
     m_clsMutex.release();
-
-    if ( pclsContact ) {
-        pclsContact->m_clsUri.m_strProtocol = SIP_PROTOCOL;
-        pclsContact->m_clsUri.m_strUser = strUserId;
-        pclsContact->m_clsUri.m_strHost = clsInfo.m_strIp;
-        pclsContact->m_clsUri.m_iPort = clsInfo.m_iPort;
-        pclsContact->m_clsUri.InsertTransport( clsInfo.m_eTransport );
-    }
 
     return true;
 }
@@ -243,17 +256,34 @@ void CUserMap::DeleteTimeout( int iTimeout ) {
  * @param clsDeletedList 삭제된 사용자 ID 를 받는 리스트
  */
 void CUserMap::DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList ) {
+    USER_INFO_LIST clsInfoList;
+
+    DeleteTimeout( iTimeout, clsInfoList );
+
+    clsDeletedList.clear();
+    for ( USER_INFO_LIST::iterator itList = clsInfoList.begin(); itList != clsInfoList.end(); ++itList ) {
+        clsDeletedList.push_back( itList->first );
+    }
+}
+
+/**
+ * @ingroup CspServer
+ * @brief 만료된 사용자를 삭제하고, (ID, 삭제 시점 바인딩) 쌍을 반환한다 — reg-event NOTIFY 용.
+ * @param iTimeout           만료 이후 대기 시간 (초단위)
+ * @param clsDeletedInfoList 삭제된 사용자 (ID, 바인딩) 을 받는 리스트
+ */
+void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList ) {
     USER_MAP::iterator itMap, itNext;
     time_t iTime;
 
-    clsDeletedList.clear();
+    clsDeletedInfoList.clear();
     time( &iTime );
 
     m_clsMutex.acquire();
     for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ) {
         if ( iTime > ( itMap->second.m_iLoginTime + itMap->second.m_iLoginTimeout + iTimeout ) ) {
             CLog::Print( LOG_DEBUG, "user(%s) is deleted - timeout", itMap->first.c_str() );
-            clsDeletedList.push_back( itMap->first );
+            clsDeletedInfoList.push_back( std::make_pair( itMap->first, itMap->second ) );
             itMap = m_clsMap.erase( itMap );
         } else {
             ++itMap;

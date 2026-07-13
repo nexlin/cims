@@ -141,6 +141,13 @@ public:
 	 *  송신/미지정 시 -1. */
 	int							m_iListenerId;
 
+	/** 요청 전송 목적지 오버라이드 (CSP 확장).
+	 *  세팅 시 Route/Request-URI 대신 이 주소로 전송한다 — NAT 뒤 단말처럼
+	 *  등록 Contact(사설 주소)과 실제 도달 주소가 다를 때 헤더에 노출 없이 라우팅.
+	 *  미지정(빈 문자열/0) 시 기존 동작. */
+	std::string			m_strSendDestIp;
+	int							m_iSendDestPort;
+
 	/** SIP �޽����� compact form ���� �����ϴ��� ���� */
 	bool						m_bUseCompact;
 

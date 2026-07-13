@@ -28,6 +28,10 @@
 
 typedef std::list<std::string> USER_ID_LIST;
 
+class CUserInfo;
+/** (사용자 ID, 삭제 시점 바인딩) 쌍 — 만료 sweep 이 reg-event NOTIFY 용으로 반환 */
+typedef std::list<std::pair<std::string, CUserInfo> > USER_INFO_LIST;
+
 /**
  * @ingroup CspServer
  * @brief SIP 클라이언트 정보 저장 클래스
@@ -64,6 +68,17 @@ public:
     /** REGISTER Contact 에 MCData ICSI feature tag(+g.3gpp.icsi-ref=...icsi.mcdata...) 광고 —
      *  MSRP(media plane) 배포 가능 단말 표시. fan-out 하이브리드 분기에 사용. */
     bool m_bMcDataMsrp;
+
+    /** 단말이 REGISTER Contact 에 실은 URI 원문 (as-registered, RFC 3261 §10.3).
+     *  200 OK Contact 에코·reginfo <uri> 용 — NAT 뒤 단말은 사설 주소일 수 있으므로
+     *  실제 도달 주소는 m_strIp:m_iPort(received/rport latch)를 사용한다. */
+    std::string m_strContactUri;
+
+    /** REGISTER Contact 의 파라미터 목록 (expires 제외) — reginfo <unknown-param> 용 */
+    SIP_PARAMETER_LIST m_clsContactParamList;
+
+    /** 마지막 REGISTER 의 CSeq — reginfo <contact cseq=""> 용 */
+    int m_iRegisterCSeq;
 };
 
 typedef std::map<std::string, CUserInfo> USER_MAP;
@@ -77,7 +92,7 @@ public:
     CUserMap();
     ~CUserMap();
 
-    bool Insert( CSipMessage *pclsMessage, CSipFrom *pclsContact, CspUser *pclsXmlUser );
+    bool Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser );
     bool Select( const char *pszUserId, CUserInfo &clsInfo );
     bool Select( const char *pszUserId );
     bool SelectGroup( const char *pszGroupId, USER_ID_LIST &clsList );
@@ -87,6 +102,7 @@ public:
 
     void DeleteTimeout( int iTimeout );
     void DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList );
+    void DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList );
     void SendOptions();
 
     void GetRegisteredUsers( USER_ID_LIST &clsList );
