@@ -380,7 +380,7 @@ build/dist/
 | | ptt-sip (psp) | 5060/udp · LocalIp 127.0.0.2 (loopback alias) |
 | | ptt-media (pmp) | 9000/udp · 127.0.0.3 |
 | | Test-agent | sync 9903~9906 (mgmt 9903, 4 service 9904~9906 + 추가) |
-| **운영 배포본 (참고)** | csc | 4420 |
+| **운영 배포본 (참고)** | csc | 4421 |
 | | console | 80 |
 
 ## 부록 C. 알려진 함정

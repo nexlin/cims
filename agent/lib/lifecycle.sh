@@ -325,8 +325,8 @@ for ov in candidates:
     except: pass
 if not p:
     try: p=json.load(open(base))['Server']['Port']
-    except: p=4420
-print(p)" 2>/dev/null || echo 4420)
+    except: p=4421
+print(p)" 2>/dev/null || echo 4421)
     # DIST_DIR 포함 절대경로 pattern — Phase 1/2 csc 공존 시 상호 kill 방지
     kill_stray "$DIST_DIR/csc/src/csc_app.py" "$csc_port" tcp
     info "CSC (REST API 서버) 시작... (port=$csc_port)"
@@ -338,7 +338,7 @@ print(p)" 2>/dev/null || echo 4420)
 }
 
 # OAM 분리 Phase 3b — cims@oam.service / cims-svc start oam 으로 동작.
-# OAM(4419) = Agent / HA / 배포 / 검증 책임. CSC(4420 admin + 4430 mcptt) 와 별개 프로세스.
+# OAM(4419) = Agent / HA / 배포 / 검증 책임. CSC(4421 admin + 4430 mcptt) 와 별개 프로세스.
 start_oam() {
     if is_running oam; then warn "OAM 이미 실행 중 (pid=$(read_pid oam))"; return 0; fi
     [[ ! -f "$DIST_DIR/oam/src/oam_app.py" ]] && err "OAM 소스 없음 (make dist 실행 필요)" && return 1
@@ -678,8 +678,8 @@ if os.path.isfile(ov):
     except: pass
 if not p:
     try: p=json.load(open(base))['Server']['Port']
-    except: p=4420
-print(p)" 2>/dev/null || echo 4420)
+    except: p=4421
+print(p)" 2>/dev/null || echo 4421)
     stop_one csc
     # PID 파일 없이 남아있는 스트레이 프로세스도 정리 (DIST_DIR 범위로 한정)
     kill_stray "$DIST_DIR/csc/src/csc_app.py" "$csc_port" tcp

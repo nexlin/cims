@@ -25,7 +25,7 @@
           "max": 65535,
           "required": true,
           "restart": true,
-          "help": "Phase 1 Test-CSC 기본 4421 (Phase 2 배포본 기본 4420 과 분리)."
+          "help": "CSC admin API 포트 — 전 환경 4421 (verify 배포본만 4445, OAM 4419 와 충돌 회피)."
         }
       ],
       "scope": "service"
@@ -224,7 +224,7 @@
           "label": "KMS Client 초기 요청 URL",
           "type": "string",
           "default": "https://127.0.0.1:4421/keymanagement/identity/v1/init",
-          "deploy_value": "https://@CSC_HOST@:4420/keymanagement/identity/v1/init",
+          "deploy_value": "https://@CSC_HOST@:4421/keymanagement/identity/v1/init",
           "restart": true
         },
         {

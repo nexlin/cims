@@ -15,7 +15,7 @@
 | **cwrtc** | WebRTC ↔ SIP/RTP 게이트웨이 | `build/bin/cwrtc` (C++) | 바이너리 | WS 8080 / WSS 8443, SIP 5062 |
 | **cspsim** | SIP 단말 시뮬레이터 (테스트) | `build/bin/cspsim` (C++) | 바이너리(CLI) | — |
 | **OAM** | 운영·관리 REST API (콘솔 백엔드) | Python (vendored) | `python3 ems/core/oam/src/oam_app.py` | HTTPS 4419 |
-| **CSC** | 가입자/그룹/MCPTT REST API | Python (vendored) | `python3 csc/src/csc_app.py` | HTTPS 4420/4421, MCPTT 4430 |
+| **CSC** | 가입자/그룹/MCPTT REST API | Python (vendored) | `python3 csc/src/csc_app.py` | HTTPS 4421, MCPTT 4430 |
 | **Console** | 관리자 Web UI (React/Vite) | `ems/core/console/dist/` 또는 dev 서버 | `npm run dev` (개발) | HTTP 3000 |
 | **MariaDB** | 가입자/그룹/조직/RBAC 등 영속 저장 | — | 시스템 서비스 | 3306 |
 
@@ -108,7 +108,7 @@ npm run dev -- --port 3000 --host
 ```
 - `http://<host>:3000/` 접속.
 - `/api/*` 요청을 백엔드로 프록시합니다. 프록시 대상 = `VITE_ADMIN_TARGET`.
-  - `vite.config.ts` 기본값: `https://127.0.0.1:4420`
+  - `vite.config.ts` 기본값: `https://127.0.0.1:4421`
   - `.env.local` / `.env.tb.local`: `VITE_ADMIN_TARGET=https://127.0.0.1:4419` (**OAM**)
   - 즉 개발 콘솔은 **OAM(4419)** 을 백엔드로 사용 → OAM 이 떠 있어야 데이터가 채워집니다.
 - 자체서명 인증서 허용을 위해 프록시는 `secure:false`. HTTPS 로 띄우려면 `VITE_DEV_HTTPS=1`.
@@ -140,7 +140,7 @@ python3 -u oam_app.py
 - 기동 로그에 `Uvicorn running on https://0.0.0.0:4419` 가 보이면 정상.
 - `oam_app.py` 가 `ems/core/oam/vendor/` 와 `csc/src/`(공유 서비스) 를 sys.path 에 자동 추가.
 
-### 5.2 CSC (가입자/그룹/MCPTT API, :4421/:4420, MCPTT :4430)
+### 5.2 CSC (가입자/그룹/MCPTT API, :4421, MCPTT :4430)
 ```bash
 cd csc/src
 python3 -u csc_app.py
@@ -218,7 +218,7 @@ FLUSH PRIVILEGES;
 
 # 4) OAM → 5) CSC → 6) Console (§5, §4)
 cd ems/core/oam/src && python3 -u oam_app.py        # :4419
-cd csc/src && python3 -u csc_app.py        # :4421/4420, 4430
+cd csc/src && python3 -u csc_app.py        # :4421, 4430
 cd ems/core/console && npm run dev -- --port 3000 --host
 ```
 
@@ -227,8 +227,7 @@ cd ems/core/console && npm run dev -- --port 3000 --host
 |---|---|---|---|
 | 3000 | HTTP/WS | Console | Web UI (Vite dev) |
 | 4419 | HTTPS | OAM | 운영·관리 API (콘솔 백엔드) |
-| 4420 | HTTPS | CSC | Admin REST API (운영) |
-| 4421 | HTTPS | CSC | Admin REST API (테스트) |
+| 4421 | HTTPS | CSC | Admin REST API |
 | 4430 | HTTPS | CSC | MCPTT API (UE) |
 | 5060 | UDP/TCP | CSP | SIP 시그널링 |
 | 5061 | UDP | CSP | SIP TLS |

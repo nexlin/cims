@@ -152,9 +152,9 @@ step10_verify() {
 
     echo ""
     echo "--- API ---"
-    echo -n "녹취: "; curl -sk "https://localhost:4420/api/v1/recordings" 2>&1 | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{d[\"total\"]}건')"
+    echo -n "녹취: "; curl -sk "https://localhost:4421/api/v1/recordings" 2>&1 | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{d[\"total\"]}건')"
     TODAY=$(date +%Y-%m-%d)
-    echo -n "Flow: "; curl -sk "https://localhost:4420/api/v1/flow/list?date=$TODAY" 2>&1 | python3 -c "import json,sys; ids=json.load(sys.stdin).get('call_ids',[]); print(f'{len(ids)}건')"
+    echo -n "Flow: "; curl -sk "https://localhost:4421/api/v1/flow/list?date=$TODAY" 2>&1 | python3 -c "import json,sys; ids=json.load(sys.stdin).get('call_ids',[]); print(f'{len(ids)}건')"
 }
 
 # ─────────────────────────────────────────────

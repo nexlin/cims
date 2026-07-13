@@ -329,8 +329,8 @@ c.setdefault('Log', {})['File'] = 'log/csc_tb.log'
 c.setdefault('Packages', {})['Dir'] = 'packages_tb'
 c['Packages']['BackupDir'] = 'packages_tb_trash'
 c['ConfigCacheDir'] = 'cache_tb'
-# IdMs.KmsClientReqUrl 을 TB-CSC(4419) 로. base csc.json 의 deploy_value
-# 는 운영 포트(4420) 를 유지하므로 여기서 4420/4421 둘 다 4419 로 치환.
+# IdMs.KmsClientReqUrl 을 TB-CSC(4419) 로 치환 (admin 포트는 전 환경 4421 —
+# 과거 4420 렌더본 호환을 위해 둘 다 수용).
 idms = c.setdefault('IdMs', {})
 if isinstance(idms.get('KmsClientReqUrl'), str):
     idms['KmsClientReqUrl'] = (idms['KmsClientReqUrl']

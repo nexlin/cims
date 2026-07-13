@@ -80,11 +80,12 @@ _AGENT_NAME_CSC = "mgmt-server"
 _DIST_ROOT_CSC = "mgmt-server"
 _AGENT_SYNC_PORT_CSC = 9903
 
-# 배포본 csc — verify 환경 기본 포트 (4445/8081). 운영 환경 (4420/80) 도
+# 배포본 csc — verify 환경 기본 포트 (4445/8081). 운영 환경 (4421/80) 도
 # ctx.opts["target"]="prod" 로 분기 가능. csp/cmp 는 두 환경 동일 (5060/9000).
+# csc 포트 SoT 는 csc_http.DEPLOYED_CSC_PORTS.
 _TARGET_PORTS = {
-    "verify": {"csc": 4445, "console": 8081},
-    "prod":   {"csc": 4420, "console": 80},
+    "verify": {"csc": csc_http.deployed_csc_port("verify"), "console": 8081},
+    "prod":   {"csc": csc_http.deployed_csc_port("prod"), "console": 80},
 }
 
 # Instance descriptor — 한 entry = 한 service-server 인스턴스. tarball/install/process/

@@ -29,6 +29,20 @@ _INSECURE_CTX = ssl.create_default_context()
 _INSECURE_CTX.check_hostname = False
 _INSECURE_CTX.verify_mode = ssl.CERT_NONE
 
+# 배포본 csc admin 포트 — target(ctx.opts["target"]) 별. verify 파이프라인이
+# 자체 배포하는 csc 는 4445, 운영 배포본은 4421 (시스템 단일 admin 포트).
+DEPLOYED_CSC_PORTS = {"verify": 4445, "prod": 4421}
+
+
+def deployed_csc_port(target: str = "verify") -> int:
+    """배포본 csc admin 포트 — 미지정/미지원 target 은 verify(4445)."""
+    return DEPLOYED_CSC_PORTS.get(target or "verify", DEPLOYED_CSC_PORTS["verify"])
+
+
+def deployed_csc_base(target: str = "verify") -> str:
+    """배포본 csc admin API base URL (https://127.0.0.1:<port>)."""
+    return f"https://127.0.0.1:{deployed_csc_port(target)}"
+
 
 def _request(method: str, url: str, *, headers: Optional[dict] = None,
              data: Optional[bytes] = None, timeout: int = 10) -> tuple:

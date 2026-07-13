@@ -49,9 +49,9 @@ interface PkgDef {
 // 실제 운영자는 ServiceIpPanel 에서 자유 입력 가능 (이 매핑은 hint 용).
 const SLOT_MAP: Record<string, IpSlot[]> = {
   csc:     [
-    { scope: 'service', name: 'Admin', port: 4420, proto: 'tcp' },
+    { scope: 'service', name: 'Admin', port: 4421, proto: 'tcp' },
     { scope: 'service', name: 'McPTT', port: 4430, proto: 'tcp' },
-    { scope: 'vip',     name: 'Admin', port: 4420, proto: 'tcp' },
+    { scope: 'vip',     name: 'Admin', port: 4421, proto: 'tcp' },
   ],
   csp:     [
     { scope: 'service', name: 'SIP',   port: 5060, proto: 'udp' },
@@ -206,8 +206,9 @@ function buildInstallCommand(token: string, name: string, role: Role): string {
   const r = role ? ` --role ${role}` : ''
   // name 에 space/특수문자 포함 가능 → 큰따옴표 quote
   const quotedName = `"${name.replace(/(["\\$`])/g, '\\$1')}"`
-  return `curl -k https://CSC:4420/install-agent.sh | bash -s -- \\
-  --csc-url https://CSC:4420 \\
+  // 서버 발급(install_command) fallback — install-agent.sh 는 OAM(4419) 이 서빙.
+  return `curl -fsSLk https://OAM:4419/install-agent.sh | bash -s -- \\
+  --oam-url https://OAM:4419 \\
   --enrollment-token ${token} \\
   --name ${quotedName}${r}`
 }

@@ -1,7 +1,7 @@
 """S6-CMP-GROUP-SYNC — admin → CSP → CMP roster 동기화 검증.
 
 흐름:
-  1. 배포본 csc(target=verify→4445, prod→4420) admin login.
+  1. 배포본 csc(target=verify→4445, prod→4421) admin login.
   2. 임시 PTT 그룹 (gid="verify-cmp-<ms>") POST /api/v1/ptt/groups.
      csc → notify_csp(UDP) → CSP → CMP `addGroup` 전파.
   3. 1~5 초 폴링: CMP 9000/UDP `STATS_REQUEST` 응답의
@@ -24,13 +24,8 @@ from ...common.cmp_client import cmp_request
 from ._helpers import target_ip
 
 
-_TARGET_CSC_PORTS = {"verify": 4445, "prod": 4420}
-
-
 def _deployed_csc_base(ctx: VerifyContext) -> str:
-    target = (ctx.opts or {}).get("target") or "verify"
-    port = _TARGET_CSC_PORTS.get(target, 4445)
-    return f"https://127.0.0.1:{port}"
+    return csc_http.deployed_csc_base((ctx.opts or {}).get("target") or "verify")
 
 
 def _stats_has_gid(resp: dict, gid: str) -> bool:

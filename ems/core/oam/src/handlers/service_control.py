@@ -89,7 +89,7 @@ def _driver() -> str:
 
 # TB-CSC 가 자기 config (csc-tb.json, port 4419) 로 띄워진 상태에서 subprocess 가
 # 환경을 그대로 상속하면 자식 csc_app.py 도 csc-tb.json 을 읽어 4419/4431 bind 시도 → 충돌.
-# Test-CSC / 배포본 csc 는 base csc.json (4421/4445/4420) 을 써야 하므로 TB 전용 env 차단.
+# Test-CSC / 배포본 csc 는 base csc.json (4421/4445) 을 써야 하므로 TB 전용 env 차단.
 _BLOCKED_ENV_KEYS = {"CIMS_CSC_CONFIG", "CIMS_AGENT_SYNC_PORT"}
 
 

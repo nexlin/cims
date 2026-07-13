@@ -19,7 +19,7 @@
 3. **CSC 본연 (MCPTT 신호처리)** — UE 와의 IdMS / GMS / CMS / KMS — 단말 통신
 4. **공통 인프라** — Admin JWT 인증, 로그인 본인 정보
 
-규모: `csc/src/handlers/` 13 파일 약 11,000 line, `services/mcptt.py` 1,200 line. Admin server(4420) 가 비대해진 상태. 운영팀/사업팀 배포 사이클 독립을 위해 분리 필요.
+규모: `csc/src/handlers/` 13 파일 약 11,000 line, `services/mcptt.py` 1,200 line. Admin server(4421) 가 비대해진 상태. 운영팀/사업팀 배포 사이클 독립을 위해 분리 필요.
 
 ## 결정 (4 의문점)
 

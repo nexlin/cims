@@ -16,13 +16,13 @@ export interface UploadHandle<T> {
 }
 
 // 업로드 URL — 기본은 상대 경로(Vite 프록시 또는 동일 오리진).
-// VITE_CSC_DIRECT=1 환경변수로 dev 모드에서만 4420 직접 전송 전환 가능 (인증서 신뢰 필요).
+// VITE_CSC_DIRECT=1 환경변수로 dev 모드에서만 4421 직접 전송 전환 가능 (인증서 신뢰 필요).
 // CORS + 자체서명 인증서 이중신뢰 이슈를 피하려면 상대 경로 유지 권장.
 function buildUploadUrl(path: string): string {
   const env = (import.meta as unknown as { env: Record<string, string> }).env || {}
   if (env.VITE_CSC_DIRECT === '1' && env.PROD !== 'true') {
     const loc = window.location
-    const port = env.VITE_CSC_PORT || '4420'
+    const port = env.VITE_CSC_PORT || '4421'
     return `${loc.protocol}//${loc.hostname}:${port}${BASE}${path}`
   }
   return `${BASE}${path}`

@@ -4,9 +4,9 @@ Phase 1.H stub. 2-node 환경 (`agent/keepalived/ha.json` 존재 + standby peer
 응답) 일 때만 LIVE. 그 외 (현재 dev/single-node) SKIP.
 
 LIVE 흐름:
-  1. ha.json 의 peer_ip 가 4420 응답 → 2-node 환경 확인.
+  1. ha.json 의 peer_ip 가 csc admin 포트(4421) 응답 → 2-node 환경 확인.
   2. active CSC process kill (cims.sh stop csc).
-  3. ≤5s 대기 후 peer 의 4420/admin API 200 OK 응답 확인 → VIP 인수 + CSC standby 승격.
+  3. ≤5s 대기 후 peer 의 admin API 200 OK 응답 확인 → VIP 인수 + CSC standby 승격.
   4. 복구: 원래 active 노드 cims.sh start csc.
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ import socket
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
+from ...common.csc_http import deployed_csc_port
 
 
 _HA_JSON_REL = ("agent", "keepalived", "ha.json")
@@ -41,8 +42,9 @@ def scn_failover_csc(ctx: VerifyContext) -> ItemResult:
     peer_ip = cfg.get("peer_ip") or ""
     if not peer_ip:
         return _skip(ctx, "ha.json.peer_ip 미설정")
-    if not _peer_admin_ready(peer_ip, 4420):
-        return _skip(ctx, f"peer {peer_ip}:4420 응답 없음 — 2-node 환경 미준비")
+    admin_port = deployed_csc_port("prod")
+    if not _peer_admin_ready(peer_ip, admin_port):
+        return _skip(ctx, f"peer {peer_ip}:{admin_port} 응답 없음 — 2-node 환경 미준비")
 
     # LIVE 시나리오 구현은 후속 라운드 (실제 fail-over 검증 환경 마련 후).
     return _skip(ctx, "2-node 환경 감지됨 — LIVE 본체 미구현 (1.H 후속)")

@@ -234,12 +234,12 @@ if __name__ == '__main__':
         # ── CSC Admin server (가입자 CRUD + 조직) ─────────────────────────────
         # CSC 완전 독립 (csc_standalone_module.md P1) — 가입자(admin.py) + 조직(org.py)만.
         # 로그인/토큰발급(auth)·본인프로파일(users /me)은 base(oam) 책임. port 는
-        # csc.json Server.Port (default 4420, OAM 4419 와 충돌 회피).
-        admin_conf = config.get('Server', {'Ip': '0.0.0.0', 'Port': 4420})
+        # csc.json Server.Port (default 4421, OAM 4419 와 충돌 회피).
+        admin_conf = config.get('Server', {'Ip': '0.0.0.0', 'Port': 4421})
         cims_kwargs = {'config': config}
         admin_server = HttpServer(
             admin_conf.get('Ip', '0.0.0.0'),
-            admin_conf.get('Port', 4420),
+            admin_conf.get('Port', 4421),
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,
         )
@@ -248,7 +248,7 @@ if __name__ == '__main__':
             for path, handler, _ in CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
         ])
         admin_server.start()
-        logger.log_info(f"CSC Admin server started on port {admin_conf.get('Port', 4420)}")
+        logger.log_info(f"CSC Admin server started on port {admin_conf.get('Port', 4421)}")
 
         # ── MCPTT server (IdMS / GMS / CMS / KMS) ───────────────────────────
         mcptt_conf = config.get('McpttServer', {'Ip': '0.0.0.0', 'Port': 4430})

@@ -6,7 +6,7 @@
    (S5 배포 이후 패키지 재빌드 시 mismatch → FAIL, S5 부터 재배포 필요)
 
 target=verify (default) → csc=4445, console=8081
-target=prod             → csc=4420, console=80
+target=prod             → csc=4421, console=80
 시그널링/미디어 포트 (5060/9000) 는 LocalIp 별로 분리 — _INSTANCES.local_ip 매칭.
 """
 from __future__ import annotations
@@ -15,12 +15,13 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ... import shell
 from ...common import pkg_manifest as _pkgm
+from ...common.csc_http import deployed_csc_port
 from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
 
 
 _TARGET_PORTS = {
-    "verify": {"csc": 4445, "console": 8081},
-    "prod":   {"csc": 4420, "console": 80},
+    "verify": {"csc": deployed_csc_port("verify"), "console": 8081},
+    "prod":   {"csc": deployed_csc_port("prod"), "console": 80},
 }
 
 

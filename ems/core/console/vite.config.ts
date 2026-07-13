@@ -17,7 +17,7 @@ const EMS_ROOT = path.resolve(process.cwd(), '../..')   // dev server fs.allow �
 // Vite 가 proxy target 을 HTTPS 로 보낼 때 `secure: false` 가 필수 (CSC 자체서명).
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
-  const adminTarget = env.VITE_ADMIN_TARGET || 'https://127.0.0.1:4420'
+  const adminTarget = env.VITE_ADMIN_TARGET || 'https://127.0.0.1:4421'
   const useHttps = env.VITE_DEV_HTTPS === '1'
   const plugins = useHttps ? [react(), basicSsl()] : [react()]
   return {

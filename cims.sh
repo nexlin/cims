@@ -295,7 +295,7 @@ cmd_reset() {
             local _killed=0
             # reset 은 검증 대상만 정리 — TB 포트(4419/3000) 는 제외해 상시 동작 보장
             # console: Dev(3001) + Test(8080) / cwrtc: 8443 (블록 A 이전, 구 8080)
-            for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp"; do
+            for _rp in "5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp"; do
                 _port="${_rp%%:*}"; _proto="${_rp##*:}"
                 if [[ $_proto == "tcp" ]]; then
                     _pids=$(ss -Htlnp 2>/dev/null | awk -v pt=":$_port" '$4 ~ pt {match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | sort -u || true)
@@ -526,7 +526,7 @@ cmd_preflight() {
     # 3) 포트 점유 확인
     # 검증 대상 포트 — 기동 전엔 "가용" 이어야 정상.
     # TB 포트(4419/3000) 는 반대로 "점유" 되어 있어야 정상 (TB 상시 동작 전제).
-    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4420:tcp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp")
+    local target_ports=("5060:udp" "5061:tcp" "9000:udp" "9001:udp" "4421:tcp" "3001:tcp" "3002:tcp" "8080:tcp" "8443:tcp")
     local tb_ports=("4419:tcp:TB-CSC" "3000:tcp:TB-Console")
     local pp port proto line pid label
     info "[검증 대상] 기동 전엔 가용해야 함"
