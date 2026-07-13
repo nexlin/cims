@@ -6,9 +6,13 @@
 #     <svc> = ha.json services.<svc> 에 등록된 slug (그룹명)
 #
 # 동작 (상태 인지 — cold-spare 정합):
-#   0) 이 노드가 해당 서비스의 VIP 를 보유하지 않으면 무조건 PASS —
-#      standby 는 cold 모듈이 정지 상태인 것이 정상이라, 포트 검사를 하면
-#      영구 FAULT 로 승격 자격을 잃는 데드락이 된다 (헬스는 VIP 보유자만 검사).
+#   0) 이 노드가 해당 서비스의 VIP 를 보유하지 않으면 **승격 자격 검사** —
+#      cold standby 는 모듈이 정지 상태인 것이 정상이므로 실행 여부는 보지 않고,
+#      절체 시 기동할 모듈(health_module ∪ cold_modules ∪ tracked_modules)이
+#      **설치되어 있는지** (${cims_home}/modules/<mod>/current 존재) 만 검사한다.
+#        - 필수 모듈 미설치        → rc=1 (승격 자격 없음 — 빈 서버가 VIP 를
+#          인수해 ACTIVE 로 보이는 것을 차단)
+#        - 필수 모듈 정보가 없으면 → 설치 모듈이 하나라도 있으면 PASS, 전무하면 rc=1
 #   1) VIP 보유 노드: ha.json services.<svc>.{port, proto, bind_ip} lookup 후
 #      `ss -ln{t,u}` 로 binding 확인 (listen 중이면 PASS)
 #      — services.<svc>.health_module/health_config_key 가 렌더돼 있으면(csc 등
@@ -17,7 +21,14 @@
 #        직접 읽는다 — 배포기록↔실파일 포트 드리프트가 나도 헬스는 모듈이 실제
 #        bind 하는 포트를 본다 (드리프트 노출은 config_out_of_sync 알람 몫).
 #        읽기 실패 시 ha.json port → 내장 default 순 fallback.
+#      — 포트를 어떤 경로로도 알 수 없으면 **하드 FAIL 하지 않는다**: 필수 모듈
+#        pgrep 검사로 대체하고, 그것도 없으면 PASS + 로그 (검사 불능 ≠ 장애 —
+#        포트 미상으로 FAULT→VIP반납→재승격 무한 flap 하던 구조 제거).
 #   2) tracked_modules 가 지정되면 `pgrep -x <mod>` 도 모두 PASS 해야 rc=0
+#   3) 승격 grace — cims-notify 가 MASTER 전이 시 기록한
+#      ${HA_LOG_DIR}/master_at_<svc> 이후 grace_sec (ha.json
+#      failover_options.health.grace_sec, 기본 30s) 동안은 검사 실패를 유예
+#      (cold 모듈 기동 시간 흡수 — 승격 직후 FAULT 로 되돌아가는 race 차단).
 #   실패 시 rc=1 → keepalived FAULT → VIP 이양 → 피어가 승격.
 #
 # 옛 check_{csc,csp,psp}.sh (각 서비스별 분리) 의 대체.
@@ -36,19 +47,23 @@ fi
 SVC="${1:-}"
 [[ -z "$SVC" ]] && { echo "usage: cims-health <svc>" >&2; exit 2; }
 
-# ha.json 에서 port / proto / bind_ip / vips / tracked_modules lookup. 미존재 시 default.
-# 출력 형식: PORT|PROTO|BIND_IP|VIP1,VIP2|MOD1,MOD2  (빈값 케이스에서 split 충돌 회피)
-IFS='|' read -r PORT PROTO BIND_IP VIPS TRACKED < <(python3 - "$HA_JSON" "$SVC" <<'PY'
+STATE_DIR="${HA_LOG_DIR:-/var/log/cims-ha}"
+
+# ha.json 에서 port / proto / bind_ip / vips / tracked / 필수모듈 / grace lookup.
+# 출력 형식: PORT|PROTO|BIND_IP|VIP1,VIP2|MOD1,MOD2|REQ1,REQ2|GRACE|HOME
+IFS='|' read -r PORT PROTO BIND_IP VIPS TRACKED REQ GRACE CIMS_HOME < <(python3 - "$HA_JSON" "$SVC" <<'PY'
 import json, sys, os
 ha_json, svc = sys.argv[1], sys.argv[2]
 defaults = {"csc": (4421, "tcp", ""),
             "csp": (5060, "udp", ""),
             "psp": (5060, "udp", "")}
 port, proto, bind_ip = defaults.get(svc, (0, "udp", ""))
-vips, tracked = [], []
+vips, tracked, req = [], [], []
+grace, home = 30, "/opt/cims"
 if os.path.isfile(ha_json):
     try:
         cfg = json.load(open(ha_json))
+        home = cfg.get("cims_home") or home
         s = (cfg.get("services") or {}).get(svc) or {}
         port = s.get("port", port)
         proto = s.get("proto", proto)
@@ -59,12 +74,24 @@ if os.path.isfile(ha_json):
             vips.append(str(s["vip"]).strip())
         fo = s.get("failover_options") or {}
         tracked = [str(m).strip() for m in (fo.get("tracked_modules") or []) if str(m).strip()]
+        try:
+            grace = int((fo.get("health") or {}).get("grace_sec", grace))
+        except (TypeError, ValueError):
+            pass
+        # 승격 자격/대체 검사 대상 모듈 — health_module ∪ cold_modules ∪ tracked.
+        mods = []
+        if s.get("health_module"):
+            mods.append(str(s["health_module"]).strip())
+        mods += [str(m).strip() for m in (s.get("cold_modules") or []) if str(m).strip()]
+        mods += tracked
+        for m in mods:
+            if m and m not in req:
+                req.append(m)
         # 진실 기반 포트 — 모듈이 실제 읽는 배포 config.json 의 키에서 유도.
         # (OAM 이 수동 health.port 오버라이드 시 health_module 을 렌더하지 않음.)
         mod, key = s.get("health_module"), s.get("health_config_key")
         if mod and key:
             try:
-                home = cfg.get("cims_home") or "/opt/cims"
                 base = os.path.join(home, "modules", mod, "current")
                 for rel in (os.path.join(mod, "config.json"), "config.json"):
                     p = os.path.join(base, rel)
@@ -86,12 +113,14 @@ if os.path.isfile(ha_json):
                 pass                                     # ha.json port 그대로
     except Exception:
         pass
-print(f"{port}|{proto}|{bind_ip}|{','.join(vips)}|{','.join(tracked)}")
+print(f"{port}|{proto}|{bind_ip}|{','.join(vips)}|{','.join(tracked)}|{','.join(req)}|{grace}|{home}")
 PY
 )
 
-# 0) VIP 보유 검사 — 미보유(BACKUP/standby)면 서비스 상태와 무관하게 PASS.
+# ── 0) VIP 보유 검사 ────────────────────────────────────────────────
+#    미보유(BACKUP/standby)면 실행 상태 대신 승격 자격(설치 여부)을 검사.
 #    (VIP 미정의 그룹은 판정 불가 → 종전대로 포트 검사로 진행.)
+HOLD=1
 if [[ -n "${VIPS:-}" ]]; then
     LOCAL_ADDRS=$(ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
     HOLD=0
@@ -99,14 +128,65 @@ if [[ -n "${VIPS:-}" ]]; then
     for v in "${VIPARR[@]}"; do
         if [[ -n "$v" ]] && grep -qxF "$v" <<< "$LOCAL_ADDRS"; then HOLD=1; break; fi
     done
-    if [[ $HOLD -eq 0 ]]; then
-        exit 0      # standby — cold 모듈 정지가 정상, 헬스는 VIP 보유자만 검사
-    fi
 fi
 
+if [[ $HOLD -eq 0 ]]; then
+    # standby — cold 모듈 정지는 정상. 절체 시 기동할 모듈이 설치돼 있는지만 검사.
+    if [[ -n "${REQ:-}" ]]; then
+        IFS=',' read -r -a REQARR <<< "$REQ"
+        for m in "${REQARR[@]}"; do
+            [[ -z "$m" ]] && continue
+            if [[ ! -e "$CIMS_HOME/modules/$m/current" ]]; then
+                echo "cims-health: $SVC standby — module '$m' not installed (승격 자격 없음)" >&2
+                exit 1
+            fi
+        done
+        exit 0
+    fi
+    # 필수 모듈 정보 없음 — 설치 모듈이 하나라도 있으면 PASS, 전무(빈 서버)면 FAIL.
+    if compgen -G "$CIMS_HOME/modules/*/current" >/dev/null 2>&1; then
+        exit 0
+    fi
+    echo "cims-health: $SVC standby — no modules installed (승격 자격 없음)" >&2
+    exit 1
+fi
+
+# ── VIP 보유 노드 검사 ──────────────────────────────────────────────
+# 승격 grace — MASTER 전이 후 grace_sec 이내면 검사 실패를 유예 (cold 기동 흡수).
+_in_grace() {
+    [[ "${GRACE:-0}" -gt 0 ]] || return 1
+    local mf="$STATE_DIR/master_at_$SVC"
+    [[ -f "$mf" ]] || return 1
+    local at now
+    at=$(stat -c %Y "$mf" 2>/dev/null) || return 1
+    now=$(date +%s)
+    (( now - at < GRACE ))
+}
+
+_fail() {  # 검사 실패 — grace 이내면 유예 PASS, 아니면 rc=1
+    if _in_grace; then
+        echo "cims-health: $SVC grace 유예 — $*" >&2
+        exit 0
+    fi
+    echo "cims-health: $*" >&2
+    exit 1
+}
+
 if [[ -z "${PORT:-}" || "$PORT" == "0" ]]; then
-    echo "cims-health: port unknown for svc=$SVC" >&2
-    exit 2
+    # 포트 미상 — 하드 FAIL 금지 (검사 불능 ≠ 장애). 필수 모듈 pgrep 로 대체 검사,
+    # 그것도 없으면 PASS + 로그 (ha.json 렌더 보완은 OAM/알람 몫).
+    if [[ -n "${REQ:-}" ]]; then
+        IFS=',' read -r -a REQARR <<< "$REQ"
+        for m in "${REQARR[@]}"; do
+            [[ -z "$m" ]] && continue
+            if ! pgrep -x "$m" >/dev/null 2>&1; then
+                _fail "$SVC port unknown — fallback module '$m' not running"
+            fi
+        done
+        exit 0
+    fi
+    echo "cims-health: $SVC port unknown — 검사 대상 없음, PASS (ha.json 렌더 확인 필요)" >&2
+    exit 0
 fi
 
 case "$PROTO" in
@@ -117,10 +197,10 @@ esac
 # 1) port listen 검사
 if [[ -n "$BIND_IP" ]]; then
     ss $FLAG "src ${BIND_IP}:${PORT}" 2>/dev/null | awk 'NR>1 {found=1} END {exit found?0:1}' \
-        || { echo "cims-health: $SVC port ${BIND_IP}:${PORT}/${PROTO} not listening" >&2; exit 1; }
+        || _fail "$SVC port ${BIND_IP}:${PORT}/${PROTO} not listening"
 else
     ss $FLAG "sport = :${PORT}" 2>/dev/null | awk 'NR>1 {found=1} END {exit found?0:1}' \
-        || { echo "cims-health: $SVC port :${PORT}/${PROTO} not listening" >&2; exit 1; }
+        || _fail "$SVC port :${PORT}/${PROTO} not listening"
 fi
 
 # 2) tracked_modules pgrep 검사 (지정된 경우만)
@@ -129,8 +209,7 @@ if [[ -n "${TRACKED:-}" ]]; then
     for m in "${MODS[@]}"; do
         [[ -z "$m" ]] && continue
         if ! pgrep -x "$m" >/dev/null 2>&1; then
-            echo "cims-health: $SVC tracked module '$m' not running" >&2
-            exit 1
+            _fail "$SVC tracked module '$m' not running"
         fi
     done
 fi

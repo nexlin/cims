@@ -2638,6 +2638,19 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     except Exception as e:
         logger.log_warning(f"[deploy] self-register routes 실패({process_name}): {e}")
 
+    # ── HA ha.json 재렌더 전파 — 헬스포트/cold_modules 는 렌더 시점의 배포 목록에서
+    #   유도되는 파생값이라, 정본 흐름(그룹 구성 → 설치)에서는 그룹 적용 시점에 배포가
+    #   없어 port 미기재 ha.json 이 만들어진다. 배포 생성이 렌더 입력을 바꾸므로
+    #   여기서 재렌더를 태워 ha.json 이 자동 추종하게 한다. (전파 실패는 생성 성공에
+    #   영향 없음 — flap 방어는 cims-health 쪽 안전망이 담당.)
+    try:
+        from handlers.ha_groups import enqueue_update_ha_for_agent
+        n = await asyncio.to_thread(enqueue_update_ha_for_agent, agent_id, config)
+        if n:
+            logger.log_info(f"[deploy] {process_name}: 배포 생성 → update_ha {n}건 재렌더 큐잉")
+    except Exception as e:
+        logger.log_warning(f"[deploy] 배포 생성 ha 재렌더 전파 실패(agent={agent_id}): {e}")
+
     return HandlerResult(status=201, body=_deployment_to_json(r), media_type="application/json")
 
 
@@ -2734,6 +2747,15 @@ async def _delete_deployment(did: int, config):
                     logger.log_info(f"runtime store v2: '{pkg}' 마지막 deployment 제거 → 컬렉션 SoT prune")
         except Exception as _e:
             logger.log_warning(f"runtime store v2 prune skip (pkg={pkg}): {_e}")
+    # 배포 제거도 렌더 입력 변경 — ha.json 재렌더 전파 (생성 경로와 대칭).
+    if dep and dep.get("agent_id") is not None:
+        try:
+            from handlers.ha_groups import enqueue_update_ha_for_agent
+            n = await asyncio.to_thread(enqueue_update_ha_for_agent, dep["agent_id"], config)
+            if n:
+                logger.log_info(f"[deploy] dep={did} 제거 → update_ha {n}건 재렌더 큐잉")
+        except Exception as e:
+            logger.log_warning(f"[deploy] 배포 제거 ha 재렌더 전파 실패(dep={did}): {e}")
     return HandlerResult(status=204, body=None, media_type="application/json")
 
 

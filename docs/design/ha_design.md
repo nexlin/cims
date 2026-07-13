@@ -297,7 +297,7 @@ standby CSC 가 write API 를 허용하면 split-brain 위험이 있어 **cold-s
 | keepalived 인프라 자동화 | `agent/keepalived/`, `cims.sh ha` |
 | Redis register replication 골격 | `csp/RedisStore.{h,cpp}` (cold-mode no-op) + `csp/CspUser.cpp` SetBinding/DelBinding hook. hiredis 통합은 후속. |
 | CMP consistent hash 분배 | `csp/ConsistentHashRing.h` + `csp/CmpClient.{h,cpp}` endpoint vector + AddEndpoint + SelectEndpointForSession |
-| A/S cold-spare + 모듈별 hot 선택 | `oam ha_groups.py`(module_modes 정규화 + cold_modules 렌더), `agent/bin/cims-notify`(승격/강등 시 cims-svc start/stop), `agent/bin/cims-health`(VIP 미보유 노드 PASS), `agent/cims_agent.py`(cold-standby 기동 억제 게이트), 콘솔 `ServersPage FailoverSection`(Cold/Hot 토글) |
+| A/S cold-spare + 모듈별 hot 선택 | `oam ha_groups.py`(module_modes 정규화 + cold_modules 렌더), `agent/bin/cims-notify`(승격/강등 시 cims-svc start/stop), `agent/bin/cims-health`(standby 승격 자격 검사 + 승격 grace), `agent/cims_agent.py`(cold-standby 기동 억제 게이트), 콘솔 `ServersPage FailoverSection`(Cold/Hot 토글) |
 | cims_agent VIP target + backoff | `agent/cims_agent.py:run_loop` exponential backoff (5s→10s→20s→max 60s, 성공 시 reset). VIP target 은 `--csc-url` 인자로 변경. |
 | verify 시나리오 | `verify/lib/items/stage6/scn_failover_{csc,csp,cmp}.py` 3개 (ha.json + multi-CMP 감지 시 LIVE 활성 분기). |
 
@@ -363,15 +363,31 @@ systemd `cims@` instance 는 enable 하지 않는다.
 
 ### 11.3 health probe 정책
 
-- `agent/bin/cims-health <svc>` — ha.json `services.<svc>.{port, proto, bind_ip}`
-  lookup 후 `ss -ln{t,u}` 로 binding 확인. rc=0 / rc=1.
+- `agent/bin/cims-health <svc>` — VIP 보유 여부에 따른 2-모드 검사. rc=0 / rc=1.
+  - **VIP 미보유(standby) = 승격 자격 검사**: 실행 상태 대신, 절체 시 기동할 모듈
+    (`health_module ∪ cold_modules ∪ tracked_modules`)이
+    `${cims_home}/modules/<mod>/current` 에 **설치돼 있는지**만 검사 (cold 정지는
+    정상이므로 PASS). 필수 모듈 정보가 없으면 설치 모듈이 하나라도 있어야 PASS —
+    모듈이 전무한 빈 서버는 승격 자격이 없어 VIP 를 인수하지 못한다.
+  - **VIP 보유(active) = 서비스 검사**: ha.json `services.<svc>.{port, proto,
+    bind_ip}` lookup 후 `ss -ln{t,u}` 로 binding 확인. 포트를 어떤 경로로도 알 수
+    없으면 하드 FAIL 하지 않는다 — 필수 모듈 pgrep 대체 검사, 그것도 없으면
+    PASS+로그 (검사 불능 ≠ 장애: 포트 미상이 FAULT→VIP반납→재승격 무한 flap 으로
+    증폭되는 것을 차단).
+  - **승격 grace**: cims-notify 가 MASTER 전이 시각을 `${ha_log_dir}/master_at_<svc>`
+    로 기록, 이후 `failover_options.health.grace_sec`(기본 30s, 0=유예 없음) 동안
+    VIP 보유 노드의 검사 실패를 유예 — cold 모듈 기동 시간을 흡수해 승격 직후
+    FAULT 로 되돌아가는 race 를 차단.
 - **port/proto 유도**: OAM 렌더(`ha_groups._infer_health_port_proto`)가 그룹 멤버 배포의
   대표 daemon 모듈로 결정. csc 는 실효 admin 포트를 게이트웨이 self-register 와 동일한
   단일 해석(`handlers.agents.effective_server_port`: materialize `Server.Port` →
   pkg `gateway.default_port`)으로 유도 — 콘솔에서 포트를 바꾸면 배포 설정 저장 경로가
   게이트웨이 라우트 재등록 + `update_ha` 재렌더를 함께 큐잉해 자동 추종.
   그 외 모듈은 service descriptor 기본값. 그룹 `failover_options.health.{port,proto}`
-  수동 오버라이드가 최우선.
+  수동 오버라이드가 최우선. **배포 생성/제거도 재렌더를 큐잉**하므로 정본 워크플로
+  (그룹 구성 → 설치)에서 ha.json 이 배포 상태를 자동 추종한다. daemon 배포가 전무하고
+  헬스포트도 (유도/수동) 없는 멤버는 entry 가 `enabled:false` 로 렌더되어
+  vrrp_instance 자체가 생성되지 않는다 (빈 서버 VIP 인수 원천 차단).
 - **진실 기반 검사 (csc)**: 렌더가 `services.<svc>.health_module/health_config_key`
   힌트를 내리면 (csc 이고 수동 health.port 오버라이드가 없을 때), cims-health 는
   검사 시점에 노드 로컬 배포 설정
@@ -398,7 +414,7 @@ keepalived 는 기본적으로 **VIP 만 옮기고 서비스는 건드리지 않
 
 | keepalived state | 동작 |
 |---|---|
-| MASTER  | cold_modules 각각 `cims-svc start <mod>` (선언 순서) — 없으면 로그만 |
+| MASTER  | 승격 시각을 `${ha_log_dir}/master_at_<svc>` 로 기록 (health grace 기준점) 후 cold_modules 각각 `cims-svc start <mod>` (선언 순서) — 없으면 로그만 |
 | BACKUP  | cold_modules 각각 `cims-svc stop <mod>` (역순) — 없으면 로그만 |
 | FAULT   | BACKUP 과 동일 — health probe fail 시 자기 정지 |
 | STOP    | 변경 없음 — keepalived 자체 종료 시 서비스 그대로 유지 |
@@ -470,7 +486,10 @@ install 정책 (csc/src/handlers/agents.py:_create_deployment):
 - `standalone` 모듈은 어느 그룹/그룹 없음 OK
 
 자동 분배 (ems/core/oam/src/handlers/ha_groups.py + agent/cims_agent.py:job_update_ha):
-1. 운영자 Console 에서 그룹 생성 / 멤버 추가 / 멤버 제거 / 그룹 수정
+1. 렌더 트리거 — 그룹 생성 / 멤버 추가·제거 / 그룹 수정 / [▶ 적용], **배포 생성·제거**
+   (`enqueue_update_ha_for_agent`), 배포 설정 저장으로 실효포트가 바뀐 경우.
+   헬스포트/cold_modules 가 배포 목록에서 유도되는 파생값이라, 렌더 입력을 바꾸는
+   변이는 전부 재렌더를 태운다 (그룹 구성 → 설치 순서에서도 자동 추종)
 2. OAM `_enqueue_update_ha_for_members` 가 멤버별 ha.json render → `update_ha` job
    큐잉 (params.ha_json — install_path 는 구 agent 호환 잔재, 신 agent 는 무시)
 3. cims_agent heartbeat 시 job 회수 → `job_update_ha`:

@@ -42,6 +42,7 @@ _FAILOVER_DEFAULTS = {
         'fall':        2,
         'rise':        2,
         'timeout':     3,
+        'grace_sec':   30,   # MASTER 승격 후 헬스 유예 — cold 모듈 기동 시간 흡수
     },
     'track_interface': False,
     'tracked_modules': [],
@@ -97,6 +98,13 @@ def _normalize_failover_options(raw) -> dict:
     hproto = health_in.get('proto')
     if hproto in ('tcp', 'udp'):
         health['proto'] = hproto
+    # 승격 grace (0=유예 없음) — cims-health 가 VIP 취득 직후 cold 모듈이 뜨는 동안
+    # 검사 실패를 유예하는 윈도. 초과 범위는 default.
+    try:
+        gs = int(health_in.get('grace_sec', _FAILOVER_DEFAULTS['health']['grace_sec']))
+        health['grace_sec'] = gs if 0 <= gs <= 600 else _FAILOVER_DEFAULTS['health']['grace_sec']
+    except (TypeError, ValueError):
+        health['grace_sec'] = _FAILOVER_DEFAULTS['health']['grace_sec']
     out['health'] = health
 
     out['track_interface'] = bool(raw.get('track_interface', False))
@@ -339,11 +347,17 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     # cold-spare 절체 대상 — AS 그룹의 daemon 모듈 중 module_modes 가 hot 이 아닌 전부
     # (기본 cold). cims-notify 가 MASTER 승격 시 start / BACKUP·FAULT 강등 시 stop.
     # hot 모듈과 oam(descriptor 비데몬 — 관리 평면 자신)은 양쪽 상시 기동 유지.
+    daemon_mods = _agent_daemon_modules(agent_id, config) if config else []
     cold_modules: list = []
-    if group.get('mode') == 'active_standby' and config:
+    if group.get('mode') == 'active_standby':
         modes = failover_options.get('module_modes') or {}
-        cold_modules = [m for m in _agent_daemon_modules(agent_id, config)
-                        if modes.get(m, 'cold') != 'hot']
+        cold_modules = [m for m in daemon_mods if modes.get(m, 'cold') != 'hot']
+
+    # daemon 배포가 전무하고 헬스포트도 (유도/수동 지정) 없는 멤버 = 빈 서버 —
+    # vrrp_instance 자체를 내리지 않는다 (enabled=false → cims-ha 렌더 스킵).
+    # 서비스가 전혀 없는 노드가 VIP 를 인수해 ACTIVE 로 보이는 것을 원천 차단.
+    # 이후 모듈 설치가 재렌더(enqueue_update_ha_for_agent)를 태워 자동 활성화.
+    ha_enabled = bool(h_port or daemon_mods)
 
     services: dict = {}
     if vip_bindings:
@@ -373,7 +387,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             vips.append({'slot': slot, 'ip': ip, 'mask': mask, 'dev': iface or svc_iface})
         if vips:
             entry = {
-                'enabled':  True,
+                'enabled':  ha_enabled,
                 'vrid':     group['vrid'],
                 'interface': svc_iface,
                 'vips':     vips,
@@ -390,7 +404,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
         # legacy 단일 vip
         entry = {
-            'enabled':  True,
+            'enabled':  ha_enabled,
             'vrid':     group['vrid'],
             'interface': default_iface,
             'vip':      group['vip'],

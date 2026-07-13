@@ -11,7 +11,7 @@
 //  AA 그룹: 동기화 개념 없음 — 비교 표만 (편집은 각 서버의 설정 탭).
 //
 //  서버 개별(scope=system) 설정은 여기 없음 — 각 서버 선택 → [패키지 설정] 탭.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
   deploymentApi, effectiveScope,
@@ -153,9 +153,11 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   }, [memberDepsForPkg, show])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => {   // 패키지 전환 시 뷰/선택 초기화
+  useEffect(() => {   // 패키지 전환 시 뷰/선택/폼 초기화 (dirty 해제 → 새 기준으로 재초기화)
     setView(isAS ? 'edit' : 'compare')
     setOffTarget(null)
+    setFormValues({})
+    setFormInitial({})
   }, [effectivePkgName, isAS])
 
   // 멤버별 실효값 — overlay 값 없으면 template default (fromDefault 표시용)
@@ -167,9 +169,17 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     return { v: v as FieldValue, fromDefault: false }
   }, [configs])
 
+  // effect 에서 최신 dirty 여부를 deps 순환 없이 참조하기 위한 미러 ref
+  const dirtyRef = useRef(false)
+
   // ── 공통 설정 폼 초기화 — 기준 멤버의 실효값 ──
+  // dirty(미저장 편집) 중에는 재초기화하지 않는다 — 부모 폴링으로 live
+  // group.active_agent_id 가 바뀌면(절체 등) baseAgentId 가 튀어 이 effect 가
+  // 재실행되는데, 그때 편집 중이던 입력이 서버값으로 덮어써지던 것 방지.
+  // 저장/패키지 전환으로 dirty 가 풀리면 다음 실행에서 새 기준으로 재초기화.
   useEffect(() => {
     if (!template || !configs || baseAgentId == null) return
+    if (dirtyRef.current) return
     const base: Record<string, FieldValue> = {}
     for (const sec of svcSections) {
       for (const f of sec.fields) base[f.key] = effective(baseAgentId, f).v
@@ -185,6 +195,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     }
     return s
   }, [formValues, formInitial])
+  dirtyRef.current = changed.size > 0
 
   async function saveForm() {
     if (!baseDep || changed.size === 0) return
@@ -201,6 +212,9 @@ export function GroupConfigCompareView({ group, members: liveMembers,
         ? `저장됨 — 그룹 멤버 ${r.members.length}명 적용 (job ${jobs})`
         : `저장됨 — ${deployedMembers.find(m => m.id === baseAgentId)?.name} 에만 적용 (job ${jobs})`,
         'ok')
+      // dirty 해제 — 저장된 값이 새 기준. (해제해야 load() 후 폼 재초기화 가드 통과)
+      setFormInitial(formValues)
+      dirtyRef.current = false
       await load()
     } catch (e) {
       show(`저장 실패: ${(e as Error).message}`, 'err')
